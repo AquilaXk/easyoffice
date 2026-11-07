@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
+import { switchModule } from "./test-support/modules.mjs";
 
 test("focused cell edit supports undo, redo formula recalculation, and subsequent re-edit", async () => {
   const { document, sandbox, userClick } = await createWorkspaceHarness();
-  userClick(document.querySelector('.mod-btn[data-module="SHEET"]'));
+  switchModule(document, "SHEET");
   await flushAsyncTurns();
 
   const b2 = document.querySelector('#pane-sheet td[data-cell="B2"]');
@@ -81,7 +82,7 @@ test("clicking formula cell while async recalculation is in flight preserves dat
     },
   });
 
-  userClick(document.querySelector('.mod-btn[data-module="SHEET"]'));
+  switchModule(document, "SHEET");
   await flushAsyncTurns();
 
   const b2 = document.querySelector('#pane-sheet td[data-cell="B2"]');
@@ -157,7 +158,7 @@ test("real userClick on save waits for blur-triggered async evaluate_sheet befor
     },
   });
 
-  userClick(document.querySelector('.mod-btn[data-module="SHEET"]'));
+  switchModule(document, "SHEET");
   await flushAsyncTurns();
 
   const b2 = document.querySelector('#pane-sheet td[data-cell="B2"]');
@@ -210,7 +211,7 @@ test("switching sheet tabs with structured JSON IPC and special sheet names avoi
     },
   });
 
-  userClick(document.querySelector('.mod-btn[data-module="SHEET"]'));
+  switchModule(document, "SHEET");
   await flushAsyncTurns();
 
   const b2 = document.querySelector('#pane-sheet td[data-cell="B2"]');
@@ -256,7 +257,7 @@ test("switching sheet tabs with structured JSON IPC and special sheet names avoi
 test("trailing backslashes, special-character sheet names, and unblurred save work cleanly offline", async () => {
   const { document, sandbox, downloads, revokedUrls, userClick, advanceTimers } =
     await createWorkspaceHarness();
-  userClick(document.querySelector('.mod-btn[data-module="SHEET"]'));
+  switchModule(document, "SHEET");
   await flushAsyncTurns();
 
   const sheetTabBar = document.getElementById("sheet-tab-bar");
@@ -355,10 +356,10 @@ test("security audit blocks >512-char and whitespace XXE plus PDF inputs while P
   const { document, sandbox, downloads, userClick } = await createWorkspaceHarness();
   const docEditor = document.getElementById("doc-editor");
 
-  userClick(document.querySelector('.mod-btn[data-module="HWP"]'));
+  switchModule(document, "HWP");
   await flushAsyncTurns();
   docEditor.innerHTML = "<p>한글 기안문 전화 010-7777-8888</p>";
-  userClick(document.querySelector('.mod-btn[data-module="DOC"]'));
+  switchModule(document, "DOC");
   await flushAsyncTurns();
 
   const filler = "가나다라마바사아자차카타파하 ".repeat(50);
@@ -395,14 +396,14 @@ test("security audit blocks >512-char and whitespace XXE plus PDF inputs while P
   assert.ok(docEditor.textContent.includes("***@***"));
   assert.ok(docEditor.textContent.includes("******-*******"));
 
-  userClick(document.querySelector('.mod-btn[data-module="HWP"]'));
+  switchModule(document, "HWP");
   await flushAsyncTurns();
   assert.ok(
     docEditor.textContent.includes("010-7777-8888"),
     "inactive HWP buffer must not be mutated when scrubbing DOC"
   );
 
-  userClick(document.querySelector('.mod-btn[data-module="PDF"]'));
+  switchModule(document, "PDF");
   await flushAsyncTurns();
   const wmInput = document.getElementById("pdf-watermark-input");
   const applicantInput = document.getElementById("pdf-form-applicant");
@@ -465,7 +466,7 @@ test("security audit blocks >512-char and whitespace XXE plus PDF inputs while P
     /InvalidArgument/
   );
 
-  userClick(document.querySelector('.mod-btn[data-module="SLIDE"]'));
+  switchModule(document, "SLIDE");
   await flushAsyncTurns();
   userClick(document.getElementById("btn-add-slide"));
   await flushAsyncTurns();
@@ -578,7 +579,7 @@ test("rapid async ribbon undo and overlapping sheet evaluations serialize cleanl
 
   assert.equal(document.documentElement.dataset.theme, "light");
 
-  userClick(document.querySelector('.mod-btn[data-module="SHEET"]'));
+  switchModule(document, "SHEET");
   await flushAsyncTurns();
   const d9 = document.querySelector('#pane-sheet td[data-cell="D9"]');
   const e9 = document.querySelector('#pane-sheet td[data-cell="E9"]');
@@ -642,7 +643,7 @@ test("multi-PII inline formatting, br boundaries, sheet formula literal PII, and
   assert.ok(brEmail.querySelector("br"));
   assert.equal(brEmail.innerHTML, "ext9<br>***@***");
 
-  userClick(document.querySelector('.mod-btn[data-module="SHEET"]'));
+  switchModule(document, "SHEET");
   await flushAsyncTurns();
   const a9 = document.querySelector('#pane-sheet td[data-cell="A9"]');
   a9.focus();
@@ -662,7 +663,7 @@ test("multi-PII inline formatting, br boundaries, sheet formula literal PII, and
   assert.equal(a9.dataset.formula, '="담당자 ""김연구원"" 010-1234-5678"');
   assert.equal(a9.textContent, '담당자 "김연구원" 010-1234-5678');
 
-  userClick(document.querySelector('.mod-btn[data-module="PDF"]'));
+  switchModule(document, "PDF");
   await flushAsyncTurns();
   const pdfCard = document.getElementById("pdf-page-card");
   const formStatus = document.getElementById("pdf-form-status");
@@ -692,7 +693,7 @@ test("multi-PII inline formatting, br boundaries, sheet formula literal PII, and
 
 test("focused formula undo-redo updates displayed result, missing sheet returns #REF!, and in-flight or failed ribbon IPC keeps undo stack consistent", async () => {
   const { document, sandbox, userClick, advanceTimers } = await createWorkspaceHarness();
-  userClick(document.querySelector('.mod-btn[data-module="SHEET"]'));
+  switchModule(document, "SHEET");
   await flushAsyncTurns();
 
   const f2 = document.querySelector('#pane-sheet td[data-cell="F2"]');
@@ -934,7 +935,7 @@ test("failed undo-redo and formula-bar IPC keep stacks intact, offline sheet ide
   await flushAsyncTurns();
   assert.equal(headingBold(), "true");
 
-  retryHarness.userClick(retryHarness.document.querySelector('.mod-btn[data-module="SHEET"]'));
+  switchModule(retryHarness.document, "SHEET");
   await flushAsyncTurns();
   const f2 = retryHarness.document.querySelector('#pane-sheet td[data-cell="F2"]');
   const formulaInput = retryHarness.document.getElementById("formula-input");
@@ -1027,7 +1028,7 @@ test("ribbon IPC sends a per-window session id and the undo target module (#106)
 
   hA.userClick(hA.document.querySelector('[data-command-id="document-home-bold"]'));
   await flushAsyncTurns();
-  hA.userClick(hA.document.querySelector('.mod-btn[data-module="SHEET"]'));
+  switchModule(hA.document, "SHEET");
   await flushAsyncTurns();
   hA.userClick(hA.document.querySelector('[data-command-id="sheet-home-italic"]'));
   await flushAsyncTurns();

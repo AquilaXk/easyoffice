@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
+import { switchModule } from "./test-support/modules.mjs";
 
 test("design tokens, ARIA tab roles, zoom controls, split compare pane, and format filters stay synchronized", async () => {
   const { document, sandbox, userClick } = await createWorkspaceHarness();
@@ -13,22 +14,20 @@ test("design tokens, ARIA tab roles, zoom controls, split compare pane, and form
   assert.equal(homeTabBtn.getAttribute("aria-selected"), "true");
   assert.equal(viewTabBtn.getAttribute("aria-selected"), "false");
 
-  const firstOpenTab = document.querySelector("#tab-strip .tab-pill");
-  assert.equal(firstOpenTab.getAttribute("role"), "tab");
-  assert.equal(firstOpenTab.getAttribute("aria-selected"), "true");
+  assert.equal(document.getElementById("tab-strip"), null, "a window has no document tab strip");
 
   const ctxBadge = document.getElementById("contextual-tool-badge");
   assert.equal(ctxBadge.textContent, "표·개체 도구");
-  userClick(document.querySelector('.mod-btn[data-module="HWP"]'));
+  switchModule(document, "HWP");
   await flushAsyncTurns();
   assert.equal(ctxBadge.textContent, "쪽·결재·원고지 도구");
-  userClick(document.querySelector('.mod-btn[data-module="SLIDE"]'));
+  switchModule(document, "SLIDE");
   await flushAsyncTurns();
   assert.equal(ctxBadge.textContent, "발표자·레이저 도구");
-  userClick(document.querySelector('.mod-btn[data-module="PDF"]'));
+  switchModule(document, "PDF");
   await flushAsyncTurns();
   assert.equal(ctxBadge.textContent, "전자결재·주석 도구");
-  userClick(document.querySelector('.mod-btn[data-module="DOC"]'));
+  switchModule(document, "DOC");
   await flushAsyncTurns();
 
   const zoomLabel = document.getElementById("status-zoom-label");
@@ -56,22 +55,7 @@ test("design tokens, ARIA tab roles, zoom controls, split compare pane, and form
   await flushAsyncTurns();
   assert.ok(!stage.querySelector(".split-compare-pane"));
 
-  const filterBox = document.getElementById("format-filters");
-  const odfChip = Array.from(filterBox.querySelectorAll(".filter-chip")).find(
-    (c) => c.textContent === "ODF"
-  );
-  const allChip = Array.from(filterBox.querySelectorAll(".filter-chip")).find(
-    (c) => c.textContent === "전체"
-  );
-  userClick(document.querySelector('.mod-btn[data-module="CONV"]'));
-  await flushAsyncTurns();
-  userClick(odfChip);
-  await flushAsyncTurns();
-  assert.equal(document.getElementById("pane-doc").hidden, false);
-  assert.equal(filterBox.dataset.activeFilter, "ODF");
-  userClick(allChip);
-  await flushAsyncTurns();
-  assert.equal(filterBox.dataset.activeFilter, "ALL");
+  assert.equal(document.getElementById("format-filters"), null, "format chips that switched modules are gone");
 });
 
 test("DOC and HWP module-specific ribbon tools build real DOM structures and direct typing supports Undo/Redo across repeated focus-retained edits", async () => {
@@ -113,7 +97,7 @@ test("DOC and HWP module-specific ribbon tools build real DOM structures and dir
   );
   assert.ok(docEditor.querySelector(".eo-doc-mailmerge"));
 
-  userClick(document.querySelector('.mod-btn[data-module="HWP"]'));
+  switchModule(document, "HWP");
   await flushAsyncTurns();
   userClick(modTab);
   await flushAsyncTurns();
@@ -167,7 +151,7 @@ test("DOC and HWP module-specific ribbon tools build real DOM structures and dir
 
 test("SHEET supports keyboard arrow/Tab/Delete cell navigation, inline editing key pass-through, sort baseline/blank-row preservation, condfmt, freeze, and autosum actions", async () => {
   const { document, sandbox, userClick } = await createWorkspaceHarness();
-  userClick(document.querySelector('.mod-btn[data-module="SHEET"]'));
+  switchModule(document, "SHEET");
   await flushAsyncTurns();
 
   const b2 = document.querySelector('#pane-sheet td[data-cell="B2"]');
@@ -295,7 +279,7 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   const docSelection = { _range: null, get rangeCount() { return this._range ? 1 : 0; }, getRangeAt() { return this._range; }, removeAllRanges() { this._range = null; }, addRange(r) { this._range = r; } };
   const { document, sandbox, userClick } = await createWorkspaceHarness({ selection: docSelection });
 
-  userClick(document.querySelector('.mod-btn[data-module="SLIDE"]'));
+  switchModule(document, "SLIDE");
   await flushAsyncTurns();
   assert.equal(document.querySelectorAll("#slide-thumb-list .slide-thumb").length, 3);
 
@@ -356,7 +340,7 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   await flushAsyncTurns();
   assert.match(document.getElementById("smart-summary-output").textContent, /슬라이드 차트 개체|발표 자료/);
 
-  userClick(document.querySelector('.mod-btn[data-module="PDF"]'));
+  switchModule(document, "PDF");
   await flushAsyncTurns();
   userClick(document.querySelector('#ribbon-tabs [data-category="moduleSpecific"]'));
   await flushAsyncTurns();
@@ -389,7 +373,7 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   assert.equal(restoredHolder.childNodes[0].rowSpan, 2);
   assert.equal(restoredHolder.childNodes[0].getAttribute("rowspan"), "2");
 
-  userClick(document.querySelector('.mod-btn[data-module="SLIDE"]'));
+  switchModule(document, "SLIDE");
   await flushAsyncTurns();
   lowerZone.querySelector("p").textContent = "추진 배경·목적\n세부 실행 계획";
   lowerZone.dispatchEvent({ type: "input", target: lowerZone.querySelector("p") });
@@ -408,7 +392,7 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   assert.equal(catalog.formatPlatformShortcut("⌘B", "⌘"), "⌘B");
   assert.equal(document.getElementById("shortcut-hint").textContent, "Ctrl+K");
 
-  userClick(document.querySelector('.mod-btn[data-module="DOC"]'));
+  switchModule(document, "DOC");
   await flushAsyncTurns();
   const boldText = document.querySelector("#doc-editor .eo-h-title").childNodes[0];
   docSelection.addRange({ startContainer: boldText, startOffset: 1, endContainer: boldText, endOffset: 4, collapsed: false });
@@ -487,7 +471,7 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   fontLang.dispatchEvent({ type: "change" });
   assert.equal(docEditor.dataset.fontLang, "한글");
 
-  userClick(document.querySelector('.mod-btn[data-module="HWP"]'));
+  switchModule(document, "HWP");
   await flushAsyncTurns();
   assert.equal(styleSelect.value, "공문서 바탕글");
   assert.ok(
@@ -499,7 +483,7 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   assert.equal(document.getElementById("btn-toggle-doc-grid").classList.contains("active"), false);
   assert.equal(document.getElementById("btn-align-justify").classList.contains("active"), true);
 
-  userClick(document.querySelector('.mod-btn[data-module="DOC"]'));
+  switchModule(document, "DOC");
   await flushAsyncTurns();
   assert.equal(styleSelect.value, "개요 1");
   assert.equal(fontLang.value, "한글");
@@ -535,7 +519,7 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   assert.equal(document.getElementById("status-zoom-label").textContent, "100%");
   assert.equal(zoomSlider.value, "100");
 
-  userClick(document.querySelector('.mod-btn[data-module="PDF"]'));
+  switchModule(document, "PDF");
   await flushAsyncTurns();
   userClick(document.getElementById("btn-pdf-rotate"));
   await flushAsyncTurns();
@@ -555,7 +539,7 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   sandbox.dispatchWindowKeydown({ key: "Escape" });
   assert.equal(editMenuWrap.classList.contains("open"), false);
 
-  userClick(document.querySelector('.mod-btn[data-module="DOC"]'));
+  switchModule(document, "DOC");
   await flushAsyncTurns();
   const docTableBody = document.getElementById("doc-table-body");
   const initialRowCount = docTableBody.querySelectorAll("tr").length;
@@ -577,7 +561,7 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
     initialRowCount + 1
   );
 
-  userClick(document.querySelector('.mod-btn[data-module="PDF"]'));
+  switchModule(document, "PDF");
   await flushAsyncTurns();
   const rowCountInPdf = document.getElementById("doc-table-body").querySelectorAll("tr").length;
   userClick(document.querySelector('[data-studio-menu-cmd="table-add-row"]'));
@@ -585,7 +569,7 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   await flushAsyncTurns();
   assert.equal(document.getElementById("doc-table-body").querySelectorAll("tr").length, rowCountInPdf);
 
-  userClick(document.querySelector('.mod-btn[data-module="DOC"]'));
+  switchModule(document, "DOC");
   await flushAsyncTurns();
   userClick(document.querySelector('[data-studio-menu-cmd="security-audit"]'));
   await flushAsyncTurns();
@@ -594,7 +578,7 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   userClick(document.getElementById("btn-command-palette"));
   const paletteModal = document.getElementById("cmd-palette-modal");
   assert.equal(paletteModal.open, true);
-  assert.equal(paletteModal.querySelector(".cp-slash")?.textContent, "/");
+  assert.equal(paletteModal.querySelector(".cp-slash")?.dataset.icon, "search", "the search icon replaces the slash glyph");
   const cpItems = paletteModal.querySelectorAll("#cmd-palette-list .cp-item");
   assert.ok(cpItems.length > 0);
   assert.equal(cpItems[0].classList.contains("cp-item--selected"), true);

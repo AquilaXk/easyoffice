@@ -3,6 +3,7 @@ import fs from "node:fs";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
+import { switchModule, typeIntoDocParagraph, createMemoryStorage } from "./test-support/modules.mjs";
 
 const UI_DIR = new URL("../crates/easyoffice-app/ui/", import.meta.url);
 const INDEX_HTML = fs.readFileSync(fileURLToPath(new URL("index.html", UI_DIR)), "utf8");
@@ -23,20 +24,6 @@ const BROWSER_RESERVED_SHORTCUTS = new Set([
 ]);
 
 const SLIDE_SCOPED_BROWSER_KEYS = new Set(["F5"]);
-
-function createMemoryStorage(seed = {}) {
-  const map = new Map(Object.entries(seed));
-  return {
-    map,
-    getItem: (k) => (map.has(k) ? map.get(k) : null),
-    setItem: (k, v) => {
-      map.set(k, String(v));
-    },
-    removeItem: (k) => {
-      map.delete(k);
-    },
-  };
-}
 
 function createFakeClipboard(initial = "") {
   const clip = {
@@ -115,16 +102,6 @@ function firstTextNode(el) {
   return null;
 }
 
-function typeIntoDocParagraph(document, text) {
-  const docEditor = document.getElementById("doc-editor");
-  docEditor.focus();
-  const p = docEditor.querySelector("p");
-  docEditor.dispatchEvent({ type: "beforeinput", target: p });
-  p.textContent = text;
-  docEditor.dispatchEvent({ type: "input", target: p });
-  return p;
-}
-
 function normalizeShortcutLabel(catalog, raw) {
   const formatted = catalog.formatPlatformShortcut(String(raw).trim(), "Ctrl");
   if (formatted === "/" || formatted.includes(",")) return formatted;
@@ -155,7 +132,8 @@ test("index.html menu and tooltip shortcut labels map 1:1 onto registered handle
   assert.ok(Array.isArray(catalog.WORKSPACE_SHORTCUT_BINDINGS), "shortcut registry must be exported");
   const bound = new Set(catalog.WORKSPACE_SHORTCUT_BINDINGS.map((b) => b.keys));
   for (const b of catalog.WORKSPACE_SHORTCUT_BINDINGS) {
-    assert.ok(!BROWSER_RESERVED_SHORTCUTS.has(b.keys), "registry must not bind reserved key " + b.keys);
+    // Only the desktop shell (which owns its windows) binds new/close window; see PD-088.
+    assert.ok(!BROWSER_RESERVED_SHORTCUTS.has(b.keys) || b.desktopOnly === true, "registry must not bind reserved key " + b.keys);
     if (SLIDE_SCOPED_BROWSER_KEYS.has(b.keys)) {
       assert.equal(b.module, "SLIDE", b.keys + " may only be taken over inside the slide module");
       assert.equal(b.bareKey, true, b.keys + " must never fire from a text field");
@@ -166,7 +144,8 @@ test("index.html menu and tooltip shortcut labels map 1:1 onto registered handle
   for (const { where, raw } of labels) {
     const norm = normalizeShortcutLabel(catalog, raw);
     assert.ok(!norm.includes(","), `${where} label "${raw}" advertises an unsupported chord sequence`);
-    assert.ok(!BROWSER_RESERVED_SHORTCUTS.has(norm), `${where} label "${raw}" is browser-reserved`);
+    const desktopOnly = catalog.WORKSPACE_SHORTCUT_BINDINGS.some((b) => b.keys === norm && b.desktopOnly === true);
+    assert.ok(!BROWSER_RESERVED_SHORTCUTS.has(norm) || desktopOnly, `${where} label "${raw}" is browser-reserved`);
     assert.ok(bound.has(norm), `${where} label "${raw}" (${norm}) has no registered handler`);
   }
 });
@@ -176,7 +155,7 @@ test("ribbon tool strip and command palette only display shortcuts that the keyd
   const catalog = sandbox.__EASYOFFICE_RIBBON_CATALOG__;
   const bound = new Set(catalog.WORKSPACE_SHORTCUT_BINDINGS.map((b) => b.keys));
   for (const mod of ["DOC", "SHEET", "SLIDE", "PDF"]) {
-    userClick(document.querySelector(`.mod-btn[data-module="${mod}"]`));
+    switchModule(document, mod);
     await flushAsyncTurns();
     for (const tab of document.querySelectorAll("#ribbon-tabs .ribbon-btn")) {
       userClick(tab);
@@ -243,7 +222,7 @@ test("workspace edits autosave to localStorage and are restored on the next load
   const storage = createMemoryStorage();
   const first = await createWorkspaceHarness({ localStorage: storage });
   typeIntoDocParagraph(first.document, "자동 저장 복원 검증 문단");
-  first.userClick(first.document.querySelector('.mod-btn[data-module="SHEET"]'));
+  switchModule(first.document, "SHEET");
   await flushAsyncTurns();
   const b2 = first.document.querySelector('#pane-sheet td[data-cell="B2"]');
   b2.focus();
@@ -271,7 +250,7 @@ test("workspace edits autosave to localStorage and are restored on the next load
     second.document.querySelector('#pane-sheet td[data-cell="B2"]').textContent,
     "2000"
   );
-  second.userClick(second.document.querySelector('.mod-btn[data-module="DOC"]'));
+  switchModule(second.document, "DOC");
   await flushAsyncTurns();
   assert.equal(
     second.document.getElementById("doc-editor").querySelector("p").textContent,
@@ -310,7 +289,7 @@ test("beforeunload guard is registered only while the workspace is dirty", async
   assert.equal(sandbox.getWindowListenerCount("beforeunload"), 0);
 
   for (const mod of ["HWP", "SHEET", "SLIDE", "PDF", "CONV", "DOC"]) {
-    userClick(document.querySelector(`.mod-btn[data-module="${mod}"]`));
+    switchModule(document, mod);
     await flushAsyncTurns();
     if (mod === "SHEET") {
       userClick(document.querySelector('.sheet-tab-btn[data-sheet-tab="Sheet2"]'));
@@ -357,7 +336,7 @@ test("document toolbars and menus are disabled outside DOC/HWP and the status ba
   const styleBar = document.getElementById("doc-style-bar");
   const paraNumBtn = document.querySelector('#icon-toolbar [data-studio-cmd="para-numbering"]');
   const cutBtn = document.querySelector('#icon-toolbar [data-studio-cmd="clip-cut"]');
-  const saveBtn = document.querySelector('#icon-toolbar [data-studio-cmd="studio-save"]');
+  const saveBtn = document.getElementById("qat-save");
   const paraMenu = document.querySelector('.md-item[data-studio-menu-cmd="para-numbering"]');
   const ctrlMarks = document.getElementById("btn-toggle-ctrl-marks");
   const sheetAgg = document.getElementById("status-sheet-agg");
@@ -368,7 +347,7 @@ test("document toolbars and menus are disabled outside DOC/HWP and the status ba
   assert.equal(cutBtn.disabled, false);
   assert.equal(sheetAgg.hidden, true);
 
-  userClick(document.querySelector('.mod-btn[data-module="SHEET"]'));
+  switchModule(document, "SHEET");
   await flushAsyncTurns();
   assert.equal(styleBar.hidden, true);
   assert.equal(paraNumBtn.disabled, true);
@@ -385,11 +364,11 @@ test("document toolbars and menus are disabled outside DOC/HWP and the status ba
   await flushAsyncTurns();
   assert.equal(fb.textContent, before);
 
-  userClick(document.querySelector('.mod-btn[data-module="SLIDE"]'));
+  switchModule(document, "SLIDE");
   await flushAsyncTurns();
   assert.equal(sheetAgg.hidden, true, "sheet aggregate must not leak into SLIDE");
 
-  userClick(document.querySelector('.mod-btn[data-module="HWP"]'));
+  switchModule(document, "HWP");
   await flushAsyncTurns();
   assert.equal(styleBar.hidden, false);
   assert.equal(paraNumBtn.disabled, false);
@@ -397,29 +376,15 @@ test("document toolbars and menus are disabled outside DOC/HWP and the status ba
   assert.equal(docStatus.hidden, false);
 });
 
-test("open-document tab strip stays visible, follows the active module, and File menu labels describe switching", async () => {
-  const { document, userClick } = await createWorkspaceHarness();
-  const rules = STYLES_CSS.replaceAll(/\/\*[\s\S]*?\*\//g, "").split("}");
-  for (const rule of rules) {
-    const [selectors, decls = ""] = rule.split("{");
-    if (/\.tab-strip\b/.test(selectors) && /display:\s*none/.test(decls)) {
-      assert.fail("tab strip must not be hidden by CSS: " + selectors.trim());
-    }
-  }
+test("a window has no tab strip or module switcher; the File menu opens windows instead of switching", async () => {
+  const { document } = await createWorkspaceHarness();
+  assert.equal(document.getElementById("tab-strip"), null);
+  assert.equal(document.querySelector(".module-switcher"), null);
+  assert.doesNotMatch(STYLES_CSS, /\.tab-strip|\.tab-pill|\.mod-btn/, "no tab or module-button styling remains");
   assert.match(STYLES_CSS, /\.eo-doc-style-bar\[hidden\]/);
-
-  const tabs = document.querySelectorAll("#tab-strip .tab-pill");
-  assert.ok(tabs.length >= 2);
-  userClick(document.querySelector('.mod-btn[data-module="SHEET"]'));
-  await flushAsyncTurns();
-  const active = document.querySelector("#tab-strip .tab-pill.active");
-  assert.equal(active.dataset.module, "SHEET");
-
-  for (const item of document.querySelectorAll('.md-item[data-studio-menu-cmd^="module:"]')) {
-    const label = item.querySelector(".md-label").textContent;
-    assert.ok(!label.startsWith("새 "), "File menu must not claim to create a new document: " + label);
-    assert.match(label, /전환/);
-  }
+  assert.equal(document.querySelectorAll('.md-item[data-studio-menu-cmd^="module:"]').length, 0);
+  const labels = document.querySelectorAll('.menu-item[data-menu="file"] .md-label').map((l) => l.textContent.trim());
+  assert.ok(labels.includes("새 문서") && labels.includes("열기…") && labels.includes("닫기"), labels.join("|"));
 });
 
 test("Edit menu cut/copy/paste act on the real selection and the system clipboard", async () => {
@@ -495,7 +460,8 @@ test("bootstrap IPC failure shows an error with retry and never claims macOS on 
   userClick(document.getElementById("btn-bootstrap-retry"));
   await flushAsyncTurns(10);
   assert.equal(banner.hidden, true);
-  assert.equal(document.querySelectorAll("#tab-strip .tab-pill").length, 1);
+  assert.equal(document.title, "보고서.docx — EasyOffice".replace("보고서.docx", document.defaultView.__EASYOFFICE_WINDOW_BRIDGE__.instance.getDocumentName("DOC")));
+  assert.equal(document.defaultView.__EASYOFFICE_WINDOW_BRIDGE__.instance.getDocumentName("DOC"), "보고서.docx");
   assert.ok(document.querySelector("#ribbon-tool-strip .ribbon-tool-btn"));
   assert.equal(document.getElementById("platform-pill").textContent, "Windows · Ctrl");
 });

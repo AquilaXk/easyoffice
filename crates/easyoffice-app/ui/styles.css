@@ -63,7 +63,6 @@ button {
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,
-.tab-pill:focus-visible,
 .ribbon-btn:focus-visible,
 .ribbon-tool-btn:focus-visible,
 [contenteditable="true"]:focus-visible {
@@ -95,10 +94,7 @@ html[data-theme="dark"] .md-shortcut { color: #9aa4b2; }
 html[data-theme="dark"] .md-sep { border-top-color: #3d444d; }
 .menu-toolbox-toggle { margin-left: auto; width: 24px; height: 22px; font-size: 11px; color: #555555; flex-shrink: 0; }
 html[data-theme="dark"] .menu-toolbox-toggle { color: #c9d1d9; }
-.app-shell:not([data-chrome-expanded="true"]) .ribbon-bar,
-.app-shell:not([data-chrome-expanded="true"]) .filter-bar,
-.app-shell:not([data-chrome-expanded="true"]) .brand-group,
-.app-shell:not([data-chrome-expanded="true"]) .topbar-actions { display: none; }
+.app-shell:not([data-chrome-expanded="true"]) .ribbon-bar { display: none; }
 .eo-doc-style-bar[hidden], .statusbar-left-group[hidden], .eo-bootstrap-error[hidden] { display: none; }
 .eo-bootstrap-error { display: flex; align-items: center; gap: 10px; flex-shrink: 0; padding: 6px 12px; font-size: 12px; background: #fdecea; color: #8a1c14; }
 html[data-theme="dark"] .eo-bootstrap-error { background: #4a1f1c; color: #ffd7d2; }
@@ -107,17 +103,7 @@ html[data-theme="dark"] .eo-bootstrap-error { background: #4a1f1c; color: #ffd7d
 .app-shell:not([data-panels-expanded="true"]) .workspace-grid { grid-template-columns: 1fr; }
 .app-shell:not([data-panels-expanded="true"]) .sidebar-left,
 .app-shell:not([data-panels-expanded="true"]) .inspector-right { display: none; }
-.brand-group { display: flex; align-items: center; gap: 8px; flex-shrink: 0; white-space: nowrap; }
-.brand-title { font-weight: 700; font-size: 15px; }
 .platform-pill { font-size: 11px; padding: 2px 6px; color: var(--eo-text-muted); white-space: nowrap; }
-.qat-group { display: flex; align-items: center; gap: 2px; margin-left: 6px; padding-left: 8px; border-left: 1px solid var(--eo-border); flex-shrink: 0; }
-.qat-btn { padding: 4px 8px; font-size: 11px; color: var(--eo-text-muted); white-space: nowrap; flex-shrink: 0; }
-.qat-btn:hover { background: var(--eo-surface-elevated); color: var(--eo-text); }
-.qat-btn.qat-accent { color: var(--eo-primary); font-weight: 600; }
-.tab-strip { display: flex; flex: 1 1 auto; min-width: 0; gap: 2px; overflow-x: auto; scrollbar-width: none; }
-.tab-pill { display: flex; align-items: center; gap: 6px; padding: 6px 10px; font-size: 12px; color: var(--eo-text-muted); border-bottom: 2px solid transparent; white-space: nowrap; flex-shrink: 0; }
-.tab-pill:hover { color: var(--eo-text); background: var(--eo-surface-elevated); }
-.tab-pill.active { border-bottom-color: var(--eo-module-active); color: var(--eo-text); font-weight: 600; }
 .topbar-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .action-btn, .secondary-btn { padding: 5px 10px; font-size: 12px; color: var(--eo-text); background: transparent; white-space: nowrap; flex-shrink: 0; }
 .action-btn:hover, .secondary-btn:hover { background: var(--eo-surface-elevated); }
@@ -135,11 +121,6 @@ html[data-theme="dark"] .eo-bootstrap-error { background: #4a1f1c; color: #ffd7d
 .ribbon-tool-btn { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; color: var(--eo-text); font-size: 11px; white-space: nowrap; }
 .ribbon-tool-btn:hover { background: var(--eo-primary-soft); color: var(--eo-primary); }
 .ribbon-tool-btn small { color: var(--eo-text-muted); font-size: 10px; }
-.filter-bar { display: flex; align-items: center; justify-content: space-between; padding: 0 14px; background: var(--eo-surface); border-bottom: 1px solid var(--eo-border); }
-.filter-chips, .module-switcher { display: flex; gap: 4px; }
-.filter-chip, .mod-btn { padding: 4px 9px; font-size: 11px; color: var(--eo-text-muted); border-bottom: 2px solid transparent; }
-.filter-chip:hover, .mod-btn:hover { color: var(--eo-text); }
-.filter-chip.active, .mod-btn.active { color: var(--eo-module-active); border-bottom-color: var(--eo-module-active); font-weight: 600; }
 .workspace-grid { flex: 1; display: grid; grid-template-columns: 220px 1fr 240px; overflow: hidden; min-height: 0; }
 .panel { background: var(--eo-surface); padding: 12px 14px; overflow-y: auto; }
 .sidebar-left { border-right: 1px solid var(--eo-border); }

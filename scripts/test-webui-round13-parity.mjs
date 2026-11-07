@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
+import { switchModule } from "./test-support/modules.mjs";
 
 function makeF2AnchoredOfflineRpc(sandbox) {
   return sandbox.__EASYOFFICE_CREATE_OFFLINE_RPC__({
@@ -206,7 +207,7 @@ test("focus-retaining ribbon and theme clicks refresh focused cell pendingSnapsh
     },
   });
 
-  userClick(document.querySelector('.mod-btn[data-module="SHEET"]'));
+  switchModule(document, "SHEET");
   await flushAsyncTurns();
 
   const f2 = document.querySelector('#pane-sheet td[data-cell="F2"]');
@@ -295,7 +296,7 @@ test("DOC vs HWP and Slide 1 vs Slide 2 layout commands derive state from target
   assert.equal(docEditor.style.padding, "16px 20px");
   assert.equal(docEditor.dataset.paperSize, "Letter");
 
-  userClick(document.querySelector('.mod-btn[data-module="HWP"]'));
+  switchModule(document, "HWP");
   await flushAsyncTurns();
 
   assert.equal(docEditor.style.maxWidth, "");
@@ -345,12 +346,12 @@ test("DOC vs HWP and Slide 1 vs Slide 2 layout commands derive state from target
   assert.equal(docEditor.classList.contains("manuscript-grid"), true);
   assert.equal(document.getElementById("hwp-manuscript-preview").hidden, false);
 
-  userClick(document.querySelector('.mod-btn[data-module="DOC"]'));
+  switchModule(document, "DOC");
   await flushAsyncTurns();
   assert.equal(docEditor.classList.contains("manuscript-grid"), false);
   assert.equal(document.getElementById("hwp-manuscript-preview").hidden, true);
 
-  userClick(document.querySelector('.mod-btn[data-module="SLIDE"]'));
+  switchModule(document, "SLIDE");
   await flushAsyncTurns();
   userClick(document.querySelector('.ribbon-btn[data-category="layout"]'));
   await flushAsyncTurns();
@@ -444,7 +445,7 @@ test("concurrent switchSheetTab and performWorkspaceUndo serialize ahead of qat-
     },
   });
 
-  userClick(document.querySelector('.mod-btn[data-module="SHEET"]'));
+  switchModule(document, "SHEET");
   await flushAsyncTurns();
 
   const b2 = document.querySelector('#pane-sheet td[data-cell="B2"]');
@@ -628,7 +629,7 @@ test("evaluate_sheet batch targets anchor validation, Roman numeral sheet ident,
     "#VALUE!",
   ]);
 
-  userClick(document.querySelector('.mod-btn[data-module="SHEET"]'));
+  switchModule(document, "SHEET");
   await flushAsyncTurns();
   const f2 = document.querySelector('#pane-sheet td[data-cell="F2"]');
   const baselineText = f2.textContent;
@@ -686,7 +687,7 @@ test("evaluate_sheet batch targets anchor validation, Roman numeral sheet ident,
   await flushAsyncTurns(10);
   assert.equal(document.documentElement.dataset.theme, "light");
 
-  userClick(document.querySelector('.mod-btn[data-module="HWP"]'));
+  switchModule(document, "HWP");
   await flushAsyncTurns(10);
   const hwpPreview = document.getElementById("hwp-manuscript-preview");
   assert.ok(hwpPreview);

@@ -72,7 +72,7 @@
 | `apps/studio-host/src/core/document-open.ts` | `loadDocument(bytes, fileName)` + 비밀번호 재시도 루프(`showHwpPasswordDialog`) | — |
 | `apps/studio-host/src/ui/print-dialog.ts` | 모든 쪽을 `renderPageSvg(i)`로 숨은 루트에 그린 뒤 `@media print`로 인쇄하고, 5쪽마다 양보 | `print_webview` 명령 대신 iframe의 `window.print()` |
 | `apps/desktop/src-tauri/src/state.rs` | `DocumentSession{source_fingerprint{len,modified_millis,content_hash}, dirty, revision}`, `NamedTempFile::new_in(parent)` → `write_all` → `sync_all` → `persist` | EasyOffice `save_file.rs`의 원자적 쓰기를 유지하고, 외부 변경 지문만 추가 |
-| `apps/desktop/src-tauri/src/{pending_open.rs,windows.rs,lib.rs}` | `tauri-plugin-single-instance`의 argv → 열기 큐, 창별 큐 | 다중 창은 보류(§8 Q7) |
+| `apps/desktop/src-tauri/src/{pending_open.rs,windows.rs,lib.rs}` | `tauri-plugin-single-instance`의 argv → 열기 큐, 창별 큐 | 다중 창은 PD-088(#132)에서 구현: 창별 대기 큐는 경로 대신 바이트·이름만 담는다 |
 | `apps/desktop/src-tauri/src/pdf_export.rs` + `apps/desktop/rhwp-adapter` | 네이티브 rhwp `render_page_svg_native` → `svgs_to_pdf_with_options`(검색 가능 PDF), 저장 전 재파싱 검증 | 6단계 이후 선택 사항(툴체인 1.93.1 필요) |
 | `tauri.conf.json` `fileAssociations`(`hwp`·`hwpx`, mime `application/x-hwp`·`application/vnd.hancom.hwpx`) | 파일 연결 정의 | NSIS 기준으로 맞추고, #111 셸 열기 명령이 생긴 뒤 등록 |
 
@@ -193,7 +193,7 @@ iframe은 **HWP 모듈을 처음 활성화할 때 지연 생성**한다. 그래�
 
 | 영역 | 설계 |
 |---|---|
-| 탭(`#tab-strip`) | 1) 1단계(작업 항목 3~4)는 HWP 문서 1개<br>2) 5단계에서 "HWP 탭 1개 = iframe 1개", 동시 4개 상한(메모리, §6.1)<br>3) 탭 제목은 PD-073 파일명 규칙 재사용<br>4) 비활성 탭 iframe은 `hidden`으로 두고 언로드하지 않음 |
+| 탭(`#tab-strip`) | **[대체됨: PD-088(#132) — 문서마다 개별 창, 탭 줄·모듈 전환 탭 없음. 아래 "탭만" 기본값은 더 이상 유효하지 않다.]** 1) 1단계(작업 항목 3~4)는 HWP 문서 1개<br>2) 5단계에서 "HWP 탭 1개 = iframe 1개", 동시 4개 상한(메모리, §6.1)<br>3) 탭 제목은 PD-073 파일명 규칙 재사용<br>4) 비활성 탭 iframe은 `hidden`으로 두고 언로드하지 않음 |
 | 파일 메뉴 | 1) 열기·저장·다른 이름으로 저장·인쇄는 EasyOffice 메뉴가 소유<br>2) 오버레이가 업스트림 메뉴바의 `file:*` 항목을 `chrome.set`/CSS로 숨김<br>3) 업스트림 `command/commands/file.ts`(File System Access, `showSaveFilePicker`, `?url=` fetch)는 오버레이에서 **부모 위임 구현으로 교체**(hop의 `command/commands/file` extension과 같은 위치) |
 | 편집기 도구모음 | 1) rhwp 서식 도구모음(글꼴, 크기, 굵게, 문단, 표)을 그대로 사용(문자 모양과 조판 정확성이 핵심 가치)<br>2) HWP 활성 시 EasyOffice `#doc-style-bar`와 문서 전용 리본 명령은 숨기거나 비활성(PD-072 3항 규칙 확장) |
 | 리본 연결(5단계) | 1) 리본 140종 중 HWP에 의미가 있는 명령(굵게·기울임·밑줄·정렬·표 삽입·쪽 설정 등)만 `automation.execute(id)`로 매핑<br>2) 매핑이 없으면 비활성<br>3) 매핑표는 `ribbon-catalog.js`에 데이터로 둠(140종 수치 불변) |
@@ -636,7 +636,7 @@ Tauri CSP는 앱 전체에 하나만 적용된다(경로별로 나눌 수 없음
 4. **변환기 엔진**: HWP → DOCX/PDF 변환을 계속 EasyOffice `hwp5_codec`으로 할지, 네이티브 어댑터(6b) 도입 후 rhwp 파서로 바꿀지(정확도는 오르지만 툴체인 1.93.1이 필요).
 5. **배포용·암호 문서**: 현재 EasyOffice는 fail-closed 차단이다. rhwp는 읽기와 비밀번호 열기를 지원한다. 열기를 허용할지, 저장 시 보호 해제 경고 정책을 어떻게 할지.
 6. **rhwp 로드 실패 시**: 오류로 끝낼지, 사용자가 선택하면 기존 평문 디코드로 "텍스트만 가져오기"를 제공할지.
-7. **다중 창**: hop처럼 문서별 창을 지원할지, 탭만 쓸지(현재 권장: 탭만).
+7. **다중 창**: ~~hop처럼 문서별 창을 지원할지, 탭만 쓸지(현재 권장: 탭만).~~ **[확정: 문서마다 개별 창 — PD-088(#132). "탭만" 기본값은 대체됨. 탭 구현 시도는 폐기.]**
 8. **HWP 파일 크기 상한**: 64 MiB 제안. 공문서 대용량 첨부 HWP를 고려해 조정할지.
 9. **자동 저장 소유**: 업스트림 `src/recovery/`(IndexedDB) 재사용과 EasyOffice 부모 소유 중 어느 쪽으로 할지(권장: 부모 소유).
 10. **WASM 출처 정책**: hop처럼 미리 빌드한 WASM을 저장소에 커밋할지(업데이트마다 약 12 MB 증가), 아니면 CI에서 매번 빌드할지(+10~20분 `[추정]`, 1.93.1 툴체인 상시 필요). 재현 빌드가 안 될 때 어느 산출물을 신뢰할지.

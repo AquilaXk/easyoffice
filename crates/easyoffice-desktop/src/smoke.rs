@@ -3,15 +3,19 @@
 //! round trip: activate the HWP module, wait for the embedded rhwp editor, create a blank document,
 //! type into it, export HWP bytes and verify them. The page reports (2) through an ordinary engine
 //! call (`scrub_pii` with a marker text) that this probe observes, so no extra IPC permission exists.
-//! Exits 0 on success, 1 on failure or timeout. Used by CI to prove the shell loads its bundled
+//! The window round trip (PD-088): after the HWP round trip the first window opens a second document
+//! window; that window reports that it loaded (same marker mechanism) and closes itself, and the
+//! probe must see its `Destroyed` event. Exits 0 on success, 1 on failure or timeout. Used by CI to prove the shell loads its bundled
 //! assets (including the editor bundle) and reaches the engine without a server.
 
+use crate::windows::PRIMARY_LABEL;
 use std::sync::Mutex;
 use std::time::Duration;
 
 pub const SMOKE_TIMEOUT: Duration = Duration::from_secs(75);
 const HWP_OK_MARKER: &str = "EASYOFFICE_SMOKE_HWP_ROUNDTRIP_OK ";
 const HWP_FAIL_MARKER: &str = "EASYOFFICE_SMOKE_HWP_ROUNDTRIP_FAIL ";
+const WINDOW_OK_MARKER: &str = "EASYOFFICE_SMOKE_WINDOW_OK ";
 
 /// Injected before the page scripts run, in smoke mode only; the page then drives the HWP round trip.
 pub const SMOKE_INIT_SCRIPT: &str = "window.__EASYOFFICE_SMOKE__ = true;";
@@ -39,9 +43,24 @@ impl SmokeProbe {
             Ok(mut progress) => progress.step(command, payload, ok),
             Err(_) => SmokeStep::Failed("smoke state unavailable".to_string()),
         };
+        Self::finish(step);
+    }
+
+    /// Observes that a window was destroyed (the second window closing cleanly).
+    pub fn window_closed(&self, label: &str) {
+        let step = match self.progress.lock() {
+            Ok(mut progress) => progress.window_closed(label),
+            Err(_) => SmokeStep::Failed("smoke state unavailable".to_string()),
+        };
+        Self::finish(step);
+    }
+
+    fn finish(step: SmokeStep) {
         match step {
             SmokeStep::Passed(detail) => {
-                println!("smoke: WebUI IPC round trip and HWP editor round trip passed ({detail})");
+                println!(
+                    "smoke: WebUI IPC, HWP editor and second-window round trips passed ({detail})"
+                );
                 std::process::exit(0);
             }
             SmokeStep::Failed(reason) => {
@@ -65,6 +84,8 @@ struct SmokeProgress {
     bootstrapped: bool,
     ribbon: bool,
     hwp: Option<String>,
+    window_loaded: Option<String>,
+    window_closed: bool,
 }
 
 impl SmokeProgress {
@@ -84,11 +105,30 @@ impl SmokeProgress {
                 if let Some(detail) = payload.strip_prefix(HWP_OK_MARKER) {
                     self.hwp = Some(detail.to_string());
                 }
+                if let Some(module) = payload.strip_prefix(WINDOW_OK_MARKER) {
+                    self.window_loaded = Some(module.to_string());
+                }
             }
             _ => {}
         }
-        match (&self.hwp, self.bootstrapped && self.ribbon) {
-            (Some(detail), true) => SmokeStep::Passed(detail.clone()),
+        self.verdict()
+    }
+
+    /// The second window counts as closed only after it reported that it had loaded.
+    fn window_closed(&mut self, label: &str) -> SmokeStep {
+        if label != PRIMARY_LABEL && self.window_loaded.is_some() {
+            self.window_closed = true;
+        }
+        self.verdict()
+    }
+
+    fn verdict(&self) -> SmokeStep {
+        match (&self.hwp, &self.window_loaded) {
+            (Some(detail), Some(module))
+                if self.bootstrapped && self.ribbon && self.window_closed =>
+            {
+                SmokeStep::Passed(format!("{detail}, window={module}"))
+            }
             _ => SmokeStep::Waiting,
         }
     }
@@ -99,7 +139,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn smoke_requires_bootstrap_ribbon_and_hwp_round_trips() {
+    fn smoke_requires_bootstrap_ribbon_hwp_and_second_window_round_trips() {
         let mut p = SmokeProgress::default();
         assert_eq!(
             p.step("get_ribbon_category_commands", "", true),
@@ -120,7 +160,27 @@ mod tests {
                 "EASYOFFICE_SMOKE_HWP_ROUNDTRIP_OK bytes=512",
                 true
             ),
-            SmokeStep::Passed("bytes=512".to_string())
+            SmokeStep::Waiting,
+            "the second window is still missing"
+        );
+        assert_eq!(
+            p.window_closed("doc-1-a"),
+            SmokeStep::Waiting,
+            "closing before loading does not count"
+        );
+        assert_eq!(
+            p.step("scrub_pii", "EASYOFFICE_SMOKE_WINDOW_OK DOC", true),
+            SmokeStep::Waiting,
+            "loaded but not yet closed"
+        );
+        assert_eq!(
+            p.window_closed("main"),
+            SmokeStep::Waiting,
+            "the first window is not the second window"
+        );
+        assert_eq!(
+            p.window_closed("doc-1-a"),
+            SmokeStep::Passed("bytes=512, window=DOC".to_string())
         );
     }
 
@@ -136,6 +196,18 @@ mod tests {
             p.step("scrub_pii", "ordinary text", true),
             SmokeStep::Waiting
         );
+    }
+
+    #[test]
+    fn hwp_and_window_round_trips_without_the_ipc_round_trip_do_not_pass() {
+        let mut p = SmokeProgress::default();
+        p.step(
+            "scrub_pii",
+            "EASYOFFICE_SMOKE_HWP_ROUNDTRIP_OK bytes=1",
+            true,
+        );
+        p.step("scrub_pii", "EASYOFFICE_SMOKE_WINDOW_OK DOC", true);
+        assert_eq!(p.window_closed("doc-1-a"), SmokeStep::Waiting);
     }
 
     #[test]

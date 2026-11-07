@@ -2,10 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { makeFixtureFile, pickFile } from "./test-support/fixture-files.mjs";
+import { switchModule } from "./test-support/modules.mjs";
 
 async function openModule(module, options = {}) {
   const h = await createWorkspaceHarness(options);
-  h.userClick(h.document.querySelector(`.mod-btn[data-module="${module}"]`));
+  switchModule(h.document, module);
   await flushAsyncTurns();
   return h;
 }
