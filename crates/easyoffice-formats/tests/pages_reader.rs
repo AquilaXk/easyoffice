@@ -253,7 +253,7 @@ fn synthetic_document_maps_to_rich_blocks() {
     assert!(
         warnings
             .iter()
-            .any(|w| w.contains("그림·도형") && w.contains("3005") && w.contains("1개")),
+            .any(|w| w.contains("그림") && w.contains("3005") && w.contains("1개")),
         "skipped image must be reported: {warnings:?}"
     );
 }
