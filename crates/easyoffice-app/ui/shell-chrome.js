@@ -12,6 +12,35 @@
   const TOAST_ERROR_MS = 8000;
   const ERROR_HINT = /실패|오류|거부|불가|없습니다|취소|못했습니다/;
 
+  // The macOS menu bar (`crates/easyoffice-desktop/src/native_menu.rs`, PD-102) runs an item by calling
+  // `__EASYOFFICE_NATIVE_MENU__(id)` in the focused window. Each id names a page action: the name of an
+  // entry of the shortcut action table (so a menu item and its keyboard shortcut run the same handler),
+  // optionally `name:argument`. A test keeps this list equal to the Rust table.
+  const NATIVE_MENU_ACTIONS = Object.freeze({
+    "app:about": "about",
+    "file:new": "file-new",
+    "file:open": "file-open",
+    "file:open-recent": "recent-dialog",
+    "file:save": "studio-save",
+    "file:save-as": "file-save-as",
+    "file:close": "window-close",
+    "edit:find": "find",
+    "view:zoom-in": "zoom-in",
+    "view:zoom-out": "zoom-out",
+    "view:zoom-100": "ribbon:view-zoom",
+  });
+
+  // Runs the page action of a menu id; false for an unknown id or an action the page does not have.
+  function runNativeMenuAction(id, actions) {
+    const entry = Object.hasOwn(NATIVE_MENU_ACTIONS, id) ? NATIVE_MENU_ACTIONS[id] : null;
+    if (!entry) return false;
+    const [name, argument] = entry.split(":");
+    const run = actions[name];
+    if (typeof run !== "function") return false;
+    run(argument);
+    return true;
+  }
+
   function createShellChrome(deps) {
     const { document, hwpHost } = deps;
     const env = deps.env || host;
@@ -111,6 +140,11 @@
 
     // ---- About dialog -------------------------------------------------------------------------
 
+    function openAbout() {
+      const dialog = document.getElementById("about-dialog");
+      if (dialog && typeof dialog.showModal === "function" && !dialog.open) dialog.showModal();
+    }
+
     function bindAbout() {
       const dialog = document.getElementById("about-dialog");
       for (const el of document.querySelectorAll("[data-about-open]")) {
@@ -139,8 +173,9 @@
       hwpHost.onCommand(runShellCommand);
     }
 
-    return { bind, setAppVersion, applyStoredTheme, pushRecents, toast, runShellCommand, currentTheme, getThemeMode: () => themeApi().getMode() };
+    return { bind, openAbout, setAppVersion, applyStoredTheme, pushRecents, toast, runShellCommand, currentTheme, getThemeMode: () => themeApi().getMode() };
   }
 
   host.__EASYOFFICE_CREATE_SHELL_CHROME__ = createShellChrome;
+  host.__EASYOFFICE_NATIVE_MENU_TABLE__ = { NATIVE_MENU_ACTIONS, runNativeMenuAction };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

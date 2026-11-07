@@ -861,6 +861,31 @@
     workspaceSession.handleShortcutKeydown(e, shortcutActions(modal, cmdSearchInput));
   }
 
+  // The macOS menu bar (PD-102) runs the same actions as the keyboard, plus three menu-only ones.
+  function runNativeMenu(id) {
+    const modal = document.getElementById("cmd-palette-modal");
+    const input = document.getElementById("cmd-search-input");
+    const clickButton = (buttonId) => () => document.getElementById(buttonId)?.click();
+    const actions = {
+      ...shortcutActions(modal, input),
+      about: () => shellChrome.openAbout(),
+      // Inside the Hangul editor Find is the editor's own find dialog (its `edit:find` automation
+      // command over the embed port); every other window opens the command palette like Ctrl+F.
+      find: () => {
+        if (activeModule === "HWP" && hwpHost.isEmbedActive()) {
+          void hwpHost.call("automation.execute", { id: "edit:find", allowDialog: true }).catch(() => {});
+        } else {
+          togglePaletteModal(modal, input);
+        }
+      },
+      "file-save-as": () => (activeModule === "HWP" ? void hwpSession.saveAs("hwp") : void saveWorkspaceDocument().catch(() => {})),
+      "zoom-in": clickButton("btn-zoom-in"),
+      "zoom-out": clickButton("btn-zoom-out"),
+    };
+    return host.__EASYOFFICE_NATIVE_MENU_TABLE__.runNativeMenuAction(id, actions);
+  }
+  host.__EASYOFFICE_NATIVE_MENU__ = (id) => runNativeMenu(String(id));
+
   // Combos forwarded by the embedded HWP editor run the same actions as the keyboard.
   function handleForwardedShortcut(combo) {
     const modal = document.getElementById("cmd-palette-modal");
