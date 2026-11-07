@@ -22,13 +22,19 @@ pub mod pages_package;
 pub mod pages_proto;
 mod pages_schema;
 mod pages_table;
+mod pdf_image;
 mod pdf_stream_parser;
 mod pdf_writer;
 pub mod rich_document;
+mod rich_image;
+mod rich_image_probe;
+mod rich_image_writers;
 mod rich_read_hwpx;
+mod rich_read_images;
 mod rich_read_odt;
 mod rich_read_ooxml;
 mod rich_read_pages;
+mod rich_read_pages_image;
 mod rich_read_rtf;
 mod rich_read_text;
 pub mod rich_readers;
@@ -56,6 +62,11 @@ pub use rich_document::{
     evaluate_table_formulas, normalize_hex_color, RichAlignment, RichBlock, RichDocument,
     RichListKind, RichParagraph, RichRun,
 };
+pub use rich_image::{
+    RichImage, IMAGE_PLACEHOLDER_TEXT, MAX_ALT_TEXT_BYTES, MAX_IMAGES_PER_DOCUMENT,
+    MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, MAX_TOTAL_IMAGE_BYTES,
+};
+pub use rich_image_probe::RichImageFormat;
 pub use rich_readers::{DecodedContent, DecodedDocument, DecodedSlide};
 pub use rtf_xml_helpers::{
     unescape_xml_five_pass_baseline, unescape_xml_single_pass, RtfCodec, RtfPayload,

@@ -3,8 +3,9 @@
 //! warnings for objects that are not imported.
 
 use easyoffice_formats::{
-    DecodedContent, DocumentFormat, RichAlignment, RichBlock, RichDocument, RichListKind,
-    RichParagraph, RichRun, UniversalFormatConverter,
+    DecodedContent, DocumentFormat, RichAlignment, RichBlock, RichDocument, RichImage,
+    RichImageFormat, RichListKind, RichParagraph, RichRun, UniversalFormatConverter,
+    ZipArchiveCodec, ZipSecurityPolicy,
 };
 
 fn open(name: &str) -> (RichDocument, Vec<String>) {
@@ -23,7 +24,7 @@ fn paragraphs(doc: &RichDocument) -> Vec<&RichParagraph> {
         .iter()
         .filter_map(|b| match b {
             RichBlock::Paragraph(p) => Some(p),
-            RichBlock::Table(_) => None,
+            RichBlock::Table(_) | RichBlock::Image(_) => None,
         })
         .collect()
 }
@@ -33,7 +34,7 @@ fn tables(doc: &RichDocument) -> Vec<&Vec<Vec<String>>> {
         .iter()
         .filter_map(|b| match b {
             RichBlock::Table(rows) => Some(rows),
-            RichBlock::Paragraph(_) => None,
+            RichBlock::Paragraph(_) | RichBlock::Image(_) => None,
         })
         .collect()
 }
@@ -264,7 +265,6 @@ fn objects_fixture_reports_skipped_kinds() {
         warnings,
         vec![
             "가져오지 않은 요소: 각주 1개".to_string(),
-            "가져오지 않은 요소: 그림(형식 3005) 1개".to_string(),
             "가져오지 않은 요소: 댓글 1개".to_string(),
             "가져오지 않은 요소: 도형·텍스트 상자(형식 2011) 2개".to_string(),
             "가져오지 않은 요소: 머리글 텍스트 1개".to_string(),
@@ -301,6 +301,7 @@ fn content_outline(doc: &RichDocument) -> Vec<String> {
         .filter_map(|block| match block {
             RichBlock::Paragraph(p) => Some(p.plain_text()).filter(|text| !text.is_empty()),
             RichBlock::Table(rows) => Some(table_text(rows)),
+            RichBlock::Image(img) => Some(img.fallback_text().to_string()),
         })
         .collect()
 }
@@ -334,4 +335,45 @@ fn every_fixture_converts_to_docx_and_reads_back_the_same_text_and_cells() {
             "{name}"
         );
     }
+}
+
+#[test]
+fn objects_fixture_imports_picture_at_its_document_position() {
+    let path = format!(
+        "{}/tests/fixtures/pages/eo-pages-objects.pages",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let package = std::fs::read(path).expect("fixture readable");
+    let entries = ZipArchiveCodec::unpack(&package, &ZipSecurityPolicy::default()).expect("unpack");
+    let stored = entries
+        .iter()
+        .find(|e| e.path == "Data/test-image-1739601.png")
+        .expect("picture file in package");
+
+    let (doc, _) = open("eo-pages-objects.pages");
+    let images: Vec<(usize, &RichImage)> = doc
+        .blocks
+        .iter()
+        .enumerate()
+        .filter_map(|(i, b)| match b {
+            RichBlock::Image(img) => Some((i, img)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(images.len(), 1);
+    let (index, img) = images[0];
+    assert_eq!(img.bytes(), stored.data.as_slice());
+    assert_eq!(img.format(), RichImageFormat::Png);
+    assert_eq!((img.width_px(), img.height_px()), (240, 160));
+    // The geometry size is 240 x 160 pt.
+    assert_eq!(img.display_emu(), (240 * 12_700, 160 * 12_700));
+    // It sits right after the heading-like paragraph that introduces it.
+    let RichBlock::Paragraph(before) = &doc.blocks[index - 1] else {
+        panic!("paragraph before the picture");
+    };
+    assert_eq!(before.plain_text(), "1. 그림 (직접 만든 테스트 이미지)");
+    let RichBlock::Paragraph(after) = &doc.blocks[index + 1] else {
+        panic!("paragraph after the picture");
+    };
+    assert_eq!(after.plain_text(), "2. 도형 (사각형 안에 글자)");
 }

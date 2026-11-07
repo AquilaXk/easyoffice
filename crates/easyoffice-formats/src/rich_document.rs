@@ -6,6 +6,7 @@
 //! HWPX, ODT, RTF, Markdown) are written by [`crate::rich_writers`]; every other format receives
 //! the flattened [`UniversalDocumentModel`].
 
+use crate::rich_image::RichImage;
 use crate::{
     DocumentFormat, EasyOfficeError, HwpxCodec, UniversalDocumentModel, UniversalFormatConverter,
     XlsxFormulaCache,
@@ -132,6 +133,8 @@ pub enum RichBlock {
     Paragraph(RichParagraph),
     /// Table rows of final cell text (formula cells already replaced by their values).
     Table(Vec<Vec<String>>),
+    /// A PNG/JPEG picture on its own line; formats without picture support get its alt text.
+    Image(RichImage),
 }
 
 /// Ordered, formatted document.
@@ -159,6 +162,7 @@ impl RichDocument {
             match block {
                 RichBlock::Paragraph(p) => paragraphs.push(p.plain_text()),
                 RichBlock::Table(rows) => tables.push(rows.clone()),
+                RichBlock::Image(img) => paragraphs.push(img.fallback_text().to_string()),
             }
         }
         UniversalDocumentModel {

@@ -14,6 +14,8 @@ use crate::hwpx_parts::{
 };
 use crate::office_codecs::validate_zip_xml_entries;
 use crate::rich_document::{RichAlignment, RichBlock, RichDocument};
+use crate::rich_image::{check_document_images, RichImage};
+use crate::rich_image_writers::{hwpx_picture_run, MediaParts};
 use crate::rtf_xml_helpers::{
     extract_attr, extract_attr_from_fragment, extract_tag_bodies,
     extract_tags_or_self_closing_with_attrs, extract_tags_with_attrs, strip_tag_blocks,
@@ -23,6 +25,24 @@ use crate::{EasyOfficeError, XmlSanitizer, ZipArchiveCodec, ZipSecurityPolicy};
 /// OPF metadata entry marking a document as a template (`.hwtx`).
 pub const HWPX_TEMPLATE_META_MARKER: &str =
     "<opf:meta name=\"isTemplate\" content=\"text\">1</opf:meta>";
+
+/// Directory of embedded pictures inside the package.
+const HWPX_MEDIA_DIR: &str = "BinData";
+
+/// `opf:item` manifest entries for embedded pictures (`image1`, `image2`, ...).
+fn hpf_media_items(media: &MediaParts) -> String {
+    media
+        .listing()
+        .iter()
+        .enumerate()
+        .map(|(idx, (path, mime))| {
+            format!(
+                "<opf:item id=\"image{}\" href=\"{path}\" media-type=\"{mime}\" isEmbeded=\"1\"/>",
+                idx + 1
+            )
+        })
+        .collect()
+}
 
 const META_AGENCY: &str = "officialAgency";
 const META_APPROVAL: &str = "approvalLines";
@@ -85,6 +105,13 @@ impl SectionWriter {
             self.xml.push_str(&section_properties_xml());
             self.xml.push_str("</hp:run>");
         }
+    }
+
+    fn picture_paragraph(&mut self, img: &RichImage, number: usize) {
+        self.open_paragraph();
+        self.xml
+            .push_str(&hwpx_picture_run(img, number, &format!("image{number}")));
+        self.xml.push_str("</hp:p>");
     }
 
     fn text_paragraph(&mut self, text: &str) {
@@ -166,7 +193,7 @@ impl HwpxCodec {
         for tbl in &payload.tables {
             sec.table_paragraph(tbl);
         }
-        Self::pack_package(payload, header_xml(), sec.finish())
+        Self::pack_package(payload, header_xml(), sec.finish(), MediaParts::default())
     }
 
     /// Writes a [`RichDocument`] in block order: each distinct run format becomes a `charPr`,
@@ -185,13 +212,21 @@ impl HwpxCodec {
                 table.len() - 1
             })
         }
+        check_document_images(doc)?;
+        let mut media = MediaParts::default();
         let mut sec = SectionWriter::new();
         for block in &doc.blocks {
-            let RichBlock::Paragraph(p) = block else {
-                if let RichBlock::Table(rows) = block {
+            let p = match block {
+                RichBlock::Paragraph(p) => p,
+                RichBlock::Table(rows) => {
                     sec.table_paragraph(rows);
+                    continue;
                 }
-                continue;
+                RichBlock::Image(img) => {
+                    let (number, _) = media.add(HWPX_MEDIA_DIR, img);
+                    sec.picture_paragraph(img, number);
+                    continue;
+                }
             };
             let level = if (1..=6).contains(&p.heading_level) {
                 p.heading_level
@@ -277,13 +312,14 @@ impl HwpxCodec {
             paragraphs: Vec::new(),
             tables: Vec::new(),
         };
-        Self::pack_package(&meta, header, sec.finish())
+        Self::pack_package(&meta, header, sec.finish(), media)
     }
 
     fn pack_package(
         payload: &HwpxPayload,
         header: String,
         section: String,
+        media: MediaParts,
     ) -> Result<Vec<u8>, EasyOfficeError> {
         let mut metadata = format!(
             "<opf:title>{}</opf:title><opf:language>ko</opf:language><opf:meta name=\"creator\" content=\"text\">EasyOffice</opf:meta>",
@@ -312,12 +348,13 @@ impl HwpxCodec {
                 "<opf:manifest>",
                 "<opf:item id=\"header\" href=\"Contents/header.xml\" media-type=\"application/xml\"/>",
                 "<opf:item id=\"section0\" href=\"Contents/section0.xml\" media-type=\"application/xml\"/>",
-                "<opf:item id=\"settings\" href=\"settings.xml\" media-type=\"application/xml\"/>",
+                "<opf:item id=\"settings\" href=\"settings.xml\" media-type=\"application/xml\"/>{}",
                 "</opf:manifest>",
                 "<opf:spine><opf:itemref idref=\"header\" linear=\"yes\"/><opf:itemref idref=\"section0\" linear=\"yes\"/></opf:spine>",
                 "</opf:package>"
             ),
-            metadata
+            metadata,
+            hpf_media_items(&media)
         );
 
         let part_names = [
@@ -327,13 +364,13 @@ impl HwpxCodec {
             "Contents/section0.xml",
             "settings.xml",
         ];
-        let manifest = manifest_xml(Self::MIMETYPE_HWPX, &part_names);
+        let manifest = manifest_xml(Self::MIMETYPE_HWPX, &part_names, &media.listing());
 
         for xml in [&content_hpf, &header, &section, &manifest] {
             XmlSanitizer::validate_safe_xml(xml)?;
         }
 
-        ZipArchiveCodec::pack_compressed(&[
+        let mut entries = vec![
             (
                 "mimetype".to_string(),
                 Self::MIMETYPE_HWPX.as_bytes().to_vec(),
@@ -348,7 +385,9 @@ impl HwpxCodec {
             ("Contents/header.xml".to_string(), header.into_bytes()),
             ("Contents/section0.xml".to_string(), section.into_bytes()),
             ("settings.xml".to_string(), SETTINGS_XML.as_bytes().to_vec()),
-        ])
+        ];
+        entries.extend(media.into_entries());
+        ZipArchiveCodec::pack_compressed(&entries)
     }
 
     pub fn unpack(bytes: &[u8]) -> Result<HwpxPayload, EasyOfficeError> {

@@ -45,6 +45,41 @@ pub(crate) mod ty {
     pub const SHAPE_WITH_TEXT: u32 = 2011;
     /// Header/footer text lists (`1` = header storages, `2` = footer storages). 확인
     pub const HEADER_FOOTER_LIST: u32 = 10143;
+    /// Package metadata (list of data files with identifiers and names). 확인 (fixture)
+    pub const PACKAGE_METADATA: u32 = 11006;
+}
+
+/// Picture drawable field numbers. 확인 (fixture objects file)
+pub(crate) mod image {
+    /// Drawable super message (geometry etc.).
+    pub const DRAWABLE: u32 = 1;
+    /// Data reference `{ identifier = 1 }` of the picture file.
+    pub const DATA: u32 = 11;
+}
+
+/// Drawable field numbers.
+pub(crate) mod drawable {
+    /// Geometry message (position, size, flags, angle).
+    pub const GEOMETRY: u32 = 1;
+}
+
+/// Geometry field numbers.
+pub(crate) mod geometry {
+    /// Size message `{ width = 1, height = 2 }` as 32-bit floats in points.
+    pub const SIZE: u32 = 2;
+}
+
+/// Package metadata field numbers.
+pub(crate) mod package_metadata {
+    /// Repeated data file descriptions.
+    pub const DATA_INFOS: u32 = 4;
+}
+
+/// Data file description field numbers.
+pub(crate) mod data_info {
+    pub const IDENTIFIER: u32 = 1;
+    pub const PREFERRED_NAME: u32 = 3;
+    pub const FILE_NAME: u32 = 4;
 }
 
 /// Field numbers of the document root.

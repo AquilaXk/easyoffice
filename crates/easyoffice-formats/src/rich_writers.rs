@@ -3,8 +3,18 @@
 //! words), Markdown (`**`/`*`/`~~`/`#`), TXT, and PDF (ordered text). User text is always escaped
 //! for the target syntax and never parsed.
 
+use crate::pdf_image::pdf_image_object;
+use crate::pdf_writer::{
+    paginate_pages, PdfImagePage, PdfPageEntry, PDF_IMAGE_MARGIN_PT, PDF_PAGE_HEIGHT_PT,
+    PDF_PAGE_WIDTH_PT,
+};
 use crate::rich_document::{
     RichAlignment, RichBlock, RichDocument, RichListKind, RichParagraph, RichRun,
+};
+use crate::rich_image::{check_document_images, fit_within};
+use crate::rich_image_writers::{
+    docx_content_type_defaults, docx_image_paragraph, docx_image_relationship, emu_to_points,
+    odt_image_paragraph, MediaParts, DOCX_PICTURE_NAMESPACES, ODT_PICTURE_NAMESPACES,
 };
 use crate::rich_run_writers::{
     docx_run_properties, has_extra_run_format, odt_font_face_decls, odt_text_key,
@@ -131,20 +141,29 @@ fn push_docx_table(out: &mut String, rows: &[Vec<String>]) {
     out.push_str("</w:tbl>");
 }
 
-pub(crate) fn pack_docx_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeError> {
-    let content_types = format!(
+/// Relationship id offset of the first picture (`rId1` is the style sheet).
+const DOCX_FIRST_IMAGE_REL: usize = 2;
+const DOCX_MEDIA_DIR: &str = "word/media";
+
+fn docx_content_types(media: &MediaParts) -> String {
+    format!(
         concat!(
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
             "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">",
             "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>",
-            "<Default Extension=\"xml\" ContentType=\"application/xml\"/>",
+            "<Default Extension=\"xml\" ContentType=\"application/xml\"/>{}",
             "<Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/>",
             "<Override PartName=\"/word/styles.xml\" ContentType=\"{}\"/>",
             "<Override PartName=\"/docProps/core.xml\" ContentType=\"application/vnd.openxmlformats-package.core-properties+xml\"/>",
             "</Types>"
         ),
+        docx_content_type_defaults(media),
         DOCX_STYLES_CONTENT_TYPE
-    );
+    )
+}
+
+pub(crate) fn pack_docx_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeError> {
+    check_document_images(doc)?;
     let rels = concat!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
         "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">",
@@ -152,21 +171,28 @@ pub(crate) fn pack_docx_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeEr
         "<Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties\" Target=\"docProps/core.xml\"/>",
         "</Relationships>"
     );
-    let doc_rels = concat!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
-        "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">",
-        "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>",
-        "</Relationships>"
-    );
     let core_xml = crate::ooxml_shared_parts::core_properties_xml(&doc.display_title());
     let styles = docx_styles_xml();
 
     let mut body = String::with_capacity(1024);
     body.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
-    body.push_str("<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body>");
+    body.push_str(
+        "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"",
+    );
+    body.push_str(DOCX_PICTURE_NAMESPACES);
+    body.push_str("><w:body>");
+    let mut media = MediaParts::default();
+    let mut image_rels = String::new();
     for block in &doc.blocks {
         match block {
             RichBlock::Paragraph(p) => push_docx_paragraph(&mut body, p),
+            RichBlock::Image(img) => {
+                let (number, path) = media.add(DOCX_MEDIA_DIR, img);
+                let rel_id = format!("rId{}", number + DOCX_FIRST_IMAGE_REL - 1);
+                let target = path.strip_prefix("word/").unwrap_or(&path);
+                image_rels.push_str(&docx_image_relationship(&rel_id, target));
+                body.push_str(&docx_image_paragraph(img, number, &rel_id));
+            }
             RichBlock::Table(rows) => {
                 push_docx_table(&mut body, rows);
                 // A table cannot end the body or touch another table without a paragraph.
@@ -177,11 +203,22 @@ pub(crate) fn pack_docx_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeEr
     body.push_str("<w:sectPr><w:pgSz w:w=\"11906\" w:h=\"16838\"/></w:sectPr>");
     body.push_str("</w:body></w:document>");
 
-    for xml in [&body, &core_xml, &styles] {
+    let content_types = docx_content_types(&media);
+    let doc_rels = format!(
+        concat!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+            "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">",
+            "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>",
+            "{}</Relationships>"
+        ),
+        image_rels
+    );
+
+    for xml in [&body, &core_xml, &styles, &doc_rels] {
         XmlSanitizer::validate_safe_xml(xml)?;
     }
 
-    ZipArchiveCodec::pack_compressed(&[
+    let mut entries = vec![
         (
             "[Content_Types].xml".to_string(),
             content_types.into_bytes(),
@@ -190,11 +227,13 @@ pub(crate) fn pack_docx_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeEr
         ("word/document.xml".to_string(), body.into_bytes()),
         (
             "word/_rels/document.xml.rels".to_string(),
-            doc_rels.as_bytes().to_vec(),
+            doc_rels.into_bytes(),
         ),
         ("word/styles.xml".to_string(), styles.into_bytes()),
         ("docProps/core.xml".to_string(), core_xml.into_bytes()),
-    ])
+    ];
+    entries.extend(media.into_entries());
+    ZipArchiveCodec::pack_compressed(&entries)
 }
 
 // ---------------------------------------------------------------- ODT
@@ -317,7 +356,11 @@ fn odt_para_style_xml(number: usize, (align, level, is_list): &OdtParaKey) -> St
     styles
 }
 
+const ODT_MEDIA_DIR: &str = "Pictures";
+
 pub(crate) fn pack_odt_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeError> {
+    check_document_images(doc)?;
+    let mut media = MediaParts::default();
     let mut para_styles: StyleTable<OdtParaKey> = StyleTable::new();
     let mut text_styles: StyleTable<OdtTextKey> = StyleTable::new();
     let mut body = String::with_capacity(1024);
@@ -327,6 +370,10 @@ pub(crate) fn pack_odt_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeErr
                 push_odt_paragraph(&mut body, p, &mut para_styles, &mut text_styles);
             }
             RichBlock::Table(rows) => push_odt_table(&mut body, rows),
+            RichBlock::Image(img) => {
+                let (number, path) = media.add(ODT_MEDIA_DIR, img);
+                body.push_str(&odt_image_paragraph(img, number, &path));
+            }
         }
     }
 
@@ -348,25 +395,26 @@ pub(crate) fn pack_odt_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeErr
             "xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" ",
             "xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" ",
             "xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\" ",
-            "xmlns:svg=\"urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0\" ",
+            "xmlns:svg=\"urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0\" {}",
             "office:version=\"1.2\" title=\"{}\">{}<office:body><office:text>{}</office:text></office:body></office:document-content>"
         ),
+        ODT_PICTURE_NAMESPACES,
         XmlSanitizer::escape(&doc.display_title()),
         styles,
         body
     );
     XmlSanitizer::validate_safe_xml(&content)?;
-    ZipArchiveCodec::pack_compressed(&[
+    let manifest = OdfCodec::build_manifest_with_media(OdfCodec::MIMETYPE_ODT, &media.listing());
+    let mut entries = vec![
         (
             "mimetype".to_string(),
             OdfCodec::MIMETYPE_ODT.as_bytes().to_vec(),
         ),
-        (
-            "META-INF/manifest.xml".to_string(),
-            OdfCodec::build_manifest(OdfCodec::MIMETYPE_ODT).into_bytes(),
-        ),
+        ("META-INF/manifest.xml".to_string(), manifest.into_bytes()),
         ("content.xml".to_string(), content.into_bytes()),
-    ])
+    ];
+    entries.extend(media.into_entries());
+    ZipArchiveCodec::pack_compressed(&entries)
 }
 
 // ---------------------------------------------------------------- RTF
@@ -507,13 +555,20 @@ pub(crate) fn encode_rtf_rich(doc: &RichDocument) -> String {
     ));
     let tables = RtfRunTables::collect(doc.blocks.iter().flat_map(|b| match b {
         RichBlock::Paragraph(p) => p.runs.iter(),
-        RichBlock::Table(_) => [].iter(),
+        RichBlock::Table(_) | RichBlock::Image(_) => [].iter(),
     }));
     lines.extend(tables.header_lines());
     let mut table_idx = 0usize;
     for block in &doc.blocks {
         match block {
             RichBlock::Paragraph(p) => lines.push(rtf_paragraph_line(p, &tables)),
+            RichBlock::Image(img) => {
+                let stand_in = RichParagraph {
+                    runs: vec![RichRun::plain(img.fallback_text())],
+                    ..RichParagraph::default()
+                };
+                lines.push(rtf_paragraph_line(&stand_in, &tables));
+            }
             RichBlock::Table(rows) => {
                 for row in rows {
                     let cells = row
@@ -657,6 +712,13 @@ pub(crate) fn render_markdown_rich(doc: &RichDocument) -> String {
                     parts.push(text);
                 }
             }
+            RichBlock::Image(img) => {
+                flush(&mut parts, &mut list_buf);
+                ordinal = 0;
+                parts.push(escape_markdown_line_start(&escape_markdown_inline(
+                    img.fallback_text(),
+                )));
+            }
             RichBlock::Table(rows) => {
                 flush(&mut parts, &mut list_buf);
                 ordinal = 0;
@@ -672,6 +734,20 @@ pub(crate) fn render_markdown_rich(doc: &RichDocument) -> String {
     parts.join("\n\n")
 }
 
+/// Plain-text lines of one block: paragraph text, alt text of a picture, table rows joined by
+/// `cell_sep`.
+fn push_plain_lines(block: &RichBlock, cell_sep: &str, lines: &mut Vec<String>) {
+    match block {
+        RichBlock::Paragraph(p) => lines.push(p.plain_text()),
+        RichBlock::Image(img) => lines.push(img.fallback_text().to_string()),
+        RichBlock::Table(rows) => {
+            for row in rows.iter().filter(|r| !r.is_empty()) {
+                lines.push(row.join(cell_sep));
+            }
+        }
+    }
+}
+
 /// Ordered plain text: optional title line, paragraph text, table rows joined by `cell_sep`.
 pub(crate) fn render_plain_text(doc: &RichDocument, cell_sep: &str, with_title: bool) -> String {
     let mut lines = Vec::with_capacity(doc.blocks.len() + 1);
@@ -679,19 +755,84 @@ pub(crate) fn render_plain_text(doc: &RichDocument, cell_sep: &str, with_title: 
         lines.push(doc.display_title());
     }
     for block in &doc.blocks {
-        match block {
-            RichBlock::Paragraph(p) => lines.push(p.plain_text()),
-            RichBlock::Table(rows) => {
-                for row in rows.iter().filter(|r| !r.is_empty()) {
-                    lines.push(row.join(cell_sep));
-                }
-            }
-        }
+        push_plain_lines(block, cell_sep, &mut lines);
     }
     lines.join("\n")
 }
 
+/// Widest / tallest picture area on a PDF page (A4 minus margins), in points.
+const PDF_IMAGE_MAX_WIDTH_PT: u64 = PDF_PAGE_WIDTH_PT - 2 * PDF_IMAGE_MARGIN_PT;
+const PDF_IMAGE_MAX_HEIGHT_PT: u64 = PDF_PAGE_HEIGHT_PT - 2 * PDF_IMAGE_MARGIN_PT;
+
+fn flush_pdf_text(
+    entries: &mut Vec<PdfPageEntry>,
+    lines: &mut Vec<String>,
+    stamp: &mut Option<String>,
+) {
+    if lines.is_empty() {
+        return;
+    }
+    let page = PdfPageModel {
+        page_number: 0,
+        rotation_degrees: 0,
+        body_text: lines.join("\n"),
+        approval_stamp: stamp.take(),
+    };
+    lines.clear();
+    entries.extend(
+        paginate_pages(vec![page])
+            .into_iter()
+            .map(PdfPageEntry::Text),
+    );
+}
+
+/// Text pages with every embeddable picture on a page of its own, in document order; pictures
+/// the PDF writer cannot embed are printed as alternative text.
+fn pdf_entries(doc: &RichDocument) -> Vec<PdfPageEntry> {
+    let mut entries = Vec::new();
+    let mut lines = Vec::new();
+    let mut stamp = doc.official_agency.clone();
+    for block in &doc.blocks {
+        let embedded = match block {
+            RichBlock::Image(img) => pdf_image_object(img).map(|object| (img, object)),
+            _ => None,
+        };
+        let Some((img, image)) = embedded else {
+            push_plain_lines(block, " | ", &mut lines);
+            continue;
+        };
+        flush_pdf_text(&mut entries, &mut lines, &mut stamp);
+        let (cx, cy) = img.display_emu();
+        let (width_pt, height_pt) = fit_within(
+            emu_to_points(cx),
+            emu_to_points(cy),
+            PDF_IMAGE_MAX_WIDTH_PT,
+            PDF_IMAGE_MAX_HEIGHT_PT,
+        );
+        entries.push(PdfPageEntry::Image(PdfImagePage {
+            page_number: 0,
+            image,
+            width_pt,
+            height_pt,
+        }));
+    }
+    flush_pdf_text(&mut entries, &mut lines, &mut stamp);
+    for (idx, entry) in entries.iter_mut().enumerate() {
+        match entry {
+            PdfPageEntry::Text(page) => page.page_number = idx + 1,
+            PdfPageEntry::Image(page) => page.page_number = idx + 1,
+        }
+    }
+    entries
+}
+
 pub(crate) fn serialize_pdf_rich(doc: &RichDocument) -> Vec<u8> {
+    if doc.blocks.iter().any(|b| matches!(b, RichBlock::Image(_))) {
+        let entries = pdf_entries(doc);
+        if entries.iter().any(|e| matches!(e, PdfPageEntry::Image(_))) {
+            return PdfSerializer::serialize_entries(&doc.display_title(), None, &entries);
+        }
+    }
     PdfSerializer::serialize(&PdfDocumentModel {
         title: doc.display_title(),
         pages: vec![PdfPageModel {
