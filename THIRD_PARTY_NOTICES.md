@@ -8766,12 +8766,36 @@ LAMP/EPFL (https://lamp.epfl.ch/) and
 Lightbend, Inc. (https://www.lightbend.com/).
 ```
 
+## Desktop shell PDF export crates (searchable PDF, PD-101)
+
+The desktop shell (`crates/easyoffice-desktop`, not the engine crates) depends on `svg2pdf` (rhwp's vendored copy, MIT OR Apache-2.0, `vendor/svg2pdf`, copied from rhwp `1a76570` `vendor/svg2pdf` with its patch notes `RHWP_PATCHES.md`), `usvg`, `fontdb` and `pdf-writer` to turn the Hangul editor's page SVGs into PDFs with embedded, searchable text. `crates/easyoffice-desktop/src/pdf_export.rs` adapts the page assembly of rhwp's PDF renderer and of hop `apps/desktop/src-tauri/src/pdf_export.rs` (MIT, Copyright (c) 2025-2026 Edward Kim). Licenses of the 77 crates in the dependency closure of the four (checked with `cargo metadata`):
+
+| License expression | Crates |
+| --- | --- |
+| `MIT OR Apache-2.0` | 37: arrayvec, base64, bitflags, cfg-if, crc32fast, data-url, euclid, fdeflate, flate2, font-types, hashbrown, itoa, libc, log, memmap2, num-traits, once_cell, pdf-writer, png, polycool, proc-macro2, quote, read-fonts, roxmltree, serde, serde_core, serde_derive, siphasher, skrifa, smallvec, subsetter, svg2pdf, syn, ttf-parser, unicode-bidi, unicode-script, write-fonts |
+| `MIT` | 12: core_maths, float-cmp, fontconfig-parser, fontdb, imagesize, libm, pico-args, rgb, rustybuzz, simd-adler32, strict-num, xmlwriter |
+| `Apache-2.0 OR MIT` | 9: equivalent, indexmap, kurbo, kurbo, resvg, rustc-hash, simplecss, svgtypes, usvg |
+| `MIT/Apache-2.0` | 4: bitflags, unicode-bidi-mirroring, unicode-ccc, unicode-vo |
+| `Zlib OR Apache-2.0 OR MIT` | 3: bytemuck, bytemuck_derive, tinyvec |
+| `MIT OR Zlib OR Apache-2.0` | 2: miniz_oxide, miniz_oxide |
+| `Zlib` | 2: slotmap, zlib-rs |
+| `BSD-3-Clause` | 2: tiny-skia, tiny-skia-path |
+| `(MIT OR Apache-2.0) AND Unicode-3.0` | 2: unicode-ident, unicode-properties |
+| `0BSD OR MIT OR Apache-2.0` | 1: adler2 |
+| `BSD-2-Clause` | 1: arrayref |
+| `Unlicense OR MIT` | 1: memchr |
+| `Apache-2.0 OR BSL-1.0` | 1: ryu |
+
+No MPL, GPL or unlicensed crate is in the closure.
+
 ## hop (code adapted)
 
 hop (MIT, https://github.com/golbin/hop, reference commit `80888af`, v0.4.5) is the model for the EasyOffice window UI (PD-098) and for the build and verification patterns of the `apps/hwp-studio` overlay (pinned upstream checkout, Vite alias overlay with an override manifest, vendored WebAssembly with provenance, font policy). Where hop code is ported, the TypeScript is rewritten as plain JavaScript or the CSS is copied with its tokens renamed, each ported file starts with a header naming its hop source, and the file is listed here first:
 
 | EasyOffice file | hop source | Change |
 | --- | --- | --- |
+| `crates/easyoffice-desktop/src/pdf_font_fallbacks.rs` | `apps/desktop/src-tauri/src/pdf_font_fallbacks.rs` | Rewritten around one sorted static table of document font names with an allocation-free binary search; fallback chains name the platform's installed Korean fonts |
+| `crates/easyoffice-desktop/src/pdf_export.rs` | `apps/desktop/src-tauri/src/pdf_export.rs` | Page SVGs come from the editor as strings and are converted with svg2pdf directly (no native rhwp core); limits and fail-closed pages added |
 | `crates/easyoffice-app/ui/home-screen.js` | `apps/studio-host/src/ui/home-screen.ts` | TypeScript rewritten as JavaScript; six new-document buttons with icons, cards without paths or previews, opening through the window bridge |
 | `crates/easyoffice-app/ui/recent-documents-dialog.js` | `apps/studio-host/src/ui/recent-documents-dialog.ts` | TypeScript rewritten as JavaScript; entries are `{ id, name, kind }`, no clear button |
 | `crates/easyoffice-app/ui/custom-select.js` | `apps/studio-host/src/ui/custom-select.ts` | TypeScript rewritten as JavaScript; only `select.sb-combo` is enhanced, programmatic `value` assignments refresh the label |

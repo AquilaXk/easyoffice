@@ -279,6 +279,7 @@
       .filter((b) => b.forwardFromEditor && (!b.desktopOnly || desktopBridge.isAvailable()))
       .map((b) => b.keys),
     onStateChange: () => workspaceSession.applyModuleContext(activeModule),
+    canExportPdf: desktopBridge.isAvailable(),
   });
 
   hwpSession = host.__EASYOFFICE_CREATE_HWP_SESSION__({
@@ -286,6 +287,7 @@
     activateHwp: () => ribbonHistory.activatePane("HWP"),
     deliverSavedFile: (base64, name, ext) => workspacePanels.deliverSavedFile(base64, name, ext),
     resolveBaseName: () => workspacePanels.resolveSaveFileBase("HWP"),
+    exportSearchablePdf: desktopBridge.isAvailable() ? (name, pages) => desktopBridge.exportSearchablePdf(name, pages) : null,
     getDocumentId: () => windowBridge.launch.windowId,
     setDocumentName: (name) => windowBridge.setDocumentName(name, "HWP"),
     onDirtyChange: (dirty) => workspaceSession.setExternalDirty(dirty),
@@ -300,7 +302,8 @@
     actions: {
       newDocument: () => windowBridge.newDocument("HWP"), openFile: () => fileOpen.openFilePicker(),
       openRecent: (id) => windowBridge.openRecent(id), save: () => saveWorkspaceDocument(),
-      saveAs: (format) => hwpSession.saveAs(format), close: () => windowBridge.requestClose(),
+      saveAs: (format) => hwpSession.saveAs(format), exportPdf: () => hwpSession.exportPdf(),
+      close: () => windowBridge.requestClose(),
     },
   });
 

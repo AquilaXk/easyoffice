@@ -27,9 +27,9 @@
   const TOOL_HINT = "한글 편집기 도구줄을 사용하세요";
   const SHORTCUT_REASON = "shell_shortcut";
   // The editor's 파일 menu forwards shell commands by name only (#158); the shell re-checks each one
-  // here before anything runs, so a compromised frame can only ask for these six actions.
+  // here before anything runs, so a compromised frame can only ask for these seven actions.
   const SHELL_COMMAND_REASON = "shell_command";
-  const SHELL_COMMANDS = Object.freeze(["new", "open", "recent", "save", "save-as", "close"]);
+  const SHELL_COMMANDS = Object.freeze(["new", "open", "recent", "save", "save-as", "export-pdf", "close"]);
   const SAVE_AS_FORMATS = Object.freeze(["hwp", "hwpx"]);
   const SHELL_THEMES = Object.freeze(["light", "dark", "system"]);
   const RECENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
@@ -99,7 +99,11 @@
     const shortcutListeners = new Set();
     const commandListeners = new Set();
     // Pushed into the editor (`setShellContext`): the shell theme and the recent-documents list.
-    const shellContext = { theme: SHELL_THEMES.includes(deps.initialTheme) ? deps.initialTheme : "system", recents: [] };
+    const shellContext = {
+      theme: SHELL_THEMES.includes(deps.initialTheme) ? deps.initialTheme : "system",
+      recents: [],
+      pdfExport: deps.canExportPdf === true,
+    };
     // Combos the editor forwards to the shell (from the shell's single shortcut table). They travel
     // in the frame URL so the editor knows which keys to hand over; the editor sends combo strings only.
     const shellShortcuts = Array.isArray(deps.shellShortcuts) ? deps.shellShortcuts.filter((k) => typeof k === "string") : [];
@@ -476,7 +480,7 @@
     // Theme and recent documents travel to the editor as plain values (recents: opaque id + name).
     function pushShellContext() {
       if (!port || !capabilities.includes("shell-context-v1")) return Promise.resolve(false);
-      return call(SHELL_CONTEXT_METHOD, { theme: shellContext.theme, recents: shellContext.recents })
+      return call(SHELL_CONTEXT_METHOD, { theme: shellContext.theme, recents: shellContext.recents, pdfExport: shellContext.pdfExport })
         .then(() => true, () => false);
     }
 

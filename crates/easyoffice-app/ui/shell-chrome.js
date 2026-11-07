@@ -99,6 +99,7 @@
         case "recent": return report(actions.openRecent?.(request.id));
         case "save": return report(actions.save?.());
         case "save-as": return report(actions.saveAs?.(request.format));
+        case "export-pdf": return report(actions.exportPdf?.());
         case "close": return report(actions.close?.());
         default: return undefined;
       }

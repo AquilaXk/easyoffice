@@ -22,6 +22,12 @@ tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri-plugin-single-instance = "2"
+# PD-101: searchable PDF export of the Hangul editor's page SVGs (shell only; the engine crates stay
+# dependency-free, PD-053/095).
+svg2pdf = { version = "0.13", default-features = false, features = ["text"] }
+usvg = { version = "0.45", default-features = false, features = ["text"] }
+fontdb = "0.23"
+pdf-writer = "0.12"
 
 # macOS recent items (PD-099): already in the dependency graph through tauri, here with only the
 # two features the shell calls.

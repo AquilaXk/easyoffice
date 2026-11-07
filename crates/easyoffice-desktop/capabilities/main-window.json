@@ -7,6 +7,7 @@
   "permissions": [
     "allow-ipc-dispatch",
     "allow-save-document-file",
+    "allow-export-searchable-pdf",
     "allow-open-document-window",
     "allow-open-file-in-new-window",
     "allow-take-pending-open",

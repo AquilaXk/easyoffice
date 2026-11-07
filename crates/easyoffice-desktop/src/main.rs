@@ -6,6 +6,8 @@
 
 mod app_commands;
 mod os_recent;
+mod pdf_export;
+mod pdf_font_fallbacks;
 mod recent;
 mod save_file;
 mod smoke;
@@ -87,10 +89,51 @@ async fn save_document_file(
             return save_tracked(&app, &window, tracked, request).await;
         }
     }
+    save_via_dialog(&app, &window, request).await
+}
+
+/// Builds a searchable PDF from the page SVGs of the Hangul editor and saves it through the same
+/// native save dialog (PD-101). The page supplies SVG text only; fonts and the target path stay in
+/// Rust.
+#[tauri::command]
+async fn export_searchable_pdf(
+    app: AppHandle,
+    window: WebviewWindow,
+    file_name: String,
+    pages: Vec<String>,
+) -> Result<SaveOutcome, IpcError> {
+    let font_dirs: Vec<std::path::PathBuf> = app
+        .path()
+        .resource_dir()
+        .map(|dir| vec![dir.join(PDF_FONT_DIR)])
+        .unwrap_or_default();
+    let pdf = tauri::async_runtime::spawn_blocking(move || {
+        let fonts = pdf_export::shared_font_db(&font_dirs);
+        pdf_export::svgs_to_searchable_pdf(&pages, &fonts)
+    })
+    .await
+    .map_err(|err| IpcError::new(format!("PDF 내보내기를 실행하지 못했습니다: {err}")))?
+    .map_err(IpcError::new)?;
+    let request = SaveRequest::from_bytes(&file_name, pdf).map_err(IpcError::new)?;
+    if request.extension() != "pdf" {
+        return Err(IpcError::new("PDF 파일 이름은 .pdf 확장자여야 합니다."));
+    }
+    save_via_dialog(&app, &window, request).await
+}
+
+/// Resource sub-directory that holds the bundled OFL fonts used when embedding PDF text.
+const PDF_FONT_DIR: &str = "pdf-fonts";
+
+/// Asks where to save with the native dialog and writes the request there.
+async fn save_via_dialog(
+    app: &AppHandle,
+    window: &WebviewWindow,
+    request: SaveRequest,
+) -> Result<SaveOutcome, IpcError> {
     let (tx, rx) = std::sync::mpsc::channel();
     app.dialog()
         .file()
-        .set_parent(&window)
+        .set_parent(window)
         .set_title("문서 저장")
         .set_file_name(request.file_name())
         .add_filter(request.filter_label(), &[request.extension()])
@@ -112,7 +155,7 @@ async fn save_document_file(
     .await
     .map_err(|err| IpcError::new(format!("파일을 쓰지 못했습니다: {err}")))?
     .map_err(IpcError::new)?;
-    window_commands::note_saved_path(&app, window.label(), &written.0);
+    window_commands::note_saved_path(app, window.label(), &written.0);
     Ok(SaveOutcome::saved(&written.0, written.1))
 }
 
@@ -177,6 +220,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             ipc_dispatch,
             save_document_file,
+            export_searchable_pdf,
             window_commands::open_document_window,
             window_commands::open_file_in_new_window,
             window_commands::take_pending_open,
@@ -275,7 +319,7 @@ mod tests {
         );
         assert_eq!(value["windows"], serde_json::json!(["main", "doc-*"]));
         assert_eq!(value["local"], serde_json::json!(true));
-        assert_eq!(app_commands::APP_COMMANDS.len(), 9);
+        assert_eq!(app_commands::APP_COMMANDS.len(), 10);
     }
 
     #[test]
