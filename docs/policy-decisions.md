@@ -1519,7 +1519,7 @@
 - **Decision (`PD-091`)**
   1. 새 `checks` 작업(`ubuntu-latest`)이 OS와 무관한 게이트를 한 번만 실행합니다: 위생 가드, rhwp 핀·WASM·글꼴 검증, rhwp/hwp-studio 가드 테스트, Info.plist 범위, WebUI 회귀 묶음, `cargo fmt --check`, 엔진 clippy `-D warnings`, `cargo test --workspace --exclude easyoffice-desktop`, `--self-test`.
   2. `verify`(macOS)는 Swift 빌드·테스트와 `.app` 번들 검증만, `verify-windows`는 엔진 테스트·자체 시험(Windows 경로 동작), `embed-hwp-studio`, `--serve` 스모크, 데스크톱 clippy·테스트, NSIS 빌드·스모크·하네스만 실행합니다. 작업 이름은 그대로 두어 기존 필수 검사 설정이 깨지지 않습니다.
-  3. 세 작업 모두 `Swatinem/rust-cache@v2`로 `~/.cargo`와 `target`의 의존성 산출물을 캐시합니다(키: 작업·rustc·Cargo.lock).
+  3. 세 작업 모두 `Swatinem/rust-cache`(v2.9.3, 공급망 보호를 위해 커밋 SHA로 고정)로 `~/.cargo`와 `target`의 의존성 산출물을 캐시합니다(키: 작업·rustc·Cargo.lock).
 - **Why** 같은 검사를 두 OS에서 반복할 근거가 없고(순수 JS·서식 검사), 캐시는 의존성 재컴파일 시간을 없애 PR 대기 시간을 가장 크게 줄입니다.
 - **Trade-offs** 엔진 테스트는 macOS에서 더 이상 돌지 않습니다(Linux·Windows에서 실행, macOS 전용 엔진 코드 없음). `checks`를 필수 검사로 쓰려면 저장소 설정에서 추가해야 합니다. 캐시가 오래되면 rustc 버전·잠금 파일 변경 시 자동으로 새 키를 씁니다.
 - **Alternatives rejected** 문서만 바뀐 PR의 작업 건너뛰기(경로 필터는 필수 검사가 보고되지 않아 PR이 대기 상태로 남으므로 대체 작업이 필요, 개인 프로젝트 규모에서 이득 대비 복잡), 모든 검사를 Linux 하나로 통합(Swift 앱·Tauri MSVC 빌드는 해당 OS 필요).

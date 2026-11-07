@@ -55,7 +55,7 @@ jobs:
         run: node --test scripts/test-webui-behavior.mjs scripts/test-webui-ux-ergonomics.mjs scripts/test-webui-round13-parity.mjs scripts/test-webui-sheet-atomicity.mjs scripts/test-webui-security-ipc.mjs scripts/test-webui-session-context.mjs scripts/test-webui-save-fidelity.mjs scripts/test-webui-desktop-bridge.mjs scripts/test-webui-file-open.mjs scripts/test-webui-slide-show.mjs scripts/test-webui-doc-runs.mjs scripts/test-webui-sheet-editing.mjs scripts/test-webui-hwp-host.mjs scripts/test-webui-hwp-session.mjs scripts/test-webui-sheet-format.mjs scripts/test-webui-sheet-styles.mjs scripts/test-webui-windows.mjs scripts/test-webui-shell-chrome.mjs scripts/test-webui-hwp-shortcuts.mjs
 
       - name: Cache Rust dependencies and build artifacts
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       - name: Check Rust toolchain version
         run: cargo --version && rustc --version
@@ -86,7 +86,7 @@ jobs:
           node-version: "22"
 
       - name: Cache Rust dependencies and build artifacts
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       - name: Check Swift toolchain version
         run: swift --version
@@ -116,7 +116,7 @@ jobs:
           cache-dependency-path: apps/hwp-studio/package-lock.json
 
       - name: Cache Rust dependencies and build artifacts
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       # hwp-studio (PD-081, PD-083): the editor bundle is generated from the committed WASM package, the
       # pinned sparse rhwp checkout and the npm lockfile; the WASM is never compiled here. The desktop shell
