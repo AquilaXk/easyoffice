@@ -129,10 +129,38 @@ fn data_list<'a, T>(
     out
 }
 
+/// Entries `(key, text)` of a string list object (entry text = field 3), sorted by key.
+fn string_list(objects: &ObjectTable, list_id: u64) -> KeyedList<&str> {
+    let mut out = KeyedList::new();
+    let Some(obj) = objects
+        .get(list_id)
+        .filter(|o| o.type_id == ty::TABLE_DATA_LIST)
+    else {
+        return out;
+    };
+    let Ok(list) = Message::parse(&obj.payload) else {
+        return out;
+    };
+    let Ok(entries) = list.subs(table::LIST_ENTRIES) else {
+        return out;
+    };
+    for e in entries.into_iter().take(MAX_LIST_ENTRIES) {
+        let text = e
+            .bytes(table::ENTRY_STRING)
+            .and_then(|b| std::str::from_utf8(b).ok());
+        if let (Some(key), Some(text)) = (e.varint(table::ENTRY_KEY), text) {
+            out.push((key, text));
+        }
+    }
+    out.sort_by_key(|(k, _)| *k);
+    out
+}
+
 /// Everything needed to turn packed cells into text.
 struct CellContext<'a> {
     objects: &'a ObjectTable,
     rich_text: KeyedList<u64>,
+    strings: KeyedList<&'a str>,
     formats: KeyedList<FormatSpec<'a>>,
 }
 
@@ -154,9 +182,13 @@ impl<'a> CellContext<'a> {
                 })
             })
             .unwrap_or_default();
+        let strings = list_of(table::STORE_STRING_LIST)
+            .map(|id| string_list(objects, id))
+            .unwrap_or_default();
         Self {
             objects,
             rich_text,
+            strings,
             formats,
         }
     }
@@ -185,6 +217,15 @@ impl<'a> CellContext<'a> {
                 Some(payload) => Rendered::Text(self.payload_text(payload)),
                 None => Rendered::Unsupported,
             };
+        }
+        if matches!(packed.kind, cell::TYPE_STRING | cell::TYPE_ERROR) {
+            // String cells show their text; error cells show the cached error text.
+            return packed
+                .string_key
+                .and_then(|key| lookup(&self.strings, u64::from(key)))
+                .map_or(Rendered::Unsupported, |text| {
+                    Rendered::Text(text.to_string())
+                });
         }
         if packed.value == CellScalar::None {
             return Rendered::Unsupported;

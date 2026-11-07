@@ -310,6 +310,10 @@ pub(crate) mod table {
     pub const ENTRY_RICH_TEXT: u32 = 9;
     /// Format list entry: format message. 확인 (fixture lists file)
     pub const ENTRY_FORMAT: u32 = 6;
+    /// Data store: string list reference, entry text = field 3. 확인 (Pages 14.4 / file format
+    /// 26.4.0 documents with string and error cells)
+    pub const STORE_STRING_LIST: u32 = 4;
+    pub const ENTRY_STRING: u32 = 3;
     /// Rich text payload: storage reference. 확인
     pub const PAYLOAD_STORAGE: u32 = 1;
 }
@@ -325,9 +329,31 @@ pub(crate) mod cell_format {
     pub const DECIMALS: u32 = 3;
     /// Currency code such as `KRW`. 확인
     pub const CURRENCY: u32 = 4;
-    /// Thousands separator switch. 검증 필요 (set on number, percent and currency formats alike;
-    /// no rendered reference was available)
+    /// Thousands separator switch. 확인 (field 5 in both layouts; on and off cells compared in
+    /// the Pages 14.4 fixtures)
     pub const THOUSANDS: u32 = 5;
+    /// Decimal places of the newer layout (Pages 14.4): a varint in field 2 where the older
+    /// layout uses field 3. Field 3 of a newer currency entry is the currency code string.
+    pub const DECIMALS_V2: u32 = 2;
+    /// Decimal-place values above this mean "automatic" (not a count). 검증 필요
+    pub const MAX_DECIMALS: u64 = 20;
+    /// Currency code string of the newer layout. 확인
+    pub const CURRENCY_V2: u32 = 3;
+    /// Duration format: style (1 in the fixtures), largest and smallest unit. 확인 (units are
+    /// matched against the cell values of the fixtures)
+    pub const DURATION_STYLE: u32 = 7;
+    pub const DURATION_LARGEST: u32 = 15;
+    pub const DURATION_SMALLEST: u32 = 16;
+    pub const KIND_DURATION: u64 = 268;
+    /// Style number whose display form is verified ("1h 30m").
+    pub const DURATION_STYLE_COMPACT: u64 = 1;
+    /// Duration unit codes. 확인 for day, hour and minute; week and second follow the same
+    /// power-of-two order (검증 필요).
+    pub const UNIT_WEEK: u64 = 1;
+    pub const UNIT_DAY: u64 = 2;
+    pub const UNIT_HOUR: u64 = 4;
+    pub const UNIT_MINUTE: u64 = 8;
+    pub const UNIT_SECOND: u64 = 16;
     /// Currency format. 확인
     pub const KIND_CURRENCY: u64 = 256;
     /// Number format. 확인
@@ -347,6 +373,33 @@ pub(crate) mod cell {
     pub const LEGACY_FIELDS_OFFSET: usize = 12;
     /// Legacy flag bit whose field is the rich text list key. 확인 (key order matches list keys)
     pub const LEGACY_FLAG_RICH_TEXT_KEY: u32 = 0x10;
+    /// Version-5 layout of Pages 14.4 (file format 26.4.0) number, string, duration and error
+    /// cells: one 4-byte (or larger, see the sizes below) field per set flag bit, in bit order,
+    /// from byte 12. 확인 (the field sizes add up to the cell lengths of the fixtures).
+    pub const LEGACY_BIT_DECIMAL: u32 = 0;
+    pub const LEGACY_BIT_DOUBLE: u32 = 1;
+    pub const LEGACY_BIT_STRING_KEY: u32 = 3;
+    pub const LEGACY_BIT_RICH_TEXT_KEY: u32 = 4;
+    /// Flag bits whose 4-byte fields are present in the fixtures: cell style, text style,
+    /// formula, formula error, suggestion, and the number, currency, duration and text formats.
+    pub const LEGACY_FOUR_BYTE_BITS: u32 = (1 << 3)
+        | (1 << 4)
+        | (1 << 5)
+        | (1 << 6)
+        | (1 << 9)
+        | (1 << 11)
+        | (1 << 12)
+        | (1 << 13)
+        | (1 << 14)
+        | (1 << 16)
+        | (1 << 17);
+    /// Flag bits whose field size was never seen (bits 2, 7, 8, 10, 15): such cells are not
+    /// read, because every later field offset would be a guess. 검증 필요
+    pub const LEGACY_UNVERIFIED_BITS: u32 = (1 << 2) | (1 << 7) | (1 << 8) | (1 << 10) | (1 << 15);
+    /// Highest flag bit that is decoded.
+    pub const LEGACY_LAST_BIT: u32 = 17;
+    /// Format list key bits: number (13), currency (14) and duration (16) format.
+    pub const LEGACY_FORMAT_BITS: [u32; 3] = [13, 14, 16];
     /// Current layout: version byte 1, type byte, flags word at byte 4, fields from byte 8 in
     /// flag-bit order. 확인 (fixture documents)
     pub const CURRENT_VERSION: u8 = 1;
@@ -355,6 +408,9 @@ pub(crate) mod cell {
     /// Cell type byte values. 확인 unless noted.
     pub const TYPE_EMPTY: u8 = 0;
     pub const TYPE_NUMBER: u8 = 2;
+    pub const TYPE_STRING: u8 = 3;
+    pub const TYPE_DURATION: u8 = 7;
+    pub const TYPE_ERROR: u8 = 8;
     pub const TYPE_DATE: u8 = 5;
     pub const TYPE_BOOL: u8 = 6;
     pub const TYPE_RICH_TEXT: u8 = 9;
