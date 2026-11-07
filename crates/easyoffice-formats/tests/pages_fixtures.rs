@@ -292,3 +292,46 @@ fn objects_fixture_reports_skipped_kinds() {
         "페이지 나누기(Page Break) 뒤에 이어지는 두 번째 페이지의 본문 문단입니다."
     );
 }
+
+/// Paragraph text and table cells, in document order: what must survive a conversion. Empty
+/// paragraphs (layout-only, e.g. the one carrying a page break) are not content and are skipped.
+fn content_outline(doc: &RichDocument) -> Vec<String> {
+    doc.blocks
+        .iter()
+        .filter_map(|block| match block {
+            RichBlock::Paragraph(p) => Some(p.plain_text()).filter(|text| !text.is_empty()),
+            RichBlock::Table(rows) => Some(table_text(rows)),
+        })
+        .collect()
+}
+
+fn table_text(rows: &[Vec<String>]) -> String {
+    rows.iter()
+        .map(|row| row.join("\t"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn every_fixture_converts_to_docx_and_reads_back_the_same_text_and_cells() {
+    for name in [
+        "eo-pages-text.pages",
+        "eo-pages-lists-tables.pages",
+        "eo-pages-objects.pages",
+    ] {
+        let (original, _) = open(name);
+        // The app saves through the rich path, which keeps block order and formatting.
+        let docx = UniversalFormatConverter::encode_rich(&original, DocumentFormat::Docx, None)
+            .expect("encode DOCX");
+        let reread =
+            UniversalFormatConverter::decode_rich(&docx, Some("out.docx")).expect("reopen DOCX");
+        let DecodedContent::Document(reread) = reread.content else {
+            panic!("{name}: DOCX did not reopen as a document");
+        };
+        assert_eq!(
+            content_outline(&reread),
+            content_outline(&original),
+            "{name}"
+        );
+    }
+}
