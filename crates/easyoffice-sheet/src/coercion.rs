@@ -585,114 +585,127 @@ impl SheetEngine {
             return Err(FormulaError::Value);
         }
 
-        let mut sum = 0.0f64;
-        let mut product = 1.0f64;
-        let mut num_count = 0usize;
-        let mut non_empty_count = 0usize;
-        let mut min_val: Option<f64> = None;
-        let mut max_val: Option<f64> = None;
-        let mut mean = 0.0f64;
-        let mut m2 = 0.0f64;
-
-        let mut fold_val = |v: EvaluatedCellValue| -> Result<(), FormulaError> {
-            match v {
-                EvaluatedCellValue::Error(e) => return Err(e),
-                EvaluatedCellValue::Empty => {}
-                EvaluatedCellValue::Number(n) => {
-                    non_empty_count += 1;
-                    sum += n;
-                    product *= n;
-                    num_count += 1;
-                    min_val = Some(min_val.map_or(n, |m| m.min(n)));
-                    max_val = Some(max_val.map_or(n, |m| m.max(n)));
-                    let delta = n - mean;
-                    mean += delta / (num_count as f64);
-                    m2 += delta * (n - mean);
-                }
-                EvaluatedCellValue::Boolean(_) | EvaluatedCellValue::Text(_) => {
-                    non_empty_count += 1;
-                }
-            }
-            Ok(())
-        };
-
+        let mut acc = SubtotalAcc::new();
         for arg in &args[1..] {
             if let Some(spec) = self.extract_streaming_range_ctx(arg, ctx, depth)? {
-                let (ref sheet_opt, min_r, min_c, rows, cols, transposed) = spec;
-                for dr in 0..rows {
-                    for dc in 0..cols {
-                        let (r, c) = if transposed {
-                            (min_r + dc as u32, min_c + dr as u32)
-                        } else {
-                            (min_r + dr as u32, min_c + dc as u32)
-                        };
-                        if ctx.steps > Self::MAX_EVAL_STEPS {
-                            return Err(FormulaError::Value);
-                        }
-                        let coord =
-                            PackedCellCoordinate::new(r, c).map_err(|_| FormulaError::Ref)?;
-                        if self.is_nested_subtotal_cell(sheet_opt.as_deref(), coord, ctx) {
-                            continue;
-                        }
-                        let v = self.eval_sheet_coord(sheet_opt.as_deref(), coord, ctx, depth);
-                        fold_val(v)?;
-                    }
-                }
+                self.subtotal_range(&spec, &mut acc, ctx, depth)?;
             } else if !crate::expr_contains_subtotal(arg) {
-                fold_val(self.eval_arg_val(arg, ctx, depth)?)?;
+                acc.fold(self.eval_arg_val(arg, ctx, depth)?)?;
             }
         }
+        acc.result(base_code)
+    }
 
-        match base_code {
-            1 => {
-                if num_count == 0 {
-                    Err(FormulaError::DivByZero)
+    /// Folds every non-nested-subtotal cell of a streamed range into `acc`.
+    fn subtotal_range(
+        &self,
+        spec: &StreamingRangeSpec<'_>,
+        acc: &mut SubtotalAcc,
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<(), FormulaError> {
+        let (ref sheet_opt, min_r, min_c, rows, cols, transposed) = *spec;
+        for dr in 0..rows {
+            for dc in 0..cols {
+                let (r, c) = if transposed {
+                    (min_r + dc as u32, min_c + dr as u32)
                 } else {
-                    Ok(EvaluatedCellValue::Number(sum / (num_count as f64)))
+                    (min_r + dr as u32, min_c + dc as u32)
+                };
+                if ctx.steps > Self::MAX_EVAL_STEPS {
+                    return Err(FormulaError::Value);
                 }
-            }
-            2 => Ok(EvaluatedCellValue::Number(num_count as f64)),
-            3 => Ok(EvaluatedCellValue::Number(non_empty_count as f64)),
-            4 => Ok(EvaluatedCellValue::Number(max_val.unwrap_or(0.0))),
-            5 => Ok(EvaluatedCellValue::Number(min_val.unwrap_or(0.0))),
-            6 => Ok(EvaluatedCellValue::Number(if num_count == 0 {
-                0.0
-            } else {
-                product
-            })),
-            7 => {
-                if num_count < 2 {
-                    Err(FormulaError::DivByZero)
-                } else {
-                    Ok(EvaluatedCellValue::Number(
-                        (m2 / ((num_count - 1) as f64)).sqrt(),
-                    ))
+                let coord = PackedCellCoordinate::new(r, c).map_err(|_| FormulaError::Ref)?;
+                if self.is_nested_subtotal_cell(sheet_opt.as_deref(), coord, ctx) {
+                    continue;
                 }
+                acc.fold(self.eval_sheet_coord(sheet_opt.as_deref(), coord, ctx, depth))?;
             }
-            8 => {
-                if num_count == 0 {
-                    Err(FormulaError::DivByZero)
-                } else {
-                    Ok(EvaluatedCellValue::Number((m2 / (num_count as f64)).sqrt()))
-                }
-            }
-            9 => Ok(EvaluatedCellValue::Number(sum)),
-            10 => {
-                if num_count < 2 {
-                    Err(FormulaError::DivByZero)
-                } else {
-                    Ok(EvaluatedCellValue::Number(m2 / ((num_count - 1) as f64)))
-                }
-            }
-            11 => {
-                if num_count == 0 {
-                    Err(FormulaError::DivByZero)
-                } else {
-                    Ok(EvaluatedCellValue::Number(m2 / (num_count as f64)))
-                }
-            }
-            _ => Err(FormulaError::Value),
         }
+        Ok(())
+    }
+}
+
+/// Running statistics for `SUBTOTAL` (Welford mean / variance for the deviation codes).
+struct SubtotalAcc {
+    sum: f64,
+    product: f64,
+    num_count: usize,
+    non_empty_count: usize,
+    min_val: Option<f64>,
+    max_val: Option<f64>,
+    mean: f64,
+    m2: f64,
+}
+
+impl SubtotalAcc {
+    fn new() -> Self {
+        Self {
+            sum: 0.0,
+            product: 1.0,
+            num_count: 0,
+            non_empty_count: 0,
+            min_val: None,
+            max_val: None,
+            mean: 0.0,
+            m2: 0.0,
+        }
+    }
+
+    fn fold(&mut self, v: EvaluatedCellValue) -> Result<(), FormulaError> {
+        match v {
+            EvaluatedCellValue::Error(e) => return Err(e),
+            EvaluatedCellValue::Empty => {}
+            EvaluatedCellValue::Number(n) => {
+                self.non_empty_count += 1;
+                self.sum += n;
+                self.product *= n;
+                self.num_count += 1;
+                self.min_val = Some(self.min_val.map_or(n, |m| m.min(n)));
+                self.max_val = Some(self.max_val.map_or(n, |m| m.max(n)));
+                let delta = n - self.mean;
+                self.mean += delta / (self.num_count as f64);
+                self.m2 += delta * (n - self.mean);
+            }
+            EvaluatedCellValue::Boolean(_) | EvaluatedCellValue::Text(_) => {
+                self.non_empty_count += 1;
+            }
+        }
+        Ok(())
+    }
+
+    /// Variance with divisor `count - 1` (sample) or `count` (population).
+    fn variance(&self, sample: bool) -> Result<f64, FormulaError> {
+        let min_count = if sample { 2 } else { 1 };
+        if self.num_count < min_count {
+            return Err(FormulaError::DivByZero);
+        }
+        let denom = if sample {
+            self.num_count - 1
+        } else {
+            self.num_count
+        };
+        Ok(self.m2 / (denom as f64))
+    }
+
+    fn result(&self, base_code: i32) -> Result<EvaluatedCellValue, FormulaError> {
+        let value = match base_code {
+            1 if self.num_count == 0 => return Err(FormulaError::DivByZero),
+            1 => self.sum / (self.num_count as f64),
+            2 => self.num_count as f64,
+            3 => self.non_empty_count as f64,
+            4 => self.max_val.unwrap_or(0.0),
+            5 => self.min_val.unwrap_or(0.0),
+            6 if self.num_count == 0 => 0.0,
+            6 => self.product,
+            7 => self.variance(true)?.sqrt(),
+            8 => self.variance(false)?.sqrt(),
+            9 => self.sum,
+            10 => self.variance(true)?,
+            11 => self.variance(false)?,
+            _ => return Err(FormulaError::Value),
+        };
+        Ok(EvaluatedCellValue::Number(value))
     }
 }
 

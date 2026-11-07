@@ -15,6 +15,28 @@ pub type OdsUnpacked = (String, Vec<(u32, u32, String)>);
 /// Unpacked multi-sheet ODF spreadsheet (`Vec<(sheet_name, cells)>`).
 pub type OdsMultiUnpacked = Vec<(String, Vec<(u32, u32, String)>)>;
 
+/// Appends the empty-row filler for a gap of `gap` rows.
+fn push_empty_rows(content: &mut String, gap: u32) {
+    if gap == 1 {
+        content.push_str("<table:table-row><table:table-cell/></table:table-row>");
+    } else {
+        content.push_str(&format!(
+            "<table:table-row table:number-rows-repeated=\"{gap}\"><table:table-cell/></table:table-row>"
+        ));
+    }
+}
+
+/// Appends the empty-cell filler for a gap of `gap` columns.
+fn push_empty_cells(content: &mut String, gap: u32) {
+    if gap == 1 {
+        content.push_str("<table:table-cell/>");
+    } else {
+        content.push_str(&format!(
+            "<table:table-cell table:number-columns-repeated=\"{gap}\"/>"
+        ));
+    }
+}
+
 /// One parsed ODS cell: explicit row, explicit column, column repeat and resolved text.
 type ParsedOdsRowCell = (Option<u32>, Option<u32>, u32, Option<String>);
 
@@ -289,34 +311,7 @@ impl OdfCodec {
         sheets: &[OdsUnpacked],
         stylings: &[SheetStyling],
     ) -> Result<Vec<u8>, EasyOfficeError> {
-        let mut total_cells = 0usize;
-        for (_, cells) in sheets {
-            total_cells = total_cells.saturating_add(cells.len());
-            if total_cells > Self::MAX_CELLS {
-                return Err(EasyOfficeError::ResourceBudgetExceeded(
-                    "ODS 셀 개수가 허용 예산을 초과했습니다.".to_string(),
-                ));
-            }
-            for (row, col, _) in cells {
-                if *row > Self::MAX_ROWS || *col > Self::MAX_COLS {
-                    return Err(EasyOfficeError::ResourceBudgetExceeded(
-                        "ODS 셀 좌표가 허용 범위를 초과했습니다.".to_string(),
-                    ));
-                }
-            }
-        }
-
-        for styling in stylings {
-            let bad_cell = styling
-                .cells
-                .keys()
-                .any(|&(r, c)| r > Self::MAX_ROWS || c > Self::MAX_COLS);
-            if bad_cell || styling.columns.keys().any(|&c| c > Self::MAX_COLS) {
-                return Err(EasyOfficeError::ResourceBudgetExceeded(
-                    "ODS 서식 좌표가 허용 범위를 초과했습니다.".to_string(),
-                ));
-            }
-        }
+        Self::validate_ods_bounds(sheets, stylings)?;
         let style_table = OdsStyleTable::build(stylings);
 
         let manifest = Self::build_manifest(Self::MIMETYPE_ODS);
@@ -332,91 +327,14 @@ impl OdfCodec {
         } else {
             sheets
         };
-
-        let blank = String::new();
         for (sheet_idx, (sheet_name, cells)) in active_sheets.iter().enumerate() {
-            let styling = stylings.get(sheet_idx);
-            let mut grid: std::collections::BTreeMap<
-                u32,
-                std::collections::BTreeMap<u32, &String>,
-            > = std::collections::BTreeMap::new();
-            for (row, col, raw) in cells {
-                grid.entry(*row).or_default().insert(*col, raw);
-            }
-            // Styled cells without a value are still written (`<table:table-cell table:style-name=".."/>`).
-            if let Some(st) = styling {
-                for (&(row, col), style) in &st.cells {
-                    if !style.is_plain() {
-                        grid.entry(row).or_default().entry(col).or_insert(&blank);
-                    }
-                }
-            }
-
-            content.push_str(&format!(
-                "<table:table table:name=\"{}\">",
-                XmlSanitizer::escape(sheet_name)
-            ));
-            if let Some(st) = styling {
-                content.push_str(&table_columns_xml(&st.columns, &style_table));
-            }
-
-            let mut expected_row: u32 = 0;
-            for (row, row_cells) in grid {
-                if row > expected_row {
-                    let gap = row - expected_row;
-                    if gap == 1 {
-                        content.push_str("<table:table-row><table:table-cell/></table:table-row>");
-                    } else {
-                        content.push_str(&format!(
-                            "<table:table-row table:number-rows-repeated=\"{gap}\"><table:table-cell/></table:table-row>"
-                        ));
-                    }
-                }
-                content.push_str("<table:table-row>");
-                let mut expected_col: u32 = 0;
-                for (col, raw) in row_cells {
-                    if col > expected_col {
-                        let gap = col - expected_col;
-                        if gap == 1 {
-                            content.push_str("<table:table-cell/>");
-                        } else {
-                            content.push_str(&format!(
-                                "<table:table-cell table:number-columns-repeated=\"{gap}\"/>"
-                            ));
-                        }
-                    }
-                    let style_attr = styling
-                        .and_then(|st| st.cells.get(&(row, col)))
-                        .and_then(|style| style_table.cell_style_name(style))
-                        .map_or(String::new(), |name| {
-                            format!(" table:style-name=\"{name}\"")
-                        });
-                    if raw.is_empty() {
-                        content.push_str(&format!("<table:table-cell{style_attr}/>"));
-                    } else if let Some(formula) = raw.strip_prefix('=') {
-                        let of_expr = Self::to_open_formula_syntax(formula);
-                        let escaped_formula = XmlSanitizer::escape(&of_expr);
-                        content.push_str(&format!(
-                            "<table:table-cell row=\"{row}\" col=\"{col}\"{style_attr} table:formula=\"of:={escaped_formula}\" office:value-type=\"string\"><text:p>{}</text:p></table:table-cell>",
-                            XmlSanitizer::escape(raw)
-                        ));
-                    } else if raw.parse::<f64>().is_ok() {
-                        let escaped_val = XmlSanitizer::escape(raw);
-                        content.push_str(&format!(
-                            "<table:table-cell row=\"{row}\" col=\"{col}\"{style_attr} office:value-type=\"float\" office:value=\"{escaped_val}\"><text:p>{escaped_val}</text:p></table:table-cell>"
-                        ));
-                    } else {
-                        content.push_str(&format!(
-                            "<table:table-cell row=\"{row}\" col=\"{col}\"{style_attr} office:value-type=\"string\"><text:p>{}</text:p></table:table-cell>",
-                            XmlSanitizer::escape(raw)
-                        ));
-                    }
-                    expected_col = col.saturating_add(1);
-                }
-                content.push_str("</table:table-row>");
-                expected_row = row.saturating_add(1);
-            }
-            content.push_str("</table:table>");
+            Self::push_ods_table(
+                &mut content,
+                sheet_name,
+                cells,
+                stylings.get(sheet_idx),
+                &style_table,
+            );
         }
 
         content.push_str("</office:spreadsheet></office:body></office:document-content>");
@@ -430,6 +348,116 @@ impl OdfCodec {
             ("META-INF/manifest.xml".to_string(), manifest.into_bytes()),
             ("content.xml".to_string(), content.into_bytes()),
         ])
+    }
+
+    /// Rejects cell / style coordinates and counts above the ODS budgets.
+    fn validate_ods_bounds(
+        sheets: &[OdsUnpacked],
+        stylings: &[SheetStyling],
+    ) -> Result<(), EasyOfficeError> {
+        let mut total_cells = 0usize;
+        for (_, cells) in sheets {
+            total_cells = total_cells.saturating_add(cells.len());
+            if total_cells > Self::MAX_CELLS {
+                return Err(ods_budget_error("ODS 셀 개수가 허용 예산을 초과했습니다."));
+            }
+            if cells
+                .iter()
+                .any(|(row, col, _)| *row > Self::MAX_ROWS || *col > Self::MAX_COLS)
+            {
+                return Err(ods_budget_error("ODS 셀 좌표가 허용 범위를 초과했습니다."));
+            }
+        }
+        for styling in stylings {
+            let bad_cell = styling
+                .cells
+                .keys()
+                .any(|&(r, c)| r > Self::MAX_ROWS || c > Self::MAX_COLS);
+            if bad_cell || styling.columns.keys().any(|&c| c > Self::MAX_COLS) {
+                return Err(ods_budget_error(
+                    "ODS 서식 좌표가 허용 범위를 초과했습니다.",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Appends one `<table:table>` with sparse-row / sparse-column gap elements.
+    fn push_ods_table(
+        content: &mut String,
+        sheet_name: &str,
+        cells: &[(u32, u32, String)],
+        styling: Option<&SheetStyling>,
+        style_table: &OdsStyleTable,
+    ) {
+        let blank = String::new();
+        let mut grid: std::collections::BTreeMap<u32, std::collections::BTreeMap<u32, &String>> =
+            std::collections::BTreeMap::new();
+        for (row, col, raw) in cells {
+            grid.entry(*row).or_default().insert(*col, raw);
+        }
+        // Styled cells without a value are still written (`<table:table-cell table:style-name=".."/>`).
+        if let Some(st) = styling {
+            for (&(row, col), style) in &st.cells {
+                if !style.is_plain() {
+                    grid.entry(row).or_default().entry(col).or_insert(&blank);
+                }
+            }
+        }
+        content.push_str(&format!(
+            "<table:table table:name=\"{}\">",
+            XmlSanitizer::escape(sheet_name)
+        ));
+        if let Some(st) = styling {
+            content.push_str(&table_columns_xml(&st.columns, style_table));
+        }
+        let mut expected_row: u32 = 0;
+        for (row, row_cells) in grid {
+            if row > expected_row {
+                push_empty_rows(content, row - expected_row);
+            }
+            content.push_str("<table:table-row>");
+            let mut expected_col: u32 = 0;
+            for (col, raw) in row_cells {
+                if col > expected_col {
+                    push_empty_cells(content, col - expected_col);
+                }
+                let style_attr = styling
+                    .and_then(|st| st.cells.get(&(row, col)))
+                    .and_then(|style| style_table.cell_style_name(style))
+                    .map_or(String::new(), |name| {
+                        format!(" table:style-name=\"{name}\"")
+                    });
+                Self::push_ods_cell(content, (row, col), raw, &style_attr);
+                expected_col = col.saturating_add(1);
+            }
+            content.push_str("</table:table-row>");
+            expected_row = row.saturating_add(1);
+        }
+        content.push_str("</table:table>");
+    }
+
+    fn push_ods_cell(content: &mut String, (row, col): (u32, u32), raw: &str, style_attr: &str) {
+        if raw.is_empty() {
+            content.push_str(&format!("<table:table-cell{style_attr}/>"));
+        } else if let Some(formula) = raw.strip_prefix('=') {
+            let of_expr = Self::to_open_formula_syntax(formula);
+            let escaped_formula = XmlSanitizer::escape(&of_expr);
+            content.push_str(&format!(
+                "<table:table-cell row=\"{row}\" col=\"{col}\"{style_attr} table:formula=\"of:={escaped_formula}\" office:value-type=\"string\"><text:p>{}</text:p></table:table-cell>",
+                XmlSanitizer::escape(raw)
+            ));
+        } else if raw.parse::<f64>().is_ok() {
+            let escaped_val = XmlSanitizer::escape(raw);
+            content.push_str(&format!(
+                "<table:table-cell row=\"{row}\" col=\"{col}\"{style_attr} office:value-type=\"float\" office:value=\"{escaped_val}\"><text:p>{escaped_val}</text:p></table:table-cell>"
+            ));
+        } else {
+            content.push_str(&format!(
+                "<table:table-cell row=\"{row}\" col=\"{col}\"{style_attr} office:value-type=\"string\"><text:p>{}</text:p></table:table-cell>",
+                XmlSanitizer::escape(raw)
+            ));
+        }
     }
 
     pub fn unpack_ods(bytes: &[u8]) -> Result<OdsUnpacked, EasyOfficeError> {

@@ -3,7 +3,9 @@
 //! words), Markdown (`**`/`*`/`~~`/`#`), TXT, and PDF (ordered text). User text is always escaped
 //! for the target syntax and never parsed.
 
-use crate::rich_document::{RichAlignment, RichBlock, RichDocument, RichListKind, RichParagraph};
+use crate::rich_document::{
+    RichAlignment, RichBlock, RichDocument, RichListKind, RichParagraph, RichRun,
+};
 use crate::rich_run_writers::{
     docx_run_properties, has_extra_run_format, odt_font_face_decls, odt_text_key,
     odt_text_key_is_plain, odt_text_style_xml, OdtTextKey, RtfRunTables,
@@ -232,6 +234,89 @@ fn push_odt_text(out: &mut String, text: &str) {
     }
 }
 
+fn push_odt_paragraph(
+    body: &mut String,
+    p: &RichParagraph,
+    para_styles: &mut StyleTable<OdtParaKey>,
+    text_styles: &mut StyleTable<OdtTextKey>,
+) {
+    let level = if (1..=6).contains(&p.heading_level) {
+        p.heading_level
+    } else {
+        0
+    };
+    let key = (p.alignment, level, p.list.is_some());
+    let style_attr = if key == (None, 0, false) {
+        String::new()
+    } else {
+        format!(" text:style-name=\"P{}\"", para_styles.intern(&key))
+    };
+    if level > 0 {
+        body.push_str(&format!(
+            "<text:h text:outline-level=\"{level}\"{style_attr}>"
+        ));
+    } else {
+        body.push_str(&format!("<text:p{style_attr}>"));
+    }
+    for run in &p.runs {
+        let key = odt_text_key(run);
+        if odt_text_key_is_plain(&key) {
+            push_odt_text(body, &run.text);
+        } else {
+            let t = text_styles.intern(&key);
+            body.push_str(&format!("<text:span text:style-name=\"T{t}\">"));
+            push_odt_text(body, &run.text);
+            body.push_str("</text:span>");
+        }
+    }
+    body.push_str(if level > 0 { "</text:h>" } else { "</text:p>" });
+}
+
+fn push_odt_table(body: &mut String, rows: &[Vec<String>]) {
+    let cols = rows.iter().map(Vec::len).max().unwrap_or(0).max(1);
+    body.push_str(&format!(
+        "<table:table><table:table-column table:number-columns-repeated=\"{cols}\"/>"
+    ));
+    for row in rows {
+        body.push_str("<table:table-row>");
+        for cell in row {
+            body.push_str("<table:table-cell office:value-type=\"string\"><text:p>");
+            push_odt_text(body, cell);
+            body.push_str("</text:p></table:table-cell>");
+        }
+        body.push_str("</table:table-row>");
+    }
+    body.push_str("</table:table>");
+}
+
+/// `style:style` XML of one paragraph style (1-based `number`).
+fn odt_para_style_xml(number: usize, (align, level, is_list): &OdtParaKey) -> String {
+    let mut styles = format!(
+        "<style:style style:name=\"P{number}\" style:family=\"paragraph\"><style:paragraph-properties"
+    );
+    if let Some(a) = align {
+        let v = match a {
+            RichAlignment::Left => "start",
+            RichAlignment::Center => "center",
+            RichAlignment::Right => "end",
+            RichAlignment::Justify => "justify",
+        };
+        styles.push_str(&format!(" fo:text-align=\"{v}\""));
+    }
+    if *is_list {
+        styles.push_str(" fo:margin-left=\"0.5in\"");
+    }
+    styles.push_str("/>");
+    if *level > 0 {
+        styles.push_str(&format!(
+            "<style:text-properties fo:font-size=\"{}pt\" fo:font-weight=\"bold\"/>",
+            heading_half_points(*level) / 2
+        ));
+    }
+    styles.push_str("</style:style>");
+    styles
+}
+
 pub(crate) fn pack_odt_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeError> {
     let mut para_styles: StyleTable<OdtParaKey> = StyleTable::new();
     let mut text_styles: StyleTable<OdtTextKey> = StyleTable::new();
@@ -239,85 +324,15 @@ pub(crate) fn pack_odt_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeErr
     for block in &doc.blocks {
         match block {
             RichBlock::Paragraph(p) => {
-                let level = if (1..=6).contains(&p.heading_level) {
-                    p.heading_level
-                } else {
-                    0
-                };
-                let key = (p.alignment, level, p.list.is_some());
-                let style = if key == (None, 0, false) {
-                    None
-                } else {
-                    Some(para_styles.intern(&key))
-                };
-                let style_attr = style
-                    .map(|s| format!(" text:style-name=\"P{s}\""))
-                    .unwrap_or_default();
-                if level > 0 {
-                    body.push_str(&format!(
-                        "<text:h text:outline-level=\"{level}\"{style_attr}>"
-                    ));
-                } else {
-                    body.push_str(&format!("<text:p{style_attr}>"));
-                }
-                for run in &p.runs {
-                    let key = odt_text_key(run);
-                    if odt_text_key_is_plain(&key) {
-                        push_odt_text(&mut body, &run.text);
-                    } else {
-                        let t = text_styles.intern(&key);
-                        body.push_str(&format!("<text:span text:style-name=\"T{t}\">"));
-                        push_odt_text(&mut body, &run.text);
-                        body.push_str("</text:span>");
-                    }
-                }
-                body.push_str(if level > 0 { "</text:h>" } else { "</text:p>" });
+                push_odt_paragraph(&mut body, p, &mut para_styles, &mut text_styles);
             }
-            RichBlock::Table(rows) => {
-                let cols = rows.iter().map(Vec::len).max().unwrap_or(0).max(1);
-                body.push_str(&format!(
-                    "<table:table><table:table-column table:number-columns-repeated=\"{cols}\"/>"
-                ));
-                for row in rows {
-                    body.push_str("<table:table-row>");
-                    for cell in row {
-                        body.push_str("<table:table-cell office:value-type=\"string\"><text:p>");
-                        push_odt_text(&mut body, cell);
-                        body.push_str("</text:p></table:table-cell>");
-                    }
-                    body.push_str("</table:table-row>");
-                }
-                body.push_str("</table:table>");
-            }
+            RichBlock::Table(rows) => push_odt_table(&mut body, rows),
         }
     }
 
     let mut styles = String::from("<office:automatic-styles>");
-    for (idx, (align, level, is_list)) in para_styles.keys.iter().enumerate() {
-        styles.push_str(&format!(
-            "<style:style style:name=\"P{}\" style:family=\"paragraph\"><style:paragraph-properties",
-            idx + 1
-        ));
-        if let Some(a) = align {
-            let v = match a {
-                RichAlignment::Left => "start",
-                RichAlignment::Center => "center",
-                RichAlignment::Right => "end",
-                RichAlignment::Justify => "justify",
-            };
-            styles.push_str(&format!(" fo:text-align=\"{v}\""));
-        }
-        if *is_list {
-            styles.push_str(" fo:margin-left=\"0.5in\"");
-        }
-        styles.push_str("/>");
-        if *level > 0 {
-            styles.push_str(&format!(
-                "<style:text-properties fo:font-size=\"{}pt\" fo:font-weight=\"bold\"/>",
-                heading_half_points(*level) / 2
-            ));
-        }
-        styles.push_str("</style:style>");
+    for (idx, key) in para_styles.keys.iter().enumerate() {
+        styles.push_str(&odt_para_style_xml(idx + 1, key));
     }
     for (idx, key) in text_styles.keys.iter().enumerate() {
         styles.push_str(&odt_text_style_xml(idx + 1, key));
@@ -426,6 +441,63 @@ pub(crate) fn strip_rtf_format_words(input: &str) -> String {
     out
 }
 
+fn rtf_alignment_word(a: RichAlignment) -> &'static str {
+    match a {
+        RichAlignment::Left => "\\ql",
+        RichAlignment::Center => "\\qc",
+        RichAlignment::Right => "\\qr",
+        RichAlignment::Justify => "\\qj",
+    }
+}
+
+/// One RTF paragraph line (`\pard ... \par`).
+fn rtf_paragraph_line(p: &RichParagraph, tables: &RtfRunTables) -> String {
+    let mut line = String::from("\\pard");
+    if let Some(a) = p.alignment {
+        line.push_str(rtf_alignment_word(a));
+    }
+    if (1..=6).contains(&p.heading_level) {
+        line.push_str(&format!(
+            "\\outlinelevel{}\\fs{}",
+            p.heading_level - 1,
+            heading_half_points(p.heading_level)
+        ));
+    } else if p.list.is_some() {
+        line.push_str("\\li720");
+    }
+    line.push(' ');
+    for run in &p.runs {
+        push_rtf_run(&mut line, run, tables);
+    }
+    line.push_str("\\par");
+    line
+}
+
+fn push_rtf_run(line: &mut String, run: &RichRun, tables: &RtfRunTables) {
+    let toggles = [
+        (run.bold, "\\b ", "\\b0 "),
+        (run.italic, "\\i ", "\\i0 "),
+        (run.underline, "\\ul ", "\\ulnone "),
+        (run.strike, "\\strike ", "\\strike0 "),
+    ];
+    for (on, open, _) in toggles {
+        if on {
+            line.push_str(open);
+        }
+    }
+    line.push_str(&tables.run_words(run));
+    line.push_str(&RtfCodec::escape_rtf_text(&run.text));
+    if has_extra_run_format(run) {
+        line.push_str("\\plain ");
+        return;
+    }
+    for (on, _, close) in toggles {
+        if on {
+            line.push_str(close);
+        }
+    }
+}
+
 pub(crate) fn encode_rtf_rich(doc: &RichDocument) -> String {
     let mut lines: Vec<String> = Vec::with_capacity(doc.blocks.len() + 4);
     lines.push("{\\rtf1\\ansi\\deff0".to_string());
@@ -441,53 +513,7 @@ pub(crate) fn encode_rtf_rich(doc: &RichDocument) -> String {
     let mut table_idx = 0usize;
     for block in &doc.blocks {
         match block {
-            RichBlock::Paragraph(p) => {
-                let mut line = String::from("\\pard");
-                if let Some(a) = p.alignment {
-                    line.push_str(match a {
-                        RichAlignment::Left => "\\ql",
-                        RichAlignment::Center => "\\qc",
-                        RichAlignment::Right => "\\qr",
-                        RichAlignment::Justify => "\\qj",
-                    });
-                }
-                if (1..=6).contains(&p.heading_level) {
-                    line.push_str(&format!(
-                        "\\outlinelevel{}\\fs{}",
-                        p.heading_level - 1,
-                        heading_half_points(p.heading_level)
-                    ));
-                } else if p.list.is_some() {
-                    line.push_str("\\li720");
-                }
-                line.push(' ');
-                for run in &p.runs {
-                    let toggles = [
-                        (run.bold, "\\b ", "\\b0 "),
-                        (run.italic, "\\i ", "\\i0 "),
-                        (run.underline, "\\ul ", "\\ulnone "),
-                        (run.strike, "\\strike ", "\\strike0 "),
-                    ];
-                    for (on, open, _) in toggles {
-                        if on {
-                            line.push_str(open);
-                        }
-                    }
-                    line.push_str(&tables.run_words(run));
-                    line.push_str(&RtfCodec::escape_rtf_text(&run.text));
-                    if has_extra_run_format(run) {
-                        line.push_str("\\plain ");
-                        continue;
-                    }
-                    for (on, _, close) in toggles {
-                        if on {
-                            line.push_str(close);
-                        }
-                    }
-                }
-                line.push_str("\\par");
-                lines.push(line);
-            }
+            RichBlock::Paragraph(p) => lines.push(rtf_paragraph_line(p, &tables)),
             RichBlock::Table(rows) => {
                 for row in rows {
                     let cells = row
