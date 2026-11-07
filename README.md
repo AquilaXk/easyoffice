@@ -109,7 +109,7 @@ Later opens work normally. Signing is prepared but off: setting the `APPLE_SIGNI
 
 ```bash
 cd crates/easyoffice-desktop
-npx @tauri-apps/cli@2 build --bundles app,dmg   # target/release/bundle/dmg/EasyOffice_<version>_<arch>.dmg
+npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --bundles app,dmg   # target/release/bundle/dmg/EasyOffice_<version>_<arch>.dmg
 ```
 
 #### Windows
@@ -120,7 +120,7 @@ To build the installer from source on Windows (MSVC Rust toolchain 1.90+, Visual
 
 ```powershell
 cd crates/easyoffice-desktop
-npx @tauri-apps/cli@2 build --bundles nsis   # target/release/bundle/nsis/EasyOffice_<version>_x64-setup.exe
+npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --bundles nsis   # target/release/bundle/nsis/EasyOffice_<version>_x64-setup.exe
 ```
 
 **Developer-only local server (`--serve`).** `--serve` is not shipped to users and is not part of any release asset. It exists only for development and automated verification (headless-browser UI checks and CI smoke tests); the installed app opens no network port. From a source checkout, run `cargo run -p easyoffice-app -- --self-test` to verify the engine or `cargo run -p easyoffice-app -- --serve 8787` to open the loopback WebUI at `http://127.0.0.1:8787/`. `--help` lists all options. `--serve` without a port uses 8787 and falls back to 8788-8800 when it is busy; an explicit port (`--serve 18787`) is bound exactly or the command fails. Invalid ports, unknown options, and file paths exit with a non-zero status. The Host/Origin checks, connection and time limits, and CSP stay enabled for developer safety (PD-086).

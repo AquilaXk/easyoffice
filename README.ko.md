@@ -109,7 +109,7 @@ xattr -dr com.apple.quarantine /Applications/EasyOffice.app
 
 ```bash
 cd crates/easyoffice-desktop
-npx @tauri-apps/cli@2 build --bundles app,dmg   # target/release/bundle/dmg/EasyOffice_<version>_<arch>.dmg
+npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --bundles app,dmg   # target/release/bundle/dmg/EasyOffice_<version>_<arch>.dmg
 ```
 
 #### Windows
@@ -120,7 +120,7 @@ Windows 릴리스는 설치 프로그램 `EasyOffice-<version>-windows-x64-setup
 
 ```powershell
 cd crates/easyoffice-desktop
-npx @tauri-apps/cli@2 build --bundles nsis   # target/release/bundle/nsis/EasyOffice_<version>_x64-setup.exe
+npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --bundles nsis   # target/release/bundle/nsis/EasyOffice_<version>_x64-setup.exe
 ```
 
 **개발자 전용 로컬 서버(`--serve`).** `--serve`는 일반 사용자에게 배포하지 않으며 어떤 릴리스 자산에도 포함되지 않습니다. 개발과 자동 검증(헤드리스 브라우저 UI 검증, CI 스모크)에만 쓰며, 설치형 앱은 네트워크 포트를 열지 않습니다. 소스 저장소에서 `cargo run -p easyoffice-app -- --self-test`로 엔진 무결성을 검증하거나 `cargo run -p easyoffice-app -- --serve 8787`로 `http://127.0.0.1:8787/` 루프백 WebUI를 열 수 있습니다. 전체 옵션은 `--help`로 확인합니다. 포트 없이 `--serve`를 실행하면 8787을 사용하고, 사용 중이면 8788~8800으로 대체합니다. 포트를 명시하면(`--serve 18787`) 해당 포트만 사용하며 쓸 수 없으면 실패합니다. 잘못된 포트, 알 수 없는 옵션, 파일 경로는 0이 아닌 종료 코드로 끝납니다. Host·Origin 검사, 연결 수·시간 제한, CSP는 개발 중 안전을 위해 그대로 유지합니다(PD-086).

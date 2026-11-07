@@ -111,7 +111,7 @@ jobs:
         working-directory: crates/easyoffice-desktop
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
-        run: npx --yes @tauri-apps/cli@2 build --ci --bundles app,dmg
+        run: npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --ci --bundles app,dmg
 
       - name: Verify .app and .dmg output
         run: |
@@ -249,7 +249,7 @@ jobs:
       # run (several minutes); it downloads the NSIS toolset itself.
       - name: Build desktop shell release binary and NSIS installer
         working-directory: crates/easyoffice-desktop
-        run: npx --yes @tauri-apps/cli@2 build --ci --bundles nsis
+        run: npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --ci --bundles nsis
 
       - name: Verify NSIS installer output
         shell: pwsh

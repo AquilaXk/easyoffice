@@ -84,7 +84,7 @@ jobs:
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
           VERSION: ${{ steps.meta.outputs.version }}
-        run: npx --yes @tauri-apps/cli@2 build --ci --target universal-apple-darwin --bundles app,dmg --config "{\"version\":\"${VERSION}\"}"
+        run: npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --ci --target universal-apple-darwin --bundles app,dmg --config "{\"version\":\"${VERSION}\"}"
 
       - name: Smoke test desktop shell window (embedded WebUI, IPC round trip and HWP editor round trip)
         if: vars.MACOS_SMOKE != 'off'
@@ -184,7 +184,7 @@ jobs:
         shell: bash
         env:
           VERSION: ${{ steps.meta.outputs.version }}
-        run: npx --yes @tauri-apps/cli@2 build --ci --bundles nsis --config "{\"version\":\"${VERSION}\"}"
+        run: npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --ci --bundles nsis --config "{\"version\":\"${VERSION}\"}"
 
       - name: Smoke test desktop shell window (embedded WebUI, IPC round trip and HWP editor round trip)
         shell: pwsh
