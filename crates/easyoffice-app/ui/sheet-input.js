@@ -225,32 +225,43 @@
       refreshChrome();
     }
 
-    function jumpTarget(dr, dc, extend) {
-      let r = extend ? sel.cr : sel.ar;
-      let c = extend ? sel.cc : sel.ac;
-      const ext = api.getExtent();
-      const limit = jumpLimit(dr, dc, ext);
-      const inBounds = (rr, cc) => rr >= 1 && cc >= 1 && rr <= grid.MAX_ROWS && cc <= grid.MAX_COLS;
-      const has = (rr, cc) => api.hasValue(rr, cc);
-      if (!inBounds(r + dr, c + dc)) return { r, c };
-      const startHas = has(r, c);
-      let nr = r + dr;
-      let nc = c + dc;
-      if (startHas && has(nr, nc)) {
-        while (inBounds(nr + dr, nc + dc) && has(nr + dr, nc + dc)) {
-          nr += dr;
-          nc += dc;
-        }
-        return { r: nr, c: nc };
+    function inGridBounds(rr, cc) {
+      return rr >= 1 && cc >= 1 && rr <= grid.MAX_ROWS && cc <= grid.MAX_COLS;
+    }
+
+    // Ctrl+Arrow from a populated run: walk to the last populated cell of that run.
+    function jumpAlongData(nr, nc, dr, dc) {
+      let r = nr;
+      let c = nc;
+      while (inGridBounds(r + dr, c + dc) && api.hasValue(r + dr, c + dc)) {
+        r += dr;
+        c += dc;
       }
-      while (inBounds(nr, nc) && !has(nr, nc)) {
-        const pastData = isPastData(dr, dc, nr, nc, limit);
-        if (pastData) return { r: dr > 0 ? grid.MAX_ROWS : r, c: dc > 0 ? grid.MAX_COLS : c };
+      return { r, c };
+    }
+
+    // Ctrl+Arrow across a gap: stop at the next populated cell or at the sheet edge.
+    function jumpAcrossGap(from, dr, dc, limit) {
+      let nr = from.r + dr;
+      let nc = from.c + dc;
+      while (inGridBounds(nr, nc) && !api.hasValue(nr, nc)) {
+        if (isPastData(dr, dc, nr, nc, limit)) {
+          return { r: dr > 0 ? grid.MAX_ROWS : from.r, c: dc > 0 ? grid.MAX_COLS : from.c };
+        }
         nr += dr;
         nc += dc;
       }
-      if (!inBounds(nr, nc)) return { r: dr < 0 ? 1 : r, c: dc < 0 ? 1 : c };
+      if (!inGridBounds(nr, nc)) return { r: dr < 0 ? 1 : from.r, c: dc < 0 ? 1 : from.c };
       return { r: nr, c: nc };
+    }
+
+    function jumpTarget(dr, dc, extend) {
+      const from = { r: extend ? sel.cr : sel.ar, c: extend ? sel.cc : sel.ac };
+      if (!inGridBounds(from.r + dr, from.c + dc)) return from;
+      const nr = from.r + dr;
+      const nc = from.c + dc;
+      if (api.hasValue(from.r, from.c) && api.hasValue(nr, nc)) return jumpAlongData(nr, nc, dr, dc);
+      return jumpAcrossGap(from, dr, dc, jumpLimit(dr, dc, api.getExtent()));
     }
 
     function moveBy(dr, dc, opts) {
@@ -412,25 +423,13 @@
 
     function onKeydown(ev) {
       const td = gridTdOf(ev.target) || tdAt(sel.ar, sel.ac);
-      if (ev.isComposing || ev.key === "Process" || ev.keyCode === 229) {
-        const cst = td ? stateOf(td) : null;
-        if (td && !isEditing(cst) && ev.key === "Process") startEdit(td, "enter", true);
-        return;
-      }
+      if (handleCompositionKey(ev, td)) return;
       const st = td ? stateOf(td) : null;
       const editing = isEditing(st);
       const mod = ev.ctrlKey || ev.metaKey;
       if (ARROWS[ev.key]) return handleArrow(ev, st, editing);
       if (ev.key === "Enter" || ev.key === "Tab") return handleEnterTab(ev, editing);
-      if (ev.key === "Escape") {
-        if (editing) {
-          ev.preventDefault();
-          cancelEdit(td);
-        } else if (sel.ar !== sel.cr || sel.ac !== sel.cc) {
-          select(sel.ar, sel.ac, false);
-        }
-        return;
-      }
+      if (ev.key === "Escape") return handleEscapeKey(ev, editing, td);
       if (ev.key === "F2" && td) {
         ev.preventDefault();
         startEdit(td, "edit", false);
@@ -443,6 +442,11 @@
         return;
       }
       if (editing) return;
+      handleIdleKey(ev, mod, td);
+    }
+
+    // Keys that act on the selection (select all, clear, type-to-edit) while no cell is being edited.
+    function handleIdleKey(ev, mod, td) {
       if (mod && ev.key.toLowerCase() === "a") {
         ev.preventDefault();
         selectAll();
@@ -454,6 +458,23 @@
         return;
       }
       if (isPrintable(ev)) startTyping(ev, td);
+    }
+
+    function handleEscapeKey(ev, editing, td) {
+      if (editing) {
+        ev.preventDefault();
+        cancelEdit(td);
+      } else if (sel.ar !== sel.cr || sel.ac !== sel.cc) {
+        select(sel.ar, sel.ac, false);
+      }
+    }
+
+    // IME composition: a bare "Process" key starts an edit; every composition key is consumed.
+    function handleCompositionKey(ev, td) {
+      if (!(ev.isComposing || ev.key === "Process" || ev.keyCode === 229)) return false;
+      const cst = td ? stateOf(td) : null;
+      if (td && !isEditing(cst) && ev.key === "Process") startEdit(td, "enter", true);
+      return true;
     }
 
     function startTyping(ev, td) {

@@ -1,68 +1,68 @@
+const NOT_OPEN = ":not(";
+
+function isQuoteChar(ch) {
+  return ch === '"' || ch === "'";
+}
+
+/** Index just after the quoted run that starts at `start` (honours backslash escapes; text.length if unterminated). */
+function quotedEnd(text, start) {
+  const quote = text[start];
+  let j = start + 1;
+  while (j < text.length) {
+    const c = text[j];
+    if (c === "\\" && j + 1 < text.length) j += 2;
+    else if (c === quote) return j + 1;
+    else j += 1;
+  }
+  return text.length;
+}
+
+/** Index of the `)` closing a `:not(` whose body starts at `start`, or -1 when unbalanced. */
+function findNotClauseEnd(input, start) {
+  let j = start;
+  let depth = 1;
+  while (j < input.length) {
+    const c = input[j];
+    if (isQuoteChar(c)) {
+      j = quotedEnd(input, j);
+      continue;
+    }
+    if (c === "(") depth += 1;
+    else if (c === ")") depth -= 1;
+    if (depth === 0) return j;
+    j += 1;
+  }
+  return -1;
+}
+
+function nextBracketDepth(ch, depth) {
+  if (ch === "[") return depth + 1;
+  if (ch === "]" && depth > 0) return depth - 1;
+  return depth;
+}
+
 function extractBalancedNotClauses(input) {
   let out = "";
   const negInners = [];
   let i = 0;
-  let inQuote = null;
   let bracketDepth = 0;
   while (i < input.length) {
     const ch = input[i];
-    if (inQuote) {
-      out += ch;
-      if (ch === "\\" && i + 1 < input.length) {
-        out += input[i + 1];
-        i += 2;
-        continue;
-      }
-      if (ch === inQuote) inQuote = null;
-      i += 1;
+    if (isQuoteChar(ch)) {
+      const end = quotedEnd(input, i);
+      out += input.slice(i, end);
+      i = end;
       continue;
     }
-    if (ch === '"' || ch === "'") {
-      inQuote = ch;
-      out += ch;
-      i += 1;
-      continue;
-    }
-    if (ch === "[") {
-      bracketDepth += 1;
-      out += ch;
-      i += 1;
-      continue;
-    }
-    if (ch === "]" && bracketDepth > 0) {
-      bracketDepth -= 1;
-      out += ch;
-      i += 1;
-      continue;
-    }
-    if (bracketDepth === 0 && input.slice(i, i + 5).toLowerCase() === ":not(") {
-      let j = i + 5;
-      let pDepth = 1;
-      let q = null;
-      while (j < input.length && pDepth > 0) {
-        const c = input[j];
-        if (q) {
-          if (c === "\\" && j + 1 < input.length) {
-            j += 2;
-            continue;
-          }
-          if (c === q) q = null;
-        } else if (c === '"' || c === "'") {
-          q = c;
-        } else if (c === "(") {
-          pDepth += 1;
-        } else if (c === ")") {
-          pDepth -= 1;
-          if (pDepth === 0) break;
-        }
-        j += 1;
-      }
-      if (pDepth === 0) {
-        negInners.push(input.slice(i + 5, j));
-        i = j + 1;
+    if (bracketDepth === 0 && input.slice(i, i + NOT_OPEN.length).toLowerCase() === NOT_OPEN) {
+      const close = findNotClauseEnd(input, i + NOT_OPEN.length);
+      if (close >= 0) {
+        negInners.push(input.slice(i + NOT_OPEN.length, close));
+        i = close + 1;
         continue;
       }
     }
+    bracketDepth = nextBracketDepth(ch, bracketDepth);
     out += ch;
     i += 1;
   }
@@ -95,41 +95,32 @@ function parseSingleAttributeClause(rawInner) {
   return { name, op, value: val };
 }
 
+/** Index of the `]` closing the attribute clause opened at `open`, or -1. */
+function findAttributeEnd(input, open) {
+  let j = open + 1;
+  while (j < input.length) {
+    const c = input[j];
+    if (isQuoteChar(c)) j = quotedEnd(input, j);
+    else if (c === "]") return j;
+    else j += 1;
+  }
+  return -1;
+}
+
 function extractAttributeClauses(input) {
   let out = "";
   const attrs = [];
   let i = 0;
   while (i < input.length) {
-    if (input[i] !== "[") {
+    const close = input[i] === "[" ? findAttributeEnd(input, i) : -1;
+    if (close < 0) {
       out += input[i];
       i += 1;
       continue;
     }
-    let j = i + 1;
-    let q = null;
-    while (j < input.length) {
-      const c = input[j];
-      if (q) {
-        if (c === "\\" && j + 1 < input.length) {
-          j += 2;
-          continue;
-        }
-        if (c === q) q = null;
-      } else if (c === '"' || c === "'") {
-        q = c;
-      } else if (c === "]") {
-        break;
-      }
-      j += 1;
-    }
-    if (j < input.length && input[j] === "]") {
-      const parsedAttr = parseSingleAttributeClause(input.slice(i + 1, j).trim());
-      if (parsedAttr) attrs.push(parsedAttr);
-      i = j + 1;
-      continue;
-    }
-    out += input[i];
-    i += 1;
+    const parsedAttr = parseSingleAttributeClause(input.slice(i + 1, close).trim());
+    if (parsedAttr) attrs.push(parsedAttr);
+    i = close + 1;
   }
   return { rest: out, attrs };
 }
@@ -152,26 +143,22 @@ function parseSimpleSelector(rawSel) {
   return { tag, id, classes, attrs, notSelectorLists: negInners };
 }
 
+const ATTRIBUTE_MATCHERS = {
+  "=": (actual, expected) => actual === expected,
+  "^=": (actual, expected) => expected.length > 0 && actual.startsWith(expected),
+  "$=": (actual, expected) => expected.length > 0 && actual.endsWith(expected),
+  "*=": (actual, expected) => expected.length > 0 && actual.includes(expected),
+  "~=": (actual, expected) =>
+    expected.length > 0 && !/\s/.test(expected) && actual.split(/\s+/).filter(Boolean).includes(expected),
+  "|=": (actual, expected) => actual === expected || actual.startsWith(expected + "-"),
+};
+
 function matchesAttribute(el, attr) {
   if (!el._attrs.has(attr.name)) return false;
   if (attr.op === null) return true;
-  const actual = el._attrs.get(attr.name) ?? "";
-  const expected = attr.value ?? "";
-  if (attr.op === "=") return actual === expected;
-  if (attr.op === "^=") return expected.length > 0 && actual.startsWith(expected);
-  if (attr.op === "$=") return expected.length > 0 && actual.endsWith(expected);
-  if (attr.op === "*=") return expected.length > 0 && actual.includes(expected);
-  if (attr.op === "~=") {
-    return (
-      expected.length > 0 &&
-      !/\s/.test(expected) &&
-      actual.split(/\s+/).filter(Boolean).includes(expected)
-    );
-  }
-  if (attr.op === "|=") {
-    return actual === expected || actual.startsWith(expected + "-");
-  }
-  return false;
+  const matcher = ATTRIBUTE_MATCHERS[attr.op];
+  if (!matcher) return false;
+  return matcher(el._attrs.get(attr.name) ?? "", attr.value ?? "");
 }
 
 function matchesSimple(el, spec, scopeEl) {
@@ -200,59 +187,63 @@ function pushSelectorToken(tokens, rawBuf) {
   tokens.push({ type: "sel", spec: parseSimpleSelector(trimmed) });
 }
 
-function tokenizeComplexSelector(sel, scopeEl) {
-  const working = sel.trim();
-  const tokens = [];
-  let buf = "";
-  let bracketDepth = 0;
-  let parenDepth = 0;
-  let inQuote = null;
-  for (let i = 0; i < working.length; i++) {
-    const ch = working[i];
-    if (inQuote) {
-      buf += ch;
-      if (ch === "\\" && i + 1 < working.length) {
-        buf += working[i + 1];
-        i += 1;
-        continue;
-      }
-      if (ch === inQuote) inQuote = null;
-      continue;
-    }
-    if (ch === '"' || ch === "'") {
-      inQuote = ch;
-      buf += ch;
-      continue;
-    }
-    if (ch === "[") bracketDepth += 1;
-    else if (ch === "]" && bracketDepth > 0) bracketDepth -= 1;
-    else if (ch === "(") parenDepth += 1;
-    else if (ch === ")" && parenDepth > 0) parenDepth -= 1;
+function updateDepths(depth, ch) {
+  if (ch === "[") depth.bracket += 1;
+  else if (ch === "]" && depth.bracket > 0) depth.bracket -= 1;
+  else if (ch === "(") depth.paren += 1;
+  else if (ch === ")" && depth.paren > 0) depth.paren -= 1;
+}
 
-    if (bracketDepth === 0 && parenDepth === 0 && (ch === ">" || /\s/.test(ch))) {
-      if (buf.trim()) {
-        pushSelectorToken(tokens, buf);
-        buf = "";
-      }
-      if (ch === ">") {
-        if (tokens.length > 0 && tokens.at(-1).type === "comb") {
-          tokens.at(-1).comb = ">";
-        } else {
-          tokens.push({ type: "comb", comb: ">" });
-        }
-      } else if (tokens.length > 0 && tokens.at(-1).type !== "comb") {
-        tokens.push({ type: "comb", comb: " " });
-      }
+/**
+ * Walks `text`, keeping quoted runs intact and tracking () / [] depth. Calls onSeparator(ch, buffered)
+ * for every separator character at depth 0 and returns the trailing buffer.
+ */
+function scanTopLevel(text, isSeparator, onSeparator) {
+  const depth = { paren: 0, bracket: 0 };
+  let buf = "";
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (isQuoteChar(ch)) {
+      const end = quotedEnd(text, i);
+      buf += text.slice(i, end);
+      i = end;
       continue;
     }
-    buf += ch;
+    updateDepths(depth, ch);
+    if (depth.paren === 0 && depth.bracket === 0 && isSeparator(ch)) {
+      onSeparator(ch, buf);
+      buf = "";
+    } else {
+      buf += ch;
+    }
+    i += 1;
   }
-  if (buf.trim()) {
+  return buf;
+}
+
+function isCombinatorChar(ch) {
+  return ch === ">" || /\s/.test(ch);
+}
+
+function pushCombinator(tokens, ch) {
+  const last = tokens.at(-1);
+  if (ch === ">") {
+    if (last?.type === "comb") last.comb = ">";
+    else tokens.push({ type: "comb", comb: ">" });
+  } else if (last && last.type !== "comb") {
+    tokens.push({ type: "comb", comb: " " });
+  }
+}
+
+function tokenizeComplexSelector(sel, scopeEl) {
+  const tokens = [];
+  const tail = scanTopLevel(sel.trim(), isCombinatorChar, (ch, buf) => {
     pushSelectorToken(tokens, buf);
-  }
-  if (tokens.length > 0 && tokens.at(-1).type === "comb") {
-    tokens.pop();
-  }
+    pushCombinator(tokens, ch);
+  });
+  pushSelectorToken(tokens, tail);
+  if (tokens.at(-1)?.type === "comb") tokens.pop();
   return { scopeEl, tokens };
 }
 
@@ -285,38 +276,9 @@ function matchesParsedChain(el, parsed) {
 
 export function matchesSelectorList(el, selectorList, scopeEl) {
   const parts = [];
-  let buf = "";
-  let parenDepth = 0;
-  let bracketDepth = 0;
-  let inQuote = null;
-  for (let i = 0; i < selectorList.length; i++) {
-    const ch = selectorList[i];
-    if (inQuote) {
-      buf += ch;
-      if (ch === "\\" && i + 1 < selectorList.length) {
-        buf += selectorList[i + 1];
-        i += 1;
-        continue;
-      }
-      if (ch === inQuote) inQuote = null;
-      continue;
-    }
-    if (ch === '"' || ch === "'") {
-      inQuote = ch;
-      buf += ch;
-      continue;
-    }
-    if (ch === "(") parenDepth += 1;
-    else if (ch === ")" && parenDepth > 0) parenDepth -= 1;
-    else if (ch === "[") bracketDepth += 1;
-    else if (ch === "]" && bracketDepth > 0) bracketDepth -= 1;
-    if (ch === "," && parenDepth === 0 && bracketDepth === 0) {
-      if (buf.trim()) parts.push(buf.trim());
-      buf = "";
-      continue;
-    }
-    buf += ch;
-  }
-  if (buf.trim()) parts.push(buf.trim());
+  const collect = (buf) => {
+    if (buf.trim()) parts.push(buf.trim());
+  };
+  collect(scanTopLevel(selectorList, (ch) => ch === ",", (_ch, buf) => collect(buf)));
   return parts.some((p) => matchesParsedChain(el, tokenizeComplexSelector(p, scopeEl)));
 }

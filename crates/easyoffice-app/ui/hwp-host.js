@@ -245,31 +245,36 @@
       frame = null;
     }
 
+    function handleResponseMessage(data) {
+      const waiter = pending.get(data.id);
+      if (!waiter) return;
+      pending.delete(data.id);
+      timers.clear(waiter.timer);
+      if (data.error) {
+        waiter.reject(new Error(String(data.error.message || data.error.code || "한글 편집기 오류")));
+      } else {
+        waiter.resolve(data.result);
+      }
+    }
+
+    function handleEventMessage(data) {
+      const payload = data.payload;
+      if (payload?.reason === SHELL_COMMAND_REASON) {
+        const command = sanitizeShellCommand(payload);
+        if (command) for (const listener of commandListeners) listener(command);
+        return;
+      }
+      if (payload?.reason === SHORTCUT_REASON) {
+        if (typeof payload.shortcut === "string") for (const listener of shortcutListeners) listener(payload.shortcut);
+        return;
+      }
+      for (const listener of changeListeners) listener(data);
+    }
+
     function handlePortMessage(data) {
       if (!data || typeof data !== "object") return;
-      if (data.type === "rhwp-response") {
-        const waiter = pending.get(data.id);
-        if (!waiter) return;
-        pending.delete(data.id);
-        timers.clear(waiter.timer);
-        if (data.error) {
-          waiter.reject(new Error(String(data.error.message || data.error.code || "한글 편집기 오류")));
-        } else {
-          waiter.resolve(data.result);
-        }
-      } else if (data.type === "rhwp-event") {
-        const payload = data.payload;
-        if (payload?.reason === SHELL_COMMAND_REASON) {
-          const command = sanitizeShellCommand(payload);
-          if (command) for (const listener of commandListeners) listener(command);
-          return;
-        }
-        if (payload?.reason === SHORTCUT_REASON) {
-          if (typeof payload.shortcut === "string") for (const listener of shortcutListeners) listener(payload.shortcut);
-          return;
-        }
-        for (const listener of changeListeners) listener(data);
-      }
+      if (data.type === "rhwp-response") handleResponseMessage(data);
+      else if (data.type === "rhwp-event") handleEventMessage(data);
     }
 
     function call(method, params, options) {

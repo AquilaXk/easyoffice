@@ -118,6 +118,17 @@ function checkWasm(dir, files, vendorWasm, errors) {
   }
 }
 
+function isScannableText(rel) {
+  return TEXT_EXT.has(path.extname(rel)) && rel !== ASSET_MANIFEST && !rel.startsWith("fonts/");
+}
+
+function scanTextFile(rel, text, errors) {
+  scanText(rel, text, errors);
+  if (rel.endsWith(".html")) scanHtml(rel, text, errors);
+  // The bundle is hosted below /hwp-studio/: a root-absolute url() would escape it (PD-083).
+  if (rel.endsWith(".css") && /url\(\s*["']?\/(?!\/)/.test(text)) errors.push(`${rel}: root-absolute url() escapes the /hwp-studio/ base`);
+}
+
 /** Returns { errors, stats } for a built bundle directory. */
 export function checkBundle(dir, { vendorWasm = path.join(REPO, "vendor/rhwp-core/rhwp_bg.wasm"), budget = BUDGET_BYTES } = {}) {
   const errors = [];
@@ -133,13 +144,7 @@ export function checkBundle(dir, { vendorWasm = path.join(REPO, "vendor/rhwp-cor
     if (rel.startsWith("fonts/")) fontBytes += size;
     else nonFontBytes += size;
     if (FORBIDDEN_FILES.some((re) => re.test(path.posix.basename(rel)))) errors.push(`${rel}: forbidden file`);
-    if (TEXT_EXT.has(path.extname(rel)) && rel !== ASSET_MANIFEST && !rel.startsWith("fonts/")) {
-      const text = fs.readFileSync(full, "utf8");
-      scanText(rel, text, errors);
-      if (rel.endsWith(".html")) scanHtml(rel, text, errors);
-      // The bundle is hosted below /hwp-studio/: a root-absolute url() would escape it (PD-083).
-      if (rel.endsWith(".css") && /url\(\s*["']?\/(?!\/)/.test(text)) errors.push(`${rel}: root-absolute url() escapes the /hwp-studio/ base`);
-    }
+    if (isScannableText(rel)) scanTextFile(rel, fs.readFileSync(full, "utf8"), errors);
   }
   checkReferencedAssets(dir, files, errors);
   checkManifest(dir, files, errors);

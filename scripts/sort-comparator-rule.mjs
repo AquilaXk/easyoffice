@@ -65,52 +65,64 @@ function startsRegex(emitted) {
   return REGEX_PRECEDING_CHAR.test(tail.at(-1)) || REGEX_PRECEDING_WORD.test(tail);
 }
 
+function skipTo(st, end) {
+  st.out += blank(st.src.slice(st.i, end));
+  st.i = end;
+}
+
+/** Template-literal text: consume one escape, closer, `${` opener or plain character. */
+function stepTemplate(st, c, next) {
+  if (c === "\\") skipTo(st, st.i + 2);
+  else if (c === "`") {
+    st.modes.pop();
+    skipTo(st, st.i + 1);
+  } else if (c === "$" && next === "{") {
+    st.modes.push({ depth: 0 });
+    skipTo(st, st.i + 2);
+  } else skipTo(st, st.i + 1);
+}
+
+/** Skips a comment, string, template opener or regex literal at the cursor; false when it is plain code. */
+function stepLiteral(st, c, next) {
+  const { src } = st;
+  if (c === "/" && next === "/") skipTo(st, lineCommentEnd(src, st.i));
+  else if (c === "/" && next === "*") skipTo(st, blockCommentEnd(src, st.i));
+  else if (c === '"' || c === "'") skipTo(st, quotedEnd(src, st.i));
+  else if (c === "`") {
+    st.modes.push({ template: true });
+    skipTo(st, st.i + 1);
+  } else if (c === "/" && startsRegex(st.out)) skipTo(st, regexEnd(src, st.i));
+  else return false;
+  return true;
+}
+
+/** Plain code: track `${ ... }` brace depth and copy the character through. */
+function stepCode(st, c, mode) {
+  if (mode && c === "{") mode.depth += 1;
+  else if (mode && c === "}") {
+    if (mode.depth === 0) {
+      st.modes.pop();
+      skipTo(st, st.i + 1);
+      return;
+    }
+    mode.depth -= 1;
+  }
+  st.out += c;
+  st.i += 1;
+}
+
 /** Replace comments, strings, template text and regex literals with spaces, keeping code and newlines. */
 export function stripCommentsAndStrings(src) {
-  let out = "";
-  let i = 0;
-  const modes = []; // stack of { template: true } or { depth: number } for `${ ... }` expressions
-
-  const skip = (end) => {
-    out += blank(src.slice(i, end));
-    i = end;
-  };
-
-  while (i < src.length) {
-    const c = src[i];
-    const next = src[i + 1];
-    const mode = modes.at(-1);
-    if (mode?.template) {
-      if (c === "\\") skip(i + 2);
-      else if (c === "`") {
-        modes.pop();
-        skip(i + 1);
-      } else if (c === "$" && next === "{") {
-        modes.push({ depth: 0 });
-        skip(i + 2);
-      } else skip(i + 1);
-    } else if (c === "/" && next === "/") skip(lineCommentEnd(src, i));
-    else if (c === "/" && next === "*") skip(blockCommentEnd(src, i));
-    else if (c === '"' || c === "'") skip(quotedEnd(src, i));
-    else if (c === "`") {
-      modes.push({ template: true });
-      skip(i + 1);
-    } else if (c === "/" && startsRegex(out)) skip(regexEnd(src, i));
-    else {
-      if (mode && c === "{") mode.depth += 1;
-      else if (mode && c === "}") {
-        if (mode.depth === 0) {
-          modes.pop();
-          skip(i + 1);
-          continue;
-        }
-        mode.depth -= 1;
-      }
-      out += c;
-      i += 1;
-    }
+  // modes: stack of { template: true } or { depth: number } for `${ ... }` expressions
+  const st = { src, out: "", i: 0, modes: [] };
+  while (st.i < src.length) {
+    const c = src[st.i];
+    const next = src[st.i + 1];
+    const mode = st.modes.at(-1);
+    if (mode?.template) stepTemplate(st, c, next);
+    else if (!stepLiteral(st, c, next)) stepCode(st, c, mode);
   }
-  return out;
+  return st.out;
 }
 
 /** 1-based line numbers of every `.sort()` call without a comparator. */

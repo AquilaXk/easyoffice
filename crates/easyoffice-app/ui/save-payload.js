@@ -172,43 +172,53 @@
       cur.runs.push(run);
     }
 
+    function walkTextNode(node, ctx, fmt) {
+      const prev = cur?.runs[cur.runs.length - 1]?.text || "";
+      let text = String(node.nodeValue || "").replaceAll(/\s+/g, " ");
+      if ((!cur || prev.endsWith(" ")) && text.startsWith(" ")) text = text.slice(1);
+      appendText(text, ctx, fmt);
+    }
+
+    function walkLineBreak(ctx) {
+      const keepCtx = cur ? cur.ctx : ctx;
+      flush();
+      cur = { ctx: keepCtx, runs: [] };
+    }
+
+    function walkTable(node) {
+      flush();
+      const tbl = buildTableBlock(node);
+      if (tbl.rows.length > 0) blocks.push(tbl);
+    }
+
+    function blockContext(node, tag, ctx) {
+      const headingMatch = /^H([1-6])$/.exec(tag);
+      const listParent = tag === "LI" ? node.parentElement : null;
+      let nextList = ctx.list;
+      if (listParent) nextList = (listParent.tagName || "").toUpperCase() === "OL" ? "ordered" : "bullet";
+      return {
+        align: normalizeAlign(node.style?.textAlign) || ctx.align,
+        heading: headingMatch ? Number(headingMatch[1]) : ctx.heading,
+        list: nextList,
+      };
+    }
+
     function walk(node, ctx, fmt) {
       if (node.nodeType === 3) {
-        const prev = cur?.runs[cur.runs.length - 1]?.text || "";
-        let text = String(node.nodeValue || "").replaceAll(/\s+/g, " ");
-        if ((!cur || prev.endsWith(" ")) && text.startsWith(" ")) text = text.slice(1);
-        appendText(text, ctx, fmt);
+        walkTextNode(node, ctx, fmt);
         return;
       }
       if (node.nodeType !== 1 || isSkippedElement(node)) return;
       const tag = (node.tagName || "").toUpperCase();
-      if (tag === "BR") {
-        const keepCtx = cur ? cur.ctx : ctx;
-        flush();
-        cur = { ctx: keepCtx, runs: [] };
-        return;
-      }
-      if (tag === "TABLE") {
-        flush();
-        const tbl = buildTableBlock(node);
-        if (tbl.rows.length > 0) blocks.push(tbl);
-        return;
-      }
+      if (tag === "BR") return walkLineBreak(ctx);
+      if (tag === "TABLE") return walkTable(node);
       const nextFmt = styleFormat(node, fmt);
       if (!BLOCK_TAGS.has(tag)) {
         Array.from(node.childNodes || []).forEach((child) => walk(child, ctx, nextFmt));
         return;
       }
       flush();
-      const headingMatch = /^H([1-6])$/.exec(tag);
-      const listParent = tag === "LI" ? node.parentElement : null;
-      let nextList = ctx.list;
-      if (listParent) nextList = (listParent.tagName || "").toUpperCase() === "OL" ? "ordered" : "bullet";
-      const nextCtx = {
-        align: normalizeAlign(node.style?.textAlign) || ctx.align,
-        heading: headingMatch ? Number(headingMatch[1]) : ctx.heading,
-        list: nextList,
-      };
+      const nextCtx = blockContext(node, tag, ctx);
       Array.from(node.childNodes || []).forEach((child) => walk(child, nextCtx, nextFmt));
       flush();
     }

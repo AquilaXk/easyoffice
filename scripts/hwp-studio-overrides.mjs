@@ -108,8 +108,7 @@ function upstreamPathFor(kind, id) {
   return path.join(UPSTREAM_STUDIO_REL, kind === "overrides" ? `src/${id}.ts` : id);
 }
 
-/** Baseline checks against the sparse upstream checkout (skipped when it is not present). */
-export function checkUpstreamBaseline(root, manifest, config) {
+function checkUpstreamTables(manifest, config) {
   const errors = [];
   const upstream = manifest.upstream ?? {};
   if (upstream.commit !== config.commit || upstream.version !== config.version) {
@@ -117,6 +116,12 @@ export function checkUpstreamBaseline(root, manifest, config) {
   }
   const counterparts = upstream.counterparts ?? {};
   const assets = upstream.assets ?? {};
+  errors.push(...checkUpstreamTableEntries(counterparts, assets), ...checkUpstreamCoverage(manifest, counterparts, assets));
+  return errors;
+}
+
+function checkUpstreamTableEntries(counterparts, assets) {
+  const errors = [];
   for (const [name, table] of [
     ["counterparts", counterparts],
     ["assets", assets],
@@ -126,6 +131,11 @@ export function checkUpstreamBaseline(root, manifest, config) {
       if (!isSafeRelative(id)) errors.push(`${MANIFEST_REL}: upstream.${name} has an unsafe path '${id}'`);
     }
   }
+  return errors;
+}
+
+function checkUpstreamCoverage(manifest, counterparts, assets) {
+  const errors = [];
   for (const { id } of manifest.overrides) {
     if (!(id in counterparts)) errors.push(`${MANIFEST_REL}: upstream.counterparts is missing '${id}'`);
   }
@@ -135,20 +145,33 @@ export function checkUpstreamBaseline(root, manifest, config) {
   for (const source of manifest.verbatimAssets ?? []) {
     if (!(source in assets)) errors.push(`${MANIFEST_REL}: upstream.assets is missing verbatim asset '${source}'`);
   }
-  if (errors.length > 0) return errors;
-  if (!fs.existsSync(path.join(root, config.path, ".git"))) return errors;
+  return errors;
+}
+
+function checkUpstreamFiles(root, counterparts, assets) {
+  const errors = [];
   const checks = [
     ...Object.entries(counterparts).map(([id, sha]) => [upstreamPathFor("overrides", id), sha]),
     ...Object.entries(assets).map(([id, sha]) => [upstreamPathFor("assets", id), sha]),
   ];
   for (const [rel, sha] of checks) {
     const file = path.join(root, rel);
-    if (!fs.existsSync(file)) errors.push(`upstream file ${rel.split(path.sep).join("/")} is missing`);
+    const shown = rel.split(path.sep).join("/");
+    if (!fs.existsSync(file)) errors.push(`upstream file ${shown} is missing`);
     else if (normalizedSha256(file) !== sha) {
-      errors.push(`upstream ${rel.split(path.sep).join("/")} changed since its override was written (review ${MANIFEST_REL})`);
+      errors.push(`upstream ${shown} changed since its override was written (review ${MANIFEST_REL})`);
     }
   }
   return errors;
+}
+
+/** Baseline checks against the sparse upstream checkout (skipped when it is not present). */
+export function checkUpstreamBaseline(root, manifest, config) {
+  const errors = checkUpstreamTables(manifest, config);
+  if (errors.length > 0) return errors;
+  if (!fs.existsSync(path.join(root, config.path, ".git"))) return errors;
+  const upstream = manifest.upstream ?? {};
+  return checkUpstreamFiles(root, upstream.counterparts ?? {}, upstream.assets ?? {});
 }
 
 export function verifyOverrides(root, config) {

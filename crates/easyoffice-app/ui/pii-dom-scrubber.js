@@ -118,6 +118,35 @@
     ];
   }
 
+  // Index just after a 'quoted sheet name' run starting at formula[start] ('' escapes a quote).
+  function skipSingleQuotedRun(formula, start) {
+    let i = start + 1;
+    while (i < formula.length) {
+      if (formula[i] !== "'") i += 1;
+      else if (formula[i + 1] === "'") i += 2;
+      else return i + 1;
+    }
+    return i;
+  }
+
+  // Reads a "string literal" starting at formula[start]; null when it is never closed.
+  function readDoubleQuotedLiteral(formula, start) {
+    let j = start + 1;
+    let inner = "";
+    while (j < formula.length) {
+      if (formula[j] !== '"') {
+        inner += formula[j];
+        j += 1;
+      } else if (formula[j + 1] === '"') {
+        inner += '"';
+        j += 2;
+      } else {
+        return { inner, end: j + 1 };
+      }
+    }
+    return null;
+  }
+
   function tokenizeFormulaStringLiterals(formula) {
     const segments = [];
     let i = 0;
@@ -125,51 +154,19 @@
     while (i < formula.length) {
       const ch = formula[i];
       if (ch === "'") {
+        i = skipSingleQuotedRun(formula, i);
+        continue;
+      }
+      if (ch !== '"') {
         i += 1;
-        while (i < formula.length) {
-          if (formula[i] === "'") {
-            if (i + 1 < formula.length && formula[i + 1] === "'") {
-              i += 2;
-              continue;
-            }
-            i += 1;
-            break;
-          }
-          i += 1;
-        }
         continue;
       }
-      if (ch === '"') {
-        if (i > rawStart) {
-          segments.push({ isLiteral: false, text: formula.slice(rawStart, i) });
-        }
-        let j = i + 1;
-        let inner = "";
-        let closed = false;
-        while (j < formula.length) {
-          if (formula[j] === '"') {
-            if (j + 1 < formula.length && formula[j + 1] === '"') {
-              inner += '"';
-              j += 2;
-              continue;
-            }
-            closed = true;
-            j += 1;
-            break;
-          }
-          inner += formula[j];
-          j += 1;
-        }
-        if (closed) {
-          segments.push({ isLiteral: true, text: inner });
-          i = j;
-          rawStart = j;
-        } else {
-          break;
-        }
-        continue;
-      }
-      i += 1;
+      if (i > rawStart) segments.push({ isLiteral: false, text: formula.slice(rawStart, i) });
+      const literal = readDoubleQuotedLiteral(formula, i);
+      if (!literal) break;
+      segments.push({ isLiteral: true, text: literal.inner });
+      i = literal.end;
+      rawStart = literal.end;
     }
     if (rawStart < formula.length) {
       segments.push({ isLiteral: false, text: formula.slice(rawStart) });

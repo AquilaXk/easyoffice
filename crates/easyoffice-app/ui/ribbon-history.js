@@ -28,6 +28,24 @@
     return String(rawStyle || "").toLowerCase().includes("hangul") ? "hangul" : "standard";
   }
 
+  // Next preset after the current one (or the second preset when the current value is not a preset).
+  function cyclePreset(presets, current) {
+    const curIdx = presets.indexOf(current);
+    return presets[curIdx >= 0 ? (curIdx + 1) % presets.length : 1];
+  }
+
+  function docEffectTrack({ docEditor }) {
+    const firstP = docEditor.querySelector(":scope > p:not(#hwp-manuscript-preview)");
+    if (!firstP) return;
+    const nextOn = firstP.dataset.highlighted !== "true";
+    firstP.dataset.highlighted = nextOn ? "true" : "false";
+    firstP.style.backgroundColor = nextOn ? "rgba(92, 107, 192, 0.14)" : "";
+  }
+
+  function docEffectPaper({ docEditor }) {
+    docEditor.dataset.paperSize = docEditor.dataset.paperSize === "Letter" ? "A4" : "Letter";
+  }
+
   function createRibbonHistory(deps) {
     const {
       document,
@@ -212,6 +230,27 @@
       });
     }
 
+    function createRibbonToolButton(cmd) {
+      const btn = document.createElement("button");
+      btn.className = "ribbon-tool-btn";
+      btn.dataset.commandId = cmd.id;
+      const span = document.createElement("span");
+      span.textContent = cmd.title || "";
+      btn.appendChild(span);
+      const boundShortcut = resolveRibbonShortcutLabel(cmd.id, cmd.shortcut);
+      if (boundShortcut) {
+        const small = document.createElement("small");
+        const activeModKey = typeof getShortcutModifier === "function" ? getShortcutModifier() : "⌘";
+        small.textContent = "(" + formatPlatformShortcut(boundShortcut, activeModKey) + ")";
+        btn.appendChild(document.createTextNode(" "));
+        btn.appendChild(small);
+      }
+      btn.addEventListener("click", () => {
+        void executeTrackedRibbonCommand(cmd.id, { fallbackTitle: cmd.title }).catch(() => {});
+      });
+      return btn;
+    }
+
     async function renderRibbonCategoryTools(categoryKey) {
       const seq = ribbonRenderSeq + 1;
       ribbonRenderSeq = seq;
@@ -235,26 +274,7 @@
       if (seq !== ribbonRenderSeq) return;
       const cmds = (res && Array.isArray(res.commands) && res.commands) || [];
       strip.innerHTML = "";
-      cmds.forEach((cmd) => {
-        const btn = document.createElement("button");
-        btn.className = "ribbon-tool-btn";
-        btn.dataset.commandId = cmd.id;
-        const span = document.createElement("span");
-        span.textContent = cmd.title || "";
-        btn.appendChild(span);
-        const boundShortcut = resolveRibbonShortcutLabel(cmd.id, cmd.shortcut);
-        if (boundShortcut) {
-          const small = document.createElement("small");
-          const activeModKey = typeof getShortcutModifier === "function" ? getShortcutModifier() : "⌘";
-          small.textContent = "(" + formatPlatformShortcut(boundShortcut, activeModKey) + ")";
-          btn.appendChild(document.createTextNode(" "));
-          btn.appendChild(small);
-        }
-        btn.addEventListener("click", () => {
-          void executeTrackedRibbonCommand(cmd.id, { fallbackTitle: cmd.title }).catch(() => {});
-        });
-        strip.appendChild(btn);
-      });
+      cmds.forEach((cmd) => strip.appendChild(createRibbonToolButton(cmd)));
       getSheetController()?.syncSheetFormatToolbar?.();
     }
 
@@ -301,29 +321,69 @@
       return enqueueWorkspaceHistoryOp(() => activatePaneInternal(mod, skipTabBufferSync));
     }
 
-    async function restoreWorkspaceSnapshot(snap, backendSyncRes) {
-      if (!snap) return;
-      const sheetController = getSheetController();
-      const workspacePanels = getWorkspacePanels();
-      sheetController.bumpSnapshotEpoch();
+    function applyPdfRotationDom(nextRot) {
+      setPdfRotationDeg(nextRot);
+      const badge = document.getElementById("pdf-rotation-badge");
+      const card = document.getElementById("pdf-page-card");
+      if (badge) badge.textContent = "회전: " + nextRot + "°";
+      if (card) {
+        card.style.transform = "rotate(" + nextRot + "deg)";
+        card.dataset.rotatedQuarter = nextRot % 180 !== 0 ? "true" : "false";
+      }
+    }
+
+    function createSheetTabButton(shKey) {
+      const newTab = document.createElement("button");
+      newTab.className = "sheet-tab-btn";
+      newTab.setAttribute("role", "tab");
+      newTab.dataset.sheetTab = shKey;
+      const numMatch = /^Sheet(\d+)$/.exec(shKey);
+      newTab.textContent = numMatch ? "시트 " + numMatch[1] : shKey;
+      return newTab;
+    }
+
+    // Drops tabs for sheets that no longer exist, adds missing ones and marks the active tab.
+    function syncSheetTabBar(activeSheetName) {
+      const sheetTabBar = document.getElementById("sheet-tab-bar");
+      if (!sheetTabBar) return;
+      const addSheetBtn = document.getElementById("btn-add-sheet-tab");
+      const tabSelector = ".sheet-tab-btn[data-sheet-tab]";
+      const knownKeys = new Set(["Sheet1", "Sheet2", ...Object.keys(sheetDataStore)]);
+      for (const btn of sheetTabBar.querySelectorAll(tabSelector)) {
+        if (!knownKeys.has(btn.dataset.sheetTab)) btn.remove();
+      }
+      const renderedKeys = new Set(Array.from(sheetTabBar.querySelectorAll(tabSelector)).map((btn) => btn.dataset.sheetTab));
+      for (const shKey of Object.keys(sheetDataStore)) {
+        if (!renderedKeys.has(shKey) && addSheetBtn) addSheetBtn.before(createSheetTabButton(shKey));
+      }
+      for (const btn of sheetTabBar.querySelectorAll(tabSelector)) {
+        const isAct = btn.dataset.sheetTab === activeSheetName;
+        btn.classList.toggle("active", isAct);
+        btn.setAttribute("role", "tab");
+        btn.setAttribute("aria-selected", isAct ? "true" : "false");
+      }
+    }
+
+    function restoreSnapshotStores(snap, sheetController) {
       if (snap.docTabs) {
         docTabStore.DOC = snap.docTabs.DOC ? structuredClone(snap.docTabs.DOC) : null;
         docTabStore.HWP = snap.docTabs.HWP ? structuredClone(snap.docTabs.HWP) : null;
       }
       if (snap.sheets) {
-        const clonedSheets = cloneSheets(snap.sheets);
-        const clonedRowCounts = snap.sheetRowCounts
-          ? structuredClone(snap.sheetRowCounts)
-          : null;
-        sheetController.replaceLiveSheetDataStore(clonedSheets, clonedRowCounts);
+        const clonedRowCounts = snap.sheetRowCounts ? structuredClone(snap.sheetRowCounts) : null;
+        sheetController.replaceLiveSheetDataStore(cloneSheets(snap.sheets), clonedRowCounts);
       }
       if (Array.isArray(snap.slides)) {
-        slideDeckState.splice(
-          0,
-          slideDeckState.length,
-          ...structuredClone(snap.slides)
-        );
+        slideDeckState.splice(0, slideDeckState.length, ...structuredClone(snap.slides));
       }
+    }
+
+    async function restoreWorkspaceSnapshot(snap, backendSyncRes) {
+      if (!snap) return;
+      const sheetController = getSheetController();
+      const workspacePanels = getWorkspacePanels();
+      sheetController.bumpSnapshotEpoch();
+      restoreSnapshotStores(snap, sheetController);
       const targetStyle = normalizeRibbonStyleKey(
         snap.ribbonState?.ribbonStyle || localRibbonState.ribbonStyle
       );
@@ -337,15 +397,7 @@
         () => null
       );
       applyRibbonStyleDom(targetStyle);
-      const nextRot = typeof snap.pdfRotationDeg === "number" ? snap.pdfRotationDeg : 0;
-      setPdfRotationDeg(nextRot);
-      const badge = document.getElementById("pdf-rotation-badge");
-      const card = document.getElementById("pdf-page-card");
-      if (badge) badge.textContent = "회전: " + nextRot + "°";
-      if (card) {
-        card.style.transform = "rotate(" + nextRot + "deg)";
-        card.dataset.rotatedQuarter = nextRot % 180 !== 0 ? "true" : "false";
-      }
+      applyPdfRotationDom(typeof snap.pdfRotationDeg === "number" ? snap.pdfRotationDeg : 0);
       workspacePanels.restorePdfStudioState(snap.pdfStudio);
       workspacePanels.restoreWorkspaceViewState(snap.viewState);
 
@@ -367,38 +419,7 @@
       }
       if (snap.activeSheetName) {
         setActiveSheetName(snap.activeSheetName);
-        const sheetTabBar = document.getElementById("sheet-tab-bar");
-        const addSheetBtn = document.getElementById("btn-add-sheet-tab");
-        if (sheetTabBar) {
-          const knownKeys = new Set(["Sheet1", "Sheet2", ...Object.keys(sheetDataStore)]);
-          sheetTabBar.querySelectorAll(".sheet-tab-btn[data-sheet-tab]").forEach((btn) => {
-            if (!knownKeys.has(btn.dataset.sheetTab)) {
-              btn.remove();
-            }
-          });
-          const renderedKeys = new Set(
-            Array.from(sheetTabBar.querySelectorAll(".sheet-tab-btn[data-sheet-tab]")).map(
-              (btn) => btn.dataset.sheetTab
-            )
-          );
-          Object.keys(sheetDataStore).forEach((shKey) => {
-            if (!renderedKeys.has(shKey) && addSheetBtn) {
-              const newTab = document.createElement("button");
-              newTab.className = "sheet-tab-btn";
-              newTab.setAttribute("role", "tab");
-              newTab.dataset.sheetTab = shKey;
-              const numMatch = /^Sheet(\d+)$/.exec(shKey);
-              newTab.textContent = numMatch ? "시트 " + numMatch[1] : shKey;
-              addSheetBtn.before(newTab);
-            }
-          });
-          sheetTabBar.querySelectorAll(".sheet-tab-btn[data-sheet-tab]").forEach((btn) => {
-            const isAct = btn.dataset.sheetTab === snap.activeSheetName;
-            btn.classList.toggle("active", isAct);
-            btn.setAttribute("role", "tab");
-            btn.setAttribute("aria-selected", isAct ? "true" : "false");
-          });
-        }
+        syncSheetTabBar(snap.activeSheetName);
         sheetController.restoreDomSheetCells(snap.activeSheetName);
         sheetController.updateSheetSelectionAndAggregates(snap.activeSheetCellRef || "F2");
       }
@@ -468,121 +489,110 @@
       getWorkspacePanels().syncDocStyleBarFromTarget(targetEl);
     }
 
+    const STYLE_FONT_SIZES = ["15px", "18px", "22px", "13.5px"];
+    const PAGE_PADDINGS = ["28px 36px", "16px 20px", "36px 52px"];
+    const MAX_DOC_COLUMNS = 3;
+    const LANDSCAPE_MAX_WIDTH = "980px";
+    const endsWithAny = (cmdId, suffixes) => suffixes.some((suffix) => cmdId.endsWith(suffix));
+
+    function docEffectHomeStyle({ targetEl }) {
+      targetEl.style.fontSize = cyclePreset(STYLE_FONT_SIZES, targetEl.style.fontSize);
+      syncDocStyleBarFromTarget(targetEl);
+    }
+
+    function docEffectColumns({ docEditor }) {
+      const curCols = Number(docEditor.style.columnCount || "1");
+      const cols = curCols >= MAX_DOC_COLUMNS ? 1 : curCols + 1;
+      docEditor.style.columnCount = cols > 1 ? String(cols) : "";
+    }
+
+    function docEffectOrientation({ docEditor }) {
+      const landscape = docEditor.style.maxWidth !== LANDSCAPE_MAX_WIDTH;
+      docEditor.style.maxWidth = landscape ? LANDSCAPE_MAX_WIDTH : "";
+    }
+
+    function docEffectMargins({ docEditor }) {
+      docEditor.style.padding = cyclePreset(PAGE_PADDINGS, docEditor.style.padding);
+    }
+
+    function docEffectBorder({ docEditor }) {
+      const tableEl = docEditor.querySelector("#doc-table") || document.getElementById("doc-table");
+      if (!tableEl) return;
+      tableEl.style.borderStyle = tableEl.style.borderStyle !== "double" ? "double" : "";
+    }
+
+    function docEffectModuleSpecific({ docEditor, cmdId, execRes }) {
+      const workspacePanels = getWorkspacePanels();
+      workspacePanels.applyDocModuleSpecificDomEffect(cmdId, docEditor, execRes);
+      workspacePanels.computeSmartStats();
+      workspacePanels.renderModuleOutline(getActiveModule());
+    }
+
+    function docEffectInsertNote({ docEditor, cmdId, execRes }) {
+      const workspacePanels = getWorkspacePanels();
+      const p = document.createElement("p");
+      p.textContent = "[" + (execRes?.summary || cmdId) + "]";
+      docEditor.appendChild(p);
+      workspacePanels.computeSmartStats();
+      workspacePanels.renderModuleOutline(getActiveModule());
+    }
+
+    function docEffectSort({ execRes }) {
+      const tbody = document.getElementById("doc-table-body");
+      if (!tbody) return;
+      const rows = Array.from(tbody.querySelectorAll("tr:not(#doc-table-sum-row)"));
+      const asc = Boolean(execRes?.sortAscending);
+      rows.sort((a, b) => {
+        const aText = (a.cells[0]?.textContent || "").trim();
+        const bText = (b.cells[0]?.textContent || "").trim();
+        return asc ? aText.localeCompare(bText, "ko") : bText.localeCompare(aText, "ko");
+      });
+      const sumRow = document.getElementById("doc-table-sum-row");
+      for (const r of rows) {
+        if (sumRow) sumRow.before(r);
+        else tbody.appendChild(r);
+      }
+    }
+
+    const MODULE_SPECIFIC_DOC_COMMANDS = new Set(["doc-mod-toc", "doc-mod-footnote", "doc-mod-mailmerge", "hwp-mod-header", "hwp-mod-field"]);
+    const INSERT_NOTE_SUFFIXES = ["-insert-chart", "-insert-shape", "-insert-link", "-data-fn-browser", "-review-comment"];
+
+    // First matching entry wins; the order mirrors the original command precedence.
+    const DOC_EDITOR_EFFECTS = [
+      [(id) => id.endsWith("-home-style"), docEffectHomeStyle],
+      [(id) => id.endsWith("-review-track"), docEffectTrack],
+      [(id) => id.endsWith("-layout-columns"), docEffectColumns],
+      [(id) => id.endsWith("-layout-orientation"), docEffectOrientation],
+      [(id) => id.endsWith("-layout-margins"), docEffectMargins],
+      [(id) => id.endsWith("-layout-paper"), docEffectPaper],
+      [(id) => id === "hwp-mod-border", docEffectBorder],
+      [(id) => MODULE_SPECIFIC_DOC_COMMANDS.has(id), docEffectModuleSpecific],
+      [(id) => endsWithAny(id, INSERT_NOTE_SUFFIXES), docEffectInsertNote],
+      [(id) => id.endsWith("-insert-table"), () => getWorkspacePanels().appendDocTableRow()],
+      [(id) => id.endsWith("-data-autosum") || id === "doc-mod-tableformula", () => getWorkspacePanels().computeDocTableSummary()],
+      [(id) => id.endsWith("-data-sort"), docEffectSort],
+    ];
+
+    function docEditorEffectFor(cmdId) {
+      for (const [matches, run] of DOC_EDITOR_EFFECTS) {
+        if (matches(cmdId)) return run;
+      }
+      return null;
+    }
+
     function applyDocEditorRibbonEffect(docEditor, cmdId, execRes) {
       if (!docEditor) return false;
-      const workspacePanels = getWorkspacePanels();
-      const targetEl = workspacePanels.getFocusedDocBlock(docEditor);
+      const targetEl = getWorkspacePanels().getFocusedDocBlock(docEditor);
       const runProp = DOC_RUN_COMMANDS.find(([suffix]) => cmdId.endsWith(suffix));
       if (runProp) {
         // Character formatting applies to the selection only (run model, PD-077).
         getDocRuns().toggle(runProp[1], { undo: false });
         return true;
       }
-      if (cmdId.endsWith("-home-style")) {
-        const sizes = ["15px", "18px", "22px", "13.5px"];
-        const curIdx = sizes.indexOf(targetEl.style.fontSize);
-        const presetIdx = curIdx >= 0 ? (curIdx + 1) % sizes.length : 1;
-        targetEl.style.fontSize = sizes[presetIdx];
-        syncDocStyleBarFromTarget(targetEl);
-        return true;
-      }
-      if (cmdId.endsWith("-review-track")) {
-        const firstP = docEditor.querySelector(":scope > p:not(#hwp-manuscript-preview)");
-        if (firstP) {
-          const nextOn = firstP.dataset.highlighted !== "true";
-          firstP.dataset.highlighted = nextOn ? "true" : "false";
-          firstP.style.backgroundColor = nextOn ? "rgba(92, 107, 192, 0.14)" : "";
-        }
-        return true;
-      }
-      if (cmdId.endsWith("-layout-columns")) {
-        const curCols = Number(docEditor.style.columnCount || "1");
-        const cols = curCols >= 3 ? 1 : curCols + 1;
-        docEditor.style.columnCount = cols > 1 ? String(cols) : "";
-        return true;
-      }
-      if (cmdId.endsWith("-layout-orientation")) {
-        const landscape = docEditor.style.maxWidth !== "980px";
-        docEditor.style.maxWidth = landscape ? "980px" : "";
-        return true;
-      }
-      if (cmdId.endsWith("-layout-margins")) {
-        const pads = ["28px 36px", "16px 20px", "36px 52px"];
-        const curPadIdx = pads.indexOf(docEditor.style.padding);
-        const idx = curPadIdx >= 0 ? (curPadIdx + 1) % pads.length : 1;
-        docEditor.style.padding = pads[idx];
-        return true;
-      }
-      if (cmdId.endsWith("-layout-paper")) {
-        const paper = docEditor.dataset.paperSize === "Letter" ? "A4" : "Letter";
-        docEditor.dataset.paperSize = paper;
-        return true;
-      }
-      if (cmdId === "hwp-mod-border") {
-        const tableEl =
-          docEditor.querySelector("#doc-table") || document.getElementById("doc-table");
-        if (tableEl) {
-          const borderOn = tableEl.style.borderStyle !== "double";
-          tableEl.style.borderStyle = borderOn ? "double" : "";
-        }
-        return true;
-      }
-      if (
-        cmdId === "doc-mod-toc" ||
-        cmdId === "doc-mod-footnote" ||
-        cmdId === "doc-mod-mailmerge" ||
-        cmdId === "hwp-mod-header" ||
-        cmdId === "hwp-mod-field"
-      ) {
-        workspacePanels.applyDocModuleSpecificDomEffect(cmdId, docEditor, execRes);
-        workspacePanels.computeSmartStats();
-        workspacePanels.renderModuleOutline(getActiveModule());
-        return true;
-      }
-      if (
-        cmdId.endsWith("-insert-chart") ||
-        cmdId.endsWith("-insert-shape") ||
-        cmdId.endsWith("-insert-link") ||
-        cmdId.endsWith("-data-fn-browser") ||
-        cmdId.endsWith("-review-comment")
-      ) {
-        const p = document.createElement("p");
-        p.textContent = "[" + (execRes?.summary || cmdId) + "]";
-        docEditor.appendChild(p);
-        workspacePanels.computeSmartStats();
-        workspacePanels.renderModuleOutline(getActiveModule());
-        return true;
-      }
-      if (cmdId.endsWith("-insert-table")) {
-        workspacePanels.appendDocTableRow();
-        return true;
-      }
-      if (cmdId.endsWith("-data-autosum") || cmdId === "doc-mod-tableformula") {
-        workspacePanels.computeDocTableSummary();
-        return true;
-      }
-      if (cmdId.endsWith("-data-sort")) {
-        const tbody = document.getElementById("doc-table-body");
-        if (tbody) {
-          const rows = Array.from(tbody.querySelectorAll("tr:not(#doc-table-sum-row)"));
-          const asc = Boolean(execRes?.sortAscending);
-          rows.sort((a, b) => {
-            const aText = (a.cells[0]?.textContent || "").trim();
-            const bText = (b.cells[0]?.textContent || "").trim();
-            return asc ? aText.localeCompare(bText, "ko") : bText.localeCompare(aText, "ko");
-          });
-          const sumRow = document.getElementById("doc-table-sum-row");
-          rows.forEach((r) => {
-            if (sumRow) {
-              sumRow.before(r);
-            } else {
-              tbody.appendChild(r);
-            }
-          });
-        }
-        return true;
-      }
-      return false;
+      const runEffect = docEditorEffectFor(cmdId);
+      if (!runEffect) return false;
+      runEffect({ docEditor, targetEl, cmdId, execRes });
+      return true;
     }
 
     async function prepareRibbonAsyncEffect(cmdId, effectiveModule) {
@@ -609,279 +619,307 @@
       return null;
     }
 
-    async function applyRibbonDomSideEffects(cmdId, execRes, preparedEffect) {
-      const sheetController = getSheetController();
-      const workspacePanels = getWorkspacePanels();
-      if (cmdId.endsWith("-view-theme")) {
-        const html = document.documentElement;
-        const next = html.dataset.theme === "dark" ? "light" : "dark";
-        html.dataset.theme = next;
-        localRibbonState.darkThemeEnabled = next === "dark";
-        const themeBtn = document.getElementById("btn-theme-toggle");
-        if (themeBtn) host.__EASYOFFICE_ICONS__.syncThemeToggle(document, next);
-        return;
-      }
-      if (cmdId.endsWith("-view-zoom")) {
-        let zoom = Number(execRes?.zoomPercent || 0);
-        if (!zoom) {
-          const curZoom = Number(localRibbonState.zoomPercent || 100);
-          if (curZoom === 100) zoom = 125;
-          else if (curZoom === 125) zoom = 150;
-          else if (curZoom === 150) zoom = 90;
-          else zoom = 100;
-          localRibbonState.zoomPercent = zoom;
-        }
-        const stage = document.querySelector(".canvas-stage");
-        if (stage) stage.style.zoom = zoom + "%";
-        const zoomLabel = document.getElementById("status-zoom-label");
-        if (zoomLabel) zoomLabel.textContent = zoom + "%";
-        const slider = document.getElementById("status-zoom-slider");
-        if (slider) slider.value = String(zoom);
-        return;
-      }
-      if (cmdId.endsWith("-view-ribbon")) {
-        const strip = document.getElementById("ribbon-tool-strip");
-        if (strip) {
-          if (execRes?.ribbonCollapsed !== undefined) {
-            strip.hidden = Boolean(execRes.ribbonCollapsed);
-          } else {
-            strip.hidden = !strip.hidden;
-            localRibbonState.ribbonCollapsed = strip.hidden;
-          }
-        }
-        return;
-      }
-      if (cmdId.endsWith("-view-split")) {
-        const stage = document.querySelector(".canvas-stage");
-        if (stage) {
-          const nextSplit =
-            execRes?.splitViewEnabled !== undefined
-              ? Boolean(execRes.splitViewEnabled)
-              : stage.dataset.splitView !== "true";
-          stage.dataset.splitView = nextSplit ? "true" : "false";
-          workspacePanels.syncSplitComparePane(stage);
-        }
-        return;
-      }
-      if (cmdId.endsWith("-review-verify") || cmdId.endsWith("-data-validation")) {
-        workspacePanels.applySecurityAuditDom(preparedEffect?.auditOutcome);
-        return;
-      }
-      if (cmdId.endsWith("-review-stats")) {
-        workspacePanels.applySmartDiagnoseDom(preparedEffect?.smartRes, false);
-        return;
-      }
-      if (cmdId === "hwp-mod-manuscript" || cmdId.endsWith("-manuscript")) {
-        const docEditorEl = document.getElementById("doc-editor");
-        const gridOn = docEditorEl ? !docEditorEl.classList.contains("manuscript-grid") : false;
-        localRibbonState.manuscriptGridEnabled = gridOn;
-        if (docEditorEl) {
-          docEditorEl.classList.toggle("manuscript-grid", gridOn);
-        }
-        const gridBtn = document.getElementById("btn-toggle-doc-grid");
-        if (gridBtn) {
-          gridBtn.classList.toggle("active", gridOn);
-          gridBtn.setAttribute("aria-pressed", gridOn ? "true" : "false");
-        }
-        const hwpNotice = document.getElementById("hwp-manuscript-preview");
-        if (hwpNotice) {
-          hwpNotice.classList.toggle("manuscript-grid", gridOn);
-          hwpNotice.hidden = getActiveModule() !== "HWP" || !gridOn;
-        }
-        workspacePanels.saveActiveDocTabState();
-        return;
-      }
+    const ZOOM_CYCLE = { 100: 125, 125: 150, 150: 90 };
+    const DEFAULT_ZOOM_PERCENT = 100;
 
+    function viewEffectTheme() {
+      const html = document.documentElement;
+      const next = html.dataset.theme === "dark" ? "light" : "dark";
+      html.dataset.theme = next;
+      localRibbonState.darkThemeEnabled = next === "dark";
+      const themeBtn = document.getElementById("btn-theme-toggle");
+      if (themeBtn) host.__EASYOFFICE_ICONS__.syncThemeToggle(document, next);
+    }
+
+    function viewEffectZoom(_cmdId, execRes) {
+      let zoom = Number(execRes?.zoomPercent || 0);
+      if (!zoom) {
+        const curZoom = Number(localRibbonState.zoomPercent || DEFAULT_ZOOM_PERCENT);
+        zoom = ZOOM_CYCLE[curZoom] ?? DEFAULT_ZOOM_PERCENT;
+        localRibbonState.zoomPercent = zoom;
+      }
+      const stage = document.querySelector(".canvas-stage");
+      if (stage) stage.style.zoom = zoom + "%";
+      const zoomLabel = document.getElementById("status-zoom-label");
+      if (zoomLabel) zoomLabel.textContent = zoom + "%";
+      const slider = document.getElementById("status-zoom-slider");
+      if (slider) slider.value = String(zoom);
+    }
+
+    function viewEffectRibbon(_cmdId, execRes) {
+      const strip = document.getElementById("ribbon-tool-strip");
+      if (!strip) return;
+      if (execRes?.ribbonCollapsed !== undefined) {
+        strip.hidden = Boolean(execRes.ribbonCollapsed);
+        return;
+      }
+      strip.hidden = !strip.hidden;
+      localRibbonState.ribbonCollapsed = strip.hidden;
+    }
+
+    function viewEffectSplit(_cmdId, execRes) {
+      const stage = document.querySelector(".canvas-stage");
+      if (!stage) return;
+      const nextSplit =
+        execRes?.splitViewEnabled !== undefined ? Boolean(execRes.splitViewEnabled) : stage.dataset.splitView !== "true";
+      stage.dataset.splitView = nextSplit ? "true" : "false";
+      getWorkspacePanels().syncSplitComparePane(stage);
+    }
+
+    function viewEffectManuscript() {
+      const docEditorEl = document.getElementById("doc-editor");
+      const gridOn = docEditorEl ? !docEditorEl.classList.contains("manuscript-grid") : false;
+      localRibbonState.manuscriptGridEnabled = gridOn;
+      if (docEditorEl) docEditorEl.classList.toggle("manuscript-grid", gridOn);
+      const gridBtn = document.getElementById("btn-toggle-doc-grid");
+      if (gridBtn) {
+        gridBtn.classList.toggle("active", gridOn);
+        gridBtn.setAttribute("aria-pressed", gridOn ? "true" : "false");
+      }
+      const hwpNotice = document.getElementById("hwp-manuscript-preview");
+      if (hwpNotice) {
+        hwpNotice.classList.toggle("manuscript-grid", gridOn);
+        hwpNotice.hidden = getActiveModule() !== "HWP" || !gridOn;
+      }
+      getWorkspacePanels().saveActiveDocTabState();
+    }
+
+    // First matching entry wins and ends the dispatch (these commands have no module-specific follow-up).
+    const VIEW_RIBBON_EFFECTS = [
+      [(id) => id.endsWith("-view-theme"), viewEffectTheme],
+      [(id) => id.endsWith("-view-zoom"), viewEffectZoom],
+      [(id) => id.endsWith("-view-ribbon"), viewEffectRibbon],
+      [(id) => id.endsWith("-view-split"), viewEffectSplit],
+      [(id) => endsWithAny(id, ["-review-verify", "-data-validation"]), (_id, _res, prepared) => getWorkspacePanels().applySecurityAuditDom(prepared?.auditOutcome)],
+      [(id) => id.endsWith("-review-stats"), (_id, _res, prepared) => getWorkspacePanels().applySmartDiagnoseDom(prepared?.smartRes, false)],
+      [(id) => id === "hwp-mod-manuscript" || id.endsWith("-manuscript"), viewEffectManuscript],
+    ];
+
+    // Document pane commands; true when the doc editor handled the command.
+    function applyDocumentPaneEffect(cmdId, execRes) {
       const curMod = getActiveModule();
       const docEditor = document.getElementById("doc-editor");
-      if (
-        curMod === "CONV" &&
-        (cmdId.startsWith("document-") || cmdId.startsWith("doc-mod-"))
-      ) {
+      const workspacePanels = getWorkspacePanels();
+      const isConvDocCommand = cmdId.startsWith("document-") || cmdId.startsWith("doc-mod-");
+      if (curMod === "CONV" && isConvDocCommand) {
         workspacePanels.restoreDocTabState("DOC");
         if (applyDocEditorRibbonEffect(docEditor, cmdId, execRes)) {
           workspacePanels.saveDocTabStateForModule("DOC");
-          return;
+          return true;
         }
       }
-      if (
-        (curMod === "DOC" || curMod === "HWP") &&
-        applyDocEditorRibbonEffect(docEditor, cmdId, execRes)
-      ) {
+      if ((curMod === "DOC" || curMod === "HWP") && applyDocEditorRibbonEffect(docEditor, cmdId, execRes)) {
         workspacePanels.saveActiveDocTabState();
+        return true;
+      }
+      return false;
+    }
+
+    function setSheetSummary(execRes) {
+      const out = document.getElementById("sheet-eval-result");
+      if (out && execRes?.summary) out.textContent = execRes.summary;
+    }
+
+    function applySheetRibbonEffect(cmdId, execRes, preparedEffect) {
+      const sheetController = getSheetController();
+      // Cell formatting (bold/italic/underline/strike/size) applies to the whole selected range.
+      if (sheetController.applySheetFormatCommand(cmdId)) return;
+      switch (cmdId) {
+        case "sheet-data-autosum":
+        case "sheet-data-fn-browser":
+          sheetController.commitPreparedFormulaBarEvaluation(preparedEffect?.formulaPrep, null);
+          break;
+        case "sheet-insert-table":
+          sheetController.appendSheetRow();
+          break;
+        case "sheet-data-sort":
+          sheetController.sortActiveSheetByColumnB();
+          setSheetSummary(execRes);
+          break;
+        case "sheet-mod-pivot":
+          sheetController.applySheetPivotOrChartSummary("pivot", execRes);
+          break;
+        case "sheet-mod-chart":
+        case "sheet-insert-chart":
+          sheetController.applySheetPivotOrChartSummary("chart", execRes);
+          break;
+        case "sheet-mod-condfmt":
+          sheetController.toggleSheetConditionalFormatting(!document.querySelector("#pane-sheet td.condfmt-high"));
+          setSheetSummary(execRes);
+          break;
+        case "sheet-mod-freeze":
+          sheetController.toggleSheetFreezePanes(!document.querySelector("#pane-sheet thead.frozen-header"));
+          setSheetSummary(execRes);
+          break;
+        default:
+          setSheetSummary(execRes);
+      }
+    }
+
+    const SLIDE_TITLE_TOGGLES = {
+      "slide-home-bold": ["fontWeight", "700"],
+      "slide-home-italic": ["fontStyle", "italic"],
+      "slide-home-underline": ["textDecoration", "underline"],
+    };
+    const SLIDE_TITLE_SIZES = ["20px", "22px", "24px", "18px"];
+    const SLIDE_TITLE_COLORS = ["", "var(--eo-primary)", "var(--eo-accent-slide)", ""];
+    const SLIDE_PADDINGS = ["20px", "12px", "28px"];
+    const SLIDE_TRANSITIONS = ["fade", "push", "zoom", "none"];
+    const SLIDE_INSERT_OBJECT_COMMANDS = new Set(["slide-insert-table", "slide-insert-chart", "slide-insert-shape"]);
+    const SLIDE_NOTE_COMMANDS = new Set(["slide-insert-link", "slide-data-autosum", "slide-data-fn-browser", "slide-review-comment"]);
+
+    function slideTitleEffect(cmdId, ctx) {
+      const { titleZone } = ctx;
+      if (!titleZone) return false;
+      const toggle = SLIDE_TITLE_TOGGLES[cmdId];
+      if (toggle) {
+        const [prop, value] = toggle;
+        titleZone.style[prop] = titleZone.style[prop] !== value ? value : "";
+      } else if (cmdId === "slide-home-style") {
+        const presetIdx = SLIDE_TITLE_SIZES.indexOf(cyclePreset(SLIDE_TITLE_SIZES, titleZone.style.fontSize));
+        titleZone.style.fontSize = SLIDE_TITLE_SIZES[presetIdx];
+        titleZone.style.color = SLIDE_TITLE_COLORS[presetIdx];
+      } else {
+        return false;
+      }
+      getWorkspacePanels().syncActiveSlideDomStylesToDeck();
+      return true;
+    }
+
+    function slideAppendNote(cmdId, execRes, ctx) {
+      const { curSlide, curIdx } = ctx;
+      const tag = "[" + (execRes?.summary || cmdId) + "]";
+      if (curSlide) {
+        const prefix = curSlide.lower ? curSlide.lower + " · " : "";
+        curSlide.lower = prefix + tag;
+      }
+      getWorkspacePanels().renderSlideDeck(curIdx);
+    }
+
+    function slideSortLower(execRes, ctx) {
+      const { curSlide, curIdx } = ctx;
+      const asc = Boolean(execRes?.sortAscending);
+      const parts = curSlide.lower
+        .split("·")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      parts.sort((a, b) => (asc ? a.localeCompare(b, "ko") : b.localeCompare(a, "ko")));
+      curSlide.lower = parts.join(" · ");
+      getWorkspacePanels().renderSlideDeck(curIdx);
+    }
+
+    function slidePresenterMode(ctx) {
+      const { stageBox } = ctx;
+      if (stageBox) {
+        stageBox.dataset.presenterMode = stageBox.dataset.presenterMode !== "true" ? "true" : "false";
+        getWorkspacePanels().syncActiveSlideDomStylesToDeck();
+      }
+      document.getElementById("btn-slide-laser")?.click();
+    }
+
+    function slideCycleTransition(ctx) {
+      const sel = document.getElementById("slide-transition-select");
+      const { curSlide, curIdx } = ctx;
+      if (!sel || !curSlide) return;
+      sel.value = SLIDE_TRANSITIONS[(SLIDE_TRANSITIONS.indexOf(sel.value) + 1) % SLIDE_TRANSITIONS.length];
+      curSlide.transition = sel.value;
+      getWorkspacePanels().renderSlideDeck(curIdx);
+    }
+
+    function slideContentEffect(cmdId, execRes, ctx) {
+      if (SLIDE_INSERT_OBJECT_COMMANDS.has(cmdId)) {
+        getWorkspacePanels().insertSlideStageObject(cmdId, execRes);
+      } else if (SLIDE_NOTE_COMMANDS.has(cmdId)) {
+        slideAppendNote(cmdId, execRes, ctx);
+      } else if (cmdId === "slide-data-sort" && ctx.curSlide?.lower) {
+        slideSortLower(execRes, ctx);
+      } else if (cmdId === "slide-mod-presenter") {
+        slidePresenterMode(ctx);
+      } else if (cmdId === "slide-mod-transition") {
+        slideCycleTransition(ctx);
+      } else {
+        return false;
+      }
+      return true;
+    }
+
+    function slideStageEffect(cmdId, execRes, ctx) {
+      const { stageBox, lowerZone } = ctx;
+      if (cmdId === "slide-layout-columns" && lowerZone) {
+        const curCols = Number(lowerZone.style.columnCount || "1");
+        const cols = curCols >= MAX_DOC_COLUMNS ? 1 : curCols + 1;
+        lowerZone.style.columnCount = cols > 1 ? String(cols) : "";
+      } else if (cmdId === "slide-layout-margins") {
+        stageBox.style.padding = cyclePreset(SLIDE_PADDINGS, stageBox.style.padding);
+      } else if (cmdId === "slide-mod-snap" || cmdId === "slide-review-track") {
+        stageBox.style.outline = stageBox.style.outline ? "" : "2px dashed var(--eo-primary)";
+      } else {
+        stageBox.dataset.layoutState = execRes?.summary || cmdId;
+      }
+      getWorkspacePanels().syncActiveSlideDomStylesToDeck();
+    }
+
+    function applySlideRibbonEffect(cmdId, execRes) {
+      const curIdx = getActiveSlideIndex();
+      const ctx = {
+        lowerZone: document.getElementById("slide-lower-zone"),
+        stageBox: document.getElementById("slide-stage-box"),
+        titleZone: document.getElementById("slide-title-zone"),
+        curIdx,
+        curSlide: slideDeckState[curIdx],
+      };
+      const handled = slideTitleEffect(cmdId, ctx) || slideContentEffect(cmdId, execRes, ctx);
+      if (!handled && ctx.stageBox) slideStageEffect(cmdId, execRes, ctx);
+      const metaStatus = document.getElementById("slide-meta-status");
+      if (metaStatus && execRes?.summary && cmdId !== "slide-mod-transition") {
+        metaStatus.textContent =
+          "슬라이드 " + (getActiveSlideIndex() + 1) + " / " + slideDeckState.length + " · " + execRes.summary;
+      }
+    }
+
+    const PDF_BADGE_EFFECTS = {
+      "pdf-mod-highlight": { cls: "pdf-highlight-badge", dataKey: "pdfHighlight", fallback: "형광펜 주석 강조 적용" },
+      "pdf-mod-splitmerge": { cls: "pdf-splitmerge-badge", dataKey: "pdfSplitmerge", fallback: "페이지 분할·병합 준비 완료" },
+    };
+
+    function applyPdfBadge(spec, execRes) {
+      const card = document.getElementById("pdf-page-card");
+      if (!card) return;
+      const existing = card.querySelector("." + spec.cls);
+      const badge = existing || document.createElement("span");
+      badge.className = spec.cls;
+      badge.dataset[spec.dataKey] = "true";
+      badge.textContent = execRes?.summary || spec.fallback;
+      if (!existing) card.appendChild(badge);
+    }
+
+    async function applyRibbonDomSideEffects(cmdId, execRes, preparedEffect) {
+      const viewEffect = VIEW_RIBBON_EFFECTS.find(([matches]) => matches(cmdId));
+      if (viewEffect) {
+        viewEffect[1](cmdId, execRes, preparedEffect);
         return;
       }
+      if (applyDocumentPaneEffect(cmdId, execRes)) return;
       if (cmdId.startsWith("sheet-")) {
-        const out = document.getElementById("sheet-eval-result");
-        // Cell formatting (bold/italic/underline/strike/size) applies to the whole selected range.
-        if (sheetController.applySheetFormatCommand(cmdId)) {
-          // handled by sheet-format.js (model-level, one undo step through the tracked op)
-        } else if (cmdId === "sheet-data-autosum" || cmdId === "sheet-data-fn-browser") {
-          sheetController.commitPreparedFormulaBarEvaluation(preparedEffect?.formulaPrep, null);
-        } else if (cmdId === "sheet-insert-table") {
-          sheetController.appendSheetRow();
-        } else if (cmdId === "sheet-data-sort") {
-          sheetController.sortActiveSheetByColumnB();
-          if (out && execRes?.summary) out.textContent = execRes.summary;
-        } else if (cmdId === "sheet-mod-pivot") {
-          sheetController.applySheetPivotOrChartSummary("pivot", execRes);
-        } else if (cmdId === "sheet-mod-chart" || cmdId === "sheet-insert-chart") {
-          sheetController.applySheetPivotOrChartSummary("chart", execRes);
-        } else if (cmdId === "sheet-mod-condfmt") {
-          const condOn = !document.querySelector("#pane-sheet td.condfmt-high");
-          sheetController.toggleSheetConditionalFormatting(condOn);
-          if (out && execRes?.summary) out.textContent = execRes.summary;
-        } else if (cmdId === "sheet-mod-freeze") {
-          const freezeOn = !document.querySelector("#pane-sheet thead.frozen-header");
-          sheetController.toggleSheetFreezePanes(freezeOn);
-          if (out && execRes?.summary) out.textContent = execRes.summary;
-        } else if (out && execRes?.summary) {
-          out.textContent = execRes.summary;
-        }
+        applySheetRibbonEffect(cmdId, execRes, preparedEffect);
         return;
       }
       if (cmdId.startsWith("slide-")) {
-        const titleZone = document.getElementById("slide-title-zone");
-        const lowerZone = document.getElementById("slide-lower-zone");
-        const stageBox = document.getElementById("slide-stage-box");
-        const curIdx = getActiveSlideIndex();
-        const curSlide = slideDeckState[curIdx];
-        if (cmdId === "slide-home-bold" && titleZone) {
-          const boldOn = titleZone.style.fontWeight !== "700";
-          titleZone.style.fontWeight = boldOn ? "700" : "";
-          workspacePanels.syncActiveSlideDomStylesToDeck();
-        } else if (cmdId === "slide-home-italic" && titleZone) {
-          const italicOn = titleZone.style.fontStyle !== "italic";
-          titleZone.style.fontStyle = italicOn ? "italic" : "";
-          workspacePanels.syncActiveSlideDomStylesToDeck();
-        } else if (cmdId === "slide-home-underline" && titleZone) {
-          const underOn = titleZone.style.textDecoration !== "underline";
-          titleZone.style.textDecoration = underOn ? "underline" : "";
-          workspacePanels.syncActiveSlideDomStylesToDeck();
-        } else if (cmdId === "slide-home-style" && titleZone) {
-          const sizes = ["20px", "22px", "24px", "18px"];
-          const colors = ["", "var(--eo-primary)", "var(--eo-accent-slide)", ""];
-          const curIdxSize = sizes.indexOf(titleZone.style.fontSize);
-          const presetIdx = curIdxSize >= 0 ? (curIdxSize + 1) % sizes.length : 1;
-          titleZone.style.fontSize = sizes[presetIdx];
-          titleZone.style.color = colors[presetIdx];
-          workspacePanels.syncActiveSlideDomStylesToDeck();
-        } else if (
-          cmdId === "slide-insert-table" ||
-          cmdId === "slide-insert-chart" ||
-          cmdId === "slide-insert-shape"
-        ) {
-          workspacePanels.insertSlideStageObject(cmdId, execRes);
-        } else if (
-          cmdId === "slide-insert-link" ||
-          cmdId === "slide-data-autosum" ||
-          cmdId === "slide-data-fn-browser" ||
-          cmdId === "slide-review-comment"
-        ) {
-          const tag = "[" + (execRes?.summary || cmdId) + "]";
-          if (curSlide) {
-            const prefix = curSlide.lower ? curSlide.lower + " · " : "";
-            curSlide.lower = prefix + tag;
-          }
-          workspacePanels.renderSlideDeck(curIdx);
-        } else if (cmdId === "slide-data-sort" && curSlide?.lower) {
-          const asc = Boolean(execRes?.sortAscending);
-          const parts = curSlide.lower
-            .split("·")
-            .map((s) => s.trim())
-            .filter(Boolean);
-          parts.sort((a, b) => (asc ? a.localeCompare(b, "ko") : b.localeCompare(a, "ko")));
-          curSlide.lower = parts.join(" · ");
-          workspacePanels.renderSlideDeck(curIdx);
-        } else if (cmdId === "slide-mod-presenter") {
-          if (stageBox) {
-            const nextPres = stageBox.dataset.presenterMode !== "true";
-            stageBox.dataset.presenterMode = nextPres ? "true" : "false";
-            workspacePanels.syncActiveSlideDomStylesToDeck();
-          }
-          document.getElementById("btn-slide-laser")?.click();
-        } else if (cmdId === "slide-mod-transition") {
-          const sel = document.getElementById("slide-transition-select");
-          if (sel && curSlide) {
-            const opts = ["fade", "push", "zoom", "none"];
-            const nextIdx = (opts.indexOf(sel.value) + 1) % opts.length;
-            sel.value = opts[nextIdx];
-            curSlide.transition = sel.value;
-            workspacePanels.renderSlideDeck(curIdx);
-          }
-        } else if (stageBox) {
-          if (cmdId === "slide-layout-columns" && lowerZone) {
-            const curCols = Number(lowerZone.style.columnCount || "1");
-            const cols = curCols >= 3 ? 1 : curCols + 1;
-            lowerZone.style.columnCount = cols > 1 ? String(cols) : "";
-          } else if (cmdId === "slide-layout-margins") {
-            const pads = ["20px", "12px", "28px"];
-            const curPadIdx = pads.indexOf(stageBox.style.padding);
-            const idx = curPadIdx >= 0 ? (curPadIdx + 1) % pads.length : 1;
-            stageBox.style.padding = pads[idx];
-          } else if (cmdId === "slide-mod-snap" || cmdId === "slide-review-track") {
-            stageBox.style.outline = stageBox.style.outline ? "" : "2px dashed var(--eo-primary)";
-          } else {
-            stageBox.dataset.layoutState = execRes?.summary || cmdId;
-          }
-          workspacePanels.syncActiveSlideDomStylesToDeck();
-        }
-        const metaStatus = document.getElementById("slide-meta-status");
-        if (metaStatus && execRes?.summary && cmdId !== "slide-mod-transition") {
-          metaStatus.textContent =
-            "슬라이드 " +
-            (getActiveSlideIndex() + 1) +
-            " / " +
-            slideDeckState.length +
-            " · " +
-            execRes.summary;
-        }
+        applySlideRibbonEffect(cmdId, execRes);
         return;
       }
       if (cmdId === "pdf-mod-rotate") {
-        let nextRot = (getPdfRotationDeg() + 90) % 360;
-        if (typeof execRes?.pdfRotationDegrees === "number") {
-          nextRot = execRes.pdfRotationDegrees;
-        }
-        setPdfRotationDeg(nextRot);
-        const badge = document.getElementById("pdf-rotation-badge");
-        const card = document.getElementById("pdf-page-card");
-        if (badge) badge.textContent = "회전: " + nextRot + "°";
-        if (card) {
-          card.style.transform = "rotate(" + nextRot + "deg)";
-          card.dataset.rotatedQuarter = nextRot % 180 !== 0 ? "true" : "false";
-        }
-        workspacePanels.applyPdfStudioFormState();
+        const rotated = typeof execRes?.pdfRotationDegrees === "number" ? execRes.pdfRotationDegrees : (getPdfRotationDeg() + 90) % 360;
+        applyPdfRotationDom(rotated);
+        getWorkspacePanels().applyPdfStudioFormState();
         return;
       }
       if (cmdId === "pdf-mod-tooffice") {
         await activatePaneInternal("CONV", false);
         return;
       }
-      if (cmdId === "pdf-mod-highlight") {
-        const card = document.getElementById("pdf-page-card");
-        if (card) {
-          const existing = card.querySelector(".pdf-highlight-badge");
-          const hl = existing || document.createElement("span");
-          hl.className = "pdf-highlight-badge";
-          hl.dataset.pdfHighlight = "true";
-          hl.textContent = execRes?.summary || "형광펜 주석 강조 적용";
-          if (!existing) card.appendChild(hl);
-        }
-      } else if (cmdId === "pdf-mod-splitmerge") {
-        const card = document.getElementById("pdf-page-card");
-        if (card) {
-          const existing = card.querySelector(".pdf-splitmerge-badge");
-          const sm = existing || document.createElement("span");
-          sm.className = "pdf-splitmerge-badge";
-          sm.dataset.pdfSplitmerge = "true";
-          sm.textContent = execRes?.summary || "페이지 분할·병합 준비 완료";
-          if (!existing) card.appendChild(sm);
-        }
-      }
-      if (cmdId.startsWith("pdf-")) {
-        workspacePanels.applyPdfStudioFormState();
-      }
+      if (PDF_BADGE_EFFECTS[cmdId]) applyPdfBadge(PDF_BADGE_EFFECTS[cmdId], execRes);
+      if (cmdId.startsWith("pdf-")) getWorkspacePanels().applyPdfStudioFormState();
     }
 
     // HWP ribbon commands edit the text-only fallback editor; the embedded editor has its own toolbar.

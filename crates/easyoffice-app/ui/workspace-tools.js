@@ -52,6 +52,36 @@
     return prefix + "다운로드 실패: 변환 결과 파일을 받지 못했습니다";
   }
 
+  function buildSmartSummaryText(res) {
+    const lines = Array.isArray(res.summaryLines) ? res.summaryLines : [];
+    const actions = Array.isArray(res.actionItems) ? res.actionItems : [];
+    const suggestions = Array.isArray(res.styleSuggestions) ? res.styleSuggestions : [];
+    const summaryText = lines.length > 0 ? lines.join(" / ") : "핵심 문장 요약 완료";
+    const actionSuffix = actions.length > 0 ? " · 조치: " + actions.join(", ") : "";
+    const styleSuffix = suggestions.length > 0 ? " · 교정: " + suggestions.join(" / ") : "";
+    return "요약: " + summaryText + actionSuffix + styleSuffix;
+  }
+
+  function inputScrubField(input) {
+    if (!input || !(input.value || "").trim()) return null;
+    return { read: () => input.value, write: (v) => { input.value = v; } };
+  }
+
+  // The watermark layer is scrubbed on its own only when it does not simply mirror the watermark input.
+  function layerScrubField(wmLayer, wmInput, prevWmInputVal) {
+    if (!wmLayer) return null;
+    const mirrorsInput = Boolean(wmInput) && wmLayer.textContent === prevWmInputVal;
+    if (mirrorsInput || !(wmLayer.textContent || "").trim()) return null;
+    return { read: () => wmLayer.textContent, write: (v) => { wmLayer.textContent = v; } };
+  }
+
+  function applyFieldScrub(field, res) {
+    if (!field || !res) return 0;
+    const count = Number(res.totalMasked || 0);
+    if (count > 0) field.write(res.scrubbedText);
+    return count;
+  }
+
   function createWorkspaceTools(deps, panelHooks) {
     const {
       document,
@@ -218,64 +248,85 @@
       return result.ok;
     }
 
-    function saveActiveModuleDocument() {
-      return enqueueWorkspaceHistoryOp(async () => {
-        await sheetController.commitPendingFocusedSheetCell(true);
-        const curMod = getActiveModule();
-        const hwpHost = getHwpHost?.();
-        const hwpSession = getHwpSession?.();
-        if (curMod === "HWP" && hwpHost?.isEmbedActive() && hwpSession) return saveEmbeddedHwp(hwpSession);
-        const extMap = {
-          DOC: "docx",
-          HWP: "hwpx",
-          SHEET: "xlsx",
-          SLIDE: "pptx",
-          PDF: "pdf",
-          CONV: document.getElementById("conv-dst-fmt")?.value || "hwpx",
-        };
-        const dstExt = extMap[curMod] || "docx";
-        let srcExt = dstExt;
-        if (curMod === "CONV") {
-          srcExt = document.getElementById("conv-src-fmt")?.value || "docx";
-        }
-        const sourceTarget = curMod === "CONV" ? srcExt : curMod;
-        const content = buildConversionContent(sourceTarget);
-        const title = resolveSaveFileBase(curMod);
-        const fb = document.getElementById("status-command-feedback");
-        let res = null;
-        let failure = "";
-        try {
-          res = await invokeIpc(
-            "convert_document_format",
-            JSON.stringify({ sourceFormat: srcExt, targetFormat: dstExt, title, ...content })
-          );
-        } catch (err) {
-          failure = err?.message || String(err);
-        }
+    function setStatusFeedback(text) {
+      const fb = document.getElementById("status-command-feedback");
+      if (fb) fb.textContent = text;
+    }
+
+    async function convertForSave(srcExt, dstExt, title, content) {
+      try {
+        const res = await invokeIpc(
+          "convert_document_format",
+          JSON.stringify({ sourceFormat: srcExt, targetFormat: dstExt, title, ...content })
+        );
         const b64 = String(res?.convertedBase64 || "");
-        if (!failure && !b64) failure = "변환 결과가 비어 있습니다";
-        const deliver = curMod === "CONV" ? deliverSavedFile : deliverInPlace;
-        const delivery = failure ? null : await deliver(b64, title, dstExt);
-        if (delivery?.cancelled) {
-          if (fb) fb.textContent = "문서 저장 취소 (" + dstExt.toUpperCase() + "): 저장 위치를 선택하지 않았습니다";
-          return false;
-        }
-        if (!failure && !delivery.ok) failure = delivery.error || "파일 다운로드를 시작하지 못했습니다";
-        if (failure) {
-          if (fb) fb.textContent = "문서 저장 실패 (" + dstExt.toUpperCase() + "): " + failure;
-          return false;
-        }
-        if (fb) {
-          fb.textContent =
-            "문서 저장 완료 (" + delivery.name + " · " + (res.outputBytes || 0) + "B · " +
-            describeConversionSpec(res) + ")";
-        }
-        noteSavedName(delivery.name);
-        return true;
-      });
+        return { res, b64, failure: b64 ? "" : "변환 결과가 비어 있습니다" };
+      } catch (err) {
+        return { res: null, b64: "", failure: err?.message || String(err) };
+      }
+    }
+
+    const SAVE_EXT_BY_MODULE = { DOC: "docx", HWP: "hwpx", SHEET: "xlsx", SLIDE: "pptx", PDF: "pdf" };
+
+    async function runSaveActiveModuleDocument() {
+      await sheetController.commitPendingFocusedSheetCell(true);
+      const curMod = getActiveModule();
+      const hwpHost = getHwpHost?.();
+      const hwpSession = getHwpSession?.();
+      if (curMod === "HWP" && hwpHost?.isEmbedActive() && hwpSession) return saveEmbeddedHwp(hwpSession);
+      const isConv = curMod === "CONV";
+      const dstExt = (isConv ? document.getElementById("conv-dst-fmt")?.value || "hwpx" : SAVE_EXT_BY_MODULE[curMod]) || "docx";
+      const srcExt = isConv ? document.getElementById("conv-src-fmt")?.value || "docx" : dstExt;
+      const title = resolveSaveFileBase(curMod);
+      const content = buildConversionContent(isConv ? srcExt : curMod);
+      const converted = await convertForSave(srcExt, dstExt, title, content);
+      let failure = converted.failure;
+      const deliver = isConv ? deliverSavedFile : deliverInPlace;
+      const delivery = failure ? null : await deliver(converted.b64, title, dstExt);
+      if (delivery?.cancelled) {
+        setStatusFeedback("문서 저장 취소 (" + dstExt.toUpperCase() + "): 저장 위치를 선택하지 않았습니다");
+        return false;
+      }
+      if (!failure && !delivery.ok) failure = delivery.error || "파일 다운로드를 시작하지 못했습니다";
+      if (failure) {
+        setStatusFeedback("문서 저장 실패 (" + dstExt.toUpperCase() + "): " + failure);
+        return false;
+      }
+      const res = converted.res;
+      setStatusFeedback(
+        "문서 저장 완료 (" + delivery.name + " · " + (res.outputBytes || 0) + "B · " + describeConversionSpec(res) + ")"
+      );
+      noteSavedName(delivery.name);
+      return true;
+    }
+
+    function saveActiveModuleDocument() {
+      return enqueueWorkspaceHistoryOp(runSaveActiveModuleDocument);
     }
 
     let insertModeLabel = "삽입";
+
+    function updateStudioPosition(text, chars, estPages) {
+      const posEl = document.getElementById("status-studio-pos");
+      if (!posEl) return;
+      const editor = document.getElementById("doc-editor");
+      const cols = Number.parseInt(editor?.style?.columnCount || "1", 10) || 1;
+      const lineCount = Math.max(1, text ? text.split(/\n+/).length : 1);
+      const colChars = Math.max(1, chars % 60 || Math.min(60, chars));
+      posEl.textContent =
+        "1/" + estPages + " 쪽   " + cols + "단   " + lineCount + "줄   " + colChars + "칸 | 구역: 1 / 1 |";
+    }
+
+    function updateDocFilename(estPages) {
+      const fileEl = document.getElementById("status-doc-filename");
+      if (!fileEl) return;
+      const activeTabTitle = getWindowBridge?.()?.getDocumentName(getActiveModule());
+      const fallbackName =
+        getActiveModule() === "HWP"
+          ? "[붙임2] 행정안전부 전자결재 표준 기안문.hwpx"
+          : "[붙임2] 2026년 디지털행정혁신 종합 추진계획(안).docx";
+      fileEl.textContent = (activeTabTitle || fallbackName) + " — " + estPages + "페이지";
+    }
 
     function computeSmartStats() {
       const statsEl = document.getElementById("smart-stats");
@@ -290,25 +341,8 @@
       if (zoneEl) {
         zoneEl.textContent = "1 / " + estPages + " 쪽 · 구역: 1 / 1 · " + insertModeLabel;
       }
-      const posEl = document.getElementById("status-studio-pos");
-      if (posEl) {
-        const editor = document.getElementById("doc-editor");
-        const cols = Number.parseInt(editor?.style?.columnCount || "1", 10) || 1;
-        const lineCount = Math.max(1, text ? text.split(/\n+/).length : 1);
-        const colChars = Math.max(1, chars % 60 || Math.min(60, chars));
-        posEl.textContent =
-          "1/" + estPages + " 쪽   " + cols + "단   " + lineCount + "줄   " + colChars + "칸 | 구역: 1 / 1 |";
-      }
-      const fileEl = document.getElementById("status-doc-filename");
-      if (fileEl) {
-        const activeTabTitle = getWindowBridge?.()?.getDocumentName(getActiveModule());
-        const curMod = getActiveModule();
-        const fallbackName =
-          curMod === "HWP"
-            ? "[붙임2] 행정안전부 전자결재 표준 기안문.hwpx"
-            : "[붙임2] 2026년 디지털행정혁신 종합 추진계획(안).docx";
-        fileEl.textContent = (activeTabTitle || fallbackName) + " — " + estPages + "페이지";
-      }
+      updateStudioPosition(text, chars, estPages);
+      updateDocFilename(estPages);
     }
 
     function applySmartDiagnoseDom(res, updateFeedback) {
@@ -319,15 +353,7 @@
       if (statsEl) {
         statsEl.textContent = `문자: ${res.charCount} · 단어: ${res.wordCount} · 문장: ${res.sentenceCount} · 읽기: ${res.readingTimeSeconds}초 · 요약: ${res.summaryCount}건`;
       }
-      if (summaryEl) {
-        const lines = Array.isArray(res.summaryLines) ? res.summaryLines : [];
-        const actions = Array.isArray(res.actionItems) ? res.actionItems : [];
-        const suggestions = Array.isArray(res.styleSuggestions) ? res.styleSuggestions : [];
-        const summaryText = lines.length > 0 ? lines.join(" / ") : "핵심 문장 요약 완료";
-        const actionSuffix = actions.length > 0 ? " · 조치: " + actions.join(", ") : "";
-        const styleSuffix = suggestions.length > 0 ? " · 교정: " + suggestions.join(" / ") : "";
-        summaryEl.textContent = "요약: " + summaryText + actionSuffix + styleSuffix;
-      }
+      if (summaryEl) summaryEl.textContent = buildSmartSummaryText(res);
       if (fb && updateFeedback) {
         fb.textContent = `문장 진단 완료 · 요약 ${res.summaryCount}건 · 실행 항목 ${res.actionItemCount}건 · 교정 제안 ${res.suggestionCount}건`;
       }
@@ -445,96 +471,50 @@
       return total;
     }
 
+    function requestFieldScrub(field) {
+      return field ? invokeIpc("scrub_pii", field.read()) : Promise.resolve(null);
+    }
+
+    function sumFieldMasks(fields, results) {
+      let total = 0;
+      fields.forEach((field, idx) => {
+        if (!field || results[idx] === null) return;
+        assertValidScrubResult(field.read(), results[idx]);
+        total += Number(results[idx].totalMasked || 0);
+      });
+      return total;
+    }
+
     async function scrubPdfDom(preSnapshot) {
       const pdfNodes = Array.from(
         document.querySelectorAll("#pdf-page-card h3, #pdf-page-card p:not(#pdf-form-status)")
       );
-      const nodeGroups = [];
-      pdfNodes.forEach((el) => {
-        nodeGroups.push(...collectActiveScrubGroups(el));
-      });
+      const nodeGroups = pdfNodes.flatMap((el) => collectActiveScrubGroups(el));
       const wmInput = document.getElementById("pdf-watermark-input");
       const wmLayer = document.getElementById("pdf-watermark-layer");
       const prevWmInputVal = wmInput ? wmInput.value : "";
-      const scrubSeparateLayer =
-        Boolean(wmLayer) &&
-        !(wmInput && wmLayer.textContent === prevWmInputVal) &&
-        Boolean((wmLayer.textContent || "").trim());
-      const appInput = document.getElementById("pdf-form-applicant");
-      const deptInput = document.getElementById("pdf-form-dept");
-
-      const wmInputPromise =
-        wmInput && (wmInput.value || "").trim()
-          ? invokeIpc("scrub_pii", wmInput.value)
-          : Promise.resolve(null);
-      const wmLayerPromise = scrubSeparateLayer
-        ? invokeIpc("scrub_pii", wmLayer.textContent)
-        : Promise.resolve(null);
-      const appPromise =
-        appInput && (appInput.value || "").trim()
-          ? invokeIpc("scrub_pii", appInput.value)
-          : Promise.resolve(null);
-      const deptPromise =
-        deptInput && (deptInput.value || "").trim()
-          ? invokeIpc("scrub_pii", deptInput.value)
-          : Promise.resolve(null);
-
-      const [groupResults, wmInputRes, wmLayerRes, appRes, deptRes] = await Promise.all([
+      const fields = [
+        inputScrubField(wmInput),
+        layerScrubField(wmLayer, wmInput, prevWmInputVal),
+        inputScrubField(document.getElementById("pdf-form-applicant")),
+        inputScrubField(document.getElementById("pdf-form-dept")),
+      ];
+      const fieldPromises = fields.map(requestFieldScrub);
+      const [groupResults, ...fieldResults] = await Promise.all([
         Promise.all(nodeGroups.map((g) => invokeIpc("scrub_pii", g.origText))),
-        wmInputPromise,
-        wmLayerPromise,
-        appPromise,
-        deptPromise,
+        ...fieldPromises,
       ]);
 
-      let pendingTotal = countPendingGroupMasks(nodeGroups, groupResults);
-      if (wmInput && wmInputRes !== null) {
-        assertValidScrubResult(wmInput.value, wmInputRes);
-        pendingTotal += Number(wmInputRes.totalMasked || 0);
-      }
-      if (scrubSeparateLayer && wmLayer && wmLayerRes !== null) {
-        assertValidScrubResult(wmLayer.textContent, wmLayerRes);
-        pendingTotal += Number(wmLayerRes.totalMasked || 0);
-      }
-      if (appInput && appRes !== null) {
-        assertValidScrubResult(appInput.value, appRes);
-        pendingTotal += Number(appRes.totalMasked || 0);
-      }
-      if (deptInput && deptRes !== null) {
-        assertValidScrubResult(deptInput.value, deptRes);
-        pendingTotal += Number(deptRes.totalMasked || 0);
-      }
-
-      if (pendingTotal === 0) {
-        return 0;
-      }
+      const pendingTotal = countPendingGroupMasks(nodeGroups, groupResults) + sumFieldMasks(fields, fieldResults);
+      if (pendingTotal === 0) return 0;
 
       commitDeferredUndoSnapshot(preSnapshot);
       let totalMasked = applyScrubResultsToGroups(nodeGroups, groupResults);
-      if (wmInput && wmInputRes) {
-        const count = Number(wmInputRes.totalMasked || 0);
-        if (count > 0) wmInput.value = wmInputRes.scrubbedText;
-        totalMasked += count;
-      }
-      if (wmLayer) {
-        if (wmInput && wmLayer.textContent === prevWmInputVal) {
-          wmLayer.textContent = wmInput.value;
-        } else if (wmLayerRes) {
-          const count = Number(wmLayerRes.totalMasked || 0);
-          if (count > 0) wmLayer.textContent = wmLayerRes.scrubbedText;
-          totalMasked += count;
-        }
-      }
-      if (appInput && appRes) {
-        const count = Number(appRes.totalMasked || 0);
-        if (count > 0) appInput.value = appRes.scrubbedText;
-        totalMasked += count;
-      }
-      if (deptInput && deptRes) {
-        const count = Number(deptRes.totalMasked || 0);
-        if (count > 0) deptInput.value = deptRes.scrubbedText;
-        totalMasked += count;
-      }
+      totalMasked += applyFieldScrub(fields[0], fieldResults[0]);
+      if (wmLayer && wmInput && wmLayer.textContent === prevWmInputVal) wmLayer.textContent = wmInput.value;
+      totalMasked += applyFieldScrub(fields[1], fieldResults[1]);
+      totalMasked += applyFieldScrub(fields[2], fieldResults[2]);
+      totalMasked += applyFieldScrub(fields[3], fieldResults[3]);
       const formStatus = document.getElementById("pdf-form-status");
       if (formStatus && (formStatus.textContent || "").startsWith("양식 반영 완료")) {
         applyPdfStudioFormState();
@@ -542,145 +522,155 @@
       return totalMasked;
     }
 
-    function runPiiScrubAction(recordUndo) {
-      return enqueueWorkspaceHistoryOp(async () => {
-        const piiOut = document.getElementById("pii-result-text");
-        if (!piiOut) return;
-        await sheetController.commitPendingFocusedSheetCell(true);
-        const preSnapshot = recordUndo ? captureWorkspaceSnapshot(false) : null;
-        const curMod = getActiveModule();
-        let targetScope = curMod;
-        if (curMod === "CONV") {
-          targetScope = resolveSourceScopeKind(
-            document.getElementById("conv-src-fmt")?.value || "docx"
-          );
-        }
-        let totalMasked = 0;
-
-        if (targetScope === "SHEET") {
-          const curSheet = getActiveSheetName();
-          sheetDataStore[curSheet] = sheetController.snapshotDomSheetCells();
-          let scrubbed;
-          try {
-            scrubbed = await scrubSheetStoreMap(
-              sheetDataStore,
-              curSheet,
-              sheetController.trackSheetAsyncWork
-            );
-          } catch (sheetScrubErr) {
-            const fb = document.getElementById("status-command-feedback");
-            if (fb && !String(fb.textContent || "").startsWith("[요청 거부]")) {
-              fb.textContent = "[요청 거부] " + (sheetScrubErr?.message || String(sheetScrubErr));
-            }
-            throw sheetScrubErr;
-          }
-          totalMasked = scrubbed.totalMasked;
-          if (totalMasked > 0) {
-            commitDeferredUndoSnapshot(preSnapshot);
-            sheetController.replaceLiveSheetDataStore(scrubbed.nextSheets);
-            sheetController.restoreDomSheetCells(curSheet);
-            sheetController.refreshFocusedSheetCellPendingSnapshot();
-            sheetController.updateSheetSelectionAndAggregates(getActiveSheetCellRef() || "F2");
-          }
-        } else if (targetScope === "SLIDE") {
-          if (curMod === "SLIDE" && typeof syncActiveSlideDomStylesToDeck === "function") {
-            syncActiveSlideDomStylesToDeck();
-          }
-          const fields = [];
-          const slideNodeJobs = [];
-          slideDeckState.forEach((slide) => {
-            ["title", "lower", "notes"].forEach((key) => {
-              if ((slide[key] || "").trim()) {
-                fields.push({ slide, key, text: slide[key] });
-              }
-            });
-            if (Array.isArray(slide.insertedNodes) && slide.insertedNodes.length > 0) {
-              const tempDiv = document.createElement("div");
-              restoreDomChildren(tempDiv, slide.insertedNodes, document);
-              const groups = collectActiveScrubGroups(tempDiv);
-              if (groups.length > 0) {
-                slideNodeJobs.push({ slide, tempDiv, groups });
-              }
-            }
-          });
-          const [results, nodeJobResults] = await Promise.all([
-            Promise.all(fields.map((item) => invokeIpc("scrub_pii", item.text))),
-            Promise.all(
-              slideNodeJobs.map((job) =>
-                Promise.all(job.groups.map((g) => invokeIpc("scrub_pii", g.origText)))
-              )
-            ),
-          ]);
-          results.forEach((res, idx) => {
-            assertValidScrubResult(fields[idx].text, res);
-            totalMasked += Number(res.totalMasked || 0);
-          });
-          nodeJobResults.forEach((groupRes, jIdx) => {
-            totalMasked += countPendingGroupMasks(slideNodeJobs[jIdx].groups, groupRes);
-          });
-          if (totalMasked > 0) {
-            commitDeferredUndoSnapshot(preSnapshot);
-            results.forEach((res, idx) => {
-              const count = Number(res.totalMasked || 0);
-              if (count > 0) fields[idx].slide[fields[idx].key] = res.scrubbedText;
-            });
-            nodeJobResults.forEach((groupRes, jIdx) => {
-              const job = slideNodeJobs[jIdx];
-              const modCount = applyScrubResultsToGroups(job.groups, groupRes);
-              if (modCount > 0) {
-                job.slide.insertedNodes = serializeDomChildren(job.tempDiv);
-              }
-            });
-            renderSlideDeck(getActiveSlideIndex());
-          }
-        } else if (targetScope === "PDF") {
-          totalMasked = await scrubPdfDom(preSnapshot);
-        } else {
-          ensureDefaultDocTabStore();
-          const editorEl = document.getElementById("doc-editor");
-          if (curMod === targetScope && editorEl) {
-            const activeGroups = collectActiveScrubGroups(editorEl);
-            const groupResults = await Promise.all(
-              activeGroups.map((g) => invokeIpc("scrub_pii", g.origText))
-            );
-            const pendingCount = countPendingGroupMasks(activeGroups, groupResults);
-            if (pendingCount > 0) {
-              commitDeferredUndoSnapshot(preSnapshot);
-              totalMasked += applyScrubResultsToGroups(activeGroups, groupResults);
-              computeDocTableSummary();
-              saveActiveDocTabState();
-            }
-          } else if (Array.isArray(docTabStore[targetScope]?.editorNodes)) {
-            const tempDiv = document.createElement("div");
-            restoreDomChildren(tempDiv, docTabStore[targetScope].editorNodes, document);
-            const activeGroups = collectActiveScrubGroups(tempDiv);
-            const groupResults = await Promise.all(
-              activeGroups.map((g) => invokeIpc("scrub_pii", g.origText))
-            );
-            const pendingCount = countPendingGroupMasks(activeGroups, groupResults);
-            if (pendingCount > 0) {
-              commitDeferredUndoSnapshot(preSnapshot);
-              const modMasked = applyScrubResultsToGroups(activeGroups, groupResults);
-              if (modMasked > 0) {
-                docTabStore[targetScope] = {
-                  ...docTabStore[targetScope],
-                  editorNodes: serializeDomChildren(tempDiv),
-                };
-              }
-              totalMasked += modMasked;
-            }
-          }
-        }
-
-        if (totalMasked > 0) {
-          piiOut.textContent = "개인정보(주민번호·연락처·이메일·카드·계좌·여권·면허·사업자번호) " + totalMasked + "건 마스킹 완료 (" + curMod + ")";
-        } else {
-          piiOut.textContent = "개인정보(주민번호·연락처·이메일·카드·계좌·여권·면허·사업자번호) 스캔 완료 (감지 0건 · " + curMod + ")";
-        }
+    async function scrubSheetScope(preSnapshot) {
+      const curSheet = getActiveSheetName();
+      sheetDataStore[curSheet] = sheetController.snapshotDomSheetCells();
+      let scrubbed;
+      try {
+        scrubbed = await scrubSheetStoreMap(sheetDataStore, curSheet, sheetController.trackSheetAsyncWork);
+      } catch (sheetScrubErr) {
         const fb = document.getElementById("status-command-feedback");
-        if (fb) fb.textContent = piiOut.textContent;
-        computeSmartStats();
+        if (fb && !String(fb.textContent || "").startsWith("[요청 거부]")) {
+          fb.textContent = "[요청 거부] " + (sheetScrubErr?.message || String(sheetScrubErr));
+        }
+        throw sheetScrubErr;
+      }
+      if (scrubbed.totalMasked > 0) {
+        commitDeferredUndoSnapshot(preSnapshot);
+        sheetController.replaceLiveSheetDataStore(scrubbed.nextSheets);
+        sheetController.restoreDomSheetCells(curSheet);
+        sheetController.refreshFocusedSheetCellPendingSnapshot();
+        sheetController.updateSheetSelectionAndAggregates(getActiveSheetCellRef() || "F2");
+      }
+      return scrubbed.totalMasked;
+    }
+
+    const SLIDE_TEXT_KEYS = ["title", "lower", "notes"];
+
+    function collectSlideScrubJobs() {
+      const fields = [];
+      const slideNodeJobs = [];
+      slideDeckState.forEach((slide) => {
+        for (const key of SLIDE_TEXT_KEYS) {
+          if ((slide[key] || "").trim()) fields.push({ slide, key, text: slide[key] });
+        }
+        if (!Array.isArray(slide.insertedNodes) || slide.insertedNodes.length === 0) return;
+        const tempDiv = document.createElement("div");
+        restoreDomChildren(tempDiv, slide.insertedNodes, document);
+        const groups = collectActiveScrubGroups(tempDiv);
+        if (groups.length > 0) slideNodeJobs.push({ slide, tempDiv, groups });
       });
+      return { fields, slideNodeJobs };
+    }
+
+    function applySlideScrubResults(fields, results, slideNodeJobs, nodeJobResults) {
+      results.forEach((res, idx) => {
+        if (Number(res.totalMasked || 0) > 0) fields[idx].slide[fields[idx].key] = res.scrubbedText;
+      });
+      nodeJobResults.forEach((groupRes, jIdx) => {
+        const job = slideNodeJobs[jIdx];
+        if (applyScrubResultsToGroups(job.groups, groupRes) > 0) {
+          job.slide.insertedNodes = serializeDomChildren(job.tempDiv);
+        }
+      });
+    }
+
+    async function scrubSlideScope(curMod, preSnapshot) {
+      if (curMod === "SLIDE" && typeof syncActiveSlideDomStylesToDeck === "function") {
+        syncActiveSlideDomStylesToDeck();
+      }
+      const { fields, slideNodeJobs } = collectSlideScrubJobs();
+      const [results, nodeJobResults] = await Promise.all([
+        Promise.all(fields.map((item) => invokeIpc("scrub_pii", item.text))),
+        Promise.all(
+          slideNodeJobs.map((job) => Promise.all(job.groups.map((g) => invokeIpc("scrub_pii", g.origText))))
+        ),
+      ]);
+      let totalMasked = 0;
+      results.forEach((res, idx) => {
+        assertValidScrubResult(fields[idx].text, res);
+        totalMasked += Number(res.totalMasked || 0);
+      });
+      nodeJobResults.forEach((groupRes, jIdx) => {
+        totalMasked += countPendingGroupMasks(slideNodeJobs[jIdx].groups, groupRes);
+      });
+      if (totalMasked > 0) {
+        commitDeferredUndoSnapshot(preSnapshot);
+        applySlideScrubResults(fields, results, slideNodeJobs, nodeJobResults);
+        renderSlideDeck(getActiveSlideIndex());
+      }
+      return totalMasked;
+    }
+
+    function scrubGroupResults(activeGroups) {
+      return Promise.all(activeGroups.map((g) => invokeIpc("scrub_pii", g.origText)));
+    }
+
+    async function scrubLiveEditor(editorEl, preSnapshot) {
+      const activeGroups = collectActiveScrubGroups(editorEl);
+      const groupResults = await scrubGroupResults(activeGroups);
+      if (countPendingGroupMasks(activeGroups, groupResults) === 0) return 0;
+      commitDeferredUndoSnapshot(preSnapshot);
+      const masked = applyScrubResultsToGroups(activeGroups, groupResults);
+      computeDocTableSummary();
+      saveActiveDocTabState();
+      return masked;
+    }
+
+    async function scrubStoredEditorNodes(targetScope, preSnapshot) {
+      const tempDiv = document.createElement("div");
+      restoreDomChildren(tempDiv, docTabStore[targetScope].editorNodes, document);
+      const activeGroups = collectActiveScrubGroups(tempDiv);
+      const groupResults = await scrubGroupResults(activeGroups);
+      if (countPendingGroupMasks(activeGroups, groupResults) === 0) return 0;
+      commitDeferredUndoSnapshot(preSnapshot);
+      const modMasked = applyScrubResultsToGroups(activeGroups, groupResults);
+      if (modMasked > 0) {
+        docTabStore[targetScope] = { ...docTabStore[targetScope], editorNodes: serializeDomChildren(tempDiv) };
+      }
+      return modMasked;
+    }
+
+    async function scrubDocScope(curMod, targetScope, preSnapshot) {
+      ensureDefaultDocTabStore();
+      const editorEl = document.getElementById("doc-editor");
+      if (curMod === targetScope && editorEl) return scrubLiveEditor(editorEl, preSnapshot);
+      if (Array.isArray(docTabStore[targetScope]?.editorNodes)) return scrubStoredEditorNodes(targetScope, preSnapshot);
+      return 0;
+    }
+
+    const PII_RESULT_LABEL = "개인정보(주민번호·연락처·이메일·카드·계좌·여권·면허·사업자번호) ";
+
+    function scrubTargetScope(curMod) {
+      if (curMod !== "CONV") return curMod;
+      return resolveSourceScopeKind(document.getElementById("conv-src-fmt")?.value || "docx");
+    }
+
+    async function scrubByScope(curMod, targetScope, preSnapshot) {
+      if (targetScope === "SHEET") return scrubSheetScope(preSnapshot);
+      if (targetScope === "SLIDE") return scrubSlideScope(curMod, preSnapshot);
+      if (targetScope === "PDF") return scrubPdfDom(preSnapshot);
+      return scrubDocScope(curMod, targetScope, preSnapshot);
+    }
+
+    async function runPiiScrub(recordUndo) {
+      const piiOut = document.getElementById("pii-result-text");
+      if (!piiOut) return;
+      await sheetController.commitPendingFocusedSheetCell(true);
+      const preSnapshot = recordUndo ? captureWorkspaceSnapshot(false) : null;
+      const curMod = getActiveModule();
+      const totalMasked = await scrubByScope(curMod, scrubTargetScope(curMod), preSnapshot);
+      piiOut.textContent =
+        totalMasked > 0
+          ? PII_RESULT_LABEL + totalMasked + "건 마스킹 완료 (" + curMod + ")"
+          : PII_RESULT_LABEL + "스캔 완료 (감지 0건 · " + curMod + ")";
+      const fb = document.getElementById("status-command-feedback");
+      if (fb) fb.textContent = piiOut.textContent;
+      computeSmartStats();
+    }
+
+    function runPiiScrubAction(recordUndo) {
+      return enqueueWorkspaceHistoryOp(() => runPiiScrub(recordUndo));
     }
 
     function withDocStyleUndo(mutateFn) {

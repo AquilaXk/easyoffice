@@ -40,33 +40,38 @@ function insideRoundedTile(x, y) {
   return (x - cx) ** 2 + (y - cy) ** 2 <= r * r;
 }
 
+const SUPERSAMPLE = 8;
+
+/** Supersamples one pixel; returns summed colour channels and the covered sample count. */
+function samplePixel(px, py, scale) {
+  const acc = { r: 0, g: 0, b: 0, covered: 0 };
+  for (let sy = 0; sy < SUPERSAMPLE; sy += 1) {
+    for (let sx = 0; sx < SUPERSAMPLE; sx += 1) {
+      const c = sampleColor((px + (sx + 0.5) / SUPERSAMPLE) * scale, (py + (sy + 0.5) / SUPERSAMPLE) * scale);
+      if (!c) continue;
+      acc.r += c[0];
+      acc.g += c[1];
+      acc.b += c[2];
+      acc.covered += 1;
+    }
+  }
+  return acc;
+}
+
+function writePixel(rgba, offset, { r, g, b, covered }) {
+  if (covered === 0) return;
+  rgba[offset] = Math.round(r / covered);
+  rgba[offset + 1] = Math.round(g / covered);
+  rgba[offset + 2] = Math.round(b / covered);
+  rgba[offset + 3] = Math.round((covered / (SUPERSAMPLE * SUPERSAMPLE)) * 255);
+}
+
 function rasterize(size) {
-  const ss = 8;
   const rgba = Buffer.alloc(size * size * 4);
   const scale = 32 / size;
   for (let py = 0; py < size; py += 1) {
     for (let px = 0; px < size; px += 1) {
-      let r = 0;
-      let g = 0;
-      let b = 0;
-      let covered = 0;
-      for (let sy = 0; sy < ss; sy += 1) {
-        for (let sx = 0; sx < ss; sx += 1) {
-          const c = sampleColor((px + (sx + 0.5) / ss) * scale, (py + (sy + 0.5) / ss) * scale);
-          if (!c) continue;
-          r += c[0];
-          g += c[1];
-          b += c[2];
-          covered += 1;
-        }
-      }
-      const o = (py * size + px) * 4;
-      if (covered > 0) {
-        rgba[o] = Math.round(r / covered);
-        rgba[o + 1] = Math.round(g / covered);
-        rgba[o + 2] = Math.round(b / covered);
-        rgba[o + 3] = Math.round((covered / (ss * ss)) * 255);
-      }
+      writePixel(rgba, (py * size + px) * 4, samplePixel(px, py, scale));
     }
   }
   return rgba;
