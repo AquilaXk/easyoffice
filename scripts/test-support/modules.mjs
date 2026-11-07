@@ -29,3 +29,18 @@ export function createMemoryStorage(seed = {}) {
     },
   };
 }
+
+const COMMAND_PREFIX_MODULE = { document: "DOC", doc: "DOC", hwp: "HWP", sheet: "SHEET", slide: "SLIDE", pdf: "PDF" };
+
+/** Menu item that runs the named studio command (`studio-save`, `studio-undo`, ...). */
+export function studioItem(document, cmd) {
+  return document.querySelector(`.md-item[data-studio-menu-cmd="${cmd}"]`);
+}
+
+/** Menu item that runs one catalog ribbon command id (the ribbon strip no longer exists). */
+export function commandItem(document, commandId) {
+  const catalog = document.defaultView.__EASYOFFICE_RIBBON_CATALOG__;
+  const mod = COMMAND_PREFIX_MODULE[commandId.split("-")[0]];
+  const items = document.querySelectorAll(".md-item[data-studio-menu-cmd]");
+  return items.find((el) => catalog.resolveMenuCommand(el.dataset.studioMenuCmd, mod) === commandId) || null;
+}

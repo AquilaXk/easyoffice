@@ -25,7 +25,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     "layout-paper", "layout-orientation", "layout-columns", "layout-margins",
     "data-autosum", "data-fn-browser", "data-sort", "data-validation",
     "review-track", "review-comment", "review-verify", "review-stats",
-    "view-split", "view-ribbon", "view-theme", "view-zoom",
+    "view-split", "view-theme", "view-zoom",
   ];
   // Module-specific ribbon commands are only enabled in their own module.
   const MODULE_SPECIFIC_COMMANDS = Object.fromEntries([
@@ -40,7 +40,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     "studio-save": ALL_MODULES, "studio-undo": ALL_MODULES, "studio-redo": ALL_MODULES,
     palette: ALL_MODULES, "view-theme": ALL_MODULES, "zoom-in": ALL_MODULES, "zoom-out": ALL_MODULES,
     "zoom-fit-page": ALL_MODULES, "zoom-fit-width": ALL_MODULES, "smart-diagnose": ALL_MODULES,
-    "scrub-pii": ALL_MODULES, "security-audit": ALL_MODULES,
+    "scrub-pii": ALL_MODULES, "security-audit": ALL_MODULES, "bench-run": ALL_MODULES, "view-outline": ALL_MODULES,
     "clip-copy": EDIT_MODULES, "clip-cut": DOC_SHEET_MODULES, "clip-paste": DOC_SHEET_MODULES,
     // Every ribbon command exists for the five editing modules, so its menu item is enabled in all
     // of them (PD-098: the menu bar reaches every command the ribbon has).
@@ -624,13 +624,6 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       const hint = document.getElementById("shortcut-hint");
       if (pill) pill.textContent = (info?.platform || "Desktop") + " · " + modifier;
       if (hint) hint.textContent = modifier === "⌘" ? "⌘K" : modifier + "+K";
-      if (modifier === "Ctrl") {
-        const titles = { "qat-save": "저장 (Ctrl+S)", "qat-undo": "실행 취소 (Ctrl+Z)", "qat-redo": "다시 실행 (Ctrl+Y)" };
-        for (const [id, title] of Object.entries(titles)) {
-          const el = document.getElementById(id);
-          if (el) el.title = title;
-        }
-      }
       return modifier;
     }
 

@@ -110,7 +110,7 @@ test("icons are inserted as SVG elements and replace glyph text", async () => {
     assert.equal(svg.getAttribute("viewBox"), "0 0 24 24");
   }
   const glyphButtons = document
-    .querySelectorAll("#icon-toolbar button, .qat-btn, .statusbar-zoom-btn, .menu-toolbox-toggle, #btn-theme-toggle, #btn-command-palette, .sb-step-btn, #doc-style-bar button")
+    .querySelectorAll("#icon-toolbar button, .statusbar-zoom-btn, #btn-theme-toggle, #btn-command-palette, .sb-step-btn, #doc-style-bar button")
     .filter((b) => GLYPH_ICON.test(textWithoutIcons(b)));
   assert.deepEqual(glyphButtons.map((b) => b.id || b.title), [], "no emoji or symbol characters stand in for icons");
 });

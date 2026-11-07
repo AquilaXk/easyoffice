@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
-import { switchModule } from "./test-support/modules.mjs";
+import { switchModule, studioItem, commandItem } from "./test-support/modules.mjs";
 
 function makeF2AnchoredOfflineRpc(sandbox) {
   return sandbox.__EASYOFFICE_CREATE_OFFLINE_RPC__({
@@ -210,7 +210,7 @@ test("focus-retaining ribbon and theme clicks refresh focused cell pendingSnapsh
   await flushAsyncTurns();
 
   const f2 = document.querySelector('#pane-sheet td[data-cell="F2"]');
-  const boldBtn = document.querySelector('[data-command-id="sheet-home-bold"]');
+  const boldBtn = commandItem(document, "sheet-home-bold");
   assert.ok(f2);
   assert.ok(boldBtn);
 
@@ -278,16 +278,15 @@ test("DOC vs HWP and Slide 1 vs Slide 2 layout commands derive state from target
   const { document, userClick } = await createWorkspaceHarness();
   const docEditor = document.getElementById("doc-editor");
 
-  userClick(document.querySelector('.ribbon-btn[data-category="layout"]'));
   await flushAsyncTurns();
 
-  userClick(document.querySelector('[data-command-id="document-layout-orientation"]'));
+  userClick(commandItem(document, "document-layout-orientation"));
   await flushAsyncTurns();
-  userClick(document.querySelector('[data-command-id="document-layout-columns"]'));
+  userClick(commandItem(document, "document-layout-columns"));
   await flushAsyncTurns();
-  userClick(document.querySelector('[data-command-id="document-layout-margins"]'));
+  userClick(commandItem(document, "document-layout-margins"));
   await flushAsyncTurns();
-  userClick(document.querySelector('[data-command-id="document-layout-paper"]'));
+  userClick(commandItem(document, "document-layout-paper"));
   await flushAsyncTurns();
 
   assert.equal(docEditor.style.maxWidth, "980px");
@@ -305,13 +304,13 @@ test("DOC vs HWP and Slide 1 vs Slide 2 layout commands derive state from target
   assert.equal(docEditor.classList.contains("manuscript-grid"), false);
   assert.equal(document.getElementById("hwp-manuscript-preview").hidden, true);
 
-  userClick(document.querySelector('[data-command-id="hwp-layout-orientation"]'));
+  userClick(commandItem(document, "hwp-layout-orientation"));
   await flushAsyncTurns();
-  userClick(document.querySelector('[data-command-id="hwp-layout-columns"]'));
+  userClick(commandItem(document, "hwp-layout-columns"));
   await flushAsyncTurns();
-  userClick(document.querySelector('[data-command-id="hwp-layout-margins"]'));
+  userClick(commandItem(document, "hwp-layout-margins"));
   await flushAsyncTurns();
-  userClick(document.querySelector('[data-command-id="hwp-layout-paper"]'));
+  userClick(commandItem(document, "hwp-layout-paper"));
   await flushAsyncTurns();
 
   assert.equal(docEditor.style.maxWidth, "980px");
@@ -319,28 +318,27 @@ test("DOC vs HWP and Slide 1 vs Slide 2 layout commands derive state from target
   assert.equal(docEditor.style.padding, "16px 20px");
   assert.equal(docEditor.dataset.paperSize, "Letter");
 
-  userClick(document.querySelector('.ribbon-btn[data-category="moduleSpecific"]'));
   await flushAsyncTurns();
   const hwpTable = docEditor.querySelector("#doc-table");
-  userClick(document.querySelector('[data-command-id="hwp-mod-border"]'));
+  userClick(commandItem(document, "hwp-mod-border"));
   await flushAsyncTurns();
   assert.equal(hwpTable.style.borderStyle, "double");
   hwpTable.style.borderStyle = "";
-  userClick(document.querySelector('[data-command-id="hwp-mod-border"]'));
+  userClick(commandItem(document, "hwp-mod-border"));
   await flushAsyncTurns();
   assert.equal(hwpTable.style.borderStyle, "double");
 
-  userClick(document.querySelector('[data-command-id="hwp-mod-manuscript"]'));
+  userClick(commandItem(document, "hwp-mod-manuscript"));
   await flushAsyncTurns();
   assert.equal(docEditor.classList.contains("manuscript-grid"), true);
   assert.equal(document.getElementById("hwp-manuscript-preview").hidden, false);
 
-  userClick(document.getElementById("qat-undo"));
+  userClick(studioItem(document, "studio-undo"));
   await flushAsyncTurns(8);
   assert.equal(docEditor.classList.contains("manuscript-grid"), false);
   assert.equal(document.getElementById("hwp-manuscript-preview").hidden, true);
 
-  userClick(document.querySelector('[data-command-id="hwp-mod-manuscript"]'));
+  userClick(commandItem(document, "hwp-mod-manuscript"));
   await flushAsyncTurns();
   assert.equal(docEditor.classList.contains("manuscript-grid"), true);
   assert.equal(document.getElementById("hwp-manuscript-preview").hidden, false);
@@ -352,15 +350,14 @@ test("DOC vs HWP and Slide 1 vs Slide 2 layout commands derive state from target
 
   switchModule(document, "SLIDE");
   await flushAsyncTurns();
-  userClick(document.querySelector('.ribbon-btn[data-category="layout"]'));
   await flushAsyncTurns();
 
   const lowerZone = document.getElementById("slide-lower-zone");
   const stageBox = document.getElementById("slide-stage-box");
 
-  userClick(document.querySelector('[data-command-id="slide-layout-columns"]'));
+  userClick(commandItem(document, "slide-layout-columns"));
   await flushAsyncTurns();
-  userClick(document.querySelector('[data-command-id="slide-layout-margins"]'));
+  userClick(commandItem(document, "slide-layout-margins"));
   await flushAsyncTurns();
   assert.equal(lowerZone.style.columnCount, "2");
   assert.equal(stageBox.style.padding, "12px");
@@ -370,9 +367,9 @@ test("DOC vs HWP and Slide 1 vs Slide 2 layout commands derive state from target
   assert.equal(lowerZone.style.columnCount, "");
   assert.equal(stageBox.style.padding, "");
 
-  userClick(document.querySelector('[data-command-id="slide-layout-columns"]'));
+  userClick(commandItem(document, "slide-layout-columns"));
   await flushAsyncTurns();
-  userClick(document.querySelector('[data-command-id="slide-layout-margins"]'));
+  userClick(commandItem(document, "slide-layout-margins"));
   await flushAsyncTurns();
   assert.equal(lowerZone.style.columnCount, "2");
   assert.equal(stageBox.style.padding, "12px");
@@ -383,7 +380,7 @@ test("DOC vs HWP and Slide 1 vs Slide 2 layout commands derive state from target
   assert.equal(stageBox.style.padding, "12px");
 });
 
-test("concurrent switchSheetTab and performWorkspaceUndo serialize ahead of qat-save, convert, and security audit on workspaceHistoryQueue", async () => {
+test("concurrent switchSheetTab and performWorkspaceUndo serialize ahead of save, convert, and security audit on workspaceHistoryQueue", async () => {
   let evalGateResolve = null;
   let undoGateResolve = null;
   const eventLog = [];
@@ -455,7 +452,7 @@ test("concurrent switchSheetTab and performWorkspaceUndo serialize ahead of qat-
   evalGateResolve = () => {};
   const sheet2Tab = document.querySelector('.sheet-tab-btn[data-sheet-tab="Sheet2"]');
   sheet2Tab.click();
-  document.getElementById("qat-save").click();
+  studioItem(document, "studio-save").click();
   await flushAsyncTurns(4);
 
   assert.equal(
@@ -472,12 +469,12 @@ test("concurrent switchSheetTab and performWorkspaceUndo serialize ahead of qat-
   assert.match(firstConvert, /기획조정실/);
 
   eventLog.length = 0;
-  userClick(document.querySelector('[data-command-id="sheet-home-bold"]'));
+  userClick(commandItem(document, "sheet-home-bold"));
   await flushAsyncTurns(8);
 
   undoGateResolve = () => {};
   sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
-  document.getElementById("qat-save").click();
+  studioItem(document, "studio-save").click();
   document.getElementById("btn-run-convert").click();
   document.getElementById("btn-run-security-audit").click();
   await flushAsyncTurns(4);
@@ -497,8 +494,8 @@ test("concurrent switchSheetTab and performWorkspaceUndo serialize ahead of qat-
   assert.equal(eventLog.at(-1), "audit_security");
 });
 
-test("evaluate_sheet batch targets anchor validation, Roman numeral sheet ident, and ribbon-style Undo sync", async () => {
-  const { document, sandbox, userClick } = await createWorkspaceHarness();
+test("evaluate_sheet batch targets anchor validation, Roman numeral sheet ident, and Undo sync", async () => {
+  const { document, sandbox } = await createWorkspaceHarness();
   const offlineRpc = sandbox.__EASYOFFICE_CREATE_OFFLINE_RPC__({
     getActiveModule: () => "SHEET",
     getActiveSheetCellRef: () => "A1",
@@ -632,33 +629,19 @@ test("evaluate_sheet batch targets anchor validation, Roman numeral sheet ident,
   await flushAsyncTurns();
   const f2 = document.querySelector('#pane-sheet td[data-cell="F2"]');
   const baselineText = f2.textContent;
-  const btnStyle = document.getElementById("btn-ribbon-style");
-  const firstRibbonTab = document.querySelector("#ribbon-tabs .ribbon-btn");
-  const baselineTabText = firstRibbonTab.textContent;
-
   f2.focus();
   f2.textContent = "456";
   f2.dispatchEvent({ type: "input", target: f2 });
-  btnStyle.click();
   await flushAsyncTurns(10);
-
-  assert.equal(btnStyle.textContent, "리본: 한글(HWP) 7탭");
-  assert.notEqual(firstRibbonTab.textContent, baselineTabText);
+  assert.equal(f2.textContent, "456");
 
   sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
   await flushAsyncTurns(10);
-  assert.equal(btnStyle.textContent, "리본: 표준 오피스");
-  assert.equal(firstRibbonTab.textContent, baselineTabText);
-  assert.equal(f2.textContent, "456");
+  assert.equal(f2.textContent, baselineText);
 
   sandbox.dispatchWindowKeydown({ key: "y", ctrlKey: true });
   await flushAsyncTurns(10);
-  assert.equal(btnStyle.textContent, "리본: 한글(HWP) 7탭");
-  assert.notEqual(firstRibbonTab.textContent, baselineTabText);
-
-  sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
-  await flushAsyncTurns(10);
-  assert.equal(btnStyle.textContent, "리본: 표준 오피스");
+  assert.equal(f2.textContent, "456");
 
   sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
   await flushAsyncTurns(10);
@@ -670,9 +653,7 @@ test("evaluate_sheet batch targets anchor validation, Roman numeral sheet ident,
   await flushAsyncTurns(10);
   assert.equal(document.documentElement.dataset.themeEffective, "dark");
 
-  userClick(document.querySelector('[data-category="view"]'));
-  await flushAsyncTurns(10);
-  const ribbonThemeBtn = document.querySelector('[data-command-id="sheet-view-theme"]');
+  const ribbonThemeBtn = commandItem(document, "sheet-view-theme");
   assert.ok(ribbonThemeBtn);
   ribbonThemeBtn.click();
   await flushAsyncTurns(10);

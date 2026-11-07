@@ -123,7 +123,7 @@ mod tests {
         }
 
         let bootstrap_json = invoke_c_abi_roundtrip("get_workspace_bootstrap", "");
-        assert!(bootstrap_json.contains("ribbonCategories"));
+        assert!(bootstrap_json.contains("shortcutModifier"));
     }
 
     #[test]
@@ -131,8 +131,11 @@ mod tests {
         use crate::{run_self_test, EasyOfficeError, EasyOfficeIpcRouter};
 
         let bootstrap = EasyOfficeIpcRouter::dispatch("get_workspace_bootstrap", "").unwrap();
-        assert!(bootstrap.contains("ribbonCategories"));
-        assert!(bootstrap.contains("\"ribbonMatrixSlots\":35"));
+        assert!(bootstrap.contains("shortcutModifier"));
+        assert!(
+            !bootstrap.contains("ribbonCategories"),
+            "the ribbon UI is gone"
+        );
 
         let detect_res =
             EasyOfficeIpcRouter::dispatch("detect_format", "docx|HEX:504B03041400").unwrap();

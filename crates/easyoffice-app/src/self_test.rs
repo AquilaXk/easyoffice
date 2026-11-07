@@ -323,7 +323,7 @@ fn check_ipc_responses() -> Result<(), EasyOfficeError> {
     }
 
     let bootstrap = EasyOfficeIpcRouter::dispatch("get_workspace_bootstrap", "")?;
-    if !bootstrap.contains("HWP/HWPX") {
+    if !bootstrap.contains("\"shortcutModifier\"") || bootstrap.contains("ribbonCategories") {
         return Err(EasyOfficeError::InvalidArgument(
             "IPC 부트스트랩 응답 검증 실패".to_string(),
         ));

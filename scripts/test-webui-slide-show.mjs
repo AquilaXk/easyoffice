@@ -3,7 +3,7 @@ import fs from "node:fs";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { createWorkspaceHarness, createWebUiDom, flushAsyncTurns } from "./webui-dom-harness.mjs";
-import { switchModule } from "./test-support/modules.mjs";
+import { switchModule, studioItem } from "./test-support/modules.mjs";
 
 const UI_DIR = new URL("../crates/easyoffice-app/ui/", import.meta.url);
 const STYLES_CSS = fs.readFileSync(fileURLToPath(new URL("styles.css", UI_DIR)), "utf8");
@@ -442,7 +442,7 @@ test("autosave and save payload carry the managed slide order, titles, bullets a
     ]
   );
 
-  userClick($(document, "qat-save"));
+  userClick(studioItem(document, "studio-save"));
   await flushAsyncTurns(10);
   const payload = converts.at(-1);
   assert.equal(payload.targetFormat, "pptx");

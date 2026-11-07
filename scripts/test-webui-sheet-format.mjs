@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { makeFixtureFile, pickFile } from "./test-support/fixture-files.mjs";
-import { switchModule } from "./test-support/modules.mjs";
+import { switchModule, commandItem } from "./test-support/modules.mjs";
 
 async function openModule(module, options = {}) {
   const h = await createWorkspaceHarness(options);
@@ -58,7 +58,7 @@ test("toggle rule: all bold -> remove, none or mixed -> set all", async () => {
   await press(sandbox, "b");
   assert.equal(bold(document, "B3"), "600");
   await selectRange(document, "B2", [["ArrowDown", 2]]);
-  const btn = () => document.querySelector('[data-command-id="sheet-home-bold"]') || document.getElementById("btn-stylebar-bold");
+  const btn = () => document.getElementById("btn-stylebar-bold");
   assert.equal(btn()?.getAttribute("aria-pressed"), "mixed", "toolbar shows mixed");
   await press(sandbox, "b");
   for (const ref of ["B2", "B3", "B4"]) assert.equal(bold(document, ref), "600", "mixed sets all");
@@ -81,7 +81,7 @@ test("italic and underline apply to the whole range; font size applies to all ce
 test("ribbon font size applies to every cell of the range; strikethrough via Ctrl+5 keeps underline", async () => {
   const { document, sandbox, userClick } = await openModule("SHEET");
   await selectRange(document, "A2", [["ArrowRight", 2], ["ArrowDown", 1]]);
-  userClick(document.querySelector('[data-command-id="sheet-home-style"]'));
+  userClick(commandItem(document, "sheet-home-style"));
   await flushAsyncTurns(14);
   for (const ref of ["A2", "B2", "C2", "A3", "B3", "C3"]) assert.equal(cell(document, ref).style.fontSize, "15px", ref);
   assert.equal(cell(document, "D2").style.fontSize, "", "outside the range is untouched");
