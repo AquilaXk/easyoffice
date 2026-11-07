@@ -67,19 +67,23 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
   // Ignore serialization noise that merely viewing a pane produces (empty cells/styles/lists
   // materialized on first render, table summary attributes recomputed from cell text) so that
   // only real edits mark the workspace dirty.
+  const DERIVED_DATA_KEYS = new Set(["docNum", "docAvg", "docCount"]);
+
+  function canonicalizeObject(value, key) {
+    const out = {};
+    for (const k of Object.keys(value).sort(compareCodeUnits)) {
+      if (key === "data" && DERIVED_DATA_KEYS.has(k)) continue;
+      const c = canonicalizeContent(value[k], k);
+      if (c !== undefined) out[k] = c;
+    }
+    return Object.keys(out).length > 0 ? out : undefined;
+  }
+
   function canonicalizeContent(value, key) {
     if (Array.isArray(value)) {
       return value.length > 0 ? value.map((item) => canonicalizeContent(item, "") ?? null) : undefined;
     }
-    if (value && typeof value === "object") {
-      const out = {};
-      for (const k of Object.keys(value).sort(compareCodeUnits)) {
-        if (key === "data" && (k === "docNum" || k === "docAvg" || k === "docCount")) continue;
-        const c = canonicalizeContent(value[k], k);
-        if (c !== undefined) out[k] = c;
-      }
-      return Object.keys(out).length > 0 ? out : undefined;
-    }
+    if (value && typeof value === "object") return canonicalizeObject(value, key);
     return value === "" || value === null || value === false ? undefined : value;
   }
 
@@ -414,6 +418,19 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       });
     }
 
+    function syncToolbarButtons(mod, commandModule) {
+      // The SHEET home toolbar lists spreadsheet commands only: document-only tools are hidden.
+      const hideInapplicable = mod === "SHEET";
+      for (const btn of document.querySelectorAll("#icon-toolbar button")) {
+        const cmd = btn.dataset.studioCmd || TOOLBAR_ID_COMMANDS[btn.id];
+        if (!cmd) continue;
+        const on = studioCommandApplies(cmd, commandModule);
+        btn.disabled = !on;
+        btn.hidden = hideInapplicable && !on;
+        btn.setAttribute("aria-disabled", on ? "false" : "true");
+      }
+    }
+
     function applyModuleContext(mod) {
       const embed = mod === "HWP" && Boolean(getHwpHost?.()?.isEmbedActive());
       const isDoc = DOC_MODULES.includes(mod) && !embed;
@@ -424,19 +441,11 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       for (const item of document.querySelectorAll("[data-save-as-generic]")) item.hidden = embed;
       const styleBar = document.getElementById("doc-style-bar");
       if (styleBar) styleBar.hidden = !isDoc;
-      // The SHEET home toolbar lists spreadsheet commands only: document-only tools are hidden.
-      const hideInapplicable = mod === "SHEET";
-      for (const btn of document.querySelectorAll("#icon-toolbar button")) {
-        const cmd = btn.dataset.studioCmd || TOOLBAR_ID_COMMANDS[btn.id];
-        if (!cmd) continue;
-        const on = studioCommandApplies(cmd, embed ? "HWP_EMBED" : mod);
-        btn.disabled = !on;
-        btn.hidden = hideInapplicable && !on;
-        btn.setAttribute("aria-disabled", on ? "false" : "true");
-      }
+      const commandModule = embed ? "HWP_EMBED" : mod;
+      syncToolbarButtons(mod, commandModule);
       syncToolbarGroupVisibility();
       for (const item of document.querySelectorAll(".md-item[data-studio-menu-cmd]")) {
-        const on = studioCommandApplies(item.dataset.studioMenuCmd, embed ? "HWP_EMBED" : mod);
+        const on = studioCommandApplies(item.dataset.studioMenuCmd, commandModule);
         item.setAttribute("aria-disabled", on ? "false" : "true");
       }
       const agg = document.getElementById("status-sheet-agg");
@@ -505,33 +514,35 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       else editor.appendChild(p);
     }
 
+    async function runSheetClipboard(cmd) {
+      const where = await getSheetController().runSheetClipboardCommand(cmd);
+      const verb = { "clip-cut": "오려 두기", "clip-copy": "복사", "clip-paste": "붙여넣기" }[cmd];
+      if (where) setFeedback("선택 범위 " + verb + " 완료" + (where === "internal" ? " (앱 내부 클립보드)" : ""));
+      else if (cmd === "clip-paste") setFeedback("붙일 클립보드 내용이 없습니다");
+    }
+
+    async function runDocClipboardPaste(range, withDocStyleUndo) {
+      const text = await readSystemClipboard();
+      if (!text) {
+        setFeedback("붙일 클립보드 내용이 없습니다");
+        return;
+      }
+      withDocStyleUndo(() => insertPlainText(range, text));
+      getWorkspacePanels().computeSmartStats();
+      noteActivity();
+      setFeedback("클립보드 붙이기 완료 (" + Array.from(text).length + "자)");
+    }
+
     async function runClipboardCommand(cmd, withDocStyleUndo) {
       const mod = getActiveModule();
       if (!studioCommandApplies(cmd, mod)) {
         setFeedback("현재 모듈에서는 키보드 Ctrl+X / Ctrl+C / Ctrl+V를 사용하세요");
         return;
       }
-      if (mod === "SHEET" && typeof getSheetController === "function") {
-        const where = await getSheetController().runSheetClipboardCommand(cmd);
-        const verb = { "clip-cut": "오려 두기", "clip-copy": "복사", "clip-paste": "붙여넣기" }[cmd];
-        if (where) setFeedback("선택 범위 " + verb + " 완료" + (where === "internal" ? " (앱 내부 클립보드)" : ""));
-        else if (cmd === "clip-paste") setFeedback("붙일 클립보드 내용이 없습니다");
-        return;
-      }
+      if (mod === "SHEET" && typeof getSheetController === "function") return runSheetClipboard(cmd);
       const range = resolveActiveRange(mod);
       const panels = getWorkspacePanels();
-      if (cmd === "clip-paste") {
-        const text = await readSystemClipboard();
-        if (!text) {
-          setFeedback("붙일 클립보드 내용이 없습니다");
-          return;
-        }
-        withDocStyleUndo(() => insertPlainText(range, text));
-        panels.computeSmartStats();
-        noteActivity();
-        setFeedback("클립보드 붙이기 완료 (" + Array.from(text).length + "자)");
-        return;
-      }
+      if (cmd === "clip-paste") return runDocClipboardPaste(range, withDocStyleUndo);
       const text = range && !range.collapsed ? range.toString() : "";
       if (!text) {
         setFeedback((cmd === "clip-cut" ? "오려 둘" : "복사할") + " 텍스트를 먼저 선택하세요");

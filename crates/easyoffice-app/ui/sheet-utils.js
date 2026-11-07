@@ -153,90 +153,92 @@
     return str[pos - 1];
   }
 
-  function scanDomainAfterAtJs(str, domStart) {
-    if (domStart >= str.length) return -1;
-    let cursor = domStart;
-    const labels = [];
+  // One DNS label: alphanumerics (single script) and inner hyphens.
+  function scanDomainLabelJs(str, labelStart) {
+    let cursor = labelStart;
+    let labelChars = 0;
+    let allAlpha = true;
+    let prevHyphen = false;
+    let labelScript = 0;
     while (cursor < str.length) {
-      const labelStart = cursor;
-      let labelChars = 0;
-      let allAlpha = true;
-      let prevHyphen = false;
-      let labelScript = 0;
-      while (cursor < str.length) {
-        const { ch, step } = readCodePointAt(str, cursor);
-        if (ch === "-") {
-          if (cursor === labelStart) break;
-          allAlpha = false;
-          prevHyphen = true;
-          cursor += 1;
-          labelChars += 1;
-          continue;
-        }
-        if (!isUnicodeAlnum(ch)) break;
-        const sc = charAlphaScript(ch);
-        if (sc !== 0) {
-          if (labelScript !== 0 && labelScript !== sc) break;
-          labelScript = sc;
-        } else {
-          allAlpha = false;
-        }
-        prevHyphen = false;
-        cursor += step;
+      const { ch, step } = readCodePointAt(str, cursor);
+      if (ch === "-") {
+        if (cursor === labelStart) break;
+        allAlpha = false;
+        prevHyphen = true;
+        cursor += 1;
         labelChars += 1;
+        continue;
       }
-      if (cursor === labelStart || prevHyphen) break;
-      labels.push({ endPos: cursor, allAlpha, labelChars });
-      if (cursor < str.length && str[cursor] === ".") {
-        const afterDot = cursor + 1;
-        if (afterDot < str.length) {
-          const nextCp = readCodePointAt(str, afterDot);
-          if (isUnicodeAlnum(nextCp.ch)) {
-            cursor = afterDot;
-            continue;
-          }
-        }
-      }
-      break;
+      if (!isUnicodeAlnum(ch)) break;
+      const sc = charAlphaScript(ch);
+      if (sc === 0) allAlpha = false;
+      else if (labelScript !== 0 && labelScript !== sc) break;
+      else labelScript = sc;
+      prevHyphen = false;
+      cursor += step;
+      labelChars += 1;
     }
+    return { endPos: cursor, allAlpha, labelChars, prevHyphen };
+  }
+
+  // Start of the next label when a dot is followed by an alphanumeric, otherwise -1.
+  function nextDomainLabelStartJs(str, cursor) {
+    const afterDot = cursor + 1;
+    if (str[cursor] !== "." || afterDot >= str.length) return -1;
+    return isUnicodeAlnum(readCodePointAt(str, afterDot).ch) ? afterDot : -1;
+  }
+
+  // The match ends at the last label that can be a TLD (all letters, 2+ chars) with a label before it.
+  function domainEndFromLabelsJs(labels) {
     while (labels.length >= 2) {
       const last = labels.at(-1);
-      if (last.allAlpha && last.labelChars >= 2) {
-        return last.endPos;
-      }
+      if (last.allAlpha && last.labelChars >= 2) return last.endPos;
       labels.pop();
     }
     return -1;
   }
 
-  function scanEmailAtJs(str, idx) {
-    if (idx >= str.length) return { matchedLen: 0, skipUntil: str.length };
-    const first = readCodePointAt(str, idx);
-    const stepOne = idx + first.step;
-    if (!isEmailLocalNonDot(first.ch)) {
-      return { matchedLen: 0, skipUntil: stepOne };
+  function scanDomainAfterAtJs(str, domStart) {
+    if (domStart >= str.length) return -1;
+    let cursor = domStart;
+    const labels = [];
+    while (cursor < str.length) {
+      const label = scanDomainLabelJs(str, cursor);
+      if (label.endPos === cursor || label.prevHyphen) break;
+      labels.push({ endPos: label.endPos, allAlpha: label.allAlpha, labelChars: label.labelChars });
+      const nextStart = nextDomainLabelStartJs(str, label.endPos);
+      if (nextStart < 0) break;
+      cursor = nextStart;
     }
-    const prevCh = readPrevCodePoint(str, idx);
-    if (prevCh !== null) {
-      if (prevCh === "." || prevCh === "_" || prevCh === "%" || prevCh === "+" || prevCh === "-") {
-        return { matchedLen: 0, skipUntil: stepOne };
-      }
-      if (isUnicodeAlnum(prevCh)) {
-        const prevScript = charAlphaScript(prevCh);
-        const curScript = charAlphaScript(first.ch);
-        if (prevScript === 0 || curScript === 0 || prevScript === curScript) {
-          return { matchedLen: 0, skipUntil: stepOne };
-        }
-      }
-    }
+    return domainEndFromLabelsJs(labels);
+  }
 
+  const EMAIL_BLOCKING_PREV_CHARS = new Set([".", "_", "%", "+", "-"]);
+
+  function emailMissJs(skipUntil) {
+    return { matchedLen: 0, skipUntil };
+  }
+
+  // A local part cannot start right after these characters (or inside an alphanumeric run of one script).
+  function isBlockedByPrevCodePointJs(prevCh, firstCh) {
+    if (prevCh === null) return false;
+    if (EMAIL_BLOCKING_PREV_CHARS.has(prevCh)) return true;
+    if (!isUnicodeAlnum(prevCh)) return false;
+    const prevScript = charAlphaScript(prevCh);
+    const curScript = charAlphaScript(firstCh);
+    return prevScript === 0 || curScript === 0 || prevScript === curScript;
+  }
+
+  // Scans the local part; returns { p, prevWasDot } or { abortAt } when the candidate is rejected.
+  function scanEmailLocalPartJs(str, idx) {
     let p = idx;
     let prevWasDot = false;
     let atomScript = 0;
     while (p < str.length) {
       const { ch, step } = readCodePointAt(str, p);
       if (ch === ".") {
-        if (prevWasDot) return { matchedLen: 0, skipUntil: p + 1 };
+        if (prevWasDot) return { abortAt: p + 1 };
         prevWasDot = true;
         atomScript = 0;
         p += 1;
@@ -245,25 +247,28 @@
       if (!isEmailLocalNonDot(ch)) break;
       const sc = charAlphaScript(ch);
       if (sc !== 0) {
-        if (atomScript !== 0 && atomScript !== sc) {
-          return { matchedLen: 0, skipUntil: p };
-        }
+        if (atomScript !== 0 && atomScript !== sc) return { abortAt: p };
         atomScript = sc;
       }
       prevWasDot = false;
       p += step;
     }
+    return { p, prevWasDot };
+  }
 
-    if (p >= str.length || str[p] !== "@") {
-      return { matchedLen: 0, skipUntil: Math.max(p, stepOne) };
-    }
-    if (prevWasDot) {
-      return { matchedLen: 0, skipUntil: p + 1 };
-    }
+  function scanEmailAtJs(str, idx) {
+    if (idx >= str.length) return emailMissJs(str.length);
+    const first = readCodePointAt(str, idx);
+    const stepOne = idx + first.step;
+    if (!isEmailLocalNonDot(first.ch)) return emailMissJs(stepOne);
+    if (isBlockedByPrevCodePointJs(readPrevCodePoint(str, idx), first.ch)) return emailMissJs(stepOne);
+    const local = scanEmailLocalPartJs(str, idx);
+    if (local.abortAt !== undefined) return emailMissJs(local.abortAt);
+    const { p, prevWasDot } = local;
+    if (p >= str.length || str[p] !== "@") return emailMissJs(Math.max(p, stepOne));
+    if (prevWasDot) return emailMissJs(p + 1);
     const endDom = scanDomainAfterAtJs(str, p + 1);
-    if (endDom < 0) {
-      return { matchedLen: 0, skipUntil: p + 1 };
-    }
+    if (endDom < 0) return emailMissJs(p + 1);
     return { matchedLen: endDom - idx, skipUntil: endDom };
   }
 
@@ -308,63 +313,61 @@
     return ch === "-" || ch === "." || ch === " ";
   }
 
+  function skipPhoneSepJs(str, p) {
+    return p < str.length && isPhoneSepChar(str[p]) ? p + 1 : p;
+  }
+
+  function endsDigitRunJs(str, pos) {
+    return pos === str.length || !isAsciiDigitCode(str.codePointAt(pos));
+  }
+
+  // +82 [sep] area(1-3) [sep] mid(3-4) [sep] last(4)
+  function matchIntlPhoneJs(str, idx) {
+    if (!str.startsWith("+82", idx)) return null;
+    const pArea = consumeDigitsJs(str, skipPhoneSepJs(str, idx + 3), 1, 3);
+    if (pArea <= 0) return null;
+    const pMid = consumeDigitsJs(str, skipPhoneSepJs(str, pArea), 3, 4);
+    if (pMid <= 0) return null;
+    const pEnd = consumeDigitsJs(str, skipPhoneSepJs(str, pMid), 4, 4);
+    if (pEnd > 0 && endsDigitRunJs(str, pEnd)) return { len: pEnd - idx, replacement: "+82-**-****-****" };
+    return null;
+  }
+
+  // mid(3-4) sep last(4) starting at midStart; returns the end offset or -1.
+  function matchSeparatedTailJs(str, midStart, sep) {
+    const pMid = consumeDigitsJs(str, midStart, 3, 4);
+    if (!(pMid > 0 && pMid < str.length && str[pMid] === sep)) return -1;
+    const pEnd = consumeDigitsJs(str, pMid + 1, 4, 4);
+    return pEnd > 0 && endsDigitRunJs(str, pEnd) ? pEnd : -1;
+  }
+
+  function matchMobilePhoneJs(str, idx) {
+    const prefix3 = str.slice(idx, idx + 3);
+    if (!/^01[016789]$/.test(prefix3)) return null;
+    const replacement = prefix3 + "-****-****";
+    const p = idx + 3;
+    if (p < str.length && isPhoneSepChar(str[p])) {
+      const pEnd = matchSeparatedTailJs(str, p + 1, str[p]);
+      return pEnd > 0 ? { len: pEnd - idx, replacement } : null;
+    }
+    const compact = idx + 11 <= str.length && /^\d{11}$/.test(str.slice(idx, idx + 11)) && endsDigitRunJs(str, idx + 11);
+    return compact ? { len: 11, replacement } : null;
+  }
+
+  function matchLandlinePhoneJs(str, idx) {
+    const landlineMatch = /^(02|0[3-6][1-5])([-.\s])/.exec(str.slice(idx, idx + 4));
+    if (!landlineMatch) return null;
+    const area = landlineMatch[1];
+    const pEnd = matchSeparatedTailJs(str, idx + area.length + 1, landlineMatch[2]);
+    if (pEnd < 0) return null;
+    return { len: pEnd - idx, replacement: area === "02" ? "02-****-****" : "***-****-****" };
+  }
+
   function matchPhoneAtJs(str, idx) {
     if (idx > 0 && (isAsciiDigitCode(str.codePointAt(idx - 1)) || str[idx - 1] === "+")) {
       return null;
     }
-    if (str.startsWith("+82", idx)) {
-      let p = idx + 3;
-      if (p < str.length && isPhoneSepChar(str[p])) p += 1;
-      const pArea = consumeDigitsJs(str, p, 1, 3);
-      if (pArea > 0) {
-        let p2 = pArea;
-        if (p2 < str.length && isPhoneSepChar(str[p2])) p2 += 1;
-        const pMid = consumeDigitsJs(str, p2, 3, 4);
-        if (pMid > 0) {
-          let p3 = pMid;
-          if (p3 < str.length && isPhoneSepChar(str[p3])) p3 += 1;
-          const pEnd = consumeDigitsJs(str, p3, 4, 4);
-          if (pEnd > 0 && (pEnd === str.length || !isAsciiDigitCode(str.codePointAt(pEnd)))) {
-            return { len: pEnd - idx, replacement: "+82-**-****-****" };
-          }
-        }
-      }
-    }
-    const prefix3 = str.slice(idx, idx + 3);
-    if (/^01[016789]$/.test(prefix3)) {
-      const mobileMask = prefix3 + "-****-****";
-      const p = idx + 3;
-      if (p < str.length && isPhoneSepChar(str[p])) {
-        const sep = str[p];
-        const pMid = consumeDigitsJs(str, p + 1, 3, 4);
-        if (pMid > 0 && pMid < str.length && str[pMid] === sep) {
-          const pEnd = consumeDigitsJs(str, pMid + 1, 4, 4);
-          if (pEnd > 0 && (pEnd === str.length || !isAsciiDigitCode(str.codePointAt(pEnd)))) {
-            return { len: pEnd - idx, replacement: mobileMask };
-          }
-        }
-      } else if (
-        idx + 11 <= str.length &&
-        /^\d{11}$/.test(str.slice(idx, idx + 11)) &&
-        (idx + 11 === str.length || !isAsciiDigitCode(str.codePointAt(idx + 11)))
-      ) {
-        return { len: 11, replacement: mobileMask };
-      }
-    }
-    const landlineMatch = /^(02|0[3-6][1-5])([-.\s])/.exec(str.slice(idx, idx + 4));
-    if (landlineMatch) {
-      const area = landlineMatch[1];
-      const sep = landlineMatch[2];
-      const pMid = consumeDigitsJs(str, idx + area.length + 1, 3, 4);
-      if (pMid > 0 && pMid < str.length && str[pMid] === sep) {
-        const pEnd = consumeDigitsJs(str, pMid + 1, 4, 4);
-        if (pEnd > 0 && (pEnd === str.length || !isAsciiDigitCode(str.codePointAt(pEnd)))) {
-          const mask = area === "02" ? "02-****-****" : "***-****-****";
-          return { len: pEnd - idx, replacement: mask };
-        }
-      }
-    }
-    return null;
+    return matchIntlPhoneJs(str, idx) ?? matchMobilePhoneJs(str, idx) ?? matchLandlinePhoneJs(str, idx);
   }
 
   // Card / bank account / passport / driver's licence / business registration numbers.
@@ -466,62 +469,55 @@
     }
   }
 
+  function matchNonEmailPiiAtJs(text, idx) {
+    const rrn = matchRrnAtJs(text, idx);
+    if (rrn) return { kind: "resident", len: rrn.len, replacement: rrn.replacement };
+    const ph = matchPhoneAtJs(text, idx);
+    if (ph) return { kind: "phone", len: ph.len, replacement: ph.replacement };
+    const idLen = matchIdentifierAtJs(text, idx);
+    if (idLen <= 0) return null;
+    return { kind: "identifier", len: idLen, replacement: text.slice(idx, idx + idLen).replace(/[A-Za-z0-9]/g, "*") };
+  }
+
+  function strippedMetadataFieldsJs(metaMap) {
+    if (!metaMap) return [];
+    return Object.keys(metaMap).filter((k) => {
+      const val = metaMap[k];
+      return k.trim() && val !== null && val !== undefined && String(val).trim() !== "";
+    });
+  }
+
+  // Accepts either (text, metadata) or a JSON envelope { text, metadata } as the text argument.
+  function resolveScrubInputJs(rawInput, metadataObj) {
+    const text = String(rawInput ?? "");
+    if (metadataObj && typeof metadataObj === "object") return { text, metaMap: metadataObj };
+    const parsed = tryParseJsonEnvelope(text);
+    if (!parsed || typeof parsed.text !== "string") return { text, metaMap: null };
+    const hasMeta = parsed.metadata && typeof parsed.metadata === "object";
+    return { text: parsed.text, metaMap: hasMeta ? parsed.metadata : null };
+  }
+
   function localScrubPii(rawInput, metadataObj) {
-    let text = String(rawInput ?? "");
-    let metaMap = metadataObj && typeof metadataObj === "object" ? metadataObj : null;
-    if (metaMap === null) {
-      const parsed = tryParseJsonEnvelope(text);
-      if (parsed && typeof parsed.text === "string") {
-        text = parsed.text;
-        if (parsed.metadata && typeof parsed.metadata === "object") {
-          metaMap = parsed.metadata;
-        }
-      }
-    }
+    const { text, metaMap } = resolveScrubInputJs(rawInput, metadataObj);
     let scrubbedText = "";
-    let residentCount = 0;
-    let phoneCount = 0;
-    let emailCount = 0;
-    let identifierCount = 0;
+    const counts = { resident: 0, phone: 0, email: 0, identifier: 0 };
     const spans = [];
     let idx = 0;
     let emailFailedUntil = 0;
 
     while (idx < text.length) {
+      let hit = null;
       if (idx >= emailFailedUntil) {
         const em = scanEmailAtJs(text, idx);
-        if (em.matchedLen > 0) {
-          scrubbedText += "***@***";
-          spans.push({ start: idx, end: idx + em.matchedLen, replacement: "***@***" });
-          emailCount += 1;
-          idx += em.matchedLen;
-          continue;
-        }
-        emailFailedUntil = em.skipUntil;
+        if (em.matchedLen > 0) hit = { kind: "email", len: em.matchedLen, replacement: "***@***" };
+        else emailFailedUntil = em.skipUntil;
       }
-      const rrn = matchRrnAtJs(text, idx);
-      if (rrn) {
-        scrubbedText += rrn.replacement;
-        spans.push({ start: idx, end: idx + rrn.len, replacement: rrn.replacement });
-        residentCount += 1;
-        idx += rrn.len;
-        continue;
-      }
-      const ph = matchPhoneAtJs(text, idx);
-      if (ph) {
-        scrubbedText += ph.replacement;
-        spans.push({ start: idx, end: idx + ph.len, replacement: ph.replacement });
-        phoneCount += 1;
-        idx += ph.len;
-        continue;
-      }
-      const idLen = matchIdentifierAtJs(text, idx);
-      if (idLen > 0) {
-        const idMask = text.slice(idx, idx + idLen).replace(/[A-Za-z0-9]/g, "*");
-        scrubbedText += idMask;
-        spans.push({ start: idx, end: idx + idLen, replacement: idMask });
-        identifierCount += 1;
-        idx += idLen;
+      hit ??= matchNonEmailPiiAtJs(text, idx);
+      if (hit) {
+        scrubbedText += hit.replacement;
+        spans.push({ start: idx, end: idx + hit.len, replacement: hit.replacement });
+        counts[hit.kind] += 1;
+        idx += hit.len;
         continue;
       }
       const step = text.codePointAt(idx) > 0xffff ? 2 : 1;
@@ -529,25 +525,15 @@
       idx += step;
     }
 
-    const strippedMetadataFields = [];
-    if (metaMap) {
-      Object.keys(metaMap).forEach((k) => {
-        const val = metaMap[k];
-        if (k.trim() && val !== null && val !== undefined && String(val).trim() !== "") {
-          strippedMetadataFields.push(k);
-        }
-      });
-    }
-
     return {
       scrubbedText,
-      maskedResidentIds: residentCount,
-      maskedPhoneNumbers: phoneCount,
-      maskedEmails: emailCount,
-      maskedIdentifierNumbers: identifierCount,
-      totalMasked: residentCount + phoneCount + emailCount + identifierCount,
+      maskedResidentIds: counts.resident,
+      maskedPhoneNumbers: counts.phone,
+      maskedEmails: counts.email,
+      maskedIdentifierNumbers: counts.identifier,
+      totalMasked: counts.resident + counts.phone + counts.email + counts.identifier,
       spans,
-      strippedMetadataFields,
+      strippedMetadataFields: strippedMetadataFieldsJs(metaMap),
     };
   }
 

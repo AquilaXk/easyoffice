@@ -201,175 +201,362 @@
     return formatOpenFormulaEndpointJs(inner);
   }
 
+  /** Handles quote toggling at body[i]; returns the next index, or -1 when body[i] is not an active quote. */
+  function consumeQuoteJs(body, i, st) {
+    const ch = body[i];
+    if (ch === '"' && !st.inSingle) {
+      st.inDouble = !st.inDouble;
+      st.out += ch;
+      return i + 1;
+    }
+    if (ch !== "'" || st.inDouble) return -1;
+    if (st.inSingle && body[i + 1] === "'") {
+      st.out += "''";
+      return i + 2;
+    }
+    st.inSingle = !st.inSingle;
+    st.out += ch;
+    return i + 1;
+  }
+
+  function findBracketCloseJs(body, startInner) {
+    let bracketQuote = false;
+    for (let j = startInner; j < body.length; j += 1) {
+      if (body[j] === "'") bracketQuote = !bracketQuote;
+      else if (body[j] === "]" && !bracketQuote) return j;
+    }
+    return -1;
+  }
+
   function normalizeOpenFormulaReferencesJs(body) {
     if (!body.includes("[")) return body;
-    let out = "";
-    let inDoubleQuote = false;
-    let inSingleQuote = false;
+    const st = { out: "", inDouble: false, inSingle: false };
     let i = 0;
     while (i < body.length) {
-      const ch = body[i];
-      if (ch === '"' && !inSingleQuote) {
-        inDoubleQuote = !inDoubleQuote;
-        out += ch;
-        i += 1;
+      const afterQuote = consumeQuoteJs(body, i, st);
+      if (afterQuote >= 0) {
+        i = afterQuote;
         continue;
       }
-      if (ch === "'" && !inDoubleQuote) {
-        if (inSingleQuote && i + 1 < body.length && body[i + 1] === "'") {
-          out += "''";
-          i += 2;
-        } else {
-          inSingleQuote = !inSingleQuote;
-          out += ch;
-          i += 1;
-        }
+      if (!st.inDouble && !st.inSingle && body[i] === "[") {
+        const closeIdx = findBracketCloseJs(body, i + 1);
+        if (closeIdx < 0) return st.out + body.slice(i);
+        st.out += normalizeBracketedOpenFormulaRefJs(body.slice(i + 1, closeIdx));
+        i = closeIdx + 1;
         continue;
       }
-      if (!inDoubleQuote && !inSingleQuote && ch === "[") {
-        const startInner = i + 1;
-        let closeIdx = -1;
-        let bracketQuote = false;
-        let j = startInner;
-        while (j < body.length) {
-          if (body[j] === "'") {
-            bracketQuote = !bracketQuote;
-          } else if (body[j] === "]" && !bracketQuote) {
-            closeIdx = j;
-            break;
-          }
-          j += 1;
-        }
-        if (closeIdx >= 0) {
-          out += normalizeBracketedOpenFormulaRefJs(body.slice(startInner, closeIdx));
-          i = closeIdx + 1;
-          continue;
-        }
-        out += body.slice(i);
-        break;
-      }
-      out += ch;
+      st.out += body[i];
       i += 1;
     }
-    return out;
+    return st.out;
+  }
+
+  const LEX_ERROR = { error: "#VALUE!" };
+  const NUMBER_TOKEN_RE = /^(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?/;
+  const NUMBER_TRAILER_RE = /^(?:\.|[\p{Alphabetic}_$])/u;
+  const SHEET_WORD_RE = /^[\p{Alphabetic}_$][\p{Alphabetic}\p{N}_$]*$/u;
+  const WORD_BREAK_RE = /[\s!+\-*/^&=<>%(),;:'"#]/;
+  const TWO_CHAR_OPS = new Set(["<=", ">=", "<>"]);
+  const PUNCT_CHARS = "+-*/^&=<>%(),:";
+
+  /** Reads a double-quoted string literal starting at src[i]. */
+  function lexStringJs(src, i) {
+    let pos = i + 1;
+    let buf = "";
+    while (pos < src.length) {
+      if (src[pos] !== '"') {
+        buf += src[pos];
+        pos += 1;
+      } else if (src[pos + 1] === '"') {
+        buf += '"';
+        pos += 2;
+      } else {
+        return { tok: { type: "str", value: buf }, end: pos + 1 };
+      }
+    }
+    return LEX_ERROR;
+  }
+
+  /** Reads a quoted sheet name ('Name'!) starting at src[i]. */
+  function lexQuotedSheetJs(src, i) {
+    let pos = i + 1;
+    let closed = false;
+    while (pos < src.length && !closed) {
+      if (src[pos] !== "'") pos += 1;
+      else if (src[pos + 1] === "'") pos += 2;
+      else {
+        pos += 1;
+        closed = true;
+      }
+    }
+    if (!closed || src[pos] !== "!") return LEX_ERROR;
+    const unquoted = unquoteFormulaSheetTokenOnce(src.slice(i, pos));
+    if (unquoted === null) return LEX_ERROR;
+    return { tok: { type: "sheet", name: unquoted }, end: pos + 1 };
+  }
+
+  function lexErrorLiteralJs(src, i) {
+    const restUpper = asciiUpperJs(src.slice(i));
+    const errHit = FORMULA_ERROR_LIST.find((code) => restUpper.startsWith(code));
+    if (!errHit) return LEX_ERROR;
+    return { tok: { type: "err", code: errHit }, end: i + errHit.length };
+  }
+
+  function lexNumberJs(src, i) {
+    const numMatch = NUMBER_TOKEN_RE.exec(src.slice(i));
+    if (!numMatch) return LEX_ERROR;
+    const parsedNum = Number(numMatch[0]);
+    if (!Number.isFinite(parsedNum)) return { error: "#NUM!" };
+    const end = i + numMatch[0].length;
+    if (NUMBER_TRAILER_RE.test(src.slice(end))) return LEX_ERROR;
+    return { tok: { type: "num", value: parsedNum }, end };
+  }
+
+  function lexWordJs(src, i) {
+    let end = i;
+    while (end < src.length && !WORD_BREAK_RE.test(src[end])) end += 1;
+    if (end === i) return LEX_ERROR;
+    const word = src.slice(i, end);
+    if (src[end] !== "!") return { tok: { type: "ident", value: word }, end };
+    if (!SHEET_WORD_RE.test(word)) return LEX_ERROR;
+    return { tok: { type: "sheet", name: word }, end: end + 1 };
+  }
+
+  function lexOperatorOrWordJs(src, i) {
+    const ch = src[i];
+    const twoChar = src.slice(i, i + 2);
+    if (TWO_CHAR_OPS.has(twoChar)) return { tok: { type: "op", value: twoChar }, end: i + 2 };
+    if (ch === ";") return { tok: { type: "punct", value: "," }, end: i + 1 };
+    if (PUNCT_CHARS.includes(ch)) return { tok: { type: "punct", value: ch }, end: i + 1 };
+    return lexWordJs(src, i);
+  }
+
+  function lexTokenAtJs(src, i) {
+    const ch = src[i];
+    if (ch === '"') return lexStringJs(src, i);
+    if (ch === "'") return lexQuotedSheetJs(src, i);
+    if (ch === "#") return lexErrorLiteralJs(src, i);
+    if ((ch >= "0" && ch <= "9") || ch === ".") return lexNumberJs(src, i);
+    return lexOperatorOrWordJs(src, i);
   }
 
   function tokenizeFormulaJs(rawBody) {
-    if (rawBody.length > MAX_FORMULA_LEN) return { error: "#VALUE!" };
+    if (rawBody.length > MAX_FORMULA_LEN) return LEX_ERROR;
     const src = normalizeOpenFormulaReferencesJs(rawBody);
-    if (src.length > MAX_FORMULA_LEN) return { error: "#VALUE!" };
+    if (src.length > MAX_FORMULA_LEN) return LEX_ERROR;
     const tokens = [];
     let i = 0;
-
-    function pushTok(tok) {
-      if (tokens.length >= MAX_TOKENS) return false;
-      tokens.push(tok);
-      return true;
-    }
-
     while (i < src.length) {
-      const ch = src[i];
-      if (/\s/.test(ch)) {
+      if (/\s/.test(src[i])) {
         i += 1;
         continue;
       }
-      if (ch === '"') {
-        i += 1;
-        let buf = "";
-        let closed = false;
-        while (i < src.length) {
-          if (src[i] === '"') {
-            if (i + 1 < src.length && src[i + 1] === '"') {
-              buf += '"';
-              i += 2;
-              continue;
-            }
-            i += 1;
-            closed = true;
-            break;
-          }
-          buf += src[i];
-          i += 1;
-        }
-        if (!closed) return { error: "#VALUE!" };
-        if (!pushTok({ type: "str", value: buf })) return { error: "#VALUE!" };
-        continue;
-      }
-      if (ch === "'") {
-        const start = i;
-        i += 1;
-        let closed = false;
-        while (i < src.length) {
-          if (src[i] === "'") {
-            if (i + 1 < src.length && src[i + 1] === "'") {
-              i += 2;
-              continue;
-            }
-            i += 1;
-            closed = true;
-            break;
-          }
-          i += 1;
-        }
-        if (!closed || i >= src.length || src[i] !== "!") return { error: "#VALUE!" };
-        const unquoted = unquoteFormulaSheetTokenOnce(src.slice(start, i));
-        if (unquoted === null) return { error: "#VALUE!" };
-        i += 1;
-        if (!pushTok({ type: "sheet", name: unquoted })) return { error: "#VALUE!" };
-        continue;
-      }
-      if (ch === "#") {
-        const restUpper = asciiUpperJs(src.slice(i));
-        const errHit = FORMULA_ERROR_LIST.find((code) => restUpper.startsWith(code));
-        if (!errHit) return { error: "#VALUE!" };
-        if (!pushTok({ type: "err", code: errHit })) return { error: "#VALUE!" };
-        i += errHit.length;
-        continue;
-      }
-      if ((ch >= "0" && ch <= "9") || ch === ".") {
-        const numMatch = /^(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?/.exec(src.slice(i));
-        if (!numMatch) return { error: "#VALUE!" };
-        const parsedNum = Number(numMatch[0]);
-        if (!Number.isFinite(parsedNum)) return { error: "#NUM!" };
-        if (/^(?:\.|[\p{Alphabetic}_$])/u.test(src.slice(i + numMatch[0].length))) {
-          return { error: "#VALUE!" };
-        }
-        if (!pushTok({ type: "num", value: parsedNum })) return { error: "#VALUE!" };
-        i += numMatch[0].length;
-        continue;
-      }
-      const twoChar = src.slice(i, i + 2);
-      if (twoChar === "<=" || twoChar === ">=" || twoChar === "<>") {
-        if (!pushTok({ type: "op", value: twoChar })) return { error: "#VALUE!" };
-        i += 2;
-        continue;
-      }
-      if (ch === ";") {
-        if (!pushTok({ type: "punct", value: "," })) return { error: "#VALUE!" };
-        i += 1;
-        continue;
-      }
-      if ("+-*/^&=<>%(),:".includes(ch)) {
-        if (!pushTok({ type: "punct", value: ch })) return { error: "#VALUE!" };
-        i += 1;
-        continue;
-      }
-      let end = i;
-      while (end < src.length && !/[\s!+\-*/^&=<>%(),;:'"#]/.test(src[end])) {
-        end += 1;
-      }
-      if (end === i) return { error: "#VALUE!" };
-      const word = src.slice(i, end);
-      if (end < src.length && src[end] === "!") {
-        if (!/^[\p{Alphabetic}_$][\p{Alphabetic}\p{N}_$]*$/u.test(word)) return { error: "#VALUE!" };
-        if (!pushTok({ type: "sheet", name: word })) return { error: "#VALUE!" };
-        i = end + 1;
-      } else {
-        if (!pushTok({ type: "ident", value: word })) return { error: "#VALUE!" };
-        i = end;
-      }
+      const lexed = lexTokenAtJs(src, i);
+      if (lexed.error) return { error: lexed.error };
+      if (tokens.length >= MAX_TOKENS) return LEX_ERROR;
+      tokens.push(lexed.tok);
+      i = lexed.end;
     }
     return { tokens };
+  }
+
+  function psPeek(ps) {
+    return ps.tokens[ps.pos] || null;
+  }
+
+  function psNext(ps) {
+    const tok = ps.tokens[ps.pos] || null;
+    ps.pos += 1;
+    return tok;
+  }
+
+  function psFail(ps, code) {
+    if (!ps.fatal) ps.fatal = code;
+    return null;
+  }
+
+  function psCheckDepth(ps, depth) {
+    if (depth <= MAX_PARSE_DEPTH) return true;
+    psFail(ps, "#VALUE!");
+    return false;
+  }
+
+  function peekIsPunct(ps, ...values) {
+    const t = psPeek(ps);
+    return t?.type === "punct" && values.includes(t.value);
+  }
+
+  function buildRangeNode(explicitSheet, endSheet, startCoord, endCoord) {
+    const minCol = Math.min(startCoord.col, endCoord.col);
+    const maxCol = Math.max(startCoord.col, endCoord.col);
+    const minRow = Math.min(startCoord.row, endCoord.row);
+    const maxRow = Math.max(startCoord.row, endCoord.row);
+    return {
+      kind: "Range",
+      sheet: explicitSheet,
+      endSheet,
+      startRef: startCoord.normRef,
+      endRef: endCoord.normRef,
+      minCol,
+      maxCol,
+      minRow,
+      maxRow,
+      cellCount: (maxRow - minRow + 1) * (maxCol - minCol + 1),
+    };
+  }
+
+  function parseRangeTail(ps, explicitSheet, startCoord) {
+    psNext(ps);
+    let endSheet = null;
+    if (psPeek(ps)?.type === "sheet") {
+      if (explicitSheet === null) return psFail(ps, "#REF!");
+      endSheet = psNext(ps).name;
+    }
+    const endTok = psNext(ps);
+    if (endTok?.type !== "ident") return psFail(ps, "#REF!");
+    const endCoord = parseStrictA1Coord(endTok.value);
+    if (!startCoord.ok || !endCoord.ok) return { kind: "Error", code: "#REF!" };
+    return buildRangeNode(explicitSheet, endSheet, startCoord, endCoord);
+  }
+
+  function parseRefOrRangeAst(ps, explicitSheet, firstWord) {
+    const startCoord = parseStrictA1Coord(firstWord);
+    if (peekIsPunct(ps, ":")) return parseRangeTail(ps, explicitSheet, startCoord);
+    if (!startCoord.ok) {
+      return { kind: "Error", code: explicitSheet === null ? startCoord.errorCode : "#REF!" };
+    }
+    return {
+      kind: "Cell",
+      sheet: explicitSheet,
+      ref: startCoord.normRef,
+      col: startCoord.col,
+      row: startCoord.row,
+    };
+  }
+
+  function isCompareToken(t) {
+    if (t?.type === "op") return true;
+    return t?.type === "punct" && (t.value === "=" || t.value === "<" || t.value === ">");
+  }
+
+  function parseComparison(ps, depth) {
+    if (!psCheckDepth(ps, depth)) return null;
+    let lhs = parseConcat(ps, depth);
+    if (!lhs) return null;
+    while (isCompareToken(psPeek(ps))) {
+      const op = psNext(ps).value;
+      const rhs = parseConcat(ps, depth);
+      if (!rhs) return null;
+      lhs = { kind: "Compare", op, lhs, rhs };
+    }
+    return lhs;
+  }
+
+  const makeBinaryNode = (op, lhs, rhs) => ({ kind: "Binary", op, lhs, rhs });
+  const makeConcatNode = (_op, lhs, rhs) => ({ kind: "Concat", lhs, rhs });
+
+  /** Left-associative chain: operand (op operand)*, with ops limited to the given punctuation. */
+  function parseBinaryChain(ps, depth, parseOperand, ops, makeNode) {
+    let lhs = parseOperand(ps, depth);
+    if (!lhs) return null;
+    while (peekIsPunct(ps, ...ops)) {
+      const op = psNext(ps).value;
+      const rhs = parseOperand(ps, depth);
+      if (!rhs) return null;
+      lhs = makeNode(op, lhs, rhs);
+    }
+    return lhs;
+  }
+
+  const parseConcat = (ps, depth) => parseBinaryChain(ps, depth, parseAdditive, ["&"], makeConcatNode);
+  const parseAdditive = (ps, depth) => parseBinaryChain(ps, depth, parseMultiplicative, ["+", "-"], makeBinaryNode);
+  const parseMultiplicative = (ps, depth) => parseBinaryChain(ps, depth, parsePower, ["*", "/"], makeBinaryNode);
+  const parsePower = (ps, depth) => parseBinaryChain(ps, depth, parseUnary, ["^"], makeBinaryNode);
+
+  function applyPercentSuffixes(ps, node, depth) {
+    let current = node;
+    let pctDepth = depth;
+    while (peekIsPunct(ps, "%")) {
+      pctDepth += 1;
+      if (!psCheckDepth(ps, pctDepth)) return null;
+      psNext(ps);
+      current = { kind: "Unary", op: "%", expr: current };
+    }
+    return current;
+  }
+
+  function parseUnary(ps, depth) {
+    if (!psCheckDepth(ps, depth)) return null;
+    if (peekIsPunct(ps, "+", "-")) {
+      const op = psNext(ps).value;
+      const expr = parseUnary(ps, depth + 1);
+      return expr ? { kind: "Unary", op, expr } : null;
+    }
+    const node = parsePrimary(ps, depth);
+    return node ? applyPercentSuffixes(ps, node, depth) : null;
+  }
+
+  /** Consumes the closing `)`; fails the parse when it is missing. */
+  function expectCloseParen(ps) {
+    if (!peekIsPunct(ps, ")")) return false;
+    psNext(ps);
+    return true;
+  }
+
+  function parseParenthesized(ps, depth) {
+    const inner = parseComparison(ps, depth + 1);
+    if (!inner) return null;
+    return expectCloseParen(ps) ? inner : psFail(ps, "#VALUE!");
+  }
+
+  /** Parses `arg (, arg)*` into args; false when an argument failed. */
+  function parseCallArgs(ps, depth, args) {
+    while (true) {
+      const argAst = parseComparison(ps, depth + 1);
+      if (!argAst) return false;
+      args.push(argAst);
+      if (!peekIsPunct(ps, ",")) return true;
+      psNext(ps);
+    }
+  }
+
+  function parseFuncCall(ps, depth, name) {
+    psNext(ps);
+    const args = [];
+    if (!peekIsPunct(ps, ")") && !parseCallArgs(ps, depth, args)) return null;
+    return expectCloseParen(ps) ? { kind: "FuncCall", name, args } : psFail(ps, "#VALUE!");
+  }
+
+  function parseIdentifier(ps, tok, depth) {
+    const up = asciiUpperJs(tok.value);
+    if (peekIsPunct(ps, "(")) return parseFuncCall(ps, depth, up);
+    if (up === "TRUE") return { kind: "Bool", value: true };
+    if (up === "FALSE") return { kind: "Bool", value: false };
+    return parseRefOrRangeAst(ps, null, tok.value);
+  }
+
+  function parseSheetPrefixed(ps, sheetTok) {
+    const refTok = psNext(ps);
+    if (refTok?.type !== "ident") return psFail(ps, "#REF!");
+    return parseRefOrRangeAst(ps, sheetTok.name, refTok.value);
+  }
+
+  const LITERAL_NODE_BUILDERS = {
+    num: (t) => ({ kind: "Number", value: t.value }),
+    str: (t) => ({ kind: "Str", value: t.value }),
+    err: (t) => ({ kind: "Error", code: t.code }),
+  };
+
+  function parsePrimary(ps, depth) {
+    if (!psCheckDepth(ps, depth)) return null;
+    const t = psNext(ps);
+    if (!t) return psFail(ps, "#VALUE!");
+    const build = LITERAL_NODE_BUILDERS[t.type];
+    if (build) return build(t);
+    if (t.type === "punct" && t.value === "(") return parseParenthesized(ps, depth);
+    if (t.type === "sheet") return parseSheetPrefixed(ps, t);
+    if (t.type === "ident") return parseIdentifier(ps, t, depth);
+    return psFail(ps, "#VALUE!");
   }
 
   function parseFormulaAstJs(exprStr) {
@@ -381,218 +568,11 @@
     if (!trimmedBody) return { kind: "Ast", root: { kind: "Empty" } };
     const lexed = tokenizeFormulaJs(trimmedBody);
     if (lexed.error) return { kind: "FormulaError", code: lexed.error };
-    const tokens = lexed.tokens;
-    if (tokens.length === 0) return { kind: "Ast", root: { kind: "Empty" } };
-
-    let pos = 0;
-    let fatalError = null;
-
-    function peek() {
-      return tokens[pos] || null;
-    }
-
-    function next() {
-      const tok = tokens[pos] || null;
-      pos += 1;
-      return tok;
-    }
-
-    function fail(code) {
-      if (!fatalError) fatalError = code;
-      return null;
-    }
-
-    function checkDepth(depth) {
-      if (depth > MAX_PARSE_DEPTH) {
-        fail("#VALUE!");
-        return false;
-      }
-      return true;
-    }
-
-    function parseRefOrRangeAst(explicitSheet, firstWord) {
-      const startCoord = parseStrictA1Coord(firstWord);
-      if (peek()?.type === "punct" && peek().value === ":") {
-        next();
-        let endSheet = null;
-        if (peek()?.type === "sheet") {
-          if (explicitSheet === null) return fail("#REF!");
-          endSheet = next().name;
-        }
-        const endTok = next();
-        if (endTok?.type !== "ident") return fail("#REF!");
-        const endCoord = parseStrictA1Coord(endTok.value);
-        if (!startCoord.ok || !endCoord.ok) {
-          return { kind: "Error", code: "#REF!" };
-        }
-        const minCol = Math.min(startCoord.col, endCoord.col);
-        const maxCol = Math.max(startCoord.col, endCoord.col);
-        const minRow = Math.min(startCoord.row, endCoord.row);
-        const maxRow = Math.max(startCoord.row, endCoord.row);
-        const cellCount = (maxRow - minRow + 1) * (maxCol - minCol + 1);
-        return {
-          kind: "Range",
-          sheet: explicitSheet,
-          endSheet,
-          startRef: startCoord.normRef,
-          endRef: endCoord.normRef,
-          minCol,
-          maxCol,
-          minRow,
-          maxRow,
-          cellCount,
-        };
-      }
-      if (!startCoord.ok) {
-        const code = explicitSheet !== null ? "#REF!" : startCoord.errorCode;
-        return { kind: "Error", code };
-      }
-      return {
-        kind: "Cell",
-        sheet: explicitSheet,
-        ref: startCoord.normRef,
-        col: startCoord.col,
-        row: startCoord.row,
-      };
-    }
-
-    function parseComparison(depth) {
-      if (!checkDepth(depth)) return null;
-      let lhs = parseConcat(depth);
-      if (!lhs) return null;
-      while (true) {
-        const t = peek();
-        const isCmpPunct =
-          t?.type === "punct" && (t.value === "=" || t.value === "<" || t.value === ">");
-        const isCmpOp = t?.type === "op";
-        if (!isCmpPunct && !isCmpOp) break;
-        const op = next().value;
-        const rhs = parseConcat(depth);
-        if (!rhs) return null;
-        lhs = { kind: "Compare", op, lhs, rhs };
-      }
-      return lhs;
-    }
-
-    function parseConcat(depth) {
-      let lhs = parseAdditive(depth);
-      if (!lhs) return null;
-      while (peek()?.type === "punct" && peek().value === "&") {
-        next();
-        const rhs = parseAdditive(depth);
-        if (!rhs) return null;
-        lhs = { kind: "Concat", lhs, rhs };
-      }
-      return lhs;
-    }
-
-    function parseAdditive(depth) {
-      let lhs = parseMultiplicative(depth);
-      if (!lhs) return null;
-      while (peek()?.type === "punct" && (peek().value === "+" || peek().value === "-")) {
-        const op = next().value;
-        const rhs = parseMultiplicative(depth);
-        if (!rhs) return null;
-        lhs = { kind: "Binary", op, lhs, rhs };
-      }
-      return lhs;
-    }
-
-    function parseMultiplicative(depth) {
-      let lhs = parsePower(depth);
-      if (!lhs) return null;
-      while (peek()?.type === "punct" && (peek().value === "*" || peek().value === "/")) {
-        const op = next().value;
-        const rhs = parsePower(depth);
-        if (!rhs) return null;
-        lhs = { kind: "Binary", op, lhs, rhs };
-      }
-      return lhs;
-    }
-
-    function parsePower(depth) {
-      let lhs = parseUnary(depth);
-      if (!lhs) return null;
-      while (peek()?.type === "punct" && peek().value === "^") {
-        next();
-        const rhs = parseUnary(depth);
-        if (!rhs) return null;
-        lhs = { kind: "Binary", op: "^", lhs, rhs };
-      }
-      return lhs;
-    }
-
-    function parseUnary(depth) {
-      if (!checkDepth(depth)) return null;
-      const t = peek();
-      if (t?.type === "punct" && (t.value === "+" || t.value === "-")) {
-        next();
-        const expr = parseUnary(depth + 1);
-        if (!expr) return null;
-        return { kind: "Unary", op: t.value, expr };
-      }
-      let node = parsePrimary(depth);
-      if (!node) return null;
-      let pctDepth = depth;
-      while (peek()?.type === "punct" && peek().value === "%") {
-        pctDepth += 1;
-        if (!checkDepth(pctDepth)) return null;
-        next();
-        node = { kind: "Unary", op: "%", expr: node };
-      }
-      return node;
-    }
-
-    function parsePrimary(depth) {
-      if (!checkDepth(depth)) return null;
-      const t = next();
-      if (!t) return fail("#VALUE!");
-      if (t.type === "num") return { kind: "Number", value: t.value };
-      if (t.type === "str") return { kind: "Str", value: t.value };
-      if (t.type === "err") return { kind: "Error", code: t.code };
-      if (t.type === "punct" && t.value === "(") {
-        const inner = parseComparison(depth + 1);
-        if (!inner) return null;
-        if (!(peek()?.type === "punct" && peek().value === ")")) return fail("#VALUE!");
-        next();
-        return inner;
-      }
-      if (t.type === "sheet") {
-        const refTok = next();
-        if (refTok?.type !== "ident") return fail("#REF!");
-        return parseRefOrRangeAst(t.name, refTok.value);
-      }
-      if (t.type === "ident") {
-        const up = asciiUpperJs(t.value);
-        if (peek()?.type === "punct" && peek().value === "(") {
-          next();
-          const args = [];
-          if (!(peek()?.type === "punct" && peek().value === ")")) {
-            while (true) {
-              const argAst = parseComparison(depth + 1);
-              if (!argAst) return null;
-              args.push(argAst);
-              if (peek()?.type === "punct" && peek().value === ",") {
-                next();
-                continue;
-              }
-              break;
-            }
-          }
-          if (!(peek()?.type === "punct" && peek().value === ")")) return fail("#VALUE!");
-          next();
-          return { kind: "FuncCall", name: up, args };
-        }
-        if (up === "TRUE") return { kind: "Bool", value: true };
-        if (up === "FALSE") return { kind: "Bool", value: false };
-        return parseRefOrRangeAst(null, t.value);
-      }
-      return fail("#VALUE!");
-    }
-
-    const root = parseComparison(0);
-    if (fatalError) return { kind: "FormulaError", code: fatalError };
-    if (!root || pos < tokens.length) return { kind: "FormulaError", code: "#VALUE!" };
+    if (lexed.tokens.length === 0) return { kind: "Ast", root: { kind: "Empty" } };
+    const ps = { tokens: lexed.tokens, pos: 0, fatal: null };
+    const root = parseComparison(ps, 0);
+    if (ps.fatal) return { kind: "FormulaError", code: ps.fatal };
+    if (!root || ps.pos < ps.tokens.length) return { kind: "FormulaError", code: "#VALUE!" };
     return { kind: "Ast", root };
   }
 

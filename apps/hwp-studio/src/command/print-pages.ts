@@ -97,35 +97,33 @@ export function namespaceSvgReferenceValue(value: string, idMap: Map<string, str
   return next;
 }
 
-function namespaceSvgIds(root: Element, namespace: string): void {
+function collectSvgIdMap(root: Element, namespace: string): Map<string, string> {
   const idElements = [
     ...(root.hasAttribute('id') ? [root] : []),
     ...Array.from(root.querySelectorAll('[id]')),
   ];
   const idMap = new Map<string, string>();
-
   for (const element of idElements) {
     const id = element.getAttribute('id');
-    if (id) {
-      idMap.set(id, `${namespace}-${id}`);
-    }
+    if (id) idMap.set(id, `${namespace}-${id}`);
   }
+  return idMap;
+}
+
+function rewriteSvgAttribute(element: Element, attr: Attr, idMap: Map<string, string>): void {
+  const nextValue = attr.name === 'id'
+    ? idMap.get(attr.value)
+    : namespaceSvgReferenceValue(attr.value, idMap);
+  if (nextValue && nextValue !== attr.value) element.setAttribute(attr.name, nextValue);
+}
+
+function namespaceSvgIds(root: Element, namespace: string): void {
+  const idMap = collectSvgIdMap(root, namespace);
   if (idMap.size === 0) return;
 
   const allElements = [root, ...Array.from(root.querySelectorAll('*'))];
   for (const element of allElements) {
-    for (const attr of Array.from(element.attributes)) {
-      if (attr.name === 'id') {
-        const nextId = idMap.get(attr.value);
-        if (nextId) element.setAttribute(attr.name, nextId);
-        continue;
-      }
-
-      const nextValue = namespaceSvgReferenceValue(attr.value, idMap);
-      if (nextValue !== attr.value) {
-        element.setAttribute(attr.name, nextValue);
-      }
-    }
+    for (const attr of Array.from(element.attributes)) rewriteSvgAttribute(element, attr, idMap);
   }
 }
 

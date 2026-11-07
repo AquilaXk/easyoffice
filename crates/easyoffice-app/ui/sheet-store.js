@@ -224,29 +224,34 @@
       }
     }
 
+    function isScrubbableLiteral(seg) {
+      return seg.isLiteral && seg.text.trim().length > 0;
+    }
+
+    function collectEntryScrubJob(entry, plainEntries, formulaJobs) {
+      const formula = entry.formula || "";
+      if (!isFormulaStr(formula)) {
+        if ((entry.value || "").trim()) plainEntries.push(entry);
+        return;
+      }
+      const segments = tokenizeFormulaStringLiterals(formula);
+      const literalSegs = segments.filter(isScrubbableLiteral);
+      if (literalSegs.length > 0) formulaJobs.push({ entry, segments, literalSegs });
+    }
+
+    function collectScrubJobs(candidateSheets, plainEntries, formulaJobs) {
+      for (const snap of Object.values(candidateSheets)) {
+        for (const entry of Object.values(snap || {})) {
+          if (entry) collectEntryScrubJob(entry, plainEntries, formulaJobs);
+        }
+      }
+    }
+
     async function scrubSheetStoreMap(baseSheets, activeSheetName, trackAsyncFn) {
       const candidateSheets = cloneStore(baseSheets);
       const plainEntries = [];
       const formulaJobs = [];
-      Object.keys(candidateSheets).forEach((shName) => {
-        const snap = candidateSheets[shName] || {};
-        Object.keys(snap).forEach((ref) => {
-          const entry = snap[ref];
-          if (!entry) return;
-          const formula = entry.formula || "";
-          if (isFormulaStr(formula)) {
-            const segments = tokenizeFormulaStringLiterals(formula);
-            const literalSegs = segments.filter(
-              (seg) => seg.isLiteral && seg.text.trim().length > 0
-            );
-            if (literalSegs.length > 0) {
-              formulaJobs.push({ entry, segments, literalSegs });
-            }
-          } else if ((entry.value || "").trim()) {
-            plainEntries.push(entry);
-          }
-        });
-      });
+      collectScrubJobs(candidateSheets, plainEntries, formulaJobs);
 
       const literalInputs = [];
       formulaJobs.forEach((job) => {

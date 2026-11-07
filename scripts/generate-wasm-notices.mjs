@@ -53,21 +53,25 @@ function readTexts(pkg, pattern) {
     .map((e) => fs.readFileSync(path.join(dir, e.name), "utf8").replaceAll("\r\n", "\n").trim());
 }
 
+function collectLicenseGroups(pkg, groups) {
+  const texts = readTexts(pkg, LICENSE_FILE_RE);
+  if (texts.length === 0) throw new Error(`${pkg.name} ${pkg.version}: no license file in its source (license: ${pkg.license})`);
+  const label = `${pkg.name} ${pkg.version}`;
+  for (const text of texts) {
+    const key = crypto.createHash("sha256").update(text).digest("hex");
+    if (!groups.has(key)) groups.set(key, { text, crates: [] });
+    const crates = groups.get(key).crates;
+    if (!crates.includes(label)) crates.push(label);
+  }
+}
+
 export function renderSection(packages) {
   const external = packages.filter((p) => p.source);
   const groups = new Map();
   const notices = [];
   const lines = [];
   for (const pkg of external) {
-    const texts = readTexts(pkg, LICENSE_FILE_RE);
-    if (texts.length === 0) throw new Error(`${pkg.name} ${pkg.version}: no license file in its source (license: ${pkg.license})`);
-    for (const text of texts) {
-      const key = crypto.createHash("sha256").update(text).digest("hex");
-      if (!groups.has(key)) groups.set(key, { text, crates: [] });
-      const crates = groups.get(key).crates;
-      const label = `${pkg.name} ${pkg.version}`;
-      if (!crates.includes(label)) crates.push(label);
-    }
+    collectLicenseGroups(pkg, groups);
     for (const text of readTexts(pkg, NOTICE_FILE_RE)) notices.push({ label: `${pkg.name} ${pkg.version}`, text });
   }
   lines.push(

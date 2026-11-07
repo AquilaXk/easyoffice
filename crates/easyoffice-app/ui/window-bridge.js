@@ -187,16 +187,20 @@
       openPopup(kind, handoff);
     }
 
+    function handlePickedFile(input, resolve, reject) {
+      const file = input.files?.[0];
+      if (!file) {
+        resolve({ status: "cancelled" });
+        return;
+      }
+      spawnWithFile(file).then(() => resolve({ status: "opened" }), reject);
+    }
+
     function pickFileForPopup() {
       return new Promise((resolve, reject) => {
         const input = document.createElement("input");
         input.type = "file";
-        input.addEventListener("change", () => {
-          const file = input.files?.[0];
-          if (!file) return resolve({ status: "cancelled" });
-          spawnWithFile(file).then(() => resolve({ status: "opened" }), reject);
-          return undefined;
-        });
+        input.addEventListener("change", () => handlePickedFile(input, resolve, reject));
         input.click();
       });
     }
