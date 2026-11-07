@@ -123,13 +123,22 @@
       if (closeBtn && dialog) closeBtn.addEventListener("click", () => dialog.close?.());
     }
 
+    // "EasyOffice x.y.z" under the dialog title (hop shows its version the same way).
+    function setAppVersion(version) {
+      const el = document.getElementById("about-version");
+      const text = String(version || "").trim();
+      if (!el || !/^[0-9A-Za-z.+-]{1,32}$/.test(text)) return;
+      el.textContent = "EasyOffice " + text;
+      el.hidden = false;
+    }
+
     function bind() {
       bindAbout();
       mirrorFeedbackToToast();
       hwpHost.onCommand(runShellCommand);
     }
 
-    return { bind, applyStoredTheme, pushRecents, toast, runShellCommand, currentTheme, getThemeMode: () => themeApi().getMode() };
+    return { bind, setAppVersion, applyStoredTheme, pushRecents, toast, runShellCommand, currentTheme, getThemeMode: () => themeApi().getMode() };
   }
 
   host.__EASYOFFICE_CREATE_SHELL_CHROME__ = createShellChrome;

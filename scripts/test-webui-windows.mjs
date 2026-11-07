@@ -84,21 +84,116 @@ test("the start window shows creation buttons and the recent list", async () => 
     list_recent_documents: () => [{ id: "a1", name: "예산.xlsx", kind: "SHEET" }, { id: "b2", name: "계획.hwpx", kind: "HWP" }],
   });
   assert.equal(document.getElementById("app").dataset.windowKind, "start");
-  assert.equal(document.getElementById("start-screen").hidden, false);
-  const kinds = document.querySelectorAll("#start-screen [data-window-new]").map((b) => b.dataset.windowNew);
+  assert.equal(document.getElementById("home-screen").hidden, false);
+  const kinds = document.querySelectorAll("#home-screen [data-window-new]").map((b) => b.dataset.windowNew);
   assert.deepEqual(kinds, ["DOC", "HWP", "SHEET", "SLIDE", "PDF", "CONV"]);
-  assert.ok(document.querySelector("#start-screen [data-file-open]"));
-  const recent = document.querySelectorAll("#start-recent-list [data-recent-id]");
-  assert.deepEqual(recent.map((b) => b.textContent.trim()), ["예산.xlsx", "계획.hwpx"]);
+  assert.ok(document.querySelector("#home-screen [data-file-open]"));
+  const recent = document.querySelectorAll("#home-screen .home-recent-card[data-recent-id]");
+  assert.deepEqual(recent.map((b) => b.querySelector(".home-recent-name").textContent.trim()), ["예산.xlsx", "계획.hwpx"]);
+  assert.deepEqual(recent.map((b) => b.querySelector(".home-recent-path").textContent.trim()), ["스프레드시트", "한글 문서"]);
   assert.equal(document.title, "EasyOffice");
   recent[1].click();
   await flushAsyncTurns();
   assert.deepEqual(shell.named("open_recent_document")[0].args, { id: "b2" });
 });
 
-test("the start window hides the recent section when there are no recent files", async () => {
+test("the start window says so when there are no recent files", async () => {
   const { document } = await openWindow("?module=START&win=main");
-  assert.equal(document.getElementById("start-recent").hidden, true);
+  assert.ok(document.querySelector("#home-screen .home-recent").classList.contains("is-empty"));
+  assert.match(document.querySelector(".home-recent-hint").textContent, /아직 최근 문서가 없습니다/);
+  assert.equal(document.querySelectorAll(".home-recent-card").length, 0);
+});
+
+test("recent cards are paged five at a time with placeholders and 이전/다음 buttons", async () => {
+  const entries = Array.from({ length: 7 }, (_, i) => ({ id: "r" + i, name: `문서${i}.docx`, kind: "DOC" }));
+  const { document, userClick } = await openWindow("?module=START&win=main", { list_recent_documents: () => entries });
+  const cards = () => document.querySelectorAll(".home-recent-track .home-recent-card");
+  const real = () => document.querySelectorAll(".home-recent-track .home-recent-card[data-recent-id]");
+  const label = () => document.querySelector(".home-recent-page-label").textContent;
+  assert.equal(cards().length, 5);
+  assert.equal(real().length, 5);
+  assert.equal(label(), "1 / 2");
+  assert.equal(document.querySelector(".home-recent-page-prev").disabled, true);
+  userClick(document.querySelector(".home-recent-page-next"));
+  assert.equal(label(), "2 / 2");
+  assert.equal(cards().length, 5, "the second page is padded with hidden placeholders");
+  assert.deepEqual(real().map((c) => c.dataset.recentId), ["r5", "r6"]);
+  assert.equal(document.querySelectorAll(".home-recent-card.is-placeholder").length, 3);
+  assert.equal(document.querySelector(".home-recent-page-next").disabled, true);
+  assert.equal(document.querySelector(".home-recent-card.is-placeholder").getAttribute("aria-hidden"), "true");
+});
+
+test("one page of recents hides the pagination controls", async () => {
+  const { document } = await openWindow("?module=START&win=main", {
+    list_recent_documents: () => [{ id: "a", name: "하나.docx", kind: "DOC" }],
+  });
+  assert.equal(document.querySelector(".home-recent-pagination").hidden, true);
+});
+
+test("the home screen keeps hop's structure and is the only visible part of a start window", async () => {
+  const { document } = await openWindow("?module=START&win=main");
+  const screen = document.getElementById("home-screen");
+  assert.equal(screen.tagName, "SECTION");
+  assert.equal(screen.getAttribute("aria-label"), "시작 화면");
+  assert.equal(screen.parentElement.id, "app");
+  assert.equal(screen.parentElement.childNodes[0], screen, "the screen comes first in the shell");
+  assert.deepEqual(
+    [".home-hero .home-title", ".home-hero .home-subtitle", ".home-hero .home-actions", ".home-recent .home-section-header .home-section-title", ".home-recent .home-recent-hint", ".home-recent .home-recent-track", ".home-drop-hint"].map((sel) => screen.querySelector(sel) !== null),
+    new Array(7).fill(true)
+  );
+  assert.equal(screen.querySelector(".home-section-title").textContent, "최근 문서");
+  for (const action of screen.querySelectorAll(".home-action")) {
+    assert.ok(action.querySelector(".home-action-title").textContent.length > 0);
+    assert.ok(action.querySelector(".home-action-description").textContent.length > 0);
+    assert.ok(action.querySelector(".home-action-icon svg"), "every action has an SVG icon");
+  }
+  assert.equal(document.querySelectorAll(".start-card, #start-screen").length, 0, "the old start markup is gone");
+});
+
+test("a document window has no home screen", async () => {
+  const { document } = await openWindow("?module=DOC&win=w-nohome");
+  assert.equal(document.getElementById("home-screen"), null);
+});
+
+test("the recent-documents dialog lists the entries and opens the chosen one", async () => {
+  const entries = [{ id: "a1", name: "예산.xlsx", kind: "SHEET" }, { id: "b2", name: "계획.hwpx", kind: "HWP" }];
+  const { document, shell, userClick } = await openWindow("?module=DOC&win=w-recent-dialog", { list_recent_documents: () => entries });
+  const trigger = document.getElementById("recent-dialog-open");
+  assert.equal(trigger.hidden, false);
+  userClick(trigger);
+  await flushAsyncTurns();
+  const dialog = document.querySelector(".recent-documents-dialog");
+  assert.equal(dialog.getAttribute("role"), "dialog");
+  const items = dialog.querySelectorAll(".recent-documents-item");
+  assert.deepEqual(items.map((i) => i.querySelector(".recent-documents-name").textContent), ["예산.xlsx", "계획.hwpx"]);
+  assert.equal(items[0].getAttribute("aria-selected"), "true");
+  document.dispatchEvent({ type: "keydown", key: "ArrowDown", preventDefault() {}, stopPropagation() {} });
+  assert.equal(items[1].getAttribute("aria-selected"), "true");
+  document.dispatchEvent({ type: "keydown", key: "Enter", preventDefault() {}, stopPropagation() {} });
+  await flushAsyncTurns();
+  assert.equal(document.querySelector(".recent-documents-dialog"), null, "the dialog closes");
+  assert.deepEqual(shell.named("open_recent_document")[0].args, { id: "b2" });
+});
+
+test("Escape and 취소 close the recent-documents dialog without opening anything", async () => {
+  const entries = [{ id: "a1", name: "예산.xlsx", kind: "SHEET" }];
+  const { document, shell, userClick } = await openWindow("?module=DOC&win=w-recent-esc", { list_recent_documents: () => entries });
+  userClick(document.getElementById("recent-dialog-open"));
+  await flushAsyncTurns();
+  document.dispatchEvent({ type: "keydown", key: "Escape", preventDefault() {}, stopPropagation() {} });
+  await flushAsyncTurns();
+  assert.equal(document.querySelector(".recent-documents-dialog"), null);
+  userClick(document.getElementById("recent-dialog-open"));
+  await flushAsyncTurns();
+  userClick(document.querySelectorAll(".recent-documents-dialog .dialog-btn")[1]);
+  await flushAsyncTurns();
+  assert.equal(document.querySelector(".recent-documents-dialog"), null);
+  assert.equal(shell.named("open_recent_document").length, 0);
+});
+
+test("the dialog entry in the recent submenu is hidden while the list is empty", async () => {
+  const { document } = await openWindow("?module=DOC&win=w-recent-empty");
+  assert.equal(document.getElementById("recent-dialog-open").hidden, true);
 });
 
 test("File menu: new document kinds, open, recent, save and close call the window bridge", async () => {
@@ -142,7 +237,7 @@ test("opening a file from the start window closes the start window", async () =>
   const { document, shell, userClick } = await openWindow("?module=START&win=main", {
     open_file_in_new_window: () => ({ status: "opened" }),
   });
-  userClick(document.querySelector("#start-screen [data-file-open]"));
+  userClick(document.querySelector("#home-screen [data-file-open]"));
   await flushAsyncTurns();
   assert.equal(shell.named("close_current_window").length, 1);
 });
@@ -151,7 +246,7 @@ test("a cancelled open dialog keeps the start window", async () => {
   const { document, shell, userClick } = await openWindow("?module=START&win=main", {
     open_file_in_new_window: () => ({ status: "cancelled" }),
   });
-  userClick(document.querySelector("#start-screen [data-file-open]"));
+  userClick(document.querySelector("#home-screen [data-file-open]"));
   await flushAsyncTurns();
   assert.equal(shell.named("close_current_window").length, 0);
 });
@@ -376,4 +471,29 @@ test("macOS Command shortcuts map onto the Ctrl-based shortcut table and the pla
   assert.equal(shortcutComboFromEvent(ev({ key: "z", metaKey: true, shiftKey: true })), "Ctrl+Shift+Z");
   assert.equal(shortcutComboFromEvent(ev({ key: "s", ctrlKey: true })), "Ctrl+S");
   assert.deepEqual(guessClientPlatform(), { platform: "macOS", shortcutModifier: "⌘" });
+});
+
+test("the about dialog shows the app version from the bootstrap and ignores a malformed one", async () => {
+  const { document } = await openWindow("?module=DOC&win=w-about");
+  const version = document.getElementById("about-version");
+  assert.equal(version.hidden, false);
+  assert.equal(version.textContent, "EasyOffice 1.2.3");
+  const api = document.defaultView.__EASYOFFICE_CREATE_SHELL_CHROME__({ document, hwpHost: { setShellContext: async () => null, onCommand() {} } });
+  api.setAppVersion("<b>x</b>");
+  assert.equal(version.textContent, "EasyOffice 1.2.3", "a version with markup is dropped");
+});
+
+test("home screen and dialog files carry their hop source header and are listed in the notices", async () => {
+  const fs = await import("node:fs");
+  const read = (rel) => fs.readFileSync(new URL(`../crates/easyoffice-app/ui/${rel}`, import.meta.url), "utf8");
+  const notices = fs.readFileSync(new URL("../THIRD_PARTY_NOTICES.md", import.meta.url), "utf8");
+  for (const [file, source] of [
+    ["home-screen.js", "apps/studio-host/src/ui/home-screen.ts"],
+    ["recent-documents-dialog.js", "apps/studio-host/src/ui/recent-documents-dialog.ts"],
+    ["home.css", "apps/studio-host/src/styles/home-screen.css"],
+  ]) {
+    assert.match(read(file), /Adapted from hop/, `${file} names hop`);
+    assert.ok(read(file).includes("Edward Kim"), `${file} carries the copyright`);
+    assert.ok(notices.includes(`ui/${file}`) && notices.includes(source), `${file} is in the notices table`);
+  }
 });
