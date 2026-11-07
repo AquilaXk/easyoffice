@@ -124,6 +124,22 @@
 
   // ---- the job --------------------------------------------------------------------------------
 
+  // Checks one getPrintPages reply against the batch size, the page count seen so far and the paper limits.
+  function readBatch(result, expectedFrom, total) {
+    const pages = Array.isArray(result?.pages) ? result.pages : [];
+    const pageCount = Number(result?.pageCount);
+    if (!Number.isSafeInteger(pageCount) || pageCount < 0 || (total !== null && pageCount !== total)) {
+      throw new Error(MSG_BAD_PAGE);
+    }
+    if (pageCount > 0 && (pages.length === 0 || pages.length > BATCH_PAGES)) throw new Error(MSG_BAD_PAGE);
+    for (const page of pages) {
+      if (typeof page?.svg !== "string" || !isValidPaperMm(page.widthMm) || !isValidPaperMm(page.heightMm)) {
+        throw new Error(MSG_BAD_PAGE);
+      }
+    }
+    return { pages, pageCount, nextFrom: expectedFrom + pages.length };
+  }
+
   function createHwpPrint(deps) {
     const { document, hwpHost } = deps;
     const env = deps.env || host;
@@ -148,21 +164,6 @@
       page.className = PAGE_CLASS + " " + rules.classFor(size.widthMm, size.heightMm);
       page.appendChild(document.importNode(svg, true));
       return page;
-    }
-
-    function readBatch(result, expectedFrom, total) {
-      const pages = Array.isArray(result?.pages) ? result.pages : [];
-      const pageCount = Number(result?.pageCount);
-      if (!Number.isSafeInteger(pageCount) || pageCount < 0 || (total !== null && pageCount !== total)) {
-        throw new Error(MSG_BAD_PAGE);
-      }
-      if (pageCount > 0 && (pages.length === 0 || pages.length > BATCH_PAGES)) throw new Error(MSG_BAD_PAGE);
-      for (const page of pages) {
-        if (typeof page?.svg !== "string" || !isValidPaperMm(page.widthMm) || !isValidPaperMm(page.heightMm)) {
-          throw new Error(MSG_BAD_PAGE);
-        }
-      }
-      return { pages, pageCount, nextFrom: expectedFrom + pages.length };
     }
 
     function removePrintDocument() {
@@ -217,26 +218,32 @@
       return printed;
     }
 
-    async function fetchPages(state) {
-      let from = 0;
-      let total = null;
-      let chars = 0;
-      while (total === null || from < total) {
-        if (job.cancelled) return false;
-        const result = await hwpHost.call("getPrintPages", { from, count: BATCH_PAGES }, { timeoutMs: BATCH_TIMEOUT_MS });
-        const batch = readBatch(result, from, total);
-        total = batch.pageCount;
-        if (total === 0) throw new Error(MSG_EMPTY);
-        for (const [offset, page] of batch.pages.entries()) {
-          chars += page.svg.length;
-          if (chars > MAX_SVG_CHARS) throw new Error(MSG_TOO_BIG);
-          state.root.appendChild(newPageElement(page.svg, from + offset, state.rules, page));
-        }
-        from = batch.nextFrom;
-        showProgress(progressText(Math.min(from, total), total));
-        await nextTask();
+    // Batches are fetched strictly one after another (one batch of page SVG in memory at a time), so
+    // each step awaits the previous one and schedules the next.
+    function appendBatch(state, batch, from, chars) {
+      let total = chars;
+      for (const [offset, page] of batch.pages.entries()) {
+        total += page.svg.length;
+        if (total > MAX_SVG_CHARS) throw new Error(MSG_TOO_BIG);
+        state.root.appendChild(newPageElement(page.svg, from + offset, state.rules, page));
       }
-      return true;
+      return total;
+    }
+
+    async function fetchPagesFrom(state, from, total, chars) {
+      if (job.cancelled) return false;
+      if (total !== null && from >= total) return true;
+      const result = await hwpHost.call("getPrintPages", { from, count: BATCH_PAGES }, { timeoutMs: BATCH_TIMEOUT_MS });
+      const batch = readBatch(result, from, total);
+      if (batch.pageCount === 0) throw new Error(MSG_EMPTY);
+      const used = appendBatch(state, batch, from, chars);
+      showProgress(progressText(Math.min(batch.nextFrom, batch.pageCount), batch.pageCount));
+      await nextTask();
+      return fetchPagesFrom(state, batch.nextFrom, batch.pageCount, used);
+    }
+
+    function fetchPages(state) {
+      return fetchPagesFrom(state, 0, null, 0);
     }
 
     function nextTask() {

@@ -25,7 +25,7 @@ class FakeSvg {
   setAttribute(k, v) { this.attrs.set(k, v); }
   removeAttribute(k) { this.attrs.delete(k); }
   querySelectorAll() { return []; }
-  remove() {}
+  remove() { this.removed = true; }
 }
 
 class FakeNode {
