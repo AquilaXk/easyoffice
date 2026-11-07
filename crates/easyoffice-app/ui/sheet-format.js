@@ -215,11 +215,9 @@
       if (getActiveModule() !== "SHEET") return;
       const map = sheetDataStore[getActiveSheetName()] || {};
       const rg = getRange();
-      const barVisible = document.getElementById("doc-style-bar")?.hidden === false;
       Object.keys(BUTTON_IDS).forEach((kind) => {
         const state = rangeFlagState(map, rg, kind);
-        setPressed(document.querySelector('[data-command-id="sheet-home-' + kind + '"]'), state);
-        if (barVisible) setPressed(document.getElementById(BUTTON_IDS[kind]), state);
+        setPressed(document.getElementById(BUTTON_IDS[kind]), state);
       });
     }
 

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createWebUiDom, createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { makeFixtureFile, pickFile } from "./test-support/fixture-files.mjs";
-import { switchModule } from "./test-support/modules.mjs";
+import { switchModule, studioItem } from "./test-support/modules.mjs";
 
 // Cell formatting and column widths in the save payload and on open (PD-089, #148).
 
@@ -47,7 +47,7 @@ function dragColumn(document, col, dx) {
 }
 
 async function saveSheet(h) {
-  h.userClick(h.document.getElementById("qat-save"));
+  h.userClick(studioItem(h.document, "studio-save"));
   await flushAsyncTurns(20);
   return h.converts.at(-1);
 }

@@ -68,15 +68,12 @@
       getActiveModule,
       getHwpHost,
       setActiveModule,
-      getActiveRibbonCategory,
-      setActiveRibbonCategory,
       getActiveSheetName,
       setActiveSheetName,
       getActiveSheetCellRef,
       getActiveSlideIndex,
       getPdfRotationDeg,
       setPdfRotationDeg,
-      getShortcutModifier,
       enqueueWorkspaceHistoryOp,
       onModuleApplied,
       getWindowBridge,
@@ -85,12 +82,7 @@
     const {
       MODULE_LABELS,
       MODULE_SPECS,
-      CONTEXTUAL_TOOL_BADGES,
-      RIBBON_STYLE_LABELS,
-      RIBBON_CATEGORY_ORDER,
       syncLocalRibbonStateFromBackend,
-      formatPlatformShortcut,
-      resolveRibbonShortcutLabel,
     } = ribbonCatalog;
 
     const {
@@ -103,7 +95,6 @@
     const ribbonIpcPayload = (fields) => JSON.stringify({ ...fields, sessionId: ribbonSessionId });
     const workspaceUndoStack = [];
     const workspaceRedoStack = [];
-    let ribbonRenderSeq = 0;
     let historyMutationEpoch = 0;
 
     function getHistoryMutationEpoch() {
@@ -177,9 +168,6 @@
       if (statusMod) statusMod.textContent = "모듈: " + (MODULE_LABELS[mod] || mod);
       if (statusSpec) statusSpec.textContent = "포맷: " + (MODULE_SPECS[mod] || "");
 
-      const ctxBadge = document.getElementById("contextual-tool-badge");
-      if (ctxBadge) ctxBadge.textContent = CONTEXTUAL_TOOL_BADGES[mod] || "표·개체 도구";
-
       const hwpNotice = document.getElementById("hwp-manuscript-preview");
       const docEditorEl = document.getElementById("doc-editor");
       if (hwpNotice) {
@@ -187,92 +175,6 @@
           mod !== "HWP" || !docEditorEl?.classList.contains("manuscript-grid");
       }
       if (typeof onModuleApplied === "function") onModuleApplied(mod);
-    }
-
-    function applyRibbonStyleDom(rawStyle, categoriesOverride) {
-      const styleKey = normalizeRibbonStyleKey(rawStyle);
-      localRibbonState.ribbonStyle = styleKey;
-      const btnRibbonStyle = document.getElementById("btn-ribbon-style");
-      if (btnRibbonStyle) {
-        btnRibbonStyle.textContent =
-          styleKey === "hangul" ? "리본: 한글(HWP) 7탭" : "리본: 표준 오피스";
-      }
-      const labels =
-        categoriesOverride || RIBBON_STYLE_LABELS[styleKey] || RIBBON_STYLE_LABELS.standard;
-      let nextActiveCat = getActiveRibbonCategory();
-      document.querySelectorAll("#ribbon-tabs .ribbon-btn").forEach((b, idx) => {
-        if (labels[idx]) b.textContent = labels[idx];
-        if (RIBBON_CATEGORY_ORDER[idx]) {
-          b.dataset.category = RIBBON_CATEGORY_ORDER[idx];
-          if (b.classList.contains("active")) {
-            nextActiveCat = RIBBON_CATEGORY_ORDER[idx];
-          }
-        }
-      });
-      return nextActiveCat;
-    }
-
-    function switchRibbonStyleTracked() {
-      return enqueueWorkspaceHistoryOp(async () => {
-        const sheetController = getSheetController();
-        await sheetController.commitPendingFocusedSheetCell(true);
-        const preSnapshot = captureWorkspaceSnapshot(false);
-        const curStyle = normalizeRibbonStyleKey(localRibbonState.ribbonStyle);
-        const nextStyle = curStyle === "standard" ? "hangul" : "standard";
-        const res = await invokeIpc("switch_ribbon_style", ribbonIpcPayload({ style: nextStyle }));
-        const nextActiveCat = applyRibbonStyleDom(nextStyle, res?.categories);
-        await renderRibbonCategoryTools(nextActiveCat);
-        commitDeferredUndoSnapshot(preSnapshot);
-        sheetController.refreshFocusedSheetCellPendingSnapshot();
-      });
-    }
-
-    function createRibbonToolButton(cmd) {
-      const btn = document.createElement("button");
-      btn.className = "ribbon-tool-btn";
-      btn.dataset.commandId = cmd.id;
-      const span = document.createElement("span");
-      span.textContent = cmd.title || "";
-      btn.appendChild(span);
-      const boundShortcut = resolveRibbonShortcutLabel(cmd.id, cmd.shortcut);
-      if (boundShortcut) {
-        const small = document.createElement("small");
-        const activeModKey = typeof getShortcutModifier === "function" ? getShortcutModifier() : "⌘";
-        small.textContent = "(" + formatPlatformShortcut(boundShortcut, activeModKey) + ")";
-        btn.appendChild(document.createTextNode(" "));
-        btn.appendChild(small);
-      }
-      btn.addEventListener("click", () => {
-        void executeTrackedRibbonCommand(cmd.id, { fallbackTitle: cmd.title }).catch(() => {});
-      });
-      return btn;
-    }
-
-    async function renderRibbonCategoryTools(categoryKey) {
-      const seq = ribbonRenderSeq + 1;
-      ribbonRenderSeq = seq;
-      setActiveRibbonCategory(categoryKey || "home");
-      const catKey = getActiveRibbonCategory();
-      localRibbonState.activeCategory = catKey;
-      document.querySelectorAll("#ribbon-tabs .ribbon-btn").forEach((b) => {
-        const isAct = b.dataset.category === catKey;
-        b.classList.toggle("active", isAct);
-        b.setAttribute("role", "tab");
-        b.setAttribute("aria-selected", isAct ? "true" : "false");
-      });
-      const strip = document.getElementById("ribbon-tool-strip");
-      if (!strip) return;
-      const curMod = getActiveModule();
-      const modKey = curMod === "CONV" ? "DOC" : curMod;
-      const res = await invokeIpc(
-        "get_ribbon_category_commands",
-        JSON.stringify({ module: modKey, category: catKey })
-      );
-      if (seq !== ribbonRenderSeq) return;
-      const cmds = (res && Array.isArray(res.commands) && res.commands) || [];
-      strip.innerHTML = "";
-      cmds.forEach((cmd) => strip.appendChild(createRibbonToolButton(cmd)));
-      getSheetController()?.syncSheetFormatToolbar?.();
     }
 
     async function activatePaneInternal(mod, skipTabBufferSync) {
@@ -310,7 +212,7 @@
         workspacePanels.restoreDocTabState(mod);
       }
       workspacePanels.renderModuleOutline(mod);
-      await renderRibbonCategoryTools(getActiveRibbonCategory()).catch(() => {});
+      getSheetController()?.syncSheetFormatToolbar?.();
       void getHwpHost?.()?.onModuleActivated(mod);
     }
 
@@ -381,19 +283,12 @@
       const workspacePanels = getWorkspacePanels();
       sheetController.bumpSnapshotEpoch();
       restoreSnapshotStores(snap, sheetController);
-      const targetStyle = normalizeRibbonStyleKey(
-        snap.ribbonState?.ribbonStyle || localRibbonState.ribbonStyle
-      );
       if (snap.ribbonState) {
         Object.assign(localRibbonState, structuredClone(snap.ribbonState));
       }
       if (backendSyncRes) {
         syncLocalRibbonStateFromBackend(localRibbonState, backendSyncRes);
       }
-      await invokeIpc("switch_ribbon_style", ribbonIpcPayload({ style: targetStyle })).catch(
-        () => null
-      );
-      applyRibbonStyleDom(targetStyle);
       applyPdfRotationDom(typeof snap.pdfRotationDeg === "number" ? snap.pdfRotationDeg : 0);
       workspacePanels.restorePdfStudioState(snap.pdfStudio);
       workspacePanels.restoreWorkspaceViewState(snap.viewState);
@@ -628,15 +523,10 @@
       if (slider) slider.value = String(zoom);
     }
 
+    // The ribbon bar is gone (PD-098); the command stays in the catalog and keeps the state flag.
     function viewEffectRibbon(_cmdId, execRes) {
-      const strip = document.getElementById("ribbon-tool-strip");
-      if (!strip) return;
-      if (execRes?.ribbonCollapsed !== undefined) {
-        strip.hidden = Boolean(execRes.ribbonCollapsed);
-        return;
-      }
-      strip.hidden = !strip.hidden;
-      localRibbonState.ribbonCollapsed = strip.hidden;
+      localRibbonState.ribbonCollapsed =
+        execRes?.ribbonCollapsed !== undefined ? Boolean(execRes.ribbonCollapsed) : !localRibbonState.ribbonCollapsed;
     }
 
     function viewEffectSplit(_cmdId, execRes) {
@@ -959,8 +849,6 @@
       performWorkspaceUndo,
       performWorkspaceRedo,
       applyModuleAccent,
-      switchRibbonStyleTracked,
-      renderRibbonCategoryTools,
       activatePaneInternal,
       activatePane,
       executeTrackedRibbonCommand,

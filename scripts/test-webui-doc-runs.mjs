@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createWebUiDom, flushAsyncTurns } from "./webui-dom-harness.mjs";
+import { studioItem } from "./test-support/modules.mjs";
 
 // Selection holder honoring the Selection API surface the controller uses.
 function createSelection() {
@@ -351,7 +352,7 @@ test("save payload carries run size, font, color and highlight and keeps neighbo
     size: 28, bold: true, color: "#ff0000", font: "함초롬바탕", highlight: "#ffff00",
   });
 
-  h.userClick(h.document.getElementById("qat-save"));
+  h.userClick(studioItem(h.document, "studio-save"));
   await flushAsyncTurns(20);
   const payload = h.converts.at(-1);
   assert.equal(payload.blocks.length, 2);

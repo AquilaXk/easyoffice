@@ -82,22 +82,20 @@ enum SmokeStep {
 #[derive(Default)]
 struct SmokeProgress {
     bootstrapped: bool,
-    ribbon: bool,
     hwp: Option<String>,
     window_loaded: Option<String>,
     window_closed: bool,
 }
 
 impl SmokeProgress {
-    /// The UI requests `get_workspace_bootstrap` first and only asks for ribbon commands after it
-    /// has parsed that response, so a successful second step proves a full round trip.
+    /// The UI requests `get_workspace_bootstrap` first; the HWP and window markers arrive later over
+    /// the same IPC path, so bootstrap plus both markers prove the full round trips.
     fn step(&mut self, command: &str, payload: &str, ok: bool) -> SmokeStep {
         if !ok {
             return SmokeStep::Failed(format!("IPC command {command} failed"));
         }
         match command {
             "get_workspace_bootstrap" => self.bootstrapped = true,
-            "get_ribbon_category_commands" if self.bootstrapped => self.ribbon = true,
             "scrub_pii" => {
                 if let Some(reason) = payload.strip_prefix(HWP_FAIL_MARKER) {
                     return SmokeStep::Failed(format!("HWP editor round trip: {reason}"));
@@ -124,9 +122,7 @@ impl SmokeProgress {
 
     fn verdict(&self) -> SmokeStep {
         match (&self.hwp, &self.window_loaded) {
-            (Some(detail), Some(module))
-                if self.bootstrapped && self.ribbon && self.window_closed =>
-            {
+            (Some(detail), Some(module)) if self.bootstrapped && self.window_closed => {
                 SmokeStep::Passed(format!("{detail}, window={module}"))
             }
             _ => SmokeStep::Waiting,
@@ -139,19 +135,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn smoke_requires_bootstrap_ribbon_hwp_and_second_window_round_trips() {
+    fn smoke_requires_bootstrap_hwp_and_second_window_round_trips() {
         let mut p = SmokeProgress::default();
         assert_eq!(
-            p.step("get_ribbon_category_commands", "", true),
-            SmokeStep::Waiting
-        );
-        assert!(!p.ribbon, "ribbon before bootstrap does not count");
-        assert_eq!(
             p.step("get_workspace_bootstrap", "", true),
-            SmokeStep::Waiting
-        );
-        assert_eq!(
-            p.step("get_ribbon_category_commands", "HWP|module", true),
             SmokeStep::Waiting
         );
         assert_eq!(
@@ -189,7 +176,7 @@ mod tests {
         let mut p = SmokeProgress::default();
         p.step("get_workspace_bootstrap", "", true);
         assert_eq!(
-            p.step("get_ribbon_category_commands", "", true),
+            p.step("execute_ribbon_command", "", true),
             SmokeStep::Waiting
         );
         assert_eq!(

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createWebUiDom, flushAsyncTurns } from "./webui-dom-harness.mjs";
-import { switchModule } from "./test-support/modules.mjs";
+import { switchModule, studioItem } from "./test-support/modules.mjs";
 
 // Builds a harness whose IPC is the offline backend, with optional per-command overrides, and
 // records every convert_document_format payload.
@@ -42,7 +42,7 @@ test("DOC save sends ordered formatted blocks with in-place tables and computed 
     "<p>[[SLIDE]]\t가짜 슬라이드</p><p>[[TABLE_ROW]]\t주입</p>" +
     '<ul><li>항목 하나</li></ul><p style="text-align: right">뒤 문단</p>';
 
-  userClick(document.getElementById("qat-save"));
+  userClick(studioItem(document, "studio-save"));
   await flushAsyncTurns(10);
 
   assert.equal(converts.length, 1);
@@ -82,7 +82,7 @@ test("HWP save carries no hardcoded agency and uses the HWP tab title", async ()
   const { document, userClick, converts, downloads } = await createSaveHarness();
   switchModule(document, "HWP");
   await flushAsyncTurns(6);
-  userClick(document.getElementById("qat-save"));
+  userClick(studioItem(document, "studio-save"));
   await flushAsyncTurns(10);
 
   const payload = converts.at(-1);
@@ -115,7 +115,7 @@ test("SHEET save sends every sheet, not only the active one", async () => {
   a1.blur();
   await flushAsyncTurns(8);
 
-  userClick(document.getElementById("qat-save"));
+  userClick(studioItem(document, "studio-save"));
   await flushAsyncTurns(10);
 
   const payload = converts.at(-1);
@@ -134,7 +134,7 @@ test("save reports failure when the conversion result is missing or the backend 
   const empty = await createSaveHarness({
     convert_document_format: () => ({ status: "OK", outputBytes: 0, specification: "x", convertedBase64: "" }),
   });
-  empty.userClick(empty.document.getElementById("qat-save"));
+  empty.userClick(studioItem(empty.document, "studio-save"));
   await flushAsyncTurns(10);
   assert.equal(empty.downloads.length, 0);
   assert.match(feedback(empty.document), /^문서 저장 실패 \(DOCX\): 변환 결과가 비어 있습니다/);
@@ -145,7 +145,7 @@ test("save reports failure when the conversion result is missing or the backend 
       throw new Error("InvalidArgument: 구조화 저장 실패");
     },
   });
-  rejected.userClick(rejected.document.getElementById("qat-save"));
+  rejected.userClick(studioItem(rejected.document, "studio-save"));
   await flushAsyncTurns(10);
   assert.equal(rejected.downloads.length, 0);
   assert.match(feedback(rejected.document), /^문서 저장 실패 \(DOCX\): .*구조화 저장 실패/);
@@ -159,7 +159,7 @@ test("download file name follows a sanitized tab title", async () => {
       return boot;
     },
   });
-  userClick(document.getElementById("qat-save"));
+  userClick(studioItem(document, "studio-save"));
   await flushAsyncTurns(10);
   assert.equal(converts.at(-1).title, "_CON");
   assert.equal(downloads.at(-1).download, "_CON.docx");

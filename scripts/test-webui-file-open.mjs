@@ -4,7 +4,7 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createWebUiDom, createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { pickFile as pickFixtureFile } from "./test-support/fixture-files.mjs";
-import { switchModule } from "./test-support/modules.mjs";
+import { switchModule, studioItem } from "./test-support/modules.mjs";
 
 const INDEX_HTML = fs.readFileSync(
   fileURLToPath(new URL("../crates/easyoffice-app/ui/index.html", import.meta.url)),
@@ -160,7 +160,7 @@ test("opening a DOCX-style model loads formatted blocks into the DOC module and 
 test("open then save round-trips the structured blocks and names the download after the file", async () => {
   const { document, userClick, converts, downloads } = await createOpenHarness();
   await pickFile(document, fixtureFile("보고서.docx", DOC_MODEL));
-  userClick(document.getElementById("qat-save"));
+  userClick(studioItem(document, "studio-save"));
   await flushAsyncTurns(20);
 
   const save = converts().at(-1);
@@ -248,7 +248,7 @@ test("XLSX sheets keep every sheet name, values and formulas, and save back unch
   assert.equal(a1.dataset.formula, "=매출!B4");
   assert.equal(a1.textContent, "350", "cross-sheet formula evaluates against the imported sheet");
 
-  userClick(document.getElementById("qat-save"));
+  userClick(studioItem(document, "studio-save"));
   await flushAsyncTurns(20);
   const save = converts().at(-1);
   assert.deepEqual(save.sheets.map((s) => s.name), ["매출", "요약"]);
@@ -362,19 +362,19 @@ test("opening is one undoable workspace state (and redoable)", async () => {
   await pickFile(document, fixtureFile("보고서.docx", DOC_MODEL));
   assert.equal(editor.querySelector("h1").textContent, "개요");
 
-  userClick(document.getElementById("qat-undo"));
+  userClick(studioItem(document, "studio-undo"));
   await flushAsyncTurns(30);
   assert.equal(editor.textContent, before, "default document is back");
   assert.equal(tabTitle(document, "DOC"), "분기_경영실적_보고서.docx", "tab title is part of the undone state");
 
-  userClick(document.getElementById("qat-redo"));
+  userClick(studioItem(document, "studio-redo"));
   await flushAsyncTurns(30);
   assert.equal(editor.querySelector("h1").textContent, "개요");
   assert.equal(tabTitle(document, "DOC"), "보고서.docx");
 
   // Undo of a sheet import brings the default workbook tabs back.
   await pickFile(document, fixtureFile("통계.xlsx", SHEET_MODEL));
-  userClick(document.getElementById("qat-undo"));
+  userClick(studioItem(document, "studio-undo"));
   await flushAsyncTurns(30);
   const tabs = [...document.querySelectorAll("#sheet-tab-bar .sheet-tab-btn[data-sheet-tab]")].map((b) => b.dataset.sheetTab);
   assert.deepEqual(tabs, ["Sheet1", "Sheet2"]);
@@ -524,7 +524,7 @@ test("pictures, super/subscripts, indents and line spacing show in the editor", 
 test("saving an opened document sends the picture bytes, scripts, indents and spacing unchanged", async () => {
   const { document, userClick, converts } = await createOpenHarness();
   await pickFile(document, fixtureFile("그림.docx", RICH_MODEL));
-  userClick(document.getElementById("qat-save"));
+  userClick(studioItem(document, "studio-save"));
   await flushAsyncTurns(20);
   const save = converts().at(-1);
   assert.deepEqual(save.blocks, SAVED_RICH_BLOCKS);
@@ -535,7 +535,7 @@ test("an <img> without stored bytes degrades to its alternative text on save", a
   await pickFile(document, fixtureFile("그림.docx", RICH_MODEL));
   const editor = document.getElementById("doc-editor");
   editor.querySelector("img").dataset.eoImageId = "img-missing";
-  userClick(document.getElementById("qat-save"));
+  userClick(studioItem(document, "studio-save"));
   await flushAsyncTurns(20);
   const blocks = converts().at(-1).blocks;
   assert.deepEqual(blocks[1], { type: "paragraph", runs: [{ text: '작은 "그림" <b>' }] });
@@ -550,7 +550,7 @@ test("undo and redo of an opened picture keep it displayable and savable", async
   document.defaultView.__EASYOFFICE_SHEET_UTILS__.restoreDomChildren(editor, snapshot, document);
   const img = editor.querySelector("img");
   assert.equal(img.getAttribute("src"), "blob:easyoffice-test");
-  userClick(document.getElementById("qat-save"));
+  userClick(studioItem(document, "studio-save"));
   await flushAsyncTurns(20);
   assert.deepEqual(converts().at(-1).blocks, SAVED_RICH_BLOCKS);
 });

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
-import { switchModule } from "./test-support/modules.mjs";
+import { switchModule, commandItem } from "./test-support/modules.mjs";
 
 function makeStandaloneOfflineRpc(sandbox) {
   return sandbox.__EASYOFFICE_CREATE_OFFLINE_RPC__({
@@ -469,29 +469,22 @@ test("failed ribbon async prep (autosum, smart stats, security audit) preserves 
   switchModule(document, "SHEET");
   await flushAsyncTurns();
 
-  const insertCatBtn = document.querySelector('.ribbon-btn[data-category="insert"]');
-  const homeCatBtn = document.querySelector('.ribbon-btn[data-category="home"]');
-  userClick(insertCatBtn);
-  await flushAsyncTurns(2);
-  userClick(homeCatBtn);
-  await flushAsyncTurns(6);
-  assert.ok(document.querySelector('[data-command-id="sheet-home-bold"]'));
+  assert.ok(commandItem(document, "sheet-home-bold"));
   if (mock.deferredReviewCategoryResolve) {
     mock.deferredReviewCategoryResolve();
     await flushAsyncTurns(6);
   }
-  assert.equal(document.querySelector('[data-command-id="sheet-insert-table"]'), null);
-  assert.ok(document.querySelector('[data-command-id="sheet-home-bold"]'));
+  assert.ok(commandItem(document, "sheet-home-bold"));
 
   const f2 = document.querySelector('#pane-sheet td[data-cell="F2"]');
   const formulaInput = document.getElementById("formula-input");
   const feedback = document.getElementById("status-command-feedback");
   const secStatus = document.getElementById("security-status-text");
-  const boldBtn = document.querySelector('[data-command-id="sheet-home-bold"]');
-  const autosumBtn = document.querySelector('[data-command-id="sheet-data-autosum"]');
-  const dataValBtn = document.querySelector('[data-command-id="sheet-data-validation"]');
-  const verifyBtn = document.querySelector('[data-command-id="sheet-review-verify"]');
-  const statsBtn = document.querySelector('[data-command-id="sheet-review-stats"]');
+  const boldBtn = commandItem(document, "sheet-home-bold");
+  const autosumBtn = commandItem(document, "sheet-data-autosum");
+  const dataValBtn = commandItem(document, "sheet-data-validation");
+  const verifyBtn = commandItem(document, "sheet-review-verify");
+  const statsBtn = commandItem(document, "sheet-review-stats");
 
   userClick(boldBtn);
   await flushAsyncTurns(10);
@@ -585,16 +578,15 @@ test("workspace snapshot SSOT restores per-sheet row counts, doc layout styles, 
   const { document, sandbox, userClick } = await createWorkspaceHarness();
 
   const docEditor = document.getElementById("doc-editor");
-  userClick(document.querySelector('.ribbon-btn[data-category="layout"]'));
   await flushAsyncTurns();
 
-  userClick(document.querySelector('[data-command-id="document-layout-columns"]'));
+  userClick(commandItem(document, "document-layout-columns"));
   await flushAsyncTurns();
-  userClick(document.querySelector('[data-command-id="document-layout-orientation"]'));
+  userClick(commandItem(document, "document-layout-orientation"));
   await flushAsyncTurns();
-  userClick(document.querySelector('[data-command-id="document-layout-margins"]'));
+  userClick(commandItem(document, "document-layout-margins"));
   await flushAsyncTurns();
-  userClick(document.querySelector('[data-command-id="document-layout-paper"]'));
+  userClick(commandItem(document, "document-layout-paper"));
   await flushAsyncTurns();
 
   assert.equal(docEditor.style.columnCount, "2");
@@ -622,11 +614,10 @@ test("workspace snapshot SSOT restores per-sheet row counts, doc layout styles, 
 
   switchModule(document, "SHEET");
   await flushAsyncTurns();
-  userClick(document.querySelector('.ribbon-btn[data-category="insert"]'));
   await flushAsyncTurns();
 
   assert.equal(document.querySelectorAll("#pane-sheet tbody tr").length, 12);
-  userClick(document.querySelector('[data-command-id="sheet-insert-table"]'));
+  userClick(commandItem(document, "sheet-insert-table"));
   await flushAsyncTurns();
   assert.equal(document.querySelectorAll("#pane-sheet tbody tr").length, 13);
 
@@ -650,17 +641,16 @@ test("workspace snapshot SSOT restores per-sheet row counts, doc layout styles, 
 
   switchModule(document, "SLIDE");
   await flushAsyncTurns();
-  userClick(document.querySelector('.ribbon-btn[data-category="home"]'));
   await flushAsyncTurns();
 
   const titleZone = document.getElementById("slide-title-zone");
-  userClick(document.querySelector('[data-command-id="slide-home-bold"]'));
+  userClick(commandItem(document, "slide-home-bold"));
   await flushAsyncTurns();
-  userClick(document.querySelector('[data-command-id="slide-home-italic"]'));
+  userClick(commandItem(document, "slide-home-italic"));
   await flushAsyncTurns();
-  userClick(document.querySelector('[data-command-id="slide-home-underline"]'));
+  userClick(commandItem(document, "slide-home-underline"));
   await flushAsyncTurns();
-  userClick(document.querySelector('[data-command-id="slide-home-style"]'));
+  userClick(commandItem(document, "slide-home-style"));
   await flushAsyncTurns();
 
   assert.equal(titleZone.style.fontWeight, "700");
@@ -686,37 +676,30 @@ test("workspace snapshot SSOT restores per-sheet row counts, doc layout styles, 
   assert.equal(titleZone.style.textDecoration, "underline");
   assert.equal(titleZone.style.fontSize, "22px");
 
-  userClick(document.querySelector('.ribbon-btn[data-category="view"]'));
   await flushAsyncTurns();
   const stage = document.querySelector(".canvas-stage");
-  const strip = document.getElementById("ribbon-tool-strip");
 
-  userClick(document.querySelector('[data-command-id="slide-view-zoom"]'));
+  userClick(commandItem(document, "slide-view-zoom"));
   await flushAsyncTurns();
-  userClick(document.querySelector('[data-command-id="slide-view-split"]'));
-  await flushAsyncTurns();
-  userClick(document.querySelector('[data-command-id="slide-view-ribbon"]'));
+  userClick(commandItem(document, "slide-view-split"));
   await flushAsyncTurns();
 
   assert.equal(stage.style.zoom, "125%");
   assert.equal(stage.dataset.splitView, "true");
-  assert.equal(strip.hidden, true);
 
-  for (let i = 0; i < 3; i += 1) {
+  for (let i = 0; i < 2; i += 1) {
     sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
     await flushAsyncTurns();
   }
   assert.equal(stage.style.zoom, "");
   assert.equal(stage.dataset.splitView, undefined);
-  assert.equal(strip.hidden, false);
 
-  for (let i = 0; i < 3; i += 1) {
+  for (let i = 0; i < 2; i += 1) {
     sandbox.dispatchWindowKeydown({ key: "y", ctrlKey: true });
     await flushAsyncTurns();
   }
   assert.equal(stage.style.zoom, "125%");
   assert.equal(stage.dataset.splitView, "true");
-  assert.equal(strip.hidden, true);
 });
 
 test("JSON-only real-backend IPC syncs state, toggles per-cell inline styles independently, and awaits async cell flush before switchSheetTab and activatePane", async () => {
@@ -822,8 +805,8 @@ test("JSON-only real-backend IPC syncs state, toggles per-cell inline styles ind
 
   const f2 = document.querySelector('#pane-sheet td[data-cell="F2"]');
   const a1 = document.querySelector('#pane-sheet td[data-cell="A1"]');
-  const boldBtn = document.querySelector('[data-command-id="sheet-home-bold"]');
-  const zoomBtn = document.querySelector('[data-command-id="sheet-view-zoom"]');
+  const boldBtn = commandItem(document, "sheet-home-bold");
+  const zoomBtn = commandItem(document, "sheet-view-zoom");
 
   userClick(f2);
   userClick(boldBtn);

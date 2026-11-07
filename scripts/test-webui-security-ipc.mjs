@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createWebUiDom, flushAsyncTurns } from "./webui-dom-harness.mjs";
-import { switchModule } from "./test-support/modules.mjs";
+import { switchModule, studioItem } from "./test-support/modules.mjs";
 
 const VECTORS_PATH = fileURLToPath(
   new URL("../fixtures/pii-scrub-vectors.json", import.meta.url)
@@ -41,7 +41,7 @@ test("disconnected host refuses IPC fail-closed without mutating DOC, SHEET, or 
     /\[요청 거부\] 엔진 미연결: 데스크톱 호스트 또는 로컬 서버\(--serve\) 연결이 필요합니다\./
   );
 
-  userClick(document.getElementById("qat-save"));
+  userClick(studioItem(document, "studio-save"));
   await flushAsyncTurns(6);
   assert.equal(downloads.length, 0);
   assert.equal(docEditor.innerHTML, docHtmlBefore);
@@ -291,7 +291,7 @@ test("structured JSON IPC preserves ? and %3B in cross-sheet formulas, literals,
   assert.equal(e2.textContent, "a?b");
   assert.equal(d2.textContent, "100%3B");
 
-  wrappedHarness.userClick(wrappedHarness.document.getElementById("qat-save"));
+  wrappedHarness.userClick(studioItem(wrappedHarness.document, "studio-save"));
   await flushAsyncTurns(8);
   const saveCall = capturedCalls.find((c) => c.command === "convert_document_format");
   assert.ok(saveCall);
