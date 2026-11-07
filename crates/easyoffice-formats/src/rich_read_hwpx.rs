@@ -40,124 +40,155 @@ struct Header {
     styles: HashMap<String, StyleInfo>,
 }
 
-fn read_header(xml: &str) -> Result<Header, EasyOfficeError> {
-    let mut h = Header::default();
-    let mut cur_char: Option<(String, CharFmt)> = None;
-    let mut cur_para: Option<(String, ParaShape, bool)> = None;
-    let mut hangul_slot = false;
-    for ev in tokenize(xml)? {
-        match ev {
-            XmlEvent::Start { name, attrs } => match name.as_str() {
-                "hh:fontface" => hangul_slot = attr(&attrs, "lang") == Some("HANGUL"),
-                "hh:font" if hangul_slot => {
-                    if let (Some(id), Some(face)) = (attr(&attrs, "id"), attr(&attrs, "face")) {
-                        h.fonts.insert(id.to_string(), face.to_string());
-                    }
+/// Parsing state while reading `Contents/header.xml`.
+#[derive(Default)]
+struct HeaderBuilder {
+    header: Header,
+    cur_char: Option<(String, CharFmt)>,
+    cur_para: Option<(String, ParaShape, bool)>,
+    hangul_slot: bool,
+}
+
+impl HeaderBuilder {
+    fn char_fmt_mut(&mut self) -> Option<&mut CharFmt> {
+        self.cur_char.as_mut().map(|(_, f)| f)
+    }
+
+    fn para_mut(&mut self) -> Option<&mut ParaShape> {
+        self.cur_para.as_mut().map(|(_, p, _)| p)
+    }
+
+    fn on_start(&mut self, name: &str, attrs: &[(String, String)]) {
+        match name {
+            "hh:fontface" => self.hangul_slot = attr(attrs, "lang") == Some("HANGUL"),
+            "hh:font" if self.hangul_slot => {
+                if let (Some(id), Some(face)) = (attr(attrs, "id"), attr(attrs, "face")) {
+                    self.header.fonts.insert(id.to_string(), face.to_string());
                 }
-                "hh:charPr" => {
-                    cur_char = attr(&attrs, "id").map(|id| {
-                        let fmt = CharFmt {
-                            size_half_pt: attr(&attrs, "height")
-                                .and_then(|v| v.parse::<u32>().ok())
-                                .map(|v| v / 50)
-                                .and_then(|v| u16::try_from(v).ok())
-                                .filter(|v| *v > 0),
-                            color: attr(&attrs, "textColor")
-                                .and_then(normalize_hex_color)
-                                .filter(|c| c != "000000"),
-                            highlight: attr(&attrs, "shadeColor").and_then(normalize_hex_color),
-                            ..CharFmt::default()
-                        };
-                        (id.to_string(), fmt)
-                    });
+            }
+            "hh:charPr" => {
+                self.cur_char =
+                    attr(attrs, "id").map(|id| (id.to_string(), char_fmt_from_attrs(attrs)))
+            }
+            "hh:fontRef" => {
+                let font = attr(attrs, "hangul")
+                    .and_then(|id| self.header.fonts.get(id))
+                    .filter(|face| face.as_str() != DEFAULT_FONT_FACE)
+                    .cloned();
+                if let Some(f) = self.char_fmt_mut() {
+                    f.font = font;
                 }
-                "hh:fontRef" => {
-                    if let Some((_, f)) = cur_char.as_mut() {
-                        f.font = attr(&attrs, "hangul")
-                            .and_then(|id| h.fonts.get(id))
-                            .filter(|face| face.as_str() != DEFAULT_FONT_FACE)
-                            .cloned();
-                    }
+            }
+            "hh:bold" => {
+                if let Some(f) = self.char_fmt_mut() {
+                    f.bold = true;
                 }
-                "hh:bold" => {
-                    if let Some((_, f)) = cur_char.as_mut() {
-                        f.bold = true;
-                    }
+            }
+            "hh:italic" => {
+                if let Some(f) = self.char_fmt_mut() {
+                    f.italic = true;
                 }
-                "hh:italic" => {
-                    if let Some((_, f)) = cur_char.as_mut() {
-                        f.italic = true;
-                    }
+            }
+            "hh:underline" => {
+                if let Some(f) = self.char_fmt_mut() {
+                    f.underline = attr(attrs, "type").is_some_and(|t| t != "NONE");
                 }
-                "hh:underline" => {
-                    if let Some((_, f)) = cur_char.as_mut() {
-                        f.underline = attr(&attrs, "type").is_some_and(|t| t != "NONE");
-                    }
+            }
+            "hh:strikeout" => {
+                if let Some(f) = self.char_fmt_mut() {
+                    f.strike = attr(attrs, "shape").is_some_and(|t| t != "NONE");
                 }
-                "hh:strikeout" => {
-                    if let Some((_, f)) = cur_char.as_mut() {
-                        f.strike = attr(&attrs, "shape").is_some_and(|t| t != "NONE");
-                    }
+            }
+            "hh:paraPr" => {
+                self.cur_para =
+                    attr(attrs, "id").map(|id| (id.to_string(), ParaShape::default(), false));
+            }
+            "hh:align" => {
+                if let Some(p) = self.para_mut() {
+                    p.align = attr(attrs, "horizontal").map(str::to_string);
                 }
-                "hh:paraPr" => {
-                    cur_para =
-                        attr(&attrs, "id").map(|id| (id.to_string(), ParaShape::default(), false));
+            }
+            "hh:heading" => {
+                if let Some(p) = self.para_mut() {
+                    p.heading_type = attr(attrs, "type").unwrap_or("NONE").to_string();
+                    p.heading_level = attr(attrs, "level")
+                        .and_then(|l| l.parse().ok())
+                        .unwrap_or(0);
                 }
-                "hh:align" => {
-                    if let Some((_, p, _)) = cur_para.as_mut() {
-                        p.align = attr(&attrs, "horizontal").map(str::to_string);
-                    }
-                }
-                "hh:heading" => {
-                    if let Some((_, p, _)) = cur_para.as_mut() {
-                        p.heading_type = attr(&attrs, "type").unwrap_or("NONE").to_string();
-                        p.heading_level = attr(&attrs, "level")
-                            .and_then(|l| l.parse().ok())
+            }
+            "hc:left" => {
+                if let Some((_, p, seen)) = self.cur_para.as_mut() {
+                    if !*seen {
+                        *seen = true;
+                        p.left = attr(attrs, "value")
+                            .and_then(|v| v.parse().ok())
                             .unwrap_or(0);
                     }
                 }
-                "hc:left" => {
-                    if let Some((_, p, seen)) = cur_para.as_mut() {
-                        if !*seen {
-                            *seen = true;
-                            p.left = attr(&attrs, "value")
-                                .and_then(|v| v.parse().ok())
-                                .unwrap_or(0);
-                        }
-                    }
-                }
-                "hh:style" => {
-                    if let Some(id) = attr(&attrs, "id") {
-                        h.styles.insert(
-                            id.to_string(),
-                            StyleInfo {
-                                name: attr(&attrs, "name").unwrap_or("").to_string(),
-                                eng_name: attr(&attrs, "engName").unwrap_or("").to_string(),
-                                para_pr: attr(&attrs, "paraPrIDRef").unwrap_or("").to_string(),
-                                char_pr: attr(&attrs, "charPrIDRef").unwrap_or("").to_string(),
-                            },
-                        );
-                    }
-                }
-                _ => {}
+            }
+            "hh:style" => self.register_style(attrs),
+            _ => {}
+        }
+    }
+
+    fn register_style(&mut self, attrs: &[(String, String)]) {
+        let Some(id) = attr(attrs, "id") else {
+            return;
+        };
+        self.header.styles.insert(
+            id.to_string(),
+            StyleInfo {
+                name: attr(attrs, "name").unwrap_or("").to_string(),
+                eng_name: attr(attrs, "engName").unwrap_or("").to_string(),
+                para_pr: attr(attrs, "paraPrIDRef").unwrap_or("").to_string(),
+                char_pr: attr(attrs, "charPrIDRef").unwrap_or("").to_string(),
             },
-            XmlEvent::End(name) => match name.as_str() {
-                "hh:charPr" => {
-                    if let Some((id, f)) = cur_char.take() {
-                        h.chars.insert(id, f);
-                    }
+        );
+    }
+
+    fn on_end(&mut self, name: &str) {
+        match name {
+            "hh:charPr" => {
+                if let Some((id, f)) = self.cur_char.take() {
+                    self.header.chars.insert(id, f);
                 }
-                "hh:paraPr" => {
-                    if let Some((id, p, _)) = cur_para.take() {
-                        h.paras.insert(id, p);
-                    }
+            }
+            "hh:paraPr" => {
+                if let Some((id, p, _)) = self.cur_para.take() {
+                    self.header.paras.insert(id, p);
                 }
-                _ => {}
-            },
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Base character format of a `hh:charPr` element (size, text and shade colours).
+fn char_fmt_from_attrs(attrs: &[(String, String)]) -> CharFmt {
+    CharFmt {
+        size_half_pt: attr(attrs, "height")
+            .and_then(|v| v.parse::<u32>().ok())
+            .map(|v| v / 50)
+            .and_then(|v| u16::try_from(v).ok())
+            .filter(|v| *v > 0),
+        color: attr(attrs, "textColor")
+            .and_then(normalize_hex_color)
+            .filter(|c| c != "000000"),
+        highlight: attr(attrs, "shadeColor").and_then(normalize_hex_color),
+        ..CharFmt::default()
+    }
+}
+
+fn read_header(xml: &str) -> Result<Header, EasyOfficeError> {
+    let mut builder = HeaderBuilder::default();
+    for ev in tokenize(xml)? {
+        match ev {
+            XmlEvent::Start { name, attrs } => builder.on_start(&name, &attrs),
+            XmlEvent::End(name) => builder.on_end(&name),
             XmlEvent::Text(_) => {}
         }
     }
-    Ok(h)
+    Ok(builder.header)
 }
 
 #[derive(Default)]

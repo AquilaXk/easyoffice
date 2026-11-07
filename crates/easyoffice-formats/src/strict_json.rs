@@ -14,6 +14,87 @@ pub enum StrictJsonValue {
     Object(Vec<(String, StrictJsonValue)>),
 }
 
+/// Extra digits of headroom added to the exponent clamp.
+const EXPONENT_CLAMP_MARGIN: usize = 25;
+/// A `u64` has at most 20 decimal digits.
+const MAX_U64_DIGITS: usize = 20;
+
+/// Splits a JSON number mantissa into validated integer and fraction digit strings.
+fn split_mantissa(mantissa: &str) -> Option<(&str, &str)> {
+    let (int_part, frac_part) = match mantissa.split_once('.') {
+        Some((ip, fp)) => {
+            if fp.is_empty() || !fp.bytes().all(|b| b.is_ascii_digit()) {
+                return None;
+            }
+            (ip, fp)
+        }
+        None => (mantissa, ""),
+    };
+    let valid_int = !int_part.is_empty()
+        && int_part.bytes().all(|b| b.is_ascii_digit())
+        && !(int_part.len() > 1 && int_part.starts_with('0'));
+    valid_int.then_some((int_part, frac_part))
+}
+
+/// Parses an exponent (`+5`, `-3`, `12`), clamping its magnitude to `exp_clamp`.
+fn parse_clamped_exponent(exp_raw: &str, exp_clamp: i64) -> Option<i64> {
+    let (exp_neg, exp_digits) = if let Some(r) = exp_raw.strip_prefix('-') {
+        (true, r)
+    } else {
+        (false, exp_raw.strip_prefix('+').unwrap_or(exp_raw))
+    };
+    if exp_digits.is_empty() || !exp_digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let mut acc = 0i64;
+    for b in exp_digits.bytes() {
+        acc = (acc.saturating_mul(10)).saturating_add(i64::from(b - b'0'));
+        if acc > exp_clamp {
+            acc = exp_clamp;
+            break;
+        }
+    }
+    Some(if exp_neg { -acc } else { acc })
+}
+
+/// Converts `int.frac * 10^exp` to `u64` when it is a non-negative integer that fits.
+fn decimal_to_u64(is_neg: bool, int_bytes: &[u8], frac_bytes: &[u8], exp: i64) -> Option<u64> {
+    let total_digits = int_bytes.len().checked_add(frac_bytes.len())?;
+    let digit_at = |idx: usize| -> u8 {
+        if idx < int_bytes.len() {
+            int_bytes[idx]
+        } else {
+            frac_bytes[idx - int_bytes.len()]
+        }
+    };
+    let Some(first_nz) = (0..total_digits).find(|&idx| digit_at(idx) != b'0') else {
+        return Some(0);
+    };
+    if is_neg {
+        return None;
+    }
+    let last_nz = (first_nz..total_digits)
+        .rev()
+        .find(|&idx| digit_at(idx) != b'0')?;
+    let sig_len = last_nz - first_nz + 1;
+    let trailing_zeros = i64::try_from(total_digits - 1 - last_nz).ok()?;
+    let frac_len = i64::try_from(frac_bytes.len()).ok()?;
+    let scale = exp.checked_sub(frac_len)?.checked_add(trailing_zeros)?;
+    if scale < 0 || sig_len > MAX_U64_DIGITS || (sig_len as i64) + scale > MAX_U64_DIGITS as i64 {
+        return None;
+    }
+    let mut val = 0u64;
+    for idx in first_nz..=last_nz {
+        val = val
+            .checked_mul(10)?
+            .checked_add(u64::from(digit_at(idx) - b'0'))?;
+    }
+    for _ in 0..scale {
+        val = val.checked_mul(10)?;
+    }
+    Some(val)
+}
+
 impl StrictJsonValue {
     pub fn parse(input: &str) -> Result<Self, EasyOfficeError> {
         let trimmed = input.strip_prefix('\u{FEFF}').unwrap_or(input);
@@ -70,89 +151,18 @@ impl StrictJsonValue {
             Some(pos) => (&unsigned_str[..pos], Some(&unsigned_str[pos + 1..])),
             None => (unsigned_str, None),
         };
-        let (int_part, frac_part) = match mantissa.split_once('.') {
-            Some((ip, fp)) => {
-                if fp.is_empty() || !fp.bytes().all(|b| b.is_ascii_digit()) {
-                    return None;
-                }
-                (ip, fp)
-            }
-            None => (mantissa, ""),
-        };
-        if int_part.is_empty()
-            || !int_part.bytes().all(|b| b.is_ascii_digit())
-            || (int_part.len() > 1 && int_part.starts_with('0'))
-        {
-            return None;
-        }
+        let (int_part, frac_part) = split_mantissa(mantissa)?;
         if !is_neg && frac_part.is_empty() && exp_opt.is_none() {
             return int_part.parse::<u64>().ok();
         }
-        let int_bytes = int_part.as_bytes();
-        let frac_bytes = frac_part.as_bytes();
-        let total_digits = int_bytes.len().checked_add(frac_bytes.len())?;
-        let exp_clamp = i64::try_from(total_digits.saturating_add(25)).unwrap_or(i64::MAX / 4);
-        let exp: i64 = match exp_opt {
-            Some(exp_raw) => {
-                let (exp_neg, exp_digits) = if let Some(r) = exp_raw.strip_prefix('-') {
-                    (true, r)
-                } else if let Some(r) = exp_raw.strip_prefix('+') {
-                    (false, r)
-                } else {
-                    (false, exp_raw)
-                };
-                if exp_digits.is_empty() || !exp_digits.bytes().all(|b| b.is_ascii_digit()) {
-                    return None;
-                }
-                let mut acc = 0i64;
-                for b in exp_digits.bytes() {
-                    acc = (acc.saturating_mul(10)).saturating_add(i64::from(b - b'0'));
-                    if acc > exp_clamp {
-                        acc = exp_clamp;
-                        break;
-                    }
-                }
-                if exp_neg {
-                    -acc
-                } else {
-                    acc
-                }
-            }
+        let total_digits = int_part.len().checked_add(frac_part.len())?;
+        let exp_clamp = i64::try_from(total_digits.saturating_add(EXPONENT_CLAMP_MARGIN))
+            .unwrap_or(i64::MAX / 4);
+        let exp = match exp_opt {
+            Some(exp_raw) => parse_clamped_exponent(exp_raw, exp_clamp)?,
             None => 0,
         };
-        let digit_at = |idx: usize| -> u8 {
-            if idx < int_bytes.len() {
-                int_bytes[idx]
-            } else {
-                frac_bytes[idx - int_bytes.len()]
-            }
-        };
-        let Some(first_nz) = (0..total_digits).find(|&idx| digit_at(idx) != b'0') else {
-            return Some(0);
-        };
-        if is_neg {
-            return None;
-        }
-        let last_nz = (first_nz..total_digits)
-            .rev()
-            .find(|&idx| digit_at(idx) != b'0')?;
-        let sig_len = last_nz - first_nz + 1;
-        let trailing_zeros = i64::try_from(total_digits - 1 - last_nz).ok()?;
-        let frac_len = i64::try_from(frac_bytes.len()).ok()?;
-        let scale = exp.checked_sub(frac_len)?.checked_add(trailing_zeros)?;
-        if scale < 0 || sig_len > 20 || (sig_len as i64) + scale > 20 {
-            return None;
-        }
-        let mut val = 0u64;
-        for idx in first_nz..=last_nz {
-            val = val
-                .checked_mul(10)?
-                .checked_add(u64::from(digit_at(idx) - b'0'))?;
-        }
-        for _ in 0..scale {
-            val = val.checked_mul(10)?;
-        }
-        Some(val)
+        decimal_to_u64(is_neg, int_part.as_bytes(), frac_part.as_bytes(), exp)
     }
 
     pub fn to_scalar_string(&self) -> Option<String> {
