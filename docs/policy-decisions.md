@@ -1577,7 +1577,7 @@
 - **Why** 같은 검사를 두 OS에서 반복할 근거가 없고(순수 JS·서식 검사), 캐시는 의존성 재컴파일 시간을 없애 PR 대기 시간을 가장 크게 줄입니다.
 - **Trade-offs** 엔진 테스트는 macOS에서 더 이상 돌지 않습니다(Linux·Windows에서 실행, macOS 전용 엔진 코드 없음). `checks`를 필수 검사로 쓰려면 저장소 설정에서 추가해야 합니다. 캐시가 오래되면 rustc 버전·잠금 파일 변경 시 자동으로 새 키를 씁니다.
 - **Alternatives rejected** 문서만 바뀐 PR의 작업 건너뛰기(경로 필터는 필수 검사가 보고되지 않아 PR이 대기 상태로 남으므로 대체 작업이 필요, 개인 프로젝트 규모에서 이득 대비 복잡), 모든 검사를 Linux 하나로 통합(Swift 앱·Tauri MSVC 빌드는 해당 OS 필요).
-- **Verified by** `.github/workflows/ci.yml`의 세 작업 결과, `node scripts/check-repo-hygiene.mjs`.
+- **Verified by** `.github/workflows/ci.yml`의 세 작업 결과, `node scripts/check-repo-hygiene.mjs`. 위생 가드는 릴리스와 같은 CRLF 체크아웃에서도 돌도록 Windows 작업에서 한 번 더 실행하고, 가드의 줄 단위 개수 검사는 원본을 LF로 정규화해 읽습니다(v2.0.0 릴리스 실패 후 보완).
 - **Revisit when** 문서 전용 PR이 잦아질 때, 캐시 적중률이 낮을 때.
 
 ## 67. 예약 글꼴 이름(RFN)이 있는 번들 글꼴은 공식 배포 파일 또는 그 WOFF2 압축본만 사용 (PD-092, #144)

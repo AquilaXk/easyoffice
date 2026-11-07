@@ -597,25 +597,27 @@ if (
   fs.existsSync(ribbonCatalogJsPath) &&
   fs.existsSync(rustIpcLibPath)
 ) {
+  // Sources are read with LF line endings so the line-anchored counts below match a CRLF checkout
+  // (Windows release runners) the same way they match on Linux and macOS.
+  const readSourceLf = (file) => fs.readFileSync(file, "utf8").replaceAll("\r\n", "\n");
+
   // Read/write formats: the DocumentFormat variants minus the read-only sources.
-  const formatsLib = fs.readFileSync(formatsLibPath, "utf8");
+  const formatsLib = readSourceLf(formatsLibPath);
   const enumBody = (formatsLib.split("pub enum DocumentFormat {")[1] || "").split("\n}")[0];
   const variantCount = enumBody.split("\n").filter((line) => /^\s+[A-Z][A-Za-z0-9]*,$/.test(line)).length;
   const readOnlyCount = Number((formatsLib.match(/READ_ONLY:\s*\[DocumentFormat;\s*(\d+)\]/) || [])[1] || 0);
   const formatCount = variantCount - readOnlyCount;
 
-  const rustFnMatch = fs
-    .readFileSync(rustSheetFunctionsPath, "utf8")
-    .match(/CANONICAL_122_FUNCTIONS:\s*\[&str;\s*122\]\s*=\s*\[([\s\S]*?)\];/);
+  const rustFnMatch = readSourceLf(rustSheetFunctionsPath).match(/CANONICAL_122_FUNCTIONS:\s*\[&str;\s*122\]\s*=\s*\[([\s\S]*?)\];/);
   const functionCount = rustFnMatch ? (rustFnMatch[1].match(/"[A-Z0-9]+"/g) || []).length : 0;
 
-  const ribbonCatalogJs = fs.readFileSync(ribbonCatalogJsPath, "utf8");
+  const ribbonCatalogJs = readSourceLf(ribbonCatalogJsPath);
   const commonSpecCount = (ribbonCatalogJs.match(/\{\s*suffix:\s*"/g) || []).length;
   const modSpecSection = ribbonCatalogJs.split("function buildRibbonCatalog")[0].split("MODULE_SPECIFIC_SPECS")[1] || "";
   const modSpecCount = (modSpecSection.match(/\{\s*id:\s*"/g) || []).length;
   const ribbonCommandCount = commonSpecCount * 5 + modSpecCount;
 
-  const rustIpcLib = fs.readFileSync(rustIpcLibPath, "utf8");
+  const rustIpcLib = readSourceLf(rustIpcLibPath);
   const dispatchBlock = (rustIpcLib.split("pub fn dispatch(")[1] || "").split("fn handle_workspace_bootstrap")[0] || "";
   const ipcCommandCount = dispatchBlock
     .split("\n")
