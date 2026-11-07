@@ -63,7 +63,7 @@
     }
   }
 
-  // Resolves `{ status: "saved", path, bytes }` or `{ status: "cancelled" }`; rejects with an
+  // Resolves `{ status: "saved", name, bytes }` (file name only, never a path) or `{ status: "cancelled" }`; rejects with an
   // Error whose message explains why the file was not written. `options.inPlace` asks Rust to write
   // back to the file this window's document came from (same format; Rust keeps the path and checks
   // the file did not change on disk); without it, or when Rust has no matching file, the dialog opens.

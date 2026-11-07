@@ -444,8 +444,8 @@
         }
       }
       return {
-        ok: true, cancelled: false, path: delivery.path, format: exported.format,
-        message: "문서 저장 완료 (" + delivery.path + " · " + tag + " · " + mib(exported.bytes.length) + ")" + tail,
+        ok: true, cancelled: false, name: delivery.name, format: exported.format,
+        message: "문서 저장 완료 (" + delivery.name + " · " + tag + " · " + mib(exported.bytes.length) + ")" + tail,
       };
     }
 

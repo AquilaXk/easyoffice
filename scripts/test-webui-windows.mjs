@@ -24,7 +24,7 @@ function recordingShell(overrides = {}) {
   }
   commands.save_document_file = (args) => {
     calls.push({ name: "save_document_file", args });
-    return overrides.save_document_file ? overrides.save_document_file(args) : { status: "saved", path: "C:\\문서\\보고서.docx", bytes: 1 };
+    return overrides.save_document_file ? overrides.save_document_file(args) : { status: "saved", name: "보고서.docx", bytes: 1 };
   };
   const named = (name) => calls.filter((c) => c.name === name);
   return { commands, calls, named };

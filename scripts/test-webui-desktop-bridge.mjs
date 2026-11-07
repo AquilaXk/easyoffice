@@ -128,7 +128,7 @@ test("desktop save uses the native save command instead of a Blob download", asy
   const { document, userClick, downloads, calls } = await createShellHarness({
     saveFile: (args) => {
       saves.push(args);
-      return { status: "saved", path: "C:\\Users\\me\\Documents\\" + args.fileName, bytes: 42 };
+      return { status: "saved", name: args.fileName, bytes: 42 };
     },
   });
   userClick(document.getElementById("qat-save"));
@@ -145,11 +145,11 @@ test("desktop save uses the native save command instead of a Blob download", asy
   assert.equal(saves[0].inPlace, true, "Save asks Rust to write back to the opened file when it knows it");
   assert.equal(downloads.length, 0, "no Blob download inside the shell");
   assert.ok(calls.some((c) => c.command === "ipc_dispatch" && c.args.command === "convert_document_format"));
-  assert.match(feedback(document), /^문서 저장 완료 \(C:\\Users\\me\\Documents\\분기_경영실적_보고서\.docx · /);
+  assert.match(feedback(document), /^문서 저장 완료 \(분기_경영실적_보고서\.docx · /);
 });
 
 test("cancelled and failed desktop saves never claim success", async () => {
-  const cancelled = await createShellHarness({ saveFile: () => ({ status: "cancelled", path: null, bytes: 0 }) });
+  const cancelled = await createShellHarness({ saveFile: () => ({ status: "cancelled", name: null, bytes: 0 }) });
   cancelled.userClick(cancelled.document.getElementById("qat-save"));
   await flushAsyncTurns(12);
   assert.match(feedback(cancelled.document), /^문서 저장 취소 \(DOCX\): 저장 위치를 선택하지 않았습니다/);
@@ -167,7 +167,7 @@ test("cancelled and failed desktop saves never claim success", async () => {
 });
 
 test("converter output is saved through the shell and reports cancellation honestly", async () => {
-  let outcome = { status: "saved", path: "C:\\out\\통합_변환_문서.hwpx", bytes: 10 };
+  let outcome = { status: "saved", name: "통합_변환_문서.hwpx", bytes: 10 };
   const saves = [];
   const { document, userClick, downloads } = await createShellHarness({
     saveFile: (args) => {
@@ -185,7 +185,7 @@ test("converter output is saved through the shell and reports cancellation hones
   assert.doesNotMatch(box.textContent, /실패|취소/);
   assert.equal(downloads.length, 0);
 
-  outcome = { status: "cancelled", path: null, bytes: 0 };
+  outcome = { status: "cancelled", name: null, bytes: 0 };
   userClick(document.getElementById("btn-run-convert"));
   await flushAsyncTurns(12);
   assert.match(box.textContent, / · 저장 취소: 저장 위치를 선택하지 않았습니다$/);

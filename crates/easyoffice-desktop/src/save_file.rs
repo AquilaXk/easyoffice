@@ -73,24 +73,17 @@ impl SaveRequest {
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct SaveOutcome {
     status: &'static str,
-    path: Option<String>,
+    name: Option<String>,
     bytes: usize,
 }
 
 impl SaveOutcome {
+    /// A save reports the file name only, never a path: the page never learns the directory
+    /// (PD-088). Rust keeps the path in the window's tracked file.
     pub fn saved(path: &Path, bytes: usize) -> Self {
         Self {
             status: "saved",
-            path: Some(path.display().to_string()),
-            bytes,
-        }
-    }
-
-    /// An in-place save reports the file name only: the page never learns the directory.
-    pub fn saved_in_place(file_name: &str, bytes: usize) -> Self {
-        Self {
-            status: "saved",
-            path: Some(file_name.to_string()),
+            name: path.file_name().map(|n| n.to_string_lossy().into_owned()),
             bytes,
         }
     }
@@ -98,7 +91,7 @@ impl SaveOutcome {
     pub fn cancelled() -> Self {
         Self {
             status: "cancelled",
-            path: None,
+            name: None,
             bytes: 0,
         }
     }
@@ -259,11 +252,17 @@ mod tests {
 
     #[test]
     fn outcomes_serialize_for_the_webview() {
-        let saved = serde_json::to_string(&SaveOutcome::saved(Path::new("C:/a.pdf"), 3)).unwrap();
-        assert_eq!(saved, r#"{"status":"saved","path":"C:/a.pdf","bytes":3}"#);
+        let saved = serde_json::to_string(&SaveOutcome::saved(Path::new("/home/me/docs/a.pdf"), 3))
+            .unwrap();
+        assert_eq!(saved, r#"{"status":"saved","name":"a.pdf","bytes":3}"#);
         let cancelled = serde_json::to_string(&SaveOutcome::cancelled()).unwrap();
-        assert_eq!(cancelled, r#"{"status":"cancelled","path":null,"bytes":0}"#);
-        let named = serde_json::to_string(&SaveOutcome::saved_in_place("a.pdf", 3)).unwrap();
-        assert_eq!(named, r#"{"status":"saved","path":"a.pdf","bytes":3}"#);
+        assert_eq!(cancelled, r#"{"status":"cancelled","name":null,"bytes":0}"#);
+        for path in ["/home/me/docs/보고서.hwpx", "relative/dir/b.docx", "c.txt"] {
+            let json = serde_json::to_string(&SaveOutcome::saved(Path::new(path), 1)).unwrap();
+            assert!(
+                !json.contains('/') && !json.contains('\\'),
+                "no directory leaks: {json}"
+            );
+        }
     }
 }
