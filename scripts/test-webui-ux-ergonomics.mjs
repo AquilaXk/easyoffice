@@ -14,10 +14,8 @@ test("design tokens, ARIA tab roles, zoom controls, split compare pane, and form
 
   assert.equal(document.getElementById("tab-strip"), null, "a window has no document tab strip");
 
-  for (const mod of ["HWP", "SLIDE", "PDF", "DOC"]) {
-    switchModule(document, mod);
-    await flushAsyncTurns();
-  }
+  for (const mod of ["HWP", "SLIDE", "PDF", "DOC"]) switchModule(document, mod);
+  await flushAsyncTurns(4);
 
   const zoomLabel = document.getElementById("status-zoom-label");
   const stage = document.querySelector(".canvas-stage");

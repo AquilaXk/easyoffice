@@ -495,7 +495,7 @@ test("concurrent switchSheetTab and performWorkspaceUndo serialize ahead of save
 });
 
 test("evaluate_sheet batch targets anchor validation, Roman numeral sheet ident, and Undo sync", async () => {
-  const { document, sandbox, userClick } = await createWorkspaceHarness();
+  const { document, sandbox } = await createWorkspaceHarness();
   const offlineRpc = sandbox.__EASYOFFICE_CREATE_OFFLINE_RPC__({
     getActiveModule: () => "SHEET",
     getActiveSheetCellRef: () => "A1",
