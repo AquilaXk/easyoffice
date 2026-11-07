@@ -27,3 +27,8 @@ export function rulesFor(css, needles) {
   return rules;
 }
 
+
+/** The rule block whose selector list (`a, b`) contains exactly `selector`. */
+export function ruleWithSelector(css, selector) {
+  return rulesFor(css, [selector]).find((rule) => rule.selector.split(",").some((part) => part.trim() === selector));
+}

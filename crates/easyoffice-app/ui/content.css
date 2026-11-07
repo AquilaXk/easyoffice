@@ -5,8 +5,10 @@
  * UI chrome may use a literal colour; `scripts/test-webui-theme.mjs` allows them only here. */
 .sb-textcolor-btn { border-bottom: 3px solid #d93025; }
 .sb-highlight-btn { border-bottom: 3px solid #fbbc04; }
-/* The slide editing stage is a sheet of paper like the page: dark text on white in both themes. */
-.slide-stage {
+/* The slide editing stage and the PDF page card are sheets of paper like the page: dark text on
+   white in both themes. */
+.slide-stage,
+.pdf-page-card {
   --ui-text: #333333;
   --ui-text-muted: #666666;
   --ui-border-light: #d0d0d0;

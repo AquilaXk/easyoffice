@@ -230,9 +230,10 @@ select:focus-visible,
   min-height: 280px;
   margin: 16px auto;
   padding: 24px;
-  background: var(--ui-surface);
-  border: 1px solid var(--ui-border-light);
-  border-radius: 6px;
+  background: var(--doc-paper);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 1px 4px var(--doc-shadow);
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -439,8 +440,12 @@ select:focus-visible,
   color: var(--ui-text-secondary);
   text-align: center;
 }
-.pdf-stamp-select, .conv-fmt-select { width: 140px; margin: 0; padding: 4px 8px; }
-.pdf-watermark-input { width: 200px; margin: 0; padding: 4px 8px; }
+.pdf-stamp-select { width: 104px; }
+.conv-fmt-select { width: 140px; }
+.pdf-watermark-input { width: 200px; }
+#pdf-toolbar { margin: 0 0 12px; padding: 0 8px; flex-wrap: nowrap; }
+.conv-source-row .sb-select[type="file"] { height: auto; max-width: 280px; }
+.security-card { padding: 10px 12px; font-size: 12px; color: var(--ui-text); background: var(--ui-surface-raised); border: 1px solid var(--ui-border); border-radius: var(--radius-sm); }
 .canvas-stage[data-split-view="true"] {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(260px, 0.85fr);
