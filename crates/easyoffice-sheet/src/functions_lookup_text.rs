@@ -1,847 +1,435 @@
-use crate::{
-    EvalContext, EvaluatedCellValue, Expr, FormulaError, PackedCellCoordinate, SheetEngine,
-};
+use crate::{EvalContext, EvaluatedCellValue, Expr, FormulaError, SheetEngine};
 
-impl SheetEngine {
-    pub(crate) fn eval_lookup_func(
-        &self,
-        name: &str,
-        args: &[Expr],
-        ctx: &mut EvalContext<'_>,
-        depth: usize,
-    ) -> Result<EvaluatedCellValue, FormulaError> {
-        match name {
-            "VLOOKUP" | "HLOOKUP" => {
-                if args.len() < 3 || args.len() > 4 {
-                    return Err(FormulaError::Value);
-                }
-                let lookup_val = self.eval_arg_val(&args[0], ctx, depth)?;
-                let Some((sheet_opt, range, _)) =
-                    self.extract_range_and_sheet_ctx(&args[1], ctx, depth)?
-                else {
-                    return Err(FormulaError::Value);
-                };
-                let idx_num = self.eval_arg_num(&args[2], ctx, depth)?.trunc() as isize;
-                let range_lookup = if args.len() == 4 {
-                    self.eval_arg_val(&args[3], ctx, depth)?
-                        .as_bool()
-                        .ok_or(FormulaError::Value)?
-                } else {
-                    true
-                };
-                let (rows, cols) = range.dimensions();
-                let min_r = range.start.row().min(range.end.row());
-                let min_c = range.start.col().min(range.end.col());
-                let is_vertical = name == "VLOOKUP";
-                let (outer_count, bound_limit) = if is_vertical {
-                    (rows, cols)
-                } else {
-                    (cols, rows)
-                };
-                if idx_num < 1 || (idx_num as usize) > bound_limit {
-                    return Err(FormulaError::Ref);
-                }
-                let target_idx = idx_num as u32 - 1;
-                let same_type = |a: &EvaluatedCellValue, b: &EvaluatedCellValue| -> bool {
-                    matches!(
-                        (a, b),
-                        (EvaluatedCellValue::Number(_), EvaluatedCellValue::Number(_))
-                            | (EvaluatedCellValue::Text(_), EvaluatedCellValue::Text(_))
-                            | (
-                                EvaluatedCellValue::Boolean(_),
-                                EvaluatedCellValue::Boolean(_)
-                            )
-                    )
-                };
-                let coord_pair = |off: u32| -> Result<
-                    (PackedCellCoordinate, PackedCellCoordinate),
-                    FormulaError,
-                > {
-                    if is_vertical {
-                        Ok((
-                            PackedCellCoordinate::new(min_r + off, min_c)
-                                .map_err(|_| FormulaError::Ref)?,
-                            PackedCellCoordinate::new(min_r + off, min_c + target_idx)
-                                .map_err(|_| FormulaError::Ref)?,
-                        ))
-                    } else {
-                        Ok((
-                            PackedCellCoordinate::new(min_r, min_c + off)
-                                .map_err(|_| FormulaError::Ref)?,
-                            PackedCellCoordinate::new(min_r + target_idx, min_c + off)
-                                .map_err(|_| FormulaError::Ref)?,
-                        ))
-                    }
-                };
-                let mut best: Option<(u32, EvaluatedCellValue)> = None;
-                for off in 0..outer_count {
-                    let (kc, rc) = coord_pair(off as u32)?;
-                    let kv = self.eval_sheet_coord(sheet_opt.as_deref(), kc, ctx, depth);
-                    if !range_lookup {
-                        if Self::values_match_wildcard(&kv, &lookup_val) {
-                            return Ok(self.eval_sheet_coord(sheet_opt.as_deref(), rc, ctx, depth));
-                        }
-                    } else if same_type(&kv, &lookup_val) {
-                        if let Some(ord) = Self::compare_excel_values(&kv, &lookup_val) {
-                            if ord.is_le() {
-                                let replace = match &best {
-                                    None => true,
-                                    Some((_, prev)) => Self::compare_excel_values(&kv, prev)
-                                        .is_some_and(|o| o.is_ge()),
-                                };
-                                if replace {
-                                    best = Some((off as u32, kv));
-                                }
-                            }
-                        }
-                    }
-                }
-                if let Some((best_off, _)) = best {
-                    let (_, rc) = coord_pair(best_off)?;
-                    return Ok(self.eval_sheet_coord(sheet_opt.as_deref(), rc, ctx, depth));
-                }
-                Err(FormulaError::Na)
-            }
-            "XLOOKUP" => {
-                if args.len() < 3 || args.len() > 6 {
-                    return Err(FormulaError::Value);
-                }
-                let lookup_val = self.eval_arg_val(&args[0], ctx, depth)?;
-                let match_mode = if args.len() >= 5 && !matches!(args[4], Expr::Missing) {
-                    self.eval_arg_num(&args[4], ctx, depth)?.trunc() as i32
-                } else {
-                    0
-                };
-                if !matches!(match_mode, -1..=2) {
-                    return Err(FormulaError::Value);
-                }
-                let search_mode = if args.len() >= 6 && !matches!(args[5], Expr::Missing) {
-                    self.eval_arg_num(&args[5], ctx, depth)?.trunc() as i32
-                } else {
-                    1
-                };
-                if !matches!(search_mode, -2 | -1 | 1 | 2) {
-                    return Err(FormulaError::Value);
-                }
-                let cell_matches = |k: &EvaluatedCellValue| -> bool {
-                    if match_mode == 2 {
-                        Self::values_match_wildcard(k, &lookup_val)
-                    } else {
-                        Self::values_match(k, &lookup_val)
-                    }
-                };
-                let update_approx = |best: &mut Option<(usize, EvaluatedCellValue)>,
-                                     idx: usize,
-                                     k: &EvaluatedCellValue| {
-                    let same_t = matches!(
-                        (k, &lookup_val),
-                        (EvaluatedCellValue::Number(_), EvaluatedCellValue::Number(_))
-                            | (EvaluatedCellValue::Text(_), EvaluatedCellValue::Text(_))
-                            | (
-                                EvaluatedCellValue::Boolean(_),
-                                EvaluatedCellValue::Boolean(_)
-                            )
-                    );
-                    if (match_mode == -1 || match_mode == 1) && same_t {
-                        if let Some(ord) = Self::compare_excel_values(k, &lookup_val) {
-                            let valid = (match_mode == -1 && ord.is_lt())
-                                || (match_mode == 1 && ord.is_gt());
-                            if valid {
-                                let replace = match best {
-                                    None => true,
-                                    Some((_, prev)) => Self::compare_excel_values(k, prev)
-                                        .is_some_and(|o| {
-                                            if match_mode == -1 {
-                                                o.is_gt()
-                                            } else {
-                                                o.is_lt()
-                                            }
-                                        }),
-                                };
-                                if replace {
-                                    *best = Some((idx, k.clone()));
-                                }
-                            }
-                        }
-                    }
-                };
-                if let (Some(lookup_spec), Some(return_spec)) = (
-                    self.extract_streaming_range_ctx(&args[1], ctx, depth)?,
-                    self.extract_streaming_range_ctx(&args[2], ctx, depth)?,
-                ) {
-                    let (_, _, _, l_rows, l_cols, _) = lookup_spec;
-                    let (_, _, _, r_rows, r_cols, _) = return_spec;
-                    let total_len = l_rows * l_cols;
-                    if total_len != r_rows * r_cols || r_cols == 0 || l_cols == 0 {
-                        return Err(FormulaError::Value);
-                    }
-                    let mut best_approx: Option<(usize, EvaluatedCellValue)> = None;
-                    for step in 0..total_len {
-                        let flat_idx = if search_mode < 0 {
-                            total_len - 1 - step
-                        } else {
-                            step
-                        };
-                        let k = self.eval_streaming_cell_allow_error(
-                            &lookup_spec,
-                            flat_idx / l_cols,
-                            flat_idx % l_cols,
-                            ctx,
-                            depth,
-                        )?;
-                        if cell_matches(&k) {
-                            return self.eval_streaming_cell(
-                                &return_spec,
-                                flat_idx / r_cols,
-                                flat_idx % r_cols,
-                                ctx,
-                                depth,
-                            );
-                        }
-                        update_approx(&mut best_approx, flat_idx, &k);
-                    }
-                    if let Some((best_idx, _)) = best_approx {
-                        return self.eval_streaming_cell(
-                            &return_spec,
-                            best_idx / r_cols,
-                            best_idx % r_cols,
-                            ctx,
-                            depth,
-                        );
-                    }
-                    return if args.len() >= 4 && !matches!(args[3], Expr::Missing) {
-                        Ok(self.eval_expr_ctx(&args[3], ctx, depth))
-                    } else {
-                        Err(FormulaError::Na)
-                    };
-                }
-                let lookup_arr = self.eval_range_vec(&args[1], ctx, depth)?;
-                let return_arr = self.eval_range_vec(&args[2], ctx, depth)?;
-                if lookup_arr.len() != return_arr.len() {
-                    return Err(FormulaError::Value);
-                }
-                let total_len = lookup_arr.len();
-                let mut best_approx: Option<(usize, EvaluatedCellValue)> = None;
-                for step in 0..total_len {
-                    let idx = if search_mode < 0 {
-                        total_len - 1 - step
-                    } else {
-                        step
-                    };
-                    let k = &lookup_arr[idx];
-                    if cell_matches(k) {
-                        return Ok(return_arr[idx].clone());
-                    }
-                    update_approx(&mut best_approx, idx, k);
-                }
-                if let Some((best_idx, _)) = best_approx {
-                    return Ok(return_arr[best_idx].clone());
-                }
-                if args.len() >= 4 && !matches!(args[3], Expr::Missing) {
-                    Ok(self.eval_expr_ctx(&args[3], ctx, depth))
-                } else {
-                    Err(FormulaError::Na)
-                }
-            }
-            "INDEX" => {
-                if args.len() < 2 || args.len() > 3 {
-                    return Err(FormulaError::Value);
-                }
-                let Some((sheet_opt, range, transposed)) =
-                    self.extract_range_and_sheet_ctx(&args[0], ctx, depth)?
-                else {
-                    return Err(FormulaError::Value);
-                };
-                let row_num = self.eval_arg_num(&args[1], ctx, depth)?.trunc() as isize;
-                let col_num = if args.len() == 3 {
-                    self.eval_arg_num(&args[2], ctx, depth)?.trunc() as isize
-                } else {
-                    1
-                };
-                let (orig_rows, orig_cols) = range.dimensions();
-                let (rows, cols) = if transposed {
-                    (orig_cols, orig_rows)
-                } else {
-                    (orig_rows, orig_cols)
-                };
-                let min_r = range.start.row().min(range.end.row());
-                let min_c = range.start.col().min(range.end.col());
-                let (eff_r, eff_c) = if args.len() == 2
-                    && rows == 1
-                    && cols > 1
-                    && row_num >= 1
-                    && (row_num as usize) <= cols
-                {
-                    (1isize, row_num)
-                } else if args.len() == 3
-                    && row_num == 0
-                    && col_num >= 1
-                    && (col_num as usize) <= cols
-                {
-                    (1isize, col_num)
-                } else if args.len() == 3
-                    && col_num == 0
-                    && row_num >= 1
-                    && (row_num as usize) <= rows
-                {
-                    (row_num, 1isize)
-                } else {
-                    (row_num, col_num)
-                };
-                if eff_r < 1 || eff_c < 1 || (eff_r as usize) > rows || (eff_c as usize) > cols {
-                    return Err(FormulaError::Ref);
-                }
-                let (r_off, c_off) = if transposed {
-                    (eff_c as u32 - 1, eff_r as u32 - 1)
-                } else {
-                    (eff_r as u32 - 1, eff_c as u32 - 1)
-                };
-                let coord = PackedCellCoordinate::new(min_r + r_off, min_c + c_off)
-                    .map_err(|_| FormulaError::Ref)?;
-                Ok(self.eval_sheet_coord(sheet_opt.as_deref(), coord, ctx, depth))
-            }
-            "MATCH" => {
-                if args.len() < 2 || args.len() > 3 {
-                    return Err(FormulaError::Value);
-                }
-                let lookup_val = self.eval_arg_val(&args[0], ctx, depth)?;
-                let match_type = if args.len() == 3 {
-                    self.eval_arg_num(&args[2], ctx, depth)?.trunc() as i32
-                } else {
-                    1
-                };
-                let same_type = |a: &EvaluatedCellValue, b: &EvaluatedCellValue| -> bool {
-                    matches!(
-                        (a, b),
-                        (EvaluatedCellValue::Number(_), EvaluatedCellValue::Number(_))
-                            | (EvaluatedCellValue::Text(_), EvaluatedCellValue::Text(_))
-                            | (
-                                EvaluatedCellValue::Boolean(_),
-                                EvaluatedCellValue::Boolean(_)
-                            )
-                    )
-                };
-                let mut best: Option<(usize, EvaluatedCellValue)> = None;
-                let mut eval_match_candidate = |idx: usize, v: &EvaluatedCellValue| -> bool {
-                    if match_type == 0 {
-                        return Self::values_match_wildcard(v, &lookup_val);
-                    }
-                    if same_type(v, &lookup_val) {
-                        if let Some(ord) = Self::compare_excel_values(v, &lookup_val) {
-                            let is_better = if match_type > 0 && ord.is_le() {
-                                best.as_ref().is_none_or(|(_, prev)| {
-                                    Self::compare_excel_values(v, prev).is_some_and(|o| o.is_ge())
-                                })
-                            } else if match_type < 0 && ord.is_ge() {
-                                best.as_ref().is_none_or(|(_, prev)| {
-                                    Self::compare_excel_values(v, prev).is_some_and(|o| o.is_le())
-                                })
-                            } else {
-                                false
-                            };
-                            if is_better {
-                                best = Some((idx, v.clone()));
-                            }
-                        }
-                    }
-                    false
-                };
-                if let Some(spec) = self.extract_streaming_range_ctx(&args[1], ctx, depth)? {
-                    let (_, _, _, rows, cols, _) = spec;
-                    let mut idx = 0usize;
-                    for r_off in 0..rows {
-                        for c_off in 0..cols {
-                            idx += 1;
-                            let v = self
-                                .eval_streaming_cell_allow_error(&spec, r_off, c_off, ctx, depth)?;
-                            if eval_match_candidate(idx, &v) {
-                                return Ok(EvaluatedCellValue::Number(idx as f64));
-                            }
-                        }
-                    }
-                    if let Some((best_idx, _)) = best {
-                        return Ok(EvaluatedCellValue::Number(best_idx as f64));
-                    }
-                    return Err(FormulaError::Na);
-                }
-                let arr = self.eval_range_vec(&args[1], ctx, depth)?;
-                for (zero_idx, v) in arr.iter().enumerate() {
-                    let idx = zero_idx + 1;
-                    if eval_match_candidate(idx, v) {
-                        return Ok(EvaluatedCellValue::Number(idx as f64));
-                    }
-                }
-                if let Some((best_idx, _)) = best {
-                    return Ok(EvaluatedCellValue::Number(best_idx as f64));
-                }
-                Err(FormulaError::Na)
-            }
-            "CHOOSE" => {
-                if args.len() < 2 {
-                    return Err(FormulaError::Value);
-                }
-                let idx = self.eval_arg_num(&args[0], ctx, depth)?.trunc() as isize;
-                if idx < 1 || (idx as usize) >= args.len() {
-                    return Err(FormulaError::Value);
-                }
-                Ok(self.eval_expr_ctx(&args[idx as usize], ctx, depth))
-            }
-            "OFFSET" | "INDIRECT" => {
-                let expr = Expr::FuncCall {
-                    name: name.to_string(),
-                    args: args.to_vec(),
-                };
-                let Some((sheet_opt, range, _)) =
-                    self.extract_range_and_sheet_ctx(&expr, ctx, depth)?
-                else {
-                    return Err(FormulaError::Value);
-                };
-                if range.start != range.end {
-                    return Err(FormulaError::Value);
-                }
-                Ok(self.eval_sheet_coord(sheet_opt.as_deref(), range.start, ctx, depth))
-            }
-            "ROW" | "COLUMN" => {
-                if args.is_empty() {
-                    let v = ctx.current_coord.map_or(1, |c| {
-                        if name == "ROW" {
-                            c.row() + 1
-                        } else {
-                            c.col() + 1
-                        }
-                    });
-                    return Ok(EvaluatedCellValue::Number(v as f64));
-                }
-                if args.len() != 1 {
-                    return Err(FormulaError::Value);
-                }
-                let Some((_, range, _)) = self.extract_range_and_sheet_ctx(&args[0], ctx, depth)?
-                else {
-                    return Err(FormulaError::Value);
-                };
-                let v = if name == "ROW" {
-                    range.start.row().min(range.end.row()) + 1
-                } else {
-                    range.start.col().min(range.end.col()) + 1
-                };
-                Ok(EvaluatedCellValue::Number(v as f64))
-            }
-            "ROWS" | "COLUMNS" => {
-                if args.len() != 1 {
-                    return Err(FormulaError::Value);
-                }
-                if let Some((_, range, transposed)) =
-                    self.extract_range_and_sheet_ctx(&args[0], ctx, depth)?
-                {
-                    let (r, c) = range.dimensions();
-                    let ans = match (name == "ROWS", transposed) {
-                        (true, false) | (false, true) => r,
-                        (true, true) | (false, false) => c,
-                    };
-                    Ok(EvaluatedCellValue::Number(ans as f64))
-                } else {
-                    let _ = self.eval_arg_val(&args[0], ctx, depth)?;
-                    Ok(EvaluatedCellValue::Number(1.0))
-                }
-            }
-            "TRANSPOSE" => {
-                if args.len() != 1 {
-                    return Err(FormulaError::Value);
-                }
-                let vals = self.eval_range_vec(&args[0], ctx, depth)?;
-                if vals.len() == 1 {
-                    Ok(vals.into_iter().next().unwrap())
-                } else {
-                    let joined = vals
-                        .iter()
-                        .map(EvaluatedCellValue::to_display_string)
-                        .collect::<Vec<_>>()
-                        .join(",");
-                    Ok(EvaluatedCellValue::Text(joined))
-                }
-            }
-            _ => Err(FormulaError::Name),
+type CellResult = Result<EvaluatedCellValue, FormulaError>;
+
+const MAX_CHAR_CODE: i64 = 1_114_111;
+const MIN_PRINTABLE: u32 = 0x20;
+const FIXED_MIN_DECIMALS: f64 = -100.0;
+const FIXED_MAX_DECIMALS: f64 = 20.0;
+const FIXED_DEFAULT_DECIMALS: i32 = 2;
+
+fn check_text_arity(args: &[Expr], min: usize, max: usize) -> Result<(), FormulaError> {
+    if args.len() < min || args.len() > max {
+        Err(FormulaError::Value)
+    } else {
+        Ok(())
+    }
+}
+
+/// Wraps `out` as a text value, failing when it exceeds the cell text limit.
+fn bounded_text(out: String) -> CellResult {
+    if out.chars().count() > SheetEngine::MAX_CELL_TEXT_CHARS {
+        return Err(FormulaError::Value);
+    }
+    Ok(EvaluatedCellValue::Text(out))
+}
+
+fn number_cell(v: f64) -> CellResult {
+    Ok(EvaluatedCellValue::Number(v))
+}
+
+/// Running character budget for text built piece by piece.
+#[derive(Default)]
+struct TextBudget {
+    total_chars: usize,
+}
+
+impl TextBudget {
+    /// Reserves `chars` characters; fails when the cell text limit is exceeded.
+    #[inline]
+    fn reserve(&mut self, chars: usize) -> Result<(), FormulaError> {
+        self.total_chars = self.total_chars.saturating_add(chars);
+        if self.total_chars > SheetEngine::MAX_CELL_TEXT_CHARS {
+            return Err(FormulaError::Value);
         }
+        Ok(())
     }
 
+    fn push(&mut self, out: &mut String, piece: &str) -> Result<(), FormulaError> {
+        self.push_counted(out, piece, piece.chars().count())
+    }
+
+    fn push_counted(
+        &mut self,
+        out: &mut String,
+        piece: &str,
+        chars: usize,
+    ) -> Result<(), FormulaError> {
+        self.reserve(chars)?;
+        out.push_str(piece);
+        Ok(())
+    }
+}
+
+fn proper_case(s: &str) -> String {
+    let mut res = String::with_capacity(s.len());
+    let mut cap_next = true;
+    for c in s.chars() {
+        if !c.is_alphabetic() {
+            cap_next = true;
+            res.push(c);
+        } else if cap_next {
+            res.extend(c.to_uppercase());
+            cap_next = false;
+        } else {
+            res.extend(c.to_lowercase());
+        }
+    }
+    res
+}
+
+/// SUBSTITUTE core: replaces every (or only the `target`-th) occurrence of `old`.
+fn substitute_text(text: &str, old: &str, new: &str, target: Option<usize>) -> CellResult {
+    if old.is_empty() {
+        return bounded_text(text.to_string());
+    }
+    let old_chars = old.chars().count();
+    let new_chars = new.chars().count();
+    let mut out = String::new();
+    let mut budget = TextBudget::default();
+    let mut rem = text;
+    let mut count = 0usize;
+    while let Some(pos) = rem.find(old) {
+        count += 1;
+        budget.push(&mut out, &rem[..pos])?;
+        let tail = &rem[pos + old.len()..];
+        if target.is_some_and(|t| t != count) {
+            budget.push_counted(&mut out, old, old_chars)?;
+        } else {
+            budget.push_counted(&mut out, new, new_chars)?;
+            if target.is_some() {
+                budget.push(&mut out, tail)?;
+                return Ok(EvaluatedCellValue::Text(out));
+            }
+        }
+        rem = tail;
+    }
+    budget.push(&mut out, rem)?;
+    Ok(EvaluatedCellValue::Text(out))
+}
+
+/// SEARCH: case-insensitive wildcard search; `start` is 1-based.
+fn search_wildcard(needle: &str, hay: &str, start: isize) -> CellResult {
+    let byte_indices: Vec<usize> = hay.char_indices().map(|(i, _)| i).collect();
+    if start < 1 || (start as usize) > byte_indices.len().max(1) {
+        return Err(FormulaError::Value);
+    }
+    if needle.is_empty() {
+        return number_cell(start as f64);
+    }
+    let st = (start - 1) as usize;
+    for (char_idx, &byte_pos) in byte_indices.iter().enumerate().skip(st) {
+        if crate::coercion::wildcard_prefix_match(&hay[byte_pos..], needle) {
+            return number_cell((char_idx + 1) as f64);
+        }
+    }
+    Err(FormulaError::Value)
+}
+
+/// FIND: case-sensitive literal search; `start` is 1-based.
+fn find_literal(needle: &str, hay: &str, start: isize) -> CellResult {
+    let hay_chars: Vec<char> = hay.chars().collect();
+    let needle_chars: Vec<char> = needle.chars().collect();
+    if start < 1 || (start as usize) > hay_chars.len().max(1) {
+        return Err(FormulaError::Value);
+    }
+    if needle_chars.is_empty() {
+        return number_cell(start as f64);
+    }
+    let st = (start - 1) as usize;
+    for idx in st..=hay_chars.len().saturating_sub(needle_chars.len()) {
+        if hay_chars[idx..].starts_with(&needle_chars) {
+            return number_cell((idx + 1) as f64);
+        }
+    }
+    Err(FormulaError::Value)
+}
+
+impl SheetEngine {
     pub(crate) fn eval_text_func(
         &self,
         name: &str,
         args: &[Expr],
         ctx: &mut EvalContext<'_>,
         depth: usize,
-    ) -> Result<EvaluatedCellValue, FormulaError> {
+    ) -> CellResult {
         match name {
             "LEN" => {
-                if args.len() != 1 {
-                    return Err(FormulaError::Value);
-                }
-                let s = self.eval_arg_val(&args[0], ctx, depth)?.to_display_string();
-                Ok(EvaluatedCellValue::Number(s.chars().count() as f64))
+                check_text_arity(args, 1, 1)?;
+                let s = self.text_arg(&args[0], ctx, depth)?;
+                number_cell(s.chars().count() as f64)
             }
-            "CONCAT" | "CONCATENATE" => {
-                let vals = self.expand_args_ctx(args, ctx, depth)?;
-                let mut out = String::new();
-                let mut total_chars = 0usize;
-                for v in vals {
-                    let piece = v.to_display_string();
-                    total_chars = total_chars.saturating_add(piece.chars().count());
-                    if total_chars > Self::MAX_CELL_TEXT_CHARS {
-                        return Err(FormulaError::Value);
-                    }
-                    out.push_str(&piece);
-                }
-                Ok(EvaluatedCellValue::Text(out))
-            }
-            "TEXTJOIN" => {
-                if args.len() < 3 {
-                    return Err(FormulaError::Value);
-                }
-                let delim = self.eval_arg_val(&args[0], ctx, depth)?.to_display_string();
-                let delim_chars = delim.chars().count();
-                let ignore_empty = self
-                    .eval_arg_val(&args[1], ctx, depth)?
-                    .as_bool()
-                    .ok_or(FormulaError::Value)?;
-                let vals = self.expand_args_ctx(&args[2..], ctx, depth)?;
-                let mut out = String::new();
-                let mut total_chars = 0usize;
-                let mut first = true;
-                for v in vals {
-                    let s = v.to_display_string();
-                    if ignore_empty && s.is_empty() {
-                        continue;
-                    }
-                    if !first {
-                        total_chars = total_chars.saturating_add(delim_chars);
-                        if total_chars > Self::MAX_CELL_TEXT_CHARS {
-                            return Err(FormulaError::Value);
-                        }
-                        out.push_str(&delim);
-                    }
-                    first = false;
-                    total_chars = total_chars.saturating_add(s.chars().count());
-                    if total_chars > Self::MAX_CELL_TEXT_CHARS {
-                        return Err(FormulaError::Value);
-                    }
-                    out.push_str(&s);
-                }
-                Ok(EvaluatedCellValue::Text(out))
-            }
-            "LEFT" | "RIGHT" => {
-                if args.is_empty() || args.len() > 2 {
-                    return Err(FormulaError::Value);
-                }
-                let s: Vec<char> = self
-                    .eval_arg_val(&args[0], ctx, depth)?
-                    .to_display_string()
-                    .chars()
-                    .collect();
-                let n = if args.len() == 2 {
-                    let k = self.eval_arg_num(&args[1], ctx, depth)?.trunc() as isize;
-                    if k < 0 {
-                        return Err(FormulaError::Value);
-                    }
-                    k as usize
-                } else {
-                    1
-                };
-                let take = n.min(s.len());
-                let res: String = if name == "LEFT" {
-                    s[..take].iter().collect()
-                } else {
-                    s[s.len() - take..].iter().collect()
-                };
-                Ok(EvaluatedCellValue::Text(res))
-            }
-            "MID" => {
-                if args.len() != 3 {
-                    return Err(FormulaError::Value);
-                }
-                let s: Vec<char> = self
-                    .eval_arg_val(&args[0], ctx, depth)?
-                    .to_display_string()
-                    .chars()
-                    .collect();
-                let start = self.eval_arg_num(&args[1], ctx, depth)?.trunc() as isize;
-                let count = self.eval_arg_num(&args[2], ctx, depth)?.trunc() as isize;
-                if start < 1 || count < 0 {
-                    return Err(FormulaError::Value);
-                }
-                let st = ((start - 1) as usize).min(s.len());
-                let end = (st + count as usize).min(s.len());
-                Ok(EvaluatedCellValue::Text(s[st..end].iter().collect()))
-            }
-            "TRIM" | "UPPER" | "LOWER" | "PROPER" => {
-                if args.len() != 1 {
-                    return Err(FormulaError::Value);
-                }
-                let s = self.eval_arg_val(&args[0], ctx, depth)?.to_display_string();
-                let out = match name {
-                    "TRIM" => s.split_whitespace().collect::<Vec<_>>().join(" "),
-                    "UPPER" => s.to_uppercase(),
-                    "LOWER" => s.to_lowercase(),
-                    _ => {
-                        let mut res = String::with_capacity(s.len());
-                        let mut cap_next = true;
-                        for c in s.chars() {
-                            if c.is_alphabetic() {
-                                if cap_next {
-                                    res.extend(c.to_uppercase());
-                                    cap_next = false;
-                                } else {
-                                    res.extend(c.to_lowercase());
-                                }
-                            } else {
-                                cap_next = true;
-                                res.push(c);
-                            }
-                        }
-                        res
-                    }
-                };
-                if out.chars().count() > Self::MAX_CELL_TEXT_CHARS {
-                    return Err(FormulaError::Value);
-                }
-                Ok(EvaluatedCellValue::Text(out))
-            }
-            "SUBSTITUTE" => {
-                if args.len() < 3 || args.len() > 4 {
-                    return Err(FormulaError::Value);
-                }
-                let text = self.eval_arg_val(&args[0], ctx, depth)?.to_display_string();
-                let old_t = self.eval_arg_val(&args[1], ctx, depth)?.to_display_string();
-                let new_t = self.eval_arg_val(&args[2], ctx, depth)?.to_display_string();
-                let target_inst = if args.len() == 4 {
-                    let inst = self.eval_arg_num(&args[3], ctx, depth)?.trunc() as isize;
-                    if inst < 1 {
-                        return Err(FormulaError::Value);
-                    }
-                    Some(inst as usize)
-                } else {
-                    None
-                };
-                if old_t.is_empty() {
-                    if text.chars().count() > Self::MAX_CELL_TEXT_CHARS {
-                        return Err(FormulaError::Value);
-                    }
-                    return Ok(EvaluatedCellValue::Text(text));
-                }
-                let old_chars = old_t.chars().count();
-                let new_chars = new_t.chars().count();
-                let mut out = String::new();
-                let mut total_chars = 0usize;
-                let mut rem = text.as_str();
-                let mut count = 0usize;
-                while let Some(pos) = rem.find(&old_t) {
-                    count += 1;
-                    let prefix = &rem[..pos];
-                    total_chars = total_chars.saturating_add(prefix.chars().count());
-                    if total_chars > Self::MAX_CELL_TEXT_CHARS {
-                        return Err(FormulaError::Value);
-                    }
-                    out.push_str(prefix);
-                    if target_inst.is_none() || target_inst == Some(count) {
-                        total_chars = total_chars.saturating_add(new_chars);
-                        if total_chars > Self::MAX_CELL_TEXT_CHARS {
-                            return Err(FormulaError::Value);
-                        }
-                        out.push_str(&new_t);
-                        if target_inst == Some(count) {
-                            let tail = &rem[pos + old_t.len()..];
-                            total_chars = total_chars.saturating_add(tail.chars().count());
-                            if total_chars > Self::MAX_CELL_TEXT_CHARS {
-                                return Err(FormulaError::Value);
-                            }
-                            out.push_str(tail);
-                            return Ok(EvaluatedCellValue::Text(out));
-                        }
-                    } else {
-                        total_chars = total_chars.saturating_add(old_chars);
-                        if total_chars > Self::MAX_CELL_TEXT_CHARS {
-                            return Err(FormulaError::Value);
-                        }
-                        out.push_str(&old_t);
-                    }
-                    rem = &rem[pos + old_t.len()..];
-                }
-                total_chars = total_chars.saturating_add(rem.chars().count());
-                if total_chars > Self::MAX_CELL_TEXT_CHARS {
-                    return Err(FormulaError::Value);
-                }
-                out.push_str(rem);
-                Ok(EvaluatedCellValue::Text(out))
-            }
-            "REPLACE" => {
-                if args.len() != 4 {
-                    return Err(FormulaError::Value);
-                }
-                let chars: Vec<char> = self
-                    .eval_arg_val(&args[0], ctx, depth)?
-                    .to_display_string()
-                    .chars()
-                    .collect();
-                let start = self.eval_arg_num(&args[1], ctx, depth)?.trunc() as isize;
-                let num_chars = self.eval_arg_num(&args[2], ctx, depth)?.trunc() as isize;
-                let new_t = self.eval_arg_val(&args[3], ctx, depth)?.to_display_string();
-                if start < 1 || num_chars < 0 {
-                    return Err(FormulaError::Value);
-                }
-                let st = ((start - 1) as usize).min(chars.len());
-                let end = (st + num_chars as usize).min(chars.len());
-                let suffix_len = chars.len() - end;
-                let total_chars = st
-                    .saturating_add(new_t.chars().count())
-                    .saturating_add(suffix_len);
-                if total_chars > Self::MAX_CELL_TEXT_CHARS {
-                    return Err(FormulaError::Value);
-                }
-                let mut out: String = chars[..st].iter().collect();
-                out.push_str(&new_t);
-                out.extend(chars[end..].iter());
-                Ok(EvaluatedCellValue::Text(out))
-            }
-            "FIND" | "SEARCH" => {
-                if args.len() < 2 || args.len() > 3 {
-                    return Err(FormulaError::Value);
-                }
-                let needle_raw = self.eval_arg_val(&args[0], ctx, depth)?.to_display_string();
-                let hay_raw = self.eval_arg_val(&args[1], ctx, depth)?.to_display_string();
-                let start = if args.len() == 3 {
-                    self.eval_arg_num(&args[2], ctx, depth)?.trunc() as isize
-                } else {
-                    1
-                };
-                if name == "SEARCH" {
-                    let byte_indices: Vec<usize> = hay_raw.char_indices().map(|(i, _)| i).collect();
-                    if start < 1 || (start as usize) > byte_indices.len().max(1) {
-                        return Err(FormulaError::Value);
-                    }
-                    let st = (start - 1) as usize;
-                    if needle_raw.is_empty() {
-                        return Ok(EvaluatedCellValue::Number(start as f64));
-                    }
-                    for (char_idx, &byte_pos) in byte_indices.iter().enumerate().skip(st) {
-                        if crate::coercion::wildcard_prefix_match(&hay_raw[byte_pos..], &needle_raw)
-                        {
-                            return Ok(EvaluatedCellValue::Number((char_idx + 1) as f64));
-                        }
-                    }
-                    return Err(FormulaError::Value);
-                }
-                let hay_chars: Vec<char> = hay_raw.chars().collect();
-                let needle_chars: Vec<char> = needle_raw.chars().collect();
-                if start < 1 || (start as usize) > hay_chars.len().max(1) {
-                    return Err(FormulaError::Value);
-                }
-                let st = (start - 1) as usize;
-                if needle_chars.is_empty() {
-                    return Ok(EvaluatedCellValue::Number(start as f64));
-                }
-                for idx in st..=hay_chars.len().saturating_sub(needle_chars.len()) {
-                    if hay_chars[idx..].starts_with(&needle_chars) {
-                        return Ok(EvaluatedCellValue::Number((idx + 1) as f64));
-                    }
-                }
-                Err(FormulaError::Value)
-            }
+            "CONCAT" | "CONCATENATE" => self.text_concat(args, ctx, depth),
+            "TEXTJOIN" => self.text_join(args, ctx, depth),
+            "LEFT" | "RIGHT" => self.text_left_right(name == "LEFT", args, ctx, depth),
+            "MID" => self.text_mid(args, ctx, depth),
+            "TRIM" | "UPPER" | "LOWER" | "PROPER" => self.text_case(name, args, ctx, depth),
+            "SUBSTITUTE" => self.text_substitute(args, ctx, depth),
+            "REPLACE" => self.text_replace(args, ctx, depth),
+            "FIND" | "SEARCH" => self.text_find(name == "SEARCH", args, ctx, depth),
             "EXACT" => {
-                if args.len() != 2 {
-                    return Err(FormulaError::Value);
-                }
-                let a = self.eval_arg_val(&args[0], ctx, depth)?.to_display_string();
-                let b = self.eval_arg_val(&args[1], ctx, depth)?.to_display_string();
+                check_text_arity(args, 2, 2)?;
+                let a = self.text_arg(&args[0], ctx, depth)?;
+                let b = self.text_arg(&args[1], ctx, depth)?;
                 Ok(EvaluatedCellValue::Boolean(a == b))
             }
-            "REPT" => {
-                if args.len() != 2 {
-                    return Err(FormulaError::Value);
-                }
-                let s = self.eval_arg_val(&args[0], ctx, depth)?.to_display_string();
-                let n = self.eval_arg_num(&args[1], ctx, depth)?.trunc() as isize;
-                if n < 0 || s.chars().count().saturating_mul(n as usize) > Self::MAX_CELL_TEXT_CHARS
-                {
-                    return Err(FormulaError::Value);
-                }
-                Ok(EvaluatedCellValue::Text(s.repeat(n as usize)))
-            }
+            "REPT" => self.text_rept(args, ctx, depth),
             "VALUE" => {
-                if args.len() != 1 {
-                    return Err(FormulaError::Value);
-                }
+                check_text_arity(args, 1, 1)?;
                 let v = self.eval_arg_val(&args[0], ctx, depth)?;
                 crate::coercion::coerce_to_number(&v).map(EvaluatedCellValue::Number)
             }
-            "TEXT" => {
-                if args.len() != 2 {
-                    return Err(FormulaError::Value);
-                }
-                let val = self.eval_arg_val(&args[0], ctx, depth)?;
-                let fmt_str = self.eval_arg_val(&args[1], ctx, depth)?.to_display_string();
-                let out = if let Some(num) = val.as_number() {
-                    crate::coercion::format_number_with_code(num, &fmt_str)?
-                } else {
-                    crate::coercion::format_text_value_with_code(&val.to_display_string(), &fmt_str)
-                };
-                if out.chars().count() > Self::MAX_CELL_TEXT_CHARS {
-                    return Err(FormulaError::Value);
-                }
-                Ok(EvaluatedCellValue::Text(out))
-            }
-            "FIXED" => {
-                if args.is_empty() || args.len() > 3 {
-                    return Err(FormulaError::Value);
-                }
-                let num = self.eval_arg_num(&args[0], ctx, depth)?;
-                let decimals = if args.len() >= 2 && !matches!(args[1], Expr::Missing) {
-                    self.eval_arg_num(&args[1], ctx, depth)?
-                        .trunc()
-                        .clamp(-100.0, 20.0) as i32
-                } else {
-                    2
-                };
-                let no_commas = if args.len() == 3 && !matches!(args[2], Expr::Missing) {
-                    self.eval_arg_val(&args[2], ctx, depth)?
-                        .as_bool()
-                        .ok_or(FormulaError::Value)?
-                } else {
-                    false
-                };
-                let out = crate::coercion::format_fixed_number(num, decimals, !no_commas);
-                if out.chars().count() > Self::MAX_CELL_TEXT_CHARS {
-                    return Err(FormulaError::Value);
-                }
-                Ok(EvaluatedCellValue::Text(out))
-            }
+            "TEXT" => self.text_format(args, ctx, depth),
+            "FIXED" => self.text_fixed(args, ctx, depth),
             "CLEAN" => {
-                if args.len() != 1 {
-                    return Err(FormulaError::Value);
-                }
-                let s = self.eval_arg_val(&args[0], ctx, depth)?.to_display_string();
-                let out: String = s.chars().filter(|&c| (c as u32) >= 0x20).collect();
-                Ok(EvaluatedCellValue::Text(out))
+                check_text_arity(args, 1, 1)?;
+                let s = self.text_arg(&args[0], ctx, depth)?;
+                Ok(EvaluatedCellValue::Text(
+                    s.chars().filter(|&c| (c as u32) >= MIN_PRINTABLE).collect(),
+                ))
             }
             "CHAR" => {
-                if args.len() != 1 {
-                    return Err(FormulaError::Value);
-                }
+                check_text_arity(args, 1, 1)?;
                 let code = self.eval_arg_num(&args[0], ctx, depth)?.trunc() as i64;
-                if !(1..=1_114_111).contains(&code) {
+                if !(1..=MAX_CHAR_CODE).contains(&code) {
                     return Err(FormulaError::Value);
                 }
                 let ch = char::from_u32(code as u32).ok_or(FormulaError::Value)?;
                 Ok(EvaluatedCellValue::Text(ch.to_string()))
             }
             "CODE" => {
-                if args.len() != 1 {
-                    return Err(FormulaError::Value);
-                }
-                let s = self.eval_arg_val(&args[0], ctx, depth)?.to_display_string();
+                check_text_arity(args, 1, 1)?;
+                let s = self.text_arg(&args[0], ctx, depth)?;
                 let ch = s.chars().next().ok_or(FormulaError::Value)?;
-                Ok(EvaluatedCellValue::Number((ch as u32) as f64))
+                number_cell((ch as u32) as f64)
             }
             _ => Err(FormulaError::Name),
         }
+    }
+
+    /// Evaluates `arg` and renders it as display text.
+    fn text_arg(
+        &self,
+        arg: &Expr,
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<String, FormulaError> {
+        Ok(self.eval_arg_val(arg, ctx, depth)?.to_display_string())
+    }
+
+    fn text_chars_arg(
+        &self,
+        arg: &Expr,
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<Vec<char>, FormulaError> {
+        Ok(self.text_arg(arg, ctx, depth)?.chars().collect())
+    }
+
+    fn text_concat(&self, args: &[Expr], ctx: &mut EvalContext<'_>, depth: usize) -> CellResult {
+        let vals = self.expand_args_ctx(args, ctx, depth)?;
+        let mut out = String::new();
+        let mut budget = TextBudget::default();
+        for v in vals {
+            budget.push(&mut out, &v.to_display_string())?;
+        }
+        Ok(EvaluatedCellValue::Text(out))
+    }
+
+    fn text_join(&self, args: &[Expr], ctx: &mut EvalContext<'_>, depth: usize) -> CellResult {
+        check_text_arity(args, 3, usize::MAX)?;
+        let delim = self.text_arg(&args[0], ctx, depth)?;
+        let delim_chars = delim.chars().count();
+        let ignore_empty = self
+            .eval_arg_val(&args[1], ctx, depth)?
+            .as_bool()
+            .ok_or(FormulaError::Value)?;
+        let vals = self.expand_args_ctx(&args[2..], ctx, depth)?;
+        let mut out = String::new();
+        let mut budget = TextBudget::default();
+        let mut first = true;
+        for v in vals {
+            let s = v.to_display_string();
+            if ignore_empty && s.is_empty() {
+                continue;
+            }
+            if !first {
+                budget.push_counted(&mut out, &delim, delim_chars)?;
+            }
+            first = false;
+            budget.push(&mut out, &s)?;
+        }
+        Ok(EvaluatedCellValue::Text(out))
+    }
+
+    fn text_left_right(
+        &self,
+        is_left: bool,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> CellResult {
+        check_text_arity(args, 1, 2)?;
+        let s = self.text_chars_arg(&args[0], ctx, depth)?;
+        let n = match args.get(1) {
+            Some(arg) => {
+                let k = self.eval_arg_num(arg, ctx, depth)?.trunc() as isize;
+                usize::try_from(k).map_err(|_| FormulaError::Value)?
+            }
+            None => 1,
+        };
+        let take = n.min(s.len());
+        let slice = if is_left {
+            &s[..take]
+        } else {
+            &s[s.len() - take..]
+        };
+        Ok(EvaluatedCellValue::Text(slice.iter().collect()))
+    }
+
+    fn text_mid(&self, args: &[Expr], ctx: &mut EvalContext<'_>, depth: usize) -> CellResult {
+        check_text_arity(args, 3, 3)?;
+        let s = self.text_chars_arg(&args[0], ctx, depth)?;
+        let start = self.eval_arg_num(&args[1], ctx, depth)?.trunc() as isize;
+        let count = self.eval_arg_num(&args[2], ctx, depth)?.trunc() as isize;
+        if start < 1 || count < 0 {
+            return Err(FormulaError::Value);
+        }
+        let st = ((start - 1) as usize).min(s.len());
+        let end = (st + count as usize).min(s.len());
+        Ok(EvaluatedCellValue::Text(s[st..end].iter().collect()))
+    }
+
+    fn text_case(
+        &self,
+        name: &str,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> CellResult {
+        check_text_arity(args, 1, 1)?;
+        let s = self.text_arg(&args[0], ctx, depth)?;
+        bounded_text(match name {
+            "TRIM" => s.split_whitespace().collect::<Vec<_>>().join(" "),
+            "UPPER" => s.to_uppercase(),
+            "LOWER" => s.to_lowercase(),
+            _ => proper_case(&s),
+        })
+    }
+
+    fn text_substitute(
+        &self,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> CellResult {
+        check_text_arity(args, 3, 4)?;
+        let text = self.text_arg(&args[0], ctx, depth)?;
+        let old_t = self.text_arg(&args[1], ctx, depth)?;
+        let new_t = self.text_arg(&args[2], ctx, depth)?;
+        let target_inst = match args.get(3) {
+            Some(arg) => {
+                let inst = self.eval_arg_num(arg, ctx, depth)?.trunc() as isize;
+                Some(
+                    usize::try_from(inst)
+                        .ok()
+                        .filter(|&i| i >= 1)
+                        .ok_or(FormulaError::Value)?,
+                )
+            }
+            None => None,
+        };
+        substitute_text(&text, &old_t, &new_t, target_inst)
+    }
+
+    fn text_replace(&self, args: &[Expr], ctx: &mut EvalContext<'_>, depth: usize) -> CellResult {
+        check_text_arity(args, 4, 4)?;
+        let chars = self.text_chars_arg(&args[0], ctx, depth)?;
+        let start = self.eval_arg_num(&args[1], ctx, depth)?.trunc() as isize;
+        let num_chars = self.eval_arg_num(&args[2], ctx, depth)?.trunc() as isize;
+        let new_t = self.text_arg(&args[3], ctx, depth)?;
+        if start < 1 || num_chars < 0 {
+            return Err(FormulaError::Value);
+        }
+        let st = ((start - 1) as usize).min(chars.len());
+        let end = (st + num_chars as usize).min(chars.len());
+        let suffix_len = chars.len() - end;
+        let mut budget = TextBudget::default();
+        budget.reserve(
+            st.saturating_add(new_t.chars().count())
+                .saturating_add(suffix_len),
+        )?;
+        let mut out: String = chars[..st].iter().collect();
+        out.push_str(&new_t);
+        out.extend(chars[end..].iter());
+        Ok(EvaluatedCellValue::Text(out))
+    }
+
+    fn text_find(
+        &self,
+        is_search: bool,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> CellResult {
+        check_text_arity(args, 2, 3)?;
+        let needle = self.text_arg(&args[0], ctx, depth)?;
+        let hay = self.text_arg(&args[1], ctx, depth)?;
+        let start = match args.get(2) {
+            Some(arg) => self.eval_arg_num(arg, ctx, depth)?.trunc() as isize,
+            None => 1,
+        };
+        if is_search {
+            search_wildcard(&needle, &hay, start)
+        } else {
+            find_literal(&needle, &hay, start)
+        }
+    }
+
+    fn text_rept(&self, args: &[Expr], ctx: &mut EvalContext<'_>, depth: usize) -> CellResult {
+        check_text_arity(args, 2, 2)?;
+        let s = self.text_arg(&args[0], ctx, depth)?;
+        let n = self.eval_arg_num(&args[1], ctx, depth)?.trunc() as isize;
+        if n < 0 || s.chars().count().saturating_mul(n as usize) > Self::MAX_CELL_TEXT_CHARS {
+            return Err(FormulaError::Value);
+        }
+        Ok(EvaluatedCellValue::Text(s.repeat(n as usize)))
+    }
+
+    fn text_format(&self, args: &[Expr], ctx: &mut EvalContext<'_>, depth: usize) -> CellResult {
+        check_text_arity(args, 2, 2)?;
+        let val = self.eval_arg_val(&args[0], ctx, depth)?;
+        let fmt_str = self.text_arg(&args[1], ctx, depth)?;
+        let out = match val.as_number() {
+            Some(num) => crate::coercion::format_number_with_code(num, &fmt_str)?,
+            None => {
+                crate::coercion::format_text_value_with_code(&val.to_display_string(), &fmt_str)
+            }
+        };
+        bounded_text(out)
+    }
+
+    fn text_fixed(&self, args: &[Expr], ctx: &mut EvalContext<'_>, depth: usize) -> CellResult {
+        check_text_arity(args, 1, 3)?;
+        let num = self.eval_arg_num(&args[0], ctx, depth)?;
+        let decimals = match args.get(1) {
+            Some(arg) if !matches!(arg, Expr::Missing) => {
+                self.eval_arg_num(arg, ctx, depth)?
+                    .trunc()
+                    .clamp(FIXED_MIN_DECIMALS, FIXED_MAX_DECIMALS) as i32
+            }
+            _ => FIXED_DEFAULT_DECIMALS,
+        };
+        let no_commas = match args.get(2) {
+            Some(arg) if !matches!(arg, Expr::Missing) => self
+                .eval_arg_val(arg, ctx, depth)?
+                .as_bool()
+                .ok_or(FormulaError::Value)?,
+            _ => false,
+        };
+        bounded_text(crate::coercion::format_fixed_number(
+            num, decimals, !no_commas,
+        ))
     }
 
     pub(crate) fn eval_logical_func(
@@ -850,76 +438,18 @@ impl SheetEngine {
         args: &[Expr],
         ctx: &mut EvalContext<'_>,
         depth: usize,
-    ) -> Result<EvaluatedCellValue, FormulaError> {
+    ) -> CellResult {
         match name {
-            "IF" => {
-                if args.len() < 2 || args.len() > 3 {
-                    return Err(FormulaError::Value);
-                }
-                let flag = self
-                    .eval_arg_val(&args[0], ctx, depth)?
-                    .as_bool()
-                    .ok_or(FormulaError::Value)?;
-                if flag {
-                    Ok(self.eval_expr_ctx(&args[1], ctx, depth))
-                } else if args.len() == 3 {
-                    Ok(self.eval_expr_ctx(&args[2], ctx, depth))
-                } else {
-                    Ok(EvaluatedCellValue::Boolean(false))
-                }
-            }
-            "IFS" => {
-                if args.len() < 2 || args.len() % 2 != 0 {
-                    return Err(FormulaError::Value);
-                }
-                for pair in args.chunks(2) {
-                    let cond = self.eval_arg_val(&pair[0], ctx, depth)?;
-                    if cond.as_bool().ok_or(FormulaError::Value)? {
-                        return Ok(self.eval_expr_ctx(&pair[1], ctx, depth));
-                    }
-                }
-                Err(FormulaError::Na)
-            }
-            "AND" | "OR" | "XOR" => {
-                let vals = self.expand_args_ctx(args, ctx, depth)?;
-                if vals.is_empty() {
-                    return Err(FormulaError::Value);
-                }
-                let mut trues = 0usize;
-                let mut seen = 0usize;
-                for v in vals {
-                    if matches!(v, EvaluatedCellValue::Empty) {
-                        continue;
-                    }
-                    let b = v.as_bool().ok_or(FormulaError::Value)?;
-                    seen += 1;
-                    if b {
-                        trues += 1;
-                    }
-                }
-                if seen == 0 {
-                    return Err(FormulaError::Value);
-                }
-                Ok(EvaluatedCellValue::Boolean(match name {
-                    "AND" => trues == seen,
-                    "OR" => trues > 0,
-                    _ => trues % 2 == 1,
-                }))
-            }
+            "IF" => self.logical_if(args, ctx, depth),
+            "IFS" => self.logical_ifs(args, ctx, depth),
+            "AND" | "OR" | "XOR" => self.logical_fold(name, args, ctx, depth),
             "NOT" => {
-                if args.len() != 1 {
-                    return Err(FormulaError::Value);
-                }
-                let b = self
-                    .eval_arg_val(&args[0], ctx, depth)?
-                    .as_bool()
-                    .ok_or(FormulaError::Value)?;
+                check_text_arity(args, 1, 1)?;
+                let b = self.bool_arg(&args[0], ctx, depth)?;
                 Ok(EvaluatedCellValue::Boolean(!b))
             }
             "IFERROR" | "IFNA" => {
-                if args.len() != 2 {
-                    return Err(FormulaError::Value);
-                }
+                check_text_arity(args, 2, 2)?;
                 let primary = self.eval_expr_ctx(&args[0], ctx, depth);
                 let catch = match primary {
                     EvaluatedCellValue::Error(FormulaError::Na) => true,
@@ -932,27 +462,90 @@ impl SheetEngine {
                     primary
                 })
             }
-            "SWITCH" => {
-                if args.len() < 3 {
-                    return Err(FormulaError::Value);
-                }
-                let target = self.eval_arg_val(&args[0], ctx, depth)?;
-                let rest = &args[1..];
-                for i in 0..(rest.len() / 2) {
-                    let k = self.eval_arg_val(&rest[i * 2], ctx, depth)?;
-                    if Self::values_match(&target, &k) {
-                        return Ok(self.eval_expr_ctx(&rest[i * 2 + 1], ctx, depth));
-                    }
-                }
-                if rest.len() % 2 == 1 {
-                    Ok(self.eval_expr_ctx(rest.last().unwrap(), ctx, depth))
-                } else {
-                    Err(FormulaError::Na)
-                }
-            }
+            "SWITCH" => self.logical_switch(args, ctx, depth),
             "TRUE" => Ok(EvaluatedCellValue::Boolean(true)),
             "FALSE" => Ok(EvaluatedCellValue::Boolean(false)),
             _ => Err(FormulaError::Name),
+        }
+    }
+
+    fn bool_arg(
+        &self,
+        arg: &Expr,
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<bool, FormulaError> {
+        self.eval_arg_val(arg, ctx, depth)?
+            .as_bool()
+            .ok_or(FormulaError::Value)
+    }
+
+    fn logical_if(&self, args: &[Expr], ctx: &mut EvalContext<'_>, depth: usize) -> CellResult {
+        check_text_arity(args, 2, 3)?;
+        if self.bool_arg(&args[0], ctx, depth)? {
+            return Ok(self.eval_expr_ctx(&args[1], ctx, depth));
+        }
+        match args.get(2) {
+            Some(otherwise) => Ok(self.eval_expr_ctx(otherwise, ctx, depth)),
+            None => Ok(EvaluatedCellValue::Boolean(false)),
+        }
+    }
+
+    fn logical_ifs(&self, args: &[Expr], ctx: &mut EvalContext<'_>, depth: usize) -> CellResult {
+        if args.len() < 2 || args.len() % 2 != 0 {
+            return Err(FormulaError::Value);
+        }
+        for pair in args.chunks(2) {
+            if self.bool_arg(&pair[0], ctx, depth)? {
+                return Ok(self.eval_expr_ctx(&pair[1], ctx, depth));
+            }
+        }
+        Err(FormulaError::Na)
+    }
+
+    /// AND / OR / XOR over all non-empty arguments.
+    fn logical_fold(
+        &self,
+        name: &str,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> CellResult {
+        let vals = self.expand_args_ctx(args, ctx, depth)?;
+        let mut trues = 0usize;
+        let mut seen = 0usize;
+        for v in vals
+            .iter()
+            .filter(|v| !matches!(v, EvaluatedCellValue::Empty))
+        {
+            seen += 1;
+            if v.as_bool().ok_or(FormulaError::Value)? {
+                trues += 1;
+            }
+        }
+        if seen == 0 {
+            return Err(FormulaError::Value);
+        }
+        Ok(EvaluatedCellValue::Boolean(match name {
+            "AND" => trues == seen,
+            "OR" => trues > 0,
+            _ => trues % 2 == 1,
+        }))
+    }
+
+    fn logical_switch(&self, args: &[Expr], ctx: &mut EvalContext<'_>, depth: usize) -> CellResult {
+        check_text_arity(args, 3, usize::MAX)?;
+        let target = self.eval_arg_val(&args[0], ctx, depth)?;
+        let rest = &args[1..];
+        for pair in rest.chunks_exact(2) {
+            let k = self.eval_arg_val(&pair[0], ctx, depth)?;
+            if Self::values_match(&target, &k) {
+                return Ok(self.eval_expr_ctx(&pair[1], ctx, depth));
+            }
+        }
+        match rest.len() % 2 {
+            1 => Ok(self.eval_expr_ctx(&rest[rest.len() - 1], ctx, depth)),
+            _ => Err(FormulaError::Na),
         }
     }
 }
