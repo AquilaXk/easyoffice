@@ -9,6 +9,7 @@ mod native_menu;
 mod os_recent;
 mod pdf_export;
 mod pdf_font_fallbacks;
+mod preview;
 mod recent;
 mod save_file;
 mod smoke;
@@ -233,6 +234,7 @@ fn main() {
             window_commands::close_current_window,
             window_commands::list_recent_documents,
             window_commands::open_recent_document,
+            preview::get_recent_preview,
         ])
         .setup(move |app| {
             app.manage(AppWindows::new(app.path().app_data_dir().ok()));
@@ -240,6 +242,7 @@ fn main() {
             #[cfg(target_os = "macos")]
             native_menu::install(app)?;
             update_check::start(app.handle(), smoke_mode);
+            app.manage(preview::PreviewState::new());
             let handle = app.handle().clone();
             if smoke_mode {
                 app.manage(SmokeProbe::start(SMOKE_TIMEOUT));
@@ -328,7 +331,7 @@ mod tests {
         );
         assert_eq!(value["windows"], serde_json::json!(["main", "doc-*"]));
         assert_eq!(value["local"], serde_json::json!(true));
-        assert_eq!(app_commands::APP_COMMANDS.len(), 13);
+        assert_eq!(app_commands::APP_COMMANDS.len(), 14);
     }
 
     #[test]

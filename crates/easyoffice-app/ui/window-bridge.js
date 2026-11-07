@@ -420,6 +420,8 @@
       home = create({
         document,
         onOpenRecent: (id) => openRecent(id).catch((err) => feedback("최근 문서 열기 실패: " + (err?.message || err))),
+        loadPreview: desktopAvailable() ? (id) => shell("recentPreview", { id }) : null,
+        env,
       });
       home.mount(shellEl || document.body);
       home.show();

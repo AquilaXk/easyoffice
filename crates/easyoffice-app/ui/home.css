@@ -297,6 +297,25 @@
   background: var(--color-surface-raised);
 }
 
+/* A picture from the file (PD-106) replaces the skeleton and fills the card. */
+.home-recent-preview.is-loaded {
+  padding: 0;
+  overflow: hidden;
+}
+
+.home-recent-preview.is-loaded::before {
+  display: none;
+}
+
+.home-preview-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
+  background: var(--color-surface);
+}
+
 .home-drop-hint {
   color: var(--color-text-muted);
   font-size: 13px;

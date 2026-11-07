@@ -114,6 +114,7 @@ const REQUIRED_TRACKED_CONTRACTS = [
   "scripts/test-webui-slide-show.mjs",
   "scripts/test-webui-hwp-host.mjs",
   "scripts/test-webui-hwp-print.mjs",
+  "scripts/test-webui-home-preview.mjs",
   "scripts/test-webui-hwp-session.mjs",
   "scripts/test-webui-windows.mjs",
   "scripts/test-webui-shell-chrome.mjs",

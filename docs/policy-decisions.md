@@ -1801,3 +1801,14 @@
 - **Alternatives rejected** 셸이 선호를 저장해 편집기에 밀어 넣기(RPC 추가), DOM 창에도 항목 추가(동작 없음).
 - **Verified by** `node --test scripts/test-hwp-studio.mjs`(토글 왕복과 저장값, 저장 실패 시 기본값, 메뉴·명령·CSS·매니페스트 일치), `node scripts/build-hwp-studio.mjs`(번들 빌드와 검사).
 - **Revisit when** DOM 창 도구 상자에 글자 라벨을 넣을 때.
+
+## 81. 시작 창 최근 문서 카드의 미리보기: 파일에 든 그림만 읽어 보여 줌 (PD-106)
+
+- **Status** Implemented (합성 컨테이너와 페이지 가짜 환경 테스트; 실제 문서·Windows·macOS 화면 확인 전)
+- **Context** hop은 Rust 네이티브 rhwp로 첫 쪽 SVG를 그려 카드에 보입니다. EasyOffice의 셸에는 쪽을 그리는 엔진이 없고(한글 WASM은 편집기 안에만 있음), 문서·시트·슬라이드·PDF를 그리는 경로도 없습니다. 페이지에 파일 바이트를 넘기는 것은 PD-088의 경계(경로·내용은 Rust 안)를 넓힙니다. 한글(`PrvImage`)·HWPX(`Preview/PrvImage.*`)·OOXML(`docProps/thumbnail.*`)·ODF(`Thumbnails/thumbnail.png`) 파일은 만든 프로그램이 넣어 둔 작은 미리보기 그림을 이미 갖고 있습니다.
+- **Decision (`PD-106`)** (1) 새 명령 `get_recent_preview(id)`는 **불투명 id만** 받습니다(형식 `[0-9a-f]{16}` 검사, 아니면 오류). 최근 목록에 없으면 `null`입니다. 경로와 문서 바이트는 페이지로 가지 않고, 돌려주는 것은 그림의 종류(`image/png|jpeg|gif|bmp`)와 Base64뿐입니다. (2) `preview/`가 파일을 **시크로만** 읽습니다: OLE2는 머리글·FAT 목록·디렉터리·`PrvImage` 스트림(작으면 미니 스트림)만, ZIP은 끝 레코드·중앙 디렉터리·그 항목 하나만 읽으며(저장 또는 deflate, 암호·ZIP64는 무시) 256MiB 문서도 수십 KB만 읽습니다. (3) 상한: 그림 256KiB(압축·풀린 크기 모두, deflate는 상한에서 중단), 디렉터리 항목 4096개, FAT 구역 8192개, DIFAT 256개, 사슬 65536칸, ZIP 항목 8192개·중앙 디렉터리 4MiB, 모든 오프셋·크기 계산은 `checked_*`, 사슬 순환은 칸 수 상한으로 끊습니다. (4) 종류는 **앞 바이트(매직)** 로만 정합니다: PNG·JPEG·GIF·BMP만 받고 WMF·EMF·그 밖은 버립니다(이름의 확장자는 후보 선택에만 씀). (5) 캐시는 id별 1개, 파일의 수정 시각과 크기가 같을 때만 유효하고 최대 10개이며, 그림이 없다는 결과도 기억해 같은 파일을 다시 읽지 않습니다. (6) 페이지는 카드가 그려진 뒤(`setTimeout 0`) **한 장씩 차례로** 요청하고, 응답의 `createImageBitmap(new Blob([bytes], {type}))` 결과를 카드 안 `<canvas>`에 그립니다. URL을 만들지 않으므로 페이지 CSP(`default-src 'self'`)의 `img-src`와 무관하며 CSP는 바꾸지 않습니다. Base64는 256KiB 상한을 넘으면 디코드 전에 버립니다. 요청 실패·그림 없음·디코드 실패·`createImageBitmap` 미지원이면 그 카드는 스켈레톤을 유지하고 다른 카드는 계속 진행합니다. 목록을 다시 그리면 이전 실행은 멈춥니다. 개발용 `--serve`에서는 요청하지 않습니다. (7) 명령은 앱 명령 목록과 capability에 1:1로 추가했습니다(11개).
+- **Why** 엔진 무의존과 "경로·내용은 Rust 안" 원칙을 지키면서 카드에 실제 모습을 보이기 위함이며, 한 파일의 그림 하나만 읽어 시작 창 비용이 거의 들지 않습니다.
+- **Trade-offs** 그림이 없는 파일(다른 프로그램이 만든 것, 이 앱이 저장한 파일, PDF)은 스켈레톤으로 남고, 그림은 저해상도이며 문서와 어긋날 수 있습니다. 그림은 문서 내용의 일부이므로 시작 창 화면과 메모리 캐시에만 있고 디스크에 쓰지 않습니다.
+- **Alternatives rejected** 페이지에서 한글 WASM으로 첫 쪽을 그리기(바이트가 페이지로 가고 11.8MB 코어를 시작 창에서 불러옴), 엔진에 쪽 그리기를 새로 만들기(규모), `data:`/`blob:` 이미지(CSP를 풀어야 함).
+- **Verified by** `cargo test -p easyoffice-desktop preview`(합성 OLE2 미니·일반 스트림, ZIP 저장·deflate, 매직·확장자·상한·압축 폭탄, 잘린·순환·잘못된 FAT·ZIP64, id 형식, 캐시 키·10개·미적중 기억, Base64 응답), 앱 명령·capability 1:1 테스트, `node --test scripts/test-webui-home-preview.mjs`(순차 요청·캔버스 교체, 실패별 스켈레톤 유지, 큰 응답 거부, 디코더·명령 없음, 새 목록의 취소, CSS 토큰).
+- **Revisit when** 그림 없는 파일이 많아 실제 쪽 미리보기가 필요할 때(한글만 편집기 코어로 그리는 안을 다시 검토).
