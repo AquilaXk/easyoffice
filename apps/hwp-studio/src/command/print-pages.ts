@@ -196,7 +196,7 @@ export function buildPrintPageRules(pages: PrintPage[]): string {
   const pageSizeRules = pages
     .map((page) => `.${page.className} { page: ${page.pageName}; width: ${formatMm(page.widthMm)}mm; height: ${formatMm(page.heightMm)}mm; }`)
     .join('\n');
-  return `\n\n`;
+  return `${pageRules}\n${pageSizeRules}\n`;
 }
 
 /**
