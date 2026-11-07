@@ -256,6 +256,7 @@ fn finish_paragraph(header: &Header, p: ParaState) -> RichParagraph {
             font: r.font,
             color: r.color,
             highlight: r.highlight,
+            ..CharFmt::default()
         };
         push_run(&mut runs, &r.text, &fmt);
     }
@@ -264,6 +265,7 @@ fn finish_paragraph(header: &Header, p: ParaState) -> RichParagraph {
         alignment,
         heading_level: heading,
         list,
+        ..RichParagraph::default()
     }
 }
 

@@ -183,6 +183,7 @@ fn parse_paragraph(
                 font: opt_font(run)?,
                 color: opt_color(run, "color")?,
                 highlight: opt_color(run, "highlight")?,
+                ..RichRun::default()
             });
         }
     }
@@ -212,6 +213,7 @@ fn parse_paragraph(
         alignment,
         heading_level,
         list,
+        ..RichParagraph::default()
     })
 }
 

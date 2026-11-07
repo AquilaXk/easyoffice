@@ -5,7 +5,7 @@
 //! style (`style id="0"`) plus optional heading styles; every paragraph and run in
 //! `section0.xml` refers to these IDs.
 
-use crate::XmlSanitizer;
+use crate::{RichScript, XmlSanitizer};
 
 pub(crate) const NS_HEAD: &str = "http://www.owpml.org/owpml/2011/head";
 pub(crate) const NS_CORE: &str = "http://www.owpml.org/owpml/2011/core";
@@ -20,6 +20,10 @@ const MARGIN_SIDE: u32 = 8_504;
 pub(crate) const TEXT_WIDTH: u32 = PAGE_WIDTH - 2 * MARGIN_SIDE;
 /// Left margin (HWPUNIT) the writer gives list paragraphs; the reader treats it as the list marker.
 pub(crate) const LIST_LEFT_MARGIN: u32 = 2_000;
+/// Single-spacing-relative line spacing written when a paragraph sets none (percent).
+pub(crate) const DEFAULT_LINE_PERCENT: u32 = 160;
+/// HWPUNIT is 1/100 point and a twip is 1/20 point, so one twip is five HWPUNIT.
+pub(crate) const HWPUNIT_PER_TWIP: u32 = 5;
 /// Default cell height for generated tables.
 pub(crate) const CELL_HEIGHT: u32 = 1_000;
 
@@ -63,6 +67,7 @@ pub(crate) struct HwpxCharShape {
     pub font: usize,
     pub text_color: Option<u32>,
     pub shade_color: Option<u32>,
+    pub script: RichScript,
 }
 
 impl Default for HwpxCharShape {
@@ -76,6 +81,7 @@ impl Default for HwpxCharShape {
             font: 0,
             text_color: None,
             shade_color: None,
+            script: RichScript::Normal,
         }
     }
 }
@@ -85,6 +91,10 @@ impl Default for HwpxCharShape {
 pub(crate) struct HwpxParaShape {
     pub align: &'static str,
     pub left_margin: u32,
+    /// First-line indent (`hc:intent`), HWPUNIT; negative for a hanging indent.
+    pub intent: i32,
+    /// Line spacing in percent of single spacing.
+    pub line_percent: u32,
 }
 
 impl Default for HwpxParaShape {
@@ -92,6 +102,8 @@ impl Default for HwpxParaShape {
         Self {
             align: "JUSTIFY",
             left_margin: 0,
+            intent: 0,
+            line_percent: DEFAULT_LINE_PERCENT,
         }
     }
 }
@@ -139,8 +151,13 @@ fn char_pr_xml(id: usize, shape: &HwpxCharShape) -> String {
     xml.push_str(concat!(
         "<hh:outline type=\"NONE\"/>",
         "<hh:shadow type=\"NONE\" color=\"#C0C0C0\" offsetX=\"10\" offsetY=\"10\"/>",
-        "</hh:charPr>"
     ));
+    match shape.script {
+        RichScript::Normal => {}
+        RichScript::Superscript => xml.push_str("<hh:supscript/>"),
+        RichScript::Subscript => xml.push_str("<hh:subscript/>"),
+    }
+    xml.push_str("</hh:charPr>");
     xml
 }
 
@@ -152,15 +169,17 @@ fn para_pr_xml(id: usize, shape: &HwpxParaShape) -> String {
             "<hh:heading type=\"NONE\" idRef=\"0\" level=\"0\"/>",
             "<hh:breakSetting breakLatinWord=\"KEEP_WORD\" breakNonLatinWord=\"KEEP_WORD\" widowOrphan=\"0\" keepWithNext=\"0\" keepLines=\"0\" pageBreakBefore=\"0\" lineWrap=\"BREAK\"/>",
             "<hh:autoSpacing eAsianEng=\"0\" eAsianNum=\"0\"/>",
-            "<hh:margin><hc:intent value=\"0\" unit=\"HWPUNIT\"/><hc:left value=\"{left}\" unit=\"HWPUNIT\"/>",
+            "<hh:margin><hc:intent value=\"{intent}\" unit=\"HWPUNIT\"/><hc:left value=\"{left}\" unit=\"HWPUNIT\"/>",
             "<hc:right value=\"0\" unit=\"HWPUNIT\"/><hc:prev value=\"0\" unit=\"HWPUNIT\"/><hc:next value=\"0\" unit=\"HWPUNIT\"/></hh:margin>",
-            "<hh:lineSpacing type=\"PERCENT\" value=\"160\" unit=\"HWPUNIT\"/>",
+            "<hh:lineSpacing type=\"PERCENT\" value=\"{line}\" unit=\"HWPUNIT\"/>",
             "<hh:border borderFillIDRef=\"1\" offsetLeft=\"0\" offsetRight=\"0\" offsetTop=\"0\" offsetBottom=\"0\" connect=\"0\" ignoreMargin=\"0\"/>",
             "</hh:paraPr>"
         ),
         id = id,
         align = shape.align,
-        left = shape.left_margin
+        left = shape.left_margin,
+        intent = shape.intent,
+        line = shape.line_percent
     )
 }
 

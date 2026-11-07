@@ -12,7 +12,7 @@ use crate::rich_xml::{
 };
 use crate::{
     EasyOfficeError, RichAlignment, RichBlock, RichDocument, RichImage, RichListKind,
-    RichParagraph, XmlSanitizer, ZipArchiveCodec, ZipArchiveEntry, ZipSecurityPolicy,
+    RichParagraph, RichScript, XmlSanitizer, ZipArchiveCodec, ZipArchiveEntry, ZipSecurityPolicy,
     MAX_IMAGES_PER_DOCUMENT, MAX_TOTAL_IMAGE_BYTES,
 };
 
@@ -24,6 +24,9 @@ struct ParaState {
     num_id: Option<String>,
     outline: Option<u8>,
     images: Vec<RichImage>,
+    left_indent: Option<u32>,
+    first_line: Option<i32>,
+    line_percent: Option<u16>,
 }
 
 fn entry_xml<'a>(
@@ -152,6 +155,9 @@ impl Resolver<'_> {
             runs: p.runs,
             heading_level: heading,
             list,
+            left_indent_twips: p.left_indent,
+            first_line_indent_twips: p.first_line,
+            line_spacing_percent: p.line_percent,
         }
     }
 }
@@ -176,6 +182,9 @@ const SKIPPED_ELEMENTS: [&str; 11] = [
 ];
 const UNSUPPORTED_OBJECT_ELEMENTS: [&str; 2] = ["w:pict", "w:object"];
 const DRAWING_ELEMENT: &str = "w:drawing";
+/// `w:spacing/@w:line` of single line spacing (240ths of a line).
+const DOCX_SINGLE_LINE_240THS: i64 = 240;
+const SINGLE_LINE_PERCENT: u16 = 100;
 const UNSUPPORTED_OBJECT_NOTE: &str = "그림·도형·OLE 개체는 가져오지 않았습니다.";
 
 /// Applies a run-property element (`w:b`, `w:sz`, ...) to `fmt`.
@@ -196,10 +205,37 @@ fn apply_run_property(fmt: &mut CharFmt, name: &str, attrs: &[(String, String)])
         "w:sz" => fmt.size_half_pt = val.and_then(|v| v.parse::<u16>().ok()).filter(|v| *v > 0),
         "w:color" => fmt.color = val.and_then(normalize_hex_color),
         "w:highlight" => fmt.highlight = val.and_then(highlight_name_to_hex),
+        "w:vertAlign" => {
+            fmt.script = match val {
+                Some("superscript") => RichScript::Superscript,
+                Some("subscript") => RichScript::Subscript,
+                _ => RichScript::Normal,
+            };
+        }
         "w:shd" => {
             if let Some(fill) = attr(attrs, "w:fill").and_then(normalize_hex_color) {
                 fmt.highlight = Some(fill);
             }
+        }
+        _ => {}
+    }
+}
+
+/// `w:spacing` (auto line rule, 240ths of a line) and `w:ind` of a paragraph.
+fn apply_para_layout(top: &mut ParaState, name: &str, attrs: &[(String, String)]) {
+    let number = |key: &str| attr(attrs, key).and_then(|v| v.trim().parse::<i64>().ok());
+    match name {
+        "w:spacing" if attr(attrs, "w:lineRule").is_none_or(|r| r == "auto") => {
+            top.line_percent = number("w:line")
+                .filter(|l| *l > 0)
+                .and_then(|l| u16::try_from(l * 100 / DOCX_SINGLE_LINE_240THS).ok())
+                .filter(|p| *p != SINGLE_LINE_PERCENT);
+        }
+        "w:ind" => {
+            top.left_indent = number("w:left").and_then(|v| u32::try_from(v).ok());
+            top.first_line = number("w:firstLine")
+                .or_else(|| number("w:hanging").map(|h| -h))
+                .and_then(|v| i32::try_from(v).ok());
         }
         _ => {}
     }
@@ -242,6 +278,7 @@ impl DocxWalker {
         if let Some(top) = self.paras.last_mut() {
             if self.in_ppr {
                 Self::apply_para_property(top, name, attr(attrs, "w:val"));
+                apply_para_layout(top, name, attrs);
             }
         }
         if self.in_run && self.in_rpr {

@@ -8,7 +8,7 @@ use crate::rich_document::normalize_hex_color;
 use crate::rich_xml::{attr, push_run, skip_subtree, tokenize, CharFmt, XmlEvent};
 use crate::{
     EasyOfficeError, OdfCodec, RichAlignment, RichBlock, RichDocument, RichListKind, RichParagraph,
-    RichRun, XmlSanitizer, ZipArchiveCodec, ZipSecurityPolicy,
+    RichRun, RichScript, XmlSanitizer, ZipArchiveCodec, ZipSecurityPolicy,
 };
 
 /// Left margin the ODT writer gives list paragraphs; the reader treats it as the list marker.
@@ -26,6 +26,22 @@ fn off(value: Option<&str>) -> bool {
 }
 
 /// `14pt`/`9.5pt` to half-points; other units are ignored.
+/// `style:text-position` such as `super 58%`, `sub 58%` or `33% 58%` (positive raise = super).
+fn script_of(position: Option<&str>) -> RichScript {
+    let first = position
+        .and_then(|p| p.split_whitespace().next())
+        .unwrap_or("");
+    match first {
+        "super" => RichScript::Superscript,
+        "sub" => RichScript::Subscript,
+        other => match other.strip_suffix('%').and_then(|n| n.parse::<i32>().ok()) {
+            Some(n) if n > 0 => RichScript::Superscript,
+            Some(n) if n < 0 => RichScript::Subscript,
+            _ => RichScript::Normal,
+        },
+    }
+}
+
 fn parse_points(value: &str) -> Option<u16> {
     let pt: f32 = value.trim().strip_suffix("pt")?.parse().ok()?;
     let half = (pt * 2.0).round();
@@ -47,6 +63,7 @@ fn char_fmt_from_text_properties(attrs: &[(String, String)]) -> CharFmt {
             .filter(|f| !f.is_empty()),
         color: attr(attrs, "fo:color").and_then(normalize_hex_color),
         highlight: attr(attrs, "fo:background-color").and_then(normalize_hex_color),
+        script: script_of(attr(attrs, "style:text-position")),
     }
 }
 
@@ -141,6 +158,11 @@ fn merge_span_fmt(cur: CharFmt, add: CharFmt) -> CharFmt {
         font: add.font.or(cur.font),
         color: add.color.or(cur.color),
         highlight: add.highlight.or(cur.highlight),
+        script: if add.script == RichScript::Normal {
+            cur.script
+        } else {
+            add.script
+        },
     }
 }
 
@@ -311,6 +333,7 @@ impl<'a> OdtWalker<'a> {
                 alignment: p.style.align,
                 heading_level: p.outline,
                 list,
+                ..RichParagraph::default()
             }));
         }
         self.span_fmts.clear();

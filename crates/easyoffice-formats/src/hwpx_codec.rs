@@ -9,8 +9,9 @@
 
 use crate::hwpx_parts::{
     header_xml, header_xml_with, manifest_xml, section_properties_xml, HwpxCharShape,
-    HwpxParaShape, HwpxStyle, CELL_HEIGHT, CONTAINER_XML, DEFAULT_CHAR_HEIGHT, LIST_LEFT_MARGIN,
-    NS_PARAGRAPH, NS_SECTION, SETTINGS_XML, TEXT_WIDTH, VERSION_XML,
+    HwpxParaShape, HwpxStyle, CELL_HEIGHT, CONTAINER_XML, DEFAULT_CHAR_HEIGHT,
+    DEFAULT_LINE_PERCENT, HWPUNIT_PER_TWIP, LIST_LEFT_MARGIN, NS_PARAGRAPH, NS_SECTION,
+    SETTINGS_XML, TEXT_WIDTH, VERSION_XML,
 };
 use crate::office_codecs::validate_zip_xml_entries;
 use crate::rich_document::{RichAlignment, RichBlock, RichDocument};
@@ -241,11 +242,20 @@ impl HwpxCodec {
                     Some(RichAlignment::Right) => "RIGHT",
                     Some(RichAlignment::Justify) => "JUSTIFY",
                 },
-                left_margin: if p.list.is_some() {
-                    LIST_LEFT_MARGIN
-                } else {
-                    0
-                },
+                left_margin: p
+                    .left_indent_twips
+                    .map(|t| t.saturating_mul(HWPUNIT_PER_TWIP))
+                    .unwrap_or(if p.list.is_some() {
+                        LIST_LEFT_MARGIN
+                    } else {
+                        0
+                    }),
+                intent: p
+                    .first_line_indent_twips
+                    .map_or(0, |t| t.saturating_mul(HWPUNIT_PER_TWIP as i32)),
+                line_percent: p
+                    .line_spacing_percent
+                    .map_or(DEFAULT_LINE_PERCENT, u32::from),
             };
             let para_pr = intern(&mut para_shapes, para);
             let base = HwpxCharShape {
@@ -297,6 +307,7 @@ impl HwpxCodec {
                     font,
                     text_color: run.color.as_deref().and_then(hex_rgb),
                     shade_color: run.highlight.as_deref().and_then(hex_rgb),
+                    script: run.script,
                 };
                 let char_pr = intern(&mut char_shapes, shape);
                 sec.run(char_pr, &run.text);

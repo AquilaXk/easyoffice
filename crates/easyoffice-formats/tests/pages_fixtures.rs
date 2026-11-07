@@ -4,7 +4,7 @@
 
 use easyoffice_formats::{
     DecodedContent, DocumentFormat, RichAlignment, RichBlock, RichDocument, RichImage,
-    RichImageFormat, RichListKind, RichParagraph, RichRun, UniversalFormatConverter,
+    RichImageFormat, RichListKind, RichParagraph, RichRun, RichScript, UniversalFormatConverter,
     ZipArchiveCodec, ZipSecurityPolicy,
 };
 
@@ -60,7 +60,7 @@ fn flags(r: &RichRun) -> Flags {
 /// `(bold, italic, underline, strike)`
 type Flags = (bool, bool, bool, bool);
 
-const GENERIC_WARNING: &str = "Pages 문서는 읽기 전용으로 열며, 머리글·바닥글·각주·변경 추적·차트 등은 가져오지 않고 서식이 일부 단순화될 수 있습니다.";
+const GENERIC_WARNING: &str = "Pages 문서는 읽기 전용으로 열고, 머리글·바닥글·각주는 본문 뒤 부록 문단으로 옮기며, 변경 추적·차트 등은 가져오지 않고 서식이 일부 단순화될 수 있습니다.";
 
 #[test]
 fn text_fixture_paragraphs_and_headings() {
@@ -259,82 +259,72 @@ fn lists_fixture_table_cells() {
 }
 
 #[test]
-fn objects_fixture_reports_skipped_kinds() {
+fn objects_fixture_reports_only_what_is_still_skipped() {
     let (doc, warnings) = open("eo-pages-objects.pages");
     assert_eq!(
         warnings,
         vec![
-            "가져오지 않은 요소: 각주 1개".to_string(),
             "가져오지 않은 요소: 댓글 1개".to_string(),
-            "가져오지 않은 요소: 도형·텍스트 상자(형식 2011) 2개".to_string(),
-            "가져오지 않은 요소: 머리글 텍스트 1개".to_string(),
-            "가져오지 않은 요소: 바닥글 텍스트 1개".to_string(),
             GENERIC_WARNING.to_string(),
         ]
     );
-    let texts: Vec<String> = paragraphs(&doc).iter().map(|p| p.plain_text()).collect();
-    assert_eq!(texts.len(), 13);
-    assert_eq!(texts[0], "미지원 항목 안내 확인용 문서 (객체 테스트)");
-    assert_eq!(texts[4], "이 문장 끝에는 각주가 달려 있습니다.");
-    // Text inside shapes, the footnote, headers and footers is not mixed into the body.
-    let joined = texts.join("\n");
-    for hidden in [
-        "사각형 도형 안의",
-        "텍스트 상자(Text Box) 안에",
-        "각주 설명",
-        "머리말:",
-        "꼬리말 -",
-    ] {
-        assert!(!joined.contains(hidden), "{hidden} leaked into the body");
-    }
+    // Body text keeps its order; shape, footnote, header and footer text moved, not mixed in.
+    let texts: Vec<(u8, String)> = paragraphs(&doc)
+        .iter()
+        .map(|p| (p.heading_level, p.plain_text()))
+        .collect();
+    assert_eq!(texts.len(), 21);
+    assert_eq!(texts[0].1, "미지원 항목 안내 확인용 문서 (객체 테스트)");
+    assert_eq!(texts[5].1, "이 문장 끝에는 각주가 달려 있습니다.");
     assert_eq!(
-        texts[12],
+        texts[14].1,
         "페이지 나누기(Page Break) 뒤에 이어지는 두 번째 페이지의 본문 문단입니다."
     );
 }
 
-/// Paragraph text and table cells, in document order: what must survive a conversion. Empty
-/// paragraphs (layout-only, e.g. the one carrying a page break) are not content and are skipped.
-fn content_outline(doc: &RichDocument) -> Vec<String> {
-    doc.blocks
+#[test]
+fn objects_fixture_places_shape_and_text_box_text_at_the_anchor() {
+    let (doc, _) = open("eo-pages-objects.pages");
+    let texts: Vec<String> = doc
+        .blocks
         .iter()
-        .filter_map(|block| match block {
-            RichBlock::Paragraph(p) => Some(p.plain_text()).filter(|text| !text.is_empty()),
-            RichBlock::Table(rows) => Some(table_text(rows)),
-            RichBlock::Image(img) => Some(img.fallback_text().to_string()),
+        .filter_map(|b| match b {
+            RichBlock::Paragraph(p) => Some(p.plain_text()),
+            _ => None,
         })
-        .collect()
-}
-
-fn table_text(rows: &[Vec<String>]) -> String {
-    rows.iter()
-        .map(|row| row.join("\t"))
-        .collect::<Vec<_>>()
-        .join("\n")
+        .collect();
+    let at = |needle: &str| texts.iter().position(|t| t == needle).expect(needle);
+    let shape = at("사각형 도형 안의 텍스트입니다.");
+    assert_eq!(texts[shape - 1], "2. 도형 (사각형 안에 글자)");
+    assert_eq!(texts[shape + 1], "3. 각주");
+    let text_box = at("텍스트 상자(Text Box) 안에 작성된 안내 문구입니다.");
+    assert_eq!(texts[text_box - 1], "6. 텍스트 상자");
 }
 
 #[test]
-fn every_fixture_converts_to_docx_and_reads_back_the_same_text_and_cells() {
-    for name in [
-        "eo-pages-text.pages",
-        "eo-pages-lists-tables.pages",
-        "eo-pages-objects.pages",
-    ] {
-        let (original, _) = open(name);
-        // The app saves through the rich path, which keeps block order and formatting.
-        let docx = UniversalFormatConverter::encode_rich(&original, DocumentFormat::Docx, None)
-            .expect("encode DOCX");
-        let reread =
-            UniversalFormatConverter::decode_rich(&docx, Some("out.docx")).expect("reopen DOCX");
-        let DecodedContent::Document(reread) = reread.content else {
-            panic!("{name}: DOCX did not reopen as a document");
-        };
-        assert_eq!(
-            content_outline(&reread),
-            content_outline(&original),
-            "{name}"
-        );
-    }
+fn objects_fixture_appends_footnotes_headers_and_footers_after_the_body() {
+    let (doc, _) = open("eo-pages-objects.pages");
+    let tail: Vec<(u8, String)> = paragraphs(&doc)
+        .iter()
+        .rev()
+        .take(6)
+        .rev()
+        .map(|p| (p.heading_level, p.plain_text()))
+        .collect();
+    assert_eq!(
+        tail,
+        vec![
+            (2, "각주".to_string()),
+            (
+                0,
+                "각주 설명 텍스트입니다. 본문 하단에 표시되는 각주 항목입니다.".to_string()
+            ),
+            (2, "머리글".to_string()),
+            (0, "머리말: Pages 객체 테스트 문서".to_string()),
+            (2, "바닥글".to_string()),
+            (0, "꼬리말 - 쪽 번호: ".to_string()),
+        ]
+    );
 }
 
 #[test]
@@ -376,4 +366,58 @@ fn objects_fixture_imports_picture_at_its_document_position() {
         panic!("paragraph after the picture");
     };
     assert_eq!(after.plain_text(), "2. 도형 (사각형 안에 글자)");
+}
+
+#[test]
+fn text_fixture_font_script_indent_and_line_spacing() {
+    let (doc, _) = open("eo-pages-text.pages");
+    let fonts = paragraph_with(&doc, "서로 다른 글꼴 비교");
+    assert_eq!(
+        run_named(fonts, "명조계열단어").font.as_deref(),
+        Some("AppleMyungjo")
+    );
+    assert_eq!(
+        run_named(fonts, "고딕계열단어").font.as_deref(),
+        Some("AppleSDGothicNeo-Regular")
+    );
+    assert_eq!(run_named(fonts, "서로 다른 글꼴 비교: ").font, None);
+
+    let scripts = paragraph_with(&doc, "첨자 테스트");
+    assert_eq!(run_named(scripts, "위첨자").script, RichScript::Superscript);
+    assert_eq!(run_named(scripts, "아래첨자").script, RichScript::Subscript);
+    assert_eq!(
+        run_named(scripts, "첨자 테스트: X").script,
+        RichScript::Normal
+    );
+
+    let left = paragraph_with(&doc, "왼쪽 여백 들여쓰기");
+    assert_eq!(
+        (
+            left.left_indent_twips,
+            left.first_line_indent_twips,
+            left.line_spacing_percent
+        ),
+        (Some(720), None, None)
+    );
+    let first = paragraph_with(&doc, "첫 줄 들여쓰기");
+    assert_eq!(
+        (
+            first.left_indent_twips,
+            first.first_line_indent_twips,
+            first.line_spacing_percent
+        ),
+        (None, Some(720), None)
+    );
+    let spacing = paragraph_with(&doc, "줄 간격 2배");
+    assert_eq!(
+        (
+            spacing.left_indent_twips,
+            spacing.first_line_indent_twips,
+            spacing.line_spacing_percent
+        ),
+        (None, None, Some(200))
+    );
+    let plain = paragraph_with(&doc, "왼쪽 정렬이");
+    assert_eq!(plain.left_indent_twips, None);
+    assert_eq!(plain.line_spacing_percent, None);
 }

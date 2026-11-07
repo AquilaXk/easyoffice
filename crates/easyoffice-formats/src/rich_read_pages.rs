@@ -3,22 +3,27 @@
 //! Everything that depends on Apple's object schema lives in [`crate::pages_schema`]; table
 //! cells are decoded by [`crate::pages_table`].
 //!
-//! Pictures (PNG/JPEG) are imported as image blocks. Unsupported elements (shapes, text boxes, footnotes, comments, header/footer text,
+//! Pictures (PNG/JPEG) are imported as image blocks, shape and text-box text at its anchor, and
+//! footnotes, headers and footers as appendix paragraphs. Unsupported elements (comments,
 //! unreadable cell values) are skipped and reported as warnings with kinds and counts; legacy
 //! XML and encrypted packages are refused by [`crate::pages_package::load_package`].
+
+mod notes;
 
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
 use crate::pages_package::load_package;
 use crate::pages_proto::{ArchiveObject, Message, ObjectTable};
-use crate::pages_schema::{attachment, char_props_layout, heading, list_type, para_props, root};
-use crate::pages_schema::{header_footer, storage, style, ty};
+use crate::pages_schema::{attachment, baseline, char_props_layout, compact_para, heading};
+use crate::pages_schema::{list_type, para_props, root};
+use crate::pages_schema::{storage, style, ty};
 use crate::pages_schema::{CharPropFields, COLOR_RGBA};
-use crate::pages_table::{cell_plain_text, read_table, TableBudget, TableOutcome};
+use crate::pages_table::{read_table, TableBudget, TableOutcome};
 use crate::rich_read_pages_image::{PageImage, PageImages};
 use crate::{
     EasyOfficeError, RichAlignment, RichBlock, RichDocument, RichListKind, RichParagraph, RichRun,
+    RichScript,
 };
 
 const MAX_PARAGRAPHS: usize = 200_000;
@@ -27,6 +32,11 @@ const MAX_STYLE_CHAIN: usize = 16;
 const MAX_FONT_SIZE_PT: f32 = 1000.0;
 const MAX_HEADING_LEVEL: u8 = 6;
 const COLOR_CHANNEL_MAX: f32 = 255.0;
+const MAX_FONT_NAME_BYTES: usize = 128;
+const TWIPS_PER_POINT: f32 = 20.0;
+const MAX_INDENT_PT: f32 = 1000.0;
+const MAX_LINE_SPACING_MULTIPLE: f32 = 10.0;
+const SINGLE_SPACING_PERCENT: u16 = 100;
 
 fn corrupt(detail: &str) -> EasyOfficeError {
     EasyOfficeError::CorruptedContainer(format!("Pages 문서: {detail}"))
@@ -110,6 +120,11 @@ struct Fmt {
     highlight: Option<String>,
     align: Option<u64>,
     identifier: Option<String>,
+    font: Option<String>,
+    script: Option<RichScript>,
+    left_indent_twips: Option<u32>,
+    first_line_indent_twips: Option<i32>,
+    line_spacing_percent: Option<u16>,
 }
 
 fn color_hex(color: &Message) -> Option<String> {
@@ -129,6 +144,39 @@ fn size_half_pt(props: &Message, field: u32) -> Option<u16> {
         .float(field)
         .filter(|s| s.is_finite() && *s > 0.0 && *s < MAX_FONT_SIZE_PT)
         .map(|s| (s * 2.0).round() as u16)
+}
+
+fn script_of(value: u64) -> Option<RichScript> {
+    match value {
+        baseline::SUPERSCRIPT => Some(RichScript::Superscript),
+        baseline::SUBSCRIPT => Some(RichScript::Subscript),
+        _ => None,
+    }
+}
+
+/// Points as twips (1/20 point); `None` for non-finite or out-of-range values.
+fn points_to_twips(points: f32) -> Option<i32> {
+    (points.is_finite() && points.abs() <= MAX_INDENT_PT)
+        .then(|| (points * TWIPS_PER_POINT).round() as i32)
+}
+
+/// Line spacing as a percentage of single spacing, for the "multiple" mode only; 100% is the
+/// default and reported as unset.
+fn line_spacing_percent(p: &Message) -> Option<u16> {
+    let spacing = p.sub(compact_para::LINE_SPACING).ok().flatten()?;
+    if spacing
+        .varint(compact_para::SPACING_MODE)
+        .unwrap_or(compact_para::SPACING_MULTIPLE)
+        != compact_para::SPACING_MULTIPLE
+    {
+        return None;
+    }
+    let amount = spacing.float(compact_para::SPACING_AMOUNT)?;
+    if !amount.is_finite() || amount <= 0.0 || amount > MAX_LINE_SPACING_MULTIPLE {
+        return None;
+    }
+    let percent = (amount * 100.0).round() as u16;
+    (percent != SINGLE_SPACING_PERCENT).then_some(percent)
 }
 
 fn alignment_of(value: u64) -> Option<RichAlignment> {
@@ -161,6 +209,33 @@ impl Fmt {
                 .and_then(|n| p.sub(n).ok().flatten())
                 .and_then(|c| color_hex(&c));
         }
+        if self.font.is_none() {
+            self.font = l
+                .font
+                .and_then(|n| p.string(n).ok().flatten())
+                .filter(|f| !f.is_empty() && f.len() <= MAX_FONT_NAME_BYTES);
+        }
+        if self.script.is_none() {
+            self.script = l.script.and_then(|n| p.varint(n)).and_then(script_of);
+        }
+    }
+
+    /// Indents and line spacing of a compact paragraph property message.
+    fn merge_para_layout(&mut self, p: &Message) {
+        if self.left_indent_twips.is_none() {
+            self.left_indent_twips = p
+                .float(compact_para::LEFT_INDENT)
+                .and_then(points_to_twips)
+                .and_then(|t| u32::try_from(t).ok());
+        }
+        if self.first_line_indent_twips.is_none() {
+            self.first_line_indent_twips = p
+                .float(compact_para::FIRST_LINE_INDENT)
+                .and_then(points_to_twips);
+        }
+        if self.line_spacing_percent.is_none() {
+            self.line_spacing_percent = line_spacing_percent(p);
+        }
     }
 
     /// Merges one style object (full or compact layout) into this format.
@@ -176,6 +251,11 @@ impl Fmt {
         }
         if obj.type_id == ty::PARA_STYLE && self.align.is_none() {
             self.align = para_props_of(&m).and_then(|p| p.varint(para_props::ALIGNMENT));
+        }
+        if obj.type_id == ty::PARA_STYLE && matches!(m.sub(style::PARA_PROPS), Ok(None)) {
+            if let Ok(Some(p)) = m.sub(style::COMPACT_PARA_PROPS) {
+                self.merge_para_layout(&p);
+            }
         }
     }
 }
@@ -256,7 +336,9 @@ fn styled_run(text: String, c: Option<&Fmt>, p: Option<&Fmt>) -> RichRun {
         size_half_pt: pick(c, p, |f| f.size_half_pt),
         color: pick(c, p, |f| f.color.clone()),
         highlight: pick(c, p, |f| f.highlight.clone()),
-        ..RichRun::default()
+        // The paragraph style's font is the template default, so only a character style counts.
+        font: c.and_then(|f| f.font.clone()),
+        script: pick(c, p, |f| f.script).unwrap_or_default(),
     }
 }
 
@@ -335,6 +417,9 @@ impl<'a> Reader<'a> {
         if let Some(f) = &pfmt {
             para.alignment = f.align.and_then(alignment_of);
             para.heading_level = f.identifier.as_deref().map_or(0, heading_level);
+            para.left_indent_twips = f.left_indent_twips;
+            para.first_line_indent_twips = f.first_line_indent_twips;
+            para.line_spacing_percent = f.line_spacing_percent;
         }
         let level = t.list_levels.at(start).unwrap_or(0);
         para.list = t
@@ -440,32 +525,36 @@ impl<'a> Reader<'a> {
             self.skip("표 안의 개체");
             return Ok(());
         }
-        if let Some(block) = self.attachment_block(att)? {
-            blocks.push(block);
-        }
+        blocks.extend(self.attachment_blocks(att)?);
         Ok(())
     }
 
-    /// Resolves an attachment to a table or picture block, counting anything else as skipped.
-    fn attachment_block(&mut self, att_id: u64) -> Result<Option<RichBlock>, EasyOfficeError> {
+    /// Resolves an attachment to table, picture or shape-text blocks, counting anything else as
+    /// skipped.
+    fn attachment_blocks(&mut self, att_id: u64) -> Result<Vec<RichBlock>, EasyOfficeError> {
         let drawable = self
             .object(att_id, ty::ATTACHMENT)
             .and_then(|o| Message::parse(&o.payload).ok())
             .and_then(|m| reference(&m, attachment::DRAWABLE));
         let Some(did) = drawable else {
             self.skip("알 수 없는 첨부 개체");
-            return Ok(None);
+            return Ok(Vec::new());
         };
         match self.objects.get(did) {
-            Some(o) if o.type_id == ty::TABLE_INFO => Ok(self.read_table(o)?.map(RichBlock::Table)),
-            Some(o) if o.type_id == ty::IMAGE => self.read_picture(o),
+            Some(o) if o.type_id == ty::TABLE_INFO => Ok(self
+                .read_table(o)?
+                .map(RichBlock::Table)
+                .into_iter()
+                .collect()),
+            Some(o) if o.type_id == ty::IMAGE => Ok(self.read_picture(o)?.into_iter().collect()),
+            Some(o) if o.type_id == ty::SHAPE_WITH_TEXT => self.shape_blocks(o),
             Some(o) => {
                 self.skip(format!("{}(형식 {})", object_kind(o.type_id), o.type_id));
-                Ok(None)
+                Ok(Vec::new())
             }
             None => {
                 self.skip("끊어진 개체 참조");
-                Ok(None)
+                Ok(Vec::new())
             }
         }
     }
@@ -497,38 +586,11 @@ impl<'a> Reader<'a> {
         }
     }
 
-    /// Counts footnotes, comments and non-empty header/footer text, which are not imported.
+    /// Counts comments, which are not imported.
     fn note_unimported_text(&mut self, body: &Message) -> Result<(), EasyOfficeError> {
-        let footnotes = AttrTable::parse(body, storage::FOOTNOTE_TABLE)?.referenced();
-        self.skip_many("각주", footnotes);
         let comments = AttrTable::parse(body, storage::COMMENT_TABLE)?.referenced();
         self.skip_many("댓글", comments);
-        let (mut headers, mut footers) = (0usize, 0usize);
-        for obj in self.objects.objects.values() {
-            if obj.type_id != ty::HEADER_FOOTER_LIST {
-                continue;
-            }
-            let Ok(list) = Message::parse(&obj.payload) else {
-                continue;
-            };
-            headers += usize::from(self.has_text(&list, header_footer::HEADERS));
-            footers += usize::from(self.has_text(&list, header_footer::FOOTERS));
-        }
-        self.skip_many("머리글 텍스트", headers);
-        self.skip_many("바닥글 텍스트", footers);
         Ok(())
-    }
-
-    /// True when any storage referenced by `field` of a header/footer list has text.
-    fn has_text(&self, list: &Message, field: u32) -> bool {
-        let Ok(refs) = list.subs(field) else {
-            return false;
-        };
-        refs.iter()
-            .filter_map(|r| r.varint(1))
-            .filter_map(|id| self.storage_message(id))
-            .filter_map(|st| cell_plain_text(&st, storage::TEXT).ok())
-            .any(|t| !t.is_empty())
     }
 }
 
@@ -536,7 +598,6 @@ impl<'a> Reader<'a> {
 fn object_kind(type_id: u32) -> &'static str {
     match type_id {
         ty::IMAGE => "그림",
-        ty::SHAPE_WITH_TEXT => "도형·텍스트 상자",
         _ => "그림·도형 등 개체",
     }
 }
@@ -570,13 +631,14 @@ pub(crate) fn read_pages(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Ea
     while matches!(blocks.last(), Some(RichBlock::Paragraph(p)) if p.runs.is_empty()) {
         blocks.pop();
     }
+    blocks.extend(reader.appendix_blocks(&body)?);
     let mut warnings: Vec<String> = reader
         .skipped
         .iter()
         .map(|(kind, n)| format!("가져오지 않은 요소: {kind} {n}개"))
         .collect();
     warnings.push(
-        "Pages 문서는 읽기 전용으로 열며, 머리글·바닥글·각주·변경 추적·차트 등은 가져오지 않고 서식이 일부 단순화될 수 있습니다."
+        "Pages 문서는 읽기 전용으로 열고, 머리글·바닥글·각주는 본문 뒤 부록 문단으로 옮기며, 변경 추적·차트 등은 가져오지 않고 서식이 일부 단순화될 수 있습니다."
             .to_string(),
     );
     Ok((

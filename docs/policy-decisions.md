@@ -1676,3 +1676,20 @@
 - **Alternatives rejected** GIF·WebP·SVG 허용(재인코딩 또는 별도 파서 필요, 공격 면 증가), 그림 바이트를 열 때 전부 디코드해 검증(큰 PNG에서 메모리 폭증), 모든 그림을 PDF에서 래스터화해 한 형식으로 통일(화질 손실과 의존성).
 - **Verified by** `cargo test -p easyoffice-formats --test rich_images --test pages_fixtures`(작성기별 파트·참조·바이트 일치, DOCX 왕복, 손상·과대·과다 그림 거부, PDF 스트림, Pages 픽스처의 정확한 바이트·위치), `cargo test -p easyoffice-formats pdf_image`(PNG 필터 5종 복원).
 - **Revisit when** ODT·HWPX 읽기와 편집기 그림 블록을 추가할 때, 글 감싸기·자르기 지원을 요구받을 때, GIF·WebP 요구가 생길 때.
+
+## 72. Pages 가져오기 2단계: 도형 글자, 각주·머리글·바닥글 부록, 글꼴·첨자·들여쓰기·줄 간격 (PD-097)
+
+- **Status** Implemented (픽스처 3개로 확인된 범위). 표 셀의 문자열(3)·기간(7)·오류 종류는 픽스처에 없어 구현하지 않았습니다.
+- **Context** PD-096 다음 단계로 Pages 개체 중 본문 흐름 밖에 있던 글자와 문단·글자 서식을 가져옵니다(#168).
+- **Decision (`PD-097`)**
+  1. **도형·텍스트 상자(형식 2011)**: 첨부 위치(문단 바로 뒤)에서 도형의 글 저장소(필드 2)를 읽어 빈 문단을 뺀 문단으로 넣습니다. 도형 안의 첨부는 표를 허용하지 않고 건너뛴 개체로 셉니다.
+  2. **부록**: 각주(본문 저장소 필드 11 → 형식 2012 → 글 저장소), 머리글, 바닥글 문단을 본문 끝 뒤에 제목 문단("각주", "머리글", "바닥글", 제목 수준 2)과 함께 이어 붙입니다. 머리글·바닥글은 모든 머리글/바닥글 목록(형식 10143)을 개체 번호 순으로 읽고 같은 문단은 한 번만 넣으며, 쪽 번호 같은 표식은 건너뛴 개체로 세지 않습니다(쪽 번호 자리는 빈 글자). 각주는 본문의 표식 위치와 연결하지 않고 목록으로만 둡니다. 댓글은 계속 가져오지 않고 경고로 알립니다.
+  3. **글자 서식**: `RichRun.script`(`Normal`/`Superscript`/`Subscript`)를 추가했습니다. 글꼴 이름은 문단 스타일에는 템플릿 기본 글꼴이 항상 들어 있어 글자 스타일에 지정된 것만 가져옵니다.
+  4. **문단 서식**: `RichParagraph`에 왼쪽 들여쓰기(twip), 첫 줄 들여쓰기(twip, 음수는 내어쓰기), 줄 간격(단일 간격의 백분율)을 추가했습니다. Pages는 줄 간격 "배수" 방식만 읽고 100%는 지정 없음으로 둡니다. 스타일에서 상속된 값도 그대로 가져옵니다(예: 인용 스타일의 왼쪽 여백).
+  5. **작성기**: DOCX는 `w:vertAlign`, `w:spacing w:line`(자동), `w:ind`(left/firstLine/hanging)로, ODT는 `style:text-position`(`super 58%`/`sub 58%`), `fo:margin-left`, `fo:text-indent`, `fo:line-height`로, HWPX는 `hh:supscript`/`hh:subscript`, `hc:intent`/`hc:left`(1twip=5HWPUNIT), `hh:lineSpacing`(PERCENT)로 씁니다. RTF·Markdown·TXT·PDF는 이 서식을 쓰지 않습니다. 읽기는 DOCX(첨자·들여쓰기·줄 간격)와 ODT(첨자)만 합니다.
+  6. **표 병합**: 모델에 병합 표현이 없어 기존 방식(병합 영역의 첫 칸만 값, 나머지는 빈 칸)을 유지합니다.
+- **Why** 본문 흐름 밖 글자와 서식이 조용히 사라지는 것을 줄이고, 남은 것은 경고로 알리기 위함입니다.
+- **Trade-offs** 각주가 부록으로 옮겨져 본문 위치와의 연결을 잃습니다. 필드 번호는 픽스처로 확인한 것만 씁니다(전체 레이아웃의 글꼴·첨자·문단 속성은 확인하지 못해 읽지 않음). WebUI 편집기 JSON은 새 서식을 모릅니다.
+- **Alternatives rejected** 각주를 각주 번호가 붙은 문단으로 본문 안에 끼우기(표식 위치 해석이 픽스처 한 건뿐), 문단 스타일의 글꼴도 가져오기(모든 런에 템플릿 글꼴이 붙음).
+- **Verified by** `cargo test -p easyoffice-formats --test pages_fixtures --test rich_script_and_layout`(도형·텍스트 상자 위치, 부록 문단, 글꼴·첨자·들여쓰기·줄 간격의 픽스처 값, 작성기별 XML과 DOCX·ODT 읽기).
+- **Revisit when** 문자열·기간·오류 셀이 있는 Pages 문서를 구하게 되었을 때, 각주 표식 위치를 연결할 때, ODT·HWPX 문단 서식 읽기를 추가할 때.
