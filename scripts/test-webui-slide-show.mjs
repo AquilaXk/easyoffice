@@ -3,6 +3,7 @@ import fs from "node:fs";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { createWorkspaceHarness, createWebUiDom, flushAsyncTurns } from "./webui-dom-harness.mjs";
+import { switchModule } from "./test-support/modules.mjs";
 
 const UI_DIR = new URL("../crates/easyoffice-app/ui/", import.meta.url);
 const STYLES_CSS = fs.readFileSync(fileURLToPath(new URL("styles.css", UI_DIR)), "utf8");
@@ -23,7 +24,7 @@ function createMemoryStorage() {
 
 async function openSlideModule(options = {}) {
   const h = await createWorkspaceHarness(options);
-  h.userClick(h.document.querySelector('.mod-btn[data-module="SLIDE"]'));
+  switchModule(h.document, "SLIDE");
   await flushAsyncTurns();
   return h;
 }
@@ -62,7 +63,7 @@ test("F5 starts the show from slide 1, Shift+F5 from the current slide; reload i
   assert.equal(sandbox.dispatchWindowKeydown({ key: "F5" }).defaultPrevented, false, "DOC module keeps browser reload");
   assert.equal(isShowing(document), false);
 
-  userClick(document.querySelector('.mod-btn[data-module="SLIDE"]'));
+  switchModule(document, "SLIDE");
   await flushAsyncTurns();
   userClick(document.querySelector('.slide-thumb[data-slide-idx="2"]'));
   await flushAsyncTurns();
@@ -417,7 +418,7 @@ test("autosave and save payload carry the managed slide order, titles, bullets a
       return offline[command](payload);
     },
   });
-  userClick(document.querySelector('.mod-btn[data-module="SLIDE"]'));
+  switchModule(document, "SLIDE");
   await flushAsyncTurns();
   userClick(document.querySelector('.slide-thumb[data-slide-idx="2"]'));
   await flushAsyncTurns();

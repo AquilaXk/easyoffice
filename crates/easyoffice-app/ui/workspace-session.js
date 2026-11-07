@@ -163,7 +163,16 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       getWorkspacePanels,
       getSheetController,
     } = deps;
+    const isDesktopShell = typeof deps.isDesktopShell === "function" ? deps.isDesktopShell : () => false;
 
+    // Each window keeps its own recovery record (keyed by the window id); a host without window
+    // ids (single-page tests) keeps the shared key.
+    const storageKey = () => {
+      const id = typeof deps.getDocumentId === "function" ? deps.getDocumentId() : "";
+      return id ? AUTOSAVE_STORAGE_KEY + "." + id : AUTOSAVE_STORAGE_KEY;
+    };
+    let discarded = false;
+    let lastReportedDirty = null;
     let baselineHash = null;
     let dirty = false;
     let externalDirty = false; // unsaved changes owned by another editor (the embedded HWP editor)
@@ -200,7 +209,12 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     function syncUnloadGuard() {
       const want = dirty || pendingActivity || externalDirty;
       const shell = document.getElementById("app");
-      if (shell) shell.dataset.dirty = dirty || externalDirty ? "true" : "false";
+      const unsaved = dirty || externalDirty;
+      if (shell) shell.dataset.dirty = unsaved ? "true" : "false";
+      if (lastReportedDirty !== unsaved) {
+        lastReportedDirty = unsaved;
+        if (typeof deps.onDirtyChange === "function") deps.onDirtyChange(unsaved);
+      }
       if (want === guardRegistered) return;
       guardRegistered = want;
       if (want) host.addEventListener?.("beforeunload", handleBeforeUnload);
@@ -209,11 +223,11 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
 
     function persistRecord(snap) {
       const storage = resolveStorage();
-      if (!storage) return;
+      if (!storage || discarded) return;
       try {
-        if (!dirty && storage.getItem(AUTOSAVE_STORAGE_KEY) === null) return;
+        if (!dirty && storage.getItem(storageKey()) === null) return;
         storage.setItem(
-          AUTOSAVE_STORAGE_KEY,
+          storageKey(),
           JSON.stringify({
             version: AUTOSAVE_SCHEMA_VERSION,
             savedAt: Date.now(),
@@ -242,7 +256,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       pendingActivity = false;
       dirty = true;
       try {
-        resolveStorage()?.removeItem(AUTOSAVE_STORAGE_KEY);
+        resolveStorage()?.removeItem(storageKey());
       } catch {
         // storage may be blocked; the unsaved-changes guard still protects the session
       }
@@ -320,7 +334,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       if (!storage) return null;
       let record = null;
       try {
-        const raw = storage.getItem(AUTOSAVE_STORAGE_KEY);
+        const raw = storage.getItem(storageKey());
         if (!raw) return null;
         record = JSON.parse(raw);
       } catch {
@@ -339,6 +353,18 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       }
       setFeedback("이전 세션의 편집 내용을 자동 저장본에서 복원했습니다");
       return record;
+    }
+
+    // Closing a window drops its recovery record and stops writing a new one.
+    function discardStoredState() {
+      discarded = true;
+      if (autosaveTimer !== null) host.clearTimeout?.(autosaveTimer);
+      autosaveTimer = null;
+      try {
+        resolveStorage()?.removeItem(storageKey());
+      } catch {
+        // storage may be blocked; nothing is left to clean up
+      }
     }
 
     function installActivityTracking() {
@@ -378,6 +404,11 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     function applyModuleContext(mod) {
       const embed = mod === "HWP" && Boolean(getHwpHost?.()?.isEmbedActive());
       const isDoc = DOC_MODULES.includes(mod) && !embed;
+      // Only the editor's own toolbar is shown while it owns the HWP module (no duplicate chrome).
+      const appShell = document.getElementById("app");
+      if (appShell) appShell.dataset.hwpEmbed = embed ? "true" : "false";
+      for (const item of document.querySelectorAll("[data-hwp-save-as]")) item.hidden = !embed;
+      for (const item of document.querySelectorAll("[data-save-as-generic]")) item.hidden = embed;
       const styleBar = document.getElementById("doc-style-bar");
       if (styleBar) styleBar.hidden = !isDoc;
       // The SHEET home toolbar lists spreadsheet commands only: document-only tools are hidden.
@@ -521,10 +552,29 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       return Boolean(el.closest?.('[contenteditable="true"]'));
     }
 
+    // Browser-reserved combos (new/close window) are only bound inside the desktop shell.
+    function bindingFor(combo) {
+      const binding = shortcutBindings.find((b) => b.keys === combo);
+      if (!binding || binding.native || binding.external) return null;
+      return binding.desktopOnly && !isDesktopShell() ? null : binding;
+    }
+
+    // The embedded HWP editor forwards a combo string, never key events or typed text; only
+    // combinations the shared table marks `forwardFromEditor` are accepted.
+    function runForwardedShortcut(combo, actions) {
+      if (typeof combo !== "string") return false;
+      const binding = bindingFor(combo);
+      if (!binding || !binding.forwardFromEditor) return false;
+      const run = actions[binding.action];
+      if (typeof run !== "function") return false;
+      run();
+      return true;
+    }
+
     function handleShortcutKeydown(e, actions) {
       const combo = shortcutComboFromEvent(e);
-      const binding = shortcutBindings.find((b) => b.keys === combo);
-      if (!binding || binding.native || binding.external) return false;
+      const binding = bindingFor(combo);
+      if (!binding) return false;
       if (binding.module && getActiveModule() !== binding.module) return false;
       if (binding.bareKey && isTextEntryTarget(document.activeElement)) return false;
       if (binding.scope && !document.activeElement?.closest?.(binding.scope)) return false;
@@ -581,6 +631,8 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       applyModuleContext,
       runClipboardCommand,
       handleShortcutKeydown,
+      runForwardedShortcut,
+      discardStoredState,
       applyPlatformChrome,
       showBootstrapError,
       hideBootstrapError,

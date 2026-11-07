@@ -373,14 +373,19 @@
   // palette). Each entry is dispatched by app.js `handleWorkspaceShortcutKeydown`, except
   // `native` entries (browser editing keys left untouched) and `external` entries (handled by
   // workspace-tools.js). Browser-reserved keys (Ctrl+N/T/W/R, Ctrl+Shift+R/T/J/C/N/I, F5, ...)
-  // must never be listed here.
+  // must never be listed here, except the two window commands marked `desktopOnly`: they are bound
+  // only inside the desktop shell, which owns its windows (PD-088). `forwardFromEditor` marks the
+  // combos the embedded HWP editor forwards to the shell over the embed port (the editor sends the
+  // combo string only, never typed text).
   const WORKSPACE_SHORTCUT_BINDINGS = Object.freeze([
-    { keys: "Ctrl+O", action: "file-open" },
-    { keys: "Ctrl+S", action: "studio-save" },
+    { keys: "Ctrl+O", action: "file-open", forwardFromEditor: true },
+    { keys: "Ctrl+N", action: "file-new", desktopOnly: true, forwardFromEditor: true },
+    { keys: "Ctrl+W", action: "window-close", desktopOnly: true, forwardFromEditor: true },
+    { keys: "Ctrl+S", action: "studio-save", forwardFromEditor: true },
     { keys: "Ctrl+Z", action: "studio-undo" },
     { keys: "Ctrl+Y", action: "studio-redo" },
     { keys: "Ctrl+Shift+Z", action: "studio-redo" },
-    { keys: "Ctrl+K", action: "palette" },
+    { keys: "Ctrl+K", action: "palette", forwardFromEditor: true },
     { keys: "Ctrl+F", action: "palette" },
     { keys: "Ctrl+B", action: "home-bold", ribbon: true },
     { keys: "Ctrl+I", action: "home-italic", ribbon: true },

@@ -2,10 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { makeFixtureFile, pickFile } from "./test-support/fixture-files.mjs";
+import { switchModule } from "./test-support/modules.mjs";
 
 async function openSheet(options = {}) {
   const h = await createWorkspaceHarness(options);
-  h.userClick(h.document.querySelector('.mod-btn[data-module="SHEET"]'));
+  switchModule(h.document, "SHEET");
   await flushAsyncTurns();
   return h;
 }
@@ -374,11 +375,10 @@ test("SHEET home shows spreadsheet commands only", async () => {
     const btn = document.querySelector(`#icon-toolbar [data-studio-cmd="${cmd}"]`);
     assert.ok(btn.hidden, `${cmd} is hidden in SHEET`);
   }
-  const save = document.querySelector('#icon-toolbar [data-studio-cmd="studio-save"]');
+  const save = document.getElementById("qat-save");
   assert.equal(save.hidden, false);
   assert.equal(document.getElementById("btn-toggle-ctrl-marks").hidden, true);
-  const docBtn = document.querySelector('.mod-btn[data-module="DOC"]');
-  docBtn.click();
+  switchModule(document, "DOC");
   await flushAsyncTurns();
   assert.equal(document.querySelector('#icon-toolbar [data-studio-cmd="para-numbering"]').hidden, false, "DOC shows them again");
 });

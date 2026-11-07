@@ -8,6 +8,7 @@ const INDEX_HTML_PATH = fileURLToPath(
   new URL("../crates/easyoffice-app/ui/index.html", import.meta.url)
 );
 const PROD_PRE_SCRIPTS = [
+  "../crates/easyoffice-app/ui/icons.js",
   "../crates/easyoffice-app/ui/sheet-utils.js",
 ].map((relPath) => ({
   relPath,
@@ -31,6 +32,7 @@ const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/doc-runs.js",
   "../crates/easyoffice-app/ui/doc-runs-ui.js",
   "../crates/easyoffice-app/ui/desktop-bridge.js",
+  "../crates/easyoffice-app/ui/window-bridge.js",
   "../crates/easyoffice-app/ui/workspace-tools.js",
   "../crates/easyoffice-app/ui/workspace-panels.js",
   "../crates/easyoffice-app/ui/sheet-grid.js",
@@ -691,6 +693,10 @@ class MiniDocument {
     return new MiniElement(tag, this);
   }
 
+  createElementNS(_namespace, tag) {
+    return new MiniElement(tag, this);
+  }
+
   createTextNode(text) {
     return new MiniTextNode(text, this);
   }
@@ -751,10 +757,13 @@ export async function flushAsyncTurns(count = 6) {
 // through the shell's single `ipc_dispatch` command exactly like the real WebView bridge.
 function resolveShellInternals(options) {
   if (options.tauriInternals) return options.tauriInternals;
-  if (!options.tauriInvoke) return undefined;
+  if (!options.tauriInvoke && !options.shellCommands) return undefined;
   return {
     invoke: async (shellCommand, args = {}) => {
-      if (shellCommand !== "ipc_dispatch") {
+      if (options.shellCommands && typeof options.shellCommands[shellCommand] === "function") {
+        return options.shellCommands[shellCommand](args);
+      }
+      if (shellCommand !== "ipc_dispatch" || !options.tauriInvoke) {
         throw { status: "error", message: "등록되지 않은 데스크톱 셸 명령: " + shellCommand };
       }
       return options.tauriInvoke(args.command, { payload: args.payload });
@@ -839,6 +848,11 @@ export async function createWorkspaceHarness(options = {}) {
     },
     __TAURI_INTERNALS__: resolveShellInternals(options),
   };
+  if (options.search !== undefined) hostEnv.location.search = options.search;
+  if (options.open) hostEnv.open = options.open;
+  if (options.close) hostEnv.close = options.close;
+  if (options.sessionStorage) hostEnv.sessionStorage = options.sessionStorage;
+  document.defaultView = hostEnv;
 
   Object.assign(hostEnv, options.hostEnvExtras || {});
 
@@ -1008,7 +1022,7 @@ export async function createWorkspaceHarness(options = {}) {
     virtualNowMs = targetMs;
   }
 
-  return { document, sandbox, downloads, revokedUrls, userClick, advanceTimers };
+  return { document, sandbox, downloads, revokedUrls, userClick, advanceTimers, host: hostEnv };
 }
 
 export async function createWebUiDom(options = {}) {

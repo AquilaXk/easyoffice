@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createWebUiDom, flushAsyncTurns } from "./webui-dom-harness.mjs";
+import { switchModule } from "./test-support/modules.mjs";
 
 // Builds a harness whose IPC is the offline backend, with optional per-command overrides, and
 // records every convert_document_format payload.
@@ -79,7 +80,7 @@ test("DOC save sends ordered formatted blocks with in-place tables and computed 
 
 test("HWP save carries no hardcoded agency and uses the HWP tab title", async () => {
   const { document, userClick, converts, downloads } = await createSaveHarness();
-  userClick(document.querySelector('.mod-btn[data-module="HWP"]'));
+  switchModule(document, "HWP");
   await flushAsyncTurns(6);
   userClick(document.getElementById("qat-save"));
   await flushAsyncTurns(10);
@@ -96,7 +97,7 @@ test("HWP save carries no hardcoded agency and uses the HWP tab title", async ()
 
 test("SHEET save sends every sheet, not only the active one", async () => {
   const { document, userClick, converts } = await createSaveHarness();
-  userClick(document.querySelector('.mod-btn[data-module="SHEET"]'));
+  switchModule(document, "SHEET");
   await flushAsyncTurns(6);
   const b2 = document.querySelector('#pane-sheet td[data-cell="B2"]');
   b2.focus();
