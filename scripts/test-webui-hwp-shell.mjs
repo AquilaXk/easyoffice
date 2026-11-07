@@ -16,7 +16,7 @@ const CHROME_JS = new URL("shell-chrome.js", UI_DIR);
 const ALL_CSS = `${read("styles.css")}\n${read("shell.css")}\n${read("content.css")}\n${read("home.css")}\n${read("menu-bar.css")}\n${read("toolbar.css")}`;
 const OVERLAY = new URL("../apps/hwp-studio/", import.meta.url);
 
-const COMMANDS = ["new", "open", "recent", "save", "save-as", "export-pdf", "close"];
+const COMMANDS = ["new", "open", "recent", "save", "save-as", "export-pdf", "print", "close"];
 
 // ---- fake editor (embed protocol) -------------------------------------------------------------
 
@@ -105,14 +105,14 @@ test("the editor's 파일 menu forwards only whitelisted shell commands, re-chec
   const seen = [];
   api.onCommand((c) => seen.push(c));
   const send = (payload) => sendEvent({ schemaVersion: 1, reason: "shell_command", ...payload });
-  for (const command of ["new", "open", "save", "close"]) send({ command });
+  for (const command of ["new", "open", "save", "print", "close"]) send({ command });
   send({ command: "recent", id: "r-1_a" });
   send({ command: "save-as", format: "hwpx" });
   send({ command: "save-as" });
   send({ command: "export-pdf", path: String.raw`C:\x.pdf`, pages: ["<svg/>"] });
   await settle();
   assert.deepEqual(seen, [
-    { command: "new" }, { command: "open" }, { command: "save" }, { command: "close" },
+    { command: "new" }, { command: "open" }, { command: "save" }, { command: "print" }, { command: "close" },
     { command: "recent", id: "r-1_a" },
     { command: "save-as", format: "hwpx" },
     { command: "save-as", format: "hwp" },

@@ -3,7 +3,7 @@
 
   // Shell chrome around the embedded HWP editor (#158). While the editor owns a window it brings its
   // own menu row, theme and status line, so the shell keeps out of the way: the editor's 파일 menu
-  // forwards six whitelisted shell commands (see hwp-host.js), the shell theme (light, dark or system)
+  // forwards seven whitelisted shell commands (see hwp-host.js), the shell theme (light, dark or system)
   // is pushed into the editor, and shell notices become toasts because the shell status bar is hidden
   // (the CSS keys off `data-hwp-embed`). The About dialog holds the diagnostics that used to crowd the
   // status bar.
@@ -129,6 +129,7 @@
         case "save": return report(actions.save?.());
         case "save-as": return report(actions.saveAs?.(request.format));
         case "export-pdf": return report(actions.exportPdf?.());
+        case "print": return report(actions.print?.());
         case "close": return report(actions.close?.());
         default: return undefined;
       }

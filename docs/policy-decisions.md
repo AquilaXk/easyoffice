@@ -1779,3 +1779,14 @@
 - **Alternatives rejected** 서명 없는 자동 다운로드·설치(변조 위험), rustls/ring 계열 HTTP 클라이언트(번들 TLS와 다른 라이선스), 페이지가 주소를 넘기는 열기 명령(임의 주소 열기).
 - **Verified by** `cargo test -p easyoffice-desktop update_check`(버전 파서·비교, URL 접두사, JSON 추출·상한·잘못된 입력, 하루 1회 기록, 실패 재시도 없음, 끄기, 스모크·데이터 폴더 없음, 기록 변조), `node --test scripts/test-webui-update-notice.mjs`(카드 DOM·hop 클래스·Esc·나중에·주소 없는 열기·끄기 토글·토큰 전용), 명령·capability 1:1 테스트.
 - **Revisit when** 서명 키가 생겨 자동 설치를 넣을 때, 릴리스에 사전 배포 채널을 둘 때.
+
+## 79. 한글 창 인쇄: 쪽을 나눠 받아 숨은 루트에서 창 인쇄, 취소 가능 (PD-104)
+
+- **Status** Implemented (브라우저 헤드리스에서 파일 메뉴 → 숨은 루트·@page 규칙 생성까지 확인, 데스크톱 실제 인쇄 대화상자는 Windows·macOS 수동 확인 전)
+- **Context** 한글 편집기는 `sandbox` iframe(팝업 거부, PD-083) 안에서 돌고, 편집기 안의 인쇄 명령은 포함 모드에서 숨겨져 있어(`EMBED_HIDDEN_FILE_COMMAND_IDS`) 한글 창에는 인쇄가 없었습니다. hop은 모든 쪽 SVG를 숨은 루트에 쌓고 쪽 크기로 `@page`를 만들어 창을 인쇄합니다. 같은 방식을 가져오되 큰 문서와 취소를 더 안전하게 다룹니다.
+- **Decision (`PD-104`)** (1) 파일 메뉴에 `인쇄…`(`print` 셸 명령, 셸 허용 목록 7개)와 한글 모듈의 `Ctrl+P`(편집기에서 전달, 브라우저 예약 키라 데스크톱 셸에서만)를 둡니다. 편집기는 이름만 전달하고 셸이 다시 검사합니다. (2) 셸의 `hwp-print.js`가 임베드 RPC `getPrintPages({from,count})`(capability `print-pages-v1`, `count` 1..=10)로 쪽을 **10쪽씩 순서대로** 받습니다. 편집기는 한 묶음을 인쇄 프로필·이식 가능 지표(`withPortableMetrics`) 한 번에 그려 SVG와 용지 크기(mm, 표준 용지로 맞춤)를 돌려줍니다. 문서 전체 SVG를 한꺼번에 만들거나 보내지 않습니다. (3) 셸은 각 쪽 SVG를 정리(script·foreignObject·iframe 등 제거, `on*`·`javascript:`·외부 참조 제거, 쪽마다 id 이름 공간 분리)해 `#eo-print-root`에 더합니다. 쪽에 쌓는 SVG 글자 수는 96Mi 글자로 제한하고 넘으면 안내와 함께 중단합니다. 용지 크기 값은 10..=2000mm만 받습니다. (4) 용지 크기마다 `@page` 이름 규칙과 쪽 상자 규칙을 하나씩, 첫 크기는 이름 없는 기본 `@page`로도 더합니다(이름 있는 쪽을 모르는 엔진 대비). 규칙은 생성형 스타일시트(CSSOM)로만 더하며 style 요소·속성은 쓰지 않습니다. 쪽 상자는 용지보다 0.1mm 낮게 잡아 빈 쪽을 막습니다. 인쇄용 정적 규칙은 `shell.css`의 `@media print`입니다. (5) 진행: "인쇄 준비 중… (i/n)" 카드와 **취소** 단추(Esc도 같음). 취소하면 가져오기를 멈추고 숨은 루트와 스타일시트를 지우며, 같은 시각에 인쇄가 이미 준비 중이면 새 요청은 안내만 합니다. (6) 준비가 끝나면 창의 `print()`를 부르고 `afterprint`(없으면 5분 뒤)에 지웁니다. 데스크톱 웹뷰는 `print()`를 모든 플랫폼에서 지원하므로 **새 셸 명령·capability는 없습니다**(capability 파일에 인쇄 항목이 없다는 것을 테스트로 고정). `print.html`·`print.css`·`print-pages.ts`는 업스트림 포크 그대로 두며(Sonar 제외 대상) 포함 모드에서는 쓰이지 않습니다.
+- **Why** 한글 창에서 문서를 종이나 PDF로 낼 수 있어야 하고, 큰 문서에서도 메모리를 제한하며 취소할 수 있어야 하기 때문입니다.
+- **Trade-offs** 쪽 DOM은 인쇄가 끝날 때까지 한 번에 창에 있어야 해서 아주 큰 문서는 상한에서 중단됩니다. 쪽마다 크기가 달라도 `@page` 이름 규칙은 엔진에 따라 무시될 수 있습니다(그때는 첫 용지 크기).
+- **Alternatives rejected** 편집기 안의 `file:print`(팝업 거부로 불가), iframe 인쇄(웹뷰별 동작 차이), 전체 쪽을 한 번에 받기(메모리·메시지 크기), 새 셸 `print_webview` 명령(웹 `print()`로 충분).
+- **Verified by** `node --test scripts/test-webui-hwp-print.mjs`(10쪽 배치 순서, 크기별 규칙, SVG 정리·id 분리, 취소·Esc·중복 요청, 지원 없음·빈 문서·상한·잘못된 쪽, 인쇄 실패·afterprint 정리, 단축키·capability), `node --test scripts/test-hwp-studio.mjs`(배치 mm·끝 처리·잘못된 범위, 라우터·capability), `scripts/test-webui-hwp-shell.mjs`(셸 명령 7개), 헤드리스 브라우저 확인(메뉴 → 숨은 루트).
+- **Revisit when** 쪽 범위·매수·양면 같은 인쇄 옵션을 앱에서 받을 때, 웹뷰가 이름 있는 `@page`를 지원하지 않는 사례가 확인될 때.

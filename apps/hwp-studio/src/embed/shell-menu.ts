@@ -1,11 +1,11 @@
 // EasyOffice extension: the editor's 파일 menu is made of shell commands (#158). The shell owns
-// documents and windows (new, open, recent, save, save as, close), so the editor only forwards the
+// documents and windows (new, open, recent, save, save as, print, close), so the editor only forwards the
 // command name over the embed port; the shell re-checks it against its own whitelist. The shell also
 // pushes its theme and a recent-documents list (opaque id + display name, never a path) into the
 // editor (`setShellContext`), so the window has one menu row and one theme.
 
 export const SHELL_COMMAND_REASON = 'shell_command' as const;
-export const SHELL_COMMANDS = ['new', 'open', 'recent', 'save', 'save-as', 'export-pdf', 'close'] as const;
+export const SHELL_COMMANDS = ['new', 'open', 'recent', 'save', 'save-as', 'export-pdf', 'print', 'close'] as const;
 export type ShellCommand = (typeof SHELL_COMMANDS)[number];
 export const SHELL_THEMES = ['light', 'dark', 'system'] as const;
 export type ShellTheme = (typeof SHELL_THEMES)[number];

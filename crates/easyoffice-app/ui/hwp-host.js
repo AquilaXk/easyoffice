@@ -19,7 +19,8 @@
   const CONNECT_TIMEOUT_MS = 60000;
   // Same-origin and scripts are required (the editor is an app bundle that uses storage and WASM);
   // modals keep alert/confirm dialogs working. Popups, forms, downloads and top navigation stay
-  // denied, which also neutralizes the editor's hyperlink preview and print preview windows.
+  // denied, which also neutralizes the editor's hyperlink preview and print preview windows (printing is
+  // done by hwp-print.js from the shell window).
   const FRAME_SANDBOX = "allow-same-origin allow-scripts allow-modals";
   const MSG_UNAVAILABLE = "한글 편집기 구성 요소가 포함되지 않은 빌드입니다. 텍스트 전용 편집기로 대체합니다.";
   const MSG_LOADING = "한글 편집기를 불러오는 중입니다…";
@@ -29,7 +30,7 @@
   // The editor's 파일 menu forwards shell commands by name only (#158); the shell re-checks each one
   // here before anything runs, so a compromised frame can only ask for these seven actions.
   const SHELL_COMMAND_REASON = "shell_command";
-  const SHELL_COMMANDS = Object.freeze(["new", "open", "recent", "save", "save-as", "export-pdf", "close"]);
+  const SHELL_COMMANDS = Object.freeze(["new", "open", "recent", "save", "save-as", "export-pdf", "print", "close"]);
   const SAVE_AS_FORMATS = Object.freeze(["hwp", "hwpx"]);
   const SHELL_THEMES = Object.freeze(["light", "dark", "system"]);
   const RECENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;

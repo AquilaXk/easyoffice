@@ -8809,6 +8809,8 @@ hop (MIT, https://github.com/golbin/hop, reference commit `80888af`, v0.4.5) is 
 | `crates/easyoffice-app/ui/custom-select.js` | `apps/studio-host/src/ui/custom-select.ts` | TypeScript rewritten as JavaScript; only `select.sb-combo` is enhanced, programmatic `value` assignments refresh the label |
 | `crates/easyoffice-app/ui/toolbar.css` (combo box rules) | `apps/studio-host/src/styles/custom-select.css` | Generic `.custom-select*` rules with EasyOffice widths for the slide toolbar |
 | `crates/easyoffice-app/ui/home.css` | `apps/studio-host/src/styles/home-screen.css`, `recent-documents-dialog.css` | Same rules and class names; flex child instead of an absolute layer, action icons, modal base rules from rhwp-studio `dialogs.css` |
+| `crates/easyoffice-app/ui/hwp-print.js` | `apps/studio-host/src/ui/print-dialog.ts` | TypeScript rewritten as JavaScript; same hidden print root, one `@page` size per paper size and progress text, SVG sanitizing kept; pages come from the editor in batches of ten over the embed port, a cancel button and a text budget are added, page ids are namespaced per page |
+| `crates/easyoffice-app/ui/shell.css` (print rules) | `apps/studio-host/src/ui/print-dialog.ts` (inline print style) | Same print rules moved into a static stylesheet; the per-size rules are added through a constructed stylesheet |
 | `crates/easyoffice-desktop/src/os_recent.rs` | `apps/desktop/src-tauri/src/macos_recent_documents.rs` | Same calls; errors ignored, no-op off macOS |
 
 Colour and theme code taken from rhwp-studio is listed in the rhwp section.

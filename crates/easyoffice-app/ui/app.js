@@ -282,6 +282,10 @@
     canExportPdf: desktopBridge.isAvailable(),
   });
 
+  const hwpPrint = host.__EASYOFFICE_CREATE_HWP_PRINT__({
+    document, hwpHost, env: host, notify: (text) => setStatusFeedback(text),
+  });
+
   hwpSession = host.__EASYOFFICE_CREATE_HWP_SESSION__({
     document, hwpHost, invokeIpc, getActiveModule: () => activeModule,
     activateHwp: () => ribbonHistory.activatePane("HWP"),
@@ -302,7 +306,7 @@
     actions: {
       newDocument: () => windowBridge.newDocument("HWP"), openFile: () => fileOpen.openFilePicker(),
       openRecent: (id) => windowBridge.openRecent(id), save: () => saveWorkspaceDocument(),
-      saveAs: (format) => hwpSession.saveAs(format), exportPdf: () => hwpSession.exportPdf(),
+      saveAs: (format) => hwpSession.saveAs(format), exportPdf: () => hwpSession.exportPdf(), print: () => hwpPrint.print(),
       close: () => windowBridge.requestClose(),
     },
   });
@@ -848,6 +852,7 @@
       "recent-dialog": () => void windowBridge.chooseRecent().catch(() => {}),
       "file-new": () => void windowBridge.newDocument(activeModule).catch((err) => setStatusFeedback(err?.message || String(err))),
       "window-close": () => void windowBridge.requestClose().catch(() => {}),
+      "hwp-print": () => void hwpPrint.print().catch((err) => setStatusFeedback(err?.message || String(err))),
       "studio-save": () => void saveWorkspaceDocument().catch(() => {}),
       "studio-undo": () => void ribbonHistory.performWorkspaceUndo().catch(() => {}),
       "studio-redo": () => void ribbonHistory.performWorkspaceRedo().catch(() => {}),
