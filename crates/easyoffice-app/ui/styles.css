@@ -688,11 +688,7 @@ html[data-theme="dark"] .statusbar {
 }
 
 .app-shell:not([data-module="DOC"]):not([data-module="HWP"]) .statusbar-left-group,
-.app-shell:not([data-chrome-expanded="true"]) #status-module,
-.app-shell:not([data-chrome-expanded="true"]) #status-format-spec,
-:is(.app-shell[data-module="DOC"], .app-shell[data-module="HWP"]):not([data-chrome-expanded="true"]) #status-sheet-agg,
-.app-shell:not([data-chrome-expanded="true"]) #ime-badge,
-.app-shell:not([data-chrome-expanded="true"]) #status-engine {
+:is(.app-shell[data-module="DOC"], .app-shell[data-module="HWP"]):not([data-chrome-expanded="true"]) #status-sheet-agg {
   display: none;
 }
 

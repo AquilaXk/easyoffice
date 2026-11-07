@@ -25,6 +25,8 @@ const OVERLAY_NON_OVERRIDE = new Set([
   "src/vite-env.d.ts",
   // EasyOffice-only module (no upstream counterpart): shell shortcut forwarding over the embed port.
   "src/embed/shell-shortcuts.ts",
+  // EasyOffice-only module: the 파일 menu as shell commands, shell theme and recent documents.
+  "src/embed/shell-menu.ts",
 ]);
 
 export function normalizedSha256(file) {

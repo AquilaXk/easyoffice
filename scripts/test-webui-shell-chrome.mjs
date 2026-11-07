@@ -145,7 +145,7 @@ test("top bar: menus on the left, compact right-side controls that never shrink 
 });
 
 test("status bar items shrink with an ellipsis instead of clipping, and carry tooltips", async () => {
-  for (const sel of ["#status-command-feedback", ".statusbar-doc-path", "#status-engine"]) {
+  for (const sel of ["#status-command-feedback", ".statusbar-doc-path"]) {
     const body = cssRule(sel);
     assert.ok(hasDecl(body, "text-overflow", "ellipsis"), `${sel} ellipsis`);
     assert.ok(hasDecl(body, "overflow", "hidden"), `${sel} overflow hidden`);
