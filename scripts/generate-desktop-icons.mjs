@@ -219,6 +219,8 @@ const OUTPUTS = {
   "icon.icns": () => encodeIcns(),
 };
 
+/** Pixel decoder per output extension; PNG is the default. */
+const PIXEL_DECODERS = Object.freeze({ ".ico": decodeIcoPixels, ".icns": decodeIcnsPixels });
 const checkOnly = process.argv.includes("--check");
 const stale = [];
 fs.mkdirSync(ICON_DIR, { recursive: true });
@@ -226,11 +228,7 @@ for (const [name, build] of Object.entries(OUTPUTS)) {
   const target = path.join(ICON_DIR, name);
   const bytes = build();
   if (checkOnly) {
-    const decode = name.endsWith(".ico")
-      ? decodeIcoPixels
-      : name.endsWith(".icns")
-        ? decodeIcnsPixels
-        : decodePngPixels;
+    const decode = PIXEL_DECODERS[path.extname(name)] ?? decodePngPixels;
     if (!fs.existsSync(target) || !decode(fs.readFileSync(target)).equals(decode(bytes))) stale.push(name);
   } else {
     fs.writeFileSync(target, bytes);
