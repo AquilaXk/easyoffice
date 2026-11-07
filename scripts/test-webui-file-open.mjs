@@ -289,7 +289,7 @@ test("dropping a file on the workspace opens it; non-file drags are ignored; ext
 test("opening over unsaved edits asks first; declining changes nothing, accepting replaces it", async () => {
   const asked = [];
   let answer = false;
-  const { document, userClick } = await createOpenHarness({
+  const { document } = await createOpenHarness({
     confirm: (msg) => {
       asked.push(msg);
       return answer;
@@ -401,7 +401,7 @@ test("openDocumentFromBytes is the shared entry point for a desktop shell", asyn
   const api = sandbox.__EASYOFFICE_WORKSPACE_API__;
   assert.equal(typeof api.openDocumentFromBytes, "function");
   const bytes = enc.encode("EOFIXTURE:" + JSON.stringify(DOC_MODEL));
-  const result = await api.openDocumentFromBytes("C:\\Users\\me\\바탕화면\\공유.docx", bytes);
+  const result = await api.openDocumentFromBytes(String.raw`C:\Users\me\바탕화면\공유.docx`, bytes);
   assert.deepEqual([result.ok, result.module, result.title], [true, "DOC", "공유.docx"]);
   assert.equal(tabTitle(document, "DOC"), "공유.docx");
   const bad = await api.openDocumentFromBytes("x.docx", new Uint8Array(0));
@@ -466,7 +466,7 @@ test("converter rejects an oversized or corrupt source without converting", asyn
 });
 
 test("dropping a file while the converter is active selects it as the conversion source", async () => {
-  const { document, userClick } = await createOpenHarness();
+  const { document } = await createOpenHarness();
   switchModule(document, "CONV");
   await flushAsyncTurns(10);
   const app = document.getElementById("app");

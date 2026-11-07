@@ -29,8 +29,8 @@
   function resolveCanonicalSheetUpper(knownSheets, rawName) {
     const targetKey = canonicalSheetKeyJs(rawName);
     if (!targetKey) return null;
-    for (let i = 0; i < knownSheets.length; i += 1) {
-      if (canonicalSheetKeyJs(knownSheets[i]) === targetKey) {
+    for (const knownSheet of knownSheets) {
+      if (canonicalSheetKeyJs(knownSheet) === targetKey) {
         return targetKey;
       }
     }
@@ -207,8 +207,7 @@
     const nums = [];
     let countAll = 0;
     let countBlank = 0;
-    for (let idx = 0; idx < argItems.length; idx += 1) {
-      const item = argItems[idx];
+    for (const item of argItems) {
       if (item.kind === "range") {
         if (!item.sheetUpper) return valErr("#REF!");
         let rangeErr = null;
@@ -245,15 +244,15 @@
     if (fnName === "COUNTA") return valNum(countAll);
     if (fnName === "COUNTBLANK") return valNum(countBlank);
     let sum = 0;
-    for (let i = 0; i < nums.length; i += 1) {
-      sum += nums[i];
+    for (const num of nums) {
+      sum += num;
     }
     if (fnName === "SUM") return valNum(sum);
     if (fnName === "PRODUCT") {
       if (nums.length === 0) return valNum(0);
       let prod = 1;
-      for (let i = 0; i < nums.length; i += 1) {
-        prod *= nums[i];
+      for (const num of nums) {
+        prod *= num;
       }
       return valNum(prod);
     }
@@ -280,8 +279,8 @@
     if (nums.length < 2) return valErr("#DIV/0!");
     const mean = sum / nums.length;
     let m2 = 0;
-    for (let i = 0; i < nums.length; i += 1) {
-      const diff = nums[i] - mean;
+    for (const num of nums) {
+      const diff = num - mean;
       m2 += diff * diff;
     }
     const variance = m2 / (nums.length - 1);
@@ -291,8 +290,7 @@
   function evalLogicalFunction(fnName, argItems, workbook, depth) {
     let trues = 0;
     let seen = 0;
-    for (let idx = 0; idx < argItems.length; idx += 1) {
-      const item = argItems[idx];
+    for (const item of argItems) {
       if (item.kind === "range") {
         if (!item.sheetUpper) return valErr("#REF!");
         let rangeErr = null;
@@ -488,7 +486,7 @@
     if (parsed.kind === "FormulaError") return valErr(parsed.code);
 
     function ensureScalar(v) {
-      if (v && v.kind === "range") {
+      if (v?.kind === "range") {
         if (v.minCol === v.maxCol && v.minRow === v.maxRow) {
           if (!v.sheetUpper) return valErr("#REF!");
           return readWorkbookTypedCell(
@@ -643,8 +641,8 @@
           return valNum(1);
         }
         const evaluatedArgs = [];
-        for (let i = 0; i < args.length; i += 1) {
-          evaluatedArgs.push(evalAst(args[i]));
+        for (const arg of args) {
+          evaluatedArgs.push(evalAst(arg));
         }
         if (AGGREGATE_FN_SET.has(fnUpper)) {
           return evalAggregateFunction(fnUpper, evaluatedArgs, workbook, depth);
@@ -653,8 +651,8 @@
           return evalLogicalFunction(fnUpper, evaluatedArgs, workbook, depth);
         }
         const scalarArgs = [];
-        for (let i = 0; i < evaluatedArgs.length; i += 1) {
-          const sv = ensureScalar(evaluatedArgs[i]);
+        for (const evalArg of evaluatedArgs) {
+          const sv = ensureScalar(evalArg);
           if (sv.kind === "error") return sv;
           scalarArgs.push(sv);
         }
@@ -703,12 +701,11 @@
 
   function validateExplicitSheetsArrayJs(sheetsArr) {
     if (!Array.isArray(sheetsArr)) {
-      throw new Error("InvalidArgument: JSON 'sheets' 필드는 문자열 배열이어야 합니다.");
+      throw new TypeError("InvalidArgument: JSON 'sheets' 필드는 문자열 배열이어야 합니다.");
     }
-    for (let i = 0; i < sheetsArr.length; i += 1) {
-      const s = sheetsArr[i];
+    for (const s of sheetsArr) {
       if (typeof s !== "string") {
-        throw new Error("InvalidArgument: JSON 'sheets' 항목은 문자열이어야 합니다.");
+        throw new TypeError("InvalidArgument: JSON 'sheets' 항목은 문자열이어야 합니다.");
       }
       if (s.trim().length === 0) {
         throw new Error("InvalidArgument: JSON 'sheets' 항목은 비어 있거나 공백만일 수 없습니다.");
@@ -736,8 +733,8 @@
     const hasExplicitSheets = doc.sheets !== undefined;
     if (hasExplicitSheets) {
       validateExplicitSheetsArrayJs(doc.sheets);
-      for (let i = 0; i < doc.sheets.length; i += 1) {
-        ensureKnownSheetUpper(knownSheets, doc.sheets[i]);
+      for (const sheetName of doc.sheets) {
+        ensureKnownSheetUpper(knownSheets, sheetName);
       }
     } else {
       ensureKnownSheetUpper(knownSheets, defaultSheet);
@@ -750,8 +747,7 @@
     const formulaEntries = {};
     const triples = [];
 
-    for (let i = 0; i < cells.length; i += 1) {
-      const item = cells[i];
+    for (const item of cells) {
       if (!item || typeof item !== "object" || Array.isArray(item)) {
         throw new Error("InvalidArgument: JSON 'cells' 항목은 객체여야 합니다.");
       }
@@ -774,8 +770,8 @@
       triples.push({ shUpper, addrUpper: addrNorm, strVal });
     }
 
-    for (let i = 0; i < triples.length; i += 1) {
-      const { shUpper, addrUpper, strVal } = triples[i];
+    for (const triple of triples) {
+      const { shUpper, addrUpper, strVal } = triple;
       const fullKey = shUpper + "!" + addrUpper;
       rawValues[fullKey] = strVal;
       if (isFormulaStringJs(strVal)) {

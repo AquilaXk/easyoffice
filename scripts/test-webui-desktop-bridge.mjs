@@ -96,7 +96,7 @@ test("shell rejections surface exactly like the --serve HTTP 400 error body", as
         return { ok: false, status: 400, json: async () => ({ status: "error", error: message, message }) };
       }
       const body = await offline[command](payload);
-      return { ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(body)) };
+      return { ok: true, status: 200, json: async () => structuredClone(body) };
     },
   });
   http.userClick(http.document.getElementById("btn-run-security-audit"));
@@ -157,7 +157,7 @@ test("cancelled and failed desktop saves never claim success", async () => {
 
   const failed = await createShellHarness({
     saveFile: () => {
-      throw { status: "error", message: "파일을 저장하지 못했습니다 (D:\\ro\\a.docx): 액세스가 거부되었습니다." };
+      throw { status: "error", message: String.raw`파일을 저장하지 못했습니다 (D:\ro\a.docx): 액세스가 거부되었습니다.` };
     },
   });
   failed.userClick(failed.document.getElementById("qat-save"));
@@ -199,7 +199,7 @@ test("without the shell the --serve preview keeps the HTTP transport and Blob do
       const { command, payload } = JSON.parse(init.body);
       fetched.push({ url, command });
       const body = await offline[command](payload);
-      return { ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(body)) };
+      return { ok: true, status: 200, json: async () => structuredClone(body) };
     },
   });
   assert.ok(fetched.some((f) => f.url === "/api/ipc" && f.command === "get_workspace_bootstrap"));
@@ -220,7 +220,7 @@ test("a shell object without an invoke function is ignored", async () => {
       const { command, payload } = JSON.parse(init.body);
       fetched.push(command);
       const body = await offline[command](payload);
-      return { ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(body)) };
+      return { ok: true, status: 200, json: async () => structuredClone(body) };
     },
   });
   assert.ok(fetched.includes("get_workspace_bootstrap"));

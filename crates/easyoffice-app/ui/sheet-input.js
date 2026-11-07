@@ -1,6 +1,45 @@
 (function (host) {
   "use strict";
 
+  function isEditing(st) {
+    return Boolean(st && (st.mode || st.userEdited));
+  }
+
+  function numericOf(raw) {
+    const t = String(raw ?? "").replaceAll(",", "").trim();
+    if (t === "") return null;
+    const n = Number(t);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function formatAggregate(nums) {
+    if (nums.length === 0) return "선택 집계 · 숫자 데이터 없음";
+    let sum = 0;
+    let min = nums[0];
+    let max = nums[0];
+    nums.forEach((n) => {
+      sum += n;
+      if (n < min) min = n;
+      if (n > max) max = n;
+    });
+    const avg = Math.round((sum / nums.length) * 10) / 10;
+    const fmt = (n) => Number(n.toPrecision(12)).toLocaleString();
+    return (
+      "선택 집계 · 합계 " + fmt(sum) + " · 평균 " + avg.toLocaleString() + " · 개수 " + nums.length +
+      " · 최소 " + fmt(min) + " · 최대 " + fmt(max)
+    );
+  }
+
+  function isPrintable(ev) {
+    return ev.key?.length === 1 && !ev.ctrlKey && !ev.metaKey && !ev.altKey;
+  }
+
+  function markEditing(td, st, mode) {
+    st.mode = mode;
+    td.dataset.editMode = mode;
+    td.classList.add("editing");
+  }
+
   // Sheet editing interaction: selection model, ready/edit modes, keyboard, mouse, IME,
   // clipboard events and the selection aggregate.
   //
@@ -11,6 +50,17 @@
   //   edit   - started by F2 / double-click. Left/Right move the caret; Up/Down commit and move.
   // Enter commits and moves down (Shift+Enter up), Tab commits and moves right (Shift+Tab left),
   // Esc cancels and restores. Keys pressed while an IME composes are never interpreted.
+  // Ctrl+Arrow: jump to the edge of the contiguous data block (or the next block).
+  function jumpLimit(dr, dc, ext) {
+    if (dr > 0) return ext.dataRows;
+    return dc > 0 ? ext.dataCols : 0;
+  }
+
+  function isPastData(dr, dc, nr, nc, limit) {
+    if (dr > 0) return nr > limit;
+    return dc > 0 && nc > limit;
+  }
+
   function createSheetInput(api) {
     const { document, grid, sheetCellFocusState, isFormulaStr } = api;
     const sel = { ar: 1, ac: 1, cr: 1, cc: 1 };
@@ -43,22 +93,12 @@
       };
     }
 
-    function isEditing(st) {
-      return Boolean(st && (st.mode || st.userEdited));
-    }
-
     function gridTdOf(el) {
       const td = el && typeof el.closest === "function" ? el.closest("td[data-cell]") : null;
       return td && document.getElementById("pane-sheet")?.contains(td) ? td : null;
     }
 
     // ---- aggregate -------------------------------------------------------------------------
-    function numericOf(raw) {
-      const t = String(raw ?? "").replaceAll(",", "").trim();
-      if (t === "") return null;
-      const n = Number(t);
-      return Number.isFinite(n) ? n : null;
-    }
 
     function collectNumbers(range, liveTd) {
       const nums = [];
@@ -79,24 +119,6 @@
         if (row >= range.r1 && row <= range.r2 && col >= range.c1 && col <= range.c2) push(ref);
       });
       return nums;
-    }
-
-    function formatAggregate(nums) {
-      if (nums.length === 0) return "선택 집계 · 숫자 데이터 없음";
-      let sum = 0;
-      let min = nums[0];
-      let max = nums[0];
-      nums.forEach((n) => {
-        sum += n;
-        if (n < min) min = n;
-        if (n > max) max = n;
-      });
-      const avg = Math.round((sum / nums.length) * 10) / 10;
-      const fmt = (n) => Number(n.toPrecision(12)).toLocaleString();
-      return (
-        "선택 집계 · 합계 " + fmt(sum) + " · 평균 " + avg.toLocaleString() + " · 개수 " + nums.length +
-        " · 최소 " + fmt(min) + " · 최대 " + fmt(max)
-      );
     }
 
     // ---- selection painting ----------------------------------------------------------------
@@ -203,12 +225,11 @@
       refreshChrome();
     }
 
-    // Ctrl+Arrow: jump to the edge of the contiguous data block (or the next block).
     function jumpTarget(dr, dc, extend) {
       let r = extend ? sel.cr : sel.ar;
       let c = extend ? sel.cc : sel.ac;
       const ext = api.getExtent();
-      const limit = dr > 0 ? ext.dataRows : dc > 0 ? ext.dataCols : 0;
+      const limit = jumpLimit(dr, dc, ext);
       const inBounds = (rr, cc) => rr >= 1 && cc >= 1 && rr <= grid.MAX_ROWS && cc <= grid.MAX_COLS;
       const has = (rr, cc) => api.hasValue(rr, cc);
       if (!inBounds(r + dr, c + dc)) return { r, c };
@@ -223,7 +244,7 @@
         return { r: nr, c: nc };
       }
       while (inBounds(nr, nc) && !has(nr, nc)) {
-        const pastData = dr > 0 ? nr > limit : dc > 0 ? nc > limit : false;
+        const pastData = isPastData(dr, dc, nr, nc, limit);
         if (pastData) return { r: dr > 0 ? grid.MAX_ROWS : r, c: dc > 0 ? grid.MAX_COLS : c };
         nr += dr;
         nc += dc;
@@ -253,12 +274,6 @@
       range.collapse(false);
       selObj.removeAllRanges();
       selObj.addRange(range);
-    }
-
-    function markEditing(td, st, mode) {
-      st.mode = mode;
-      td.dataset.editMode = mode;
-      td.classList.add("editing");
     }
 
     function startEdit(td, mode, replace) {
@@ -351,10 +366,6 @@
       ArrowLeft: [0, -1],
       ArrowRight: [0, 1],
     };
-
-    function isPrintable(ev) {
-      return ev.key && ev.key.length === 1 && !ev.ctrlKey && !ev.metaKey && !ev.altKey;
-    }
 
     function handleArrow(ev, st, editing) {
       const [dr, dc] = ARROWS[ev.key];

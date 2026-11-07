@@ -40,7 +40,7 @@ impl Hwp5Codec {
     pub const STD_HWPTAG_LIST_HEADER: u16 = 56;
     pub const ALT_HWPTAG_LIST_HEADER: u16 = 72;
     pub const STD_HWPTAG_TABLE: u16 = 61;
-    pub const HWT_TEMPLATE_MARKER: &'static [u8; 12] = b"HWT_TEMPLATE";
+    pub const HWT_TEMPLATE_MARKER: &[u8; 12] = b"HWT_TEMPLATE";
     pub const MAX_HWP5_RECORDS: usize = 524_288;
     pub const MAX_TOTAL_HWP5_TABLE_CELLS: usize = 65_536;
 
@@ -176,7 +176,7 @@ impl Hwp5Codec {
 
         for tbl in std::iter::once(&payload.table_cells).chain(extra_tables.iter()) {
             let n_rows = tbl.len();
-            let n_cols = tbl.iter().map(|r| r.len()).max().unwrap_or(0);
+            let n_cols = tbl.iter().map(Vec::len).max().unwrap_or(0);
             if n_rows > 0 && n_cols > 0 {
                 let mut tbl_hdr = Vec::with_capacity(8 + n_rows * 2);
                 tbl_hdr.extend_from_slice(&0u32.to_le_bytes());

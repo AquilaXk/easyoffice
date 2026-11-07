@@ -780,7 +780,7 @@ impl Ole2SecurityGuard {
     pub const END_OF_CHAIN: u32 = 0xFFFF_FFFE;
     pub const FREE_SECTOR: u32 = 0xFFFF_FFFF;
     pub const HWP5_FILE_HEADER_LEN: usize = 256;
-    pub const HWP5_SIGNATURE: &'static [u8] = b"HWP Document File";
+    pub const HWP5_SIGNATURE: &[u8] = b"HWP Document File";
     pub const HWP5_FLAG_COMPRESSED: u32 = 0x01;
     pub const HWP5_FLAG_ENCRYPTED: u32 = 0x02;
     pub const HWP5_FLAG_DISTRIBUTION: u32 = 0x04;

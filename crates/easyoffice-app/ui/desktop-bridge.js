@@ -71,7 +71,7 @@
     const res = await callShell(SAVE_COMMAND, {
       fileName: String(fileName),
       base64: String(base64Data),
-      inPlace: Boolean(options && options.inPlace),
+      inPlace: Boolean(options?.inPlace),
     });
     if (res && (res.status === "saved" || res.status === "cancelled")) return res;
     throw new Error("저장 결과를 확인하지 못했습니다.");

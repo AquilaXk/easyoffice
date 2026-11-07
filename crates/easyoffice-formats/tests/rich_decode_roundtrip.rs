@@ -35,7 +35,7 @@ fn para(
 fn table(rows: &[&[&str]]) -> RichBlock {
     RichBlock::Table(
         rows.iter()
-            .map(|r| r.iter().map(|c| c.to_string()).collect())
+            .map(|r| r.iter().map(ToString::to_string).collect())
             .collect(),
     )
 }

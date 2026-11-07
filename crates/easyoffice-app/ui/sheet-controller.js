@@ -7,6 +7,10 @@
   const EAGER_SNAPSHOT_MAX_ENTRIES = 4000;
   const IDLE_SNAPSHOT_DELAY_MS = 250;
 
+  function hasCellContent(entry) {
+    return Boolean(entry && (entry.value || entry.formula));
+  }
+
   function createSheetController(deps) {
     const {
       document,
@@ -65,8 +69,8 @@
     function inferMaxRowFromSheetMap(sheetObj) {
       let maxRow = DEFAULT_SHEET_ROW_COUNT;
       const keys = Object.keys(sheetObj || {});
-      for (let i = 0; i < keys.length; i += 1) {
-        const m = /^[A-Za-z]+([1-9][0-9]*)$/.exec(keys[i]);
+      for (const key of keys) {
+        const m = /^[A-Za-z]+([1-9]\d*)$/.exec(key);
         if (m) {
           const rowNum = Number(m[1]);
           if (Number.isSafeInteger(rowNum) && rowNum > maxRow) {
@@ -89,10 +93,6 @@
 
     // ---- used extent (rows/cols that hold data) ---------------------------------------------
     let extentCache = {};
-
-    function hasCellContent(entry) {
-      return Boolean(entry && (entry.value || entry.formula));
-    }
 
     function scanExtent(sheetName) {
       const map = sheetDataStore[sheetName] || {};
@@ -138,7 +138,7 @@
 
     function isGridFocused() {
       const ae = document.activeElement;
-      return Boolean(ae && ae.tagName === "TD" && ae.dataset?.cell);
+      return Boolean(ae?.tagName === "TD" && ae.dataset?.cell);
     }
 
     let refocusAfterRender = false;
@@ -235,7 +235,7 @@
           fontStyle: "",
           textDecoration: "",
           fontSize: "",
-          ...(entry.style || {}),
+          ...entry.style,
           frozenPanes: true,
         };
         map.A1 = entry;
@@ -391,7 +391,7 @@
         Object.assign(sheetRowCounts, nextRowCounts);
       } else {
         Object.keys(sheetRowCounts).forEach((k) => {
-          if (!Object.prototype.hasOwnProperty.call(sheetDataStore, k)) {
+          if (!Object.hasOwn(sheetDataStore, k)) {
             delete sheetRowCounts[k];
           }
         });
@@ -535,7 +535,7 @@
     }
 
     function commitPreparedFormulaBarEvaluation(prep, preSnapshot = null) {
-      if (!prep || prep.epoch !== sheetSnapshotEpoch) return;
+      if (prep?.epoch !== sheetSnapshotEpoch) return;
       const out = document.getElementById("sheet-eval-result");
       commitDeferredUndoSnapshot(preSnapshot);
       replaceLiveSheetDataStore(prep.evaluated.sheets);
@@ -567,7 +567,7 @@
       }
       const fallbackSnap = captureWorkspaceSnapshot(false);
       const shName = st.sheetName || getActiveSheetName();
-      if (fallbackSnap.sheets && fallbackSnap.sheets[shName] && td.dataset?.cell) {
+      if (fallbackSnap.sheets?.[shName] && td.dataset?.cell) {
         const prevStyle = fallbackSnap.sheets[shName][td.dataset.cell]?.style;
         const cellSnap = {
           value: st.initialText,
@@ -664,8 +664,7 @@
       if (activeEl && sheetCellFocusState.has(activeEl)) {
         await commitSheetCellEdit(activeEl, false);
       } else if (
-        activeEl &&
-        activeEl.nodeType === 1 &&
+        activeEl?.nodeType === 1 &&
         activeEl.dataset?.cell &&
         typeof activeEl.blur === "function"
       ) {
@@ -681,8 +680,7 @@
         committed = await commitSheetCellEdit(activeEl, keepFocus);
       } else if (
         !keepFocus &&
-        activeEl &&
-        activeEl.nodeType === 1 &&
+        activeEl?.nodeType === 1 &&
         activeEl.dataset?.cell &&
         typeof activeEl.blur === "function"
       ) {

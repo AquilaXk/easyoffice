@@ -25,7 +25,7 @@ test("ignores comments, strings, template text and regex literals", () => {
     "const b = '.sort()';",
     "const c = `template .sort() ${1 + 1} done`;",
     "const d = /['\"].sort()/.test(s);",
-    'const e = "quote \\" .sort() still string";',
+    String.raw`const e = "quote \" .sort() still string";`,
   ].join("\n");
   assert.deepEqual(findBareSorts(src), []);
 });

@@ -55,7 +55,7 @@ function paragraphSignature(doc, para) {
   for (let i = 0; i < len; i += 1) {
     const c = JSON.parse(doc.getCharPropertiesAt(0, para, i));
     const key = [c.fontFamily, c.fontSize, c.bold, c.italic, c.underline, c.textColor].join("|");
-    if (runs.length > 0 && runs[runs.length - 1].key === key) runs[runs.length - 1].len += 1;
+    if (runs.length > 0 && runs.at(-1).key === key) runs.at(-1).len += 1;
     else runs.push({ key, len: 1 });
   }
   const p = JSON.parse(doc.getParaPropertiesAt(0, para));
@@ -259,9 +259,11 @@ async function runFlow(cdp, mod, flow) {
     const bytes = fs.readFileSync(file);
     const sig = signature(mod, bytes);
     outcome.checks.push({ file: path.basename(file), bytes: bytes.length, format: sig.format });
-    outcome.checks.push(sameStructure(label + ": character shapes", sig.paragraphs.map((p) => p.runs), expected.paragraphs.map((p) => p.runs)));
-    outcome.checks.push(sameStructure(label + ": paragraph shapes", sig.paragraphs.map((p) => p.shape), expected.paragraphs.map((p) => p.shape)));
-    outcome.checks.push(sameStructure(label + ": table placement", sig.tables, expected.tables));
+    outcome.checks.push(
+      sameStructure(label + ": character shapes", sig.paragraphs.map((p) => p.runs), expected.paragraphs.map((p) => p.runs)),
+      sameStructure(label + ": paragraph shapes", sig.paragraphs.map((p) => p.shape), expected.paragraphs.map((p) => p.shape)),
+      sameStructure(label + ": table placement", sig.tables, expected.tables),
+    );
     const again = await openInUi(cdp, path.basename(file), bytes);
     outcome.checks.push({ label: label + ": reopen in UI", ok: again.result.ok, ms: again.ms });
   }
@@ -368,4 +370,9 @@ async function main() {
   process.exit(failed ? 1 : 0);
 }
 
-main().catch((err) => { console.error(err); process.exit(2); });
+try {
+  await main();
+} catch (err) {
+  console.error(err);
+  process.exit(2);
+}

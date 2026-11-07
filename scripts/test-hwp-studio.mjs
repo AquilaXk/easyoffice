@@ -335,7 +335,7 @@ test("hygiene skips ignored build output but still scans other untracked files",
     assert.notEqual(res.status, 0);
     assert.match(res.stderr, /tools-extra\/broken\.js/);
     for (const ignored of ["target-wasm", "permissions/schema", "gen/schemas", "node_modules/pkg", "ui/hwp-studio/assets"]) {
-      assert.doesNotMatch(res.stderr, new RegExp(ignored.replaceAll("/", "\\/")));
+      assert.doesNotMatch(res.stderr, new RegExp(ignored.replaceAll("/", String.raw`\/`)));
     }
   } finally {
     cleanup(dir);
@@ -375,7 +375,7 @@ test("notices list every bundled font family, the bundled npm package and the ge
   const end = notices.indexOf(END);
   assert.ok(start > 0 && end > start);
   const section = notices.slice(start, end);
-  assert.match(section, /\d+ third-party crates are linked into the module/);
+  assert.match(section, /(?<!\d)\d+ third-party crates are linked into the module/);
   assert.ok(section.includes("| wasm-bindgen |"));
   assert.ok(section.includes("Permission is hereby granted, free of charge"));
   assert.ok(section.includes("Apache License"));

@@ -5,10 +5,42 @@
   // operating on the sheet model so they work for rows that are not currently materialized.
   const SORT_COL_LETTERS = ["A", "B", "C", "D", "E", "F", "G", "H"];
 
+  function numberOf(entry) {
+    const text = String(entry?.value ?? "").replaceAll(",", "").trim();
+    const n = Number(text);
+    return text !== "" && Number.isFinite(n) ? n : null;
+  }
+
+  function cloneStyleWithoutFreeze(style) {
+    if (!style) return undefined;
+    const copy = structuredClone(style);
+    delete copy.frozenPanes;
+    return copy;
+  }
+
+  function setCondfmtFlag(entry, on) {
+    if (on) {
+      entry.style = {
+        fontWeight: "",
+        fontStyle: "",
+        textDecoration: "",
+        fontSize: "",
+        ...entry.style,
+        condfmtHigh: true,
+      };
+      return;
+    }
+    if (!entry.style?.condfmtHigh) return;
+    delete entry.style.condfmtHigh;
+    const s = entry.style;
+    if (!(s.fontWeight || s.fontStyle || s.textDecoration || s.fontSize || s.frozenPanes)) {
+      delete entry.style;
+    }
+  }
+
   function createSheetOps(api) {
     const {
       document,
-      grid,
       sheetDataStore,
       getActiveSheetName,
       getActiveSheetCellRef,
@@ -19,19 +51,6 @@
       updateSheetSelectionAndAggregates,
       hasCellContent,
     } = api;
-
-    function numberOf(entry) {
-      const text = String(entry?.value ?? "").replaceAll(",", "").trim();
-      const n = Number(text);
-      return text !== "" && Number.isFinite(n) ? n : null;
-    }
-
-    function cloneStyleWithoutFreeze(style) {
-      if (!style) return undefined;
-      const copy = structuredClone(style);
-      delete copy.frozenPanes;
-      return copy;
-    }
 
     function sortActiveSheetByColumnB() {
       const curSheet = getActiveSheetName();
@@ -74,7 +93,7 @@
           const moved = { value: src.value, formula: "" };
           if (src.formula) {
             moved.formula = src.formula.replace(
-              new RegExp("([A-Z]+)" + item.origRow + "\\b", "g"),
+              new RegExp("([A-Z]+)" + item.origRow + String.raw`\b`, "g"),
               "$1" + targetRow
             );
           }
@@ -121,26 +140,6 @@
       }
       const smartOut = document.getElementById("smart-summary-output");
       if (smartOut) smartOut.textContent = summaryLine;
-    }
-
-    function setCondfmtFlag(entry, on) {
-      if (on) {
-        entry.style = {
-          fontWeight: "",
-          fontStyle: "",
-          textDecoration: "",
-          fontSize: "",
-          ...(entry.style || {}),
-          condfmtHigh: true,
-        };
-        return;
-      }
-      if (!entry.style?.condfmtHigh) return;
-      delete entry.style.condfmtHigh;
-      const s = entry.style;
-      if (!(s.fontWeight || s.fontStyle || s.textDecoration || s.fontSize || s.frozenPanes)) {
-        delete entry.style;
-      }
     }
 
     function toggleSheetConditionalFormatting(enabled) {

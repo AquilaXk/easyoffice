@@ -68,9 +68,9 @@
     const raw = String(sheetName ?? "");
     if (!raw) return "''";
     const hasEdgeSpace = raw !== raw.trim();
-    const hasNonAlphaNum = !/^[A-Za-z0-9_]+$/.test(raw);
-    const startsWithDigit = /^[0-9]/.test(raw);
-    const looksLikeCell = /^[A-Za-z]{1,3}[0-9]+$/.test(raw);
+    const hasNonAlphaNum = !/^\w+$/.test(raw);
+    const startsWithDigit = /^\d/.test(raw);
+    const looksLikeCell = /^[A-Za-z]{1,3}\d+$/.test(raw);
     const up = asciiUpperJs(raw);
     const isReserved = up === "TRUE" || up === "FALSE";
     if (hasEdgeSpace || hasNonAlphaNum || startsWithDigit || looksLikeCell || isReserved) {
@@ -81,13 +81,13 @@
 
   function parseStrictA1Coord(rawToken) {
     const str = String(rawToken ?? "").trim();
-    const candidateMatch = /^\$?([A-Za-z]{1,3})\$?([0-9]+)$/.exec(str);
+    const candidateMatch = /^\$?([A-Za-z]{1,3})\$?(\d+)$/.exec(str);
     if (!candidateMatch) {
       return { ok: false, errorCode: "#NAME?" };
     }
     const letters = asciiUpperJs(candidateMatch[1]);
     const digits = candidateMatch[2];
-    if (digits[0] === "0") {
+    if (digits.startsWith("0")) {
       return { ok: false, errorCode: "#REF!" };
     }
     let col1 = 0;
@@ -420,7 +420,7 @@
           endSheet = next().name;
         }
         const endTok = next();
-        if (!endTok || endTok.type !== "ident") return fail("#REF!");
+        if (endTok?.type !== "ident") return fail("#REF!");
         const endCoord = parseStrictA1Coord(endTok.value);
         if (!startCoord.ok || !endCoord.ok) {
           return { kind: "Error", code: "#REF!" };
@@ -463,8 +463,8 @@
       while (true) {
         const t = peek();
         const isCmpPunct =
-          t && t.type === "punct" && (t.value === "=" || t.value === "<" || t.value === ">");
-        const isCmpOp = t && t.type === "op";
+          t?.type === "punct" && (t.value === "=" || t.value === "<" || t.value === ">");
+        const isCmpOp = t?.type === "op";
         if (!isCmpPunct && !isCmpOp) break;
         const op = next().value;
         const rhs = parseConcat(depth);
@@ -559,7 +559,7 @@
       }
       if (t.type === "sheet") {
         const refTok = next();
-        if (!refTok || refTok.type !== "ident") return fail("#REF!");
+        if (refTok?.type !== "ident") return fail("#REF!");
         return parseRefOrRangeAst(t.name, refTok.value);
       }
       if (t.type === "ident") {

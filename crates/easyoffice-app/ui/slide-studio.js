@@ -6,7 +6,7 @@
   // black/white screen, presenter view). Every mutation goes through the workspace undo snapshot
   // and autosave activity hook; the slide model itself stays in `slideDeckState` so save (#104),
   // open (#111) and autosave keep reading one source of truth.
-  const ASPECTS = ["16:9", "4:3", "A4"];
+  const ASPECTS = new Set(["16:9", "4:3", "A4"]);
   const THUMB_REFRESH_MS = 150;
   const EMPTY_TITLE_LABEL = "(제목 없음)";
   const NEXT_KEYS = new Set(["ArrowRight", "ArrowDown", " ", "PageDown", "Enter", "n", "N"]);
@@ -31,6 +31,26 @@
     const mm = String(Math.floor(totalSeconds / 60)).padStart(2, "0");
     const ss = String(totalSeconds % 60).padStart(2, "0");
     return mm + ":" + ss;
+  }
+
+  function thumbIndexFromEvent(ev) {
+    const btn = ev.target?.closest?.(".slide-thumb");
+    return btn ? Number(btn.dataset.slideIdx) : -1;
+  }
+
+  function fillThumb(btn, slide, idx, isActive) {
+    const label = slideLabel(slide);
+    btn.className = "slide-thumb" + (isActive ? " active" : "");
+    btn.dataset.slideIdx = String(idx);
+    btn.setAttribute("title", idx + 1 + ". " + label);
+    btn.setAttribute("aria-label", idx + 1 + "번 슬라이드: " + label);
+    if (isActive) btn.setAttribute("aria-current", "true");
+    else btn.removeAttribute("aria-current");
+    const titleEl = btn.querySelector(".slide-thumb-title");
+    titleEl.textContent = label;
+    titleEl.classList.toggle("is-empty", label === EMPTY_TITLE_LABEL);
+    btn.querySelector(".slide-thumb-snippet").textContent = slideSnippet(slide);
+    btn.querySelector(".slide-thumb-num").textContent = String(idx + 1);
   }
 
   function createSlideStudio(deps) {
@@ -67,7 +87,7 @@
 
     function deckAspect() {
       const raw = deck[0]?.aspect;
-      return ASPECTS.includes(raw) ? raw : "16:9";
+      return ASPECTS.has(raw) ? raw : "16:9";
     }
 
     // ---- deck operations -------------------------------------------------------------------
@@ -136,7 +156,7 @@
     const operations = { add: addSlide, duplicate: duplicateSlide, remove: removeSlide, moveUp, moveDown };
 
     function setDeckAspect(value) {
-      if (!ASPECTS.includes(value) || value === deckAspect()) return;
+      if (!ASPECTS.has(value) || value === deckAspect()) return;
       pushUndoSnapshot(false);
       deck.forEach((s) => {
         s.aspect = value;
@@ -146,21 +166,6 @@
     }
 
     // ---- thumbnails ------------------------------------------------------------------------
-
-    function fillThumb(btn, slide, idx, isActive) {
-      const label = slideLabel(slide);
-      btn.className = "slide-thumb" + (isActive ? " active" : "");
-      btn.dataset.slideIdx = String(idx);
-      btn.setAttribute("title", idx + 1 + ". " + label);
-      btn.setAttribute("aria-label", idx + 1 + "번 슬라이드: " + label);
-      if (isActive) btn.setAttribute("aria-current", "true");
-      else btn.removeAttribute("aria-current");
-      const titleEl = btn.querySelector(".slide-thumb-title");
-      titleEl.textContent = label;
-      titleEl.classList.toggle("is-empty", label === EMPTY_TITLE_LABEL);
-      btn.querySelector(".slide-thumb-snippet").textContent = slideSnippet(slide);
-      btn.querySelector(".slide-thumb-num").textContent = String(idx + 1);
-    }
 
     function buildThumb(slide, idx, isActive) {
       const btn = document.createElement("button");
@@ -269,11 +274,6 @@
     }
 
     // ---- thumbnail list: select, drag and drop, context menu ---------------------------------
-
-    function thumbIndexFromEvent(ev) {
-      const btn = ev.target?.closest?.(".slide-thumb");
-      return btn ? Number(btn.dataset.slideIdx) : -1;
-    }
 
     function clearDropMarks() {
       byId("slide-thumb-list")
@@ -489,7 +489,7 @@
     }
 
     function handleShowKey(e) {
-      if (e.ctrlKey || e.metaKey || e.altKey) return true;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
       const k = e.key;
       const lower = k.length === 1 ? k.toLowerCase() : k;
       e.preventDefault();
@@ -504,13 +504,15 @@
         const panel = byId("slide-show-presenter");
         panel.hidden = !panel.hidden;
       }
-      return true;
     }
 
     // Keyboard entry used by app.js before the shortcut table: owns every key while a show runs
     // and Esc for the thumbnail context menu. Returns true when the event was consumed.
     function handleKeydown(e) {
-      if (showing) return handleShowKey(e);
+      if (showing) {
+        handleShowKey(e);
+        return true;
+      }
       if (menuIdx >= 0 && e.key === "Escape") {
         e.preventDefault();
         closeMenu();

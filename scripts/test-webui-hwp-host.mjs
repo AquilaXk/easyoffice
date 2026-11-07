@@ -1,6 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import { loadUiModule } from "./test-support/load-ui-module.mjs";
 import { createWebUiDom, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { switchModule } from "./test-support/modules.mjs";
@@ -96,13 +95,12 @@ function createFakeStudio({ answer = true, failMethods = new Set() } = {}) {
 function loadHost({ fetchOk = true, studioOptions, activeModule = "HWP", timeouts = {}, extraDeps = {} } = {}) {
   const document = createFakeDocument();
   const studio = createFakeStudio(studioOptions);
-  const timersFired = [];
   const env = {
     MessageChannel: studio.FakeMessageChannel,
     location: { origin: "http://127.0.0.1:8800" },
     crypto: { randomUUID: () => "session-1" },
     fetch: async () => ({ ok: fetchOk }),
-    setTimeout: (fn, ms) => { const id = setTimeout(fn, Math.min(ms, 30)); timersFired.push(ms); return id; },
+    setTimeout: (fn, ms) => setTimeout(fn, Math.min(ms, 30)),
     clearTimeout,
     btoa: (s) => Buffer.from(s, "binary").toString("base64"),
     ArrayBuffer,
@@ -288,7 +286,7 @@ async function createIntegration({ bundle }) {
 }
 
 test("webui: the HWP module is hosted by #pane-hwp and the document-only toolbar is hidden while it is active", async () => {
-  const { document, userClick, studio, frames } = await createIntegration({ bundle: true });
+  const { document, studio, frames } = await createIntegration({ bundle: true });
   await flushAsyncTurns(8);
   const styleBar = document.getElementById("doc-style-bar");
   assert.equal(styleBar.hidden, false, "DOC shows the style bar");
@@ -312,7 +310,7 @@ test("webui: the HWP module is hosted by #pane-hwp and the document-only toolbar
 });
 
 test("webui: without the bundle the old editor stays usable with the explanatory notice", async () => {
-  const { document, userClick, frames } = await createIntegration({ bundle: false });
+  const { document, frames } = await createIntegration({ bundle: false });
   await flushAsyncTurns(8);
   switchModule(document, "HWP");
   await flushAsyncTurns(20);

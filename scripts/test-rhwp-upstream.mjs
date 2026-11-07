@@ -234,7 +234,7 @@ test("tampered, truncated, missing and unlisted vendor files fail closed", () =>
     bytes[bytes.length >> 1] ^= 0xff;
     fs.writeFileSync(wasm, bytes);
     assert.ok(checkVendorCore(dir, cfg).some((e) => e.includes("SHA-256")));
-    fs.writeFileSync(wasm, bytes.subarray(0, bytes.length - 1));
+    fs.writeFileSync(wasm, bytes.subarray(0, -1));
     assert.ok(checkVendorCore(dir, cfg).some((e) => e.includes("bytes")));
     fs.rmSync(wasm);
     assert.ok(checkVendorCore(dir, cfg).some((e) => e.includes("missing")));

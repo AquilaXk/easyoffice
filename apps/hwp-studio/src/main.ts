@@ -1,5 +1,3 @@
-import { setHostFontProvider, onHostFontsChanged, hasHostFontProvider, prepareHostFontCatalog, getHostFontState, localFontFaceKey, type LocalFontRecord } from '@/core/local-fonts';
-import { collectHostFontRequests } from '@/core/host-font-requests';
 import { WasmBridge } from '@/core/wasm-bridge';
 import { HwpDocument } from '@wasm/rhwp.js';
 import { installDocumentTitle } from '@/ui/document-title';
@@ -52,16 +50,15 @@ import {
   isEmbedSwallowedFileShortcut,
 } from '@/ui/chrome-mode';
 import { DocumentDirtyState } from '@/core/document-dirty-state';
-import { initThemeSync, setThemeMode, getThemeMode, getEffectiveTheme } from '@/core/theme';
-import { maybeShowSkinOnboarding } from '@/ui/skin-onboarding-dialog';
+import { initThemeSync, setThemeMode, getThemeMode } from '@/core/theme';
 import { analyzeDocumentFonts } from '@/core/document-font-status';
 import { setDocumentFontSubstitutions } from '@/core/font-substitution';
 import {
-  clearStoredLocalFonts,
-  detectLocalFonts,
   getLocalFontState,
   loadStoredLocalFonts,
-  resolveLocalFont,
+  setHostFontProvider,
+  onHostFontsChanged,
+  getHostFontState,
 } from '@/core/local-fonts';
 import { userSettings } from '@/core/user-settings';
 import { CellSelectionRenderer } from '@/engine/cell-selection-renderer';
@@ -833,7 +830,14 @@ function setupZoomControls(): void {
 }
 
 let totalSections = 1;
-let currentDocumentFonts: string[] = [];
+function headerFooterModeLabel(mode: string): string {
+  return mode === 'header' ? t('ui.tbHfLabel.header') : t('ui.tbHfLabel.footer');
+}
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 let lastAppliedLocalFontGeneration: string | null = null;
 
 function setupEventListeners(): void {
@@ -977,7 +981,6 @@ function setupEventListeners(): void {
   const noteGroup = document.querySelector('.tb-note-group') as HTMLElement | null;
   const defaultTbGroups = document.querySelectorAll('#icon-toolbar .tb-scroll-track > .tb-group:not(.tb-headerfooter-group):not(.tb-note-group):not(.tb-rotate-group), #icon-toolbar .tb-scroll-track > .tb-sep');
   const scrollContainer = document.getElementById('scroll-container');
-  const styleBar = document.getElementById('style-bar');
 
   const hfLiveStatus = document.getElementById('hf-edit-status-live');
   eventBus.on('headerFooterModeChanged', (payload) => {
@@ -990,7 +993,7 @@ function setupEventListeners(): void {
       hfGroup.hidden = !isActive;
     }
     if (hfLabel) {
-      const kind = state === 'none' ? '' : state.mode === 'header' ? t('ui.tbHfLabel.header') : t('ui.tbHfLabel.footer');
+      const kind = state === 'none' ? '' : headerFooterModeLabel(state.mode);
       const target = state === 'none' ? '' : headerFooterApplyToLabel(state.applyTo);
       hfLabel.textContent = state === 'none' ? '' : t('ui.tbHfLabel.editing', { p1: kind, p2: target });
       hfLabel.dataset.mode = state === 'none' ? '' : state.mode;
@@ -1080,7 +1083,6 @@ async function initializeDocument(
   const msg = sbMessage();
   try {
     setDocumentFontSubstitutions(docInfo.fontSubstitutions);
-    currentDocumentFonts = [...(docInfo.fontsUsed ?? [])];
     lastAppliedLocalFontGeneration = null;
     console.log('[initDoc] 1. 폰트 로딩 시작');
     await updateLoadProgress(55, '폰트 준비 중...');
@@ -1390,9 +1392,7 @@ eventBus.on('open-document-bytes', async (payload) => {
   } catch (error) {
     // #265: WASM 파서 에러 (예: HWP 3.0 미지원) 를 사용자에게 전파
     showLoadErrorUnlessCancelled(error);
-    const msg = isDocumentOpenCancelled(error)
-      ? '문서 열기가 취소되었습니다.'
-      : error instanceof Error ? error.message : String(error);
+    const msg = isDocumentOpenCancelled(error) ? '문서 열기가 취소되었습니다.' : describeError(error);
     notifyDone(false, msg);
   }
 });

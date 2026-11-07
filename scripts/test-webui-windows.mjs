@@ -129,12 +129,12 @@ test("File menu: new document kinds, open, recent, save and close call the windo
 
 test("the window bridge never hands a file system path to the page", async () => {
   const { shell, document, userClick } = await openWindow("?module=DOC&win=w-path", {
-    open_file_in_new_window: () => ({ status: "opened", path: "C:\\비밀\\a.docx" }),
+    open_file_in_new_window: () => ({ status: "opened", path: String.raw`C:\비밀\a.docx` }),
   });
   userClick(document.querySelector("[data-file-open]"));
   await flushAsyncTurns();
   const sent = JSON.stringify(shell.calls);
-  assert.ok(!/\\\\|C:/.test(sent.replace(/save_document_file/g, "")), "no path-like argument is ever sent to the shell");
+  assert.ok(!/\\\\|C:/.test(sent.replaceAll("save_document_file", "")), "no path-like argument is ever sent to the shell");
   assert.deepEqual(shell.named("open_file_in_new_window")[0].args, {});
 });
 
