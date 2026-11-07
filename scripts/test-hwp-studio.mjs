@@ -273,6 +273,33 @@ test("font guard: unlisted, tampered, non-OFL and undocumented fonts fail", () =
   }
 });
 
+test("font guard: a reserved font name requires the official file or WOFF2 compression of it (PD-092)", () => {
+  const { root, manifest } = makeFonts();
+  const rfnText = "Copyright 2020 Test, with Reserved Font Name Test Sans.\n\nSIL OPEN FONT LICENSE\nVersion 1.1 - 26 February 2007\n";
+  const withUpstream = (up) => {
+    const m = structuredClone(manifest);
+    if (up !== undefined) m.fonts[0].upstream = up;
+    write(root, "assets/fonts/fonts.json", JSON.stringify(m));
+    return checkFonts(root);
+  };
+  try {
+    write(root, "assets/fonts/licenses/Test-OFL.txt", rfnText);
+    assert.ok(withUpstream(undefined).some((e) => e.includes("upstream (official source URL")), "missing provenance fails");
+    const sha = manifest.fonts[0].sha256;
+    assert.deepEqual(withUpstream({ url: "https://example.org/Test.woff2", sha256: sha, conversion: "none" }), []);
+    assert.ok(withUpstream({ url: "https://example.org/Test.woff2", sha256: "0".repeat(64), conversion: "none" }).some((e) => e.includes("differs from the official file")));
+    assert.deepEqual(withUpstream({ url: "https://example.org/Test.ttf", sha256: "0".repeat(64), conversion: "woff2-compression" }), []);
+    assert.ok(withUpstream({ url: "https://example.org/Test.ttf", sha256: sha, conversion: "subset" }).some((e) => e.includes("conversion must be")));
+    assert.ok(withUpstream({ url: "http://example.org/Test.ttf", sha256: sha, conversion: "none" }).some((e) => e.includes("https URL")));
+    const waived = structuredClone(manifest);
+    waived.fonts[0].reservedNameNotUsed = "The reserved name is not used by this family.";
+    write(root, "assets/fonts/fonts.json", JSON.stringify(waived));
+    assert.deepEqual(checkFonts(root), []);
+  } finally {
+    cleanup(root);
+  }
+});
+
 test("vendored WASM check is wired for the real repository", () => {
   assert.deepEqual(checkVendorCore(REPO, CONFIG), []);
 });

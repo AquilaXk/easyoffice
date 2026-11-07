@@ -1525,3 +1525,18 @@
 - **Alternatives rejected** 문서만 바뀐 PR의 작업 건너뛰기(경로 필터는 필수 검사가 보고되지 않아 PR이 대기 상태로 남으므로 대체 작업이 필요, 개인 프로젝트 규모에서 이득 대비 복잡), 모든 검사를 Linux 하나로 통합(Swift 앱·Tauri MSVC 빌드는 해당 OS 필요).
 - **Verified by** `.github/workflows/ci.yml`의 세 작업 결과, `node scripts/check-repo-hygiene.mjs`.
 - **Revisit when** macOS Tauri 전환(#136)으로 Swift 단계가 사라질 때, 문서 전용 PR이 잦아질 때, 캐시 적중률이 낮을 때.
+
+## 67. 예약 글꼴 이름(RFN)이 있는 번들 글꼴은 공식 배포 파일 또는 그 WOFF2 압축본만 사용 (PD-092, #144)
+
+- **Status** Implemented
+- **Context** #129에서 rhwp가 웹용으로 변환한 OFL 글꼴 사본을 그대로 번들했습니다. 공식 TTF와 표(table) 단위로 비교하니 나눔고딕·나눔명조·나눔고딕코딩·Spoqa Han Sans 사본은 글리프 일부를 뺀 서브셋(나눔고딕 약 400개, 나눔고딕코딩 약 7,000개 적음)이었고 D2Coding 사본은 `glyf`가 달랐습니다. OFL 3조는 예약 이름(RFN)이 있는 글꼴의 수정본(Modified Version)에 원래 이름을 쓰지 못하게 하고, OFL FAQ 2.2·2.2.1은 형식 변환을 원칙적으로 수정으로 보되 "원래 글꼴 데이터가 WOFF 압축 외에는 바뀌지 않은" WOFF/WOFF2만 예외로 둡니다.
+- **Decision (`PD-092`)**
+  1. 라이선스에 `with Reserved Font Name …`이 있는 글꼴은 공식 배포 파일을 그대로(`conversion: none`) 또는 공식 TTF의 WOFF2 압축본(`conversion: woff2-compression`)만 번들합니다. 나눔 3종은 google/fonts의 TTF, D2Coding은 공식 1.3.2 릴리스 zip의 TTF를 WOFF2로 압축하고, Pretendard와 Spoqa Han Sans는 공식 woff2를 그대로 씁니다.
+  2. WOFF2 압축본은 복원한 글꼴 표가 공식 TTF와 바이트 단위로 같아야 합니다(`head`의 flags·checkSumAdjustment와 WOFF2가 요구하는 `DSIG` 제거만 예외). 기본 `glyf` 변환이 바이트를 바꾸는 나눔고딕코딩·D2Coding은 WOFF2 null 변환을 씁니다.
+  3. `fonts.json` 항목은 `upstream`(공식 https URL, 공식 파일 SHA-256, `conversion`, zip이면 `member`·`archiveSha256`)을 기록하고, `scripts/verify-fonts.mjs`가 RFN 라이선스 글꼴에 이를 요구합니다(`none`이면 번들 해시가 공식 해시와 같아야 함). 예약 이름이 이 글꼴과 무관한 경우(Noto Sans KR의 'Source')는 `reservedNameNotUsed`에 사유를 적습니다.
+  4. 파일 이름은 그대로 두어 rhwp 글꼴 카탈로그·오버레이는 바뀌지 않습니다.
+- **Why** 공개 배포 전에 RFN 위반 가능성을 없애고, 출처·해시를 기계적으로 검사해 다음 갱신 때도 같은 실수가 반복되지 않게 합니다.
+- **Trade-offs** 서브셋이 아닌 전체 글꼴이라 번들 글꼴이 18.38 MiB에서 19.44 MiB로 약 1.06 MiB 커집니다(글꼴은 20 MiB 번들 예산과 별도 집계). WOFF2 압축 동일성은 fontTools로 생성 시점에 확인했고 CI는 해시만 검사합니다.
+- **Alternatives rejected** 이름을 바꾼 수정본 사용(문서에 지정된 글꼴 이름과 맞지 않아 카탈로그 대체가 깨짐), 공식 TTF 그대로 번들(크기 약 4배), 해당 글꼴 제외(한글 문서 표시 품질 저하).
+- **Verified by** `node scripts/verify-fonts.mjs`, `node --test scripts/test-hwp-studio.mjs`(RFN 출처 검사 거부·허용 경우), 생성 시 fontTools 표 비교.
+- **Revisit when** 글꼴을 추가·갱신할 때, 공식 배포처가 woff2를 직접 제공할 때.
