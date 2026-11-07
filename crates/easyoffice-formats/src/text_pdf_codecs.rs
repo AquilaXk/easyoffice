@@ -308,6 +308,106 @@ impl<'a> PdfTopLevelScan<'a> {
     }
 }
 
+fn unclosed_literal_error() -> EasyOfficeError {
+    EasyOfficeError::CorruptedContainer(
+        "PDF 페이지 콘텐츠 스트림의 문자열 리터럴이 닫히지 않았습니다.".to_string(),
+    )
+}
+
+fn content_budget_error() -> EasyOfficeError {
+    EasyOfficeError::SecurityViolation(
+        "PDF 페이지 콘텐츠 스트림 누적 바이트 예산(32MiB)을 초과했습니다.".to_string(),
+    )
+}
+
+/// Resolves one content stream to its decoded (or raw) bytes, charging the shared byte budget.
+fn resolve_content_slice<'a>(
+    state: &mut PageWalkState<'a>,
+    so: u32,
+    sg: u16,
+    s_start: usize,
+    s_end: usize,
+) -> Result<&'a [u8], EasyOfficeError> {
+    if let Some(decoded) = state.flate_cache.get(&(so, sg)) {
+        let slice = decoded.as_slice();
+        if !validate_balanced_pdf_literals(slice) {
+            return Err(unclosed_literal_error());
+        }
+        if !state.first_used_flate.insert((so, sg)) {
+            state.remaining_budget = state
+                .remaining_budget
+                .checked_sub(slice.len())
+                .ok_or_else(content_budget_error)?;
+        }
+        return Ok(slice);
+    }
+    let slice = &state.bytes[s_start..s_end];
+    if !validate_balanced_pdf_literals(slice) {
+        return Err(unclosed_literal_error());
+    }
+    if span_crosses_object_boundary(state.bytes, s_start, s_end) {
+        return Err(EasyOfficeError::CorruptedContainer(
+            "PDF 페이지 스트림 내부에 닫히지 않은 객체 경계 토큰이 감지되었습니다.".to_string(),
+        ));
+    }
+    state.remaining_budget = state
+        .remaining_budget
+        .checked_sub(slice.len())
+        .ok_or_else(content_budget_error)?;
+    Ok(slice)
+}
+
+/// Appends the stream behind the `/Contents` reference `(so, sg)` to `out`.
+fn push_content_ref<'a>(
+    state: &mut PageWalkState<'a>,
+    out: &mut Vec<&'a [u8]>,
+    so: u32,
+    sg: u16,
+) -> Result<(), EasyOfficeError> {
+    let Some(stream_obj) = state.objects.get(&(so, sg)) else {
+        return Err(EasyOfficeError::CorruptedContainer(
+            "PDF /Contents 간접 스트림 객체를 찾을 수 없습니다.".to_string(),
+        ));
+    };
+    let Some((s_start, s_end)) = stream_obj.stream_range else {
+        return Err(EasyOfficeError::CorruptedContainer(
+            "PDF /Contents 대상 객체에 stream 본문이 없습니다.".to_string(),
+        ));
+    };
+    if !matches!(stream_obj.val, PdfObjValue::Dict(_)) {
+        return Err(EasyOfficeError::CorruptedContainer(
+            "PDF 스트림 객체 헤더가 딕셔너리가 아닙니다.".to_string(),
+        ));
+    }
+    out.push(resolve_content_slice(state, so, sg, s_start, s_end)?);
+    Ok(())
+}
+
+/// Streams of a `/Contents` array (null entries skipped, element count capped).
+fn collect_contents_array<'a>(
+    state: &mut PageWalkState<'a>,
+    arr: &[PdfObjValue],
+) -> Result<Vec<&'a [u8]>, EasyOfficeError> {
+    if arr.len() > MAX_PDF_CONTENTS_ARRAY_LEN {
+        return Err(EasyOfficeError::CorruptedContainer(
+            "PDF /Contents 배열 원소 상한(256)을 초과했습니다.".to_string(),
+        ));
+    }
+    let mut out = Vec::with_capacity(arr.len());
+    for item in arr {
+        match item {
+            PdfObjValue::Ref(so, sg) => push_content_ref(state, &mut out, *so, *sg)?,
+            PdfObjValue::Null => {}
+            _ => {
+                return Err(EasyOfficeError::CorruptedContainer(
+                    "PDF /Contents 배열 원소가 스트림 간접 참조가 아닙니다.".to_string(),
+                ))
+            }
+        }
+    }
+    Ok(out)
+}
+
 struct PageWalkState<'a> {
     bytes: &'a [u8],
     objects: &'a HashMap<(u32, u16), PdfIndirectObject>,
@@ -452,80 +552,13 @@ impl PdfSerializer {
         page_entries: &[(String, PdfObjValue)],
         inline_stream: Option<((u32, u16), (usize, usize))>,
     ) -> Result<Vec<&'a [u8]>, EasyOfficeError> {
-        let mut resolve_one =
-            |so: u32, sg: u16, s_start: usize, s_end: usize| -> Result<&'a [u8], EasyOfficeError> {
-                if let Some(decoded) = state.flate_cache.get(&(so, sg)) {
-                    let slice = decoded.as_slice();
-                    if !validate_balanced_pdf_literals(slice) {
-                        return Err(EasyOfficeError::CorruptedContainer(
-                            "PDF 페이지 콘텐츠 스트림의 문자열 리터럴이 닫히지 않았습니다."
-                                .to_string(),
-                        ));
-                    }
-                    if !state.first_used_flate.insert((so, sg)) {
-                        let Some(next_b) = state.remaining_budget.checked_sub(slice.len()) else {
-                            return Err(EasyOfficeError::SecurityViolation(
-                                "PDF 페이지 콘텐츠 스트림 누적 바이트 예산(32MiB)을 초과했습니다."
-                                    .to_string(),
-                            ));
-                        };
-                        state.remaining_budget = next_b;
-                    }
-                    Ok(slice)
-                } else {
-                    let slice = &state.bytes[s_start..s_end];
-                    if !validate_balanced_pdf_literals(slice) {
-                        return Err(EasyOfficeError::CorruptedContainer(
-                            "PDF 페이지 콘텐츠 스트림의 문자열 리터럴이 닫히지 않았습니다."
-                                .to_string(),
-                        ));
-                    }
-                    if span_crosses_object_boundary(state.bytes, s_start, s_end) {
-                        return Err(EasyOfficeError::CorruptedContainer(
-                            "PDF 페이지 스트림 내부에 닫히지 않은 객체 경계 토큰이 감지되었습니다."
-                                .to_string(),
-                        ));
-                    }
-                    let Some(next_b) = state.remaining_budget.checked_sub(slice.len()) else {
-                        return Err(EasyOfficeError::SecurityViolation(
-                            "PDF 페이지 콘텐츠 스트림 누적 바이트 예산(32MiB)을 초과했습니다."
-                                .to_string(),
-                        ));
-                    };
-                    state.remaining_budget = next_b;
-                    Ok(slice)
-                }
-            };
-
-        let mut push_ref =
-            |out: &mut Vec<&'a [u8]>, so: u32, sg: u16| -> Result<(), EasyOfficeError> {
-                let Some(stream_obj) = state.objects.get(&(so, sg)) else {
-                    return Err(EasyOfficeError::CorruptedContainer(
-                        "PDF /Contents 간접 스트림 객체를 찾을 수 없습니다.".to_string(),
-                    ));
-                };
-                let Some((s_start, s_end)) = stream_obj.stream_range else {
-                    return Err(EasyOfficeError::CorruptedContainer(
-                        "PDF /Contents 대상 객체에 stream 본문이 없습니다.".to_string(),
-                    ));
-                };
-                if !matches!(stream_obj.val, PdfObjValue::Dict(_)) {
-                    return Err(EasyOfficeError::CorruptedContainer(
-                        "PDF 스트림 객체 헤더가 딕셔너리가 아닙니다.".to_string(),
-                    ));
-                }
-                out.push(resolve_one(so, sg, s_start, s_end)?);
-                Ok(())
-            };
-
         match dict_get(page_entries, "/Contents") {
-            None | Some(PdfObjValue::Null) => {
-                if let Some(((so, sg), (s_start, s_end))) = inline_stream {
-                    Ok(vec![resolve_one(so, sg, s_start, s_end)?])
-                } else {
-                    Ok(Vec::new())
+            None | Some(PdfObjValue::Null) => match inline_stream {
+                Some(((so, sg), (s_start, s_end))) => {
+                    Ok(vec![resolve_content_slice(state, so, sg, s_start, s_end)?])
                 }
-            }
+                None => Ok(Vec::new()),
+            },
             Some(PdfObjValue::Ref(co, cg)) => {
                 let Some(target) = state.objects.get(&(*co, *cg)) else {
                     return Err(EasyOfficeError::CorruptedContainer(
@@ -534,55 +567,17 @@ impl PdfSerializer {
                 };
                 if target.stream_range.is_some() {
                     let mut out = Vec::with_capacity(1);
-                    push_ref(&mut out, *co, *cg)?;
+                    push_content_ref(state, &mut out, *co, *cg)?;
                     Ok(out)
                 } else if let PdfObjValue::Array(ref arr) = target.val {
-                    if arr.len() > MAX_PDF_CONTENTS_ARRAY_LEN {
-                        return Err(EasyOfficeError::CorruptedContainer(
-                            "PDF /Contents 배열 원소 상한(256)을 초과했습니다.".to_string(),
-                        ));
-                    }
-                    let mut out = Vec::with_capacity(arr.len());
-                    for item in arr {
-                        match item {
-                            PdfObjValue::Ref(so, sg) => push_ref(&mut out, *so, *sg)?,
-                            PdfObjValue::Null => {}
-                            _ => {
-                                return Err(EasyOfficeError::CorruptedContainer(
-                                    "PDF /Contents 배열 원소가 스트림 간접 참조가 아닙니다."
-                                        .to_string(),
-                                ))
-                            }
-                        }
-                    }
-                    Ok(out)
+                    collect_contents_array(state, arr)
                 } else {
                     Err(EasyOfficeError::CorruptedContainer(
                         "PDF /Contents 참조 대상이 스트림 또는 배열이 아닙니다.".to_string(),
                     ))
                 }
             }
-            Some(PdfObjValue::Array(arr)) => {
-                if arr.len() > MAX_PDF_CONTENTS_ARRAY_LEN {
-                    return Err(EasyOfficeError::CorruptedContainer(
-                        "PDF /Contents 배열 원소 상한(256)을 초과했습니다.".to_string(),
-                    ));
-                }
-                let mut out = Vec::with_capacity(arr.len());
-                for item in arr {
-                    match item {
-                        PdfObjValue::Ref(so, sg) => push_ref(&mut out, *so, *sg)?,
-                        PdfObjValue::Null => {}
-                        _ => {
-                            return Err(EasyOfficeError::CorruptedContainer(
-                                "PDF /Contents 배열 원소가 스트림 간접 참조가 아닙니다."
-                                    .to_string(),
-                            ))
-                        }
-                    }
-                }
-                Ok(out)
-            }
+            Some(PdfObjValue::Array(arr)) => collect_contents_array(state, arr),
             Some(_) => Err(EasyOfficeError::CorruptedContainer(
                 "PDF /Page /Contents 항목 타입이 올바르지 않습니다.".to_string(),
             )),
