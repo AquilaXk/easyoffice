@@ -26,6 +26,7 @@
     closeCurrentWindow: "close_current_window",
     listRecentDocuments: "list_recent_documents",
     openRecentDocument: "open_recent_document",
+    recentPreview: "get_recent_preview",
   });
 
   function shellInternals() {

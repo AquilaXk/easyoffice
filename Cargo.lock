@@ -902,6 +902,7 @@ name = "easyoffice-desktop"
 version = "1.0.0"
 dependencies = [
  "easyoffice-app",
+ "easyoffice-formats",
  "fontdb",
  "native-tls",
  "objc2-app-kit",

@@ -17,6 +17,7 @@
     "allow-report-window-state",
     "allow-close-current-window",
     "allow-list-recent-documents",
-    "allow-open-recent-document"
+    "allow-open-recent-document",
+    "allow-get-recent-preview"
   ]
 }
