@@ -30,7 +30,7 @@ async function press(sandbox, k) {
 function bigSheetModel(rows, cols = 8) {
   const cells = [];
   for (let r = 1; r <= rows; r += 1) {
-    for (let c = 0; c < cols; c += 1) cells.push({ ref: String.fromCharCode(65 + c) + r, raw: String(r * 10 + c) });
+    for (let c = 0; c < cols; c += 1) cells.push({ ref: String.fromCodePoint(65 + c) + r, raw: String(r * 10 + c) });
   }
   return { sheets: [{ name: "큰시트", cells }] };
 }

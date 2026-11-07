@@ -151,6 +151,32 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     return { platform: "Desktop", shortcutModifier: "Ctrl" };
   }
 
+  function resolveStorage() {
+    try {
+      const storage = host.localStorage;
+      return storage && typeof storage.getItem === "function" ? storage : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function countSheetCells(sheets) {
+    return Object.keys(sheets || {}).reduce((n, name) => n + Object.keys(sheets[name] || {}).length, 0);
+  }
+
+  function editableRootFor(node) {
+    const el = node?.nodeType === 1 ? node : node?.parentElement;
+    return el?.closest?.('[contenteditable="true"]') || null;
+  }
+
+  function captureSelectionRange() {
+    const sel = typeof host.getSelection === "function" ? host.getSelection() : null;
+    if (!sel?.rangeCount) return null;
+    const r = sel.getRangeAt(0);
+    if (!r) return null;
+    return typeof r.cloneRange === "function" ? r.cloneRange() : r;
+  }
+
   function createWorkspaceSession(deps) {
     const {
       document,
@@ -187,15 +213,6 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     function setFeedback(text) {
       const fb = document.getElementById("status-command-feedback");
       if (fb) fb.textContent = text;
-    }
-
-    function resolveStorage() {
-      try {
-        const storage = host.localStorage;
-        return storage && typeof storage.getItem === "function" ? storage : null;
-      } catch {
-        return null;
-      }
     }
 
     function handleBeforeUnload(ev) {
@@ -245,10 +262,6 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       const ae = document.activeElement;
       if (!ae || typeof ae.closest !== "function" || !ae.closest("#pane-sheet")) return false;
       return ae.id === "formula-input" || Boolean(ae.dataset?.editMode);
-    }
-
-    function countSheetCells(sheets) {
-      return Object.keys(sheets || {}).reduce((n, name) => n + Object.keys(sheets[name] || {}).length, 0);
     }
 
     function skipAutosaveForLargeWorkbook(snap) {
@@ -432,19 +445,6 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       if (docStatus) docStatus.hidden = !isDoc;
     }
 
-    function editableRootFor(node) {
-      const el = node?.nodeType === 1 ? node : node?.parentElement;
-      return el?.closest?.('[contenteditable="true"]') || null;
-    }
-
-    function captureSelectionRange() {
-      const sel = typeof host.getSelection === "function" ? host.getSelection() : null;
-      if (!sel || !sel.rangeCount) return null;
-      const r = sel.getRangeAt(0);
-      if (!r) return null;
-      return typeof r.cloneRange === "function" ? r.cloneRange() : r;
-    }
-
     function rangeBelongsToModule(range, mod) {
       const root = editableRootFor(range?.commonAncestorContainer);
       if (!root) return false;
@@ -522,7 +522,10 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       const panels = getWorkspacePanels();
       if (cmd === "clip-paste") {
         const text = await readSystemClipboard();
-        if (!text) return void setFeedback("붙일 클립보드 내용이 없습니다");
+        if (!text) {
+          setFeedback("붙일 클립보드 내용이 없습니다");
+          return;
+        }
         withDocStyleUndo(() => insertPlainText(range, text));
         panels.computeSmartStats();
         noteActivity();
@@ -564,7 +567,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     function runForwardedShortcut(combo, actions) {
       if (typeof combo !== "string") return false;
       const binding = bindingFor(combo);
-      if (!binding || !binding.forwardFromEditor) return false;
+      if (!binding?.forwardFromEditor) return false;
       const run = actions[binding.action];
       if (typeof run !== "function") return false;
       run();

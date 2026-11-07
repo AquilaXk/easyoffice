@@ -682,14 +682,13 @@ pub fn inflate_auto(input: &[u8], max_output_bytes: usize) -> Result<Vec<u8>, Ea
                         )));
                     }
                     return Ok(decoded);
-                } else if rem.is_empty() {
-                    return Ok(decoded);
-                } else {
-                    return Err(EasyOfficeError::CorruptedContainer(
-                        "RFC 1950 zlib 스트림의 4바이트 Adler-32 트레일러가 잘렸습니다."
-                            .to_string(),
-                    ));
                 }
+                if rem.is_empty() {
+                    return Ok(decoded);
+                }
+                return Err(EasyOfficeError::CorruptedContainer(
+                    "RFC 1950 zlib 스트림의 4바이트 Adler-32 트레일러가 잘렸습니다.".to_string(),
+                ));
             }
             Err(e @ EasyOfficeError::ResourceBudgetExceeded(_)) => return Err(e),
             Err(_) => {}

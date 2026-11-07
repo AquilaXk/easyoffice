@@ -21,9 +21,9 @@ pub type OdpUnpacked = (String, Vec<(String, Vec<String>, String)>);
 pub struct OdfCodec;
 
 impl OdfCodec {
-    pub const MIMETYPE_ODT: &'static str = "application/vnd.oasis.opendocument.text";
-    pub const MIMETYPE_ODS: &'static str = "application/vnd.oasis.opendocument.spreadsheet";
-    pub const MIMETYPE_ODP: &'static str = "application/vnd.oasis.opendocument.presentation";
+    pub const MIMETYPE_ODT: &str = "application/vnd.oasis.opendocument.text";
+    pub const MIMETYPE_ODS: &str = "application/vnd.oasis.opendocument.spreadsheet";
+    pub const MIMETYPE_ODP: &str = "application/vnd.oasis.opendocument.presentation";
     pub const MAX_CELLS: usize = 200_000;
     pub const MAX_ROWS: u32 = 1_048_575;
     pub const MAX_COLS: u32 = 16_383;

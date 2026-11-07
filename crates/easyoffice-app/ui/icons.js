@@ -115,7 +115,7 @@
   function setIcon(document, el, name) {
     if (!el) return;
     el.dataset.icon = name;
-    while (el.firstChild) el.removeChild(el.firstChild);
+    while (el.firstChild) el.firstChild.remove();
     el.appendChild(createIcon(document, name));
   }
 

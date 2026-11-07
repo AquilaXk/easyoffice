@@ -70,9 +70,13 @@ export function renderSection(packages) {
     }
     for (const text of readTexts(pkg, NOTICE_FILE_RE)) notices.push({ label: `${pkg.name} ${pkg.version}`, text });
   }
-  lines.push(`${external.length} third-party crates are linked into the module (normal dependencies of rhwp for wasm32-unknown-unknown;`);
-  lines.push("build-time and test-only crates are not shipped).", "");
-  lines.push("| Crate | Version | License |", "|---|---|---|");
+  lines.push(
+    `${external.length} third-party crates are linked into the module (normal dependencies of rhwp for wasm32-unknown-unknown;`,
+    "build-time and test-only crates are not shipped).",
+    "",
+    "| Crate | Version | License |",
+    "|---|---|---|",
+  );
   for (const pkg of external) lines.push(`| ${pkg.name} | ${pkg.version} | ${pkg.license ?? "see license text"} |`);
   lines.push("", "### License texts", "");
   let index = 1;

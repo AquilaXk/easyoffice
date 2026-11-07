@@ -379,7 +379,7 @@ for (const file of files) {
         stdio: "pipe",
       });
     } catch (err) {
-      const stderr = err && err.stderr ? err.stderr.toString("utf8").trim() : String(err);
+      const stderr = err?.stderr ? err.stderr.toString("utf8").trim() : String(err);
       errors.push(`JavaScript syntax check failed in ${rel}: ${stderr}`);
     }
   }
@@ -494,7 +494,7 @@ const appCommandsText = fs.existsSync(path.join(ROOT, APP_COMMANDS_FILE))
   ? fs.readFileSync(path.join(ROOT, APP_COMMANDS_FILE), "utf8")
   : "";
 const DESKTOP_SHELL_PERMISSIONS = new Set(
-  [...appCommandsText.matchAll(/^\s*"([a-z_]+)",$/gm)].map((m) => `allow-${m[1].replaceAll("_", "-")}`)
+  [...appCommandsText.matchAll(/^[^\S\r\n]*"([a-z_]+)",$/gm)].map((m) => `allow-${m[1].replaceAll("_", "-")}`)
 );
 
 // Desktop shell guard (PD-074): embedded assets only, the WebUI CSP plus the shell IPC origin,

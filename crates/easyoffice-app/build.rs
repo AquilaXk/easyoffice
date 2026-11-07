@@ -12,7 +12,7 @@ fn collect(dir: &Path, base: &Path, out: &mut Vec<(String, PathBuf)>) {
         .unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()))
         .filter_map(Result::ok)
         .collect();
-    entries.sort_by_key(|e| e.file_name());
+    entries.sort_by_key(std::fs::DirEntry::file_name);
     for entry in entries {
         let path = entry.path();
         if path.is_dir() {

@@ -20,7 +20,7 @@
     let toastTimer = null;
 
     const report = (promise) => {
-      Promise.resolve(promise).catch((err) => toast(((err && err.message) || String(err))));
+      Promise.resolve(promise).catch((err) => toast((err?.message || String(err))));
     };
 
     // ---- theme -----------------------------------------------------------------------------
@@ -97,7 +97,7 @@
 
     // Runs a command the editor forwarded. `hwp-host.js` has already checked it against the whitelist.
     function runShellCommand(request) {
-      switch (request && request.command) {
+      switch (request?.command) {
         case "new": return report(actions.newDocument?.());
         case "open": return report(actions.openFile?.());
         case "recent": return report(actions.openRecent?.(request.id));

@@ -188,13 +188,13 @@ function isSystemFontAvailable(name: string): boolean {
           probe.style.fontFamily = family;
           return probe.offsetWidth;
         });
-        const escapedName = name.replace(/(["\\])/g, '\\$1');
+        const escapedName = name.replace(/(["\\])/g, String.raw`\$1`);
         return genericFamilies.some((family, index) => {
           probe.style.fontFamily = `"${escapedName}", ${family}`;
           return probe.offsetWidth !== fallbackWidths[index];
         });
       } finally {
-        body.removeChild(probe);
+        probe.remove();
       }
     } catch {
       // body가 아직 없거나 레이아웃 측정을 지원하지 않는 surface는 기존 API로 보수적으로 처리한다.
@@ -237,6 +237,12 @@ export function getWebFontSupplySnapshot(fontName: string): WebFontSupplySnapsho
   return { status, canvasKitSfntPlanned };
 }
 
+function fontSupplyStatus(loaded: boolean, registered: boolean, catalogued: boolean): WebFontSupplyDecision['status'] {
+  if (loaded) return 'loaded';
+  if (registered) return 'registered';
+  return catalogued ? 'catalogued' : 'absent';
+}
+
 /** W2 trace용 상세 경로. 공개 snapshot의 기존 두 필드는 그대로 유지한다. */
 export function getWebFontSupplySnapshotWithRules(fontName: string): WebFontSupplyDecision {
   const normalized = normalizeFontFamily(fontName);
@@ -244,7 +250,7 @@ export function getWebFontSupplySnapshotWithRules(fontName: string): WebFontSupp
   const loaded = entries.some(entry => loadedFontFaceKeys.has(fontFaceKey(entry)));
   const registered = entries.some(entry => registeredFontFaceKeys.has(fontFaceKey(entry)));
   return {
-    status: loaded ? 'loaded' : registered ? 'registered' : entries.length > 0 ? 'catalogued' : 'absent',
+    status: fontSupplyStatus(loaded, registered, entries.length > 0),
     canvasKitSfntPlanned: isCanvasKitSfntPlanned(fontName),
     ruleIds: getProjectedWebFontRuleIds(fontName),
   };

@@ -64,7 +64,7 @@ impl TrackedFile {
     pub fn extension_matches(&self, extension: &str) -> bool {
         self.path
             .extension()
-            .and_then(|e| e.to_str())
+            .and_then(std::ffi::OsStr::to_str)
             .is_some_and(|e| e.eq_ignore_ascii_case(extension))
     }
 }

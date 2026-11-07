@@ -7,16 +7,41 @@
   // references in pasted formulas shift by the copy -> paste offset when the clipboard text is
   // the in-app copy (plain A1 refs, ranges and `$` anchors; text that merely looks like a
   // reference inside quoted sheet names is not recognised).
-  const REF_RE = /(?<![A-Za-z0-9_.!])(\$?)([A-Za-z]{1,3})(\$?)([1-9][0-9]{0,6})(?![A-Za-z0-9_(])/g;
+  const REF_RE = /(?<![\w.!])(\$?)([A-Za-z]{1,3})(\$?)([1-9]\d{0,6})(?![\w(])/g;
+
+  function entryRaw(entry) {
+    if (!entry) return "";
+    return entry.formula || entry.value || "";
+  }
+
+  function dataOf(ev) {
+    return ev.clipboardData || ev.dataTransfer || null;
+  }
+
+  async function writeSystem(text) {
+    const clip = host.navigator?.clipboard;
+    if (!clip || typeof clip.writeText !== "function") return false;
+    try {
+      await clip.writeText(text);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function readSystem() {
+    const clip = host.navigator?.clipboard;
+    if (!clip || typeof clip.readText !== "function") return "";
+    try {
+      return (await clip.readText()) || "";
+    } catch {
+      return "";
+    }
+  }
 
   function createSheetClipboard(api) {
     const { grid, isFormulaStr } = api;
     let internal = null;
-
-    function entryRaw(entry) {
-      if (!entry) return "";
-      return entry.formula || entry.value || "";
-    }
 
     function quoteField(text) {
       return /[\t\r\n"]/.test(text) ? '"' + text.replaceAll('"', '""') + '"' : text;
@@ -157,10 +182,6 @@
       return api.applyCellEdits(edits, "붙여넣기" + extra);
     }
 
-    function dataOf(ev) {
-      return ev.clipboardData || ev.dataTransfer || null;
-    }
-
     function onCopy(ev, range, cut) {
       const text = toTsv(range);
       remember(range, text);
@@ -178,27 +199,6 @@
       ev.preventDefault();
       if (!text) return Promise.resolve(false);
       return pasteText(text, range);
-    }
-
-    async function writeSystem(text) {
-      const clip = host.navigator?.clipboard;
-      if (!clip || typeof clip.writeText !== "function") return false;
-      try {
-        await clip.writeText(text);
-        return true;
-      } catch {
-        return false;
-      }
-    }
-
-    async function readSystem() {
-      const clip = host.navigator?.clipboard;
-      if (!clip || typeof clip.readText !== "function") return "";
-      try {
-        return (await clip.readText()) || "";
-      } catch {
-        return "";
-      }
     }
 
     // Toolbar / menu commands (no clipboard event available).

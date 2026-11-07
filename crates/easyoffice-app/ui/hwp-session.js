@@ -43,7 +43,7 @@
   function bytesToBase64(bytes, btoaFn) {
     let bin = "";
     for (let i = 0; i < bytes.length; i += BASE64_CHUNK) {
-      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + BASE64_CHUNK));
+      bin += String.fromCodePoint.apply(null, bytes.subarray(i, i + BASE64_CHUNK));
     }
     return btoaFn(bin);
   }
@@ -68,6 +68,13 @@
   }
 
   // ---- IndexedDB autosave store ----------------------------------------------------------
+
+  function readOne(store, key) {
+    const box = { value: undefined };
+    const req = store.get(key);
+    req.onsuccess = () => { box.value = req.result; };
+    return box;
+  }
 
   // One record per HWP tab: { tabId, fileName, format, savedAt, size, bytes }. A tiny `meta` store
   // lets stale records be found without loading document bytes.
@@ -106,13 +113,6 @@
       });
     }
 
-    function readOne(store, key) {
-      const box = { value: undefined };
-      const req = store.get(key);
-      req.onsuccess = () => { box.value = req.result; };
-      return box;
-    }
-
     return {
       put: (record) => run("readwrite", (records, meta) => {
         records.put(record);
@@ -140,6 +140,31 @@
   }
 
   // ---- session ---------------------------------------------------------------------------
+
+  function validate(name, size) {
+    if (!name) return "파일 이름을 확인할 수 없습니다";
+    if (size === 0) return "빈 파일은 열 수 없습니다";
+    if (size > MAX_HWP_BYTES) {
+      return "파일이 너무 큽니다 (" + mib(size) + "). 한글 문서는 최대 " + MAX_HWP_LABEL + "까지 열 수 있습니다";
+    }
+    return "";
+  }
+
+  function failure(format, error, cancelled) {
+    const tag = String(format).toUpperCase();
+    const message = cancelled
+      ? "문서 저장 취소 (" + tag + "): 저장 위치를 선택하지 않았습니다"
+      : "문서 저장 실패 (" + tag + "): " + error;
+    return { ok: false, cancelled: Boolean(cancelled), error: error || "", message };
+  }
+
+  function isUsableRecord(rec) {
+    const bytes = rec?.bytes;
+    const length = bytes instanceof Uint8Array ? bytes.length : bytes?.byteLength;
+    return Boolean(rec) && typeof rec.fileName === "string" && rec.fileName !== "" &&
+      (rec.format === "hwp" || rec.format === "hwpx") && Number.isFinite(rec.savedAt) &&
+      Number.isInteger(length) && length > 0 && length <= MAX_HWP_BYTES;
+  }
 
   function createHwpSession(deps) {
     const { document, hwpHost } = deps;
@@ -169,7 +194,7 @@
       if (windowId) return "hwp-" + windowId;
       try {
         const storage = env.sessionStorage;
-        const existing = storage && storage.getItem(TAB_ID_KEY);
+        const existing = storage?.getItem(TAB_ID_KEY);
         if (existing) return existing;
         const fresh = "hwp-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
         if (storage) storage.setItem(TAB_ID_KEY, fresh);
@@ -228,7 +253,7 @@
       autosaving = true;
       const seq = editSeq;
       try {
-        const format = (current && current.saveFormat) || "hwp";
+        const format = current?.saveFormat || "hwp";
         const bytes = await hwpHost.exportBytes(format);
         if (bytes.length > MAX_HWP_BYTES) {
           await store.remove(tabId).catch(() => null);
@@ -237,7 +262,7 @@
         }
         if (!dirty) return;
         await store.put({
-          tabId, fileName: (current && current.name) || "문서", format, savedAt: Date.now(),
+          tabId, fileName: current?.name || "문서", format, savedAt: Date.now(),
           size: bytes.length, bytes: copyBuffer(bytes),
         });
       } catch (err) {
@@ -251,7 +276,7 @@
     // ---- editor events -----------------------------------------------------------------
 
     hwpHost.onChange((ev) => {
-      const payload = ev && ev.payload;
+      const payload = ev?.payload;
       if (!payload || busy) return;
       if (payload.reason === "dirty_changed") {
         setDirty(payload.dirty === true);
@@ -269,22 +294,13 @@
 
     // ---- open --------------------------------------------------------------------------
 
-    function validate(name, size) {
-      if (!name) return "파일 이름을 확인할 수 없습니다";
-      if (size === 0) return "빈 파일은 열 수 없습니다";
-      if (size > MAX_HWP_BYTES) {
-        return "파일이 너무 큽니다 (" + mib(size) + "). 한글 문서는 최대 " + MAX_HWP_LABEL + "까지 열 수 있습니다";
-      }
-      return "";
-    }
-
     // Entry gate: EasyOffice FormatDetector signature/size check through the existing IPC. Only the
     // first bytes are sent: the extension hint selects the format and its magic bytes are verified.
     async function detect(name, data) {
       const res = await deps.invokeIpc("detect_format", JSON.stringify({
         fileName: name, hexPrefix: toHex(data, PREFIX_BYTES),
       }));
-      const format = String((res && res.format) || "").toLowerCase();
+      const format = String(res?.format || "").toLowerCase();
       if (!HWP_EXTENSIONS.has(format)) throw new Error("한글 문서 형식이 아닙니다 (" + (format || "알 수 없음") + ")");
       return format;
     }
@@ -318,7 +334,7 @@
       await store.remove(tabId).catch(() => null);
       if (hwpHost.getStatus() === "ready") hwpHost.useLegacyEditor();
       const res = await hooks.textFallback();
-      if (res && res.ok) {
+      if (res?.ok) {
         setNoticeText(MSG_TEXT_ONLY);
         feedback("텍스트만 열기: " + name + " — " + why + ". " + MSG_TEXT_ONLY);
         return { ...res, textOnly: true };
@@ -362,7 +378,7 @@
         const res = await loadIntoEditor(name, data, format);
         setDirty(false);
         await store.remove(tabId).catch(() => null);
-        const pages = res && res.pageCount ? " · " + res.pageCount + "쪽" : "";
+        const pages = res?.pageCount ? " · " + res.pageCount + "쪽" : "";
         feedback("열기 완료: " + name + " (" + format.toUpperCase() + " → 한글 편집기" + pages + " · " + mib(data.length) + " · " + (Date.now() - started) + "ms)");
         return { ok: true, module: "HWP", format, title: name, warnings: [] };
       } catch (err) {
@@ -394,7 +410,7 @@
       const copy = copyBuffer(bytes);
       try {
         const verdict = await hwpHost.call("verifyBytes", { data: copy }, { transfer: [copy] });
-        if (!verdict || verdict.ok !== true || !(verdict.pageCount > 0)) return { error: "저장 전 검증에 실패했습니다" };
+        if (verdict?.ok !== true || !(verdict.pageCount > 0)) return { error: "저장 전 검증에 실패했습니다" };
       } catch (err) {
         return { error: "저장 전 검증에 실패했습니다: " + describeError(err) };
       }
@@ -417,14 +433,6 @@
         if (!offer) return { error: outcome.error, format: fmt };
         fmt = "hwp";
       }
-    }
-
-    function failure(format, error, cancelled) {
-      const tag = String(format).toUpperCase();
-      const message = cancelled
-        ? "문서 저장 취소 (" + tag + "): 저장 위치를 선택하지 않았습니다"
-        : "문서 저장 실패 (" + tag + "): " + error;
-      return { ok: false, cancelled: Boolean(cancelled), error: error || "", message };
     }
 
     async function afterDelivery(delivery, exported, baseTitle, startSeq) {
@@ -451,7 +459,7 @@
 
     async function doSave(options) {
       if (hwpHost.getStatus() !== "ready") return failure(options.format || "hwp", "한글 편집기가 준비되지 않았습니다");
-      const wanted = options.format || (current && current.saveFormat) || "hwp";
+      const wanted = options.format || current?.saveFormat || "hwp";
       const startSeq = editSeq;
       saving = true;
       try {
@@ -459,8 +467,8 @@
         if (!exported.bytes) return failure(exported.format, exported.error);
         const base64 = bytesToBase64(exported.bytes, (s) => env.btoa(s));
         const delivery = await options.deliver(base64, options.baseName, exported.format);
-        if (delivery && delivery.cancelled) return failure(exported.format, "", true);
-        if (!delivery || !delivery.ok) return failure(exported.format, (delivery && delivery.error) || "파일 다운로드를 시작하지 못했습니다");
+        if (delivery?.cancelled) return failure(exported.format, "", true);
+        if (!delivery?.ok) return failure(exported.format, delivery?.error || "파일 다운로드를 시작하지 못했습니다");
         return await afterDelivery(delivery, exported, options.baseName, startSeq);
       } catch (err) {
         return failure(wanted, describeError(err));
@@ -477,14 +485,6 @@
     }
 
     // ---- restore -----------------------------------------------------------------------
-
-    function isUsableRecord(rec) {
-      const bytes = rec && rec.bytes;
-      const length = bytes instanceof Uint8Array ? bytes.length : bytes && bytes.byteLength;
-      return Boolean(rec) && typeof rec.fileName === "string" && rec.fileName !== "" &&
-        (rec.format === "hwp" || rec.format === "hwpx") && Number.isFinite(rec.savedAt) &&
-        Number.isInteger(length) && length > 0 && length <= MAX_HWP_BYTES;
-    }
 
     async function discardRecord(why) {
       await store.remove(tabId).catch(() => null);
@@ -535,7 +535,7 @@
       if (!current && !dirty) return null;
       try {
         const bytes = await hwpHost.exportBytes(srcFormat);
-        const stem = ((current && current.name) || "변환_문서").replace(/\.[A-Za-z0-9]+$/, "") || "변환_문서";
+        const stem = (current?.name || "변환_문서").replace(/\.[A-Za-z0-9]+$/, "") || "변환_문서";
         return {
           baseName: stem,
           fields: { fileName: stem + "." + srcFormat, sourceBase64: bytesToBase64(bytes, (s) => env.btoa(s)) },

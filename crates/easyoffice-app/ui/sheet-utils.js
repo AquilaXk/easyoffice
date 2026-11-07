@@ -30,9 +30,9 @@
     if (!raw) return "''";
     const up = asciiUpperJs(raw);
     const hasEdgeSpace = raw !== raw.trim();
-    const hasNonAlphaNum = !/^[A-Za-z0-9_]+$/.test(raw);
-    const startsWithDigit = /^[0-9]/.test(raw);
-    const looksLikeCell = /^[A-Za-z]{1,3}[0-9]+$/.test(raw);
+    const hasNonAlphaNum = !/^\w+$/.test(raw);
+    const startsWithDigit = /^\d/.test(raw);
+    const looksLikeCell = /^[A-Za-z]{1,3}\d+$/.test(raw);
     const isReserved = up === "TRUE" || up === "FALSE";
     if (hasEdgeSpace || hasNonAlphaNum || startsWithDigit || looksLikeCell || isReserved) {
       return "'" + raw.replaceAll("'", "''") + "'";
@@ -42,13 +42,13 @@
 
   function parseStrictA1Coord(rawToken) {
     const str = String(rawToken ?? "").trim();
-    const candidateMatch = /^\$?([A-Za-z]{1,3})\$?([0-9]+)$/.exec(str);
+    const candidateMatch = /^\$?([A-Za-z]{1,3})\$?(\d+)$/.exec(str);
     if (!candidateMatch) {
       return { ok: false, errorCode: "#NAME?" };
     }
     const letters = asciiUpperJs(candidateMatch[1]);
     const digits = candidateMatch[2];
-    if (digits[0] === "0") {
+    if (digits.startsWith("0")) {
       return { ok: false, errorCode: "#REF!" };
     }
     let col1 = 0;
@@ -200,7 +200,7 @@
       break;
     }
     while (labels.length >= 2) {
-      const last = labels[labels.length - 1];
+      const last = labels.at(-1);
       if (last.allAlpha && last.labelChars >= 2) {
         return last.endPos;
       }
@@ -276,12 +276,12 @@
   }
 
   function matchRrnAtJs(str, idx) {
-    if (idx > 0 && isAsciiDigitCode(str.charCodeAt(idx - 1))) return null;
+    if (idx > 0 && isAsciiDigitCode(str.codePointAt(idx - 1))) return null;
     if (
       idx + 14 <= str.length &&
       /^\d{6}-\d{7}$/.test(str.slice(idx, idx + 14)) &&
       isValidRrnDateAndGenderJs(str.slice(idx, idx + 6), str[idx + 7]) &&
-      (idx + 14 === str.length || !isAsciiDigitCode(str.charCodeAt(idx + 14)))
+      (idx + 14 === str.length || !isAsciiDigitCode(str.codePointAt(idx + 14)))
     ) {
       return { len: 14, replacement: "******-*******" };
     }
@@ -289,7 +289,7 @@
       idx + 13 <= str.length &&
       /^\d{13}$/.test(str.slice(idx, idx + 13)) &&
       isValidRrnDateAndGenderJs(str.slice(idx, idx + 6), str[idx + 6]) &&
-      (idx + 13 === str.length || !isAsciiDigitCode(str.charCodeAt(idx + 13)))
+      (idx + 13 === str.length || !isAsciiDigitCode(str.codePointAt(idx + 13)))
     ) {
       return { len: 13, replacement: "******-*******" };
     }
@@ -298,7 +298,7 @@
 
   function consumeDigitsJs(str, pos, minLen, maxLen) {
     let end = pos;
-    while (end < str.length && end - pos < maxLen && isAsciiDigitCode(str.charCodeAt(end))) {
+    while (end < str.length && end - pos < maxLen && isAsciiDigitCode(str.codePointAt(end))) {
       end += 1;
     }
     return end - pos >= minLen ? end : -1;
@@ -309,7 +309,7 @@
   }
 
   function matchPhoneAtJs(str, idx) {
-    if (idx > 0 && (isAsciiDigitCode(str.charCodeAt(idx - 1)) || str[idx - 1] === "+")) {
+    if (idx > 0 && (isAsciiDigitCode(str.codePointAt(idx - 1)) || str[idx - 1] === "+")) {
       return null;
     }
     if (str.startsWith("+82", idx)) {
@@ -324,7 +324,7 @@
           let p3 = pMid;
           if (p3 < str.length && isPhoneSepChar(str[p3])) p3 += 1;
           const pEnd = consumeDigitsJs(str, p3, 4, 4);
-          if (pEnd > 0 && (pEnd === str.length || !isAsciiDigitCode(str.charCodeAt(pEnd)))) {
+          if (pEnd > 0 && (pEnd === str.length || !isAsciiDigitCode(str.codePointAt(pEnd)))) {
             return { len: pEnd - idx, replacement: "+82-**-****-****" };
           }
         }
@@ -339,14 +339,14 @@
         const pMid = consumeDigitsJs(str, p + 1, 3, 4);
         if (pMid > 0 && pMid < str.length && str[pMid] === sep) {
           const pEnd = consumeDigitsJs(str, pMid + 1, 4, 4);
-          if (pEnd > 0 && (pEnd === str.length || !isAsciiDigitCode(str.charCodeAt(pEnd)))) {
+          if (pEnd > 0 && (pEnd === str.length || !isAsciiDigitCode(str.codePointAt(pEnd)))) {
             return { len: pEnd - idx, replacement: mobileMask };
           }
         }
       } else if (
         idx + 11 <= str.length &&
         /^\d{11}$/.test(str.slice(idx, idx + 11)) &&
-        (idx + 11 === str.length || !isAsciiDigitCode(str.charCodeAt(idx + 11)))
+        (idx + 11 === str.length || !isAsciiDigitCode(str.codePointAt(idx + 11)))
       ) {
         return { len: 11, replacement: mobileMask };
       }
@@ -358,7 +358,7 @@
       const pMid = consumeDigitsJs(str, idx + area.length + 1, 3, 4);
       if (pMid > 0 && pMid < str.length && str[pMid] === sep) {
         const pEnd = consumeDigitsJs(str, pMid + 1, 4, 4);
-        if (pEnd > 0 && (pEnd === str.length || !isAsciiDigitCode(str.charCodeAt(pEnd)))) {
+        if (pEnd > 0 && (pEnd === str.length || !isAsciiDigitCode(str.codePointAt(pEnd)))) {
           const mask = area === "02" ? "02-****-****" : "***-****-****";
           return { len: pEnd - idx, replacement: mask };
         }
@@ -388,7 +388,7 @@
   function allDigitsJs(str, from, len) {
     if (from + len > str.length) return false;
     for (let i = from; i < from + len; i += 1) {
-      if (!isAsciiDigitCode(str.charCodeAt(i))) return false;
+      if (!isAsciiDigitCode(str.codePointAt(i))) return false;
     }
     return true;
   }
@@ -403,14 +403,14 @@
       if (!allDigitsJs(str, p, groups[i])) return 0;
       p += groups[i];
     }
-    if (p < str.length && isAsciiDigitCode(str.charCodeAt(p))) return 0;
+    if (p < str.length && isAsciiDigitCode(str.codePointAt(p))) return 0;
     return p - idx;
   }
 
   function passesLuhnJs(digits) {
     let sum = 0;
     for (let i = 0; i < digits.length; i += 1) {
-      let v = digits.charCodeAt(digits.length - 1 - i) - 48;
+      let v = digits.codePointAt(digits.length - 1 - i) - 48;
       if (i % 2 === 1) {
         v *= 2;
         if (v > 9) v -= 9;
@@ -423,9 +423,9 @@
   function matchContiguousCardJs(str, idx) {
     if (!/[2-69]/.test(str[idx])) return 0;
     let end = idx;
-    while (end < str.length && end - idx < 20 && isAsciiDigitCode(str.charCodeAt(end))) end += 1;
+    while (end < str.length && end - idx < 20 && isAsciiDigitCode(str.codePointAt(end))) end += 1;
     const len = end - idx;
-    if (len < 13 || len > 19 || (end < str.length && isAsciiDigitCode(str.charCodeAt(end)))) return 0;
+    if (len < 13 || len > 19 || (end < str.length && isAsciiDigitCode(str.codePointAt(end)))) return 0;
     return passesLuhnJs(str.slice(idx, end)) ? len : 0;
   }
 
@@ -443,7 +443,7 @@
 
   function matchIdentifierAtJs(str, idx) {
     if (isAsciiUpperChar(str[idx])) return matchPassportJs(str, idx);
-    if (!isAsciiDigitCode(str.charCodeAt(idx)) || (idx > 0 && isAsciiDigitCode(str.charCodeAt(idx - 1)))) {
+    if (!isAsciiDigitCode(str.codePointAt(idx)) || (idx > 0 && isAsciiDigitCode(str.codePointAt(idx - 1)))) {
       return 0;
     }
     for (const [groups, isSep] of IDENTIFIER_DIGIT_LAYOUTS) {
@@ -461,6 +461,7 @@
       const parsed = JSON.parse(rawText);
       return parsed && typeof parsed === "object" ? parsed : null;
     } catch (_err) {
+      // Malformed JSON is treated as absent input.
       return null;
     }
   }
@@ -605,8 +606,8 @@
     }
     const children = [];
     const childList = node.childNodes || [];
-    for (let i = 0; i < childList.length; i += 1) {
-      const serialized = serializeDomNode(childList[i]);
+    for (const child of childList) {
+      const serialized = serializeDomNode(child);
       if (serialized) children.push(serialized);
     }
     const spec = { t: "el", tag, attrs, data, style, children };
@@ -624,10 +625,10 @@
   }
 
   function serializeDomChildren(container) {
-    if (!container || !container.childNodes) return [];
+    if (!container?.childNodes) return [];
     const out = [];
-    for (let i = 0; i < container.childNodes.length; i += 1) {
-      const item = serializeDomNode(container.childNodes[i]);
+    for (const childNode of container.childNodes) {
+      const item = serializeDomNode(childNode);
       if (item) out.push(item);
     }
     return out;

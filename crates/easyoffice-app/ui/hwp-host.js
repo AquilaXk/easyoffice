@@ -62,7 +62,7 @@
   function bytesToBase64(bytes, btoaFn) {
     let bin = "";
     for (let i = 0; i < bytes.length; i += 0x8000) {
-      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+      bin += String.fromCodePoint.apply(null, bytes.subarray(i, i + 0x8000));
     }
     return btoaFn(bin);
   }
@@ -259,12 +259,12 @@
         }
       } else if (data.type === "rhwp-event") {
         const payload = data.payload;
-        if (payload && payload.reason === SHELL_COMMAND_REASON) {
+        if (payload?.reason === SHELL_COMMAND_REASON) {
           const command = sanitizeShellCommand(payload);
           if (command) for (const listener of commandListeners) listener(command);
           return;
         }
-        if (payload && payload.reason === SHORTCUT_REASON) {
+        if (payload?.reason === SHORTCUT_REASON) {
           if (typeof payload.shortcut === "string") for (const listener of shortcutListeners) listener(payload.shortcut);
           return;
         }
@@ -276,7 +276,7 @@
       if (!port) return Promise.reject(new Error("한글 편집기에 연결되어 있지 않습니다."));
       const id = nextId;
       nextId += 1;
-      const timeoutMs = (options && options.timeoutMs) || (LONG_METHODS.has(method) ? limits.long : limits.short);
+      const timeoutMs = options?.timeoutMs || (LONG_METHODS.has(method) ? limits.long : limits.short);
       return new Promise((resolve, reject) => {
         const timer = timers.set(() => {
           pending.delete(id);
@@ -288,7 +288,7 @@
           ...(params === undefined ? {} : { params }),
         };
         try {
-          port.postMessage(envelope, (options && options.transfer) || []);
+          port.postMessage(envelope, options?.transfer || []);
         } catch (err) {
           pending.delete(id);
           timers.clear(timer);
@@ -311,8 +311,8 @@
           limits.connect,
         );
         port.onmessage = (ev) => {
-          const data = ev && ev.data;
-          if (data && data.type === "rhwp-connected") {
+          const data = ev?.data;
+          if (data?.type === "rhwp-connected") {
             timers.clear(timer);
             capabilities = Array.isArray(data.capabilities) ? data.capabilities.slice() : [];
             resolve(capabilities);
@@ -346,7 +346,7 @@
       if (typeof env.fetch !== "function") return false;
       try {
         const res = await env.fetch(studioSrc, { cache: "no-store" });
-        return Boolean(res && res.ok);
+        return Boolean(res?.ok);
       } catch {
         return false;
       }
@@ -454,7 +454,7 @@
     async function saveDocument(deliver, baseName) {
       const base64 = await exportHwpBase64();
       const delivery = await deliver(base64, baseName, "hwp");
-      if (delivery && delivery.ok) {
+      if (delivery?.ok) {
         await call("notifySaved").catch(() => null);
       }
       return delivery;
@@ -462,12 +462,12 @@
 
     function isDirty() {
       if (status !== "ready") return Promise.resolve(false);
-      return call("getDocumentState").then((s) => Boolean(s && s.dirty)).catch(() => false);
+      return call("getDocumentState").then((s) => Boolean(s?.dirty)).catch(() => false);
     }
 
     // Theme and recent documents travel to the editor as plain values (recents: opaque id + name).
     function pushShellContext() {
-      if (!port || capabilities.indexOf("shell-context-v1") < 0) return Promise.resolve(false);
+      if (!port || !capabilities.includes("shell-context-v1")) return Promise.resolve(false);
       return call(SHELL_CONTEXT_METHOD, { theme: shellContext.theme, recents: shellContext.recents })
         .then(() => true, () => false);
     }
@@ -532,9 +532,9 @@
     // Same-origin test input for the smoke run only: click the first page, then feed the editor's
     // hidden text input (the same path the browser uses for typed text).
     async function typeIntoEditor(text) {
-      const doc = frame && frame.contentDocument;
-      const win = frame && frame.contentWindow;
-      const canvas = doc && doc.querySelector("#scroll-container canvas");
+      const doc = frame?.contentDocument;
+      const win = frame?.contentWindow;
+      const canvas = doc?.querySelector("#scroll-container canvas");
       if (!canvas) return false;
       const rect = canvas.getBoundingClientRect();
       const point = { bubbles: true, cancelable: true, button: 0, view: win, clientX: rect.left + rect.width / 2, clientY: rect.top + 160 };

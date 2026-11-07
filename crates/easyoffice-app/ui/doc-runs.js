@@ -140,7 +140,7 @@
   // Formatting of elements that were not created by the run engine (pasted or opened content).
   function readLegacyFormat(el) {
     const tag = (el.tagName || "").toUpperCase();
-    const fmt = { ...(TAG_FORMAT[tag] || {}) };
+    const fmt = { ...TAG_FORMAT[tag] };
     if (tag !== "SPAN" && tag !== "FONT") return fmt;
     return Object.assign(fmt, readInlineStyleFormat(el.style || {}));
   }
@@ -193,7 +193,8 @@
     });
     const fmt = {};
     PROPS.forEach((p) => {
-      if (patch && patch[p] !== null && patch[p] !== undefined) fmt[p] = patch[p];
+      const value = patch?.[p];
+      if (value !== null && value !== undefined) fmt[p] = value;
     });
     return fmt;
   }
@@ -230,7 +231,7 @@
 
   function removeNode(node) {
     const parent = node.parentElement;
-    if (parent) parent.removeChild(node);
+    if (parent) node.remove();
   }
 
   function isSkippedElement(el, extra) {
@@ -404,9 +405,10 @@
       const tail = parent.cloneNode(false);
       Array.from(parent.childNodes).slice(idx + 1).forEach((c) => tail.appendChild(c));
       const after = parent.nextSibling ?? null;
-      grand.insertBefore(node, after);
+      if (after) after.before(node);
+      else grand.append(node);
       if (tail.childNodes.length > 0) grand.insertBefore(tail, node.nextSibling ?? null);
-      if (parent.childNodes.length === 0) grand.removeChild(parent);
+      if (parent.childNodes.length === 0) parent.remove();
     }
   }
 
@@ -454,10 +456,9 @@
   }
 
   function unwrapElement(el) {
-    const parent = el.parentElement;
-    if (!parent) return;
-    Array.from(el.childNodes).forEach((c) => parent.insertBefore(c, el));
-    parent.removeChild(el);
+    if (!el.parentElement) return;
+    Array.from(el.childNodes).forEach((c) => el.before(c));
+    el.remove();
   }
 
   function isEmptyRun(el) {
@@ -519,7 +520,7 @@
     liftOut(text, container);
     if (!hasAnyProp(fmt)) return;
     const span = createRun(text.ownerDocument, fmt);
-    container.insertBefore(span, text);
+    text.before(span);
     span.appendChild(text);
   }
 
@@ -681,7 +682,7 @@
     if (node.nodeType === 3) {
       const tail = splitTextAt(node, offset);
       const parent = node.parentElement;
-      if (tail) parent.insertBefore(fresh, tail);
+      if (tail) tail.before(fresh);
       else parent.insertBefore(fresh, offset <= 0 ? node : node.nextSibling ?? null);
     } else {
       node.insertBefore(fresh, node.childNodes[offset] ?? null);

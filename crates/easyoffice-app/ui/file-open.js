@@ -35,7 +35,7 @@
   function bytesToBase64(bytes, btoaFn) {
     let bin = "";
     for (let i = 0; i < bytes.length; i += BASE64_CHUNK) {
-      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + BASE64_CHUNK));
+      bin += String.fromCodePoint.apply(null, bytes.subarray(i, i + BASE64_CHUNK));
     }
     return btoaFn(bin);
   }
@@ -100,7 +100,7 @@
         nodes.push(elSpec("h" + heading, inline, style));
       } else if (block.list === "bullet" || block.list === "ordered") {
         const tag = block.list === "ordered" ? "ol" : "ul";
-        if (!openList || openList.tag !== tag) {
+        if (openList?.tag !== tag) {
           openList = elSpec(tag);
           nodes.push(openList);
         }
@@ -141,7 +141,7 @@
         const entry = raw.startsWith("=") ? { value: "", formula: raw } : { value: raw, formula: "" };
         if (style) entry.style = style;
         map[cell.ref] = entry;
-        const m = /(\d+)$/.exec(cell.ref);
+        const m = /(?<!\d)(\d+)$/.exec(cell.ref);
         if (m) maxRow = Math.max(maxRow, Number(m[1]));
       });
       store[sheet.name] = map;
@@ -150,6 +150,29 @@
       if (Object.keys(widths).length > 0) columnWidths[sheet.name] = widths;
     });
     return { store, rowCounts, columnWidths };
+  }
+
+  function hasFiles(ev) {
+    const dt = ev?.dataTransfer;
+    if (!dt) return false;
+    return (dt.files && dt.files.length > 0) || Array.from(dt.types || []).includes("Files");
+  }
+
+  function applyPdf(next, res) {
+    const lines = [];
+    (res.blocks || []).forEach((b) => {
+      if (b.type === "table") (b.rows || []).forEach((r) => lines.push(r.map((c) => c.text).join(" | ")));
+      else lines.push((b.runs || []).map((r) => r.text).join(""));
+    });
+    const title = res.title || "";
+    next.pdfStudio = {
+      ...next.pdfStudio,
+      stampValue: "", stampBadge: "", watermarkInput: "", watermarkLayer: "",
+      applicant: "", dept: "", formStatus: "양식 준비 완료",
+      cardHeadingNodes: [textSpec(title)],
+      cardBodyParagraphsNodes: lines.filter((l) => l.trim()).map((l) => [textSpec(l)]),
+    };
+    next.pdfRotationDeg = 0;
   }
 
   function createFileOpen(deps) {
@@ -190,24 +213,7 @@
     }
 
     function isModuleEdited(snap, mod) {
-      return Object.prototype.hasOwnProperty.call(baselines, mod) && baselines[mod] !== fingerprint(snap, mod);
-    }
-
-    function applyPdf(next, res) {
-      const lines = [];
-      (res.blocks || []).forEach((b) => {
-        if (b.type === "table") (b.rows || []).forEach((r) => lines.push(r.map((c) => c.text).join(" | ")));
-        else lines.push((b.runs || []).map((r) => r.text).join(""));
-      });
-      const title = res.title || "";
-      next.pdfStudio = {
-        ...(next.pdfStudio || {}),
-        stampValue: "", stampBadge: "", watermarkInput: "", watermarkLayer: "",
-        applicant: "", dept: "", formStatus: "양식 준비 완료",
-        cardHeadingNodes: [textSpec(title)],
-        cardBodyParagraphsNodes: lines.filter((l) => l.trim()).map((l) => [textSpec(l)]),
-      };
-      next.pdfRotationDeg = 0;
+      return Object.hasOwn(baselines, mod) && baselines[mod] !== fingerprint(snap, mod);
     }
 
     async function applyDecoded(next, res, name) {
@@ -241,7 +247,7 @@
         throw new Error("지원하지 않는 모듈입니다: " + mod);
       }
       next.activeModule = mod;
-      next.tabTitles = { ...(next.tabTitles || {}), [mod]: name };
+      next.tabTitles = { ...next.tabTitles, [mod]: name };
     }
 
     function pruneSheetTabs(names) {
@@ -251,11 +257,17 @@
       });
     }
 
+    const ITEM_UNIT_BY_KIND = new Map([
+      ["workbook", "개 시트"],
+      ["slides", "개 슬라이드"],
+    ]);
+    const DEFAULT_ITEM_UNIT = "개 블록";
+
     function describe(res, name) {
       const label = MODULE_LABELS[res.module] || res.module;
       const notes = Array.isArray(res.warnings) && res.warnings.length > 0 ? " · 참고: " + res.warnings.join(" ") : "";
       return "열기 완료: " + name + " (" + String(res.format).toUpperCase() + " → " + label + " 모듈 · " + res.itemCount +
-        (res.kind === "workbook" ? "개 시트" : res.kind === "slides" ? "개 슬라이드" : "개 블록") + ")" + notes;
+        (ITEM_UNIT_BY_KIND.get(res.kind) ?? DEFAULT_ITEM_UNIT) + ")" + notes;
     }
 
     function fail(message) {
@@ -287,7 +299,7 @@
         if (convBox) convBox.textContent = convText;
         return fail(name + " — " + (err?.message || String(err)));
       }
-      if (!res || res.status !== "OK" || !MODULE_LABELS[res.module]) {
+      if (res?.status !== "OK" || !MODULE_LABELS[res.module]) {
         return fail(name + " — 백엔드 응답을 해석할 수 없습니다");
       }
       setFeedback("파일 여는 중: " + name);
@@ -300,7 +312,7 @@
           );
           if (!ok) return { cancelled: true };
         }
-        const next = JSON.parse(JSON.stringify(pre));
+        const next = structuredClone(pre);
         await applyDecoded(next, res, name);
         pushRawUndoSnapshot(pre);
         await restoreWorkspaceSnapshot(next, null);
@@ -379,12 +391,6 @@
 
     // ---- DOM wiring ---------------------------------------------------------------------
 
-    function hasFiles(ev) {
-      const dt = ev?.dataTransfer;
-      if (!dt) return false;
-      return (dt.files && dt.files.length > 0) || Array.from(dt.types || []).includes("Files");
-    }
-
     function closeMenus() {
       document.querySelectorAll(".menu-item.open").forEach((el) => el.classList.remove("open"));
     }
@@ -401,7 +407,7 @@
     function bindUi() {
       const input = document.getElementById("file-open-input");
       input?.addEventListener("change", () => {
-        const file = input.files && input.files[0];
+        const file = input.files?.[0];
         input.value = "";
         if (file && !deps.routeFile?.(file)) void openFile(file);
       });
@@ -414,7 +420,7 @@
       });
       const convInput = document.getElementById("conv-source-file");
       convInput?.addEventListener("change", () => {
-        const file = convInput.files && convInput.files[0];
+        const file = convInput.files?.[0];
         convInput.value = "";
         if (file) void setConverterSource(file);
       });

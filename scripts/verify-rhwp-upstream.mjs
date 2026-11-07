@@ -98,7 +98,7 @@ export function parseGitmodules(text) {
       entries.set(header[1], current);
       continue;
     }
-    const kv = /^([A-Za-z][\w-]*)\s*=\s*(.*)$/.exec(line);
+    const kv = /^([A-Za-z][\w-]*)\s*=\s*(\S.*|)$/.exec(line);
     if (kv && current) current[kv[1].toLowerCase()] = kv[2].trim();
   }
   return entries;
@@ -201,8 +201,7 @@ export function verifyUpstream(root) {
   } catch (err) {
     errors.push(`git ls-files failed: ${String(err.stderr || err.message).trim()}`);
   }
-  errors.push(...checkWorktree(root, config));
-  errors.push(...checkVendorCore(root, config));
+  errors.push(...checkWorktree(root, config), ...checkVendorCore(root, config));
   return errors;
 }
 

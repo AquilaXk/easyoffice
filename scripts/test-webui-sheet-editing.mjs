@@ -32,7 +32,7 @@ function bigSheetModel(rows, cols = 8) {
   const cells = [];
   for (let r = 1; r <= rows; r += 1) {
     for (let c = 0; c < cols; c += 1) {
-      const ref = String.fromCharCode(65 + c) + r;
+      const ref = String.fromCodePoint(65 + c) + r;
       cells.push({ ref, raw: r === 1 ? "열" + (c + 1) : String(r * 10 + c) });
     }
   }

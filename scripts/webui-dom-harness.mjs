@@ -145,6 +145,14 @@ class MiniNode {
   remove() {
     if (this.parentElement) this.parentElement._removeChildRef(this);
   }
+
+  before(newNode) {
+    if (!this.parentElement) return;
+    const p = this.parentElement;
+    p._adopt(newNode);
+    const idx = p.childNodes.indexOf(this);
+    if (idx >= 0) p.childNodes.splice(idx, 0, newNode);
+  }
 }
 
 class MiniTextNode extends MiniNode {
@@ -417,7 +425,7 @@ class MiniElement extends MiniNode {
   }
 
   get lastChild() {
-    return this.childNodes[this.childNodes.length - 1] ?? null;
+    return this.childNodes.at(-1) ?? null;
   }
 
   insertBefore(newNode, refNode) {
@@ -442,14 +450,6 @@ class MiniElement extends MiniNode {
       const child = typeof n === "string" ? new MiniTextNode(n, this.ownerDocument) : n;
       this.appendChild(child);
     });
-  }
-
-  before(newNode) {
-    if (!this.parentElement) return;
-    const p = this.parentElement;
-    p._adopt(newNode);
-    const idx = p.childNodes.indexOf(this);
-    if (idx >= 0) p.childNodes.splice(idx, 0, newNode);
   }
 
   remove() {
@@ -586,7 +586,9 @@ class MiniElement extends MiniNode {
     this.open = false;
   }
 
-  scrollIntoView() {}
+  scrollIntoView() {
+    /* layout-free harness: nothing to scroll */
+  }
 
   getBoundingClientRect() {
     return { left: 0, top: 0, width: 640, height: 360 };
@@ -623,7 +625,7 @@ function serializeNodesToHtml(nodes) {
 }
 
 function parseAttributesInto(attrText, el) {
-  const attrRe = /([A-Za-z0-9_:-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g;
+  const attrRe = /([\w:-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g;
   let m;
   while ((m = attrRe.exec(attrText)) !== null) {
     const name = m[1].toLowerCase();
@@ -642,13 +644,13 @@ function parseHtmlFragment(html, ownerDocument) {
   };
   const stack = [root];
   const tagRe =
-    /<!--[\s\S]*?-->|<!doctype[^>]*>|<\/([A-Za-z0-9-]+)\s*>|<([A-Za-z0-9-]+)((?:"[^"]*"|'[^']*'|[^>"'])*)(\/?)>/gi;
+    /<!--[\s\S]*?-->|<!doctype[^>]*>|<\/([a-z0-9-]+)\s*>|<([a-z0-9-]+)((?:"[^"]*"|'[^']*'|[^>"'])*)(\/?)>/gi;
   let lastIdx = 0;
   let m;
   while ((m = tagRe.exec(html)) !== null) {
     if (m.index > lastIdx) {
       const txt = decodeHtmlEntities(html.slice(lastIdx, m.index));
-      const top = stack[stack.length - 1];
+      const top = stack.at(-1);
       top.appendChild(new MiniTextNode(txt, ownerDocument));
     }
     lastIdx = tagRe.lastIndex;
@@ -664,7 +666,7 @@ function parseHtmlFragment(html, ownerDocument) {
       const tagLower = m[2].toLowerCase();
       const el = new MiniElement(tagLower, ownerDocument);
       parseAttributesInto(m[3] || "", el);
-      stack[stack.length - 1].appendChild(el);
+      stack.at(-1).appendChild(el);
       if (!VOID_TAGS.has(tagLower) && m[4] !== "/") {
         stack.push(el);
       }
@@ -672,14 +674,15 @@ function parseHtmlFragment(html, ownerDocument) {
   }
   if (lastIdx < html.length) {
     const tailTxt = decodeHtmlEntities(html.slice(lastIdx));
-    stack[stack.length - 1].appendChild(new MiniTextNode(tailTxt, ownerDocument));
+    stack.at(-1).appendChild(new MiniTextNode(tailTxt, ownerDocument));
   }
   return root.childNodes;
 }
 
 class MiniDocument {
+  activeElement = null;
+
   constructor(htmlSource) {
-    this.activeElement = null;
     this._listeners = new Map();
     const nodes = parseHtmlFragment(htmlSource, this);
     this.documentElement =
@@ -900,7 +903,7 @@ export async function createWorkspaceHarness(options = {}) {
         const handlers = getDefaultOfflineHandlers();
         const fn = handlers[command];
         if (typeof fn !== "function") {
-          throw new Error("알 수 없는 IPC 명령: " + command);
+          throw new TypeError("알 수 없는 IPC 명령: " + command);
         }
         return await fn(payload);
       });

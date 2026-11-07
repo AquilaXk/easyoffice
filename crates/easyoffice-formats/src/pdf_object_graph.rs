@@ -317,7 +317,7 @@ pub(super) fn parse_pdf_value_with_table(
         _ => {}
     }
     let tok_str = std::str::from_utf8(tok).map_err(|_| ())?;
-    if tok.iter().all(|b| b.is_ascii_digit()) {
+    if tok.iter().all(u8::is_ascii_digit) {
         let q1 = skip_pdf_ws_and_comments(bytes, k, limit);
         if q1 > k && q1 < limit && bytes[q1].is_ascii_digit() {
             let mut k2 = q1;
@@ -345,7 +345,7 @@ pub(super) fn parse_pdf_value_with_table(
     if tok
         .iter()
         .all(|b| b.is_ascii_digit() || matches!(b, b'+' | b'-' | b'.'))
-        && tok.iter().any(|b| b.is_ascii_digit())
+        && tok.iter().any(u8::is_ascii_digit)
     {
         if let Ok(f) = tok_str.parse::<f64>() {
             if f.is_finite() {

@@ -61,8 +61,7 @@ test("depth > 64 cutoff does not poison workbook memo for shallower targets in a
       value: "=A" + String(i + 1),
     });
   }
-  cells.push({ sheet: "Sheet1", cell: "A66", value: "100" });
-  cells.push({ sheet: "Sheet1", cell: "B1", value: "=IFERROR(A1, 999)" });
+  cells.push({ sheet: "Sheet1", cell: "A66", value: "100" }, { sheet: "Sheet1", cell: "B1", value: "=IFERROR(A1, 999)" });
 
   const res = offlineRpc.evaluate_sheet(
     JSON.stringify({
@@ -164,7 +163,7 @@ test("focus-retaining ribbon and theme clicks refresh focused cell pendingSnapsh
   const backendUndoStack = [];
   let backendIsBold = false;
 
-  const { document, sandbox, userClick } = await createWorkspaceHarness({
+  const { document, sandbox } = await createWorkspaceHarness({
     tauriInvoke: (command, args) => {
       if (command === "get_workspace_bootstrap") {
         return {
@@ -495,7 +494,7 @@ test("concurrent switchSheetTab and performWorkspaceUndo serialize ahead of qat-
     eventLog.filter((entry) => entry.startsWith("convert:")).length,
     3
   );
-  assert.equal(eventLog[eventLog.length - 1], "audit_security");
+  assert.equal(eventLog.at(-1), "audit_security");
 });
 
 test("evaluate_sheet batch targets anchor validation, Roman numeral sheet ident, and ribbon-style Undo sync", async () => {

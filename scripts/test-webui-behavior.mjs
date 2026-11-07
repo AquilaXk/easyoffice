@@ -4,7 +4,7 @@ import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs
 import { switchModule } from "./test-support/modules.mjs";
 
 test("focused cell edit supports undo, redo formula recalculation, and subsequent re-edit", async () => {
-  const { document, sandbox, userClick } = await createWorkspaceHarness();
+  const { document, sandbox } = await createWorkspaceHarness();
   switchModule(document, "SHEET");
   await flushAsyncTurns();
 
@@ -59,7 +59,7 @@ test("clicking formula cell while async recalculation is in flight preserves dat
   const pendingEvaluations = [];
   let evaluateSheetCallCount = 0;
 
-  const { document, userClick } = await createWorkspaceHarness({
+  const { document } = await createWorkspaceHarness({
     tauriInvoke: (command, args) => {
       if (command === "get_workspace_bootstrap") {
         return {
@@ -1043,7 +1043,7 @@ test("ribbon IPC sends a per-window session id and the undo target module (#106)
 
   hA.sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
   await flushAsyncTurns();
-  const undoA1 = ribbonCalls.filter((c) => c.command === "undo_ribbon_command")[0];
+  const undoA1 = ribbonCalls.find((c) => c.command === "undo_ribbon_command");
   assert.equal(undoA1.win, "A");
   assert.equal(undoA1.req.module, "SHEET");
   assert.equal(undoA1.res.activeModule, "SHEET");

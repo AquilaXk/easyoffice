@@ -81,6 +81,17 @@
     return Object.values(style).some(Boolean) ? style : null;
   }
 
+  function isEmptyEntry(entry) {
+    const st = entry.style;
+    const styled = st && STYLE_KEYS.some((k) => st[k]);
+    return !entry.value && !entry.formula && !styled;
+  }
+
+  function pressedValue(state) {
+    if (state === "mixed") return "mixed";
+    return state ? "true" : "false";
+  }
+
   function createSheetFormat(api) {
     const {
       document,
@@ -135,12 +146,6 @@
       }
       if (on === 0) return false;
       return on === area ? true : "mixed";
-    }
-
-    function isEmptyEntry(entry) {
-      const st = entry.style;
-      const styled = st && STYLE_KEYS.some((k) => st[k]);
-      return !entry.value && !entry.formula && !styled;
     }
 
     function patchCell(map, ref, mutate) {
@@ -205,10 +210,6 @@
         if (fb) fb.textContent = "셀 서식: " + count + "칸";
         return count;
       });
-    }
-
-    function pressedValue(state) {
-      return state === "mixed" ? "mixed" : state ? "true" : "false";
     }
 
     function setPressed(el, state) {

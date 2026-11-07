@@ -65,7 +65,7 @@ export function pxToPrintMm(px: number): number {
 function formatMm(mm: number): string {
   return Number.isInteger(mm)
     ? String(mm)
-    : mm.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
+    : mm.toFixed(3).replace(/(?<!0)0+$/, '').replace(/\.$/, '');
 }
 
 export function createPrintPage(svg: string, pageInfo: PrintPageInfo, pageIndex: number): PrintPage {
@@ -79,7 +79,7 @@ export function createPrintPage(svg: string, pageInfo: PrintPageInfo, pageIndex:
 }
 
 function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return value.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
 }
 
 export function namespaceSvgReferenceValue(value: string, idMap: Map<string, string>): string {
@@ -87,7 +87,7 @@ export function namespaceSvgReferenceValue(value: string, idMap: Map<string, str
   for (const [oldId, newId] of idMap) {
     const escapedOldId = escapeRegExp(oldId);
     next = next.replace(
-      new RegExp(`url\\((['"]?)#${escapedOldId}\\1\\)`, 'g'),
+      new RegExp(String.raw`url\((['"]?)#${escapedOldId}\1\)`, 'g'),
       () => `url(#${newId})`,
     );
     if (next === `#${oldId}`) {

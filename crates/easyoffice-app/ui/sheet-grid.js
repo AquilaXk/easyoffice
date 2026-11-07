@@ -25,7 +25,7 @@
     let out = "";
     while (n > 0) {
       const rem = (n - 1) % 26;
-      out = String.fromCharCode(65 + rem) + out;
+      out = String.fromCodePoint(65 + rem) + out;
       n = Math.floor((n - 1) / 26);
     }
     return out;
@@ -34,13 +34,13 @@
   function colIndex(letters) {
     let n = 0;
     for (let i = 0; i < letters.length; i += 1) {
-      n = n * 26 + (letters.charCodeAt(i) - 64);
+      n = n * 26 + (letters.codePointAt(i) - 64);
     }
     return n;
   }
 
   function parseRef(ref) {
-    const m = /^([A-Za-z]{1,3})([1-9][0-9]{0,6})$/.exec(String(ref || "").trim());
+    const m = /^([A-Za-z]{1,3})([1-9]\d{0,6})$/.exec(String(ref || "").trim());
     if (!m) return null;
     const col = colIndex(m[1].toUpperCase());
     const row = Number(m[2]);
@@ -52,7 +52,7 @@
     return colName(col) + row;
   }
 
-  const NUMERIC_RE = /^-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/;
+  const NUMERIC_RE = /^-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
   const GROUPED_NUMERIC_RE = /^-?\d{1,3}(?:,\d{3})+(?:\.\d+)?$/;
 
   function isNumericText(text) {
@@ -88,6 +88,35 @@
       out[name] = dst;
     });
     return out;
+  }
+
+  function hasLayout(vp) {      return Boolean(vp) && vp.clientHeight > 0 && vp.clientWidth > 0;
+  }
+
+  function rowOf(tr) {
+    if (tr?.tagName !== "TR") return 0;
+    const raw = tr.dataset.row || tr.querySelector("th[data-row]")?.dataset.row;
+    return Number(raw) || 0;
+  }
+
+  function setDisplayValue(td, value) {
+    const raw = String(value ?? "");
+    const shown = formatGeneral(raw);
+    td.textContent = shown;
+    if (shown === raw) {
+      delete td.dataset.raw;
+      delete td.dataset.display;
+    } else {
+      td.dataset.raw = raw;
+      td.dataset.display = shown;
+    }
+    td.classList.toggle("num", isNumericText(raw));
+  }
+
+  function readTdValue(td) {
+    const text = (td.textContent || "").trim();
+    if (td.dataset.raw !== undefined && text === td.dataset.display) return td.dataset.raw;
+    return text;
   }
 
   function createSheetGrid(deps) {
@@ -158,9 +187,6 @@
       });
     }
 
-    function hasLayout(vp) {      return Boolean(vp) && vp.clientHeight > 0 && vp.clientWidth > 0;
-    }
-
     function computeView() {
       const vp = viewportEl();
       if (hasLayout(vp)) {
@@ -191,12 +217,6 @@
       };
     }
 
-    function rowOf(tr) {
-      if (!tr || tr.tagName !== "TR") return 0;
-      const raw = tr.dataset.row || tr.querySelector("th[data-row]")?.dataset.row;
-      return Number(raw) || 0;
-    }
-
     function paintTd(td, entry) {
       const value = entry?.value ?? "";
       const formula = entry?.formula || "";
@@ -212,26 +232,8 @@
     }
 
     // Shows `value` with the General format; the raw value is remembered for editing/saving.
-    function setDisplayValue(td, value) {
-      const raw = String(value ?? "");
-      const shown = formatGeneral(raw);
-      td.textContent = shown;
-      if (shown === raw) {
-        delete td.dataset.raw;
-        delete td.dataset.display;
-      } else {
-        td.dataset.raw = raw;
-        td.dataset.display = shown;
-      }
-      td.classList.toggle("num", isNumericText(raw));
-    }
 
     // Raw value of a cell: the unformatted number when the display was rounded.
-    function readTdValue(td) {
-      const text = (td.textContent || "").trim();
-      if (td.dataset.raw !== undefined && text === td.dataset.display) return td.dataset.raw;
-      return text;
-    }
 
     function createTd(ref) {
       const td = document.createElement("td");
@@ -340,7 +342,7 @@
 
     function activeGridTd() {
       const ae = document.activeElement;
-      const inGrid = ae && ae.tagName === "TD" && ae.dataset?.cell;
+      const inGrid = ae?.tagName === "TD" && ae.dataset?.cell;
       return inGrid ? ae : null;
     }
 
