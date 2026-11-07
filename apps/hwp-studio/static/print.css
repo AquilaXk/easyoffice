@@ -45,4 +45,4 @@ body { background: #fff; }
     color: #e2e8f0;
   }
 }
-@media print { .print-preview-bar { display: none; } }
+@media print { .print-preview-bar { display: none !important; } }
