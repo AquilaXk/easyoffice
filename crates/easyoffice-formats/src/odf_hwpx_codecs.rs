@@ -709,83 +709,85 @@ impl OdfCodec {
             })
             .unwrap_or_else(|| "발표자료".to_string());
 
-        let mut slides = Vec::new();
-        for (attrs, inner) in extract_balanced_elements(&content_xml, "draw:page") {
-            let mut notes = extract_attr_from_fragment(attrs, "notes")
-                .map(|s| XmlSanitizer::unescape(&s))
-                .unwrap_or_default();
+        let slides = extract_balanced_elements(&content_xml, "draw:page")
+            .into_iter()
+            .map(|(attrs, inner)| Self::parse_odp_slide(attrs, inner))
+            .collect();
+        Ok((title, slides))
+    }
 
-            let notes_blocks = extract_balanced_elements(inner, "presentation:notes");
-            if notes.is_empty() && !notes_blocks.is_empty() {
-                let mut note_lines = Vec::new();
-                for (_, n_inner) in &notes_blocks {
-                    let cleaned = strip_tag_blocks(n_inner, "text:page-number");
-                    for (_, _, p_body) in
-                        extract_odf_blocks_in_order(&cleaned, &["text:p", "text:h"])
-                    {
-                        let txt = extract_odf_inline_text(p_body);
-                        if !txt.trim().is_empty() {
-                            note_lines.push(txt);
-                        }
-                    }
+    /// Speaker notes of a slide: the `notes` attribute, else the notes pages' paragraph text.
+    fn odp_slide_notes(attrs: &str, inner: &str) -> String {
+        let notes = extract_attr_from_fragment(attrs, "notes")
+            .map(|s| XmlSanitizer::unescape(&s))
+            .unwrap_or_default();
+        let notes_blocks = extract_balanced_elements(inner, "presentation:notes");
+        if !notes.is_empty() || notes_blocks.is_empty() {
+            return notes;
+        }
+        let mut note_lines = Vec::new();
+        for (_, n_inner) in &notes_blocks {
+            let cleaned = strip_tag_blocks(n_inner, "text:page-number");
+            for (_, _, p_body) in extract_odf_blocks_in_order(&cleaned, &["text:p", "text:h"]) {
+                let txt = extract_odf_inline_text(p_body);
+                if !txt.trim().is_empty() {
+                    note_lines.push(txt);
                 }
-                notes = note_lines.join("\n");
             }
+        }
+        note_lines.join("\n")
+    }
 
-            let without_notes = strip_tag_blocks(inner, "presentation:notes");
-            let without_page_num = strip_tag_blocks(&without_notes, "text:page-number");
-
-            let mut frame_title: Option<String> = None;
-            for (f_attrs, f_inner) in extract_balanced_elements(&without_page_num, "draw:frame") {
-                if extract_attr_from_fragment(f_attrs, "presentation:class").as_deref()
+    /// Text of the first non-empty title-class frame.
+    fn odp_frame_title(without_page_num: &str) -> Option<String> {
+        extract_balanced_elements(without_page_num, "draw:frame")
+            .into_iter()
+            .filter(|(f_attrs, _)| {
+                extract_attr_from_fragment(f_attrs, "presentation:class").as_deref()
                     == Some("title")
-                {
-                    let t_parts: Vec<String> =
-                        extract_odf_blocks_in_order(f_inner, &["text:p", "text:h"])
-                            .into_iter()
-                            .map(|(_, _, b)| extract_odf_inline_text(b))
-                            .filter(|s| !s.is_empty())
-                            .collect();
-                    if !t_parts.is_empty() {
-                        frame_title = Some(t_parts.join(" "));
-                        break;
-                    }
-                }
-            }
+            })
+            .find_map(|(_, f_inner)| {
+                let t_parts: Vec<String> =
+                    extract_odf_blocks_in_order(f_inner, &["text:p", "text:h"])
+                        .into_iter()
+                        .map(|(_, _, b)| extract_odf_inline_text(b))
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                (!t_parts.is_empty()).then(|| t_parts.join(" "))
+            })
+    }
 
-            let attr_title = extract_attr_from_fragment(attrs, "draw:name")
-                .or_else(|| extract_attr_from_fragment(attrs, "title"))
-                .map(|s| XmlSanitizer::unescape(&s))
-                .unwrap_or_default();
+    fn parse_odp_slide(attrs: &str, inner: &str) -> (String, Vec<String>, String) {
+        let notes = Self::odp_slide_notes(attrs, inner);
+        let without_notes = strip_tag_blocks(inner, "presentation:notes");
+        let without_page_num = strip_tag_blocks(&without_notes, "text:page-number");
+        let frame_title = Self::odp_frame_title(&without_page_num);
+        let attr_title = extract_attr_from_fragment(attrs, "draw:name")
+            .or_else(|| extract_attr_from_fragment(attrs, "title"))
+            .map(|s| XmlSanitizer::unescape(&s))
+            .unwrap_or_default();
 
-            let mut bullets: Vec<String> =
-                extract_odf_blocks_in_order(&without_notes, &["text:p", "text:h"])
-                    .into_iter()
-                    .filter_map(|(_, _, b)| {
-                        let had_page_num = b.contains("<text:page-number");
-                        let cleaned = strip_tag_blocks(b, "text:page-number");
-                        let txt = extract_odf_inline_text(&cleaned);
-                        if had_page_num && txt.trim().is_empty() {
-                            None
-                        } else {
-                            Some(txt)
-                        }
-                    })
-                    .collect();
+        let mut bullets: Vec<String> =
+            extract_odf_blocks_in_order(&without_notes, &["text:p", "text:h"])
+                .into_iter()
+                .filter_map(|(_, _, b)| {
+                    let had_page_num = b.contains("<text:page-number");
+                    let cleaned = strip_tag_blocks(b, "text:page-number");
+                    let txt = extract_odf_inline_text(&cleaned);
+                    (!(had_page_num && txt.trim().is_empty())).then_some(txt)
+                })
+                .collect();
 
-            let s_title = if let Some(ft) = frame_title {
+        let s_title = match frame_title {
+            Some(ft) => {
                 if bullets.first() == Some(&ft) {
                     bullets.remove(0);
                 }
                 ft
-            } else {
-                attr_title
-            };
-
-            slides.push((s_title, bullets, notes));
-        }
-
-        Ok((title, slides))
+            }
+            None => attr_title,
+        };
+        (s_title, bullets, notes)
     }
 
     pub(crate) fn build_manifest(mime: &str) -> String {

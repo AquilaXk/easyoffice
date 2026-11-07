@@ -118,57 +118,14 @@ impl RtfCodec {
         let mut i = 0usize;
 
         while i < units.len() {
-            let u = units[i];
-            if u == 0x5C && i + 1 < units.len() {
-                let next = units[i + 1];
-                if next == 0x5C || next == 0x7B || next == 0x7D {
-                    out_units.push(next);
-                    i += 2;
+            if units[i] == crate::rtf_escape::RTF_BACKSLASH {
+                if let Some((decoded, next_i)) = crate::rtf_escape::decode_rtf_escape(&units, i) {
+                    out_units.extend(decoded);
+                    i = next_i;
                     continue;
-                }
-                if i + 5 <= units.len()
-                    && units[i + 1] == b'l' as u16
-                    && units[i + 2] == b'i' as u16
-                    && units[i + 3] == b'n' as u16
-                    && units[i + 4] == b'e' as u16
-                {
-                    out_units.push(b'\n' as u16);
-                    i += 5;
-                    if i < units.len() && units[i] == b' ' as u16 {
-                        i += 1;
-                    }
-                    continue;
-                }
-                if next == b'u' as u16 {
-                    let mut num_start = i + 2;
-                    let mut neg = false;
-                    if num_start < units.len() && units[num_start] == b'-' as u16 {
-                        neg = true;
-                        num_start += 1;
-                    }
-                    let mut num_end = num_start;
-                    let mut acc: i32 = 0;
-                    while num_end < units.len()
-                        && units[num_end] >= b'0' as u16
-                        && units[num_end] <= b'9' as u16
-                    {
-                        acc = acc
-                            .wrapping_mul(10)
-                            .wrapping_add((units[num_end] - b'0' as u16) as i32);
-                        num_end += 1;
-                    }
-                    if num_end > num_start {
-                        let signed_val = if neg { -acc } else { acc };
-                        out_units.push((signed_val as i16) as u16);
-                        i = num_end;
-                        if i < units.len() && units[i] == b'?' as u16 {
-                            i += 1;
-                        }
-                        continue;
-                    }
                 }
             }
-            out_units.push(u);
+            out_units.push(units[i]);
             i += 1;
         }
 

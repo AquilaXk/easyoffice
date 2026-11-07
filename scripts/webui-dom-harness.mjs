@@ -634,6 +634,25 @@ function parseAttributesInto(attrText, el) {
   }
 }
 
+function popToClosedTag(stack, closeTagUpper) {
+  for (let i = stack.length - 1; i >= 1; i--) {
+    if (stack[i].tagName === closeTagUpper) {
+      stack.length = i;
+      return;
+    }
+  }
+}
+
+function pushOpenedTag(stack, match, ownerDocument) {
+  const tagLower = match[2].toLowerCase();
+  const el = new MiniElement(tagLower, ownerDocument);
+  parseAttributesInto(match[3] || "", el);
+  stack.at(-1).appendChild(el);
+  if (!VOID_TAGS.has(tagLower) && match[4] !== "/") {
+    stack.push(el);
+  }
+}
+
 function parseHtmlFragment(html, ownerDocument) {
   const root = {
     childNodes: [],
@@ -650,26 +669,13 @@ function parseHtmlFragment(html, ownerDocument) {
   while ((m = tagRe.exec(html)) !== null) {
     if (m.index > lastIdx) {
       const txt = decodeHtmlEntities(html.slice(lastIdx, m.index));
-      const top = stack.at(-1);
-      top.appendChild(new MiniTextNode(txt, ownerDocument));
+      stack.at(-1).appendChild(new MiniTextNode(txt, ownerDocument));
     }
     lastIdx = tagRe.lastIndex;
     if (m[1]) {
-      const closeTag = m[1].toUpperCase();
-      for (let i = stack.length - 1; i >= 1; i--) {
-        if (stack[i].tagName === closeTag) {
-          stack.length = i;
-          break;
-        }
-      }
+      popToClosedTag(stack, m[1].toUpperCase());
     } else if (m[2]) {
-      const tagLower = m[2].toLowerCase();
-      const el = new MiniElement(tagLower, ownerDocument);
-      parseAttributesInto(m[3] || "", el);
-      stack.at(-1).appendChild(el);
-      if (!VOID_TAGS.has(tagLower) && m[4] !== "/") {
-        stack.push(el);
-      }
+      pushOpenedTag(stack, m, ownerDocument);
     }
   }
   if (lastIdx < html.length) {
@@ -983,50 +989,53 @@ export async function createWorkspaceHarness(options = {}) {
     const focusable =
       el.closest('button, input, select, textarea, a, [contenteditable="true"], [tabindex]') ||
       null;
-    if (
-      document.activeElement &&
-      document.activeElement !== document.body &&
-      document.activeElement !== focusable
-    ) {
-      document.activeElement.blur();
-    }
-    if (focusable && document.activeElement !== focusable) {
-      focusable.focus();
-    }
+    moveFocusForClick(document, focusable);
     el.click();
   }
 
   function advanceTimers(ms = 2000) {
     const targetMs = virtualNowMs + Math.max(0, Number(ms) || 0);
     while (true) {
-      let nextId = null;
-      let nextEntry = null;
-      for (const [id, entry] of delayedTimers.entries()) {
-        if (cancelledTimers.has(id)) {
-          delayedTimers.delete(id);
-          continue;
-        }
-        if (entry.dueAt > targetMs) continue;
-        if (
-          !nextEntry ||
-          entry.dueAt < nextEntry.dueAt ||
-          (entry.dueAt === nextEntry.dueAt && entry.seq < nextEntry.seq)
-        ) {
-          nextId = id;
-          nextEntry = entry;
-        }
-      }
-      if (!nextEntry || nextId === null) break;
-      delayedTimers.delete(nextId);
-      virtualNowMs = nextEntry.dueAt;
-      if (!cancelledTimers.has(nextId)) {
-        nextEntry.fn();
+      const next = pickNextDueTimer(delayedTimers, cancelledTimers, targetMs);
+      if (!next) break;
+      delayedTimers.delete(next.id);
+      virtualNowMs = next.entry.dueAt;
+      if (!cancelledTimers.has(next.id)) {
+        next.entry.fn();
       }
     }
     virtualNowMs = targetMs;
   }
 
   return { document, sandbox, downloads, revokedUrls, userClick, advanceTimers, host: hostEnv };
+}
+
+function moveFocusForClick(document, focusable) {
+  const active = document.activeElement;
+  if (active && active !== document.body && active !== focusable) {
+    active.blur();
+  }
+  if (focusable && document.activeElement !== focusable) {
+    focusable.focus();
+  }
+}
+
+// Earliest due (then lowest sequence) pending timer at or before targetMs; purges cancelled ones.
+function pickNextDueTimer(delayedTimers, cancelledTimers, targetMs) {
+  let best = null;
+  for (const [id, entry] of delayedTimers.entries()) {
+    if (cancelledTimers.has(id)) {
+      delayedTimers.delete(id);
+      continue;
+    }
+    if (entry.dueAt > targetMs) continue;
+    const earlier =
+      !best ||
+      entry.dueAt < best.entry.dueAt ||
+      (entry.dueAt === best.entry.dueAt && entry.seq < best.entry.seq);
+    if (earlier) best = { id, entry };
+  }
+  return best;
 }
 
 export async function createWebUiDom(options = {}) {

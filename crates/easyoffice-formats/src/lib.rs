@@ -34,12 +34,14 @@ pub mod rich_readers;
 mod rich_run_writers;
 mod rich_writers;
 mod rich_xml;
+mod rtf_escape;
 pub mod rtf_xml_helpers;
 mod sheet_styling;
 pub mod strict_json;
 pub mod text_pdf_codecs;
 pub mod utf16_swar;
 pub mod zip_codec;
+mod zip_path_tracker;
 
 pub use converter::*;
 pub use crc32::IeeeCrc32;
@@ -344,6 +346,90 @@ impl FormatDetector {
     pub const PDF_MAGIC: [u8; 5] = *b"%PDF-";
     pub const RTF_MAGIC: [u8; 5] = *b"{\\rtf";
 
+    /// Whether any archive entry satisfies `pred` (archives that fail to unpack count as no).
+    fn zip_entries_any(bytes: &[u8], pred: impl Fn(&ZipArchiveEntry) -> bool) -> bool {
+        ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default())
+            .is_ok_and(|entries| entries.iter().any(pred))
+    }
+
+    fn detect_hwpx_family(bytes: &[u8]) -> DocumentFormat {
+        let template_meta = hwpx_codec::HWPX_TEMPLATE_META_MARKER.as_bytes();
+        let is_template = Self::slice_contains(bytes, b"isTemplate=\"1\"")
+            || Self::slice_contains(bytes, template_meta)
+            || Self::zip_entries_any(bytes, |e| {
+                (e.path == "Contents/header.xml"
+                    && Self::slice_contains(&e.data, b"isTemplate=\"1\""))
+                    || (e.path == "Contents/content.hpf"
+                        && Self::slice_contains(&e.data, template_meta))
+            });
+        if is_template {
+            DocumentFormat::Hwtx
+        } else {
+            DocumentFormat::Hwpx
+        }
+    }
+
+    fn detect_zip_family(bytes: &[u8]) -> DocumentFormat {
+        if Self::slice_contains(bytes, b"Contents/header.xml")
+            || Self::slice_contains(bytes, b"version.xml")
+        {
+            return Self::detect_hwpx_family(bytes);
+        }
+        if Self::slice_contains(bytes, b"Index/Document.iwa")
+            || (Self::slice_contains(bytes, b"index.xml")
+                && !Self::slice_contains(bytes, b"[Content_Types].xml")
+                && !Self::slice_contains(bytes, b"mimetype"))
+        {
+            return DocumentFormat::Pages;
+        }
+        const MARKERS: [(&[u8], DocumentFormat); 6] = [
+            (b"oasis.opendocument.text", DocumentFormat::Odt),
+            (b"oasis.opendocument.spreadsheet", DocumentFormat::Ods),
+            (b"oasis.opendocument.presentation", DocumentFormat::Odp),
+            (b"xl/workbook.xml", DocumentFormat::Xlsx),
+            (b"presentationml.slideshow", DocumentFormat::Ppsx),
+            (b"ppt/presentation.xml", DocumentFormat::Pptx),
+        ];
+        let Some(found) = MARKERS
+            .iter()
+            .find(|(marker, _)| Self::slice_contains(bytes, marker))
+            .map(|(_, format)| *format)
+        else {
+            return DocumentFormat::Docx;
+        };
+        if found != DocumentFormat::Pptx {
+            return found;
+        }
+        let is_slideshow = Self::zip_entries_any(bytes, |e| {
+            (e.path == "[Content_Types].xml"
+                && Self::slice_contains(&e.data, b"presentationml.slideshow"))
+                || (e.path == "ppt/presentation.xml"
+                    && Self::slice_contains(&e.data, b"slideshow=\"1\""))
+        });
+        if is_slideshow {
+            DocumentFormat::Ppsx
+        } else {
+            DocumentFormat::Pptx
+        }
+    }
+
+    fn detect_ole2_family(bytes: &[u8]) -> DocumentFormat {
+        const XLS_UTF16: [u8; 16] = [
+            b'W', 0, b'o', 0, b'r', 0, b'k', 0, b'b', 0, b'o', 0, b'o', 0, b'k', 0,
+        ];
+        const PPT_UTF16: [u8; 10] = [b'P', 0, b'o', 0, b'w', 0, b'e', 0, b'r', 0];
+        let markers: [(&[u8], DocumentFormat); 4] = [
+            (b"HWT_TEMPLATE", DocumentFormat::Hwt),
+            (b"HWP Document File", DocumentFormat::Hwp),
+            (&XLS_UTF16, DocumentFormat::Xls),
+            (&PPT_UTF16, DocumentFormat::Ppt),
+        ];
+        markers
+            .iter()
+            .find(|(marker, _)| Self::slice_contains(bytes, marker))
+            .map_or(DocumentFormat::Doc, |(_, format)| *format)
+    }
+
     pub fn detect(
         bytes: &[u8],
         extension_hint: Option<&str>,
@@ -369,83 +455,10 @@ impl FormatDetector {
         }
 
         if bytes.starts_with(&Self::ZIP_MAGIC) {
-            if Self::slice_contains(bytes, b"Contents/header.xml")
-                || Self::slice_contains(bytes, b"version.xml")
-            {
-                let template_meta = hwpx_codec::HWPX_TEMPLATE_META_MARKER.as_bytes();
-                if Self::slice_contains(bytes, b"isTemplate=\"1\"")
-                    || Self::slice_contains(bytes, template_meta)
-                {
-                    return Ok(DocumentFormat::Hwtx);
-                }
-                if let Ok(entries) = ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default()) {
-                    if entries.iter().any(|e| {
-                        (e.path == "Contents/header.xml"
-                            && Self::slice_contains(&e.data, b"isTemplate=\"1\""))
-                            || (e.path == "Contents/content.hpf"
-                                && Self::slice_contains(&e.data, template_meta))
-                    }) {
-                        return Ok(DocumentFormat::Hwtx);
-                    }
-                }
-                return Ok(DocumentFormat::Hwpx);
-            }
-            if Self::slice_contains(bytes, b"Index/Document.iwa")
-                || (Self::slice_contains(bytes, b"index.xml")
-                    && !Self::slice_contains(bytes, b"[Content_Types].xml")
-                    && !Self::slice_contains(bytes, b"mimetype"))
-            {
-                return Ok(DocumentFormat::Pages);
-            }
-            if Self::slice_contains(bytes, b"oasis.opendocument.text") {
-                return Ok(DocumentFormat::Odt);
-            }
-            if Self::slice_contains(bytes, b"oasis.opendocument.spreadsheet") {
-                return Ok(DocumentFormat::Ods);
-            }
-            if Self::slice_contains(bytes, b"oasis.opendocument.presentation") {
-                return Ok(DocumentFormat::Odp);
-            }
-            if Self::slice_contains(bytes, b"xl/workbook.xml") {
-                return Ok(DocumentFormat::Xlsx);
-            }
-            if Self::slice_contains(bytes, b"presentationml.slideshow") {
-                return Ok(DocumentFormat::Ppsx);
-            }
-            if Self::slice_contains(bytes, b"ppt/presentation.xml") {
-                if let Ok(entries) = ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default()) {
-                    if entries.iter().any(|e| {
-                        (e.path == "[Content_Types].xml"
-                            && Self::slice_contains(&e.data, b"presentationml.slideshow"))
-                            || (e.path == "ppt/presentation.xml"
-                                && Self::slice_contains(&e.data, b"slideshow=\"1\""))
-                    }) {
-                        return Ok(DocumentFormat::Ppsx);
-                    }
-                }
-                return Ok(DocumentFormat::Pptx);
-            }
-            return Ok(DocumentFormat::Docx);
+            return Ok(Self::detect_zip_family(bytes));
         }
-
         if bytes.starts_with(&Self::OLE2_MAGIC) {
-            if Self::slice_contains(bytes, b"HWT_TEMPLATE") {
-                return Ok(DocumentFormat::Hwt);
-            }
-            if Self::slice_contains(bytes, b"HWP Document File") {
-                return Ok(DocumentFormat::Hwp);
-            }
-            let xls_utf16 = [
-                b'W', 0, b'o', 0, b'r', 0, b'k', 0, b'b', 0, b'o', 0, b'o', 0, b'k', 0,
-            ];
-            if Self::slice_contains(bytes, &xls_utf16) {
-                return Ok(DocumentFormat::Xls);
-            }
-            let ppt_utf16 = [b'P', 0, b'o', 0, b'w', 0, b'e', 0, b'r', 0];
-            if Self::slice_contains(bytes, &ppt_utf16) {
-                return Ok(DocumentFormat::Ppt);
-            }
-            return Ok(DocumentFormat::Doc);
+            return Ok(Self::detect_ole2_family(bytes));
         }
 
         if bytes.starts_with(&Self::PDF_MAGIC) {
@@ -672,101 +685,52 @@ impl ZipSecurityGuard {
         }
 
         let mut total_uncompressed: u64 = 0;
-        let mut seen_lower_paths = std::collections::HashSet::with_capacity(entries.len());
-        let mut seen_files_lower = std::collections::HashSet::with_capacity(entries.len());
-        let mut seen_dirs_lower = std::collections::HashSet::with_capacity(entries.len());
-
+        let mut tracker = crate::zip_path_tracker::ZipPathTracker::with_capacity(entries.len());
         for entry in entries {
             Self::validate_entry_path(&entry.path)?;
-            let is_dir = entry.path.ends_with('/');
-            let lower = entry.path.to_ascii_lowercase();
-            let trimmed_lower = lower.strip_suffix('/').unwrap_or(&lower).to_string();
+            tracker.check(entry)?;
+            Self::check_entry_sizes(entry, policy, &mut total_uncompressed)?;
+        }
+        Ok(())
+    }
 
-            if !seen_lower_paths.insert(trimmed_lower.clone()) {
-                return Err(EasyOfficeError::SecurityViolation(format!(
-                    "중복되거나 파일/디렉터리가 충돌하는 ZIP 엔트리 경로가 감지되었습니다: {}",
-                    entry.path
-                )));
-            }
-            for (idx, _) in trimmed_lower.match_indices('/') {
-                let prefix = &trimmed_lower[..idx];
-                if seen_files_lower.contains(prefix) {
-                    return Err(EasyOfficeError::SecurityViolation(format!(
-                        "ZIP 파일 경로와 디렉터리 프리픽스 충돌이 감지되었습니다: {}",
-                        entry.path
-                    )));
-                }
-                seen_dirs_lower.insert(prefix.to_string());
-            }
-            if is_dir {
-                if seen_files_lower.contains(&trimmed_lower) {
-                    return Err(EasyOfficeError::SecurityViolation(format!(
-                        "ZIP 디렉터리와 기존 파일 경로 충돌: {}",
-                        entry.path
-                    )));
-                }
-                seen_dirs_lower.insert(trimmed_lower);
-                if entry.compressed_size > 0 || entry.uncompressed_size > 0 {
-                    return Err(EasyOfficeError::SecurityViolation(format!(
-                        "ZIP 디렉터리 엔트리({})는 데이터를 포함할 수 없습니다.",
-                        entry.path
-                    )));
-                }
-            } else {
-                if seen_dirs_lower.contains(&trimmed_lower) {
-                    return Err(EasyOfficeError::SecurityViolation(format!(
-                        "ZIP 파일과 기존 디렉터리 경로 충돌: {}",
-                        entry.path
-                    )));
-                }
-                seen_files_lower.insert(trimmed_lower);
-            }
-
-            if entry.is_encrypted {
-                return Err(EasyOfficeError::EncryptedDocumentUnsupported(
-                    DocumentFormat::Docx,
-                ));
-            }
-
-            if entry.uncompressed_size > policy.max_single_entry_uncompressed_bytes {
-                return Err(EasyOfficeError::DecompressionBombDetected {
-                    ratio: entry.uncompressed_size as f64 / (entry.compressed_size.max(1) as f64),
-                    max_ratio: policy.max_compression_ratio,
-                });
-            }
-
-            total_uncompressed = total_uncompressed
-                .checked_add(entry.uncompressed_size)
-                .ok_or(EasyOfficeError::DecompressionBombDetected {
-                    ratio: f64::INFINITY,
-                    max_ratio: policy.max_compression_ratio,
-                })?;
-
-            if total_uncompressed > policy.max_total_uncompressed_bytes {
-                return Err(EasyOfficeError::DecompressionBombDetected {
-                    ratio: total_uncompressed as f64 / (entry.compressed_size.max(1) as f64),
-                    max_ratio: policy.max_compression_ratio,
-                });
-            }
-
-            if entry.compressed_size == 0 && entry.uncompressed_size > 0 {
-                return Err(EasyOfficeError::DecompressionBombDetected {
-                    ratio: f64::INFINITY,
-                    max_ratio: policy.max_compression_ratio,
-                });
-            }
-
-            if entry.compressed_size > 0 {
-                let ratio = (entry.uncompressed_size as f64) / (entry.compressed_size as f64);
-                if ratio > policy.max_compression_ratio {
-                    return Err(EasyOfficeError::DecompressionBombDetected {
-                        ratio,
-                        max_ratio: policy.max_compression_ratio,
-                    });
-                }
+    /// Encryption flag, per-entry / total size and compression-ratio limits of one entry.
+    fn check_entry_sizes(
+        entry: &ZipEntryDescriptor,
+        policy: &ZipSecurityPolicy,
+        total_uncompressed: &mut u64,
+    ) -> Result<(), EasyOfficeError> {
+        if entry.is_encrypted {
+            return Err(EasyOfficeError::EncryptedDocumentUnsupported(
+                DocumentFormat::Docx,
+            ));
+        }
+        let bomb = |ratio: f64| EasyOfficeError::DecompressionBombDetected {
+            ratio,
+            max_ratio: policy.max_compression_ratio,
+        };
+        if entry.uncompressed_size > policy.max_single_entry_uncompressed_bytes {
+            return Err(bomb(
+                entry.uncompressed_size as f64 / (entry.compressed_size.max(1) as f64),
+            ));
+        }
+        *total_uncompressed = total_uncompressed
+            .checked_add(entry.uncompressed_size)
+            .ok_or_else(|| bomb(f64::INFINITY))?;
+        if *total_uncompressed > policy.max_total_uncompressed_bytes {
+            return Err(bomb(
+                *total_uncompressed as f64 / (entry.compressed_size.max(1) as f64),
+            ));
+        }
+        if entry.compressed_size == 0 && entry.uncompressed_size > 0 {
+            return Err(bomb(f64::INFINITY));
+        }
+        if entry.compressed_size > 0 {
+            let ratio = (entry.uncompressed_size as f64) / (entry.compressed_size as f64);
+            if ratio > policy.max_compression_ratio {
+                return Err(bomb(ratio));
             }
         }
-
         Ok(())
     }
 }

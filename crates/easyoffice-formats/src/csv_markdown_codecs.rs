@@ -510,6 +510,120 @@ pub enum MarkdownBlock {
 
 pub struct CommonMarkCodec;
 
+/// True for a table separator cell such as `---`, `:--:` (at least three dashes).
+fn is_table_separator_cell(cell: &str) -> bool {
+    let core = cell.trim().trim_matches(':');
+    core.len() >= 3 && core.chars().all(|ch| ch == '-')
+}
+
+/// Heading level and text for an ATX heading line (`#` to `####`).
+fn atx_heading(trimmed: &str) -> Option<(u8, &str)> {
+    [("#### ", 4u8), ("### ", 3), ("## ", 2), ("# ", 1)]
+        .iter()
+        .find_map(|(prefix, level)| {
+            trimmed
+                .strip_prefix(prefix)
+                .map(|text| (*level, text.trim()))
+        })
+}
+
+/// Block accumulator for the line-oriented Markdown parser.
+#[derive(Default)]
+struct MarkdownAccumulator {
+    blocks: Vec<MarkdownBlock>,
+    bullets: Vec<String>,
+    numbered: Vec<String>,
+    table: Vec<Vec<String>>,
+    table_seen_sep: bool,
+}
+
+impl MarkdownAccumulator {
+    fn flush_bullets(&mut self) {
+        if !self.bullets.is_empty() {
+            self.blocks
+                .push(MarkdownBlock::BulletList(std::mem::take(&mut self.bullets)));
+        }
+    }
+
+    fn flush_numbered(&mut self) {
+        if !self.numbered.is_empty() {
+            self.blocks.push(MarkdownBlock::NumberedList(std::mem::take(
+                &mut self.numbered,
+            )));
+        }
+    }
+
+    fn flush_table(&mut self) {
+        if !self.table.is_empty() {
+            self.blocks
+                .push(MarkdownBlock::Table(std::mem::take(&mut self.table)));
+        }
+        self.table_seen_sep = false;
+    }
+
+    fn flush_all(&mut self) {
+        self.flush_bullets();
+        self.flush_numbered();
+        self.flush_table();
+    }
+
+    fn feed_line(&mut self, trimmed: &str, parse_row: fn(&str) -> Vec<String>) {
+        if trimmed.is_empty() {
+            self.flush_all();
+        } else if trimmed.len() >= 2 && trimmed.starts_with('|') && trimmed.ends_with('|') {
+            self.feed_table_row(trimmed, parse_row);
+        } else if let Some(rest) = trimmed
+            .strip_prefix("- ")
+            .or_else(|| trimmed.strip_prefix("* "))
+        {
+            self.flush_numbered();
+            self.flush_table();
+            self.bullets.push(rest.trim().to_string());
+        } else if let Some(item) = numbered_item(trimmed) {
+            self.flush_bullets();
+            self.flush_table();
+            self.numbered.push(item.to_string());
+        } else {
+            self.flush_all();
+            self.blocks.push(match atx_heading(trimmed) {
+                Some((level, text)) => MarkdownBlock::Heading {
+                    level,
+                    text: text.to_string(),
+                },
+                None => match trimmed.strip_prefix("> ") {
+                    Some(quote) => MarkdownBlock::BlockQuote(quote.trim().to_string()),
+                    None => MarkdownBlock::Paragraph(trimmed.to_string()),
+                },
+            });
+        }
+    }
+
+    fn feed_table_row(&mut self, trimmed: &str, parse_row: fn(&str) -> Vec<String>) {
+        self.flush_bullets();
+        self.flush_numbered();
+        let inner = trimmed.strip_prefix('|').unwrap_or(trimmed);
+        let inner = inner.strip_suffix('|').unwrap_or(inner);
+        let cells = parse_row(inner);
+        let is_sep = self.table.len() == 1
+            && !self.table_seen_sep
+            && !cells.is_empty()
+            && cells.iter().all(|c| is_table_separator_cell(c));
+        if is_sep {
+            self.table_seen_sep = true;
+        } else {
+            self.table.push(cells);
+        }
+    }
+}
+
+/// Item text of a `N. item` line (digits only before the first `. `).
+fn numbered_item(trimmed: &str) -> Option<&str> {
+    let dot_idx = trimmed.find(". ")?;
+    let prefix = &trimmed[..dot_idx];
+    (!prefix.is_empty() && prefix.chars().all(|c| c.is_ascii_digit()))
+        .then(|| trimmed[dot_idx + 2..].trim())
+}
+
 impl CommonMarkCodec {
     pub(crate) fn parse_markdown_table_row(inner: &str) -> Vec<String> {
         let mut cells = Vec::new();
@@ -543,144 +657,12 @@ impl CommonMarkCodec {
             ));
         }
 
-        let mut blocks: Vec<MarkdownBlock> = Vec::new();
-        let mut bullet_acc: Vec<String> = Vec::new();
-        let mut numbered_acc: Vec<String> = Vec::new();
-        let mut table_acc: Vec<Vec<String>> = Vec::new();
-        let mut table_seen_sep = false;
-
-        let flush_lists = |blocks: &mut Vec<MarkdownBlock>,
-                           bullet_acc: &mut Vec<String>,
-                           numbered_acc: &mut Vec<String>,
-                           table_acc: &mut Vec<Vec<String>>,
-                           table_seen_sep: &mut bool| {
-            if !bullet_acc.is_empty() {
-                blocks.push(MarkdownBlock::BulletList(std::mem::take(bullet_acc)));
-            }
-            if !numbered_acc.is_empty() {
-                blocks.push(MarkdownBlock::NumberedList(std::mem::take(numbered_acc)));
-            }
-            if !table_acc.is_empty() {
-                blocks.push(MarkdownBlock::Table(std::mem::take(table_acc)));
-            }
-            *table_seen_sep = false;
-        };
-
+        let mut acc = MarkdownAccumulator::default();
         for raw_line in markdown.lines() {
-            let trimmed = raw_line.trim();
-            if trimmed.is_empty() {
-                flush_lists(
-                    &mut blocks,
-                    &mut bullet_acc,
-                    &mut numbered_acc,
-                    &mut table_acc,
-                    &mut table_seen_sep,
-                );
-                continue;
-            }
-
-            if trimmed.len() >= 2 && trimmed.starts_with('|') && trimmed.ends_with('|') {
-                if !bullet_acc.is_empty() {
-                    blocks.push(MarkdownBlock::BulletList(std::mem::take(&mut bullet_acc)));
-                }
-                if !numbered_acc.is_empty() {
-                    blocks.push(MarkdownBlock::NumberedList(std::mem::take(
-                        &mut numbered_acc,
-                    )));
-                }
-                let inner = trimmed.strip_prefix('|').unwrap_or(trimmed);
-                let inner = inner.strip_suffix('|').unwrap_or(inner);
-                let cells = Self::parse_markdown_table_row(inner);
-                let is_sep = table_acc.len() == 1
-                    && !table_seen_sep
-                    && !cells.is_empty()
-                    && cells.iter().all(|c| {
-                        let core = c.trim().trim_matches(':');
-                        core.len() >= 3 && core.chars().all(|ch| ch == '-')
-                    });
-                if is_sep {
-                    table_seen_sep = true;
-                } else {
-                    table_acc.push(cells);
-                }
-                continue;
-            }
-
-            if let Some(rest) = trimmed
-                .strip_prefix("- ")
-                .or_else(|| trimmed.strip_prefix("* "))
-            {
-                if !numbered_acc.is_empty() {
-                    blocks.push(MarkdownBlock::NumberedList(std::mem::take(
-                        &mut numbered_acc,
-                    )));
-                }
-                if !table_acc.is_empty() {
-                    blocks.push(MarkdownBlock::Table(std::mem::take(&mut table_acc)));
-                    table_seen_sep = false;
-                }
-                bullet_acc.push(rest.trim().to_string());
-                continue;
-            }
-
-            if let Some(dot_idx) = trimmed.find(". ") {
-                let prefix = &trimmed[..dot_idx];
-                if !prefix.is_empty() && prefix.chars().all(|c| c.is_ascii_digit()) {
-                    if !bullet_acc.is_empty() {
-                        blocks.push(MarkdownBlock::BulletList(std::mem::take(&mut bullet_acc)));
-                    }
-                    if !table_acc.is_empty() {
-                        blocks.push(MarkdownBlock::Table(std::mem::take(&mut table_acc)));
-                        table_seen_sep = false;
-                    }
-                    numbered_acc.push(trimmed[dot_idx + 2..].trim().to_string());
-                    continue;
-                }
-            }
-
-            flush_lists(
-                &mut blocks,
-                &mut bullet_acc,
-                &mut numbered_acc,
-                &mut table_acc,
-                &mut table_seen_sep,
-            );
-
-            if let Some(h4) = trimmed.strip_prefix("#### ") {
-                blocks.push(MarkdownBlock::Heading {
-                    level: 4,
-                    text: h4.trim().to_string(),
-                });
-            } else if let Some(h3) = trimmed.strip_prefix("### ") {
-                blocks.push(MarkdownBlock::Heading {
-                    level: 3,
-                    text: h3.trim().to_string(),
-                });
-            } else if let Some(h2) = trimmed.strip_prefix("## ") {
-                blocks.push(MarkdownBlock::Heading {
-                    level: 2,
-                    text: h2.trim().to_string(),
-                });
-            } else if let Some(h1) = trimmed.strip_prefix("# ") {
-                blocks.push(MarkdownBlock::Heading {
-                    level: 1,
-                    text: h1.trim().to_string(),
-                });
-            } else if let Some(quote) = trimmed.strip_prefix("> ") {
-                blocks.push(MarkdownBlock::BlockQuote(quote.trim().to_string()));
-            } else {
-                blocks.push(MarkdownBlock::Paragraph(trimmed.to_string()));
-            }
+            acc.feed_line(raw_line.trim(), Self::parse_markdown_table_row);
         }
-
-        flush_lists(
-            &mut blocks,
-            &mut bullet_acc,
-            &mut numbered_acc,
-            &mut table_acc,
-            &mut table_seen_sep,
-        );
-        Ok(blocks)
+        acc.flush_all();
+        Ok(acc.blocks)
     }
 
     pub fn render(blocks: &[MarkdownBlock]) -> String {
