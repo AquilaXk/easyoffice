@@ -24,11 +24,24 @@ class FakeEl {
   }
   get firstChild() { return this.children[0] ?? null; }
   appendChild(kid) { kid.parent = this; this.children.push(kid); return kid; }
-  remove() { if (this.parent) this.parent.children = this.parent.children.filter((c) => c !== this); this.parent = null; }
+  remove() {
+    if (this.parent) {
+      this.parent.children = this.parent.children.filter((c) => c !== this);
+    }
+    this.parent = null;
+  }
   setAttribute(k, v) { this.attrs.set(k, v); }
   addEventListener(t, fn) { this.listeners.set(t, fn); }
   getContext() { return this.noContext ? null : { drawImage: (...a) => this.drawn.push(a) }; }
-  all(pred, out = []) { for (const c of this.children) { if (pred(c)) out.push(c); c.all(pred, out); } return out; }
+  all(pred, out = []) {
+    for (const c of this.children) {
+      if (pred(c)) {
+        out.push(c);
+      }
+      c.all(pred, out);
+    }
+    return out;
+  }
 }
 
 function setup({ loadPreview, bitmap = () => ({ width: 8, height: 6, close() { this.closed = true; } }), noDecoder = false } = {}) {
@@ -37,14 +50,27 @@ function setup({ loadPreview, bitmap = () => ({ width: 8, height: 6, close() { t
   const timers = [];
   const env = {
     setTimeout: (fn) => { timers.push(fn); return timers.length; },
-    atob: (s) => { if (!/^[A-Za-z0-9+/]*={0,2}$/.test(s)) throw new Error("InvalidCharacterError"); return Buffer.from(s, "base64").toString("latin1"); },
-    Blob: class { constructor(parts, opts) { blobs.push({ bytes: [...parts[0]], type: opts.type }); } },
+    atob: (s) => {
+      if (!/^[A-Za-z0-9+/]*={0,2}$/.test(s)) {
+        throw new Error("InvalidCharacterError");
+      }
+      return Buffer.from(s, "base64").toString("latin1");
+    },
+    Blob: function FakeBlob(parts, opts) {
+      blobs.push({ bytes: [...parts[0]], type: opts.type });
+    },
     createImageBitmap: noDecoder ? undefined : async (blob) => { const made = bitmap(blob); return made; },
   };
   if (noDecoder) delete env.createImageBitmap;
   loadUiModule(HOME_JS, env);
   const home = env.__EASYOFFICE_CREATE_HOME_SCREEN__({ document, env, onOpenRecent() {}, loadPreview });
-  const run = async () => { while (timers.length) { timers.shift()(); for (let i = 0; i < 20; i += 1) await new Promise((r) => setImmediate(r)); } };
+  const settle = (turns) => (turns === 0 ? Promise.resolve() : new Promise((r) => setImmediate(r)).then(() => settle(turns - 1)));
+  const run = async () => {
+    if (timers.length === 0) return;
+    timers.shift()();
+    await settle(20);
+    await run();
+  };
   const boxes = () => home.root.all((c) => c.className === "home-recent-preview" || c.className === "home-recent-preview is-loaded");
   const canvases = () => home.root.all((c) => c.tag === "canvas");
   return { home, run, boxes, canvases, blobs, timers };
@@ -64,7 +90,7 @@ test("previews load one after the other after the cards are drawn, and the canva
   const [first] = t.canvases();
   assert.deepEqual([first.width, first.height, first.drawn.length], [8, 6, 1]);
   assert.equal(t.blobs[0].type, "image/gif");
-  assert.equal(String.fromCharCode(...t.blobs[0].bytes.slice(0, 6)), "GIF89a");
+  assert.equal(String.fromCodePoint(...t.blobs[0].bytes.slice(0, 6)), "GIF89a");
   assert.ok(first.parent.classList.contains("is-loaded"));
   assert.equal(first.parent.children.length, 1, "the skeleton lines are gone");
 });
@@ -72,7 +98,16 @@ test("previews load one after the other after the cards are drawn, and the canva
 test("every failure keeps the skeleton of that card and the others still load", async () => {
   const replies = [null, "boom", { mime: "image/svg+xml", base64: GIF_B64 }, { mime: "image/gif", base64: "!!!" }, { mime: "image/gif", base64: "" }, { mime: "image/gif", base64: GIF_B64 }];
   let call = 0;
-  const t = setup({ loadPreview: async () => { const reply = replies[call]; call += 1; if (reply === "boom") throw new Error("denied"); return reply; } });
+  const t = setup({
+    loadPreview: async () => {
+      const reply = replies[call];
+      call += 1;
+      if (reply === "boom") {
+        throw new Error("denied");
+      }
+      return reply;
+    },
+  });
   t.home.setRecents(entries(5));
   await t.run();
   assert.equal(call, 5);

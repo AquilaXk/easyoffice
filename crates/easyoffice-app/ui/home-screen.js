@@ -195,16 +195,19 @@
 
     // One card after the other, after the cards are on screen; a newer render cancels the run, and a
     // failure of one card (no picture, decode error) leaves only that skeleton.
-    async function loadPreviews(run, boxes) {
-      for (const { id, box } of boxes) {
-        if (run !== previewRun) return;
-        try {
-          const view = await loadPreview(id);
-          if (run === previewRun) await showPreview(box, view);
-        } catch {
-          // keep the skeleton
-        }
+    async function loadOnePreview(run, id, box) {
+      try {
+        const view = await loadPreview(id);
+        if (run === previewRun) await showPreview(box, view);
+      } catch {
+        // keep the skeleton
       }
+    }
+
+    async function loadPreviews(run, boxes, index = 0) {
+      if (run !== previewRun || index >= boxes.length) return;
+      await loadOnePreview(run, boxes[index].id, boxes[index].box);
+      await loadPreviews(run, boxes, index + 1);
     }
 
     function startPreviews() {
