@@ -1790,3 +1790,14 @@
 - **Alternatives rejected** 편집기 안의 `file:print`(팝업 거부로 불가), iframe 인쇄(웹뷰별 동작 차이), 전체 쪽을 한 번에 받기(메모리·메시지 크기), 새 셸 `print_webview` 명령(웹 `print()`로 충분).
 - **Verified by** `node --test scripts/test-webui-hwp-print.mjs`(10쪽 배치 순서, 크기별 규칙, SVG 정리·id 분리, 취소·Esc·중복 요청, 지원 없음·빈 문서·상한·잘못된 쪽, 인쇄 실패·afterprint 정리, 단축키·capability), `node --test scripts/test-hwp-studio.mjs`(배치 mm·끝 처리·잘못된 범위, 라우터·capability), `scripts/test-webui-hwp-shell.mjs`(셸 명령 7개), 헤드리스 브라우저 확인(메뉴 → 숨은 루트).
 - **Revisit when** 쪽 범위·매수·양면 같은 인쇄 옵션을 앱에서 받을 때, 웹뷰가 이름 있는 `@page`를 지원하지 않는 사례가 확인될 때.
+
+## 80. 한글 창의 "도구 상자 라벨 표시" 토글, 다른 창에는 넣지 않음 (PD-105)
+
+- **Status** Implemented (한글 편집기 오버레이)
+- **Context** hop은 보기 메뉴에 "도구 상자 라벨 표시"를 두고 아이콘 도구 상자의 글자 라벨과 서식 줄의 리본 라벨을 숨깁니다. 한글 편집기(rhwp-studio)의 도구 상자는 아이콘 아래에 `.tb-label`을 갖지만 이 토글은 hop 쪽 기능이라 편집기에는 없었습니다. 문서·시트·슬라이드·PDF 창(DOM 메뉴)의 도구 상자는 처음부터 아이콘만 있어 숨길 라벨이 없습니다.
+- **Decision (`PD-105`)** (1) 편집기 오버레이의 보기 메뉴에 체크 항목 `view:toolbar-labels`를 넣고, 명령은 편집기 안에서 처리합니다(셸 RPC·셸 명령 추가 없음). (2) `<html data-toolbar-labels="shown|hidden">`가 상태이며 `hidden`이면 `#icon-toolbar .tb-label`, `#style-bar .sb-ribbon-label`을 숨기고 아이콘 도구 상자 높이를 32px로 합니다(hop CSS 그대로, 색 없음). (3) 선택은 창 표시 선호이므로 `localStorage`의 `toolbar-labels`에 저장합니다. 값이 정확히 `hidden`일 때만 숨기고, 읽기·쓰기가 실패하면 기본값(표시)으로 두며 쓰기 실패여도 이번 창에서는 바뀝니다. 다른 창의 `storage` 이벤트로 동기화합니다. (4) DOM 메뉴 창에는 항목을 넣지 않습니다(숨길 라벨이 없어 눌러도 아무 일도 없는 항목이 되기 때문). macOS 네이티브 메뉴도 같은 이유로 해당 없음이며, 이 항목은 편집기 안에만 있습니다. 나중에 DOM 도구 상자에 라벨을 도입하면 그때 함께 넣습니다.
+- **Why** 한글 창에서 hop과 같은 화면 밀도 선택을 주되, 라벨이 없는 창에 의미 없는 항목을 만들지 않기 위함입니다.
+- **Trade-offs** 저장소가 창(편집기 iframe)의 출처에 묶여 한글 창들 사이에서만 공유됩니다.
+- **Alternatives rejected** 셸이 선호를 저장해 편집기에 밀어 넣기(RPC 추가), DOM 창에도 항목 추가(동작 없음).
+- **Verified by** `node --test scripts/test-hwp-studio.mjs`(토글 왕복과 저장값, 저장 실패 시 기본값, 메뉴·명령·CSS·매니페스트 일치), `node scripts/build-hwp-studio.mjs`(번들 빌드와 검사).
+- **Revisit when** DOM 창 도구 상자에 글자 라벨을 넣을 때.
