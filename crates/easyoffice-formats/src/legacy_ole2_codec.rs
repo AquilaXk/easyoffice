@@ -1,4 +1,8 @@
 pub use crate::biff8_xls_codec::*;
+#[path = "legacy_doc_writer.rs"]
+mod doc_writer;
+#[path = "legacy_ppt_writer.rs"]
+mod ppt_writer;
 use crate::ole2_codec::{
     decode_utf16le, read_len_prefixed_utf16le, read_u16_le, read_u32_le, Ole2ContainerCodec,
     Ole2StreamEntry,
@@ -79,7 +83,7 @@ impl LegacyOle2Codec {
     }
 
     pub fn pack_doc(payload: &LegacyDocPayload) -> Result<Vec<u8>, EasyOfficeError> {
-        let (word, table) = crate::legacy_doc_writer::build_doc_streams(payload)?;
+        let (word, table) = doc_writer::build_doc_streams(payload)?;
         Ole2ContainerCodec::pack(&[
             (Self::doc_stream_name(), word),
             ("1Table".to_string(), table),
@@ -494,7 +498,7 @@ impl LegacyOle2Codec {
     }
 
     pub fn pack_ppt(payload: &LegacyPptPayload) -> Result<Vec<u8>, EasyOfficeError> {
-        let (stream, current_user) = crate::legacy_ppt_writer::build_ppt_streams(payload)?;
+        let (stream, current_user) = ppt_writer::build_ppt_streams(payload)?;
         Ole2ContainerCodec::pack(&[
             ("Current User".to_string(), current_user),
             (Self::ppt_stream_name(), stream),
@@ -509,7 +513,7 @@ impl LegacyOle2Codec {
             let len = read_u32_le(data, off + 4).ok()? as usize;
             let start = off + 8;
             let end = start.checked_add(len).filter(|e| *e <= data.len())?;
-            if rec_type == crate::legacy_ppt_writer::RT_EASYOFFICE_PRIVATE {
+            if rec_type == ppt_writer::RT_EASYOFFICE_PRIVATE {
                 return Some(&data[start..end]);
             }
             off = end;
