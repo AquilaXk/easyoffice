@@ -19,9 +19,11 @@ permissions:
 # macOS (the macOS app is native Swift) and its build needs the MSVC toolchain (PD-074).
 
 jobs:
-  verify:
-    name: verify
-    runs-on: macos-15
+  # Platform-independent gates run once on the fastest runner; the macOS and Windows jobs keep only
+  # what needs their OS (Swift app and bundle on macOS, engine tests, desktop shell and installer on Windows).
+  checks:
+    name: checks
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Checkout repository
@@ -52,8 +54,8 @@ jobs:
       - name: Run WebUI behavioral and security regression suite
         run: node --test scripts/test-webui-behavior.mjs scripts/test-webui-ux-ergonomics.mjs scripts/test-webui-round13-parity.mjs scripts/test-webui-sheet-atomicity.mjs scripts/test-webui-security-ipc.mjs scripts/test-webui-session-context.mjs scripts/test-webui-save-fidelity.mjs scripts/test-webui-desktop-bridge.mjs scripts/test-webui-file-open.mjs scripts/test-webui-slide-show.mjs scripts/test-webui-doc-runs.mjs scripts/test-webui-sheet-editing.mjs scripts/test-webui-hwp-host.mjs scripts/test-webui-hwp-session.mjs scripts/test-webui-sheet-format.mjs scripts/test-webui-sheet-styles.mjs scripts/test-webui-windows.mjs scripts/test-webui-shell-chrome.mjs scripts/test-webui-hwp-shortcuts.mjs
 
-      - name: Check Swift toolchain version
-        run: swift --version
+      - name: Cache Rust dependencies and build artifacts
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       - name: Check Rust toolchain version
         run: cargo --version && rustc --version
@@ -69,6 +71,25 @@ jobs:
 
       - name: Run Rust engine self-test
         run: cargo run -p easyoffice-app -- --self-test
+
+  verify:
+    name: verify
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js for the bundle Info.plist check
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Cache Rust dependencies and build artifacts
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Check Swift toolchain version
+        run: swift --version
 
       - name: Build all Swift targets
         run: swift build
@@ -87,26 +108,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js for repository hygiene guard
+      - name: Setup Node.js for the hwp-studio bundle build
         uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: apps/hwp-studio/package-lock.json
 
-      - name: Run repository hygiene & specification guard
-        run: node scripts/check-repo-hygiene.mjs
-
-      - name: Verify rhwp upstream pin (no submodule checkout)
-        run: node scripts/verify-rhwp-upstream.mjs
-
-      - name: Verify vendored rhwp WASM provenance and bundled fonts (no WASM build in CI)
-        run: |
-          node scripts/verify-rhwp-core.mjs
-          node scripts/verify-fonts.mjs
-
-      - name: Run rhwp upstream and hwp-studio guard tests
-        run: node --test scripts/test-rhwp-upstream.mjs scripts/test-hwp-studio.mjs scripts/test-sort-comparator-rule.mjs scripts/test-release-serve-rule.mjs
+      - name: Cache Rust dependencies and build artifacts
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       # hwp-studio (PD-081, PD-083): the editor bundle is generated from the committed WASM package, the
       # pinned sparse rhwp checkout and the npm lockfile; the WASM is never compiled here. The desktop shell
@@ -119,17 +129,8 @@ jobs:
       - name: Verify desktop icons match the generator
         run: node scripts/generate-desktop-icons.mjs --check
 
-      - name: Run WebUI behavioral and security regression suite
-        run: node --test scripts/test-webui-behavior.mjs scripts/test-webui-ux-ergonomics.mjs scripts/test-webui-round13-parity.mjs scripts/test-webui-sheet-atomicity.mjs scripts/test-webui-security-ipc.mjs scripts/test-webui-session-context.mjs scripts/test-webui-save-fidelity.mjs scripts/test-webui-desktop-bridge.mjs scripts/test-webui-file-open.mjs scripts/test-webui-slide-show.mjs scripts/test-webui-doc-runs.mjs scripts/test-webui-sheet-editing.mjs scripts/test-webui-hwp-host.mjs scripts/test-webui-hwp-session.mjs scripts/test-webui-sheet-format.mjs scripts/test-webui-sheet-styles.mjs scripts/test-webui-windows.mjs scripts/test-webui-shell-chrome.mjs scripts/test-webui-hwp-shortcuts.mjs
-
       - name: Check Rust toolchain version
         run: cargo --version && rustc --version
-
-      - name: Check Rust formatting across workspace
-        run: cargo fmt --all -- --check
-
-      - name: Run Rust Clippy lint gate across engine crates
-        run: cargo clippy --workspace --exclude easyoffice-desktop --all-targets -- -D warnings
 
       - name: Run Rust cross-platform engine test suite (Windows)
         run: cargo test --workspace --exclude easyoffice-desktop

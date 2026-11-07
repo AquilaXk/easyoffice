@@ -89,7 +89,7 @@ EasyOffice/
     ├── PULL_REQUEST_TEMPLATE.md                   # 자기완결 PR 표준 템플릿
     ├── ISSUE_TEMPLATE/                            # Epic / Task / Bug 이슈 폼 템플릿
     └── workflows/
-        ├── ci.yml                                 # 위생 가드 + macOS Swift/Rust + Windows 엔진·데스크톱 셸·설치 프로그램 게이트
+        ├── ci.yml                                 # Linux 공통 게이트(위생·WebUI·Rust fmt/clippy/test) + macOS Swift·번들 + Windows 엔진·데스크톱 셸·설치 프로그램, Rust 캐시 (PD-091)
         ├── automerge.yml                          # automerge 라벨 기반 스쿼시 병합 및 이슈 자동 종료
         └── release.yml                            # macOS .app/.dmg/.zip, Windows 설치 프로그램 및 개발자용 CLI 프리뷰 발행
 ```
