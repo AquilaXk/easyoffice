@@ -468,7 +468,12 @@ const WEBUI_ASSET_MARKERS: &[(&str, &str)] = &[
         include_str!("../ui/hwp-session.js"),
         "__EASYOFFICE_CREATE_HWP_SESSION__",
     ),
+    (
+        include_str!("../ui/hwp-print.js"),
+        "__EASYOFFICE_CREATE_HWP_PRINT__",
+    ),
     (include_str!("../ui/index.html"), "./hwp-host.js"),
+    (include_str!("../ui/index.html"), "./hwp-print.js"),
     (include_str!("../ui/index.html"), "./hwp-session.js"),
     (include_str!("../ui/app.js"), "compositionstart"),
 ];

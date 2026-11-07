@@ -27,6 +27,8 @@ const OVERLAY_NON_OVERRIDE = new Set([
   "src/embed/shell-shortcuts.ts",
   // EasyOffice-only module: the 파일 menu as shell commands, shell theme and recent documents.
   "src/embed/shell-menu.ts",
+  // EasyOffice-only module: page batches for the shell's print path (getPrintPages RPC).
+  "src/embed/print-batch.ts",
 ]);
 
 export function normalizedSha256(file) {
