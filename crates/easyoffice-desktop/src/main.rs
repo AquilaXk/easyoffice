@@ -8,6 +8,7 @@ mod app_commands;
 mod os_recent;
 mod pdf_export;
 mod pdf_font_fallbacks;
+mod native_menu;
 mod recent;
 mod save_file;
 mod smoke;
@@ -231,6 +232,9 @@ fn main() {
         ])
         .setup(move |app| {
             app.manage(AppWindows::new(app.path().app_data_dir().ok()));
+            // The menu bar exists on macOS only; Windows and Linux keep the page's own menu bar.
+            #[cfg(target_os = "macos")]
+            native_menu::install(app)?;
             let handle = app.handle().clone();
             if smoke_mode {
                 app.manage(SmokeProbe::start(SMOKE_TIMEOUT));

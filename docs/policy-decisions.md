@@ -1757,3 +1757,14 @@
 - **Alternatives rejected** `rhwp` 크레이트 전체를 셸에 의존(암호·서명 등 불필요한 큰 의존 트리), 글자를 윤곽선으로 변환(검색 불가), 엔진 크레이트에 PDF 글꼴 서브셋 자체 구현(이식 기준 초과).
 - **Verified by** `cargo test -p easyoffice-desktop pdf_export save_file`(상한, 쪽 오류 전파, `/ToUnicode`·글꼴 임베드·쪽 수·MediaBox, 결정론, 글꼴 DB 1회), 명령·capability 1:1 테스트.
 - **Revisit when** 시스템에 한국어 글꼴이 없는 환경(리눅스 등)을 지원할 때(번들 TTF 또는 woff2 해제), 하이퍼링크 주석을 넣을 때, 쪽 범위 선택을 추가할 때.
+
+## 77. macOS 네이티브 메뉴 막대: 한 벌의 표와 같은 핸들러, 이벤트 권한 없음 (PD-102)
+
+- **Status** Implemented (macOS 실기기 확인 전: 이 환경은 macOS를 컴파일할 수 없어 메뉴 구성 함수는 모든 플랫폼에서 컴파일·clippy로, 순수 표 논리는 단위 테스트로 검증했습니다)
+- **Context** macOS는 화면 위쪽 하나의 메뉴 막대를 쓰고, 지금까지는 Tauri 기본 메뉴가 떠 있었습니다. hop은 `menu.rs`로 자기 메뉴를 설치하고 메뉴 id를 활성 창에 이벤트로 보냅니다.
+- **Decision (`PD-102`)** (1) **macOS에서만 설치**합니다(`#[cfg(target_os = "macos")] native_menu::install`). Windows·Linux는 지금처럼 페이지가 그리는 메뉴만 씁니다. 메뉴를 만드는 함수 `native_menu::build`는 cfg 없이 두어 리눅스 빌드와 clippy가 같은 코드를 검사합니다. (2) 메뉴는 앱(EasyOffice 정보·서비스·숨기기·다른 앱 숨기기·모두 보기·종료) / 파일(새로 만들기 Cmd+N, 열기 Cmd+O, 최근 문서 Cmd+Alt+O, 저장 Cmd+S, 다른 이름으로 저장 Cmd+Shift+S, 닫기 Cmd+W) / 편집(되돌리기·다시 실행·오리기·복사·붙이기·모두 선택은 시스템 항목, 찾기 Cmd+F) / 보기(확대 Cmd+=, 축소 Cmd+-, 실제 크기 Cmd+0) / 윈도우(최소화·닫기)입니다. 종료는 시스템 항목이라 기존 `RunEvent::ExitRequested` 처리가 창마다 저장 확인을 거쳐 닫습니다. 새 창 생성도 페이지의 새로 만들기와 같은 창 명령을 씁니다. (3) **표는 하나**입니다: `native_menu.rs`의 `ITEMS`(id·라벨·단축키·페이지 동작)가 사용자 지정 항목 전부를 갖고, 페이지의 `shell-chrome.js` `NATIVE_MENU_ACTIONS`가 같은 id·동작 목록을 갖습니다. 테스트(`test-webui-native-menu.mjs`)가 두 목록을 1:1로 대조합니다. 동작 이름은 단축키 동작 표(`shortcutActions`)의 이름이라서 메뉴 항목과 단축키가 같은 핸들러(저장 확인, 한글 편집기의 셸 명령 포함)를 실행합니다. 메뉴 전용 동작은 정보·다른 이름으로 저장(한글 창은 HWP 저장 대화상자)·확대·축소 셋입니다. (4) **전달**: 메뉴 id가 표에 있을 때만 `window.eval`로 고정 스크립트(`window.__EASYOFFICE_NATIVE_MENU__("id")`, id는 JSON 문자열)를 **포커스가 있는 창에만** 실행합니다. 포커스 창이 없으면 아무 일도 하지 않습니다. 이벤트를 쓰지 않으므로 capability에 `core:event` 권한을 더하지 않고(테스트가 확인), 페이지가 보낸 값은 어디에도 쓰이지 않으며 경로는 계속 Rust만 다룹니다. (5) 편집 항목(되돌리기·오리기 등)은 macOS 시스템 동작이며, 한글 편집기 안에서는 편집기가 직접 처리하는 키와 겹칠 수 있어 실기기 확인이 필요합니다.
+- **Why** macOS 사용자가 기대하는 메뉴 막대를 주면서 명령 경로를 새로 만들지 않고(표 하나, 핸들러 하나) 권한도 넓히지 않기 위함입니다.
+- **Trade-offs** 실행을 `eval` 문자열로 넘기므로 호출 대상은 고정 이름 하나이고 id는 정적 표 값뿐입니다(이벤트 방식보다 단순하지만 페이지가 함수를 정의해 두어야 함, 없으면 무시).
+- **Alternatives rejected** hop처럼 `emit_to` + 페이지 `listen`(capability에 이벤트 권한 필요), 모든 창에 emit(포커스 없는 창이 저장/닫기를 실행할 수 있음), 메뉴 항목마다 Rust에서 직접 처리(저장 확인·한글 편집기 흐름 중복).
+- **Verified by** `cargo test -p easyoffice-desktop native_menu`(id 유일·형식, 단축키 형식·중복 없음, 동작 이름 형식, 표의 id만 스크립트를 만들고 id는 인용됨), `node --test scripts/test-webui-native-menu.mjs`(Rust 표와 페이지 목록 일치, 알 수 없는 id·상속 이름 거부, 실제 페이지에서 모든 id 실행, macOS에서만 설치·이벤트 권한 없음), `cargo clippy -p easyoffice-desktop --all-targets -- -D warnings`.
+- **Revisit when** 표·글 상자·그림 메뉴를 넣을 때(한글 편집기의 자체 메뉴와 겹침 확인), macOS 실기기에서 편집 항목이 한글 편집기와 충돌할 때.
