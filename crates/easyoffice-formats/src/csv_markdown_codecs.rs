@@ -4,12 +4,332 @@ use crate::{EasyOfficeError, XmlSanitizer};
 
 pub struct CsvCodec;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum CsvParseState {
+    #[default]
     Start,
     InUnquoted,
     InQuoted,
     QuoteInQuoted,
+}
+
+fn csv_budget_error() -> EasyOfficeError {
+    EasyOfficeError::ResourceBudgetExceeded(
+        "CSV 행 또는 열 개수가 허용 예산을 초과했습니다.".to_string(),
+    )
+}
+
+fn csv_unexpected_quote_error() -> EasyOfficeError {
+    EasyOfficeError::CorruptedContainer(
+        "비따옴표 CSV 필드 내부에 예기치 않은 따옴표가 발견되었습니다.".to_string(),
+    )
+}
+
+fn csv_unclosed_quote_error() -> EasyOfficeError {
+    EasyOfficeError::CorruptedContainer("닫히지 않은 따옴표 CSV 필드가 있습니다.".to_string())
+}
+
+/// Byte-level SWAR CSV scanner state (positions index into `bytes`).
+struct SwarCsvScanner<'a> {
+    input: &'a str,
+    bytes: &'a [u8],
+    delim_b: u8,
+    row_idx: usize,
+    col_idx: usize,
+    max_cols: usize,
+    pos: usize,
+    trailing_delim: bool,
+}
+
+impl<'a> SwarCsvScanner<'a> {
+    fn new(input: &'a str, delim_b: u8) -> Self {
+        Self {
+            input,
+            bytes: input.as_bytes(),
+            delim_b,
+            row_idx: 0,
+            col_idx: 0,
+            max_cols: 0,
+            pos: 0,
+            trailing_delim: false,
+        }
+    }
+
+    #[inline]
+    fn check_budget(&self) -> Result<(), EasyOfficeError> {
+        if self.col_idx >= CsvCodec::MAX_COLS || self.row_idx >= CsvCodec::MAX_ROWS {
+            return Err(csv_budget_error());
+        }
+        Ok(())
+    }
+
+    /// Delivers a field and advances to the next column.
+    #[inline]
+    fn emit<F: FnMut(usize, usize, Cow<'a, str>)>(
+        &mut self,
+        on_field: &mut F,
+        field: Cow<'a, str>,
+    ) {
+        on_field(self.row_idx, self.col_idx, field);
+        self.col_idx += 1;
+    }
+
+    #[inline]
+    fn end_row(&mut self) {
+        self.max_cols = self.max_cols.max(self.col_idx);
+        self.row_idx += 1;
+        self.col_idx = 0;
+    }
+
+    /// Index after the line break whose first byte is at `at` (`\r\n` counts as one).
+    #[inline]
+    fn after_eol(&self, at: usize) -> usize {
+        if self.bytes[at] == b'\r' && self.bytes.get(at + 1) == Some(&b'\n') {
+            at + 2
+        } else {
+            at + 1
+        }
+    }
+
+    /// Reads a quoted field whose opening quote was consumed; leaves `pos` after the closing quote.
+    fn quoted_field(&mut self) -> Result<Cow<'a, str>, EasyOfficeError> {
+        let (input, bytes) = (self.input, self.bytes);
+        let first_start = self.pos;
+        let first_q = XmlSanitizer::find_byte_swar(bytes, first_start, b'"')
+            .ok_or_else(csv_unclosed_quote_error)?;
+        if bytes.get(first_q + 1) != Some(&b'"') {
+            self.pos = first_q + 1;
+            return Ok(Cow::Borrowed(&input[first_start..first_q]));
+        }
+        let mut owned = String::with_capacity(32);
+        owned.push_str(&input[first_start..first_q]);
+        owned.push('"');
+        let mut pos = first_q + 2;
+        loop {
+            let q_pos = XmlSanitizer::find_byte_swar(bytes, pos, b'"')
+                .ok_or_else(csv_unclosed_quote_error)?;
+            owned.push_str(&input[pos..q_pos]);
+            pos = q_pos + 1;
+            if bytes.get(pos) != Some(&b'"') {
+                break;
+            }
+            owned.push('"');
+            pos += 1;
+        }
+        self.pos = pos;
+        Ok(Cow::Owned(owned))
+    }
+
+    /// Scans one field or separator; returns `false` when the input ended.
+    fn step<F: FnMut(usize, usize, Cow<'a, str>)>(
+        &mut self,
+        on_field: &mut F,
+    ) -> Result<bool, EasyOfficeError> {
+        let b = self.bytes[self.pos];
+        if b == b'"' {
+            return self.step_quoted(on_field);
+        }
+        if b == self.delim_b {
+            self.emit(on_field, Cow::Borrowed(""));
+            self.pos += 1;
+            self.trailing_delim = true;
+            return Ok(true);
+        }
+        if b == b'\r' || b == b'\n' {
+            self.pos = self.after_eol(self.pos);
+            self.emit(on_field, Cow::Borrowed(""));
+            self.end_row();
+            self.trailing_delim = false;
+            return Ok(true);
+        }
+        self.step_unquoted(on_field)
+    }
+
+    fn step_quoted<F: FnMut(usize, usize, Cow<'a, str>)>(
+        &mut self,
+        on_field: &mut F,
+    ) -> Result<bool, EasyOfficeError> {
+        self.trailing_delim = false;
+        self.pos += 1;
+        let field = self.quoted_field()?;
+        let Some(&next_b) = self.bytes.get(self.pos) else {
+            self.emit(on_field, field);
+            self.end_row();
+            return Ok(false);
+        };
+        if next_b == self.delim_b {
+            self.emit(on_field, field);
+            self.pos += 1;
+            self.trailing_delim = true;
+        } else if next_b == b'\r' || next_b == b'\n' {
+            self.pos = self.after_eol(self.pos);
+            self.emit(on_field, field);
+            self.end_row();
+        } else {
+            return Err(EasyOfficeError::CorruptedContainer(
+                "따옴표 CSV 필드 닫힘 이후 잘못된 문자가 발견되었습니다.".to_string(),
+            ));
+        }
+        Ok(true)
+    }
+
+    fn step_unquoted<F: FnMut(usize, usize, Cow<'a, str>)>(
+        &mut self,
+        on_field: &mut F,
+    ) -> Result<bool, EasyOfficeError> {
+        self.trailing_delim = false;
+        let pos = self.pos;
+        let end_pos = CsvCodec::find_csv_unquoted_special_swar(self.bytes, pos, self.delim_b);
+        let field = Cow::Borrowed(&self.input[pos..end_pos]);
+        if end_pos == self.bytes.len() {
+            self.emit(on_field, field);
+            self.end_row();
+            return Ok(false);
+        }
+        let term = self.bytes[end_pos];
+        if term == b'"' {
+            return Err(csv_unexpected_quote_error());
+        }
+        self.emit(on_field, field);
+        if term == self.delim_b {
+            self.pos = end_pos + 1;
+            self.trailing_delim = true;
+        } else {
+            self.end_row();
+            self.pos = self.after_eol(end_pos);
+        }
+        Ok(true)
+    }
+
+    /// Emits the final empty field after a trailing delimiter and returns `(rows, max_cols)`.
+    fn finish<F: FnMut(usize, usize, Cow<'a, str>)>(
+        mut self,
+        on_field: &mut F,
+    ) -> Result<(usize, usize), EasyOfficeError> {
+        if self.trailing_delim && self.col_idx > 0 {
+            self.check_budget()?;
+            self.emit(on_field, Cow::Borrowed(""));
+            self.max_cols = self.max_cols.max(self.col_idx);
+            self.row_idx += 1;
+        }
+        Ok((self.row_idx, self.max_cols))
+    }
+}
+
+/// Scalar (character-level) CSV parser used for non-ASCII delimiters.
+#[derive(Default)]
+struct ScalarCsvParser {
+    rows: Vec<Vec<String>>,
+    current_row: Vec<String>,
+    current_field: String,
+    state: CsvParseState,
+}
+
+impl ScalarCsvParser {
+    fn check_budget(&self) -> Result<(), EasyOfficeError> {
+        if self.current_row.len() >= CsvCodec::MAX_COLS || self.rows.len() >= CsvCodec::MAX_ROWS {
+            return Err(csv_budget_error());
+        }
+        Ok(())
+    }
+
+    /// Ends the current field (budget checked) and returns to the start state.
+    fn end_field(&mut self) -> Result<(), EasyOfficeError> {
+        self.check_budget()?;
+        self.current_row
+            .push(std::mem::take(&mut self.current_field));
+        self.state = CsvParseState::Start;
+        Ok(())
+    }
+
+    /// Ends the current field and row.
+    fn end_row(&mut self) -> Result<(), EasyOfficeError> {
+        self.end_field()?;
+        self.rows.push(std::mem::take(&mut self.current_row));
+        Ok(())
+    }
+
+    fn feed(
+        &mut self,
+        ch: char,
+        delimiter: char,
+        chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+    ) -> Result<(), EasyOfficeError> {
+        let is_eol = ch == '\r' || ch == '\n';
+        if is_eol
+            && ch == '\r'
+            && chars.peek() == Some(&'\n')
+            && self.state != CsvParseState::InQuoted
+        {
+            chars.next();
+        }
+        match self.state {
+            CsvParseState::Start if ch == '"' => {
+                self.current_field.clear();
+                self.state = CsvParseState::InQuoted;
+            }
+            CsvParseState::Start if ch == delimiter || is_eol => {
+                // An empty field: `current_field` is empty in the start state.
+                if is_eol {
+                    self.end_row()?;
+                } else {
+                    self.check_budget()?;
+                    self.current_row.push(String::new());
+                }
+            }
+            CsvParseState::Start => {
+                self.current_field.clear();
+                self.current_field.push(ch);
+                self.state = CsvParseState::InUnquoted;
+            }
+            CsvParseState::InUnquoted if ch == '"' => return Err(csv_unexpected_quote_error()),
+            CsvParseState::InQuoted => {
+                if ch == '"' {
+                    self.state = CsvParseState::QuoteInQuoted;
+                } else {
+                    self.current_field.push(ch);
+                }
+            }
+            CsvParseState::QuoteInQuoted if ch == '"' => {
+                self.current_field.push('"');
+                self.state = CsvParseState::InQuoted;
+            }
+            CsvParseState::QuoteInQuoted if !(ch == delimiter || is_eol) => {
+                return Err(EasyOfficeError::CorruptedContainer(
+                    "따옴표 CSV 필드 닫힘 이후 잘못된 문자가 발견되었습니다.".to_string(),
+                ));
+            }
+            CsvParseState::InUnquoted | CsvParseState::QuoteInQuoted => {
+                if is_eol {
+                    self.end_row()?;
+                } else if ch == delimiter {
+                    self.end_field()?;
+                } else {
+                    self.current_field.push(ch);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn finish(mut self) -> Result<Vec<Vec<String>>, EasyOfficeError> {
+        match self.state {
+            CsvParseState::InQuoted => return Err(csv_unclosed_quote_error()),
+            CsvParseState::QuoteInQuoted | CsvParseState::InUnquoted => {
+                self.check_budget()?;
+                self.current_row.push(self.current_field);
+                self.rows.push(self.current_row);
+            }
+            CsvParseState::Start => {
+                if !self.current_row.is_empty() {
+                    self.check_budget()?;
+                    self.current_row.push(String::new());
+                    self.rows.push(self.current_row);
+                }
+            }
+        }
+        Ok(self.rows)
+    }
 }
 
 impl CsvCodec {
@@ -75,156 +395,14 @@ impl CsvCodec {
             return Ok((row_count, max_c));
         }
 
-        let delim_b = delimiter as u8;
-        let bytes = input.as_bytes();
-        let mut row_idx = 0usize;
-        let mut col_idx = 0usize;
-        let mut max_cols = 0usize;
-        let mut pos = 0usize;
-        let mut trailing_delim = false;
-
-        while pos < bytes.len() {
-            if col_idx >= Self::MAX_COLS || row_idx >= Self::MAX_ROWS {
-                return Err(EasyOfficeError::ResourceBudgetExceeded(
-                    "CSV 행 또는 열 개수가 허용 예산을 초과했습니다.".to_string(),
-                ));
-            }
-            let b = bytes[pos];
-            if b == b'"' {
-                trailing_delim = false;
-                pos += 1;
-                let first_start = pos;
-                let Some(first_q) = XmlSanitizer::find_byte_swar(bytes, pos, b'"') else {
-                    return Err(EasyOfficeError::CorruptedContainer(
-                        "닫히지 않은 따옴표 CSV 필드가 있습니다.".to_string(),
-                    ));
-                };
-                let field_cow = if first_q + 1 < bytes.len() && bytes[first_q + 1] == b'"' {
-                    let mut owned = String::with_capacity(32);
-                    if first_q > first_start {
-                        owned.push_str(&input[first_start..first_q]);
-                    }
-                    owned.push('"');
-                    pos = first_q + 2;
-                    loop {
-                        let Some(q_pos) = XmlSanitizer::find_byte_swar(bytes, pos, b'"') else {
-                            return Err(EasyOfficeError::CorruptedContainer(
-                                "닫히지 않은 따옴표 CSV 필드가 있습니다.".to_string(),
-                            ));
-                        };
-                        if q_pos > pos {
-                            owned.push_str(&input[pos..q_pos]);
-                        }
-                        pos = q_pos + 1;
-                        if pos < bytes.len() && bytes[pos] == b'"' {
-                            owned.push('"');
-                            pos += 1;
-                        } else {
-                            break;
-                        }
-                    }
-                    Cow::Owned(owned)
-                } else {
-                    pos = first_q + 1;
-                    Cow::Borrowed(&input[first_start..first_q])
-                };
-
-                if pos >= bytes.len() {
-                    on_field(row_idx, col_idx, field_cow);
-                    col_idx += 1;
-                    max_cols = max_cols.max(col_idx);
-                    row_idx += 1;
-                    col_idx = 0;
-                    break;
-                }
-                let next_b = bytes[pos];
-                if next_b == delim_b {
-                    on_field(row_idx, col_idx, field_cow);
-                    col_idx += 1;
-                    pos += 1;
-                    trailing_delim = true;
-                } else if next_b == b'\r' || next_b == b'\n' {
-                    if next_b == b'\r' && pos + 1 < bytes.len() && bytes[pos + 1] == b'\n' {
-                        pos += 2;
-                    } else {
-                        pos += 1;
-                    }
-                    on_field(row_idx, col_idx, field_cow);
-                    col_idx += 1;
-                    max_cols = max_cols.max(col_idx);
-                    row_idx += 1;
-                    col_idx = 0;
-                } else {
-                    return Err(EasyOfficeError::CorruptedContainer(
-                        "따옴표 CSV 필드 닫힘 이후 잘못된 문자가 발견되었습니다.".to_string(),
-                    ));
-                }
-            } else if b == delim_b {
-                on_field(row_idx, col_idx, Cow::Borrowed(""));
-                col_idx += 1;
-                pos += 1;
-                trailing_delim = true;
-            } else if b == b'\r' || b == b'\n' {
-                if b == b'\r' && pos + 1 < bytes.len() && bytes[pos + 1] == b'\n' {
-                    pos += 2;
-                } else {
-                    pos += 1;
-                }
-                on_field(row_idx, col_idx, Cow::Borrowed(""));
-                col_idx += 1;
-                max_cols = max_cols.max(col_idx);
-                row_idx += 1;
-                col_idx = 0;
-                trailing_delim = false;
-            } else {
-                trailing_delim = false;
-                let end_pos = Self::find_csv_unquoted_special_swar(bytes, pos, delim_b);
-                if end_pos == bytes.len() {
-                    on_field(row_idx, col_idx, Cow::Borrowed(&input[pos..end_pos]));
-                    col_idx += 1;
-                    max_cols = max_cols.max(col_idx);
-                    row_idx += 1;
-                    col_idx = 0;
-                    break;
-                }
-                let term = bytes[end_pos];
-                if term == b'"' {
-                    return Err(EasyOfficeError::CorruptedContainer(
-                        "비따옴표 CSV 필드 내부에 예기치 않은 따옴표가 발견되었습니다.".to_string(),
-                    ));
-                } else if term == delim_b {
-                    on_field(row_idx, col_idx, Cow::Borrowed(&input[pos..end_pos]));
-                    col_idx += 1;
-                    pos = end_pos + 1;
-                    trailing_delim = true;
-                } else {
-                    on_field(row_idx, col_idx, Cow::Borrowed(&input[pos..end_pos]));
-                    col_idx += 1;
-                    max_cols = max_cols.max(col_idx);
-                    row_idx += 1;
-                    col_idx = 0;
-                    if term == b'\r' && end_pos + 1 < bytes.len() && bytes[end_pos + 1] == b'\n' {
-                        pos = end_pos + 2;
-                    } else {
-                        pos = end_pos + 1;
-                    }
-                }
+        let mut scanner = SwarCsvScanner::new(input, delimiter as u8);
+        while scanner.pos < scanner.bytes.len() {
+            scanner.check_budget()?;
+            if !scanner.step(&mut on_field)? {
+                break;
             }
         }
-
-        if trailing_delim && col_idx > 0 {
-            if col_idx >= Self::MAX_COLS || row_idx >= Self::MAX_ROWS {
-                return Err(EasyOfficeError::ResourceBudgetExceeded(
-                    "CSV 행 또는 열 개수가 허용 예산을 초과했습니다.".to_string(),
-                ));
-            }
-            on_field(row_idx, col_idx, Cow::Borrowed(""));
-            col_idx += 1;
-            max_cols = max_cols.max(col_idx);
-            row_idx += 1;
-        }
-
-        Ok((row_idx, max_cols))
+        scanner.finish(&mut on_field)
     }
 
     /// UTF-8 byte-order mark written before CSV/TSV output so spreadsheet applications on
@@ -271,141 +449,12 @@ impl CsvCodec {
         if input.is_empty() {
             return Ok(Vec::new());
         }
-        let mut rows: Vec<Vec<String>> = Vec::new();
-        let mut current_row: Vec<String> = Vec::new();
-        let mut current_field = String::new();
-        let mut state = CsvParseState::Start;
+        let mut parser = ScalarCsvParser::default();
         let mut chars = input.chars().peekable();
-
         while let Some(ch) = chars.next() {
-            match state {
-                CsvParseState::Start => {
-                    if ch == '"' {
-                        current_field.clear();
-                        state = CsvParseState::InQuoted;
-                    } else if ch == delimiter {
-                        if current_row.len() >= Self::MAX_COLS || rows.len() >= Self::MAX_ROWS {
-                            return Err(EasyOfficeError::ResourceBudgetExceeded(
-                                "CSV 행 또는 열 개수가 허용 예산을 초과했습니다.".to_string(),
-                            ));
-                        }
-                        current_row.push(String::new());
-                    } else if ch == '\r' || ch == '\n' {
-                        if ch == '\r' && chars.peek() == Some(&'\n') {
-                            chars.next();
-                        }
-                        if current_row.len() >= Self::MAX_COLS || rows.len() >= Self::MAX_ROWS {
-                            return Err(EasyOfficeError::ResourceBudgetExceeded(
-                                "CSV 행 또는 열 개수가 허용 예산을 초과했습니다.".to_string(),
-                            ));
-                        }
-                        current_row.push(String::new());
-                        rows.push(std::mem::take(&mut current_row));
-                    } else {
-                        current_field.clear();
-                        current_field.push(ch);
-                        state = CsvParseState::InUnquoted;
-                    }
-                }
-                CsvParseState::InUnquoted => {
-                    if ch == '"' {
-                        return Err(EasyOfficeError::CorruptedContainer(
-                            "비따옴표 CSV 필드 내부에 예기치 않은 따옴표가 발견되었습니다."
-                                .to_string(),
-                        ));
-                    } else if ch == delimiter {
-                        if current_row.len() >= Self::MAX_COLS || rows.len() >= Self::MAX_ROWS {
-                            return Err(EasyOfficeError::ResourceBudgetExceeded(
-                                "CSV 행 또는 열 개수가 허용 예산을 초과했습니다.".to_string(),
-                            ));
-                        }
-                        current_row.push(std::mem::take(&mut current_field));
-                        state = CsvParseState::Start;
-                    } else if ch == '\r' || ch == '\n' {
-                        if ch == '\r' && chars.peek() == Some(&'\n') {
-                            chars.next();
-                        }
-                        if current_row.len() >= Self::MAX_COLS || rows.len() >= Self::MAX_ROWS {
-                            return Err(EasyOfficeError::ResourceBudgetExceeded(
-                                "CSV 행 또는 열 개수가 허용 예산을 초과했습니다.".to_string(),
-                            ));
-                        }
-                        current_row.push(std::mem::take(&mut current_field));
-                        rows.push(std::mem::take(&mut current_row));
-                        state = CsvParseState::Start;
-                    } else {
-                        current_field.push(ch);
-                    }
-                }
-                CsvParseState::InQuoted => {
-                    if ch == '"' {
-                        state = CsvParseState::QuoteInQuoted;
-                    } else {
-                        current_field.push(ch);
-                    }
-                }
-                CsvParseState::QuoteInQuoted => {
-                    if ch == '"' {
-                        current_field.push('"');
-                        state = CsvParseState::InQuoted;
-                    } else if ch == delimiter {
-                        if current_row.len() >= Self::MAX_COLS || rows.len() >= Self::MAX_ROWS {
-                            return Err(EasyOfficeError::ResourceBudgetExceeded(
-                                "CSV 행 또는 열 개수가 허용 예산을 초과했습니다.".to_string(),
-                            ));
-                        }
-                        current_row.push(std::mem::take(&mut current_field));
-                        state = CsvParseState::Start;
-                    } else if ch == '\r' || ch == '\n' {
-                        if ch == '\r' && chars.peek() == Some(&'\n') {
-                            chars.next();
-                        }
-                        if current_row.len() >= Self::MAX_COLS || rows.len() >= Self::MAX_ROWS {
-                            return Err(EasyOfficeError::ResourceBudgetExceeded(
-                                "CSV 행 또는 열 개수가 허용 예산을 초과했습니다.".to_string(),
-                            ));
-                        }
-                        current_row.push(std::mem::take(&mut current_field));
-                        rows.push(std::mem::take(&mut current_row));
-                        state = CsvParseState::Start;
-                    } else {
-                        return Err(EasyOfficeError::CorruptedContainer(
-                            "따옴표 CSV 필드 닫힘 이후 잘못된 문자가 발견되었습니다.".to_string(),
-                        ));
-                    }
-                }
-            }
+            parser.feed(ch, delimiter, &mut chars)?;
         }
-
-        match state {
-            CsvParseState::InQuoted => {
-                return Err(EasyOfficeError::CorruptedContainer(
-                    "닫히지 않은 따옴표 CSV 필드가 있습니다.".to_string(),
-                ));
-            }
-            CsvParseState::QuoteInQuoted | CsvParseState::InUnquoted => {
-                if current_row.len() >= Self::MAX_COLS || rows.len() >= Self::MAX_ROWS {
-                    return Err(EasyOfficeError::ResourceBudgetExceeded(
-                        "CSV 행 또는 열 개수가 허용 예산을 초과했습니다.".to_string(),
-                    ));
-                }
-                current_row.push(current_field);
-                rows.push(current_row);
-            }
-            CsvParseState::Start => {
-                if !current_row.is_empty() {
-                    if current_row.len() >= Self::MAX_COLS || rows.len() >= Self::MAX_ROWS {
-                        return Err(EasyOfficeError::ResourceBudgetExceeded(
-                            "CSV 행 또는 열 개수가 허용 예산을 초과했습니다.".to_string(),
-                        ));
-                    }
-                    current_row.push(String::new());
-                    rows.push(current_row);
-                }
-            }
-        }
-
-        Ok(rows)
+        parser.finish()
     }
 
     pub fn serialize(rows: &[Vec<String>], delimiter: char) -> String {

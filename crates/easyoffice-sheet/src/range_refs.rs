@@ -6,6 +6,9 @@ use crate::{
 };
 use std::borrow::Cow;
 
+/// Ranges above this many cells may switch to a populated-cell walk.
+const SPARSE_BLOCK_MIN_CELLS: usize = 1024;
+
 pub(crate) type StreamingRangeSpec<'a> = (Option<Cow<'a, str>>, u32, u32, usize, usize, bool);
 pub(crate) type ResolvedRangeRef<'a> = (Option<Cow<'a, str>>, CellRange, bool);
 
@@ -746,6 +749,36 @@ impl SheetEngine {
         Ok(EvaluatedCellValue::Number(sum))
     }
 
+    /// Populated coordinates inside the anchored block when the block is large and sparse.
+    fn sparse_block_population(
+        &self,
+        sheet: Option<&str>,
+        origin: (u32, u32),
+        counts: (usize, usize),
+        ctx: &mut EvalContext<'_>,
+    ) -> Option<Vec<PackedCellCoordinate>> {
+        let (min_r, min_c) = origin;
+        let (r_count, c_count) = counts;
+        let total = r_count.saturating_mul(c_count);
+        if total <= SPARSE_BLOCK_MIN_CELLS {
+            return None;
+        }
+        let ts = self
+            .resolve_sheet_ref(sheet, ctx)
+            .filter(|ts| total > ts.cells.len().saturating_mul(2))?;
+        let max_r = min_r + (r_count as u32).saturating_sub(1);
+        let max_c = min_c + (c_count as u32).saturating_sub(1);
+        Some(
+            ts.cells
+                .keys()
+                .copied()
+                .filter(|c| {
+                    c.row() >= min_r && c.row() <= max_r && c.col() >= min_c && c.col() <= max_c
+                })
+                .collect(),
+        )
+    }
+
     pub(crate) fn eval_single_criteria_streaming(
         &self,
         name: &str,
@@ -754,67 +787,94 @@ impl SheetEngine {
         depth: usize,
     ) -> Result<EvaluatedCellValue, FormulaError> {
         if name == "COUNTIF" {
-            if args.len() != 2 {
-                return Err(FormulaError::Value);
+            return self.eval_countif(args, ctx, depth);
+        }
+        self.eval_sumif_family(name, args, ctx, depth)
+    }
+
+    fn eval_countif(
+        &self,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<EvaluatedCellValue, FormulaError> {
+        if args.len() != 2 {
+            return Err(FormulaError::Value);
+        }
+        let Some(range_spec) = self.extract_streaming_range_ctx(&args[0], ctx, depth)? else {
+            let val = self.eval_expr_ctx(&args[0], ctx, depth);
+            let crit = self.eval_arg_val(&args[1], ctx, depth)?;
+            let hit = CompiledCriteria::compile(&crit).matches(&val);
+            return Ok(EvaluatedCellValue::Number(f64::from(u8::from(hit))));
+        };
+        let crit_val = self.eval_arg_val(&args[1], ctx, depth)?;
+        let compiled_crit = CompiledCriteria::compile(&crit_val);
+        let (ref sheet_opt, min_r, min_c, r_count, c_count, transposed) = range_spec;
+        let total = r_count.saturating_mul(c_count);
+        let sparse = if transposed {
+            None
+        } else {
+            self.sparse_block_population(
+                sheet_opt.as_deref(),
+                (min_r, min_c),
+                (r_count, c_count),
+                ctx,
+            )
+        };
+        let mut cnt = 0usize;
+        if let Some(pop_coords) = sparse {
+            let pop_len = pop_coords.len();
+            for coord in pop_coords {
+                let val = self.eval_sheet_coord(sheet_opt.as_deref(), coord, ctx, depth);
+                cnt += usize::from(compiled_crit.matches(&val));
             }
-            let Some(range_spec) = self.extract_streaming_range_ctx(&args[0], ctx, depth)? else {
-                let val = self.eval_expr_ctx(&args[0], ctx, depth);
-                let crit = self.eval_arg_val(&args[1], ctx, depth)?;
-                let compiled_crit = CompiledCriteria::compile(&crit);
-                return Ok(EvaluatedCellValue::Number(if compiled_crit.matches(&val) {
-                    1.0
-                } else {
-                    0.0
-                }));
-            };
-            let crit_val = self.eval_arg_val(&args[1], ctx, depth)?;
-            let compiled_crit = CompiledCriteria::compile(&crit_val);
-            let (ref sheet_opt, min_r, min_c, r_count, c_count, transposed) = range_spec;
-            let total = r_count.saturating_mul(c_count);
-            if !transposed
-                && total > 1024
-                && self
-                    .resolve_sheet_ref(sheet_opt.as_deref(), ctx)
-                    .is_some_and(|ts| total > ts.cells.len().saturating_mul(2))
-            {
-                let max_r = min_r + (r_count as u32).saturating_sub(1);
-                let max_c = min_c + (c_count as u32).saturating_sub(1);
-                let pop_coords: Vec<PackedCellCoordinate> = self
-                    .resolve_sheet_ref(sheet_opt.as_deref(), ctx)
-                    .unwrap()
-                    .cells
-                    .keys()
-                    .copied()
-                    .filter(|c| {
-                        c.row() >= min_r && c.row() <= max_r && c.col() >= min_c && c.col() <= max_c
-                    })
-                    .collect();
-                let pop_len = pop_coords.len();
-                let mut cnt = 0usize;
-                for coord in pop_coords {
-                    let val = self.eval_sheet_coord(sheet_opt.as_deref(), coord, ctx, depth);
-                    if compiled_crit.matches(&val) {
-                        cnt += 1;
-                    }
-                }
-                if compiled_crit.matches(&EvaluatedCellValue::Empty) {
-                    cnt += total.saturating_sub(pop_len);
-                }
-                return Ok(EvaluatedCellValue::Number(cnt as f64));
-            }
-            let mut cnt = 0usize;
-            for dr in 0..r_count {
-                for dc in 0..c_count {
-                    let val =
-                        self.eval_streaming_cell_allow_error(&range_spec, dr, dc, ctx, depth)?;
-                    if compiled_crit.matches(&val) {
-                        cnt += 1;
-                    }
-                }
+            if compiled_crit.matches(&EvaluatedCellValue::Empty) {
+                cnt += total.saturating_sub(pop_len);
             }
             return Ok(EvaluatedCellValue::Number(cnt as f64));
         }
+        for dr in 0..r_count {
+            for dc in 0..c_count {
+                let val = self.eval_streaming_cell_allow_error(&range_spec, dr, dc, ctx, depth)?;
+                cnt += usize::from(compiled_crit.matches(&val));
+            }
+        }
+        Ok(EvaluatedCellValue::Number(cnt as f64))
+    }
 
+    /// Resolves the SUMIF / AVERAGEIF sum range, broadcasting a single cell to the criteria shape.
+    fn resolve_sum_target<'b>(
+        &self,
+        arg: &'b Expr,
+        shape: (usize, usize),
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<StreamingRangeSpec<'b>, FormulaError> {
+        let (r_count, c_count) = shape;
+        let Some(mut ts) = self.extract_streaming_range_ctx(arg, ctx, depth)? else {
+            return Err(FormulaError::Value);
+        };
+        if ts.3 == 1 && ts.4 == 1 && (r_count != 1 || c_count != 1) {
+            if ts.1 as usize + r_count > PackedCellCoordinate::MAX_ROWS as usize
+                || ts.2 as usize + c_count > PackedCellCoordinate::MAX_COLS as usize
+            {
+                return Err(FormulaError::Ref);
+            }
+            ts.3 = r_count;
+            ts.4 = c_count;
+        } else if ts.3 != r_count || ts.4 != c_count {
+            return Err(FormulaError::Value);
+        }
+        Ok(ts)
+    }
+
+    fn eval_sumif_family(
+        &self,
+        name: &str,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<EvaluatedCellValue, FormulaError> {
         if args.len() < 2 || args.len() > 3 {
             return Err(FormulaError::Value);
         }
@@ -824,106 +884,61 @@ impl SheetEngine {
         let crit_val = self.eval_arg_val(&args[1], ctx, depth)?;
         let compiled_crit = CompiledCriteria::compile(&crit_val);
         let (_, _, _, r_count, c_count, transposed) = range_spec;
-        let target_spec = if args.len() == 3 {
-            let Some(mut ts) = self.extract_streaming_range_ctx(&args[2], ctx, depth)? else {
-                return Err(FormulaError::Value);
-            };
-            if ts.3 == 1 && ts.4 == 1 && (r_count != 1 || c_count != 1) {
-                if ts.1 as usize + r_count > PackedCellCoordinate::MAX_ROWS as usize
-                    || ts.2 as usize + c_count > PackedCellCoordinate::MAX_COLS as usize
-                {
-                    return Err(FormulaError::Ref);
-                }
-                ts.3 = r_count;
-                ts.4 = c_count;
-            } else if ts.3 != r_count || ts.4 != c_count {
-                return Err(FormulaError::Value);
-            }
-            Some(ts)
-        } else {
-            None
+        let target_spec = match args.get(2) {
+            Some(arg) => Some(self.resolve_sum_target(arg, (r_count, c_count), ctx, depth)?),
+            None => None,
         };
-
-        let total = r_count.saturating_mul(c_count);
         let anchor_spec = target_spec.as_ref().unwrap_or(&range_spec);
-        if !transposed
-            && !anchor_spec.5
-            && total > 1024
-            && self
-                .resolve_sheet_ref(anchor_spec.0.as_deref(), ctx)
-                .is_some_and(|ts| total > ts.cells.len().saturating_mul(2))
-        {
-            let max_r = anchor_spec.1 + (r_count as u32).saturating_sub(1);
-            let max_c = anchor_spec.2 + (c_count as u32).saturating_sub(1);
-            let mut pop_coords: Vec<PackedCellCoordinate> = self
-                .resolve_sheet_ref(anchor_spec.0.as_deref(), ctx)
-                .unwrap()
-                .cells
-                .keys()
-                .copied()
-                .filter(|c| {
-                    c.row() >= anchor_spec.1
-                        && c.row() <= max_r
-                        && c.col() >= anchor_spec.2
-                        && c.col() <= max_c
-                })
-                .collect();
-            pop_coords.sort_unstable();
-            let mut sum = 0.0f64;
-            let mut count = 0usize;
-            for coord in pop_coords {
-                let dr = (coord.row() - anchor_spec.1) as usize;
-                let dc = (coord.col() - anchor_spec.2) as usize;
-                let val = self.eval_streaming_cell_allow_error(&range_spec, dr, dc, ctx, depth)?;
-                if compiled_crit.matches(&val) {
-                    let target_v = if let Some(ref ts) = target_spec {
-                        self.eval_streaming_cell(ts, dr, dc, ctx, depth)?
-                    } else {
-                        val
-                    };
-                    if let EvaluatedCellValue::Number(n) = target_v {
-                        sum += n;
-                        count += 1;
-                    }
-                }
-            }
-            return if name == "AVERAGEIF" {
-                if count == 0 {
-                    Err(FormulaError::DivByZero)
-                } else {
-                    Ok(EvaluatedCellValue::Number(sum / (count as f64)))
-                }
-            } else {
-                Ok(EvaluatedCellValue::Number(sum))
-            };
-        }
+        let sparse = if transposed || anchor_spec.5 {
+            None
+        } else {
+            self.sparse_block_population(
+                anchor_spec.0.as_deref(),
+                (anchor_spec.1, anchor_spec.2),
+                (r_count, c_count),
+                ctx,
+            )
+        };
 
         let mut sum = 0.0f64;
         let mut count = 0usize;
-        for dr in 0..r_count {
-            for dc in 0..c_count {
+        let mut accumulate =
+            |dr: usize, dc: usize, ctx: &mut EvalContext<'_>| -> Result<(), FormulaError> {
                 let val = self.eval_streaming_cell_allow_error(&range_spec, dr, dc, ctx, depth)?;
-                if compiled_crit.matches(&val) {
-                    let target_v = if let Some(ref ts) = target_spec {
-                        self.eval_streaming_cell(ts, dr, dc, ctx, depth)?
-                    } else {
-                        val
-                    };
-                    if let EvaluatedCellValue::Number(n) = target_v {
-                        sum += n;
-                        count += 1;
-                    }
+                if !compiled_crit.matches(&val) {
+                    return Ok(());
+                }
+                let target_v = match target_spec {
+                    Some(ref ts) => self.eval_streaming_cell(ts, dr, dc, ctx, depth)?,
+                    None => val,
+                };
+                if let EvaluatedCellValue::Number(n) = target_v {
+                    sum += n;
+                    count += 1;
+                }
+                Ok(())
+            };
+        if let Some(mut pop_coords) = sparse {
+            pop_coords.sort_unstable();
+            for coord in pop_coords {
+                let dr = (coord.row() - anchor_spec.1) as usize;
+                let dc = (coord.col() - anchor_spec.2) as usize;
+                accumulate(dr, dc, ctx)?;
+            }
+        } else {
+            for dr in 0..r_count {
+                for dc in 0..c_count {
+                    accumulate(dr, dc, ctx)?;
                 }
             }
         }
 
-        if name == "AVERAGEIF" {
-            if count == 0 {
-                return Err(FormulaError::DivByZero);
-            }
-            Ok(EvaluatedCellValue::Number(sum / (count as f64)))
-        } else {
-            Ok(EvaluatedCellValue::Number(sum))
+        if name != "AVERAGEIF" {
+            return Ok(EvaluatedCellValue::Number(sum));
         }
+        if count == 0 {
+            return Err(FormulaError::DivByZero);
+        }
+        Ok(EvaluatedCellValue::Number(sum / (count as f64)))
     }
 }
