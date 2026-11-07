@@ -622,3 +622,68 @@ test("the embed router routes getPrintPages and the editor advertises print-page
   const menu = fs.readFileSync(path.join(REPO, "apps/hwp-studio/index.html"), "utf8");
   assert.ok(menu.includes('data-shell-cmd="print"'), "the 파일 menu lists printing");
 });
+
+// ---- toolbar labels toggle (PD-105) -------------------------------------------------------------
+
+function fakeLabelsHost({ stored = null, failRead = false, failWrite = false } = {}) {
+  const store = new Map(stored === null ? [] : [["toolbar-labels", stored]]);
+  const item = { active: null, attrs: {}, classList: { toggle(name, force) { item.active = force; } }, setAttribute(k, v) { item.attrs[k] = v; } };
+  return {
+    store, item,
+    root: { dataset: {} },
+    menuItems: () => [item],
+    storage: () => ({
+      getItem: (k) => {
+        if (failRead) {
+          throw new Error("denied");
+        }
+        return store.get(k) ?? null;
+      },
+      setItem: (k, v) => {
+        if (failWrite) {
+          throw new Error("full");
+        }
+        store.set(k, v);
+      },
+    }),
+  };
+}
+
+test("the toolbar labels toggle round-trips through storage and defaults to shown", async () => {
+  const { applyToolbarLabels, readToolbarLabels, toggleToolbarLabels } = await import("../apps/hwp-studio/src/ui/toolbar-labels.ts");
+  const host = fakeLabelsHost();
+  assert.equal(readToolbarLabels(host), true, "nothing stored: labels are shown");
+  applyToolbarLabels(readToolbarLabels(host), host);
+  assert.equal(host.root.dataset.toolbarLabels, "shown");
+  assert.equal(host.item.attrs["aria-checked"], "true");
+  assert.equal(toggleToolbarLabels(host), false);
+  assert.equal(host.root.dataset.toolbarLabels, "hidden");
+  assert.equal(host.store.get("toolbar-labels"), "hidden");
+  assert.deepEqual([host.item.active, host.item.attrs["aria-checked"]], [false, "false"]);
+  assert.equal(readToolbarLabels(host), false, "the stored choice is read back");
+  assert.equal(toggleToolbarLabels(host), true);
+  assert.equal(host.store.get("toolbar-labels"), "shown");
+});
+
+test("unreadable or unwritable storage falls back to shown and the toggle still works", async () => {
+  const { readToolbarLabels, toggleToolbarLabels } = await import("../apps/hwp-studio/src/ui/toolbar-labels.ts");
+  assert.equal(readToolbarLabels(fakeLabelsHost({ failRead: true })), true);
+  assert.equal(readToolbarLabels(fakeLabelsHost({ stored: "garbage" })), true, "only the exact value hidden hides the labels");
+  const host = fakeLabelsHost({ failWrite: true });
+  assert.equal(toggleToolbarLabels(host), false, "the first toggle hides (the page starts as shown)");
+  assert.equal(host.root.dataset.toolbarLabels, "hidden", "the window follows the choice although it could not be saved");
+});
+
+test("the toolbar labels item, command, CSS and manifest agree", () => {
+  const html = fs.readFileSync(path.join(REPO, "apps/hwp-studio/index.html"), "utf8");
+  assert.match(html, /role="menuitemcheckbox"[^>]*data-cmd="view:toolbar-labels"/);
+  const main = fs.readFileSync(path.join(REPO, "apps/hwp-studio/src/main.ts"), "utf8");
+  assert.ok(main.includes("registry.register(toolbarLabelsCommand);") && main.includes("initToolbarLabels();"));
+  const css = fs.readFileSync(path.join(REPO, "apps/hwp-studio/src/eo-overrides.css"), "utf8");
+  const block = css.slice(css.indexOf(':root[data-toolbar-labels="hidden"] #icon-toolbar .tb-label'));
+  assert.ok(block.includes("#style-bar .sb-ribbon-label") && block.includes("height: 32px"));
+  assert.ok(!/#[0-9a-fA-F]{3,8}\b|rgb/.test(block), "the rules use no colours");
+  const manifest = fs.readFileSync(path.join(REPO, "config/rhwp-studio-overrides.json"), "utf8");
+  assert.ok(manifest.includes("view:toolbar-labels") && manifest.includes("src/ui/toolbar-labels.ts"));
+  assert.ok(fs.readFileSync(path.join(REPO, "THIRD_PARTY_NOTICES.md"), "utf8").includes("src/ui/toolbar-labels.ts"));
+});
