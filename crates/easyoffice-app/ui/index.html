@@ -713,24 +713,31 @@
           </div>
 
           <div id="pane-pdf" class="editor-pane" hidden>
-            <div class="formula-bar pdf-toolbar">
-              <button id="btn-pdf-rotate" class="secondary-btn"><span class="icon-slot" data-icon="rotate-cw"></span>90° 회전</button>
-              <label for="pdf-stamp-select">결재 스탬프</label>
-              <select id="pdf-stamp-select" class="cmd-input pdf-stamp-select">
-                <option value="승인필" selected>승인 완료</option>
-                <option value="대외비">대외비</option>
-                <option value="초안">초안</option>
-                <option value="최종본">최종본</option>
-              </select>
-              <input
-                id="pdf-watermark-input"
-                type="text"
-                class="cmd-input pdf-watermark-input"
-                value="대외비 · 기획조정실"
-                aria-label="워터마크 문구"
-              />
-              <button id="btn-pdf-apply" class="primary-btn">양식·스탬프 적용</button>
-              <span id="pdf-rotation-badge" class="ctx-badge">회전: 0°</span>
+            <div id="pdf-toolbar" class="formula-bar pdf-toolbar eo-doc-style-bar" role="toolbar" aria-label="PDF 도구줄">
+              <div class="tb-group">
+                <button id="btn-pdf-rotate" type="button" class="tb-btn" data-icon="rotate-cw" title="90° 회전" aria-label="90° 회전"></button>
+              </div>
+              <span class="tb-sep" aria-hidden="true"></span>
+              <div class="sb-field-grid">
+                <label for="pdf-stamp-select" class="sb-size-unit">결재 스탬프</label>
+                <select id="pdf-stamp-select" class="sb-combo pdf-stamp-select">
+                  <option value="승인필" selected>승인 완료</option>
+                  <option value="대외비">대외비</option>
+                  <option value="초안">초안</option>
+                  <option value="최종본">최종본</option>
+                </select>
+                <input
+                  id="pdf-watermark-input"
+                  type="text"
+                  class="sb-select pdf-watermark-input"
+                  value="대외비 · 기획조정실"
+                  aria-label="워터마크 문구"
+                />
+              </div>
+              <div class="tb-group">
+                <button id="btn-pdf-apply" type="button" class="tb-btn">양식·스탬프 적용</button>
+              </div>
+              <span id="pdf-rotation-badge" class="sb-size-unit">회전: 0°</span>
             </div>
             <div class="pdf-page-card" id="pdf-page-card">
               <div class="pdf-stamp" id="pdf-stamp-badge">승인필</div>
@@ -740,11 +747,11 @@
               <div class="pdf-acroform-grid">
                 <label>
                   신청인 성명
-                  <input id="pdf-form-applicant" type="text" class="cmd-input" value="이수현 수석연구원" />
+                  <input id="pdf-form-applicant" type="text" class="sb-select" value="이수현 수석연구원" />
                 </label>
                 <label>
                   소속 부서명
-                  <input id="pdf-form-dept" type="text" class="cmd-input" value="디지털행정혁신과" />
+                  <input id="pdf-form-dept" type="text" class="sb-select" value="디지털행정혁신과" />
                 </label>
               </div>
               <p id="pdf-form-status" class="formula-result">양식 준비 완료</p>
@@ -758,20 +765,20 @@
                 DOCX, HWP/HWPX, ODF, XLSX, PPTX, PDF, RTF, CSV, Markdown, TXT 간 문서를 변환합니다.
               </p>
               <div class="formula-bar conv-source-row">
-                <label for="conv-source-file">원본 파일</label>
+                <label for="conv-source-file" class="sb-size-unit">원본 파일</label>
                 <input
                   id="conv-source-file"
                   type="file"
-                  class="cmd-input"
+                  class="sb-select"
                   accept=".docx,.doc,.odt,.rtf,.md,.markdown,.txt,.hwp,.hwpx,.hwt,.hwtx,.xlsx,.xls,.ods,.csv,.tsv,.pptx,.ppt,.ppsx,.odp,.pdf,.pages"
                   aria-label="변환할 원본 파일 선택"
                 />
                 <span id="conv-source-name">선택 안 함 — 편집기 내용을 변환합니다</span>
-                <button id="btn-conv-clear-source" type="button" class="secondary-btn" hidden>선택 해제</button>
+                <button id="btn-conv-clear-source" type="button" class="dialog-btn" hidden>선택 해제</button>
               </div>
-              <div class="formula-bar">
-                <label for="conv-src-fmt">원본</label>
-                <select id="conv-src-fmt" class="cmd-input conv-fmt-select" aria-label="원본 포맷">
+              <div class="formula-bar conv-format-row">
+                <label for="conv-src-fmt" class="sb-size-unit">원본</label>
+                <select id="conv-src-fmt" class="sb-combo conv-fmt-select" aria-label="원본 포맷">
                   <option value="docx" selected>DOCX</option>
                   <option value="doc">DOC</option>
                   <option value="hwpx">HWPX</option>
@@ -795,8 +802,8 @@
                   <option value="pages">Pages (.pages, 읽기 전용)</option>
                 </select>
                 <span>→</span>
-                <label for="conv-dst-fmt">대상</label>
-                <select id="conv-dst-fmt" class="cmd-input conv-fmt-select" aria-label="대상 포맷">
+                <label for="conv-dst-fmt" class="sb-size-unit">대상</label>
+                <select id="conv-dst-fmt" class="sb-combo conv-fmt-select" aria-label="대상 포맷">
                   <option value="hwpx" selected>HWPX</option>
                   <option value="hwtx">HWTX</option>
                   <option value="hwp">HWP 5.0</option>
@@ -818,7 +825,7 @@
                   <option value="md">Markdown (.md)</option>
                   <option value="txt">TXT (.txt)</option>
                 </select>
-                <button id="btn-run-convert" class="primary-btn">즉시 변환 검증</button>
+                <button id="btn-run-convert" type="button" class="dialog-btn dialog-btn-primary">즉시 변환 검증</button>
               </div>
               <div id="conv-result-box" class="security-card">
                 원본과 대상 포맷을 선택한 뒤 [즉시 변환 검증]을 누르면 문서 변환 결과를 확인합니다.

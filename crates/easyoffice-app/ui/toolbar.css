@@ -53,7 +53,8 @@
 
 #doc-style-bar,
 #sheet-formula-bar,
-#slide-toolbar {
+#slide-toolbar,
+#pdf-toolbar {
   background: var(--color-bg);
   border-bottom: 1px solid var(--ui-border);
   white-space: nowrap;

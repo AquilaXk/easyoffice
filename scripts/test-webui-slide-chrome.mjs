@@ -4,7 +4,7 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { cssDeclarations } from "./test-support/css-declarations.mjs";
-import { hasColorLiteral, rulesFor } from "./test-support/css-rules.mjs";
+import { hasColorLiteral, rulesFor, ruleWithSelector } from "./test-support/css-rules.mjs";
 
 // PD-098 step 4b: the slide screen wears rhwp-studio's toolbar classes and hop's custom select.
 
@@ -102,7 +102,7 @@ test("slide chrome rules use tokens only; the stage paper is the fixed light pal
   for (const { selector, body } of rules) assert.equal(hasColorLiteral(body), false, `${selector} has a literal colour`);
   const stage = rulesFor(read("styles.css"), [".slide-stage"]).find((r) => r.selector === ".slide-stage");
   assert.ok(stage.body.includes("var(--doc-paper)"), "the stage is the document paper");
-  const fixed = rulesFor(read("content.css"), [".slide-stage"]).find((r) => r.selector === ".slide-stage");
+  const fixed = ruleWithSelector(read("content.css"), ".slide-stage");
   const redeclared = cssDeclarations(fixed.body);
   assert.ok(redeclared.length >= 3);
   const tokens = read("tokens.css");
