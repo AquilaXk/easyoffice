@@ -13,7 +13,7 @@ const UI_DIR = new URL("../crates/easyoffice-app/ui/", import.meta.url);
 const read = (rel, base = UI_DIR) => fs.readFileSync(fileURLToPath(new URL(rel, base)), "utf8");
 const HOST_JS = new URL("hwp-host.js", UI_DIR);
 const CHROME_JS = new URL("shell-chrome.js", UI_DIR);
-const ALL_CSS = `${read("styles.css")}\n${read("shell.css")}\n${read("content.css")}\n${read("home.css")}`;
+const ALL_CSS = `${read("styles.css")}\n${read("shell.css")}\n${read("content.css")}\n${read("home.css")}\n${read("menu-bar.css")}\n${read("toolbar.css")}`;
 const OVERLAY = new URL("../apps/hwp-studio/", import.meta.url);
 
 const COMMANDS = ["new", "open", "recent", "save", "save-as", "close"];

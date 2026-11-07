@@ -375,6 +375,7 @@
     { keys: "Ctrl+Z", action: "studio-undo" },
     { keys: "Ctrl+Y", action: "studio-redo" },
     { keys: "Ctrl+Shift+Z", action: "studio-redo" },
+    { keys: "Ctrl+Alt+O", action: "recent-dialog", forwardFromEditor: true },
     { keys: "Ctrl+K", action: "palette", forwardFromEditor: true },
     { keys: "Ctrl+F", action: "palette" },
     { keys: "Ctrl+B", action: "home-bold", ribbon: true },
@@ -398,6 +399,40 @@
     { keys: "Delete", action: "slide-delete", module: "SLIDE", bareKey: true, scope: "#slide-thumb-list" },
   ]);
 
+  // ---- menu bar -> ribbon command (PD-098) ----------------------------------------------------
+  // Menu items carry `data-studio-menu-cmd`: either the suffix of a ribbon command id (`home-bold`,
+  // run as `<module>-home-bold`), a module-specific id (`sheet-mod-pivot`, only in its module), or
+  // one of three legacy aliases the editor menus used before. This is the one place that maps them.
+  const MENU_MODULE_PREFIX = { DOC: "document", HWP: "hwp", SHEET: "sheet", SLIDE: "slide", PDF: "pdf", CONV: "document" };
+  const MODULE_SPECIFIC_PREFIX = { DOC: "doc", HWP: "hwp", SHEET: "sheet", SLIDE: "slide", PDF: "pdf" };
+  const MODULE_SPECIFIC_ID = /^(doc|hwp|sheet|slide|pdf)-mod-/;
+  const LEGACY_MENU_ALIASES = {
+    "mod-footnote": { DOC: "doc-mod-footnote" },
+    "mod-header": { HWP: "hwp-mod-header" },
+    "mod-symbol": { HWP: "hwp-mod-field" },
+  };
+
+  function allRibbonCommandIds() {
+    const ids = [];
+    for (const mod of Object.keys(RIBBON_CATEGORY_TOOLS)) {
+      for (const cat of Object.keys(RIBBON_CATEGORY_TOOLS[mod])) {
+        for (const tool of RIBBON_CATEGORY_TOOLS[mod][cat]) ids.push(tool.id);
+      }
+    }
+    return ids;
+  }
+
+  // The ribbon command id a menu command runs in `moduleCode`, or null when it has none there.
+  function resolveMenuCommand(cmd, moduleCode) {
+    const alias = LEGACY_MENU_ALIASES[cmd];
+    if (alias) return alias[moduleCode] || null;
+    if (MODULE_SPECIFIC_ID.test(cmd)) {
+      return MODULE_SPECIFIC_PREFIX[moduleCode] && cmd.startsWith(MODULE_SPECIFIC_PREFIX[moduleCode] + "-mod-") ? cmd : null;
+    }
+    const id = (MENU_MODULE_PREFIX[moduleCode] || "document") + "-" + cmd;
+    return allRibbonCommandIds().includes(id) ? id : null;
+  }
+
   function resolveRibbonShortcutLabel(commandId, rawShortcut) {
     const suffix = String(commandId || "").replace(/^[a-z]+-/, "");
     const normalized = formatPlatformShortcut(String(rawShortcut || ""), "Ctrl");
@@ -410,6 +445,8 @@
   host.__EASYOFFICE_RIBBON_CATALOG__ = {
     WORKSPACE_SHORTCUT_BINDINGS,
     resolveRibbonShortcutLabel,
+    resolveMenuCommand,
+    allRibbonCommandIds,
     MODULE_LABELS,
     MODULE_SPECS,
     CONTEXTUAL_TOOL_BADGES,

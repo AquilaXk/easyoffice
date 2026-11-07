@@ -470,7 +470,7 @@
       launch, module, isStart, isManaged: () => managed, canSpawnWindows, desktopAvailable,
       start, bindUi, refresh, setDocumentName, setDirty, getDocumentName, getTitles, applyTitles,
       newDocument, openFile, openRecent, spawnWithFile, takePendingOpen, refreshRecents,
-      requestClose, closeWindow, requestOpenFile, routeFile, applyLaunch, loadPending, bindStatusTooltips, runSmoke,
+      requestClose, closeWindow, requestOpenFile, chooseRecent, routeFile, applyLaunch, loadPending, bindStatusTooltips, runSmoke,
     };
   }
 
