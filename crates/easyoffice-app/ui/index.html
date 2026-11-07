@@ -477,15 +477,20 @@
 
           <div id="pane-hwp" class="editor-pane" hidden></div>
           <div id="pane-sheet" class="editor-pane" hidden>
-            <div class="formula-bar">
-              <span class="cell-ref" id="active-cell-ref">F2</span>
-              <input
-                id="formula-input"
-                type="text"
-                value="=SUM(B2:E2)"
-                aria-label="수식 입력줄"
-              />
-              <button id="btn-eval-formula" class="primary-btn">수식 계산</button>
+            <div id="sheet-formula-bar" class="formula-bar eo-doc-style-bar" role="toolbar" aria-label="수식 입력줄 도구줄">
+              <div class="sb-field-grid sb-formula-field">
+                <span class="cell-ref sb-size-unit" id="active-cell-ref">F2</span>
+                <input
+                  id="formula-input"
+                  class="sb-select sb-formula-input"
+                  type="text"
+                  value="=SUM(B2:E2)"
+                  aria-label="수식 입력줄"
+                />
+              </div>
+              <div class="tb-group">
+                <button id="btn-eval-formula" type="button" class="tb-btn">수식 계산</button>
+              </div>
               <span id="sheet-eval-result" class="formula-result">결과: 4950</span>
             </div>
             <div class="editor-surface sheet-surface">
@@ -640,11 +645,11 @@
                 </tbody>
               </table>
               </div>
-              <div id="sheet-tab-bar" class="sheet-tab-bar" role="tablist" aria-label="시트 탭 전환">
-                <button class="sheet-tab-btn active" role="tab" aria-selected="true" data-sheet-tab="Sheet1">2026 분기별 실적</button>
-                <button class="sheet-tab-btn" role="tab" aria-selected="false" data-sheet-tab="Sheet2">부문별 요약</button>
-                <button id="btn-add-sheet-tab" class="sheet-tab-btn">+ 시트 추가</button>
-              </div>
+            </div>
+            <div id="sheet-tab-bar" class="sheet-tab-bar" role="tablist" aria-label="시트 탭 전환">
+              <button class="sheet-tab-btn active" role="tab" aria-selected="true" data-sheet-tab="Sheet1">2026 분기별 실적</button>
+              <button class="sheet-tab-btn" role="tab" aria-selected="false" data-sheet-tab="Sheet2">부문별 요약</button>
+              <button id="btn-add-sheet-tab" class="sheet-tab-btn">+ 시트 추가</button>
             </div>
           </div>
 
