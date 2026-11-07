@@ -625,7 +625,7 @@ function serializeNodesToHtml(nodes) {
 }
 
 function parseAttributesInto(attrText, el) {
-  const attrRe = /([\w:-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g;
+  const attrRe = /([A-Za-z0-9_:-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g;
   let m;
   while ((m = attrRe.exec(attrText)) !== null) {
     const name = m[1].toLowerCase();
@@ -644,7 +644,7 @@ function parseHtmlFragment(html, ownerDocument) {
   };
   const stack = [root];
   const tagRe =
-    /<!--[\s\S]*?-->|<!doctype[^>]*>|<\/([a-z0-9-]+)\s*>|<([a-z0-9-]+)((?:"[^"]*"|'[^']*'|[^>"'])*)(\/?)>/gi;
+    /<!--[\s\S]*?-->|<!doctype[^>]*>|<\/([A-Za-z0-9-]+)\s*>|<([A-Za-z0-9-]+)((?:"[^"]*"|'[^']*'|[^>"'])*)(\/?)>/gi;
   let lastIdx = 0;
   let m;
   while ((m = tagRe.exec(html)) !== null) {

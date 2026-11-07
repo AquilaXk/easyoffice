@@ -1,4 +1,3 @@
-import { setHostFontProvider, onHostFontsChanged, getHostFontState } from '@/core/local-fonts';
 import { WasmBridge } from '@/core/wasm-bridge';
 import { HwpDocument } from '@wasm/rhwp.js';
 import { installDocumentTitle } from '@/ui/document-title';
@@ -57,6 +56,9 @@ import { setDocumentFontSubstitutions } from '@/core/font-substitution';
 import {
   getLocalFontState,
   loadStoredLocalFonts,
+  setHostFontProvider,
+  onHostFontsChanged,
+  getHostFontState,
 } from '@/core/local-fonts';
 import { userSettings } from '@/core/user-settings';
 import { CellSelectionRenderer } from '@/engine/cell-selection-renderer';

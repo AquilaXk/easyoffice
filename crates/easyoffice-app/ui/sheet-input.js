@@ -50,6 +50,17 @@
   //   edit   - started by F2 / double-click. Left/Right move the caret; Up/Down commit and move.
   // Enter commits and moves down (Shift+Enter up), Tab commits and moves right (Shift+Tab left),
   // Esc cancels and restores. Keys pressed while an IME composes are never interpreted.
+  // Ctrl+Arrow: jump to the edge of the contiguous data block (or the next block).
+  function jumpLimit(dr, dc, ext) {
+    if (dr > 0) return ext.dataRows;
+    return dc > 0 ? ext.dataCols : 0;
+  }
+
+  function isPastData(dr, dc, nr, nc, limit) {
+    if (dr > 0) return nr > limit;
+    return dc > 0 && nc > limit;
+  }
+
   function createSheetInput(api) {
     const { document, grid, sheetCellFocusState, isFormulaStr } = api;
     const sel = { ar: 1, ac: 1, cr: 1, cc: 1 };
@@ -212,17 +223,6 @@
       sel.cr = Math.max(1, ext.dataRows);
       sel.cc = Math.max(1, ext.dataCols);
       refreshChrome();
-    }
-
-    // Ctrl+Arrow: jump to the edge of the contiguous data block (or the next block).
-    function jumpLimit(dr, dc, ext) {
-      if (dr > 0) return ext.dataRows;
-      return dc > 0 ? ext.dataCols : 0;
-    }
-
-    function isPastData(dr, dc, nr, nc, limit) {
-      if (dr > 0) return nr > limit;
-      return dc > 0 && nc > limit;
     }
 
     function jumpTarget(dr, dc, extend) {

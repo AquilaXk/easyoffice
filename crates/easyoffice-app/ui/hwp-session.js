@@ -410,7 +410,8 @@
       const copy = copyBuffer(bytes);
       try {
         const verdict = await hwpHost.call("verifyBytes", { data: copy }, { transfer: [copy] });
-        if (verdict?.ok !== true || !(verdict.pageCount > 0)) return { error: "저장 전 검증에 실패했습니다" };
+        const hasPages = verdict?.pageCount > 0;
+        if (verdict?.ok !== true || !hasPages) return { error: "저장 전 검증에 실패했습니다" };
       } catch (err) {
         return { error: "저장 전 검증에 실패했습니다: " + describeError(err) };
       }
