@@ -45,8 +45,22 @@ pub(crate) mod ty {
     pub const SHAPE_WITH_TEXT: u32 = 2011;
     /// Header/footer text lists (`1` = header storages, `2` = footer storages). 확인
     pub const HEADER_FOOTER_LIST: u32 = 10143;
+    /// Footnote (points at the footnote text storage). 확인 (fixture)
+    pub const FOOTNOTE: u32 = 2012;
     /// Package metadata (list of data files with identifiers and names). 확인 (fixture)
     pub const PACKAGE_METADATA: u32 = 11006;
+}
+
+/// Shape / text box field numbers. 확인 (fixture objects file)
+pub(crate) mod shape {
+    /// Reference `{ identifier = 1 }` to the shape's text storage.
+    pub const TEXT_STORAGE: u32 = 2;
+}
+
+/// Footnote field numbers. 확인 (fixture objects file)
+pub(crate) mod footnote {
+    /// Reference `{ identifier = 1 }` to the footnote text storage.
+    pub const TEXT_STORAGE: u32 = 2;
 }
 
 /// Picture drawable field numbers. 확인 (fixture objects file)
@@ -148,6 +162,10 @@ pub(crate) struct CharPropFields {
     pub size_pt: u32,
     pub color: u32,
     pub highlight: Option<u32>,
+    /// Font name (string).
+    pub font: Option<u32>,
+    /// Baseline enum: 1 superscript, 2 subscript.
+    pub script: Option<u32>,
 }
 
 /// Full layout (`style::CHAR_PROPS`): bold (varint bool) 1, italic 2 (검증 필요: only ever 0 in
@@ -161,6 +179,8 @@ pub(crate) const FULL_CHAR_FIELDS: CharPropFields = CharPropFields {
     size_pt: 3,
     color: 7,
     highlight: None, // 검증 필요: highlight field of the full layout
+    font: None,      // 검증 필요: font and baseline fields of the full layout
+    script: None,
 };
 
 /// Compact layout (`style::COMPACT_CHAR_PROPS`), every field 확인 against the fixture text file:
@@ -173,6 +193,8 @@ pub(crate) const COMPACT_CHAR_FIELDS: CharPropFields = CharPropFields {
     size_pt: 6,
     color: 7,
     highlight: Some(19),
+    font: Some(5),    // 확인: font name string (fixture text file)
+    script: Some(10), // 확인: 1 superscript, 2 subscript
 };
 
 /// Character property message of a style object and the field layout that applies to it: the
@@ -199,6 +221,24 @@ pub(crate) mod para_props {
     pub const ALIGN_RIGHT: u64 = 1;
     pub const ALIGN_CENTER: u64 = 2;
     pub const ALIGN_JUSTIFY: u64 = 3;
+}
+
+/// Compact paragraph property layout (`style::COMPACT_PARA_PROPS`), 확인 against the fixture text
+/// file: first-line indent 6 (float, points), left indent 7 (float, points), line spacing 8
+/// (`{ mode = 1, amount = 2 }`, mode 0 = multiple of single spacing).
+pub(crate) mod compact_para {
+    pub const FIRST_LINE_INDENT: u32 = 6;
+    pub const LEFT_INDENT: u32 = 7;
+    pub const LINE_SPACING: u32 = 8;
+    pub const SPACING_MODE: u32 = 1;
+    pub const SPACING_AMOUNT: u32 = 2;
+    pub const SPACING_MULTIPLE: u64 = 0;
+}
+
+/// Baseline values of the character `script` field.
+pub(crate) mod baseline {
+    pub const SUPERSCRIPT: u64 = 1;
+    pub const SUBSCRIPT: u64 = 2;
 }
 
 /// List level types (`style::LIST_LEVEL_TYPES` values). 0 none, bullet and number 확인

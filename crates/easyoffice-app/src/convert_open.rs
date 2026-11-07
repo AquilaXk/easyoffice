@@ -427,6 +427,7 @@ mod tests {
                     alignment: Some(RichAlignment::Center),
                     heading_level: 1,
                     list: None,
+                    ..RichParagraph::default()
                 }),
                 RichBlock::Table(vec![vec!["가".into(), "나".into()]]),
             ],

@@ -42,6 +42,15 @@ pub enum RichListKind {
     Ordered,
 }
 
+/// Vertical position of a run relative to the baseline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum RichScript {
+    #[default]
+    Normal,
+    Superscript,
+    Subscript,
+}
+
 /// A span of literal text sharing one character format.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RichRun {
@@ -58,6 +67,8 @@ pub struct RichRun {
     pub color: Option<String>,
     /// Highlight/shading color as six upper-case hex digits.
     pub highlight: Option<String>,
+    /// Superscript / subscript position.
+    pub script: RichScript,
 }
 
 /// Normalizes `#rrggbb`/`RRGGBB` to upper-case `RRGGBB`; anything else (including `auto`) is
@@ -119,6 +130,12 @@ pub struct RichParagraph {
     pub alignment: Option<RichAlignment>,
     pub heading_level: u8,
     pub list: Option<RichListKind>,
+    /// Left indent in twips (1/20 point); `None` inherits.
+    pub left_indent_twips: Option<u32>,
+    /// First-line indent in twips; `None` inherits.
+    pub first_line_indent_twips: Option<i32>,
+    /// Line height as a percentage of single spacing (200 = double); `None` inherits.
+    pub line_spacing_percent: Option<u16>,
 }
 
 impl RichParagraph {

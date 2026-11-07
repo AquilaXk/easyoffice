@@ -25,6 +25,9 @@ use crate::{
     PdfSerializer, RtfCodec, XmlSanitizer, ZipArchiveCodec,
 };
 
+/// `w:spacing/@w:line` value of single line spacing (240ths of a line).
+const DOCX_SINGLE_LINE_240THS: u32 = 240;
+
 /// Heading font sizes in half-points for levels 1–6.
 const HEADING_HALF_POINTS: [u32; 6] = [32, 28, 26, 24, 22, 22];
 
@@ -88,6 +91,33 @@ fn push_docx_text(out: &mut String, text: &str) {
     }
 }
 
+/// WordprocessingML `w:spacing` (line height, 240 = single) and `w:ind` for a paragraph, in
+/// schema order; empty when the paragraph inherits both.
+fn docx_paragraph_layout(p: &RichParagraph) -> String {
+    let mut xml = String::new();
+    if let Some(percent) = p.line_spacing_percent {
+        let line = u32::from(percent) * DOCX_SINGLE_LINE_240THS / 100;
+        xml.push_str(&format!(
+            "<w:spacing w:line=\"{line}\" w:lineRule=\"auto\"/>"
+        ));
+    }
+    if p.left_indent_twips.is_some() || p.first_line_indent_twips.is_some() {
+        xml.push_str("<w:ind");
+        if let Some(left) = p.left_indent_twips {
+            xml.push_str(&format!(" w:left=\"{left}\""));
+        }
+        match p.first_line_indent_twips {
+            Some(first) if first >= 0 => xml.push_str(&format!(" w:firstLine=\"{first}\"")),
+            Some(hanging) => {
+                xml.push_str(&format!(" w:hanging=\"{}\"", hanging.unsigned_abs()));
+            }
+            None => {}
+        }
+        xml.push_str("/>");
+    }
+    xml
+}
+
 fn push_docx_paragraph(out: &mut String, p: &RichParagraph) {
     out.push_str("<w:p>");
     let style = if (1..=6).contains(&p.heading_level) {
@@ -104,11 +134,13 @@ fn push_docx_paragraph(out: &mut String, p: &RichParagraph) {
         RichAlignment::Right => "right",
         RichAlignment::Justify => "both",
     });
-    if style.is_some() || jc.is_some() {
+    let layout = docx_paragraph_layout(p);
+    if style.is_some() || jc.is_some() || !layout.is_empty() {
         out.push_str("<w:pPr>");
         if let Some(s) = style {
             out.push_str(&format!("<w:pStyle w:val=\"{s}\"/>"));
         }
+        out.push_str(&layout);
         if let Some(j) = jc {
             out.push_str(&format!("<w:jc w:val=\"{j}\"/>"));
         }
@@ -257,7 +289,16 @@ impl<K: PartialEq + Clone> StyleTable<K> {
     }
 }
 
-type OdtParaKey = (Option<RichAlignment>, u8, bool);
+/// Automatic paragraph style identity.
+#[derive(Clone, PartialEq, Default)]
+struct OdtParaKey {
+    align: Option<RichAlignment>,
+    level: u8,
+    is_list: bool,
+    left_twips: Option<u32>,
+    first_line_twips: Option<i32>,
+    line_percent: Option<u16>,
+}
 
 fn push_odt_text(out: &mut String, text: &str) {
     for (l_idx, line) in text.split('\n').enumerate() {
@@ -284,8 +325,15 @@ fn push_odt_paragraph(
     } else {
         0
     };
-    let key = (p.alignment, level, p.list.is_some());
-    let style_attr = if key == (None, 0, false) {
+    let key = OdtParaKey {
+        align: p.alignment,
+        level,
+        is_list: p.list.is_some(),
+        left_twips: p.left_indent_twips,
+        first_line_twips: p.first_line_indent_twips,
+        line_percent: p.line_spacing_percent,
+    };
+    let style_attr = if key == OdtParaKey::default() {
         String::new()
     } else {
         format!(" text:style-name=\"P{}\"", para_styles.intern(&key))
@@ -328,8 +376,28 @@ fn push_odt_table(body: &mut String, rows: &[Vec<String>]) {
     body.push_str("</table:table>");
 }
 
+/// Twips as a point length with at most two decimals (`36pt`, `7.5pt`).
+fn odt_twips_to_pt(twips: i64) -> String {
+    let sign = if twips < 0 { "-" } else { "" };
+    let abs = twips.abs();
+    let (whole, tenths_of_twip) = (abs / 20, abs % 20 * 5);
+    if tenths_of_twip == 0 {
+        format!("{sign}{whole}pt")
+    } else {
+        format!("{sign}{whole}.{tenths_of_twip:02}pt")
+    }
+}
+
 /// `style:style` XML of one paragraph style (1-based `number`).
-fn odt_para_style_xml(number: usize, (align, level, is_list): &OdtParaKey) -> String {
+fn odt_para_style_xml(number: usize, key: &OdtParaKey) -> String {
+    let OdtParaKey {
+        align,
+        level,
+        is_list,
+        left_twips,
+        first_line_twips,
+        line_percent,
+    } = key;
     let mut styles = format!(
         "<style:style style:name=\"P{number}\" style:family=\"paragraph\"><style:paragraph-properties"
     );
@@ -342,8 +410,22 @@ fn odt_para_style_xml(number: usize, (align, level, is_list): &OdtParaKey) -> St
         };
         styles.push_str(&format!(" fo:text-align=\"{v}\""));
     }
-    if *is_list {
+    if let Some(left) = left_twips {
+        styles.push_str(&format!(
+            " fo:margin-left=\"{}\"",
+            odt_twips_to_pt(i64::from(*left))
+        ));
+    } else if *is_list {
         styles.push_str(" fo:margin-left=\"0.5in\"");
+    }
+    if let Some(first) = first_line_twips {
+        styles.push_str(&format!(
+            " fo:text-indent=\"{}\"",
+            odt_twips_to_pt(i64::from(*first))
+        ));
+    }
+    if let Some(percent) = line_percent {
+        styles.push_str(&format!(" fo:line-height=\"{percent}%\""));
     }
     styles.push_str("/>");
     if *level > 0 {

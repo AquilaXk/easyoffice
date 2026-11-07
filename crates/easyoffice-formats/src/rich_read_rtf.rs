@@ -133,6 +133,7 @@ impl Reader {
                 .and_then(|f| self.fonts.get(&f).cloned()),
             color: color_at(st.color),
             highlight: color_at(st.highlight),
+            ..CharFmt::default()
         }
     }
 
@@ -208,6 +209,7 @@ impl Reader {
                     font: r.font,
                     color: r.color,
                     highlight: r.highlight,
+                    ..CharFmt::default()
                 };
                 push_run(&mut merged, &r.text, &fmt);
             }
@@ -220,6 +222,7 @@ impl Reader {
                 alignment: para.align,
                 heading_level: para.heading,
                 list: None,
+                ..RichParagraph::default()
             }));
         }
     }
