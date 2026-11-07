@@ -14,6 +14,23 @@ pub type OdtUnpacked = (String, Vec<String>, Vec<Vec<Vec<String>>>);
 pub type OdsUnpacked = (String, Vec<(u32, u32, String)>);
 /// Unpacked multi-sheet ODF spreadsheet (`Vec<(sheet_name, cells)>`).
 pub type OdsMultiUnpacked = Vec<(String, Vec<(u32, u32, String)>)>;
+
+/// One parsed ODS cell: explicit row, explicit column, column repeat and resolved text.
+type ParsedOdsRowCell = (Option<u32>, Option<u32>, u32, Option<String>);
+
+fn ods_budget_error(message: &str) -> EasyOfficeError {
+    EasyOfficeError::ResourceBudgetExceeded(message.to_string())
+}
+
+fn parse_u32_attr(attrs: &str, name: &str) -> Option<u32> {
+    extract_attr_from_fragment(attrs, name).and_then(|v| v.parse::<u32>().ok())
+}
+
+/// Repeat count attribute (defaults to 1, minimum 1).
+fn parse_repeat_attr(attrs: &str, name: &str) -> u32 {
+    parse_u32_attr(attrs, name).unwrap_or(1).max(1)
+}
+
 /// Unpacked ODF presentation (`(title, slides)`).
 pub type OdpUnpacked = (String, Vec<(String, Vec<String>, String)>);
 
@@ -441,165 +458,177 @@ impl OdfCodec {
 
         let mut total_cells_across_sheets = 0usize;
         let mut all_sheets = Vec::with_capacity(table_blocks.len());
-
         for (idx, (tbl_attrs, tbl_inner)) in table_blocks.into_iter().enumerate() {
             let sheet_name = extract_attr_from_fragment(tbl_attrs, "table:name")
                 .or_else(|| extract_attr_from_fragment(tbl_attrs, "name"))
                 .map(|s| XmlSanitizer::unescape(&s))
                 .unwrap_or_else(|| format!("Sheet{}", idx + 1));
+            let cells = Self::parse_ods_sheet_cells(tbl_inner, &mut total_cells_across_sheets)?;
+            all_sheets.push((sheet_name, cells));
+        }
+        Ok(all_sheets)
+    }
 
-            let mut cells = Vec::new();
-            let mut current_row: u32 = 0;
-
-            for (row_attrs, row_inner) in extract_balanced_elements(tbl_inner, "table:table-row") {
-                let row_repeat =
-                    extract_attr_from_fragment(row_attrs, "table:number-rows-repeated")
-                        .and_then(|v| v.parse::<u32>().ok())
-                        .unwrap_or(1)
-                        .max(1);
-                if row_repeat > Self::MAX_ROWS + 1 {
-                    return Err(EasyOfficeError::ResourceBudgetExceeded(
-                        "ODS 행 반복 횟수가 허용 범위를 초과했습니다.".to_string(),
-                    ));
-                }
-
-                type ParsedOdsRowCell = (Option<u32>, Option<u32>, u32, Option<String>);
-                let raw_cells = extract_ods_cells_from_row(row_inner);
-                let mut parsed_row_cells: Vec<ParsedOdsRowCell> = Vec::new();
-                let mut last_populated_idx: Option<usize> = None;
-
-                for (cell_idx, (is_covered, cell_attrs, cell_inner)) in
-                    raw_cells.into_iter().enumerate()
-                {
-                    let col_repeat =
-                        extract_attr_from_fragment(cell_attrs, "table:number-columns-repeated")
-                            .and_then(|v| v.parse::<u32>().ok())
-                            .unwrap_or(1)
-                            .max(1);
-                    if col_repeat > Self::MAX_COLS + 1 {
-                        return Err(EasyOfficeError::ResourceBudgetExceeded(
-                            "ODS 열 반복 횟수가 허용 범위를 초과했습니다.".to_string(),
-                        ));
-                    }
-                    if is_covered {
-                        parsed_row_cells.push((None, None, col_repeat, None));
-                        continue;
-                    }
-
-                    let explicit_row = extract_attr_from_fragment(cell_attrs, "row")
-                        .and_then(|v| v.parse::<u32>().ok());
-                    let explicit_col = extract_attr_from_fragment(cell_attrs, "col")
-                        .and_then(|v| v.parse::<u32>().ok());
-
-                    let formula_val =
-                        extract_attr_from_fragment(cell_attrs, "table:formula").map(|raw_f| {
-                            let unescaped = XmlSanitizer::unescape(&raw_f);
-                            Self::normalize_ods_formula(&unescaped)
-                        });
-
-                    let text_p_bodies = extract_tag_bodies(cell_inner, "text:p");
-                    let office_val = extract_attr_from_fragment(cell_attrs, "office:value")
-                        .or_else(|| extract_attr_from_fragment(cell_attrs, "office:string-value"))
-                        .map(|s| XmlSanitizer::unescape(&s));
-
-                    let resolved_val = if let Some(f) = formula_val {
-                        Some(f)
-                    } else if !text_p_bodies.is_empty() {
-                        Some(
-                            text_p_bodies
-                                .into_iter()
-                                .map(extract_odf_inline_text)
-                                .collect::<Vec<_>>()
-                                .join("\n"),
-                        )
-                    } else if let Some(ov) = office_val {
-                        Some(ov)
-                    } else if explicit_row.is_some() || explicit_col.is_some() {
-                        Some(String::new())
-                    } else {
-                        None
-                    };
-
-                    if resolved_val.is_some() {
-                        last_populated_idx = Some(cell_idx);
-                    }
-                    parsed_row_cells.push((explicit_row, explicit_col, col_repeat, resolved_val));
-                }
-
-                if let Some(last_pop) = last_populated_idx {
+    /// Parses all rows of one ODS table into `(row, col, text)` cells within the shared budget.
+    fn parse_ods_sheet_cells(
+        tbl_inner: &str,
+        total_cells: &mut usize,
+    ) -> Result<Vec<(u32, u32, String)>, EasyOfficeError> {
+        let mut cells = Vec::new();
+        let mut current_row: u32 = 0;
+        for (row_attrs, row_inner) in extract_balanced_elements(tbl_inner, "table:table-row") {
+            let row_repeat = parse_repeat_attr(row_attrs, "table:number-rows-repeated");
+            if row_repeat > Self::MAX_ROWS + 1 {
+                return Err(ods_budget_error(
+                    "ODS 행 반복 횟수가 허용 범위를 초과했습니다.",
+                ));
+            }
+            let (parsed_row_cells, last_populated_idx) = Self::parse_ods_row_cells(row_inner)?;
+            match last_populated_idx {
+                Some(last_pop) => {
                     let next_row = current_row.checked_add(row_repeat).ok_or_else(|| {
-                        EasyOfficeError::ResourceBudgetExceeded(
-                            "ODS 행 반복 횟수가 허용 범위를 초과했습니다.".to_string(),
-                        )
+                        ods_budget_error("ODS 행 반복 횟수가 허용 범위를 초과했습니다.")
                     })?;
                     if next_row > Self::MAX_ROWS + 1 {
-                        return Err(EasyOfficeError::ResourceBudgetExceeded(
-                            "ODS 행 인덱스가 허용 범위를 초과했습니다.".to_string(),
+                        return Err(ods_budget_error(
+                            "ODS 행 인덱스가 허용 범위를 초과했습니다.",
                         ));
                     }
                     for r_offset in 0..row_repeat {
                         let target_row = current_row + r_offset;
                         if target_row > Self::MAX_ROWS {
-                            return Err(EasyOfficeError::ResourceBudgetExceeded(
-                                "ODS 행 좌표가 허용 범위를 초과했습니다.".to_string(),
+                            return Err(ods_budget_error(
+                                "ODS 행 좌표가 허용 범위를 초과했습니다.",
                             ));
                         }
-                        let mut current_col: u32 = 0;
-                        for (c_idx, (explicit_row, explicit_col, col_repeat, resolved_val)) in
-                            parsed_row_cells.iter().enumerate()
-                        {
-                            let next_col =
-                                current_col.checked_add(*col_repeat).ok_or_else(|| {
-                                    EasyOfficeError::ResourceBudgetExceeded(
-                                        "ODS 열 반복 횟수가 허용 범위를 초과했습니다.".to_string(),
-                                    )
-                                })?;
-                            if c_idx <= last_pop && next_col > Self::MAX_COLS + 1 {
-                                return Err(EasyOfficeError::ResourceBudgetExceeded(
-                                    "ODS 열 인덱스가 허용 범위를 초과했습니다.".to_string(),
-                                ));
-                            }
-                            if let Some(val) = resolved_val {
-                                for c_offset in 0..*col_repeat {
-                                    let r = explicit_row.unwrap_or(target_row);
-                                    let c = explicit_col
-                                        .map(|ec| ec.saturating_add(c_offset))
-                                        .unwrap_or(current_col + c_offset);
-                                    if r > Self::MAX_ROWS || c > Self::MAX_COLS {
-                                        return Err(EasyOfficeError::ResourceBudgetExceeded(
-                                            "ODS 셀 좌표가 허용 범위를 초과했습니다.".to_string(),
-                                        ));
-                                    }
-                                    total_cells_across_sheets += 1;
-                                    if total_cells_across_sheets > Self::MAX_CELLS {
-                                        return Err(EasyOfficeError::ResourceBudgetExceeded(
-                                            "ODS 셀 개수가 허용 예산(200,000)을 초과했습니다."
-                                                .to_string(),
-                                        ));
-                                    }
-                                    cells.push((r, c, val.clone()));
-                                }
-                            }
-                            current_col = next_col;
-                        }
+                        Self::emit_ods_row(
+                            &parsed_row_cells,
+                            last_pop,
+                            target_row,
+                            &mut cells,
+                            total_cells,
+                        )?;
                     }
                     current_row = next_row;
-                } else {
-                    for (_, _, col_repeat, _) in &parsed_row_cells {
-                        if *col_repeat > Self::MAX_COLS + 1 {
-                            return Err(EasyOfficeError::ResourceBudgetExceeded(
-                                "ODS 열 인덱스가 허용 범위를 초과했습니다.".to_string(),
-                            ));
-                        }
+                }
+                None => {
+                    if parsed_row_cells
+                        .iter()
+                        .any(|cell| cell.2 > Self::MAX_COLS + 1)
+                    {
+                        return Err(ods_budget_error(
+                            "ODS 열 인덱스가 허용 범위를 초과했습니다.",
+                        ));
                     }
                     current_row = current_row.saturating_add(row_repeat);
                 }
             }
-
-            all_sheets.push((sheet_name, cells));
         }
+        Ok(cells)
+    }
 
-        Ok(all_sheets)
+    /// Parses the cells of one row; also returns the index of the last populated cell.
+    fn parse_ods_row_cells(
+        row_inner: &str,
+    ) -> Result<(Vec<ParsedOdsRowCell>, Option<usize>), EasyOfficeError> {
+        let mut parsed_row_cells: Vec<ParsedOdsRowCell> = Vec::new();
+        let mut last_populated_idx: Option<usize> = None;
+        for (cell_idx, (is_covered, cell_attrs, cell_inner)) in
+            extract_ods_cells_from_row(row_inner)
+                .into_iter()
+                .enumerate()
+        {
+            let col_repeat = parse_repeat_attr(cell_attrs, "table:number-columns-repeated");
+            if col_repeat > Self::MAX_COLS + 1 {
+                return Err(ods_budget_error(
+                    "ODS 열 반복 횟수가 허용 범위를 초과했습니다.",
+                ));
+            }
+            if is_covered {
+                parsed_row_cells.push((None, None, col_repeat, None));
+                continue;
+            }
+            let explicit_row = parse_u32_attr(cell_attrs, "row");
+            let explicit_col = parse_u32_attr(cell_attrs, "col");
+            let resolved_val = Self::resolve_ods_cell_text(
+                cell_attrs,
+                cell_inner,
+                explicit_row.is_some() || explicit_col.is_some(),
+            );
+            if resolved_val.is_some() {
+                last_populated_idx = Some(cell_idx);
+            }
+            parsed_row_cells.push((explicit_row, explicit_col, col_repeat, resolved_val));
+        }
+        Ok((parsed_row_cells, last_populated_idx))
+    }
+
+    /// Cell text by priority: formula, paragraph text, office value, then empty for explicit cells.
+    fn resolve_ods_cell_text(
+        cell_attrs: &str,
+        cell_inner: &str,
+        has_explicit_position: bool,
+    ) -> Option<String> {
+        if let Some(raw_f) = extract_attr_from_fragment(cell_attrs, "table:formula") {
+            return Some(Self::normalize_ods_formula(&XmlSanitizer::unescape(&raw_f)));
+        }
+        let text_p_bodies = extract_tag_bodies(cell_inner, "text:p");
+        if !text_p_bodies.is_empty() {
+            return Some(
+                text_p_bodies
+                    .into_iter()
+                    .map(extract_odf_inline_text)
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            );
+        }
+        extract_attr_from_fragment(cell_attrs, "office:value")
+            .or_else(|| extract_attr_from_fragment(cell_attrs, "office:string-value"))
+            .map(|s| XmlSanitizer::unescape(&s))
+            .or_else(|| has_explicit_position.then(String::new))
+    }
+
+    /// Expands one parsed row (with column repeats) at `target_row` into `cells`.
+    fn emit_ods_row(
+        parsed_row_cells: &[ParsedOdsRowCell],
+        last_pop: usize,
+        target_row: u32,
+        cells: &mut Vec<(u32, u32, String)>,
+        total_cells: &mut usize,
+    ) -> Result<(), EasyOfficeError> {
+        let mut current_col: u32 = 0;
+        for (c_idx, (explicit_row, explicit_col, col_repeat, resolved_val)) in
+            parsed_row_cells.iter().enumerate()
+        {
+            let next_col = current_col
+                .checked_add(*col_repeat)
+                .ok_or_else(|| ods_budget_error("ODS 열 반복 횟수가 허용 범위를 초과했습니다."))?;
+            if c_idx <= last_pop && next_col > Self::MAX_COLS + 1 {
+                return Err(ods_budget_error(
+                    "ODS 열 인덱스가 허용 범위를 초과했습니다.",
+                ));
+            }
+            if let Some(val) = resolved_val {
+                for c_offset in 0..*col_repeat {
+                    let r = explicit_row.unwrap_or(target_row);
+                    let c = explicit_col
+                        .map(|ec| ec.saturating_add(c_offset))
+                        .unwrap_or(current_col + c_offset);
+                    if r > Self::MAX_ROWS || c > Self::MAX_COLS {
+                        return Err(ods_budget_error("ODS 셀 좌표가 허용 범위를 초과했습니다."));
+                    }
+                    *total_cells += 1;
+                    if *total_cells > Self::MAX_CELLS {
+                        return Err(ods_budget_error(
+                            "ODS 셀 개수가 허용 예산(200,000)을 초과했습니다.",
+                        ));
+                    }
+                    cells.push((r, c, val.clone()));
+                }
+            }
+            current_col = next_col;
+        }
+        Ok(())
     }
 
     pub fn pack_odp(

@@ -363,22 +363,6 @@ impl SheetEngine {
         let mut col_buckets: HashMap<String, Vec<f64>> = HashMap::new();
         let mut all_values: Vec<f64> = Vec::new();
 
-        let normalize_pivot_key = |v: EvaluatedCellValue| -> (String, String) {
-            let disp = match v {
-                EvaluatedCellValue::Number(n) => crate::coercion::format_general_number(n),
-                EvaluatedCellValue::Text(s) => {
-                    if let Some(n) = crate::coercion::parse_strict_number(&s) {
-                        crate::coercion::format_general_number(n)
-                    } else {
-                        s
-                    }
-                }
-                other => other.to_display_string(),
-            };
-            let canon = disp.to_lowercase();
-            (disp, canon)
-        };
-
         if row_field_col_offset < col_count && value_field_col_offset < col_count {
             let key_col = min_c + row_field_col_offset as u32;
             let val_col = min_c + value_field_col_offset as u32;
@@ -387,57 +371,36 @@ impl SheetEngine {
                 .map(|c| min_c + c as u32);
             for r_off in start_row_idx..row_count {
                 let row_idx = min_r + r_off as u32;
-                if let (Ok(kc), Ok(vc)) = (
+                let (Ok(kc), Ok(vc)) = (
                     PackedCellCoordinate::new(row_idx, key_col),
                     PackedCellCoordinate::new(row_idx, val_col),
-                ) {
-                    let (key_str, canonical_row) =
-                        normalize_pivot_key(self.eval_coord_ctx(kc, &mut ctx, 0));
-                    if key_str.is_empty() {
-                        continue;
-                    }
-                    if row_key_set.insert(canonical_row.clone()) {
-                        row_keys.push(key_str);
-                    }
-                    let (col_str, canonical_col) = if let Some(cc_idx) = opt_col_col {
-                        if let Ok(cc) = PackedCellCoordinate::new(row_idx, cc_idx) {
-                            let (cs, cc_canon) =
-                                normalize_pivot_key(self.eval_coord_ctx(cc, &mut ctx, 0));
-                            if cs.is_empty() {
-                                ("(Blank)".to_string(), "(blank)".to_string())
-                            } else {
-                                (cs, cc_canon)
-                            }
-                        } else {
-                            ("Total".to_string(), "total".to_string())
-                        }
-                    } else {
-                        ("Total".to_string(), "total".to_string())
-                    };
-                    if col_key_set.insert(canonical_col.clone()) {
-                        col_keys.push(col_str);
-                    }
-
-                    let val = self.eval_coord_ctx(vc, &mut ctx, 0);
-                    let pushed_num = if let EvaluatedCellValue::Number(num) = val {
-                        Some(num)
-                    } else if aggregation == PivotAggregation::Count
-                        && !matches!(val, EvaluatedCellValue::Empty)
-                        && !val.to_display_string().is_empty()
-                    {
-                        Some(1.0)
-                    } else {
-                        None
-                    };
-                    if let Some(num) = pushed_num {
-                        cell_buckets
-                            .entry((canonical_row.clone(), canonical_col.clone()))
-                            .or_default()
-                            .push(num);
-                        row_buckets.entry(canonical_row).or_default().push(num);
-                        col_buckets.entry(canonical_col).or_default().push(num);
-                        all_values.push(num);
-                    }
+                ) else {
+                    continue;
+                };
+                let (key_str, canonical_row) =
+                    normalize_pivot_key(self.eval_coord_ctx(kc, &mut ctx, 0));
+                if key_str.is_empty() {
+                    continue;
+                }
+                if row_key_set.insert(canonical_row.clone()) {
+                    row_keys.push(key_str);
+                }
+                let (col_str, canonical_col) = match opt_col_col {
+                    Some(cc_idx) => self.pivot_column_key(row_idx, cc_idx, &mut ctx),
+                    None => pivot_total_key(),
+                };
+                if col_key_set.insert(canonical_col.clone()) {
+                    col_keys.push(col_str);
+                }
+                let val = self.eval_coord_ctx(vc, &mut ctx, 0);
+                if let Some(num) = pivot_numeric_value(&val, aggregation) {
+                    cell_buckets
+                        .entry((canonical_row.clone(), canonical_col.clone()))
+                        .or_default()
+                        .push(num);
+                    row_buckets.entry(canonical_row).or_default().push(num);
+                    col_buckets.entry(canonical_col).or_default().push(num);
+                    all_values.push(num);
                 }
             }
         }
@@ -494,6 +457,24 @@ impl SheetEngine {
             row_totals,
             column_totals,
             grand_total,
+        }
+    }
+
+    /// Column key of the pivot row `row_idx` taken from column `cc_idx`.
+    fn pivot_column_key(
+        &self,
+        row_idx: u32,
+        cc_idx: u32,
+        ctx: &mut EvalContext<'_>,
+    ) -> (String, String) {
+        let Ok(cc) = PackedCellCoordinate::new(row_idx, cc_idx) else {
+            return pivot_total_key();
+        };
+        let (cs, canon) = normalize_pivot_key(self.eval_coord_ctx(cc, ctx, 0));
+        if cs.is_empty() {
+            ("(Blank)".to_string(), "(blank)".to_string())
+        } else {
+            (cs, canon)
         }
     }
 
@@ -612,6 +593,103 @@ impl SheetEngine {
     }
 }
 
+/// Display text and case-folded canonical form of a pivot key cell.
+fn normalize_pivot_key(v: EvaluatedCellValue) -> (String, String) {
+    let disp = match v {
+        EvaluatedCellValue::Number(n) => crate::coercion::format_general_number(n),
+        EvaluatedCellValue::Text(s) => match crate::coercion::parse_strict_number(&s) {
+            Some(n) => crate::coercion::format_general_number(n),
+            None => s,
+        },
+        other => other.to_display_string(),
+    };
+    let canon = disp.to_lowercase();
+    (disp, canon)
+}
+
+fn pivot_total_key() -> (String, String) {
+    ("Total".to_string(), "total".to_string())
+}
+
+/// Numeric contribution of a pivot value cell (`COUNT` also counts non-empty non-numbers).
+fn pivot_numeric_value(val: &EvaluatedCellValue, aggregation: PivotAggregation) -> Option<f64> {
+    if let EvaluatedCellValue::Number(num) = val {
+        return Some(*num);
+    }
+    let counts_non_empty = aggregation == PivotAggregation::Count
+        && !matches!(val, EvaluatedCellValue::Empty)
+        && !val.to_display_string().is_empty();
+    counts_non_empty.then_some(1.0)
+}
+
+/// Longest column-letter run (exclusive upper bound) that can form an A1 column reference.
+const MAX_COL_LETTERS_EXCLUSIVE: usize = 4;
+
+#[inline]
+fn is_ident_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
+}
+
+/// Consumes an optional `$` at `cur`; returns the new index and whether one was present.
+#[inline]
+fn take_dollar(bytes: &[u8], cur: usize) -> (usize, bool) {
+    if bytes.get(cur) == Some(&b'$') {
+        (cur + 1, true)
+    } else {
+        (cur, false)
+    }
+}
+
+/// Rewrites an A1-style reference starting at `i` into `out`, shifting relative rows by `delta`.
+/// Returns the index after the reference, or `None` when `i` does not start a reference.
+fn rewrite_cell_ref(raw: &str, i: usize, delta: i64, out: &mut String) -> Option<usize> {
+    let bytes = raw.as_bytes();
+    let len = bytes.len();
+    let (col_start, has_col_dollar) = take_dollar(bytes, i);
+    let mut cur = col_start;
+    while cur < len
+        && bytes[cur].is_ascii_alphabetic()
+        && (cur - col_start) < MAX_COL_LETTERS_EXCLUSIVE
+    {
+        cur += 1;
+    }
+    let col_len = cur - col_start;
+    if !(1..=3).contains(&col_len) {
+        return None;
+    }
+    let (row_start, has_row_dollar) = take_dollar(bytes, cur);
+    if !bytes
+        .get(row_start)
+        .is_some_and(|b| b.is_ascii_digit() && *b != b'0')
+    {
+        return None;
+    }
+    cur = row_start;
+    while cur < len && bytes[cur].is_ascii_digit() {
+        cur += 1;
+    }
+    if bytes
+        .get(cur)
+        .is_some_and(|&b| is_ident_byte(b) || b == b'(')
+    {
+        return None;
+    }
+    if has_col_dollar {
+        out.push('$');
+    }
+    out.push_str(&raw[col_start..col_start + col_len]);
+    if has_row_dollar {
+        out.push('$');
+        out.push_str(&raw[row_start..cur]);
+    } else if let Ok(r_1based) = raw[row_start..cur].parse::<i64>() {
+        let new_r = (r_1based + delta).clamp(1, PackedCellCoordinate::MAX_ROWS as i64);
+        out.push_str(&new_r.to_string());
+    } else {
+        out.push_str(&raw[row_start..cur]);
+    }
+    Some(cur)
+}
+
 fn adjust_formula_row_refs(raw: &str, orig_row: u32, target_row: u32) -> String {
     if orig_row == target_row || !raw.trim_start().starts_with('=') {
         return raw.to_string();
@@ -628,70 +706,16 @@ fn adjust_formula_row_refs(raw: &str, orig_row: u32, target_row: u32) -> String 
         let b = bytes[i];
         if b == b'"' && !in_single_quotes {
             in_double_quotes = !in_double_quotes;
-            out.push('"');
-            i += 1;
-            continue;
-        }
-        if b == b'\'' && !in_double_quotes {
+        } else if b == b'\'' && !in_double_quotes {
             in_single_quotes = !in_single_quotes;
-            out.push('\'');
-            i += 1;
-            continue;
-        }
-        if !in_double_quotes && !in_single_quotes {
-            let prev_is_ident = i > 0
-                && (bytes[i - 1].is_ascii_alphanumeric()
-                    || bytes[i - 1] == b'_'
-                    || bytes[i - 1] == b'.');
-            if !prev_is_ident {
-                let mut cur = i;
-                let has_col_dollar = if cur < len && bytes[cur] == b'$' {
-                    cur += 1;
-                    true
-                } else {
-                    false
-                };
-                let col_start = cur;
-                while cur < len && bytes[cur].is_ascii_alphabetic() && (cur - col_start) < 4 {
-                    cur += 1;
-                }
-                let col_len = cur - col_start;
-                if (1..=3).contains(&col_len) {
-                    let has_row_dollar = if cur < len && bytes[cur] == b'$' {
-                        cur += 1;
-                        true
-                    } else {
-                        false
-                    };
-                    let row_start = cur;
-                    if cur < len && bytes[cur].is_ascii_digit() && bytes[cur] != b'0' {
-                        while cur < len && bytes[cur].is_ascii_digit() {
-                            cur += 1;
-                        }
-                        let next_is_ident_or_call = cur < len
-                            && (bytes[cur].is_ascii_alphanumeric()
-                                || bytes[cur] == b'_'
-                                || bytes[cur] == b'(');
-                        if !next_is_ident_or_call {
-                            if has_col_dollar {
-                                out.push('$');
-                            }
-                            out.push_str(&raw[col_start..col_start + col_len]);
-                            if has_row_dollar {
-                                out.push('$');
-                                out.push_str(&raw[row_start..cur]);
-                            } else if let Ok(r_1based) = raw[row_start..cur].parse::<i64>() {
-                                let new_r = (r_1based + delta)
-                                    .clamp(1, PackedCellCoordinate::MAX_ROWS as i64);
-                                out.push_str(&new_r.to_string());
-                            } else {
-                                out.push_str(&raw[row_start..cur]);
-                            }
-                            i = cur;
-                            continue;
-                        }
-                    }
-                }
+        } else if !in_double_quotes && !in_single_quotes {
+            let prev_is_ident = i > 0 && (is_ident_byte(bytes[i - 1]) || bytes[i - 1] == b'.');
+            if let Some(next) = (!prev_is_ident)
+                .then(|| rewrite_cell_ref(raw, i, delta, &mut out))
+                .flatten()
+            {
+                i = next;
+                continue;
             }
         }
         let ch = raw[i..].chars().next().unwrap();
