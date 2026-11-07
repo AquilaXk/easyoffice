@@ -49,6 +49,265 @@ struct ScannedPdfStructure {
     trailer_b64_count: usize,
 }
 
+/// Objects sorted by their order of appearance in the file.
+fn ordered_by_sequence(
+    objects: &HashMap<(u32, u16), PdfIndirectObject>,
+) -> Vec<((u32, u16), &PdfIndirectObject)> {
+    let mut ordered: Vec<((u32, u16), &PdfIndirectObject)> =
+        objects.iter().map(|(&id, o)| (id, o)).collect();
+    ordered.sort_by_key(|(_, o)| o.order_seq);
+    ordered
+}
+
+/// Merges every `/ToUnicode` CMap stream found among the objects.
+fn build_tounicode_map(
+    bytes: &[u8],
+    ordered_objs: &[((u32, u16), &PdfIndirectObject)],
+    flate_cache: &HashMap<(u32, u16), Vec<u8>>,
+) -> PdfToUnicodeMap {
+    let mut cmap = PdfToUnicodeMap::default();
+    for &(id, obj) in ordered_objs {
+        let stream_slice: Option<&[u8]> = match flate_cache.get(&id) {
+            Some(dec) => Some(dec.as_slice()),
+            None => obj.stream_range.map(|(s, e)| &bytes[s..e]),
+        };
+        if let Some(s_bytes) = stream_slice.filter(|s| contains_subslice(s, b"begincmap")) {
+            PdfToUnicodeMap::parse_cmap_stream(&String::from_utf8_lossy(s_bytes), &mut cmap);
+        }
+    }
+    cmap
+}
+
+/// State of the top-level token scan over a PDF file.
+struct PdfTopLevelScan<'a> {
+    bytes: &'a [u8],
+    paren_table: ParenJumpTable,
+    int_index: Option<(Vec<usize>, IntObjIndex)>,
+    objects: HashMap<(u32, u16), PdfIndirectObject>,
+    trailers: Vec<Vec<(String, PdfObjValue)>>,
+    stream_spans: Vec<(usize, usize)>,
+    has_encrypt: bool,
+    order_seq: usize,
+}
+
+impl<'a> PdfTopLevelScan<'a> {
+    fn new(bytes: &'a [u8]) -> Self {
+        Self {
+            bytes,
+            paren_table: ParenJumpTable::build(bytes),
+            int_index: None,
+            objects: HashMap::new(),
+            trailers: Vec::new(),
+            stream_spans: Vec::new(),
+            has_encrypt: false,
+            order_seq: 0,
+        }
+    }
+
+    fn corrupted(&self, at: usize, has_encrypt: bool, detail: &str) -> EasyOfficeError {
+        fail_corrupted_or_encrypted(self.bytes, at, has_encrypt, detail)
+    }
+
+    fn run(&mut self) -> Result<(), EasyOfficeError> {
+        let bytes = self.bytes;
+        let mut p = 0usize;
+        while p < bytes.len() {
+            p = skip_pdf_ws_and_comments(bytes, p, bytes.len());
+            if p >= bytes.len() {
+                break;
+            }
+            p = self.scan_token(p)?;
+        }
+        Ok(())
+    }
+
+    /// Scans the top-level construct starting at `p`; returns the offset after it.
+    fn scan_token(&mut self, p: usize) -> Result<usize, EasyOfficeError> {
+        let bytes = self.bytes;
+        if let Some((obj_num, gen_num, after_obj)) =
+            parse_indirect_obj_header(bytes, p, bytes.len())
+        {
+            return self.scan_indirect_object(p, (obj_num, gen_num), after_obj);
+        }
+        if is_standalone_pdf_kw(bytes, p, b"xref") {
+            return Ok(Self::skip_xref_table(bytes, p + 4));
+        }
+        if is_standalone_pdf_kw(bytes, p, b"trailer") {
+            return self.scan_trailer(p);
+        }
+        if is_standalone_pdf_kw(bytes, p, b"startxref") {
+            return self.scan_startxref(p);
+        }
+        Err(self.corrupted(
+            p,
+            self.has_encrypt,
+            "PDF 상위 구조에 해석할 수 없는 손상 토큰이 존재합니다.",
+        ))
+    }
+
+    fn scan_indirect_object(
+        &mut self,
+        p: usize,
+        id: (u32, u16),
+        after_obj: usize,
+    ) -> Result<usize, EasyOfficeError> {
+        let bytes = self.bytes;
+        let parsed_val =
+            parse_pdf_value_with_table(bytes, Some(&self.paren_table), after_obj, bytes.len(), 0)
+                .map_err(|_| {
+                self.corrupted(
+                    p,
+                    self.has_encrypt,
+                    "PDF 간접 객체 구문이 손상되었거나 리터럴이 닫히지 않았습니다.",
+                )
+            })?;
+        let (val, mut next_p) = parsed_val.unwrap_or((PdfObjValue::Null, after_obj));
+        if let Some(spliced_enc) = indirect_val_has_spliced_encrypt(&val) {
+            return Err(self.corrupted(
+                p,
+                self.has_encrypt || spliced_enc,
+                "PDF 상호참조 딕셔너리 구조가 손상되었습니다.",
+            ));
+        }
+        if let PdfObjValue::Dict(ref entries) = val {
+            if dict_name_eq(entries, "/Type", "/XRef") && dict_has_non_null_key(entries, "/Encrypt")
+            {
+                self.has_encrypt = true;
+            }
+        }
+        next_p = skip_pdf_ws_and_comments(bytes, next_p, bytes.len());
+        let mut stream_range = None;
+        if is_standalone_pdf_kw(bytes, next_p, b"stream") {
+            let (range, after_stream) = self.scan_stream_body(p, &val, next_p)?;
+            stream_range = Some(range);
+            next_p = skip_pdf_ws_and_comments(bytes, after_stream, bytes.len());
+        }
+        if !is_standalone_pdf_kw(bytes, next_p, b"endobj") {
+            return Err(self.corrupted(
+                p,
+                self.has_encrypt,
+                "PDF 간접 객체에 대응하는 endobj 토큰이 누락되었습니다.",
+            ));
+        }
+        self.order_seq += 1;
+        self.objects.insert(
+            id,
+            PdfIndirectObject {
+                val,
+                stream_range,
+                order_seq: self.order_seq,
+            },
+        );
+        Ok(next_p + 6)
+    }
+
+    /// Resolves the stream payload range following the object dictionary `val`.
+    /// Returns `((start, end), offset after endstream)`.
+    fn scan_stream_body(
+        &mut self,
+        obj_start: usize,
+        val: &PdfObjValue,
+        stream_kw_pos: usize,
+    ) -> Result<((usize, usize), usize), EasyOfficeError> {
+        let bytes = self.bytes;
+        let PdfObjValue::Dict(entries) = val else {
+            return Err(self.corrupted(
+                obj_start,
+                self.has_encrypt,
+                "PDF stream 앞에 객체 딕셔너리가 없습니다.",
+            ));
+        };
+        let stream_start = advance_past_stream_eol(bytes, stream_kw_pos + 6);
+        let len_hint = resolve_stream_length_hint(
+            bytes,
+            stream_start,
+            entries,
+            &self.objects,
+            &self.paren_table,
+            &mut self.int_index,
+        );
+        let Some((stream_end, after_endstream)) =
+            resolve_stream_bounds(bytes, stream_start, len_hint)
+        else {
+            return Err(self.corrupted(
+                obj_start,
+                self.has_encrypt,
+                "PDF stream 블록에 대응하는 endstream 토큰이 누락되었거나 경계가 손상되었습니다.",
+            ));
+        };
+        self.stream_spans.push((stream_kw_pos, after_endstream));
+        Ok(((stream_start, stream_end), after_endstream))
+    }
+
+    /// Skips cross-reference table tokens (`n`, `f` and digits); returns the offset after them.
+    fn skip_xref_table(bytes: &[u8], mut p: usize) -> usize {
+        loop {
+            p = skip_pdf_ws_and_comments(bytes, p, bytes.len());
+            if p >= bytes.len() || parse_indirect_obj_header(bytes, p, bytes.len()).is_some() {
+                return p;
+            }
+            let mut k = p;
+            while k < bytes.len() && !is_pdf_delim_or_ws(bytes[k]) {
+                k += 1;
+            }
+            let tok = &bytes[p..k];
+            let is_xref_token = tok == b"n" || tok == b"f" || tok.iter().all(u8::is_ascii_digit);
+            if k == p || !is_xref_token {
+                return p;
+            }
+            p = k;
+        }
+    }
+
+    fn scan_trailer(&mut self, p: usize) -> Result<usize, EasyOfficeError> {
+        let bytes = self.bytes;
+        let parsed_tr =
+            parse_pdf_value_with_table(bytes, Some(&self.paren_table), p + 7, bytes.len(), 0)
+                .map_err(|_| {
+                    self.corrupted(
+                        p,
+                        self.has_encrypt,
+                        "PDF trailer 딕셔너리가 손상되었습니다.",
+                    )
+                })?;
+        let Some((PdfObjValue::Dict(tr_entries), next_p)) = parsed_tr else {
+            return Err(self.corrupted(
+                p,
+                self.has_encrypt,
+                "PDF trailer 뒤에 딕셔너리가 없습니다.",
+            ));
+        };
+        let tr_has_enc = dict_has_non_null_key(&tr_entries, "/Encrypt");
+        if let Some(spliced_enc) = trailer_or_xref_has_spliced_encrypt(&tr_entries, tr_has_enc) {
+            return Err(self.corrupted(
+                p,
+                self.has_encrypt || tr_has_enc || spliced_enc,
+                "PDF trailer /ID 배열 구조가 손상되었습니다.",
+            ));
+        }
+        self.has_encrypt |= tr_has_enc;
+        self.trailers.push(tr_entries);
+        Ok(next_p)
+    }
+
+    fn scan_startxref(&mut self, sx_pos: usize) -> Result<usize, EasyOfficeError> {
+        let bytes = self.bytes;
+        let start_off = skip_pdf_ws_and_comments(bytes, sx_pos + 9, bytes.len());
+        let mut p = start_off;
+        while p < bytes.len() && bytes[p].is_ascii_digit() {
+            p += 1;
+        }
+        if p == start_off {
+            return Err(self.corrupted(
+                sx_pos,
+                self.has_encrypt,
+                "PDF startxref 오프셋 숫자가 누락되었습니다.",
+            ));
+        }
+        Ok(p)
+    }
+}
+
 struct PageWalkState<'a> {
     bytes: &'a [u8],
     objects: &'a HashMap<(u32, u16), PdfIndirectObject>,
@@ -481,199 +740,9 @@ impl PdfSerializer {
     }
 
     fn scan_pdf_structure(bytes: &[u8]) -> Result<ScannedPdfStructure, EasyOfficeError> {
-        let paren_table = ParenJumpTable::build(bytes);
-        let mut int_index: Option<(Vec<usize>, IntObjIndex)> = None;
-        let mut objects: HashMap<(u32, u16), PdfIndirectObject> = HashMap::new();
-        let mut trailers: Vec<Vec<(String, PdfObjValue)>> = Vec::new();
-        let mut stream_spans: Vec<(usize, usize)> = Vec::new();
-        let mut has_encrypt = false;
-        let mut trailer_b64: Option<String> = None;
-        let mut trailer_b64_count = 0usize;
-        let mut order_seq = 0usize;
-
-        let mut p = 0usize;
-        while p < bytes.len() {
-            p = skip_pdf_ws_and_comments(bytes, p, bytes.len());
-            if p >= bytes.len() {
-                break;
-            }
-            if let Some((obj_num, gen_num, after_obj)) =
-                parse_indirect_obj_header(bytes, p, bytes.len())
-            {
-                let parsed_val = parse_pdf_value_with_table(
-                    bytes,
-                    Some(&paren_table),
-                    after_obj,
-                    bytes.len(),
-                    0,
-                )
-                .map_err(|_| {
-                    fail_corrupted_or_encrypted(
-                        bytes,
-                        p,
-                        has_encrypt,
-                        "PDF 간접 객체 구문이 손상되었거나 리터럴이 닫히지 않았습니다.",
-                    )
-                })?;
-                let (val, mut next_p) = parsed_val.unwrap_or((PdfObjValue::Null, after_obj));
-                if let Some(spliced_enc) = indirect_val_has_spliced_encrypt(&val) {
-                    return Err(fail_corrupted_or_encrypted(
-                        bytes,
-                        p,
-                        has_encrypt || spliced_enc,
-                        "PDF 상호참조 딕셔너리 구조가 손상되었습니다.",
-                    ));
-                }
-                if let PdfObjValue::Dict(ref entries) = val {
-                    if dict_name_eq(entries, "/Type", "/XRef")
-                        && dict_has_non_null_key(entries, "/Encrypt")
-                    {
-                        has_encrypt = true;
-                    }
-                }
-                next_p = skip_pdf_ws_and_comments(bytes, next_p, bytes.len());
-                let mut stream_range = None;
-                if is_standalone_pdf_kw(bytes, next_p, b"stream") {
-                    let PdfObjValue::Dict(ref entries) = val else {
-                        return Err(fail_corrupted_or_encrypted(
-                            bytes,
-                            p,
-                            has_encrypt,
-                            "PDF stream 앞에 객체 딕셔너리가 없습니다.",
-                        ));
-                    };
-                    let stream_kw_pos = next_p;
-                    let stream_start = advance_past_stream_eol(bytes, next_p + 6);
-                    let len_hint = resolve_stream_length_hint(
-                        bytes,
-                        stream_start,
-                        entries,
-                        &objects,
-                        &paren_table,
-                        &mut int_index,
-                    );
-                    let Some((stream_end, after_endstream)) =
-                        resolve_stream_bounds(bytes, stream_start, len_hint)
-                    else {
-                        return Err(fail_corrupted_or_encrypted(
-                            bytes,
-                            p,
-                            has_encrypt,
-                            "PDF stream 블록에 대응하는 endstream 토큰이 누락되었거나 경계가 손상되었습니다.",
-                        ));
-                    };
-                    stream_spans.push((stream_kw_pos, after_endstream));
-                    stream_range = Some((stream_start, stream_end));
-                    next_p = skip_pdf_ws_and_comments(bytes, after_endstream, bytes.len());
-                }
-                if !is_standalone_pdf_kw(bytes, next_p, b"endobj") {
-                    return Err(fail_corrupted_or_encrypted(
-                        bytes,
-                        p,
-                        has_encrypt,
-                        "PDF 간접 객체에 대응하는 endobj 토큰이 누락되었습니다.",
-                    ));
-                }
-                order_seq += 1;
-                objects.insert(
-                    (obj_num, gen_num),
-                    PdfIndirectObject {
-                        val,
-                        stream_range,
-                        order_seq,
-                    },
-                );
-                p = next_p + 6;
-                continue;
-            }
-            if is_standalone_pdf_kw(bytes, p, b"xref") {
-                p += 4;
-                loop {
-                    p = skip_pdf_ws_and_comments(bytes, p, bytes.len());
-                    if p >= bytes.len()
-                        || parse_indirect_obj_header(bytes, p, bytes.len()).is_some()
-                    {
-                        break;
-                    }
-                    let mut k = p;
-                    while k < bytes.len() && !is_pdf_delim_or_ws(bytes[k]) {
-                        k += 1;
-                    }
-                    if k == p {
-                        break;
-                    }
-                    let tok = &bytes[p..k];
-                    if tok == b"n" || tok == b"f" || tok.iter().all(u8::is_ascii_digit) {
-                        p = k;
-                    } else {
-                        break;
-                    }
-                }
-                continue;
-            }
-            if is_standalone_pdf_kw(bytes, p, b"trailer") {
-                let parsed_tr =
-                    parse_pdf_value_with_table(bytes, Some(&paren_table), p + 7, bytes.len(), 0)
-                        .map_err(|_| {
-                            fail_corrupted_or_encrypted(
-                                bytes,
-                                p,
-                                has_encrypt,
-                                "PDF trailer 딕셔너리가 손상되었습니다.",
-                            )
-                        })?;
-                let Some((PdfObjValue::Dict(tr_entries), next_p)) = parsed_tr else {
-                    return Err(fail_corrupted_or_encrypted(
-                        bytes,
-                        p,
-                        has_encrypt,
-                        "PDF trailer 뒤에 딕셔너리가 없습니다.",
-                    ));
-                };
-                let tr_has_enc = dict_has_non_null_key(&tr_entries, "/Encrypt");
-                if let Some(spliced_enc) =
-                    trailer_or_xref_has_spliced_encrypt(&tr_entries, tr_has_enc)
-                {
-                    return Err(fail_corrupted_or_encrypted(
-                        bytes,
-                        p,
-                        has_encrypt || tr_has_enc || spliced_enc,
-                        "PDF trailer /ID 배열 구조가 손상되었습니다.",
-                    ));
-                }
-                if tr_has_enc {
-                    has_encrypt = true;
-                }
-                trailers.push(tr_entries);
-                p = next_p;
-                continue;
-            }
-            if is_standalone_pdf_kw(bytes, p, b"startxref") {
-                let sx_pos = p;
-                p = skip_pdf_ws_and_comments(bytes, p + 9, bytes.len());
-                let start_off = p;
-                while p < bytes.len() && bytes[p].is_ascii_digit() {
-                    p += 1;
-                }
-                if p == start_off {
-                    return Err(fail_corrupted_or_encrypted(
-                        bytes,
-                        sx_pos,
-                        has_encrypt,
-                        "PDF startxref 오프셋 숫자가 누락되었습니다.",
-                    ));
-                }
-                continue;
-            }
-            return Err(fail_corrupted_or_encrypted(
-                bytes,
-                p,
-                has_encrypt,
-                "PDF 상위 구조에 해석할 수 없는 손상 토큰이 존재합니다.",
-            ));
-        }
-
-        if has_encrypt {
+        let mut scan = PdfTopLevelScan::new(bytes);
+        scan.run()?;
+        if scan.has_encrypt {
             return Ok(ScannedPdfStructure {
                 has_encrypt: true,
                 title: String::new(),
@@ -683,6 +752,15 @@ impl PdfSerializer {
                 trailer_b64_count: 0,
             });
         }
+        let PdfTopLevelScan {
+            mut objects,
+            trailers,
+            stream_spans,
+            mut order_seq,
+            ..
+        } = scan;
+        let mut trailer_b64: Option<String> = None;
+        let mut trailer_b64_count = 0usize;
 
         Self::collect_outside_stream_b64_comments(
             bytes,
@@ -691,42 +769,22 @@ impl PdfSerializer {
             &mut trailer_b64_count,
         );
 
-        let mut ordered_objs: Vec<((u32, u16), &PdfIndirectObject)> =
-            objects.iter().map(|(&id, o)| (id, o)).collect();
-        ordered_objs.sort_by_key(|(_, o)| o.order_seq);
-
         let mut remaining_budget = MAX_PDF_TOTAL_DECODED_BYTES;
-        let flate_cache = decode_and_validate_pdf_streams(
-            bytes,
-            &objects,
-            &ordered_objs,
-            &mut remaining_budget,
-            &mut trailer_b64,
-            &mut trailer_b64_count,
-        )?;
+        let flate_cache = {
+            let ordered_objs = ordered_by_sequence(&objects);
+            decode_and_validate_pdf_streams(
+                bytes,
+                &objects,
+                &ordered_objs,
+                &mut remaining_budget,
+                &mut trailer_b64,
+                &mut trailer_b64_count,
+            )?
+        };
 
         expand_pdf_object_streams(bytes, &mut objects, &flate_cache, &mut order_seq);
-        let mut ordered_objs: Vec<((u32, u16), &PdfIndirectObject)> =
-            objects.iter().map(|(&id, o)| (id, o)).collect();
-        ordered_objs.sort_by_key(|(_, o)| o.order_seq);
-
-        let mut cmap = PdfToUnicodeMap::default();
-        for &(id, obj) in &ordered_objs {
-            let stream_slice: Option<&[u8]> = if let Some(dec) = flate_cache.get(&id) {
-                Some(dec.as_slice())
-            } else {
-                obj.stream_range.map(|(s, e)| &bytes[s..e])
-            };
-            if let Some(s_bytes) = stream_slice {
-                if contains_subslice(s_bytes, b"begincmap") {
-                    PdfToUnicodeMap::parse_cmap_stream(
-                        &String::from_utf8_lossy(s_bytes),
-                        &mut cmap,
-                    );
-                }
-            }
-        }
-
+        let ordered_objs = ordered_by_sequence(&objects);
+        let cmap = build_tounicode_map(bytes, &ordered_objs, &flate_cache);
         let (title, pages_target) =
             resolve_catalog_and_pages_target(&objects, &ordered_objs, &trailers);
 
@@ -742,28 +800,9 @@ impl PdfSerializer {
             pages: Vec::new(),
             watermark_text: None,
         };
-
-        if let Some(target) = pages_target {
-            Self::walk_page_tree_node(&mut walk_state, target, 0, 0)?;
-        } else {
-            for &((on, gn), obj) in &ordered_objs {
-                if let PdfObjValue::Dict(ref d) = obj.val {
-                    if dict_name_eq(d, "/Type", "/Page") {
-                        walk_state.node_count += 1;
-                        if walk_state.node_count > MAX_PDF_PAGE_TREE_NODES {
-                            return Err(EasyOfficeError::CorruptedContainer(
-                                "PDF 페이지 트리 노드 상한(4096)을 초과했습니다.".to_string(),
-                            ));
-                        }
-                        Self::emit_page_from_node(
-                            &mut walk_state,
-                            d,
-                            obj.stream_range.map(|r| ((on, gn), r)),
-                            0,
-                        )?;
-                    }
-                }
-            }
+        match pages_target {
+            Some(target) => Self::walk_page_tree_node(&mut walk_state, target, 0, 0)?,
+            None => Self::emit_unlinked_pages(&mut walk_state, &ordered_objs)?,
         }
 
         Ok(ScannedPdfStructure {
@@ -774,6 +813,29 @@ impl PdfSerializer {
             trailer_b64,
             trailer_b64_count,
         })
+    }
+
+    /// Emits every `/Page` object in file order when no page tree root was found.
+    fn emit_unlinked_pages(
+        walk_state: &mut PageWalkState<'_>,
+        ordered_objs: &[((u32, u16), &PdfIndirectObject)],
+    ) -> Result<(), EasyOfficeError> {
+        for &(id, obj) in ordered_objs {
+            let PdfObjValue::Dict(ref d) = obj.val else {
+                continue;
+            };
+            if !dict_name_eq(d, "/Type", "/Page") {
+                continue;
+            }
+            walk_state.node_count += 1;
+            if walk_state.node_count > MAX_PDF_PAGE_TREE_NODES {
+                return Err(EasyOfficeError::CorruptedContainer(
+                    "PDF 페이지 트리 노드 상한(4096)을 초과했습니다.".to_string(),
+                ));
+            }
+            Self::emit_page_from_node(walk_state, d, obj.stream_range.map(|r| (id, r)), 0)?;
+        }
+        Ok(())
     }
 
     pub fn decode_base64_bytes(input: &str) -> Option<Vec<u8>> {

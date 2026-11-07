@@ -10,6 +10,7 @@ mod functions_date_fin;
 mod functions_fin;
 mod functions_lookup;
 mod functions_lookup_text;
+mod functions_math;
 mod memo;
 mod parser;
 mod text_format;
