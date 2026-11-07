@@ -30,10 +30,7 @@
   let activeShortcutModifier = "⌘";
   let workspaceHistoryQueue = Promise.resolve();
 
-  const docTabStore = {
-    DOC: null,
-    HWP: null,
-  };
+  const docTabStore = { DOC: null, HWP: null };
 
   const sheetDataStore = {
     Sheet1: null,
@@ -49,10 +46,7 @@
 
   const sheetRowCounts = {};
   let workspaceSession = null;
-  let docRunsUi = null;
-  let hwpHost = null;
-  let hwpSession = null;
-  let windowBridge = null;
+  let docRunsUi = null, hwpHost = null, hwpSession = null, windowBridge = null;
   const icons = host.__EASYOFFICE_ICONS__;
 
   function chainWorkspaceQueue(opFn) {
@@ -304,6 +298,16 @@
 
   host.__EASYOFFICE_WINDOW_BRIDGE__.instance = windowBridge;
 
+  // The editor's 파일 menu forwards shell commands (whitelisted in hwp-host.js); these run them.
+  const shellChrome = host.__EASYOFFICE_CREATE_SHELL_CHROME__({
+    document, hwpHost, icons, ribbonState: localRibbonState,
+    actions: {
+      newDocument: () => windowBridge.newDocument("HWP"), openFile: () => fileOpen.openFilePicker(),
+      openRecent: (id) => windowBridge.openRecent(id), save: () => saveWorkspaceDocument(),
+      saveAs: (format) => hwpSession.saveAs(format), close: () => windowBridge.requestClose(),
+    },
+  });
+
   function setStatusFeedback(text) {
     const fb = document.getElementById("status-command-feedback");
     if (fb) fb.textContent = text;
@@ -534,6 +538,7 @@
             html.dataset.theme = next;
             localRibbonState.darkThemeEnabled = next === "dark";
             icons.syncThemeToggle(document, next);
+            void shellChrome.noteThemeToggle(next);
             sheetController.refreshFocusedSheetCellPendingSnapshot();
           })
           .catch(() => {});
@@ -926,17 +931,10 @@
 
   host.__EASYOFFICE_ACTIVATE_MODULE__ = (mod) => ribbonHistory.activatePane(mod);
 
-  // First paint follows the OS colour scheme (the toggle still switches); hosts without matchMedia stay light.
-  function applySystemTheme() {
-    if (!host.matchMedia?.("(prefers-color-scheme: dark)")?.matches) return;
-    document.documentElement.dataset.theme = "dark";
-    localRibbonState.darkThemeEnabled = true;
-    icons.syncThemeToggle(document, "dark");
-  }
-
   async function initWorkspace() {
     icons.applyIcons(document);
-    applySystemTheme();
+    void shellChrome.applySystemTheme();
+    shellChrome.bind();
     workspacePanels.ensureDefaultDocTabStore();
     sheetDataStore.Sheet1 = snapshotDomSheetCells();
     sheetRowCounts.Sheet1 = sheetController.getSheetRowCount("Sheet1");
@@ -967,7 +965,7 @@
     hwpSession.bindUi();
     await fileOpen.captureBaselines();
     await loadWorkspaceBootstrap();
-    await windowBridge.start();
+    void shellChrome.pushRecents(await windowBridge.start());
     await windowBridge.loadPending(async (name, bytes) => {
       await fileOpen.openDocumentFromBytes(name, bytes);
       await workspaceSession.markSaved();

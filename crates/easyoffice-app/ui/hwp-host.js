@@ -26,6 +26,32 @@
   const MSG_FAILED = "한글 편집기에 연결하지 못했습니다.";
   const TOOL_HINT = "한글 편집기 도구줄을 사용하세요";
   const SHORTCUT_REASON = "shell_shortcut";
+  // The editor's 파일 menu forwards shell commands by name only (#158); the shell re-checks each one
+  // here before anything runs, so a compromised frame can only ask for these six actions.
+  const SHELL_COMMAND_REASON = "shell_command";
+  const SHELL_COMMANDS = Object.freeze(["new", "open", "recent", "save", "save-as", "close"]);
+  const SAVE_AS_FORMATS = Object.freeze(["hwp", "hwpx"]);
+  const SHELL_THEMES = Object.freeze(["light", "dark", "system"]);
+  const RECENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+  const SHELL_CONTEXT_METHOD = "setShellContext";
+
+  // Returns `{ command, id?, format? }` for a whitelisted command with valid arguments, else null.
+  function sanitizeShellCommand(payload) {
+    if (!payload || typeof payload !== "object") return null;
+    const command = payload.command;
+    if (typeof command !== "string" || !SHELL_COMMANDS.includes(command)) return null;
+    const out = { command };
+    if (command === "recent") {
+      if (typeof payload.id !== "string" || !RECENT_ID_PATTERN.test(payload.id)) return null;
+      out.id = payload.id;
+    }
+    if (command === "save-as") {
+      const format = payload.format === undefined ? "hwp" : payload.format;
+      if (typeof format !== "string" || !SAVE_AS_FORMATS.includes(format)) return null;
+      out.format = format;
+    }
+    return out;
+  }
 
   function newSessionId(host) {
     const c = host.crypto;
@@ -68,6 +94,9 @@
     const pending = new Map();
     const changeListeners = new Set();
     const shortcutListeners = new Set();
+    const commandListeners = new Set();
+    // Pushed into the editor (`setShellContext`): the shell theme and the recent-documents list.
+    const shellContext = { theme: SHELL_THEMES.includes(deps.initialTheme) ? deps.initialTheme : "system", recents: [] };
     // Combos the editor forwards to the shell (from the shell's single shortcut table). They travel
     // in the frame URL so the editor knows which keys to hand over; the editor sends combo strings only.
     const shellShortcuts = Array.isArray(deps.shellShortcuts) ? deps.shellShortcuts.filter((k) => typeof k === "string") : [];
@@ -230,6 +259,11 @@
         }
       } else if (data.type === "rhwp-event") {
         const payload = data.payload;
+        if (payload && payload.reason === SHELL_COMMAND_REASON) {
+          const command = sanitizeShellCommand(payload);
+          if (command) for (const listener of commandListeners) listener(command);
+          return;
+        }
         if (payload && payload.reason === SHORTCUT_REASON) {
           if (typeof payload.shortcut === "string") for (const listener of shortcutListeners) listener(payload.shortcut);
           return;
@@ -324,7 +358,10 @@
       el.id = "hwp-frame";
       el.title = "한글 편집기";
       el.setAttribute("sandbox", FRAME_SANDBOX);
-      el.setAttribute("src", shellShortcuts.length > 0 ? studioSrc + "?shellKeys=" + encodeURIComponent(shellShortcuts.join(",")) : studioSrc);
+      const query = [];
+      if (shellShortcuts.length > 0) query.push("shellKeys=" + encodeURIComponent(shellShortcuts.join(",")));
+      if (shellContext.theme !== "system") query.push("theme=" + shellContext.theme);
+      el.setAttribute("src", query.length > 0 ? studioSrc + "?" + query.join("&") : studioSrc);
       pane().appendChild(el);
       return el;
     }
@@ -338,6 +375,8 @@
         await handshake;
         if (stale()) return;
         await call("ready");
+        if (stale()) return;
+        await pushShellContext();
         if (stale()) return;
         await call("createBlankDocument", { skipUnsavedGuard: true });
         if (stale()) return;
@@ -426,6 +465,29 @@
       return call("getDocumentState").then((s) => Boolean(s && s.dirty)).catch(() => false);
     }
 
+    // Theme and recent documents travel to the editor as plain values (recents: opaque id + name).
+    function pushShellContext() {
+      if (!port || capabilities.indexOf("shell-context-v1") < 0) return Promise.resolve(false);
+      return call(SHELL_CONTEXT_METHOD, { theme: shellContext.theme, recents: shellContext.recents })
+        .then(() => true, () => false);
+    }
+
+    function setShellContext(next) {
+      if (next && SHELL_THEMES.includes(next.theme)) shellContext.theme = next.theme;
+      if (next && Array.isArray(next.recents)) {
+        shellContext.recents = next.recents
+          .filter((r) => r && RECENT_ID_PATTERN.test(String(r.id)) && typeof r.name === "string" && r.name)
+          .slice(0, 10)
+          .map((r) => ({ id: String(r.id), name: r.name }));
+      }
+      return status === "ready" ? pushShellContext() : Promise.resolve(false);
+    }
+
+    function onCommand(listener) {
+      commandListeners.add(listener);
+      return () => commandListeners.delete(listener);
+    }
+
     function onShortcut(listener) {
       shortcutListeners.add(listener);
       return () => shortcutListeners.delete(listener);
@@ -491,7 +553,7 @@
 
     return {
       onModuleActivated, paneForModule, isEmbedActive, usesLegacy, call, reconnect, useLegacyEditor,
-      exportHwp, exportBytes, exportHwpBase64, saveDocument, isDirty, onChange, onShortcut, onStatus, whenSettled, runSmoke,
+      exportHwp, exportBytes, exportHwpBase64, saveDocument, isDirty, onChange, onShortcut, onCommand, setShellContext, onStatus, whenSettled, runSmoke,
       getStatus: () => status,
       getCapabilities: () => capabilities.slice(),
       getFrame: () => frame,
@@ -500,5 +562,5 @@
   }
 
   host.__EASYOFFICE_CREATE_HWP_HOST__ = createHwpHost;
-  host.__EASYOFFICE_HWP_HOST_CONSTANTS__ = { STUDIO_SRC, FRAME_SANDBOX, CAPABILITIES, MSG_UNAVAILABLE };
+  host.__EASYOFFICE_HWP_HOST_CONSTANTS__ = { STUDIO_SRC, FRAME_SANDBOX, CAPABILITIES, MSG_UNAVAILABLE, SHELL_COMMANDS, sanitizeShellCommand };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

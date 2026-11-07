@@ -8,15 +8,16 @@ mod app_commands;
 mod recent;
 mod save_file;
 mod smoke;
+mod tracked_files;
 mod window_commands;
 mod windows;
 
 use easyoffice_app::EasyOfficeIpcRouter;
-use save_file::{write_document_bytes, SaveOutcome, SaveRequest};
+use save_file::{save_in_place, write_document_bytes, InPlaceResult, SaveOutcome, SaveRequest};
 use serde::Serialize;
 use smoke::{SmokeProbe, SMOKE_TIMEOUT};
 use tauri::{AppHandle, Manager, WebviewWindow};
-use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use window_commands::AppWindows;
 use windows::WindowKind;
 
@@ -72,8 +73,18 @@ async fn save_document_file(
     window: WebviewWindow,
     file_name: String,
     base64: String,
+    in_place: Option<bool>,
 ) -> Result<SaveOutcome, IpcError> {
     let request = SaveRequest::parse(&file_name, &base64).map_err(IpcError::new)?;
+    if in_place == Some(true) {
+        // A document that came from (or was saved to) a file with the same format is written back to
+        // that file; everything else falls through to the save dialog.
+        let tracked = window_commands::tracked_file(&app, window.label())
+            .filter(|tracked| tracked.extension_matches(request.extension()));
+        if let Some(tracked) = tracked {
+            return save_tracked(&app, &window, tracked, request).await;
+        }
+    }
     let (tx, rx) = std::sync::mpsc::channel();
     app.dialog()
         .file()
@@ -103,6 +114,51 @@ async fn save_document_file(
     Ok(SaveOutcome::saved(&written.0, written.1))
 }
 
+/// Writes the document back to its own file. If the file changed on disk since it was opened, a
+/// native dialog asks before overwriting; declining leaves the file alone and reports "cancelled".
+async fn save_tracked(
+    app: &AppHandle,
+    window: &WebviewWindow,
+    tracked: tracked_files::TrackedFile,
+    request: SaveRequest,
+) -> Result<SaveOutcome, IpcError> {
+    let dialog_app = app.clone();
+    let parent = window.clone();
+    let path = tracked.path.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        save_in_place(&path, &tracked.fingerprint, request.bytes(), || {
+            dialog_app
+                .dialog()
+                .message(
+                    "이 파일이 열린 뒤 다른 프로그램에서 변경되었습니다. 지금 저장하면 그 변경 내용을 덮어씁니다.",
+                )
+                .title("파일이 변경되었습니다")
+                .kind(MessageDialogKind::Warning)
+                .parent(&parent)
+                .buttons(MessageDialogButtons::OkCancelCustom(
+                    "덮어쓰기".to_string(),
+                    "취소".to_string(),
+                ))
+                .blocking_show()
+        })
+    })
+    .await
+    .map_err(|err| IpcError::new(format!("파일을 쓰지 못했습니다: {err}")))?
+    .map_err(IpcError::new)?;
+    match result {
+        InPlaceResult::Declined => Ok(SaveOutcome::cancelled()),
+        InPlaceResult::Saved { bytes } => {
+            window_commands::note_written(app, window.label(), &tracked.path);
+            let name = tracked
+                .path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            Ok(SaveOutcome::saved_in_place(&name, bytes))
+        }
+    }
+}
+
 /// Only the embedded app origin may be displayed; any other navigation is refused.
 pub(crate) fn is_app_origin(url: &tauri::Url) -> bool {
     url.scheme() == "tauri" || url.host_str() == Some("tauri.localhost")
@@ -110,7 +166,16 @@ pub(crate) fn is_app_origin(url: &tauri::Url) -> bool {
 
 fn main() {
     let smoke_mode = std::env::args().skip(1).any(|arg| arg == "--smoke");
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+    if !smoke_mode {
+        // First plugin, as the plugin requires. A second launch never starts another process: its
+        // arguments reach this one through the open queue (the smoke run must not collide with a
+        // running instance, so it skips this).
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            window_commands::handle_second_instance(app, argv);
+        }));
+    }
+    builder
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             ipc_dispatch,

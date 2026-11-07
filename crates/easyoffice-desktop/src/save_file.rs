@@ -1,5 +1,6 @@
 //! Validation and atomic writing for the desktop "save document" command.
 
+use crate::tracked_files::{disk_state, DiskState, Fingerprint};
 use easyoffice_app::EasyOfficeIpcRouter;
 use serde::Serialize;
 use std::fs;
@@ -85,6 +86,15 @@ impl SaveOutcome {
         }
     }
 
+    /// An in-place save reports the file name only: the page never learns the directory.
+    pub fn saved_in_place(file_name: &str, bytes: usize) -> Self {
+        Self {
+            status: "saved",
+            path: Some(file_name.to_string()),
+            bytes,
+        }
+    }
+
     pub fn cancelled() -> Self {
         Self {
             status: "cancelled",
@@ -113,6 +123,31 @@ pub fn write_document_bytes(path: &Path, bytes: &[u8]) -> Result<usize, String> 
             ))
         }
     }
+}
+
+/// Result of an in-place save.
+#[derive(Debug, PartialEq, Eq)]
+pub enum InPlaceResult {
+    Saved {
+        bytes: usize,
+    },
+    /// The file changed on disk and the user chose not to overwrite it.
+    Declined,
+}
+
+/// Saves over the file the document came from. If the file no longer matches the fingerprint taken
+/// when it was opened, `confirm_overwrite` decides (the shell shows a native dialog); the write itself
+/// is the same temp-file + fsync + rename as every other save.
+pub fn save_in_place(
+    path: &Path,
+    expected: &Fingerprint,
+    bytes: &[u8],
+    confirm_overwrite: impl FnOnce() -> bool,
+) -> Result<InPlaceResult, String> {
+    if disk_state(path, expected) == DiskState::Changed && !confirm_overwrite() {
+        return Ok(InPlaceResult::Declined);
+    }
+    write_document_bytes(path, bytes).map(|bytes| InPlaceResult::Saved { bytes })
 }
 
 fn write_then_rename(tmp_path: &Path, path: &Path, bytes: &[u8]) -> std::io::Result<()> {
@@ -176,10 +211,59 @@ mod tests {
     }
 
     #[test]
+    fn in_place_save_writes_unchanged_files_without_asking() {
+        let dir = scratch_dir("inplace");
+        let target = dir.join("a.docx");
+        fs::write(&target, b"old").unwrap();
+        let seen = Fingerprint::of(&target).unwrap();
+        let result = save_in_place(&target, &seen, b"new!", || panic!("must not ask")).unwrap();
+        assert_eq!(result, InPlaceResult::Saved { bytes: 4 });
+        assert_eq!(fs::read(&target).unwrap(), b"new!");
+        assert!(!dir.join("a.docx.easyoffice-saving").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn external_change_asks_and_respects_the_answer() {
+        let dir = scratch_dir("conflict");
+        let target = dir.join("a.hwp");
+        fs::write(&target, b"old").unwrap();
+        let seen = Fingerprint::of(&target).unwrap();
+        fs::write(&target, b"edited elsewhere").unwrap();
+        let declined = save_in_place(&target, &seen, b"mine", || false).unwrap();
+        assert_eq!(declined, InPlaceResult::Declined);
+        assert_eq!(fs::read(&target).unwrap(), b"edited elsewhere");
+        let mut asked = false;
+        let accepted = save_in_place(&target, &seen, b"mine", || {
+            asked = true;
+            true
+        })
+        .unwrap();
+        assert!(asked);
+        assert_eq!(accepted, InPlaceResult::Saved { bytes: 4 });
+        assert_eq!(fs::read(&target).unwrap(), b"mine");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_deleted_original_is_recreated_without_asking() {
+        let dir = scratch_dir("gone");
+        let target = dir.join("a.pdf");
+        fs::write(&target, b"old").unwrap();
+        let seen = Fingerprint::of(&target).unwrap();
+        fs::remove_file(&target).unwrap();
+        let result = save_in_place(&target, &seen, b"back", || panic!("must not ask")).unwrap();
+        assert_eq!(result, InPlaceResult::Saved { bytes: 4 });
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn outcomes_serialize_for_the_webview() {
         let saved = serde_json::to_string(&SaveOutcome::saved(Path::new("C:/a.pdf"), 3)).unwrap();
         assert_eq!(saved, r#"{"status":"saved","path":"C:/a.pdf","bytes":3}"#);
         let cancelled = serde_json::to_string(&SaveOutcome::cancelled()).unwrap();
         assert_eq!(cancelled, r#"{"status":"cancelled","path":null,"bytes":0}"#);
+        let named = serde_json::to_string(&SaveOutcome::saved_in_place("a.pdf", 3)).unwrap();
+        assert_eq!(named, r#"{"status":"saved","path":"a.pdf","bytes":3}"#);
     }
 }

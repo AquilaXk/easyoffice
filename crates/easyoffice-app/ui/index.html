@@ -16,12 +16,12 @@
           <p class="start-subtitle">새 문서를 만들거나 파일을 열어 시작하세요. 문서마다 별도 창에서 열립니다.</p>
         </header>
         <div class="start-actions" role="group" aria-label="새 문서 만들기">
-          <button type="button" class="start-card" data-window-new="DOC"><span class="start-card-icon" data-icon="file"></span><span class="start-card-text"><strong>문서</strong><small>DOCX</small></span></button>
-          <button type="button" class="start-card" data-window-new="HWP"><span class="start-card-icon" data-icon="file"></span><span class="start-card-text"><strong>한글 문서</strong><small>HWP · HWPX</small></span></button>
-          <button type="button" class="start-card" data-window-new="SHEET"><span class="start-card-icon" data-icon="table"></span><span class="start-card-text"><strong>스프레드시트</strong><small>XLSX</small></span></button>
-          <button type="button" class="start-card" data-window-new="SLIDE"><span class="start-card-icon" data-icon="image"></span><span class="start-card-text"><strong>프레젠테이션</strong><small>PPTX</small></span></button>
-          <button type="button" class="start-card" data-window-new="PDF"><span class="start-card-icon" data-icon="file"></span><span class="start-card-text"><strong>PDF 스튜디오</strong><small>PDF</small></span></button>
-          <button type="button" class="start-card" data-window-new="CONV"><span class="start-card-icon" data-icon="activity"></span><span class="start-card-text"><strong>포맷 변환기</strong><small>변환</small></span></button>
+          <button type="button" class="start-card" data-window-new="DOC"><span class="start-card-icon" data-icon="file-doc"></span><span class="start-card-text"><strong>문서</strong><small>DOCX</small></span></button>
+          <button type="button" class="start-card" data-window-new="HWP"><span class="start-card-icon" data-icon="file-hwp"></span><span class="start-card-text"><strong>한글 문서</strong><small>HWP · HWPX</small></span></button>
+          <button type="button" class="start-card" data-window-new="SHEET"><span class="start-card-icon" data-icon="file-sheet"></span><span class="start-card-text"><strong>스프레드시트</strong><small>XLSX</small></span></button>
+          <button type="button" class="start-card" data-window-new="SLIDE"><span class="start-card-icon" data-icon="file-slide"></span><span class="start-card-text"><strong>프레젠테이션</strong><small>PPTX</small></span></button>
+          <button type="button" class="start-card" data-window-new="PDF"><span class="start-card-icon" data-icon="file-pdf"></span><span class="start-card-text"><strong>PDF 스튜디오</strong><small>PDF</small></span></button>
+          <button type="button" class="start-card" data-window-new="CONV"><span class="start-card-icon" data-icon="file-convert"></span><span class="start-card-text"><strong>포맷 변환기</strong><small>변환</small></span></button>
         </div>
         <button type="button" id="start-open" class="start-open" data-file-open="true"><span class="icon-slot" data-icon="folder-open"></span>파일 열기…<span class="start-open-hint">Ctrl+O</span></button>
         <section id="start-recent" class="start-recent" aria-label="최근 문서" hidden>
@@ -149,6 +149,12 @@
               <div class="md-item" data-studio-menu-cmd="security-audit"><span class="md-label">문서 보안 검사</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-studio-menu-cmd="palette"><span class="md-label">환경 설정 및 커맨드 검색</span><span class="md-shortcut">/</span></div>
+            </div>
+          </div>
+          <div class="menu-item" data-menu="help">
+            <button type="button" class="studio-menu-item menu-title" role="menuitem" data-menu-cat="home">도움말</button>
+            <div class="menu-dropdown" role="menu">
+              <div class="md-item" data-about-open="true" role="menuitem"><span class="md-label">제품 정보…</span></div>
             </div>
           </div>
         </div>
@@ -852,12 +858,7 @@
           <span id="status-doc-filename" class="statusbar-doc-path">[붙임2] 2026년 디지털행정혁신 종합 추진계획(안).docx — 1페이지</span>
         </span>
         <span class="statusbar-diag-group">
-          <span id="platform-pill" class="platform-pill">플랫폼 확인 중</span>
-          <span id="status-module">모듈: 문서 (DOCX)</span>
-          <span id="status-format-spec">포맷: DOCX 문서</span>
           <span id="status-sheet-agg">선택 집계 · 합계 1,300 · 평균 650 · 개수 2 · 최대 1,000</span>
-          <span id="ime-badge">IME: 완료</span>
-          <span id="status-engine">엔진: 연결 대기</span>
           <span id="status-command-feedback">준비 완료</span>
         </span>
         <span class="statusbar-zoom-group" aria-label="화면 배율 조절">
@@ -900,6 +901,25 @@
         </div>
       </form>
     </dialog>
+
+    <dialog id="about-dialog" class="close-dialog" aria-labelledby="about-dialog-title">
+      <div class="close-dialog-panel">
+        <h2 id="about-dialog-title" class="close-dialog-title">EasyOffice 제품 정보</h2>
+        <p class="close-dialog-text">문서 · 한글 · 스프레드시트 · 프레젠테이션 · PDF를 오프라인으로 다루는 작업 공간입니다.</p>
+        <div class="about-diagnostics" aria-label="진단 정보">
+          <span id="platform-pill" class="platform-pill">플랫폼 확인 중</span>
+          <span id="status-module">모듈: 문서 (DOCX)</span>
+          <span id="status-format-spec">포맷: DOCX 문서</span>
+          <span id="ime-badge">IME: 완료</span>
+          <span id="status-engine">엔진: 연결 대기</span>
+        </div>
+        <div class="close-dialog-actions">
+          <button type="button" id="btn-about-close" class="secondary-btn">닫기</button>
+        </div>
+      </div>
+    </dialog>
+
+    <div id="shell-toast" class="shell-toast" role="status" aria-live="polite" hidden></div>
 
     <div id="slide-context-menu" class="slide-context-menu" role="menu" aria-label="슬라이드 메뉴" hidden>
       <button type="button" role="menuitem" data-slide-action="new">새 슬라이드</button>
@@ -946,6 +966,7 @@
     <script src="./slide-studio.js"></script>
     <script src="./hwp-host.js"></script>
     <script src="./hwp-session.js"></script>
+    <script src="./shell-chrome.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>

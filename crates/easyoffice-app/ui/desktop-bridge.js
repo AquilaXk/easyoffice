@@ -64,9 +64,15 @@
   }
 
   // Resolves `{ status: "saved", path, bytes }` or `{ status: "cancelled" }`; rejects with an
-  // Error whose message explains why the file was not written.
-  async function saveFile(base64Data, fileName) {
-    const res = await callShell(SAVE_COMMAND, { fileName: String(fileName), base64: String(base64Data) });
+  // Error whose message explains why the file was not written. `options.inPlace` asks Rust to write
+  // back to the file this window's document came from (same format; Rust keeps the path and checks
+  // the file did not change on disk); without it, or when Rust has no matching file, the dialog opens.
+  async function saveFile(base64Data, fileName, options) {
+    const res = await callShell(SAVE_COMMAND, {
+      fileName: String(fileName),
+      base64: String(base64Data),
+      inPlace: Boolean(options && options.inPlace),
+    });
     if (res && (res.status === "saved" || res.status === "cancelled")) return res;
     throw new Error("저장 결과를 확인하지 못했습니다.");
   }

@@ -433,7 +433,7 @@
     async function start() {
       bindUi();
       refresh();
-      await refreshRecents();
+      return refreshRecents();
     }
 
     return {

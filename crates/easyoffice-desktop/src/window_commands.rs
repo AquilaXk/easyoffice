@@ -4,6 +4,7 @@
 
 use crate::recent::RecentList;
 use crate::smoke::SmokeProbe;
+use crate::tracked_files::{Fingerprint, TrackedFile, TrackedFiles};
 use crate::windows::{
     display_name, is_window_label, new_label, path_key, window_title, window_url, CloseAction,
     PendingOpen, PendingOpenQueue, PendingOpenView, WindowKind, WindowRegistry, PRIMARY_LABEL,
@@ -59,6 +60,7 @@ pub struct AppWindows {
     registry: Mutex<WindowRegistry>,
     pending: Mutex<PendingOpenQueue>,
     recents: Mutex<RecentList>,
+    files: Mutex<TrackedFiles>,
     recents_dir: Option<PathBuf>,
     counter: AtomicU64,
 }
@@ -79,6 +81,7 @@ impl AppWindows {
             registry: Mutex::new(WindowRegistry::default()),
             pending: Mutex::new(PendingOpenQueue::default()),
             recents: Mutex::new(recents),
+            files: Mutex::new(TrackedFiles::default()),
             recents_dir,
             counter: AtomicU64::new(1),
         }
@@ -224,6 +227,7 @@ fn attach_handlers(app: &AppHandle, window: &WebviewWindow) {
             let state = app.state::<AppWindows>();
             locked(&state.registry).remove(&label);
             locked(&state.pending).discard(&label);
+            locked(&state.files).untrack(&label);
             if let Some(probe) = app.try_state::<SmokeProbe>() {
                 probe.window_closed(&label);
             }
@@ -274,9 +278,10 @@ pub fn open_path(app: &AppHandle, path: &Path) -> Result<OpenOutcome, String> {
         focus_window(app, &label);
         return Ok(OpenOutcome::FOCUSED);
     }
-    let size = fs::metadata(&canonical)
-        .map_err(|err| format!("파일 정보를 읽지 못했습니다: {err}"))?
-        .len();
+    let meta =
+        fs::metadata(&canonical).map_err(|err| format!("파일 정보를 읽지 못했습니다: {err}"))?;
+    let fingerprint = Fingerprint::from_metadata(&meta);
+    let size = meta.len();
     if size == 0 || size > MAX_OPEN_BYTES {
         return Err(format!(
             "열 수 없는 파일 크기입니다 ({}): 빈 파일이거나 256MiB를 넘습니다",
@@ -300,6 +305,7 @@ pub fn open_path(app: &AppHandle, path: &Path) -> Result<OpenOutcome, String> {
             return Ok(OpenOutcome::FOCUSED);
         }
     }
+    locked(&state.files).track(&label, canonical.clone(), fingerprint);
     locked(&state.pending).push(
         &label,
         PendingOpen {
@@ -310,6 +316,7 @@ pub fn open_path(app: &AppHandle, path: &Path) -> Result<OpenOutcome, String> {
     if let Err(err) = create_registered_window(app, kind, &label) {
         locked(&state.registry).remove(&label);
         locked(&state.pending).discard(&label);
+        locked(&state.files).untrack(&label);
         return Err(err);
     }
     state.remember(&canonical);
@@ -323,23 +330,87 @@ pub fn note_saved_path(app: &AppHandle, label: &str, path: &Path) {
     };
     let state = app.state::<AppWindows>();
     // A path another window shows keeps its owner; the saving window simply stays untracked.
-    let _ = locked(&state.registry).claim_path(label, path_key(&canonical));
+    let claimed = locked(&state.registry)
+        .claim_path(label, path_key(&canonical))
+        .is_ok();
+    match Fingerprint::of(&canonical) {
+        Ok(fingerprint) if claimed => {
+            locked(&state.files).track(label, canonical.clone(), fingerprint)
+        }
+        _ => locked(&state.files).untrack(label),
+    }
     state.remember(&canonical);
+}
+
+/// The file this window's document came from (or was last saved to), if any. Rust-internal.
+pub fn tracked_file(app: &AppHandle, label: &str) -> Option<TrackedFile> {
+    locked(&app.state::<AppWindows>().files).get(label)
+}
+
+/// After an in-place write: the file now looks like this, so the next save compares against it.
+pub fn note_written(app: &AppHandle, label: &str, path: &Path) {
+    if let Ok(fingerprint) = Fingerprint::of(path) {
+        locked(&app.state::<AppWindows>().files).set_fingerprint(label, fingerprint);
+    }
+}
+
+/// Command-line arguments that name an existing file of a supported kind, in order. Everything else
+/// (flags such as `--smoke`, unknown extensions, directories) is ignored.
+pub fn launch_files(args: impl Iterator<Item = String>) -> Vec<PathBuf> {
+    args.map(PathBuf::from)
+        .filter(|path| WindowKind::for_path(path).is_some() && path.is_file())
+        .collect()
+}
+
+/// The files of a second launch: `argv[0]` is the executable, the rest are the launch arguments.
+pub fn second_instance_files(argv: Vec<String>) -> Vec<PathBuf> {
+    launch_files(argv.into_iter().skip(1))
+}
+
+/// Opens every file through `open` (the shared open queue in production). Returns whether any file
+/// was opened in a new window or focused in the window that already shows it.
+pub fn route_launch_files(
+    files: &[PathBuf],
+    mut open: impl FnMut(&Path) -> Result<OpenOutcome, String>,
+) -> bool {
+    let mut handled = false;
+    for path in files {
+        match open(path) {
+            Ok(_) => handled = true,
+            Err(message) => eprintln!("open: {message}"),
+        }
+    }
+    handled
 }
 
 /// Files named on the command line each open in their own window. Returns whether any did.
 pub fn open_startup_files(app: &AppHandle, args: impl Iterator<Item = String>) -> bool {
-    let mut opened = false;
-    for arg in args {
-        let path = PathBuf::from(arg);
-        if WindowKind::for_path(&path).is_some() && path.is_file() {
-            match open_path(app, &path) {
-                Ok(_) => opened = true,
-                Err(message) => eprintln!("open: {message}"),
-            }
+    route_launch_files(&launch_files(args), |path| open_path(app, path))
+}
+
+/// A second launch (file association, shell "open with", taskbar) is handed to this running process:
+/// its files open through the same queue as the start window, or the window that has a file
+/// already comes to the front. Without files, the existing window is simply focused.
+pub fn handle_second_instance(app: &AppHandle, argv: Vec<String>) {
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let files = second_instance_files(argv);
+        let handled = route_launch_files(&files, |path| open_path(&app, path));
+        if !handled && files.is_empty() {
+            focus_existing_window(&app);
         }
+    });
+}
+
+fn focus_existing_window(app: &AppHandle) {
+    let label = if app.get_webview_window(PRIMARY_LABEL).is_some() {
+        Some(PRIMARY_LABEL.to_string())
+    } else {
+        app.webview_windows().keys().min().cloned()
+    };
+    if let Some(label) = label {
+        focus_window(app, &label);
     }
-    opened
 }
 
 fn parse_document_kind(kind: &str) -> Result<WindowKind, WindowError> {
@@ -522,6 +593,56 @@ mod tests {
             checked += 1;
         }
         assert_eq!(checked, 7, "every window command is covered");
+    }
+
+    fn scratch_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "easyoffice-desktop-launch-{tag}-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn second_instance_args_are_routed_to_the_open_queue() {
+        let dir = scratch_dir("second");
+        let a = dir.join("a.docx");
+        let b = dir.join("b.hwpx");
+        fs::write(&a, b"x").unwrap();
+        fs::write(&b, b"x").unwrap();
+        let argv = vec![
+            "C:\\Program Files\\EasyOffice\\EasyOffice.exe".to_string(),
+            "--flag".to_string(),
+            a.display().to_string(),
+            dir.join("missing.docx").display().to_string(),
+            dir.join("notes.exe").display().to_string(),
+            b.display().to_string(),
+        ];
+        let files = second_instance_files(argv);
+        assert_eq!(
+            files,
+            vec![a.clone(), b.clone()],
+            "only existing supported files, exe skipped"
+        );
+        let mut queued = Vec::new();
+        let handled = route_launch_files(&files, |path| {
+            queued.push(path.to_path_buf());
+            Ok(OpenOutcome::OPENED)
+        });
+        assert!(handled);
+        assert_eq!(queued, vec![a, b]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn launch_routing_reports_whether_anything_was_handled() {
+        let none: Vec<PathBuf> = Vec::new();
+        assert!(!route_launch_files(&none, |_| Ok(OpenOutcome::OPENED)));
+        let files = vec![PathBuf::from("a.docx")];
+        assert!(!route_launch_files(&files, |_| Err("nope".into())));
+        assert!(route_launch_files(&files, |_| Ok(OpenOutcome::FOCUSED)));
     }
 
     #[test]

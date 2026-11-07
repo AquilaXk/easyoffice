@@ -1,6 +1,2 @@
 #file-input { display: none; }
 #sb-field:empty { display: none; }
-/* The shell owns the File menu (new, open, recent, save, close); the editor's own one only held
-   page setup (also under 쪽) and product info, so it is hidden instead of showing a second 파일. */
-#menu-bar .menu-item[data-menu="file"] { display: none; }
-
