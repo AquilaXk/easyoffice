@@ -521,7 +521,8 @@ test("utils: only the HWP family is routed and the limit is 64 MiB", () => {
 
 // ---- searchable PDF export (PD-101) --------------------------------------------------------------
 
-const pdfRecorder = (result = { status: "saved", name: "보고서.pdf", bytes: 10 }) => {
+const PDF_SAVED = Object.freeze({ status: "saved", name: "보고서.pdf", bytes: 10 });
+const pdfRecorder = (result = PDF_SAVED) => {
   const sent = [];
   const exportPdf = async (fileName, pages) => {
     sent.push({ fileName, pages });
@@ -563,13 +564,14 @@ test("PDF export: not available without the desktop shell or while the editor is
 
 test("PDF export: the page count is checked against the shell's 2,000 page ceiling before any page is rendered", async () => {
   const { sent, exportPdf } = pdfRecorder();
-  for (const count of [0, 2001, -1, 1.5, "3", null]) {
+  const rejects = async (count) => {
     const ctx = load({ exportPdf });
     pdfPages(ctx, count);
     assert.equal(await ctx.session.exportPdf(), null, String(count));
     assert.match(feedbackOf(ctx), /^PDF 내보내기 실패: 쪽 수/);
     assert.equal(ctx.fake.calls.filter((c) => c.method === "getPageSvg").length, 0);
-  }
+  };
+  await Promise.all([0, 2001, -1, 1.5, "3", null].map(rejects));
   assert.deepEqual(sent, []);
   const edge = load({ exportPdf });
   pdfPages(edge, 2000);
@@ -579,12 +581,13 @@ test("PDF export: the page count is checked against the shell's 2,000 page ceili
 
 test("PDF export: a page that is not text stops the export before the shell is called", async () => {
   const { sent, exportPdf } = pdfRecorder();
-  for (const bad of [null, "", 42, { svg: "x" }]) {
+  const stops = async (bad) => {
     const ctx = load({ exportPdf });
     pdfPages(ctx, 2, (i) => (i === 1 ? bad : "<svg/>"));
     assert.equal(await ctx.session.exportPdf(), null);
     assert.match(feedbackOf(ctx), /쪽 그림을 받지 못했습니다/);
-  }
+  };
+  await Promise.all([null, "", 42, { svg: "x" }].map(stops));
   assert.deepEqual(sent, []);
 });
 

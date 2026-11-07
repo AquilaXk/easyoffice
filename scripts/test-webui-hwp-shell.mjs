@@ -307,13 +307,14 @@ test("the PDF item is in the overlay 파일 menu, hidden until the shell says it
 });
 
 test("the shell tells the editor whether it can export a PDF (desktop app only)", async () => {
-  for (const [canExportPdf, expected] of [[true, true], [undefined, false]]) {
+  const pushes = async ([canExportPdf, expected]) => {
     const { api, requests } = loadHost(undefined, { canExportPdf });
     await api.onModuleActivated("HWP");
     await settle();
     const pushed = requests.filter((r) => r.method === "setShellContext");
     assert.equal(pushed.at(-1).params.pdfExport, expected);
-  }
+  };
+  await Promise.all([[true, true], [undefined, false]].map(pushes));
 });
 
 test("the desktop bridge sends page SVG text only and no path to export_searchable_pdf", async () => {
