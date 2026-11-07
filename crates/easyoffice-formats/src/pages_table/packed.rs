@@ -57,6 +57,7 @@ pub(crate) enum CellScalar {
 pub(crate) struct PackedCell {
     pub kind: u8,
     pub rich_text_key: Option<u32>,
+    pub string_key: Option<u32>,
     pub format_key: Option<u32>,
     pub value: CellScalar,
 }
@@ -79,6 +80,12 @@ pub(crate) fn parse_cell(buf: &[u8], offset: usize) -> Option<PackedCell> {
 fn parse_legacy(head: &[u8]) -> Option<PackedCell> {
     let kind = *head.get(1)?;
     let flags = read_u32(head, cell::LEGACY_FLAGS_OFFSET)?;
+    if matches!(
+        kind,
+        cell::TYPE_NUMBER | cell::TYPE_STRING | cell::TYPE_DURATION | cell::TYPE_ERROR
+    ) {
+        return parse_legacy_scalar(head, kind, flags);
+    }
     let mut rich_text_key = None;
     if kind == cell::TYPE_RICH_TEXT && flags & cell::LEGACY_FLAG_RICH_TEXT_KEY != 0 {
         let below = (flags & (cell::LEGACY_FLAG_RICH_TEXT_KEY - 1)).count_ones() as usize;
@@ -88,9 +95,59 @@ fn parse_legacy(head: &[u8]) -> Option<PackedCell> {
     Some(PackedCell {
         kind,
         rich_text_key,
+        string_key: None,
         format_key: None,
         value: CellScalar::None,
     })
+}
+
+/// Size of the field of legacy flag bit `bit`; `None` for bits whose size is unknown.
+fn legacy_field_size(bit: u32) -> Option<usize> {
+    match bit {
+        cell::LEGACY_BIT_DECIMAL => Some(cell::DECIMAL_BYTES),
+        cell::LEGACY_BIT_DOUBLE => Some(cell::DOUBLE_BYTES),
+        b if cell::LEGACY_FOUR_BYTE_BITS & (1 << b) != 0 => Some(cell::ASSUMED_FIELD_BYTES),
+        _ => None,
+    }
+}
+
+/// Number, string, duration and error cells of the version-5 layout. Cells with a flag bit of
+/// unknown field size are not read (fail closed).
+fn parse_legacy_scalar(head: &[u8], kind: u8, flags: u32) -> Option<PackedCell> {
+    if flags & cell::LEGACY_UNVERIFIED_BITS != 0 {
+        return None;
+    }
+    let mut out = PackedCell {
+        kind,
+        rich_text_key: None,
+        string_key: None,
+        format_key: None,
+        value: CellScalar::None,
+    };
+    let mut cursor = cell::LEGACY_FIELDS_OFFSET;
+    for bit in 0..=cell::LEGACY_LAST_BIT {
+        if flags & (1 << bit) == 0 {
+            continue;
+        }
+        let end = cursor.checked_add(legacy_field_size(bit)?)?;
+        let field = head.get(cursor..end)?;
+        match bit {
+            cell::LEGACY_BIT_DECIMAL if kind == cell::TYPE_NUMBER => {
+                out.value = decode_scalar(kind, field)?;
+            }
+            cell::LEGACY_BIT_DOUBLE if kind == cell::TYPE_DURATION => {
+                out.value = decode_scalar(kind, field)?;
+            }
+            cell::LEGACY_BIT_STRING_KEY => out.string_key = Some(read_u32(field, 0)?),
+            cell::LEGACY_BIT_RICH_TEXT_KEY => out.rich_text_key = Some(read_u32(field, 0)?),
+            b if out.format_key.is_none() && cell::LEGACY_FORMAT_BITS.contains(&b) => {
+                out.format_key = Some(read_u32(field, 0)?);
+            }
+            _ => {}
+        }
+        cursor = end;
+    }
+    Some(out)
 }
 
 /// Byte size of the field selected by flag `bit` for a cell of type `kind`.
@@ -119,6 +176,7 @@ fn parse_current(head: &[u8]) -> Option<PackedCell> {
     let mut out = PackedCell {
         kind,
         rich_text_key: None,
+        string_key: None,
         format_key: None,
         value: CellScalar::None,
     };
@@ -180,5 +238,37 @@ mod tests {
         cell_bytes.extend_from_slice(&9u32.to_le_bytes());
         assert_eq!(parse_cell(&cell_bytes, 0).unwrap().rich_text_key, Some(9));
         assert!(parse_cell(&cell_bytes, usize::MAX).is_none());
+    }
+
+    /// A Pages 14.4 number cell: decimal 12345 x 10^-1, flags 0x3061 (decimal, cell style, text
+    /// style, suggestion, number format) and format key 2.
+    #[test]
+    fn version_5_number_cells_read_value_and_format_key() {
+        let mut bytes = vec![cell::LEGACY_VERSION, cell::TYPE_NUMBER, 0, 0, 0, 0, 0, 0];
+        bytes.extend_from_slice(&0x3061u32.to_le_bytes());
+        bytes.extend_from_slice(&bid(12345, -1, false));
+        for key in [4u32, 3, 1, 2] {
+            bytes.extend_from_slice(&key.to_le_bytes());
+        }
+        let cell = parse_cell(&bytes, 0).unwrap();
+        assert_eq!(cell.format_key, Some(2));
+        let CellScalar::Decimal(d) = cell.value else {
+            panic!("decimal value")
+        };
+        assert_eq!((d.coefficient, d.exponent), (12345, -1));
+    }
+
+    #[test]
+    fn version_5_cells_with_unknown_field_sizes_are_not_read() {
+        let mut bytes = vec![cell::LEGACY_VERSION, cell::TYPE_STRING, 0, 0, 0, 0, 0, 0];
+        bytes.extend_from_slice(&(1u32 << 2 | 1 << 3).to_le_bytes());
+        bytes.extend_from_slice(&[0u8; 16]);
+        assert!(parse_cell(&bytes, 0).is_none());
+        let mut ok = vec![cell::LEGACY_VERSION, cell::TYPE_STRING, 0, 0, 0, 0, 0, 0];
+        ok.extend_from_slice(&(1u32 << 3).to_le_bytes());
+        ok.extend_from_slice(&7u32.to_le_bytes());
+        assert_eq!(parse_cell(&ok, 0).unwrap().string_key, Some(7));
+        ok.truncate(14);
+        assert!(parse_cell(&ok, 0).is_none());
     }
 }

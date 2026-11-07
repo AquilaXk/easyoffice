@@ -47,19 +47,41 @@ pub(crate) struct FormatSpec<'a> {
     decimals: Option<u32>,
     currency: Option<&'a str>,
     thousands: bool,
+    duration_style: u64,
+    duration_largest: u64,
+    duration_smallest: u64,
 }
 
 impl<'a> FormatSpec<'a> {
+    /// Reads both layouts: the older one (decimals in field 3, currency code in field 4, kind 256 =
+    /// currency, 257 = number) and the Pages 14.4 one (decimals in field 2, currency code in field
+    /// 3, kind 256 = number, 257 = currency). A currency code string tells them apart; the kind is
+    /// normalised to the older numbering.
     pub fn parse(m: &Message<'a>) -> Self {
         let text = |n: u32| m.bytes(n).and_then(|b| std::str::from_utf8(b).ok());
+        let currency = text(cell_format::CURRENCY).or_else(|| text(cell_format::CURRENCY_V2));
+        let raw_kind = m.varint(cell_format::KIND).unwrap_or(0);
+        let kind = match raw_kind {
+            cell_format::KIND_CURRENCY | cell_format::KIND_NUMBER if currency.is_some() => {
+                cell_format::KIND_CURRENCY
+            }
+            cell_format::KIND_CURRENCY | cell_format::KIND_NUMBER => cell_format::KIND_NUMBER,
+            other => other,
+        };
+        let decimals = m
+            .varint(cell_format::DECIMALS)
+            .or_else(|| m.varint(cell_format::DECIMALS_V2))
+            .filter(|v| *v <= cell_format::MAX_DECIMALS)
+            .and_then(|v| u32::try_from(v).ok());
         Self {
-            kind: m.varint(cell_format::KIND).unwrap_or(0),
+            kind,
             pattern: text(cell_format::PATTERN),
-            decimals: m
-                .varint(cell_format::DECIMALS)
-                .and_then(|v| u32::try_from(v).ok()),
-            currency: text(cell_format::CURRENCY),
+            decimals,
+            currency,
             thousands: m.varint(cell_format::THOUSANDS).is_some_and(|v| v != 0),
+            duration_style: m.varint(cell_format::DURATION_STYLE).unwrap_or(0),
+            duration_largest: m.varint(cell_format::DURATION_LARGEST).unwrap_or(0),
+            duration_smallest: m.varint(cell_format::DURATION_SMALLEST).unwrap_or(0),
         }
     }
 }
@@ -262,6 +284,69 @@ fn format_date(seconds: f64, pattern: Option<&str>) -> Option<String> {
     Some(out)
 }
 
+/// Duration units, largest first: `(format unit code, seconds, display suffix)`.
+const DURATION_UNITS: [(u64, u64, &str); 5] = [
+    (
+        cell_format::UNIT_WEEK,
+        7 * SECONDS_PER_DAY as u64,
+        "\u{C8FC}",
+    ),
+    (cell_format::UNIT_DAY, SECONDS_PER_DAY as u64, "\u{C77C}"),
+    (
+        cell_format::UNIT_HOUR,
+        SECONDS_PER_HOUR as u64,
+        "\u{C2DC}\u{AC04}",
+    ),
+    (
+        cell_format::UNIT_MINUTE,
+        SECONDS_PER_MINUTE as u64,
+        "\u{BD84}",
+    ),
+    (cell_format::UNIT_SECOND, 1, "\u{CD08}"),
+];
+
+/// Compact duration in the Korean unit words of the Pages screen (`1시간 30분`, `2일 3시간`): every unit from the largest to the smallest of the format
+/// is written (zero parts included), the smallest unit is rounded half up. Only the compact style
+/// and non-negative values are shown.
+fn format_duration(seconds: f64, spec: Option<&FormatSpec>) -> Option<String> {
+    let spec = spec.filter(|s| {
+        s.kind == cell_format::KIND_DURATION
+            && s.duration_style == cell_format::DURATION_STYLE_COMPACT
+    })?;
+    if !(0.0..MAX_DATE_SECONDS).contains(&seconds) {
+        return None;
+    }
+    let first = DURATION_UNITS
+        .iter()
+        .position(|u| u.0 == spec.duration_largest)?;
+    let last = DURATION_UNITS
+        .iter()
+        .position(|u| u.0 == spec.duration_smallest)?;
+    if first > last {
+        return None;
+    }
+    let smallest = DURATION_UNITS[last].1;
+    let mut rest = (seconds / smallest as f64 + 0.5).floor() as u64;
+    let mut parts = [0u64; DURATION_UNITS.len()];
+    for i in (first..=last).rev() {
+        let per_larger = if i == first {
+            u64::MAX
+        } else {
+            DURATION_UNITS[i - 1].1 / DURATION_UNITS[i].1
+        };
+        parts[i] = rest % per_larger;
+        rest /= per_larger;
+    }
+    let mut out = String::with_capacity(DURATION_UNITS.len() * 5);
+    for i in first..=last {
+        if i > first {
+            out.push(' ');
+        }
+        write!(out, "{}{}", parts[i], DURATION_UNITS[i].2).ok()?;
+    }
+    Some(out)
+}
+
 fn format_bool(value: f64, spec: Option<&FormatSpec>) -> &'static str {
     let on = value != 0.0;
     if spec.is_some_and(|s| s.kind == cell_format::KIND_CHECKBOX) {
@@ -284,6 +369,7 @@ pub(crate) fn render_value(packed: &PackedCell, spec: Option<&FormatSpec>) -> Op
         }
         (cell::TYPE_DATE, CellScalar::Double(v)) => format_date(v, spec.and_then(|s| s.pattern)),
         (cell::TYPE_BOOL, CellScalar::Double(v)) => Some(format_bool(v, spec).to_string()),
+        (cell::TYPE_DURATION, CellScalar::Double(v)) => format_duration(v, spec),
         _ => None,
     }
 }
@@ -296,6 +382,7 @@ mod tests {
         PackedCell {
             kind: cell::TYPE_NUMBER,
             rich_text_key: None,
+            string_key: None,
             format_key: None,
             value: CellScalar::Decimal(Decimal {
                 negative,
@@ -312,6 +399,7 @@ mod tests {
             decimals,
             currency: Some(code),
             thousands,
+            ..FormatSpec::default()
         }
     }
 
@@ -378,6 +466,7 @@ mod tests {
             let packed = PackedCell {
                 kind: cell::TYPE_DATE,
                 rich_text_key: None,
+                string_key: None,
                 format_key: None,
                 value: CellScalar::Double(secs),
             };
@@ -407,6 +496,7 @@ mod tests {
         let packed = |v: f64| PackedCell {
             kind: cell::TYPE_BOOL,
             rich_text_key: None,
+            string_key: None,
             format_key: None,
             value: CellScalar::Double(v),
         };
@@ -423,5 +513,110 @@ mod tests {
             "\u{2610}"
         );
         assert_eq!(render_value(&packed(1.0), None).unwrap(), "TRUE");
+    }
+
+    fn push_varint(out: &mut Vec<u8>, mut value: u64) {
+        while value >= 0x80 {
+            out.push((value & 0x7F) as u8 | 0x80);
+            value >>= 7;
+        }
+        out.push(value as u8);
+    }
+
+    fn format_message(fields: &[(u32, u64)], code: Option<(u32, &str)>) -> Vec<u8> {
+        let mut out = Vec::new();
+        for (number, value) in fields {
+            push_varint(&mut out, u64::from(*number) << 3);
+            push_varint(&mut out, *value);
+        }
+        if let Some((number, text)) = code {
+            push_varint(&mut out, u64::from(number << 3) | 2);
+            push_varint(&mut out, text.len() as u64);
+            out.extend_from_slice(text.as_bytes());
+        }
+        out
+    }
+
+    #[test]
+    fn both_format_layouts_give_the_same_number_kinds() {
+        // Pages 14.4: 256 = number (decimals in field 2), 257 = currency (code in field 3).
+        let buf = format_message(&[(1, 256), (2, 1), (5, 1)], None);
+        let spec = FormatSpec::parse(&Message::parse(&buf).unwrap());
+        assert_eq!(
+            (spec.kind, spec.decimals, spec.thousands),
+            (cell_format::KIND_NUMBER, Some(1), true)
+        );
+        let buf = format_message(&[(1, 257), (2, 0), (5, 0)], Some((3, "KRW")));
+        let spec = FormatSpec::parse(&Message::parse(&buf).unwrap());
+        assert_eq!(
+            (spec.kind, spec.currency),
+            (cell_format::KIND_CURRENCY, Some("KRW"))
+        );
+        // Older layout: 256 = currency (code in field 4), 257 = number (decimals in field 3).
+        let buf = format_message(&[(1, 256), (3, 0)], Some((4, "USD")));
+        let spec = FormatSpec::parse(&Message::parse(&buf).unwrap());
+        assert_eq!(
+            (spec.kind, spec.currency),
+            (cell_format::KIND_CURRENCY, Some("USD"))
+        );
+        let buf = format_message(&[(1, 257), (3, 2), (5, 1)], None);
+        let spec = FormatSpec::parse(&Message::parse(&buf).unwrap());
+        assert_eq!(
+            (spec.kind, spec.decimals),
+            (cell_format::KIND_NUMBER, Some(2))
+        );
+        // "Automatic" decimals (a large marker value) are not a place count.
+        let buf = format_message(&[(1, 256), (2, 21)], None);
+        assert_eq!(
+            FormatSpec::parse(&Message::parse(&buf).unwrap()).decimals,
+            None
+        );
+    }
+
+    fn duration_spec(style: u64, largest: u64, smallest: u64) -> FormatSpec<'static> {
+        FormatSpec {
+            kind: cell_format::KIND_DURATION,
+            duration_style: style,
+            duration_largest: largest,
+            duration_smallest: smallest,
+            ..FormatSpec::default()
+        }
+    }
+
+    #[test]
+    fn compact_durations_cover_the_unit_range_and_fail_closed() {
+        let hm = duration_spec(1, cell_format::UNIT_HOUR, cell_format::UNIT_MINUTE);
+        assert_eq!(
+            format_duration(5400.0, Some(&hm)).as_deref(),
+            Some("1시간 30분")
+        );
+        assert_eq!(
+            format_duration(3600.0, Some(&hm)).as_deref(),
+            Some("1시간 0분")
+        );
+        assert_eq!(
+            format_duration(5429.0, Some(&hm)).as_deref(),
+            Some("1시간 30분")
+        );
+        assert_eq!(
+            format_duration(5430.0, Some(&hm)).as_deref(),
+            Some("1시간 31분")
+        );
+        let dh = duration_spec(1, cell_format::UNIT_DAY, cell_format::UNIT_HOUR);
+        assert_eq!(
+            format_duration(183_600.0, Some(&dh)).as_deref(),
+            Some("2일 3시간")
+        );
+        let wds = duration_spec(1, cell_format::UNIT_WEEK, cell_format::UNIT_SECOND);
+        assert_eq!(
+            format_duration(694_861.0, Some(&wds)).as_deref(),
+            Some("1주 1일 1시간 1분 1초")
+        );
+        assert_eq!(format_duration(-1.0, Some(&hm)), None);
+        assert_eq!(format_duration(f64::NAN, Some(&hm)), None);
+        assert_eq!(format_duration(60.0, None), None);
+        assert_eq!(format_duration(60.0, Some(&duration_spec(0, 4, 8))), None);
+        assert_eq!(format_duration(60.0, Some(&duration_spec(1, 8, 4))), None);
+        assert_eq!(format_duration(60.0, Some(&duration_spec(1, 3, 8))), None);
     }
 }
