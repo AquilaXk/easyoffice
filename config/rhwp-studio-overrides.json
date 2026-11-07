@@ -23,7 +23,7 @@
     {
       "id": "main",
       "strategy": "fork",
-      "reason": "Embed-only entry point: chrome profile fixed to embed, no ?url= loading, no autosave/recent/PWA/plugin/dev hooks, Canvas2D only, adds the createBlankDocument and verifyBytes RPC handlers and forwards dirty-state and edit events to the host. Forwards the shell shortcut combos named in the frame URL (Ctrl+S/O/N/K/W) over the embed port, combo string only. The host owns open/save/new. The 파일 menu items are shell commands forwarded by name over the embed port (src/embed/shell-menu.ts), the shell theme is applied from the frame URL and from the setShellContext RPC."
+      "reason": "Embed-only entry point: chrome profile fixed to embed, no ?url= loading, no autosave/recent/PWA/plugin/dev hooks, Canvas2D only, adds the createBlankDocument, verifyBytes and getPrintPages RPC handlers and forwards dirty-state and edit events to the host. Forwards the shell shortcut combos named in the frame URL (Ctrl+S/O/N/K/W) over the embed port, combo string only. The host owns open/save/new. The 파일 menu items are shell commands forwarded by name over the embed port (src/embed/shell-menu.ts), the shell theme is applied from the frame URL and from the setShellContext RPC."
     },
     {
       "id": "core/font-loader",
@@ -38,12 +38,12 @@
     {
       "id": "embed/protocol",
       "strategy": "fork",
-      "reason": "Does not advertise plugin-loader-v1 and hwpctrl-v1 (not bundled); adds blank-document-v1, verify-bytes-v1 and shell-context-v1."
+      "reason": "Does not advertise plugin-loader-v1 and hwpctrl-v1 (not bundled); adds blank-document-v1, verify-bytes-v1, shell-context-v1 and print-pages-v1."
     },
     {
       "id": "embed/rpc-router",
       "strategy": "fork",
-      "reason": "Removes the plugin.* RPC methods and adds createBlankDocument, verifyBytes and setShellContext."
+      "reason": "Removes the plugin.* RPC methods and adds createBlankDocument, verifyBytes, setShellContext and getPrintPages."
     }
   ],
   "assetOverrides": [
@@ -51,7 +51,7 @@
       "path": "index.html",
       "upstream": "index.html",
       "strategy": "fork",
-      "reason": "Markup without inline style attributes, relative init scripts and without icon assets; the 파일 menu lists the shell commands (new, open, recent, save, save as, close) instead of the editor's own file actions; the underline sample glyph reads 가 instead of 간 (the sample is not translated)."
+      "reason": "Markup without inline style attributes, relative init scripts and without icon assets; the 파일 menu lists the shell commands (new, open, recent, save, save as, print, close) instead of the editor's own file actions; the underline sample glyph reads 가 instead of 간 (the sample is not translated)."
     },
     {
       "path": "static/print.html",

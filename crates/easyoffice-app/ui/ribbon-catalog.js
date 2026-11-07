@@ -376,6 +376,7 @@
     { keys: "Ctrl+Y", action: "studio-redo" },
     { keys: "Ctrl+Shift+Z", action: "studio-redo" },
     { keys: "Ctrl+Alt+O", action: "recent-dialog", forwardFromEditor: true },
+    { keys: "Ctrl+P", action: "hwp-print", module: "HWP", desktopOnly: true, forwardFromEditor: true },
     { keys: "Ctrl+K", action: "palette", forwardFromEditor: true },
     { keys: "Ctrl+F", action: "palette" },
     { keys: "Ctrl+B", action: "home-bold", ribbon: true },

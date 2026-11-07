@@ -584,3 +584,41 @@ test("the built bundle carries the password flow", { skip: !fs.existsSync(BUILT_
   const bundle = fs.readdirSync(assets).filter((f) => f.endsWith(".js")).map((f) => fs.readFileSync(path.join(assets, f), "utf8")).join("\n");
   assert.ok(bundle.includes(PASSWORD_REQUIRED) && bundle.includes(PASSWORD_REJECTED), "the bundle contains the password flow");
 });
+
+// ---- print batches (print-pages-v1, PD-104) -----------------------------------------------------
+
+test("print batches carry the paper size in mm, clamp at the document end and reject bad ranges", async () => {
+  const { parsePrintBatchRange, renderPrintBatch, PRINT_BATCH_MAX_PAGES } = await import("../apps/hwp-studio/src/embed/print-batch.ts");
+  const sizes = [{ width: 793.7, height: 1122.5 }, { width: 944.882, height: 665.197 }, { width: 793.7, height: 1122.5 }];
+  const calls = [];
+  const source = {
+    pageCount: sizes.length,
+    withPortableMetrics: (op) => { calls.push("metrics"); return op(); },
+    renderPageSvgWithProfile: (page, profile) => `<svg data-page="${page}" data-profile="${profile}"/>`,
+    getPageInfo: (page) => sizes[page],
+  };
+  const first = renderPrintBatch(source, 0, 2);
+  assert.equal(first.pageCount, 3);
+  assert.deepEqual(first.pages.map((p) => [p.widthMm, p.heightMm]), [[210, 297], [250, 176]]);
+  assert.match(first.pages[0].svg, /data-profile="print"/);
+  const last = renderPrintBatch(source, 2, PRINT_BATCH_MAX_PAGES);
+  assert.equal(last.pages.length, 1, "the batch stops at the last page");
+  assert.deepEqual(calls, ["metrics", "metrics"], "one portable-metrics transaction per batch");
+  assert.throws(() => renderPrintBatch(source, 3, 1), /out of range/);
+  assert.deepEqual(parsePrintBatchRange({ from: 4, count: 10 }), { from: 4, count: 10 });
+  for (const bad of [{ from: -1 }, { from: 1.5 }, { count: 0 }, { count: PRINT_BATCH_MAX_PAGES + 1 }, { count: "3" }, { extra: 1 }]) {
+    assert.throws(() => parsePrintBatchRange(bad), undefined, JSON.stringify(bad));
+  }
+});
+
+test("the embed router routes getPrintPages and the editor advertises print-pages-v1", async () => {
+  // The router imports the editor's path aliases, which plain Node cannot resolve: check its source.
+  const router = fs.readFileSync(path.join(REPO, "apps/hwp-studio/src/embed/rpc-router.ts"), "utf8");
+  assert.match(router, /case 'getPrintPages': \{\s+const range = parsePrintBatchRange\(params\);\s+return handlers\.getPrintPages\(range\.from, range\.count\);/);
+  const main = fs.readFileSync(path.join(REPO, "apps/hwp-studio/src/main.ts"), "utf8");
+  assert.match(main, /async getPrintPages\(from, count\) \{[\s\S]{0,200}renderPrintBatch\(wasm, from, count\)/);
+  const { EMBED_CAPABILITIES } = await import("../apps/hwp-studio/src/embed/protocol.ts");
+  assert.ok(EMBED_CAPABILITIES.includes("print-pages-v1"));
+  const menu = fs.readFileSync(path.join(REPO, "apps/hwp-studio/index.html"), "utf8");
+  assert.ok(menu.includes('data-shell-cmd="print"'), "the 파일 menu lists printing");
+});

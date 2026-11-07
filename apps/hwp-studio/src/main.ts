@@ -91,6 +91,7 @@ import {
   renderShellRecents,
   sanitizeShellContext,
 } from './embed/shell-menu.ts';
+import { renderPrintBatch } from './embed/print-batch.ts';
 import type { EmbedRendererRuntimeRequestV1 } from '@/embed/rpc-router';
 import { enrichFontDecisionTrace } from '@/core/font-decision-trace';
 import { DocumentAgentController } from '@/document-agent/controller';
@@ -1512,6 +1513,12 @@ installEmbedRuntime({
     async getPageSvg(page) {
       await initPromise;
       return wasm.renderPageSvg(page);
+    },
+    // EasyOffice extension (print-pages-v1): the shell prints from batches of print-profile pages.
+    async getPrintPages(from, count) {
+      await initPromise;
+      if (from === 0) commandServices.getInputHandler()?.flushDeferredPaginationIfNeeded('print');
+      return renderPrintBatch(wasm, from, count);
     },
     async exportHwp() {
       await initPromise;

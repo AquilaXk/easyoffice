@@ -382,7 +382,7 @@ test("the shortcut table marks which combos the HWP editor forwards", async () =
   const { host } = await openWindow("?module=DOC&win=w-keys");
   const bindings = host.__EASYOFFICE_RIBBON_CATALOG__.WORKSPACE_SHORTCUT_BINDINGS;
   const forwarded = bindings.filter((b) => b.forwardFromEditor).map((b) => b.keys).sort((a, b) => a.localeCompare(b));
-  assert.deepEqual(forwarded, ["Ctrl+Alt+O", "Ctrl+K", "Ctrl+N", "Ctrl+O", "Ctrl+S", "Ctrl+W"]);
+  assert.deepEqual(forwarded, ["Ctrl+Alt+O", "Ctrl+K", "Ctrl+N", "Ctrl+O", "Ctrl+P", "Ctrl+S", "Ctrl+W"]);
   for (const b of bindings.filter((x) => ["Ctrl+N", "Ctrl+W"].includes(x.keys))) assert.equal(b.desktopOnly, true);
   assert.ok(forwarded.every((k) => k.startsWith("Ctrl+")), "plain typing is never forwarded");
 });

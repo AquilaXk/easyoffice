@@ -1,5 +1,6 @@
 // EasyOffice fork of rhwp-studio/src/embed/rpc-router.ts: plugin.* methods are removed and
-// createBlankDocument is added. See config/rhwp-studio-overrides.json.
+// createBlankDocument, verifyBytes, setShellContext and getPrintPages are added. See config/rhwp-studio-overrides.json.
+import { parsePrintBatchRange, type PrintBatchResult } from './print-batch.ts';
 import type { HmlSaveState } from '@/core/hml-save-capability.ts';
 import type { EmbedFontDecisionTraceV1 } from '@/core/font-decision-trace.ts';
 import {
@@ -44,6 +45,8 @@ export interface EmbedRpcHandlers {
   verifyBytes(data: Uint8Array): Promise<{ ok: true; pageCount: number; format: string }>;
   /** EasyOffice extension (shell-context-v1): the shell's theme and recent documents. */
   setShellContext(context: unknown): Promise<{ applied: true }>;
+  /** EasyOffice extension (print-pages-v1): a batch of print-profile page SVGs with paper sizes. */
+  getPrintPages(from: number, count: number): Promise<PrintBatchResult>;
   pageCount(): Promise<number>;
   getRendererDiagnostics(page: number): Promise<EmbedRendererDiagnosticsV1>;
   getFontDecisionTrace(page: number, maxCharacters: number): Promise<EmbedFontDecisionTraceV1>;
@@ -178,6 +181,10 @@ export async function routeEmbedRequest(
     case 'verifyBytes': return handlers.verifyBytes(asBytes(params.data, allowLegacyArray));
     case 'setShellContext': return handlers.setShellContext(params);
     case 'pageCount': return handlers.pageCount();
+    case 'getPrintPages': {
+      const range = parsePrintBatchRange(params);
+      return handlers.getPrintPages(range.from, range.count);
+    }
     case 'getRendererDiagnostics': return handlers.getRendererDiagnostics(asPageIndex(params.page ?? 0));
     case 'getFontDecisionTrace': return routeFontDecisionTrace(params, handlers);
     case 'getPageSvg': return handlers.getPageSvg(
