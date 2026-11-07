@@ -27,7 +27,7 @@
 - **시트 셀 서식·열 너비 저장 (`PD-089`)**: 선택 범위에 적용한 굵게·기울임·밑줄·취소선·글자 크기와 열 머리글을 끌어 바꾼 열 너비는 XLSX·ODS로 저장하면 파일에 기록되고(XLSX `styles.xml`·`<cols>`, ODS 자동 스타일), 그 파일을 다시 열면 같은 서식과 너비로 복원됩니다. 값 없이 서식만 있는 칸도 유지되며, 서식이 없는 시트의 저장 결과는 이전과 같습니다. 글꼴 이름·색·채우기·테두리·정렬·숫자 서식·행 높이는 아직 저장하지 않습니다.
 - **PDF**: 한글은 사전 정의 CJK 글꼴 참조(`HYGoThic-Medium`, `Adobe-Korea1`, `UniKS-UCS2-H`)로 기록하여 뷰어가 설치된 한글 글꼴로 표시하며, 비ASCII `/Title`은 BOM을 붙인 UTF-16BE로 기록합니다.
 - **CSV/TSV**: 출력에 UTF-8 BOM을 붙이고, 입력의 BOM은 제거하여 읽습니다.
-- **DOC/PPT 쓰기 호환성 제한**: `.doc`/`.ppt` 출력은 EasyOffice가 다시 읽을 수 있는 OLE2 스트림 하위 집합이며(`.doc`: `1Table`/`0Table` 없음, `.ppt`: `Current User`·persist directory 없음) 다른 프로그램에서 열리지 않을 수 있습니다. 변환 응답은 `"compatibility":"limited"`와 `"compatibilityWarning"`을 반환하고 변환 결과·저장 상태 메시지에 경고를 표시합니다. 호환 저장에는 `.docx`/`.pptx`를 사용합니다(규격 바이너리 작성기는 #112).
+- **DOC/PPT 규격 바이너리 쓰기 (`PD-090`)**: `.doc`은 `WordDocument` + `1Table`(조각 표 Clx, 문자·문단 FKP, 구역 속성), `.ppt`는 `Current User` + `PowerPoint Document`(슬라이드 컨테이너, persist directory, UserEditAtom)로 기록해 다른 워드·프레젠테이션 프로그램이 열 수 있습니다. 본문은 문단과 탭으로 이은 표 행이고, 슬라이드는 제목·글머리표 본문입니다. 서식·그림·노트 페이지는 기록하지 않으며 노트·테마·전환은 EasyOffice로 다시 열 때만 복원됩니다. 더 이상 호환성 제한 경고를 표시하지 않습니다.
 
 ---
 

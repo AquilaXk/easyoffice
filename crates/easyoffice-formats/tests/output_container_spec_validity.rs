@@ -536,18 +536,11 @@ fn csv_output_starts_with_utf8_bom_and_round_trips() {
 // ---------------------------------------------------------------- DOC / PPT
 
 #[test]
-fn legacy_doc_and_ppt_outputs_are_flagged_as_limited_compatibility() {
-    for fmt in [DocumentFormat::Doc, DocumentFormat::Ppt] {
-        match fmt.output_compatibility() {
-            OutputCompatibility::Limited(reason) => assert!(!reason.is_empty()),
-            OutputCompatibility::Standard => panic!("{fmt:?} 출력이 표준 규격으로 표시됩니다."),
-        }
-        assert!(fmt.output_specification().contains("호환성 제한"));
-    }
+fn legacy_doc_and_ppt_outputs_report_standard_compatibility() {
     for fmt in DocumentFormat::ALL {
-        if !matches!(fmt, DocumentFormat::Doc | DocumentFormat::Ppt) {
-            assert_eq!(fmt.output_compatibility(), OutputCompatibility::Standard);
-            assert_eq!(fmt.output_specification(), fmt.standard_specification());
-        }
+        assert_eq!(fmt.output_compatibility(), OutputCompatibility::Standard);
+        assert_eq!(fmt.output_specification(), fmt.standard_specification());
     }
+    assert!(OutputCompatibility::Standard.warning().is_none());
+    assert_eq!(OutputCompatibility::Limited("사유").as_str(), "limited");
 }

@@ -99,7 +99,7 @@ impl SheetEngine {
                     return Err(FormulaError::Value);
                 }
                 let n = self.eval_arg_num(&args[0], ctx, depth)?;
-                if !n.is_finite() || n < 0.0 || n > 1e15 {
+                if !n.is_finite() || !(0.0..=1e15).contains(&n) {
                     return Err(FormulaError::Num);
                 }
                 let secs = (n.fract() * 86_400.0).round() as i64 % 86_400;
