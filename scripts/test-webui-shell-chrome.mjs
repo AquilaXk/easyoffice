@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { loadUiModule } from "./test-support/load-ui-module.mjs";
 import { switchModule } from "./test-support/modules.mjs";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
+import { cssDeclarations } from "./test-support/css-declarations.mjs";
 
 // Shell chrome (#126, PD-088): one SVG icon set, accessible names on every control, compact top bar,
 // a status bar that never clips, a command palette overlay and readable contrast in both themes.
@@ -198,22 +199,6 @@ function contrast(a, b) {
   return (hi + 0.05) / (lo + 0.05);
 }
 
-// `--name: value` declarations of a CSS block, split on the punctuation instead of a regex.
-function cssDeclarations(block) {
-  const out = [];
-  let text = block;
-  for (let start = text.indexOf("/*"); start >= 0; start = text.indexOf("/*")) {
-    const end = text.indexOf("*/", start + 2);
-    text = text.slice(0, start) + (end < 0 ? "" : text.slice(end + 2));
-  }
-  for (const part of text.split(/[;{}]/)) {
-    const colon = part.indexOf(":");
-    if (colon < 0) continue;
-    const name = part.slice(0, colon).trim();
-    if (name.startsWith("--")) out.push([name, part.slice(colon + 1).trim()]);
-  }
-  return out;
-}
 
 // Tokens of one theme from tokens.css (PD-098); the dark block overrides the light one.
 function tokens(theme) {
