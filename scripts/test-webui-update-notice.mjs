@@ -65,7 +65,7 @@ test("opening the release page asks the shell without passing any address", asyn
 });
 
 test("a failing open shows the shell's message on the card and keeps it", async () => {
-  const { card, userClick } = await openWithNotice({ open: () => { throw { status: "error", message: "브라우저를 열지 못했습니다." }; } });
+  const { card, userClick } = await openWithNotice({ open: () => { throw Object.assign(new Error("브라우저를 열지 못했습니다."), { status: "error" }); } });
   userClick(card.querySelector(".update-notice__button--primary"));
   await flushAsyncTurns(10);
   const error = card.querySelector(".update-notice__error");

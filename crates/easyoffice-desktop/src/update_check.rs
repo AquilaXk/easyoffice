@@ -231,7 +231,7 @@ impl UpdateService {
     fn lock(&self) -> std::sync::MutexGuard<'_, UpdateRecord> {
         self.record
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     fn persist(&self, record: &UpdateRecord) {
