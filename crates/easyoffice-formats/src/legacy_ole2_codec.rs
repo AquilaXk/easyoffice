@@ -370,6 +370,92 @@ impl LegacyOle2Codec {
     const DOC_PARA_METRICS_EXTENDED_LEN: usize = 17;
     const PPT_INST_CANVAS_ELEMENT: u16 = 0x0040;
 
+    /// Reads `p_count` paragraphs, each with a compact or extended metrics block before its text.
+    fn read_extended_doc_paragraphs(
+        data: &[u8],
+        cursor: &mut usize,
+        p_count: usize,
+    ) -> Result<Vec<String>, EasyOfficeError> {
+        let limit = data.len();
+        let mut paragraphs = Vec::with_capacity(p_count.min(4096));
+        for _ in 0..p_count {
+            let _style = read_len_prefixed_utf16le(data, cursor, limit)?;
+            let _align = read_len_prefixed_utf16le(data, cursor, limit)?;
+            let _font = read_len_prefixed_utf16le(data, cursor, limit)?;
+            if *cursor + Self::DOC_PARA_METRICS_COMPACT_LEN > limit {
+                return Err(EasyOfficeError::CorruptedContainer(
+                    "DOC 확장 문단 속성 절단".to_string(),
+                ));
+            }
+            let saved = *cursor;
+            *cursor = saved + Self::DOC_PARA_METRICS_COMPACT_LEN;
+            if let Ok(txt) = read_len_prefixed_utf16le(data, cursor, limit) {
+                paragraphs.push(txt);
+            } else {
+                *cursor = saved + Self::DOC_PARA_METRICS_EXTENDED_LEN;
+                paragraphs.push(read_len_prefixed_utf16le(data, cursor, limit)?);
+            }
+        }
+        Ok(paragraphs)
+    }
+
+    /// Table encoded with 16-bit row / column counts; `None` when it does not parse cleanly.
+    fn read_compact_doc_table(data: &[u8], cursor: &mut usize) -> Option<Vec<Vec<String>>> {
+        let limit = data.len();
+        if *cursor + 2 > limit {
+            return None;
+        }
+        let r_count = read_u16_le(data, *cursor).ok()? as usize;
+        *cursor += 2;
+        let mut rows = Vec::with_capacity(r_count.min(256));
+        for _ in 0..r_count {
+            if *cursor + 2 > limit {
+                return None;
+            }
+            let c_count = read_u16_le(data, *cursor).ok()? as usize;
+            *cursor += 2;
+            let mut row = Vec::with_capacity(c_count.min(256));
+            for _ in 0..c_count {
+                row.push(read_len_prefixed_utf16le(data, cursor, limit).ok()?);
+            }
+            rows.push(row);
+        }
+        Some(rows)
+    }
+
+    /// Table encoded with 32-bit row / column counts (budget-checked); `None` when truncated.
+    fn read_wide_doc_table(
+        data: &[u8],
+        cursor: &mut usize,
+    ) -> Result<Option<Vec<Vec<String>>>, EasyOfficeError> {
+        let limit = data.len();
+        if *cursor + 8 > limit {
+            return Ok(None);
+        }
+        let r_count = read_u32_le(data, *cursor)? as usize;
+        let c_count = read_u32_le(data, *cursor + 4)? as usize;
+        *cursor += 8;
+        if r_count == 0
+            || c_count == 0
+            || r_count > 4096
+            || c_count > 256
+            || r_count.saturating_mul(c_count).saturating_mul(4) > limit.saturating_sub(*cursor)
+        {
+            return Err(EasyOfficeError::ResourceBudgetExceeded(
+                "DOC 확장 표 행·열 개수가 보안 상한을 초과했습니다.".to_string(),
+            ));
+        }
+        let mut rows = Vec::with_capacity(r_count.min(256));
+        for _ in 0..r_count {
+            let mut row = Vec::with_capacity(c_count.min(256));
+            for _ in 0..c_count {
+                row.push(read_len_prefixed_utf16le(data, cursor, limit)?);
+            }
+            rows.push(row);
+        }
+        Ok(Some(rows))
+    }
+
     fn parse_extended_doc_trailer(
         data: &[u8],
         start: usize,
@@ -394,26 +480,7 @@ impl LegacyOle2Codec {
                 "DOC 확장 문단 개수가 보안 상한을 초과했습니다.".to_string(),
             ));
         }
-        let mut paragraphs = Vec::with_capacity(p_count.min(4096));
-        for _ in 0..p_count {
-            let _style = read_len_prefixed_utf16le(data, &mut cursor, limit)?;
-            let _align = read_len_prefixed_utf16le(data, &mut cursor, limit)?;
-            let _font = read_len_prefixed_utf16le(data, &mut cursor, limit)?;
-            if cursor + Self::DOC_PARA_METRICS_COMPACT_LEN > limit {
-                return Err(EasyOfficeError::CorruptedContainer(
-                    "DOC 확장 문단 속성 절단".to_string(),
-                ));
-            }
-            let saved = cursor;
-            cursor = saved + Self::DOC_PARA_METRICS_COMPACT_LEN;
-            if let Ok(txt) = read_len_prefixed_utf16le(data, &mut cursor, limit) {
-                paragraphs.push(txt);
-            } else {
-                cursor = saved + Self::DOC_PARA_METRICS_EXTENDED_LEN;
-                let txt = read_len_prefixed_utf16le(data, &mut cursor, limit)?;
-                paragraphs.push(txt);
-            }
-        }
+        let paragraphs = Self::read_extended_doc_paragraphs(data, &mut cursor, p_count)?;
         let mut tables = Vec::new();
         if cursor + 4 <= limit {
             let t_count = read_u32_le(data, cursor)? as usize;
@@ -426,64 +493,10 @@ impl LegacyOle2Codec {
                 let _has_header = data[cursor] != 0;
                 cursor += 1;
                 let saved_tbl = cursor;
-                let mut parsed_tbl = None;
-                if cursor + 2 <= limit {
-                    let r_count = read_u16_le(data, cursor)? as usize;
-                    cursor += 2;
-                    let mut rows = Vec::with_capacity(r_count.min(256));
-                    let mut ok = true;
-                    for _ in 0..r_count {
-                        if cursor + 2 > limit {
-                            ok = false;
-                            break;
-                        }
-                        let c_count = read_u16_le(data, cursor)? as usize;
-                        cursor += 2;
-                        let mut row = Vec::with_capacity(c_count.min(256));
-                        for _ in 0..c_count {
-                            if let Ok(cell) = read_len_prefixed_utf16le(data, &mut cursor, limit) {
-                                row.push(cell);
-                            } else {
-                                ok = false;
-                                break;
-                            }
-                        }
-                        if !ok {
-                            break;
-                        }
-                        rows.push(row);
-                    }
-                    if ok {
-                        parsed_tbl = Some(rows);
-                    }
-                }
+                let mut parsed_tbl = Self::read_compact_doc_table(data, &mut cursor);
                 if parsed_tbl.is_none() {
                     cursor = saved_tbl;
-                    if cursor + 8 <= limit {
-                        let r_count = read_u32_le(data, cursor)? as usize;
-                        let c_count = read_u32_le(data, cursor + 4)? as usize;
-                        cursor += 8;
-                        if r_count == 0
-                            || c_count == 0
-                            || r_count > 4096
-                            || c_count > 256
-                            || r_count.saturating_mul(c_count).saturating_mul(4)
-                                > limit.saturating_sub(cursor)
-                        {
-                            return Err(EasyOfficeError::ResourceBudgetExceeded(
-                                "DOC 확장 표 행·열 개수가 보안 상한을 초과했습니다.".to_string(),
-                            ));
-                        }
-                        let mut rows = Vec::with_capacity(r_count.min(256));
-                        for _ in 0..r_count {
-                            let mut row = Vec::with_capacity(c_count.min(256));
-                            for _ in 0..c_count {
-                                row.push(read_len_prefixed_utf16le(data, &mut cursor, limit)?);
-                            }
-                            rows.push(row);
-                        }
-                        parsed_tbl = Some(rows);
-                    }
+                    parsed_tbl = Self::read_wide_doc_table(data, &mut cursor)?;
                 }
                 if let Some(rows) = parsed_tbl {
                     tables.push(rows);
@@ -529,6 +542,46 @@ impl LegacyOle2Codec {
         }
     }
 
+    /// Appends text to the bullets, splitting on `\r` paragraph breaks.
+    fn push_ppt_bullets(bullets: &mut Vec<String>, s: String) {
+        if s.contains('\r') {
+            bullets.extend(s.split('\r').map(str::to_string));
+        } else {
+            bullets.push(s);
+        }
+    }
+
+    /// Routes a text atom to the slide's title, notes or bullets using the preceding text-type
+    /// header (when present) or the atom's record version.
+    fn assign_ppt_slide_text(
+        slide: &mut LegacyPptSlide,
+        text_type: Option<u32>,
+        s_ver: u16,
+        txt: String,
+    ) {
+        if let Some(tt) = text_type {
+            if tt == 0 && slide.title.is_empty() {
+                slide.title = txt;
+            } else if tt == 2 {
+                slide.notes = txt;
+            } else {
+                Self::push_ppt_bullets(&mut slide.bullets, txt);
+            }
+            return;
+        }
+        match s_ver {
+            0x0010 => {
+                if !txt.is_empty() {
+                    Self::push_ppt_bullets(&mut slide.bullets, txt);
+                }
+            }
+            0x0020 => slide.notes = txt,
+            0x0030 => Self::push_ppt_bullets(&mut slide.bullets, txt),
+            _ if slide.title.is_empty() => slide.title = txt,
+            _ => Self::push_ppt_bullets(&mut slide.bullets, txt),
+        }
+    }
+
     fn parse_ppt_slide_records(
         data: &[u8],
         start: usize,
@@ -569,48 +622,7 @@ impl LegacyOle2Codec {
                 && s_ver != Self::PPT_INST_CANVAS_ELEMENT
             {
                 let txt = Self::decode_ppt_text_atom(s_type, &data[a_start..a_end])?;
-                let push_bullets = |bullets: &mut Vec<String>, s: String| {
-                    if s.contains('\r') {
-                        for part in s.split('\r') {
-                            bullets.push(part.to_string());
-                        }
-                    } else {
-                        bullets.push(s);
-                    }
-                };
-                if let Some(tt) = current_text_type.take() {
-                    if tt == 0 && slide.title.is_empty() {
-                        slide.title = txt;
-                    } else if tt == 2 {
-                        slide.notes = txt;
-                    } else {
-                        push_bullets(&mut slide.bullets, txt);
-                    }
-                } else {
-                    match s_ver {
-                        0x0000 => {
-                            if slide.title.is_empty() {
-                                slide.title = txt;
-                            } else {
-                                push_bullets(&mut slide.bullets, txt);
-                            }
-                        }
-                        0x0010 => {
-                            if !txt.is_empty() {
-                                push_bullets(&mut slide.bullets, txt);
-                            }
-                        }
-                        0x0020 => slide.notes = txt,
-                        0x0030 => push_bullets(&mut slide.bullets, txt),
-                        _ => {
-                            if slide.title.is_empty() {
-                                slide.title = txt;
-                            } else {
-                                push_bullets(&mut slide.bullets, txt);
-                            }
-                        }
-                    }
-                }
+                Self::assign_ppt_slide_text(slide, current_text_type.take(), s_ver, txt);
             } else if (s_ver & 0x000F) == 0x000F {
                 Self::parse_ppt_slide_records(data, a_start, a_end, slide, depth + 1)?;
             }

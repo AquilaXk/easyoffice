@@ -597,6 +597,25 @@ pub(super) fn is_type_xref_entry_at(bytes: &[u8], i: usize, limit: usize) -> boo
     is_type_xref_entry_end_at(bytes, i, limit).is_some()
 }
 
+/// Index after the balanced `( ... )` literal opened at `open_pos`; `None` when unterminated.
+fn skip_balanced_literal(bytes: &[u8], open_pos: usize, end: usize) -> Option<usize> {
+    let mut paren_depth = 1usize;
+    let mut j = open_pos + 1;
+    while j < end && paren_depth > 0 {
+        match bytes[j] {
+            b'\\' => {
+                j = (j + 2).min(end);
+                continue;
+            }
+            b'(' => paren_depth += 1,
+            b')' => paren_depth -= 1,
+            _ => {}
+        }
+        j += 1;
+    }
+    (paren_depth == 0).then_some(j)
+}
+
 fn skip_balanced_pdf_dict(bytes: &[u8], open_pos: usize, limit: usize) -> Option<usize> {
     let end = limit.min(bytes.len());
     if open_pos + 1 >= end
@@ -616,24 +635,7 @@ fn skip_balanced_pdf_dict(bytes: &[u8], open_pos: usize, limit: usize) -> Option
             continue;
         }
         if bytes[p] == b'(' {
-            let mut paren_depth = 1usize;
-            let mut j = p + 1;
-            while j < end && paren_depth > 0 {
-                if bytes[j] == b'\\' {
-                    j = (j + 2).min(end);
-                    continue;
-                }
-                if bytes[j] == b'(' {
-                    paren_depth += 1;
-                } else if bytes[j] == b')' {
-                    paren_depth -= 1;
-                }
-                j += 1;
-            }
-            if paren_depth != 0 {
-                return None;
-            }
-            p = j;
+            p = skip_balanced_literal(bytes, p, end)?;
             continue;
         }
         if p + 1 < end && bytes[p] == b'<' && bytes[p + 1] == b'<' {

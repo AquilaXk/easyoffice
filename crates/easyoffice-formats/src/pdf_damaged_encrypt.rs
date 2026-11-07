@@ -266,6 +266,22 @@ fn find_id_array_end(
     None
 }
 
+/// `>>` at `q` that closes the outer dictionary or is followed by another dictionary opener.
+#[inline]
+fn is_closing_pair_at(
+    bytes: &[u8],
+    q: usize,
+    limit: usize,
+    allow_stream: bool,
+    endobj_cache: &mut (usize, usize),
+) -> bool {
+    q + 1 < limit
+        && bytes[q] == b'>'
+        && bytes[q + 1] == b'>'
+        && (is_outer_dict_close(bytes, q, limit, allow_stream, endobj_cache)
+            || is_pdf_dict_open_follow(&bytes[..limit], q + 2))
+}
+
 fn recover_broken_dict_value(
     bytes: &[u8],
     tables: &DamagedParenTables<'_>,
@@ -275,84 +291,110 @@ fn recover_broken_dict_value(
     endobj_cache: &mut (usize, usize),
     spliced: &mut RawSplicedHits,
 ) -> (usize, Option<bool>) {
-    let mut raw_paren_depth = 0usize;
     let is_arr = bytes[p] == b'[';
     let is_dict = p + 1 < limit && bytes[p] == b'<' && bytes[p + 1] == b'<';
     if is_arr || is_dict {
-        let mut depth = 1usize;
-        let mut q = p + if is_dict { 2 } else { 1 };
-        while q < limit {
-            if let Some(next_q) =
-                step_clean_comment_or_literal(bytes, tables, q, limit, &mut raw_paren_depth)
-            {
-                q = next_q;
-                continue;
-            }
-            if let Some(hs) = is_damaged_top_boundary(
-                bytes,
-                q,
-                limit,
-                allow_stream,
-                raw_paren_depth,
-                endobj_cache,
-            ) {
-                return (q, Some(hs));
-            }
-            record_spliced_dict_entries(bytes, q, limit, spliced);
-            if raw_paren_depth > 0 {
-                if is_arr && depth == 1 && bytes[q] == b']' {
-                    let after = skip_pdf_ws_stopping_at_eof(bytes, q + 1, limit);
-                    if is_outer_dict_close(bytes, after, limit, allow_stream, endobj_cache)
-                        || is_pdf_dict_open_follow(&bytes[..limit], q + 1)
-                    {
-                        return (q + 1, None);
-                    }
-                }
-                if depth == 1
-                    && q + 1 < limit
-                    && bytes[q] == b'>'
-                    && bytes[q + 1] == b'>'
-                    && (is_outer_dict_close(bytes, q, limit, allow_stream, endobj_cache)
-                        || is_pdf_dict_open_follow(&bytes[..limit], q + 2))
+        recover_nested_value(
+            bytes,
+            tables,
+            (p, limit),
+            (is_arr, is_dict),
+            allow_stream,
+            endobj_cache,
+            spliced,
+        )
+    } else {
+        recover_bare_value(
+            bytes,
+            tables,
+            (p, limit),
+            allow_stream,
+            endobj_cache,
+            spliced,
+        )
+    }
+}
+
+/// Recovery scan for a value that starts with `[` (array) or `<<` (dictionary).
+fn recover_nested_value(
+    bytes: &[u8],
+    tables: &DamagedParenTables<'_>,
+    (p, limit): (usize, usize),
+    (is_arr, is_dict): (bool, bool),
+    allow_stream: bool,
+    endobj_cache: &mut (usize, usize),
+    spliced: &mut RawSplicedHits,
+) -> (usize, Option<bool>) {
+    let mut raw_paren_depth = 0usize;
+    let mut depth = 1usize;
+    let mut q = p + if is_dict { 2 } else { 1 };
+    while q < limit {
+        if let Some(next_q) =
+            step_clean_comment_or_literal(bytes, tables, q, limit, &mut raw_paren_depth)
+        {
+            q = next_q;
+            continue;
+        }
+        if let Some(hs) =
+            is_damaged_top_boundary(bytes, q, limit, allow_stream, raw_paren_depth, endobj_cache)
+        {
+            return (q, Some(hs));
+        }
+        record_spliced_dict_entries(bytes, q, limit, spliced);
+        if raw_paren_depth > 0 {
+            if is_arr && depth == 1 && bytes[q] == b']' {
+                let after = skip_pdf_ws_stopping_at_eof(bytes, q + 1, limit);
+                if is_outer_dict_close(bytes, after, limit, allow_stream, endobj_cache)
+                    || is_pdf_dict_open_follow(&bytes[..limit], q + 1)
                 {
-                    return (if is_dict { q + 2 } else { q }, None);
+                    return (q + 1, None);
                 }
-                q += 1;
-                continue;
             }
-            if is_arr {
-                if bytes[q] == b'[' {
-                    depth += 1;
-                } else if bytes[q] == b']' {
-                    depth -= 1;
-                    if depth == 0 {
-                        return (q + 1, None);
-                    }
-                } else if q + 1 < limit
-                    && bytes[q] == b'>'
-                    && bytes[q + 1] == b'>'
-                    && depth == 1
-                    && (is_outer_dict_close(bytes, q, limit, allow_stream, endobj_cache)
-                        || is_pdf_dict_open_follow(&bytes[..limit], q + 2))
-                {
-                    return (q, None);
-                }
-            } else if q + 1 < limit && bytes[q] == b'<' && bytes[q + 1] == b'<' {
-                depth += 1;
-                q += 2;
-                continue;
-            } else if q + 1 < limit && bytes[q] == b'>' && bytes[q + 1] == b'>' {
-                depth -= 1;
-                if depth == 0 {
-                    return (q + 2, None);
-                }
-                q += 2;
-                continue;
+            if depth == 1 && is_closing_pair_at(bytes, q, limit, allow_stream, endobj_cache) {
+                return (if is_dict { q + 2 } else { q }, None);
             }
             q += 1;
+            continue;
         }
-        return (limit, None);
+        if is_arr {
+            if bytes[q] == b'[' {
+                depth += 1;
+            } else if bytes[q] == b']' {
+                depth -= 1;
+                if depth == 0 {
+                    return (q + 1, None);
+                }
+            } else if depth == 1 && is_closing_pair_at(bytes, q, limit, allow_stream, endobj_cache)
+            {
+                return (q, None);
+            }
+        } else if q + 1 < limit && bytes[q] == b'<' && bytes[q + 1] == b'<' {
+            depth += 1;
+            q += 2;
+            continue;
+        } else if q + 1 < limit && bytes[q] == b'>' && bytes[q + 1] == b'>' {
+            depth -= 1;
+            if depth == 0 {
+                return (q + 2, None);
+            }
+            q += 2;
+            continue;
+        }
+        q += 1;
     }
+    (limit, None)
+}
+
+/// Recovery scan for a scalar / name value: runs to the next key, `>>` or boundary.
+fn recover_bare_value(
+    bytes: &[u8],
+    tables: &DamagedParenTables<'_>,
+    (p, limit): (usize, usize),
+    allow_stream: bool,
+    endobj_cache: &mut (usize, usize),
+    spliced: &mut RawSplicedHits,
+) -> (usize, Option<bool>) {
+    let mut raw_paren_depth = 0usize;
     let mut q = p;
     while q < limit {
         if let Some(next_q) =
@@ -368,25 +410,17 @@ fn recover_broken_dict_value(
         }
         record_spliced_dict_entries(bytes, q, limit, spliced);
         if raw_paren_depth > 0 {
-            if q + 1 < limit
-                && bytes[q] == b'>'
-                && bytes[q + 1] == b'>'
-                && (is_outer_dict_close(bytes, q, limit, allow_stream, endobj_cache)
-                    || is_pdf_dict_open_follow(&bytes[..limit], q + 2))
-            {
+            if is_closing_pair_at(bytes, q, limit, allow_stream, endobj_cache) {
                 return (q, None);
             }
-            if bytes[q] == b'/'
+            let spliced_entry = bytes[q] == b'/'
                 && (is_encrypt_entry_at(bytes, q, limit)
                     .is_some_and(|ae| is_structural_spliced_follow(bytes, ae, limit))
-                    || is_type_xref_entry_at(bytes, q, limit))
-            {
+                    || is_type_xref_entry_at(bytes, q, limit));
+            if spliced_entry {
                 return (q, None);
             }
-            q += 1;
-            continue;
-        }
-        if q > p
+        } else if q > p
             && ((q + 1 < limit && bytes[q] == b'>' && bytes[q + 1] == b'>') || bytes[q] == b'/')
         {
             return (q, None);

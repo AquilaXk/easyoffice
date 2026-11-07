@@ -491,6 +491,31 @@ pub(crate) struct ParenJumpTable {
     pairs: Vec<(u32, u32)>,
 }
 
+/// Records the `(` at `i`, dropping the oldest open paren once the depth cap is reached.
+#[inline]
+fn push_open_paren(stack: &mut std::collections::VecDeque<u32>, i: usize) {
+    if let Ok(pos32) = u32::try_from(i) {
+        if stack.len() == MAX_PAREN_JUMP_DEPTH {
+            stack.pop_front();
+        }
+        stack.push_back(pos32);
+    }
+}
+
+/// Pairs the `)` at `i` with the innermost open paren, if any.
+#[inline]
+fn pop_close_paren(
+    stack: &mut std::collections::VecDeque<u32>,
+    pairs: &mut Vec<(u32, u32)>,
+    i: usize,
+) {
+    if let Some(open_pos) = stack.pop_back() {
+        if let Ok(end32) = u32::try_from(i + 1) {
+            pairs.push((open_pos, end32));
+        }
+    }
+}
+
 impl ParenJumpTable {
     pub(crate) fn build(bytes: &[u8]) -> Self {
         Self::build_inner(bytes, false)
@@ -528,18 +553,9 @@ impl ParenJumpTable {
                 continue;
             }
             if bytes[i] == b'(' {
-                if let Ok(pos32) = u32::try_from(i) {
-                    if stack.len() == MAX_PAREN_JUMP_DEPTH {
-                        stack.pop_front();
-                    }
-                    stack.push_back(pos32);
-                }
+                push_open_paren(&mut stack, i);
             } else if bytes[i] == b')' {
-                if let Some(open_pos) = stack.pop_back() {
-                    if let Ok(end32) = u32::try_from(i + 1) {
-                        pairs.push((open_pos, end32));
-                    }
-                }
+                pop_close_paren(&mut stack, &mut pairs, i);
             }
             i += 1;
         }

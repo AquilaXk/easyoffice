@@ -541,6 +541,71 @@ impl Hwp5Codec {
         Ok(row_lengths)
     }
 
+    /// Counts one record against the per-document record budget.
+    #[inline]
+    fn charge_record(total_records: &mut usize) -> Result<(), EasyOfficeError> {
+        *total_records += 1;
+        if *total_records > Self::MAX_HWP5_RECORDS {
+            return Err(EasyOfficeError::ResourceBudgetExceeded(
+                "HWP 5.0 레코드 개수 초과".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Whether a record outside the expected cell count ends the table (last cell complete and
+    /// the record sits at or above the table / list-header level).
+    fn table_cells_complete(
+        last_cell: Option<&Vec<String>>,
+        expected_paras_in_cell: Option<usize>,
+        (tag_id, rec_level): (u16, u16),
+        (table_level, list_hdr_level): (u16, Option<u16>),
+    ) -> bool {
+        let last_done = match (last_cell, expected_paras_in_cell) {
+            (Some(p), Some(exp)) => p.len() >= exp,
+            (Some(p), None) => !p.is_empty(),
+            _ => true,
+        };
+        if !last_done {
+            return false;
+        }
+        rec_level <= table_level
+            || list_hdr_level
+                .is_some_and(|lh| rec_level <= lh && Self::is_para_or_table_tag(tag_id))
+    }
+
+    #[inline]
+    fn is_para_or_table_tag(tag_id: u16) -> bool {
+        matches!(
+            tag_id,
+            Self::HWPTAG_PARA_HEADER
+                | Self::STD_HWPTAG_PARA_HEADER
+                | Self::HWPTAG_PARA_TEXT
+                | Self::STD_HWPTAG_PARA_TEXT
+                | Self::HWPTAG_TABLE_RECORD
+                | Self::STD_HWPTAG_TABLE
+                | 55
+                | 71
+        )
+    }
+
+    /// Joins each cell's paragraphs and splits the flat cell list into rows of `row_lengths`.
+    fn group_cells_into_rows(
+        flat_cells: Vec<Vec<String>>,
+        row_lengths: &[usize],
+    ) -> Vec<Vec<String>> {
+        let mut rows = Vec::with_capacity(row_lengths.len());
+        let mut iter = flat_cells.into_iter().map(|p| p.join("\n"));
+        for &r_len in row_lengths {
+            let mut row = Vec::with_capacity(r_len);
+            for _ in 0..r_len {
+                row.push(iter.next().unwrap_or_default());
+            }
+            rows.push(row);
+        }
+        rows
+    }
+
     fn consume_std_table_cells(
         section_bytes: &[u8],
         offset: &mut usize,
@@ -580,12 +645,7 @@ impl Hwp5Codec {
                     *offset = saved;
                     break;
                 }
-                *total_records += 1;
-                if *total_records > Self::MAX_HWP5_RECORDS {
-                    return Err(EasyOfficeError::ResourceBudgetExceeded(
-                        "HWP 5.0 레코드 개수 초과".to_string(),
-                    ));
-                }
+                Self::charge_record(total_records)?;
                 if list_hdr_level.is_none() {
                     list_hdr_level = Some(rec_level);
                 }
@@ -604,32 +664,16 @@ impl Hwp5Codec {
                 continue;
             }
 
-            if flat_cells.len() >= expected_cells {
-                let last_done = match (flat_cells.last(), expected_paras_in_cell) {
-                    (Some(p), Some(exp)) => p.len() >= exp,
-                    (Some(p), None) => !p.is_empty(),
-                    _ => true,
-                };
-                if last_done
-                    && (rec_level <= table_level
-                        || list_hdr_level.is_some_and(|lh| {
-                            rec_level <= lh
-                                && matches!(
-                                    tag_id,
-                                    Self::HWPTAG_PARA_HEADER
-                                        | Self::STD_HWPTAG_PARA_HEADER
-                                        | Self::HWPTAG_PARA_TEXT
-                                        | Self::STD_HWPTAG_PARA_TEXT
-                                        | Self::HWPTAG_TABLE_RECORD
-                                        | Self::STD_HWPTAG_TABLE
-                                        | 55
-                                        | 71
-                                )
-                        }))
-                {
-                    *offset = saved;
-                    break;
-                }
+            if flat_cells.len() >= expected_cells
+                && Self::table_cells_complete(
+                    flat_cells.last(),
+                    expected_paras_in_cell,
+                    (tag_id, rec_level),
+                    (table_level, list_hdr_level),
+                )
+            {
+                *offset = saved;
+                break;
             }
 
             if rec_level < table_level {
@@ -637,12 +681,7 @@ impl Hwp5Codec {
                 break;
             }
 
-            *total_records += 1;
-            if *total_records > Self::MAX_HWP5_RECORDS {
-                return Err(EasyOfficeError::ResourceBudgetExceeded(
-                    "HWP 5.0 레코드 개수 초과".to_string(),
-                ));
-            }
+            Self::charge_record(total_records)?;
             if tag_id == Self::HWPTAG_PARA_TEXT || tag_id == Self::STD_HWPTAG_PARA_TEXT {
                 let txt = Self::decode_hwp5_para_text(&section_bytes[start..end])?;
                 if let Some(cell_paras) = flat_cells.last_mut() {
@@ -655,15 +694,7 @@ impl Hwp5Codec {
         if expected_cells == 0 {
             return Ok(Vec::new());
         }
-        let mut rows = Vec::with_capacity(row_lengths.len());
-        let mut iter = flat_cells.into_iter().map(|p| p.join("\n"));
-        for &r_len in row_lengths {
-            let mut row = Vec::with_capacity(r_len);
-            for _ in 0..r_len {
-                row.push(iter.next().unwrap_or_default());
-            }
-            rows.push(row);
-        }
+        let rows = Self::group_cells_into_rows(flat_cells, row_lengths);
         *total_table_cells += expected_cells;
         Ok(rows)
     }

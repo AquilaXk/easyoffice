@@ -327,6 +327,37 @@ pub(super) fn parse_direct_int_endobj(
     Ok((u, end_p + 6))
 }
 
+/// For an object whose dictionary is followed by `stream`, the offset after its `endobj` when the
+/// declared (direct or previously indexed indirect) length verifies.
+fn jump_over_indirect_stream(
+    bytes: &[u8],
+    strict_table: &ParenJumpTable,
+    after_hdr: usize,
+    int_objs: &IntObjIndex,
+    eof_markers: &[usize],
+) -> Option<usize> {
+    let Ok(Some((PdfObjValue::Dict(entries), dict_end))) =
+        parse_pdf_value_with_table(bytes, Some(strict_table), after_hdr, bytes.len(), 0)
+    else {
+        return None;
+    };
+    let kw_p = skip_pdf_ws_and_comments(bytes, dict_end, bytes.len());
+    if !is_standalone_pdf_kw(bytes, kw_p, b"stream") {
+        return None;
+    }
+    let stream_start = advance_past_stream_eol(bytes, kw_p + 6);
+    let declared_len = match dict_get(&entries, "/Length") {
+        Some(PdfObjValue::Int(n)) => usize::try_from(*n).ok(),
+        Some(PdfObjValue::Ref(lo, lg)) => {
+            lookup_indexed_int_obj(int_objs, eof_markers, bytes, stream_start, *lo, *lg)
+        }
+        _ => None,
+    };
+    declared_len
+        .and_then(|u| verify_direct_stream_bounds(bytes, stream_start, u))
+        .map(|(_, _, after_endobj)| after_endobj)
+}
+
 pub(super) fn build_eof_and_int_index(
     bytes: &[u8],
     strict_table: &ParenJumpTable,
@@ -370,40 +401,13 @@ pub(super) fn build_eof_and_int_index(
                         q = next_q;
                     }
                     Err(next_q) => {
-                        let mut jumped_stream = None;
-                        if let Ok(Some((PdfObjValue::Dict(entries), dict_end))) =
-                            parse_pdf_value_with_table(
-                                bytes,
-                                Some(strict_table),
-                                after_hdr,
-                                bytes.len(),
-                                0,
-                            )
-                        {
-                            let kw_p = skip_pdf_ws_and_comments(bytes, dict_end, bytes.len());
-                            if is_standalone_pdf_kw(bytes, kw_p, b"stream") {
-                                let stream_start = advance_past_stream_eol(bytes, kw_p + 6);
-                                let direct_or_prev_len = match dict_get(&entries, "/Length") {
-                                    Some(PdfObjValue::Int(n)) => usize::try_from(*n).ok(),
-                                    Some(PdfObjValue::Ref(lo, lg)) => lookup_indexed_int_obj(
-                                        &int_objs,
-                                        &eof_markers,
-                                        bytes,
-                                        stream_start,
-                                        *lo,
-                                        *lg,
-                                    ),
-                                    _ => None,
-                                };
-                                if let Some((_, _, after_endobj)) =
-                                    direct_or_prev_len.and_then(|u| {
-                                        verify_direct_stream_bounds(bytes, stream_start, u)
-                                    })
-                                {
-                                    jumped_stream = Some(after_endobj);
-                                }
-                            }
-                        }
+                        let jumped_stream = jump_over_indirect_stream(
+                            bytes,
+                            strict_table,
+                            after_hdr,
+                            &int_objs,
+                            &eof_markers,
+                        );
                         q = jumped_stream.unwrap_or_else(|| next_q.max(after_hdr));
                     }
                 }
