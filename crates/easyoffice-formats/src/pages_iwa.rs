@@ -30,6 +30,88 @@ fn budget(detail: &str) -> EasyOfficeError {
     EasyOfficeError::ResourceBudgetExceeded(format!("Pages IWA {detail}"))
 }
 
+/// Little-endian unsigned value of up to `size_of::<usize>()` bytes.
+fn read_le_usize(raw: &[u8]) -> usize {
+    raw.iter()
+        .enumerate()
+        .fold(0usize, |acc, (i, b)| acc | (usize::from(*b) << (8 * i)))
+}
+
+/// Takes `count` bytes at `*pos`, advancing it; errors with `what` when truncated.
+fn take_bytes<'a>(
+    input: &'a [u8],
+    pos: &mut usize,
+    count: usize,
+    what: &str,
+) -> Result<&'a [u8], EasyOfficeError> {
+    let end = pos
+        .checked_add(count)
+        .ok_or_else(|| bad("offset overflow"))?;
+    let raw = input.get(*pos..end).ok_or_else(|| bad(what))?;
+    *pos = end;
+    Ok(raw)
+}
+
+/// Fails when appending `len` bytes would exceed the declared output length.
+fn ensure_within_declared(out: &[u8], len: usize, declared: usize) -> Result<(), EasyOfficeError> {
+    if out.len().checked_add(len).is_none_or(|n| n > declared) {
+        return Err(bad("snappy output exceeds declared length"));
+    }
+    Ok(())
+}
+
+/// Copies a literal run introduced by `tag` (tag type 0).
+fn snappy_literal(
+    input: &[u8],
+    pos: &mut usize,
+    tag: u8,
+    out: &mut Vec<u8>,
+    declared: usize,
+) -> Result<(), EasyOfficeError> {
+    let mut len = usize::from(tag >> 2);
+    if len >= 60 {
+        let raw = take_bytes(input, pos, len - 59, "literal length truncated")?;
+        len = read_le_usize(raw);
+    }
+    len = len
+        .checked_add(1)
+        .ok_or_else(|| bad("literal length overflow"))?;
+    let lit = take_bytes(input, pos, len, "literal truncated")?;
+    ensure_within_declared(out, len, declared)?;
+    out.extend_from_slice(lit);
+    Ok(())
+}
+
+/// Copies from earlier output as described by a copy tag (types 1-3).
+fn snappy_copy(
+    input: &[u8],
+    pos: &mut usize,
+    tag: u8,
+    out: &mut Vec<u8>,
+    declared: usize,
+) -> Result<(), EasyOfficeError> {
+    let kind = tag & 3;
+    let (len, offset_bytes) = match kind {
+        1 => (4 + usize::from((tag >> 2) & 7), 1usize),
+        2 => (1 + usize::from(tag >> 2), 2),
+        _ => (1 + usize::from(tag >> 2), 4),
+    };
+    let raw = take_bytes(input, pos, offset_bytes, "copy offset truncated")?;
+    let mut offset = read_le_usize(raw);
+    if kind == 1 {
+        offset |= usize::from(tag >> 5) << 8;
+    }
+    if offset == 0 || offset > out.len() {
+        return Err(bad("invalid copy offset"));
+    }
+    ensure_within_declared(out, len, declared)?;
+    for _ in 0..len {
+        let b = out[out.len() - offset];
+        out.push(b);
+    }
+    Ok(())
+}
+
 /// Decompresses one raw Snappy block whose declared length may not exceed `max_len`.
 pub fn snappy_decompress(input: &[u8], max_len: usize) -> Result<Vec<u8>, EasyOfficeError> {
     let mut pos = 0usize;
@@ -42,67 +124,10 @@ pub fn snappy_decompress(input: &[u8], max_len: usize) -> Result<Vec<u8>, EasyOf
     while pos < input.len() {
         let tag = input[pos];
         pos += 1;
-        match tag & 3 {
-            0 => {
-                let mut len = usize::from(tag >> 2);
-                if len >= 60 {
-                    let extra = len - 59;
-                    let end = pos
-                        .checked_add(extra)
-                        .ok_or_else(|| bad("offset overflow"))?;
-                    let raw = input
-                        .get(pos..end)
-                        .ok_or_else(|| bad("literal length truncated"))?;
-                    pos = end;
-                    len = 0;
-                    for (i, b) in raw.iter().enumerate() {
-                        len |= usize::from(*b) << (8 * i);
-                    }
-                }
-                len = len
-                    .checked_add(1)
-                    .ok_or_else(|| bad("literal length overflow"))?;
-                let end = pos.checked_add(len).ok_or_else(|| bad("offset overflow"))?;
-                let lit = input
-                    .get(pos..end)
-                    .ok_or_else(|| bad("literal truncated"))?;
-                pos = end;
-                if out.len().checked_add(len).is_none_or(|n| n > declared) {
-                    return Err(bad("snappy output exceeds declared length"));
-                }
-                out.extend_from_slice(lit);
-            }
-            kind => {
-                let (len, offset_bytes) = match kind {
-                    1 => (4 + usize::from((tag >> 2) & 7), 1usize),
-                    2 => (1 + usize::from(tag >> 2), 2),
-                    _ => (1 + usize::from(tag >> 2), 4),
-                };
-                let end = pos
-                    .checked_add(offset_bytes)
-                    .ok_or_else(|| bad("offset overflow"))?;
-                let raw = input
-                    .get(pos..end)
-                    .ok_or_else(|| bad("copy offset truncated"))?;
-                pos = end;
-                let mut offset = 0usize;
-                for (i, b) in raw.iter().enumerate() {
-                    offset |= usize::from(*b) << (8 * i);
-                }
-                if kind == 1 {
-                    offset |= usize::from(tag >> 5) << 8;
-                }
-                if offset == 0 || offset > out.len() {
-                    return Err(bad("invalid copy offset"));
-                }
-                if out.len().checked_add(len).is_none_or(|n| n > declared) {
-                    return Err(bad("snappy output exceeds declared length"));
-                }
-                for _ in 0..len {
-                    let b = out[out.len() - offset];
-                    out.push(b);
-                }
-            }
+        if tag & 3 == 0 {
+            snappy_literal(input, &mut pos, tag, &mut out, declared)?;
+        } else {
+            snappy_copy(input, &mut pos, tag, &mut out, declared)?;
         }
     }
     if out.len() != declared {
