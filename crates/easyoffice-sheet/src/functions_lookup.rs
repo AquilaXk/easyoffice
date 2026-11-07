@@ -76,7 +76,7 @@ fn update_best_floor(
         return;
     }
     let replace = best.as_ref().is_none_or(|(_, prev)| {
-        SheetEngine::compare_excel_values(&key, prev).is_some_and(|o| o.is_ge())
+        SheetEngine::compare_excel_values(&key, prev).is_some_and(std::cmp::Ordering::is_ge)
     });
     if replace {
         *best = Some((off, key));
@@ -165,9 +165,9 @@ impl MatchState {
             return false;
         };
         let better = if self.match_type > 0 && ord.is_le() {
-            self.beats_best(v, |o| o.is_ge())
+            self.beats_best(v, std::cmp::Ordering::is_ge)
         } else if self.match_type < 0 && ord.is_ge() {
-            self.beats_best(v, |o| o.is_le())
+            self.beats_best(v, std::cmp::Ordering::is_le)
         } else {
             false
         };
