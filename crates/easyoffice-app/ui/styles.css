@@ -1004,3 +1004,11 @@ html[data-theme="dark"] .cp-empty {
 .hwp-host-status { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: var(--eo-surface); color: var(--eo-text); font-size: 14px; }
 .hwp-host-status[hidden], .hwp-host-status-actions [hidden] { display: none; }
 .hwp-host-status-actions { display: flex; gap: 8px; }
+
+/* Pictures of an opened document: shown at their own size, never wider than the page. */
+.doc-inline-image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0.5em 0;
+}

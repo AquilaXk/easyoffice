@@ -653,12 +653,63 @@
     Object.keys(data).forEach((k) => {
       el.dataset[k] = String(data[k]);
     });
+    if (String(spec.tag).toLowerCase() === "img" && data.eoImageId) hydrateDocImage(el, data);
     const kids = Array.isArray(spec.children) ? spec.children : [];
     kids.forEach((childSpec) => {
       const childNode = buildDomNodeFromSpec(childSpec, doc);
       if (childNode) el.appendChild(childNode);
     });
     return el;
+  }
+
+  // ---------------------------------------------------------------- document pictures (PD-096)
+
+  // Picture bytes stay out of the DOM and of undo snapshots: the editor holds an id (a data
+  // attribute), this store holds the base64 bytes once, and the <img> gets a blob: URL.
+  const DOC_IMAGE_MIME = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg" };
+  const docImages = new Map();
+  let docImageSeq = 0;
+
+  function registerDocImage(base64, format) {
+    docImageSeq += 1;
+    const id = "img" + docImageSeq;
+    docImages.set(id, { base64: String(base64), format: String(format), url: null });
+    return id;
+  }
+
+  function getDocImage(id) {
+    return docImages.get(String(id)) || null;
+  }
+
+  function base64ToBytes(base64) {
+    const bin = host.atob(base64);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i += 1) out[i] = bin.codePointAt(i);
+    return out;
+  }
+
+  // blob: URL of a stored picture (created once); "" when the host cannot make one.
+  function docImageUrl(id) {
+    const entry = docImages.get(String(id));
+    const mime = entry ? DOC_IMAGE_MIME[entry.format] : null;
+    if (!entry || !mime) return "";
+    if (entry.url === null) {
+      const make = host.URL?.createObjectURL;
+      try {
+        entry.url = typeof make === "function" && typeof host.Blob === "function"
+          ? make.call(host.URL, new host.Blob([base64ToBytes(entry.base64)], { type: mime }))
+          : "";
+      } catch {
+        entry.url = "";
+      }
+    }
+    return entry.url;
+  }
+
+  function hydrateDocImage(el, data) {
+    const url = docImageUrl(data.eoImageId);
+    if (url) el.setAttribute("src", url);
+    el.setAttribute("alt", String(data.eoImageAlt ?? ""));
   }
 
   function restoreDomChildren(container, specs, doc) {
@@ -687,5 +738,8 @@
     localScrubPii,
     serializeDomChildren,
     restoreDomChildren,
+    registerDocImage,
+    getDocImage,
+    docImageUrl,
   };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);
