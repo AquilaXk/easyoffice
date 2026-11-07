@@ -321,7 +321,11 @@ mod tests {
     #[test]
     fn dispatch_reaches_the_shared_router() {
         let boot = EasyOfficeIpcRouter::dispatch("get_workspace_bootstrap", "").unwrap();
-        assert!(boot.contains("#5C6BC0"));
+        assert!(boot.contains("HWP/HWPX"));
+        assert!(
+            !boot.contains("#5C6BC0"),
+            "the boot JSON no longer carries a palette"
+        );
         assert!(EasyOfficeIpcRouter::dispatch("not_a_command", "").is_err());
     }
 }
