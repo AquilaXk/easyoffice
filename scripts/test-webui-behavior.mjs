@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
-import { switchModule } from "./test-support/modules.mjs";
+import { switchModule, studioItem, commandItem } from "./test-support/modules.mjs";
 
 test("focused cell edit supports undo, redo formula recalculation, and subsequent re-edit", async () => {
   const { document, sandbox } = await createWorkspaceHarness();
@@ -166,7 +166,7 @@ test("real userClick on save waits for blur-triggered async evaluate_sheet befor
   b2.textContent = "3150";
   b2.dispatchEvent({ type: "input", target: b2 });
 
-  userClick(document.getElementById("qat-save"));
+  userClick(studioItem(document, "studio-save"));
   await flushAsyncTurns();
 
   assert.equal(pendingEvaluations.length, 1);
@@ -342,7 +342,7 @@ test("trailing backslashes, special-character sheet names, and unblurred save wo
   sCustomB1.textContent = "700";
   sCustomB1.dispatchEvent({ type: "input", target: sCustomB1 });
 
-  userClick(document.getElementById("qat-save"));
+  userClick(studioItem(document, "studio-save"));
   await flushAsyncTurns();
   assert.equal(downloads.length, 2);
 
@@ -479,7 +479,7 @@ test("security audit blocks >512-char and whitespace XXE plus PDF inputs while P
   userClick(document.getElementById("btn-scrub-pii"));
   await flushAsyncTurns();
   assert.match(document.getElementById("pii-result-text").textContent, /2건 마스킹 완료/);
-  userClick(document.getElementById("qat-save"));
+  userClick(studioItem(document, "studio-save"));
   await flushAsyncTurns();
   assert.equal(downloads.length, 1);
 
@@ -563,7 +563,7 @@ test("rapid async ribbon undo and overlapping sheet evaluations serialize cleanl
   await flushAsyncTurns();
   assert.equal(document.documentElement.dataset.themeEffective, "dark");
 
-  const boldBtn = document.querySelector('[data-command-id="document-home-bold"]');
+  const boldBtn = commandItem(document, "document-home-bold");
   userClick(boldBtn);
   await flushAsyncTurns();
 
@@ -781,7 +781,7 @@ test("focused formula undo-redo updates displayed result, missing sheet returns 
     },
   });
 
-  const boldBtn = asyncHarness.document.querySelector('[data-command-id="document-home-bold"]');
+  const boldBtn = commandItem(asyncHarness.document, "document-home-bold");
   asyncHarness.userClick(boldBtn);
   asyncHarness.sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
   await flushAsyncTurns();
@@ -910,7 +910,7 @@ test("failed undo-redo and formula-bar IPC keep stacks intact, offline sheet ide
     },
   });
 
-  const boldBtn = retryHarness.document.querySelector('[data-command-id="document-home-bold"]');
+  const boldBtn = commandItem(retryHarness.document, "document-home-bold");
   const heading = () => retryHarness.document.querySelector("#doc-editor h1");
   const headingBold = () => heading().querySelector(".eo-run")?.dataset.eoBold ?? "";
   const titleText = heading().querySelector(".eo-h-title").childNodes[0];
@@ -990,8 +990,8 @@ test("failed undo-redo and formula-bar IPC keep stacks intact, offline sheet ide
     const title = h.document.querySelector("#doc-editor h1 .eo-h-title").childNodes[0];
     sel.addRange({ startContainer: title, startOffset: 1, endContainer: title, endOffset: 4, collapsed: false });
   }
-  hA.userClick(hA.document.querySelector('[data-command-id="document-home-bold"]'));
-  hB.userClick(hB.document.querySelector('[data-command-id="document-home-italic"]'));
+  hA.userClick(commandItem(hA.document, "document-home-bold"));
+  hB.userClick(commandItem(hB.document, "document-home-italic"));
   await flushAsyncTurns();
   resolveA({ commandId: "document-home-bold", summary: "굵게A", isBold: true });
   resolveB({ commandId: "document-home-italic", summary: "기울임B", isItalic: true });
@@ -1026,13 +1026,13 @@ test("ribbon IPC sends a per-window session id and the undo target module (#106)
   const hA = await createWorkspaceHarness({ testIpc: sharedIpc("A") });
   const hB = await createWorkspaceHarness({ testIpc: sharedIpc("B") });
 
-  hA.userClick(hA.document.querySelector('[data-command-id="document-home-bold"]'));
+  hA.userClick(commandItem(hA.document, "document-home-bold"));
   await flushAsyncTurns();
   switchModule(hA.document, "SHEET");
   await flushAsyncTurns();
-  hA.userClick(hA.document.querySelector('[data-command-id="sheet-home-italic"]'));
+  hA.userClick(commandItem(hA.document, "sheet-home-italic"));
   await flushAsyncTurns();
-  hB.userClick(hB.document.querySelector('[data-command-id="document-home-italic"]'));
+  hB.userClick(commandItem(hB.document, "document-home-italic"));
   await flushAsyncTurns();
 
   const sheetExec = ribbonCalls.find((c) => c.req.commandId === "sheet-home-italic");

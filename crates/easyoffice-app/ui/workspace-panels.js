@@ -489,32 +489,16 @@
     }
 
     function captureWorkspaceViewState() {
-      const strip = document.getElementById("ribbon-tool-strip");
       const stage = document.querySelector(".canvas-stage");
-      const shell = document.getElementById("app") || document.querySelector(".app-shell");
       return {
-        ribbonStripHidden: Boolean(strip?.hidden),
         canvasZoom: stage?.style?.zoom || "",
         canvasSplit: stage?.dataset?.splitView || "",
-        chromeExpanded: shell?.dataset?.chromeExpanded || "",
-        panelsExpanded: shell?.dataset?.panelsExpanded || "",
       };
     }
 
     function restoreWorkspaceViewState(viewState) {
       if (!viewState) return;
-      const strip = document.getElementById("ribbon-tool-strip");
       const stage = document.querySelector(".canvas-stage");
-      const shell = document.getElementById("app") || document.querySelector(".app-shell");
-      syncDatasetFlag(shell, "chromeExpanded", viewState.chromeExpanded);
-      syncDatasetFlag(shell, "panelsExpanded", viewState.panelsExpanded);
-      const toggleBtn = document.getElementById("btn-chrome-toggle");
-      if (toggleBtn && typeof viewState.chromeExpanded === "string") {
-        const isExp = viewState.chromeExpanded === "true";
-        toggleBtn.setAttribute("aria-expanded", isExp ? "true" : "false");
-        host.__EASYOFFICE_ICONS__.setIcon(document, toggleBtn, isExp ? "chevron-up" : "chevron-down");
-      }
-      if (strip) strip.hidden = Boolean(viewState.ribbonStripHidden);
       if (stage) {
         stage.style.zoom = viewState.canvasZoom || "";
         syncDatasetFlag(stage, "splitView", viewState.canvasSplit || "");

@@ -43,19 +43,6 @@ pub use smart_tools::*;
 pub struct EasyOfficeIpcRouter;
 
 impl EasyOfficeIpcRouter {
-    pub const RIBBON_CATEGORIES: [&str; 7] = [
-        "home",
-        "insert",
-        "layout",
-        "formulasAndData",
-        "moduleSpecific",
-        "review",
-        "view",
-    ];
-
-    pub const RECENT_FORMAT_FILTERS: [&str; 7] =
-        ["전체", "DOCX", "HWP/HWPX", "XLSX", "PPTX", "PDF", "ODF"];
-
     pub fn dispatch(command: &str, payload: &str) -> Result<String, EasyOfficeError> {
         match command {
             "get_workspace_bootstrap" => Self::handle_workspace_bootstrap(),
@@ -81,26 +68,12 @@ impl EasyOfficeIpcRouter {
 
     fn handle_workspace_bootstrap() -> Result<String, EasyOfficeError> {
         let platform = DesktopPlatform::current();
-        let filters_json = Self::RECENT_FORMAT_FILTERS
-            .iter()
-            .map(|f| format!("\"{f}\""))
-            .collect::<Vec<_>>()
-            .join(",");
-        let cats_json = Self::RIBBON_CATEGORIES
-            .iter()
-            .map(|c| format!("\"{c}\""))
-            .collect::<Vec<_>>()
-            .join(",");
-
         let json = format!(
             concat!(
                 "{{",
                 "\"platform\":\"{}\",",
                 "\"shortcutModifier\":\"{}\",",
                 "\"appVersion\":\"{}\",",
-                "\"ribbonCategories\":[{}],",
-                "\"ribbonMatrixSlots\":35,",
-                "\"recentFormatFilters\":[{}],",
                 "\"openTabs\":[",
                 "{{\"id\":\"tab-doc\",\"title\":\"분기_경영실적_보고서.docx\",\"module\":\"DOC\",\"isPinned\":true,\"isFavorite\":true}},",
                 "{{\"id\":\"tab-hwp\",\"title\":\"행정안전부_기안문.hwpx\",\"module\":\"HWP\",\"isPinned\":true,\"isFavorite\":false}},",
@@ -113,8 +86,6 @@ impl EasyOfficeIpcRouter {
             platform.os_label(),
             platform.primary_shortcut_modifier(),
             env!("CARGO_PKG_VERSION"),
-            cats_json,
-            filters_json,
         );
         Ok(json)
     }

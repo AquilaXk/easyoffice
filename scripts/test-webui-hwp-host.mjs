@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { loadUiModule } from "./test-support/load-ui-module.mjs";
 import { createWebUiDom, flushAsyncTurns } from "./webui-dom-harness.mjs";
-import { switchModule } from "./test-support/modules.mjs";
+import { switchModule, studioItem } from "./test-support/modules.mjs";
 
 // HWP host (PD-083): a fake iframe + MessageChannel stands in for the embedded rhwp-studio. The
 // fake editor answers the embed protocol (`rhwp-connect` handshake, `rhwp-request` -> response).
@@ -298,7 +298,7 @@ test("webui: the HWP module is hosted by #pane-hwp and the document-only toolbar
   assert.equal(styleBar.hidden, true, "document style bar is hidden for the embedded editor");
   const toolbarBtn = document.querySelector('#icon-toolbar button[data-studio-cmd="insert-table"]');
   assert.equal(toolbarBtn.disabled, true, "document-only toolbar items are disabled");
-  assert.equal(document.getElementById("qat-save").disabled, false);
+  assert.equal(studioItem(document, "studio-save").disabled, false);
   assert.equal(document.getElementById("app").dataset.hwpEmbed, "true", "only the editor's own toolbar is shown");
   switchModule(document, "DOC");
   await flushAsyncTurns(8);

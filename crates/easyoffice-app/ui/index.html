@@ -78,7 +78,7 @@
               <div class="md-item" data-studio-menu-cmd="view-zoom" role="menuitem"><span class="md-label">100% 실제 배율</span><span class="md-shortcut">Ctrl+0</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-studio-menu-cmd="view-split" role="menuitem"><span class="md-label">좌우 스플릿 뷰</span></div>
-              <div class="md-item" data-studio-menu-cmd="view-ribbon" role="menuitem"><span class="md-label">리본 접기·펼치기</span></div>
+              <div class="md-item" data-studio-menu-cmd="view-outline" role="menuitem"><span class="md-label">문서 개요…</span></div>
               <div class="md-sep"></div>
               <div class="md-sub" role="menuitem" aria-haspopup="menu" tabindex="0">
                 <span class="md-label">테마</span><span class="md-arrow md-caret" data-icon="chevron-right"></span>
@@ -174,6 +174,7 @@
               <div class="md-item" data-studio-menu-cmd="smart-diagnose" role="menuitem"><span class="md-label">문장 진단 및 요약</span></div>
               <div class="md-item" data-studio-menu-cmd="scrub-pii" role="menuitem"><span class="md-label">개인정보 스캔/마스킹</span></div>
               <div class="md-item" data-studio-menu-cmd="security-audit" role="menuitem"><span class="md-label">문서 보안 검사</span></div>
+              <div class="md-item" data-studio-menu-cmd="bench-run" role="menuitem"><span class="md-label">문서 엔진 성능 진단</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-studio-menu-cmd="review-track" role="menuitem"><span class="md-label">변경 내용 추적</span></div>
               <div class="md-item" data-studio-menu-cmd="review-comment" role="menuitem"><span class="md-label">검토 메모 스레드</span></div>
@@ -197,16 +198,10 @@
         </div>
 
         <div class="topbar-actions" role="toolbar" aria-label="창 도구">
-          <div class="qat-group" role="group" aria-label="빠른 실행 도구">
-            <button id="qat-save" class="icon-btn qat-btn" type="button" data-icon="save" title="저장 (Ctrl+S)" aria-label="저장"></button>
-            <button id="qat-undo" class="icon-btn qat-btn" type="button" data-icon="undo" title="실행 취소 (Ctrl+Z)" aria-label="실행 취소"></button>
-            <button id="qat-redo" class="icon-btn qat-btn" type="button" data-icon="redo" title="다시 실행 (Ctrl+Y)" aria-label="다시 실행"></button>
-          </div>
           <button id="btn-command-palette" class="palette-btn" type="button" title="명령 팔레트 (Ctrl+K)" aria-label="명령 팔레트 열기">
             <span class="icon-slot" data-icon="search"></span><span class="palette-label">명령 검색</span><kbd id="shortcut-hint">Ctrl+K</kbd>
           </button>
           <button id="btn-theme-toggle" class="icon-btn" type="button" data-icon="moon" title="다크 모드로 전환" aria-label="다크 모드로 전환"></button>
-          <button id="btn-chrome-toggle" class="icon-btn menu-toolbox-toggle" type="button" data-icon="chevron-down" title="리본 및 사이드 패널 펼치기/접기" aria-label="도구 상자 접기/펼치기" aria-expanded="false"></button>
         </div>
       </header>
 
@@ -359,39 +354,7 @@
         </div>
       </div>
 
-      <nav class="ribbon-bar" aria-label="컨텍스트 리본 탭">
-        <div class="ribbon-tabs" id="ribbon-tabs" role="tablist" aria-label="리본 카테고리 탭">
-          <button class="ribbon-btn active" role="tab" aria-selected="true" data-category="home">홈</button>
-          <button class="ribbon-btn" role="tab" aria-selected="false" data-category="insert">삽입</button>
-          <button class="ribbon-btn" role="tab" aria-selected="false" data-category="layout">레이아웃</button>
-          <button class="ribbon-btn" role="tab" aria-selected="false" data-category="formulasAndData">수식·데이터</button>
-          <button class="ribbon-btn" role="tab" aria-selected="false" data-category="moduleSpecific">모듈 전용</button>
-          <button class="ribbon-btn" role="tab" aria-selected="false" data-category="review">검토</button>
-          <button class="ribbon-btn" role="tab" aria-selected="false" data-category="view">보기</button>
-        </div>
-        <div class="ribbon-meta">
-          <span id="contextual-tool-badge" class="ctx-badge">표·개체 도구</span>
-          <button id="btn-ribbon-style" class="ribbon-style-btn" type="button" title="표준 오피스 7탭 / 한글(HWP) 7탭 전환">리본: 표준 오피스</button>
-        </div>
-        <div id="ribbon-tool-strip" class="ribbon-tool-strip" role="toolbar" aria-label="활성 리본 명령 도구"></div>
-      </nav>
-
       <main class="workspace-grid">
-        <aside class="panel sidebar-left" aria-label="문서 개요 및 최근 문서">
-          <h2 class="panel-title">개요 및 최근 문서</h2>
-          <ul id="outline-list" class="outline-list">
-            <li class="outline-item active">1. 추진 배경 및 목적</li>
-            <li class="outline-item">2. 분기별 핵심 성과 요약</li>
-            <li class="outline-item">3. 향후 실행 계획</li>
-            <li class="outline-item">4. 문서 보호 및 보안</li>
-          </ul>
-          <div class="security-card">
-            <h3>문서 보안 상태</h3>
-            <p id="security-status-text">압축 컨테이너 및 문서 구조 보호 활성</p>
-            <button id="btn-run-security-audit" class="secondary-btn">문서 보안 검사</button>
-          </div>
-        </aside>
-
         <section class="canvas-stage" aria-label="편집 캔버스">
           <div id="pane-doc" class="editor-pane active">
             <p id="hwp-fallback-notice" class="manuscript-notice" role="status" hidden><span id="hwp-fallback-text">한글 편집기 구성 요소가 포함되지 않은 빌드입니다. 텍스트 전용 편집기로 대체합니다.</span> <button type="button" id="btn-hwp-use-embed" class="tb-btn" hidden>한글 편집기로 돌아가기</button></p>
@@ -851,27 +814,6 @@
           </div>
         </section>
 
-        <aside class="panel inspector-right" aria-label="속성 인스펙터 및 스마트 보조 도구">
-          <h2 class="panel-title">인스펙터 &amp; 스마트 도구</h2>
-          <div class="inspector-section">
-            <h3>문서 통계 및 진단</h3>
-            <p id="smart-stats">문자: 0 · 단어: 0 · 읽기 시간: 1초</p>
-            <button id="btn-smart-diagnose" class="secondary-btn">문장 진단 및 요약</button>
-            <p id="smart-summary-output" class="formula-result">요약 대기 중</p>
-          </div>
-
-          <div class="inspector-section">
-            <h3>개인정보 보호</h3>
-            <button id="btn-scrub-pii" class="secondary-btn">개인정보 스캔/마스킹</button>
-            <p id="pii-result-text">감지된 개인정보 없음</p>
-          </div>
-
-          <div class="inspector-section">
-            <h3>성능 진단 결과</h3>
-            <p id="bench-result-box">[성능 진단] 버튼을 눌러 측정하세요.</p>
-            <button id="btn-run-benchmark" class="secondary-btn" type="button" title="문서 처리 성능 진단 실행">성능 진단</button>
-          </div>
-        </aside>
       </main>
 
       <footer id="status-bar" class="statusbar" role="contentinfo">
@@ -925,6 +867,74 @@
           <button type="button" id="btn-close-cancel" class="secondary-btn">취소</button>
         </div>
       </form>
+    </dialog>
+
+    <dialog id="smart-dialog" class="tool-dialog" aria-labelledby="smart-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="smart-dialog-title">문장 진단 및 요약</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <p id="smart-stats">문자: 0 · 단어: 0 · 읽기 시간: 1초</p>
+          <p id="smart-summary-output" class="formula-result">요약 대기 중</p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-smart-diagnose" type="button" class="dialog-btn dialog-btn-primary">진단 실행</button>
+          <button type="button" class="dialog-btn" data-dialog-close>닫기</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="pii-dialog" class="tool-dialog" aria-labelledby="pii-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="pii-dialog-title">개인정보 스캔/마스킹</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <p id="pii-result-text">감지된 개인정보 없음</p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-scrub-pii" type="button" class="dialog-btn dialog-btn-primary">스캔·마스킹 실행</button>
+          <button type="button" class="dialog-btn" data-dialog-close>닫기</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="security-dialog" class="tool-dialog" aria-labelledby="security-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="security-dialog-title">문서 보안 검사</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <p id="security-status-text">압축 컨테이너 및 문서 구조 보호 활성</p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-run-security-audit" type="button" class="dialog-btn dialog-btn-primary">검사 실행</button>
+          <button type="button" class="dialog-btn" data-dialog-close>닫기</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="bench-dialog" class="tool-dialog" aria-labelledby="bench-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="bench-dialog-title">문서 엔진 성능 진단</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <p id="bench-result-box">[성능 진단] 버튼을 눌러 측정하세요.</p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-run-benchmark" type="button" class="dialog-btn dialog-btn-primary" title="문서 처리 성능 진단 실행">성능 진단</button>
+          <button type="button" class="dialog-btn" data-dialog-close>닫기</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="outline-dialog" class="tool-dialog" aria-labelledby="outline-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="outline-dialog-title">문서 개요</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <ul id="outline-list" class="outline-list">
+            <li class="outline-item active">1. 추진 배경 및 목적</li>
+            <li class="outline-item">2. 분기별 핵심 성과 요약</li>
+            <li class="outline-item">3. 향후 실행 계획</li>
+            <li class="outline-item">4. 문서 보호 및 보안</li>
+          </ul>
+        </div>
+        <div class="dialog-footer"><button type="button" class="dialog-btn" data-dialog-close>닫기</button></div>
+      </div>
     </dialog>
 
     <dialog id="about-dialog" class="close-dialog" aria-labelledby="about-dialog-title">

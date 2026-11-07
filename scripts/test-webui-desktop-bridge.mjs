@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { shellError, createWebUiDom, flushAsyncTurns } from "./webui-dom-harness.mjs";
-import { switchModule } from "./test-support/modules.mjs";
+import { switchModule, studioItem, commandItem } from "./test-support/modules.mjs";
 
 // Desktop shell (Tauri v2 / WebView2) bridge: a fake `__TAURI_INTERNALS__` stands in for the
 // WebView IPC. The Rust side registers exactly two commands, `ipc_dispatch` (returns the engine's
@@ -62,13 +62,18 @@ async function createShellHarness({ engineOverrides = {}, saveFile } = {}) {
 const feedback = (document) => document.getElementById("status-command-feedback").textContent;
 
 test("desktop shell routes every engine request through ipc_dispatch with string payloads", async () => {
-  const { document, calls, fetchCalls } = await createShellHarness();
+  const { document, calls, fetchCalls, userClick } = await createShellHarness();
   const boot = calls.find((c) => c.command === "ipc_dispatch" && c.args.command === "get_workspace_bootstrap");
   assert.ok(boot, "bootstrap goes through the shell");
   assert.deepEqual(boot.args, { command: "get_workspace_bootstrap", payload: "" });
   assert.ok(calls.every((c) => c.command === "ipc_dispatch"), "only the dispatcher is used at startup");
   assert.ok(calls.every((c) => typeof c.args.payload === "string"));
-  assert.ok(calls.some((c) => c.args.command === "get_ribbon_category_commands"));
+  userClick(commandItem(document, "document-home-bold"));
+  await flushAsyncTurns(12);
+  const exec = calls.find((c) => c.args.command === "execute_ribbon_command");
+  assert.ok(exec, "menu commands reach the engine through the dispatcher");
+  assert.equal(typeof exec.args.payload, "string");
+  assert.ok(calls.every((c) => c.command === "ipc_dispatch"));
   assert.equal(fetchCalls.length, 0);
   assert.equal(document.getElementById("status-engine").textContent, "엔진: 데스크톱 연결됨");
   assert.doesNotMatch(document.getElementById("status-bar").textContent, /로컬 서버/, "the desktop app never shows the local-server text");
@@ -131,7 +136,7 @@ test("desktop save uses the native save command instead of a Blob download", asy
       return { status: "saved", name: args.fileName, bytes: 42 };
     },
   });
-  userClick(document.getElementById("qat-save"));
+  userClick(studioItem(document, "studio-save"));
   await flushAsyncTurns(12);
 
   assert.equal(saves.length, 1);
@@ -150,7 +155,7 @@ test("desktop save uses the native save command instead of a Blob download", asy
 
 test("cancelled and failed desktop saves never claim success", async () => {
   const cancelled = await createShellHarness({ saveFile: () => ({ status: "cancelled", name: null, bytes: 0 }) });
-  cancelled.userClick(cancelled.document.getElementById("qat-save"));
+  cancelled.userClick(studioItem(cancelled.document, "studio-save"));
   await flushAsyncTurns(12);
   assert.match(feedback(cancelled.document), /^문서 저장 취소 \(DOCX\): 저장 위치를 선택하지 않았습니다/);
   assert.equal(cancelled.downloads.length, 0);
@@ -160,7 +165,7 @@ test("cancelled and failed desktop saves never claim success", async () => {
       throw shellError(String.raw`파일을 저장하지 못했습니다 (D:\ro\a.docx): 액세스가 거부되었습니다.`);
     },
   });
-  failed.userClick(failed.document.getElementById("qat-save"));
+  failed.userClick(studioItem(failed.document, "studio-save"));
   await flushAsyncTurns(12);
   assert.match(feedback(failed.document), /^문서 저장 실패 \(DOCX\): 파일을 저장하지 못했습니다 .*액세스가 거부/);
   assert.doesNotMatch(feedback(failed.document), /저장 완료/);
@@ -204,7 +209,7 @@ test("without the shell the --serve preview keeps the HTTP transport and Blob do
   });
   assert.ok(fetched.some((f) => f.url === "/api/ipc" && f.command === "get_workspace_bootstrap"));
   assert.equal(document.getElementById("status-engine").textContent, "엔진: 로컬 서버 연결됨");
-  userClick(document.getElementById("qat-save"));
+  userClick(studioItem(document, "studio-save"));
   await flushAsyncTurns(12);
   assert.equal(downloads.length, 1);
   assert.equal(downloads[0].download, "분기_경영실적_보고서.docx");

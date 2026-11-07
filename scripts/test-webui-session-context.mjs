@@ -3,7 +3,7 @@ import fs from "node:fs";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
-import { switchModule, typeIntoDocParagraph, createMemoryStorage } from "./test-support/modules.mjs";
+import { switchModule, typeIntoDocParagraph, createMemoryStorage, studioItem, commandItem } from "./test-support/modules.mjs";
 
 const UI_DIR = new URL("../crates/easyoffice-app/ui/", import.meta.url);
 const INDEX_HTML = fs.readFileSync(fileURLToPath(new URL("index.html", UI_DIR)), "utf8");
@@ -150,22 +150,10 @@ test("index.html menu and tooltip shortcut labels map 1:1 onto registered handle
   }
 });
 
-test("ribbon tool strip and command palette only display shortcuts that the keydown handler really binds", async () => {
+test("command palette only displays shortcuts that the keydown handler really binds", async () => {
   const { document, sandbox, userClick } = await createWorkspaceHarness();
   const catalog = sandbox.__EASYOFFICE_RIBBON_CATALOG__;
   const bound = new Set(catalog.WORKSPACE_SHORTCUT_BINDINGS.map((b) => b.keys));
-  for (const mod of ["DOC", "SHEET", "SLIDE", "PDF"]) {
-    switchModule(document, mod);
-    await flushAsyncTurns();
-    for (const tab of document.querySelectorAll("#ribbon-tabs .ribbon-btn")) {
-      userClick(tab);
-      await flushAsyncTurns();
-      for (const small of document.querySelectorAll("#ribbon-tool-strip small")) {
-        const label = small.textContent.replace(/^\(|\)$/g, "");
-        assert.ok(bound.has(normalizeShortcutLabel(catalog, label)), `${mod} ribbon label ${label} is unbound`);
-      }
-    }
-  }
   userClick(document.getElementById("btn-command-palette"));
   const input = document.getElementById("cmd-search-input");
   for (const q of ["", "pdf", "시트", "검토", "성능"]) {
@@ -324,7 +312,7 @@ test("beforeunload guard is registered only while the workspace is dirty", async
   advanceTimers(5000);
   await flushAsyncTurns(10);
   assert.equal(sandbox.getWindowListenerCount("beforeunload"), 1);
-  userClick(document.getElementById("qat-save"));
+  userClick(studioItem(document, "studio-save"));
   await flushAsyncTurns(10);
   advanceTimers(5000);
   await flushAsyncTurns(10);
@@ -336,7 +324,7 @@ test("document toolbars and menus are disabled outside DOC/HWP and the status ba
   const styleBar = document.getElementById("doc-style-bar");
   const paraNumBtn = document.querySelector('#icon-toolbar [data-studio-cmd="para-numbering"]');
   const cutBtn = document.querySelector('#icon-toolbar [data-studio-cmd="clip-cut"]');
-  const saveBtn = document.getElementById("qat-save");
+  const saveBtn = studioItem(document, "studio-save");
   const paraMenu = document.querySelector('.md-item[data-studio-menu-cmd="para-numbering"]');
   const ctrlMarks = document.getElementById("btn-toggle-ctrl-marks");
   const sheetAgg = document.getElementById("status-sheet-agg");
@@ -462,6 +450,6 @@ test("bootstrap IPC failure shows an error with retry and never claims macOS on 
   assert.equal(banner.hidden, true);
   assert.equal(document.title, "보고서.docx — EasyOffice".replace("보고서.docx", document.defaultView.__EASYOFFICE_WINDOW_BRIDGE__.instance.getDocumentName("DOC")));
   assert.equal(document.defaultView.__EASYOFFICE_WINDOW_BRIDGE__.instance.getDocumentName("DOC"), "보고서.docx");
-  assert.ok(document.querySelector("#ribbon-tool-strip .ribbon-tool-btn"));
+  assert.ok(commandItem(document, "document-home-bold"), "menu item for the catalog command is present after retry");
   assert.equal(document.getElementById("platform-pill").textContent, "Windows · Ctrl");
 });

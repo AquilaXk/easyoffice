@@ -7,12 +7,16 @@
   const LS_STEPS = [100, 130, 160, 180, 200, 300];
   const LS_STEPS_REV = [300, 200, 180, 160, 130, 100];
   const STUDIO_QUICK_REDIRECT = {
-    palette: "btn-command-palette", "studio-save": "qat-save", "studio-undo": "qat-undo", "studio-redo": "qat-redo",
+    palette: "btn-command-palette",
     "zoom-in": "btn-zoom-in", "zoom-out": "btn-zoom-out", "zoom-fit-page": "btn-zoom-fit-page", "zoom-fit-width": "btn-zoom-fit-width",
     "ctrl-marks": "btn-toggle-ctrl-marks", "para-marks": "btn-toggle-para-marks", "doc-grid": "btn-toggle-doc-grid",
     "table-add-row": "btn-doc-add-row", "table-merge": "btn-doc-merge-toggle", "table-sum": "btn-doc-eval-table",
     "smart-diagnose": "btn-smart-diagnose", "scrub-pii": "btn-scrub-pii", "security-audit": "btn-run-security-audit", "view-theme": "btn-theme-toggle",
   };
+  // Menu command -> tool dialog (PD-098 step 3b); the action buttons keep their ids.
+  const TOOL_DIALOGS = { "smart-diagnose": "smart-dialog", "scrub-pii": "pii-dialog", "security-audit": "security-dialog", "bench-run": "bench-dialog", "view-outline": "outline-dialog" };
+  // Menu command -> app-provided action.
+  const STUDIO_DIRECT_ACTIONS = { "studio-save": "save", "studio-undo": "undo", "studio-redo": "redo", "bench-run": "benchmark" };
   const INSERT_MOD_DISPATCH = {
     "mod-symbol": { hwp: true, target: "hwp-mod-field", label: "문자표 기호 삽입 완료" },
     "mod-header": { hwp: true, target: "hwp-mod-header", label: "머리말 · 꼬리말 적용 완료" },
@@ -787,10 +791,21 @@
       return true;
     }
 
+    let studioActions = {};
+
+    function openToolDialog(dialogId) {
+      const dialog = document.getElementById(dialogId);
+      if (typeof dialog?.showModal === "function" && !dialog.open) dialog.showModal();
+    }
+
     function dispatchStudioIconCmd(cmd, editor, onStudioCmd) {
       if (!cmd) return;
+      if (TOOL_DIALOGS[cmd]) openToolDialog(TOOL_DIALOGS[cmd]);
+      const direct = STUDIO_DIRECT_ACTIONS[cmd];
+      if (direct) return void studioActions[direct]?.();
       const redirectId = STUDIO_QUICK_REDIRECT[cmd];
       if (redirectId) return void document.getElementById(redirectId)?.click();
+      if (TOOL_DIALOGS[cmd]) return;
       const curMod = getActiveModule();
       const isDocMod = curMod === "DOC" || curMod === "HWP";
       const fb = document.getElementById("status-command-feedback");
@@ -801,7 +816,6 @@
       if (execStudioInsertModCmd(cmd, editor, textTarget, fb, onStudioCmd, curMod, isDocMod)) return;
       if (typeof onStudioCmd === "function") onStudioCmd(cmd);
     }
-
 
     function applyStudioLineSpacing(editor, lsSelect, pct) {
       withDocStyleUndo(() => {
@@ -912,8 +926,7 @@
       document.addEventListener?.("click", (ev) => {
         if (!ev?.target?.closest?.(".studio-menubar")) closeAllStudioMenus();
       });
-      // rhwp-studio: while a menu is open, a single key (no modifier) runs the item whose shortcut
-      // label is that key (for example "/" in the 도구 menu).
+      // rhwp-studio: with a menu open, a single unmodified key runs the item whose shortcut label is that key.
       host.addEventListener?.("keydown", (ev) => {
         const open = document.querySelector(".menu-item.open");
         if (!open || ev.ctrlKey || ev.altKey || ev.metaKey || ev.shiftKey || String(ev.key || "").length !== 1) return;
@@ -933,18 +946,10 @@
       computeSmartStats();
     }
 
-    function setupStudioChromeControls(applyZoomPercent, onStudioCmd) {
+    function setupStudioChromeControls(applyZoomPercent, onStudioCmd, actions) {
+      studioActions = actions || {};
       const editor = document.getElementById("doc-editor");
-      const chromeToggleBtn = document.getElementById("btn-chrome-toggle");
-      chromeToggleBtn?.addEventListener("click", () => {
-        const shell = document.getElementById("app") || document.querySelector(".app-shell");
-        if (!shell) return;
-        const next = shell.dataset.chromeExpanded !== "true";
-        shell.dataset.chromeExpanded = next ? "true" : "false";
-        shell.dataset.panelsExpanded = next ? "true" : "false";
-        chromeToggleBtn.setAttribute("aria-expanded", next ? "true" : "false");
-        host.__EASYOFFICE_ICONS__.setIcon(document, chromeToggleBtn, next ? "chevron-up" : "chevron-down");
-      });
+      for (const closer of document.querySelectorAll("[data-dialog-close]")) closer.addEventListener("click", () => closer.closest("dialog")?.close?.());
       bindStudioMenuBar(editor, onStudioCmd);
       for (const btn of document.querySelectorAll("#icon-toolbar [data-studio-cmd]")) {
         btn.addEventListener("click", () => {
@@ -959,11 +964,9 @@
         const btn = document.getElementById(id);
         btn?.addEventListener("click", () => toggleEditorDatasetBtn(btn, editor, key));
       }
-      const alignMap = [
-        ["btn-align-left", "left", "left"], ["btn-align-center", "center", "center"],
-        ["btn-align-right", "right", "right"], ["btn-align-justify", "justify", "justify"],
-        ["btn-align-distribute", "distribute", "justify"], ["btn-align-divide", "divide", "justify"],
-      ];
+      const alignMap = ["left", "center", "right", "justify", "distribute", "divide"].map((mode) => [
+        "btn-align-" + mode, mode, mode === "distribute" || mode === "divide" ? "justify" : mode,
+      ]);
       for (const [id, mode, cssAlign] of alignMap) {
         document.getElementById(id)?.addEventListener("click", () => applyEditorAlignment(id, mode, cssAlign, editor, alignMap));
       }
@@ -978,11 +981,9 @@
       const zoomSlider = document.getElementById("status-zoom-slider");
       if (zoomSlider && typeof applyZoomPercent === "function") {
         const onSlide = () => applyZoomPercent(Number(zoomSlider.value) || 100);
-        zoomSlider.addEventListener("input", onSlide);
-        zoomSlider.addEventListener("change", onSlide);
+        for (const evt of ["input", "change"]) zoomSlider.addEventListener(evt, onSlide);
       }
-      document.getElementById("btn-zoom-fit-width")?.addEventListener("click", () => applyZoomPercent?.(120, "width"));
-      document.getElementById("btn-zoom-fit-page")?.addEventListener("click", () => applyZoomPercent?.(100, "page"));
+      for (const [id, pct, mode] of [["btn-zoom-fit-width", 120, "width"], ["btn-zoom-fit-page", 100, "page"]]) document.getElementById(id)?.addEventListener("click", () => applyZoomPercent?.(pct, mode));
     }
 
     return {
@@ -990,7 +991,7 @@
       describeDeliveryFailure, describeConversionSpec, saveActiveModuleDocument,
       computeSmartStats, applySmartDiagnoseDom, runSmartDiagnoseAction, runModuleSecurityAudit,
       fetchSecurityAuditOutcome, applySecurityAuditDom, runSecurityAuditAction, runBenchmarkAction,
-      runPiiScrubAction, setupStudioChromeControls,
+      runPiiScrubAction, setupStudioChromeControls, runStudioCommand: (cmd) => dispatchStudioIconCmd(cmd, document.getElementById("doc-editor"), null),
     };
   }
 

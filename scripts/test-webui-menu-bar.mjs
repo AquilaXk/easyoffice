@@ -40,8 +40,14 @@ async function openModule(mod) {
   return { ...harness, executed, catalog: harness.sandbox.__EASYOFFICE_RIBBON_CATALOG__ };
 }
 
-const idsOf = (catalog, mod) =>
+// The ribbon strip is gone (PD-098 step 3b): `*-view-ribbon` (collapse/expand) stays in the catalog
+// and the IPC contract but has no menu item, so every other id must be reachable from a menu.
+const RIBBON_COLLAPSE_SUFFIX = "-view-ribbon";
+const MENU_COMMANDS_PER_MODULE = 27;
+
+const catalogIdsOf = (catalog, mod) =>
   Object.values(catalog.RIBBON_CATEGORY_TOOLS[mod]).flatMap((tools) => tools.map((t) => t.id));
+const idsOf = (catalog, mod) => catalogIdsOf(catalog, mod).filter((id) => !id.endsWith(RIBBON_COLLAPSE_SUFFIX));
 
 const enabledMenuItems = (document) =>
   document.querySelectorAll(".md-item[data-studio-menu-cmd]").filter((el) => el.getAttribute("aria-disabled") !== "true");
@@ -51,7 +57,10 @@ test("the catalog has 140 ribbon commands, five editing modules with 28 each", a
   const all = catalog.allRibbonCommandIds();
   assert.equal(all.length, 140);
   assert.equal(new Set(all).size, 140);
-  for (const mod of MODULES) assert.equal(idsOf(catalog, mod).length, 28, mod);
+  for (const mod of MODULES) {
+    assert.equal(catalogIdsOf(catalog, mod).length, 28, mod);
+    assert.equal(idsOf(catalog, mod).length, MENU_COMMANDS_PER_MODULE, mod);
+  }
 });
 
 for (const mod of MODULES) {

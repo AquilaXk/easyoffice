@@ -21,7 +21,6 @@
 
   let isImeComposing = false;
   let activeModule = "DOC";
-  let activeRibbonCategory = "home";
   let activeSheetName = "Sheet1";
   let activeSheetCellRef = "F2";
   let activeSlideIndex = 0;
@@ -187,15 +186,12 @@
     getActiveModule: () => activeModule, getHwpHost: () => hwpHost,
     getWindowBridge: () => windowBridge,
     setActiveModule: (next) => { activeModule = next; },
-    getActiveRibbonCategory: () => activeRibbonCategory,
-    setActiveRibbonCategory: (next) => { activeRibbonCategory = next; },
     getActiveSheetName: () => activeSheetName,
     setActiveSheetName: (next) => { activeSheetName = next; },
     getActiveSheetCellRef: () => activeSheetCellRef,
     getActiveSlideIndex: () => activeSlideIndex,
     getPdfRotationDeg: () => pdfRotationDeg,
     setPdfRotationDeg: (next) => { pdfRotationDeg = next; },
-    getShortcutModifier: () => activeShortcutModifier,
     enqueueWorkspaceHistoryOp,
     onModuleApplied: (mod) => workspaceSession?.applyModuleContext(mod),
   });
@@ -333,7 +329,7 @@
     const modal = document.getElementById("cmd-palette-modal");
     if (modal && typeof modal.close === "function") modal.close();
     if (item.id === "bench-run") {
-      void workspacePanels.runBenchmarkAction().catch(() => {});
+      workspacePanels.runStudioCommand("bench-run");
     } else if (item.id === "studio-save") {
       void saveWorkspaceDocument().catch(() => {});
     } else if (item.id === "studio-undo") {
@@ -450,18 +446,6 @@
   }
 
   function setupStaticNavigationHandlers() {
-    document.querySelectorAll(".ribbon-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        document.querySelectorAll(".ribbon-btn").forEach((b) => {
-          const isAct = b === btn;
-          b.classList.toggle("active", isAct);
-          b.setAttribute("role", "tab");
-          b.setAttribute("aria-selected", isAct ? "true" : "false");
-        });
-        void ribbonHistory.renderRibbonCategoryTools(btn.dataset.category).catch(() => {});
-      });
-    });
-
     const zoomOutBtn = document.getElementById("btn-zoom-out");
     const zoomInBtn = document.getElementById("btn-zoom-in");
     if (zoomOutBtn) {
@@ -470,45 +454,29 @@
     if (zoomInBtn) {
       zoomInBtn.addEventListener("click", () => applyZoomStepDelta(1));
     }
-    workspacePanels.setupStudioChromeControls(applyZoomPercent, (cmd) => {
-      const modPrefix = getRibbonModulePrefix(activeModule);
-      const fullCmd =
-        host.__EASYOFFICE_RIBBON_CATALOG__.resolveMenuCommand(cmd, activeModule) ||
-        (cmd.startsWith("doc-") || cmd.startsWith("hwp-") ? cmd : modPrefix + "-" + cmd);
-      void ribbonHistory.executeTrackedRibbonCommand(fullCmd).catch(() => {});
-    });
+    workspacePanels.setupStudioChromeControls(
+      applyZoomPercent,
+      (cmd) => {
+        const modPrefix = getRibbonModulePrefix(activeModule);
+        const fullCmd =
+          host.__EASYOFFICE_RIBBON_CATALOG__.resolveMenuCommand(cmd, activeModule) ||
+          (cmd.startsWith("doc-") || cmd.startsWith("hwp-") ? cmd : modPrefix + "-" + cmd);
+        void ribbonHistory.executeTrackedRibbonCommand(fullCmd).catch(() => {});
+      },
+      {
+        save: () => void saveWorkspaceDocument().catch(() => {}),
+        undo: () => void ribbonHistory.performWorkspaceUndo().catch(() => {}),
+        redo: () => void ribbonHistory.performWorkspaceRedo().catch(() => {}),
+        benchmark: () => void workspacePanels.runBenchmarkAction().catch(() => {}),
+      }
+    );
   }
 
-  function setupQatAndRibbonActions() {
-    const qatSave = document.getElementById("qat-save");
-    if (qatSave) {
-      qatSave.addEventListener("click", () => {
-        void saveWorkspaceDocument().catch(() => {});
-      });
-    }
-    const qatUndo = document.getElementById("qat-undo");
-    if (qatUndo) {
-      qatUndo.addEventListener("click", () => {
-        void ribbonHistory.performWorkspaceUndo().catch(() => {});
-      });
-    }
-    const qatRedo = document.getElementById("qat-redo");
-    if (qatRedo) {
-      qatRedo.addEventListener("click", () => {
-        void ribbonHistory.performWorkspaceRedo().catch(() => {});
-      });
-    }
+  function setupPanelAndThemeActions() {
     const btnBench = document.getElementById("btn-run-benchmark");
     if (btnBench) {
       btnBench.addEventListener("click", () => {
         void workspacePanels.runBenchmarkAction().catch(() => {});
-      });
-    }
-
-    const btnRibbonStyle = document.getElementById("btn-ribbon-style");
-    if (btnRibbonStyle) {
-      btnRibbonStyle.addEventListener("click", () => {
-        void ribbonHistory.switchRibbonStyleTracked().catch(() => {});
       });
     }
 
@@ -933,7 +901,7 @@
     sheetRowCounts.Sheet1 = sheetController.getSheetRowCount("Sheet1");
     sheetRowCounts.Sheet2 = sheetController.getSheetRowCount("Sheet2");
     setupStaticNavigationHandlers();
-    setupQatAndRibbonActions();
+    setupPanelAndThemeActions();
     setupDocTableAndSheetTabHandlers();
     docRunsUi.bind();
     setupSheetAndConverterHandlers();
@@ -980,7 +948,6 @@
     }
     workspaceSession.hideBootstrapError();
     setupRibbonChrome(boot);
-    void ribbonHistory.renderRibbonCategoryTools(activeRibbonCategory).catch(() => {});
   }
 
   document.addEventListener("DOMContentLoaded", () => {

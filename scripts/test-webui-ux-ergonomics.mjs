@@ -1,34 +1,23 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
-import { switchModule } from "./test-support/modules.mjs";
+import { switchModule, commandItem } from "./test-support/modules.mjs";
 
 test("design tokens, ARIA tab roles, zoom controls, split compare pane, and format filters stay synchronized", async () => {
   const { document, sandbox, userClick } = await createWorkspaceHarness();
 
-  const ribbonTabs = document.getElementById("ribbon-tabs");
-  assert.equal(ribbonTabs.getAttribute("role"), "tablist");
-  const homeTabBtn = ribbonTabs.querySelector('[data-category="home"]');
-  const viewTabBtn = ribbonTabs.querySelector('[data-category="view"]');
-  assert.equal(homeTabBtn.getAttribute("role"), "tab");
-  assert.equal(homeTabBtn.getAttribute("aria-selected"), "true");
-  assert.equal(viewTabBtn.getAttribute("aria-selected"), "false");
+  for (const id of ["ribbon-tabs", "ribbon-tool-strip", "contextual-tool-badge", "btn-ribbon-style", "btn-chrome-toggle"]) {
+    assert.equal(document.getElementById(id), null, `${id}: the ribbon UI is gone`);
+  }
+  assert.equal(document.querySelector(".qat-btn"), null, "no quick-access toolbar");
+  assert.ok(document.querySelector('[role="menubar"]'), "the menu bar is the command surface");
 
   assert.equal(document.getElementById("tab-strip"), null, "a window has no document tab strip");
 
-  const ctxBadge = document.getElementById("contextual-tool-badge");
-  assert.equal(ctxBadge.textContent, "표·개체 도구");
-  switchModule(document, "HWP");
-  await flushAsyncTurns();
-  assert.equal(ctxBadge.textContent, "쪽·결재·원고지 도구");
-  switchModule(document, "SLIDE");
-  await flushAsyncTurns();
-  assert.equal(ctxBadge.textContent, "발표자·레이저 도구");
-  switchModule(document, "PDF");
-  await flushAsyncTurns();
-  assert.equal(ctxBadge.textContent, "전자결재·주석 도구");
-  switchModule(document, "DOC");
-  await flushAsyncTurns();
+  for (const mod of ["HWP", "SLIDE", "PDF", "DOC"]) {
+    switchModule(document, mod);
+    await flushAsyncTurns();
+  }
 
   const zoomLabel = document.getElementById("status-zoom-label");
   const stage = document.querySelector(".canvas-stage");
@@ -40,12 +29,7 @@ test("design tokens, ARIA tab roles, zoom controls, split compare pane, and form
   assert.equal(zoomLabel.textContent, "100%");
   assert.equal(stage.style.zoom, "100%");
 
-  userClick(viewTabBtn);
-  await flushAsyncTurns();
-  assert.equal(viewTabBtn.getAttribute("aria-selected"), "true");
-  assert.equal(homeTabBtn.getAttribute("aria-selected"), "false");
-
-  const splitBtn = document.querySelector('[data-command-id="document-view-split"]');
+  const splitBtn = commandItem(document, "document-view-split");
   userClick(splitBtn);
   await flushAsyncTurns();
   assert.equal(stage.dataset.splitView, "true");
@@ -69,27 +53,23 @@ test("DOC and HWP module-specific ribbon tools build real DOM structures and dir
   assert.equal(sumCell.dataset.docCount, "2");
   assert.match(document.getElementById("status-command-feedback").textContent, /평균\(AVERAGE\): 500/);
 
-  const modTab = document.querySelector('#ribbon-tabs [data-category="moduleSpecific"]');
-  userClick(modTab);
-  await flushAsyncTurns();
-
   const mergePara = document.createElement("p");
   mergePara.id = "mailmerge-target-line";
   mergePara.textContent = "수신: {{기관명}} {{성명}} ({{일자}})";
   docEditor.appendChild(mergePara);
   docEditor.dispatchEvent({ type: "input", target: mergePara });
 
-  userClick(document.querySelector('[data-command-id="doc-mod-toc"]'));
+  userClick(commandItem(document, "doc-mod-toc"));
   await flushAsyncTurns();
   const tocNav = docEditor.querySelector(".eo-doc-toc");
   assert.ok(tocNav);
   assert.ok(tocNav.querySelectorAll("li").length >= 3);
 
-  userClick(document.querySelector('[data-command-id="doc-mod-footnote"]'));
+  userClick(commandItem(document, "doc-mod-footnote"));
   await flushAsyncTurns();
   assert.ok(docEditor.querySelector(".eo-doc-footnote"));
 
-  userClick(document.querySelector('[data-command-id="doc-mod-mailmerge"]'));
+  userClick(commandItem(document, "doc-mod-mailmerge"));
   await flushAsyncTurns();
   assert.equal(
     document.getElementById("mailmerge-target-line").textContent,
@@ -99,18 +79,15 @@ test("DOC and HWP module-specific ribbon tools build real DOM structures and dir
 
   switchModule(document, "HWP");
   await flushAsyncTurns();
-  userClick(modTab);
-  await flushAsyncTurns();
-
-  userClick(document.querySelector('[data-command-id="hwp-mod-header"]'));
+  userClick(commandItem(document, "hwp-mod-header"));
   await flushAsyncTurns();
   assert.ok(docEditor.querySelector(".eo-hwp-header"));
 
-  userClick(document.querySelector('[data-command-id="hwp-mod-field"]'));
+  userClick(commandItem(document, "hwp-mod-field"));
   await flushAsyncTurns();
   assert.ok(docEditor.querySelector(".eo-hwp-field"));
 
-  userClick(document.querySelector('[data-command-id="hwp-mod-manuscript"]'));
+  userClick(commandItem(document, "hwp-mod-manuscript"));
   await flushAsyncTurns();
   assert.equal(docEditor.classList.contains("manuscript-grid"), true);
   assert.equal(document.getElementById("hwp-manuscript-preview").hidden, false);
@@ -198,10 +175,9 @@ test("SHEET supports keyboard arrow/Tab/Delete cell navigation, inline editing k
   assert.equal(b2.textContent, "1150");
   assert.equal(f2.textContent, "4950");
 
-  userClick(document.querySelector('#ribbon-tabs [data-category="formulasAndData"]'));
   await flushAsyncTurns();
   f2.focus();
-  userClick(document.querySelector('[data-command-id="sheet-data-sort"]'));
+  userClick(commandItem(document, "sheet-data-sort"));
   await flushAsyncTurns();
   assert.equal(document.querySelector('#pane-sheet td[data-cell="B2"]').textContent, "510");
   assert.equal(document.querySelector('#pane-sheet td[data-cell="B6"]').textContent, "1150");
@@ -216,26 +192,25 @@ test("SHEET supports keyboard arrow/Tab/Delete cell navigation, inline editing k
 
   const b9 = document.querySelector('#pane-sheet td[data-cell="B9"]');
   b9.focus();
-  userClick(document.querySelector('[data-command-id="sheet-data-autosum"]'));
+  userClick(commandItem(document, "sheet-data-autosum"));
   await flushAsyncTurns();
   assert.equal(b9.dataset.formula, "=SUM(B2:B6)");
   assert.equal(b9.textContent, "4100");
 
-  userClick(document.querySelector('#ribbon-tabs [data-category="moduleSpecific"]'));
   await flushAsyncTurns();
-  userClick(document.querySelector('[data-command-id="sheet-mod-pivot"]'));
+  userClick(commandItem(document, "sheet-mod-pivot"));
   await flushAsyncTurns();
   assert.match(document.getElementById("sheet-eval-result").textContent, /피벗 집계 · 합계/);
 
-  userClick(document.querySelector('[data-command-id="sheet-mod-chart"]'));
+  userClick(commandItem(document, "sheet-mod-chart"));
   await flushAsyncTurns();
   assert.match(document.getElementById("sheet-eval-result").textContent, /차트 데이터 요약 · 합계/);
 
-  userClick(document.querySelector('[data-command-id="sheet-mod-condfmt"]'));
+  userClick(commandItem(document, "sheet-mod-condfmt"));
   await flushAsyncTurns();
   assert.ok(document.querySelectorAll("#pane-sheet td.condfmt-high").length > 0);
 
-  userClick(document.querySelector('[data-command-id="sheet-mod-freeze"]'));
+  userClick(commandItem(document, "sheet-mod-freeze"));
   await flushAsyncTurns();
   const sheetThead = document.querySelector("#pane-sheet table thead");
   assert.equal(sheetThead.classList.contains("frozen-header"), true);
@@ -259,9 +234,8 @@ test("SHEET supports keyboard arrow/Tab/Delete cell navigation, inline editing k
   assert.equal(sheetThead.classList.contains("frozen-header"), false);
   assert.equal(document.querySelectorAll("#pane-sheet td.condfmt-high").length, 0);
 
-  userClick(document.querySelector('#ribbon-tabs [data-category="formulasAndData"]'));
   await flushAsyncTurns();
-  userClick(document.querySelector('[data-command-id="sheet-data-sort"]'));
+  userClick(commandItem(document, "sheet-data-sort"));
   await flushAsyncTurns();
   assert.equal(
     document.querySelector('#pane-sheet td[data-cell="A2"]').textContent,
@@ -283,13 +257,12 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   await flushAsyncTurns();
   assert.equal(document.querySelectorAll("#slide-thumb-list .slide-thumb").length, 3);
 
-  userClick(document.querySelector('#ribbon-tabs [data-category="insert"]'));
   await flushAsyncTurns();
-  userClick(document.querySelector('[data-command-id="slide-insert-table"]'));
+  userClick(commandItem(document, "slide-insert-table"));
   await flushAsyncTurns();
-  userClick(document.querySelector('[data-command-id="slide-insert-chart"]'));
+  userClick(commandItem(document, "slide-insert-chart"));
   await flushAsyncTurns();
-  userClick(document.querySelector('[data-command-id="slide-insert-shape"]'));
+  userClick(commandItem(document, "slide-insert-shape"));
   await flushAsyncTurns();
 
   assert.equal(
@@ -329,9 +302,8 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
     /010-5555-7777/
   );
 
-  userClick(document.querySelector('#ribbon-tabs [data-category="moduleSpecific"]'));
   await flushAsyncTurns();
-  userClick(document.querySelector('[data-command-id="slide-mod-presenter"]'));
+  userClick(commandItem(document, "slide-mod-presenter"));
   await flushAsyncTurns();
   assert.equal(document.getElementById("slide-stage-box").dataset.presenterMode, "true");
   assert.equal(document.getElementById("slide-laser-dot").hidden, false);
@@ -342,11 +314,10 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
 
   switchModule(document, "PDF");
   await flushAsyncTurns();
-  userClick(document.querySelector('#ribbon-tabs [data-category="moduleSpecific"]'));
   await flushAsyncTurns();
-  userClick(document.querySelector('[data-command-id="pdf-mod-highlight"]'));
+  userClick(commandItem(document, "pdf-mod-highlight"));
   await flushAsyncTurns();
-  userClick(document.querySelector('[data-command-id="pdf-mod-splitmerge"]'));
+  userClick(commandItem(document, "pdf-mod-splitmerge"));
   await flushAsyncTurns();
 
   const pdfCard = document.getElementById("pdf-page-card");
