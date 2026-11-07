@@ -615,7 +615,7 @@
 - **Superseded by PD-094 (부분)**: 이 항목 중 Swift 앱·`swift build`/`swift test`·`scripts/package-macos-release.sh`·Swift 대응 규칙에 해당하는 부분은 PD-094로 대체되었습니다. Rust 엔진·WebUI·Windows 관련 결정은 그대로 유효합니다.
 - **Decision (`PD-055`)**:
   1. **순수 Rust `std` RFC 1951 DEFLATE 압축·해제 엔진 및 PKZIP `METHOD_DEFLATE (8)` 통합 (`crates/easyoffice-formats/src/{deflate.rs,zip_codec.rs,lib.rs}`)**:
-     - 외부 크레이트 의존성이나 `unsafe` 블록 없이 `crates/easyoffice-formats/src/deflate.rs`에 RFC 1951 비압축(`BTYPE=00`)·고정 허프만(`BTYPE=01`)·동적 허프만(`BTYPE=10`) 인플레이터(`inflate_raw`), RFC 1950 2바이트 zlib 래퍼 자동 감지 인플레이터(`inflate_auto`), LZ77 슬라이딩 윈도 + 고정 허프만 디플레이터(`deflate_raw`)를 구현합니다.
+     - 외부 크레이트 의존성이나 `unsafe` 블록 없이 `crates/easyoffice-formats/src/deflate.rs`에 RFC 1951 비압축(`BTYPE=00`)·고정 허프만(`BTYPE=01`)·동적 허프만(`BTYPE=10`) 인플레이터(`inflate_raw`), RFC 1950 2바이트 zlib 래퍼 자동 감지 인플레이터(`inflate_auto`), 해시 체인 LZ77 + 블록별 동적 허프만 디플레이터(`deflate_raw`, `deflate/compress.rs`; 블록마다 저장·고정·동적 중 비트 비용이 가장 작은 형식을 고르며 miniz_oxide의 빠른 레벨 설계를 참고해 안전한 Rust로 다시 구현, 고지는 `THIRD_PARTY_NOTICES.md`)를 구현합니다.
      - 단일 엔트리 해제 예산(`MAX_SINGLE_ENTRY_UNCOMPRESSED_BYTES = 128 MiB`) 또는 누적 해제 예산(`MAX_TOTAL_UNCOMPRESSED_BYTES = 512 MiB`)을 초과하는 스트림은 즉시 `EasyOfficeError::ResourceBudgetExceeded`로 거부(Fail-Closed)합니다.
      - `ZipArchiveCodec`은 `pack_deflate`와 `unpack`에서 `METHOD_STORE (0)` 및 `METHOD_DEFLATE (8)`을 모두 처리하고 원본 바이트에 대한 IEEE 802.3 CRC-32를 검증하며, `FormatDetector::detect`는 Deflate 압축된 `.hwtx`(`Contents/header.xml` `isTemplate="1"`)와 `.ppsx`(`presentationml.slideshow` / `slideshow="1"`) 아카이브를 압축 해제하여 정확히 식별합니다.
   2. **HWP 5.0 압축 스트림(`flags = 0x01`) 및 Swift/Rust 교차 엔진 OLE2 바이너리 호환성 (`crates/easyoffice-formats/src/{ole2_codec.rs,legacy_ole2_codec.rs}`)**:
@@ -1289,7 +1289,7 @@
 ## 54. ZIP 기반 출력 DEFLATE 압축·변환 응답 단일 base64·실제 경로 벤치마크 (PD-079, #124)
 - **Context** 모든 ZIP 기반 출력(DOCX·XLSX·PPTX·PPSX·ODT·ODS·ODP·HWPX·HWTX)이 무압축 `ZipArchiveCodec::pack`만 사용해 약 1MB 텍스트(9,700문단)가 DOCX 1,480,838바이트, HWPX 2,330,134바이트가 되었고, 변환 응답은 같은 base64를 `converted_base64`와 `convertedBase64`에 두 번 담았으며, 벤치마크는 작은 합성 입력만 측정했습니다.
 - **Decision (`PD-079`)**
-  1. **항목별 압축 정책 (`zip_codec.rs`)**: 모든 ZIP 작성기는 `ZipArchiveCodec::pack_compressed`를 사용합니다. 기존 저장소 내 DEFLATE(`deflate::deflate_raw`, 고정 허프만 + 해시 체인 64단계)를 그대로 쓰고, 압축 결과가 원본보다 작지 않은 항목은 무압축으로 둡니다. `ZipArchiveCodec::must_store`가 `mimetype`(ODF/HWPX는 첫 엔트리·무압축·오프셋 30 고정)와 이미 압축된 형식(png·jpg·jpeg·gif·webp·zip·jar·gz·mp3·mp4)을 항상 무압축으로 유지합니다. `pack_deflate`도 같은 예외를 따릅니다. 인코더 프로파일링 결과 압축 비용이 변환 전체의 약 15ms/MB 수준이라 인코더 알고리즘은 바꾸지 않았고, CRC32·시트 DAG 최적화는 #135로 남깁니다.
+  1. **항목별 압축 정책 (`zip_codec.rs`)**: 모든 ZIP 작성기는 `ZipArchiveCodec::pack_compressed`를 사용합니다. 저장소 내 DEFLATE(`deflate::deflate_raw`, 해시 체인 8단계 + 블록별 동적 허프만, 기본 레벨 2)를 쓰고, 압축 결과가 원본보다 작지 않거나 압축률이 90배를 넘는 항목(읽기 쪽 압축 폭탄 한도 100배 미만 유지)은 무압축으로 둡니다. `ZipArchiveCodec::must_store`가 `mimetype`(ODF/HWPX는 첫 엔트리·무압축·오프셋 30 고정)와 이미 압축된 형식(png·jpg·jpeg·gif·webp·zip·jar·gz·mp3·mp4)을 항상 무압축으로 유지합니다. `pack_deflate`도 같은 예외를 따릅니다. 당시 인코더 프로파일링에서 압축 비용이 변환 전체의 약 15ms/MB 수준이었던 고정 허프만 인코더는 동적 허프만 인코더로 교체되어(1MB DOCX 변환 약 -31%, 10만 셀 XLSX 약 -25%, XLSX 크기 -31%), CRC32·시트 DAG 최적화는 #135로 남깁니다.
   2. **응답 필드**: `convert_document_format` 응답은 `convertedBase64` 하나만 보냅니다(`converted_base64` 제거, 응답 크기 약 2.7배 → 1배). UI·오프라인 RPC·자가 진단은 `convertedBase64`만 읽습니다.
   3. **실제 경로 벤치마크 (`benchmark_real.rs`)**: `run_engine_benchmark` 응답과 `--self-test`에 `realPaths`(DOCX→DOCX·DOCX→HWPX 9,700문단 디코드+인코드, 1,000x104셀 XLSX 패킹·언패킹, 5,000 타깃 재계산)를 추가해 시간과 출력 크기를 보고합니다. 동등성(라운드트립 문단·셀 일치)과 출력 크기 상한(문서 500,000바이트, XLSX 3MB)은 항상 검증하고, 시간 상한(10초)은 release 빌드에서만, 느슨하게 검증합니다. debug 빌드는 `timingGated:false`로 수치만 출력합니다.
 - **Measured (release)**
@@ -1644,7 +1644,7 @@
 
 ## 70. 오픈소스 구현 이식으로 엔진 성능 개선: 무의존 유지 + 허용 라이선스 소스 이식 (PD-095)
 
-- **Status** Implemented (base64), In progress (DEFLATE 압축기)
+- **Status** Implemented (base64, DEFLATE 압축기)
 - **Context** 엔진 크레이트는 외부 크레이트 의존성 0(PD-053)입니다. 같은 일을 하는 검증된 오픈소스 Rust 구현과 핫패스를 같은 데이터(1MB DOCX, 10만 셀 XLSX, 1MiB 바이트)로 비교한 결과, base64 인코드·디코드가 3~7배, DEFLATE 압축이 약 6배 느렸고 CSV·XML 이스케이프·UTF-16 디코드는 이미 더 빨랐습니다.
 - **Decision (`PD-095`)**
   1. **무의존 유지**: 엔진 크레이트(`easyoffice-formats`·`sheet`·`layout`·`app`)에 크레이트 의존성을 추가하지 않습니다. 더 빠른 구현은 소스(알고리즘·블록 구조)를 안전한 Rust로 엔진 안에 이식합니다.
@@ -1652,6 +1652,7 @@
   3. **고지**: 이식한 파일 머리에 출처·버전·라이선스를 적고 `THIRD_PARTY_NOTICES.md`의 "Engine code adapted from open-source Rust crates"에 라이선스 전문을 남깁니다.
   4. **근거**: 측정으로 개선이 확인된 것만 이식하고, 기존 동작과의 동등성은 이전 구현을 기준 함수로 둔 테스트로 고정합니다. 핫패스는 release `--self-test` 전후 비교를 PR에 남깁니다.
   5. **base64**(`crates/easyoffice-formats/src/base64_codec.rs`): `base64` 크레이트 `GeneralPurpose` 엔진의 블록 구조(8바이트 적재로 6바이트→8기호, 256칸 디코드 표와 8기호 블록, 공백이 없으면 한 번에 디코드하고 실패했을 때만 공백 제거 후 재시도)를 이식했습니다. IPC 파일 열기·저장과 PDF 서명 경로가 쓰던 세 구현(앱 인코더, PDF 디코더, 위임 함수)을 하나로 합쳤습니다. 1MiB 기준 인코드 1.77→0.6ms, 디코드 4.4→0.56ms. 오류 판정(빈 입력, 4의 배수가 아닌 길이, 알파벳 밖 기호, 마지막 4기호 밖의 `=`)은 이전과 같습니다.
+  6. **DEFLATE 압축기**(`crates/easyoffice-formats/src/deflate/compress.rs`): miniz_oxide 0.8.9(MIT OR Zlib OR Apache-2.0)의 빠른 압축 레벨 설계(한 번의 패스로 해시 체인 LZ77, 블록마다 빈도 수집 후 길이 제한 허프만 코드 생성, 저장·고정·동적 중 비트 비용이 가장 작은 블록 형식 선택)를 안전한 Rust로 다시 구현해 고정 허프만 압축기를 교체했습니다(`unsafe` 없음, 크레이트 의존성 없음). 레벨 1~4 중 기본은 레벨 2(체인 8단계, 지연 매칭 없음)이고 `deflate_raw_level`로 선택할 수 있습니다. 긴 매치는 양 끝 8위치만 해시에 넣고, 해시·체인·토큰 버퍼는 스레드별로 재사용합니다. 출력 바이트가 바뀌므로 자체 점검 deflate 벤치는 기준(이전 고정 허프만) 구현과의 바이트 동일성 대신 양쪽 디코드 동일성과 크기 비교로 검증하고, ZIP 작성기는 압축률 90배를 넘는 항목을 무압축으로 보관합니다. 측정(release `--self-test` 5회 중앙값, 전→후): 1MB DOCX→DOCX 36.1→24.8ms, DOCX→HWPX 41.8→27.7ms, 10만 셀 XLSX 패킹·해제 157→118ms, 압축 결과 크기 DOCX 184,948→182,640B, XLSX 746,192→511,060B; 32KB 반복 XML 왕복 94→70us. 압축 단독(1.48MB 문서 XML) 21.4→10.4ms, 크기 183,696→181,470B.
 - **Why** 오프라인·공급망 표면을 넓히지 않으면서(PD-053) 검증된 구현의 성능을 얻기 위함입니다.
 - **Trade-offs** 이식한 코드는 상류 수정이 자동으로 들어오지 않아 직접 따라가야 합니다. 출력 형식이 바뀌는 이식(예: DEFLATE 압축기)은 바이트 고정 테스트를 왕복 동등성 기준으로 바꿔야 합니다.
 - **Alternatives rejected** 크레이트를 의존성으로 추가(PD-053의 무의존·공급망 원칙 위반), `unsafe` SIMD 구현 이식(코드 원칙의 `unsafe` 금지 위반, 예: CRC32 4중 PCLMULQDQ 폴딩은 문서당 0.1ms 미만 이득이라 보류).
