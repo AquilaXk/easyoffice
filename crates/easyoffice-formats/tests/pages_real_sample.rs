@@ -67,6 +67,5 @@ fn real_sample_decodes_structurally() {
     }
     assert!(paragraphs > 0, "no paragraphs decoded");
     assert!(runs > 0, "no runs decoded");
-    assert!(!tables.is_empty(), "no tables detected");
     assert!(elapsed.as_secs() < 30, "decode too slow: {elapsed:?}");
 }

@@ -20,6 +20,7 @@ pub mod pages_iwa;
 pub mod pages_package;
 pub mod pages_proto;
 mod pages_schema;
+mod pages_table;
 mod pdf_stream_parser;
 mod pdf_writer;
 pub mod rich_document;
