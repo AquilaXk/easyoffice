@@ -1,6 +1,7 @@
 //! Recent documents of the desktop shell (PD-088). The list is stored as plain paths in the app's
 //! data directory and stays in Rust: the WebView only receives an opaque id, the display name and
-//! the document kind, and asks to open an entry by that id.
+//! the document kind, and asks to open an entry by that id. The one thing derived from the file that
+//! the page may also ask for by id is its embedded picture (`preview/`, PD-106).
 
 use crate::windows::{display_name, path_key, WindowKind};
 use serde::Serialize;

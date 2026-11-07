@@ -9,6 +9,11 @@
   // pagination, rewritten as plain JavaScript. EasyOffice differences: six "new document" buttons
   // instead of one, cards show the file name and its kind (the shell never hands paths or previews
   // to the page, PD-088), and opening a file or a recent document goes through the window bridge.
+  //
+  // Previews (PD-106) follow hop's `loadRecentPreview`: the card keeps its skeleton until a picture
+  // arrives. The shell sends the picture embedded in the file as Base64 (never a path or the
+  // document); it is decoded with `createImageBitmap` and drawn into a canvas, so no URL is
+  // involved and the page's image policy does not matter. Any failure leaves the skeleton.
 
   const RECENT_PER_PAGE = 5;
   const NEW_DOCUMENTS = Object.freeze([
@@ -24,6 +29,9 @@
   });
   const PREVIEW_LINES = ["home-preview-line is-wide", "home-preview-line", "home-preview-line is-short", "home-preview-line is-wide"];
   const PREVIEW_CELLS = 6;
+  const PREVIEW_MIMES = new Set(["image/png", "image/jpeg", "image/gif", "image/bmp"]);
+  // Largest Base64 text accepted: the shell's 256 KiB picture limit as Base64 (4 characters per 3 bytes).
+  const PREVIEW_MAX_BASE64_CHARS = Math.ceil((256 * 1024) / 3) * 4;
   const EMPTY_HINT = "아직 최근 문서가 없습니다. 문서를 한 번 열면 여기에 바로 나타납니다.";
   const FILLED_HINT = "창을 열자마자 이어서 작업할 수 있도록 최근에 연 문서를 보여줍니다.";
 
@@ -35,8 +43,25 @@
     while (parent.firstChild) parent.firstChild.remove();
   }
 
+  // The picture bytes of a shell reply, or null when the reply is not a small known image.
+  function decodePreview(view, env) {
+    if (!view || !PREVIEW_MIMES.has(view.mime) || typeof view.base64 !== "string") return null;
+    if (view.base64.length === 0 || view.base64.length > PREVIEW_MAX_BASE64_CHARS) return null;
+    try {
+      const raw = env.atob(view.base64);
+      const bytes = new Uint8Array(raw.length);
+      for (let i = 0; i < raw.length; i += 1) bytes[i] = raw.codePointAt(i);
+      return bytes;
+    } catch {
+      return null;
+    }
+  }
+
   function createHomeScreen(deps) {
     const { document, onOpenRecent } = deps;
+    const env = deps.env || host;
+    const loadPreview = typeof deps.loadPreview === "function" ? deps.loadPreview : null;
+    const canDecode = () => typeof env.createImageBitmap === "function" && typeof env.Blob === "function" && typeof env.atob === "function";
 
     function element(tag, className, text) {
       const el = document.createElement(tag);
@@ -103,6 +128,8 @@
 
     let recents = [];
     let page = 0;
+    let previewRun = 0;
+    let previewBoxes = [];
 
     const totalPages = () => Math.ceil(recents.length / RECENT_PER_PAGE);
 
@@ -121,7 +148,9 @@
       card.title = entry.name;
       const meta = element("div", "home-recent-meta");
       add(meta, element("div", "home-recent-name", entry.name), element("div", "home-recent-path", KIND_LABELS[entry.kind] || ""));
-      add(card, meta, previewSkeleton());
+      const box = previewSkeleton();
+      previewBoxes.push({ id: entry.id, box });
+      add(card, meta, box);
       card.addEventListener("click", (ev) => {
         if (ev.stopPropagation) ev.stopPropagation();
         onOpenRecent(entry.id);
@@ -144,8 +173,54 @@
       nextButton.disabled = pages === 0 || page >= pages - 1;
     }
 
+    // Draws the decoded picture into a canvas that replaces the skeleton of one card.
+    async function showPreview(box, view) {
+      const bytes = decodePreview(view, env);
+      if (!bytes) return;
+      const bitmap = await env.createImageBitmap(new env.Blob([bytes], { type: view.mime }));
+      const canvas = element("canvas", "home-preview-canvas");
+      const context = bitmap.width > 0 && bitmap.height > 0 ? canvas.getContext("2d") : null;
+      if (!context) {
+        bitmap.close?.();
+        return;
+      }
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      context.drawImage(bitmap, 0, 0);
+      bitmap.close?.();
+      clear(box);
+      add(box, canvas);
+      box.classList.add("is-loaded");
+    }
+
+    // One card after the other, after the cards are on screen; a newer render cancels the run, and a
+    // failure of one card (no picture, decode error) leaves only that skeleton.
+    async function loadOnePreview(run, id, box) {
+      try {
+        const view = await loadPreview(id);
+        if (run === previewRun) await showPreview(box, view);
+      } catch {
+        // keep the skeleton
+      }
+    }
+
+    async function loadPreviews(run, boxes, index = 0) {
+      if (run !== previewRun || index >= boxes.length) return;
+      await loadOnePreview(run, boxes[index].id, boxes[index].box);
+      await loadPreviews(run, boxes, index + 1);
+    }
+
+    function startPreviews() {
+      previewRun += 1;
+      if (!loadPreview || !canDecode() || previewBoxes.length === 0) return;
+      const run = previewRun;
+      const boxes = previewBoxes;
+      env.setTimeout(() => { void loadPreviews(run, boxes); }, 0);
+    }
+
     function render() {
       const pages = totalPages();
+      previewBoxes = [];
       page = pages === 0 ? 0 : Math.min(page, pages - 1);
       clear(track);
       recentSection.classList.toggle("is-empty", recents.length === 0);
@@ -156,6 +231,7 @@
         for (let i = items.length; i < RECENT_PER_PAGE; i += 1) add(track, placeholderCard());
       }
       updatePagination();
+      startPreviews();
     }
 
     function changePage(direction) {

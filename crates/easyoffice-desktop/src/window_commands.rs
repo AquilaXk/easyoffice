@@ -90,6 +90,11 @@ impl AppWindows {
         }
     }
 
+    /// The path behind an opaque recent id; it never leaves Rust.
+    pub fn recent_path(&self, id: &str) -> Option<PathBuf> {
+        locked(&self.recents).path_for(id)
+    }
+
     fn next_label(&self) -> String {
         let n = self.counter.fetch_add(1, Ordering::Relaxed);
         let millis = std::time::SystemTime::now()
