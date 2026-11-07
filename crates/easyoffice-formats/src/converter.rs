@@ -260,17 +260,7 @@ impl UniversalFormatConverter {
     ) -> Result<(DocumentFormat, UniversalDocumentModel), EasyOfficeError> {
         let format = FormatDetector::detect(bytes, format_hint)?;
         let model = match format {
-            DocumentFormat::Pages => {
-                let doc = Self::decode_rich(bytes, Some("pages"))?;
-                match doc.content {
-                    crate::DecodedContent::Document(rich) => rich.to_universal_model(),
-                    _ => {
-                        return Err(EasyOfficeError::CorruptedContainer(
-                            "Pages 문서 본문을 읽지 못했습니다.".to_string(),
-                        ))
-                    }
-                }
-            }
+            DocumentFormat::Pages => Self::decode_pages(bytes)?,
             DocumentFormat::Docx => {
                 let p = OoxmlCodec::unpack_docx(bytes)?;
                 Self::from_doc(p.title, p.paragraphs, p.tables, None)
@@ -287,53 +277,8 @@ impl UniversalFormatConverter {
                 let p = RtfCodec::decode(bytes)?;
                 Self::from_doc(p.title, p.paragraphs, p.tables, None)
             }
-            DocumentFormat::Markdown => {
-                let text = std::str::from_utf8(bytes).map_err(|_| {
-                    EasyOfficeError::InvalidUtf8("Markdown UTF-8 디코딩 오류".to_string())
-                })?;
-                let blocks = CommonMarkCodec::parse(text)?;
-                let mut title = "Markdown 문서".to_string();
-                let mut paragraphs = Vec::new();
-                let mut tables: Vec<Vec<Vec<String>>> = Vec::new();
-                for block in blocks {
-                    match block {
-                        MarkdownBlock::Heading { level: 1, text }
-                            if paragraphs.is_empty() && tables.is_empty() =>
-                        {
-                            title = text;
-                        }
-                        MarkdownBlock::Heading { text, .. }
-                        | MarkdownBlock::Paragraph(text)
-                        | MarkdownBlock::BlockQuote(text) => {
-                            paragraphs.push(text);
-                        }
-                        MarkdownBlock::BulletList(items) | MarkdownBlock::NumberedList(items) => {
-                            paragraphs.extend(items);
-                        }
-                        MarkdownBlock::Table(rows) => {
-                            if !rows.is_empty() {
-                                tables.push(rows);
-                            }
-                        }
-                    }
-                }
-                Self::from_doc(title, paragraphs, tables, None)
-            }
-            DocumentFormat::Txt => {
-                let text = std::str::from_utf8(bytes).map_err(|_| {
-                    EasyOfficeError::InvalidUtf8("TXT UTF-8 디코딩 오류".to_string())
-                })?;
-                let mut lines: Vec<String> = text.lines().map(ToString::to_string).collect();
-                let title = if !lines.is_empty() {
-                    lines.remove(0)
-                } else {
-                    "텍스트 문서".to_string()
-                };
-                if lines.is_empty() {
-                    lines.push(title.clone());
-                }
-                Self::from_doc(title, lines, Vec::new(), None)
-            }
+            DocumentFormat::Markdown => Self::decode_markdown(bytes)?,
+            DocumentFormat::Txt => Self::decode_txt(bytes)?,
             DocumentFormat::Hwp | DocumentFormat::Hwt => {
                 let (p, tables) = Hwp5Codec::unpack_multi_tables(bytes)?;
                 let paragraphs = p.paragraphs.into_iter().map(|r| r.text).collect();
@@ -363,31 +308,7 @@ impl UniversalFormatConverter {
                 let sheets = OdfCodec::unpack_ods_multi(bytes)?;
                 Self::from_sheets(sheets)
             }
-            DocumentFormat::Csv | DocumentFormat::Tsv => {
-                let delim = if format == DocumentFormat::Csv {
-                    ','
-                } else {
-                    '\t'
-                };
-                let text = std::str::from_utf8(bytes).map_err(|_| {
-                    EasyOfficeError::InvalidUtf8("CSV/TSV UTF-8 디코딩 오류".to_string())
-                })?;
-                let rows = CsvCodec::parse(text, delim)?;
-                let mut cells = Vec::new();
-                for (r_idx, row) in rows.iter().enumerate() {
-                    for (c_idx, val) in row.iter().enumerate() {
-                        if !val.is_empty() {
-                            cells.push((r_idx as u32, c_idx as u32, val.clone()));
-                        }
-                    }
-                }
-                let title = rows
-                    .first()
-                    .and_then(|r| r.first())
-                    .cloned()
-                    .unwrap_or_else(|| "시트".to_string());
-                Self::from_sheet(title, cells)
-            }
+            DocumentFormat::Csv | DocumentFormat::Tsv => Self::decode_delimited(bytes, format)?,
             DocumentFormat::Pptx | DocumentFormat::Ppsx => {
                 let p = OoxmlCodec::unpack_pptx(bytes)?;
                 Self::from_slides(p.title, p.slides)
@@ -405,24 +326,107 @@ impl UniversalFormatConverter {
                 let (title, slides) = OdfCodec::unpack_odp(bytes)?;
                 Self::from_slides(title, slides)
             }
-            DocumentFormat::Pdf => {
-                let doc = PdfSerializer::parse(bytes)?;
-                let mut paragraphs = Vec::new();
-                let mut agency = None;
-                for page in doc.pages {
-                    for line in page.body_text.lines() {
-                        if !line.is_empty() {
-                            paragraphs.push(line.to_string());
-                        }
-                    }
-                    if agency.is_none() {
-                        agency = page.approval_stamp;
-                    }
-                }
-                Self::from_doc(doc.title, paragraphs, Vec::new(), agency)
-            }
+            DocumentFormat::Pdf => Self::decode_pdf(bytes)?,
         };
         Ok((format, model))
+    }
+
+    fn decode_pages(bytes: &[u8]) -> Result<UniversalDocumentModel, EasyOfficeError> {
+        let doc = Self::decode_rich(bytes, Some("pages"))?;
+        match doc.content {
+            crate::DecodedContent::Document(rich) => Ok(rich.to_universal_model()),
+            _ => Err(EasyOfficeError::CorruptedContainer(
+                "Pages 문서 본문을 읽지 못했습니다.".to_string(),
+            )),
+        }
+    }
+
+    fn decode_markdown(bytes: &[u8]) -> Result<UniversalDocumentModel, EasyOfficeError> {
+        let text = std::str::from_utf8(bytes)
+            .map_err(|_| EasyOfficeError::InvalidUtf8("Markdown UTF-8 디코딩 오류".to_string()))?;
+        let blocks = CommonMarkCodec::parse(text)?;
+        let mut title = "Markdown 문서".to_string();
+        let mut paragraphs = Vec::new();
+        let mut tables: Vec<Vec<Vec<String>>> = Vec::new();
+        for block in blocks {
+            match block {
+                MarkdownBlock::Heading { level: 1, text }
+                    if paragraphs.is_empty() && tables.is_empty() =>
+                {
+                    title = text;
+                }
+                MarkdownBlock::Heading { text, .. }
+                | MarkdownBlock::Paragraph(text)
+                | MarkdownBlock::BlockQuote(text) => paragraphs.push(text),
+                MarkdownBlock::BulletList(items) | MarkdownBlock::NumberedList(items) => {
+                    paragraphs.extend(items);
+                }
+                MarkdownBlock::Table(rows) if !rows.is_empty() => tables.push(rows),
+                MarkdownBlock::Table(_) => {}
+            }
+        }
+        Ok(Self::from_doc(title, paragraphs, tables, None))
+    }
+
+    fn decode_txt(bytes: &[u8]) -> Result<UniversalDocumentModel, EasyOfficeError> {
+        let text = std::str::from_utf8(bytes)
+            .map_err(|_| EasyOfficeError::InvalidUtf8("TXT UTF-8 디코딩 오류".to_string()))?;
+        let mut lines: Vec<String> = text.lines().map(ToString::to_string).collect();
+        let title = if lines.is_empty() {
+            "텍스트 문서".to_string()
+        } else {
+            lines.remove(0)
+        };
+        if lines.is_empty() {
+            lines.push(title.clone());
+        }
+        Ok(Self::from_doc(title, lines, Vec::new(), None))
+    }
+
+    fn decode_delimited(
+        bytes: &[u8],
+        format: DocumentFormat,
+    ) -> Result<UniversalDocumentModel, EasyOfficeError> {
+        let delim = if format == DocumentFormat::Csv {
+            ','
+        } else {
+            '\t'
+        };
+        let text = std::str::from_utf8(bytes)
+            .map_err(|_| EasyOfficeError::InvalidUtf8("CSV/TSV UTF-8 디코딩 오류".to_string()))?;
+        let rows = CsvCodec::parse(text, delim)?;
+        let mut cells = Vec::new();
+        for (r_idx, row) in rows.iter().enumerate() {
+            for (c_idx, val) in row.iter().enumerate() {
+                if !val.is_empty() {
+                    cells.push((r_idx as u32, c_idx as u32, val.clone()));
+                }
+            }
+        }
+        let title = rows
+            .first()
+            .and_then(|r| r.first())
+            .cloned()
+            .unwrap_or_else(|| "시트".to_string());
+        Ok(Self::from_sheet(title, cells))
+    }
+
+    fn decode_pdf(bytes: &[u8]) -> Result<UniversalDocumentModel, EasyOfficeError> {
+        let doc = PdfSerializer::parse(bytes)?;
+        let mut paragraphs = Vec::new();
+        let mut agency = None;
+        for page in doc.pages {
+            paragraphs.extend(
+                page.body_text
+                    .lines()
+                    .filter(|l| !l.is_empty())
+                    .map(ToString::to_string),
+            );
+            if agency.is_none() {
+                agency = page.approval_stamp;
+            }
+        }
+        Ok(Self::from_doc(doc.title, paragraphs, Vec::new(), agency))
     }
 
     /// Converts between formats. A document source converted to a document target goes through

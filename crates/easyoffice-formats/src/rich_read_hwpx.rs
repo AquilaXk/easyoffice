@@ -253,6 +253,101 @@ const SKIPPED_SUBTREES: [&str; 14] = [
     "hp:textart",
 ];
 
+const SHAPE_SKIP_NOTE: &str = "그림·도형·수식·머리말은 가져오지 않았습니다.";
+
+/// Walker state for one `Contents/section*.xml`.
+#[derive(Default)]
+struct SectionWalker {
+    paras: Vec<ParaState>,
+    runs: Vec<RunState>,
+    t_depth: usize,
+    tbl_depth: usize,
+    table_rows: Vec<Vec<String>>,
+    cur_row: Vec<String>,
+    cell_paras: Vec<String>,
+}
+
+impl SectionWalker {
+    fn on_start(&mut self, name: &str, attrs: &[(String, String)]) {
+        match name {
+            "hp:p" => self.paras.push(ParaState {
+                runs: Vec::new(),
+                para_pr: attr(attrs, "paraPrIDRef").unwrap_or("").to_string(),
+                style: attr(attrs, "styleIDRef").unwrap_or("").to_string(),
+            }),
+            "hp:run" => self.runs.push(RunState {
+                char_pr: attr(attrs, "charPrIDRef").unwrap_or("").to_string(),
+                text: String::new(),
+            }),
+            "hp:t" => self.t_depth += 1,
+            "hp:tab" if self.t_depth > 0 => push_text(&mut self.runs, "\t"),
+            "hp:lineBreak" if self.t_depth > 0 => push_text(&mut self.runs, "\n"),
+            "hp:nbSpace" | "hp:fwSpace" if self.t_depth > 0 => push_text(&mut self.runs, " "),
+            "hp:hyphen" if self.t_depth > 0 => push_text(&mut self.runs, "-"),
+            "hp:tbl" => {
+                self.tbl_depth += 1;
+                if self.tbl_depth == 1 {
+                    self.table_rows.clear();
+                }
+            }
+            "hp:tr" if self.tbl_depth == 1 => self.cur_row = Vec::new(),
+            "hp:tc" if self.tbl_depth == 1 => self.cell_paras.clear(),
+            _ => {}
+        }
+    }
+
+    fn on_text(&mut self, text: &str) {
+        if self.t_depth > 0 {
+            push_text(&mut self.runs, text);
+        }
+    }
+
+    fn on_end(&mut self, name: &str, header: &Header, blocks: &mut Vec<RichBlock>) {
+        match name {
+            "hp:t" => self.t_depth = self.t_depth.saturating_sub(1),
+            "hp:run" => {
+                let Some(run) = self.runs.pop() else {
+                    return;
+                };
+                let fmt = header.chars.get(&run.char_pr).cloned().unwrap_or_default();
+                if let Some(top) = self.paras.last_mut() {
+                    push_run(&mut top.runs, &run.text, &fmt);
+                }
+            }
+            "hp:p" => self.finish_paragraph(header, blocks),
+            "hp:tc" if self.tbl_depth == 1 => {
+                while self.cell_paras.last().is_some_and(String::is_empty) {
+                    self.cell_paras.pop();
+                }
+                self.cur_row.push(self.cell_paras.join("\n"));
+                self.cell_paras.clear();
+            }
+            "hp:tr" if self.tbl_depth == 1 => {
+                self.table_rows.push(std::mem::take(&mut self.cur_row));
+            }
+            "hp:tbl" => {
+                self.tbl_depth = self.tbl_depth.saturating_sub(1);
+                if self.tbl_depth == 0 && !self.table_rows.is_empty() {
+                    blocks.push(RichBlock::Table(std::mem::take(&mut self.table_rows)));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn finish_paragraph(&mut self, header: &Header, blocks: &mut Vec<RichBlock>) {
+        let Some(p) = self.paras.pop() else {
+            return;
+        };
+        if self.tbl_depth > 0 {
+            self.cell_paras
+                .push(p.runs.iter().map(|r| r.text.as_str()).collect());
+        } else if p.runs.iter().any(|r| !r.text.trim().is_empty()) {
+            blocks.push(RichBlock::Paragraph(finish_paragraph(header, p)));
+        }
+    }
+}
+
 fn read_section(
     xml: &str,
     header: &Header,
@@ -260,20 +355,14 @@ fn read_section(
     warnings: &mut Vec<String>,
 ) -> Result<(), EasyOfficeError> {
     let events = tokenize(xml)?;
-    let mut paras: Vec<ParaState> = Vec::new();
-    let mut runs: Vec<RunState> = Vec::new();
-    let mut t_depth = 0usize;
-    let mut tbl_depth = 0usize;
-    let mut table_rows: Vec<Vec<String>> = Vec::new();
-    let mut cur_row: Vec<String> = Vec::new();
-    let mut cell_paras: Vec<String> = Vec::new();
+    let mut walker = SectionWalker::default();
     let mut i = 0usize;
     while i < events.len() {
         match &events[i] {
             XmlEvent::Start { name, attrs } => {
                 if SKIPPED_SUBTREES.contains(&name.as_str()) {
                     if !matches!(name.as_str(), "hp:secPr" | "hp:ctrl") {
-                        let note = "그림·도형·수식·머리말은 가져오지 않았습니다.".to_string();
+                        let note = SHAPE_SKIP_NOTE.to_string();
                         if !warnings.contains(&note) {
                             warnings.push(note);
                         }
@@ -281,72 +370,10 @@ fn read_section(
                     i = skip_subtree(&events, i);
                     continue;
                 }
-                match name.as_str() {
-                    "hp:p" => paras.push(ParaState {
-                        runs: Vec::new(),
-                        para_pr: attr(attrs, "paraPrIDRef").unwrap_or("").to_string(),
-                        style: attr(attrs, "styleIDRef").unwrap_or("").to_string(),
-                    }),
-                    "hp:run" => runs.push(RunState {
-                        char_pr: attr(attrs, "charPrIDRef").unwrap_or("").to_string(),
-                        text: String::new(),
-                    }),
-                    "hp:t" => t_depth += 1,
-                    "hp:tab" if t_depth > 0 => push_text(&mut runs, "\t"),
-                    "hp:lineBreak" if t_depth > 0 => push_text(&mut runs, "\n"),
-                    "hp:nbSpace" | "hp:fwSpace" if t_depth > 0 => push_text(&mut runs, " "),
-                    "hp:hyphen" if t_depth > 0 => push_text(&mut runs, "-"),
-                    "hp:tbl" => {
-                        tbl_depth += 1;
-                        if tbl_depth == 1 {
-                            table_rows.clear();
-                        }
-                    }
-                    "hp:tr" if tbl_depth == 1 => cur_row = Vec::new(),
-                    "hp:tc" if tbl_depth == 1 => cell_paras.clear(),
-                    _ => {}
-                }
+                walker.on_start(name, attrs);
             }
-            XmlEvent::Text(text) => {
-                if t_depth > 0 {
-                    push_text(&mut runs, text);
-                }
-            }
-            XmlEvent::End(name) => match name.as_str() {
-                "hp:t" => t_depth = t_depth.saturating_sub(1),
-                "hp:run" => {
-                    if let Some(run) = runs.pop() {
-                        let fmt = header.chars.get(&run.char_pr).cloned().unwrap_or_default();
-                        if let Some(top) = paras.last_mut() {
-                            push_run(&mut top.runs, &run.text, &fmt);
-                        }
-                    }
-                }
-                "hp:p" => {
-                    if let Some(p) = paras.pop() {
-                        if tbl_depth > 0 {
-                            cell_paras.push(p.runs.iter().map(|r| r.text.as_str()).collect());
-                        } else if p.runs.iter().any(|r| !r.text.trim().is_empty()) {
-                            blocks.push(RichBlock::Paragraph(finish_paragraph(header, p)));
-                        }
-                    }
-                }
-                "hp:tc" if tbl_depth == 1 => {
-                    while cell_paras.last().is_some_and(String::is_empty) {
-                        cell_paras.pop();
-                    }
-                    cur_row.push(cell_paras.join("\n"));
-                    cell_paras.clear();
-                }
-                "hp:tr" if tbl_depth == 1 => table_rows.push(std::mem::take(&mut cur_row)),
-                "hp:tbl" => {
-                    tbl_depth = tbl_depth.saturating_sub(1);
-                    if tbl_depth == 0 && !table_rows.is_empty() {
-                        blocks.push(RichBlock::Table(std::mem::take(&mut table_rows)));
-                    }
-                }
-                _ => {}
-            },
+            XmlEvent::Text(text) => walker.on_text(text),
+            XmlEvent::End(name) => walker.on_end(name, header, blocks),
         }
         i += 1;
     }

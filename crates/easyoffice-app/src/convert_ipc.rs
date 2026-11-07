@@ -46,6 +46,107 @@ pub(crate) fn compute_xlsx_formula_cache(model: &UniversalDocumentModel) -> Xlsx
     cache
 }
 
+/// Collects the line-oriented legacy markup into model parts.
+#[derive(Default)]
+struct LegacyBodyAccumulator {
+    paragraphs: Vec<String>,
+    tables: Vec<Vec<Vec<String>>>,
+    current_table: Vec<Vec<String>>,
+    sheet_cells: Vec<(u32, u32, String)>,
+    slides: Vec<(String, Vec<String>, String)>,
+    official_agency: Option<String>,
+}
+
+impl LegacyBodyAccumulator {
+    fn apply_line(&mut self, line: &str, title: &str) {
+        if let Some(agency) = line.strip_prefix("[[AGENCY]]\t") {
+            if !agency.trim().is_empty() {
+                self.official_agency = Some(agency.trim().to_string());
+            }
+        } else if line == "[[TABLE_NEW]]" {
+            if !self.current_table.is_empty() {
+                self.tables.push(std::mem::take(&mut self.current_table));
+            }
+        } else if let Some(row_str) = line.strip_prefix("[[TABLE_ROW]]\t") {
+            self.current_table
+                .push(row_str.split('\t').map(|c| c.trim().to_string()).collect());
+        } else if let Some(cell_str) = line.strip_prefix("[[SHEET_CELL]]\t") {
+            self.push_indexed_cell(cell_str);
+        } else if let Some(a1_str) = line.strip_prefix("[[SHEET_A1]]\t") {
+            self.push_a1_cell(a1_str);
+        } else if let Some(slide_str) = line.strip_prefix("[[SLIDE]]\t") {
+            self.slides.push(Self::parse_slide(slide_str, title));
+        } else {
+            self.paragraphs.push(line.to_string());
+        }
+    }
+
+    fn push_indexed_cell(&mut self, cell_str: &str) {
+        let mut cols = cell_str.splitn(3, '\t');
+        if let (Some(r_s), Some(c_s), Some(v_s)) = (cols.next(), cols.next(), cols.next()) {
+            if let (Ok(r), Ok(c)) = (r_s.trim().parse::<u32>(), c_s.trim().parse::<u32>()) {
+                self.sheet_cells.push((r, c, v_s.to_string()));
+            }
+        }
+    }
+
+    fn push_a1_cell(&mut self, a1_str: &str) {
+        let Some((a1, v_s)) = a1_str.split_once('\t') else {
+            return;
+        };
+        if let Ok(coord) = PackedCellCoordinate::parse_a1(a1.trim()) {
+            self.sheet_cells
+                .push((coord.row(), coord.col(), v_s.to_string()));
+        }
+    }
+
+    fn parse_slide(slide_str: &str, title: &str) -> (String, Vec<String>, String) {
+        let mut cols = slide_str.splitn(3, '\t');
+        let s_title = cols.next().unwrap_or(title).trim().to_string();
+        let bullets: Vec<String> = cols
+            .next()
+            .unwrap_or("")
+            .split(";;")
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(ToString::to_string)
+            .collect();
+        let notes = cols.next().unwrap_or("").trim().to_string();
+        (s_title, bullets, notes)
+    }
+
+    fn into_model(mut self, title: &str) -> UniversalDocumentModel {
+        if !self.current_table.is_empty() {
+            self.tables.push(std::mem::take(&mut self.current_table));
+        }
+        if self.paragraphs.is_empty() && !self.sheet_cells.is_empty() {
+            self.paragraphs = self.sheet_cells.iter().map(|(_, _, v)| v.clone()).collect();
+        }
+        if self.paragraphs.is_empty() {
+            for (s_t, bullets, notes) in &self.slides {
+                if !s_t.is_empty() {
+                    self.paragraphs.push(s_t.clone());
+                }
+                self.paragraphs.extend(bullets.iter().cloned());
+                if !notes.is_empty() {
+                    self.paragraphs.push(notes.clone());
+                }
+            }
+        }
+        if self.paragraphs.is_empty() {
+            self.paragraphs.push(title.to_string());
+        }
+        UniversalDocumentModel {
+            title: title.to_string(),
+            paragraphs: self.paragraphs,
+            tables: self.tables,
+            sheet_cells: self.sheet_cells,
+            slides: self.slides,
+            official_agency: self.official_agency,
+        }
+    }
+}
+
 impl EasyOfficeIpcRouter {
     pub(crate) fn handle_convert_document_format(payload: &str) -> Result<String, EasyOfficeError> {
         let trimmed = payload.strip_prefix('\u{FEFF}').unwrap_or(payload).trim();
@@ -171,90 +272,14 @@ impl EasyOfficeIpcRouter {
     /// Legacy text-markup `body` (`[[TABLE_ROW]]`, `[[SHEET_A1]]`, `[[SLIDE]]`, `[[AGENCY]]` lines).
     /// Kept for backward compatibility; the WebUI sends structured `blocks`/`sheets`/`slides`.
     fn legacy_body_model(body: &str, title: &str) -> UniversalDocumentModel {
-        let mut paragraphs: Vec<String> = Vec::new();
-        let mut tables: Vec<Vec<Vec<String>>> = Vec::new();
-        let mut current_table: Vec<Vec<String>> = Vec::new();
-        let mut sheet_cells: Vec<(u32, u32, String)> = Vec::new();
-        let mut slides: Vec<(String, Vec<String>, String)> = Vec::new();
-        let mut official_agency: Option<String> = None;
-
+        let mut acc = LegacyBodyAccumulator::default();
         for raw_line in body.lines() {
             let line = raw_line.trim();
-            if line.is_empty() {
-                continue;
-            }
-            if let Some(agency) = line.strip_prefix("[[AGENCY]]\t") {
-                if !agency.trim().is_empty() {
-                    official_agency = Some(agency.trim().to_string());
-                }
-            } else if line == "[[TABLE_NEW]]" {
-                if !current_table.is_empty() {
-                    tables.push(std::mem::take(&mut current_table));
-                }
-            } else if let Some(row_str) = line.strip_prefix("[[TABLE_ROW]]\t") {
-                let row: Vec<String> = row_str.split('\t').map(|c| c.trim().to_string()).collect();
-                if !row.is_empty() {
-                    current_table.push(row);
-                }
-            } else if let Some(cell_str) = line.strip_prefix("[[SHEET_CELL]]\t") {
-                let mut cols = cell_str.splitn(3, '\t');
-                if let (Some(r_s), Some(c_s), Some(v_s)) = (cols.next(), cols.next(), cols.next()) {
-                    if let (Ok(r), Ok(c)) = (r_s.trim().parse::<u32>(), c_s.trim().parse::<u32>()) {
-                        sheet_cells.push((r, c, v_s.to_string()));
-                    }
-                }
-            } else if let Some(a1_str) = line.strip_prefix("[[SHEET_A1]]\t") {
-                if let Some((a1, v_s)) = a1_str.split_once('\t') {
-                    if let Ok(coord) = PackedCellCoordinate::parse_a1(a1.trim()) {
-                        sheet_cells.push((coord.row(), coord.col(), v_s.to_string()));
-                    }
-                }
-            } else if let Some(slide_str) = line.strip_prefix("[[SLIDE]]\t") {
-                let mut cols = slide_str.splitn(3, '\t');
-                let s_title = cols.next().unwrap_or(title).trim().to_string();
-                let bullets: Vec<String> = cols
-                    .next()
-                    .unwrap_or("")
-                    .split(";;")
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                    .map(ToString::to_string)
-                    .collect();
-                let notes = cols.next().unwrap_or("").trim().to_string();
-                slides.push((s_title, bullets, notes));
-            } else {
-                paragraphs.push(line.to_string());
+            if !line.is_empty() {
+                acc.apply_line(line, title);
             }
         }
-        if !current_table.is_empty() {
-            tables.push(current_table);
-        }
-        if paragraphs.is_empty() && !sheet_cells.is_empty() {
-            paragraphs = sheet_cells.iter().map(|(_, _, v)| v.clone()).collect();
-        }
-        if paragraphs.is_empty() && !slides.is_empty() {
-            for (s_t, bullets, notes) in &slides {
-                if !s_t.is_empty() {
-                    paragraphs.push(s_t.clone());
-                }
-                paragraphs.extend(bullets.iter().cloned());
-                if !notes.is_empty() {
-                    paragraphs.push(notes.clone());
-                }
-            }
-        }
-        if paragraphs.is_empty() {
-            paragraphs.push(title.to_string());
-        }
-
-        UniversalDocumentModel {
-            title: title.to_string(),
-            paragraphs,
-            tables,
-            sheet_cells,
-            slides,
-            official_agency,
-        }
+        acc.into_model(title)
     }
 
     pub(crate) fn conversion_response(

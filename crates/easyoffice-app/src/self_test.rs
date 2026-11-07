@@ -19,8 +19,7 @@ use crate::{
     EasyOfficeIpcRouter, RibbonCommandRouter, RibbonWorkspaceState,
 };
 
-/// Executes deterministic end-to-end self-tests across all 4 crates and embedded WebUI assets.
-pub fn run_self_test() -> Result<String, EasyOfficeError> {
+fn check_codec_roundtrips() -> Result<PdfDocumentModel, EasyOfficeError> {
     if DocumentFormat::ALL.len() != 20 {
         return Err(EasyOfficeError::CorruptedContainer(
             "지원 포맷 수가 20종이 아닙니다.".to_string(),
@@ -132,6 +131,10 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
         ));
     }
 
+    Ok(pdf_model)
+}
+
+fn check_sheet_and_formats() -> Result<(), EasyOfficeError> {
     let mut sheet = SheetEngine::new("SelfTestSheet");
     sheet.set_cell("A1", "부서")?;
     sheet.set_cell("B1", "예산")?;
@@ -197,6 +200,10 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
         }
     }
 
+    Ok(())
+}
+
+fn check_layout_and_ribbon() -> Result<(), EasyOfficeError> {
     let doc_layout = DocumentPageLayout::compute(PageOrientation::Portrait, 2, 54.0)?;
     if doc_layout.compute_manuscript_grid_200().len() != 200 {
         return Err(EasyOfficeError::InvalidArgument(
@@ -241,6 +248,10 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
         ));
     }
 
+    Ok(())
+}
+
+fn check_domain_engines(pdf_model: &PdfDocumentModel) -> Result<(), EasyOfficeError> {
     let tbl = DocumentTableModel::new(vec![
         vec!["100".to_string()],
         vec!["250".to_string()],
@@ -287,6 +298,10 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
         ));
     }
 
+    Ok(())
+}
+
+fn check_ipc_responses() -> Result<(), EasyOfficeError> {
     let conv_json = EasyOfficeIpcRouter::dispatch(
         "convert_document_format",
         "docx->hwpx|기관보고서|1. 개요\n2. 세부 계획",
@@ -313,73 +328,133 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
             "IPC 부트스트랩 응답 검증 실패".to_string(),
         ));
     }
-    let html_asset = include_str!("../ui/index.html");
-    let css_asset = include_str!("../ui/styles.css");
-    let shell_css_asset = include_str!("../ui/shell.css");
-    let icons_asset = include_str!("../ui/icons.js");
-    let window_bridge_asset = include_str!("../ui/window-bridge.js");
-    let sheet_utils_asset = include_str!("../ui/sheet-utils.js");
-    let pii_scrubber_asset = include_str!("../ui/pii-dom-scrubber.js");
-    let sheet_store_asset = include_str!("../ui/sheet-store.js");
-    let ribbon_catalog_asset = include_str!("../ui/ribbon-catalog.js");
-    let save_payload_asset = include_str!("../ui/save-payload.js");
-    let desktop_bridge_asset = include_str!("../ui/desktop-bridge.js");
-    let workspace_tools_asset = include_str!("../ui/workspace-tools.js");
-    let workspace_panels_asset = include_str!("../ui/workspace-panels.js");
-    let sheet_grid_asset = include_str!("../ui/sheet-grid.js");
-    let sheet_clipboard_asset = include_str!("../ui/sheet-clipboard.js");
-    let sheet_input_asset = include_str!("../ui/sheet-input.js");
-    let sheet_ops_asset = include_str!("../ui/sheet-ops.js");
-    let sheet_format_asset = include_str!("../ui/sheet-format.js");
-    let sheet_controller_asset = include_str!("../ui/sheet-controller.js");
-    let ribbon_history_asset = include_str!("../ui/ribbon-history.js");
-    let workspace_session_asset = include_str!("../ui/workspace-session.js");
-    let file_open_asset = include_str!("../ui/file-open.js");
-    let slide_studio_asset = include_str!("../ui/slide-studio.js");
-    let doc_runs_asset = include_str!("../ui/doc-runs.js");
-    let doc_runs_ui_asset = include_str!("../ui/doc-runs-ui.js");
-    let hwp_host_asset = include_str!("../ui/hwp-host.js");
-    let hwp_session_asset = include_str!("../ui/hwp-session.js");
-    let js_asset = include_str!("../ui/app.js");
-    if !html_asset.contains("EasyOffice")
-        || !css_asset.contains("#5C6BC0")
-        || !shell_css_asset.contains("--eo-chrome-bg")
-        || !icons_asset.contains("__EASYOFFICE_ICONS__")
-        || !window_bridge_asset.contains("__EASYOFFICE_WINDOW_BRIDGE__")
-        || !html_asset.contains("./shell.css")
-        || !html_asset.contains("./icons.js")
-        || !html_asset.contains("./window-bridge.js")
-        || !sheet_utils_asset.contains("__EASYOFFICE_SHEET_UTILS__")
-        || !pii_scrubber_asset.contains("__EASYOFFICE_CREATE_PII_SCRUBBER__")
-        || !sheet_store_asset.contains("__EASYOFFICE_CREATE_SHEET_STORE__")
-        || !ribbon_catalog_asset.contains("__EASYOFFICE_RIBBON_CATALOG__")
-        || !save_payload_asset.contains("__EASYOFFICE_SAVE_PAYLOAD__")
-        || !desktop_bridge_asset.contains("__EASYOFFICE_DESKTOP_BRIDGE__")
-        || !workspace_tools_asset.contains("__EASYOFFICE_CREATE_WORKSPACE_TOOLS__")
-        || !workspace_panels_asset.contains("__EASYOFFICE_CREATE_WORKSPACE_PANELS__")
-        || !sheet_grid_asset.contains("__EASYOFFICE_CREATE_SHEET_GRID__")
-        || !sheet_clipboard_asset.contains("__EASYOFFICE_CREATE_SHEET_CLIPBOARD__")
-        || !sheet_input_asset.contains("__EASYOFFICE_CREATE_SHEET_INPUT__")
-        || !sheet_ops_asset.contains("__EASYOFFICE_CREATE_SHEET_OPS__")
-        || !sheet_format_asset.contains("__EASYOFFICE_CREATE_SHEET_FORMAT__")
-        || !sheet_controller_asset.contains("__EASYOFFICE_CREATE_SHEET_CONTROLLER__")
-        || !ribbon_history_asset.contains("__EASYOFFICE_CREATE_RIBBON_HISTORY__")
-        || !workspace_session_asset.contains("__EASYOFFICE_CREATE_WORKSPACE_SESSION__")
-        || !file_open_asset.contains("__EASYOFFICE_CREATE_FILE_OPEN__")
-        || !slide_studio_asset.contains("__EASYOFFICE_CREATE_SLIDE_STUDIO__")
-        || !doc_runs_asset.contains("__EASYOFFICE_DOC_RUNS__")
-        || !doc_runs_ui_asset.contains("__EASYOFFICE_CREATE_DOC_RUNS_UI__")
-        || !hwp_host_asset.contains("__EASYOFFICE_CREATE_HWP_HOST__")
-        || !html_asset.contains("id=\"pane-hwp\"")
-        || !hwp_session_asset.contains("__EASYOFFICE_CREATE_HWP_SESSION__")
-        || !html_asset.contains("./hwp-host.js")
-        || !html_asset.contains("./hwp-session.js")
-        || !js_asset.contains("compositionstart")
+    Ok(())
+}
+
+/// Embedded WebUI asset checks: `(asset text, required marker)`.
+const WEBUI_ASSET_MARKERS: &[(&str, &str)] = &[
+    (include_str!("../ui/index.html"), "EasyOffice"),
+    (include_str!("../ui/styles.css"), "#5C6BC0"),
+    (include_str!("../ui/shell.css"), "--eo-chrome-bg"),
+    (include_str!("../ui/icons.js"), "__EASYOFFICE_ICONS__"),
+    (
+        include_str!("../ui/window-bridge.js"),
+        "__EASYOFFICE_WINDOW_BRIDGE__",
+    ),
+    (include_str!("../ui/index.html"), "./shell.css"),
+    (include_str!("../ui/index.html"), "./icons.js"),
+    (include_str!("../ui/index.html"), "./window-bridge.js"),
+    (
+        include_str!("../ui/sheet-utils.js"),
+        "__EASYOFFICE_SHEET_UTILS__",
+    ),
+    (
+        include_str!("../ui/pii-dom-scrubber.js"),
+        "__EASYOFFICE_CREATE_PII_SCRUBBER__",
+    ),
+    (
+        include_str!("../ui/sheet-store.js"),
+        "__EASYOFFICE_CREATE_SHEET_STORE__",
+    ),
+    (
+        include_str!("../ui/ribbon-catalog.js"),
+        "__EASYOFFICE_RIBBON_CATALOG__",
+    ),
+    (
+        include_str!("../ui/save-payload.js"),
+        "__EASYOFFICE_SAVE_PAYLOAD__",
+    ),
+    (
+        include_str!("../ui/desktop-bridge.js"),
+        "__EASYOFFICE_DESKTOP_BRIDGE__",
+    ),
+    (
+        include_str!("../ui/workspace-tools.js"),
+        "__EASYOFFICE_CREATE_WORKSPACE_TOOLS__",
+    ),
+    (
+        include_str!("../ui/workspace-panels.js"),
+        "__EASYOFFICE_CREATE_WORKSPACE_PANELS__",
+    ),
+    (
+        include_str!("../ui/sheet-grid.js"),
+        "__EASYOFFICE_CREATE_SHEET_GRID__",
+    ),
+    (
+        include_str!("../ui/sheet-clipboard.js"),
+        "__EASYOFFICE_CREATE_SHEET_CLIPBOARD__",
+    ),
+    (
+        include_str!("../ui/sheet-input.js"),
+        "__EASYOFFICE_CREATE_SHEET_INPUT__",
+    ),
+    (
+        include_str!("../ui/sheet-ops.js"),
+        "__EASYOFFICE_CREATE_SHEET_OPS__",
+    ),
+    (
+        include_str!("../ui/sheet-format.js"),
+        "__EASYOFFICE_CREATE_SHEET_FORMAT__",
+    ),
+    (
+        include_str!("../ui/sheet-controller.js"),
+        "__EASYOFFICE_CREATE_SHEET_CONTROLLER__",
+    ),
+    (
+        include_str!("../ui/ribbon-history.js"),
+        "__EASYOFFICE_CREATE_RIBBON_HISTORY__",
+    ),
+    (
+        include_str!("../ui/workspace-session.js"),
+        "__EASYOFFICE_CREATE_WORKSPACE_SESSION__",
+    ),
+    (
+        include_str!("../ui/file-open.js"),
+        "__EASYOFFICE_CREATE_FILE_OPEN__",
+    ),
+    (
+        include_str!("../ui/slide-studio.js"),
+        "__EASYOFFICE_CREATE_SLIDE_STUDIO__",
+    ),
+    (include_str!("../ui/doc-runs.js"), "__EASYOFFICE_DOC_RUNS__"),
+    (
+        include_str!("../ui/doc-runs-ui.js"),
+        "__EASYOFFICE_CREATE_DOC_RUNS_UI__",
+    ),
+    (
+        include_str!("../ui/hwp-host.js"),
+        "__EASYOFFICE_CREATE_HWP_HOST__",
+    ),
+    (include_str!("../ui/index.html"), "id=\"pane-hwp\""),
+    (
+        include_str!("../ui/hwp-session.js"),
+        "__EASYOFFICE_CREATE_HWP_SESSION__",
+    ),
+    (include_str!("../ui/index.html"), "./hwp-host.js"),
+    (include_str!("../ui/index.html"), "./hwp-session.js"),
+    (include_str!("../ui/app.js"), "compositionstart"),
+];
+
+fn check_embedded_assets() -> Result<(), EasyOfficeError> {
+    if WEBUI_ASSET_MARKERS
+        .iter()
+        .any(|(asset, marker)| !asset.contains(marker))
     {
         return Err(EasyOfficeError::CorruptedContainer(
             "내장 WebUI 자산 무결성 검증 실패".to_string(),
         ));
     }
+    Ok(())
+}
+
+/// Executes deterministic end-to-end self-tests across all 4 crates and embedded WebUI assets.
+pub fn run_self_test() -> Result<String, EasyOfficeError> {
+    let pdf_model = check_codec_roundtrips()?;
+    check_sheet_and_formats()?;
+    check_layout_and_ribbon()?;
+    check_domain_engines(&pdf_model)?;
+    check_ipc_responses()?;
+    check_embedded_assets()?;
 
     if let Some(reason) = crate::hwp_bundle::embedded_integrity_error() {
         return Err(EasyOfficeError::CorruptedContainer(reason));
