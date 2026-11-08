@@ -2,7 +2,7 @@
 //!
 //! After the app has started (never in the smoke run) it asks the public GitHub releases API for the
 //! latest release at most once a day. When that release is a newer, final `x.y.z` version, the page
-//! shows a small card (hop's "update notice") with a button that opens the release page in the
+//! shows a small card (the reference app's "update notice") with a button that opens the release page in the
 //! default browser. Nothing is downloaded or installed: there is no signing key, so no automatic
 //! update.
 //!
@@ -15,8 +15,8 @@
 //! * The time of the last check and the on/off switch live in one small record in the app data
 //!   folder, not in the page.
 //!
-//! The notice card follows hop `apps/studio-host/src/ui/update-notice.ts` (MIT, see
-//! THIRD_PARTY_NOTICES.md); this module replaces hop's signed updater with a notice only.
+//! The notice card follows the reference app `apps/studio-host/src/ui/update-notice.ts` (MIT, see
+//! THIRD_PARTY_NOTICES.md); this module replaces the reference app's signed updater with a notice only.
 
 use crate::save_file::write_document_bytes;
 use serde::{Deserialize, Serialize};

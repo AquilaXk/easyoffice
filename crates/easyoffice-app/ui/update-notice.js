@@ -6,11 +6,11 @@
   // checking (once a day, in Rust); this module only asks it for the state and shows it. There is no
   // download or install here: the shell has no update signing key.
   //
-  // Adapted from hop `apps/studio-host/src/ui/update-notice.ts` (MIT, Copyright (c) 2025-2026
+  // Adapted from the reference app `apps/studio-host/src/ui/update-notice.ts` (MIT, Copyright (c) 2025-2026
   // Edward Kim; see THIRD_PARTY_NOTICES.md): the same card structure and class names (`update-notice`,
   // `update-notice__title|body|meta|error|actions|button`), the same "dismissed per version" rule.
   // TypeScript rewritten as JavaScript, only the idle and available states, and an "open the release
-  // page" action instead of hop's install and restart actions.
+  // page" action instead of the reference app's install and restart actions.
 
   // The first look waits until the window has finished starting; the shell checks in the background
   // right after start, so it looks again once more when the network answer has had time to arrive.

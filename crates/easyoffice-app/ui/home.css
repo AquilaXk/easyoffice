@@ -1,6 +1,6 @@
 /* Start screen, recent-documents dialog (PD-098, step 2).
  *
- * Adapted from hop `apps/studio-host/src/styles/home-screen.css` and `recent-documents-dialog.css`
+ * Adapted from the reference app `apps/studio-host/src/styles/home-screen.css` and `recent-documents-dialog.css`
  * (MIT, Copyright (c) 2025-2026 Edward Kim; see THIRD_PARTY_NOTICES.md), plus the modal base
  * rules (`.modal-overlay`, `.dialog-*`) of rhwp-studio `styles/dialogs.css` they rely on. The
  * values and class names are unchanged except where noted. The screen is a flex child of the app
@@ -503,7 +503,7 @@
   white-space: nowrap;
 }
 
-/* Update notice card (PD-103). Adapted from hop `apps/studio-host/src/styles/update-notice.css`
+/* Update notice card (PD-103). Adapted from the reference app `apps/studio-host/src/styles/update-notice.css`
    (MIT, see THIRD_PARTY_NOTICES.md): the same rules and class names, moved to the top right corner
    and built from the rhwp tokens. */
 .update-notice {

@@ -7,8 +7,8 @@
 //! appended right after it, ending in the generic family (the font database maps the generic
 //! families to Noto Sans KR). The original name stays first, so an installed original still wins.
 //!
-//! Adapted from hop `apps/desktop/src-tauri/src/pdf_font_fallbacks.rs` (MIT, see
-//! THIRD_PARTY_NOTICES.md): hop rewrites a few restricted families with string comparisons in a
+//! Adapted from the reference app `apps/desktop/src-tauri/src/pdf_font_fallbacks.rs` (MIT, see
+//! THIRD_PARTY_NOTICES.md): the reference app rewrites a few restricted families with string comparisons in a
 //! loop; here the names live in one sorted static table that is searched with a binary search over
 //! ASCII-case-folded bytes, so a lookup never allocates, and an SVG without such a name is
 //! returned as is (`Cow::Borrowed`).

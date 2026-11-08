@@ -8768,7 +8768,7 @@ Lightbend, Inc. (https://www.lightbend.com/).
 
 ## Desktop shell PDF export crates (searchable PDF, PD-101)
 
-The desktop shell (`crates/easyoffice-desktop`, not the engine crates) depends on `svg2pdf` (rhwp's vendored copy, MIT OR Apache-2.0, `vendor/svg2pdf`, copied from rhwp `1a76570` `vendor/svg2pdf` with its patch notes `RHWP_PATCHES.md`), `usvg`, `fontdb` and `pdf-writer` to turn the Hangul editor's page SVGs into PDFs with embedded, searchable text. `crates/easyoffice-desktop/src/pdf_export.rs` adapts the page assembly of rhwp's PDF renderer and of hop `apps/desktop/src-tauri/src/pdf_export.rs` (MIT, Copyright (c) 2025-2026 Edward Kim). Licenses of the 77 crates in the dependency closure of the four (checked with `cargo metadata`):
+The desktop shell (`crates/easyoffice-desktop`, not the engine crates) depends on `svg2pdf` (rhwp's vendored copy, MIT OR Apache-2.0, `vendor/svg2pdf`, copied from rhwp `1a76570` `vendor/svg2pdf` with its patch notes `RHWP_PATCHES.md`), `usvg`, `fontdb` and `pdf-writer` to turn the Hangul editor's page SVGs into PDFs with embedded, searchable text. `crates/easyoffice-desktop/src/pdf_export.rs` adapts the page assembly of rhwp's PDF renderer and of the reference app `apps/desktop/src-tauri/src/pdf_export.rs` (MIT, Copyright (c) 2025-2026 Edward Kim). Licenses of the 77 crates in the dependency closure of the four (checked with `cargo metadata`):
 
 | License expression | Crates |
 | --- | --- |
@@ -8792,11 +8792,11 @@ No MPL, GPL or unlicensed crate is in the closure.
 
 The desktop shell (`crates/easyoffice-desktop`, not the engine crates) depends on `ureq` 2.x (HTTP over the operating system's TLS stack through `native-tls`), `native-tls` and `open` to ask the public releases address for the newest release at most once a day and to open the release page in the default browser. Licenses of the 15 crates these three add to the shell (checked with `cargo metadata`; `open`, `is-docker` and `is-wsl` are MIT): `ureq`, `native-tls`, `openssl-probe`, `security-framework`, `security-framework-sys`, `foreign-types`, `foreign-types-shared`, `openssl-macros`, `base64`, `schannel` are MIT OR Apache-2.0 (or MIT/Apache-2.0, or MIT); `openssl` is Apache-2.0 and `openssl-sys` is MIT (Linux builds only; the OpenSSL library itself is the system's own and is not bundled). No bundled TLS library, no MPL, GPL or unlicensed crate.
 
-## hop (code adapted)
+## Reference app (code adapted)
 
-hop (MIT, https://github.com/golbin/hop, reference commit `80888af`, v0.4.5) is the model for the EasyOffice window UI (PD-098) and for the build and verification patterns of the `apps/hwp-studio` overlay (pinned upstream checkout, Vite alias overlay with an override manifest, vendored WebAssembly with provenance, font policy). Where hop code is ported, the TypeScript is rewritten as plain JavaScript or the CSS is copied with its tokens renamed, each ported file starts with a header naming its hop source, and the file is listed here first:
+The reference app (MIT, reference commit `80888af`, v0.4.5) is the model for the EasyOffice window UI (PD-098) and for the build and verification patterns of the `apps/hwp-studio` overlay (pinned upstream checkout, Vite alias overlay with an override manifest, vendored WebAssembly with provenance, font policy). Where the reference app code is ported, the TypeScript is rewritten as plain JavaScript or the CSS is copied with its tokens renamed, each ported file starts with a header naming its reference app source, and the file is listed here first:
 
-| EasyOffice file | hop source | Change |
+| EasyOffice file | Reference app source | Change |
 | --- | --- | --- |
 | `crates/easyoffice-desktop/src/pdf_font_fallbacks.rs` | `apps/desktop/src-tauri/src/pdf_font_fallbacks.rs` | Rewritten around one sorted static table of document font names with an allocation-free binary search; fallback chains name the platform's installed Korean fonts |
 | `crates/easyoffice-desktop/src/pdf_export.rs` | `apps/desktop/src-tauri/src/pdf_export.rs` | Page SVGs come from the editor as strings and are converted with svg2pdf directly (no native rhwp core); limits and fail-closed pages added |

@@ -4,7 +4,7 @@
   // HWP printing from the shell window (PD-104). The embedded editor cannot print on its own (its
   // frame is sandboxed without popups), so the shell asks it for the pages in small batches
   // (`getPrintPages`), puts each sanitized page SVG into a hidden root of this document and prints
-  // the window. The approach follows hop's print dialog (all pages in a hidden root, one @page size
+  // the window. The approach follows the reference app's print dialog (all pages in a hidden root, one @page size
   // per paper size, a progress text), with a cancel button, a batch-by-batch fetch that never holds
   // every SVG string at once, and a hard budget for the text kept in the page. The window print
   // dialog is the Web `print()`, which the desktop webview implements on every platform, so no shell
@@ -53,7 +53,7 @@
     return Number.isFinite(value) && value >= MIN_PAPER_MM && value <= MAX_PAPER_MM;
   }
 
-  // ---- SVG sanitizing (adapted from hop's print dialog) ---------------------------------------
+  // ---- SVG sanitizing (adapted from the reference app's print dialog) ---------------------------------------
 
   function isSafeReference(value) {
     const text = String(value).trim().toLowerCase();

@@ -31,7 +31,7 @@ test("the PDF toolbar is an rhwp toolbar: icon button, sb-* fields, tb-btn actio
   }
 });
 
-// Format selects are hop combo boxes: the native select stays as the hidden state holder.
+// Format selects are the reference app combo boxes: the native select stays as the hidden state holder.
 function assertCombo(document, id) {
   const select = document.getElementById(id);
   assert.ok(select.classList.contains("sb-combo"), `${id} is a combo box`);

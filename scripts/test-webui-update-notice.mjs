@@ -33,7 +33,7 @@ async function openWithNotice(handlers) {
   return { ...harness, calls, state, card: harness.document.querySelector(".update-notice") };
 }
 
-test("a newer release shows hop's card with the version and two actions", async () => {
+test("a newer release shows the reference app's card with the version and two actions", async () => {
   const { card, document } = await openWithNotice();
   assert.ok(card, "the card exists");
   assert.equal(card.hidden, false);
@@ -103,12 +103,12 @@ test("the help menu switch turns the check off in the shell and reflects the ans
   assert.equal(card.hidden, true, "no notice while the check is off");
 });
 
-test("the card is built from tokens only, hop's module names its source, and the shell grants exactly the three commands", () => {
+test("the card is built from tokens only, the reference app's module names its source, and the shell grants exactly the three commands", () => {
   const rules = rulesFor(read("crates/easyoffice-app/ui/home.css"), [".update-notice"]);
   assert.ok(rules.length >= 8, "the card rules were found");
   for (const { selector, body } of rules) assert.equal(hasColorLiteral(body), false, `${selector} has a literal colour`);
   const js = read("crates/easyoffice-app/ui/update-notice.js");
-  assert.match(js, /Adapted from hop/);
+  assert.match(js, /Adapted from the reference app/);
   assert.ok(js.includes("Edward Kim"));
   assert.ok(read("THIRD_PARTY_NOTICES.md").includes("ui/update-notice.js"));
   const permissions = JSON.parse(read("crates/easyoffice-desktop/capabilities/main-window.json")).permissions;

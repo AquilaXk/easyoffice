@@ -2,7 +2,7 @@
  * Override manifest for the hwp-studio overlay (PD-081).
  *
  * config/rhwp-studio-overrides.json lists every overlay file that replaces or extends an upstream
- * rhwp-studio file (hop's studio-host pattern). This module validates the manifest, keeps it in
+ * rhwp-studio file (the reference app's studio-host pattern). This module validates the manifest, keeps it in
  * sync with apps/hwp-studio/src, and pins the upstream baseline: each counterpart records the
  * SHA-256 of the upstream file the override was written against (line endings normalised), so an
  * rhwp bump that changes a forked file fails until the override is reviewed.
@@ -29,7 +29,7 @@ const OVERLAY_NON_OVERRIDE = new Set([
   "src/embed/shell-menu.ts",
   // EasyOffice-only module: page batches for the shell's print path (getPrintPages RPC).
   "src/embed/print-batch.ts",
-  // EasyOffice-only module (hop port): the 보기 menu toggle for the toolbar labels.
+  // EasyOffice-only module (참조 앱 port): the 보기 menu toggle for the toolbar labels.
   "src/ui/toolbar-labels.ts",
 ]);
 

@@ -1,4 +1,4 @@
-// EasyOffice-only module, adapted from hop `apps/studio-host/src/host/toolbar-labels.ts` (MIT; see
+// EasyOffice-only module, adapted from the reference app `apps/studio-host/src/host/toolbar-labels.ts` (MIT; see
 // THIRD_PARTY_NOTICES.md): the 보기 menu's "도구 상자 라벨 표시" check item. The choice is a window
 // display preference, kept in localStorage; the page-side rules are in eo-overrides.css.
 import type { CommandDef } from '@/command/types';

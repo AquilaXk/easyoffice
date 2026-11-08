@@ -6,7 +6,7 @@ import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs
 import { cssDeclarations } from "./test-support/css-declarations.mjs";
 import { hasColorLiteral, rulesFor, ruleWithSelector } from "./test-support/css-rules.mjs";
 
-// PD-098 step 4b: the slide screen wears rhwp-studio's toolbar classes and hop's custom select.
+// PD-098 step 4b: the slide screen wears rhwp-studio's toolbar classes and the reference app's custom select.
 
 const UI_DIR = new URL("../crates/easyoffice-app/ui/", import.meta.url);
 const read = (name) => fs.readFileSync(fileURLToPath(new URL(name, UI_DIR)), "utf8");
@@ -83,9 +83,9 @@ test("the laser pointer button reports its state through aria-pressed and its ti
   assert.equal(laser.title, "레이저 포인터: 끔");
 });
 
-test("custom-select.js names hop as its source and is in the notices; combo rules ship in toolbar.css", () => {
+test("custom-select.js names the reference app as its source and is in the notices; combo rules ship in toolbar.css", () => {
   const source = read("custom-select.js");
-  assert.match(source, /Adapted from hop/);
+  assert.match(source, /Adapted from the reference app/);
   assert.ok(source.includes("Edward Kim"));
   const notices = fs.readFileSync(new URL("../THIRD_PARTY_NOTICES.md", import.meta.url), "utf8");
   assert.ok(notices.includes("ui/custom-select.js"));

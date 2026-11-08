@@ -2,7 +2,7 @@
 //!
 //! The editor renders each page to SVG; this module turns those pages into one PDF whose text is
 //! real text (embedded font subsets with a `ToUnicode` map), so the result can be searched and
-//! copied. Adapted from the page assembly of the rhwp PDF renderer and from hop's
+//! copied. Adapted from the page assembly of the rhwp PDF renderer and from the reference app's
 //! `pdf_export.rs` (MIT, see THIRD_PARTY_NOTICES.md): one `svg2pdf` chunk per page, chunks
 //! renumbered into one object space, a form XObject per page placed on a media box in points.
 //!

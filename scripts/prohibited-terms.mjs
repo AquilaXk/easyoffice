@@ -18,6 +18,8 @@ export const PROHIBITED_CONTENT_B64 = [
   "c3ViYWdlbnQ=",             // internal orchestration term
   "Q28tQXV0aG9yZWQtQnk6",     // attribution header
   "Q2xhdWRlLVNlc3Npb246",     // session attribution trailer
+  "XGJob3BcYg==",           // reference app name (word)
+  "Z29sYmlu",             // reference app owner
 ];
 
 export const PROHIBITED_PATTERNS = PROHIBITED_CONTENT_B64.map(

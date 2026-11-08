@@ -1,5 +1,5 @@
 /**
- * EasyOffice overlay build of rhwp-studio (PD-081), following hop's studio-host pattern:
+ * EasyOffice overlay build of rhwp-studio (PD-081), following the reference app's studio-host pattern:
  * upstream modules are aliased to third_party/rhwp/rhwp-studio/src, the modules listed in
  * config/rhwp-studio-overrides.json are replaced by the files in ./src, and the vendored
  * WASM package (vendor/rhwp-core) is used instead of a local wasm-pack build.

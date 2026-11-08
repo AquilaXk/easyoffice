@@ -1,7 +1,7 @@
 //! Native macOS menu bar (PD-102).
 //!
 //! macOS shows one application menu bar, so the app installs one: 앱 / 파일 / 편집 / 보기 / 윈도우.
-//! Windows and Linux keep the menu bar the page draws. Adapted from hop
+//! Windows and Linux keep the menu bar the page draws. Adapted from the reference app
 //! `apps/desktop/src-tauri/src/menu.rs` (MIT, see THIRD_PARTY_NOTICES.md): the same menu layout and
 //! the same "menu id -> the focused window only" delivery, with EasyOffice's differences:
 //!

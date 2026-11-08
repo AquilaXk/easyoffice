@@ -5,7 +5,7 @@
   // the DOM as the state holder (value, options, change events) and this layer draws the visible
   // control and its menu.
   //
-  // Adapted from hop `apps/studio-host/src/ui/custom-select.ts` (MIT, Copyright (c) 2025-2026
+  // Adapted from the reference app `apps/studio-host/src/ui/custom-select.ts` (MIT, Copyright (c) 2025-2026
   // Edward Kim; see THIRD_PARTY_NOTICES.md): the same class names (`custom-select`,
   // `custom-select-trigger/-value/-arrow/-menu/-option/-group`, `native-select-hidden`), the same
   // keyboard model (Enter/Space toggle, Esc closes, arrows step) and the same commit order

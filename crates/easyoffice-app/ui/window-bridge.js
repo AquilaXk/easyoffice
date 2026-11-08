@@ -293,7 +293,7 @@
       return entries;
     }
 
-    // The full list as a dialog (hop's recent-documents dialog); a pick opens like a menu item.
+    // The full list as a dialog (the reference app's recent-documents dialog); a pick opens like a menu item.
     async function chooseRecent() {
       const dialogs = host.__EASYOFFICE_RECENT_DIALOG__;
       if (!dialogs || recentEntries.length === 0) return;

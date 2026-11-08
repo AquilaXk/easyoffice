@@ -2,7 +2,7 @@
 
 [English](README.md) | [한국어](README.ko.md)
 
-EasyOffice (`v0.1.0`) is a 100% standalone, serverless, offline-capable all-in-one productivity and office suite for macOS and Windows: a Rust engine and an offline WebUI hosted in one Tauri v2 desktop shell, following the rhwp-studio window chrome of hop with light and dark themes. It unifies **Document**, **Sheet**, **Slide**, **Korean Office (HWP / HWPX)**, and **PDF Studio** into a single lightweight workspace with bit-level container codecs, deterministic formula evaluation, offline smart document assistance, and fail-closed security guards.
+EasyOffice (`v0.1.0`) is a 100% standalone, serverless, offline-capable all-in-one productivity and office suite for macOS and Windows: a Rust engine and an offline WebUI hosted in one Tauri v2 desktop shell, following the rhwp-studio window chrome of the reference app with light and dark themes. It unifies **Document**, **Sheet**, **Slide**, **Korean Office (HWP / HWPX)**, and **PDF Studio** into a single lightweight workspace with bit-level container codecs, deterministic formula evaluation, offline smart document assistance, and fail-closed security guards.
 
 ---
 
@@ -19,7 +19,7 @@ EasyOffice (`v0.1.0`) is a 100% standalone, serverless, offline-capable all-in-o
 - **Bit-level engine work**: hardware-accelerated and slicing-by-8 `IeeeCrc32`, DEFLATE, SWAR UTF-16/XML/CSV scanning, 64-bit `PackedCellCoordinate` (row in the upper 32 bits, column in the lower 32), `SectorBitset`, checked arithmetic everywhere and no `unsafe`. `--self-test` runs the benchmarks and checks the results match.
 - **Spreadsheet engine** (`SheetEngine`, `WorkbookEngine`): **122 built-in functions** (math, statistics, logic, lookup, text, finance such as `PMT`/`NPV`/`IRR`, date/time, information), a dependency DAG with slot memoisation, pivots (`compute_pivot`), charts, conditional formatting and data validation; cell styles and column widths round-trip through XLSX/ODS.
 - **Offline smart tools and security**: `UniversalFormatConverter` batch conversion with output verification by `FormatDetector`, `LocalSmartAssistant` (extractive summary, writing diagnostics, document diff), fail-closed `FormatDetector`/`XmlSanitizer`/`DocumentSecurityAuditor` (magic-byte spoofing, ZIP bombs, path traversal, XXE, PII scrubbing).
-- **rhwp-studio / hop UI tokens** (PD-098) with one SVG icon set, system/light/dark themes and WCAG 2.1 AA contrast checked by tests.
+- **rhwp-studio UI tokens** (PD-098) with one SVG icon set, system/light/dark themes and WCAG 2.1 AA contrast checked by tests.
 
 ---
 

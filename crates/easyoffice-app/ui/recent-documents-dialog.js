@@ -4,7 +4,7 @@
   // "최근 문서" dialog (PD-098, step 2): a listbox of the recent documents with 열기 / 취소,
   // arrow keys, Enter, Escape, double click and a click on the backdrop.
   //
-  // Adapted from hop `apps/studio-host/src/ui/recent-documents-dialog.ts` (MIT, Copyright (c)
+  // Adapted from the reference app `apps/studio-host/src/ui/recent-documents-dialog.ts` (MIT, Copyright (c)
   // 2025-2026 Edward Kim; see THIRD_PARTY_NOTICES.md), rewritten as plain JavaScript with the same
   // class names. EasyOffice differences: entries are `{ id, name, kind }` (the page never sees
   // paths), the second line shows the document kind, and there is no "목록 비우기" button because

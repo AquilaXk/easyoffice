@@ -27,7 +27,9 @@ test("attribution trailers in any commit or the title are reported", () => {
 
 test("every shared prohibited term is caught case-insensitively", () => {
   for (const b64 of PROHIBITED_CONTENT_B64) {
-    assert.equal(findProhibited("t", `x ${decode(b64).toUpperCase()} y`).length >= 1, true, b64);
+    // Word-boundary entries (\b…\b) are matched as the bare word.
+    const sample = decode(b64).replaceAll("\\b", "");
+    assert.equal(findProhibited("t", `x ${sample.toUpperCase()} y`).length >= 1, true, b64);
   }
 });
 
@@ -42,4 +44,8 @@ test("commit ranges are parsed from git log records and must be SHAs", () => {
     { sha: "e".repeat(40), message: "둘째" },
   ]);
   assert.throws(() => commitMessages("main", "HEAD", fake), /SHAs/);
+});
+
+test("word-boundary entries do not flag longer words that contain them", () => {
+  assert.equal(findProhibited("t", "shop hopper chop shopping").length, 0);
 });

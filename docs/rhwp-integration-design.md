@@ -4,7 +4,7 @@
 - 대상 저장소: `aquilaxk/easyoffice` `origin/main` = `54edd83` (#121 Windows 데스크톱 셸 병합 직후). #111(파일 열기)은 아직 `feat/webui-file-open`(`9c0911c`)에만 있다.
 - 참조 저장소(읽기 전용, 실행·빌드하지 않음)
   - rhwp: `https://github.com/edwardkim/rhwp` @ `1a76570e833917d15817415a53c09ad61ab3203f` (v0.8.7, 2026-10-06). MIT.
-  - hop: `https://github.com/golbin/hop` @ `80888af2b8c8a18aea16f824d2d92309a290b1ad` (v0.4.5, 2026-10-08). MIT. 이 커밋의 서브모듈 gitlink도 rhwp `1a76570e…`(v0.8.7)를 가리킨다.
+  - 참조 앱: `` @ `80888af2b8c8a18aea16f824d2d92309a290b1ad` (v0.4.5, 2026-10-08). MIT. 이 커밋의 서브모듈 gitlink도 rhwp `1a76570e…`(v0.8.7)를 가리킨다.
 - 표기: `[확인]` = 소스에서 직접 확인, `[추정]` = 실측하지 않은 추정치. 추정치는 첫 구현 PR에서 실측으로 바꿔야 한다.
 
 ---
@@ -13,10 +13,10 @@
 
 1. **rhwp는 HWP/HWPX/HWP3/HML 전용**이다. DOCX·ODT·DOC 문서 본문을 읽거나 쓰는 코드가 없다(`src/`에서 `wordprocessingml`·`.docx`·`odt` 0건). `crates/rhwp-ooxml-chart`는 HWPX 안에 든 차트 XML만 처리한다. 따라서 **HWP 모듈만 rhwp로 바꾸고, DOC 모듈은 EasyOffice 엔진을 유지**하되 문자 런(run) 모델을 보강한다(§2.6, 작업 항목 7).
 2. **임베딩 방식: 같은 출처(same-origin) `<iframe>` 격리 + MessagePort RPC**를 권장한다. rhwp-studio에 이미 있는 임베드 프로토콜(`rhwp-studio/src/embed/{protocol,runtime,rpc-router}.ts`: `loadFile`, `exportHwp`, `exportHwpx`, `notifySaved`, `getDocumentState`, `automation.execute`, `chrome.set`, `document-change-events-v1`)을 그대로 쓴다. iframe 안의 편집기에는 **Tauri IPC 권한을 주지 않는다**. 파일 I/O는 모두 기존 부모 셸(`desktop-bridge.js` → `save_document_file`, #111 `openDocumentFromBytes`)이 맡는다.
-3. **hop에서 가져올 것은 "패턴"이다**: 서브모듈 고정·검증(`config/rhwp-upstream.json`, `scripts/verify-rhwp-upstream.mjs`), Vite alias 오버레이(`apps/studio-host/vite.config.ts`, `hop-overrides.ts`), 미리 빌드한 WASM 벤더링과 출처 증명(`vendor/rhwp-core/PROVENANCE.json`), 단계식 원자적 저장(`state.rs` `atomic_write`, `commit_staged_hwp_save`), 단일 인스턴스와 파일 열기 이벤트(`pending_open.rs`), 글꼴 카탈로그 정책(`assets/fonts/FONTS.md`, `font-catalog.ts`).
-   - hop의 권한 모델(`fs:allow-write`·`fs:allow-remove`를 WebView에 주고 경로를 JS가 다루는 방식)은 EasyOffice PD-074의 fail-closed 경계와 맞지 않으므로 **가져오지 않는다**.
+3. **참조 앱에서 가져올 것은 "패턴"이다**: 서브모듈 고정·검증(`config/rhwp-upstream.json`, `scripts/verify-rhwp-upstream.mjs`), Vite alias 오버레이(`apps/studio-host/vite.config.ts`, `참조 앱-overrides.ts`), 미리 빌드한 WASM 벤더링과 출처 증명(`vendor/rhwp-core/PROVENANCE.json`), 단계식 원자적 저장(`state.rs` `atomic_write`, `commit_staged_hwp_save`), 단일 인스턴스와 파일 열기 이벤트(`pending_open.rs`), 글꼴 카탈로그 정책(`assets/fonts/FONTS.md`, `font-catalog.ts`).
+   - 참조 앱의 권한 모델(`fs:allow-write`·`fs:allow-remove`를 WebView에 주고 경로를 JS가 다루는 방식)은 EasyOffice PD-074의 fail-closed 경계와 맞지 않으므로 **가져오지 않는다**.
 4. **빌드: rhwp는 EasyOffice Cargo 워크스페이스에 넣지 않는다**(1단계~5단계).
-   - WASM은 hop처럼 `vendor/rhwp-core/`에 커밋하고 SHA-256으로 검증한다. 원본 빌드 기준은 1.93.1 + wasm-pack 0.14.0이다.
+   - WASM은 참조 앱처럼 `vendor/rhwp-core/`에 커밋하고 SHA-256으로 검증한다. 원본 빌드 기준은 1.93.1 + wasm-pack 0.14.0이다.
    - 편집기 번들은 `apps/hwp-studio/`(Vite)에서 빌드해 `crates/easyoffice-app/ui/hwp-studio/`(gitignore 대상)로 출력한다.
    - 그러면 엔진 크레이트 MSRV 1.85와 데스크톱 1.90은 그대로 유지된다.
 5. **위생 가드의 최소 변경**: 파일 시스템 순회에서 `third_party/rhwp`(서브모듈 작업 트리)와 빌드 산출물 `ui/hwp-studio/`를 루트 기준 경로로 제외한다. 대신 "gitlink 고정 커밋·원격 URL·`.gitmodules` 허용 목록"을 새 검사로 추가한다.
@@ -60,13 +60,13 @@
 
 배포용·암호 문서 읽기는 현재 EasyOffice `Ole2SecurityGuard`가 `0x02`/`0x04` 비트로 fail-closed 차단하는 대상과 겹친다. 정책 결정이 필요하다(§8 Q5).
 
-### 1.2 hop에서 재사용 (코드 복사가 아니라 설계 패턴. 복사하면 MIT 고지 필요)
+### 1.2 참조 앱에서 재사용 (코드 복사가 아니라 설계 패턴. 복사하면 MIT 고지 필요)
 
-| hop 경로 | 가져올 것 | 버릴 것 / 바꿀 것 |
+| 참조 앱 경로 | 가져올 것 | 버릴 것 / 바꿀 것 |
 |---|---|---|
 | `.gitmodules`, `config/rhwp-upstream.json`(`version`/`tag`/`commit`/`rustToolchain 1.93.1`/`wasmPackVersion 0.14.0`) | 단일 원천(SSOT) 고정 파일 | `cargoPatches`는 네이티브 어댑터(§3.6)를 도입할 때만 사용 |
 | `scripts/verify-rhwp-upstream.mjs`, `docs/operations/RHWP_UPDATE.md` | 검증 항목 전체: 원격 URL, HEAD = 고정 커밋, 작업 트리 clean, 버전 3종 일치, 벤더 파일 크기·SHA-256, 오버라이드 원본 해시 | `pnpm` 대신 Node 내장 모듈만 사용(EasyOffice 스크립트 관례) |
-| `apps/studio-host/vite.config.ts`, `hop-overrides.ts`, `config/rhwp-studio-overrides.json` | alias 순서(오버라이드 id → `@wasm/rhwp.js` → `@/upstream` → `@upstream` → `@`). 각 오버라이드 항목에 `strategy`(extension/fork/contribution)와 `reason`을 필수로 둠. 원본 파일의 SHA-256 기준선 | hop의 데스크톱 전용 오버라이드(`tauri-bridge.ts`, `chunked-fs.ts`, `home-screen`, `recent-documents`, `update-notice`)는 쓰지 않음. EasyOffice는 부모 셸이 그 역할을 함 |
+| `apps/studio-host/vite.config.ts`, `참조 앱-overrides.ts`, `config/rhwp-studio-overrides.json` | alias 순서(오버라이드 id → `@wasm/rhwp.js` → `@/upstream` → `@upstream` → `@`). 각 오버라이드 항목에 `strategy`(extension/fork/contribution)와 `reason`을 필수로 둠. 원본 파일의 SHA-256 기준선 | 참조 앱의 데스크톱 전용 오버라이드(`tauri-bridge.ts`, `chunked-fs.ts`, `home-screen`, `recent-documents`, `update-notice`)는 쓰지 않음. EasyOffice는 부모 셸이 그 역할을 함 |
 | `apps/studio-host/vendor/rhwp-core/{rhwp.js,rhwp_bg.wasm,rhwp.d.ts,package.json,LICENSE,PROVENANCE.json}` | `wasm-pack --target web` 산출물 벤더링 + 출처 증명. CI는 WASM을 다시 빌드하지 않고 해시만 검증 | 경로는 `vendor/rhwp-core/`(저장소 루트) |
 | `apps/studio-host/src/core/font-loader.ts`(fork), `font-catalog.ts`, `font-authoring-policy.ts`, `assets/fonts/FONTS.md` | HWP 글꼴명을 번들 OFL woff2에 대응. 제한 글꼴(HY*, 휴먼명조 등)을 작성 단계에서 차단. `FontFace` API 사용 | `<style>` 주입을 없애도록 fork 범위를 정함(§4) |
 | `apps/studio-host/src/core/document-open.ts` | `loadDocument(bytes, fileName)` + 비밀번호 재시도 루프(`showHwpPasswordDialog`) | — |
@@ -76,7 +76,7 @@
 | `apps/desktop/src-tauri/src/pdf_export.rs` + `apps/desktop/rhwp-adapter` | 네이티브 rhwp `render_page_svg_native` → `svgs_to_pdf_with_options`(검색 가능 PDF), 저장 전 재파싱 검증 | 6단계 이후 선택 사항(툴체인 1.93.1 필요) |
 | `tauri.conf.json` `fileAssociations`(`hwp`·`hwpx`, mime `application/x-hwp`·`application/vnd.hancom.hwpx`) | 파일 연결 정의 | NSIS 기준으로 맞추고, #111 셸 열기 명령이 생긴 뒤 등록 |
 
-hop에서 **가져오지 않는 것**:
+참조 앱에서 **가져오지 않는 것**:
 
 - `fs:*` 플러그인 권한과 런타임 `fs_scope().allow_file`
 - CSP의 `'unsafe-eval'`
@@ -101,9 +101,9 @@ hop에서 **가져오지 않는 것**:
 | 방식 | 장점 | 단점 | 판정 |
 |---|---|---|---|
 | **A. 같은 출처 iframe + MessagePort RPC** | 1) rhwp-studio 전역 상태(`main.ts`의 `document.body` 조작, 전역 `keydown`, 메뉴바 CSS)와 EasyOffice 전역 단축키·CSS·1,000줄 규칙이 충돌하지 않음<br>2) 업스트림 임베드 프로토콜이 이미 존재하며 출처 검사(`isUsableParentOrigin`: `http:`/`https:`만 허용)가 Windows 셸 출처 `http://tauri.localhost`와 `--serve` `http://127.0.0.1`을 모두 만족<br>3) 편집기에 IPC 권한이 없어 공격 표면 최소 | 1) 포커스가 iframe 안에 있으면 부모 단축키가 동작하지 않음 → 포워딩 필요<br>2) 리본과 편집기 도구모음이 두 겹 | **권장** |
-| B. rhwp-studio 모듈을 EasyOffice DOM에 직접 마운트 | 단일 DOM, 리본 직접 연결 | 1) EasyOffice UI는 비모듈 IIFE 스크립트이고 Vite/TS 모듈과 섞어야 함<br>2) 업스트림 `main.ts` 전역 초기화를 대량 fork해야 함(hop도 `main.ts`를 자체 작성)<br>3) 위생 가드의 `ui/*.js` 1,000줄·`innerHTML` 규칙과 충돌<br>4) 업스트림 갱신 비용 큼 | 기각 |
-| C. EasyOffice UI 전체를 rhwp-studio 위에 재작성(hop 방식) | hop과 동일 구조 | 다중 모듈 작업 공간(SHEET/SLIDE/PDF/CONV)을 버려야 함 | 기각 |
-| D. 네이티브 권위 세션(Rust가 문서 보유, WebView는 SVG만 표시) | 큰 문서 메모리·속도 유리 | 1) hop도 아직 미완(`render_page_svg`·`mutate_document` 미사용)<br>2) 캐럿·IME·선택을 전부 재구현해야 함<br>3) `--serve`와 경로가 갈림 | 장기 과제(§6.2) |
+| B. rhwp-studio 모듈을 EasyOffice DOM에 직접 마운트 | 단일 DOM, 리본 직접 연결 | 1) EasyOffice UI는 비모듈 IIFE 스크립트이고 Vite/TS 모듈과 섞어야 함<br>2) 업스트림 `main.ts` 전역 초기화를 대량 fork해야 함(참조 앱도 `main.ts`를 자체 작성)<br>3) 위생 가드의 `ui/*.js` 1,000줄·`innerHTML` 규칙과 충돌<br>4) 업스트림 갱신 비용 큼 | 기각 |
+| C. EasyOffice UI 전체를 rhwp-studio 위에 재작성(참조 앱 방식) | 참조 앱과 동일 구조 | 다중 모듈 작업 공간(SHEET/SLIDE/PDF/CONV)을 버려야 함 | 기각 |
+| D. 네이티브 권위 세션(Rust가 문서 보유, WebView는 SVG만 표시) | 큰 문서 메모리·속도 유리 | 1) 참조 앱도 아직 미완(`render_page_svg`·`mutate_document` 미사용)<br>2) 캐럿·IME·선택을 전부 재구현해야 함<br>3) `--serve`와 경로가 갈림 | 장기 과제(§6.2) |
 
 ### 2.2 구조 (방식 A)
 
@@ -172,8 +172,8 @@ iframe은 **HWP 모듈을 처음 활성화할 때 지연 생성**한다. 그래�
   4. 성공하면 `notifySaved`와 EasyOffice 수정 기준선 갱신.
 - **#104 구조화 페이로드(`blocks`)는 HWP 모듈에서 쓰지 않는다.** 그 경로는 HTML → 평탄 모델 → `HwpxCodec::pack_rich`로 가는 손실 경로다. rhwp는 원본 레코드를 보존하는 직렬화(`exportHwp`)를 제공한다.
   - 단 "다른 형식으로 내보내기(DOCX/PDF/ODT)"는 기존 변환기(`convert_document_format`, `sourceBase64` = rhwp가 내보낸 HWP 바이트)로 처리한다. 15종 IPC 계약은 변경 없다.
-- **업스트림 주의점**: hop은 HWPX 원본 저장을 막고 HWP로만 저장한다("HWPX 원본 저장은 아직 안전하게 지원하지 않습니다"). 비밀번호 문서는 경고 후 비밀번호 없이 저장한다. 같은 정책을 기본값으로 삼는다.
-- **저장 검증**: 6단계 네이티브 어댑터 도입 전에는 저장 직전 iframe 안에서 `exportHwpVerify`(또는 내보낸 바이트를 `new HwpDocument(bytes)`로 재파싱) 결과가 성공일 때만 저장한다. hop은 Rust에서 재파싱한다.
+- **업스트림 주의점**: 참조 앱은 HWPX 원본 저장을 막고 HWP로만 저장한다("HWPX 원본 저장은 아직 안전하게 지원하지 않습니다"). 비밀번호 문서는 경고 후 비밀번호 없이 저장한다. 같은 정책을 기본값으로 삼는다.
+- **저장 검증**: 6단계 네이티브 어댑터 도입 전에는 저장 직전 iframe 안에서 `exportHwpVerify`(또는 내보낸 바이트를 `new HwpDocument(bytes)`로 재파싱) 결과가 성공일 때만 저장한다. 참조 앱은 Rust에서 재파싱한다.
 - **전송 효율**: `save_document_file`은 Base64 문자열(256 MiB 상한)을 받는다. 수십 MB HWP에서 Base64 인코딩·JSON 직렬화·디코딩이 3회 복사를 만든다.
   - 4단계에서 같은 명령을 Tauri v2 원시 바이트 본문(`tauri::ipc::Request`, `InvokeBody::Raw`; 파일 이름은 헤더)으로 받는 형태로 바꾸거나, 같은 권한 범위의 `save_document_bytes`로 대체한다.
   - 명령 수 변화는 위생 가드 허용 목록에서 1:1로 갱신한다.
@@ -194,14 +194,14 @@ iframe은 **HWP 모듈을 처음 활성화할 때 지연 생성**한다. 그래�
 | 영역 | 설계 |
 |---|---|
 | 탭(`#tab-strip`) | **[대체됨: PD-088(#132) — 문서마다 개별 창, 탭 줄·모듈 전환 탭 없음. 아래 "탭만" 기본값은 더 이상 유효하지 않다.]** 1) 1단계(작업 항목 3~4)는 HWP 문서 1개<br>2) 5단계에서 "HWP 탭 1개 = iframe 1개", 동시 4개 상한(메모리, §6.1)<br>3) 탭 제목은 PD-073 파일명 규칙 재사용<br>4) 비활성 탭 iframe은 `hidden`으로 두고 언로드하지 않음 |
-| 파일 메뉴 | 1) 열기·저장·다른 이름으로 저장·인쇄는 EasyOffice 메뉴가 소유<br>2) 오버레이가 업스트림 메뉴바의 `file:*` 항목을 `chrome.set`/CSS로 숨김<br>3) 업스트림 `command/commands/file.ts`(File System Access, `showSaveFilePicker`, `?url=` fetch)는 오버레이에서 **부모 위임 구현으로 교체**(hop의 `command/commands/file` extension과 같은 위치) |
+| 파일 메뉴 | 1) 열기·저장·다른 이름으로 저장·인쇄는 EasyOffice 메뉴가 소유<br>2) 오버레이가 업스트림 메뉴바의 `file:*` 항목을 `chrome.set`/CSS로 숨김<br>3) 업스트림 `command/commands/file.ts`(File System Access, `showSaveFilePicker`, `?url=` fetch)는 오버레이에서 **부모 위임 구현으로 교체**(참조 앱의 `command/commands/file` extension과 같은 위치) |
 | 편집기 도구모음 | 1) rhwp 서식 도구모음(글꼴, 크기, 굵게, 문단, 표)을 그대로 사용(문자 모양과 조판 정확성이 핵심 가치)<br>2) HWP 활성 시 EasyOffice `#doc-style-bar`와 문서 전용 리본 명령은 숨기거나 비활성(PD-072 3항 규칙 확장) |
 | 리본 연결(5단계) | 1) 리본 140종 중 HWP에 의미가 있는 명령(굵게·기울임·밑줄·정렬·표 삽입·쪽 설정 등)만 `automation.execute(id)`로 매핑<br>2) 매핑이 없으면 비활성<br>3) 매핑표는 `ribbon-catalog.js`에 데이터로 둠(140종 수치 불변) |
 | 단축키 | 1) iframe에 포커스가 있으면 부모 `keydown`이 실행되지 않음<br>2) 오버레이가 `WORKSPACE_SHORTCUT_BINDINGS` 중 셸 소유 키(`Ctrl+S`, `Ctrl+O`, `Ctrl+K`, `Ctrl+Alt+D`)만 `preventDefault` 후 포트로 부모에 전달<br>3) `Ctrl+Z/Y/B/I/U`는 rhwp가 처리<br>4) 키 목록은 부모가 연결 시 보냄(SSOT 유지) |
 | 실행 취소 | 1) HWP 문서 이력의 원천은 rhwp(`engine/history.ts` `CommandHistory`(최대 1000) + Rust 스냅샷)<br>2) EasyOffice 편집 메뉴의 실행 취소/다시 실행은 HWP 활성 시 `automation.execute('edit:undo'/'edit:redo')`<br>3) `ribbon_session.rs`의 HWP 모듈 스택(PD-069)은 HWP 활성 시 쓰지 않음 |
 | 수정 상태 | 1) PD-072의 DOM FNV 지문 대신 `document-change-events-v1` + `getDocumentState()`(revision/dirty) 사용<br>2) `beforeunload` 등록 조건에 "HWP dirty" 추가 |
 | 자동 저장 | 1) PD-072 `localStorage` 스냅샷은 5 MB 한도라 HWP 바이너리를 담을 수 없음<br>2) HWP는 **IndexedDB**(`easyoffice.hwp.autosave.v1`)에 `{tabId, fileName, format, savedAt, revision, bytes}`를 디바운스 저장(`exportHwp` 결과)<br>3) `localStorage` 스냅샷에는 탭 참조만 넣음<br>4) 업스트림 `src/recovery/`(IndexedDB 복구)를 그대로 쓸지 부모 소유로 할지는 §8 Q9. 권장은 부모 소유: 복원 UI와 검증을 EasyOffice가 통제하고, 복원 전 `FormatDetector` 통과를 필수로 함<br>5) 큰 문서의 `exportHwp` 비용(§6.1) 때문에 HWP 자동 저장 간격은 5초 이상 + 유휴 시점으로 함 |
-| 인쇄 | 1) 5단계에서 hop `print-dialog.ts` 방식 적용(iframe 안에서 `renderPageSvg` → `@media print` → `window.print()`)<br>2) WebView2 인쇄 대화상자의 "PDF로 저장"이 6단계 전까지의 PDF 경로 |
+| 인쇄 | 1) 5단계에서 참조 앱 `print-dialog.ts` 방식 적용(iframe 안에서 `renderPageSvg` → `@media print` → `window.print()`)<br>2) WebView2 인쇄 대화상자의 "PDF로 저장"이 6단계 전까지의 PDF 경로 |
 | 테마 | rhwp-studio 토큰을 그대로 사용(`docs/design-system.md`, PD-098). 업스트림 `theme-init.js`는 부모가 보낸 테마 값으로 초기화 |
 
 ---
@@ -212,7 +212,7 @@ iframe은 **HWP 모듈을 처음 활성화할 때 지연 생성**한다. 그래�
 
 ```
 .gitmodules                         # [submodule "third_party/rhwp"] url=https://github.com/edwardkim/rhwp.git, shallow=true
-config/rhwp-upstream.json           # version/tag/commit/rustToolchain/wasmPackVersion (hop 형식)
+config/rhwp-upstream.json           # version/tag/commit/rustToolchain/wasmPackVersion (참조 앱 형식)
 config/rhwp-studio-overrides.json   # 오버라이드 목록 + 업스트림 원본 SHA-256
 third_party/rhwp/                   # 서브모듈(gitlink, 읽기 전용)
 vendor/rhwp-core/                   # rhwp.js, rhwp_bg.wasm(약 11.8 MB), rhwp.d.ts, package.json, LICENSE, PROVENANCE.json
@@ -221,7 +221,7 @@ assets/fonts/                       # OFL 글꼴만 (FONTS.md에 출처·라이�
 scripts/verify-rhwp-upstream.mjs    # Node 내장 모듈만 사용
 scripts/build-hwp-studio.mjs        # npm ci --ignore-scripts && vite build → crates/easyoffice-app/ui/hwp-studio/
 crates/easyoffice-app/ui/hwp-studio/  # 빌드 산출물 (.gitignore)
-THIRD_PARTY_NOTICES.md              # rhwp, (hop 코드 복사 시) hop, WASM 내 Rust 의존성, 글꼴 OFL
+THIRD_PARTY_NOTICES.md              # rhwp, (참조 앱 코드 복사 시) 참조 앱, WASM 내 Rust 의존성, 글꼴 OFL
 ```
 
 ### 3.2 서브모듈 크기 문제 (중요)
@@ -237,11 +237,11 @@ rhwp 저장소는 **추적 파일 41,624개, 약 5.3 GB**다 `[확인]`(`git ls-
 | `rhwp-studio/` | 16.5 MB |
 | `src/` | 29.5 MB |
 
-hop CI는 `submodules: true`로 전체를 받는다. EasyOffice는 다음처럼 대응한다.
+참조 앱 CI는 `submodules: true`로 전체를 받는다. EasyOffice는 다음처럼 대응한다.
 
 - **CI·개발자 기본: sparse + shallow 서브모듈.**
   - 순서: `git submodule update --init --depth 1 --filter=blob:none third_party/rhwp` → `git -C third_party/rhwp sparse-checkout set --no-cone /Cargo.toml /Cargo.lock /rust-toolchain.toml /LICENSE /THIRD_PARTY_LICENSES.md /src/ /crates/ /vendor/svg2pdf/ /rhwp-studio/ /assets/fonts/ /ttfs/opensource/ /npm/editor/`.
-  - 정확한 목록은 `vite build` 성공과 hop 검증 스크립트 기준으로 확정한다. `build.rs`가 참조하는 파일이 있으면 추가한다.
+  - 정확한 목록은 `vite build` 성공과 참조 앱 검증 스크립트 기준으로 확정한다. `build.rs`가 참조하는 파일이 있으면 추가한다.
   - `actions/checkout@v4`의 `submodules:` 옵션은 sparse를 지원하지 않으므로 별도 스크립트(`scripts/checkout-rhwp.mjs`)로 처리한다.
 - **studio를 빌드하지 않는 작업에서는 서브모듈을 받지 않는다.** macOS `verify`, 위생 가드, WebUI 노드 테스트가 여기에 해당한다. 위생 가드는 gitlink를 `git ls-files -s`로 검사하므로 작업 트리가 없어도 된다.
 
@@ -254,7 +254,7 @@ hop CI는 `submodules: true`로 전체를 받는다. EasyOffice는 다음처럼 
 | rhwp WASM | **1.93.1** + `wasm32-unknown-unknown` + wasm-pack 0.14.0 | `third_party/rhwp/rust-toolchain.toml` |
 | (선택) `crates/easyoffice-rhwp-adapter` | `rust-version = "1.93"`, `default-members` 제외 | 6단계 이후. 이 크레이트에 의존하는 순간 desktop도 1.93 이상이 됨 |
 
-- **WASM은 커밋된 벤더 산출물을 쓴다(hop 방식).** CI는 `vendor/rhwp-core/*` 크기와 SHA-256을 `PROVENANCE.json`과 대조할 뿐 다시 빌드하지 않는다. 이유는 다음과 같다:
+- **WASM은 커밋된 벤더 산출물을 쓴다(참조 앱 방식).** CI는 `vendor/rhwp-core/*` 크기와 SHA-256을 `PROVENANCE.json`과 대조할 뿐 다시 빌드하지 않는다. 이유는 다음과 같다:
   1. 매 CI에 1.93.1 + wasm-pack + rhwp 릴리스 빌드(의존성에 암호 크레이트 다수, `wasm_api.rs` 9천 줄)를 추가하면 Windows 작업 시간이 크게 는다(§3.5).
   2. 엔진 MSRV 정책과 툴체인이 섞이지 않는다.
 - **재현 검증**: `.github/workflows/rhwp-wasm-rebuild.yml`(수동 실행, ubuntu)이 `RUSTUP_TOOLCHAIN=1.93.1 wasm-pack build --target web --release`로 다시 빌드해 해시를 비교한다.
@@ -264,9 +264,9 @@ hop CI는 `submodules: true`로 전체를 받는다. EasyOffice는 다음처럼 
 
 ### 3.4 프런트엔드 번들과 자산 포함
 
-- `apps/hwp-studio/`는 hop `apps/studio-host`의 축소판이다.
+- `apps/hwp-studio/`는 참조 앱 `apps/studio-host`의 축소판이다.
   - 의존성: devDependencies `vite ^8.3.2`, `typescript ^7.0.2`(업스트림과 동일 메이저). `@tauri-apps/*`는 **넣지 않는다**(iframe은 IPC를 쓰지 않음).
-  - `canvaskit-wasm`, `vite-plugin-pwa`, `puppeteer-core`는 제외한다. `renderer-session` 정책을 `canvas2d` 고정으로 두는 hop 방식이다. canvaskit을 빼면 wasm 7 MB와 BSD 고지가 줄어든다 `[추정 크기]`.
+  - `canvaskit-wasm`, `vite-plugin-pwa`, `puppeteer-core`는 제외한다. `renderer-session` 정책을 `canvas2d` 고정으로 두는 참조 앱 방식이다. canvaskit을 빼면 wasm 7 MB와 BSD 고지가 줄어든다 `[추정 크기]`.
   - 빌드 환경 변수: `RHWP_DISABLE_EXTERNAL_WEBFONTS=1`(jsDelivr CDN 글꼴 차단), `RHWP_WITHOUT_HWPCTRL=1`.
   - 패키지 관리자는 npm(`package-lock.json`, `npm ci --ignore-scripts`). EasyOffice는 이미 Node 22 + `npx`를 쓰므로 pnpm을 새로 도입하지 않는다.
   - 출력: `base: './'`, `outDir: ../../crates/easyoffice-app/ui/hwp-studio`, `emptyOutDir: true`, 글꼴은 `hwp-studio/fonts/`로 복사.
@@ -314,11 +314,11 @@ Tauri CSP는 앱 전체에 하나만 적용된다(경로별로 나눌 수 없음
 
 | 지시어 | 이유 |
 |---|---|
-| `'wasm-unsafe-eval'` | wasm-bindgen `--target web`의 `init()`은 `WebAssembly.instantiateStreaming`/`instantiate`를 호출하므로 CSP3 브라우저(Chromium 기반 WebView2 포함)에서 필요하다. **JS `eval`은 여전히 금지**된다. hop은 `'unsafe-eval'`까지 넣었지만 rhwp-studio 소스에는 `eval(`·`new Function`이 0건이다 `[확인]`. 따라서 `'unsafe-eval'`은 넣지 않는다. |
-| `img-src data: blob:` | HWP 내장 이미지는 Blob/Data URL로 그려진다(hop CSP와 동일). |
+| `'wasm-unsafe-eval'` | wasm-bindgen `--target web`의 `init()`은 `WebAssembly.instantiateStreaming`/`instantiate`를 호출하므로 CSP3 브라우저(Chromium 기반 WebView2 포함)에서 필요하다. **JS `eval`은 여전히 금지**된다. 참조 앱은 `'unsafe-eval'`까지 넣었지만 rhwp-studio 소스에는 `eval(`·`new Function`이 0건이다 `[확인]`. 따라서 `'unsafe-eval'`은 넣지 않는다. |
+| `img-src data: blob:` | HWP 내장 이미지는 Blob/Data URL로 그려진다(참조 앱 CSP와 동일). |
 | `frame-src 'self'` | `default-src 'self'`로도 같은 출처 iframe은 허용되지만 명시해 둔다. |
 | `font-src` | 미지정, 즉 `default-src 'self'`. 번들 woff2만 허용한다. `FontFace(name, arrayBuffer)`는 `font-src` 대상이 아니다. CDN 글꼴은 빌드에서 비활성하고 CSP로도 차단된다(이중 방어). |
-| `style-src` | **`'unsafe-inline'`을 넣지 않는 것을 목표**로 한다. 업스트림에서 `<style>` 요소를 동적으로 만드는 곳은 두 곳이다 `[확인]`: `core/font-loader.ts:135`(`@font-face` 규칙)와 `command/print-pages.ts:192`. 둘 다 오버레이에서 교체한다. font-loader는 hop도 fork했으며 `FontFace` API만 쓰도록 바꾼다. print-pages는 정적 `print.css`로 옮긴다. `cssText`/`el.style.*` CSSOM 할당 118건은 CSP 차단 대상이 아니다. `office-clipboard-images.ts:310`의 `setAttribute('style')`은 붙여넣기 HTML 처리 경로이므로 오버레이 테스트에서 동작을 확인한다. 교체가 막히면 `'unsafe-inline'` 허용 여부를 결정해야 한다(§8 Q11). |
+| `style-src` | **`'unsafe-inline'`을 넣지 않는 것을 목표**로 한다. 업스트림에서 `<style>` 요소를 동적으로 만드는 곳은 두 곳이다 `[확인]`: `core/font-loader.ts:135`(`@font-face` 규칙)와 `command/print-pages.ts:192`. 둘 다 오버레이에서 교체한다. font-loader는 참조 앱도 fork했으며 `FontFace` API만 쓰도록 바꾼다. print-pages는 정적 `print.css`로 옮긴다. `cssText`/`el.style.*` CSSOM 할당 118건은 CSP 차단 대상이 아니다. `office-clipboard-images.ts:310`의 `setAttribute('style')`은 붙여넣기 HTML 처리 경로이므로 오버레이 테스트에서 동작을 확인한다. 교체가 막히면 `'unsafe-inline'` 허용 여부를 결정해야 한다(§8 Q11). |
 | 워커 | rhwp-studio에 `new Worker` 0건, 서비스 워커는 PWA 플러그인뿐이고 제외한다. `worker-src`는 미지정(`default-src 'self'`로 처리). |
 
 위생 가드의 `DESKTOP_SHELL_CSP` 정확값 비교는 새 객체로 갱신한다. "정확값 일치" 방식 자체는 유지한다.
@@ -334,7 +334,7 @@ Tauri CSP는 앱 전체에 하나만 적용된다(경로별로 나눌 수 없음
 
 - `capabilities/main-window.json`은 **변경하지 않는다**. 대상 창은 `main`, 권한은 `allow-ipc-dispatch`·`allow-save-document-file`뿐이다.
   - iframe은 IPC를 직접 호출하지 않는다. Tauri v2가 하위 프레임에 IPC를 주입하는지는 플랫폼에 따라 다르다 `[추정]`. 따라서 **설계상 의존하지 않고**, 오버레이 번들에 `__TAURI_INTERNALS__` 참조가 없음을 정적 검사로 고정한다.
-- 5단계(파일 연결·단일 인스턴스)에서 명령이 늘어난다. 예: `open_document_file`은 Rust 대화상자로 경로를 고르고 바이트만 반환하며, 기동 인자 큐를 비우는 명령이 추가된다. 그때도 hop처럼 `fs:*` 권한을 WebView에 주지 않고 앱 명령 + `AppManifest` 기본 거부 + 허용 목록 갱신 방식을 따른다.
+- 5단계(파일 연결·단일 인스턴스)에서 명령이 늘어난다. 예: `open_document_file`은 Rust 대화상자로 경로를 고르고 바이트만 반환하며, 기동 인자 큐를 비우는 명령이 추가된다. 그때도 참조 앱처럼 `fs:*` 권한을 WebView에 주지 않고 앱 명령 + `AppManifest` 기본 거부 + 허용 목록 갱신 방식을 따른다.
 - 오버레이에서 제거하는 업스트림 기능:
   1. `?url=` 임의 URL fetch(`main.ts:1874-1902`) — 오버레이는 자체 `main.ts`를 쓰므로 진입점 자체가 없다
   2. `/samples` fetch
@@ -371,7 +371,7 @@ Tauri CSP는 앱 전체에 하나만 적용된다(경로별로 나눌 수 없음
 2. **새 검사(fail-closed)**:
    - `.gitmodules`에는 허용 목록 항목만 있을 것: `third_party/rhwp` ↔ `https://github.com/edwardkim/rhwp.git`.
    - `git ls-files -s third_party/rhwp`의 모드가 `160000`이고 커밋이 `config/rhwp-upstream.json.commit`과 같을 것.
-   - 서브모듈 작업 트리가 있으면 `git -C third_party/rhwp status --porcelain`이 비어 있을 것(업스트림 무수정. hop `upstream:verify`와 동일).
+   - 서브모듈 작업 트리가 있으면 `git -C third_party/rhwp status --porcelain`이 비어 있을 것(업스트림 무수정. 참조 앱 `upstream:verify`와 동일).
    - `vendor/rhwp-core/*`의 크기·SHA-256이 `PROVENANCE.json`과 같고 다른 파일이 없을 것.
    - `ui/hwp-studio/`가 git에 추적되지 않을 것(빌드 산출물 커밋 방지).
 3. **EasyOffice 소유 파일 규칙은 그대로 적용**한다. `apps/hwp-studio/src/**`(오버레이 TS), `vendor/rhwp-core/rhwp.js`·`rhwp.d.ts`, `config/*.json`, `THIRD_PARTY_NOTICES.md`가 대상이다.
@@ -389,18 +389,18 @@ Tauri CSP는 앱 전체에 하나만 적용된다(경로별로 나눌 수 없음
 
 | 구간 | 관찰 | 근거 |
 |---|---|---|
-| WASM 로드 | `rhwp_bg.wasm` 11,803,733 B. WebView2는 코드 캐시가 있어 두 번째 실행부터 빠름. 첫 컴파일은 수백 ms 수준 `[추정]` | hop `vendor/rhwp-core` |
+| WASM 로드 | `rhwp_bg.wasm` 11,803,733 B. WebView2는 코드 캐시가 있어 두 번째 실행부터 빠름. 첫 컴파일은 수백 ms 수준 `[추정]` | 참조 앱 `vendor/rhwp-core` |
 | 파싱 | rhwp 자체 벤치(`mydocs/tech/benchmark_vs_alternatives.md`)는 **debug 빌드** CLI로 export-text 중앙값 2234 ms, info 584 ms. 릴리스 WASM은 훨씬 빠를 것 `[추정]`. 세션 재사용 시 호출당 82.1 ms → 0.68 ms(×120.6, `track_f_scale_perf.md` R52), 즉 "한 번 파싱 후 메모리 문서 유지"가 핵심 | rhwp 문서 |
 | 렌더 | 쪽 단위 Canvas2D, 가상 스크롤, LRU 표면, 유휴 시간 프리페치 스케줄러(`page-render-scheduler.ts`, `canvas-pool.ts`, `page-surface-lru.ts`, `render-surface-budget.ts`). 큰 문서에서도 보이는 쪽만 그림 | rhwp-studio |
 | 텍스트 측정 | WASM과 네이티브가 같은 `EmbeddedTextMeasurer`(내장 글꼴 메트릭)를 사용(`src/renderer/layout/text_measurement.rs:810`). 글자마다 JS `measureText`를 왕복하지 않음 | rhwp 소스 |
-| **느린 곳 1: 표 셀 입력** | hop #85: Windows에서 표 입력 지연 7초 보고(Mac 미재현). 해결 방향은 "변경 없는 정적 레이어 재사용"(`issue-85-table-input-rendering-1pager.md`). rhwp는 셀 편집 페이지 나누기 지연 API(`insertTextInCellDeferredPagination`)를 가지고 있음 | hop 문서 |
+| **느린 곳 1: 표 셀 입력** | 참조 앱 #85: Windows에서 표 입력 지연 7초 보고(Mac 미재현). 해결 방향은 "변경 없는 정적 레이어 재사용"(`issue-85-table-input-rendering-1pager.md`). rhwp는 셀 편집 페이지 나누기 지연 API(`insertTextInCellDeferredPagination`)를 가지고 있음 | 참조 앱 문서 |
 | **느린 곳 2: 저장·자동 저장** | `exportHwp`는 문서 전체 직렬화 + 압축. 자동 저장을 자주 하면 입력 지연이 생김 → 유휴 시점 + 5초 이상 디바운스(§2.7) | 설계 |
 | **느린 곳 3: 실행 취소 스냅샷** | 큰 작업마다 Rust `saveSnapshot`(문서 복제, `MAX_SNAPSHOTS` 상한) → 큰 문서에서 WASM 메모리 증가. 32비트 WASM 메모리 상한 4 GiB, 탭당 iframe 1개면 문서당 한 인스턴스 → 동시 탭 4개 상한 | rhwp `wasm_api.rs:7073~` |
 | 바이트 전송 | iframe↔부모는 `ArrayBuffer` 이동으로 복사 없음. 셸 저장은 Base64 경로 → 원시 바이트 IPC로 개선(§2.5) | 설계 |
 
-**hop의 "WASM 미러 대 네이티브 권위" 메모**: `docs/DEVELOPMENT.md:70`은 "큰 문서에서는 현재 WASM mirror를 거치는 구간이 있어 native-authoritative 구조로 더 개선해야 합니다"라고 적는다.
+**참조 앱의 "WASM 미러 대 네이티브 권위" 메모**: `docs/DEVELOPMENT.md:70`은 "큰 문서에서는 현재 WASM mirror를 거치는 구간이 있어 native-authoritative 구조로 더 개선해야 합니다"라고 적는다.
 
-- hop의 실제 구조는 **WASM이 문서의 권위**다. 네이티브 세션은 메타데이터만 가진다(`core: None`). 저장과 PDF 시점에만 WASM이 내보낸 바이트를 Rust가 다시 파싱한다. 네이티브 편집 명령(`mutate_document`, `render_page_svg`, SVG 캐시)은 등록만 되어 있고 쓰이지 않는다.
+- 참조 앱의 실제 구조는 **WASM이 문서의 권위**다. 네이티브 세션은 메타데이터만 가진다(`core: None`). 저장과 PDF 시점에만 WASM이 내보낸 바이트를 Rust가 다시 파싱한다. 네이티브 편집 명령(`mutate_document`, `render_page_svg`, SVG 캐시)은 등록만 되어 있고 쓰이지 않는다.
 - EasyOffice도 **WASM 권위 모델로 시작**한다. 이유는 `--serve`와 셸이 같은 경로를 쓰고, MSRV가 분리되며, 캐럿·IME가 업스트림 그대로이기 때문이다.
 - 네이티브 권위(문서는 Rust 프로세스, WebView는 SVG 또는 쪽 비트맵만)는 다음 조건이 충족될 때 재검토한다:
   1. 64 MiB 넘는 문서를 지원해야 하거나
@@ -498,14 +498,14 @@ Tauri CSP는 앱 전체에 하나만 적용된다(경로별로 나눌 수 없음
 
 - **범위**
   - `vendor/rhwp-core/*` + `PROVENANCE.json`(rustToolchain 1.93.1, wasmPack 0.14.0, 커밋, 파일별 크기·SHA-256)
-  - `apps/hwp-studio/`: `package.json`, `package-lock.json`, `vite.config.ts`(hop alias 순서), `config/rhwp-studio-overrides.json`
+  - `apps/hwp-studio/`: `package.json`, `package-lock.json`, `vite.config.ts`(참조 앱 alias 순서), `config/rhwp-studio-overrides.json`
   - 오버레이 `main.ts`(임베드 전용 진입점), `font-loader` fork(`FontFace` 전용), `print-pages` 스타일 외부화, `file` 명령 부모 위임, canvaskit·PWA·hwpctrl·외부 웹글꼴 제거
   - `assets/fonts/`(OFL만) + `FONTS.md`
   - `scripts/build-hwp-studio.mjs`, `scripts/check-hwp-studio-bundle.mjs`
   - `rhwp-wasm-rebuild.yml`(수동)
 - **의존**: 1
 - **위험**
-  - 업스트림 `main.ts`의 초기화 순서가 오버레이 진입점에서 빠진 부분 때문에 깨질 수 있다(hop `main.ts` 참고).
+  - 업스트림 `main.ts`의 초기화 순서가 오버레이 진입점에서 빠진 부분 때문에 깨질 수 있다(참조 앱 `main.ts` 참고).
   - TS 7 / Vite 8 툴체인 의존성의 공급망 위험 → lockfile 고정, `--ignore-scripts`.
   - WASM 재현성 미확보(§8 Q10).
 - **수용 기준**
@@ -575,7 +575,7 @@ Tauri CSP는 앱 전체에 하나만 적용된다(경로별로 나눌 수 없음
 
 ### 작업 6. 데스크톱 파일 수명주기: 파일 연결·단일 인스턴스·제자리 저장 (선택: 네이티브 어댑터)
 
-> **[구현됨: PD-093(#133, #158)]** 단일 인스턴스(`tauri-plugin-single-instance`, 인수 → 기존 열기 큐), Rust 전용 경로·지문 표와 임시 파일 + `sync_all` + 이름 바꾸기 제자리 저장(외부 변경 시 확인 창), NSIS `fileAssociations`(창 모델이 여는 주요 9종)와 위생 가드 조건 변경을 넣었다. 6b(네이티브 어댑터)는 건너뛴다. hop에서는 패턴만 따랐고 코드는 복사하지 않았다. 한글 창의 `파일` 메뉴는 셸 명령 6종이며 임베드 포트의 `shell_command` 이벤트와 `setShellContext` RPC(capability `shell-context-v1`)로 셸과 연결한다.
+> **[구현됨: PD-093(#133, #158)]** 단일 인스턴스(`tauri-plugin-single-instance`, 인수 → 기존 열기 큐), Rust 전용 경로·지문 표와 임시 파일 + `sync_all` + 이름 바꾸기 제자리 저장(외부 변경 시 확인 창), NSIS `fileAssociations`(창 모델이 여는 주요 9종)와 위생 가드 조건 변경을 넣었다. 6b(네이티브 어댑터)는 건너뛴다. 참조 앱에서는 패턴만 따랐고 코드는 복사하지 않았다. 한글 창의 `파일` 메뉴는 셸 명령 6종이며 임베드 포트의 `shell_command` 이벤트와 `setShellContext` RPC(capability `shell-context-v1`)로 셸과 연결한다.
 
 - **범위**
   - `tauri-plugin-single-instance`(Rust만, WebView 권한 없음)
@@ -634,13 +634,13 @@ Tauri CSP는 앱 전체에 하나만 적용된다(경로별로 나눌 수 없음
 4. **변환기 엔진**: HWP → DOCX/PDF 변환을 계속 EasyOffice `hwp5_codec`으로 할지, 네이티브 어댑터(6b) 도입 후 rhwp 파서로 바꿀지(정확도는 오르지만 툴체인 1.93.1이 필요).
 5. **배포용·암호 문서**: 현재 EasyOffice는 fail-closed 차단이다. rhwp는 읽기와 비밀번호 열기를 지원한다. 열기를 허용할지, 저장 시 보호 해제 경고 정책을 어떻게 할지.
 6. **rhwp 로드 실패 시**: 오류로 끝낼지, 사용자가 선택하면 기존 평문 디코드로 "텍스트만 가져오기"를 제공할지.
-7. **다중 창**: ~~hop처럼 문서별 창을 지원할지, 탭만 쓸지(현재 권장: 탭만).~~ **[확정: 문서마다 개별 창 — PD-088(#132). "탭만" 기본값은 대체됨. 탭 구현 시도는 폐기.]**
+7. **다중 창**: ~~참조 앱처럼 문서별 창을 지원할지, 탭만 쓸지(현재 권장: 탭만).~~ **[확정: 문서마다 개별 창 — PD-088(#132). "탭만" 기본값은 대체됨. 탭 구현 시도는 폐기.]**
 8. **HWP 파일 크기 상한**: 64 MiB 제안. 공문서 대용량 첨부 HWP를 고려해 조정할지.
 9. **자동 저장 소유**: 업스트림 `src/recovery/`(IndexedDB) 재사용과 EasyOffice 부모 소유 중 어느 쪽으로 할지(권장: 부모 소유).
-10. **WASM 출처 정책**: hop처럼 미리 빌드한 WASM을 저장소에 커밋할지(업데이트마다 약 12 MB 증가), 아니면 CI에서 매번 빌드할지(+10~20분 `[추정]`, 1.93.1 툴체인 상시 필요). 재현 빌드가 안 될 때 어느 산출물을 신뢰할지.
+10. **WASM 출처 정책**: 참조 앱처럼 미리 빌드한 WASM을 저장소에 커밋할지(업데이트마다 약 12 MB 증가), 아니면 CI에서 매번 빌드할지(+10~20분 `[추정]`, 1.93.1 툴체인 상시 필요). 재현 빌드가 안 될 때 어느 산출물을 신뢰할지.
 11. **CSP `style-src`**: 오버레이 fork로 `'unsafe-inline'` 없이 가는 것을 목표로 한다. fork 범위가 커지면 `'unsafe-inline'`을 허용할지.
 12. **글꼴 번들 범위**: OFL만(Noto Sans/Serif KR, 나눔, Pretendard, 고운, D2Coding, Spoqa) 넣을지, GUST(Latin Modern Math, 수식용)도 넣을지. Cafe24·행복고흥(Happiness Sans) 같은 독자 무료 라이선스 글꼴은 제외할지(권장: 제외). 설치본 크기 증가 허용치는 얼마인지.
-13. **hop 코드 직접 복사 여부**: 패턴만 참고할지, 일부 파일(`font-catalog.ts`, `print-dialog.ts`, `verify-rhwp-upstream.mjs`)을 복사할지. 복사하면 hop MIT 고지를 추가해야 한다. hop의 `LICENSE` 저작권자 표기가 rhwp 저자(Edward Kim)로 되어 있어 표기 확인이 필요하다.
+13. **참조 앱 코드 직접 복사 여부**: 패턴만 참고할지, 일부 파일(`font-catalog.ts`, `print-dialog.ts`, `verify-rhwp-upstream.mjs`)을 복사할지. 복사하면 참조 앱 MIT 고지를 추가해야 한다. 참조 앱의 `LICENSE` 저작권자 표기가 rhwp 저자(Edward Kim)로 되어 있어 표기 확인이 필요하다.
 
 ---
 
@@ -652,7 +652,7 @@ Tauri CSP는 앱 전체에 하나만 적용된다(경로별로 나눌 수 없음
 | WASM에 정적 링크된 Rust 의존성 | MIT / Apache-2.0 / BSD / Zlib / ISC / 0BSD(업스트림 `THIRD_PARTY_LICENSES.md`) | 고지 목록 포함. Apache-2.0 크레이트의 `NOTICE` 파일이 있으면 그대로 포함. 갱신 시 `cargo about`류 생성물로 재확인(오프라인 스크립트) |
 | `vendor/svg2pdf`(6b에서만) | MIT/Apache-2.0, `NOTICE`, `RHWP_PATCHES.md` | NOTICE 유지·포함 |
 | canvaskit-wasm | BSD-3-Clause | **번들에서 제외**하므로 의무 없음(포함하면 고지 필요) |
-| hop(코드를 복사할 경우) | MIT | 고지 포함. 패턴만 참고하면 의무 없음 |
+| 참조 앱(코드를 복사할 경우) | MIT | 고지 포함. 패턴만 참고하면 의무 없음 |
 | 글꼴: Noto Sans/Serif KR, 나눔, Pretendard, 고운, D2Coding, Spoqa Han Sans, Source Han Serif | SIL OFL 1.1 | 1) 라이선스 전문 동봉<br>2) 글꼴 단독 판매 금지<br>3) 수정(서브셋·형식 변환 포함) 시 예약 글꼴 이름(RFN) 사용 제한 → **업스트림 배포 파일을 수정 없이** 사용 |
 | Latin Modern Math | GUST Font License | 포함 시 라이선스 동봉 |
 | Cafe24 Ssurround/Supermagic, Happiness Sans(`ttfs/redistributable/`) | 각 권리자 독자 무료 라이선스 | 권장: 제외 |
@@ -664,4 +664,4 @@ Tauri CSP는 앱 전체에 하나만 적용된다(경로별로 나눌 수 없음
 
 - EasyOffice(`origin/main` 54edd83): `Cargo.toml`, `crates/easyoffice-desktop/{Cargo.toml,build.rs,tauri.conf.json,capabilities/main-window.json,src/main.rs}`, `crates/easyoffice-app/ui/{index.html,desktop-bridge.js,workspace-tools.js}`, `crates/easyoffice-app/src/{http_server.rs,benchmark.rs}`, `crates/easyoffice-formats/src/zip_codec.rs`, `crates/easyoffice-sheet/src/{lib.rs,coercion.rs,types.rs}`, `scripts/check-repo-hygiene.mjs`, `.github/workflows/{ci.yml,release.yml}`, `docs/{architecture.md,policy-decisions.md §44~49}`. #111: `9c0911c` `crates/easyoffice-app/ui/file-open.js`.
 - rhwp(1a76570e): `Cargo.toml`, `rust-toolchain.toml`, `src/wasm_api.rs`, `src/renderer/layout/text_measurement.rs`, `rhwp-studio/{package.json,vite.config.ts,index.html}`, `rhwp-studio/src/{main.ts,core/wasm-bridge.ts,core/font-loader.ts,command/print-pages.ts,embed/*,hwpctl/*}`, `npm/{editor,hwpctrl-ocx}/package.json`, `.github/workflows/npm-publish.yml`, `LICENSE`, `THIRD_PARTY_LICENSES.md`, `ttfs/`, `assets/fonts/`, `mydocs/tech/{benchmark_vs_alternatives.md,agent_roadmap/track_f_scale_perf.md}`.
-- hop(80888af): `.gitmodules`, `config/{rhwp-upstream.json,rhwp-studio-overrides.json}`, `scripts/verify-rhwp-upstream.mjs`, `docs/{DEVELOPMENT.md,architecture/UPSTREAM.md,operations/RHWP_UPDATE.md,operations/issue-85-table-input-rendering-1pager.md}`, `apps/studio-host/{vite.config.ts,hop-overrides.ts,package.json,index.html,vendor/rhwp-core/PROVENANCE.json,src/core/*,src/ui/print-dialog.ts}`, `apps/desktop/src-tauri/{Cargo.toml,tauri.conf.json,capabilities/default.json,src/{lib,state,commands,pdf_export,pending_open,windows,menu,font_catalog}.rs}`, `apps/desktop/rhwp-adapter`, `.github/workflows/{ci.yml,hop-desktop.yml}`, `assets/fonts/FONTS.md`, `LICENSE`.
+- the reference app(80888af): `.gitmodules`, `config/{rhwp-upstream.json,rhwp-studio-overrides.json}`, `scripts/verify-rhwp-upstream.mjs`, `docs/{DEVELOPMENT.md,architecture/UPSTREAM.md,operations/RHWP_UPDATE.md,operations/issue-85-table-input-rendering-1pager.md}`, `apps/studio-host/{vite.config.ts,the reference app-overrides.ts,package.json,index.html,vendor/rhwp-core/PROVENANCE.json,src/core/*,src/ui/print-dialog.ts}`, `apps/desktop/src-tauri/{Cargo.toml,tauri.conf.json,capabilities/default.json,src/{lib,state,commands,pdf_export,pending_open,windows,menu,font_catalog}.rs}`, `apps/desktop/rhwp-adapter`, `.github/workflows/{ci.yml,the reference app-desktop.yml}`, `assets/fonts/FONTS.md`, `LICENSE`.

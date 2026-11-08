@@ -4,13 +4,13 @@
   // Start screen of a window that has no document yet (PD-098, step 2): a hero with the creation
   // and open buttons, the recent documents as cards (five per page) and a drop hint.
   //
-  // Adapted from hop `apps/studio-host/src/ui/home-screen.ts` (MIT, Copyright (c) 2025-2026
+  // Adapted from the reference app `apps/studio-host/src/ui/home-screen.ts` (MIT, Copyright (c) 2025-2026
   // Edward Kim; see THIRD_PARTY_NOTICES.md): the same section structure, class names, page size and
   // pagination, rewritten as plain JavaScript. EasyOffice differences: six "new document" buttons
   // instead of one, cards show the file name and its kind (the shell never hands paths or previews
   // to the page, PD-088), and opening a file or a recent document goes through the window bridge.
   //
-  // Previews (PD-106) follow hop's `loadRecentPreview`: the card keeps its skeleton until a picture
+  // Previews (PD-106) follow the reference app's `loadRecentPreview`: the card keeps its skeleton until a picture
   // arrives. The shell sends the picture embedded in the file as Base64 (never a path or the
   // document); it is decoded with `createImageBitmap` and drawn into a canvas, so no URL is
   // involved and the page's image policy does not matter. Any failure leaves the skeleton.

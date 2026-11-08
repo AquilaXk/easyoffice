@@ -159,7 +159,7 @@
       if (closeBtn && dialog) closeBtn.addEventListener("click", () => dialog.close?.());
     }
 
-    // "EasyOffice x.y.z" under the dialog title (hop shows its version the same way).
+    // "EasyOffice x.y.z" under the dialog title (the reference app shows its version the same way).
     function setAppVersion(version) {
       const el = document.getElementById("about-version");
       const text = String(version || "").trim();

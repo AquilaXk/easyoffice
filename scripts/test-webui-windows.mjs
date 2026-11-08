@@ -131,7 +131,7 @@ test("one page of recents hides the pagination controls", async () => {
   assert.equal(document.querySelector(".home-recent-pagination").hidden, true);
 });
 
-test("the home screen keeps hop's structure and is the only visible part of a start window", async () => {
+test("the home screen keeps the reference app's structure and is the only visible part of a start window", async () => {
   const { document } = await openWindow("?module=START&win=main");
   const screen = document.getElementById("home-screen");
   assert.equal(screen.tagName, "SECTION");
@@ -484,7 +484,7 @@ test("the about dialog shows the app version from the bootstrap and ignores a ma
   assert.equal(version.textContent, "EasyOffice 1.2.3", "a version with markup is dropped");
 });
 
-test("home screen and dialog files carry their hop source header and are listed in the notices", async () => {
+test("home screen and dialog files carry their the reference app source header and are listed in the notices", async () => {
   const fs = await import("node:fs");
   const read = (rel) => fs.readFileSync(new URL(`../crates/easyoffice-app/ui/${rel}`, import.meta.url), "utf8");
   const notices = fs.readFileSync(new URL("../THIRD_PARTY_NOTICES.md", import.meta.url), "utf8");
@@ -493,7 +493,7 @@ test("home screen and dialog files carry their hop source header and are listed 
     ["recent-documents-dialog.js", "apps/studio-host/src/ui/recent-documents-dialog.ts"],
     ["home.css", "apps/studio-host/src/styles/home-screen.css"],
   ]) {
-    assert.match(read(file), /Adapted from hop/, `${file} names hop`);
+    assert.match(read(file), /Adapted from the reference app/, `${file} names the reference app`);
     assert.ok(read(file).includes("Edward Kim"), `${file} carries the copyright`);
     assert.ok(notices.includes(`ui/${file}`) && notices.includes(source), `${file} is in the notices table`);
   }

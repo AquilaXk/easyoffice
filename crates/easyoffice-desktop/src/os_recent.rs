@@ -2,7 +2,7 @@
 //! opens or saves is also noted with `NSDocumentController`, so it shows in the Dock menu and in
 //! 사과 메뉴 ▸ 최근 사용 항목. Other platforms keep only the in-app list (`recent.rs`).
 //!
-//! Adapted from hop `apps/desktop/src-tauri/src/macos_recent_documents.rs` (MIT, Copyright (c)
+//! Adapted from the reference app `apps/desktop/src-tauri/src/macos_recent_documents.rs` (MIT, Copyright (c)
 //! 2025-2026 Edward Kim; see THIRD_PARTY_NOTICES.md). EasyOffice difference: failures are ignored
 //! (the in-app list is the source of truth), so the function returns nothing.
 

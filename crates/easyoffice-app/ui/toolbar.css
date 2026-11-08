@@ -6,7 +6,7 @@
  * `#style-bar` and `#status-bar`, keyed to EasyOffice's markup (`#icon-toolbar` also carries
  * `.eo-icon-toolbar`, `#doc-style-bar` plays rhwp's `#style-bar`, `#status-bar` also carries
  * `.statusbar`). Sizes stay with styles.css: EasyOffice's buttons are icon-only (no labels), so the
- * bars keep the compact heights that the hop "labels hidden" mode uses. */
+ * bars keep the compact heights that the reference app's "labels hidden" mode uses. */
 
 #icon-toolbar {
   background: linear-gradient(to bottom, var(--ui-toolbar-bg-start), var(--ui-toolbar-bg-end));
@@ -69,7 +69,7 @@
   user-select: none;
 }
 
-/* Combo boxes (custom-select.js). Adapted from hop `styles/custom-select.css` (MIT, see
+/* Combo boxes (custom-select.js). Adapted from the reference app `styles/custom-select.css` (MIT, see
    THIRD_PARTY_NOTICES.md): native select popups vary by OS, so the select stays the state holder
    and this layer draws the control and its menu. Slide toolbar widths are EasyOffice's. */
 

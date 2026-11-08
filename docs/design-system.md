@@ -1,6 +1,6 @@
 # EasyOffice UI 디자인 기준 (PD-098)
 
-EasyOffice는 자체 디자인 시스템을 두지 않습니다. 모든 창은 hop(golbin/hop)이 쓰는 rhwp-studio 크롬을 기준으로 하며, 이 문서는 그 기준을 코드에서 지키는 규칙만 적습니다. 결정과 단계별 상태는 `docs/policy-decisions.md`의 PD-098입니다. Signature Lavender 팔레트와 Swift 시절의 설명은 폐기했습니다(Git 이력에 남아 있습니다).
+EasyOffice는 자체 디자인 시스템을 두지 않습니다. 모든 창은 참조 앱이 쓰는 rhwp-studio 크롬을 기준으로 하며, 이 문서는 그 기준을 코드에서 지키는 규칙만 적습니다. 결정과 단계별 상태는 `docs/policy-decisions.md`의 PD-098입니다. Signature Lavender 팔레트와 Swift 시절의 설명은 폐기했습니다(Git 이력에 남아 있습니다).
 
 ## 1. 토큰
 
@@ -31,9 +31,9 @@ EasyOffice는 자체 디자인 시스템을 두지 않습니다. 모든 창은 h
 - UI 글꼴은 `--font-family-ui`(`-apple-system, BlinkMacSystemFont, '맑은 고딕', 'Malgun Gothic', 'Segoe UI', sans-serif`). 문서용 글꼴은 OFL 번들(PD-081, PD-092)입니다.
 - 아이콘은 `ui/icons.js`의 24x24 선 아이콘 한 벌(`currentColor`)만 씁니다. 이모지·화살표·도형 문자를 아이콘 대용으로 쓰지 않고, 아이콘만 있는 컨트롤은 `aria-label`을 갖습니다.
 
-## 4. 창 구성 (현재, 단계적으로 hop 구조로 이동 중)
+## 4. 창 구성 (현재, 단계적으로 참조 앱 구조로 이동 중)
 
-문서 하나가 창 하나입니다(PD-088). 시작 창도 같은 크기의 일반 창이고 hop의 홈 화면(`home-screen.js`, `home.css`)을 보여 줍니다. 상단 메뉴 줄, 아이콘 도구 상자, 서식 도구줄, 편집 영역, 상태 표시줄 순이며 한글 창은 rhwp 도구모음 하나만 보입니다. 리본, 빠른 실행 도구 모음, 측면 패널은 없습니다(PD-098 10항). 스마트 보조·개인정보 스캔·보안 검사·성능 진단·문서 개요는 메뉴에서 여는 대화상자(`.tool-dialog` 안에 `.dialog-wrap/.dialog-title/.dialog-body/.dialog-footer`)이고, 시트·슬라이드·PDF 재입힘은 이후 단계에서 이 절을 갱신합니다.
+문서 하나가 창 하나입니다(PD-088). 시작 창도 같은 크기의 일반 창이고 참조 앱의 홈 화면(`home-screen.js`, `home.css`)을 보여 줍니다. 상단 메뉴 줄, 아이콘 도구 상자, 서식 도구줄, 편집 영역, 상태 표시줄 순이며 한글 창은 rhwp 도구모음 하나만 보입니다. 리본, 빠른 실행 도구 모음, 측면 패널은 없습니다(PD-098 10항). 스마트 보조·개인정보 스캔·보안 검사·성능 진단·문서 개요는 메뉴에서 여는 대화상자(`.tool-dialog` 안에 `.dialog-wrap/.dialog-title/.dialog-body/.dialog-footer`)이고, 시트·슬라이드·PDF 재입힘은 이후 단계에서 이 절을 갱신합니다.
 
 ## 5. 새 화면을 만들 때
 
