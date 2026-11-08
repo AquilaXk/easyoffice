@@ -14,6 +14,10 @@
 //! may themselves arrive a batch at a time ([`PdfAssembler`], PD-123), so the SVGs of a long
 //! document are not alive together either. Every size is bounded with `checked_*` arithmetic
 //! before any work starts.
+//!
+//! Text that asks for bold or italic and gets a regular upright face is synthesised before the page
+//! is converted (`pdf_synthetic.rs`), and the finished file's text maps name the standard
+//! character for private-use codes of Hangul documents (`pdf_tounicode.rs`), PD-131.
 
 use pdf_writer::{Chunk, Content, Finish, Name, Pdf, Rect, Ref, TextStr};
 use std::cell::Cell;
@@ -191,8 +195,15 @@ fn convert_page(
     embed_text: bool,
 ) -> Result<PageChunk, String> {
     let svg = crate::pdf_font_fallbacks::add_font_fallbacks(svg);
-    let tree = usvg::Tree::from_data(svg.as_bytes(), options)
+    let (tree, styled) = crate::pdf_synthetic::parse_page(&svg, options)
         .map_err(|err| format!("{}쪽 SVG를 읽지 못했습니다: {err}", index + 1))?;
+    if styled.unsupported > 0 {
+        eprintln!(
+            "PDF export: page {} has {} bold or italic text(s) that mix faces or paints and are not synthesised",
+            index + 1,
+            styled.unsupported
+        );
+    }
     let (chunk, xobject) = convert_with_outline_retry(index, embed_text, |embed_text| {
         let conversion = svg2pdf::ConversionOptions {
             embed_text,
@@ -317,7 +328,8 @@ impl PdfAssembler {
         Ok(())
     }
 
-    /// The finished PDF: the catalog, the page tree over every page written, the document info.
+    /// The finished PDF: the catalog, the page tree over every page written, the document info,
+    /// and the text maps with readable private-use characters (same bytes, same offsets).
     pub fn finish(mut self) -> Result<Vec<u8>, String> {
         if self.page_refs.is_empty() {
             return Err("내보낼 페이지가 없습니다.".to_string());
@@ -330,7 +342,9 @@ impl PdfAssembler {
             .kids(self.page_refs.iter().copied());
         let info_ref = self.alloc.bump();
         self.pdf.document_info(info_ref).producer(TextStr(PRODUCER));
-        Ok(self.pdf.finish())
+        let mut bytes = self.pdf.finish();
+        crate::pdf_tounicode::remap_private_use(&mut bytes);
+        Ok(bytes)
     }
 }
 
@@ -476,7 +490,7 @@ mod tests {
         )
     }
 
-    fn system_font_db() -> Option<Arc<Database>> {
+    pub(super) fn system_font_db() -> Option<Arc<Database>> {
         let mut db = Database::new();
         for dir in [
             "/usr/share/fonts",
@@ -1045,3 +1059,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "pdf_export_text_tests.rs"]
+mod text_tests;

@@ -34,6 +34,9 @@ pdf-writer = "0.12"
 # Glyph lookup of the PDF fallback-font index (usvg keeps its own lookup private); already in the
 # graph through usvg and svg2pdf.
 ttf-parser = { version = "0.25", default-features = false, features = ["std"] }
+# Synthetic bold and italic (PD-131) edit the page SVG at the byte positions of its elements; usvg
+# parses with the same crate, so it is already in the graph.
+roxmltree = "0.20"
 
 # PD-103: update check over the OS TLS stack (no bundled TLS library).
 ureq = { version = "2", default-features = false, features = ["native-tls"] }
@@ -56,3 +59,6 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = ["s
 # The Linux runtime fixes (PD-125) read GTK cache files in their tests.
 [dev-dependencies]
 tempfile = "3"
+# Tests read the compressed content streams of the exported PDF (PD-131); already in the graph
+# through svg2pdf.
+miniz_oxide = "0.8"
