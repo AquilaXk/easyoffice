@@ -639,11 +639,12 @@ fn file_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
     )?;
     let mut lines = entries(&["file:new"]);
     lines.push(Entry::Sub(kinds));
-    // 닫기 is the 윈도우 menu's (the only ⌘W) and 끝내기 is in the application menu.
+    // 닫기 is the 윈도우 menu's (the only ⌘W) and 끝내기 is in the application menu. The reference
+    // app's order: new documents, a separator, open, recent, save, save as (`menu.rs` 79-96).
     lines.extend(entries(&[
+        SEPARATOR,
         "file:open",
         "file:open-recent",
-        SEPARATOR,
         "file:save",
         "file:save-as",
         SEPARATOR,
@@ -679,9 +680,10 @@ fn view_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
     let mut lines = entries(&[
         "view:zoom-in",
         "view:zoom-out",
+        "view:zoom-100",
+        SEPARATOR,
         "view:zoom-fit-page",
         "view:zoom-fit-width",
-        "view:zoom-100",
         SEPARATOR,
         "view:split",
         "view:outline",
@@ -1169,6 +1171,57 @@ mod tests {
         assert!(file
             .trim_end()
             .ends_with("submenu(app, \"파일\", lines)\n}"));
+    }
+
+    /// The reference app's file menu is new documents, a separator, open, recent, save, save as, a
+    /// separator, export, print; its view menu is zoom in, zoom out, actual size, a separator, fit
+    /// page, fit width (`menu.rs` 79-114). The lines before the first item and after the last one are ours.
+    #[test]
+    fn the_file_and_view_menus_keep_the_reference_order_and_separators() {
+        let source = include_str!("native_menu.rs");
+        let production = source.split("#[cfg(test)]").next().unwrap();
+        let section = |from: &str, to: &str| {
+            let start = production.find(from).unwrap();
+            &production[start..start + production[start..].find(to).unwrap()]
+        };
+        let ids_in = |text: &str| -> Vec<String> {
+            text.split('"')
+                .skip(1)
+                .step_by(2)
+                .filter(|piece| piece.contains(':') || *piece == "-")
+                .map(str::to_string)
+                .collect()
+        };
+        let file = section("fn file_menu", "fn edit_menu");
+        let lines = file.split("lines.push(Entry::Sub(kinds));").nth(1).unwrap();
+        let lines = lines.replace("SEPARATOR", "\"-\"");
+        assert_eq!(
+            ids_in(&lines),
+            [
+                "-",
+                "file:open",
+                "file:open-recent",
+                "file:save",
+                "file:save-as",
+                "-",
+                "file:export-pdf",
+                "file:print"
+            ]
+        );
+        let view =
+            section("fn view_menu", "lines.push(Entry::Sub(theme))").replace("SEPARATOR", "\"-\"");
+        let view_ids = ids_in(view.split("let mut lines").nth(1).unwrap());
+        assert_eq!(
+            view_ids[..6],
+            [
+                "view:zoom-in",
+                "view:zoom-out",
+                "view:zoom-100",
+                "-",
+                "view:zoom-fit-page",
+                "view:zoom-fit-width"
+            ]
+        );
     }
 
     /// `run_item` hands the quit item to the queue (it once skipped macOS, where the id then fell
