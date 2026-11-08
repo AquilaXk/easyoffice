@@ -95,6 +95,8 @@ cargo run -p easyoffice-desktop
 
 전체 릴리스는 [GitHub Releases](https://github.com/AquilaXk/easyoffice/releases)에서 볼 수 있습니다.
 
+**업데이트.** 설치된 앱은 하루 1회 이하로 새 릴리스를 확인합니다(도움말 메뉴에서 끌 수 있습니다). 새 버전이 있으면 카드에 **설치하고 다시 시작**이 나타나며, 앱이 릴리스에서 패키지를 내려받아 앱에 들어 있는 공개 키로 서명을 확인한 뒤 설치하고 다시 시작합니다. 저장하지 않은 변경 사항이 있는 창이 있으면 설치하지 않고, 서명이 맞지 않는 패키지는 설치하지 않습니다. `.deb`·`.rpm` 업데이트는 관리자 권한을 요청하며, 업데이터가 다루지 못하는 설치 형태는 릴리스 페이지에서 직접 받습니다(카드에 버튼이 있습니다). 릴리스에는 패키지마다 `.sig` 파일과 업데이터가 읽는 `latest.json`도 들어 있습니다.
+
 #### macOS
 
 macOS 릴리스는 유니버설 디스크 이미지 `EasyOffice-macos-universal.dmg`(Apple silicon·Intel, macOS 11 이상)로 배포됩니다. 이미지를 열어 **EasyOffice**를 `/Applications`로 끌어다 놓습니다. 앱은 Windows와 같은 Tauri v2 데스크톱 셸(WKWebView)로, WebUI가 내장되어 있고 모든 명령이 Rust 엔진에서 프로세스 안에서 실행되며 네트워크 연결이 필요 없습니다. 표준 메뉴 막대와 Command 단축키(⌘C/⌘V/⌘X/⌘A/⌘Z/⌘S/⌘O/⌘W/⌘Q)가 동작하고, Finder의 "다음으로 열기"와 더블 클릭은 파일을 새 창에서 엽니다. ⌘Q로 종료하면 각 창의 저장 / 저장 안 함 / 취소 확인을 거칩니다.

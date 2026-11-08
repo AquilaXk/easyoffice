@@ -95,6 +95,8 @@ Every release carries the same fixed asset names, without a version in them, so 
 
 All releases are listed on the [GitHub Releases](https://github.com/AquilaXk/easyoffice/releases) page.
 
+**Updates.** The installed app checks for a newer release at most once a day (switch it off in the Help menu). When one exists, a card offers **Install and restart**: the app downloads the package from the release, verifies its signature against the public key built into the app, installs it and restarts. Nothing is installed while a window has unsaved changes, and a package whose signature does not verify is never installed. A `.deb` or `.rpm` update asks for administrator permission; an installation the updater does not cover is updated from the release page (the card has a button for it). The release also carries each package's `.sig` file and `latest.json`, which the updater reads.
+
 #### macOS
 
 macOS releases ship a universal disk image, `EasyOffice-macos-universal.dmg` (Apple silicon and Intel, macOS 11 or later). Open the image and drag **EasyOffice** to `/Applications`. The app is the same Tauri v2 desktop shell as on Windows (WKWebView): the WebUI is embedded, every command runs in-process on the Rust engine, and no network connection is involved. The standard menu bar and Command shortcuts (⌘C/⌘V/⌘X/⌘A/⌘Z/⌘S/⌘O/⌘W/⌘Q) work; Finder "Open With" and double-click open files in a new window. Quitting with ⌘Q goes through each window's save / discard / cancel prompt.
