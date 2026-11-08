@@ -1,14 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import { loadUiModule } from "./test-support/load-ui-module.mjs";
+import { readText } from "./test-support/read-text.mjs";
 
 // HWP printing (PD-104): the shell fetches pages in batches from the editor, builds a hidden root
 // with one @page size per paper size, and prints the window. The DOM is a small fake; the editor
 // is a function that answers `getPrintPages`.
 
 const PRINT_JS = new URL("../crates/easyoffice-app/ui/hwp-print.js", import.meta.url);
-const UI = (name) => fs.readFileSync(new URL(`../crates/easyoffice-app/ui/${name}`, import.meta.url), "utf8");
+const UI = (name) => readText(new URL(`../crates/easyoffice-app/ui/${name}`, import.meta.url));
 const A4 = { widthMm: 210, heightMm: 297 };
 const LANDSCAPE = { widthMm: 297, heightMm: 210 };
 
@@ -200,7 +200,7 @@ test("the shell wires printing: menu item, shortcut, no new shell command, only 
   const css = UI("shell.css");
   assert.ok(css.includes("body > :not(#eo-print-root)") && css.includes("#eo-print-root { display: none; }"));
   assert.match(app, /__EASYOFFICE_CREATE_HWP_PRINT__\(\{[^}]*desktopBridge/s, "the print module gets the desktop bridge");
-  const caps = fs.readFileSync(new URL("../crates/easyoffice-desktop/capabilities/main-window.json", import.meta.url), "utf8");
+  const caps = readText(new URL("../crates/easyoffice-desktop/capabilities/main-window.json", import.meta.url));
   assert.ok(caps.includes('"allow-print-webview"'), "the native print command is granted");
   assert.ok(UI("desktop-bridge.js").includes('printWebview: "print_webview"'));
 });

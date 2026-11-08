@@ -1,14 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createWebUiDom, createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
+import { readText } from "./test-support/read-text.mjs";
 
 // Menu bar (PD-098, step 3a): rhwp-studio markup and behaviour, and every ribbon command of the
 // catalog (140 ids over the five editing modules) is reachable from a menu item.
 
 const UI_DIR = new URL("../crates/easyoffice-app/ui/", import.meta.url);
-const read = (name) => fs.readFileSync(fileURLToPath(new URL(name, UI_DIR)), "utf8");
+const read = (name) => readText(fileURLToPath(new URL(name, UI_DIR)));
 const MODULES = ["DOC", "HWP", "SHEET", "SLIDE", "PDF"];
 
 async function openModule(mod) {
@@ -200,7 +200,7 @@ test("menu-bar.css keeps rhwp-studio's selectors and names its source", () => {
 });
 
 test("menu-bar.css and toolbar.css name rhwp-studio as their source and are in the notices", () => {
-  const notices = fs.readFileSync(new URL("../THIRD_PARTY_NOTICES.md", import.meta.url), "utf8");
+  const notices = readText(new URL("../THIRD_PARTY_NOTICES.md", import.meta.url));
   for (const name of ["menu-bar.css", "toolbar.css"]) {
     assert.match(read(name), /Adapted from rhwp-studio/);
     assert.ok(read(name).includes("Edward Kim"));

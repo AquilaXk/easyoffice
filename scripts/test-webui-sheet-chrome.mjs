@@ -1,14 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createWorkspaceHarness } from "./webui-dom-harness.mjs";
 import { hasColorLiteral, rulesFor } from "./test-support/css-rules.mjs";
+import { readText } from "./test-support/read-text.mjs";
 
 // PD-098 step 4a: the sheet screen wears rhwp-studio's classes and tokens (no new components).
 
 const UI_DIR = new URL("../crates/easyoffice-app/ui/", import.meta.url);
-const read = (name) => fs.readFileSync(fileURLToPath(new URL(name, UI_DIR)), "utf8");
+const read = (name) => readText(fileURLToPath(new URL(name, UI_DIR)));
 test("the formula bar is a separate row built from rhwp style-bar and toolbar classes", async () => {
   const { document } = await createWorkspaceHarness({ search: "?module=SHEET&win=w-sheet-chrome" });
   const bar = document.getElementById("sheet-formula-bar");

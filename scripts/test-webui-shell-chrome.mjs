@@ -1,22 +1,22 @@
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { loadUiModule } from "./test-support/load-ui-module.mjs";
 import { switchModule } from "./test-support/modules.mjs";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { cssDeclarations } from "./test-support/css-declarations.mjs";
+import { readText } from "./test-support/read-text.mjs";
 
 // Shell chrome (#126, PD-088): one SVG icon set, accessible names on every control, compact top bar,
 // a status bar that never clips, a command palette overlay and readable contrast in both themes.
 
 const UI_DIR = new URL("../crates/easyoffice-app/ui/", import.meta.url);
-const CSS = fs.readFileSync(fileURLToPath(new URL("styles.css", UI_DIR)), "utf8");
-const SHELL_CSS = fs.readFileSync(fileURLToPath(new URL("shell.css", UI_DIR)), "utf8");
-const CONTENT_CSS = fs.readFileSync(fileURLToPath(new URL("content.css", UI_DIR)), "utf8");
-const TOKENS_CSS = fs.readFileSync(fileURLToPath(new URL("tokens.css", UI_DIR)), "utf8");
-const TOOLBAR_CSS = fs.readFileSync(fileURLToPath(new URL("toolbar.css", UI_DIR)), "utf8");
-const MENU_CSS = fs.readFileSync(fileURLToPath(new URL("menu-bar.css", UI_DIR)), "utf8");
+const CSS = readText(fileURLToPath(new URL("styles.css", UI_DIR)));
+const SHELL_CSS = readText(fileURLToPath(new URL("shell.css", UI_DIR)));
+const CONTENT_CSS = readText(fileURLToPath(new URL("content.css", UI_DIR)));
+const TOKENS_CSS = readText(fileURLToPath(new URL("tokens.css", UI_DIR)));
+const TOOLBAR_CSS = readText(fileURLToPath(new URL("toolbar.css", UI_DIR)));
+const MENU_CSS = readText(fileURLToPath(new URL("menu-bar.css", UI_DIR)));
 const ALL_CSS = `${CSS}\n${SHELL_CSS}\n${CONTENT_CSS}\n${MENU_CSS}\n${TOOLBAR_CSS}`;
 const ICONS_JS = new URL("icons.js", UI_DIR);
 
@@ -142,14 +142,14 @@ test("reference values: 28px menu bar with the light border, bottom-left update 
   const bar = cssRule(".topbar", SHELL_CSS);
   assert.ok(hasDecl(bar, "height", "28px") && hasDecl(bar, "border-bottom", "1px solid var(--ui-border-light)"));
   assert.ok(hasDecl(cssRule(".icon-btn", SHELL_CSS), "height", "24px") && hasDecl(cssRule(".palette-btn", SHELL_CSS), "height", "22px"), "the search and theme controls fit 28px");
-  const home = fs.readFileSync(fileURLToPath(new URL("home.css", UI_DIR)), "utf8");
+  const home = readText(fileURLToPath(new URL("home.css", UI_DIR)));
   const card = cssRule(".update-notice", home);
   assert.ok(hasDecl(card, "left", "16px") && hasDecl(card, "bottom", "48px") && hasDecl(card, "box-shadow", "var(--shadow-dialog)"));
   assert.ok(!hasDecl(card, "top") && !hasDecl(card, "right"));
   const loaded = cssRule(".home-recent-preview.is-loaded", home);
   assert.ok(hasDecl(loaded, "padding", "14px") && hasDecl(cssRule(".home-preview-canvas", home), "border-radius", "var(--radius-lg)"));
-  assert.match(fs.readFileSync(fileURLToPath(new URL("home-screen.js", UI_DIR)), "utf8"), /앱을 실행하자마자 이어서 작업할 수 있도록 최근에 연 문서를 보여줍니다\./);
-  const html = fs.readFileSync(fileURLToPath(new URL("index.html", UI_DIR)), "utf8");
+  assert.match(readText(fileURLToPath(new URL("home-screen.js", UI_DIR))), /앱을 실행하자마자 이어서 작업할 수 있도록 최근에 연 문서를 보여줍니다\./);
+  const html = readText(fileURLToPath(new URL("index.html", UI_DIR)));
   const about = html.slice(html.indexOf('<dialog id="about-dialog"'));
   assert.match(about, /class="tool-dialog"[\s\S]*?<div class="dialog-wrap">\s*<div class="dialog-title"><span id="about-dialog-title">제품 정보<\/span>/);
   assert.match(about, /<div class="dialog-body about-body">\s*<div class="about-product-name">EasyOffice<\/div>[\s\S]*?id="about-version"/);
@@ -260,10 +260,10 @@ test("shell chrome colours meet WCAG AA in the light and dark themes", () => {
 
 test("no UI file exceeds the line ceiling and the new modules are registered", () => {
   for (const name of ["icons.js", "window-bridge.js"]) {
-    const lines = fs.readFileSync(fileURLToPath(new URL(name, UI_DIR)), "utf8").split("\n").length;
+    const lines = readText(fileURLToPath(new URL(name, UI_DIR))).split("\n").length;
     assert.ok(lines < 1000, `${name} has ${lines} lines`);
   }
-  const html = fs.readFileSync(fileURLToPath(new URL("index.html", UI_DIR)), "utf8");
+  const html = readText(fileURLToPath(new URL("index.html", UI_DIR)));
   for (const asset of ["./icons.js", "./window-bridge.js", "./shell.css", "./tokens.css", "./content.css", "./theme.js"]) assert.ok(html.includes(asset), asset);
 });
 

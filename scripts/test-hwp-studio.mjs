@@ -15,10 +15,11 @@ import { resolveGitExecutable } from "./verify-rhwp-upstream.mjs";
 import { execFileSync, spawnSync } from "node:child_process";
 import { stripTypeScriptTypes } from "node:module";
 import { BEGIN, END, replaceSection, wasmDependencyClosure } from "./generate-wasm-notices.mjs";
+import { readText } from "./test-support/read-text.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, "..");
-const CONFIG = JSON.parse(fs.readFileSync(path.join(REPO, "config/rhwp-upstream.json"), "utf8"));
+const CONFIG = JSON.parse(readText(path.join(REPO, "config/rhwp-upstream.json")));
 
 function tmp(prefix) {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -237,7 +238,7 @@ function makeFonts() {
 
 test("the bundled fonts are all OFL 1.1 and match their hashes", () => {
   assert.deepEqual(checkFonts(REPO), []);
-  const manifest = JSON.parse(fs.readFileSync(path.join(REPO, "assets/fonts/fonts.json"), "utf8"));
+  const manifest = JSON.parse(readText(path.join(REPO, "assets/fonts/fonts.json")));
   assert.ok(manifest.fonts.length >= 20);
   assert.ok(manifest.fonts.every((f) => f.license === "OFL-1.1"));
   assert.ok(!manifest.fonts.some((f) => /Cafe24|Happiness|LatinModern|SourceHan|hamchob|Arial|Malgun/i.test(f.file)));
@@ -368,8 +369,8 @@ test("hygiene scans overlay TypeScript for prohibited references", () => {
 // ---- third-party notices ----------------------------------------------------------------------
 
 test("notices list every bundled font family, the bundled npm package and the generated crate section", () => {
-  const notices = fs.readFileSync(path.join(REPO, "THIRD_PARTY_NOTICES.md"), "utf8");
-  const fonts = JSON.parse(fs.readFileSync(path.join(REPO, "assets/fonts/fonts.json"), "utf8")).fonts;
+  const notices = readText(path.join(REPO, "THIRD_PARTY_NOTICES.md"));
+  const fonts = JSON.parse(readText(path.join(REPO, "assets/fonts/fonts.json"))).fonts;
   for (const family of new Set(fonts.map((f) => f.family))) assert.ok(notices.includes(`| ${family} |`), family);
   assert.ok(notices.includes("@noble/hashes"));
   const start = notices.indexOf(BEGIN);
@@ -435,7 +436,7 @@ test("print styles carry an @page size rule and a page box per page (#173)", asy
 // flow code (sliced out of main.ts, types stripped) with a mock engine and dialog, and guard that
 // the password never reaches the shell, the embed port, storage or logs.
 
-const OVERLAY_MAIN = fs.readFileSync(path.join(REPO, "apps/hwp-studio/src/main.ts"), "utf8");
+const OVERLAY_MAIN = readText(path.join(REPO, "apps/hwp-studio/src/main.ts"));
 const PASSWORD_REQUIRED = "비밀번호가 필요한 암호 문서";
 const PASSWORD_REJECTED = "비밀번호가 일치하지 않거나 암호화 데이터가 손상되었습니다";
 
@@ -568,12 +569,12 @@ test("the password stays inside the open flow: no storage, logs, embed port or s
     "crates/easyoffice-desktop/src/main.rs",
   ];
   for (const rel of outside) {
-    assert.doesNotMatch(fs.readFileSync(path.join(REPO, rel), "utf8"), /openWithPassword|loadDocumentWithPassword|hwp-password/, rel);
+    assert.doesNotMatch(readText(path.join(REPO, rel)), /openWithPassword|loadDocumentWithPassword|hwp-password/, rel);
   }
 });
 
 test("the pinned engine exports the password open", () => {
-  assert.match(fs.readFileSync(path.join(REPO, "vendor/rhwp-core/rhwp.d.ts"), "utf8"), /static openWithPassword\(data: Uint8Array, password: string\): HwpDocument/);
+  assert.match(readText(path.join(REPO, "vendor/rhwp-core/rhwp.d.ts")), /static openWithPassword\(data: Uint8Array, password: string\): HwpDocument/);
 });
 
 const BUILT_ASSETS = path.join(REPO, "crates/easyoffice-app/ui/hwp-studio/assets");
@@ -581,7 +582,7 @@ const BUILT_ASSETS = path.join(REPO, "crates/easyoffice-app/ui/hwp-studio/assets
 // The editor bundle is build output (not tracked); CI jobs that do not build it skip this check.
 test("the built bundle carries the password flow", { skip: !fs.existsSync(BUILT_ASSETS) }, () => {
   const assets = BUILT_ASSETS;
-  const bundle = fs.readdirSync(assets).filter((f) => f.endsWith(".js")).map((f) => fs.readFileSync(path.join(assets, f), "utf8")).join("\n");
+  const bundle = fs.readdirSync(assets).filter((f) => f.endsWith(".js")).map((f) => readText(path.join(assets, f))).join("\n");
   assert.ok(bundle.includes(PASSWORD_REQUIRED) && bundle.includes(PASSWORD_REJECTED), "the bundle contains the password flow");
 });
 
@@ -613,22 +614,22 @@ test("print batches carry the paper size in mm, clamp at the document end and re
 
 test("the embed router routes getPrintPages and the editor advertises print-pages-v1", async () => {
   // The router imports the editor's path aliases, which plain Node cannot resolve: check its source.
-  const router = fs.readFileSync(path.join(REPO, "apps/hwp-studio/src/embed/rpc-router.ts"), "utf8");
+  const router = readText(path.join(REPO, "apps/hwp-studio/src/embed/rpc-router.ts"));
   assert.match(router, /case 'getPrintPages': \{\s+const range = parsePrintBatchRange\(params\);\s+return handlers\.getPrintPages\(range\.from, range\.count\);/);
-  const main = fs.readFileSync(path.join(REPO, "apps/hwp-studio/src/main.ts"), "utf8");
+  const main = readText(path.join(REPO, "apps/hwp-studio/src/main.ts"));
   assert.match(main, /async getPrintPages\(from, count\) \{[\s\S]{0,200}renderPrintBatch\(wasm, from, count\)/);
   const { EMBED_CAPABILITIES } = await import("../apps/hwp-studio/src/embed/protocol.ts");
   assert.ok(EMBED_CAPABILITIES.includes("print-pages-v1"));
-  const menu = fs.readFileSync(path.join(REPO, "apps/hwp-studio/index.html"), "utf8");
+  const menu = readText(path.join(REPO, "apps/hwp-studio/index.html"));
   assert.ok(menu.includes('data-shell-cmd="print"'), "the 파일 menu lists printing");
 });
 
 // ---- drop highlight (drag-over-v1, PD-124) -------------------------------------------------------
 
 test("the editor shows the drop highlight on its scroll container when the shell asks, and the shell may only send a boolean", async () => {
-  const router = fs.readFileSync(path.join(REPO, "apps/hwp-studio/src/embed/rpc-router.ts"), "utf8");
+  const router = readText(path.join(REPO, "apps/hwp-studio/src/embed/rpc-router.ts"));
   assert.match(router, /case 'setDragOver':\s+assertOnlyKeys\(params, \['active'\], 'setDragOver params'\);\s+if \(typeof params.active !== 'boolean'\)/);
-  const main = fs.readFileSync(path.join(REPO, "apps/hwp-studio/src/main.ts"), "utf8");
+  const main = readText(path.join(REPO, "apps/hwp-studio/src/main.ts"));
   assert.match(main, /async setDragOver\(active\) \{\s+document\.getElementById\('scroll-container'\)\?\.classList\.toggle\('drag-over', active\);/);
   const { EMBED_CAPABILITIES } = await import("../apps/hwp-studio/src/embed/protocol.ts");
   assert.ok(EMBED_CAPABILITIES.includes("drag-over-v1"));
@@ -638,11 +639,11 @@ test("the editor shows the drop highlight on its scroll container when the shell
 
 test("the editor tells the shell whether the document was opened with a password, and only that flag", async () => {
   // The router and main import the editor's path aliases, which plain Node cannot resolve: check their source.
-  const router = fs.readFileSync(path.join(REPO, "apps/hwp-studio/src/embed/rpc-router.ts"), "utf8");
+  const router = readText(path.join(REPO, "apps/hwp-studio/src/embed/rpc-router.ts"));
   assert.match(router, /case 'getSaveProtection':\s+assertEmptyParams\(params, 'getSaveProtection params'\);\s+return handlers\.getSaveProtection\(\);/);
   assert.match(router, /case 'clearSaveProtection':\s+assertEmptyParams\(params, 'clearSaveProtection params'\);\s+return handlers\.clearSaveProtection\(\);/);
   assert.match(router, /getSaveProtection\(\): Promise<\{ passwordProtected: boolean \}>;/);
-  const main = fs.readFileSync(path.join(REPO, "apps/hwp-studio/src/main.ts"), "utf8");
+  const main = readText(path.join(REPO, "apps/hwp-studio/src/main.ts"));
   assert.match(main, /async getSaveProtection\(\) \{\s+await initPromise;\s+return \{ passwordProtected: wasm\.requiresPasswordForSave \};/);
   assert.match(main, /async clearSaveProtection\(\) \{\s+await initPromise;\s+wasm\.requiresPasswordForSave = false;/);
   const { EMBED_CAPABILITIES } = await import("../apps/hwp-studio/src/embed/protocol.ts");
@@ -654,7 +655,7 @@ test("the editor tells the shell whether the document was opened with a password
 const UPSTREAM_BRIDGE = path.join(REPO, "third_party/rhwp/rhwp-studio/src/core/wasm-bridge.ts");
 
 test("upstream bridge: the password open sets the save flag, every other load clears it", { skip: !fs.existsSync(UPSTREAM_BRIDGE) }, () => {
-  const bridge = fs.readFileSync(UPSTREAM_BRIDGE, "utf8");
+  const bridge = readText(UPSTREAM_BRIDGE);
   assert.match(bridge, /loadDocumentWithPassword\([^)]*\): void \{\s+this\.loadDocumentAtomically\(\s+data,\s+fileName,\s+true,/);
   assert.match(bridge, /loadDocument\(data: Uint8Array, fileName\?: string\): DocumentInfo \{\s+this\.loadDocumentAtomically\(data, fileName, false,/);
   assert.match(bridge, /releaseDocument\(\): void \{[\s\S]*?this\._requiresPasswordForSave = false;/);
@@ -713,17 +714,17 @@ test("unreadable or unwritable storage falls back to shown and the toggle still 
 });
 
 test("the toolbar labels item, command, CSS and manifest agree", () => {
-  const html = fs.readFileSync(path.join(REPO, "apps/hwp-studio/index.html"), "utf8");
+  const html = readText(path.join(REPO, "apps/hwp-studio/index.html"));
   assert.match(html, /role="menuitemcheckbox"[^>]*data-cmd="view:toolbar-labels"/);
-  const main = fs.readFileSync(path.join(REPO, "apps/hwp-studio/src/main.ts"), "utf8");
+  const main = readText(path.join(REPO, "apps/hwp-studio/src/main.ts"));
   assert.ok(main.includes("registry.register(toolbarLabelsCommand);") && main.includes("initToolbarLabels();"));
-  const css = fs.readFileSync(path.join(REPO, "apps/hwp-studio/src/eo-overrides.css"), "utf8");
+  const css = readText(path.join(REPO, "apps/hwp-studio/src/eo-overrides.css"));
   const block = css.slice(css.indexOf(':root[data-toolbar-labels="hidden"] #icon-toolbar .tb-label'));
   assert.ok(block.includes("#style-bar .sb-ribbon-label") && block.includes("height: 32px"));
   assert.ok(!/#[0-9a-fA-F]{3,8}\b|rgb/.test(block), "the rules use no colours");
-  const manifest = fs.readFileSync(path.join(REPO, "config/rhwp-studio-overrides.json"), "utf8");
+  const manifest = readText(path.join(REPO, "config/rhwp-studio-overrides.json"));
   assert.ok(manifest.includes("view:toolbar-labels") && manifest.includes("src/ui/toolbar-labels.ts"));
-  assert.ok(fs.readFileSync(path.join(REPO, "THIRD_PARTY_NOTICES.md"), "utf8").includes("src/ui/toolbar-labels.ts"));
+  assert.ok(readText(path.join(REPO, "THIRD_PARTY_NOTICES.md")).includes("src/ui/toolbar-labels.ts"));
 });
 
 test("the 셀 선택 command (table:cell-selection-enter) replays F5 through the editor's keyboard path, only in a table", async () => {
@@ -742,7 +743,7 @@ test("the 셀 선택 command (table:cell-selection-enter) replays F5 through the
 // The shell's edit menu (macOS ⌘Z/⇧⌘Z/⌘X/⌘C are menu keys, so they never reach this frame) sends edit:undo, redo,
 // cut and copy over the embed port. A dialog's text field with the focus must take them, never the document.
 const TEXT_FIELD_EDIT = (async () => {
-  const source = fs.readFileSync(path.join(REPO, "apps/hwp-studio/src/embed/text-field-edit.ts"), "utf8");
+  const source = readText(path.join(REPO, "apps/hwp-studio/src/embed/text-field-edit.ts"));
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "eo-text-field-edit-")), "text-field-edit.mjs");
   fs.writeFileSync(file, stripTypeScriptTypes(source));
   return import(pathToFileURL(file).href);
@@ -787,7 +788,7 @@ test("the editor's own hidden input, buttons, no focus and other commands run th
 });
 
 test("the embed port's automation.execute hands every edit command to the field-aware runner", () => {
-  const main = fs.readFileSync(path.join(REPO, "apps/hwp-studio/src/main.ts"), "utf8");
+  const main = readText(path.join(REPO, "apps/hwp-studio/src/main.ts"));
   const handler = main.slice(main.indexOf("async automationExecute"), main.indexOf("async automationContext"));
   assert.match(handler, /runEditCommand\(\s*id,\s*document\.activeElement,/);
   assert.match(handler, /\(\) => automation\.execute\(id, params, options\)/);
@@ -795,7 +796,7 @@ test("the embed port's automation.execute hands every edit command to the field-
 });
 
 const DESKTOP_CHROME = (async () => {
-  const source = fs.readFileSync(path.join(REPO, "apps/hwp-studio/src/embed/desktop-chrome.ts"), "utf8");
+  const source = readText(path.join(REPO, "apps/hwp-studio/src/embed/desktop-chrome.ts"));
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "eo-desktop-chrome-")), "desktop-chrome.mjs");
   fs.writeFileSync(file, stripTypeScriptTypes(source));
   return import(pathToFileURL(file).href);
@@ -838,7 +839,7 @@ test("the context menu of the menu bar and toolbars is suppressed, the document 
 });
 
 test("the editor entry applies the Mac labels on macOS and always guards the chrome context menu", () => {
-  const main = fs.readFileSync(path.join(REPO, "apps/hwp-studio/src/main.ts"), "utf8");
+  const main = readText(path.join(REPO, "apps/hwp-studio/src/main.ts"));
   assert.match(main, /from '\.\/embed\/desktop-chrome\.ts'/);
   assert.match(main, /detectPlatformKind\(\) === 'mac'\) applyMacShortcutPresentation\(document\)/);
   assert.match(main, /installNonEditorContextMenuGuards\(document\)/);
@@ -849,14 +850,14 @@ test("the editor entry applies the Mac labels on macOS and always guards the chr
 test("host fonts: the editor advertises host-fonts-v1, routes the two RPCs and installs the shell provider", async () => {
   const { EMBED_CAPABILITIES } = await import("../apps/hwp-studio/src/embed/protocol.ts");
   assert.ok(EMBED_CAPABILITIES.includes("host-fonts-v1"));
-  const router = fs.readFileSync(path.join(REPO, "apps/hwp-studio/src/embed/rpc-router.ts"), "utf8");
+  const router = readText(path.join(REPO, "apps/hwp-studio/src/embed/rpc-router.ts"));
   assert.match(router, /case 'enableHostFonts':\s+assertEmptyParams\(params, 'enableHostFonts params'\);\s+return handlers\.enableHostFonts\(\);/);
   assert.match(router, /case 'hostFontsReply': return handlers\.hostFontsReply\(params\);/);
-  const main = fs.readFileSync(path.join(REPO, "apps/hwp-studio/src/main.ts"), "utf8");
+  const main = readText(path.join(REPO, "apps/hwp-studio/src/main.ts"));
   assert.match(main, /async enableHostFonts\(\) \{\s+await initPromise;\s+void setHostFontProvider\(shellFontBridge\.provider\);/);
   assert.match(main, /shellFontBridge\.relay\.add\(/);
   assert.match(main, /async hostFontsReply\(params\) \{\s+return shellFontBridge\.reply\(params\);/);
-  const code = fs.readFileSync(path.join(REPO, "apps/hwp-studio/src/embed/host-fonts.ts"), "utf8").split("\n").filter((line) => !/^\s*(\/\/|\/?\*)/.test(line)).join("\n");
+  const code = readText(path.join(REPO, "apps/hwp-studio/src/embed/host-fonts.ts")).split("\n").filter((line) => !/^\s*(\/\/|\/?\*)/.test(line)).join("\n");
   assert.doesNotMatch(code, /\bpath\b|__TAURI|invoke\(/i, "the editor side names no path and calls no command");
 });
 

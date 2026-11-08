@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { switchModule } from "./test-support/modules.mjs";
+import { readText } from "./test-support/read-text.mjs";
 
 // What the native menu bar shows for a window (PD-102, menu_state.rs): the page reports its theme and the
 // items its module cannot use (the page's own `studioCommandApplies` rule). The Rust side applies the
@@ -12,7 +12,7 @@ import { switchModule } from "./test-support/modules.mjs";
 
 const REPO = new URL("../", import.meta.url);
 const byName = (a, b) => a.localeCompare(b);
-const read = (rel) => fs.readFileSync(fileURLToPath(new URL(rel, REPO)), "utf8");
+const read = (rel) => readText(fileURLToPath(new URL(rel, REPO)));
 
 async function shellPage(search = "?module=DOC&win=w-menu-state", platform = "MacIntel") {
   const reports = [];

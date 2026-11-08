@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { createWebUiDom, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { switchModule, studioItem } from "./test-support/modules.mjs";
 import { loadUiModule } from "./test-support/load-ui-module.mjs";
+import { readText } from "./test-support/read-text.mjs";
 
 const VECTORS_PATH = fileURLToPath(
   new URL("../fixtures/pii-scrub-vectors.json", import.meta.url)
@@ -320,7 +321,7 @@ test("structured JSON IPC preserves ? and %3B in cross-sheet formulas, literals,
 });
 
 test("shared PII vectors in fixtures/pii-scrub-vectors.json match JS sheet-utils and offline-rpc engines", async () => {
-  const vectorsDoc = JSON.parse(fs.readFileSync(VECTORS_PATH, "utf8"));
+  const vectorsDoc = JSON.parse(readText(VECTORS_PATH));
   const { sandbox } = await createWebUiDom();
   const localScrubPii = sandbox.__EASYOFFICE_SHEET_UTILS__.localScrubPii;
   const offlineRpc = sandbox.__EASYOFFICE_CREATE_OFFLINE_RPC__({
@@ -362,7 +363,7 @@ test("shared PII vectors in fixtures/pii-scrub-vectors.json match JS sheet-utils
 // frame therefore gets an opaque origin; these checks pin the pieces that keep it that way.
 
 const ROOT = new URL("../", import.meta.url);
-const readText = (rel) => fs.readFileSync(new URL(rel, ROOT), "utf8");
+const readRel = (rel) => readText(new URL(rel, ROOT));
 
 test("editor frame: the sandbox grants scripts and modals only, never the shell's origin", () => {
   const env = {};
@@ -377,54 +378,54 @@ test("editor frame: the sandbox grants scripts and modals only, never the shell'
 test("editor frame: no code in the shell UI reaches into the frame or hands it Tauri objects", () => {
   const uiDir = new URL("crates/easyoffice-app/ui/", ROOT);
   for (const name of fs.readdirSync(uiDir).filter((n) => n.endsWith(".js") || n.endsWith(".html"))) {
-    const source = fs.readFileSync(new URL(name, uiDir), "utf8");
+    const source = readText(new URL(name, uiDir));
     assert.doesNotMatch(source, /contentDocument|contentWindow\.(?!postMessage)/, `${name} reads the editor frame`);
   }
-  const bridge = readText("crates/easyoffice-app/ui/desktop-bridge.js");
+  const bridge = readRel("crates/easyoffice-app/ui/desktop-bridge.js");
   assert.doesNotMatch(bridge, /allow-same-origin/);
 });
 
 test("editor frame: the window capability is local-only, global Tauri stays off and the editor gets a strict CSP", () => {
-  const capability = JSON.parse(readText("crates/easyoffice-desktop/capabilities/main-window.json"));
+  const capability = JSON.parse(readRel("crates/easyoffice-desktop/capabilities/main-window.json"));
   assert.equal(capability.local, true);
   assert.equal(capability.remote, undefined, "no remote origin may call commands");
   assert.deepEqual(capability.windows, ["main", "doc-*"]);
   assert.equal(capability.webviews, undefined);
-  const conf = JSON.parse(readText("crates/easyoffice-desktop/tauri.conf.json"));
+  const conf = JSON.parse(readRel("crates/easyoffice-desktop/tauri.conf.json"));
   assert.equal(conf.app.withGlobalTauri, false);
   assert.equal(conf.app.security.csp["frame-src"], "'self'");
   // The editor document is answered with the --serve policy (no ipc: endpoints) by the app protocol hook.
-  const windows = readText("crates/easyoffice-desktop/src/window_commands.rs");
+  const windows = readRel("crates/easyoffice-desktop/src/window_commands.rs");
   assert.match(windows, /\.on_web_resource_request\([^)]*\|request, response\|/);
   assert.match(windows, /studio_frame::harden_studio_response\(&request, response\)/);
-  const studioCsp = readText("crates/easyoffice-app/src/hwp_bundle.rs").match(/STUDIO_CSP: &str = "([^"]+)"/)[1];
+  const studioCsp = readRel("crates/easyoffice-app/src/hwp_bundle.rs").match(/STUDIO_CSP: &str = "([^"]+)"/)[1];
   assert.match(studioCsp, /^default-src 'self';/);
   assert.doesNotMatch(studioCsp, /connect-src|ipc|'unsafe-/);
   // WebKit (macOS) does not match 'self' for the opaque-origin frame and blocks all its subresources:
   // the desktop answers the editor document with the policy that spells the app origin out.
-  const studioFrame = readText("crates/easyoffice-desktop/src/studio_frame.rs");
+  const studioFrame = readRel("crates/easyoffice-desktop/src/studio_frame.rs");
   assert.match(studioFrame, /CONTENT_SECURITY_POLICY,\s+studio_csp_value\(app_origin\(cfg!\(windows\)\)\)/);
   // The origin is a platform constant, not the request URI: wry hands the hook `tauri://localhost/...`
   // even on Windows, where the document's origin is `http://tauri.localhost`.
   assert.match(studioFrame, /WINDOWS_APP_ORIGIN: &str = "http:\/\/tauri\.localhost"/);
   assert.match(studioFrame, /CUSTOM_SCHEME_APP_ORIGIN: &str = "tauri:\/\/localhost"/);
   assert.doesNotMatch(studioFrame.split("#[cfg(test)]")[0], /request\.uri\(\)\.(authority|scheme)|uri\.authority/);
-  assert.match(readText("crates/easyoffice-app/src/hwp_bundle.rs"), /STUDIO_CSP\.replace\("'self'", origin\)/);
+  assert.match(readRel("crates/easyoffice-app/src/hwp_bundle.rs"), /STUDIO_CSP\.replace\("'self'", origin\)/);
 });
 
 test("shell commands: only the desktop bridge calls the Tauri IPC, and it always sends the window token", () => {
   const uiDir = new URL("crates/easyoffice-app/ui/", ROOT);
   const callers = [];
   for (const name of fs.readdirSync(uiDir).filter((n) => n.endsWith(".js"))) {
-    const code = fs.readFileSync(new URL(name, uiDir), "utf8").replace(/\/\/.*$/gm, "");
+    const code = readText(new URL(name, uiDir)).replace(/\/\/.*$/gm, "");
     if (/__TAURI_INTERNALS__|\bwindow\.ipc\b|chrome\.webview/.test(code)) callers.push(name);
   }
   // frame-probe.js is the smoke probe that plays the part of a compromised editor frame.
   assert.deepEqual(callers.sort((a, b) => a.localeCompare(b)), ["desktop-bridge.js", "frame-probe.js"]);
-  const bridge = readText("crates/easyoffice-app/ui/desktop-bridge.js");
+  const bridge = readRel("crates/easyoffice-app/ui/desktop-bridge.js");
   assert.equal([...bridge.matchAll(/internals\.invoke\(/g)].length, 1, "one call site");
   assert.match(bridge, /internals\.invoke\(command, args, \{ headers: \{ \[TOKEN_HEADER\]: token \} \}\)/);
-  const rust = readText("crates/easyoffice-desktop/src/shell_caller.rs");
+  const rust = readRel("crates/easyoffice-desktop/src/shell_caller.rs");
   assert.ok(rust.includes(`TOKEN_HEADER: &str = "x-easyoffice-shell"`));
   assert.match(bridge, /const TOKEN_HEADER = "x-easyoffice-shell"/);
   assert.match(rust, /TOKEN_GLOBAL: &str = "__EASYOFFICE_SHELL_TOKEN__"/);

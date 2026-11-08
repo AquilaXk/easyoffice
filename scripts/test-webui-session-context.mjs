@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { switchModule, typeIntoDocParagraph, createMemoryStorage, studioItem, commandItem } from "./test-support/modules.mjs";
+import { readText } from "./test-support/read-text.mjs";
 
 const UI_DIR = new URL("../crates/easyoffice-app/ui/", import.meta.url);
-const INDEX_HTML = fs.readFileSync(fileURLToPath(new URL("index.html", UI_DIR)), "utf8");
-const STYLES_CSS = fs.readFileSync(fileURLToPath(new URL("styles.css", UI_DIR)), "utf8");
+const INDEX_HTML = readText(fileURLToPath(new URL("index.html", UI_DIR)));
+const STYLES_CSS = readText(fileURLToPath(new URL("styles.css", UI_DIR)));
 const AUTOSAVE_KEY = "easyoffice.workspace.autosave.v1";
 
 // Shortcuts a web page cannot (or must not) take over from the browser: new window/tab,

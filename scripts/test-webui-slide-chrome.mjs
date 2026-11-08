@@ -1,15 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { cssDeclarations } from "./test-support/css-declarations.mjs";
 import { hasColorLiteral, rulesFor, ruleWithSelector } from "./test-support/css-rules.mjs";
+import { readText } from "./test-support/read-text.mjs";
 
 // PD-098 step 4b: the slide screen wears rhwp-studio's toolbar classes and the reference app's custom select.
 
 const UI_DIR = new URL("../crates/easyoffice-app/ui/", import.meta.url);
-const read = (name) => fs.readFileSync(fileURLToPath(new URL(name, UI_DIR)), "utf8");
+const read = (name) => readText(fileURLToPath(new URL(name, UI_DIR)));
 const SLIDE_SEARCH = "?module=SLIDE&win=w-slide-chrome";
 const TOOL_BUTTONS = [
   "btn-add-slide", "btn-slide-duplicate", "btn-slide-delete", "btn-slide-move-up", "btn-slide-move-down",
@@ -87,7 +87,7 @@ test("custom-select.js names the reference app as its source and is in the notic
   const source = read("custom-select.js");
   assert.match(source, /Adapted from the reference app/);
   assert.ok(source.includes("Edward Kim"));
-  const notices = fs.readFileSync(new URL("../THIRD_PARTY_NOTICES.md", import.meta.url), "utf8");
+  const notices = readText(new URL("../THIRD_PARTY_NOTICES.md", import.meta.url));
   assert.ok(notices.includes("ui/custom-select.js"));
   const css = read("toolbar.css");
   for (const sel of [".custom-select-trigger", ".custom-select-menu", ".custom-select-option", ".native-select-hidden"]) {

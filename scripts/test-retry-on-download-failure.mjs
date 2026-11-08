@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { backoffMs, isDownloadFailure, runWithRetry } from "./retry-on-download-failure.mjs";
+import { readText } from "./test-support/read-text.mjs";
 
 test("bundler download errors are retryable, compile and test errors are not", () => {
   assert.ok(isDownloadFailure("Downloading https://github.com/x/AppRun-x86_64\nfailed to bundle project: `http status: 504`"));
@@ -66,7 +67,7 @@ test("does not retry a compile failure", async () => {
 });
 
 // Workflow structure (PD-118): every bundling build retries downloads and has the tool cache restored.
-const read = (rel) => fs.readFileSync(new URL(`../${rel}`, import.meta.url), "utf8");
+const read = (rel) => readText(new URL(`../${rel}`, import.meta.url));
 const CLI_BUILD = /@tauri-apps\/cli@(\d+\.\d+\.\d+) build/g;
 
 test("every Tauri build runs through the retry wrapper", () => {

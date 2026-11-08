@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import test from "node:test";
 import { findServeReleaseViolations } from "./release-serve-rule.mjs";
+import { readText } from "./test-support/read-text.mjs";
 
 test("flags a published cli-serve archive", () => {
   const yml = 'ARCHIVE="EasyOffice-${VERSION}-windows-x64-cli-serve-preview.zip"';
@@ -23,6 +23,6 @@ test("accepts installer-only assets", () => {
 });
 
 test("the real release workflow is clean", () => {
-  const text = fs.readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
+  const text = readText(new URL("../.github/workflows/release.yml", import.meta.url));
   assert.deepEqual(findServeReleaseViolations(text), []);
 });

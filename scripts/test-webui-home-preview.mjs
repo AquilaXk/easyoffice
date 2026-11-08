@@ -1,14 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import { loadUiModule } from "./test-support/load-ui-module.mjs";
+import { readText } from "./test-support/read-text.mjs";
 
 // Start-window previews (PD-106): the shell returns the picture inside a file as Base64; the page
 // decodes it with createImageBitmap and draws it into a canvas on the card. Any failure keeps the
 // skeleton. The DOM is a small fake; the shell and the decoder are functions.
 
 const HOME_JS = new URL("../crates/easyoffice-app/ui/home-screen.js", import.meta.url);
-const UI = (name) => fs.readFileSync(new URL(`../crates/easyoffice-app/ui/${name}`, import.meta.url), "utf8");
+const UI = (name) => readText(new URL(`../crates/easyoffice-app/ui/${name}`, import.meta.url));
 const GIF_B64 = Buffer.from("GIF89a\x01\x00\x01\x00\x00\x00\x00;", "latin1").toString("base64");
 
 class FakeEl {
@@ -156,7 +156,7 @@ test("the window bridge passes the opaque id only, the command is granted, and t
   const bridge = UI("window-bridge.js");
   assert.ok(bridge.includes('shell("recentPreview", { id })'));
   assert.ok(UI("desktop-bridge.js").includes('recentPreview: "get_recent_preview"'));
-  const capability = fs.readFileSync(new URL("../crates/easyoffice-desktop/capabilities/main-window.json", import.meta.url), "utf8");
+  const capability = readText(new URL("../crates/easyoffice-desktop/capabilities/main-window.json", import.meta.url));
   assert.ok(capability.includes('"allow-get-recent-preview"'));
   const home = UI("home-screen.js");
   assert.ok(!/\.src\s*=|createObjectURL|data:image|innerHTML/.test(home), "no URL is made for the picture");

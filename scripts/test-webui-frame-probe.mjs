@@ -1,13 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import vm from "node:vm";
+import { readText } from "./test-support/read-text.mjs";
 
 // frame-probe.js (smoke step `frame_ipc`): what the probe page reports for the Tauri objects a
 // webview may put into a frame.
 
-const SOURCE = fs.readFileSync(new URL("../crates/easyoffice-app/ui/frame-probe.js", import.meta.url), "utf8");
-const PAGE = fs.readFileSync(new URL("../crates/easyoffice-app/ui/frame-probe.html", import.meta.url), "utf8");
+const SOURCE = readText(new URL("../crates/easyoffice-app/ui/frame-probe.js", import.meta.url));
+const PAGE = readText(new URL("../crates/easyoffice-app/ui/frame-probe.html", import.meta.url));
 
 async function runProbe(globals) {
   const posted = [];

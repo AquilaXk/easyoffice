@@ -1,15 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createWorkspaceHarness } from "./webui-dom-harness.mjs";
 import { cssDeclarations } from "./test-support/css-declarations.mjs";
 import { hasColorLiteral, rulesFor, ruleWithSelector } from "./test-support/css-rules.mjs";
+import { readText } from "./test-support/read-text.mjs";
 
 // PD-098 step 4c: the PDF studio and the converter wear rhwp-studio's classes and tokens.
 
 const UI_DIR = new URL("../crates/easyoffice-app/ui/", import.meta.url);
-const read = (name) => fs.readFileSync(fileURLToPath(new URL(name, UI_DIR)), "utf8");
+const read = (name) => readText(fileURLToPath(new URL(name, UI_DIR)));
 
 test("the PDF toolbar is an rhwp toolbar: icon button, sb-* fields, tb-btn action, no legacy button classes", async () => {
   const { document } = await createWorkspaceHarness({ search: "?module=PDF&win=w-pdf-chrome" });

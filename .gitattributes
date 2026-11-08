@@ -1,3 +1,15 @@
+# Sources are LF on every checkout (a Windows runner defaults to CRLF); the node tests match on "\n".
+*.rs text eol=lf
+*.js text eol=lf
+*.mjs text eol=lf
+*.ts text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+*.toml text eol=lf
+# Later rules win: the vendored and generated artifacts below stay byte-exact.
 # Vendored and generated artifacts are hashed byte-for-byte (PD-076, PD-081); never normalise line endings.
 vendor/rhwp-core/** -text
 assets/fonts/** -text

@@ -1,16 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { loadUiModule } from "./test-support/load-ui-module.mjs";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
+import { readText } from "./test-support/read-text.mjs";
 
 // The native menu bar (PD-102, macOS only since PD-121): the Rust table and the page's list name the same ids and
 // actions, the page runs them through the shortcut handlers, and the shell grants the page nothing for it. The page's
 // own menu row is drawn on every OS, as in the reference app.
 
 const REPO = new URL("../", import.meta.url);
-const read = (rel) => fs.readFileSync(fileURLToPath(new URL(rel, REPO)), "utf8");
+const read = (rel) => readText(fileURLToPath(new URL(rel, REPO)));
 const CHROME_JS = new URL("crates/easyoffice-app/ui/shell-chrome.js", REPO);
 
 function rustItems() {

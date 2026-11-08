@@ -1,14 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import vm from "node:vm";
+import { readText } from "./test-support/read-text.mjs";
 
 // Storage shim of the embedded editor: in a frame without allow-same-origin the browser
 // storage throws, and the editor reads it at module top level. The shim runs first and swaps in
 // memory storage only where the real one is unreachable.
 
-const SHIM = fs.readFileSync(new URL("../apps/hwp-studio/static/storage-shim.js", import.meta.url), "utf8");
-const INDEX_HTML = fs.readFileSync(new URL("../apps/hwp-studio/index.html", import.meta.url), "utf8");
+const SHIM = readText(new URL("../apps/hwp-studio/static/storage-shim.js", import.meta.url));
+const INDEX_HTML = readText(new URL("../apps/hwp-studio/index.html", import.meta.url));
 
 function opaqueOriginGlobal() {
   const global = {};

@@ -15,6 +15,7 @@ import {
   parseRpmDump,
   signatureProblems,
 } from "./verify-linux-bundles.mjs";
+import { readText } from "./test-support/read-text.mjs";
 
 const mimeLine = [...REQUIRED_MIME_TYPES.values()].join(";") + ";";
 const desktop = (overrides = {}) => {
@@ -93,7 +94,7 @@ test("an rpm must be built for the architecture and require the runtime librarie
 
 const shellDir = new URL("../crates/easyoffice-desktop/", import.meta.url);
 // A Windows checkout has CRLF line ends; the bundler is only ever run on Linux, where .gitattributes keeps LF.
-const template = fs.readFileSync(new URL(LINUX_DESKTOP_TEMPLATE, shellDir), "utf8").replaceAll("\r\n", "\n");
+const template = readText(new URL(LINUX_DESKTOP_TEMPLATE, shellDir));
 
 /** What the bundler's Handlebars renders for the template: `{{x}}` filled in, `{{#if}}` blocks kept. */
 const render = (text) =>

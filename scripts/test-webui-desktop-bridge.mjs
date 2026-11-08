@@ -1,8 +1,8 @@
-import fs from "node:fs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { shellError, createWebUiDom, flushAsyncTurns, requireShellToken, SHELL_TOKEN, SHELL_TOKEN_HEADER } from "./webui-dom-harness.mjs";
 import { switchModule, studioItem, commandItem } from "./test-support/modules.mjs";
+import { readText } from "./test-support/read-text.mjs";
 
 // Desktop shell (Tauri v2 / WebView2) bridge: a fake `__TAURI_INTERNALS__` stands in for the
 // WebView IPC. The Rust side registers exactly two commands, `ipc_dispatch` (returns the engine's
@@ -341,7 +341,7 @@ test("browser preview: confirm uses window.confirm with the kind's text; unknown
 });
 
 test("the browser texts equal the shell's wording and the command is granted like the other app commands", async () => {
-  const rust = fs.readFileSync(new URL("../crates/easyoffice-desktop/src/confirm_dialog.rs", import.meta.url), "utf8");
+  const rust = readText(new URL("../crates/easyoffice-desktop/src/confirm_dialog.rs", import.meta.url));
   const production = rust.split("#[cfg(test)]")[0];
   const fromRust = {};
   for (const m of production.matchAll(/Self::(\w+) => ConfirmSpec \{\s*title: "[^"]*",\s*message: "([^"]*)",/g)) {
@@ -351,9 +351,9 @@ test("the browser texts equal the shell's wording and the command is granted lik
   const browser = sandbox.__EASYOFFICE_DESKTOP_BRIDGE__.CONFIRM_BROWSER_TEXT;
   assert.equal(Object.keys(fromRust).length, 5);
   assert.deepEqual({ ...browser }, fromRust);
-  const caps = JSON.parse(fs.readFileSync(new URL("../crates/easyoffice-desktop/capabilities/main-window.json", import.meta.url), "utf8"));
+  const caps = JSON.parse(readText(new URL("../crates/easyoffice-desktop/capabilities/main-window.json", import.meta.url)));
   assert.ok(caps.permissions.includes("allow-confirm-dialog"));
-  const commands = fs.readFileSync(new URL("../crates/easyoffice-desktop/src/app_commands.rs", import.meta.url), "utf8");
+  const commands = readText(new URL("../crates/easyoffice-desktop/src/app_commands.rs", import.meta.url));
   assert.ok(commands.includes('"confirm_dialog"'));
   assert.ok(caps.permissions.includes("allow-confirm-close"), "the close prompt is granted like the other app commands");
   assert.ok(commands.includes('"confirm_close"'));
@@ -362,10 +362,10 @@ test("the browser texts equal the shell's wording and the command is granted lik
 });
 
 test("the close prompt wording lives in the shell only: the page holds no text for it", () => {
-  const bridge = fs.readFileSync(new URL("../crates/easyoffice-app/ui/window-bridge.js", import.meta.url), "utf8");
-  const html = fs.readFileSync(new URL("../crates/easyoffice-app/ui/index.html", import.meta.url), "utf8");
+  const bridge = readText(new URL("../crates/easyoffice-app/ui/window-bridge.js", import.meta.url));
+  const html = readText(new URL("../crates/easyoffice-app/ui/index.html", import.meta.url));
   assert.ok(!html.includes("close-confirm-dialog") && !html.includes("btn-close-save"), "no page dialog for the save prompt");
   assert.ok(!bridge.includes("변경 내용을 저장할까요"), "the document name and wording come from the shell");
-  const rust = fs.readFileSync(new URL("../crates/easyoffice-desktop/src/confirm_dialog.rs", import.meta.url), "utf8");
+  const rust = readText(new URL("../crates/easyoffice-desktop/src/confirm_dialog.rs", import.meta.url));
   assert.ok(rust.includes('"변경 내용을 저장할까요?"') || rust.includes("의 변경 내용을 저장할까요?"));
 });

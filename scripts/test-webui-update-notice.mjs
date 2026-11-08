@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { hasColorLiteral, rulesFor } from "./test-support/css-rules.mjs";
+import { readText } from "./test-support/read-text.mjs";
 
 // Update notice (PD-103): a card in the bottom left corner when the shell reports a newer release.
 // The page reads the state, switches the check, asks the shell to install the signed update (the
@@ -11,7 +11,7 @@ import { hasColorLiteral, rulesFor } from "./test-support/css-rules.mjs";
 // progress while a download or install runs.
 
 const REPO = new URL("../", import.meta.url);
-const read = (rel) => fs.readFileSync(fileURLToPath(new URL(rel, REPO)), "utf8");
+const read = (rel) => readText(fileURLToPath(new URL(rel, REPO)));
 const FIRST_LOOK_MS = 3500;
 const VIEW = (version, enabled = true, extra = {}) => ({ status: version ? "available" : "idle", version: version ?? null, enabled, supported: true, ...extra });
 const WATCH_MS = 700;

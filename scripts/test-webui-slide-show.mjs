@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { createWorkspaceHarness, createWebUiDom, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { switchModule, studioItem } from "./test-support/modules.mjs";
+import { readText } from "./test-support/read-text.mjs";
 
 const UI_DIR = new URL("../crates/easyoffice-app/ui/", import.meta.url);
-const STYLES_CSS = fs.readFileSync(fileURLToPath(new URL("styles.css", UI_DIR)), "utf8");
+const STYLES_CSS = readText(fileURLToPath(new URL("styles.css", UI_DIR)));
 const AUTOSAVE_KEY = "easyoffice.workspace.autosave.v1";
 
 function createMemoryStorage() {

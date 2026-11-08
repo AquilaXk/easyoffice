@@ -1,15 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { cssDeclarations } from "./test-support/css-declarations.mjs";
+import { readText } from "./test-support/read-text.mjs";
 
 // Theme tokens and mode (PD-098): rhwp-studio tokens in one file, the mode on <html>, no literal
 // colours outside tokens.css and content.css, no leftovers of the old lavender variables.
 
 const UI_DIR = new URL("../crates/easyoffice-app/ui/", import.meta.url);
-const read = (name) => fs.readFileSync(fileURLToPath(new URL(name, UI_DIR)), "utf8");
+const read = (name) => readText(fileURLToPath(new URL(name, UI_DIR)));
 const STORAGE_KEY = "easyoffice.theme-mode";
 
 function memoryStorage() {

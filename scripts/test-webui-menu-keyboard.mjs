@@ -1,13 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
+import { readText } from "./test-support/read-text.mjs";
 
 // Menu bar and command palette keyboard access, find wording, and user-facing error text.
 
 const UI_DIR = new URL("../crates/easyoffice-app/ui/", import.meta.url);
-const read = (name) => fs.readFileSync(fileURLToPath(new URL(name, UI_DIR)), "utf8");
+const read = (name) => readText(fileURLToPath(new URL(name, UI_DIR)));
 
 const titleOf = (document, name) => document.querySelector(`.menu-item[data-menu="${name}"] > .menu-title`);
 const press = (el, key, extra = {}) => el.dispatchEvent({ type: "keydown", key, target: el, ...extra });

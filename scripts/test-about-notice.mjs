@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { MIME_EXCEPTIONS, NOTICE_EXCEPTIONS, PROHIBITED_PATTERNS, allowedMimeTokens, allowedNotices, prohibitedPatternsIn } from "./prohibited-terms.mjs";
+import { readText } from "./test-support/read-text.mjs";
 
 // About dialog notice and license table (PD-122) and the narrow hygiene exception that carries the notice.
 
-const read = (rel) => fs.readFileSync(fileURLToPath(new URL(`../${rel}`, import.meta.url)), "utf8");
+const read = (rel) => readText(fileURLToPath(new URL(`../${rel}`, import.meta.url)));
 const INDEX = "crates/easyoffice-app/ui/index.html";
 const [{ textB64, files }] = NOTICE_EXCEPTIONS;
 const NOTICE = Buffer.from(textB64, "base64").toString("utf8");

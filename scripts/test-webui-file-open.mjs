@@ -1,15 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createWebUiDom, createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { pickFile as pickFixtureFile } from "./test-support/fixture-files.mjs";
 import { switchModule, studioItem } from "./test-support/modules.mjs";
+import { readText } from "./test-support/read-text.mjs";
 
-const INDEX_HTML = fs.readFileSync(
-  fileURLToPath(new URL("../crates/easyoffice-app/ui/index.html", import.meta.url)),
-  "utf8"
-);
+const INDEX_HTML = readText(
+  fileURLToPath(new URL("../crates/easyoffice-app/ui/index.html", import.meta.url)));
 const AUTOSAVE_KEY = "easyoffice.workspace.autosave.v1";
 const enc = new TextEncoder();
 

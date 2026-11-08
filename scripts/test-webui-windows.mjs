@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import test from "node:test";
 import { loadUiModule } from "./test-support/load-ui-module.mjs";
 import { switchModule, typeIntoDocParagraph, createMemoryStorage } from "./test-support/modules.mjs";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
+import { readText } from "./test-support/read-text.mjs";
 
 // Per-document windows (PD-088): every window hosts exactly one document, the converter or the
 // start screen, chosen by its launch parameters. There is no module tab strip and no module switcher.
@@ -94,7 +94,7 @@ test("the start window keeps the menu bar and status bar around the start screen
   for (const cmd of ["studio-save", "studio-undo", "clip-copy", "zoom-in", "layout-paper"]) assert.equal(grayed(cmd), "true", cmd);
   for (const cmd of ["palette", "view-theme"]) assert.equal(grayed(cmd), "false", cmd);
   assert.equal(document.getElementById("status-bar").querySelector(".statusbar-left-group").hidden, true);
-  const css = fs.readFileSync(new URL("../crates/easyoffice-app/ui/home.css", import.meta.url), "utf8");
+  const css = readText(new URL("../crates/easyoffice-app/ui/home.css", import.meta.url));
   assert.match(css, /\[data-window-kind="start"\] > :not\(#home-screen\):not\(#menu-bar\):not\(#status-bar\) \{ display: none; \}/);
 });
 
@@ -676,7 +676,7 @@ test("HWP save plumbing: a plain save overwrites the opened file, the close prom
   await tools.saveActiveModuleDocument();
   await tools.saveActiveModuleDocument({ closing: true });
   assert.deepEqual(saves.map((o) => [o.inPlace, o.closing]), [[true, false], [true, true]]);
-  const app = fs.readFileSync(new URL("../crates/easyoffice-app/ui/app.js", import.meta.url), "utf8");
+  const app = readText(new URL("../crates/easyoffice-app/ui/app.js", import.meta.url));
   assert.match(app, /isDirty: \(\) => workspaceSession\.isDirty\(\),\s+save: \(\) => saveWorkspaceDocument\(\{ closing: true \}\),/, "the close prompt saves with closing");
   assert.match(app, /openRecent: \(id\) => windowBridge\.openRecent\(id\), recentDialog: \(\) => windowBridge\.chooseRecent\(\), save: \(\) => saveWorkspaceDocument\(\),/, "the 파일 menu saves in place");
 });
@@ -704,8 +704,8 @@ test("the about dialog shows the app version from the bootstrap and ignores a ma
 
 test("home screen and dialog files carry their the reference app source header and are listed in the notices", async () => {
   const fs = await import("node:fs");
-  const read = (rel) => fs.readFileSync(new URL(`../crates/easyoffice-app/ui/${rel}`, import.meta.url), "utf8");
-  const notices = fs.readFileSync(new URL("../THIRD_PARTY_NOTICES.md", import.meta.url), "utf8");
+  const read = (rel) => readText(new URL(`../crates/easyoffice-app/ui/${rel}`, import.meta.url));
+  const notices = readText(new URL("../THIRD_PARTY_NOTICES.md", import.meta.url));
   for (const [file, source] of [
     ["home-screen.js", "apps/studio-host/src/ui/home-screen.ts"],
     ["recent-documents-dialog.js", "apps/studio-host/src/ui/recent-documents-dialog.ts"],
@@ -795,7 +795,7 @@ test("smoke: the second window reports that it loaded and closes itself; a norma
 });
 
 test("smoke: the page wiring keeps the step order and app.js stays under the line ceiling", () => {
-  const app = fs.readFileSync(new URL("../crates/easyoffice-app/ui/app.js", import.meta.url), "utf8");
+  const app = readText(new URL("../crates/easyoffice-app/ui/app.js", import.meta.url));
   const wiring = /const smokeSteps = \{ (.*) \};/.exec(app);
   assert.ok(wiring, "app.js defines the smoke steps");
   assert.deepEqual([...wiring[1].matchAll(/(\w+): \(\) =>/g)].map((m) => m[1]), ["hwp", "pdf", "print", "frame_ipc"]);
@@ -813,7 +813,7 @@ test("the shell's drag signals light the document area with the reference app's 
   assert.equal(document.getElementById("shell-toast").hidden, true, "no toast any more");
   host.__EASYOFFICE_DRAG_OFF__();
   assert.equal(pane.classList.contains("drag-over"), false);
-  const css = fs.readFileSync(new URL("../crates/easyoffice-app/ui/styles.css", import.meta.url), "utf8");
+  const css = readText(new URL("../crates/easyoffice-app/ui/styles.css", import.meta.url));
   assert.match(css, /\.editor-pane\.drag-over \{ background: var\(--ui-selected\); outline: 3px dashed var\(--focus-ring\); outline-offset: -3px; \}/);
 });
 

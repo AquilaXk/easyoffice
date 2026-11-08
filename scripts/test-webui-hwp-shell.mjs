@@ -1,16 +1,16 @@
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { loadUiModule } from "./test-support/load-ui-module.mjs";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
+import { readText } from "./test-support/read-text.mjs";
 
 // One window, one menu row, one theme, one status bar (#158): the HWP window hides the shell's menu
 // row and status bar, the editor's 파일 menu is a whitelist of shell commands forwarded over the embed
 // port, the shell theme reaches the editor, and the status bar keeps only what a reader needs.
 
 const UI_DIR = new URL("../crates/easyoffice-app/ui/", import.meta.url);
-const read = (rel, base = UI_DIR) => fs.readFileSync(fileURLToPath(new URL(rel, base)), "utf8");
+const read = (rel, base = UI_DIR) => readText(fileURLToPath(new URL(rel, base)));
 const HOST_JS = new URL("hwp-host.js", UI_DIR);
 const CHROME_JS = new URL("shell-chrome.js", UI_DIR);
 const ALL_CSS = `${read("styles.css")}\n${read("shell.css")}\n${read("content.css")}\n${read("home.css")}\n${read("menu-bar.css")}\n${read("toolbar.css")}`;
