@@ -1,4 +1,4 @@
-//! The fonts installed on the machine, for the Hangul editor (PD-127).
+//! The fonts installed on the machine, for the Hangul editor (PD-128).
 //!
 //! The editor draws a document in the fonts it names (Batang, Malgun Gothic, ...) when the
 //! machine has them. The reference app does this with two commands, `list_local_fonts` and

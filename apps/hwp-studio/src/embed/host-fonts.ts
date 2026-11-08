@@ -1,4 +1,4 @@
-// EasyOffice extension (host-fonts-v1, PD-127): the fonts installed on the machine reach the editor
+// EasyOffice extension (host-fonts-v1, PD-128): the fonts installed on the machine reach the editor
 // through the host-font contract the editor already has (`HostFontProvider`: a catalog of faces and
 // a lazy read of one face). The editor frame is sandboxed with an opaque origin and cannot call the
 // shell's commands (PD-086/088), so the provider asks the shell over the embed port and the shell,

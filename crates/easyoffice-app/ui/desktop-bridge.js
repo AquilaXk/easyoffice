@@ -15,7 +15,7 @@
     pages: "pdf_export_pages",
     finish: "pdf_export_finish",
   });
-  // Installed fonts for the Hangul editor (PD-127). The list holds names, styles and numbers, never a path;
+  // Installed fonts for the Hangul editor (PD-128). The list holds names, styles and numbers, never a path;
   // a read quotes the revision of the list and a file number, and gets the font file as an ArrayBuffer.
   const SYSTEM_FONT_COMMANDS = Object.freeze({ list: "list_system_fonts", read: "read_system_font" });
   // Update notice (PD-103): the shell checks for a newer release and installs it (signed package);

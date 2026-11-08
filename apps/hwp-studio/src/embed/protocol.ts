@@ -28,7 +28,7 @@ export const EMBED_CAPABILITIES = [
   // password is saved without it; the shell asks before it writes such a copy, PD-120).
   'save-protection-v1',
   // EasyOffice extension: enableHostFonts and hostFontsReply RPCs (the machine's fonts reach the editor through the
-  // shell, which alone may read them; the editor asks over the port, PD-127).
+  // shell, which alone may read them; the editor asks over the port, PD-128).
   'host-fonts-v1',
 ] as const;
 

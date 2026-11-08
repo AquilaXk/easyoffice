@@ -833,7 +833,7 @@ test("the editor entry applies the Mac labels on macOS and always guards the chr
   assert.match(main, /installNonEditorContextMenuGuards\(document\)/);
 });
 
-// ---- installed fonts (host-fonts-v1, PD-127) ----------------------------------------------------
+// ---- installed fonts (host-fonts-v1, PD-128) ----------------------------------------------------
 
 test("host fonts: the editor advertises host-fonts-v1, routes the two RPCs and installs the shell provider", async () => {
   const { EMBED_CAPABILITIES } = await import("../apps/hwp-studio/src/embed/protocol.ts");

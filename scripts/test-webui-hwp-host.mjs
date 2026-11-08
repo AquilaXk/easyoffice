@@ -441,7 +441,7 @@ test("frame probe: fails closed on a malformed report and on silence", async () 
   await assert.rejects(second.done, /응답하지 않았습니다/);
 });
 
-// ---- installed fonts (host-fonts-v1, PD-127) ----------------------------------------------------
+// ---- installed fonts (host-fonts-v1, PD-128) ----------------------------------------------------
 
 const FONT_CAPABILITIES = ["transferable-array-buffer", "blank-document-v1", "host-fonts-v1"];
 const rawFace = (file, faceIndex, family, extra = {}) => ({
@@ -582,4 +582,43 @@ test("fonts: an invalid list from the shell command is not forwarded", async () 
   sendFontEvent(broken.studio, { requestId: 1, op: "list" });
   await settle();
   assert.ok("error" in fontReplies(broken.studio)[0].params);
+});
+
+test("fonts: a file evicted while it loads is not counted in the cache size when it arrives", async () => {
+  const MiB = 1024 * 1024;
+  const sizes = { 1: 50 * MiB, 2: 100 * MiB, 3: 40 * MiB, 4: 80 * MiB };
+  const reads = [];
+  const gates = new Map();
+  const faces = [1, 2, 3, 4].map((n) => rawFace(n, 0, "Face " + n));
+  const systemFonts = {
+    list: async () => ({ revision: "00ff", faces }),
+    read: async (_revision, file) => {
+      reads.push(file);
+      if (gates.has(file)) await gates.get(file);
+      const buffer = new ArrayBuffer(8);
+      Object.defineProperty(buffer, "byteLength", { value: sizes[file] }); // counted size without the memory
+      return buffer;
+    },
+  };
+  const { hostApi, studio } = loadHost({ studioOptions: { capabilities: FONT_CAPABILITIES }, extraDeps: { systemFonts } });
+  await hostApi.onModuleActivated("HWP");
+  await settle();
+  const ask = (requestId, file) => sendFontEvent(studio, { requestId, op: "read", face: file + ":0", revision: "00ff" });
+  let openGate;
+  gates.set(1, new Promise((resolve) => { openGate = resolve; }));
+  ask(1, 1); // stays loading
+  await settle();
+  ask(2, 2); // 100 MiB
+  await settle();
+  ask(3, 3); // 140 MiB in all: evicts file 1 (still loading) and file 2
+  await settle();
+  openGate(); // file 1 arrives after it was evicted: 50 MiB must not be counted
+  await settle();
+  ask(4, 4); // 40 + 80 = 120 MiB fits the 128 MiB cache only if file 1 was not counted
+  await settle();
+  const before = reads.length;
+  ask(5, 3);
+  await settle();
+  assert.equal(reads.length, before, "file 3 is still cached");
+  assert.equal(fontReplies(studio).filter((r) => "data" in r.params).length, 5);
 });

@@ -52,7 +52,7 @@
   const SHELL_THEMES = Object.freeze(["light", "dark", "system"]);
   const RECENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
   const SHELL_CONTEXT_METHOD = "setShellContext";
-  // Installed fonts (host-fonts-v1, PD-127): the editor asks over the port, the shell calls its
+  // Installed fonts (host-fonts-v1, PD-128): the editor asks over the port, the shell calls its
   // commands. The editor names a face by the id of the list below; it never sees a path.
   const FONTS_REASON = "shell_fonts";
   const FONTS_CAPABILITY = "host-fonts-v1";
@@ -337,6 +337,8 @@
       entry.pending = Promise.resolve().then(() => systemFonts.read(fonts.revision, file)).then((raw) => {
         const bytes = toArrayBuffer(raw);
         if (generation !== fonts.generation) throw new Error("글꼴 목록이 오래되었습니다.");
+        // An entry that was evicted while it loaded (or dropped by a reset) is not counted.
+        if (fonts.cache.get(file) !== entry) return bytes;
         entry.size = bytes.byteLength;
         fonts.cacheBytes += entry.size;
         for (const [key, old] of fonts.cache) {

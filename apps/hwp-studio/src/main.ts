@@ -333,7 +333,7 @@ if (chromeMode === 'embed') {
   if (menuBar) installShellMenu(menuBar, shellCommandRelay);
 }
 
-// EasyOffice (host-fonts-v1): the machine's fonts come from the shell over the embed port (PD-127).
+// EasyOffice (host-fonts-v1): the machine's fonts come from the shell over the embed port (PD-128).
 const shellFontBridge = createShellFontBridge();
 
 // 상태 바 요소

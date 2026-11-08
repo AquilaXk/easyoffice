@@ -29,7 +29,7 @@ const OVERLAY_NON_OVERRIDE = new Set([
   "src/embed/shell-menu.ts",
   // EasyOffice-only module: page batches for the shell's print path (getPrintPages RPC).
   "src/embed/print-batch.ts",
-  // EasyOffice-only module: the installed fonts as the editor's host-font provider, asked over the embed port (PD-127).
+  // EasyOffice-only module: the installed fonts as the editor's host-font provider, asked over the embed port (PD-128).
   "src/embed/host-fonts.ts",
   // EasyOffice-only module (참조 앱 port): the 보기 menu toggle for the toolbar labels.
   "src/ui/toolbar-labels.ts",
