@@ -357,7 +357,7 @@
         return fail(name + " — " + (err?.message || String(err)));
       }
       if (res?.status !== "OK" || !MODULE_LABELS[res.module]) {
-        return fail(name + " — 백엔드 응답을 해석할 수 없습니다");
+        return fail(name + " — 응답을 처리하지 못했습니다. 다시 시도해 주세요.");
       }
       setFeedback("파일 여는 중: " + name);
       const outcome = await enqueueOp(async () => {
@@ -449,7 +449,7 @@
     // ---- DOM wiring ---------------------------------------------------------------------
 
     function closeMenus() {
-      document.querySelectorAll(".menu-item.open").forEach((el) => el.classList.remove("open"));
+      host.__EASYOFFICE_CLOSE_MENUS__(document);
     }
 
     // In a managed window (PD-088) opening a file means a new window: `onOpenRequest` handles the

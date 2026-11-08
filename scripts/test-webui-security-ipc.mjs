@@ -18,12 +18,12 @@ test("disconnected host refuses IPC fail-closed without mutating DOC, SHEET, or 
   assert.equal(sandbox.__EASYOFFICE_CREATE_OFFLINE_RPC__, undefined);
   assert.match(
     document.getElementById("status-engine").textContent,
-    /엔진 미연결: 데스크톱 호스트 또는 로컬 서버\(--serve\) 연결이 필요합니다\./
+    /연결할 수 없습니다\. 앱을 다시 시작해 주세요\./
   );
 
   await assert.rejects(
     () => sandbox.__EASYOFFICE_INVOKE_BACKEND__("get_workspace_bootstrap", ""),
-    /엔진 미연결: 데스크톱 호스트 또는 로컬 서버\(--serve\) 연결이 필요합니다\./
+    /연결할 수 없습니다\. 앱을 다시 시작해 주세요\./
   );
 
   const docEditor = document.getElementById("doc-editor");
@@ -35,11 +35,11 @@ test("disconnected host refuses IPC fail-closed without mutating DOC, SHEET, or 
   assert.equal(docEditor.innerHTML, docHtmlBefore);
   assert.match(
     document.getElementById("status-command-feedback").textContent,
-    /\[요청 거부\] 엔진 미연결: 데스크톱 호스트 또는 로컬 서버\(--serve\) 연결이 필요합니다\./
+    /\[요청 거부\] 연결할 수 없습니다\. 앱을 다시 시작해 주세요\./
   );
   assert.match(
     document.getElementById("pii-result-text").textContent,
-    /\[요청 거부\] 엔진 미연결: 데스크톱 호스트 또는 로컬 서버\(--serve\) 연결이 필요합니다\./
+    /\[요청 거부\] 연결할 수 없습니다\. 앱을 다시 시작해 주세요\./
   );
 
   userClick(studioItem(document, "studio-save"));
@@ -51,14 +51,14 @@ test("disconnected host refuses IPC fail-closed without mutating DOC, SHEET, or 
   await flushAsyncTurns(6);
   assert.match(
     document.getElementById("conv-result-box").textContent,
-    /\[요청 거부\] 엔진 미연결/
+    /\[요청 거부\] 연결할 수 없습니다/
   );
 
   userClick(document.getElementById("btn-run-security-audit"));
   await flushAsyncTurns(6);
   assert.match(
     document.getElementById("security-status-text").textContent,
-    /\[요청 거부\] 엔진 미연결/
+    /\[요청 거부\] 연결할 수 없습니다/
   );
 
   switchModule(document, "SHEET");

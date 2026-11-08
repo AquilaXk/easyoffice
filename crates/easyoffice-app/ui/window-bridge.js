@@ -104,7 +104,7 @@
     }
 
     function closeMenus() {
-      for (const el of document.querySelectorAll(".menu-item.open")) el.classList.remove("open");
+      host.__EASYOFFICE_CLOSE_MENUS__(document);
     }
 
     // ---- title and state -------------------------------------------------------------------
@@ -256,6 +256,10 @@
         btn.dataset.recentId = entry.id;
         btn.title = entry.name;
         btn.textContent = entry.name;
+        if (container.getAttribute("role") === "menu") {
+          btn.setAttribute("role", "menuitem");
+          btn.tabIndex = -1;
+        }
         btn.addEventListener("click", (ev) => {
           if (ev.stopPropagation) ev.stopPropagation();
           closeMenus();

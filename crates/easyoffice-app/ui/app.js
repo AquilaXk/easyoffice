@@ -73,90 +73,8 @@
     tokenizeFormulaStringLiterals,
   } = host.__EASYOFFICE_CREATE_PII_SCRUBBER__({ document, localScrubPii });
 
-  function setEngineStatusText(text) {
-    const engineEl = document.getElementById("status-engine");
-    if (engineEl) engineEl.textContent = text;
-  }
-
-  async function invokeIpc(command, payload) {
-    if (typeof host.__EASYOFFICE_TEST_IPC__ === "function") {
-      try {
-        const raw = await host.__EASYOFFICE_TEST_IPC__(command, payload);
-        setEngineStatusText("엔진: 테스트 하네스");
-        return typeof raw === "string" ? JSON.parse(raw) : raw;
-      } catch (testErr) {
-        const msg = testErr?.message || String(testErr);
-        reportIpcFailure(command, msg);
-        throw new Error(msg);
-      }
-    }
-    if (desktopBridge.isAvailable()) {
-      try {
-        const res = await desktopBridge.invokeIpc(command, payload);
-        setEngineStatusText("엔진: 데스크톱 연결됨");
-        return res;
-      } catch (shellErr) {
-        const msg = shellErr?.message || String(shellErr);
-        reportIpcFailure(command, msg);
-        throw new Error(msg);
-      }
-    }
-    if (isHttpIpcTransportAvailable()) {
-      const res = await invokeHttpIpc(command, payload);
-      setEngineStatusText("엔진: 로컬 서버 연결됨");
-      return res;
-    }
-    const disconnectedMsg =
-      "엔진 미연결: 데스크톱 호스트 또는 로컬 서버(--serve) 연결이 필요합니다.";
-    setEngineStatusText("엔진: 미연결 · " + disconnectedMsg);
-    reportIpcFailure(command, disconnectedMsg);
-    throw new Error(disconnectedMsg);
-  }
-
+  const { invokeIpc } = host.__EASYOFFICE_CREATE_IPC_TRANSPORT__({ document, host, desktopBridge });
   host.__EASYOFFICE_INVOKE_BACKEND__ = invokeIpc;
-
-  function isHttpIpcTransportAvailable() {
-    const proto = host.location?.protocol;
-    return (proto === "http:" || proto === "https:") && typeof host.fetch === "function";
-  }
-
-  function reportIpcFailure(command, msg) {
-    const fb = document.getElementById("status-command-feedback");
-    if (fb) fb.textContent = "[요청 거부] " + msg;
-    const targetMap = {
-      convert_document_format: "conv-result-box",
-      audit_security: "security-status-text",
-      scrub_pii: "pii-result-text",
-      run_smart_assistant: "smart-summary-output",
-      run_engine_benchmark: "bench-result-box",
-    };
-    const targetId = targetMap[command];
-    const targetEl = targetId ? document.getElementById(targetId) : null;
-    if (targetEl) targetEl.textContent = "[요청 거부] " + msg;
-  }
-
-  async function invokeHttpIpc(command, payload) {
-    let resp;
-    try {
-      resp = await host.fetch("/api/ipc", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ command, payload: String(payload ?? "") }),
-      });
-    } catch (netErr) {
-      const msg = "백엔드 IPC 네트워크 오류: " + (netErr?.message || String(netErr));
-      setEngineStatusText("엔진: 연결 오류");
-      reportIpcFailure(command, msg);
-      throw new Error(msg);
-    }
-    if (!resp.ok) {
-      const errBody = await resp.json().catch(() => ({}));
-      const msg = errBody.error || errBody.message || "IPC request failed (" + resp.status + ")";
-      reportIpcFailure(command, msg);
-      throw new Error(msg);
-    }
-    return await resp.json();
-  }
 
   let sheetController = null;
   let workspacePanels = null;
@@ -389,16 +307,25 @@
       .slice(0, 18);
     if (paletteSelectedIdx >= paletteFilteredItems.length) paletteSelectedIdx = 0;
     listEl.innerHTML = "";
+    const searchInput = document.getElementById("cmd-search-input");
+    searchInput?.removeAttribute("aria-activedescendant");
     if (paletteFilteredItems.length === 0) {
       const emptyLi = document.createElement("li");
       emptyLi.className = "cp-empty";
+      emptyLi.setAttribute("role", "option");
+      emptyLi.setAttribute("aria-disabled", "true");
       emptyLi.textContent = "검색 결과 없음";
       listEl.appendChild(emptyLi);
       return;
     }
     paletteFilteredItems.forEach((item, idx) => {
       const li = document.createElement("li");
-      li.className = idx === paletteSelectedIdx ? "cp-item cp-item--selected" : "cp-item";
+      const selected = idx === paletteSelectedIdx;
+      li.className = selected ? "cp-item cp-item--selected" : "cp-item";
+      li.id = "cp-option-" + idx;
+      li.setAttribute("role", "option");
+      li.setAttribute("aria-selected", selected ? "true" : "false");
+      if (selected) searchInput?.setAttribute("aria-activedescendant", li.id);
       const labelSpan = document.createElement("span");
       labelSpan.className = "cp-item-label";
       labelSpan.textContent = item.title;

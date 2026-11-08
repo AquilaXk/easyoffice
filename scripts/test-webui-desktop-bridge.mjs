@@ -77,7 +77,7 @@ test("desktop shell routes every engine request through ipc_dispatch with string
   assert.equal(typeof exec.args.payload, "string");
   assert.ok(calls.every((c) => c.command === "ipc_dispatch" || c.command === "report_menu_state"));
   assert.equal(fetchCalls.length, 0);
-  assert.equal(document.getElementById("status-engine").textContent, "엔진: 데스크톱 연결됨");
+  assert.equal(document.getElementById("status-engine").textContent, "연결됨");
   assert.doesNotMatch(document.getElementById("status-bar").textContent, /로컬 서버/, "the desktop app never shows the local-server text");
 });
 
@@ -122,10 +122,10 @@ test("bridge accepts string and Error rejections and reports unparsable engine o
   assert.equal(describe("plain text"), "plain text");
   assert.equal(describe(new Error("boom")), "boom");
   assert.equal(describe({ status: "error", message: "shaped" }), "shaped");
-  assert.match(describe(undefined), /데스크톱 셸 요청 실패/);
+  assert.match(describe(undefined), /요청을 처리하지 못했습니다/);
 
   shell.internals.invoke = async () => "<html>not json</html>";
-  await assert.rejects(bridge.invokeIpc("detect_format", "x"), /엔진 응답을 해석하지 못했습니다 \(detect_format\)/);
+  await assert.rejects(bridge.invokeIpc("detect_format", "x"), /응답을 처리하지 못했습니다/);
   shell.internals.invoke = async () => ({ status: "weird" });
   await assert.rejects(bridge.saveFile("UEsDBA==", "a.docx"), /저장 결과를 확인하지 못했습니다/);
 });
@@ -210,7 +210,7 @@ test("without the shell the --serve preview keeps the HTTP transport and Blob do
     },
   });
   assert.ok(fetched.some((f) => f.url === "/api/ipc" && f.command === "get_workspace_bootstrap"));
-  assert.equal(document.getElementById("status-engine").textContent, "엔진: 로컬 서버 연결됨");
+  assert.equal(document.getElementById("status-engine").textContent, "연결됨");
   userClick(studioItem(document, "studio-save"));
   await flushAsyncTurns(12);
   assert.equal(downloads.length, 1);
@@ -231,7 +231,7 @@ test("a shell object without an invoke function is ignored", async () => {
     },
   });
   assert.ok(fetched.includes("get_workspace_bootstrap"));
-  assert.equal(document.getElementById("status-engine").textContent, "엔진: 로컬 서버 연결됨");
+  assert.equal(document.getElementById("status-engine").textContent, "연결됨");
 });
 
 test("every shell command carries the window's command token as a header", async () => {
@@ -253,7 +253,7 @@ test("without the token global the bridge refuses to call the shell at all", asy
     tauriInternals: { invoke: async (command, args, options) => { calls.push({ command }); requireShellToken(options); return "{}"; } },
   });
   const bridge = sandbox.__EASYOFFICE_DESKTOP_BRIDGE__;
-  await assert.rejects(bridge.invokeIpc("get_workspace_bootstrap", ""), /호출 토큰/);
-  await assert.rejects(bridge.getUpdateNotice(), /호출 토큰/);
+  await assert.rejects(bridge.invokeIpc("get_workspace_bootstrap", ""), /연결할 수 없습니다/);
+  await assert.rejects(bridge.getUpdateNotice(), /연결할 수 없습니다/);
   assert.equal(calls.length, 0, "nothing reaches the shell without a token");
 });

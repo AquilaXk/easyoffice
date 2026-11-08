@@ -662,7 +662,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       bootstrapRetry = onRetry;
       const banner = document.getElementById("bootstrap-error");
       const text = document.getElementById("bootstrap-error-text");
-      if (text) text.textContent = "작업 공간 초기화 실패: " + message + " · 로컬 서버(--serve)가 실행 중인지 확인한 뒤 다시 연결하세요.";
+      if (text) text.textContent = "작업 공간을 불러오지 못했습니다: " + message + " · 앱을 다시 시작한 뒤 다시 연결해 주세요.";
       if (banner) banner.hidden = false;
     }
 

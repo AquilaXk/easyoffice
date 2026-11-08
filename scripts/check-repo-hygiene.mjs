@@ -54,6 +54,8 @@ const REQUIRED_TRACKED_CONTRACTS = [
   "crates/easyoffice-app/ui/file-open.js",
   "crates/easyoffice-app/ui/icons.js",
   "crates/easyoffice-app/ui/window-bridge.js",
+  "crates/easyoffice-app/ui/ipc-transport.js",
+  "crates/easyoffice-app/ui/menu-keyboard.js",
   "crates/easyoffice-app/ui/shell.css",
   "crates/easyoffice-app/ui/tokens.css",
   "crates/easyoffice-app/ui/content.css",

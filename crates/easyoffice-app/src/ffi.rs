@@ -254,16 +254,16 @@ mod tests {
                 && err_json.contains("\\u0007")
         );
 
-        let app_js = include_str!("../ui/app.js");
-        let ipc_start = app_js.find("async function invokeIpc(").unwrap();
-        let ipc_end = app_js[ipc_start..]
-            .find("function snapshotDomSheetCells()")
+        let transport_js = include_str!("../ui/ipc-transport.js");
+        let http_start = transport_js.find("async function invokeHttp(").unwrap();
+        let http_end = transport_js[http_start..]
+            .find("async function viaTransport(")
             .unwrap()
-            + ipc_start;
-        let ipc_fn = &app_js[ipc_start..ipc_end];
+            + http_start;
+        let http_fn = &transport_js[http_start..http_end];
         assert!(
-            ipc_fn.contains("IPC request failed ("),
-            "invokeIpc must throw on non-OK HTTP responses instead of falling back to MOCK_IPC_HANDLERS"
+            http_fn.contains("if (!resp.ok)") && http_fn.contains("throw new Error(msg)"),
+            "the HTTP transport must throw on non-OK responses instead of falling back to MOCK_IPC_HANDLERS"
         );
     }
 }

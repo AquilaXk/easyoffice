@@ -25,6 +25,8 @@ const UPDATE_NOTICE_JS: &str = include_str!("../ui/update-notice.js");
 const RECENT_DIALOG_JS: &str = include_str!("../ui/recent-documents-dialog.js");
 const ICONS_JS: &str = include_str!("../ui/icons.js");
 const WINDOW_BRIDGE_JS: &str = include_str!("../ui/window-bridge.js");
+const IPC_TRANSPORT_JS: &str = include_str!("../ui/ipc-transport.js");
+const MENU_KEYBOARD_JS: &str = include_str!("../ui/menu-keyboard.js");
 const SHEET_UTILS_JS: &str = include_str!("../ui/sheet-utils.js");
 const PII_DOM_SCRUBBER_JS: &str = include_str!("../ui/pii-dom-scrubber.js");
 const SHEET_STORE_JS: &str = include_str!("../ui/sheet-store.js");
@@ -459,6 +461,16 @@ fn handle_http_connection(stream: &mut TcpStream, port: u16, ipc_handler: &IpcDi
             "200 OK",
             "application/javascript; charset=utf-8",
             WINDOW_BRIDGE_JS.to_string(),
+        ),
+        ("GET", "/ipc-transport.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            IPC_TRANSPORT_JS.to_string(),
+        ),
+        ("GET", "/menu-keyboard.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            MENU_KEYBOARD_JS.to_string(),
         ),
         ("GET", "/sheet-utils.js") => (
             "200 OK",

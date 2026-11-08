@@ -6,6 +6,7 @@
   // goes through `save_document_file` (native save dialog + write in Rust). Outside the shell
   // (`--serve` preview, tests) `isAvailable()` is false and callers keep their HTTP/Blob paths.
 
+  const DISCONNECTED_MESSAGE = "연결할 수 없습니다. 앱을 다시 시작해 주세요.";
   const IPC_COMMAND = "ipc_dispatch";
   const SAVE_COMMAND = "save_document_file";
   const EXPORT_PDF_COMMAND = "export_searchable_pdf";
@@ -59,14 +60,14 @@
       if (typeof err.message === "string" && err.message) return err.message;
       if (typeof err.error === "string" && err.error) return err.error;
     }
-    return "데스크톱 셸 요청 실패: " + String(err);
+    return "요청을 처리하지 못했습니다. 다시 시도해 주세요.";
   }
 
   async function callShell(command, args) {
     const internals = shellInternals();
-    if (!internals) throw new Error("데스크톱 셸이 연결되어 있지 않습니다.");
+    if (!internals) throw new Error(DISCONNECTED_MESSAGE);
     const token = shellToken();
-    if (!token) throw new Error("데스크톱 셸 호출 토큰이 없어 요청하지 않았습니다.");
+    if (!token) throw new Error(DISCONNECTED_MESSAGE);
     try {
       return await internals.invoke(command, args, { headers: { [TOKEN_HEADER]: token } });
     } catch (err) {
@@ -83,7 +84,7 @@
     try {
       return JSON.parse(raw);
     } catch {
-      throw new Error("엔진 응답을 해석하지 못했습니다 (" + command + ")");
+      throw new Error("응답을 처리하지 못했습니다. 다시 시도해 주세요.");
     }
   }
 

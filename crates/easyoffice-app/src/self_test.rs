@@ -359,6 +359,14 @@ const WEBUI_ASSET_MARKERS: &[(&str, &str)] = &[
         include_str!("../ui/window-bridge.js"),
         "__EASYOFFICE_WINDOW_BRIDGE__",
     ),
+    (
+        include_str!("../ui/ipc-transport.js"),
+        "__EASYOFFICE_CREATE_IPC_TRANSPORT__",
+    ),
+    (
+        include_str!("../ui/menu-keyboard.js"),
+        "__EASYOFFICE_CREATE_MENU_KEYBOARD__",
+    ),
     (include_str!("../ui/index.html"), "./shell.css"),
     (include_str!("../ui/index.html"), "./tokens.css"),
     (include_str!("../ui/index.html"), "./content.css"),
@@ -374,6 +382,8 @@ const WEBUI_ASSET_MARKERS: &[(&str, &str)] = &[
     (include_str!("../ui/index.html"), "./update-notice.js"),
     (include_str!("../ui/index.html"), "./icons.js"),
     (include_str!("../ui/index.html"), "./window-bridge.js"),
+    (include_str!("../ui/index.html"), "./ipc-transport.js"),
+    (include_str!("../ui/index.html"), "./menu-keyboard.js"),
     (
         include_str!("../ui/sheet-utils.js"),
         "__EASYOFFICE_SHEET_UTILS__",

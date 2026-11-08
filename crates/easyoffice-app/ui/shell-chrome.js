@@ -280,7 +280,7 @@
       for (const el of document.querySelectorAll("[data-about-open]")) {
         el.addEventListener("click", (ev) => {
           if (ev.stopPropagation) ev.stopPropagation();
-          for (const open of document.querySelectorAll(".menu-item.open")) open.classList.remove("open");
+          host.__EASYOFFICE_CLOSE_MENUS__(document);
           if (dialog && typeof dialog.showModal === "function" && !dialog.open) dialog.showModal();
         });
       }
