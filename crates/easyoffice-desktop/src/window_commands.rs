@@ -371,7 +371,6 @@ pub fn open_path(app: &AppHandle, path: &Path) -> Result<OpenOutcome, String> {
     }
     let meta =
         fs::metadata(&canonical).map_err(|err| format!("파일 정보를 읽지 못했습니다: {err}"))?;
-    let fingerprint = Fingerprint::from_metadata(&meta);
     let size = meta.len();
     if size == 0 || size > MAX_OPEN_BYTES {
         return Err(format!(
@@ -385,6 +384,9 @@ pub fn open_path(app: &AppHandle, path: &Path) -> Result<OpenOutcome, String> {
             display_name(&canonical)
         )
     })?;
+    // Metadata from before the read, hash of the bytes the editor receives: a change in between
+    // makes the next save ask instead of silently overwriting.
+    let fingerprint = Fingerprint::from_metadata_and_bytes(&meta, &bytes);
     let label = state.next_label();
     {
         let mut registry = locked(&state.registry);
@@ -416,7 +418,12 @@ pub fn open_path(app: &AppHandle, path: &Path) -> Result<OpenOutcome, String> {
 }
 
 /// A document saved under a new path belongs to that path from now on (re-opening focuses it).
-pub fn note_saved_path(app: &AppHandle, label: &str, path: &Path) {
+pub fn note_saved_path(
+    app: &AppHandle,
+    label: &str,
+    path: &Path,
+    fingerprint: Option<Fingerprint>,
+) {
     let Ok(canonical) = fs::canonicalize(path) else {
         return;
     };
@@ -425,8 +432,8 @@ pub fn note_saved_path(app: &AppHandle, label: &str, path: &Path) {
     let claimed = locked(&state.registry)
         .claim_path(label, path_key(&canonical))
         .is_ok();
-    match Fingerprint::of(&canonical) {
-        Ok(fingerprint) if claimed => {
+    match fingerprint {
+        Some(fingerprint) if claimed => {
             locked(&state.files).track(label, canonical.clone(), fingerprint)
         }
         _ => locked(&state.files).untrack(label),
@@ -441,8 +448,9 @@ pub fn tracked_file(app: &AppHandle, label: &str) -> Option<TrackedFile> {
 }
 
 /// After an in-place write: the file now looks like this, so the next save compares against it.
-pub fn note_written(app: &AppHandle, label: &str, path: &Path) {
-    if let Ok(fingerprint) = Fingerprint::of(path) {
+/// Without a fingerprint the old one stays, so the next save asks instead of assuming.
+pub fn note_written(app: &AppHandle, label: &str, fingerprint: Option<Fingerprint>) {
+    if let Some(fingerprint) = fingerprint {
         locked(&app.state::<AppWindows>().files).set_fingerprint(label, fingerprint);
     }
 }

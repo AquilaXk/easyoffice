@@ -12,6 +12,7 @@ mod pdf_font_fallbacks;
 mod preview;
 mod recent;
 mod save_file;
+mod save_verify;
 mod smoke;
 mod smoke_steps;
 mod tracked_files;
@@ -83,7 +84,12 @@ async fn save_document_file(
     base64: String,
     in_place: Option<bool>,
 ) -> Result<SaveOutcome, IpcError> {
-    let request = SaveRequest::parse(&file_name, &base64).map_err(IpcError::new)?;
+    // Decoding and checking a document of up to 256MiB takes a while: off the async workers.
+    let request =
+        tauri::async_runtime::spawn_blocking(move || SaveRequest::parse(&file_name, &base64))
+            .await
+            .map_err(|err| IpcError::new(format!("문서를 확인하지 못했습니다: {err}")))?
+            .map_err(IpcError::new)?;
     if in_place == Some(true) {
         // A document that came from (or was saved to) a file with the same format is written back to
         // that file; everything else falls through to the save dialog.
@@ -158,13 +164,14 @@ async fn save_via_dialog(
         .into_path()
         .map_err(|err| IpcError::new(format!("저장 위치를 확인할 수 없습니다: {err}")))?;
     let written = tauri::async_runtime::spawn_blocking(move || {
-        write_document_bytes(&path, request.bytes()).map(|n| (path, n))
+        write_document_bytes(&path, request.bytes()).map(|written| (path, written))
     })
     .await
     .map_err(|err| IpcError::new(format!("파일을 쓰지 못했습니다: {err}")))?
     .map_err(IpcError::new)?;
-    window_commands::note_saved_path(app, window.label(), &written.0);
-    Ok(SaveOutcome::saved(&written.0, written.1))
+    let (path, written) = written;
+    window_commands::note_saved_path(app, window.label(), &path, written.fingerprint);
+    Ok(SaveOutcome::saved(&path, written.bytes))
 }
 
 /// Writes the document back to its own file. If the file changed on disk since it was opened, a
@@ -200,9 +207,9 @@ async fn save_tracked(
     .map_err(IpcError::new)?;
     match result {
         InPlaceResult::Declined => Ok(SaveOutcome::cancelled()),
-        InPlaceResult::Saved { bytes } => {
-            window_commands::note_written(app, window.label(), &tracked.path);
-            Ok(SaveOutcome::saved(&tracked.path, bytes))
+        InPlaceResult::Saved(written) => {
+            window_commands::note_written(app, window.label(), written.fingerprint);
+            Ok(SaveOutcome::saved(&tracked.path, written.bytes))
         }
     }
 }

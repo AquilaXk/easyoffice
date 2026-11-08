@@ -1,22 +1,57 @@
 //! The window label <-> file path map used by in-place saving (#133). Like the registry in
 //! `windows.rs`, it lives in Rust only: the WebView never sees a path, only whether a save worked.
-//! Each entry also keeps the size and modification time observed when the document was opened (or
-//! last written), so a save can notice that another program changed the file in the meantime.
+//! Each entry also keeps a fingerprint of the file as it was opened (or last written): size,
+//! modification time and a hash of the content, so a save can notice that another program changed
+//! the file in the meantime (PD-109).
+//!
+//! The content hash follows a reference implementation (MIT, Copyright (c) 2025-2026 Edward Kim;
+//! see THIRD_PARTY_NOTICES.md): `apps/desktop/src-tauri/src/state.rs` lines 643-690
+//! (`file_fingerprint`, `hash_reader`), a streamed hash in a fixed buffer next to the length and
+//! the modification time. EasyOffice differences: a
+//! 64-bit SipHash-1-3 from the standard library instead of 32-bit FNV-1a (about 6 times faster on
+//! 64 MiB and without FNV's weak spots), a read cap, and a fingerprint built from bytes the caller
+//! already holds so the open and save paths do not read the file a second time.
 
+use crate::window_commands::MAX_OPEN_BYTES;
+use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::fs;
+use std::hash::Hasher;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
-/// Size and modification time of a file at one moment.
+/// Size of the stack buffer the file is streamed through.
+const HASH_BUFFER_BYTES: usize = 64 * 1024;
+
+/// Size, modification time and content hash of a file at one moment. The hash only lives in this
+/// process (it is never stored), so the standard hasher's unspecified algorithm is not a problem.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Fingerprint {
     len: u64,
     modified_nanos: Option<u128>,
+    content_hash: u64,
 }
 
 impl Fingerprint {
-    pub fn from_metadata(meta: &fs::Metadata) -> Self {
+    /// For bytes the caller already holds: the fingerprint of `meta` (taken before the bytes were
+    /// read, so a change in between shows up as a difference) with the hash of `bytes`.
+    pub fn from_metadata_and_bytes(meta: &fs::Metadata, bytes: &[u8]) -> Self {
+        let mut hasher = DefaultHasher::new();
+        hasher.write(bytes);
+        Self::from_parts(meta, hasher.finish())
+    }
+
+    /// Reads the file once: metadata from the opened handle, then the content through a fixed
+    /// buffer. Files above the open limit hash only their first bytes; the length already differs.
+    pub fn of(path: &Path) -> std::io::Result<Self> {
+        let file = fs::File::open(path)?;
+        let meta = file.metadata()?;
+        let content_hash = hash_reader(file.take(MAX_OPEN_BYTES + 1))?;
+        Ok(Self::from_parts(&meta, content_hash))
+    }
+
+    fn from_parts(meta: &fs::Metadata, content_hash: u64) -> Self {
         let modified_nanos = meta
             .modified()
             .ok()
@@ -25,11 +60,22 @@ impl Fingerprint {
         Self {
             len: meta.len(),
             modified_nanos,
+            content_hash,
         }
     }
+}
 
-    pub fn of(path: &Path) -> std::io::Result<Self> {
-        fs::metadata(path).map(|meta| Self::from_metadata(&meta))
+/// Streams `reader` through a stack buffer into a 64-bit hash, without allocating.
+fn hash_reader(mut reader: impl Read) -> std::io::Result<u64> {
+    let mut hasher = DefaultHasher::new();
+    let mut buffer = [0_u8; HASH_BUFFER_BYTES];
+    loop {
+        match reader.read(&mut buffer) {
+            Ok(0) => return Ok(hasher.finish()),
+            Ok(read) => hasher.write(&buffer[..read]),
+            Err(err) if err.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(err) => return Err(err),
+        }
     }
 }
 
@@ -118,6 +164,123 @@ mod tests {
         assert_eq!(disk_state(&file, &seen), DiskState::Changed);
         fs::remove_file(&file).unwrap();
         assert_eq!(disk_state(&file, &seen), DiskState::Missing);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn same_length_and_same_time_but_different_content_is_a_change() {
+        let dir = scratch("samestamp");
+        let file = dir.join("a.docx");
+        fs::write(&file, b"abcdef").unwrap();
+        let seen = Fingerprint::of(&file).unwrap();
+        let stamp = fs::metadata(&file).unwrap().modified().unwrap();
+        fs::write(&file, b"abcdeX").unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&file)
+            .unwrap()
+            .set_modified(stamp)
+            .unwrap();
+        // Length and modification time alone cannot tell these apart.
+        let now = fs::metadata(&file).unwrap();
+        assert_eq!(now.len(), 6);
+        assert_eq!(now.modified().unwrap(), stamp);
+        assert_eq!(disk_state(&file, &seen), DiskState::Changed);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn unchanged_content_with_the_same_stamp_is_unchanged() {
+        let dir = scratch("same");
+        let file = dir.join("a.docx");
+        fs::write(&file, b"abcdef").unwrap();
+        let seen = Fingerprint::of(&file).unwrap();
+        assert_eq!(Fingerprint::of(&file).unwrap(), seen);
+        assert_eq!(disk_state(&file, &seen), DiskState::Unchanged);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A reader that hands out at most `step` bytes per call, like a slow disk or a pipe.
+    struct Trickle<'a> {
+        data: &'a [u8],
+        step: usize,
+    }
+
+    impl Read for Trickle<'_> {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            let n = self.step.min(self.data.len()).min(buf.len());
+            buf[..n].copy_from_slice(&self.data[..n]);
+            self.data = &self.data[n..];
+            Ok(n)
+        }
+    }
+
+    fn hash_of_slice(bytes: &[u8]) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        hasher.write(bytes);
+        hasher.finish()
+    }
+
+    #[test]
+    fn the_streamed_hash_equals_the_hash_of_the_whole_slice_at_every_buffer_edge() {
+        let sizes = [
+            0,
+            1,
+            7,
+            8,
+            9,
+            HASH_BUFFER_BYTES - 1,
+            HASH_BUFFER_BYTES,
+            HASH_BUFFER_BYTES + 1,
+            2 * HASH_BUFFER_BYTES,
+            2 * HASH_BUFFER_BYTES + 3,
+        ];
+        for size in sizes {
+            let data: Vec<u8> = (0..size).map(|i| (i * 31 + 7) as u8).collect();
+            let whole = hash_of_slice(&data);
+            assert_eq!(hash_reader(&data[..]).unwrap(), whole, "size {size}");
+            // Short reads must not change the result.
+            for step in [1, 5, 4096] {
+                let trickle = Trickle { data: &data, step };
+                assert_eq!(
+                    hash_reader(trickle).unwrap(),
+                    whole,
+                    "size {size} step {step}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn one_changed_byte_anywhere_changes_the_hash() {
+        let size = 2 * HASH_BUFFER_BYTES + 5;
+        let base: Vec<u8> = (0..size).map(|i| (i % 251) as u8).collect();
+        let original = hash_of_slice(&base);
+        for at in [0, 1, HASH_BUFFER_BYTES - 1, HASH_BUFFER_BYTES, size - 1] {
+            let mut edited = base.clone();
+            edited[at] ^= 0x01;
+            assert_ne!(hash_of_slice(&edited), original, "byte {at}");
+        }
+        assert_ne!(hash_of_slice(&base[..size - 1]), original);
+    }
+
+    #[test]
+    fn an_empty_file_has_a_stable_fingerprint_and_the_file_and_byte_paths_agree() {
+        let dir = scratch("empty");
+        for (name, bytes) in [
+            ("empty", Vec::new()),
+            ("edge", vec![9_u8; HASH_BUFFER_BYTES]),
+            ("over", vec![9_u8; HASH_BUFFER_BYTES + 1]),
+        ] {
+            let file = dir.join(name);
+            fs::write(&file, &bytes).unwrap();
+            let meta = fs::metadata(&file).unwrap();
+            assert_eq!(
+                Fingerprint::of(&file).unwrap(),
+                Fingerprint::from_metadata_and_bytes(&meta, &bytes),
+                "{name}"
+            );
+        }
         let _ = fs::remove_dir_all(&dir);
     }
 

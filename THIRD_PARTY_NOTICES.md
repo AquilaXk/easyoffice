@@ -8814,6 +8814,9 @@ The reference app (MIT, reference commit `80888af`, v0.4.5) is the model for the
 | `apps/hwp-studio/src/ui/toolbar-labels.ts` | `apps/studio-host/src/host/toolbar-labels.ts` | Same storage rule and menu check state; the key is `toolbar-labels`, and the module can run against a fake page for tests |
 | `apps/hwp-studio/src/eo-overrides.css` (toolbar label rules) | `apps/studio-host/src/styles/toolbar-labels.css` | Same rules |
 | `crates/easyoffice-desktop/src/os_recent.rs` | `apps/desktop/src-tauri/src/macos_recent_documents.rs` | Same calls; errors ignored, no-op off macOS |
+| `crates/easyoffice-desktop/src/tracked_files.rs` (fingerprint) | `apps/desktop/src-tauri/src/state.rs` (lines 643-690) | Length, modification time and a streamed content hash; 64-bit SipHash-1-3 from the standard library instead of 32-bit FNV-1a, a read cap, fingerprint from bytes the caller already holds |
+| `crates/easyoffice-desktop/src/save_file.rs` (write) | `apps/desktop/src-tauri/src/state.rs` (lines 621-640) | Temporary file next to the target, `sync_all`, rename; the temporary file is created by hand (`create_new`, process id, counter, clock) so the target's permission bits are kept |
+| `crates/easyoffice-desktop/src/save_verify.rs` | `apps/desktop/src-tauri/src/state.rs` (lines 189-215) | Bytes are checked before they replace a file; the engine's ZIP and OLE2 structure parsers stand in for the native Hangul core, which this shell does not have |
 
 Colour and theme code taken from rhwp-studio is listed in the rhwp section.
 
