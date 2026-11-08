@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use super::{object_kind, reference, AttrTable, Reader};
+use super::{object_kind, reference, AttrTable, Flow, Reader};
 use crate::pages_proto::{ArchiveObject, Message};
 use crate::pages_schema::{floating, footnote, header_footer, shape, storage, ty};
 use crate::{EasyOfficeError, RichBlock, RichParagraph, RichRun};
@@ -42,7 +42,7 @@ impl Reader<'_> {
         let Some(st) = self.storage_message(storage_id) else {
             return Ok(Vec::new());
         };
-        let mut blocks = self.convert_storage(&st, false)?;
+        let mut blocks = self.convert_storage(&st, Flow::Nested)?;
         blocks.retain(non_empty);
         Ok(blocks)
     }
@@ -89,15 +89,32 @@ impl Reader<'_> {
         }
     }
 
+    /// Footnote text in mark order, each led by its superscript number (the one shown at the
+    /// mark in the body).
     fn footnote_blocks(&mut self, body: &Message<'_>) -> Result<Vec<RichBlock>, EasyOfficeError> {
         let table = AttrTable::parse(body, storage::FOOTNOTE_TABLE)?;
         let mut out = Vec::new();
-        for id in table.entries.iter().filter_map(|(_, v)| *v) {
+        for (number, id) in table.entries.iter().filter_map(|(_, v)| *v).enumerate() {
             let Some(obj) = self.object(id, ty::FOOTNOTE) else {
                 continue;
             };
             let payload = Message::parse(&obj.payload)?;
-            out.extend(self.nested_text(&payload, footnote::TEXT_STORAGE)?);
+            let mut blocks = self.nested_text(&payload, footnote::TEXT_STORAGE)?;
+            let mut lead = vec![self.footnote_number_run(number + 1)?, RichRun::plain(" ")];
+            match blocks.first_mut() {
+                Some(RichBlock::Paragraph(p)) => {
+                    lead.append(&mut p.runs);
+                    p.runs = lead;
+                }
+                _ => blocks.insert(
+                    0,
+                    RichBlock::Paragraph(RichParagraph {
+                        runs: lead,
+                        ..RichParagraph::default()
+                    }),
+                ),
+            }
+            out.extend(blocks);
         }
         Ok(out)
     }
@@ -112,8 +129,6 @@ impl Reader<'_> {
             .map(|(id, _)| *id)
             .collect();
         ids.sort_unstable();
-        // Page-number fields and other marks in headers and footers are not reported as skipped.
-        let skipped_before = self.skipped.clone();
         let mut out: Vec<RichBlock> = Vec::new();
         for id in ids {
             let Some(obj) = self.objects.get(id) else {
@@ -127,14 +142,21 @@ impl Reader<'_> {
                 let Some(st) = self.storage_message(storage_id) else {
                     continue;
                 };
-                for block in self.convert_storage(&st, false)? {
+                // Page-number fields and other marks in headers and footers are not reported as
+                // skipped; pictures always are.
+                self.quiet = true;
+                let blocks = self.convert_storage(&st, Flow::Nested);
+                self.quiet = false;
+                for block in blocks? {
                     if non_empty(&block) && !out.contains(&block) {
                         out.push(block);
+                    } else if let RichBlock::Image(image) = &block {
+                        // The same logo repeats in every header/footer variant: count it once.
+                        self.images.release(image);
                     }
                 }
             }
         }
-        self.skipped = skipped_before;
         Ok(out)
     }
 

@@ -275,7 +275,8 @@ fn objects_fixture_reports_only_what_is_still_skipped() {
         .collect();
     assert_eq!(texts.len(), 21);
     assert_eq!(texts[0].1, "미지원 항목 안내 확인용 문서 (객체 테스트)");
-    assert_eq!(texts[5].1, "이 문장 끝에는 각주가 달려 있습니다.");
+    // The footnote mark is a superscript number at the end of the sentence.
+    assert_eq!(texts[5].1, "이 문장 끝에는 각주가 달려 있습니다.1");
     assert_eq!(
         texts[14].1,
         "페이지 나누기(Page Break) 뒤에 이어지는 두 번째 페이지의 본문 문단입니다."
@@ -317,7 +318,7 @@ fn objects_fixture_appends_footnotes_headers_and_footers_after_the_body() {
             (2, "각주".to_string()),
             (
                 0,
-                "각주 설명 텍스트입니다. 본문 하단에 표시되는 각주 항목입니다.".to_string()
+                "1 각주 설명 텍스트입니다. 본문 하단에 표시되는 각주 항목입니다.".to_string()
             ),
             (2, "머리글".to_string()),
             (0, "머리말: Pages 객체 테스트 문서".to_string()),
@@ -325,6 +326,27 @@ fn objects_fixture_appends_footnotes_headers_and_footers_after_the_body() {
             (0, "꼬리말 - 쪽 번호: ".to_string()),
         ]
     );
+}
+
+#[test]
+fn objects_fixture_marks_the_footnote_with_a_superscript_number() {
+    let (doc, _) = open("eo-pages-objects.pages");
+    let marked = paragraph_with(&doc, "이 문장 끝에는 각주가 달려 있습니다.");
+    let last = marked.runs.last().expect("runs");
+    assert_eq!(
+        (last.text.as_str(), last.script),
+        ("1", RichScript::Superscript)
+    );
+    assert!(marked.runs[..marked.runs.len() - 1]
+        .iter()
+        .all(|r| r.script == RichScript::Normal));
+    // The appendix paragraph starts with the same number.
+    let note = paragraphs(&doc)
+        .into_iter()
+        .find(|p| p.plain_text().contains("각주 설명 텍스트입니다."))
+        .expect("appendix footnote");
+    assert_eq!(note.runs[0].script, RichScript::Superscript);
+    assert_eq!(note.runs[0].text, "1");
 }
 
 #[test]

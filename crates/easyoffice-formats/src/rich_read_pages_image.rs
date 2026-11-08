@@ -62,6 +62,12 @@ impl<'a> PageImages<'a> {
             .map(String::as_str)
     }
 
+    /// Gives back the budget of a picture that was dropped as a duplicate.
+    pub(crate) fn release(&mut self, picture: &RichImage) {
+        self.count = self.count.saturating_sub(1);
+        self.bytes = self.bytes.saturating_sub(picture.bytes().len());
+    }
+
     pub(crate) fn read(&mut self, obj: &ArchiveObject) -> Result<PageImage, EasyOfficeError> {
         let Ok(msg) = Message::parse(&obj.payload) else {
             return Ok(PageImage::Skipped("읽을 수 없는 그림"));

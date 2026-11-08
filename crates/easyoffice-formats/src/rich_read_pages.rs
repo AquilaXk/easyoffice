@@ -293,11 +293,32 @@ struct StorageTables {
     list_styles: AttrTable,
     list_levels: AttrTable,
     attachments: AttrTable,
+    /// Footnote marks `(character index, footnote id)` in text order; only the main flow reads
+    /// them, so the number shown at a mark equals the footnote's place in the appendix.
+    footnote_marks: Vec<(u64, u64)>,
 }
 
 impl StorageTables {
-    fn parse(st: &Message) -> Result<Self, EasyOfficeError> {
+    /// 1-based footnote number of the mark at `idx`.
+    fn footnote_number(&self, idx: u64) -> Option<usize> {
+        self.footnote_marks
+            .binary_search_by_key(&idx, |(i, _)| *i)
+            .ok()
+            .map(|k| k + 1)
+    }
+
+    fn parse(st: &Message, flow: Flow) -> Result<Self, EasyOfficeError> {
+        let footnote_marks = if flow == Flow::Body {
+            AttrTable::parse(st, storage::FOOTNOTE_TABLE)?
+                .entries
+                .into_iter()
+                .filter_map(|(i, v)| v.map(|id| (i, id)))
+                .collect()
+        } else {
+            Vec::new()
+        };
         Ok(Self {
+            footnote_marks,
             para_styles: AttrTable::parse(st, storage::PARA_STYLE_TABLE)?,
             char_styles: AttrTable::parse(st, storage::CHAR_STYLE_TABLE)?,
             list_styles: AttrTable::parse(st, storage::LIST_STYLE_TABLE)?,
@@ -306,6 +327,17 @@ impl StorageTables {
         })
     }
 }
+
+/// Where a storage sits: the main flow takes every drawable; text inside a shape, footnote,
+/// header or footer takes pictures only (tables and shapes cannot nest in the rich model).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Flow {
+    Body,
+    Nested,
+}
+
+/// Warning kind for tables and shapes found inside nested text.
+const NESTED_UNSUPPORTED: &str = "도형·각주·머리글·바닥글 안의 표·도형";
 
 /// Text and attachments found in one line of a storage.
 #[derive(Default)]
@@ -351,10 +383,20 @@ struct Reader<'a> {
     tables: TableBudget,
     fmt_cache: HashMap<u64, Rc<Fmt>>,
     images: PageImages<'a>,
+    /// Marks such as page-number fields in headers and footers are not reported as skipped.
+    quiet: bool,
 }
 
 impl<'a> Reader<'a> {
+    /// Counts skipped drawables unless marks are being ignored (see [`Reader::quiet`]).
     fn skip_many(&mut self, kind: impl Into<String>, count: usize) {
+        if !self.quiet {
+            self.report_many(kind, count);
+        }
+    }
+
+    /// Counts skipped content that must always be reported (pictures).
+    fn report_many(&mut self, kind: impl Into<String>, count: usize) {
         if count > 0 {
             *self.skipped.entry(kind.into()).or_default() += count;
         }
@@ -430,6 +472,25 @@ impl<'a> Reader<'a> {
         (para, pfmt)
     }
 
+    fn count_run(&mut self) -> Result<(), EasyOfficeError> {
+        self.runs += 1;
+        if self.runs > MAX_RUNS {
+            return Err(EasyOfficeError::ResourceBudgetExceeded(
+                "Pages 글자 구간 수 한도 초과".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Superscript footnote number run (shown at the mark and in front of the appendix text).
+    fn footnote_number_run(&mut self, number: usize) -> Result<RichRun, EasyOfficeError> {
+        self.count_run()?;
+        Ok(RichRun {
+            script: RichScript::Superscript,
+            ..RichRun::plain(number.to_string())
+        })
+    }
+
     fn flush_run(
         &mut self,
         content: &mut LineContent,
@@ -440,12 +501,7 @@ impl<'a> Reader<'a> {
         if cur.is_empty() {
             return Ok(());
         }
-        self.runs += 1;
-        if self.runs > MAX_RUNS {
-            return Err(EasyOfficeError::ResourceBudgetExceeded(
-                "Pages 글자 구간 수 한도 초과".to_string(),
-            ));
-        }
+        self.count_run()?;
         let cfmt = char_style.map(|id| self.style_fmt(id));
         content
             .runs
@@ -474,6 +530,11 @@ impl<'a> Reader<'a> {
             }
             if ch == '\u{FFFC}' {
                 content.attachments.extend(t.attachments.exact(utf16));
+                if let Some(number) = t.footnote_number(utf16) {
+                    self.flush_run(&mut content, &mut cur, t.char_styles.at(seg_start), pfmt)?;
+                    seg_start = utf16 + 1;
+                    content.runs.push(self.footnote_number_run(number)?);
+                }
             } else {
                 push_clean(&mut cur, ch);
             }
@@ -486,10 +547,10 @@ impl<'a> Reader<'a> {
     fn convert_storage(
         &mut self,
         st: &Message,
-        allow_tables: bool,
+        flow: Flow,
     ) -> Result<Vec<RichBlock>, EasyOfficeError> {
         let text = st.text(storage::TEXT)?;
-        let tables = StorageTables::parse(st)?;
+        let tables = StorageTables::parse(st, flow)?;
         let mut blocks = Vec::new();
         let mut pos: u64 = 0;
         for line in text.split('\n') {
@@ -510,29 +571,19 @@ impl<'a> Reader<'a> {
                 blocks.push(RichBlock::Paragraph(para));
             }
             for att in content.attachments {
-                self.place_attachment(att, allow_tables, &mut blocks)?;
+                blocks.extend(self.attachment_blocks(att, flow)?);
             }
         }
         Ok(blocks)
     }
 
-    fn place_attachment(
-        &mut self,
-        att: u64,
-        allow_tables: bool,
-        blocks: &mut Vec<RichBlock>,
-    ) -> Result<(), EasyOfficeError> {
-        if !allow_tables {
-            self.skip("표 안의 개체");
-            return Ok(());
-        }
-        blocks.extend(self.attachment_blocks(att)?);
-        Ok(())
-    }
-
     /// Resolves an attachment to table, picture or shape-text blocks, counting anything else as
-    /// skipped.
-    fn attachment_blocks(&mut self, att_id: u64) -> Result<Vec<RichBlock>, EasyOfficeError> {
+    /// skipped. Nested text takes pictures only.
+    fn attachment_blocks(
+        &mut self,
+        att_id: u64,
+        flow: Flow,
+    ) -> Result<Vec<RichBlock>, EasyOfficeError> {
         let drawable = self
             .object(att_id, ty::ATTACHMENT)
             .and_then(|o| Message::parse(&o.payload).ok())
@@ -542,6 +593,13 @@ impl<'a> Reader<'a> {
             return Ok(Vec::new());
         };
         match self.objects.get(did) {
+            Some(o)
+                if flow == Flow::Nested
+                    && matches!(o.type_id, ty::TABLE_INFO | ty::SHAPE_WITH_TEXT) =>
+            {
+                self.skip(NESTED_UNSUPPORTED);
+                Ok(Vec::new())
+            }
             Some(o) if o.type_id == ty::TABLE_INFO => Ok(self
                 .read_table(o)?
                 .map(RichBlock::Table)
@@ -564,12 +622,12 @@ impl<'a> Reader<'a> {
         match self.images.read(obj)? {
             PageImage::Picture { image, cropped } => {
                 if cropped {
-                    self.skip(CROPPED);
+                    self.report_many(CROPPED, 1);
                 }
                 Ok(Some(RichBlock::Image(image)))
             }
             PageImage::Skipped(why) => {
-                self.skip(why);
+                self.report_many(why, 1);
                 Ok(None)
             }
         }
@@ -628,11 +686,12 @@ pub(crate) fn read_pages(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Ea
         tables: TableBudget::default(),
         fmt_cache: HashMap::new(),
         images: PageImages::new(&pkg.objects, &pkg.data_files),
+        quiet: false,
     };
     let body = reader
         .storage_message(body_id)
         .ok_or_else(|| corrupt("본문 저장소를 읽을 수 없습니다"))?;
-    let mut blocks = reader.convert_storage(&body, true)?;
+    let mut blocks = reader.convert_storage(&body, Flow::Body)?;
     reader.note_unimported_text(&body)?;
     reader.note_floating_drawables();
     while matches!(blocks.last(), Some(RichBlock::Paragraph(p)) if p.runs.is_empty()) {
