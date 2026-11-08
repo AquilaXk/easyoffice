@@ -56,6 +56,10 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     "script", "iframe", "frame", "frameset", "object", "embed", "link", "meta", "style", "base",
     "form", "template", "svg", "math", "portal",
   ]);
+  // Parts of the window that are not the editing area: the web view's own right-click menu has
+  // nothing to offer there (the editing area and text fields keep it). Reference implementation (MIT, Copyright (c) 2025-2026 Edward Kim; see THIRD_PARTY_NOTICES.md),
+  // `apps/studio-host/src/core/desktop-chrome.ts`: the same chrome selector and context-menu guard.
+  const NON_EDITOR_CHROME_SELECTOR = "#menu-bar, #icon-toolbar, #doc-style-bar, #status-bar";
   const URL_ATTRS = new Set(["href", "src", "action", "formaction", "xlink:href", "srcset", "poster"]);
 
   // Commands that still apply while the embedded HWP editor is the active surface.
@@ -617,6 +621,30 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       return true;
     }
 
+    // Writes the menu shortcut labels in the platform's notation (the markup holds the "Ctrl+X" form).
+    function normalizeMenuShortcuts(modifier) {
+      const { formatPlatformShortcut } = host.__EASYOFFICE_RIBBON_CATALOG__;
+      for (const label of document.querySelectorAll(".md-shortcut")) {
+        label.textContent = formatPlatformShortcut(label.textContent.trim(), modifier);
+      }
+    }
+
+    let chromeGuardsInstalled = false;
+
+    // One-time window chrome: no web view context menu outside the editing area, and the page's
+    // own menu bar gives way to the native menu bar of the desktop shell (PD-102).
+    function installChromeGuards() {
+      if (chromeGuardsInstalled) return;
+      chromeGuardsInstalled = true;
+      for (const part of document.querySelectorAll(NON_EDITOR_CHROME_SELECTOR)) {
+        part.addEventListener("contextmenu", (ev) => {
+          if (!isTextEntryTarget(ev.target)) ev.preventDefault();
+        });
+      }
+      const app = document.getElementById("app");
+      if (app && isDesktopShell()) app.dataset.nativeMenu = "true";
+    }
+
     // Platform pill, palette hint and quick-access tooltips; returns the active modifier glyph.
     function applyPlatformChrome(info) {
       const modifier = info?.shortcutModifier || "⌘";
@@ -624,6 +652,8 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       const hint = document.getElementById("shortcut-hint");
       if (pill) pill.textContent = (info?.platform || "Desktop") + " · " + modifier;
       if (hint) hint.textContent = modifier === "⌘" ? "⌘K" : modifier + "+K";
+      normalizeMenuShortcuts(modifier);
+      installChromeGuards();
       return modifier;
     }
 

@@ -484,17 +484,22 @@
       document.getElementById("btn-conv-clear-source")?.addEventListener("click", clearConverterSource);
       renderConverterSource();
 
-      const shell = document.getElementById("app");
-      shell?.addEventListener("dragover", (ev) => {
+      // The browser's own drop behaviour (opening or downloading the file) is off for the whole
+      // document; only the editing area accepts a file and shows the drop outline. Reference implementation (MIT, Copyright (c) 2025-2026 Edward Kim; see THIRD_PARTY_NOTICES.md),
+      // `apps/studio-host/src/main.ts`: the same document-wide guard and editing-area drop target.
+      document.addEventListener("dragover", (ev) => ev.preventDefault());
+      document.addEventListener("drop", (ev) => ev.preventDefault());
+      const dropArea = document.querySelector(".canvas-stage");
+      dropArea?.addEventListener("dragover", (ev) => {
         if (!hasFiles(ev)) return;
         ev.preventDefault();
-        shell.classList.add("eo-drop-active");
+        dropArea.classList.add("eo-drop-active");
       });
-      shell?.addEventListener("dragleave", () => shell.classList.remove("eo-drop-active"));
-      shell?.addEventListener("drop", (ev) => {
+      dropArea?.addEventListener("dragleave", () => dropArea.classList.remove("eo-drop-active"));
+      dropArea?.addEventListener("drop", (ev) => {
         if (!hasFiles(ev)) return;
         ev.preventDefault();
-        shell.classList.remove("eo-drop-active");
+        dropArea.classList.remove("eo-drop-active");
         const files = Array.from(ev.dataTransfer.files || []);
         if (files.length === 0) return;
         if (getActiveModule() !== "CONV" && deps.routeFile?.(files[0])) return;

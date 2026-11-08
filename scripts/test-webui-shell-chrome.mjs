@@ -247,3 +247,52 @@ test("no UI file exceeds the line ceiling and the new modules are registered", (
   const html = fs.readFileSync(fileURLToPath(new URL("index.html", UI_DIR)), "utf8");
   for (const asset of ["./icons.js", "./window-bridge.js", "./shell.css", "./tokens.css", "./content.css", "./theme.js"]) assert.ok(html.includes(asset), asset);
 });
+
+// ---- desktop chrome: right-click guard and platform shortcut labels ---------------------------
+
+const menuLabels = (document) => [...document.querySelectorAll(".md-shortcut")].map((el) => el.textContent);
+
+test("the web view's right-click menu is blocked on the menu bar, toolbars and status bar only", async () => {
+  const { document } = await createWorkspaceHarness();
+  await flushAsyncTurns(10);
+  const contextmenu = (el) => {
+    // dispatchEvent returns false when a listener called preventDefault.
+    return !el.dispatchEvent({ type: "contextmenu", target: el });
+  };
+  for (const selector of ["#menu-bar", "#icon-toolbar", "#doc-style-bar", "#status-bar"]) {
+    assert.equal(contextmenu(document.querySelector(selector)), true, `${selector} blocks it`);
+  }
+  assert.equal(contextmenu(document.querySelector("#menu-bar .menu-title")), true, "a child of the menu bar blocks it too");
+  assert.equal(contextmenu(document.getElementById("cmd-search-input")), false, "text fields keep their own menu");
+  assert.equal(contextmenu(document.getElementById("doc-editor")), false, "the editing area keeps its own menu");
+  assert.equal(contextmenu(document.querySelector(".canvas-stage")), false);
+});
+
+test("menu shortcut labels follow the platform: command glyphs on macOS, Ctrl elsewhere", async () => {
+  const mac = await createWorkspaceHarness({ platform: "MacIntel" });
+  await flushAsyncTurns(10);
+  const macLabels = menuLabels(mac.document);
+  assert.ok(macLabels.length >= 15);
+  assert.ok(macLabels.includes("⌘N") && macLabels.includes("⇧⌘Z") && macLabels.includes("⌥⌘O") && macLabels.includes("⌥⌘D"), macLabels.join(" "));
+  assert.ok(macLabels.every((label) => !/Ctrl|Alt|Shift/.test(label)), "no Windows words left on macOS");
+  assert.ok(macLabels.includes("/"), "labels that are not key combinations stay");
+
+  const win = await createWorkspaceHarness({ platform: "Win32" });
+  await flushAsyncTurns(10);
+  const winLabels = menuLabels(win.document);
+  assert.ok(winLabels.includes("Ctrl+N") && winLabels.includes("Ctrl+Shift+Z") && winLabels.includes("Ctrl+Alt+O"));
+  assert.ok(winLabels.every((label) => !/[⌘⌥⇧⌃]/.test(label)));
+});
+
+test("formatPlatformShortcut writes both notations from either one and leaves other text alone", async () => {
+  const { sandbox } = await createWorkspaceHarness();
+  const fmt = sandbox.__EASYOFFICE_RIBBON_CATALOG__.formatPlatformShortcut;
+  assert.equal(fmt("Ctrl+Shift+Z", "⌘"), "⇧⌘Z");
+  assert.equal(fmt("Ctrl+Alt+Shift+K", "⌘"), "⌥⇧⌘K");
+  assert.equal(fmt("Ctrl+0", "⌘"), "⌘0");
+  assert.equal(fmt("⌘S", "⌘"), "⌘S", "already in macOS notation");
+  assert.equal(fmt("/", "⌘"), "/");
+  assert.equal(fmt("F5", "⌘"), "F5");
+  assert.equal(fmt("⌘B", "Ctrl"), "Ctrl+B");
+  assert.equal(fmt("Ctrl+N", "Ctrl"), "Ctrl+N");
+});

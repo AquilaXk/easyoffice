@@ -868,13 +868,13 @@
     workspaceSession.handleShortcutKeydown(e, shortcutActions(modal, cmdSearchInput));
   }
 
-  // The macOS menu bar (PD-102) runs the same actions as the keyboard, plus three menu-only ones.
+  // The native menu bar (PD-102) runs the same actions as the keyboard, the page's own menu items and two menu-only ones.
   function runNativeMenu(id) {
     const modal = document.getElementById("cmd-palette-modal");
     const input = document.getElementById("cmd-search-input");
-    const clickButton = (buttonId) => () => document.getElementById(buttonId)?.click();
     const actions = {
       ...shortcutActions(modal, input),
+      ...host.__EASYOFFICE_NATIVE_MENU_TABLE__.pageMenuActions(document),
       about: () => shellChrome.openAbout(),
       // Inside the Hangul editor Find is the editor's own find dialog (its `edit:find` automation
       // command over the embed port); every other window opens the command palette like Ctrl+F.
@@ -886,8 +886,6 @@
         }
       },
       "file-save-as": () => (activeModule === "HWP" ? void hwpSession.saveAs("hwp") : void saveWorkspaceDocument().catch(() => {})),
-      "zoom-in": clickButton("btn-zoom-in"),
-      "zoom-out": clickButton("btn-zoom-out"),
     };
     return host.__EASYOFFICE_NATIVE_MENU_TABLE__.runNativeMenuAction(id, actions);
   }

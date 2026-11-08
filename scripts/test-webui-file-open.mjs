@@ -267,7 +267,7 @@ test("CSV with a BOM opens as a sheet", async () => {
 
 test("dropping a file on the workspace opens it; non-file drags are ignored; extra files are reported", async () => {
   const { document } = await createOpenHarness();
-  const app = document.getElementById("app");
+  const app = document.querySelector(".canvas-stage");
   // dispatchEvent returns false when a listener called preventDefault (the drop is accepted).
   assert.equal(app.dispatchEvent({ type: "dragover", dataTransfer: { types: ["Files"], files: [] } }), false);
   assert.ok(app.classList.contains("eo-drop-active"), "drop target is highlighted");
@@ -284,6 +284,23 @@ test("dropping a file on the workspace opens it; non-file drags are ignored; ext
   assert.equal(tabTitle(document, "DOC"), "첫째.docx");
   assert.match(feedback(document), /첫 번째 파일만/);
   assert.ok(!app.classList.contains("eo-drop-active"));
+});
+
+test("the browser's drop behaviour is off for the whole document and only the editing area shows the drop outline", async () => {
+  const { document } = await createOpenHarness();
+  for (const type of ["dragover", "drop"]) {
+    const ev = { type, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } };
+    document.dispatchEvent(ev);
+    assert.equal(ev.defaultPrevented, true, `${type} on the document is cancelled`);
+  }
+  const shell = document.getElementById("app");
+  shell.dispatchEvent({ type: "dragover", dataTransfer: { types: ["Files"], files: [] } });
+  assert.ok(!shell.classList.contains("eo-drop-active"), "the window is not outlined");
+  const area = document.querySelector(".canvas-stage");
+  area.dispatchEvent({ type: "dragover", dataTransfer: { types: ["Files"], files: [] } });
+  assert.ok(area.classList.contains("eo-drop-active"), "the editing area is outlined");
+  area.dispatchEvent({ type: "dragleave" });
+  assert.ok(!area.classList.contains("eo-drop-active"));
 });
 
 test("opening over unsaved edits asks first; declining changes nothing, accepting replaces it", async () => {
@@ -469,7 +486,7 @@ test("dropping a file while the converter is active selects it as the conversion
   const { document } = await createOpenHarness();
   switchModule(document, "CONV");
   await flushAsyncTurns(10);
-  const app = document.getElementById("app");
+  const app = document.querySelector(".canvas-stage");
   app.dispatchEvent({ type: "drop", dataTransfer: { types: ["Files"], files: [fixtureFile("끌어온.docx", DOC_MODEL)] } });
   await flushAsyncTurns(20);
   assert.match(document.getElementById("conv-source-name").textContent, /끌어온\.docx/);

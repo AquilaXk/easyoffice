@@ -9,7 +9,7 @@
 //!   names of [`PAGE_STEPS`].
 //! * Shell steps run here and are reported directly: `window_state` (the remembered-geometry file),
 //!   `preview` (the thumbnail of a sample Hangul file), `update` (the update request against a
-//!   one-shot server on `127.0.0.1`), and on macOS `menu` (every custom menu id is installed).
+//!   one-shot server on `127.0.0.1`), and `menu` (every custom menu id is installed).
 //!
 //! The sample file is the rhwp `shift-return.hwp` fixture, found through the compile-time manifest
 //! directory. That is valid here because the smoke run exists only for CI, which builds and starts the
@@ -35,7 +35,6 @@ pub const WINDOW: &str = "window";
 pub const WINDOW_STATE: &str = "window_state";
 pub const PREVIEW: &str = "preview";
 pub const UPDATE: &str = "update";
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub const MENU: &str = "menu";
 /// Reported by the second window once it loaded; it becomes [`WINDOW`] when that window is destroyed.
 pub const WINDOW_LOADED: &str = "window_loaded";
@@ -43,7 +42,6 @@ pub const WINDOW_LOADED: &str = "window_loaded";
 /// The names a page may report.
 pub const PAGE_STEPS: [&str; 4] = [HWP, PDF, PRINT, WINDOW_LOADED];
 
-#[cfg(target_os = "macos")]
 const REQUIRED: &[&str] = &[
     IPC,
     HWP,
@@ -55,10 +53,8 @@ const REQUIRED: &[&str] = &[
     UPDATE,
     MENU,
 ];
-#[cfg(not(target_os = "macos"))]
-const REQUIRED: &[&str] = &[IPC, HWP, PDF, PRINT, WINDOW, WINDOW_STATE, PREVIEW, UPDATE];
 
-/// Every step that must succeed (the menu bar exists on macOS only).
+/// Every step that must succeed.
 pub fn required_steps() -> &'static [&'static str] {
     REQUIRED
 }
@@ -348,13 +344,10 @@ pub fn update_check_step(app_version: &str) -> Result<String, String> {
 
 // ---- menu --------------------------------------------------------------------------------------
 
-/// Checks that every custom item of the menu table is among the installed menu ids and has a page
-/// action script.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+/// Checks that every custom item this OS's menu bar holds is among the installed menu ids and has a
+/// page action script.
 fn check_menu_ids<S: AsRef<str>>(installed: &[S]) -> Result<(), String> {
-    let missing: Vec<&str> = crate::native_menu::ITEMS
-        .iter()
-        .map(|spec| spec.id)
+    let missing: Vec<&str> = crate::native_menu::installed_ids()
         .filter(|id| {
             !installed.iter().any(|have| have.as_ref() == *id)
                 || crate::native_menu::dispatch_script(id).is_none()
@@ -370,11 +363,9 @@ fn check_menu_ids<S: AsRef<str>>(installed: &[S]) -> Result<(), String> {
     }
 }
 
-/// Deepest submenu level read; the menu bar has two (menu, item).
-#[cfg(target_os = "macos")]
+/// Deepest submenu level read; the menu bar has three (menu, submenu, item).
 const MAX_MENU_DEPTH: usize = 4;
 
-#[cfg(target_os = "macos")]
 fn collect_menu_ids<R: tauri::Runtime>(
     items: &[tauri::menu::MenuItemKind<R>],
     depth: usize,
@@ -393,8 +384,7 @@ fn collect_menu_ids<R: tauri::Runtime>(
     Ok(())
 }
 
-/// The installed menu bar holds every custom item of the table (macOS only).
-#[cfg(target_os = "macos")]
+/// The installed menu bar holds every custom item of the table.
 pub fn menu_step(app: &tauri::AppHandle) -> Result<String, String> {
     let menu = app.menu().ok_or("앱 메뉴가 설치되지 않았습니다.")?;
     let top = menu
@@ -403,7 +393,10 @@ pub fn menu_step(app: &tauri::AppHandle) -> Result<String, String> {
     let mut ids = Vec::new();
     collect_menu_ids(&top, 0, &mut ids)?;
     check_menu_ids(&ids)?;
-    Ok(format!("{} custom items", crate::native_menu::ITEMS.len()))
+    Ok(format!(
+        "{} custom items",
+        crate::native_menu::installed_ids().count()
+    ))
 }
 
 #[cfg(test)]
@@ -418,7 +411,7 @@ mod tests {
         for name in [IPC, HWP, PDF, PRINT, WINDOW, WINDOW_STATE, PREVIEW, UPDATE] {
             assert!(required.contains(&name), "{name}");
         }
-        assert_eq!(required.contains(&MENU), cfg!(target_os = "macos"));
+        assert!(required.contains(&MENU));
         assert!(!required.contains(&WINDOW_LOADED));
     }
 
@@ -575,10 +568,7 @@ mod tests {
 
     #[test]
     fn the_menu_check_names_every_missing_item() {
-        let all: Vec<&str> = crate::native_menu::ITEMS
-            .iter()
-            .map(|spec| spec.id)
-            .collect();
+        let all: Vec<&str> = crate::native_menu::installed_ids().collect();
         assert_eq!(check_menu_ids(&all), Ok(()));
         assert_eq!(
             check_menu_ids(&[all.as_slice(), &["extra:item"]].concat()),

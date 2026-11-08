@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { loadUiModule } from "./test-support/load-ui-module.mjs";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 
-// The macOS menu bar (PD-102): the Rust table and the page's list name the same ids and actions, the
+// The native menu bar (PD-102), on every OS: the Rust table and the page's list name the same ids and actions, the
 // page runs them through the shortcut handlers, and the shell grants the page nothing for it.
 
 const REPO = new URL("../", import.meta.url);
@@ -40,7 +40,7 @@ test("a menu id runs the page action of the same name as its shortcut, with its 
   const calls = [];
   const actions = new Proxy({}, { get: (_t, name) => (arg) => calls.push([String(name), arg]) });
   for (const id of ["file:save", "file:new", "view:zoom-100", "edit:find"]) assert.equal(runNativeMenuAction(id, actions), true, id);
-  assert.deepEqual(calls, [["studio-save", undefined], ["file-new", undefined], ["ribbon", "view-zoom"], ["find", undefined]]);
+  assert.deepEqual(calls, [["studio-save", undefined], ["file-new", undefined], ["studio-cmd", "view-zoom"], ["find", undefined]]);
 });
 
 test("unknown ids, inherited property names and missing actions run nothing", () => {
@@ -54,20 +54,85 @@ test("unknown ids, inherited property names and missing actions run nothing", ()
   assert.deepEqual(calls, []);
 });
 
-test("every menu id is handled by the real page and the zoom, find and about items act", async () => {
+// The page-side behaviour behind each kind of native action: the page element a native item clicks.
+const PAGE_ITEM_SELECTORS = {
+  "studio-cmd": (cmd) => `.md-item[data-studio-menu-cmd="${cmd}"]`,
+  "window-new": (kind) => `[data-window-new="${kind.toUpperCase()}"]`,
+  theme: (mode) => `[data-theme-mode-choice="${mode}"]`,
+  "update-check": () => "[data-update-check-toggle]",
+};
+
+test("every menu id is handled by the real page; the page-item ids reach an existing page item and the find, zoom and about items act", async () => {
   const { document } = await createWorkspaceHarness();
   await flushAsyncTurns(10);
   const run = document.defaultView.__EASYOFFICE_NATIVE_MENU__;
   assert.equal(typeof run, "function");
-  for (const { id } of rustItems()) {
-    if (id === "file:close" || id === "file:new" || id === "file:open" || id === "file:open-recent" || id === "file:save" || id === "file:save-as") continue;
-    assert.equal(run(id), true, id);
+  for (const { id, action } of rustItems()) {
+    const [name, argument] = action.split(":");
+    const selector = PAGE_ITEM_SELECTORS[name];
+    if (selector) assert.ok(document.querySelector(selector(argument)), `${id} has its page item`);
   }
+  for (const id of ["edit:find", "view:zoom-in", "view:zoom-out", "view:zoom-100", "app:about"]) assert.equal(run(id), true, id);
   await flushAsyncTurns(4);
   assert.equal(document.getElementById("cmd-palette-modal").open, true, "Find opens the command palette");
   assert.equal(document.getElementById("status-zoom-label").textContent, "100%", "zoom in, zoom out, then the 100% command as Ctrl+0");
   assert.equal(document.getElementById("about-dialog").open, true, "About opens the dialog");
   assert.equal(run("nope"), false);
+});
+
+// How a page menu item is named in the native table: the generic kinds name themselves, the rest are
+// the items that already had their own action (a shortcut handler or the About dialog).
+const OWN_ACTIONS = {
+  "data-file-open": "file-open",
+  "data-window-close": "window-close",
+  "data-about-open": "about",
+  "data-recent-dialog-open": "recent-dialog",
+  "data-save-as-generic": "file-save-as",
+};
+const OWN_STUDIO_COMMANDS = { "studio-save": "studio-save", palette: "find" };
+// Visible only in the Hangul editor window, where the whole menu row is hidden.
+const NEVER_VISIBLE = ["data-hwp-save-as"];
+
+function pageMenuItemActions() {
+  const html = read("crates/easyoffice-app/ui/index.html");
+  const menu = html.slice(html.indexOf('<div class="studio-menubar"'), html.indexOf('class="topbar-actions"'));
+  const found = [];
+  for (const m of menu.matchAll(/<(?:div|button)\b[^>]*>/g)) {
+    const tag = m[0];
+    const attr = (name) => tag.match(new RegExp(`\\b${name}="([^"]*)"`))?.[1];
+    if (attr("data-studio-menu-cmd")) found.push(attr("data-save-as-generic") ? OWN_ACTIONS["data-save-as-generic"] : OWN_STUDIO_COMMANDS[attr("data-studio-menu-cmd")] ?? `studio-cmd:${attr("data-studio-menu-cmd")}`);
+    else if (attr("data-window-new")) found.push(`window-new:${attr("data-window-new").toLowerCase()}`);
+    else if (attr("data-theme-mode-choice")) found.push(`theme:${attr("data-theme-mode-choice")}`);
+    else if (tag.includes("data-update-check-toggle")) found.push("update-check");
+    else {
+      const own = Object.keys(OWN_ACTIONS).find((name) => tag.includes(name));
+      const hidden = NEVER_VISIBLE.find((name) => tag.includes(name));
+      if (own) found.push(OWN_ACTIONS[own]);
+      else assert.ok(hidden || !/data-(?:studio|window|file|hwp|theme|update|about|recent)/.test(tag), `unclassified page menu item ${tag}`);
+    }
+  }
+  return found;
+}
+
+test("every item of the page's menu bar is in the native menu (nothing is lost when the page menu is hidden)", () => {
+  const native = new Set(rustItems().map((r) => r.action));
+  // The edit items macOS draws as system items still keep their table entry (Windows and Linux use it).
+  const missing = pageMenuItemActions().filter((action) => !native.has(action));
+  assert.deepEqual([...new Set(missing)], []);
+  assert.ok(pageMenuItemActions().length >= 60, "the page menu was parsed");
+});
+
+test("the page menu bar gives way once the desktop shell is present, and not otherwise", async () => {
+  const shell = await createWorkspaceHarness({
+    shellCommands: { get_workspace_bootstrap: () => null },
+  });
+  await flushAsyncTurns(10);
+  assert.equal(shell.document.getElementById("app").dataset.nativeMenu, "true");
+  const plain = await createWorkspaceHarness();
+  await flushAsyncTurns(10);
+  assert.notEqual(plain.document.getElementById("app").dataset.nativeMenu, "true", "--serve and browsers keep the page menu");
+  const css = read("crates/easyoffice-app/ui/shell.css");
+  assert.match(css, /\.app-shell\[data-native-menu="true"\] \.studio-menubar \{ display: none; \}/);
 });
 
 test("Actual size (view:zoom-100 and the page menu's 100% item) resets any zoom to 100%, not the next step", async () => {
@@ -109,9 +174,10 @@ test("file items reach the same handlers as their shortcuts", async () => {
   await flushAsyncTurns(6);
 });
 
-test("the shell installs the menu on macOS only and grants the page no event permission", () => {
+test("the shell installs the menu on every OS and grants the page no event permission", () => {
   const main = read("crates/easyoffice-desktop/src/main.rs");
-  assert.match(main, /#\[cfg\(target_os = "macos"\)\]\s*native_menu::install\(app\)\?;/);
+  assert.match(main, /native_menu::install\(app\)\?;/);
+  assert.ok(!/cfg\(target_os = "macos"\)\]\s*native_menu::install/.test(main), "not limited to macOS");
   const capability = JSON.parse(read("crates/easyoffice-desktop/capabilities/main-window.json"));
   assert.ok(capability.permissions.every((p) => !p.includes("event") && !p.startsWith("core:")), "no event or core permission is added for the menu");
   const menu = read("crates/easyoffice-desktop/src/native_menu.rs");

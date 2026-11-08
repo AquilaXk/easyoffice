@@ -1,7 +1,7 @@
-//! Native macOS menu bar (PD-102).
+//! Native menu bar (PD-102), installed on every OS.
 //!
-//! macOS shows one application menu bar, so the app installs one: 앱 / 파일 / 편집 / 보기 / 윈도우.
-//! Windows and Linux keep the menu bar the page draws. Adapted from the reference app
+//! The desktop shell draws one menu bar and the page hides its own (`data-native-menu`), so every
+//! item of the page's menu bar is in [`ITEMS`] (a test compares both). Adapted from the reference app
 //! `apps/desktop/src-tauri/src/menu.rs` (MIT, see THIRD_PARTY_NOTICES.md): the same menu layout and
 //! the same "menu id -> the focused window only" delivery, with EasyOffice's differences:
 //!
@@ -10,20 +10,20 @@
 //!   `shell-chrome.js`); a test compares both lists, so they cannot drift apart.
 //! * The page action names are the ones the keyboard shortcuts already use, so a menu item and its
 //!   shortcut run the same handler (dirty prompts and the Hangul editor's shell commands included).
+//!   Items that the page menu also has run that page item (`studio-cmd:<command>`), so the module
+//!   rules (an item that does not apply in the window's module does nothing) stay the page's.
 //! * The page is called by evaluating a fixed script with the item's static id; no event
 //!   permission is added to the capability, and the id never comes from the page.
-//! * Quit uses the system item, which ends in `RunEvent::ExitRequested`; the existing handler then
-//!   closes every window through its own save prompt. Undo, copy, paste and the like are system
-//!   items as well.
-//!
-//! The menu is built by plain, platform independent functions (so the Linux build checks them with
-//! clippy); only the installation is limited to macOS.
+//! * Labels are Korean on every OS. Accelerators follow the OS (`CmdOrCtrl`). Only items whose
+//!   keys the page does not already handle for the focused editor carry one: the editing keys
+//!   (bold, undo, copy and the like) stay with the editor.
+//! * macOS: the application menu (about, services, hide, quit) and the system edit items (undo,
+//!   copy, paste and the like, which also work in text fields). Quit ends in
+//!   `RunEvent::ExitRequested`; the existing handler then closes every window through its own save
+//!   prompt. Windows and Linux have no system undo/redo (and no application menu), so their edit
+//!   menu uses the table's items; closing the last window ends the app.
 
-// Only the installation is macOS-specific; the rest is built and tested on every platform, so the
-// non-macOS builds see it as unused outside the tests.
-#![cfg_attr(not(target_os = "macos"), allow(dead_code))]
-
-use tauri::menu::{Menu, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
+use tauri::menu::{Menu, MenuItemBuilder, PredefinedMenuItem, Submenu, SubmenuBuilder};
 use tauri::{AppHandle, Runtime};
 
 /// One custom menu item.
@@ -53,6 +53,22 @@ const fn item(
 pub const ITEMS: &[MenuItemSpec] = &[
     item("app:about", "EasyOffice 정보", None, "about"),
     item("file:new", "새로 만들기", Some("CmdOrCtrl+N"), "file-new"),
+    item("file:new-doc", "문서 (DOCX)", None, "window-new:doc"),
+    item("file:new-hwp", "한글 문서 (HWP)", None, "window-new:hwp"),
+    item(
+        "file:new-sheet",
+        "스프레드시트 (XLSX)",
+        None,
+        "window-new:sheet",
+    ),
+    item(
+        "file:new-slide",
+        "프레젠테이션 (PPTX)",
+        None,
+        "window-new:slide",
+    ),
+    item("file:new-pdf", "PDF 스튜디오", None, "window-new:pdf"),
+    item("file:new-conv", "포맷 변환기", None, "window-new:conv"),
     item("file:open", "열기…", Some("CmdOrCtrl+O"), "file-open"),
     item(
         "file:open-recent",
@@ -68,14 +84,356 @@ pub const ITEMS: &[MenuItemSpec] = &[
         "file-save-as",
     ),
     item("file:close", "닫기", Some("CmdOrCtrl+W"), "window-close"),
+    item("edit:undo", "되돌리기", None, "studio-cmd:studio-undo"),
+    item("edit:redo", "다시 실행", None, "studio-cmd:studio-redo"),
+    item("edit:cut", "오려 두기", None, "studio-cmd:clip-cut"),
+    item("edit:copy", "복사하기", None, "studio-cmd:clip-copy"),
+    item("edit:paste", "붙이기", None, "studio-cmd:clip-paste"),
     item("edit:find", "찾기", Some("CmdOrCtrl+F"), "find"),
-    item("view:zoom-in", "확대", Some("CmdOrCtrl+="), "zoom-in"),
-    item("view:zoom-out", "축소", Some("CmdOrCtrl+-"), "zoom-out"),
+    item(
+        "view:zoom-in",
+        "확대",
+        Some("CmdOrCtrl+="),
+        "studio-cmd:zoom-in",
+    ),
+    item(
+        "view:zoom-out",
+        "축소",
+        Some("CmdOrCtrl+-"),
+        "studio-cmd:zoom-out",
+    ),
+    item(
+        "view:zoom-fit-page",
+        "쪽 맞춤",
+        None,
+        "studio-cmd:zoom-fit-page",
+    ),
+    item(
+        "view:zoom-fit-width",
+        "폭 맞춤",
+        None,
+        "studio-cmd:zoom-fit-width",
+    ),
     item(
         "view:zoom-100",
-        "실제 크기",
+        "100% 실제 배율",
         Some("CmdOrCtrl+0"),
-        "ribbon:view-zoom",
+        "studio-cmd:view-zoom",
+    ),
+    item(
+        "view:split",
+        "좌우 스플릿 뷰",
+        None,
+        "studio-cmd:view-split",
+    ),
+    item(
+        "view:outline",
+        "문서 개요…",
+        None,
+        "studio-cmd:view-outline",
+    ),
+    item("view:theme-system", "시스템 설정", None, "theme:system"),
+    item("view:theme-light", "밝게", None, "theme:light"),
+    item("view:theme-dark", "어둡게", None, "theme:dark"),
+    item(
+        "view:theme-toggle",
+        "밝게/어둡게 전환",
+        Some("CmdOrCtrl+Alt+D"),
+        "studio-cmd:view-theme",
+    ),
+    item(
+        "view:ctrl-marks",
+        "조판 부호",
+        None,
+        "studio-cmd:ctrl-marks",
+    ),
+    item(
+        "view:para-marks",
+        "문단 부호",
+        None,
+        "studio-cmd:para-marks",
+    ),
+    item("view:doc-grid", "격자 설정", None, "studio-cmd:doc-grid"),
+    item("insert:shape", "도형", None, "studio-cmd:insert-shape"),
+    item("insert:chart", "차트 개체", None, "studio-cmd:insert-chart"),
+    item("insert:footnote", "각주", None, "studio-cmd:mod-footnote"),
+    item("insert:symbol", "문자표", None, "studio-cmd:mod-symbol"),
+    item("insert:link", "하이퍼링크", None, "studio-cmd:insert-link"),
+    item(
+        "insert:toc",
+        "자동 목차 생성",
+        None,
+        "studio-cmd:doc-mod-toc",
+    ),
+    item(
+        "insert:mailmerge",
+        "메일 머지 치환",
+        None,
+        "studio-cmd:doc-mod-mailmerge",
+    ),
+    item(
+        "insert:field",
+        "누름틀 필드 삽입",
+        None,
+        "studio-cmd:hwp-mod-field",
+    ),
+    item("format:bold", "진하게", None, "studio-cmd:home-bold"),
+    item("format:italic", "기울임", None, "studio-cmd:home-italic"),
+    item(
+        "format:underline",
+        "밑줄",
+        None,
+        "studio-cmd:home-underline",
+    ),
+    item(
+        "format:char-shape",
+        "글자 모양",
+        None,
+        "studio-cmd:home-style",
+    ),
+    item(
+        "format:para-shape",
+        "문단 모양",
+        None,
+        "studio-cmd:para-shape",
+    ),
+    item(
+        "format:para-numbering",
+        "문단 번호 모양",
+        None,
+        "studio-cmd:para-numbering",
+    ),
+    item(
+        "format:para-bullet",
+        "글머리표 모양",
+        None,
+        "studio-cmd:para-bullet",
+    ),
+    item(
+        "format:indent-in",
+        "한 수준 증가",
+        None,
+        "studio-cmd:indent-in",
+    ),
+    item(
+        "format:indent-out",
+        "한 수준 감소",
+        None,
+        "studio-cmd:indent-out",
+    ),
+    item("page:paper", "편집 용지", None, "studio-cmd:layout-paper"),
+    item(
+        "page:orientation",
+        "용지 방향 전환",
+        None,
+        "studio-cmd:layout-orientation",
+    ),
+    item(
+        "page:margins",
+        "여백 전환",
+        None,
+        "studio-cmd:layout-margins",
+    ),
+    item(
+        "page:header",
+        "머리말/꼬리말",
+        None,
+        "studio-cmd:mod-header",
+    ),
+    item(
+        "page:columns",
+        "다단 설정",
+        None,
+        "studio-cmd:layout-columns",
+    ),
+    item(
+        "page:hwp-header",
+        "행정 공문서 두문·결재란",
+        None,
+        "studio-cmd:hwp-mod-header",
+    ),
+    item(
+        "page:manuscript",
+        "200자 원고지 매수 검산",
+        None,
+        "studio-cmd:hwp-mod-manuscript",
+    ),
+    item(
+        "page:slide-master",
+        "마스터 레이아웃",
+        None,
+        "studio-cmd:slide-mod-master",
+    ),
+    item(
+        "page:slide-snap",
+        "스마트 정렬 가이드",
+        None,
+        "studio-cmd:slide-mod-snap",
+    ),
+    item(
+        "page:slide-transition",
+        "화면 전환 효과",
+        None,
+        "studio-cmd:slide-mod-transition",
+    ),
+    item(
+        "page:slide-presenter",
+        "발표자 도구 시작",
+        None,
+        "studio-cmd:slide-mod-presenter",
+    ),
+    item("table:insert", "표 만들기", None, "studio-cmd:insert-table"),
+    item(
+        "table:add-row",
+        "아래쪽에 줄 추가하기",
+        None,
+        "studio-cmd:table-add-row",
+    ),
+    item("table:merge", "셀 합치기", None, "studio-cmd:table-merge"),
+    item("table:sum", "블록 합계", None, "studio-cmd:table-sum"),
+    item(
+        "table:doc-formula",
+        "표 셀 수식 계산",
+        None,
+        "studio-cmd:doc-mod-tableformula",
+    ),
+    item(
+        "table:hwp-border",
+        "이중선·대각선 테두리",
+        None,
+        "studio-cmd:hwp-mod-border",
+    ),
+    item(
+        "table:autosum",
+        "자동 합계 (SUM)",
+        None,
+        "studio-cmd:data-autosum",
+    ),
+    item(
+        "table:fn-browser",
+        "함수 마법사",
+        None,
+        "studio-cmd:data-fn-browser",
+    ),
+    item(
+        "table:sort",
+        "오름차순·내림차순 정렬",
+        None,
+        "studio-cmd:data-sort",
+    ),
+    item(
+        "table:validation",
+        "데이터 유효성 검사",
+        None,
+        "studio-cmd:data-validation",
+    ),
+    item(
+        "table:sheet-pivot",
+        "피벗 테이블 요약",
+        None,
+        "studio-cmd:sheet-mod-pivot",
+    ),
+    item(
+        "table:sheet-chart",
+        "차트 시각화",
+        None,
+        "studio-cmd:sheet-mod-chart",
+    ),
+    item(
+        "table:sheet-condfmt",
+        "조건부 서식 규칙",
+        None,
+        "studio-cmd:sheet-mod-condfmt",
+    ),
+    item(
+        "table:sheet-freeze",
+        "행·열 틀 고정",
+        None,
+        "studio-cmd:sheet-mod-freeze",
+    ),
+    item(
+        "tool:diagnose",
+        "문장 진단 및 요약",
+        None,
+        "studio-cmd:smart-diagnose",
+    ),
+    item(
+        "tool:scrub-pii",
+        "개인정보 스캔/마스킹",
+        None,
+        "studio-cmd:scrub-pii",
+    ),
+    item(
+        "tool:security-audit",
+        "문서 보안 검사",
+        None,
+        "studio-cmd:security-audit",
+    ),
+    item(
+        "tool:bench-run",
+        "문서 엔진 성능 진단",
+        None,
+        "studio-cmd:bench-run",
+    ),
+    item(
+        "tool:review-track",
+        "변경 내용 추적",
+        None,
+        "studio-cmd:review-track",
+    ),
+    item(
+        "tool:review-comment",
+        "검토 메모 스레드",
+        None,
+        "studio-cmd:review-comment",
+    ),
+    item(
+        "tool:review-verify",
+        "문서 구조 보안 검사",
+        None,
+        "studio-cmd:review-verify",
+    ),
+    item(
+        "tool:review-stats",
+        "문서 통계·글자 수",
+        None,
+        "studio-cmd:review-stats",
+    ),
+    item(
+        "tool:pdf-highlight",
+        "형광펜·밑줄 주석",
+        None,
+        "studio-cmd:pdf-mod-highlight",
+    ),
+    item(
+        "tool:pdf-rotate",
+        "페이지 90° 회전",
+        None,
+        "studio-cmd:pdf-mod-rotate",
+    ),
+    item(
+        "tool:pdf-splitmerge",
+        "페이지 분할·병합",
+        None,
+        "studio-cmd:pdf-mod-splitmerge",
+    ),
+    item(
+        "tool:pdf-tooffice",
+        "편집 문서 변환",
+        None,
+        "studio-cmd:pdf-mod-tooffice",
+    ),
+    item(
+        "tool:palette",
+        "명령 검색·환경 설정",
+        None,
+        "studio-cmd:palette",
+    ),
+    item(
+        "help:update-check",
+        "업데이트 확인 알림 켜기/끄기",
+        None,
+        "update-check",
     ),
 ];
 
@@ -117,9 +475,62 @@ fn spec(id: &str) -> &'static MenuItemSpec {
         .expect("menu id is in the table")
 }
 
-/// Builds the whole menu bar.
-pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
-    let app_menu = SubmenuBuilder::new(app, "EasyOffice")
+/// Edit items macOS replaces with system items (they also work in text fields).
+const MACOS_SYSTEM_EDIT_IDS: &[&str] = &[
+    "edit:undo",
+    "edit:redo",
+    "edit:cut",
+    "edit:copy",
+    "edit:paste",
+];
+
+/// The custom ids the menu bar of this OS holds.
+pub fn installed_ids() -> impl Iterator<Item = &'static str> {
+    ITEMS
+        .iter()
+        .map(|spec| spec.id)
+        .filter(|id| !(cfg!(target_os = "macos") && MACOS_SYSTEM_EDIT_IDS.contains(id)))
+}
+
+const SEPARATOR: &str = "-";
+
+/// One line of a submenu: a table item, a separator or a nested submenu.
+enum Entry<R: Runtime> {
+    Item(&'static str),
+    Separator,
+    Sub(Submenu<R>),
+}
+
+fn entries<R: Runtime>(ids: &[&'static str]) -> Vec<Entry<R>> {
+    ids.iter()
+        .map(|id| {
+            if *id == SEPARATOR {
+                Entry::Separator
+            } else {
+                Entry::Item(id)
+            }
+        })
+        .collect()
+}
+
+fn submenu<R: Runtime>(
+    app: &AppHandle<R>,
+    title: &str,
+    lines: Vec<Entry<R>>,
+) -> tauri::Result<Submenu<R>> {
+    let mut builder = SubmenuBuilder::new(app, title);
+    for line in lines {
+        builder = match line {
+            Entry::Separator => builder.separator(),
+            Entry::Item(id) => builder.item(&custom(app, spec(id))?),
+            Entry::Sub(sub) => builder.item(&sub),
+        };
+    }
+    builder.build()
+}
+
+fn app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
+    SubmenuBuilder::new(app, "EasyOffice")
         .item(&custom(app, spec("app:about"))?)
         .separator()
         .services()
@@ -129,18 +540,44 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .show_all()
         .separator()
         .quit()
-        .build()?;
-    let file_menu = SubmenuBuilder::new(app, "파일")
-        .item(&custom(app, spec("file:new"))?)
-        .item(&custom(app, spec("file:open"))?)
-        .item(&custom(app, spec("file:open-recent"))?)
-        .separator()
-        .item(&custom(app, spec("file:save"))?)
-        .item(&custom(app, spec("file:save-as"))?)
-        .separator()
-        .item(&custom(app, spec("file:close"))?)
-        .build()?;
-    let edit_menu = SubmenuBuilder::new(app, "편집")
+        .build()
+}
+
+fn file_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
+    let kinds = submenu(
+        app,
+        "새 문서",
+        entries(&[
+            "file:new-doc",
+            "file:new-hwp",
+            "file:new-sheet",
+            "file:new-slide",
+            "file:new-pdf",
+            "file:new-conv",
+        ]),
+    )?;
+    let mut lines = entries(&["file:new"]);
+    lines.push(Entry::Sub(kinds));
+    lines.extend(entries(&[
+        "file:open",
+        "file:open-recent",
+        SEPARATOR,
+        "file:save",
+        "file:save-as",
+        SEPARATOR,
+        "file:close",
+    ]));
+    submenu(app, "파일", lines)
+}
+
+fn edit_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
+    if !cfg!(target_os = "macos") {
+        let ids = ["edit:undo", "edit:redo", SEPARATOR, "edit:cut", "edit:copy"];
+        let mut lines = entries(&ids);
+        lines.extend(entries(&["edit:paste", SEPARATOR, "edit:find"]));
+        return submenu(app, "편집", lines);
+    }
+    SubmenuBuilder::new(app, "편집")
         .undo()
         .redo()
         .separator()
@@ -150,24 +587,170 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .select_all()
         .separator()
         .item(&custom(app, spec("edit:find"))?)
-        .build()?;
-    let view_menu = SubmenuBuilder::new(app, "보기")
-        .item(&custom(app, spec("view:zoom-in"))?)
-        .item(&custom(app, spec("view:zoom-out"))?)
-        .item(&custom(app, spec("view:zoom-100"))?)
-        .build()?;
-    let window_menu = SubmenuBuilder::new(app, "윈도우")
+        .build()
+}
+
+fn view_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
+    let theme = submenu(
+        app,
+        "테마",
+        entries(&["view:theme-system", "view:theme-light", "view:theme-dark"]),
+    )?;
+    let mut lines = entries(&[
+        "view:zoom-in",
+        "view:zoom-out",
+        "view:zoom-fit-page",
+        "view:zoom-fit-width",
+        "view:zoom-100",
+        SEPARATOR,
+        "view:split",
+        "view:outline",
+        SEPARATOR,
+    ]);
+    lines.push(Entry::Sub(theme));
+    lines.extend(entries(&[
+        "view:theme-toggle",
+        SEPARATOR,
+        "view:ctrl-marks",
+        "view:para-marks",
+        "view:doc-grid",
+    ]));
+    submenu(app, "보기", lines)
+}
+
+fn insert_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
+    let ids = [
+        "insert:shape",
+        "insert:chart",
+        "insert:footnote",
+        "insert:symbol",
+        "insert:link",
+        "insert:toc",
+        "insert:mailmerge",
+        "insert:field",
+    ];
+    submenu(app, "입력", entries(&ids))
+}
+
+fn format_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
+    let ids = [
+        "format:bold",
+        "format:italic",
+        "format:underline",
+        SEPARATOR,
+        "format:char-shape",
+        "format:para-shape",
+        "format:para-numbering",
+        "format:para-bullet",
+        "format:indent-in",
+        "format:indent-out",
+    ];
+    submenu(app, "서식", entries(&ids))
+}
+
+fn page_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
+    let ids = [
+        "page:paper",
+        "page:orientation",
+        "page:margins",
+        "page:header",
+        "page:columns",
+        SEPARATOR,
+        "page:hwp-header",
+        "page:manuscript",
+        SEPARATOR,
+        "page:slide-master",
+        "page:slide-snap",
+        "page:slide-transition",
+        "page:slide-presenter",
+    ];
+    submenu(app, "쪽", entries(&ids))
+}
+
+fn table_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
+    let ids = [
+        "table:insert",
+        "table:add-row",
+        "table:merge",
+        "table:sum",
+        "table:doc-formula",
+        "table:hwp-border",
+        SEPARATOR,
+        "table:autosum",
+        "table:fn-browser",
+        "table:sort",
+        "table:validation",
+        "table:sheet-pivot",
+        "table:sheet-chart",
+        "table:sheet-condfmt",
+        "table:sheet-freeze",
+    ];
+    submenu(app, "표", entries(&ids))
+}
+
+fn tool_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
+    let ids = [
+        "tool:diagnose",
+        "tool:scrub-pii",
+        "tool:security-audit",
+        "tool:bench-run",
+        SEPARATOR,
+        "tool:review-track",
+        "tool:review-comment",
+        "tool:review-verify",
+        "tool:review-stats",
+        SEPARATOR,
+        "tool:pdf-highlight",
+        "tool:pdf-rotate",
+        "tool:pdf-splitmerge",
+        "tool:pdf-tooffice",
+        SEPARATOR,
+        "tool:palette",
+    ];
+    submenu(app, "도구", entries(&ids))
+}
+
+fn window_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
+    SubmenuBuilder::new(app, "윈도우")
         .minimize()
         .item(&PredefinedMenuItem::close_window(app, None)?)
-        .build()?;
-    Menu::with_items(
-        app,
-        &[&app_menu, &file_menu, &edit_menu, &view_menu, &window_menu],
-    )
+        .build()
+}
+
+/// 도움말: the About item lives in the application menu on macOS and here elsewhere.
+fn help_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
+    let about = if cfg!(target_os = "macos") {
+        Vec::new()
+    } else {
+        entries(&["app:about", SEPARATOR])
+    };
+    let mut lines = about;
+    lines.extend(entries(&["help:update-check"]));
+    submenu(app, "도움말", lines)
+}
+
+/// Builds the whole menu bar.
+pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
+    let menu = Menu::new(app)?;
+    if cfg!(target_os = "macos") {
+        menu.append(&app_menu(app)?)?;
+    }
+    menu.append(&file_menu(app)?)?;
+    menu.append(&edit_menu(app)?)?;
+    menu.append(&view_menu(app)?)?;
+    menu.append(&insert_menu(app)?)?;
+    menu.append(&format_menu(app)?)?;
+    menu.append(&page_menu(app)?)?;
+    menu.append(&table_menu(app)?)?;
+    menu.append(&tool_menu(app)?)?;
+    if cfg!(target_os = "macos") {
+        menu.append(&window_menu(app)?)?;
+    }
+    menu.append(&help_menu(app)?)?;
+    Ok(menu)
 }
 
 /// Installs the menu bar and routes custom items to the focused window.
-#[cfg(target_os = "macos")]
 pub fn install(app: &mut tauri::App) -> tauri::Result<()> {
     let menu = build(app.handle())?;
     app.set_menu(menu)?;
@@ -177,7 +760,6 @@ pub fn install(app: &mut tauri::App) -> tauri::Result<()> {
 
 /// Runs a custom item in the window that has the focus; with no focused window nothing happens
 /// (a menu click never reaches a window the user is not looking at).
-#[cfg(target_os = "macos")]
 fn run_item(app: &AppHandle, id: &str) {
     use tauri::Manager;
     let Some(script) = dispatch_script(id) else {
@@ -197,6 +779,9 @@ mod tests {
     use super::*;
 
     const MODIFIERS: &[&str] = &["CmdOrCtrl", "Alt", "Shift"];
+    const GROUPS: &[&str] = &[
+        "app", "file", "edit", "view", "insert", "format", "page", "table", "tool", "help",
+    ];
 
     #[test]
     fn ids_are_unique_and_shaped_like_group_colon_name() {
@@ -204,11 +789,7 @@ mod tests {
         for spec in ITEMS {
             assert!(seen.insert(spec.id), "duplicate id {}", spec.id);
             let (group, name) = spec.id.split_once(':').expect("group:name");
-            assert!(
-                ["app", "file", "edit", "view"].contains(&group),
-                "{}",
-                spec.id
-            );
+            assert!(GROUPS.contains(&group), "{}", spec.id);
             assert!(
                 !name.is_empty()
                     && name
@@ -284,6 +865,55 @@ mod tests {
         for spec in ITEMS {
             assert!(!spec.label.trim().is_empty());
             assert!(!spec.label.contains(['<', '>', '&']), "{}", spec.label);
+        }
+    }
+
+    #[test]
+    fn the_menu_functions_use_exactly_the_ids_of_the_table() {
+        let source = include_str!("native_menu.rs");
+        let menus =
+            &source[source.find("const SEPARATOR").unwrap()..source.find("#[cfg(test)]").unwrap()];
+        let used: std::collections::BTreeSet<&str> = menus
+            .split('"')
+            .skip(1)
+            .step_by(2)
+            .filter(|text| {
+                text.split_once(':')
+                    .is_some_and(|(group, _)| GROUPS.contains(&group))
+            })
+            .collect();
+        let table: std::collections::BTreeSet<&str> = ITEMS.iter().map(|spec| spec.id).collect();
+        assert_eq!(used, table);
+    }
+
+    #[test]
+    fn the_page_menu_commands_are_reached_through_the_page_item_actions() {
+        let studio = ITEMS
+            .iter()
+            .filter(|spec| spec.action.starts_with("studio-cmd:"))
+            .count();
+        assert!(studio >= 60, "{studio} page menu commands");
+        for spec in ITEMS.iter().filter(|spec| spec.id.starts_with("file:new-")) {
+            assert!(spec.action.starts_with("window-new:"), "{}", spec.id);
+        }
+    }
+
+    #[test]
+    fn only_macos_swaps_the_edit_items_for_system_ones() {
+        let ids: Vec<&str> = installed_ids().collect();
+        for id in MACOS_SYSTEM_EDIT_IDS {
+            assert!(ITEMS.iter().any(|spec| spec.id == *id), "{id}");
+            assert_eq!(ids.contains(id), !cfg!(target_os = "macos"), "{id}");
+        }
+        assert!(ids.contains(&"app:about") && ids.contains(&"edit:find"));
+    }
+
+    #[test]
+    fn editing_keys_stay_with_the_focused_editor() {
+        for spec in ITEMS.iter().filter(|spec| {
+            spec.id.starts_with("format:") || MACOS_SYSTEM_EDIT_IDS.contains(&spec.id)
+        }) {
+            assert_eq!(spec.accelerator, None, "{}", spec.id);
         }
     }
 }

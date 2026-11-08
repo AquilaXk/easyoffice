@@ -344,9 +344,26 @@
     return localRibbonState;
   }
 
+  // Reference implementation (MIT, Copyright (c) 2025-2026 Edward Kim; see THIRD_PARTY_NOTICES.md),
+  // `apps/studio-host/src/core/platform.ts` `normalizeShortcutLabel`: the same macOS glyph notation.
+  // "Ctrl+Alt+O" -> "⌥⌘O": macOS writes the modifiers as glyphs in the order ⌃⌥⇧⌘, with no "+".
+  const MAC_MODIFIER_GLYPHS = [["Ctrl", "⌘"], ["Cmd", "⌘"], ["Option", "⌥"], ["Alt", "⌥"], ["Shift", "⇧"]];
+  const MAC_MODIFIER_ORDER = "⌃⌥⇧⌘";
+  const PLUS_SHORTCUT = /^(?:(?:Ctrl|Cmd|Option|Alt|Shift)\+)+[^+\s]+$/;
+
+  function toMacShortcut(text) {
+    if (!PLUS_SHORTCUT.test(text)) return text;
+    const parts = text.split("+");
+    const key = parts.pop();
+    const glyphs = parts.map((name) => MAC_MODIFIER_GLYPHS.find(([word]) => word === name)[1]);
+    return [...new Set(glyphs)].sort((a, b) => MAC_MODIFIER_ORDER.indexOf(a) - MAC_MODIFIER_ORDER.indexOf(b)).join("") + key;
+  }
+
   function formatPlatformShortcut(rawShortcut, shortcutModifier) {
     const text = String(rawShortcut || "");
-    if (!text || shortcutModifier !== "Ctrl") return text;
+    if (!text) return text;
+    if (shortcutModifier === "⌘") return toMacShortcut(text);
+    if (shortcutModifier !== "Ctrl") return text;
     return text
       .replaceAll("⌃⌘", "Ctrl+Alt+")
       .replace(/\bCtrl\+Cmd\+/g, "Ctrl+Alt+")

@@ -506,7 +506,7 @@ select:focus-visible,
 .statusbar-zoom-group { display: inline-flex; align-items: center; gap: 4px; }
 .statusbar-zoom-btn, .statusbar-mode-btn { padding: 1px 6px; font-size: 11px; font-weight: 700; color: var(--ui-text); background: var(--ui-hover); }
 .stb-zoom-slider { width: 76px; height: 14px; accent-color: var(--accent-strong); }
-.app-shell.eo-drop-active { outline: 3px dashed var(--accent-strong); outline-offset: -6px; }
+.canvas-stage.eo-drop-active { outline: 3px dashed var(--accent-strong); outline-offset: -6px; }
 .conv-source-row { gap: 8px; flex-wrap: wrap; }
 /* Sheet editor: virtualized grid with fixed column widths, frozen headers and range selection */
 #pane-sheet:not([hidden]) { display: flex; flex-direction: column; height: 100%; min-height: 0; }

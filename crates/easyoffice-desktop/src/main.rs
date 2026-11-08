@@ -250,8 +250,7 @@ fn main() {
         ])
         .setup(move |app| {
             app.manage(AppWindows::new(app.path().app_data_dir().ok()));
-            // The menu bar exists on macOS only; Windows and Linux keep the page's own menu bar.
-            #[cfg(target_os = "macos")]
+            // Every OS gets the native menu bar; the page hides its own (PD-102).
             native_menu::install(app)?;
             update_check::start(app.handle(), smoke_mode);
             app.manage(preview::PreviewState::new());

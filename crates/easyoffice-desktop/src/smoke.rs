@@ -8,7 +8,7 @@
 //! * Page steps (`hwp`, `pdf`, `print`, `window_loaded`): the page reports them through an ordinary
 //!   engine call (`scrub_pii` with a marker text) that this probe observes, so no extra IPC
 //!   permission exists. Only the names of `smoke_steps::PAGE_STEPS` are accepted.
-//! * Shell steps (`window_state`, `preview`, `update`, and `menu` on macOS) run in Rust and report
+//! * Shell steps (`window_state`, `preview`, `update` and `menu`) run in Rust and report
 //!   directly; `window` completes when the second document window (which reported `window_loaded`)
 //!   is destroyed.
 //!
@@ -96,10 +96,9 @@ impl SmokeProbe {
     }
 }
 
-/// Starts the shell steps: the macOS menu check now (it needs the main thread, where the menu was
+/// Starts the shell steps: the menu check now (it needs the main thread, where the menu was
 /// installed) and the others on a worker thread. Each reports to the managed [`SmokeProbe`].
 pub fn run_rust_steps(app: &AppHandle) {
-    #[cfg(target_os = "macos")]
     app.state::<SmokeProbe>()
         .report(steps::MENU, steps::menu_step(app));
     let app = app.clone();
