@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   checkDesktopBundleConfig,
   LINUX_DEB_DEPENDS,
+  LINUX_DESKTOP_TEMPLATE,
   LINUX_RPM_DEPENDS,
   NOTICES_FILE,
   REQUIRED_ASSOCIATIONS,
@@ -58,12 +59,16 @@ test("Linux packages must declare the WebKitGTK runtime libraries and the bundle
   assert.deepEqual(conf.bundle.linux.deb.depends, LINUX_DEB_DEPENDS);
   assert.deepEqual(conf.bundle.linux.rpm.depends, LINUX_RPM_DEPENDS);
   conf.bundle.linux.deb.depends = ["libgtk-3-0"];
+  delete conf.bundle.linux.deb.desktopTemplate;
   delete conf.bundle.linux.rpm;
   conf.bundle.targets = ["nsis", "app", "dmg"];
   const problems = checkDesktopBundleConfig(conf).join("\n");
   assert.match(problems, /bundle\.linux\.deb\.depends must list 'libwebkit2gtk-4\.1-0'/);
   assert.match(problems, /bundle\.linux\.rpm\.depends must list 'libxdo\.so\.3\(\)\(64bit\)'/);
   assert.match(problems, /targets must include 'appimage'/);
+  assert.match(problems, /bundle\.linux\.deb\.desktopTemplate must be '\.\/linux\/easyoffice\.desktop'/);
+  assert.match(problems, /bundle\.linux\.rpm\.desktopTemplate must be/);
+  assert.equal(load().bundle.linux.rpm.desktopTemplate, LINUX_DESKTOP_TEMPLATE);
 });
 
 test("a missing MIME type on a file association is reported", () => {

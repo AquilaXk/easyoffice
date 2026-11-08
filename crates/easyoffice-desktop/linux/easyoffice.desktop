@@ -1,0 +1,16 @@
+# Desktop entry template for the deb, rpm and AppImage bundles (PD-086). Tauri's default template has
+# no file field code on Exec, so a file manager would start the app without the document; %F passes every
+# selected file as a path and the running instance opens each one in its own window (single instance).
+# scripts/test-verify-linux-bundles.mjs pins this file; the package check reads it back from the built packages.
+[Desktop Entry]
+Type=Application
+Name={{name}}
+{{#if comment}}
+Comment={{comment}}
+{{/if}}
+Exec={{exec}} %F
+StartupWMClass={{exec}}
+Icon={{icon}}
+Terminal=false
+Categories=Office;
+MimeType=application/x-hwp;application/vnd.hancom.hwpx;application/vnd.openxmlformats-officedocument.wordprocessingml.document;application/vnd.oasis.opendocument.text;application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;application/vnd.oasis.opendocument.spreadsheet;application/vnd.openxmlformats-officedocument.presentationml.presentation;application/vnd.oasis.opendocument.presentation;application/pdf;

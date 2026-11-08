@@ -82,6 +82,7 @@ const REQUIRED_TRACKED_CONTRACTS = [
   "crates/easyoffice-desktop/src/window_commands.rs",
   "crates/easyoffice-desktop/src/recent.rs",
   "crates/easyoffice-desktop/tauri.conf.json",
+  "crates/easyoffice-desktop/linux/easyoffice.desktop",
   "crates/easyoffice-desktop/capabilities/main-window.json",
   "crates/easyoffice-desktop/icons/icon.ico",
   "crates/easyoffice-desktop/icons/icon.icns",

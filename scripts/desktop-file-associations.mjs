@@ -36,10 +36,21 @@ export const REQUIRED_MIME_TYPES = new Map([
   ["pdf", "application/pdf"],
 ]);
 
-/** Runtime libraries the Linux packages must declare (the WebKitGTK shell links all three). */
-export const LINUX_DEB_DEPENDS = ["libwebkit2gtk-4.1-0", "libgtk-3-0", "libxdo3"];
+/** Runtime libraries the Linux packages must declare (the WebKitGTK shell, its menus and the update check TLS link them). */
+export const LINUX_DEB_DEPENDS = ["libwebkit2gtk-4.1-0", "libgtk-3-0", "libxdo3", "libssl3"];
 /** RPM requirements are library capabilities, so they hold on every RPM distribution's package names. */
-export const LINUX_RPM_DEPENDS = ["libwebkit2gtk-4.1.so.0()(64bit)", "libgtk-3.so.0()(64bit)", "libxdo.so.3()(64bit)"];
+export const LINUX_RPM_DEPENDS = [
+  "libwebkit2gtk-4.1.so.0()(64bit)",
+  "libgtk-3.so.0()(64bit)",
+  "libxdo.so.3()(64bit)",
+  "libssl.so.3()(64bit)",
+];
+
+/**
+ * The `.desktop` template of the deb and rpm bundles (the AppImage reuses the deb one). Tauri's default has
+ * no file field code on `Exec`, so a double click would start the app without the document.
+ */
+export const LINUX_DESKTOP_TEMPLATE = "./linux/easyoffice.desktop";
 
 /** The notice file every package must carry (MIT notice condition) and where the config reads it from. */
 export const NOTICES_FILE = "THIRD_PARTY_NOTICES.md";
@@ -96,6 +107,9 @@ function checkLinuxSettings(bundle) {
     const depends = Array.isArray(linux[kind]?.depends) ? linux[kind].depends : [];
     for (const dependency of required) {
       if (!depends.includes(dependency)) problems.push(`bundle.linux.${kind}.depends must list '${dependency}'`);
+    }
+    if (linux[kind]?.desktopTemplate !== LINUX_DESKTOP_TEMPLATE) {
+      problems.push(`bundle.linux.${kind}.desktopTemplate must be '${LINUX_DESKTOP_TEMPLATE}' (Exec needs the file field code)`);
     }
   }
   if (bundle.resources?.[NOTICES_SOURCE] !== NOTICES_FILE) {

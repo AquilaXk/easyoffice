@@ -59,11 +59,13 @@
     },
     "linux": {
       "deb": {
-        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0", "libxdo3"],
-        "recommends": ["xdg-utils"]
+        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0", "libxdo3", "libssl3"],
+        "recommends": ["xdg-utils"],
+        "desktopTemplate": "./linux/easyoffice.desktop"
       },
       "rpm": {
-        "depends": ["libwebkit2gtk-4.1.so.0()(64bit)", "libgtk-3.so.0()(64bit)", "libxdo.so.3()(64bit)"]
+        "depends": ["libwebkit2gtk-4.1.so.0()(64bit)", "libgtk-3.so.0()(64bit)", "libxdo.so.3()(64bit)", "libssl.so.3()(64bit)"],
+        "desktopTemplate": "./linux/easyoffice.desktop"
       }
     },
     "windows": {

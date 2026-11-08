@@ -28,10 +28,11 @@ on:
         required: false
         default: true
 
-# Tag pushes group by tag. A manual run groups by version and publish flag, so a trial build
-# (publish=false) never queues behind or replaces a publishing run of the same version.
+# Tag pushes group by tag. A manual run groups by version, publish flag and draft flag, so a trial
+# build (publish=false) never queues behind or replaces a publishing run of the same version, and a
+# queued request to publish a release is never cancelled by a draft request for the same version.
 concurrency:
-  group: release-${{ github.event_name == 'workflow_dispatch' && format('dispatch-{0}-{1}', inputs.version, inputs.publish) || github.ref_name }}
+  group: release-${{ github.event_name == 'workflow_dispatch' && format('dispatch-{0}-{1}-{2}', inputs.version, inputs.publish, inputs.release_draft) || github.ref_name }}
   cancel-in-progress: false
 
 permissions:
@@ -50,13 +51,14 @@ jobs:
       tag: ${{ steps.meta.outputs.tag }}
       draft: ${{ steps.meta.outputs.draft }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-
-      - name: Resolve release version, tag and draft state
+      # First step, before anything uses the value: the version ends up in a tag, a JSON build
+      # override and a release title, so only a plain semantic version passes. A release that is
+      # public at once (release_draft=false) may only come from main.
+      - name: Resolve and validate the release version, tag and draft state
         id: meta
         env:
           INPUT_VERSION: ${{ inputs.version }}
+          INPUT_PUBLISH: ${{ inputs.publish }}
           INPUT_DRAFT: ${{ inputs.release_draft }}
         run: |
           if [ "$GITHUB_REF_TYPE" = tag ]; then
@@ -64,16 +66,27 @@ jobs:
           else
             VERSION="${INPUT_VERSION#v}"
           fi
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::The release version must look like 1.2.3 or 1.2.3-rc.1"
+            exit 1
+          fi
           # Only an explicit release_draft=false on a manual run publishes right away.
           DRAFT=true
           if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ "$INPUT_DRAFT" = false ]; then
             DRAFT=false
+          fi
+          if [ "$DRAFT" = false ] && [ "$INPUT_PUBLISH" = true ] && [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo "::error::A release that is public at once (release_draft=false) may only be created from main"
+            exit 1
           fi
           {
             echo "version=$VERSION"
             echo "tag=v$VERSION"
             echo "draft=$DRAFT"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - name: Compare the tag version with the workspace package version
         if: github.ref_type == 'tag'

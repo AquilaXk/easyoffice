@@ -5,7 +5,7 @@
  *   - AppImage: `--appimage-extract` unpacks it (the runtime's own option, the app does not run) and the
  *     extracted tree is inspected.
  *   - deb: control fields (architecture, runtime dependencies) and the unpacked payload.
- *   - rpm: architecture, requirements and the file list.
+ *   - rpm: architecture, requirements and the unpacked payload (`rpm2cpio | cpio`), like the deb.
  * Every package must carry the binary, a `.desktop` file and THIRD_PARTY_NOTICES.md (MIT notice condition);
  * the `.desktop` file must be in the Office menu category, pass the opened files to the app and list the
  * MIME type of every document format the app registers.
@@ -34,6 +34,7 @@ import {
 import { locateBundles } from "./release-assets.mjs";
 
 const MAIN_BINARY = "usr/bin/EasyOffice";
+const PAYLOAD_BUFFER_BYTES = 512 * 1024 * 1024;
 const FILE_FIELD_CODE = /%[fFuU](\s|$)/;
 const ARCHITECTURES = {
   "linux-x64": { deb: "amd64", rpm: "x86_64" },
@@ -147,11 +148,18 @@ function inspectDeb(file, scratch, arch) {
   ];
 }
 
-function inspectRpm(file, arch) {
+function inspectRpm(file, scratch, arch) {
+  const root = path.join(scratch, "rpm");
+  fs.mkdirSync(root);
   const query = (...args) => run("rpm", ["--query", "--package", ...args, file]);
+  // The payload is a cpio archive: unpacking it gives the file list and the .desktop file to read.
+  const payload = execFileSync("rpm2cpio", [file], { maxBuffer: PAYLOAD_BUFFER_BYTES });
+  execFileSync("cpio", ["--extract", "--make-directories", "--no-absolute-filenames", "--quiet"], { cwd: root, input: payload });
+  const files = walk(root);
   return [
     ...checkRpmPackage({ arch: query("--queryformat", "%{ARCH}").trim(), requires: query("--requires") }, arch.rpm),
-    ...checkPayload(query("--list").split(/\r?\n/).filter(Boolean)),
+    ...checkPayload(files),
+    ...desktopProblems(root, files),
   ];
 }
 
@@ -167,7 +175,7 @@ function inspectAppImage(file, scratch) {
 
 const INSPECTORS = {
   deb: (file, scratch, arch) => inspectDeb(file, scratch, arch),
-  rpm: (file, _scratch, arch) => inspectRpm(file, arch),
+  rpm: (file, scratch, arch) => inspectRpm(file, scratch, arch),
   appimage: (file, scratch) => inspectAppImage(file, scratch),
 };
 

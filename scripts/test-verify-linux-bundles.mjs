@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import test from "node:test";
-import { LINUX_DEB_DEPENDS, LINUX_RPM_DEPENDS, REQUIRED_MIME_TYPES } from "./desktop-file-associations.mjs";
+import { LINUX_DEB_DEPENDS, LINUX_DESKTOP_TEMPLATE, LINUX_RPM_DEPENDS, REQUIRED_MIME_TYPES } from "./desktop-file-associations.mjs";
 import { checkDebControl, checkDesktopEntry, checkPayload, checkRpmPackage, parseControl } from "./verify-linux-bundles.mjs";
 
 const mimeLine = [...REQUIRED_MIME_TYPES.values()].join(";") + ";";
@@ -72,4 +73,38 @@ test("an rpm must be built for the architecture and require the runtime librarie
   assert.match(problems, /architecture is aarch64, expected x86_64/);
   assert.match(problems, /Requires must list libwebkit2gtk-4\.1\.so\.0\(\)\(64bit\)/);
   assert.doesNotMatch(problems, /libgtk-3/);
+});
+
+const shellDir = new URL("../crates/easyoffice-desktop/", import.meta.url);
+const template = fs.readFileSync(new URL(LINUX_DESKTOP_TEMPLATE, shellDir), "utf8");
+
+/** What the bundler's Handlebars renders for the template: `{{x}}` filled in, `{{#if}}` blocks kept. */
+const render = (text) =>
+  text
+    .split("\n")
+    .filter((line) => !/^\{\{[#/]/.test(line))
+    .join("\n")
+    .replaceAll("{{name}}", "EasyOffice")
+    .replaceAll("{{comment}}", "EasyOffice offline office workspace")
+    .replaceAll("{{exec}}", "EasyOffice")
+    .replaceAll("{{icon}}", "EasyOffice");
+
+test("the desktop entry template renders an entry the package check accepts", () => {
+  const rendered = render(template);
+  assert.deepEqual(checkDesktopEntry(rendered), []);
+  assert.match(rendered, /^Exec=EasyOffice %F$/m);
+  assert.match(rendered, /^Categories=Office;$/m);
+});
+
+test("the template lists exactly the registered MIME types and no template variable is left over", () => {
+  const rendered = render(template);
+  const line = rendered.split("\n").find((l) => l.startsWith("MimeType="));
+  assert.deepEqual(line.slice("MimeType=".length).split(";").filter(Boolean), [...REQUIRED_MIME_TYPES.values()]);
+  assert.doesNotMatch(rendered, /\{\{/);
+});
+
+test("the deb, rpm and AppImage bundles all take the template (the AppImage reuses the deb setting)", () => {
+  const conf = JSON.parse(fs.readFileSync(new URL("tauri.conf.json", shellDir), "utf8"));
+  assert.equal(conf.bundle.linux.deb.desktopTemplate, LINUX_DESKTOP_TEMPLATE);
+  assert.equal(conf.bundle.linux.rpm.desktopTemplate, LINUX_DESKTOP_TEMPLATE);
 });
