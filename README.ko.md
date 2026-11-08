@@ -93,6 +93,8 @@ cargo run -p easyoffice-desktop
 - [Linux arm64 (.deb, Ubuntu·Debian 계열)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-linux-arm64.deb)
 - [SHA256SUMS.txt](https://github.com/AquilaXk/easyoffice/releases/latest/download/SHA256SUMS.txt)
 
+단축키는 [docs/keyboard-shortcuts.md](docs/keyboard-shortcuts.md)에 정리했습니다.
+
 전체 릴리스는 [GitHub Releases](https://github.com/AquilaXk/easyoffice/releases)에서 볼 수 있습니다.
 
 **업데이트.** 설치된 앱은 하루 1회 이하로 새 릴리스를 확인합니다(도움말 메뉴에서 끌 수 있습니다). 새 버전이 있으면 카드에 **설치하고 다시 시작**이 나타나며, 앱이 릴리스에서 패키지를 내려받아 앱에 들어 있는 공개 키로 서명을 확인한 뒤 설치하고 다시 시작합니다. 저장하지 않은 변경 사항이 있는 창이 있으면 설치하지 않고, 서명이 맞지 않는 패키지는 설치하지 않습니다. `.deb`·`.rpm` 업데이트는 관리자 권한을 요청하며, 업데이터가 다루지 못하는 설치 형태는 릴리스 페이지에서 직접 받습니다(카드에 버튼이 있습니다). 릴리스에는 패키지마다 `.sig` 파일과 업데이터가 읽는 `latest.json`도 들어 있습니다.
@@ -121,6 +123,8 @@ npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --bundles app,dmg   # ta
 #### Windows
 
 Windows 릴리스는 설치 프로그램 `EasyOffice-windows-x64-setup.exe`(NSIS, 사용자 단위 설치, 관리자 권한 불필요)로 배포됩니다. 설치한 뒤 시작 메뉴에서 **EasyOffice**를 실행합니다. `EasyOffice.exe`는 Windows 내장 WebView2 런타임 위의 데스크톱 창(Tauri v2 셸, `crates/easyoffice-desktop`)으로, WebUI가 실행 파일에 포함되어 있고 모든 명령을 프로세스 안에서 Rust 엔진으로 바로 처리합니다. 로컬 HTTP 서버, 브라우저, 네트워크 연결을 쓰지 않습니다. 저장하면 Windows 기본 저장 대화상자가 열립니다. 제거는 설정 > 앱 또는 시작 메뉴 폴더의 제거 프로그램으로 합니다. WebView2는 Windows 11과 최신 Windows 10에 기본 포함되어 있으며, 없을 때만 설치 프로그램이 런타임 부트스트래퍼를 내려받습니다. 설치 프로그램은 주요 문서 형식(HWP, HWPX, DOCX, ODT, XLSX, ODS, PPTX, ODP, PDF)을 연결하므로 더블클릭하면 실행 중인 앱의 새 창에서 파일이 열립니다(단일 인스턴스). TXT, MD, CSV 같은 일반 텍스트 형식은 연결하지 않습니다. 저장은 임시 파일을 거쳐 이름을 바꾸는 방식으로 열었던 파일에 되쓰고, 그 사이 디스크에서 파일이 바뀌었으면 덮어쓰기 전에 묻습니다.
+
+설치 프로그램은 **코드 서명이 되어 있지 않아** `EasyOffice-windows-x64-setup.exe`를 처음 실행할 때 Windows SmartScreen이 "Windows의 PC 보호" 창을 띄울 수 있습니다. **추가 정보**를 누른 뒤 **실행**을 선택하세요. 브라우저가 다운로드를 막으면 다운로드 목록에서 먼저 **유지**를 선택합니다. 의심스러우면 `SHA256SUMS.txt`와 비교합니다(`Get-FileHash .\EasyOffice-windows-x64-setup.exe`).
 
 소스에서 설치 프로그램을 빌드하려면 Windows에서 MSVC Rust 툴체인 1.90+, Visual Studio Build Tools, Node.js가 필요합니다.
 

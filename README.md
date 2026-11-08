@@ -93,6 +93,8 @@ Every release carries the same fixed asset names, without a version in them, so 
 - [Linux arm64 (.deb, Ubuntu / Debian)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-linux-arm64.deb)
 - [SHA256SUMS.txt](https://github.com/AquilaXk/easyoffice/releases/latest/download/SHA256SUMS.txt)
 
+Keyboard shortcuts are listed in [docs/keyboard-shortcuts.md](docs/keyboard-shortcuts.md) (Korean).
+
 All releases are listed on the [GitHub Releases](https://github.com/AquilaXk/easyoffice/releases) page.
 
 **Updates.** The installed app checks for a newer release at most once a day (switch it off in the Help menu). When one exists, a card offers **Install and restart**: the app downloads the package from the release, verifies its signature against the public key built into the app, installs it and restarts. Nothing is installed while a window has unsaved changes, and a package whose signature does not verify is never installed. A `.deb` or `.rpm` update asks for administrator permission; an installation the updater does not cover is updated from the release page (the card has a button for it). The release also carries each package's `.sig` file and `latest.json`, which the updater reads.
@@ -121,6 +123,8 @@ npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --bundles app,dmg   # ta
 #### Windows
 
 Windows releases ship an installer, `EasyOffice-windows-x64-setup.exe` (NSIS, per-user install, no administrator rights required). Run it, then start **EasyOffice** from the Start menu. `EasyOffice.exe` is a desktop window on the built-in Windows WebView2 runtime (Tauri v2 shell, `crates/easyoffice-desktop`): the WebUI is embedded in the executable and every command runs in-process on the Rust engine, so no local HTTP server, browser, or network connection is involved. Saving opens the native Save dialog. Uninstall from Settings > Apps or the uninstaller in the Start menu folder. WebView2 is part of Windows 11 and current Windows 10; only if it is missing does the installer download the runtime bootstrapper. The installer registers the main document formats (HWP, HWPX, DOCX, ODT, XLSX, ODS, PPTX, ODP, PDF) so a double-click opens the file in a new window of the running instance (single instance); plain-text formats such as TXT, MD and CSV are not claimed. Saving writes back to the opened file through a temporary file and rename, and asks before overwriting a file that changed on disk in the meantime.
+
+The installer is **not code-signed**, so Windows SmartScreen may show "Windows protected your PC" the first time you run `EasyOffice-windows-x64-setup.exe`. Click **More info**, then **Run anyway**. If the browser blocks the download, choose **Keep** in its download list first. Compare the file with `SHA256SUMS.txt` if in doubt (`Get-FileHash .\EasyOffice-windows-x64-setup.exe`).
 
 To build the installer from source on Windows (MSVC Rust toolchain 1.90+, Visual Studio Build Tools, Node.js):
 
