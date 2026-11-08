@@ -59,7 +59,7 @@ jobs:
           node scripts/verify-fonts.mjs
 
       - name: Run rhwp upstream and hwp-studio guard tests
-        run: node --test scripts/test-rhwp-upstream.mjs scripts/test-update-rhwp.mjs scripts/test-hwp-studio.mjs scripts/test-commit-messages.mjs scripts/test-sort-comparator-rule.mjs scripts/test-release-serve-rule.mjs scripts/test-desktop-file-associations.mjs scripts/test-release-assets.mjs scripts/test-verify-linux-bundles.mjs
+        run: node --test scripts/test-rhwp-upstream.mjs scripts/test-update-rhwp.mjs scripts/test-hwp-studio.mjs scripts/test-commit-messages.mjs scripts/test-sort-comparator-rule.mjs scripts/test-release-serve-rule.mjs scripts/test-desktop-file-associations.mjs scripts/test-release-assets.mjs scripts/test-verify-linux-bundles.mjs scripts/test-retry-on-download-failure.mjs
 
       - name: Run WebUI behavioral and security regression suite
         run: node --test "scripts/test-webui-*.mjs"
@@ -124,7 +124,7 @@ jobs:
         working-directory: crates/easyoffice-desktop
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
-        run: npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --ci --bundles app,dmg
+        run: node "$GITHUB_WORKSPACE/scripts/retry-on-download-failure.mjs" -- npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --ci --bundles app,dmg
 
       - name: Verify .app and .dmg output
         run: |
@@ -222,11 +222,17 @@ jobs:
       - name: Run desktop shell unit tests (Linux)
         run: cargo test -p easyoffice-desktop
 
+      - name: Cache the Tauri bundler tools (linuxdeploy, AppRun)
+        uses: ./.github/actions/cache-tauri-tools
+        with:
+          tauri-cli-version: 2.12.4
+
+      # The bundler downloads its tools from GitHub releases; a 5xx there is retried, anything else is not.
       - name: Build desktop shell Linux x64 packages
         working-directory: crates/easyoffice-desktop
         run: |
           BUNDLES="$(node "$GITHUB_WORKSPACE/scripts/release-assets.mjs" bundles linux-x64)"
-          npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --ci --bundles "$BUNDLES"
+          node "$GITHUB_WORKSPACE/scripts/retry-on-download-failure.mjs" -- npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --ci --bundles "$BUNDLES"
 
       - name: Verify the package structure (AppImage extraction, deb and rpm metadata, desktop entry, notices)
         run: node scripts/verify-linux-bundles.mjs linux-x64
@@ -342,9 +348,15 @@ jobs:
 
       # The prebuilt Tauri CLI from npm (major 2) avoids compiling tauri-cli from source on every
       # run (several minutes); it downloads the NSIS toolset itself.
+      - name: Cache the Tauri bundler tools (NSIS)
+        uses: ./.github/actions/cache-tauri-tools
+        with:
+          tauri-cli-version: 2.12.4
+
       - name: Build desktop shell release binary and NSIS installer
         working-directory: crates/easyoffice-desktop
-        run: npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --ci --bundles nsis
+        shell: bash
+        run: node "$GITHUB_WORKSPACE/scripts/retry-on-download-failure.mjs" -- npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --ci --bundles nsis
 
       - name: Verify NSIS installer output
         shell: pwsh

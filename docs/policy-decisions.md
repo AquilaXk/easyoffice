@@ -1953,3 +1953,13 @@
 - **Alternatives rejected** 셀마다 `{text, row_span, col_span}`를 담는 구조(사용처 전부와 `to_universal_model`·수식 계산이 바뀌고 셀 격자 접근이 느려짐), 위 영역 지도 없이 읽기에서만 span을 푸는 것(저장 시 병합이 다시 사라짐), 기존 표 크레이트(DOCX·ODT·HWPX를 모두 덮는 MIT 크레이트가 없음).
 - **Verified by** `cargo test -p easyoffice-formats --lib rich_table`(겹침·범위 밖·`u32::MAX` span·들쭉날쭉한 행·큰 격자 거부, 큰 영역 20만 개가 5초 안에 끝남, 짝 없는 `vMerge`, 먼 주소·중복 주소), `--test table_merge`(DOCX·ODT·HWPX 쓰기→읽기가 같은 표, 마크업 확인, 악의적 DOCX·ODT·HWPX·Pages 입력은 영역을 버리고 경고).
 - **Revisit when** 병합이 든 실제 Pages 파일을 구했을 때(필드 번호 확정, 수식 저장소 경로), 편집기가 병합 셀을 그릴 수 있을 때, RTF 작성기가 셀 위치를 쓸 때.
+
+## 92. Tauri 번들 도구 캐시와 다운로드 실패 재시도 (PD-118)
+
+- **Context** Tauri 번들러는 콜드 빌드마다 GitHub 릴리스에서 도구(Windows NSIS와 플러그인, Linux linuxdeploy·플러그인·AppRun)를 내려받는데, 그곳이 504를 돌려주면 컴파일과 테스트가 끝난 `verify-linux`·`verify-windows` 잡이 번들 단계에서 실패했습니다. 릴리스 빌드도 같은 위험이 있었습니다.
+- **Decision (`PD-118`)** (1) 번들러가 도구를 두는 사용자 캐시 디렉터리의 `tauri` 폴더(`dirs::cache_dir()`: Linux `~/.cache/tauri`, Windows `%LOCALAPPDATA%\tauri`)를 `.github/actions/cache-tauri-tools`로 캐시합니다. 키는 OS·아키텍처·Tauri CLI 버전이고, CI의 Linux·Windows 잡과 릴리스 빌드(`prepare-desktop-build`)가 쓰며 macOS는 내려받는 도구가 없어 건너뜁니다. (2) 번들 단계는 `scripts/retry-on-download-failure.mjs`로 감싸 최대 3회(15초, 30초 대기) 다시 실행합니다. 출력에 `failed to bundle project`와 네트워크 오류(`http status: 5xx`·408·429, 요청 전송 오류, 시간 초과, 연결 끊김, DNS)가 함께 있을 때만 재시도하고 컴파일·테스트·그 밖의 번들 실패는 곧바로 실패합니다.
+- **Why** 캐시가 있으면 내려받기 자체를 하지 않아 장애의 영향이 없고, 캐시가 비었을 때만 재시도가 필요합니다. 재시도 조건을 번들 단계의 네트워크 오류로 좁혀 실제 결함을 가리지 않습니다.
+- **Trade-offs** 캐시는 잡이 성공해야 저장되므로 첫 성공 전까지는 재시도에 기댑니다. 도구 버전은 CLI 버전에 묶여 있어 CLI를 올리면 키가 바뀌어 새로 내려받습니다. 오류 문구는 번들러 출력에 의존합니다.
+- **Alternatives rejected** 도구를 리포에 넣기(크기·라이선스 관리), 잡 전체 재실행(컴파일부터 다시), 문구 없이 모든 번들 실패 재시도(실제 결함을 세 번 반복).
+- **Verified by** `node --test scripts/test-retry-on-download-failure.mjs`(재시도 판정, 지수 대기, 3회 한도, 컴파일 실패는 한 번만 실행, 워크플로가 모든 빌드를 감싸고 캐시 단계와 CLI 버전이 일치함).
+- **Revisit when** 번들러가 도구 내려받기를 자체 재시도하거나 미러 설정을 기본으로 제공할 때.

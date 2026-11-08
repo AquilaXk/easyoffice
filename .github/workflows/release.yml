@@ -148,7 +148,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           BUNDLES="$(node "$GITHUB_WORKSPACE/scripts/release-assets.mjs" bundles macos-universal)"
-          npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --ci --target universal-apple-darwin --bundles "$BUNDLES" --config "{\"version\":\"${VERSION}\",\"bundle\":{\"createUpdaterArtifacts\":true}}" -- --locked
+          node "$GITHUB_WORKSPACE/scripts/retry-on-download-failure.mjs" -- npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --ci --target universal-apple-darwin --bundles "$BUNDLES" --config "{\"version\":\"${VERSION}\",\"bundle\":{\"createUpdaterArtifacts\":true}}" -- --locked
 
       - name: Smoke test desktop shell window (embedded WebUI, IPC round trip and HWP editor round trip)
         if: vars.MACOS_SMOKE != 'off'
@@ -210,7 +210,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           BUNDLES="$(node "$GITHUB_WORKSPACE/scripts/release-assets.mjs" bundles windows-x64)"
-          npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --ci --bundles "$BUNDLES" --config "{\"version\":\"${VERSION}\",\"bundle\":{\"createUpdaterArtifacts\":true}}" -- --locked
+          node "$GITHUB_WORKSPACE/scripts/retry-on-download-failure.mjs" -- npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --ci --bundles "$BUNDLES" --config "{\"version\":\"${VERSION}\",\"bundle\":{\"createUpdaterArtifacts\":true}}" -- --locked
 
       - name: Smoke test desktop shell window (embedded WebUI, IPC round trip and HWP editor round trip)
         shell: pwsh
@@ -277,7 +277,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           BUNDLES="$(node "$GITHUB_WORKSPACE/scripts/release-assets.mjs" bundles "$PLATFORM")"
-          npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --ci --bundles "$BUNDLES" --config "{\"version\":\"${VERSION}\",\"bundle\":{\"createUpdaterArtifacts\":true}}" -- --locked
+          node "$GITHUB_WORKSPACE/scripts/retry-on-download-failure.mjs" -- npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --ci --bundles "$BUNDLES" --config "{\"version\":\"${VERSION}\",\"bundle\":{\"createUpdaterArtifacts\":true}}" -- --locked
 
       - name: Verify the package structure (AppImage extraction, deb and rpm metadata, desktop entry, notices) and the signatures
         env:

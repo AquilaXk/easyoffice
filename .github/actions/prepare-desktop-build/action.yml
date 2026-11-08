@@ -13,13 +13,19 @@ runs:
       with:
         node-version: "22"
 
+    # The bundler's downloaded tools (PD-118); the build step retries a failed download.
+    - name: Cache the Tauri bundler tools
+      uses: ./.github/actions/cache-tauri-tools
+      with:
+        tauri-cli-version: 2.12.4
+
     - name: Run repository hygiene guard
       shell: bash
       run: node scripts/check-repo-hygiene.mjs
 
     - name: Run desktop bundle contract, release asset and WebUI regression suites
       shell: bash
-      run: node --test scripts/test-desktop-file-associations.mjs scripts/test-release-assets.mjs scripts/test-verify-linux-bundles.mjs "scripts/test-webui-*.mjs"
+      run: node --test scripts/test-desktop-file-associations.mjs scripts/test-release-assets.mjs scripts/test-verify-linux-bundles.mjs scripts/test-retry-on-download-failure.mjs "scripts/test-webui-*.mjs"
 
     # The desktop shell embeds the editor bundle and fails to build without it, so it is built before
     # any Rust step.

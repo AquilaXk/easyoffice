@@ -1,0 +1,21 @@
+name: Cache Tauri bundler tools
+description: >-
+  Caches the tools the Tauri bundler downloads from GitHub releases on a cold build (NSIS and its plugin on
+  Windows; linuxdeploy, its plugins and AppRun on Linux), so a GitHub 5xx cannot fail a build that already
+  has them (PD-118). The bundler keeps them in the user cache directory under "tauri" (dirs::cache_dir():
+  $XDG_CACHE_HOME or ~/.cache on Linux, the local app data folder on Windows). macOS bundles download nothing.
+
+inputs:
+  tauri-cli-version:
+    description: Version of the @tauri-apps/cli package the build runs; the bundler pins its tool versions to it.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Restore the Tauri bundler tool cache
+      if: runner.os != 'macOS'
+      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      with:
+        path: ${{ runner.os == 'Windows' && '~/AppData/Local/tauri' || '~/.cache/tauri' }}
+        key: tauri-tools-${{ runner.os }}-${{ runner.arch }}-cli-${{ inputs.tauri-cli-version }}
