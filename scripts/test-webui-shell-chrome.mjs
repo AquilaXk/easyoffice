@@ -138,6 +138,25 @@ test("theme toggle keeps an accessible name and announces its state", async () =
   assert.equal(document.documentElement.dataset.themeEffective, "dark");
 });
 
+test("reference values: 28px menu bar with the light border, bottom-left update card with the dialog shadow, 14px preview margin, product information in the dialog frame", () => {
+  const bar = cssRule(".topbar", SHELL_CSS);
+  assert.ok(hasDecl(bar, "height", "28px") && hasDecl(bar, "border-bottom", "1px solid var(--ui-border-light)"));
+  assert.ok(hasDecl(cssRule(".icon-btn", SHELL_CSS), "height", "24px") && hasDecl(cssRule(".palette-btn", SHELL_CSS), "height", "22px"), "the search and theme controls fit 28px");
+  const home = fs.readFileSync(fileURLToPath(new URL("home.css", UI_DIR)), "utf8");
+  const card = cssRule(".update-notice", home);
+  assert.ok(hasDecl(card, "left", "16px") && hasDecl(card, "bottom", "48px") && hasDecl(card, "box-shadow", "var(--shadow-dialog)"));
+  assert.ok(!hasDecl(card, "top") && !hasDecl(card, "right"));
+  const loaded = cssRule(".home-recent-preview.is-loaded", home);
+  assert.ok(hasDecl(loaded, "padding", "14px") && hasDecl(cssRule(".home-preview-canvas", home), "border-radius", "var(--radius-lg)"));
+  assert.match(fs.readFileSync(fileURLToPath(new URL("home-screen.js", UI_DIR)), "utf8"), /앱을 실행하자마자 이어서 작업할 수 있도록 최근에 연 문서를 보여줍니다\./);
+  const html = fs.readFileSync(fileURLToPath(new URL("index.html", UI_DIR)), "utf8");
+  const about = html.slice(html.indexOf('<dialog id="about-dialog"'));
+  assert.match(about, /class="tool-dialog"[\s\S]*?<div class="dialog-wrap">\s*<div class="dialog-title"><span id="about-dialog-title">제품 정보<\/span>/);
+  assert.match(about, /<div class="dialog-body about-body">\s*<div class="about-product-name">EasyOffice<\/div>[\s\S]*?id="about-version"/);
+  assert.ok(hasDecl(cssRule(".tool-dialog", SHELL_CSS), "width", "min(460px"));
+  assert.ok(hasDecl(cssRule("#about-dialog .about-body", SHELL_CSS), "text-align", "center"));
+});
+
 test("top bar: menus on the left, compact right-side controls that never shrink or wrap", () => {
   const bar = cssRule(".topbar");
   assert.ok(hasDecl(bar, "flex-wrap", "nowrap") || !hasDecl(bar, "flex-wrap"), "no wrapping");

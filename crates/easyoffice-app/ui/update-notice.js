@@ -1,7 +1,7 @@
 (function (host) {
   "use strict";
 
-  // Update notice (PD-103): a small card in the top right corner of a window when a newer release
+  // Update notice (PD-103): a small card in the bottom left corner of a window when a newer release
   // exists, with a button that installs it and restarts the app, and one that opens the release page
   // in the default browser. The shell does everything else (the daily check, the signed download,
   // the refusal while any window has unsaved changes, the install and the restart); this module asks

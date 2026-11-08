@@ -696,10 +696,10 @@ test("the about dialog shows the app version from the bootstrap and ignores a ma
   const { document } = await openWindow("?module=DOC&win=w-about");
   const version = document.getElementById("about-version");
   assert.equal(version.hidden, false);
-  assert.equal(version.textContent, "EasyOffice 1.2.3");
+  assert.equal(version.textContent, "Version 1.2.3");
   const api = document.defaultView.__EASYOFFICE_CREATE_SHELL_CHROME__({ document, hwpHost: { setShellContext: async () => null, onCommand() {} } });
   api.setAppVersion("<b>x</b>");
-  assert.equal(version.textContent, "EasyOffice 1.2.3", "a version with markup is dropped");
+  assert.equal(version.textContent, "Version 1.2.3", "a version with markup is dropped");
 });
 
 test("home screen and dialog files carry their the reference app source header and are listed in the notices", async () => {

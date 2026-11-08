@@ -33,7 +33,7 @@
   // Largest Base64 text accepted: the shell's 256 KiB picture limit as Base64 (4 characters per 3 bytes).
   const PREVIEW_MAX_BASE64_CHARS = Math.ceil((256 * 1024) / 3) * 4;
   const EMPTY_HINT = "아직 최근 문서가 없습니다. 문서를 한 번 열면 여기에 바로 나타납니다.";
-  const FILLED_HINT = "창을 열자마자 이어서 작업할 수 있도록 최근에 연 문서를 보여줍니다.";
+  const FILLED_HINT = "앱을 실행하자마자 이어서 작업할 수 있도록 최근에 연 문서를 보여줍니다.";
 
   // appendChild-based so the page also works in hosts without ParentNode.append.
   function add(parent, ...children) {

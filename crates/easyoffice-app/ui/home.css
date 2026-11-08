@@ -301,9 +301,19 @@
   background: var(--color-surface-raised);
 }
 
+/* The picture of the file (PD-106) sits in the card with the reference app's 14px margin, rounded
+   corners and the same light shadow as the skeleton page above (`home-screen.css` 225-243). */
+.home-preview-canvas {
+  border-radius: var(--radius-lg);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
 /* A picture from the file (PD-106) replaces the skeleton and fills the card. */
 .home-recent-preview.is-loaded {
-  padding: 0;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  padding: 14px;
   overflow: hidden;
 }
 
@@ -512,19 +522,19 @@
 }
 
 /* Update notice card (PD-103). Adapted from the reference app `apps/studio-host/src/styles/update-notice.css`
-   (MIT, see THIRD_PARTY_NOTICES.md): the same rules and class names, moved to the top right corner
-   and built from the rhwp tokens. */
+   (MIT, see THIRD_PARTY_NOTICES.md): the same rules, class names and position (bottom left corner)
+   built from the rhwp tokens. */
 .update-notice {
   position: fixed;
-  top: 48px;
-  right: 16px;
+  left: 16px;
+  bottom: 48px;
   z-index: 40;
   width: min(340px, calc(100vw - 32px));
   padding: 12px;
   border: 1px solid var(--color-border-lighter);
   border-radius: 8px;
   background: var(--color-surface-raised);
-  box-shadow: var(--shadow-dropdown);
+  box-shadow: var(--shadow-dialog);
   color: var(--color-text);
 }
 

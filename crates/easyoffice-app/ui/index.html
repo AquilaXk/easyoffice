@@ -936,13 +936,15 @@
       </div>
     </dialog>
 
-    <dialog id="about-dialog" class="close-dialog" aria-labelledby="about-dialog-title">
-      <div class="close-dialog-panel">
-        <h2 id="about-dialog-title" class="close-dialog-title">EasyOffice 제품 정보</h2>
-        <p id="about-version" class="about-version" hidden></p>
-        <p class="close-dialog-text">문서 · 한글 · 스프레드시트 · 프레젠테이션 · PDF를 오프라인으로 다루는 작업 공간입니다.</p>
+    <dialog id="about-dialog" class="tool-dialog" aria-labelledby="about-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="about-dialog-title">제품 정보</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body about-body">
+        <div class="about-product-name">EasyOffice</div>
+        <div class="about-product-name-ko">문서 · 한글 · 스프레드시트 · 프레젠테이션 · PDF를 오프라인으로 다루는 작업 공간입니다.</div>
+        <div id="about-version" class="about-version" hidden></div>
         <p class="about-notice">본 제품은 한글과컴퓨터의 한글 문서 파일(.hwp) 공개 문서를 참고하여 개발하였습니다.</p>
-        <h3 class="about-license-title">오픈소스 라이선스</h3>
+        <div class="about-license-title">오픈소스 라이선스</div>
         <table class="about-license-table" aria-label="오픈소스 라이선스">
           <tbody>
             <tr><td>wasm-bindgen</td><td>MIT / Apache-2.0</td></tr>
@@ -962,7 +964,7 @@
             <tr><td>console_error_panic_hook</td><td>MIT / Apache-2.0</td></tr>
           </tbody>
         </table>
-        <p class="about-license-note">WASM 번들에 포함되는 핵심 크레이트만 표시합니다. 전체 목록은 THIRD_PARTY_NOTICES.md를 참조하세요.</p>
+        <div class="about-license-note">WASM 번들에 포함되는 핵심 크레이트만 표시합니다. 전체 목록은 THIRD_PARTY_NOTICES.md를 참조하세요.</div>
         <div class="about-diagnostics" aria-label="진단 정보">
           <span id="platform-pill" class="platform-pill">플랫폼 확인 중</span>
           <span id="status-module">모듈: 문서 (DOCX)</span>
@@ -970,9 +972,8 @@
           <span id="ime-badge">IME: 완료</span>
           <span id="status-engine">연결 대기</span>
         </div>
-        <div class="close-dialog-actions">
-          <button type="button" id="btn-about-close" class="secondary-btn">닫기</button>
         </div>
+        <div class="dialog-footer"><button type="button" id="btn-about-close" class="dialog-btn dialog-btn-primary">닫기</button></div>
       </div>
     </dialog>
 

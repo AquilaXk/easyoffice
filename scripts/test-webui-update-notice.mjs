@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { hasColorLiteral, rulesFor } from "./test-support/css-rules.mjs";
 
-// Update notice (PD-103): a card in the top right corner when the shell reports a newer release.
+// Update notice (PD-103): a card in the bottom left corner when the shell reports a newer release.
 // The page reads the state, switches the check, asks the shell to install the signed update (the
 // shell refuses while a window has unsaved changes) or to open the release page, and polls the
 // progress while a download or install runs.

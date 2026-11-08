@@ -330,12 +330,12 @@
       if (closeBtn && dialog) closeBtn.addEventListener("click", () => dialog.close?.());
     }
 
-    // "EasyOffice x.y.z" under the dialog title (the reference app shows its version the same way).
+    // "Version x.y.z" under the product name (the reference app's wording).
     function setAppVersion(version) {
       const el = document.getElementById("about-version");
       const text = String(version || "").trim();
       if (!el || !/^[0-9A-Za-z.+-]{1,32}$/.test(text)) return;
-      el.textContent = "EasyOffice " + text;
+      el.textContent = "Version " + text;
       el.hidden = false;
     }
 
