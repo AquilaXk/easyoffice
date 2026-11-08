@@ -10,7 +10,8 @@
 //! * every format: the signature for the file extension (`FormatDetector::detect` with the extension
 //!   as hint; text formats must be UTF-8 without NUL);
 //! * ZIP formats (OOXML, ODF, HWPX): the full central directory and local header walk with CRC,
-//!   size, ratio and path checks of `ZipArchiveCodec::unpack`, plus the format's main part;
+//!   size, ratio and path checks of `ZipArchiveCodec::verify` (one entry in memory at a time),
+//!   plus the format's main part;
 //! * OLE2 formats (HWP, DOC, XLS, PPT): the full container walk of `Ole2ContainerCodec::unpack`;
 //!   HWP also needs a `FileHeader` stream that starts with the HWP signature;
 //! * PDF: the header, a `startxref` and the `%%EOF` marker within the last kilobyte.
@@ -20,7 +21,7 @@
 
 use easyoffice_formats::{
     ContainerFamily, DocumentFormat, EasyOfficeError, FormatDetector, Ole2ContainerCodec,
-    Ole2SecurityGuard, ZipArchiveCodec, ZipSecurityPolicy, HANGUL_EDITOR_MAX_ENTRY_BYTES,
+    Ole2SecurityGuard, ZipArchiveCodec, ZipSecurityPolicy,
 };
 
 /// What the user is told when the bytes are refused: no internal terms, and the file is untouched.
@@ -43,15 +44,6 @@ const ZIP_MAIN_PARTS: [(DocumentFormat, &str); 9] = [
     (DocumentFormat::Hwpx, "Contents/"),
     (DocumentFormat::Hwtx, "Contents/"),
 ];
-
-/// Ratio limit of the Hangul formats: none. The next reader of a saved HWPX is the editor's rhwp,
-/// which has no ratio rule, and the page has already re-parsed these exact bytes with it before
-/// they get here (`exportVerified` in `hwp-session.js`, on every save path). A flat picture the
-/// editor embeds legitimately deflates past 1000:1, so any number would refuse real documents.
-/// The entry count, the total size limit and the "empty but inflates" rule stay; the per-entry
-/// limit is the editor's own ([`HANGUL_EDITOR_MAX_ENTRY_BYTES`]), since the editor embeds pictures
-/// the engine's 128 MiB default would refuse.
-const HANGUL_RATIO_LIMIT: f64 = f64::INFINITY;
 
 const HWP_FILE_HEADER_STREAM: &str = "FileHeader";
 
@@ -79,31 +71,32 @@ fn corrupted(detail: &str) -> EasyOfficeError {
 }
 
 /// The policy the next reader applies: the engine's default for every format the engine opens, the
-/// default without its ratio rule for the Hangul formats (see [`HANGUL_RATIO_LIMIT`]).
+/// Hangul editor's own for the Hangul formats. That one has no ratio rule: the next reader of a
+/// saved HWPX is the editor's rhwp, which has none, and the page has already re-parsed these exact
+/// bytes with it before they get here (`exportVerified` in `hwp-session.js`, on every save path). A
+/// flat picture the editor embeds legitimately deflates past 1000:1, so any number would refuse
+/// real documents. Its size limits are the reader's too (PD-112): text parts 256 MiB each and
+/// 512 MiB together, pictures 512 MiB each and, since the reader has no total for them, a total
+/// that only bounds this check's own work.
 fn zip_policy(format: DocumentFormat) -> ZipSecurityPolicy {
-    let default = ZipSecurityPolicy::default();
     match format {
-        DocumentFormat::Hwpx | DocumentFormat::Hwtx => ZipSecurityPolicy {
-            max_compression_ratio: HANGUL_RATIO_LIMIT,
-            max_single_entry_uncompressed_bytes: HANGUL_EDITOR_MAX_ENTRY_BYTES,
-            ..default
-        },
-        _ => default,
+        DocumentFormat::Hwpx | DocumentFormat::Hwtx => ZipSecurityPolicy::hangul_editor(),
+        _ => ZipSecurityPolicy::default(),
     }
 }
 
 fn verify_zip(format: DocumentFormat, bytes: &[u8]) -> Result<(), EasyOfficeError> {
-    let entries = ZipArchiveCodec::unpack(bytes, &zip_policy(format))?;
+    let paths = ZipArchiveCodec::verify(bytes, &zip_policy(format))?;
     let main_part = ZIP_MAIN_PARTS
         .iter()
         .find(|(candidate, _)| *candidate == format)
         .map(|(_, part)| *part)
         .ok_or_else(|| EasyOfficeError::UnsupportedExtension(format.extension().to_string()))?;
-    let present = entries.iter().any(|entry| {
+    let present = paths.iter().any(|path| {
         if main_part.ends_with('/') {
-            entry.path.starts_with(main_part)
+            path.starts_with(main_part)
         } else {
-            entry.path == main_part
+            path == main_part
         }
     });
     if present {
@@ -150,7 +143,7 @@ mod tests {
     use super::*;
     use easyoffice_formats::{
         UniversalDocumentModel, UniversalFormatConverter, ZipArchiveEntry, ZipEntryDescriptor,
-        ZipSecurityGuard,
+        ZipSecurityGuard, HANGUL_EDITOR_MAX_ENTRY_BYTES as HANGUL_PICTURE_LIMIT,
     };
 
     fn sample_model() -> UniversalDocumentModel {
@@ -332,34 +325,217 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn the_hangul_entry_limit_is_the_editors_not_the_engines() {
-        let entry = |size: u64| {
-            vec![ZipEntryDescriptor::new(
-                "BinData/image1.bmp",
-                size,
-                size,
-                false,
-            )]
-        };
-        let policy = zip_policy(DocumentFormat::Hwpx);
-        let engine = 128_u64 * 1_048_576;
-        // Over the engine's default but within what the editor opens: kept.
-        assert!(ZipSecurityGuard::validate_archive(&entry(engine + 1), &policy).is_ok());
-        assert!(
-            ZipSecurityGuard::validate_archive(&entry(HANGUL_EDITOR_MAX_ENTRY_BYTES), &policy)
-                .is_ok()
-        );
-        assert!(ZipSecurityGuard::validate_archive(
-            &entry(engine + 1),
-            &zip_policy(DocumentFormat::Docx)
-        )
-        .is_err());
-        // Past the editor's limit: refused.
-        assert!(matches!(
-            ZipSecurityGuard::validate_archive(&entry(HANGUL_EDITOR_MAX_ENTRY_BYTES + 1), &policy),
+    const MIB: u64 = 1_048_576;
+    const PICTURE_NAMES: [&str; 10] = [
+        "BinData/image0.bmp",
+        "BinData/image1.bmp",
+        "BinData/image2.bmp",
+        "BinData/image3.bmp",
+        "BinData/image4.bmp",
+        "BinData/image5.bmp",
+        "BinData/image6.bmp",
+        "BinData/image7.bmp",
+        "BinData/image8.bmp",
+        "BinData/image9.bmp",
+    ];
+
+    /// Verdict of the Hangul policy on a package declared as these `(path, size)` parts (stored,
+    /// so the compressed size is the size), without building the data.
+    fn hangul_verdict(parts: &[(&str, u64)]) -> Result<(), EasyOfficeError> {
+        let descriptors: Vec<_> = parts
+            .iter()
+            .map(|(path, size)| ZipEntryDescriptor::new(*path, *size, *size, false))
+            .collect();
+        ZipSecurityGuard::validate_archive(&descriptors, &zip_policy(DocumentFormat::Hwpx))
+    }
+
+    fn is_bomb(verdict: Result<(), EasyOfficeError>) -> bool {
+        matches!(
+            verdict,
             Err(EasyOfficeError::DecompressionBombDetected { .. })
-        ));
+        )
+    }
+
+    #[test]
+    fn the_hangul_picture_limit_is_the_editors_not_the_engines() {
+        let engine = 128 * MIB;
+        let picture = |size: u64| hangul_verdict(&[("BinData/image1.bmp", size)]);
+        // Over the engine's default but within what the editor opens: kept.
+        assert!(picture(engine + 1).is_ok());
+        assert!(picture(HANGUL_PICTURE_LIMIT).is_ok());
+        let docx = vec![ZipEntryDescriptor::new(
+            "BinData/image1.bmp",
+            engine + 1,
+            engine + 1,
+            false,
+        )];
+        assert!(
+            ZipSecurityGuard::validate_archive(&docx, &zip_policy(DocumentFormat::Docx)).is_err()
+        );
+        // Past the editor's limit: refused.
+        assert!(is_bomb(picture(HANGUL_PICTURE_LIMIT + 1)));
+    }
+
+    #[test]
+    fn hangul_text_parts_are_limited_like_the_editors_reader() {
+        let xml = |size: u64| hangul_verdict(&[("Contents/section0.xml", size)]);
+        assert!(xml(256 * MIB).is_ok());
+        assert!(is_bomb(xml(256 * MIB + 1)));
+        // 256 + 256 MiB of text is the editor's total; one byte more is refused.
+        let section = |size| ("Contents/section0.xml", size);
+        let header = |size| ("Contents/header.xml", size);
+        assert!(hangul_verdict(&[section(256 * MIB), header(256 * MIB)]).is_ok());
+        assert!(is_bomb(hangul_verdict(&[
+            section(256 * MIB),
+            header(256 * MIB),
+            ("Contents/content.hpf", 1),
+        ])));
+        // The OPF package file counts as text whatever the case of its name.
+        assert!(is_bomb(hangul_verdict(&[
+            section(256 * MIB),
+            ("Contents/content.HPF", 256 * MIB),
+            ("version.xml", 1),
+        ])));
+    }
+
+    #[test]
+    fn hangul_pictures_beyond_the_old_total_pass_when_the_editor_opens_them() {
+        // Ten 100 MiB pictures: 1000 MiB of picture data, almost twice the old 512 MiB total.
+        // The editor inflates a picture only when a page needs it, so it opens this package.
+        let mut parts = vec![("Contents/header.xml", 1_u64), ("Contents/section0.xml", 1)];
+        parts.extend(PICTURE_NAMES.iter().map(|name| (*name, 100 * MIB)));
+        assert!(hangul_verdict(&parts).is_ok());
+        // Eight pictures of the editor's per-part limit are the verification's whole budget.
+        let eight: Vec<_> = PICTURE_NAMES[..8]
+            .iter()
+            .map(|name| (*name, HANGUL_PICTURE_LIMIT))
+            .collect();
+        assert!(hangul_verdict(&eight).is_ok());
+        let mut nine = eight;
+        nine.push((PICTURE_NAMES[8], 1));
+        assert!(is_bomb(hangul_verdict(&nine)));
+    }
+
+    #[test]
+    fn pictures_and_text_have_separate_budgets() {
+        let section = ("Contents/section0.xml", 256 * MIB);
+        let header = ("Contents/header.xml", 256 * MIB);
+        let picture = |index: usize| (PICTURE_NAMES[index], HANGUL_PICTURE_LIMIT);
+        assert!(hangul_verdict(&[section, header, picture(0), picture(1), picture(2)]).is_ok());
+    }
+
+    #[test]
+    fn a_picture_bomb_is_refused_by_its_declared_sizes_before_anything_is_inflated() {
+        // A few KiB of data declared as many gigabytes of pictures: over the budget by size alone.
+        let descriptors: Vec<_> = (0..9)
+            .map(|index| {
+                ZipEntryDescriptor::new(
+                    format!("BinData/bomb{index}.bmp"),
+                    500_000,
+                    HANGUL_PICTURE_LIMIT,
+                    false,
+                )
+            })
+            .collect();
+        assert!(is_bomb(ZipSecurityGuard::validate_archive(
+            &descriptors,
+            &zip_policy(DocumentFormat::Hwpx)
+        )));
+        // A real package: one picture whose data inflates past the size its header declares.
+        let mut bytes = flat_picture_package("Contents/header.xml");
+        let mut at = bytes
+            .windows(4)
+            .position(|w| w == [0x50, 0x4B, 0x01, 0x02])
+            .unwrap();
+        while &bytes[at + 46..at + 46 + 18] != b"BinData/image1.bmp" {
+            at += 46 + usize::from(u16::from_le_bytes([bytes[at + 28], bytes[at + 29]]));
+        }
+        bytes[at + 24..at + 28].copy_from_slice(&1_000_u32.to_le_bytes());
+        assert!(verify_document_bytes("hwpx", &bytes).is_err());
+    }
+
+    /// The stored or deflate stream of some data with its CRC-32 and size, to be written into a package any
+    /// number of times: `ZipArchiveCodec::pack_deflate` refuses a sum over its own 512 MiB policy.
+    struct Stream {
+        method: u16,
+        deflated: Vec<u8>,
+        crc: u32,
+        size: u32,
+    }
+
+    impl Stream {
+        fn of(data: &[u8]) -> Self {
+            // Take it from a one-entry package: CRC at 14, compressed size at 18, data at 31.
+            let single = ZipArchiveCodec::pack_deflate(&[("p", data)]).unwrap();
+            let word = |at: usize| u32::from_le_bytes(single[at..at + 4].try_into().unwrap());
+            Self {
+                method: u16::from_le_bytes([single[8], single[9]]),
+                deflated: single[31..31 + word(18) as usize].to_vec(),
+                crc: word(14),
+                size: data.len() as u32,
+            }
+        }
+    }
+
+    fn package_of_streams(parts: &[(&str, &Stream)]) -> Vec<u8> {
+        let (mut out, mut directory) = (Vec::new(), Vec::new());
+        for (name, stream) in parts {
+            let offset = out.len() as u32;
+            let header = |signature: u32, central: bool| {
+                let mut h = signature.to_le_bytes().to_vec();
+                if central {
+                    h.extend_from_slice(&20_u16.to_le_bytes());
+                }
+                h.extend_from_slice(&20_u16.to_le_bytes());
+                h.extend_from_slice(&[0, 0]);
+                h.extend_from_slice(&stream.method.to_le_bytes());
+                h.extend_from_slice(&[0, 0, 0x21, 0]);
+                h.extend_from_slice(&stream.crc.to_le_bytes());
+                h.extend_from_slice(&(stream.deflated.len() as u32).to_le_bytes());
+                h.extend_from_slice(&stream.size.to_le_bytes());
+                h.extend_from_slice(&(name.len() as u16).to_le_bytes());
+                h
+            };
+            out.extend(header(ZipArchiveCodec::LOCAL_FILE_HEADER_SIG, false));
+            out.extend_from_slice(&[0, 0]);
+            out.extend_from_slice(name.as_bytes());
+            out.extend_from_slice(&stream.deflated);
+            directory.extend(header(ZipArchiveCodec::CENTRAL_DIR_HEADER_SIG, true));
+            directory.extend_from_slice(&[0; 12]);
+            directory.extend_from_slice(&offset.to_le_bytes());
+            directory.extend_from_slice(name.as_bytes());
+        }
+        let count = (parts.len() as u16).to_le_bytes();
+        let offset = out.len() as u32;
+        out.extend_from_slice(&directory);
+        out.extend_from_slice(&ZipArchiveCodec::END_OF_CENTRAL_DIR_SIG.to_le_bytes());
+        out.extend_from_slice(&[0; 4]);
+        out.extend_from_slice(&count);
+        out.extend_from_slice(&count);
+        out.extend_from_slice(&(directory.len() as u32).to_le_bytes());
+        out.extend_from_slice(&offset.to_le_bytes());
+        out.extend_from_slice(&[0, 0]);
+        out
+    }
+
+    #[test]
+    fn a_real_package_with_more_picture_data_than_the_old_total_is_verified() {
+        // Six flat 100 MiB pictures (600 MiB, over the old 512 MiB total) plus a text part.
+        // Verification inflates one picture at a time and keeps none of them.
+        let picture = Stream::of(&vec![0xAB_u8; 100 * MIB as usize]);
+        let text = Stream::of(b"<head/>");
+        let mut parts = vec![("Contents/header.xml", &text)];
+        parts.extend(PICTURE_NAMES[..6].iter().map(|name| (*name, &picture)));
+        let bytes = package_of_streams(&parts);
+        assert!(bytes.len() < MIB as usize);
+        verify_document_bytes("hwpx", &bytes).unwrap();
+        // The old policy (one shared 512 MiB total) refused exactly this package.
+        let old = ZipSecurityPolicy {
+            max_single_entry_uncompressed_bytes: HANGUL_PICTURE_LIMIT,
+            max_compression_ratio: f64::INFINITY,
+            ..ZipSecurityPolicy::default()
+        };
+        assert!(ZipArchiveCodec::verify(&bytes, &old).is_err());
     }
 
     #[test]

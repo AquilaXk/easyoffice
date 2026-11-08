@@ -480,13 +480,17 @@ struct OutBuf {
 }
 
 impl OutBuf {
-    fn new(input_len: usize, max_output_bytes: usize) -> Self {
+    /// `expected_len` is the output size the container declares (0 when unknown): allocating it
+    /// at once spares the doubling growth, which for a large picture copies the output about
+    /// twice over and, on some allocators, leaves every outgrown block resident.
+    fn new(input_len: usize, max_output_bytes: usize, expected_len: usize) -> Self {
         let hard_cap = max_output_bytes.saturating_add(OUT_SLACK);
-        let initial = input_len
-            .saturating_mul(4)
-            .max(MIN_OUT_CAPACITY)
-            .saturating_add(OUT_SLACK)
-            .min(hard_cap);
+        let guess = if expected_len > 0 {
+            expected_len
+        } else {
+            input_len.saturating_mul(4).max(MIN_OUT_CAPACITY)
+        };
+        let initial = guess.saturating_add(OUT_SLACK).min(hard_cap);
         Self {
             buf: vec![0u8; initial],
             pos: 0,
@@ -751,6 +755,7 @@ fn decode_huffman_block(
 fn inflate_raw_with_consumed(
     input: &[u8],
     max_output_bytes: usize,
+    expected_len: usize,
 ) -> Result<(Vec<u8>, usize), EasyOfficeError> {
     if input.is_empty() {
         return Err(EasyOfficeError::CorruptedContainer(
@@ -759,7 +764,7 @@ fn inflate_raw_with_consumed(
     }
 
     let mut reader = BitReader::new(input);
-    let mut out = OutBuf::new(input.len(), max_output_bytes);
+    let mut out = OutBuf::new(input.len(), max_output_bytes, expected_len);
 
     loop {
         let bfinal = reader.read_bits(1)?;
@@ -818,7 +823,18 @@ fn inflate_raw_with_consumed(
 
 /// Decompresses an RFC 1951 raw DEFLATE bitstream with Fail-Closed output budget enforcement.
 pub fn inflate_raw(input: &[u8], max_output_bytes: usize) -> Result<Vec<u8>, EasyOfficeError> {
-    inflate_raw_with_consumed(input, max_output_bytes).map(|(out, _)| out)
+    inflate_raw_with_consumed(input, max_output_bytes, 0).map(|(out, _)| out)
+}
+
+/// [`inflate_raw`] for a stream whose output size the container declares (`expected_len`): the
+/// output is allocated once at that size. The declaration is only a hint, so a stream that
+/// produces more is still cut off at `max_output_bytes`.
+pub fn inflate_raw_sized(
+    input: &[u8],
+    max_output_bytes: usize,
+    expected_len: usize,
+) -> Result<Vec<u8>, EasyOfficeError> {
+    inflate_raw_with_consumed(input, max_output_bytes, expected_len).map(|(out, _)| out)
 }
 
 /// Computes the RFC 1950 Adler-32 checksum using `NMAX = 5552` deferred modulo reduction.
@@ -881,7 +897,7 @@ pub fn inflate_zlib(input: &[u8], max_output_bytes: usize) -> Result<Vec<u8>, Ea
             "유효하지 않은 RFC 1950 zlib 스트림(헤더 2 + 데이터 + Adler-32 4)입니다.".to_string(),
         ));
     }
-    let (decoded, consumed) = inflate_raw_with_consumed(&input[2..], max_output_bytes)?;
+    let (decoded, consumed) = inflate_raw_with_consumed(&input[2..], max_output_bytes, 0)?;
     let rem = &input[2 + consumed..];
     if rem.len() < 4 {
         return Err(EasyOfficeError::CorruptedContainer(
@@ -901,7 +917,7 @@ pub fn inflate_zlib(input: &[u8], max_output_bytes: usize) -> Result<Vec<u8>, Ea
 /// Decompresses either a raw RFC 1951 DEFLATE stream or an RFC 1950 zlib-wrapped DEFLATE stream.
 pub fn inflate_auto(input: &[u8], max_output_bytes: usize) -> Result<Vec<u8>, EasyOfficeError> {
     if is_valid_zlib_header(input) {
-        match inflate_raw_with_consumed(&input[2..], max_output_bytes) {
+        match inflate_raw_with_consumed(&input[2..], max_output_bytes, 0) {
             Ok((decoded, consumed)) => {
                 let rem = &input[2 + consumed..];
                 if rem.len() >= 4 {

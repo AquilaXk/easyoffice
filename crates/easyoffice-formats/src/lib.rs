@@ -53,6 +53,7 @@ pub mod text_pdf_codecs;
 pub mod utf16_swar;
 pub mod zip_codec;
 mod zip_path_tracker;
+mod zip_policy;
 
 pub use converter::*;
 pub use crc32::IeeeCrc32;
@@ -88,6 +89,7 @@ pub use utf16_swar::{
     encode_utf16le_swar, encode_utf16le_swar_into, expand_ascii4_to_utf16le_u64, SectorBitset,
 };
 pub use zip_codec::*;
+pub use zip_policy::*;
 
 pub const MAX_BIFF8_ROW: u32 = 65_535;
 pub const MAX_BIFF8_COL: u32 = 255;
@@ -620,31 +622,6 @@ impl ZipEntryDescriptor {
     }
 }
 
-/// Per-entry uncompressed limit of the Hangul editor's HWPX reader (rhwp `MAX_BINDATA_SIZE`,
-/// `src/parser/hwpx/reader.rs:58`). A saved HWPX is verified against this same limit, so a picture
-/// the editor accepts is never refused on save (PD-112).
-pub const HANGUL_EDITOR_MAX_ENTRY_BYTES: u64 = 512 * 1024 * 1024;
-
-/// Fail-Closed security budget for ZIP containers (OOXML, ODF, HWPX).
-#[derive(Debug, Clone, PartialEq)]
-pub struct ZipSecurityPolicy {
-    pub max_entries: usize,
-    pub max_single_entry_uncompressed_bytes: u64,
-    pub max_total_uncompressed_bytes: u64,
-    pub max_compression_ratio: f64,
-}
-
-impl Default for ZipSecurityPolicy {
-    fn default() -> Self {
-        Self {
-            max_entries: 4_096,
-            max_single_entry_uncompressed_bytes: 128 * 1024 * 1024,
-            max_total_uncompressed_bytes: 512 * 1024 * 1024,
-            max_compression_ratio: 100.0,
-        }
-    }
-}
-
 /// Fail-Closed ZIP archive security guard defending against Zip-Slip and Decompression Bombs.
 pub struct ZipSecurityGuard;
 
@@ -710,21 +687,22 @@ impl ZipSecurityGuard {
             )));
         }
 
-        let mut total_uncompressed: u64 = 0;
+        let mut totals = [0_u64; ZIP_BUDGET_SLOTS];
         let mut tracker = crate::zip_path_tracker::ZipPathTracker::with_capacity(entries.len());
         for entry in entries {
             Self::validate_entry_path(&entry.path)?;
             tracker.check(entry)?;
-            Self::check_entry_sizes(entry, policy, &mut total_uncompressed)?;
+            Self::check_entry_sizes(entry, policy, &mut totals)?;
         }
         Ok(())
     }
 
-    /// Encryption flag, per-entry / total size and compression-ratio limits of one entry.
+    /// Encryption flag, per-entry / total size and compression-ratio limits of one entry. The
+    /// entry counts toward the budget slot its path belongs to ([`ZipSecurityPolicy::slot`]).
     fn check_entry_sizes(
         entry: &ZipEntryDescriptor,
         policy: &ZipSecurityPolicy,
-        total_uncompressed: &mut u64,
+        totals: &mut [u64; ZIP_BUDGET_SLOTS],
     ) -> Result<(), EasyOfficeError> {
         if entry.is_encrypted {
             return Err(EasyOfficeError::EncryptedDocumentUnsupported(
@@ -735,17 +713,19 @@ impl ZipSecurityGuard {
             ratio,
             max_ratio: policy.max_compression_ratio,
         };
-        if entry.uncompressed_size > policy.max_single_entry_uncompressed_bytes {
+        let slot = policy.slot(&entry.path);
+        let (max_single, max_total) = policy.limits(slot);
+        if entry.uncompressed_size > max_single {
             return Err(bomb(
                 entry.uncompressed_size as f64 / (entry.compressed_size.max(1) as f64),
             ));
         }
-        *total_uncompressed = total_uncompressed
+        totals[slot] = totals[slot]
             .checked_add(entry.uncompressed_size)
             .ok_or_else(|| bomb(f64::INFINITY))?;
-        if *total_uncompressed > policy.max_total_uncompressed_bytes {
+        if totals[slot] > max_total {
             return Err(bomb(
-                *total_uncompressed as f64 / (entry.compressed_size.max(1) as f64),
+                totals[slot] as f64 / (entry.compressed_size.max(1) as f64),
             ));
         }
         if entry.compressed_size == 0 && entry.uncompressed_size > 0 {

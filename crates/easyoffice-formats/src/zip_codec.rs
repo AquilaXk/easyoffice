@@ -1,3 +1,4 @@
+use crate::zip_policy::ZIP_BUDGET_SLOTS;
 use crate::IeeeCrc32;
 use crate::{
     ContainerFamily, EasyOfficeError, FormatDetector, ZipEntryDescriptor, ZipSecurityGuard,
@@ -242,6 +243,30 @@ impl ZipArchiveCodec {
         bytes: &[u8],
         policy: &ZipSecurityPolicy,
     ) -> Result<Vec<ZipArchiveEntry>, EasyOfficeError> {
+        let mut extracted = Vec::new();
+        Self::unpack_each(bytes, policy, |entry| extracted.push(entry))?;
+        Ok(extracted)
+    }
+
+    /// Runs every check of [`Self::unpack`] (structure, CRC, sizes, ratio, paths) and returns the
+    /// entry paths, without keeping the payloads: at most one entry is held at a time, so a
+    /// package of many large parts costs the memory of the largest one, not of their sum.
+    pub fn verify(
+        bytes: &[u8],
+        policy: &ZipSecurityPolicy,
+    ) -> Result<Vec<String>, EasyOfficeError> {
+        let mut paths = Vec::new();
+        Self::unpack_each(bytes, policy, |entry| paths.push(entry.path))?;
+        Ok(paths)
+    }
+
+    /// [`Self::unpack`] that hands each verified entry to `visit` in archive order instead of
+    /// collecting them.
+    pub fn unpack_each(
+        bytes: &[u8],
+        policy: &ZipSecurityPolicy,
+        mut visit: impl FnMut(ZipArchiveEntry),
+    ) -> Result<(), EasyOfficeError> {
         if bytes.is_empty() {
             return Err(EasyOfficeError::EmptyPayload);
         }
@@ -348,8 +373,7 @@ impl ZipArchiveCodec {
 
         ZipSecurityGuard::validate_archive(&descriptors, policy)?;
 
-        let mut extracted: Vec<ZipArchiveEntry> = Vec::with_capacity(raw_records.len());
-        let mut total_uncompressed: u64 = 0;
+        let mut totals = [0_u64; ZIP_BUDGET_SLOTS];
 
         for (path, method, expected_crc, comp_size, uncomp_size, local_offset) in raw_records {
             if method != Self::METHOD_STORE && method != Self::METHOD_DEFLATE {
@@ -427,13 +451,16 @@ impl ZipArchiveCodec {
                 )));
             }
 
+            let slot = policy.slot(&path);
+            let (max_single, max_total) = policy.limits(slot);
             let compressed_slice = &bytes[data_start..data_end];
             let payload = if method == Self::METHOD_STORE {
                 compressed_slice.to_vec()
             } else {
-                let decompressed = crate::deflate::inflate_raw(
+                let decompressed = crate::deflate::inflate_raw_sized(
                     compressed_slice,
-                    policy.max_single_entry_uncompressed_bytes as usize,
+                    max_single as usize,
+                    uncomp_size,
                 )?;
                 if decompressed.len() != uncomp_size {
                     return Err(EasyOfficeError::CorruptedContainer(format!(
@@ -444,11 +471,11 @@ impl ZipArchiveCodec {
                 decompressed
             };
 
-            total_uncompressed = total_uncompressed.saturating_add(payload.len() as u64);
-            if total_uncompressed > policy.max_total_uncompressed_bytes {
+            totals[slot] = totals[slot].saturating_add(payload.len() as u64);
+            if totals[slot] > max_total {
                 return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
-                    "ZIP 누적 복원 크기({total_uncompressed})가 한도({})를 초과했습니다.",
-                    policy.max_total_uncompressed_bytes
+                    "ZIP 누적 복원 크기({})가 한도({max_total})를 초과했습니다.",
+                    totals[slot]
                 )));
             }
 
@@ -459,14 +486,14 @@ impl ZipArchiveCodec {
                 )));
             }
 
-            extracted.push(ZipArchiveEntry {
+            visit(ZipArchiveEntry {
                 path,
                 data: payload,
                 crc32: actual_crc,
             });
         }
 
-        Ok(extracted)
+        Ok(())
     }
 
     fn find_eocd_offset(bytes: &[u8]) -> Option<usize> {
@@ -561,6 +588,72 @@ mod tests {
             ZipArchiveCodec::pack(&bad_entries),
             Err(EasyOfficeError::SecurityViolation(_))
         ));
+    }
+
+    #[test]
+    fn verify_runs_the_checks_of_unpack_and_returns_only_the_paths() {
+        let entries = vec![
+            ("Contents/header.xml".to_string(), b"<head/>".to_vec()),
+            (
+                "BinData/image1.bmp".to_string(),
+                (0..=250).cycle().take(4096).collect(),
+            ),
+        ];
+        let archive = ZipArchiveCodec::pack_deflate(&entries).unwrap();
+        let policy = ZipSecurityPolicy::default();
+        assert_eq!(
+            ZipArchiveCodec::verify(&archive, &policy).unwrap(),
+            ["Contents/header.xml", "BinData/image1.bmp"]
+        );
+        // A flipped payload byte (CRC-32) and a truncated archive are refused as by `unpack`.
+        let mut corrupted = archive.clone();
+        corrupted[30 + "Contents/header.xml".len()] ^= 0xFF;
+        assert!(ZipArchiveCodec::verify(&corrupted, &policy).is_err());
+        assert!(ZipArchiveCodec::verify(&archive[..archive.len() - 10], &policy).is_err());
+    }
+
+    #[test]
+    fn a_binary_budget_counts_non_xml_parts_apart_from_xml_parts() {
+        let entries = vec![
+            ("Contents/a.xml".to_string(), vec![b'a'; 3000]),
+            ("Contents/b.XML".to_string(), vec![b'b'; 3000]),
+            ("Contents/content.hpf".to_string(), vec![b'c'; 3000]),
+            ("BinData/image1.bmp".to_string(), vec![1_u8; 20_000]),
+            ("BinData/image2.bmp".to_string(), vec![2_u8; 20_000]),
+        ];
+        let archive = ZipArchiveCodec::pack_deflate(&entries).unwrap();
+        let shared = ZipSecurityPolicy {
+            max_single_entry_uncompressed_bytes: 20_000,
+            max_total_uncompressed_bytes: 10_000,
+            max_compression_ratio: f64::INFINITY,
+            ..ZipSecurityPolicy::default()
+        };
+        // One budget for everything: 49 000 bytes against 10 000.
+        assert!(ZipArchiveCodec::verify(&archive, &shared).is_err());
+        let split = ZipSecurityPolicy {
+            binary_budget: Some(crate::ZipBinaryBudget {
+                max_single_entry_uncompressed_bytes: 20_000,
+                max_total_uncompressed_bytes: 40_000,
+            }),
+            ..shared.clone()
+        };
+        // 9 000 bytes of text fit 10 000 and 40 000 bytes of pictures fit theirs.
+        assert_eq!(ZipArchiveCodec::verify(&archive, &split).unwrap().len(), 5);
+        // One byte less for pictures, or less for text, is refused by size alone, whichever
+        // order the parts come in.
+        let few_pictures = ZipSecurityPolicy {
+            binary_budget: Some(crate::ZipBinaryBudget {
+                max_single_entry_uncompressed_bytes: 20_000,
+                max_total_uncompressed_bytes: 39_999,
+            }),
+            ..shared.clone()
+        };
+        assert!(ZipArchiveCodec::verify(&archive, &few_pictures).is_err());
+        let little_text = ZipSecurityPolicy {
+            max_total_uncompressed_bytes: 8_999,
+            ..split
+        };
+        assert!(ZipArchiveCodec::verify(&archive, &little_text).is_err());
     }
 
     #[test]

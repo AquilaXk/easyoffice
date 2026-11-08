@@ -224,3 +224,19 @@ fn test_inflate_roundtrips_every_level_against_reference() {
         }
     }
 }
+
+#[test]
+fn test_inflate_raw_sized_treats_the_declared_size_only_as_a_hint() {
+    let input: Vec<u8> = (0..=250u8).cycle().take(50_000).collect();
+    let packed = deflate_raw(&input);
+    // Exact, too small and too large hints all give the same output.
+    for hint in [input.len(), 10, 10_000_000] {
+        assert_eq!(
+            inflate_raw_sized(&packed, input.len(), hint).unwrap(),
+            input
+        );
+    }
+    // The output budget still cuts off a stream that produces more than declared.
+    assert!(inflate_raw_sized(&packed, input.len() - 1, 10).is_err());
+    assert!(inflate_raw_sized(&packed, 1_000, 10_000_000).is_err());
+}

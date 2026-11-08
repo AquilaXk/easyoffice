@@ -1908,14 +1908,16 @@
 - **Verified by** `node --test scripts/test-webui-native-menu.mjs scripts/test-webui-menu-state.mjs scripts/test-hwp-studio.mjs`, `cargo test -p easyoffice-desktop native_menu`.
 - **Revisit when** 편집기 상태에 따라 메뉴를 회색 처리해야 할 때.
 
-## PD-112. 한글 저장 검증의 항목 상한은 편집기가 여는 상한과 같다
+## PD-112. 한글 저장 검증의 크기 상한은 편집기가 여는 상한과 같다
 
-- **Context** 저장 전 구조 검증이 엔진 기본값(항목당 128MiB)을 그대로 써서, 편집기(rhwp)가 넣을 수 있는 더 큰 그림을 가진 정상 문서를 저장하지 못했습니다. 참조 앱의 저장 검증은 "다음에 여는 엔진이 받아들이는가"입니다.
-- **Decision (`PD-112`)** 한글(HWPX·HWTX)의 항목당 비압축 상한을 `HANGUL_EDITOR_MAX_ENTRY_BYTES`(512MiB, rhwp `MAX_BINDATA_SIZE`) 한 상수로 두고 저장 검증이 이를 씁니다. 항목 수(4096)와 전체 합계(512MiB), 빈 항목 검사는 그대로입니다. 압축비 규칙 없음은 PD-109 그대로입니다.
-- **Why** 저장 검증 상한이 여는 쪽보다 작으면 편집기가 만든 파일을 거부하고, 크면 못 여는 파일을 저장합니다. 편집기 XML 항목 상한(256MiB)은 페이지가 저장 직전 같은 바이트를 rhwp로 다시 파싱해 걸러냅니다.
-- **Trade-offs** 엔진 자체 HWPX 읽기(변환 경로)는 기본 128MiB 그대로라 그보다 큰 그림의 문서는 변환에서 거부됩니다. 합계 512MiB를 넘는 그림 묶음도 거부합니다.
-- **Verified by** `cargo test -p easyoffice-desktop save_verify`(선언 크기 기준: 128MiB 초과~512MiB 통과, 512MiB 초과 거부).
-- **Revisit when** rhwp 상한이 바뀌거나 엔진 HWPX 읽기를 편집기와 같은 상한으로 올릴 때.
+- **Status** Implemented, 개정 (QA 요청 2026-11-09): 합계 상한을 텍스트와 그림으로 나눴습니다. 처음 결정(항목당 512MiB 한 상수)은 그대로 유지합니다.
+- **Context** 저장 전 구조 검증이 엔진 기본값(항목당 128MiB)을 그대로 써서, 편집기(rhwp)가 넣을 수 있는 더 큰 그림을 가진 정상 문서를 저장하지 못했습니다. 참조 앱의 저장 검증은 "다음에 여는 엔진이 받아들이는가"입니다. 첫 개정 뒤에도 전체 합계 512MiB 하나가 남아, 그림 합계가 큰 문서(압축이 잘 되는 비트맵 여러 장)는 rhwp가 여는데도 저장이 거부될 수 있었습니다. rhwp 리더(`src/parser/hwpx/reader.rs`)는 XML 항목당 256MiB·XML 합계 512MiB, 그림(BinData) 항목당 512MiB이고 그림 합계 상한이 없습니다(그림은 쪽이 필요할 때 하나씩 풂, 원본 컨테이너만 보관).
+- **Decision (`PD-112`)** (1) 한글(HWPX·HWTX)의 저장 검증 정책은 `ZipSecurityPolicy::hangul_editor()` 하나입니다. 이름이 `.xml`·`.hpf`로 끝나는 항목은 텍스트: 항목당 256MiB(`HANGUL_EDITOR_MAX_XML_ENTRY_BYTES`), 합계 512MiB(`HANGUL_EDITOR_MAX_XML_TOTAL_BYTES`). 나머지 항목은 그림 등 바이너리: 항목당 512MiB(`HANGUL_EDITOR_MAX_ENTRY_BYTES`), 합계는 `HANGUL_VERIFY_MAX_BINARY_TOTAL_BYTES`(4GiB, 항목 상한의 8배). 항목 수(4096)와 빈 항목 검사, 압축비 규칙 없음(PD-109)은 그대로입니다. (2) 4GiB는 편집기의 상한이 아니라 검증 자체의 작업량 상한입니다. 근거는 측정입니다(릴리스 빌드, 이 Mac): 평평한 512MiB 그림 8장(4GiB, 파일 4.2MB)을 검증하는 데 0.6초, 최대 메모리 539MiB(항목 하나 분량). 압축이 거의 안 되는 데이터는 0.37GiB/s이지만 저장 요청 상한(256MiB, 압축 바이트)이 그 출력을 막습니다. 저장 바이트 자체는 선언 크기로 먼저 검사하므로, 선언이 상한을 넘는 폭탄은 풀기 전에 거부합니다. (3) 검증은 풀어서 보관하지 않고 항목 하나씩 풀어 CRC·크기만 확인한 뒤 버립니다(`ZipArchiveCodec::verify`). 메모리는 합계가 아니라 가장 큰 항목입니다. 항목이 선언한 크기로 출력 버퍼를 한 번에 잡습니다(`inflate_raw_sized`; 선언은 힌트일 뿐 상한은 그대로). 항목마다 보관하지 않아도 크기를 두 배씩 키우던 버퍼는 macOS에서 놓친 블록이 반환되지 않아 같은 4GiB 검증이 최대 4.3GiB를 점유했고(측정), 한 번에 잡으면 539MiB입니다.
+- **Why** 저장 검증 상한이 여는 쪽보다 작으면 편집기가 만든 파일을 거부하고, 크면 못 여는 파일을 저장합니다. 편집기 XML 항목 상한(256MiB)과 합계는 페이지가 저장 직전 같은 바이트를 rhwp로 다시 파싱해 걸러내므로 같은 값을 둬도 정상 문서를 막지 않습니다. 그림 합계를 없애지 않고 둔 이유는 신뢰할 수 없는 입력 예산(Fail-Closed)을 유지하기 위해서입니다.
+- **재사용 판단** (1) 허용 라이선스의 크레이트: 셸이 이미 가진 rhwp의 `HwpxReader`(`zip` 크레이트)를 직접 쓰면 "여는 엔진" 그대로지만 우리 ZIP 보안 검사(로컬·중앙 헤더 일치, 중복 경로, 경로 순회)를 잃고 파일 전체를 복사합니다. (2) 이미 쓰는 의존성: 엔진의 `ZipArchiveCodec`에 보관하지 않는 `verify`와 분리된 합계(`ZipBinaryBudget`)만 더했습니다. (3) 이식은 하지 않았고 rhwp의 상한값만 따랐습니다(출처는 `zip_policy.rs` 머리 주석).
+- **Trade-offs** 엔진 자체 HWPX 읽기(변환 경로)는 기본 128MiB·합계 512MiB 그대로라 그보다 큰 그림의 문서는 변환에서 거부됩니다. 미리보기 그림을 넣는 재작성(`embed_thumbnail`)은 전부 보관해야 해서 64MiB 이하 문서만 다루고 기본 합계를 씁니다. 이름이 `.xml`·`.hpf`가 아닌 텍스트 항목은 그림 쪽 상한으로 셉니다(rhwp보다 느슨). `.xml`이지만 큰 항목은 rhwp처럼 256MiB 한 항목 상한에 걸려, 예전 512MiB 개정에서 통과하던 257~512MiB XML 항목은 이제 거부됩니다(rhwp도 열지 못함).
+- **Verified by** `cargo test -p easyoffice-desktop save_verify`(선언 크기 기준: 그림 항목 512MiB 통과·초과 거부, XML 항목 256MiB 통과·초과 거부, XML 합계 512MiB 통과·1바이트 초과 거부, 그림 합계 1000MiB 통과, 8×512MiB 통과·1바이트 더 거부, 텍스트와 그림 예산 분리, 폭탄 선언 거부, 실제 압축 폭탄 헤더 거부, 실제 600MiB 그림 묶음 통과), `cargo test -p easyoffice-formats`(`verify`·분리 예산·`inflate_raw_sized`).
+- **Revisit when** rhwp 상한이 바뀌거나 엔진 HWPX 읽기를 편집기와 같은 상한으로 올릴 때, 그림 합계 4GiB가 정상 문서를 막는다는 신고가 있을 때.
 
 ## PD-113. 저장 확인 중의 두 번째 닫기는 닫지 않고, 응답 없는 페이지만 시간 뒤에 닫음
 
