@@ -236,11 +236,11 @@ fn synthetic_document_maps_to_rich_blocks() {
     assert_eq!(centered.alignment, Some(RichAlignment::Center));
     assert_eq!(centered.list, None);
 
-    let RichBlock::Table(rows) = &blocks[4] else {
+    let RichBlock::Table(table) = &blocks[4] else {
         panic!("table")
     };
     assert_eq!(
-        rows,
+        &table.rows,
         &vec![
             vec!["A1".to_string(), "B1".into()],
             vec!["A2".into(), "B2".into()]

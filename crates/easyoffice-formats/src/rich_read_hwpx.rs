@@ -11,6 +11,7 @@ use crate::hwpx_parts::{
 use crate::office_codecs::validate_zip_xml_entries;
 use crate::rich_document::normalize_hex_color;
 use crate::rich_image::{safe_package_path, ImageBudget};
+use crate::rich_table::{table_from_placed, PlacedCell};
 use crate::rich_xml::{
     attr, heading_level_from_name, push_run, skip_subtree, tokenize, CharFmt, XmlEvent,
 };
@@ -357,6 +358,13 @@ const SKIPPED_SUBTREES: [&str; 13] = [
 
 const SHAPE_SKIP_NOTE: &str = "그림·도형·수식·머리말은 가져오지 않았습니다.";
 
+/// A non-negative integer attribute (`default` when absent or unreadable, saturating when huge).
+fn count_attr(attrs: &[(String, String)], name: &str, default: u32) -> u32 {
+    attr(attrs, name)
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .map_or(default, |v| u32::try_from(v).unwrap_or(u32::MAX))
+}
+
 /// Walker state for one `Contents/section*.xml`.
 #[derive(Default)]
 struct SectionWalker {
@@ -364,8 +372,15 @@ struct SectionWalker {
     runs: Vec<RunState>,
     t_depth: usize,
     tbl_depth: usize,
-    table_rows: Vec<Vec<String>>,
-    cur_row: Vec<String>,
+    placed: Vec<PlacedCell>,
+    /// Index of the open `hp:tr` and the column after the previous cell (positions of cells
+    /// that carry no `hp:cellAddr`).
+    tr_index: u32,
+    next_col: u32,
+    cell_addr: Option<(u32, u32)>,
+    cell_span: (u32, u32),
+    /// Merged regions and cells dropped as invalid, reported once per document.
+    dropped_merges: usize,
     cell_paras: Vec<String>,
     budget: ImageBudget,
 }
@@ -506,11 +521,28 @@ impl SectionWalker {
             "hp:tbl" => {
                 self.tbl_depth += 1;
                 if self.tbl_depth == 1 {
-                    self.table_rows.clear();
+                    self.placed.clear();
+                    self.tr_index = 0;
                 }
             }
-            "hp:tr" if self.tbl_depth == 1 => self.cur_row = Vec::new(),
-            "hp:tc" if self.tbl_depth == 1 => self.cell_paras.clear(),
+            "hp:tr" if self.tbl_depth == 1 => self.next_col = 0,
+            "hp:tc" if self.tbl_depth == 1 => {
+                self.cell_paras.clear();
+                self.cell_addr = None;
+                self.cell_span = (1, 1);
+            }
+            "hp:cellAddr" if self.tbl_depth == 1 => {
+                self.cell_addr = Some((
+                    count_attr(attrs, "rowAddr", 0),
+                    count_attr(attrs, "colAddr", 0),
+                ));
+            }
+            "hp:cellSpan" if self.tbl_depth == 1 => {
+                self.cell_span = (
+                    count_attr(attrs, "rowSpan", 1).max(1),
+                    count_attr(attrs, "colSpan", 1).max(1),
+                );
+            }
             _ => {}
         }
     }
@@ -538,16 +570,25 @@ impl SectionWalker {
                 while self.cell_paras.last().is_some_and(String::is_empty) {
                     self.cell_paras.pop();
                 }
-                self.cur_row.push(self.cell_paras.join("\n"));
+                let (row, col) = self.cell_addr.unwrap_or((self.tr_index, self.next_col));
+                let (row_span, col_span) = self.cell_span;
+                self.next_col = col.saturating_add(col_span);
+                self.placed.push(PlacedCell {
+                    row,
+                    col,
+                    row_span,
+                    col_span,
+                    text: self.cell_paras.join("\n"),
+                });
                 self.cell_paras.clear();
             }
-            "hp:tr" if self.tbl_depth == 1 => {
-                self.table_rows.push(std::mem::take(&mut self.cur_row));
-            }
+            "hp:tr" if self.tbl_depth == 1 => self.tr_index = self.tr_index.saturating_add(1),
             "hp:tbl" => {
                 self.tbl_depth = self.tbl_depth.saturating_sub(1);
-                if self.tbl_depth == 0 && !self.table_rows.is_empty() {
-                    blocks.push(RichBlock::Table(std::mem::take(&mut self.table_rows)));
+                if self.tbl_depth == 0 && !self.placed.is_empty() {
+                    let (table, dropped) = table_from_placed(std::mem::take(&mut self.placed));
+                    self.dropped_merges += dropped;
+                    blocks.push(RichBlock::Table(table));
                 }
             }
             _ => {}
@@ -661,6 +702,12 @@ pub(crate) fn read_hwpx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Eas
             &mut blocks,
             &mut warnings,
         )?;
+    }
+    if walker.dropped_merges > 0 {
+        warnings.push(format!(
+            "표의 병합·셀 {}곳은 범위를 벗어나거나 겹쳐 가져오지 않았습니다.",
+            walker.dropped_merges
+        ));
     }
     if meta.official_agency.is_some() {
         warnings.push("기관명 등 공문서 메타데이터는 저장 시 다시 기록되지 않습니다.".to_string());

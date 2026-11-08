@@ -24,7 +24,7 @@ use crate::pages_table::{read_table, TableBudget, TableOutcome};
 use crate::rich_read_pages_image::{PageImage, PageImages, CROPPED};
 use crate::{
     EasyOfficeError, RichAlignment, RichBlock, RichDocument, RichListKind, RichParagraph, RichRun,
-    RichScript,
+    RichScript, RichTable,
 };
 
 const MAX_PARAGRAPHS: usize = 200_000;
@@ -633,14 +633,13 @@ impl<'a> Reader<'a> {
         }
     }
 
-    fn read_table(
-        &mut self,
-        info: &ArchiveObject,
-    ) -> Result<Option<Vec<Vec<String>>>, EasyOfficeError> {
+    fn read_table(&mut self, info: &ArchiveObject) -> Result<Option<RichTable>, EasyOfficeError> {
         match read_table(self.objects, info, &mut self.tables)? {
             TableOutcome::Read(t) => {
                 self.skip_many("표 셀의 읽을 수 없는 값(문자열·기간 등)", t.unsupported);
-                Ok(Some(t.grid))
+                let (table, dropped) = RichTable::with_merges(t.grid, t.merges);
+                self.skip_many("범위를 벗어나거나 겹치는 표 병합 영역", dropped);
+                Ok(Some(table))
             }
             TableOutcome::Absent => Ok(None),
             TableOutcome::Skipped(why) => {

@@ -30,10 +30,10 @@ fn outline(doc: &RichDocument) -> Vec<String> {
         .iter()
         .filter_map(|block| match block {
             RichBlock::Paragraph(p) => Some(p.plain_text()).filter(|text| !text.is_empty()),
-            RichBlock::Table(rows) => Some(format!(
+            RichBlock::Table(table) => Some(format!(
                 "[table {}x{}]",
-                rows.len(),
-                rows.first().map_or(0, Vec::len)
+                table.rows.len(),
+                table.rows.first().map_or(0, Vec::len)
             )),
             RichBlock::Image(_) => Some("[image]".to_string()),
         })

@@ -129,8 +129,9 @@ fn block_json(b: &RichBlock) -> String {
     match b {
         RichBlock::Paragraph(p) => paragraph_json(p),
         RichBlock::Image(img) => image_json(img),
-        RichBlock::Table(rows) => {
-            let rows: Vec<String> = rows
+        RichBlock::Table(table) => {
+            let rows: Vec<String> = table
+                .rows
                 .iter()
                 .map(|row| {
                     let cells: Vec<String> = row
@@ -453,7 +454,7 @@ mod tests {
                     list: None,
                     ..RichParagraph::default()
                 }),
-                RichBlock::Table(vec![vec!["가".into(), "나".into()]]),
+                RichBlock::Table(vec![vec!["가".into(), "나".into()]].into()),
             ],
             official_agency: None,
         };

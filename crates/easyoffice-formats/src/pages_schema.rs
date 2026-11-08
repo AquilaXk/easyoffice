@@ -332,6 +332,17 @@ pub(crate) mod table {
     pub const ENTRY_STRING: u32 = 3;
     /// Rich text payload: storage reference. 확인
     pub const PAYLOAD_STORAGE: u32 = 1;
+    /// Data store: merge region map reference (an object with repeated cell ranges). 검증 필요:
+    /// field numbers are from a public independent implementation's schema notes (the data store
+    /// fields 17 and 22 of the same notes match the fixtures); the fixtures carry no merged cell.
+    pub const STORE_MERGE_REGION_MAP: u32 = 13;
+    /// Merge region map: repeated cell range. 검증 필요 (see [`STORE_MERGE_REGION_MAP`]).
+    pub const MERGE_RANGES: u32 = 1;
+    /// Cell range: origin `{ packed = 1 }` and size `{ packed = 1 }`, each a fixed32 with the
+    /// column in the high 16 bits and the row in the low 16 bits. 검증 필요 (see above).
+    pub const RANGE_ORIGIN: u32 = 1;
+    pub const RANGE_SIZE: u32 = 2;
+    pub const RANGE_PACKED: u32 = 1;
 }
 
 /// Cell format message fields and format kinds (fixture lists file). Date formats (kind 261)

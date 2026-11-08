@@ -20,6 +20,7 @@ use crate::rich_run_writers::{
     docx_run_properties, has_extra_run_format, odt_font_face_decls, odt_text_key,
     odt_text_key_is_plain, odt_text_style_xml, OdtTextKey, RtfRunTables,
 };
+use crate::rich_table_writers::{push_docx_table, push_odt_table};
 use crate::{
     CommonMarkCodec, EasyOfficeError, MarkdownBlock, OdfCodec, PdfDocumentModel, PdfPageModel,
     PdfSerializer, RtfCodec, XmlSanitizer, ZipArchiveCodec,
@@ -73,7 +74,7 @@ fn docx_styles_xml() -> String {
     xml
 }
 
-fn push_docx_text(out: &mut String, text: &str) {
+pub(crate) fn push_docx_text(out: &mut String, text: &str) {
     for (l_idx, line) in text.split('\n').enumerate() {
         if l_idx > 0 {
             out.push_str("<w:br/>");
@@ -158,21 +159,6 @@ fn push_docx_paragraph(out: &mut String, p: &RichParagraph) {
     out.push_str("</w:p>");
 }
 
-fn push_docx_table(out: &mut String, rows: &[Vec<String>]) {
-    out.push_str("<w:tbl>");
-    crate::ooxml_shared_parts::push_docx_table_properties(out, rows);
-    for row in rows {
-        out.push_str("<w:tr>");
-        for cell in row {
-            out.push_str("<w:tc><w:p><w:r>");
-            push_docx_text(out, cell);
-            out.push_str("</w:r></w:p></w:tc>");
-        }
-        out.push_str("</w:tr>");
-    }
-    out.push_str("</w:tbl>");
-}
-
 /// Relationship id offset of the first picture (`rId1` is the style sheet).
 const DOCX_FIRST_IMAGE_REL: usize = 2;
 const DOCX_MEDIA_DIR: &str = "word/media";
@@ -225,8 +211,8 @@ pub(crate) fn pack_docx_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeEr
                 image_rels.push_str(&docx_image_relationship(&rel_id, target));
                 body.push_str(&docx_image_paragraph(img, number, &rel_id));
             }
-            RichBlock::Table(rows) => {
-                push_docx_table(&mut body, rows);
+            RichBlock::Table(table) => {
+                push_docx_table(&mut body, table);
                 // A table cannot end the body or touch another table without a paragraph.
                 body.push_str("<w:p/>");
             }
@@ -300,7 +286,7 @@ struct OdtParaKey {
     line_percent: Option<u16>,
 }
 
-fn push_odt_text(out: &mut String, text: &str) {
+pub(crate) fn push_odt_text(out: &mut String, text: &str) {
     for (l_idx, line) in text.split('\n').enumerate() {
         if l_idx > 0 {
             out.push_str("<text:line-break/>");
@@ -357,23 +343,6 @@ fn push_odt_paragraph(
         }
     }
     body.push_str(if level > 0 { "</text:h>" } else { "</text:p>" });
-}
-
-fn push_odt_table(body: &mut String, rows: &[Vec<String>]) {
-    let cols = rows.iter().map(Vec::len).max().unwrap_or(0).max(1);
-    body.push_str(&format!(
-        "<table:table><table:table-column table:number-columns-repeated=\"{cols}\"/>"
-    ));
-    for row in rows {
-        body.push_str("<table:table-row>");
-        for cell in row {
-            body.push_str("<table:table-cell office:value-type=\"string\"><text:p>");
-            push_odt_text(body, cell);
-            body.push_str("</text:p></table:table-cell>");
-        }
-        body.push_str("</table:table-row>");
-    }
-    body.push_str("</table:table>");
 }
 
 /// Twips as a point length with at most two decimals (`36pt`, `7.5pt`).
@@ -451,7 +420,7 @@ pub(crate) fn pack_odt_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeErr
             RichBlock::Paragraph(p) => {
                 push_odt_paragraph(&mut body, p, &mut para_styles, &mut text_styles);
             }
-            RichBlock::Table(rows) => push_odt_table(&mut body, rows),
+            RichBlock::Table(table) => push_odt_table(&mut body, table),
             RichBlock::Image(img) => {
                 let (number, path) = media.add(ODT_MEDIA_DIR, img);
                 body.push_str(&odt_image_paragraph(img, number, &path));
@@ -651,8 +620,8 @@ pub(crate) fn encode_rtf_rich(doc: &RichDocument) -> String {
                 };
                 lines.push(rtf_paragraph_line(&stand_in, &tables));
             }
-            RichBlock::Table(rows) => {
-                for row in rows {
+            RichBlock::Table(table) => {
+                for row in &table.rows {
                     let cells = row
                         .iter()
                         .map(|c| format!("\\cellx {}\\cell", RtfCodec::escape_rtf_text(c)))
@@ -801,12 +770,12 @@ pub(crate) fn render_markdown_rich(doc: &RichDocument) -> String {
                     img.fallback_text(),
                 )));
             }
-            RichBlock::Table(rows) => {
+            RichBlock::Table(table) => {
                 flush(&mut parts, &mut list_buf);
                 ordinal = 0;
-                if rows.iter().any(|r| !r.is_empty()) {
+                if table.rows.iter().any(|r| !r.is_empty()) {
                     parts.push(CommonMarkCodec::render(&[MarkdownBlock::Table(
-                        rows.clone(),
+                        table.rows.clone(),
                     )]));
                 }
             }
@@ -822,8 +791,8 @@ fn push_plain_lines(block: &RichBlock, cell_sep: &str, lines: &mut Vec<String>) 
     match block {
         RichBlock::Paragraph(p) => lines.push(p.plain_text()),
         RichBlock::Image(img) => lines.push(img.fallback_text().to_string()),
-        RichBlock::Table(rows) => {
-            for row in rows.iter().filter(|r| !r.is_empty()) {
+        RichBlock::Table(table) => {
+            for row in table.rows.iter().filter(|r| !r.is_empty()) {
                 lines.push(row.join(cell_sep));
             }
         }

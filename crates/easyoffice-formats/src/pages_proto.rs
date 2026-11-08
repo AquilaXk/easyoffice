@@ -139,6 +139,14 @@ impl<'a> Message<'a> {
         })
     }
 
+    /// First fixed32 value of field `number`.
+    pub fn fixed32(&self, number: u32) -> Option<u32> {
+        self.fields.iter().find_map(|f| match f.value {
+            WireValue::Fixed32(v) if f.number == number => Some(v),
+            _ => None,
+        })
+    }
+
     /// First fixed32 value of field `number`, reinterpreted as `f32`.
     pub fn float(&self, number: u32) -> Option<f32> {
         self.fields.iter().find_map(|f| match f.value {

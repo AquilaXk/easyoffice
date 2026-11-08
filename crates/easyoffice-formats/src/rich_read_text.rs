@@ -306,7 +306,7 @@ pub(crate) fn read_markdown(text: &str) -> Result<Vec<RichBlock>, EasyOfficeErro
                 }
                 i += 1;
             }
-            blocks.push(RichBlock::Table(rows));
+            blocks.push(RichBlock::Table(rows.into()));
             continue;
         }
         if let Some((kind, body)) = list_marker(trimmed) {

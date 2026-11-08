@@ -33,7 +33,7 @@ fn tables(doc: &RichDocument) -> Vec<&Vec<Vec<String>>> {
     doc.blocks
         .iter()
         .filter_map(|b| match b {
-            RichBlock::Table(rows) => Some(rows),
+            RichBlock::Table(table) => Some(&table.rows),
             RichBlock::Paragraph(_) | RichBlock::Image(_) => None,
         })
         .collect()

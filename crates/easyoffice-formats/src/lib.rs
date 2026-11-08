@@ -39,6 +39,8 @@ mod rich_read_rtf;
 mod rich_read_text;
 pub mod rich_readers;
 mod rich_run_writers;
+mod rich_table;
+mod rich_table_writers;
 mod rich_writers;
 mod rich_xml;
 mod rtf_escape;
@@ -68,6 +70,7 @@ pub use rich_image::{
 };
 pub use rich_image_probe::RichImageFormat;
 pub use rich_readers::{DecodedContent, DecodedDocument, DecodedSlide};
+pub use rich_table::{CellMerge, CellSpan, RichTable, SpanMap, MAX_MERGE_SPAN};
 pub use rtf_xml_helpers::{
     unescape_xml_five_pass_baseline, unescape_xml_single_pass, RtfCodec, RtfPayload,
 };

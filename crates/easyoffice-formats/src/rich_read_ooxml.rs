@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use crate::office_codecs::validate_zip_xml_entries;
 use crate::rich_document::{highlight_name_to_hex, normalize_hex_color};
 use crate::rich_read_images::{drawing_picture, DocxMedia, DrawingOutcome};
+use crate::rich_table::TableAssembler;
 use crate::rich_xml::{
     attr, heading_level_from_name, push_run, skip_subtree, toggle_on, tokenize, CharFmt, XmlEvent,
 };
@@ -15,6 +16,23 @@ use crate::{
     RichParagraph, RichScript, XmlSanitizer, ZipArchiveCodec, ZipArchiveEntry, ZipSecurityPolicy,
     MAX_IMAGES_PER_DOCUMENT, MAX_TOTAL_IMAGE_BYTES,
 };
+
+/// `w:vMerge` state of a table cell.
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+enum VMerge {
+    #[default]
+    None,
+    Restart,
+    Continue,
+}
+
+/// `w:gridSpan/@w:val`, at least 1; an unreadable value is 1 and a huge one is left for the
+/// table assembler to reject.
+fn grid_span(attrs: &[(String, String)]) -> u32 {
+    attr(attrs, "w:val")
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .map_or(1, |v| u32::try_from(v).unwrap_or(u32::MAX).max(1))
+}
 
 #[derive(Default)]
 struct ParaState {
@@ -254,9 +272,13 @@ struct DocxWalker {
     fmt: CharFmt,
     cur_text: String,
     tbl_depth: usize,
-    rows: Vec<Vec<String>>,
-    cur_row: Vec<String>,
+    table: TableAssembler,
     cell_paras: Vec<String>,
+    /// `w:gridSpan` and `w:vMerge` of the open top-level cell.
+    cell_span: u32,
+    cell_v_merge: VMerge,
+    /// Merged regions that were dropped as invalid (reported once per document).
+    dropped_merges: usize,
     image_count: usize,
     image_bytes: usize,
 }
@@ -274,7 +296,7 @@ impl DocxWalker {
             }
             return true;
         }
-        self.track_structure(name);
+        self.track_structure(name, attrs);
         if let Some(top) = self.paras.last_mut() {
             if self.in_ppr {
                 Self::apply_para_property(top, name, attr(attrs, "w:val"));
@@ -289,16 +311,28 @@ impl DocxWalker {
         false
     }
 
-    fn track_structure(&mut self, name: &str) {
+    fn track_structure(&mut self, name: &str, attrs: &[(String, String)]) {
         match name {
             "w:tbl" => {
                 self.tbl_depth += 1;
                 if self.tbl_depth == 1 {
-                    self.rows.clear();
+                    self.table.reset();
                 }
             }
-            "w:tr" if self.tbl_depth == 1 => self.cur_row = Vec::new(),
-            "w:tc" if self.tbl_depth == 1 => self.cell_paras.clear(),
+            "w:tr" if self.tbl_depth == 1 => self.table.start_row(),
+            "w:tc" if self.tbl_depth == 1 => {
+                self.cell_paras.clear();
+                self.cell_span = 1;
+                self.cell_v_merge = VMerge::None;
+            }
+            "w:gridSpan" if self.tbl_depth == 1 => self.cell_span = grid_span(attrs),
+            "w:vMerge" if self.tbl_depth == 1 => {
+                self.cell_v_merge = if attr(attrs, "w:val") == Some("restart") {
+                    VMerge::Restart
+                } else {
+                    VMerge::Continue
+                };
+            }
             "w:p" => self.paras.push(ParaState::default()),
             "w:pPr" => self.in_ppr = true,
             "w:r" => {
@@ -359,18 +393,29 @@ impl DocxWalker {
                 while self.cell_paras.last().is_some_and(String::is_empty) {
                     self.cell_paras.pop();
                 }
-                self.cur_row.push(self.cell_paras.join("\n"));
+                let text = self.cell_paras.join("\n");
                 self.cell_paras.clear();
+                self.push_cell(text);
             }
-            "w:tr" if self.tbl_depth == 1 => self.rows.push(std::mem::take(&mut self.cur_row)),
+            "w:tr" if self.tbl_depth == 1 => self.table.end_row(),
             "w:tbl" => {
                 self.tbl_depth = self.tbl_depth.saturating_sub(1);
-                if self.tbl_depth == 0 && !self.rows.is_empty() {
-                    self.blocks
-                        .push(RichBlock::Table(std::mem::take(&mut self.rows)));
+                if self.tbl_depth == 0 && !self.table.is_empty() {
+                    let (table, dropped) = std::mem::take(&mut self.table).finish();
+                    self.dropped_merges += dropped;
+                    self.blocks.push(RichBlock::Table(table));
                 }
             }
             _ => {}
+        }
+    }
+
+    fn push_cell(&mut self, text: String) {
+        let span = self.cell_span;
+        match self.cell_v_merge {
+            VMerge::None => self.table.spanning(text, span),
+            VMerge::Restart => self.table.restart(text, span),
+            VMerge::Continue => self.table.continue_above(text, span),
         }
     }
 
@@ -480,6 +525,12 @@ pub(crate) fn read_docx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Eas
         i += 1;
     }
     let mut warnings = walker.warnings;
+    if walker.dropped_merges > 0 {
+        warnings.push(format!(
+            "표의 병합 {}곳은 범위를 벗어나거나 겹쳐 가져오지 않았습니다.",
+            walker.dropped_merges
+        ));
+    }
     if entries.iter().any(|e| {
         let p = e.path.as_str();
         (p.starts_with("word/header") || p.starts_with("word/footer")) && p.ends_with(".xml")

@@ -7,6 +7,7 @@
 //! the flattened [`UniversalDocumentModel`].
 
 use crate::rich_image::RichImage;
+use crate::rich_table::RichTable;
 use crate::{
     DocumentFormat, EasyOfficeError, HwpxCodec, UniversalDocumentModel, UniversalFormatConverter,
     XlsxFormulaCache,
@@ -148,8 +149,9 @@ impl RichParagraph {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RichBlock {
     Paragraph(RichParagraph),
-    /// Table rows of final cell text (formula cells already replaced by their values).
-    Table(Vec<Vec<String>>),
+    /// Table rows of final cell text (formula cells already replaced by their values) and its
+    /// merged regions.
+    Table(RichTable),
     /// A PNG/JPEG picture on its own line; formats without picture support get its alt text.
     Image(RichImage),
 }
@@ -178,7 +180,7 @@ impl RichDocument {
         for block in &self.blocks {
             match block {
                 RichBlock::Paragraph(p) => paragraphs.push(p.plain_text()),
-                RichBlock::Table(rows) => tables.push(rows.clone()),
+                RichBlock::Table(table) => tables.push(table.rows.clone()),
                 RichBlock::Image(img) => paragraphs.push(img.fallback_text().to_string()),
             }
         }
@@ -339,7 +341,7 @@ mod tests {
                     runs: vec![RichRun::plain("가"), RichRun::plain("나")],
                     ..RichParagraph::default()
                 }),
-                RichBlock::Table(grid(&[&["1"]])),
+                RichBlock::Table(grid(&[&["1"]]).into()),
             ],
             official_agency: None,
         };

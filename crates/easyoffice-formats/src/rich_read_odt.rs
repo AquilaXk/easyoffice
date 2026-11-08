@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use crate::office_codecs::validate_zip_xml_entries;
 use crate::rich_document::normalize_hex_color;
 use crate::rich_image::{safe_package_path, ImageBudget};
+use crate::rich_table::{TableAssembler, MAX_PADDED_COLUMNS};
 use crate::rich_xml::{attr, push_run, skip_subtree, tokenize, CharFmt, XmlEvent};
 use crate::{
     EasyOfficeError, OdfCodec, RichAlignment, RichBlock, RichDocument, RichImage, RichListKind,
@@ -193,6 +194,13 @@ const MAX_REPEATED_SPACES: usize = 1024;
 const MAX_OUTLINE_LEVEL: u8 = 6;
 const UNSUPPORTED_OBJECT_NOTE: &str = "그림·도형·OLE 개체는 가져오지 않았습니다.";
 
+/// A positive count attribute; unreadable values are 1 and huge ones saturate.
+fn count_attr(attrs: &[(String, String)], name: &str) -> u32 {
+    attr(attrs, name)
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .map_or(1, |v| u32::try_from(v).unwrap_or(u32::MAX).max(1))
+}
+
 /// Walker state for ODF `content.xml` events.
 struct OdtWalker<'a> {
     styles: &'a HashMap<String, StyleProps>,
@@ -204,9 +212,12 @@ struct OdtWalker<'a> {
     span_fmts: Vec<CharFmt>,
     list_stack: Vec<RichListKind>,
     tbl_depth: usize,
-    rows: Vec<Vec<String>>,
-    cur_row: Vec<String>,
+    table: TableAssembler,
     cell_paras: Vec<String>,
+    /// Row span, column span and repeat count of the open top-level cell.
+    cell_shape: (u32, u32, u32),
+    /// Merged regions dropped as invalid in this document.
+    dropped_merges: usize,
     in_automatic_styles: bool,
     budget: ImageBudget,
 }
@@ -245,9 +256,10 @@ impl<'a> OdtWalker<'a> {
             span_fmts: Vec::new(),
             list_stack: Vec::new(),
             tbl_depth: 0,
-            rows: Vec::new(),
-            cur_row: Vec::new(),
+            table: TableAssembler::default(),
             cell_paras: Vec::new(),
+            cell_shape: (1, 1, 1),
+            dropped_merges: 0,
             in_automatic_styles: false,
             budget: ImageBudget::default(),
         }
@@ -289,12 +301,24 @@ impl<'a> OdtWalker<'a> {
             "table:table" => {
                 self.tbl_depth += 1;
                 if self.tbl_depth == 1 {
-                    self.rows.clear();
+                    self.table.reset();
                 }
             }
-            "table:table-row" if self.tbl_depth == 1 => self.cur_row = Vec::new(),
-            "table:table-cell" if self.tbl_depth == 1 => self.cell_paras.clear(),
-            "table:covered-table-cell" if self.tbl_depth == 1 => self.cur_row.push(String::new()),
+            "table:table-row" if self.tbl_depth == 1 => self.table.start_row(),
+            "table:table-cell" if self.tbl_depth == 1 => {
+                self.cell_paras.clear();
+                self.cell_shape = (
+                    count_attr(attrs, "table:number-rows-spanned"),
+                    count_attr(attrs, "table:number-columns-spanned"),
+                    count_attr(attrs, "table:number-columns-repeated"),
+                );
+            }
+            "table:covered-table-cell" if self.tbl_depth == 1 => {
+                let repeated = count_attr(attrs, "table:number-columns-repeated");
+                for _ in 0..repeated.min(self.padding_room()) {
+                    self.table.covered();
+                }
+            }
             _ => {}
         }
         false
@@ -408,20 +432,35 @@ impl<'a> OdtWalker<'a> {
                 while self.cell_paras.last().is_some_and(String::is_empty) {
                     self.cell_paras.pop();
                 }
-                self.cur_row.push(self.cell_paras.join("\n"));
+                let text = self.cell_paras.join("\n");
                 self.cell_paras.clear();
+                self.push_cell(text);
             }
-            "table:table-row" if self.tbl_depth == 1 => {
-                self.rows.push(std::mem::take(&mut self.cur_row))
-            }
+            "table:table-row" if self.tbl_depth == 1 => self.table.end_row(),
             "table:table" => {
                 self.tbl_depth = self.tbl_depth.saturating_sub(1);
-                if self.tbl_depth == 0 && !self.rows.is_empty() {
-                    self.blocks
-                        .push(RichBlock::Table(std::mem::take(&mut self.rows)));
+                if self.tbl_depth == 0 && !self.table.is_empty() {
+                    let (table, dropped) = std::mem::take(&mut self.table).finish();
+                    self.dropped_merges += dropped;
+                    self.blocks.push(RichBlock::Table(table));
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Cells that a repeat count may still add to the open row.
+    fn padding_room(&self) -> u32 {
+        u32::try_from(MAX_PADDED_COLUMNS.saturating_sub(self.table.row_len())).unwrap_or(0)
+    }
+
+    /// Adds the closed cell, repeated as declared (bounded by the row width limit).
+    fn push_cell(&mut self, text: String) {
+        let (row_span, col_span, repeated) = self.cell_shape;
+        let repeated = repeated.min(self.padding_room()).max(1);
+        self.table.anchor(text.clone(), row_span, col_span);
+        for _ in 1..repeated {
+            self.table.cell(text.clone());
         }
     }
 
@@ -514,10 +553,16 @@ pub(crate) fn read_odt(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Easy
     }
     let OdtWalker {
         mut title,
-        warnings,
+        mut warnings,
         blocks,
+        dropped_merges,
         ..
     } = walker;
+    if dropped_merges > 0 {
+        warnings.push(format!(
+            "표의 병합 {dropped_merges}곳은 범위를 벗어나거나 겹쳐 가져오지 않았습니다."
+        ));
+    }
     if title.is_empty() {
         if let Some(meta) = entries.iter().find(|e| e.path == "meta.xml") {
             if let Ok(m) = std::str::from_utf8(&meta.data) {

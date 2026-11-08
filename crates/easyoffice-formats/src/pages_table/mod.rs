@@ -6,11 +6,12 @@
 use self::format::{render_value, FormatSpec};
 use self::packed::{parse_cell, CellScalar, PackedCell};
 mod format;
+mod merge;
 mod packed;
 
 use crate::pages_proto::{ArchiveObject, Message, ObjectTable};
 use crate::pages_schema::{cell, table, ty};
-use crate::EasyOfficeError;
+use crate::{CellMerge, EasyOfficeError};
 
 const MAX_TABLES: usize = 2_000;
 const MAX_TABLE_ROWS: usize = 10_000;
@@ -54,6 +55,8 @@ impl TableBudget {
 #[derive(Debug)]
 pub(crate) struct TableRead {
     pub grid: Vec<Vec<String>>,
+    /// Merged regions as declared by the file (validated by the rich table).
+    pub merges: Vec<CellMerge>,
     pub unsupported: usize,
 }
 
@@ -351,5 +354,10 @@ pub(crate) fn read_table(
         Some(tiles) => fill_tiles(&ctx, &tiles, &mut grid, cols)?,
         None => 0,
     };
-    Ok(TableOutcome::Read(TableRead { grid, unsupported }))
+    let merges = merge::read_merges(objects, &store);
+    Ok(TableOutcome::Read(TableRead {
+        grid,
+        merges,
+        unsupported,
+    }))
 }

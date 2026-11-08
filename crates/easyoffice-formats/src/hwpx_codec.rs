@@ -17,6 +17,7 @@ use crate::office_codecs::validate_zip_xml_entries;
 use crate::rich_document::{RichAlignment, RichBlock, RichDocument};
 use crate::rich_image::{check_document_images, RichImage};
 use crate::rich_image_writers::{hwpx_picture_run, MediaParts};
+use crate::rich_table::{CellSpan, SpanMap};
 use crate::rtf_xml_helpers::{
     extract_attr, extract_attr_from_fragment, extract_tag_bodies,
     extract_tags_or_self_closing_with_attrs, extract_tags_with_attrs, strip_tag_blocks,
@@ -128,7 +129,7 @@ impl SectionWriter {
         self.xml.push_str("</hp:t></hp:run>");
     }
 
-    fn table_paragraph(&mut self, rows: &[Vec<String>]) {
+    fn table_paragraph(&mut self, rows: &[Vec<String>], spans: Option<&SpanMap>) {
         let row_cnt = rows.len();
         let col_cnt = rows.iter().map(Vec::len).max().unwrap_or(0).max(1);
         let cell_w = TEXT_WIDTH / col_cnt as u32;
@@ -153,6 +154,13 @@ impl SectionWriter {
         for (r_idx, row) in rows.iter().enumerate() {
             self.xml.push_str("<hp:tr>");
             for (c_idx, cell) in row.iter().enumerate() {
+                let (row_span, col_span) =
+                    match spans.map_or(CellSpan::Plain, |m| m.at(r_idx, c_idx)) {
+                        CellSpan::Plain => (1, 1),
+                        CellSpan::Anchor { row_span, col_span } => (row_span, col_span),
+                        // The anchor's cell covers this position.
+                        CellSpan::Covered { .. } => continue,
+                    };
                 self.xml.push_str("<hp:tc name=\"\" header=\"0\" hasMargin=\"0\" protect=\"0\" editable=\"0\" dirty=\"0\" borderFillIDRef=\"2\">");
                 self.xml.push_str("<hp:subList id=\"\" textDirection=\"HORIZONTAL\" lineWrap=\"BREAK\" vertAlign=\"CENTER\" linkListIDRef=\"0\" linkListNextIDRef=\"0\" textWidth=\"0\" textHeight=\"0\" hasTextRef=\"0\" hasNumRef=\"0\">");
                 for line in cell.split('\n') {
@@ -163,8 +171,10 @@ impl SectionWriter {
                     ));
                     self.next_para_id += 1;
                 }
+                let cell_w_span = cell_w * col_span;
+                let cell_h_span = CELL_HEIGHT * row_span;
                 self.xml.push_str(&format!(
-                    "</hp:subList><hp:cellAddr colAddr=\"{c_idx}\" rowAddr=\"{r_idx}\"/><hp:cellSpan colSpan=\"1\" rowSpan=\"1\"/><hp:cellSz width=\"{cell_w}\" height=\"{CELL_HEIGHT}\"/><hp:cellMargin left=\"510\" right=\"510\" top=\"141\" bottom=\"141\"/></hp:tc>"
+                    "</hp:subList><hp:cellAddr colAddr=\"{c_idx}\" rowAddr=\"{r_idx}\"/><hp:cellSpan colSpan=\"{col_span}\" rowSpan=\"{row_span}\"/><hp:cellSz width=\"{cell_w_span}\" height=\"{cell_h_span}\"/><hp:cellMargin left=\"510\" right=\"510\" top=\"141\" bottom=\"141\"/></hp:tc>"
                 ));
             }
             self.xml.push_str("</hp:tr>");
@@ -192,7 +202,7 @@ impl HwpxCodec {
             sec.text_paragraph(p);
         }
         for tbl in &payload.tables {
-            sec.table_paragraph(tbl);
+            sec.table_paragraph(tbl, None);
         }
         Self::pack_package(payload, header_xml(), sec.finish(), MediaParts::default())
     }
@@ -219,8 +229,8 @@ impl HwpxCodec {
         for block in &doc.blocks {
             let p = match block {
                 RichBlock::Paragraph(p) => p,
-                RichBlock::Table(rows) => {
-                    sec.table_paragraph(rows);
+                RichBlock::Table(table) => {
+                    sec.table_paragraph(&table.rows, table.span_map().as_ref());
                     continue;
                 }
                 RichBlock::Image(img) => {

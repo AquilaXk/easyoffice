@@ -20,7 +20,7 @@ fn first_table(name: &str) -> (Grid, Vec<String>) {
         .blocks
         .into_iter()
         .find_map(|b| match b {
-            RichBlock::Table(rows) => Some(rows),
+            RichBlock::Table(table) => Some(table.rows),
             RichBlock::Paragraph(_) | RichBlock::Image(_) => None,
         })
         .expect("a table");

@@ -289,6 +289,16 @@ impl DocBuilder {
 
     /// A table of rich-text cells (version-5 packed layout). Returns the table-info id.
     pub fn table(&mut self, grid: &[Vec<&str>]) -> u64 {
+        self.table_with_merges(grid, &[])
+    }
+
+    /// Like [`Self::table`] with a merge region map; each region is `(row, col, rows, cols)`,
+    /// stored as ranges whose origin and size are `column << 16 | row` (fixed32).
+    pub fn table_with_merges(
+        &mut self,
+        grid: &[Vec<&str>],
+        merges: &[(u32, u32, u32, u32)],
+    ) -> u64 {
         let rows = grid.len();
         let cols = grid[0].len();
         let mut list_entries = Vec::new();
@@ -333,7 +343,25 @@ impl DocBuilder {
             f_bytes(1, &cat(&[f_varint(1, 0), f_ref(2, tile)])),
             f_varint(2, 256),
         ]);
-        let store = cat(&[f_bytes(3, &tiles), f_ref(17, list)]);
+        let mut store = cat(&[f_bytes(3, &tiles), f_ref(17, list)]);
+        if !merges.is_empty() {
+            let packed = |col: u32, row: u32| {
+                let mut o = vec![0x0D];
+                o.extend_from_slice(&(col << 16 | row).to_le_bytes());
+                o
+            };
+            let ranges: Vec<Vec<u8>> = merges
+                .iter()
+                .map(|&(r, c, nr, nc)| {
+                    f_bytes(
+                        1,
+                        &cat(&[f_bytes(1, &packed(c, r)), f_bytes(2, &packed(nc, nr))]),
+                    )
+                })
+                .collect();
+            let map = self.add(6144, &cat(&ranges));
+            store.extend(f_ref(13, map));
+        }
         let model = self.add(
             6001,
             &cat(&[
@@ -372,6 +400,18 @@ pub fn pages_zip_with_data(iwa: Vec<u8>, data: Vec<(String, Vec<u8>)>) -> Vec<u8
     ];
     entries.extend(data);
     ZipArchiveCodec::pack(&entries).expect("zip")
+}
+
+/// A document whose body is one paragraph holding a table with the given merge regions.
+pub fn merged_table_document(grid: &[Vec<&str>], merges: &[(u32, u32, u32, u32)]) -> Vec<u8> {
+    let mut b = DocBuilder::default();
+    let table = b.table_with_merges(grid, merges);
+    let att = b.attachment(table);
+    let st = b.add(
+        2001,
+        &DocBuilder::storage_payload("\u{FFFC}", &[], &[], &[], &[(0, Some(att))]),
+    );
+    pages_zip(b.finish(st))
 }
 
 /// Standard sample: heading, formatted body paragraph, bullet item, center paragraph, a 2x2

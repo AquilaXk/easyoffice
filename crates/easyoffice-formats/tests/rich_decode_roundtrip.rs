@@ -37,7 +37,8 @@ fn table(rows: &[&[&str]]) -> RichBlock {
     RichBlock::Table(
         rows.iter()
             .map(|r| r.iter().map(ToString::to_string).collect())
-            .collect(),
+            .collect::<Vec<Vec<String>>>()
+            .into(),
     )
 }
 

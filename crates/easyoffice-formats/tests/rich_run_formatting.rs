@@ -136,10 +136,9 @@ fn rtf_plain_text_and_tables_still_decode_after_the_run_reader() {
                 runs: vec![RichRun::plain("가 {중괄호} \\ 역슬래시 한글")],
                 ..RichParagraph::default()
             }),
-            RichBlock::Table(vec![
-                vec!["a".into(), "b".into()],
-                vec!["1".into(), "2".into()],
-            ]),
+            RichBlock::Table(
+                vec![vec!["a".into(), "b".into()], vec!["1".into(), "2".into()]].into(),
+            ),
             RichBlock::Paragraph(RichParagraph {
                 runs: vec![RichRun::plain("끝")],
                 ..RichParagraph::default()

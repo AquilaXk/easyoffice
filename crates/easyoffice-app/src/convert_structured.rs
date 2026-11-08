@@ -324,7 +324,7 @@ fn parse_blocks(
         let obj = as_object(item, "blocks")?;
         match opt_str(obj, "type")? {
             Some("paragraph") => blocks.push(RichBlock::Paragraph(parse_paragraph(obj, budget)?)),
-            Some("table") => blocks.push(RichBlock::Table(parse_table(obj, budget)?)),
+            Some("table") => blocks.push(RichBlock::Table(parse_table(obj, budget)?.into())),
             Some("image") => blocks.push(RichBlock::Image(parse_image(obj)?)),
             other => {
                 return Err(invalid(format!(
@@ -628,7 +628,7 @@ pub(crate) fn encode_structured(
                         ..RichParagraph::default()
                     }));
                     if !grid.is_empty() {
-                        blocks.push(RichBlock::Table(grid));
+                        blocks.push(RichBlock::Table(grid.into()));
                     }
                 }
                 let doc = RichDocument {

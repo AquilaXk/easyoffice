@@ -188,7 +188,7 @@ impl Reader {
     fn flush_table(&mut self) {
         if let Some((_, rows)) = self.table.take() {
             if !rows.is_empty() {
-                self.blocks.push(RichBlock::Table(rows));
+                self.blocks.push(RichBlock::Table(rows.into()));
             }
         }
     }

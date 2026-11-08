@@ -111,7 +111,7 @@ fn flat_document(
         tables
             .into_iter()
             .filter(|t| !t.is_empty())
-            .map(RichBlock::Table),
+            .map(|rows| RichBlock::Table(rows.into())),
     );
     RichDocument {
         title,
