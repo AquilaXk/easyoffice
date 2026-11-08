@@ -4,7 +4,8 @@
 //! one of:
 //! - `blocks`: ordered `{"type":"paragraph","runs":[{"text","bold","italic","underline","strike",
 //!   "sizeHalfPt","font","color","highlight"}],
-//!   "align","heading","list"}` and `{"type":"table","rows":[[{"text","value"}]]}` items;
+//!   "align","heading","list"}` and `{"type":"table","rows":[[{"text","value"}]],
+//!   "merges":[{"row","col","rowSpan","colSpan"}]}` items (`merges` is optional, PD-130);
 //! - `sheets`: `[{"name","cells":[{"ref":"A1","raw":"=SUM(A1:A2)","style":{"bold":true,"sizePt":11.25}}],`n//!   "columns":[{"index":1,"widthPx":120}]}]` for every workbook sheet (`style` and `columns` are optional,`n//!   PD-089; `index` is the 1-based column number);
 //! - `slides`: `[{"title","bullets":[...],"notes"}]`.
 //!
@@ -13,11 +14,12 @@
 use std::collections::BTreeMap;
 
 use easyoffice_formats::{
-    base64_codec, evaluate_table_formulas, normalize_hex_color, CellStyle, DocumentFormat,
-    EasyOfficeError, OdfCodec, OdsUnpacked, OoxmlCodec, RichAlignment, RichBlock, RichDocument,
-    RichImage, RichListKind, RichParagraph, RichRun, RichScript, SheetStyling, StrictJsonValue,
-    UniversalDocumentModel, UniversalFormatConverter, XlsxCachedValue, XlsxFormulaCache,
-    MAX_COLUMN_PX, MAX_IMAGE_BYTES, MAX_SIZE_PT, MIN_COLUMN_PX, MIN_SIZE_PT,
+    base64_codec, evaluate_table_formulas, normalize_hex_color, CellMerge, CellStyle,
+    DocumentFormat, EasyOfficeError, OdfCodec, OdsUnpacked, OoxmlCodec, RichAlignment, RichBlock,
+    RichDocument, RichImage, RichListKind, RichParagraph, RichRun, RichScript, RichTable,
+    SheetStyling, StrictJsonValue, UniversalDocumentModel, UniversalFormatConverter,
+    XlsxCachedValue, XlsxFormulaCache, MAX_COLUMN_PX, MAX_IMAGE_BYTES, MAX_SIZE_PT, MIN_COLUMN_PX,
+    MIN_SIZE_PT,
 };
 use easyoffice_sheet::{EvaluatedCellValue, PackedCellCoordinate, WorkbookEngine};
 
@@ -141,26 +143,32 @@ impl Budget {
     }
 }
 
-/// Returns the structured content if the payload carries `blocks`, `sheets`, or `slides`.
+/// Structured content of a save payload plus what the parser had to drop from it.
+pub(crate) type ParsedStructured = (StructuredContent, Vec<String>);
+
+/// Returns the structured content (and warnings) if the payload carries `blocks`, `sheets`, or
+/// `slides`.
 pub(crate) fn parse_structured_content(
     entries: &JsonObject,
-) -> Result<Option<StructuredContent>, EasyOfficeError> {
+) -> Result<Option<ParsedStructured>, EasyOfficeError> {
     let mut budget = Budget(0);
     if let Some(v) = field(entries, "blocks") {
-        let blocks = parse_blocks(as_array(v, "blocks")?, &mut budget)?;
-        return Ok(Some(StructuredContent::Document(RichDocument {
+        let mut warnings = Vec::new();
+        let blocks = parse_blocks(as_array(v, "blocks")?, &mut budget, &mut warnings)?;
+        let content = StructuredContent::Document(RichDocument {
             title: String::new(),
             blocks,
             official_agency: None,
-        })));
+        });
+        return Ok(Some((content, warnings)));
     }
     if let Some(v) = field(entries, "sheets") {
         return parse_sheets(as_array(v, "sheets")?, &mut budget)
-            .map(|(sheets, styling)| Some(StructuredContent::Workbook(sheets, styling)));
+            .map(|(sheets, styling)| Some((StructuredContent::Workbook(sheets, styling), vec![])));
     }
     if let Some(v) = field(entries, "slides") {
         return parse_slides(as_array(v, "slides")?, &mut budget)
-            .map(|s| Some(StructuredContent::Slides(s)));
+            .map(|s| Some((StructuredContent::Slides(s), vec![])));
     }
     Ok(None)
 }
@@ -286,7 +294,35 @@ fn parse_image(obj: &JsonObject) -> Result<RichImage, EasyOfficeError> {
     Ok(image)
 }
 
-fn parse_table(obj: &JsonObject, budget: &mut Budget) -> Result<Vec<Vec<String>>, EasyOfficeError> {
+/// `{"row","col","rowSpan","colSpan"}`: non-negative integers. Values past `u32` saturate, so the
+/// table's own validation drops them like any other region outside the grid.
+fn parse_merge(item: &StrictJsonValue) -> Result<CellMerge, EasyOfficeError> {
+    let obj = as_object(item, "merges")?;
+    let number = |key: &str| {
+        field(obj, key)
+            .and_then(StrictJsonValue::as_u64)
+            .map(|n| u32::try_from(n).unwrap_or(u32::MAX))
+            .ok_or_else(|| {
+                invalid(format!(
+                    "구조화 저장: 병합의 '{key}'는 0 이상의 정수여야 합니다."
+                ))
+            })
+    };
+    Ok(CellMerge {
+        row: number("row")?,
+        col: number("col")?,
+        row_span: number("rowSpan")?,
+        col_span: number("colSpan")?,
+    })
+}
+
+/// The page's `merges` are untrusted: the table re-validates them (one-cell, outside the grid,
+/// overlapping) and the dropped ones are reported.
+fn parse_table(
+    obj: &JsonObject,
+    budget: &mut Budget,
+    warnings: &mut Vec<String>,
+) -> Result<RichTable, EasyOfficeError> {
     let rows_v =
         field(obj, "rows").ok_or_else(|| invalid("구조화 저장: 표에는 'rows'가 필요합니다."))?;
     let mut rows = Vec::new();
@@ -311,12 +347,26 @@ fn parse_table(obj: &JsonObject, budget: &mut Budget) -> Result<Vec<Vec<String>>
         rows.push(row);
     }
     evaluate_table_formulas(&mut rows);
-    Ok(rows)
+    let mut merges = Vec::new();
+    if let Some(v) = field(obj, "merges") {
+        for item in as_array(v, "merges")? {
+            budget.take(1)?;
+            merges.push(parse_merge(item)?);
+        }
+    }
+    let (table, dropped) = RichTable::with_merges(rows, merges);
+    if dropped > 0 {
+        warnings.push(format!(
+            "표의 병합 {dropped}곳은 범위를 벗어나거나 겹쳐 저장하지 않았습니다."
+        ));
+    }
+    Ok(table)
 }
 
 fn parse_blocks(
     items: &[StrictJsonValue],
     budget: &mut Budget,
+    warnings: &mut Vec<String>,
 ) -> Result<Vec<RichBlock>, EasyOfficeError> {
     let mut blocks = Vec::with_capacity(items.len());
     for item in items {
@@ -324,7 +374,7 @@ fn parse_blocks(
         let obj = as_object(item, "blocks")?;
         match opt_str(obj, "type")? {
             Some("paragraph") => blocks.push(RichBlock::Paragraph(parse_paragraph(obj, budget)?)),
-            Some("table") => blocks.push(RichBlock::Table(parse_table(obj, budget)?.into())),
+            Some("table") => blocks.push(RichBlock::Table(parse_table(obj, budget, warnings)?)),
             Some("image") => blocks.push(RichBlock::Image(parse_image(obj)?)),
             other => {
                 return Err(invalid(format!(

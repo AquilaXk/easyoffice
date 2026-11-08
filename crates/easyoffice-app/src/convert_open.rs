@@ -10,9 +10,10 @@
 //! ceilings, path-traversal checks, and XXE/DTD rejection apply to every path.
 
 use easyoffice_formats::{
-    base64_codec, read_sheet_styling, CellStyle, DecodedContent, DecodedDocument, DocumentFormat,
-    EasyOfficeError, OdsUnpacked, RichAlignment, RichBlock, RichImage, RichListKind, RichParagraph,
-    RichScript, SheetStyling, StrictJsonValue, UniversalFormatConverter,
+    base64_codec, read_sheet_styling, CellMerge, CellStyle, DecodedContent, DecodedDocument,
+    DocumentFormat, EasyOfficeError, OdsUnpacked, RichAlignment, RichBlock, RichImage,
+    RichListKind, RichParagraph, RichScript, SheetStyling, StrictJsonValue,
+    UniversalFormatConverter,
 };
 use easyoffice_sheet::PackedCellCoordinate;
 use std::collections::HashSet;
@@ -125,6 +126,24 @@ fn image_json(img: &RichImage) -> String {
     )
 }
 
+/// `,"merges":[{"row":0,"col":0,"rowSpan":1,"colSpan":2}]` for a table with merged regions (PD-130),
+/// nothing otherwise. Covered cells stay in `rows` as empty text.
+fn merges_json(merges: &[CellMerge]) -> String {
+    if merges.is_empty() {
+        return String::new();
+    }
+    let items: Vec<String> = merges
+        .iter()
+        .map(|m| {
+            format!(
+                "{{\"row\":{},\"col\":{},\"rowSpan\":{},\"colSpan\":{}}}",
+                m.row, m.col, m.row_span, m.col_span
+            )
+        })
+        .collect();
+    format!(",\"merges\":[{}]", items.join(","))
+}
+
 fn block_json(b: &RichBlock) -> String {
     match b {
         RichBlock::Paragraph(p) => paragraph_json(p),
@@ -141,7 +160,11 @@ fn block_json(b: &RichBlock) -> String {
                     format!("[{}]", cells.join(","))
                 })
                 .collect();
-            format!("{{\"type\":\"table\",\"rows\":[{}]}}", rows.join(","))
+            let merges = merges_json(&table.merges);
+            format!(
+                "{{\"type\":\"table\",\"rows\":[{}]{merges}}}",
+                rows.join(",")
+            )
         }
     }
 }

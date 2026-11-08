@@ -1,8 +1,8 @@
 (function (host) {
   "use strict";
 
-  // Structured save payload (PD-073): ordered paragraph/table blocks with run formatting, every
-  // workbook sheet, and slides as JSON fields. User text is never encoded as line markup.
+  // Structured save payload (PD-073): ordered paragraph/table blocks (tables with their merged
+  // regions, PD-130) with run formatting, every workbook sheet, and slides as JSON fields. User text is never encoded as line markup.
 
   const BLOCK_TAGS = new Set([
     "P", "DIV", "H1", "H2", "H3", "H4", "H5", "H6", "LI", "UL", "OL",
@@ -20,6 +20,7 @@
   const LAYOUT_TAGS = new Set(["P", "H1", "H2", "H3", "H4", "H5", "H6", "LI"]);
   const TWIPS_PER_PX = 15; // 1 px = 3/4 pt = 15 twips
   const MAX_LINE_PERCENT = 1000;
+  const MAX_TABLE_COLUMNS = 1024; // the readers' padded-column cap (PD-117)
   const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
 
   function isSkippedElement(el) {
@@ -152,16 +153,81 @@
     return String(cell.textContent || "").replaceAll(/\s+/g, " ").trim();
   }
 
-  function buildTableBlock(table) {
+  // A span attribute as a positive integer (`rowspan="0"` and junk count as 1).
+  function spanOf(value) {
+    return Math.max(1, Math.trunc(Number(value)) || 1);
+  }
+
+  // Rows that a cell spanning `wanted` rows covers, starting at row `r`. A table opened from a file
+  // marks each row with its original index (`data-eo-row`), so a row deleted inside a region
+  // shortens it instead of letting it reach the row after the region.
+  function coveredRowCount(trs, r, wanted) {
+    const limit = Math.min(wanted, trs.length - r);
+    const origin = Number(trs[r].dataset?.eoRow);
+    if (!Number.isInteger(origin)) return limit;
+    let count = 1;
+    while (count < limit && Number(trs[r + count].dataset?.eoRow) < origin + wanted) count += 1;
+    return count;
+  }
+
+  // A span stops at the first slot another cell already covers, so regions never overlap and each
+  // slot is visited once. Free slots in a row from `col`, at most `wanted`.
+  function freeRun(takenRow, col, wanted) {
+    let count = 0;
+    while (count < wanted && !takenRow[col + count]) count += 1;
+    return count;
+  }
+
+  // Rows from `r` (whose slots from `col` are free) that stay free over `colSpan` columns.
+  function freeRows(taken, r, col, colSpan, wanted) {
+    let count = 1;
+    while (count < wanted && freeRun(taken[r + count], col, colSpan) === colSpan) count += 1;
+    return count;
+  }
+
+  // Cell text grid and merged regions of a table, read as the HTML table model lays it out: a cell
+  // with colspan/rowspan covers the slots to its right and below, and the cells after it start
+  // behind them. Covered slots are empty strings. Spans stop at the table's last row, at
+  // MAX_TABLE_COLUMNS and at slots another cell covers; hidden cells are not part of the grid; rows
+  // without any slot are dropped.
+  function readTableGrid(table) {
     const trs = Array.from(table.querySelectorAll("tr")).filter((tr) => tr.closest("table") === table);
-    const texts = trs.map((tr) =>
-      Array.from(tr.children || []).filter((c) => /^(TD|TH)$/i.test(c.tagName || "")).map(cellText)
-    );
+    const taken = trs.map(() => []);
+    const texts = trs.map(() => []);
+    const merges = [];
+    trs.forEach((tr, r) => {
+      let col = 0;
+      for (const cell of Array.from(tr.children || [])) {
+        if (!/^(TD|TH)$/i.test(cell.tagName || "") || isSkippedElement(cell)) continue;
+        while (taken[r][col]) col += 1;
+        if (col >= MAX_TABLE_COLUMNS) break;
+        const colSpan = freeRun(taken[r], col, Math.min(spanOf(cell.colSpan), MAX_TABLE_COLUMNS - col));
+        const rowSpan = freeRows(taken, r, col, colSpan, coveredRowCount(trs, r, spanOf(cell.rowSpan)));
+        for (let dr = 0; dr < rowSpan; dr += 1) {
+          for (let dc = 0; dc < colSpan; dc += 1) {
+            taken[r + dr][col + dc] = true;
+            texts[r + dr][col + dc] = "";
+          }
+        }
+        texts[r][col] = cellText(cell);
+        if (rowSpan * colSpan > 1) merges.push({ row: r, col, rowSpan, colSpan });
+        col += colSpan;
+      }
+    });
+    const rows = texts.map((row) => Array.from(row, (text) => text ?? ""));
+    const before = [0];
+    rows.forEach((row) => before.push(before.at(-1) + (row.length > 0 ? 1 : 0)));
+    const regions = merges
+      .map((m) => ({ ...m, row: before[m.row], rowSpan: before[m.row + m.rowSpan] - before[m.row] }))
+      .filter((m) => m.rowSpan * m.colSpan > 1);
+    return { texts: rows.filter((row) => row.length > 0), merges: regions };
+  }
+
+  function buildTableBlock(table) {
+    const { texts, merges } = readTableGrid(table);
     const values = evaluateDocTableFormulas(texts);
-    const rows = texts
-      .map((row, r) => row.map((text, c) => (values[r][c] === null ? { text } : { text, value: values[r][c] })))
-      .filter((row) => row.length > 0);
-    return { type: "table", rows };
+    const rows = texts.map((row, r) => row.map((text, c) => (values[r][c] === null ? { text } : { text, value: values[r][c] })));
+    return merges.length > 0 ? { type: "table", rows, merges } : { type: "table", rows };
   }
 
   // Walks an editor root in document order and returns paragraph/table blocks.

@@ -285,7 +285,6 @@ class MiniElement extends MiniNode {
     this._listeners = new Map();
     this.style = createStyleProxy(this);
     this.classList = new MiniClassList(this);
-    this.colSpan = 1;
     this.open = false;
     this._explicitValue = undefined;
     this.dataset = new Proxy(
@@ -382,9 +381,23 @@ class MiniElement extends MiniNode {
     const k = String(name || "").toLowerCase();
     const strVal = String(value ?? "");
     this._attrs.set(k, strVal);
-    if (k === "colspan") {
-      this.colSpan = Math.max(1, Number(strVal) || 1);
-    }
+  }
+
+  // Table cell spans reflect their attributes like the real DOM (default 1).
+  get colSpan() {
+    return Math.max(1, Math.trunc(Number(this._attrs.get("colspan"))) || 1);
+  }
+
+  set colSpan(v) {
+    this._attrs.set("colspan", String(v));
+  }
+
+  get rowSpan() {
+    return Math.max(1, Math.trunc(Number(this._attrs.get("rowspan"))) || 1);
+  }
+
+  set rowSpan(v) {
+    this._attrs.set("rowspan", String(v));
   }
 
   get value() {
@@ -496,7 +509,6 @@ class MiniElement extends MiniNode {
     for (const [k, v] of this._attrs.entries()) {
       copy._attrs.set(k, v);
     }
-    copy.colSpan = this.colSpan;
     copy._explicitValue = this._explicitValue;
     if (deep) {
       this.childNodes.forEach((c) => copy.appendChild(c.cloneNode(true)));

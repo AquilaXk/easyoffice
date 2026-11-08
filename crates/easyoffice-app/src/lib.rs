@@ -15,6 +15,8 @@ pub mod cli_args;
 mod convert_ipc;
 mod convert_open;
 mod convert_structured;
+#[cfg(test)]
+mod editor_merge_tests;
 pub mod ffi;
 pub mod http_server;
 pub mod hwp_bundle;

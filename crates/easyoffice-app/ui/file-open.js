@@ -131,16 +131,61 @@
     return out;
   }
 
+  const cellKey = (row, col) => row + "," + col;
+
+  // Anchors (with their spans) and covered cells of a decoded table's `merges` (PD-130). A region is
+  // used only when it is inside the grid, every cell of it exists and no other region has it.
+  function mergeLayout(rows, merges) {
+    const anchors = new Map();
+    const covered = new Set();
+    (Array.isArray(merges) ? merges : []).forEach((m) => {
+      const { row, col, rowSpan, colSpan } = m && typeof m === "object" ? m : {};
+      const ints = [row, col, rowSpan, colSpan];
+      if (!ints.every(Number.isInteger) || row < 0 || col < 0 || rowSpan < 1 || colSpan < 1) return;
+      if (rowSpan * colSpan < 2 || row + rowSpan > rows.length) return;
+      for (let r = row; r < row + rowSpan; r += 1) {
+        for (let c = col; c < col + colSpan; c += 1) {
+          if (c >= rows[r].length || anchors.has(cellKey(r, c)) || covered.has(cellKey(r, c))) return;
+        }
+      }
+      for (let r = row; r < row + rowSpan; r += 1) {
+        for (let c = col; c < col + colSpan; c += 1) covered.add(cellKey(r, c));
+      }
+      covered.delete(cellKey(row, col));
+      anchors.set(cellKey(row, col), { rowSpan, colSpan });
+    });
+    return { anchors, covered };
+  }
+
+  // A table block: merged regions as colspan/rowspan on their top-left cell, covered cells not drawn,
+  // and each row's original index so a save can tell which rows of a region were deleted.
+  function tableSpec(block) {
+    const rows = Array.isArray(block.rows) ? block.rows.map((r) => (Array.isArray(r) ? r : [])) : [];
+    const { anchors, covered } = mergeLayout(rows, block.merges);
+    const trs = rows.map((row, r) => {
+      const cells = [];
+      row.forEach((cell, c) => {
+        if (covered.has(cellKey(r, c))) return;
+        const span = anchors.get(cellKey(r, c));
+        const attrs = {};
+        if (span?.colSpan > 1) attrs.colspan = String(span.colSpan);
+        if (span?.rowSpan > 1) attrs.rowspan = String(span.rowSpan);
+        cells.push(elSpec("td", [textSpec(typeof cell === "string" ? cell : cell?.text ?? "")], {}, attrs));
+      });
+      const tr = elSpec("tr", cells);
+      tr.data = { eoRow: String(r) };
+      return tr;
+    });
+    return elSpec("table", [elSpec("tbody", trs)], {}, { class: "doc-inline-table" });
+  }
+
   function buildEditorNodes(blocks) {
     const nodes = [];
     let openList = null;
     (blocks || []).forEach((block) => {
       if (block.type === "table") {
         openList = null;
-        const rows = (block.rows || []).map((row) =>
-          elSpec("tr", row.map((cell) => elSpec("td", [textSpec(typeof cell === "string" ? cell : cell?.text ?? "")])))
-        );
-        nodes.push(elSpec("table", [elSpec("tbody", rows)], {}, { class: "doc-inline-table" }));
+        nodes.push(tableSpec(block));
         return;
       }
       if (block.type === "image") {

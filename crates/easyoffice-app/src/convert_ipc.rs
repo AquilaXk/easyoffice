@@ -151,6 +151,7 @@ impl EasyOfficeIpcRouter {
     pub(crate) fn handle_convert_document_format(payload: &str) -> Result<String, EasyOfficeError> {
         let trimmed = payload.strip_prefix('\u{FEFF}').unwrap_or(payload).trim();
         let mut structured: Option<StructuredContent> = None;
+        let mut warnings: Vec<String> = Vec::new();
         let (src_owned, dst_owned, title_owned, body_owned) = if trimmed.starts_with('{') {
             let entries = Self::parse_rpc_json_object(trimmed)?;
             if let Some(b64) = Self::optional_json_str(&entries, "sourceBase64")? {
@@ -161,7 +162,10 @@ impl EasyOfficeIpcRouter {
                     "decode 요청에는 sourceBase64가 필요합니다.".to_string(),
                 ));
             }
-            structured = parse_structured_content(&entries)?;
+            if let Some((content, parse_warnings)) = parse_structured_content(&entries)? {
+                structured = Some(content);
+                warnings = parse_warnings;
+            }
             let src = match Self::optional_json_str(&entries, "sourceFormat")? {
                 Some(s) => s,
                 None => Self::optional_json_str(&entries, "source")?.unwrap_or("docx"),
@@ -266,7 +270,7 @@ impl EasyOfficeIpcRouter {
                 )?,
             )
         };
-        Self::conversion_response(src_fmt, dst_fmt, &src_bytes, &dst_bytes, &[])
+        Self::conversion_response(src_fmt, dst_fmt, &src_bytes, &dst_bytes, &warnings)
     }
 
     /// Legacy text-markup `body` (`[[TABLE_ROW]]`, `[[SHEET_A1]]`, `[[SLIDE]]`, `[[AGENCY]]` lines).
