@@ -160,6 +160,31 @@ test("a failing print dialog removes the pages and reports the error; afterprint
   assert.equal(ok.doc.adoptedStyleSheets.length, 0);
 });
 
+test("the smoke step checks the prepared pages and rules but never opens the print dialog", async () => {
+  const t = setup({ pages: makePages(12) });
+  assert.equal(await t.print.smoke(), "pages=12 rules=3");
+  assert.deepEqual(t.requests.map(([, p]) => [p.from, p.count]), [[0, 10], [10, 10]]);
+  assert.equal(t.printed.length, 0, "print() of the window is not called");
+  assert.equal(t.notes.includes("인쇄 대화상자를 여는 중…"), false);
+  assert.equal(t.doc.adoptedStyleSheets.length, 0, "the hidden root and its rules are removed again");
+  assert.equal([...t.byId.values()].some((n) => n.id === t.internals.ROOT_ID && !n.removed), false);
+  assert.equal(t.print.isBusy(), false);
+  assert.equal(await t.print.print(), true, "a real print still works afterwards");
+  assert.equal(t.printed.length, 1);
+});
+
+test("the smoke step fails with a message when printing is unsupported, empty, cancelled or busy", async () => {
+  await assert.rejects(setup({ pages: makePages(1), capabilities: [] }).print.smoke(), /지원하지 않습니다/);
+  await assert.rejects(setup({ pages: [] }).print.smoke(), /인쇄할 쪽이 없습니다/);
+  await assert.rejects(setup({ pages: [{ svg: "<svg/>", widthMm: 0, heightMm: 297 }] }).print.smoke(), /올바르지 않은 쪽/);
+  const t = setup({ pages: makePages(40) });
+  const running = t.print.print();
+  await new Promise((r) => setImmediate(r));
+  await assert.rejects(t.print.smoke(), /인쇄 준비가 끝나지 않았습니다/);
+  t.print.cancel();
+  assert.equal(await running, false);
+});
+
 test("the shell wires printing: menu item, shortcut, no new shell command, only inline-free CSS", () => {
   const app = UI("app.js");
   assert.ok(app.includes("__EASYOFFICE_CREATE_HWP_PRINT__") && app.includes('"hwp-print"'));

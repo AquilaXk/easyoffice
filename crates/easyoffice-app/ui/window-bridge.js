@@ -20,6 +20,8 @@
     SLIDE: ["pptx", "ppt", "ppsx", "odp"],
     PDF: ["pdf"],
   });
+  // Smoke step the second window reports once it has loaded (`smoke_steps.rs`).
+  const SMOKE_WINDOW_STEP = "window_loaded";
   const POPUP_FEATURES = "popup=yes,width=1280,height=860";
 
   function kindForFileName(name) {
@@ -446,19 +448,44 @@
       }
     }
 
-    // `EasyOffice.exe --smoke`: the first window runs the HWP round trip and then opens a second
-    // window; that window reports that it loaded and closes itself again.
-    async function runSmoke({ invokeIpc, runHwpSmoke }) {
+    // `EasyOffice.exe --smoke`: the first window runs the steps in order (each resolves with its
+    // detail text or rejects with the reason), then opens a second window; that window reports that
+    // it loaded and closes itself again. Every result goes to the shell as a marker over an
+    // ordinary engine call (`smoke.rs` lists the accepted names); the first failure stops the run.
+    function reportSmoke(invokeIpc, ok, name, text) {
+      const marker = ok ? "EASYOFFICE_SMOKE_STEP_OK " : "EASYOFFICE_SMOKE_STEP_FAIL ";
+      return Promise.resolve(invokeIpc("scrub_pii", marker + name + " " + text)).catch(() => null);
+    }
+
+    function failureText(err) {
+      return err instanceof Error ? err.message : String(err);
+    }
+
+    async function runSmokeStep(invokeIpc, name, run) {
+      let detail;
+      try {
+        detail = String(await run());
+      } catch (err) {
+        await reportSmoke(invokeIpc, false, name, failureText(err));
+        return false;
+      }
+      await reportSmoke(invokeIpc, true, name, detail);
+      return true;
+    }
+
+    async function runSmoke({ invokeIpc, steps }) {
       const role = env.__EASYOFFICE_SMOKE__;
       if (!role) return;
       if (role === "secondary") {
-        await invokeIpc("scrub_pii", "EASYOFFICE_SMOKE_WINDOW_OK " + module).catch(() => null);
+        await reportSmoke(invokeIpc, true, SMOKE_WINDOW_STEP, module);
         await closeWindow();
         return;
       }
-      await runHwpSmoke();
+      for (const [name, run] of Object.entries(steps)) {
+        if (!(await runSmokeStep(invokeIpc, name, run))) return;
+      }
       await newDocument("DOC").catch((err) =>
-        invokeIpc("scrub_pii", "EASYOFFICE_SMOKE_HWP_ROUNDTRIP_FAIL 두 번째 창: " + (err?.message || String(err))).catch(() => null)
+        reportSmoke(invokeIpc, false, SMOKE_WINDOW_STEP, "두 번째 창: " + failureText(err))
       );
     }
 

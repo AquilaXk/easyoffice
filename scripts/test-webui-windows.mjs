@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import test from "node:test";
 import { loadUiModule } from "./test-support/load-ui-module.mjs";
 import { switchModule, typeIntoDocParagraph, createMemoryStorage } from "./test-support/modules.mjs";
@@ -496,4 +497,89 @@ test("home screen and dialog files carry their hop source header and are listed 
     assert.ok(read(file).includes("Edward Kim"), `${file} carries the copyright`);
     assert.ok(notices.includes(`ui/${file}`) && notices.includes(source), `${file} is in the notices table`);
   }
+});
+
+// ---- --smoke steps ---------------------------------------------------------------------------------
+
+function smokeBridge(role, shellOverrides = {}) {
+  const env = { location: { search: "?module=HWP&win=w-hwp", protocol: "tauri:" }, __EASYOFFICE_SMOKE__: role };
+  loadUiModule(WINDOW_BRIDGE_JS, env);
+  const shellCalls = [];
+  const bridge = env.__EASYOFFICE_WINDOW_BRIDGE__.createWindowBridge({
+    document: { title: "", querySelectorAll: () => [], getElementById: () => null },
+    env,
+    desktopBridge: {
+      isAvailable: () => true,
+      windowCommand: async (key, args) => {
+        shellCalls.push({ key, args });
+        if (shellOverrides[key]) throw shellOverrides[key];
+        return null;
+      },
+    },
+  });
+  const reports = [];
+  const invokeIpc = async (command, payload) => { reports.push({ command, payload }); };
+  return { bridge, reports, shellCalls, invokeIpc };
+}
+
+test("smoke: the first window reports each step in order and then opens the second window", async () => {
+  const t = smokeBridge(true);
+  const ran = [];
+  const steps = {
+    hwp: async () => { ran.push("hwp"); return "bytes=512"; },
+    pdf: async () => { ran.push("pdf"); return 7; },
+    print: async () => { ran.push("print"); return "pages=1 rules=2"; },
+  };
+  await t.bridge.runSmoke({ invokeIpc: t.invokeIpc, steps });
+  assert.deepEqual(ran, ["hwp", "pdf", "print"]);
+  assert.deepEqual(t.reports, [
+    { command: "scrub_pii", payload: "EASYOFFICE_SMOKE_STEP_OK hwp bytes=512" },
+    { command: "scrub_pii", payload: "EASYOFFICE_SMOKE_STEP_OK pdf 7" },
+    { command: "scrub_pii", payload: "EASYOFFICE_SMOKE_STEP_OK print pages=1 rules=2" },
+  ]);
+  assert.deepEqual(t.shellCalls, [{ key: "openDocumentWindow", args: { kind: "DOC" } }]);
+});
+
+test("smoke: the first failing step is reported, stops the run and opens no second window", async () => {
+  const t = smokeBridge(true);
+  const ran = [];
+  const steps = {
+    hwp: async () => "ok",
+    pdf: async () => { throw new Error("쪽 수(0)가 범위를 벗어납니다"); },
+    print: async () => { ran.push("print"); return "never"; },
+  };
+  await t.bridge.runSmoke({ invokeIpc: t.invokeIpc, steps });
+  assert.deepEqual(t.reports.map((r) => r.payload), [
+    "EASYOFFICE_SMOKE_STEP_OK hwp ok",
+    "EASYOFFICE_SMOKE_STEP_FAIL pdf 쪽 수(0)가 범위를 벗어납니다",
+  ]);
+  assert.deepEqual(ran, []);
+  assert.deepEqual(t.shellCalls, []);
+  const text = smokeBridge(true);
+  await text.bridge.runSmoke({ invokeIpc: text.invokeIpc, steps: { hwp: () => Promise.reject("plain text") } });
+  assert.equal(text.reports[0].payload, "EASYOFFICE_SMOKE_STEP_FAIL hwp plain text");
+});
+
+test("smoke: a second window that cannot be opened fails the window_loaded step", async () => {
+  const t = smokeBridge(true, { openDocumentWindow: new Error("창 만들기 실패") });
+  await t.bridge.runSmoke({ invokeIpc: t.invokeIpc, steps: {} });
+  assert.deepEqual(t.reports.map((r) => r.payload), ["EASYOFFICE_SMOKE_STEP_FAIL window_loaded 두 번째 창: 창 만들기 실패"]);
+});
+
+test("smoke: the second window reports that it loaded and closes itself; a normal run does nothing", async () => {
+  const second = smokeBridge("secondary");
+  await second.bridge.runSmoke({ invokeIpc: second.invokeIpc, steps: { hwp: () => assert.fail("a second window runs no steps") } });
+  assert.deepEqual(second.reports.map((r) => r.payload), ["EASYOFFICE_SMOKE_STEP_OK window_loaded HWP"]);
+  assert.deepEqual(second.shellCalls.map((c) => c.key), ["closeCurrentWindow"]);
+  const normal = smokeBridge(undefined);
+  await normal.bridge.runSmoke({ invokeIpc: normal.invokeIpc, steps: { hwp: () => assert.fail("not a smoke run") } });
+  assert.deepEqual([normal.reports, normal.shellCalls], [[], []]);
+});
+
+test("smoke: the page wiring keeps the step order and app.js stays under the line ceiling", () => {
+  const app = fs.readFileSync(new URL("../crates/easyoffice-app/ui/app.js", import.meta.url), "utf8");
+  const wiring = /const smokeSteps = \{ (.*) \};/.exec(app);
+  assert.ok(wiring, "app.js defines the smoke steps");
+  assert.deepEqual([...wiring[1].matchAll(/(\w+): \(\) =>/g)].map((m) => m[1]), ["hwp", "pdf", "print"]);
+  assert.ok(app.split("\n").length < 1000);
 });

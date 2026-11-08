@@ -245,18 +245,15 @@ test("save exports HWP bytes, delivers them as .hwp and clears the editor dirty 
   assert.equal(studio.requests.at(-1).method, "notifySaved");
 });
 
-test("smoke round trip fails (and says so through the engine call) when typed input cannot reach the editor", async () => {
+test("the smoke hwp step rejects with the reason when typed input cannot reach the editor", async () => {
   const { hostApi, ipcCalls } = loadHost();
-  await hostApi.runSmoke(() => hostApi.onModuleActivated("HWP"));
-  assert.equal(ipcCalls.length, 1);
-  assert.equal(ipcCalls[0].cmd, "scrub_pii");
-  assert.match(ipcCalls[0].payload, /^EASYOFFICE_SMOKE_HWP_ROUNDTRIP_FAIL /);
+  await assert.rejects(hostApi.runSmoke(() => hostApi.onModuleActivated("HWP")), /편집기에 입력이 반영되지 않았습니다/);
+  assert.equal(ipcCalls.length, 0, "the window bridge reports the result, the host makes no engine call");
 });
 
-test("smoke round trip fails when the bundle is missing", async () => {
-  const { hostApi, ipcCalls } = loadHost({ fetchOk: false });
-  await hostApi.runSmoke(() => hostApi.onModuleActivated("HWP"));
-  assert.match(ipcCalls[0].payload, /ROUNDTRIP_FAIL .*구성 요소가 포함되지 않은 빌드/);
+test("the smoke hwp step rejects when the bundle is missing", async () => {
+  const { hostApi } = loadHost({ fetchOk: false });
+  await assert.rejects(hostApi.runSmoke(() => hostApi.onModuleActivated("HWP")), /구성 요소가 포함되지 않은 빌드/);
 });
 
 async function createIntegration({ bundle }) {

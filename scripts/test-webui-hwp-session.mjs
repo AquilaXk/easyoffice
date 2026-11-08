@@ -601,3 +601,31 @@ test("PDF export: cancelling the save dialog and shell errors are reported witho
   assert.equal(await failing.session.exportPdf(), null);
   assert.match(feedbackOf(failing), /^PDF 내보내기 실패: .*1쪽 SVG를 읽지 못했습니다/);
 });
+
+test("PDF smoke step: sends the page SVGs as smoke.pdf and reports pages and bytes from the shell's answer", async () => {
+  const { sent, exportPdf } = pdfRecorder({ status: "saved", name: "smoke.pdf", bytes: 321 });
+  const ctx = load({ exportPdf });
+  pdfPages(ctx, 2);
+  assert.equal(await ctx.session.smokePdf(), "pages=2 bytes=321");
+  assert.deepEqual(sent, [{ fileName: "smoke.pdf", pages: ['<svg id="p0"/>', '<svg id="p1"/>'] }]);
+  assert.equal(feedbackOf(ctx), "", "the smoke step shows no status text");
+});
+
+test("PDF smoke step: rejects when the shell is missing, the page count is wrong or the answer is not the smoke save", async () => {
+  const plain = load();
+  pdfPages(plain, 1);
+  await assert.rejects(plain.session.smokePdf(), /데스크톱 앱의 한글 편집기에서만/);
+  const { exportPdf } = pdfRecorder();
+  const wrongName = load({ exportPdf });
+  pdfPages(wrongName, 1);
+  await assert.rejects(wrongName.session.smokePdf(), /검사 결과를 돌려주지 않았습니다/);
+  const dialogAnswer = load({ exportPdf: pdfRecorder({ status: "cancelled", name: null, bytes: 0 }).exportPdf });
+  pdfPages(dialogAnswer, 1);
+  await assert.rejects(dialogAnswer.session.smokePdf(), /검사 결과를 돌려주지 않았습니다/);
+  const empty = load({ exportPdf });
+  pdfPages(empty, 0);
+  await assert.rejects(empty.session.smokePdf(), /쪽 수\(0\)/);
+  const failing = load({ exportPdf: pdfRecorder(new Error("1쪽 SVG를 읽지 못했습니다")).exportPdf });
+  pdfPages(failing, 1);
+  await assert.rejects(failing.session.smokePdf(), /1쪽 SVG를 읽지 못했습니다/);
+});
