@@ -12,6 +12,7 @@
   const APP_TITLE = "EasyOffice";
   const UNTITLED = "제목 없음";
   const DIRTY_MARK = "● ";
+  const CLOSE_CHOICES = Object.freeze(["save", "discard", "cancel"]);
   const ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
   const EXTENSION_KINDS = Object.freeze({
     DOC: ["docx", "doc", "odt", "rtf", "md", "markdown", "txt"],
@@ -330,36 +331,22 @@
       if (desktopAvailable()) await shell("quitApp", {});
     }
 
-    function askCloseChoice() {
-      const dialog = document.getElementById("close-confirm-dialog");
-      if (!dialog || typeof dialog.showModal !== "function") {
+    // The save prompt is the shell's native dialog (`confirm_close`, PD-136): it names the document
+    // itself and answers save / discard / cancel. The page sends no wording and no file name. Any
+    // other answer, a refused call included, counts as cancel so a close never discards by accident.
+    // Without the shell (the `--serve` preview) the browser's own confirmation stands in.
+    async function askCloseChoice() {
+      if (!desktopAvailable()) {
         const ok = typeof env.confirm === "function" ? env.confirm("저장하지 않은 변경 사항이 있습니다. 저장하지 않고 닫을까요?") : true;
-        return Promise.resolve(ok ? "discard" : "cancel");
+        return ok ? "discard" : "cancel";
       }
-      const text = document.getElementById("close-dialog-text");
-      if (text) text.textContent = (getDocumentName() || UNTITLED) + "의 변경 내용을 저장할까요?";
-      return new Promise((resolve) => {
-        let settled = false;
-        const cleanups = [];
-        const finish = (choice) => {
-          if (settled) return;
-          settled = true;
-          for (const off of cleanups) off();
-          if (dialog.open) dialog.close();
-          resolve(choice);
-        };
-        for (const [id, choice] of [["btn-close-save", "save"], ["btn-close-discard", "discard"], ["btn-close-cancel", "cancel"]]) {
-          const btn = document.getElementById(id);
-          if (!btn) continue;
-          const onClick = () => finish(choice);
-          btn.addEventListener("click", onClick);
-          cleanups.push(() => btn.removeEventListener?.("click", onClick));
-        }
-        const onClose = () => finish("cancel");
-        dialog.addEventListener("close", onClose);
-        cleanups.push(() => dialog.removeEventListener?.("close", onClose));
-        dialog.showModal();
-      });
+      try {
+        const choice = await shell("confirmClose", {});
+        return CLOSE_CHOICES.includes(choice) ? choice : "cancel";
+      } catch (err) {
+        feedback("저장 확인 창을 열지 못했습니다: " + (err?.message || String(err)));
+        return "cancel";
+      }
     }
 
     // The window stays open: its next close asks again, and a running "끝내기" (quit from the menu)

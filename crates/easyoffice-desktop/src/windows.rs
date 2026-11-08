@@ -99,13 +99,21 @@ pub fn window_url(kind: WindowKind, label: &str) -> String {
 
 /// "파일 이름 — EasyOffice", with a leading mark while the document has unsaved changes.
 pub fn window_title(name: &str, dirty: bool) -> String {
+    format!(
+        "{}{} — EasyOffice",
+        if dirty { "● " } else { "" },
+        shown_name(name)
+    )
+}
+
+/// The name a window shows for its document: the reported name, or "제목 없음" while it has none.
+fn shown_name(name: &str) -> &str {
     let shown = name.trim();
-    let shown = if shown.is_empty() {
+    if shown.is_empty() {
         "제목 없음"
     } else {
         shown
-    };
-    format!("{}{shown} — EasyOffice", if dirty { "● " } else { "" })
+    }
 }
 
 /// File name for display (never a directory), trimmed to a sane length.
@@ -215,6 +223,11 @@ impl WindowRegistry {
             entry.close_prompt = None;
         }
         Some(window_title(&entry.name, dirty))
+    }
+
+    /// The document name of `label` as its title shows it (the native save prompt names it).
+    pub fn shown_name(&self, label: &str) -> String {
+        shown_name(self.windows.get(label).map_or("", |w| w.name.as_str())).to_string()
     }
 
     /// Some window holds changes that were not saved.
@@ -419,6 +432,22 @@ mod tests {
             "● 보고서.docx — EasyOffice"
         );
         assert_eq!(window_title("  ", false), "제목 없음 — EasyOffice");
+    }
+
+    #[test]
+    fn the_shown_name_of_a_window_falls_back_to_untitled() {
+        let mut reg = WindowRegistry::default();
+        reg.register("doc-1-a", WindowKind::Doc);
+        assert_eq!(
+            reg.shown_name("doc-1-a"),
+            "제목 없음",
+            "nothing reported yet"
+        );
+        reg.set_state("doc-1-a", "  예산.xlsx ", true);
+        assert_eq!(reg.shown_name("doc-1-a"), "예산.xlsx");
+        reg.set_state("doc-1-a", "   ", true);
+        assert_eq!(reg.shown_name("doc-1-a"), "제목 없음");
+        assert_eq!(reg.shown_name("missing"), "제목 없음");
     }
 
     #[test]

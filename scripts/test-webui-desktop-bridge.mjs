@@ -355,4 +355,16 @@ test("the browser texts equal the shell's wording and the command is granted lik
   assert.ok(caps.permissions.includes("allow-confirm-dialog"));
   const commands = fs.readFileSync(new URL("../crates/easyoffice-desktop/src/app_commands.rs", import.meta.url), "utf8");
   assert.ok(commands.includes('"confirm_dialog"'));
+  assert.ok(caps.permissions.includes("allow-confirm-close"), "the close prompt is granted like the other app commands");
+  assert.ok(commands.includes('"confirm_close"'));
+  assert.equal(sandbox.__EASYOFFICE_DESKTOP_BRIDGE__.WINDOW_COMMANDS.confirmClose, "confirm_close");
+});
+
+test("the close prompt wording lives in the shell only: the page holds no text for it", () => {
+  const bridge = fs.readFileSync(new URL("../crates/easyoffice-app/ui/window-bridge.js", import.meta.url), "utf8");
+  const html = fs.readFileSync(new URL("../crates/easyoffice-app/ui/index.html", import.meta.url), "utf8");
+  assert.ok(!html.includes("close-confirm-dialog") && !html.includes("btn-close-save"), "no page dialog for the save prompt");
+  assert.ok(!bridge.includes("변경 내용을 저장할까요"), "the document name and wording come from the shell");
+  const rust = fs.readFileSync(new URL("../crates/easyoffice-desktop/src/confirm_dialog.rs", import.meta.url), "utf8");
+  assert.ok(rust.includes('"변경 내용을 저장할까요?"') || rust.includes("의 변경 내용을 저장할까요?"));
 });

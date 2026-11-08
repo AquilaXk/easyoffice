@@ -94,6 +94,11 @@ impl AppWindows {
         }
     }
 
+    /// The document name `label` reports, "제목 없음" while it has none.
+    pub fn shown_name(&self, label: &str) -> String {
+        locked(&self.registry).shown_name(label)
+    }
+
     /// True while any window reports unsaved changes (the signed update waits for them).
     pub fn has_unsaved_documents(&self) -> bool {
         locked(&self.registry).has_unsaved()

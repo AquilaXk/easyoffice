@@ -34,9 +34,6 @@ select:focus-visible,
 .topbar-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .action-btn, .secondary-btn { padding: 5px 10px; font-size: 12px; color: var(--ui-text); background: transparent; white-space: nowrap; flex-shrink: 0; }
 .action-btn:hover, .secondary-btn:hover { background: var(--ui-hover); }
-.primary-btn { padding: 5px 12px; border-radius: 4px; font-size: 12px; font-weight: 600; background: var(--accent-strong); color: var(--ui-text-on-accent); white-space: nowrap; flex-shrink: 0; }
-:root[data-theme-effective="dark"] .primary-btn { color: var(--ui-bg); }
-.primary-btn:hover { filter: brightness(0.92); }
 .ctx-badge, .matrix-badge, .ime-badge { font-size: 11px; color: var(--ui-text-muted); }
 .ctx-badge { color: var(--accent-strong); font-weight: 600; }
 .outline-list { list-style: none; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--ui-border-light); }

@@ -16,7 +16,7 @@ function recordingShell(overrides = {}) {
   const commands = {};
   for (const name of [
     "open_document_window", "open_file_in_new_window", "take_pending_open", "report_window_state",
-    "close_current_window", "list_recent_documents", "clear_recent_documents", "open_recent_document", "report_menu_state", "end_close_prompt", "ack_close_prompt", "quit_app",
+    "close_current_window", "list_recent_documents", "clear_recent_documents", "open_recent_document", "report_menu_state", "end_close_prompt", "ack_close_prompt", "confirm_close", "quit_app",
   ]) {
     commands[name] = (args) => {
       calls.push({ name, args });
@@ -41,6 +41,19 @@ async function openWindow(search, shellOverrides, options = {}) {
     ...options.harness,
   });
   return { ...harness, shell };
+}
+
+// The shell's native save prompt (`confirm_close`): each call takes the next queued answer, which may be
+// a promise so a test can hold the dialog open.
+function closeAnswers(...answers) {
+  const queue = [...answers];
+  return { confirm_close: () => queue.shift() };
+}
+
+function openPrompt() {
+  let answer;
+  const promise = new Promise((resolve) => { answer = resolve; });
+  return { promise, answer };
 }
 
 test("launch parameters are parsed strictly", () => {
@@ -328,50 +341,56 @@ test("a cancelled open dialog keeps the start window", async () => {
   assert.equal(shell.named("close_current_window").length, 0);
 });
 
-test("File menu 닫기 asks before discarding unsaved changes", async () => {
-  const { document, shell, userClick, advanceTimers } = await openWindow("?module=DOC&win=w-close", {}, { localStorage: createMemoryStorage() });
+test("File menu 닫기 asks with the native prompt before discarding unsaved changes", async () => {
+  const { document, shell, userClick, advanceTimers } = await openWindow("?module=DOC&win=w-close", closeAnswers("cancel"), { localStorage: createMemoryStorage() });
   userClick(document.querySelector("[data-window-close]"));
   await flushAsyncTurns();
   assert.equal(shell.named("close_current_window").length, 1, "a clean window closes immediately");
+  assert.equal(shell.named("confirm_close").length, 0, "a clean window asks nothing");
 
   typeIntoDocParagraph(document, "저장하지 않은 편집");
   advanceTimers(3000);
   await flushAsyncTurns(10);
   userClick(document.querySelector("[data-window-close]"));
   await flushAsyncTurns();
-  assert.equal(document.getElementById("close-confirm-dialog").open, true);
-  assert.equal(shell.named("close_current_window").length, 1);
+  assert.equal(shell.named("confirm_close").length, 1);
+  assert.equal(shell.named("close_current_window").length, 1, "the answer was cancel: the window stays");
+  assert.equal(document.getElementById("close-confirm-dialog"), null, "the prompt is the shell's, the page has no dialog of its own");
 });
 
 test("close request: 저장 안 함 closes, 취소 keeps the window, 저장 saves first", async () => {
-  const { document, shell, host, userClick, advanceTimers } = await openWindow("?module=DOC&win=w-flow", {}, { localStorage: createMemoryStorage() });
+  const held = openPrompt();
+  const { document, shell, host, advanceTimers } = await openWindow(
+    "?module=DOC&win=w-flow",
+    closeAnswers(held.promise, "save", "discard"),
+    { localStorage: createMemoryStorage() },
+  );
   assert.equal(typeof host.__EASYOFFICE_CLOSE_REQUEST__, "function");
   typeIntoDocParagraph(document, "편집 내용");
   advanceTimers(3000);
   await flushAsyncTurns(10);
-  const dialog = document.getElementById("close-confirm-dialog");
 
   const first = host.__EASYOFFICE_CLOSE_REQUEST__();
   await flushAsyncTurns();
-  assert.equal(dialog.open, true);
-  assert.equal(document.getElementById("close-dialog-title").textContent, "저장 확인");
-  assert.equal(document.getElementById("close-dialog-text").textContent, "제목 없음의 변경 내용을 저장할까요?", "the prompt names the document, as the reference app does");
+  assert.equal(shell.named("confirm_close").length, 1);
+  assert.deepEqual(shell.named("confirm_close")[0].args, {}, "no wording and no file name travels to the shell: it names the document itself");
   assert.equal(shell.named("ack_close_prompt").length, 1, "the shell hears that the prompt is shown");
+  const order = shell.calls.map((c) => c.name);
+  assert.ok(order.indexOf("ack_close_prompt") < order.indexOf("confirm_close"), "the confirmation goes out right before the native window");
   const secondWhileOpen = host.__EASYOFFICE_CLOSE_REQUEST__();
   await flushAsyncTurns();
   assert.equal(shell.named("ack_close_prompt").length, 2, "a repeated request joins the open prompt and confirms it again");
-  userClick(document.getElementById("btn-close-cancel"));
+  assert.equal(shell.named("confirm_close").length, 1, "and does not open a second native window");
+  held.answer("cancel");
   assert.equal(await secondWhileOpen, await first, "both requests get the one answer");
-  assert.equal(dialog.open, false);
   assert.equal(shell.named("close_current_window").length, 0);
   assert.equal(shell.named("end_close_prompt").length, 1, "취소 ends the close prompt (and a quit from the menu)");
 
   const second = host.__EASYOFFICE_CLOSE_REQUEST__();
-  await flushAsyncTurns();
-  assert.equal(shell.named("ack_close_prompt").length, 3, "the next prompt is confirmed again");
-  userClick(document.getElementById("btn-close-save"));
   await second;
   await flushAsyncTurns(10);
+  assert.equal(shell.named("ack_close_prompt").length, 3, "the next prompt is confirmed again");
+  assert.equal(shell.named("confirm_close").length, 2);
   assert.equal(shell.named("save_document_file").length, 1, "저장 runs the native save first");
   assert.equal(shell.named("close_current_window").length, 1);
   assert.equal(shell.named("end_close_prompt").length, 1, "a close that goes through does not end the prompt");
@@ -379,51 +398,59 @@ test("close request: 저장 안 함 closes, 취소 keeps the window, 저장 save
   typeIntoDocParagraph(document, "다시 편집");
   advanceTimers(3000);
   await flushAsyncTurns(10);
-  const third = host.__EASYOFFICE_CLOSE_REQUEST__();
-  await flushAsyncTurns();
-  userClick(document.getElementById("btn-close-discard"));
-  await third;
+  await host.__EASYOFFICE_CLOSE_REQUEST__();
+  assert.equal(shell.named("save_document_file").length, 1, "저장 안 함 does not save");
   assert.equal(shell.named("close_current_window").length, 2);
 });
 
+test("anything but a clear save or discard keeps the window: unknown answers and a refused prompt count as cancel", async () => {
+  for (const answer of [null, undefined, "", "yes", "SAVE", true, { choice: "discard" }, new Error("창을 열지 못했습니다")]) {
+    const responses = answer instanceof Error ? { confirm_close: () => { throw answer; } } : closeAnswers(answer);
+    const { document, shell, host, advanceTimers } = await openWindow("?module=DOC&win=w-odd", responses, { localStorage: createMemoryStorage() });
+    typeIntoDocParagraph(document, "편집 내용");
+    advanceTimers(3000);
+    await flushAsyncTurns(10);
+    await host.__EASYOFFICE_CLOSE_REQUEST__();
+    await flushAsyncTurns(10);
+    assert.equal(shell.named("close_current_window").length, 0, `${String(answer)} must not close`);
+    assert.equal(shell.named("save_document_file").length, 0);
+    assert.equal(shell.named("end_close_prompt").length, 1, "the prompt ends so the next close asks again");
+  }
+});
+
 test("a save that throws keeps the window open and ends the close prompt", async () => {
-  const { document, shell, host, userClick, advanceTimers } = await openWindow(
+  const { document, shell, host, advanceTimers } = await openWindow(
     "?module=DOC&win=w-throw-save",
-    { save_document_file: () => { throw new Error("디스크 오류"); } },
+    { ...closeAnswers("save"), save_document_file: () => { throw new Error("디스크 오류"); } },
     { localStorage: createMemoryStorage() },
   );
   typeIntoDocParagraph(document, "편집 내용");
   advanceTimers(3000);
   await flushAsyncTurns(10);
-  const pending = host.__EASYOFFICE_CLOSE_REQUEST__();
-  await flushAsyncTurns();
-  userClick(document.getElementById("btn-close-save"));
-  await pending;
+  await host.__EASYOFFICE_CLOSE_REQUEST__();
   await flushAsyncTurns(10);
   assert.equal(shell.named("close_current_window").length, 0);
   assert.equal(shell.named("end_close_prompt").length, 1);
 });
 
 test("a cancelled save dialog keeps the window open", async () => {
-  const { document, shell, host, userClick, advanceTimers } = await openWindow(
+  const { document, shell, host, advanceTimers } = await openWindow(
     "?module=DOC&win=w-cancel-save",
-    { save_document_file: () => ({ status: "cancelled" }) },
+    { ...closeAnswers("save"), save_document_file: () => ({ status: "cancelled" }) },
     { localStorage: createMemoryStorage() },
   );
   typeIntoDocParagraph(document, "편집 내용");
   advanceTimers(3000);
   await flushAsyncTurns(10);
-  const pending = host.__EASYOFFICE_CLOSE_REQUEST__();
-  await flushAsyncTurns();
-  userClick(document.getElementById("btn-close-save"));
-  await pending;
+  await host.__EASYOFFICE_CLOSE_REQUEST__();
   await flushAsyncTurns(10);
   assert.equal(shell.named("close_current_window").length, 0);
   assert.equal(shell.named("end_close_prompt").length, 1, "a save that did not happen ends the close prompt");
 });
 
 test("a prompt the page opened itself is confirmed when the shell asks for a close", async () => {
-  const { document, shell, host, userClick, advanceTimers } = await openWindow("?module=DOC&win=w-page-first", {}, { localStorage: createMemoryStorage() });
+  const held = openPrompt();
+  const { document, shell, host, userClick, advanceTimers } = await openWindow("?module=DOC&win=w-page-first", closeAnswers(held.promise), { localStorage: createMemoryStorage() });
   typeIntoDocParagraph(document, "편집 내용");
   advanceTimers(3000);
   await flushAsyncTurns(10);
@@ -431,15 +458,14 @@ test("a prompt the page opened itself is confirmed when the shell asks for a clo
   assert.ok(closeButton, "the page has its own close button");
   userClick(closeButton);
   await flushAsyncTurns();
-  const dialog = document.getElementById("close-confirm-dialog");
-  assert.equal(dialog.open, true);
+  assert.equal(shell.named("confirm_close").length, 1);
   assert.equal(shell.named("ack_close_prompt").length, 1);
   // The shell asks as well (Cmd+Q, the window's close button): it has no record of this prompt yet.
   const fromShell = host.__EASYOFFICE_CLOSE_REQUEST__();
   await flushAsyncTurns();
   assert.equal(shell.named("ack_close_prompt").length, 2, "the shell's request is answered with a confirmation");
-  assert.equal(dialog.open, true, "still one prompt");
-  userClick(document.getElementById("btn-close-cancel"));
+  assert.equal(shell.named("confirm_close").length, 1, "still one prompt");
+  held.answer("cancel");
   await fromShell;
   assert.equal(shell.named("close_current_window").length, 0);
 });
@@ -598,7 +624,7 @@ test("desktop-only combos are not forwarded without the desktop shell", async ()
 });
 
 test("Ctrl+N and Ctrl+W work from the page itself in the desktop shell", async () => {
-  const { shell, sandbox, document, advanceTimers } = await openWindow("?module=DOC&win=w-keys2", {}, { localStorage: createMemoryStorage() });
+  const { shell, sandbox, document, advanceTimers } = await openWindow("?module=DOC&win=w-keys2", closeAnswers("cancel"), { localStorage: createMemoryStorage() });
   sandbox.dispatchWindowKeydown({ key: "n", ctrlKey: true });
   await flushAsyncTurns();
   assert.deepEqual(shell.named("open_document_window")[0].args, { kind: "DOC" }, "new document of the same kind");
@@ -610,7 +636,7 @@ test("Ctrl+N and Ctrl+W work from the page itself in the desktop shell", async (
   await flushAsyncTurns(10);
   sandbox.dispatchWindowKeydown({ key: "w", ctrlKey: true });
   await flushAsyncTurns();
-  assert.equal(document.getElementById("close-confirm-dialog").open, true);
+  assert.equal(shell.named("confirm_close").length, 1, "Ctrl+W on a dirty window asks with the native prompt");
 });
 
 // Windows and Linux have no native 끝내기 item (PD-121): Ctrl+Q starts the shell's quit queue, which closes

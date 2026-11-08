@@ -44,6 +44,7 @@
     endClosePrompt: "end_close_prompt",
     ackClosePrompt: "ack_close_prompt",
     confirmDialog: "confirm_dialog",
+    confirmClose: "confirm_close",
   });
 
   // Confirmation kinds (`confirm_dialog.rs`, PD-120). The desktop shell shows its own native dialog

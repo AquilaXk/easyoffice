@@ -2155,3 +2155,14 @@
 - **Alternatives rejected** 시작 창에 도구 상자까지 보이는 것(전부 회색이라 쓸모 없음), 시작 창 전용 메뉴를 새로 만드는 것(참조 앱에 없음), 대화상자 항목만 두고 하위 목록을 없애는 것(PD-093 (1) 결정을 바꿈).
 - **Verified by** `node --test scripts/test-webui-windows.mjs`(시작 창에서 메뉴 줄 < 시작 화면 < 상태 줄 순서, 편집 명령 회색·`palette`·`view-theme` 활성, CSS가 메뉴 줄·상태 줄을 숨기지 않음), `scripts/test-webui-hwp-shell.mjs`(명령 목록 공유, `recent-dialog`·`about` 전달, 파일 메뉴 항목 순서), `scripts/test-hwp-studio.mjs`.
 - **Revisit when** 실기기에서 Windows·Linux 시작 창을 확인한 뒤, 참조 앱이 최근 문서 하위 목록을 넣거나 시작 창의 도구 상자 표시가 필요해질 때.
+
+## 111. 닫을 때의 저장 확인은 셸의 네이티브 세 단추 창 (PD-136)
+
+- **Status** Implemented (QA 요청 2026-11-08)
+- **Context** 변경 내용이 있는 창을 닫으면 페이지의 `<dialog>`(`close-confirm-dialog`)가 저장 / 저장 안 함 / 취소를 물었습니다. 참조 앱은 같은 질문을 네이티브 메시지 창으로 묻습니다(`apps/studio-host/src/core/tauri-bridge.ts` 470-490행: 제목 "저장 확인", 본문 "`{파일 이름}`의 변경 내용을 저장할까요?", 종류 경고, 단추 저장 / 저장 안 함 / 취소). 페이지 대화상자는 참조 앱에 없는 자체 디자인이었습니다.
+- **Decision (`PD-136`)** (1) 새 앱 명령 `confirm_close`(`confirm_dialog.rs`, 인수 없음)가 호출한 창 위에 `tauri-plugin-dialog` 2.8.4의 `MessageDialogButtons::YesNoCancelCustom`으로 세 단추 창을 띄우고 `save`·`discard`·`cancel` 한 낱말만 돌려줍니다. 문구(제목, 본문 틀, 단추)는 Rust 상수이고 파일 이름은 페이지가 보내지 않고 셸이 창 레지스트리의 표시 이름(제목 표시줄과 같은 이름, 비면 "제목 없음")으로 만듭니다. 이름의 제어 문자는 공백으로 바꿔 창에 줄을 더하지 못하게 합니다. 경로는 관여하지 않습니다. (2) 답은 저장 단추(예 또는 그 단추의 라벨)와 저장 안 함 단추(아니요 또는 그 라벨)만 `save`·`discard`로 읽고, 창을 닫은 경우를 포함한 그 밖의 모든 답은 `cancel`입니다. 알 수 없는 답과 거부된 호출도 페이지가 `cancel`로 보아 닫기가 작업을 버리는 일이 없게 합니다. (3) 닫기 흐름은 그대로입니다: 확인 신호(`ack_close_prompt`)는 네이티브 창을 호출하기 직전에 보내고(PD-113, 10초 탈출구 유지), 창이 떠 있는 동안 온 두 번째 닫기 요청(Cmd+W, Cmd+Q, 끝내기 큐)은 열린 확인에 합류해 신호만 다시 보내며 두 번째 창을 띄우지 않습니다. 취소와 저장 실패는 `end_close_prompt`로 끝내기 큐를 멈춥니다(PD-119). 암호 문서의 닫기 저장(PD-120)은 저장 답 뒤에 이어집니다. (4) `index.html`의 `close-confirm-dialog`와 쓰이지 않게 된 `.primary-btn` 규칙을 지웁니다(`.close-dialog*` 스타일은 제품 정보 창이 계속 씁니다). `--serve` 미리보기에는 셸이 없어 브라우저 `confirm`이 대신합니다.
+- **Why** 참조 앱과 같은 모양·동작이 목표이고(QA 요청), 문구를 셸이 갖는 쪽이 페이지가 임의 문구를 네이티브 창에 올리지 못하게 하는 PD-120의 경계와 같습니다. 창 모달이라 닫기 중에 문서 편집이 막힙니다.
+- **Trade-offs** 앱 명령이 26개로 늘었습니다(`confirm_dialog`와 달리 종류를 받지 않는 별도 명령, 결과가 둘이 아니라 셋이어서). 네이티브 단추 순서와 모양은 운영체제가 정합니다. 이름이 없는 창은 참조 앱의 "현재 문서" 대신 제목 표시줄과 같은 "제목 없음"으로 부릅니다.
+- **Alternatives rejected** 페이지가 이름을 넘기는 것(페이지가 문구를 정하게 됨), `confirm_dialog`에 세 번째 결과를 억지로 넣는 것(불리언 계약이 깨지고 모든 호출부가 바뀜), 페이지 대화상자 유지(참조 앱에 없는 자체 디자인).
+- **Verified by** `cargo test -p easyoffice-desktop confirm_dialog windows`(제목·단추·본문 문구, 이름의 제어 문자, 예/아니요/라벨 → 저장/저장 안 함, 그 밖의 답 → 취소, 직렬화, 표시 이름 대체값, 명령 목록과 권한 1:1), `node --test scripts/test-webui-windows.mjs`(네이티브 창이 한 번만 뜨고 인수 없음, 신호가 창보다 먼저, 두 번째 요청 합류, 취소·저장·저장 안 함, 알 수 없는 답과 거부는 창을 닫지 않음, 페이지에 대화상자 없음), `scripts/test-webui-desktop-bridge.mjs`. 실제 네이티브 창의 모양과 단추 순서는 실기기 확인 대상입니다.
+- **Revisit when** 참조 앱의 문구나 단추가 바뀔 때, 실기기에서 운영체제별 단추 순서가 어긋날 때.

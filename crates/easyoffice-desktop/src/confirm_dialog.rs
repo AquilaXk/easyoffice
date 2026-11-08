@@ -1,15 +1,19 @@
-//! Native yes/no confirmations for the page (PD-120).
+//! Native confirmations for the page: yes/no kinds (PD-120) and the save prompt of a closing window
+//! (PD-136).
 //!
 //! WKWebView through wry does not implement `window.confirm`, which then answers "cancel" without
 //! showing anything, so every page confirmation goes through a native dialog instead (the reference
 //! app does the same). The page names only a [`ConfirmKind`]; the wording and the button labels are
 //! constants here, so the page cannot put its own text into a native dialog.
 
-use serde::Deserialize;
-use tauri::{AppHandle, WebviewWindow};
-use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Manager, WebviewWindow};
+use tauri_plugin_dialog::{
+    DialogExt, MessageDialogButtons, MessageDialogKind, MessageDialogResult,
+};
 
 use crate::shell_caller::ShellCaller;
+use crate::window_commands::AppWindows;
 use crate::IpcError;
 
 /// The confirmations the page may ask for. An unknown name fails to deserialize and the command is
@@ -101,6 +105,74 @@ pub async fn confirm_dialog(
     .map_err(|err| IpcError::new(format!("확인 창을 열지 못했습니다: {err}")))
 }
 
+/// The user's answer to the save prompt of a window with unsaved changes. The page gets one of
+/// these three words and nothing else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CloseChoice {
+    Save,
+    Discard,
+    Cancel,
+}
+
+// The reference app's save prompt (`apps/studio-host/src/core/tauri-bridge.ts`, `promptUnsavedChanges`).
+const CLOSE_TITLE: &str = "저장 확인";
+const CLOSE_SAVE: &str = "저장";
+const CLOSE_DISCARD: &str = "저장 안 함";
+const CLOSE_CANCEL: &str = CANCEL;
+
+/// "`{file name}`의 변경 내용을 저장할까요?". The name is what the window reported for its title, so
+/// control characters become spaces and it cannot add lines of its own to a native dialog.
+fn close_message(name: &str) -> String {
+    let name: String = name
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    format!("{name}의 변경 내용을 저장할까요?")
+}
+
+/// Which button was pressed. The dialog answers with the label of a custom button, or with
+/// yes / no / cancel depending on the system; closing the dialog or any other answer is cancel, so
+/// work is never discarded without a clear 저장 안 함.
+fn close_choice(result: MessageDialogResult) -> CloseChoice {
+    match result {
+        MessageDialogResult::Yes => CloseChoice::Save,
+        MessageDialogResult::No => CloseChoice::Discard,
+        MessageDialogResult::Custom(label) if label == CLOSE_SAVE => CloseChoice::Save,
+        MessageDialogResult::Custom(label) if label == CLOSE_DISCARD => CloseChoice::Discard,
+        _ => CloseChoice::Cancel,
+    }
+}
+
+/// The save prompt of a window that is being closed with unsaved changes: 저장 / 저장 안 함 /
+/// 취소 over the calling window. The shell words it with the document name the window reported, so
+/// the page sends nothing and no path is involved.
+#[tauri::command]
+pub async fn confirm_close(
+    _caller: ShellCaller,
+    app: AppHandle,
+    window: WebviewWindow,
+) -> Result<CloseChoice, IpcError> {
+    let message = close_message(&app.state::<AppWindows>().shown_name(window.label()));
+    tauri::async_runtime::spawn_blocking(move || {
+        close_choice(
+            app.dialog()
+                .message(message)
+                .title(CLOSE_TITLE)
+                .kind(MessageDialogKind::Warning)
+                .parent(&window)
+                .buttons(MessageDialogButtons::YesNoCancelCustom(
+                    CLOSE_SAVE.to_string(),
+                    CLOSE_DISCARD.to_string(),
+                    CLOSE_CANCEL.to_string(),
+                ))
+                .blocking_show_with_result(),
+        )
+    })
+    .await
+    .map_err(|err| IpcError::new(format!("저장 확인 창을 열지 못했습니다: {err}")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -183,5 +255,56 @@ mod tests {
             (password.accept, password.cancel),
             ("암호 없이 저장", "취소")
         );
+    }
+
+    #[test]
+    fn the_close_prompt_follows_the_reference_wording_and_names_the_document() {
+        assert_eq!(CLOSE_TITLE, "저장 확인");
+        assert_eq!(
+            (CLOSE_SAVE, CLOSE_DISCARD, CLOSE_CANCEL),
+            ("저장", "저장 안 함", "취소")
+        );
+        assert_eq!(
+            close_message("보고서.docx"),
+            "보고서.docx의 변경 내용을 저장할까요?"
+        );
+        // The name is the page's report, so it cannot add lines or other control text to the dialog.
+        assert_eq!(
+            close_message("a\nb\t\u{7}c.hwp"),
+            "a b  c.hwp의 변경 내용을 저장할까요?"
+        );
+    }
+
+    #[test]
+    fn the_close_prompt_answer_is_save_discard_or_cancel_and_anything_else_cancels() {
+        use tauri_plugin_dialog::MessageDialogResult as R;
+        let custom = |label: &str| R::Custom(label.to_string());
+        assert_eq!(close_choice(R::Yes), CloseChoice::Save);
+        assert_eq!(close_choice(custom(CLOSE_SAVE)), CloseChoice::Save);
+        assert_eq!(close_choice(R::No), CloseChoice::Discard);
+        assert_eq!(close_choice(custom(CLOSE_DISCARD)), CloseChoice::Discard);
+        assert_eq!(close_choice(R::Cancel), CloseChoice::Cancel);
+        assert_eq!(close_choice(custom(CLOSE_CANCEL)), CloseChoice::Cancel);
+        // A dialog that was closed, or an answer this prompt never offered, must not discard work.
+        for other in [
+            R::Ok,
+            custom(""),
+            custom("evil"),
+            custom("저장 "),
+            custom("yes"),
+        ] {
+            assert_eq!(close_choice(other), CloseChoice::Cancel);
+        }
+    }
+
+    #[test]
+    fn the_close_prompt_answer_reaches_the_page_as_a_fixed_word() {
+        for (choice, word) in [
+            (CloseChoice::Save, "\"save\""),
+            (CloseChoice::Discard, "\"discard\""),
+            (CloseChoice::Cancel, "\"cancel\""),
+        ] {
+            assert_eq!(serde_json::to_string(&choice).unwrap(), word);
+        }
     }
 }
