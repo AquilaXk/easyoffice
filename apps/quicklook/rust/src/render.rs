@@ -110,6 +110,15 @@ pub fn png(page: &Page, max_side: u32) -> Result<Vec<u8>, i32> {
 /// THIRD_PARTY_NOTICES.md): chunks of the pages are renumbered into one object space. The pages go
 /// in as SVG trees directly, where the reference app rasterized them first.
 pub fn pdf(core: &DocumentCore, page_count: u32) -> Result<(Vec<u8>, Page), i32> {
+    pdf_of(page_count, |index| page(core, index))
+}
+
+/// [`pdf`] over any source of pages. A page after the first that cannot be drawn or converted ends
+/// the PDF there, like the other limits; the first page failing fails the call.
+pub(crate) fn pdf_of(
+    page_count: u32,
+    mut next_page: impl FnMut(u32) -> Result<Page, i32>,
+) -> Result<(Vec<u8>, Page), i32> {
     use pdf_writer::{Content, Finish, Name, Pdf, Rect, Ref, TextStr};
     let count = page_count.min(MAX_PREVIEW_PAGES);
     let options = svg2pdf::ConversionOptions {
@@ -127,9 +136,15 @@ pub fn pdf(core: &DocumentCore, page_count: u32) -> Result<(Vec<u8>, Page), i32>
         if index > 0 && started.elapsed() > PDF_PAGE_BUDGET {
             break;
         }
-        let parsed = page(core, index)?;
-        let (chunk, xobject) =
-            svg2pdf::to_chunk(&parsed.tree, options).map_err(|_| STATUS_RENDER_FAILED)?;
+        let converted = next_page(index).and_then(|parsed| {
+            let chunk = svg2pdf::to_chunk(&parsed.tree, options).map_err(|_| STATUS_RENDER_FAILED);
+            chunk.map(|(chunk, xobject)| (parsed, chunk, xobject))
+        });
+        let (parsed, chunk, xobject) = match converted {
+            Ok(done) => done,
+            Err(_) if index > 0 => break,
+            Err(code) => return Err(code),
+        };
         let mut renumbered_to = HashMap::new();
         let chunk = chunk.renumber(|old| *renumbered_to.entry(old).or_insert_with(|| alloc.bump()));
         let xobject = renumbered_to.get(&xobject).copied().unwrap_or(xobject);

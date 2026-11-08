@@ -149,6 +149,29 @@ fn preview_pdf_has_one_page_per_document_page() {
 }
 
 #[test]
+fn a_later_page_that_fails_ends_the_pdf_there_and_a_first_page_that_fails_fails_it() {
+    let good = || render::parse_svg(&svg(r#"<rect width="50" height="50"/>"#));
+    let (pdf, first) = render::pdf_of(5, |index| {
+        if index < 2 {
+            good()
+        } else {
+            Err(STATUS_RENDER_FAILED)
+        }
+    })
+    .expect("the pages before the failure stay");
+    assert!(pdf.starts_with(b"%PDF-"));
+    assert_eq!(
+        count_of(&pdf, b"/Type /Page\n") + count_of(&pdf, b"/Type /Page "),
+        2
+    );
+    assert_eq!(first.width, 100.0);
+    assert_eq!(
+        render::pdf_of(5, |_| Err(STATUS_RENDER_FAILED)).err(),
+        Some(STATUS_RENDER_FAILED)
+    );
+}
+
+#[test]
 fn embedded_picture_is_returned_as_stored_or_reported_missing() {
     let result = embedded(&sample("field-01.hwp"));
     assert_eq!(result.status, STATUS_OK);
