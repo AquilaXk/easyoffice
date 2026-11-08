@@ -85,7 +85,7 @@ pub enum DiskState {
     Unchanged,
     /// Another program changed (or replaced) the file after it was opened.
     Changed,
-    /// The file is gone; saving simply recreates it.
+    /// The file is gone (deleted or moved); saving recreates it, after asking.
     Missing,
 }
 

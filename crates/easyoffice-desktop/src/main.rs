@@ -61,6 +61,7 @@ use shell_caller::ShellCaller;
 use smoke::{SmokeProbe, SMOKE_TIMEOUT};
 use tauri::{AppHandle, Manager, WebviewWindow};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+use tracked_files::DiskState;
 use window_commands::AppWindows;
 use windows::WindowKind;
 
@@ -216,16 +217,23 @@ fn report_save_failure(app: &AppHandle, window: &WebviewWindow, err: &SaveError)
 
 const EXTERNAL_CHANGE_TITLE: &str = "외부 변경 감지";
 
-/// The reference app's wording for a file that changed behind the app's back; the file is named by
-/// its name only (PD-088).
-fn external_change_message(file_name: &str) -> String {
+/// The reference app's wording for a file that changed behind the app's back, or that was deleted
+/// or moved (its reason line, `state.rs` `external_modification_status`); the file is named by its
+/// name only (PD-088).
+fn external_change_message(file_name: &str, state: DiskState) -> String {
+    let reason = if state == DiskState::Missing {
+        "원본 파일이 삭제되었거나 이동되었습니다\n"
+    } else {
+        ""
+    };
     format!(
-        "원본 파일이 EasyOffice 밖에서 변경되었습니다.\n파일: {file_name}\n\n그대로 저장하면 외부에서 변경된 내용이 사라질 수 있습니다."
+        "원본 파일이 EasyOffice 밖에서 변경되었습니다.\n파일: {file_name}\n{reason}\n그대로 저장하면 외부에서 변경된 내용이 사라질 수 있습니다."
     )
 }
 
-/// Writes the document back to its own file. If the file changed on disk since it was opened, a
-/// native dialog asks before overwriting; declining leaves the file alone and reports "cancelled".
+/// Writes the document back to its own file. If the file changed on disk since it was opened, or was
+/// deleted or moved, a native dialog asks before writing over it; declining leaves the file alone
+/// (nothing is recreated) and reports "cancelled".
 async fn save_tracked(
     app: &AppHandle,
     window: &WebviewWindow,
@@ -237,10 +245,10 @@ async fn save_tracked(
     let path = tracked.path.clone();
     let file_name = windows::display_name(&path);
     let result = tauri::async_runtime::spawn_blocking(move || {
-        save_in_place(&path, &tracked.fingerprint, request.bytes(), || {
+        save_in_place(&path, &tracked.fingerprint, request.bytes(), |state| {
             dialog_app
                 .dialog()
-                .message(external_change_message(&file_name))
+                .message(external_change_message(&file_name, state))
                 .title(EXTERNAL_CHANGE_TITLE)
                 .kind(MessageDialogKind::Warning)
                 .parent(&parent)
@@ -391,12 +399,25 @@ mod tests {
 
     #[test]
     fn the_external_change_dialog_names_the_file_and_never_a_path() {
-        let text = external_change_message("보고서.docx");
+        let text = external_change_message("보고서.docx", DiskState::Changed);
         assert_eq!(
             text,
             "원본 파일이 EasyOffice 밖에서 변경되었습니다.\n파일: 보고서.docx\n\n그대로 저장하면 외부에서 변경된 내용이 사라질 수 있습니다."
         );
         assert_eq!(EXTERNAL_CHANGE_TITLE, "외부 변경 감지");
+    }
+
+    #[test]
+    fn a_missing_original_asks_with_the_reference_apps_reason() {
+        let text = external_change_message("보고서.docx", DiskState::Missing);
+        assert_eq!(
+            text,
+            "원본 파일이 EasyOffice 밖에서 변경되었습니다.\n파일: 보고서.docx\n원본 파일이 삭제되었거나 이동되었습니다\n\n그대로 저장하면 외부에서 변경된 내용이 사라질 수 있습니다."
+        );
+        assert!(
+            !text.contains('/') && !text.contains('\\'),
+            "a name, never a path"
+        );
     }
 
     #[test]

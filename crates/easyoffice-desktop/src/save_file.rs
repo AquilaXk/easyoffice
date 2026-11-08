@@ -263,20 +263,22 @@ fn create_unique_sibling(path: &Path) -> std::io::Result<(PathBuf, fs::File)> {
 #[derive(Debug, PartialEq, Eq)]
 pub enum InPlaceResult {
     Saved(Written),
-    /// The file changed on disk and the user chose not to overwrite it.
+    /// The file changed or disappeared on disk and the user chose not to write over it.
     Declined,
 }
 
 /// Saves over the file the document came from. If the file no longer matches the fingerprint taken
-/// when it was opened, `confirm_overwrite` decides (the shell shows a native dialog); the write itself
-/// is the same temp-file + fsync + rename as every other save.
+/// when it was opened, or is gone (deleted or moved), `confirm_overwrite` decides with what was found
+/// (the shell shows a native dialog, as the reference app does); the write itself is the same
+/// temp-file + fsync + rename as every other save.
 pub fn save_in_place(
     path: &Path,
     expected: &Fingerprint,
     bytes: &[u8],
-    confirm_overwrite: impl FnOnce() -> bool,
+    confirm_overwrite: impl FnOnce(DiskState) -> bool,
 ) -> Result<InPlaceResult, SaveError> {
-    if disk_state(path, expected) == DiskState::Changed && !confirm_overwrite() {
+    let state = disk_state(path, expected);
+    if state != DiskState::Unchanged && !confirm_overwrite(state) {
         return Ok(InPlaceResult::Declined);
     }
     write_document_bytes(path, bytes).map(InPlaceResult::Saved)
@@ -535,7 +537,7 @@ mod tests {
         let target = dir.join("a.docx");
         fs::write(&target, b"old").unwrap();
         let seen = Fingerprint::of(&target).unwrap();
-        let result = save_in_place(&target, &seen, b"new!", || panic!("must not ask")).unwrap();
+        let result = save_in_place(&target, &seen, b"new!", |_| panic!("must not ask")).unwrap();
         assert_eq!(saved_bytes(result), 4);
         assert_eq!(fs::read(&target).unwrap(), b"new!");
         assert_no_leftovers(&dir);
@@ -549,30 +551,48 @@ mod tests {
         fs::write(&target, b"old").unwrap();
         let seen = Fingerprint::of(&target).unwrap();
         fs::write(&target, b"edited elsewhere").unwrap();
-        let declined = save_in_place(&target, &seen, b"mine", || false).unwrap();
+        let declined = save_in_place(&target, &seen, b"mine", |_| false).unwrap();
         assert_eq!(declined, InPlaceResult::Declined);
         assert_eq!(fs::read(&target).unwrap(), b"edited elsewhere");
-        let mut asked = false;
-        let accepted = save_in_place(&target, &seen, b"mine", || {
-            asked = true;
+        let mut asked = None;
+        let accepted = save_in_place(&target, &seen, b"mine", |state| {
+            asked = Some(state);
             true
         })
         .unwrap();
-        assert!(asked);
+        assert_eq!(asked, Some(DiskState::Changed));
         assert_eq!(saved_bytes(accepted), 4);
         assert_eq!(fs::read(&target).unwrap(), b"mine");
         let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn a_deleted_original_is_recreated_without_asking() {
+    fn a_deleted_or_moved_original_asks_before_it_is_recreated() {
         let dir = scratch_dir("gone");
         let target = dir.join("a.pdf");
         fs::write(&target, b"old").unwrap();
         let seen = Fingerprint::of(&target).unwrap();
         fs::remove_file(&target).unwrap();
-        let result = save_in_place(&target, &seen, b"back", || panic!("must not ask")).unwrap();
-        assert_eq!(saved_bytes(result), 4);
+
+        let declined = save_in_place(&target, &seen, b"back", |state| {
+            assert_eq!(state, DiskState::Missing);
+            false
+        })
+        .unwrap();
+        assert_eq!(declined, InPlaceResult::Declined);
+        assert!(!target.exists(), "declining recreates nothing");
+        assert_no_leftovers(&dir);
+
+        let mut asked = 0;
+        let accepted = save_in_place(&target, &seen, b"back", |state| {
+            assert_eq!(state, DiskState::Missing);
+            asked += 1;
+            true
+        })
+        .unwrap();
+        assert_eq!(asked, 1);
+        assert_eq!(saved_bytes(accepted), 4);
+        assert_eq!(fs::read(&target).unwrap(), b"back");
         let _ = fs::remove_dir_all(&dir);
     }
 
