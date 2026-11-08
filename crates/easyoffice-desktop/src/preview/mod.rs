@@ -5,23 +5,41 @@
 //! only that picture with seeks (the directory and one stream, never the whole file), checks its magic
 //! bytes (PNG, JPEG, GIF, BMP) and size, and hands the page the bytes in Base64 for a given opaque
 //! recent id. The page never gets a path, and never gets a document's bytes: only this picture.
+//!
+//! A Hangul file without such a picture gets its first page drawn instead (PD-142): rhwp lays the
+//! page out, `usvg`/`resvg` draw it as a PNG. That runs on its own bounded worker (`bounded.rs`) and
+//! fails to nothing, which the page shows as the empty card.
 
+mod bounded;
 mod cache;
 mod ole2;
+mod render;
 mod zip;
 
+use crate::pdf_fonts::shared_font_db;
 use crate::shell_caller::ShellCaller;
+use crate::windows::WindowKind;
 use crate::AppWindows;
+use bounded::{Gate, RenderError};
 use cache::{FileStamp, PreviewCache};
 use serde::Serialize;
-use std::fs::File;
+use std::fs::{File, Metadata};
 use std::io::{Read, Seek, SeekFrom};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
 use tauri::{AppHandle, Manager};
 
-/// Largest picture the shell accepts (compressed and uncompressed alike).
+/// Largest picture the shell accepts from inside a file (compressed and uncompressed alike).
 pub const MAX_THUMBNAIL_BYTES: usize = 256 * 1024;
+/// Largest picture the shell hands the page for a drawn first page (the page refuses more).
+pub const MAX_RENDERED_PNG_BYTES: usize = 1024 * 1024;
+/// Time one first-page render may take before the card stays empty.
+const RENDER_DEADLINE: Duration = Duration::from_secs(10);
+/// Time a request waits for a free render thread before it gives up.
+const PERMIT_WAIT: Duration = Duration::from_secs(2);
+/// Render threads alive at once, running or stuck past their deadline.
+const MAX_RENDER_WORKERS: usize = 2;
 const RECENT_ID_LEN: usize = 16;
 const OLE2_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
 const ZIP_MAGIC: [u8; 4] = *b"PK\x03\x04";
@@ -107,36 +125,136 @@ pub fn is_recent_id(id: &str) -> bool {
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
-/// Managed state: a small cache of the pictures found (or not found) per recent id.
-pub struct PreviewState(Mutex<PreviewCache>);
+/// Managed state: a small cache of the pictures found (or not found) per recent id, the limits of
+/// the first-page renders and the folders of the bundled fonts they draw with.
+pub struct PreviewState {
+    cache: Mutex<PreviewCache>,
+    gate: Arc<Gate>,
+    limits: RenderLimits,
+    font_dirs: Arc<[PathBuf]>,
+}
+
+#[derive(Clone, Copy)]
+struct RenderLimits {
+    deadline: Duration,
+    permit_wait: Duration,
+}
 
 impl PreviewState {
     pub fn new() -> Self {
-        Self(Mutex::new(PreviewCache::default()))
+        Self::with_font_dirs(Vec::new())
+    }
+
+    pub fn with_font_dirs(font_dirs: Vec<PathBuf>) -> Self {
+        Self::with_limits(
+            font_dirs,
+            MAX_RENDER_WORKERS,
+            RenderLimits {
+                deadline: RENDER_DEADLINE,
+                permit_wait: PERMIT_WAIT,
+            },
+        )
+    }
+
+    fn with_limits(font_dirs: Vec<PathBuf>, workers: usize, limits: RenderLimits) -> Self {
+        Self {
+            cache: Mutex::new(PreviewCache::default()),
+            gate: Gate::new(workers),
+            limits,
+            font_dirs: font_dirs.into(),
+        }
+    }
+
+    fn cached(&self, id: &str, stamp: &FileStamp) -> Option<Option<Arc<Thumbnail>>> {
+        self.cache
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(id, stamp)
+    }
+
+    fn remember(&self, id: &str, stamp: FileStamp, found: Option<Arc<Thumbnail>>) {
+        self.cache
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .put(id, stamp, found);
     }
 }
 
+/// The picture of a recent document: the one inside the file, else (Hangul only) its first page.
 pub(crate) fn load_preview(state: &PreviewState, id: &str, path: &Path) -> Option<Arc<Thumbnail>> {
+    let font_dirs = Arc::clone(&state.font_dirs);
+    load_preview_with(state, id, path, move |document| {
+        render::first_page_png(&document, &shared_font_db(&font_dirs))
+    })
+}
+
+/// [`load_preview`] with the first-page step given by the caller (a test hook; the real step runs
+/// on the bounded worker either way). An answer is cached for the file's time and size, a miss
+/// too, except when no render thread was free: that one is the shell's state, not the file's.
+fn load_preview_with(
+    state: &PreviewState,
+    id: &str,
+    path: &Path,
+    render: impl FnOnce(Vec<u8>) -> Result<Vec<u8>, RenderError> + Send + 'static,
+) -> Option<Arc<Thumbnail>> {
     let meta = std::fs::metadata(path).ok()?;
     let stamp = FileStamp::of(&meta);
-    if let Some(hit) = state
-        .0
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .get(id, &stamp)
-    {
+    if let Some(hit) = state.cached(id, &stamp) {
         return hit;
     }
-    let found = File::open(path)
-        .ok()
-        .and_then(|mut file| extract_thumbnail(&mut file))
-        .map(Arc::new);
-    state
-        .0
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .put(id, stamp, found.clone());
+    let found = match File::open(path) {
+        Err(_) => None,
+        Ok(mut file) => match extract_thumbnail(&mut file) {
+            Some(embedded) => Some(Arc::new(embedded)),
+            None => match draw_first_page(state, &mut file, path, &meta, render) {
+                Ok(drawn) => Some(Arc::new(drawn)),
+                Err(RenderError::Busy) => return None,
+                Err(_) => None,
+            },
+        },
+    };
+    state.remember(id, stamp, found.clone());
     found
+}
+
+/// The first page of a Hangul file within the size limit, drawn by the bounded worker.
+fn draw_first_page(
+    state: &PreviewState,
+    file: &mut File,
+    path: &Path,
+    meta: &Metadata,
+    render: impl FnOnce(Vec<u8>) -> Result<Vec<u8>, RenderError> + Send + 'static,
+) -> Result<Thumbnail, RenderError> {
+    if WindowKind::for_path(path) != Some(WindowKind::Hwp)
+        || meta.len() > render::MAX_RENDER_INPUT_BYTES as u64
+    {
+        return Err(RenderError::Unreadable);
+    }
+    // The file may have grown since `meta`: read one byte past the limit and refuse that.
+    let mut document = Vec::with_capacity(meta.len() as usize);
+    file.seek(SeekFrom::Start(0))
+        .and_then(|_| {
+            file.take(render::MAX_RENDER_INPUT_BYTES as u64 + 1)
+                .read_to_end(&mut document)
+        })
+        .map_err(|_| RenderError::Unreadable)?;
+    if document.len() > render::MAX_RENDER_INPUT_BYTES {
+        return Err(RenderError::TooLarge);
+    }
+    let limits = state.limits;
+    let png = bounded::run(
+        &state.gate,
+        limits.permit_wait,
+        limits.deadline,
+        move || render(document),
+    )?;
+    if png.len() > MAX_RENDERED_PNG_BYTES || sniff_image(&png) != Some("image/png") {
+        return Err(RenderError::TooLarge);
+    }
+    Ok(Thumbnail {
+        mime: "image/png",
+        bytes: png,
+    })
 }
 
 fn to_view(thumbnail: &Thumbnail) -> PreviewImage {
@@ -167,5 +285,7 @@ pub async fn get_recent_preview(
     .map_err(|err| format!("미리보기를 읽지 못했습니다: {err}"))
 }
 
+#[cfg(test)]
+mod render_tests;
 #[cfg(test)]
 mod tests;

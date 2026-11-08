@@ -30,8 +30,9 @@
   const PREVIEW_LINES = ["home-preview-line is-wide", "home-preview-line", "home-preview-line is-short", "home-preview-line is-wide"];
   const PREVIEW_CELLS = 6;
   const PREVIEW_MIMES = new Set(["image/png", "image/jpeg", "image/gif", "image/bmp"]);
-  // Largest Base64 text accepted: the shell's 256 KiB picture limit as Base64 (4 characters per 3 bytes).
-  const PREVIEW_MAX_BASE64_CHARS = Math.ceil((256 * 1024) / 3) * 4;
+  // Largest Base64 text accepted: the shell's 1 MiB limit for a drawn first page (PD-142; a picture
+  // inside a file is at most 256 KiB) as Base64, 4 characters per 3 bytes.
+  const PREVIEW_MAX_BASE64_CHARS = Math.ceil((1024 * 1024) / 3) * 4;
   const EMPTY_HINT = "아직 최근 문서가 없습니다. 문서를 한 번 열면 여기에 바로 나타납니다.";
   const FILLED_HINT = "앱을 실행하자마자 이어서 작업할 수 있도록 최근에 연 문서를 보여줍니다.";
 

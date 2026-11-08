@@ -27,3 +27,8 @@ rust-version = "1.85"
 # svg2pdf (the engine crates do not).
 [patch.crates-io]
 svg2pdf = { path = "vendor/svg2pdf" }
+# PD-142: the shell draws the first page of a Hangul document with the pinned rhwp checkout
+# (`config/rhwp-upstream.json`; the crates.io release is a different version). It is a patch, not
+# a `path` dependency, because `cargo fmt --all` follows path dependencies into the sparse checkout
+# and fails there, while it skips registry ones.
+rhwp = { path = "third_party/rhwp" }

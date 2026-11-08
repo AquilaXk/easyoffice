@@ -342,8 +342,10 @@ fn main() {
             update_check::start(app.handle(), smoke_mode);
             #[cfg(target_os = "macos")]
             menu_state::refresh(app.handle()).map_err(std::io::Error::other)?;
-            app.manage(preview::PreviewState::new());
             let handle = app.handle().clone();
+            app.manage(preview::PreviewState::with_font_dirs(
+                pdf_job::pdf_font_dirs(&handle),
+            ));
             if smoke_mode {
                 app.manage(SmokeProbe::start(SMOKE_TIMEOUT));
                 smoke::run_rust_steps(&handle);

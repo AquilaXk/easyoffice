@@ -21,9 +21,15 @@ use usvg::fontdb::Database;
 pub const MAX_THUMBNAIL_SVG_BYTES: usize = 16 * 1_048_576;
 
 /// Draws the page SVG as an opaque white-backed PNG whose longer side is
-/// [`MAX_THUMBNAIL_SIDE_PX`]. The SVG is parsed with the options of the PDF export (the shared
-/// fonts and fallback faces, no file access from `href`s).
+/// [`MAX_THUMBNAIL_SIDE_PX`] (the size the file formats keep as their preview picture).
 pub fn render_png(svg: &str, fonts: &Arc<Database>) -> Result<Vec<u8>, String> {
+    render_png_sized(svg, fonts, MAX_THUMBNAIL_SIDE_PX)
+}
+
+/// [`render_png`] with the longer side `side` pixels (the start window's cards draw larger than a
+/// file's preview picture, PD-142). The SVG is parsed with the options of the PDF export (the
+/// shared fonts and fallback faces, no file access from `href`s).
+pub fn render_png_sized(svg: &str, fonts: &Arc<Database>, side: u32) -> Result<Vec<u8>, String> {
     if svg.len() > MAX_THUMBNAIL_SVG_BYTES {
         return Err("쪽 SVG가 미리보기 한도를 넘습니다.".to_string());
     }
@@ -34,8 +40,8 @@ pub fn render_png(svg: &str, fonts: &Arc<Database>) -> Result<Vec<u8>, String> {
     if !(width.is_finite() && height.is_finite() && width > 0.0 && height > 0.0) {
         return Err("쪽 크기가 올바르지 않습니다.".to_string());
     }
-    let scale = MAX_THUMBNAIL_SIDE_PX as f32 / width.max(height);
-    let pixels = |side: f32| ((side * scale).round() as u32).clamp(1, MAX_THUMBNAIL_SIDE_PX);
+    let scale = side as f32 / width.max(height);
+    let pixels = |extent: f32| ((extent * scale).round() as u32).clamp(1, side);
     let mut pixmap = tiny_skia::Pixmap::new(pixels(width), pixels(height))
         .ok_or_else(|| "미리보기 그림을 만들지 못했습니다.".to_string())?;
     pixmap.fill(tiny_skia::Color::WHITE);

@@ -129,7 +129,7 @@ fn zip_entry(name: &str, method: u16, comp: &[u8], uncompressed: usize) -> (Vec<
     (local, name.as_bytes().to_vec())
 }
 
-fn zip(entries: &[(&str, u16, Vec<u8>, usize)]) -> Vec<u8> {
+pub(super) fn zip(entries: &[(&str, u16, Vec<u8>, usize)]) -> Vec<u8> {
     let mut body = Vec::new();
     let mut central = Vec::new();
     for (name, method, comp, uncompressed) in entries {

@@ -3,12 +3,15 @@ import assert from "node:assert/strict";
 import { loadUiModule } from "./test-support/load-ui-module.mjs";
 import { readText } from "./test-support/read-text.mjs";
 
-// Start-window previews (PD-106): the shell returns the picture inside a file as Base64; the page
-// decodes it with createImageBitmap and draws it into a canvas on the card. Any failure keeps the
+// Start-window previews (PD-106, PD-142): the shell returns the picture inside a file, or else the
+// drawn first page (a PNG), as Base64; the page decodes it with createImageBitmap and draws it into
+// a canvas on the card. Any failure keeps the
 // skeleton. The DOM is a small fake; the shell and the decoder are functions.
 
 const HOME_JS = new URL("../crates/easyoffice-app/ui/home-screen.js", import.meta.url);
 const UI = (name) => readText(new URL(`../crates/easyoffice-app/ui/${name}`, import.meta.url));
+const PNG_B64 = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]).toString("base64");
+const MAX_BASE64_CHARS = Math.ceil((1024 * 1024) / 3) * 4;
 const GIF_B64 = Buffer.from("GIF89a\x01\x00\x01\x00\x00\x00\x00;", "latin1").toString("base64");
 
 class FakeEl {
@@ -127,13 +130,28 @@ test("a decode error, a missing 2d context or an empty bitmap leaves the skeleto
   assert.equal(empty.canvases().length, 0);
 });
 
-test("an oversized reply is refused before it is decoded", async () => {
-  const big = "A".repeat(Math.ceil((256 * 1024) / 3) * 4 + 4);
-  const t = setup({ loadPreview: async () => ({ mime: "image/png", base64: big }) });
+test("a drawn first page up to the shell's 1 MiB limit is shown, one byte-group over is refused undecoded", async () => {
+  const atLimit = "A".repeat(MAX_BASE64_CHARS);
+  const shown = setup({ loadPreview: async () => ({ mime: "image/png", base64: atLimit }) });
+  shown.home.setRecents(entries(1));
+  await shown.run();
+  assert.equal(shown.blobs.length, 1, "a reply at the limit is decoded");
+  assert.equal(shown.canvases().length, 1);
+  const t = setup({ loadPreview: async () => ({ mime: "image/png", base64: atLimit + "AAAA" }) });
   t.home.setRecents(entries(1));
   await t.run();
-  assert.equal(t.blobs.length, 0);
+  assert.equal(t.blobs.length, 0, "an oversized reply is refused before it is decoded");
   assert.equal(t.canvases().length, 0);
+});
+
+test("the PNG of a drawn first page is decoded like an embedded picture and fills the card", async () => {
+  const t = setup({ loadPreview: async () => ({ mime: "image/png", base64: PNG_B64 }) });
+  t.home.setRecents(entries(2));
+  await t.run();
+  assert.equal(t.canvases().length, 2);
+  assert.equal(t.blobs[0].type, "image/png");
+  assert.deepEqual(t.blobs[0].bytes.slice(0, 4), [0x89, 0x50, 0x4e, 0x47]);
+  assert.ok(t.canvases()[0].parent.classList.contains("is-loaded"));
 });
 
 test("without a shell command or a decoder nothing is requested; a newer list cancels the run", async () => {

@@ -2,9 +2,9 @@
 name = "easyoffice-desktop"
 version.workspace = true
 edition.workspace = true
-# Tauri v2 (tauri, tauri-build, tauri-plugin-dialog 2.x) requires Rust 1.90; the engine crates keep
-# the workspace MSRV 1.85 (docs/policy-decisions.md PD-074).
-rust-version = "1.90"
+# Tauri v2 (tauri, tauri-build, tauri-plugin-dialog 2.x) requires Rust 1.90 and the pinned rhwp
+# (PD-142) builds with 1.93; the engine crates keep the workspace MSRV 1.85 (PD-074).
+rust-version = "1.93"
 license.workspace = true
 description = "EasyOffice desktop shell (Tauri v2: WebView2 on Windows, WKWebView on macOS) hosting the embedded WebUI"
 
@@ -36,6 +36,10 @@ fontdb = "0.23"
 resvg = { version = "0.45", default-features = false, features = ["text"] }
 tiny-skia = { version = "0.11", default-features = false, features = ["std", "png-format"] }
 pdf-writer = "0.12"
+# PD-142: the first page of a recent document without a preview picture. Parser and layout only (no
+# `native-skia`, so no Skia download); the pages come out as SVG that the crates above draw. The
+# workspace `[patch.crates-io]` points this at the pinned checkout `third_party/rhwp`.
+rhwp = { version = "0.8.7", default-features = false }
 # Glyph lookup of the PDF fallback-font index (usvg keeps its own lookup private); already in the
 # graph through usvg and svg2pdf.
 ttf-parser = { version = "0.25", default-features = false, features = ["std"] }
