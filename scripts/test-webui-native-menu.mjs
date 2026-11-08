@@ -65,9 +65,31 @@ test("every menu id is handled by the real page and the zoom, find and about ite
   }
   await flushAsyncTurns(4);
   assert.equal(document.getElementById("cmd-palette-modal").open, true, "Find opens the command palette");
-  assert.equal(document.getElementById("status-zoom-label").textContent, "125%", "zoom in, zoom out, then the same 100% command as Ctrl+0");
+  assert.equal(document.getElementById("status-zoom-label").textContent, "100%", "zoom in, zoom out, then the 100% command as Ctrl+0");
   assert.equal(document.getElementById("about-dialog").open, true, "About opens the dialog");
   assert.equal(run("nope"), false);
+});
+
+test("Actual size (view:zoom-100 and the page menu's 100% item) resets any zoom to 100%, not the next step", async () => {
+  const { document } = await createWorkspaceHarness();
+  await flushAsyncTurns(10);
+  const run = document.defaultView.__EASYOFFICE_NATIVE_MENU__;
+  const label = () => document.getElementById("status-zoom-label").textContent;
+  const stageZoom = () => document.querySelector(".canvas-stage").style.zoom;
+  const pageItem = document.querySelector('[data-studio-menu-cmd="view-zoom"]');
+  assert.ok(pageItem, "the page menu has the 100% item");
+  for (const [name, reset] of [["native view:zoom-100", () => run("view:zoom-100")], ["page menu item", () => pageItem.click()]]) {
+    for (const steps of [0, 1, 2, 3]) {
+      for (let i = 0; i < steps; i += 1) run("view:zoom-in");
+      reset();
+      await flushAsyncTurns(6);
+      assert.equal(label(), "100%", `${name} after ${steps} zoom-in`);
+      assert.equal(stageZoom(), "100%", `${name} stage after ${steps} zoom-in`);
+    }
+    reset();
+    await flushAsyncTurns(6);
+    assert.equal(label(), "100%", `${name} twice in a row stays at 100%`);
+  }
 });
 
 test("Find goes to the editor's own find command in the Hangul window and to the palette elsewhere", () => {

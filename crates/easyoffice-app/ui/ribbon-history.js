@@ -505,16 +505,12 @@
       return null;
     }
 
-    const ZOOM_CYCLE = { 100: 125, 125: 150, 150: 90 };
     const DEFAULT_ZOOM_PERCENT = 100;
 
     function viewEffectZoom(_cmdId, execRes) {
-      let zoom = Number(execRes?.zoomPercent || 0);
-      if (!zoom) {
-        const curZoom = Number(localRibbonState.zoomPercent || DEFAULT_ZOOM_PERCENT);
-        zoom = ZOOM_CYCLE[curZoom] ?? DEFAULT_ZOOM_PERCENT;
-        localRibbonState.zoomPercent = zoom;
-      }
+      // "100% 실제 배율" (Cmd+0) always resets to 100%; the engine reports the same value.
+      const zoom = Number(execRes?.zoomPercent || DEFAULT_ZOOM_PERCENT);
+      localRibbonState.zoomPercent = zoom;
       const stage = document.querySelector(".canvas-stage");
       if (stage) stage.style.zoom = zoom + "%";
       const zoomLabel = document.getElementById("status-zoom-label");

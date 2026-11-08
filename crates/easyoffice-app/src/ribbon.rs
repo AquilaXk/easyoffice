@@ -1,6 +1,9 @@
 use easyoffice_formats::EasyOfficeError;
 use easyoffice_layout::{ContextualObjectToolKind, OfficeModuleKind, RibbonLayoutStyle};
 
+/// "실제 크기"(Cmd+0, `view-zoom`) 배율이자 새 작업 상태의 기본 배율(%).
+const ACTUAL_SIZE_ZOOM_PERCENT: u32 = 100;
+
 /// Single command entry in the 140-command (7 categories × 5 modules × 4 actions) context ribbon catalog.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RibbonCommandDescriptor {
@@ -180,7 +183,7 @@ impl Default for RibbonWorkspaceState {
             split_view_enabled: false,
             ribbon_collapsed: false,
             dark_theme_enabled: false,
-            zoom_percent: 100,
+            zoom_percent: ACTUAL_SIZE_ZOOM_PERCENT,
             last_command_id: String::new(),
             executed_count: 0,
         }
@@ -353,12 +356,7 @@ const COMMAND_EFFECTS: &[(CommandMatch, CommandEffect)] = &[
         state.dark_theme_enabled = !state.dark_theme_enabled;
     }),
     (CommandMatch::Suffix("-view-zoom"), |state| {
-        state.zoom_percent = match state.zoom_percent {
-            100 => 125,
-            125 => 150,
-            150 => 90,
-            _ => 100,
-        };
+        state.zoom_percent = ACTUAL_SIZE_ZOOM_PERCENT;
     }),
 ];
 
@@ -564,6 +562,10 @@ mod tests {
             probe_before.active_module = state.active_module;
             probe_before.last_command_id = state.last_command_id.clone();
             probe_before.executed_count = state.executed_count;
+            // "100% 실제 배율" resets to 100%, so from the default 100% it changes nothing.
+            if cmd.id.ends_with("-view-zoom") {
+                continue;
+            }
             assert_ne!(
                 probe_before, state,
                 "Command {} did not mutate domain state",
@@ -584,5 +586,24 @@ mod tests {
 
         let redone = undo_stack.redo(restored).unwrap();
         assert_eq!(redone.executed_count, 140);
+    }
+
+    #[test]
+    fn view_zoom_resets_to_100_percent_from_any_zoom() {
+        for start in [50, 90, 100, 125, 150, 200] {
+            for module in RibbonCommandRouter::MODULES {
+                let prefix = RibbonCommandRouter::module_prefix(module);
+                let mut state = RibbonWorkspaceState {
+                    zoom_percent: start,
+                    ..RibbonWorkspaceState::default()
+                };
+                RibbonCommandRouter::execute_command(&format!("{prefix}-view-zoom"), &mut state)
+                    .unwrap();
+                assert_eq!(
+                    state.zoom_percent, ACTUAL_SIZE_ZOOM_PERCENT,
+                    "{prefix} from {start}%"
+                );
+            }
+        }
     }
 }
