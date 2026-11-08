@@ -89,6 +89,7 @@ impl ExportJob {
         open: impl FnOnce(&Path) -> std::io::Result<()>,
     ) -> Result<PdfFinish, String> {
         let pages = self.assembler.page_count();
+        let skipped_pictures = self.assembler.skipped_pictures();
         let pdf = self.assembler.finish()?;
         let path = match self.target {
             ExportTarget::Check { bundled_font } => {
@@ -106,7 +107,13 @@ impl ExportJob {
             && open(&path)
                 .inspect_err(|err| eprintln!("pdf export: the file could not be opened: {err}"))
                 .is_ok();
-        Ok(PdfFinish::saved(&path, written.bytes, pages, opened))
+        Ok(PdfFinish::saved(
+            &path,
+            written.bytes,
+            pages,
+            opened,
+            skipped_pictures,
+        ))
     }
 }
 
@@ -146,24 +153,34 @@ pub struct PdfProgress {
 }
 
 /// Answer of `pdf_export_finish`. Like a save it names the file only, never a path (PD-088);
-/// `opened` says whether the OS default app was started.
+/// `opened` says whether the OS default app was started, `skippedPictures` how many pictures were
+/// left out of the pages because they were over the pixel limits (PD-145).
 #[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct PdfFinish {
     status: &'static str,
     name: Option<String>,
     bytes: usize,
     pages: usize,
     opened: bool,
+    skipped_pictures: u32,
 }
 
 impl PdfFinish {
-    pub fn saved(path: &Path, bytes: usize, pages: usize, opened: bool) -> Self {
+    pub fn saved(
+        path: &Path,
+        bytes: usize,
+        pages: usize,
+        opened: bool,
+        skipped_pictures: u32,
+    ) -> Self {
         Self {
             status: "saved",
             name: path.file_name().map(|n| n.to_string_lossy().into_owned()),
             bytes,
             pages,
             opened,
+            skipped_pictures,
         }
     }
 
@@ -174,6 +191,7 @@ impl PdfFinish {
             bytes: 0,
             pages: 0,
             opened: false,
+            skipped_pictures: 0,
         }
     }
 }
@@ -442,7 +460,7 @@ mod tests {
             serde_json::to_value(&done).unwrap(),
             serde_json::json!({
                 "status": "saved", "name": "보고서.pdf",
-                "bytes": fs::metadata(&target).unwrap().len(), "pages": 13, "opened": true
+                "bytes": fs::metadata(&target).unwrap().len(), "pages": 13, "opened": true, "skippedPictures": 0
             })
         );
         assert_eq!(

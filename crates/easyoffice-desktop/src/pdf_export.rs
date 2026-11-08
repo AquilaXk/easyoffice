@@ -126,7 +126,7 @@ impl Drop for NestedLevel {
 /// 0.8.7, `src/renderer/pdf.rs` lines 1188-1205; MIT), with the nesting bound added because that
 /// version recurses as deep as the data does. Other data pictures go to usvg's default resolver;
 /// path and `file:` hrefs are ignored, in the page and in nested SVGs alike.
-fn image_href_resolver(budget: Option<Arc<RasterBudget>>) -> usvg::ImageHrefResolver<'static> {
+fn image_href_resolver(budget: Arc<RasterBudget>) -> usvg::ImageHrefResolver<'static> {
     let default_data = usvg::ImageHrefResolver::default_data_resolver();
     usvg::ImageHrefResolver {
         resolve_data: Box::new(move |mime, data, options| match mime {
@@ -136,9 +136,10 @@ fn image_href_resolver(budget: Option<Arc<RasterBudget>>) -> usvg::ImageHrefReso
                     .ok()
                     .map(usvg::ImageKind::SVG)
             }
-            // A page drawn to a bitmap decodes its pictures itself; the budget keeps a hostile
-            // page from making that cost more than a fixed number of pixels (PD-145).
-            _ if budget.as_ref().is_some_and(|budget| !budget.admit(&data)) => None,
+            // The decoders allocate by the size in the picture's header, so a page SVG (untrusted)
+            // is kept from making a picture or a page cost more than a fixed number of pixels. A
+            // refused picture is left out and the page is kept (PD-145).
+            _ if !budget.admit(&data) => None,
             _ => default_data(mime, data, options),
         }),
         // A page SVG is untrusted text: a path or `file:` href must never make the export read a
@@ -147,10 +148,15 @@ fn image_href_resolver(budget: Option<Arc<RasterBudget>>) -> usvg::ImageHrefReso
     }
 }
 
-/// Parse options of one export: the shared fonts, the indexed fallback selector (one index per
-/// export) and the nested-SVG resolver. The PDF keeps the pictures as they are.
+/// Parse options of a single page with the picture limits of an exported page, as
+/// [`ExportOptions::page`] makes them (for the tests that parse one page by itself).
+#[cfg(test)]
 pub(crate) fn parse_options(fonts: &Arc<Database>) -> usvg::Options<'static> {
-    options_with(fonts, None)
+    options_with(
+        fonts,
+        new_fallback_selector(),
+        Arc::new(RasterBudget::for_export()),
+    )
 }
 
 /// [`parse_options`] for a page that is drawn to a bitmap: its pictures are bounded by `budget`,
@@ -159,23 +165,55 @@ pub(crate) fn bitmap_parse_options(
     fonts: &Arc<Database>,
     budget: RasterBudget,
 ) -> usvg::Options<'static> {
-    options_with(fonts, Some(Arc::new(budget)))
+    options_with(fonts, new_fallback_selector(), Arc::new(budget))
+}
+
+fn new_fallback_selector() -> usvg::FallbackSelectionFn<'static> {
+    crate::pdf_fonts::fallback_selector(
+        crate::pdf_fonts::MAX_INDEXED_CHARS,
+        crate::pdf_fonts::MAX_FACE_PROBES,
+    )
 }
 
 fn options_with(
     fonts: &Arc<Database>,
-    budget: Option<Arc<RasterBudget>>,
+    select_fallback: usvg::FallbackSelectionFn<'static>,
+    budget: Arc<RasterBudget>,
 ) -> usvg::Options<'static> {
     let mut options = usvg::Options {
         fontdb: Arc::clone(fonts),
         ..usvg::Options::default()
     };
-    options.font_resolver.select_fallback = crate::pdf_fonts::fallback_selector(
-        crate::pdf_fonts::MAX_INDEXED_CHARS,
-        crate::pdf_fonts::MAX_FACE_PROBES,
-    );
+    options.font_resolver.select_fallback = select_fallback;
     options.image_href_resolver = image_href_resolver(budget);
     options
+}
+
+/// The options of one export: the fonts and the fallback selector (one index per export) are
+/// shared by every page; each page gets a new picture budget, because the pages are converted
+/// side by side and one page's photos must not use up another's.
+struct ExportOptions {
+    fonts: Arc<Database>,
+    select_fallback: Arc<usvg::FallbackSelectionFn<'static>>,
+}
+
+impl ExportOptions {
+    fn new(fonts: Arc<Database>) -> Self {
+        Self {
+            fonts,
+            select_fallback: Arc::new(new_fallback_selector()),
+        }
+    }
+
+    /// Options for one page and the budget they count its pictures in.
+    fn page(&self) -> (usvg::Options<'static>, Arc<RasterBudget>) {
+        let budget = Arc::new(RasterBudget::for_export());
+        let shared = Arc::clone(&self.select_fallback);
+        let select_fallback: usvg::FallbackSelectionFn<'static> =
+            Box::new(move |c, used, db| shared.as_ref()(c, used, db));
+        let options = options_with(&self.fonts, select_fallback, Arc::clone(&budget));
+        (options, budget)
+    }
 }
 
 /// One converted page before assembly.
@@ -184,6 +222,8 @@ struct PageChunk {
     xobject: Ref,
     width: f32,
     height: f32,
+    /// Pictures left out of the page because they were over the pixel limits.
+    skipped_pictures: u32,
 }
 
 /// Runs `to_chunk` with the page's text embedded; when the font subsetter fails on a page (a font
@@ -211,11 +251,12 @@ fn convert_with_outline_retry<T>(
 fn convert_page(
     index: usize,
     svg: &str,
-    options: &usvg::Options,
+    options: &ExportOptions,
     embed_text: bool,
 ) -> Result<PageChunk, String> {
     let svg = crate::pdf_font_fallbacks::add_font_fallbacks(svg);
-    let (tree, styled) = crate::pdf_synthetic::parse_page(&svg, options)
+    let (page_options, pictures) = options.page();
+    let (tree, styled) = crate::pdf_synthetic::parse_page(&svg, &page_options)
         .map_err(|err| format!("{}쪽 SVG를 읽지 못했습니다: {err}", index + 1))?;
     if styled.unsupported > 0 {
         eprintln!(
@@ -237,6 +278,7 @@ fn convert_page(
         xobject,
         width: tree.size().width() * PX_TO_PT,
         height: tree.size().height() * PX_TO_PT,
+        skipped_pictures: pictures.refused(),
     })
 }
 
@@ -246,7 +288,7 @@ fn convert_page(
 fn convert_batch(
     first: usize,
     batch: &[String],
-    options: &usvg::Options,
+    options: &ExportOptions,
     embed_text: bool,
 ) -> Result<Vec<PageChunk>, String> {
     let threads = std::thread::available_parallelism()
@@ -295,9 +337,10 @@ fn convert_batch(
 /// are counted over all batches. Any error ends the export (the caller drops the assembler), so
 /// a half-built PDF is never finished.
 pub struct PdfAssembler {
-    options: usvg::Options<'static>,
+    options: ExportOptions,
     embed_text: bool,
     budget: Budget,
+    skipped_pictures: u32,
     alloc: Ref,
     catalog_ref: Ref,
     tree_ref: Ref,
@@ -311,9 +354,10 @@ impl PdfAssembler {
         let catalog_ref = alloc.bump();
         let tree_ref = alloc.bump();
         Self {
-            options: parse_options(&Arc::new(crate::pdf_fonts::with_mapped_faces(fonts))),
+            options: ExportOptions::new(Arc::new(crate::pdf_fonts::with_mapped_faces(fonts))),
             embed_text,
             budget: Budget::default(),
+            skipped_pictures: 0,
             alloc,
             catalog_ref,
             tree_ref,
@@ -327,6 +371,11 @@ impl PdfAssembler {
         self.page_refs.len()
     }
 
+    /// Pictures left out of the pages so far because they were over the pixel limits (PD-145).
+    pub fn skipped_pictures(&self) -> u32 {
+        self.skipped_pictures
+    }
+
     /// Converts the next pages, in order, [`BATCH_PAGES`] at a time.
     pub fn add_pages(&mut self, pages: &[String]) -> Result<(), String> {
         self.budget.admit(pages)?;
@@ -334,6 +383,7 @@ impl PdfAssembler {
             let converted =
                 convert_batch(self.page_refs.len(), batch, &self.options, self.embed_text)?;
             for page in converted {
+                self.skipped_pictures = self.skipped_pictures.saturating_add(page.skipped_pictures);
                 let page_ref = self.alloc.bump();
                 self.page_refs.push(page_ref);
                 place_page(
@@ -1083,3 +1133,7 @@ mod tests {
 #[cfg(test)]
 #[path = "pdf_export_text_tests.rs"]
 mod text_tests;
+
+#[cfg(test)]
+#[path = "pdf_export_raster_tests.rs"]
+mod raster_tests;

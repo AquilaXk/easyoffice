@@ -438,3 +438,51 @@ fn abandoned_workers_are_capped_and_overlapping_requests_are_not() {
         assert_eq!(handle.join().unwrap(), Ok(n));
     }
 }
+
+fn png_data_url(png: &[u8]) -> String {
+    format!(
+        "data:image/png;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(png)
+    )
+}
+
+/// The signature and the header chunk: the declared size and no pixel data.
+fn png_header(width: u32, height: u32) -> Vec<u8> {
+    let mut bytes = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13];
+    bytes.extend_from_slice(b"IHDR");
+    bytes.extend_from_slice(&width.to_be_bytes());
+    bytes.extend_from_slice(&height.to_be_bytes());
+    bytes.extend_from_slice(&[8, 6, 0, 0, 0]);
+    bytes
+}
+
+fn has_red(page: &tiny_skia::Pixmap) -> bool {
+    page.pixels().iter().any(|p| p.green() < 128)
+}
+
+#[test]
+fn a_picture_declaring_too_many_pixels_is_left_out_and_the_page_is_drawn() {
+    let mut red = tiny_skia::Pixmap::new(8, 8).unwrap();
+    red.fill(tiny_skia::Color::from_rgba8(255, 0, 0, 255));
+    let kept = png_data_url(&red.encode_png().unwrap());
+    let bomb = png_data_url(&png_header(100_000, 100_000));
+    let page = rendered(&svg(&format!(
+        r#"<image x="0" y="0" width="100" height="50" href="{bomb}"/><image x="0" y="50" width="100" height="50" href="{kept}"/>"#
+    )));
+    assert!(has_red(&page), "the picture within the limits is drawn");
+    let only_bomb = rendered(&svg(&format!(
+        r#"<image x="0" y="0" width="100" height="100" href="{bomb}"/>"#
+    )));
+    assert!(!has_red(&only_bomb));
+}
+
+#[test]
+fn a_photo_over_the_thumbnail_limit_is_left_out() {
+    let mut red = tiny_skia::Pixmap::new(5000, 4000).unwrap();
+    red.fill(tiny_skia::Color::from_rgba8(255, 0, 0, 255));
+    let big = png_data_url(&red.encode_png().unwrap());
+    let page = rendered(&svg(&format!(
+        r#"<image x="0" y="0" width="100" height="100" href="{big}"/>"#
+    )));
+    assert!(!has_red(&page), "20 MP is over 4096 x 4096");
+}

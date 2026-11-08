@@ -9,6 +9,7 @@
 
 mod bounded;
 mod fonts;
+mod raster;
 mod render;
 mod status;
 #[cfg(test)]

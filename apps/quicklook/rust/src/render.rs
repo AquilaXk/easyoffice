@@ -6,6 +6,7 @@
 //! and the PDF.
 
 use crate::fonts;
+use crate::raster::{self, RasterBudget};
 use crate::status::{
     STATUS_EMPTY_DOCUMENT, STATUS_INVALID_INPUT, STATUS_PARSE_FAILED, STATUS_RENDER_FAILED,
     STATUS_TOO_LARGE,
@@ -57,7 +58,7 @@ pub fn open(data: &[u8]) -> Result<(DocumentCore, u32), i32> {
 }
 
 /// Page `index` as a parsed SVG tree. The SVG is parsed without any file access: path and `file:`
-/// hrefs are ignored, only data URLs are read.
+/// hrefs are ignored, only data URLs are read, and a picture over the pixel limits is left out.
 pub fn page(core: &DocumentCore, index: u32) -> Result<Page, i32> {
     let svg = core
         .render_page_svg_native(index)
@@ -74,7 +75,7 @@ pub fn parse_svg(svg: &str) -> Result<Page, i32> {
         fontdb: fonts::shared(),
         ..usvg::Options::default()
     };
-    options.image_href_resolver.resolve_string = Box::new(|_, _| None);
+    options.image_href_resolver = raster::bounded_image_resolver(RasterBudget::for_page());
     let tree = usvg::Tree::from_str(&svg, &options).map_err(|_| STATUS_RENDER_FAILED)?;
     let (width, height) = (tree.size().width(), tree.size().height());
     if !(width.is_finite() && height.is_finite() && width > 0.0 && height > 0.0) {

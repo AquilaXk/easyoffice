@@ -107,6 +107,7 @@ pub fn verify_pdf(
         pdf.len(),
         pages,
         false,
+        0,
     ))
 }
 
@@ -597,7 +598,7 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&outcome).unwrap(),
             format!(
-                r#"{{"status":"saved","name":"smoke.pdf","bytes":{},"pages":1,"opened":false}}"#,
+                r#"{{"status":"saved","name":"smoke.pdf","bytes":{},"pages":1,"opened":false,"skippedPictures":0}}"#,
                 minimal_pdf(1).len()
             )
         );

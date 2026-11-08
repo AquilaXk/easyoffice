@@ -138,7 +138,8 @@
   // to finish. Nothing here takes or returns a path.
   //   start(fileName)       -> { status: "started", jobId } | { status: "cancelled" } (no location chosen)
   //   pages(jobId, svgs)    -> { pages } (how many the PDF holds now; at most 10 svgs per call)
-  //   finish(jobId, commit) -> { status: "saved", name, bytes, pages, opened } | { status: "cancelled" }
+  //   finish(jobId, commit) -> { status: "saved", name, bytes, pages, opened, skippedPictures } | { status: "cancelled" }
+  //                            (skippedPictures: pictures left out of the pages for being over the pixel limits)
   //                            (commit false drops the export; both are safe to repeat)
   const pdfExport = Object.freeze({
     async start(fileName) {

@@ -403,6 +403,7 @@ name = "easyoffice-quicklook-ffi"
 version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
+ "imagesize",
  "pdf-writer",
  "resvg",
  "rhwp",
