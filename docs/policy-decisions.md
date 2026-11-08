@@ -1826,3 +1826,13 @@
 - **Trade-offs** 과거 커밋 36개의 표기는 남습니다. PR 제목에 금지어를 인용해야 하는 경우도 막힙니다.
 - **Verified by** `node --test scripts/test-commit-messages.mjs`(깨끗한 메시지 통과, 각 커밋·제목의 표기 보고, 공유 목록 전체 대소문자 무시 검사, git log 레코드 파싱·SHA 검사), 과거 표기 커밋 범위에서 실제로 실패하는지 수동 확인, `node --test "scripts/test-webui-*.mjs"`(319).
 - **Revisit when** main 이력을 정리할 필요가 생길 때(예: 저장소 이전), 금지 목록이 바뀔 때.
+
+## 83. 앱 아이콘을 rhwp 강조색으로 (PD-108)
+
+- **Status** Implemented
+- **Context** 앱 아이콘과 파비콘이 폐기된 라벤더(#5C6BC0, PD-098 이전 디자인 시스템)로 남아 있었습니다.
+- **Decision (`PD-108`)** 사용자 선택 L-3안입니다. 문서 모양(접힌 모서리, 줄 표시 세 개)은 유지하고 글자는 넣지 않습니다. 바탕은 rhwp 강조색의 세로 그러데이션(#6182D6 → #3E62BB), 종이는 흰색, 접힌 모서리는 #D6DFF5, 줄은 #335095(긴 줄 두 개)와 #6182D6(짧은 줄)이고 줄 끝은 둥글게 합니다. 바탕 사각형은 참조 셸(hop) 아이콘과 같은 비율입니다(1024 기준 64 안쪽, 896 크기, 모서리 반지름 214). 원본은 `crates/easyoffice-app/ui/favicon.svg`(1024 단위) 하나이고, 데스크톱 아이콘(PNG 32·128·256·512, Windows ICO, macOS ICNS)은 `node scripts/generate-desktop-icons.mjs`가 같은 좌표로 도형을 해석적으로 그려 결정론적으로 만듭니다(`--check`로 최신 여부 검사).
+- **Why** 앱 안의 색(rhwp 토큰)과 아이콘을 맞추고, 기존 사용자에게 익숙한 문서 모양을 지키기 위함입니다. 글자(E·Easy)는 작은 크기에서 읽히지 않고 문서 모양과 어울리지 않아 넣지 않습니다.
+- **Trade-offs** hop의 단색 자모 아이콘과 달리 문서 모양을 씁니다.
+- **Verified by** `node scripts/generate-desktop-icons.mjs --check`, `cargo test -p easyoffice-desktop`(ICNS 포함 검사), 위생 가드, 16·32·64px 육안 확인.
+- **Revisit when** 브랜드 아이콘을 새로 디자인할 때.
