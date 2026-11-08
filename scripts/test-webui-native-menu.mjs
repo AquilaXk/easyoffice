@@ -54,6 +54,40 @@ test("unknown ids, inherited property names and missing actions run nothing", ()
   assert.deepEqual(calls, []);
 });
 
+// The reference app's menu event ids (`menu.rs`: 표 Select Cells / Merge Cells / Split Cells, 보기 Zoom In / Zoom
+// Out / Actual Size / Fit Page / Fit Width): inside the Hangul editor each native item is that editor command.
+const EXPECTED_EDITOR_COMMANDS = {
+  "view:zoom-in": "view:zoom-in",
+  "view:zoom-out": "view:zoom-out",
+  "view:zoom-100": "view:zoom-100",
+  "view:zoom-fit-page": "view:zoom-fit-page",
+  "view:zoom-fit-width": "view:zoom-fit-width",
+  "table:cell-select": "table:cell-selection-enter",
+  "table:merge": "table:cell-merge",
+  "table:cell-split": "table:cell-split",
+};
+
+test("the native menu ids that reach the Hangul editor map to the reference app's editor command ids", () => {
+  const { EMBED_EDITOR_COMMANDS, NATIVE_MENU_ACTIONS } = chromeTable();
+  assert.deepEqual({ ...EMBED_EDITOR_COMMANDS }, EXPECTED_EDITOR_COMMANDS);
+  const rust = new Map(rustItems().map((r) => [r.id, r]));
+  for (const id of Object.keys(EXPECTED_EDITOR_COMMANDS)) assert.ok(rust.has(id), `${id} is in the Rust table`);
+  // Items that exist only for the editor have no page action of their own: they are the `hwp-editor` ones.
+  const editorOnly = Object.keys(NATIVE_MENU_ACTIONS).filter((id) => NATIVE_MENU_ACTIONS[id] === "hwp-editor");
+  assert.deepEqual(editorOnly.sort((a, b) => a.localeCompare(b)), ["table:cell-select", "table:cell-split"]);
+  assert.equal(rust.get("table:cell-select").accelerator, "CmdOrCtrl+Alt+T");
+  assert.equal(rust.get("view:zoom-100").accelerator, "CmdOrCtrl+0");
+  assert.deepEqual(["table:cell-select", "table:merge", "table:cell-split"].map((id) => rust.get(id).label), ["셀 선택", "셀 합치기", "셀 나누기"]);
+});
+
+test("outside the Hangul editor the editor-only items run nothing and the shared ones keep their page action", () => {
+  const { runNativeMenuAction } = chromeTable();
+  const calls = [];
+  const actions = { "hwp-editor": (_arg, id) => calls.push(["editor", id]), "studio-cmd": (cmd) => calls.push(["page", cmd]) };
+  for (const id of ["table:cell-select", "table:merge"]) assert.equal(runNativeMenuAction(id, actions), true, id);
+  assert.deepEqual(calls, [["editor", "table:cell-select"], ["page", "table-merge"]]);
+});
+
 // The page-side behaviour behind each kind of native action: the page element a native item clicks.
 const PAGE_ITEM_SELECTORS = {
   "studio-cmd": (cmd) => `.md-item[data-studio-menu-cmd="${cmd}"]`,
@@ -163,6 +197,14 @@ test("Find goes to the editor's own find command in the Hangul window and to the
   assert.match(app, /hwpHost\.call\("automation\.execute", \{ id: "edit:find", allowDialog: true \}\)/);
   const router = read("apps/hwp-studio/src/embed/rpc-router.ts");
   assert.match(router, /case 'automation\.execute'/, "the embed port already carries editor commands");
+});
+
+test("in the Hangul window the zoom and cell items are sent to the editor over the embed port, Actual Size (Cmd+0) included", () => {
+  const app = read("crates/easyoffice-app/ui/app.js");
+  assert.match(app, /Object\.hasOwn\(EMBED_EDITOR_COMMANDS, id\) && editorCommand\(id\)/);
+  assert.match(app, /activeModule !== "HWP" \|\| !hwpHost\.isEmbedActive\(\)/);
+  assert.match(app, /hwpHost\.call\("automation\.execute", \{ id: EMBED_EDITOR_COMMANDS\[menuId\], allowDialog: true \}\)/);
+  assert.equal(chromeTable().EMBED_EDITOR_COMMANDS["view:zoom-100"], "view:zoom-100");
 });
 
 test("file items reach the same handlers as their shortcuts", async () => {

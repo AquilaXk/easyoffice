@@ -93,6 +93,7 @@ import {
 } from './embed/shell-menu.ts';
 import { renderPrintBatch } from './embed/print-batch.ts';
 import { initToolbarLabels, toolbarLabelsCommand } from './ui/toolbar-labels.ts';
+import { cellSelectionEnterCommand } from './command/cell-selection.ts';
 import type { EmbedRendererRuntimeRequestV1 } from '@/embed/rpc-router';
 import { enrichFontDecisionTrace } from '@/core/font-decision-trace';
 import { DocumentAgentController } from '@/document-agent/controller';
@@ -264,6 +265,7 @@ initToolbarLabels();
 registry.registerAll(formatCommands);
 registry.registerAll(insertCommands);
 registry.registerAll(tableCommands);
+registry.register(cellSelectionEnterCommand);
 registry.registerAll(pageCommands);
 registry.registerAll(toolCommands);
 

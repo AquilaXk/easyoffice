@@ -57,7 +57,11 @@ test("the disabled ids are exactly the table items the page's own rule refuses i
   for (const mod of ["DOC", "SHEET", "SLIDE", "PDF", "HWP"]) {
     await switchModule(document, mod);
     await flushAsyncTurns(10);
-    const expected = commands.filter(([, command]) => !rule(command, mod)).map(([id]) => id);
+    const editorOnly = Object.entries(page.__EASYOFFICE_NATIVE_MENU_TABLE__.NATIVE_MENU_ACTIONS)
+      .filter(([, action]) => action === "hwp-editor")
+      .map(([id]) => id);
+    assert.deepEqual(editorOnly.sort(byName), ["table:cell-select", "table:cell-split"]);
+    const expected = [...commands.filter(([, command]) => !rule(command, mod)).map(([id]) => id), ...editorOnly];
     assert.ok(reports.length > 0, `${mod} reported`);
     assert.deepEqual([...reports.at(-1).disabled].sort(byName), expected.sort(byName), mod);
   }
@@ -167,4 +171,25 @@ test("the check items are the three themes and the update switch", () => {
   for (const id of ["view:theme-system", "view:theme-light", "view:theme-dark", "UPDATE_CHECK_ID"]) {
     assert.ok(menu.slice(menu.indexOf("pub const CHECK_IDS"), menu.indexOf("fn is_check_item")).includes(id), id);
   }
+});
+
+test("in the Hangul editor window the zoom and cell items are enabled, and the editor-only ones are grayed out elsewhere", async () => {
+  const { document, reports } = await shellPage();
+  const page = document.defaultView;
+  const { EMBED_EDITOR_COMMANDS } = page.__EASYOFFICE_NATIVE_MENU_TABLE__;
+  await switchModule(document, "DOC");
+  await flushAsyncTurns(10);
+  assert.ok(reports.at(-1).disabled.includes("table:cell-select") && reports.at(-1).disabled.includes("table:cell-split"));
+  assert.ok(!reports.at(-1).disabled.includes("view:zoom-100"), "zoom is the page's own in a document window");
+  const sent = [];
+  const shellChrome = page.__EASYOFFICE_CREATE_SHELL_CHROME__({
+    document,
+    hwpHost: { setShellContext: () => Promise.resolve() },
+    desktopBridge: { isAvailable: () => true, windowCommand: (_name, state) => { sent.push(state); return Promise.resolve(); } },
+  });
+  shellChrome.applyStoredTheme();
+  shellChrome.pushMenuState("HWP_EMBED", true);
+  const last = sent.at(-1);
+  assert.equal(last.embed, true);
+  for (const id of Object.keys(EMBED_EDITOR_COMMANDS)) assert.ok(!last.disabled.includes(id), `${id} is enabled in the editor window`);
 });

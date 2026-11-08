@@ -800,9 +800,19 @@
   function runNativeMenu(id) {
     const modal = document.getElementById("cmd-palette-modal");
     const input = document.getElementById("cmd-search-input");
+    const { EMBED_EDITOR_COMMANDS } = host.__EASYOFFICE_NATIVE_MENU_TABLE__;
+    // Inside the Hangul editor the zoom and cell items are the editor's own commands (a command it
+    // cannot run right now, such as merging without selected cells, is refused by the editor and ignored).
+    const editorCommand = (menuId) => {
+      if (activeModule !== "HWP" || !hwpHost.isEmbedActive()) return false;
+      void hwpHost.call("automation.execute", { id: EMBED_EDITOR_COMMANDS[menuId], allowDialog: true }).catch(() => {});
+      return true;
+    };
+    if (Object.hasOwn(EMBED_EDITOR_COMMANDS, id) && editorCommand(id)) return true;
     const actions = {
       ...shortcutActions(modal, input),
       ...host.__EASYOFFICE_NATIVE_MENU_TABLE__.pageMenuActions(document),
+      "hwp-editor": (_argument, menuId) => void editorCommand(menuId),
       about: () => shellChrome.openAbout(),
       // Inside the Hangul editor Find is the editor's own find dialog (its `edit:find` automation
       // command over the embed port); every other window opens the command palette like Ctrl+F.

@@ -81,7 +81,9 @@
     "page:slide-presenter": "studio-cmd:slide-mod-presenter",
     "table:insert": "studio-cmd:insert-table",
     "table:add-row": "studio-cmd:table-add-row",
+    "table:cell-select": "hwp-editor",
     "table:merge": "studio-cmd:table-merge",
+    "table:cell-split": "hwp-editor",
     "table:sum": "studio-cmd:table-sum",
     "table:doc-formula": "studio-cmd:doc-mod-tableformula",
     "table:hwp-border": "studio-cmd:hwp-mod-border",
@@ -109,6 +111,21 @@
     "help:update-check": "update-check",
   });
 
+  // Menu id -> command id of the Hangul editor (the rhwp-studio command registry, over the embed port's
+  // `automation.execute`). While the editor owns the window these items go to it, the zoom and cell
+  // items using the same command ids as the reference app's menu events; the table's `hwp-editor` items
+  // exist only for it and are grayed out everywhere else.
+  const EMBED_EDITOR_COMMANDS = Object.freeze({
+    "view:zoom-in": "view:zoom-in",
+    "view:zoom-out": "view:zoom-out",
+    "view:zoom-100": "view:zoom-100",
+    "view:zoom-fit-page": "view:zoom-fit-page",
+    "view:zoom-fit-width": "view:zoom-fit-width",
+    "table:cell-select": "table:cell-selection-enter",
+    "table:merge": "table:cell-merge",
+    "table:cell-split": "table:cell-split",
+  });
+
   // Actions that click the page's own (hidden) menu item, so a native item does exactly what the page
   // menu did, including doing nothing where the item does not apply to the window's module. The
   // arguments come from the static table above only.
@@ -129,7 +146,7 @@
     const [name, argument] = entry.split(":");
     const run = actions[name];
     if (typeof run !== "function") return false;
-    run(argument);
+    run(argument, id);
     return true;
   }
 
@@ -176,9 +193,10 @@
     function disabledMenuIds(commandModule) {
       const applies = host.__EASYOFFICE_WORKSPACE_SESSION_UTILS__.studioCommandApplies;
       return Object.entries(NATIVE_MENU_ACTIONS)
-        .filter(([, entry]) => {
+        .filter(([id, entry]) => {
           const [name, command] = entry.split(":");
-          return name === "studio-cmd" && !applies(command, commandModule);
+          if (Object.hasOwn(EMBED_EDITOR_COMMANDS, id) && commandModule === "HWP_EMBED") return false;
+          return name === "hwp-editor" || (name === "studio-cmd" && !applies(command, commandModule));
         })
         .map(([id]) => id);
     }
@@ -307,5 +325,5 @@
   }
 
   host.__EASYOFFICE_CREATE_SHELL_CHROME__ = createShellChrome;
-  host.__EASYOFFICE_NATIVE_MENU_TABLE__ = { NATIVE_MENU_ACTIONS, runNativeMenuAction, pageMenuActions };
+  host.__EASYOFFICE_NATIVE_MENU_TABLE__ = { NATIVE_MENU_ACTIONS, EMBED_EDITOR_COMMANDS, runNativeMenuAction, pageMenuActions };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

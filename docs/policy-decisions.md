@@ -1895,3 +1895,12 @@
 - **Trade-offs** 본문 찾기(문서 텍스트 검색)는 없습니다. 만들려면 새 찾기 막대가 필요하고 시각 승인 대상입니다. 네이티브 메뉴 라벨은 "찾기"로 남습니다.
 - **Verified by** `node --test scripts/test-webui-menu-keyboard.mjs`(항목 역할·tabindex, 열기·이동·돌아옴, 하위 메뉴, Esc 단계와 포커스 복귀, 메뉴 간 이동, 비활성 항목, 팔레트 ARIA와 화살표, 찾기 표기, 사용자 문구 가드).
 - **Revisit when** 문서·시트·슬라이드 본문 찾기를 넣을 때.
+
+## 86. 한글 창의 표·배율 메뉴가 편집기 명령에 닿는다 (PD-111)
+
+- **Context** 네이티브 메뉴의 `실제 배율`(`Cmd+0`)·확대·축소·쪽 맞춤·폭 맞춤은 한글 편집기가 창을 차지하면 페이지의 `studioCommandApplies`가 거부해 회색이거나 아무 일도 하지 않았고, 표 메뉴에는 참조 앱의 셀 선택·셀 합치기·셀 나누기가 없었습니다.
+- **Decision (`PD-111`)** (1) 표 메뉴에 `셀 선택`(`CmdOrCtrl+Alt+T`), `셀 합치기`(기존 `table:merge`), `셀 나누기`를 참조 앱 순서로 둡니다. (2) 한글 편집기 창(`HWP_EMBED`)에서는 배율 5개와 셀 3개를 참조 앱과 같은 명령 id(`view:zoom-in`·`view:zoom-out`·`view:zoom-100`·`view:zoom-fit-page`·`view:zoom-fit-width`, `table:cell-selection-enter`·`table:cell-merge`·`table:cell-split`)로 임베드 포트의 `automation.execute`에 보냅니다. 이 대응표는 `shell-chrome.js`의 `EMBED_EDITOR_COMMANDS` 하나입니다. (3) 새 두 항목(`table:cell-select`, `table:cell-split`)은 편집기에만 있는 동작(`hwp-editor`)이라 다른 모듈 창에서는 회색입니다. 편집기가 그 순간 실행할 수 없는 명령(셀을 고르지 않은 합치기 등)은 편집기가 거절하고 셸은 무시합니다. (4) 편집기에는 `table:cell-selection-enter`가 없어(참조 앱도 같은 id만 보냅니다) 오버레이가 이 명령을 등록하고, 셀 선택을 F5 키 경로로 실행합니다. 글 상자·그림 항목은 참조 앱에 없어 넣지 않습니다.
+- **Why** 참조 앱과 같은 메뉴·같은 명령 id로 맞추고, 기존 임베드 경로(`찾기`가 이미 쓰는 `automation.execute`)를 그대로 씁니다.
+- **Trade-offs** 항목의 회색 처리는 창의 모듈 단위입니다. 커서가 표 안인지 같은 편집기 상태는 셸에 보고하지 않습니다.
+- **Verified by** `node --test scripts/test-webui-native-menu.mjs scripts/test-webui-menu-state.mjs scripts/test-hwp-studio.mjs`, `cargo test -p easyoffice-desktop native_menu`.
+- **Revisit when** 편집기 상태에 따라 메뉴를 회색 처리해야 할 때.

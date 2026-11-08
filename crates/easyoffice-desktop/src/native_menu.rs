@@ -299,7 +299,14 @@ pub const ITEMS: &[MenuItemSpec] = &[
         None,
         "studio-cmd:table-add-row",
     ),
+    item(
+        "table:cell-select",
+        "셀 선택",
+        Some("CmdOrCtrl+Alt+T"),
+        "hwp-editor",
+    ),
     item("table:merge", "셀 합치기", None, "studio-cmd:table-merge"),
+    item("table:cell-split", "셀 나누기", None, "hwp-editor"),
     item("table:sum", "블록 합계", None, "studio-cmd:table-sum"),
     item(
         "table:doc-formula",
@@ -730,7 +737,11 @@ fn table_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
     let ids = [
         "table:insert",
         "table:add-row",
+        SEPARATOR,
+        "table:cell-select",
         "table:merge",
+        "table:cell-split",
+        SEPARATOR,
         "table:sum",
         "table:doc-formula",
         "table:hwp-border",
@@ -1026,6 +1037,34 @@ mod tests {
         for spec in ITEMS.iter().filter(|spec| spec.id.starts_with("file:new-")) {
             assert!(spec.action.starts_with("window-new:"), "{}", spec.id);
         }
+    }
+
+    #[test]
+    fn the_table_menu_has_the_reference_cell_items_in_order_and_the_editor_only_ones_say_so() {
+        let source = include_str!("native_menu.rs");
+        let table =
+            &source[source.find("fn table_menu").unwrap()..source.find("fn tool_menu").unwrap()];
+        let cells = [
+            "\"table:cell-select\"",
+            "\"table:merge\"",
+            "\"table:cell-split\"",
+        ];
+        let at: Vec<usize> = cells.iter().map(|id| table.find(id).unwrap()).collect();
+        assert!(
+            at.windows(2).all(|pair| pair[0] < pair[1]),
+            "select, merge, split"
+        );
+        let editor_only: Vec<&str> = ITEMS
+            .iter()
+            .filter(|spec| spec.action == "hwp-editor")
+            .map(|spec| spec.id)
+            .collect();
+        assert_eq!(editor_only, ["table:cell-select", "table:cell-split"]);
+        assert_eq!(
+            spec("table:cell-select").accelerator,
+            Some("CmdOrCtrl+Alt+T")
+        );
+        assert_eq!(spec("view:zoom-100").accelerator, Some("CmdOrCtrl+0"));
     }
 
     #[test]

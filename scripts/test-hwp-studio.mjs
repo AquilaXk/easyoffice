@@ -687,3 +687,16 @@ test("the toolbar labels item, command, CSS and manifest agree", () => {
   assert.ok(manifest.includes("view:toolbar-labels") && manifest.includes("src/ui/toolbar-labels.ts"));
   assert.ok(fs.readFileSync(path.join(REPO, "THIRD_PARTY_NOTICES.md"), "utf8").includes("src/ui/toolbar-labels.ts"));
 });
+
+test("the 셀 선택 command (table:cell-selection-enter) replays F5 through the editor's keyboard path, only in a table", async () => {
+  const { cellSelectionEnterCommand } = await import("../apps/hwp-studio/src/command/cell-selection.ts");
+  assert.equal(cellSelectionEnterCommand.id, "table:cell-selection-enter");
+  assert.equal(cellSelectionEnterCommand.canExecute({ inTable: true, inCellSelectionMode: false }), true);
+  assert.equal(cellSelectionEnterCommand.canExecute({ inTable: false, inCellSelectionMode: false }), false);
+  assert.equal(cellSelectionEnterCommand.canExecute({ inTable: true, inCellSelectionMode: true }), false);
+  const keys = [];
+  globalThis.KeyboardEvent ??= class { constructor(type, init) { this.type = type; this.key = init.key; } };
+  cellSelectionEnterCommand.execute({ getInputHandler: () => ({ handleDocumentNavigationKey: (e) => keys.push(e.key) }) });
+  assert.deepEqual(keys, ["F5"]);
+  cellSelectionEnterCommand.execute({ getInputHandler: () => null });
+});
