@@ -9,6 +9,15 @@
   // text-only fallback, and a failed connection offers a reconnect.
 
   const STUDIO_SRC = "./hwp-studio/index.html";
+  // Smoke only (step `frame_ipc`): a page that behaves like the editor frame (same sandbox, same
+  // response policy) and reports whether it can run an app command.
+  const PROBE_SRC = "./frame-probe.html";
+  const PROBE_TIMEOUT_MS = 20000;
+  const PROBE_VALUES = Object.freeze({
+    internals: ["present", "absent"],
+    webview: ["present", "absent"],
+    invoke: ["absent", "rejected", "no-answer", "allowed"],
+  });
   const PROTOCOL_VERSION = 1;
   const CAPABILITIES = [
     "transferable-array-buffer", "document-state-v1", "document-change-events-v1", "notify-saved-v1",
@@ -18,7 +27,7 @@
   const LONG_TIMEOUT_MS = 60000;
   const CONNECT_TIMEOUT_MS = 60000;
   // Scripts are required (the editor is an app bundle with WASM); modals keep alert/confirm dialogs
-  // working. `allow-same-origin` is deliberately absent (#233): with it the frame would share this
+  // working. `allow-same-origin` is deliberately absent: with it the frame would share this
   // window's origin and could call `window.parent.__TAURI_INTERNALS__.invoke` (and, on Windows, its
   // own injected copy) against every command the window may call. Without it the frame gets an
   // opaque origin: no parent DOM or global access, and IPC requests with `Origin: null` are rejected
@@ -542,9 +551,50 @@
       return "bytes=" + bytes.length + " pages=" + verdict.pageCount;
     }
 
+    // `EasyOffice.exe --smoke` step `frame_ipc`: puts a probe page in a frame sandboxed like the
+    // editor and reports what it could reach. The Tauri IPC objects may be present in the frame
+    // (Windows adds the initialization scripts to every frame); what must hold is that an app
+    // command called from there does not run. Resolves with the detail text, rejects otherwise.
+    function runFrameProbe(options) {
+      const root = pane();
+      if (!root || typeof env.addEventListener !== "function") {
+        return Promise.reject(new Error("격리 점검을 시작할 수 없는 환경입니다."));
+      }
+      const probe = document.createElement("iframe");
+      probe.hidden = true;
+      probe.title = "격리 점검";
+      probe.setAttribute("sandbox", FRAME_SANDBOX);
+      probe.setAttribute("src", PROBE_SRC);
+      let onMessage = null;
+      let timer = null;
+      const cleanup = () => {
+        if (onMessage) env.removeEventListener("message", onMessage);
+        if (timer !== null) timers.clear(timer);
+        if (typeof probe.remove === "function") probe.remove();
+      };
+      return new Promise((resolve, reject) => {
+        onMessage = (ev) => {
+          if (!probe.contentWindow || ev?.source !== probe.contentWindow) return;
+          const data = ev.data;
+          const valid = data && typeof data === "object" && data.type === "eo-frame-probe"
+            && Object.entries(PROBE_VALUES).every(([key, allowed]) => allowed.includes(data[key]));
+          if (!valid) {
+            reject(new Error("격리 점검 결과를 해석하지 못했습니다."));
+          } else if (data.invoke === "allowed") {
+            reject(new Error("편집기와 같은 샌드박스 프레임이 앱 명령을 실행했습니다 (internals=" + data.internals + " webview=" + data.webview + ")."));
+          } else {
+            resolve("internals=" + data.internals + " webview=" + data.webview + " invoke=" + data.invoke);
+          }
+        };
+        env.addEventListener("message", onMessage);
+        timer = timers.set(() => reject(new Error("격리 점검 프레임이 응답하지 않았습니다.")), options?.timeoutMs || PROBE_TIMEOUT_MS);
+        root.appendChild(probe);
+      }).finally(cleanup);
+    }
+
     return {
       onModuleActivated, paneForModule, isEmbedActive, usesLegacy, call, reconnect, useLegacyEditor,
-      exportHwp, exportBytes, exportHwpBase64, saveDocument, isDirty, onChange, onShortcut, onCommand, setShellContext, onStatus, whenSettled, runSmoke,
+      exportHwp, exportBytes, exportHwpBase64, saveDocument, isDirty, onChange, onShortcut, onCommand, setShellContext, onStatus, whenSettled, runSmoke, runFrameProbe,
       getStatus: () => status,
       getCapabilities: () => capabilities.slice(),
       getFrame: () => frame,

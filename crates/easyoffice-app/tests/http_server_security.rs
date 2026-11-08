@@ -272,7 +272,7 @@ fn test_bundle_routes_never_leave_the_bundle_directory() {
 
 #[test]
 fn test_cross_origin_read_is_granted_only_to_editor_bundle_responses() {
-    // The editor frame has an opaque origin (sandbox without allow-same-origin, #233), so its module
+    // The editor frame has an opaque origin (sandbox without allow-same-origin), so its module
     // scripts, WASM and fonts are cross-origin reads. The grant must stay on `/hwp-studio/*`: the
     // page, the API and error pages never carry it.
     let (port, stop, handle) = start_server();

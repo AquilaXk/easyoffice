@@ -904,6 +904,7 @@ dependencies = [
  "easyoffice-app",
  "easyoffice-formats",
  "fontdb",
+ "getrandom 0.3.4",
  "native-tls",
  "objc2-app-kit",
  "objc2-foundation",

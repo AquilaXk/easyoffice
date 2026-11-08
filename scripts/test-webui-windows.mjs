@@ -580,6 +580,6 @@ test("smoke: the page wiring keeps the step order and app.js stays under the lin
   const app = fs.readFileSync(new URL("../crates/easyoffice-app/ui/app.js", import.meta.url), "utf8");
   const wiring = /const smokeSteps = \{ (.*) \};/.exec(app);
   assert.ok(wiring, "app.js defines the smoke steps");
-  assert.deepEqual([...wiring[1].matchAll(/(\w+): \(\) =>/g)].map((m) => m[1]), ["hwp", "pdf", "print"]);
+  assert.deepEqual([...wiring[1].matchAll(/(\w+): \(\) =>/g)].map((m) => m[1]), ["hwp", "pdf", "print", "frame_ipc"]);
   assert.ok(app.split("\n").length < 1000);
 });

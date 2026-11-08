@@ -10,6 +10,7 @@ mod cache;
 mod ole2;
 mod zip;
 
+use crate::shell_caller::ShellCaller;
 use crate::AppWindows;
 use cache::{FileStamp, PreviewCache};
 use serde::Serialize;
@@ -148,6 +149,7 @@ fn to_view(thumbnail: &Thumbnail) -> PreviewImage {
 /// The picture of a recent document (or `None` when it has none) for the start window's card.
 #[tauri::command]
 pub async fn get_recent_preview(
+    _caller: ShellCaller,
     app: AppHandle,
     id: String,
 ) -> Result<Option<PreviewImage>, String> {

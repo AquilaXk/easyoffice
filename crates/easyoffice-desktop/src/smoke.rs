@@ -5,7 +5,7 @@
 //! <detail>` on stdout or `EASYOFFICE_SMOKE_STEP_FAIL <name> <reason>` on stderr. Steps come from
 //! three places:
 //! * `ipc`: the page's first engine call (`get_workspace_bootstrap`) went through the bridge.
-//! * Page steps (`hwp`, `pdf`, `print`, `window_loaded`): the page reports them through an ordinary
+//! * Page steps (`hwp`, `pdf`, `print`, `frame_ipc`, `window_loaded`): the page reports them through an ordinary
 //!   engine call (`scrub_pii` with a marker text) that this probe observes, so no extra IPC
 //!   permission exists. Only the names of `smoke_steps::PAGE_STEPS` are accepted.
 //! * Shell steps (`window_state`, `preview`, `update` and `menu`) run in Rust and report

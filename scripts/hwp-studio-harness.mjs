@@ -4,7 +4,7 @@
  *
  * Serves crates/easyoffice-app/ui/hwp-studio under /hwp-studio/ with the CSP and the cross-origin
  * read grant planned for the embedded editor, hosts it in an <iframe> with the shell's sandbox
- * (`allow-scripts allow-modals`, opaque origin, #233) of a tiny parent page that speaks the rhwp
+ * (`allow-scripts allow-modals`, opaque origin) of a tiny parent page that speaks the rhwp
  * embed protocol over a MessagePort, checks that the frame cannot reach the parent, and drives a
  * headless Chrome over the DevTools protocol with real input events (the frame's DOM is read through
  * an isolated world of the frame, never through `contentDocument`):
@@ -47,11 +47,13 @@ const BIG_PT = 20;
 
 const PARENT_HTML = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>harness</title>
 <link rel="stylesheet" href="/harness.css"></head><body>
-<iframe id="studio" title="studio" sandbox="allow-scripts allow-modals" src="/hwp-studio/index.html"></iframe>
+<iframe id="studio" title="studio" sandbox="allow-scripts allow-modals"></iframe>
 <script src="/harness.js"></script></body></html>`;
 const PARENT_CSS = "html,body{margin:0;height:100%}#studio{border:0;width:1280px;height:800px}";
 const PARENT_JS = `
 const frame = document.getElementById('studio');
+// The query of the harness page is passed on, like the shell does for ?theme= and ?shellKeys=.
+frame.src = '/hwp-studio/index.html' + location.search;
 const channel = new MessageChannel();
 const sessionId = crypto.randomUUID();
 let nextId = 1;
@@ -336,6 +338,15 @@ const ISOLATION_PROBE = `(() => {
   return out;
 })()`;
 
+/** Storage behaviour inside the sandboxed editor frame (what the shim has to guarantee). */
+const STORAGE_PROBE = `(() => {
+  const out = {};
+  try { localStorage.setItem('eo-probe', '1'); out.roundTrip = localStorage.getItem('eo-probe') === '1' ? 'ok' : 'lost'; } catch (e) { out.roundTrip = e.name; }
+  out.indexedDB = typeof indexedDB;
+  out.themeFromUrl = document.documentElement.dataset.themeMode;
+  return out;
+})()`;
+
 export async function runHarness({ log = console.log } = {}) {
   if (!fs.existsSync(path.join(BUNDLE, "index.html"))) {
     throw new Error("hwp-studio bundle is missing; run node scripts/build-hwp-studio.mjs first");
@@ -359,6 +370,9 @@ export async function runHarness({ log = console.log } = {}) {
       if (msg.method === "Target.attachedToTarget" && msg.sessionId === s && msg.params.targetInfo.type === "iframe") {
         frameSessions.push(msg.params.sessionId);
       }
+      if (frameSessions.includes(msg.sessionId) && msg.method === "Runtime.exceptionThrown") {
+        problems.push(`editor frame exception: ${msg.params.exceptionDetails.exception?.description ?? msg.params.exceptionDetails.text}`);
+      }
       if (msg.sessionId !== s) return;
       if (msg.method === "Runtime.executionContextCreated" && msg.params.context.auxData?.isDefault) {
         mainWorlds.set(msg.params.context.auxData.frameId, msg.params.context.id);
@@ -373,8 +387,10 @@ export async function runHarness({ log = console.log } = {}) {
     await cdp.send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true }, s);
 
     const origin = `http://127.0.0.1:${server.address().port}`;
-    await cdp.send("Page.navigate", { url: `${origin}/harness.html` }, s);
-    const connected = await waitFor(() => evaluate(cdp, s, "window.hwp ? hwp.connected.then((m) => m.capabilities) : null"), "embed connection");
+    // The shell opens the editor with ?theme=dark|light when its theme is not "system". With a
+    // blocked storage that used to abort the bundle at top level (connection time-out).
+    await cdp.send("Page.navigate", { url: `${origin}/harness.html?theme=dark` }, s);
+    const connected = await waitFor(() => evaluate(cdp, s, "window.hwp ? Promise.race([hwp.connected.then((m) => m.capabilities), new Promise((resolve) => setTimeout(() => resolve(null), 2000))]) : null"), "embed connection");
     log(`connected, capabilities: ${connected.join(", ")}`);
     for (const forbidden of ["plugin-loader-v1", "hwpctrl-v1"]) {
       if (connected.includes(forbidden)) problems.push(`capability ${forbidden} must not be advertised`);
@@ -391,12 +407,28 @@ export async function runHarness({ log = console.log } = {}) {
       return evaluate(cdp, s, expression, mainWorlds.get(frameId));
     };
     await waitFor(() => frameSessions.length > 0 || mainWorlds.has(frameId), "editor frame context");
+    if (frameSessions.length > 0) await cdp.send("Runtime.enable", {}, frameSessions[0]);
     const probe = await inFrame(ISOLATION_PROBE);
     log(`isolation probe: ${JSON.stringify(probe)}`);
     if (probe.origin !== "null") problems.push(`the editor frame must have an opaque origin, got ${probe.origin}`);
     for (const name of ["parentDocument", "parentTauri", "topLocation"]) {
       if (probe[name] !== "SecurityError") problems.push(`${name} must be blocked for the editor frame, got ${probe[name]}`);
     }
+
+    // Storage is unreachable in an opaque origin; the editor's settings must still work (memory) and
+    // the theme must apply from the URL and from the shell context without an uncaught error.
+    const storageProbe = await inFrame(STORAGE_PROBE);
+    log(`storage probe: ${JSON.stringify(storageProbe)}`);
+    if (storageProbe.roundTrip !== "ok") problems.push(`localStorage must work in memory, got ${storageProbe.roundTrip}`);
+    if (storageProbe.indexedDB !== "undefined") problems.push(`indexedDB must be undefined, got ${storageProbe.indexedDB}`);
+    if (storageProbe.themeFromUrl !== "dark") problems.push(`?theme=dark must apply at boot, got ${storageProbe.themeFromUrl}`);
+    const applied = await evaluate(cdp, s, "hwp.call('setShellContext', { theme: 'light', recents: [], pdfExport: false })");
+    if (applied?.applied !== true) problems.push(`setShellContext must apply the theme, got ${JSON.stringify(applied)}`);
+    const themeAfter = await inFrame("document.documentElement.dataset.themeMode");
+    if (themeAfter !== "light") problems.push(`setShellContext({theme:'light'}) must switch the theme, got ${themeAfter}`);
+    const saved = await inFrame(`JSON.parse(localStorage.getItem('rhwp-settings') || '{}').theme?.mode ?? null`);
+    if (saved !== "light") problems.push(`the theme choice must be saved to the settings store, got ${saved}`);
+
     const frameBox = () => evaluate(cdp, s, "(() => { const r = document.getElementById('studio').getBoundingClientRect(); return { x: r.left, y: r.top }; })()");
     const rectOf = async (selector) => {
       const [box, r] = [await frameBox(), await inFrame(frameRectExpr(selector))];

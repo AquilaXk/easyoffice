@@ -787,11 +787,22 @@ export async function flushAsyncTurns(count = 6) {
 // Desktop shell stub. `tauriInternals` installs a raw `__TAURI_INTERNALS__` object (bridge tests);
 // `tauriInvoke(command, { payload })` is a per-engine-command convenience handler that is routed
 // through the shell's single `ipc_dispatch` command exactly like the real WebView bridge.
+// Token and header of the shell's command check (`shell_caller.rs`): the stub shell refuses a
+// call that does not carry the window's token, like the real one.
+export const SHELL_TOKEN = "test-shell-token-0123456789abcdef";
+export const SHELL_TOKEN_HEADER = "x-easyoffice-shell";
+export function requireShellToken(options) {
+  if (options?.headers?.[SHELL_TOKEN_HEADER] !== SHELL_TOKEN) {
+    throw shellError("이 호출은 셸 창의 문서에서 온 요청이 아니어서 거부했습니다.");
+  }
+}
+
 function resolveShellInternals(options) {
   if (options.tauriInternals) return options.tauriInternals;
   if (!options.tauriInvoke && !options.shellCommands) return undefined;
   return {
-    invoke: async (shellCommand, args = {}) => {
+    invoke: async (shellCommand, args = {}, callOptions) => {
+      requireShellToken(callOptions);
       if (options.shellCommands && typeof options.shellCommands[shellCommand] === "function") {
         return options.shellCommands[shellCommand](args);
       }
@@ -881,6 +892,7 @@ export async function createWorkspaceHarness(options = {}) {
       if (idx >= 0) fns.splice(idx, 1);
     },
     __TAURI_INTERNALS__: resolveShellInternals(options),
+    ...(options.shellToken === null ? {} : { __EASYOFFICE_SHELL_TOKEN__: options.shellToken ?? SHELL_TOKEN }),
   };
   if (options.search !== undefined) hostEnv.location.search = options.search;
   if (options.open) hostEnv.open = options.open;

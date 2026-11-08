@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { shellError, createWebUiDom, flushAsyncTurns } from "./webui-dom-harness.mjs";
+import { shellError, createWebUiDom, flushAsyncTurns, requireShellToken, SHELL_TOKEN, SHELL_TOKEN_HEADER } from "./webui-dom-harness.mjs";
 import { switchModule, studioItem, commandItem } from "./test-support/modules.mjs";
 
 // Desktop shell (Tauri v2 / WebView2) bridge: a fake `__TAURI_INTERNALS__` stands in for the
@@ -26,8 +26,9 @@ async function createShellHarness({ engineOverrides = {}, saveFile } = {}) {
   const calls = [];
   const fetchCalls = [];
   const internals = {
-    invoke: async (command, args) => {
-      calls.push({ command, args });
+    invoke: async (command, args, options) => {
+      calls.push({ command, args, options });
+      requireShellToken(options);
       if (command === "ipc_dispatch") {
         const handler = engineOverrides[args.command] || offline[args.command];
         if (typeof handler !== "function") {
@@ -230,4 +231,28 @@ test("a shell object without an invoke function is ignored", async () => {
   });
   assert.ok(fetched.includes("get_workspace_bootstrap"));
   assert.equal(document.getElementById("status-engine").textContent, "엔진: 로컬 서버 연결됨");
+});
+
+test("every shell command carries the window's command token as a header", async () => {
+  const { calls, sandbox } = await createShellHarness();
+  const bridge = sandbox.__EASYOFFICE_DESKTOP_BRIDGE__;
+  await bridge.getUpdateNotice().catch(() => null);
+  await bridge.windowCommand("takePendingOpen", {}).catch(() => null);
+  await bridge.saveFile("QQ==", "a.docx").catch(() => null);
+  assert.ok(calls.length >= 4);
+  for (const call of calls) {
+    assert.equal(call.options?.headers?.[SHELL_TOKEN_HEADER], SHELL_TOKEN, call.command);
+  }
+});
+
+test("without the token global the bridge refuses to call the shell at all", async () => {
+  const calls = [];
+  const { sandbox } = await createWebUiDom({
+    shellToken: null,
+    tauriInternals: { invoke: async (command, args, options) => { calls.push({ command }); requireShellToken(options); return "{}"; } },
+  });
+  const bridge = sandbox.__EASYOFFICE_DESKTOP_BRIDGE__;
+  await assert.rejects(bridge.invokeIpc("get_workspace_bootstrap", ""), /호출 토큰/);
+  await assert.rejects(bridge.getUpdateNotice(), /호출 토큰/);
+  assert.equal(calls.length, 0, "nothing reaches the shell without a token");
 });

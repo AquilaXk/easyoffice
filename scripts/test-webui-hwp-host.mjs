@@ -97,6 +97,8 @@ function createFakeStudio({ answer = true, failMethods = new Set() } = {}) {
   return { requests, state, FakeMessageChannel, attachWindow };
 }
 
+const listeners = new Map();
+
 function loadHost({ fetchOk = true, studioOptions, activeModule = "HWP", timeouts = {}, extraDeps = {} } = {}) {
   const document = createFakeDocument();
   const studio = createFakeStudio(studioOptions);
@@ -109,6 +111,8 @@ function loadHost({ fetchOk = true, studioOptions, activeModule = "HWP", timeout
     clearTimeout,
     btoa: (s) => Buffer.from(s, "binary").toString("base64"),
     ArrayBuffer,
+    addEventListener: (type, fn) => { (listeners.get(type) ?? listeners.set(type, new Set()).get(type)).add(fn); },
+    removeEventListener: (type, fn) => { listeners.get(type)?.delete(fn); },
   };
   loadUiModule(HOST_JS, env);
   let mod = activeModule;
@@ -129,7 +133,8 @@ function loadHost({ fetchOk = true, studioOptions, activeModule = "HWP", timeout
     }
     return el;
   };
-  return { hostApi, document, studio, states, ipcCalls, setModule: (m) => { mod = m; }, constants: env.__EASYOFFICE_HWP_HOST_CONSTANTS__ };
+  const post = (source, data) => { for (const fn of [...(listeners.get("message") ?? [])]) fn({ source, data }); };
+  return { hostApi, document, studio, states, ipcCalls, post, listenerCount: () => listeners.get("message")?.size ?? 0, setModule: (m) => { mod = m; }, constants: env.__EASYOFFICE_HWP_HOST_CONSTANTS__ };
 }
 
 const settle = async () => { for (let i = 0; i < 12; i += 1) await new Promise((r) => setImmediate(r)); };
@@ -146,7 +151,7 @@ test("lazy start: no frame until HWP is activated, then connect handshake, ready
   const frame = document.frames[0];
   assert.equal(frame.getAttribute("src"), "./hwp-studio/index.html");
   assert.equal(frame.getAttribute("sandbox"), constants.FRAME_SANDBOX);
-  assert.deepEqual(frame.getAttribute("sandbox").split(" "), ["allow-scripts", "allow-modals"], "exactly these two tokens (#233)");
+  assert.deepEqual(frame.getAttribute("sandbox").split(" "), ["allow-scripts", "allow-modals"], "exactly these two tokens");
   const { message, origin, ports } = studio.state.connect;
   assert.equal(message.type, "rhwp-connect");
   assert.equal(message.version, 1);
@@ -377,12 +382,59 @@ test("shell shortcuts: without a shortcut table the frame URL stays plain", asyn
   assert.equal(document.frames[0].getAttribute("src"), constants.STUDIO_SRC);
 });
 
-test("the host never reaches into the editor frame or the shell's own Tauri objects (#233)", async () => {
+test("the host never reaches into the editor frame or the shell's own Tauri objects", async () => {
   const { readFileSync } = await import("node:fs");
   const source = readFileSync(HOST_JS, "utf8").replace(/\/\/.*$/gm, "");
   assert.doesNotMatch(source, /contentDocument/);
   assert.doesNotMatch(source, /allow-same-origin/);
   assert.doesNotMatch(source, /__TAURI/);
-  assert.equal([...source.matchAll(/contentWindow/g)].length, 1, "contentWindow is used once, as the postMessage target of the handshake");
+  assert.doesNotMatch(source, /contentWindow\s*(\.|\[)/, "the frame's window is only handed to postMessage or compared, never read");
   assert.match(source, /target\.postMessage\(/);
+});
+
+// ---- frame IPC probe (smoke step `frame_ipc`) -------------------------------------------
+
+function startProbe(h, timeouts) {
+  const done = h.hostApi.runFrameProbe(timeouts);
+  const frame = h.document.frames.at(-1);
+  return { done, frame };
+}
+
+test("frame probe: loads frame-probe.html in a sandbox without allow-same-origin and passes when the frame cannot run a command", async () => {
+  const h = loadHost();
+  const { done, frame } = startProbe(h);
+  assert.equal(frame.getAttribute("src"), "./frame-probe.html");
+  assert.deepEqual(frame.getAttribute("sandbox").split(" "), ["allow-scripts", "allow-modals"]);
+  h.post({}, { type: "eo-frame-probe", internals: "present", webview: "present", invoke: "rejected" });
+  assert.equal(h.listenerCount(), 1, "a message from another window is ignored");
+  h.post(frame.contentWindow, { type: "eo-frame-probe", internals: "present", webview: "present", invoke: "rejected" });
+  assert.equal(await done, "internals=present webview=present invoke=rejected");
+  assert.equal(frame.removed, true, "the probe frame is removed");
+  assert.equal(h.listenerCount(), 0, "and the listener with it");
+});
+
+test("frame probe: absent Tauri objects and an unanswered call also pass", async () => {
+  for (const [internals, invoke] of [["absent", "absent"], ["present", "no-answer"]]) {
+    const h = loadHost();
+    const { done, frame } = startProbe(h);
+    h.post(frame.contentWindow, { type: "eo-frame-probe", internals, webview: "absent", invoke });
+    assert.equal(await done, `internals=${internals} webview=absent invoke=${invoke}`);
+  }
+});
+
+test("frame probe: fails when the frame ran an app command", async () => {
+  const h = loadHost();
+  const { done, frame } = startProbe(h);
+  h.post(frame.contentWindow, { type: "eo-frame-probe", internals: "present", webview: "present", invoke: "allowed" });
+  await assert.rejects(done, /앱 명령을 실행했습니다/);
+  assert.equal(frame.removed, true);
+});
+
+test("frame probe: fails closed on a malformed report and on silence", async () => {
+  const h = loadHost();
+  const first = startProbe(h);
+  h.post(first.frame.contentWindow, { type: "eo-frame-probe", internals: "present", webview: "present", invoke: "maybe" });
+  await assert.rejects(first.done, /점검 결과를 해석하지 못했습니다/);
+  const second = startProbe(loadHost(), { timeoutMs: 20 });
+  await assert.rejects(second.done, /응답하지 않았습니다/);
 });

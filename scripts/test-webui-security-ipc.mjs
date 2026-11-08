@@ -356,7 +356,7 @@ test("shared PII vectors in fixtures/pii-scrub-vectors.json match JS sheet-utils
   assert.deepEqual(metaRes.strippedMetadataFields, ["Author", "Company"]);
 });
 
-// ---- HWP editor frame isolation (#233, PD-083) ------------------------------------------------
+// ---- HWP editor frame isolation (PD-083) ------------------------------------------------
 // Tauri decides IPC access per window/webview and per origin (local or remote), never per frame, so
 // an editor frame that shares the shell's origin inherits every command the window may call. The
 // frame therefore gets an opaque origin; these checks pin the pieces that keep it that way.
@@ -400,4 +400,23 @@ test("editor frame: the window capability is local-only, global Tauri stays off 
   const studioCsp = readText("crates/easyoffice-app/src/hwp_bundle.rs").match(/STUDIO_CSP: &str = "([^"]+)"/)[1];
   assert.match(studioCsp, /^default-src 'self';/);
   assert.doesNotMatch(studioCsp, /connect-src|ipc|'unsafe-/);
+});
+
+test("shell commands: only the desktop bridge calls the Tauri IPC, and it always sends the window token", () => {
+  const uiDir = new URL("crates/easyoffice-app/ui/", ROOT);
+  const callers = [];
+  for (const name of fs.readdirSync(uiDir).filter((n) => n.endsWith(".js"))) {
+    const code = fs.readFileSync(new URL(name, uiDir), "utf8").replace(/\/\/.*$/gm, "");
+    if (/__TAURI_INTERNALS__|\bwindow\.ipc\b|chrome\.webview/.test(code)) callers.push(name);
+  }
+  // frame-probe.js is the smoke probe that plays the part of a compromised editor frame.
+  assert.deepEqual(callers.sort((a, b) => a.localeCompare(b)), ["desktop-bridge.js", "frame-probe.js"]);
+  const bridge = readText("crates/easyoffice-app/ui/desktop-bridge.js");
+  assert.equal([...bridge.matchAll(/internals\.invoke\(/g)].length, 1, "one call site");
+  assert.match(bridge, /internals\.invoke\(command, args, \{ headers: \{ \[TOKEN_HEADER\]: token \} \}\)/);
+  const rust = readText("crates/easyoffice-desktop/src/shell_caller.rs");
+  assert.ok(rust.includes(`TOKEN_HEADER: &str = "x-easyoffice-shell"`));
+  assert.match(bridge, /const TOKEN_HEADER = "x-easyoffice-shell"/);
+  assert.match(rust, /TOKEN_GLOBAL: &str = "__EASYOFFICE_SHELL_TOKEN__"/);
+  assert.match(bridge, /const TOKEN_GLOBAL = "__EASYOFFICE_SHELL_TOKEN__"/);
 });

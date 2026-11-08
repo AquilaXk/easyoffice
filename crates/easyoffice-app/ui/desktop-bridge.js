@@ -29,6 +29,17 @@
     recentPreview: "get_recent_preview",
   });
 
+  // Command token (`crates/easyoffice-desktop/src/shell_caller.rs`): the shell defines it in the
+  // top-level document of each window only and refuses a command that does not carry it, so the
+  // sandboxed editor frame cannot use the Tauri IPC objects it may be handed on Windows.
+  const TOKEN_GLOBAL = "__EASYOFFICE_SHELL_TOKEN__";
+  const TOKEN_HEADER = "x-easyoffice-shell";
+
+  function shellToken() {
+    const token = host[TOKEN_GLOBAL];
+    return typeof token === "string" && token !== "" ? token : null;
+  }
+
   function shellInternals() {
     const internals = host.__TAURI_INTERNALS__;
     return internals && typeof internals.invoke === "function" ? internals : null;
@@ -52,8 +63,10 @@
   async function callShell(command, args) {
     const internals = shellInternals();
     if (!internals) throw new Error("데스크톱 셸이 연결되어 있지 않습니다.");
+    const token = shellToken();
+    if (!token) throw new Error("데스크톱 셸 호출 토큰이 없어 요청하지 않았습니다.");
     try {
-      return await internals.invoke(command, args);
+      return await internals.invoke(command, args, { headers: { [TOKEN_HEADER]: token } });
     } catch (err) {
       throw new Error(describeShellError(err));
     }

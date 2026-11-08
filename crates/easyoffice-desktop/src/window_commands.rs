@@ -3,6 +3,7 @@
 //! none takes or returns a file system path. Paths are read, canonicalized and tracked in Rust only.
 
 use crate::recent::RecentList;
+use crate::shell_caller::{self, ShellCaller};
 use crate::smoke::SmokeProbe;
 use crate::tracked_files::{Fingerprint, TrackedFile, TrackedFiles};
 use crate::window_state::{MonitorRect, WindowGeometry};
@@ -166,6 +167,7 @@ fn build_window(
             .inner_size(size.0, size.1)
             .min_inner_size(min.0, min.1)
             .on_navigation(crate::is_app_origin)
+            .initialization_script(shell_token_script(app, label)?)
             .on_web_resource_request(|request, response| {
                 crate::studio_frame::harden_studio_response(&request, response);
             });
@@ -191,6 +193,14 @@ fn build_window(
         .map_err(|err| format!("새 창을 만들지 못했습니다: {err}"))?;
     attach_handlers(app, &window);
     Ok(window)
+}
+
+/// The script that gives the window's top-level document its command token (`shell_caller.rs`).
+fn shell_token_script(app: &AppHandle, label: &str) -> Result<String, String> {
+    app.state::<shell_caller::ShellTokens>()
+        .issue(label)
+        .map(|token| shell_caller::init_script(&token))
+        .map_err(|err| format!("새 창의 호출 토큰을 만들지 못했습니다: {err}"))
 }
 
 /// Creates a window that has already been registered under `label`.
@@ -317,6 +327,7 @@ fn attach_handlers(app: &AppHandle, window: &WebviewWindow) {
             }
         }
         WindowEvent::Destroyed => {
+            app.state::<shell_caller::ShellTokens>().forget(&label);
             persist_geometry(&app);
             let state = app.state::<AppWindows>();
             locked(&state.registry).remove(&label);
@@ -546,6 +557,7 @@ fn parse_document_kind(kind: &str) -> Result<WindowKind, WindowError> {
 
 #[tauri::command]
 pub async fn open_document_window(
+    _caller: ShellCaller,
     app: AppHandle,
     kind: String,
 ) -> Result<OpenOutcome, WindowError> {
@@ -558,6 +570,7 @@ pub async fn open_document_window(
 /// page learns only whether a window was opened, focused, or the dialog was cancelled.
 #[tauri::command]
 pub async fn open_file_in_new_window(
+    _caller: ShellCaller,
     app: AppHandle,
     window: WebviewWindow,
 ) -> Result<OpenOutcome, WindowError> {
@@ -594,7 +607,11 @@ pub async fn open_file_in_new_window(
 
 /// The bytes and display name queued for this window, once; `null` when nothing is pending.
 #[tauri::command]
-pub fn take_pending_open(app: AppHandle, window: WebviewWindow) -> Option<PendingOpenView> {
+pub fn take_pending_open(
+    _caller: ShellCaller,
+    app: AppHandle,
+    window: WebviewWindow,
+) -> Option<PendingOpenView> {
     if !is_window_label(window.label()) {
         return None;
     }
@@ -604,7 +621,13 @@ pub fn take_pending_open(app: AppHandle, window: WebviewWindow) -> Option<Pendin
 }
 
 #[tauri::command]
-pub fn report_window_state(app: AppHandle, window: WebviewWindow, name: String, dirty: bool) {
+pub fn report_window_state(
+    _caller: ShellCaller,
+    app: AppHandle,
+    window: WebviewWindow,
+    name: String,
+    dirty: bool,
+) {
     if !is_window_label(window.label()) {
         return;
     }
@@ -617,17 +640,24 @@ pub fn report_window_state(app: AppHandle, window: WebviewWindow, name: String, 
 
 /// Destroys the calling window without another close request (the page already asked the user).
 #[tauri::command]
-pub fn close_current_window(window: WebviewWindow) {
+pub fn close_current_window(_caller: ShellCaller, window: WebviewWindow) {
     let _ = window.destroy();
 }
 
 #[tauri::command]
-pub fn list_recent_documents(app: AppHandle) -> Vec<crate::recent::RecentView> {
+pub fn list_recent_documents(
+    _caller: ShellCaller,
+    app: AppHandle,
+) -> Vec<crate::recent::RecentView> {
     locked(&app.state::<AppWindows>().recents).views()
 }
 
 #[tauri::command]
-pub async fn open_recent_document(app: AppHandle, id: String) -> Result<OpenOutcome, WindowError> {
+pub async fn open_recent_document(
+    _caller: ShellCaller,
+    app: AppHandle,
+    id: String,
+) -> Result<OpenOutcome, WindowError> {
     let path = locked(&app.state::<AppWindows>().recents)
         .path_for(&id)
         .ok_or_else(|| WindowError::new("최근 문서 목록에 없는 항목입니다."))?;

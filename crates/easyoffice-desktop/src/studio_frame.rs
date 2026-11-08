@@ -1,4 +1,4 @@
-//! Response policy of the embedded editor bundle (`/hwp-studio/*`, PD-083, #233).
+//! Response policy of the embedded editor bundle (`/hwp-studio/*`, PD-083).
 //!
 //! The editor runs in an `<iframe sandbox="allow-scripts allow-modals">`, so it has an opaque origin:
 //! it cannot touch the shell window's DOM or its Tauri IPC objects, and its IPC requests carry
@@ -12,11 +12,20 @@
 
 use std::borrow::Cow;
 
-use easyoffice_app::hwp_bundle::{BUNDLE_URL_PREFIX, STUDIO_CSP};
+use easyoffice_app::hwp_bundle::{fold_request_path, is_bundle_request_path, STUDIO_CSP};
 use tauri::http::header::{
     HeaderValue, ACCESS_CONTROL_ALLOW_ORIGIN, CONTENT_SECURITY_POLICY, CONTENT_TYPE,
 };
 use tauri::http::{Request, Response};
+
+/// Pages the shell loads into a frame sandboxed like the editor: the editor bundle and the smoke
+/// probe (`ui/frame-probe.*`), which has to see exactly the editor's environment.
+const PROBE_PAGES: [&str; 2] = ["frame-probe.html", "frame-probe.js"];
+
+fn is_sandboxed_frame_page(raw_path: &str) -> bool {
+    is_bundle_request_path(raw_path)
+        || fold_request_path(raw_path).is_some_and(|folded| PROBE_PAGES.contains(&folded.as_str()))
+}
 
 fn is_html(response: &Response<Cow<'static, [u8]>>) -> bool {
     response
@@ -31,7 +40,7 @@ pub(crate) fn harden_studio_response(
     request: &Request<Vec<u8>>,
     response: &mut Response<Cow<'static, [u8]>>,
 ) {
-    if !request.uri().path().starts_with(BUNDLE_URL_PREFIX) {
+    if !is_sandboxed_frame_page(request.uri().path()) {
         return;
     }
     response
@@ -69,6 +78,10 @@ mod tests {
         for uri in [
             "tauri://localhost/hwp-studio/index.html",
             "http://tauri.localhost/hwp-studio/index.html?theme=dark",
+            "tauri://localhost/hwp%2Dstudio/index.html",
+            "tauri://localhost/frame-probe.html",
+            "http://tauri.localhost/%66rame-probe.html",
+            "http://tauri.localhost/%68wp-studio/index.html",
         ] {
             let mut html = response("text/html");
             harden_studio_response(&request(uri), &mut html);
@@ -98,6 +111,8 @@ mod tests {
             "tauri://localhost/hwp-studio",
             "tauri://localhost/x/hwp-studio/index.html",
             "http://tauri.localhost/hwp-studio-evil/index.html",
+            "tauri://localhost/frame-probe.html.evil",
+            "tauri://localhost/x/frame-probe.html",
         ] {
             let mut page = response("text/html");
             harden_studio_response(&request(uri), &mut page);

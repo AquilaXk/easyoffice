@@ -13,6 +13,7 @@ mod preview;
 mod recent;
 mod save_file;
 mod save_verify;
+mod shell_caller;
 mod smoke;
 mod smoke_steps;
 mod studio_frame;
@@ -25,6 +26,7 @@ mod windows;
 use easyoffice_app::EasyOfficeIpcRouter;
 use save_file::{save_in_place, write_document_bytes, InPlaceResult, SaveOutcome, SaveRequest};
 use serde::Serialize;
+use shell_caller::ShellCaller;
 use smoke::{SmokeProbe, SMOKE_TIMEOUT};
 use tauri::{AppHandle, Manager, WebviewWindow};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
@@ -52,6 +54,7 @@ impl IpcError {
 /// over `POST /api/ipc`. Runs on a blocking worker so long engine calls never freeze the window.
 #[tauri::command]
 async fn ipc_dispatch(
+    _caller: ShellCaller,
     app: AppHandle,
     command: String,
     payload: String,
@@ -79,6 +82,7 @@ async fn ipc_dispatch(
 /// comes from the dialog shown by this process.
 #[tauri::command]
 async fn save_document_file(
+    _caller: ShellCaller,
     app: AppHandle,
     window: WebviewWindow,
     file_name: String,
@@ -108,6 +112,7 @@ async fn save_document_file(
 /// Rust.
 #[tauri::command]
 async fn export_searchable_pdf(
+    _caller: ShellCaller,
     app: AppHandle,
     window: WebviewWindow,
     file_name: String,
@@ -250,6 +255,7 @@ fn main() {
             preview::get_recent_preview,
         ])
         .setup(move |app| {
+            app.manage(shell_caller::ShellTokens::default());
             app.manage(AppWindows::new(app.path().app_data_dir().ok()));
             // Every OS gets the native menu bar; the page hides its own (PD-102).
             native_menu::install(app)?;

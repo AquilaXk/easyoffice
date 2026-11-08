@@ -98,7 +98,7 @@ function easyOfficeStaticAssets(): Plugin {
       for (const rel of manifest.verbatimAssets as string[]) {
         emit(this, rel.replace(/^public\//, ''), resolve(upstreamStudio, rel));
       }
-      for (const name of listFiles(staticDir, '.html').concat(listFiles(staticDir, '.css'))) {
+      for (const name of ['.html', '.css', '.js'].flatMap((extension) => listFiles(staticDir, extension))) {
         emit(this, name, resolve(staticDir, name));
       }
       for (const name of listFiles(fontsDir, '.woff2')) emit(this, `fonts/${name}`, resolve(fontsDir, name));

@@ -19,6 +19,7 @@
 //! THIRD_PARTY_NOTICES.md); this module replaces the reference app's signed updater with a notice only.
 
 use crate::save_file::write_document_bytes;
+use crate::shell_caller::ShellCaller;
 use serde::{Deserialize, Serialize};
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -406,19 +407,29 @@ pub fn start(app: &AppHandle, smoke_mode: bool) {
 }
 
 #[tauri::command]
-pub fn get_update_notice(service: State<'_, Arc<UpdateService>>) -> UpdateNoticeView {
+pub fn get_update_notice(
+    _caller: ShellCaller,
+    service: State<'_, Arc<UpdateService>>,
+) -> UpdateNoticeView {
     service.view()
 }
 
 #[tauri::command]
-pub fn set_update_check(service: State<'_, Arc<UpdateService>>, enabled: bool) -> UpdateNoticeView {
+pub fn set_update_check(
+    _caller: ShellCaller,
+    service: State<'_, Arc<UpdateService>>,
+    enabled: bool,
+) -> UpdateNoticeView {
     service.set_enabled(enabled);
     service.view()
 }
 
 /// Opens the stored release page in the default browser. The page supplies no address.
 #[tauri::command]
-pub async fn open_release_page(service: State<'_, Arc<UpdateService>>) -> Result<(), String> {
+pub async fn open_release_page(
+    _caller: ShellCaller,
+    service: State<'_, Arc<UpdateService>>,
+) -> Result<(), String> {
     let url = service
         .release_url()
         .ok_or_else(|| "열 수 있는 릴리스 페이지가 없습니다.".to_string())?;

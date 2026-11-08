@@ -22,7 +22,7 @@ const MAX_REL_LEN: usize = 160;
 pub const STUDIO_CSP: &str = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' data: blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'self'";
 
 /// Response header that lets the editor frame read its own files. The frame is sandboxed without
-/// `allow-same-origin` (#233), so it has an opaque origin and its module scripts, WASM and fonts are
+/// `allow-same-origin`, so it has an opaque origin and its module scripts, WASM and fonts are
 /// cross-origin reads. The bundle is public static content; no other response carries this header.
 pub const STUDIO_CORS_HEADER: &str = "Access-Control-Allow-Origin: *\r\n";
 
@@ -71,6 +71,27 @@ fn percent_decode(raw: &str) -> Option<String> {
         }
     }
     String::from_utf8(out).ok()
+}
+
+/// Folds a request path (query removed) for comparison: percent-decoded, backslashes as slashes,
+/// lower case, no leading separator. `None` when it does not decode. This is the form to compare
+/// against, so `/hwp%2Dstudio/...` and `/%68wp-studio/...` cannot slip past a check that the file
+/// lookup would still resolve.
+pub fn fold_request_path(raw_path: &str) -> Option<String> {
+    let decoded = percent_decode(raw_path)?;
+    Some(
+        decoded
+            .replace('\\', "/")
+            .to_ascii_lowercase()
+            .trim_start_matches('/')
+            .to_string(),
+    )
+}
+
+/// True when a request path (query removed, not yet percent-decoded) addresses the editor bundle.
+pub fn is_bundle_request_path(raw_path: &str) -> bool {
+    fold_request_path(raw_path)
+        .is_some_and(|folded| folded.starts_with(BUNDLE_URL_PREFIX.trim_start_matches('/')))
 }
 
 /// Maps a request path (query already removed) below `/hwp-studio/` to a safe relative path, or
@@ -168,6 +189,33 @@ pub fn embedded_integrity_error() -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bundle_request_paths_are_recognised_after_decoding() {
+        for yes in [
+            "/hwp-studio/index.html",
+            "/hwp%2Dstudio/index.html",
+            "/%68wp-studio/assets/a.js",
+            "//hwp-studio/index.html",
+            "/HWP-Studio/index.html",
+            "/hwp-studio/",
+            "\\hwp-studio\\index.html",
+        ] {
+            assert!(is_bundle_request_path(yes), "{yes}");
+        }
+        for no in [
+            "/",
+            "/index.html",
+            "/app.js",
+            "/hwp-studio",
+            "/hwp-studio-evil/index.html",
+            "/x/hwp-studio/index.html",
+            "/hwp%2",
+            "/hwp%zz-studio/index.html",
+        ] {
+            assert!(!is_bundle_request_path(no), "{no}");
+        }
+    }
 
     #[test]
     fn sanitize_accepts_plain_bundle_paths() {

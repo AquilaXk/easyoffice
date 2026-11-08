@@ -115,7 +115,7 @@ async function connect(wsUrl) {
   const logs = [];
   const dialogs = [];
   const downloads = [];
-  // The editor frame is sandboxed without allow-same-origin (opaque origin, #233): the shell cannot
+  // The editor frame is sandboxed without allow-same-origin (opaque origin): the shell cannot
   // read its DOM, so the frame's own CDP session (out-of-process iframe) is used for that.
   const frameSessions = [];
   await new Promise((resolve, reject) => { sock.onopen = resolve; sock.onerror = reject; });

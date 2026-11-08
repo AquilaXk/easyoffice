@@ -4,7 +4,7 @@
 //! reported success (`smoke.rs` keeps the book and prints one `EASYOFFICE_SMOKE_STEP_OK <name>` or
 //! `EASYOFFICE_SMOKE_STEP_FAIL <name>` line per step). Two kinds exist:
 //!
-//! * Page steps run in the first window (`hwp`, `pdf`, `print`) or the second one (`window_loaded`)
+//! * Page steps run in the first window (`hwp`, `pdf`, `print`, `frame_ipc`) or the second one (`window_loaded`)
 //!   and are reported by the page over the ordinary `scrub_pii` call; a page can report only the
 //!   names of [`PAGE_STEPS`].
 //! * Shell steps run here and are reported directly: `window_state` (the remembered-geometry file),
@@ -31,6 +31,8 @@ pub const IPC: &str = "ipc";
 pub const HWP: &str = "hwp";
 pub const PDF: &str = "pdf";
 pub const PRINT: &str = "print";
+/// The sandboxed editor frame must not be able to run an app command; see `frame-probe.js`.
+pub const FRAME_IPC: &str = "frame_ipc";
 pub const WINDOW: &str = "window";
 pub const WINDOW_STATE: &str = "window_state";
 pub const PREVIEW: &str = "preview";
@@ -40,13 +42,14 @@ pub const MENU: &str = "menu";
 pub const WINDOW_LOADED: &str = "window_loaded";
 
 /// The names a page may report.
-pub const PAGE_STEPS: [&str; 4] = [HWP, PDF, PRINT, WINDOW_LOADED];
+pub const PAGE_STEPS: [&str; 5] = [HWP, PDF, PRINT, FRAME_IPC, WINDOW_LOADED];
 
 const REQUIRED: &[&str] = &[
     IPC,
     HWP,
     PDF,
     PRINT,
+    FRAME_IPC,
     WINDOW,
     WINDOW_STATE,
     PREVIEW,
@@ -408,7 +411,17 @@ mod tests {
         let required = required_steps();
         let unique: std::collections::HashSet<_> = required.iter().collect();
         assert_eq!(unique.len(), required.len());
-        for name in [IPC, HWP, PDF, PRINT, WINDOW, WINDOW_STATE, PREVIEW, UPDATE] {
+        for name in [
+            IPC,
+            HWP,
+            PDF,
+            PRINT,
+            FRAME_IPC,
+            WINDOW,
+            WINDOW_STATE,
+            PREVIEW,
+            UPDATE,
+        ] {
             assert!(required.contains(&name), "{name}");
         }
         assert!(required.contains(&MENU));
@@ -438,7 +451,7 @@ mod tests {
             .unwrap()
         };
         let app = page("app.js");
-        for name in [HWP, PDF, PRINT] {
+        for name in [HWP, PDF, PRINT, FRAME_IPC] {
             assert!(app.contains(&format!("{name}: ")), "app.js reports {name}");
         }
         assert!(page("window-bridge.js").contains(&format!("\"{WINDOW_LOADED}\"")));

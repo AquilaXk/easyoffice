@@ -319,7 +319,10 @@ test("the shell tells the editor whether it can export a PDF (desktop app only)"
 
 test("the desktop bridge sends page SVG text only and no path to export_searchable_pdf", async () => {
   const calls = [];
-  const env = { __TAURI_INTERNALS__: { invoke: async (command, args) => { calls.push({ command, args }); return { status: "saved", name: "a.pdf", bytes: 3 }; } } };
+  const env = {
+    __EASYOFFICE_SHELL_TOKEN__: "token",
+    __TAURI_INTERNALS__: { invoke: async (command, args) => { calls.push({ command, args }); return { status: "saved", name: "a.pdf", bytes: 3 }; } },
+  };
   loadUiModule(new URL("../crates/easyoffice-app/ui/desktop-bridge.js", import.meta.url), env);
   const bridge = env.__EASYOFFICE_DESKTOP_BRIDGE__;
   const res = await bridge.exportSearchablePdf("보고서.pdf", ["<svg/>", "<svg/>"]);

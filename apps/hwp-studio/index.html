@@ -6,6 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="color-scheme" content="light dark" />
   
+  <!-- EasyOffice: 불투명 출처 프레임에서 막히는 브라우저 저장소를 메모리로 대체한다. 다른 스크립트보다 먼저(동기) 돈다. -->
+  <script src="./storage-shim.js"></script>
   <!-- 다크테마 FOUC 방지 — 확장 CSP가 인라인 스크립트를 금지하므로 외부 파일로 분리(#1444).
        module/defer 금지(동기 로드)로 번들 전 즉시 실행되어 FOUC 방지를 유지한다. -->
   <script src="./theme-init.js"></script>

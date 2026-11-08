@@ -968,7 +968,7 @@
       await workspaceSession.markSaved();
     });
     if (!windowBridge.isStart) void hwpSession.restore().catch(() => {});
-    const smokeSteps = { hwp: () => hwpHost.runSmoke(() => ribbonHistory.activatePane("HWP")), pdf: () => hwpSession.smokePdf(), print: () => hwpPrint.smoke() };
+    const smokeSteps = { hwp: () => hwpHost.runSmoke(() => ribbonHistory.activatePane("HWP")), pdf: () => hwpSession.smokePdf(), print: () => hwpPrint.smoke(), frame_ipc: () => hwpHost.runFrameProbe() };
     void windowBridge.runSmoke({ invokeIpc, steps: smokeSteps });
   }
 

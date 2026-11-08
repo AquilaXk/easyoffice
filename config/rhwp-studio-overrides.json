@@ -51,7 +51,7 @@
       "path": "index.html",
       "upstream": "index.html",
       "strategy": "fork",
-      "reason": "Markup without inline style attributes, relative init scripts and without icon assets; the 보기 menu has the 도구 상자 라벨 표시 check item (view:toolbar-labels); the 파일 menu lists the shell commands (new, open, recent, save, save as, print, close) instead of the editor's own file actions; the underline sample glyph reads 가 instead of 간 (the sample is not translated)."
+      "reason": "Markup without inline style attributes, relative init scripts and without icon assets; the 보기 menu has the 도구 상자 라벨 표시 check item (view:toolbar-labels); the 파일 menu lists the shell commands (new, open, recent, save, save as, print, close) instead of the editor's own file actions; the underline sample glyph reads 가 instead of 간 (the sample is not translated); loads static/storage-shim.js first, which swaps the storage that an opaque-origin frame cannot reach for memory."
     },
     {
       "path": "static/print.html",
