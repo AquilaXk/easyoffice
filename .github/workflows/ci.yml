@@ -184,8 +184,8 @@ jobs:
 
   # The Linux desktop shell builds on Ubuntu 22.04, the baseline the release packages are built on. The
   # fast `checks` job stays free of the WebKitGTK packages. The x64 packages are built and their
-  # structure is checked as in the release; the arm64 deb is built only by the release. No GUI smoke
-  # test yet: the Hangul editor round trip fails under xvfb (TODO.md).
+  # structure is checked as in the release; the arm64 deb is built only by the release. The release
+  # binary then runs the same `--smoke` GUI test as macOS and Windows, on a virtual X display.
   verify-linux:
     name: verify-linux
     runs-on: ubuntu-22.04
@@ -230,6 +230,22 @@ jobs:
 
       - name: Verify the package structure (AppImage extraction, deb and rpm metadata, desktop entry, notices)
         run: node scripts/verify-linux-bundles.mjs linux-x64
+
+      # WebKitGTK needs a display: Xvfb provides one. The binary prints one EASYOFFICE_SMOKE_STEP_OK or
+      # _FAIL line per step; `timeout` ends a hang (the app's own watchdog is 75 s).
+      - name: Smoke test desktop shell window (embedded WebUI, IPC round trip and HWP editor round trip)
+        run: |
+          set +e
+          timeout -k 5 100 xvfb-run -a -s "-screen 0 1280x1024x24" target/release/EasyOffice --smoke
+          CODE=$?
+          if [ "$CODE" -eq 124 ]; then
+            echo "Desktop shell smoke test timed out"
+            exit 1
+          fi
+          if [ "$CODE" -ne 0 ]; then
+            echo "Desktop shell smoke test failed with exit code $CODE"
+            exit 1
+          fi
 
       - name: Upload Linux packages for review
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0

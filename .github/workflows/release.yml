@@ -242,7 +242,7 @@ jobs:
           if-no-files-found: error
 
   # x64 builds the AppImage, deb and rpm; arm64 builds the deb only. Both build on Ubuntu 22.04, which
-  # sets the glibc baseline of the packages. The Linux GUI smoke test is not run yet (TODO.md).
+  # sets the glibc baseline of the packages. The Linux GUI smoke test runs in CI (`verify-linux`), not here.
   build-linux-release:
     name: Build ${{ matrix.platform }} Release Artifacts
     needs: prepare

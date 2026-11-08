@@ -1,7 +1,8 @@
 name: Install Linux build dependencies
 description: >-
   System packages the Tauri desktop shell needs on Ubuntu 22.04: WebKitGTK 4.1, GTK 3, the menu library
-  (libxdo), the packaging tools for deb, rpm and AppImage, and FUSE for the AppImage tooling.
+  (libxdo), the packaging tools for deb, rpm and AppImage, FUSE for the AppImage tooling, and Xvfb for the
+  GUI smoke test.
 
 # Reference implementation (MIT, Copyright (c) 2025-2026 Edward Kim) of the reference app's desktop
 # release workflow (.github/workflows/*-desktop.yml, "Install Linux dependencies"): the same package
@@ -29,4 +30,6 @@ runs:
           patchelf \
           pkg-config \
           rpm \
-          wget
+          wget \
+          xauth \
+          xvfb
