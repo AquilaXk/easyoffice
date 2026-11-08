@@ -19,6 +19,7 @@
 //! is converted (`pdf_synthetic.rs`), and the finished file's text maps name the standard
 //! character for private-use codes of Hangul documents (`pdf_tounicode.rs`), PD-131.
 
+use crate::raster_budget::RasterBudget;
 use pdf_writer::{Chunk, Content, Finish, Name, Pdf, Rect, Ref, TextStr};
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -125,7 +126,7 @@ impl Drop for NestedLevel {
 /// 0.8.7, `src/renderer/pdf.rs` lines 1188-1205; MIT), with the nesting bound added because that
 /// version recurses as deep as the data does. Other data pictures go to usvg's default resolver;
 /// path and `file:` hrefs are ignored, in the page and in nested SVGs alike.
-fn image_href_resolver() -> usvg::ImageHrefResolver<'static> {
+fn image_href_resolver(budget: Option<Arc<RasterBudget>>) -> usvg::ImageHrefResolver<'static> {
     let default_data = usvg::ImageHrefResolver::default_data_resolver();
     usvg::ImageHrefResolver {
         resolve_data: Box::new(move |mime, data, options| match mime {
@@ -135,6 +136,9 @@ fn image_href_resolver() -> usvg::ImageHrefResolver<'static> {
                     .ok()
                     .map(usvg::ImageKind::SVG)
             }
+            // A page drawn to a bitmap decodes its pictures itself; the budget keeps a hostile
+            // page from making that cost more than a fixed number of pixels (PD-145).
+            _ if budget.as_ref().is_some_and(|budget| !budget.admit(&data)) => None,
             _ => default_data(mime, data, options),
         }),
         // A page SVG is untrusted text: a path or `file:` href must never make the export read a
@@ -144,8 +148,24 @@ fn image_href_resolver() -> usvg::ImageHrefResolver<'static> {
 }
 
 /// Parse options of one export: the shared fonts, the indexed fallback selector (one index per
-/// export) and the nested-SVG resolver.
+/// export) and the nested-SVG resolver. The PDF keeps the pictures as they are.
 pub(crate) fn parse_options(fonts: &Arc<Database>) -> usvg::Options<'static> {
+    options_with(fonts, None)
+}
+
+/// [`parse_options`] for a page that is drawn to a bitmap: its pictures are bounded by `budget`,
+/// which counts this one page (a new budget for each page).
+pub(crate) fn bitmap_parse_options(
+    fonts: &Arc<Database>,
+    budget: RasterBudget,
+) -> usvg::Options<'static> {
+    options_with(fonts, Some(Arc::new(budget)))
+}
+
+fn options_with(
+    fonts: &Arc<Database>,
+    budget: Option<Arc<RasterBudget>>,
+) -> usvg::Options<'static> {
     let mut options = usvg::Options {
         fontdb: Arc::clone(fonts),
         ..usvg::Options::default()
@@ -154,7 +174,7 @@ pub(crate) fn parse_options(fonts: &Arc<Database>) -> usvg::Options<'static> {
         crate::pdf_fonts::MAX_INDEXED_CHARS,
         crate::pdf_fonts::MAX_FACE_PROBES,
     );
-    options.image_href_resolver = image_href_resolver();
+    options.image_href_resolver = image_href_resolver(budget);
     options
 }
 

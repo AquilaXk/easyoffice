@@ -22,6 +22,7 @@ mod pdf_synthetic;
 mod pdf_tounicode;
 mod preview;
 mod print_webview;
+mod raster_budget;
 mod recent;
 mod save_error;
 mod save_file;

@@ -9,6 +9,7 @@
 
 use crate::pdf_export;
 use crate::pdf_font_fallbacks::add_font_fallbacks;
+use crate::raster_budget::RasterBudget;
 use crate::save_verify::verify_document_bytes;
 use easyoffice_formats::{
     embed_thumbnail, DocumentFormat, MAX_EMBED_DOCUMENT_BYTES, MAX_THUMBNAIL_SIDE_PX,
@@ -34,8 +35,11 @@ pub fn render_png_sized(svg: &str, fonts: &Arc<Database>, side: u32) -> Result<V
         return Err("쪽 SVG가 미리보기 한도를 넘습니다.".to_string());
     }
     let svg = add_font_fallbacks(svg);
-    let tree = usvg::Tree::from_data(svg.as_bytes(), &pdf_export::parse_options(fonts))
-        .map_err(|err| format!("쪽 SVG를 읽지 못했습니다: {err}"))?;
+    let tree = usvg::Tree::from_data(
+        svg.as_bytes(),
+        &pdf_export::bitmap_parse_options(fonts, RasterBudget::for_page()),
+    )
+    .map_err(|err| format!("쪽 SVG를 읽지 못했습니다: {err}"))?;
     let (width, height) = (tree.size().width(), tree.size().height());
     if !(width.is_finite() && height.is_finite() && width > 0.0 && height > 0.0) {
         return Err("쪽 크기가 올바르지 않습니다.".to_string());
@@ -78,3 +82,7 @@ pub fn with_first_page(
 #[cfg(test)]
 #[path = "save_thumbnail_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "save_thumbnail_raster_tests.rs"]
+mod raster_tests;
