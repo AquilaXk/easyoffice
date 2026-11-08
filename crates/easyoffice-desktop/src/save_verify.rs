@@ -24,7 +24,8 @@ use easyoffice_formats::{
 };
 
 /// What the user is told when the bytes are refused: no internal terms, and the file is untouched.
-pub const REFUSED_MESSAGE: &str = "문서 내용이 올바르지 않아 저장하지 않았습니다. 기존 파일은 그대로 두었습니다. 다시 저장해 보세요.";
+pub const REFUSED_MESSAGE: &str =
+    "문서 형식을 확인하지 못해 저장하지 않았습니다. 기존 파일은 그대로 두었습니다.";
 
 /// The PDF end-of-file marker must sit in this many trailing bytes (ISO 32000 asks for 1024).
 const PDF_TAIL_BYTES: usize = 1024;
@@ -42,6 +43,13 @@ const ZIP_MAIN_PARTS: [(DocumentFormat, &str); 9] = [
     (DocumentFormat::Hwpx, "Contents/"),
     (DocumentFormat::Hwtx, "Contents/"),
 ];
+
+/// Ratio limit of the Hangul formats: none. The next reader of a saved HWPX is the editor's rhwp,
+/// which has no ratio rule, and the page has already re-parsed these exact bytes with it before
+/// they get here (`exportVerified` in `hwp-session.js`, on every save path). A flat picture the
+/// editor embeds legitimately deflates past 1000:1, so any number would refuse real documents.
+/// The entry count, per-entry and total size limits and the "empty but inflates" rule stay.
+const HANGUL_RATIO_LIMIT: f64 = f64::INFINITY;
 
 const HWP_FILE_HEADER_STREAM: &str = "FileHeader";
 
@@ -68,8 +76,21 @@ fn corrupted(detail: &str) -> EasyOfficeError {
     EasyOfficeError::CorruptedContainer(detail.to_string())
 }
 
+/// The policy the next reader applies: the engine's default for every format the engine opens, the
+/// default without its ratio rule for the Hangul formats (see [`HANGUL_RATIO_LIMIT`]).
+fn zip_policy(format: DocumentFormat) -> ZipSecurityPolicy {
+    let default = ZipSecurityPolicy::default();
+    match format {
+        DocumentFormat::Hwpx | DocumentFormat::Hwtx => ZipSecurityPolicy {
+            max_compression_ratio: HANGUL_RATIO_LIMIT,
+            ..default
+        },
+        _ => default,
+    }
+}
+
 fn verify_zip(format: DocumentFormat, bytes: &[u8]) -> Result<(), EasyOfficeError> {
-    let entries = ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default())?;
+    let entries = ZipArchiveCodec::unpack(bytes, &zip_policy(format))?;
     let main_part = ZIP_MAIN_PARTS
         .iter()
         .find(|(candidate, _)| *candidate == format)
@@ -124,7 +145,7 @@ fn verify_pdf_tail(bytes: &[u8]) -> Result<(), EasyOfficeError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use easyoffice_formats::{UniversalDocumentModel, UniversalFormatConverter};
+    use easyoffice_formats::{UniversalDocumentModel, UniversalFormatConverter, ZipArchiveEntry};
 
     fn sample_model() -> UniversalDocumentModel {
         UniversalDocumentModel {
@@ -227,6 +248,82 @@ mod tests {
             .unwrap();
         bytes[cd + 24..cd + 28].copy_from_slice(&u32::MAX.to_le_bytes());
         assert!(verify_document_bytes("docx", &bytes).is_err());
+    }
+
+    /// What the Hangul editor writes for a flat 3000x2000 24-bit picture: one entry of 18 MB that
+    /// deflates by more than 1000:1 (1025.6 measured on the editor's own output).
+    fn flat_picture_package(main_part: &str) -> Vec<u8> {
+        let entries = vec![
+            ZipArchiveEntry::new("mimetype", b"application/hwp+zip".to_vec()),
+            ZipArchiveEntry::new(main_part, b"<head/>".to_vec()),
+            ZipArchiveEntry::new("BinData/image1.bmp", vec![0xFF_u8; 18_000_054]),
+        ];
+        ZipArchiveCodec::pack_deflate(&entries).unwrap()
+    }
+
+    #[test]
+    fn a_hangul_package_with_a_flat_picture_passes_without_a_ratio_rule() {
+        let bytes = flat_picture_package("Contents/header.xml");
+        let ratio = 18_000_054.0 / bytes.len() as f64;
+        assert!(ratio > 1000.0, "fixture is a high-ratio package: {ratio}");
+        // The engine's open policy would call it a bomb; the Hangul editor opens it.
+        assert!(matches!(
+            ZipArchiveCodec::unpack(&bytes, &ZipSecurityPolicy::default()),
+            Err(EasyOfficeError::DecompressionBombDetected { .. })
+        ));
+        verify_document_bytes("hwpx", &bytes).unwrap();
+        verify_document_bytes("hwtx", &bytes).unwrap();
+    }
+
+    #[test]
+    fn formats_the_engine_opens_keep_the_open_policy() {
+        // The same kind of package under an extension the engine opens is held to its policy...
+        let bytes = flat_picture_package("word/document.xml");
+        assert!(verify_document_bytes("docx", &bytes).is_err());
+        // ...and the repetitive documents the engine itself writes stay within it, because its
+        // writer stores an entry that would compress past the limit.
+        let repetitive = UniversalDocumentModel {
+            title: "반복".to_string(),
+            paragraphs: vec!["같은 문장이 계속 반복됩니다. ".repeat(20); 20_000],
+            sheet_cells: (0..20_000).map(|r| (r, 0, "same".to_string())).collect(),
+            slides: vec![(
+                "제목".to_string(),
+                vec!["항목".to_string(); 5_000],
+                String::new(),
+            )],
+            ..Default::default()
+        };
+        for format in [
+            DocumentFormat::Docx,
+            DocumentFormat::Odt,
+            DocumentFormat::Xlsx,
+            DocumentFormat::Ods,
+            DocumentFormat::Pptx,
+            DocumentFormat::Odp,
+            DocumentFormat::Hwpx,
+        ] {
+            let bytes = UniversalFormatConverter::encode(&repetitive, format).unwrap();
+            verify_document_bytes(format.extension(), &bytes)
+                .unwrap_or_else(|err| panic!(".{} refused: {err}", format.extension()));
+        }
+    }
+
+    #[test]
+    fn the_size_limits_still_apply_to_hangul_packages() {
+        let mut bytes = flat_picture_package("Contents/header.xml");
+        // Declare the picture 200 MiB large in its central directory record: over the entry limit.
+        let mut at = bytes
+            .windows(4)
+            .position(|w| w == [0x50, 0x4B, 0x01, 0x02])
+            .unwrap();
+        while &bytes[at + 46..at + 46 + 18] != b"BinData/image1.bmp" {
+            at += 46 + usize::from(u16::from_le_bytes([bytes[at + 28], bytes[at + 29]]));
+        }
+        bytes[at + 24..at + 28].copy_from_slice(&(200_u32 * 1_048_576).to_le_bytes());
+        assert!(matches!(
+            verify_document_bytes("hwpx", &bytes),
+            Err(EasyOfficeError::DecompressionBombDetected { .. })
+        ));
     }
 
     #[test]

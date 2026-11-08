@@ -174,6 +174,23 @@ pub fn write_document_bytes(path: &Path, bytes: &[u8]) -> Result<Written, String
     })
 }
 
+/// Options that create the temporary file with the permissions the target already has, so the
+/// document is never readable by more people than before, not even while it is being written. The
+/// process umask can only narrow the mode here; `keep_mode_of` restores the exact bits afterwards.
+/// A new target gets the usual mode (0666 minus the umask on Unix).
+fn sibling_open_options(target: &Path) -> fs::OpenOptions {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    if let Ok(meta) = fs::metadata(target) {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        options.mode(meta.permissions().mode());
+    }
+    #[cfg(not(unix))]
+    let _ = target;
+    options
+}
+
 /// Creates a new, empty file next to `path` under a name nobody else can be using: the process id,
 /// a per-process counter and the clock make a repeat unlikely, and `create_new` makes it harmless
 /// (the open fails instead of reusing the file, and the next name is tried).
@@ -196,11 +213,7 @@ fn create_unique_sibling(path: &Path) -> std::io::Result<(PathBuf, fs::File)> {
             COUNTER.fetch_add(1, Ordering::Relaxed)
         );
         let candidate = path.with_file_name(name);
-        match fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&candidate)
-        {
+        match sibling_open_options(path).open(&candidate) {
             Ok(file) => return Ok((candidate, file)),
             Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => last_err = Some(err),
             Err(err) => return Err(err),
@@ -444,6 +457,23 @@ mod tests {
             assert_eq!(own, vec![worker; 4096]);
         }
         assert_no_leftovers(&dir);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_temporary_file_is_born_with_the_targets_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = scratch_dir("born");
+        let target = dir.join("a.docx");
+        fs::write(&target, b"old").unwrap();
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o600)).unwrap();
+        let (tmp, file) = create_unique_sibling(&target).unwrap();
+        // Checked before anything is written or changed: no wider mode at any moment.
+        let mode = file.metadata().unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        drop(file);
+        fs::remove_file(tmp).unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
 
