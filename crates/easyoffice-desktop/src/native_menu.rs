@@ -897,6 +897,10 @@ fn run_item(app: &AppHandle, id: &str) {
     if let Some(window) = focused {
         let _ = window.eval(&script);
     }
+    // The system flips a check item when it is clicked; the bar shows the state again.
+    if let Err(error) = crate::menu_state::refresh(app) {
+        eprintln!("[menu] {error}");
+    }
 }
 
 #[cfg(test)]

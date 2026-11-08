@@ -28,7 +28,7 @@
     openRecentDocument: "open_recent_document",
     recentPreview: "get_recent_preview",
     reportMenuState: "report_menu_state",
-    cancelAppQuit: "cancel_app_quit",
+    endClosePrompt: "end_close_prompt",
   });
 
   // Command token (`crates/easyoffice-desktop/src/shell_caller.rs`): the shell defines it in the

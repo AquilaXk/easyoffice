@@ -20,7 +20,7 @@ async function shellPage(search = "?module=DOC&win=w-menu-state") {
     search,
     shellCommands: {
       report_menu_state: (args) => { reports.push(args); return null; },
-      cancel_app_quit: () => { closes.push("cancel"); return null; },
+      end_close_prompt: () => { closes.push("end-prompt"); return null; },
       report_window_state: () => null,
       close_current_window: () => { closes.push("close"); return null; },
       take_pending_open: () => null,
@@ -120,13 +120,34 @@ test("a cancelled or failed close tells the shell to end a running quit; a close
   assert.deepEqual(closes, ["close"], "a clean window closes and does not cancel the quit");
 });
 
+test("a menu report that did not arrive is sent again", async () => {
+  let fail = true;
+  const reports = [];
+  const { document } = await createWorkspaceHarness({
+    search: "?module=DOC&win=w-retry",
+    shellCommands: {
+      report_menu_state: (args) => {
+        reports.push(args);
+        if (fail) { fail = false; throw new Error("전송 실패"); }
+        return null;
+      },
+      report_window_state: () => null, take_pending_open: () => null, list_recent_documents: () => [],
+    },
+  });
+  await flushAsyncTurns(20);
+  document.querySelector('[data-theme-mode-choice="system"]').click();
+  await flushAsyncTurns(10);
+  assert.ok(reports.length >= 2, "the state is sent again after the failure");
+  assert.deepEqual(reports[1], reports[0], "the same state, not a changed one");
+});
+
 test("both new commands are window commands of the bridge, called with the shell token", () => {
   const bridge = read("crates/easyoffice-app/ui/desktop-bridge.js");
   assert.match(bridge, /reportMenuState: "report_menu_state"/);
-  assert.match(bridge, /cancelAppQuit: "cancel_app_quit"/);
+  assert.match(bridge, /endClosePrompt: "end_close_prompt"/);
   const commands = read("crates/easyoffice-desktop/src/app_commands.rs");
   const capability = JSON.parse(read("crates/easyoffice-desktop/capabilities/main-window.json"));
-  for (const command of ["report_menu_state", "cancel_app_quit"]) {
+  for (const command of ["report_menu_state", "end_close_prompt"]) {
     assert.ok(commands.includes(`"${command}"`), command);
     assert.ok(capability.permissions.includes(`allow-${command.replaceAll("_", "-")}`), command);
   }

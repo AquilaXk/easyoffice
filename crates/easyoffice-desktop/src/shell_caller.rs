@@ -158,7 +158,6 @@ mod tests {
             include_str!("update_check.rs"),
             include_str!("preview/mod.rs"),
             include_str!("menu_state.rs"),
-            include_str!("app_quit.rs"),
         ];
         let mut checked = 0;
         for source in sources {

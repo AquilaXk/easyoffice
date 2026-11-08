@@ -219,6 +219,14 @@ impl WindowRegistry {
         CloseAction::AskPage
     }
 
+    /// The user answered the close prompt without closing (cancel, or the save failed): the next
+    /// close request asks again instead of closing at once.
+    pub fn end_close_prompt(&mut self, label: &str) {
+        if let Some(entry) = self.windows.get_mut(label) {
+            entry.close_prompted = false;
+        }
+    }
+
     pub fn remove(&mut self, label: &str) -> bool {
         let Some(entry) = self.windows.remove(label) else {
             return false;
@@ -430,6 +438,18 @@ mod tests {
         assert_eq!(reg.begin_close("doc-1-a"), CloseAction::CloseNow);
         assert_eq!(reg.set_state("missing", "x", false), None);
         assert_eq!(reg.begin_close("missing"), CloseAction::CloseNow);
+    }
+
+    #[test]
+    fn ending_the_close_prompt_makes_the_next_close_ask_again() {
+        let mut reg = WindowRegistry::default();
+        reg.register("doc-1-a", WindowKind::Doc);
+        reg.set_state("doc-1-a", "계획.hwpx", true);
+        assert_eq!(reg.begin_close("doc-1-a"), CloseAction::AskPage);
+        // The user cancelled: without this the next close would go through unasked.
+        reg.end_close_prompt("doc-1-a");
+        assert_eq!(reg.begin_close("doc-1-a"), CloseAction::AskPage);
+        reg.end_close_prompt("missing");
     }
 
     #[test]

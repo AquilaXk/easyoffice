@@ -16,7 +16,7 @@ function recordingShell(overrides = {}) {
   const commands = {};
   for (const name of [
     "open_document_window", "open_file_in_new_window", "take_pending_open", "report_window_state",
-    "close_current_window", "list_recent_documents", "open_recent_document", "report_menu_state", "cancel_app_quit",
+    "close_current_window", "list_recent_documents", "open_recent_document", "report_menu_state", "end_close_prompt",
   ]) {
     commands[name] = (args) => {
       calls.push({ name, args });
@@ -282,7 +282,7 @@ test("close request: 저장 안 함 closes, 취소 keeps the window, 저장 save
   await first;
   assert.equal(dialog.open, false);
   assert.equal(shell.named("close_current_window").length, 0);
-  assert.equal(shell.named("cancel_app_quit").length, 1, "취소 ends a quit from the menu");
+  assert.equal(shell.named("end_close_prompt").length, 1, "취소 ends the close prompt (and a quit from the menu)");
 
   const second = host.__EASYOFFICE_CLOSE_REQUEST__();
   await flushAsyncTurns();
@@ -291,7 +291,7 @@ test("close request: 저장 안 함 closes, 취소 keeps the window, 저장 save
   await flushAsyncTurns(10);
   assert.equal(shell.named("save_document_file").length, 1, "저장 runs the native save first");
   assert.equal(shell.named("close_current_window").length, 1);
-  assert.equal(shell.named("cancel_app_quit").length, 1, "a close that goes through does not end the quit");
+  assert.equal(shell.named("end_close_prompt").length, 1, "a close that goes through does not end the prompt");
 
   typeIntoDocParagraph(document, "다시 편집");
   advanceTimers(3000);
@@ -318,7 +318,7 @@ test("a cancelled save dialog keeps the window open", async () => {
   await pending;
   await flushAsyncTurns(10);
   assert.equal(shell.named("close_current_window").length, 0);
-  assert.equal(shell.named("cancel_app_quit").length, 1, "a save that did not happen ends a quit from the menu");
+  assert.equal(shell.named("end_close_prompt").length, 1, "a save that did not happen ends the close prompt");
 });
 
 test("dirty state and the document name are reported to the shell for the native title", async () => {

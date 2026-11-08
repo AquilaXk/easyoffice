@@ -193,7 +193,11 @@
       const key = JSON.stringify(state);
       if (key === lastMenuState) return;
       lastMenuState = key;
-      report(bridge.windowCommand("reportMenuState", state));
+      // A report that did not arrive is sent again the next time.
+      report(bridge.windowCommand("reportMenuState", state).catch((err) => {
+        lastMenuState = "";
+        throw err;
+      }));
     }
 
     // ---- toasts (shell notices while the shell status bar is hidden) -------------------------

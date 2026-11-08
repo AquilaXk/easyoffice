@@ -7,15 +7,14 @@
 //! the reference app asks each window with an event; EasyOffice asks with `WebviewWindow::close`, so
 //! the existing close flow runs (`CloseRequested`: a window without unsaved changes closes, a dirty
 //! one runs the page's 저장 / 저장 안 함 / 취소 prompt), and the page ends the quit through the
-//! narrow `cancel_app_quit` command when the user cancels or a save fails. macOS keeps its system
+//! narrow `end_close_prompt` command (`window_commands.rs`) when the user cancels or a save fails. macOS keeps its system
 //! quit item (`RunEvent::ExitRequested` in `main.rs`).
 
 use std::collections::VecDeque;
 use std::sync::Mutex;
 
+#[cfg(not(target_os = "macos"))]
 use tauri::{AppHandle, Manager};
-
-use crate::shell_caller::ShellCaller;
 
 /// The windows still to be closed by a running quit, in order.
 #[derive(Default)]
@@ -30,7 +29,10 @@ enum Advance {
     Idle,
     /// Ask this window next.
     Next(String),
-    /// Every window is gone.
+    /// A window other than the one being asked is gone: it only leaves the queue, nobody is asked
+    /// again (the asked window may be showing its save prompt).
+    Waiting,
+    /// Every window of the queue is gone.
     Complete,
 }
 
@@ -53,7 +55,7 @@ impl AppQuit {
         pending.front().cloned()
     }
 
-    fn cancel(&self) {
+    pub fn cancel(&self) {
         self.pending().clear();
     }
 
@@ -63,10 +65,12 @@ impl AppQuit {
         if pending.is_empty() {
             return Advance::Idle;
         }
+        let was_asked = pending.front().map(String::as_str) == Some(closed);
         pending.retain(|label| label != closed);
         match pending.front() {
-            Some(next) => Advance::Next(next.clone()),
             None => Advance::Complete,
+            Some(next) if was_asked => Advance::Next(next.clone()),
+            Some(_) => Advance::Waiting,
         }
     }
 }
@@ -86,44 +90,59 @@ fn ordered(mut labels: Vec<String>, focused: Option<&str>) -> Vec<String> {
 
 #[cfg(not(target_os = "macos"))]
 pub fn request_app_quit(app: &AppHandle) {
+    let labels = open_labels(app, None);
+    if labels.is_empty() {
+        app.exit(0);
+    } else if let Some(first) = app.state::<AppQuit>().begin(labels) {
+        ask(app, &first);
+    }
+}
+
+/// The windows still open, the focused one first; `except` is a window that is going away.
+#[cfg(not(target_os = "macos"))]
+fn open_labels(app: &AppHandle, except: Option<&str>) -> Vec<String> {
     let windows = app.webview_windows();
     let focused = windows
         .values()
         .find(|window| window.is_focused().unwrap_or(false))
         .map(|window| window.label().to_string());
-    let labels = ordered(windows.keys().cloned().collect(), focused.as_deref());
-    match app.state::<AppQuit>().begin(labels) {
-        Some(first) => ask(app, &first),
-        None if windows.is_empty() => app.exit(0),
-        None => {}
-    }
+    let labels = windows
+        .into_keys()
+        .filter(|label| Some(label.as_str()) != except);
+    ordered(labels.collect(), focused.as_deref())
 }
 
-/// A window is gone: ask the next one, or end the app after the last.
+/// A window is gone: ask the next one, or end the app after the last. A window opened while the
+/// quit was running is asked too (the queue is built again before the app ends).
 #[cfg(not(target_os = "macos"))]
 pub fn window_destroyed(app: &AppHandle, label: &str) {
     match app.state::<AppQuit>().advance_after_close(label) {
-        Advance::Idle => {}
+        Advance::Idle | Advance::Waiting => {}
         Advance::Next(next) => ask(app, &next),
-        Advance::Complete => app.exit(0),
+        Advance::Complete => {
+            let quit = app.state::<AppQuit>();
+            match quit.begin(open_labels(app, Some(label))) {
+                Some(first) => ask(app, &first),
+                None => app.exit(0),
+            }
+        }
     }
 }
 
+/// Brings the window to the front (it may be minimized or behind others) and closes it, which runs
+/// its own close confirmation.
 #[cfg(not(target_os = "macos"))]
 fn ask(app: &AppHandle, label: &str) {
-    let closed = app
-        .get_webview_window(label)
-        .is_some_and(|window| window.close().is_ok());
+    let closed = app.get_webview_window(label).is_some_and(|window| {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+        window.close().is_ok()
+    });
     if !closed {
         // The window could not be asked: stop instead of leaving a quit that never ends.
         app.state::<AppQuit>().cancel();
     }
-}
-
-/// The user kept a window open (cancel, or the save failed): the quit ends.
-#[tauri::command]
-pub fn cancel_app_quit(_caller: ShellCaller, app: AppHandle) {
-    app.state::<AppQuit>().cancel();
 }
 
 #[cfg(test)]
@@ -149,17 +168,27 @@ mod tests {
     }
 
     #[test]
-    fn a_window_closed_out_of_turn_is_dropped_from_the_queue() {
+    fn a_window_closed_out_of_turn_only_leaves_the_queue() {
         let quit = AppQuit::default();
         quit.begin(labels(&["main", "doc-2", "doc-3"]));
+        assert_eq!(quit.advance_after_close("doc-2"), Advance::Waiting);
+        assert_eq!(quit.advance_after_close("other"), Advance::Waiting);
         assert_eq!(
-            quit.advance_after_close("doc-2"),
-            Advance::Next("main".to_string())
+            quit.advance_after_close("main"),
+            Advance::Next("doc-3".to_string())
         );
+    }
+
+    #[test]
+    fn the_asked_window_is_not_asked_again_when_another_window_closes() {
+        let quit = AppQuit::default();
         assert_eq!(
-            quit.advance_after_close("other"),
-            Advance::Next("main".to_string())
+            quit.begin(labels(&["main", "doc-2"])),
+            Some("main".to_string())
         );
+        // main shows its save prompt; doc-2 is closed meanwhile (by the user).
+        assert_eq!(quit.advance_after_close("doc-2"), Advance::Waiting);
+        assert_eq!(quit.advance_after_close("main"), Advance::Complete);
     }
 
     #[test]

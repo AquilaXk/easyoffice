@@ -20,6 +20,6 @@
     "allow-open-recent-document",
     "allow-get-recent-preview",
     "allow-report-menu-state",
-    "allow-cancel-app-quit"
+    "allow-end-close-prompt"
   ]
 }

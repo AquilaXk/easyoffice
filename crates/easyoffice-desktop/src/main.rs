@@ -254,7 +254,7 @@ fn main() {
             window_commands::close_current_window,
             window_commands::list_recent_documents,
             menu_state::report_menu_state,
-            app_quit::cancel_app_quit,
+            window_commands::end_close_prompt,
             window_commands::open_recent_document,
             preview::get_recent_preview,
         ])

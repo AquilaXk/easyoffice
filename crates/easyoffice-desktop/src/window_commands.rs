@@ -646,6 +646,14 @@ pub fn report_window_state(
     }
 }
 
+/// The page's close prompt ended with the window staying open (cancel, or the save failed): the
+/// window asks again on the next close request, and a running menu quit stops.
+#[tauri::command]
+pub fn end_close_prompt(_caller: ShellCaller, app: AppHandle, window: WebviewWindow) {
+    locked(&app.state::<AppWindows>().registry).end_close_prompt(window.label());
+    app.state::<crate::app_quit::AppQuit>().cancel();
+}
+
 /// Destroys the calling window without another close request (the page already asked the user).
 #[tauri::command]
 pub fn close_current_window(_caller: ShellCaller, window: WebviewWindow) {
@@ -752,7 +760,7 @@ mod tests {
             );
             checked += 1;
         }
-        assert_eq!(checked, 7, "every window command is covered");
+        assert_eq!(checked, 8, "every window command is covered");
     }
 
     fn scratch_dir(tag: &str) -> PathBuf {

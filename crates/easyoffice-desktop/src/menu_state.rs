@@ -44,6 +44,9 @@ impl Default for WindowMenu {
 impl WindowMenu {
     /// Checks a report: the theme must be a known mode and every id an item of the table.
     pub fn parse(theme: &str, disabled: Vec<String>, embed: bool) -> Result<Self, String> {
+        if disabled.len() > ITEMS.len() {
+            return Err("메뉴 항목 목록이 너무 깁니다.".to_string());
+        }
         let theme = ["system", "light", "dark"]
             .into_iter()
             .find(|mode| *mode == theme)
@@ -166,6 +169,8 @@ mod tests {
         assert!(WindowMenu::parse("purple", Vec::new(), false).is_err());
         assert!(WindowMenu::parse("light", ids(&["file:quit"]), false).is_err());
         assert!(WindowMenu::parse("light", ids(&["nope"]), false).is_err());
+        let too_many = vec!["table:sort".to_string(); ITEMS.len() + 1];
+        assert!(WindowMenu::parse("light", too_many, false).is_err());
     }
 
     #[test]

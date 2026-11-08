@@ -340,9 +340,10 @@
       });
     }
 
-    // The window stays open: a running "끝내기" (quit from the menu) ends here instead of closing the rest.
+    // The window stays open: its next close asks again, and a running "끝내기" (quit from the menu)
+    // ends here instead of closing the rest.
     async function keepOpen() {
-      if (desktopAvailable()) await shell("cancelAppQuit", {}).catch((err) => feedback("종료를 멈추지 못했습니다: " + (err?.message || String(err))));
+      if (desktopAvailable()) await shell("endClosePrompt", {}).catch((err) => feedback("닫기 확인을 마치지 못했습니다: " + (err?.message || String(err))));
       return false;
     }
 
