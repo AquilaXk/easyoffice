@@ -782,3 +782,53 @@ test("the embed port's automation.execute hands every edit command to the field-
   assert.match(handler, /\(\) => automation\.execute\(id, params, options\)/);
   assert.match(main, /from '\.\/embed\/text-field-edit\.ts'/);
 });
+
+const DESKTOP_CHROME = (async () => {
+  const source = fs.readFileSync(path.join(REPO, "apps/hwp-studio/src/embed/desktop-chrome.ts"), "utf8");
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "eo-desktop-chrome-")), "desktop-chrome.mjs");
+  fs.writeFileSync(file, stripTypeScriptTypes(source));
+  return import(pathToFileURL(file).href);
+})();
+
+test("on macOS the shortcut text reads with the Mac modifier symbols", async () => {
+  const { macShortcutLabel } = await DESKTOP_CHROME;
+  assert.equal(macShortcutLabel("Ctrl+F"), "⌘F");
+  assert.equal(macShortcutLabel("Alt+Shift+V"), "⌥⇧V");
+  assert.equal(macShortcutLabel("Ctrl+Shift+H"), "⌘⇧H");
+  assert.equal(macShortcutLabel("확대 (Ctrl++)"), "확대 (⌘+)");
+  assert.equal(macShortcutLabel("⌘F"), "⌘F", "an already converted label is unchanged");
+  assert.equal(macShortcutLabel("찾기(F)"), "찾기(F)");
+});
+
+test("the shortcut presentation rewrites split-menu text and tooltips only where a modifier is named", async () => {
+  const { applyMacShortcutPresentation } = await DESKTOP_CHROME;
+  const node = (props) => ({ ...props, setAttribute(name, value) { this.attrs[name] = value; }, getAttribute(name) { return this.attrs[name] ?? null; } });
+  const text = node({ textContent: "Ctrl+Shift+H", attrs: {} });
+  const titled = node({ attrs: { title: "저장 (Ctrl+S)" } });
+  const plain = node({ attrs: { title: "굵게" } });
+  const doc = { querySelectorAll: (selector) => (selector.includes("shortcut") ? [text] : [titled, plain]) };
+  applyMacShortcutPresentation(doc);
+  assert.equal(text.textContent, "⌘⇧H");
+  assert.equal(titled.attrs.title, "저장 (⌘S)");
+  assert.equal(plain.attrs.title, "굵게");
+});
+
+test("the context menu of the menu bar and toolbars is suppressed, the document area keeps its own", async () => {
+  const { installNonEditorContextMenuGuards, NON_EDITOR_CHROME_SELECTOR } = await DESKTOP_CHROME;
+  assert.equal(NON_EDITOR_CHROME_SELECTOR, "#menu-bar, #icon-toolbar, #style-bar, #status-bar");
+  const listeners = [];
+  const chrome = { addEventListener: (type, handler) => listeners.push({ type, handler }) };
+  installNonEditorContextMenuGuards({ querySelectorAll: (selector) => (selector === NON_EDITOR_CHROME_SELECTOR ? [chrome] : []) });
+  assert.equal(listeners.length, 1);
+  assert.equal(listeners[0].type, "contextmenu");
+  let prevented = false;
+  listeners[0].handler({ preventDefault: () => (prevented = true) });
+  assert.ok(prevented);
+});
+
+test("the editor entry applies the Mac labels on macOS and always guards the chrome context menu", () => {
+  const main = fs.readFileSync(path.join(REPO, "apps/hwp-studio/src/main.ts"), "utf8");
+  assert.match(main, /from '\.\/embed\/desktop-chrome\.ts'/);
+  assert.match(main, /detectPlatformKind\(\) === 'mac'\) applyMacShortcutPresentation\(document\)/);
+  assert.match(main, /installNonEditorContextMenuGuards\(document\)/);
+});

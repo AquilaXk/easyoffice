@@ -99,6 +99,7 @@ import type { EmbedRendererRuntimeRequestV1 } from '@/embed/rpc-router';
 import { enrichFontDecisionTrace } from '@/core/font-decision-trace';
 import { DocumentAgentController } from '@/document-agent/controller';
 import { initI18n, t } from '@/i18n/index.ts';
+import { applyMacShortcutPresentation, installNonEditorContextMenuGuards } from './embed/desktop-chrome.ts';
 
 // 언어팩 초기화 — 정적 마크업의 라벨을 결정된 로케일로 갱신한다. 카탈로그에 없는 키는
 // 원문(ko)으로 물러나므로 번역이 없는 상태에서도 화면은 도입 전과 같다.
@@ -487,6 +488,9 @@ async function initialize(): Promise<void> {
     );
 
     new MenuBar(document.getElementById('menu-bar')!, eventBus, dispatcher, registry);
+
+    if (detectPlatformKind() === 'mac') applyMacShortcutPresentation(document);
+    installNonEditorContextMenuGuards(document);
 
     // 툴바 내 data-cmd 버튼 클릭 → 커맨드 디스패치
     document.querySelectorAll('.tb-btn[data-cmd]').forEach(btn => {

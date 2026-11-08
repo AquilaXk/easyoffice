@@ -35,6 +35,8 @@ const OVERLAY_NON_OVERRIDE = new Set([
   "src/command/cell-selection.ts",
   // EasyOffice-only module: the shell's edit commands go to a focused dialog text field, never the document.
   "src/embed/text-field-edit.ts",
+  // EasyOffice-only module (참조 앱 port): macOS shortcut labels and the chrome context-menu guard.
+  "src/embed/desktop-chrome.ts",
 ]);
 
 /** SHA-256 of upstream text with CRLF normalised to LF (the baseline the manifest pins). */
