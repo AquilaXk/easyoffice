@@ -18,8 +18,8 @@
 - [ ] 정식 릴리스 전: macOS Developer ID 서명·공증(QA 보류, PD-143)
 
 ## PDF·미리보기
-- [ ] 검색 가능한 PDF: Linux·Windows 설치본에서 번들 글꼴 확인, HWP 5.0 원시 기호 코드(`0xA000|n`)가 SVG 글자에 남는지 실문서로 보고 남으면 ToUnicode 정리에 더함(PD-131)
-- [ ] 비한글 문서(DOCX 등)를 저장할 때 첫 쪽 썸네일: 엔진 `embed_thumbnail`은 DOCX를 받지만 쪽을 그리는 경로가 없음(PD-132). 그림이 든 한글 문서의 썸네일에 래스터 그림을 그리려면 `resvg`의 `raster-images`(크레이트 8개) 검토
+- [ ] 검색 가능한 PDF: Linux·Windows 설치본에서 번들 글꼴 확인(PD-131)
+- [ ] 비한글 문서(DOCX 등)를 저장할 때 첫 쪽 썸네일: 엔진 `embed_thumbnail`은 DOCX를 받지만 쪽을 그리는 경로가 없음(PD-132).
 
 ## Pages 읽기 3단계
 - [ ] Pages 각주 번호 형식·미주·쪽마다 다시 시작 확인, 병합 영역 필드 번호를 실파일로 확인(PD-117)

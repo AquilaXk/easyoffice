@@ -15,7 +15,11 @@
 //! THIRD_PARTY_NOTICES.md).
 //! Differences: the three sources are one binary-searched table (a unit test checks the order),
 //! the enclosed numbers are computed from their range, and the HWP 5.0 raw form of the symbols
-//! (`0xA000 | n`, indistinguishable from real Yi syllables without the parser) is not mapped.
+//! (`0xA000 | n`, indistinguishable from real Yi syllables without the parser) is not mapped: the
+//! renderer already turns the raw codes that its parser table lists (`src/parser/tags.rs`, the 66
+//! values measured against the word processor's own output) into the codes of this table before
+//! it writes the SVG (`src/renderer/composer.rs`, the display-text step), and a raw code outside
+//! that table has no known meaning to map. The 14 sample documents (153 pages) draw none (PD-131).
 //! An unknown private-use code is left as it is; a meaning is never guessed.
 
 /// Enclosed numbers ① to ⑳ (U+2460..U+2473, three UTF-8 bytes each).
