@@ -72,11 +72,23 @@ impl RasterBudget {
         if pixels == 0 || pixels > self.per_image {
             return false;
         }
-        self.remaining
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |left| {
-                left.checked_sub(pixels)
-            })
-            .is_ok()
+        // A compare-exchange loop rather than `fetch_update`/`try_update`: the latter was renamed
+        // between toolchains, and this form compiles warning-free on the MSRV and on current stable.
+        let mut left = self.remaining.load(Ordering::Relaxed);
+        loop {
+            let Some(rest) = left.checked_sub(pixels) else {
+                return false;
+            };
+            match self.remaining.compare_exchange_weak(
+                left,
+                rest,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return true,
+                Err(current) => left = current,
+            }
+        }
     }
 }
 
