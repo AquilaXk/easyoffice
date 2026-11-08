@@ -38,14 +38,13 @@ jobs:
         run: node scripts/check-repo-hygiene.mjs
 
       # Squash merges copy commit messages into main: reject tool names, external brands and
-      # attribution trailers in the PR's commits, title and body (same list as the hygiene guard).
-      - name: Check PR commit messages, title and body
+      # attribution trailers in the PR's commits and title (same list as the hygiene guard).
+      - name: Check PR commit messages and title
         if: github.event_name == 'pull_request'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           git fetch --no-tags --depth=200 origin "$BASE_SHA" "$HEAD_SHA"
           node scripts/check-commit-messages.mjs "$BASE_SHA" "$HEAD_SHA"

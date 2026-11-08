@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 /**
- * Commit message guard for pull requests: the commit messages in `base..head`, the PR title and
- * the PR body must not carry prohibited tool names, external brand names or attribution trailers
- * (the same list as the repository hygiene guard). Squash merges copy commit messages into main, so
- * this stops them before they land.
+ * Commit message guard for pull requests: the commit messages in `base..head` and the PR title
+ * (the default squash-merge subject) must not carry prohibited tool names, external brand names or
+ * attribution trailers (the same list as the repository hygiene guard). Squash merges copy commit
+ * messages into main, so this stops them before they land. The PR body is not checked: it never
+ * reaches the repository history, and the hosting integration may append its own footer to it.
  *
  * Usage: node scripts/check-commit-messages.mjs <base-sha> <head-sha>
- * The PR title and body are read from PR_TITLE and PR_BODY when set.
+ * The PR title is read from PR_TITLE when set.
  */
 
 import { execFileSync } from "node:child_process";
@@ -37,9 +38,9 @@ export function commitMessages(base, head, run = execFileSync) {
     });
 }
 
-export function checkPullRequest({ commits, title = "", body = "" }) {
+export function checkPullRequest({ commits, title = "" }) {
   const problems = commits.flatMap(({ sha, message }) => findProhibited(`commit ${sha.slice(0, 8)}`, message));
-  return [...problems, ...findProhibited("PR title", title), ...findProhibited("PR body", body)];
+  return [...problems, ...findProhibited("PR title", title)];
 }
 
 function main() {
@@ -47,7 +48,6 @@ function main() {
   const problems = checkPullRequest({
     commits: commitMessages(base, head),
     title: process.env.PR_TITLE ?? "",
-    body: process.env.PR_BODY ?? "",
   });
   if (problems.length > 0) {
     console.error(`Commit message guard failed:\n  - ${problems.join("\n  - ")}`);

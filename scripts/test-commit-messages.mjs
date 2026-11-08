@@ -7,21 +7,21 @@ const decode = (b64) => Buffer.from(b64, "base64").toString("utf8");
 const TRAILER = decode("Q28tQXV0aG9yZWQtQnk6") + " someone <a@b.c>";
 const SESSION = decode("Q2xhdWRlLVNlc3Npb246") + " https://example.invalid/x";
 
-test("clean commits, title and body pass", () => {
+test("clean commits and title pass", () => {
   const commits = [{ sha: "a".repeat(40), message: "[Feat] 기능 추가\n\n- 설명" }];
-  assert.deepEqual(checkPullRequest({ commits, title: "[Feat] 기능", body: "## 요약" }), []);
+  assert.deepEqual(checkPullRequest({ commits, title: "[Feat] 기능" }), []);
 });
 
-test("attribution trailers in any commit, the title or the body are reported", () => {
+test("attribution trailers in any commit or the title are reported", () => {
   const commits = [
     { sha: "b".repeat(40), message: `[Fix] 수정\n\n${TRAILER}` },
     { sha: "c".repeat(40), message: `[Fix] 수정\n\n${SESSION}` },
   ];
-  const problems = checkPullRequest({ commits, title: "ok", body: `본문\n${TRAILER}` });
+  const problems = checkPullRequest({ commits, title: `제목 ${TRAILER}` });
   assert.equal(problems.length, 3);
   assert.ok(problems[0].startsWith("commit bbbbbbbb"));
   assert.ok(problems[1].startsWith("commit cccccccc"));
-  assert.ok(problems[2].startsWith("PR body"));
+  assert.ok(problems[2].startsWith("PR title"));
   assert.ok(problems.every((p) => !p.includes(TRAILER)), "the report does not echo the term");
 });
 
