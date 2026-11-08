@@ -38,6 +38,7 @@
   const MSG_TOO_BIG = "문서가 커서 한 번에 인쇄할 수 없습니다.";
   const MSG_CANCELLED = "인쇄를 취소했습니다.";
   const MSG_OPENING = "인쇄 대화상자를 여는 중…";
+  const MSG_NOT_PREPARED = "인쇄 준비가 끝나지 않았습니다.";
   const MSG_BAD_PAGE = "편집기가 올바르지 않은 쪽을 보냈습니다.";
 
   function progressText(current, total) {
@@ -278,9 +279,23 @@
         cleanup();
         throw err;
       }
+      return true;
     }
 
-    async function print() {
+    // `--smoke` step `print`: everything up to the window print call. The pages must be in the hidden
+    // root and the page rules in the constructed sheet; then the document is removed again, so the
+    // print dialog never opens.
+    async function inspectPrepared() {
+      const pages = printed.root.children.length;
+      const rules = printed.sheet.cssRules.length;
+      removePrintDocument();
+      if (pages === 0 || rules === 0) throw new Error("인쇄 준비에 쪽이나 쪽 규칙이 없습니다.");
+      return "pages=" + pages + " rules=" + rules;
+    }
+
+    // Fetches every page into the hidden root, then hands over to `finish`. Resolves with what
+    // `finish` returns, or `false` when another job runs or this one was cancelled.
+    async function runJob(finish) {
       if (job) {
         notify(MSG_BUSY);
         return false;
@@ -297,8 +312,7 @@
           return false;
         }
         hideProgress();
-        await printPrepared();
-        return true;
+        return await finish();
       } catch (err) {
         removePrintDocument();
         throw err;
@@ -309,7 +323,14 @@
       }
     }
 
-    return { print, cancel: cancelPrint, isBusy: () => job !== null };
+    const print = async () => (await runJob(printPrepared)) === true;
+    const smoke = async () => {
+      const detail = await runJob(inspectPrepared);
+      if (detail === false) throw new Error(MSG_NOT_PREPARED);
+      return detail;
+    };
+
+    return { print, smoke, cancel: cancelPrint, isBusy: () => job !== null };
   }
 
   host.__EASYOFFICE_CREATE_HWP_PRINT__ = createHwpPrint;

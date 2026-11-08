@@ -511,35 +511,26 @@
       return () => changeListeners.delete(listener);
     }
 
-    // `EasyOffice.exe --smoke`: activate the HWP module, wait for the editor, type into a blank
-    // document, export HWP bytes and verify them. The shell watches the engine call made by `report`.
-    function reportSmoke(ok, message) {
-      const marker = ok ? "EASYOFFICE_SMOKE_HWP_ROUNDTRIP_OK " : "EASYOFFICE_SMOKE_HWP_ROUNDTRIP_FAIL ";
-      return Promise.resolve(deps.invokeIpc("scrub_pii", marker + message)).catch(() => null);
-    }
-
+    // `EasyOffice.exe --smoke` step `hwp`: activate the HWP module, wait for the editor, type into a
+    // blank document, export HWP bytes and verify them. Resolves with the detail text the bridge
+    // reports; rejects with the reason it failed.
     async function runSmoke(activate) {
-      const report = reportSmoke;
-      try {
-        await activate();
-        const started = Date.now();
-        while (status !== "ready") {
-          if (status === "error" || usesLegacy()) throw new Error(lastError || MSG_UNAVAILABLE);
-          if (Date.now() - started > limits.connect) throw new Error("편집기 준비 시간 초과");
-          await new Promise((resolve) => timers.set(resolve, 100));
-        }
-        const before = await exportHwp();
-        const typed = await typeIntoEditor("한글 스모크 테스트");
-        const after = await exportHwp();
-        const dirty = await isDirty();
-        if (!typed || !dirty) throw new Error("편집기에 입력이 반영되지 않았습니다.");
-        if (after.length === 0 || after[0] !== 0xd0 || after[1] !== 0xcf) {
-          throw new Error("내보낸 HWP 바이트가 올바르지 않습니다.");
-        }
-        await report(true, "bytes=" + after.length + " blank=" + before.length);
-      } catch (err) {
-        await report(false, err instanceof Error ? err.message : String(err));
+      await activate();
+      const started = Date.now();
+      while (status !== "ready") {
+        if (status === "error" || usesLegacy()) throw new Error(lastError || MSG_UNAVAILABLE);
+        if (Date.now() - started > limits.connect) throw new Error("편집기 준비 시간 초과");
+        await new Promise((resolve) => timers.set(resolve, 100));
       }
+      const before = await exportHwp();
+      const typed = await typeIntoEditor("한글 스모크 테스트");
+      const after = await exportHwp();
+      const dirty = await isDirty();
+      if (!typed || !dirty) throw new Error("편집기에 입력이 반영되지 않았습니다.");
+      if (after.length === 0 || after[0] !== 0xd0 || after[1] !== 0xcf) {
+        throw new Error("내보낸 HWP 바이트가 올바르지 않습니다.");
+      }
+      return "bytes=" + after.length + " blank=" + before.length;
     }
 
     // Same-origin test input for the smoke run only: click the first page, then feed the editor's

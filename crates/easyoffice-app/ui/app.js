@@ -970,10 +970,8 @@
       await workspaceSession.markSaved();
     });
     if (!windowBridge.isStart) void hwpSession.restore().catch(() => {});
-    void windowBridge.runSmoke({
-      invokeIpc,
-      runHwpSmoke: () => hwpHost.runSmoke(() => ribbonHistory.activatePane("HWP")),
-    });
+    const smokeSteps = { hwp: () => hwpHost.runSmoke(() => ribbonHistory.activatePane("HWP")), pdf: () => hwpSession.smokePdf(), print: () => hwpPrint.smoke() };
+    void windowBridge.runSmoke({ invokeIpc, steps: smokeSteps });
   }
 
   async function loadWorkspaceBootstrap() {

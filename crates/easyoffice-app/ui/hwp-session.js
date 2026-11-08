@@ -11,6 +11,7 @@
   // Same page ceiling as the shell's PDF export (`pdf_export.rs`, PD-101).
   const MAX_PDF_PAGES = 2000;
   const PDF_PAGE_TIMEOUT_MS = 120000;
+  const SMOKE_PDF_NAME = "smoke.pdf";
   const MSG_PDF_UNAVAILABLE = "PDF로 내보내기는 데스크톱 앱의 한글 편집기에서만 사용할 수 있습니다";
   const HWP_EXTENSIONS = new Set(["hwp", "hwpx", "hwt", "hwtx"]);
   const OPEN_TIMEOUT_MS = 10 * 60 * 1000; // an encrypted document waits for the user's password
@@ -563,33 +564,45 @@
       }
     }
 
-    // Searchable PDF (PD-101): the page SVGs come out of the editor over the embed port and go to
-    // the desktop shell as text; Rust builds the PDF and owns the file dialog and the path.
+    // The page SVGs come out of the editor over the embed port; `onCount` hears the page count first.
+    async function readPageSvgs(onCount) {
+      const count = await hwpHost.call("pageCount");
+      if (!Number.isInteger(count) || count < 1 || count > MAX_PDF_PAGES) {
+        throw new Error("쪽 수(" + count + ")가 1~" + MAX_PDF_PAGES + " 범위를 벗어납니다");
+      }
+      onCount(count);
+      const options = { timeoutMs: PDF_PAGE_TIMEOUT_MS };
+      const pages = await Promise.all(Array.from({ length: count }, (_, page) => hwpHost.call("getPageSvg", { page }, options)));
+      if (!pages.every((svg) => typeof svg === "string" && svg !== "")) throw new Error("쪽 그림을 받지 못했습니다");
+      return pages;
+    }
+
+    // Searchable PDF (PD-101): the page SVGs go to the desktop shell as text; Rust builds the PDF and
+    // owns the file dialog and the path.
     async function exportPdf() {
       if (!hwpHost.isEmbedActive() || typeof deps.exportSearchablePdf !== "function") {
         feedback(MSG_PDF_UNAVAILABLE);
         return null;
       }
       try {
-        const count = await hwpHost.call("pageCount");
-        if (!Number.isInteger(count) || count < 1 || count > MAX_PDF_PAGES) {
-          feedback("PDF 내보내기 실패: 쪽 수(" + count + ")가 1~" + MAX_PDF_PAGES + " 범위를 벗어납니다");
-          return null;
-        }
-        feedback("PDF 만드는 중: " + count + "쪽");
-        const options = { timeoutMs: PDF_PAGE_TIMEOUT_MS };
-        const pages = await Promise.all(Array.from({ length: count }, (_, page) => hwpHost.call("getPageSvg", { page }, options)));
-        if (!pages.every((svg) => typeof svg === "string" && svg !== "")) {
-          feedback("PDF 내보내기 실패: 쪽 그림을 받지 못했습니다");
-          return null;
-        }
+        const pages = await readPageSvgs((count) => feedback("PDF 만드는 중: " + count + "쪽"));
         const result = await deps.exportSearchablePdf(deps.resolveBaseName() + ".pdf", pages);
-        feedback(result.status === "saved" ? "PDF 내보내기 완료 (" + result.name + " · " + count + "쪽)" : "PDF 내보내기 취소: 저장 위치를 선택하지 않았습니다");
+        feedback(result.status === "saved" ? "PDF 내보내기 완료 (" + result.name + " · " + pages.length + "쪽)" : "PDF 내보내기 취소: 저장 위치를 선택하지 않았습니다");
         return result;
       } catch (err) {
         feedback("PDF 내보내기 실패: " + describeError(err));
         return null;
       }
+    }
+
+    // `--smoke` step `pdf`: the same pages go to the shell, which in the smoke run checks the PDF in
+    // memory (no dialog, no file) and answers as if it had saved `smoke.pdf`.
+    async function smokePdf() {
+      if (!hwpHost.isEmbedActive() || typeof deps.exportSearchablePdf !== "function") throw new Error(MSG_PDF_UNAVAILABLE);
+      const pages = await readPageSvgs(() => {});
+      const result = await deps.exportSearchablePdf(SMOKE_PDF_NAME, pages);
+      if (result?.status !== "saved" || result.name !== SMOKE_PDF_NAME) throw new Error("셸이 PDF 검사 결과를 돌려주지 않았습니다");
+      return "pages=" + pages.length + " bytes=" + result.bytes;
     }
 
     async function saveAs(format) {
@@ -603,7 +616,7 @@
     }
 
     return {
-      openFromBytes, save, saveAs, exportPdf, restore, bindUi, getConverterSource, runAutosave,
+      openFromBytes, save, saveAs, exportPdf, smokePdf, restore, bindUi, getConverterSource, runAutosave,
       isDirty: () => dirty,
       getCurrent: () => (current ? { ...current } : null),
       getTabId: () => tabId,
