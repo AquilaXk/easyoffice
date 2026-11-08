@@ -89,6 +89,54 @@ pub(crate) fn rtf_table_lines(table: &RichTable, table_idx: usize) -> Vec<String
         .collect()
 }
 
+/// Escaped cell texts of one `{\trowd ... \row}` line, for both layouts: standard (every `\cellx`
+/// before the first cell) and the older one (`\cellx` right before each cell's text). Cell
+/// definitions (`\cellx`, `\cl*` merge marks) are dropped; escapes stay for the unescaper.
+pub(crate) fn flat_row_cells(line: &str) -> Vec<String> {
+    let body = line.strip_prefix("{\\trowd").unwrap_or(line);
+    let body = match body.strip_prefix("{\\*\\tblidx") {
+        Some(rest) => rest.split_once('}').map_or("", |(_, tail)| tail),
+        None => body,
+    };
+    let body = body.strip_prefix(' ').unwrap_or(body);
+    let bytes = body.as_bytes();
+    let (mut cells, mut cur) = (Vec::new(), String::new());
+    let (mut copied, mut i) = (0usize, 0usize);
+    while i < bytes.len() {
+        if bytes[i] != b'\\' {
+            i += 1;
+            continue;
+        }
+        let word_end = bytes[i + 1..]
+            .iter()
+            .position(|b| !b.is_ascii_lowercase())
+            .map_or(bytes.len(), |n| i + 1 + n);
+        let word = &body[i + 1..word_end];
+        let is_def = matches!(word, "cellx" | "clmgf" | "clmrg" | "clvmgf" | "clvmrg");
+        if word.is_empty() || !(is_def || word == "cell") {
+            // Control symbol or other control word: keep it in the text.
+            i = word_end.max(i + 2);
+            continue;
+        }
+        cur.push_str(&body[copied..i]);
+        let mut end = word_end;
+        if word == "cellx" {
+            while bytes.get(end).is_some_and(u8::is_ascii_digit) {
+                end += 1;
+            }
+        }
+        if bytes.get(end) == Some(&b' ') {
+            end += 1;
+        }
+        if word == "cell" {
+            cells.push(std::mem::take(&mut cur));
+        }
+        copied = end;
+        i = end;
+    }
+    cells
+}
+
 /// Width of the horizontal run that starts at `col`, in cells.
 fn run_width(marks: &[CellMarks], col: usize) -> u32 {
     let merged = marks[col + 1..]
@@ -142,6 +190,14 @@ mod tests {
         rows.iter()
             .map(|r| r.iter().map(|c| c.to_string()).collect())
             .collect()
+    }
+
+    #[test]
+    fn flat_reader_reads_standard_and_old_layouts() {
+        let standard = "{\\trowd{\\*\\tblidx 0} \\clmgf\\cellx3000\\clmrg\\cellx6000 a \\\\cell\\cell b\\line c\\cell \\row}";
+        assert_eq!(flat_row_cells(standard), vec!["a \\\\cell", "b\\line c"]);
+        let old = "{\\trowd{\\*\\tblidx 0} \\cellx a\\cell \\cellx b\\cell \\row}";
+        assert_eq!(flat_row_cells(old), vec!["a", "b"]);
     }
 
     #[test]

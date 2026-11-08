@@ -299,3 +299,16 @@ fn rtf_hostile_merge_marks_are_dropped_with_a_warning() {
     assert!(table.merges.is_empty());
     assert!(warnings.iter().any(|w| w.contains("병합")), "{warnings:?}");
 }
+
+#[test]
+fn flat_rtf_decoder_reads_cell_text_of_rich_output() {
+    let bytes =
+        UniversalFormatConverter::encode_rich(&doc_of(sample_table()), DocumentFormat::Rtf, None)
+            .unwrap();
+    let payload = easyoffice_formats::RtfCodec::decode(&bytes).expect("flat decode");
+    assert_eq!(payload.tables.len(), 1);
+    assert_eq!(
+        payload.tables[0],
+        text_rows(&[&["머리", "", "끝"], &["a", "b", "세로"], &["c", "d", ""]])
+    );
+}

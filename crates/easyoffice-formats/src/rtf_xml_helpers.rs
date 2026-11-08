@@ -70,12 +70,10 @@ impl RtfCodec {
                 let tbl_idx = extract_between(line, "{\\*\\tblidx ", "}")
                     .and_then(|s| s.parse::<usize>().ok())
                     .unwrap_or(0);
-                let mut row_cells = Vec::new();
-                for seg in line.split("\\cellx ").skip(1) {
-                    if let Some(end_pos) = seg.find("\\cell") {
-                        row_cells.push(Self::unescape_rtf_text(&seg[..end_pos]));
-                    }
-                }
+                let row_cells = crate::rich_rtf_table::flat_row_cells(line)
+                    .iter()
+                    .map(|c| Self::unescape_rtf_text(c))
+                    .collect();
                 if let Some(last) = tables.last_mut().filter(|(idx, _)| *idx == tbl_idx) {
                     last.1.push(row_cells);
                 } else {
