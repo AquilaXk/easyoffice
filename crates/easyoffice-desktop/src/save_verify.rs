@@ -20,7 +20,7 @@
 
 use easyoffice_formats::{
     ContainerFamily, DocumentFormat, EasyOfficeError, FormatDetector, Ole2ContainerCodec,
-    Ole2SecurityGuard, ZipArchiveCodec, ZipSecurityPolicy,
+    Ole2SecurityGuard, ZipArchiveCodec, ZipSecurityPolicy, HANGUL_EDITOR_MAX_ENTRY_BYTES,
 };
 
 /// What the user is told when the bytes are refused: no internal terms, and the file is untouched.
@@ -48,7 +48,9 @@ const ZIP_MAIN_PARTS: [(DocumentFormat, &str); 9] = [
 /// which has no ratio rule, and the page has already re-parsed these exact bytes with it before
 /// they get here (`exportVerified` in `hwp-session.js`, on every save path). A flat picture the
 /// editor embeds legitimately deflates past 1000:1, so any number would refuse real documents.
-/// The entry count, per-entry and total size limits and the "empty but inflates" rule stay.
+/// The entry count, the total size limit and the "empty but inflates" rule stay; the per-entry
+/// limit is the editor's own ([`HANGUL_EDITOR_MAX_ENTRY_BYTES`]), since the editor embeds pictures
+/// the engine's 128 MiB default would refuse.
 const HANGUL_RATIO_LIMIT: f64 = f64::INFINITY;
 
 const HWP_FILE_HEADER_STREAM: &str = "FileHeader";
@@ -83,6 +85,7 @@ fn zip_policy(format: DocumentFormat) -> ZipSecurityPolicy {
     match format {
         DocumentFormat::Hwpx | DocumentFormat::Hwtx => ZipSecurityPolicy {
             max_compression_ratio: HANGUL_RATIO_LIMIT,
+            max_single_entry_uncompressed_bytes: HANGUL_EDITOR_MAX_ENTRY_BYTES,
             ..default
         },
         _ => default,
@@ -145,7 +148,10 @@ fn verify_pdf_tail(bytes: &[u8]) -> Result<(), EasyOfficeError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use easyoffice_formats::{UniversalDocumentModel, UniversalFormatConverter, ZipArchiveEntry};
+    use easyoffice_formats::{
+        UniversalDocumentModel, UniversalFormatConverter, ZipArchiveEntry, ZipEntryDescriptor,
+        ZipSecurityGuard,
+    };
 
     fn sample_model() -> UniversalDocumentModel {
         UniversalDocumentModel {
@@ -311,7 +317,7 @@ mod tests {
     #[test]
     fn the_size_limits_still_apply_to_hangul_packages() {
         let mut bytes = flat_picture_package("Contents/header.xml");
-        // Declare the picture 200 MiB large in its central directory record: over the entry limit.
+        // Declare the picture 600 MiB large in its central directory record: over the editor's limit.
         let mut at = bytes
             .windows(4)
             .position(|w| w == [0x50, 0x4B, 0x01, 0x02])
@@ -319,9 +325,39 @@ mod tests {
         while &bytes[at + 46..at + 46 + 18] != b"BinData/image1.bmp" {
             at += 46 + usize::from(u16::from_le_bytes([bytes[at + 28], bytes[at + 29]]));
         }
-        bytes[at + 24..at + 28].copy_from_slice(&(200_u32 * 1_048_576).to_le_bytes());
+        bytes[at + 24..at + 28].copy_from_slice(&(600_u32 * 1_048_576).to_le_bytes());
         assert!(matches!(
             verify_document_bytes("hwpx", &bytes),
+            Err(EasyOfficeError::DecompressionBombDetected { .. })
+        ));
+    }
+
+    #[test]
+    fn the_hangul_entry_limit_is_the_editors_not_the_engines() {
+        let entry = |size: u64| {
+            vec![ZipEntryDescriptor::new(
+                "BinData/image1.bmp",
+                size,
+                size,
+                false,
+            )]
+        };
+        let policy = zip_policy(DocumentFormat::Hwpx);
+        let engine = 128_u64 * 1_048_576;
+        // Over the engine's default but within what the editor opens: kept.
+        assert!(ZipSecurityGuard::validate_archive(&entry(engine + 1), &policy).is_ok());
+        assert!(
+            ZipSecurityGuard::validate_archive(&entry(HANGUL_EDITOR_MAX_ENTRY_BYTES), &policy)
+                .is_ok()
+        );
+        assert!(ZipSecurityGuard::validate_archive(
+            &entry(engine + 1),
+            &zip_policy(DocumentFormat::Docx)
+        )
+        .is_err());
+        // Past the editor's limit: refused.
+        assert!(matches!(
+            ZipSecurityGuard::validate_archive(&entry(HANGUL_EDITOR_MAX_ENTRY_BYTES + 1), &policy),
             Err(EasyOfficeError::DecompressionBombDetected { .. })
         ));
     }

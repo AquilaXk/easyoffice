@@ -611,6 +611,11 @@ impl ZipEntryDescriptor {
     }
 }
 
+/// Per-entry uncompressed limit of the Hangul editor's HWPX reader (rhwp `MAX_BINDATA_SIZE`,
+/// `src/parser/hwpx/reader.rs:58`). A saved HWPX is verified against this same limit, so a picture
+/// the editor accepts is never refused on save (PD-112).
+pub const HANGUL_EDITOR_MAX_ENTRY_BYTES: u64 = 512 * 1024 * 1024;
+
 /// Fail-Closed security budget for ZIP containers (OOXML, ODF, HWPX).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ZipSecurityPolicy {

@@ -1904,3 +1904,12 @@
 - **Trade-offs** 항목의 회색 처리는 창의 모듈 단위입니다. 커서가 표 안인지 같은 편집기 상태는 셸에 보고하지 않습니다.
 - **Verified by** `node --test scripts/test-webui-native-menu.mjs scripts/test-webui-menu-state.mjs scripts/test-hwp-studio.mjs`, `cargo test -p easyoffice-desktop native_menu`.
 - **Revisit when** 편집기 상태에 따라 메뉴를 회색 처리해야 할 때.
+
+## 87. 한글 저장 검증의 항목 상한은 편집기가 여는 상한과 같다 (PD-112)
+
+- **Context** 저장 전 구조 검증이 엔진 기본값(항목당 128MiB)을 그대로 써서, 편집기(rhwp)가 넣을 수 있는 더 큰 그림을 가진 정상 문서를 저장하지 못했습니다. 참조 앱의 저장 검증은 "다음에 여는 엔진이 받아들이는가"입니다.
+- **Decision (`PD-112`)** 한글(HWPX·HWTX)의 항목당 비압축 상한을 `HANGUL_EDITOR_MAX_ENTRY_BYTES`(512MiB, rhwp `MAX_BINDATA_SIZE`) 한 상수로 두고 저장 검증이 이를 씁니다. 항목 수(4096)와 전체 합계(512MiB), 빈 항목 검사는 그대로입니다. 압축비 규칙 없음은 PD-109 그대로입니다.
+- **Why** 저장 검증 상한이 여는 쪽보다 작으면 편집기가 만든 파일을 거부하고, 크면 못 여는 파일을 저장합니다. 편집기 XML 항목 상한(256MiB)은 페이지가 저장 직전 같은 바이트를 rhwp로 다시 파싱해 걸러냅니다.
+- **Trade-offs** 엔진 자체 HWPX 읽기(변환 경로)는 기본 128MiB 그대로라 그보다 큰 그림의 문서는 변환에서 거부됩니다. 합계 512MiB를 넘는 그림 묶음도 거부합니다.
+- **Verified by** `cargo test -p easyoffice-desktop save_verify`(선언 크기 기준: 128MiB 초과~512MiB 통과, 512MiB 초과 거부).
+- **Revisit when** rhwp 상한이 바뀌거나 엔진 HWPX 읽기를 편집기와 같은 상한으로 올릴 때.
