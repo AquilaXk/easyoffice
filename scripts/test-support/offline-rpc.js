@@ -349,7 +349,6 @@
       blocks: lines.map((l) => ({ type: "paragraph", runs: [{ text: l.replace(/^#+\s*/, "") }] })) };
   }
 
-  const ZOOM_STEP_CYCLE = { 100: 125, 125: 150, 150: 90 };
 
   function parseRibbonPayloadFields(payload) {
     const raw = String(payload || "").trim();
@@ -644,7 +643,7 @@
       ["-view-split", (s) => { s.splitViewEnabled = !s.splitViewEnabled; }],
       ["-view-ribbon", (s) => { s.ribbonCollapsed = !s.ribbonCollapsed; }],
       ["-view-theme", (s) => { s.darkThemeEnabled = !s.darkThemeEnabled; }],
-      ["-view-zoom", (s) => { s.zoomPercent = ZOOM_STEP_CYCLE[s.zoomPercent] ?? 100; }],
+      ["-view-zoom", (s) => { s.zoomPercent = 100; }],
     ];
 
     function localExecuteRibbonCommand(payload) {

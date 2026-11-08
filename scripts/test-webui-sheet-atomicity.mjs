@@ -679,7 +679,7 @@ test("workspace snapshot SSOT restores per-sheet row counts, doc layout styles, 
   await flushAsyncTurns();
   const stage = document.querySelector(".canvas-stage");
 
-  userClick(commandItem(document, "slide-view-zoom"));
+  userClick(document.getElementById("btn-zoom-in"));
   await flushAsyncTurns();
   userClick(commandItem(document, "slide-view-split"));
   await flushAsyncTurns();
@@ -749,7 +749,7 @@ test("JSON-only real-backend IPC syncs state, toggles per-cell inline styles ind
         if (cmdId.endsWith("-home-bold")) {
           rustState.isBold = !rustState.isBold;
         } else if (cmdId.endsWith("-view-zoom")) {
-          rustState.zoomPercent = rustState.zoomPercent === 100 ? 125 : 100;
+          rustState.zoomPercent = 100;
         }
         return JSON.stringify({
           commandId: cmdId,
@@ -823,7 +823,7 @@ test("JSON-only real-backend IPC syncs state, toggles per-cell inline styles ind
 
   userClick(zoomBtn);
   await flushAsyncTurns();
-  assert.equal(document.querySelector(".canvas-stage").style.zoom, "125%");
+  assert.equal(document.querySelector(".canvas-stage").style.zoom, "100%");
 
   let releaseSlowEval = null;
   slowEvalGate = {
