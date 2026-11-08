@@ -259,6 +259,7 @@ fn main() {
             window_commands::list_recent_documents,
             menu_state::report_menu_state,
             window_commands::end_close_prompt,
+            window_commands::ack_close_prompt,
             window_commands::open_recent_document,
             preview::get_recent_preview,
         ])
@@ -304,9 +305,9 @@ fn handle_run_event(app: &AppHandle, event: tauri::RunEvent) {
             let windows = app.webview_windows();
             if !windows.is_empty() {
                 api.prevent_exit();
-                // A window already showing its save prompt is not asked again (that would close it).
+                // A window already showing its save prompt stays in front and keeps it.
                 for window in windows.values() {
-                    window_commands::raise_and_close(app, window);
+                    window_commands::raise_and_close(window);
                 }
             }
         }
@@ -362,7 +363,7 @@ mod tests {
         );
         assert_eq!(value["windows"], serde_json::json!(["main", "doc-*"]));
         assert_eq!(value["local"], serde_json::json!(true));
-        assert_eq!(app_commands::APP_COMMANDS.len(), 17);
+        assert_eq!(app_commands::APP_COMMANDS.len(), 18);
     }
 
     #[test]

@@ -21,6 +21,7 @@ async function shellPage(search = "?module=DOC&win=w-menu-state") {
     shellCommands: {
       report_menu_state: (args) => { reports.push(args); return null; },
       end_close_prompt: () => { closes.push("end-prompt"); return null; },
+      ack_close_prompt: () => null,
       report_window_state: () => null,
       close_current_window: () => { closes.push("close"); return null; },
       take_pending_open: () => null,
@@ -145,13 +146,14 @@ test("a menu report that did not arrive is sent again", async () => {
   assert.deepEqual(reports[1], reports[0], "the same state, not a changed one");
 });
 
-test("both new commands are window commands of the bridge, called with the shell token", () => {
+test("the menu state and close prompt commands are window commands of the bridge, called with the shell token", () => {
   const bridge = read("crates/easyoffice-app/ui/desktop-bridge.js");
   assert.match(bridge, /reportMenuState: "report_menu_state"/);
   assert.match(bridge, /endClosePrompt: "end_close_prompt"/);
+  assert.match(bridge, /ackClosePrompt: "ack_close_prompt"/);
   const commands = read("crates/easyoffice-desktop/src/app_commands.rs");
   const capability = JSON.parse(read("crates/easyoffice-desktop/capabilities/main-window.json"));
-  for (const command of ["report_menu_state", "end_close_prompt"]) {
+  for (const command of ["report_menu_state", "end_close_prompt", "ack_close_prompt"]) {
     assert.ok(commands.includes(`"${command}"`), command);
     assert.ok(capability.permissions.includes(`allow-${command.replaceAll("_", "-")}`), command);
   }

@@ -21,6 +21,7 @@
     "allow-open-recent-document",
     "allow-get-recent-preview",
     "allow-report-menu-state",
-    "allow-end-close-prompt"
+    "allow-end-close-prompt",
+    "allow-ack-close-prompt"
   ]
 }

@@ -351,8 +351,17 @@
       return false;
     }
 
+    // Tells the shell the prompt is on its way to the screen. Until it hears this, a second close
+    // request (Cmd+W, the close button, Cmd+Q) treats the page as hung and closes the window once
+    // the shell's timeout has passed; after it, a second request only brings the window forward.
+    function ackPrompt() {
+      if (!desktopAvailable()) return;
+      shell("ackClosePrompt", {}).catch((err) => feedback("닫기 확인을 알리지 못했습니다: " + (err?.message || String(err))));
+    }
+
     async function runCloseRequest() {
       if (!deps.isDirty()) return closeWindow();
+      ackPrompt();
       const choice = await askCloseChoice();
       if (choice === "cancel") return keepOpen();
       if (choice === "save") {

@@ -32,6 +32,7 @@
     recentPreview: "get_recent_preview",
     reportMenuState: "report_menu_state",
     endClosePrompt: "end_close_prompt",
+    ackClosePrompt: "ack_close_prompt",
   });
 
   // Command token (`crates/easyoffice-desktop/src/shell_caller.rs`): the shell defines it in the

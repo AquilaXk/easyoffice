@@ -16,7 +16,7 @@ function recordingShell(overrides = {}) {
   const commands = {};
   for (const name of [
     "open_document_window", "open_file_in_new_window", "take_pending_open", "report_window_state",
-    "close_current_window", "list_recent_documents", "open_recent_document", "report_menu_state", "end_close_prompt",
+    "close_current_window", "list_recent_documents", "open_recent_document", "report_menu_state", "end_close_prompt", "ack_close_prompt",
   ]) {
     commands[name] = (args) => {
       calls.push({ name, args });
@@ -278,14 +278,19 @@ test("close request: 저장 안 함 closes, 취소 keeps the window, 저장 save
   const first = host.__EASYOFFICE_CLOSE_REQUEST__();
   await flushAsyncTurns();
   assert.equal(dialog.open, true);
+  assert.equal(shell.named("ack_close_prompt").length, 1, "the shell hears that the prompt is shown");
+  const secondWhileOpen = host.__EASYOFFICE_CLOSE_REQUEST__();
+  await flushAsyncTurns();
+  assert.equal(shell.named("ack_close_prompt").length, 1, "a repeated request joins the open prompt");
   userClick(document.getElementById("btn-close-cancel"));
-  await first;
+  assert.equal(await secondWhileOpen, await first, "both requests get the one answer");
   assert.equal(dialog.open, false);
   assert.equal(shell.named("close_current_window").length, 0);
   assert.equal(shell.named("end_close_prompt").length, 1, "취소 ends the close prompt (and a quit from the menu)");
 
   const second = host.__EASYOFFICE_CLOSE_REQUEST__();
   await flushAsyncTurns();
+  assert.equal(shell.named("ack_close_prompt").length, 2, "the next prompt is confirmed again");
   userClick(document.getElementById("btn-close-save"));
   await second;
   await flushAsyncTurns(10);
@@ -337,6 +342,14 @@ test("a cancelled save dialog keeps the window open", async () => {
   await flushAsyncTurns(10);
   assert.equal(shell.named("close_current_window").length, 0);
   assert.equal(shell.named("end_close_prompt").length, 1, "a save that did not happen ends the close prompt");
+});
+
+test("a window without unsaved changes closes without a prompt or a confirmation", async () => {
+  const { shell, host } = await openWindow("?module=DOC&win=w-clean-close", {}, { localStorage: createMemoryStorage() });
+  await host.__EASYOFFICE_CLOSE_REQUEST__();
+  assert.equal(shell.named("close_current_window").length, 1);
+  assert.equal(shell.named("ack_close_prompt").length, 0);
+  assert.equal(shell.named("end_close_prompt").length, 0);
 });
 
 test("dirty state and the document name are reported to the shell for the native title", async () => {

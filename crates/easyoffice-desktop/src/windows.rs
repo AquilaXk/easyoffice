@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 /// What a window hosts. `Start` is a regular-size window showing the start screen (PD-098); the
 /// others are document windows.
@@ -132,16 +133,32 @@ struct WindowEntry {
     name: String,
     dirty: bool,
     path_key: Option<String>,
-    close_prompted: bool,
+    close_prompt: Option<ClosePrompt>,
+}
+
+/// How long a page may take to confirm (`ack_close_prompt`) that it is showing the save prompt. A
+/// page that stays silent this long is treated as hung, and only then may another close request
+/// close the window without the prompt. Twice the five seconds after which the desktop systems
+/// themselves call a window unresponsive, because closing unasked loses unsaved work (PD-113).
+pub const CLOSE_ACK_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The save prompt the shell asked a window to show.
+#[derive(Debug)]
+struct ClosePrompt {
+    asked_at: Instant,
+    /// The page answered that it is showing the prompt.
+    acked: bool,
 }
 
 /// What to do when the user asks to close a window.
 #[derive(Debug, PartialEq, Eq)]
 pub enum CloseAction {
-    /// Nothing unsaved (or the page did not answer the earlier request): close now.
+    /// Nothing unsaved, or the page never confirmed the prompt within [`CLOSE_ACK_TIMEOUT`]: close.
     CloseNow,
     /// Ask the page to run its 저장 / 저장 안 함 / 취소 flow.
     AskPage,
+    /// The page is showing the prompt: keep the window open and bring it to the front.
+    KeepPrompt,
 }
 
 /// Open windows, their reported state and the canonical path each document came from.
@@ -160,7 +177,7 @@ impl WindowRegistry {
                 name: String::new(),
                 dirty: false,
                 path_key: None,
-                close_prompted: false,
+                close_prompt: None,
             },
         );
     }
@@ -187,12 +204,16 @@ impl WindowRegistry {
         Ok(())
     }
 
-    /// The page reports its document name and unsaved state; a report ends any pending close prompt.
+    /// The page reports its document name and unsaved state. A saved document has nothing left to
+    /// ask about, so a pending close prompt ends; a report that is still unsaved leaves the prompt
+    /// alone (it may be on screen).
     pub fn set_state(&mut self, label: &str, name: &str, dirty: bool) -> Option<String> {
         let entry = self.windows.get_mut(label)?;
         entry.name = name.chars().take(200).collect();
         entry.dirty = dirty;
-        entry.close_prompted = false;
+        if !dirty {
+            entry.close_prompt = None;
+        }
         Some(window_title(&entry.name, dirty))
     }
 
@@ -211,29 +232,50 @@ impl WindowRegistry {
         self.windows.get(label).map(|w| w.kind)
     }
 
-    /// A second request while the page is still asked (it never answered) closes the window, so a
-    /// hung page can never make a window unclosable.
-    pub fn begin_close(&mut self, label: &str) -> CloseAction {
+    /// A close request at `now`. A prompt the page confirmed is kept (a second request never
+    /// closes over it); one the page has not confirmed is asked again, and closes the window only
+    /// once [`CLOSE_ACK_TIMEOUT`] has passed, so a hung page can never make a window unclosable.
+    pub fn begin_close(&mut self, label: &str, now: Instant) -> CloseAction {
         let Some(entry) = self.windows.get_mut(label) else {
             return CloseAction::CloseNow;
         };
-        if !entry.dirty || entry.close_prompted {
+        if !entry.dirty {
+            entry.close_prompt = None;
             return CloseAction::CloseNow;
         }
-        entry.close_prompted = true;
-        CloseAction::AskPage
+        match &entry.close_prompt {
+            None => {
+                entry.close_prompt = Some(ClosePrompt {
+                    asked_at: now,
+                    acked: false,
+                });
+                CloseAction::AskPage
+            }
+            Some(prompt) if prompt.acked => CloseAction::KeepPrompt,
+            Some(prompt) if now.saturating_duration_since(prompt.asked_at) >= CLOSE_ACK_TIMEOUT => {
+                CloseAction::CloseNow
+            }
+            Some(_) => CloseAction::AskPage,
+        }
     }
 
-    /// The page is showing this window's save prompt (a close request now would skip it).
-    pub fn is_close_prompted(&self, label: &str) -> bool {
-        self.windows.get(label).is_some_and(|w| w.close_prompted)
+    /// The page confirms it is showing the save prompt. Ignored when no prompt was asked (a late
+    /// answer after the prompt already ended).
+    pub fn ack_close_prompt(&mut self, label: &str) {
+        if let Some(prompt) = self
+            .windows
+            .get_mut(label)
+            .and_then(|w| w.close_prompt.as_mut())
+        {
+            prompt.acked = true;
+        }
     }
 
     /// The user answered the close prompt without closing (cancel, or the save failed): the next
-    /// close request asks again instead of closing at once.
+    /// close request asks again instead of keeping a prompt that is no longer there.
     pub fn end_close_prompt(&mut self, label: &str) {
         if let Some(entry) = self.windows.get_mut(label) {
-            entry.close_prompted = false;
+            entry.close_prompt = None;
         }
     }
 
@@ -418,12 +460,20 @@ mod tests {
         assert_eq!(reg.find_by_path("new"), Some("doc-1-a"));
     }
 
+    fn dirty_window() -> (WindowRegistry, Instant) {
+        let mut reg = WindowRegistry::default();
+        reg.register("doc-1-a", WindowKind::Doc);
+        reg.set_state("doc-1-a", "계획.hwpx", true);
+        (reg, Instant::now())
+    }
+
     #[test]
     fn state_reports_set_the_title_and_drive_the_close_decision() {
         let mut reg = WindowRegistry::default();
+        let now = Instant::now();
         reg.register("doc-1-a", WindowKind::Doc);
         assert_eq!(
-            reg.begin_close("doc-1-a"),
+            reg.begin_close("doc-1-a", now),
             CloseAction::CloseNow,
             "clean windows close"
         );
@@ -432,37 +482,98 @@ mod tests {
             Some("● 계획.hwpx — EasyOffice")
         );
         assert!(reg.is_dirty("doc-1-a"));
-        assert_eq!(reg.begin_close("doc-1-a"), CloseAction::AskPage);
+        assert_eq!(reg.begin_close("doc-1-a", now), CloseAction::AskPage);
+        reg.set_state("doc-1-a", "계획.hwpx", false);
         assert_eq!(
-            reg.begin_close("doc-1-a"),
+            reg.begin_close("doc-1-a", now),
             CloseAction::CloseNow,
-            "a page that never answers cannot trap the window"
+            "saved while asked"
         );
         reg.set_state("doc-1-a", "계획.hwpx", true);
         assert_eq!(
-            reg.begin_close("doc-1-a"),
+            reg.begin_close("doc-1-a", now),
             CloseAction::AskPage,
-            "a new report re-arms the prompt"
+            "a prompt that ended with the save does not linger"
         );
-        reg.set_state("doc-1-a", "계획.hwpx", false);
-        assert_eq!(reg.begin_close("doc-1-a"), CloseAction::CloseNow);
         assert_eq!(reg.set_state("missing", "x", false), None);
-        assert_eq!(reg.begin_close("missing"), CloseAction::CloseNow);
+        assert_eq!(reg.begin_close("missing", now), CloseAction::CloseNow);
+    }
+
+    #[test]
+    fn a_second_close_while_the_prompt_is_shown_keeps_the_window() {
+        let (mut reg, now) = dirty_window();
+        assert_eq!(reg.begin_close("doc-1-a", now), CloseAction::AskPage);
+        reg.ack_close_prompt("doc-1-a");
+        for later in [Duration::ZERO, CLOSE_ACK_TIMEOUT, CLOSE_ACK_TIMEOUT * 100] {
+            assert_eq!(
+                reg.begin_close("doc-1-a", now + later),
+                CloseAction::KeepPrompt,
+                "Cmd+W, the close button and Cmd+Q never close over a shown prompt"
+            );
+        }
+        reg.set_state("doc-1-a", "계획.hwpx", true);
+        assert_eq!(
+            reg.begin_close("doc-1-a", now),
+            CloseAction::KeepPrompt,
+            "an unsaved report while the prompt is open leaves it alone"
+        );
+    }
+
+    #[test]
+    fn a_page_that_never_confirms_the_prompt_can_be_closed_after_the_timeout() {
+        let (mut reg, now) = dirty_window();
+        assert_eq!(reg.begin_close("doc-1-a", now), CloseAction::AskPage);
+        let almost = now + CLOSE_ACK_TIMEOUT - Duration::from_millis(1);
+        assert_eq!(
+            reg.begin_close("doc-1-a", almost),
+            CloseAction::AskPage,
+            "a slow page is asked again, not closed"
+        );
+        assert_eq!(
+            reg.begin_close("doc-1-a", now + CLOSE_ACK_TIMEOUT),
+            CloseAction::CloseNow,
+            "the escape hatch for a hung page"
+        );
+    }
+
+    #[test]
+    fn a_late_confirmation_still_protects_the_prompt() {
+        let (mut reg, now) = dirty_window();
+        reg.begin_close("doc-1-a", now);
+        reg.ack_close_prompt("doc-1-a");
+        assert_eq!(
+            reg.begin_close("doc-1-a", now + CLOSE_ACK_TIMEOUT),
+            CloseAction::KeepPrompt
+        );
+    }
+
+    #[test]
+    fn a_confirmation_without_a_prompt_changes_nothing() {
+        let (mut reg, now) = dirty_window();
+        reg.ack_close_prompt("doc-1-a");
+        reg.ack_close_prompt("missing");
+        assert_eq!(
+            reg.begin_close("doc-1-a", now),
+            CloseAction::AskPage,
+            "an answer nobody asked for does not pre-confirm the next prompt"
+        );
     }
 
     #[test]
     fn ending_the_close_prompt_makes_the_next_close_ask_again() {
-        let mut reg = WindowRegistry::default();
-        reg.register("doc-1-a", WindowKind::Doc);
-        reg.set_state("doc-1-a", "계획.hwpx", true);
-        assert_eq!(reg.begin_close("doc-1-a"), CloseAction::AskPage);
-        assert!(reg.is_close_prompted("doc-1-a"));
+        let (mut reg, now) = dirty_window();
+        assert_eq!(reg.begin_close("doc-1-a", now), CloseAction::AskPage);
+        reg.ack_close_prompt("doc-1-a");
+        // The user cancelled: the next close asks again instead of keeping a prompt that is gone,
+        // and instead of closing at once.
         reg.end_close_prompt("doc-1-a");
-        assert!(!reg.is_close_prompted("doc-1-a"));
-        assert_eq!(reg.begin_close("doc-1-a"), CloseAction::AskPage);
-        // The user cancelled: without this the next close would go through unasked.
+        assert_eq!(reg.begin_close("doc-1-a", now), CloseAction::AskPage);
         reg.end_close_prompt("doc-1-a");
-        assert_eq!(reg.begin_close("doc-1-a"), CloseAction::AskPage);
+        assert_eq!(
+            reg.begin_close("doc-1-a", now + CLOSE_ACK_TIMEOUT),
+            CloseAction::AskPage,
+            "an unconfirmed old prompt does not carry its age into the new one"
+        );
         reg.end_close_prompt("missing");
     }
 

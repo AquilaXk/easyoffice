@@ -16,6 +16,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard};
+use std::time::Instant;
 use tauri::{
     AppHandle, DragDropEvent, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
 };
@@ -318,12 +319,19 @@ fn attach_handlers(app: &AppHandle, window: &WebviewWindow) {
     let label = window.label().to_string();
     window.on_window_event(move |event| match event {
         WindowEvent::CloseRequested { api, .. } => {
-            let action = locked(&app.state::<AppWindows>().registry).begin_close(&label);
+            let action =
+                locked(&app.state::<AppWindows>().registry).begin_close(&label, Instant::now());
+            if action == CloseAction::CloseNow {
+                return;
+            }
+            api.prevent_close();
+            let Some(window) = app.get_webview_window(&label) else {
+                return;
+            };
             if action == CloseAction::AskPage {
-                api.prevent_close();
-                if let Some(window) = app.get_webview_window(&label) {
-                    let _ = window.eval(CLOSE_REQUEST_SCRIPT);
-                }
+                let _ = window.eval(CLOSE_REQUEST_SCRIPT);
+            } else {
+                raise(&window);
             }
         }
         WindowEvent::Focused(true) => {
@@ -659,15 +667,26 @@ pub fn end_close_prompt(_caller: ShellCaller, app: AppHandle, window: WebviewWin
     app.state::<crate::app_quit::AppQuit>().cancel();
 }
 
-/// Brings a window to the front and asks it to close, which runs its own close confirmation. A
-/// window that is already showing its save prompt is only brought to the front: a second close
-/// request would close it without asking. Returns false when the window could not be asked.
-pub fn raise_and_close(app: &AppHandle, window: &WebviewWindow) -> bool {
+/// The page confirms that its save prompt is on screen. Until then a second close request is
+/// treated as coming from a hung page and closes the window (`CLOSE_ACK_TIMEOUT`, PD-113).
+#[tauri::command]
+pub fn ack_close_prompt(_caller: ShellCaller, app: AppHandle, window: WebviewWindow) {
+    locked(&app.state::<AppWindows>().registry).ack_close_prompt(window.label());
+}
+
+fn raise(window: &WebviewWindow) {
     let _ = window.unminimize();
     let _ = window.show();
     let _ = window.set_focus();
-    let prompted = locked(&app.state::<AppWindows>().registry).is_close_prompted(window.label());
-    prompted || window.close().is_ok()
+}
+
+/// Brings a window to the front and asks it to close, which runs its own close confirmation. A
+/// window already showing its save prompt only stays in front (`CloseRequested` keeps the prompt);
+/// one whose page never showed it closes after the timeout. Returns false when the window could
+/// not be asked.
+pub fn raise_and_close(window: &WebviewWindow) -> bool {
+    raise(window);
+    window.close().is_ok()
 }
 
 /// Destroys the calling window without another close request (the page already asked the user).
@@ -776,7 +795,7 @@ mod tests {
             );
             checked += 1;
         }
-        assert_eq!(checked, 8, "every window command is covered");
+        assert_eq!(checked, 9, "every window command is covered");
     }
 
     fn scratch_dir(tag: &str) -> PathBuf {

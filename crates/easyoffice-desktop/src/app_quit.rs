@@ -7,7 +7,7 @@
 //! the reference app asks each window with an event; EasyOffice asks with `WebviewWindow::close`, so
 //! the existing close flow runs (`CloseRequested`: a window without unsaved changes closes, a dirty
 //! one runs the page's 저장 / 저장 안 함 / 취소 prompt), and the page ends the quit through the
-//! narrow `end_close_prompt` command (`window_commands.rs`) when the user cancels or a save fails. macOS keeps its system
+//! narrow `end_close_prompt` command (`window_commands.rs`) when the user cancels or a save fails; it confirms the prompt with `ack_close_prompt`. macOS keeps its system
 //! quit item (`RunEvent::ExitRequested` in `main.rs`).
 
 use std::collections::VecDeque;
@@ -129,13 +129,14 @@ pub fn window_destroyed(app: &AppHandle, label: &str) {
     }
 }
 
-/// Asks the window to close (`raise_and_close`): a window already showing its save prompt is not
-/// closed again, the quit waits for its answer (destroyed: next window; cancelled: quit stops).
+/// Asks the window to close (`raise_and_close`): a window already showing its save prompt keeps it,
+/// the quit waits for its answer (destroyed: next window; cancelled: quit stops). A page that never
+/// confirmed its prompt is closed by the next request after `CLOSE_ACK_TIMEOUT` (PD-113).
 #[cfg(not(target_os = "macos"))]
 fn ask(app: &AppHandle, label: &str) {
     let closed = app
         .get_webview_window(label)
-        .is_some_and(|window| crate::window_commands::raise_and_close(app, &window));
+        .is_some_and(|window| crate::window_commands::raise_and_close(&window));
     if !closed {
         // The window could not be asked: stop instead of leaving a quit that never ends.
         app.state::<AppQuit>().cancel();
@@ -216,7 +217,7 @@ mod tests {
     }
 
     /// Structural guard: the menu quit and the macOS quit never call `close()` themselves; both go
-    /// through `raise_and_close`, which skips a window that is already showing its save prompt.
+    /// through `raise_and_close`, which never closes over a save prompt the page is showing.
     #[test]
     fn quits_close_windows_only_through_raise_and_close() {
         for source in [include_str!("app_quit.rs"), include_str!("main.rs")] {
