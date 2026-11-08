@@ -8,6 +8,7 @@
 //! with mode 0600 on Unix and would tighten the permissions of every document it replaces; here a
 //! new file keeps the process's usual mode and a replaced file keeps the mode it had.
 
+use crate::save_error::SaveError;
 use crate::save_verify::{verify_document_bytes, REFUSED_MESSAGE};
 use crate::tracked_files::{disk_state, DiskState, Fingerprint};
 use easyoffice_app::EasyOfficeIpcRouter;
@@ -194,9 +195,8 @@ pub struct Written {
 /// write never leaves a truncated document where an existing one used to be, and two saves into the
 /// same folder never share a temporary file. `fs::rename` replaces an existing file on Windows too
 /// (`MoveFileExW` with `MOVEFILE_REPLACE_EXISTING`).
-pub fn write_document_bytes(path: &Path, bytes: &[u8]) -> Result<Written, String> {
-    let failed =
-        |err: std::io::Error| format!("파일을 저장하지 못했습니다 ({}): {err}", path.display());
+pub fn write_document_bytes(path: &Path, bytes: &[u8]) -> Result<Written, SaveError> {
+    let failed = |err: std::io::Error| SaveError::from_io(path, &err);
     let (tmp_path, tmp_file) = create_unique_sibling(path).map_err(failed)?;
     if let Err(err) = write_then_rename(&tmp_path, tmp_file, path, bytes) {
         let _ = fs::remove_file(&tmp_path);
@@ -275,7 +275,7 @@ pub fn save_in_place(
     expected: &Fingerprint,
     bytes: &[u8],
     confirm_overwrite: impl FnOnce() -> bool,
-) -> Result<InPlaceResult, String> {
+) -> Result<InPlaceResult, SaveError> {
     if disk_state(path, expected) == DiskState::Changed && !confirm_overwrite() {
         return Ok(InPlaceResult::Declined);
     }
@@ -421,7 +421,8 @@ mod tests {
         let dir = scratch_dir("fail");
         let target = dir.join("missing-dir").join("a.pdf");
         let err = write_document_bytes(&target, b"x").unwrap_err();
-        assert!(err.contains("파일을 저장하지 못했습니다"));
+        assert_eq!(err.to_string(), "파일을 저장하지 못했습니다 (a.pdf)");
+        assert!(!err.to_string().contains("missing-dir"), "no folder: {err}");
         let _ = fs::remove_dir_all(&dir);
     }
 

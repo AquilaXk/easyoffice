@@ -22,6 +22,7 @@ mod pdf_synthetic;
 mod pdf_tounicode;
 mod preview;
 mod recent;
+mod save_error;
 mod save_file;
 mod save_thumbnail;
 mod save_verify;
@@ -53,6 +54,7 @@ mod menu_state {
 }
 
 use easyoffice_app::EasyOfficeIpcRouter;
+use save_error::SaveError;
 use save_file::{save_in_place, write_document_bytes, InPlaceResult, SaveOutcome, SaveRequest};
 use serde::Serialize;
 use shell_caller::ShellCaller;
@@ -199,10 +201,17 @@ async fn save_via_dialog(
     })
     .await
     .map_err(|err| IpcError::new(format!("파일을 쓰지 못했습니다: {err}")))?
-    .map_err(IpcError::new)?;
+    .map_err(|err| report_save_failure(app, window, &err))?;
     let (path, written) = written;
     window_commands::note_saved_path(app, window.label(), &path, written.fingerprint);
     Ok(SaveOutcome::saved(&path, written.bytes))
+}
+
+/// A document that could not be written: the shell shows the reference app's error dialog itself
+/// (the page never words it) and the command fails with the reason alone, no path (PD-088).
+fn report_save_failure(app: &AppHandle, window: &WebviewWindow, err: &SaveError) -> IpcError {
+    save_error::show_dialog(app, window, err);
+    err.to_ipc()
 }
 
 const EXTERNAL_CHANGE_TITLE: &str = "외부 변경 감지";
@@ -244,7 +253,7 @@ async fn save_tracked(
     })
     .await
     .map_err(|err| IpcError::new(format!("파일을 쓰지 못했습니다: {err}")))?
-    .map_err(IpcError::new)?;
+    .map_err(|err| report_save_failure(app, window, &err))?;
     match result {
         InPlaceResult::Declined => Ok(SaveOutcome::cancelled()),
         InPlaceResult::Saved(written) => {
@@ -481,3 +490,6 @@ mod tests {
         assert!(EasyOfficeIpcRouter::dispatch("not_a_command", "").is_err());
     }
 }
+
+#[cfg(test)]
+mod path_leak_tests;

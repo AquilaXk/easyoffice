@@ -98,7 +98,8 @@ impl ExportJob {
         };
         // The same check every saved document passes: the bytes must be a PDF the engine accepts.
         let request = SaveRequest::from_bytes(VERIFY_NAME, pdf)?;
-        let written = write_document_bytes(&path, request.bytes())?;
+        let written =
+            write_document_bytes(&path, request.bytes()).map_err(|err| err.to_string())?;
         // Only a file that is a PDF by name is handed to the OS: the dialog does not force the
         // extension, and a document named like a program must not be launched.
         let opened = is_pdf_name(&path)

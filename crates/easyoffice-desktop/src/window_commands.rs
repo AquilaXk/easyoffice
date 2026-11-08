@@ -203,9 +203,10 @@ fn build_window(
     } else if label == PRIMARY_LABEL && app.try_state::<SmokeProbe>().is_some() {
         builder = builder.initialization_script(crate::smoke::SMOKE_INIT_SCRIPT);
     }
-    let window = builder
-        .build()
-        .map_err(|err| format!("새 창을 만들지 못했습니다: {err}"))?;
+    let window = builder.build().map_err(|err| {
+        eprintln!("window: build failed: {err}");
+        "새 창을 만들지 못했습니다.".to_string()
+    })?;
     attach_handlers(app, &window);
     Ok(window)
 }
@@ -757,9 +758,10 @@ pub fn list_recent_documents(
 
 #[tauri::command]
 pub fn clear_recent_documents(_caller: ShellCaller, app: AppHandle) -> Result<(), WindowError> {
-    app.state::<AppWindows>()
-        .clear_recents()
-        .map_err(|err| WindowError::new(format!("최근 문서를 지우지 못했습니다: {err}")))?;
+    app.state::<AppWindows>().clear_recents().map_err(|err| {
+        eprintln!("recent: clear failed: {err}");
+        WindowError::new("최근 문서를 지우지 못했습니다.")
+    })?;
     crate::recent::notify_changed(&app);
     Ok(())
 }
