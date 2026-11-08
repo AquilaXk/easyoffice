@@ -1,0 +1,36 @@
+name: Prepare desktop release build
+description: >-
+  Gates and inputs every release build runs before bundling: repository hygiene, the bundle contract and
+  WebUI suites, the pinned rhwp checkout and editor bundle (generated, not tracked, PD-081 and PD-083),
+  then the Rust workspace tests and the engine self-test. Needs a checkout; Linux also needs the
+  install-linux-deps action first.
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Node.js for the hygiene guard, the editor bundle and the Tauri CLI
+      uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+      with:
+        node-version: "22"
+
+    - name: Run repository hygiene guard
+      shell: bash
+      run: node scripts/check-repo-hygiene.mjs
+
+    - name: Run desktop bundle contract, release asset and WebUI regression suites
+      shell: bash
+      run: node --test scripts/test-desktop-file-associations.mjs scripts/test-release-assets.mjs scripts/test-verify-linux-bundles.mjs "scripts/test-webui-*.mjs"
+
+    # The desktop shell embeds the editor bundle and fails to build without it, so it is built before
+    # any Rust step.
+    - name: Check out the pinned rhwp upstream and build the hwp-studio editor bundle
+      shell: bash
+      run: |
+        node scripts/checkout-rhwp.mjs
+        node scripts/build-hwp-studio.mjs
+
+    - name: Run Rust workspace test suite and self-test
+      shell: bash
+      run: |
+        cargo test --workspace --locked
+        cargo run --locked -p easyoffice-app -- --self-test

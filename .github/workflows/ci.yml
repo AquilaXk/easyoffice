@@ -15,12 +15,14 @@ permissions:
   contents: read
 
 # The desktop shell crate (crates/easyoffice-desktop, Tauri v2: WebView2 on Windows, WKWebView on
-# macOS) is excluded from the cross-platform engine gates and verified on its own in the macOS
-# (`verify`) and Windows jobs: its build needs the platform toolchain and webview (PD-074, PD-094).
+# macOS, WebKitGTK on Linux) is excluded from the cross-platform engine gates and verified on its own in
+# the macOS (`verify`), Windows and Linux (`verify-linux`) jobs: its build needs the platform toolchain
+# and webview (PD-074, PD-094).
 
 jobs:
-  # Platform-independent gates run once on the fastest runner; the macOS and Windows jobs keep only
-  # what needs their OS (desktop shell, .app and .dmg on macOS; engine tests, desktop shell and installer on Windows).
+  # Platform-independent gates run once on the fastest runner; the OS jobs keep only what needs their OS
+  # (desktop shell, .app and .dmg on macOS; engine tests, desktop shell and installer on Windows; desktop
+  # shell and the deb, rpm and AppImage packages on Linux).
   checks:
     name: checks
     runs-on: ubuntu-latest
@@ -57,7 +59,7 @@ jobs:
           node scripts/verify-fonts.mjs
 
       - name: Run rhwp upstream and hwp-studio guard tests
-        run: node --test scripts/test-rhwp-upstream.mjs scripts/test-update-rhwp.mjs scripts/test-hwp-studio.mjs scripts/test-commit-messages.mjs scripts/test-sort-comparator-rule.mjs scripts/test-release-serve-rule.mjs scripts/test-desktop-file-associations.mjs
+        run: node --test scripts/test-rhwp-upstream.mjs scripts/test-update-rhwp.mjs scripts/test-hwp-studio.mjs scripts/test-commit-messages.mjs scripts/test-sort-comparator-rule.mjs scripts/test-release-serve-rule.mjs scripts/test-desktop-file-associations.mjs scripts/test-release-assets.mjs scripts/test-verify-linux-bundles.mjs
 
       - name: Run WebUI behavioral and security regression suite
         run: node --test "scripts/test-webui-*.mjs"
@@ -140,6 +142,8 @@ jobs:
             grep -q "<string>${ext}</string>" document-types.xml || { echo "Info.plist does not register .${ext}"; exit 1; }
           done
           test "$(plutil -extract LSMinimumSystemVersion raw "$PLIST")" = "11.0"
+          # The MIT notice condition: the third-party notices travel inside the app.
+          test -f "$APP/Contents/Resources/THIRD_PARTY_NOTICES.md" || { echo "missing THIRD_PARTY_NOTICES.md in the app"; exit 1; }
           DMGS=(target/release/bundle/dmg/EasyOffice_*.dmg)
           test "${#DMGS[@]}" -eq 1 && test -f "${DMGS[0]}" || { echo "expected exactly one EasyOffice .dmg"; exit 1; }
           DMG_BYTES=$(stat -f%z "${DMGS[0]}")
@@ -175,6 +179,66 @@ jobs:
         with:
           name: easyoffice-macos-dmg-ci
           path: target/release/bundle/dmg/EasyOffice_*.dmg
+          retention-days: 7
+          if-no-files-found: error
+
+  # The Linux desktop shell builds on Ubuntu 22.04, the baseline the release packages are built on. The
+  # fast `checks` job stays free of the WebKitGTK packages. The x64 packages are built and their
+  # structure is checked as in the release; the arm64 deb is built only by the release. No GUI smoke
+  # test yet: the Hangul editor round trip fails under xvfb (TODO.md).
+  verify-linux:
+    name: verify-linux
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - name: Install the Linux build dependencies
+        uses: ./.github/actions/install-linux-deps
+
+      - name: Setup Node.js for the hwp-studio bundle build and the Tauri CLI
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/hwp-studio/package-lock.json
+
+      - name: Cache Rust dependencies and build artifacts
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Check out the pinned rhwp upstream (sparse, shallow)
+        run: node scripts/checkout-rhwp.mjs
+
+      - name: Build the hwp-studio editor bundle (npm ci --ignore-scripts, vite build, static checks)
+        run: node scripts/build-hwp-studio.mjs
+
+      - name: Check Rust toolchain version
+        run: cargo --version && rustc --version
+
+      - name: Run Rust Clippy lint gate for the desktop shell (Linux)
+        run: cargo clippy -p easyoffice-desktop --all-targets -- -D warnings
+
+      - name: Run desktop shell unit tests (Linux)
+        run: cargo test -p easyoffice-desktop
+
+      - name: Build desktop shell Linux x64 packages
+        working-directory: crates/easyoffice-desktop
+        run: |
+          BUNDLES="$(node "$GITHUB_WORKSPACE/scripts/release-assets.mjs" bundles linux-x64)"
+          npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --ci --bundles "$BUNDLES"
+
+      - name: Verify the package structure (AppImage extraction, deb and rpm metadata, desktop entry, notices)
+        run: node scripts/verify-linux-bundles.mjs linux-x64
+
+      - name: Upload Linux packages for review
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: easyoffice-linux-x64-ci
+          path: |
+            target/release/bundle/appimage/*.AppImage
+            target/release/bundle/deb/*.deb
+            target/release/bundle/rpm/*.rpm
           retention-days: 7
           if-no-files-found: error
 
@@ -277,6 +341,12 @@ jobs:
             throw "NSIS installer is unexpectedly small: $($installers[0].Length) bytes"
           }
           Write-Output "Installer: $($installers[0].Name) ($($installers[0].Length) bytes)"
+          # 7-Zip lists the files inside an NSIS installer without running it: the third-party notices
+          # (MIT notice condition) must be among them.
+          $listing = & 7z l $installers[0].FullName
+          if (-not ($listing | Select-String -SimpleMatch "THIRD_PARTY_NOTICES.md")) {
+            throw "THIRD_PARTY_NOTICES.md is missing from the NSIS installer"
+          }
 
       - name: Smoke test desktop shell window (embedded WebUI, IPC round trip and HWP editor round trip)
         shell: pwsh

@@ -1,12 +1,19 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
-import { checkDesktopBundleConfig, REQUIRED_ASSOCIATIONS } from "./desktop-file-associations.mjs";
+import {
+  checkDesktopBundleConfig,
+  LINUX_DEB_DEPENDS,
+  LINUX_RPM_DEPENDS,
+  NOTICES_FILE,
+  REQUIRED_ASSOCIATIONS,
+  REQUIRED_MIME_TYPES,
+} from "./desktop-file-associations.mjs";
 
 const confUrl = new URL("../crates/easyoffice-desktop/tauri.conf.json", import.meta.url);
 const load = () => JSON.parse(fs.readFileSync(confUrl, "utf8"));
 
-test("the committed desktop bundle config satisfies the macOS and Windows contract", () => {
+test("the committed desktop bundle config satisfies the macOS, Windows and Linux contract", () => {
   assert.deepEqual(checkDesktopBundleConfig(load()), []);
 });
 
@@ -14,6 +21,12 @@ test("every required extension is registered under its role", () => {
   const registered = new Map();
   for (const a of load().bundle.fileAssociations) for (const e of a.ext) registered.set(e, a.role);
   for (const [ext, role] of REQUIRED_ASSOCIATIONS) assert.equal(registered.get(ext), role, ext);
+});
+
+test("every required extension declares its Linux MIME type", () => {
+  const mimeTypes = new Map();
+  for (const a of load().bundle.fileAssociations) for (const e of a.ext) mimeTypes.set(e, a.mimeType);
+  assert.deepEqual(Object.fromEntries(mimeTypes), Object.fromEntries(REQUIRED_MIME_TYPES));
 });
 
 test("a missing extension, a wrong role or a pushy handler rank is reported", () => {
@@ -38,4 +51,33 @@ test("macOS bundle settings are required and a committed signing identity is rej
   assert.match(problems, /signingIdentity must not be committed/);
   assert.match(problems, /targets must include 'app'/);
   assert.match(problems, /icon.icns/);
+});
+
+test("Linux packages must declare the WebKitGTK runtime libraries and the bundle targets", () => {
+  const conf = load();
+  assert.deepEqual(conf.bundle.linux.deb.depends, LINUX_DEB_DEPENDS);
+  assert.deepEqual(conf.bundle.linux.rpm.depends, LINUX_RPM_DEPENDS);
+  conf.bundle.linux.deb.depends = ["libgtk-3-0"];
+  delete conf.bundle.linux.rpm;
+  conf.bundle.targets = ["nsis", "app", "dmg"];
+  const problems = checkDesktopBundleConfig(conf).join("\n");
+  assert.match(problems, /bundle\.linux\.deb\.depends must list 'libwebkit2gtk-4\.1-0'/);
+  assert.match(problems, /bundle\.linux\.rpm\.depends must list 'libxdo\.so\.3\(\)\(64bit\)'/);
+  assert.match(problems, /targets must include 'appimage'/);
+});
+
+test("a missing MIME type on a file association is reported", () => {
+  const conf = load();
+  delete conf.bundle.fileAssociations.find((a) => a.ext.includes("docx")).mimeType;
+  conf.bundle.fileAssociations.find((a) => a.ext.includes("pdf")).mimeType = "text/plain";
+  const problems = checkDesktopBundleConfig(conf).join("\n");
+  assert.match(problems, /'\.docx' must declare mimeType application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.document/);
+  assert.match(problems, /'\.pdf' must declare mimeType application\/pdf/);
+});
+
+test("the third-party notice file must be shipped as a bundle resource", () => {
+  const conf = load();
+  assert.equal(conf.bundle.resources[`../../${NOTICES_FILE}`], NOTICES_FILE);
+  delete conf.bundle.resources;
+  assert.match(checkDesktopBundleConfig(conf).join("\n"), /bundle\.resources must ship 'THIRD_PARTY_NOTICES\.md'/);
 });

@@ -1,5 +1,12 @@
 name: Release Packages
 
+# Reference implementation (MIT, Copyright (c) 2025-2026 Edward Kim) of the reference app's desktop
+# release workflow (.github/workflows/*-desktop.yml): the Linux build matrix (x64 AppImage, deb and rpm;
+# arm64 deb), the AppImage extraction check, fixed release asset names, one combined checksum file and
+# the draft release. The staging and checks are scripts here (scripts/release-assets.mjs,
+# scripts/verify-linux-bundles.mjs) with unit tests; the shared build steps are composite actions
+# (.github/actions). Updater artifacts and signing of the reference are not taken over (PD-094, PD-103).
+
 on:
   push:
     tags:
@@ -15,6 +22,11 @@ on:
         type: boolean
         required: false
         default: true
+      release_draft:
+        description: "Create the release as a draft (QA publishes it after checking). A tag push always creates a draft."
+        type: boolean
+        required: false
+        default: true
 
 # Tag pushes group by tag. A manual run groups by version and publish flag, so a trial build
 # (publish=false) never queues behind or replaces a publishing run of the same version.
@@ -26,96 +38,85 @@ permissions:
   contents: read
 
 jobs:
-  # A tag push must name the version the sources carry, or the app would ship with a stale version
-  # (PD-103 compares it with the latest release). Runs first so a mismatch fails before any build.
-  check-tag-version:
-    name: Check Tag Matches Cargo Workspace Version
+  # Resolves the version, tag and draft state once for every job. A tag push must name the version the
+  # sources carry, or the app would ship with a stale version (PD-103 compares it with the latest
+  # release); it runs first so a mismatch fails before any build.
+  prepare:
+    name: Resolve Release and Check Tag Matches Cargo Workspace Version
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+      draft: ${{ steps.meta.outputs.draft }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
+      - name: Resolve release version, tag and draft state
+        id: meta
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_DRAFT: ${{ inputs.release_draft }}
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="${INPUT_VERSION#v}"
+          fi
+          # Only an explicit release_draft=false on a manual run publishes right away.
+          DRAFT=true
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ "$INPUT_DRAFT" = false ]; then
+            DRAFT=false
+          fi
+          {
+            echo "version=$VERSION"
+            echo "tag=v$VERSION"
+            echo "draft=$DRAFT"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Compare the tag version with the workspace package version
         if: github.ref_type == 'tag'
         env:
-          REF_NAME: ${{ github.ref_name }}
+          TAG_VERSION: ${{ steps.meta.outputs.version }}
         run: |
           CARGO_VERSION="$(awk '/^\[workspace\.package\]/{in_pkg=1; next} /^\[/{in_pkg=0} in_pkg && /^version[[:space:]]*=/{gsub(/.*=[[:space:]]*"|".*/, ""); print; exit}' Cargo.toml)"
           test -n "$CARGO_VERSION"
-          TAG_VERSION="${REF_NAME#v}"
           if [ "$TAG_VERSION" != "$CARGO_VERSION" ]; then
-            echo "::error::Tag $REF_NAME does not match Cargo workspace version $CARGO_VERSION"
+            echo "::error::Tag v$TAG_VERSION does not match Cargo workspace version $CARGO_VERSION"
             exit 1
           fi
 
   release-macos:
     name: Build macOS Release Artifacts
-    needs: check-tag-version
+    needs: prepare
     runs-on: macos-15
     timeout-minutes: 60
-    outputs:
-      version: ${{ steps.meta.outputs.version }}
-      tag: ${{ steps.meta.outputs.tag }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           fetch-depth: 0
 
-      - name: Setup Node.js for repository hygiene guard and the Tauri CLI
-        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
-        with:
-          node-version: "22"
-
-      - name: Run repository hygiene guard
-        run: node scripts/check-repo-hygiene.mjs
-
-      - name: Run desktop bundle contract and WebUI regression suite
-        run: node --test scripts/test-desktop-file-associations.mjs "scripts/test-webui-*.mjs"
-
-      # The editor bundle (PD-081, PD-083) is generated, not tracked. The desktop shell embeds it and
-      # fails to build without it, so build it before any Rust step.
-      - name: Check out the pinned rhwp upstream and build the hwp-studio editor bundle
-        run: |
-          node scripts/checkout-rhwp.mjs
-          node scripts/build-hwp-studio.mjs
-
       - name: Add the macOS Rust targets for the universal build
         run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
 
-      - name: Run Rust workspace test suite and self-test
-        run: |
-          cargo test --workspace --locked
-          cargo run --locked -p easyoffice-app -- --self-test
-
-      - name: Resolve release version and tag
-        id: meta
-        env:
-          INPUT_VERSION: ${{ inputs.version }}
-          REF_NAME: ${{ github.ref_name }}
-        run: |
-          if [[ "$REF_NAME" == v* ]]; then
-            VERSION="${REF_NAME#v}"
-            TAG="$REF_NAME"
-          else
-            VERSION="${INPUT_VERSION#v}"
-            TAG="v${VERSION}"
-          fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+      - name: Run the shared release gates and prepare the editor bundle
+        uses: ./.github/actions/prepare-desktop-build
 
       # Universal .dmg without a Developer ID (PD-094). The identity "-" is an ad-hoc signature (Apple
       # silicon refuses to run a binary without any signature; Gatekeeper still prompts on first open).
       # To sign and notarize later, add the APPLE_SIGNING_IDENTITY secret and pass APPLE_ID,
       # APPLE_PASSWORD and APPLE_TEAM_ID to this step; the Tauri CLI reads them from the environment.
-      # The release version overrides the bundle version so the asset name, Info.plist and tag agree.
+      # The release version overrides the bundle version so the Info.plist and the tag agree.
       - name: Build EasyOffice desktop shell universal .dmg
         working-directory: crates/easyoffice-desktop
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
-          VERSION: ${{ steps.meta.outputs.version }}
-        run: npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --ci --target universal-apple-darwin --bundles app,dmg --config "{\"version\":\"${VERSION}\"}" -- --locked
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          BUNDLES="$(node "$GITHUB_WORKSPACE/scripts/release-assets.mjs" bundles macos-universal)"
+          npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --ci --target universal-apple-darwin --bundles "$BUNDLES" --config "{\"version\":\"${VERSION}\"}" -- --locked
 
       - name: Smoke test desktop shell window (embedded WebUI, IPC round trip and HWP editor round trip)
         if: vars.MACOS_SMOKE != 'off'
@@ -138,28 +139,22 @@ jobs:
             exit 1
           fi
 
-      - name: Stage macOS .dmg and SHA-256 checksums
-        env:
-          VERSION: ${{ steps.meta.outputs.version }}
-        run: |
-          mkdir -p dist
-          DMG="$(ls target/universal-apple-darwin/release/bundle/dmg/EasyOffice_*_universal.dmg | head -n 1)"
-          test -n "$DMG"
-          cp "$DMG" "dist/EasyOffice-${VERSION}-macos-universal.dmg"
-          (cd dist && shasum -a 256 "EasyOffice-${VERSION}-macos-universal.dmg" > "SHA256SUMS-macos-universal.txt")
+      - name: Verify the third-party notices are inside the app
+        run: test -f target/universal-apple-darwin/release/bundle/macos/EasyOffice.app/Contents/Resources/THIRD_PARTY_NOTICES.md
+
+      - name: Stage the macOS .dmg under its fixed name
+        run: node scripts/release-assets.mjs stage macos-universal dist
 
       - name: Upload macOS release artifacts
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
-          name: macos-release-artifacts
-          path: |
-            dist/EasyOffice-${{ steps.meta.outputs.version }}-macos-universal.dmg
-            dist/SHA256SUMS-macos-universal.txt
+          name: release-macos-universal
+          path: dist/
           if-no-files-found: error
 
   build-windows-release:
     name: Build Windows x64 Installer & Release Artifacts
-    needs: check-tag-version
+    needs: prepare
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
@@ -168,55 +163,20 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Node.js for repository hygiene guard and the Tauri CLI
-        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
-        with:
-          node-version: "22"
-
-      - name: Run repository hygiene guard
-        run: node scripts/check-repo-hygiene.mjs
-
-      - name: Run WebUI behavioral and security regression suite
-        run: node --test "scripts/test-webui-*.mjs"
-
-      # The editor bundle (PD-081, PD-083) is generated, not tracked. The desktop shell embeds it and
-      # fails to build without it, so build it before any Rust step.
-      - name: Check out the pinned rhwp upstream and build the hwp-studio editor bundle
-        run: |
-          node scripts/checkout-rhwp.mjs
-          node scripts/build-hwp-studio.mjs
-
-      - name: Run Rust workspace test suite and self-test
-        run: |
-          cargo test --workspace --locked
-          cargo run --locked -p easyoffice-app -- --self-test
-
-      - name: Resolve release version and tag
-        id: meta
-        shell: bash
-        env:
-          INPUT_VERSION: ${{ inputs.version }}
-          REF_NAME: ${{ github.ref_name }}
-        run: |
-          if [[ "$REF_NAME" == v* ]]; then
-            VERSION="${REF_NAME#v}"
-            TAG="$REF_NAME"
-          else
-            VERSION="${INPUT_VERSION#v}"
-            TAG="v${VERSION}"
-          fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+      - name: Run the shared release gates and prepare the editor bundle
+        uses: ./.github/actions/prepare-desktop-build
 
       # Prebuilt Tauri CLI (major 2) from npm; it builds crates/easyoffice-desktop in release mode
       # with the WebUI embedded and packages it with NSIS. The release version overrides the
-      # installer version so the asset name, installer metadata, and tag agree.
+      # installer version so the installer metadata and the tag agree.
       - name: Build EasyOffice desktop shell and NSIS installer
         working-directory: crates/easyoffice-desktop
         shell: bash
         env:
-          VERSION: ${{ steps.meta.outputs.version }}
-        run: npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --ci --bundles nsis --config "{\"version\":\"${VERSION}\"}" -- --locked
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          BUNDLES="$(node "$GITHUB_WORKSPACE/scripts/release-assets.mjs" bundles windows-x64)"
+          npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --ci --bundles "$BUNDLES" --config "{\"version\":\"${VERSION}\"}" -- --locked
 
       - name: Smoke test desktop shell window (embedded WebUI, IPC round trip and HWP editor round trip)
         shell: pwsh
@@ -231,29 +191,78 @@ jobs:
             throw "Desktop shell smoke test failed with exit code $($proc.ExitCode)"
           }
 
-      - name: Stage Windows installer and SHA-256 checksums
+      # 7-Zip lists the files inside an NSIS installer without running it.
+      - name: Verify the third-party notices are inside the installer
         shell: bash
-        env:
-          VERSION: ${{ steps.meta.outputs.version }}
-        run: |
-          mkdir -p dist
-          INSTALLER="$(ls target/release/bundle/nsis/EasyOffice_*_x64-setup.exe | head -n 1)"
-          test -n "$INSTALLER"
-          cp "$INSTALLER" "dist/EasyOffice-${VERSION}-windows-x64-setup.exe"
-          (cd dist && sha256sum "EasyOffice-${VERSION}-windows-x64-setup.exe" > "SHA256SUMS-windows-x64.txt")
+        run: 7z l target/release/bundle/nsis/EasyOffice_*_x64-setup.exe | grep -F THIRD_PARTY_NOTICES.md
+
+      - name: Stage the Windows installer under its fixed name
+        shell: bash
+        run: node scripts/release-assets.mjs stage windows-x64 dist
 
       - name: Upload Windows x64 release artifacts
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
-          name: windows-release-artifacts
-          path: |
-            dist/EasyOffice-${{ steps.meta.outputs.version }}-windows-x64-setup.exe
-            dist/SHA256SUMS-windows-x64.txt
+          name: release-windows-x64
+          path: dist/
+          if-no-files-found: error
+
+  # x64 builds the AppImage, deb and rpm; arm64 builds the deb only. Both build on Ubuntu 22.04, which
+  # sets the glibc baseline of the packages. The Linux GUI smoke test is not run yet (TODO.md).
+  build-linux-release:
+    name: Build ${{ matrix.platform }} Release Artifacts
+    needs: prepare
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x64
+            runner: ubuntu-22.04
+          - platform: linux-arm64
+            runner: ubuntu-22.04-arm
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 0
+
+      - name: Install the Linux build dependencies
+        uses: ./.github/actions/install-linux-deps
+
+      - name: Run the shared release gates and prepare the editor bundle
+        uses: ./.github/actions/prepare-desktop-build
+
+      - name: Build EasyOffice desktop shell Linux packages
+        working-directory: crates/easyoffice-desktop
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          BUNDLES="$(node "$GITHUB_WORKSPACE/scripts/release-assets.mjs" bundles "$PLATFORM")"
+          npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --ci --bundles "$BUNDLES" --config "{\"version\":\"${VERSION}\"}" -- --locked
+
+      - name: Verify the package structure (AppImage extraction, deb and rpm metadata, desktop entry, notices)
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: node scripts/verify-linux-bundles.mjs "$PLATFORM"
+
+      - name: Stage the Linux packages under their fixed names
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: node scripts/release-assets.mjs stage "$PLATFORM" dist
+
+      - name: Upload Linux release artifacts
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: release-${{ matrix.platform }}
+          path: dist/
           if-no-files-found: error
 
   publish-release:
     name: Publish Combined GitHub Release
-    needs: [release-macos, build-windows-release]
+    needs: [prepare, release-macos, build-windows-release, build-linux-release]
     # publish=false (workflow_dispatch only) stops after the build jobs, leaving the Actions artifacts.
     if: github.event_name != 'workflow_dispatch' || inputs.publish
     runs-on: ubuntu-latest
@@ -261,31 +270,43 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Download macOS and Windows release artifacts
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - name: Download the macOS, Windows and Linux release artifacts
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           path: release-assets
+          pattern: release-*
           merge-multiple: true
 
-      - name: Publish GitHub Release
+      # Fails unless release-assets holds exactly the six fixed-name assets; then writes the one
+      # combined SHA256SUMS.txt.
+      - name: Write the combined SHA-256 checksums
+        run: node scripts/release-assets.mjs checksums release-assets
+
+      # A draft stays invisible to /releases/latest, so neither the download links nor the update
+      # notice (PD-103) point at it until QA publishes it. A rerun on an existing release only replaces
+      # its assets; it never turns a published release back into a draft.
+      - name: Create or update the GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ needs.release-macos.outputs.tag }}
-          VERSION: ${{ needs.release-macos.outputs.version }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          DRAFT: ${{ needs.prepare.outputs.draft }}
           TARGET_SHA: ${{ github.sha }}
         run: |
-          ASSETS=(
-            "release-assets/EasyOffice-${VERSION}-macos-universal.dmg"
-            "release-assets/SHA256SUMS-macos-universal.txt"
-            "release-assets/EasyOffice-${VERSION}-windows-x64-setup.exe"
-            "release-assets/SHA256SUMS-windows-x64.txt"
-          )
+          set -euo pipefail
+          FILES=(release-assets/*)
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$TAG" "${ASSETS[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+            gh release upload "$TAG" "${FILES[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+            if [ "$DRAFT" = false ]; then
+              gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
+            fi
           else
-            gh release create "$TAG" "${ASSETS[@]}" \
-              --target "$TARGET_SHA" \
-              --title "EasyOffice v${VERSION} (macOS & Windows)" \
-              --generate-notes \
-              --repo "$GITHUB_REPOSITORY"
+            FLAGS=(--target "$TARGET_SHA" --title "EasyOffice v${VERSION}" --generate-notes --repo "$GITHUB_REPOSITORY")
+            if [ "$DRAFT" = true ]; then
+              FLAGS+=(--draft)
+            fi
+            gh release create "$TAG" "${FILES[@]}" "${FLAGS[@]}"
           fi

@@ -2,13 +2,13 @@
 
 [English](README.md) | [한국어](README.ko.md)
 
-EasyOffice (`v0.1.0`) is a 100% standalone, serverless, offline-capable all-in-one productivity and office suite for macOS and Windows: a Rust engine and an offline WebUI hosted in one Tauri v2 desktop shell, following the rhwp-studio window chrome of the reference app with light and dark themes. It unifies **Document**, **Sheet**, **Slide**, **Korean Office (HWP / HWPX)**, and **PDF Studio** into a single lightweight workspace with bit-level container codecs, deterministic formula evaluation, offline smart document assistance, and fail-closed security guards.
+EasyOffice (`v0.1.0`) is a 100% standalone, serverless, offline-capable all-in-one productivity and office suite for macOS, Windows and Linux: a Rust engine and an offline WebUI hosted in one Tauri v2 desktop shell, following the rhwp-studio window chrome of the reference app with light and dark themes. It unifies **Document**, **Sheet**, **Slide**, **Korean Office (HWP / HWPX)**, and **PDF Studio** into a single lightweight workspace with bit-level container codecs, deterministic formula evaluation, offline smart document assistance, and fail-closed security guards.
 
 ---
 
 ## Key Highlights
 
-- **One code base on macOS and Windows**: a Rust engine (`crates/`), a WebUI (`crates/easyoffice-app/ui/`) and a Tauri v2 desktop shell (`crates/easyoffice-desktop`, WKWebView on macOS, WebView2 on Windows). Every document opens in its own window; a start window offers new documents, recent files and open. Single instance, in-place atomic save with external-change detection, and file associations are handled in Rust; the WebView never receives a file path.
+- **One code base on macOS, Windows and Linux**: a Rust engine (`crates/`), a WebUI (`crates/easyoffice-app/ui/`) and a Tauri v2 desktop shell (`crates/easyoffice-desktop`, WKWebView on macOS, WebView2 on Windows, WebKitGTK on Linux). Every document opens in its own window; a start window offers new documents, recent files and open. Single instance, in-place atomic save with external-change detection, and file associations are handled in Rust; the WebView never receives a file path.
 - **HWP/HWPX editor**: the rhwp engine (MIT, pinned upstream submodule) runs as a same-origin iframe editor with HWP/HWPX open, save-before-verify, dirty state and IndexedDB autosave. The shell drives its File menu, theme and status bar.
 - **20 read/write formats plus Pages (read-only)**:
   - ZIP containers (`ZipArchiveCodec` with `ZipSecurityGuard`): `OoxmlCodec` (`.docx`, `.xlsx`, `.pptx`, `.ppsx`), `OdfCodec` (`.odt`, `.ods`, `.odp`), `HwpxCodec` (`.hwpx`, `.hwtx`).
@@ -45,7 +45,7 @@ EasyOffice/
 ├── crates/easyoffice-sheet/          # Formula engine (122 built-in functions), pivot and DAG recalculation
 ├── crates/easyoffice-layout/         # Page layout engine
 ├── crates/easyoffice-app/            # IPC router, CLI (`--serve`, `--self-test`) and the WebUI in `ui/`
-├── crates/easyoffice-desktop/        # Tauri v2 desktop shell for Windows (WebView2) and macOS (WKWebView)
+├── crates/easyoffice-desktop/        # Tauri v2 desktop shell for Windows (WebView2), macOS (WKWebView) and Linux (WebKitGTK)
 ├── apps/hwp-studio/                  # HWP editor overlay built on the pinned rhwp upstream
 ├── scripts/                          # Hygiene guard, bundle contract checks, WebUI regression tests
 └── docs/                             # Architecture, design system, policy decisions (SSOT), product spec
@@ -58,6 +58,7 @@ EasyOffice/
 ### System Requirements
 - macOS 11.0 (Big Sur) or later on Apple Silicon (`arm64`) and Intel (`x86_64`) for the universal `.dmg` (building the desktop shell needs Rust 1.90+, Node.js and Xcode command line tools)
 - Windows 10/11 x64 with the WebView2 runtime for the installed Windows desktop app (building the desktop shell needs Rust 1.90+ with the MSVC toolchain)
+- Linux x64 (AppImage, deb, rpm) or arm64 (deb) with WebKitGTK 4.1 and glibc 2.35 or newer, e.g. Ubuntu 22.04, Debian 12 or Fedora (building the desktop shell needs Rust 1.90+ and the WebKitGTK 4.1 development packages)
 - Rust 1.85+ for the cross-platform engine crates and the developer-only local WebUI server
 
 ### Build, Verify & Run Locally
@@ -82,9 +83,21 @@ cargo run -p easyoffice-desktop
 
 ### Release Artifacts & First Launch
 
+Every release carries the same fixed asset names, without a version in them, so the links below always point at the latest published release. `SHA256SUMS.txt` lists the SHA-256 checksum of every asset.
+
+- [macOS universal (.dmg)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-macos-universal.dmg)
+- [Windows x64 (installer)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-windows-x64-setup.exe)
+- [Linux x64 (AppImage, portable)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-linux-x64.AppImage)
+- [Linux x64 (.deb, Ubuntu / Debian)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-linux-x64.deb)
+- [Linux x64 (.rpm, Fedora / openSUSE)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-linux-x64.rpm)
+- [Linux arm64 (.deb, Ubuntu / Debian)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-linux-arm64.deb)
+- [SHA256SUMS.txt](https://github.com/AquilaXk/easyoffice/releases/latest/download/SHA256SUMS.txt)
+
+All releases are listed on the [GitHub Releases](https://github.com/AquilaXk/easyoffice/releases) page.
+
 #### macOS
 
-macOS releases ship a universal disk image, `EasyOffice-<version>-macos-universal.dmg` (Apple silicon and Intel, macOS 11 or later) with a `SHA256SUMS-macos-universal.txt` checksum file. Open the image and drag **EasyOffice** to `/Applications`. The app is the same Tauri v2 desktop shell as on Windows (WKWebView): the WebUI is embedded, every command runs in-process on the Rust engine, and no network connection is involved. The standard menu bar and Command shortcuts (⌘C/⌘V/⌘X/⌘A/⌘Z/⌘S/⌘O/⌘W/⌘Q) work; Finder "Open With" and double-click open files in a new window. Quitting with ⌘Q goes through each window's save / discard / cancel prompt.
+macOS releases ship a universal disk image, `EasyOffice-macos-universal.dmg` (Apple silicon and Intel, macOS 11 or later). Open the image and drag **EasyOffice** to `/Applications`. The app is the same Tauri v2 desktop shell as on Windows (WKWebView): the WebUI is embedded, every command runs in-process on the Rust engine, and no network connection is involved. The standard menu bar and Command shortcuts (⌘C/⌘V/⌘X/⌘A/⌘Z/⌘S/⌘O/⌘W/⌘Q) work; Finder "Open With" and double-click open files in a new window. Quitting with ⌘Q goes through each window's save / discard / cancel prompt.
 
 The release is **not signed or notarized with an Apple Developer ID**, so macOS Gatekeeper blocks it the first time ("EasyOffice cannot be opened because the developer cannot be verified"). Allow it once:
 
@@ -105,13 +118,22 @@ npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --bundles app,dmg   # ta
 
 #### Windows
 
-Windows releases ship an installer, `EasyOffice-<version>-windows-x64-setup.exe` (NSIS, per-user install, no administrator rights required). Run it, then start **EasyOffice** from the Start menu. `EasyOffice.exe` is a desktop window on the built-in Windows WebView2 runtime (Tauri v2 shell, `crates/easyoffice-desktop`): the WebUI is embedded in the executable and every command runs in-process on the Rust engine, so no local HTTP server, browser, or network connection is involved. Saving opens the native Save dialog. Uninstall from Settings > Apps or the uninstaller in the Start menu folder. WebView2 is part of Windows 11 and current Windows 10; only if it is missing does the installer download the runtime bootstrapper. The installer registers the main document formats (HWP, HWPX, DOCX, ODT, XLSX, ODS, PPTX, ODP, PDF) so a double-click opens the file in a new window of the running instance (single instance); plain-text formats such as TXT, MD and CSV are not claimed. Saving writes back to the opened file through a temporary file and rename, and asks before overwriting a file that changed on disk in the meantime.
+Windows releases ship an installer, `EasyOffice-windows-x64-setup.exe` (NSIS, per-user install, no administrator rights required). Run it, then start **EasyOffice** from the Start menu. `EasyOffice.exe` is a desktop window on the built-in Windows WebView2 runtime (Tauri v2 shell, `crates/easyoffice-desktop`): the WebUI is embedded in the executable and every command runs in-process on the Rust engine, so no local HTTP server, browser, or network connection is involved. Saving opens the native Save dialog. Uninstall from Settings > Apps or the uninstaller in the Start menu folder. WebView2 is part of Windows 11 and current Windows 10; only if it is missing does the installer download the runtime bootstrapper. The installer registers the main document formats (HWP, HWPX, DOCX, ODT, XLSX, ODS, PPTX, ODP, PDF) so a double-click opens the file in a new window of the running instance (single instance); plain-text formats such as TXT, MD and CSV are not claimed. Saving writes back to the opened file through a temporary file and rename, and asks before overwriting a file that changed on disk in the meantime.
 
 To build the installer from source on Windows (MSVC Rust toolchain 1.90+, Visual Studio Build Tools, Node.js):
 
 ```powershell
 cd crates/easyoffice-desktop
 npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --bundles nsis   # target/release/bundle/nsis/EasyOffice_<version>_x64-setup.exe
+```
+
+#### Linux
+
+Linux releases ship `EasyOffice-linux-x64.AppImage`, `EasyOffice-linux-x64.deb`, `EasyOffice-linux-x64.rpm` and `EasyOffice-linux-arm64.deb`. Prefer the native package of your distribution: the Korean input method (IME) and the WebKitGTK runtime are most reliable when they come from the distribution, and the package declares them as dependencies. Install it with `sudo apt install ./EasyOffice-linux-x64.deb` (Ubuntu, Debian) or `sudo dnf install ./EasyOffice-linux-x64.rpm` (Fedora); on arm64 only the `.deb` is built. The AppImage needs no installation (`chmod +x EasyOffice-linux-x64.AppImage`, then run it; it needs FUSE 2, the `libfuse2` package) and is meant for cases where a native package is not an option: on some Wayland and IME setups switching between Korean and English input or showing the window can be unreliable. The packages register the main document formats (HWP, HWPX, DOCX, ODT, XLSX, ODS, PPTX, ODP, PDF) as "Open with" targets without taking over another application's default, and they are built on Ubuntu 22.04, so glibc 2.35 or newer and WebKitGTK 4.1 are required. Check a download with `sha256sum --check --ignore-missing SHA256SUMS.txt`. To build the packages from source on Linux (Rust 1.90+, Node.js, `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libxdo-dev`, `librsvg2-dev`, `libssl-dev`, `patchelf`, `rpm`):
+
+```bash
+cd crates/easyoffice-desktop
+npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --bundles appimage,deb,rpm   # target/release/bundle/{appimage,deb,rpm}/
 ```
 
 **Developer-only local server (`--serve`).** `--serve` is not shipped to users and is not part of any release asset. It exists only for development and automated verification (headless-browser UI checks and CI smoke tests); the installed app opens no network port. From a source checkout, run `cargo run -p easyoffice-app -- --self-test` to verify the engine or `cargo run -p easyoffice-app -- --serve 8787` to open the loopback WebUI at `http://127.0.0.1:8787/`. `--help` lists all options. `--serve` without a port uses 8787 and falls back to 8788-8800 when it is busy; an explicit port (`--serve 18787`) is bound exactly or the command fails. Invalid ports, unknown options, and file paths exit with a non-zero status. The Host/Origin checks, connection and time limits, and CSP stay enabled for developer safety (PD-086).

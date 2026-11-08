@@ -22,7 +22,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis", "app", "dmg"],
+    "targets": ["nsis", "app", "dmg", "deb", "rpm", "appimage"],
     "publisher": "EasyOffice",
     "copyright": "Copyright (c) EasyOffice contributors. MIT License.",
     "category": "Productivity",
@@ -35,16 +35,19 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "resources": {
+      "../../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md"
+    },
     "fileAssociations": [
       { "ext": ["hwp"], "name": "EasyOffice.Hwp", "description": "한글 문서 (HWP)", "role": "Editor", "rank": "Alternate", "mimeType": "application/x-hwp" },
       { "ext": ["hwpx"], "name": "EasyOffice.Hwpx", "description": "한글 문서 (HWPX)", "role": "Editor", "rank": "Alternate", "mimeType": "application/vnd.hancom.hwpx" },
-      { "ext": ["docx"], "name": "EasyOffice.Docx", "description": "문서 (DOCX)", "role": "Editor", "rank": "Alternate" },
-      { "ext": ["odt"], "name": "EasyOffice.Odt", "description": "문서 (ODT)", "role": "Editor", "rank": "Alternate" },
-      { "ext": ["xlsx"], "name": "EasyOffice.Xlsx", "description": "스프레드시트 (XLSX)", "role": "Editor", "rank": "Alternate" },
-      { "ext": ["ods"], "name": "EasyOffice.Ods", "description": "스프레드시트 (ODS)", "role": "Editor", "rank": "Alternate" },
-      { "ext": ["pptx"], "name": "EasyOffice.Pptx", "description": "프레젠테이션 (PPTX)", "role": "Editor", "rank": "Alternate" },
-      { "ext": ["odp"], "name": "EasyOffice.Odp", "description": "프레젠테이션 (ODP)", "role": "Editor", "rank": "Alternate" },
-      { "ext": ["pdf"], "name": "EasyOffice.Pdf", "description": "PDF 문서", "role": "Viewer", "rank": "Alternate" }
+      { "ext": ["docx"], "name": "EasyOffice.Docx", "description": "문서 (DOCX)", "role": "Editor", "rank": "Alternate", "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document" },
+      { "ext": ["odt"], "name": "EasyOffice.Odt", "description": "문서 (ODT)", "role": "Editor", "rank": "Alternate", "mimeType": "application/vnd.oasis.opendocument.text" },
+      { "ext": ["xlsx"], "name": "EasyOffice.Xlsx", "description": "스프레드시트 (XLSX)", "role": "Editor", "rank": "Alternate", "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+      { "ext": ["ods"], "name": "EasyOffice.Ods", "description": "스프레드시트 (ODS)", "role": "Editor", "rank": "Alternate", "mimeType": "application/vnd.oasis.opendocument.spreadsheet" },
+      { "ext": ["pptx"], "name": "EasyOffice.Pptx", "description": "프레젠테이션 (PPTX)", "role": "Editor", "rank": "Alternate", "mimeType": "application/vnd.openxmlformats-officedocument.presentationml.presentation" },
+      { "ext": ["odp"], "name": "EasyOffice.Odp", "description": "프레젠테이션 (ODP)", "role": "Editor", "rank": "Alternate", "mimeType": "application/vnd.oasis.opendocument.presentation" },
+      { "ext": ["pdf"], "name": "EasyOffice.Pdf", "description": "PDF 문서", "role": "Viewer", "rank": "Alternate", "mimeType": "application/pdf" }
     ],
     "macOS": {
       "minimumSystemVersion": "11.0",
@@ -52,6 +55,15 @@
         "windowSize": { "width": 660, "height": 400 },
         "appPosition": { "x": 180, "y": 190 },
         "applicationFolderPosition": { "x": 480, "y": 190 }
+      }
+    },
+    "linux": {
+      "deb": {
+        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0", "libxdo3"],
+        "recommends": ["xdg-utils"]
+      },
+      "rpm": {
+        "depends": ["libwebkit2gtk-4.1.so.0()(64bit)", "libgtk-3.so.0()(64bit)", "libxdo.so.3()(64bit)"]
       }
     },
     "windows": {

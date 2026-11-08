@@ -2,13 +2,13 @@
 
 [English](README.md) | [한국어](README.ko.md)
 
-EasyOffice (`v0.1.0`)는 Rust 엔진과 오프라인 WebUI를 하나의 Tauri v2 데스크톱 셸에 담은 **100% 독립 실행형(Standalone)·서버리스(Serverless)·오프라인 지원 macOS·Windows 올인원 오피스 스위트**입니다. 참조 앱의 rhwp-studio 크롬을 기준으로 한 라이트·다크 테마 위에서 **워드 문서(Document)**, **스프레드시트(Sheet)**, **프레젠테이션(Slide)**, **한글 문서(HWP / HWPX)**, **PDF 스튜디오(PDF Studio)**를 하나의 워크스페이스에서 통합 제공하며, 비트 수준 컨테이너 코덱과 결정론적 수식 연산, 온디바이스 스마트 문서 보조 도구, Fail-Closed 보안 가드를 내장합니다.
+EasyOffice (`v0.1.0`)는 Rust 엔진과 오프라인 WebUI를 하나의 Tauri v2 데스크톱 셸에 담은 **100% 독립 실행형(Standalone)·서버리스(Serverless)·오프라인 지원 macOS·Windows·Linux 올인원 오피스 스위트**입니다. 참조 앱의 rhwp-studio 크롬을 기준으로 한 라이트·다크 테마 위에서 **워드 문서(Document)**, **스프레드시트(Sheet)**, **프레젠테이션(Slide)**, **한글 문서(HWP / HWPX)**, **PDF 스튜디오(PDF Studio)**를 하나의 워크스페이스에서 통합 제공하며, 비트 수준 컨테이너 코덱과 결정론적 수식 연산, 온디바이스 스마트 문서 보조 도구, Fail-Closed 보안 가드를 내장합니다.
 
 ---
 
 ## 핵심 특징
 
-- **macOS·Windows 단일 코드베이스**: Rust 엔진(`crates/`), WebUI(`crates/easyoffice-app/ui/`), Tauri v2 데스크톱 셸(`crates/easyoffice-desktop`, macOS는 WKWebView·Windows는 WebView2). 문서마다 개별 창으로 열리고 시작 창에서 새 문서·최근 문서·열기를 고릅니다. 단일 인스턴스, 외부 변경 감지가 있는 제자리 원자적 저장, 파일 연결은 Rust가 처리하며 WebView는 파일 경로를 받지 않습니다.
+- **macOS·Windows·Linux 단일 코드베이스**: Rust 엔진(`crates/`), WebUI(`crates/easyoffice-app/ui/`), Tauri v2 데스크톱 셸(`crates/easyoffice-desktop`, macOS는 WKWebView·Windows는 WebView2·Linux는 WebKitGTK). 문서마다 개별 창으로 열리고 시작 창에서 새 문서·최근 문서·열기를 고릅니다. 단일 인스턴스, 외부 변경 감지가 있는 제자리 원자적 저장, 파일 연결은 Rust가 처리하며 WebView는 파일 경로를 받지 않습니다.
 - **한글(HWP/HWPX) 편집기**: rhwp 엔진(MIT, 고정된 upstream 서브모듈)을 같은 출처 iframe 편집기로 띄워 HWP/HWPX 열기, 저장 전 검증, 수정 상태, IndexedDB 자동 저장을 지원하고, 셸이 파일 메뉴·테마·상태 표시줄을 맡습니다.
 - **읽기·쓰기 20종 + Pages(읽기 전용)**:
   - ZIP 컨테이너(`ZipArchiveCodec`, `ZipSecurityGuard`): `OoxmlCodec`(`.docx`, `.xlsx`, `.pptx`, `.ppsx`), `OdfCodec`(`.odt`, `.ods`, `.odp`), `HwpxCodec`(`.hwpx`, `.hwtx`).
@@ -45,7 +45,7 @@ EasyOffice/
 ├── crates/easyoffice-sheet/          # 수식 엔진(122종 내장 함수), 피벗, DAG 재계산
 ├── crates/easyoffice-layout/         # 페이지 조판 엔진
 ├── crates/easyoffice-app/            # IPC 라우터, CLI(`--serve`, `--self-test`), `ui/`의 WebUI
-├── crates/easyoffice-desktop/        # Windows(WebView2)·macOS(WKWebView)용 Tauri v2 데스크톱 셸
+├── crates/easyoffice-desktop/        # Windows(WebView2)·macOS(WKWebView)·Linux(WebKitGTK)용 Tauri v2 데스크톱 셸
 ├── apps/hwp-studio/                  # 고정된 rhwp 업스트림 위에 만든 한글 편집기 오버레이
 ├── scripts/                          # 위생 가드, 번들 계약 검사, WebUI 회귀 테스트
 └── docs/                             # 아키텍처, 디자인 시스템, 정책 결정 기록(SSOT), 제품 명세
@@ -58,6 +58,7 @@ EasyOffice/
 ### 시스템 요구 사항
 - macOS 11.0 (Big Sur) 이상 (Apple Silicon `arm64` 및 Intel `x86_64` 유니버설 `.dmg`; 데스크톱 셸 빌드에는 Rust 1.90+, Node.js, Xcode 명령줄 도구 필요)
 - Windows 설치형 데스크톱 앱: Windows 10/11 x64 및 WebView2 런타임 (데스크톱 셸 빌드는 MSVC 툴체인의 Rust 1.90+ 필요)
+- Linux x64(AppImage·deb·rpm) 또는 arm64(deb): WebKitGTK 4.1과 glibc 2.35 이상, 예를 들어 Ubuntu 22.04, Debian 12, Fedora (데스크톱 셸 빌드에는 Rust 1.90+와 WebKitGTK 4.1 개발 패키지 필요)
 - 크로스플랫폼 엔진 크레이트와 개발 전용 로컬 WebUI 서버 빌드는 Rust 1.85+
 
 ### 로컬 위생 검증 · 빌드 · 테스트 · 실행
@@ -82,9 +83,21 @@ cargo run -p easyoffice-desktop
 
 ### 릴리스 실행 안내
 
+모든 릴리스는 버전이 들어가지 않는 같은 자산 이름을 쓰므로, 아래 링크는 항상 가장 최근에 공개된 릴리스를 가리킵니다. `SHA256SUMS.txt`에는 모든 자산의 SHA-256 체크섬이 들어 있습니다.
+
+- [macOS 유니버설 (.dmg)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-macos-universal.dmg)
+- [Windows x64 (설치 프로그램)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-windows-x64-setup.exe)
+- [Linux x64 (AppImage, 설치 없이 실행)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-linux-x64.AppImage)
+- [Linux x64 (.deb, Ubuntu·Debian 계열)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-linux-x64.deb)
+- [Linux x64 (.rpm, Fedora·openSUSE 계열)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-linux-x64.rpm)
+- [Linux arm64 (.deb, Ubuntu·Debian 계열)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-linux-arm64.deb)
+- [SHA256SUMS.txt](https://github.com/AquilaXk/easyoffice/releases/latest/download/SHA256SUMS.txt)
+
+전체 릴리스는 [GitHub Releases](https://github.com/AquilaXk/easyoffice/releases)에서 볼 수 있습니다.
+
 #### macOS
 
-macOS 릴리스는 유니버설 디스크 이미지 `EasyOffice-<version>-macos-universal.dmg`(Apple silicon·Intel, macOS 11 이상)와 체크섬 파일 `SHA256SUMS-macos-universal.txt`로 배포됩니다. 이미지를 열어 **EasyOffice**를 `/Applications`로 끌어다 놓습니다. 앱은 Windows와 같은 Tauri v2 데스크톱 셸(WKWebView)로, WebUI가 내장되어 있고 모든 명령이 Rust 엔진에서 프로세스 안에서 실행되며 네트워크 연결이 필요 없습니다. 표준 메뉴 막대와 Command 단축키(⌘C/⌘V/⌘X/⌘A/⌘Z/⌘S/⌘O/⌘W/⌘Q)가 동작하고, Finder의 "다음으로 열기"와 더블 클릭은 파일을 새 창에서 엽니다. ⌘Q로 종료하면 각 창의 저장 / 저장 안 함 / 취소 확인을 거칩니다.
+macOS 릴리스는 유니버설 디스크 이미지 `EasyOffice-macos-universal.dmg`(Apple silicon·Intel, macOS 11 이상)로 배포됩니다. 이미지를 열어 **EasyOffice**를 `/Applications`로 끌어다 놓습니다. 앱은 Windows와 같은 Tauri v2 데스크톱 셸(WKWebView)로, WebUI가 내장되어 있고 모든 명령이 Rust 엔진에서 프로세스 안에서 실행되며 네트워크 연결이 필요 없습니다. 표준 메뉴 막대와 Command 단축키(⌘C/⌘V/⌘X/⌘A/⌘Z/⌘S/⌘O/⌘W/⌘Q)가 동작하고, Finder의 "다음으로 열기"와 더블 클릭은 파일을 새 창에서 엽니다. ⌘Q로 종료하면 각 창의 저장 / 저장 안 함 / 취소 확인을 거칩니다.
 
 이 배포본은 Apple Developer ID로 **서명·공증되어 있지 않으므로** 처음 실행할 때 macOS Gatekeeper가 막습니다("개발자를 확인할 수 없기 때문에 열 수 없습니다"). 한 번만 허용하면 됩니다.
 
@@ -105,13 +118,22 @@ npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --bundles app,dmg   # ta
 
 #### Windows
 
-Windows 릴리스는 설치 프로그램 `EasyOffice-<version>-windows-x64-setup.exe`(NSIS, 사용자 단위 설치, 관리자 권한 불필요)로 배포됩니다. 설치한 뒤 시작 메뉴에서 **EasyOffice**를 실행합니다. `EasyOffice.exe`는 Windows 내장 WebView2 런타임 위의 데스크톱 창(Tauri v2 셸, `crates/easyoffice-desktop`)으로, WebUI가 실행 파일에 포함되어 있고 모든 명령을 프로세스 안에서 Rust 엔진으로 바로 처리합니다. 로컬 HTTP 서버, 브라우저, 네트워크 연결을 쓰지 않습니다. 저장하면 Windows 기본 저장 대화상자가 열립니다. 제거는 설정 > 앱 또는 시작 메뉴 폴더의 제거 프로그램으로 합니다. WebView2는 Windows 11과 최신 Windows 10에 기본 포함되어 있으며, 없을 때만 설치 프로그램이 런타임 부트스트래퍼를 내려받습니다. 문서 파일 연결(`.docx`/`.hwpx` 등 더블클릭으로 열기)은 앱에서 파일 열기 기능(#111)이 준비될 때까지 일부러 등록하지 않습니다.
+Windows 릴리스는 설치 프로그램 `EasyOffice-windows-x64-setup.exe`(NSIS, 사용자 단위 설치, 관리자 권한 불필요)로 배포됩니다. 설치한 뒤 시작 메뉴에서 **EasyOffice**를 실행합니다. `EasyOffice.exe`는 Windows 내장 WebView2 런타임 위의 데스크톱 창(Tauri v2 셸, `crates/easyoffice-desktop`)으로, WebUI가 실행 파일에 포함되어 있고 모든 명령을 프로세스 안에서 Rust 엔진으로 바로 처리합니다. 로컬 HTTP 서버, 브라우저, 네트워크 연결을 쓰지 않습니다. 저장하면 Windows 기본 저장 대화상자가 열립니다. 제거는 설정 > 앱 또는 시작 메뉴 폴더의 제거 프로그램으로 합니다. WebView2는 Windows 11과 최신 Windows 10에 기본 포함되어 있으며, 없을 때만 설치 프로그램이 런타임 부트스트래퍼를 내려받습니다. 문서 파일 연결(`.docx`/`.hwpx` 등 더블클릭으로 열기)은 앱에서 파일 열기 기능(#111)이 준비될 때까지 일부러 등록하지 않습니다.
 
 소스에서 설치 프로그램을 빌드하려면 Windows에서 MSVC Rust 툴체인 1.90+, Visual Studio Build Tools, Node.js가 필요합니다.
 
 ```powershell
 cd crates/easyoffice-desktop
 npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --bundles nsis   # target/release/bundle/nsis/EasyOffice_<version>_x64-setup.exe
+```
+
+#### Linux
+
+Linux 릴리스는 `EasyOffice-linux-x64.AppImage`, `EasyOffice-linux-x64.deb`, `EasyOffice-linux-x64.rpm`, `EasyOffice-linux-arm64.deb`로 배포됩니다. 배포판에 맞는 네이티브 패키지를 먼저 쓰세요. 한글 입력기(IME)와 WebKitGTK 런타임은 배포판이 제공하는 것을 쓸 때 가장 안정적이고, 패키지가 이를 의존성으로 선언합니다. Ubuntu·Debian은 `sudo apt install ./EasyOffice-linux-x64.deb`, Fedora는 `sudo dnf install ./EasyOffice-linux-x64.rpm`으로 설치합니다. arm64는 `.deb`만 만듭니다. AppImage는 설치가 필요 없지만(`chmod +x EasyOffice-linux-x64.AppImage` 뒤 실행, FUSE 2인 `libfuse2` 패키지 필요) 네이티브 패키지를 쓸 수 없을 때만 권장합니다. 일부 Wayland·IME 환경에서는 한영 전환이나 창 표시가 불안정할 수 있습니다. 패키지는 주요 문서 형식(HWP, HWPX, DOCX, ODT, XLSX, ODS, PPTX, ODP, PDF)을 다른 앱의 기본 프로그램을 가로채지 않고 "다음으로 열기" 대상으로 등록하며, Ubuntu 22.04에서 빌드하므로 glibc 2.35 이상과 WebKitGTK 4.1이 필요합니다. 내려받은 파일은 `sha256sum --check --ignore-missing SHA256SUMS.txt`로 확인합니다. Linux에서 소스로 패키지를 빌드하려면 Rust 1.90+, Node.js, `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libxdo-dev`, `librsvg2-dev`, `libssl-dev`, `patchelf`, `rpm`이 필요합니다.
+
+```bash
+cd crates/easyoffice-desktop
+npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --bundles appimage,deb,rpm   # target/release/bundle/{appimage,deb,rpm}/
 ```
 
 **개발자 전용 로컬 서버(`--serve`).** `--serve`는 일반 사용자에게 배포하지 않으며 어떤 릴리스 자산에도 포함되지 않습니다. 개발과 자동 검증(헤드리스 브라우저 UI 검증, CI 스모크)에만 쓰며, 설치형 앱은 네트워크 포트를 열지 않습니다. 소스 저장소에서 `cargo run -p easyoffice-app -- --self-test`로 엔진 무결성을 검증하거나 `cargo run -p easyoffice-app -- --serve 8787`로 `http://127.0.0.1:8787/` 루프백 WebUI를 열 수 있습니다. 전체 옵션은 `--help`로 확인합니다. 포트 없이 `--serve`를 실행하면 8787을 사용하고, 사용 중이면 8788~8800으로 대체합니다. 포트를 명시하면(`--serve 18787`) 해당 포트만 사용하며 쓸 수 없으면 실패합니다. 잘못된 포트, 알 수 없는 옵션, 파일 경로는 0이 아닌 종료 코드로 끝납니다. Host·Origin 검사, 연결 수·시간 제한, CSP는 개발 중 안전을 위해 그대로 유지합니다(PD-086).

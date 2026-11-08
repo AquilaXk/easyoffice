@@ -1,10 +1,13 @@
 /**
  * Static contract of the desktop bundle configuration (crates/easyoffice-desktop/tauri.conf.json).
  *
- * macOS builds can only run on macOS CI, so what ends up in the app's Info.plist is pinned here: the
- * Tauri `bundle.fileAssociations` become `CFBundleDocumentTypes` (extensions, role, handler rank),
- * `bundle.macOS` sets the minimum system version, and the bundle must stay unsigned in the repository
- * (a signing identity is supplied through the environment at release time, PD-094).
+ * macOS and Linux builds can only run on their own CI, so what ends up in the app's Info.plist is pinned
+ * here: the Tauri `bundle.fileAssociations` become `CFBundleDocumentTypes` (extensions, role, handler
+ * rank), `bundle.macOS` sets the minimum system version, and the bundle must stay unsigned in the
+ * repository (a signing identity is supplied through the environment at release time, PD-094).
+ * On Linux the same associations become the `MimeType=` line of the `.desktop` file, so every extension
+ * needs a MIME type, and the package dependencies and the shipped license notices are pinned too
+ * (PD-086). `scripts/verify-linux-bundles.mjs` checks the built packages against the same constants.
  */
 
 /** Extensions the installed app must register with the OS, with the role each is registered under. */
@@ -20,10 +23,35 @@ export const REQUIRED_ASSOCIATIONS = new Map([
   ["pdf", "Viewer"],
 ]);
 
+/** MIME type the Linux `.desktop` file declares for each extension (`MimeType=`). */
+export const REQUIRED_MIME_TYPES = new Map([
+  ["hwp", "application/x-hwp"],
+  ["hwpx", "application/vnd.hancom.hwpx"],
+  ["docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+  ["odt", "application/vnd.oasis.opendocument.text"],
+  ["xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+  ["ods", "application/vnd.oasis.opendocument.spreadsheet"],
+  ["pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation"],
+  ["odp", "application/vnd.oasis.opendocument.presentation"],
+  ["pdf", "application/pdf"],
+]);
+
+/** Runtime libraries the Linux packages must declare (the WebKitGTK shell links all three). */
+export const LINUX_DEB_DEPENDS = ["libwebkit2gtk-4.1-0", "libgtk-3-0", "libxdo3"];
+/** RPM requirements are library capabilities, so they hold on every RPM distribution's package names. */
+export const LINUX_RPM_DEPENDS = ["libwebkit2gtk-4.1.so.0()(64bit)", "libgtk-3.so.0()(64bit)", "libxdo.so.3()(64bit)"];
+
+/** The notice file every package must carry (MIT notice condition) and where the config reads it from. */
+export const NOTICES_FILE = "THIRD_PARTY_NOTICES.md";
+const NOTICES_SOURCE = `../../${NOTICES_FILE}`;
+
+/** The XDG menu category the `.desktop` file must carry (Tauri maps `bundle.category` Productivity to it). */
+export const LINUX_DESKTOP_CATEGORY = "Office";
+
 /** Handler ranks that make LaunchServices prefer this app over the user's current default. */
 const PUSHY_RANKS = new Set(["Owner", "Default"]);
 
-const REQUIRED_TARGETS = ["nsis", "app", "dmg"];
+const REQUIRED_TARGETS = ["nsis", "app", "dmg", "deb", "rpm", "appimage"];
 const REQUIRED_ICONS = ["icons/icon.icns", "icons/icon.ico"];
 const FORBIDDEN_MAC_KEYS = ["signingIdentity", "providerShortName", "entitlements"];
 const MIN_SYSTEM_VERSION_PATTERN = /^\d+\.\d+(\.\d+)?$/;
@@ -57,6 +85,25 @@ function checkMacOsSettings(mac) {
   return problems;
 }
 
+function checkLinuxSettings(bundle) {
+  const problems = [];
+  const linux = bundle.linux ?? {};
+  const wanted = [
+    ["deb", LINUX_DEB_DEPENDS],
+    ["rpm", LINUX_RPM_DEPENDS],
+  ];
+  for (const [kind, required] of wanted) {
+    const depends = Array.isArray(linux[kind]?.depends) ? linux[kind].depends : [];
+    for (const dependency of required) {
+      if (!depends.includes(dependency)) problems.push(`bundle.linux.${kind}.depends must list '${dependency}'`);
+    }
+  }
+  if (bundle.resources?.[NOTICES_SOURCE] !== NOTICES_FILE) {
+    problems.push(`bundle.resources must ship '${NOTICES_FILE}' (map '${NOTICES_SOURCE}' to '${NOTICES_FILE}', MIT notice condition)`);
+  }
+  return problems;
+}
+
 function checkAssociationShape(assoc, names) {
   const problems = [];
   const label = JSON.stringify(assoc?.ext ?? assoc?.name ?? "?");
@@ -77,7 +124,10 @@ function checkRequiredExtensions(registered) {
   const problems = [];
   for (const [ext, role] of REQUIRED_ASSOCIATIONS) {
     if (!registered.has(ext)) problems.push(`file association for '.${ext}' is missing`);
-    else if (registered.get(ext) !== role) problems.push(`file association for '.${ext}' must use role ${role}`);
+    else if (registered.get(ext).role !== role) problems.push(`file association for '.${ext}' must use role ${role}`);
+    else if (registered.get(ext).mimeType !== REQUIRED_MIME_TYPES.get(ext)) {
+      problems.push(`file association for '.${ext}' must declare mimeType ${REQUIRED_MIME_TYPES.get(ext)} (Linux MimeType=)`);
+    }
   }
   return problems;
 }
@@ -89,7 +139,7 @@ function checkFileAssociations(associations) {
   for (const assoc of associations) {
     problems.push(...checkAssociationShape(assoc, names));
     for (const ext of Array.isArray(assoc?.ext) ? assoc.ext : []) {
-      registered.set(String(ext).toLowerCase(), assoc.role);
+      registered.set(String(ext).toLowerCase(), { role: assoc.role, mimeType: assoc.mimeType });
     }
   }
   return [...problems, ...checkRequiredExtensions(registered)];
@@ -101,6 +151,7 @@ export function checkDesktopBundleConfig(conf) {
   return [
     ...checkTargetsAndIcons(bundle),
     ...checkMacOsSettings(bundle.macOS ?? {}),
+    ...checkLinuxSettings(bundle),
     ...checkFileAssociations(Array.isArray(bundle.fileAssociations) ? bundle.fileAssociations : []),
   ];
 }
