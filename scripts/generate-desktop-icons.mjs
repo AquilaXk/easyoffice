@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 /**
  * Generates the desktop shell icons (PNG, multi-size ICO for Windows, ICNS for macOS) from the EasyOffice favicon
- * design (`crates/easyoffice-app/ui/favicon.svg`: lavender #5C6BC0 tile with a white document
- * glyph). The glyph is rasterized analytically with 8x8 supersampling, so no image toolchain is
- * needed and the output is byte-for-byte deterministic.
+ * design (`crates/easyoffice-app/ui/favicon.svg`, PD-108: rhwp accent tile #6182D6 -> #3E62BB in the
+ * reference shell's icon proportions, a white page with a folded corner and three rounded text
+ * lines). The glyph is rasterized analytically in the same 1024-unit coordinates as the SVG with
+ * 8x8 supersampling, so no image toolchain is needed and the output is byte-for-byte deterministic.
  *
  *   node scripts/generate-desktop-icons.mjs          # (re)write crates/easyoffice-desktop/icons
  *   node scripts/generate-desktop-icons.mjs --check  # fail if committed icons are out of date
@@ -17,27 +18,58 @@ import { fileURLToPath } from "node:url";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const ICON_DIR = path.join(ROOT, "crates/easyoffice-desktop/icons");
 
-const LAVENDER = [0x5c, 0x6b, 0xc0];
-const WHITE = [0xff, 0xff, 0xff];
-const FOLD = [0xdd, 0xe2, 0xf6];
+// Design units of favicon.svg (viewBox 0 0 1024 1024).
+const DESIGN = 1024;
+const TILE_TOP = [0x61, 0x82, 0xd6];
+const TILE_BOTTOM = [0x3e, 0x62, 0xbb];
+const PAPER = [0xff, 0xff, 0xff];
+const FOLD = [0xd6, 0xdf, 0xf5];
+const LINE = [0x33, 0x50, 0x95];
+const LINE_SHORT = [0x61, 0x82, 0xd6];
+const TILE = { left: 64, top: 64, right: 960, bottom: 960, radius: 214 };
+const PAGE = { left: 316, top: 222, right: 712, bottom: 802, radius: 36 };
+// The folded corner: the page is cut along x - y = FOLD_CUT and the triangle right of FOLD_X and
+// above FOLD_Y (inside the cut) is the fold.
+const FOLD_X = 572;
+const FOLD_Y = 362;
+const FOLD_CUT = FOLD_X - PAGE.top;
+const LINE_HEIGHT = 48;
+const LINES = [
+  { left: 392, top: 452, width: 240, color: LINE },
+  { left: 392, top: 552, width: 240, color: LINE },
+  { left: 392, top: 652, width: 150, color: LINE_SHORT },
+];
 
-// Same geometry as favicon.svg (32x32 viewBox), evaluated front-to-back.
-function sampleColor(x, y) {
-  const inLine = (top) => x >= 12 && x <= 20 && y >= top && y <= top + 1.8;
-  const inPage = x >= 9 && x <= 23 && y >= 7 && y <= 25 && x - y <= 12;
-  if (inPage && (inLine(14) || inLine(18))) return LAVENDER;
-  if (inPage && x >= 19 && y <= 11) return FOLD;
-  if (inPage) return WHITE;
-  if (insideRoundedTile(x, y)) return LAVENDER;
-  return null;
+/** Point inside an axis-aligned rectangle with circular corners of `radius`. */
+function insideRoundedRect(x, y, { left, top, right, bottom, radius }) {
+  if (x < left || y < top || x > right || y > bottom) return false;
+  const cx = Math.min(Math.max(x, left + radius), right - radius);
+  const cy = Math.min(Math.max(y, top + radius), bottom - radius);
+  return (x - cx) ** 2 + (y - cy) ** 2 <= radius * radius;
 }
 
-function insideRoundedTile(x, y) {
-  const r = 6;
-  if (x < 0 || y < 0 || x > 32 || y > 32) return false;
-  const cx = Math.min(Math.max(x, r), 32 - r);
-  const cy = Math.min(Math.max(y, r), 32 - r);
-  return (x - cx) ** 2 + (y - cy) ** 2 <= r * r;
+function lineColor(x, y) {
+  const half = LINE_HEIGHT / 2;
+  const hit = LINES.find((line) =>
+    insideRoundedRect(x, y, { left: line.left, top: line.top, right: line.left + line.width, bottom: line.top + LINE_HEIGHT, radius: half })
+  );
+  return hit ? hit.color : null;
+}
+
+/** Vertical gradient of the tile, top to bottom. */
+function tileColor(y) {
+  const t = Math.min(Math.max((y - TILE.top) / (TILE.bottom - TILE.top), 0), 1);
+  return TILE_TOP.map((top, i) => Math.round(top + (TILE_BOTTOM[i] - top) * t));
+}
+
+// Same geometry as favicon.svg, evaluated front-to-back.
+function sampleColor(x, y) {
+  if (insideRoundedRect(x, y, PAGE) && x - y <= FOLD_CUT) {
+    if (x >= FOLD_X && y <= FOLD_Y) return FOLD;
+    return lineColor(x, y) ?? PAPER;
+  }
+  if (insideRoundedRect(x, y, TILE)) return tileColor(y);
+  return null;
 }
 
 const SUPERSAMPLE = 8;
@@ -68,7 +100,7 @@ function writePixel(rgba, offset, { r, g, b, covered }) {
 
 function rasterize(size) {
   const rgba = Buffer.alloc(size * size * 4);
-  const scale = 32 / size;
+  const scale = DESIGN / size;
   for (let py = 0; py < size; py += 1) {
     for (let px = 0; px < size; px += 1) {
       writePixel(rgba, (py * size + px) * 4, samplePixel(px, py, scale));
