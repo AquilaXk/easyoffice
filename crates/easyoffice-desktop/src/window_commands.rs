@@ -106,12 +106,7 @@ impl AppWindows {
 
     /// Empties the recent list and its stored file.
     pub fn clear_recents(&self) -> std::io::Result<()> {
-        let mut recents = locked(&self.recents);
-        recents.clear();
-        match &self.recents_dir {
-            Some(dir) => recents.save(dir),
-            None => Ok(()),
-        }
+        locked(&self.recents).update(self.recents_dir.as_deref(), RecentList::clear)
     }
 
     fn next_label(&self) -> String {
@@ -123,11 +118,12 @@ impl AppWindows {
         new_label(n, millis)
     }
 
-    fn remember(&self, path: &Path) {
-        let mut recents = locked(&self.recents);
-        recents.add(path.to_path_buf());
-        if let Some(dir) = &self.recents_dir {
-            let _ = recents.save(dir);
+    fn remember(&self, app: &AppHandle, path: &Path) {
+        match locked(&self.recents)
+            .update(self.recents_dir.as_deref(), |r| r.add(path.to_path_buf()))
+        {
+            Ok(()) => crate::recent::notify_changed(app),
+            Err(err) => eprintln!("recent: {err}"),
         }
     }
 }
@@ -470,7 +466,7 @@ pub fn open_path(app: &AppHandle, path: &Path) -> Result<OpenOutcome, String> {
             display_name(&canonical)
         ));
     }
-    state.remember(&canonical);
+    state.remember(app, &canonical);
     crate::os_recent::note_recent_document(app, &canonical);
     close_empty_start_windows(app);
     Ok(OpenOutcome::OPENED)
@@ -515,7 +511,7 @@ pub fn note_saved_path(
         }
         _ => locked(&state.files).untrack(label),
     }
-    state.remember(&canonical);
+    state.remember(app, &canonical);
     crate::os_recent::note_recent_document(app, &canonical);
 }
 
@@ -761,7 +757,9 @@ pub fn list_recent_documents(
 pub fn clear_recent_documents(_caller: ShellCaller, app: AppHandle) -> Result<(), WindowError> {
     app.state::<AppWindows>()
         .clear_recents()
-        .map_err(|err| WindowError::new(format!("최근 문서를 지우지 못했습니다: {err}")))
+        .map_err(|err| WindowError::new(format!("최근 문서를 지우지 못했습니다: {err}")))?;
+    crate::recent::notify_changed(&app);
+    Ok(())
 }
 
 #[tauri::command]

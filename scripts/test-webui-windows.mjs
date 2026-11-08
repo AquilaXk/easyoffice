@@ -270,6 +270,21 @@ test("File menu: new document kinds, open, recent, save and close call the windo
   assert.deepEqual(recent.map((b) => b.dataset.recentId), ["r1"]);
 });
 
+test("the shell's recents-changed signal reloads the recent lists without any argument (PD-127)", async () => {
+  let list = [];
+  const { document, host, shell } = await openWindow("?module=DOC&win=w-sync", {
+    list_recent_documents: () => list,
+  });
+  assert.equal(typeof host.__EASYOFFICE_RECENTS_CHANGED__, "function");
+  assert.equal(document.querySelectorAll("#recent-menu-list [data-recent-id]").length, 0);
+  const before = shell.named("list_recent_documents").length;
+  list = [{ id: "r9", name: "다른 창.docx", kind: "DOC" }];
+  host.__EASYOFFICE_RECENTS_CHANGED__();
+  await flushAsyncTurns();
+  assert.ok(shell.named("list_recent_documents").length > before, "the list is asked from the shell again");
+  assert.deepEqual(document.querySelectorAll("#recent-menu-list [data-recent-id]").map((b) => b.dataset.recentId), ["r9"]);
+});
+
 test("the window bridge never hands a file system path to the page", async () => {
   const { shell, document, userClick } = await openWindow("?module=DOC&win=w-path", {
     open_file_in_new_window: () => ({ status: "opened", path: String.raw`C:\비밀\a.docx` }),

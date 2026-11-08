@@ -2060,3 +2060,4 @@
 - **Alternatives rejected** 네이티브 확인 대화상자를 거치는 것(참조 앱에 없음), `alert` 사용.
 - **Verified by** `cargo test -p easyoffice-desktop`(`recent::clearing_empties_the_list_and_the_stored_file`, 구조 테스트), `node --test scripts/test-webui-windows.mjs`.
 - **Revisit when** 참조 앱의 비우기 동작이나 Dock 항목 처리가 바뀔 때.
+- **후속 (`PD-127`)** 최근 목록 저장은 문서 저장과 같은 임시 파일·`sync_all`·rename으로 쓰고(`save_file::write_document_bytes` 재사용), 저장이 실패하면 메모리 목록을 이전 상태로 되돌립니다. 목록이 바뀌면(추가·비우기) 셸이 열린 모든 창에서 인수 없는 전역 함수 `__EASYOFFICE_RECENTS_CHANGED__`를 실행하고, 페이지는 기존 `refreshRecents`로 셸에서 다시 받습니다(페이지에 이벤트 권한을 주지 않음, PD-102).

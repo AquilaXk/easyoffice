@@ -3,13 +3,26 @@
 //! the document kind, and asks to open an entry by that id. The one thing derived from the file that
 //! the page may also ask for by id is its embedded picture (`preview/`, PD-106).
 
+use crate::save_file::write_document_bytes;
 use crate::windows::{display_name, path_key, WindowKind};
 use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
+use tauri::{AppHandle, Manager};
 
 pub const MAX_RECENT: usize = 10;
 const FILE_NAME: &str = "recent-documents.json";
+/// The page's fixed global that reloads its recent lists from the shell; it takes no argument, so
+/// no list content travels through the script (PD-102, PD-127).
+const CHANGED_SCRIPT: &str =
+    "window.__EASYOFFICE_RECENTS_CHANGED__ && window.__EASYOFFICE_RECENTS_CHANGED__();";
+
+/// Tells every open window that the recent list changed so it asks the shell for it again.
+pub fn notify_changed(app: &AppHandle) {
+    for window in app.webview_windows().into_values() {
+        let _ = window.eval(CHANGED_SCRIPT);
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecentEntry {
@@ -34,7 +47,7 @@ pub fn recent_id(path: &Path) -> String {
     format!("{hash:016x}")
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct RecentList {
     entries: Vec<RecentEntry>,
 }
@@ -90,6 +103,24 @@ impl RecentList {
         list
     }
 
+    /// Applies `change` and stores the list (when there is a data directory); a failed store puts
+    /// the list back, so memory and disk never disagree.
+    pub fn update(
+        &mut self,
+        dir: Option<&Path>,
+        change: impl FnOnce(&mut Self),
+    ) -> std::io::Result<()> {
+        let before = self.clone();
+        change(self);
+        let saved = dir.map_or(Ok(()), |dir| self.save(dir));
+        if saved.is_err() {
+            *self = before;
+        }
+        saved
+    }
+
+    /// Writes the list with the same temp-file, fsync and rename as a document save, so a crash
+    /// leaves the old list or the new one, never a torn file.
     pub fn save(&self, dir: &Path) -> std::io::Result<()> {
         fs::create_dir_all(dir)?;
         let paths: Vec<String> = self
@@ -98,7 +129,9 @@ impl RecentList {
             .map(|e| e.path.to_string_lossy().into_owned())
             .collect();
         let json = serde_json::to_string(&paths).map_err(std::io::Error::other)?;
-        fs::write(dir.join(FILE_NAME), json)
+        write_document_bytes(&dir.join(FILE_NAME), json.as_bytes())
+            .map(|_| ())
+            .map_err(std::io::Error::other)
     }
 }
 
@@ -170,6 +203,41 @@ mod tests {
         assert_eq!(list.path_for(&views[1].id), Some(doc));
         assert_eq!(list.path_for("0000000000000000"), None);
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn saving_replaces_the_file_atomically_and_leaves_no_temp_file() {
+        let dir = scratch("atomic");
+        let mut list = RecentList::default();
+        list.add(PathBuf::from("C:/d/one.docx"));
+        list.save(&dir).unwrap();
+        list.add(PathBuf::from("C:/d/two.docx"));
+        list.save(&dir).unwrap();
+        assert_eq!(RecentList::load(&dir).entries.len(), 2);
+        let names: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names, vec![std::ffi::OsString::from(FILE_NAME)]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_failed_save_puts_the_list_back() {
+        let blocker = scratch("blocker").join("file");
+        fs::write(&blocker, b"a file, not a directory").unwrap();
+        let bad_dir = blocker.join("data");
+        let mut list = RecentList::default();
+        list.add(PathBuf::from("C:/d/one.docx"));
+        assert!(list.update(Some(&bad_dir), RecentList::clear).is_err());
+        assert_eq!(list.entries.len(), 1, "clear was undone");
+        assert!(list
+            .update(Some(&bad_dir), |l| l.add(PathBuf::from("C:/d/two.docx")))
+            .is_err());
+        assert_eq!(list.entries.len(), 1, "add was undone");
+        assert!(list.update(None, RecentList::clear).is_ok());
+        assert!(list.entries.is_empty());
+        let _ = fs::remove_dir_all(blocker.parent().unwrap());
     }
 
     #[test]
