@@ -1649,7 +1649,7 @@
 
 ## 69. macOS도 Tauri 데스크톱 셸로 배포: Swift 앱 삭제·서명 없는 .dmg·파일 연결 계약 (PD-094, #136)
 
-- **Status** Implemented
+- **Status** Implemented. 서명 보류는 PD-143으로 재확인(2026-11-09).
 - **Context** 저장소에는 두 개의 데스크톱 앱이 있었습니다. Windows는 Rust 엔진 + WebUI를 Tauri 셸(PD-074)로 배포하고, macOS는 같은 기능을 Swift/SwiftUI로 따로 구현했습니다. 이후 기능(한글 편집기, 문서별 창, 제자리 저장, 파일 연결)은 모두 WebUI와 Rust 쪽에만 생겼고, Swift 앱은 이를 따라가지 못한 채 CI 시간과 검증 규칙(Rust↔Swift 동등성)만 계속 소모했습니다.
 - **Decision (`PD-094`)**
   1. **하나의 코드베이스**: macOS 앱은 `crates/easyoffice-desktop`(Tauri v2, WKWebView)로 빌드합니다. Swift 앱(`Sources/`, `Tests/`, `Package.swift`), `scripts/package-macos-release.sh`, `scripts/verify-macos-plist.mjs`, 위생 가드의 Swift 규칙과 Rust↔Swift 동등성 검사(함수 목록·포맷 수 대조)를 같은 변경에서 삭제합니다. 옛 코드는 Git 이력에 남습니다. Swift 구현에 관한 이전 항목은 Superseded로 표시하고 본문은 보존합니다.
@@ -2235,3 +2235,11 @@
 - **Alternatives rejected** SVG를 페이지에 그대로 넣기(참조 앱 방식: 페이지 CSP·스크립트 실행 검토 필요, 안전한 PNG가 같은 모습), 페이지에서 한글 WASM으로 그리기(문서 바이트가 페이지로 감, PD-106이 기각), Quick Look 크레이트를 의존성으로 쓰기(별도 작업공간·C ABI·macOS 전용), `path` 의존 + `cargo fmt --all` 명령 변경(문서화된 검증 명령을 바꿈), 별도 프로세스로 렌더(번들·서명·플랫폼별 부속 실행 파일이 규모에 비해 큼; 마감을 넘기면 강제 종료할 수 있다는 장점은 인정), 글꼴·PNG 크기 상한을 더 크게.
 - **Verified by** `cargo test -p easyoffice-desktop preview`(그림을 지운 HWP·HWPX 샘플이 PNG로 그려짐·긴 변 480px·흰 종이가 아님, 그림이 있으면 그리지 않음, 비트를 깨거나 잘리거나 빈·가짜 파일은 빈 카드와 패닉 없음, HWP·HWPX 외 확장자는 그리지 않음, 50MiB 초과는 렌더러에 닿지 않고 한도 정확히는 읽어 넘김, 1MiB 초과·PNG가 아닌 결과 버림, 마감 초과 시 호출자가 기다리지 않고 허가를 끝까지 쥠·허가가 없으면 캐시하지 않음·나중에 다시 그림, 패닉 포착과 허가 반환, 동시에 8개를 요청해도 렌더 2개를 넘지 않음, 같은 파일은 한 번만 그리고 바뀌면 다시 그림, 실패도 기억, 캐시 10개; 허가를 일찍 놓거나 busy를 캐시하거나 캐시 조회를 빼거나 PNG 검사를 빼면 해당 테스트가 실패하는 것을 확인), `cargo test -p easyoffice-desktop --release measure_ten_cards -- --ignored --nocapture`(측정), `node --test scripts/test-webui-home-preview.mjs`(1MiB 한도 경계, PNG 응답 표시).
 - **Revisit when** 다른 형식(DOCX·XLSX 등)의 첫 쪽 미리보기가 필요할 때, 실기기에서 렌더가 시작 창을 늦추거나 마감을 자주 넘길 때(별도 프로세스 렌더 재검토), rhwp 고정 버전을 올릴 때(`[patch]`의 `version`도 함께).
+
+## 118. 정식 릴리스 전까지 macOS 서명·공증 보류, 배포 채널은 GitHub 릴리스만 (PD-143)
+
+- **Status** Accepted (QA 결정 2026-11-09). PD-094의 서명 없는 배포를 재확인합니다. 코드 변경은 없습니다.
+- **Context** 참조 앱은 macOS 앱에 Developer ID 서명과 공증을 하고, 외부 패키지 관리자 채널(macOS용 하나, Linux 배포판 사용자 저장소 하나)로도 배포합니다. 이 프로젝트는 개인 프로젝트이고 유료 개발자 계정이 없습니다.
+- **Decision (`PD-143`)** (1) 정식(안정) 릴리스 전까지 Developer ID 서명·공증을 하지 않습니다. ad-hoc 서명(PD-094)과 README의 Gatekeeper 안내를 유지합니다. (2) 배포 채널은 GitHub 릴리스뿐입니다. 외부 패키지 관리자 채널은 만들지 않습니다.
+- **Trade-offs** 참조 앱과 달리 처음 실행할 때 Gatekeeper 확인이 필요하고, 서명된 앱을 기대하는 사용자에게는 설치 마찰이 있습니다. 패키지 관리자로 설치·갱신하는 사용자는 지원하지 않습니다.
+- **Revisit when** 정식 릴리스를 준비할 때(서명·공증 도입 여부를 다시 정함), 개발자 계정을 확보할 때, 패키지 관리자 채널 요청이 반복될 때.

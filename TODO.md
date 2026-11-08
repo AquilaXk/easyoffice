@@ -15,6 +15,7 @@
 
 ## 배포
 - [ ] README 스크린샷 추가
+- [ ] 정식 릴리스 전: macOS Developer ID 서명·공증(QA 보류, PD-143)
 
 ## PDF·미리보기
 - [ ] 검색 가능한 PDF: Linux·Windows 설치본에서 번들 글꼴 확인, HWP 5.0 원시 기호 코드(`0xA000|n`)가 SVG 글자에 남는지 실문서로 보고 남으면 ToUnicode 정리에 더함(PD-131)
