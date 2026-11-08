@@ -195,9 +195,7 @@
 
   hwpHost = host.__EASYOFFICE_CREATE_HWP_HOST__({
     document, invokeIpc, getActiveModule: () => activeModule,
-    shellShortcuts: ribbonCatalog.WORKSPACE_SHORTCUT_BINDINGS
-      .filter((b) => b.forwardFromEditor && (!b.desktopOnly || desktopBridge.isAvailable()))
-      .map((b) => b.keys),
+    shellShortcuts: workspaceSession.forwardedKeys(),
     onStateChange: () => workspaceSession.applyModuleContext(activeModule),
     canExportPdf: desktopBridge.isAvailable(),
   });
@@ -786,6 +784,7 @@
       "window-close": () => void windowBridge.requestClose().catch(() => {}),
       "app-quit": () => void windowBridge.requestQuit().catch(() => {}),
       "hwp-print": () => void hwpPrint.print().catch((err) => setStatusFeedback(err?.message || String(err))),
+      "hwp-export-pdf": () => void hwpSession.exportPdf(),
       "studio-save": () => void saveWorkspaceDocument().catch(() => {}),
       "studio-undo": () => void ribbonHistory.performWorkspaceUndo().catch(() => {}),
       "studio-redo": () => void ribbonHistory.performWorkspaceRedo().catch(() => {}),

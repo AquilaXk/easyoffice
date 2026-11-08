@@ -97,6 +97,13 @@ pub const ITEMS: &[MenuItemSpec] = &[
         Some("CmdOrCtrl+Shift+S"),
         "file-save-as",
     ),
+    item(
+        "file:export-pdf",
+        "PDF로 내보내기…",
+        Some("CmdOrCtrl+E"),
+        "hwp-export-pdf",
+    ),
+    item("file:print", "인쇄…", Some("CmdOrCtrl+P"), "hwp-print"),
     item("file:close", "닫기", Some("CmdOrCtrl+W"), "window-close"),
     item("edit:undo", "되돌리기", None, "studio-cmd:studio-undo"),
     item("edit:redo", "다시 실행", None, "studio-cmd:studio-redo"),
@@ -649,6 +656,9 @@ fn file_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
         SEPARATOR,
         "file:save",
         "file:save-as",
+        SEPARATOR,
+        "file:export-pdf",
+        "file:print",
     ]));
     submenu(app, "파일", lines)
 }
@@ -1138,6 +1148,37 @@ mod tests {
             .iter()
             .all(|(_, keys)| *keys != QUIT_ACCELERATOR));
         assert_eq!(QUIT_LABEL, "EasyOffice 끝내기");
+    }
+
+    /// The reference app's file menu ends in a separator, `Export PDF...` (⌘E) and `Print...` (⌘P)
+    /// (`menu.rs` 27-32, 88-89). Both are shell commands of the Hangul editor window: the page
+    /// actions are the ones its keyboard shortcuts and its own 파일 menu already run, and the page
+    /// grays them out in every other window (`shell-chrome.js`, `EMBED_ONLY_ACTIONS`).
+    #[test]
+    fn the_file_menu_ends_with_pdf_export_and_print_with_the_reference_keys() {
+        let export = spec("file:export-pdf");
+        assert_eq!(
+            (export.label, export.accelerator, export.action),
+            ("PDF로 내보내기…", Some("CmdOrCtrl+E"), "hwp-export-pdf")
+        );
+        let print = spec("file:print");
+        assert_eq!(
+            (print.label, print.accelerator, print.action),
+            ("인쇄…", Some("CmdOrCtrl+P"), "hwp-print")
+        );
+        let source = include_str!("native_menu.rs");
+        let production = source.split("#[cfg(test)]").next().unwrap();
+        let start = production.find("fn file_menu").unwrap();
+        let file = &production[start..start + production[start..].find("fn edit_menu").unwrap()];
+        let at = |needle: &str| file.find(needle).unwrap();
+        assert!(
+            at("\"file:save-as\"") < at("SEPARATOR,\n        \"file:export-pdf\"")
+                && at("\"file:export-pdf\"") < at("\"file:print\""),
+            "save as, a separator, export, print"
+        );
+        assert!(file
+            .trim_end()
+            .ends_with("submenu(app, \"파일\", lines)\n}"));
     }
 
     /// `run_item` hands the quit item to the queue (it once skipped macOS, where the id then fell

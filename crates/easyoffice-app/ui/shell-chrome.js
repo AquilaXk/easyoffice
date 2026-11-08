@@ -30,6 +30,8 @@
     "file:open-recent": "recent-dialog",
     "file:save": "studio-save",
     "file:save-as": "file-save-as",
+    "file:export-pdf": "hwp-export-pdf",
+    "file:print": "hwp-print",
     "file:close": "window-close",
     "edit:undo": "studio-cmd:studio-undo",
     "edit:redo": "studio-cmd:studio-redo",
@@ -110,6 +112,11 @@
     "tool:palette": "studio-cmd:palette",
     "help:update-check": "update-check",
   });
+
+  // Actions that work on the Hangul editor's pages (the shell's PDF export and print). They have no item
+  // in the page's own menu row: the editor's 파일 menu carries them in the Hangul window, and no other
+  // window has them, so the native items are grayed out everywhere but in the editor window.
+  const EMBED_ONLY_ACTIONS = Object.freeze(["hwp-export-pdf", "hwp-print"]);
 
   // Menu id -> command id of the Hangul editor (the rhwp-studio command registry, over the embed port's
   // `automation.execute`). While the editor owns the window these items go to it, the zoom and cell
@@ -210,6 +217,7 @@
         .filter(([id, entry]) => {
           const [name, command] = entry.split(":");
           if (Object.hasOwn(EMBED_EDITOR_COMMANDS, id) && commandModule === "HWP_EMBED") return false;
+          if (EMBED_ONLY_ACTIONS.includes(name)) return commandModule !== "HWP_EMBED";
           return name === "hwp-editor" || (name === "studio-cmd" && !applies(command, commandModule));
         })
         .map(([id]) => id);
@@ -339,5 +347,5 @@
   }
 
   host.__EASYOFFICE_CREATE_SHELL_CHROME__ = createShellChrome;
-  host.__EASYOFFICE_NATIVE_MENU_TABLE__ = { NATIVE_MENU_ACTIONS, EMBED_EDITOR_COMMANDS, TEXT_FIELD_EDIT_COMMANDS, runNativeMenuAction, pageMenuActions };
+  host.__EASYOFFICE_NATIVE_MENU_TABLE__ = { NATIVE_MENU_ACTIONS, EMBED_EDITOR_COMMANDS, EMBED_ONLY_ACTIONS, TEXT_FIELD_EDIT_COMMANDS, runNativeMenuAction, pageMenuActions };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

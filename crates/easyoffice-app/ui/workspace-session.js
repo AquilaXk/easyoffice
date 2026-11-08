@@ -177,6 +177,10 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     return { platform: "Desktop", shortcutModifier: "Ctrl" };
   }
 
+  function isMacClient() {
+    return guessClientPlatform().shortcutModifier === "⌘";
+  }
+
   function resolveStorage() {
     try {
       const storage = host.localStorage;
@@ -589,11 +593,19 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       return Boolean(el.closest?.('[contenteditable="true"]'));
     }
 
-    // Browser-reserved combos (new/close window) are only bound inside the desktop shell.
+    // Browser-reserved combos (new/close window) are only bound inside the desktop shell; `macOnly`
+    // combos only on macOS (the other systems keep the key for the editor).
     function bindingFor(combo) {
       const binding = shortcutBindings.find((b) => b.keys === combo);
       if (!binding || binding.native || binding.external) return null;
+      if (binding.macOnly && !isMacClient()) return null;
       return binding.desktopOnly && !isDesktopShell() ? null : binding;
+    }
+
+    // The combos the embedded editor is asked to hand over (the frame URL's key list): the table's
+    // `forwardFromEditor` entries that are bound in this window.
+    function forwardedKeys() {
+      return shortcutBindings.filter((b) => b.forwardFromEditor && bindingFor(b.keys) === b).map((b) => b.keys);
     }
 
     // The embedded HWP editor forwards a combo string, never key events or typed text; only
@@ -686,6 +698,8 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       runClipboardCommand,
       handleShortcutKeydown,
       runForwardedShortcut,
+      isMacClient,
+      forwardedKeys,
       discardStoredState,
       applyPlatformChrome,
       showBootstrapError,

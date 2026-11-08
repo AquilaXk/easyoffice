@@ -383,7 +383,8 @@
   // must never be listed here, except the two window commands marked `desktopOnly`: they are bound
   // only inside the desktop shell, which owns its windows (PD-088). `forwardFromEditor` marks the
   // combos the embedded HWP editor forwards to the shell over the embed port (the editor sends the
-  // combo string only, never typed text).
+  // combo string only, never typed text). `macOnly` binds the combo on macOS alone: the reference
+  // app gives PDF export ⌘E through its macOS menu and leaves Ctrl+E to the editor's delete everywhere else.
   const WORKSPACE_SHORTCUT_BINDINGS = Object.freeze([
     { keys: "Ctrl+O", action: "file-open", forwardFromEditor: true },
     { keys: "Ctrl+N", action: "file-new", desktopOnly: true, forwardFromEditor: true },
@@ -395,6 +396,7 @@
     { keys: "Ctrl+Shift+Z", action: "studio-redo" },
     { keys: "Ctrl+Alt+O", action: "recent-dialog", forwardFromEditor: true },
     { keys: "Ctrl+P", action: "hwp-print", module: "HWP", desktopOnly: true, forwardFromEditor: true },
+    { keys: "Ctrl+E", action: "hwp-export-pdf", module: "HWP", desktopOnly: true, macOnly: true, forwardFromEditor: true },
     { keys: "Ctrl+K", action: "palette", forwardFromEditor: true },
     { keys: "Ctrl+F", action: "palette" },
     { keys: "Ctrl+B", action: "home-bold", ribbon: true },

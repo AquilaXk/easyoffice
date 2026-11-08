@@ -72,7 +72,13 @@ test("the disabled ids are exactly the table items the page's own rule refuses i
       .filter(([, action]) => action === "hwp-editor")
       .map(([id]) => id);
     assert.deepEqual(editorOnly.sort(byName), ["table:cell-select", "table:cell-split"]);
-    const expected = [...commands.filter(([, command]) => !rule(command, mod)).map(([id]) => id), ...editorOnly];
+    // PDF export and print work on the editor's pages: gray in every window but the editor window.
+    const { EMBED_ONLY_ACTIONS } = page.__EASYOFFICE_NATIVE_MENU_TABLE__;
+    const embedOnly = Object.entries(page.__EASYOFFICE_NATIVE_MENU_TABLE__.NATIVE_MENU_ACTIONS)
+      .filter(([, action]) => EMBED_ONLY_ACTIONS.includes(action))
+      .map(([id]) => id);
+    assert.deepEqual(embedOnly.sort(byName), ["file:export-pdf", "file:print"]);
+    const expected = [...commands.filter(([, command]) => !rule(command, mod)).map(([id]) => id), ...editorOnly, ...embedOnly];
     assert.ok(reports.length > 0, `${mod} reported`);
     assert.deepEqual([...reports.at(-1).disabled].sort(byName), expected.sort(byName), mod);
   }
@@ -201,6 +207,7 @@ test("in the Hangul editor window the zoom and cell items are enabled, and the e
   await flushAsyncTurns(10);
   assert.ok(reports.at(-1).disabled.includes("table:cell-select") && reports.at(-1).disabled.includes("table:cell-split"));
   assert.ok(!reports.at(-1).disabled.includes("view:zoom-100"), "zoom is the page's own in a document window");
+  for (const id of ["file:export-pdf", "file:print"]) assert.ok(reports.at(-1).disabled.includes(id), `${id} is grayed out in a document window`);
   const sent = [];
   const shellChrome = page.__EASYOFFICE_CREATE_SHELL_CHROME__({
     document,
@@ -212,4 +219,5 @@ test("in the Hangul editor window the zoom and cell items are enabled, and the e
   shellChrome.pushMenuState("HWP_EMBED");
   const last = sent.at(-1);
   for (const id of Object.keys(EMBED_EDITOR_COMMANDS)) assert.ok(!last.disabled.includes(id), `${id} is enabled in the editor window`);
+  for (const id of ["file:export-pdf", "file:print"]) assert.ok(!last.disabled.includes(id), `${id} is enabled in the editor window`);
 });

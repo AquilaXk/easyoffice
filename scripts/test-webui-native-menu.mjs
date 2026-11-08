@@ -95,6 +95,34 @@ test("outside the Hangul editor the editor-only items run nothing and the shared
   assert.deepEqual(calls, [["editor", "table:cell-select"], ["page", "table-merge"]]);
 });
 
+// The reference app's file menu ends in `Export PDF...` (CmdOrCtrl+E) and `Print...` (CmdOrCtrl+P). Both act on the
+// Hangul editor's pages, so they run the actions the editor's own 파일 menu and its Ctrl+P already run and have no item
+// in the page's menu row (like the editor-only cell items); the native items are grayed out outside the editor window.
+test("the native file menu has PDF export and print with the reference keys, run through the editor's own page actions", async () => {
+  const rust = new Map(rustItems().map((r) => [r.id, r]));
+  assert.deepEqual(
+    ["file:export-pdf", "file:print"].map((id) => [rust.get(id).label, rust.get(id).accelerator, rust.get(id).action]),
+    [["PDF로 내보내기…", "CmdOrCtrl+E", "hwp-export-pdf"], ["인쇄…", "CmdOrCtrl+P", "hwp-print"]],
+  );
+  const { NATIVE_MENU_ACTIONS, EMBED_ONLY_ACTIONS } = chromeTable();
+  assert.equal(NATIVE_MENU_ACTIONS["file:export-pdf"], "hwp-export-pdf");
+  assert.equal(NATIVE_MENU_ACTIONS["file:print"], "hwp-print");
+  assert.deepEqual([...EMBED_ONLY_ACTIONS], ["hwp-export-pdf", "hwp-print"]);
+  const html = read("crates/easyoffice-app/ui/index.html");
+  const menu = html.slice(html.indexOf('<div class="studio-menubar"'), html.indexOf('class="topbar-actions"'));
+  assert.ok(!/export-pdf|hwp-print|인쇄|PDF로 내보내기/.test(menu), "no page menu item: the editor's own 파일 menu has them");
+  const { document } = await createWorkspaceHarness();
+  await flushAsyncTurns(10);
+  const run = document.defaultView.__EASYOFFICE_NATIVE_MENU__;
+  const feedback = () => document.getElementById("status-command-feedback").textContent;
+  assert.equal(run("file:export-pdf"), true, "the page has the handler");
+  await flushAsyncTurns(4);
+  assert.match(feedback(), /PDF로 내보내기는 데스크톱 앱의 한글 편집기에서만/, "outside the editor window it only says it is unavailable");
+  assert.equal(run("file:print"), true, "the page has the handler");
+  await flushAsyncTurns(4);
+  assert.match(feedback(), /인쇄/);
+});
+
 // The page-side behaviour behind each kind of native action: the page element a native item clicks.
 const PAGE_ITEM_SELECTORS = {
   "studio-cmd": (cmd) => `.md-item[data-studio-menu-cmd="${cmd}"]`,
