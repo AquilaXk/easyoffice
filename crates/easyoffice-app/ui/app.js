@@ -788,6 +788,9 @@
       "hwp-print": () => void hwpPrint.print().catch((err) => setStatusFeedback(err?.message || String(err))),
       "hwp-export-pdf": () => void hwpSession.exportPdf(),
       "studio-save": () => void saveWorkspaceDocument().catch(() => {}),
+      "file-save-as": () => (activeModule === "HWP" ? void hwpSession.saveAs("hwp") : void saveWorkspaceDocument().catch(() => {})),
+      "zoom-in": () => void runNativeMenu("view:zoom-in"),
+      "zoom-out": () => void runNativeMenu("view:zoom-out"),
       "studio-undo": () => void ribbonHistory.performWorkspaceUndo().catch(() => {}),
       "studio-redo": () => void ribbonHistory.performWorkspaceRedo().catch(() => {}),
       ribbon: (suffix) => {
@@ -834,7 +837,6 @@
           togglePaletteModal(modal, input);
         }
       },
-      "file-save-as": () => (activeModule === "HWP" ? void hwpSession.saveAs("hwp") : void saveWorkspaceDocument().catch(() => {})),
     };
     return host.__EASYOFFICE_NATIVE_MENU_TABLE__.runNativeMenuAction(id, actions);
   }

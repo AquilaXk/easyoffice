@@ -391,6 +391,7 @@
     { keys: "Ctrl+W", action: "window-close", desktopOnly: true, forwardFromEditor: true },
     { keys: "Ctrl+Q", action: "app-quit", desktopOnly: true, forwardFromEditor: true },
     { keys: "Ctrl+S", action: "studio-save", forwardFromEditor: true },
+    { keys: "Ctrl+Shift+S", action: "file-save-as", forwardFromEditor: true },
     { keys: "Ctrl+Z", action: "studio-undo" },
     { keys: "Ctrl+Y", action: "studio-redo" },
     { keys: "Ctrl+Shift+Z", action: "studio-redo" },
@@ -402,6 +403,11 @@
     { keys: "Ctrl+B", action: "home-bold", ribbon: true },
     { keys: "Ctrl+I", action: "home-italic", ribbon: true },
     { keys: "Ctrl+U", action: "home-underline", ribbon: true },
+    // Zoom keys as in the reference app (Ctrl+= / Ctrl+- / Ctrl+0). The embedded editor keeps its own
+    // zoom keys, so they are not forwarded; Ctrl+Shift++ is the same key as Ctrl+= on layouts where + needs Shift.
+    { keys: "Ctrl+=", action: "zoom-in" },
+    { keys: "Ctrl+Shift++", action: "zoom-in" },
+    { keys: "Ctrl+-", action: "zoom-out" },
     { keys: "Ctrl+0", action: "view-zoom", ribbon: true },
     { keys: "Ctrl+Alt+D", action: "view-theme", ribbon: true },
     { keys: "Ctrl+X", action: "clip-cut", native: true },

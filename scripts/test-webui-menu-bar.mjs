@@ -165,6 +165,32 @@ test("Ctrl+Alt+O opens the recent-documents dialog and the menu advertises it", 
   assert.ok(document.querySelector(".recent-documents-dialog"), "the dialog is open");
 });
 
+test("Ctrl+= / Ctrl+- / Ctrl+0 zoom and Ctrl+Shift+S is Save As, as in the reference app; the menu advertises them", async () => {
+  const { document, sandbox } = await createWorkspaceHarness({ search: "?module=DOC&win=w-zoom-keys" });
+  await flushAsyncTurns(10);
+  const label = (cmd) => document.querySelector(`.md-item[data-studio-menu-cmd="${cmd}"] .md-shortcut`)?.textContent;
+  assert.equal(label("zoom-in"), "Ctrl+=");
+  assert.equal(label("zoom-out"), "Ctrl+-");
+  assert.equal(document.querySelector("[data-save-as-generic] .md-shortcut").textContent, "Ctrl+Shift+S");
+  const zoom = () => document.getElementById("status-zoom-label").textContent;
+  const press = async (init) => {
+    const ev = sandbox.dispatchWindowKeydown({ ctrlKey: true, ...init });
+    await flushAsyncTurns(4);
+    assert.equal(ev.defaultPrevented, true, JSON.stringify(init));
+  };
+  await press({ key: "=" });
+  const zoomedIn = zoom();
+  assert.notEqual(zoomedIn, "100%", "Ctrl+= zooms in");
+  await press({ key: "0" });
+  assert.equal(zoom(), "100%", "Ctrl+0 returns to 100%");
+  await press({ key: "-" });
+  assert.notEqual(zoom(), "100%", "Ctrl+- zooms out");
+  await press({ key: "+", shiftKey: true });
+  assert.equal(zoom(), "100%", "Ctrl+Shift++ zooms in like Ctrl+=");
+  const bound = sandbox.__EASYOFFICE_RIBBON_CATALOG__.WORKSPACE_SHORTCUT_BINDINGS.find((b) => b.keys === "Ctrl+Shift+S");
+  assert.deepEqual([bound.action, bound.forwardFromEditor], ["file-save-as", true]);
+});
+
 test("menu-bar.css keeps rhwp-studio's selectors and names its source", () => {
   const css = read("menu-bar.css");
   assert.match(css, /Adapted from rhwp-studio/);
