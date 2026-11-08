@@ -241,6 +241,63 @@ fn a_file_over_the_limit_never_reaches_the_renderer() {
     assert_eq!(seen.load(Ordering::SeqCst), render::MAX_RENDER_INPUT_BYTES);
 }
 
+/// A source that counts the reads made from it and notes the thread that made them.
+struct CountingSource {
+    inner: Cursor<Vec<u8>>,
+    reads: Arc<AtomicUsize>,
+    reader_thread: Arc<Mutex<Option<String>>>,
+}
+
+impl Read for CountingSource {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.reads.fetch_add(1, Ordering::SeqCst);
+        *self.reader_thread.lock().unwrap() = thread::current().name().map(str::to_string);
+        self.inner.read(buf)
+    }
+}
+
+impl Seek for CountingSource {
+    fn seek(&mut self, to: SeekFrom) -> std::io::Result<u64> {
+        self.inner.seek(to)
+    }
+}
+
+#[test]
+fn the_file_is_read_on_the_worker_and_only_when_a_permit_is_free() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = hwp_file(&dir, "a.hwp", b"data");
+    let meta = fs::metadata(&path).unwrap();
+    let source = || {
+        let reads = Arc::new(AtomicUsize::new(0));
+        let thread_name = Arc::new(Mutex::new(None));
+        let source = CountingSource {
+            inner: Cursor::new(b"data".to_vec()),
+            reads: Arc::clone(&reads),
+            reader_thread: Arc::clone(&thread_name),
+        };
+        (source, reads, thread_name)
+    };
+
+    // Every permit taken: the request gives up as busy and has read nothing.
+    let preview = state(1, 1000, 50);
+    let held = preview.gate.acquire(Duration::from_millis(10)).unwrap();
+    let (busy_source, reads, _) = source();
+    let outcome = draw_first_page(&preview, busy_source, &path, &meta, fake_png);
+    assert_eq!(outcome.unwrap_err(), RenderError::Busy);
+    assert_eq!(reads.load(Ordering::SeqCst), 0, "no permit, no read");
+    drop(held);
+
+    // A free permit: the read happens, on the render worker, not on the caller's thread.
+    let (free_source, reads, thread_name) = source();
+    let drawn = draw_first_page(&preview, free_source, &path, &meta, fake_png).unwrap();
+    assert_eq!(drawn.mime, "image/png");
+    assert!(reads.load(Ordering::SeqCst) > 0);
+    assert_eq!(
+        thread_name.lock().unwrap().as_deref(),
+        Some("eo-home-preview")
+    );
+}
+
 #[test]
 fn the_renderer_refuses_empty_and_oversized_input_itself() {
     let fonts = shared_font_db(&[]);

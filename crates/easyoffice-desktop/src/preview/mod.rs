@@ -206,7 +206,7 @@ fn load_preview_with(
         Err(_) => None,
         Ok(mut file) => match extract_thumbnail(&mut file) {
             Some(embedded) => Some(Arc::new(embedded)),
-            None => match draw_first_page(state, &mut file, path, &meta, render) {
+            None => match draw_first_page(state, file, path, &meta, render) {
                 Ok(drawn) => Some(Arc::new(drawn)),
                 Err(RenderError::Busy) => return None,
                 Err(_) => None,
@@ -217,10 +217,31 @@ fn load_preview_with(
     found
 }
 
-/// The first page of a Hangul file within the size limit, drawn by the bounded worker.
-fn draw_first_page(
+/// The whole of `source` within the render input limit. The file may have grown since its size
+/// was read, so one byte past the limit is read and refused.
+fn read_document<R: Read + Seek>(source: &mut R, size_hint: u64) -> Result<Vec<u8>, RenderError> {
+    let mut document =
+        Vec::with_capacity(size_hint.min(render::MAX_RENDER_INPUT_BYTES as u64) as usize);
+    source
+        .seek(SeekFrom::Start(0))
+        .and_then(|_| {
+            source
+                .take(render::MAX_RENDER_INPUT_BYTES as u64 + 1)
+                .read_to_end(&mut document)
+        })
+        .map_err(|_| RenderError::Unreadable)?;
+    if document.len() > render::MAX_RENDER_INPUT_BYTES {
+        return Err(RenderError::TooLarge);
+    }
+    Ok(document)
+}
+
+/// The first page of a Hangul file within the size limit, drawn by the bounded worker. The file is
+/// read on the worker, after it holds a render permit: a request that finds none free reads nothing,
+/// so a stream of them cannot each hold up to 50 MiB of file bytes.
+fn draw_first_page<R: Read + Seek + Send + 'static>(
     state: &PreviewState,
-    file: &mut File,
+    mut source: R,
     path: &Path,
     meta: &Metadata,
     render: impl FnOnce(Vec<u8>) -> Result<Vec<u8>, RenderError> + Send + 'static,
@@ -230,23 +251,13 @@ fn draw_first_page(
     {
         return Err(RenderError::Unreadable);
     }
-    // The file may have grown since `meta`: read one byte past the limit and refuse that.
-    let mut document = Vec::with_capacity(meta.len() as usize);
-    file.seek(SeekFrom::Start(0))
-        .and_then(|_| {
-            file.take(render::MAX_RENDER_INPUT_BYTES as u64 + 1)
-                .read_to_end(&mut document)
-        })
-        .map_err(|_| RenderError::Unreadable)?;
-    if document.len() > render::MAX_RENDER_INPUT_BYTES {
-        return Err(RenderError::TooLarge);
-    }
+    let size = meta.len();
     let limits = state.limits;
     let png = bounded::run(
         &state.gate,
         limits.permit_wait,
         limits.deadline,
-        move || render(document),
+        move || render(read_document(&mut source, size)?),
     )?;
     if png.len() > MAX_RENDERED_PNG_BYTES || sniff_image(&png) != Some("image/png") {
         return Err(RenderError::TooLarge);
