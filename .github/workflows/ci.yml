@@ -282,10 +282,18 @@ jobs:
       - name: Smoke test desktop shell window (embedded WebUI, IPC round trip and HWP editor round trip)
         shell: pwsh
         run: |
-          $proc = Start-Process -FilePath "target/release/EasyOffice.exe" -ArgumentList @("--smoke") -PassThru
+          # The release binary has no console; redirected output files carry the per-step
+          # EASYOFFICE_SMOKE_STEP_OK / EASYOFFICE_SMOKE_STEP_FAIL lines into the job log.
+          $proc = Start-Process -FilePath "target/release/EasyOffice.exe" -ArgumentList @("--smoke") -PassThru -RedirectStandardOutput smoke-stdout.txt -RedirectStandardError smoke-stderr.txt
           $null = $proc.Handle # cache the process handle so ExitCode stays readable after exit
-          if (-not $proc.WaitForExit(90000)) {
+          $finished = $proc.WaitForExit(90000)
+          if (-not $finished) {
             Stop-Process -Id $proc.Id -Force
+          }
+          foreach ($log in @("smoke-stdout.txt", "smoke-stderr.txt")) {
+            Get-Content -Path $log -ErrorAction SilentlyContinue
+          }
+          if (-not $finished) {
             throw "Desktop shell smoke test timed out"
           }
           if ($proc.ExitCode -ne 0) {

@@ -183,6 +183,97 @@ fn write_page(
     pdf.stream(content_ref, &content.finish());
 }
 
+/// Largest PDF [`verify_exported_pdf`] scans (bytes).
+const MAX_VERIFIED_PDF_BYTES: usize = 256 * 1_048_576;
+/// Dictionary keys the check looks for. The writer emits them as plain text (no object streams).
+const KEY_COUNT: &[u8] = b"/Count ";
+const KEY_MEDIA_BOX: &[u8] = b"/MediaBox";
+const KEY_TO_UNICODE: &[u8] = b"/ToUnicode";
+const KEYS_FONT_FILE: [&[u8]; 2] = [b"/FontFile2", b"/FontFile3"];
+
+/// What [`verify_exported_pdf`] found.
+#[derive(Debug, PartialEq, Eq)]
+pub struct PdfCheck {
+    pub pages: usize,
+    /// Set when the PDF is valid but its text cannot be searched (see [`verify_exported_pdf`]).
+    pub warning: Option<String>,
+}
+
+fn count_of(haystack: &[u8], needle: &[u8]) -> usize {
+    haystack
+        .windows(needle.len())
+        .filter(|w| *w == needle)
+        .count()
+}
+
+fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack.windows(needle.len()).any(|w| w == needle)
+}
+
+/// The numbers that follow each `/Count ` key (page tree sizes).
+fn declared_counts(pdf: &[u8]) -> Vec<usize> {
+    pdf.windows(KEY_COUNT.len())
+        .enumerate()
+        .filter(|(_, window)| *window == KEY_COUNT)
+        .filter_map(|(at, _)| {
+            let digits: Vec<u8> = pdf[at + KEY_COUNT.len()..]
+                .iter()
+                .copied()
+                .take_while(u8::is_ascii_digit)
+                .take(MAX_COUNT_DIGITS)
+                .collect();
+            std::str::from_utf8(&digits).ok()?.parse().ok()
+        })
+        .collect()
+}
+
+/// Digits read after `/Count `: more than this cannot be a page count.
+const MAX_COUNT_DIGITS: usize = 7;
+
+/// Checks the bytes of an exported PDF against what the export promises: the `%PDF-` header, a page
+/// tree of `expected_pages` pages with one `/MediaBox` per page, and, when a font is embedded, a
+/// `/ToUnicode` map (a font without one would give text that cannot be copied or searched).
+///
+/// `has_text` says that the page SVGs held `<text`. When they did but no font was embedded (a
+/// machine without a usable font draws the glyphs as outlines) the PDF is still correct, only not
+/// searchable, so that is a warning in the result and not an error.
+pub fn verify_exported_pdf(
+    pdf: &[u8],
+    expected_pages: usize,
+    has_text: bool,
+) -> Result<PdfCheck, String> {
+    if pdf.len() > MAX_VERIFIED_PDF_BYTES {
+        return Err("PDF가 검사할 수 있는 크기를 넘습니다.".to_string());
+    }
+    if !pdf.starts_with(b"%PDF-") {
+        return Err("PDF 머리글(%PDF-)이 없습니다.".to_string());
+    }
+    if !declared_counts(pdf).contains(&expected_pages) {
+        return Err(format!(
+            "PDF 쪽 수(/Count)가 {expected_pages}쪽이 아닙니다."
+        ));
+    }
+    let media_boxes = count_of(pdf, KEY_MEDIA_BOX);
+    if media_boxes != expected_pages {
+        return Err(format!(
+            "PDF에 쪽 크기(/MediaBox)가 {media_boxes}개 있습니다. {expected_pages}개여야 합니다."
+        ));
+    }
+    let has_font = KEYS_FONT_FILE.iter().any(|key| contains(pdf, key));
+    let has_map = contains(pdf, KEY_TO_UNICODE);
+    if has_font && !has_map {
+        return Err("PDF에 글꼴은 있으나 글자 대응표(/ToUnicode)가 없습니다.".to_string());
+    }
+    let warning = (has_text && !has_font).then(|| {
+        "글꼴이 포함되지 않아 글자가 윤곽선으로 나갔습니다(PDF는 올바르지만 글자 검색 불가)."
+            .to_string()
+    });
+    Ok(PdfCheck {
+        pages: expected_pages,
+        warning,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -209,10 +300,6 @@ mod tests {
         }
         db.load_system_fonts();
         (!db.is_empty()).then(|| Arc::new(db))
-    }
-
-    fn contains(haystack: &[u8], needle: &[u8]) -> bool {
-        haystack.windows(needle.len()).any(|w| w == needle)
     }
 
     #[test]
@@ -300,6 +387,71 @@ mod tests {
         assert_eq!(
             svgs_to_searchable_pdf(&pages, &db),
             svgs_to_searchable_pdf(&pages, &db)
+        );
+    }
+
+    #[test]
+    fn a_real_export_passes_the_check_with_one_media_box_per_page() {
+        let Some(db) = system_font_db() else { return };
+        let pages = vec![page_svg(SAMPLE_TEXT), page_svg("Second page")];
+        let pdf = svgs_to_searchable_pdf(&pages, &db).expect("pdf");
+        assert_eq!(
+            verify_exported_pdf(&pdf, 2, true),
+            Ok(PdfCheck {
+                pages: 2,
+                warning: None
+            })
+        );
+        assert!(verify_exported_pdf(&pdf, 3, true)
+            .unwrap_err()
+            .contains("/Count"));
+        assert!(verify_exported_pdf(&pdf, 1, true).is_err());
+    }
+
+    #[test]
+    fn an_export_without_text_needs_no_font_and_outlined_text_is_a_warning() {
+        let Some(db) = system_font_db() else { return };
+        let pages = vec![page_svg(SAMPLE_TEXT)];
+        let outlined = svgs_to_pdf(&pages, &db, false).expect("pdf");
+        let check = verify_exported_pdf(&outlined, 1, true).expect("outlines are valid");
+        assert!(check.warning.is_some_and(|w| w.contains("윤곽선")));
+        assert_eq!(
+            verify_exported_pdf(&outlined, 1, false).unwrap().warning,
+            None
+        );
+    }
+
+    #[test]
+    fn damaged_or_incomplete_pdfs_are_refused() {
+        let Some(db) = system_font_db() else { return };
+        let good = svgs_to_searchable_pdf(&[page_svg(SAMPLE_TEXT)], &db).expect("pdf");
+        let broken = |from: &[u8], to: &[u8]| {
+            let at = good
+                .windows(from.len())
+                .position(|w| w == from)
+                .expect("key");
+            let mut bytes = good.clone();
+            bytes[at..at + to.len()].copy_from_slice(to);
+            bytes
+        };
+        let header = verify_exported_pdf(&good[5..], 1, true).unwrap_err();
+        assert!(header.contains("%PDF-"), "{header}");
+        let media = verify_exported_pdf(&broken(b"/MediaBox", b"/Mediabox"), 1, true);
+        assert!(media.unwrap_err().contains("/MediaBox"));
+        let map = verify_exported_pdf(&broken(b"/ToUnicode", b"/ToUnicodf"), 1, true);
+        assert!(map.unwrap_err().contains("/ToUnicode"));
+        assert!(verify_exported_pdf(b"", 1, false).is_err());
+        assert!(verify_exported_pdf(b"%PDF-1.7", 1, false).is_err());
+    }
+
+    #[test]
+    fn page_counts_are_read_as_bounded_digit_runs() {
+        assert_eq!(declared_counts(b"/Count 12 /Count 3>>"), vec![12, 3]);
+        assert_eq!(declared_counts(b"/Count x /Count "), Vec::<usize>::new());
+        assert_eq!(
+            declared_counts(b"/Count 99999999999999999999"),
+            vec![9_999_999],
+            "reading stops after the digit limit"
         );
     }
 

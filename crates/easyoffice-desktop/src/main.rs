@@ -13,6 +13,7 @@ mod preview;
 mod recent;
 mod save_file;
 mod smoke;
+mod smoke_steps;
 mod tracked_files;
 mod update_check;
 mod window_commands;
@@ -110,13 +111,17 @@ async fn export_searchable_pdf(
         .resource_dir()
         .map(|dir| vec![dir.join(PDF_FONT_DIR)])
         .unwrap_or_default();
-    let pdf = tauri::async_runtime::spawn_blocking(move || {
+    let (pages, pdf) = tauri::async_runtime::spawn_blocking(move || {
         let fonts = pdf_export::shared_font_db(&font_dirs);
-        pdf_export::svgs_to_searchable_pdf(&pages, &fonts)
+        pdf_export::svgs_to_searchable_pdf(&pages, &fonts).map(|pdf| (pages, pdf))
     })
     .await
     .map_err(|err| IpcError::new(format!("PDF 내보내기를 실행하지 못했습니다: {err}")))?
     .map_err(IpcError::new)?;
+    if app.try_state::<SmokeProbe>().is_some() {
+        // The smoke run checks the PDF in memory: no dialog, no file (smoke_steps.rs).
+        return smoke_steps::verify_pdf(&pages, &pdf).map_err(IpcError::new);
+    }
     let request = SaveRequest::from_bytes(&file_name, pdf).map_err(IpcError::new)?;
     if request.extension() != "pdf" {
         return Err(IpcError::new("PDF 파일 이름은 .pdf 확장자여야 합니다."));
@@ -246,6 +251,7 @@ fn main() {
             let handle = app.handle().clone();
             if smoke_mode {
                 app.manage(SmokeProbe::start(SMOKE_TIMEOUT));
+                smoke::run_rust_steps(&handle);
                 // The smoke run drives the HWP editor, so its first window is an HWP document window.
                 window_commands::create_primary_window(&handle, WindowKind::Hwp)
                     .map_err(std::io::Error::other)?;

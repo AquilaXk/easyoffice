@@ -115,7 +115,7 @@ impl PreviewState {
     }
 }
 
-fn load_preview(state: &PreviewState, id: &str, path: &Path) -> Option<Arc<Thumbnail>> {
+pub(crate) fn load_preview(state: &PreviewState, id: &str, path: &Path) -> Option<Arc<Thumbnail>> {
     let meta = std::fs::metadata(path).ok()?;
     let stamp = FileStamp::of(&meta);
     if let Some(hit) = state

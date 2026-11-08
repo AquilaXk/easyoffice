@@ -30,6 +30,8 @@ pub const RELEASES_API: &str = "https://api.github.com/repos/AquilaXk/easyoffice
 pub const RELEASE_URL_PREFIX: &str = "https://github.com/AquilaXk/easyoffice/releases/";
 /// Largest accepted API response (bytes).
 pub const MAX_BODY_BYTES: u64 = 256 * 1024;
+/// `Accept` header of the update request (the smoke run's fake server checks it).
+pub const ACCEPT_HEADER: &str = "application/vnd.github+json";
 /// Largest accepted record file (bytes).
 const MAX_RECORD_BYTES: u64 = 64 * 1024;
 const CHECK_INTERVAL_SECS: u64 = 86_400;
@@ -311,26 +313,55 @@ impl UpdateService {
     }
 }
 
-/// Downloads the latest-release answer: HTTPS only, OS TLS, short timeouts, no redirects, and at
-/// most [`MAX_BODY_BYTES`] bytes. `None` means there is no release yet (HTTP 404).
-fn fetch_latest_release(app_version: &str) -> Result<Option<Vec<u8>>, String> {
+/// Message for every failure to get the release answer (the reason is never shown to the page).
+const FETCH_FAILED: &str = "업데이트 정보를 가져오지 못했습니다.";
+
+/// The user agent of the update request: the app's name and version, nothing about the user.
+pub fn user_agent(app_version: &str) -> String {
+    format!("EasyOffice/{app_version}")
+}
+
+/// True when `url` may be requested. `https_only` (the real check) allows `https` addresses only.
+/// Without it (the smoke run's fake server, PD-103) only `http://127.0.0.1:<port>/...` is allowed:
+/// the host is compared after URL parsing, so `127.0.0.1@evil.example` or `127.0.0.1.evil.example`
+/// do not pass, and no address with a user name or password does.
+fn url_allowed(url: &tauri::Url, https_only: bool) -> bool {
+    if https_only {
+        return url.scheme() == "https";
+    }
+    url.scheme() == "http"
+        && url.host_str() == Some("127.0.0.1")
+        && url.port().is_some()
+        && url.username().is_empty()
+        && url.password().is_none()
+}
+
+/// Downloads a release answer: OS TLS, short timeouts, no redirects, and at most
+/// [`MAX_BODY_BYTES`] + 1 bytes (a longer body is rejected by [`parse_release`]). `None` means the
+/// server has no such release (HTTP 404). `https_only = false` exists for the loopback hook of the
+/// smoke run and refuses every address except `http://127.0.0.1:<port>`.
+pub fn fetch_release(
+    url: &str,
+    https_only: bool,
+    app_version: &str,
+) -> Result<Option<Vec<u8>>, String> {
+    let url = tauri::Url::parse(url)
+        .ok()
+        .filter(|parsed| url_allowed(parsed, https_only))
+        .ok_or_else(|| "허용되지 않는 업데이트 주소입니다.".to_string())?;
     let tls =
         native_tls::TlsConnector::new().map_err(|_| "TLS를 준비하지 못했습니다.".to_string())?;
     let agent = ureq::AgentBuilder::new()
         .tls_connector(Arc::new(tls))
-        .https_only(true)
+        .https_only(https_only)
         .redirects(0)
         .timeout(HTTP_TIMEOUT)
-        .user_agent(&format!("EasyOffice/{app_version}"))
+        .user_agent(&user_agent(app_version))
         .build();
-    let response = match agent
-        .get(RELEASES_API)
-        .set("Accept", "application/vnd.github+json")
-        .call()
-    {
+    let response = match agent.get(url.as_str()).set("Accept", ACCEPT_HEADER).call() {
         Ok(response) => response,
         Err(ureq::Error::Status(404, _)) => return Ok(None),
-        Err(_) => return Err("업데이트 정보를 가져오지 못했습니다.".to_string()),
+        Err(_) => return Err(FETCH_FAILED.to_string()),
     };
     let mut body = Vec::with_capacity(16 * 1024);
     response
@@ -339,6 +370,12 @@ fn fetch_latest_release(app_version: &str) -> Result<Option<Vec<u8>>, String> {
         .read_to_end(&mut body)
         .map_err(|_| "업데이트 정보를 읽지 못했습니다.".to_string())?;
     Ok(Some(body))
+}
+
+/// The real check: HTTPS only, against the project's releases API. `None` means there is no
+/// release yet (HTTP 404).
+fn fetch_latest_release(app_version: &str) -> Result<Option<Vec<u8>>, String> {
+    fetch_release(RELEASES_API, true, app_version)
 }
 
 fn unix_now() -> u64 {
@@ -440,6 +477,52 @@ mod tests {
             "-1.2.3",
         ] {
             assert_eq!(parse_version(bad.as_bytes()), None, "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn only_https_or_the_exact_loopback_address_may_be_requested() {
+        let allowed = |url: &str, https_only: bool| {
+            tauri::Url::parse(url).is_ok_and(|parsed| url_allowed(&parsed, https_only))
+        };
+        assert!(allowed(RELEASES_API, true));
+        assert!(allowed("http://127.0.0.1:8080/releases/latest", false));
+        for bad in [
+            "http://127.0.0.1:8080/x",
+            "http://example.com/",
+            "ftp://example.com/",
+            "file:///etc/passwd",
+        ] {
+            assert!(!allowed(bad, true), "{bad}");
+        }
+        for bad in [
+            RELEASES_API,
+            "https://127.0.0.1:8080/x",
+            "http://127.0.0.1/x",
+            "http://127.0.0.1.evil.example:80/",
+            "http://127.0.0.1:80@evil.example/",
+            "http://user:secret@127.0.0.1:80/",
+            "http://localhost:80/",
+            "http://[::1]:80/",
+            "http://10.0.0.1:80/",
+            "http://example.com:80/",
+            "ftp://127.0.0.1:80/",
+        ] {
+            assert!(!allowed(bad, false), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_refused_address_fails_before_any_connection() {
+        for (url, https_only) in [
+            ("not a url", true),
+            ("http://127.0.0.1:9/x", true),
+            ("http://example.com/", false),
+            ("https://api.github.com/", false),
+            ("http://127.0.0.1:80@evil.example/", false),
+        ] {
+            let err = fetch_release(url, https_only, "1.2.3").unwrap_err();
+            assert!(err.contains("허용되지 않는"), "{url}: {err}");
         }
     }
 
