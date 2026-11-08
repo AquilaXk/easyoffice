@@ -2,7 +2,7 @@
 
 [English](README.md) | [한국어](README.ko.md)
 
-EasyOffice (`v2.1.0`)는 Rust 엔진과 오프라인 WebUI를 하나의 Tauri v2 데스크톱 셸에 담은 **100% 독립 실행형(Standalone)·서버리스(Serverless)·오프라인 지원 macOS·Windows 올인원 오피스 스위트**입니다. hop의 rhwp-studio 크롬을 기준으로 한 라이트·다크 테마 위에서 **워드 문서(Document)**, **스프레드시트(Sheet)**, **프레젠테이션(Slide)**, **한글 문서(HWP / HWPX)**, **PDF 스튜디오(PDF Studio)**를 하나의 워크스페이스에서 통합 제공하며, 비트 수준 컨테이너 코덱과 결정론적 수식 연산, 온디바이스 스마트 문서 보조 도구, Fail-Closed 보안 가드를 내장합니다.
+EasyOffice (`v0.1.0`)는 Rust 엔진과 오프라인 WebUI를 하나의 Tauri v2 데스크톱 셸에 담은 **100% 독립 실행형(Standalone)·서버리스(Serverless)·오프라인 지원 macOS·Windows 올인원 오피스 스위트**입니다. hop의 rhwp-studio 크롬을 기준으로 한 라이트·다크 테마 위에서 **워드 문서(Document)**, **스프레드시트(Sheet)**, **프레젠테이션(Slide)**, **한글 문서(HWP / HWPX)**, **PDF 스튜디오(PDF Studio)**를 하나의 워크스페이스에서 통합 제공하며, 비트 수준 컨테이너 코덱과 결정론적 수식 연산, 온디바이스 스마트 문서 보조 도구, Fail-Closed 보안 가드를 내장합니다.
 
 ---
 

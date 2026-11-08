@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version (e.g. 2.1.0)"
+        description: "Release version (e.g. 0.1.0)"
         required: true
-        default: "2.1.0"
+        default: "0.1.0"
       publish:
         description: "Publish the GitHub Release (false builds and uploads Actions artifacts only)"
         type: boolean
