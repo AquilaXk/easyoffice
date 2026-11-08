@@ -14,6 +14,8 @@
 - **Verified by**: 이 결정을 강제하고 증명하는 테스트 또는 검증 스크립트
 - **Revisit when**: 결정을 재검토해야 하는 조건
 
+번호 규칙: 절 제목은 `## PD-NNN. 제목`이고 PD 번호가 유일한 식별자입니다(절 번호는 없음). 새 PD는 마지막 번호 다음 번호로 문서 끝에 추가하며, 부여한 PD 번호는 바꾸지 않습니다. 아래 `초기 기록`(1~41)은 PD 번호 부여 이전의 Swift 시기 항목으로 제목 번호를 그대로 둡니다.
+
 ---
 
 ## 목차 (Contents)
@@ -45,6 +47,8 @@
 25. [PD-047 ~ PD-051: 7차 적대적 감사 기반 무클리핑 단일 컨텍스트 툴바·수직 눈금자/탭 정지점·단일 A4 WYSIWYG 조판·9열 시트/외곽 2pt 범위 테두리·수식 연산자(&/%)·슬라이드 단일 필름스트립/전환 타이밍·PDF 상단 렌더링 및 찾기/바꾸기 내비게이션 정책 (2026-10-19)](#25-pd-047--pd-051-7차-적대적-감사-기반-무클리핑-단일-컨텍스트-툴바수직-눈금자탭-정지점단일-a4-wysiwyg-조판9열-시트외곽-2pt-범위-테두리수식-연산자슬라이드-단일-필름스트립전환-타이밍pdf-상단-렌더링-및-찾기바꾸기-내비게이션-정책-2026-10-19)
 
 ---
+
+## 초기 기록 (PD-067 이전, Swift 시기)
 
 ### 1. macOS 네이티브 Swift 6 + SwiftUI/AppKit 하이브리드 아키텍처 채택
 
@@ -958,7 +962,7 @@
 - **Verified by** `node scripts/check-repo-hygiene.mjs`, `node --test scripts/test-webui-*.mjs`, `cargo run -p easyoffice-app -- --self-test`, `swift build`, `swift test`, `.agents/skills/verify-easyoffice/scripts/eo.sh`
 - **Revisit when** 스플릿 뷰 보조 패널에 독립적인 2번째 활성 커서 세션(`secondaryActiveTabID` 변이 라우팅)을 도입할 때.
 
-## 42. 적대적 아키텍처 리뷰(Red-Team) 기반 모노레포 정합성·파서 무결성·CI 경량화 (PD-067)
+## PD-067. 적대적 아키텍처 리뷰(Red-Team) 기반 모노레포 정합성·파서 무결성·CI 경량화
 
 - **Status** Implemented
 - **Superseded by PD-094 (부분)**: 이 항목 중 Swift 앱·`swift build`/`swift test`·`scripts/package-macos-release.sh`·Swift 대응 규칙에 해당하는 부분은 PD-094로 대체되었습니다. Rust 엔진·WebUI·Windows 관련 결정은 그대로 유효합니다.
@@ -990,7 +994,7 @@
 - **Verified by** `node scripts/check-repo-hygiene.mjs`, `node --test scripts/test-webui-*.mjs`, `cargo test --workspace`, `swift test`
 - **Revisit when** 스트리밍 디스크 플러시 기반 무제한 배치 변환 모드를 추가할 때.
 
-## 43. Windows(WebView2)·macOS(AppKit/WKWebView) 실런타임 구동 감사 기반 플랫폼 단축키·PDF 회전 레이아웃·크로스스택 122종 수식 카탈로그 정합성 (PD-068)
+## PD-068. Windows(WebView2)·macOS(AppKit/WKWebView) 실런타임 구동 감사 기반 플랫폼 단축키·PDF 회전 레이아웃·크로스스택 122종 수식 카탈로그 정합성
 
 - **Status** Implemented
 - **Superseded by PD-094 (부분)**: 이 항목 중 Swift 앱·`swift build`/`swift test`·`scripts/package-macos-release.sh`·Swift 대응 규칙에 해당하는 부분은 PD-094로 대체되었습니다. Rust 엔진·WebUI·Windows 관련 결정은 그대로 유효합니다.
@@ -1028,7 +1032,7 @@
 - **Verified by** `node scripts/check-repo-hygiene.mjs`, `node --test scripts/test-webui-*.mjs`, `cargo test --workspace`, `swift test`, `.agents/skills/verify-easyoffice/scripts/eo.sh`
 - **Revisit when** Linux Wayland 전용 시스템 트레이 및 글로벌 단축키 포털 연동이 필요할 때.
 
-## 44. 리본 서식 상태·실행 취소 스택의 클라이언트 세션별·모듈별 분리 (PD-069, #106)
+## PD-069. 리본 서식 상태·실행 취소 스택의 클라이언트 세션별·모듈별 분리 (#106)
 
 - **Status** Implemented
 - **Context** `--serve` 서버가 전역 `SharedRibbonSession` 하나(서식 플래그 1벌, 실행 취소 스택 1벌)를 공유하여 `document-home-bold` 다음 `sheet-home-italic`을 실행하면 SHEET 응답에 DOC의 굵게가 넘어가고, `undo_ribbon_command`가 방금 한 SHEET 작업이 아닌 DOC 작업을 취소했으며, 브라우저 창 두 개가 같은 스택을 공유했습니다.
@@ -1046,7 +1050,7 @@
 - **Verified by** `cargo test -p easyoffice-app ribbon_session`(이슈 재현 순서, 두 세션 격리, 형식 오류 거부, LRU 상한), `node --test scripts/test-webui-behavior.mjs`(`ribbon IPC sends a per-window session id and the undo target module (#106)`), `node scripts/check-repo-hygiene.mjs`
 - **Revisit when** 서버가 루프백 외 원격 다중 사용자 접속을 지원하여 세션 식별자에 인증·소유권 검증이 필요해질 때.
 
-## 45. 시트 TEXT 서식 코드·대용량 통합 문서 재계산·없는 시트 `#REF!`·순환 참조 표준 오류값 정합성 (PD-070, #107)
+## PD-070. 시트 TEXT 서식 코드·대용량 통합 문서 재계산·없는 시트 `#REF!`·순환 참조 표준 오류값 정합성 (#107)
 
 - **Status** Implemented
 - **Context** `evaluate_sheet` IPC 점검에서 `TEXT()`가 리터럴·0 채움·`;` 구간·월/요일 이름·시간을 처리하지 못했고, UI가 재계산마다 통합 문서 전체를 보내는데 HTTP 본문 한도(1MiB) 때문에 숫자 20,000개 + 수식 4,000개(약 1.37MB) 문서가 `413`으로 실패했으며, `=SUM(A1:Z10000)`이 범위 확장 상한(`100,000`셀)으로 `#REF!`를 냈습니다. 또한 `evaluate_workbook_formula`가 데모 값(`Sheet1!A1=1200`, `Sheet2!A1=100`)과 암묵적 `Sheet1`/`Sheet2`를 시드해 없는 시트 참조가 가상 값을 냈고, 순환 참조는 규격에 없는 `#CYCLE!`로 표시됐습니다.
@@ -1067,7 +1071,7 @@
 - **Verified by** `cargo test -p easyoffice-sheet --test sheet_text_format_and_large_ranges`, `crates/easyoffice-app/src/sheet_ipc_tests.rs`, `node --test scripts/test-webui-sheet-atomicity.mjs`
 - **Revisit when** 셀 단위 증분 재계산 IPC 또는 로캘별(ko-KR) 월·요일 이름 서식 코드(`[$-412]`)를 도입할 때.
 
-## 46. 출력 컨테이너 필수 파트·스키마 정합화, 표준 한글 CID 글꼴 참조 및 DOC/PPT 쓰기 호환성 제한 표시 (PD-071, #105)
+## PD-071. 출력 컨테이너 필수 파트·스키마 정합화, 표준 한글 CID 글꼴 참조 및 DOC/PPT 쓰기 호환성 제한 표시 (#105)
 
 - **Status** Implemented
 - **Context** `convert_document_format` 출력을 풀어 각 규격과 대조한 결과(#105), XLSX 셀의 비표준 `row`/`col` 속성과 항상 `0`인 수식 캐시값, PPTX 테마·`p:clrMap`·도형 비시각 속성 누락 및 `<p:sld title notes>` 비표준 속성, 빈 HWPX `header.xml`과 `version.xml`/`settings.xml`/`secPr` 누락, DOCX `<w:document title>` 비표준 속성과 `w:tblPr`/`w:tblGrid` 누락, PDF 한글 글꼴(`EasyOfficeGothic-Medium`)의 프로그램 없는 참조와 UTF-8 바이트 그대로의 `/Title`, BOM 없는 CSV, 규격 구현처럼 표시되는 `.doc`/`.ppt` 출력이 확인되었습니다.
@@ -1092,7 +1096,7 @@
 - **Verified by** `crates/easyoffice-formats/tests/output_container_spec_validity.rs`, `crates/easyoffice-app/src/convert_ipc.rs` 단위 테스트, `scripts/test-webui-behavior.mjs`(호환성 제한 표시), `cargo test --workspace`
 - **Revisit when** 공개 라이선스 한글 글꼴 서브셋 임베딩 또는 규격 충족 워드·프레젠테이션 바이너리 작성기(#112)를 도입할 때.
 
-## 47. WebUI 작업 유실 방지(자동 저장·이탈 경고)·단축키 라벨 1:1 정합성 및 모듈별 도구모음 컨텍스트 (PD-072, #103, #108)
+## PD-072. WebUI 작업 유실 방지(자동 저장·이탈 경고)·단축키 라벨 1:1 정합성 및 모듈별 도구모음 컨텍스트 (#103, #108)
 
 - **Status** Implemented
 - **Context** Windows `easyoffice-app.exe --serve` WebUI 실조작 리뷰(#103, #108)에서 새로고침·탭 닫기 시 경고 없이 편집 내용이 사라지고, 메뉴·툴팁이 처리기 없는 단축키나 브라우저 예약 키(`Ctrl+Shift+R` 강력 새로고침, `Ctrl+N` 새 창 등)를 안내하여 안내대로 누르면 작업이 즉시 유실되는 문제, 시트·슬라이드·PDF·변환기 모듈에서도 문서 전용 도구모음과 시트 선택 집계가 그대로 노출되는 문제, 열린 문서 탭 줄 숨김, 선택 영역과 무관한 내부 문자열 클립보드, 부트스트랩 IPC 실패 시 빈 화면과 `macOS · ⌘` 고정 표기가 확인되었습니다.
@@ -1125,7 +1129,7 @@
 - **Verified by** `node scripts/check-repo-hygiene.mjs`, `node --test scripts/test-webui-*.mjs`(`scripts/test-webui-session-context.mjs` 포함), `cargo test --workspace`, `cargo run -p easyoffice-app -- --self-test`
 - **Revisit when** 서버 측 문서 저장소(다중 문서·버전 기록)를 도입하여 로컬 자동 저장본을 서버 초안으로 대체할 때.
 
-## 48. 저장 서식·표 위치·표 계산값·다중 시트 보존, 저장 실패 표시 및 문서 제목 파일명 (PD-073, #104)
+## PD-073. 저장 서식·표 위치·표 계산값·다중 시트 보존, 저장 실패 표시 및 문서 제목 파일명 (#104)
 
 - **Status** Implemented
 - **Context** WebUI에서 `Ctrl+S`로 저장한 파일을 풀어 확인한 결과(#104), 문서·한글 저장 본문이 `extractEditableDocumentText` 평문이어서 DOCX에 `w:rPr`/`w:pPr`가 하나도 없고(굵게·기울임·밑줄·정렬·제목 수준 유실), 본문 중간 표가 문서 끝으로 이동하며, 표 셀 `=SUM(ABOVE)`가 계산값 대신 문자열로 저장되었습니다. 한글 저장은 항상 `[[AGENCY]] 행정안전부`를 넣었고, 사용자가 `[[SLIDE]]`·`[[TABLE_ROW]]`로 시작하는 문단을 쓰면 서버가 구조 마크업으로 해석했습니다. 시트는 활성 시트만 저장되었고, `convertedBase64`가 없어도 "문서 저장 완료"를 표시했으며, 파일명은 항상 `EasyOffice_<모듈>_문서.<확장자>`였습니다.
@@ -1153,7 +1157,7 @@
 - **Verified by** `cargo test -p easyoffice-app --test structured_save_fidelity`(DOCX/HWPX 서식 요소·표 순서·계산값·마크업 비해석·고정 기관명 부재, ODT/RTF/Markdown 서식, 다중 시트 XLSX 시트 간 캐시, 형식 오류 거부), `crates/easyoffice-formats/src/{rich_document.rs,rich_writers.rs}` 단위 테스트, `node --test scripts/test-webui-save-fidelity.mjs`(블록 페이로드, 전 시트 전송, 저장 실패 표시, 파일명 정리), `node scripts/check-repo-hygiene.mjs`, `cargo run -p easyoffice-app -- --self-test`
 - **Revisit when** 글꼴·크기·색상·셀 병합·이미지 저장을 추가하거나, DOC/HWP 5.0 바이너리 작성기가 문단 서식과 표 위치를 지원하게 될 때.
 
-## 49. Windows 설치형 데스크톱 앱: WebView2 셸·프로세스 내 IPC·NSIS 설치 프로그램 (PD-074, #119)
+## PD-074. Windows 설치형 데스크톱 앱: WebView2 셸·프로세스 내 IPC·NSIS 설치 프로그램 (#119)
 
 - **Status** Implemented
 - **Context** 제품은 서버 없이 설치해 쓰는 오프라인 데스크톱 프로그램이지만, Windows 배포물은 `easyoffice-app.exe --serve 8787`을 명령줄에서 실행한 뒤 브라우저로 접속하는 CLI 아카이브뿐이었습니다(#119). 데스크톱 창 의존성이 없었고 UI는 `fetch("/api/ipc")`로만 엔진을 호출했으며, 설치 프로그램·시작 메뉴 등록이 없었습니다. 그런데 `lib.rs` 주석("Tauri v2 compatible"), IPC 오류 문구("Tauri IPC 명령"), CI 작업 이름("Tauri Shell")은 데스크톱 셸이 있는 것처럼 표기했습니다.
@@ -1182,7 +1186,7 @@
 - **Verified by** `node --test scripts/test-webui-desktop-bridge.mjs`(가짜 `__TAURI_INTERNALS__`로 `ipc_dispatch` 단일 경로·문자열 페이로드·`fetch` 미사용, 셸 거부와 HTTP 400의 동일 표시, 네이티브 저장 명령 사용·경로 미전송·Blob 미사용, 저장 취소·실패 표시, 변환기 저장, 셸 부재 시 HTTP·Blob 유지), 기존 WebUI 스위트 7종, `crates/easyoffice-desktop` 단위 테스트(파일 이름 정리·Base64·원자적 쓰기·직렬화 형태·탐색 출처·스모크 상태 전이), Windows CI의 셸 Clippy·NSIS 빌드·`--smoke`, `node scripts/generate-desktop-icons.mjs --check`, `node scripts/check-repo-hygiene.mjs`, `cargo run -p easyoffice-app -- --self-test`
 - **Revisit when** 파일 열기(#111)가 구현되어 파일 연결을 등록할 때, 코드 서명 인증서를 도입할 때, 또는 macOS·Linux에도 같은 셸을 배포하기로 할 때.
 
-## 50. WebUI 파일 열기·가져오기와 실제 원본 파일 기반 변환 (PD-075, #111)
+## PD-075. WebUI 파일 열기·가져오기와 실제 원본 파일 기반 변환 (#111)
 
 - **Status** Implemented
 - **Context** WebUI에는 파일 입력도 `FileReader`도 없어 사용자가 자신의 문서를 열 수 없었고, 통합 포맷 변환기는 편집기 텍스트(`body`)만으로 출력을 만들어 "DOCX → HWPX"가 실제 DOCX를 읽지 않았습니다(#111). 기존 디코더(`UniversalFormatConverter::decode`)는 문단과 표를 따로 평탄화하므로 서식·표 위치·모든 시트를 편집기 모델로 되돌릴 수 없었습니다.
@@ -1216,7 +1220,7 @@
 - **Verified by** `cargo test -p easyoffice-formats --test rich_decode_roundtrip`(DOCX·HWPX·ODT·Markdown·TXT·XLSX 다중 시트 수식·BOM CSV·PPTX 디코드→인코드→디코드 동치, 레거시·PDF 평문 적재, 매직 바이트 우선, Word 스타일 제목·번호 목록, DOCX/XLSX/PPTX/HWPX/ODT XXE·ZIP 폭탄·경로 순회·손상 입력 거부), `cargo test -p easyoffice-app convert_open`(decode 응답·모듈 라우팅·격자 절단·원본 바이트 변환·보안 거부), `crates/easyoffice-formats/src/{rich_xml.rs,rich_read_text.rs}` 단위 테스트, `node --test scripts/test-webui-file-open.mjs`(`Ctrl+O`·메뉴·accept, 입력·끌어 놓기, 모듈 라우팅, 수정 확인, 크기·손상 오류, 탭 제목, 실행 취소/다시 실행, 자동 저장 복원, 열기→저장 라운드트립, 변환기 원본), 실서버 `--serve 8795` + 헤드리스 Chrome에서 DOCX·XLSX 열기, `node scripts/check-repo-hygiene.mjs`, `cargo run -p easyoffice-app -- --self-test`
 - **Revisit when** 글꼴·그림·머리말 가져오기, 시트 격자 확장, 비UTF-8 CSV(CP949) 지원, 다중 문서 탭, 데스크톱 셸의 파일 연결 열기(PD-074)가 추가될 때.
 
-## 51. rhwp upstream 경계: 읽기 전용 서브모듈·위생 가드 제외·라이선스 고지 (PD-076, #128)
+## PD-076. rhwp upstream 경계: 읽기 전용 서브모듈·위생 가드 제외·라이선스 고지 (#128)
 - **Decision (`PD-076`)**
   1. **읽기 전용 upstream**: rhwp는 `third_party/rhwp`의 서브모듈(`.gitmodules`의 `https://github.com/edwardkim/rhwp.git`, `shallow = true`)로만 가져오며 EasyOffice가 수정하지 않습니다. 고정 대상(커밋 `1a76570e833917d15817415a53c09ad61ab3203f`, 버전 0.8.7, 툴체인 1.93.1)과 sparse 목록은 `config/rhwp-upstream.json`이 유일한 기준입니다. 필요한 변경은 EasyOffice 쪽 오버레이로 처리하고(이후 단계), 서브모듈 안에서 고치지 않습니다.
   2. **얕은·부분 체크아웃**: upstream 전체는 약 5.3 GB(문서·PDF·샘플·도구)이므로 `scripts/checkout-rhwp.mjs`가 `--depth 1`과 `--filter=blob:none`으로 고정 커밋만 받고 sparse 목록(소스·`rhwp-studio`·라이선스 파일)만 작업 트리에 둡니다. AI 도구 규칙 파일과 `.mcp.json`은 목록에 없어 디스크에도 생기지 않습니다. CI의 기본 체크아웃은 서브모듈을 받지 않습니다(`actions/checkout` 기본값 유지).
@@ -1237,7 +1241,7 @@
 - **Verified by** `node --test scripts/test-rhwp-upstream.mjs`(미체크아웃 통과, gitlink 변조·URL 변조·버전 불일치·작업 트리 수정 실패, 위생 가드의 루트 금지 파일 추적 실패와 `third_party/rhwp`만 제외), `node scripts/verify-rhwp-upstream.mjs`, `node scripts/check-repo-hygiene.mjs`
 - **Revisit when** upstream를 갱신하거나 `vendor/rhwp-core`·`apps/hwp-studio` 산출물이 추가되어 제외 경로를 늘려야 할 때.
 
-## 52. 문서 모듈 글자 단위 런 모델: 선택 범위 글자 크기·글꼴·색·형광펜·굵게·기울임·밑줄·취소선 (PD-077, #134)
+## PD-077. 문서 모듈 글자 단위 런 모델: 선택 범위 글자 크기·글꼴·색·형광펜·굵게·기울임·밑줄·취소선 (#134)
 
 - **Status** Implemented
 - **Context** 글자 크기를 바꾸면 편집기 전체(`editor.style.fontSize`)가 커지고, 굵게·기울임·밑줄은 커서가 있는 문단 전체의 인라인 스타일로 적용되었으며(`ribbon-history.js`의 `targetEl.style.fontWeight` 등), 글꼴도 편집기 전체에 걸렸습니다(#134). 글꼴·크기·색은 저장 페이로드와 디코더에도 없어(PD-073 트레이드오프 1, PD-075 트레이드오프 1) 열고 저장하면 사라졌습니다. DOCX·ODT·RTF는 HWP 편집기용 라이브러리 대상이 아니므로 DOC 모듈이 자체 글자 단위 런 모델을 가져야 합니다.
@@ -1268,7 +1272,7 @@
 - **Verified by** `node --test scripts/test-webui-doc-runs.mjs`(문단 일부 크기·굵게·색 적용 시 나머지 글자 불변, 글꼴·형광펜·기울임·밑줄·취소선, 여러 문단·표 셀 선택, 인접 런 병합·빈 런 제거, 레거시 `strong` 보존, 잘못된 값 거부, 서식 한 번 = 실행 취소 한 단계와 다시 실행 복원, 크기 칸 혼합 표시, 굵게 `mixed` 상태·토글, 단어 적용/대기 서식·다음 입력에만 적용, 저장 페이로드 런 필드, 자동 저장 스냅샷의 런, 문단 단위 들여쓰기·눈금자 핀, 선택 없음 거부), 갱신한 `test-webui-behavior.mjs`·`test-webui-ux-ergonomics.mjs`(선택 범위 기반 서식·실행 취소), `cargo test -p easyoffice-formats --test rich_run_formatting`(DOCX/HWPX/ODT/RTF 크기·글꼴·색·형광펜 런 왕복과 원시 XML 속성, 제목 런 크기 재정의, RTF 평문·표 왕복), `cargo test -p easyoffice-app convert_open`(14 pt·굵게·빨강 런이 DOCX로 저장되어 다시 열면 같은 런·필드, 잘못된 값 거부, 필드 없는 기존 페이로드), 실서버 `--serve 8871` + 헤드리스 Chrome에서 실제 마우스 드래그 선택(`Input.dispatchMouseEvent` 누름/이동/놓음) 후 크기 20 pt 적용(선택한 글자만 커지고 편집기 전체 크기 불변), 실제 `Ctrl+B`·색 버튼·`Ctrl+Z`/`Ctrl+Y` 세 단계 정확히 되돌림, 다중 문단 드래그 후 16 pt, 대기 굵게 후 입력, 2000문단 성능 측정, `node scripts/check-repo-hygiene.mjs`, `cargo run -p easyoffice-app -- --self-test`
 - **Revisit when** 표 셀 서식·셀 병합 저장, 위·아래 첨자·자간·장평, 스타일 상속 가져오기, IME 조합 중 서식, 별도 탭 정지 모델, HWP 편집기를 rhwp로 교체할 때.
 
-## 53. 시트 편집 기본기: 준비/편집 모드, 범위 선택·클립보드, 가상화 격자, 숫자 표시 (PD-078, #123)
+## PD-078. 시트 편집 기본기: 준비/편집 모드, 범위 선택·클립보드, 가상화 격자, 숫자 표시 (#123)
 
 - **Status** Implemented
 - **Context** 실조작 리뷰(#123)에서 시트 셀에 입력하면 기존 값 뒤에 이어 붙고(`920`+`1000`=`9201000`, `=B3`은 수식이 아님), Enter는 포커스만 잃고 방향키가 멈추며, 범위 선택·`Ctrl+C`/`Ctrl+V`가 없고 "선택 집계"가 시트 전체 합계를 보였습니다. 격자는 12행 × 8열 고정이고 열 너비 조절이 없으며, 숫자는 왼쪽 정렬에 `1266.66666666667`처럼 표시되고, 개요의 시트 이름이 탭과 달랐고, SHEET 홈에 문서 전용 명령이 보였습니다.
@@ -1287,8 +1291,7 @@
 - **Verified by** `node --test scripts/test-webui-sheet-editing.mjs`(덮어쓰기 입력·`=B3` 수식·Enter/Shift+Enter/Tab/Esc·방향키 모드·IME 조합·범위 선택 3종·Ctrl+A·선택 범위 집계·TSV 복사/붙여넣기/잘라내기와 상대 참조·범위 지우기·10,000행 가상화와 `Ctrl`+방향키 점프·숫자 서식·열 너비 조절·수식 입력줄·개요 이름·SHEET 홈), 기존 `test-webui-*.mjs` 전체, 실서버 `--serve` + 헤드리스 Chrome 실제 키보드·마우스·클립보드·IME(`Input.imeSetComposition`/`Input.insertText`) 조작과 스크린샷, 10,000행 × 8열 성능 측정(키 처리 p50 3~4ms·p95 약 16~18ms·최대 약 28ms, 스크롤 렌더 p50 약 4ms·p95 약 6~9ms, 휠 스크롤 프레임 p50 16.7ms·p95 약 22~25ms), `node scripts/check-repo-hygiene.mjs`, `cargo run -p easyoffice-app -- --self-test`
 - **Revisit when** 병합 셀·열 숨김·행 높이 조절, 열 너비·서식을 파일에 보존, 채우기 핸들, 셀 이동(드래그 앤 드롭), 대용량(수십만 셀) 증분 재계산이 필요할 때.
 
-
-## 54. ZIP 기반 출력 DEFLATE 압축·변환 응답 단일 base64·실제 경로 벤치마크 (PD-079, #124)
+## PD-079. ZIP 기반 출력 DEFLATE 압축·변환 응답 단일 base64·실제 경로 벤치마크 (#124)
 - **Context** 모든 ZIP 기반 출력(DOCX·XLSX·PPTX·PPSX·ODT·ODS·ODP·HWPX·HWTX)이 무압축 `ZipArchiveCodec::pack`만 사용해 약 1MB 텍스트(9,700문단)가 DOCX 1,480,838바이트, HWPX 2,330,134바이트가 되었고, 변환 응답은 같은 base64를 `converted_base64`와 `convertedBase64`에 두 번 담았으며, 벤치마크는 작은 합성 입력만 측정했습니다.
 - **Decision (`PD-079`)**
   1. **항목별 압축 정책 (`zip_codec.rs`)**: 모든 ZIP 작성기는 `ZipArchiveCodec::pack_compressed`를 사용합니다. 저장소 내 DEFLATE(`deflate::deflate_raw`, 해시 체인 8단계 + 블록별 동적 허프만, 기본 레벨 2)를 쓰고, 압축 결과가 원본보다 작지 않거나 압축률이 90배를 넘는 항목(읽기 쪽 압축 폭탄 한도 100배 미만 유지)은 무압축으로 둡니다. `ZipArchiveCodec::must_store`가 `mimetype`(ODF/HWPX는 첫 엔트리·무압축·오프셋 30 고정)와 이미 압축된 형식(png·jpg·jpeg·gif·webp·zip·jar·gz·mp3·mp4)을 항상 무압축으로 유지합니다. `pack_deflate`도 같은 예외를 따릅니다. 당시 인코더 프로파일링에서 압축 비용이 변환 전체의 약 15ms/MB 수준이었던 고정 허프만 인코더는 동적 허프만 인코더로 교체되어(1MB DOCX 변환 약 -31%, 10만 셀 XLSX 약 -25%, XLSX 크기 -31%), CRC32·시트 DAG 최적화는 #135로 남깁니다.
@@ -1304,7 +1307,7 @@
 - **Verified by** `cargo test -p easyoffice-formats --test zip_deflate_outputs`(크기 상한, `mimetype` 첫 엔트리·무압축, 9개 ZIP 형식 왕복·CRC, 항목별 정책), `cargo test -p easyoffice-app --lib convert_ipc`(응답 단일 필드), `benchmark_real` 테스트, `--self-test`, .NET `ZipFile`과 `Expand-Archive`로 생성물 열기.
 - **Revisit when** 그림 등 미디어 파트 출력이 추가되거나, 동적 허프만이 필요한 더 큰 문서·시간 병목(#135)이 확인될 때.
 
-## 55. 슬라이드 발표자 모드·슬라이드 관리·실시간 썸네일·덱 화면 비율 (PD-080, #125)
+## PD-080. 슬라이드 발표자 모드·슬라이드 관리·실시간 썸네일·덱 화면 비율 (#125)
 
 - **Status** Implemented
 - **Context** 슬라이드 모듈에는 발표 기능(F5)이 없었고 삭제·복제·순서 변경 UI가 없었으며, 제목을 고쳐도 왼쪽 목록이 갱신되지 않고 14자로 잘렸습니다. 새 슬라이드는 이전 기본 문구로 채워졌고 스테이지는 창 너비를 따라 가로로 늘어났습니다(#125).
@@ -1324,7 +1327,7 @@
 - **Verified by** `node --test scripts/test-webui-slide-show.mjs`(단축키 표 등록·모듈/텍스트 안전, F5·Shift+F5 시작 위치, 이동·화면 가리기·종료 키, 전환·전체 화면 성공/거부/미지원/해제, 발표자 보기, 빈 새 슬라이드, 복제·삭제·실행 취소·재실행·이동·키보드·끌어 놓기·우클릭 메뉴, 디바운스 썸네일·말줄임·툴팁, 비율 16:9/4:3/A4와 실행 취소, 자동 저장·저장 페이로드 순서), `node --test scripts/test-webui-session-context.mjs`(F5 예외 고정), 실서버 `--serve 8837` + 헤드리스 Chrome 1024×680·1440×900·1920×1080 실제 키·마우스 입력과 스크린샷(스테이지 비율 1.778/1.333/1.414, F5 전체 화면 진입, 슬라이드 쇼 레터박스), `node scripts/check-repo-hygiene.mjs`, `cargo run -p easyoffice-app -- --self-test`
 - **Revisit when** 프로젝터용 별도 발표자 창, 슬라이드 크기 PPTX 반영, 레이아웃 선택·개체 틀 편집, 레이저 포인터의 쇼 화면 연동이 추가될 때.
 
-## 56. rhwp WASM 벤더링·hwp-studio 오버레이 빌드·OFL 글꼴 번들 (PD-081, #129)
+## PD-081. rhwp WASM 벤더링·hwp-studio 오버레이 빌드·OFL 글꼴 번들 (#129)
 - **Context** rhwp 통합 2단계입니다(설계 `docs/rhwp-integration-design.md` §3.3~3.5, §4, §9, 작업 2). 1단계(PD-076)가 upstream을 고정했고, 이 단계는 편집기 엔진(WASM)과 임베드 전용 편집기 번들, 번들 가능한 글꼴을 만듭니다. 앱 런타임은 바뀌지 않습니다(UI·IPC 15종·Tauri 셸 불변, 임베딩은 3단계).
 - **Decision (`PD-081`)**
   1. **WASM은 미리 빌드해 커밋하고 CI는 빌드하지 않습니다.** `vendor/rhwp-core/`에 `rhwp_bg.wasm`·`rhwp.js`·`rhwp.d.ts`·`rhwp_bg.wasm.d.ts`·`package.json`·`LICENSE`와 `PROVENANCE.json`(rhwp 커밋·버전, 툴체인 1.93.1, wasm-pack 0.14.0, 빌드 명령·호스트, 파일별 크기·SHA-256)를 둡니다. `scripts/verify-rhwp-core.mjs`(Node 내장 모듈만)가 provenance와 `config/rhwp-upstream.json`(`wasmPackVersion` 추가) 일치, 파일 존재·크기·해시, 미등재 파일 부재를 fail-closed로 검사하고 `verify-rhwp-upstream.mjs`·위생 가드에서 호출됩니다. 갱신은 `scripts/vendor-rhwp-core.mjs`가 wasm-pack 출력 폴더에서 복사하고 provenance를 다시 쓰는 방식뿐입니다. `.gitattributes`가 벤더 파일과 글꼴의 줄바꿈 변환을 막아 Windows 체크아웃에서도 해시가 같습니다.
@@ -1354,7 +1357,7 @@
 - **Verified by** `node --test scripts/test-rhwp-upstream.mjs scripts/test-hwp-studio.mjs`(벤더 변조·누락·미등재·provenance 불일치, 번들 정적 검사 각 항목과 오탐 방지, 해시·예산, 오버라이드 목록 구조·원본 해시 드리프트, 글꼴 OFL·해시·문서, 위생 가드의 무시 경로·번들 추적·`.ts` 검사), `node scripts/build-hwp-studio.mjs`, `node scripts/hwp-studio-harness.mjs`, `node scripts/check-repo-hygiene.mjs`
 - **Revisit when** rhwp를 갱신할 때(WASM 재빌드·원본 해시 검토), 셸에 번들을 내장하는 3단계(Tauri CSP에 `'wasm-unsafe-eval'` 필요), 저장 가능한 HWPX(4단계)나 macOS 이전(9단계)을 다룰 때.
 
-## 57. 엔진 저수준 성능: CRC-32 하드웨어 가속·시트 슬롯 메모/DAG 계획 캐시·대형 워크로드 벤치와 release 게이트 (PD-082, #135)
+## PD-082. 엔진 저수준 성능: CRC-32 하드웨어 가속·시트 슬롯 메모/DAG 계획 캐시·대형 워크로드 벤치와 release 게이트 (#135)
 - **Context** release 기준 최적화 경로가 기준선 대비 1.6~4.1배였으나 debug에서 CRC-32 0.85배·시트 DAG 0.92배였고, 시트 "최적화" 경로는 위상 사전 평가 뒤 재평가·스택마다 시트 이름 `String` 복제·셀당 SipHash 조회 여러 번·메모 적중마다 값 복제로 오히려 일을 더 했습니다(설계 `docs/rhwp-integration-design.md` §6.2, 작업 8).
 - **Decision (`PD-082`)**
   1. **CRC-32 (`crc32.rs`)**: 조회 표를 연관 `const`가 아닌 `static CRC32_TABLES: [[u32; 256]; 16]`로 두고 `chunks_exact(16)` slicing-by-16 스칼라 코어를 쓴다. 입력이 64바이트 이상이면 실행 시간 검출로 x86_64 PCLMULQDQ 폴딩(`is_x86_feature_detected!("pclmulqdq")` + `sse4.1`, `#[target_feature]` 함수 하나)이나 aarch64 `crc` 명령(`is_aarch64_feature_detected!("crc")`)을 쓰고, 그 외에는 항상 스칼라로 폴백한다. `unsafe`는 두 개의 `#[target_feature]` 함수와 그 호출(SAFETY 주석: 검출 직후 호출, 16바이트 경계 검사)로 한정한다. 결과는 기존과 바이트 단위로 같다(`update(crc, bytes)`로 증분 계산 가능). aarch64 경로는 `cargo check --target aarch64-pc-windows-msvc`로 컴파일만 검증했고 이 저장소 CI에서 실행되지는 않는다.
@@ -1392,7 +1395,7 @@
 - **Verified by** `cargo test -p easyoffice-formats --test crc32_equivalence`(무작위 길이 0~4,200·정렬 오프셋 64종·0~700 전 길이·증분 분할·1MiB를 비트 단위 기준 구현과 대조, 하드웨어 경로 포함), `cargo test -p easyoffice-sheet --test sheet_slot_memo_and_plan_cache`(구 엔진에서도 같은 단언이 통과하는 특성화 테스트: 반복 재계산·편집 무효화·순환·깊은 사슬·1만 행·열 인덱스·오버플로 경로·시트 간 참조), 임시 400시드 무작위 시트(재계산·셀 평가·2시트 워크북, 순환 포함)를 구 엔진과 대조해 출력 일치(구 엔진의 큰 범위 순회를 정렬 순서로 고정해 비교, 재생 결과도 첫 실행과 일치), `cargo run --release -p easyoffice-app -- --self-test`(성능 게이트), `benchmark_large` 테스트.
 - **Revisit when** 하드웨어 경로가 없는 CPU에서 스칼라 6배 미만으로 떨어지거나, 시트 공개 API를 바꿀 수 있어 결과 맵·텍스트 값 표현을 교체할 때, 문서 압축이 변환 시간의 지배 요인이 될 때.
 
-## 58. 한글 패널 iframe 임베딩·CSP·폴백 (PD-083, #130)
+## PD-083. 한글 패널 iframe 임베딩·CSP·폴백 (#130)
 - **Context** rhwp 통합 3단계입니다(설계 `docs/rhwp-integration-design.md` §2, §4). 2단계(PD-081)가 만든 `ui/hwp-studio` 번들을 한글(HWP) 모듈에 넣어 데스크톱 셸과 `--serve`에서 같은 출처 iframe으로 띄웁니다. 파일 열기·HWPX 저장은 4단계(#131)입니다.
 - **Decision (`PD-083`)**
   1. **호스트 `ui/hwp-host.js`**: 한글 모듈을 처음 활성화할 때만 `#pane-hwp`에 iframe(`./hwp-studio/index.html`)을 만들고(지연 생성), `rhwp-connect` 핸드셰이크(`MessageChannel`, 대상 출처는 `"*"`(불투명 출처 프레임에는 이것만 가능, 핸드셰이크 본문은 버전·세션 id·capability 이름뿐), 포트는 transfer) 후 MessagePort로 `ready` → `createBlankDocument({skipUnsavedGuard:true})`를 호출합니다. 요청마다 증가하는 id와 타임아웃(일반 15초, 준비·불러오기·내보내기 60초, 연결 60초)이 있고 오류는 `textContent`로만 그립니다(`innerHTML` 없음). 연결 실패는 "다시 연결"(새 iframe)과 "텍스트 전용 편집기 사용" 버튼이 있는 오류 상태입니다. iframe에는 Tauri IPC·엔진 브리지를 주지 않으며 번들에 `__TAURI` 참조가 없음을 정적 검사가 보장합니다.
@@ -1428,7 +1431,7 @@
 - **Verified by** `node --test scripts/test-webui-hwp-host.mjs`(핸드셰이크·요청/응답·타임아웃·재연결·번들 없음 폴백·도구 숨김·저장), `cargo test -p easyoffice-app`(경로 순회·MIME·바이너리 정확·CSP), `cargo test -p easyoffice-desktop`(smoke 상태 기계), `EasyOffice.exe --smoke`(PD-083 개정부터 포트 RPC만 사용), `cargo test -p easyoffice-desktop`(`studio_frame.rs`: 편집기 응답에만 CORS 부여·IPC 없는 CSP), `node --test scripts/test-webui-security-ipc.mjs`(샌드박스 토큰·프레임 DOM 접근 금지·capability `local` 전용·`invoke` 호출 지점 하나와 토큰 헤더), `scripts/test-hwp-studio-storage-shim.mjs`, `scripts/test-webui-frame-probe.mjs`, `cargo test -p easyoffice-desktop`(`shell_caller.rs`: 토큰 검증과 모든 명령의 `ShellCaller`), Windows CI의 `frame_ipc` 스모크 표식, 헤드리스 Chrome 실제 입력(빈 문서 → 한글 입력 → 앞 3글자만 20pt·굵게 → 앱 저장 → 내보낸 HWP 재해석), 위생 가드의 정확한 CSP 검사.
 - **Revisit when** 4단계(HWP/HWPX 열기·저장·더티 가드·`getDocumentState` 연동), 호스트와 편집기 단축키 통합, 앱 CSP를 문서별로 나눌 수 있게 될 때, macOS 이전(출처 검사). Tauri가 프레임 단위 권한을 지원할 때, 편집기 설정을 셸이 대신 기억해야 할 때.
 
-## 59. 시트 범위 서식: 선택 범위 전체에 굵게·기울임·밑줄·취소선·글자 크기 (PD-084, #143)
+## PD-084. 시트 범위 서식: 선택 범위 전체에 굵게·기울임·밑줄·취소선·글자 크기 (#143)
 
 - **Status** Implemented
 - **Context** 시트에서 Shift+방향키로 범위를 고른 뒤 Ctrl+B·리본 서식을 눌러도 활성 셀 하나에만 적용되었습니다. 서식은 렌더된 `td`의 인라인 스타일에만 쓰였고, 가상 스크롤(PD-078)에서는 화면 밖 셀이 DOM에 없어 범위 전체 적용이 불가능했습니다(#143).
@@ -1446,7 +1449,7 @@
 - **Verified by** `node --test scripts/test-webui-sheet-format.mjs`(범위 굵게 전체/없음/혼합 토글, 실행 취소·다시 실행 한 단계, 기울임·밑줄·크기·취소선 결합, 1만 행 범위의 화면 밖 행·스크롤 후 유지, 시트 탭 전환 유지, 혼합 `aria-pressed`, DOC 비영향), 헤드리스 Chrome(CDP `Input.*`)에서 Shift+방향키 선택 후 Ctrl+B로 12칸 모두 굵게, 1만×8 범위 굵게 적용이 실제 브라우저에서 약 0.36초(실행 취소 스냅샷 포함)이며 스크롤한 8,326행도 굵게였습니다.
 - **Revisit when** XLSX 저장 페이로드에 셀 스타일을 담을 때, 글꼴·색·채우기·테두리·정렬을 범위에 적용할 때, 열·행 단위 서식(전체 열 서식)을 도입할 때.
 
-## 60. 한글 열기·HWP/HWPX 저장·수정 상태·IndexedDB 자동 저장 (PD-085, #131)
+## PD-085. 한글 열기·HWP/HWPX 저장·수정 상태·IndexedDB 자동 저장 (#131)
 - **Context** rhwp 통합 4단계입니다(설계 `docs/rhwp-integration-design.md` §2.4~§2.7). 3단계(PD-083)의 임베드 편집기에 파일 열기·저장·수정 상태·자동 저장을 연결합니다. 사용자 결정: HWPX 저장 허용, HWP 열기 한도 64 MiB, 자동 저장은 EasyOffice 부모가 IndexedDB로 소유, rhwp가 못 여는 파일은 텍스트 전용으로 대체.
 - **Decision (`PD-085`)**
   1. **열기** (`ui/hwp-session.js`, 새 모듈): `file-open.js`의 `openDocumentFromBytes`(파일 선택·Ctrl+O·끌어놓기·셸 파일 연결 공용)가 확장자 `hwp/hwpx/hwt/hwtx`이면 세션으로 위임합니다. 순서는 ① 크기 검사(64 MiB, 초과 시 "최대 64 MiB" 안내, 빈 파일 거부) ② `detect_format` IPC(기존 15종 중 하나, 파일 이름 힌트 + 앞 16바이트 hex만 보내 64 MiB를 Base64로 보내지 않음, 매직 바이트 불일치는 fail-closed로 열지 않음) ③ 저장하지 않은 편집이 있으면 확인 ④ 편집기 준비(필요하면 한글 모듈 활성화·재연결) ⑤ `loadFile({data, fileName, skipUnsavedGuard:true})`을 복사본 ArrayBuffer transfer로 호출(호출자의 바이트는 유지, 대기 시간 10분 — 비밀번호 입력 대기). 탭 제목은 파일 이름입니다.
@@ -1475,7 +1478,7 @@
 - **Verified by** `node --test scripts/test-webui-hwp-session.mjs`(열기 라우팅·`detect_format` 힌트·64 MiB 한도·빈 파일·거부·텍스트 대체·비밀번호 취소/DRM·번들 없음, HWP/HWPX 저장 선택·검증 실패·HWPX→HWP 제안·취소/실패 기준선 유지·저장 중 편집, 수정 이벤트, 자동 저장 디바운스·크기 상한·저장 후 삭제, 복원 검증·손상 레코드·거절·오래된 본 정리, 변환기 원본), `node --test scripts/test-webui-hwp-host.mjs`, `node scripts/hwp-roundtrip-cdp.mjs`(헤드리스 Chrome 실제 입력: HWP·HWPX 열기 → 앞 3글자 20pt+굵게 → 저장(같은 형식·다른 형식) → 다시 열기, 글자·문단 모양·표 위치 동일, 11 MiB 문서 열기·저장, 편집 → 5초 후 IndexedDB 본 → 새로고침 → 복원 → 저장 → 본 삭제), 위생 가드.
 - **Revisit when** 5단계(단축키 포워딩·다중 탭: 탭 ID별 자동 저장 확장), 6단계(네이티브 어댑터·파일 연결·제자리 저장·원시 바이트 저장 IPC: Base64 3회 복사 제거), rhwp 갱신으로 `exportHwpxWithReport` 손실 보고를 노출할 수 있을 때.
 
-## 61. `--serve` 루프백 서버를 개발·테스트 전용으로 한정하고 릴리스 배포 중단 (PD-086, #151)
+## PD-086. `--serve` 루프백 서버를 개발·테스트 전용으로 한정하고 릴리스 배포 중단 (#151)
 - **Context** EasyOffice는 서버 없이 설치해 쓰는 프로그램이고 설치형 데스크톱 앱(#121)은 앱 내부 IPC만 쓰며 열린 네트워크 포트가 없습니다. 그런데 릴리스에는 루프백 HTTP 서버를 띄우는 `--serve` CLI zip이 보조 산출물로 남아 있었습니다.
 - **Decision (`PD-086`)**
   1. 제품은 서버리스 설치형입니다. `--serve`는 헤드리스 브라우저 UI 검증과 CI 스모크 같은 개발·자동 검증에만 쓰며 사용자에게 배포하지 않습니다.
@@ -1495,7 +1498,7 @@
 - **Verified by** `node --test scripts/test-release-serve-rule.mjs scripts/test-release-assets.mjs scripts/test-verify-linux-bundles.mjs scripts/test-desktop-file-associations.mjs`, `node scripts/check-repo-hygiene.mjs`, `cargo test -p easyoffice-app`(`--help` 문구), 기존 CI `--serve` 스모크, CI `verify-linux`(Linux 빌드·구조 검사), 릴리스 수동 실행 `publish=false`(세 OS 산출물과 구조 검사).
 - **Revisit when** 정식 웹 배포 계획이 생기거나 UI 검증 방식이 `--serve` 없이 가능해질 때, 서명 키를 도입해 자동 설치 업데이터를 만들 때, arm64에 AppImage·rpm 요구가 생길 때.
 
-## 62. Apple Pages(.pages) 읽기 지원 범위·스키마 검증 상태·법적 접근 (PD-087, #154)
+## PD-087. Apple Pages(.pages) 읽기 지원 범위·스키마 검증 상태·법적 접근 (#154)
 
 - **Superseded by PD-094 (부분)**: 이 항목 중 Swift 앱·`swift build`/`swift test`·`scripts/package-macos-release.sh`·Swift 대응 규칙에 해당하는 부분은 PD-094로 대체되었습니다. Rust 엔진·WebUI·Windows 관련 결정은 그대로 유효합니다.
 - **Context** Pages는 사양이 공개되지 않은 형식입니다. 2013년 이후 문서는 ZIP 안의 `Index/*.iwa`(Snappy 변형 청크로 감싼 protobuf 레코드)이고 객체 종류(type ID)와 필드 번호는 파일 안에 없습니다. 참고 구현 중 일부는 MPL-2.0이거나 문서가 비상업 조건(CC BY-NC-SA)이며, 추출된 `.proto` 파일의 권리 상태가 불명확합니다.
@@ -1520,7 +1523,7 @@
 - **Verified by** `cargo test -p easyoffice-formats --test pages_reader --test pages_security`(프레이밍·Snappy·protobuf·레코드·매핑·판별·거부·결정적 PRNG 퍼징·순환·한도), 실파일 3건 시험 `pages_fixtures`(본문·서식·제목·목록·표 셀 정확한 내용과 건너뛴 개체 경고), 환경변수 지정 실파일 시험 `pages_real_sample`(구조만 확인), `node --test scripts/test-webui-file-open.mjs`.
 - **Revisit when** 실파일이 늘어 남은 미확인 상수(기울임·취소선 전체 배치, 문자열·기간 셀, 천 단위 구분)를 확정할 때, 화면 대조본(Pages가 그린 표 쪽 이미지)을 확보했을 때, 구형 XML(v2), 이미지(`Data/`)·각주·머리글 지원, 병합 정보 보존, Pages 쓰기 검토.
 
-## 63. 문서별 개별 창 모델·열기 큐 보안·단축키 전달·아이콘 세트 (PD-088, #132, #126)
+## PD-088. 문서별 개별 창 모델·열기 큐 보안·단축키 전달·아이콘 세트 (#132, #126)
 - **Context** 문서 탭 줄 시도(모듈 전환 탭, 한 창에 여러 문서)는 결과물이 조잡해 폐기했고, 사용자가 "문서마다 개별 창"으로 방향을 바꿨습니다. 같은 시기에 셸 화면(#126)은 1024px에서 우측 컨트롤이 잘리고, 상태 표시줄이 글을 자르며, 이모지·문자 기호가 아이콘 노릇을 하고, 일부 아이콘 버튼에 이름이 없는 문제가 있었습니다. 참고 구현은 참조 앱의 다중 창 구조(창별 열기 큐, 창 생성, 끌어 놓기)입니다. 코드를 가져오지 않고 구조만 따랐고, 참조 앱과 달리 WebView에는 경로를 주지 않습니다.
 - **Decision (`PD-088`)**
   1. **창 모델**: 창 하나는 문서 하나, 변환기 하나 또는 시작 화면 하나만 보여 줍니다. 창이 보여 줄 것은 시작 주소의 `?module=DOC|HWP|SHEET|SLIDE|PDF|CONV|START&win=<창 이름>`이 정합니다. 메뉴 줄의 모듈 전환 탭·포맷 필터 칩·모듈 버튼은 없앴고 `mod-btn`·`tab-pill`·`tab-strip`은 더 이상 없습니다. 인수 없이 실행하면 일반 크기의 시작 창(홈 화면: 새 문서 6종·파일 열기·최근 문서 카드, PD-098로 컴팩트 창에서 바뀜)이 뜨고, 문서 창을 열면 시작 창은 스스로 닫힙니다. 마지막 창을 닫으면 앱이 종료됩니다(Tauri 기본 동작).
@@ -1551,7 +1554,7 @@
 - **Verified by** `node --test scripts/test-webui-windows.mjs scripts/test-webui-shell-chrome.mjs scripts/test-webui-hwp-shortcuts.mjs scripts/test-webui-hwp-host.mjs`와 기존 WebUI 묶음, `cargo +stable-x86_64-pc-windows-msvc test -p easyoffice-desktop`(`windows`·`recent`·`window_commands`·`smoke`·`main` 단위 테스트), `node scripts/check-repo-hygiene.mjs`, `node scripts/build-hwp-studio.mjs`, `EasyOffice.exe --smoke`(두 번째 창 왕복, 단계별 표식은 12항), 1024/1440/1920 라이트·다크 화면 확인과 직접 실행한 창의 PrintWindow 캡처.
 - **Revisit when** 파일 연결(#111 후속)이나 단일 인스턴스 라우팅을 넣을 때(명령줄·두 번째 실행을 첫 프로세스의 `open_path`로 보내는 것이 자연스러운 확장), 창당 메모리가 문제가 되어 상한이 필요할 때, 편집기와 셸의 테마를 맞출 때.
 
-## 64. 시트 셀 서식·열 너비를 XLSX/ODS에 저장하고 다시 읽기 (PD-089, #148)
+## PD-089. 시트 셀 서식·열 너비를 XLSX/ODS에 저장하고 다시 읽기 (#148)
 
 - **Status** Implemented
 - **Context** 시트 셀 서식(굵게·기울임·밑줄·취소선·글자 크기, `PD-084`)과 열 너비(`PD-078`)는 작업 공간 스냅샷에만 있고 저장 페이로드 `sheets[].cells`가 `{ref, raw}`만 담아 파일에 기록되지 않았습니다. 저장하고 다시 열면 서식이 사라졌습니다(#148).
@@ -1570,7 +1573,7 @@
 - **Verified by** `cargo test -p easyoffice-formats --test sheet_style_roundtrip`(플래그·크기·중복 제거 1,000셀→`cellXfs` 3개·열 너비·요소 순서·수식 캐시·값 없는 서식 셀·타 앱 스타일 읽기·ODS 반복/단위), `cargo test -p easyoffice-app`(`convert_open`의 저장 → 디코드 → 재저장 왕복·검증 오류·격자 절단), `node --test scripts/test-webui-sheet-styles.mjs`(범위 굵게·열 너비 페이로드, 열 때 적용, 열기 → 편집 → 저장), 헤드리스 Chrome(CDP `Input.*`) 실제 UI 왕복.
 - **Revisit when** 글꼴·색·채우기·테두리·정렬·숫자 서식 같은 서식을 시트 편집기에 추가할 때, 열 너비를 실행 취소/자동 저장에 포함할 때, XLS(BIFF8) 서식 기록이 필요할 때.
 
-## 65. DOC/PPT를 실제 MS-DOC·MS-PPT 바이너리로 기록 (PD-090, #112)
+## PD-090. DOC/PPT를 실제 MS-DOC·MS-PPT 바이너리로 기록 (#112)
 
 - **Status** Implemented
 - **Context** `.doc` 출력은 `WordDocument` 스트림 하나(64바이트 FIB 스텁 + UTF-16 본문 + EasyOffice 전용 트레일러)였고 `.ppt` 출력은 `RT_Document` 안에 슬라이드를 중첩한 전용 구조였습니다. `1Table`·조각 표(Clx)·FKP가 없고, `Current User`·persist directory·UserEditAtom도 없어 다른 워드·프레젠테이션 프로그램이 열지 못했으므로 `PD-071`에서 "호환성 제한"으로 표시했습니다(#112).
@@ -1591,7 +1594,7 @@
 - **Verified by** `cargo test -p easyoffice-formats --test legacy_writers`(FIB·Clx·FKP 512 경계·`PlcfSed`, Current User → UserEditAtom → PersistDirectory → SlideContainer, 한글·빈 문서·슬라이드 0장·다수 왕복, Clx 단독 복원, 이전 중첩 형식), `cargo test -p easyoffice-formats --test output_container_spec_validity`, `cargo test -p easyoffice-app`, 외부 검증: `soffice --headless --convert-to txt` / `pdf`로 문단·슬라이드 제목·글머리표 확인.
 - **Revisit when** 서식·표·그림·노트 페이지·전환을 규격 구조로 기록할 때, 요약 정보(작성자·제목) 기록이 필요할 때, 워드·프레젠테이션 프로그램에서 복구 경고가 보고될 때.
 
-## 66. CI 작업 분리와 Rust 캐시: 공통 게이트는 Linux에서 한 번, OS별 작업은 해당 OS에서만 (PD-091)
+## PD-091. CI 작업 분리와 Rust 캐시: 공통 게이트는 Linux에서 한 번, OS별 작업은 해당 OS에서만
 
 - **Status** Implemented
 - **Superseded by PD-094 (부분)**: 이 항목 중 Swift 앱·`swift build`/`swift test`·`scripts/package-macos-release.sh`·Swift 대응 규칙에 해당하는 부분은 PD-094로 대체되었습니다. Rust 엔진·WebUI·Windows 관련 결정은 그대로 유효합니다.
@@ -1606,7 +1609,7 @@
 - **Verified by** `.github/workflows/ci.yml`의 세 작업 결과, `node scripts/check-repo-hygiene.mjs`. 위생 가드는 릴리스와 같은 CRLF 체크아웃에서도 돌도록 Windows 작업에서 한 번 더 실행하고, 가드의 줄 단위 개수 검사는 원본을 LF로 정규화해 읽습니다(v2.0.0 릴리스 실패 후 보완).
 - **Revisit when** 문서 전용 PR이 잦아질 때, 캐시 적중률이 낮을 때.
 
-## 67. 예약 글꼴 이름(RFN)이 있는 번들 글꼴은 공식 배포 파일 또는 그 WOFF2 압축본만 사용 (PD-092, #144)
+## PD-092. 예약 글꼴 이름(RFN)이 있는 번들 글꼴은 공식 배포 파일 또는 그 WOFF2 압축본만 사용 (#144)
 
 - **Status** Implemented
 - **Context** #129에서 rhwp가 웹용으로 변환한 OFL 글꼴 사본을 그대로 번들했습니다. 공식 TTF와 표(table) 단위로 비교하니 나눔고딕·나눔명조·나눔고딕코딩·Spoqa Han Sans 사본은 글리프 일부를 뺀 서브셋(나눔고딕 약 400개, 나눔고딕코딩 약 7,000개 적음)이었고 D2Coding 사본은 `glyf`가 달랐습니다. OFL 3조는 예약 이름(RFN)이 있는 글꼴의 수정본(Modified Version)에 원래 이름을 쓰지 못하게 하고, OFL FAQ 2.2·2.2.1은 형식 변환을 원칙적으로 수정으로 보되 "원래 글꼴 데이터가 WOFF 압축 외에는 바뀌지 않은" WOFF/WOFF2만 예외로 둡니다.
@@ -1621,7 +1624,7 @@
 - **Verified by** `node scripts/verify-fonts.mjs`, `node --test scripts/test-hwp-studio.mjs`(RFN 출처 검사 거부·허용 경우), 생성 시 fontTools 표 비교.
 - **Revisit when** 글꼴을 추가·갱신할 때, 공식 배포처가 woff2를 직접 제공할 때.
 
-## 68. 한글 창 크롬 정리·상태 표시줄·시작 아이콘과 데스크톱 파일 수명주기: 단일 인스턴스·제자리 저장·파일 연결 (PD-093, #158, #133)
+## PD-093. 한글 창 크롬 정리·상태 표시줄·시작 아이콘과 데스크톱 파일 수명주기: 단일 인스턴스·제자리 저장·파일 연결 (#158, #133)
 
 - **Status** Implemented
 - **Context** 한글 창에는 셸 메뉴 줄과 rhwp 메뉴 줄, 셸 상태 표시줄과 편집기 상태 줄, 셸 테마와 편집기 테마가 겹쳐 있었고, 상태 표시줄에는 진단 항목(`모듈: …`, `포맷: …`, `IME…`, `엔진: 로컬 서버…`)이 섞여 1024px에서 잘렸습니다. 시작 창의 문서·한글·PDF 카드는 같은 아이콘이었습니다. 또 데스크톱은 실행할 때마다 새 프로세스가 뜨고, 저장은 매번 대화상자를 열었으며, 더블클릭으로 파일을 열 수 없었습니다(PD-088 Revisit 항목, #111 후속).
@@ -1647,7 +1650,7 @@
 - **Verified by** `node --test scripts/test-webui-hwp-shell.mjs`(허용 목록·인수 검사·편집기/셸 목록 일치, 테마 전달과 `theme=` 주소, 숨김 규칙, 토스트, 상태 표시줄 항목, 시작 아이콘), `scripts/test-webui-desktop-bridge.mjs`(`inPlace` 인수·`로컬 서버` 부재), `cargo test -p easyoffice-desktop`(`window_commands`의 두 번째 실행 인수 → 열기 큐, `save_file`의 임시 파일 + 이름 바꾸기·외부 변경 확인·삭제된 원본, `tracked_files`의 지문, 권한 목록 1:1), `node scripts/check-repo-hygiene.mjs`(연결 확장자 검사). NSIS 설치 파일의 연결 등록, 실제 두 번째 실행, 네이티브 확인 창은 Windows CI/수동 확인 대상입니다.
 - **Revisit when** 외부 변경을 저장 전 외에도 알려야 할 때(감시자), HWPX로 연 문서를 HWPX로 제자리 저장하게 할 때, 한글 창에서도 팔레트·테마 컨트롤이 필요해질 때, macOS 번들(#136)이 같은 창 모델을 쓸 때, 연결 확장자를 넓힐 때.
 
-## 69. macOS도 Tauri 데스크톱 셸로 배포: Swift 앱 삭제·서명 없는 .dmg·파일 연결 계약 (PD-094, #136)
+## PD-094. macOS도 Tauri 데스크톱 셸로 배포: Swift 앱 삭제·서명 없는 .dmg·파일 연결 계약 (#136)
 
 - **Status** Implemented. 서명 보류는 PD-143으로 재확인(2026-11-09).
 - **Context** 저장소에는 두 개의 데스크톱 앱이 있었습니다. Windows는 Rust 엔진 + WebUI를 Tauri 셸(PD-074)로 배포하고, macOS는 같은 기능을 Swift/SwiftUI로 따로 구현했습니다. 이후 기능(한글 편집기, 문서별 창, 제자리 저장, 파일 연결)은 모두 WebUI와 Rust 쪽에만 생겼고, Swift 앱은 이를 따라가지 못한 채 CI 시간과 검증 규칙(Rust↔Swift 동등성)만 계속 소모했습니다.
@@ -1668,7 +1671,7 @@
 - **Verified by** `node --test scripts/test-desktop-file-associations.mjs scripts/test-webui-windows.mjs`, `cargo test -p easyoffice-desktop`(번들 설정·Finder URL 변환), `node scripts/check-repo-hygiene.mjs`, `node scripts/generate-desktop-icons.mjs --check`, macOS CI(`ci.yml` `verify`).
 - **Revisit when** 유료 개발자 계정을 확보해 서명·공증을 켤 때, `--smoke`가 macOS 러너에서 불안정할 때(저장소 변수 `MACOS_SMOKE=off`로 건너뛸 수 있음), 사용자가 macOS 전용 네이티브 기능을 다시 요구할 때, Mac App Store 배포를 검토할 때.
 
-## 70. 오픈소스 구현 이식으로 엔진 성능 개선: 무의존 유지 + 허용 라이선스 소스 이식 (PD-095)
+## PD-095. 오픈소스 구현 이식으로 엔진 성능 개선: 무의존 유지 + 허용 라이선스 소스 이식
 
 - **Status** Implemented (base64, DEFLATE 압축기)
 - **Context** 엔진 크레이트는 외부 크레이트 의존성 0(PD-053)입니다. 같은 일을 하는 검증된 오픈소스 Rust 구현과 핫패스를 같은 데이터(1MB DOCX, 10만 셀 XLSX, 1MiB 바이트)로 비교한 결과, base64 인코드·디코드가 3~7배, DEFLATE 압축이 약 6배 느렸고 CSV·XML 이스케이프·UTF-16 디코드는 이미 더 빨랐습니다.
@@ -1686,7 +1689,7 @@
 - **Verified by** `cargo test -p easyoffice-formats base64_codec`(RFC 4648 벡터, 0~199바이트 전 꼬리 길이에서 이전 인코더와 바이트 동일·왕복, 잘못된 입력에서 이전 디코더와 결과 동일), `cargo run -p easyoffice-app -- --self-test`
 - **Revisit when** 상류 구현이 크게 빨라지거나 보안 수정이 나올 때, 남은 후보를 측정할 때(해제는 miniz_oxide 대비 시트 XML에서 약 25% 느려 다중 리터럴 해독을 더 시도할 여지가 있음).
 
-## 71. 문서 그림 블록: PNG/JPEG 모델, 상한, 형식별 처리 (PD-096)
+## PD-096. 문서 그림 블록: PNG/JPEG 모델, 상한, 형식별 처리
 
 - **Status** Implemented (모델, DOCX·ODT·HWPX·PDF 작성, DOCX·ODT·HWPX·Pages 읽기, 편집기 JSON 왕복과 표시).
 - **Context** 서식 문서 모델(`RichDocument`)에 그림이 없어 Pages·DOCX 그림이 변환 때 사라졌습니다(#168).
@@ -1703,7 +1706,7 @@
 - **Verified by** `cargo test -p easyoffice-formats --test rich_images --test pages_fixtures`(작성기별 파트·참조·바이트 일치, DOCX 왕복, 손상·과대·과다 그림 거부, PDF 스트림, Pages 픽스처의 정확한 바이트·위치), `cargo test -p easyoffice-formats pdf_image`(PNG 필터 5종 복원).
 - **Revisit when** 글 감싸기·자르기 지원을 요구받을 때, GIF·WebP 요구가 생길 때, 편집기에 그림 삽입 UI를 넣을 때.
 
-## 72. Pages 가져오기 2단계: 도형 글자, 각주·머리글·바닥글 부록, 글꼴·첨자·들여쓰기·줄 간격 (PD-097)
+## PD-097. Pages 가져오기 2단계: 도형 글자, 각주·머리글·바닥글 부록, 글꼴·첨자·들여쓰기·줄 간격
 
 - **Status** Implemented (픽스처 3개로 확인된 범위). 표 셀의 문자열(3)·기간(7)·오류 종류는 픽스처에 없어 구현하지 않았습니다.
 - **Context** PD-096 다음 단계로 Pages 개체 중 본문 흐름 밖에 있던 글자와 문단·글자 서식을 가져옵니다(#168).
@@ -1721,7 +1724,7 @@
 - **Verified by** `cargo test -p easyoffice-formats --test pages_fixtures --test rich_script_and_layout`(도형·텍스트 상자 위치, 부록 문단, 글꼴·첨자·들여쓰기·줄 간격의 픽스처 값, 작성기별 XML과 DOCX·ODT 읽기).
 - **Revisit when** 문자열·기간·오류 셀이 있는 Pages 문서를 구하게 되었을 때, 각주 표식 위치를 연결할 때, ODT·HWPX 문단 서식 읽기를 추가할 때.
 
-## 73. UI 기준을 참조 앱/rhwp-studio 크롬으로 통일하고 자체 디자인 시스템을 폐기 (PD-098)
+## PD-098. UI 기준을 참조 앱/rhwp-studio 크롬으로 통일하고 자체 디자인 시스템을 폐기
 
 - **Status** Partially implemented (1단계: 토큰·테마·폰트, 2단계: 홈 화면·최근 문서 대화상자·제품 정보 버전 줄·시작 창 정상 크기, 3a단계: 메뉴 바·도구 상자·서식줄·상태줄 표면을 rhwp-studio 규칙으로 맞추고 리본 명령을 메뉴로 노출, 3b단계: 리본·빠른 실행 도구 모음·측면 패널 제거와 도구 대화상자 전환, 4a단계: 시트 화면 재입힘, 4b단계: 슬라이드 화면 재입힘, 4c단계: PDF 스튜디오·변환기 재입힘). 5단계(macOS 네이티브 메뉴·업데이트 알림)는 단계별 PR로 같은 절을 갱신합니다.
 - **Context** 사용자 결정: 자체 디자인 설계 없이 앱 전체를 참조 앱(참조 앱, MIT) 구조로 갑니다. 참조 앱의 UI는 rhwp-studio 크롬(메뉴 줄, 아이콘 도구 상자, 서식 도구줄, 상태 표시줄, 색 토큰)에 홈 화면·최근 문서·업데이트 알림 등을 얹은 것이고, EasyOffice의 `third_party/rhwp`는 참조 앱과 같은 v0.8.7이라 같은 CSS를 이미 갖고 있습니다. 계획 전체는 `참조 앱-plan` 검토 결과를 따릅니다.
@@ -1745,7 +1748,7 @@
 - **Verified by** `node --test scripts/test-webui-theme.mjs scripts/test-webui-shell-chrome.mjs scripts/test-webui-hwp-shell.mjs scripts/test-webui-menu-bar.mjs scripts/test-webui-tool-dialogs.mjs`(모드 저장·OS 추종·라디오 메뉴, 리터럴 색·`--eo-` 잔재 없음, 정의된 토큰만 사용, 종이 팔레트, 대비), `node scripts/check-repo-hygiene.mjs`.
 - **Revisit when** 2단계 이후 PR이 메뉴·도구 상자·시작 화면을 바꿀 때마다 이 절의 상태와 `design-system.md`를 갱신합니다.
 
-## 74. 데스크톱 창 크기·위치·최대화 상태 기억과 macOS 최근 항목 (PD-099)
+## PD-099. 데스크톱 창 크기·위치·최대화 상태 기억과 macOS 최근 항목
 
 - **Status** Implemented
 - **Context** 데스크톱 셸은 창을 열 때마다 기본 크기(1280x860)로 화면 가운데에 띄워, 창 크기를 바꾸거나 다른 모니터로 옮겨 써도 다음 실행에 사라졌습니다. 참조 셸(참조 앱)은 Tauri `window-state` 플러그인으로 창 위치를 기억합니다. 다만 그 플러그인은 창 이름(label)을 키로 한 JSON 맵을 저장하는데, 우리 문서 창 이름은 실행마다 새로 만들어지므로(`doc-<번호>-<시각>`) 맵이 계속 커지기만 하고 다시 쓰이지 않습니다.
@@ -1761,7 +1764,7 @@
 - **Verified by** `cargo test -p easyoffice-desktop window_state`(레코드 바이트 배치·왕복, 손상 레코드 거부, 반올림·범위, 모니터 판정·오버플로, 데이터 폴더 왕복). 실제 창 복원은 Windows·macOS 수동 확인 대상입니다.
 - **Revisit when** 창 종류별로 다른 크기를 기억해야 할 때, 여러 창의 배치를 세션으로 복원할 때.
 
-## 75. 암호가 걸린 HWP 열기: 업스트림 흐름 사용과 암호 비보관 (PD-100)
+## PD-100. 암호가 걸린 HWP 열기: 업스트림 흐름 사용과 암호 비보관
 
 - **Status** Implemented (기존 오버레이 흐름 확인과 가드 테스트 추가)
 - **Context** 참조 앱은 `document-open.ts` 어댑터로 암호 문서를 열지만, EasyOffice가 고정해 쓰는 rhwp-studio의 열기 깔때기(`apps/hwp-studio/src/main.ts`의 `loadDocumentForOpen`)가 같은 흐름을 이미 갖고 있고 고정 WASM(`vendor/rhwp-core`)에도 `HwpDocument.openWithPassword`가 있습니다. 같은 일을 하는 코드를 한 벌 더 옮기면 두 흐름이 남으므로 참조 앱 어댑터는 옮기지 않았고(THIRD_PARTY_NOTICES에 새 파일 없음) 업스트림 흐름을 정책과 테스트로 고정했습니다.
@@ -1772,7 +1775,7 @@
 - **Verified by** `node --test scripts/test-hwp-studio.mjs`(실제 흐름 코드를 모의 엔진·대화상자로 실행: 암호 없음·정답·오답 후 재시도·취소·미지원/DRM/손상·암호 비반향, 암호가 임베드·셸 파일에 없음, 고정 WASM과 번들에 흐름 존재), 업스트림 `rhwp-studio/tests/hwp-password-open.test.ts`.
 - **Revisit when** 암호로 저장을 지원하거나 업스트림 열기 깔때기가 바뀔 때(오버레이 해시 갱신과 함께 이 절을 갱신합니다).
 
-## 76. 한글 문서 검색 가능한 PDF 내보내기: 데스크톱 셸의 svg2pdf 의존성 정책 (PD-101)
+## PD-101. 한글 문서 검색 가능한 PDF 내보내기: 데스크톱 셸의 svg2pdf 의존성 정책
 
 - **Status** Implemented (셸 변환·저장 명령·상한, 글꼴 이름 대체표, 한글 창 파일 메뉴 "PDF로 내보내기" 연결; 번들 TTF 글꼴은 두지 않기로 결정)
 - **Context** 한글 문서를 PDF로 만들 때 글자가 그림이 되면 검색·복사가 안 됩니다. 참조 앱은 rhwp의 페이지 SVG를 `svg2pdf`로 바꿔 글꼴 부분집합과 `ToUnicode` 맵이 든 PDF를 만듭니다. rhwp는 같은 변환기의 결정론·그러데이션 수정본을 `vendor/svg2pdf`로 고정해 두며, 우리는 rhwp `1a76570`의 그 사본을 저장소의 `vendor/svg2pdf`로 복사해 씁니다(CI는 서브모듈을 받지 않음, 수정 없음).
@@ -1784,7 +1787,7 @@
 - **Verified by** `cargo test -p easyoffice-desktop pdf_export save_file`(상한, 쪽 오류 전파, `/ToUnicode`·글꼴 임베드·쪽 수·MediaBox, 결정론, 글꼴 DB 1회), 명령·capability 1:1 테스트.
 - **Revisit when** 시스템에 한국어 글꼴이 없는 환경(리눅스 등)을 지원할 때(번들 TTF 또는 woff2 해제), 하이퍼링크 주석을 넣을 때, 쪽 범위 선택을 추가할 때.
 
-## 77. 네이티브 메뉴 막대: 한 벌의 표와 같은 핸들러, 이벤트 권한 없음 (PD-102; 모든 OS 설치는 PD-121에서 macOS만으로 정정)
+## PD-102. 네이티브 메뉴 막대: 한 벌의 표와 같은 핸들러, 이벤트 권한 없음 (모든 OS 설치는 PD-121에서 macOS만으로 정정)
 
 - **Status** PD-121(95번)이 "모든 OS에 설치·페이지 메뉴 줄 숨김" 전제를 정정했습니다: 참조 앱의 네이티브 메뉴는 macOS에만 있고 페이지 메뉴 줄은 모든 OS에서 그립니다. 아래 (1)·(7)·(8)·(10)과 Windows·Linux 서술은 PD-121로 바뀌었고 나머지는 macOS에서 그대로입니다. Implemented, 개정 2026-11-08 (QA 요청: 참조 앱과 같은 동작. macOS·Windows·Linux 실기기 확인 전: 이 환경은 메뉴 구성 함수를 컴파일·clippy·단위 테스트로만 검증했습니다)
 - **Context** 처음에는 macOS에만 메뉴 막대를 설치하고 Windows·Linux는 페이지가 그리는 메뉴를 썼는데, macOS에서는 두 메뉴가 겹쳤습니다. 참조 앱은 모든 OS에 네이티브 메뉴를 설치하고 창 안 메뉴는 그리지 않습니다.
@@ -1795,7 +1798,7 @@
 - **Verified by** `cargo test -p easyoffice-desktop native_menu`(id 유일·형식, 단축키 형식·중복 없음, 동작 이름 형식, 표의 id만 스크립트를 만들고 id는 인용됨, 메뉴 함수가 표의 id를 빠짐없이 그대로 씀, 편집 키는 단축키 없음), `node --test scripts/test-webui-native-menu.mjs`(Rust 표와 페이지 목록 일치, 페이지 메뉴 항목 ⊆ 표, 표의 페이지 항목 존재, 데스크톱 셸에서만 페이지 메뉴 숨김, 이벤트 권한 없음), `cargo test -p easyoffice-desktop app_quit menu_state native_menu`(종료 순서·취소·포커스 창 우선, 보고 검증, 체크 상태, 끝내기는 표 밖), `node --test scripts/test-webui-menu-state.mjs`(모듈별 비활성 id가 페이지 규칙과 일치, 테마 변경 보고, 한글 편집기 `embed` 보고, 취소 시 `end_close_prompt`), `cargo clippy -p easyoffice-desktop --all-targets -- -D warnings`.
 - **Revisit when** 표·글 상자·그림 메뉴를 넣을 때(한글 편집기의 자체 메뉴와 겹침 확인), 실기기에서 Windows·Linux 한글 편집기 창의 메뉴 숨김·`Ctrl+Q`·체크 표시·회색 항목이 기대대로인지 확인한 뒤(정보·테마·업데이트 확인 알림이 그 창에 필요하면 편집기 메뉴로 전달할지), 실기기에서 편집 항목이 한글 편집기와 충돌할 때.
 
-## 78. 업데이트: 하루 1회 릴리스 조회와 서명된 자동 설치 (PD-103)
+## PD-103. 업데이트: 하루 1회 릴리스 조회와 서명된 자동 설치
 
 - **Status** Implemented (데스크톱 앱 전용; 서명 릴리스에서의 실제 설치·재시작은 Windows·macOS·Linux 실기기와 첫 서명 릴리스 확인 전)
 - **Context** 사용자 결정(QA 요청): 업데이트는 참조 앱처럼 넣습니다. 처음에는 서명 키가 없어 알림과 릴리스 페이지 안내까지만 했으나(2026-11-08 이전), 서명 키 쌍이 생겨 참조 앱처럼 서명된 업데이터로 내려받아 설치하고 다시 시작합니다. 하루 1회 조회·끄기·404 처리·스모크 경로는 그대로 두고 알림 카드에 설치 동작을 더했습니다.
@@ -1807,7 +1810,7 @@
 - **Verified by** `cargo test -p easyoffice-desktop update_check`(버전 파서·비교, 앱 버전 문자열 기준 판단, URL 접두사, JSON 추출·상한·잘못된 입력, 하루 1회 기록, 실패 재시도 없음, 끄기, 스모크·데이터 폴더 없음, 기록 변조, 설치 상태가 페이지에 가는 모양과 보인 알림이 있어야 설치가 시작됨), `cargo test -p easyoffice-desktop update_install`(다운로드·서명 실패 시 설치 안 함, 다운로드 뒤 저장 안 된 창이 생기면 설치 안 함, 검증된 바이트 그대로 설치, 한 번에 하나·재시도, 크기 상한, 버전·주소 일치, 플러그인 오류 문구, 업데이트 설정 고정: 공개 키·엔드포인트·`requireSignedVersion`·위험 옵션 없음·capability에 `updater:` 없음·`createUpdaterArtifacts` 미설정), `cargo test -p easyoffice-desktop windows`(`has_unsaved`), `cargo test -p easyoffice-desktop shell_caller`(모든 명령이 토큰을 받음), `cargo test -p easyoffice-desktop smoke`(가짜 서버 왕복·404, 요청 줄·`User-Agent`·`Accept` 검사, 단계 장부·표식; 업데이터 플러그인 설정이 맞아야 앱이 시작함), 루프백 훅의 주소 거부(`update_check`), `node --test scripts/test-webui-update-notice.mjs`(카드 DOM·참조 앱 클래스·Esc·나중에·설치 시작·저장 안 된 창 거부 문구·진행률 폴링·실패 재시도·재시작 보류·모르는 상태 무시·토큰 전용), `node --test scripts/test-release-assets.mjs`(자산·서명 이름, 서명 없는 번들 거부, `latest.json` 구조·플랫폼 키·서명 필드·버전 불일치 거부, 체크섬에 모두 포함, workflow의 서명 환경 변수·키 필수·`createUpdaterArtifacts`·`latest.json` 순서), `node --test scripts/test-verify-linux-bundles.mjs`(서명 파일 필수), 명령·capability 1:1 테스트.
 - **Revisit when** 첫 서명 릴리스(`publish=false` 시험 실행 후)에서 실기기 설치·재시작을 확인한 뒤(Windows NSIS `passive`, macOS `.app` 교체, AppImage 교체, deb·rpm의 권한 상승 창), Apple Developer ID 서명·공증을 넣을 때(macOS 업데이트 경로 재확인), 서명 키를 교체할 때(공개 키와 이전 설치본의 수동 재설치), 릴리스에 사전 배포 채널을 둘 때.
 
-## 79. 한글 창 인쇄: 쪽을 나눠 받아 숨은 루트에서 창 인쇄, 취소 가능 (PD-104)
+## PD-104. 한글 창 인쇄: 쪽을 나눠 받아 숨은 루트에서 창 인쇄, 취소 가능
 
 - **Status** Implemented (브라우저 헤드리스에서 파일 메뉴 → 숨은 루트·@page 규칙 생성까지 확인, 데스크톱 실제 인쇄 대화상자는 Windows·macOS 수동 확인 전). (6)은 PD-139가 개정합니다: 데스크톱 셸은 `window.print()` 대신 `print_webview` 명령으로 인쇄합니다.
 - **Context** 한글 편집기는 `sandbox` iframe(팝업 거부, PD-083) 안에서 돌고, 편집기 안의 인쇄 명령은 포함 모드에서 숨겨져 있어(`EMBED_HIDDEN_FILE_COMMAND_IDS`) 한글 창에는 인쇄가 없었습니다. 참조 앱은 모든 쪽 SVG를 숨은 루트에 쌓고 쪽 크기로 `@page`를 만들어 창을 인쇄합니다. 같은 방식을 가져오되 큰 문서와 취소를 더 안전하게 다룹니다.
@@ -1818,7 +1821,7 @@
 - **Verified by** `node --test scripts/test-webui-hwp-print.mjs`(10쪽 배치 순서, 크기별 규칙, SVG 정리·id 분리, 취소·Esc·중복 요청, 지원 없음·빈 문서·상한·잘못된 쪽, 인쇄 실패·afterprint 정리, 단축키·capability), `node --test scripts/test-hwp-studio.mjs`(배치 mm·끝 처리·잘못된 범위, 라우터·capability), `scripts/test-webui-hwp-shell.mjs`(셸 명령 7개), 헤드리스 브라우저 확인(메뉴 → 숨은 루트).
 - **Revisit when** 쪽 범위·매수·양면 같은 인쇄 옵션을 앱에서 받을 때, 웹뷰가 이름 있는 `@page`를 지원하지 않는 사례가 확인될 때.
 
-## 80. 한글 창의 "도구 상자 라벨 표시" 토글, 다른 창에는 넣지 않음 (PD-105)
+## PD-105. 한글 창의 "도구 상자 라벨 표시" 토글, 다른 창에는 넣지 않음
 
 - **Status** Implemented (한글 편집기 오버레이)
 - **Context** 참조 앱은 보기 메뉴에 "도구 상자 라벨 표시"를 두고 아이콘 도구 상자의 글자 라벨과 서식 줄의 리본 라벨을 숨깁니다. 한글 편집기(rhwp-studio)의 도구 상자는 아이콘 아래에 `.tb-label`을 갖지만 이 토글은 참조 앱 쪽 기능이라 편집기에는 없었습니다. 문서·시트·슬라이드·PDF 창(DOM 메뉴)의 도구 상자는 처음부터 아이콘만 있어 숨길 라벨이 없습니다.
@@ -1829,7 +1832,7 @@
 - **Verified by** `node --test scripts/test-hwp-studio.mjs`(토글 왕복과 저장값, 저장 실패 시 기본값, 메뉴·명령·CSS·매니페스트 일치), `node scripts/build-hwp-studio.mjs`(번들 빌드와 검사).
 - **Revisit when** DOM 창 도구 상자에 글자 라벨을 넣을 때.
 
-## 81. 시작 창 최근 문서 카드의 미리보기: 파일에 든 그림만 읽어 보여 줌 (PD-106)
+## PD-106. 시작 창 최근 문서 카드의 미리보기: 파일에 든 그림만 읽어 보여 줌
 
 - **Status** Implemented (합성 컨테이너와 페이지 가짜 환경 테스트; 실제 문서·Windows·macOS 화면 확인 전). 한글 파일은 그림이 없을 때 첫 쪽을 그리도록 PD-142가 개정합니다(아래 Context의 "셸에 쪽을 그리는 엔진이 없다"와 Trade-offs의 "그림이 없는 파일은 스켈레톤" 중 한글 문서 부분, 페이지의 Base64 상한은 1MiB).
 - **Context** 참조 앱은 Rust 네이티브 rhwp로 첫 쪽 SVG를 그려 카드에 보입니다. EasyOffice의 셸에는 쪽을 그리는 엔진이 없고(한글 WASM은 편집기 안에만 있음), 문서·시트·슬라이드·PDF를 그리는 경로도 없습니다. 페이지에 파일 바이트를 넘기는 것은 PD-088의 경계(경로·내용은 Rust 안)를 넓힙니다. 한글(`PrvImage`)·HWPX(`Preview/PrvImage.*`)·OOXML(`docProps/thumbnail.*`)·ODF(`Thumbnails/thumbnail.png`) 파일은 만든 프로그램이 넣어 둔 작은 미리보기 그림을 이미 갖고 있습니다.
@@ -1840,7 +1843,7 @@
 - **Verified by** `cargo test -p easyoffice-desktop preview`(합성 OLE2 미니·일반 스트림, ZIP 저장·deflate, 매직·확장자·상한·압축 폭탄, 잘린·순환·잘못된 FAT·ZIP64, id 형식, 캐시 키·10개·미적중 기억, Base64 응답), 앱 명령·capability 1:1 테스트, `node --test scripts/test-webui-home-preview.mjs`(순차 요청·캔버스 교체, 실패별 스켈레톤 유지, 큰 응답 거부, 디코더·명령 없음, 새 목록의 취소, CSS 토큰).
 - **Revisit when** 그림 없는 파일이 많아 실제 쪽 미리보기가 필요할 때(한글만 편집기 코어로 그리는 안을 다시 검토).
 
-## 82. PR 커밋 메시지 가드와 웹 UI 테스트 전체 실행 (PD-107)
+## PD-107. PR 커밋 메시지 가드와 웹 UI 테스트 전체 실행
 
 - **개정 (2026-11-08)**: PR을 쓰지 않으므로 같은 가드가 `main` push의 커밋 범위(`before..sha`)를 검사합니다. PR 제목 검사는 없앴습니다.
 
@@ -1856,7 +1859,7 @@
 - **Verified by** `node --test scripts/test-commit-messages.mjs`(깨끗한 메시지 통과, 각 커밋·제목의 표기 보고, 공유 목록 전체 대소문자 무시 검사, git log 레코드 파싱·SHA 검사), 과거 표기 커밋 범위에서 실제로 실패하는지 수동 확인, `node --test "scripts/test-webui-*.mjs"`(319).
 - **Revisit when** main 이력을 정리할 필요가 생길 때(예: 저장소 이전), 금지 목록이 바뀔 때.
 
-## 83. 앱 아이콘을 rhwp 강조색으로 (PD-108)
+## PD-108. 앱 아이콘을 rhwp 강조색으로
 
 - **Status** Implemented
 - **Context** 앱 아이콘과 파비콘이 폐기된 라벤더(#5C6BC0, PD-098 이전 디자인 시스템)로 남아 있었습니다.
@@ -1866,7 +1869,7 @@
 - **Verified by** `node scripts/generate-desktop-icons.mjs --check`, `cargo test -p easyoffice-desktop`(ICNS 포함 검사), 위생 가드, 16·32·64px 육안 확인.
 - **Revisit when** 브랜드 아이콘을 새로 디자인할 때.
 
-## 84. 저장 안정성: 내용 해시 지문, 고유 임시 파일, 저장 전 구조 검증 (PD-109, #227)
+## PD-109. 저장 안정성: 내용 해시 지문, 고유 임시 파일, 저장 전 구조 검증 (#227)
 
 - **Status** Implemented
 - **Context** 외부 변경 감지 지문이 길이와 수정 시각만 봐서, 같은 크기·같은 시각으로 바뀐 파일을 놓쳤습니다. 임시 파일 이름이 `<원본>.easyoffice-saving`으로 고정이라 같은 폴더에 동시에 저장하면 서로의 임시 파일을 덮었습니다. 페이지가 보낸 바이트는 검증 없이 원본을 대체했습니다. 참조 구현(MIT)은 지문에 내용 해시를 더하고, 고유한 임시 파일을 쓰며, 저장을 확정하기 전에 한글 코어로 다시 읽어 봅니다.
@@ -1881,7 +1884,7 @@
 - **Verified by** `cargo test -p easyoffice-desktop`(`tracked_files`: 같은 길이·같은 수정 시각의 내용 변경 감지, 빈 파일·버퍼 경계·짧게 끊어 읽기에서 조각 해시 = 통째 해시; `save_file`: 고유 임시 이름 200개, 동시 저장 8스레드, 늦은 이름 바꾸기 실패에서 원본·임시 파일, 권한 유지, 지문 = 디스크; `save_verify`: 엔진이 쓰는 20개 형식 전부 통과, 다른 종류 패키지, 잘린 컨테이너, 거짓 서명, 부풀린 ZIP·OLE2 선언 크기, 머리 스트림 없는 한글, 압축률 1000배 넘는 한글 패키지 통과와 같은 패키지의 엔진 형식 거부, 반복이 많은 엔진 산출물 7종 통과, 한글 패키지의 크기 상한 유지; `save_file`: 임시 파일이 원래 권한으로 만들어짐), 실제 rhwp WASM 산출물(위 22,831바이트 HWPX)을 직접 통과시켜 확인.
 - **Revisit when** 셸이 rhwp 코어를 갖게 될 때(한글 문서 재파싱으로 승격), 정상 문서가 검증에 걸린다는 보고가 있을 때.
 
-## 85. 메뉴·명령 팔레트 키보드 접근성, 찾기 표기, 사용자 문구 (PD-110)
+## PD-110. 메뉴·명령 팔레트 키보드 접근성, 찾기 표기, 사용자 문구
 
 - **Status** Implemented
 - **Context** 페이지 메뉴(`--serve`·브라우저에서 쓰임)의 항목이 마우스로만 열리는 `div`였고, 명령 팔레트 목록에는 역할 정보가 없었습니다. 편집→찾기와 Ctrl/Cmd+F는 문서·시트·슬라이드에서 실제로는 명령 팔레트를 여는데 이름은 "찾기"였습니다. 오류 문구에는 `--serve`, `엔진 응답`, `데스크톱 셸`, `IPC` 같은 내부 용어가 그대로 보였습니다.
@@ -1896,7 +1899,7 @@
 - **Verified by** `node --test scripts/test-webui-menu-keyboard.mjs`(항목 역할·tabindex, 열기·이동·돌아옴, 하위 메뉴, Esc 단계와 포커스 복귀, 메뉴 간 이동, 비활성 항목, 팔레트 ARIA와 화살표, 찾기 표기, 사용자 문구 가드).
 - **Revisit when** 문서·시트·슬라이드 본문 찾기를 넣을 때.
 
-## 86. 한글 창의 표·배율 메뉴가 편집기 명령에 닿는다 (PD-111)
+## PD-111. 한글 창의 표·배율 메뉴가 편집기 명령에 닿는다
 
 - **Context** 네이티브 메뉴의 `실제 배율`(`Cmd+0`)·확대·축소·쪽 맞춤·폭 맞춤은 한글 편집기가 창을 차지하면 페이지의 `studioCommandApplies`가 거부해 회색이거나 아무 일도 하지 않았고, 표 메뉴에는 참조 앱의 셀 선택·셀 합치기·셀 나누기가 없었습니다.
 - **Decision (`PD-111`)** (1) 표 메뉴에 `셀 선택`(`CmdOrCtrl+Alt+T`), `셀 합치기`(기존 `table:merge`), `셀 나누기`를 참조 앱 순서로 둡니다. (2) 한글 편집기 창(`HWP_EMBED`)에서는 배율 5개와 셀 3개를 참조 앱과 같은 명령 id(`view:zoom-in`·`view:zoom-out`·`view:zoom-100`·`view:zoom-fit-page`·`view:zoom-fit-width`, `table:cell-selection-enter`·`table:cell-merge`·`table:cell-split`)로 임베드 포트의 `automation.execute`에 보냅니다. 이 대응표는 `shell-chrome.js`의 `EMBED_EDITOR_COMMANDS` 하나입니다. (3) 새 두 항목(`table:cell-select`, `table:cell-split`)은 편집기에만 있는 동작(`hwp-editor`)이라 다른 모듈 창에서는 회색입니다. 편집기가 그 순간 실행할 수 없는 명령(셀을 고르지 않은 합치기 등)은 편집기가 거절하고 셸은 무시합니다. (4) 편집기에는 `table:cell-selection-enter`가 없어(참조 앱도 같은 id만 보냅니다) 오버레이가 이 명령을 등록하고, 셀 선택을 F5 키 경로로 실행합니다. 글 상자·그림 항목은 참조 앱에 없어 넣지 않습니다.
@@ -1905,7 +1908,7 @@
 - **Verified by** `node --test scripts/test-webui-native-menu.mjs scripts/test-webui-menu-state.mjs scripts/test-hwp-studio.mjs`, `cargo test -p easyoffice-desktop native_menu`.
 - **Revisit when** 편집기 상태에 따라 메뉴를 회색 처리해야 할 때.
 
-## 87. 한글 저장 검증의 항목 상한은 편집기가 여는 상한과 같다 (PD-112)
+## PD-112. 한글 저장 검증의 항목 상한은 편집기가 여는 상한과 같다
 
 - **Context** 저장 전 구조 검증이 엔진 기본값(항목당 128MiB)을 그대로 써서, 편집기(rhwp)가 넣을 수 있는 더 큰 그림을 가진 정상 문서를 저장하지 못했습니다. 참조 앱의 저장 검증은 "다음에 여는 엔진이 받아들이는가"입니다.
 - **Decision (`PD-112`)** 한글(HWPX·HWTX)의 항목당 비압축 상한을 `HANGUL_EDITOR_MAX_ENTRY_BYTES`(512MiB, rhwp `MAX_BINDATA_SIZE`) 한 상수로 두고 저장 검증이 이를 씁니다. 항목 수(4096)와 전체 합계(512MiB), 빈 항목 검사는 그대로입니다. 압축비 규칙 없음은 PD-109 그대로입니다.
@@ -1914,7 +1917,7 @@
 - **Verified by** `cargo test -p easyoffice-desktop save_verify`(선언 크기 기준: 128MiB 초과~512MiB 통과, 512MiB 초과 거부).
 - **Revisit when** rhwp 상한이 바뀌거나 엔진 HWPX 읽기를 편집기와 같은 상한으로 올릴 때.
 
-## 88. 저장 확인 중의 두 번째 닫기는 닫지 않고, 응답 없는 페이지만 시간 뒤에 닫음 (PD-113)
+## PD-113. 저장 확인 중의 두 번째 닫기는 닫지 않고, 응답 없는 페이지만 시간 뒤에 닫음
 
 - **Context** 저장 확인이 떠 있는 창에 닫기가 다시 오면(Cmd+W, 닫기 버튼, Cmd+Q, 끝내기) 셸이 확인 없이 창을 닫아 저장 안 된 내용을 잃을 수 있었습니다. 그 동작은 페이지가 멈춰 확인을 못 띄울 때 창을 닫을 수 있게 하려는 탈출구였습니다. 참조 앱은 닫기 확인을 전부 페이지에서 처리하고(`CloseRequested`를 막고 확인을 기다림) 확인 중인 창에 다시 오는 요청이나 응답 없는 페이지를 위한 시간 제한이 없으며, 종료는 이미 진행 중이면 두 번째 요청을 무시합니다. 멈춘 페이지는 닫을 수 없습니다.
 - **Decision (`PD-113`)** (1) 확인이 떠 있는 동안의 닫기 요청은 창을 닫지 않고 앞으로 가져오며 확인을 그대로 둡니다(`CloseAction::KeepPrompt`). (2) 페이지는 저장 확인을 띄울 때 새 명령 `ack_close_prompt`(인수 없음)로 셸에 알립니다. 셸은 확인을 요청한 시각과 응답 여부를 창마다 기억합니다. (3) 응답이 없는 확인에 닫기가 다시 오면 `CLOSE_ACK_TIMEOUT`(10초) 전에는 확인을 다시 요청하고, 그 뒤에만 확인 없이 닫습니다. 응답이 늦게라도 오면 그 뒤로는 (1)입니다. (4) 취소·저장 실패(`end_close_prompt`)와 저장 완료 보고(수정 없음)는 기억을 지워, 다음 닫기는 처음처럼 확인을 요청합니다. 수정 있음 보고는 기억을 건드리지 않습니다. (5) 끝내기·Cmd+Q도 같은 `CloseRequested` 경로로 창을 닫으므로 같은 규칙이 적용됩니다. (6) 셸은 확인을 유지할 때도 페이지의 닫기 요청 스크립트를 다시 실행하고, 페이지는 이미 확인이 떠 있으면 같은 확인에 합류하면서 응답을 다시 보냅니다(페이지가 먼저 띄운 확인이나 대기 상태가 지워졌다 다시 생긴 경우도 보호됨). (7) 페이지가 (다시) 로드되기 시작하면 셸은 그 창의 대기 상태를 지웁니다. 다시 로드된 페이지는 확인을 잃었기 때문입니다.
@@ -1923,7 +1926,16 @@
 - **Verified by** `cargo test -p easyoffice-desktop windows::`(확인 중 두 번째 닫기는 유지, 응답 없는 페이지는 시간 뒤 닫힘, 늦은 응답, 응답 뒤 취소는 상태 해제, 응답은 요청 없이 효과 없음), `node --test scripts/test-webui-windows.mjs scripts/test-webui-menu-state.mjs`(확인을 띄울 때 한 번 알림, 겹친 요청은 같은 확인에 합쳐짐, 수정 없는 창은 알림 없음), 끝내기 경로는 `app_quit` 구조 테스트(`raise_and_close`만 씀).
 - **Revisit when** 멈춘 페이지 감지를 시간 말고 페이지의 심박 같은 신호로 바꿀 때, 시간 값이 실제로 너무 짧거나 길다는 신고가 있을 때.
 
-## 89. Pages 그림: 지원하지 않는 형식은 경고만, 대체 텍스트·잘림·쪽 위 개체 알림 (PD-115)
+## PD-114. 검색 가능한 PDF를 참조 앱 수준으로: 번들 글꼴, 글자별 대체 글꼴, 병렬 변환
+
+- **Context** 참조 앱의 PDF 내보내기(`pdf_export.rs`와 rhwp PDF 변환기)와 비교한 결과 우리에게 빠진 것은 (a) 한국어 글꼴이 없는 환경을 위한 번들 글꼴(참조 앱은 `fonts/pdf/`에 Noto Sans KR Regular TTF와 OFL을 싣습니다. PD-101은 TTF를 싣지 않았고 `pdf-fonts/` 폴더는 어디에도 없었습니다), (b) 쪽에 없는 글자를 다른 글꼴에서 찾는 색인(없으면 글자마다 설치된 모든 글꼴을 다시 열어 봅니다), (c) WMF·EMF 그림이 SVG 안의 SVG로 들어온 경우 안의 비트맵을 읽는 해석기, (d) 글꼴 서브셋 실패를 쪽 단위로 다루는 처리였습니다. 300쪽 합성 보고서(쪽당 46줄)를 내보내는 데 108.6초(시스템 시간 97초, 최대 상주 메모리 169MB)가 걸렸는데, 원인은 글꼴 파일을 접근마다 열고 매핑하고 해제하는 fontdb의 동작이었습니다. 링크 주석과 쪽 범위는 참조 앱에도 없습니다: rhwp 변환기는 링크 목록을 받을 수 있지만 참조 앱은 빈 목록을 넘기고, 쪽 범위는 백엔드 인수만 있고 화면이 항상 `null`을 넘깁니다.
+- **Decision (`PD-114`)** (1) 설치본에 `pdf-fonts/NotoSansKR-Regular.ttf`와 `NotoSansKR-OFL.txt`를 싣습니다(`tauri.conf.json` resources, 원본은 rhwp `ttfs/opensource/`이므로 `config/rhwp-upstream.json`의 sparse 목록에 TTF를 더함). PD-101 (7)의 "TTF는 번들하지 않고"는 이 항목으로 바뀌며, 시스템 한국어 글꼴이 우선이 아니라 번들 폴더가 글꼴 DB에 먼저 들어가고 일반 serif/sans/monospace는 Noto Sans KR로 갑니다. 스모크 `pdf` 단계는 DB에 번들 폴더의 글꼴이 있는지 확인하고 없으면 실패합니다(시스템 글꼴이 있는 러너에서도 설치 누락이 드러나도록). (2) 쪽에 없는 글자의 대체 글꼴은 rhwp `PdfFontFallbackIndex`를 옮긴 색인(`pdf_fonts.rs`)으로 찾습니다: (글자, 글꼴) 조합마다 한 번만 열고 결과를 비트로 기억하며, 서로 다른 글자 4,096개 또는 조회 262,144회를 넘기면 색인을 버리고 usvg 기본 선택기로 넘어갑니다(결과는 같고 느릴 뿐). (3) 내보내기 한 번 동안 글꼴 DB의 파일을 읽기 전용으로 매핑해 둡니다(`with_mapped_faces`, 내보내기가 끝나면 해제). (4) `data:image/svg+xml` 그림은 안의 `<image>`까지 읽되(rhwp `pdf_image_href_resolver`) 중첩 깊이 4를 넘는 그림은 버립니다. 파일 경로·`file:` href는 쪽과 중첩 SVG 모두에서 읽지 않습니다(쪽 SVG는 신뢰하지 않는 입력이며 편집기는 그림을 전부 데이터 URL로 넣습니다). rhwp 원본은 데이터가 깊은 만큼 재귀합니다. (5) 쪽의 글꼴 서브셋이 실패하면 그 쪽만 글자를 윤곽선으로 바꿔 다시 변환합니다(쪽은 맞게 보이지만 그 쪽은 검색되지 않음). 다시 실패하거나 다른 오류면 쪽 번호가 든 오류로 전체를 실패시킵니다: 참조 앱은 두 번째 실패에서 쪽을 건너뛰지만 쪽이 빠진 PDF는 만들지 않는다는 PD-101 (4)를 유지합니다. (6) 변환은 16쪽씩 묶어 최대 4개 스레드로 하고, 묶음이 끝날 때마다 쪽 객체를 출력에 바로 다시 번호 매겨 넣고 버립니다(쪽 순서와 결과 바이트는 단일 스레드와 같음). 살아 있는 변환 결과는 한 묶음뿐이라 쪽 수에 따라 메모리가 늘지 않습니다. (7) 링크 주석과 쪽 범위는 구현하지 않습니다(참조 앱에 없음). (8) 한글 창 상태줄은 쪽 SVG를 받는 동안 "PDF 만드는 중: n / N쪽"으로 쪽마다 알립니다(참조 앱이 쪽마다 진행 문구를 내는 것과 같은 수준).
+- **Why** 정책값·처리 방식은 참조 앱이 같은 문제를 어떻게 풀었는지를 따른다는 원칙입니다(번들 글꼴, rhwp 색인·해석기). 편차는 우리 쪽 근거가 있는 두 곳뿐입니다: 쪽을 건너뛰지 않음, 해석기에 깊이 상한. 병렬·매핑은 측정으로 정했습니다.
+- **Trade-offs** 최대 상주 메모리는 보통 문서(측정한 300쪽 보고서) 기준 442MB로, 단일 스레드(199MB)보다 4개 스레드와 매핑된 글꼴 쪽만큼 늘었고 쪽 수에는 비례하지 않습니다. 최악은 입력 상한이 정합니다: 동시에 변환하는 쪽 4개가 각각 쪽당 상한(SVG 64MiB)에 가까운 입력과 그 변환 작업 메모리를 갖고, 묶음 16쪽의 변환 결과가 출력에 들어가기 전까지 함께 살아 있습니다(입력 전체는 합계 상한 512MiB). 이 최악 값은 측정하지 않았습니다. 번들 글꼴은 Regular 한 벌의 한글·라틴·기호 부분집합이라 한자는 시스템 글꼴이 없으면 빠지고 굵게·기울임은 합성되지 않아 그 글꼴로 그려지는 굵은 글자는 보통 두께로 나옵니다. 사설 영역(PUA) 문자(①류)를 표준 문자로 바꾸는 ToUnicode 정리와 합성 굵게·기울임은 참조 앱(rhwp)에 있으나 아직 옮기지 않았습니다. 글꼴 서브셋 실패로 윤곽선이 된 쪽은 경고를 표준 오류에 남길 뿐 화면에 알리지 않습니다.
+- **Verified by** `cargo test -p easyoffice-desktop pdf_`(번들 글꼴만 있는 DB에서 한글이 `ToUnicode`에 들어감, 글꼴이 전혀 없으면 검사가 경고, 색인이 기본 선택기와 같은 글꼴을 고름·상한을 넘으면 기본 선택기로 넘어감, 적대적 글자 수 입력, 중첩 그림 깊이 상한, 묶음을 넘는 쪽 순서, 뒤 묶음의 가장 앞 실패 쪽 번호, 서브셋 실패 재시도 한 번), 경로 href 무시 시험, `node --test scripts/test-webui-hwp-session.mjs`(쪽 진행 문구), `scripts/test-verify-linux-bundles.mjs`·`test-desktop-file-associations.mjs`(설치 구조 검사가 번들 글꼴과 OFL을 요구: Linux 패키지 검사, macOS 앱·NSIS 설치 파일 목록 검사는 CI·릴리스 워크플로), 측정은 `cargo test --release -p easyoffice-desktop hundreds_of_pages -- --ignored --nocapture`: 300쪽 합성 보고서 108.6초 → 3.2초(색인+매핑, 단일 스레드) → 1.1초(4스레드), 최대 상주 메모리 169MB → 199MB → 442MB.
+- **Revisit when** 사설 영역(PUA) 문자 ToUnicode 정리와 합성 굵게·기울임을 옮길 때, 링크 주석이나 쪽 범위가 참조 앱에 들어올 때, 서브셋 실패 쪽을 화면에 알려야 할 때.
+
+## PD-115. Pages 그림: 지원하지 않는 형식은 경고만, 대체 텍스트·잘림·쪽 위 개체 알림
 
 - **Context** PD-096(그림 블록·`Data/` 읽기)과 PD-097(도형·텍스트 상자 글자)로 3단계 첫 항목은 이미 구현되어 있었습니다. 남은 틈은 그림 설명(대체 텍스트)을 읽지 않는 것, 자른 그림과 쪽 위에 놓인 개체가 조용히 빠지는 것, 악의적 패키지 시험이 없는 것이었습니다.
 - **Decision (`PD-115`)** (1) 데이터가 PNG·JPEG가 아니면(매직 바이트 기준) PD-087대로 본문에 글자를 섞지 않고 건너뛰며 경고 `지원하지 않는 형식의 그림 N개`만 남깁니다. PNG·JPEG 매직 바이트는 있으나 구조가 깨졌거나 화소·크기 한도를 넘은 그림, 데이터 참조·파일 이름·파일이 없는 그림, 그림 하나 32MiB 초과도 같이 건너뛰고 경고만 남깁니다(`[그림]` 같은 자리표시 문단은 넣지 않음). (2) 그림 설명은 개체 공통부의 필드 8에서 읽어 공백을 줄이고 4,096바이트로 자른 뒤 대체 텍스트로 씁니다. (3) 자르기 마스크(그림 필드 5)가 있는 그림은 전체 그림으로 가져오고 `자른 그림(전체 그림으로 가져옴) N개`로 알립니다. (4) 쪽 배치 문서의 쪽 위 개체 목록(형식 10010)은 가져오지 않고 개체 종류별 개수를 `쪽 위의 개체: …`(끊어진 참조는 `쪽 위의 끊어진 개체 참조`)로 알립니다. 같은 개체는 한 번만 셉니다. 한도는 PD-096 그대로(문서당 256개·합계 128MiB 초과는 열기 실패, 그림당 32MiB·5,000만 화소 초과는 건너뜀)입니다.
@@ -1933,7 +1945,7 @@
 - **Verified by** `cargo test -p easyoffice-formats --test pages_images`(설명·크기, JPEG, 이상한 기하 크기, 지원하지 않는 형식은 본문 글자 없이 경고만, 모든 지점에서 잘린 PNG·JPEG와 화소 폭탄, 끊어진 참조·`../` 이름, 257개 거부, 합계 155MiB 거부, 33MiB 건너뜀, 자기 참조 첨부·도형, 자른 그림·쪽 위 개체 알림), `pages_fixtures`(기존 그림 위치·바이트).
 - **Revisit when** 쪽 배치 문서나 자른 그림, 설명이 든 실파일을 구했을 때(필드 번호 확정), 표·도형 안 그림을 모델이 담을 수 있을 때.
 
-## 90. Pages 각주 번호 연결, 도형·각주·머리글·바닥글 안의 그림 (PD-116)
+## PD-116. Pages 각주 번호 연결, 도형·각주·머리글·바닥글 안의 그림
 
 - **Supersedes PD-097 (부분)**: 2항의 "각주는 본문의 표식 위치와 연결하지 않고 목록으로만 둔다"와 "도형 안의 첨부는 건너뜀"(1항)을 이 항목이 대체합니다.
 - **Context** PD-097 이후 남은 틈은 네 가지였습니다. 각주 표식이 본문에서 사라져 부록 목록과 이어지지 않는 것, 도형·각주·머리글·바닥글 안의 그림이 경고 없이 빠지는 것(머리글·바닥글은 건너뜀 집계를 통째로 되돌렸음), 머리글·바닥글 변형(최대 18개)마다 같은 로고를 읽어 그림 합계·개수 한도에 걸려 문서가 열리지 않을 수 있는 것, 도형 안의 건너뜀이 모두 "표 안의 개체"로 잘못 분류되는 것입니다. 표 셀 종류(문자열·기간·오류)·셀 서식·글꼴·첨자·들여쓰기는 PD-097 8항과 3~5항에서 이미 구현되어 있어 이번에 바꾸지 않았습니다.
@@ -1944,7 +1956,7 @@
 - **Verified by** `cargo test -p easyoffice-formats --test pages_notes --test pages_fixtures`(픽스처의 각주 표식과 부록 번호, 번호 순서, 각주·도형 안 그림, 중첩 표·도형 분류, 머리글 변형 300개의 같은 로고가 한 장으로 열림, 손상된 머리글 그림은 알리고 표식은 알리지 않음, 각주 항목 65,000개로 문단 한도 거부, 범위 밖·끊어진 각주 표식).
 - **Revisit when** 병합 영역을 모델에 담을 수 있을 때, 번호 형식·미주·쪽마다 다시 시작하는 각주 실파일을 구했을 때.
 
-## 91. 표 병합 영역을 모델에 담고 DOCX·ODT·HWPX·Pages가 보존 (PD-117)
+## PD-117. 표 병합 영역을 모델에 담고 DOCX·ODT·HWPX·Pages가 보존
 
 - **Context** `RichBlock::Table`은 셀 글자 격자(`Vec<Vec<String>>`)뿐이라 병합 셀이 DOCX·ODT·HWPX 읽기에서 사라지고(가로 병합은 짧은 행, 세로 병합은 빈 셀이 됨) Pages 표의 병합 영역은 읽지 않았으며 작성기도 병합을 쓰지 못했습니다.
 - **Decision (`PD-117`)** (1) 모델은 `RichBlock::Table(RichTable)`로 바꿉니다. `RichTable`은 기존 글자 격자(`rows`)를 그대로 두고 병합 영역 목록(`merges`: 왼쪽 위 셀의 행·열과 행·열 span)을 더합니다. 덮인 셀은 격자에 빈 칸으로 남아 글자만 보는 소비자(Markdown·TXT·PDF·변환)는 바뀌지 않습니다. (2) 영역 검증은 한 곳(`rich_table.rs`)에서 합니다: 한 칸짜리, span 0, span이 32,767(15비트)을 넘는 것, 격자를 벗어나는 것, 덮을 셀이 없는 행(들쭉날쭉한 행), 앞서 받아들인 영역과 겹치는 것을 버리고 세어 경고로 알립니다(앞의 것이 우선). 겹침은 행 단위 비트 격자와 워드 마스크로 보고, 검증 작업량 상한(비트 격자 워드 2^24개)을 넘으면 나머지를 버립니다. 격자가 400만 셀을 넘으면 영역을 전부 버립니다. 작성기는 쓰기 전에 다시 검증하므로 만든 뒤 바뀐 표가 잘못된 서식을 낳지 않습니다. (3) 읽기: DOCX는 `gridSpan`(빈 셀로 채움)·`vMerge`(위 영역의 같은 열을 늘림, 짝 없는 `continue`는 일반 셀), ODT는 `number-columns/rows-spanned`·`covered-table-cell`·`number-columns-repeated`(행 폭 1,024로 제한), HWPX는 `cellAddr`+`cellSpan`(주소가 없으면 `tr` 순서, 주소·span이 한도를 넘거나 주소가 겹치는 셀은 버림, 격자는 100만 셀까지), Pages는 데이터 저장소 필드 13의 병합 영역 지도입니다. (4) 쓰기: DOCX `gridSpan`/`vMerge`, ODT `number-*-spanned`와 `covered-table-cell`, HWPX `cellSpan`(덮인 셀은 쓰지 않고 셀 크기에 span을 곱함). RTF 작성기는 행마다 `\trowd`와 셀 오른쪽 경계 `\cellxN`(표 폭 9,360트윕을 열 수로 균등 분할, 덮인 셀도 씀)을 셀 내용보다 앞에 쓰고, 가로 병합은 `\clmgf`/`\clmrg`, 세로 병합은 `\clvmgf`/`\clvmrg`로 표시합니다. RTF 읽기는 이 표시를 영역으로 모아 `with_merges`로 다시 검증하며(같은 폭으로 바로 아래 이어지는 세로 표시만 잇고, 버린 영역은 경고), 범위를 벗어나거나 겹치는 표시는 버립니다.
@@ -1954,7 +1966,7 @@
 - **Verified by** `cargo test -p easyoffice-formats --lib rich_table`(겹침·범위 밖·`u32::MAX` span·들쭉날쭉한 행·큰 격자 거부, 큰 영역 20만 개가 5초 안에 끝남, 짝 없는 `vMerge`, 먼 주소·중복 주소), `--test table_merge`(DOCX·ODT·HWPX 쓰기→읽기가 같은 표, 마크업 확인, 악의적 DOCX·ODT·HWPX·Pages 입력은 영역을 버리고 경고).
 - **Revisit when** 병합이 든 실제 Pages 파일을 구했을 때(필드 번호 확정, 수식 저장소 경로), 편집기가 병합 셀을 그릴 수 있을 때, RTF 작성기가 셀 위치를 쓸 때.
 
-## 92. Tauri 번들 도구 캐시와 다운로드 실패 재시도 (PD-118)
+## PD-118. Tauri 번들 도구 캐시와 다운로드 실패 재시도
 
 - **Context** Tauri 번들러는 콜드 빌드마다 GitHub 릴리스에서 도구(Windows NSIS와 플러그인, Linux linuxdeploy·플러그인·AppRun)를 내려받는데, 그곳이 504를 돌려주면 컴파일과 테스트가 끝난 `verify-linux`·`verify-windows` 잡이 번들 단계에서 실패했습니다. 릴리스 빌드도 같은 위험이 있었습니다.
 - **Decision (`PD-118`)** (1) 번들러가 도구를 두는 사용자 캐시 디렉터리의 `tauri` 폴더(`dirs::cache_dir()`: Linux `~/.cache/tauri`, Windows `%LOCALAPPDATA%\tauri`)를 `.github/actions/cache-tauri-tools`로 캐시합니다. 키는 OS·아키텍처·Tauri CLI 버전이고, CI의 Linux·Windows 잡과 릴리스 빌드(`prepare-desktop-build`)가 쓰며 macOS는 내려받는 도구가 없어 건너뜁니다. (2) 번들 단계는 `scripts/retry-on-download-failure.mjs`로 감싸 최대 3회(15초, 30초 대기) 다시 실행합니다. 출력에 `failed to bundle project`와 네트워크 오류(`http status: 5xx`·408·429, 요청 전송 오류, 시간 초과, 연결 끊김, DNS)가 함께 있을 때만 재시도하고 컴파일·테스트·그 밖의 번들 실패는 곧바로 실패합니다.
@@ -1964,16 +1976,7 @@
 - **Verified by** `node --test scripts/test-retry-on-download-failure.mjs`(재시도 판정, 지수 대기, 3회 한도, 컴파일 실패는 한 번만 실행, 워크플로가 모든 빌드를 감싸고 캐시 단계와 CLI 버전이 일치함).
 - **Revisit when** 번들러가 도구 내려받기를 자체 재시도하거나 미러 설정을 기본으로 제공할 때.
 
-## 93. 검색 가능한 PDF를 참조 앱 수준으로: 번들 글꼴, 글자별 대체 글꼴, 병렬 변환 (PD-114)
-
-- **Context** 참조 앱의 PDF 내보내기(`pdf_export.rs`와 rhwp PDF 변환기)와 비교한 결과 우리에게 빠진 것은 (a) 한국어 글꼴이 없는 환경을 위한 번들 글꼴(참조 앱은 `fonts/pdf/`에 Noto Sans KR Regular TTF와 OFL을 싣습니다. PD-101은 TTF를 싣지 않았고 `pdf-fonts/` 폴더는 어디에도 없었습니다), (b) 쪽에 없는 글자를 다른 글꼴에서 찾는 색인(없으면 글자마다 설치된 모든 글꼴을 다시 열어 봅니다), (c) WMF·EMF 그림이 SVG 안의 SVG로 들어온 경우 안의 비트맵을 읽는 해석기, (d) 글꼴 서브셋 실패를 쪽 단위로 다루는 처리였습니다. 300쪽 합성 보고서(쪽당 46줄)를 내보내는 데 108.6초(시스템 시간 97초, 최대 상주 메모리 169MB)가 걸렸는데, 원인은 글꼴 파일을 접근마다 열고 매핑하고 해제하는 fontdb의 동작이었습니다. 링크 주석과 쪽 범위는 참조 앱에도 없습니다: rhwp 변환기는 링크 목록을 받을 수 있지만 참조 앱은 빈 목록을 넘기고, 쪽 범위는 백엔드 인수만 있고 화면이 항상 `null`을 넘깁니다.
-- **Decision (`PD-114`)** (1) 설치본에 `pdf-fonts/NotoSansKR-Regular.ttf`와 `NotoSansKR-OFL.txt`를 싣습니다(`tauri.conf.json` resources, 원본은 rhwp `ttfs/opensource/`이므로 `config/rhwp-upstream.json`의 sparse 목록에 TTF를 더함). PD-101 (7)의 "TTF는 번들하지 않고"는 이 항목으로 바뀌며, 시스템 한국어 글꼴이 우선이 아니라 번들 폴더가 글꼴 DB에 먼저 들어가고 일반 serif/sans/monospace는 Noto Sans KR로 갑니다. 스모크 `pdf` 단계는 DB에 번들 폴더의 글꼴이 있는지 확인하고 없으면 실패합니다(시스템 글꼴이 있는 러너에서도 설치 누락이 드러나도록). (2) 쪽에 없는 글자의 대체 글꼴은 rhwp `PdfFontFallbackIndex`를 옮긴 색인(`pdf_fonts.rs`)으로 찾습니다: (글자, 글꼴) 조합마다 한 번만 열고 결과를 비트로 기억하며, 서로 다른 글자 4,096개 또는 조회 262,144회를 넘기면 색인을 버리고 usvg 기본 선택기로 넘어갑니다(결과는 같고 느릴 뿐). (3) 내보내기 한 번 동안 글꼴 DB의 파일을 읽기 전용으로 매핑해 둡니다(`with_mapped_faces`, 내보내기가 끝나면 해제). (4) `data:image/svg+xml` 그림은 안의 `<image>`까지 읽되(rhwp `pdf_image_href_resolver`) 중첩 깊이 4를 넘는 그림은 버립니다. 파일 경로·`file:` href는 쪽과 중첩 SVG 모두에서 읽지 않습니다(쪽 SVG는 신뢰하지 않는 입력이며 편집기는 그림을 전부 데이터 URL로 넣습니다). rhwp 원본은 데이터가 깊은 만큼 재귀합니다. (5) 쪽의 글꼴 서브셋이 실패하면 그 쪽만 글자를 윤곽선으로 바꿔 다시 변환합니다(쪽은 맞게 보이지만 그 쪽은 검색되지 않음). 다시 실패하거나 다른 오류면 쪽 번호가 든 오류로 전체를 실패시킵니다: 참조 앱은 두 번째 실패에서 쪽을 건너뛰지만 쪽이 빠진 PDF는 만들지 않는다는 PD-101 (4)를 유지합니다. (6) 변환은 16쪽씩 묶어 최대 4개 스레드로 하고, 묶음이 끝날 때마다 쪽 객체를 출력에 바로 다시 번호 매겨 넣고 버립니다(쪽 순서와 결과 바이트는 단일 스레드와 같음). 살아 있는 변환 결과는 한 묶음뿐이라 쪽 수에 따라 메모리가 늘지 않습니다. (7) 링크 주석과 쪽 범위는 구현하지 않습니다(참조 앱에 없음). (8) 한글 창 상태줄은 쪽 SVG를 받는 동안 "PDF 만드는 중: n / N쪽"으로 쪽마다 알립니다(참조 앱이 쪽마다 진행 문구를 내는 것과 같은 수준).
-- **Why** 정책값·처리 방식은 참조 앱이 같은 문제를 어떻게 풀었는지를 따른다는 원칙입니다(번들 글꼴, rhwp 색인·해석기). 편차는 우리 쪽 근거가 있는 두 곳뿐입니다: 쪽을 건너뛰지 않음, 해석기에 깊이 상한. 병렬·매핑은 측정으로 정했습니다.
-- **Trade-offs** 최대 상주 메모리는 보통 문서(측정한 300쪽 보고서) 기준 442MB로, 단일 스레드(199MB)보다 4개 스레드와 매핑된 글꼴 쪽만큼 늘었고 쪽 수에는 비례하지 않습니다. 최악은 입력 상한이 정합니다: 동시에 변환하는 쪽 4개가 각각 쪽당 상한(SVG 64MiB)에 가까운 입력과 그 변환 작업 메모리를 갖고, 묶음 16쪽의 변환 결과가 출력에 들어가기 전까지 함께 살아 있습니다(입력 전체는 합계 상한 512MiB). 이 최악 값은 측정하지 않았습니다. 번들 글꼴은 Regular 한 벌의 한글·라틴·기호 부분집합이라 한자는 시스템 글꼴이 없으면 빠지고 굵게·기울임은 합성되지 않아 그 글꼴로 그려지는 굵은 글자는 보통 두께로 나옵니다. 사설 영역(PUA) 문자(①류)를 표준 문자로 바꾸는 ToUnicode 정리와 합성 굵게·기울임은 참조 앱(rhwp)에 있으나 아직 옮기지 않았습니다. 글꼴 서브셋 실패로 윤곽선이 된 쪽은 경고를 표준 오류에 남길 뿐 화면에 알리지 않습니다.
-- **Verified by** `cargo test -p easyoffice-desktop pdf_`(번들 글꼴만 있는 DB에서 한글이 `ToUnicode`에 들어감, 글꼴이 전혀 없으면 검사가 경고, 색인이 기본 선택기와 같은 글꼴을 고름·상한을 넘으면 기본 선택기로 넘어감, 적대적 글자 수 입력, 중첩 그림 깊이 상한, 묶음을 넘는 쪽 순서, 뒤 묶음의 가장 앞 실패 쪽 번호, 서브셋 실패 재시도 한 번), 경로 href 무시 시험, `node --test scripts/test-webui-hwp-session.mjs`(쪽 진행 문구), `scripts/test-verify-linux-bundles.mjs`·`test-desktop-file-associations.mjs`(설치 구조 검사가 번들 글꼴과 OFL을 요구: Linux 패키지 검사, macOS 앱·NSIS 설치 파일 목록 검사는 CI·릴리스 워크플로), 측정은 `cargo test --release -p easyoffice-desktop hundreds_of_pages -- --ignored --nocapture`: 300쪽 합성 보고서 108.6초 → 3.2초(색인+매핑, 단일 스레드) → 1.1초(4스레드), 최대 상주 메모리 169MB → 199MB → 442MB.
-- **Revisit when** 사설 영역(PUA) 문자 ToUnicode 정리와 합성 굵게·기울임을 옮길 때, 링크 주석이나 쪽 범위가 참조 앱에 들어올 때, 서브셋 실패 쪽을 화면에 알려야 할 때.
-
-## 94. macOS 끝내기도 순차 큐, macOS 메뉴의 한국어 라벨·⌘W 하나·편집 항목 (PD-119)
+## PD-119. macOS 끝내기도 순차 큐, macOS 메뉴의 한국어 라벨·⌘W 하나·편집 항목
 
 - **Context** macOS의 끝내기는 시스템 종료 항목이 `ExitRequested`를 일으키면 열린 모든 창에 동시에 `close()`를 보냈습니다. 저장 확인이 여러 창에 한꺼번에 뜨고, 한 창에서 취소해도 깨끗한 다른 창은 이미 닫혔습니다. 순차 큐(`app_quit.rs`)는 Windows·Linux만 썼습니다. 또 macOS 메뉴의 시스템 항목(서비스·가리기·최소화·모두 선택 등)은 시스템 언어로 보였고, ⌘W가 파일 메뉴와 윈도우 메뉴에 둘 있었으며, 시스템 되돌리기·복사는 한글 편집기 프레임 안의 되돌리기 기록과 선택에 닿지 않았습니다.
 - **Decision (`PD-119`)** (1) 끝내기는 모든 OS가 `app_quit`의 큐 하나를 씁니다(cfg 제한 없음). 항목은 참조 앱처럼 id `app:quit`·`CmdOrCtrl+Q`의 사용자 지정 항목으로, macOS는 앱 메뉴 끝(라벨 `EasyOffice 끝내기`), Windows·Linux는 파일 메뉴 끝(`끝내기`)입니다(이전 id `file:quit`는 `app:quit`로 바뀜). (2) macOS의 `RunEvent::ExitRequested`(종료 코드 없음: Dock의 종료·시스템 종료)는 열린 창이 있으면 막고 같은 큐로 보냅니다. 코드가 있는 종료(큐가 마지막 창 뒤에 하는 `app.exit(0)`)와 창이 없을 때는 그대로 통과합니다. 큐가 이미 돌고 있으면 두 번째 요청은 무시하되, 큐가 `CLOSE_ACK_TIMEOUT`(10초) 동안 진행(창이 사라짐) 없이 멈춰 있으면 다음 요청이 큐를 새로 시작해 묻고 있던 창을 다시 묻습니다(응답 없는 창이 이후의 모든 끝내기를 삼키지 않음). 메뉴의 끝내기 항목은 `run_item`이 모든 OS에서 이 큐로 보냅니다. 창은 `raise_and_close`로만 닫으므로 PD-113의 확인 유지·응답 없는 페이지 시간 제한과 취소/실패 시 `end_close_prompt`로 끝내기 전체를 멈추는 규칙이 그대로 적용됩니다. 업데이터의 재시작(`app.restart()`)은 큐를 거치지 않으며, 저장 안 한 창이 있으면 시작하지 않는 기존 규칙이 지킵니다. (3) macOS 시스템 항목은 한국어 라벨을 줍니다: 서비스, `EasyOffice 가리기`, 기타 가리기, 모두 보기, 최소화, 닫기, 붙이기, 모두 선택. (4) ⌘W는 윈도우 메뉴의 시스템 `닫기`만 갖습니다(참조 앱과 같음). macOS 파일 메뉴에는 `file:close`를 넣지 않습니다(표에는 남아 Windows·Linux가 `Ctrl+W`로 씁니다). 시스템 닫기도 창의 `CloseRequested`를 거쳐 저장 확인(PD-113)이 같은 경로로 보장됩니다. (5) macOS 편집 메뉴는 참조 앱처럼 되돌리기·다시 실행·오려 두기·복사하기를 표의 사용자 지정 항목(`⌘Z`·`⇧⌘Z`·`⌘X`·`⌘C`, `MACOS_EDIT_KEYS`)으로 두고, 붙이기·모두 선택만 시스템 항목입니다. 한글 편집기 창에서는 이 네 항목이 편집기 명령(`edit:undo`·`edit:redo`·`edit:cut`·`edit:copy`)으로 임베드 포트의 `automation.execute`에 가며(`EMBED_EDITOR_COMMANDS`), 그 창에서는 회색이 되지 않습니다. 다른 창은 기존 페이지 동작(`studio-cmd:`)이며, 입력 칸(`input`·`textarea`)에 포커스가 있으면 브라우저의 편집 명령(`execCommand`)을 실행합니다(메뉴 키가 입력 칸에 닿지 않으므로). 편집기 프레임 안에서도 같습니다: 편집기가 이 네 명령을 받을 때 편집기 자신의 숨은 입력(`aria-label` `문서 편집 입력`)이 아닌 글자 입력 칸(대화상자의 입력 칸 등)에 포커스가 있으면 문서 명령 대신 그 칸에 `execCommand`를 적용하므로 문서 선택이 잘리거나 복사되지 않습니다(`embed/text-field-edit.ts`). Windows·Linux는 PD-102(4)대로 키를 달지 않습니다. (6) PD-102의 (5) 편집 항목 중 macOS 시스템 항목, (6)의 종료, (8)의 Windows·Linux 한정 서술은 이 결정으로 바뀝니다.
@@ -1983,7 +1986,17 @@
 - **Verified by** `cargo test -p easyoffice-desktop`(큐의 순차 진행·취소·진행 중 두 번째 요청 무시, 끝내기 id·키·라벨, 앱 메뉴에 시스템 끝내기 없음, 시스템 항목 모두 한국어 라벨, ⌘W는 윈도우 메뉴만, 편집 키 네 개, 끝내기 경로가 `app_quit`뿐인 구조 검사), `node --test scripts/test-webui-native-menu.mjs scripts/test-webui-menu-state.mjs`(편집 항목의 편집기 명령 대응, 입력 칸의 편집 명령, 한글 창에서 회색이 아님). `cargo test -p easyoffice-desktop`의 `run_item_sends_the_quit_item_to_the_queue`와 멈춘 큐 재시작 시험, `node --test scripts/test-hwp-studio.mjs`(모달 입력 칸 포커스 + 문서 선택 있음 → 문서 불변). 실기기 확인 필요: ⌘Q 순차·취소, Dock 종료, 한글 편집기에서 ⌘Z·⌘C, 입력 칸에서 ⌘C·⌘Z.
 - **Revisit when** 입력 칸의 `execCommand` 복사가 웹뷰에서 막힐 때, 참조 앱이 편집 키 처리를 바꿀 때.
 
-## 95. 네이티브 메뉴는 macOS만, 페이지 메뉴 줄은 모든 OS의 모든 창에: PD-102 전제 정정, 끝내기 명령 (PD-121)
+## PD-120. 암호로 연 한글 문서는 원본을 덮어쓰지 않고, 암호 없이 저장하기 전에 묻는다
+
+- **Context** PD-085 트레이드오프 6이 "저장본에 암호가 유지되는지 미검증"으로 남아 있었습니다. 확인 결과 유지되지 않습니다: rhwp의 `serialize_hwp`는 암호를 받지 않으면 파일 머리의 암호·배포용 플래그와 암호 버전을 지우고(`serializer/cfb_writer.rs` `serialize_hwp_inner`) 암호를 받는 경로(`exportHwpWithPassword`)는 편집기가 암호 문자열을 보관하지 않아(`wasm-bridge.ts` `loadDocumentAtomically`) 쓸 수 없습니다. 그래서 암호 문서를 저장하면 사용자가 모르는 사이 암호 없는 파일이 원본 자리에 생겼고, 자동 저장 사본(IndexedDB)도 평문이었습니다. 참조 앱은 암호 문서의 원본 저장을 거부하고 다른 이름으로 저장할 때만 "저장한 HWP 파일에는 암호가 적용되지 않습니다. 암호 없이 저장하시겠습니까?"를 묻습니다(`tauri-bridge.ts` 191-219, 편집기가 암호로 열었는지를 `requiresPasswordForSave` 플래그로 기억).
+- **Decision (`PD-120`)** (1) 편집기는 참조 앱과 같은 플래그(`wasm.requiresPasswordForSave`, 암호로 연 경우에만 참, 다른 문서 열기·새 문서에서 거짓)를 임베드 포트로 알립니다. 새 capability `save-protection-v1`과 RPC 둘: `getSaveProtection` → `{ passwordProtected: boolean }`, `clearSaveProtection` → `{ cleared: true }`. 경로·암호 값은 포트를 건너지 않습니다. (2) 셸(`hwp-session.js`)은 저장마다 내보내기 전에 `getSaveProtection`을 묻습니다. capability가 없거나 응답이 불리언이 아니거나 호출이 실패하면 저장하지 않습니다(fail-closed, 검증 RPC와 같음). (3) 암호 문서에서 원본 저장(같은 파일 덮어쓰기: 저장·Ctrl+S)은 거부하고 "다른 이름으로 저장에서 암호 없는 HWP 파일로 저장하세요"를 상태줄에 알립니다. (4) 다른 이름으로 저장(메뉴 HWP·HWPX)은 참조 앱 문구 그대로 묻고, 취소하면 내보내기도 저장 대화상자도 열지 않습니다. (5) 창 닫기의 `저장`(끝내기·Cmd+Q는 같은 경로)은 암호 문서면 원본 저장 대신 같은 확인을 거친 다른 이름으로 저장(저장 대화상자)이 됩니다. 확인 취소·대화상자 취소·실패는 저장 실패로 돌아가 창을 닫지 않고 끝내기도 멈춥니다(PD-113의 `end_close_prompt`). (6) 저장이 전달되면 셸은 `clearSaveProtection`으로 편집기 플래그를 내립니다(저장된 파일에는 암호가 없고 셸이 추적하는 파일도 그 파일이므로 이후 저장은 평범한 원본 저장). 저장 중 편집이 있어 수정됨을 유지할 때도 플래그는 내립니다. (7) 자동 저장은 암호 문서에서 하지 않고 이미 있던 자동 저장본을 지우며, 문서당 한 번 상태줄에 알립니다(참조 rhwp-studio의 `isRecoveryBlocked`와 같은 입장). (8) 확인은 네이티브 확인 창입니다. macOS의 WKWebView(wry)는 `window.confirm`을 구현하지 않아 대화상자 없이 늘 취소로 답하므로(그 탓에 이 기능이 macOS에서 저장 불가가 되고, 기존 "수정 중 다른 문서 열기"·"HWPX 검증 실패 시 HWP 대체 저장"·자동 저장본 복원 확인도 늘 거절이었습니다 — 복원 확인은 늘 "복원 안 함"으로 자동 저장본을 지웠습니다), 새 앱 명령 `confirm_dialog(kind)`(`ShellCaller` 필수, APP_COMMANDS 19번째, capability `allow-confirm-dialog`)를 둡니다. 인자는 확인 종류 enum 하나(`password-free-save`, `replace-unsaved-hwp`, `hwpx-fallback-hwp`, `restore-hwp-autosave`, `replace-unsaved-module`)이고 모르는 이름은 직렬화에서 거부됩니다. 문구·단추 이름은 Rust 상수라 페이지가 임의 문구를 띄울 수 없고, 창은 호출한 창이며(`parent`), `save_tracked`의 `OkCancelCustom`·`blocking_show` 패턴을 `spawn_blocking`에서 씁니다. 암호 확인의 단추는 참조 앱과 같은 "암호 없이 저장"/"취소"입니다. 페이지의 `confirm`은 비동기이고 기본값은 "아니오"입니다(확인 창을 못 띄우면 거절입니다). 복원 확인은 네이티브 창이 "복원 안 함"과 창 닫기·창 없음을 구분하지 못하므로 수락한 복원 외에는 자동 저장본을 지우지 않고 남겨 다음 시작에 다시 묻습니다(단추는 "복원"/"나중에", 7일 뒤 정리·저장·다른 문서 열기가 지움). 확인이 떠 있는 동안 세션은 `busy`라 자동 저장과 두 번째 열기가 끼어들지 못하고, 수락 뒤에도 창이 정리되었거나 그사이 편집·열기가 있었으면 복원하지 않습니다. `--serve` 브라우저 미리보기는 `window.confirm`이 되므로 같은 문구를 `desktop-bridge.js`가 갖고 테스트가 Rust와의 일치를 검사합니다. 파일 이름·모듈 이름 같은 동적 값은 네이티브 문구에 넣지 않아 기존 문구에서 그 부분이 빠졌고(HWPX 검증 실패 사유는 상태줄로 이동).
+- **Why** 사용자가 암호로 보호한 문서가 알림 없이 평문으로 바뀌는 것은 데이터 보호 결함이고, 암호를 되살려 쓰려면 암호를 보관해야 하는데 PD-085는 암호가 부모로 오지 않는다는 입장입니다. 참조 앱과 같은 흐름이 가장 좁은 해결입니다.
+- **Trade-offs** 참조 앱은 저장 위치를 고른 뒤 묻지만 셸의 저장 전달은 대화상자와 쓰기가 한 번의 셸 명령이라 사이에 끼울 수 없어, 우리는 위치를 고르기 전에 묻습니다(취소는 같음). 원본 거부 안내는 상태줄에만 나옵니다. 암호 문서의 자동 저장이 꺼져 있어 비정상 종료 시 마지막 저장 이후 편집은 복원되지 않습니다. 변환기로 보내는 내보내기(`getConverterSource`)와 PDF·인쇄는 사용자가 고른 다른 형식 출력이라 이 확인 대상이 아닙니다(참조 앱도 묻지 않음). 저장된 사본에 암호를 다시 거는 기능은 없습니다(암호 보관이 필요).
+- **Alternatives rejected** 편집기에 암호를 보관해 `exportHwpWithPassword`로 저장(암호가 메모리에 오래 남고 PD-085 입장과 충돌), 원본 저장도 확인 후 허용(원본의 암호가 확인 한 번으로 사라짐), 위치 선택 뒤 확인(셸 명령을 둘로 쪼개야 하고 저장 경로 규칙이 바뀜).
+- **Verified by** `node --test scripts/test-webui-hwp-session.mjs`(원본 저장 거부, 다른 이름 저장 확인·취소, 닫기 중 대화상자 전달과 취소, 플래그 해제, 확인 불가 시 fail-closed, 자동 저장 차단, 암호 없는 문서 무영향), `scripts/test-hwp-studio.mjs`(포트 RPC·capability·업스트림 플래그 수명), `scripts/test-webui-windows.mjs`(닫기 저장이 `closing`으로 가는 배선), `scripts/test-webui-desktop-bridge.mjs`(확인 호출은 종류 이름과 토큰만 보냄, true만 수락, 브라우저 문구가 Rust와 같음), `cargo test -p easyoffice-desktop confirm_dialog`(모르는 이름·형식 거부, 종류별 문구, 참조 앱 문구와 단추).
+- **Revisit when** 참조 앱이 암호를 유지한 저장을 지원할 때, 셸 저장 명령이 위치 선택과 쓰기를 나눌 수 있을 때, 저장된 사본에 암호를 다시 거는 요구가 생길 때.
+
+## PD-121. 네이티브 메뉴는 macOS만, 페이지 메뉴 줄은 모든 OS의 모든 창에: PD-102 전제 정정, 끝내기 명령
 
 - **Status** Implemented (QA 요청 2026-11-08: 메뉴 막대를 참조 앱과 같게. Windows·Linux 실기기 확인 전: 이 환경은 macOS이므로 비 macOS 경로는 macOS 코드를 cfg로 빼고 clippy·테스트 빌드한 것과 JS 테스트로만 검증했습니다)
 - **Context** PD-102는 "참조 앱은 모든 OS에 네이티브 메뉴를 설치하고 창 안 메뉴는 그리지 않는다"고 전제하고 모든 OS에 네이티브 막대를 달았으며 페이지의 메뉴 줄을 숨겼습니다. 이 전제가 틀렸습니다. 참조 앱의 네이티브 메뉴는 macOS에만 있고(`apps/desktop/src-tauri/src/lib.rs:8-9` `#[cfg(target_os = "macos")] mod menu;`, `:67-70` macOS가 아니면 빈 `Menu::new`), 메뉴 줄은 모든 OS에서 항상 페이지가 그립니다(`apps/studio-host/src/main.ts:154` `new MenuBar(#menu-bar, ...)`). 숨기는 규칙은 참조 앱 어디에도 없습니다(`core/desktop-chrome.ts`는 macOS에서 단축키 문구만 바꾸고, 메뉴 줄 숨김 CSS가 없음). 그래서 macOS에서도 네이티브 막대와 페이지 메뉴 줄이 함께 보입니다. 우리 쪽 결과로 Windows·Linux의 한글 창은 네이티브 막대를 숨기려고 창마다 `hide_menu`를 부르는 상태 보고(`embed`)가 필요했고, 막대를 숨긴 창에서는 `Ctrl+Q`가 동작하지 않을 수 있었습니다.
@@ -1994,17 +2007,7 @@
 - **Verified by** `cargo test -p easyoffice-desktop`(앱 명령 19종·capability 일치, 모든 명령이 `ShellCaller`를 받음, 끝내기 경로가 `app_quit` 큐뿐), macOS 코드를 cfg로 뺀 상태의 `cargo clippy -p easyoffice-desktop --all-targets -- -D warnings`와 `cargo test --no-run`(비 macOS 빌드 모사), `node --test scripts/test-webui-native-menu.mjs scripts/test-webui-menu-state.mjs scripts/test-webui-windows.mjs`(모든 OS에서 메뉴 줄을 숨기지 않음, Windows·Linux 창은 메뉴 상태를 보내지 않음, `Ctrl+Q`가 `quit_app`을 부르고 페이지 메뉴에 끝내기 항목이 없음, 전달 단축키 목록).
 - **Revisit when** 실기기에서 Windows·Linux의 한글 창 메뉴 줄·`Ctrl+Q`·끝내기 항목을 확인한 뒤, 참조 앱이 Windows·Linux에 네이티브 메뉴를 넣을 때, 한글 창에 정보·테마·업데이트 항목이 필요해질 때.
 
-## 96. 암호로 연 한글 문서는 원본을 덮어쓰지 않고, 암호 없이 저장하기 전에 묻는다 (PD-120)
-
-- **Context** PD-085 트레이드오프 6이 "저장본에 암호가 유지되는지 미검증"으로 남아 있었습니다. 확인 결과 유지되지 않습니다: rhwp의 `serialize_hwp`는 암호를 받지 않으면 파일 머리의 암호·배포용 플래그와 암호 버전을 지우고(`serializer/cfb_writer.rs` `serialize_hwp_inner`) 암호를 받는 경로(`exportHwpWithPassword`)는 편집기가 암호 문자열을 보관하지 않아(`wasm-bridge.ts` `loadDocumentAtomically`) 쓸 수 없습니다. 그래서 암호 문서를 저장하면 사용자가 모르는 사이 암호 없는 파일이 원본 자리에 생겼고, 자동 저장 사본(IndexedDB)도 평문이었습니다. 참조 앱은 암호 문서의 원본 저장을 거부하고 다른 이름으로 저장할 때만 "저장한 HWP 파일에는 암호가 적용되지 않습니다. 암호 없이 저장하시겠습니까?"를 묻습니다(`tauri-bridge.ts` 191-219, 편집기가 암호로 열었는지를 `requiresPasswordForSave` 플래그로 기억).
-- **Decision (`PD-120`)** (1) 편집기는 참조 앱과 같은 플래그(`wasm.requiresPasswordForSave`, 암호로 연 경우에만 참, 다른 문서 열기·새 문서에서 거짓)를 임베드 포트로 알립니다. 새 capability `save-protection-v1`과 RPC 둘: `getSaveProtection` → `{ passwordProtected: boolean }`, `clearSaveProtection` → `{ cleared: true }`. 경로·암호 값은 포트를 건너지 않습니다. (2) 셸(`hwp-session.js`)은 저장마다 내보내기 전에 `getSaveProtection`을 묻습니다. capability가 없거나 응답이 불리언이 아니거나 호출이 실패하면 저장하지 않습니다(fail-closed, 검증 RPC와 같음). (3) 암호 문서에서 원본 저장(같은 파일 덮어쓰기: 저장·Ctrl+S)은 거부하고 "다른 이름으로 저장에서 암호 없는 HWP 파일로 저장하세요"를 상태줄에 알립니다. (4) 다른 이름으로 저장(메뉴 HWP·HWPX)은 참조 앱 문구 그대로 묻고, 취소하면 내보내기도 저장 대화상자도 열지 않습니다. (5) 창 닫기의 `저장`(끝내기·Cmd+Q는 같은 경로)은 암호 문서면 원본 저장 대신 같은 확인을 거친 다른 이름으로 저장(저장 대화상자)이 됩니다. 확인 취소·대화상자 취소·실패는 저장 실패로 돌아가 창을 닫지 않고 끝내기도 멈춥니다(PD-113의 `end_close_prompt`). (6) 저장이 전달되면 셸은 `clearSaveProtection`으로 편집기 플래그를 내립니다(저장된 파일에는 암호가 없고 셸이 추적하는 파일도 그 파일이므로 이후 저장은 평범한 원본 저장). 저장 중 편집이 있어 수정됨을 유지할 때도 플래그는 내립니다. (7) 자동 저장은 암호 문서에서 하지 않고 이미 있던 자동 저장본을 지우며, 문서당 한 번 상태줄에 알립니다(참조 rhwp-studio의 `isRecoveryBlocked`와 같은 입장). (8) 확인은 네이티브 확인 창입니다. macOS의 WKWebView(wry)는 `window.confirm`을 구현하지 않아 대화상자 없이 늘 취소로 답하므로(그 탓에 이 기능이 macOS에서 저장 불가가 되고, 기존 "수정 중 다른 문서 열기"·"HWPX 검증 실패 시 HWP 대체 저장"·자동 저장본 복원 확인도 늘 거절이었습니다 — 복원 확인은 늘 "복원 안 함"으로 자동 저장본을 지웠습니다), 새 앱 명령 `confirm_dialog(kind)`(`ShellCaller` 필수, APP_COMMANDS 19번째, capability `allow-confirm-dialog`)를 둡니다. 인자는 확인 종류 enum 하나(`password-free-save`, `replace-unsaved-hwp`, `hwpx-fallback-hwp`, `restore-hwp-autosave`, `replace-unsaved-module`)이고 모르는 이름은 직렬화에서 거부됩니다. 문구·단추 이름은 Rust 상수라 페이지가 임의 문구를 띄울 수 없고, 창은 호출한 창이며(`parent`), `save_tracked`의 `OkCancelCustom`·`blocking_show` 패턴을 `spawn_blocking`에서 씁니다. 암호 확인의 단추는 참조 앱과 같은 "암호 없이 저장"/"취소"입니다. 페이지의 `confirm`은 비동기이고 기본값은 "아니오"입니다(확인 창을 못 띄우면 거절입니다). 복원 확인은 네이티브 창이 "복원 안 함"과 창 닫기·창 없음을 구분하지 못하므로 수락한 복원 외에는 자동 저장본을 지우지 않고 남겨 다음 시작에 다시 묻습니다(단추는 "복원"/"나중에", 7일 뒤 정리·저장·다른 문서 열기가 지움). 확인이 떠 있는 동안 세션은 `busy`라 자동 저장과 두 번째 열기가 끼어들지 못하고, 수락 뒤에도 창이 정리되었거나 그사이 편집·열기가 있었으면 복원하지 않습니다. `--serve` 브라우저 미리보기는 `window.confirm`이 되므로 같은 문구를 `desktop-bridge.js`가 갖고 테스트가 Rust와의 일치를 검사합니다. 파일 이름·모듈 이름 같은 동적 값은 네이티브 문구에 넣지 않아 기존 문구에서 그 부분이 빠졌고(HWPX 검증 실패 사유는 상태줄로 이동).
-- **Why** 사용자가 암호로 보호한 문서가 알림 없이 평문으로 바뀌는 것은 데이터 보호 결함이고, 암호를 되살려 쓰려면 암호를 보관해야 하는데 PD-085는 암호가 부모로 오지 않는다는 입장입니다. 참조 앱과 같은 흐름이 가장 좁은 해결입니다.
-- **Trade-offs** 참조 앱은 저장 위치를 고른 뒤 묻지만 셸의 저장 전달은 대화상자와 쓰기가 한 번의 셸 명령이라 사이에 끼울 수 없어, 우리는 위치를 고르기 전에 묻습니다(취소는 같음). 원본 거부 안내는 상태줄에만 나옵니다. 암호 문서의 자동 저장이 꺼져 있어 비정상 종료 시 마지막 저장 이후 편집은 복원되지 않습니다. 변환기로 보내는 내보내기(`getConverterSource`)와 PDF·인쇄는 사용자가 고른 다른 형식 출력이라 이 확인 대상이 아닙니다(참조 앱도 묻지 않음). 저장된 사본에 암호를 다시 거는 기능은 없습니다(암호 보관이 필요).
-- **Alternatives rejected** 편집기에 암호를 보관해 `exportHwpWithPassword`로 저장(암호가 메모리에 오래 남고 PD-085 입장과 충돌), 원본 저장도 확인 후 허용(원본의 암호가 확인 한 번으로 사라짐), 위치 선택 뒤 확인(셸 명령을 둘로 쪼개야 하고 저장 경로 규칙이 바뀜).
-- **Verified by** `node --test scripts/test-webui-hwp-session.mjs`(원본 저장 거부, 다른 이름 저장 확인·취소, 닫기 중 대화상자 전달과 취소, 플래그 해제, 확인 불가 시 fail-closed, 자동 저장 차단, 암호 없는 문서 무영향), `scripts/test-hwp-studio.mjs`(포트 RPC·capability·업스트림 플래그 수명), `scripts/test-webui-windows.mjs`(닫기 저장이 `closing`으로 가는 배선), `scripts/test-webui-desktop-bridge.mjs`(확인 호출은 종류 이름과 토큰만 보냄, true만 수락, 브라우저 문구가 Rust와 같음), `cargo test -p easyoffice-desktop confirm_dialog`(모르는 이름·형식 거부, 종류별 문구, 참조 앱 문구와 단추).
-- **Revisit when** 참조 앱이 암호를 유지한 저장을 지원할 때, 셸 저장 명령이 위치 선택과 쓰기를 나눌 수 있을 때, 저장된 사본에 암호를 다시 거는 요구가 생길 때.
-
-## 97. 제품 정보 창에 HWP 공개 문서 고지와 오픈소스 라이선스 표, 위생 가드의 고지 문장 예외 (PD-122)
+## PD-122. 제품 정보 창에 HWP 공개 문서 고지와 오픈소스 라이선스 표, 위생 가드의 고지 문장 예외
 
 - **Status** Implemented (QA 승인 2026-11-08: 고지 문구는 원문 그대로, 오픈소스 라이선스 목록도 넣고, 위생 가드에 이 문장에 한한 예외를 둠)
 - **Context** HWP 공개 문서의 저작권 조항은 제품 정보에 고지 문구를 요구하고, 업스트림 편집기는 제품 정보에 그 문구와 오픈소스 라이선스 표를 둡니다(`rhwp-studio/src/ui/about-dialog.ts`, `i18n/locales/ko.ts`). 참조 앱은 업스트림 대화상자에 버전 줄만 더해 씁니다. 우리 제품 정보 창에는 버전과 진단 알약뿐이었습니다. 문구에 회사 이름이 들어가 위생 가드의 금지 용어와 부딪힙니다.
@@ -2015,29 +2018,7 @@
 - **Verified by** `node --test scripts/test-about-notice.mjs`(고지 한 번, 표와 일치, 예외 범위), `node scripts/check-repo-hygiene.mjs`.
 - **Revisit when** WebAssembly 패키지를 다시 빌드해 의존성이 바뀔 때, 참조 앱이 제품 정보 구성을 바꿀 때.
 
-## 99. 열기 피드백, 시작 창 정리, 저장 확인·외부 변경 문구를 참조 앱과 같게 (PD-124)
-
-- **Status** Implemented (QA 요청 2026-11-08: 참조 앱과 같게 맞춤)
-- **Context** 끌어 놓기·Finder 열기·두 번째 실행에서 파일을 열지 못하면 로그로만 남고, 지원하지 않는 파일은 조용히 무시되며, 끌어오는 동안 안내가 없었습니다. 이런 열기는 Rust가 문서 창을 만들기 때문에 시작 창이 비어 있는 채 뒤에 남았습니다. 닫기 확인과 외부 변경 대화상자의 문구도 참조 앱과 달랐습니다(`desktop-events.ts`, `windows.rs`, `tauri-bridge.ts`).
-- **Decision (`PD-124`)** (1) 열기 실패는 사용자 문장으로 포커스 창의 기존 토스트에 보입니다(`__EASYOFFICE_NOTICE__`). 창이 없으면 네이티브 오류 대화상자를 씁니다. 지원하지 않는 형식은 "지원하지 않는 형식입니다 (파일 이름)", 그 밖은 "파일 로드 실패: 사유"이며 사유는 "파일을 찾을 수 없습니다"처럼 짧은 문장과 파일 이름뿐이고 경로와 운영체제 오류 문구는 로그에만 남깁니다(PD-088). (2) 지원하는 파일을 끌어 창 위에 올리면 같은 토스트로 "파일을 놓으면 문서를 엽니다"를 보입니다. 새 시각 요소는 없습니다. (3) Rust가 문서 창을 열거나 이미 열린 창을 앞으로 가져오면 문서도 수정도 없는 시작 창을 레지스트리로 판정해 닫습니다(페이지 쪽 `finishStartWindow`와 같은 규칙). (4) 닫기 확인은 제목 "저장 확인", 본문 "`{문서 이름}`의 변경 내용을 저장할까요?"(표시 이름, 경로 아님), 단추는 저장 / 저장 안 함 / 취소를 유지합니다. (5) 외부 변경 대화상자는 제목 "외부 변경 감지", 본문 "원본 파일이 EasyOffice 밖에서 변경되었습니다. / 파일: {파일 이름} / 그대로 저장하면 외부에서 변경된 내용이 사라질 수 있습니다."이고 단추는 덮어쓰기 / 저장 취소 두 개입니다.
-- **Why** 참조 앱은 같은 실패를 상태 메시지로 알리고 끌어오는 동안 안내를 띄웁니다. 참조 앱의 세 번째 단추 "취소"는 "저장 취소"와 같이 저장을 하지 않는 결과(null)만 만들어 의미가 겹치므로 우리는 두 단추로 둡니다.
-- **Trade-offs** 명령줄·Finder 인수는 지원하지 않는 확장자의 실제 파일도 열기 시도로 넘겨 오류를 보입니다(이전에는 조용히 무시). 끌어오기를 취소하면 토스트는 시간이 지나야 사라집니다.
-- **Alternatives rejected** 새 끌어 놓기 덮개 요소(새 시각 요소 금지), 페이지가 Tauri 이벤트를 직접 듣게 하는 것(페이지에 이벤트 권한을 주지 않는 PD-102 방침).
-- **Verified by** `cargo test -p easyoffice-desktop`(`open_feedback`, `windows::only_empty_start_windows_are_listed_for_cleanup`, 외부 변경 문구), `node --test scripts/test-webui-windows.mjs`.
-- **Revisit when** 참조 앱의 열기 안내나 저장 확인 문구가 바뀔 때.
-
-## 100. Linux 웹뷰 런타임 보정, HWP UTI 선언, 한글 창 macOS 표기, 작은 정리를 참조 앱과 같게 (PD-125)
-
-- **Status** Implemented (QA 요청 2026-11-08: 참조 앱과 같게 맞춤. Linux 보정은 이 환경에서 결정 로직 단위 테스트만 돌렸고 실기기 확인 전)
-- **Context** 참조 앱은 Linux에서 WebKitGTK 그래픽 문제를 피하는 환경 변수와 AppImage의 입력기 캐시 보정을 웹뷰 생성 전에 적용하고, macOS 파일 연결에 HWP UTI를 선언하며, 한글 편집기 틀에서 macOS 단축키를 기호로 쓰고 크롬 영역의 기본 우클릭 메뉴를 막습니다(`linux_runtime.rs`, `tauri.conf.json`, `desktop-chrome.ts`, `platform.ts`).
-- **Decision (`PD-125`)** (1) `linux_runtime.rs`를 이식해 `main`의 첫머리(웹뷰 전)에서 부릅니다. Arch 계열은 항상, Fedora·RHEL 계열은 Wayland 세션일 때 `WEBKIT_DISABLE_DMABUF_RENDERER`·`WEBKIT_DISABLE_COMPOSITING_MODE`를 `1`로 두며 사용자가 이미 정한 값은 덮어쓰지 않습니다. AppImage에서는 요청된 입력기 모듈이 번들 캐시에 없고 호스트 캐시에 있으면 호스트 캐시를 씁니다(사용자가 `GTK_IM_MODULE_FILE`을 정했으면 그대로). 다른 OS에서는 결정 로직 테스트에만 컴파일됩니다. (2) HWP·HWPX 파일 연결에 `contentTypes`와 `exportedType`(우리 식별자 `com.aquilaxk.easyoffice.hwp(x)`만)을 더합니다. 참조 앱이 함께 적은 다른 앱·회사의 식별자는 넣지 않았고, 핸들러 순위는 우리 정책(Alternate)을 유지합니다. `scripts/desktop-file-associations.mjs`가 이를 검사합니다. (3) 한글 창(`apps/hwp-studio`)은 macOS에서 정적 크롬의 단축키 글과 툴팁을 `⌘`·`⌥`·`⇧`로 쓰고(메뉴 항목은 편집기가 이미 그렇게 씀), 메뉴 줄·도구 상자·서식 줄·상태 줄의 기본 우클릭 메뉴를 막습니다. (4) 시작 화면 "문서 열기" 설명에서 `(Ctrl+O)`를 빼고, 개요 대화상자의 정적 예시 항목을 없앱니다(열 때 `workspace-panels.js`가 채움).
-- **Why** 참조 앱과 같은 동작을 맞추고, Linux 배포판별 렌더링 문제와 macOS 연결 불일치를 줄입니다.
-- **Trade-offs** 다른 앱이 선언한 UTI는 처음에는 넣지 않았으나, QA 결정(2026-11-09)으로 HWP·HWPX마다 그 앱의 UTI 하나씩을 별도 파일 연결의 `contentTypes`로 더했습니다(PD-141). 우리 `exportedType`과 순위(Alternate)는 그대로입니다. Linux 보정은 배포판 판별을 `/etc/os-release`에 의존합니다.
-- **Alternatives rejected** 모든 Linux에 그래픽 대체를 켜는 것(성능 저하), 참조 앱의 UTI 식별자를 그대로 쓰는 것(다른 앱의 식별자).
-- **Verified by** `cargo test -p easyoffice-desktop linux_runtime`, `node --test scripts/test-desktop-file-associations.mjs scripts/test-hwp-studio.mjs`.
-- **Revisit when** 참조 앱의 Linux 보정 목록이나 UTI 선언이 바뀔 때, Linux·macOS 실기기에서 확인한 뒤.
-
-## 101. PDF 내보내기: 저장 위치를 먼저 고르고 쪽을 10쪽씩 흘려보내 저장 후 열기, macOS 파일 메뉴의 PDF·인쇄 (PD-123)
+## PD-123. PDF 내보내기: 저장 위치를 먼저 고르고 쪽을 10쪽씩 흘려보내 저장 후 열기, macOS 파일 메뉴의 PDF·인쇄
 
 - **Status** Implemented (QA 요청 2026-11-08: 참조 앱과 같은 PDF 내보내기 흐름·파일 메뉴. macOS 실기기의 ⌘E·⌘P 키 우선순위와 저장 뒤 열기는 이 환경에서 GUI를 띄울 수 없어 확인 전입니다. 로직은 단위 테스트와 가짜 열기로 검증했습니다)
 - **Context** 한글 창의 PDF 내보내기(PD-101, PD-114)는 모든 쪽 SVG를 `Promise.all`로 한꺼번에(최대 2,000쪽) 받은 뒤에야 저장 대화상자를 열었고, 한 번의 명령에 쪽 전체를 실어 보냈습니다. 취소해도 렌더 비용이 들었고 저장된 파일을 열어 주지도 않았습니다. 참조 앱은 저장 위치를 먼저 고르고(`apps/studio-host/src/core/tauri-bridge.ts:226-245`) 끝나면 `openAfter`로 OS 기본 앱을 엽니다(`apps/desktop/src-tauri/src/commands.rs:440-482`, `open::that`). 참조 앱의 macOS 파일 메뉴는 `Export PDF...`(`CmdOrCtrl+E`)와 `Print...`(`CmdOrCtrl+P`)로 끝납니다(`apps/desktop/src-tauri/src/menu.rs:27-32,88-89`). 우리 macOS 파일 메뉴에는 둘 다 없었습니다.
@@ -2050,7 +2031,29 @@
 - **측정** 300쪽 합성 보고서(쪽당 46줄), `cargo test --release -p easyoffice-desktop hundreds_of_ -- --ignored --nocapture`를 `/usr/bin/time -l`로 각각 따로 돌린 최대 상주 메모리(Rust 쪽만; 페이지 쪽 SVG 문자열과 IPC 본문 크기는 포함하지 않음): 쪽을 한 번에 주는 변환(`hundreds_of_pages_are_measured`) 439MB, 10쪽씩 만들어 넣고 버리는 변환(`hundreds_of_streamed_pages_are_measured`) 428MB, 걸린 시간은 각각 1.23초·1.33초입니다. 이 합성 문서의 SVG는 쪽당 약 12.7KB(합계 3.8MB)라 셸 쪽 차이는 SVG 합계만큼(약 4MB)으로 작고, 최대 상주 메모리는 변환 작업(4개 스레드와 매핑된 글꼴, PD-114)이 정합니다. 이 변경의 이득은 그림이 든 문서에서 나타납니다: 쪽 SVG가 쪽당 수 MB가 되면 이전에는 페이지(문자열)와 셸(IPC 본문과 `Vec<String>`)이 문서 전체를 동시에 쥐었고, 지금은 어느 쪽도 10쪽 분량을 넘지 않습니다. 그림이 많은 문서의 실측은 하지 않았습니다.
 - **Revisit when** 실기기에서 macOS ⌘E가 편집기 지우기로 가는 경우가 확인될 때(전달 목록을 빼도 되는지), Windows·Linux에서 저장 뒤 열기·파일 메뉴를 확인한 뒤, 참조 앱이 PDF 쪽 범위나 진행률 취소를 넣을 때, 내보내는 동안의 편집을 막아야 할 때.
 
-## 102. 최근 문서 대화상자의 "목록 비우기"와 빈 목록 안내를 참조 앱과 같게 (PD-126)
+## PD-124. 열기 피드백, 시작 창 정리, 저장 확인·외부 변경 문구를 참조 앱과 같게
+
+- **Status** Implemented (QA 요청 2026-11-08: 참조 앱과 같게 맞춤)
+- **Context** 끌어 놓기·Finder 열기·두 번째 실행에서 파일을 열지 못하면 로그로만 남고, 지원하지 않는 파일은 조용히 무시되며, 끌어오는 동안 안내가 없었습니다. 이런 열기는 Rust가 문서 창을 만들기 때문에 시작 창이 비어 있는 채 뒤에 남았습니다. 닫기 확인과 외부 변경 대화상자의 문구도 참조 앱과 달랐습니다(`desktop-events.ts`, `windows.rs`, `tauri-bridge.ts`).
+- **Decision (`PD-124`)** (1) 열기 실패는 사용자 문장으로 포커스 창의 기존 토스트에 보입니다(`__EASYOFFICE_NOTICE__`). 창이 없으면 네이티브 오류 대화상자를 씁니다. 지원하지 않는 형식은 "지원하지 않는 형식입니다 (파일 이름)", 그 밖은 "파일 로드 실패: 사유"이며 사유는 "파일을 찾을 수 없습니다"처럼 짧은 문장과 파일 이름뿐이고 경로와 운영체제 오류 문구는 로그에만 남깁니다(PD-088). (2) 지원하는 파일을 끌어 창 위에 올리면 같은 토스트로 "파일을 놓으면 문서를 엽니다"를 보입니다. 새 시각 요소는 없습니다. (3) Rust가 문서 창을 열거나 이미 열린 창을 앞으로 가져오면 문서도 수정도 없는 시작 창을 레지스트리로 판정해 닫습니다(페이지 쪽 `finishStartWindow`와 같은 규칙). (4) 닫기 확인은 제목 "저장 확인", 본문 "`{문서 이름}`의 변경 내용을 저장할까요?"(표시 이름, 경로 아님), 단추는 저장 / 저장 안 함 / 취소를 유지합니다. (5) 외부 변경 대화상자는 제목 "외부 변경 감지", 본문 "원본 파일이 EasyOffice 밖에서 변경되었습니다. / 파일: {파일 이름} / 그대로 저장하면 외부에서 변경된 내용이 사라질 수 있습니다."이고 단추는 덮어쓰기 / 저장 취소 두 개입니다.
+- **Why** 참조 앱은 같은 실패를 상태 메시지로 알리고 끌어오는 동안 안내를 띄웁니다. 참조 앱의 세 번째 단추 "취소"는 "저장 취소"와 같이 저장을 하지 않는 결과(null)만 만들어 의미가 겹치므로 우리는 두 단추로 둡니다.
+- **Trade-offs** 명령줄·Finder 인수는 지원하지 않는 확장자의 실제 파일도 열기 시도로 넘겨 오류를 보입니다(이전에는 조용히 무시). 끌어오기를 취소하면 토스트는 시간이 지나야 사라집니다.
+- **Alternatives rejected** 새 끌어 놓기 덮개 요소(새 시각 요소 금지), 페이지가 Tauri 이벤트를 직접 듣게 하는 것(페이지에 이벤트 권한을 주지 않는 PD-102 방침).
+- **Verified by** `cargo test -p easyoffice-desktop`(`open_feedback`, `windows::only_empty_start_windows_are_listed_for_cleanup`, 외부 변경 문구), `node --test scripts/test-webui-windows.mjs`.
+- **Revisit when** 참조 앱의 열기 안내나 저장 확인 문구가 바뀔 때.
+
+## PD-125. Linux 웹뷰 런타임 보정, HWP UTI 선언, 한글 창 macOS 표기, 작은 정리를 참조 앱과 같게
+
+- **Status** Implemented (QA 요청 2026-11-08: 참조 앱과 같게 맞춤. Linux 보정은 이 환경에서 결정 로직 단위 테스트만 돌렸고 실기기 확인 전)
+- **Context** 참조 앱은 Linux에서 WebKitGTK 그래픽 문제를 피하는 환경 변수와 AppImage의 입력기 캐시 보정을 웹뷰 생성 전에 적용하고, macOS 파일 연결에 HWP UTI를 선언하며, 한글 편집기 틀에서 macOS 단축키를 기호로 쓰고 크롬 영역의 기본 우클릭 메뉴를 막습니다(`linux_runtime.rs`, `tauri.conf.json`, `desktop-chrome.ts`, `platform.ts`).
+- **Decision (`PD-125`)** (1) `linux_runtime.rs`를 이식해 `main`의 첫머리(웹뷰 전)에서 부릅니다. Arch 계열은 항상, Fedora·RHEL 계열은 Wayland 세션일 때 `WEBKIT_DISABLE_DMABUF_RENDERER`·`WEBKIT_DISABLE_COMPOSITING_MODE`를 `1`로 두며 사용자가 이미 정한 값은 덮어쓰지 않습니다. AppImage에서는 요청된 입력기 모듈이 번들 캐시에 없고 호스트 캐시에 있으면 호스트 캐시를 씁니다(사용자가 `GTK_IM_MODULE_FILE`을 정했으면 그대로). 다른 OS에서는 결정 로직 테스트에만 컴파일됩니다. (2) HWP·HWPX 파일 연결에 `contentTypes`와 `exportedType`(우리 식별자 `com.aquilaxk.easyoffice.hwp(x)`만)을 더합니다. 참조 앱이 함께 적은 다른 앱·회사의 식별자는 넣지 않았고, 핸들러 순위는 우리 정책(Alternate)을 유지합니다. `scripts/desktop-file-associations.mjs`가 이를 검사합니다. (3) 한글 창(`apps/hwp-studio`)은 macOS에서 정적 크롬의 단축키 글과 툴팁을 `⌘`·`⌥`·`⇧`로 쓰고(메뉴 항목은 편집기가 이미 그렇게 씀), 메뉴 줄·도구 상자·서식 줄·상태 줄의 기본 우클릭 메뉴를 막습니다. (4) 시작 화면 "문서 열기" 설명에서 `(Ctrl+O)`를 빼고, 개요 대화상자의 정적 예시 항목을 없앱니다(열 때 `workspace-panels.js`가 채움).
+- **Why** 참조 앱과 같은 동작을 맞추고, Linux 배포판별 렌더링 문제와 macOS 연결 불일치를 줄입니다.
+- **Trade-offs** 다른 앱이 선언한 UTI는 처음에는 넣지 않았으나, QA 결정(2026-11-09)으로 HWP·HWPX마다 그 앱의 UTI 하나씩을 별도 파일 연결의 `contentTypes`로 더했습니다(PD-141). 우리 `exportedType`과 순위(Alternate)는 그대로입니다. Linux 보정은 배포판 판별을 `/etc/os-release`에 의존합니다.
+- **Alternatives rejected** 모든 Linux에 그래픽 대체를 켜는 것(성능 저하), 참조 앱의 UTI 식별자를 그대로 쓰는 것(다른 앱의 식별자).
+- **Verified by** `cargo test -p easyoffice-desktop linux_runtime`, `node --test scripts/test-desktop-file-associations.mjs scripts/test-hwp-studio.mjs`.
+- **Revisit when** 참조 앱의 Linux 보정 목록이나 UTI 선언이 바뀔 때, Linux·macOS 실기기에서 확인한 뒤.
+
+## PD-126. 최근 문서 대화상자의 "목록 비우기"와 빈 목록 안내를 참조 앱과 같게
 
 - **Status** Implemented (QA 요청 2026-11-08: 참조 앱과 같게 맞춤)
 - **Context** 참조 앱의 최근 문서 대화상자는 바닥글 왼쪽에 "목록 비우기"가 있고 확인 없이 목록을 지운 뒤 닫습니다. 목록이 비었을 때는 대화상자를 열지 않고 "최근 문서가 없습니다."를 알립니다(`alert`).
@@ -2062,7 +2065,7 @@
 - **Revisit when** 참조 앱의 비우기 동작이나 Dock 항목 처리가 바뀔 때.
 - **후속 (`PD-127`)** 최근 목록 저장은 문서 저장과 같은 임시 파일·`sync_all`·rename으로 쓰고(`save_file::write_document_bytes` 재사용), 저장이 실패하면 메모리 목록을 이전 상태로 되돌립니다. 목록이 바뀌면(추가·비우기) 셸이 열린 모든 창에서 인수 없는 전역 함수 `__EASYOFFICE_RECENTS_CHANGED__`를 실행하고, 페이지는 기존 `refreshRecents`로 셸에서 다시 받습니다(페이지에 이벤트 권한을 주지 않음, PD-102).
 
-## 103. 설치된 글꼴로 문서가 지정한 글꼴을 그림 (PD-128)
+## PD-128. 설치된 글꼴로 문서가 지정한 글꼴을 그림
 
 - **Status** Implemented (QA 요청 2026-11-08: 참조 앱과 같게 맞춤. 실기기에서 문서를 열어 보는 확인은 하지 않았고, 헤드리스 브라우저로 목록 한 번·읽기 한 번·`FontFace` 등록까지 확인)
 - **Context** 한글 편집기는 번들 글꼴만 쓰면 바탕·돋움·맑은 고딕처럼 문서가 지정한 글꼴이 이 PC에 있어도 다른 모양으로 그립니다. 참조 앱은 명령 두 개(`list_local_fonts`, `read_local_font`)로 글꼴 목록(패밀리·스타일·굵기·경로)을 주고 경로로 파일을 읽어 `FontFace`로 등록합니다(`font_catalog.rs`, `commands.rs` 339-349, `desktop-local-fonts.ts`). 읽기에 크기 상한이 없고 페이지가 경로를 쥡니다. 편집기 프레임은 불투명 출처 샌드박스라 셸 명령에 닿지 못합니다(PD-086/088).
@@ -2075,7 +2078,7 @@
 - **Verified by** `cargo test -p easyoffice-desktop`(`font_catalog`: 읽기·서명·빈 파일·64MiB 초과·읽는 중 커지는 파일·창/revision/범위 검사·창당 상한과 반환·경로 비노출 직렬화·번들 폴더 제외; 앱 명령 25개·capability 일치·모든 명령이 `ShellCaller`), `node --test scripts/test-webui-hwp-host.mjs`(셸 쪽: 켜는 조건, 목록에 파일 번호·경로 없음, 파일당 한 번 읽기와 전송, 잘못된 id·revision·요청 번호·실패한 읽기는 일반 문구, 잘못된 목록 거부), `node --test scripts/test-hwp-studio.mjs`(편집기 쪽 포트 공급자: 요청·응답·형식 검사·중단·시간 초과), `node scripts/hwp-studio-harness.mjs`(실제 브라우저에서 샌드박스 프레임 ↔ 셸 흉내 ↔ `FontFace`).
 - **Revisit when** 실기기에서 문서를 열어 확인한 뒤, 실행 중 설치한 글꼴을 다시 읽어야 할 때, 참조 앱이 읽기 상한이나 목록 갱신을 넣을 때.
 
-## 104. 위생 가드에 회사 이름 약칭 추가, 문서·주석의 해당 표기를 일반 명칭으로 (PD-129)
+## PD-129. 위생 가드에 회사 이름 약칭 추가, 문서·주석의 해당 표기를 일반 명칭으로
 
 - **Status** Implemented (QA 요청 2026-11-08)
 - **Context** 금지 용어에는 회사의 전체 이름과 상품명이 있었지만 두 글자 약칭은 없어, TODO·정책 문서·주석에 약칭이 남아 있었습니다.
@@ -2087,7 +2090,7 @@
 - **Verified by** `node --test scripts/test-about-notice.mjs scripts/test-commit-messages.mjs`(약칭이 조사와 함께, 모든 파일과 고지 파일에서, 커밋 메시지에서 걸림), `node scripts/check-repo-hygiene.mjs`.
 - **Revisit when** 다른 약칭이나 별칭이 문서에서 발견될 때.
 
-## 105. 편집기(웹 화면)가 표 병합을 그리고 열기→저장에서 보존 (PD-130)
+## PD-130. 편집기(웹 화면)가 표 병합을 그리고 열기→저장에서 보존
 
 - **Status** Implemented (QA 요청 2026-11-08: 열기→편집→저장에서 병합이 사라지는 데이터 손실 방지. 병합/분할 버튼은 이번 범위가 아님)
 - **Context** PD-117로 모델과 DOCX·ODT·HWPX·Pages 읽기, DOCX·ODT·HWPX 쓰기는 병합을 담지만, 구조화 열기 JSON에 병합이 없고 편집기가 표를 `colspan`/`rowspan` 없이 그리며 구조화 저장 JSON도 병합을 싣지 않아 열기→저장에서 병합이 모두 풀렸습니다. 현재 편집기에는 열린 표의 행·열 추가·삭제 명령이 없습니다(행 추가·정렬·병합 토글은 기본 문서의 표 하나에만 걸려 있음). 지워지는 경로는 선택 영역을 지우는 브라우저 기본 동작뿐입니다.
@@ -2098,7 +2101,7 @@
 - **Verified by** `cargo test -p easyoffice-app --lib editor_merge`(DOCX·ODT·HWPX 열기→편집 없이 저장→다시 읽기에서 병합 동일, 병합 없는 표엔 `merges` 없음, MD·RTF·TXT·PDF 저장, 겹침·격자 밖·`u32::MAX`·span 0·한 칸짜리 병합을 버리고 경고, 잘못된 형식 거부, 병합 50만 개 상한, 큰 겹침 2만 개가 빠르게 끝남), `node --test scripts/test-webui-table-merges.mjs`(그리기, 저장에서 같은 격자·병합, 행 삭제로 병합 축소·해제, 붙여넣은 표, 숨김 셀, 큰 span 상한, 겹치는 span).
 - **Revisit when** 편집기에 행·열 추가·삭제나 병합/분할 명령이 생길 때(그 연산이 span을 직접 고치게), RTF 작성기가 셀 위치를 쓸 때, 덮인 셀의 글자를 보존해야 할 때.
 
-## 106. 검색 가능한 PDF: 사설 영역 문자의 글자 대응표 정리와 합성 굵게·기울임 (PD-131)
+## PD-131. 검색 가능한 PDF: 사설 영역 문자의 글자 대응표 정리와 합성 굵게·기울임
 
 - **Status** Implemented (QA 요청 2026-11-08: 참조 앱 rhwp 변환기에 있고 우리에 없던 두 가지를 이식). 실기기 설치본(Windows·Linux)에서 문서를 내보내 보는 확인은 하지 않았고, PDF 객체 검사 테스트까지 확인.
 - **Context** 한글 문서는 원문자·글머리표 같은 기호를 사설 영역(PUA) 코드로 저장하고, svg2pdf는 `ToUnicode` 대응표를 SVG 글자 그대로 만듭니다. 그래서 PDF에서 ①을 검색하면 걸리지 않고 복사하면 사설 코드가 나옵니다. 또 굵게·기울임은 SVG 속성일 뿐이라, 번들 글꼴이 Regular 하나이고(PD-114) 문서 글꼴이 없는 PC에서는 굵은 글자가 보통 두께·바로 선 모양으로 나옵니다. rhwp 변환기는 대응표 정리(`remap_pua_in_tounicode`)와 합성 굵게·기울임(`pdf_synthetic_bold.rs`, `pdf_synthetic_italic.rs`)을 갖고 있습니다.
@@ -2111,7 +2114,7 @@
 - **측정** 300쪽 합성 보고서(쪽당 46줄), 같은 머신에서 이식 전·후 시험 바이너리를 번갈아 3회, `hundreds_of_pages`·`hundreds_of_streamed_pages`: 전 1.03~1.15s·1.21~1.24s, 후 1.06~1.15s·1.22~1.31s(차이는 잡음 안), 최대 상주 메모리 약 456MB로 같음. 굵게 5줄에 1줄·기울임 7줄에 1줄과 사설 영역 문자 2개가 매 줄에 있는 같은 300쪽(`hundreds_of_styled_pages_are_measured`, 이 머신에서는 합성이 모든 쪽에서 일어나 최악에 가까운 경우): 합성 없이 1.2s → 합성 1.8s(분석 사본에서 요청하지 않은 글자를 가리기 전에는 2.4s). 굵게·기울임이 없는 쪽의 비용은 요청 단어 검색 정도입니다.
 - **Revisit when** 실기기(Windows·Linux)에서 번들 글꼴만으로 내보낸 PDF를 열어 확인한 뒤, svg2pdf를 올려 CMap 형식이 바뀔 때, HWP 5.0 원시 기호가 SVG에 남는 것이 확인될 때.
 
-## 107. 저장한 HWP·HWPX 파일에 첫 쪽 미리보기 그림을 넣고, DOCX는 엔진이 받을 수 있게 함 (PD-132)
+## PD-132. 저장한 HWP·HWPX 파일에 첫 쪽 미리보기 그림을 넣고, DOCX는 엔진이 받을 수 있게 함
 
 - **Status** Implemented (QA 요청 2026-11-08: 탐색기·시작 화면 카드(PD-106)가 이 앱이 저장한 파일에서도 그림을 보이게. 한글 HWP·HWPX는 저장 경로까지 연결, DOCX는 엔진 기능만이고 쪽을 그리는 호출자가 없어 연결하지 않음)
 - **Context** rhwp 직렬화는 문서를 열 때의 미리보기를 그대로 다시 씁니다. HWP는 원본 `PrvImage`(없던 문서는 스트림 없음), HWPX는 원본 `Preview/PrvImage.png`(새 문서는 1x1 투명 PNG)라서 편집해 저장해도 그림은 열 때의 첫 쪽이거나 비어 있습니다(rhwp 0.8.7로 내보낸 샘플에서 원본 그림이 그대로 나옴을 확인). 편집기 WASM에는 미리보기를 바꾸는 호출이 없습니다. 엔진(`easyoffice-formats`)은 쪽을 그리지 않고, 비한글 문서에는 쪽을 그리는 경로 자체가 없습니다. PDF의 `/Thumb`는 아래 7에서 다룹니다.
@@ -2124,7 +2127,7 @@
 - **Verified by** `cargo test -p easyoffice-formats --test embedded_thumbnail`(HWP·HWPX·DOCX에 항목 생성과 나머지 항목 동일, 교체·중복 없음, PNG 기본 형식 중복 없음, 비PNG 썸네일 관계 거부, 깨진·긴 변 초과·바이트 초과·CRC 오류 PNG와 64MiB 초과·잘린 컨테이너 거부, rich 작성기 `None` 동일), `cargo test -p easyoffice-desktop save_thumbnail`(A4·가로·가는 쪽·거대한 선언 크기에서 긴 변 256, 흰 바탕과 색 픽셀, 읽을 수 없는·큰 SVG 거부와 외부 파일 href 무시, 세 형식이 시작 화면 읽기(`extract_thumbnail`)로 같은 PNG를 돌려줌, 실패해도 저장 바이트 불변, 단계에서 패닉이 나도 원본 바이트로 저장(주입 시험), 파일로 쓴 뒤 읽기와 저장 검증), `node --test scripts/test-webui-hwp-session.mjs scripts/test-webui-desktop-bridge.mjs`(첫 쪽 요청 순서와 인수, 지원 없음·오류·상한 초과에서 그림 없이 전달, 암호 문서 경로, 브리지가 문자열일 때만 `thumbnailSvg` 전송).
 - **Revisit when** 비한글 문서를 그리는 경로(쪽 렌더링)가 생길 때(DOCX 저장에 `encode_rich_with_thumbnail` 연결), 래스터 그림이 든 문서의 썸네일이 비어 보여 문제가 될 때(`raster-images`), 참조 앱이 PDF 썸네일을 넣을 때.
 
-## 108. 저장 실패는 셸이 네이티브 오류 창으로 알리고, 페이지로는 경로와 시스템 원문을 보내지 않음 (PD-133)
+## PD-133. 저장 실패는 셸이 네이티브 오류 창으로 알리고, 페이지로는 경로와 시스템 원문을 보내지 않음
 
 - **Status** Implemented (QA 요청 2026-11-08)
 - **Context** 저장 쓰기가 실패하면 `save_file.rs`가 `파일을 저장하지 못했습니다 ({전체 경로}): {시스템 오류 원문}`을 명령 오류로 돌려 경로와 운영체제 문구가 페이지로 나갔습니다(PD-088 위반). 참조 앱은 저장 실패를 제목 "저장 실패", 본문 "문서를 저장하지 못했습니다.\n{사유}"의 오류 창으로 보입니다(`apps/studio-host/src/core/tauri-bridge.ts` 459행, 492~499행).
@@ -2135,7 +2138,7 @@
 - **Verified by** `cargo test -p easyoffice-desktop save_error path_leak save_file pdf_job`(`ErrorKind`별 문구, 폴더 이름과 `os error`가 사용자 문구·오류 창 본문·명령 오류 JSON에 없음, 없는 폴더에 쓰기 실패가 파일 이름만 말함, 구조 시험이 누출 예를 잡음).
 - **Revisit when** 다른 쓰기 경로(PDF 내보내기, 저장 후 미리보기)에서도 오류 창을 셸이 직접 띄우기로 할 때, 참조 앱의 문구가 바뀔 때.
 
-## 109. 메뉴·도구 단추의 이름은 실제 동작과 같아야 함 (PD-134)
+## PD-134. 메뉴·도구 단추의 이름은 실제 동작과 같아야 함
 
 - **Status** Implemented (QA 요청 2026-11-08)
 - **Context** 페이지 메뉴와 도구 상자의 일부 항목은 이름이 약속하는 기능과 연결된 명령이 달랐습니다: `모양 복사`·`글자 모양`은 `home-style`(리본 이름 "스타일 적용", 글자 크기 단계 순환), `찾아 바꾸기(E)`는 명령 팔레트, `개체 속성`은 `layout-paper`(용지 규격 전환)를 실행했습니다.
@@ -2147,7 +2150,7 @@
 - **Follow-up (QA 요청 2026-11-08)** 같은 기준으로 남은 불일치를 정리했습니다: `문단 모양`(메뉴·도구 단추·macOS `format:para-shape`)은 편집기 막대의 양쪽 정렬을 누르므로 `양쪽 정렬`(`format:justify`)로, 머리말·꼬리말 도구 단추 두 개와 각주·미주 단추 두 개는 같은 명령 하나이므로 `머리말/꼬리말`·`각주` 단추 하나씩만 남기고, 그림·차트 아이콘이 없는 `그림 삽입` 단추(`insert-chart`는 메뉴 `차트 개체`로 계속 닿음)는 지우며(쓰지 않게 된 아이콘 4개 제거), 메뉴 `명령 검색(F)`는 `(F)` 표기를 빼고 `명령 검색`으로 둡니다(Ctrl+F가 여는 것은 명령 팔레트). 한글 모듈에서 `머리말/꼬리말`은 `행정 공문서 두문·결재란`을, macOS의 `찾기`(Cmd+F)는 한글 창 밖에서 명령 팔레트를 엽니다(알려진 차이).
 - **Revisit when** 앱 모듈에 모양 복사나 찾아 바꾸기가 생길 때.
 
-## 110. 시작 창에 메뉴 줄·상태 줄을 보이고, 한글 창 파일 메뉴를 참조 앱 순서로 (PD-135)
+## PD-135. 시작 창에 메뉴 줄·상태 줄을 보이고, 한글 창 파일 메뉴를 참조 앱 순서로
 
 - **Context** PD-121이 "다른 창(시작 창 등)의 메뉴로 닿는다"고 적었지만 시작 창은 `home.css`가 메뉴 줄을 포함한 모든 자식을 숨겨 Windows·Linux(네이티브 메뉴 없음)에서 제품 정보·테마·업데이트 알림 끄기·최근 문서 대화상자에 닿을 곳이 없었습니다. 참조 앱의 시작 화면은 편집기 창 안의 층이라 메뉴·도구 상자·상태 줄이 그대로 보입니다(`apps/studio-host/src/main.ts` 96-111, `styles/home-screen.css` 1-8). 한글 창 파일 메뉴(`apps/hwp-studio/index.html`)는 참조 앱(`apps/studio-host/index.html` 16-29)과 항목 순서·구성이 달랐습니다.
 - **Decision (`PD-135`)** (1) 시작 창(`data-window-kind="start"`)은 페이지 메뉴 줄(`#menu-bar`)과 상태 줄(`#status-bar`)을 보이고, 시작 화면은 그 사이에 들어갑니다(`home-screen.js`의 `mount`가 메뉴 줄 바로 뒤에 넣음). 도구 상자·서식줄·편집 영역·배율 조절은 숨깁니다(문서가 없음). (2) 시작 창은 메뉴 명령 문맥 `START`를 쓰고 기존 회색 처리 규칙(`studioCommandApplies`)에서 `palette`·`view-theme`만 적용되며 나머지 편집 명령은 회색입니다(새 창·열기·최근 문서·테마·제품 정보·닫기처럼 문서가 필요 없는 항목은 그대로). macOS 네이티브 막대의 회색 처리도 같은 규칙을 따릅니다. (3) 한글 창 파일 메뉴는 새로 만들기, 열기, 최근 문서(목록), 최근 문서 대화 상자(`Ctrl+Alt+O`), ─, 저장, 다른 이름으로 저장(HWP·HWPX), PDF로 내보내기, 편집 용지(`F7`, 편집기 명령 `file:page-setup`), 인쇄, ─, 닫기, ─, 제품 정보 순입니다. PD-093 (1)의 "셸 명령 여섯 개" 구성과 허용 목록은 이 결정으로 셸 명령 열 개와 편집기 명령 하나(편집 용지)가 됩니다. 셸 명령 화이트리스트(편집기 `shell-menu.ts`, 셸 `hwp-host.js`)에 `recent-dialog`(셸의 최근 문서 대화상자)와 `about`(셸의 제품 정보 창)을 더했습니다. (4) PD-121의 "시작 창 메뉴로 닿는다"는 서술은 이제 사실이며 위 Trade-offs를 고쳤습니다.
@@ -2157,7 +2160,7 @@
 - **Verified by** `node --test scripts/test-webui-windows.mjs`(시작 창에서 메뉴 줄 < 시작 화면 < 상태 줄 순서, 편집 명령 회색·`palette`·`view-theme` 활성, CSS가 메뉴 줄·상태 줄을 숨기지 않음), `scripts/test-webui-hwp-shell.mjs`(명령 목록 공유, `recent-dialog`·`about` 전달, 파일 메뉴 항목 순서), `scripts/test-hwp-studio.mjs`.
 - **Revisit when** 실기기에서 Windows·Linux 시작 창을 확인한 뒤, 참조 앱이 최근 문서 하위 목록을 넣거나 시작 창의 도구 상자 표시가 필요해질 때.
 
-## 111. 닫을 때의 저장 확인은 셸의 네이티브 세 단추 창 (PD-136)
+## PD-136. 닫을 때의 저장 확인은 셸의 네이티브 세 단추 창
 
 - **Status** Implemented (QA 요청 2026-11-08)
 - **Context** 변경 내용이 있는 창을 닫으면 페이지의 `<dialog>`(`close-confirm-dialog`)가 저장 / 저장 안 함 / 취소를 물었습니다. 참조 앱은 같은 질문을 네이티브 메시지 창으로 묻습니다(`apps/studio-host/src/core/tauri-bridge.ts` 470-490행: 제목 "저장 확인", 본문 "`{파일 이름}`의 변경 내용을 저장할까요?", 종류 경고, 단추 저장 / 저장 안 함 / 취소). 페이지 대화상자는 참조 앱에 없는 자체 디자인이었습니다.
@@ -2168,7 +2171,7 @@
 - **Verified by** `cargo test -p easyoffice-desktop confirm_dialog windows`(제목·단추·본문 문구, 이름의 제어 문자, 예/아니요/라벨 → 저장/저장 안 함, 그 밖의 답 → 취소, 직렬화, 표시 이름 대체값, 명령 목록과 권한 1:1), `node --test scripts/test-webui-windows.mjs`(네이티브 창이 한 번만 뜨고 인수 없음, 신호가 창보다 먼저, 두 번째 요청 합류, 취소·저장·저장 안 함, 알 수 없는 답과 거부는 창을 닫지 않음, 페이지에 대화상자 없음), `scripts/test-webui-desktop-bridge.mjs`. 실제 네이티브 창의 모양과 단추 순서는 실기기 확인 대상입니다.
 - **Revisit when** 참조 앱의 문구나 단추가 바뀔 때, 실기기에서 운영체제별 단추 순서가 어긋날 때.
 
-## 112. 원본 파일이 지워졌거나 옮겨졌으면 제자리 저장 전에 묻기 (PD-137)
+## PD-137. 원본 파일이 지워졌거나 옮겨졌으면 제자리 저장 전에 묻기
 
 - **Status** Implemented (QA 요청 2026-11-08). PD-093 (7)을 개정합니다.
 - **Context** PD-093 (7)은 추적하던 원본이 없어지면(`Missing`) 묻지 않고 같은 자리에 다시 만들었습니다. 사용자가 일부러 지웠거나 다른 폴더로 옮긴 파일이 저장 한 번에 되살아나거나 옛 자리에 사본이 생깁니다. 참조 앱은 이 경우도 외부 변경 확인 창으로 사유 "원본 파일이 삭제되었거나 이동되었습니다"를 보이고 덮어쓰기 여부를 묻습니다(`apps/desktop/src-tauri/src/state.rs` 518-525행, 확인 창은 `apps/studio-host/src/core/tauri-bridge.ts`의 `confirmExternalOverwriteIfNeeded`).
@@ -2179,7 +2182,7 @@
 - **Verified by** `cargo test -p easyoffice-desktop save_file main`(지워진 원본에 `Missing`으로 묻고, 취소하면 파일이 생기지 않고 임시 파일도 남지 않음, 덮어쓰기하면 다시 만듦, 바뀐 원본은 `Changed`로 묻고 바뀌지 않은 원본은 묻지 않음, 본문 문구에 경로 없음). 실제 네이티브 창은 실기기 확인 대상입니다.
 - **Revisit when** 참조 앱의 사유 문구가 바뀔 때, 삭제된 원본에 다른 이름 저장을 권해야 할 때.
 
-## 113. 단축키·끌어 놓기 강조·CSS 값·macOS 메뉴 순서·창 기본값을 참조 앱에 맞춤 (PD-138)
+## PD-138. 단축키·끌어 놓기 강조·CSS 값·macOS 메뉴 순서·창 기본값을 참조 앱에 맞춤
 
 - **Status** Implemented (QA 요청 2026-11-08). PD-103 (6), PD-124 (2), PD-099의 창 크기 한도를 개정합니다.
 - **Context** 참조 앱(`main.ts` 244-287, 342-354·`desktop-events.ts` 76-90·`menu.rs` 79-114·`windows.rs` 7-13, 77-118)과 남은 차이: Windows·Linux에 Ctrl+Shift+S와 Ctrl+=·Ctrl+-가 없음, 끌어오는 동안 문서 영역 강조 없이 토스트만, 메뉴 줄 34px, 업데이트 카드 위치·그림자, 홈 미리보기 여백, 제품 정보 틀, macOS 파일·보기 메뉴 구분선, 창 최소 크기 1024x680과 모니터 전체 92% 한도.
@@ -2190,7 +2193,7 @@
 - **Verified by** `node --test scripts/test-*.mjs`(단축키 표와 전달 목록·메뉴 표기·확대·축소·100% 동작, 끌어 놓기 신호와 `drag-over` CSS, `setDragOver` 라우터·핸들러·capability, 메뉴 줄·카드·미리보기·제품 정보 CSS 값), `cargo test -p easyoffice-desktop`(`native_menu`의 파일·보기 순서, `window_commands`의 85% 한도·가운데 배치, `open_feedback`의 인수 없는 신호, 최소 크기).
 - **Revisit when** 실기기에서 Windows·Linux 창 틀 높이와 작업 영역을 확인한 뒤, 참조 앱의 단축키·창 기본값이 바뀔 때.
 
-## 114. 한글 창 인쇄는 셸의 `print_webview`로 웹뷰를 네이티브 인쇄 (PD-139)
+## PD-139. 한글 창 인쇄는 셸의 `print_webview`로 웹뷰를 네이티브 인쇄
 
 - **Status** Implemented (QA 요청 2026-11-08). PD-104 (6)을 개정합니다. 실제 인쇄 대화상자는 macOS·Windows·Linux 수동 확인 전.
 - **Context** PD-104는 숨은 루트를 쌓은 뒤 웹 `window.print()`를 불렀습니다. 그러나 macOS의 WKWebView에서는 wry 0.57.1의 UI delegate(`wkwebview/class/wry_web_view_ui_delegate.rs`)가 파일 선택·미디어 권한·새 창 콜백만 구현하고 인쇄 콜백은 구현하지 않아 `window.print()`가 아무것도 하지 않을 가능성이 큽니다(`window.confirm`이 답 없이 취소되던 PD-120과 같은 원인). 같은 wry에는 웹뷰 인쇄가 따로 있습니다: macOS `NSPrintOperation`(`wkwebview/mod.rs` 949-985), Linux WebKitGTK `PrintOperation`(`webkitgtk/mod.rs` 779-783), Windows WebView2 `window.print()` 실행(`webview2/mod.rs` 1886-1891). 참조 앱은 `print_webview` 명령이 `WebviewWindow::print()`를 부릅니다(`apps/desktop/src-tauri/src/commands.rs` 308-312).
@@ -2201,7 +2204,7 @@
 - **Verified by** `node --test scripts/test-webui-hwp-print.mjs`(셸이 있으면 `printWebview` 한 번과 `window.print` 호출 없음, 셸이 없으면 `window.print`, 취소하면 어느 쪽도 부르지 않음, 명령 실패 시 쪽 정리와 메시지, 스모크는 명령을 부르지 않음, capability에 `allow-print-webview`), `scripts/test-webui-desktop-bridge.mjs`(명령 이름), `cargo test -p easyoffice-desktop`(명령 목록·capability 1:1과 27개, 모든 명령이 `ShellCaller`를 받음, 경로 유출 가드).
 - **Revisit when** 실기기에서 `afterprint`가 오지 않아 쪽이 오래 남는 것이 확인될 때, Tauri가 인쇄 완료 콜백이나 인쇄 옵션 API를 제공할 때.
 
-## 115. Finder의 HWP·HWPX 빠른 보기와 아이콘 썸네일: Quick Look 확장 두 개 (PD-140)
+## PD-140. Finder의 HWP·HWPX 빠른 보기와 아이콘 썸네일: Quick Look 확장 두 개
 
 - **Status** Implemented (QA 요청 2026-11-08). 배포본(universal)과 실제 Finder에서의 확인은 아직 없음. 이 Mac에서는 앱 번들과 확장을 만들어 시스템의 썸네일 생성 API와 `qlmanage -p`로 확인함.
 - **Context** 스페이스바 미리보기와 아이콘 썸네일은 앱 번들 안의 Quick Look 앱 확장(`PlugIns/*.appex`)이 만든다. Finder가 확장에 넘기는 파일은 무엇이든 될 수 있고, 확장은 샌드박스 안에서 시스템이 정한 시간·메모리 안에 답해야 한다. 참조 앱은 같은 확장 두 개를 Swift로 쓰고 rhwp 어댑터와 Skia로 그린다.
@@ -2212,7 +2215,7 @@
 - **Verified by** `node scripts/run-quicklook-tests.mjs`(`cargo fmt --check`, `clippy -D warnings`, 릴리스 테스트 25개: 입력 거부·50MiB 초과를 읽기 전에 거부·문서 아닌 파일 Fail-Closed·샘플 HWP/HWPX 첫 쪽 PNG와 긴 변 한도·PDF 쪽 수·파일 안 그림·잘린 문서와 비트를 깬 문서·ZIP 폭탄·쪽 SVG 한도·경로 href 안 읽음(해제하면 실패하는 것을 확인)·터무니없는 쪽 크기·깊은 중첩·마감·패닉·남은 작업 상한), `node --test scripts/test-quicklook-config.mjs`, `node scripts/build-quicklook-macos.mjs`로 만든 `.appex` 두 개와 `tauri build --bundles app`의 `EasyOffice.app/Contents/PlugIns`에 대한 `node scripts/verify-quicklook-bundle.mjs`와 `codesign --verify --deep --strict`, 시스템의 썸네일 생성 API(`QLThumbnailGenerator`)가 `.hwpx`에서 확장을 불러 첫 쪽 그림을 받음(파일 안 그림이 있는 파일과 없는 파일, 깨진 파일은 시스템 기본 아이콘), `qlmanage -p`가 미리보기 확장을 띄워 10쪽 PDF를 만듦(로그의 쪽 수·바이트 수).
 - **Revisit when** 배포본에서 Finder 확인 중 샌드박스가 글꼴 폴더 읽기를 막거나 확장이 시간 안에 못 끝날 때, 공증을 도입할 때(확장도 같은 신원으로 서명), 앱 크기가 문제가 될 때(두 확장이 같은 정적 라이브러리를 각각 품음).
 
-## 116. 다른 앱이 선언한 HWP·HWPX UTI도 연결·Quick Look 대상에 포함, 위생 가드는 정확 문자열 예외 (PD-141)
+## PD-141. 다른 앱이 선언한 HWP·HWPX UTI도 연결·Quick Look 대상에 포함, 위생 가드는 정확 문자열 예외
 
 - **Status** Implemented (QA 결정 2026-11-09). PD-125 (2)의 "다른 앱의 UTI는 넣지 않음"과 PD-140의 `.hwp` 위험 항목을 개정합니다. 실제 Finder에서 그 UTI로 풀리는 Mac의 확인은 수동 확인 전.
 - **Context** 다른 회사의 앱이 설치된 Mac은 `.hwp`·`.hwpx`를 그 앱의 UTI로 풀 수 있고, 그러면 우리 UTI만 선언한 앱과 Quick Look 확장은 "다음으로 열기"와 미리보기·썸네일 후보에서 빠집니다.
@@ -2223,7 +2226,7 @@
 - **Verified by** `node --test scripts/test-about-notice.mjs scripts/test-desktop-file-associations.mjs scripts/test-quicklook-config.mjs`, `node scripts/check-repo-hygiene.mjs`.
 - **Revisit when** 그 앱의 UTI 이름이 바뀔 때, 실기기에서 후보·미리보기가 나타나지 않을 때.
 
-## 117. 시작 창 카드: 파일 안 그림이 없는 한글 문서는 첫 쪽을 rhwp로 그림 (PD-142)
+## PD-142. 시작 창 카드: 파일 안 그림이 없는 한글 문서는 첫 쪽을 rhwp로 그림
 
 - **Status** Implemented (QA 요청 2026-11-09). PD-106을 개정합니다. 실제 앱 창에서의 화면 확인(macOS·Windows)은 아직 없고, 이 Mac에서는 셸 코드 경로를 테스트·측정으로 확인함.
 - **Context** PD-106은 파일에 든 미리보기 그림만 보여 줘서 그림이 없는 한글 파일(다른 프로그램이 저장한 것, 그림을 빼고 저장된 것)은 빈 카드였다. 참조 앱은 항상 엔진으로 첫 쪽을 SVG로 그려(`commands.rs` `render_document_preview`, `home-screen.ts` `loadRecentPreview`) 카드에 넣지만, 경로를 페이지에서 받고 파일을 통째로 읽으며 상한·마감이 없다. 이 셸은 이미 쪽 SVG를 PNG로 그리는 `usvg`/`resvg` 경로(PD-132)를 갖고 있고, Quick Look 확장(PD-140)은 같은 일을 별도 작업공간에서 한다.
@@ -2236,7 +2239,7 @@
 - **Verified by** `cargo test -p easyoffice-desktop preview`(그림을 지운 HWP·HWPX 샘플이 PNG로 그려짐·긴 변 480px·흰 종이가 아님, 그림이 있으면 그리지 않음, 비트를 깨거나 잘리거나 빈·가짜 파일은 빈 카드와 패닉 없음, HWP·HWPX 외 확장자는 그리지 않음, 50MiB 초과는 렌더러에 닿지 않고 한도 정확히는 읽어 넘김, 1MiB 초과·PNG가 아닌 결과 버림, 마감 초과 시 호출자가 기다리지 않고 허가를 끝까지 쥠·허가가 없으면 캐시하지 않음·나중에 다시 그림, 패닉 포착과 허가 반환, 동시에 8개를 요청해도 렌더 2개를 넘지 않음, 같은 파일은 한 번만 그리고 바뀌면 다시 그림, 실패도 기억, 캐시 10개; 허가를 일찍 놓거나 busy를 캐시하거나 캐시 조회를 빼거나 PNG 검사를 빼면 해당 테스트가 실패하는 것을 확인), `cargo test -p easyoffice-desktop --release measure_ten_cards -- --ignored --nocapture`(측정), `node --test scripts/test-webui-home-preview.mjs`(1MiB 한도 경계, PNG 응답 표시).
 - **Revisit when** 다른 형식(DOCX·XLSX 등)의 첫 쪽 미리보기가 필요할 때, 실기기에서 렌더가 시작 창을 늦추거나 마감을 자주 넘길 때(별도 프로세스 렌더 재검토), rhwp 고정 버전을 올릴 때(`[patch]`의 `version`도 함께).
 
-## 118. 정식 릴리스 전까지 macOS 서명·공증 보류, 배포 채널은 GitHub 릴리스만 (PD-143)
+## PD-143. 정식 릴리스 전까지 macOS 서명·공증 보류, 배포 채널은 GitHub 릴리스만
 
 - **Status** Accepted (QA 결정 2026-11-09). PD-094의 서명 없는 배포를 재확인합니다. 코드 변경은 없습니다.
 - **Context** 참조 앱은 macOS 앱에 Developer ID 서명과 공증을 하고, 외부 패키지 관리자 채널(macOS용 하나, Linux 배포판 사용자 저장소 하나)로도 배포합니다. 이 프로젝트는 개인 프로젝트이고 유료 개발자 계정이 없습니다.
