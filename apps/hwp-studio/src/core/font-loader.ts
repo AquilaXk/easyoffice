@@ -59,7 +59,7 @@ export interface WebFontSupplyDecision extends WebFontSupplySnapshot {
 }
 
 // Canonical registry의 Canvas2D webfont projection. CanvasKit 공급 계획과 공유하지 않는다.
-// The catalog supplies the two default Hancom families only from a CDN (a non-OFL font). EasyOffice
+// The catalog supplies the two default HWP families only from a CDN (a non-OFL font). EasyOffice
 // serves those names from bundled OFL fonts instead, so a document in the default fonts still renders
 // with a bundled Hangul face when the PC has no matching system font.
 const BUNDLED_ALIAS_ENTRIES: readonly FontEntry[] = [

@@ -22,6 +22,7 @@ export const PROHIBITED_CONTENT_B64 = [
   "Z29sYmlu",             // reference app owner
   "XGJjb20uaGFuY29t", // external company reverse-domain identifier 1 (com.<company>)
   "XGJjb20uaGFhbnNvZnQ=", // external company reverse-domain identifier 2
+  "aGFuY29t", // external company short name (en); only the registered MIME token may carry it, see MIME_EXCEPTIONS
   "7ZWc7Lu0", // external company short name (ko), also with a particle attached; no exception
   "7ZWc6riA6rO87Lu07ZOo7YSw", // external company name (ko); only the required spec notice may carry it, see NOTICE_EXCEPTIONS (keep last)
 ];
@@ -44,14 +45,34 @@ export const NOTICE_EXCEPTIONS = [
   },
 ];
 
+// The registered HWPX MIME type (`application/vnd.<company>.hwpx`) is a standard identifier that file
+// associations must spell out, so that exact token is allowed in the files that really use it. Any other
+// use of the short name, in these files or elsewhere, is still reported. Commit messages get no exception.
+export const MIME_EXCEPTIONS = [
+  {
+    tokenB64: "YXBwbGljYXRpb24vdm5kLmhhbmNvbS5od3B4",
+    files: [
+      "crates/easyoffice-desktop/tauri.conf.json",
+      "crates/easyoffice-desktop/linux/easyoffice.desktop",
+      "scripts/desktop-file-associations.mjs",
+      "docs/rhwp-integration-design.md",
+    ],
+  },
+];
+
+/** The exact MIME tokens that `rel` (root-relative, forward slashes) may carry. */
+export function allowedMimeTokens(rel) {
+  return MIME_EXCEPTIONS.filter((entry) => entry.files.includes(rel)).map((entry) => decode(entry.tokenB64));
+}
+
 /** The exact notice sentences that `rel` (root-relative, forward slashes) may carry. */
 export function allowedNotices(rel) {
   return NOTICE_EXCEPTIONS.filter((entry) => entry.files.includes(rel)).map((entry) => decode(entry.textB64));
 }
 
-/** Patterns that match `content` of the tracked file `rel` once its allowed notice sentences are set aside. */
+/** Patterns that match `content` of the tracked file `rel` once its allowed notice sentences and MIME tokens are set aside. */
 export function prohibitedPatternsIn(rel, content) {
   let rest = content;
-  for (const notice of allowedNotices(rel)) rest = rest.split(notice).join("");
+  for (const notice of [...allowedNotices(rel), ...allowedMimeTokens(rel)]) rest = rest.split(notice).join("");
   return PROHIBITED_PATTERNS.filter((pattern) => pattern.test(rest));
 }

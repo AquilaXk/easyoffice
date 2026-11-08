@@ -2081,8 +2081,8 @@
 - **Context** 금지 용어에는 회사의 전체 이름과 상품명이 있었지만 두 글자 약칭은 없어, TODO·정책 문서·주석에 약칭이 남아 있었습니다.
 - **Decision (`PD-129`)** (1) `scripts/prohibited-terms.mjs`에 한글 약칭을 같은 base64 방식으로 더합니다. 부분 문자열로 맞추므로 조사가 붙은 형태도 걸리고, 고지 문장 예외(PD-122)는 약칭에 적용하지 않습니다. 커밋 메시지 가드도 같은 목록을 씁니다. (2) 걸린 TODO·정책 문서·설계 문서·편집기 주석·부분 패치 설명의 표기는 "사설 영역(PUA) 문자", "HWP 제작사", "상용 뷰어"처럼 일반 명칭으로 바꿉니다.
 - **Why** 한 곳의 목록이 저장소와 커밋 메시지를 함께 막으므로, 약칭도 같은 곳에 두면 새로 들어오는 표기를 CI가 잡습니다.
-- **Trade-offs** 영문 약칭은 더하지 않습니다. 등록된 HWPX MIME 형식(`application/vnd.<제작사>.hwpx`)이 파일 연결 정의에 필요해, 영문 약칭을 막으면 표준 식별자까지 걸립니다(기존 테스트가 이 식별자를 허용으로 고정). 글꼴 설명의 영문 표기는 그대로 둡니다.
-- **Alternatives rejected** 영문 약칭을 막고 MIME 문자열을 예외로 두는 것(예외 범위가 넓어짐), 약칭을 단어 경계로 맞추는 것(한글 조사 앞에서 경계가 성립하지 않음).
+- **Trade-offs** 영문 약칭도 더하되(후속 변경), 등록된 HWPX MIME 형식(`application/vnd.<제작사>.hwpx`)은 파일 연결 정의에 필요한 표준 식별자라 정확한 문자열만 `MIME_EXCEPTIONS`의 파일(`tauri.conf.json`, 리눅스 `.desktop`, `desktop-file-associations.mjs`, 통합 설계 문서)에서 허용합니다. 커밋 메시지 가드에는 예외가 없습니다. 글꼴 설명의 영문 표기는 일반 명칭으로 바꿨습니다.
+- **Alternatives rejected** 약칭을 단어 경계로 맞추는 것(한글 조사 앞에서 경계가 성립하지 않음).
 - **Verified by** `node --test scripts/test-about-notice.mjs scripts/test-commit-messages.mjs`(약칭이 조사와 함께, 모든 파일과 고지 파일에서, 커밋 메시지에서 걸림), `node scripts/check-repo-hygiene.mjs`.
 - **Revisit when** 다른 약칭이나 별칭이 문서에서 발견될 때.
 

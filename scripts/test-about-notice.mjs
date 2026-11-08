@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { NOTICE_EXCEPTIONS, PROHIBITED_PATTERNS, allowedNotices, prohibitedPatternsIn } from "./prohibited-terms.mjs";
+import { MIME_EXCEPTIONS, NOTICE_EXCEPTIONS, PROHIBITED_PATTERNS, allowedMimeTokens, allowedNotices, prohibitedPatternsIn } from "./prohibited-terms.mjs";
 
 // About dialog notice and license table (PD-122) and the narrow hygiene exception that carries the notice.
 
@@ -49,10 +49,25 @@ test("the company name stays prohibited outside the exact sentence", () => {
 });
 
 test("a reverse-domain identifier of another company is rejected, this app's own is not", () => {
-  const foreign = ["com.", "hancom", ".hwp"].join("");
+  const foreign = ["com.", "han", "com", ".hwp"].join("");
   assert.ok(prohibitedPatternsIn("crates/x.json", `"${foreign}"`).length > 0);
   assert.equal(prohibitedPatternsIn("crates/x.json", '"com.aquilaxk.easyoffice.hwp"').length, 0);
-  assert.equal(prohibitedPatternsIn("crates/x.json", "application/vnd.hancom.hwpx").length, 0);
+});
+
+test("the short company name in English is rejected in prose, the registered MIME token passes only where it is used", () => {
+  const shortName = ["han", "com"].join("");
+  const [{ files }] = MIME_EXCEPTIONS;
+  const mime = allowedMimeTokens(files[0])[0];
+  assert.equal(mime, `application/vnd.${shortName}.hwpx`);
+  assert.deepEqual(allowedMimeTokens("docs/other.md"), []);
+  for (const rel of files) assert.equal(prohibitedPatternsIn(rel, `"mimeType": "${mime}"`).length, 0, rel);
+  for (const text of [shortName, `the ${shortName.toUpperCase()} families`, `${mime} ${shortName}`]) {
+    assert.ok(prohibitedPatternsIn(files[0], text).length > 0, `in an allowed file: ${text}`);
+    assert.ok(prohibitedPatternsIn("docs/other.md", text).length > 0, text);
+  }
+  assert.ok(prohibitedPatternsIn("docs/other.md", mime).length > 0, "the token in another file");
+  assert.ok(PROHIBITED_PATTERNS.some((pattern) => pattern.test(mime)), "commit messages get no exception");
+  assert.ok(prohibitedPatternsIn("crates/x.json", `"com.${shortName}.hwp"`).length > 0, "reverse-domain id");
 });
 
 test("the short company name is rejected with a particle attached, in every file and in commit messages", () => {

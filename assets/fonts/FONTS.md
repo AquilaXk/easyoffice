@@ -60,6 +60,6 @@ Total: 28 files, 19.44 MiB (20387796 bytes).
   which this family does not use.
 - Not bundled, on purpose: fonts under custom "free to use" terms (Cafe24 Ssurround, Cafe24 Supermagic,
   Happiness Sans), Latin Modern Math (GUST Font License, not OFL), the Source Han Serif K old-Hangul subset
-  (a modified subset of a font that reserves the name "Source"), and every Hancom, Microsoft or operating
+  (a modified subset of a font that reserves the name "Source"), and every HWP default, commercial or operating
   system font. Documents that use such fonts fall back to a bundled family or to a font installed on the
   user's PC.
