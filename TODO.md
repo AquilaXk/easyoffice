@@ -17,7 +17,7 @@
 - [ ] README를 설치 중심으로(스크린샷)
 
 ## PDF·미리보기
-- [ ] 검색 가능한 PDF: 사설 영역(PUA) 문자(①류) ToUnicode 정리와 합성 굵게·기울임 이식(참조 앱 rhwp 변환기에 있음), Linux·Windows 설치본에서 번들 글꼴 확인
+- [ ] 검색 가능한 PDF: Linux·Windows 설치본에서 번들 글꼴 확인, HWP 5.0 원시 기호 코드(`0xA000|n`)가 SVG 글자에 남는지 실문서로 보고 남으면 ToUnicode 정리에 더함(PD-131)
 - [ ] 우리가 저장하는 HWP/DOCX에 썸네일 넣기, PDF 첫 쪽 썸네일
 
 ## Pages 읽기 3단계
