@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::Instant;
+use tauri::webview::PageLoadEvent;
 use tauri::{
     AppHandle, DragDropEvent, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
 };
@@ -173,6 +174,7 @@ fn build_window(
             .inner_size(size.0, size.1)
             .min_inner_size(min.0, min.1)
             .on_navigation(crate::is_app_origin)
+            .on_page_load(page_load_ends_close_prompt)
             .initialization_script(shell_token_script(app, label)?)
             .on_web_resource_request(|request, response| {
                 crate::studio_frame::harden_studio_response(&request, response);
@@ -199,6 +201,18 @@ fn build_window(
         .map_err(|err| format!("새 창을 만들지 못했습니다: {err}"))?;
     attach_handlers(app, &window);
     Ok(window)
+}
+
+/// A page that (re)loads has lost any save prompt it showed, so the shell forgets it too: a stale
+/// confirmation would keep the window open for a prompt nobody can see.
+fn page_load_ends_close_prompt(
+    window: WebviewWindow,
+    payload: tauri::webview::PageLoadPayload<'_>,
+) {
+    if payload.event() == PageLoadEvent::Started {
+        let app = window.app_handle();
+        locked(&app.state::<AppWindows>().registry).end_close_prompt(window.label());
+    }
 }
 
 /// The script that gives the window's top-level document its command token (`shell_caller.rs`).
@@ -328,11 +342,12 @@ fn attach_handlers(app: &AppHandle, window: &WebviewWindow) {
             let Some(window) = app.get_webview_window(&label) else {
                 return;
             };
-            if action == CloseAction::AskPage {
-                let _ = window.eval(CLOSE_REQUEST_SCRIPT);
-            } else {
+            if action == CloseAction::KeepPrompt {
                 raise(&window);
             }
+            // Also while the prompt is kept: the page joins the prompt it has open (and confirms it
+            // again) or shows it anew if it lost it, e.g. after a reload.
+            let _ = window.eval(CLOSE_REQUEST_SCRIPT);
         }
         WindowEvent::Focused(true) => {
             if let Err(error) = crate::menu_state::refresh(&app) {
@@ -668,7 +683,8 @@ pub fn end_close_prompt(_caller: ShellCaller, app: AppHandle, window: WebviewWin
 }
 
 /// The page confirms that its save prompt is on screen. Until then a second close request is
-/// treated as coming from a hung page and closes the window (`CLOSE_ACK_TIMEOUT`, PD-113).
+/// treated as coming from a hung page and closes the window (`CLOSE_ACK_TIMEOUT`, PD-113). The page
+/// sends it again whenever the shell asks while its prompt is open.
 #[tauri::command]
 pub fn ack_close_prompt(_caller: ShellCaller, app: AppHandle, window: WebviewWindow) {
     locked(&app.state::<AppWindows>().registry).ack_close_prompt(window.label());

@@ -548,6 +548,36 @@ mod tests {
     }
 
     #[test]
+    fn a_prompt_the_page_opened_first_is_protected_once_the_shell_asks_and_the_page_confirms() {
+        let (mut reg, now) = dirty_window();
+        // The page's own close button opened the prompt: the shell has no request, the ack is lost.
+        reg.ack_close_prompt("doc-1-a");
+        // The window's close button asks the shell, which asks the page; the page confirms again.
+        assert_eq!(reg.begin_close("doc-1-a", now), CloseAction::AskPage);
+        reg.ack_close_prompt("doc-1-a");
+        for later in [Duration::ZERO, CLOSE_ACK_TIMEOUT, CLOSE_ACK_TIMEOUT * 100] {
+            assert_eq!(
+                reg.begin_close("doc-1-a", now + later),
+                CloseAction::KeepPrompt
+            );
+        }
+    }
+
+    #[test]
+    fn a_saved_report_that_wipes_the_prompt_is_followed_by_a_fresh_ask() {
+        let (mut reg, now) = dirty_window();
+        reg.begin_close("doc-1-a", now);
+        reg.ack_close_prompt("doc-1-a");
+        reg.set_state("doc-1-a", "계획.hwpx", false);
+        reg.set_state("doc-1-a", "계획.hwpx", true);
+        assert_eq!(
+            reg.begin_close("doc-1-a", now),
+            CloseAction::AskPage,
+            "the page is asked again and confirms its open prompt again"
+        );
+    }
+
+    #[test]
     fn a_confirmation_without_a_prompt_changes_nothing() {
         let (mut reg, now) = dirty_window();
         reg.ack_close_prompt("doc-1-a");

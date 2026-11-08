@@ -281,7 +281,7 @@ test("close request: 저장 안 함 closes, 취소 keeps the window, 저장 save
   assert.equal(shell.named("ack_close_prompt").length, 1, "the shell hears that the prompt is shown");
   const secondWhileOpen = host.__EASYOFFICE_CLOSE_REQUEST__();
   await flushAsyncTurns();
-  assert.equal(shell.named("ack_close_prompt").length, 1, "a repeated request joins the open prompt");
+  assert.equal(shell.named("ack_close_prompt").length, 2, "a repeated request joins the open prompt and confirms it again");
   userClick(document.getElementById("btn-close-cancel"));
   assert.equal(await secondWhileOpen, await first, "both requests get the one answer");
   assert.equal(dialog.open, false);
@@ -290,7 +290,7 @@ test("close request: 저장 안 함 closes, 취소 keeps the window, 저장 save
 
   const second = host.__EASYOFFICE_CLOSE_REQUEST__();
   await flushAsyncTurns();
-  assert.equal(shell.named("ack_close_prompt").length, 2, "the next prompt is confirmed again");
+  assert.equal(shell.named("ack_close_prompt").length, 3, "the next prompt is confirmed again");
   userClick(document.getElementById("btn-close-save"));
   await second;
   await flushAsyncTurns(10);
@@ -342,6 +342,28 @@ test("a cancelled save dialog keeps the window open", async () => {
   await flushAsyncTurns(10);
   assert.equal(shell.named("close_current_window").length, 0);
   assert.equal(shell.named("end_close_prompt").length, 1, "a save that did not happen ends the close prompt");
+});
+
+test("a prompt the page opened itself is confirmed when the shell asks for a close", async () => {
+  const { document, shell, host, userClick, advanceTimers } = await openWindow("?module=DOC&win=w-page-first", {}, { localStorage: createMemoryStorage() });
+  typeIntoDocParagraph(document, "편집 내용");
+  advanceTimers(3000);
+  await flushAsyncTurns(10);
+  const closeButton = document.querySelector("[data-window-close]");
+  assert.ok(closeButton, "the page has its own close button");
+  userClick(closeButton);
+  await flushAsyncTurns();
+  const dialog = document.getElementById("close-confirm-dialog");
+  assert.equal(dialog.open, true);
+  assert.equal(shell.named("ack_close_prompt").length, 1);
+  // The shell asks as well (Cmd+Q, the window's close button): it has no record of this prompt yet.
+  const fromShell = host.__EASYOFFICE_CLOSE_REQUEST__();
+  await flushAsyncTurns();
+  assert.equal(shell.named("ack_close_prompt").length, 2, "the shell's request is answered with a confirmation");
+  assert.equal(dialog.open, true, "still one prompt");
+  userClick(document.getElementById("btn-close-cancel"));
+  await fromShell;
+  assert.equal(shell.named("close_current_window").length, 0);
 });
 
 test("a window without unsaved changes closes without a prompt or a confirmation", async () => {

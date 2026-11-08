@@ -7,8 +7,9 @@
 //! the reference app asks each window with an event; EasyOffice asks with `WebviewWindow::close`, so
 //! the existing close flow runs (`CloseRequested`: a window without unsaved changes closes, a dirty
 //! one runs the page's 저장 / 저장 안 함 / 취소 prompt), and the page ends the quit through the
-//! narrow `end_close_prompt` command (`window_commands.rs`) when the user cancels or a save fails; it confirms the prompt with `ack_close_prompt`. macOS keeps its system
-//! quit item (`RunEvent::ExitRequested` in `main.rs`).
+//! narrow `end_close_prompt` command (`window_commands.rs`) when the user cancels or a save fails;
+//! it confirms the prompt with `ack_close_prompt`. macOS keeps its system quit item
+//! (`RunEvent::ExitRequested` in `main.rs`).
 
 use std::collections::VecDeque;
 use std::sync::Mutex;

@@ -379,9 +379,14 @@
       return closeWindow();
     }
 
-    // One prompt at a time: a second close request while the dialog is open returns the same answer.
+    // One prompt at a time: a second close request while the dialog is open returns the same answer
+    // and confirms it to the shell again (the shell may have asked for a prompt this page opened
+    // itself, and has not heard about it).
     function requestClose() {
-      if (closePrompt) return closePrompt;
+      if (closePrompt) {
+        ackPrompt();
+        return closePrompt;
+      }
       closePrompt = runCloseRequest().finally(() => {
         closePrompt = null;
       });
