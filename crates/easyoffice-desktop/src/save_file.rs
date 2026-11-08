@@ -16,9 +16,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use usvg::fontdb::Database;
 
 /// Upper bound for one saved document (decoded bytes).
 pub const MAX_SAVE_BYTES: usize = 256 * 1_048_576;
@@ -103,13 +101,37 @@ impl SaveRequest {
     }
 
     /// Puts the first page, drawn from `svg`, into the document as its preview picture (PD-132). The
-    /// save never depends on it: when the picture cannot be made or the result does not pass the
-    /// check, the document stays exactly as it was and the reason goes to the log.
-    pub fn with_thumbnail(self, svg: &str, fonts: &Arc<Database>) -> Self {
-        match crate::save_thumbnail::with_first_page(&self.extension, &self.bytes, svg, fonts) {
-            Ok(bytes) => Self { bytes, ..self },
-            Err(reason) => {
+    /// save never depends on it: when the picture cannot be made, the result does not pass the
+    /// check, or any step panics (the SVG, font and container code all handle untrusted input), the
+    /// document stays exactly as it was and the reason goes to the log. `font_dirs` are the folders
+    /// of the shared font database, which is built inside the guarded step.
+    pub fn with_thumbnail(self, svg: &str, font_dirs: &[PathBuf]) -> Self {
+        self.with_thumbnail_using(|extension, bytes| {
+            let fonts = crate::pdf_export::shared_font_db(font_dirs);
+            crate::save_thumbnail::with_first_page(extension, bytes, svg, &fonts)
+        })
+    }
+
+    /// [`Self::with_thumbnail`] with the step that makes the new bytes given by the caller (a test
+    /// hook: the guard around it is what keeps a panic from failing the save).
+    pub(crate) fn with_thumbnail_using(
+        self,
+        make: impl FnOnce(&str, &[u8]) -> Result<Vec<u8>, String>,
+    ) -> Self {
+        let attempt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            make(&self.extension, &self.bytes)
+        }));
+        match attempt {
+            Ok(Ok(bytes)) => Self { bytes, ..self },
+            Ok(Err(reason)) => {
                 eprintln!("save: no preview picture in .{}: {reason}", self.extension);
+                self
+            }
+            Err(_) => {
+                eprintln!(
+                    "save: no preview picture in .{}: the step panicked",
+                    self.extension
+                );
                 self
             }
         }

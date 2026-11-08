@@ -125,7 +125,7 @@ async fn save_document_file(
     let request = tauri::async_runtime::spawn_blocking(move || {
         let request = SaveRequest::parse(&file_name, &base64)?;
         Ok::<_, String>(match thumbnail_svg {
-            Some(svg) => request.with_thumbnail(&svg, &pdf_export::shared_font_db(&font_dirs)),
+            Some(svg) => request.with_thumbnail(&svg, &font_dirs),
             None => request,
         })
     })

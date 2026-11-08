@@ -315,7 +315,7 @@ test("save: the first page is requested after the export and handed to the shell
   assert.deepEqual(ctx.fake.calls.map((c) => c.method), ["getSaveProtection", "exportHwp", "verifyBytes", "getPrintPages", "notifySaved"]);
   const request = ctx.fake.calls.find((c) => c.method === "getPrintPages");
   assert.deepEqual(request.params, { from: 0, count: 1 });
-  assert.ok(request.options.timeoutMs <= 15000, "a stuck editor does not hold the save for long");
+  assert.ok(request.options.timeoutMs <= 3000, "a stuck editor does not hold the save for long");
   assert.deepEqual(deliveries[0].options, { thumbnailSvg: PAGE_SVG });
 });
 
@@ -325,7 +325,7 @@ test("save: without print support, or when the page cannot be had, the document 
     ["no pages", async () => ({ pageCount: 0, pages: [] })],
     ["not a string", async () => ({ pageCount: 1, pages: [{ svg: 42 }] })],
     ["empty", async () => ({ pageCount: 1, pages: [{ svg: "" }] })],
-    ["oversized", async () => ({ pageCount: 1, pages: [{ svg: "x".repeat(16 * 1024 * 1024 + 1) }] })],
+    ["oversized", async () => ({ pageCount: 1, pages: [{ svg: "x".repeat(Math.floor((16 * 1024 * 1024) / 3) + 1) }] })],
     ["garbage", async () => null],
   ];
   for (const [label, handler] of bad) {

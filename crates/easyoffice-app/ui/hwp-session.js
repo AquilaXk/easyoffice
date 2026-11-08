@@ -37,8 +37,9 @@
   // file's preview picture (PD-132). The page is the print profile SVG the PDF export uses; whatever
   // goes wrong here leaves the save as it was.
   const PRINT_CAPABILITY = "print-pages-v1";
-  const THUMBNAIL_PAGE_TIMEOUT_MS = 10000;
-  const MAX_THUMBNAIL_SVG_CHARS = 16 * 1024 * 1024; // `MAX_THUMBNAIL_SVG_BYTES` in save_thumbnail.rs
+  const THUMBNAIL_PAGE_TIMEOUT_MS = 3000;
+  // `MAX_THUMBNAIL_SVG_BYTES` (16 MiB) in save_thumbnail.rs counts UTF-8 bytes; a UTF-16 unit is at most 3 of them.
+  const MAX_THUMBNAIL_SVG_CHARS = Math.floor((16 * 1024 * 1024) / 3);
   const MSG_PASSWORD_NO_OVERWRITE = "암호 문서의 원본 저장은 아직 지원하지 않습니다. 다른 이름으로 저장에서 암호 없는 HWP 파일로 저장하세요.";
   const MSG_PASSWORD_DECLINED = "암호 없이 저장하지 않았습니다";
   const MSG_PASSWORD_NO_AUTOSAVE = "암호 문서는 자동 저장하지 않습니다. 저장(다른 이름으로 저장)으로 보관하세요";

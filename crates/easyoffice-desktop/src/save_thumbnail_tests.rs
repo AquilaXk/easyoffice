@@ -128,7 +128,6 @@ fn a_format_without_a_preview_part_and_a_document_over_the_budget_are_refused() 
 
 #[test]
 fn a_failed_preview_never_fails_the_save() {
-    let fonts = fonts();
     let docx = docx();
     let base64 = base64_codec::encode(&docx);
     for svg in [
@@ -138,25 +137,40 @@ fn a_failed_preview_never_fails_the_save() {
     ] {
         let request = SaveRequest::parse("문서.docx", &base64)
             .unwrap()
-            .with_thumbnail(svg, &fonts);
+            .with_thumbnail(svg, &[]);
         assert_eq!(request.bytes(), docx.as_slice(), "{svg:?}");
     }
     // A format that has nowhere to keep the picture is saved as it is.
     let pdf = UniversalFormatConverter::encode(&model(), DocumentFormat::Pdf).unwrap();
     let request = SaveRequest::from_bytes("a.pdf", pdf.clone())
         .unwrap()
-        .with_thumbnail(A4_SVG, &fonts);
+        .with_thumbnail(A4_SVG, &[]);
     assert_eq!(request.bytes(), pdf.as_slice());
 }
 
 #[test]
+fn a_panic_while_making_the_picture_still_saves_the_original_bytes() {
+    let docx = docx();
+    let request = SaveRequest::parse("문서.docx", &base64_codec::encode(&docx)).unwrap();
+    let kept = request.with_thumbnail_using(|_, _| -> Result<Vec<u8>, String> {
+        panic!("injected panic in the thumbnail step")
+    });
+    assert_eq!(kept.bytes(), docx.as_slice());
+    assert_eq!(kept.file_name(), "문서.docx");
+    // The same request still works afterwards: a panic poisons nothing.
+    let drawn = SaveRequest::parse("문서.docx", &base64_codec::encode(&docx))
+        .unwrap()
+        .with_thumbnail(A4_SVG, &[]);
+    assert_ne!(drawn.bytes(), docx.as_slice());
+}
+
+#[test]
 fn the_saved_file_shows_the_picture_and_still_opens_as_a_document() {
-    let fonts = fonts();
     let dir = tempfile::tempdir().unwrap();
     for (name, document) in [("a.hwp", hwp()), ("b.hwpx", hwpx()), ("c.docx", docx())] {
         let request = SaveRequest::parse(name, &base64_codec::encode(&document))
             .unwrap()
-            .with_thumbnail(A4_SVG, &fonts);
+            .with_thumbnail(A4_SVG, &[]);
         assert_ne!(request.bytes(), document.as_slice(), "{name}");
         let path = dir.path().join(name);
         write_document_bytes(&path, request.bytes()).unwrap();
