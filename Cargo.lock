@@ -929,6 +929,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
+ "ttf-parser",
  "ureq",
  "usvg",
 ]

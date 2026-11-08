@@ -1,19 +1,27 @@
-//! Searchable PDF export of the Hangul editor's page SVGs (PD-101).
+//! Searchable PDF export of the Hangul editor's page SVGs (PD-101, PD-114).
 //!
 //! The editor renders each page to SVG; this module turns those pages into one PDF whose text is
 //! real text (embedded font subsets with a `ToUnicode` map), so the result can be searched and
-//! copied. Adapted from the page assembly of the rhwp PDF renderer and from the reference app's
+//! copied. Adapted from the page assembly of the rhwp PDF renderer (`src/renderer/pdf.rs`,
+//! `svgs_to_pdf_with_links_and_to_chunk`, rhwp 0.8.7 at `1a76570`) and from the reference app's
 //! `pdf_export.rs` (MIT, see THIRD_PARTY_NOTICES.md): one `svg2pdf` chunk per page, chunks
 //! renumbered into one object space, a form XObject per page placed on a media box in points.
 //!
 //! Hot path: page SVGs are parsed straight from their bytes (no copy), the font database is built
-//! once per process, and every size is bounded with `checked_*` arithmetic before any work starts.
+//! once per process, a character's fallback face is looked up once per export (`pdf_fonts.rs`),
+//! pages are converted on a few threads a batch at a time and each converted chunk is renumbered
+//! straight into the output and dropped, so only one batch of chunks is alive at once. Every size
+//! is bounded with `checked_*` arithmetic before any work starts.
 
 use pdf_writer::{Chunk, Content, Finish, Name, Pdf, Rect, Ref, TextStr};
+use std::cell::Cell;
 use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::{Arc, OnceLock};
+use std::num::NonZeroUsize;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use usvg::fontdb::Database;
+
+pub use crate::pdf_fonts::shared_font_db;
 
 /// Most pages one export may contain.
 pub const MAX_PAGES: usize = 2_000;
@@ -21,36 +29,20 @@ pub const MAX_PAGES: usize = 2_000;
 pub const MAX_PAGE_SVG_BYTES: usize = 64 * 1_048_576;
 /// Largest sum of all page SVGs (bytes).
 pub const MAX_TOTAL_SVG_BYTES: usize = 512 * 1_048_576;
+/// Pages converted before their chunks are written out; it bounds the converted data kept alive.
+const BATCH_PAGES: usize = 16;
+/// Threads that convert pages at once. A dense page needs on the order of 100 MB to convert, so the
+/// count stays small whatever the machine offers.
+const MAX_CONVERT_THREADS: usize = 4;
+/// Deepest `<image>` inside `<image>` of SVG data URLs that is kept; deeper pictures are dropped.
+/// WMF/EMF pictures are one level (an SVG that holds a bitmap); the bound keeps a hostile chain of
+/// nested data URLs from recursing without end.
+const MAX_NESTED_SVG_DEPTH: u32 = 4;
 /// SVG user units are CSS pixels (96 per inch); PDF user units are points (72 per inch).
 const PX_TO_PT: f32 = 72.0 / 96.0;
 /// Name of the page's form XObject.
 const PAGE_XOBJECT: Name<'static> = Name(b"S1");
 const PRODUCER: &str = "EasyOffice";
-/// Family names used for the generic `serif`/`sans-serif`/`monospace` fallbacks.
-const FALLBACK_FAMILY: &str = "Noto Sans KR";
-
-static FONT_DB: OnceLock<Arc<Database>> = OnceLock::new();
-
-/// Font database shared by every export: the given directories (bundled OFL fonts) first, then
-/// the system fonts. The first call decides the directories; later calls reuse the database, so
-/// the font files are scanned once per process.
-pub fn shared_font_db(font_dirs: &[PathBuf]) -> Arc<Database> {
-    FONT_DB
-        .get_or_init(|| Arc::new(build_font_db(font_dirs)))
-        .clone()
-}
-
-fn build_font_db(font_dirs: &[PathBuf]) -> Database {
-    let mut db = Database::new();
-    for dir in font_dirs {
-        db.load_fonts_dir(dir);
-    }
-    db.load_system_fonts();
-    db.set_serif_family(FALLBACK_FAMILY);
-    db.set_sans_serif_family(FALLBACK_FAMILY);
-    db.set_monospace_family(FALLBACK_FAMILY);
-    db
-}
 
 /// Checks the page count and byte limits before anything is parsed.
 fn check_limits(pages: &[String]) -> Result<(), String> {
@@ -75,6 +67,69 @@ fn check_limits(pages: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+thread_local! {
+    /// How many nested SVG pictures this thread is parsing right now.
+    static NESTED_SVG_DEPTH: Cell<u32> = const { Cell::new(0) };
+}
+
+/// Leaves one nesting level when dropped.
+struct NestedLevel;
+
+impl NestedLevel {
+    /// Enters a level, or `None` when [`MAX_NESTED_SVG_DEPTH`] is reached.
+    fn enter() -> Option<Self> {
+        NESTED_SVG_DEPTH.with(|depth| {
+            (depth.get() < MAX_NESTED_SVG_DEPTH).then(|| {
+                depth.set(depth.get() + 1);
+                Self
+            })
+        })
+    }
+}
+
+impl Drop for NestedLevel {
+    fn drop(&mut self) {
+        NESTED_SVG_DEPTH.with(|depth| depth.set(depth.get() - 1));
+    }
+}
+
+/// Reads a `data:image/svg+xml` picture together with the images inside it. usvg's own resolver
+/// drops every `<image>` of such a sub-SVG (the SVG rule), which turned WMF/EMF pictures that
+/// hold a bitmap into blanks; the page and its sub-SVGs both come from the editor, so the
+/// sub-SVG is parsed with the same options. Ported from rhwp `pdf_image_href_resolver` (rhwp
+/// 0.8.7, `src/renderer/pdf.rs` lines 1188-1205; MIT), with the nesting bound added because that
+/// version recurses as deep as the data does. Other pictures go to usvg's default resolver.
+fn image_href_resolver() -> usvg::ImageHrefResolver<'static> {
+    let default_data = usvg::ImageHrefResolver::default_data_resolver();
+    usvg::ImageHrefResolver {
+        resolve_data: Box::new(move |mime, data, options| match mime {
+            "image/svg+xml" => {
+                let _level = NestedLevel::enter()?;
+                usvg::Tree::from_data(&data, options)
+                    .ok()
+                    .map(usvg::ImageKind::SVG)
+            }
+            _ => default_data(mime, data, options),
+        }),
+        resolve_string: usvg::ImageHrefResolver::default_string_resolver(),
+    }
+}
+
+/// Parse options of one export: the shared fonts, the indexed fallback selector (one index per
+/// export) and the nested-SVG resolver.
+fn parse_options(fonts: &Arc<Database>) -> usvg::Options<'static> {
+    let mut options = usvg::Options {
+        fontdb: Arc::clone(fonts),
+        ..usvg::Options::default()
+    };
+    options.font_resolver.select_fallback = crate::pdf_fonts::fallback_selector(
+        crate::pdf_fonts::MAX_INDEXED_CHARS,
+        crate::pdf_fonts::MAX_FACE_PROBES,
+    );
+    options.image_href_resolver = image_href_resolver();
+    options
+}
+
 /// One converted page before assembly.
 struct PageChunk {
     chunk: Chunk,
@@ -83,23 +138,100 @@ struct PageChunk {
     height: f32,
 }
 
+/// Runs `to_chunk` with the page's text embedded; when the font subsetter fails on a page (a font
+/// the subsetter cannot cut), the page is converted again with its text as outlines. The page is
+/// then right on screen and in print but not searchable, and the export goes on. Any other error
+/// or a second failure is returned. The reference app retries the same way, then skips the page;
+/// this export fails instead, because a PDF with a page missing is worse than no PDF (PD-114).
+fn convert_with_outline_retry<T>(
+    index: usize,
+    embed_text: bool,
+    mut to_chunk: impl FnMut(bool) -> Result<T, svg2pdf::ConversionError>,
+) -> Result<T, svg2pdf::ConversionError> {
+    match to_chunk(embed_text) {
+        Err(svg2pdf::ConversionError::SubsetError(_)) if embed_text => {
+            eprintln!(
+                "PDF export: font subsetting failed on page {}, its text is drawn as outlines",
+                index + 1
+            );
+            to_chunk(false)
+        }
+        result => result,
+    }
+}
+
 fn convert_page(
     index: usize,
     svg: &str,
     options: &usvg::Options,
-    conversion: svg2pdf::ConversionOptions,
+    embed_text: bool,
 ) -> Result<PageChunk, String> {
     let svg = crate::pdf_font_fallbacks::add_font_fallbacks(svg);
     let tree = usvg::Tree::from_data(svg.as_bytes(), options)
         .map_err(|err| format!("{}쪽 SVG를 읽지 못했습니다: {err}", index + 1))?;
-    let (chunk, xobject) = svg2pdf::to_chunk(&tree, conversion)
-        .map_err(|err| format!("{}쪽을 PDF로 바꾸지 못했습니다: {err:?}", index + 1))?;
+    let (chunk, xobject) = convert_with_outline_retry(index, embed_text, |embed_text| {
+        let conversion = svg2pdf::ConversionOptions {
+            embed_text,
+            ..svg2pdf::ConversionOptions::default()
+        };
+        svg2pdf::to_chunk(&tree, conversion)
+    })
+    .map_err(|err| format!("{}쪽을 PDF로 바꾸지 못했습니다: {err:?}", index + 1))?;
     Ok(PageChunk {
         chunk,
         xobject,
         width: tree.size().width() * PX_TO_PT,
         height: tree.size().height() * PX_TO_PT,
     })
+}
+
+/// Converts the pages of one batch on up to [`MAX_CONVERT_THREADS`] threads and returns them in
+/// page order. `first` is the page number of `batch[0]`. With several failures the lowest page
+/// number is reported.
+fn convert_batch(
+    first: usize,
+    batch: &[String],
+    options: &usvg::Options,
+    embed_text: bool,
+) -> Result<Vec<PageChunk>, String> {
+    let threads = std::thread::available_parallelism()
+        .map_or(1, NonZeroUsize::get)
+        .min(MAX_CONVERT_THREADS)
+        .min(batch.len());
+    if threads <= 1 {
+        return batch
+            .iter()
+            .enumerate()
+            .map(|(offset, svg)| convert_page(first + offset, svg, options, embed_text))
+            .collect();
+    }
+    let next = AtomicUsize::new(0);
+    let mut done: Vec<(usize, Result<PageChunk, String>)> = std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..threads)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut local = Vec::new();
+                    loop {
+                        let offset = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(svg) = batch.get(offset) else { break };
+                        let page = convert_page(first + offset, svg, options, embed_text);
+                        let failed = page.is_err();
+                        local.push((offset, page));
+                        if failed {
+                            break;
+                        }
+                    }
+                    local
+                })
+            })
+            .collect();
+        workers
+            .into_iter()
+            .flat_map(|worker| worker.join().expect("a page conversion thread panicked"))
+            .collect()
+    });
+    done.sort_unstable_by_key(|(offset, _)| *offset);
+    done.into_iter().map(|(_, page)| page).collect()
 }
 
 /// Converts page SVGs to one searchable PDF. Fails closed on any page that cannot be converted:
@@ -116,24 +248,7 @@ fn svgs_to_pdf(
     embed_text: bool,
 ) -> Result<Vec<u8>, String> {
     check_limits(pages)?;
-    let conversion = svg2pdf::ConversionOptions {
-        embed_text,
-        ..svg2pdf::ConversionOptions::default()
-    };
-    let options = usvg::Options {
-        fontdb: Arc::clone(fonts),
-        ..usvg::Options::default()
-    };
-    let converted = pages
-        .iter()
-        .enumerate()
-        .map(|(index, svg)| convert_page(index, svg, &options, conversion))
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(assemble(converted))
-}
-
-/// Builds the page tree and places every page's form XObject.
-fn assemble(pages: Vec<PageChunk>) -> Vec<u8> {
+    let options = parse_options(&Arc::new(crate::pdf_fonts::with_mapped_faces(fonts)));
     let mut alloc = Ref::new(1);
     let catalog_ref = alloc.bump();
     let tree_ref = alloc.bump();
@@ -144,33 +259,26 @@ fn assemble(pages: Vec<PageChunk>) -> Vec<u8> {
     pdf.pages(tree_ref)
         .count(count)
         .kids(page_refs.iter().copied());
-    let mut renumbered = Vec::with_capacity(pages.len());
-    for (page, page_ref) in pages.iter().zip(&page_refs) {
-        let mut map: HashMap<Ref, Ref> = HashMap::new();
-        let chunk = page
-            .chunk
-            .renumber(|old| *map.entry(old).or_insert_with(|| alloc.bump()));
-        let xobject = map.get(&page.xobject).copied().unwrap_or(page.xobject);
-        let content_ref = alloc.bump();
-        write_page(&mut pdf, *page_ref, tree_ref, content_ref, xobject, page);
-        renumbered.push(chunk);
-    }
-    for chunk in &renumbered {
-        pdf.extend(chunk);
+    for (batch_index, batch) in pages.chunks(BATCH_PAGES).enumerate() {
+        let first = batch_index * BATCH_PAGES;
+        let converted = convert_batch(first, batch, &options, embed_text)?;
+        for (page, page_ref) in converted.into_iter().zip(&page_refs[first..]) {
+            place_page(&mut pdf, &mut alloc, tree_ref, *page_ref, page);
+        }
     }
     let info_ref = alloc.bump();
     pdf.document_info(info_ref).producer(TextStr(PRODUCER));
-    pdf.finish()
+    Ok(pdf.finish())
 }
 
-fn write_page(
-    pdf: &mut Pdf,
-    page_ref: Ref,
-    tree_ref: Ref,
-    content_ref: Ref,
-    xobject: Ref,
-    page: &PageChunk,
-) {
+/// Writes one page: its objects renumbered straight into the output (the chunk is dropped
+/// afterwards), the page dictionary, and the content stream that places the form XObject.
+fn place_page(pdf: &mut Pdf, alloc: &mut Ref, tree_ref: Ref, page_ref: Ref, page: PageChunk) {
+    let mut map: HashMap<Ref, Ref> = HashMap::with_capacity(page.chunk.refs().len());
+    page.chunk
+        .renumber_into(pdf, |old| *map.entry(old).or_insert_with(|| alloc.bump()));
+    let xobject = map.get(&page.xobject).copied().unwrap_or(page.xobject);
+    let content_ref = alloc.bump();
     let mut writer = pdf.page(page_ref);
     writer.media_box(Rect::new(0.0, 0.0, page.width, page.height));
     writer.parent(tree_ref);
@@ -380,6 +488,230 @@ mod tests {
         assert!(!contains(&outlines, b"/FontFile2") && !contains(&outlines, b"/FontFile3"));
     }
 
+    /// Synthetic page of a Hangul report: 46 lines of mixed Korean/Latin text in document faces that
+    /// are not installed (so the fallback chain runs) plus a table border.
+    fn report_page_svg(page: usize) -> String {
+        let mut svg = String::from(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="794" height="1123"><rect width="794" height="1123" fill="white"/>"#,
+        );
+        for line in 0..46 {
+            let y = 80 + line * 21;
+            let family = ["함초롬바탕", "맑은 고딕", "휴먼명조", "굴림"][line % 4];
+            svg.push_str(&format!(
+                r#"<text x="72" y="{y}" font-family="{family}" font-size="14">제{page}쪽 {line}째 줄: 검색 가능한 PDF를 만드는 한글 문서 내보내기 시험 문장입니다 ①②③ ABC abc 12345</text><line x1="72" y1="{}" x2="722" y2="{}" stroke="black" stroke-width="0.5"/>"#,
+                y + 4,
+                y + 4
+            ));
+        }
+        svg.push_str("</svg>");
+        svg
+    }
+
+    /// Measurement for the PR record: `cargo test --release -p easyoffice-desktop
+    /// hundreds_of_pages -- --ignored --nocapture` under `/usr/bin/time -l` (peak RSS).
+    #[test]
+    #[ignore = "measurement, run by hand"]
+    fn hundreds_of_pages_are_measured() {
+        let Some(db) = system_font_db() else { return };
+        let pages: Vec<String> = (0..300).map(report_page_svg).collect();
+        let started = std::time::Instant::now();
+        let pdf = svgs_to_searchable_pdf(&pages, &db).expect("pdf");
+        eprintln!(
+            "MEASURE pages=300 svg_bytes={} pdf_bytes={} elapsed={:?}",
+            pages.iter().map(String::len).sum::<usize>(),
+            pdf.len(),
+            started.elapsed()
+        );
+        assert!(verify_exported_pdf(&pdf, 300, true).is_ok());
+    }
+
+    fn bundled_only_db() -> Option<Arc<Database>> {
+        crate::pdf_fonts::tests::bundled_only_db().map(Arc::new)
+    }
+
+    const KOREAN_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="320" height="120"><text x="16" y="64" font-family="함초롬바탕, serif" font-size="24">한글 검색</text></svg>"#;
+
+    /// The environment PD-114 is about: no Korean system font at all, only the bundled face. The
+    /// document face is not installed, the generic family maps to the bundled face, and the text
+    /// comes out as an embedded font with a text map that names the syllables (the map is plain
+    /// text in the file; `<D55C>` is U+D55C, `<AE00>` is U+AE00).
+    #[test]
+    fn korean_text_is_searchable_with_only_the_bundled_font() {
+        let Some(db) = bundled_only_db() else { return };
+        let pdf = svgs_to_searchable_pdf(&[KOREAN_SVG.to_string()], &db).expect("pdf");
+        assert_eq!(
+            verify_exported_pdf(&pdf, 1, true),
+            Ok(PdfCheck {
+                pages: 1,
+                warning: None
+            })
+        );
+        assert!(contains(&pdf, b"NotoSansKR"));
+        assert!(contains(&pdf, b"<D55C>") && contains(&pdf, b"<AE00>"));
+    }
+
+    /// Without any usable font the text is dropped from the page; the check says so (a warning,
+    /// not an error: the PDF itself is valid). This is what the bundled font prevents.
+    #[test]
+    fn without_any_font_the_text_is_lost_and_the_check_warns() {
+        let pdf = svgs_to_searchable_pdf(&[KOREAN_SVG.to_string()], &Arc::new(Database::new()))
+            .expect("pdf");
+        let check = verify_exported_pdf(&pdf, 1, true).expect("valid pdf");
+        assert!(check.warning.is_some_and(|w| w.contains("글꼴")));
+    }
+
+    fn blank_page(width: usize) -> String {
+        format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="40"><rect width="{width}" height="40" fill="gray"/></svg>"#
+        )
+    }
+
+    /// Page widths in file order, read from the `/MediaBox [0 0 W H]` entries.
+    fn media_box_widths(pdf: &[u8]) -> Vec<f32> {
+        let key = b"/MediaBox [0 0 ";
+        pdf.windows(key.len())
+            .enumerate()
+            .filter(|(_, w)| *w == key)
+            .map(|(at, _)| {
+                let rest = &pdf[at + key.len()..];
+                let end = rest.iter().position(|b| *b == b' ').expect("width");
+                std::str::from_utf8(&rest[..end])
+                    .expect("ascii")
+                    .parse()
+                    .expect("number")
+            })
+            .collect()
+    }
+
+    #[test]
+    fn pages_stay_in_order_across_batches_and_threads() {
+        const PAGES: usize = BATCH_PAGES * 2 + 5;
+        let pages: Vec<String> = (0..PAGES).map(|i| blank_page(96 + 4 * i)).collect();
+        let pdf = svgs_to_searchable_pdf(&pages, &Arc::new(Database::new())).expect("pdf");
+        let widths = media_box_widths(&pdf);
+        let expected: Vec<f32> = (0..PAGES).map(|i| (96 + 4 * i) as f32 * 0.75).collect();
+        assert_eq!(widths, expected);
+        assert!(verify_exported_pdf(&pdf, PAGES, false).is_ok());
+    }
+
+    #[test]
+    fn the_lowest_failing_page_of_a_later_batch_is_reported() {
+        let mut pages: Vec<String> = (0..BATCH_PAGES * 2 + 4).map(|_| blank_page(100)).collect();
+        pages[BATCH_PAGES + 3] = "not svg".to_string();
+        pages[BATCH_PAGES + 9] = "also not svg".to_string();
+        let err = svgs_to_searchable_pdf(&pages, &Arc::new(Database::new())).unwrap_err();
+        assert!(err.starts_with(&format!("{}쪽", BATCH_PAGES + 4)), "{err}");
+    }
+
+    #[test]
+    fn a_subset_failure_retries_the_page_with_outlined_text_once() {
+        let subset = || svg2pdf::ConversionError::SubsetError(usvg::fontdb::ID::dummy());
+        let mut calls = Vec::new();
+        let result = convert_with_outline_retry(0, true, |embed| {
+            calls.push(embed);
+            if embed {
+                Err(subset())
+            } else {
+                Ok(7)
+            }
+        });
+        assert_eq!((result.ok(), calls), (Some(7), vec![true, false]));
+
+        let mut calls = Vec::new();
+        let result: Result<i32, _> = convert_with_outline_retry(0, true, |embed| {
+            calls.push(embed);
+            Err(subset())
+        });
+        assert!(
+            result.is_err(),
+            "a second failure is an error, not a skipped page"
+        );
+        assert_eq!(calls, vec![true, false]);
+
+        let mut calls = Vec::new();
+        let result: Result<i32, _> = convert_with_outline_retry(0, true, |embed| {
+            calls.push(embed);
+            Err(svg2pdf::ConversionError::InvalidImage)
+        });
+        assert!(result.is_err());
+        assert_eq!(calls, vec![true], "only a subset failure is retried");
+    }
+
+    fn base64(bytes: &[u8]) -> String {
+        const DIGITS: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut out = String::new();
+        for chunk in bytes.chunks(3) {
+            let n = chunk
+                .iter()
+                .enumerate()
+                .fold(0u32, |n, (i, b)| n | u32::from(*b) << (16 - 8 * i));
+            for i in 0..4 {
+                if i <= chunk.len() {
+                    out.push(DIGITS[(n >> (18 - 6 * i) & 63) as usize] as char);
+                } else {
+                    out.push('=');
+                }
+            }
+        }
+        out
+    }
+
+    /// `depth` SVGs, each holding the next as a `data:image/svg+xml` picture; the innermost is a
+    /// bitmap-free square.
+    fn nested_svg(depth: usize) -> String {
+        let mut svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8"/></svg>"#.to_string();
+        for _ in 0..depth {
+            svg = format!(
+                r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="8" height="8"><image width="8" height="8" xlink:href="data:image/svg+xml;base64,{}"/></svg>"#,
+                base64(svg.as_bytes())
+            );
+        }
+        svg
+    }
+
+    fn picture_depth(group: &usvg::Group) -> u32 {
+        group
+            .children()
+            .iter()
+            .map(|node| match node {
+                usvg::Node::Group(inner) => picture_depth(inner),
+                usvg::Node::Image(image) => match image.kind() {
+                    usvg::ImageKind::SVG(tree) => 1 + picture_depth(tree.root()),
+                    _ => 0,
+                },
+                _ => 0,
+            })
+            .max()
+            .unwrap_or(0)
+    }
+
+    #[test]
+    fn a_picture_inside_a_picture_is_kept_but_a_hostile_chain_is_cut() {
+        let options = parse_options(&Arc::new(Database::new()));
+        let parse =
+            |depth| usvg::Tree::from_data(nested_svg(depth).as_bytes(), &options).expect("tree");
+        assert_eq!(
+            picture_depth(parse(2).root()),
+            2,
+            "an image inside a sub-SVG (a WMF holding a bitmap) is kept; usvg's own resolver drops it"
+        );
+        assert_eq!(
+            picture_depth(parse(MAX_NESTED_SVG_DEPTH as usize).root()),
+            MAX_NESTED_SVG_DEPTH
+        );
+        // Base64 grows a level by a third, so a chain this deep is already tens of kilobytes.
+        let hostile = parse(MAX_NESTED_SVG_DEPTH as usize + 8);
+        assert_eq!(picture_depth(hostile.root()), MAX_NESTED_SVG_DEPTH);
+        // The counter is back to zero afterwards, so the next page starts clean.
+        assert_eq!(picture_depth(parse(1).root()), 1);
+        let pdf = svgs_to_searchable_pdf(
+            &[nested_svg(MAX_NESTED_SVG_DEPTH as usize + 8)],
+            &Arc::new(Database::new()),
+        );
+        assert!(pdf.is_ok());
+    }
+
     #[test]
     fn export_is_deterministic() {
         let Some(db) = system_font_db() else { return };
@@ -453,12 +785,5 @@ mod tests {
             vec![9_999_999],
             "reading stops after the digit limit"
         );
-    }
-
-    #[test]
-    fn the_shared_font_database_is_built_once() {
-        let first = shared_font_db(&[]);
-        let second = shared_font_db(&[PathBuf::from("/nonexistent")]);
-        assert!(Arc::ptr_eq(&first, &second));
     }
 }

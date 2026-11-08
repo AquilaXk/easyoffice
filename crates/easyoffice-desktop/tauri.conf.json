@@ -44,7 +44,9 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "../../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md"
+      "../../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md",
+      "../../third_party/rhwp/ttfs/opensource/NotoSansKR-Regular.ttf": "pdf-fonts/NotoSansKR-Regular.ttf",
+      "../../third_party/rhwp/ttfs/opensource/NotoSansKR-OFL.txt": "pdf-fonts/NotoSansKR-OFL.txt"
     },
     "fileAssociations": [
       { "ext": ["hwp"], "name": "EasyOffice.Hwp", "description": "한글 문서 (HWP)", "role": "Editor", "rank": "Alternate", "mimeType": "application/x-hwp" },

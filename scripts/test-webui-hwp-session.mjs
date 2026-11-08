@@ -122,6 +122,7 @@ function load(options = {}) {
     resolveBaseName: () => "보고서",
     deliverSavedFile: options.deliver,
     exportSearchablePdf: options.exportPdf,
+    setFeedback: options.setFeedback,
     defaultNotice: "기본 안내",
     autosaveIdleMs: 20, autosaveMaxWaitMs: 50,
   });
@@ -548,6 +549,21 @@ test("PDF export: every page SVG is fetched over the embed port and sent to the 
   assert.deepEqual(fetched.map((c) => c.params), [{ page: 0 }, { page: 1 }, { page: 2 }]);
   assert.ok(fetched.every((c) => c.options.timeoutMs >= 60000), "page rendering gets a long timeout");
   assert.match(feedbackOf(ctx), /^PDF 내보내기 완료 \(보고서\.pdf · 3쪽\)$/);
+});
+
+test("PDF export: the status line counts the pages as they arrive and ends with the result", async () => {
+  const { exportPdf } = pdfRecorder();
+  const lines = [];
+  const ctx = load({ exportPdf, setFeedback: (line) => lines.push(line) });
+  pdfPages(ctx, 3);
+  await ctx.session.exportPdf();
+  assert.deepEqual(lines, [
+    "PDF 만드는 중: 0 / 3쪽",
+    "PDF 만드는 중: 1 / 3쪽",
+    "PDF 만드는 중: 2 / 3쪽",
+    "PDF 만드는 중: 3 / 3쪽",
+    "PDF 내보내기 완료 (보고서.pdf · 3쪽)",
+  ]);
 });
 
 test("PDF export: not available without the desktop shell or while the editor is not ready", async () => {

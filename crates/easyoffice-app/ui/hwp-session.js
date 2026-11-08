@@ -564,15 +564,21 @@
       }
     }
 
-    // The page SVGs come out of the editor over the embed port; `onCount` hears the page count first.
-    async function readPageSvgs(onCount) {
+    // The page SVGs come out of the editor over the embed port; `onProgress(done, count)` hears 0 of
+    // the page count first and then each page as it arrives.
+    async function readPageSvgs(onProgress) {
       const count = await hwpHost.call("pageCount");
       if (!Number.isInteger(count) || count < 1 || count > MAX_PDF_PAGES) {
         throw new Error("쪽 수(" + count + ")가 1~" + MAX_PDF_PAGES + " 범위를 벗어납니다");
       }
-      onCount(count);
+      onProgress(0, count);
       const options = { timeoutMs: PDF_PAGE_TIMEOUT_MS };
-      const pages = await Promise.all(Array.from({ length: count }, (_, page) => hwpHost.call("getPageSvg", { page }, options)));
+      let done = 0;
+      const pages = await Promise.all(Array.from({ length: count }, async (_, page) => {
+        const svg = await hwpHost.call("getPageSvg", { page }, options);
+        onProgress(++done, count);
+        return svg;
+      }));
       if (!pages.every((svg) => typeof svg === "string" && svg !== "")) throw new Error("쪽 그림을 받지 못했습니다");
       return pages;
     }
@@ -585,7 +591,7 @@
         return null;
       }
       try {
-        const pages = await readPageSvgs((count) => feedback("PDF 만드는 중: " + count + "쪽"));
+        const pages = await readPageSvgs((done, count) => feedback("PDF 만드는 중: " + done + " / " + count + "쪽"));
         const result = await deps.exportSearchablePdf(deps.resolveBaseName() + ".pdf", pages);
         feedback(result.status === "saved" ? "PDF 내보내기 완료 (" + result.name + " · " + pages.length + "쪽)" : "PDF 내보내기 취소: 저장 위치를 선택하지 않았습니다");
         return result;

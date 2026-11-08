@@ -19,6 +19,7 @@
     "/rhwp-studio/",
     "/assets/fonts/",
     "/ttfs/opensource/*.txt",
+    "/ttfs/opensource/NotoSansKR-Regular.ttf",
     "/ttfs/opensource/*.md",
     "/npm/editor/",
     "/bindings/Native/",

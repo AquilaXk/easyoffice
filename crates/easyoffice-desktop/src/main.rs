@@ -11,6 +11,7 @@ mod native_menu;
 mod os_recent;
 mod pdf_export;
 mod pdf_font_fallbacks;
+mod pdf_fonts;
 mod preview;
 mod recent;
 mod save_file;
@@ -126,16 +127,17 @@ async fn export_searchable_pdf(
         .resource_dir()
         .map(|dir| vec![dir.join(PDF_FONT_DIR)])
         .unwrap_or_default();
-    let (pages, pdf) = tauri::async_runtime::spawn_blocking(move || {
+    let (pages, pdf, bundled_font) = tauri::async_runtime::spawn_blocking(move || {
         let fonts = pdf_export::shared_font_db(&font_dirs);
-        pdf_export::svgs_to_searchable_pdf(&pages, &fonts).map(|pdf| (pages, pdf))
+        let bundled_font = pdf_fonts::has_face_from(&fonts, &font_dirs);
+        pdf_export::svgs_to_searchable_pdf(&pages, &fonts).map(|pdf| (pages, pdf, bundled_font))
     })
     .await
     .map_err(|err| IpcError::new(format!("PDF 내보내기를 실행하지 못했습니다: {err}")))?
     .map_err(IpcError::new)?;
     if app.try_state::<SmokeProbe>().is_some() {
         // The smoke run checks the PDF in memory: no dialog, no file (smoke_steps.rs).
-        return smoke_steps::verify_pdf(&pages, &pdf).map_err(IpcError::new);
+        return smoke_steps::verify_pdf(&pages, &pdf, bundled_font).map_err(IpcError::new);
     }
     let request = SaveRequest::from_bytes(&file_name, pdf).map_err(IpcError::new)?;
     if request.extension() != "pdf" {

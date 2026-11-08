@@ -31,6 +31,9 @@ svg2pdf = { version = "0.13", default-features = false, features = ["text"] }
 usvg = { version = "0.45", default-features = false, features = ["text"] }
 fontdb = "0.23"
 pdf-writer = "0.12"
+# Glyph lookup of the PDF fallback-font index (usvg keeps its own lookup private); already in the
+# graph through usvg and svg2pdf.
+ttf-parser = { version = "0.25", default-features = false, features = ["std"] }
 
 # PD-103: update check over the OS TLS stack (no bundled TLS library).
 ureq = { version = "2", default-features = false, features = ["native-tls"] }
