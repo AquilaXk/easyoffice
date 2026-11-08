@@ -37,6 +37,18 @@ jobs:
       - name: Run repository hygiene & specification guard
         run: node scripts/check-repo-hygiene.mjs
 
+      # Squash merges copy commit messages into main: reject tool names, external brands and
+      # attribution trailers in the PR's commits and title (same list as the hygiene guard).
+      - name: Check PR commit messages and title
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          git fetch --no-tags --depth=200 origin "$BASE_SHA" "$HEAD_SHA"
+          node scripts/check-commit-messages.mjs "$BASE_SHA" "$HEAD_SHA"
+
       - name: Verify rhwp upstream pin (no submodule checkout)
         run: node scripts/verify-rhwp-upstream.mjs
 
@@ -46,10 +58,10 @@ jobs:
           node scripts/verify-fonts.mjs
 
       - name: Run rhwp upstream and hwp-studio guard tests
-        run: node --test scripts/test-rhwp-upstream.mjs scripts/test-hwp-studio.mjs scripts/test-sort-comparator-rule.mjs scripts/test-release-serve-rule.mjs scripts/test-desktop-file-associations.mjs
+        run: node --test scripts/test-rhwp-upstream.mjs scripts/test-hwp-studio.mjs scripts/test-commit-messages.mjs scripts/test-sort-comparator-rule.mjs scripts/test-release-serve-rule.mjs scripts/test-desktop-file-associations.mjs
 
       - name: Run WebUI behavioral and security regression suite
-        run: node --test scripts/test-webui-behavior.mjs scripts/test-webui-ux-ergonomics.mjs scripts/test-webui-round13-parity.mjs scripts/test-webui-sheet-atomicity.mjs scripts/test-webui-security-ipc.mjs scripts/test-webui-session-context.mjs scripts/test-webui-save-fidelity.mjs scripts/test-webui-desktop-bridge.mjs scripts/test-webui-file-open.mjs scripts/test-webui-slide-show.mjs scripts/test-webui-doc-runs.mjs scripts/test-webui-sheet-editing.mjs scripts/test-webui-hwp-host.mjs scripts/test-webui-hwp-session.mjs scripts/test-webui-sheet-format.mjs scripts/test-webui-sheet-styles.mjs scripts/test-webui-windows.mjs scripts/test-webui-shell-chrome.mjs scripts/test-webui-hwp-shortcuts.mjs
+        run: node --test "scripts/test-webui-*.mjs"
 
       - name: Cache Rust dependencies and build artifacts
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
