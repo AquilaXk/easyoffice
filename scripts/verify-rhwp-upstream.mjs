@@ -8,7 +8,10 @@
  *  - the recorded gitlink (git ls-files -s) is missing, not a gitlink, or not the pinned commit,
  *  - the submodule work tree is checked out and its remote, HEAD, version or toolchain differ,
  *    or it contains any local modification (tracked or untracked),
- *  - the vendored WASM package (vendor/rhwp-core, PD-081) is missing, tampered with or unlisted.
+ *  - the vendored WASM package (vendor/rhwp-core, PD-081) is missing, tampered with or unlisted,
+ *  - the desktop shell's `rhwp` dependency (PD-142) names another version than the pin, or the
+ *    workspace `[patch.crates-io]` does not point rhwp at the checkout: the patch would not
+ *    apply and `cargo --locked` would fail.
  * With no checkout (the CI default) only the superproject records are verified.
  * Uses Node built-in modules only.
  */
@@ -22,6 +25,9 @@ import { checkVendorCore } from "./verify-rhwp-core.mjs";
 export const CONFIG_REL = "config/rhwp-upstream.json";
 export const SUBMODULE_PATH = "third_party/rhwp";
 export const PINNED_URL = "https://github.com/edwardkim/rhwp.git";
+export const SHELL_MANIFEST_REL = "crates/easyoffice-desktop/Cargo.toml";
+export const ROOT_MANIFEST_REL = "Cargo.toml";
+export const LOCK_REL = "Cargo.lock";
 const GITLINK_MODE = "160000";
 const SHA_RE = /^[0-9a-f]{40}$/;
 const SEMVER_RE = /^\d+\.\d+\.\d+$/;
@@ -144,6 +150,56 @@ export function cargoVersion(text) {
   return m ? m[1] : null;
 }
 
+const SHELL_RHWP_RE = /^(rhwp\s*=\s*\{[^}\n]*\bversion\s*=\s*")([^"\n]+)(")/m;
+const LOCK_RHWP_RE = /(\[\[package\]\]\r?\nname = "rhwp"\r?\nversion = ")([^"\n]+)(")/;
+const PATCH_RHWP_RE = /^rhwp\s*=\s*\{[^}\n]*\bpath\s*=\s*"([^"\n]+)"/m;
+
+/** Version the desktop shell's manifest requires of rhwp, or null when it has no such line. */
+export function shellRhwpVersion(manifestText) {
+  return SHELL_RHWP_RE.exec(manifestText)?.[2] ?? null;
+}
+
+/** `manifestText` with the shell's rhwp requirement set to `version` (null if there is none). */
+export function withShellRhwpVersion(manifestText, version) {
+  return SHELL_RHWP_RE.test(manifestText) ? manifestText.replace(SHELL_RHWP_RE, `$1${version}$3`) : null;
+}
+
+/** Version of the `rhwp` package recorded in Cargo.lock, or null when there is no such entry. */
+export function lockRhwpVersion(lockText) {
+  return LOCK_RHWP_RE.exec(lockText)?.[2] ?? null;
+}
+
+/** `lockText` with the `rhwp` package's version set to `version` (null if there is no entry). */
+export function withLockRhwpVersion(lockText, version) {
+  return LOCK_RHWP_RE.test(lockText) ? lockText.replace(LOCK_RHWP_RE, `$1${version}$3`) : null;
+}
+
+/** Path the workspace `[patch.crates-io]` gives rhwp, or null when it has no such entry. */
+export function patchedRhwpPath(rootManifestText) {
+  const section = /^\[patch\.crates-io\]\r?\n((?:(?!\[)[^\n]*\n?)*)/m.exec(rootManifestText);
+  return section ? (PATCH_RHWP_RE.exec(section[1])?.[1] ?? null) : null;
+}
+
+/** The shell must require the pinned rhwp version and the workspace must patch it to the checkout. */
+export function checkShellDeclaration(root, config) {
+  const errors = [];
+  const shell = readIfExists(path.join(root, SHELL_MANIFEST_REL));
+  const declared = shell === null ? null : shellRhwpVersion(shell);
+  if (declared === null) errors.push(`${SHELL_MANIFEST_REL}: no rhwp dependency with a version`);
+  else if (declared !== config.version) {
+    errors.push(
+      `${SHELL_MANIFEST_REL}: rhwp version "${declared}" differs from ${CONFIG_REL} version "${config.version}" `
+        + `(the [patch.crates-io] entry would not apply; run scripts/update-rhwp.mjs or set the version)`,
+    );
+  }
+  const manifest = readIfExists(path.join(root, ROOT_MANIFEST_REL));
+  const patched = manifest === null ? null : patchedRhwpPath(manifest);
+  if (patched !== config.path) {
+    errors.push(`${ROOT_MANIFEST_REL}: [patch.crates-io] rhwp must have path "${config.path}" (found ${patched === null ? "none" : `"${patched}"`})`);
+  }
+  return errors;
+}
+
 function readIfExists(file) {
   return fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null;
 }
@@ -203,6 +259,7 @@ export function verifyUpstream(root, { skipVendor = false } = {}) {
     errors.push(`git ls-files failed: ${String(err.stderr || err.message).trim()}`);
   }
   errors.push(...checkWorktree(root, config));
+  errors.push(...checkShellDeclaration(root, config));
   if (!skipVendor) errors.push(...checkVendorCore(root, config));
   return errors;
 }

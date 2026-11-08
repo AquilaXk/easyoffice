@@ -19,6 +19,12 @@ const MANIFEST_REL = "config/rhwp-studio-overrides.json";
 const MAIN_TS = "export const main = 1;\n";
 const ASSET = "<svg/>\n";
 const PATCH = '[patch.crates-io]\nsvg2pdf = { path = "vendor/svg2pdf" }\n';
+const SHELL_REL = "crates/easyoffice-desktop/Cargo.toml";
+const LOCK_REL = "Cargo.lock";
+const shellManifest = (version) =>
+  `[package]\nname = "easyoffice-desktop"\n\n[dependencies]\nsvg2pdf = { version = "0.13" }\nrhwp = { version = "${version}", default-features = false }\n`;
+const lockFile = (version) =>
+  `[[package]]\nname = "rhwp-extra"\nversion = "${version}"\n\n[[package]]\nname = "rhwp"\nversion = "${version}"\ndependencies = [\n "aes",\n]\n`;
 const SVG2PDF = {
   "vendor/svg2pdf/Cargo.toml": '[package]\nname = "svg2pdf"\nversion = "0.13.0"\n',
   "vendor/svg2pdf/src/lib.rs": "pub fn a() {}\n",
@@ -57,11 +63,14 @@ function makeRoot() {
   }
   fs.writeFileSync(path.join(root, CONFIG_REL), stringify(config));
   fs.writeFileSync(path.join(root, MANIFEST_REL), stringify(manifest));
+  fs.mkdirSync(path.join(root, path.dirname(SHELL_REL)), { recursive: true });
+  fs.writeFileSync(path.join(root, SHELL_REL), shellManifest(config.version));
+  fs.writeFileSync(path.join(root, LOCK_REL), lockFile(config.version));
   return root;
 }
 
 function snapshot(root) {
-  return [CONFIG_REL, MANIFEST_REL].map((rel) => fs.readFileSync(path.join(root, rel), "utf8"));
+  return [CONFIG_REL, MANIFEST_REL, SHELL_REL, LOCK_REL].map((rel) => fs.readFileSync(path.join(root, rel), "utf8"));
 }
 
 function readJson(root, rel) {
@@ -217,6 +226,51 @@ test("updates the pin, the baseline commit, the gitlink and the checkout, then p
   const output = env.logs.join("\n");
   assert.match(output, /vendored WASM was NOT rebuilt/);
   assert.match(output, /vendor-rhwp-core\.mjs/);
+});
+
+test("the shell's rhwp requirement and the Cargo.lock entry follow the pin, and nothing else in them changes", () => {
+  const root = makeRoot();
+  const old = readJson(root, CONFIG_REL).version;
+  runUpdate(["v0.9.0"], makeEnv(root, makeRemote()));
+  assert.equal(fs.readFileSync(path.join(root, SHELL_REL), "utf8"), shellManifest("0.9.0"));
+  // Only the `rhwp` package changes, not another package whose name starts the same way.
+  assert.equal(
+    fs.readFileSync(path.join(root, LOCK_REL), "utf8"),
+    lockFile(old).replace('name = "rhwp"\nversion = "' + old, 'name = "rhwp"\nversion = "0.9.0'),
+  );
+});
+
+test("a shell manifest or lock file without rhwp refuses the update and changes nothing", () => {
+  for (const [rel, text, pattern] of [
+    [SHELL_REL, '[dependencies]\nsvg2pdf = "0.13"\n', /easyoffice-desktop\/Cargo\.toml has no rhwp dependency/],
+    [LOCK_REL, '[[package]]\nname = "aes"\nversion = "0.8.4"\n', /Cargo\.lock has no rhwp package entry/],
+  ]) {
+    const root = makeRoot();
+    fs.writeFileSync(path.join(root, rel), text);
+    const before = snapshot(root);
+    const env = makeEnv(root, makeRemote());
+    assert.throws(() => runUpdate(["v0.9.0"], env), pattern);
+    assert.deepEqual(snapshot(root), before);
+    assert.deepEqual(env.calls, []);
+  }
+});
+
+test("a pin that is current but a shell requirement that is stale is repaired, not skipped", () => {
+  const root = makeRoot();
+  const pinned = readJson(root, CONFIG_REL);
+  const remote = makeRemote({
+    tags: { "v0.8.7": `${NEW_COMMIT}\trefs/tags/v0.8.7` },
+    files: { "Cargo.toml": `[package]\nname = "rhwp"\nversion = "0.8.7"\n\n${PATCH}`, "rust-toolchain.toml": `[toolchain]\nchannel = "${pinned.rustToolchain}"\n` },
+  });
+  fs.writeFileSync(path.join(root, CONFIG_REL), stringify({ ...pinned, commit: NEW_COMMIT }));
+  const manifest = readJson(root, MANIFEST_REL);
+  manifest.upstream.commit = NEW_COMMIT;
+  fs.writeFileSync(path.join(root, MANIFEST_REL), stringify(manifest));
+  fs.writeFileSync(path.join(root, SHELL_REL), shellManifest("0.8.6"));
+  const env = makeEnv(root, remote);
+  runUpdate(["v0.8.7"], env);
+  assert.equal(fs.readFileSync(path.join(root, SHELL_REL), "utf8"), shellManifest("0.8.7"));
+  assert.doesNotMatch(env.logs.join("\n"), /already pinned/);
 });
 
 test("the already pinned tag is a no-op", () => {

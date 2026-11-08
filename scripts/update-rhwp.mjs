@@ -12,7 +12,9 @@
  *
  * The tag is resolved on the remote to a commit, the new upstream files are read from that commit
  * without a checkout, and the whole plan is built first. Files are written only at the end: the pin
- * (config/rhwp-upstream.json), the override baseline, the gitlink and the sparse checkout. A failed
+ * (config/rhwp-upstream.json), the override baseline, the rhwp version the desktop shell requires
+ * (crates/easyoffice-desktop/Cargo.toml, and its Cargo.lock entry; a mismatch with the workspace
+ * [patch.crates-io] would fail `cargo --locked`), the gitlink and the sparse checkout. A failed
  * write restores the pin files and the gitlink. The vendored WASM is never rebuilt here.
  *
  * Reference implementation (MIT, Copyright (c) 2025-2026 Edward Kim) of the reference app:
@@ -28,7 +30,17 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { normalizedSha256Text, MANIFEST_REL, studioFileRel } from "./hwp-studio-overrides.mjs";
 import { applySvg2pdf, planSvg2pdf, restoreSvg2pdf, SVG2PDF_DIR } from "./rhwp-svg2pdf.mjs";
-import { CONFIG_REL, cargoVersion, checkConfig, readConfig, resolveGitExecutable } from "./verify-rhwp-upstream.mjs";
+import {
+  CONFIG_REL,
+  LOCK_REL,
+  SHELL_MANIFEST_REL,
+  cargoVersion,
+  checkConfig,
+  readConfig,
+  resolveGitExecutable,
+  withLockRhwpVersion,
+  withShellRhwpVersion,
+} from "./verify-rhwp-upstream.mjs";
 
 const TAG_RE = /^v(\d{1,4})\.(\d{1,4})\.(\d{1,4})$/;
 const SHA_RE = /^[0-9a-f]{40}$/;
@@ -182,11 +194,20 @@ export function planUpdate({ root, tag, acceptOverrides, syncSvg2pdf = false, re
   const svg2pdf = planSvg2pdf({ root, remote, url: config.url, commit, sync: syncSvg2pdf });
   problems.push(...svg2pdf.problems);
 
+  const shellManifest = fs.readFileSync(path.join(root, SHELL_MANIFEST_REL), "utf8");
+  const nextShellManifest = withShellRhwpVersion(shellManifest, version);
+  if (nextShellManifest === null) problems.push(`${SHELL_MANIFEST_REL} has no rhwp dependency with a version`);
+  const lock = fs.readFileSync(path.join(root, LOCK_REL), "utf8");
+  const nextLock = withLockRhwpVersion(lock, version);
+  if (nextLock === null) problems.push(`${LOCK_REL} has no rhwp package entry`);
+
   const nextConfig = { ...config, commit, version, rustToolchain: rustToolchain ?? config.rustToolchain };
   const nextManifest = { ...manifest, upstream: { ...manifest.upstream, version, commit, ...baseline.next } };
   const files = [
     { rel: CONFIG_REL, before: configText, after: stringify(nextConfig) },
     { rel: MANIFEST_REL, before: manifestText, after: stringify(nextManifest) },
+    { rel: SHELL_MANIFEST_REL, before: shellManifest, after: nextShellManifest ?? shellManifest },
+    { rel: LOCK_REL, before: lock, after: nextLock ?? lock },
   ];
   return {
     tag, commit, version, previousCommit: config.commit, rustToolchain: nextConfig.rustToolchain,
@@ -225,6 +246,7 @@ function describePlan(plan, dryRun) {
     `${dryRun ? "Plan" : "Updating"}: rhwp ${plan.previousCommit.slice(0, 8)} -> ${plan.tag} (${plan.commit})`,
     `  ${CONFIG_REL}: commit, version ${plan.version}, rustToolchain ${plan.rustToolchain}`,
     `  ${MANIFEST_REL}: upstream baseline (${plan.changedOverrides.length} changed: ${plan.changedOverrides.join(", ") || "none"})`,
+    `  ${SHELL_MANIFEST_REL} and ${LOCK_REL}: rhwp version ${plan.version}`,
     ...(plan.svg2pdf ? [`  ${SVG2PDF_DIR}: sync to rhwp's copy (version ${plan.svg2pdf.localVersion} -> ${plan.svg2pdf.upstreamVersion}): ${plan.svg2pdf.lines.join("; ")}`] : []),
     "  gitlink third_party/rhwp and sparse checkout via scripts/checkout-rhwp.mjs",
   ];
@@ -237,6 +259,7 @@ function nextSteps(plan) {
     `  1. cd third_party/rhwp && RUSTUP_TOOLCHAIN=${plan.rustToolchain} CARGO_TARGET_DIR=<outside the submodule> wasm-pack build --target web --out-dir <abs outDir> --release (wasm-pack ${plan.wasmPackVersion})`,
     "  2. node scripts/vendor-rhwp-core.mjs <outDir> --wasm-pack <abs path to wasm-pack>   (rewrites vendor/rhwp-core/PROVENANCE.json)",
     "  3. node scripts/verify-rhwp-upstream.mjs && node scripts/check-repo-hygiene.mjs",
+    "     then `cargo check -p easyoffice-desktop` and commit Cargo.lock if cargo changed more than the rhwp version",
     "  4. Re-check THIRD_PARTY_NOTICES.md and run the hwp-studio build and tests.",
   ].join("\n");
 }

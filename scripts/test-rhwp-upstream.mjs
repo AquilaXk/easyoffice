@@ -14,6 +14,11 @@ import {
   verifyUpstream,
   sparseCheckoutPlan,
   resolveGitExecutable,
+  ROOT_MANIFEST_REL,
+  SHELL_MANIFEST_REL,
+  lockRhwpVersion,
+  patchedRhwpPath,
+  shellRhwpVersion,
 } from "./verify-rhwp-upstream.mjs";
 import { REQUIRED_VENDOR_FILES, checkVendorCore } from "./verify-rhwp-core.mjs";
 
@@ -41,6 +46,10 @@ function makeRepo({ commit = COMMIT, url = URL_OK, config = {}, gitlink = commit
   fs.writeFileSync(path.join(dir, ".gitmodules"), gitmodulesText(url));
   git(dir, "update-index", "--add", "--cacheinfo", `160000,${gitlink},third_party/rhwp`);
   fs.cpSync(path.join(REPO, "vendor/rhwp-core"), path.join(dir, "vendor/rhwp-core"), { recursive: true });
+  for (const rel of [SHELL_MANIFEST_REL, ROOT_MANIFEST_REL]) {
+    fs.mkdirSync(path.join(dir, path.dirname(rel)), { recursive: true });
+    fs.copyFileSync(path.join(REPO, rel), path.join(dir, rel));
+  }
   return dir;
 }
 
@@ -76,6 +85,42 @@ test("a temporary repository with the pinned gitlink passes", () => {
   const dir = makeRepo();
   try {
     assert.deepEqual(verifyUpstream(dir), []);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("the shell's rhwp requirement, the workspace patch and Cargo.lock agree with the pinned commit's version", () => {
+  const config = JSON.parse(fs.readFileSync(path.join(REPO, "config/rhwp-upstream.json"), "utf8"));
+  const read = (rel) => fs.readFileSync(path.join(REPO, rel), "utf8");
+  assert.equal(shellRhwpVersion(read(SHELL_MANIFEST_REL)), config.version);
+  assert.equal(patchedRhwpPath(read(ROOT_MANIFEST_REL)), config.path);
+  assert.equal(lockRhwpVersion(read("Cargo.lock")), config.version);
+});
+
+test("a shell that requires another rhwp version than the pin fails", () => {
+  const dir = makeRepo();
+  try {
+    const shell = path.join(dir, SHELL_MANIFEST_REL);
+    fs.writeFileSync(shell, fs.readFileSync(shell, "utf8").replace(/(rhwp = \{ version = ")[^"]+/, "$10.8.6"));
+    const errs = verifyUpstream(dir);
+    assert.ok(errs.some((e) => e.includes(SHELL_MANIFEST_REL) && e.includes('"0.8.6"')), errs.join("\n"));
+    fs.writeFileSync(shell, "[dependencies]\n");
+    assert.ok(verifyUpstream(dir).some((e) => e.includes("no rhwp dependency")));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("a workspace without the rhwp patch to the checkout fails", () => {
+  const dir = makeRepo();
+  try {
+    const root = path.join(dir, ROOT_MANIFEST_REL);
+    const text = fs.readFileSync(root, "utf8");
+    fs.writeFileSync(root, text.replace('rhwp = { path = "third_party/rhwp" }', 'rhwp = { path = "elsewhere/rhwp" }'));
+    assert.ok(verifyUpstream(dir).some((e) => e.includes("[patch.crates-io] rhwp must have path")));
+    fs.writeFileSync(root, text.replace('rhwp = { path = "third_party/rhwp" }', ""));
+    assert.ok(verifyUpstream(dir).some((e) => e.includes("found none")));
   } finally {
     cleanup(dir);
   }
