@@ -36,6 +36,15 @@ export const REQUIRED_MIME_TYPES = new Map([
   ["pdf", "application/pdf"],
 ]);
 
+/**
+ * macOS UTIs of the two HWP formats (Info.plist `LSItemContentTypes` and `UTExportedTypeDeclarations`): the
+ * type the app exports itself (types other software declares are not listed). Both formats are plain data (HWPX is also a zip archive).
+ */
+export const REQUIRED_UTIS = new Map([
+  ["hwp", { exported: "com.aquilaxk.easyoffice.hwp", conformsTo: ["public.data"] }],
+  ["hwpx", { exported: "com.aquilaxk.easyoffice.hwpx", conformsTo: ["public.data", "public.zip-archive"] }],
+]);
+
 /** Runtime libraries the Linux packages must declare (the WebKitGTK shell, its menus and the update check TLS link them). */
 export const LINUX_DEB_DEPENDS = ["libwebkit2gtk-4.1-0", "libgtk-3-0", "libxdo3", "libssl3"];
 /** RPM requirements are library capabilities, so they hold on every RPM distribution's package names. */
@@ -159,6 +168,25 @@ function checkRequiredExtensions(registered) {
   return problems;
 }
 
+function checkUtiDeclarations(associations) {
+  const problems = [];
+  for (const [ext, uti] of REQUIRED_UTIS) {
+    const assoc = associations.find((a) => Array.isArray(a?.ext) && a.ext.includes(ext));
+    if (!assoc) continue;
+    const types = Array.isArray(assoc.contentTypes) ? assoc.contentTypes : [];
+    for (const wanted of [uti.exported]) {
+      if (!types.includes(wanted)) problems.push(`file association for '.${ext}' must list contentTypes '${wanted}' (macOS UTI)`);
+    }
+    const exported = assoc.exportedType;
+    if (exported?.identifier !== uti.exported) {
+      problems.push(`file association for '.${ext}' must export the type '${uti.exported}'`);
+    } else if (JSON.stringify(exported.conformsTo) !== JSON.stringify(uti.conformsTo)) {
+      problems.push(`exported type '${uti.exported}' must conform to ${uti.conformsTo.join(", ")}`);
+    }
+  }
+  return problems;
+}
+
 function checkFileAssociations(associations) {
   const problems = [];
   const registered = new Map();
@@ -169,7 +197,7 @@ function checkFileAssociations(associations) {
       registered.set(String(ext).toLowerCase(), { role: assoc.role, mimeType: assoc.mimeType });
     }
   }
-  return [...problems, ...checkRequiredExtensions(registered)];
+  return [...problems, ...checkRequiredExtensions(registered), ...checkUtiDeclarations(associations)];
 }
 
 /** Returns a list of problems (empty when the configuration satisfies the contract). */

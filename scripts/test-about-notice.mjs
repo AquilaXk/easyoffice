@@ -47,3 +47,10 @@ test("the company name stays prohibited outside the exact sentence", () => {
   assert.ok(prohibitedPatternsIn(INDEX, NOTICE.replace(".hwp", ".hwpx")).length > 0, "reworded sentence in the page");
   assert.ok(prohibitedPatternsIn(INDEX, `${COMPANY}의 소식`).length > 0, "another sentence with the name");
 });
+
+test("a reverse-domain identifier of another company is rejected, this app's own is not", () => {
+  const foreign = ["com.", "hancom", ".hwp"].join("");
+  assert.ok(prohibitedPatternsIn("crates/x.json", `"${foreign}"`).length > 0);
+  assert.equal(prohibitedPatternsIn("crates/x.json", '"com.aquilaxk.easyoffice.hwp"').length, 0);
+  assert.equal(prohibitedPatternsIn("crates/x.json", "application/vnd.hancom.hwpx").length, 0);
+});

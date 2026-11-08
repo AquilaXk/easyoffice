@@ -7,6 +7,9 @@
 mod app_commands;
 mod app_quit;
 mod confirm_dialog;
+// Linux webview runtime fixes (PD-125); other OSes compile it only for its decision-logic tests.
+#[cfg(any(target_os = "linux", test))]
+mod linux_runtime;
 mod open_feedback;
 mod os_recent;
 mod pdf_export;
@@ -256,6 +259,10 @@ pub(crate) fn is_app_origin(url: &tauri::Url) -> bool {
 }
 
 fn main() {
+    // Before any webview exists: WebKitGTK reads these variables when it starts.
+    #[cfg(target_os = "linux")]
+    linux_runtime::apply_linux_runtime_fixes();
+
     let smoke_mode = std::env::args().skip(1).any(|arg| arg == "--smoke");
     let mut builder = tauri::Builder::default();
     if !smoke_mode {

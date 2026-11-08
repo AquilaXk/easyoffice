@@ -1,0 +1,309 @@
+// 참조 구현 (MIT, Copyright (c) 2025-2026 Edward Kim): 참조 앱 apps/desktop/src-tauri/src/linux_runtime.rs
+// (WebKitGTK 그래픽 대체 설정과 AppImage의 GTK 입력기 모듈 캐시 보정, 8-46줄 상수와 함수 전체).
+// 출처와 라이선스는 THIRD_PARTY_NOTICES.md에 있다. 사용자가 이미 정한 환경 변수는 덮어쓰지 않는다.
+//
+// 이 모듈은 Linux 빌드에서 쓰이고, 다른 OS에서는 결정 로직을 단위 테스트할 때만 컴파일된다.
+#![cfg_attr(not(target_os = "linux"), allow(dead_code))]
+
+use std::{
+    env,
+    ffi::{OsStr, OsString},
+    fs,
+    path::{Path, PathBuf},
+};
+
+const APPIMAGE_GTK_IM_MODULE_CACHE_CANDIDATES: &[&str] = &[
+    "usr/lib/x86_64-linux-gnu/gtk-3.0/3.0.0/immodules.cache",
+    "usr/lib/aarch64-linux-gnu/gtk-3.0/3.0.0/immodules.cache",
+    "usr/lib64/gtk-3.0/3.0.0/immodules.cache",
+    "usr/lib/gtk-3.0/3.0.0/immodules.cache",
+];
+
+const HOST_GTK_IM_MODULE_CACHE_CANDIDATES: &[&str] = &[
+    "/usr/lib/x86_64-linux-gnu/gtk-3.0/3.0.0/immodules.cache",
+    "/usr/lib/aarch64-linux-gnu/gtk-3.0/3.0.0/immodules.cache",
+    "/usr/lib64/gtk-3.0/3.0.0/immodules.cache",
+    "/usr/lib/gtk-3.0/3.0.0/immodules.cache",
+];
+
+const HOST_GTK_DIR_CANDIDATES: &[&str] = &[
+    "/usr/lib/x86_64-linux-gnu/gtk-3.0",
+    "/usr/lib/aarch64-linux-gnu/gtk-3.0",
+    "/usr/lib64/gtk-3.0",
+    "/usr/lib/gtk-3.0",
+];
+
+const GTK_IM_MODULE_FALLBACK_ENV: &[&str] = &["QT_IM_MODULE", "SDL_IM_MODULE", "INPUT_METHOD"];
+const GTK_PATH_SEPARATOR: char = ':';
+const OS_RELEASE_PATH: &str = "/etc/os-release";
+const WEBKIT_GRAPHICS_FALLBACK_ENV: &[(&str, &str)] = &[
+    ("WEBKIT_DISABLE_DMABUF_RENDERER", "1"),
+    ("WEBKIT_DISABLE_COMPOSITING_MODE", "1"),
+];
+const WEBKIT_GRAPHICS_FALLBACK_DISTRO_FAMILIES: &[&str] = &[
+    "arch",
+    "archlinux",
+    "cachyos",
+    "manjaro",
+    "endeavouros",
+    "garuda",
+];
+const WEBKIT_GRAPHICS_FALLBACK_WAYLAND_DISTRO_FAMILIES: &[&str] = &["fedora", "rhel", "redhat"];
+
+pub fn apply_linux_runtime_fixes() {
+    apply_linux_runtime_fixes_for_os_release(read_os_release().as_deref());
+}
+
+fn apply_linux_runtime_fixes_for_os_release(os_release: Option<&str>) {
+    apply_webkit_graphics_fallbacks(os_release);
+
+    if !is_appimage_runtime() {
+        return;
+    }
+
+    let host_cache_candidates = host_cache_candidate_paths();
+    apply_appimage_runtime_fixes_with_host_caches(&host_cache_candidates);
+}
+
+fn apply_webkit_graphics_fallbacks(os_release: Option<&str>) {
+    if !needs_webkit_graphics_fallback(os_release) {
+        return;
+    }
+
+    for (name, value) in WEBKIT_GRAPHICS_FALLBACK_ENV {
+        if env::var_os(name).is_none() {
+            env::set_var(name, value);
+        }
+    }
+}
+
+fn apply_appimage_runtime_fixes_with_host_caches(host_cache_candidates: &[PathBuf]) {
+    let requested_module = requested_gtk_im_module();
+    if has_user_im_module_cache_override() {
+        if let Some(module) = requested_module.as_deref() {
+            ensure_gtk_im_module(module);
+        }
+        return;
+    }
+
+    if let Some(module) = requested_module.as_deref() {
+        if active_cache_supports_module(module) {
+            ensure_gtk_im_module(module);
+            return;
+        }
+
+        if let Some(cache_path) = find_im_module_cache(host_cache_candidates, module) {
+            apply_host_im_module_cache(&cache_path);
+            ensure_gtk_im_module(module);
+        }
+    }
+}
+
+fn is_appimage_runtime() -> bool {
+    env::var_os("APPIMAGE").is_some() || env::var_os("APPDIR").is_some()
+}
+
+fn read_os_release() -> Option<String> {
+    fs::read_to_string(OS_RELEASE_PATH).ok()
+}
+
+fn needs_webkit_graphics_fallback(os_release: Option<&str>) -> bool {
+    distro_family_matches(os_release, WEBKIT_GRAPHICS_FALLBACK_DISTRO_FAMILIES)
+        || (is_wayland_session()
+            && distro_family_matches(os_release, WEBKIT_GRAPHICS_FALLBACK_WAYLAND_DISTRO_FAMILIES))
+}
+
+fn distro_family_matches(os_release: Option<&str>, families: &[&str]) -> bool {
+    let Some(contents) = os_release else {
+        return false;
+    };
+
+    contents.lines().any(|line| {
+        let Some((name, value)) = line.split_once('=') else {
+            return false;
+        };
+        if !matches!(name, "ID" | "ID_LIKE") {
+            return false;
+        }
+        os_release_value_tokens(value).any(|token| families.iter().any(|family| token == *family))
+    })
+}
+
+fn is_wayland_session() -> bool {
+    env_var_is_nonempty("WAYLAND_DISPLAY")
+        || env::var_os("XDG_SESSION_TYPE")
+            .is_some_and(|value| value.to_string_lossy().eq_ignore_ascii_case("wayland"))
+}
+
+fn env_var_is_nonempty(name: &str) -> bool {
+    env::var_os(name).is_some_and(|value| !value.is_empty())
+}
+
+fn os_release_value_tokens(value: &str) -> impl Iterator<Item = String> + '_ {
+    value
+        .trim()
+        .trim_matches('"')
+        .split_whitespace()
+        .map(|token| token.to_ascii_lowercase())
+}
+
+fn requested_gtk_im_module() -> Option<String> {
+    env_im_module("GTK_IM_MODULE")
+        .or_else(requested_xim_module)
+        .or_else(|| {
+            GTK_IM_MODULE_FALLBACK_ENV
+                .iter()
+                .find_map(|name| env_im_module(name))
+        })
+}
+
+fn env_im_module(name: &str) -> Option<String> {
+    env::var(name)
+        .ok()
+        .and_then(|value| normalize_im_module(&value))
+}
+
+fn requested_xim_module() -> Option<String> {
+    env::var("XMODIFIERS").ok().and_then(|value| {
+        let (_, module) = value.split_once("@im=")?;
+        let module = module
+            .split(|ch: char| ch == ';' || ch.is_whitespace())
+            .next()
+            .unwrap_or(module);
+        normalize_im_module(module)
+    })
+}
+
+fn has_user_im_module_cache_override() -> bool {
+    current_im_module_cache()
+        .as_deref()
+        .is_some_and(|path| !is_appimage_owned_path(path))
+}
+
+fn is_appimage_owned_path(path: &Path) -> bool {
+    env::var_os("APPDIR")
+        .map(PathBuf::from)
+        .is_some_and(|appdir| path.starts_with(appdir))
+}
+
+fn normalize_im_module(value: &str) -> Option<String> {
+    let normalized = value.trim().trim_matches('"').trim().to_ascii_lowercase();
+
+    match normalized.as_str() {
+        "" | "none" | "simple" | "gtk-im-context-simple" => None,
+        "fcitx5" => Some("fcitx".to_string()),
+        _ => Some(normalized),
+    }
+}
+
+fn host_cache_candidate_paths() -> Vec<PathBuf> {
+    HOST_GTK_IM_MODULE_CACHE_CANDIDATES
+        .iter()
+        .map(PathBuf::from)
+        .collect()
+}
+
+fn find_im_module_cache(candidates: &[PathBuf], requested_module: &str) -> Option<PathBuf> {
+    candidates
+        .iter()
+        .find(|path| cache_supports_module(path, requested_module))
+        .cloned()
+}
+
+fn active_cache_supports_module(requested_module: &str) -> bool {
+    current_im_module_cache()
+        .as_deref()
+        .is_some_and(|path| cache_supports_module(path, requested_module))
+}
+
+fn current_im_module_cache() -> Option<PathBuf> {
+    if let Some(path) = env::var_os("GTK_IM_MODULE_FILE") {
+        return Some(PathBuf::from(path));
+    }
+
+    let appdir = env::var_os("APPDIR")?;
+    APPIMAGE_GTK_IM_MODULE_CACHE_CANDIDATES
+        .iter()
+        .map(|relative| PathBuf::from(&appdir).join(relative))
+        .find(|path| path.is_file())
+}
+
+fn cache_supports_module(path: &Path, requested_module: &str) -> bool {
+    let Ok(contents) = fs::read_to_string(path) else {
+        return false;
+    };
+    let needle = format!("\"{requested_module}\"");
+    contents.contains(&needle)
+}
+
+fn apply_host_im_module_cache(cache_path: &Path) {
+    env::set_var("GTK_IM_MODULE_FILE", cache_path);
+    if let Some(gtk_path) = merged_gtk_paths(
+        env::var_os("GTK_PATH").as_deref(),
+        &host_gtk_path_candidates_for_cache(cache_path),
+    ) {
+        env::set_var("GTK_PATH", gtk_path);
+    }
+}
+
+fn ensure_gtk_im_module(module: &str) {
+    if matches!(module, "xim" | "wayland" | "waylandgtk" | "broadway") {
+        return;
+    }
+
+    if env_im_module("GTK_IM_MODULE").as_deref() != Some(module) {
+        env::set_var("GTK_IM_MODULE", module);
+    }
+}
+
+fn host_gtk_path_candidates_for_cache(cache_path: &Path) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Some(root) = gtk_path_root_for_cache(cache_path) {
+        push_unique_path(&mut paths, root);
+    }
+    for candidate in HOST_GTK_DIR_CANDIDATES {
+        push_unique_path(&mut paths, PathBuf::from(candidate));
+    }
+    paths
+}
+
+fn gtk_path_root_for_cache(cache_path: &Path) -> Option<PathBuf> {
+    cache_path.parent()?.parent().map(Path::to_path_buf)
+}
+
+fn merged_gtk_paths(current: Option<&OsStr>, host_dirs: &[PathBuf]) -> Option<OsString> {
+    let mut values = Vec::new();
+    for dir in host_dirs {
+        push_unique_path(&mut values, dir.clone());
+    }
+
+    if let Some(current) = current {
+        for segment in current.to_string_lossy().split(GTK_PATH_SEPARATOR) {
+            push_unique_path(&mut values, PathBuf::from(segment));
+        }
+    }
+
+    if values.is_empty() {
+        None
+    } else {
+        let mut joined = OsString::new();
+        for (index, path) in values.iter().enumerate() {
+            if index > 0 {
+                joined.push(GTK_PATH_SEPARATOR.to_string());
+            }
+            joined.push(path);
+        }
+        Some(joined)
+    }
+}
+
+fn push_unique_path(paths: &mut Vec<PathBuf>, path: PathBuf) {
+    if path.as_os_str().is_empty() || paths.iter().any(|existing| existing == &path) {
+        return;
+    }
+    paths.push(path);
+}
+
+#[cfg(test)]
+#[path = "linux_runtime_tests.rs"]
+mod linux_runtime_tests;

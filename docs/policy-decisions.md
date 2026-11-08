@@ -2025,3 +2025,14 @@
 - **Alternatives rejected** 새 끌어 놓기 덮개 요소(새 시각 요소 금지), 페이지가 Tauri 이벤트를 직접 듣게 하는 것(페이지에 이벤트 권한을 주지 않는 PD-102 방침).
 - **Verified by** `cargo test -p easyoffice-desktop`(`open_feedback`, `windows::only_empty_start_windows_are_listed_for_cleanup`, 외부 변경 문구), `node --test scripts/test-webui-windows.mjs`.
 - **Revisit when** 참조 앱의 열기 안내나 저장 확인 문구가 바뀔 때.
+
+## 100. Linux 웹뷰 런타임 보정, HWP UTI 선언, 한글 창 macOS 표기, 작은 정리를 참조 앱과 같게 (PD-125)
+
+- **Status** Implemented (QA 요청 2026-11-08: 참조 앱과 같게 맞춤. Linux 보정은 이 환경에서 결정 로직 단위 테스트만 돌렸고 실기기 확인 전)
+- **Context** 참조 앱은 Linux에서 WebKitGTK 그래픽 문제를 피하는 환경 변수와 AppImage의 입력기 캐시 보정을 웹뷰 생성 전에 적용하고, macOS 파일 연결에 HWP UTI를 선언하며, 한글 편집기 틀에서 macOS 단축키를 기호로 쓰고 크롬 영역의 기본 우클릭 메뉴를 막습니다(`linux_runtime.rs`, `tauri.conf.json`, `desktop-chrome.ts`, `platform.ts`).
+- **Decision (`PD-125`)** (1) `linux_runtime.rs`를 이식해 `main`의 첫머리(웹뷰 전)에서 부릅니다. Arch 계열은 항상, Fedora·RHEL 계열은 Wayland 세션일 때 `WEBKIT_DISABLE_DMABUF_RENDERER`·`WEBKIT_DISABLE_COMPOSITING_MODE`를 `1`로 두며 사용자가 이미 정한 값은 덮어쓰지 않습니다. AppImage에서는 요청된 입력기 모듈이 번들 캐시에 없고 호스트 캐시에 있으면 호스트 캐시를 씁니다(사용자가 `GTK_IM_MODULE_FILE`을 정했으면 그대로). 다른 OS에서는 결정 로직 테스트에만 컴파일됩니다. (2) HWP·HWPX 파일 연결에 `contentTypes`와 `exportedType`(우리 식별자 `com.aquilaxk.easyoffice.hwp(x)`만)을 더합니다. 참조 앱이 함께 적은 다른 앱·회사의 식별자는 넣지 않았고, 핸들러 순위는 우리 정책(Alternate)을 유지합니다. `scripts/desktop-file-associations.mjs`가 이를 검사합니다. (3) 한글 창(`apps/hwp-studio`)은 macOS에서 정적 크롬의 단축키 글과 툴팁을 `⌘`·`⌥`·`⇧`로 쓰고(메뉴 항목은 편집기가 이미 그렇게 씀), 메뉴 줄·도구 상자·서식 줄·상태 줄의 기본 우클릭 메뉴를 막습니다. (4) 시작 화면 "문서 열기" 설명에서 `(Ctrl+O)`를 빼고, 개요 대화상자의 정적 예시 항목을 없앱니다(열 때 `workspace-panels.js`가 채움).
+- **Why** 참조 앱과 같은 동작을 맞추고, Linux 배포판별 렌더링 문제와 macOS 연결 불일치를 줄입니다.
+- **Trade-offs** 다른 앱이 선언한 UTI는 넣지 않음(QA 결정 시 예외 가능). 그 앱이 형식을 표시한 파일은 연결 후보에서 빠질 수 있습니다. Linux 보정은 배포판 판별을 `/etc/os-release`에 의존합니다.
+- **Alternatives rejected** 모든 Linux에 그래픽 대체를 켜는 것(성능 저하), 참조 앱의 UTI 식별자를 그대로 쓰는 것(다른 앱의 식별자).
+- **Verified by** `cargo test -p easyoffice-desktop linux_runtime`, `node --test scripts/test-desktop-file-associations.mjs scripts/test-hwp-studio.mjs`.
+- **Revisit when** 참조 앱의 Linux 보정 목록이나 UTI 선언이 바뀔 때, Linux·macOS 실기기에서 확인한 뒤.

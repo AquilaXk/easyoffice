@@ -20,6 +20,8 @@ export const PROHIBITED_CONTENT_B64 = [
   "Q2xhdWRlLVNlc3Npb246",     // session attribution trailer
   "XGJob3BcYg==",           // reference app name (word)
   "Z29sYmlu",             // reference app owner
+  "XGJjb20uaGFuY29t", // external company reverse-domain identifier 1 (com.<company>)
+  "XGJjb20uaGFhbnNvZnQ=", // external company reverse-domain identifier 2
   "7ZWc6riA6rO87Lu07ZOo7YSw", // external company name (ko); only the required spec notice may carry it, see NOTICE_EXCEPTIONS
 ];
 

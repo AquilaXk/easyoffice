@@ -10,6 +10,7 @@ import {
   PDF_FONT_FILES,
   REQUIRED_ASSOCIATIONS,
   REQUIRED_MIME_TYPES,
+  REQUIRED_UTIS,
 } from "./desktop-file-associations.mjs";
 
 const confUrl = new URL("../crates/easyoffice-desktop/tauri.conf.json", import.meta.url);
@@ -29,6 +30,29 @@ test("every required extension declares its Linux MIME type", () => {
   const mimeTypes = new Map();
   for (const a of load().bundle.fileAssociations) for (const e of a.ext) mimeTypes.set(e, a.mimeType);
   assert.deepEqual(Object.fromEntries(mimeTypes), Object.fromEntries(REQUIRED_MIME_TYPES));
+});
+
+test("the HWP formats declare only the exported UTI of this app", () => {
+  const associations = load().bundle.fileAssociations;
+  for (const [ext, uti] of REQUIRED_UTIS) {
+    const assoc = associations.find((a) => a.ext.includes(ext));
+    assert.deepEqual(assoc.contentTypes, [uti.exported], ext);
+    assert.deepEqual(assoc.exportedType, { identifier: uti.exported, conformsTo: uti.conformsTo }, ext);
+    assert.equal(assoc.rank, "Alternate", ext);
+  }
+});
+
+test("a missing or mismatched UTI declaration is reported", () => {
+  const conf = load();
+  const hwp = conf.bundle.fileAssociations.find((a) => a.ext.includes("hwp"));
+  const hwpx = conf.bundle.fileAssociations.find((a) => a.ext.includes("hwpx"));
+  hwp.contentTypes = [];
+  hwpx.exportedType.conformsTo = ["public.data"];
+  const problems = checkDesktopBundleConfig(conf).join("\n");
+  assert.match(problems, /'\.hwp' must list contentTypes 'com\.aquilaxk\.easyoffice\.hwp'/);
+  assert.match(problems, /'com\.aquilaxk\.easyoffice\.hwpx' must conform to public\.data, public\.zip-archive/);
+  delete hwp.exportedType;
+  assert.match(checkDesktopBundleConfig(conf).join("\n"), /'\.hwp' must export the type/);
 });
 
 test("a missing extension, a wrong role or a pushy handler rank is reported", () => {
