@@ -2,6 +2,7 @@
 
 ## 지금
 - [ ] 한글 편집기 iframe(`allow-same-origin allow-scripts`)에서 셸 IPC에 닿는지 확인하고 막기
+- [ ] 한글(HWPX) 저장 검증의 항목 128MiB 상한 재검토(편집기는 더 큰 그림을 허용)
 - [ ] v0.1.0: RC 설치 파일로 실기기 점검(아래) → `v0.1.0` 태그
 
 ## v0.1.0 실기기 점검 (macOS·Windows)
@@ -37,5 +38,4 @@
 - [ ] 실제 Pages 픽스처와 내용 테스트
 
 ## 정리
-- [ ] rhwp 업스트림 갱신 스크립트와 테스트
 - [ ] `docs/policy-decisions.md` 절 번호 정리

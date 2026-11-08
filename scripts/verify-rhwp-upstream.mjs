@@ -138,7 +138,7 @@ export function checkGitlink(lsFilesOutput, config) {
   return [];
 }
 
-function cargoVersion(text) {
+export function cargoVersion(text) {
   const pkg = /\[package\]([\s\S]*?)(?:\n\[|$)/.exec(text);
   const m = pkg ? /^version\s*=\s*"([^"]+)"/m.exec(pkg[1]) : null;
   return m ? m[1] : null;
@@ -184,7 +184,8 @@ export function sparseCheckoutPlan(config) {
   };
 }
 
-export function verifyUpstream(root) {
+/** `skipVendor` is for scripts/update-rhwp.mjs only: the vendored WASM is refreshed after a pin change. */
+export function verifyUpstream(root, { skipVendor = false } = {}) {
   let config;
   try {
     config = readConfig(root);
@@ -201,7 +202,8 @@ export function verifyUpstream(root) {
   } catch (err) {
     errors.push(`git ls-files failed: ${String(err.stderr || err.message).trim()}`);
   }
-  errors.push(...checkWorktree(root, config), ...checkVendorCore(root, config));
+  errors.push(...checkWorktree(root, config));
+  if (!skipVendor) errors.push(...checkVendorCore(root, config));
   return errors;
 }
 

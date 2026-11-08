@@ -4,8 +4,10 @@
  * sparse checkout limited to config/rhwp-upstream.json "sparse". The full upstream is about
  * 5.3 GB (docs, PDFs, samples, tools), so a plain `git submodule update --init` must not be used.
  *
- * Usage: node scripts/checkout-rhwp.mjs [--dry-run] [--source <url-or-path>]
+ * Usage: node scripts/checkout-rhwp.mjs [--dry-run] [--skip-vendor-check] [--source <url-or-path>]
  *   --dry-run  print the plan only
+ *   --skip-vendor-check  do not compare the vendored WASM with the pin (used by scripts/update-rhwp.mjs,
+ *              which moves the pin before the WASM is rebuilt)
  *   --source   fetch from another location (mirror or local clone); the work tree origin stays
  *              the pinned URL. Filters are skipped for plain paths.
  * Nothing is fetched by CI by default (PD-076).
@@ -21,9 +23,10 @@ function run(cwd, args) {
 }
 
 function parseArgs(argv) {
-  const opts = { dryRun: false, source: null };
+  const opts = { dryRun: false, skipVendorCheck: false, source: null };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--dry-run") opts.dryRun = true;
+    else if (argv[i] === "--skip-vendor-check") opts.skipVendorCheck = true;
     else if (argv[i] === "--source" && argv[i + 1]) opts.source = argv[++i];
     else throw new Error(`Unknown argument: ${argv[i]}`);
   }
@@ -63,7 +66,7 @@ function main() {
   const head = run(dir, ["rev-parse", "HEAD"]).trim();
   if (head !== config.commit) throw new Error(`checked out ${head}, expected ${config.commit}`);
 
-  const errors = verifyUpstream(root);
+  const errors = verifyUpstream(root, { skipVendor: opts.skipVendorCheck });
   if (errors.length > 0) throw new Error(`verification failed:\n${errors.join("\n")}`);
   console.log(`checked out ${config.path} at ${head.slice(0, 8)} (sparse, shallow).`);
 }

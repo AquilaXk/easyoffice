@@ -125,6 +125,8 @@ const REQUIRED_TRACKED_CONTRACTS = [
   "scripts/verify-rhwp-upstream.mjs",
   "scripts/checkout-rhwp.mjs",
   "scripts/test-rhwp-upstream.mjs",
+  "scripts/update-rhwp.mjs",
+  "scripts/test-update-rhwp.mjs",
   "THIRD_PARTY_NOTICES.md",
   "docs/rhwp-integration-design.md",
   "scripts/test-webui-doc-runs.mjs",

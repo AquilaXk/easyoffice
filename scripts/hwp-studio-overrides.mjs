@@ -33,9 +33,13 @@ const OVERLAY_NON_OVERRIDE = new Set([
   "src/ui/toolbar-labels.ts",
 ]);
 
+/** SHA-256 of upstream text with CRLF normalised to LF (the baseline the manifest pins). */
+export function normalizedSha256Text(text) {
+  return crypto.createHash("sha256").update(text.replaceAll("\r\n", "\n")).digest("hex");
+}
+
 export function normalizedSha256(file) {
-  const text = fs.readFileSync(file, "utf8").replaceAll("\r\n", "\n");
-  return crypto.createHash("sha256").update(text).digest("hex");
+  return normalizedSha256Text(fs.readFileSync(file, "utf8"));
 }
 
 export function readManifest(root) {
@@ -108,8 +112,13 @@ export function checkManifestStructure(root, manifest) {
   return errors;
 }
 
+/** Path of a baseline entry inside rhwp-studio (counterparts live under src/, assets keep their path). */
+export function studioFileRel(kind, id) {
+  return kind === "overrides" ? `src/${id}.ts` : id;
+}
+
 function upstreamPathFor(kind, id) {
-  return path.join(UPSTREAM_STUDIO_REL, kind === "overrides" ? `src/${id}.ts` : id);
+  return path.join(UPSTREAM_STUDIO_REL, studioFileRel(kind, id));
 }
 
 function checkUpstreamTables(manifest, config) {

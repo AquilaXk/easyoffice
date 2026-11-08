@@ -262,6 +262,8 @@ rhwp 저장소는 **추적 파일 41,624개, 약 5.3 GB**다 `[확인]`(`git ls-
   - 재현이 되지 않으면 "CI 빌드 산출물 = 벤더 갱신 PR의 유일한 원천"으로 정책을 정한다(§8 Q10).
 - 주의: 경로 의존(`path = "../../third_party/rhwp"`)으로 빌드하면 툴체인은 **호출 디렉터리**의 것을 쓴다. 서브모듈의 `rust-toolchain.toml`은 적용되지 않으므로 6단계에서는 `cargo +1.93.1`을 명시해야 한다.
 
+- **업스트림 갱신 절차**: `node scripts/update-rhwp.mjs vX.Y.Z --dry-run`으로 계획(태그 → 커밋, 바뀌는 오버라이드)을 확인한 뒤 `--dry-run` 없이 실행한다. 명시 태그만 받고, 오버라이드가 맞춰 둔 업스트림 파일이 바뀌었으면 실패하므로 `apps/hwp-studio`를 다시 맞춘 뒤 `--accept-overrides`로 기준선을 갱신한다. 설정·gitlink·sparse 체크아웃만 바꾸고 벤더 WASM은 다시 빌드하지 않는다. 이어서 위 방법으로 WASM을 빌드해 `vendor-rhwp-core.mjs`로 `PROVENANCE.json`을 갱신하고 `verify-rhwp-upstream.mjs`·위생 가드를 통과시킨다(PD-076).
+
 ### 3.4 프런트엔드 번들과 자산 포함
 
 - `apps/hwp-studio/`는 참조 앱 `apps/studio-host`의 축소판이다.

@@ -57,7 +57,7 @@ jobs:
           node scripts/verify-fonts.mjs
 
       - name: Run rhwp upstream and hwp-studio guard tests
-        run: node --test scripts/test-rhwp-upstream.mjs scripts/test-hwp-studio.mjs scripts/test-commit-messages.mjs scripts/test-sort-comparator-rule.mjs scripts/test-release-serve-rule.mjs scripts/test-desktop-file-associations.mjs
+        run: node --test scripts/test-rhwp-upstream.mjs scripts/test-update-rhwp.mjs scripts/test-hwp-studio.mjs scripts/test-commit-messages.mjs scripts/test-sort-comparator-rule.mjs scripts/test-release-serve-rule.mjs scripts/test-desktop-file-associations.mjs
 
       - name: Run WebUI behavioral and security regression suite
         run: node --test "scripts/test-webui-*.mjs"
