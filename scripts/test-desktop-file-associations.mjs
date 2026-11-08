@@ -11,6 +11,7 @@ import {
   REQUIRED_ASSOCIATIONS,
   REQUIRED_MIME_TYPES,
   REQUIRED_UTIS,
+  bundledContentTypes,
 } from "./desktop-file-associations.mjs";
 
 const confUrl = new URL("../crates/easyoffice-desktop/tauri.conf.json", import.meta.url);
@@ -36,9 +37,23 @@ test("the HWP formats declare the exported UTI of this app and the one other sof
   const associations = load().bundle.fileAssociations;
   for (const [ext, uti] of REQUIRED_UTIS) {
     const assoc = associations.find((a) => a.ext.includes(ext));
-    assert.deepEqual(assoc.contentTypes, [uti.exported, uti.external], ext);
+    assert.deepEqual(assoc.contentTypes, [uti.exported], ext);
+    const other = associations.find((a) => a.name === uti.externalName);
+    assert.deepEqual(other.contentTypes, [uti.external], ext);
+    assert.deepEqual(other.ext, [], "the other UTI rides on an association of its own, without an extension");
+    assert.equal(other.rank, "Alternate", ext);
     assert.deepEqual(assoc.exportedType, { identifier: uti.exported, conformsTo: uti.conformsTo }, ext);
     assert.equal(assoc.rank, "Alternate", ext);
+  }
+});
+
+test("the bundler result lists every UTI the Quick Look extensions support", () => {
+  // An association with an exported type contributes only that type, so listing a second UTI on it is lost.
+  const merged = { ext: ["hwp"], contentTypes: ["a.b", "c.d"], exportedType: { identifier: "a.b" } };
+  assert.deepEqual(bundledContentTypes(merged), ["a.b"]);
+  const bundled = load().bundle.fileAssociations.flatMap(bundledContentTypes);
+  for (const uti of REQUIRED_UTIS.values()) {
+    assert.ok(bundled.includes(uti.exported) && bundled.includes(uti.external), uti.exported);
   }
 });
 
@@ -46,12 +61,12 @@ test("a missing or mismatched UTI declaration is reported", () => {
   const conf = load();
   const hwp = conf.bundle.fileAssociations.find((a) => a.ext.includes("hwp"));
   const hwpx = conf.bundle.fileAssociations.find((a) => a.ext.includes("hwpx"));
-  hwp.contentTypes = [hwp.contentTypes[1]];
-  hwpx.contentTypes = [hwpx.contentTypes[0]];
+  hwp.contentTypes = [];
+  conf.bundle.fileAssociations = conf.bundle.fileAssociations.filter((a) => a.name !== REQUIRED_UTIS.get("hwpx").externalName);
   hwpx.exportedType.conformsTo = ["public.data"];
   const problems = checkDesktopBundleConfig(conf).join("\n");
   assert.match(problems, /'\.hwp' must list contentTypes 'com\.aquilaxk\.easyoffice\.hwp'/);
-  assert.match(problems, new RegExp(`'\\.hwpx' must list contentTypes '${REQUIRED_UTIS.get("hwpx").external.replaceAll(".", "\\.")}'`));
+  assert.match(problems, new RegExp(`'${REQUIRED_UTIS.get("hwpx").externalName}' must list only contentTypes`));
   assert.match(problems, /'com\.aquilaxk\.easyoffice\.hwpx' must conform to public\.data, public\.zip-archive/);
   delete hwp.exportedType;
   assert.match(checkDesktopBundleConfig(conf).join("\n"), /'\.hwp' must export the type/);

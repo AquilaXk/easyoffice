@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { REQUIRED_UTIS } from "./desktop-file-associations.mjs";
+import { REQUIRED_UTIS, bundledContentTypes } from "./desktop-file-associations.mjs";
 import {
   EXTENSIONS, MIN_MACOS, byCodeUnits, appVersion, bundleFilesEntries, entitlements, ffiHeader, quicklookRoot, repoRoot, rustRoot,
 } from "./quicklook-config.mjs";
@@ -46,8 +46,8 @@ test("the extensions support only the UTIs the app exports or lists for HWP and 
   }
   const exported = conf().bundle.fileAssociations.flatMap((a) => (a.exportedType ? [a.exportedType.identifier] : []));
   for (const uti of ours) assert.ok(exported.includes(uti), `${uti} is exported by the app`);
-  const listed = conf().bundle.fileAssociations.flatMap((a) => a.contentTypes ?? []);
-  for (const uti of supported) assert.ok(listed.includes(uti), `${uti} is listed in the app's file associations`);
+  const listed = conf().bundle.fileAssociations.flatMap(bundledContentTypes);
+  for (const uti of supported) assert.ok(listed.includes(uti), `${uti} is in the document types the bundler writes`);
 });
 
 test("the principal class is a class of the extension's sources, in its module", () => {

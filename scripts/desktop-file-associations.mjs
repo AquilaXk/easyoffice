@@ -40,11 +40,13 @@ export const REQUIRED_MIME_TYPES = new Map([
  * macOS UTIs of the two HWP formats (Info.plist `LSItemContentTypes` and `UTExportedTypeDeclarations`): the
  * type the app exports itself, and `external`, the one another company's app declares for the same
  * extension (PD-141, QA 2026-11-09): a Mac that resolves the file to it still offers this app and Quick
- * Look. The app only lists it, never exports it. Both formats are plain data (HWPX is also a zip archive).
+ * Look. The app only lists it, never exports it. The bundler writes only the exported type into
+ * `LSItemContentTypes` of an association that has an `exportedType`, so `external` goes in a second,
+ * extension-less association of its own (`name` below) and shows up as its own document type. Both formats are plain data (HWPX is also a zip archive).
  */
 export const REQUIRED_UTIS = new Map([
-  ["hwp", { exported: "com.aquilaxk.easyoffice.hwp", external: "com.hancom.hwp", conformsTo: ["public.data"] }],
-  ["hwpx", { exported: "com.aquilaxk.easyoffice.hwpx", external: "com.hancom.hwpx", conformsTo: ["public.data", "public.zip-archive"] }],
+  ["hwp", { exported: "com.aquilaxk.easyoffice.hwp", external: "com.hancom.hwp", externalName: "EasyOffice.HwpOther", conformsTo: ["public.data"] }],
+  ["hwpx", { exported: "com.aquilaxk.easyoffice.hwpx", external: "com.hancom.hwpx", externalName: "EasyOffice.HwpxOther", conformsTo: ["public.data", "public.zip-archive"] }],
 ]);
 
 /** Runtime libraries the Linux packages must declare (the WebKitGTK shell, its menus and the update check TLS link them). */
@@ -170,20 +172,31 @@ function checkRequiredExtensions(registered) {
   return problems;
 }
 
+/**
+ * The `LSItemContentTypes` Tauri's bundler writes for an association (tauri-utils `infer_content_types`,
+ * minus the types it infers from extensions): only the exported type when there is one, else `contentTypes`.
+ */
+export function bundledContentTypes(assoc) {
+  if (assoc?.exportedType) return [assoc.exportedType.identifier];
+  return Array.isArray(assoc?.contentTypes) ? assoc.contentTypes : [];
+}
+
 function checkUtiDeclarations(associations) {
   const problems = [];
   for (const [ext, uti] of REQUIRED_UTIS) {
     const assoc = associations.find((a) => Array.isArray(a?.ext) && a.ext.includes(ext));
     if (!assoc) continue;
     const types = Array.isArray(assoc.contentTypes) ? assoc.contentTypes : [];
-    for (const wanted of [uti.exported, uti.external]) {
-      if (!types.includes(wanted)) problems.push(`file association for '.${ext}' must list contentTypes '${wanted}' (macOS UTI)`);
-    }
+    if (!types.includes(uti.exported)) problems.push(`file association for '.${ext}' must list contentTypes '${uti.exported}' (macOS UTI)`);
     const exported = assoc.exportedType;
     if (exported?.identifier !== uti.exported) {
       problems.push(`file association for '.${ext}' must export the type '${uti.exported}'`);
     } else if (JSON.stringify(exported.conformsTo) !== JSON.stringify(uti.conformsTo)) {
       problems.push(`exported type '${uti.exported}' must conform to ${uti.conformsTo.join(", ")}`);
+    }
+    const other = associations.find((a) => a?.name === uti.externalName);
+    if (JSON.stringify(other?.contentTypes) !== JSON.stringify([uti.external]) || (other.ext ?? []).length > 0 || other.exportedType) {
+      problems.push(`file association '${uti.externalName}' must list only contentTypes '${uti.external}' with no extension and no exported type (the bundler writes just the exported type for an association that has one)`);
     }
   }
   return problems;
