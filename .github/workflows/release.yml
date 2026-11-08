@@ -16,8 +16,10 @@ on:
         required: false
         default: true
 
+# Tag pushes group by tag. A manual run groups by version and publish flag, so a trial build
+# (publish=false) never queues behind or replaces a publishing run of the same version.
 concurrency:
-  group: release-${{ github.ref_name || inputs.version }}
+  group: release-${{ github.event_name == 'workflow_dispatch' && format('dispatch-{0}-{1}', inputs.version, inputs.publish) || github.ref_name }}
   cancel-in-progress: false
 
 permissions:
@@ -84,8 +86,8 @@ jobs:
 
       - name: Run Rust workspace test suite and self-test
         run: |
-          cargo test --workspace
-          cargo run -p easyoffice-app -- --self-test
+          cargo test --workspace --locked
+          cargo run --locked -p easyoffice-app -- --self-test
 
       - name: Resolve release version and tag
         id: meta
@@ -113,7 +115,7 @@ jobs:
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
           VERSION: ${{ steps.meta.outputs.version }}
-        run: npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --ci --target universal-apple-darwin --bundles app,dmg --config "{\"version\":\"${VERSION}\"}"
+        run: npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --ci --target universal-apple-darwin --bundles app,dmg --config "{\"version\":\"${VERSION}\"}" -- --locked
 
       - name: Smoke test desktop shell window (embedded WebUI, IPC round trip and HWP editor round trip)
         if: vars.MACOS_SMOKE != 'off'
@@ -186,8 +188,8 @@ jobs:
 
       - name: Run Rust workspace test suite and self-test
         run: |
-          cargo test --workspace
-          cargo run -p easyoffice-app -- --self-test
+          cargo test --workspace --locked
+          cargo run --locked -p easyoffice-app -- --self-test
 
       - name: Resolve release version and tag
         id: meta
@@ -214,7 +216,7 @@ jobs:
         shell: bash
         env:
           VERSION: ${{ steps.meta.outputs.version }}
-        run: npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --ci --bundles nsis --config "{\"version\":\"${VERSION}\"}"
+        run: npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --ci --bundles nsis --config "{\"version\":\"${VERSION}\"}" -- --locked
 
       - name: Smoke test desktop shell window (embedded WebUI, IPC round trip and HWP editor round trip)
         shell: pwsh
