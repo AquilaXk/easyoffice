@@ -23,4 +23,5 @@ pub const APP_COMMANDS: &[&str] = &[
     "quit_app",
     "end_close_prompt",
     "ack_close_prompt",
+    "confirm_dialog",
 ];

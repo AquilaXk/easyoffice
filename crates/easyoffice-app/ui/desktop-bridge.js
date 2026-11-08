@@ -34,6 +34,18 @@
     reportMenuState: "report_menu_state",
     endClosePrompt: "end_close_prompt",
     ackClosePrompt: "ack_close_prompt",
+    confirmDialog: "confirm_dialog",
+  });
+
+  // Confirmation kinds (`confirm_dialog.rs`, PD-120). The desktop shell shows its own native dialog
+  // with its own wording; this text is only for the `--serve` browser preview, where `window.confirm`
+  // works. A test keeps it identical to the Rust wording.
+  const CONFIRM_BROWSER_TEXT = Object.freeze({
+    "password-free-save": "저장한 HWP 파일에는 암호가 적용되지 않습니다. 암호 없이 저장하시겠습니까?",
+    "replace-unsaved-hwp": "저장하지 않은 한글 문서 편집 내용이 있습니다.\n다른 문서를 열면 현재 내용이 사라집니다. 계속할까요?",
+    "hwpx-fallback-hwp": "HWPX로 저장하기 전 검증에 실패했습니다.\nHWP 형식으로 대신 저장할까요?",
+    "restore-hwp-autosave": "이전 세션의 저장하지 않은 한글 문서의 자동 저장본이 있습니다. 복원할까요?\n복원하지 않으면 자동 저장본은 삭제됩니다.",
+    "replace-unsaved-module": "이 모듈에 저장하지 않은 편집 내용이 있습니다.\n파일을 열면 현재 내용이 바뀝니다 (실행 취소로 되돌릴 수 있습니다). 계속할까요?",
   });
 
   // Command token (`crates/easyoffice-desktop/src/shell_caller.rs`): the shell defines it in the
@@ -118,11 +130,22 @@
   const openReleasePage = () => callShell(UPDATE_COMMANDS.open, {});
   const installUpdate = () => callShell(UPDATE_COMMANDS.install, {});
 
+  // Resolves whether the user accepted the named confirmation. Never true without an answer: a
+  // refused call rejects, an unknown kind or a missing browser dialog answers no.
+  async function confirm(kind) {
+    if (isAvailable()) {
+      const answer = await callShell(WINDOW_COMMANDS.confirmDialog, { kind: String(kind) });
+      return answer === true;
+    }
+    const text = Object.hasOwn(CONFIRM_BROWSER_TEXT, kind) ? CONFIRM_BROWSER_TEXT[kind] : "";
+    return text !== "" && typeof host.confirm === "function" && host.confirm(text) === true;
+  }
+
   async function windowCommand(key, args) {
     const command = WINDOW_COMMANDS[key];
     if (!command) throw new Error("알 수 없는 창 명령입니다: " + key);
     return callShell(command, args || {});
   }
 
-  host.__EASYOFFICE_DESKTOP_BRIDGE__ = { isAvailable, invokeIpc, saveFile, exportSearchablePdf, getUpdateNotice, setUpdateCheck, openReleasePage, installUpdate, describeShellError, windowCommand, WINDOW_COMMANDS };
+  host.__EASYOFFICE_DESKTOP_BRIDGE__ = { isAvailable, invokeIpc, saveFile, exportSearchablePdf, getUpdateNotice, setUpdateCheck, openReleasePage, installUpdate, describeShellError, windowCommand, confirm, CONFIRM_BROWSER_TEXT, WINDOW_COMMANDS };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

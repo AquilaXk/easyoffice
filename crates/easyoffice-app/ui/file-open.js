@@ -239,7 +239,8 @@
       createEmptySlideStyleFields, getActiveModule, replaceColumnWidths,
     } = deps;
     const hasHwpRoute = () => Boolean(deps.getHwpSession?.());
-    const confirmFn = deps.confirm || ((msg) => (typeof host.confirm === "function" ? host.confirm(msg) : true));
+    // A named kind answered by the native dialog (`confirm_dialog` in the shell); without a way to ask, no.
+    const confirmFn = deps.confirm || (async () => false);
     const btoaFn = (bin) => host.btoa(bin);
     const baselines = {};
     let converterSource = null;
@@ -364,10 +365,7 @@
         await commitPendingSheetCell(true);
         const pre = captureWorkspaceSnapshot(false);
         if (isModuleEdited(pre, res.module)) {
-          const ok = confirmFn(
-            MODULE_LABELS[res.module] + " 모듈에 저장하지 않은 편집 내용이 있습니다.\n'" + name + "'을(를) 열면 현재 내용이 바뀝니다 (실행 취소로 되돌릴 수 있습니다). 계속할까요?"
-          );
-          if (!ok) return { cancelled: true };
+          if ((await confirmFn("replace-unsaved-module")) !== true) return { cancelled: true };
         }
         const next = structuredClone(pre);
         await applyDecoded(next, res, name);

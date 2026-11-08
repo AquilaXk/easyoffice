@@ -23,6 +23,7 @@
     "allow-report-menu-state",
     "allow-quit-app",
     "allow-end-close-prompt",
-    "allow-ack-close-prompt"
+    "allow-ack-close-prompt",
+    "allow-confirm-dialog"
   ]
 }

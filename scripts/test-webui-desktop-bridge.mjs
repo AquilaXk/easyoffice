@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { shellError, createWebUiDom, flushAsyncTurns, requireShellToken, SHELL_TOKEN, SHELL_TOKEN_HEADER } from "./webui-dom-harness.mjs";
@@ -256,4 +257,81 @@ test("without the token global the bridge refuses to call the shell at all", asy
   await assert.rejects(bridge.invokeIpc("get_workspace_bootstrap", ""), /연결할 수 없습니다/);
   await assert.rejects(bridge.getUpdateNotice(), /연결할 수 없습니다/);
   assert.equal(calls.length, 0, "nothing reaches the shell without a token");
+});
+
+// ---- native confirmations (confirm_dialog, PD-120) ------------------------------------------------
+
+function confirmHarnessOptions(answers, calls) {
+  return {
+    tauriInternals: {
+      invoke: async (command, args, options) => {
+        requireShellToken(options);
+        if (command === "confirm_dialog") {
+          calls.push({ command, args, options });
+          const answer = answers.shift();
+          if (answer instanceof Error) throw shellError(answer.message);
+          return answer;
+        }
+        if (command === "ipc_dispatch") return JSON.stringify({ status: "OK" });
+        return null;
+      },
+    },
+  };
+}
+
+test("desktop confirm asks the shell by kind name only, with the command token, and only a true answer accepts", async () => {
+  const calls = [];
+  const { sandbox } = await createWebUiDom(confirmHarnessOptions([true, false, "yes", null, 1], calls));
+  const bridge = sandbox.__EASYOFFICE_DESKTOP_BRIDGE__;
+  assert.equal(await bridge.confirm("password-free-save"), true);
+  assert.equal(await bridge.confirm("replace-unsaved-hwp"), false);
+  assert.equal(await bridge.confirm("hwpx-fallback-hwp"), false, "a truthy string is not an acceptance");
+  assert.equal(await bridge.confirm("restore-hwp-autosave"), false);
+  assert.equal(await bridge.confirm("replace-unsaved-module"), false);
+  assert.deepEqual(calls.map((c) => c.args), [
+    { kind: "password-free-save" }, { kind: "replace-unsaved-hwp" }, { kind: "hwpx-fallback-hwp" },
+    { kind: "restore-hwp-autosave" }, { kind: "replace-unsaved-module" },
+  ], "no wording and no file name travels to the shell");
+  for (const call of calls) assert.equal(call.options.headers[SHELL_TOKEN_HEADER], SHELL_TOKEN);
+});
+
+test("desktop confirm rejects when the shell refuses, and without the token it never reaches the shell", async () => {
+  const calls = [];
+  const { sandbox } = await createWebUiDom(confirmHarnessOptions([new Error("확인 창을 열지 못했습니다")], calls));
+  await assert.rejects(sandbox.__EASYOFFICE_DESKTOP_BRIDGE__.confirm("password-free-save"), /확인 창을 열지 못했습니다/);
+  const none = [];
+  const untokened = await createWebUiDom({ ...confirmHarnessOptions([true], none), shellToken: null });
+  await assert.rejects(untokened.sandbox.__EASYOFFICE_DESKTOP_BRIDGE__.confirm("password-free-save"), /연결할 수 없습니다/);
+  assert.equal(none.length, 0);
+});
+
+test("browser preview: confirm uses window.confirm with the kind's text; unknown kinds and a missing dialog answer no", async () => {
+  const asked = [];
+  const { sandbox } = await createWebUiDom({ confirm: (text) => { asked.push(text); return true; } });
+  const bridge = sandbox.__EASYOFFICE_DESKTOP_BRIDGE__;
+  assert.equal(await bridge.confirm("password-free-save"), true);
+  assert.equal(asked[0], "저장한 HWP 파일에는 암호가 적용되지 않습니다. 암호 없이 저장하시겠습니까?");
+  assert.equal(await bridge.confirm("anything else"), false);
+  assert.equal(await bridge.confirm("constructor"), false);
+  assert.equal(asked.length, 1, "an unknown kind asks nothing");
+  const silent = await createWebUiDom({});
+  silent.sandbox.confirm = undefined;
+  assert.equal(await silent.sandbox.__EASYOFFICE_DESKTOP_BRIDGE__.confirm("password-free-save"), false);
+});
+
+test("the browser texts equal the shell's wording and the command is granted like the other app commands", async () => {
+  const rust = fs.readFileSync(new URL("../crates/easyoffice-desktop/src/confirm_dialog.rs", import.meta.url), "utf8");
+  const production = rust.split("#[cfg(test)]")[0];
+  const fromRust = {};
+  for (const m of production.matchAll(/Self::(\w+) => ConfirmSpec \{\s*title: "[^"]*",\s*message: "([^"]*)",/g)) {
+    fromRust[m[1].replace(/([a-z])([A-Z])/g, "$1-$2").toLowerCase()] = m[2].replaceAll("\\n", "\n");
+  }
+  const { sandbox } = await createWebUiDom({});
+  const browser = sandbox.__EASYOFFICE_DESKTOP_BRIDGE__.CONFIRM_BROWSER_TEXT;
+  assert.equal(Object.keys(fromRust).length, 5);
+  assert.deepEqual({ ...browser }, fromRust);
+  const caps = JSON.parse(fs.readFileSync(new URL("../crates/easyoffice-desktop/capabilities/main-window.json", import.meta.url), "utf8"));
+  assert.ok(caps.permissions.includes("allow-confirm-dialog"));
+  const commands = fs.readFileSync(new URL("../crates/easyoffice-desktop/src/app_commands.rs", import.meta.url), "utf8");
+  assert.ok(commands.includes('"confirm_dialog"'));
 });

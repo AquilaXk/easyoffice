@@ -6,6 +6,7 @@
 
 mod app_commands;
 mod app_quit;
+mod confirm_dialog;
 mod os_recent;
 mod pdf_export;
 mod pdf_font_fallbacks;
@@ -277,6 +278,7 @@ fn main() {
             menu_state::report_menu_state,
             app_quit::quit_app,
             window_commands::end_close_prompt,
+            confirm_dialog::confirm_dialog,
             window_commands::ack_close_prompt,
             window_commands::open_recent_document,
             preview::get_recent_preview,
@@ -388,7 +390,7 @@ mod tests {
         );
         assert_eq!(value["windows"], serde_json::json!(["main", "doc-*"]));
         assert_eq!(value["local"], serde_json::json!(true));
-        assert_eq!(app_commands::APP_COMMANDS.len(), 19);
+        assert_eq!(app_commands::APP_COMMANDS.len(), 20);
     }
 
     #[test]

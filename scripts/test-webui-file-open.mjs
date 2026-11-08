@@ -325,8 +325,7 @@ test("opening over unsaved edits asks first; declining changes nothing, acceptin
 
   await pickFile(document, fixtureFile("새문서.docx", DOC_MODEL));
   assert.equal(asked.length, 1);
-  assert.match(asked[0], /저장하지 않은 편집 내용/);
-  assert.match(asked[0], /새문서\.docx/);
+  assert.match(asked[0], /저장하지 않은 편집 내용/, "the browser preview asks with the page's own text");
   assert.equal(editor.textContent, "내가 쓴 내용", "declined: untouched");
   assert.notEqual(tabTitle(document, "DOC"), "새문서.docx");
   assert.match(feedback(document), /취소/);

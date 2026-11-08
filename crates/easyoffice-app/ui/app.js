@@ -181,6 +181,7 @@
   const fileOpen = host.__EASYOFFICE_CREATE_FILE_OPEN__({
     document, invokeIpc, createEmptySlideStyleFields, getActiveModule: () => activeModule,
     getHwpSession: () => hwpSession,
+    confirm: (kind) => desktopBridge.confirm(kind),
     onOpenRequest: () => windowBridge.requestOpenFile(),
     routeFile: (file) => windowBridge.routeFile(file),
     enqueueOp: enqueueWorkspaceHistoryOp, runExclusive: chainWorkspaceQueue,
@@ -207,6 +208,7 @@
 
   hwpSession = host.__EASYOFFICE_CREATE_HWP_SESSION__({
     document, hwpHost, invokeIpc, getActiveModule: () => activeModule,
+    confirm: (kind) => desktopBridge.confirm(kind),
     activateHwp: () => ribbonHistory.activatePane("HWP"),
     deliverSavedFile: (base64, name, ext) => workspacePanels.deliverSavedFile(base64, name, ext),
     resolveBaseName: () => workspacePanels.resolveSaveFileBase("HWP"),

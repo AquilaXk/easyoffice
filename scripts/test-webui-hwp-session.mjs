@@ -118,7 +118,11 @@ function load(options = {}) {
       const name = JSON.parse(payload).fileName;
       return { format: name.split(".").pop().toLowerCase() };
     },
-    confirm: (msg) => { confirms.push(msg); return answers.length > 0 ? answers.shift() : true; },
+    confirm: options.noConfirm ? undefined : async (kind) => {
+      confirms.push(kind);
+      if (options.confirmThrows) throw new Error("확인 창을 열지 못했습니다");
+      return answers.length > 0 ? answers.shift() : true;
+    },
     onDirtyChange: (d) => dirtyLog.push(d),
     resolveBaseName: () => "보고서",
     deliverSavedFile: options.deliver,
@@ -205,7 +209,7 @@ test("open: unsaved edits ask first and a refusal leaves the editor alone", asyn
   const res = await ctx.session.openFromBytes("next.hwp", hwpBytes());
   assert.equal(res.cancelled, true);
   assert.equal(ctx.fake.calls.some((c) => c.method === "loadFile"), false);
-  assert.match(ctx.confirms[0], /저장하지 않은 한글 문서 편집 내용/);
+  assert.equal(ctx.confirms[0], "replace-unsaved-hwp");
   assert.equal(ctx.session.isDirty(), true);
 });
 
@@ -310,7 +314,8 @@ test("save: HWPX verification failure offers HWP; accepting saves HWP, declining
       return { ok: true, pageCount: 1, format: "hwp", params };
     };
     const res = await ctx.session.save({ deliver, baseName: "a" });
-    assert.match(ctx.confirms[0], /HWPX로 저장하기 전 검증에 실패했습니다.*HWP 형식으로 대신 저장/s);
+    assert.equal(ctx.confirms[0], "hwpx-fallback-hwp");
+    assert.match(feedbackOf(ctx), /HWPX로 저장하기 전 검증에 실패했습니다/);
     assert.deepEqual(deliveries.map((d) => d.ext), expectedDeliveries);
     assert.equal(res.ok, accept);
     if (accept) {
@@ -412,7 +417,7 @@ test("password document: save-as asks once, delivers after consent, clears the e
   ctx.fake.calls.length = 0;
   const res = await ctx.session.save({ deliver, baseName: "x" });
   assert.equal(res.ok, true);
-  assert.deepEqual(ctx.confirms, ["저장한 HWP 파일에는 암호가 적용되지 않습니다. 암호 없이 저장하시겠습니까?"]);
+  assert.deepEqual(ctx.confirms, ["password-free-save"]);
   assert.deepEqual(methodsOf(ctx), ["getSaveProtection", "exportHwp", "verifyBytes", "clearSaveProtection", "notifySaved"]);
   assert.equal(deliveries.length, 1);
   assert.match(res.message, /저장한 파일에는 암호가 없습니다/);
@@ -527,6 +532,40 @@ test("password document: after a save-as that dropped the password, autosave wor
   ctx.fake.emit({ reason: "edited" });
   await delay(100);
   assert.equal(ctx.env.indexedDB.stores.records.size, 1);
+});
+
+test("confirmations default to no: without a way to ask, nothing is overwritten, replaced or restored", async () => {
+  const { deliver, deliveries } = recordingDeliver();
+  const ctx = loadProtected({ deliver, noConfirm: true });
+  const res = await ctx.session.save({ deliver, baseName: "x" });
+  assert.equal(res.cancelled, true);
+  assert.equal(deliveries.length, 0);
+  const open = load({ noConfirm: true });
+  open.fake.emit({ reason: "dirty_changed", dirty: true });
+  const opened = await open.session.openFromBytes("b.hwp", hwpBytes());
+  assert.equal(opened.cancelled, true);
+  assert.equal(open.fake.calls.some((c) => c.method === "loadFile"), false);
+  const restore = load({ noConfirm: true });
+  seedRecord(restore);
+  assert.equal((await restore.session.restore()).restored, false);
+  assert.equal(restore.fake.calls.some((c) => c.method === "loadFile"), false);
+});
+
+test("a confirmation that cannot be shown counts as no, and keeps the autosaved copy for the next start", async () => {
+  const { deliver, deliveries } = recordingDeliver();
+  const ctx = loadProtected({ deliver, confirmThrows: true });
+  const res = await ctx.session.save({ deliver, baseName: "x" });
+  assert.equal(res.cancelled, true);
+  assert.equal(deliveries.length, 0);
+  assert.match(feedbackOf(ctx), /확인 창을 열지 못했습니다/);
+  const restore = load({ confirmThrows: true });
+  seedRecord(restore);
+  assert.equal((await restore.session.restore()).restored, false);
+  assert.equal(restore.env.indexedDB.stores.records.size, 1, "the recovery copy is not deleted when the question could not be asked");
+  const declined = load({ confirmAnswers: [false] });
+  seedRecord(declined);
+  await declined.session.restore();
+  assert.equal(declined.env.indexedDB.stores.records.size, 0, "a real no deletes it");
 });
 
 // ---- dirty state and autosave -----------------------------------------------------------

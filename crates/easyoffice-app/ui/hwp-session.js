@@ -31,7 +31,6 @@
   // port (a flag, never the password); the shell refuses an overwrite and asks before a new copy.
   const PROTECTION_CAPABILITY = "save-protection-v1";
   const MSG_PASSWORD_NO_OVERWRITE = "암호 문서의 원본 저장은 아직 지원하지 않습니다. 다른 이름으로 저장에서 암호 없는 HWP 파일로 저장하세요.";
-  const MSG_PASSWORD_CONFIRM = "저장한 HWP 파일에는 암호가 적용되지 않습니다. 암호 없이 저장하시겠습니까?";
   const MSG_PASSWORD_DECLINED = "암호 없이 저장하지 않았습니다";
   const MSG_PASSWORD_NO_AUTOSAVE = "암호 문서는 자동 저장하지 않습니다. 저장(다른 이름으로 저장)으로 보관하세요";
 
@@ -182,7 +181,9 @@
     const { document, hwpHost } = deps;
     const env = deps.env || host;
     const timers = { set: (fn, ms) => env.setTimeout(fn, ms), clear: (id) => env.clearTimeout(id) };
-    const confirmFn = deps.confirm || ((msg) => (typeof env.confirm === "function" ? env.confirm(msg) : true));
+    // Confirmations are named kinds answered by the native dialog (`confirm_dialog` in the shell); the
+    // wording lives in Rust. Without a way to ask, the answer is no.
+    const confirmFn = deps.confirm || (async () => false);
     const store = deps.store || createAutosaveStore(env.indexedDB);
     const idleMs = deps.autosaveIdleMs || AUTOSAVE_IDLE_MS;
     const maxWaitMs = deps.autosaveMaxWaitMs || AUTOSAVE_MAX_WAIT_MS;
@@ -221,6 +222,16 @@
       if (typeof deps.setFeedback === "function") deps.setFeedback(msg);
       const fb = document.getElementById("status-command-feedback");
       if (fb) fb.textContent = msg;
+    }
+
+    // true: accepted, false: declined, null: the question could not be asked.
+    async function ask(kind) {
+      try {
+        return (await confirmFn(kind)) === true;
+      } catch (err) {
+        feedback("확인 창을 열지 못했습니다: " + describeError(err));
+        return null;
+      }
     }
 
     function setNoticeText(text) {
@@ -377,7 +388,7 @@
         feedback("파일 열기 실패: " + name + " — " + describeError(err));
         return { ok: false, error: describeError(err) };
       }
-      if (dirty && !confirmFn("저장하지 않은 한글 문서 편집 내용이 있습니다.\n'" + name + "'을(를) 열면 현재 내용이 사라집니다. 계속할까요?")) {
+      if (dirty && (await ask("replace-unsaved-hwp")) !== true) {
         feedback("파일 열기를 취소했습니다 (" + name + ")");
         return { ok: false, cancelled: true };
       }
@@ -448,9 +459,8 @@
           outcome = { error: describeError(err) };
         }
         if (outcome.bytes) return { bytes: outcome.bytes, format: fmt, downgraded: fmt !== format };
-        const offer = fmt === "hwpx" && confirmFn(
-          "HWPX로 저장하기 전 검증에 실패했습니다 (" + outcome.error + ").\nHWP 형식으로 대신 저장할까요?",
-        );
+        if (fmt === "hwpx") feedback("HWPX로 저장하기 전 검증에 실패했습니다 (" + outcome.error + ")");
+        const offer = fmt === "hwpx" && (await ask("hwpx-fallback-hwp")) === true;
         if (!offer) return { error: outcome.error, format: fmt };
         fmt = "hwp";
       }
@@ -471,7 +481,7 @@
     async function passwordGate(options, format) {
       if (!(await readPasswordProtected())) return { deliver: options.deliver, protectedDoc: false };
       if (options.inPlace && !options.closing) return { failure: failure(format, MSG_PASSWORD_NO_OVERWRITE) };
-      if (!confirmFn(MSG_PASSWORD_CONFIRM)) return { failure: failure(format, "", true, MSG_PASSWORD_DECLINED) };
+      if ((await ask("password-free-save")) !== true) return { failure: failure(format, "", true, MSG_PASSWORD_DECLINED) };
       return { deliver: options.inPlace ? deps.deliverSavedFile : options.deliver, protectedDoc: true };
     }
 
@@ -561,9 +571,10 @@
       } catch {
         return discardRecord("자동 저장된 한글 문서가 올바른 형식이 아니어서 무시했습니다");
       }
-      if (!confirmFn("이전 세션의 저장하지 않은 한글 문서 '" + rec.fileName + "'의 자동 저장본이 있습니다. 복원할까요?")) {
-        return discardRecord("자동 저장된 한글 문서를 복원하지 않고 삭제했습니다");
-      }
+      const restoreAnswer = await ask("restore-hwp-autosave");
+      // A question that could not be asked keeps the recovery copy for the next start.
+      if (restoreAnswer === null) return { restored: false };
+      if (!restoreAnswer) return discardRecord("자동 저장된 한글 문서를 복원하지 않고 삭제했습니다");
       busy = true;
       try {
         if (await ensureEditor()) return { restored: false };
