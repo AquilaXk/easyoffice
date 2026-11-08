@@ -194,11 +194,20 @@ test("menu and toolbar labels name what their command does", async () => {
   assert.deepEqual(buttonsOf("home-style").map((el) => [el.getAttribute("title"), el.getAttribute("aria-label")]), [["스타일 적용", "스타일 적용"]]);
   assert.deepEqual(labelsOf("layout-paper"), ["편집 용지", "편집 용지"]);
   assert.equal(buttonsOf("layout-paper").length, 0, "no toolbar button called object properties");
+  // `para-shape` clicks the editor bar's justify button; `mod-header` and `mod-footnote` each do one thing, so one
+  // button each; `insert-chart` has no picture or chart icon and stays a menu item.
+  assert.deepEqual(labelsOf("para-shape"), ["양쪽 정렬"]);
+  assert.deepEqual(buttonsOf("para-shape").map((el) => el.getAttribute("title")), ["양쪽 정렬"]);
+  assert.deepEqual(buttonsOf("mod-header").map((el) => el.getAttribute("title")), ["머리말/꼬리말"]);
+  assert.deepEqual(buttonsOf("mod-footnote").map((el) => el.getAttribute("title")), ["각주"]);
+  assert.equal(buttonsOf("insert-chart").length, 0, "no picture button for the chart command");
+  assert.deepEqual(labelsOf("insert-chart"), ["차트 개체"]);
+  assert.deepEqual(labelsOf("palette"), ["명령 검색", "환경 설정 및 커맨드 검색"]);
   const named = [
     ...document.querySelectorAll(".md-label").map((el) => el.textContent),
     ...document.querySelectorAll("#icon-toolbar [title]").map((el) => el.getAttribute("title")),
   ];
-  for (const promised of ["모양 복사", "찾아 바꾸기", "개체 속성", "글자 모양"]) {
+  for (const promised of ["모양 복사", "찾아 바꾸기", "개체 속성", "글자 모양", "문단 모양", "그림 삽입", "미주", "(F)"]) {
     assert.ok(!named.some((text) => text.includes(promised)), `${promised} is not a feature of the app`);
   }
 });

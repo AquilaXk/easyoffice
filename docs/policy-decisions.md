@@ -2143,4 +2143,5 @@
 - **Trade-offs** 참조 앱 편집기 메뉴에 있는 항목 일부가 이 앱의 문서·시트·슬라이드 화면에는 없습니다(한글 편집기 안의 메뉴는 편집기가 제공).
 - **Alternatives rejected** 이름을 그대로 두고 팔레트로 연결하는 것(없는 기능을 있는 것처럼 보임), 새 찾아 바꾸기·모양 복사를 만드는 것(범위 밖).
 - **Verified by** `node --test scripts/test-webui-menu-bar.mjs scripts/test-webui-native-menu.mjs scripts/test-webui-menu-state.mjs`(`home-style`·`layout-paper` 이름, 약속한 기능 이름이 메뉴·도구 단추에 없음, 네이티브와 페이지의 이름 일치), `cargo test -p easyoffice-desktop native_menu`.
-- **Revisit when** 앱 모듈에 모양 복사나 찾아 바꾸기가 생길 때. 같은 불일치가 남은 도구 단추(`그림 삽입` -> `insert-chart`, `꼬리말` -> `mod-header`, `문단 모양` -> 정렬)는 후속으로 정리합니다.
+- **Follow-up (QA 요청 2026-11-08)** 같은 기준으로 남은 불일치를 정리했습니다: `문단 모양`(메뉴·도구 단추·macOS `format:para-shape`)은 편집기 막대의 양쪽 정렬을 누르므로 `양쪽 정렬`(`format:justify`)로, 머리말·꼬리말 도구 단추 두 개와 각주·미주 단추 두 개는 같은 명령 하나이므로 `머리말/꼬리말`·`각주` 단추 하나씩만 남기고, 그림·차트 아이콘이 없는 `그림 삽입` 단추(`insert-chart`는 메뉴 `차트 개체`로 계속 닿음)는 지우며(쓰지 않게 된 아이콘 4개 제거), 메뉴 `명령 검색(F)`는 `(F)` 표기를 빼고 `명령 검색`으로 둡니다(Ctrl+F가 여는 것은 명령 팔레트). 한글 모듈에서 `머리말/꼬리말`은 `행정 공문서 두문·결재란`을, macOS의 `찾기`(Cmd+F)는 한글 창 밖에서 명령 팔레트를 엽니다(알려진 차이).
+- **Revisit when** 앱 모듈에 모양 복사나 찾아 바꾸기가 생길 때.
