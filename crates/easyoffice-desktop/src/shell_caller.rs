@@ -156,6 +156,7 @@ mod tests {
             include_str!("main.rs"),
             include_str!("window_commands.rs"),
             include_str!("update_check.rs"),
+            include_str!("update_install.rs"),
             include_str!("preview/mod.rs"),
             include_str!("menu_state.rs"),
         ];

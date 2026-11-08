@@ -10,6 +10,7 @@ pub const APP_COMMANDS: &[&str] = &[
     "get_update_notice",
     "set_update_check",
     "open_release_page",
+    "install_update",
     "open_document_window",
     "open_file_in_new_window",
     "take_pending_open",

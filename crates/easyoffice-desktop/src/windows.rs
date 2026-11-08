@@ -196,6 +196,11 @@ impl WindowRegistry {
         Some(window_title(&entry.name, dirty))
     }
 
+    /// Some window holds changes that were not saved.
+    pub fn has_unsaved(&self) -> bool {
+        self.windows.values().any(|w| w.dirty)
+    }
+
     #[cfg(test)]
     pub fn is_dirty(&self, label: &str) -> bool {
         self.windows.get(label).is_some_and(|w| w.dirty)
@@ -459,6 +464,22 @@ mod tests {
         reg.end_close_prompt("doc-1-a");
         assert_eq!(reg.begin_close("doc-1-a"), CloseAction::AskPage);
         reg.end_close_prompt("missing");
+    }
+
+    #[test]
+    fn unsaved_changes_in_any_window_are_reported_until_saved_or_closed() {
+        let mut reg = WindowRegistry::default();
+        reg.register(PRIMARY_LABEL, WindowKind::Start);
+        reg.register("doc-1-a", WindowKind::Doc);
+        reg.register("doc-2-b", WindowKind::Hwp);
+        assert!(!reg.has_unsaved());
+        reg.set_state("doc-1-a", "계획.docx", true);
+        assert!(reg.has_unsaved());
+        reg.set_state("doc-2-b", "표.hwpx", true);
+        reg.set_state("doc-1-a", "계획.docx", false);
+        assert!(reg.has_unsaved(), "the other window is still dirty");
+        assert!(reg.remove("doc-2-b"));
+        assert!(!reg.has_unsaved());
     }
 
     #[test]

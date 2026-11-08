@@ -91,6 +91,11 @@ impl AppWindows {
         }
     }
 
+    /// True while any window reports unsaved changes (the signed update waits for them).
+    pub fn has_unsaved_documents(&self) -> bool {
+        locked(&self.registry).has_unsaved()
+    }
+
     /// The path behind an opaque recent id; it never leaves Rust.
     pub fn recent_path(&self, id: &str) -> Option<PathBuf> {
         locked(&self.recents).path_for(id)

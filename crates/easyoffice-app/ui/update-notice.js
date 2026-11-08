@@ -2,21 +2,30 @@
   "use strict";
 
   // Update notice (PD-103): a small card in the top right corner of a window when a newer release
-  // exists, with a button that opens the release page in the default browser. The shell does the
-  // checking (once a day, in Rust); this module only asks it for the state and shows it. There is no
-  // download or install here: the shell has no update signing key.
+  // exists, with a button that installs it and restarts the app, and one that opens the release page
+  // in the default browser. The shell does everything else (the daily check, the signed download,
+  // the refusal while any window has unsaved changes, the install and the restart); this module asks
+  // it to start, shows the state it reports and polls it while a download or install runs.
   //
   // Adapted from the reference app `apps/studio-host/src/ui/update-notice.ts` (MIT, Copyright (c) 2025-2026
   // Edward Kim; see THIRD_PARTY_NOTICES.md): the same card structure and class names (`update-notice`,
-  // `update-notice__title|body|meta|error|actions|button`), the same "dismissed per version" rule.
-  // TypeScript rewritten as JavaScript, only the idle and available states, and an "open the release
-  // page" action instead of the reference app's install and restart actions.
+  // `update-notice__title|body|meta|error|actions|button`), the same states (available, downloading,
+  // error), the progress text and the "dismissed per version" rule. TypeScript rewritten as
+  // JavaScript; the page polls the shell instead of receiving an event; the install and the restart
+  // are one action ("설치하고 다시 시작"), so there is no separate ready state; added: the release
+  // page button (installations the signed install does not cover) and an "installed" state for a
+  // restart held back by unsaved changes.
 
   // The first look waits until the window has finished starting; the shell checks in the background
   // right after start, so it looks again once more when the network answer has had time to arrive.
   const FIRST_LOOK_DELAY_MS = 3000;
   const RECHECK_DELAY_MS = 15000;
+  // While a download or install runs the shell is asked for the progress this often.
+  const WATCH_INTERVAL_MS = 700;
   const ESCAPE_KEY = "Escape";
+  const STATUSES = ["available", "downloading", "installing", "installed", "error"];
+  // A card the user may hide; the progress of a running install stays visible.
+  const DISMISSIBLE = ["available", "installed", "error"];
 
   function el(document, tag, className) {
     const node = document.createElement(tag);
@@ -39,11 +48,12 @@
     const actions = el(document, "div", "update-notice__actions");
     for (const child of [title, body, meta, error, actions]) root.appendChild(child);
 
-    let view = { status: "idle", version: null, enabled: true, supported: false };
+    let view = { status: "idle", version: null, enabled: true, supported: false, downloadedBytes: null, totalBytes: null, message: null };
     let dismissedKey = null;
     let pending = false;
+    let watching = false;
 
-    const noticeKey = () => (view.status === "available" ? "available:" + view.version : null);
+    const noticeKey = () => (DISMISSIBLE.includes(view.status) ? view.status + ":" + view.version : null);
 
     function button(label, primary, onClick) {
       const node = el(document, "button", "update-notice__button" + (primary ? " update-notice__button--primary" : ""));
@@ -55,8 +65,14 @@
     }
 
     function dismiss() {
+      if (!DISMISSIBLE.includes(view.status)) return;
       dismissedKey = noticeKey();
       root.hidden = true;
+    }
+
+    function showError(err) {
+      error.textContent = err?.message || String(err);
+      error.hidden = false;
     }
 
     async function openReleasePage() {
@@ -67,11 +83,46 @@
       try {
         await bridge.openReleasePage();
       } catch (err) {
-        error.textContent = err?.message || String(err);
-        error.hidden = false;
+        showError(err);
       }
       pending = false;
       render();
+    }
+
+    // The shell refuses while a window has unsaved changes and says so; that text is shown here.
+    async function installUpdate() {
+      if (pending) return;
+      pending = true;
+      error.hidden = true;
+      render();
+      try {
+        setView(await bridge.installUpdate());
+      } catch (err) {
+        showError(err);
+      }
+      pending = false;
+      render();
+    }
+
+    function formatBytes(bytes) {
+      if (bytes < 1024) return bytes + " B";
+      if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + " KB";
+      return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+    }
+
+    function progressText() {
+      const done = view.downloadedBytes;
+      if (done === null) return "";
+      if (view.totalBytes && view.totalBytes > 0) {
+        const percent = Math.max(0, Math.min(100, Math.round((done / view.totalBytes) * 100)));
+        return formatBytes(done) + " / " + formatBytes(view.totalBytes) + " (" + percent + "%)";
+      }
+      return formatBytes(done) + " 다운로드됨";
+    }
+
+    function setText(node, text) {
+      node.textContent = text || "";
+      node.hidden = !text;
     }
 
     function renderToggles() {
@@ -86,26 +137,66 @@
     function render() {
       renderToggles();
       const key = noticeKey();
-      if (!key || key === dismissedKey) {
+      const shown = view.status !== "idle" && (key === null || key !== dismissedKey);
+      if (!shown) {
         root.hidden = true;
         return;
       }
       root.hidden = false;
       root.dataset.state = view.status;
-      title.textContent = "새 버전 " + view.version + " 사용 가능";
-      body.textContent = "다운로드 페이지에서 받아 설치할 수 있습니다.";
-      meta.textContent = "업데이트는 자동으로 설치되지 않습니다.";
-      actions.replaceChildren(button("다운로드 페이지 열기", true, () => void openReleasePage()), button("나중에", false, dismiss));
+      const releaseButton = () => button("릴리스 페이지", false, () => void openReleasePage());
+      const laterButton = (label) => button(label, false, dismiss);
+      if (view.status === "available") {
+        title.textContent = "새 버전 " + view.version + " 사용 가능";
+        body.textContent = "원할 때 설치하고 다시 시작할 수 있습니다.";
+        setText(meta, "업데이트는 직접 시작할 때만 진행되며, 서명을 확인한 파일만 설치합니다.");
+        actions.replaceChildren(button("설치하고 다시 시작", true, () => void installUpdate()), releaseButton(), laterButton("나중에"));
+      } else if (view.status === "downloading") {
+        title.textContent = "버전 " + view.version + " 준비 중";
+        body.textContent = "업데이트 파일을 내려받고 있습니다.";
+        setText(meta, progressText());
+        actions.replaceChildren();
+      } else if (view.status === "installing") {
+        title.textContent = "버전 " + view.version + " 설치 중";
+        body.textContent = "설치가 끝나면 앱이 다시 시작됩니다. 잠시 기다려 주세요.";
+        setText(meta, "");
+        actions.replaceChildren();
+      } else if (view.status === "installed") {
+        title.textContent = "버전 " + view.version + " 설치 완료";
+        body.textContent = "저장하지 않은 변경 사항이 있어 다시 시작하지 않았습니다. 저장한 뒤 앱을 다시 시작하세요.";
+        setText(meta, "");
+        actions.replaceChildren(laterButton("닫기"));
+      } else {
+        title.textContent = "버전 " + view.version + " 업데이트 실패";
+        body.textContent = view.message || "업데이트를 설치하지 못했습니다.";
+        setText(meta, "");
+        actions.replaceChildren(button("다시 시도", true, () => void installUpdate()), releaseButton(), laterButton("닫기"));
+      }
+      watch();
     }
 
     function setView(next) {
+      const count = (value) => (Number.isFinite(value) && value >= 0 ? value : null);
       view = {
-        status: next?.status === "available" ? "available" : "idle",
+        status: STATUSES.includes(next?.status) && typeof next?.version === "string" ? next.status : "idle",
         version: typeof next?.version === "string" ? next.version : null,
         enabled: next?.enabled !== false,
         supported: next?.supported === true,
+        downloadedBytes: count(next?.downloadedBytes),
+        totalBytes: count(next?.totalBytes),
+        message: typeof next?.message === "string" ? next.message : null,
       };
       render();
+    }
+
+    // Looks again soon while a download or install runs (one timer at a time).
+    function watch() {
+      if (watching || (view.status !== "downloading" && view.status !== "installing")) return;
+      watching = true;
+      env.setTimeout(() => {
+        watching = false;
+        void refresh();
+      }, WATCH_INTERVAL_MS);
     }
 
     async function refresh() {

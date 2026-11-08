@@ -1,10 +1,11 @@
-//! Update notice (PD-103).
+//! Update notice and signed install (PD-103).
 //!
 //! After the app has started (never in the smoke run) it asks the public GitHub releases API for the
 //! latest release at most once a day. When that release is a newer, final `x.y.z` version, the page
-//! shows a small card (the reference app's "update notice") with a button that opens the release page in the
-//! default browser. Nothing is downloaded or installed: there is no signing key, so no automatic
-//! update.
+//! shows a small card (the reference app's "update notice") with a button that installs it and
+//! restarts the app (`update_install.rs`: signed package, refused while a window has unsaved
+//! changes) and a button that opens the release page in the default browser, the way to update an
+//! installation the signed install does not cover (deb, rpm).
 //!
 //! Privacy and safety:
 //! * The request carries no information about the user or the document; the only identifying text is
@@ -16,10 +17,11 @@
 //!   folder, not in the page.
 //!
 //! The notice card follows the reference app `apps/studio-host/src/ui/update-notice.ts` (MIT, see
-//! THIRD_PARTY_NOTICES.md); this module replaces the reference app's signed updater with a notice only.
+//! THIRD_PARTY_NOTICES.md); the install is `update_install.rs`.
 
 use crate::save_file::write_document_bytes;
 use crate::shell_caller::ShellCaller;
+use crate::update_install::{InstallProgress, Phase, NOTHING_TO_INSTALL};
 use serde::{Deserialize, Serialize};
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -199,13 +201,19 @@ fn read_record(path: &Path, current: Version) -> UpdateRecord {
         .sanitized(current)
 }
 
-/// What the page sees.
+/// What the page sees. `status` is `idle`, `available`, `downloading`, `installing`, `installed`
+/// (restart held for unsaved changes) or `error` (`message` says why); the byte counts belong to
+/// `downloading`.
 #[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct UpdateNoticeView {
     pub status: &'static str,
     pub version: Option<String>,
     pub enabled: bool,
     pub supported: bool,
+    pub downloaded_bytes: Option<u64>,
+    pub total_bytes: Option<u64>,
+    pub message: Option<String>,
 }
 
 /// The update state of the running app.
@@ -215,6 +223,8 @@ pub struct UpdateService {
     /// False in the smoke run and when there is no app data folder: nothing is checked or stored.
     active: bool,
     current: Version,
+    /// The signed install in progress, if any (not stored: a restart starts clean).
+    pub install: InstallProgress,
 }
 
 impl UpdateService {
@@ -229,6 +239,7 @@ impl UpdateService {
             path,
             active: active && data_dir.is_some(),
             current,
+            install: InstallProgress::default(),
         }
     }
 
@@ -256,7 +267,7 @@ impl UpdateService {
             .available
             .as_ref()
             .filter(|_| record.enabled && self.active);
-        UpdateNoticeView {
+        let mut view = UpdateNoticeView {
             status: if available.is_some() {
                 "available"
             } else {
@@ -265,7 +276,53 @@ impl UpdateService {
             version: available.map(|a| a.version.clone()),
             enabled: record.enabled,
             supported: self.active,
+            downloaded_bytes: None,
+            total_bytes: None,
+            message: None,
+        };
+        match self.install.phase() {
+            Phase::Idle => {}
+            Phase::Downloading {
+                version,
+                downloaded,
+                total,
+            } => {
+                view.status = "downloading";
+                view.version = Some(version);
+                view.downloaded_bytes = Some(downloaded);
+                view.total_bytes = total;
+            }
+            Phase::Installing { version } => {
+                view.status = "installing";
+                view.version = Some(version);
+            }
+            Phase::Installed { version } => {
+                view.status = "installed";
+                view.version = Some(version);
+            }
+            Phase::Failed { version, message } => {
+                view.status = "error";
+                view.version = Some(version);
+                view.message = Some(message);
+            }
         }
+        view
+    }
+
+    /// Starts the signed install of the release the notice shows; returns its version. Refused when
+    /// no notice is shown, one install is running, or `unsaved` windows exist.
+    pub fn begin_install(&self, unsaved: bool) -> Result<String, String> {
+        let version = {
+            let record = self.lock();
+            record
+                .available
+                .as_ref()
+                .filter(|_| record.enabled && self.active)
+                .map(|available| available.version.clone())
+        }
+        .ok_or_else(|| NOTHING_TO_INSTALL.to_string())?;
+        self.install.begin(&version, unsaved)?;
+        Ok(version)
     }
 
     /// The release page to open, only while a notice is shown.
@@ -682,7 +739,10 @@ mod tests {
                 status: "available",
                 version: Some("1.2.0".into()),
                 enabled: true,
-                supported: true
+                supported: true,
+                downloaded_bytes: None,
+                total_bytes: None,
+                message: None
             }
         );
         service.check(NOW + 60, fetch).unwrap();
@@ -753,7 +813,10 @@ mod tests {
                 status: "idle",
                 version: None,
                 enabled: false,
-                supported: true
+                supported: true,
+                downloaded_bytes: None,
+                total_bytes: None,
+                message: None
             }
         );
         assert_eq!(service.release_url(), None);
@@ -830,6 +893,69 @@ mod tests {
                 .status,
             "idle"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_install_state_reaches_the_page_and_the_install_needs_a_shown_notice() {
+        let dir = scratch("install");
+        let service = UpdateService::new(Some(&dir), true, [1, 0, 0]);
+        assert_eq!(
+            service.begin_install(false),
+            Err(NOTHING_TO_INSTALL.to_string()),
+            "no notice, nothing to install"
+        );
+        service
+            .check(NOW, || Ok(Some(release_json("v1.2.0", RELEASE_URL, ""))))
+            .unwrap();
+        assert!(
+            service.begin_install(true).is_err(),
+            "unsaved windows block it"
+        );
+        assert_eq!(service.view().status, "available");
+        assert_eq!(service.begin_install(false), Ok("1.2.0".to_string()));
+        assert!(
+            service.begin_install(false).is_err(),
+            "one install at a time"
+        );
+
+        service.install.downloading("1.2.0", 5, Some(10));
+        let view = service.view();
+        assert_eq!(
+            (view.status, view.downloaded_bytes, view.total_bytes),
+            ("downloading", Some(5), Some(10))
+        );
+        service.install.installing("1.2.0");
+        assert_eq!(service.view().status, "installing");
+        service.install.fail("1.2.0", "서명".into());
+        let view = service.view();
+        assert_eq!(
+            (
+                view.status,
+                view.version.as_deref(),
+                view.message.as_deref()
+            ),
+            ("error", Some("1.2.0"), Some("서명"))
+        );
+        assert_eq!(
+            service.begin_install(false),
+            Ok("1.2.0".to_string()),
+            "retry"
+        );
+        service.install.installed("1.2.0");
+        assert_eq!(service.view().status, "installed");
+        let json = serde_json::to_value(service.view()).unwrap();
+        assert!(json.get("downloadedBytes").is_some() && json.get("totalBytes").is_some());
+
+        service.set_enabled(false);
+        let off = UpdateService::new(Some(&dir), true, [1, 0, 0]);
+        assert_eq!(
+            off.begin_install(false),
+            Err(NOTHING_TO_INSTALL.to_string()),
+            "a switched-off check shows no notice and installs nothing"
+        );
+        let smoke = UpdateService::new(Some(&dir), false, [1, 0, 0]);
+        assert!(smoke.begin_install(false).is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

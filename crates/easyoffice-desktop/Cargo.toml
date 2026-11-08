@@ -37,6 +37,12 @@ ureq = { version = "2", default-features = false, features = ["native-tls"] }
 native-tls = "0.2"
 # Opens the release page in the OS default browser (the URL is always Rust's own value).
 open = "5"
+# Signed in-app update (PD-103): download, minisign verification and install run in Rust only; the
+# plugin is registered but its JS commands are never granted to a window. OS TLS like the check above
+# (no bundled rustls); the `zip` feature (legacy zip updater packages) is not needed.
+tauri-plugin-updater = { version = "2", default-features = false, features = ["native-tls", "system-proxy"] }
+# `Abortable` ends a download that grows past the size limit.
+futures-util = { version = "0.3", default-features = false }
 
 # macOS recent items (PD-099): already in the dependency graph through tauri, here with only the
 # two features the shell calls.

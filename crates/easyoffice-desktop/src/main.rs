@@ -21,6 +21,7 @@ mod smoke_steps;
 mod studio_frame;
 mod tracked_files;
 mod update_check;
+mod update_install;
 mod window_commands;
 mod window_state;
 mod windows;
@@ -240,6 +241,8 @@ fn main() {
     }
     builder
         .plugin(tauri_plugin_dialog::init())
+        // Used from Rust only (update_install.rs): none of its JS commands is granted to a window.
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             ipc_dispatch,
             save_document_file,
@@ -247,6 +250,7 @@ fn main() {
             update_check::get_update_notice,
             update_check::set_update_check,
             update_check::open_release_page,
+            update_install::install_update,
             window_commands::open_document_window,
             window_commands::open_file_in_new_window,
             window_commands::take_pending_open,
@@ -358,7 +362,7 @@ mod tests {
         );
         assert_eq!(value["windows"], serde_json::json!(["main", "doc-*"]));
         assert_eq!(value["local"], serde_json::json!(true));
-        assert_eq!(app_commands::APP_COMMANDS.len(), 16);
+        assert_eq!(app_commands::APP_COMMANDS.len(), 17);
     }
 
     #[test]
