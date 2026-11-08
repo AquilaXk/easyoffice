@@ -16,13 +16,23 @@
 
 use std::collections::VecDeque;
 use std::sync::Mutex;
+use std::time::Instant;
 
 use tauri::{AppHandle, Manager};
 
-/// The windows still to be closed by a running quit, in order.
+use crate::windows::CLOSE_ACK_TIMEOUT;
+
+/// The windows still to be closed by a running quit, in order, and when the quit last moved.
+#[derive(Default)]
+struct Queue {
+    pending: VecDeque<String>,
+    progressed: Option<Instant>,
+}
+
+/// The windows still to be closed by a running quit.
 #[derive(Default)]
 pub struct AppQuit {
-    pending: Mutex<VecDeque<String>>,
+    queue: Mutex<Queue>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,37 +49,51 @@ enum Advance {
 }
 
 impl AppQuit {
-    fn pending(&self) -> std::sync::MutexGuard<'_, VecDeque<String>> {
-        self.pending
+    fn queue(&self) -> std::sync::MutexGuard<'_, Queue> {
+        self.queue
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// Starts a quit over `labels`; returns the first window to ask (`None` when there is none).
-    /// A second request while one is running changes nothing.
+    /// A second request while one is running changes nothing, unless the running one has not moved
+    /// for [`CLOSE_ACK_TIMEOUT`] (its window never answered): then the new request starts over, so
+    /// a stuck quit cannot swallow every later Cmd+Q.
     fn begin(&self, labels: Vec<String>) -> Option<String> {
-        let mut pending = self.pending();
-        if !pending.is_empty() {
+        self.begin_at(labels, Instant::now())
+    }
+
+    fn begin_at(&self, labels: Vec<String>, now: Instant) -> Option<String> {
+        let mut queue = self.queue();
+        let running = !queue.pending.is_empty();
+        let stalled = queue
+            .progressed
+            .is_some_and(|at| now.saturating_duration_since(at) >= CLOSE_ACK_TIMEOUT);
+        if running && !stalled {
             return None;
         }
-        *pending = labels.into();
-        pending.front().cloned()
+        queue.pending = labels.into();
+        queue.progressed = Some(now);
+        queue.pending.front().cloned()
     }
 
     pub fn cancel(&self) {
-        self.pending().clear();
+        self.queue().pending.clear();
     }
 
     fn advance_after_close(&self, closed: &str) -> Advance {
-        let mut pending = self.pending();
+        let mut queue = self.queue();
+        let pending = &mut queue.pending;
         if pending.is_empty() {
             return Advance::Idle;
         }
         let was_asked = pending.front().map(String::as_str) == Some(closed);
         pending.retain(|label| label != closed);
-        match pending.front() {
+        let next = pending.front().cloned();
+        queue.progressed = Some(Instant::now());
+        match next {
             None => Advance::Complete,
-            Some(next) if was_asked => Advance::Next(next.clone()),
+            Some(next) if was_asked => Advance::Next(next),
             Some(_) => Advance::Waiting,
         }
     }
@@ -194,6 +218,29 @@ mod tests {
         quit.cancel();
         assert_eq!(quit.advance_after_close("main"), Advance::Idle);
         assert_eq!(quit.begin(labels(&["doc-2"])), Some("doc-2".to_string()));
+    }
+
+    #[test]
+    fn a_quit_that_has_not_moved_for_the_ack_timeout_is_started_over_by_the_next_request() {
+        let quit = AppQuit::default();
+        let start = Instant::now();
+        assert_eq!(
+            quit.begin_at(labels(&["main", "doc-2"]), start),
+            Some("main".to_string())
+        );
+        let just_before = start + CLOSE_ACK_TIMEOUT - std::time::Duration::from_millis(1);
+        assert_eq!(quit.begin_at(labels(&["doc-2"]), just_before), None);
+        assert_eq!(
+            quit.begin_at(labels(&["doc-2", "main"]), start + CLOSE_ACK_TIMEOUT),
+            Some("doc-2".to_string()),
+            "the stuck quit is replaced"
+        );
+        // Progress (a window gone) restarts the clock.
+        assert_eq!(
+            quit.advance_after_close("doc-2"),
+            Advance::Next("main".to_string())
+        );
+        assert_eq!(quit.begin_at(labels(&["main"]), Instant::now()), None);
     }
 
     #[test]

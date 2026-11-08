@@ -918,12 +918,9 @@ pub fn install(app: &mut tauri::App) -> tauri::Result<()> {
 /// (a menu click never reaches a window the user is not looking at).
 fn run_item(app: &AppHandle, id: &str) {
     use tauri::Manager;
-    #[cfg(not(target_os = "macos"))]
-    {
-        if id == QUIT_ID {
-            crate::app_quit::request_app_quit(app);
-            return;
-        }
+    if id == QUIT_ID {
+        crate::app_quit::request_app_quit(app);
+        return;
     }
     let Some(script) = dispatch_script(id) else {
         return;
@@ -1174,6 +1171,19 @@ mod tests {
                 "끝내기"
             }
         );
+    }
+
+    /// `run_item` hands the quit item to the queue on every OS (it once skipped macOS, where the
+    /// id then fell through to `dispatch_script`, which has none, and ⌘Q did nothing).
+    #[test]
+    fn run_item_sends_the_quit_item_to_the_queue_on_every_os() {
+        let source = include_str!("native_menu.rs");
+        let production = source.split("#[cfg(test)]").next().unwrap();
+        let run_item = &production[production.find("fn run_item").unwrap()..];
+        let quit = &run_item[..run_item.find("dispatch_script(id)").unwrap()];
+        assert!(quit.contains("if id == QUIT_ID {"));
+        assert!(quit.contains("crate::app_quit::request_app_quit(app);"));
+        assert!(!quit.contains("cfg"), "no OS is skipped");
     }
 
     /// The macOS layout (source check, the menu itself needs a running app): the application menu
