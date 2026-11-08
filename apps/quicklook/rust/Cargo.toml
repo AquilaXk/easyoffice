@@ -1,0 +1,42 @@
+[package]
+name = "easyoffice-quicklook-ffi"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.93"
+license = "MIT"
+publish = false
+description = "C ABI of the macOS Quick Look extensions: first-page thumbnail, preview PDF and the embedded preview picture of HWP/HWPX files"
+
+[lib]
+name = "easyoffice_quicklook_ffi"
+crate-type = ["staticlib", "rlib"]
+
+# Not a member of the repository workspace: the extensions link this crate as a static library and it
+# pulls the whole rhwp parser, which the engine crates and CI's `--workspace` jobs must not build.
+[workspace]
+
+[dependencies]
+# Reference implementation for the parser and the page layout: the pinned upstream submodule, read
+# only. Without `native-skia` it renders SVG pages, which the crates below draw (no Skia download).
+rhwp = { path = "../../../third_party/rhwp", default-features = false }
+usvg = { version = "0.45", default-features = false, features = ["text"] }
+resvg = { version = "0.45", default-features = false, features = ["text"] }
+tiny-skia = { version = "0.11", default-features = false, features = ["std", "png-format"] }
+svg2pdf = { version = "0.13", default-features = false, features = ["text"] }
+pdf-writer = "0.12"
+
+# Same svg2pdf source as the desktop shell (PD-101).
+[patch.crates-io]
+svg2pdf = { path = "../../../vendor/svg2pdf" }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = "debuginfo"
+
+[dev-dependencies]
+# Builds hostile HWPX packages for the tests (the same zip version rhwp's own tests use).
+zip = { version = "8.5", default-features = false, features = ["deflate"] }
+# Data URL of a picture in the SVG tests; already in the graph through rhwp.
+base64 = "0.23"

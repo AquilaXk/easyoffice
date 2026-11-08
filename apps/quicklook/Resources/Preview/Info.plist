@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>EasyOffice Quick Look Preview</string>
+	<key>CFBundleExecutable</key>
+	<string>EasyOfficeQuickLookPreview</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.aquilaxk.easyoffice.quicklook.preview</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>EasyOfficeQuickLookPreview</string>
+	<key>CFBundlePackageType</key>
+	<string>XPC!</string>
+	<key>CFBundleShortVersionString</key>
+	<string>@VERSION@</string>
+	<key>CFBundleVersion</key>
+	<string>@VERSION@</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>12.0</string>
+	<key>NSExtension</key>
+	<dict>
+		<key>NSExtensionAttributes</key>
+		<dict>
+			<key>QLIsDataBasedPreview</key>
+			<true/>
+			<key>QLSupportedContentTypes</key>
+			<array>
+				<string>com.aquilaxk.easyoffice.hwp</string>
+				<string>com.aquilaxk.easyoffice.hwpx</string>
+			</array>
+			<key>QLSupportsSearchableItems</key>
+			<false/>
+		</dict>
+		<key>NSExtensionPointIdentifier</key>
+		<string>com.apple.quicklook.preview</string>
+		<key>NSExtensionPrincipalClass</key>
+		<string>EasyOfficeQuickLookPreview.HwpPreviewProvider</string>
+	</dict>
+</dict>
+</plist>

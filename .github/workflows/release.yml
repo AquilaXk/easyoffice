@@ -132,6 +132,15 @@ jobs:
       - name: Run the shared release gates and prepare the editor bundle
         uses: ./.github/actions/prepare-desktop-build
 
+      # The Quick Look preview and thumbnail extensions (PD-140) are copied into the app's PlugIns
+      # folder by bundle.macOS.files, so they are built first, universal, with the same signing
+      # identity as the app and the release version.
+      - name: Build the Quick Look preview and thumbnail extensions (universal)
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
+          EASYOFFICE_VERSION: ${{ needs.prepare.outputs.version }}
+        run: node scripts/build-quicklook-macos.mjs --universal
+
       # Universal .dmg without a Developer ID (PD-094). The identity "-" is an ad-hoc signature (Apple
       # silicon refuses to run a binary without any signature; Gatekeeper still prompts on first open).
       # To sign and notarize later, add the APPLE_SIGNING_IDENTITY secret and pass APPLE_ID,
@@ -149,6 +158,9 @@ jobs:
         run: |
           BUNDLES="$(node "$GITHUB_WORKSPACE/scripts/release-assets.mjs" bundles macos-universal)"
           node "$GITHUB_WORKSPACE/scripts/retry-on-download-failure.mjs" -- npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --ci --target universal-apple-darwin --bundles "$BUNDLES" --config "{\"version\":\"${VERSION}\",\"bundle\":{\"createUpdaterArtifacts\":true}}" -- --locked
+
+      - name: Verify the Quick Look extensions are inside the app (identity, types, sandbox, both architectures)
+        run: node scripts/verify-quicklook-bundle.mjs target/universal-apple-darwin/release/bundle/macos/EasyOffice.app --archs arm64,x86_64
 
       - name: Smoke test desktop shell window (embedded WebUI, IPC round trip and HWP editor round trip)
         if: vars.MACOS_SMOKE != 'off'

@@ -65,6 +65,10 @@
     ],
     "macOS": {
       "minimumSystemVersion": "11.0",
+      "files": {
+        "PlugIns/EasyOfficeQuickLookPreview.appex": "../../target/quicklook/PlugIns/EasyOfficeQuickLookPreview.appex",
+        "PlugIns/EasyOfficeQuickLookThumbnail.appex": "../../target/quicklook/PlugIns/EasyOfficeQuickLookThumbnail.appex"
+      },
       "dmg": {
         "windowSize": { "width": 660, "height": 400 },
         "appPosition": { "x": 180, "y": 190 },

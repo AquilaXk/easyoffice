@@ -97,8 +97,13 @@ jobs:
           cache: npm
           cache-dependency-path: apps/hwp-studio/package-lock.json
 
+      # The Quick Look extensions (PD-140) are their own Cargo workspace with their own target directory.
       - name: Cache Rust dependencies and build artifacts
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: |
+            . -> target
+            apps/quicklook/rust -> target
 
       # The desktop shell embeds the generated editor bundle (frontendDist) and fails to build without it.
       - name: Check out the pinned rhwp upstream (sparse, shallow)
@@ -115,6 +120,18 @@ jobs:
 
       - name: Run desktop shell unit tests (macOS)
         run: cargo test -p easyoffice-desktop
+
+      - name: Run the Quick Look crate checks (format, Clippy, tests with hostile files)
+        run: node scripts/run-quicklook-tests.mjs
+
+      # The extensions go into EasyOffice.app/Contents/PlugIns through bundle.macOS.files, so they are
+      # built first. Universal like the release; ad-hoc signed (PD-094) with the sandbox entitlements.
+      - name: Build the Quick Look preview and thumbnail extensions (universal, ad-hoc signed)
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
+        run: |
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          node scripts/build-quicklook-macos.mjs --universal
 
       # No Developer ID in CI or in the repository (PD-094). The identity "-" is an ad-hoc signature:
       # Apple silicon refuses to run a binary without any signature, and it is not a trusted identity
@@ -153,6 +170,9 @@ jobs:
           DMG_BYTES=$(stat -f%z "${DMGS[0]}")
           echo "${DMGS[0]}: ${DMG_BYTES} bytes"
           test "$DMG_BYTES" -ge 1048576 || { echo ".dmg is unexpectedly small"; exit 1; }
+
+      - name: Verify the Quick Look extensions are inside the app (identity, types, sandbox, both architectures)
+        run: node scripts/verify-quicklook-bundle.mjs target/release/bundle/macos/EasyOffice.app --archs arm64,x86_64
 
       # The hosted macOS runner has a logged-in GUI session, so WKWebView can open a window. If a
       # runner image ever changes that, set the repository variable MACOS_SMOKE=off to skip this
