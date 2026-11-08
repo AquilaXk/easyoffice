@@ -2,6 +2,7 @@
 //! drop, the close flow and the window commands the WebView may call. Every command here is narrow:
 //! none takes or returns a file system path. Paths are read, canonicalized and tracked in Rust only.
 
+use crate::open_feedback::{report_open_failure, UNSUPPORTED};
 use crate::recent::RecentList;
 use crate::shell_caller::{self, ShellCaller};
 use crate::smoke::SmokeProbe;
@@ -368,6 +369,15 @@ fn attach_handlers(app: &AppHandle, window: &WebviewWindow) {
                 probe.window_closed(&label);
             }
         }
+        WindowEvent::DragDrop(DragDropEvent::Enter { paths, .. }) => {
+            if paths.iter().any(|p| WindowKind::for_path(p).is_some()) {
+                if let Some(window) = app.get_webview_window(&label) {
+                    let _ = window.eval(crate::open_feedback::notice_script(
+                        crate::open_feedback::DROP_HINT,
+                    ));
+                }
+            }
+        }
         WindowEvent::DragDrop(DragDropEvent::Drop { paths, .. }) => {
             open_dropped_paths(&app, paths.clone());
         }
@@ -378,14 +388,7 @@ fn attach_handlers(app: &AppHandle, window: &WebviewWindow) {
 fn open_dropped_paths(app: &AppHandle, paths: Vec<PathBuf>) {
     let app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        for path in paths
-            .into_iter()
-            .filter(|p| WindowKind::for_path(p).is_some())
-        {
-            if let Err(message) = open_path(&app, &path) {
-                eprintln!("open: {message}");
-            }
-        }
+        open_files(&app, &paths);
     });
 }
 
@@ -400,22 +403,19 @@ fn focus_window(app: &AppHandle, label: &str) {
 /// Opens the document at `path` in its own window, or focuses the window that already has it.
 pub fn open_path(app: &AppHandle, path: &Path) -> Result<OpenOutcome, String> {
     let canonical = fs::canonicalize(path)
-        .map_err(|err| format!("파일을 열 수 없습니다 ({}): {err}", display_name(path)))?;
-    let kind = WindowKind::for_path(&canonical).ok_or_else(|| {
-        format!(
-            "지원하지 않는 파일 형식입니다 ({})",
-            display_name(&canonical)
-        )
-    })?;
+        .map_err(|err| open_failure("파일을 찾을 수 없습니다", path, &err))?;
+    let kind = WindowKind::for_path(&canonical)
+        .ok_or_else(|| format!("{} ({})", UNSUPPORTED, display_name(&canonical)))?;
     let state = app.state::<AppWindows>();
     let key = path_key(&canonical);
     let existing = locked(&state.registry).find_by_path(&key).map(String::from);
     if let Some(label) = existing {
         focus_window(app, &label);
+        close_empty_start_windows(app);
         return Ok(OpenOutcome::FOCUSED);
     }
-    let meta =
-        fs::metadata(&canonical).map_err(|err| format!("파일 정보를 읽지 못했습니다: {err}"))?;
+    let meta = fs::metadata(&canonical)
+        .map_err(|err| open_failure("파일 정보를 읽지 못했습니다", &canonical, &err))?;
     let size = meta.len();
     if size == 0 || size > MAX_OPEN_BYTES {
         return Err(format!(
@@ -423,12 +423,8 @@ pub fn open_path(app: &AppHandle, path: &Path) -> Result<OpenOutcome, String> {
             display_name(&canonical)
         ));
     }
-    let bytes = fs::read(&canonical).map_err(|err| {
-        format!(
-            "파일을 읽지 못했습니다 ({}): {err}",
-            display_name(&canonical)
-        )
-    })?;
+    let bytes = fs::read(&canonical)
+        .map_err(|err| open_failure("파일을 읽지 못했습니다", &canonical, &err))?;
     // Metadata from before the read, hash of the bytes the editor receives: a change in between
     // makes the next save ask instead of silently overwriting.
     let fingerprint = Fingerprint::from_metadata_and_bytes(&meta, &bytes);
@@ -440,6 +436,7 @@ pub fn open_path(app: &AppHandle, path: &Path) -> Result<OpenOutcome, String> {
             registry.remove(&label);
             drop(registry);
             focus_window(app, &owner);
+            close_empty_start_windows(app);
             return Ok(OpenOutcome::FOCUSED);
         }
     }
@@ -455,11 +452,31 @@ pub fn open_path(app: &AppHandle, path: &Path) -> Result<OpenOutcome, String> {
         locked(&state.registry).remove(&label);
         locked(&state.pending).discard(&label);
         locked(&state.files).untrack(&label);
-        return Err(err);
+        eprintln!("open: {err}");
+        return Err(format!(
+            "문서 창을 만들지 못했습니다 ({})",
+            display_name(&canonical)
+        ));
     }
     state.remember(&canonical);
     crate::os_recent::note_recent_document(app, &canonical);
+    close_empty_start_windows(app);
     Ok(OpenOutcome::OPENED)
+}
+
+/// A user sentence naming the file; the operating system's own error text stays in the log.
+fn open_failure(reason: &str, path: &Path, err: &std::io::Error) -> String {
+    eprintln!("open: {reason} ({}): {err}", display_name(path));
+    format!("{reason} ({})", display_name(path))
+}
+
+/// A document window exists now, so a start window with nothing in it has done its job (the page
+/// closes its own start window after the opens it starts; this covers the ones Rust starts).
+fn close_empty_start_windows(app: &AppHandle) {
+    let labels = locked(&app.state::<AppWindows>().registry).empty_start_labels();
+    for window in labels.iter().filter_map(|label| app.get_webview_window(label)) {
+        let _ = window.close();
+    }
 }
 
 /// A document saved under a new path belongs to that path from now on (re-opening focuses it).
@@ -500,12 +517,10 @@ pub fn note_written(app: &AppHandle, label: &str, fingerprint: Option<Fingerprin
     }
 }
 
-/// Command-line arguments that name an existing file of a supported kind, in order. Everything else
-/// (flags such as `--smoke`, unknown extensions, directories) is ignored.
+/// Command-line arguments that name an existing file, in order; opening reports the ones of an
+/// unsupported kind. Everything else (flags such as `--smoke`, missing paths, directories) is ignored.
 pub fn launch_files(args: impl Iterator<Item = String>) -> Vec<PathBuf> {
-    args.map(PathBuf::from)
-        .filter(|path| WindowKind::for_path(path).is_some() && path.is_file())
-        .collect()
+    args.map(PathBuf::from).filter(|path| path.is_file()).collect()
 }
 
 /// The files of a second launch: `argv[0]` is the executable, the rest are the launch arguments.
@@ -513,33 +528,44 @@ pub fn second_instance_files(argv: Vec<String>) -> Vec<PathBuf> {
     launch_files(argv.into_iter().skip(1))
 }
 
-/// Opens every file through `open` (the shared open queue in production). Returns whether any file
-/// was opened in a new window or focused in the window that already shows it.
+/// Opens every file through `open` (the shared open queue in production) and hands each failure to
+/// `fail`. Returns whether any file was opened in a new window or focused in the window that
+/// already shows it.
 pub fn route_launch_files(
     files: &[PathBuf],
     mut open: impl FnMut(&Path) -> Result<OpenOutcome, String>,
+    mut fail: impl FnMut(&str),
 ) -> bool {
     let mut handled = false;
     for path in files {
         match open(path) {
             Ok(_) => handled = true,
-            Err(message) => eprintln!("open: {message}"),
+            Err(message) => fail(&message),
         }
     }
     handled
 }
 
-/// Files named on the command line each open in their own window. Returns whether any did.
-pub fn open_startup_files(app: &AppHandle, args: impl Iterator<Item = String>) -> bool {
-    route_launch_files(&launch_files(args), |path| open_path(app, path))
+/// Opens each file in its own window and tells the user about every one that failed.
+fn open_files(app: &AppHandle, files: &[PathBuf]) -> bool {
+    route_launch_files(
+        files,
+        |path| open_path(app, path),
+        |message| report_open_failure(app, message),
+    )
 }
 
-/// The local files among `file:` URLs handed over by the macOS "open" Apple Event.
+/// Files named on the command line each open in their own window. Returns whether any did.
+pub fn open_startup_files(app: &AppHandle, args: impl Iterator<Item = String>) -> bool {
+    open_files(app, &launch_files(args))
+}
+
+/// The existing local files among `file:` URLs handed over by the macOS "open" Apple Event.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn file_url_paths(urls: &[tauri::Url]) -> Vec<PathBuf> {
     urls.iter()
         .filter_map(|url| url.to_file_path().ok())
-        .filter(|path| WindowKind::for_path(path).is_some() && path.is_file())
+        .filter(|path| path.is_file())
         .collect()
 }
 
@@ -548,7 +574,7 @@ pub fn file_url_paths(urls: &[tauri::Url]) -> Vec<PathBuf> {
 pub fn open_urls(app: &AppHandle, urls: Vec<tauri::Url>) {
     let app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        route_launch_files(&file_url_paths(&urls), |path| open_path(&app, path));
+        open_files(&app, &file_url_paths(&urls));
     });
 }
 
@@ -559,7 +585,7 @@ pub fn handle_second_instance(app: &AppHandle, argv: Vec<String>) {
     let app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let files = second_instance_files(argv);
-        let handled = route_launch_files(&files, |path| open_path(&app, path));
+        let handled = open_files(&app, &files);
         if !handled && files.is_empty() {
             focus_existing_window(&app);
         }
@@ -824,34 +850,40 @@ mod tests {
         let dir = scratch_dir("second");
         let a = dir.join("a.docx");
         let b = dir.join("b.hwpx");
+        let exe = dir.join("notes.exe");
         fs::write(&a, b"x").unwrap();
         fs::write(&b, b"x").unwrap();
+        fs::write(&exe, b"x").unwrap();
         let argv = vec![
             "C:\\Program Files\\EasyOffice\\EasyOffice.exe".to_string(),
             "--flag".to_string(),
             a.display().to_string(),
             dir.join("missing.docx").display().to_string(),
-            dir.join("notes.exe").display().to_string(),
+            exe.display().to_string(),
             b.display().to_string(),
         ];
         let files = second_instance_files(argv);
         assert_eq!(
             files,
-            vec![a.clone(), b.clone()],
-            "only existing supported files, exe skipped"
+            vec![a.clone(), exe.clone(), b.clone()],
+            "only existing files, in order; the unsupported one is reported when opened"
         );
         let mut queued = Vec::new();
-        let handled = route_launch_files(&files, |path| {
-            queued.push(path.to_path_buf());
-            Ok(OpenOutcome::OPENED)
-        });
+        let handled = route_launch_files(
+            &files,
+            |path| {
+                queued.push(path.to_path_buf());
+                Ok(OpenOutcome::OPENED)
+            },
+            |_| {},
+        );
         assert!(handled);
-        assert_eq!(queued, vec![a, b]);
+        assert_eq!(queued, vec![a, exe, b]);
         let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn finder_open_urls_keep_only_existing_supported_local_files() {
+    fn finder_open_urls_keep_only_existing_local_files() {
         let dir = std::env::temp_dir().join(format!("eo-urls-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         let doc = dir.join("보고서 1.docx");
@@ -864,17 +896,31 @@ mod tests {
             tauri::Url::from_file_path(dir.join("missing.xlsx")).unwrap(),
             tauri::Url::parse("https://example.com/a.docx").unwrap(),
         ];
-        assert_eq!(file_url_paths(&urls), vec![doc]);
+        assert_eq!(file_url_paths(&urls), vec![doc, exe]);
         let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn launch_routing_reports_whether_anything_was_handled() {
         let none: Vec<PathBuf> = Vec::new();
-        assert!(!route_launch_files(&none, |_| Ok(OpenOutcome::OPENED)));
+        assert!(!route_launch_files(
+            &none,
+            |_| Ok(OpenOutcome::OPENED),
+            |_| {}
+        ));
         let files = vec![PathBuf::from("a.docx")];
-        assert!(!route_launch_files(&files, |_| Err("nope".into())));
-        assert!(route_launch_files(&files, |_| Ok(OpenOutcome::FOCUSED)));
+        let mut failures = Vec::new();
+        assert!(!route_launch_files(
+            &files,
+            |_| Err("nope".into()),
+            |message| failures.push(message.to_string())
+        ));
+        assert_eq!(failures, vec!["nope".to_string()], "a failure is reported");
+        assert!(route_launch_files(
+            &files,
+            |_| Ok(OpenOutcome::FOCUSED),
+            |_| {}
+        ));
     }
 
     #[test]

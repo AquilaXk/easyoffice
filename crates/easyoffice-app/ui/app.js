@@ -838,6 +838,8 @@
     return host.__EASYOFFICE_NATIVE_MENU_TABLE__.runNativeMenuAction(id, actions);
   }
   host.__EASYOFFICE_NATIVE_MENU__ = (id) => runNativeMenu(String(id));
+  // The shell reports open failures and the drag hint here (`window_commands.rs`); they show as the shared toast.
+  host.__EASYOFFICE_NOTICE__ = (message) => shellChrome.toast(message);
 
   // Combos forwarded by the embedded HWP editor run the same actions as the keyboard.
   function handleForwardedShortcut(combo) {

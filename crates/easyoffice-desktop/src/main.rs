@@ -7,6 +7,7 @@
 mod app_commands;
 mod app_quit;
 mod confirm_dialog;
+mod open_feedback;
 mod os_recent;
 mod pdf_export;
 mod pdf_font_fallbacks;
@@ -200,6 +201,16 @@ async fn save_via_dialog(
     Ok(SaveOutcome::saved(&path, written.bytes))
 }
 
+const EXTERNAL_CHANGE_TITLE: &str = "외부 변경 감지";
+
+/// The reference app's wording for a file that changed behind the app's back; the file is named by
+/// its name only (PD-088).
+fn external_change_message(file_name: &str) -> String {
+    format!(
+        "원본 파일이 EasyOffice 밖에서 변경되었습니다.\n파일: {file_name}\n\n그대로 저장하면 외부에서 변경된 내용이 사라질 수 있습니다."
+    )
+}
+
 /// Writes the document back to its own file. If the file changed on disk since it was opened, a
 /// native dialog asks before overwriting; declining leaves the file alone and reports "cancelled".
 async fn save_tracked(
@@ -211,19 +222,18 @@ async fn save_tracked(
     let dialog_app = app.clone();
     let parent = window.clone();
     let path = tracked.path.clone();
+    let file_name = windows::display_name(&path);
     let result = tauri::async_runtime::spawn_blocking(move || {
         save_in_place(&path, &tracked.fingerprint, request.bytes(), || {
             dialog_app
                 .dialog()
-                .message(
-                    "이 파일이 열린 뒤 다른 프로그램에서 변경되었습니다. 지금 저장하면 그 변경 내용을 덮어씁니다.",
-                )
-                .title("파일이 변경되었습니다")
+                .message(external_change_message(&file_name))
+                .title(EXTERNAL_CHANGE_TITLE)
                 .kind(MessageDialogKind::Warning)
                 .parent(&parent)
                 .buttons(MessageDialogButtons::OkCancelCustom(
                     "덮어쓰기".to_string(),
-                    "취소".to_string(),
+                    "저장 취소".to_string(),
                 ))
                 .blocking_show()
         })
@@ -352,6 +362,16 @@ mod tests {
     fn ipc_error_serializes_like_http_error_body() {
         let json = serde_json::to_string(&IpcError::new("bad")).unwrap();
         assert_eq!(json, r#"{"status":"error","message":"bad"}"#);
+    }
+
+    #[test]
+    fn the_external_change_dialog_names_the_file_and_never_a_path() {
+        let text = external_change_message("보고서.docx");
+        assert_eq!(
+            text,
+            "원본 파일이 EasyOffice 밖에서 변경되었습니다.\n파일: 보고서.docx\n\n그대로 저장하면 외부에서 변경된 내용이 사라질 수 있습니다."
+        );
+        assert_eq!(EXTERNAL_CHANGE_TITLE, "외부 변경 감지");
     }
 
     #[test]

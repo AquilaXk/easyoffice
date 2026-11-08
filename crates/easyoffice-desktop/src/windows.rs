@@ -293,6 +293,17 @@ impl WindowRegistry {
         self.windows.len()
     }
 
+    /// Start windows with nothing in them: no document and no unsaved state. The page closes its own
+    /// start window once it opens a document; this is the same rule for the opens Rust starts
+    /// (drag and drop, Finder, a second launch).
+    pub fn empty_start_labels(&self) -> Vec<String> {
+        self.windows
+            .iter()
+            .filter(|(_, w)| w.kind == WindowKind::Start && !w.dirty && w.path_key.is_none())
+            .map(|(label, _)| label.clone())
+            .collect()
+    }
+
     pub fn document_window_count(&self) -> usize {
         self.windows
             .values()
@@ -631,6 +642,18 @@ mod tests {
         reg.register("doc-1-a", WindowKind::Pdf);
         assert_eq!((reg.len(), reg.document_window_count()), (2, 1));
         assert_eq!(reg.kind("doc-1-a"), Some(WindowKind::Pdf));
+    }
+
+    #[test]
+    fn only_empty_start_windows_are_listed_for_cleanup() {
+        let mut registry = WindowRegistry::default();
+        registry.register("main", WindowKind::Start);
+        registry.register("doc-1", WindowKind::Doc);
+        registry.register("doc-2", WindowKind::Start);
+        assert!(registry.claim_path("doc-2", "k".into()).is_ok());
+        registry.register("doc-3", WindowKind::Start);
+        registry.set_state("doc-3", "x", true);
+        assert_eq!(registry.empty_start_labels(), vec!["main".to_string()]);
     }
 
     #[test]
