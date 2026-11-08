@@ -92,7 +92,7 @@
     function buildHero() {
       const hero = element("div", "home-hero");
       const actions = element("div", "home-actions");
-      const open = actionButton("문서 열기", "홈 화면에서 파일 선택 (Ctrl+O)", "folder-open");
+      const open = actionButton("문서 열기", "홈 화면에서 파일 선택", "folder-open");
       open.dataset.fileOpen = "true";
       add(actions, open);
       for (const doc of NEW_DOCUMENTS) {
