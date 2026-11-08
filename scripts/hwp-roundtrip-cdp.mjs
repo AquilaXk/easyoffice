@@ -115,10 +115,18 @@ async function connect(wsUrl) {
   const logs = [];
   const dialogs = [];
   const downloads = [];
+  // The editor frame is sandboxed without allow-same-origin (opaque origin, #233): the shell cannot
+  // read its DOM, so the frame's own CDP session (out-of-process iframe) is used for that.
+  const frameSessions = [];
   await new Promise((resolve, reject) => { sock.onopen = resolve; sock.onerror = reject; });
   sock.onmessage = (ev) => {
     const m = JSON.parse(ev.data);
     if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); return; }
+    if (m.method === "Target.attachedToTarget" && m.params.targetInfo.type === "iframe") frameSessions.push(m.params.sessionId);
+    if (m.method === "Target.detachedFromTarget") {
+      const at = frameSessions.indexOf(m.params.sessionId);
+      if (at >= 0) frameSessions.splice(at, 1);
+    }
     if (m.method === "Runtime.exceptionThrown") logs.push("[exception] " + (m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text));
     if (m.method === "Page.javascriptDialogOpening") {
       dialogs.push(`${m.params.type}: ${m.params.message}`);
@@ -126,17 +134,24 @@ async function connect(wsUrl) {
     }
     if (m.method === "Page.downloadWillBegin") downloads.push(m.params.suggestedFilename);
   };
-  const send = (method, params = {}) => new Promise((resolve) => {
+  const send = (method, params = {}, sessionId) => new Promise((resolve) => {
     const i = ++id;
     pending.set(i, resolve);
-    sock.send(JSON.stringify({ id: i, method, params }));
+    sock.send(JSON.stringify({ id: i, method, params, ...(sessionId ? { sessionId } : {}) }));
   });
+  const evalFrame = async (expression) => {
+    const sessionId = frameSessions.at(-1);
+    if (!sessionId) throw new Error("the editor frame has no CDP session");
+    const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, sessionId);
+    if (r.result?.exceptionDetails) throw new Error("frame exception: " + (r.result.exceptionDetails.exception?.description || r.result.exceptionDetails.text));
+    return r.result?.result?.value;
+  };
   const evalJs = async (expression) => {
     const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
     if (r.result?.exceptionDetails) throw new Error("page exception: " + (r.result.exceptionDetails.exception?.description || r.result.exceptionDetails.text));
     return r.result?.result?.value;
   };
-  return { send, evalJs, logs, dialogs, downloads, close: () => sock.close() };
+  return { send, evalJs, evalFrame, logs, dialogs, downloads, close: () => sock.close() };
 }
 
 const KEYS = {
@@ -159,10 +174,12 @@ async function click(cdp, x, y) {
 }
 
 async function rectOf(cdp, selector, inFrame) {
-  const expr = inFrame
-    ? `(() => { const f = document.getElementById("hwp-frame"); const fr = f.getBoundingClientRect(); const el = f.contentDocument.querySelector(${JSON.stringify(selector)}); if (!el) return null; const r = el.getBoundingClientRect(); return { x: fr.left + r.left, y: fr.top + r.top, w: r.width, h: r.height }; })()`
-    : `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; })()`;
-  const rect = await cdp.evalJs(expr);
+  const rectExpr = `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; })()`;
+  let rect = await (inFrame ? cdp.evalFrame(rectExpr) : cdp.evalJs(rectExpr));
+  if (rect && inFrame) {
+    const frameBox = await cdp.evalJs(`(() => { const r = document.getElementById("hwp-frame").getBoundingClientRect(); return { x: r.left, y: r.top }; })()`);
+    rect = { x: frameBox.x + rect.x, y: frameBox.y + rect.y, w: rect.w, h: rect.h };
+  }
   if (!rect) throw new Error("element not found: " + selector);
   return rect;
 }
@@ -343,6 +360,7 @@ async function main() {
   try {
     cdp = await connect(procs.wsUrl);
     for (const m of ["Runtime.enable", "Page.enable"]) await cdp.send(m);
+    await cdp.send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
     await cdp.send("Page.setDownloadBehavior", { behavior: "allow", downloadPath: DOWNLOADS });
     await cdp.send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
     await cdp.send("Page.navigate", { url: `http://127.0.0.1:${PORT}/?module=HWP&win=cdp-roundtrip` });

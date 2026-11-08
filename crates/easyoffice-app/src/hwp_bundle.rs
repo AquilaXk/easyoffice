@@ -21,6 +21,11 @@ const MAX_REL_LEN: usize = 160;
 /// no `unsafe-eval`. Only the app's own origin may embed the document.
 pub const STUDIO_CSP: &str = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' data: blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'self'";
 
+/// Response header that lets the editor frame read its own files. The frame is sandboxed without
+/// `allow-same-origin` (#233), so it has an opaque origin and its module scripts, WASM and fonts are
+/// cross-origin reads. The bundle is public static content; no other response carries this header.
+pub const STUDIO_CORS_HEADER: &str = "Access-Control-Allow-Origin: *\r\n";
+
 #[cfg(feature = "embed-hwp-studio")]
 mod embedded {
     include!(concat!(env!("OUT_DIR"), "/hwp_studio_embedded.rs"));

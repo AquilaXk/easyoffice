@@ -17,11 +17,19 @@
   const SHORT_TIMEOUT_MS = 15000;
   const LONG_TIMEOUT_MS = 60000;
   const CONNECT_TIMEOUT_MS = 60000;
-  // Same-origin and scripts are required (the editor is an app bundle that uses storage and WASM);
-  // modals keep alert/confirm dialogs working. Popups, forms, downloads and top navigation stay
-  // denied, which also neutralizes the editor's hyperlink preview and print preview windows (printing is
-  // done by hwp-print.js from the shell window).
-  const FRAME_SANDBOX = "allow-same-origin allow-scripts allow-modals";
+  // Scripts are required (the editor is an app bundle with WASM); modals keep alert/confirm dialogs
+  // working. `allow-same-origin` is deliberately absent (#233): with it the frame would share this
+  // window's origin and could call `window.parent.__TAURI_INTERNALS__.invoke` (and, on Windows, its
+  // own injected copy) against every command the window may call. Without it the frame gets an
+  // opaque origin: no parent DOM or global access, and IPC requests with `Origin: null` are rejected
+  // by Tauri. Popups, forms, downloads and top navigation stay denied, which also neutralizes the
+  // editor's hyperlink preview and print preview windows (printing is done by hwp-print.js from
+  // the shell window).
+  const FRAME_SANDBOX = "allow-scripts allow-modals";
+  // An opaque origin can only be addressed with "*". The target is `contentWindow` of the frame this
+  // host created, and the handshake carries only a protocol version, a session id and capability
+  // names; everything after it travels over the transferred MessagePort.
+  const OPAQUE_TARGET_ORIGIN = "*";
   const MSG_UNAVAILABLE = "한글 편집기 구성 요소가 포함되지 않은 빌드입니다. 텍스트 전용 편집기로 대체합니다.";
   const MSG_LOADING = "한글 편집기를 불러오는 중입니다…";
   const MSG_FAILED = "한글 편집기에 연결하지 못했습니다.";
@@ -343,7 +351,7 @@
           }
           target.postMessage(
             { type: "rhwp-connect", version: PROTOCOL_VERSION, sessionId, capabilities: CAPABILITIES },
-            env.location.origin,
+            OPAQUE_TARGET_ORIGIN,
             [channel.port2],
           );
         };
@@ -511,9 +519,11 @@
       return () => changeListeners.delete(listener);
     }
 
-    // `EasyOffice.exe --smoke` step `hwp`: activate the HWP module, wait for the editor, type into a
-    // blank document, export HWP bytes and verify them. Resolves with the detail text the bridge
-    // reports; rejects with the reason it failed.
+    // `EasyOffice.exe --smoke` step `hwp`: activate the HWP module, wait for the editor, export the
+    // blank document and have the editor re-parse the bytes. Everything goes over the embed port
+    // because the sandboxed frame exposes no DOM (typing is covered by
+    // `scripts/hwp-studio-harness.mjs`). Resolves with the detail text the bridge reports; rejects
+    // with the reason it failed.
     async function runSmoke(activate) {
       await activate();
       const started = Date.now();
@@ -522,37 +532,14 @@
         if (Date.now() - started > limits.connect) throw new Error("편집기 준비 시간 초과");
         await new Promise((resolve) => timers.set(resolve, 100));
       }
-      const before = await exportHwp();
-      const typed = await typeIntoEditor("한글 스모크 테스트");
-      const after = await exportHwp();
-      const dirty = await isDirty();
-      if (!typed || !dirty) throw new Error("편집기에 입력이 반영되지 않았습니다.");
-      if (after.length === 0 || after[0] !== 0xd0 || after[1] !== 0xcf) {
+      const bytes = await exportHwp();
+      if (bytes.length === 0 || bytes[0] !== 0xd0 || bytes[1] !== 0xcf) {
         throw new Error("내보낸 HWP 바이트가 올바르지 않습니다.");
       }
-      return "bytes=" + after.length + " blank=" + before.length;
-    }
-
-    // Same-origin test input for the smoke run only: click the first page, then feed the editor's
-    // hidden text input (the same path the browser uses for typed text).
-    async function typeIntoEditor(text) {
-      const doc = frame?.contentDocument;
-      const win = frame?.contentWindow;
-      const canvas = doc?.querySelector("#scroll-container canvas");
-      if (!canvas) return false;
-      const rect = canvas.getBoundingClientRect();
-      const point = { bubbles: true, cancelable: true, button: 0, view: win, clientX: rect.left + rect.width / 2, clientY: rect.top + 160 };
-      for (const type of ["mousedown", "mouseup", "click"]) {
-        canvas.dispatchEvent(new win.MouseEvent(type, point));
-      }
-      await new Promise((resolve) => timers.set(resolve, 300));
-      const input = doc.querySelector("textarea");
-      if (!input) return false;
-      input.focus();
-      input.value = text;
-      input.dispatchEvent(new win.InputEvent("input", { bubbles: true, data: text, inputType: "insertText" }));
-      await new Promise((resolve) => timers.set(resolve, 300));
-      return true;
+      const copy = bytes.slice().buffer;
+      const verdict = await call("verifyBytes", { data: copy }, { transfer: [copy] });
+      if (!verdict?.ok || !(verdict.pageCount >= 1)) throw new Error("편집기가 내보낸 HWP를 다시 열지 못했습니다.");
+      return "bytes=" + bytes.length + " pages=" + verdict.pageCount;
     }
 
     return {

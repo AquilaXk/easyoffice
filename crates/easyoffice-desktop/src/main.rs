@@ -15,6 +15,7 @@ mod save_file;
 mod save_verify;
 mod smoke;
 mod smoke_steps;
+mod studio_frame;
 mod tracked_files;
 mod update_check;
 mod window_commands;

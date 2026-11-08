@@ -271,6 +271,31 @@ fn test_bundle_routes_never_leave_the_bundle_directory() {
 }
 
 #[test]
+fn test_cross_origin_read_is_granted_only_to_editor_bundle_responses() {
+    // The editor frame has an opaque origin (sandbox without allow-same-origin, #233), so its module
+    // scripts, WASM and fonts are cross-origin reads. The grant must stay on `/hwp-studio/*`: the
+    // page, the API and error pages never carry it.
+    let (port, stop, handle) = start_server();
+    for path in [
+        "/",
+        "/index.html",
+        "/nope",
+        "/hwp-studio/nope.js",
+        "/hwp-studio/../Cargo.toml",
+    ] {
+        let (head, _) = split_response(&get(port, path));
+        let granted = head.contains("Access-Control-Allow-Origin");
+        assert_eq!(
+            granted,
+            path.starts_with("/hwp-studio/"),
+            "{path} -> {head}"
+        );
+    }
+    stop.store(true, Ordering::Release);
+    handle.join().unwrap();
+}
+
+#[test]
 fn test_bundle_files_are_binary_exact_with_mime_and_iframe_csp() {
     let bundle = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("ui/hwp-studio");
     if !bundle.join("index.html").is_file() {
@@ -281,6 +306,7 @@ fn test_bundle_files_are_binary_exact_with_mime_and_iframe_csp() {
     let (head, body) = split_response(&get(port, "/hwp-studio/index.html?x=1"));
     assert!(head.starts_with("HTTP/1.1 200 OK\r\n"), "{head}");
     assert!(head.contains("Content-Type: text/html; charset=utf-8\r\n"));
+    assert!(head.contains("Access-Control-Allow-Origin: *\r\n"));
     assert!(head.contains("Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' data: blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'self'\r\n"));
     assert_eq!(body, std::fs::read(bundle.join("index.html")).unwrap());
 

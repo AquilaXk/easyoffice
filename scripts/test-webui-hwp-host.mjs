@@ -77,11 +77,16 @@ function createFakeStudio({ answer = true, failMethods = new Set() } = {}) {
       exportHwp: new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 1, 2, 3]),
       exportHwpx: new Uint8Array([0x50, 0x4b, 3, 4]),
       getDocumentState: { dirty: true },
+      verifyBytes: { ok: true, pageCount: 1, format: "hwp" },
       notifySaved: null,
     };
     respond({ result: results[msg.method] });
   }
   const attachWindow = (frame) => {
+    // An opaque-origin frame (sandbox without allow-same-origin) exposes no document to the shell.
+    Object.defineProperty(frame, "contentDocument", {
+      get() { throw new Error("SecurityError: the editor frame is cross-origin"); },
+    });
     frame.contentWindow = {
       postMessage(message, origin, ports) {
         state.connect = { message, origin, ports };
@@ -141,15 +146,14 @@ test("lazy start: no frame until HWP is activated, then connect handshake, ready
   const frame = document.frames[0];
   assert.equal(frame.getAttribute("src"), "./hwp-studio/index.html");
   assert.equal(frame.getAttribute("sandbox"), constants.FRAME_SANDBOX);
-  assert.match(frame.getAttribute("sandbox"), /allow-same-origin/);
-  assert.match(frame.getAttribute("sandbox"), /allow-scripts/);
-  assert.doesNotMatch(frame.getAttribute("sandbox"), /allow-popups|allow-top-navigation|allow-forms/);
+  assert.deepEqual(frame.getAttribute("sandbox").split(" "), ["allow-scripts", "allow-modals"], "exactly these two tokens (#233)");
   const { message, origin, ports } = studio.state.connect;
   assert.equal(message.type, "rhwp-connect");
   assert.equal(message.version, 1);
   assert.equal(message.sessionId, "session-1");
   assert.ok(message.capabilities.includes("transferable-array-buffer"));
-  assert.equal(origin, "http://127.0.0.1:8800", "target origin is the page origin, never *");
+  assert.equal(origin, "*", "an opaque-origin frame can only be addressed with * (the target is the frame this host created)");
+  assert.deepEqual(Object.keys(message), ["type", "version", "sessionId", "capabilities"], "the handshake carries no shell data");
   assert.equal(ports.length, 1);
   assert.equal(studio.requests.map((r) => r.method).join(","), "ready,createBlankDocument");
   assert.equal(JSON.stringify(studio.requests[1].params), JSON.stringify({ skipUnsavedGuard: true }));
@@ -245,10 +249,16 @@ test("save exports HWP bytes, delivers them as .hwp and clears the editor dirty 
   assert.equal(studio.requests.at(-1).method, "notifySaved");
 });
 
-test("the smoke hwp step rejects with the reason when typed input cannot reach the editor", async () => {
-  const { hostApi, ipcCalls } = loadHost();
-  await assert.rejects(hostApi.runSmoke(() => hostApi.onModuleActivated("HWP")), /편집기에 입력이 반영되지 않았습니다/);
+test("the smoke hwp step runs over the embed port only and resolves with the exported byte count (no frame DOM access)", async () => {
+  const { hostApi, ipcCalls, studio } = loadHost();
+  assert.equal(await hostApi.runSmoke(() => hostApi.onModuleActivated("HWP")), "bytes=7 pages=1");
   assert.equal(ipcCalls.length, 0, "the window bridge reports the result, the host makes no engine call");
+  assert.deepEqual(studio.requests.map((r) => r.method), ["ready", "createBlankDocument", "exportHwp", "verifyBytes"]);
+});
+
+test("the smoke hwp step rejects with the reason when the editor cannot re-open the exported bytes", async () => {
+  const { hostApi } = loadHost({ studioOptions: { failMethods: new Set(["verifyBytes"]) } });
+  await assert.rejects(hostApi.runSmoke(() => hostApi.onModuleActivated("HWP")), /fail verifyBytes/);
 });
 
 test("the smoke hwp step rejects when the bundle is missing", async () => {
@@ -365,4 +375,14 @@ test("shell shortcuts: without a shortcut table the frame URL stays plain", asyn
   await hostApi.onModuleActivated("HWP");
   await settle();
   assert.equal(document.frames[0].getAttribute("src"), constants.STUDIO_SRC);
+});
+
+test("the host never reaches into the editor frame or the shell's own Tauri objects (#233)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const source = readFileSync(HOST_JS, "utf8").replace(/\/\/.*$/gm, "");
+  assert.doesNotMatch(source, /contentDocument/);
+  assert.doesNotMatch(source, /allow-same-origin/);
+  assert.doesNotMatch(source, /__TAURI/);
+  assert.equal([...source.matchAll(/contentWindow/g)].length, 1, "contentWindow is used once, as the postMessage target of the handshake");
+  assert.match(source, /target\.postMessage\(/);
 });

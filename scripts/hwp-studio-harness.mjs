@@ -2,10 +2,12 @@
 /**
  * Standalone browser harness for the built hwp-studio bundle (PD-081).
  *
- * Serves crates/easyoffice-app/ui/hwp-studio under /hwp-studio/ with the CSP planned for the
- * embedded editor, hosts it in a same-origin <iframe> of a tiny parent page that speaks the
- * rhwp embed protocol over a MessagePort, and drives a headless Chrome over the DevTools
- * protocol with real input events:
+ * Serves crates/easyoffice-app/ui/hwp-studio under /hwp-studio/ with the CSP and the cross-origin
+ * read grant planned for the embedded editor, hosts it in an <iframe> with the shell's sandbox
+ * (`allow-scripts allow-modals`, opaque origin, #233) of a tiny parent page that speaks the rhwp
+ * embed protocol over a MessagePort, checks that the frame cannot reach the parent, and drives a
+ * headless Chrome over the DevTools protocol with real input events (the frame's DOM is read through
+ * an isolated world of the frame, never through `contentDocument`):
  *   blank document -> type Korean text -> change the font size of a partial selection only ->
  *   exportHwp -> reload the bytes (vendored WASM in Node and the editor itself) -> same character shapes.
  *
@@ -45,7 +47,7 @@ const BIG_PT = 20;
 
 const PARENT_HTML = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>harness</title>
 <link rel="stylesheet" href="/harness.css"></head><body>
-<iframe id="studio" title="studio" src="/hwp-studio/index.html"></iframe>
+<iframe id="studio" title="studio" sandbox="allow-scripts allow-modals" src="/hwp-studio/index.html"></iframe>
 <script src="/harness.js"></script></body></html>`;
 const PARENT_CSS = "html,body{margin:0;height:100%}#studio{border:0;width:1280px;height:800px}";
 const PARENT_JS = `
@@ -71,7 +73,7 @@ frame.addEventListener('load', () => {
   frame.contentWindow.postMessage({
     type: 'rhwp-connect', version: 1, sessionId,
     capabilities: ['transferable-array-buffer', 'document-state-v1', 'selection-context-v1', 'document-change-events-v1'],
-  }, location.origin, [channel.port2]);
+  }, '*', [channel.port2]);
 });
 function call(method, params) {
   const id = nextId++;
@@ -117,7 +119,10 @@ export function startServer() {
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
     const send = (status, type, body, csp) => {
-      res.writeHead(status, { "Content-Type": type, "Content-Security-Policy": csp, "X-Content-Type-Options": "nosniff" });
+      const headers = { "Content-Type": type, "Content-Security-Policy": csp, "X-Content-Type-Options": "nosniff" };
+      // Same grant as hwp_bundle::STUDIO_CORS_HEADER: the sandboxed frame reads its own files cross-origin.
+      if (csp === STUDIO_CSP) headers["Access-Control-Allow-Origin"] = "*";
+      res.writeHead(status, headers);
       res.end(body);
     };
     if (url.pathname === "/harness.html") return send(200, MIME[".html"], PARENT_HTML, PARENT_CSP);
@@ -265,8 +270,8 @@ class Cdp {
   }
 }
 
-async function evaluate(cdp, session, expression) {
-  const res = await cdp.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, session);
+async function evaluate(cdp, session, expression, contextId) {
+  const res = await cdp.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true, ...(contextId ? { contextId } : {}) }, session);
   if (res.exceptionDetails) throw new Error(`page error: ${res.exceptionDetails.exception?.description ?? res.exceptionDetails.text}`);
   return res.result.value;
 }
@@ -316,9 +321,20 @@ async function key(cdp, session, name, code, vk, modifiers = 0) {
   await cdp.send("Input.dispatchKeyEvent", { ...base, type: "keyUp" }, session);
 }
 
-const rectOf = (selector) =>
-  `(() => { const r = document.getElementById('studio').contentDocument.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();
-    const f = document.getElementById('studio').getBoundingClientRect(); return { x: f.left + r.left, y: f.top + r.top, w: r.width, h: r.height }; })()`;
+/** Expression run inside the editor frame: the element's rectangle in the frame's own viewport. */
+const frameRectExpr = (selector) =>
+  `(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; })()`;
+
+/** Isolation probes run in the editor frame's main world (what a compromised editor could try). */
+const ISOLATION_PROBE = `(() => {
+  const out = {};
+  const attempt = (name, fn) => { try { out[name] = fn(); } catch (e) { out[name] = e.name; } };
+  attempt("parentDocument", () => { void window.parent.document.title; return "reachable"; });
+  attempt("parentTauri", () => { void window.parent.__TAURI_INTERNALS__; return "reachable"; });
+  attempt("topLocation", () => { void window.top.location.href; return "reachable"; });
+  attempt("origin", () => self.origin);
+  return out;
+})()`;
 
 export async function runHarness({ log = console.log } = {}) {
   if (!fs.existsSync(path.join(BUNDLE, "index.html"))) {
@@ -337,14 +353,24 @@ export async function runHarness({ log = console.log } = {}) {
     const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
     const s = sessionId;
     const requests = [];
+    const mainWorlds = new Map();
+    const frameSessions = [];
     cdp.onEvent((msg) => {
+      if (msg.method === "Target.attachedToTarget" && msg.sessionId === s && msg.params.targetInfo.type === "iframe") {
+        frameSessions.push(msg.params.sessionId);
+      }
       if (msg.sessionId !== s) return;
+      if (msg.method === "Runtime.executionContextCreated" && msg.params.context.auxData?.isDefault) {
+        mainWorlds.set(msg.params.context.auxData.frameId, msg.params.context.id);
+      }
       if (msg.method === "Runtime.exceptionThrown") problems.push(`exception: ${msg.params.exceptionDetails.exception?.description ?? msg.params.exceptionDetails.text}`);
       if (msg.method === "Log.entryAdded" && /Content Security Policy|Refused to/.test(msg.params.entry.text)) problems.push(`csp: ${msg.params.entry.text}`);
       if (msg.method === "Network.requestWillBeSent") requests.push(msg.params.request.url);
     });
     for (const domain of ["Page", "Runtime", "Log", "Network"]) await cdp.send(`${domain}.enable`, {}, s);
     await cdp.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false }, s);
+    // An opaque-origin frame may live in its own process (out-of-process iframe): attach to it.
+    await cdp.send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true }, s);
 
     const origin = `http://127.0.0.1:${server.address().port}`;
     await cdp.send("Page.navigate", { url: `${origin}/harness.html` }, s);
@@ -356,13 +382,34 @@ export async function runHarness({ log = console.log } = {}) {
     if (!connected.includes("blank-document-v1")) problems.push("capability blank-document-v1 missing");
     await waitFor(() => evaluate(cdp, s, "hwp.call('ready')"), "studio ready", 60000);
 
+    // The editor frame has an opaque origin: its DOM is only reachable through the frame's own
+    // execution context (never `contentDocument`), and from inside it the parent is out of reach.
+    const { frameTree } = await cdp.send("Page.getFrameTree", {}, s);
+    const frameId = frameTree.childFrames?.[0]?.frame.id;
+    const inFrame = async (expression) => {
+      if (frameSessions.length > 0) return evaluate(cdp, frameSessions[0], expression);
+      return evaluate(cdp, s, expression, mainWorlds.get(frameId));
+    };
+    await waitFor(() => frameSessions.length > 0 || mainWorlds.has(frameId), "editor frame context");
+    const probe = await inFrame(ISOLATION_PROBE);
+    log(`isolation probe: ${JSON.stringify(probe)}`);
+    if (probe.origin !== "null") problems.push(`the editor frame must have an opaque origin, got ${probe.origin}`);
+    for (const name of ["parentDocument", "parentTauri", "topLocation"]) {
+      if (probe[name] !== "SecurityError") problems.push(`${name} must be blocked for the editor frame, got ${probe[name]}`);
+    }
+    const frameBox = () => evaluate(cdp, s, "(() => { const r = document.getElementById('studio').getBoundingClientRect(); return { x: r.left, y: r.top }; })()");
+    const rectOf = async (selector) => {
+      const [box, r] = [await frameBox(), await inFrame(frameRectExpr(selector))];
+      return { x: box.x + r.x, y: box.y + r.y, w: r.w, h: r.h };
+    };
+
     const created = await evaluate(cdp, s, "hwp.call('createBlankDocument')");
     log(`blank document created, pages: ${created.pageCount}`);
-    await waitFor(() => evaluate(cdp, s, "document.getElementById('studio').contentDocument.querySelectorAll('canvas').length > 0"), "page canvas");
+    await waitFor(() => inFrame("document.querySelectorAll('canvas').length > 0"), "page canvas");
     await sleep(800);
 
     // Real input: click into the first page, type Korean text.
-    const page = await evaluate(cdp, s, rectOf("#scroll-container canvas"));
+    const page = await rectOf("#scroll-container canvas");
     await click(cdp, s, page.x + page.w / 2, page.y + 160);
     await sleep(300);
     await cdp.send("Input.insertText", { text: TYPED_TEXT }, s);
@@ -374,7 +421,7 @@ export async function runHarness({ log = console.log } = {}) {
     await sleep(300);
 
     // Font size 20 through the toolbar input (select the field, type, Enter).
-    const input = await evaluate(cdp, s, rectOf("#font-size"));
+    const input = await rectOf("#font-size");
     await click(cdp, s, input.x + input.w / 2, input.y + input.h / 2, 3);
     await cdp.send("Input.insertText", { text: String(BIG_PT) }, s);
     await key(cdp, s, "Enter", "Enter", 13);
@@ -402,10 +449,8 @@ export async function runHarness({ log = console.log } = {}) {
       problems.push("character shapes differ after reloading the exported bytes in the editor");
     }
 
-    const loadedFonts = await evaluate(
-      cdp,
-      s,
-      "[...new Set([...document.getElementById('studio').contentDocument.fonts].filter((f) => f.status === 'loaded').map((f) => f.family.replaceAll(String.fromCharCode(34), '')))]",
+    const loadedFonts = await inFrame(
+      "[...new Set([...document.fonts].filter((f) => f.status === 'loaded').map((f) => f.family.replaceAll(String.fromCharCode(34), '')))]",
     );
     log(`bundled fonts loaded: ${loadedFonts.join(", ") || "(none)"}`);
     if (loadedFonts.length === 0) problems.push("no bundled font was loaded through the FontFace API");

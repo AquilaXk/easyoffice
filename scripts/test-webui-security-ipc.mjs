@@ -4,6 +4,7 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createWebUiDom, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { switchModule, studioItem } from "./test-support/modules.mjs";
+import { loadUiModule } from "./test-support/load-ui-module.mjs";
 
 const VECTORS_PATH = fileURLToPath(
   new URL("../fixtures/pii-scrub-vectors.json", import.meta.url)
@@ -353,4 +354,50 @@ test("shared PII vectors in fixtures/pii-scrub-vectors.json match JS sheet-utils
   );
   assert.equal(metaRes.scrubbedText, "문의 010-****-****");
   assert.deepEqual(metaRes.strippedMetadataFields, ["Author", "Company"]);
+});
+
+// ---- HWP editor frame isolation (#233, PD-083) ------------------------------------------------
+// Tauri decides IPC access per window/webview and per origin (local or remote), never per frame, so
+// an editor frame that shares the shell's origin inherits every command the window may call. The
+// frame therefore gets an opaque origin; these checks pin the pieces that keep it that way.
+
+const ROOT = new URL("../", import.meta.url);
+const readText = (rel) => fs.readFileSync(new URL(rel, ROOT), "utf8");
+
+test("editor frame: the sandbox grants scripts and modals only, never the shell's origin", () => {
+  const env = {};
+  loadUiModule(new URL("crates/easyoffice-app/ui/hwp-host.js", ROOT), env);
+  const { FRAME_SANDBOX } = env.__EASYOFFICE_HWP_HOST_CONSTANTS__;
+  assert.deepEqual(FRAME_SANDBOX.split(" "), ["allow-scripts", "allow-modals"]);
+  for (const forbidden of ["allow-same-origin", "allow-top-navigation", "allow-popups", "allow-forms", "allow-downloads"]) {
+    assert.ok(!FRAME_SANDBOX.includes(forbidden), forbidden);
+  }
+});
+
+test("editor frame: no code in the shell UI reaches into the frame or hands it Tauri objects", () => {
+  const uiDir = new URL("crates/easyoffice-app/ui/", ROOT);
+  for (const name of fs.readdirSync(uiDir).filter((n) => n.endsWith(".js") || n.endsWith(".html"))) {
+    const source = fs.readFileSync(new URL(name, uiDir), "utf8");
+    assert.doesNotMatch(source, /contentDocument|contentWindow\.(?!postMessage)/, `${name} reads the editor frame`);
+  }
+  const bridge = readText("crates/easyoffice-app/ui/desktop-bridge.js");
+  assert.doesNotMatch(bridge, /allow-same-origin/);
+});
+
+test("editor frame: the window capability is local-only, global Tauri stays off and the editor gets a strict CSP", () => {
+  const capability = JSON.parse(readText("crates/easyoffice-desktop/capabilities/main-window.json"));
+  assert.equal(capability.local, true);
+  assert.equal(capability.remote, undefined, "no remote origin may call commands");
+  assert.deepEqual(capability.windows, ["main", "doc-*"]);
+  assert.equal(capability.webviews, undefined);
+  const conf = JSON.parse(readText("crates/easyoffice-desktop/tauri.conf.json"));
+  assert.equal(conf.app.withGlobalTauri, false);
+  assert.equal(conf.app.security.csp["frame-src"], "'self'");
+  // The editor document is answered with the --serve policy (no ipc: endpoints) by the app protocol hook.
+  const windows = readText("crates/easyoffice-desktop/src/window_commands.rs");
+  assert.match(windows, /\.on_web_resource_request\([^)]*\|request, response\|/);
+  assert.match(windows, /studio_frame::harden_studio_response\(&request, response\)/);
+  const studioCsp = readText("crates/easyoffice-app/src/hwp_bundle.rs").match(/STUDIO_CSP: &str = "([^"]+)"/)[1];
+  assert.match(studioCsp, /^default-src 'self';/);
+  assert.doesNotMatch(studioCsp, /connect-src|ipc|'unsafe-/);
 });

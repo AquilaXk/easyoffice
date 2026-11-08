@@ -150,7 +150,7 @@ pub fn is_allowed_origin(origin: &str, port: u16) -> bool {
 const MAIN_CSP: &str = "default-src 'self'";
 
 fn write_http_response(stream: &mut TcpStream, status: &str, content_type: &str, body: &str) {
-    write_http_bytes(stream, status, content_type, MAIN_CSP, body.as_bytes());
+    write_http_bytes(stream, status, content_type, MAIN_CSP, "", body.as_bytes());
 }
 
 fn write_http_bytes(
@@ -158,10 +158,11 @@ fn write_http_bytes(
     status: &str,
     content_type: &str,
     csp: &str,
+    extra_headers: &str,
     body: &[u8],
 ) {
     let head = format!(
-        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nContent-Security-Policy: {csp}\r\nX-Content-Type-Options: nosniff\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nContent-Security-Policy: {csp}\r\nX-Content-Type-Options: nosniff\r\nCache-Control: no-store\r\n{extra_headers}Connection: close\r\n\r\n",
         body.len()
     );
     let _ = stream.write_all(head.as_bytes());
@@ -210,6 +211,7 @@ fn write_bundle_file(stream: &mut TcpStream, request_path: &str) {
             "200 OK",
             file.content_type,
             hwp_bundle::STUDIO_CSP,
+            hwp_bundle::STUDIO_CORS_HEADER,
             &file.bytes,
         ),
         None => write_http_bytes(
@@ -217,6 +219,7 @@ fn write_bundle_file(stream: &mut TcpStream, request_path: &str) {
             "404 Not Found",
             "application/json; charset=utf-8",
             hwp_bundle::STUDIO_CSP,
+            hwp_bundle::STUDIO_CORS_HEADER,
             b"{\"status\":\"not_found\"}",
         ),
     }

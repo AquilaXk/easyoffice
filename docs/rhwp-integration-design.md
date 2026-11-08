@@ -12,7 +12,7 @@
 ## 0. 요약 (결론 먼저)
 
 1. **rhwp는 HWP/HWPX/HWP3/HML 전용**이다. DOCX·ODT·DOC 문서 본문을 읽거나 쓰는 코드가 없다(`src/`에서 `wordprocessingml`·`.docx`·`odt` 0건). `crates/rhwp-ooxml-chart`는 HWPX 안에 든 차트 XML만 처리한다. 따라서 **HWP 모듈만 rhwp로 바꾸고, DOC 모듈은 EasyOffice 엔진을 유지**하되 문자 런(run) 모델을 보강한다(§2.6, 작업 항목 7).
-2. **임베딩 방식: 같은 출처(same-origin) `<iframe>` 격리 + MessagePort RPC**를 권장한다. rhwp-studio에 이미 있는 임베드 프로토콜(`rhwp-studio/src/embed/{protocol,runtime,rpc-router}.ts`: `loadFile`, `exportHwp`, `exportHwpx`, `notifySaved`, `getDocumentState`, `automation.execute`, `chrome.set`, `document-change-events-v1`)을 그대로 쓴다. iframe 안의 편집기에는 **Tauri IPC 권한을 주지 않는다**. 파일 I/O는 모두 기존 부모 셸(`desktop-bridge.js` → `save_document_file`, #111 `openDocumentFromBytes`)이 맡는다.
+2. **임베딩 방식: 샌드박스 `<iframe>` 격리 + MessagePort RPC**를 권장한다(#233 개정: 처음의 같은 출처 iframe은 셸의 Tauri IPC를 물려받는 것이 실측돼 `allow-same-origin` 없는 불투명 출처로 바꿨다. PD-083 5항). rhwp-studio에 이미 있는 임베드 프로토콜(`rhwp-studio/src/embed/{protocol,runtime,rpc-router}.ts`: `loadFile`, `exportHwp`, `exportHwpx`, `notifySaved`, `getDocumentState`, `automation.execute`, `chrome.set`, `document-change-events-v1`)을 그대로 쓴다. iframe 안의 편집기에는 **Tauri IPC 권한을 주지 않는다**. 파일 I/O는 모두 기존 부모 셸(`desktop-bridge.js` → `save_document_file`, #111 `openDocumentFromBytes`)이 맡는다.
 3. **참조 앱에서 가져올 것은 "패턴"이다**: 서브모듈 고정·검증(`config/rhwp-upstream.json`, `scripts/verify-rhwp-upstream.mjs`), Vite alias 오버레이(`apps/studio-host/vite.config.ts`, `참조 앱-overrides.ts`), 미리 빌드한 WASM 벤더링과 출처 증명(`vendor/rhwp-core/PROVENANCE.json`), 단계식 원자적 저장(`state.rs` `atomic_write`, `commit_staged_hwp_save`), 단일 인스턴스와 파일 열기 이벤트(`pending_open.rs`), 글꼴 카탈로그 정책(`assets/fonts/FONTS.md`, `font-catalog.ts`).
    - 참조 앱의 권한 모델(`fs:allow-write`·`fs:allow-remove`를 WebView에 주고 경로를 JS가 다루는 방식)은 EasyOffice PD-074의 fail-closed 경계와 맞지 않으므로 **가져오지 않는다**.
 4. **빌드: rhwp는 EasyOffice Cargo 워크스페이스에 넣지 않는다**(1단계~5단계).
@@ -335,7 +335,7 @@ Tauri CSP는 앱 전체에 하나만 적용된다(경로별로 나눌 수 없음
 ### 4.3 권한(capabilities)과 fail-closed 유지
 
 - `capabilities/main-window.json`은 **변경하지 않는다**. 대상 창은 `main`, 권한은 `allow-ipc-dispatch`·`allow-save-document-file`뿐이다.
-  - iframe은 IPC를 직접 호출하지 않는다. Tauri v2가 하위 프레임에 IPC를 주입하는지는 플랫폼에 따라 다르다 `[추정]`. 따라서 **설계상 의존하지 않고**, 오버레이 번들에 `__TAURI_INTERNALS__` 참조가 없음을 정적 검사로 고정한다.
+  - iframe은 IPC를 직접 호출하지 않는다. 처음에는 "Tauri v2가 하위 프레임에 IPC를 주입하는지는 플랫폼에 따라 다르다 `[추정]`"로 두고 번들의 `__TAURI_INTERNALS__` 참조 부재만 정적 검사로 고정했다. #233 실측 결과 같은 출처 iframe은 `window.parent`(전 OS)와 Windows의 하위 프레임 주입 사본으로 창의 앱 명령에 닿았다. 그래서 iframe을 불투명 출처로 만들었고(`Origin: null` 요청은 Tauri가 거부), 편집기 문서 CSP에서 `ipc:`를 뺐다. 근거와 한계는 PD-083 5·6항.
 - 5단계(파일 연결·단일 인스턴스)에서 명령이 늘어난다. 예: `open_document_file`은 Rust 대화상자로 경로를 고르고 바이트만 반환하며, 기동 인자 큐를 비우는 명령이 추가된다. 그때도 참조 앱처럼 `fs:*` 권한을 WebView에 주지 않고 앱 명령 + `AppManifest` 기본 거부 + 허용 목록 갱신 방식을 따른다.
 - 오버레이에서 제거하는 업스트림 기능:
   1. `?url=` 임의 URL fetch(`main.ts:1874-1902`) — 오버레이는 자체 `main.ts`를 쓰므로 진입점 자체가 없다

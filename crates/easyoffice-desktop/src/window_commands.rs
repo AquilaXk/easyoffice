@@ -165,7 +165,10 @@ fn build_window(
             .title(title)
             .inner_size(size.0, size.1)
             .min_inner_size(min.0, min.1)
-            .on_navigation(crate::is_app_origin);
+            .on_navigation(crate::is_app_origin)
+            .on_web_resource_request(|request, response| {
+                crate::studio_frame::harden_studio_response(&request, response);
+            });
     builder = match (remembered_origin(app, remembered), monitor) {
         (Some((x, y)), _) => builder.position(x, y),
         (None, Some(m)) => {
