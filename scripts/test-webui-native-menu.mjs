@@ -65,6 +65,12 @@ const EXPECTED_EDITOR_COMMANDS = {
   "table:cell-select": "table:cell-selection-enter",
   "table:merge": "table:cell-merge",
   "table:cell-split": "table:cell-split",
+  // The macOS edit menu (`menu.rs`: Undo / Redo / Cut / Copy are menu events; Paste is the system item): the editor's
+  // own commands, so the editor's undo stack and selection are reached.
+  "edit:undo": "edit:undo",
+  "edit:redo": "edit:redo",
+  "edit:cut": "edit:cut",
+  "edit:copy": "edit:copy",
 };
 
 test("the native menu ids that reach the Hangul editor map to the reference app's editor command ids", () => {
@@ -225,4 +231,42 @@ test("the shell installs the menu on every OS and grants the page no event permi
   const menu = read("crates/easyoffice-desktop/src/native_menu.rs");
   assert.match(menu, /window\.eval\(&script\)/, "items are delivered by evaluating a fixed script in the focused window");
   assert.ok(!/emit_to|\.emit\(/.test(menu), "no event is emitted to the page");
+});
+
+// The macOS edit menu (reference app `menu.rs:34-46`): undo, redo, cut and copy are menu items with ⌘ keys that run
+// in the page; paste stays a system item. A bound key never reaches the page, so a plain text field gets the browser's
+// editing command, and the Hangul editor gets its own command.
+test("undo, redo, cut and copy run the browser's editing command in a text field and the page's action elsewhere", async () => {
+  const { document } = await createWorkspaceHarness();
+  await flushAsyncTurns(10);
+  const page = document.defaultView;
+  const ran = [];
+  document.execCommand = (name) => ran.push(name);
+  const ids = ["edit:undo", "edit:redo", "edit:cut", "edit:copy"];
+  const field = document.getElementById("cmd-search-input");
+  field.focus();
+  assert.equal(document.activeElement, field);
+  for (const id of ids) assert.equal(page.__EASYOFFICE_NATIVE_MENU__(id), true, id);
+  assert.deepEqual(ran, ["undo", "redo", "cut", "copy"]);
+  field.blur();
+  ran.length = 0;
+  for (const id of ids) assert.equal(page.__EASYOFFICE_NATIVE_MENU__(id), true, id);
+  assert.deepEqual(ran, [], "no text field has the focus: the page's own undo and clipboard actions run");
+  assert.equal(chromeTable().TEXT_FIELD_EDIT_COMMANDS["edit:paste"], undefined, "paste is the system item");
+});
+
+test("macOS binds the reference keys to the four edit items and ⌘Q to the custom quit item", () => {
+  const menu = read("crates/easyoffice-desktop/src/native_menu.rs");
+  const keys = menu.slice(menu.indexOf("const MACOS_EDIT_KEYS"), menu.indexOf("];", menu.indexOf("const MACOS_EDIT_KEYS")));
+  assert.deepEqual(
+    [...keys.matchAll(/\("([a-z:]+)", "([^"]+)"\)/g)].map((m) => [m[1], m[2]]),
+    [["edit:undo", "CmdOrCtrl+Z"], ["edit:redo", "CmdOrCtrl+Shift+Z"], ["edit:cut", "CmdOrCtrl+X"], ["edit:copy", "CmdOrCtrl+C"]],
+  );
+  assert.match(menu, /pub const QUIT_ID: &str = "app:quit";/);
+  assert.match(menu, /const QUIT_ACCELERATOR: &str = "CmdOrCtrl\+Q";/);
+  assert.match(menu, /"EasyOffice 끝내기"/);
+  const appMenu = menu.slice(menu.indexOf("fn app_menu"), menu.indexOf("fn file_menu"));
+  assert.ok(appMenu.includes(".item(&quit_item(app)?)") && !appMenu.includes(".quit()"), "no system quit item");
+  const chrome = read("crates/easyoffice-app/ui/shell-chrome.js");
+  assert.ok(!chrome.includes("app:quit"), "the page cannot quit the app");
 });

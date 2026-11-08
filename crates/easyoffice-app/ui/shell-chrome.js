@@ -124,6 +124,21 @@
     "table:cell-select": "table:cell-selection-enter",
     "table:merge": "table:cell-merge",
     "table:cell-split": "table:cell-split",
+    // The edit menu (macOS binds ⌘Z, ⇧⌘Z, ⌘X, ⌘C to these four, as the reference app does): the editor's
+    // own undo stack and selection, which the system items cannot reach inside the editor's frame.
+    "edit:undo": "edit:undo",
+    "edit:redo": "edit:redo",
+    "edit:cut": "edit:cut",
+    "edit:copy": "edit:copy",
+  });
+
+  // The same four items while a plain text field of the page has the focus (a bound ⌘ key never reaches the
+  // field): the browser's own editing command for that field.
+  const TEXT_FIELD_EDIT_COMMANDS = Object.freeze({
+    "edit:undo": "undo",
+    "edit:redo": "redo",
+    "edit:cut": "cut",
+    "edit:copy": "copy",
   });
 
   // Actions that click the page's own (hidden) menu item, so a native item does exactly what the page
@@ -325,5 +340,5 @@
   }
 
   host.__EASYOFFICE_CREATE_SHELL_CHROME__ = createShellChrome;
-  host.__EASYOFFICE_NATIVE_MENU_TABLE__ = { NATIVE_MENU_ACTIONS, EMBED_EDITOR_COMMANDS, runNativeMenuAction, pageMenuActions };
+  host.__EASYOFFICE_NATIVE_MENU_TABLE__ = { NATIVE_MENU_ACTIONS, EMBED_EDITOR_COMMANDS, TEXT_FIELD_EDIT_COMMANDS, runNativeMenuAction, pageMenuActions };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

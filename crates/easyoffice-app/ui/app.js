@@ -800,7 +800,12 @@
   function runNativeMenu(id) {
     const modal = document.getElementById("cmd-palette-modal");
     const input = document.getElementById("cmd-search-input");
-    const { EMBED_EDITOR_COMMANDS } = host.__EASYOFFICE_NATIVE_MENU_TABLE__;
+    const { EMBED_EDITOR_COMMANDS, TEXT_FIELD_EDIT_COMMANDS } = host.__EASYOFFICE_NATIVE_MENU_TABLE__;
+    const field = document.activeElement;
+    if (Object.hasOwn(TEXT_FIELD_EDIT_COMMANDS, id) && (field?.tagName === "INPUT" || field?.tagName === "TEXTAREA")) {
+      document.execCommand(TEXT_FIELD_EDIT_COMMANDS[id]);
+      return true;
+    }
     // Inside the Hangul editor the zoom and cell items are the editor's own commands (a command it
     // cannot run right now, such as merging without selected cells, is refused by the editor and ignored).
     const editorCommand = (menuId) => {
