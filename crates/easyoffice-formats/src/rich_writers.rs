@@ -16,6 +16,7 @@ use crate::rich_image_writers::{
     docx_content_type_defaults, docx_image_paragraph, docx_image_relationship, emu_to_points,
     odt_image_paragraph, MediaParts, DOCX_PICTURE_NAMESPACES, ODT_PICTURE_NAMESPACES,
 };
+use crate::rich_rtf_table::rtf_table_lines;
 use crate::rich_run_writers::{
     docx_run_properties, has_extra_run_format, odt_font_face_decls, odt_text_key,
     odt_text_key_is_plain, odt_text_style_xml, OdtTextKey, RtfRunTables,
@@ -621,16 +622,7 @@ pub(crate) fn encode_rtf_rich(doc: &RichDocument) -> String {
                 lines.push(rtf_paragraph_line(&stand_in, &tables));
             }
             RichBlock::Table(table) => {
-                for row in &table.rows {
-                    let cells = row
-                        .iter()
-                        .map(|c| format!("\\cellx {}\\cell", RtfCodec::escape_rtf_text(c)))
-                        .collect::<Vec<_>>()
-                        .join(" ");
-                    lines.push(format!(
-                        "{{\\trowd{{\\*\\tblidx {table_idx}}} {cells}\\row}}"
-                    ));
-                }
+                lines.extend(rtf_table_lines(table, table_idx));
                 table_idx += 1;
             }
         }

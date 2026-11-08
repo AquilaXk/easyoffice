@@ -6,6 +6,8 @@
 use std::collections::HashMap;
 
 use crate::rich_document::normalize_hex_color;
+use crate::rich_rtf_table::{merges_from_marks, CellMarks, HMark, VMark};
+use crate::rich_table::RichTable;
 use crate::rich_writers::heading_half_points;
 use crate::rich_xml::{push_run, CharFmt};
 use crate::{EasyOfficeError, RichAlignment, RichBlock, RichDocument, RichParagraph, RichRun};
@@ -82,7 +84,10 @@ struct Reader {
     cell: String,
     row: Vec<String>,
     table_idx: usize,
-    table: Option<(usize, Vec<Vec<String>>)>,
+    table: Option<(usize, Vec<Vec<String>>, Vec<Vec<CellMarks>>)>,
+    pending_marks: CellMarks,
+    row_marks: Vec<CellMarks>,
+    merges_dropped: usize,
     high_surrogate: Option<u16>,
 }
 
@@ -109,6 +114,9 @@ impl Reader {
             row: Vec::new(),
             table_idx: 0,
             table: None,
+            pending_marks: CellMarks::default(),
+            row_marks: Vec::new(),
+            merges_dropped: 0,
             high_surrogate: None,
         }
     }
@@ -186,9 +194,11 @@ impl Reader {
     }
 
     fn flush_table(&mut self) {
-        if let Some((_, rows)) = self.table.take() {
+        if let Some((_, rows, marks)) = self.table.take() {
             if !rows.is_empty() {
-                self.blocks.push(RichBlock::Table(rows.into()));
+                let (table, dropped) = RichTable::with_merges(rows, merges_from_marks(&marks));
+                self.merges_dropped += dropped;
+                self.blocks.push(RichBlock::Table(table));
             }
         }
     }
@@ -229,18 +239,22 @@ impl Reader {
 
     fn end_row(&mut self) {
         let row = std::mem::take(&mut self.row);
+        let marks = std::mem::take(&mut self.row_marks);
         self.in_row = false;
         self.cell.clear();
         if self
             .table
             .as_ref()
-            .is_some_and(|(idx, _)| *idx != self.table_idx)
+            .is_some_and(|(idx, _, _)| *idx != self.table_idx)
         {
             self.flush_table();
         }
         match self.table.as_mut() {
-            Some((_, rows)) => rows.push(row),
-            None => self.table = Some((self.table_idx, vec![row])),
+            Some((_, rows, all_marks)) => {
+                rows.push(row);
+                all_marks.push(marks);
+            }
+            None => self.table = Some((self.table_idx, vec![row], vec![marks])),
         }
     }
 
@@ -323,7 +337,17 @@ impl Reader {
             "trowd" => {
                 self.in_row = true;
                 self.row.clear();
+                self.row_marks.clear();
+                self.pending_marks = CellMarks::default();
                 self.cell.clear();
+            }
+            "clmgf" if self.in_row => self.pending_marks.h = HMark::First,
+            "clmrg" if self.in_row => self.pending_marks.h = HMark::Merged,
+            "clvmgf" if self.in_row => self.pending_marks.v = VMark::First,
+            "clvmrg" if self.in_row => self.pending_marks.v = VMark::Merged,
+            "cellx" if self.in_row => {
+                let marks = std::mem::take(&mut self.pending_marks);
+                self.row_marks.push(marks);
             }
             "cell" if self.in_row => {
                 let cell = std::mem::take(&mut self.cell);
@@ -470,12 +494,19 @@ pub(crate) fn read_rtf(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Easy
     } else {
         reader.title.trim().to_string()
     };
+    let mut warnings = vec!["표 셀 서식·그림·머리말은 가져오지 않았습니다.".to_string()];
+    if reader.merges_dropped > 0 {
+        warnings.push(format!(
+            "표의 병합 {}곳은 범위를 벗어나거나 겹쳐 가져오지 않았습니다.",
+            reader.merges_dropped
+        ));
+    }
     Ok((
         RichDocument {
             title,
             blocks: reader.blocks,
             official_agency: None,
         },
-        vec!["표 셀 서식·그림·머리말은 가져오지 않았습니다.".to_string()],
+        warnings,
     ))
 }

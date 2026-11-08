@@ -261,3 +261,41 @@ fn pages_without_a_merge_map_has_no_regions() {
     let (table, _) = decoded_table(&bytes, "p.pages");
     assert!(table.merges.is_empty());
 }
+
+#[test]
+fn rtf_writes_cell_edges_and_merge_marks_and_reads_them_back() {
+    let table = sample_table();
+    let bytes =
+        UniversalFormatConverter::encode_rich(&doc_of(table.clone()), DocumentFormat::Rtf, None)
+            .unwrap();
+    let rtf = String::from_utf8(bytes.clone()).unwrap();
+    assert!(rtf.contains("\\clmgf\\cellx3120\\clmrg\\cellx6240\\cellx9360 "));
+    assert!(rtf.contains("\\cellx6240\\clvmgf\\cellx9360 "));
+    assert!(rtf.contains("\\clvmrg\\cellx9360"));
+    assert_eq!(rtf.matches("\\row}").count(), 3);
+    let (back, warnings) = decoded_table(&bytes, "a.rtf");
+    assert_eq!(back, table);
+    assert!(!warnings.iter().any(|w| w.contains("병합")), "{warnings:?}");
+}
+
+#[test]
+fn rtf_table_without_merges_keeps_cells_and_writes_no_marks() {
+    let table = RichTable::new(text_rows(&[&["a", "b"], &["c", "d"]]));
+    let bytes =
+        UniversalFormatConverter::encode_rich(&doc_of(table.clone()), DocumentFormat::Rtf, None)
+            .unwrap();
+    let rtf = String::from_utf8(bytes.clone()).unwrap();
+    assert!(!rtf.contains("\\clm") && !rtf.contains("\\clvm"));
+    assert_eq!(decoded_table(&bytes, "a.rtf").0, table);
+}
+
+#[test]
+fn rtf_hostile_merge_marks_are_dropped_with_a_warning() {
+    let rtf = "{\\rtf1\\ansi\n\
+        {\\trowd{\\*\\tblidx 0} \\clmgf\\cellx1000\\clmrg\\cellx2000\\clmrg\\cellx3000 a\\cell b\\cell \\row}\n\
+        {\\trowd{\\*\\tblidx 0} \\clvmrg\\cellx1000\\cellx2000 c\\cell d\\cell \\row}\n}";
+    let (table, warnings) = decoded_table(rtf.as_bytes(), "a.rtf");
+    assert_eq!(table.rows.len(), 2);
+    assert!(table.merges.is_empty());
+    assert!(warnings.iter().any(|w| w.contains("병합")), "{warnings:?}");
+}

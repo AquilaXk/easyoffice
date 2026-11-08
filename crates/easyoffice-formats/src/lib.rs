@@ -39,6 +39,7 @@ mod rich_read_pages_image;
 mod rich_read_rtf;
 mod rich_read_text;
 pub mod rich_readers;
+mod rich_rtf_table;
 mod rich_run_writers;
 mod rich_table;
 mod rich_table_writers;
