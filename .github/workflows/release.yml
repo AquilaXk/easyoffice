@@ -41,7 +41,7 @@ jobs:
         run: node scripts/check-repo-hygiene.mjs
 
       - name: Run desktop bundle contract and WebUI regression suite
-        run: node --test scripts/test-desktop-file-associations.mjs scripts/test-webui-behavior.mjs scripts/test-webui-ux-ergonomics.mjs scripts/test-webui-round13-parity.mjs scripts/test-webui-sheet-atomicity.mjs scripts/test-webui-security-ipc.mjs scripts/test-webui-session-context.mjs scripts/test-webui-save-fidelity.mjs scripts/test-webui-desktop-bridge.mjs scripts/test-webui-hwp-host.mjs scripts/test-webui-hwp-session.mjs
+        run: node --test scripts/test-desktop-file-associations.mjs "scripts/test-webui-*.mjs"
 
       # The editor bundle (PD-081, PD-083) is generated, not tracked. The desktop shell embeds it and
       # fails to build without it, so build it before any Rust step.
@@ -145,7 +145,7 @@ jobs:
         run: node scripts/check-repo-hygiene.mjs
 
       - name: Run WebUI behavioral and security regression suite
-        run: node --test scripts/test-webui-behavior.mjs scripts/test-webui-ux-ergonomics.mjs scripts/test-webui-round13-parity.mjs scripts/test-webui-sheet-atomicity.mjs scripts/test-webui-security-ipc.mjs scripts/test-webui-session-context.mjs scripts/test-webui-save-fidelity.mjs scripts/test-webui-desktop-bridge.mjs scripts/test-webui-hwp-host.mjs scripts/test-webui-hwp-session.mjs
+        run: node --test "scripts/test-webui-*.mjs"
 
       # The editor bundle (PD-081, PD-083) is generated, not tracked. The desktop shell embeds it and
       # fails to build without it, so build it before any Rust step.
