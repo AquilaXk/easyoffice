@@ -22,7 +22,8 @@ export const PROHIBITED_CONTENT_B64 = [
   "Z29sYmlu",             // reference app owner
   "XGJjb20uaGFuY29t", // external company reverse-domain identifier 1 (com.<company>)
   "XGJjb20uaGFhbnNvZnQ=", // external company reverse-domain identifier 2
-  "7ZWc6riA6rO87Lu07ZOo7YSw", // external company name (ko); only the required spec notice may carry it, see NOTICE_EXCEPTIONS
+  "7ZWc7Lu0", // external company short name (ko), also with a particle attached; no exception
+  "7ZWc6riA6rO87Lu07ZOo7YSw", // external company name (ko); only the required spec notice may carry it, see NOTICE_EXCEPTIONS (keep last)
 ];
 
 export const PROHIBITED_PATTERNS = PROHIBITED_CONTENT_B64.map(

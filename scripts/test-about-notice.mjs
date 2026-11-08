@@ -54,3 +54,12 @@ test("a reverse-domain identifier of another company is rejected, this app's own
   assert.equal(prohibitedPatternsIn("crates/x.json", '"com.aquilaxk.easyoffice.hwp"').length, 0);
   assert.equal(prohibitedPatternsIn("crates/x.json", "application/vnd.hancom.hwpx").length, 0);
 });
+
+test("the short company name is rejected with a particle attached, in every file and in commit messages", () => {
+  const shortName = Buffer.from("7ZWc7Lu0", "base64").toString("utf8");
+  for (const text of [shortName, `${shortName}의 소식`, `이${shortName}이`]) {
+    assert.ok(prohibitedPatternsIn("docs/other.md", text).length > 0, text);
+    assert.ok(prohibitedPatternsIn(INDEX, text).length > 0, `no notice exception: ${text}`);
+    assert.ok(PROHIBITED_PATTERNS.some((pattern) => pattern.test(text)), text);
+  }
+});

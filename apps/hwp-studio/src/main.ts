@@ -849,7 +849,7 @@ function setupZoomControls(): void {
     dispatcher.dispatch('view:zoom-fit-page');
   });
 
-  // 한컴 상황 선처럼 돋보기와 배율 표시 전체가 하나의 대화상자 진입점이다.
+  // 참조 앱의 상황선처럼 돋보기와 배율 표시 전체가 하나의 대화상자 진입점이다.
   document.getElementById('sb-zoom-display')!.addEventListener('click', () => {
     dispatcher.dispatch('view:zoom-dialog');
   });

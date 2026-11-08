@@ -658,7 +658,7 @@ Tauri CSP는 앱 전체에 하나만 적용된다(경로별로 나눌 수 없음
 | 글꼴: Noto Sans/Serif KR, 나눔, Pretendard, 고운, D2Coding, Spoqa Han Sans, Source Han Serif | SIL OFL 1.1 | 1) 라이선스 전문 동봉<br>2) 글꼴 단독 판매 금지<br>3) 수정(서브셋·형식 변환 포함) 시 예약 글꼴 이름(RFN) 사용 제한 → **업스트림 배포 파일을 수정 없이** 사용 |
 | Latin Modern Math | GUST Font License | 포함 시 라이선스 동봉 |
 | Cafe24 Ssurround/Supermagic, Happiness Sans(`ttfs/redistributable/`) | 각 권리자 독자 무료 라이선스 | 권장: 제외 |
-| 한컴·MS·OS 글꼴 | 독점 | **절대 번들 금지**. 업스트림도 gitignore. 사용자 PC에 있으면 OS 글꼴로만 사용 |
+| HWP 제작사·MS·OS 글꼴 | 독점 | **절대 번들 금지**. 업스트림도 gitignore. 사용자 PC에 있으면 OS 글꼴로만 사용 |
 
 ---
 
