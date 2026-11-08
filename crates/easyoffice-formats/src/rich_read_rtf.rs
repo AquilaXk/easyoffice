@@ -84,11 +84,18 @@ struct Reader {
     cell: String,
     row: Vec<String>,
     table_idx: usize,
-    table: Option<(usize, Vec<Vec<String>>, Vec<Vec<CellMarks>>)>,
+    table: Option<OpenTable>,
     pending_marks: CellMarks,
     row_marks: Vec<CellMarks>,
     merges_dropped: usize,
     high_surrogate: Option<u16>,
+}
+
+/// Rows (text and merge marks) of the table being read, numbered by `\tblidx`.
+struct OpenTable {
+    idx: usize,
+    rows: Vec<Vec<String>>,
+    marks: Vec<Vec<CellMarks>>,
 }
 
 impl Reader {
@@ -194,9 +201,10 @@ impl Reader {
     }
 
     fn flush_table(&mut self) {
-        if let Some((_, rows, marks)) = self.table.take() {
-            if !rows.is_empty() {
-                let (table, dropped) = RichTable::with_merges(rows, merges_from_marks(&marks));
+        if let Some(open) = self.table.take() {
+            if !open.rows.is_empty() {
+                let merges = merges_from_marks(&open.marks);
+                let (table, dropped) = RichTable::with_merges(open.rows, merges);
                 self.merges_dropped += dropped;
                 self.blocks.push(RichBlock::Table(table));
             }
@@ -245,16 +253,22 @@ impl Reader {
         if self
             .table
             .as_ref()
-            .is_some_and(|(idx, _, _)| *idx != self.table_idx)
+            .is_some_and(|open| open.idx != self.table_idx)
         {
             self.flush_table();
         }
         match self.table.as_mut() {
-            Some((_, rows, all_marks)) => {
-                rows.push(row);
-                all_marks.push(marks);
+            Some(open) => {
+                open.rows.push(row);
+                open.marks.push(marks);
             }
-            None => self.table = Some((self.table_idx, vec![row], vec![marks])),
+            None => {
+                self.table = Some(OpenTable {
+                    idx: self.table_idx,
+                    rows: vec![row],
+                    marks: vec![marks],
+                })
+            }
         }
     }
 
