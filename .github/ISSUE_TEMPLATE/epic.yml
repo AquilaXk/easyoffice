@@ -15,14 +15,14 @@ body:
       label: 대상 영역 (Area)
       placeholder: "예) Core Format Engines, macOS Native Editors, Lavender UI/UX, Smart Tools & Security, Release & Quality"
     validations:
-      required: true
+      required: false
   - type: textarea
     id: summary
     attributes:
       label: 목표 및 배경 (Summary)
       description: 이 영역 에픽이 달성해야 할 사용자·시스템 가치를 간결하게 적습니다.
     validations:
-      required: true
+      required: false
   - type: textarea
     id: sub_issues
     attributes:
@@ -31,7 +31,7 @@ body:
         - [ ] 백로그 항목 1
         - [ ] 백로그 항목 2
     validations:
-      required: true
+      required: false
   - type: textarea
     id: done_when
     attributes:
@@ -40,4 +40,4 @@ body:
         - [ ] 연결된 모든 필수 sub-issue가 닫히고 결정론적 검증 게이트를 통과한다.
         - [ ] 변경된 정책이 `docs/policy-decisions.md`에 기록되어 있다.
     validations:
-      required: true
+      required: false

@@ -15,14 +15,14 @@ body:
       label: 상위 에픽 및 대상 모듈 (Parent Epic & Module)
       placeholder: "예) Parent: #2 | Module: EasyOfficeCore / SheetEngine"
     validations:
-      required: true
+      required: false
   - type: textarea
     id: goal_and_background
     attributes:
       label: 목표 및 배경 (Goal & Background)
       description: 해결하려는 문제와 구현 완료 후 사용자/시스템이 얻는 결과를 적습니다.
     validations:
-      required: true
+      required: false
   - type: textarea
     id: checklist
     attributes:
@@ -32,7 +32,7 @@ body:
         - [ ] 결정론적 단위/통합 테스트 추가 및 통과 (`cargo test`, `node --test`)
         - [ ] 정책 변경 시 `docs/policy-decisions.md` 동기화
     validations:
-      required: true
+      required: false
   - type: textarea
     id: verification_and_evidence
     attributes:
@@ -41,4 +41,4 @@ body:
         - 검증 명령: `node scripts/check-repo-hygiene.mjs && cargo test --workspace --exclude easyoffice-desktop`
         - PR 증거: 테스트 출력 로그 및 UI 변경 시 화면 캡처 첨부
     validations:
-      required: true
+      required: false
