@@ -92,7 +92,7 @@
     document, env: host, desktopBridge, getActiveModule: () => activeModule,
     setFeedback: (text) => setStatusFeedback(text),
     isDirty: () => workspaceSession.isDirty(),
-    save: () => saveWorkspaceDocument(),
+    save: () => saveWorkspaceDocument({ closing: true }),
     discardStoredState: () => { workspaceSession.discardStoredState(); hwpSession.discardAutosave(); },
   });
 
@@ -237,8 +237,8 @@
     if (fb) fb.textContent = text;
   }
 
-  function saveWorkspaceDocument() {
-    return workspacePanels.saveActiveModuleDocument().then((saved) => {
+  function saveWorkspaceDocument(options) {
+    return workspacePanels.saveActiveModuleDocument(options).then((saved) => {
       if (saved !== false) { workspaceSession.markSaved(); fileOpen.markModuleSaved(); }
       return saved;
     });

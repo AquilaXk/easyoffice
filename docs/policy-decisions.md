@@ -1465,7 +1465,7 @@
   3. HWPX 내보내기는 HWP 대비 일부 속성이 달라질 수 있습니다(예: 표 바깥 여백이 0 → 283으로 기록됨, 글자·문단 모양·표 위치는 같음). 저장 시 확인 안내를 붙이고 검증을 통과한 파일만 내보냅니다.
   4. 저장 전 검증은 구문 해석 가능성과 쪽 수만 확인하며 한글 프로그램과의 조판 일치는 보장하지 않습니다.
   5. 편집기 이벤트는 모든 편집마다 포트 메시지를 보냅니다(부모가 디바운스).
-  6. 비밀번호로 연 문서를 저장할 때 저장본에 암호가 유지되는지는 이 단계에서 검증하지 않았습니다(미검증). 저장된 파일을 다시 열어 확인해야 합니다.
+  6. 비밀번호로 연 문서를 저장하면 저장본에 암호가 유지되지 않습니다(rhwp 직렬화가 암호·배포용 플래그를 지우고 편집기는 암호 문자열을 보관하지 않음). 이 단계에서는 막지 않았고, PD-120이 원본 저장 거부와 암호 없이 저장 확인으로 막습니다.
 - **Alternatives rejected**
   - `getDocumentState()` 폴링: 호출마다 전체 문서를 내보내 대형 문서에서 느려 기각(이벤트 전달로 해결).
   - 부모 쪽 WASM으로 재파싱: 앱 CSP를 넓히거나 12 MiB WASM을 이중 적재해야 해서 기각(편집기 안에서 버려지는 문서로 재파싱).
@@ -1993,3 +1993,13 @@
 - **Alternatives rejected** Windows·Linux에 빈 `Menu::new()`를 다는 것(참조 앱 그대로이나 Windows에서 빈 메뉴 줄이 자리를 차지할 수 있는지 확인할 기기가 없음), macOS에서 페이지 메뉴 줄을 숨기는 것(참조 앱이 그리므로 따름), 페이지 `파일` 메뉴나 한글 편집기 메뉴에 끝내기 항목을 넣는 것(참조 앱에 없는 UI이고 편집기는 번들 재생성도 필요), `report_menu_state`를 모든 OS에 두고 비 macOS에서 무시하는 것(쓰이지 않는 IPC).
 - **Verified by** `cargo test -p easyoffice-desktop`(앱 명령 19종·capability 일치, 모든 명령이 `ShellCaller`를 받음, 끝내기 경로가 `app_quit` 큐뿐), macOS 코드를 cfg로 뺀 상태의 `cargo clippy -p easyoffice-desktop --all-targets -- -D warnings`와 `cargo test --no-run`(비 macOS 빌드 모사), `node --test scripts/test-webui-native-menu.mjs scripts/test-webui-menu-state.mjs scripts/test-webui-windows.mjs`(모든 OS에서 메뉴 줄을 숨기지 않음, Windows·Linux 창은 메뉴 상태를 보내지 않음, `Ctrl+Q`가 `quit_app`을 부르고 페이지 메뉴에 끝내기 항목이 없음, 전달 단축키 목록).
 - **Revisit when** 실기기에서 Windows·Linux의 한글 창 메뉴 줄·`Ctrl+Q`·끝내기 항목을 확인한 뒤, 참조 앱이 Windows·Linux에 네이티브 메뉴를 넣을 때, 한글 창에 정보·테마·업데이트 항목이 필요해질 때.
+
+## 96. 암호로 연 한글 문서는 원본을 덮어쓰지 않고, 암호 없이 저장하기 전에 묻는다 (PD-120)
+
+- **Context** PD-085 트레이드오프 6이 "저장본에 암호가 유지되는지 미검증"으로 남아 있었습니다. 확인 결과 유지되지 않습니다: rhwp의 `serialize_hwp`는 암호를 받지 않으면 파일 머리의 암호·배포용 플래그와 암호 버전을 지우고(`serializer/cfb_writer.rs` `serialize_hwp_inner`) 암호를 받는 경로(`exportHwpWithPassword`)는 편집기가 암호 문자열을 보관하지 않아(`wasm-bridge.ts` `loadDocumentAtomically`) 쓸 수 없습니다. 그래서 암호 문서를 저장하면 사용자가 모르는 사이 암호 없는 파일이 원본 자리에 생겼고, 자동 저장 사본(IndexedDB)도 평문이었습니다. 참조 앱은 암호 문서의 원본 저장을 거부하고 다른 이름으로 저장할 때만 "저장한 HWP 파일에는 암호가 적용되지 않습니다. 암호 없이 저장하시겠습니까?"를 묻습니다(`tauri-bridge.ts` 191-219, 편집기가 암호로 열었는지를 `requiresPasswordForSave` 플래그로 기억).
+- **Decision (`PD-120`)** (1) 편집기는 참조 앱과 같은 플래그(`wasm.requiresPasswordForSave`, 암호로 연 경우에만 참, 다른 문서 열기·새 문서에서 거짓)를 임베드 포트로 알립니다. 새 capability `save-protection-v1`과 RPC 둘: `getSaveProtection` → `{ passwordProtected: boolean }`, `clearSaveProtection` → `{ cleared: true }`. 경로·암호 값은 포트를 건너지 않습니다. (2) 셸(`hwp-session.js`)은 저장마다 내보내기 전에 `getSaveProtection`을 묻습니다. capability가 없거나 응답이 불리언이 아니거나 호출이 실패하면 저장하지 않습니다(fail-closed, 검증 RPC와 같음). (3) 암호 문서에서 원본 저장(같은 파일 덮어쓰기: 저장·Ctrl+S)은 거부하고 "다른 이름으로 저장에서 암호 없는 HWP 파일로 저장하세요"를 상태줄에 알립니다. (4) 다른 이름으로 저장(메뉴 HWP·HWPX)은 참조 앱 문구 그대로 `confirm`으로 묻고, 취소하면 내보내기도 저장 대화상자도 열지 않습니다. (5) 창 닫기의 `저장`(끝내기·Cmd+Q는 같은 경로)은 암호 문서면 원본 저장 대신 같은 확인을 거친 다른 이름으로 저장(저장 대화상자)이 됩니다. 확인 취소·대화상자 취소·실패는 저장 실패로 돌아가 창을 닫지 않고 끝내기도 멈춥니다(PD-113의 `end_close_prompt`). (6) 저장이 전달되면 셸은 `clearSaveProtection`으로 편집기 플래그를 내립니다(저장된 파일에는 암호가 없고 셸이 추적하는 파일도 그 파일이므로 이후 저장은 평범한 원본 저장). 저장 중 편집이 있어 수정됨을 유지할 때도 플래그는 내립니다. (7) 자동 저장은 암호 문서에서 하지 않고 이미 있던 자동 저장본을 지우며, 문서당 한 번 상태줄에 알립니다(참조 rhwp-studio의 `isRecoveryBlocked`와 같은 입장). (8) 확인은 새 디자인 없이 이 페이지의 다른 확인(문서 열기, HWPX 대체 저장)과 같은 `confirm`입니다.
+- **Why** 사용자가 암호로 보호한 문서가 알림 없이 평문으로 바뀌는 것은 데이터 보호 결함이고, 암호를 되살려 쓰려면 암호를 보관해야 하는데 PD-085는 암호가 부모로 오지 않는다는 입장입니다. 참조 앱과 같은 흐름이 가장 좁은 해결입니다.
+- **Trade-offs** 참조 앱은 저장 위치를 고른 뒤 묻지만 셸의 저장 전달은 대화상자와 쓰기가 한 번의 셸 명령이라 사이에 끼울 수 없어, 우리는 위치를 고르기 전에 묻습니다(취소는 같음). `confirm` 단추는 확인·취소로 고정이라 참조 앱의 "암호 없이 저장" 단추 이름은 문구에 담겼습니다. 원본 거부 안내는 상태줄에만 나옵니다. 암호 문서의 자동 저장이 꺼져 있어 비정상 종료 시 마지막 저장 이후 편집은 복원되지 않습니다. 변환기로 보내는 내보내기(`getConverterSource`)와 PDF·인쇄는 사용자가 고른 다른 형식 출력이라 이 확인 대상이 아닙니다(참조 앱도 묻지 않음). 저장된 사본에 암호를 다시 거는 기능은 없습니다(암호 보관이 필요).
+- **Alternatives rejected** 편집기에 암호를 보관해 `exportHwpWithPassword`로 저장(암호가 메모리에 오래 남고 PD-085 입장과 충돌), 원본 저장도 확인 후 허용(원본의 암호가 확인 한 번으로 사라짐), 위치 선택 뒤 확인(셸 명령을 둘로 쪼개야 하고 저장 경로 규칙이 바뀜).
+- **Verified by** `node --test scripts/test-webui-hwp-session.mjs`(원본 저장 거부, 다른 이름 저장 확인·취소, 닫기 중 대화상자 전달과 취소, 플래그 해제, 확인 불가 시 fail-closed, 자동 저장 차단, 암호 없는 문서 무영향), `scripts/test-hwp-studio.mjs`(포트 RPC·capability·업스트림 플래그 수명), `scripts/test-webui-windows.mjs`(닫기 저장이 `closing`으로 가는 배선).
+- **Revisit when** 참조 앱이 암호를 유지한 저장을 지원할 때, 셸 저장 명령이 위치 선택과 쓰기를 나눌 수 있을 때, 저장된 사본에 암호를 다시 거는 요구가 생길 때.

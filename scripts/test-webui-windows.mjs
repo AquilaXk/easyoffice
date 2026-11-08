@@ -530,6 +530,24 @@ test("HWP autosave records are keyed by the window id", async () => {
   assert.equal(mk("w-2").getTabId(), "hwp-w-2");
 });
 
+test("HWP save plumbing: a plain save overwrites the opened file, the close prompt's save marks the window as closing", async () => {
+  const { host, document } = await openWindow("?module=HWP&win=w-save-plumbing");
+  const saves = [];
+  const tools = host.__EASYOFFICE_CREATE_WORKSPACE_TOOLS__({
+    document, URL, invokeIpc: async () => ({}), getActiveModule: () => "HWP",
+    getHwpHost: () => ({ isEmbedActive: () => true }),
+    getHwpSession: () => ({ save: async (options) => { saves.push(options); return { ok: false, message: "x" }; } }),
+    sheetController: { commitPendingFocusedSheetCell: async () => {} },
+    enqueueWorkspaceHistoryOp: (op) => op(), getWindowBridge: () => null,
+  }, {});
+  await tools.saveActiveModuleDocument();
+  await tools.saveActiveModuleDocument({ closing: true });
+  assert.deepEqual(saves.map((o) => [o.inPlace, o.closing]), [[true, false], [true, true]]);
+  const app = fs.readFileSync(new URL("../crates/easyoffice-app/ui/app.js", import.meta.url), "utf8");
+  assert.match(app, /isDirty: \(\) => workspaceSession\.isDirty\(\),\s+save: \(\) => saveWorkspaceDocument\(\{ closing: true \}\),/, "the close prompt saves with closing");
+  assert.match(app, /openRecent: \(id\) => windowBridge\.openRecent\(id\), save: \(\) => saveWorkspaceDocument\(\),/, "the 파일 menu saves in place");
+});
+
 test("macOS Command shortcuts map onto the Ctrl-based shortcut table and the platform hint shows the Command key", () => {
   const SESSION_JS = new URL("../crates/easyoffice-app/ui/workspace-session.js", import.meta.url);
   const env = loadUiModule(SESSION_JS, { navigator: { platform: "MacIntel" } });

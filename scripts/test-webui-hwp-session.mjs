@@ -43,7 +43,7 @@ function fakeIndexedDb() {
   return { open, stores };
 }
 
-function createFakeHost({ status = "ready", capabilities = ["verify-bytes-v1"] } = {}) {
+function createFakeHost({ status = "ready", capabilities = ["verify-bytes-v1", "save-protection-v1"] } = {}) {
   const calls = [];
   const changeListeners = new Set();
   const statusListeners = new Set();
@@ -70,6 +70,7 @@ function createFakeHost({ status = "ready", capabilities = ["verify-bytes-v1"] }
       if (handler) return handler(params, options);
       if (method === "loadFile") return { pageCount: 3 };
       if (method === "verifyBytes") return { ok: true, pageCount: 2, format: "hwp" };
+      if (method === "getSaveProtection") return { passwordProtected: false };
       return null;
     },
   };
@@ -260,7 +261,7 @@ test("save: an HWP document is exported as HWP, verified, delivered, then notify
   ctx.fake.calls.length = 0;
   const res = await ctx.session.save({ deliver, baseName: "보고서" });
   assert.equal(res.ok, true);
-  assert.deepEqual(ctx.fake.calls.map((c) => c.method), ["exportHwp", "verifyBytes", "notifySaved"]);
+  assert.deepEqual(ctx.fake.calls.map((c) => c.method), ["getSaveProtection", "exportHwp", "verifyBytes", "notifySaved"]);
   assert.equal(deliveries[0].ext, "hwp");
   assert.equal(Buffer.from(deliveries[0].base64, "base64")[0], 0xd0);
   assert.equal(ctx.session.isDirty(), false);
@@ -354,7 +355,7 @@ test("save: edits made while the save runs keep the document marked as modified"
 
 test("save: an editor without verify support is refused (fail-closed) and a not-ready editor reports it", async () => {
   const { deliver, deliveries } = recordingDeliver();
-  const ctx = load({ deliver, host: { capabilities: [] } });
+  const ctx = load({ deliver, host: { capabilities: ["save-protection-v1"] } });
   const res = await ctx.session.save({ deliver, baseName: "x" });
   assert.equal(res.ok, false);
   assert.match(res.message, /저장 검증 기능을 사용할 수 없습니다/);
@@ -371,6 +372,161 @@ test("saveAs from the menu delegates to save with the chosen format and reports 
   assert.equal(deliveries[0].ext, "hwpx");
   assert.equal(deliveries[0].name, "보고서");
   assert.match(feedbackOf(ctx), /문서 저장 완료/);
+});
+
+// ---- password documents (PD-120) -------------------------------------------------------------
+
+function loadProtected(options = {}) {
+  const ctx = load(options);
+  ctx.protection = { passwordProtected: true, cleared: 0 };
+  ctx.fake.state.handlers.getSaveProtection = async () => ({ passwordProtected: ctx.protection.passwordProtected });
+  ctx.fake.state.handlers.clearSaveProtection = async () => {
+    ctx.protection.cleared += 1;
+    ctx.protection.passwordProtected = false;
+    return { cleared: true };
+  };
+  return ctx;
+}
+
+const methodsOf = (ctx) => ctx.fake.calls.map((c) => c.method);
+
+test("password document: a save over the opened file is refused with the save-as hint, nothing is exported or delivered", async () => {
+  const { deliver, deliveries } = recordingDeliver();
+  const ctx = loadProtected({ deliver });
+  ctx.fake.emit({ reason: "dirty_changed", dirty: true });
+  ctx.fake.calls.length = 0;
+  const res = await ctx.session.save({ deliver, inPlace: true, baseName: "x" });
+  assert.equal(res.ok, false);
+  assert.equal(res.cancelled, false);
+  assert.match(res.message, /암호 문서의 원본 저장은 아직 지원하지 않습니다\. 다른 이름으로 저장에서 암호 없는 HWP 파일로 저장하세요/);
+  assert.deepEqual(methodsOf(ctx), ["getSaveProtection"]);
+  assert.equal(deliveries.length, 0);
+  assert.equal(ctx.confirms.length, 0, "a refused overwrite asks nothing");
+  assert.equal(ctx.session.isDirty(), true);
+});
+
+test("password document: save-as asks once, delivers after consent, clears the editor flag and the dirty state", async () => {
+  const { deliver, deliveries } = recordingDeliver();
+  const ctx = loadProtected({ deliver });
+  ctx.fake.emit({ reason: "dirty_changed", dirty: true });
+  ctx.fake.calls.length = 0;
+  const res = await ctx.session.save({ deliver, baseName: "x" });
+  assert.equal(res.ok, true);
+  assert.deepEqual(ctx.confirms, ["저장한 HWP 파일에는 암호가 적용되지 않습니다. 암호 없이 저장하시겠습니까?"]);
+  assert.deepEqual(methodsOf(ctx), ["getSaveProtection", "exportHwp", "verifyBytes", "clearSaveProtection", "notifySaved"]);
+  assert.equal(deliveries.length, 1);
+  assert.match(res.message, /저장한 파일에는 암호가 없습니다/);
+  assert.equal(ctx.protection.cleared, 1);
+  assert.equal(ctx.session.isDirty(), false);
+  const again = await ctx.session.save({ deliver, inPlace: true, baseName: "x" });
+  assert.equal(again.ok, true, "the saved copy has no password, so saving over it is allowed");
+  assert.equal(ctx.confirms.length, 1);
+});
+
+test("password document: declining the save-as confirmation saves nothing and keeps everything as it was", async () => {
+  const { deliver, deliveries } = recordingDeliver();
+  const ctx = loadProtected({ deliver, confirmAnswers: [false] });
+  ctx.fake.emit({ reason: "dirty_changed", dirty: true });
+  ctx.fake.calls.length = 0;
+  const res = await ctx.session.save({ deliver, baseName: "x" });
+  assert.equal(res.ok, false);
+  assert.equal(res.cancelled, true);
+  assert.match(res.message, /문서 저장 취소 \(HWP\): 암호 없이 저장하지 않았습니다/);
+  assert.deepEqual(methodsOf(ctx), ["getSaveProtection"]);
+  assert.equal(deliveries.length, 0);
+  assert.equal(ctx.protection.passwordProtected, true);
+  assert.equal(ctx.session.isDirty(), true);
+});
+
+test("password document: when the window closes, save turns into a confirmed save-as through the dialog delivery", async () => {
+  const inPlace = recordingDeliver();
+  const dialog = recordingDeliver();
+  const ctx = loadProtected({ deliver: dialog.deliver });
+  const res = await ctx.session.save({ deliver: inPlace.deliver, inPlace: true, closing: true, baseName: "x" });
+  assert.equal(res.ok, true);
+  assert.equal(ctx.confirms.length, 1);
+  assert.equal(inPlace.deliveries.length, 0, "never the overwrite delivery");
+  assert.equal(dialog.deliveries.length, 1);
+});
+
+test("password document: declining while the window closes ends the save as cancelled, so the close or quit is cancelled", async () => {
+  const inPlace = recordingDeliver();
+  const dialog = recordingDeliver();
+  const ctx = loadProtected({ deliver: dialog.deliver, confirmAnswers: [false] });
+  const res = await ctx.session.save({ deliver: inPlace.deliver, inPlace: true, closing: true, baseName: "x" });
+  assert.equal(res.ok, false);
+  assert.equal(res.cancelled, true);
+  assert.equal(inPlace.deliveries.length + dialog.deliveries.length, 0);
+});
+
+test("password document: a cancelled file dialog after consent keeps the flag", async () => {
+  const { deliver } = recordingDeliver({ ok: false, cancelled: true, name: "", error: "" });
+  const ctx = loadProtected({ deliver });
+  const res = await ctx.session.save({ deliver, baseName: "x" });
+  assert.equal(res.cancelled, true);
+  assert.equal(ctx.protection.cleared, 0);
+  assert.equal(ctx.protection.passwordProtected, true);
+});
+
+test("password document: edits during the save keep the dirty state but the flag is still cleared", async () => {
+  const ctx = loadProtected();
+  ctx.fake.emit({ reason: "dirty_changed", dirty: true });
+  const deliver = async () => {
+    ctx.fake.emit({ reason: "edited" });
+    return { ok: true, cancelled: false, name: "p.hwp", error: "" };
+  };
+  const res = await ctx.session.save({ deliver, baseName: "x" });
+  assert.equal(res.ok, true);
+  assert.equal(ctx.protection.cleared, 1);
+  assert.equal(ctx.session.isDirty(), true);
+});
+
+test("plain document: save, save-as and closing saves are not affected and ask nothing", async () => {
+  const inPlace = recordingDeliver();
+  const dialog = recordingDeliver();
+  const ctx = load({ deliver: dialog.deliver });
+  for (const options of [{ inPlace: true }, {}, { inPlace: true, closing: true }]) {
+    const res = await ctx.session.save({ deliver: inPlace.deliver, baseName: "x", ...options });
+    assert.equal(res.ok, true);
+  }
+  assert.equal(ctx.confirms.length, 0);
+  assert.equal(inPlace.deliveries.length, 3);
+  assert.equal(dialog.deliveries.length, 0);
+  assert.equal(methodsOf(ctx).includes("clearSaveProtection"), false);
+});
+
+test("password document: an editor that cannot tell, or answers badly, fails the save closed", async () => {
+  const { deliver, deliveries } = recordingDeliver();
+  const missing = load({ deliver, host: { capabilities: ["verify-bytes-v1"] } });
+  assert.match((await missing.session.save({ deliver, baseName: "x" })).message, /암호 문서 확인 기능을 사용할 수 없습니다/);
+  const bad = load({ deliver });
+  bad.fake.state.handlers.getSaveProtection = async () => ({ passwordProtected: "no" });
+  assert.match((await bad.session.save({ deliver, baseName: "x" })).message, /암호 문서 확인 결과를 받지 못했습니다/);
+  const broken = load({ deliver });
+  broken.fake.state.handlers.getSaveProtection = async () => { throw new Error("port closed"); };
+  assert.match((await broken.session.save({ deliver, baseName: "x" })).message, /port closed/);
+  assert.equal(deliveries.length, 0);
+});
+
+test("password document: autosave never writes a plain copy, removes an old record and says so once", async () => {
+  const ctx = loadProtected();
+  ctx.env.indexedDB.stores.records.set("tab-A", { tabId: "tab-A" });
+  ctx.fake.emit({ reason: "dirty_changed", dirty: true });
+  ctx.fake.emit({ reason: "edited" });
+  await delay(100);
+  assert.equal(ctx.env.indexedDB.stores.records.size, 0);
+  assert.equal(methodsOf(ctx).some((m) => m === "exportHwp" || m === "exportHwpx"), false);
+  assert.match(feedbackOf(ctx), /암호 문서는 자동 저장하지 않습니다/);
+});
+
+test("password document: after a save-as that dropped the password, autosave works again", async () => {
+  const { deliver } = recordingDeliver();
+  const ctx = loadProtected({ deliver });
+  await ctx.session.save({ deliver, baseName: "x" });
+  ctx.fake.emit({ reason: "dirty_changed", dirty: true });
+  ctx.fake.emit({ reason: "edited" });
+  await delay(100);
+  assert.equal(ctx.env.indexedDB.stores.records.size, 1);
 });
 
 // ---- dirty state and autosave -----------------------------------------------------------

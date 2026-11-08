@@ -1,5 +1,5 @@
 // EasyOffice fork of rhwp-studio/src/embed/rpc-router.ts: plugin.* methods are removed and
-// createBlankDocument, verifyBytes, setShellContext and getPrintPages are added. See config/rhwp-studio-overrides.json.
+// createBlankDocument, verifyBytes, setShellContext, getPrintPages, getSaveProtection and clearSaveProtection are added. See config/rhwp-studio-overrides.json.
 import { parsePrintBatchRange, type PrintBatchResult } from './print-batch.ts';
 import type { HmlSaveState } from '@/core/hml-save-capability.ts';
 import type { EmbedFontDecisionTraceV1 } from '@/core/font-decision-trace.ts';
@@ -47,6 +47,10 @@ export interface EmbedRpcHandlers {
   setShellContext(context: unknown): Promise<{ applied: true }>;
   /** EasyOffice extension (print-pages-v1): a batch of print-profile page SVGs with paper sizes. */
   getPrintPages(from: number, count: number): Promise<PrintBatchResult>;
+  /** EasyOffice extension (save-protection-v1): whether the document was opened with a password. Never the password itself. */
+  getSaveProtection(): Promise<{ passwordProtected: boolean }>;
+  /** EasyOffice extension (save-protection-v1): the shell wrote an unprotected copy, so the flag no longer applies. */
+  clearSaveProtection(): Promise<{ cleared: true }>;
   pageCount(): Promise<number>;
   getRendererDiagnostics(page: number): Promise<EmbedRendererDiagnosticsV1>;
   getFontDecisionTrace(page: number, maxCharacters: number): Promise<EmbedFontDecisionTraceV1>;
@@ -180,6 +184,12 @@ export async function routeEmbedRequest(
     case 'createBlankDocument': return handlers.createBlankDocument(params.skipUnsavedGuard === true);
     case 'verifyBytes': return handlers.verifyBytes(asBytes(params.data, allowLegacyArray));
     case 'setShellContext': return handlers.setShellContext(params);
+    case 'getSaveProtection':
+      assertEmptyParams(params, 'getSaveProtection params');
+      return handlers.getSaveProtection();
+    case 'clearSaveProtection':
+      assertEmptyParams(params, 'clearSaveProtection params');
+      return handlers.clearSaveProtection();
     case 'pageCount': return handlers.pageCount();
     case 'getPrintPages': {
       const range = parsePrintBatchRange(params);

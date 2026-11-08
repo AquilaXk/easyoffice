@@ -216,9 +216,10 @@
     }
 
     // Embedded HWP editor: HWP 5.0 bytes exported by the editor itself, same delivery as every save.
-    async function saveEmbeddedHwp(session) {
+    // `closing`: the save runs for a window close or quit, where a password document goes to a save-as.
+    async function saveEmbeddedHwp(session, closing) {
       const fb = document.getElementById("status-command-feedback");
-      const result = await session.save({ deliver: deliverInPlace, baseName: resolveSaveFileBase("HWP") });
+      const result = await session.save({ deliver: deliverInPlace, inPlace: true, closing, baseName: resolveSaveFileBase("HWP") });
       if (fb) fb.textContent = result.message;
       if (result.ok) noteSavedName(result.name);
       return result.ok;
@@ -244,12 +245,12 @@
 
     const SAVE_EXT_BY_MODULE = { DOC: "docx", HWP: "hwpx", SHEET: "xlsx", SLIDE: "pptx", PDF: "pdf" };
 
-    async function runSaveActiveModuleDocument() {
+    async function runSaveActiveModuleDocument(closing) {
       await sheetController.commitPendingFocusedSheetCell(true);
       const curMod = getActiveModule();
       const hwpHost = getHwpHost?.();
       const hwpSession = getHwpSession?.();
-      if (curMod === "HWP" && hwpHost?.isEmbedActive() && hwpSession) return saveEmbeddedHwp(hwpSession);
+      if (curMod === "HWP" && hwpHost?.isEmbedActive() && hwpSession) return saveEmbeddedHwp(hwpSession, closing === true);
       const isConv = curMod === "CONV";
       const dstExt = (isConv ? document.getElementById("conv-dst-fmt")?.value || "hwpx" : SAVE_EXT_BY_MODULE[curMod]) || "docx";
       const srcExt = isConv ? document.getElementById("conv-src-fmt")?.value || "docx" : dstExt;
@@ -276,8 +277,8 @@
       return true;
     }
 
-    function saveActiveModuleDocument() {
-      return enqueueWorkspaceHistoryOp(runSaveActiveModuleDocument);
+    function saveActiveModuleDocument(options) {
+      return enqueueWorkspaceHistoryOp(() => runSaveActiveModuleDocument(options?.closing));
     }
 
     let insertModeLabel = "삽입";

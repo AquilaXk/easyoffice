@@ -1,5 +1,5 @@
 // EasyOffice fork of rhwp-studio/src/embed/protocol.ts: the plugin-loader and hwpctrl capabilities
-// are not advertised (the plugin loader is not bundled); blank-document-v1 and print-pages-v1 are added.
+// are not advertised (the plugin loader is not bundled); blank-document-v1, print-pages-v1 and save-protection-v1 are added.
 export const EMBED_PROTOCOL_VERSION = 1 as const;
 export const EMBED_CAPABILITIES = [
   'transferable-array-buffer',
@@ -24,6 +24,9 @@ export const EMBED_CAPABILITIES = [
   'shell-context-v1',
   // EasyOffice extension: getPrintPages RPC (the shell prints the document from batches of page SVGs).
   'print-pages-v1',
+  // EasyOffice extension: getSaveProtection and clearSaveProtection RPCs (a document opened with a
+  // password is saved without it; the shell asks before it writes such a copy, PD-120).
+  'save-protection-v1',
 ] as const;
 
 export interface EmbedConnectAttempt {

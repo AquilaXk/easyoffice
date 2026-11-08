@@ -623,6 +623,33 @@ test("the embed router routes getPrintPages and the editor advertises print-page
   assert.ok(menu.includes('data-shell-cmd="print"'), "the 파일 menu lists printing");
 });
 
+// ---- password documents (save-protection-v1, PD-120) ------------------------------------------
+
+test("the editor tells the shell whether the document was opened with a password, and only that flag", async () => {
+  // The router and main import the editor's path aliases, which plain Node cannot resolve: check their source.
+  const router = fs.readFileSync(path.join(REPO, "apps/hwp-studio/src/embed/rpc-router.ts"), "utf8");
+  assert.match(router, /case 'getSaveProtection':\s+assertEmptyParams\(params, 'getSaveProtection params'\);\s+return handlers\.getSaveProtection\(\);/);
+  assert.match(router, /case 'clearSaveProtection':\s+assertEmptyParams\(params, 'clearSaveProtection params'\);\s+return handlers\.clearSaveProtection\(\);/);
+  assert.match(router, /getSaveProtection\(\): Promise<\{ passwordProtected: boolean \}>;/);
+  const main = fs.readFileSync(path.join(REPO, "apps/hwp-studio/src/main.ts"), "utf8");
+  assert.match(main, /async getSaveProtection\(\) \{\s+await initPromise;\s+return \{ passwordProtected: wasm\.requiresPasswordForSave \};/);
+  assert.match(main, /async clearSaveProtection\(\) \{\s+await initPromise;\s+wasm\.requiresPasswordForSave = false;/);
+  const { EMBED_CAPABILITIES } = await import("../apps/hwp-studio/src/embed/protocol.ts");
+  assert.ok(EMBED_CAPABILITIES.includes("save-protection-v1"));
+  assert.match(main, /wasm\.loadDocumentWithPassword\(data, password, fileName\)/);
+  assert.doesNotMatch(main, /passwordProtected:\s*password|requiresPasswordForSave\s*=\s*password/, "the password string is never kept");
+});
+
+const UPSTREAM_BRIDGE = path.join(REPO, "third_party/rhwp/rhwp-studio/src/core/wasm-bridge.ts");
+
+test("upstream bridge: the password open sets the save flag, every other load clears it", { skip: !fs.existsSync(UPSTREAM_BRIDGE) }, () => {
+  const bridge = fs.readFileSync(UPSTREAM_BRIDGE, "utf8");
+  assert.match(bridge, /loadDocumentWithPassword\([^)]*\): void \{\s+this\.loadDocumentAtomically\(\s+data,\s+fileName,\s+true,/);
+  assert.match(bridge, /loadDocument\(data: Uint8Array, fileName\?: string\): DocumentInfo \{\s+this\.loadDocumentAtomically\(data, fileName, false,/);
+  assert.match(bridge, /releaseDocument\(\): void \{[\s\S]*?this\._requiresPasswordForSave = false;/);
+  assert.match(bridge, /createNewDocument\(\): DocumentInfo \{[\s\S]*?this\._requiresPasswordForSave = false;/);
+});
+
 // ---- toolbar labels toggle (PD-105) -------------------------------------------------------------
 
 function fakeLabelsHost({ stored = null, failRead = false, failWrite = false } = {}) {

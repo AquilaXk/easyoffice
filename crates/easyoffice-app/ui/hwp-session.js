@@ -27,6 +27,13 @@
   const MSG_TEXT_ONLY = "한글 편집기로 열지 못해 텍스트만 불러왔습니다. 서식·표·그림은 유지되지 않으며 이 상태로 저장하면 서식이 사라집니다.";
   const REFUSED = /DRM|지원하지 않는 암호화|암호화된 문서를 열 수 없습니다/;
   const CANCELLED = /취소/;
+  // A document opened with a password is exported without it (PD-120). The editor says so over the
+  // port (a flag, never the password); the shell refuses an overwrite and asks before a new copy.
+  const PROTECTION_CAPABILITY = "save-protection-v1";
+  const MSG_PASSWORD_NO_OVERWRITE = "암호 문서의 원본 저장은 아직 지원하지 않습니다. 다른 이름으로 저장에서 암호 없는 HWP 파일로 저장하세요.";
+  const MSG_PASSWORD_CONFIRM = "저장한 HWP 파일에는 암호가 적용되지 않습니다. 암호 없이 저장하시겠습니까?";
+  const MSG_PASSWORD_DECLINED = "암호 없이 저장하지 않았습니다";
+  const MSG_PASSWORD_NO_AUTOSAVE = "암호 문서는 자동 저장하지 않습니다. 저장(다른 이름으로 저장)으로 보관하세요";
 
   function baseName(raw) {
     return String(raw || "").split(/[\\/]/).pop().trim();
@@ -155,10 +162,10 @@
     return "";
   }
 
-  function failure(format, error, cancelled) {
+  function failure(format, error, cancelled, cancelReason) {
     const tag = String(format).toUpperCase();
     const message = cancelled
-      ? "문서 저장 취소 (" + tag + "): 저장 위치를 선택하지 않았습니다"
+      ? "문서 저장 취소 (" + tag + "): " + (cancelReason || "저장 위치를 선택하지 않았습니다")
       : "문서 저장 실패 (" + tag + "): " + error;
     return { ok: false, cancelled: Boolean(cancelled), error: error || "", message };
   }
@@ -191,6 +198,7 @@
     let wasReady = hwpHost.getStatus() === "ready";
     let saveChain = Promise.resolve();
     let discarded = false;
+    let passwordNoticeShown = false;
     const tabId = resolveTabId();
 
     // One autosave record per window: the window id keeps simultaneous HWP windows apart.
@@ -258,6 +266,12 @@
       autosaving = true;
       const seq = editSeq;
       try {
+        if (await readPasswordProtected()) {
+          await store.remove(tabId).catch(() => null);
+          if (!passwordNoticeShown) feedback(MSG_PASSWORD_NO_AUTOSAVE);
+          passwordNoticeShown = true;
+          return;
+        }
         const format = current?.saveFormat || "hwp";
         const bytes = await hwpHost.exportBytes(format);
         if (bytes.length > MAX_HWP_BYTES) {
@@ -326,6 +340,7 @@
         { transfer: [copy], timeoutMs: OPEN_TIMEOUT_MS },
       );
       current = { name, saveFormat: format === "hwpx" || format === "hwtx" ? "hwpx" : "hwp" };
+      passwordNoticeShown = false;
       setTabTitle(name);
       setNoticeText(deps.defaultNotice || "");
       return result;
@@ -441,10 +456,37 @@
       }
     }
 
-    async function afterDelivery(delivery, exported, baseTitle, startSeq) {
+    // Whether the editor opened the document with a password. Fails closed: without the answer the
+    // shell cannot tell a protected document from a plain one.
+    async function readPasswordProtected() {
+      if (!hwpHost.getCapabilities().includes(PROTECTION_CAPABILITY)) throw new Error("암호 문서 확인 기능을 사용할 수 없습니다");
+      const state = await hwpHost.call("getSaveProtection");
+      if (typeof state?.passwordProtected !== "boolean") throw new Error("암호 문서 확인 결과를 받지 못했습니다");
+      return state.passwordProtected;
+    }
+
+    // A protected document is never overwritten by an unprotected copy: "save" is refused (closing
+    // the window or quitting turns it into a save-as), and every save-as asks first. `deliver` is
+    // what writes the bytes; `protectedDoc` makes the shell clear the editor's flag after delivery.
+    async function passwordGate(options, format) {
+      if (!(await readPasswordProtected())) return { deliver: options.deliver, protectedDoc: false };
+      if (options.inPlace && !options.closing) return { failure: failure(format, MSG_PASSWORD_NO_OVERWRITE) };
+      if (!confirmFn(MSG_PASSWORD_CONFIRM)) return { failure: failure(format, "", true, MSG_PASSWORD_DECLINED) };
+      return { deliver: options.inPlace ? deps.deliverSavedFile : options.deliver, protectedDoc: true };
+    }
+
+    async function afterDelivery(delivery, exported, baseTitle, startSeq, protectedDoc) {
       const tag = exported.format.toUpperCase();
       let tail = exported.downgraded ? " · HWPX 검증 실패로 HWP로 저장" : "";
       if (exported.format === "hwpx") tail += " · HWPX는 일부 서식이 HWP와 다르게 저장될 수 있어 한글에서 열어 확인하세요";
+      if (protectedDoc) {
+        tail += " · 저장한 파일에는 암호가 없습니다";
+        try {
+          await hwpHost.call("clearSaveProtection");
+        } catch (err) {
+          tail += " · 암호 표시를 해제하지 못했습니다 (" + describeError(err) + ")";
+        }
+      }
       current = { name: baseTitle + "." + exported.format, saveFormat: exported.format };
       if (editSeq !== startSeq) {
         tail += " · 저장하는 동안 편집이 있어 수정됨 상태를 유지합니다";
@@ -469,13 +511,15 @@
       const startSeq = editSeq;
       saving = true;
       try {
+        const gate = await passwordGate(options, wanted);
+        if (gate.failure) return gate.failure;
         const exported = await exportForSave(wanted);
         if (!exported.bytes) return failure(exported.format, exported.error);
         const base64 = bytesToBase64(exported.bytes, (s) => env.btoa(s));
-        const delivery = await options.deliver(base64, options.baseName, exported.format);
+        const delivery = await gate.deliver(base64, options.baseName, exported.format);
         if (delivery?.cancelled) return failure(exported.format, "", true);
         if (!delivery?.ok) return failure(exported.format, delivery?.error || "파일 다운로드를 시작하지 못했습니다");
-        return await afterDelivery(delivery, exported, options.baseName, startSeq);
+        return await afterDelivery(delivery, exported, options.baseName, startSeq, gate.protectedDoc);
       } catch (err) {
         return failure(wanted, describeError(err));
       } finally {
@@ -483,7 +527,9 @@
       }
     }
 
-    // `options`: { deliver(base64, baseName, ext), baseName, format? }. Saves are serialized.
+    // `options`: { deliver(base64, baseName, ext), baseName, format?, inPlace?, closing? }. `inPlace`
+    // marks a save that overwrites the opened file, `closing` one that runs for a window close or quit.
+    // Saves are serialized.
     function save(options) {
       const run = saveChain.then(() => doSave(options), () => doSave(options));
       saveChain = run.then(() => null, () => null);

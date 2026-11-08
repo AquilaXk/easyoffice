@@ -1489,6 +1489,17 @@ installEmbedRuntime({
       await initPromise;
       return wasm.pageCount;
     },
+    // EasyOffice extension (save-protection-v1): the editor exports plain bytes, so a document that
+    // was opened with a password would be saved without it. Only this flag crosses the port.
+    async getSaveProtection() {
+      await initPromise;
+      return { passwordProtected: wasm.requiresPasswordForSave };
+    },
+    async clearSaveProtection() {
+      await initPromise;
+      wasm.requiresPasswordForSave = false;
+      return { cleared: true as const };
+    },
     async getRendererDiagnostics(pageIndex) {
       await initPromise;
       const selection = canvasView?.getRendererSessionDiagnostics() ?? null;
