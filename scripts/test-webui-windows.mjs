@@ -802,7 +802,22 @@ test("smoke: the page wiring keeps the step order and app.js stays under the lin
   assert.ok(app.split("\n").length < 1000);
 });
 
-test("the shell's notice (open failures, the drop hint) shows as the shared toast in every window", async () => {
+test("the shell's drag signals light the document area with the reference app's drag-over look and show the drop hint", async () => {
+  const { document, host } = await openWindow("?module=DOC&win=w-drag", {}, { localStorage: createMemoryStorage() });
+  assert.equal(typeof host.__EASYOFFICE_DRAG_ON__, "function");
+  assert.equal(typeof host.__EASYOFFICE_DRAG_OFF__, "function");
+  const pane = document.getElementById("pane-doc");
+  host.__EASYOFFICE_DRAG_ON__();
+  assert.equal(pane.classList.contains("drag-over"), true);
+  assert.equal(document.getElementById("status-command-feedback").textContent, "파일을 놓으면 문서를 엽니다");
+  assert.equal(document.getElementById("shell-toast").hidden, true, "no toast any more");
+  host.__EASYOFFICE_DRAG_OFF__();
+  assert.equal(pane.classList.contains("drag-over"), false);
+  const css = fs.readFileSync(new URL("../crates/easyoffice-app/ui/styles.css", import.meta.url), "utf8");
+  assert.match(css, /\.editor-pane\.drag-over \{ background: var\(--ui-selected\); outline: 3px dashed var\(--focus-ring\); outline-offset: -3px; \}/);
+});
+
+test("the shell's notice (open failures) shows as the shared toast in every window", async () => {
   for (const search of ["?module=START&win=w-n1", "?module=DOC&win=w-n2"]) {
     const { document, host } = await openWindow(search, {}, { localStorage: createMemoryStorage() });
     assert.equal(typeof host.__EASYOFFICE_NOTICE__, "function");

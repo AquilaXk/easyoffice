@@ -1520,6 +1520,11 @@ installEmbedRuntime({
     async hostFontsReply(params) {
       return shellFontBridge.reply(params);
     },
+    // EasyOffice extension (drag-over-v1): the shell tells the editor a droppable file is over the window.
+    async setDragOver(active) {
+      document.getElementById('scroll-container')?.classList.toggle('drag-over', active);
+      return { applied: true as const };
+    },
     async getRendererDiagnostics(pageIndex) {
       await initPromise;
       const selection = canvasView?.getRendererSessionDiagnostics() ?? null;

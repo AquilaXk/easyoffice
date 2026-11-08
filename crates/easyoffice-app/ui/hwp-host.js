@@ -659,6 +659,12 @@
       return status === "ready" ? pushShellContext() : Promise.resolve(false);
     }
 
+    // The drop highlight on the editor's scroll container (drag-over-v1); false when the editor lacks it.
+    function setDragOver(active) {
+      if (!port || !capabilities.includes("drag-over-v1")) return Promise.resolve(false);
+      return call("setDragOver", { active: Boolean(active) }).then(() => true, () => false);
+    }
+
     function onCommand(listener) {
       commandListeners.add(listener);
       return () => commandListeners.delete(listener);
@@ -740,7 +746,7 @@
 
     return {
       onModuleActivated, paneForModule, isEmbedActive, usesLegacy, call, reconnect, useLegacyEditor,
-      exportHwp, exportBytes, exportHwpBase64, saveDocument, isDirty, onChange, onShortcut, onCommand, setShellContext, onStatus, whenSettled, runSmoke, runFrameProbe,
+      exportHwp, exportBytes, exportHwpBase64, saveDocument, isDirty, onChange, onShortcut, onCommand, setShellContext, setDragOver, onStatus, whenSettled, runSmoke, runFrameProbe,
       getStatus: () => status,
       getCapabilities: () => capabilities.slice(),
       getFrame: () => frame,

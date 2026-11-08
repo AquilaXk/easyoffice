@@ -412,18 +412,25 @@ fn attach_handlers(app: &AppHandle, window: &WebviewWindow) {
         }
         WindowEvent::DragDrop(DragDropEvent::Enter { paths, .. }) => {
             if paths.iter().any(|p| WindowKind::for_path(p).is_some()) {
-                if let Some(window) = app.get_webview_window(&label) {
-                    let _ = window.eval(crate::open_feedback::notice_script(
-                        crate::open_feedback::DROP_HINT,
-                    ));
-                }
+                drag_signal(&app, &label, crate::open_feedback::DRAG_ON_SCRIPT);
             }
         }
+        WindowEvent::DragDrop(DragDropEvent::Leave) => {
+            drag_signal(&app, &label, crate::open_feedback::DRAG_OFF_SCRIPT);
+        }
         WindowEvent::DragDrop(DragDropEvent::Drop { paths, .. }) => {
+            drag_signal(&app, &label, crate::open_feedback::DRAG_OFF_SCRIPT);
             open_dropped_paths(&app, paths.clone());
         }
         _ => {}
     });
+}
+
+/// Tells the window's page that a droppable file entered or left it (PD-124).
+fn drag_signal(app: &AppHandle, label: &str, script: &str) {
+    if let Some(window) = app.get_webview_window(label) {
+        let _ = window.eval(script);
+    }
 }
 
 fn open_dropped_paths(app: &AppHandle, paths: Vec<PathBuf>) {

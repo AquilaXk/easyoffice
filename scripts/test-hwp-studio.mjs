@@ -623,6 +623,17 @@ test("the embed router routes getPrintPages and the editor advertises print-page
   assert.ok(menu.includes('data-shell-cmd="print"'), "the 파일 menu lists printing");
 });
 
+// ---- drop highlight (drag-over-v1, PD-124) -------------------------------------------------------
+
+test("the editor shows the drop highlight on its scroll container when the shell asks, and the shell may only send a boolean", async () => {
+  const router = fs.readFileSync(path.join(REPO, "apps/hwp-studio/src/embed/rpc-router.ts"), "utf8");
+  assert.match(router, /case 'setDragOver':\s+assertOnlyKeys\(params, \['active'\], 'setDragOver params'\);\s+if \(typeof params.active !== 'boolean'\)/);
+  const main = fs.readFileSync(path.join(REPO, "apps/hwp-studio/src/main.ts"), "utf8");
+  assert.match(main, /async setDragOver\(active\) \{\s+document\.getElementById\('scroll-container'\)\?\.classList\.toggle\('drag-over', active\);/);
+  const { EMBED_CAPABILITIES } = await import("../apps/hwp-studio/src/embed/protocol.ts");
+  assert.ok(EMBED_CAPABILITIES.includes("drag-over-v1"));
+});
+
 // ---- password documents (save-protection-v1, PD-120) ------------------------------------------
 
 test("the editor tells the shell whether the document was opened with a password, and only that flag", async () => {

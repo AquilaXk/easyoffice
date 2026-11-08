@@ -1,5 +1,5 @@
 // EasyOffice fork of rhwp-studio/src/embed/rpc-router.ts: plugin.* methods are removed and
-// createBlankDocument, verifyBytes, setShellContext, getPrintPages, getSaveProtection, clearSaveProtection, enableHostFonts and hostFontsReply are added. See config/rhwp-studio-overrides.json.
+// createBlankDocument, verifyBytes, setShellContext, getPrintPages, getSaveProtection, clearSaveProtection, enableHostFonts, hostFontsReply and setDragOver are added. See config/rhwp-studio-overrides.json.
 import { parsePrintBatchRange, type PrintBatchResult } from './print-batch.ts';
 import type { HmlSaveState } from '@/core/hml-save-capability.ts';
 import type { EmbedFontDecisionTraceV1 } from '@/core/font-decision-trace.ts';
@@ -55,6 +55,8 @@ export interface EmbedRpcHandlers {
   enableHostFonts(): Promise<{ enabled: true }>;
   /** EasyOffice extension (host-fonts-v1): the shell's answer to a `shell_fonts` event. */
   hostFontsReply(params: Record<string, unknown>): Promise<{ accepted: boolean }>;
+  /** EasyOffice extension (drag-over-v1): show or hide the drop highlight (`drag-over` class) on the scroll container. */
+  setDragOver(active: boolean): Promise<{ applied: true }>;
   pageCount(): Promise<number>;
   getRendererDiagnostics(page: number): Promise<EmbedRendererDiagnosticsV1>;
   getFontDecisionTrace(page: number, maxCharacters: number): Promise<EmbedFontDecisionTraceV1>;
@@ -198,6 +200,10 @@ export async function routeEmbedRequest(
       assertEmptyParams(params, 'enableHostFonts params');
       return handlers.enableHostFonts();
     case 'hostFontsReply': return handlers.hostFontsReply(params);
+    case 'setDragOver':
+      assertOnlyKeys(params, ['active'], 'setDragOver params');
+      if (typeof params.active !== 'boolean') throw new Error('active must be a boolean');
+      return handlers.setDragOver(params.active);
     case 'pageCount': return handlers.pageCount();
     case 'getPrintPages': {
       const range = parsePrintBatchRange(params);

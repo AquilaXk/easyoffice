@@ -10,8 +10,12 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
 /// A file whose extension no window kind opens. Also the start of the message `open_path` returns.
 pub const UNSUPPORTED: &str = "지원하지 않는 형식입니다";
-/// Shown while a file the app can open is dragged over a window.
-pub const DROP_HINT: &str = "파일을 놓으면 문서를 엽니다";
+/// Signals to the page, without arguments, that a file the app can open is over the window or
+/// left it (or was dropped). The page draws the drop highlight and shows the hint itself.
+pub const DRAG_ON_SCRIPT: &str =
+    "window.__EASYOFFICE_DRAG_ON__ && window.__EASYOFFICE_DRAG_ON__();";
+pub const DRAG_OFF_SCRIPT: &str =
+    "window.__EASYOFFICE_DRAG_OFF__ && window.__EASYOFFICE_DRAG_OFF__();";
 const FAILURE_PREFIX: &str = "파일 로드 실패: ";
 const DIALOG_TITLE: &str = "파일 열기";
 
@@ -89,6 +93,18 @@ mod tests {
         assert_eq!(
             script,
             "window.__EASYOFFICE_NOTICE__ && window.__EASYOFFICE_NOTICE__(\"a\\\"b\\\\c\\n</script>\");"
+        );
+    }
+
+    #[test]
+    fn the_drag_signals_call_the_page_without_arguments() {
+        assert_eq!(
+            DRAG_ON_SCRIPT,
+            "window.__EASYOFFICE_DRAG_ON__ && window.__EASYOFFICE_DRAG_ON__();"
+        );
+        assert_eq!(
+            DRAG_OFF_SCRIPT,
+            "window.__EASYOFFICE_DRAG_OFF__ && window.__EASYOFFICE_DRAG_OFF__();"
         );
     }
 

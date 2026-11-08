@@ -249,6 +249,7 @@
   let paletteSelectedIdx = 0;
   let paletteFilteredItems = [];
 
+  const DROP_HINT = "파일을 놓으면 문서를 엽니다";
   const NEW_DOCUMENT_LABELS = {
     DOC: "문서 (DOCX)", HWP: "한글 문서 (HWP)", SHEET: "스프레드시트 (XLSX)",
     SLIDE: "프레젠테이션 (PPTX)", PDF: "PDF 스튜디오", CONV: "포맷 변환기",
@@ -843,6 +844,15 @@
   host.__EASYOFFICE_NATIVE_MENU__ = (id) => runNativeMenu(String(id));
   // The shell reports open failures and the drag hint here (`window_commands.rs`); they show as the shared toast.
   host.__EASYOFFICE_NOTICE__ = (message) => shellChrome.toast(message);
+  // The shell calls these (no argument) while a droppable file is dragged over the window (PD-124): the
+  // document area gets the reference app's `drag-over` look, in the editor's own container for the Hangul editor.
+  const setDragOver = (active) => {
+    if (active) setStatusFeedback(DROP_HINT);
+    if (activeModule === "HWP" && hwpHost.isEmbedActive()) return void hwpHost.setDragOver(active);
+    for (const pane of document.querySelectorAll(".editor-pane")) pane.classList.toggle("drag-over", active);
+  };
+  host.__EASYOFFICE_DRAG_ON__ = () => setDragOver(true);
+  host.__EASYOFFICE_DRAG_OFF__ = () => setDragOver(false);
   // The shell calls this (no argument) when another window changed the recent list (PD-127).
   host.__EASYOFFICE_RECENTS_CHANGED__ = () => void windowBridge.refreshRecents().then((entries) => shellChrome.pushRecents(entries));
 
