@@ -10,7 +10,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { PROHIBITED_PATTERNS } from "./prohibited-terms.mjs";
+import { prohibitedPatternsIn } from "./prohibited-terms.mjs";
 import { execFileSync } from "node:child_process";
 import { readConfig, resolveGitExecutable, verifyUpstream } from "./verify-rhwp-upstream.mjs";
 import { verifyOverrides } from "./hwp-studio-overrides.mjs";
@@ -367,10 +367,8 @@ for (const file of files) {
   if (rel === "scripts/check-repo-hygiene.mjs") continue;
 
   const content = fs.readFileSync(file, "utf8");
-  for (const regex of PROHIBITED_PATTERNS) {
-    if (regex.test(content)) {
-      errors.push(`Prohibited external brand or local-only reference detected in ${rel} (pattern: ${regex.source})`);
-    }
+  for (const regex of prohibitedPatternsIn(rel, content)) {
+    errors.push(`Prohibited external brand or local-only reference detected in ${rel} (pattern: ${regex.source})`);
   }
 
   if (isSortRuleScoped(rel)) {

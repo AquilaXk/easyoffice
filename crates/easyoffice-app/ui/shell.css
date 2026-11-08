@@ -58,6 +58,14 @@
 /* ---- diagnostics (About dialog) and toasts ------------------------------------------------------ */
 .about-diagnostics { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--ui-text-muted); }
 .about-diagnostics > span { display: block; padding: 0; }
+#about-dialog .close-dialog-panel { max-height: calc(100vh - 48px); overflow-y: auto; }
+.about-notice { padding: 10px 14px; font-size: var(--font-size-base); line-height: 1.6; color: var(--ui-note-text); background: var(--ui-note-bg); border: 1px solid var(--ui-note-border); border-radius: 4px; }
+.about-license-title { font-size: var(--font-size-base); font-weight: 700; color: var(--ui-text-secondary); }
+.about-license-table { width: 100%; border-collapse: collapse; font-size: var(--font-size-sm); }
+.about-license-table td { padding: 3px 8px; color: var(--ui-text-secondary); border-bottom: 1px solid var(--ui-border-subtle); }
+.about-license-table td:first-child { font-family: monospace; color: var(--ui-text); }
+.about-license-table td:last-child { text-align: right; color: var(--ui-text-hint); }
+.about-license-note { font-size: var(--font-size-sm); color: var(--ui-text-muted); }
 .shell-toast { position: fixed; right: 16px; bottom: 16px; z-index: 50; max-width: min(420px, calc(100vw - 32px)); padding: 9px 14px; font-size: 12.5px; line-height: 1.45; color: var(--ui-text); background: var(--ui-bg-light); border: 1px solid var(--ui-border); border-radius: 8px; filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.22)); }
 .shell-toast[hidden] { display: none; }
 /* ---- command palette overlay ------------------------------------------------------------------ */

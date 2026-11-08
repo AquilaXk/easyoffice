@@ -2003,3 +2003,14 @@
 - **Alternatives rejected** 편집기에 암호를 보관해 `exportHwpWithPassword`로 저장(암호가 메모리에 오래 남고 PD-085 입장과 충돌), 원본 저장도 확인 후 허용(원본의 암호가 확인 한 번으로 사라짐), 위치 선택 뒤 확인(셸 명령을 둘로 쪼개야 하고 저장 경로 규칙이 바뀜).
 - **Verified by** `node --test scripts/test-webui-hwp-session.mjs`(원본 저장 거부, 다른 이름 저장 확인·취소, 닫기 중 대화상자 전달과 취소, 플래그 해제, 확인 불가 시 fail-closed, 자동 저장 차단, 암호 없는 문서 무영향), `scripts/test-hwp-studio.mjs`(포트 RPC·capability·업스트림 플래그 수명), `scripts/test-webui-windows.mjs`(닫기 저장이 `closing`으로 가는 배선), `scripts/test-webui-desktop-bridge.mjs`(확인 호출은 종류 이름과 토큰만 보냄, true만 수락, 브라우저 문구가 Rust와 같음), `cargo test -p easyoffice-desktop confirm_dialog`(모르는 이름·형식 거부, 종류별 문구, 참조 앱 문구와 단추).
 - **Revisit when** 참조 앱이 암호를 유지한 저장을 지원할 때, 셸 저장 명령이 위치 선택과 쓰기를 나눌 수 있을 때, 저장된 사본에 암호를 다시 거는 요구가 생길 때.
+
+## 97. 제품 정보 창에 HWP 공개 문서 고지와 오픈소스 라이선스 표, 위생 가드의 고지 문장 예외 (PD-122)
+
+- **Status** Implemented (QA 승인 2026-11-08: 고지 문구는 원문 그대로, 오픈소스 라이선스 목록도 넣고, 위생 가드에 이 문장에 한한 예외를 둠)
+- **Context** HWP 공개 문서의 저작권 조항은 제품 정보에 고지 문구를 요구하고, 업스트림 편집기는 제품 정보에 그 문구와 오픈소스 라이선스 표를 둡니다(`rhwp-studio/src/ui/about-dialog.ts`, `i18n/locales/ko.ts`). 참조 앱은 업스트림 대화상자에 버전 줄만 더해 씁니다. 우리 제품 정보 창에는 버전과 진단 알약뿐이었습니다. 문구에 회사 이름이 들어가 위생 가드의 금지 용어와 부딪힙니다.
+- **Decision (`PD-122`)** (1) `index.html`의 제품 정보 창에 업스트림과 같은 순서로 고지 문장(원문 그대로), "오픈소스 라이선스" 제목, 라이선스 표, 전체 목록 안내를 넣고 진단 알약(PD-093 (4))은 그대로 둡니다. 한글 창도 같은 창을 씁니다(편집기 번들에는 자체 제품 정보가 없음). 스타일은 업스트림 `dialogs.css`의 `.about-*` 값을 `tokens.css` 토큰으로만 옮겼습니다. (2) 라이선스 표는 `THIRD_PARTY_NOTICES.md`의 WebAssembly 의존성 표에 실제로 있는 크레이트만 두고(업스트림 목록에서 네이티브 전용인 `subsetter`는 뺌), `scripts/test-about-notice.mjs`가 이름과 라이선스가 표와 일치하는지 검사합니다. (3) 고지 문장에 든 회사 이름을 금지 용어에 더하고(커밋 메시지 가드에도 적용), `scripts/prohibited-terms.mjs`의 `NOTICE_EXCEPTIONS`에 정확한 고지 문장과 허용 파일(`index.html`)만 예외로 둡니다. 허용 파일에서도 문장 밖의 이름, 문장을 고친 형태, 다른 파일의 같은 문장은 계속 실패합니다. 커밋 메시지에는 예외가 없습니다.
+- **Why** 고지는 법적 요구이고 원문을 바꿀 수 없으므로 가드를 문장 단위로만 열어, 다른 곳에 회사 이름이 새로 생기는 것은 계속 막습니다. 라이선스 목록의 원천을 `THIRD_PARTY_NOTICES.md` 하나로 두고 일치 테스트로 어긋남을 잡습니다.
+- **Trade-offs** 표는 `index.html`에 손으로 둔 행이라 의존성이 바뀌면 행을 고쳐야 하며(테스트가 어긋남을 알려 줌), 업스트림처럼 핵심 크레이트만 보여 줍니다.
+- **Alternatives rejected** 빌드 시 표를 생성하는 것(정적 페이지와 번들 파이프라인에 단계가 늘어남), 가드를 파일 전체에서 여는 것(다른 문장의 이름이 통과함).
+- **Verified by** `node --test scripts/test-about-notice.mjs`(고지 한 번, 표와 일치, 예외 범위), `node scripts/check-repo-hygiene.mjs`.
+- **Revisit when** WebAssembly 패키지를 다시 빌드해 의존성이 바뀔 때, 참조 앱이 제품 정보 구성을 바꿀 때.
