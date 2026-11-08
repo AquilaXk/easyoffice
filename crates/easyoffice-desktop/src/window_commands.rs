@@ -474,7 +474,10 @@ fn open_failure(reason: &str, path: &Path, err: &std::io::Error) -> String {
 /// closes its own start window after the opens it starts; this covers the ones Rust starts).
 fn close_empty_start_windows(app: &AppHandle) {
     let labels = locked(&app.state::<AppWindows>().registry).empty_start_labels();
-    for window in labels.iter().filter_map(|label| app.get_webview_window(label)) {
+    for window in labels
+        .iter()
+        .filter_map(|label| app.get_webview_window(label))
+    {
         let _ = window.close();
     }
 }
@@ -520,7 +523,9 @@ pub fn note_written(app: &AppHandle, label: &str, fingerprint: Option<Fingerprin
 /// Command-line arguments that name an existing file, in order; opening reports the ones of an
 /// unsupported kind. Everything else (flags such as `--smoke`, missing paths, directories) is ignored.
 pub fn launch_files(args: impl Iterator<Item = String>) -> Vec<PathBuf> {
-    args.map(PathBuf::from).filter(|path| path.is_file()).collect()
+    args.map(PathBuf::from)
+        .filter(|path| path.is_file())
+        .collect()
 }
 
 /// The files of a second launch: `argv[0]` is the executable, the rest are the launch arguments.
