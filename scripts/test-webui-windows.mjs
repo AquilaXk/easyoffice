@@ -303,6 +303,24 @@ test("close request: 저장 안 함 closes, 취소 keeps the window, 저장 save
   assert.equal(shell.named("close_current_window").length, 2);
 });
 
+test("a save that throws keeps the window open and ends the close prompt", async () => {
+  const { document, shell, host, userClick, advanceTimers } = await openWindow(
+    "?module=DOC&win=w-throw-save",
+    { save_document_file: () => { throw new Error("디스크 오류"); } },
+    { localStorage: createMemoryStorage() },
+  );
+  typeIntoDocParagraph(document, "편집 내용");
+  advanceTimers(3000);
+  await flushAsyncTurns(10);
+  const pending = host.__EASYOFFICE_CLOSE_REQUEST__();
+  await flushAsyncTurns();
+  userClick(document.getElementById("btn-close-save"));
+  await pending;
+  await flushAsyncTurns(10);
+  assert.equal(shell.named("close_current_window").length, 0);
+  assert.equal(shell.named("end_close_prompt").length, 1);
+});
+
 test("a cancelled save dialog keeps the window open", async () => {
   const { document, shell, host, userClick, advanceTimers } = await openWindow(
     "?module=DOC&win=w-cancel-save",

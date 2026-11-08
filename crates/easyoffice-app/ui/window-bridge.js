@@ -352,7 +352,12 @@
       const choice = await askCloseChoice();
       if (choice === "cancel") return keepOpen();
       if (choice === "save") {
-        const saved = await deps.save();
+        let saved;
+        try {
+          saved = await deps.save();
+        } catch {
+          saved = false;
+        }
         if (saved === false) {
           feedback("저장하지 못해 창을 닫지 않았습니다");
           return keepOpen();

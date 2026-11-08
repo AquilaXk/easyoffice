@@ -300,8 +300,9 @@ fn handle_run_event(app: &AppHandle, event: tauri::RunEvent) {
             let windows = app.webview_windows();
             if !windows.is_empty() {
                 api.prevent_exit();
+                // A window already showing its save prompt is not asked again (that would close it).
                 for window in windows.values() {
-                    let _ = window.close();
+                    window_commands::raise_and_close(app, window);
                 }
             }
         }

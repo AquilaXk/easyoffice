@@ -129,16 +129,13 @@ pub fn window_destroyed(app: &AppHandle, label: &str) {
     }
 }
 
-/// Brings the window to the front (it may be minimized or behind others) and closes it, which runs
-/// its own close confirmation.
+/// Asks the window to close (`raise_and_close`): a window already showing its save prompt is not
+/// closed again, the quit waits for its answer (destroyed: next window; cancelled: quit stops).
 #[cfg(not(target_os = "macos"))]
 fn ask(app: &AppHandle, label: &str) {
-    let closed = app.get_webview_window(label).is_some_and(|window| {
-        let _ = window.unminimize();
-        let _ = window.show();
-        let _ = window.set_focus();
-        window.close().is_ok()
-    });
+    let closed = app
+        .get_webview_window(label)
+        .is_some_and(|window| crate::window_commands::raise_and_close(app, &window));
     if !closed {
         // The window could not be asked: stop instead of leaving a quit that never ends.
         app.state::<AppQuit>().cancel();
@@ -216,5 +213,16 @@ mod tests {
             ordered(all, Some("gone")),
             labels(&["doc-1", "doc-3", "main"])
         );
+    }
+
+    /// Structural guard: the menu quit and the macOS quit never call `close()` themselves; both go
+    /// through `raise_and_close`, which skips a window that is already showing its save prompt.
+    #[test]
+    fn quits_close_windows_only_through_raise_and_close() {
+        for source in [include_str!("app_quit.rs"), include_str!("main.rs")] {
+            let production = source.split("#[cfg(test)]").next().unwrap();
+            assert!(production.contains("raise_and_close"));
+            assert!(!production.contains(".close()"), "a direct close() call");
+        }
     }
 }

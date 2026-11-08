@@ -654,6 +654,17 @@ pub fn end_close_prompt(_caller: ShellCaller, app: AppHandle, window: WebviewWin
     app.state::<crate::app_quit::AppQuit>().cancel();
 }
 
+/// Brings a window to the front and asks it to close, which runs its own close confirmation. A
+/// window that is already showing its save prompt is only brought to the front: a second close
+/// request would close it without asking. Returns false when the window could not be asked.
+pub fn raise_and_close(app: &AppHandle, window: &WebviewWindow) -> bool {
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_focus();
+    let prompted = locked(&app.state::<AppWindows>().registry).is_close_prompted(window.label());
+    prompted || window.close().is_ok()
+}
+
 /// Destroys the calling window without another close request (the page already asked the user).
 #[tauri::command]
 pub fn close_current_window(_caller: ShellCaller, window: WebviewWindow) {

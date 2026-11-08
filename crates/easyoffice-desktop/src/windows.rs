@@ -219,6 +219,11 @@ impl WindowRegistry {
         CloseAction::AskPage
     }
 
+    /// The page is showing this window's save prompt (a close request now would skip it).
+    pub fn is_close_prompted(&self, label: &str) -> bool {
+        self.windows.get(label).is_some_and(|w| w.close_prompted)
+    }
+
     /// The user answered the close prompt without closing (cancel, or the save failed): the next
     /// close request asks again instead of closing at once.
     pub fn end_close_prompt(&mut self, label: &str) {
@@ -445,6 +450,10 @@ mod tests {
         let mut reg = WindowRegistry::default();
         reg.register("doc-1-a", WindowKind::Doc);
         reg.set_state("doc-1-a", "계획.hwpx", true);
+        assert_eq!(reg.begin_close("doc-1-a"), CloseAction::AskPage);
+        assert!(reg.is_close_prompted("doc-1-a"));
+        reg.end_close_prompt("doc-1-a");
+        assert!(!reg.is_close_prompted("doc-1-a"));
         assert_eq!(reg.begin_close("doc-1-a"), CloseAction::AskPage);
         // The user cancelled: without this the next close would go through unasked.
         reg.end_close_prompt("doc-1-a");
