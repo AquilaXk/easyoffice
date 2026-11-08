@@ -7,7 +7,9 @@
   "permissions": [
     "allow-ipc-dispatch",
     "allow-save-document-file",
-    "allow-export-searchable-pdf",
+    "allow-pdf-export-start",
+    "allow-pdf-export-pages",
+    "allow-pdf-export-finish",
     "allow-get-update-notice",
     "allow-set-update-check",
     "allow-open-release-page",

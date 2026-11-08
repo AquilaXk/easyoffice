@@ -358,6 +358,8 @@ fn attach_handlers(app: &AppHandle, window: &WebviewWindow) {
         }
         WindowEvent::Destroyed => {
             app.state::<shell_caller::ShellTokens>().forget(&label);
+            app.state::<std::sync::Arc<crate::pdf_job::PdfExports>>()
+                .forget(&label);
             persist_geometry(&app);
             let state = app.state::<AppWindows>();
             locked(&state.registry).remove(&label);

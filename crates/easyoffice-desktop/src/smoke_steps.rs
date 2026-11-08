@@ -17,8 +17,8 @@
 //! copy never runs `--smoke`.
 
 use crate::pdf_export;
+use crate::pdf_job::PdfFinish;
 use crate::preview::{self, PreviewState};
-use crate::save_file::SaveOutcome;
 use crate::update_check::{self, ACCEPT_HEADER};
 use crate::window_state::{MonitorRect, WindowGeometry, RECORD_LEN};
 use std::io::{Read, Write};
@@ -82,22 +82,32 @@ fn scratch_dir(tag: &str) -> Result<PathBuf, String> {
 
 // ---- pdf ---------------------------------------------------------------------------------------
 
-/// The smoke branch of `export_searchable_pdf`: checks the in-memory PDF and answers as if it had
-/// been saved, without a dialog and without writing a file.
+/// The smoke branch of the PDF export (`pdf_job.rs`): checks the in-memory PDF of `pages` pages and
+/// answers as if it had been saved, without a dialog and without writing a file. `has_text` says
+/// that a page held text.
 ///
 /// `bundled_font` says the font database holds the face the installer ships in `pdf-fonts/`: a
 /// shell that cannot find it would drop Korean text on a machine without a Korean font (PD-114),
 /// and a runner that has system fonts would not show it.
-pub fn verify_pdf(pages: &[String], pdf: &[u8], bundled_font: bool) -> Result<SaveOutcome, String> {
+pub fn verify_pdf(
+    pages: usize,
+    has_text: bool,
+    pdf: &[u8],
+    bundled_font: bool,
+) -> Result<PdfFinish, String> {
     if !bundled_font {
         return Err("설치본의 PDF 번들 글꼴(pdf-fonts)을 찾지 못했습니다.".to_string());
     }
-    let has_text = pages.iter().any(|svg| svg.contains("<text"));
-    let check = pdf_export::verify_exported_pdf(pdf, pages.len(), has_text)?;
+    let check = pdf_export::verify_exported_pdf(pdf, pages, has_text)?;
     if let Some(warning) = check.warning {
         eprintln!("smoke: warning: {warning}");
     }
-    Ok(SaveOutcome::saved(Path::new(SMOKE_PDF_NAME), pdf.len()))
+    Ok(PdfFinish::saved(
+        Path::new(SMOKE_PDF_NAME),
+        pdf.len(),
+        pages,
+        false,
+    ))
 }
 
 // ---- window_state ------------------------------------------------------------------------------
@@ -580,15 +590,14 @@ mod tests {
 
     #[test]
     fn the_pdf_branch_answers_like_a_save_and_names_what_is_wrong() {
-        let pages = vec!["<svg/>".to_string()];
-        assert!(verify_pdf(&pages, b"not a pdf", true).is_err());
-        let missing = verify_pdf(&pages, &minimal_pdf(1), false).unwrap_err();
+        assert!(verify_pdf(1, true, b"not a pdf", true).is_err());
+        let missing = verify_pdf(1, true, &minimal_pdf(1), false).unwrap_err();
         assert!(missing.contains("pdf-fonts"), "{missing}");
-        let outcome = verify_pdf(&pages, &minimal_pdf(1), true).expect("valid");
+        let outcome = verify_pdf(1, true, &minimal_pdf(1), true).expect("valid");
         assert_eq!(
             serde_json::to_string(&outcome).unwrap(),
             format!(
-                r#"{{"status":"saved","name":"smoke.pdf","bytes":{}}}"#,
+                r#"{{"status":"saved","name":"smoke.pdf","bytes":{},"pages":1,"opened":false}}"#,
                 minimal_pdf(1).len()
             )
         );

@@ -210,7 +210,7 @@
     activateHwp: () => ribbonHistory.activatePane("HWP"),
     deliverSavedFile: (base64, name, ext) => workspacePanels.deliverSavedFile(base64, name, ext),
     resolveBaseName: () => workspacePanels.resolveSaveFileBase("HWP"),
-    exportSearchablePdf: desktopBridge.isAvailable() ? (name, pages) => desktopBridge.exportSearchablePdf(name, pages) : null,
+    pdfExport: desktopBridge.isAvailable() ? desktopBridge.pdfExport : null,
     getDocumentId: () => windowBridge.launch.windowId,
     setDocumentName: (name) => windowBridge.setDocumentName(name, "HWP"),
     onDirtyChange: (dirty) => workspaceSession.setExternalDirty(dirty),

@@ -10,8 +10,10 @@
 //! Hot path: page SVGs are parsed straight from their bytes (no copy), the font database is built
 //! once per process, a character's fallback face is looked up once per export (`pdf_fonts.rs`),
 //! pages are converted on a few threads a batch at a time and each converted chunk is renumbered
-//! straight into the output and dropped, so only one batch of chunks is alive at once. Every size
-//! is bounded with `checked_*` arithmetic before any work starts.
+//! straight into the output and dropped, so only one batch of chunks is alive at once. The pages
+//! may themselves arrive a batch at a time ([`PdfAssembler`], PD-123), so the SVGs of a long
+//! document are not alive together either. Every size is bounded with `checked_*` arithmetic
+//! before any work starts.
 
 use pdf_writer::{Chunk, Content, Finish, Name, Pdf, Rect, Ref, TextStr};
 use std::cell::Cell;
@@ -44,27 +46,46 @@ const PX_TO_PT: f32 = 72.0 / 96.0;
 const PAGE_XOBJECT: Name<'static> = Name(b"S1");
 const PRODUCER: &str = "EasyOffice";
 
-/// Checks the page count and byte limits before anything is parsed.
-fn check_limits(pages: &[String]) -> Result<(), String> {
-    if pages.is_empty() {
-        return Err("내보낼 페이지가 없습니다.".to_string());
-    }
-    if pages.len() > MAX_PAGES {
-        return Err(format!(
-            "PDF로 내보낼 수 있는 쪽 수({MAX_PAGES})를 초과했습니다."
-        ));
-    }
-    let mut total = 0usize;
-    for (index, svg) in pages.iter().enumerate() {
-        if svg.len() > MAX_PAGE_SVG_BYTES {
-            return Err(format!("{}쪽 SVG가 허용 크기를 초과합니다.", index + 1));
+/// What the pages of one export have used so far, checked before each batch is parsed. The sums
+/// are the limits of the whole export, whether its pages come in one slice or in batches.
+#[derive(Debug, Default)]
+struct Budget {
+    pages: usize,
+    bytes: usize,
+}
+
+impl Budget {
+    /// Admits a batch, or says which limit it would pass. Nothing is parsed before this succeeds.
+    fn admit(&mut self, batch: &[String]) -> Result<(), String> {
+        if batch.is_empty() {
+            return Err("내보낼 페이지가 없습니다.".to_string());
         }
-        total = total
-            .checked_add(svg.len())
-            .filter(|sum| *sum <= MAX_TOTAL_SVG_BYTES)
-            .ok_or_else(|| "페이지 SVG 전체 크기가 허용 한도를 초과합니다.".to_string())?;
+        if self
+            .pages
+            .checked_add(batch.len())
+            .is_none_or(|sum| sum > MAX_PAGES)
+        {
+            return Err(format!(
+                "PDF로 내보낼 수 있는 쪽 수({MAX_PAGES})를 초과했습니다."
+            ));
+        }
+        let mut bytes = self.bytes;
+        for (offset, svg) in batch.iter().enumerate() {
+            if svg.len() > MAX_PAGE_SVG_BYTES {
+                return Err(format!(
+                    "{}쪽 SVG가 허용 크기를 초과합니다.",
+                    self.pages + offset + 1
+                ));
+            }
+            bytes = bytes
+                .checked_add(svg.len())
+                .filter(|sum| *sum <= MAX_TOTAL_SVG_BYTES)
+                .ok_or_else(|| "페이지 SVG 전체 크기가 허용 한도를 초과합니다.".to_string())?;
+        }
+        self.pages += batch.len();
+        self.bytes = bytes;
+        Ok(())
     }
-    Ok(())
 }
 
 thread_local! {
@@ -237,41 +258,80 @@ fn convert_batch(
     done.into_iter().map(|(_, page)| page).collect()
 }
 
-/// Converts page SVGs to one searchable PDF. Fails closed on any page that cannot be converted:
-/// a partial document would silently lose pages.
-pub fn svgs_to_searchable_pdf(pages: &[String], fonts: &Arc<Database>) -> Result<Vec<u8>, String> {
-    svgs_to_pdf(pages, fonts, true)
+/// A PDF built from page SVGs that arrive a batch at a time (PD-123): each batch is converted and
+/// written into the output at once and then dropped, so the page SVGs of a long document are never
+/// alive together. The limits of [`MAX_PAGES`], [`MAX_PAGE_SVG_BYTES`] and [`MAX_TOTAL_SVG_BYTES`]
+/// are counted over all batches. Any error ends the export (the caller drops the assembler), so
+/// a half-built PDF is never finished.
+pub struct PdfAssembler {
+    options: usvg::Options<'static>,
+    embed_text: bool,
+    budget: Budget,
+    alloc: Ref,
+    catalog_ref: Ref,
+    tree_ref: Ref,
+    page_refs: Vec<Ref>,
+    pdf: Pdf,
 }
 
-/// `embed_text = false` turns glyphs into outlines (smaller work, but the text can no longer be
-/// searched); it exists for the before/after measurement in the tests.
-fn svgs_to_pdf(
-    pages: &[String],
-    fonts: &Arc<Database>,
-    embed_text: bool,
-) -> Result<Vec<u8>, String> {
-    check_limits(pages)?;
-    let options = parse_options(&Arc::new(crate::pdf_fonts::with_mapped_faces(fonts)));
-    let mut alloc = Ref::new(1);
-    let catalog_ref = alloc.bump();
-    let tree_ref = alloc.bump();
-    let page_refs: Vec<Ref> = pages.iter().map(|_| alloc.bump()).collect();
-    let mut pdf = Pdf::new();
-    pdf.catalog(catalog_ref).pages(tree_ref);
-    let count = i32::try_from(page_refs.len()).unwrap_or(i32::MAX);
-    pdf.pages(tree_ref)
-        .count(count)
-        .kids(page_refs.iter().copied());
-    for (batch_index, batch) in pages.chunks(BATCH_PAGES).enumerate() {
-        let first = batch_index * BATCH_PAGES;
-        let converted = convert_batch(first, batch, &options, embed_text)?;
-        for (page, page_ref) in converted.into_iter().zip(&page_refs[first..]) {
-            place_page(&mut pdf, &mut alloc, tree_ref, *page_ref, page);
+impl PdfAssembler {
+    pub fn new(fonts: &Arc<Database>, embed_text: bool) -> Self {
+        let mut alloc = Ref::new(1);
+        let catalog_ref = alloc.bump();
+        let tree_ref = alloc.bump();
+        Self {
+            options: parse_options(&Arc::new(crate::pdf_fonts::with_mapped_faces(fonts))),
+            embed_text,
+            budget: Budget::default(),
+            alloc,
+            catalog_ref,
+            tree_ref,
+            page_refs: Vec::new(),
+            pdf: Pdf::new(),
         }
     }
-    let info_ref = alloc.bump();
-    pdf.document_info(info_ref).producer(TextStr(PRODUCER));
-    Ok(pdf.finish())
+
+    /// Pages written so far.
+    pub fn page_count(&self) -> usize {
+        self.page_refs.len()
+    }
+
+    /// Converts the next pages, in order, [`BATCH_PAGES`] at a time.
+    pub fn add_pages(&mut self, pages: &[String]) -> Result<(), String> {
+        self.budget.admit(pages)?;
+        for batch in pages.chunks(BATCH_PAGES) {
+            let converted =
+                convert_batch(self.page_refs.len(), batch, &self.options, self.embed_text)?;
+            for page in converted {
+                let page_ref = self.alloc.bump();
+                self.page_refs.push(page_ref);
+                place_page(
+                    &mut self.pdf,
+                    &mut self.alloc,
+                    self.tree_ref,
+                    page_ref,
+                    page,
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// The finished PDF: the catalog, the page tree over every page written, the document info.
+    pub fn finish(mut self) -> Result<Vec<u8>, String> {
+        if self.page_refs.is_empty() {
+            return Err("내보낼 페이지가 없습니다.".to_string());
+        }
+        self.pdf.catalog(self.catalog_ref).pages(self.tree_ref);
+        let count = i32::try_from(self.page_refs.len()).unwrap_or(i32::MAX);
+        self.pdf
+            .pages(self.tree_ref)
+            .count(count)
+            .kids(self.page_refs.iter().copied());
+        let info_ref = self.alloc.bump();
+        self.pdf.document_info(info_ref).producer(TextStr(PRODUCER));
+        Ok(self.pdf.finish())
+    }
 }
 
 /// Writes one page: its objects renumbered straight into the output (the chunk is dropped
@@ -390,6 +450,24 @@ mod tests {
     use super::*;
     use std::path::Path;
 
+    /// All pages in one slice: the whole export through [`PdfAssembler`]. Fails closed on any page
+    /// that cannot be converted, since a partial document would silently lose pages.
+    fn svgs_to_searchable_pdf(pages: &[String], fonts: &Arc<Database>) -> Result<Vec<u8>, String> {
+        svgs_to_pdf(pages, fonts, true)
+    }
+
+    /// `embed_text = false` turns glyphs into outlines (smaller work, but the text can no longer be
+    /// searched); it exists for the before/after measurement below.
+    fn svgs_to_pdf(
+        pages: &[String],
+        fonts: &Arc<Database>,
+        embed_text: bool,
+    ) -> Result<Vec<u8>, String> {
+        let mut assembler = PdfAssembler::new(fonts, embed_text);
+        assembler.add_pages(pages)?;
+        assembler.finish()
+    }
+
     const SAMPLE_TEXT: &str = "Searchable PDF 12345";
 
     fn page_svg(text: &str) -> String {
@@ -413,19 +491,52 @@ mod tests {
         (!db.is_empty()).then(|| Arc::new(db))
     }
 
+    fn admit(pages: &[String]) -> Result<(), String> {
+        Budget::default().admit(pages)
+    }
+
     #[test]
     fn limits_reject_empty_oversized_and_overflowing_inputs() {
-        assert!(check_limits(&[]).is_err());
+        assert!(admit(&[]).is_err());
         let many = vec![String::new(); MAX_PAGES + 1];
-        assert!(check_limits(&many).unwrap_err().contains("쪽 수"));
+        assert!(admit(&many).unwrap_err().contains("쪽 수"));
         let big = vec!["x".repeat(MAX_PAGE_SVG_BYTES + 1)];
-        assert!(check_limits(&big).unwrap_err().contains("1쪽"));
+        assert!(admit(&big).unwrap_err().contains("1쪽"));
         let page = "x".repeat(MAX_PAGE_SVG_BYTES);
         let too_many_bytes = vec![page; MAX_TOTAL_SVG_BYTES / MAX_PAGE_SVG_BYTES + 1];
-        assert!(check_limits(&too_many_bytes)
-            .unwrap_err()
-            .contains("전체 크기"));
-        assert!(check_limits(&[page_svg("ok")]).is_ok());
+        assert!(admit(&too_many_bytes).unwrap_err().contains("전체 크기"));
+        assert!(admit(&[page_svg("ok")]).is_ok());
+    }
+
+    /// The limits belong to the export, not to a batch: pages and bytes add up over the batches,
+    /// a refused batch changes nothing, and a page number in a message is the document's.
+    #[test]
+    fn limits_add_up_over_batches_and_a_refused_batch_changes_nothing() {
+        let mut budget = Budget::default();
+        let ten = vec![String::new(); 10];
+        for _ in 0..MAX_PAGES / 10 {
+            budget.admit(&ten).expect("within the page limit");
+        }
+        assert_eq!(budget.pages, MAX_PAGES);
+        let err = budget.admit(&ten[..1]).unwrap_err();
+        assert!(err.contains("쪽 수") && err.contains("2000"), "{err}");
+        assert_eq!(budget.pages, MAX_PAGES, "a refused batch is not counted");
+
+        let mut budget = Budget::default();
+        let big = vec!["x".repeat(MAX_PAGE_SVG_BYTES)];
+        for _ in 0..MAX_TOTAL_SVG_BYTES / MAX_PAGE_SVG_BYTES {
+            budget.admit(&big).expect("within the byte limit");
+        }
+        let err = budget.admit(&[String::from("x")]).unwrap_err();
+        assert!(err.contains("전체 크기"), "{err}");
+        assert_eq!(budget.bytes, MAX_TOTAL_SVG_BYTES);
+
+        let mut budget = Budget::default();
+        budget.admit(&ten).expect("first batch");
+        let mut second = vec![String::new(); 2];
+        second.push("x".repeat(MAX_PAGE_SVG_BYTES + 1));
+        let err = budget.admit(&second).unwrap_err();
+        assert!(err.starts_with("13쪽"), "page 10 + 3: {err}");
     }
 
     #[test]
@@ -522,6 +633,31 @@ mod tests {
         eprintln!(
             "MEASURE pages=300 svg_bytes={} pdf_bytes={} elapsed={:?}",
             pages.iter().map(String::len).sum::<usize>(),
+            pdf.len(),
+            started.elapsed()
+        );
+        assert!(verify_exported_pdf(&pdf, 300, true).is_ok());
+    }
+
+    /// The same 300 pages as above, but the page SVGs are made ten at a time and dropped after
+    /// each batch, the way the shell now receives them: `cargo test --release -p
+    /// easyoffice-desktop hundreds_of_streamed_pages -- --ignored --nocapture` under
+    /// `/usr/bin/time -l` (peak RSS).
+    #[test]
+    #[ignore = "measurement, run by hand"]
+    fn hundreds_of_streamed_pages_are_measured() {
+        let Some(db) = system_font_db() else { return };
+        let started = std::time::Instant::now();
+        let mut assembler = PdfAssembler::new(&db, true);
+        let mut svg_bytes = 0;
+        for first in (0..300).step_by(10) {
+            let batch: Vec<String> = (first..first + 10).map(report_page_svg).collect();
+            svg_bytes += batch.iter().map(String::len).sum::<usize>();
+            assembler.add_pages(&batch).expect("batch");
+        }
+        let pdf = assembler.finish().expect("pdf");
+        eprintln!(
+            "MEASURE streamed pages=300 svg_bytes={svg_bytes} pdf_bytes={} elapsed={:?}",
             pdf.len(),
             started.elapsed()
         );
@@ -803,6 +939,45 @@ mod tests {
             svgs_to_searchable_pdf(&pages, &db),
             svgs_to_searchable_pdf(&pages, &db)
         );
+    }
+
+    /// The batches an export arrives in do not show in the file: the same pages give the same bytes
+    /// in one slice, ten at a time, or one at a time.
+    #[test]
+    fn pages_added_in_batches_give_the_bytes_of_one_slice() {
+        let Some(db) = system_font_db() else { return };
+        let pages: Vec<String> = (0..25)
+            .map(|i| page_svg(&format!("{SAMPLE_TEXT} page {i}")))
+            .collect();
+        let whole = svgs_to_searchable_pdf(&pages, &db).expect("pdf");
+        for size in [1, 10] {
+            let mut assembler = PdfAssembler::new(&db, true);
+            for batch in pages.chunks(size) {
+                assembler.add_pages(batch).expect("batch");
+            }
+            assert_eq!(assembler.page_count(), pages.len());
+            assert_eq!(assembler.finish().expect("pdf"), whole, "batches of {size}");
+        }
+    }
+
+    #[test]
+    fn a_failing_page_of_a_later_batch_is_named_by_its_place_in_the_document() {
+        let db = Arc::new(Database::new());
+        let mut assembler = PdfAssembler::new(&db, true);
+        assembler
+            .add_pages(&vec![blank_page(8); 10])
+            .expect("first batch");
+        let err = assembler
+            .add_pages(&[blank_page(8), "not svg".to_string()])
+            .unwrap_err();
+        assert!(err.starts_with("12쪽"), "{err}");
+    }
+
+    #[test]
+    fn an_assembler_with_no_pages_has_no_pdf() {
+        let db = Arc::new(Database::new());
+        assert!(PdfAssembler::new(&db, true).finish().is_err());
+        assert!(PdfAssembler::new(&db, true).add_pages(&[]).is_err());
     }
 
     #[test]

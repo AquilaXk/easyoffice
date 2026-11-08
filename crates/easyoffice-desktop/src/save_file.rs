@@ -37,7 +37,7 @@ pub struct SaveRequest {
 }
 
 /// Validates a proposed file name and returns `(file name, lower-case extension)`.
-fn split_file_name(file_name: &str) -> Result<(String, String), String> {
+pub(crate) fn split_file_name(file_name: &str) -> Result<(String, String), String> {
     // Keep only the final component so a proposed name can never point at another directory.
     let base = file_name
         .rsplit(['/', '\\'])

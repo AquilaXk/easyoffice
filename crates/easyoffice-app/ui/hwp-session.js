@@ -8,10 +8,13 @@
 
   const MAX_HWP_BYTES = 64 * 1024 * 1024;
   const MAX_HWP_LABEL = "64 MiB";
-  // Same page ceiling as the shell's PDF export (`pdf_export.rs`, PD-101).
+  // Same page ceiling as the shell's PDF export (`pdf_export.rs`, PD-101), and the batch size of its
+  // `pdf_export_pages` call (`MAX_PAGES_PER_CALL` in `pdf_job.rs`, the print path's 10 pages too).
   const MAX_PDF_PAGES = 2000;
+  const PDF_BATCH_PAGES = 10;
   const PDF_PAGE_TIMEOUT_MS = 120000;
   const SMOKE_PDF_NAME = "smoke.pdf";
+  const MSG_PDF_BUSY = "이미 PDF를 내보내고 있습니다";
   const MSG_PDF_UNAVAILABLE = "PDF로 내보내기는 데스크톱 앱의 한글 편집기에서만 사용할 수 있습니다";
   const HWP_EXTENSIONS = new Set(["hwp", "hwpx", "hwt", "hwtx"]);
   const OPEN_TIMEOUT_MS = 10 * 60 * 1000; // an encrypted document waits for the user's password
@@ -192,6 +195,7 @@
     let dirty = false;
     let editSeq = 0;
     let busy = false; // open / restore in flight
+    let exportingPdf = false; // a PDF export is running (its save dialog included)
     let saving = false;
     let autosaving = false;
     let idleTimer = null;
@@ -631,51 +635,98 @@
       }
     }
 
-    // The page SVGs come out of the editor over the embed port; `onProgress(done, count)` hears 0 of
-    // the page count first and then each page as it arrives.
-    async function readPageSvgs(onProgress) {
+    // ---- searchable PDF (PD-101, PD-114, PD-123) --------------------------------------------------
+
+    function pdfAvailable() {
+      return hwpHost.isEmbedActive() && deps.pdfExport && typeof deps.pdfExport.start === "function";
+    }
+
+    async function readPdfPageCount() {
       const count = await hwpHost.call("pageCount");
       if (!Number.isInteger(count) || count < 1 || count > MAX_PDF_PAGES) {
         throw new Error("쪽 수(" + count + ")가 1~" + MAX_PDF_PAGES + " 범위를 벗어납니다");
       }
-      onProgress(0, count);
-      const options = { timeoutMs: PDF_PAGE_TIMEOUT_MS };
-      let done = 0;
-      const pages = await Promise.all(Array.from({ length: count }, async (_, page) => {
-        const svg = await hwpHost.call("getPageSvg", { page }, options);
-        onProgress(++done, count);
-        return svg;
-      }));
-      if (!pages.every((svg) => typeof svg === "string" && svg !== "")) throw new Error("쪽 그림을 받지 못했습니다");
-      return pages;
+      return count;
     }
 
-    // Searchable PDF (PD-101): the page SVGs go to the desktop shell as text; Rust builds the PDF and
-    // owns the file dialog and the path.
+    // One batch of page SVGs out of the editor over the embed port; `onPage()` hears each page as it
+    // arrives.
+    async function readPageBatch(first, count, onPage) {
+      const options = { timeoutMs: PDF_PAGE_TIMEOUT_MS };
+      const svgs = await Promise.all(Array.from({ length: count }, async (_, offset) => {
+        const svg = await hwpHost.call("getPageSvg", { page: first + offset }, options);
+        onPage();
+        return svg;
+      }));
+      if (!svgs.every((svg) => typeof svg === "string" && svg !== "")) throw new Error("쪽 그림을 받지 못했습니다");
+      return svgs;
+    }
+
+    // The PDF is built in the shell while the pages come: the shell asks where to save first (so a
+    // cancelled dialog renders nothing), then gets the pages `PDF_BATCH_PAGES` at a time like the print
+    // path, so no more than one batch of SVG text is alive here or there. `onProgress(done, count)`
+    // hears 0 of the page count first and then each page as it arrives. Any failure drops the shell's
+    // export, which writes the file only at the end, so a partial PDF never exists.
+    async function runPdfExport(fileName, onProgress) {
+      const count = await readPdfPageCount();
+      const started = await deps.pdfExport.start(fileName);
+      if (started.status !== "started") return { cancelled: true, count };
+      let done = 0;
+      try {
+        onProgress(0, count);
+        for (let first = 0; first < count; first += PDF_BATCH_PAGES) {
+          const size = Math.min(PDF_BATCH_PAGES, count - first);
+          const svgs = await readPageBatch(first, size, () => onProgress(++done, count));
+          await deps.pdfExport.pages(started.jobId, svgs);
+        }
+        return { cancelled: false, count, result: await deps.pdfExport.finish(started.jobId, true) };
+      } catch (err) {
+        await deps.pdfExport.finish(started.jobId, false).catch(() => null);
+        throw err;
+      }
+    }
+
+    function pdfDoneText(result, count) {
+      const opened = result.opened === false ? " · 저장했으나 기본 앱으로 열지 못했습니다" : "";
+      return "PDF 내보내기 완료 (" + result.name + " · " + count + "쪽)" + opened;
+    }
+
+    // Searchable PDF: the page SVGs go to the desktop shell as text; Rust builds the PDF and owns the
+    // file dialog, the path and opening the result.
     async function exportPdf() {
-      if (!hwpHost.isEmbedActive() || typeof deps.exportSearchablePdf !== "function") {
+      if (!pdfAvailable()) {
         feedback(MSG_PDF_UNAVAILABLE);
         return null;
       }
+      if (exportingPdf) {
+        feedback(MSG_PDF_BUSY);
+        return null;
+      }
+      exportingPdf = true;
       try {
-        const pages = await readPageSvgs((done, count) => feedback("PDF 만드는 중: " + done + " / " + count + "쪽"));
-        const result = await deps.exportSearchablePdf(deps.resolveBaseName() + ".pdf", pages);
-        feedback(result.status === "saved" ? "PDF 내보내기 완료 (" + result.name + " · " + pages.length + "쪽)" : "PDF 내보내기 취소: 저장 위치를 선택하지 않았습니다");
-        return result;
+        const run = await runPdfExport(deps.resolveBaseName() + ".pdf", (done, count) => feedback("PDF 만드는 중: " + done + " / " + count + "쪽"));
+        if (run.cancelled) {
+          feedback("PDF 내보내기 취소: 저장 위치를 선택하지 않았습니다");
+          return { status: "cancelled", name: null, bytes: 0 };
+        }
+        feedback(run.result.status === "saved" ? pdfDoneText(run.result, run.count) : "PDF 내보내기 취소: 저장하지 않았습니다");
+        return run.result;
       } catch (err) {
         feedback("PDF 내보내기 실패: " + describeError(err));
         return null;
+      } finally {
+        exportingPdf = false;
       }
     }
 
     // `--smoke` step `pdf`: the same pages go to the shell, which in the smoke run checks the PDF in
     // memory (no dialog, no file) and answers as if it had saved `smoke.pdf`.
     async function smokePdf() {
-      if (!hwpHost.isEmbedActive() || typeof deps.exportSearchablePdf !== "function") throw new Error(MSG_PDF_UNAVAILABLE);
-      const pages = await readPageSvgs(() => {});
-      const result = await deps.exportSearchablePdf(SMOKE_PDF_NAME, pages);
+      if (!pdfAvailable()) throw new Error(MSG_PDF_UNAVAILABLE);
+      const run = await runPdfExport(SMOKE_PDF_NAME, () => {});
+      const result = run.result;
       if (result?.status !== "saved" || result.name !== SMOKE_PDF_NAME) throw new Error("셸이 PDF 검사 결과를 돌려주지 않았습니다");
-      return "pages=" + pages.length + " bytes=" + result.bytes;
+      return "pages=" + run.count + " bytes=" + result.bytes;
     }
 
     async function saveAs(format) {

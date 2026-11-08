@@ -15,6 +15,7 @@ mod os_recent;
 mod pdf_export;
 mod pdf_font_fallbacks;
 mod pdf_fonts;
+mod pdf_job;
 mod preview;
 mod recent;
 mod save_file;
@@ -130,43 +131,37 @@ async fn save_document_file(
     save_via_dialog(&app, &window, request).await
 }
 
-/// Builds a searchable PDF from the page SVGs of the Hangul editor and saves it through the same
-/// native save dialog (PD-101). The page supplies SVG text only; fonts and the target path stay in
-/// Rust.
-#[tauri::command]
-async fn export_searchable_pdf(
-    _caller: ShellCaller,
-    app: AppHandle,
-    window: WebviewWindow,
-    file_name: String,
-    pages: Vec<String>,
-) -> Result<SaveOutcome, IpcError> {
-    let font_dirs: Vec<std::path::PathBuf> = app
-        .path()
-        .resource_dir()
-        .map(|dir| vec![dir.join(PDF_FONT_DIR)])
-        .unwrap_or_default();
-    let (pages, pdf, bundled_font) = tauri::async_runtime::spawn_blocking(move || {
-        let fonts = pdf_export::shared_font_db(&font_dirs);
-        let bundled_font = pdf_fonts::has_face_from(&fonts, &font_dirs);
-        pdf_export::svgs_to_searchable_pdf(&pages, &fonts).map(|pdf| (pages, pdf, bundled_font))
-    })
-    .await
-    .map_err(|err| IpcError::new(format!("PDF 내보내기를 실행하지 못했습니다: {err}")))?
-    .map_err(IpcError::new)?;
-    if app.try_state::<SmokeProbe>().is_some() {
-        // The smoke run checks the PDF in memory: no dialog, no file (smoke_steps.rs).
-        return smoke_steps::verify_pdf(&pages, &pdf, bundled_font).map_err(IpcError::new);
-    }
-    let request = SaveRequest::from_bytes(&file_name, pdf).map_err(IpcError::new)?;
-    if request.extension() != "pdf" {
-        return Err(IpcError::new("PDF 파일 이름은 .pdf 확장자여야 합니다."));
-    }
-    save_via_dialog(&app, &window, request).await
+/// Asks where to save with the native save dialog; `None` when the user cancels. The page proposes
+/// the file name only (`file_name`, `label` for the filter), the path stays in Rust.
+pub(crate) async fn pick_save_path(
+    app: &AppHandle,
+    window: &WebviewWindow,
+    title: &str,
+    file_name: &str,
+    label: &str,
+    extension: &str,
+) -> Result<Option<std::path::PathBuf>, IpcError> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.dialog()
+        .file()
+        .set_parent(window)
+        .set_title(title)
+        .set_file_name(file_name)
+        .add_filter(label, &[extension])
+        .save_file(move |picked| {
+            let _ = tx.send(picked);
+        });
+    let picked = tauri::async_runtime::spawn_blocking(move || rx.recv().ok().flatten())
+        .await
+        .map_err(|err| IpcError::new(format!("저장 대화상자를 열지 못했습니다: {err}")))?;
+    picked
+        .map(|picked| {
+            picked
+                .into_path()
+                .map_err(|err| IpcError::new(format!("저장 위치를 확인할 수 없습니다: {err}")))
+        })
+        .transpose()
 }
-
-/// Resource sub-directory that holds the bundled OFL fonts used when embedding PDF text.
-const PDF_FONT_DIR: &str = "pdf-fonts";
 
 /// Asks where to save with the native dialog and writes the request there.
 async fn save_via_dialog(
@@ -174,25 +169,18 @@ async fn save_via_dialog(
     window: &WebviewWindow,
     request: SaveRequest,
 ) -> Result<SaveOutcome, IpcError> {
-    let (tx, rx) = std::sync::mpsc::channel();
-    app.dialog()
-        .file()
-        .set_parent(window)
-        .set_title("문서 저장")
-        .set_file_name(request.file_name())
-        .add_filter(request.filter_label(), &[request.extension()])
-        .save_file(move |picked| {
-            let _ = tx.send(picked);
-        });
-    let picked = tauri::async_runtime::spawn_blocking(move || rx.recv().ok().flatten())
-        .await
-        .map_err(|err| IpcError::new(format!("저장 대화상자를 열지 못했습니다: {err}")))?;
-    let Some(picked) = picked else {
+    let Some(path) = pick_save_path(
+        app,
+        window,
+        "문서 저장",
+        request.file_name(),
+        &request.filter_label(),
+        request.extension(),
+    )
+    .await?
+    else {
         return Ok(SaveOutcome::cancelled());
     };
-    let path = picked
-        .into_path()
-        .map_err(|err| IpcError::new(format!("저장 위치를 확인할 수 없습니다: {err}")))?;
     let written = tauri::async_runtime::spawn_blocking(move || {
         write_document_bytes(&path, request.bytes()).map(|written| (path, written))
     })
@@ -280,7 +268,9 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             ipc_dispatch,
             save_document_file,
-            export_searchable_pdf,
+            pdf_job::pdf_export_start,
+            pdf_job::pdf_export_pages,
+            pdf_job::pdf_export_finish,
             update_check::get_update_notice,
             update_check::set_update_check,
             update_check::open_release_page,
@@ -304,6 +294,7 @@ fn main() {
             app.manage(shell_caller::ShellTokens::default());
             app.manage(AppWindows::new(app.path().app_data_dir().ok()));
             app.manage(app_quit::AppQuit::default());
+            app.manage(std::sync::Arc::new(pdf_job::PdfExports::default()));
             // macOS gets the native menu bar beside the page's menu row; Windows and Linux have only
             // the page's row, as in the reference app (PD-121).
             #[cfg(target_os = "macos")]
@@ -417,7 +408,7 @@ mod tests {
         );
         assert_eq!(value["windows"], serde_json::json!(["main", "doc-*"]));
         assert_eq!(value["local"], serde_json::json!(true));
-        assert_eq!(app_commands::APP_COMMANDS.len(), 20);
+        assert_eq!(app_commands::APP_COMMANDS.len(), 22);
     }
 
     #[test]

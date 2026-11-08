@@ -9,7 +9,12 @@
   const DISCONNECTED_MESSAGE = "연결할 수 없습니다. 앱을 다시 시작해 주세요.";
   const IPC_COMMAND = "ipc_dispatch";
   const SAVE_COMMAND = "save_document_file";
-  const EXPORT_PDF_COMMAND = "export_searchable_pdf";
+  // Searchable PDF export of the Hangul editor (PD-123): choose the file, send the pages in batches, finish.
+  const PDF_EXPORT_COMMANDS = Object.freeze({
+    start: "pdf_export_start",
+    pages: "pdf_export_pages",
+    finish: "pdf_export_finish",
+  });
   // Update notice (PD-103): the shell checks for a newer release and installs it (signed package);
   // the page only reads the state, switches the check on or off and asks the shell to start the
   // install or to open the release page (it passes no address and no package).
@@ -118,13 +123,31 @@
     throw new Error("저장 결과를 확인하지 못했습니다.");
   }
 
-  // Searchable PDF of the Hangul editor's page SVGs (PD-101). The page sends SVG text only; Rust
-  // builds the PDF and asks where to save it. Resolves like `saveFile`.
-  async function exportSearchablePdf(fileName, pages) {
-    const res = await callShell(EXPORT_PDF_COMMAND, { fileName: String(fileName), pages });
-    if (res && (res.status === "saved" || res.status === "cancelled")) return res;
-    throw new Error("PDF 저장 결과를 확인하지 못했습니다.");
-  }
+  // Searchable PDF of the Hangul editor's page SVGs (PD-101, PD-123). Rust owns the save dialog, the
+  // file and the OS "open"; the page sends a file name, then SVG text a batch at a time, then asks
+  // to finish. Nothing here takes or returns a path.
+  //   start(fileName)       -> { status: "started", jobId } | { status: "cancelled" } (no location chosen)
+  //   pages(jobId, svgs)    -> { pages } (how many the PDF holds now; at most 10 svgs per call)
+  //   finish(jobId, commit) -> { status: "saved", name, bytes, pages, opened } | { status: "cancelled" }
+  //                            (commit false drops the export; both are safe to repeat)
+  const pdfExport = Object.freeze({
+    async start(fileName) {
+      const res = await callShell(PDF_EXPORT_COMMANDS.start, { fileName: String(fileName) });
+      if (res?.status === "cancelled") return { status: "cancelled" };
+      if (res?.status === "started" && Number.isSafeInteger(res.jobId)) return { status: "started", jobId: res.jobId };
+      throw new Error("PDF 저장 위치 확인 결과를 받지 못했습니다.");
+    },
+    async pages(jobId, svgs) {
+      const res = await callShell(PDF_EXPORT_COMMANDS.pages, { jobId, pages: svgs });
+      if (Number.isSafeInteger(res?.pages)) return res;
+      throw new Error("PDF 쪽 변환 결과를 확인하지 못했습니다.");
+    },
+    async finish(jobId, commit) {
+      const res = await callShell(PDF_EXPORT_COMMANDS.finish, { jobId, commit: Boolean(commit) });
+      if (res && (res.status === "saved" || res.status === "cancelled")) return res;
+      throw new Error("PDF 저장 결과를 확인하지 못했습니다.");
+    },
+  });
   const getUpdateNotice = () => callShell(UPDATE_COMMANDS.get, {});
   const setUpdateCheck = (enabled) => callShell(UPDATE_COMMANDS.set, { enabled: Boolean(enabled) });
   const openReleasePage = () => callShell(UPDATE_COMMANDS.open, {});
@@ -147,5 +170,5 @@
     return callShell(command, args || {});
   }
 
-  host.__EASYOFFICE_DESKTOP_BRIDGE__ = { isAvailable, invokeIpc, saveFile, exportSearchablePdf, getUpdateNotice, setUpdateCheck, openReleasePage, installUpdate, describeShellError, windowCommand, confirm, CONFIRM_BROWSER_TEXT, WINDOW_COMMANDS };
+  host.__EASYOFFICE_DESKTOP_BRIDGE__ = { isAvailable, invokeIpc, saveFile, pdfExport, getUpdateNotice, setUpdateCheck, openReleasePage, installUpdate, describeShellError, windowCommand, confirm, CONFIRM_BROWSER_TEXT, WINDOW_COMMANDS };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

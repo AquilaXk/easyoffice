@@ -128,7 +128,7 @@ function load(options = {}) {
     onDirtyChange: (d) => dirtyLog.push(d),
     resolveBaseName: () => "보고서",
     deliverSavedFile: options.deliver,
-    exportSearchablePdf: options.exportPdf,
+    pdfExport: options.pdfExport,
     setFeedback: options.setFeedback,
     defaultNotice: "기본 안내",
     autosaveIdleMs: 20, autosaveMaxWaitMs: 50,
@@ -750,41 +750,94 @@ test("utils: only the HWP family is routed and the limit is 64 MiB", () => {
   for (const name of ["a.docx", "hwp", "a.hwp.txt"]) assert.equal(utils.isHwpName(name), false, name);
 });
 
-// ---- searchable PDF export (PD-101) --------------------------------------------------------------
+// ---- searchable PDF export (PD-101, PD-123) ------------------------------------------------------
 
-const PDF_SAVED = Object.freeze({ status: "saved", name: "보고서.pdf", bytes: 10 });
-const pdfRecorder = (result = PDF_SAVED) => {
-  const sent = [];
-  const exportPdf = async (fileName, pages) => {
-    sent.push({ fileName, pages });
-    if (result instanceof Error) throw result;
-    return result;
+const PDF_SAVED = Object.freeze({ status: "saved", name: "보고서.pdf", bytes: 10, pages: 3, opened: true });
+
+// A fake of the shell's three PDF commands (`desktop-bridge.js` `pdfExport`). `log` is what the shell
+// saw in order; `renderedAt` is how many page SVGs the editor had been asked for at each shell call, so
+// a test can tell when a page was rendered relative to the dialog and to the batch before it.
+function pdfShell(ctx, { start = { status: "started", jobId: 7 }, finish = PDF_SAVED, failPages = null } = {}) {
+  const log = [];
+  const renderedAt = [];
+  const rendered = () => ctx.fake.calls.filter((c) => c.method === "getPageSvg").length;
+  const record = (entry) => { log.push(entry); renderedAt.push(rendered()); };
+  return {
+    log, renderedAt,
+    start: async (fileName) => {
+      record({ op: "start", fileName });
+      if (start instanceof Error) throw start;
+      return start;
+    },
+    pages: async (jobId, svgs) => {
+      record({ op: "pages", jobId, svgs });
+      if (failPages) throw failPages;
+      return { pages: log.filter((e) => e.op === "pages").reduce((n, e) => n + e.svgs.length, 0) };
+    },
+    finish: async (jobId, commit) => {
+      record({ op: "finish", jobId, commit });
+      if (!commit) return { status: "cancelled" };
+      if (finish instanceof Error) throw finish;
+      return finish;
+    },
   };
-  return { sent, exportPdf };
-};
+}
 
 function pdfPages(ctx, count, pageFor = (i) => `<svg id="p${i}"/>`) {
   ctx.fake.state.handlers.pageCount = () => count;
   ctx.fake.state.handlers.getPageSvg = ({ page }) => pageFor(page);
 }
 
-test("PDF export: every page SVG is fetched over the embed port and sent to the shell as an array of strings", async () => {
-  const { sent, exportPdf } = pdfRecorder();
-  const ctx = load({ exportPdf });
-  pdfPages(ctx, 3);
+// `load` needs the shell before the fake host exists, so the shell is bound afterwards.
+function loadPdf(shellOptions, loadOptions = {}) {
+  let shell = null;
+  const proxy = {
+    start: (...args) => shell.start(...args),
+    pages: (...args) => shell.pages(...args),
+    finish: (...args) => shell.finish(...args),
+  };
+  const ctx = load({ ...loadOptions, pdfExport: proxy });
+  shell = pdfShell(ctx, shellOptions);
+  return { ctx, shell };
+}
+
+test("PDF export: the location is asked first, then the pages go to the shell ten at a time and the file is finished", async () => {
+  const { ctx, shell } = loadPdf();
+  pdfPages(ctx, 23);
   const result = await ctx.session.exportPdf();
   assert.equal(result.status, "saved");
-  assert.deepEqual(sent, [{ fileName: "보고서.pdf", pages: ['<svg id="p0"/>', '<svg id="p1"/>', '<svg id="p2"/>'] }]);
+  assert.deepEqual(shell.log.map((e) => [e.op, e.svgs?.length ?? e.fileName ?? e.commit]), [
+    ["start", "보고서.pdf"], ["pages", 10], ["pages", 10], ["pages", 3], ["finish", true],
+  ]);
+  assert.ok(shell.log.every((e) => e.jobId === undefined || e.jobId === 7), "every call names the job the shell opened");
+  assert.deepEqual(shell.log.filter((e) => e.op === "pages").flatMap((e) => e.svgs), Array.from({ length: 23 }, (_, i) => `<svg id="p${i}"/>`), "all pages, in order");
   const fetched = ctx.fake.calls.filter((c) => c.method === "getPageSvg");
-  assert.deepEqual(fetched.map((c) => c.params), [{ page: 0 }, { page: 1 }, { page: 2 }]);
+  assert.deepEqual(fetched.map((c) => c.params.page), Array.from({ length: 23 }, (_, i) => i));
   assert.ok(fetched.every((c) => c.options.timeoutMs >= 60000), "page rendering gets a long timeout");
-  assert.match(feedbackOf(ctx), /^PDF 내보내기 완료 \(보고서\.pdf · 3쪽\)$/);
+  assert.match(feedbackOf(ctx), /^PDF 내보내기 완료 \(보고서\.pdf · 23쪽\)$/);
+});
+
+test("PDF export: cancelling the save dialog renders nothing and sends nothing", async () => {
+  const { ctx, shell } = loadPdf({ start: { status: "cancelled" } });
+  pdfPages(ctx, 40);
+  const result = await ctx.session.exportPdf();
+  assert.equal(result.status, "cancelled");
+  assert.deepEqual(shell.log.map((e) => e.op), ["start"], "no pages, no finish");
+  assert.equal(ctx.fake.calls.filter((c) => c.method === "getPageSvg").length, 0, "not one page was rendered");
+  assert.match(feedbackOf(ctx), /^PDF 내보내기 취소: 저장 위치를 선택하지 않았습니다$/);
+});
+
+test("PDF export: a batch is rendered only after the shell took the one before, so at most ten page SVGs wait at a time", async () => {
+  const { ctx, shell } = loadPdf();
+  pdfPages(ctx, 23);
+  await ctx.session.exportPdf();
+  assert.deepEqual(shell.log.map((e) => e.op), ["start", "pages", "pages", "pages", "finish"]);
+  assert.deepEqual(shell.renderedAt, [0, 10, 20, 23, 23], "page 11 is asked for after batch 1 was handed over, and so on");
 });
 
 test("PDF export: the status line counts the pages as they arrive and ends with the result", async () => {
-  const { exportPdf } = pdfRecorder();
   const lines = [];
-  const ctx = load({ exportPdf, setFeedback: (line) => lines.push(line) });
+  const { ctx } = loadPdf({ finish: { ...PDF_SAVED, pages: 3 } }, { setFeedback: (line) => lines.push(line) });
   pdfPages(ctx, 3);
   await ctx.session.exportPdf();
   assert.deepEqual(lines, [
@@ -796,64 +849,91 @@ test("PDF export: the status line counts the pages as they arrive and ends with 
   ]);
 });
 
+test("PDF export: a file that was saved but could not be opened says so", async () => {
+  const { ctx } = loadPdf({ finish: { ...PDF_SAVED, opened: false } });
+  pdfPages(ctx, 2);
+  assert.equal((await ctx.session.exportPdf()).status, "saved");
+  assert.equal(feedbackOf(ctx), "PDF 내보내기 완료 (보고서.pdf · 2쪽) · 저장했으나 기본 앱으로 열지 못했습니다");
+});
+
 test("PDF export: not available without the desktop shell or while the editor is not ready", async () => {
   const plain = load();
   pdfPages(plain, 2);
   assert.equal(await plain.session.exportPdf(), null);
   assert.match(feedbackOf(plain), /데스크톱 앱의 한글 편집기에서만/);
   assert.equal(plain.fake.calls.filter((c) => c.method === "getPageSvg").length, 0);
-  const { sent, exportPdf } = pdfRecorder();
-  const legacy = load({ exportPdf, host: { status: "legacy" } });
+  const { ctx: legacy, shell } = loadPdf({}, { host: { status: "legacy" } });
   assert.equal(await legacy.session.exportPdf(), null);
-  assert.deepEqual(sent, []);
+  assert.deepEqual(shell.log, []);
 });
 
-test("PDF export: the page count is checked against the shell's 2,000 page ceiling before any page is rendered", async () => {
-  const { sent, exportPdf } = pdfRecorder();
-  const rejects = async (count) => {
-    const ctx = load({ exportPdf });
+test("PDF export: the page count is checked against the 2,000 page ceiling before the dialog and before any page is rendered", async () => {
+  for (const count of [0, 2001, -1, 1.5, "3", null]) {
+    const { ctx, shell } = loadPdf();
     pdfPages(ctx, count);
     assert.equal(await ctx.session.exportPdf(), null, String(count));
     assert.match(feedbackOf(ctx), /^PDF 내보내기 실패: 쪽 수/);
     assert.equal(ctx.fake.calls.filter((c) => c.method === "getPageSvg").length, 0);
-  };
-  await Promise.all([0, 2001, -1, 1.5, "3", null].map(rejects));
-  assert.deepEqual(sent, []);
-  const edge = load({ exportPdf });
+    assert.deepEqual(shell.log, [], "no dialog for a document the shell would refuse");
+  }
+  const { ctx: edge, shell } = loadPdf();
   pdfPages(edge, 2000);
   assert.equal((await edge.session.exportPdf()).status, "saved");
-  assert.equal(sent[0].pages.length, 2000);
+  const batches = shell.log.filter((e) => e.op === "pages");
+  assert.equal(batches.length, 200);
+  assert.ok(batches.every((e) => e.svgs.length === 10));
 });
 
-test("PDF export: a page that is not text stops the export before the shell is called", async () => {
-  const { sent, exportPdf } = pdfRecorder();
-  const stops = async (bad) => {
-    const ctx = load({ exportPdf });
-    pdfPages(ctx, 2, (i) => (i === 1 ? bad : "<svg/>"));
+test("PDF export: a page that is not text drops the shell's export before anything is written", async () => {
+  for (const bad of [null, "", 42, { svg: "x" }]) {
+    const { ctx, shell } = loadPdf();
+    pdfPages(ctx, 12, (i) => (i === 11 ? bad : "<svg/>"));
     assert.equal(await ctx.session.exportPdf(), null);
     assert.match(feedbackOf(ctx), /쪽 그림을 받지 못했습니다/);
-  };
-  await Promise.all([null, "", 42, { svg: "x" }].map(stops));
-  assert.deepEqual(sent, []);
+    assert.deepEqual(shell.log.map((e) => [e.op, e.commit]), [["start", undefined], ["pages", undefined], ["finish", false]], "batch 1 went, batch 2 never, then the job was dropped");
+  }
 });
 
-test("PDF export: cancelling the save dialog and shell errors are reported without a path", async () => {
-  const cancelled = load({ exportPdf: pdfRecorder({ status: "cancelled", name: null, bytes: 0 }).exportPdf });
-  pdfPages(cancelled, 1);
-  assert.equal((await cancelled.session.exportPdf()).status, "cancelled");
-  assert.match(feedbackOf(cancelled), /PDF 내보내기 취소/);
-  const failing = load({ exportPdf: pdfRecorder(new Error("1쪽 SVG를 읽지 못했습니다")).exportPdf });
-  pdfPages(failing, 1);
-  assert.equal(await failing.session.exportPdf(), null);
-  assert.match(feedbackOf(failing), /^PDF 내보내기 실패: .*1쪽 SVG를 읽지 못했습니다/);
+test("PDF export: a shell error on a batch stops the export, drops the job and is reported without a path", async () => {
+  const { ctx, shell } = loadPdf({ failPages: new Error("12쪽을 PDF로 바꾸지 못했습니다") });
+  pdfPages(ctx, 25);
+  assert.equal(await ctx.session.exportPdf(), null);
+  assert.match(feedbackOf(ctx), /^PDF 내보내기 실패: 12쪽을 PDF로 바꾸지 못했습니다/);
+  assert.deepEqual(shell.log.map((e) => [e.op, e.commit]), [["start", undefined], ["pages", undefined], ["finish", false]]);
+  assert.equal(ctx.fake.calls.filter((c) => c.method === "getPageSvg").length, 10, "no further page was rendered");
+  const failing = loadPdf({ start: new Error("저장 대화상자를 열지 못했습니다") });
+  pdfPages(failing.ctx, 1);
+  assert.equal(await failing.ctx.session.exportPdf(), null);
+  assert.match(feedbackOf(failing.ctx), /저장 대화상자를 열지 못했습니다/);
+  assert.deepEqual(failing.shell.log.map((e) => e.op), ["start"]);
+});
+
+test("PDF export: a failed finish is reported", async () => {
+  const { ctx } = loadPdf({ finish: new Error("파일을 저장하지 못했습니다") });
+  pdfPages(ctx, 2);
+  assert.equal(await ctx.session.exportPdf(), null);
+  assert.match(feedbackOf(ctx), /^PDF 내보내기 실패: 파일을 저장하지 못했습니다/);
+});
+
+test("PDF export: a second request while one runs (menu, shortcut or editor menu) is refused and opens no second dialog", async () => {
+  const lines = [];
+  const { ctx, shell } = loadPdf({}, { setFeedback: (line) => lines.push(line) });
+  pdfPages(ctx, 12);
+  const first = ctx.session.exportPdf();
+  assert.equal(await ctx.session.exportPdf(), null);
+  assert.equal(lines.at(-1), "이미 PDF를 내보내고 있습니다");
+  assert.equal((await first).status, "saved");
+  assert.equal(shell.log.filter((e) => e.op === "start").length, 1, "one dialog, one job");
+  assert.equal((await ctx.session.exportPdf()).status, "saved", "after it ended the next export runs");
 });
 
 test("PDF smoke step: sends the page SVGs as smoke.pdf and reports pages and bytes from the shell's answer", async () => {
-  const { sent, exportPdf } = pdfRecorder({ status: "saved", name: "smoke.pdf", bytes: 321 });
-  const ctx = load({ exportPdf });
+  const { ctx, shell } = loadPdf({ finish: { status: "saved", name: "smoke.pdf", bytes: 321, pages: 2, opened: false } });
   pdfPages(ctx, 2);
   assert.equal(await ctx.session.smokePdf(), "pages=2 bytes=321");
-  assert.deepEqual(sent, [{ fileName: "smoke.pdf", pages: ['<svg id="p0"/>', '<svg id="p1"/>'] }]);
+  assert.deepEqual(shell.log.map((e) => e.op), ["start", "pages", "finish"]);
+  assert.equal(shell.log[0].fileName, "smoke.pdf");
+  assert.deepEqual(shell.log[1].svgs, ['<svg id="p0"/>', '<svg id="p1"/>']);
   assert.equal(feedbackOf(ctx), "", "the smoke step shows no status text");
 });
 
@@ -861,17 +941,16 @@ test("PDF smoke step: rejects when the shell is missing, the page count is wrong
   const plain = load();
   pdfPages(plain, 1);
   await assert.rejects(plain.session.smokePdf(), /데스크톱 앱의 한글 편집기에서만/);
-  const { exportPdf } = pdfRecorder();
-  const wrongName = load({ exportPdf });
-  pdfPages(wrongName, 1);
-  await assert.rejects(wrongName.session.smokePdf(), /검사 결과를 돌려주지 않았습니다/);
-  const dialogAnswer = load({ exportPdf: pdfRecorder({ status: "cancelled", name: null, bytes: 0 }).exportPdf });
-  pdfPages(dialogAnswer, 1);
-  await assert.rejects(dialogAnswer.session.smokePdf(), /검사 결과를 돌려주지 않았습니다/);
-  const empty = load({ exportPdf });
-  pdfPages(empty, 0);
-  await assert.rejects(empty.session.smokePdf(), /쪽 수\(0\)/);
-  const failing = load({ exportPdf: pdfRecorder(new Error("1쪽 SVG를 읽지 못했습니다")).exportPdf });
-  pdfPages(failing, 1);
-  await assert.rejects(failing.session.smokePdf(), /1쪽 SVG를 읽지 못했습니다/);
+  const wrongName = loadPdf();
+  pdfPages(wrongName.ctx, 1);
+  await assert.rejects(wrongName.ctx.session.smokePdf(), /검사 결과를 돌려주지 않았습니다/);
+  const dialogAnswer = loadPdf({ start: { status: "cancelled" } });
+  pdfPages(dialogAnswer.ctx, 1);
+  await assert.rejects(dialogAnswer.ctx.session.smokePdf(), /검사 결과를 돌려주지 않았습니다/);
+  const empty = loadPdf();
+  pdfPages(empty.ctx, 0);
+  await assert.rejects(empty.ctx.session.smokePdf(), /쪽 수\(0\)/);
+  const failing = loadPdf({ failPages: new Error("1쪽 SVG를 읽지 못했습니다") });
+  pdfPages(failing.ctx, 1);
+  await assert.rejects(failing.ctx.session.smokePdf(), /1쪽 SVG를 읽지 못했습니다/);
 });
