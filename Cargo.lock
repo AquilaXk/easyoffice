@@ -890,7 +890,7 @@ checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 
 [[package]]
 name = "easyoffice-app"
-version = "1.0.0"
+version = "2.1.0"
 dependencies = [
  "easyoffice-formats",
  "easyoffice-layout",
@@ -899,7 +899,7 @@ dependencies = [
 
 [[package]]
 name = "easyoffice-desktop"
-version = "1.0.0"
+version = "2.1.0"
 dependencies = [
  "easyoffice-app",
  "easyoffice-formats",
@@ -922,18 +922,18 @@ dependencies = [
 
 [[package]]
 name = "easyoffice-formats"
-version = "1.0.0"
+version = "2.1.0"
 
 [[package]]
 name = "easyoffice-layout"
-version = "1.0.0"
+version = "2.1.0"
 dependencies = [
  "easyoffice-formats",
 ]
 
 [[package]]
 name = "easyoffice-sheet"
-version = "1.0.0"
+version = "2.1.0"
 dependencies = [
  "easyoffice-formats",
 ]

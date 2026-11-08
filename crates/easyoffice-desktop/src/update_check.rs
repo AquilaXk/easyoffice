@@ -79,9 +79,10 @@ pub fn is_newer(candidate: Version, current: Version) -> bool {
     candidate > current
 }
 
-/// The running version (`CARGO_PKG_VERSION`).
-pub fn current_version() -> Version {
-    parse_version(env!("CARGO_PKG_VERSION").as_bytes()).unwrap_or([0, 0, 0])
+/// The running version from the app's version text (the Tauri config version, which the release
+/// build overrides with the tag). Unparseable text counts as `0.0.0`.
+pub fn current_version(text: &str) -> Version {
+    parse_version(text.as_bytes()).unwrap_or([0, 0, 0])
 }
 
 /// True for an address inside the project's releases page (no whitespace or control characters).
@@ -309,7 +310,7 @@ impl UpdateService {
 
 /// Downloads the latest-release answer: HTTPS only, OS TLS, short timeouts, no redirects, and at
 /// most [`MAX_BODY_BYTES`] bytes.
-fn fetch_latest_release() -> Result<Vec<u8>, String> {
+fn fetch_latest_release(app_version: &str) -> Result<Vec<u8>, String> {
     let tls =
         native_tls::TlsConnector::new().map_err(|_| "TLS를 준비하지 못했습니다.".to_string())?;
     let agent = ureq::AgentBuilder::new()
@@ -317,7 +318,7 @@ fn fetch_latest_release() -> Result<Vec<u8>, String> {
         .https_only(true)
         .redirects(0)
         .timeout(HTTP_TIMEOUT)
-        .user_agent(&format!("EasyOffice/{}", env!("CARGO_PKG_VERSION")))
+        .user_agent(&format!("EasyOffice/{app_version}"))
         .build();
     let response = agent
         .get(RELEASES_API)
@@ -343,17 +344,18 @@ fn unix_now() -> u64 {
 /// starts the background check.
 pub fn start(app: &AppHandle, smoke_mode: bool) {
     let dir = app.path().app_data_dir().ok();
+    let app_version = app.package_info().version.to_string();
     let service = Arc::new(UpdateService::new(
         dir.as_deref(),
         !smoke_mode,
-        current_version(),
+        current_version(&app_version),
     ));
     app.manage(Arc::clone(&service));
     if smoke_mode {
         return;
     }
     std::thread::spawn(move || {
-        if let Err(message) = service.check(unix_now(), fetch_latest_release) {
+        if let Err(message) = service.check(unix_now(), || fetch_latest_release(&app_version)) {
             eprintln!("update check: {message}");
         }
     });
@@ -441,10 +443,17 @@ mod tests {
         assert!(is_newer([2, 0, 0], [1, 99, 99]));
         assert!(!is_newer([1, 0, 0], [1, 0, 0]));
         assert!(!is_newer([0, 9, 9], [1, 0, 0]));
-        assert_eq!(
-            parse_version(env!("CARGO_PKG_VERSION").as_bytes()),
-            Some(current_version())
-        );
+    }
+
+    #[test]
+    fn the_app_version_text_decides_which_release_is_news() {
+        let built_as_2_1_0 = current_version("2.1.0");
+        assert_eq!(built_as_2_1_0, [2, 1, 0]);
+        let notice =
+            |tag: &str| parse_release(&release_json(tag, RELEASE_URL, ""), built_as_2_1_0).unwrap();
+        assert!(notice("v2.1.0").is_none());
+        assert!(notice("v2.1.1").is_some());
+        assert_eq!(current_version("not a version"), [0, 0, 0]);
     }
 
     #[test]
