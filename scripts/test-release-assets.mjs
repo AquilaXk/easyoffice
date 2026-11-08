@@ -296,3 +296,19 @@ test("the tag, the app version and latest.json agree, so an updated app finds no
   assert.match(workflow, /VERSION: \$\{\{ needs\.prepare\.outputs\.version \}\}/);
   assert.match(workflow, /--prerelease/, "a pre-release version is flagged so /releases/latest never serves its latest.json");
 });
+
+test("a rerun moves a draft's target commit with its assets and never moves a published release's (PD-146)", () => {
+  const publish = workflow.slice(workflow.indexOf("  publish-release:"));
+  const draft = publish.indexOf('if [ "$IS_DRAFT" = true ]');
+  const edit = publish.indexOf('gh release edit "$TAG" --target "$TARGET_SHA"');
+  const prune = publish.indexOf("gh release delete-asset");
+  const published = publish.indexOf("else", draft);
+  const refuse = publish.indexOf('if [ "$TAG_SHA" != "$TARGET_SHA" ]');
+  const upload = publish.indexOf('gh release upload "$TAG"');
+  assert.ok(draft > 0 && draft < edit && edit < prune && prune < published, "a draft gets the new target, then loses stale files");
+  assert.ok(published < refuse && refuse < upload, "a published release is checked against its tag before any upload");
+  assert.match(publish, /\.isDraft/);
+  assert.match(publish, /commits\/\$TAG/, "the published release's commit is read from its tag");
+  assert.match(publish, /refusing to replace its assets/);
+  assert.match(publish, /exit 1/);
+});
