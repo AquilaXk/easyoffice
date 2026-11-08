@@ -20,7 +20,8 @@ import {
   writeManifest,
 } from "./release-assets.mjs";
 
-const read = (rel) => fs.readFileSync(new URL(`../${rel}`, import.meta.url), "utf8");
+// A Windows checkout may have CRLF line endings; the text checks below split and match on LF.
+const read = (rel) => fs.readFileSync(new URL(`../${rel}`, import.meta.url), "utf8").replaceAll("\r\n", "\n");
 
 /** A target directory laid out the way the Tauri CLI leaves it, with one file per asset. */
 function fakeBundles(root, platformId, overrides = {}, { signedFor } = {}) {
