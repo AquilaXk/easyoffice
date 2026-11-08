@@ -470,6 +470,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
         const on = studioCommandApplies(item.dataset.studioMenuCmd, commandModule);
         item.setAttribute("aria-disabled", on ? "false" : "true");
       }
+      if (typeof deps.onMenuContext === "function") deps.onMenuContext(commandModule, embed);
       const agg = document.getElementById("status-sheet-agg");
       if (agg) agg.hidden = mod !== "SHEET";
       const docStatus = document.querySelector(".statusbar-left-group");

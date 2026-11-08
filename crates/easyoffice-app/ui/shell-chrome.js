@@ -159,8 +159,41 @@
         if (deps.ribbonState) deps.ribbonState.darkThemeEnabled = effective === "dark";
         deps.icons?.syncThemeToggle(document, effective);
         report(hwpHost.setShellContext({ theme: mode }));
+        pushMenuState();
       });
       api.init();
+    }
+
+    // ---- native menu state ---------------------------------------------------------------------
+
+    // The native menu bar is shared by all windows, so each window tells the shell what the bar should
+    // show while it has the focus (`menu_state.rs`): its theme mode, the items its module cannot use
+    // (the page's own rule, `studioCommandApplies`, applied to the table above) and whether the editor
+    // brings its own menu row (the shell then hides the native bar: one menu, never two).
+    let menuContext = null;
+    let lastMenuState = "";
+
+    function disabledMenuIds(commandModule) {
+      const applies = host.__EASYOFFICE_WORKSPACE_SESSION_UTILS__.studioCommandApplies;
+      return Object.entries(NATIVE_MENU_ACTIONS)
+        .filter(([, entry]) => {
+          const [name, command] = entry.split(":");
+          return name === "studio-cmd" && !applies(command, commandModule);
+        })
+        .map(([id]) => id);
+    }
+
+    // Without a new module context the last one is reused (a theme change); nothing is sent before the
+    // first one, and an unchanged state is not sent twice.
+    function pushMenuState(commandModule, embed) {
+      const bridge = deps.desktopBridge || host.__EASYOFFICE_DESKTOP_BRIDGE__;
+      if (commandModule !== undefined) menuContext = { commandModule, embed: Boolean(embed) };
+      if (!menuContext || !bridge?.isAvailable()) return;
+      const state = { theme: themeApi().getMode(), disabled: disabledMenuIds(menuContext.commandModule), embed: menuContext.embed };
+      const key = JSON.stringify(state);
+      if (key === lastMenuState) return;
+      lastMenuState = key;
+      report(bridge.windowCommand("reportMenuState", state));
     }
 
     // ---- toasts (shell notices while the shell status bar is hidden) -------------------------
@@ -266,7 +299,7 @@
       hwpHost.onCommand(runShellCommand);
     }
 
-    return { bind, openAbout, setAppVersion, applyStoredTheme, pushRecents, toast, runShellCommand, currentTheme, getThemeMode: () => themeApi().getMode() };
+    return { bind, openAbout, setAppVersion, applyStoredTheme, pushMenuState, pushRecents, toast, runShellCommand, currentTheme, getThemeMode: () => themeApi().getMode() };
   }
 
   host.__EASYOFFICE_CREATE_SHELL_CHROME__ = createShellChrome;

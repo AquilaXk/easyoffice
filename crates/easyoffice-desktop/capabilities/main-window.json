@@ -18,6 +18,8 @@
     "allow-close-current-window",
     "allow-list-recent-documents",
     "allow-open-recent-document",
-    "allow-get-recent-preview"
+    "allow-get-recent-preview",
+    "allow-report-menu-state",
+    "allow-cancel-app-quit"
   ]
 }

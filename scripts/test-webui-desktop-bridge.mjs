@@ -67,14 +67,15 @@ test("desktop shell routes every engine request through ipc_dispatch with string
   const boot = calls.find((c) => c.command === "ipc_dispatch" && c.args.command === "get_workspace_bootstrap");
   assert.ok(boot, "bootstrap goes through the shell");
   assert.deepEqual(boot.args, { command: "get_workspace_bootstrap", payload: "" });
-  assert.ok(calls.every((c) => c.command === "ipc_dispatch"), "only the dispatcher is used at startup");
-  assert.ok(calls.every((c) => typeof c.args.payload === "string"));
+  const engineCalls = calls.filter((c) => c.command !== "report_menu_state");
+  assert.ok(engineCalls.every((c) => c.command === "ipc_dispatch"), "only the dispatcher and the menu report are used at startup");
+  assert.ok(engineCalls.every((c) => typeof c.args.payload === "string"));
   userClick(commandItem(document, "document-home-bold"));
   await flushAsyncTurns(12);
   const exec = calls.find((c) => c.args.command === "execute_ribbon_command");
   assert.ok(exec, "menu commands reach the engine through the dispatcher");
   assert.equal(typeof exec.args.payload, "string");
-  assert.ok(calls.every((c) => c.command === "ipc_dispatch"));
+  assert.ok(calls.every((c) => c.command === "ipc_dispatch" || c.command === "report_menu_state"));
   assert.equal(fetchCalls.length, 0);
   assert.equal(document.getElementById("status-engine").textContent, "엔진: 데스크톱 연결됨");
   assert.doesNotMatch(document.getElementById("status-bar").textContent, /로컬 서버/, "the desktop app never shows the local-server text");

@@ -321,6 +321,11 @@ fn attach_handlers(app: &AppHandle, window: &WebviewWindow) {
                 }
             }
         }
+        WindowEvent::Focused(true) => {
+            if let Err(error) = crate::menu_state::refresh(&app) {
+                eprintln!("[menu] {error}");
+            }
+        }
         WindowEvent::Moved(_) | WindowEvent::Resized(_) => {
             if let Some(window) = app.get_webview_window(&label) {
                 note_geometry(&app, &window);
@@ -333,6 +338,9 @@ fn attach_handlers(app: &AppHandle, window: &WebviewWindow) {
             locked(&state.registry).remove(&label);
             locked(&state.pending).discard(&label);
             locked(&state.files).untrack(&label);
+            app.state::<crate::menu_state::MenuStates>().forget(&label);
+            #[cfg(not(target_os = "macos"))]
+            crate::app_quit::window_destroyed(&app, &label);
             if let Some(probe) = app.try_state::<SmokeProbe>() {
                 probe.window_closed(&label);
             }

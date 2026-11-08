@@ -2,8 +2,9 @@
 //!
 //! The desktop shell draws one menu bar and the page hides its own (`data-native-menu`), so every
 //! item of the page's menu bar is in [`ITEMS`] (a test compares both). Adapted from the reference app
-//! `apps/desktop/src-tauri/src/menu.rs` (MIT, see THIRD_PARTY_NOTICES.md): the same menu layout and
-//! the same "menu id -> the focused window only" delivery, with EasyOffice's differences:
+//! `apps/desktop/src-tauri/src/menu.rs` (MIT, Copyright (c) 2025-2026 Edward Kim, see
+//! THIRD_PARTY_NOTICES.md): the same menu layout, the same "menu id -> the focused window only"
+//! delivery and the same quit item (`app:quit` there, [`QUIT_ID`] here), with EasyOffice's differences:
 //!
 //! * One static table ([`ITEMS`]) holds every custom item: its id, label, accelerator and the
 //!   page action it runs. The page keeps the matching list (`NATIVE_MENU_ACTIONS` in
@@ -21,9 +22,18 @@
 //!   copy, paste and the like, which also work in text fields). Quit ends in
 //!   `RunEvent::ExitRequested`; the existing handler then closes every window through its own save
 //!   prompt. Windows and Linux have no system undo/redo (and no application menu), so their edit
-//!   menu uses the table's items; closing the last window ends the app.
+//!   menu uses the table's items and their 파일 menu ends in 끝내기 ([`QUIT_ID`], handled in Rust by
+//!   `app_quit.rs`, so it is not in the table and has no page action).
+//! * The theme choices and the update-check switch are check items; the 'enabled' and 'checked'
+//!   state of the bar follows the focused window ([`sync`], fed by `menu_state.rs`).
+//!   The disabled ids come from the page, which owns the module rules (`studioCommandApplies`).
 
-use tauri::menu::{Menu, MenuItemBuilder, PredefinedMenuItem, Submenu, SubmenuBuilder};
+use std::collections::HashSet;
+
+use tauri::menu::{
+    CheckMenuItem, CheckMenuItemBuilder, Menu, MenuItemBuilder, MenuItemKind, PredefinedMenuItem,
+    Submenu, SubmenuBuilder,
+};
 use tauri::{AppHandle, Runtime};
 
 /// One custom menu item.
@@ -437,6 +447,38 @@ pub const ITEMS: &[MenuItemSpec] = &[
     ),
 ];
 
+/// 끝내기 (Windows and Linux 파일 menu). It runs in Rust (`app_quit.rs`), not in the page, so it is
+/// not in [`ITEMS`]; the accelerator is the reference app's.
+pub const QUIT_ID: &str = "file:quit";
+const QUIT_LABEL: &str = "끝내기";
+const QUIT_ACCELERATOR: &str = "CmdOrCtrl+Q";
+
+/// Settings the user switches on and off or picks one of: check items whose mark [`sync`] sets.
+pub const CHECK_IDS: [&str; 4] = [
+    "view:theme-system",
+    "view:theme-light",
+    "view:theme-dark",
+    UPDATE_CHECK_ID,
+];
+const UPDATE_CHECK_ID: &str = "help:update-check";
+const THEME_ITEMS: [(&str, &str); 3] = [
+    ("system", "view:theme-system"),
+    ("light", "view:theme-light"),
+    ("dark", "view:theme-dark"),
+];
+
+/// The id of the theme item for a theme mode (`system`, `light` or `dark`).
+pub fn theme_item_id(mode: &str) -> Option<&'static str> {
+    THEME_ITEMS
+        .iter()
+        .find(|(name, _)| *name == mode)
+        .map(|(_, id)| *id)
+}
+
+fn is_check_item(id: &str) -> bool {
+    CHECK_IDS.contains(&id)
+}
+
 /// Longest accepted id (a defensive bound for the generated script).
 const MAX_ID_LEN: usize = 32;
 const SCRIPT_PREFIX: &str = "window.__EASYOFFICE_NATIVE_MENU__&&window.__EASYOFFICE_NATIVE_MENU__(";
@@ -466,6 +508,18 @@ fn custom<R: Runtime>(
         Some(accelerator) => builder.accelerator(accelerator).build(app),
         None => builder.build(app),
     }
+}
+
+fn check<R: Runtime>(app: &AppHandle<R>, spec: &MenuItemSpec) -> tauri::Result<CheckMenuItem<R>> {
+    CheckMenuItemBuilder::with_id(spec.id, spec.label)
+        .checked(false)
+        .build(app)
+}
+
+fn quit_item<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<tauri::menu::MenuItem<R>> {
+    MenuItemBuilder::with_id(QUIT_ID, QUIT_LABEL)
+        .accelerator(QUIT_ACCELERATOR)
+        .build(app)
 }
 
 fn spec(id: &str) -> &'static MenuItemSpec {
@@ -522,6 +576,8 @@ fn submenu<R: Runtime>(
     for line in lines {
         builder = match line {
             Entry::Separator => builder.separator(),
+            Entry::Item(QUIT_ID) => builder.item(&quit_item(app)?),
+            Entry::Item(id) if is_check_item(id) => builder.item(&check(app, spec(id))?),
             Entry::Item(id) => builder.item(&custom(app, spec(id))?),
             Entry::Sub(sub) => builder.item(&sub),
         };
@@ -567,6 +623,9 @@ fn file_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
         SEPARATOR,
         "file:close",
     ]));
+    if !cfg!(target_os = "macos") {
+        lines.extend(entries(&[SEPARATOR, QUIT_ID]));
+    }
     submenu(app, "파일", lines)
 }
 
@@ -750,6 +809,65 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     Ok(menu)
 }
 
+/// What the menu bar shows for the focused window.
+pub struct MenuView<'a> {
+    /// Theme mode of the window: `system`, `light` or `dark`.
+    pub theme: &'a str,
+    /// Ids of the table items the window's module cannot use.
+    pub disabled: &'a HashSet<String>,
+    /// The update-check switch: `None` when the app does not check at all (it is then disabled).
+    pub update_check: Option<bool>,
+}
+
+/// `(checked, enabled)` of a check item, `None` for an id that is not one.
+fn check_state(id: &str, view: &MenuView) -> Option<(bool, bool)> {
+    if id == UPDATE_CHECK_ID {
+        return Some((view.update_check == Some(true), view.update_check.is_some()));
+    }
+    let theme = theme_item_id(view.theme);
+    is_check_item(id).then(|| (theme == Some(id), !view.disabled.contains(id)))
+}
+
+/// Visits every item of the bar, submenus included.
+pub fn for_each_item<R: Runtime>(
+    menu: &Menu<R>,
+    visit: &mut impl FnMut(&MenuItemKind<R>),
+) -> tauri::Result<()> {
+    fn walk<R: Runtime>(
+        items: Vec<MenuItemKind<R>>,
+        visit: &mut impl FnMut(&MenuItemKind<R>),
+    ) -> tauri::Result<()> {
+        for item in items {
+            visit(&item);
+            if let Some(submenu) = item.as_submenu() {
+                walk(submenu.items()?, visit)?;
+            }
+        }
+        Ok(())
+    }
+    walk(menu.items()?, visit)
+}
+
+/// Shows `view` on the bar: grays out the unusable items and sets the marks of the check items.
+pub fn sync<R: Runtime>(menu: &Menu<R>, view: &MenuView) -> tauri::Result<()> {
+    let mut failed = None;
+    for_each_item(menu, &mut |item| {
+        let id = item.id().as_ref();
+        let result = match item {
+            MenuItemKind::Check(check) => check_state(id, view)
+                .map_or(Ok(()), |(checked, enabled)| {
+                    check.set_checked(checked).and(check.set_enabled(enabled))
+                }),
+            MenuItemKind::MenuItem(plain) if ITEMS.iter().any(|spec| spec.id == id) => {
+                plain.set_enabled(!view.disabled.contains(id))
+            }
+            _ => Ok(()),
+        };
+        failed = failed.take().or(result.err());
+    })?;
+    failed.map_or(Ok(()), Err)
+}
+
 /// Installs the menu bar and routes custom items to the focused window.
 pub fn install(app: &mut tauri::App) -> tauri::Result<()> {
     let menu = build(app.handle())?;
@@ -762,6 +880,13 @@ pub fn install(app: &mut tauri::App) -> tauri::Result<()> {
 /// (a menu click never reaches a window the user is not looking at).
 fn run_item(app: &AppHandle, id: &str) {
     use tauri::Manager;
+    #[cfg(not(target_os = "macos"))]
+    {
+        if id == QUIT_ID {
+            crate::app_quit::request_app_quit(app);
+            return;
+        }
+    }
     let Some(script) = dispatch_script(id) else {
         return;
     };
@@ -852,6 +977,7 @@ mod tests {
             "file:save\");alert(1);(\"",
             "file:unknown",
             "app:quit",
+            QUIT_ID,
             "FILE:SAVE",
         ] {
             assert_eq!(dispatch_script(bad), None, "{bad}");
@@ -915,5 +1041,63 @@ mod tests {
         }) {
             assert_eq!(spec.accelerator, None, "{}", spec.id);
         }
+    }
+
+    #[test]
+    fn quit_runs_in_rust_with_the_reference_accelerator_and_is_not_a_table_item() {
+        assert!(ITEMS.iter().all(|spec| spec.id != QUIT_ID));
+        assert_eq!(dispatch_script(QUIT_ID), None);
+        assert_eq!(action_for(QUIT_ID), None);
+        assert!(QUIT_ID.starts_with("file:") && QUIT_ID.len() <= MAX_ID_LEN);
+        assert_eq!(QUIT_ACCELERATOR, "CmdOrCtrl+Q");
+        assert!(ITEMS
+            .iter()
+            .all(|spec| spec.accelerator != Some(QUIT_ACCELERATOR)));
+    }
+
+    #[test]
+    fn the_check_items_are_the_three_themes_and_the_update_switch_of_the_table() {
+        for id in CHECK_IDS {
+            assert!(ITEMS.iter().any(|spec| spec.id == id), "{id}");
+        }
+        for (mode, id) in THEME_ITEMS {
+            assert_eq!(theme_item_id(mode), Some(id));
+            assert!(CHECK_IDS.contains(&id));
+            assert_eq!(action_for(id).unwrap(), format!("theme:{mode}"));
+        }
+        assert_eq!(theme_item_id("purple"), None);
+        assert_eq!(CHECK_IDS.len(), THEME_ITEMS.len() + 1);
+        assert_eq!(action_for("help:update-check"), Some("update-check"));
+    }
+
+    #[test]
+    fn exactly_the_current_theme_is_checked_and_the_update_switch_follows_the_app() {
+        let none = HashSet::new();
+        let view = |theme, update_check| MenuView {
+            theme,
+            disabled: &none,
+            update_check,
+        };
+        for mode in ["system", "light", "dark"] {
+            let checked: Vec<&str> = CHECK_IDS
+                .into_iter()
+                .filter(|id| check_state(id, &view(mode, None)).is_some_and(|(on, _)| on))
+                .collect();
+            assert_eq!(checked, vec![theme_item_id(mode).unwrap()], "{mode}");
+        }
+        assert_eq!(
+            check_state("help:update-check", &view("dark", Some(true))),
+            Some((true, true))
+        );
+        assert_eq!(
+            check_state("help:update-check", &view("dark", Some(false))),
+            Some((false, true))
+        );
+        assert_eq!(
+            check_state("help:update-check", &view("dark", None)),
+            Some((false, false)),
+            "an app that does not check offers no switch"
+        );
+        assert_eq!(check_state("file:save", &view("dark", None)), None);
     }
 }

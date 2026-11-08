@@ -417,10 +417,15 @@ pub fn get_update_notice(
 #[tauri::command]
 pub fn set_update_check(
     _caller: ShellCaller,
+    app: AppHandle,
     service: State<'_, Arc<UpdateService>>,
     enabled: bool,
 ) -> UpdateNoticeView {
     service.set_enabled(enabled);
+    // The menu's check item follows the switch.
+    if let Err(error) = crate::menu_state::refresh(&app) {
+        eprintln!("[menu] {error}");
+    }
     service.view()
 }
 

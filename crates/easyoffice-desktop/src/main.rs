@@ -5,6 +5,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app_commands;
+mod app_quit;
+mod menu_state;
 mod native_menu;
 mod os_recent;
 mod pdf_export;
@@ -251,15 +253,20 @@ fn main() {
             window_commands::report_window_state,
             window_commands::close_current_window,
             window_commands::list_recent_documents,
+            menu_state::report_menu_state,
+            app_quit::cancel_app_quit,
             window_commands::open_recent_document,
             preview::get_recent_preview,
         ])
         .setup(move |app| {
             app.manage(shell_caller::ShellTokens::default());
             app.manage(AppWindows::new(app.path().app_data_dir().ok()));
+            app.manage(menu_state::MenuStates::default());
+            app.manage(app_quit::AppQuit::default());
             // Every OS gets the native menu bar; the page hides its own (PD-102).
             native_menu::install(app)?;
             update_check::start(app.handle(), smoke_mode);
+            menu_state::refresh(app.handle()).map_err(std::io::Error::other)?;
             app.manage(preview::PreviewState::new());
             let handle = app.handle().clone();
             if smoke_mode {
@@ -350,7 +357,7 @@ mod tests {
         );
         assert_eq!(value["windows"], serde_json::json!(["main", "doc-*"]));
         assert_eq!(value["local"], serde_json::json!(true));
-        assert_eq!(app_commands::APP_COMMANDS.len(), 14);
+        assert_eq!(app_commands::APP_COMMANDS.len(), 16);
     }
 
     #[test]

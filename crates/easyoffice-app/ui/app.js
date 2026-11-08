@@ -247,6 +247,7 @@
     getDocumentId: () => windowBridge.launch.windowId,
     onDirtyChange: (unsaved) => windowBridge.setDirty(unsaved),
     isDesktopShell: () => desktopBridge.isAvailable(),
+    onMenuContext: (commandModule, embed) => shellChrome.pushMenuState(commandModule, embed),
   });
 
   slideStudio = host.__EASYOFFICE_CREATE_SLIDE_STUDIO__({

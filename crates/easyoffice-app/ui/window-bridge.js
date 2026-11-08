@@ -340,15 +340,21 @@
       });
     }
 
+    // The window stays open: a running "끝내기" (quit from the menu) ends here instead of closing the rest.
+    async function keepOpen() {
+      if (desktopAvailable()) await shell("cancelAppQuit", {}).catch((err) => feedback("종료를 멈추지 못했습니다: " + (err?.message || String(err))));
+      return false;
+    }
+
     async function runCloseRequest() {
       if (!deps.isDirty()) return closeWindow();
       const choice = await askCloseChoice();
-      if (choice === "cancel") return false;
+      if (choice === "cancel") return keepOpen();
       if (choice === "save") {
         const saved = await deps.save();
         if (saved === false) {
           feedback("저장하지 못해 창을 닫지 않았습니다");
-          return false;
+          return keepOpen();
         }
       }
       return closeWindow();

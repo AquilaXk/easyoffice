@@ -347,15 +347,29 @@ pub fn update_check_step(app_version: &str) -> Result<String, String> {
 
 // ---- menu --------------------------------------------------------------------------------------
 
+/// What the smoke run reads from the installed menu bar: every item id, and the ids of the check items.
+struct InstalledMenu {
+    ids: Vec<String>,
+    checks: Vec<String>,
+}
+
 /// Checks that every custom item this OS's menu bar holds is among the installed menu ids and has a
-/// page action script.
-fn check_menu_ids<S: AsRef<str>>(installed: &[S]) -> Result<(), String> {
-    let missing: Vec<&str> = crate::native_menu::installed_ids()
-        .filter(|id| {
-            !installed.iter().any(|have| have.as_ref() == *id)
-                || crate::native_menu::dispatch_script(id).is_none()
-        })
+/// page action script (the quit item runs in Rust and is checked on its own), that the theme and
+/// update-check items are check items, and that 끝내기 is in the Windows and Linux menu only.
+fn check_menu(installed: &InstalledMenu) -> Result<(), String> {
+    let have = |id: &str| installed.ids.iter().any(|have| have == id);
+    let mut missing: Vec<&str> = crate::native_menu::installed_ids()
+        .filter(|id| !have(id) || crate::native_menu::dispatch_script(id).is_none())
         .collect();
+    let quit = crate::native_menu::QUIT_ID;
+    if have(quit) == cfg!(target_os = "macos") {
+        missing.push(quit);
+    }
+    for id in crate::native_menu::CHECK_IDS {
+        if !installed.checks.iter().any(|check| check == id) {
+            missing.push(id);
+        }
+    }
     if missing.is_empty() {
         Ok(())
     } else {
@@ -366,39 +380,25 @@ fn check_menu_ids<S: AsRef<str>>(installed: &[S]) -> Result<(), String> {
     }
 }
 
-/// Deepest submenu level read; the menu bar has three (menu, submenu, item).
-const MAX_MENU_DEPTH: usize = 4;
-
-fn collect_menu_ids<R: tauri::Runtime>(
-    items: &[tauri::menu::MenuItemKind<R>],
-    depth: usize,
-    out: &mut Vec<String>,
-) -> Result<(), String> {
-    for item in items {
-        out.push(item.id().as_ref().to_string());
-        let Some(submenu) = item.as_submenu().filter(|_| depth < MAX_MENU_DEPTH) else {
-            continue;
-        };
-        let children = submenu
-            .items()
-            .map_err(|err| format!("메뉴 항목을 읽지 못했습니다: {err}"))?;
-        collect_menu_ids(&children, depth + 1, out)?;
-    }
-    Ok(())
-}
-
-/// The installed menu bar holds every custom item of the table.
+/// The installed menu bar holds every custom item of the table, the check items and 끝내기.
 pub fn menu_step(app: &tauri::AppHandle) -> Result<String, String> {
     let menu = app.menu().ok_or("앱 메뉴가 설치되지 않았습니다.")?;
-    let top = menu
-        .items()
-        .map_err(|err| format!("메뉴 항목을 읽지 못했습니다: {err}"))?;
-    let mut ids = Vec::new();
-    collect_menu_ids(&top, 0, &mut ids)?;
-    check_menu_ids(&ids)?;
+    let mut installed = InstalledMenu {
+        ids: Vec::new(),
+        checks: Vec::new(),
+    };
+    crate::native_menu::for_each_item(&menu, &mut |item| {
+        installed.ids.push(item.id().as_ref().to_string());
+        if item.as_check_menuitem().is_some() {
+            installed.checks.push(item.id().as_ref().to_string());
+        }
+    })
+    .map_err(|err| format!("메뉴 항목을 읽지 못했습니다: {err}"))?;
+    check_menu(&installed)?;
     Ok(format!(
-        "{} custom items",
-        crate::native_menu::installed_ids().count()
+        "{} custom items, {} check items",
+        crate::native_menu::installed_ids().count(),
+        installed.checks.len()
     ))
 }
 
@@ -579,19 +579,55 @@ mod tests {
         pdf
     }
 
+    fn installed(extra: &[&str]) -> InstalledMenu {
+        let mut ids: Vec<String> = crate::native_menu::installed_ids()
+            .map(str::to_string)
+            .collect();
+        if !cfg!(target_os = "macos") {
+            ids.push(crate::native_menu::QUIT_ID.to_string());
+        }
+        ids.extend(extra.iter().map(|id| (*id).to_string()));
+        InstalledMenu {
+            ids,
+            checks: crate::native_menu::CHECK_IDS
+                .iter()
+                .map(|id| (*id).to_string())
+                .collect(),
+        }
+    }
+
     #[test]
     fn the_menu_check_names_every_missing_item() {
-        let all: Vec<&str> = crate::native_menu::installed_ids().collect();
-        assert_eq!(check_menu_ids(&all), Ok(()));
-        assert_eq!(
-            check_menu_ids(&[all.as_slice(), &["extra:item"]].concat()),
-            Ok(())
-        );
-        let err = check_menu_ids(&all[2..]).unwrap_err();
+        assert_eq!(check_menu(&installed(&[])), Ok(()));
+        assert_eq!(check_menu(&installed(&["extra:item"])), Ok(()));
+        let mut menu = installed(&[]);
+        menu.ids.retain(|id| id != "app:about" && id != "file:new");
+        let err = check_menu(&menu).unwrap_err();
         assert!(
             err.contains("app:about") && err.contains("file:new"),
             "{err}"
         );
-        assert!(check_menu_ids::<&str>(&[]).is_err());
+        assert!(check_menu(&InstalledMenu {
+            ids: Vec::new(),
+            checks: Vec::new()
+        })
+        .is_err());
+    }
+
+    #[test]
+    fn the_menu_check_wants_plain_theme_and_update_items_to_be_check_items() {
+        let mut menu = installed(&[]);
+        menu.checks.retain(|id| id != "view:theme-dark");
+        let err = check_menu(&menu).unwrap_err();
+        assert!(err.contains("view:theme-dark"), "{err}");
+    }
+
+    #[test]
+    fn the_quit_item_is_in_the_menu_of_windows_and_linux_only() {
+        let mut menu = installed(&[]);
+        menu.ids.retain(|id| id != crate::native_menu::QUIT_ID);
+        assert_eq!(check_menu(&menu).is_err(), !cfg!(target_os = "macos"));
+        let menu = installed(&[crate::native_menu::QUIT_ID]);
+        assert_eq!(check_menu(&menu).is_err(), cfg!(target_os = "macos"));
     }
 }
