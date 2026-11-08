@@ -403,8 +403,12 @@ test("editor frame: the window capability is local-only, global Tauri stays off 
   // WebKit (macOS) does not match 'self' for the opaque-origin frame and blocks all its subresources:
   // the desktop answers the editor document with the policy that spells the app origin out.
   const studioFrame = readText("crates/easyoffice-desktop/src/studio_frame.rs");
-  assert.match(studioFrame, /CONTENT_SECURITY_POLICY, studio_csp_value\(request\)/);
-  assert.match(studioFrame, /studio_csp_for_origin\(&format!\("\{scheme\}:\/\/\{authority\}"\)\)/);
+  assert.match(studioFrame, /CONTENT_SECURITY_POLICY,\s+studio_csp_value\(app_origin\(cfg!\(windows\)\)\)/);
+  // The origin is a platform constant, not the request URI: wry hands the hook `tauri://localhost/...`
+  // even on Windows, where the document's origin is `http://tauri.localhost`.
+  assert.match(studioFrame, /WINDOWS_APP_ORIGIN: &str = "http:\/\/tauri\.localhost"/);
+  assert.match(studioFrame, /CUSTOM_SCHEME_APP_ORIGIN: &str = "tauri:\/\/localhost"/);
+  assert.doesNotMatch(studioFrame.split("#[cfg(test)]")[0], /request\.uri\(\)\.(authority|scheme)|uri\.authority/);
   assert.match(readText("crates/easyoffice-app/src/hwp_bundle.rs"), /STUDIO_CSP\.replace\("'self'", origin\)/);
 });
 
