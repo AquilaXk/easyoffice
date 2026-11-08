@@ -26,4 +26,4 @@
 
 ## 정리
 - [ ] `docs/policy-decisions.md` 절 번호 정리
-- [ ] rhwp 갱신 스크립트가 rhwp에서 복사한 vendor/svg2pdf 패치(Cargo.toml [patch])도 새 버전 기준으로 확인
+- [ ] HWPX 저장 검증의 전체 512MiB 상한이 rhwp(그림 합계 상한 없음)보다 작아, 그림 합계가 큰 문서는 저장 거부(PD-112)

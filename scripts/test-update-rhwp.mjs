@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { normalizedSha256Text } from "./hwp-studio-overrides.mjs";
+import { blobOid, patchEntry } from "./rhwp-svg2pdf.mjs";
 import { commitFromLsRemote, parseArgs, runUpdate } from "./update-rhwp.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -17,6 +18,12 @@ const CONFIG_REL = "config/rhwp-upstream.json";
 const MANIFEST_REL = "config/rhwp-studio-overrides.json";
 const MAIN_TS = "export const main = 1;\n";
 const ASSET = "<svg/>\n";
+const PATCH = '[patch.crates-io]\nsvg2pdf = { path = "vendor/svg2pdf" }\n';
+const SVG2PDF = {
+  "vendor/svg2pdf/Cargo.toml": '[package]\nname = "svg2pdf"\nversion = "0.13.0"\n',
+  "vendor/svg2pdf/src/lib.rs": "pub fn a() {}\n",
+  "vendor/svg2pdf/src/render/path.rs": "pub fn b() {}\n",
+};
 
 function stringify(value) {
   return `${JSON.stringify(value, null, 2)}\n`;
@@ -43,6 +50,11 @@ function makeRoot() {
     overrides: [],
     assetOverrides: [],
   };
+  fs.writeFileSync(path.join(root, "Cargo.toml"), `[workspace]\nmembers = []\n\n${PATCH}`);
+  for (const [rel, text] of Object.entries(SVG2PDF)) {
+    fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
+    fs.writeFileSync(path.join(root, rel), text);
+  }
   fs.writeFileSync(path.join(root, CONFIG_REL), stringify(config));
   fs.writeFileSync(path.join(root, MANIFEST_REL), stringify(manifest));
   return root;
@@ -59,7 +71,8 @@ function readJson(root, rel) {
 /** Fake remote: tags map to ls-remote output, files map `${commit}:${path}` to text. */
 function makeRemote({ tags = { "v0.9.0": `${NEW_COMMIT}\trefs/tags/v0.9.0` }, files = {} } = {}) {
   const base = {
-    "Cargo.toml": '[package]\nname = "rhwp"\nversion = "0.9.0"\n',
+    "Cargo.toml": `[package]\nname = "rhwp"\nversion = "0.9.0"\n\n${PATCH}`,
+    ...SVG2PDF,
     "rust-toolchain.toml": '[toolchain]\nchannel = "1.94.0"\n',
     "rhwp-studio/src/main.ts": MAIN_TS,
     "rhwp-studio/public/a.svg": ASSET,
@@ -68,6 +81,13 @@ function makeRemote({ tags = { "v0.9.0": `${NEW_COMMIT}\trefs/tags/v0.9.0` }, fi
   return {
     lsRemote: (_url, tag) => tags[tag] ?? "",
     readFileAt: (_url, commit, rel) => (commit === NEW_COMMIT ? content[rel] ?? null : null),
+    listTreeAt: (_url, _commit, dir) =>
+      new Map(
+        Object.entries(content)
+          .filter(([rel, text]) => rel.startsWith(`${dir}/`) && text !== undefined)
+          .map(([rel, text]) => [rel.slice(dir.length + 1), blobOid(Buffer.from(text))]),
+      ),
+    readBlobAt: (_url, _commit, rel) => Buffer.from(content[rel]),
   };
 }
 
@@ -87,7 +107,8 @@ function makeEnv(root, remote) {
 
 test("accepts only explicit vX.Y.Z tags", () => {
   assert.equal(parseArgs(["v0.9.0"]).tag, "v0.9.0");
-  assert.deepEqual(parseArgs(["v0.9.0", "--dry-run", "--accept-overrides"]), { tag: "v0.9.0", dryRun: true, acceptOverrides: true });
+  assert.deepEqual(parseArgs(["v0.9.0", "--dry-run", "--accept-overrides"]), { tag: "v0.9.0", dryRun: true, acceptOverrides: true, syncSvg2pdf: false });
+  assert.equal(parseArgs(["--sync-svg2pdf", "v0.9.0"]).syncSvg2pdf, true);
   const rejected = [
     [], ["main"], ["latest"], ["0.9.0"], ["v0.9"], ["v0.9.0-rc.1"], ["v0.9.0+build"], [NEW_COMMIT],
     ["v1.2.3", "v1.2.4"], ["v1.2.3", "--force"], ["--dry-run"], ["v12345.0.0"], ["v1.2.3\nmain"], ["-vv1.2.3"],
@@ -201,7 +222,7 @@ test("updates the pin, the baseline commit, the gitlink and the checkout, then p
 test("the already pinned tag is a no-op", () => {
   const root = makeRoot();
   const files = {
-    "Cargo.toml": '[package]\nname = "rhwp"\nversion = "0.8.7"\n',
+    "Cargo.toml": `[package]\nname = "rhwp"\nversion = "0.8.7"\n\n${PATCH}`,
     "rust-toolchain.toml": '[toolchain]\nchannel = "1.93.1"\n',
   };
   const remote = makeRemote({ tags: { "v0.8.7": `${NEW_COMMIT}\trefs/tags/v0.8.7` }, files });
@@ -216,4 +237,72 @@ test("the already pinned tag is a no-op", () => {
   assert.deepEqual(snapshot(root), pinned);
   assert.deepEqual(env.calls, []);
   assert.match(env.logs.join("\n"), /already pinned/);
+});
+
+const svg2pdfFiles = (root) =>
+  Object.fromEntries(Object.keys(SVG2PDF).map((rel) => [rel, fs.existsSync(path.join(root, rel)) ? fs.readFileSync(path.join(root, rel), "utf8") : null]));
+
+test("svg2pdf: an identical vendored copy passes and the patch entry is read", () => {
+  assert.equal(patchEntry(PATCH), '{ path = "vendor/svg2pdf" }');
+  assert.equal(patchEntry('[package]\nname = "x"\n'), null);
+  const root = makeRoot();
+  runUpdate(["v0.9.0", "--dry-run"], makeEnv(root, makeRemote()));
+});
+
+test("svg2pdf: a differing file refuses the update and names the file, hashes and versions", () => {
+  const root = makeRoot();
+  const before = snapshot(root);
+  const files = { "vendor/svg2pdf/src/lib.rs": "pub fn changed() {}\n", "vendor/svg2pdf/Cargo.toml": '[package]\nname = "svg2pdf"\nversion = "0.14.0"\n' };
+  const env = makeEnv(root, makeRemote({ files }));
+  assert.throws(() => runUpdate(["v0.9.0"], env), (err) => {
+    assert.match(err.message, /changed src\/lib\.rs \([0-9a-f]{10} -> [0-9a-f]{10}\)/);
+    assert.match(err.message, /version 0\.13\.0 -> 0\.14\.0/);
+    assert.match(err.message, /--sync-svg2pdf/);
+    return true;
+  });
+  assert.deepEqual(snapshot(root), before);
+  assert.equal(svg2pdfFiles(root)["vendor/svg2pdf/src/lib.rs"], SVG2PDF["vendor/svg2pdf/src/lib.rs"]);
+  assert.deepEqual(env.calls, []);
+});
+
+test("svg2pdf: a different [patch] entry is refused even with --sync-svg2pdf", () => {
+  const root = makeRoot();
+  const cargo = '[package]\nname = "rhwp"\nversion = "0.9.0"\n\n[patch.crates-io]\nsvg2pdf = { git = "https://example.invalid/svg2pdf" }\n';
+  const env = makeEnv(root, makeRemote({ files: { "Cargo.toml": cargo } }));
+  assert.throws(() => runUpdate(["v0.9.0", "--sync-svg2pdf"], env), /\[patch\.crates-io\] svg2pdf is/);
+  assert.deepEqual(env.calls, []);
+});
+
+test("svg2pdf: --sync-svg2pdf copies changed and added files and removes the ones upstream dropped", () => {
+  const root = makeRoot();
+  const files = {
+    "vendor/svg2pdf/src/lib.rs": "pub fn changed() {}\n",
+    "vendor/svg2pdf/src/render/path.rs": undefined,
+    "vendor/svg2pdf/src/new.rs": "pub fn n() {}\n",
+  };
+  const env = makeEnv(root, makeRemote({ files }));
+  runUpdate(["v0.9.0", "--sync-svg2pdf"], env);
+  assert.equal(fs.readFileSync(path.join(root, "vendor/svg2pdf/src/lib.rs"), "utf8"), "pub fn changed() {}\n");
+  assert.equal(fs.readFileSync(path.join(root, "vendor/svg2pdf/src/new.rs"), "utf8"), "pub fn n() {}\n");
+  assert.equal(fs.existsSync(path.join(root, "vendor/svg2pdf/src/render/path.rs")), false);
+  assert.deepEqual(env.calls, [`gitlink ${NEW_COMMIT}`, "checkout"]);
+});
+
+test("svg2pdf: --dry-run with --sync-svg2pdf writes nothing; a failing checkout restores the vendored files", () => {
+  const files = { "vendor/svg2pdf/src/lib.rs": "pub fn changed() {}\n", "vendor/svg2pdf/src/new.rs": "pub fn n() {}\n" };
+  const dry = makeRoot();
+  const beforeDry = svg2pdfFiles(dry);
+  runUpdate(["v0.9.0", "--sync-svg2pdf", "--dry-run"], makeEnv(dry, makeRemote({ files })));
+  assert.deepEqual(svg2pdfFiles(dry), beforeDry);
+  assert.equal(fs.existsSync(path.join(dry, "vendor/svg2pdf/src/new.rs")), false);
+
+  const root = makeRoot();
+  const before = svg2pdfFiles(root);
+  const env = makeEnv(root, makeRemote({ files }));
+  env.checkout = () => {
+    throw new Error("fetch failed");
+  };
+  assert.throws(() => runUpdate(["v0.9.0", "--sync-svg2pdf"], env), /restored.*fetch failed/);
+  assert.deepEqual(svg2pdfFiles(root), before);
+  assert.equal(fs.existsSync(path.join(root, "vendor/svg2pdf/src/new.rs")), false);
 });

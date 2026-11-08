@@ -2,11 +2,13 @@
 /**
  * Moves the rhwp upstream pin to an explicit release tag (PD-076, PD-081).
  *
- * Usage: node scripts/update-rhwp.mjs vX.Y.Z [--dry-run] [--accept-overrides]
+ * Usage: node scripts/update-rhwp.mjs vX.Y.Z [--dry-run] [--accept-overrides] [--sync-svg2pdf]
  *   vX.Y.Z             explicit release tag only; branches, SHAs and `latest` are refused
  *   --dry-run          print the plan and change nothing
  *   --accept-overrides re-pin the hwp-studio override baseline (config/rhwp-studio-overrides.json)
  *                      after the overrides were reviewed against the new upstream files
+ *   --sync-svg2pdf     copy the svg2pdf files rhwp pins over vendor/svg2pdf (PD-101). Without it a
+ *                      difference in the files or in the Cargo.toml [patch] entry refuses the update
  *
  * The tag is resolved on the remote to a commit, the new upstream files are read from that commit
  * without a checkout, and the whole plan is built first. Files are written only at the end: the pin
@@ -25,6 +27,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { normalizedSha256Text, MANIFEST_REL, studioFileRel } from "./hwp-studio-overrides.mjs";
+import { applySvg2pdf, planSvg2pdf, restoreSvg2pdf, SVG2PDF_DIR } from "./rhwp-svg2pdf.mjs";
 import { CONFIG_REL, cargoVersion, checkConfig, readConfig, resolveGitExecutable } from "./verify-rhwp-upstream.mjs";
 
 const TAG_RE = /^v(\d{1,4})\.(\d{1,4})\.(\d{1,4})$/;
@@ -39,14 +42,15 @@ const TABLES = [
 ];
 
 export function parseArgs(argv) {
-  const opts = { tag: null, dryRun: false, acceptOverrides: false };
+  const opts = { tag: null, dryRun: false, acceptOverrides: false, syncSvg2pdf: false };
   for (const arg of argv) {
     if (arg === "--dry-run") opts.dryRun = true;
     else if (arg === "--accept-overrides") opts.acceptOverrides = true;
+    else if (arg === "--sync-svg2pdf") opts.syncSvg2pdf = true;
     else if (opts.tag === null && TAG_RE.test(arg)) opts.tag = arg;
     else throw new Error(`Unexpected argument '${arg.slice(0, 40)}' (only one explicit vX.Y.Z tag is accepted)`);
   }
-  if (opts.tag === null) throw new Error("usage: update-rhwp.mjs vX.Y.Z [--dry-run] [--accept-overrides]");
+  if (opts.tag === null) throw new Error("usage: update-rhwp.mjs vX.Y.Z [--dry-run] [--accept-overrides] [--sync-svg2pdf]");
   return opts;
 }
 
@@ -66,10 +70,10 @@ function parseChannel(toolchainToml) {
   return /^\s*channel\s*=\s*"(\d+\.\d+\.\d+)"/m.exec(toolchainToml ?? "")?.[1] ?? null;
 }
 
-function git(cwd, args) {
+function git(cwd, args, encoding = "utf8") {
   return execFileSync(resolveGitExecutable(), args, {
     cwd,
-    encoding: "utf8",
+    encoding,
     stdio: ["ignore", "pipe", "pipe"],
     timeout: GIT_TIMEOUT_MS,
     maxBuffer: MAX_FILE_BYTES,
@@ -104,6 +108,20 @@ export function createGitRemote() {
       if (git(repo, ["ls-tree", "--name-only", commit, "--", relPath]).trim() === "") return null;
       return git(repo, ["show", `${commit}:${relPath}`]);
     },
+    /** Map of path (relative to `dir`) -> blob id for every file under `dir` at `commit`. */
+    listTreeAt(url, commit, dir) {
+      const repo = repoFor(url, commit);
+      const tree = new Map();
+      for (const line of git(repo, ["ls-tree", "-r", commit, "--", `${dir}/`]).split("\n")) {
+        const m = /^\d+ blob ([0-9a-f]{40})\t(.+)$/.exec(line);
+        if (m) tree.set(m[2].slice(dir.length + 1), m[1]);
+      }
+      return tree;
+    },
+    /** Raw bytes of the file at `commit:relPath`. */
+    readBlobAt(url, commit, relPath) {
+      return git(repoFor(url, commit), ["show", `${commit}:${relPath}`], "buffer");
+    },
     close() {
       if (scratch !== null) fs.rmSync(scratch, { recursive: true, force: true });
       scratch = null;
@@ -136,7 +154,7 @@ function stringify(value) {
 }
 
 /** Builds the whole update plan without touching the working tree. `problems` block applying it. */
-export function planUpdate({ root, tag, acceptOverrides, remote }) {
+export function planUpdate({ root, tag, acceptOverrides, syncSvg2pdf = false, remote }) {
   const config = readConfig(root);
   const configErrors = checkConfig(config);
   if (configErrors.length > 0) throw new Error(`current pin is invalid:\n${configErrors.join("\n")}`);
@@ -161,6 +179,9 @@ export function planUpdate({ root, tag, acceptOverrides, remote }) {
     );
   }
 
+  const svg2pdf = planSvg2pdf({ root, remote, url: config.url, commit, sync: syncSvg2pdf });
+  problems.push(...svg2pdf.problems);
+
   const nextConfig = { ...config, commit, version, rustToolchain: rustToolchain ?? config.rustToolchain };
   const nextManifest = { ...manifest, upstream: { ...manifest.upstream, version, commit, ...baseline.next } };
   const files = [
@@ -169,8 +190,8 @@ export function planUpdate({ root, tag, acceptOverrides, remote }) {
   ];
   return {
     tag, commit, version, previousCommit: config.commit, rustToolchain: nextConfig.rustToolchain,
-    wasmPackVersion: config.wasmPackVersion, changedOverrides: baseline.changed, problems, files,
-    unchanged: files.every((f) => f.before === f.after),
+    wasmPackVersion: config.wasmPackVersion, changedOverrides: baseline.changed, problems, files, svg2pdf: svg2pdf.sync,
+    unchanged: svg2pdf.sync === null && files.every((f) => f.before === f.after),
   };
 }
 
@@ -182,10 +203,12 @@ export function applyPlan(root, plan, env) {
       fs.writeFileSync(path.join(root, file.rel), file.after);
       written.push(file);
     }
+    if (plan.svg2pdf) applySvg2pdf(root, plan.svg2pdf);
     env.setGitlink(plan.commit);
     env.checkout();
   } catch (err) {
     for (const file of written) fs.writeFileSync(path.join(root, file.rel), file.before);
+    if (plan.svg2pdf) restoreSvg2pdf(root, plan.svg2pdf);
     try {
       env.setGitlink(plan.previousCommit);
     } catch (restoreErr) {
@@ -202,6 +225,7 @@ function describePlan(plan, dryRun) {
     `${dryRun ? "Plan" : "Updating"}: rhwp ${plan.previousCommit.slice(0, 8)} -> ${plan.tag} (${plan.commit})`,
     `  ${CONFIG_REL}: commit, version ${plan.version}, rustToolchain ${plan.rustToolchain}`,
     `  ${MANIFEST_REL}: upstream baseline (${plan.changedOverrides.length} changed: ${plan.changedOverrides.join(", ") || "none"})`,
+    ...(plan.svg2pdf ? [`  ${SVG2PDF_DIR}: sync to rhwp's copy (version ${plan.svg2pdf.localVersion} -> ${plan.svg2pdf.upstreamVersion}): ${plan.svg2pdf.lines.join("; ")}`] : []),
     "  gitlink third_party/rhwp and sparse checkout via scripts/checkout-rhwp.mjs",
   ];
   return lines.join("\n");
@@ -220,7 +244,7 @@ function nextSteps(plan) {
 /** Runs the command; `env` supplies the remote and the side effects so tests can fake them. */
 export function runUpdate(argv, env) {
   const opts = parseArgs(argv);
-  const plan = planUpdate({ root: env.root, tag: opts.tag, acceptOverrides: opts.acceptOverrides, remote: env.remote });
+  const plan = planUpdate({ root: env.root, tag: opts.tag, acceptOverrides: opts.acceptOverrides, syncSvg2pdf: opts.syncSvg2pdf, remote: env.remote });
   if (plan.unchanged && plan.problems.length === 0) {
     env.log(`rhwp is already pinned to ${plan.tag} (${plan.commit}); nothing to update.`);
     return;
