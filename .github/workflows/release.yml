@@ -63,12 +63,17 @@ jobs:
           INPUT_PUBLISH: ${{ inputs.publish }}
           INPUT_DRAFT: ${{ inputs.release_draft }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           # Every run signs its updater packages, a trial run (publish=false) included: a trial that skipped
           # the signing would not test the step that is most likely to fail. Without the key the build
           # cannot make the signatures the app requires, so stop before building anything.
           if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
             echo "::error::TAURI_SIGNING_PRIVATE_KEY is required: the updater packages must be signed (PD-103)"
+            exit 1
+          fi
+          if [ -z "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" ]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY_PASSWORD is required: the signing key is password protected (PD-103)"
             exit 1
           fi
           if [ "$GITHUB_REF_TYPE" = tag ]; then

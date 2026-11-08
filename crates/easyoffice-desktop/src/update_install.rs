@@ -38,8 +38,10 @@ use tauri_plugin_updater::UpdaterExt;
 
 /// Every update package must come from the project's release downloads.
 pub const DOWNLOAD_URL_PREFIX: &str = "https://github.com/AquilaXk/easyoffice/releases/download/";
-/// Largest accepted package (bytes); a longer download is dropped while it runs.
-pub const MAX_PACKAGE_BYTES: u64 = 512 * 1024 * 1024;
+/// Largest accepted package (bytes); a longer download is dropped while it runs. The plugin grows one
+/// `Vec` while it downloads, so the memory near the limit is about twice this (the old buffer and the
+/// grown one).
+pub const MAX_PACKAGE_BYTES: u64 = 256 * 1024 * 1024;
 /// Asking `latest.json` which package fits this installation.
 const CHECK_TIMEOUT: Duration = Duration::from_secs(15);
 /// The whole package download, including a slow connection.
@@ -497,6 +499,7 @@ mod tests {
 
     #[test]
     fn the_package_size_limit_applies_to_the_running_total_and_the_announced_size() {
+        assert_eq!(MAX_PACKAGE_BYTES, 256 * 1024 * 1024);
         assert!(within_limit(0, None));
         assert!(within_limit(MAX_PACKAGE_BYTES, Some(MAX_PACKAGE_BYTES)));
         assert!(!within_limit(MAX_PACKAGE_BYTES + 1, None));

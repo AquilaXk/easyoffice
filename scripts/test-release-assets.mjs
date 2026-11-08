@@ -274,6 +274,9 @@ test("a run without the signing key fails before any build, publishing or not", 
   assert.match(prepare, /TAURI_SIGNING_PRIVATE_KEY: \$\{\{ secrets\.TAURI_SIGNING_PRIVATE_KEY \}\}/);
   assert.match(prepare, /-z "\$\{TAURI_SIGNING_PRIVATE_KEY:-\}"/);
   assert.match(prepare, /TAURI_SIGNING_PRIVATE_KEY is required/);
+  assert.match(prepare, /TAURI_SIGNING_PRIVATE_KEY_PASSWORD: \$\{\{ secrets\.TAURI_SIGNING_PRIVATE_KEY_PASSWORD \}\}/);
+  assert.match(prepare, /-z "\$\{TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-\}"/);
+  assert.match(prepare, /TAURI_SIGNING_PRIVATE_KEY_PASSWORD is required/);
   const jobs = workflow.slice(workflow.indexOf("  release-macos:"));
   assert.equal(jobs.split("needs: prepare").length - 1 + jobs.split("needs: [prepare,").length - 1, 4, "every other job waits for prepare");
 });
