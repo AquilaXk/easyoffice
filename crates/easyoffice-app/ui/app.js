@@ -210,7 +210,7 @@
     document, hwpHost, invokeIpc, getActiveModule: () => activeModule,
     confirm: (kind) => desktopBridge.confirm(kind),
     activateHwp: () => ribbonHistory.activatePane("HWP"),
-    deliverSavedFile: (base64, name, ext) => workspacePanels.deliverSavedFile(base64, name, ext),
+    deliverSavedFile: (base64, name, ext, options) => workspacePanels.deliverSavedFile(base64, name, ext, options),
     resolveBaseName: () => workspacePanels.resolveSaveFileBase("HWP"),
     pdfExport: desktopBridge.isAvailable() ? desktopBridge.pdfExport : null,
     getDocumentId: () => windowBridge.launch.windowId,

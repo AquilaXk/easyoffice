@@ -290,6 +290,72 @@ test("save: a document opened as HWPX saves as HWPX, and a later save-as HWP swi
   assert.deepEqual(deliveries.map((d) => d.ext), ["hwpx", "hwp", "hwp"]);
 });
 
+// ---- preview picture (PD-132) ---------------------------------------------------------------
+
+const PAGE_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="794" height="1123"/>';
+const withPrint = { capabilities: ["verify-bytes-v1", "save-protection-v1", "print-pages-v1"] };
+
+function recordingDeliverWithOptions() {
+  const deliveries = [];
+  const deliver = async (base64, name, ext, options) => {
+    deliveries.push({ base64, name, ext, options });
+    return { ok: true, cancelled: false, name: name + "." + ext, error: "" };
+  };
+  return { deliver, deliveries };
+}
+
+test("save: the first page is requested after the export and handed to the shell with the bytes", async () => {
+  const { deliver, deliveries } = recordingDeliverWithOptions();
+  const ctx = load({ deliver, host: withPrint });
+  ctx.fake.state.handlers.getPrintPages = async () => ({ pageCount: 3, pages: [{ svg: PAGE_SVG, widthMm: 210, heightMm: 297 }] });
+  await ctx.session.openFromBytes("a.hwp", hwpBytes());
+  ctx.fake.calls.length = 0;
+  const res = await ctx.session.save({ deliver, baseName: "보고서" });
+  assert.equal(res.ok, true);
+  assert.deepEqual(ctx.fake.calls.map((c) => c.method), ["getSaveProtection", "exportHwp", "verifyBytes", "getPrintPages", "notifySaved"]);
+  const request = ctx.fake.calls.find((c) => c.method === "getPrintPages");
+  assert.deepEqual(request.params, { from: 0, count: 1 });
+  assert.ok(request.options.timeoutMs <= 15000, "a stuck editor does not hold the save for long");
+  assert.deepEqual(deliveries[0].options, { thumbnailSvg: PAGE_SVG });
+});
+
+test("save: without print support, or when the page cannot be had, the document is delivered without a picture", async () => {
+  const bad = [
+    ["throws", async () => { throw new Error("렌더링 실패"); }],
+    ["no pages", async () => ({ pageCount: 0, pages: [] })],
+    ["not a string", async () => ({ pageCount: 1, pages: [{ svg: 42 }] })],
+    ["empty", async () => ({ pageCount: 1, pages: [{ svg: "" }] })],
+    ["oversized", async () => ({ pageCount: 1, pages: [{ svg: "x".repeat(16 * 1024 * 1024 + 1) }] })],
+    ["garbage", async () => null],
+  ];
+  for (const [label, handler] of bad) {
+    const { deliver, deliveries } = recordingDeliverWithOptions();
+    const ctx = load({ deliver, host: withPrint });
+    ctx.fake.state.handlers.getPrintPages = handler;
+    const res = await ctx.session.save({ deliver, baseName: "a" });
+    assert.equal(res.ok, true, label);
+    assert.equal(deliveries[0].options, undefined, label);
+  }
+  const { deliver, deliveries } = recordingDeliverWithOptions();
+  const ctx = load({ deliver });
+  const res = await ctx.session.save({ deliver, baseName: "a" });
+  assert.equal(res.ok, true);
+  assert.equal(ctx.fake.calls.some((c) => c.method === "getPrintPages"), false, "no call to an editor that cannot print");
+  assert.equal(deliveries[0].options, undefined);
+});
+
+test("save: a password document closing the window goes through the save-as delivery with the same picture", async () => {
+  const { deliver, deliveries } = recordingDeliverWithOptions();
+  const inPlace = recordingDeliverWithOptions();
+  const ctx = load({ deliver: inPlace.deliver, host: withPrint });
+  ctx.fake.state.handlers.getSaveProtection = async () => ({ passwordProtected: true });
+  ctx.fake.state.handlers.getPrintPages = async () => ({ pageCount: 1, pages: [{ svg: PAGE_SVG }] });
+  const res = await ctx.session.save({ deliver, baseName: "a", inPlace: true, closing: true });
+  assert.equal(res.ok, true);
+  assert.equal(deliveries.length, 0);
+  assert.deepEqual(inPlace.deliveries[0].options, { thumbnailSvg: PAGE_SVG });
+});
+
 test("save: a verification failure refuses delivery and keeps the dirty baseline", async () => {
   const { deliver, deliveries } = recordingDeliver();
   const ctx = load({ deliver });

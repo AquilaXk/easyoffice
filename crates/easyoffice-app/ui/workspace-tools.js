@@ -193,8 +193,8 @@
     }
 
     // "Save" (not "save as" or an export) writes back to the opened file when the shell knows it.
-    const deliverInPlace = (base64Data, baseFilename, ext) =>
-      deliverSavedFile(base64Data, baseFilename, ext, { inPlace: true });
+    const deliverInPlace = (base64Data, baseFilename, ext, extra) =>
+      deliverSavedFile(base64Data, baseFilename, ext, { ...extra, inPlace: true });
 
     // Hands saved bytes to the user: the native save dialog inside the desktop shell (WebView2
     // downloads can be silent), the Blob download in the `--serve` browser preview. Never throws;

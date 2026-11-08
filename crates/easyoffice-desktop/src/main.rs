@@ -23,6 +23,7 @@ mod pdf_tounicode;
 mod preview;
 mod recent;
 mod save_file;
+mod save_thumbnail;
 mod save_verify;
 mod shell_caller;
 mod smoke;
@@ -116,13 +117,21 @@ async fn save_document_file(
     file_name: String,
     base64: String,
     in_place: Option<bool>,
+    thumbnail_svg: Option<String>,
 ) -> Result<SaveOutcome, IpcError> {
-    // Decoding and checking a document of up to 256MiB takes a while: off the async workers.
-    let request =
-        tauri::async_runtime::spawn_blocking(move || SaveRequest::parse(&file_name, &base64))
-            .await
-            .map_err(|err| IpcError::new(format!("문서를 확인하지 못했습니다: {err}")))?
-            .map_err(IpcError::new)?;
+    let font_dirs = pdf_job::pdf_font_dirs(&app);
+    // Decoding and checking a document of up to 256MiB takes a while: off the async workers. The
+    // preview picture (first page as SVG, PD-132) is made here too and never fails the save.
+    let request = tauri::async_runtime::spawn_blocking(move || {
+        let request = SaveRequest::parse(&file_name, &base64)?;
+        Ok::<_, String>(match thumbnail_svg {
+            Some(svg) => request.with_thumbnail(&svg, &pdf_export::shared_font_db(&font_dirs)),
+            None => request,
+        })
+    })
+    .await
+    .map_err(|err| IpcError::new(format!("문서를 확인하지 못했습니다: {err}")))?
+    .map_err(IpcError::new)?;
     if in_place == Some(true) {
         // A document that came from (or was saved to) a file with the same format is written back to
         // that file; everything else falls through to the save dialog.

@@ -30,6 +30,11 @@ tauri-plugin-single-instance = "2"
 svg2pdf = { version = "0.13", default-features = false, features = ["text"] }
 usvg = { version = "0.45", default-features = false, features = ["text"] }
 fontdb = "0.23"
+# PD-132: the first page of a saved Hangul document drawn to a small PNG for the file's preview
+# picture. Both crates are already in the graph through svg2pdf (same versions). Raster pictures
+# inside the page are not decoded (no `raster-images`; it adds eight decoder crates).
+resvg = { version = "0.45", default-features = false, features = ["text"] }
+tiny-skia = { version = "0.11", default-features = false, features = ["std", "png-format"] }
 pdf-writer = "0.12"
 # Glyph lookup of the PDF fallback-font index (usvg keeps its own lookup private); already in the
 # graph through usvg and svg2pdf.

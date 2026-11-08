@@ -16,7 +16,9 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use usvg::fontdb::Database;
 
 /// Upper bound for one saved document (decoded bytes).
 pub const MAX_SAVE_BYTES: usize = 256 * 1_048_576;
@@ -98,6 +100,19 @@ impl SaveRequest {
             extension,
             bytes,
         })
+    }
+
+    /// Puts the first page, drawn from `svg`, into the document as its preview picture (PD-132). The
+    /// save never depends on it: when the picture cannot be made or the result does not pass the
+    /// check, the document stays exactly as it was and the reason goes to the log.
+    pub fn with_thumbnail(self, svg: &str, fonts: &Arc<Database>) -> Self {
+        match crate::save_thumbnail::with_first_page(&self.extension, &self.bytes, svg, fonts) {
+            Ok(bytes) => Self { bytes, ..self },
+            Err(reason) => {
+                eprintln!("save: no preview picture in .{}: {reason}", self.extension);
+                self
+            }
+        }
     }
 
     pub fn file_name(&self) -> &str {

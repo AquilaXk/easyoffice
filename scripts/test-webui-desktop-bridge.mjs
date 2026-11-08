@@ -156,6 +156,27 @@ test("desktop save uses the native save command instead of a Blob download", asy
   assert.match(feedback(document), /^문서 저장 완료 \(분기_경영실적_보고서\.docx · /);
 });
 
+test("the first page of a Hangul document is sent to the shell only when the page gives one", async () => {
+  const saves = [];
+  const shell = await createShellHarness({
+    saveFile: (args) => {
+      saves.push(args);
+      return { status: "saved", name: args.fileName, bytes: 1 };
+    },
+  });
+  const bridge = shell.sandbox.__EASYOFFICE_DESKTOP_BRIDGE__;
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg"/>';
+  await bridge.saveFile("QQ==", "a.hwp", { inPlace: true, thumbnailSvg: svg });
+  await bridge.saveFile("QQ==", "b.hwp", { inPlace: true });
+  await bridge.saveFile("QQ==", "c.hwp", { thumbnailSvg: "" });
+  await bridge.saveFile("QQ==", "d.hwp", { thumbnailSvg: 42 });
+  assert.deepEqual(Object.keys(saves[0]).sort((a, b) => a.localeCompare(b)), ["base64", "fileName", "inPlace", "thumbnailSvg"]);
+  assert.equal(saves[0].thumbnailSvg, svg);
+  for (const save of saves.slice(1)) {
+    assert.deepEqual(Object.keys(save).sort((a, b) => a.localeCompare(b)), ["base64", "fileName", "inPlace"]);
+  }
+});
+
 test("cancelled and failed desktop saves never claim success", async () => {
   const cancelled = await createShellHarness({ saveFile: () => ({ status: "cancelled", name: null, bytes: 0 }) });
   cancelled.userClick(studioItem(cancelled.document, "studio-save"));

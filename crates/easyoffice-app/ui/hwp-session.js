@@ -33,6 +33,12 @@
   // A document opened with a password is exported without it (PD-120). The editor says so over the
   // port (a flag, never the password); the shell refuses an overwrite and asks before a new copy.
   const PROTECTION_CAPABILITY = "save-protection-v1";
+  // The first page goes to the shell next to the saved bytes, which draws it small and stores it as the
+  // file's preview picture (PD-132). The page is the print profile SVG the PDF export uses; whatever
+  // goes wrong here leaves the save as it was.
+  const PRINT_CAPABILITY = "print-pages-v1";
+  const THUMBNAIL_PAGE_TIMEOUT_MS = 10000;
+  const MAX_THUMBNAIL_SVG_CHARS = 16 * 1024 * 1024; // `MAX_THUMBNAIL_SVG_BYTES` in save_thumbnail.rs
   const MSG_PASSWORD_NO_OVERWRITE = "암호 문서의 원본 저장은 아직 지원하지 않습니다. 다른 이름으로 저장에서 암호 없는 HWP 파일로 저장하세요.";
   const MSG_PASSWORD_DECLINED = "암호 없이 저장하지 않았습니다";
   const MSG_PASSWORD_NO_AUTOSAVE = "암호 문서는 자동 저장하지 않습니다. 저장(다른 이름으로 저장)으로 보관하세요";
@@ -459,6 +465,19 @@
       return { bytes };
     }
 
+    // The first page as SVG for the file's preview picture, or null (no print support in the editor,
+    // an error, a timeout or an oversized page) so that the document is saved without one.
+    async function readThumbnailSvg() {
+      try {
+        if (!hwpHost.getCapabilities().includes(PRINT_CAPABILITY)) return null;
+        const reply = await hwpHost.call("getPrintPages", { from: 0, count: 1 }, { timeoutMs: THUMBNAIL_PAGE_TIMEOUT_MS });
+        const svg = reply?.pages?.[0]?.svg;
+        return typeof svg === "string" && svg.length > 0 && svg.length <= MAX_THUMBNAIL_SVG_CHARS ? svg : null;
+      } catch {
+        return null;
+      }
+    }
+
     async function exportForSave(format) {
       let fmt = format;
       for (;;) {
@@ -536,7 +555,8 @@
         const exported = await exportForSave(wanted);
         if (!exported.bytes) return failure(exported.format, exported.error);
         const base64 = bytesToBase64(exported.bytes, (s) => env.btoa(s));
-        const delivery = await gate.deliver(base64, options.baseName, exported.format);
+        const thumbnailSvg = await readThumbnailSvg();
+        const delivery = await gate.deliver(base64, options.baseName, exported.format, thumbnailSvg ? { thumbnailSvg } : undefined);
         if (delivery?.cancelled) return failure(exported.format, "", true);
         if (!delivery?.ok) return failure(exported.format, delivery?.error || "파일 다운로드를 시작하지 못했습니다");
         return await afterDelivery(delivery, exported, options.baseName, startSeq, gate.protectedDoc);

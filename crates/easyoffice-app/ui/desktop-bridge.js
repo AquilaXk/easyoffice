@@ -117,12 +117,16 @@
   // Error whose message explains why the file was not written. `options.inPlace` asks Rust to write
   // back to the file this window's document came from (same format; Rust keeps the path and checks
   // the file did not change on disk); without it, or when Rust has no matching file, the dialog opens.
+  // `options.thumbnailSvg` is the first page of a Hangul document: Rust draws it small and stores it as
+  // the file's preview picture (PD-132), and saves the document without one if that fails.
   async function saveFile(base64Data, fileName, options) {
-    const res = await callShell(SAVE_COMMAND, {
+    const args = {
       fileName: String(fileName),
       base64: String(base64Data),
       inPlace: Boolean(options?.inPlace),
-    });
+    };
+    if (typeof options?.thumbnailSvg === "string" && options.thumbnailSvg) args.thumbnailSvg = options.thumbnailSvg;
+    const res = await callShell(SAVE_COMMAND, args);
     if (res && (res.status === "saved" || res.status === "cancelled")) return res;
     throw new Error("저장 결과를 확인하지 못했습니다.");
   }

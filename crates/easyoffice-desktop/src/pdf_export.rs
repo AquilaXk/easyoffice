@@ -145,7 +145,7 @@ fn image_href_resolver() -> usvg::ImageHrefResolver<'static> {
 
 /// Parse options of one export: the shared fonts, the indexed fallback selector (one index per
 /// export) and the nested-SVG resolver.
-fn parse_options(fonts: &Arc<Database>) -> usvg::Options<'static> {
+pub(crate) fn parse_options(fonts: &Arc<Database>) -> usvg::Options<'static> {
     let mut options = usvg::Options {
         fontdb: Arc::clone(fonts),
         ..usvg::Options::default()
