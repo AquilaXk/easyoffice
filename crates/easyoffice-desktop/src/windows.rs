@@ -69,7 +69,7 @@ impl WindowKind {
     }
 
     pub fn min_inner_size(self) -> (f64, f64) {
-        (1024.0, 680.0)
+        (960.0, 720.0)
     }
 }
 
@@ -391,7 +391,7 @@ mod tests {
             WindowKind::Conv,
         ] {
             assert_eq!(kind.inner_size(), (1280.0, 860.0));
-            assert_eq!(kind.min_inner_size(), (1024.0, 680.0));
+            assert_eq!(kind.min_inner_size(), (960.0, 720.0));
         }
         assert_eq!(WindowKind::parse("evil"), None);
         assert_eq!(WindowKind::for_extension("DOCX"), Some(WindowKind::Doc));

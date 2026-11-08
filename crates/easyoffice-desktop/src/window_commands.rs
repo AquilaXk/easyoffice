@@ -133,33 +133,58 @@ impl AppWindows {
     }
 }
 
-/// Position of the n-th document window: centred on the monitor, shifted by a small cascade step.
-pub fn cascade_origin(monitor: (f64, f64), size: (f64, f64), index: usize) -> (f64, f64) {
+/// Margin kept free around a new window and the height the window frame takes beyond the inner
+/// size, as in the reference app (`windows.rs` 12-13, 111-118).
+const WORK_AREA_MARGIN: f64 = 24.0;
+const FRAME_HEIGHT_RESERVE: f64 = 72.0;
+/// A new window never opens larger than this share of the usable work area (`windows.rs` 11, 100-101).
+const MAX_WORK_AREA_RATIO: f64 = 0.85;
+
+/// The part of a monitor that windows can use (without the menu bar, dock or taskbar), in logical pixels.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct WorkArea {
+    origin: (f64, f64),
+    size: (f64, f64),
+}
+
+/// Position of the n-th document window inside the work area: centred (the frame's extra height
+/// counted), shifted by a small cascade step, never closer than the margin to the work area's edge.
+pub fn cascade_origin(work: (f64, f64), size: (f64, f64), index: usize) -> (f64, f64) {
     let shift = CASCADE_STEP * (index % 8) as f64;
-    let x = ((monitor.0 - size.0) / 2.0 + shift).max(0.0);
-    let y = ((monitor.1 - size.1) / 2.0 + shift).max(0.0);
+    let x = ((work.0 - size.0) / 2.0 + shift).max(WORK_AREA_MARGIN);
+    let y = ((work.1 - size.1 - FRAME_HEIGHT_RESERVE) / 2.0 + shift).max(WORK_AREA_MARGIN);
     (x, y)
 }
 
-/// A window never opens larger than 92% of the monitor, but never below its minimum.
-pub fn clamp_size(monitor: (f64, f64), size: (f64, f64), min: (f64, f64)) -> (f64, f64) {
+/// A window never opens larger than 85% of the usable work area, but never below its minimum.
+pub fn clamp_size(work: (f64, f64), size: (f64, f64), min: (f64, f64)) -> (f64, f64) {
+    let max_width = ((work.0 - WORK_AREA_MARGIN * 2.0).max(1.0) * MAX_WORK_AREA_RATIO).floor();
+    let max_height = ((work.1 - WORK_AREA_MARGIN * 2.0 - FRAME_HEIGHT_RESERVE).max(1.0)
+        * MAX_WORK_AREA_RATIO)
+        .floor();
     (
-        size.0.min(monitor.0 * 0.92).max(min.0),
-        size.1.min(monitor.1 * 0.92).max(min.1),
+        size.0.min(max_width).max(min.0),
+        size.1.min(max_height).max(min.1),
     )
 }
 
-fn monitor_logical_size(app: &AppHandle) -> Option<(f64, f64)> {
+fn monitor_logical_work_area(app: &AppHandle) -> Option<WorkArea> {
     let monitor = app.primary_monitor().ok().flatten()?;
     let scale = monitor.scale_factor();
     if scale <= 0.0 {
         return None;
     }
-    let size = monitor.size();
-    Some((
-        f64::from(size.width) / scale,
-        f64::from(size.height) / scale,
-    ))
+    let area = monitor.work_area();
+    Some(WorkArea {
+        origin: (
+            f64::from(area.position.x) / scale,
+            f64::from(area.position.y) / scale,
+        ),
+        size: (
+            f64::from(area.size.width) / scale,
+            f64::from(area.size.height) / scale,
+        ),
+    })
 }
 
 fn build_window(
@@ -168,12 +193,12 @@ fn build_window(
     label: &str,
     smoke_secondary: bool,
 ) -> Result<WebviewWindow, String> {
-    let monitor = monitor_logical_size(app);
+    let work_area = monitor_logical_work_area(app);
     let min = kind.min_inner_size();
     let remembered = remembered_geometry(app);
     let preferred = remembered.map_or_else(|| kind.inner_size(), WindowGeometry::size);
-    let size = monitor
-        .map(|m| clamp_size(m, preferred, min))
+    let size = work_area
+        .map(|w| clamp_size(w.size, preferred, min))
         .unwrap_or(preferred);
     let title = if kind == WindowKind::Start {
         "EasyOffice".to_string()
@@ -191,12 +216,12 @@ fn build_window(
             .on_web_resource_request(|request, response| {
                 crate::studio_frame::harden_studio_response(&request, response);
             });
-    builder = match (remembered_origin(app, remembered), monitor) {
+    builder = match (remembered_origin(app, remembered), work_area) {
         (Some((x, y)), _) => builder.position(x, y),
         (None, Some(m)) => {
             let index = locked(&app.state::<AppWindows>().registry).document_window_count();
-            let (x, y) = cascade_origin(m, size, index);
-            builder.position(x, y)
+            let (x, y) = cascade_origin(m.size, size, index);
+            builder.position(m.origin.0 + x, m.origin.1 + y)
         }
         (None, None) => builder.center(),
     };
@@ -799,30 +824,30 @@ mod tests {
     }
 
     #[test]
-    fn windows_cascade_from_the_monitor_centre_and_wrap() {
-        let monitor = (1920.0, 1080.0);
-        let size = (1280.0, 860.0);
-        assert_eq!(cascade_origin(monitor, size, 0), (320.0, 110.0));
-        assert_eq!(cascade_origin(monitor, size, 1), (348.0, 138.0));
-        assert_eq!(cascade_origin(monitor, size, 8), (320.0, 110.0));
-        assert_eq!(cascade_origin((1000.0, 700.0), size, 0), (0.0, 0.0));
+    fn windows_cascade_from_the_work_area_centre_and_wrap() {
+        let work = (1920.0, 1000.0);
+        let size = (1280.0, 760.0);
+        assert_eq!(cascade_origin(work, size, 0), (320.0, 84.0));
+        assert_eq!(cascade_origin(work, size, 1), (348.0, 112.0));
+        assert_eq!(cascade_origin(work, size, 8), (320.0, 84.0));
+        assert_eq!(cascade_origin((1000.0, 700.0), size, 0), (24.0, 24.0));
     }
 
     #[test]
-    fn size_is_limited_to_the_monitor_but_keeps_the_minimum() {
-        let min = (1024.0, 680.0);
+    fn size_is_limited_to_85_percent_of_the_work_area_but_keeps_the_minimum() {
+        let min = (960.0, 720.0);
         assert_eq!(
-            clamp_size((2560.0, 1440.0), (1280.0, 860.0), min),
+            clamp_size((2560.0, 1400.0), (1280.0, 860.0), min),
             (1280.0, 860.0)
         );
-        let (w, h) = clamp_size((1366.0, 768.0), (1280.0, 860.0), min);
-        assert!(
-            (w - 1256.72).abs() < 1e-6 && (h - 706.56).abs() < 1e-6,
-            "{w}x{h}"
+        // (1366 - 48) * 0.85 = 1120.3 and (768 - 48 - 72) * 0.85 = 550.8, floored; the height is then raised to the minimum.
+        assert_eq!(
+            clamp_size((1366.0, 768.0), (1280.0, 860.0), min),
+            (1120.0, 720.0)
         );
         assert_eq!(
-            clamp_size((1024.0, 600.0), (1280.0, 860.0), min),
-            (1024.0, 680.0)
+            clamp_size((900.0, 600.0), (1280.0, 860.0), min),
+            (960.0, 720.0)
         );
     }
 
