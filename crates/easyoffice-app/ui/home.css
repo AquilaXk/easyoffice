@@ -456,6 +456,10 @@
   max-width: calc(100vw - 32px);
 }
 
+.recent-documents-footer-spacer {
+  flex: 1;
+}
+
 .recent-documents-body {
   padding: 12px 16px;
 }

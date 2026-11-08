@@ -48,6 +48,11 @@ impl RecentList {
         self.entries.truncate(MAX_RECENT);
     }
 
+    /// Forgets every entry (the reference app's 목록 비우기).
+    pub fn clear(&mut self) {
+        self.entries.clear();
+    }
+
     pub fn path_for(&self, id: &str) -> Option<PathBuf> {
         self.entries
             .iter()
@@ -164,6 +169,20 @@ mod tests {
         );
         assert_eq!(list.path_for(&views[1].id), Some(doc));
         assert_eq!(list.path_for("0000000000000000"), None);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn clearing_empties_the_list_and_the_stored_file() {
+        let dir = scratch("clear");
+        let mut list = RecentList::default();
+        list.add(PathBuf::from("C:/d/one.docx"));
+        list.save(&dir).unwrap();
+        list.clear();
+        assert!(list.entries.is_empty());
+        assert!(list.views().is_empty());
+        list.save(&dir).unwrap();
+        assert!(RecentList::load(&dir).entries.is_empty());
         let _ = fs::remove_dir_all(&dir);
     }
 

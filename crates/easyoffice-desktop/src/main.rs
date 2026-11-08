@@ -281,6 +281,7 @@ fn main() {
             window_commands::report_window_state,
             window_commands::close_current_window,
             window_commands::list_recent_documents,
+            window_commands::clear_recent_documents,
             #[cfg(target_os = "macos")]
             menu_state::report_menu_state,
             app_quit::quit_app,
@@ -408,7 +409,7 @@ mod tests {
         );
         assert_eq!(value["windows"], serde_json::json!(["main", "doc-*"]));
         assert_eq!(value["local"], serde_json::json!(true));
-        assert_eq!(app_commands::APP_COMMANDS.len(), 22);
+        assert_eq!(app_commands::APP_COMMANDS.len(), 23);
     }
 
     #[test]

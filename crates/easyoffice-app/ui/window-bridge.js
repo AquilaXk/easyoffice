@@ -297,11 +297,22 @@
       return entries;
     }
 
+    // 목록 비우기: the shell forgets the list, then the start screen, menus and editor menu follow.
+    async function clearRecents() {
+      await shell("clearRecentDocuments", {});
+      const entries = await refreshRecents();
+      if (typeof deps.onRecentsChanged === "function") await deps.onRecentsChanged(entries);
+    }
+
     // The full list as a dialog (the reference app's recent-documents dialog); a pick opens like a menu item.
     async function chooseRecent() {
       const dialogs = host.__EASYOFFICE_RECENT_DIALOG__;
-      if (!dialogs || recentEntries.length === 0) return;
-      const picked = await dialogs.open(document, recentEntries);
+      if (!dialogs) return;
+      if (recentEntries.length === 0) {
+        if (typeof host.__EASYOFFICE_NOTICE__ === "function") host.__EASYOFFICE_NOTICE__("최근 문서가 없습니다.");
+        return;
+      }
+      const picked = await dialogs.open(document, recentEntries, { clearRecentDocuments: clearRecents });
       if (picked) await openRecent(picked.id);
     }
 
@@ -536,7 +547,7 @@
       launch, module, isStart, isManaged: () => managed, canSpawnWindows, desktopAvailable,
       start, bindUi, refresh, setDocumentName, setDirty, getDocumentName, getTitles, applyTitles,
       newDocument, openFile, openRecent, spawnWithFile, takePendingOpen, refreshRecents,
-      requestClose, requestQuit, closeWindow, requestOpenFile, chooseRecent, routeFile, applyLaunch, loadPending, bindStatusTooltips, runSmoke,
+      requestClose, requestQuit, closeWindow, requestOpenFile, chooseRecent, clearRecents, routeFile, applyLaunch, loadPending, bindStatusTooltips, runSmoke,
     };
   }
 

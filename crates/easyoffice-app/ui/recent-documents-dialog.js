@@ -7,8 +7,8 @@
   // Adapted from the reference app `apps/studio-host/src/ui/recent-documents-dialog.ts` (MIT, Copyright (c)
   // 2025-2026 Edward Kim; see THIRD_PARTY_NOTICES.md), rewritten as plain JavaScript with the same
   // class names. EasyOffice differences: entries are `{ id, name, kind }` (the page never sees
-  // paths), the second line shows the document kind, and there is no "목록 비우기" button because
-  // the shell has no command for it.
+  // paths), and the second line shows the document kind. "목록 비우기" asks the
+  // caller to clear the list (no confirmation, as in the reference app) and closes on success.
 
   const KIND_LABELS = Object.freeze({
     DOC: "문서", HWP: "한글 문서", SHEET: "스프레드시트", SLIDE: "프레젠테이션", PDF: "PDF",
@@ -22,8 +22,8 @@
     while (parent.firstChild) parent.firstChild.remove();
   }
 
-  // Resolves with the chosen entry or null.
-  function openRecentDocumentsDialog(document, entries) {
+  // Resolves with the chosen entry or null. `options.clearRecentDocuments` empties the stored list.
+  function openRecentDocumentsDialog(document, entries, options = {}) {
     return new Promise((resolve) => {
       let selected = 0;
 
@@ -54,9 +54,11 @@
       list.setAttribute("aria-label", "최근 문서 목록");
       add(body, list);
       const footer = element("div", "dialog-footer");
+      const clearBtn = button("dialog-btn recent-documents-clear", "목록 비우기");
+      const spacer = element("span", "recent-documents-footer-spacer");
       const openBtn = button("dialog-btn dialog-btn-primary", "열기");
       const cancelBtn = button("dialog-btn", "취소");
-      add(footer, openBtn, cancelBtn);
+      add(footer, clearBtn, spacer, openBtn, cancelBtn);
       add(dialog, titleBar, body, footer);
       add(overlay, dialog);
 
@@ -113,6 +115,14 @@
       closeBtn.addEventListener("click", () => close(null));
       cancelBtn.addEventListener("click", () => close(null));
       openBtn.addEventListener("click", () => close(entries[selected] || null));
+      clearBtn.addEventListener("click", () => {
+        clearBtn.disabled = true;
+        Promise.resolve(options.clearRecentDocuments && options.clearRecentDocuments())
+          .then(() => close(null))
+          .catch(() => {
+            clearBtn.disabled = false;
+          });
+      });
       overlay.addEventListener("click", (event) => {
         if (event.target === overlay) close(null);
       });

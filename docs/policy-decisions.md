@@ -2049,3 +2049,14 @@
 - **Verified by** `cargo test -p easyoffice-desktop`(`pdf_job`: 묶음별 변환 뒤 마지막에 한 번 쓰기와 열기 한 번, 취소·실패 때 파일·임시 파일 없음과 기존 파일 유지, 10쪽 초과 거부, 빈 작업 거부, 창·번호 불일치와 늦은 중단 무시, 열기 실패해도 저장, `.pdf`만 열기, 스모크 대상 메모리 검사; `pdf_export`: 상한이 묶음에 걸쳐 누적되고 거부된 묶음은 세지 않음, 묶음 크기와 무관한 같은 바이트, 뒤 묶음 실패 쪽의 문서 기준 번호; `native_menu`: 파일 메뉴 끝의 구분선·두 항목·키·동작; 앱 명령 22종·capability 일치·모든 명령이 `ShellCaller`를 받음), `node --test scripts/test-webui-hwp-session.mjs`(위치 먼저·10쪽 묶음·다음 묶음은 셸이 받은 뒤 렌더, 취소 시 렌더 0회, 쪽 수 상한은 대화상자 전에, 실패 시 작업 버림, 중복 요청 거부, 스모크), `scripts/test-webui-hwp-shell.mjs`(브리지가 이름·번호·SVG만 보내고 토큰을 싣는지), `scripts/test-webui-native-menu.mjs`·`test-webui-menu-state.mjs`(표 일치, 편집기 밖에서 회색), `scripts/test-webui-windows.mjs`(`Ctrl+E`는 macOS에서만 전달·바인딩). 300쪽 보고서 측정은 아래.
 - **측정** 300쪽 합성 보고서(쪽당 46줄), `cargo test --release -p easyoffice-desktop hundreds_of_ -- --ignored --nocapture`를 `/usr/bin/time -l`로 각각 따로 돌린 최대 상주 메모리(Rust 쪽만; 페이지 쪽 SVG 문자열과 IPC 본문 크기는 포함하지 않음): 쪽을 한 번에 주는 변환(`hundreds_of_pages_are_measured`) 439MB, 10쪽씩 만들어 넣고 버리는 변환(`hundreds_of_streamed_pages_are_measured`) 428MB, 걸린 시간은 각각 1.23초·1.33초입니다. 이 합성 문서의 SVG는 쪽당 약 12.7KB(합계 3.8MB)라 셸 쪽 차이는 SVG 합계만큼(약 4MB)으로 작고, 최대 상주 메모리는 변환 작업(4개 스레드와 매핑된 글꼴, PD-114)이 정합니다. 이 변경의 이득은 그림이 든 문서에서 나타납니다: 쪽 SVG가 쪽당 수 MB가 되면 이전에는 페이지(문자열)와 셸(IPC 본문과 `Vec<String>`)이 문서 전체를 동시에 쥐었고, 지금은 어느 쪽도 10쪽 분량을 넘지 않습니다. 그림이 많은 문서의 실측은 하지 않았습니다.
 - **Revisit when** 실기기에서 macOS ⌘E가 편집기 지우기로 가는 경우가 확인될 때(전달 목록을 빼도 되는지), Windows·Linux에서 저장 뒤 열기·파일 메뉴를 확인한 뒤, 참조 앱이 PDF 쪽 범위나 진행률 취소를 넣을 때, 내보내는 동안의 편집을 막아야 할 때.
+
+## 102. 최근 문서 대화상자의 "목록 비우기"와 빈 목록 안내를 참조 앱과 같게 (PD-126)
+
+- **Status** Implemented (QA 요청 2026-11-08: 참조 앱과 같게 맞춤)
+- **Context** 참조 앱의 최근 문서 대화상자는 바닥글 왼쪽에 "목록 비우기"가 있고 확인 없이 목록을 지운 뒤 닫습니다. 목록이 비었을 때는 대화상자를 열지 않고 "최근 문서가 없습니다."를 알립니다(`alert`).
+- **Decision (`PD-126`)** (1) 새 앱 명령 `clear_recent_documents`는 `ShellCaller`가 필수이고 인수가 없습니다. 앱 안 목록(`recent.rs`)과 저장 파일을 함께 비우며 실패하면 오류를 돌려줍니다. 참조 앱과 같이 macOS Dock·시스템 최근 항목(`os_recent.rs`)은 건드리지 않습니다(참조 앱의 비우기도 앱 저장소만 지움). 명령은 앱 명령 목록·capability·구조 테스트에 1:1로 추가했습니다(23개). (2) 대화상자 바닥글은 `목록 비우기 · 여백 · 열기 · 취소` 순서이고, 확인 대화상자 없이 실행합니다. 성공하면 대화상자를 닫고 시작 화면·최근 문서 메뉴·한글 편집기의 최근 목록을 다시 불러오며, 실패하면 열어 둔 채 단추를 다시 쓸 수 있게 합니다. (3) 목록이 비었을 때 ⌘⌥O는 대화상자 대신 기존 토스트로 "최근 문서가 없습니다."를 보입니다(`alert`는 macOS WKWebView에서 동작하지 않음).
+- **Why** 참조 앱과 같은 동작을 맞춥니다.
+- **Trade-offs** 확인 없이 지우므로 되돌릴 수 없습니다(참조 앱과 같음). Dock의 최근 항목은 남습니다.
+- **Alternatives rejected** 네이티브 확인 대화상자를 거치는 것(참조 앱에 없음), `alert` 사용.
+- **Verified by** `cargo test -p easyoffice-desktop`(`recent::clearing_empties_the_list_and_the_stored_file`, 구조 테스트), `node --test scripts/test-webui-windows.mjs`.
+- **Revisit when** 참조 앱의 비우기 동작이나 Dock 항목 처리가 바뀔 때.

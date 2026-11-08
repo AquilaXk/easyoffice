@@ -104,6 +104,16 @@ impl AppWindows {
         locked(&self.recents).path_for(id)
     }
 
+    /// Empties the recent list and its stored file.
+    pub fn clear_recents(&self) -> std::io::Result<()> {
+        let mut recents = locked(&self.recents);
+        recents.clear();
+        match &self.recents_dir {
+            Some(dir) => recents.save(dir),
+            None => Ok(()),
+        }
+    }
+
     fn next_label(&self) -> String {
         let n = self.counter.fetch_add(1, Ordering::Relaxed);
         let millis = std::time::SystemTime::now()
@@ -748,6 +758,13 @@ pub fn list_recent_documents(
 }
 
 #[tauri::command]
+pub fn clear_recent_documents(_caller: ShellCaller, app: AppHandle) -> Result<(), WindowError> {
+    app.state::<AppWindows>()
+        .clear_recents()
+        .map_err(|err| WindowError::new(format!("최근 문서를 지우지 못했습니다: {err}")))
+}
+
+#[tauri::command]
 pub async fn open_recent_document(
     _caller: ShellCaller,
     app: AppHandle,
@@ -839,7 +856,7 @@ mod tests {
             );
             checked += 1;
         }
-        assert_eq!(checked, 9, "every window command is covered");
+        assert_eq!(checked, 10, "every window command is covered");
     }
 
     fn scratch_dir(tag: &str) -> PathBuf {

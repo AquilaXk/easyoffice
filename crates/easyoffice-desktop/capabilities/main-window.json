@@ -20,6 +20,7 @@
     "allow-report-window-state",
     "allow-close-current-window",
     "allow-list-recent-documents",
+    "allow-clear-recent-documents",
     "allow-open-recent-document",
     "allow-get-recent-preview",
     "allow-report-menu-state",

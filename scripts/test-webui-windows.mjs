@@ -16,7 +16,7 @@ function recordingShell(overrides = {}) {
   const commands = {};
   for (const name of [
     "open_document_window", "open_file_in_new_window", "take_pending_open", "report_window_state",
-    "close_current_window", "list_recent_documents", "open_recent_document", "report_menu_state", "end_close_prompt", "ack_close_prompt", "quit_app",
+    "close_current_window", "list_recent_documents", "clear_recent_documents", "open_recent_document", "report_menu_state", "end_close_prompt", "ack_close_prompt", "quit_app",
   ]) {
     commands[name] = (args) => {
       calls.push({ name, args });
@@ -186,10 +186,57 @@ test("Escape and 취소 close the recent-documents dialog without opening anythi
   assert.equal(document.querySelector(".recent-documents-dialog"), null);
   userClick(document.getElementById("recent-dialog-open"));
   await flushAsyncTurns();
-  userClick(document.querySelectorAll(".recent-documents-dialog .dialog-btn")[1]);
+  userClick(document.querySelectorAll(".recent-documents-dialog .dialog-btn")[2]);
   await flushAsyncTurns();
   assert.equal(document.querySelector(".recent-documents-dialog"), null);
   assert.equal(shell.named("open_recent_document").length, 0);
+});
+
+test("목록 비우기 clears through the shell without asking, closes the dialog and empties the start screen", async () => {
+  let entries = [{ id: "a1", name: "예산.xlsx", kind: "SHEET" }];
+  const { document, shell, userClick } = await openWindow("?module=START&win=main", {
+    list_recent_documents: () => entries,
+    clear_recent_documents: () => { entries = []; return null; },
+  });
+  assert.equal(document.querySelectorAll("#home-screen .home-recent-card[data-recent-id]").length, 1);
+  userClick(document.getElementById("recent-dialog-open"));
+  await flushAsyncTurns();
+  const footer = document.querySelector(".recent-documents-dialog .dialog-footer");
+  const labels = footer.querySelectorAll("button").map((b) => b.textContent);
+  assert.deepEqual(labels, ["목록 비우기", "열기", "취소"]);
+  userClick(footer.querySelector(".recent-documents-clear"));
+  await flushAsyncTurns();
+  assert.equal(shell.named("clear_recent_documents").length, 1);
+  assert.deepEqual(shell.named("clear_recent_documents")[0].args, {});
+  assert.equal(document.querySelector(".recent-documents-dialog"), null, "the dialog closes");
+  assert.equal(document.querySelectorAll("#home-screen .home-recent-card[data-recent-id]").length, 0);
+  assert.equal(document.getElementById("recent-dialog-open").hidden, true);
+  assert.equal(shell.named("open_recent_document").length, 0);
+});
+
+test("a failed 목록 비우기 keeps the dialog open and the button usable", async () => {
+  const entries = [{ id: "a1", name: "예산.xlsx", kind: "SHEET" }];
+  const { document, userClick } = await openWindow("?module=DOC&win=w-clear-fail", {
+    list_recent_documents: () => entries,
+    clear_recent_documents: () => { throw new Error("denied"); },
+  });
+  userClick(document.getElementById("recent-dialog-open"));
+  await flushAsyncTurns();
+  const clearBtn = document.querySelector(".recent-documents-clear");
+  userClick(clearBtn);
+  await flushAsyncTurns();
+  assert.ok(document.querySelector(".recent-documents-dialog"));
+  assert.equal(clearBtn.disabled, false);
+});
+
+test("opening the recent-documents dialog with an empty list shows the toast instead of a silent no-op", async () => {
+  const { document, host, userClick } = await openWindow("?module=DOC&win=w-recent-none");
+  userClick(document.querySelector("[data-recent-dialog-open]"));
+  await flushAsyncTurns();
+  assert.equal(document.querySelector(".recent-documents-dialog"), null);
+  const toast = document.getElementById("shell-toast");
+  assert.equal(toast.hidden, false);
+  assert.equal(toast.textContent, "최근 문서가 없습니다.");
 });
 
 test("the dialog entry in the recent submenu is hidden while the list is empty", async () => {

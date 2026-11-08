@@ -34,6 +34,7 @@
     closeCurrentWindow: "close_current_window",
     quitApp: "quit_app",
     listRecentDocuments: "list_recent_documents",
+    clearRecentDocuments: "clear_recent_documents",
     openRecentDocument: "open_recent_document",
     recentPreview: "get_recent_preview",
     reportMenuState: "report_menu_state",

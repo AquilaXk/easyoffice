@@ -91,6 +91,7 @@
   windowBridge = host.__EASYOFFICE_WINDOW_BRIDGE__.createWindowBridge({
     document, env: host, desktopBridge, getActiveModule: () => activeModule,
     setFeedback: (text) => setStatusFeedback(text),
+    onRecentsChanged: (entries) => shellChrome.pushRecents(entries),
     isDirty: () => workspaceSession.isDirty(),
     save: () => saveWorkspaceDocument({ closing: true }),
     discardStoredState: () => { workspaceSession.discardStoredState(); hwpSession.discardAutosave(); },
