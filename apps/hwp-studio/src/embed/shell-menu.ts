@@ -5,7 +5,7 @@
 // editor (`setShellContext`), so the window has one menu row and one theme.
 
 export const SHELL_COMMAND_REASON = 'shell_command' as const;
-export const SHELL_COMMANDS = ['new', 'open', 'recent', 'save', 'save-as', 'export-pdf', 'print', 'close'] as const;
+export const SHELL_COMMANDS = ['new', 'open', 'recent', 'recent-dialog', 'save', 'save-as', 'export-pdf', 'print', 'close', 'about'] as const;
 export type ShellCommand = (typeof SHELL_COMMANDS)[number];
 export const SHELL_THEMES = ['light', 'dark', 'system'] as const;
 export type ShellTheme = (typeof SHELL_THEMES)[number];

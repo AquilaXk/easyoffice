@@ -295,11 +295,13 @@
         case "new": return report(actions.newDocument?.());
         case "open": return report(actions.openFile?.());
         case "recent": return report(actions.openRecent?.(request.id));
+        case "recent-dialog": return report(actions.recentDialog?.());
         case "save": return report(actions.save?.());
         case "save-as": return report(actions.saveAs?.(request.format));
         case "export-pdf": return report(actions.exportPdf?.());
         case "print": return report(actions.print?.());
         case "close": return report(actions.close?.());
+        case "about": return openAbout();
         default: return undefined;
       }
     }

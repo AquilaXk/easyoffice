@@ -228,7 +228,7 @@
     hasNativeMenu: () => activeShortcutModifier === "⌘",
     actions: {
       newDocument: () => windowBridge.newDocument("HWP"), openFile: () => fileOpen.openFilePicker(),
-      openRecent: (id) => windowBridge.openRecent(id), save: () => saveWorkspaceDocument(),
+      openRecent: (id) => windowBridge.openRecent(id), recentDialog: () => windowBridge.chooseRecent(), save: () => saveWorkspaceDocument(),
       saveAs: (format) => hwpSession.saveAs(format), exportPdf: () => hwpSession.exportPdf(), print: () => hwpPrint.print(),
       close: () => windowBridge.requestClose(),
     },

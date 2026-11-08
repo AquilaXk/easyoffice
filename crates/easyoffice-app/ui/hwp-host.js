@@ -45,9 +45,9 @@
   const TOOL_HINT = "한글 편집기 도구줄을 사용하세요";
   const SHORTCUT_REASON = "shell_shortcut";
   // The editor's 파일 menu forwards shell commands by name only (#158); the shell re-checks each one
-  // here before anything runs, so a compromised frame can only ask for these seven actions.
+  // here before anything runs, so a compromised frame can only ask for these actions.
   const SHELL_COMMAND_REASON = "shell_command";
-  const SHELL_COMMANDS = Object.freeze(["new", "open", "recent", "save", "save-as", "export-pdf", "print", "close"]);
+  const SHELL_COMMANDS = Object.freeze(["new", "open", "recent", "recent-dialog", "save", "save-as", "export-pdf", "print", "close", "about"]);
   const SAVE_AS_FORMATS = Object.freeze(["hwp", "hwpx"]);
   const SHELL_THEMES = Object.freeze(["light", "dark", "system"]);
   const RECENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;

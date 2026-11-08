@@ -652,7 +652,7 @@ test("HWP save plumbing: a plain save overwrites the opened file, the close prom
   assert.deepEqual(saves.map((o) => [o.inPlace, o.closing]), [[true, false], [true, true]]);
   const app = fs.readFileSync(new URL("../crates/easyoffice-app/ui/app.js", import.meta.url), "utf8");
   assert.match(app, /isDirty: \(\) => workspaceSession\.isDirty\(\),\s+save: \(\) => saveWorkspaceDocument\(\{ closing: true \}\),/, "the close prompt saves with closing");
-  assert.match(app, /openRecent: \(id\) => windowBridge\.openRecent\(id\), save: \(\) => saveWorkspaceDocument\(\),/, "the 파일 menu saves in place");
+  assert.match(app, /openRecent: \(id\) => windowBridge\.openRecent\(id\), recentDialog: \(\) => windowBridge\.chooseRecent\(\), save: \(\) => saveWorkspaceDocument\(\),/, "the 파일 menu saves in place");
 });
 
 test("macOS Command shortcuts map onto the Ctrl-based shortcut table and the platform hint shows the Command key", () => {

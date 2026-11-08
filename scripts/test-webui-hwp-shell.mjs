@@ -16,7 +16,7 @@ const CHROME_JS = new URL("shell-chrome.js", UI_DIR);
 const ALL_CSS = `${read("styles.css")}\n${read("shell.css")}\n${read("content.css")}\n${read("home.css")}\n${read("menu-bar.css")}\n${read("toolbar.css")}`;
 const OVERLAY = new URL("../apps/hwp-studio/", import.meta.url);
 
-const COMMANDS = ["new", "open", "recent", "save", "save-as", "export-pdf", "print", "close"];
+const COMMANDS = ["new", "open", "recent", "recent-dialog", "save", "save-as", "export-pdf", "print", "close", "about"];
 
 // ---- fake editor (embed protocol) -------------------------------------------------------------
 
@@ -105,14 +105,14 @@ test("the editor's 파일 menu forwards only whitelisted shell commands, re-chec
   const seen = [];
   api.onCommand((c) => seen.push(c));
   const send = (payload) => sendEvent({ schemaVersion: 1, reason: "shell_command", ...payload });
-  for (const command of ["new", "open", "save", "print", "close"]) send({ command });
+  for (const command of ["new", "open", "recent-dialog", "save", "print", "close", "about"]) send({ command });
   send({ command: "recent", id: "r-1_a" });
   send({ command: "save-as", format: "hwpx" });
   send({ command: "save-as" });
   send({ command: "export-pdf", path: String.raw`C:\x.pdf`, pages: ["<svg/>"] });
   await settle();
   assert.deepEqual(seen, [
-    { command: "new" }, { command: "open" }, { command: "save" }, { command: "print" }, { command: "close" },
+    { command: "new" }, { command: "open" }, { command: "recent-dialog" }, { command: "save" }, { command: "print" }, { command: "close" }, { command: "about" },
     { command: "recent", id: "r-1_a" },
     { command: "save-as", format: "hwpx" },
     { command: "save-as", format: "hwp" },
@@ -153,11 +153,11 @@ test("forwarded commands run the matching shell action", () => {
   const chrome = env.__EASYOFFICE_CREATE_SHELL_CHROME__({
     document, env,
     hwpHost: { onCommand: (fn) => { handler = fn; }, setShellContext: () => Promise.resolve(true) },
-    actions: Object.fromEntries(["newDocument", "openFile", "openRecent", "save", "saveAs", "exportPdf", "close"].map((name) => [name, (...args) => { calls.push([name, ...args]); }])),
+    actions: Object.fromEntries(["newDocument", "openFile", "openRecent", "recentDialog", "save", "saveAs", "exportPdf", "close"].map((name) => [name, (...args) => { calls.push([name, ...args]); }])),
   });
   chrome.bind();
-  for (const request of [{ command: "new" }, { command: "open" }, { command: "recent", id: "x1" }, { command: "save" }, { command: "save-as", format: "hwpx" }, { command: "export-pdf" }, { command: "close" }, { command: "bogus" }]) handler(request);
-  assert.deepEqual(calls, [["newDocument"], ["openFile"], ["openRecent", "x1"], ["save"], ["saveAs", "hwpx"], ["exportPdf"], ["close"]]);
+  for (const request of [{ command: "new" }, { command: "open" }, { command: "recent", id: "x1" }, { command: "recent-dialog" }, { command: "save" }, { command: "save-as", format: "hwpx" }, { command: "export-pdf" }, { command: "close" }, { command: "about" }, { command: "bogus" }]) handler(request);
+  assert.deepEqual(calls, [["newDocument"], ["openFile"], ["openRecent", "x1"], ["recentDialog"], ["save"], ["saveAs", "hwpx"], ["exportPdf"], ["close"]]);
 });
 
 test("overlay 파일 menu lists exactly the shell commands and no editor file action", () => {
@@ -167,7 +167,10 @@ test("overlay 파일 menu lists exactly the shell commands and no editor file ac
   assert.ok(block.includes("data-shell-recent"), "the recent submenu is filled by the shell's list");
   const byName = (a, b) => a.localeCompare(b);
   assert.deepEqual([...commands].sort(byName), COMMANDS.filter((c) => c !== "recent").sort(byName));
-  assert.ok(!/data-cmd=/.test(block), "no editor-native file command is left in the 파일 menu");
+  assert.deepEqual([...block.matchAll(/data-cmd="([^"]+)"/g)].map((m) => m[1]), ["file:page-setup"], "page setup is the only editor-native file command in the 파일 menu");
+  // Same order as the reference app: new, open, recent, save, save as, export, page setup, print, ..., about.
+  const order = [...block.matchAll(/data-(?:shell-cmd|cmd)="([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(order, ["new", "open", "recent-dialog", "save", "save-as", "save-as", "export-pdf", "file:page-setup", "print", "close", "about"]);
   const ts = read("src/embed/shell-menu.ts", OVERLAY);
   const listed = /SHELL_COMMANDS = \[([^\]]+)\]/.exec(ts)[1].match(/'([^']+)'/g).map((s) => s.slice(1, -1));
   assert.deepEqual(listed, COMMANDS, "the editor and the shell share one command list");
