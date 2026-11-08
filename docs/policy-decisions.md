@@ -2032,7 +2032,7 @@
 - **Context** 참조 앱은 Linux에서 WebKitGTK 그래픽 문제를 피하는 환경 변수와 AppImage의 입력기 캐시 보정을 웹뷰 생성 전에 적용하고, macOS 파일 연결에 HWP UTI를 선언하며, 한글 편집기 틀에서 macOS 단축키를 기호로 쓰고 크롬 영역의 기본 우클릭 메뉴를 막습니다(`linux_runtime.rs`, `tauri.conf.json`, `desktop-chrome.ts`, `platform.ts`).
 - **Decision (`PD-125`)** (1) `linux_runtime.rs`를 이식해 `main`의 첫머리(웹뷰 전)에서 부릅니다. Arch 계열은 항상, Fedora·RHEL 계열은 Wayland 세션일 때 `WEBKIT_DISABLE_DMABUF_RENDERER`·`WEBKIT_DISABLE_COMPOSITING_MODE`를 `1`로 두며 사용자가 이미 정한 값은 덮어쓰지 않습니다. AppImage에서는 요청된 입력기 모듈이 번들 캐시에 없고 호스트 캐시에 있으면 호스트 캐시를 씁니다(사용자가 `GTK_IM_MODULE_FILE`을 정했으면 그대로). 다른 OS에서는 결정 로직 테스트에만 컴파일됩니다. (2) HWP·HWPX 파일 연결에 `contentTypes`와 `exportedType`(우리 식별자 `com.aquilaxk.easyoffice.hwp(x)`만)을 더합니다. 참조 앱이 함께 적은 다른 앱·회사의 식별자는 넣지 않았고, 핸들러 순위는 우리 정책(Alternate)을 유지합니다. `scripts/desktop-file-associations.mjs`가 이를 검사합니다. (3) 한글 창(`apps/hwp-studio`)은 macOS에서 정적 크롬의 단축키 글과 툴팁을 `⌘`·`⌥`·`⇧`로 쓰고(메뉴 항목은 편집기가 이미 그렇게 씀), 메뉴 줄·도구 상자·서식 줄·상태 줄의 기본 우클릭 메뉴를 막습니다. (4) 시작 화면 "문서 열기" 설명에서 `(Ctrl+O)`를 빼고, 개요 대화상자의 정적 예시 항목을 없앱니다(열 때 `workspace-panels.js`가 채움).
 - **Why** 참조 앱과 같은 동작을 맞추고, Linux 배포판별 렌더링 문제와 macOS 연결 불일치를 줄입니다.
-- **Trade-offs** 다른 앱이 선언한 UTI는 넣지 않음(QA 결정 시 예외 가능). 그 앱이 형식을 표시한 파일은 연결 후보에서 빠질 수 있습니다. Linux 보정은 배포판 판별을 `/etc/os-release`에 의존합니다.
+- **Trade-offs** 다른 앱이 선언한 UTI는 처음에는 넣지 않았으나, QA 결정(2026-11-09)으로 HWP·HWPX마다 그 앱의 UTI 하나씩을 `contentTypes`에 더했습니다(PD-141). 우리 `exportedType`과 순위(Alternate)는 그대로입니다. Linux 보정은 배포판 판별을 `/etc/os-release`에 의존합니다.
 - **Alternatives rejected** 모든 Linux에 그래픽 대체를 켜는 것(성능 저하), 참조 앱의 UTI 식별자를 그대로 쓰는 것(다른 앱의 식별자).
 - **Verified by** `cargo test -p easyoffice-desktop linux_runtime`, `node --test scripts/test-desktop-file-associations.mjs scripts/test-hwp-studio.mjs`.
 - **Revisit when** 참조 앱의 Linux 보정 목록이나 UTI 선언이 바뀔 때, Linux·macOS 실기기에서 확인한 뒤.
@@ -2082,6 +2082,7 @@
 - **Decision (`PD-129`)** (1) `scripts/prohibited-terms.mjs`에 한글 약칭을 같은 base64 방식으로 더합니다. 부분 문자열로 맞추므로 조사가 붙은 형태도 걸리고, 고지 문장 예외(PD-122)는 약칭에 적용하지 않습니다. 커밋 메시지 가드도 같은 목록을 씁니다. (2) 걸린 TODO·정책 문서·설계 문서·편집기 주석·부분 패치 설명의 표기는 "사설 영역(PUA) 문자", "HWP 제작사", "상용 뷰어"처럼 일반 명칭으로 바꿉니다.
 - **Why** 한 곳의 목록이 저장소와 커밋 메시지를 함께 막으므로, 약칭도 같은 곳에 두면 새로 들어오는 표기를 CI가 잡습니다.
 - **Trade-offs** 영문 약칭도 더하되(후속 변경), 등록된 HWPX MIME 형식(`application/vnd.<제작사>.hwpx`)은 파일 연결 정의에 필요한 표준 식별자라 정확한 문자열만 `MIME_EXCEPTIONS`의 파일(`tauri.conf.json`, 리눅스 `.desktop`, `desktop-file-associations.mjs`, 통합 설계 문서)에서 허용합니다. 커밋 메시지 가드에는 예외가 없습니다. 글꼴 설명의 영문 표기는 일반 명칭으로 바꿨습니다.
+- **개정 (QA 결정 2026-11-09, PD-141)** 다른 회사의 역도메인 UTI 두 개(HWP·HWPX)도 같은 구조의 정확 문자열 예외(`UTI_EXCEPTIONS`)로 허용합니다. 범위는 PD-141에 있습니다.
 - **Alternatives rejected** 약칭을 단어 경계로 맞추는 것(한글 조사 앞에서 경계가 성립하지 않음).
 - **Verified by** `node --test scripts/test-about-notice.mjs scripts/test-commit-messages.mjs`(약칭이 조사와 함께, 모든 파일과 고지 파일에서, 커밋 메시지에서 걸림), `node scripts/check-repo-hygiene.mjs`.
 - **Revisit when** 다른 약칭이나 별칭이 문서에서 발견될 때.
@@ -2209,4 +2210,15 @@
 - **Trade-offs** 확장 하나가 단일 아키텍처로 약 15~17MB(universal이면 두 배), 둘이면 앱이 그만큼 커진다(rhwp 전체가 정적으로 들어감). macOS CI의 빌드 시간이 rhwp 네이티브 빌드(x86_64·arm64 각각) 만큼 늘어난다. 미리보기 PDF의 글자는 윤곽선이라 선택·검색이 안 되고 형식 상자 하나는 쪽당 1MB 안팎이다. 마감을 넘긴 작업은 취소되지 않고 프로세스가 끝날 때까지 남을 수 있어 세 개로 막는다. `.hwp`를 다른 한글 앱이 자기 UTI로 선언한 Mac에서는 그 파일의 형식이 우리 UTI가 아니어서 이 확장이 불리지 않을 수 있다(이 Mac에서 `.hwpx`는 우리 UTI로 풀렸고 `.hwp`는 다른 앱의 UTI로 풀림). 참조 앱은 그런 타사 UTI를 지원 목록에 함께 적지만 위생 가드가 그 이름들을 막고 PD-122가 이 앱의 UTI만 선언하므로 따르지 않았다. 확장 안 파일 접근(앱의 글꼴 폴더 읽기)이 샌드박스에서 막혀도 시스템 글꼴로 물러난다(막혔는지는 배포본 확인 전).
 - **Alternatives rejected** 참조 앱처럼 Skia(`native-skia`)로 쪽을 그림(빌드 시 큰 바이너리 내려받기, 셸과 다른 래스터라이저), 쪽을 PNG로 그려 PDF에 넣음(해상도 한도와 용량, 확대하면 흐림), 확장 안 Swift로 HWP를 직접 읽음(파서 중복), 마감 없이 호출(Finder가 파일 하나로 멎음), Rust 크레이트를 저장소 작업공간에 넣음(모든 `--workspace` 작업이 rhwp를 빌드), 타사 UTI를 지원 목록에 더함(위생 가드·PD-122).
 - **Verified by** `node scripts/run-quicklook-tests.mjs`(`cargo fmt --check`, `clippy -D warnings`, 릴리스 테스트 25개: 입력 거부·50MiB 초과를 읽기 전에 거부·문서 아닌 파일 Fail-Closed·샘플 HWP/HWPX 첫 쪽 PNG와 긴 변 한도·PDF 쪽 수·파일 안 그림·잘린 문서와 비트를 깬 문서·ZIP 폭탄·쪽 SVG 한도·경로 href 안 읽음(해제하면 실패하는 것을 확인)·터무니없는 쪽 크기·깊은 중첩·마감·패닉·남은 작업 상한), `node --test scripts/test-quicklook-config.mjs`, `node scripts/build-quicklook-macos.mjs`로 만든 `.appex` 두 개와 `tauri build --bundles app`의 `EasyOffice.app/Contents/PlugIns`에 대한 `node scripts/verify-quicklook-bundle.mjs`와 `codesign --verify --deep --strict`, 시스템의 썸네일 생성 API(`QLThumbnailGenerator`)가 `.hwpx`에서 확장을 불러 첫 쪽 그림을 받음(파일 안 그림이 있는 파일과 없는 파일, 깨진 파일은 시스템 기본 아이콘), `qlmanage -p`가 미리보기 확장을 띄워 10쪽 PDF를 만듦(로그의 쪽 수·바이트 수).
-- **Revisit when** 배포본에서 Finder 확인 중 샌드박스가 글꼴 폴더 읽기를 막거나 확장이 시간 안에 못 끝날 때, `.hwp` 확장자가 다른 앱의 UTI로 풀리는 Mac에서도 미리보기가 필요하다는 결정이 날 때, 공증을 도입할 때(확장도 같은 신원으로 서명), 앱 크기가 문제가 될 때(두 확장이 같은 정적 라이브러리를 각각 품음).
+- **Revisit when** 배포본에서 Finder 확인 중 샌드박스가 글꼴 폴더 읽기를 막거나 확장이 시간 안에 못 끝날 때, 공증을 도입할 때(확장도 같은 신원으로 서명), 앱 크기가 문제가 될 때(두 확장이 같은 정적 라이브러리를 각각 품음).
+
+## 116. 다른 앱이 선언한 HWP·HWPX UTI도 연결·Quick Look 대상에 포함, 위생 가드는 정확 문자열 예외 (PD-141)
+
+- **Status** Implemented (QA 결정 2026-11-09). PD-125 (2)의 "다른 앱의 UTI는 넣지 않음"과 PD-140의 `.hwp` 위험 항목을 개정합니다. 실제 Finder에서 그 UTI로 풀리는 Mac의 확인은 수동 확인 전.
+- **Context** 다른 회사의 앱이 설치된 Mac은 `.hwp`·`.hwpx`를 그 앱의 UTI로 풀 수 있고, 그러면 우리 UTI만 선언한 앱과 Quick Look 확장은 "다음으로 열기"와 미리보기·썸네일 후보에서 빠집니다.
+- **Decision (`PD-141`)** (1) `tauri.conf.json`의 HWP·HWPX `contentTypes`에 그 UTI를 하나씩 더합니다(우리 UTI가 먼저). `exportedType`은 우리 식별자만, 순위는 Alternate 그대로라 기본 앱을 가로채지 않습니다. (2) Quick Look 확장 두 개의 `QLSupportedContentTypes`에도 같은 UTI를 더합니다. (3) 위생 가드의 `UTI_EXCEPTIONS`가 그 정확한 문자열 두 개만, 그 문자열을 담는 네 파일(`tauri.conf.json`, 두 `Info.plist`, `scripts/desktop-file-associations.mjs`)에서 통째 토큰으로만 허용합니다. 뒤에 글자가 더 붙은 형태, 다른 식별자, 다른 파일의 같은 문자열은 계속 걸리고 커밋 메시지 가드에는 예외가 없습니다. (4) 구조 검사는 형식마다 우리 UTI와 그 UTI가 함께 선언됐는지 확인하고(`REQUIRED_UTIS`의 `external`), 번들 검증은 확장의 지원 UTI를 앱이 내보내거나 문서 형식으로 선언한 UTI로 인정합니다.
+- **Why** 참조 앱이 같은 UTI들을 함께 선언해 같은 Mac에서도 동작하고, 연결 후보에서 빠지지 않는 것이 목표(QA 결정).
+- **Trade-offs** 다른 회사 식별자 문자열이 저장소에 네 파일에 남습니다. 그 UTI를 소유한 앱이 정의를 바꾸면 따라가야 합니다. 테스트는 문자열을 조합해 쓰므로 허용 목록에 넣지 않았습니다.
+- **Alternatives rejected** 우리 UTI만 유지(그 UTI로 풀리는 Mac에서 후보·미리보기 없음), 가드 전체 완화(범위가 넓음).
+- **Verified by** `node --test scripts/test-about-notice.mjs scripts/test-desktop-file-associations.mjs scripts/test-quicklook-config.mjs`, `node scripts/check-repo-hygiene.mjs`.
+- **Revisit when** 그 앱의 UTI 이름이 바뀔 때, 실기기에서 후보·미리보기가 나타나지 않을 때.

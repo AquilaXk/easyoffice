@@ -38,11 +38,13 @@ export const REQUIRED_MIME_TYPES = new Map([
 
 /**
  * macOS UTIs of the two HWP formats (Info.plist `LSItemContentTypes` and `UTExportedTypeDeclarations`): the
- * type the app exports itself (types other software declares are not listed). Both formats are plain data (HWPX is also a zip archive).
+ * type the app exports itself, and `external`, the one another company's app declares for the same
+ * extension (PD-141, QA 2026-11-09): a Mac that resolves the file to it still offers this app and Quick
+ * Look. The app only lists it, never exports it. Both formats are plain data (HWPX is also a zip archive).
  */
 export const REQUIRED_UTIS = new Map([
-  ["hwp", { exported: "com.aquilaxk.easyoffice.hwp", conformsTo: ["public.data"] }],
-  ["hwpx", { exported: "com.aquilaxk.easyoffice.hwpx", conformsTo: ["public.data", "public.zip-archive"] }],
+  ["hwp", { exported: "com.aquilaxk.easyoffice.hwp", external: "com.hancom.hwp", conformsTo: ["public.data"] }],
+  ["hwpx", { exported: "com.aquilaxk.easyoffice.hwpx", external: "com.hancom.hwpx", conformsTo: ["public.data", "public.zip-archive"] }],
 ]);
 
 /** Runtime libraries the Linux packages must declare (the WebKitGTK shell, its menus and the update check TLS link them). */
@@ -174,7 +176,7 @@ function checkUtiDeclarations(associations) {
     const assoc = associations.find((a) => Array.isArray(a?.ext) && a.ext.includes(ext));
     if (!assoc) continue;
     const types = Array.isArray(assoc.contentTypes) ? assoc.contentTypes : [];
-    for (const wanted of [uti.exported]) {
+    for (const wanted of [uti.exported, uti.external]) {
       if (!types.includes(wanted)) problems.push(`file association for '.${ext}' must list contentTypes '${wanted}' (macOS UTI)`);
     }
     const exported = assoc.exportedType;

@@ -3,7 +3,8 @@
 //   node scripts/verify-quicklook-bundle.mjs <EasyOffice.app> [--archs arm64,x86_64]
 // Each extension must be present with the identity, extension point, supported types and version the
 // app expects, be signed with the sandbox entitlements, and contain the requested CPU architectures.
-// The supported types must be UTIs the app itself exports, so the two lists cannot drift apart.
+// The supported types must be UTIs the app itself exports or lists as the types its documents open as
+// (the latter covers the UTI another app declares for the same extension, PD-141), so the lists cannot drift apart.
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -27,12 +28,15 @@ export function checkExtensionInfo(info, ext, appInfo) {
   expect("LSMinimumSystemVersion", info?.LSMinimumSystemVersion, MIN_MACOS);
   expect("CFBundleShortVersionString", info?.CFBundleShortVersionString, appInfo?.CFBundleShortVersionString);
   const supported = extension.NSExtensionAttributes?.QLSupportedContentTypes;
-  const exported = new Set((appInfo?.UTExportedTypeDeclarations ?? []).map((type) => type.UTTypeIdentifier));
+  const known = new Set([
+    ...(appInfo?.UTExportedTypeDeclarations ?? []).map((type) => type.UTTypeIdentifier),
+    ...(appInfo?.CFBundleDocumentTypes ?? []).flatMap((doc) => doc.LSItemContentTypes ?? []),
+  ]);
   if (!Array.isArray(supported) || supported.length === 0) {
     problems.push(`${ext.appexName}: QLSupportedContentTypes is empty`);
   } else {
     for (const type of supported) {
-      if (!exported.has(type)) problems.push(`${ext.appexName}: supports '${type}', which the app does not export`);
+      if (!known.has(type)) problems.push(`${ext.appexName}: supports '${type}', which the app neither exports nor opens`);
     }
   }
   return problems;

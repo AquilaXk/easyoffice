@@ -32,6 +32,8 @@
 			<array>
 				<string>com.aquilaxk.easyoffice.hwp</string>
 				<string>com.aquilaxk.easyoffice.hwpx</string>
+				<string>com.hancom.hwp</string>
+				<string>com.hancom.hwpx</string>
 			</array>
 			<key>QLSupportsSearchableItems</key>
 			<false/>

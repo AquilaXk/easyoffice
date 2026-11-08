@@ -32,11 +32,11 @@ test("every required extension declares its Linux MIME type", () => {
   assert.deepEqual(Object.fromEntries(mimeTypes), Object.fromEntries(REQUIRED_MIME_TYPES));
 });
 
-test("the HWP formats declare only the exported UTI of this app", () => {
+test("the HWP formats declare the exported UTI of this app and the one other software declares", () => {
   const associations = load().bundle.fileAssociations;
   for (const [ext, uti] of REQUIRED_UTIS) {
     const assoc = associations.find((a) => a.ext.includes(ext));
-    assert.deepEqual(assoc.contentTypes, [uti.exported], ext);
+    assert.deepEqual(assoc.contentTypes, [uti.exported, uti.external], ext);
     assert.deepEqual(assoc.exportedType, { identifier: uti.exported, conformsTo: uti.conformsTo }, ext);
     assert.equal(assoc.rank, "Alternate", ext);
   }
@@ -46,10 +46,12 @@ test("a missing or mismatched UTI declaration is reported", () => {
   const conf = load();
   const hwp = conf.bundle.fileAssociations.find((a) => a.ext.includes("hwp"));
   const hwpx = conf.bundle.fileAssociations.find((a) => a.ext.includes("hwpx"));
-  hwp.contentTypes = [];
+  hwp.contentTypes = [hwp.contentTypes[1]];
+  hwpx.contentTypes = [hwpx.contentTypes[0]];
   hwpx.exportedType.conformsTo = ["public.data"];
   const problems = checkDesktopBundleConfig(conf).join("\n");
   assert.match(problems, /'\.hwp' must list contentTypes 'com\.aquilaxk\.easyoffice\.hwp'/);
+  assert.match(problems, new RegExp(`'\\.hwpx' must list contentTypes '${REQUIRED_UTIS.get("hwpx").external.replaceAll(".", "\\.")}'`));
   assert.match(problems, /'com\.aquilaxk\.easyoffice\.hwpx' must conform to public\.data, public\.zip-archive/);
   delete hwp.exportedType;
   assert.match(checkDesktopBundleConfig(conf).join("\n"), /'\.hwp' must export the type/);

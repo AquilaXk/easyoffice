@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { MIME_EXCEPTIONS, NOTICE_EXCEPTIONS, PROHIBITED_PATTERNS, allowedMimeTokens, allowedNotices, prohibitedPatternsIn } from "./prohibited-terms.mjs";
+import { MIME_EXCEPTIONS, NOTICE_EXCEPTIONS, PROHIBITED_PATTERNS, UTI_EXCEPTIONS, allowedMimeTokens, allowedNotices, allowedUtiTokens, prohibitedPatternsIn } from "./prohibited-terms.mjs";
 import { readText } from "./test-support/read-text.mjs";
 
 // About dialog notice and license table (PD-122) and the narrow hygiene exception that carries the notice.
@@ -52,6 +52,26 @@ test("a reverse-domain identifier of another company is rejected, this app's own
   const foreign = ["com.", "han", "com", ".hwp"].join("");
   assert.ok(prohibitedPatternsIn("crates/x.json", `"${foreign}"`).length > 0);
   assert.equal(prohibitedPatternsIn("crates/x.json", '"com.aquilaxk.easyoffice.hwp"').length, 0);
+});
+
+test("only the two exact UTI tokens pass, only in the files that list them, and never in commit messages", () => {
+  const [{ files }] = UTI_EXCEPTIONS;
+  const shortName = ["han", "com"].join("");
+  const [hwp, hwpx] = allowedUtiTokens(files[0]);
+  assert.equal(hwp, `com.${shortName}.hwp`);
+  assert.equal(hwpx, `com.${shortName}.hwpx`);
+  assert.deepEqual(allowedUtiTokens("docs/other.md"), []);
+  for (const rel of files) {
+    assert.equal(prohibitedPatternsIn(rel, `<string>${hwp}</string><string>${hwpx}</string>`).length, 0, rel);
+    for (const text of [`${hwp}x2`, `${hwp}z`, `${hwpx}.bak`, `com.${shortName}.hwpml`, `com.${shortName}.other`, `${hwp} ${shortName}`]) {
+      assert.ok(prohibitedPatternsIn(rel, text).length > 0, `in an allowed file: ${text}`);
+    }
+  }
+  for (const text of [hwp, hwpx]) {
+    assert.ok(prohibitedPatternsIn("docs/other.md", text).length > 0, `in another file: ${text}`);
+    assert.ok(prohibitedPatternsIn("scripts/test-about-notice.mjs", text).length > 0, `in the test: ${text}`);
+    assert.ok(PROHIBITED_PATTERNS.some((pattern) => pattern.test(text)), "commit messages get no exception");
+  }
 });
 
 test("the short company name in English is rejected in prose, the registered MIME token passes only where it is used", () => {

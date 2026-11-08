@@ -60,9 +60,30 @@ export const MIME_EXCEPTIONS = [
   },
 ];
 
+// PD-141 (QA 2026-11-09): a Mac may resolve `.hwp`/`.hwpx` to the UTI another company's app declares, and
+// then only a handler that lists that UTI is offered "Open With" and gets Quick Look. So exactly these two
+// reverse-domain identifiers are allowed, only in the files that list them and only as whole tokens.
+// Any other use, in these files or elsewhere, is still reported. Commit messages get no exception.
+export const UTI_EXCEPTIONS = [
+  {
+    tokensB64: ["Y29tLmhhbmNvbS5od3A=", "Y29tLmhhbmNvbS5od3B4"],
+    files: [
+      "crates/easyoffice-desktop/tauri.conf.json",
+      "apps/quicklook/Resources/Preview/Info.plist",
+      "apps/quicklook/Resources/Thumbnail/Info.plist",
+      "scripts/desktop-file-associations.mjs",
+    ],
+  },
+];
+
 /** The exact MIME tokens that `rel` (root-relative, forward slashes) may carry. */
 export function allowedMimeTokens(rel) {
   return MIME_EXCEPTIONS.filter((entry) => entry.files.includes(rel)).map((entry) => decode(entry.tokenB64));
+}
+
+/** The exact UTI tokens that `rel` (root-relative, forward slashes) may carry. */
+export function allowedUtiTokens(rel) {
+  return UTI_EXCEPTIONS.filter((entry) => entry.files.includes(rel)).flatMap((entry) => entry.tokensB64.map(decode));
 }
 
 /** The exact notice sentences that `rel` (root-relative, forward slashes) may carry. */
@@ -70,9 +91,10 @@ export function allowedNotices(rel) {
   return NOTICE_EXCEPTIONS.filter((entry) => entry.files.includes(rel)).map((entry) => decode(entry.textB64));
 }
 
-/** Patterns that match `content` of the tracked file `rel` once its allowed notice sentences and MIME tokens are set aside. */
+/** Patterns that match `content` of the tracked file `rel` once its allowed notice sentences, MIME tokens and UTI tokens are set aside. */
 export function prohibitedPatternsIn(rel, content) {
   let rest = content;
   for (const notice of [...allowedNotices(rel), ...allowedMimeTokens(rel)]) rest = rest.split(notice).join("");
+  for (const uti of allowedUtiTokens(rel)) rest = rest.replace(new RegExp(`${uti.replaceAll(".", "\\.")}(?![\\w.-])`, "g"), "");
   return PROHIBITED_PATTERNS.filter((pattern) => pattern.test(rest));
 }

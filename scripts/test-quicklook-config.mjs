@@ -11,6 +11,7 @@ import { checkExtensionInfo } from "./verify-quicklook-bundle.mjs";
 const read = (path) => fs.readFileSync(path, "utf8");
 const conf = () => JSON.parse(read(join(repoRoot, "crates/easyoffice-desktop/tauri.conf.json")));
 const ours = [...REQUIRED_UTIS.values()].map((uti) => uti.exported).sort(byCodeUnits);
+const supported = [...REQUIRED_UTIS.values()].flatMap((uti) => [uti.exported, uti.external]).sort(byCodeUnits);
 
 /** `<key>name</key>` followed by a string value or an array of strings (the plist subset used here). */
 function plistValue(text, key) {
@@ -39,12 +40,14 @@ test("each extension's Info.plist matches the table the build and the verifier u
   }
 });
 
-test("the extensions support only the UTIs the app exports for HWP and HWPX", () => {
+test("the extensions support only the UTIs the app exports or lists for HWP and HWPX", () => {
   for (const ext of EXTENSIONS) {
-    assert.deepEqual([...plistValue(read(ext.infoPlist), "QLSupportedContentTypes")].sort(byCodeUnits), ours, ext.kind);
+    assert.deepEqual([...plistValue(read(ext.infoPlist), "QLSupportedContentTypes")].sort(byCodeUnits), supported, ext.kind);
   }
   const exported = conf().bundle.fileAssociations.flatMap((a) => (a.exportedType ? [a.exportedType.identifier] : []));
   for (const uti of ours) assert.ok(exported.includes(uti), `${uti} is exported by the app`);
+  const listed = conf().bundle.fileAssociations.flatMap((a) => a.contentTypes ?? []);
+  for (const uti of supported) assert.ok(listed.includes(uti), `${uti} is listed in the app's file associations`);
 });
 
 test("the principal class is a class of the extension's sources, in its module", () => {
@@ -93,14 +96,19 @@ test("the workspace version feeds the extensions and a release version overrides
 });
 
 test("the verifier accepts a right extension and names each way it can be wrong", () => {
-  const app = { CFBundleShortVersionString: "1.0.0", UTExportedTypeDeclarations: ours.map((id) => ({ UTTypeIdentifier: id })) };
+  const externals = [...REQUIRED_UTIS.values()].map((uti) => uti.external);
+  const app = {
+    CFBundleShortVersionString: "1.0.0",
+    UTExportedTypeDeclarations: ours.map((id) => ({ UTTypeIdentifier: id })),
+    CFBundleDocumentTypes: [{ LSItemContentTypes: externals }],
+  };
   for (const ext of EXTENSIONS) {
     const info = {
       CFBundleIdentifier: ext.bundleId, CFBundleExecutable: ext.moduleName, CFBundlePackageType: "XPC!",
       LSMinimumSystemVersion: MIN_MACOS, CFBundleShortVersionString: "1.0.0",
       NSExtension: {
         NSExtensionPointIdentifier: ext.pointIdentifier, NSExtensionPrincipalClass: ext.principalClass,
-        NSExtensionAttributes: { QLSupportedContentTypes: ours },
+        NSExtensionAttributes: { QLSupportedContentTypes: supported },
       },
     };
     assert.deepEqual(checkExtensionInfo(info, ext, app), []);
@@ -113,6 +121,9 @@ test("the verifier accepts a right extension and names each way it can be wrong"
     assert.match(problems, /com\.example\.unknown/);
     assert.match(problems, /NSExtensionPointIdentifier/);
     assert.ok(checkExtensionInfo({}, ext, app).length >= 5);
+    const unlisted = structuredClone(info);
+    unlisted.NSExtension.NSExtensionAttributes.QLSupportedContentTypes = supported;
+    assert.match(checkExtensionInfo(unlisted, ext, { ...app, CFBundleDocumentTypes: [] }).join("\n"), /neither exports nor opens/);
   }
 });
 
