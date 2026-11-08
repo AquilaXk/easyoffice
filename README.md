@@ -2,7 +2,7 @@
 
 [English](README.md) | [한국어](README.ko.md)
 
-EasyOffice (`v1.0.0`) is a 100% standalone, serverless, offline-capable all-in-one productivity and office suite for macOS and Windows: a Rust engine and an offline WebUI hosted in one Tauri v2 desktop shell, featuring a Signature Lavender Design System (`#5C6BC0`). It unifies **Document**, **Sheet**, **Slide**, **Korean Office (HWP / HWPX)**, and **PDF Studio** into a single lightweight workspace with bit-level container codecs, deterministic formula evaluation, offline smart document assistance, and fail-closed security guards.
+EasyOffice (`v0.1.0`) is a 100% standalone, serverless, offline-capable all-in-one productivity and office suite for macOS and Windows: a Rust engine and an offline WebUI hosted in one Tauri v2 desktop shell, following the rhwp-studio window chrome of hop with light and dark themes. It unifies **Document**, **Sheet**, **Slide**, **Korean Office (HWP / HWPX)**, and **PDF Studio** into a single lightweight workspace with bit-level container codecs, deterministic formula evaluation, offline smart document assistance, and fail-closed security guards.
 
 ---
 
