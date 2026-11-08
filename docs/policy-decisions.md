@@ -2287,3 +2287,15 @@
 - **Alternatives rejected** 공개된 릴리스의 태그를 옮기는 것(이미 받아 간 사용자와 어긋남), 드래프트 대상 커밋을 그대로 두는 것(현재 결함).
 - **Verified by** `node --test scripts/test-release-assets.mjs`(드래프트는 대상 갱신 뒤 남은 파일 삭제, 공개 릴리스는 태그 커밋 비교 뒤에만 업로드, 불일치 시 실패).
 - **Revisit when** 공개 릴리스의 자산만 고쳐야 하는 일이 생길 때.
+
+## PD-147. CI와 릴리스의 Rust 툴체인을 정확한 버전으로 고정
+
+- **Status** Implemented (`.github/rust-toolchain-version`, `.github/actions/setup-rust`; 실제 러너 실행은 첫 CI에서 확인)
+- **Context** 러너의 stable이 새 deprecation 경고를 내면서 `-D warnings` clippy 게이트가 코드 변경 없이 깨졌습니다(래스터 예산의 `fetch_update`). 게이트의 결과가 러너가 그날 쓰는 컴파일러에 달려 있었습니다.
+- **Decision (`PD-147`)** CI(`ci.yml`의 모든 Rust 잡)와 릴리스(`release.yml`, 공용 액션 `prepare-desktop-build`)와 Quick Look 빌드가 `1.93.1`을 씁니다. 버전은 `.github/rust-toolchain-version` 한 파일에만 적고, 공용 액션 `setup-rust`가 그 파일을 읽어 `rustup toolchain install <버전> --profile minimal --component clippy,rustfmt`, `rustup default`, `RUSTUP_TOOLCHAIN` 내보내기를 합니다(macOS 범용 빌드의 두 타깃도 같은 액션이 추가). 러스트 캐시 키에 버전을 넣습니다. 리포 루트에 `rust-toolchain.toml`은 두지 않아 로컬 개발과 `rhwp` 서브모듈의 툴체인 선택은 그대로입니다. 서드파티 액션 없이 러너에 있는 `rustup`만 씁니다.
+- **Why** 데스크톱·Quick Look `rust-version`이 1.93이고 `rhwp`가 1.93.1을 고정하므로 같은 버전이면 MSRV보다 새 API를 쓰는 실수를 CI가 잡습니다.
+- **Trade-offs** 새 컴파일러의 lint는 올리기 전까지 보이지 않습니다. 올리는 일이 사람의 몫입니다.
+- **올리는 주기·방법** 월 1회 또는 `rhwp`를 갱신할 때. `.github/rust-toolchain-version` 한 줄을 바꾸고, 같은 버전으로 `cargo clippy`·`cargo test` 전체를 돌린 뒤 한 커밋으로 올립니다. 새 버전의 경고가 많으면 코드 수정과 같은 커밋에 넣습니다. 올릴 때 이 항목의 버전도 갱신합니다.
+- **Alternatives rejected** 루트 `rust-toolchain.toml`(로컬과 `rhwp` 빌드에 영향), 러너 stable 그대로 두고 경고만 대응(같은 문제 재발), 서드파티 툴체인 액션(핀할 SHA를 하나 더 관리).
+- **Verified by** `node --test scripts/test-rust-toolchain-pin.mjs`(버전 원천 하나, 모든 Rust 잡이 cargo 전에 `setup-rust`, 개별 `rustup` 호출 없음, 캐시 키에 버전).
+- **Revisit when** 1.93.1에서 기존 코드가 빌드되지 않거나 의존성이 더 새로운 MSRV를 요구할 때(그 시점의 stable 숫자로 올림).

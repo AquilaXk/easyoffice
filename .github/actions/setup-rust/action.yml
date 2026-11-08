@@ -1,0 +1,36 @@
+name: Set up the pinned Rust toolchain
+description: >-
+  Installs the exact Rust version in .github/rust-toolchain-version (the only place it is written, PD-147)
+  with clippy and rustfmt, and makes it the toolchain of every later step through RUSTUP_TOOLCHAIN, so a new
+  stable release cannot change a gate without a commit. Needs a checkout.
+
+inputs:
+  targets:
+    description: Space-separated extra compilation targets to add (the macOS universal build needs two).
+    required: false
+    default: ""
+
+outputs:
+  version:
+    description: The pinned Rust version, for cache keys.
+    value: ${{ steps.pin.outputs.version }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install the pinned Rust toolchain
+      id: pin
+      shell: bash
+      env:
+        TARGETS: ${{ inputs.targets }}
+      run: |
+        VERSION="$(tr -d '[:space:]' < .github/rust-toolchain-version)"
+        test -n "$VERSION"
+        rustup toolchain install "$VERSION" --profile minimal --component clippy,rustfmt
+        rustup default "$VERSION"
+        echo "RUSTUP_TOOLCHAIN=$VERSION" >> "$GITHUB_ENV"
+        if [ -n "$TARGETS" ]; then
+          # shellcheck disable=SC2086
+          rustup target add --toolchain "$VERSION" $TARGETS
+        fi
+        echo "version=$VERSION" >> "$GITHUB_OUTPUT"

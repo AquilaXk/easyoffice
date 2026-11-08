@@ -5,9 +5,21 @@ description: >-
   then the Rust workspace tests and the engine self-test. Needs a checkout; Linux also needs the
   install-linux-deps action first.
 
+inputs:
+  rust-targets:
+    description: Space-separated extra Rust compilation targets (the macOS universal build needs two).
+    required: false
+    default: ""
+
 runs:
   using: composite
   steps:
+    # One pinned version for every Rust build (PD-147).
+    - name: Set up the pinned Rust toolchain
+      uses: ./.github/actions/setup-rust
+      with:
+        targets: ${{ inputs.rust-targets }}
+
     - name: Setup Node.js for the hygiene guard, the editor bundle and the Tauri CLI
       uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
       with:

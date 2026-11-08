@@ -59,7 +59,7 @@ jobs:
           node scripts/verify-fonts.mjs
 
       - name: Run rhwp upstream and hwp-studio guard tests
-        run: node --test scripts/test-rhwp-upstream.mjs scripts/test-update-rhwp.mjs scripts/test-hwp-studio.mjs scripts/test-commit-messages.mjs scripts/test-sort-comparator-rule.mjs scripts/test-release-serve-rule.mjs scripts/test-desktop-file-associations.mjs scripts/test-release-assets.mjs scripts/test-verify-linux-bundles.mjs scripts/test-retry-on-download-failure.mjs
+        run: node --test scripts/test-rhwp-upstream.mjs scripts/test-update-rhwp.mjs scripts/test-hwp-studio.mjs scripts/test-commit-messages.mjs scripts/test-sort-comparator-rule.mjs scripts/test-release-serve-rule.mjs scripts/test-desktop-file-associations.mjs scripts/test-release-assets.mjs scripts/test-verify-linux-bundles.mjs scripts/test-retry-on-download-failure.mjs scripts/test-rust-toolchain-pin.mjs
 
       - name: Run WebUI behavioral and security regression suite
         run: node --test "scripts/test-webui-*.mjs"
@@ -69,8 +69,14 @@ jobs:
       - name: Check out the pinned rhwp upstream (sparse, shallow)
         run: node scripts/checkout-rhwp.mjs
 
+      - name: Set up the pinned Rust toolchain (PD-147)
+        id: rust
+        uses: ./.github/actions/setup-rust
+
       - name: Cache Rust dependencies and build artifacts
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: rust-${{ steps.rust.outputs.version }}
 
       - name: Check Rust toolchain version
         run: cargo --version && rustc --version
@@ -102,10 +108,17 @@ jobs:
           cache: npm
           cache-dependency-path: apps/hwp-studio/package-lock.json
 
+      - name: Set up the pinned Rust toolchain (PD-147)
+        id: rust
+        uses: ./.github/actions/setup-rust
+        with:
+          targets: aarch64-apple-darwin x86_64-apple-darwin
+
       # The Quick Look extensions (PD-140) are their own Cargo workspace with their own target directory.
       - name: Cache Rust dependencies and build artifacts
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
+          key: rust-${{ steps.rust.outputs.version }}
           workspaces: |
             . -> target
             apps/quicklook/rust -> target
@@ -135,7 +148,6 @@ jobs:
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
         run: |
-          rustup target add aarch64-apple-darwin x86_64-apple-darwin
           node scripts/build-quicklook-macos.mjs --universal
 
       # No Developer ID in CI or in the repository (PD-094). The identity "-" is an ad-hoc signature:
@@ -233,8 +245,14 @@ jobs:
           cache: npm
           cache-dependency-path: apps/hwp-studio/package-lock.json
 
+      - name: Set up the pinned Rust toolchain (PD-147)
+        id: rust
+        uses: ./.github/actions/setup-rust
+
       - name: Cache Rust dependencies and build artifacts
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: rust-${{ steps.rust.outputs.version }}
 
       - name: Check out the pinned rhwp upstream (sparse, shallow)
         run: node scripts/checkout-rhwp.mjs
@@ -312,8 +330,14 @@ jobs:
       - name: Run repository hygiene guard on a Windows checkout
         run: node scripts/check-repo-hygiene.mjs
 
+      - name: Set up the pinned Rust toolchain (PD-147)
+        id: rust
+        uses: ./.github/actions/setup-rust
+
       - name: Cache Rust dependencies and build artifacts
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: rust-${{ steps.rust.outputs.version }}
 
       # hwp-studio (PD-081, PD-083): the editor bundle is generated from the committed WASM package, the
       # pinned sparse rhwp checkout and the npm lockfile; the WASM is never compiled here. The desktop shell

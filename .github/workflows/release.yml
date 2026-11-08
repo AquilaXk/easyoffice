@@ -126,11 +126,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Add the macOS Rust targets for the universal build
-        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
-
       - name: Run the shared release gates and prepare the editor bundle
         uses: ./.github/actions/prepare-desktop-build
+        with:
+          rust-targets: aarch64-apple-darwin x86_64-apple-darwin
 
       # The Quick Look preview and thumbnail extensions (PD-140) are copied into the app's PlugIns
       # folder by bundle.macOS.files, so they are built first, universal, with the same signing
