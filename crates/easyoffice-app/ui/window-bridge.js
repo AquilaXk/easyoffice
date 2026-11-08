@@ -325,6 +325,8 @@
         const ok = typeof env.confirm === "function" ? env.confirm("저장하지 않은 변경 사항이 있습니다. 저장하지 않고 닫을까요?") : true;
         return Promise.resolve(ok ? "discard" : "cancel");
       }
+      const text = document.getElementById("close-dialog-text");
+      if (text) text.textContent = (getDocumentName() || UNTITLED) + "의 변경 내용을 저장할까요?";
       return new Promise((resolve) => {
         let settled = false;
         const cleanups = [];

@@ -278,6 +278,8 @@ test("close request: 저장 안 함 closes, 취소 keeps the window, 저장 save
   const first = host.__EASYOFFICE_CLOSE_REQUEST__();
   await flushAsyncTurns();
   assert.equal(dialog.open, true);
+  assert.equal(document.getElementById("close-dialog-title").textContent, "저장 확인");
+  assert.equal(document.getElementById("close-dialog-text").textContent, "제목 없음의 변경 내용을 저장할까요?", "the prompt names the document, as the reference app does");
   assert.equal(shell.named("ack_close_prompt").length, 1, "the shell hears that the prompt is shown");
   const secondWhileOpen = host.__EASYOFFICE_CLOSE_REQUEST__();
   await flushAsyncTurns();
@@ -667,4 +669,16 @@ test("smoke: the page wiring keeps the step order and app.js stays under the lin
   assert.ok(wiring, "app.js defines the smoke steps");
   assert.deepEqual([...wiring[1].matchAll(/(\w+): \(\) =>/g)].map((m) => m[1]), ["hwp", "pdf", "print", "frame_ipc"]);
   assert.ok(app.split("\n").length < 1000);
+});
+
+test("the shell's notice (open failures, the drop hint) shows as the shared toast in every window", async () => {
+  for (const search of ["?module=START&win=w-n1", "?module=DOC&win=w-n2"]) {
+    const { document, host } = await openWindow(search, {}, { localStorage: createMemoryStorage() });
+    assert.equal(typeof host.__EASYOFFICE_NOTICE__, "function");
+    const toast = document.getElementById("shell-toast");
+    assert.equal(toast.hidden, true);
+    host.__EASYOFFICE_NOTICE__("지원하지 않는 형식입니다 (a.exe)");
+    assert.equal(toast.hidden, false, search);
+    assert.equal(toast.textContent, "지원하지 않는 형식입니다 (a.exe)");
+  }
 });
