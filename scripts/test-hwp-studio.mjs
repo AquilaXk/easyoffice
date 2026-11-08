@@ -700,3 +700,58 @@ test("the 셀 선택 command (table:cell-selection-enter) replays F5 through the
   assert.deepEqual(keys, ["F5"]);
   cellSelectionEnterCommand.execute({ getInputHandler: () => null });
 });
+
+// The shell's edit menu (macOS ⌘Z/⇧⌘Z/⌘X/⌘C are menu keys, so they never reach this frame) sends edit:undo, redo,
+// cut and copy over the embed port. A dialog's text field with the focus must take them, never the document.
+const TEXT_FIELD_EDIT = (async () => {
+  const source = fs.readFileSync(path.join(REPO, "apps/hwp-studio/src/embed/text-field-edit.ts"), "utf8");
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "eo-text-field-edit-")), "text-field-edit.mjs");
+  fs.writeFileSync(file, stripTypeScriptTypes(source));
+  return import(pathToFileURL(file).href);
+})();
+
+const element = (tagName, attributes = {}, type) => ({ tagName, type, getAttribute: (name) => attributes[name] ?? null });
+
+test("an edit command goes to the focused dialog field, and the document is left untouched even with a selection", async () => {
+  const { runEditCommand } = await TEXT_FIELD_EDIT;
+  const documentSelection = { text: "선택한 문장", clipboard: "" };
+  const executed = [];
+  const runDocument = (id) => () => {
+    // The document command: cut removes the selection, copy puts it on the clipboard.
+    if (id === "edit:cut") documentSelection.text = "";
+    if (id === "edit:copy" || id === "edit:cut") documentSelection.clipboard = "선택한 문장";
+    return { ok: true, document: true };
+  };
+  const dialogField = element("INPUT", { class: "dialog-input" }, "text");
+  for (const [id, name] of [["edit:undo", "undo"], ["edit:redo", "redo"], ["edit:cut", "cut"], ["edit:copy", "copy"]]) {
+    const result = runEditCommand(id, dialogField, (command) => executed.push(command), runDocument(id));
+    assert.deepEqual(result, { ok: true }, id);
+    assert.equal(executed.at(-1), name);
+  }
+  assert.deepEqual(documentSelection, { text: "선택한 문장", clipboard: "" }, "the document selection was not cut or copied");
+  for (const field of [element("TEXTAREA"), element("INPUT"), element("input", {}, "search")]) {
+    assert.deepEqual(runEditCommand("edit:cut", field, () => true, () => "doc"), { ok: true });
+  }
+});
+
+test("the editor's own hidden input, buttons, no focus and other commands run the document command", async () => {
+  const { runEditCommand, textFieldEditCommand } = await TEXT_FIELD_EDIT;
+  const run = (id, active) => runEditCommand(id, active, () => assert.fail("no field command"), () => "document");
+  assert.equal(run("edit:cut", element("TEXTAREA", { "aria-label": "문서 편집 입력" })), "document");
+  assert.equal(run("edit:copy", element("INPUT", { "aria-label": "문서 편집 입력" }, "text")), "document");
+  assert.equal(run("edit:undo", null), "document");
+  assert.equal(run("edit:undo", element("BUTTON")), "document");
+  assert.equal(run("edit:cut", element("DIV")), "document");
+  for (const type of ["checkbox", "radio", "button", "range", "file"]) assert.equal(run("edit:cut", element("INPUT", {}, type)), "document", type);
+  assert.equal(run("edit:paste", element("INPUT", {}, "text")), "document", "paste is not routed here");
+  assert.equal(run("edit:find", element("INPUT", {}, "text")), "document");
+  assert.equal(textFieldEditCommand("constructor", element("INPUT", {}, "text")), null);
+});
+
+test("the embed port's automation.execute hands every edit command to the field-aware runner", () => {
+  const main = fs.readFileSync(path.join(REPO, "apps/hwp-studio/src/main.ts"), "utf8");
+  const handler = main.slice(main.indexOf("async automationExecute"), main.indexOf("async automationContext"));
+  assert.match(handler, /runEditCommand\(\s*id,\s*document\.activeElement,/);
+  assert.match(handler, /\(\) => automation\.execute\(id, params, options\)/);
+  assert.match(main, /from '\.\/embed\/text-field-edit\.ts'/);
+});

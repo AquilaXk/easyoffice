@@ -33,6 +33,8 @@ const OVERLAY_NON_OVERRIDE = new Set([
   "src/ui/toolbar-labels.ts",
   // EasyOffice-only module (참조 앱 menu event id): the 표 menu's 셀 선택 command.
   "src/command/cell-selection.ts",
+  // EasyOffice-only module: the shell's edit commands go to a focused dialog text field, never the document.
+  "src/embed/text-field-edit.ts",
 ]);
 
 /** SHA-256 of upstream text with CRLF normalised to LF (the baseline the manifest pins). */

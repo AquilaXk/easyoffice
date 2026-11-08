@@ -18,6 +18,7 @@ import { MenuBar } from '@/ui/menu-bar';
 import { loadWebFonts } from '@/core/font-loader';
 import { CommandRegistry } from '@/command/registry';
 import { AutomationHost } from '@/automation/host';
+import { runEditCommand } from './embed/text-field-edit.ts';
 import { getChromeVisibility, setChromeVisibility } from '@/automation/chrome';
 import type { ChromeVisibility } from '@/automation/types';
 import { CommandDispatcher } from '@/command/dispatcher';
@@ -1583,7 +1584,13 @@ installEmbedRuntime({
     async automationIsEnabled(id) { await initPromise; return automation.isEnabled(id); },
     async automationExecute(id, params, options) {
       await initPromise;
-      return automation.execute(id, params, options);
+      // A dialog's text field with the focus takes the shell's edit commands (never the document).
+      return runEditCommand(
+        id,
+        document.activeElement,
+        (name) => document.execCommand(name),
+        () => automation.execute(id, params, options),
+      );
     },
     async automationContext() { await initPromise; return automation.getContext(); },
     async createBlankDocument(skipUnsavedGuard) {
