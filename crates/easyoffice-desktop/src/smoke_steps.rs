@@ -362,14 +362,14 @@ struct InstalledMenu {
 
 /// Checks that every custom item this OS's menu bar holds is among the installed menu ids and has a
 /// page action script (the quit item runs in Rust and is checked on its own), that the theme and
-/// update-check items are check items, and that 끝내기 is in the Windows and Linux menu only.
+/// update-check items are check items, and that 끝내기 is in the menu on every OS.
 fn check_menu(installed: &InstalledMenu) -> Result<(), String> {
     let have = |id: &str| installed.ids.iter().any(|have| have == id);
     let mut missing: Vec<&str> = crate::native_menu::installed_ids()
         .filter(|id| !have(id) || crate::native_menu::dispatch_script(id).is_none())
         .collect();
     let quit = crate::native_menu::QUIT_ID;
-    if have(quit) == cfg!(target_os = "macos") {
+    if !have(quit) {
         missing.push(quit);
     }
     for id in crate::native_menu::CHECK_IDS {
@@ -592,9 +592,7 @@ mod tests {
         let mut ids: Vec<String> = crate::native_menu::installed_ids()
             .map(str::to_string)
             .collect();
-        if !cfg!(target_os = "macos") {
-            ids.push(crate::native_menu::QUIT_ID.to_string());
-        }
+        ids.push(crate::native_menu::QUIT_ID.to_string());
         ids.extend(extra.iter().map(|id| (*id).to_string()));
         InstalledMenu {
             ids,
@@ -632,11 +630,11 @@ mod tests {
     }
 
     #[test]
-    fn the_quit_item_is_in_the_menu_of_windows_and_linux_only() {
+    fn the_quit_item_is_in_the_menu_of_every_os() {
+        assert_eq!(check_menu(&installed(&[])), Ok(()));
         let mut menu = installed(&[]);
         menu.ids.retain(|id| id != crate::native_menu::QUIT_ID);
-        assert_eq!(check_menu(&menu).is_err(), !cfg!(target_os = "macos"));
-        let menu = installed(&[crate::native_menu::QUIT_ID]);
-        assert_eq!(check_menu(&menu).is_err(), cfg!(target_os = "macos"));
+        let err = check_menu(&menu).unwrap_err();
+        assert!(err.contains(crate::native_menu::QUIT_ID), "{err}");
     }
 }

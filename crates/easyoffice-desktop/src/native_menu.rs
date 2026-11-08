@@ -4,7 +4,7 @@
 //! item of the page's menu bar is in [`ITEMS`] (a test compares both). Adapted from the reference app
 //! `apps/desktop/src-tauri/src/menu.rs` (MIT, Copyright (c) 2025-2026 Edward Kim, see
 //! THIRD_PARTY_NOTICES.md): the same menu layout, the same "menu id -> the focused window only"
-//! delivery and the same quit item (`app:quit` there, [`QUIT_ID`] here), with EasyOffice's differences:
+//! delivery and the same quit item (`app:quit`, [`QUIT_ID`]), with EasyOffice's differences:
 //!
 //! * One static table ([`ITEMS`]) holds every custom item: its id, label, accelerator and the
 //!   page action it runs. The page keeps the matching list (`NATIVE_MENU_ACTIONS` in
@@ -18,12 +18,13 @@
 //! * Labels are Korean on every OS. Accelerators follow the OS (`CmdOrCtrl`). Only items whose
 //!   keys the page does not already handle for the focused editor carry one: the editing keys
 //!   (bold, undo, copy and the like) stay with the editor.
-//! * macOS: the application menu (about, services, hide, quit) and the system edit items (undo,
-//!   copy, paste and the like, which also work in text fields). Quit ends in
-//!   `RunEvent::ExitRequested`; the existing handler then closes every window through its own save
-//!   prompt. Windows and Linux have no system undo/redo (and no application menu), so their edit
-//!   menu uses the table's items and their 파일 menu ends in 끝내기 ([`QUIT_ID`], handled in Rust by
-//!   `app_quit.rs`, so it is not in the table and has no page action).
+//! * macOS: the application menu (about, services, hide, 끝내기) and the system edit items (undo,
+//!   copy, paste and the like, which also work in text fields). Windows and Linux have no system
+//!   undo/redo (and no application menu), so their edit menu uses the table's items. 끝내기
+//!   ([`QUIT_ID`], ⌘Q) is a custom item on every OS (macOS: application menu, Windows and Linux:
+//!   end of the 파일 menu), handled in Rust by `app_quit.rs`, so it is not in the table and has no
+//!   page action; the Dock's 종료 reaches the same queue through `RunEvent::ExitRequested`
+//!   (`main.rs`).
 //! * The theme choices and the update-check switch are check items; the 'enabled' and 'checked'
 //!   state of the bar follows the focused window ([`sync`], fed by `menu_state.rs`).
 //!   The disabled ids come from the page, which owns the module rules (`studioCommandApplies`).
@@ -454,10 +455,15 @@ pub const ITEMS: &[MenuItemSpec] = &[
     ),
 ];
 
-/// 끝내기 (Windows and Linux 파일 menu). It runs in Rust (`app_quit.rs`), not in the page, so it is
-/// not in [`ITEMS`]; the accelerator is the reference app's.
-pub const QUIT_ID: &str = "file:quit";
-const QUIT_LABEL: &str = "끝내기";
+/// 끝내기: the application menu on macOS, the end of the 파일 menu elsewhere. It runs in Rust
+/// (`app_quit.rs`), not in the page, so it is not in [`ITEMS`]; id and accelerator are the
+/// reference app's.
+pub const QUIT_ID: &str = "app:quit";
+const QUIT_LABEL: &str = if cfg!(target_os = "macos") {
+    "EasyOffice 끝내기"
+} else {
+    "끝내기"
+};
 const QUIT_ACCELERATOR: &str = "CmdOrCtrl+Q";
 
 /// Settings the user switches on and off or picks one of: check items whose mark [`sync`] sets.
@@ -602,7 +608,7 @@ fn app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
         .hide_others()
         .show_all()
         .separator()
-        .quit()
+        .item(&quit_item(app)?)
         .build()
 }
 
@@ -1091,7 +1097,20 @@ mod tests {
         assert!(ITEMS.iter().all(|spec| spec.id != QUIT_ID));
         assert_eq!(dispatch_script(QUIT_ID), None);
         assert_eq!(action_for(QUIT_ID), None);
-        assert!(QUIT_ID.starts_with("file:") && QUIT_ID.len() <= MAX_ID_LEN);
+        assert_eq!(QUIT_ID, "app:quit");
+        assert!(QUIT_ID.len() <= MAX_ID_LEN);
+        assert_eq!(
+            QUIT_LABEL,
+            if cfg!(target_os = "macos") {
+                "EasyOffice 끝내기"
+            } else {
+                "끝내기"
+            }
+        );
+        let source = include_str!("native_menu.rs");
+        let app_menu =
+            &source[source.find("fn app_menu").unwrap()..source.find("fn file_menu").unwrap()];
+        assert!(app_menu.contains(".item(&quit_item(app)?)") && !app_menu.contains(".quit()"));
         assert_eq!(QUIT_ACCELERATOR, "CmdOrCtrl+Q");
         assert!(ITEMS
             .iter()

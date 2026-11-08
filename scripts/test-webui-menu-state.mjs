@@ -159,12 +159,13 @@ test("the menu state and close prompt commands are window commands of the bridge
   }
 });
 
-test("the quit item is Rust-only: 끝내기 ends the 파일 menu on Windows and Linux and has no page action", () => {
+test("the quit item is Rust-only: 끝내기 ends the 파일 menu on Windows and Linux, 끝내기 closes the macOS application menu, and it has no page action", () => {
   const menu = read("crates/easyoffice-desktop/src/native_menu.rs");
   assert.match(menu, /lines\.extend\(entries\(&\[SEPARATOR, QUIT_ID\]\)\)/);
-  assert.match(menu, /const QUIT_LABEL: &str = "끝내기";/);
+  assert.match(menu, /"EasyOffice 끝내기"\n\} else \{\n    "끝내기"/);
+  assert.match(menu, /\.item\(&quit_item\(app\)\?\)/);
   const chrome = read("crates/easyoffice-app/ui/shell-chrome.js");
-  assert.ok(!chrome.includes("file:quit"), "the page cannot quit the app");
+  assert.ok(!chrome.includes("app:quit") && !chrome.includes("file:quit"), "the page cannot quit the app");
 });
 
 test("the check items are the three themes and the update switch", () => {

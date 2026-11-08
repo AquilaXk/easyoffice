@@ -167,7 +167,7 @@ mod tests {
         assert_eq!(ok.theme, "dark");
         assert!(ok.embed && ok.disabled.contains("table:sort"));
         assert!(WindowMenu::parse("purple", Vec::new(), false).is_err());
-        assert!(WindowMenu::parse("light", ids(&["file:quit"]), false).is_err());
+        assert!(WindowMenu::parse("light", ids(&["app:quit"]), false).is_err());
         assert!(WindowMenu::parse("light", ids(&["nope"]), false).is_err());
         let too_many = vec!["table:sort".to_string(); ITEMS.len() + 1];
         assert!(WindowMenu::parse("light", too_many, false).is_err());

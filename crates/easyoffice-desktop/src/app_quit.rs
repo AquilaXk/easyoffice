@@ -1,5 +1,6 @@
-//! Quit from the menu on Windows and Linux: every window goes through its own close confirmation,
-//! one after the other, and the app ends when the last one is gone.
+//! Quit on every OS (the 끝내기 menu item, and on macOS also Cmd+Q, the Dock's 종료 and a system
+//! shutdown, which arrive as `RunEvent::ExitRequested`): every window goes through its own close
+//! confirmation, one after the other, and the app ends when the last one is gone.
 //!
 //! Adapted from the reference app `apps/desktop/src-tauri/src/app_quit.rs` (MIT, Copyright (c)
 //! 2025-2026 Edward Kim; see THIRD_PARTY_NOTICES.md): the same queue of window labels (the focused
@@ -8,13 +9,14 @@
 //! the existing close flow runs (`CloseRequested`: a window without unsaved changes closes, a dirty
 //! one runs the page's 저장 / 저장 안 함 / 취소 prompt), and the page ends the quit through the
 //! narrow `end_close_prompt` command (`window_commands.rs`) when the user cancels or a save fails;
-//! it confirms the prompt with `ack_close_prompt`. macOS keeps its system quit item
-//! (`RunEvent::ExitRequested` in `main.rs`).
+//! it confirms the prompt with `ack_close_prompt`. The reference app does the same on macOS: its
+//! application menu has a custom quit item and `ExitRequested` (no exit code) is prevented and sent
+//! to the same queue (`app_quit.rs:62-153`, `lib.rs:133`). The updater's restart (`update_install.rs`)
+//! does not go through here: it refuses to start while a window has unsaved changes.
 
 use std::collections::VecDeque;
 use std::sync::Mutex;
 
-#[cfg(not(target_os = "macos"))]
 use tauri::{AppHandle, Manager};
 
 /// The windows still to be closed by a running quit, in order.
@@ -23,7 +25,6 @@ pub struct AppQuit {
     pending: Mutex<VecDeque<String>>,
 }
 
-#[cfg(any(not(target_os = "macos"), test))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Advance {
     /// No quit is running.
@@ -46,7 +47,6 @@ impl AppQuit {
 
     /// Starts a quit over `labels`; returns the first window to ask (`None` when there is none).
     /// A second request while one is running changes nothing.
-    #[cfg(any(not(target_os = "macos"), test))]
     fn begin(&self, labels: Vec<String>) -> Option<String> {
         let mut pending = self.pending();
         if !pending.is_empty() {
@@ -60,7 +60,6 @@ impl AppQuit {
         self.pending().clear();
     }
 
-    #[cfg(any(not(target_os = "macos"), test))]
     fn advance_after_close(&self, closed: &str) -> Advance {
         let mut pending = self.pending();
         if pending.is_empty() {
@@ -77,7 +76,6 @@ impl AppQuit {
 }
 
 /// Focused window first, the others in label order.
-#[cfg(any(not(target_os = "macos"), test))]
 fn ordered(mut labels: Vec<String>, focused: Option<&str>) -> Vec<String> {
     labels.sort();
     if let Some(focused) = focused {
@@ -89,7 +87,8 @@ fn ordered(mut labels: Vec<String>, focused: Option<&str>) -> Vec<String> {
     labels
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Starts a quit: the 끝내기 item on every OS, and `ExitRequested` on macOS. A quit that is already
+/// running ignores the request, so a second Cmd+Q cannot ask a window twice.
 pub fn request_app_quit(app: &AppHandle) {
     let labels = open_labels(app, None);
     if labels.is_empty() {
@@ -100,7 +99,6 @@ pub fn request_app_quit(app: &AppHandle) {
 }
 
 /// The windows still open, the focused one first; `except` is a window that is going away.
-#[cfg(not(target_os = "macos"))]
 fn open_labels(app: &AppHandle, except: Option<&str>) -> Vec<String> {
     let windows = app.webview_windows();
     let focused = windows
@@ -115,7 +113,6 @@ fn open_labels(app: &AppHandle, except: Option<&str>) -> Vec<String> {
 
 /// A window is gone: ask the next one, or end the app after the last. A window opened while the
 /// quit was running is asked too (the queue is built again before the app ends).
-#[cfg(not(target_os = "macos"))]
 pub fn window_destroyed(app: &AppHandle, label: &str) {
     match app.state::<AppQuit>().advance_after_close(label) {
         Advance::Idle | Advance::Waiting => {}
@@ -133,7 +130,6 @@ pub fn window_destroyed(app: &AppHandle, label: &str) {
 /// Asks the window to close (`raise_and_close`): a window already showing its save prompt keeps it,
 /// the quit waits for its answer (destroyed: next window; cancelled: quit stops). A page that never
 /// confirmed its prompt is closed by the next request after `CLOSE_ACK_TIMEOUT` (PD-113).
-#[cfg(not(target_os = "macos"))]
 fn ask(app: &AppHandle, label: &str) {
     let closed = app
         .get_webview_window(label)
@@ -217,14 +213,30 @@ mod tests {
         );
     }
 
-    /// Structural guard: the menu quit and the macOS quit never call `close()` themselves; both go
-    /// through `raise_and_close`, which never closes over a save prompt the page is showing.
+    /// Structural guard: no quit path calls `close()` itself. The queue asks windows through
+    /// `raise_and_close`, which never closes over a save prompt the page is showing, and the macOS
+    /// `ExitRequested` handler only hands the request to the queue (no loop over all windows).
     #[test]
-    fn quits_close_windows_only_through_raise_and_close() {
-        for source in [include_str!("app_quit.rs"), include_str!("main.rs")] {
-            let production = source.split("#[cfg(test)]").next().unwrap();
-            assert!(production.contains("raise_and_close"));
+    fn every_quit_goes_through_the_one_queue() {
+        let queue = include_str!("app_quit.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap();
+        assert!(queue.contains("raise_and_close"));
+        let main = include_str!("main.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap();
+        for production in [queue, main] {
             assert!(!production.contains(".close()"), "a direct close() call");
         }
+        assert!(
+            !main.contains("raise_and_close"),
+            "main.rs never closes windows itself"
+        );
+        let handler = &main[main.find("fn handle_run_event").unwrap()..];
+        assert!(handler.contains("ExitRequested"));
+        assert!(handler.contains("api.prevent_exit()"));
+        assert!(handler.contains("app_quit::request_app_quit(app)"));
     }
 }

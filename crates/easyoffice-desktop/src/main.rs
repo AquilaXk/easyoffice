@@ -295,22 +295,23 @@ fn main() {
 
 /// Application-level events. On macOS a Finder "open" (double click, drag onto the Dock icon,
 /// "Open With") reaches a running or starting app as an Apple Event, not as a command-line
-/// argument, and Cmd+Q must go through each window's own save prompt instead of ending the process.
+/// argument, and a quit from the Dock must go through each window's own save prompt in turn instead
+/// of ending the process.
 fn handle_run_event(app: &AppHandle, event: tauri::RunEvent) {
     match event {
         #[cfg(target_os = "macos")]
         tauri::RunEvent::Opened { urls } => window_commands::open_urls(app, urls),
+        // Cmd+Q is the application menu's own quit item (`native_menu.rs`); the Dock's 종료 and a
+        // system shutdown arrive here. All of them take the same queue: one window at a time, a
+        // cancelled save prompt stops the quit (`app_quit.rs`). An exit with a code (the queue's own
+        // `app.exit(0)`) and the end after the last window closed pass.
         #[cfg(target_os = "macos")]
         tauri::RunEvent::ExitRequested {
             code: None, api, ..
         } => {
-            let windows = app.webview_windows();
-            if !windows.is_empty() {
+            if !app.webview_windows().is_empty() {
                 api.prevent_exit();
-                // A window already showing its save prompt stays in front and keeps it.
-                for window in windows.values() {
-                    window_commands::raise_and_close(window);
-                }
+                app_quit::request_app_quit(app);
             }
         }
         _ => {
