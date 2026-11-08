@@ -3,7 +3,7 @@
 //! `eprintln!` calls removed, and the test module cut off.
 
 /// The shell sources whose errors reach the page (commands and the code under them).
-const SOURCES: [(&str, &str); 9] = [
+const SOURCES: [(&str, &str); 10] = [
     ("main.rs", include_str!("main.rs")),
     ("pdf_job.rs", include_str!("pdf_job.rs")),
     ("window_commands.rs", include_str!("window_commands.rs")),
@@ -11,6 +11,7 @@ const SOURCES: [(&str, &str); 9] = [
     ("save_error.rs", include_str!("save_error.rs")),
     ("font_catalog.rs", include_str!("font_catalog.rs")),
     ("confirm_dialog.rs", include_str!("confirm_dialog.rs")),
+    ("print_webview.rs", include_str!("print_webview.rs")),
     ("open_feedback.rs", include_str!("open_feedback.rs")),
     ("menu_state.rs", include_str!("menu_state.rs")),
 ];

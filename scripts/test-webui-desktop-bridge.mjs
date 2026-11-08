@@ -358,6 +358,7 @@ test("the browser texts equal the shell's wording and the command is granted lik
   assert.ok(caps.permissions.includes("allow-confirm-close"), "the close prompt is granted like the other app commands");
   assert.ok(commands.includes('"confirm_close"'));
   assert.equal(sandbox.__EASYOFFICE_DESKTOP_BRIDGE__.WINDOW_COMMANDS.confirmClose, "confirm_close");
+  assert.equal(sandbox.__EASYOFFICE_DESKTOP_BRIDGE__.WINDOW_COMMANDS.printWebview, "print_webview");
 });
 
 test("the close prompt wording lives in the shell only: the page holds no text for it", () => {

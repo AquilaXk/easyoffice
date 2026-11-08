@@ -43,7 +43,7 @@ class FakeSheet {
   insertRule(rule, index) { this.cssRules.splice(index, 0, rule); return index; }
 }
 
-function setup({ pages, capabilities = ["print-pages-v1"], printImpl } = {}) {
+function setup({ pages, capabilities = ["print-pages-v1"], printImpl, desktopBridge } = {}) {
   const body = new FakeNode("body");
   const byId = new Map();
   const doc = {
@@ -75,10 +75,10 @@ function setup({ pages, capabilities = ["print-pages-v1"], printImpl } = {}) {
   const notes = [];
   const printed = [];
   loadUiModule(PRINT_JS, env);
-  const print = env.__EASYOFFICE_CREATE_HWP_PRINT__({
-    document: doc, hwpHost, env, notify: (t) => notes.push(t),
-    print: printImpl ?? (() => { printed.push(true); }),
-  });
+  const deps = { document: doc, hwpHost, env, notify: (t) => notes.push(t), desktopBridge };
+  if (!desktopBridge) deps.print = printImpl ?? (() => { printed.push(true); });
+  else env.print = () => { printed.push("window"); };
+  const print = env.__EASYOFFICE_CREATE_HWP_PRINT__(deps);
   return { print, doc, env, requests, notes, printed, byId, internals: env.__EASYOFFICE_HWP_PRINT_INTERNALS__ };
 }
 
@@ -199,6 +199,60 @@ test("the shell wires printing: menu item, shortcut, no new shell command, only 
   assert.ok(!/\.style\.|setAttribute\("style"|createElement\("style"\)|innerHTML|eval\(/.test(js), "no inline style, no markup injection");
   const css = UI("shell.css");
   assert.ok(css.includes("body > :not(#eo-print-root)") && css.includes("#eo-print-root { display: none; }"));
+  assert.match(app, /__EASYOFFICE_CREATE_HWP_PRINT__\(\{[^}]*desktopBridge/s, "the print module gets the desktop bridge");
   const caps = fs.readFileSync(new URL("../crates/easyoffice-desktop/capabilities/main-window.json", import.meta.url), "utf8");
-  assert.ok(!/print/i.test(caps), "printing needs no shell command");
+  assert.ok(caps.includes('"allow-print-webview"'), "the native print command is granted");
+  assert.ok(UI("desktop-bridge.js").includes('printWebview: "print_webview"'));
+});
+
+const shellBridge = (calls, { available = true, fail = false } = {}) => ({
+  isAvailable: () => available,
+  windowCommand: async (key, args) => {
+    calls.push([key, args]);
+    if (fail) throw new Error("인쇄 대화상자를 열지 못했습니다.");
+  },
+});
+
+test("in the desktop shell the pages are printed by the native print command, not window.print", async () => {
+  const calls = [];
+  const t = setup({ pages: makePages(12), desktopBridge: shellBridge(calls) });
+  assert.equal(await t.print.print(), true);
+  assert.deepEqual(calls, [["printWebview", undefined]], "no argument: the shell prints the caller's own document");
+  assert.deepEqual(t.printed, [], "window.print is not used");
+  const root = [...t.byId.values()].find((n) => n.id === t.internals.ROOT_ID);
+  assert.equal(root.children.length, 12, "every page is in the hidden root before the command runs");
+});
+
+test("without the shell (--serve) the page falls back to window.print", async () => {
+  const calls = [];
+  const t = setup({ pages: makePages(2), desktopBridge: shellBridge(calls, { available: false }) });
+  assert.equal(await t.print.print(), true);
+  assert.deepEqual(calls, []);
+  assert.deepEqual(t.printed, ["window"]);
+});
+
+test("a cancelled preparation never reaches the native print command", async () => {
+  const calls = [];
+  const t = setup({ pages: makePages(40), desktopBridge: shellBridge(calls) });
+  const running = t.print.print();
+  await new Promise((r) => setImmediate(r));
+  t.print.cancel();
+  assert.equal(await running, false);
+  assert.deepEqual(calls, []);
+  assert.deepEqual(t.printed, []);
+});
+
+test("a native print command that fails removes the pages and reports its message", async () => {
+  const calls = [];
+  const t = setup({ pages: makePages(1), desktopBridge: shellBridge(calls, { fail: true }) });
+  await assert.rejects(t.print.print(), /인쇄 대화상자를 열지 못했습니다/);
+  assert.equal(t.doc.adoptedStyleSheets.length, 0);
+  assert.equal([...t.byId.values()].find((n) => n.id === t.internals.ROOT_ID).removed, true);
+});
+
+test("the smoke step never calls the native print command", async () => {
+  const calls = [];
+  const t = setup({ pages: makePages(3), desktopBridge: shellBridge(calls) });
+  assert.match(await t.print.smoke(), /pages=3/);
+  assert.deepEqual(calls, []);
 });

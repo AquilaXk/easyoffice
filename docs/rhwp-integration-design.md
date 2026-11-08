@@ -70,7 +70,7 @@
 | `apps/studio-host/vendor/rhwp-core/{rhwp.js,rhwp_bg.wasm,rhwp.d.ts,package.json,LICENSE,PROVENANCE.json}` | `wasm-pack --target web` 산출물 벤더링 + 출처 증명. CI는 WASM을 다시 빌드하지 않고 해시만 검증 | 경로는 `vendor/rhwp-core/`(저장소 루트) |
 | `apps/studio-host/src/core/font-loader.ts`(fork), `font-catalog.ts`, `font-authoring-policy.ts`, `assets/fonts/FONTS.md` | HWP 글꼴명을 번들 OFL woff2에 대응. 제한 글꼴(HY*, 휴먼명조 등)을 작성 단계에서 차단. `FontFace` API 사용 | `<style>` 주입을 없애도록 fork 범위를 정함(§4) |
 | `apps/studio-host/src/core/document-open.ts` | `loadDocument(bytes, fileName)` + 비밀번호 재시도 루프(`showHwpPasswordDialog`) | — |
-| `apps/studio-host/src/ui/print-dialog.ts` | 모든 쪽을 `renderPageSvg(i)`로 숨은 루트에 그린 뒤 `@media print`로 인쇄하고, 5쪽마다 양보 | `print_webview` 명령 대신 iframe의 `window.print()` |
+| `apps/studio-host/src/ui/print-dialog.ts` | 모든 쪽을 `renderPageSvg(i)`로 숨은 루트에 그린 뒤 `@media print`로 인쇄하고, 5쪽마다 양보 | 셸 창에서 `print_webview` 명령(PD-139; `--serve`는 `window.print()`) |
 | `apps/desktop/src-tauri/src/state.rs` | `DocumentSession{source_fingerprint{len,modified_millis,content_hash}, dirty, revision}`, `NamedTempFile::new_in(parent)` → `write_all` → `sync_all` → `persist` | EasyOffice `save_file.rs`의 원자적 쓰기를 유지하고, 외부 변경 지문만 추가 |
 | `apps/desktop/src-tauri/src/{pending_open.rs,windows.rs,lib.rs}` | `tauri-plugin-single-instance`의 argv → 열기 큐, 창별 큐 | 다중 창은 PD-088(#132)에서 구현: 창별 대기 큐는 경로 대신 바이트·이름만 담는다 |
 | `apps/desktop/src-tauri/src/pdf_export.rs` + `apps/desktop/rhwp-adapter` | 네이티브 rhwp `render_page_svg_native` → `svgs_to_pdf_with_options`(검색 가능 PDF), 저장 전 재파싱 검증 | 6단계 이후 선택 사항(툴체인 1.93.1 필요) |

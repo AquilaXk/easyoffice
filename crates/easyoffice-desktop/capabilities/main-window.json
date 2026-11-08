@@ -30,6 +30,7 @@
     "allow-end-close-prompt",
     "allow-ack-close-prompt",
     "allow-confirm-dialog",
-    "allow-confirm-close"
+    "allow-confirm-close",
+    "allow-print-webview"
   ]
 }

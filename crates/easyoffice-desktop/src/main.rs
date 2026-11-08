@@ -21,6 +21,7 @@ mod pdf_pua;
 mod pdf_synthetic;
 mod pdf_tounicode;
 mod preview;
+mod print_webview;
 mod recent;
 mod save_error;
 mod save_file;
@@ -320,6 +321,7 @@ fn main() {
             window_commands::end_close_prompt,
             confirm_dialog::confirm_dialog,
             confirm_dialog::confirm_close,
+            print_webview::print_webview,
             window_commands::ack_close_prompt,
             window_commands::open_recent_document,
             preview::get_recent_preview,
@@ -456,7 +458,7 @@ mod tests {
         );
         assert_eq!(value["windows"], serde_json::json!(["main", "doc-*"]));
         assert_eq!(value["local"], serde_json::json!(true));
-        assert_eq!(app_commands::APP_COMMANDS.len(), 26);
+        assert_eq!(app_commands::APP_COMMANDS.len(), 27);
     }
 
     #[test]

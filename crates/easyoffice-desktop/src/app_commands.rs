@@ -30,4 +30,5 @@ pub const APP_COMMANDS: &[&str] = &[
     "ack_close_prompt",
     "confirm_dialog",
     "confirm_close",
+    "print_webview",
 ];

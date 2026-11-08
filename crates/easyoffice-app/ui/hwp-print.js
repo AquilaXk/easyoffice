@@ -7,8 +7,9 @@
   // the window. The approach follows the reference app's print dialog (all pages in a hidden root, one @page size
   // per paper size, a progress text), with a cancel button, a batch-by-batch fetch that never holds
   // every SVG string at once, and a hard budget for the text kept in the page. The window print
-  // dialog is the Web `print()`, which the desktop webview implements on every platform, so no shell
-  // command is needed. Every rule that depends on the pages goes through a constructed stylesheet
+  // dialog is the shell's `print_webview` command (PD-138): `window.print()` does nothing in the
+  // macOS webview, so the desktop shell prints the webview natively, as the reference app does; only
+  // `--serve` in a browser uses the Web `print()`. Every rule that depends on the pages goes through a constructed stylesheet
   // (no inline style element, no style attribute).
 
   const CAPABILITY = "print-pages-v1";
@@ -145,7 +146,8 @@
     const { document, hwpHost } = deps;
     const env = deps.env || host;
     const notify = typeof deps.notify === "function" ? deps.notify : () => {};
-    const printWindow = deps.print || (() => env.print());
+    const bridge = deps.desktopBridge;
+    const printWindow = deps.print || (() => (bridge?.isAvailable() ? bridge.windowCommand("printWebview") : env.print()));
     let job = null;
     let printed = null;
 
@@ -256,7 +258,8 @@
     }
 
     // The pages stay in the document until the print dialog is done (`afterprint`), with a late
-    // cleanup in case the webview never reports it.
+    // cleanup in case the webview never reports it. The native command returns when the dialog is
+    // requested, not when it is done, so the pages must outlive its answer.
     function scheduleCleanup() {
       let timer = null;
       const cleanup = () => {

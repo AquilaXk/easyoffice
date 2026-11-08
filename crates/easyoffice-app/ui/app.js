@@ -203,7 +203,7 @@
   });
 
   const hwpPrint = host.__EASYOFFICE_CREATE_HWP_PRINT__({
-    document, hwpHost, env: host, notify: (text) => setStatusFeedback(text),
+    document, hwpHost, env: host, notify: (text) => setStatusFeedback(text), desktopBridge,
   });
 
   hwpSession = host.__EASYOFFICE_CREATE_HWP_SESSION__({
