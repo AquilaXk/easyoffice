@@ -61,9 +61,9 @@ impl ConfirmKind {
             },
             Self::RestoreHwpAutosave => ConfirmSpec {
                 title: "자동 저장본 복원",
-                message: "이전 세션의 저장하지 않은 한글 문서의 자동 저장본이 있습니다. 복원할까요?\n복원하지 않으면 자동 저장본은 삭제됩니다.",
+                message: "이전 세션의 저장하지 않은 한글 문서의 자동 저장본이 있습니다. 복원할까요?\n복원하지 않으면 자동 저장본은 남겨 두고 다음에 다시 묻습니다.",
                 accept: "복원",
-                cancel: "복원 안 함",
+                cancel: "나중에",
             },
             Self::ReplaceUnsavedModule => ConfirmSpec {
                 title: "저장하지 않은 편집 내용",

@@ -77,6 +77,8 @@ function createFakeHost({ status = "ready", capabilities = ["verify-bytes-v1", "
   return { api, calls, state, setStatus, emit: (payload) => { for (const l of changeListeners) l({ type: "rhwp-event", payload }); } };
 }
 
+const loadWithConfirm = (confirmImpl) => load({ confirmImpl });
+
 function createDocument() {
   const byId = new Map();
   const tab = { dataset: { module: "HWP" }, textContent: "한글 문서" };
@@ -118,11 +120,11 @@ function load(options = {}) {
       const name = JSON.parse(payload).fileName;
       return { format: name.split(".").pop().toLowerCase() };
     },
-    confirm: options.noConfirm ? undefined : async (kind) => {
+    confirm: options.noConfirm ? undefined : options.confirmImpl || (async (kind) => {
       confirms.push(kind);
       if (options.confirmThrows) throw new Error("확인 창을 열지 못했습니다");
       return answers.length > 0 ? answers.shift() : true;
-    },
+    }),
     onDirtyChange: (d) => dirtyLog.push(d),
     resolveBaseName: () => "보고서",
     deliverSavedFile: options.deliver,
@@ -564,8 +566,41 @@ test("a confirmation that cannot be shown counts as no, and keeps the autosaved 
   assert.equal(restore.env.indexedDB.stores.records.size, 1, "the recovery copy is not deleted when the question could not be asked");
   const declined = load({ confirmAnswers: [false] });
   seedRecord(declined);
-  await declined.session.restore();
-  assert.equal(declined.env.indexedDB.stores.records.size, 0, "a real no deletes it");
+  assert.equal((await declined.session.restore()).restored, false);
+  assert.equal(declined.env.indexedDB.stores.records.size, 1, "a no cannot be told from a closed dialog, so the copy stays");
+  assert.match(feedbackOf(declined), /자동 저장본은 남겨 두었습니다/);
+});
+
+test("while a confirmation is up the session is busy: no second open and no autosave", async () => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const answers = [];
+  const waiting = loadWithConfirm(async (kind) => { answers.push(kind); await gate; return true; });
+  waiting.fake.emit({ reason: "dirty_changed", dirty: true });
+  const first = waiting.session.openFromBytes("a.hwp", hwpBytes());
+  await delay(5);
+  const second = await waiting.session.openFromBytes("b.hwp", hwpBytes());
+  assert.equal(second.ok, false);
+  assert.match(second.error, /다른 문서를 여는 중/);
+  waiting.fake.emit({ reason: "edited" });
+  await delay(80);
+  assert.equal(waiting.fake.calls.some((c) => c.method === "exportHwp"), false, "no autosave under the dialog");
+  release();
+  assert.equal((await first).ok, true);
+  assert.deepEqual(answers, ["replace-unsaved-hwp"]);
+});
+
+test("restore: an accepted restore is dropped when the window was torn down while the question was up", async () => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const ctx = loadWithConfirm(async () => { await gate; return true; });
+  seedRecord(ctx);
+  const pending = ctx.session.restore();
+  await delay(5);
+  ctx.session.discardAutosave();
+  release();
+  assert.equal((await pending).restored, false);
+  assert.equal(ctx.fake.calls.some((c) => c.method === "loadFile"), false);
 });
 
 // ---- dirty state and autosave -----------------------------------------------------------
@@ -672,11 +707,11 @@ test("restore: corrupted records are ignored and deleted (bad shape, wrong type,
   assert.match(feedbackOf(rejected), /올바른 형식이 아니어서 무시/);
 });
 
-test("restore: declining deletes the record, no record is a no-op, stale foreign records are purged", async () => {
+test("restore: declining keeps the record, no record is a no-op, stale foreign records are purged", async () => {
   const declined = load({ confirmAnswers: [false] });
   seedRecord(declined);
   assert.equal((await declined.session.restore()).restored, false);
-  assert.equal(declined.env.indexedDB.stores.records.size, 0);
+  assert.equal(declined.env.indexedDB.stores.records.size, 1);
   assert.equal(declined.fake.calls.length, 0);
 
   const none = load();

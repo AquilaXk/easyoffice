@@ -388,12 +388,18 @@
         feedback("파일 열기 실패: " + name + " — " + describeError(err));
         return { ok: false, error: describeError(err) };
       }
-      if (dirty && (await ask("replace-unsaved-hwp")) !== true) {
-        feedback("파일 열기를 취소했습니다 (" + name + ")");
-        return { ok: false, cancelled: true };
+      // `busy` is on before the question, so the autosave and a second open leave the editor alone
+      // while the native dialog is up; the answer is applied only if the window is still in use.
+      if (busy) {
+        feedback("파일 열기 실패: 다른 문서를 여는 중입니다 (" + name + ")");
+        return { ok: false, error: "다른 문서를 여는 중입니다" };
       }
       busy = true;
       try {
+        if (dirty && ((await ask("replace-unsaved-hwp")) !== true || discarded)) {
+          feedback("파일 열기를 취소했습니다 (" + name + ")");
+          return { ok: false, cancelled: true };
+        }
         return await openChecked(name, data, format, hooks);
       } finally {
         busy = false;
@@ -571,12 +577,16 @@
       } catch {
         return discardRecord("자동 저장된 한글 문서가 올바른 형식이 아니어서 무시했습니다");
       }
-      const restoreAnswer = await ask("restore-hwp-autosave");
-      // A question that could not be asked keeps the recovery copy for the next start.
-      if (restoreAnswer === null) return { restored: false };
-      if (!restoreAnswer) return discardRecord("자동 저장된 한글 문서를 복원하지 않고 삭제했습니다");
       busy = true;
       try {
+        // The native dialog cannot tell "복원 안 함" from a closed dialog or no dialog at all, so
+        // nothing but an accepted restore touches the recovery copy: it stays for the next start.
+        if ((await ask("restore-hwp-autosave")) !== true) {
+          feedback("자동 저장된 한글 문서를 복원하지 않았습니다. 자동 저장본은 남겨 두었습니다");
+          return { restored: false };
+        }
+        // Edits or a newly opened document made while the question was up are not overwritten.
+        if (discarded || dirty || current) return { restored: false };
         if (await ensureEditor()) return { restored: false };
         await loadIntoEditor(rec.fileName, data, rec.format);
         current = { name: rec.fileName, saveFormat: rec.format };
