@@ -1,7 +1,7 @@
 //! Pages picture import. A picture drawable (`TSD.ImageArchive`) references a data identifier;
 //! the package metadata maps identifiers to file names and the file lives under `Data/`.
-//! Only PNG and JPEG data are imported; other data stays in place as a placeholder paragraph and
-//! is reported, and damaged pictures are skipped with a warning.
+//! Only PNG and JPEG data are imported; anything else (other formats, damaged data) is skipped and
+//! reported, never replaced by text in the body.
 
 use std::collections::HashMap;
 
@@ -10,16 +10,15 @@ use crate::pages_schema::{data_info, drawable, geometry, image, package_metadata
 use crate::rich_image::truncate_alt;
 use crate::rich_image_probe::sniff_format;
 use crate::{
-    EasyOfficeError, RichImage, IMAGE_PLACEHOLDER_TEXT, MAX_IMAGES_PER_DOCUMENT, MAX_IMAGE_BYTES,
-    MAX_TOTAL_IMAGE_BYTES,
+    EasyOfficeError, RichImage, MAX_IMAGES_PER_DOCUMENT, MAX_IMAGE_BYTES, MAX_TOTAL_IMAGE_BYTES,
 };
 
 const DATA_DIR: &str = "Data/";
 /// Points to EMU (12,700 per point).
 const EMU_PER_POINT: f32 = 12_700.0;
 
-/// Warning kind for data that is not PNG or JPEG (the picture stays as a placeholder).
-pub(crate) const UNSUPPORTED_FORMAT: &str = "지원하지 않는 형식의 그림";
+/// Warning kind for data that is not PNG or JPEG.
+const UNSUPPORTED_FORMAT: &str = "지원하지 않는 형식의 그림";
 /// Warning kind for a picture with a crop mask (imported whole).
 pub(crate) const CROPPED: &str = "자른 그림(전체 그림으로 가져옴)";
 
@@ -30,8 +29,6 @@ pub(crate) enum PageImage {
         /// The drawable has a crop mask, which the rich model cannot express.
         cropped: bool,
     },
-    /// Data is present but not PNG or JPEG; `text` stands in at the anchor.
-    Unsupported { text: String },
     /// Skipped; the text names the reason for the warning list.
     Skipped(&'static str),
 }
@@ -88,16 +85,10 @@ impl<'a> PageImages<'a> {
                 "Pages 그림이 문서당 한도(개수·합계 크기)를 넘었습니다.".to_string(),
             ));
         }
-        let alt = description(&msg);
         if sniff_format(bytes).is_none() {
-            let text = if alt.is_empty() {
-                IMAGE_PLACEHOLDER_TEXT.to_string()
-            } else {
-                alt
-            };
-            return Ok(PageImage::Unsupported { text });
+            return Ok(PageImage::Skipped(UNSUPPORTED_FORMAT));
         }
-        let Ok(mut image) = RichImage::new(bytes.clone(), alt) else {
+        let Ok(mut image) = RichImage::new(bytes.clone(), description(&msg)) else {
             return Ok(PageImage::Skipped("손상되었거나 한도를 넘은 PNG·JPEG 그림"));
         };
         if let Some((w, h)) = display_size_emu(&msg) {

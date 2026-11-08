@@ -3,8 +3,8 @@
 //! Everything that depends on Apple's object schema lives in [`crate::pages_schema`]; table
 //! cells are decoded by [`crate::pages_table`].
 //!
-//! Pictures (PNG/JPEG) are imported as image blocks (other picture data as a placeholder
-//! paragraph), shape and text-box text at its anchor, and footnotes, headers and footers as
+//! Pictures (PNG/JPEG) are imported as image blocks (other picture data is reported, not
+//! mixed into the text), shape and text-box text at its anchor, and footnotes, headers and footers as
 //! appendix paragraphs. Unsupported elements (comments, page-floating drawables, unreadable cell
 //! values) are skipped and reported as warnings with kinds and counts; legacy
 //! XML and encrypted packages are refused by [`crate::pages_package::load_package`].
@@ -21,7 +21,7 @@ use crate::pages_schema::{list_type, para_props, root};
 use crate::pages_schema::{storage, style, ty};
 use crate::pages_schema::{CharPropFields, COLOR_RGBA};
 use crate::pages_table::{read_table, TableBudget, TableOutcome};
-use crate::rich_read_pages_image::{PageImage, PageImages, CROPPED, UNSUPPORTED_FORMAT};
+use crate::rich_read_pages_image::{PageImage, PageImages, CROPPED};
 use crate::{
     EasyOfficeError, RichAlignment, RichBlock, RichDocument, RichListKind, RichParagraph, RichRun,
     RichScript,
@@ -567,13 +567,6 @@ impl<'a> Reader<'a> {
                     self.skip(CROPPED);
                 }
                 Ok(Some(RichBlock::Image(image)))
-            }
-            PageImage::Unsupported { text } => {
-                self.skip(UNSUPPORTED_FORMAT);
-                Ok(Some(RichBlock::Paragraph(RichParagraph {
-                    runs: vec![RichRun::plain(text)],
-                    ..RichParagraph::default()
-                })))
             }
             PageImage::Skipped(why) => {
                 self.skip(why);

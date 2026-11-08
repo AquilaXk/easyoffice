@@ -6,7 +6,7 @@ mod pages_fixture;
 
 use easyoffice_formats::{
     DecodedContent, DocumentFormat, EasyOfficeError, RichBlock, RichDocument, RichImage,
-    UniversalFormatConverter, IMAGE_PLACEHOLDER_TEXT, MAX_IMAGES_PER_DOCUMENT, MAX_IMAGE_BYTES,
+    UniversalFormatConverter, MAX_IMAGES_PER_DOCUMENT, MAX_IMAGE_BYTES,
 };
 use image_fixture::{make_jpeg, make_png, png_chunk, PNG_SIGNATURE};
 use pages_fixture::*;
@@ -216,36 +216,32 @@ fn nonsense_geometry_falls_back_to_the_pixel_size() {
 }
 
 #[test]
-fn unsupported_format_becomes_a_placeholder_paragraph_at_its_position() {
-    let gif = b"GIF89a\x01\x00\x01\x00\x00\x00\x00;".to_vec();
-    let (doc, warnings) = open(&one_picture_zip(gif, &Picture::default())).expect("opens");
-    assert!(images(&doc).is_empty());
-    assert_eq!(
-        paragraph_texts(&doc),
-        vec!["앞", IMAGE_PLACEHOLDER_TEXT, "뒤"]
-    );
-    assert!(
-        warned(&warnings, "지원하지 않는 형식의 그림 1개"),
-        "{warnings:?}"
-    );
+fn unsupported_format_is_reported_without_text_in_the_body() {
+    let samples: [Vec<u8>; 2] = [
+        b"GIF89a\x01\x00\x01\x00\x00\x00\x00;".to_vec(),
+        b"II*\x00\x08\x00\x00\x00".to_vec(),
+    ];
+    for bytes in samples {
+        // A description must not leak into the body either.
+        let zip = one_picture_zip(
+            bytes,
+            &Picture {
+                alt: Some("분기 매출 표"),
+                ..Picture::default()
+            },
+        );
+        let (doc, warnings) = open(&zip).expect("opens");
+        assert!(images(&doc).is_empty());
+        assert_eq!(paragraph_texts(&doc), vec!["앞", "뒤"]);
+        assert!(
+            warned(&warnings, "지원하지 않는 형식의 그림 1개"),
+            "{warnings:?}"
+        );
+    }
 }
 
 #[test]
-fn unsupported_format_placeholder_prefers_the_description() {
-    let tiff = b"II*\x00\x08\x00\x00\x00".to_vec();
-    let zip = one_picture_zip(
-        tiff,
-        &Picture {
-            alt: Some("분기 매출 표"),
-            ..Picture::default()
-        },
-    );
-    let (doc, _) = open(&zip).expect("opens");
-    assert_eq!(paragraph_texts(&doc), vec!["앞", "분기 매출 표", "뒤"]);
-}
-
-#[test]
-fn damaged_pictures_are_skipped_with_a_warning_not_placeholders() {
+fn damaged_pictures_are_skipped_with_a_warning() {
     let png = make_png(8, 4, 2, 3);
     let mut flipped = png.clone();
     let mid = flipped.len() / 2;
@@ -262,7 +258,7 @@ fn damaged_pictures_are_skipped_with_a_warning_not_placeholders() {
 
     let mut cases: Vec<Vec<u8>> = vec![flipped, huge_dims, PNG_SIGNATURE.to_vec()];
     // Every truncation point of a valid PNG and JPEG that still carries the magic bytes (a
-    // shorter prefix is indistinguishable from unsupported data and gets the placeholder).
+    // shorter prefix reads as unsupported data and gets the other warning).
     for (full, magic) in [(png, PNG_SIGNATURE.len()), (make_jpeg(6, 3), 3)] {
         for cut in magic..full.len() {
             cases.push(full[..cut].to_vec());
