@@ -144,6 +144,10 @@ jobs:
           test "$(plutil -extract LSMinimumSystemVersion raw "$PLIST")" = "11.0"
           # The MIT notice condition: the third-party notices travel inside the app.
           test -f "$APP/Contents/Resources/THIRD_PARTY_NOTICES.md" || { echo "missing THIRD_PARTY_NOTICES.md in the app"; exit 1; }
+          # The PDF export font (PD-114): without it Korean text is lost on a machine with no Korean font.
+          for font in NotoSansKR-Regular.ttf NotoSansKR-OFL.txt; do
+            test -f "$APP/Contents/Resources/pdf-fonts/$font" || { echo "missing pdf-fonts/$font in the app"; exit 1; }
+          done
           DMGS=(target/release/bundle/dmg/EasyOffice_*.dmg)
           test "${#DMGS[@]}" -eq 1 && test -f "${DMGS[0]}" || { echo "expected exactly one EasyOffice .dmg"; exit 1; }
           DMG_BYTES=$(stat -f%z "${DMGS[0]}")
@@ -374,6 +378,11 @@ jobs:
           $listing = & 7z l $installers[0].FullName
           if (-not ($listing | Select-String -SimpleMatch "THIRD_PARTY_NOTICES.md")) {
             throw "THIRD_PARTY_NOTICES.md is missing from the NSIS installer"
+          }
+          foreach ($font in @("NotoSansKR-Regular.ttf", "NotoSansKR-OFL.txt")) {
+            if (-not ($listing | Select-String -SimpleMatch $font)) {
+              throw "$font (PDF export font) is missing from the NSIS installer"
+            }
           }
 
       - name: Smoke test desktop shell window (embedded WebUI, IPC round trip and HWP editor round trip)

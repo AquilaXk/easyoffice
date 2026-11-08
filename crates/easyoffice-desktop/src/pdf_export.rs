@@ -98,7 +98,8 @@ impl Drop for NestedLevel {
 /// hold a bitmap into blanks; the page and its sub-SVGs both come from the editor, so the
 /// sub-SVG is parsed with the same options. Ported from rhwp `pdf_image_href_resolver` (rhwp
 /// 0.8.7, `src/renderer/pdf.rs` lines 1188-1205; MIT), with the nesting bound added because that
-/// version recurses as deep as the data does. Other pictures go to usvg's default resolver.
+/// version recurses as deep as the data does. Other data pictures go to usvg's default resolver;
+/// path and `file:` hrefs are ignored, in the page and in nested SVGs alike.
 fn image_href_resolver() -> usvg::ImageHrefResolver<'static> {
     let default_data = usvg::ImageHrefResolver::default_data_resolver();
     usvg::ImageHrefResolver {
@@ -111,7 +112,9 @@ fn image_href_resolver() -> usvg::ImageHrefResolver<'static> {
             }
             _ => default_data(mime, data, options),
         }),
-        resolve_string: usvg::ImageHrefResolver::default_string_resolver(),
+        // A page SVG is untrusted text: a path or `file:` href must never make the export read a
+        // file (usvg's default would). The editor embeds every picture as a data URL.
+        resolve_string: Box::new(|_, _| None),
     }
 }
 
@@ -710,6 +713,86 @@ mod tests {
             &Arc::new(Database::new()),
         );
         assert!(pdf.is_ok());
+    }
+
+    fn image_count(group: &usvg::Group) -> usize {
+        group
+            .children()
+            .iter()
+            .map(|node| match node {
+                usvg::Node::Group(inner) => image_count(inner),
+                usvg::Node::Image(image) => match image.kind() {
+                    usvg::ImageKind::SVG(tree) => 1 + image_count(tree.root()),
+                    _ => 1,
+                },
+                _ => 0,
+            })
+            .sum()
+    }
+
+    /// A page must not make the export read files: path, relative and `file:` hrefs are ignored, at
+    /// the top level and inside a nested SVG. The same SVG with usvg's own options does load the file,
+    /// so the test would notice a resolver that lets paths through.
+    #[test]
+    fn path_and_file_hrefs_are_ignored_in_pages_and_nested_svgs() {
+        const PNG: [u8; 67] = [
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0x0D, 0x49, 0x48, 0x44, 0x52,
+            0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 0x1F, 0x15, 0xC4, 0x89, 0, 0, 0, 0x0D, 0x49,
+            0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0, 1, 0, 0, 5, 0, 1, 0x0D, 0x0A, 0x2D, 0xB4, 0, 0,
+            0, 0, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+        ];
+        let dir = std::env::temp_dir().join(format!("easyoffice-href-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let file = dir.join("x.png");
+        std::fs::write(&file, PNG).expect("png");
+        let path = file.to_str().expect("utf-8 path").to_string();
+        let page = |href: &str| {
+            format!(
+                r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="8" height="8"><image width="8" height="8" xlink:href="{href}"/></svg>"#
+            )
+        };
+        let nested = |href: &str| {
+            format!(
+                r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="8" height="8"><image width="8" height="8" xlink:href="data:image/svg+xml;base64,{}"/></svg>"#,
+                base64(page(href).as_bytes())
+            )
+        };
+        let hrefs = [
+            path.clone(),
+            format!("file://{path}"),
+            "/etc/passwd".to_string(),
+            "../x.png".to_string(),
+            "x.png".to_string(),
+        ];
+        let stock = usvg::Options {
+            resources_dir: Some(dir.clone()),
+            ..usvg::Options::default()
+        };
+        let ours = usvg::Options {
+            resources_dir: Some(dir.clone()),
+            ..parse_options(&Arc::new(Database::new()))
+        };
+        let count = |svg: &str, options: &usvg::Options| {
+            image_count(
+                usvg::Tree::from_data(svg.as_bytes(), options)
+                    .expect("tree")
+                    .root(),
+            )
+        };
+        assert_eq!(
+            count(&page(&path), &stock),
+            1,
+            "control: usvg reads a file path"
+        );
+        for href in &hrefs {
+            assert_eq!(count(&page(href), &ours), 0, "page: {href}");
+            assert_eq!(
+                count(&nested(href), &ours),
+                1,
+                "nested: only the data URL itself, {href}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

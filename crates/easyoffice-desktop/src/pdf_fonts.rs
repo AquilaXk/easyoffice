@@ -228,12 +228,19 @@ pub(crate) mod tests {
     use super::*;
     use std::path::Path;
 
-    /// The bundled face, when the rhwp checkout that holds it is present (CI jobs that build the
-    /// desktop shell check it out; `tauri.conf.json` ships it as `pdf-fonts/`).
+    /// The bundled face, when the rhwp checkout that holds it is present. The CI jobs that build the
+    /// desktop shell check it out (`tauri.conf.json` ships it as `pdf-fonts/`), so there a missing
+    /// file fails the test; elsewhere (`CI` unset) the tests that need it are skipped.
     pub(crate) fn bundled_font_dir() -> Option<PathBuf> {
         let dir =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../../third_party/rhwp/ttfs/opensource");
-        dir.join("NotoSansKR-Regular.ttf").is_file().then_some(dir)
+        let found = dir.join("NotoSansKR-Regular.ttf").is_file();
+        assert!(
+            found || std::env::var_os("CI").is_none(),
+            "CI must have the bundled font {}: run scripts/checkout-rhwp.mjs",
+            dir.display()
+        );
+        found.then_some(dir)
     }
 
     #[test]

@@ -7,6 +7,7 @@ import {
   LINUX_DESKTOP_TEMPLATE,
   LINUX_RPM_DEPENDS,
   NOTICES_FILE,
+  PDF_FONT_FILES,
   REQUIRED_ASSOCIATIONS,
   REQUIRED_MIME_TYPES,
 } from "./desktop-file-associations.mjs";
@@ -78,6 +79,16 @@ test("a missing MIME type on a file association is reported", () => {
   const problems = checkDesktopBundleConfig(conf).join("\n");
   assert.match(problems, /'\.docx' must declare mimeType application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.document/);
   assert.match(problems, /'\.pdf' must declare mimeType application\/pdf/);
+});
+
+test("the PDF export font and its license must be shipped as bundle resources", () => {
+  const conf = load();
+  for (const installed of PDF_FONT_FILES) {
+    assert.ok(Object.values(conf.bundle.resources).includes(installed), installed);
+  }
+  const key = Object.keys(conf.bundle.resources).find((source) => source.endsWith("NotoSansKR-Regular.ttf"));
+  delete conf.bundle.resources[key];
+  assert.match(checkDesktopBundleConfig(conf).join("\n"), /bundle\.resources must ship 'pdf-fonts\/NotoSansKR-Regular\.ttf'/);
 });
 
 test("the third-party notice file must be shipped as a bundle resource", () => {

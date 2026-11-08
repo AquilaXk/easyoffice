@@ -8,7 +8,8 @@
  *   - rpm: architecture, requirements, the file list and the `.desktop` file's SHA-256 from the rpm's own
  *     file digests: the deb is built from the same template, so its already checked entry must hash the same.
  *     (The payload is not unpacked: `rpm2cpio` exits without a message on the Tauri-built rpm on the runner.)
- * Every package must carry the binary, a `.desktop` file and THIRD_PARTY_NOTICES.md (MIT notice condition);
+ * Every package must carry the binary, a `.desktop` file, THIRD_PARTY_NOTICES.md (MIT notice condition) and
+ * the PDF export font with its license (`pdf-fonts/`, PD-114);
  * the `.desktop` file must be in the Office menu category, pass the opened files to the app and list the
  * MIME type of every document format the app registers.
  *
@@ -35,6 +36,7 @@ import {
   LINUX_DESKTOP_CATEGORY,
   LINUX_RPM_DEPENDS,
   NOTICES_FILE,
+  PDF_FONT_FILES,
   REQUIRED_MIME_TYPES,
 } from "./desktop-file-associations.mjs";
 import { locateBundles } from "./release-assets.mjs";
@@ -148,6 +150,9 @@ export function checkPayload(paths) {
   if (!files.includes(MAIN_BINARY)) problems.push(`the package must contain ${MAIN_BINARY}`);
   if (!files.some((file) => file.endsWith(`/${NOTICES_FILE}`))) problems.push(`the package must contain ${NOTICES_FILE}`);
   if (!files.some((file) => file.endsWith(".desktop"))) problems.push("the package must contain a .desktop file");
+  for (const font of PDF_FONT_FILES) {
+    if (!files.some((file) => file.endsWith(`/${font}`))) problems.push(`the package must contain ${font} (PDF export font)`);
+  }
   return problems;
 }
 

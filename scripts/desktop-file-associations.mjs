@@ -56,6 +56,13 @@ export const LINUX_DESKTOP_TEMPLATE = "./linux/easyoffice.desktop";
 export const NOTICES_FILE = "THIRD_PARTY_NOTICES.md";
 const NOTICES_SOURCE = `../../${NOTICES_FILE}`;
 
+/**
+ * The PDF export fonts every package must carry (PD-114): the bundled Korean face and its license, as
+ * installed paths under the resource folder and where the config reads them from (the rhwp checkout).
+ */
+export const PDF_FONT_FILES = ["pdf-fonts/NotoSansKR-Regular.ttf", "pdf-fonts/NotoSansKR-OFL.txt"];
+const PDF_FONT_SOURCE_DIR = "../../third_party/rhwp/ttfs/opensource/";
+
 /** The XDG menu category the `.desktop` file must carry (Tauri maps `bundle.category` Productivity to it). */
 export const LINUX_DESKTOP_CATEGORY = "Office";
 
@@ -114,6 +121,12 @@ function checkLinuxSettings(bundle) {
   }
   if (bundle.resources?.[NOTICES_SOURCE] !== NOTICES_FILE) {
     problems.push(`bundle.resources must ship '${NOTICES_FILE}' (map '${NOTICES_SOURCE}' to '${NOTICES_FILE}', MIT notice condition)`);
+  }
+  for (const installed of PDF_FONT_FILES) {
+    const source = `${PDF_FONT_SOURCE_DIR}${installed.split("/").pop()}`;
+    if (bundle.resources?.[source] !== installed) {
+      problems.push(`bundle.resources must ship '${installed}' (map '${source}' to '${installed}', PDF export font)`);
+    }
   }
   return problems;
 }

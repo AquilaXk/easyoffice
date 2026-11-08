@@ -171,8 +171,12 @@ jobs:
             exit 1
           fi
 
-      - name: Verify the third-party notices are inside the app
-        run: test -f target/universal-apple-darwin/release/bundle/macos/EasyOffice.app/Contents/Resources/THIRD_PARTY_NOTICES.md
+      - name: Verify the third-party notices and the PDF export font are inside the app
+        run: |
+          RES=target/universal-apple-darwin/release/bundle/macos/EasyOffice.app/Contents/Resources
+          test -f "$RES/THIRD_PARTY_NOTICES.md"
+          test -f "$RES/pdf-fonts/NotoSansKR-Regular.ttf"
+          test -f "$RES/pdf-fonts/NotoSansKR-OFL.txt"
 
       - name: Stage the macOS .dmg and the signed updater archive under their fixed names
         run: node scripts/release-assets.mjs stage macos-universal dist
@@ -226,9 +230,13 @@ jobs:
           }
 
       # 7-Zip lists the files inside an NSIS installer without running it.
-      - name: Verify the third-party notices are inside the installer
+      - name: Verify the third-party notices and the PDF export font are inside the installer
         shell: bash
-        run: 7z l target/release/bundle/nsis/EasyOffice_*_x64-setup.exe | grep -F THIRD_PARTY_NOTICES.md
+        run: |
+          LISTING="$(7z l target/release/bundle/nsis/EasyOffice_*_x64-setup.exe)"
+          for file in THIRD_PARTY_NOTICES.md NotoSansKR-Regular.ttf NotoSansKR-OFL.txt; do
+            grep -qF "$file" <<<"$LISTING" || { echo "$file is missing from the NSIS installer"; exit 1; }
+          done
 
       - name: Stage the Windows installer and its signature under their fixed names
         shell: bash
