@@ -108,14 +108,14 @@ macOS, Windows, Linux 데스크톱 환경에서 동일한 문서 포맷 검증, 
 
 ---
 
-## 4. macOS 및 Windows 릴리스 패키징 파이프라인 (`.github/workflows/release.yml`, PD-094)
+## 4. macOS·Windows·Linux 릴리스 패키징 파이프라인 (`.github/workflows/release.yml`, PD-094, PD-086)
 
-GitHub Release 발행 시 macOS(`release-macos`)와 Windows(`build-windows-release`) 병렬 파이프라인이 같은 Tauri 데스크톱 셸(`crates/easyoffice-desktop`)을 각 OS에서 번들링합니다.
-1. 두 작업 모두 위생 가드, WebUI 회귀 묶음, 편집기 번들(`checkout-rhwp.mjs`, `build-hwp-studio.mjs`) 빌드, Rust 테스트·자체 시험을 먼저 실행합니다.
-2. Windows는 `npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --bundles nsis`로 NSIS 설치 프로그램을, macOS는 `rustup target add aarch64-apple-darwin x86_64-apple-darwin` 뒤 `build --target universal-apple-darwin --bundles app,dmg`로 유니버설 `.app`과 `.dmg`를 만듭니다. 릴리스 버전은 `--config`로 번들 버전을 덮어써 자산 이름·메타데이터·태그가 일치합니다.
-3. macOS 번들은 Apple Developer ID 없이 ad-hoc 서명(`APPLE_SIGNING_IDENTITY` 시크릿이 없으면 `-`)만 하며 공증하지 않습니다. 파일 연결(`CFBundleDocumentTypes`)과 최소 시스템 버전은 `tauri.conf.json`에서 오고, `scripts/desktop-file-associations.mjs`가 정적으로 검사합니다. 처음 실행 방법은 README에 있습니다.
-4. 두 작업 모두 빌드한 실행 파일을 `--smoke`로 실행해 임베드된 WebUI·IPC·한글 편집기 왕복을 확인합니다(macOS는 저장소 변수 `MACOS_SMOKE=off`로 건너뛸 수 있음).
-5. 자산 `EasyOffice-<version>-macos-universal.dmg`, `SHA256SUMS-macos-universal.txt`, `EasyOffice-<version>-windows-x64-setup.exe`, `SHA256SUMS-windows-x64.txt`를 빌드 대상 커밋 SHA(`--target`)에 고정하여 GitHub Release 자산으로 업로드합니다. `--serve` 개발용 CLI는 배포하지 않습니다(PD-086).
+릴리스 발행 시 `prepare`(버전·태그·드래프트 결정, 태그와 워크스페이스 버전 검사)가 먼저 돌고, macOS(`release-macos`)·Windows(`build-windows-release`)·Linux(`build-linux-release`: x64와 arm64 매트릭스) 빌드가 병렬로 같은 Tauri 데스크톱 셸(`crates/easyoffice-desktop`)을 각 OS에서 번들링합니다.
+1. 모든 빌드 잡은 공용 composite action `prepare-desktop-build`로 위생 가드, 번들 계약·WebUI 회귀 묶음, 편집기 번들(`checkout-rhwp.mjs`, `build-hwp-studio.mjs`) 빌드, Rust 테스트·자체 시험을 먼저 실행합니다. Linux는 그 앞에 `install-linux-deps`(WebKitGTK 4.1, GTK 3, libxdo, 패키징 도구)를 실행합니다.
+2. Windows는 `npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --bundles nsis`로 NSIS 설치 프로그램을, macOS는 `rustup target add aarch64-apple-darwin x86_64-apple-darwin` 뒤 `build --target universal-apple-darwin --bundles app,dmg`로 유니버설 `.app`과 `.dmg`를, Linux x64는 `--bundles appimage,deb,rpm`, arm64는 `--bundles deb`로 패키지를 만듭니다. `--bundles` 값은 `scripts/release-assets.mjs bundles <플랫폼>`이 알려 주며 릴리스 버전은 `--config`로 번들 버전을 덮어씁니다.
+3. macOS 번들은 Apple Developer ID 없이 ad-hoc 서명(`APPLE_SIGNING_IDENTITY` 시크릿이 없으면 `-`)만 하며 공증하지 않습니다. 파일 연결(`CFBundleDocumentTypes`, Linux `.desktop`의 `MimeType=`)과 최소 시스템 버전, Linux 패키지 의존성, 고지 파일 리소스는 `tauri.conf.json`에서 오고, `scripts/desktop-file-associations.mjs`가 정적으로 검사합니다. 처음 실행 방법은 README에 있습니다.
+4. macOS·Windows 잡은 빌드한 실행 파일을 `--smoke`로 실행해 임베드된 WebUI·IPC·한글 편집기 왕복을 확인합니다(macOS는 저장소 변수 `MACOS_SMOKE=off`로 건너뛸 수 있음). Linux 잡은 GUI를 실행하지 않고 `scripts/verify-linux-bundles.mjs`로 AppImage 추출, deb·rpm 메타데이터, `.desktop`, 고지 파일을 확인합니다. 세 OS 모두 산출물 안에 `THIRD_PARTY_NOTICES.md`가 있는지 확인합니다.
+5. 각 잡은 `scripts/release-assets.mjs stage`로 고정 파일명(`EasyOffice-macos-universal.dmg`, `EasyOffice-windows-x64-setup.exe`, `EasyOffice-linux-x64.AppImage`·`.deb`·`.rpm`, `EasyOffice-linux-arm64.deb`)을 `dist/`에 두어 아티팩트로 올립니다. 발행 잡(`publish-release`)은 이를 모아 정확히 이 6개가 있는지 확인하고 합친 `SHA256SUMS.txt`를 만든 뒤, 빌드 대상 커밋 SHA(`--target`)에 고정하여 GitHub Release에 올립니다. 기본은 드래프트이고 QA가 확인한 뒤 공개합니다(`/releases/latest`와 업데이트 알림은 공개된 뒤에만 새 릴리스를 봄, PD-086, PD-103). `--serve` 개발용 CLI는 배포하지 않습니다(PD-086).
 
 ---
 
