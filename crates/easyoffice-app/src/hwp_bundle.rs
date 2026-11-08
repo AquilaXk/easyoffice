@@ -21,6 +21,28 @@ const MAX_REL_LEN: usize = 160;
 /// no `unsafe-eval`. Only the app's own origin may embed the document.
 pub const STUDIO_CSP: &str = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' data: blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'self'";
 
+/// [`STUDIO_CSP`] with every `'self'` written as the explicit `origin` (`scheme://authority`).
+///
+/// The editor frame has an opaque origin (sandbox without `allow-same-origin`). Chromium still
+/// matches `'self'` against the document's URL there, but WebKit (macOS WKWebView) does not: it
+/// blocks every subresource of the frame before sending a request (measured in the desktop smoke,
+/// where not even `storage-shim.js` reached the app protocol). A host-source names the same origin
+/// without that dependency. Returns `None` for an origin that is not a plain `scheme://host[:port]`,
+/// so a value can never smuggle another directive into the header.
+pub fn studio_csp_for_origin(origin: &str) -> Option<String> {
+    let (scheme, authority) = origin.split_once("://")?;
+    let scheme_ok = !scheme.is_empty()
+        && scheme.starts_with(|c: char| c.is_ascii_lowercase())
+        && scheme
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '+' | '-' | '.'));
+    let authority_ok = !authority.is_empty()
+        && authority
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':'));
+    (scheme_ok && authority_ok).then(|| STUDIO_CSP.replace("'self'", origin))
+}
+
 /// Response header that lets the editor frame read its own files. The frame is sandboxed without
 /// `allow-same-origin`, so it has an opaque origin and its module scripts, WASM and fonts are
 /// cross-origin reads. The bundle is public static content; no other response carries this header.
@@ -189,6 +211,37 @@ pub fn embedded_integrity_error() -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn studio_csp_names_the_origin_instead_of_self_and_only_for_plain_origins() {
+        let csp = studio_csp_for_origin("tauri://localhost").unwrap();
+        assert_eq!(
+            csp,
+            "default-src tauri://localhost; script-src tauri://localhost 'wasm-unsafe-eval'; \
+             img-src tauri://localhost data: blob:; object-src 'none'; base-uri 'none'; \
+             frame-ancestors tauri://localhost"
+        );
+        assert_eq!(
+            studio_csp_for_origin("http://tauri.localhost").unwrap(),
+            STUDIO_CSP.replace("'self'", "http://tauri.localhost")
+        );
+        assert!(studio_csp_for_origin("http://127.0.0.1:8080").is_some());
+        for bad in [
+            "",
+            "localhost",
+            "://localhost",
+            "tauri://",
+            "tauri://localhost;script-src *",
+            "tauri://local host",
+            "tauri://localhost/x",
+            "Tauri://localhost",
+            "1tauri://localhost",
+            "tauri://localhost,*",
+        ] {
+            assert!(studio_csp_for_origin(bad).is_none(), "{bad:?}");
+        }
+        assert!(!csp.contains("connect-src") && !csp.contains("ipc") && !csp.contains("'unsafe-"));
+    }
 
     #[test]
     fn bundle_request_paths_are_recognised_after_decoding() {

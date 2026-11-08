@@ -400,6 +400,12 @@ test("editor frame: the window capability is local-only, global Tauri stays off 
   const studioCsp = readText("crates/easyoffice-app/src/hwp_bundle.rs").match(/STUDIO_CSP: &str = "([^"]+)"/)[1];
   assert.match(studioCsp, /^default-src 'self';/);
   assert.doesNotMatch(studioCsp, /connect-src|ipc|'unsafe-/);
+  // WebKit (macOS) does not match 'self' for the opaque-origin frame and blocks all its subresources:
+  // the desktop answers the editor document with the policy that spells the app origin out.
+  const studioFrame = readText("crates/easyoffice-desktop/src/studio_frame.rs");
+  assert.match(studioFrame, /CONTENT_SECURITY_POLICY, studio_csp_value\(request\)/);
+  assert.match(studioFrame, /studio_csp_for_origin\(&format!\("\{scheme\}:\/\/\{authority\}"\)\)/);
+  assert.match(readText("crates/easyoffice-app/src/hwp_bundle.rs"), /STUDIO_CSP\.replace\("'self'", origin\)/);
 });
 
 test("shell commands: only the desktop bridge calls the Tauri IPC, and it always sends the window token", () => {
