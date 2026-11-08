@@ -65,8 +65,12 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
   // Commands that still apply while the embedded HWP editor is the active surface.
   const HWP_EMBED_COMMANDS = new Set(["studio-save", "palette", "view-theme", "scrub-pii", "security-audit"]);
 
+  // The start window has no document: only the window-level commands apply.
+  const START_COMMANDS = new Set(["palette", "view-theme"]);
+
   function studioCommandApplies(cmd, mod) {
     if (!cmd || cmd.startsWith("module:")) return true;
+    if (mod === "START") return START_COMMANDS.has(cmd);
     if (mod === "HWP_EMBED") return HWP_EMBED_COMMANDS.has(cmd);
     return (STUDIO_COMMAND_MODULES[cmd] || DOC_MODULES).includes(mod);
   }
@@ -459,15 +463,16 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
 
     function applyModuleContext(mod) {
       const embed = mod === "HWP" && Boolean(getHwpHost?.()?.isEmbedActive());
-      const isDoc = DOC_MODULES.includes(mod) && !embed;
       // Only the editor's own toolbar is shown while it owns the HWP module (no duplicate chrome).
       const appShell = document.getElementById("app");
+      const start = appShell?.dataset.windowKind === "start";
+      const isDoc = DOC_MODULES.includes(mod) && !embed && !start;
       if (appShell) appShell.dataset.hwpEmbed = embed ? "true" : "false";
       for (const item of document.querySelectorAll("[data-hwp-save-as]")) item.hidden = !embed;
       for (const item of document.querySelectorAll("[data-save-as-generic]")) item.hidden = embed;
       const styleBar = document.getElementById("doc-style-bar");
       if (styleBar) styleBar.hidden = !isDoc;
-      const commandModule = embed ? "HWP_EMBED" : mod;
+      const commandModule = start ? "START" : embed ? "HWP_EMBED" : mod;
       syncToolbarButtons(mod, commandModule);
       syncToolbarGroupVisibility();
       for (const item of document.querySelectorAll(".md-item[data-studio-menu-cmd]")) {

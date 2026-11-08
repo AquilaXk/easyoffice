@@ -248,9 +248,10 @@
       render();
     }
 
-    // Puts the screen into the window (first child of the app shell) and draws its icons.
+    // Puts the screen into the window, between the menu bar and the status bar, and draws its icons.
     function mount(container) {
-      container.insertBefore(root, container.firstChild);
+      const menuBar = container.querySelector(":scope > #menu-bar");
+      container.insertBefore(root, menuBar ? menuBar.nextSibling : container.firstChild);
       host.__EASYOFFICE_ICONS__?.applyIcons(document, root);
       render();
     }

@@ -6,7 +6,11 @@
  * values and class names are unchanged except where noted. The screen is a flex child of the app
  * shell instead of an absolutely positioned layer, and the action buttons carry an icon. */
 
-.app-shell[data-window-kind="start"] > :not(#home-screen) { display: none; }
+/* The start window keeps the menu bar and the status bar (the reference app's start screen is a layer inside
+ * the editor window, so its menu, toolbar and status bar stay); the editing chrome and the zoom controls
+ * (nothing to zoom) are hidden. */
+.app-shell[data-window-kind="start"] > :not(#home-screen):not(#menu-bar):not(#status-bar) { display: none; }
+.app-shell[data-window-kind="start"] .statusbar-zoom-group { display: none; }
 .home-screen[hidden] { display: none; }
 
 .home-screen {

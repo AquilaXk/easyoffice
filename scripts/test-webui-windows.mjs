@@ -72,6 +72,19 @@ test("a window shows exactly one module and has no tab strip or module switcher"
   assert.equal(document.title, "제목 없음 — EasyOffice");
 });
 
+test("the start window keeps the menu bar and status bar around the start screen and grays document commands", async () => {
+  const { document } = await openWindow("?module=START&win=main");
+  const ids = Array.from(document.getElementById("app").children).map((el) => el.id).filter(Boolean);
+  assert.ok(ids.indexOf("menu-bar") < ids.indexOf("home-screen"), ids.join());
+  assert.ok(ids.indexOf("home-screen") < ids.indexOf("status-bar"), ids.join());
+  const grayed = (cmd) => document.querySelector(`.md-item[data-studio-menu-cmd="${cmd}"]`).getAttribute("aria-disabled");
+  for (const cmd of ["studio-save", "studio-undo", "clip-copy", "zoom-in", "layout-paper"]) assert.equal(grayed(cmd), "true", cmd);
+  for (const cmd of ["palette", "view-theme"]) assert.equal(grayed(cmd), "false", cmd);
+  assert.equal(document.getElementById("status-bar").querySelector(".statusbar-left-group").hidden, true);
+  const css = fs.readFileSync(new URL("../crates/easyoffice-app/ui/home.css", import.meta.url), "utf8");
+  assert.match(css, /\[data-window-kind="start"\] > :not\(#home-screen\):not\(#menu-bar\):not\(#status-bar\) \{ display: none; \}/);
+});
+
 test("each launch module opens its own pane", async () => {
   for (const [mod, pane] of [["DOC", "pane-doc"], ["SLIDE", "pane-slide"], ["PDF", "pane-pdf"], ["CONV", "pane-converter"]]) {
     const { document } = await openWindow(`?module=${mod}&win=w-${mod}`);
@@ -131,13 +144,14 @@ test("one page of recents hides the pagination controls", async () => {
   assert.equal(document.querySelector(".home-recent-pagination").hidden, true);
 });
 
-test("the home screen keeps the reference app's structure and is the only visible part of a start window", async () => {
+test("the home screen keeps the reference app's structure and is the only visible part of a start window besides the menu and status bars", async () => {
   const { document } = await openWindow("?module=START&win=main");
   const screen = document.getElementById("home-screen");
   assert.equal(screen.tagName, "SECTION");
   assert.equal(screen.getAttribute("aria-label"), "시작 화면");
   assert.equal(screen.parentElement.id, "app");
-  assert.equal(screen.parentElement.childNodes[0], screen, "the screen comes first in the shell");
+  const siblings = screen.parentElement.childNodes;
+  assert.equal(siblings[siblings.indexOf(screen) - 1].id, "menu-bar", "the screen sits right below the menu bar");
   assert.deepEqual(
     [".home-hero .home-title", ".home-hero .home-subtitle", ".home-hero .home-actions", ".home-recent .home-section-header .home-section-title", ".home-recent .home-recent-hint", ".home-recent .home-recent-track", ".home-drop-hint"].map((sel) => screen.querySelector(sel) !== null),
     new Array(7).fill(true)

@@ -906,6 +906,8 @@
     );
     workspaceSession.applyModuleContext(activeModule);
     await windowBridge.applyLaunch((mod) => ribbonHistory.activatePane(mod));
+    // The start window has no document: gray the menu items that need one.
+    if (windowBridge.isStart) workspaceSession.applyModuleContext(activeModule);
     windowBridge.bindStatusTooltips();
     hwpHost.onShortcut((combo) => handleForwardedShortcut(combo));
     const restoredRecord = await workspaceSession.restoreFromStorage().catch(() => null);
