@@ -47,11 +47,8 @@ EasyOffice/
 │   └── architecture.md                            # 시스템 아키텍처 문서
 └── .github/
     ├── release.yml                                # GitHub Release 노트 자동 분류 설정
-    ├── PULL_REQUEST_TEMPLATE.md                   # 자기완결 PR 표준 템플릿
-    ├── ISSUE_TEMPLATE/                            # Epic / Task / Bug 이슈 폼 템플릿
     └── workflows/
         ├── ci.yml                                 # Linux 공통 게이트(위생·WebUI·Rust fmt/clippy/test) + macOS 데스크톱 셸·.app·.dmg + Windows 엔진·데스크톱 셸·설치 프로그램, Rust 캐시 (PD-091)
-        ├── automerge.yml                          # automerge 라벨 기반 스쿼시 병합 및 이슈 자동 종료
         └── release.yml                            # macOS 유니버설 .dmg, Windows 설치 프로그램 및 개발자용 CLI 프리뷰 발행
 ```
 

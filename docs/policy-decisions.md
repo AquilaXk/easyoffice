@@ -121,6 +121,7 @@
 
 - **Status**: Implemented (`.github/PULL_REQUEST_TEMPLATE.md`, `.github/workflows/release.yml`, `.github/release.yml`)
 - **개정 (2026-11-08, QA 승인)**: 개인 프로젝트 수준으로 절차를 줄입니다. PR 템플릿은 요약·검증·미실행 세 칸만 두고(Class 등급·위험도·체크리스트 칸 삭제), 이슈 템플릿의 필수 항목을 없애고 빈 이슈를 허용합니다. 병합은 squash만 쓰고, `main` 병합 필수 체크는 `checks`·`verify`·`Verify Rust Core & Tauri Shell (Windows x64)` 세 job입니다(리포 ruleset).
+- **개정 2 (2026-11-08, QA 결정)**: 1인 프로젝트 방식으로 바꿉니다. 이슈·PR·라벨·템플릿·automerge를 쓰지 않고, 격리 worktree에서 검증한 커밋을 `main`에 바로 push합니다. 남은 일은 루트 `TODO.md` 한 파일로 관리합니다. `main` 규칙은 삭제 금지와 force-push 금지만 남기고, CI는 push에서 돕니다. 기존 이슈는 모두 삭제했습니다.
 - **Superseded by PD-094 (부분)**: 이 항목 중 Swift 앱·`swift build`/`swift test`·`scripts/package-macos-release.sh`·Swift 대응 규칙에 해당하는 부분은 PD-094로 대체되었습니다. Rust 엔진·WebUI·Windows 관련 결정은 그대로 유효합니다.
 - **Decision**:
   1. 이슈 트래커는 `Roadmap (#1) → 5대 영역 Epic (#2~#6) → 백로그 항목(GitHub Native Sub-issue) → 자기완결 PR`의 3계층으로 운영합니다.
@@ -1825,6 +1826,8 @@
 - **Revisit when** 그림 없는 파일이 많아 실제 쪽 미리보기가 필요할 때(한글만 편집기 코어로 그리는 안을 다시 검토).
 
 ## 82. PR 커밋 메시지 가드와 웹 UI 테스트 전체 실행 (PD-107)
+
+- **개정 (2026-11-08)**: PR을 쓰지 않으므로 같은 가드가 `main` push의 커밋 범위(`before..sha`)를 검사합니다. PR 제목 검사는 없앴습니다.
 
 - **Status** Implemented
 - **Context** 스쿼시 머지는 PR 커밋 메시지를 main에 그대로 옮깁니다. 위생 가드는 추적 파일만 검사해서, 금지된 도구 이름·외부 상용 브랜드·귀속 표기(공동 작성자 트레일러 등)가 커밋 메시지로 main에 들어가는 것을 막지 못했습니다(이미 들어간 과거 커밋 36개). 또 CI가 웹 UI 테스트를 파일 이름 목록으로 실행해, 그 뒤 추가된 테스트 11개(슬라이드·PDF/변환기 화면, 인쇄, 업데이트 알림, 홈 미리보기, macOS 메뉴 등)가 CI에서 돌지 않았습니다.
