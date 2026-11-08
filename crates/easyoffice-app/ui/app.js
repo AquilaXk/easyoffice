@@ -199,6 +199,7 @@
     shellShortcuts: workspaceSession.forwardedKeys(),
     onStateChange: () => workspaceSession.applyModuleContext(activeModule),
     canExportPdf: desktopBridge.isAvailable(),
+    systemFonts: desktopBridge.isAvailable() ? desktopBridge.systemFonts : null,
   });
 
   const hwpPrint = host.__EASYOFFICE_CREATE_HWP_PRINT__({

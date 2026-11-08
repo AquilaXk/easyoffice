@@ -366,6 +366,8 @@ fn attach_handlers(app: &AppHandle, window: &WebviewWindow) {
             app.state::<shell_caller::ShellTokens>().forget(&label);
             app.state::<std::sync::Arc<crate::pdf_job::PdfExports>>()
                 .forget(&label);
+            app.state::<std::sync::Arc<crate::font_catalog::SystemFonts>>()
+                .forget(&label);
             persist_geometry(&app);
             let state = app.state::<AppWindows>();
             locked(&state.registry).remove(&label);

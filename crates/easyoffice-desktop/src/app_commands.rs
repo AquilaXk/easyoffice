@@ -9,6 +9,8 @@ pub const APP_COMMANDS: &[&str] = &[
     "pdf_export_start",
     "pdf_export_pages",
     "pdf_export_finish",
+    "list_system_fonts",
+    "read_system_font",
     "get_update_notice",
     "set_update_check",
     "open_release_page",

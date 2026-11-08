@@ -93,6 +93,7 @@ import {
   sanitizeShellContext,
 } from './embed/shell-menu.ts';
 import { renderPrintBatch } from './embed/print-batch.ts';
+import { createShellFontBridge } from './embed/host-fonts.ts';
 import { initToolbarLabels, toolbarLabelsCommand } from './ui/toolbar-labels.ts';
 import { cellSelectionEnterCommand } from './command/cell-selection.ts';
 import type { EmbedRendererRuntimeRequestV1 } from '@/embed/rpc-router';
@@ -331,6 +332,9 @@ if (chromeMode === 'embed') {
   const menuBar = document.getElementById('menu-bar');
   if (menuBar) installShellMenu(menuBar, shellCommandRelay);
 }
+
+// EasyOffice (host-fonts-v1): the machine's fonts come from the shell over the embed port (PD-127).
+const shellFontBridge = createShellFontBridge();
 
 // 상태 바 요소
 const sbMessage = () => document.getElementById('sb-message')!;
@@ -1467,6 +1471,7 @@ installEmbedRuntime({
     const offs = [
       shellShortcutRelay.add(listener),
       shellCommandRelay.add(listener),
+      shellFontBridge.relay.add((request) => listener({ ...request })),
       eventBus.on('document-agent-changed', listener),
       eventBus.on('document-dirty-changed', (change) => {
         listener({ schemaVersion: 1, reason: 'dirty_changed', dirty: (change as { dirty?: boolean })?.dirty === true });
@@ -1503,6 +1508,17 @@ installEmbedRuntime({
       await initPromise;
       wasm.requiresPasswordForSave = false;
       return { cleared: true as const };
+    },
+    // EasyOffice extension (host-fonts-v1): the shell lists the installed fonts and reads one on
+    // request; the editor draws the document in them when it has them and keeps its bundled fonts
+    // otherwise. The catalog loads in the background, so this answers at once.
+    async enableHostFonts() {
+      await initPromise;
+      void setHostFontProvider(shellFontBridge.provider);
+      return { enabled: true as const };
+    },
+    async hostFontsReply(params) {
+      return shellFontBridge.reply(params);
     },
     async getRendererDiagnostics(pageIndex) {
       await initPromise;

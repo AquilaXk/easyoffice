@@ -23,7 +23,7 @@
     {
       "id": "main",
       "strategy": "fork",
-      "reason": "Embed-only entry point: chrome profile fixed to embed, no ?url= loading, no autosave/recent/PWA/plugin/dev hooks, Canvas2D only, adds the createBlankDocument, verifyBytes, getPrintPages, getSaveProtection and clearSaveProtection RPC handlers (the last two tell the shell only whether the document was opened with a password) and forwards dirty-state and edit events to the host. Forwards the shell shortcut combos named in the frame URL (Ctrl+S/O/N/K/W) over the embed port, combo string only. The host owns open/save/new. The 파일 menu items are shell commands forwarded by name over the embed port (src/embed/shell-menu.ts), the shell theme is applied from the frame URL and from the setShellContext RPC. Registers the view:toolbar-labels command (src/ui/toolbar-labels.ts) and applies the stored choice at start, and the table:cell-selection-enter command (src/command/cell-selection.ts) the native 표 menu sends. The shell's edit:undo/redo/cut/copy commands go to a focused dialog text field instead of the document (src/embed/text-field-edit.ts). Applies the Mac modifier symbols to the static chrome on macOS and suppresses the browser context menu on the menu bar, toolbars and status bar (src/embed/desktop-chrome.ts)."
+      "reason": "Embed-only entry point: chrome profile fixed to embed, no ?url= loading, no autosave/recent/PWA/plugin/dev hooks, Canvas2D only, adds the createBlankDocument, verifyBytes, getPrintPages, getSaveProtection and clearSaveProtection RPC handlers (the last two tell the shell only whether the document was opened with a password) and forwards dirty-state and edit events to the host. Forwards the shell shortcut combos named in the frame URL (Ctrl+S/O/N/K/W) over the embed port, combo string only. The host owns open/save/new. The 파일 menu items are shell commands forwarded by name over the embed port (src/embed/shell-menu.ts), the shell theme is applied from the frame URL and from the setShellContext RPC. Registers the view:toolbar-labels command (src/ui/toolbar-labels.ts) and applies the stored choice at start, and the table:cell-selection-enter command (src/command/cell-selection.ts) the native 표 menu sends. The shell's edit:undo/redo/cut/copy commands go to a focused dialog text field instead of the document (src/embed/text-field-edit.ts). Adds the enableHostFonts and hostFontsReply RPC handlers: the installed fonts reach the editor's host-font provider through the shell over the embed port (src/embed/host-fonts.ts). Applies the Mac modifier symbols to the static chrome on macOS and suppresses the browser context menu on the menu bar, toolbars and status bar (src/embed/desktop-chrome.ts)."
     },
     {
       "id": "core/font-loader",
@@ -38,12 +38,12 @@
     {
       "id": "embed/protocol",
       "strategy": "fork",
-      "reason": "Does not advertise plugin-loader-v1 and hwpctrl-v1 (not bundled); adds blank-document-v1, verify-bytes-v1, shell-context-v1, print-pages-v1 and save-protection-v1."
+      "reason": "Does not advertise plugin-loader-v1 and hwpctrl-v1 (not bundled); adds blank-document-v1, verify-bytes-v1, shell-context-v1, print-pages-v1, save-protection-v1 and host-fonts-v1."
     },
     {
       "id": "embed/rpc-router",
       "strategy": "fork",
-      "reason": "Removes the plugin.* RPC methods and adds createBlankDocument, verifyBytes, setShellContext, getPrintPages, getSaveProtection and clearSaveProtection."
+      "reason": "Removes the plugin.* RPC methods and adds createBlankDocument, verifyBytes, setShellContext, getPrintPages, getSaveProtection, clearSaveProtection, enableHostFonts and hostFontsReply."
     }
   ],
   "assetOverrides": [

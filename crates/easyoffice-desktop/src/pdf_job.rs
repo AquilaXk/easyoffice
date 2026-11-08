@@ -285,6 +285,15 @@ impl PdfExports {
     }
 }
 
+/// The folders of the shared font database: the installer's bundled font. The first caller of
+/// `shared_font_db` decides them, so the PDF export and the editor's font list both pass these.
+pub fn pdf_font_dirs(app: &AppHandle) -> Vec<PathBuf> {
+    app.path()
+        .resource_dir()
+        .map(|dir| vec![dir.join(PDF_FONT_DIR)])
+        .unwrap_or_default()
+}
+
 fn worker_failed(err: tauri::Error) -> IpcError {
     IpcError::new(format!("PDF 내보내기를 실행하지 못했습니다: {err}"))
 }
@@ -320,11 +329,7 @@ pub async fn pdf_export_start(
             None => return Ok(PdfStart::cancelled()),
         }
     };
-    let font_dirs: Vec<PathBuf> = app
-        .path()
-        .resource_dir()
-        .map(|dir| vec![dir.join(PDF_FONT_DIR)])
-        .unwrap_or_default();
+    let font_dirs = pdf_font_dirs(&app);
     let job = tauri::async_runtime::spawn_blocking(move || {
         let fonts = pdf_export::shared_font_db(&font_dirs);
         let target = match picked {

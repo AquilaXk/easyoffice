@@ -41,6 +41,8 @@ const MIME = {
   ".json": "application/json",
 };
 
+/** A real font the fake shell serves as the installed face (present when the rhwp checkout is). */
+const HOST_FONT_FILE = path.join(REPO, "third_party/rhwp/ttfs/opensource/NotoSansKR-Regular.ttf");
 const TYPED_TEXT = "안녕하세요 한글 편집기";
 const SELECTED_CHARS = 3;
 const BIG_PT = 20;
@@ -63,7 +65,10 @@ const connected = new Promise((resolve) => { onConnected = resolve; });
 const events = [];
 channel.port1.onmessage = ({ data }) => {
   if (data.type === 'rhwp-connected') onConnected(data);
-  else if (data.type === 'rhwp-event') events.push(data);
+  else if (data.type === 'rhwp-event') {
+    events.push(data);
+    if (data.payload?.reason === 'shell_fonts') answerFonts(data.payload);
+  }
   else if (data.type === 'rhwp-response') {
     const waiter = pending.get(data.id);
     pending.delete(data.id);
@@ -77,12 +82,30 @@ frame.addEventListener('load', () => {
     capabilities: ['transferable-array-buffer', 'document-state-v1', 'selection-context-v1', 'document-change-events-v1'],
   }, '*', [channel.port2]);
 });
-function call(method, params) {
+function call(method, params, transfer = []) {
   const id = nextId++;
   return new Promise((resolve, reject) => {
     pending.set(id, { resolve, reject });
-    channel.port1.postMessage({ type: 'rhwp-request', version: 1, sessionId, id, method, params });
+    channel.port1.postMessage({ type: 'rhwp-request', version: 1, sessionId, id, method, params }, transfer);
   });
+}
+// Stands in for the shell's font bridge (host-fonts-v1): one face that claims the blank document's
+// default family, backed by a real font file the harness serves.
+const fontLog = [];
+async function answerFonts(payload) {
+  fontLog.push(payload.op === 'list' ? 'list' : 'read ' + payload.face);
+  const params = { requestId: payload.requestId };
+  let transfer = [];
+  if (payload.op === 'list') {
+    params.list = { revision: 'harness', faces: [{ id: '1:0', family: '함초롬바탕', fullName: '함초롬바탕', postscriptName: 'HarnessFace', style: 'Regular', weight: 400, slant: 'normal', aliases: [] }] };
+  } else if (payload.face === '1:0' && payload.revision === 'harness') {
+    const bytes = await (await fetch('/host-font.ttf')).arrayBuffer();
+    params.data = { bytes, faceIndex: 0 };
+    transfer = [bytes];
+  } else {
+    params.error = 'unknown face';
+  }
+  await call('hostFontsReply', params, transfer);
 }
 function toBase64(bytes) {
   let binary = '';
@@ -96,7 +119,7 @@ function fromBase64(text) {
   return bytes;
 }
 window.hwp = {
-  connected, events, call,
+  connected, events, call, fontLog,
   async exportBase64() { return toBase64(await call('exportHwp')); },
   async loadBase64(text, fileName) { const data = fromBase64(text); return call('loadFile', { data, fileName, skipUnsavedGuard: true }); },
 };
@@ -129,6 +152,7 @@ export function startServer() {
     };
     if (url.pathname === "/harness.html") return send(200, MIME[".html"], PARENT_HTML, PARENT_CSP);
     if (url.pathname === "/harness.js") return send(200, MIME[".js"], PARENT_JS, PARENT_CSP);
+    if (url.pathname === "/host-font.ttf" && fs.existsSync(HOST_FONT_FILE)) return send(200, "font/ttf", fs.readFileSync(HOST_FONT_FILE), PARENT_CSP);
     if (url.pathname === "/harness.css") return send(200, MIME[".css"], PARENT_CSS, PARENT_CSP);
     if (url.pathname.startsWith("/hwp-studio/")) {
       const file = resolveBundleFile(url.pathname.slice("/hwp-studio/".length));
@@ -435,10 +459,32 @@ export async function runHarness({ log = console.log } = {}) {
       return { x: box.x + r.x, y: box.y + r.y, w: r.w, h: r.h };
     };
 
+    // Installed fonts: the editor lists them through the shell, reads the face the document names
+    // (once) and draws with it. The editor never sees a path, only the opaque id above.
+    const hostFonts = connected.includes("host-fonts-v1") && fs.existsSync(HOST_FONT_FILE);
+    if (!connected.includes("host-fonts-v1")) problems.push("capability host-fonts-v1 missing");
+    if (hostFonts) {
+      const enabled = await evaluate(cdp, s, "hwp.call('enableHostFonts')");
+      if (enabled?.enabled !== true) problems.push(`enableHostFonts must answer enabled, got ${JSON.stringify(enabled)}`);
+    }
     const created = await evaluate(cdp, s, "hwp.call('createBlankDocument')");
     log(`blank document created, pages: ${created.pageCount}`);
     await waitFor(() => inFrame("document.querySelectorAll('canvas').length > 0"), "page canvas");
     await sleep(800);
+
+    if (hostFonts) {
+      await waitFor(() => evaluate(cdp, s, "hwp.fontLog.includes('read 1:0')"), "the editor to read the host font", 15000)
+        .catch(() => problems.push("the editor never read the host font"));
+      const fontLog = await evaluate(cdp, s, "hwp.fontLog");
+      log(`host font requests: ${fontLog.join(", ")}`);
+      if (fontLog.filter((entry) => entry === "list").length !== 1) problems.push(`the font list must be asked once, got ${fontLog.join(", ")}`);
+      if (fontLog.filter((entry) => entry === "read 1:0").length !== 1) problems.push(`the host font must be read once, got ${fontLog.join(", ")}`);
+      const hostFaces = await inFrame(
+        "[...document.fonts].filter((f) => f.family.includes('__rhwp_host_face_') && f.status === 'loaded').length",
+      );
+      log(`host font faces loaded in the editor: ${hostFaces}`);
+      if (hostFaces < 1) problems.push("the host font was not registered as a loaded FontFace in the editor");
+    }
 
     // Real input: click into the first page, type Korean text.
     const page = await rectOf("#scroll-container canvas");

@@ -7,6 +7,7 @@
 mod app_commands;
 mod app_quit;
 mod confirm_dialog;
+mod font_catalog;
 // Linux webview runtime fixes (PD-125); other OSes compile it only for its decision-logic tests.
 #[cfg(any(target_os = "linux", test))]
 mod linux_runtime;
@@ -271,6 +272,8 @@ fn main() {
             pdf_job::pdf_export_start,
             pdf_job::pdf_export_pages,
             pdf_job::pdf_export_finish,
+            font_catalog::list_system_fonts,
+            font_catalog::read_system_font,
             update_check::get_update_notice,
             update_check::set_update_check,
             update_check::open_release_page,
@@ -296,6 +299,7 @@ fn main() {
             app.manage(AppWindows::new(app.path().app_data_dir().ok()));
             app.manage(app_quit::AppQuit::default());
             app.manage(std::sync::Arc::new(pdf_job::PdfExports::default()));
+            app.manage(std::sync::Arc::new(font_catalog::SystemFonts::default()));
             // macOS gets the native menu bar beside the page's menu row; Windows and Linux have only
             // the page's row, as in the reference app (PD-121).
             #[cfg(target_os = "macos")]
@@ -409,7 +413,7 @@ mod tests {
         );
         assert_eq!(value["windows"], serde_json::json!(["main", "doc-*"]));
         assert_eq!(value["local"], serde_json::json!(true));
-        assert_eq!(app_commands::APP_COMMANDS.len(), 23);
+        assert_eq!(app_commands::APP_COMMANDS.len(), 25);
     }
 
     #[test]

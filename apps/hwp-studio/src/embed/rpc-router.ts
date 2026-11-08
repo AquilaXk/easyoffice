@@ -1,5 +1,5 @@
 // EasyOffice fork of rhwp-studio/src/embed/rpc-router.ts: plugin.* methods are removed and
-// createBlankDocument, verifyBytes, setShellContext, getPrintPages, getSaveProtection and clearSaveProtection are added. See config/rhwp-studio-overrides.json.
+// createBlankDocument, verifyBytes, setShellContext, getPrintPages, getSaveProtection, clearSaveProtection, enableHostFonts and hostFontsReply are added. See config/rhwp-studio-overrides.json.
 import { parsePrintBatchRange, type PrintBatchResult } from './print-batch.ts';
 import type { HmlSaveState } from '@/core/hml-save-capability.ts';
 import type { EmbedFontDecisionTraceV1 } from '@/core/font-decision-trace.ts';
@@ -51,6 +51,10 @@ export interface EmbedRpcHandlers {
   getSaveProtection(): Promise<{ passwordProtected: boolean }>;
   /** EasyOffice extension (save-protection-v1): the shell wrote an unprotected copy, so the flag no longer applies. */
   clearSaveProtection(): Promise<{ cleared: true }>;
+  /** EasyOffice extension (host-fonts-v1): use the fonts the shell lists as the host font catalog. */
+  enableHostFonts(): Promise<{ enabled: true }>;
+  /** EasyOffice extension (host-fonts-v1): the shell's answer to a `shell_fonts` event. */
+  hostFontsReply(params: Record<string, unknown>): Promise<{ accepted: boolean }>;
   pageCount(): Promise<number>;
   getRendererDiagnostics(page: number): Promise<EmbedRendererDiagnosticsV1>;
   getFontDecisionTrace(page: number, maxCharacters: number): Promise<EmbedFontDecisionTraceV1>;
@@ -190,6 +194,10 @@ export async function routeEmbedRequest(
     case 'clearSaveProtection':
       assertEmptyParams(params, 'clearSaveProtection params');
       return handlers.clearSaveProtection();
+    case 'enableHostFonts':
+      assertEmptyParams(params, 'enableHostFonts params');
+      return handlers.enableHostFonts();
+    case 'hostFontsReply': return handlers.hostFontsReply(params);
     case 'pageCount': return handlers.pageCount();
     case 'getPrintPages': {
       const range = parsePrintBatchRange(params);

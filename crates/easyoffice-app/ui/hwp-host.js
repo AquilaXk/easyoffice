@@ -52,6 +52,37 @@
   const SHELL_THEMES = Object.freeze(["light", "dark", "system"]);
   const RECENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
   const SHELL_CONTEXT_METHOD = "setShellContext";
+  // Installed fonts (host-fonts-v1, PD-127): the editor asks over the port, the shell calls its
+  // commands. The editor names a face by the id of the list below; it never sees a path.
+  const FONTS_REASON = "shell_fonts";
+  const FONTS_CAPABILITY = "host-fonts-v1";
+  const FONT_FACE_ID = /^\d{1,10}:\d{1,10}$/;
+  const FONT_REVISION = /^[0-9a-f]{1,64}$/;
+  const FONT_SLANTS = Object.freeze(["normal", "italic", "oblique"]);
+  const MAX_FONT_FACES = 25000;
+  const MAX_FONT_ALIASES = 32;
+  // Font files kept so that the faces of one collection (and a repeated request) read the file once.
+  const FONT_CACHE_BYTES = 128 * 1024 * 1024;
+
+  const isCount = (value) => Number.isSafeInteger(value) && value >= 0;
+  const isName = (value) => typeof value === "string" && value.length <= 1024;
+
+  // One face of the Rust list as the editor's host-font contract wants it, or null. The file number
+  // and the face index stay in the shell (`files`); the editor gets an opaque id.
+  function toEditorFace(raw, files) {
+    if (!raw || typeof raw !== "object" || !isCount(raw.file) || !isCount(raw.faceIndex)) return null;
+    const aliases = Array.isArray(raw.aliases) ? raw.aliases : [];
+    const valid = isName(raw.family) && raw.family.trim() !== "" && isName(raw.fullName) && raw.fullName.trim() !== ""
+      && isName(raw.postscriptName) && isName(raw.style) && Number.isFinite(raw.weight)
+      && FONT_SLANTS.includes(raw.slant) && aliases.length <= MAX_FONT_ALIASES && aliases.every((a) => isName(a) && a.trim() !== "");
+    if (!valid) return null;
+    const id = raw.file + ":" + raw.faceIndex;
+    files.set(id, { file: raw.file, faceIndex: raw.faceIndex });
+    return {
+      id, family: raw.family, fullName: raw.fullName, postscriptName: raw.postscriptName, style: raw.style,
+      weight: raw.weight, slant: raw.slant, aliases: aliases.slice(),
+    };
+  }
 
   // Returns `{ command, id?, format? }` for a whitelisted command with valid arguments, else null.
   function sanitizeShellCommand(payload) {
@@ -127,6 +158,9 @@
     const shellShortcuts = Array.isArray(deps.shellShortcuts) ? deps.shellShortcuts.filter((k) => typeof k === "string") : [];
     const statusListeners = new Set();
     let returnBound = false;
+    // Installed fonts (see FONTS_REASON). `generation` ends the work of an older connection.
+    const systemFonts = deps.systemFonts || null;
+    const fonts = { active: false, generation: 0, listing: null, revision: "", files: new Map(), cache: new Map(), cacheBytes: 0 };
 
     function pane() {
       return document.getElementById("pane-hwp");
@@ -257,7 +291,111 @@
       }
     }
 
+    function resetFonts() {
+      fonts.active = false;
+      fonts.generation += 1;
+      fonts.listing = null;
+      fonts.revision = "";
+      fonts.files = new Map();
+      fonts.cache.clear();
+      fonts.cacheBytes = 0;
+    }
+
+    // The list is asked for once per connection (a repeated request gets the same list), so the
+    // revision the shell quotes stays valid.
+    function fontList() {
+      if (fonts.listing) return fonts.listing;
+      const generation = fonts.generation;
+      const listing = Promise.resolve().then(() => systemFonts.list()).then((raw) => {
+        const valid = raw && typeof raw === "object" && FONT_REVISION.test(String(raw.revision)) && Array.isArray(raw.faces)
+          && raw.faces.length <= MAX_FONT_FACES;
+        if (!valid) throw new Error("글꼴 목록을 해석하지 못했습니다.");
+        const files = new Map();
+        const faces = raw.faces.map((face) => toEditorFace(face, files)).filter((face) => face !== null);
+        if (generation !== fonts.generation) throw new Error("글꼴 목록이 오래되었습니다.");
+        fonts.files = files;
+        fonts.revision = raw.revision;
+        return { revision: raw.revision, faces };
+      });
+      fonts.listing = listing;
+      listing.catch(() => { if (fonts.listing === listing) fonts.listing = null; });
+      return listing;
+    }
+
+    function toArrayBuffer(raw) {
+      if (raw instanceof env.ArrayBuffer) return raw;
+      if (env.ArrayBuffer.isView(raw)) return raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength);
+      throw new Error("글꼴 바이트를 해석하지 못했습니다.");
+    }
+
+    // The bytes of font file `file`, read once while they stay in the cache.
+    function fontFileBytes(file) {
+      const cached = fonts.cache.get(file);
+      if (cached) return cached.pending;
+      const generation = fonts.generation;
+      const entry = { size: 0, pending: null };
+      entry.pending = Promise.resolve().then(() => systemFonts.read(fonts.revision, file)).then((raw) => {
+        const bytes = toArrayBuffer(raw);
+        if (generation !== fonts.generation) throw new Error("글꼴 목록이 오래되었습니다.");
+        entry.size = bytes.byteLength;
+        fonts.cacheBytes += entry.size;
+        for (const [key, old] of fonts.cache) {
+          if (fonts.cacheBytes <= FONT_CACHE_BYTES || key === file) break;
+          fonts.cacheBytes -= old.size;
+          fonts.cache.delete(key);
+        }
+        return bytes;
+      });
+      fonts.cache.set(file, entry);
+      entry.pending.catch(() => { if (fonts.cache.get(file) === entry) fonts.cache.delete(file); });
+      return entry.pending;
+    }
+
+    async function answerFontRequest(payload) {
+      if (payload.op === "list") return { list: await fontList() };
+      await fontList();
+      const face = typeof payload.face === "string" && FONT_FACE_ID.test(payload.face) ? fonts.files.get(payload.face) : undefined;
+      if (!face || payload.revision !== fonts.revision) throw new Error("알 수 없는 글꼴입니다.");
+      const bytes = (await fontFileBytes(face.file)).slice(0);
+      return { data: { bytes, faceIndex: face.faceIndex }, transfer: [bytes] };
+    }
+
+    // The editor asked for the font list or one face. Anything but a well-formed request from an
+    // enabled connection is dropped; a failed one is answered with a generic refusal.
+    function handleFontsRequest(payload) {
+      if (!fonts.active || !Number.isSafeInteger(payload.requestId) || payload.requestId < 1) return;
+      const generation = fonts.generation;
+      const requestId = payload.requestId;
+      const reply = (params, options) => {
+        if (generation === fonts.generation && port) call("hostFontsReply", { requestId, ...params }, options).catch(() => {});
+      };
+      if (payload.op !== "list" && payload.op !== "read") {
+        reply({ error: "지원하지 않는 글꼴 요청입니다." });
+        return;
+      }
+      answerFontRequest(payload).then(
+        ({ transfer, ...params }) => reply(params, transfer ? { transfer } : undefined),
+        () => reply({ error: "글꼴을 불러오지 못했습니다." }),
+      );
+    }
+
+    // Tells the editor to take its fonts from the shell; best effort (the bundled fonts remain).
+    async function enableHostFonts() {
+      if (!systemFonts || !port || !capabilities.includes(FONTS_CAPABILITY)) return false;
+      resetFonts();
+      fonts.active = true;
+      fontList().catch(() => {});
+      try {
+        await call("enableHostFonts");
+        return true;
+      } catch {
+        resetFonts();
+        return false;
+      }
+    }
+
     function closeConnection(reason) {
+      resetFonts();
       failPending(reason);
       if (port) {
         port.onmessage = null;
@@ -284,6 +422,10 @@
 
     function handleEventMessage(data) {
       const payload = data.payload;
+      if (payload?.reason === FONTS_REASON) {
+        handleFontsRequest(payload);
+        return;
+      }
       if (payload?.reason === SHELL_COMMAND_REASON) {
         const command = sanitizeShellCommand(payload);
         if (command) for (const listener of commandListeners) listener(command);
@@ -407,6 +549,8 @@
         await call("ready");
         if (stale()) return;
         await pushShellContext();
+        if (stale()) return;
+        await enableHostFonts();
         if (stale()) return;
         await call("createBlankDocument", { skipUnsavedGuard: true });
         if (stale()) return;

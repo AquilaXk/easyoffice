@@ -832,3 +832,72 @@ test("the editor entry applies the Mac labels on macOS and always guards the chr
   assert.match(main, /detectPlatformKind\(\) === 'mac'\) applyMacShortcutPresentation\(document\)/);
   assert.match(main, /installNonEditorContextMenuGuards\(document\)/);
 });
+
+// ---- installed fonts (host-fonts-v1, PD-127) ----------------------------------------------------
+
+test("host fonts: the editor advertises host-fonts-v1, routes the two RPCs and installs the shell provider", async () => {
+  const { EMBED_CAPABILITIES } = await import("../apps/hwp-studio/src/embed/protocol.ts");
+  assert.ok(EMBED_CAPABILITIES.includes("host-fonts-v1"));
+  const router = fs.readFileSync(path.join(REPO, "apps/hwp-studio/src/embed/rpc-router.ts"), "utf8");
+  assert.match(router, /case 'enableHostFonts':\s+assertEmptyParams\(params, 'enableHostFonts params'\);\s+return handlers\.enableHostFonts\(\);/);
+  assert.match(router, /case 'hostFontsReply': return handlers\.hostFontsReply\(params\);/);
+  const main = fs.readFileSync(path.join(REPO, "apps/hwp-studio/src/main.ts"), "utf8");
+  assert.match(main, /async enableHostFonts\(\) \{\s+await initPromise;\s+void setHostFontProvider\(shellFontBridge\.provider\);/);
+  assert.match(main, /shellFontBridge\.relay\.add\(/);
+  assert.match(main, /async hostFontsReply\(params\) \{\s+return shellFontBridge\.reply\(params\);/);
+  const code = fs.readFileSync(path.join(REPO, "apps/hwp-studio/src/embed/host-fonts.ts"), "utf8").split("\n").filter((line) => !/^\s*(\/\/|\/?\*)/.test(line)).join("\n");
+  assert.doesNotMatch(code, /\bpath\b|__TAURI|invoke\(/i, "the editor side names no path and calls no command");
+});
+
+test("host fonts: the provider asks the shell over the port and takes only well-formed answers", async () => {
+  const { createShellFontBridge, SHELL_FONTS_REASON } = await import("../apps/hwp-studio/src/embed/host-fonts.ts");
+  const bridge = createShellFontBridge(50);
+  const sent = [];
+  const signal = new AbortController().signal;
+  await assert.rejects(bridge.provider.getSnapshot(signal), /not listening/, "no port, no request");
+  const off = bridge.relay.add((request) => sent.push(request));
+
+  const snapshot = bridge.provider.getSnapshot(signal);
+  assert.deepEqual(sent[0], { schemaVersion: 1, reason: SHELL_FONTS_REASON, requestId: 1, op: "list" });
+  assert.deepEqual(bridge.reply({ requestId: 1, list: { revision: "r", faces: [] } }), { accepted: true });
+  assert.deepEqual(await snapshot, { revision: "r", faces: [] });
+  assert.deepEqual(bridge.reply({ requestId: 1, list: { revision: "r", faces: [] } }), { accepted: false }, "an answer counts once");
+  assert.deepEqual(bridge.reply({ requestId: 99 }), { accepted: false }, "an unknown request number is ignored");
+
+  const read = bridge.provider.readFace("7:1", "r", signal);
+  assert.deepEqual(sent[1], { schemaVersion: 1, reason: SHELL_FONTS_REASON, requestId: 2, op: "read", face: "7:1", revision: "r" });
+  const bytes = new ArrayBuffer(4);
+  bridge.reply({ requestId: 2, data: { bytes, faceIndex: 1 } });
+  assert.deepEqual(await read, { bytes, faceIndex: 1 });
+
+  for (const data of [{ bytes: new Uint8Array(4), faceIndex: 0 }, { bytes, faceIndex: -1 }, { bytes, faceIndex: 1.5 }, "x", null]) {
+    const pending = bridge.provider.readFace("7:1", "r", signal);
+    bridge.reply({ requestId: sent.at(-1).requestId, data });
+    await assert.rejects(pending, /no font data/, JSON.stringify(data));
+  }
+  const refused = bridge.provider.readFace("7:1", "r", signal);
+  bridge.reply({ requestId: sent.at(-1).requestId, error: "/secret/path" });
+  await assert.rejects(refused, (error) => !String(error.message).includes("/secret"), "the shell's text is not repeated");
+
+  for (const bad of [null, [], { requestId: "1" }, { requestId: 1.5 }, { requestId: 1, extra: true }]) {
+    assert.throws(() => bridge.reply(bad), undefined, JSON.stringify(bad));
+  }
+  off();
+  await assert.rejects(bridge.provider.getSnapshot(signal), /not listening/);
+});
+
+test("host fonts: a request ends on abort and on timeout, and leaves nothing waiting", async () => {
+  const { createShellFontBridge } = await import("../apps/hwp-studio/src/embed/host-fonts.ts");
+  const bridge = createShellFontBridge(20);
+  const sent = [];
+  bridge.relay.add((request) => sent.push(request));
+  const controller = new AbortController();
+  const aborted = bridge.provider.getSnapshot(controller.signal);
+  controller.abort();
+  await assert.rejects(aborted, /aborted/);
+  assert.deepEqual(bridge.reply({ requestId: sent[0].requestId, list: {} }), { accepted: false }, "an aborted request takes no answer");
+  await assert.rejects(bridge.provider.getSnapshot(controller.signal), /aborted/, "an aborted signal sends nothing");
+  assert.equal(sent.length, 1);
+  await assert.rejects(bridge.provider.readFace("1:0", "r", new AbortController().signal), /timed out/);
+  assert.deepEqual(bridge.reply({ requestId: sent[1].requestId }), { accepted: false });
+});

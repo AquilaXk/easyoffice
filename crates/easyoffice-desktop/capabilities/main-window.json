@@ -10,6 +10,8 @@
     "allow-pdf-export-start",
     "allow-pdf-export-pages",
     "allow-pdf-export-finish",
+    "allow-list-system-fonts",
+    "allow-read-system-font",
     "allow-get-update-notice",
     "allow-set-update-check",
     "allow-open-release-page",

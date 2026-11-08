@@ -15,6 +15,9 @@
     pages: "pdf_export_pages",
     finish: "pdf_export_finish",
   });
+  // Installed fonts for the Hangul editor (PD-127). The list holds names, styles and numbers, never a path;
+  // a read quotes the revision of the list and a file number, and gets the font file as an ArrayBuffer.
+  const SYSTEM_FONT_COMMANDS = Object.freeze({ list: "list_system_fonts", read: "read_system_font" });
   // Update notice (PD-103): the shell checks for a newer release and installs it (signed package);
   // the page only reads the state, switches the check on or off and asks the shell to start the
   // install or to open the release page (it passes no address and no package).
@@ -149,6 +152,10 @@
       throw new Error("PDF 저장 결과를 확인하지 못했습니다.");
     },
   });
+  const systemFonts = Object.freeze({
+    list: () => callShell(SYSTEM_FONT_COMMANDS.list, {}),
+    read: (revision, file) => callShell(SYSTEM_FONT_COMMANDS.read, { revision: String(revision), file }),
+  });
   const getUpdateNotice = () => callShell(UPDATE_COMMANDS.get, {});
   const setUpdateCheck = (enabled) => callShell(UPDATE_COMMANDS.set, { enabled: Boolean(enabled) });
   const openReleasePage = () => callShell(UPDATE_COMMANDS.open, {});
@@ -171,5 +178,5 @@
     return callShell(command, args || {});
   }
 
-  host.__EASYOFFICE_DESKTOP_BRIDGE__ = { isAvailable, invokeIpc, saveFile, pdfExport, getUpdateNotice, setUpdateCheck, openReleasePage, installUpdate, describeShellError, windowCommand, confirm, CONFIRM_BROWSER_TEXT, WINDOW_COMMANDS };
+  host.__EASYOFFICE_DESKTOP_BRIDGE__ = { isAvailable, invokeIpc, saveFile, pdfExport, systemFonts, getUpdateNotice, setUpdateCheck, openReleasePage, installUpdate, describeShellError, windowCommand, confirm, CONFIRM_BROWSER_TEXT, WINDOW_COMMANDS };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

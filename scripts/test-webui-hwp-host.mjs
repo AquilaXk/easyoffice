@@ -54,20 +54,20 @@ function createFakeDocument() {
   };
 }
 
-function createFakeStudio({ answer = true, failMethods = new Set() } = {}) {
+function createFakeStudio({ answer = true, failMethods = new Set(), capabilities = ["transferable-array-buffer", "blank-document-v1"] } = {}) {
   const requests = [];
   const state = { connect: null, port2: null, silent: !answer, answerConnect: answer };
   class FakeMessageChannel {
     constructor() {
-      const port1 = { onmessage: null, closed: false, postMessage: (msg) => deliver(msg), close() { this.closed = true; } };
+      const port1 = { onmessage: null, closed: false, postMessage: (msg, transfer) => deliver(msg, transfer), close() { this.closed = true; } };
       const port2 = { postMessage: (msg) => queueMicrotask(() => port1.onmessage?.({ data: msg })) };
       this.port1 = port1;
       this.port2 = port2;
       state.port2 = port2;
     }
   }
-  function deliver(msg) {
-    requests.push(msg);
+  function deliver(msg, transfer) {
+    requests.push(transfer ? { ...msg, transfer } : msg);
     if (state.silent) return;
     const respond = (extra) => state.port2.postMessage({ type: "rhwp-response", version: 1, sessionId: msg.sessionId, id: msg.id, ...extra });
     if (failMethods.has(msg.method)) return respond({ error: { code: "E", message: "fail " + msg.method } });
@@ -79,6 +79,8 @@ function createFakeStudio({ answer = true, failMethods = new Set() } = {}) {
       getDocumentState: { dirty: true },
       verifyBytes: { ok: true, pageCount: 1, format: "hwp" },
       notifySaved: null,
+      enableHostFonts: { enabled: true },
+      hostFontsReply: { accepted: true },
     };
     respond({ result: results[msg.method] });
   }
@@ -90,7 +92,7 @@ function createFakeStudio({ answer = true, failMethods = new Set() } = {}) {
     frame.contentWindow = {
       postMessage(message, origin, ports) {
         state.connect = { message, origin, ports };
-        if (state.answerConnect) queueMicrotask(() => state.port2.postMessage({ type: "rhwp-connected", version: 1, sessionId: message.sessionId, capabilities: ["transferable-array-buffer", "blank-document-v1"] }));
+        if (state.answerConnect) queueMicrotask(() => state.port2.postMessage({ type: "rhwp-connected", version: 1, sessionId: message.sessionId, capabilities }));
       },
     };
   };
@@ -437,4 +439,147 @@ test("frame probe: fails closed on a malformed report and on silence", async () 
   await assert.rejects(first.done, /점검 결과를 해석하지 못했습니다/);
   const second = startProbe(loadHost(), { timeoutMs: 20 });
   await assert.rejects(second.done, /응답하지 않았습니다/);
+});
+
+// ---- installed fonts (host-fonts-v1, PD-127) ----------------------------------------------------
+
+const FONT_CAPABILITIES = ["transferable-array-buffer", "blank-document-v1", "host-fonts-v1"];
+const rawFace = (file, faceIndex, family, extra = {}) => ({
+  file, faceIndex, family, fullName: family, postscriptName: family.replaceAll(" ", ""), style: "Regular", weight: 400, slant: "normal", aliases: [], ...extra,
+});
+
+function fontsApi({ faces, revision = "00ff00ff00ff00ff", sizes = {}, failRead = false } = {}) {
+  const calls = { list: 0, read: [] };
+  return {
+    calls,
+    api: {
+      list: async () => { calls.list += 1; return { revision, faces }; },
+      read: async (rev, file) => {
+        calls.read.push([rev, file]);
+        if (failRead) throw new Error("/Users/someone/Library/Fonts/secret.ttf: denied");
+        return new Uint8Array(sizes[file] ?? 8).fill(file + 1).buffer;
+      },
+    },
+  };
+}
+
+const sendFontEvent = (studio, payload) => studio.state.port2.postMessage({ type: "rhwp-event", version: 1, sessionId: "session-1", event: "documentChanged", payload: { schemaVersion: 1, reason: "shell_fonts", ...payload } });
+const fontReplies = (studio) => studio.requests.filter((r) => r.method === "hostFontsReply");
+
+test("fonts: the shell enables the editor's host fonts after the shell context, only with the capability and the bridge", async () => {
+  const withBoth = loadHost({ studioOptions: { capabilities: FONT_CAPABILITIES }, extraDeps: { systemFonts: fontsApi({ faces: [] }).api } });
+  await withBoth.hostApi.onModuleActivated("HWP");
+  await settle();
+  assert.equal(withBoth.studio.requests.map((r) => r.method).join(","), "ready,enableHostFonts,createBlankDocument");
+  const noCapability = loadHost({ extraDeps: { systemFonts: fontsApi({ faces: [] }).api } });
+  await noCapability.hostApi.onModuleActivated("HWP");
+  await settle();
+  assert.equal(noCapability.studio.requests.map((r) => r.method).join(","), "ready,createBlankDocument");
+  const noBridge = loadHost({ studioOptions: { capabilities: FONT_CAPABILITIES } });
+  await noBridge.hostApi.onModuleActivated("HWP");
+  await settle();
+  assert.equal(noBridge.studio.requests.map((r) => r.method).join(","), "ready,createBlankDocument", "outside the desktop shell there is no font bridge");
+});
+
+test("fonts: a list request is answered with ids, names and styles, never a path or file number", async () => {
+  const fonts = fontsApi({ faces: [rawFace(7, 0, "Batang", { aliases: ["바탕"] }), rawFace(7, 1, "Batang Bold", { weight: 700, style: "Bold" }), rawFace(9, 0, "Dotum")] });
+  const { hostApi, studio } = loadHost({ studioOptions: { capabilities: FONT_CAPABILITIES }, extraDeps: { systemFonts: fonts.api } });
+  await hostApi.onModuleActivated("HWP");
+  await settle();
+  sendFontEvent(studio, { requestId: 1, op: "list" });
+  sendFontEvent(studio, { requestId: 2, op: "list" });
+  await settle();
+  const [first, second] = fontReplies(studio);
+  assert.equal(first.params.requestId, 1);
+  assert.equal(fonts.calls.list, 1, "one list per connection, the second request reuses it");
+  assert.deepEqual(first.params.list, second.params.list);
+  assert.equal(first.params.list.revision, "00ff00ff00ff00ff");
+  assert.deepEqual(first.params.list.faces.map((f) => f.id), ["7:0", "7:1", "9:0"]);
+  assert.deepEqual(first.params.list.faces[0], { id: "7:0", family: "Batang", fullName: "Batang", postscriptName: "Batang", style: "Regular", weight: 400, slant: "normal", aliases: ["바탕"] });
+  for (const face of first.params.list.faces) {
+    assert.ok(!("file" in face) && !("faceIndex" in face) && !("path" in face), "only the contract fields reach the editor");
+  }
+});
+
+test("fonts: a read is checked against the list, read once per file, and the bytes are transferred", async () => {
+  const fonts = fontsApi({ faces: [rawFace(7, 0, "Batang"), rawFace(7, 1, "Batang Bold", { weight: 700 }), rawFace(9, 0, "Dotum")] });
+  const { hostApi, studio } = loadHost({ studioOptions: { capabilities: FONT_CAPABILITIES }, extraDeps: { systemFonts: fonts.api } });
+  await hostApi.onModuleActivated("HWP");
+  await settle();
+  const revision = "00ff00ff00ff00ff";
+  sendFontEvent(studio, { requestId: 1, op: "read", face: "7:0", revision });
+  sendFontEvent(studio, { requestId: 2, op: "read", face: "7:1", revision });
+  await settle();
+  const [one, two] = fontReplies(studio);
+  assert.deepEqual(fonts.calls.read, [[revision, 7]], "the faces of one collection read the file once");
+  assert.equal(one.params.data.faceIndex, 0);
+  assert.equal(two.params.data.faceIndex, 1);
+  assert.equal(one.params.data.bytes.byteLength, 8);
+  assert.deepEqual(one.transfer, [one.params.data.bytes], "the bytes move, they are not copied again");
+  assert.notEqual(one.params.data.bytes, two.params.data.bytes, "each reply owns its buffer");
+  assert.equal(new Uint8Array(one.params.data.bytes)[0], 8);
+});
+
+test("fonts: unknown ids, a wrong revision, malformed requests and a failing read are refused without detail", async () => {
+  const fonts = fontsApi({ faces: [rawFace(7, 0, "Batang")], failRead: true });
+  const { hostApi, studio } = loadHost({ studioOptions: { capabilities: FONT_CAPABILITIES }, extraDeps: { systemFonts: fonts.api } });
+  await hostApi.onModuleActivated("HWP");
+  await settle();
+  const revision = "00ff00ff00ff00ff";
+  const bad = [
+    { requestId: 1, op: "read", face: "8:0", revision },
+    { requestId: 2, op: "read", face: "7:0", revision: "ffffffffffffffff" },
+    { requestId: 3, op: "read", face: "../../etc/passwd", revision },
+    { requestId: 4, op: "read", face: "7:0" },
+    { requestId: 5, op: "read", face: 70, revision },
+    { requestId: 6, op: "write" },
+    { requestId: 7, op: "read", face: "7:0", revision },
+  ];
+  for (const payload of bad) sendFontEvent(studio, payload);
+  sendFontEvent(studio, { requestId: 0, op: "list" });
+  sendFontEvent(studio, { requestId: 1.5, op: "list" });
+  sendFontEvent(studio, { op: "list" });
+  await settle();
+  const replies = fontReplies(studio);
+  assert.equal(replies.length, bad.length, "malformed request numbers get no answer");
+  for (const reply of replies) {
+    assert.ok("error" in reply.params && !("data" in reply.params));
+    assert.ok(!JSON.stringify(reply.params).includes("/Users"), "no system text in the answer");
+  }
+  assert.deepEqual(fonts.calls.read, [[revision, 7]], "only the valid request reached the shell command");
+});
+
+test("fonts: only a connection the shell enabled fonts for answers, and a reconnect starts anew", async () => {
+  const fonts = fontsApi({ faces: [rawFace(7, 0, "Batang")] });
+  const { hostApi, studio } = loadHost({ studioOptions: { capabilities: FONT_CAPABILITIES }, extraDeps: { systemFonts: fonts.api } });
+  await hostApi.onModuleActivated("HWP");
+  await settle();
+  await hostApi.reconnect();
+  await settle();
+  const before = fontReplies(studio).length;
+  sendFontEvent(studio, { requestId: 1, op: "list" });
+  await settle();
+  assert.equal(fontReplies(studio).length, before + 1, "the new connection answers");
+  const silent = loadHost({ studioOptions: { capabilities: ["transferable-array-buffer"] }, extraDeps: { systemFonts: fonts.api } });
+  await silent.hostApi.onModuleActivated("HWP");
+  await settle();
+  sendFontEvent(silent.studio, { requestId: 1, op: "list" });
+  await settle();
+  assert.equal(fontReplies(silent.studio).length, 0, "not enabled: ignored");
+});
+
+test("fonts: an invalid list from the shell command is not forwarded", async () => {
+  const hostile = { revision: "00ff", faces: [rawFace(1, 0, "Fine"), rawFace(2, 0, ""), { file: -1, faceIndex: 0 }, null, rawFace(3, 0, "X", { slant: "sideways" }), rawFace(4, 0, "Y", { aliases: Array(40).fill("a") })] };
+  const { hostApi, studio } = loadHost({ studioOptions: { capabilities: FONT_CAPABILITIES }, extraDeps: { systemFonts: { list: async () => hostile, read: async () => new ArrayBuffer(1) } } });
+  await hostApi.onModuleActivated("HWP");
+  await settle();
+  sendFontEvent(studio, { requestId: 1, op: "list" });
+  await settle();
+  assert.deepEqual(fontReplies(studio)[0].params.list.faces.map((f) => f.family), ["Fine"]);
+  const broken = loadHost({ studioOptions: { capabilities: FONT_CAPABILITIES }, extraDeps: { systemFonts: { list: async () => ({ revision: "../x", faces: [] }), read: async () => new ArrayBuffer(1) } } });
+  await broken.hostApi.onModuleActivated("HWP");
+  await settle();
+  sendFontEvent(broken.studio, { requestId: 1, op: "list" });
+  await settle();
+  assert.ok("error" in fontReplies(broken.studio)[0].params);
 });
