@@ -314,6 +314,11 @@
       return true;
     }
 
+    // Quits the app: the shell closes the windows one at a time, each through its own close prompt.
+    async function requestQuit() {
+      if (desktopAvailable()) await shell("quitApp", {});
+    }
+
     function askCloseChoice() {
       const dialog = document.getElementById("close-confirm-dialog");
       if (!dialog || typeof dialog.showModal !== "function") {
@@ -529,7 +534,7 @@
       launch, module, isStart, isManaged: () => managed, canSpawnWindows, desktopAvailable,
       start, bindUi, refresh, setDocumentName, setDirty, getDocumentName, getTitles, applyTitles,
       newDocument, openFile, openRecent, spawnWithFile, takePendingOpen, refreshRecents,
-      requestClose, closeWindow, requestOpenFile, chooseRecent, routeFile, applyLaunch, loadPending, bindStatusTooltips, runSmoke,
+      requestClose, requestQuit, closeWindow, requestOpenFile, chooseRecent, routeFile, applyLaunch, loadPending, bindStatusTooltips, runSmoke,
     };
   }
 

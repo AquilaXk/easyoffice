@@ -11,6 +11,7 @@
 - [ ] 업데이트 설치: 서명된 릴리스에서 카드의 '설치하고 다시 시작'으로 설치·재시작(Windows NSIS, macOS, AppImage, deb·rpm), 저장 안 된 창이 있으면 막히고 안내
 - [ ] PDF 스튜디오·변환기·슬라이드 화면, Pages 파일 표시
 - [ ] macOS: 네이티브 메뉴, 한글 편집기 안 Cmd+Z/X/C/V/A, Cmd+F, Dock 최근 항목
+- [ ] Windows·Linux: 모든 창에 페이지 메뉴 줄(한글 창은 편집기 메뉴 줄), Ctrl+Q(한글 창 포함)의 순차 종료
 
 ## 배포
 - [ ] README를 설치 중심으로(스크린샷)

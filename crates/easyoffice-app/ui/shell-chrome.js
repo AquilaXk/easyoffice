@@ -12,7 +12,7 @@
   const TOAST_ERROR_MS = 8000;
   const ERROR_HINT = /실패|오류|거부|불가|없습니다|취소|못했습니다/;
 
-  // The native menu bar (`crates/easyoffice-desktop/src/native_menu.rs`, PD-102) runs an item by calling
+  // The native menu bar (macOS only; `crates/easyoffice-desktop/src/native_menu.rs`, PD-102, PD-121) runs an item by calling
   // `__EASYOFFICE_NATIVE_MENU__(id)` in the focused window. Each id names a page action: the name of an
   // entry of the shortcut action table (so a menu item and its keyboard shortcut run the same handler)
   // or of `pageMenuActions` (the page's own menu item), optionally `name:argument`. A test keeps this
@@ -198,10 +198,9 @@
 
     // ---- native menu state ---------------------------------------------------------------------
 
-    // The native menu bar is shared by all windows, so each window tells the shell what the bar should
-    // show while it has the focus (`menu_state.rs`): its theme mode, the items its module cannot use
-    // (the page's own rule, `studioCommandApplies`, applied to the table above) and whether the editor
-    // brings its own menu row (the shell then hides the native bar: one menu, never two).
+    // The native menu bar (macOS only, PD-121) is shared by all windows, so each window tells the shell
+    // what the bar should show while it has the focus (`menu_state.rs`): its theme mode and the items its
+    // module cannot use (the page's own rule, `studioCommandApplies`, applied to the table above).
     let menuContext = null;
     let lastMenuState = "";
 
@@ -218,11 +217,11 @@
 
     // Without a new module context the last one is reused (a theme change); nothing is sent before the
     // first one, and an unchanged state is not sent twice.
-    function pushMenuState(commandModule, embed) {
+    function pushMenuState(commandModule) {
       const bridge = deps.desktopBridge || host.__EASYOFFICE_DESKTOP_BRIDGE__;
-      if (commandModule !== undefined) menuContext = { commandModule, embed: Boolean(embed) };
-      if (!menuContext || !bridge?.isAvailable()) return;
-      const state = { theme: themeApi().getMode(), disabled: disabledMenuIds(menuContext.commandModule), embed: menuContext.embed };
+      if (commandModule !== undefined) menuContext = { commandModule };
+      if (!menuContext || !bridge?.isAvailable() || !deps.hasNativeMenu()) return;
+      const state = { theme: themeApi().getMode(), disabled: disabledMenuIds(menuContext.commandModule) };
       const key = JSON.stringify(state);
       if (key === lastMenuState) return;
       lastMenuState = key;

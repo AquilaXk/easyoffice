@@ -1,6 +1,5 @@
-//! What the native menu bar shows for each window (PD-102): the marks of the theme and update-check
-//! items, the items grayed out for the window's module, and, on Windows and Linux, whether the bar
-//! is shown at all.
+//! What the native menu bar (macOS only, PD-121) shows for each window (PD-102): the marks of the
+//! theme and update-check items and the items grayed out for the window's module.
 //!
 //! The menu bar is one set of items shared by all windows, so the state belongs to the window that
 //! has the focus: every window reports its own state to Rust ([`report_menu_state`], when its
@@ -9,8 +8,7 @@
 //!
 //! The page owns the module rules (`studioCommandApplies`, the same rule that grays out the page's own
 //! menu items), so it sends the ids of the items its module cannot use; nothing is duplicated here.
-//! Every id is checked against the item table. A window that hosts the Hangul editor brings its own
-//! complete menu row, so on Windows and Linux its native bar is hidden (one menu, never two).
+//! Every id is checked against the item table.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -27,8 +25,6 @@ use crate::windows::is_window_label;
 pub struct WindowMenu {
     theme: &'static str,
     disabled: HashSet<String>,
-    /// The Hangul editor's own menu row is shown in this window.
-    embed: bool,
 }
 
 impl Default for WindowMenu {
@@ -36,14 +32,13 @@ impl Default for WindowMenu {
         Self {
             theme: "system",
             disabled: HashSet::new(),
-            embed: false,
         }
     }
 }
 
 impl WindowMenu {
     /// Checks a report: the theme must be a known mode and every id an item of the table.
-    pub fn parse(theme: &str, disabled: Vec<String>, embed: bool) -> Result<Self, String> {
+    pub fn parse(theme: &str, disabled: Vec<String>) -> Result<Self, String> {
         if disabled.len() > ITEMS.len() {
             return Err("메뉴 항목 목록이 너무 깁니다.".to_string());
         }
@@ -60,7 +55,6 @@ impl WindowMenu {
         Ok(Self {
             theme,
             disabled: disabled.into_iter().collect(),
-            embed,
         })
     }
 }
@@ -85,20 +79,8 @@ impl MenuStates {
     }
 }
 
-/// Windows and Linux hold a menu bar per window: the Hangul editor's window hides it.
-#[cfg(not(target_os = "macos"))]
-fn set_bar_visible(window: &WebviewWindow, visible: bool) -> tauri::Result<()> {
-    if visible {
-        window.show_menu()
-    } else {
-        window.hide_menu()
-    }
-}
-
-/// macOS has one bar for the whole app: nothing to hide.
-#[cfg(target_os = "macos")]
-fn set_bar_visible(_window: &WebviewWindow, _visible: bool) -> tauri::Result<()> {
-    Ok(())
+pub fn forget(app: &AppHandle, label: &str) {
+    app.state::<MenuStates>().forget(label);
 }
 
 /// Shows the focused window's state on the bar.
@@ -130,8 +112,15 @@ pub fn refresh(app: &AppHandle) -> Result<(), String> {
     .map_err(|err| format!("메뉴를 갱신하지 못했습니다: {err}"))
 }
 
-/// A window reports its theme, the items its module cannot use and whether the editor's own menu
-/// row is shown.
+/// Shows the focused window's state on the bar; a failure is only logged (the bar is a convenience
+/// and never stops the window's own work).
+pub fn refresh_logged(app: &AppHandle) {
+    if let Err(error) = refresh(app) {
+        eprintln!("[menu] {error}");
+    }
+}
+
+/// A window reports its theme and the items its module cannot use.
 #[tauri::command]
 pub fn report_menu_state(
     _caller: ShellCaller,
@@ -139,17 +128,14 @@ pub fn report_menu_state(
     window: WebviewWindow,
     theme: String,
     disabled: Vec<String>,
-    embed: bool,
 ) -> Result<(), crate::IpcError> {
     if !is_window_label(window.label()) {
         return Ok(());
     }
-    let state = WindowMenu::parse(&theme, disabled, embed).map_err(crate::IpcError::new)?;
+    let state = WindowMenu::parse(&theme, disabled).map_err(crate::IpcError::new)?;
     app.state::<MenuStates>()
         .states()
         .insert(window.label().to_string(), state);
-    set_bar_visible(&window, !embed)
-        .map_err(|err| crate::IpcError::new(format!("메뉴 막대를 바꾸지 못했습니다: {err}")))?;
     refresh(&app).map_err(crate::IpcError::new)
 }
 
@@ -163,14 +149,14 @@ mod tests {
 
     #[test]
     fn a_report_is_accepted_only_with_a_known_theme_and_known_items() {
-        let ok = WindowMenu::parse("dark", ids(&["table:sort", "edit:undo"]), true).unwrap();
+        let ok = WindowMenu::parse("dark", ids(&["table:sort", "edit:undo"])).unwrap();
         assert_eq!(ok.theme, "dark");
-        assert!(ok.embed && ok.disabled.contains("table:sort"));
-        assert!(WindowMenu::parse("purple", Vec::new(), false).is_err());
-        assert!(WindowMenu::parse("light", ids(&["app:quit"]), false).is_err());
-        assert!(WindowMenu::parse("light", ids(&["nope"]), false).is_err());
+        assert!(ok.disabled.contains("table:sort"));
+        assert!(WindowMenu::parse("purple", Vec::new()).is_err());
+        assert!(WindowMenu::parse("light", ids(&["app:quit"])).is_err());
+        assert!(WindowMenu::parse("light", ids(&["nope"])).is_err());
         let too_many = vec!["table:sort".to_string(); ITEMS.len() + 1];
-        assert!(WindowMenu::parse("light", too_many, false).is_err());
+        assert!(WindowMenu::parse("light", too_many).is_err());
     }
 
     #[test]
@@ -179,7 +165,7 @@ mod tests {
         assert_eq!(states.get("doc-1"), WindowMenu::default());
         states.states().insert(
             "doc-1".to_string(),
-            WindowMenu::parse("dark", Vec::new(), false).unwrap(),
+            WindowMenu::parse("dark", Vec::new()).unwrap(),
         );
         assert_eq!(states.get("doc-1").theme, "dark");
         states.forget("doc-1");

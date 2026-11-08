@@ -27,6 +27,7 @@
     takePendingOpen: "take_pending_open",
     reportWindowState: "report_window_state",
     closeCurrentWindow: "close_current_window",
+    quitApp: "quit_app",
     listRecentDocuments: "list_recent_documents",
     openRecentDocument: "open_recent_document",
     recentPreview: "get_recent_preview",

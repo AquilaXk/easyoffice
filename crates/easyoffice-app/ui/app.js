@@ -165,7 +165,7 @@
     getDocumentId: () => windowBridge.launch.windowId,
     onDirtyChange: (unsaved) => windowBridge.setDirty(unsaved),
     isDesktopShell: () => desktopBridge.isAvailable(),
-    onMenuContext: (commandModule, embed) => shellChrome.pushMenuState(commandModule, embed),
+    onMenuContext: (commandModule) => shellChrome.pushMenuState(commandModule),
   });
 
   slideStudio = host.__EASYOFFICE_CREATE_SLIDE_STUDIO__({
@@ -222,6 +222,8 @@
   // The editor's 파일 menu forwards shell commands (whitelisted in hwp-host.js); these run them.
   const shellChrome = host.__EASYOFFICE_CREATE_SHELL_CHROME__({
     document, hwpHost, icons, ribbonState: localRibbonState,
+    // Only macOS has a native menu bar that needs the window's state (PD-121).
+    hasNativeMenu: () => activeShortcutModifier === "⌘",
     actions: {
       newDocument: () => windowBridge.newDocument("HWP"), openFile: () => fileOpen.openFilePicker(),
       openRecent: (id) => windowBridge.openRecent(id), save: () => saveWorkspaceDocument(),
@@ -780,6 +782,7 @@
       "recent-dialog": () => void windowBridge.chooseRecent().catch(() => {}),
       "file-new": () => void windowBridge.newDocument(activeModule).catch((err) => setStatusFeedback(err?.message || String(err))),
       "window-close": () => void windowBridge.requestClose().catch(() => {}),
+      "app-quit": () => void windowBridge.requestQuit().catch(() => {}),
       "hwp-print": () => void hwpPrint.print().catch((err) => setStatusFeedback(err?.message || String(err))),
       "studio-save": () => void saveWorkspaceDocument().catch(() => {}),
       "studio-undo": () => void ribbonHistory.performWorkspaceUndo().catch(() => {}),

@@ -349,11 +349,7 @@ fn attach_handlers(app: &AppHandle, window: &WebviewWindow) {
             // again) or shows it anew if it lost it, e.g. after a reload.
             let _ = window.eval(CLOSE_REQUEST_SCRIPT);
         }
-        WindowEvent::Focused(true) => {
-            if let Err(error) = crate::menu_state::refresh(&app) {
-                eprintln!("[menu] {error}");
-            }
-        }
+        WindowEvent::Focused(true) => crate::menu_state::refresh_logged(&app),
         WindowEvent::Moved(_) | WindowEvent::Resized(_) => {
             if let Some(window) = app.get_webview_window(&label) {
                 note_geometry(&app, &window);
@@ -366,7 +362,7 @@ fn attach_handlers(app: &AppHandle, window: &WebviewWindow) {
             locked(&state.registry).remove(&label);
             locked(&state.pending).discard(&label);
             locked(&state.files).untrack(&label);
-            app.state::<crate::menu_state::MenuStates>().forget(&label);
+            crate::menu_state::forget(&app, &label);
             crate::app_quit::window_destroyed(&app, &label);
             if let Some(probe) = app.try_state::<SmokeProbe>() {
                 probe.window_closed(&label);

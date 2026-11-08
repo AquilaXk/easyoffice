@@ -34,9 +34,6 @@
    line, so the shell's menu row, zoom group and status bar give way. Shell notices become toasts. */
 .app-shell[data-hwp-embed="true"] #menu-bar,
 .app-shell[data-hwp-embed="true"] #status-bar { display: none; }
-/* The desktop shell installs a native menu bar (PD-102): the page's own menu row gives way to it. The
-   command-palette button and theme toggle beside it stay. */
-.app-shell[data-native-menu="true"] .studio-menubar { display: none; }
 /* ---- toolbar labels --------------------------------------------------------------------------- */
 .formula-bar label { font-size: 12px; color: var(--ui-text-muted); white-space: nowrap; flex-shrink: 0; }
 .slide-notes-box label { font-size: 12px; color: var(--ui-text-muted); white-space: nowrap; }

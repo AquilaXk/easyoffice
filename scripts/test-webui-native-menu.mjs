@@ -5,8 +5,9 @@ import { fileURLToPath } from "node:url";
 import { loadUiModule } from "./test-support/load-ui-module.mjs";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 
-// The native menu bar (PD-102), on every OS: the Rust table and the page's list name the same ids and actions, the
-// page runs them through the shortcut handlers, and the shell grants the page nothing for it.
+// The native menu bar (PD-102, macOS only since PD-121): the Rust table and the page's list name the same ids and
+// actions, the page runs them through the shortcut handlers, and the shell grants the page nothing for it. The page's
+// own menu row is drawn on every OS, as in the reference app.
 
 const REPO = new URL("../", import.meta.url);
 const read = (rel) => fs.readFileSync(fileURLToPath(new URL(rel, REPO)), "utf8");
@@ -154,25 +155,25 @@ function pageMenuItemActions() {
   return found;
 }
 
-test("every item of the page's menu bar is in the native menu (nothing is lost when the page menu is hidden)", () => {
+test("every item of the page's menu bar is in the native menu (nothing is lost on macOS)", () => {
   const native = new Set(rustItems().map((r) => r.action));
-  // The edit items macOS draws as system items still keep their table entry (Windows and Linux use it).
+  // The edit items macOS draws as system items still keep their table entry (the page menu has them).
   const missing = pageMenuItemActions().filter((action) => !native.has(action));
   assert.deepEqual([...new Set(missing)], []);
   assert.ok(pageMenuItemActions().length >= 60, "the page menu was parsed");
 });
 
-test("the page menu bar gives way once the desktop shell is present, and not otherwise", async () => {
-  const shell = await createWorkspaceHarness({
-    shellCommands: { get_workspace_bootstrap: () => null },
-  });
-  await flushAsyncTurns(10);
-  assert.equal(shell.document.getElementById("app").dataset.nativeMenu, "true");
-  const plain = await createWorkspaceHarness();
-  await flushAsyncTurns(10);
-  assert.notEqual(plain.document.getElementById("app").dataset.nativeMenu, "true", "--serve and browsers keep the page menu");
+test("the page menu row is drawn in every window of every OS, the desktop shell included (the reference app does the same)", async () => {
+  for (const platform of ["Win32", "Linux x86_64", "MacIntel"]) {
+    const shell = await createWorkspaceHarness({ platform, shellCommands: { get_workspace_bootstrap: () => null } });
+    await flushAsyncTurns(10);
+    assert.equal(shell.document.getElementById("app").dataset.nativeMenu, undefined, `${platform}: no flag hides the row`);
+    assert.ok(shell.document.querySelector(".studio-menubar .menu-title"), platform);
+  }
   const css = read("crates/easyoffice-app/ui/shell.css");
-  assert.match(css, /\.app-shell\[data-native-menu="true"\] \.studio-menubar \{ display: none; \}/);
+  assert.ok(!css.includes("data-native-menu") && !/\.studio-menubar \{ display: none/.test(css), "no rule hides the menu row");
+  const hwp = read("crates/easyoffice-app/ui/workspace-session.js");
+  assert.ok(!hwp.includes("nativeMenu"), "the page no longer marks the window as having a native menu");
 });
 
 test("Actual size (view:zoom-100 and the page menu's 100% item) resets any zoom to 100%, not the next step", async () => {
@@ -222,10 +223,10 @@ test("file items reach the same handlers as their shortcuts", async () => {
   await flushAsyncTurns(6);
 });
 
-test("the shell installs the menu on every OS and grants the page no event permission", () => {
+test("the shell installs the native menu on macOS only and grants the page no event permission", () => {
   const main = read("crates/easyoffice-desktop/src/main.rs");
-  assert.match(main, /native_menu::install\(app\)\?;/);
-  assert.ok(!/cfg\(target_os = "macos"\)\]\s*native_menu::install/.test(main), "not limited to macOS");
+  assert.match(main, /#\[cfg\(target_os = "macos"\)\]\s*\{\s*app\.manage\(menu_state::MenuStates::default\(\)\);\s*native_menu::install\(app\)\?;/);
+  assert.ok(!/set_menu/.test(main), "Windows and Linux get no menu bar at all");
   const capability = JSON.parse(read("crates/easyoffice-desktop/capabilities/main-window.json"));
   assert.ok(capability.permissions.every((p) => !p.includes("event") && !p.startsWith("core:")), "no event or core permission is added for the menu");
   const menu = read("crates/easyoffice-desktop/src/native_menu.rs");

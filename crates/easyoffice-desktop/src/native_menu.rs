@@ -1,10 +1,13 @@
-//! Native menu bar (PD-102), installed on every OS.
+//! Native menu bar (PD-102, PD-121): macOS only.
 //!
-//! The desktop shell draws one menu bar and the page hides its own (`data-native-menu`), so every
-//! item of the page's menu bar is in [`ITEMS`] (a test compares both). Adapted from the reference app
-//! `apps/desktop/src-tauri/src/menu.rs` (MIT, Copyright (c) 2025-2026 Edward Kim, see
-//! THIRD_PARTY_NOTICES.md): the same menu layout, the same "menu id -> the focused window only"
-//! delivery and the same quit item (`app:quit`, [`QUIT_ID`]), with EasyOffice's differences:
+//! The reference app installs a native menu only on macOS and draws the page's own menu row on every
+//! OS (`apps/desktop/src-tauri/src/lib.rs:8-9,67-70`, `apps/studio-host/src/main.ts:154`). So does
+//! EasyOffice: Windows and Linux have no native bar (the page's menu row is their menu), and macOS has
+//! this bar beside the page's row. Every item of the page's menu row is in [`ITEMS`] (a test compares
+//! both). Adapted from the reference app `apps/desktop/src-tauri/src/menu.rs` (MIT, Copyright (c)
+//! 2025-2026 Edward Kim, see THIRD_PARTY_NOTICES.md): the same menu layout, the same "menu id -> the
+//! focused window only" delivery and the same quit item (`app:quit`, [`QUIT_ID`]), with EasyOffice's
+//! differences:
 //!
 //! * One static table ([`ITEMS`]) holds every custom item: its id, label, accelerator and the
 //!   page action it runs. The page keeps the matching list (`NATIVE_MENU_ACTIONS` in
@@ -15,20 +18,16 @@
 //!   rules (an item that does not apply in the window's module does nothing) stay the page's.
 //! * The page is called by evaluating a fixed script with the item's static id; no event
 //!   permission is added to the capability, and the id never comes from the page.
-//! * Labels are Korean on every OS. Accelerators follow the OS (`CmdOrCtrl`). Only items whose
-//!   keys the page does not already handle for the focused editor carry one: the editing keys
-//!   (bold, undo, copy and the like) stay with the editor.
-//! * macOS: the application menu (about, services, hide, 끝내기) and the 윈도우 menu hold system
-//!   items with Korean labels (nothing is left to the system language). The reference app's edit
-//!   menu: undo, redo, cut and copy are the table's items with their ⌘ keys ([`MACOS_EDIT_KEYS`]), so
-//!   they reach the page (and in the Hangul editor its own undo stack through `automation.execute`,
+//! * Labels are Korean. Only items whose keys the page does not already handle for the focused
+//!   editor carry an accelerator: the editing keys (bold and the like) stay with the editor.
+//! * The application menu (about, services, hide, 끝내기) and the 윈도우 menu hold system items with
+//!   Korean labels (nothing is left to the system language). The reference app's edit menu: undo,
+//!   redo, cut and copy are the table's items with their ⌘ keys ([`MACOS_EDIT_KEYS`]), so they
+//!   reach the page (and in the Hangul editor its own undo stack through `automation.execute`,
 //!   `EMBED_EDITOR_COMMANDS`); only paste and select all are system items. 닫기 is the 윈도우
-//!   menu's system item and the only ⌘W (the 파일 menu has none on macOS). 끝내기 ([`QUIT_ID`], ⌘Q)
-//!   is a custom item on every OS (macOS: application menu, Windows and Linux: end of the 파일
-//!   menu), handled in Rust by `app_quit.rs`, so it is not in the table and has no page action;
-//!   the Dock's 종료 reaches the same queue through `RunEvent::ExitRequested` (`main.rs`).
-//!   Windows and Linux have no system undo/redo (and no application menu), so their edit menu uses
-//!   the table's items without keys.
+//!   menu's system item and the only ⌘W. 끝내기 ([`QUIT_ID`], ⌘Q) is a custom item at the end of the
+//!   application menu, handled in Rust by `app_quit.rs`, so it is not in the table and has no page
+//!   action; the Dock's 종료 reaches the same queue through `RunEvent::ExitRequested` (`main.rs`).
 //! * The theme choices and the update-check switch are check items; the 'enabled' and 'checked'
 //!   state of the bar follows the focused window ([`sync`], fed by `menu_state.rs`).
 //!   The disabled ids come from the page, which owns the module rules (`studioCommandApplies`).
@@ -459,20 +458,16 @@ pub const ITEMS: &[MenuItemSpec] = &[
     ),
 ];
 
-/// 끝내기: the application menu on macOS, the end of the 파일 menu elsewhere. It runs in Rust
+/// 끝내기: the end of the application menu. It runs in Rust
 /// (`app_quit.rs`), not in the page, so it is not in [`ITEMS`]; id and accelerator are the
 /// reference app's.
 pub const QUIT_ID: &str = "app:quit";
-const QUIT_LABEL: &str = if cfg!(target_os = "macos") {
-    "EasyOffice 끝내기"
-} else {
-    "끝내기"
-};
+const QUIT_LABEL: &str = "EasyOffice 끝내기";
 const QUIT_ACCELERATOR: &str = "CmdOrCtrl+Q";
 
-/// The keys the macOS edit menu gives the table's undo, redo, cut and copy items (the reference
-/// app's). A key bound to a menu item never reaches the page, so only macOS binds them: its web
-/// view runs copy and the like only through a menu key. Elsewhere the editor takes the keys.
+/// The keys the edit menu gives the table's undo, redo, cut and copy items (the reference app's).
+/// A key bound to a menu item never reaches the page, so the web view runs copy and the like only
+/// through a menu key (the page's own menu row, on the other OSes, leaves the keys to the editor).
 const MACOS_EDIT_KEYS: [(&str, &str); 4] = [
     ("edit:undo", "CmdOrCtrl+Z"),
     ("edit:redo", "CmdOrCtrl+Shift+Z"),
@@ -480,12 +475,12 @@ const MACOS_EDIT_KEYS: [(&str, &str); 4] = [
     ("edit:copy", "CmdOrCtrl+C"),
 ];
 
-/// The key an item of the table gets on this OS.
+/// The key an item of the table gets.
 fn accelerator_of(spec: &MenuItemSpec) -> Option<&'static str> {
     spec.accelerator.or_else(|| {
         MACOS_EDIT_KEYS
             .iter()
-            .find(|(id, _)| cfg!(target_os = "macos") && *id == spec.id)
+            .find(|(id, _)| *id == spec.id)
             .map(|(_, keys)| *keys)
     })
 }
@@ -566,16 +561,17 @@ fn spec(id: &str) -> &'static MenuItemSpec {
         .expect("menu id is in the table")
 }
 
-/// Table items macOS does not install as custom items: paste is the system item (it reaches the
+/// Table items the bar does not install as custom items: paste is the system item (it reaches the
 /// page's paste handler and text fields), and 닫기 is the 윈도우 menu's system item, the one ⌘W.
+/// They stay in the table because the page's menu row has them.
 const MACOS_SYSTEM_IDS: &[&str] = &["edit:paste", "file:close"];
 
-/// The custom ids the menu bar of this OS holds.
+/// The custom ids the menu bar holds.
 pub fn installed_ids() -> impl Iterator<Item = &'static str> {
     ITEMS
         .iter()
         .map(|spec| spec.id)
-        .filter(|id| !(cfg!(target_os = "macos") && MACOS_SYSTEM_IDS.contains(id)))
+        .filter(|id| !MACOS_SYSTEM_IDS.contains(id))
 }
 
 const SEPARATOR: &str = "-";
@@ -646,6 +642,7 @@ fn file_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
     )?;
     let mut lines = entries(&["file:new"]);
     lines.push(Entry::Sub(kinds));
+    // 닫기 is the 윈도우 menu's (the only ⌘W) and 끝내기 is in the application menu.
     lines.extend(entries(&[
         "file:open",
         "file:open-recent",
@@ -653,20 +650,10 @@ fn file_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
         "file:save",
         "file:save-as",
     ]));
-    // macOS: 닫기 is the 윈도우 menu's (the only ⌘W) and 끝내기 is in the application menu.
-    if !cfg!(target_os = "macos") {
-        lines.extend(entries(&[SEPARATOR, "file:close", SEPARATOR, QUIT_ID]));
-    }
     submenu(app, "파일", lines)
 }
 
 fn edit_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
-    if !cfg!(target_os = "macos") {
-        let ids = ["edit:undo", "edit:redo", SEPARATOR, "edit:cut", "edit:copy"];
-        let mut lines = entries(&ids);
-        lines.extend(entries(&["edit:paste", SEPARATOR, "edit:find"]));
-        return submenu(app, "편집", lines);
-    }
     SubmenuBuilder::new(app, "편집")
         .item(&custom(app, spec("edit:undo"))?)
         .item(&custom(app, spec("edit:redo"))?)
@@ -814,24 +801,15 @@ fn window_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
         .build()
 }
 
-/// 도움말: the About item lives in the application menu on macOS and here elsewhere.
+/// 도움말: the About item lives in the application menu.
 fn help_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
-    let about = if cfg!(target_os = "macos") {
-        Vec::new()
-    } else {
-        entries(&["app:about", SEPARATOR])
-    };
-    let mut lines = about;
-    lines.extend(entries(&["help:update-check"]));
-    submenu(app, "도움말", lines)
+    submenu(app, "도움말", entries(&["help:update-check"]))
 }
 
 /// Builds the whole menu bar.
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let menu = Menu::new(app)?;
-    if cfg!(target_os = "macos") {
-        menu.append(&app_menu(app)?)?;
-    }
+    menu.append(&app_menu(app)?)?;
     menu.append(&file_menu(app)?)?;
     menu.append(&edit_menu(app)?)?;
     menu.append(&view_menu(app)?)?;
@@ -840,9 +818,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     menu.append(&page_menu(app)?)?;
     menu.append(&table_menu(app)?)?;
     menu.append(&tool_menu(app)?)?;
-    if cfg!(target_os = "macos") {
-        menu.append(&window_menu(app)?)?;
-    }
+    menu.append(&window_menu(app)?)?;
     menu.append(&help_menu(app)?)?;
     Ok(menu)
 }
@@ -933,9 +909,7 @@ fn run_item(app: &AppHandle, id: &str) {
         let _ = window.eval(&script);
     }
     // The system flips a check item when it is clicked; the bar shows the state again.
-    if let Err(error) = crate::menu_state::refresh(app) {
-        eprintln!("[menu] {error}");
-    }
+    crate::menu_state::refresh_logged(app);
 }
 
 #[cfg(test)]
@@ -1047,7 +1021,12 @@ mod tests {
                     .is_some_and(|(group, _)| GROUPS.contains(&group))
             })
             .collect();
-        let table: std::collections::BTreeSet<&str> = ITEMS.iter().map(|spec| spec.id).collect();
+        // 닫기 is the 윈도우 menu's system item; every other table item is built by a menu function.
+        let table: std::collections::BTreeSet<&str> = ITEMS
+            .iter()
+            .map(|spec| spec.id)
+            .filter(|id| *id != "file:close")
+            .collect();
         assert_eq!(used, table);
     }
 
@@ -1092,12 +1071,12 @@ mod tests {
     }
 
     #[test]
-    fn only_macos_leaves_paste_and_close_to_system_items() {
+    fn paste_and_close_are_system_items_that_stay_in_the_table_for_the_page_menu() {
         let ids: Vec<&str> = installed_ids().collect();
         assert_eq!(MACOS_SYSTEM_IDS, ["edit:paste", "file:close"]);
         for id in MACOS_SYSTEM_IDS {
             assert!(ITEMS.iter().any(|spec| spec.id == *id), "{id}");
-            assert_eq!(ids.contains(id), !cfg!(target_os = "macos"), "{id}");
+            assert!(!ids.contains(id), "{id} is a system item");
         }
         for id in [
             "edit:undo",
@@ -1106,13 +1085,13 @@ mod tests {
             "edit:copy",
             "edit:find",
         ] {
-            assert!(ids.contains(&id), "{id} is a custom item on every OS");
+            assert!(ids.contains(&id), "{id} is a custom item");
         }
         assert!(ids.contains(&"app:about"));
     }
 
     #[test]
-    fn editing_keys_stay_with_the_focused_editor_except_the_macos_edit_menu_keys() {
+    fn editing_keys_stay_with_the_focused_editor_except_the_edit_menu_keys() {
         for spec in ITEMS
             .iter()
             .filter(|spec| spec.id.starts_with("format:") || spec.id.starts_with("edit:"))
@@ -1121,12 +1100,7 @@ mod tests {
             assert_eq!(spec.accelerator, None, "{}", spec.id);
             let bound = accelerator_of(spec);
             let macos_key = MACOS_EDIT_KEYS.iter().find(|(id, _)| *id == spec.id);
-            assert_eq!(
-                bound,
-                macos_key
-                    .filter(|_| cfg!(target_os = "macos"))
-                    .map(|(_, keys)| *keys)
-            );
+            assert_eq!(bound, macos_key.map(|(_, keys)| *keys));
         }
     }
 
@@ -1163,27 +1137,20 @@ mod tests {
         assert!(MACOS_EDIT_KEYS
             .iter()
             .all(|(_, keys)| *keys != QUIT_ACCELERATOR));
-        assert_eq!(
-            QUIT_LABEL,
-            if cfg!(target_os = "macos") {
-                "EasyOffice 끝내기"
-            } else {
-                "끝내기"
-            }
-        );
+        assert_eq!(QUIT_LABEL, "EasyOffice 끝내기");
     }
 
-    /// `run_item` hands the quit item to the queue on every OS (it once skipped macOS, where the
-    /// id then fell through to `dispatch_script`, which has none, and ⌘Q did nothing).
+    /// `run_item` hands the quit item to the queue (it once skipped macOS, where the id then fell
+    /// through to `dispatch_script`, which has none, and ⌘Q did nothing).
     #[test]
-    fn run_item_sends_the_quit_item_to_the_queue_on_every_os() {
+    fn run_item_sends_the_quit_item_to_the_queue() {
         let source = include_str!("native_menu.rs");
         let production = source.split("#[cfg(test)]").next().unwrap();
         let run_item = &production[production.find("fn run_item").unwrap()..];
         let quit = &run_item[..run_item.find("dispatch_script(id)").unwrap()];
         assert!(quit.contains("if id == QUIT_ID {"));
         assert!(quit.contains("crate::app_quit::request_app_quit(app);"));
-        assert!(!quit.contains("cfg"), "no OS is skipped");
+        assert!(!quit.contains("cfg"), "no condition is skipped");
     }
 
     /// The macOS layout (source check, the menu itself needs a running app): the application menu
@@ -1201,8 +1168,7 @@ mod tests {
         assert!(app.contains(".item(&quit_item(app)?)"));
         assert!(!app.contains(".quit()") && !app.contains("PredefinedMenuItem::quit"));
         let file = section("fn file_menu", "fn edit_menu");
-        let on_macos = &file[..file.find("if !cfg!(target_os = \"macos\")").unwrap()];
-        assert!(!on_macos.contains("file:close") && !on_macos.contains("QUIT_ID"));
+        assert!(!file.contains("file:close") && !file.contains("QUIT_ID"));
         let window = section("fn window_menu", "fn help_menu");
         assert!(window.contains("PredefinedMenuItem::close_window(app, Some(\"닫기\"))"));
         let edit = section("fn edit_menu", "fn view_menu");

@@ -5,19 +5,21 @@ import { fileURLToPath } from "node:url";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { switchModule } from "./test-support/modules.mjs";
 
-// What the native menu bar shows for a window (PD-102, menu_state.rs): the page reports its theme, the
-// items its module cannot use (the page's own `studioCommandApplies` rule) and whether the Hangul
-// editor's own menu row is shown. The Rust side applies the focused window's report to the bar.
+// What the native menu bar shows for a window (PD-102, menu_state.rs): the page reports its theme and the
+// items its module cannot use (the page's own `studioCommandApplies` rule). The Rust side applies the
+// focused window's report to the bar. Only macOS has that bar (PD-121): the page of Windows and Linux
+// reports nothing.
 
 const REPO = new URL("../", import.meta.url);
 const byName = (a, b) => a.localeCompare(b);
 const read = (rel) => fs.readFileSync(fileURLToPath(new URL(rel, REPO)), "utf8");
 
-async function shellPage(search = "?module=DOC&win=w-menu-state") {
+async function shellPage(search = "?module=DOC&win=w-menu-state", platform = "MacIntel") {
   const reports = [];
   const closes = [];
   const harness = await createWorkspaceHarness({
     search,
+    platform,
     shellCommands: {
       report_menu_state: (args) => { reports.push(args); return null; },
       end_close_prompt: () => { closes.push("end-prompt"); return null; },
@@ -39,14 +41,22 @@ function tableCommands(page) {
     .map(([id, action]) => [id, action.slice("studio-cmd:".length)]);
 }
 
-test("a window reports its theme, module and editor state to the shell", async () => {
+test("a window reports its theme and module state to the shell", async () => {
   const { reports } = await shellPage();
   const last = reports.at(-1);
   assert.ok(last, "the window reported its state at start");
-  assert.deepEqual(Object.keys(last).sort(byName), ["disabled", "embed", "theme"]);
+  assert.deepEqual(Object.keys(last).sort(byName), ["disabled", "theme"]);
   assert.equal(last.theme, "system");
-  assert.equal(last.embed, false);
   assert.ok(Array.isArray(last.disabled));
+});
+
+test("Windows and Linux have no native bar, so their windows report nothing", async () => {
+  for (const platform of ["Win32", "Linux x86_64"]) {
+    const { document, reports } = await shellPage("?module=DOC&win=w-no-bar", platform);
+    document.querySelector('[data-theme-mode-choice="dark"]').click();
+    await flushAsyncTurns(10);
+    assert.deepEqual(reports, [], platform);
+  }
 });
 
 test("the disabled ids are exactly the table items the page's own rule refuses in the window's module", async () => {
@@ -80,14 +90,17 @@ test("the same rule grays out different items per module: sheet-only items are o
   assert.ok(reports.at(-1).disabled.includes("insert:toc"));
 });
 
-test("the editor's menu row and the native bar are never both shown: the Hangul embed reports embed=true", () => {
+test("the native bar and its state exist on macOS only; the other OSes keep no per-window menu state", () => {
   const session = read("crates/easyoffice-app/ui/workspace-session.js");
-  assert.match(session, /deps\.onMenuContext\(commandModule, embed\)/, "the module context carries the embed flag");
+  assert.match(session, /deps\.onMenuContext\(commandModule\)/);
   const app = read("crates/easyoffice-app/ui/app.js");
-  assert.match(app, /onMenuContext: \(commandModule, embed\) => shellChrome\.pushMenuState\(commandModule, embed\)/);
+  assert.match(app, /hasNativeMenu: \(\) => activeShortcutModifier === "⌘"/);
+  const main = read("crates/easyoffice-desktop/src/main.rs");
+  assert.match(main, /#\[cfg\(target_os = "macos"\)\]\nmod menu_state;/);
+  assert.match(main, /#\[cfg\(target_os = "macos"\)\]\nmod native_menu;/);
+  assert.match(main, /#\[cfg\(target_os = "macos"\)\]\s*menu_state::report_menu_state,/);
   const rust = read("crates/easyoffice-desktop/src/menu_state.rs");
-  assert.match(rust, /set_bar_visible\(&window, !embed\)/);
-  assert.match(rust, /window\.hide_menu\(\)/);
+  assert.ok(!/hide_menu|show_menu|embed/.test(rust), "no bar is hidden per window: the page's menu row is the menu elsewhere");
 });
 
 test("a theme change reaches the shell with the new mode, and an unchanged state is not sent twice", async () => {
@@ -130,6 +143,7 @@ test("a menu report that did not arrive is sent again", async () => {
   const reports = [];
   const { document } = await createWorkspaceHarness({
     search: "?module=DOC&win=w-retry",
+    platform: "MacIntel",
     shellCommands: {
       report_menu_state: (args) => {
         reports.push(args);
@@ -159,12 +173,16 @@ test("the menu state and close prompt commands are window commands of the bridge
   }
 });
 
-test("the quit item is Rust-only: 끝내기 ends the 파일 menu on Windows and Linux, 끝내기 closes the macOS application menu, and it has no page action", () => {
+test("the native quit item is Rust-only (it closes the macOS application menu and has no page action); elsewhere the page quits through quit_app", () => {
   const menu = read("crates/easyoffice-desktop/src/native_menu.rs");
-  assert.match(menu, /lines\.extend\(entries\(&\[SEPARATOR, "file:close", SEPARATOR, QUIT_ID\]\)\)/);
-  assert.match(menu, /"EasyOffice 끝내기"\n\} else \{\n    "끝내기"/);
+  assert.match(menu, /const QUIT_LABEL: &str = "EasyOffice 끝내기";/);
+  assert.ok(!menu.includes("QUIT_ID]"), "not in the 파일 menu");
   const chrome = read("crates/easyoffice-app/ui/shell-chrome.js");
-  assert.ok(!chrome.includes("app:quit") && !chrome.includes("file:quit"), "the page cannot quit the app");
+  assert.ok(!chrome.includes("app:quit") && !chrome.includes("file:quit"), "the native table has no page action for it");
+  assert.match(read("crates/easyoffice-app/ui/desktop-bridge.js"), /quitApp: "quit_app"/);
+  const commands = read("crates/easyoffice-desktop/src/app_commands.rs");
+  const capability = JSON.parse(read("crates/easyoffice-desktop/capabilities/main-window.json"));
+  assert.ok(commands.includes('"quit_app"') && capability.permissions.includes("allow-quit-app"));
 });
 
 test("the check items are the three themes and the update switch", () => {
@@ -187,11 +205,11 @@ test("in the Hangul editor window the zoom and cell items are enabled, and the e
   const shellChrome = page.__EASYOFFICE_CREATE_SHELL_CHROME__({
     document,
     hwpHost: { setShellContext: () => Promise.resolve() },
+    hasNativeMenu: () => true,
     desktopBridge: { isAvailable: () => true, windowCommand: (_name, state) => { sent.push(state); return Promise.resolve(); } },
   });
   shellChrome.applyStoredTheme();
-  shellChrome.pushMenuState("HWP_EMBED", true);
+  shellChrome.pushMenuState("HWP_EMBED");
   const last = sent.at(-1);
-  assert.equal(last.embed, true);
   for (const id of Object.keys(EMBED_EDITOR_COMMANDS)) assert.ok(!last.disabled.includes(id), `${id} is enabled in the editor window`);
 });

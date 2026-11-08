@@ -388,6 +388,7 @@
     { keys: "Ctrl+O", action: "file-open", forwardFromEditor: true },
     { keys: "Ctrl+N", action: "file-new", desktopOnly: true, forwardFromEditor: true },
     { keys: "Ctrl+W", action: "window-close", desktopOnly: true, forwardFromEditor: true },
+    { keys: "Ctrl+Q", action: "app-quit", desktopOnly: true, forwardFromEditor: true },
     { keys: "Ctrl+S", action: "studio-save", forwardFromEditor: true },
     { keys: "Ctrl+Z", action: "studio-undo" },
     { keys: "Ctrl+Y", action: "studio-redo" },

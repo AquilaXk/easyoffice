@@ -9,7 +9,7 @@
 //!   names of [`PAGE_STEPS`].
 //! * Shell steps run here and are reported directly: `window_state` (the remembered-geometry file),
 //!   `preview` (the thumbnail of a sample Hangul file), `update` (the update request against a
-//!   one-shot server on `127.0.0.1`), and `menu` (every custom menu id is installed).
+//!   one-shot server on `127.0.0.1`), and `menu` (macOS: every custom menu id is installed; Windows and Linux: there is no native bar, the page draws the menu row).
 //!
 //! The sample file is the rhwp `shift-return.hwp` fixture, found through the compile-time manifest
 //! directory. That is valid here because the smoke run exists only for CI, which builds and starts the
@@ -355,14 +355,16 @@ pub fn update_check_step(app_version: &str) -> Result<String, String> {
 // ---- menu --------------------------------------------------------------------------------------
 
 /// What the smoke run reads from the installed menu bar: every item id, and the ids of the check items.
+#[cfg(target_os = "macos")]
 struct InstalledMenu {
     ids: Vec<String>,
     checks: Vec<String>,
 }
 
-/// Checks that every custom item this OS's menu bar holds is among the installed menu ids and has a
+/// Checks that every custom item the menu bar holds is among the installed menu ids and has a
 /// page action script (the quit item runs in Rust and is checked on its own), that the theme and
-/// update-check items are check items, and that 끝내기 is in the menu on every OS.
+/// update-check items are check items, and that 끝내기 is in the menu.
+#[cfg(target_os = "macos")]
 fn check_menu(installed: &InstalledMenu) -> Result<(), String> {
     let have = |id: &str| installed.ids.iter().any(|have| have == id);
     let mut missing: Vec<&str> = crate::native_menu::installed_ids()
@@ -388,6 +390,7 @@ fn check_menu(installed: &InstalledMenu) -> Result<(), String> {
 }
 
 /// The installed menu bar holds every custom item of the table, the check items and 끝내기.
+#[cfg(target_os = "macos")]
 pub fn menu_step(app: &tauri::AppHandle) -> Result<String, String> {
     let menu = app.menu().ok_or("앱 메뉴가 설치되지 않았습니다.")?;
     let mut installed = InstalledMenu {
@@ -407,6 +410,19 @@ pub fn menu_step(app: &tauri::AppHandle) -> Result<String, String> {
         crate::native_menu::installed_ids().count(),
         installed.checks.len()
     ))
+}
+
+/// Windows and Linux have no native menu bar (the page's menu row is the menu, as in the reference
+/// app); a bar that was installed anyway would show a second menu.
+#[cfg(not(target_os = "macos"))]
+pub fn menu_step(app: &tauri::AppHandle) -> Result<String, String> {
+    match app.menu() {
+        Some(_) => Err(
+            "이 OS에는 네이티브 메뉴 막대가 없어야 합니다(메뉴 줄은 페이지가 그립니다)."
+                .to_string(),
+        ),
+        None => Ok("no native menu bar, the page draws the menu row".to_string()),
+    }
 }
 
 #[cfg(test)]
@@ -588,6 +604,7 @@ mod tests {
         pdf
     }
 
+    #[cfg(target_os = "macos")]
     fn installed(extra: &[&str]) -> InstalledMenu {
         let mut ids: Vec<String> = crate::native_menu::installed_ids()
             .map(str::to_string)
@@ -603,6 +620,7 @@ mod tests {
         }
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn the_menu_check_names_every_missing_item() {
         assert_eq!(check_menu(&installed(&[])), Ok(()));
@@ -621,6 +639,7 @@ mod tests {
         .is_err());
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn the_menu_check_wants_plain_theme_and_update_items_to_be_check_items() {
         let mut menu = installed(&[]);
@@ -629,8 +648,9 @@ mod tests {
         assert!(err.contains("view:theme-dark"), "{err}");
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
-    fn the_quit_item_is_in_the_menu_of_every_os() {
+    fn the_quit_item_is_in_the_menu() {
         assert_eq!(check_menu(&installed(&[])), Ok(()));
         let mut menu = installed(&[]);
         menu.ids.retain(|id| id != crate::native_menu::QUIT_ID);

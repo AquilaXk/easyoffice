@@ -1,6 +1,7 @@
-//! Quit on every OS (the 끝내기 menu item, and on macOS also Cmd+Q, the Dock's 종료 and a system
-//! shutdown, which arrive as `RunEvent::ExitRequested`): every window goes through its own close
-//! confirmation, one after the other, and the app ends when the last one is gone.
+//! Quit on every OS (the page's 끝내기 item and Ctrl+Q through [`quit_app`], and on macOS also the
+//! native 끝내기 item (Cmd+Q), the Dock's 종료 and a system shutdown, which arrive as
+//! `RunEvent::ExitRequested`): every window goes through its own close confirmation, one after the
+//! other, and the app ends when the last one is gone.
 //!
 //! Adapted from the reference app `apps/desktop/src-tauri/src/app_quit.rs` (MIT, Copyright (c)
 //! 2025-2026 Edward Kim; see THIRD_PARTY_NOTICES.md): the same queue of window labels (the focused
@@ -20,6 +21,7 @@ use std::time::Instant;
 
 use tauri::{AppHandle, Manager};
 
+use crate::shell_caller::ShellCaller;
 use crate::windows::CLOSE_ACK_TIMEOUT;
 
 /// The windows still to be closed by a running quit, in order, and when the quit last moved.
@@ -111,8 +113,8 @@ fn ordered(mut labels: Vec<String>, focused: Option<&str>) -> Vec<String> {
     labels
 }
 
-/// Starts a quit: the 끝내기 item on every OS, and `ExitRequested` on macOS. A quit that is already
-/// running ignores the request, so a second Cmd+Q cannot ask a window twice.
+/// Starts a quit: the 끝내기 items and `ExitRequested` on macOS, [`quit_app`] elsewhere. A quit that
+/// is already running ignores the request, so a second Cmd+Q cannot ask a window twice.
 pub fn request_app_quit(app: &AppHandle) {
     let labels = open_labels(app, None);
     if labels.is_empty() {
@@ -120,6 +122,13 @@ pub fn request_app_quit(app: &AppHandle) {
     } else if let Some(first) = app.state::<AppQuit>().begin(labels) {
         ask(app, &first);
     }
+}
+
+/// The page's 끝내기 item and Ctrl+Q (Windows and Linux have no native menu; macOS uses its own quit
+/// item and the same queue). Takes no argument: what is asked and closed is decided here.
+#[tauri::command]
+pub fn quit_app(_caller: ShellCaller, app: AppHandle) {
+    request_app_quit(&app);
 }
 
 /// The windows still open, the focused one first; `except` is a window that is going away.

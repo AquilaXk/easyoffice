@@ -16,7 +16,7 @@ function recordingShell(overrides = {}) {
   const commands = {};
   for (const name of [
     "open_document_window", "open_file_in_new_window", "take_pending_open", "report_window_state",
-    "close_current_window", "list_recent_documents", "open_recent_document", "report_menu_state", "end_close_prompt", "ack_close_prompt",
+    "close_current_window", "list_recent_documents", "open_recent_document", "report_menu_state", "end_close_prompt", "ack_close_prompt", "quit_app",
   ]) {
     commands[name] = (args) => {
       calls.push({ name, args });
@@ -439,8 +439,8 @@ test("the shortcut table marks which combos the HWP editor forwards", async () =
   const { host } = await openWindow("?module=DOC&win=w-keys");
   const bindings = host.__EASYOFFICE_RIBBON_CATALOG__.WORKSPACE_SHORTCUT_BINDINGS;
   const forwarded = bindings.filter((b) => b.forwardFromEditor).map((b) => b.keys).sort((a, b) => a.localeCompare(b));
-  assert.deepEqual(forwarded, ["Ctrl+Alt+O", "Ctrl+K", "Ctrl+N", "Ctrl+O", "Ctrl+P", "Ctrl+S", "Ctrl+W"]);
-  for (const b of bindings.filter((x) => ["Ctrl+N", "Ctrl+W"].includes(x.keys))) assert.equal(b.desktopOnly, true);
+  assert.deepEqual(forwarded, ["Ctrl+Alt+O", "Ctrl+K", "Ctrl+N", "Ctrl+O", "Ctrl+P", "Ctrl+Q", "Ctrl+S", "Ctrl+W"]);
+  for (const b of bindings.filter((x) => ["Ctrl+N", "Ctrl+W", "Ctrl+Q"].includes(x.keys))) assert.equal(b.desktopOnly, true);
   assert.ok(forwarded.every((k) => k.startsWith("Ctrl+")), "plain typing is never forwarded");
 });
 
@@ -504,6 +504,17 @@ test("Ctrl+N and Ctrl+W work from the page itself in the desktop shell", async (
   sandbox.dispatchWindowKeydown({ key: "w", ctrlKey: true });
   await flushAsyncTurns();
   assert.equal(document.getElementById("close-confirm-dialog").open, true);
+});
+
+// Windows and Linux have no native 끝내기 item (PD-121): Ctrl+Q starts the shell's quit queue, which closes
+// the windows one at a time through their own close prompts. The reference app's page menu has no such item.
+test("Ctrl+Q starts the shell's quit queue, and the page menu has no 끝내기 item", async () => {
+  const { shell, sandbox, document } = await openWindow("?module=DOC&win=w-quit", {}, { harness: { platform: "Win32" } });
+  assert.equal(document.querySelector("[data-app-quit]"), null, "no item the reference app's menu lacks");
+  sandbox.dispatchWindowKeydown({ key: "q", ctrlKey: true });
+  await flushAsyncTurns();
+  assert.equal(shell.named("quit_app").length, 1);
+  assert.equal(shell.named("close_current_window").length, 0, "the queue, not this window's own close");
 });
 
 test("HWP autosave records are keyed by the window id", async () => {

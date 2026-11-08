@@ -480,9 +480,7 @@ pub fn set_update_check(
 ) -> UpdateNoticeView {
     service.set_enabled(enabled);
     // The menu's check item follows the switch.
-    if let Err(error) = crate::menu_state::refresh(&app) {
-        eprintln!("[menu] {error}");
-    }
+    crate::menu_state::refresh_logged(&app);
     service.view()
 }
 

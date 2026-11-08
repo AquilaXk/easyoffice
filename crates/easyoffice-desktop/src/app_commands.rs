@@ -20,6 +20,7 @@ pub const APP_COMMANDS: &[&str] = &[
     "open_recent_document",
     "get_recent_preview",
     "report_menu_state",
+    "quit_app",
     "end_close_prompt",
     "ack_close_prompt",
 ];

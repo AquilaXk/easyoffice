@@ -6,8 +6,6 @@
 
 mod app_commands;
 mod app_quit;
-mod menu_state;
-mod native_menu;
 mod os_recent;
 mod pdf_export;
 mod pdf_font_fallbacks;
@@ -26,6 +24,22 @@ mod update_install;
 mod window_commands;
 mod window_state;
 mod windows;
+
+// The reference app installs a native menu bar only on macOS; on Windows and Linux the page draws
+// the menu row (PD-121). The macOS bar and the state it shows live in these two modules; the other
+// OSes have no bar to keep in step.
+#[cfg(target_os = "macos")]
+mod menu_state;
+#[cfg(target_os = "macos")]
+mod native_menu;
+#[cfg(not(target_os = "macos"))]
+mod menu_state {
+    use tauri::AppHandle;
+
+    pub fn refresh_logged(_app: &AppHandle) {}
+
+    pub fn forget(_app: &AppHandle, _label: &str) {}
+}
 
 use easyoffice_app::EasyOfficeIpcRouter;
 use save_file::{save_in_place, write_document_bytes, InPlaceResult, SaveOutcome, SaveRequest};
@@ -259,7 +273,9 @@ fn main() {
             window_commands::report_window_state,
             window_commands::close_current_window,
             window_commands::list_recent_documents,
+            #[cfg(target_os = "macos")]
             menu_state::report_menu_state,
+            app_quit::quit_app,
             window_commands::end_close_prompt,
             window_commands::ack_close_prompt,
             window_commands::open_recent_document,
@@ -268,11 +284,16 @@ fn main() {
         .setup(move |app| {
             app.manage(shell_caller::ShellTokens::default());
             app.manage(AppWindows::new(app.path().app_data_dir().ok()));
-            app.manage(menu_state::MenuStates::default());
             app.manage(app_quit::AppQuit::default());
-            // Every OS gets the native menu bar; the page hides its own (PD-102).
-            native_menu::install(app)?;
+            // macOS gets the native menu bar beside the page's menu row; Windows and Linux have only
+            // the page's row, as in the reference app (PD-121).
+            #[cfg(target_os = "macos")]
+            {
+                app.manage(menu_state::MenuStates::default());
+                native_menu::install(app)?;
+            }
             update_check::start(app.handle(), smoke_mode);
+            #[cfg(target_os = "macos")]
             menu_state::refresh(app.handle()).map_err(std::io::Error::other)?;
             app.manage(preview::PreviewState::new());
             let handle = app.handle().clone();
@@ -301,7 +322,8 @@ fn handle_run_event(app: &AppHandle, event: tauri::RunEvent) {
     match event {
         #[cfg(target_os = "macos")]
         tauri::RunEvent::Opened { urls } => window_commands::open_urls(app, urls),
-        // Cmd+Q is the application menu's own quit item (`native_menu.rs`); the Dock's 종료 and a
+        // Cmd+Q is the application menu's own quit item (`native_menu.rs`; Windows and Linux reach the
+        // queue from the page, `app_quit::quit_app`); the Dock's 종료 and a
         // system shutdown arrive here. All of them take the same queue: one window at a time, a
         // cancelled save prompt stops the quit (`app_quit.rs`). An exit with a code (the queue's own
         // `app.exit(0)`) and the end after the last window closed pass.
@@ -366,7 +388,7 @@ mod tests {
         );
         assert_eq!(value["windows"], serde_json::json!(["main", "doc-*"]));
         assert_eq!(value["local"], serde_json::json!(true));
-        assert_eq!(app_commands::APP_COMMANDS.len(), 18);
+        assert_eq!(app_commands::APP_COMMANDS.len(), 19);
     }
 
     #[test]

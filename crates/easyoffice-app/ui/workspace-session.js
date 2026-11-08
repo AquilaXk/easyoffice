@@ -470,7 +470,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
         const on = studioCommandApplies(item.dataset.studioMenuCmd, commandModule);
         item.setAttribute("aria-disabled", on ? "false" : "true");
       }
-      if (typeof deps.onMenuContext === "function") deps.onMenuContext(commandModule, embed);
+      if (typeof deps.onMenuContext === "function") deps.onMenuContext(commandModule);
       const agg = document.getElementById("status-sheet-agg");
       if (agg) agg.hidden = mod !== "SHEET";
       const docStatus = document.querySelector(".statusbar-left-group");
@@ -632,8 +632,8 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
 
     let chromeGuardsInstalled = false;
 
-    // One-time window chrome: no web view context menu outside the editing area, and the page's
-    // own menu bar gives way to the native menu bar of the desktop shell (PD-102).
+    // One-time window chrome: no web view context menu outside the editing area. The page's own menu
+    // row is always drawn, beside the native bar on macOS (the reference app does the same, PD-121).
     function installChromeGuards() {
       if (chromeGuardsInstalled) return;
       chromeGuardsInstalled = true;
@@ -642,8 +642,6 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
           if (!isTextEntryTarget(ev.target)) ev.preventDefault();
         });
       }
-      const app = document.getElementById("app");
-      if (app && isDesktopShell()) app.dataset.nativeMenu = "true";
     }
 
     // Platform pill, palette hint and quick-access tooltips; returns the active modifier glyph.
