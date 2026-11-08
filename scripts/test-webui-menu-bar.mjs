@@ -181,3 +181,24 @@ test("menu-bar.css and toolbar.css name rhwp-studio as their source and are in t
     assert.ok(notices.includes(`ui/${name}`), `${name} is in the notices`);
   }
 });
+
+// A label must name what its command does. The app has no format painter, no find-and-replace and no
+// object properties dialog, so no menu item or toolbar button may be called that; `home-style` is the
+// ribbon's "스타일 적용" and `layout-paper` the paper size toggle ("편집 용지").
+test("menu and toolbar labels name what their command does", async () => {
+  const { document } = await openModule("DOC");
+  const labelsOf = (cmd) =>
+    document.querySelectorAll(`.md-item[data-studio-menu-cmd="${cmd}"] .md-label`).map((el) => el.textContent.trim());
+  const buttonsOf = (cmd) => document.querySelectorAll(`#icon-toolbar [data-studio-cmd="${cmd}"]`);
+  assert.deepEqual(labelsOf("home-style"), ["스타일 적용"]);
+  assert.deepEqual(buttonsOf("home-style").map((el) => [el.getAttribute("title"), el.getAttribute("aria-label")]), [["스타일 적용", "스타일 적용"]]);
+  assert.deepEqual(labelsOf("layout-paper"), ["편집 용지", "편집 용지"]);
+  assert.equal(buttonsOf("layout-paper").length, 0, "no toolbar button called object properties");
+  const named = [
+    ...document.querySelectorAll(".md-label").map((el) => el.textContent),
+    ...document.querySelectorAll("#icon-toolbar [title]").map((el) => el.getAttribute("title")),
+  ];
+  for (const promised of ["모양 복사", "찾아 바꾸기", "개체 속성", "글자 모양"]) {
+    assert.ok(!named.some((text) => text.includes(promised)), `${promised} is not a feature of the app`);
+  }
+});

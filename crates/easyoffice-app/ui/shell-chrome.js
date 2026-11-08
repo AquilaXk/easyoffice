@@ -64,7 +64,7 @@
     "format:bold": "studio-cmd:home-bold",
     "format:italic": "studio-cmd:home-italic",
     "format:underline": "studio-cmd:home-underline",
-    "format:char-shape": "studio-cmd:home-style",
+    "format:style": "studio-cmd:home-style",
     "format:para-shape": "studio-cmd:para-shape",
     "format:para-numbering": "studio-cmd:para-numbering",
     "format:para-bullet": "studio-cmd:para-bullet",

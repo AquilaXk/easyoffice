@@ -299,3 +299,16 @@ test("macOS binds the reference keys to the four edit items and ⌘Q to the cust
   const chrome = read("crates/easyoffice-app/ui/shell-chrome.js");
   assert.ok(!chrome.includes("app:quit"), "the page cannot quit the app");
 });
+
+// The macOS menu names a shared command like the page does (a label must say what the command does).
+test("the native labels of the shared style and paper commands are the page's labels", () => {
+  const html = read("crates/easyoffice-app/ui/index.html");
+  const pageLabels = (cmd) =>
+    [...html.matchAll(new RegExp(`data-studio-menu-cmd="${cmd}"[^>]*><span class="md-label">([^<]+)</span>`, "g"))].map((m) => m[1]);
+  for (const cmd of ["home-style", "layout-paper"]) {
+    const native = rustItems().filter((item) => item.action === `studio-cmd:${cmd}`).map((item) => item.label);
+    assert.ok(native.length > 0, cmd);
+    assert.deepEqual([...new Set(pageLabels(cmd))], [...new Set(native)], cmd);
+  }
+  assert.ok(!rustItems().some((item) => /글자 모양|모양 복사|찾아 바꾸기|개체 속성/.test(item.label)));
+});

@@ -2133,3 +2133,14 @@
 - **Alternatives rejected** 페이지가 오류 창 문구를 정하는 것(PD-088의 문구는 셸 소유), 시스템 원문을 그대로 두는 것(운영체제·언어마다 달라 안내가 되지 못함).
 - **Verified by** `cargo test -p easyoffice-desktop save_error path_leak save_file pdf_job`(`ErrorKind`별 문구, 폴더 이름과 `os error`가 사용자 문구·오류 창 본문·명령 오류 JSON에 없음, 없는 폴더에 쓰기 실패가 파일 이름만 말함, 구조 시험이 누출 예를 잡음).
 - **Revisit when** 다른 쓰기 경로(PDF 내보내기, 저장 후 미리보기)에서도 오류 창을 셸이 직접 띄우기로 할 때, 참조 앱의 문구가 바뀔 때.
+
+## 109. 메뉴·도구 단추의 이름은 실제 동작과 같아야 함 (PD-134)
+
+- **Status** Implemented (QA 요청 2026-11-08)
+- **Context** 페이지 메뉴와 도구 상자의 일부 항목은 이름이 약속하는 기능과 연결된 명령이 달랐습니다: `모양 복사`·`글자 모양`은 `home-style`(리본 이름 "스타일 적용", 글자 크기 단계 순환), `찾아 바꾸기(E)`는 명령 팔레트, `개체 속성`은 `layout-paper`(용지 규격 전환)를 실행했습니다.
+- **Decision (`PD-134`)** 이름대로 하는 기능이 앱 모듈에 없는 항목은 지웁니다(새 기능·새 화면 없음): 편집 > `모양 복사`와 `찾아 바꾸기(E)`, 입력 > `개체 속성`, 도구 상자의 `모양 복사`·`개체 속성` 단추(쓰지 않게 된 아이콘 두 개도 제거). 기능은 있으나 이름이 다른 항목은 기능의 이름으로 고칩니다: 서식 > `글자 모양`과 도구 단추, macOS 서식 메뉴의 항목(`format:char-shape` -> `format:style`)은 `스타일 적용`. `home-style`과 `layout-paper`는 다른 메뉴 항목(`스타일 적용`, `편집 용지`)으로 계속 닿으므로 모듈별 리본 명령 도달 시험은 그대로입니다. 페이지 메뉴와 macOS 메뉴의 1:1 시험에 두 곳의 이름이 같은지 더했습니다.
+- **Why** 이름과 동작이 다르면 사용자가 없는 기능이 있다고 믿거나 엉뚱한 변경을 일으킵니다.
+- **Trade-offs** 참조 앱 편집기 메뉴에 있는 항목 일부가 이 앱의 문서·시트·슬라이드 화면에는 없습니다(한글 편집기 안의 메뉴는 편집기가 제공).
+- **Alternatives rejected** 이름을 그대로 두고 팔레트로 연결하는 것(없는 기능을 있는 것처럼 보임), 새 찾아 바꾸기·모양 복사를 만드는 것(범위 밖).
+- **Verified by** `node --test scripts/test-webui-menu-bar.mjs scripts/test-webui-native-menu.mjs scripts/test-webui-menu-state.mjs`(`home-style`·`layout-paper` 이름, 약속한 기능 이름이 메뉴·도구 단추에 없음, 네이티브와 페이지의 이름 일치), `cargo test -p easyoffice-desktop native_menu`.
+- **Revisit when** 앱 모듈에 모양 복사나 찾아 바꾸기가 생길 때. 같은 불일치가 남은 도구 단추(`그림 삽입` -> `insert-chart`, `꼬리말` -> `mod-header`, `문단 모양` -> 정렬)는 후속으로 정리합니다.

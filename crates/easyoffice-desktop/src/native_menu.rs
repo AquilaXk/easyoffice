@@ -206,12 +206,7 @@ pub const ITEMS: &[MenuItemSpec] = &[
         None,
         "studio-cmd:home-underline",
     ),
-    item(
-        "format:char-shape",
-        "글자 모양",
-        None,
-        "studio-cmd:home-style",
-    ),
+    item("format:style", "스타일 적용", None, "studio-cmd:home-style"),
     item(
         "format:para-shape",
         "문단 모양",
@@ -728,7 +723,7 @@ fn format_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
         "format:italic",
         "format:underline",
         SEPARATOR,
-        "format:char-shape",
+        "format:style",
         "format:para-shape",
         "format:para-numbering",
         "format:para-bullet",
