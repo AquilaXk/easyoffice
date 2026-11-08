@@ -293,6 +293,25 @@ impl UniversalFormatConverter {
             _ => Self::encode_with_formula_cache(&doc.to_universal_model(), format, formula_cache),
         }
     }
+
+    /// [`Self::encode_rich`] with a preview picture in the file (PD-132). The engine draws no
+    /// pages, so `thumbnail_png` comes from the caller; `None`, or a format without a preview part
+    /// (see [`crate::supports_thumbnail`]), gives exactly what [`Self::encode_rich`] gives. A
+    /// picture that is not a valid PNG within the limits is an error.
+    pub fn encode_rich_with_thumbnail(
+        doc: &RichDocument,
+        format: DocumentFormat,
+        formula_cache: Option<&XlsxFormulaCache>,
+        thumbnail_png: Option<&[u8]>,
+    ) -> Result<Vec<u8>, EasyOfficeError> {
+        let bytes = Self::encode_rich(doc, format, formula_cache)?;
+        match thumbnail_png {
+            Some(png) if crate::supports_thumbnail(format) => {
+                crate::embed_thumbnail(format, &bytes, png)
+            }
+            _ => Ok(bytes),
+        }
+    }
 }
 
 #[cfg(test)]

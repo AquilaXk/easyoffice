@@ -6,6 +6,7 @@ pub mod converter;
 mod crc32;
 pub mod csv_markdown_codecs;
 pub mod deflate;
+pub mod embedded_thumbnail;
 pub mod hwp5_codec;
 pub mod hwp_eqedit;
 pub mod hwpx_codec;
@@ -56,6 +57,10 @@ pub use converter::*;
 pub use crc32::IeeeCrc32;
 pub use csv_markdown_codecs::*;
 pub use deflate::*;
+pub use embedded_thumbnail::{
+    check_thumbnail_png, embed_thumbnail, supports_thumbnail, MAX_EMBED_DOCUMENT_BYTES,
+    MAX_THUMBNAIL_PNG_BYTES, MAX_THUMBNAIL_SIDE_PX,
+};
 pub use hwp_eqedit::*;
 pub use office_codecs::*;
 pub use ole2_codec::*;
