@@ -120,6 +120,7 @@
 ### 6. 실무 기준 3계층 이슈 구조(Epic → Sub-issue → PR) 및 GitHub Release 배포 체계
 
 - **Status**: Implemented (`.github/PULL_REQUEST_TEMPLATE.md`, `.github/workflows/release.yml`, `.github/release.yml`)
+- **개정 (2026-11-08, QA 승인)**: 개인 프로젝트 수준으로 절차를 줄입니다. PR 템플릿은 요약·검증·미실행 세 칸만 두고(Class 등급·위험도·체크리스트 칸 삭제), 이슈 템플릿의 필수 항목을 없애고 빈 이슈를 허용합니다. 병합은 squash만 쓰고, `main` 병합 필수 체크는 `checks`·`verify`·`Verify Rust Core & Tauri Shell (Windows x64)` 세 job입니다(리포 ruleset).
 - **Superseded by PD-094 (부분)**: 이 항목 중 Swift 앱·`swift build`/`swift test`·`scripts/package-macos-release.sh`·Swift 대응 규칙에 해당하는 부분은 PD-094로 대체되었습니다. Rust 엔진·WebUI·Windows 관련 결정은 그대로 유효합니다.
 - **Decision**:
   1. 이슈 트래커는 `Roadmap (#1) → 5대 영역 Epic (#2~#6) → 백로그 항목(GitHub Native Sub-issue) → 자기완결 PR`의 3계층으로 운영합니다.

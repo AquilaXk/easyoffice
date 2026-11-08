@@ -17,14 +17,14 @@ body:
         - P1 — 핵심 문서 열람/편집/변환/수식 동작 실패
         - P2 — 부분 기능 오류 또는 우회 경로 존재
     validations:
-      required: true
+      required: false
   - type: input
     id: domain
     attributes:
       label: 대상 영역 및 상위 에픽 (Domain & Parent Epic)
       placeholder: "예) EasyOfficeCore / FormatDetector (Refs #2)"
     validations:
-      required: true
+      required: false
   - type: textarea
     id: reproduction
     attributes:
@@ -34,7 +34,7 @@ body:
         - 기대 결과:
         - 실제 결과:
     validations:
-      required: true
+      required: false
   - type: textarea
     id: done_when
     attributes:
@@ -43,4 +43,4 @@ body:
         - [ ] 재현 테스트가 수정 전 실패(RED)하고 수정 후 통과(GREEN)한다.
         - [ ] 인접 포맷/모듈 회귀 없이 `cargo test`와 `node --test` 전체가 통과한다.
     validations:
-      required: true
+      required: false
