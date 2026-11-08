@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { LINUX_DEB_DEPENDS, LINUX_DESKTOP_TEMPLATE, LINUX_RPM_DEPENDS, REQUIRED_MIME_TYPES } from "./desktop-file-associations.mjs";
 import {
@@ -11,6 +13,7 @@ import {
   checkRpmPackage,
   parseControl,
   parseRpmDump,
+  signatureProblems,
 } from "./verify-linux-bundles.mjs";
 
 const mimeLine = [...REQUIRED_MIME_TYPES.values()].join(";") + ";";
@@ -138,4 +141,15 @@ test("the rpm .desktop file must hash like the checked deb one", () => {
   assert.match(checkRpmDesktopMatchesDeb(parseRpmDump(dump("abc123")), text).join("\n"), /not SHA-256/);
   assert.match(checkRpmDesktopMatchesDeb(parseRpmDump(dump(sha256(text))), undefined).join("\n"), /no checked deb/);
   assert.deepEqual(checkRpmDesktopMatchesDeb(parseRpmDump("/usr/bin/EasyOffice 1 1 aa 0100755 root root 0 0 0 X\n"), text), []);
+});
+
+test("a release package needs a non-empty signature file next to it", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "signed-bundle-"));
+  const deb = path.join(dir, "EasyOffice_0.1.0_amd64.deb");
+  fs.writeFileSync(deb, "deb");
+  assert.match(signatureProblems(deb).join("\n"), /EasyOffice_0\.1\.0_amd64\.deb\.sig is missing or empty/);
+  fs.writeFileSync(`${deb}.sig`, "");
+  assert.equal(signatureProblems(deb).length, 1, "an empty signature does not count");
+  fs.writeFileSync(`${deb}.sig`, "c2ln");
+  assert.deepEqual(signatureProblems(deb), []);
 });

@@ -3,9 +3,11 @@ name: Release Packages
 # Reference implementation (MIT, Copyright (c) 2025-2026 Edward Kim) of the reference app's desktop
 # release workflow (.github/workflows/*-desktop.yml): the Linux build matrix (x64 AppImage, deb and rpm;
 # arm64 deb), the AppImage extraction check, fixed release asset names, one combined checksum file and
-# the draft release. The staging and checks are scripts here (scripts/release-assets.mjs,
-# scripts/verify-linux-bundles.mjs) with unit tests; the shared build steps are composite actions
-# (.github/actions). Updater artifacts and signing of the reference are not taken over (PD-094, PD-103).
+# the draft release, and its signed updater artifacts (createUpdaterArtifacts, a `.sig` per package, the
+# `latest.json` manifest, the required signing key). The staging, the manifest and the checks are scripts
+# here (scripts/release-assets.mjs, scripts/verify-linux-bundles.mjs) with unit tests; the shared build
+# steps are composite actions (.github/actions). The macOS notarization of the reference is not taken
+# over (PD-094); the update signature is the Tauri minisign key (PD-103).
 
 on:
   push:
@@ -60,7 +62,15 @@ jobs:
           INPUT_VERSION: ${{ inputs.version }}
           INPUT_PUBLISH: ${{ inputs.publish }}
           INPUT_DRAFT: ${{ inputs.release_draft }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
+          # Every run signs its updater packages, a trial run (publish=false) included: a trial that skipped
+          # the signing would not test the step that is most likely to fail. Without the key the build
+          # cannot make the signatures the app requires, so stop before building anything.
+          if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY is required: the updater packages must be signed (PD-103)"
+            exit 1
+          fi
           if [ "$GITHUB_REF_TYPE" = tag ]; then
             VERSION="${GITHUB_REF_NAME#v}"
           else
@@ -122,14 +132,18 @@ jobs:
       # To sign and notarize later, add the APPLE_SIGNING_IDENTITY secret and pass APPLE_ID,
       # APPLE_PASSWORD and APPLE_TEAM_ID to this step; the Tauri CLI reads them from the environment.
       # The release version overrides the bundle version so the Info.plist and the tag agree.
-      - name: Build EasyOffice desktop shell universal .dmg
+      # createUpdaterArtifacts adds the signed .app.tar.gz the app's updater installs (the signing key
+      # comes from the secrets, only here; local and CI builds have no key and do not switch it on).
+      - name: Build EasyOffice desktop shell universal .dmg and the signed updater archive
         working-directory: crates/easyoffice-desktop
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
           VERSION: ${{ needs.prepare.outputs.version }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           BUNDLES="$(node "$GITHUB_WORKSPACE/scripts/release-assets.mjs" bundles macos-universal)"
-          npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --ci --target universal-apple-darwin --bundles "$BUNDLES" --config "{\"version\":\"${VERSION}\"}" -- --locked
+          npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --ci --target universal-apple-darwin --bundles "$BUNDLES" --config "{\"version\":\"${VERSION}\",\"bundle\":{\"createUpdaterArtifacts\":true}}" -- --locked
 
       - name: Smoke test desktop shell window (embedded WebUI, IPC round trip and HWP editor round trip)
         if: vars.MACOS_SMOKE != 'off'
@@ -155,7 +169,7 @@ jobs:
       - name: Verify the third-party notices are inside the app
         run: test -f target/universal-apple-darwin/release/bundle/macos/EasyOffice.app/Contents/Resources/THIRD_PARTY_NOTICES.md
 
-      - name: Stage the macOS .dmg under its fixed name
+      - name: Stage the macOS .dmg and the signed updater archive under their fixed names
         run: node scripts/release-assets.mjs stage macos-universal dist
 
       - name: Upload macOS release artifacts
@@ -182,14 +196,16 @@ jobs:
       # Prebuilt Tauri CLI (major 2) from npm; it builds crates/easyoffice-desktop in release mode
       # with the WebUI embedded and packages it with NSIS. The release version overrides the
       # installer version so the installer metadata and the tag agree.
-      - name: Build EasyOffice desktop shell and NSIS installer
+      - name: Build EasyOffice desktop shell and the signed NSIS installer
         working-directory: crates/easyoffice-desktop
         shell: bash
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           BUNDLES="$(node "$GITHUB_WORKSPACE/scripts/release-assets.mjs" bundles windows-x64)"
-          npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --ci --bundles "$BUNDLES" --config "{\"version\":\"${VERSION}\"}" -- --locked
+          npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --ci --bundles "$BUNDLES" --config "{\"version\":\"${VERSION}\",\"bundle\":{\"createUpdaterArtifacts\":true}}" -- --locked
 
       - name: Smoke test desktop shell window (embedded WebUI, IPC round trip and HWP editor round trip)
         shell: pwsh
@@ -209,7 +225,7 @@ jobs:
         shell: bash
         run: 7z l target/release/bundle/nsis/EasyOffice_*_x64-setup.exe | grep -F THIRD_PARTY_NOTICES.md
 
-      - name: Stage the Windows installer under its fixed name
+      - name: Stage the Windows installer and its signature under their fixed names
         shell: bash
         run: node scripts/release-assets.mjs stage windows-x64 dist
 
@@ -247,21 +263,23 @@ jobs:
       - name: Run the shared release gates and prepare the editor bundle
         uses: ./.github/actions/prepare-desktop-build
 
-      - name: Build EasyOffice desktop shell Linux packages
+      - name: Build EasyOffice desktop shell signed Linux packages
         working-directory: crates/easyoffice-desktop
         env:
           PLATFORM: ${{ matrix.platform }}
           VERSION: ${{ needs.prepare.outputs.version }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           BUNDLES="$(node "$GITHUB_WORKSPACE/scripts/release-assets.mjs" bundles "$PLATFORM")"
-          npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --ci --bundles "$BUNDLES" --config "{\"version\":\"${VERSION}\"}" -- --locked
+          npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --ci --bundles "$BUNDLES" --config "{\"version\":\"${VERSION}\",\"bundle\":{\"createUpdaterArtifacts\":true}}" -- --locked
 
-      - name: Verify the package structure (AppImage extraction, deb and rpm metadata, desktop entry, notices)
+      - name: Verify the package structure (AppImage extraction, deb and rpm metadata, desktop entry, notices) and the signatures
         env:
           PLATFORM: ${{ matrix.platform }}
-        run: node scripts/verify-linux-bundles.mjs "$PLATFORM"
+        run: node scripts/verify-linux-bundles.mjs "$PLATFORM" --signed
 
-      - name: Stage the Linux packages under their fixed names
+      - name: Stage the Linux packages and their signatures under their fixed names
         env:
           PLATFORM: ${{ matrix.platform }}
         run: node scripts/release-assets.mjs stage "$PLATFORM" dist
@@ -293,13 +311,23 @@ jobs:
           pattern: release-*
           merge-multiple: true
 
-      # Fails unless release-assets holds exactly the six fixed-name assets; then writes the one
-      # combined SHA256SUMS.txt.
+      # latest.json is what the app's updater reads (releases/latest/download/latest.json): one entry per
+      # platform key with the URL of this release's package and its signature. It fails unless every
+      # package has a signature made for exactly this version, so an app that updated to this release
+      # finds nothing newer.
+      - name: Write latest.json from the signatures
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: node scripts/release-assets.mjs manifest release-assets "$VERSION"
+
+      # Fails unless release-assets holds exactly the release files (the assets, the macOS updater
+      # archive, the signatures and latest.json); then writes the one combined SHA256SUMS.txt.
       - name: Write the combined SHA-256 checksums
         run: node scripts/release-assets.mjs checksums release-assets
 
-      # A draft stays invisible to /releases/latest, so neither the download links nor the update
-      # notice (PD-103) point at it until QA publishes it. A rerun on an existing release only replaces
+      # A draft stays invisible to /releases/latest, so neither the download links, the update notice nor
+      # latest.json (PD-103) point at it until QA publishes it; a pre-release version (1.2.3-rc.1) is
+      # flagged so /releases/latest never serves it either. A rerun on an existing release only replaces
       # its assets; it never turns a published release back into a draft.
       - name: Create or update the GitHub Release
         env:
@@ -320,6 +348,9 @@ jobs:
             FLAGS=(--target "$TARGET_SHA" --title "EasyOffice v${VERSION}" --generate-notes --repo "$GITHUB_REPOSITORY")
             if [ "$DRAFT" = true ]; then
               FLAGS+=(--draft)
+            fi
+            if [[ "$VERSION" == *-* ]]; then
+              FLAGS+=(--prerelease)
             fi
             gh release create "$TAG" "${FILES[@]}" "${FLAGS[@]}"
           fi

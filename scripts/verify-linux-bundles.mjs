@@ -12,7 +12,10 @@
  * the `.desktop` file must be in the Office menu category, pass the opened files to the app and list the
  * MIME type of every document format the app registers.
  *
- * Usage: node scripts/verify-linux-bundles.mjs <linux-x64|linux-arm64>   (run from the repository root)
+ * With `--signed` (the release build, which makes updater signatures) every package must also have a
+ * non-empty `.sig` file next to it, so a build that lost its signing key fails here, before staging.
+ *
+ * Usage: node scripts/verify-linux-bundles.mjs <linux-x64|linux-arm64> [--signed]   (run from the repository root)
  *
  * Reference implementation (MIT, Copyright (c) 2025-2026 Edward Kim) of the reference app's desktop release
  * workflow (.github/workflows, "Verify Linux ABI baseline"): the AppImage is only extracted, never run.
@@ -209,8 +212,16 @@ const INSPECTORS = {
 // The deb comes before the rpm: the rpm's .desktop file is compared with the deb's.
 const INSPECTION_ORDER = ["appimage", "deb", "rpm"];
 
+/** The problems with the updater signature next to a package (`<package>.sig`): none when it exists and is not empty. */
+export function signatureProblems(file) {
+  const signature = `${file}.sig`;
+  return fs.existsSync(signature) && fs.statSync(signature).size > 0
+    ? []
+    : [`${path.basename(signature)} is missing or empty: the release build must be made with the updater signing key`];
+}
+
 /** Inspects the bundles of one platform under `root`; returns one message per problem. */
-export function verifyBundles(platformId, root) {
+export function verifyBundles(platformId, root, { signed = false } = {}) {
   const arch = ARCHITECTURES[platformId];
   if (!arch) throw new Error(`unknown Linux platform '${platformId}' (expected ${Object.keys(ARCHITECTURES).join(" or ")})`);
   const scratch = fs.mkdtempSync(path.join(process.env.RUNNER_TEMP ?? os.tmpdir(), "linux-bundles-"));
@@ -220,7 +231,7 @@ export function verifyBundles(platformId, root) {
       (a, b) => INSPECTION_ORDER.indexOf(a.asset.dir) - INSPECTION_ORDER.indexOf(b.asset.dir)
     );
     return bundles.flatMap(({ asset, file }) => {
-      const problems = INSPECTORS[asset.dir](file, scratch, arch, context);
+      const problems = [...INSPECTORS[asset.dir](file, scratch, arch, context), ...(signed ? signatureProblems(file) : [])];
       console.log(`${asset.dir} ${path.basename(file)}: ${problems.length ? `${problems.length} problem(s)` : "ok"}`);
       return problems.map((problem) => `${path.basename(file)}: ${problem}`);
     });
@@ -231,7 +242,9 @@ export function verifyBundles(platformId, root) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
-    const problems = verifyBundles(process.argv[2] ?? "", process.cwd());
+    const [platform = "", ...flags] = process.argv.slice(2);
+    if (flags.some((flag) => flag !== "--signed")) throw new Error(`unknown option '${flags.join(" ")}'`);
+    const problems = verifyBundles(platform, process.cwd(), { signed: flags.includes("--signed") });
     for (const problem of problems) console.error(`::error::${problem}`);
     process.exit(problems.length ? 1 : 0);
   } catch (err) {
