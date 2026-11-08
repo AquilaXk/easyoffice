@@ -170,7 +170,8 @@ impl RichImage {
     }
 }
 
-fn truncate_alt(mut alt: String) -> String {
+/// Replaces control characters with spaces and caps the text at [`MAX_ALT_TEXT_BYTES`].
+pub(crate) fn truncate_alt(mut alt: String) -> String {
     alt = alt
         .chars()
         .map(|c| if c.is_control() { ' ' } else { c })

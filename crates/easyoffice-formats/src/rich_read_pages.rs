@@ -3,9 +3,10 @@
 //! Everything that depends on Apple's object schema lives in [`crate::pages_schema`]; table
 //! cells are decoded by [`crate::pages_table`].
 //!
-//! Pictures (PNG/JPEG) are imported as image blocks, shape and text-box text at its anchor, and
-//! footnotes, headers and footers as appendix paragraphs. Unsupported elements (comments,
-//! unreadable cell values) are skipped and reported as warnings with kinds and counts; legacy
+//! Pictures (PNG/JPEG) are imported as image blocks (other picture data as a placeholder
+//! paragraph), shape and text-box text at its anchor, and footnotes, headers and footers as
+//! appendix paragraphs. Unsupported elements (comments, page-floating drawables, unreadable cell
+//! values) are skipped and reported as warnings with kinds and counts; legacy
 //! XML and encrypted packages are refused by [`crate::pages_package::load_package`].
 
 mod notes;
@@ -20,7 +21,7 @@ use crate::pages_schema::{list_type, para_props, root};
 use crate::pages_schema::{storage, style, ty};
 use crate::pages_schema::{CharPropFields, COLOR_RGBA};
 use crate::pages_table::{read_table, TableBudget, TableOutcome};
-use crate::rich_read_pages_image::{PageImage, PageImages};
+use crate::rich_read_pages_image::{PageImage, PageImages, CROPPED, UNSUPPORTED_FORMAT};
 use crate::{
     EasyOfficeError, RichAlignment, RichBlock, RichDocument, RichListKind, RichParagraph, RichRun,
     RichScript,
@@ -561,7 +562,19 @@ impl<'a> Reader<'a> {
 
     fn read_picture(&mut self, obj: &ArchiveObject) -> Result<Option<RichBlock>, EasyOfficeError> {
         match self.images.read(obj)? {
-            PageImage::Picture(img) => Ok(Some(RichBlock::Image(img))),
+            PageImage::Picture { image, cropped } => {
+                if cropped {
+                    self.skip(CROPPED);
+                }
+                Ok(Some(RichBlock::Image(image)))
+            }
+            PageImage::Unsupported { text } => {
+                self.skip(UNSUPPORTED_FORMAT);
+                Ok(Some(RichBlock::Paragraph(RichParagraph {
+                    runs: vec![RichRun::plain(text)],
+                    ..RichParagraph::default()
+                })))
+            }
             PageImage::Skipped(why) => {
                 self.skip(why);
                 Ok(None)
@@ -628,6 +641,7 @@ pub(crate) fn read_pages(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Ea
         .ok_or_else(|| corrupt("본문 저장소를 읽을 수 없습니다"))?;
     let mut blocks = reader.convert_storage(&body, true)?;
     reader.note_unimported_text(&body)?;
+    reader.note_floating_drawables();
     while matches!(blocks.last(), Some(RichBlock::Paragraph(p)) if p.runs.is_empty()) {
         blocks.pop();
     }

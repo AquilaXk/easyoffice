@@ -49,6 +49,9 @@ pub(crate) mod ty {
     pub const FOOTNOTE: u32 = 2012;
     /// Package metadata (list of data files with identifiers and names). 확인 (fixture)
     pub const PACKAGE_METADATA: u32 = 11006;
+    /// Drawables floating on pages (page-layout documents). 검증 필요: field layout is from a
+    /// public independent implementation's notes; the fixtures only carry an empty list.
+    pub const FLOATING_DRAWABLES: u32 = 10010;
 }
 
 /// Shape / text box field numbers. 확인 (fixture objects file)
@@ -67,6 +70,8 @@ pub(crate) mod footnote {
 pub(crate) mod image {
     /// Drawable super message (geometry etc.).
     pub const DRAWABLE: u32 = 1;
+    /// Mask reference (crop window). 검증 필요: public notes only; absent in the fixtures.
+    pub const MASK: u32 = 5;
     /// Data reference `{ identifier = 1 }` of the picture file.
     pub const DATA: u32 = 11;
 }
@@ -75,6 +80,17 @@ pub(crate) mod image {
 pub(crate) mod drawable {
     /// Geometry message (position, size, flags, angle).
     pub const GEOMETRY: u32 = 1;
+    /// Accessibility description (alternative text). 검증 필요: public notes only; the
+    /// fixtures carry no description.
+    pub const DESCRIPTION: u32 = 8;
+}
+
+/// Floating-drawables list field numbers. 검증 필요 (see [`ty::FLOATING_DRAWABLES`]).
+pub(crate) mod floating {
+    /// Repeated page groups.
+    pub const PAGE_GROUPS: u32 = 1;
+    /// Repeated `{ drawable reference = 1 }` entries inside a page group.
+    pub const GROUP_DRAWABLES: u32 = 4;
 }
 
 /// Geometry field numbers.

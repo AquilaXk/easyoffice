@@ -358,14 +358,20 @@ impl DocBuilder {
 }
 
 pub fn pages_zip(iwa: Vec<u8>) -> Vec<u8> {
-    ZipArchiveCodec::pack(&[
+    pages_zip_with_data(iwa, Vec::new())
+}
+
+/// Package with extra files (for example `Data/<name>`), keyed by package-relative path.
+pub fn pages_zip_with_data(iwa: Vec<u8>, data: Vec<(String, Vec<u8>)>) -> Vec<u8> {
+    let mut entries = vec![
         ("Index/Document.iwa".to_string(), iwa),
         (
             "Metadata/Properties.plist".to_string(),
             b"bplist00".to_vec(),
         ),
-    ])
-    .expect("zip")
+    ];
+    entries.extend(data);
+    ZipArchiveCodec::pack(&entries).expect("zip")
 }
 
 /// Standard sample: heading, formatted body paragraph, bullet item, center paragraph, a 2x2

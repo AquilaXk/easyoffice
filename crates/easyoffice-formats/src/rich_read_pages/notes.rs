@@ -1,9 +1,11 @@
 //! Text that lives outside the main text flow: shape/text-box text (placed where the shape is
 //! anchored) and footnotes, headers and footers (appended after the body under a heading).
 
-use super::{reference, AttrTable, Reader};
+use std::collections::HashSet;
+
+use super::{object_kind, reference, AttrTable, Reader};
 use crate::pages_proto::{ArchiveObject, Message};
-use crate::pages_schema::{footnote, header_footer, shape, storage, ty};
+use crate::pages_schema::{floating, footnote, header_footer, shape, storage, ty};
 use crate::{EasyOfficeError, RichBlock, RichParagraph, RichRun};
 
 /// Appendix headings (heading level 2 paragraphs).
@@ -52,6 +54,39 @@ impl Reader<'_> {
     ) -> Result<Vec<RichBlock>, EasyOfficeError> {
         let payload = Message::parse(&obj.payload)?;
         self.nested_text(&payload, shape::TEXT_STORAGE)
+    }
+
+    /// Reports drawables floating on pages (page-layout documents), which are not imported.
+    /// Word-processing documents keep their objects anchored in the text and leave this list
+    /// empty. Each drawable is counted once; an unreadable list is ignored.
+    pub(super) fn note_floating_drawables(&mut self) {
+        let mut seen = HashSet::new();
+        for list in self.objects.objects.values() {
+            if list.type_id != ty::FLOATING_DRAWABLES {
+                continue;
+            }
+            let Ok(list) = Message::parse(&list.payload) else {
+                continue;
+            };
+            for group in list.subs(floating::PAGE_GROUPS).unwrap_or_default() {
+                for entry in group.subs(floating::GROUP_DRAWABLES).unwrap_or_default() {
+                    let Some(id) = reference(&entry, 1) else {
+                        continue;
+                    };
+                    if !seen.insert(id) {
+                        continue;
+                    }
+                    match self.objects.get(id) {
+                        Some(o) => self.skip(format!(
+                            "쪽 위의 개체: {}(형식 {})",
+                            object_kind(o.type_id),
+                            o.type_id
+                        )),
+                        None => self.skip("쪽 위의 끊어진 개체 참조"),
+                    }
+                }
+            }
+        }
     }
 
     fn footnote_blocks(&mut self, body: &Message<'_>) -> Result<Vec<RichBlock>, EasyOfficeError> {
