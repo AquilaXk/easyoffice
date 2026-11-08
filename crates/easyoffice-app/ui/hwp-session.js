@@ -709,7 +709,8 @@
 
     function pdfDoneText(result, count) {
       const opened = result.opened === false ? " · 저장했으나 기본 앱으로 열지 못했습니다" : "";
-      return "PDF 내보내기 완료 (" + result.name + " · " + count + "쪽)" + opened;
+      const skipped = result.skippedPictures > 0 ? " · 그림 " + result.skippedPictures + "개는 너무 커서 빠졌습니다" : "";
+      return "PDF 내보내기 완료 (" + result.name + " · " + count + "쪽)" + opened + skipped;
     }
 
     // Searchable PDF: the page SVGs go to the desktop shell as text; Rust builds the PDF and owns the

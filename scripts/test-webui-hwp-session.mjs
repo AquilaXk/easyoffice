@@ -922,6 +922,13 @@ test("PDF export: a file that was saved but could not be opened says so", async 
   assert.equal(feedbackOf(ctx), "PDF 내보내기 완료 (보고서.pdf · 2쪽) · 저장했으나 기본 앱으로 열지 못했습니다");
 });
 
+test("PDF export: pictures left out for their size are named in the finished status", async () => {
+  const { ctx } = loadPdf({ finish: { ...PDF_SAVED, pages: 2, skippedPictures: 3 } });
+  pdfPages(ctx, 2);
+  await ctx.session.exportPdf();
+  assert.equal(feedbackOf(ctx), "PDF 내보내기 완료 (보고서.pdf · 2쪽) · 그림 3개는 너무 커서 빠졌습니다");
+});
+
 test("PDF export: not available without the desktop shell or while the editor is not ready", async () => {
   const plain = load();
   pdfPages(plain, 2);
