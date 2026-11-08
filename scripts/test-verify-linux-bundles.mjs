@@ -1,8 +1,17 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import test from "node:test";
 import { LINUX_DEB_DEPENDS, LINUX_DESKTOP_TEMPLATE, LINUX_RPM_DEPENDS, REQUIRED_MIME_TYPES } from "./desktop-file-associations.mjs";
-import { checkDebControl, checkDesktopEntry, checkPayload, checkRpmPackage, parseControl } from "./verify-linux-bundles.mjs";
+import {
+  checkDebControl,
+  checkDesktopEntry,
+  checkPayload,
+  checkRpmDesktopMatchesDeb,
+  checkRpmPackage,
+  parseControl,
+  parseRpmDump,
+} from "./verify-linux-bundles.mjs";
 
 const mimeLine = [...REQUIRED_MIME_TYPES.values()].join(";") + ";";
 const desktop = (overrides = {}) => {
@@ -76,7 +85,8 @@ test("an rpm must be built for the architecture and require the runtime librarie
 });
 
 const shellDir = new URL("../crates/easyoffice-desktop/", import.meta.url);
-const template = fs.readFileSync(new URL(LINUX_DESKTOP_TEMPLATE, shellDir), "utf8");
+// A Windows checkout has CRLF line ends; the bundler is only ever run on Linux, where .gitattributes keeps LF.
+const template = fs.readFileSync(new URL(LINUX_DESKTOP_TEMPLATE, shellDir), "utf8").replaceAll("\r\n", "\n");
 
 /** What the bundler's Handlebars renders for the template: `{{x}}` filled in, `{{#if}}` blocks kept. */
 const render = (text) =>
@@ -107,4 +117,25 @@ test("the deb, rpm and AppImage bundles all take the template (the AppImage reus
   const conf = JSON.parse(fs.readFileSync(new URL("tauri.conf.json", shellDir), "utf8"));
   assert.equal(conf.bundle.linux.deb.desktopTemplate, LINUX_DESKTOP_TEMPLATE);
   assert.equal(conf.bundle.linux.rpm.desktopTemplate, LINUX_DESKTOP_TEMPLATE);
+});
+
+const sha256 = (text) => crypto.createHash("sha256").update(text).digest("hex");
+const dump = (digest) =>
+  `/usr/bin/EasyOffice 100 1700000000 ${"0".repeat(64)} 0100755 root root 0 0 0 X\n` +
+  `/usr/share/applications/EasyOffice.desktop 300 1700000000 ${digest} 0100644 root root 0 0 0 X\n` +
+  "/usr/share 0 1700000000 0000000000000000000000000000000000000000000000000000000000000000 040755 root root 0 0 0 X\n";
+
+test("rpm --dump lines give the path and the file digest", () => {
+  const entries = parseRpmDump(dump("ab".repeat(32)));
+  assert.deepEqual(entries.map((e) => e.path), ["/usr/bin/EasyOffice", "/usr/share/applications/EasyOffice.desktop", "/usr/share"]);
+  assert.equal(entries[1].digest, "ab".repeat(32));
+});
+
+test("the rpm .desktop file must hash like the checked deb one", () => {
+  const text = render(template);
+  assert.deepEqual(checkRpmDesktopMatchesDeb(parseRpmDump(dump(sha256(text))), text), []);
+  assert.match(checkRpmDesktopMatchesDeb(parseRpmDump(dump(sha256("other"))), text).join("\n"), /differs from the deb's \.desktop/);
+  assert.match(checkRpmDesktopMatchesDeb(parseRpmDump(dump("abc123")), text).join("\n"), /not SHA-256/);
+  assert.match(checkRpmDesktopMatchesDeb(parseRpmDump(dump(sha256(text))), undefined).join("\n"), /no checked deb/);
+  assert.deepEqual(checkRpmDesktopMatchesDeb(parseRpmDump("/usr/bin/EasyOffice 1 1 aa 0100755 root root 0 0 0 X\n"), text), []);
 });
