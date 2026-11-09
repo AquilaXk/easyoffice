@@ -17,11 +17,10 @@
 .palette-btn kbd { font: 11px/1 "Consolas", "Menlo", monospace; padding: 2px 5px; color: var(--ui-text-muted); border: 1px solid var(--ui-border); border-radius: 3px; }
 /* ---- toolbars drawn with the icon set --------------------------------------------------------- */
 .eo-icon-toolbar { background: var(--ui-bg-light); border-bottom-color: var(--ui-border); }
-.eo-doc-style-bar { background: var(--ui-bg-light); border-bottom-color: var(--ui-border); color: var(--ui-text); }
+.eo-doc-style-bar { border-bottom-color: var(--ui-border); color: var(--ui-text); }
 .tb-btn, .eo-glyph-btn { color: var(--ui-text-secondary); }
 .tb-btn { min-width: 28px; height: 26px; }
-.tb-btn:hover, .tb-btn.active, .eo-glyph-btn:hover, .eo-glyph-btn.active { background: var(--ui-hover); color: var(--ui-text); outline: 1px solid var(--ui-border); font-weight: inherit; }
-.tb-btn[aria-pressed="true"] { background: var(--ui-hover); color: var(--ui-text); }
+.eo-glyph-btn:hover, .eo-glyph-btn.active { background: var(--ui-hover); color: var(--ui-text); outline: 1px solid var(--ui-border); font-weight: inherit; }
 .sb-step-btn { display: inline-flex; align-items: center; justify-content: center; color: var(--ui-text-secondary); }
 .sb-step-btn .eo-icon { width: 10px; height: 10px; }
 .eo-doc-style-bar .sb-select { color: var(--ui-text); background: var(--ui-surface); border-color: var(--color-border-input); }
@@ -81,14 +80,9 @@
 .cp-slash { position: absolute; top: 50%; left: 24px; transform: translateY(-50%); width: 16px; height: 16px; color: var(--ui-text-muted); pointer-events: none; }
 .cmd-input.cp-input { display: block; width: 100%; height: 34px; padding-left: 40px; padding-right: 12px; font-size: 14px; color: var(--ui-text); background: transparent; }
 .cmd-input.cp-input::placeholder { color: var(--ui-text-muted); opacity: 1; }
-.cp-item { border-radius: 5px; }
-.cp-item-label { color: var(--ui-text); }
-.cp-item-shortcut { color: var(--ui-text-muted); background: transparent; border-color: var(--ui-border); border-radius: 3px; }
-.cp-item:hover,.cp-item.cp-item--selected { background: var(--ui-hover); }
-.cp-item:hover .cp-item-label, .cp-item.cp-item--selected .cp-item-label { color: var(--ui-text); }
-.cp-empty { padding: 14px; color: var(--ui-text-muted); }
 /* ---- modal panel (제품 정보) ----------------------------------------------------------------------- */
-button:focus-visible, .md-item:focus-visible, .md-sub:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 1px; }
+.dialog-btn-primary, :root[data-theme-effective="dark"] .dialog-btn-primary { color: var(--ui-text-on-accent); }
+button:not(.md-item):focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 1px; }
 .about-version { margin-bottom: 12px; font-size: var(--font-size-md); color: var(--color-text-muted); }
 
 /* ---- tool dialogs (smart assistant, personal data, security, benchmark, outline) -------------- */

@@ -8,7 +8,8 @@
       "core/font-loader": "64a7f5fa58f0aa4638ac0665875a02eb841e6225bf53b54a7e5d3aaca827cef1",
       "command/print-pages": "b16aa902f12c9227d669f98cb4c2695e0d10056f57ba5de449510d94472801ce",
       "embed/protocol": "56cd7b2892e52c69cd2871f573f4058df3eb5a60ebb3de8757f0b196b4fbbe77",
-      "embed/rpc-router": "d7dcff642a112474aea95eaccbf6670183ea3ff4a6c2b4fef4e2d6bff6ddb538"
+      "embed/rpc-router": "d7dcff642a112474aea95eaccbf6670183ea3ff4a6c2b4fef4e2d6bff6ddb538",
+      "ui/toolbar": "f80b61e04ddd36d64d08a4f06c364fbef174400e2ecec7186c4ae145bb3d4bb9"
     },
     "assets": {
       "index.html": "15cc17c2acf2864d4eb4e0ece92559f2603f5dcc4e361b1c28b118cce00a6fea",
@@ -23,7 +24,7 @@
     {
       "id": "main",
       "strategy": "fork",
-      "reason": "Embed-only entry point: chrome profile fixed to embed, no ?url= loading, no autosave/recent/PWA/plugin/dev hooks, Canvas2D only, adds the createBlankDocument, verifyBytes, getPrintPages, getSaveProtection, clearSaveProtection and setDragOver RPC handlers (getSaveProtection and clearSaveProtection tell the shell only whether the document was opened with a password) and forwards dirty-state and edit events to the host. Forwards the shell shortcut combos named in the frame URL (Ctrl+S/O/N/K/W) over the embed port, combo string only. The host owns open/save/new. The 파일 menu items are shell commands forwarded by name over the embed port (src/embed/shell-menu.ts), the shell theme is applied from the frame URL and from the setShellContext RPC. Registers the view:toolbar-labels command (src/ui/toolbar-labels.ts) and applies the stored choice at start, and the table:cell-selection-enter command (src/command/cell-selection.ts) the native 표 menu sends. The shell's edit:undo/redo/cut/copy commands go to a focused dialog text field instead of the document (src/embed/text-field-edit.ts). Adds the enableHostFonts and hostFontsReply RPC handlers: the installed fonts reach the editor's host-font provider through the shell over the embed port (src/embed/host-fonts.ts). Registers the edit:cut command of src/command/safe-cut.ts over the editor's own, which deletes a text selection only after the system clipboard accepted it. Applies the Mac modifier symbols to the static chrome on macOS and suppresses the browser context menu on the menu bar, toolbars and status bar (src/embed/desktop-chrome.ts)."
+      "reason": "Embed-only entry point: chrome profile fixed to embed, no ?url= loading, no autosave/recent/PWA/plugin/dev hooks, Canvas2D only, adds the createBlankDocument, verifyBytes, getPrintPages, getSaveProtection, clearSaveProtection and setDragOver RPC handlers (getSaveProtection and clearSaveProtection tell the shell only whether the document was opened with a password) and forwards dirty-state and edit events to the host. Forwards the shell shortcut combos named in the frame URL (Ctrl+S/O/N/K/W) over the embed port, combo string only. The host owns open/save/new. The 파일 menu items are shell commands forwarded by name over the embed port (src/embed/shell-menu.ts), the shell theme is applied from the frame URL and from the setShellContext RPC. Registers the view:toolbar-labels command (src/ui/toolbar-labels.ts) and applies the stored choice at start, and the table:cell-selection-enter command (src/command/cell-selection.ts) the native 표 menu sends. The shell's edit:undo/redo/cut/copy commands go to a focused dialog text field instead of the document (src/embed/text-field-edit.ts). Adds the enableHostFonts and hostFontsReply RPC handlers: the installed fonts reach the editor's host-font provider through the shell over the embed port (src/embed/host-fonts.ts). Registers the edit:cut command of src/command/safe-cut.ts over the editor's own, which deletes a text selection only after the system clipboard accepted it. Applies the Mac modifier symbols to the static chrome on macOS and suppresses the browser context menu on the menu bar, toolbars and status bar (src/embed/desktop-chrome.ts). Enhances style-bar and dialog select elements with the custom combo box (src/ui/custom-select.ts)."
     },
     {
       "id": "core/font-loader",
@@ -44,6 +45,11 @@
       "id": "embed/rpc-router",
       "strategy": "fork",
       "reason": "Removes the plugin.* RPC methods and adds createBlankDocument, verifyBytes, setShellContext, getPrintPages, getSaveProtection, clearSaveProtection, enableHostFonts, hostFontsReply and setDragOver."
+    },
+    {
+      "id": "ui/toolbar",
+      "strategy": "fork",
+      "reason": "Uses the reference app's custom-select combo boxes and shared color-picker palette (src/ui/custom-select.ts, src/ui/color-picker.ts, src/ui/toolbar-popup.ts) for style, language, font, line-spacing, text color and highlight controls."
     }
   ],
   "assetOverrides": [

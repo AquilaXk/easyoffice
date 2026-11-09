@@ -6,6 +6,7 @@ import { EventBus } from '@/core/event-bus';
 import { CanvasView } from '@/view/canvas-view';
 import { InputHandler } from '@/engine/input-handler';
 import { Toolbar } from '@/ui/toolbar';
+import { enhanceCustomSelects } from './ui/custom-select.ts';
 import { initIconToolbarScroller } from '@/ui/icon-toolbar-scroller';
 import { initStyleToolbarOverflow } from '@/ui/style-toolbar-overflow';
 import {
@@ -496,6 +497,8 @@ async function initialize(): Promise<void> {
     inputHandler.setPictureObjectRenderer(
       new TableObjectRenderer(container, canvasView.getVirtualScroll(), true),
     );
+
+    enhanceCustomSelects(document);
 
     new MenuBar(document.getElementById('menu-bar')!, eventBus, dispatcher, registry);
 

@@ -97,6 +97,26 @@
   text-overflow: ellipsis;
 }
 
+.md-icon {
+  position: absolute;
+  left: 8px;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.md-item.checked::before,
+.md-item[role="menuitemradio"][aria-checked="true"]::before {
+  content: '✓';
+  position: absolute;
+  left: 10px;
+  font-size: 11px;
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
 .md-item:hover,
 .md-item:focus-visible,
 .md-item.active {
@@ -107,6 +127,7 @@
 
 .md-item.disabled,
 .md-item[aria-disabled="true"],
+.md-sub.disabled,
 .md-sub[aria-disabled="true"] {
   color: var(--color-text-disabled);
   cursor: default;
@@ -175,8 +196,8 @@
   line-height: 16px;
 }
 
-.md-sub:hover,
-.md-sub:focus-visible {
+.md-sub:not(.disabled):not([aria-disabled="true"]):hover,
+.md-sub:not(.disabled):not([aria-disabled="true"]):focus-visible {
   background: var(--ui-selected);
   color: var(--color-primary-dark);
   outline: none;
@@ -187,6 +208,10 @@
   margin-left: auto;
   padding-left: 16px;
   color: var(--color-text-placeholder);
+}
+
+.md-sub > .md-shortcut + .md-arrow {
+  margin-left: 8px;
 }
 
 .md-arrow .eo-icon {
@@ -208,8 +233,8 @@
   z-index: 1001;
 }
 
-.md-sub:not([aria-disabled="true"]):hover > .md-sub-panel,
-.md-sub:focus-within > .md-sub-panel {
+.md-sub:not(.disabled):not([aria-disabled="true"]):hover > .md-sub-panel,
+.md-sub:has(> .md-sub-panel:focus-within) > .md-sub-panel {
   display: block;
 }
 

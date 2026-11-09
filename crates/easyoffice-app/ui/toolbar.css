@@ -264,8 +264,9 @@
   width: 76px;
 }
 
+#doc-style-bar #doc-font-select,
 #doc-style-bar .custom-select[data-select-id="doc-font-select"] {
-  width: 148px;
+  width: 180px;
 }
 
 #doc-style-bar .custom-select[data-select-id="doc-linespacing-select"] {

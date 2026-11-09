@@ -1,6 +1,11 @@
 #file-input { display: none; }
 #sb-field:empty { display: none; }
 
+#studio-header {
+  position: relative;
+  z-index: 20;
+}
+
 /* "PDF로 내보내기" is hidden until the shell reports it can export (desktop app only, PD-101). */
 .md-item[hidden] {
   display: none;
