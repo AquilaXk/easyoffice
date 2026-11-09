@@ -287,6 +287,10 @@ impl SheetEngine {
             | "DEVSQ" => self.eval_welford_variance_streaming(name, args, ctx, depth),
             "MEDIAN" | "MODE" | "MODE.SNGL" | "AVEDEV" | "GEOMEAN" | "HARMEAN" | "SKEW"
             | "KURT" => self.eval_stat_basic(name, args, ctx, depth),
+            "CORREL" | "PEARSON" | "COVARIANCE.P" | "COVARIANCE.S" | "SLOPE" | "INTERCEPT"
+            | "RSQ" | "FORECAST" | "FORECAST.LINEAR" => {
+                self.eval_stat_regression(name, args, ctx, depth)
+            }
             "AVERAGEIF" => self.eval_single_criteria_streaming(name, args, ctx, depth),
             "AVERAGEIFS" => self.eval_multi_criteria_streaming(name, args, ctx, depth),
             "SMALL" | "LARGE" | "RANK" | "RANK.EQ" | "RANK.AVG" | "PERCENTILE" | "QUARTILE"
@@ -307,13 +311,11 @@ impl SheetEngine {
             | "UNICHAR" => self.eval_text_func(name, args, ctx, depth),
             "DATE" | "YEAR" | "MONTH" | "DAY" | "TIME" | "HOUR" | "MINUTE" | "SECOND" | "DAYS"
             | "EDATE" | "EOMONTH" | "DATEDIF" | "TODAY" | "NOW" | "WEEKDAY" | "DATEVALUE"
-            | "WORKDAY" | "NETWORKDAYS" | "TIMEVALUE" | "WEEKNUM" | "ISOWEEKNUM" | "YEARFRAC" => {
-                self.eval_date_func(name, args, ctx, depth)
-            }
-            "PMT" | "IPMT" | "PPMT" | "FV" | "PV" | "NPV" | "IRR" | "RATE" | "NPER" | "SLN"
-            | "DB" | "DDB" | "SYD" | "EFFECT" | "NOMINAL" => {
-                self.eval_financial_func(name, args, ctx, depth)
-            }
+            | "WORKDAY" | "WORKDAY.INTL" | "NETWORKDAYS" | "NETWORKDAYS.INTL" | "TIMEVALUE"
+            | "WEEKNUM" | "ISOWEEKNUM" | "YEARFRAC" => self.eval_date_func(name, args, ctx, depth),
+            "PMT" | "IPMT" | "PPMT" | "CUMIPMT" | "CUMPRINC" | "FV" | "PV" | "NPV" | "XNPV"
+            | "IRR" | "XIRR" | "MIRR" | "RATE" | "NPER" | "SLN" | "DB" | "DDB" | "SYD"
+            | "EFFECT" | "NOMINAL" => self.eval_financial_func(name, args, ctx, depth),
             "ISBLANK" | "ISNUMBER" | "ISTEXT" | "ISLOGICAL" | "ISERR" | "ISERROR" | "ISNA"
             | "ISEVEN" | "ISODD" | "TYPE" | "ERROR.TYPE" => {
                 self.eval_info_func(name, args, ctx, depth)

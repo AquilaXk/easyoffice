@@ -118,6 +118,7 @@
   /* 타이포그래피 */
   --font-family-ui: -apple-system, BlinkMacSystemFont, '맑은 고딕', 'Malgun Gothic', 'Segoe UI', sans-serif;
   --font-family-mono: 'Consolas', 'Courier New', monospace;
+  --font-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
   --font-size-xs: 10px;
   --font-size-sm: 11px;
   --font-size-base: 12px;
@@ -137,6 +138,7 @@
   --space-12: 24px;
 
   /* 모서리 */
+  --radius-xs: 2px;
   --radius-sm: 2px;
   --radius-md: 3px;
   --radius-lg: 4px;

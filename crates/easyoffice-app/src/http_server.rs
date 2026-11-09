@@ -129,21 +129,34 @@ pub fn parse_ipc_http_body(body: &str) -> Result<(String, String), EasyOfficeErr
     }
 }
 
+#[inline]
+fn is_loopback_name(name: &str) -> bool {
+    name == "127.0.0.1" || name == "[::1]" || name.eq_ignore_ascii_case("localhost")
+}
+
 pub fn is_allowed_host(host: &str, port: u16) -> bool {
     let h = host.trim();
-    h.eq_ignore_ascii_case(&format!("127.0.0.1:{port}"))
-        || h.eq_ignore_ascii_case(&format!("localhost:{port}"))
-        || h.eq_ignore_ascii_case(&format!("[::1]:{port}"))
-        || h.eq_ignore_ascii_case("127.0.0.1")
-        || h.eq_ignore_ascii_case("localhost")
-        || h.eq_ignore_ascii_case("[::1]")
+    if is_loopback_name(h) {
+        return true;
+    }
+    if let Some((name, port_str)) = h.rsplit_once(':') {
+        is_loopback_name(name) && port_str.parse::<u16>() == Ok(port)
+    } else {
+        false
+    }
 }
 
 pub fn is_allowed_origin(origin: &str, port: u16) -> bool {
     let o = origin.trim().trim_end_matches('/');
-    o.eq_ignore_ascii_case(&format!("http://127.0.0.1:{port}"))
-        || o.eq_ignore_ascii_case(&format!("http://localhost:{port}"))
-        || o.eq_ignore_ascii_case(&format!("http://[::1]:{port}"))
+    if o.len() <= 7 || !o[..7].eq_ignore_ascii_case("http://") {
+        return false;
+    }
+    let authority = &o[7..];
+    if let Some((name, port_str)) = authority.rsplit_once(':') {
+        is_loopback_name(name) && port_str.parse::<u16>() == Ok(port)
+    } else {
+        false
+    }
 }
 
 /// CSP of the main page and every API/error response. A same-origin <iframe> is already allowed by

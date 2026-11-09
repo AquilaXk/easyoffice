@@ -77,21 +77,21 @@ impl OdsStyleTable {
                 f64::from(px) / PX_PER_INCH
             ));
         }
-        for (i, &(bold, italic, underline, strike, size)) in self.cells.iter().enumerate() {
+        for (i, &k) in self.cells.iter().enumerate() {
             let mut props = String::new();
-            if bold {
+            if k.bold() {
                 props.push_str(" fo:font-weight=\"bold\"");
             }
-            if italic {
+            if k.italic() {
                 props.push_str(" fo:font-style=\"italic\"");
             }
-            if underline {
+            if k.underline() {
                 props.push_str(" style:text-underline-style=\"solid\" style:text-underline-width=\"auto\" style:text-underline-color=\"font-color\"");
             }
-            if strike {
+            if k.strike() {
                 props.push_str(" style:text-line-through-style=\"solid\"");
             }
-            if let Some(centi) = size {
+            if let Some(centi) = k.size_centipt() {
                 props.push_str(&format!(" fo:font-size=\"{}pt\"", format_centipt(centi)));
             }
             xml.push_str(&format!(

@@ -39,16 +39,12 @@ fn range_bounds(range: &CellRange) -> Bounds {
 }
 
 /// Sorted coordinates of populated cells that lie inside `bounds`.
-fn sorted_population<'a>(
-    keys: impl Iterator<Item = &'a PackedCellCoordinate>,
+#[inline]
+fn sorted_population(
+    sheet: &SheetEngine,
     (min_r, max_r, min_c, max_c): Bounds,
 ) -> Vec<PackedCellCoordinate> {
-    let mut pop: Vec<PackedCellCoordinate> = keys
-        .copied()
-        .filter(|c| c.row() >= min_r && c.row() <= max_r && c.col() >= min_c && c.col() <= max_c)
-        .collect();
-    pop.sort_unstable();
-    pop
+    sheet.cell_index().range_coords(min_r, max_r, min_c, max_c)
 }
 
 #[inline]
@@ -232,7 +228,7 @@ impl SheetEngine {
         let (min_r, max_r, min_c, max_c) = bounds;
         let total = range.cell_count();
         if is_sparse(total, self.cells.len()) {
-            let pop = sorted_population(self.cells.keys(), bounds);
+            let pop = sorted_population(self, bounds);
             let pop_len = pop.len();
             for (idx, coord) in pop.into_iter().enumerate() {
                 self.with_coord_value(coord, ctx, depth, |v| fold.fold(v, idx, true))?;
@@ -263,7 +259,7 @@ impl SheetEngine {
         let sparse_pop = self
             .resolve_sheet_ref(Some(sheet), ctx)
             .filter(|ts| is_sparse(total, ts.cells.len()))
-            .map(|ts| sorted_population(ts.cells.keys(), bounds));
+            .map(|ts| sorted_population(ts, bounds));
         if let Some(pop) = sparse_pop {
             let pop_len = pop.len();
             for (idx, coord) in pop.into_iter().enumerate() {
@@ -307,7 +303,7 @@ impl SheetEngine {
             .map(|ts| {
                 let max_r = min_r + (rows as u32).saturating_sub(1);
                 let max_c = min_c + (cols as u32).saturating_sub(1);
-                sorted_population(ts.cells.keys(), (min_r, max_r, min_c, max_c))
+                sorted_population(ts, (min_r, max_r, min_c, max_c))
             });
         if let Some(pop) = sparse_pop {
             let pop_len = pop.len();

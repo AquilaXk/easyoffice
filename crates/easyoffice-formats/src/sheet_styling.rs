@@ -23,6 +23,11 @@ pub const MAX_COLUMN_PX: u32 = 2_000;
 pub const MIN_SIZE_PT: f64 = 1.0;
 pub const MAX_SIZE_PT: f64 = 409.0;
 
+pub const STYLE_BOLD: u8 = 1 << 0;
+pub const STYLE_ITALIC: u8 = 1 << 1;
+pub const STYLE_UNDERLINE: u8 = 1 << 2;
+pub const STYLE_STRIKE: u8 = 1 << 3;
+
 /// Formatting of one cell: the flags and font size the sheet editor can set (PD-084).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct CellStyle {
@@ -34,23 +39,69 @@ pub struct CellStyle {
     pub size_pt: Option<f64>,
 }
 
-/// Identity used to deduplicate styles: the size is compared in hundredths of a point.
-pub(crate) type StyleKey = (bool, bool, bool, bool, Option<u32>);
+/// Packed 64-bit style identity (`(centipt_or_zero as u64) << 40 | u64::from(flags)`) for $O(1)$
+/// word comparison and hashing; the size is compared in hundredths of a point.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub(crate) struct StyleKey(pub(crate) u64);
 
-impl CellStyle {
-    /// A style that changes nothing relative to the default cell.
-    pub fn is_plain(&self) -> bool {
-        !self.bold && !self.italic && !self.underline && !self.strike && self.size_pt.is_none()
+impl StyleKey {
+    #[inline]
+    pub(crate) const fn flags(self) -> u8 {
+        (self.0 & 0xFF) as u8
     }
 
+    #[inline]
+    pub(crate) const fn bold(self) -> bool {
+        (self.flags() & STYLE_BOLD) != 0
+    }
+
+    #[inline]
+    pub(crate) const fn italic(self) -> bool {
+        (self.flags() & STYLE_ITALIC) != 0
+    }
+
+    #[inline]
+    pub(crate) const fn underline(self) -> bool {
+        (self.flags() & STYLE_UNDERLINE) != 0
+    }
+
+    #[inline]
+    pub(crate) const fn strike(self) -> bool {
+        (self.flags() & STYLE_STRIKE) != 0
+    }
+
+    #[inline]
+    pub(crate) const fn size_centipt(self) -> Option<u32> {
+        let centi = (self.0 >> 40) as u32;
+        if centi == 0 {
+            None
+        } else {
+            Some(centi)
+        }
+    }
+}
+
+impl CellStyle {
+    #[inline]
+    pub const fn flags(&self) -> u8 {
+        (if self.bold { STYLE_BOLD } else { 0 })
+            | (if self.italic { STYLE_ITALIC } else { 0 })
+            | (if self.underline { STYLE_UNDERLINE } else { 0 })
+            | (if self.strike { STYLE_STRIKE } else { 0 })
+    }
+
+    /// A style that changes nothing relative to the default cell.
+    #[inline]
+    pub fn is_plain(&self) -> bool {
+        self.flags() == 0 && self.size_pt.is_none()
+    }
+
+    #[inline]
     pub(crate) fn key(&self) -> StyleKey {
-        (
-            self.bold,
-            self.italic,
-            self.underline,
-            self.strike,
-            self.size_pt.map(|s| (s * 100.0).round() as u32),
-        )
+        let centi = self
+            .size_pt
+            .map_or(0u64, |s| ((s * 100.0).round() as u32) as u64);
+        StyleKey((centi << 40) | u64::from(self.flags()))
     }
 }
 

@@ -145,8 +145,8 @@ test("hwp-studio wires font-authoring-policy into toolbar and font-loader and im
   assert.match(styleCss, /@import\s+"\.\/styles\/font-set-dialog\.css";/);
 
   const dialogCss = readText(path.join(REPO, "apps/hwp-studio/src/styles/font-set-dialog.css"));
-  assert.match(dialogCss, /\.fs-list-item:hover\s*\{\s*background:\s*var\(--color-hover-bg\);\s*\}/);
-  assert.match(dialogCss, /\.fse-row\s*\{[\s\S]*?gap:\s*8px;[\s\S]*?padding:\s*3px\s+0;/);
+  assert.match(dialogCss, /\.fs-list-item:hover\s*\{\s*background:\s*var\(--ui-selected\);\s*\}/);
+  assert.match(dialogCss, /\.fse-row\s*\{[\s\S]*?gap:\s*10px;[\s\S]*?padding:\s*4px\s+0;/);
 
   const toolbarTs = readText(path.join(REPO, "apps/hwp-studio/src/ui/toolbar.ts"));
   assert.match(toolbarTs, /from\s+'\.\.\/core\/font-authoring-policy'/);

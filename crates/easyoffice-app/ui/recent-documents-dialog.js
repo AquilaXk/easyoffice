@@ -40,11 +40,11 @@
       }
 
       const overlay = element("div", "modal-overlay");
-      const dialog = element("div", "dialog-wrap recent-documents-dialog");
+      const dialog = element("div", "dialog-wrap recent-documents-dialog recent-dialog");
       dialog.setAttribute("role", "dialog");
       dialog.setAttribute("aria-modal", "true");
       dialog.setAttribute("aria-label", "최근 문서");
-      const titleBar = element("div", "dialog-title", "최근 문서");
+      const titleBar = element("div", "dialog-title dialog-header", "최근 문서");
       const closeBtn = button("dialog-close", "×");
       closeBtn.setAttribute("aria-label", "닫기");
       add(titleBar, closeBtn);
@@ -62,7 +62,32 @@
       add(dialog, titleBar, body, footer);
       add(overlay, dialog);
 
+      let dx = 0, dy = 0, dragging = false, startX = 0, startY = 0;
+      function onDragMove(ev) {
+        if (!dragging) return;
+        dx = (Number(ev.clientX) || 0) - startX;
+        dy = (Number(ev.clientY) || 0) - startY;
+        dialog.style.transform = `translate(${dx}px, ${dy}px)`;
+      }
+      function stopDrag() {
+        if (!dragging) return;
+        dragging = false;
+        document.removeEventListener?.("mousemove", onDragMove);
+        document.removeEventListener?.("mouseup", stopDrag);
+      }
+      titleBar.addEventListener("mousedown", (ev) => {
+        if (ev.button !== undefined && ev.button !== 0) return;
+        if (ev.target?.closest?.(".dialog-close, button, [data-dialog-close]")) return;
+        startX = (Number(ev.clientX) || 0) - dx;
+        startY = (Number(ev.clientY) || 0) - dy;
+        dragging = true;
+        document.addEventListener?.("mousemove", onDragMove);
+        document.addEventListener?.("mouseup", stopDrag);
+        ev.preventDefault?.();
+      });
+
       function close(value) {
+        stopDrag();
         document.removeEventListener("keydown", onKeyDown, true);
         overlay.remove();
         resolve(value);

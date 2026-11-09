@@ -110,15 +110,25 @@ fn substitute_text(text: &str, old: &str, new: &str, target: Option<usize>) -> C
 
 /// SEARCH: case-insensitive wildcard search; `start` is 1-based.
 fn search_wildcard(needle: &str, hay: &str, start: isize) -> CellResult {
-    let byte_indices: Vec<usize> = hay.char_indices().map(|(i, _)| i).collect();
-    if start < 1 || (start as usize) > byte_indices.len().max(1) {
+    if start < 1 {
         return Err(FormulaError::Value);
     }
-    if needle.is_empty() {
-        return number_cell(start as f64);
-    }
     let st = (start - 1) as usize;
-    for (char_idx, &byte_pos) in byte_indices.iter().enumerate().skip(st) {
+    if hay.is_empty() {
+        return if st == 0 && needle.is_empty() {
+            number_cell(1.0)
+        } else {
+            Err(FormulaError::Value)
+        };
+    }
+    if needle.is_empty() {
+        return if hay.char_indices().nth(st).is_some() {
+            number_cell(start as f64)
+        } else {
+            Err(FormulaError::Value)
+        };
+    }
+    for (char_idx, (byte_pos, _)) in hay.char_indices().enumerate().skip(st) {
         if crate::coercion::wildcard_prefix_match(&hay[byte_pos..], needle) {
             return number_cell((char_idx + 1) as f64);
         }
@@ -304,15 +314,6 @@ impl SheetEngine {
         Ok(self.eval_arg_val(arg, ctx, depth)?.to_display_string())
     }
 
-    fn text_chars_arg(
-        &self,
-        arg: &Expr,
-        ctx: &mut EvalContext<'_>,
-        depth: usize,
-    ) -> Result<Vec<char>, FormulaError> {
-        Ok(self.text_arg(arg, ctx, depth)?.chars().collect())
-    }
-
     fn text_concat(&self, args: &[Expr], ctx: &mut EvalContext<'_>, depth: usize) -> CellResult {
         let vals = self.expand_args_ctx(args, ctx, depth)?;
         let mut out = String::new();
@@ -453,24 +454,45 @@ impl SheetEngine {
 
     fn text_replace(&self, args: &[Expr], ctx: &mut EvalContext<'_>, depth: usize) -> CellResult {
         check_text_arity(args, 4, 4)?;
-        let chars = self.text_chars_arg(&args[0], ctx, depth)?;
+        let old_t = self.text_arg(&args[0], ctx, depth)?;
         let start = self.eval_arg_num(&args[1], ctx, depth)?.trunc() as isize;
         let num_chars = self.eval_arg_num(&args[2], ctx, depth)?.trunc() as isize;
         let new_t = self.text_arg(&args[3], ctx, depth)?;
         if start < 1 || num_chars < 0 {
             return Err(FormulaError::Value);
         }
-        let st = ((start - 1) as usize).min(chars.len());
-        let end = (st + num_chars as usize).min(chars.len());
-        let suffix_len = chars.len() - end;
+        let st_target = (start - 1) as usize;
+        let end_target = st_target.saturating_add(num_chars as usize);
+        let mut b_st = old_t.len();
+        let mut b_end = old_t.len();
+        let mut total_old_chars = 0usize;
+        for (char_idx, (byte_idx, _)) in old_t.char_indices().enumerate() {
+            if char_idx == st_target {
+                b_st = byte_idx;
+            }
+            if char_idx == end_target {
+                b_end = byte_idx;
+            }
+            total_old_chars = char_idx + 1;
+        }
+        if st_target >= total_old_chars {
+            b_st = old_t.len();
+            b_end = old_t.len();
+        } else if end_target >= total_old_chars {
+            b_end = old_t.len();
+        }
+        let prefix_chars = st_target.min(total_old_chars);
+        let suffix_chars = total_old_chars.saturating_sub(end_target.min(total_old_chars));
         let mut budget = TextBudget::default();
         budget.reserve(
-            st.saturating_add(new_t.chars().count())
-                .saturating_add(suffix_len),
+            prefix_chars
+                .saturating_add(new_t.chars().count())
+                .saturating_add(suffix_chars),
         )?;
-        let mut out: String = chars[..st].iter().collect();
+        let mut out = String::with_capacity(b_st + new_t.len() + (old_t.len() - b_end));
+        out.push_str(&old_t[..b_st]);
         out.push_str(&new_t);
-        out.extend(chars[end..].iter());
+        out.push_str(&old_t[b_end..]);
         Ok(EvaluatedCellValue::Text(out))
     }
 
@@ -764,5 +786,27 @@ impl SheetEngine {
             1 => Ok(self.eval_expr_ctx(&rest[rest.len() - 1], ctx, depth)),
             _ => Err(FormulaError::Na),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn search_and_replace_utf8_zero_alloc_slicing() {
+        let s = SheetEngine::new("Sheet1");
+        assert_eq!(
+            s.evaluate_formula_str("=SEARCH(\"문?\", \"한국어 문서 편집\", 3)"),
+            EvaluatedCellValue::Number(5.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=REPLACE(\"가나다라마바\", 3, 2, \"XY\")"),
+            EvaluatedCellValue::Text("가나XY마바".to_string())
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=REPLACE(\"가나다\", 10, 2, \"끝\")"),
+            EvaluatedCellValue::Text("가나다끝".to_string())
+        );
     }
 }

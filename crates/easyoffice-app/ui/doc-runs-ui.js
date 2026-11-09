@@ -15,8 +15,8 @@
     underline: "btn-stylebar-underline",
     strike: "btn-stylebar-strike",
   };
-  const MIN_PT = 6;
-  const MAX_PT = 72;
+  const MIN_PT = 1;
+  const MAX_PT = 4096;
   const DEFAULT_COLORS = { color: "FF0000", highlight: "FFFF00" };
   const INDENT_LIMITS = { paddingLeft: [0, 192], textIndent: [-96, 192], paddingRight: [0, 192] };
   const RULER_PINS = {

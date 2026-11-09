@@ -218,7 +218,7 @@
     }
     observeValue(select, sync);
     rebuild();
-    ENHANCED.set(select, { root, sync });
+    ENHANCED.set(select, { root, sync, rebuild });
   }
 
   function stepEdgeSelection(select, options, toEnd) {
@@ -253,7 +253,8 @@
   }
 
   function syncCustomSelect(select) {
-    ENHANCED.get(select)?.sync();
+    const entry = ENHANCED.get(select);
+    if (entry) (entry.rebuild || entry.sync)();
   }
 
   host.__EASYOFFICE_CUSTOM_SELECT__ = { enhanceCustomSelects, syncCustomSelect };

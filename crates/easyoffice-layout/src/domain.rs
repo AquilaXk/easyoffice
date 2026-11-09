@@ -190,7 +190,7 @@ impl DocumentTableModel {
         Ok(())
     }
 
-    /// Evaluates table cell formulas (`=SUM(ABOVE)`, `=AVERAGE(ABOVE)`, `=COUNT(ABOVE)`, `=SUM(LEFT)`, `=AVERAGE(LEFT)`, `=COUNT(LEFT)`).
+    /// Evaluates table cell formulas (`=SUM(ABOVE)`, `=AVERAGE(ABOVE)`, `=COUNT(ABOVE)`, `=MIN(ABOVE)`, `=MAX(ABOVE)`, `=SUM(LEFT)`, `=AVERAGE(LEFT)`, `=COUNT(LEFT)`, `=MIN(LEFT)`, `=MAX(LEFT)`).
     pub fn evaluate_cell_formula(&self, row: usize, col: usize) -> Result<f64, EasyOfficeError> {
         let raw = self
             .rows
@@ -203,45 +203,105 @@ impl DocumentTableModel {
             })?
             .trim();
 
-        let upper = raw.to_ascii_uppercase().replace(' ', "");
-        let collect_above = || -> Vec<f64> {
-            (0..row)
-                .filter_map(|r| self.rows.get(r).and_then(|cols| cols.get(col)))
-                .filter_map(|v| v.trim().parse::<f64>().ok())
-                .collect()
-        };
-        let collect_left = || -> Vec<f64> {
-            (0..col)
-                .filter_map(|c| self.rows.get(row).and_then(|cols| cols.get(c)))
-                .filter_map(|v| v.trim().parse::<f64>().ok())
-                .collect()
+        let mut compact = [0u8; 24];
+        let mut compact_len = 0usize;
+        let mut fits_compact = true;
+        for &b in raw.as_bytes() {
+            if b == b' ' {
+                continue;
+            }
+            if compact_len >= compact.len() {
+                fits_compact = false;
+                break;
+            }
+            compact[compact_len] = b.to_ascii_uppercase();
+            compact_len += 1;
+        }
+
+        let accum = |is_above: bool| -> (f64, usize, f64, f64) {
+            let mut sum = 0.0f64;
+            let mut count = 0usize;
+            let mut min_v = f64::INFINITY;
+            let mut max_v = f64::NEG_INFINITY;
+            if is_above {
+                for r in 0..row {
+                    if let Some(v) = self
+                        .rows
+                        .get(r)
+                        .and_then(|cols| cols.get(col))
+                        .and_then(|s| s.trim().parse::<f64>().ok())
+                    {
+                        sum += v;
+                        count += 1;
+                        if v < min_v {
+                            min_v = v;
+                        }
+                        if v > max_v {
+                            max_v = v;
+                        }
+                    }
+                }
+            } else if let Some(cols) = self.rows.get(row) {
+                for cell in cols.iter().take(col) {
+                    if let Ok(v) = cell.trim().parse::<f64>() {
+                        sum += v;
+                        count += 1;
+                        if v < min_v {
+                            min_v = v;
+                        }
+                        if v > max_v {
+                            max_v = v;
+                        }
+                    }
+                }
+            }
+            (sum, count, min_v, max_v)
         };
 
-        match upper.as_str() {
-            "=SUM(ABOVE)" => Ok(collect_above().into_iter().sum()),
-            "=AVERAGE(ABOVE)" => {
-                let vals = collect_above();
-                if vals.is_empty() {
-                    Ok(0.0)
-                } else {
-                    Ok(vals.iter().sum::<f64>() / (vals.len() as f64))
+        if fits_compact {
+            match &compact[..compact_len] {
+                b"=SUM(ABOVE)" => return Ok(accum(true).0),
+                b"=AVERAGE(ABOVE)" => {
+                    let (sum, count, _, _) = accum(true);
+                    return Ok(if count == 0 {
+                        0.0
+                    } else {
+                        sum / (count as f64)
+                    });
                 }
-            }
-            "=COUNT(ABOVE)" => Ok(collect_above().len() as f64),
-            "=SUM(LEFT)" => Ok(collect_left().into_iter().sum()),
-            "=AVERAGE(LEFT)" => {
-                let vals = collect_left();
-                if vals.is_empty() {
-                    Ok(0.0)
-                } else {
-                    Ok(vals.iter().sum::<f64>() / (vals.len() as f64))
+                b"=COUNT(ABOVE)" => return Ok(accum(true).1 as f64),
+                b"=MIN(ABOVE)" => {
+                    let (_, count, min_v, _) = accum(true);
+                    return Ok(if count == 0 { 0.0 } else { min_v });
                 }
+                b"=MAX(ABOVE)" => {
+                    let (_, count, _, max_v) = accum(true);
+                    return Ok(if count == 0 { 0.0 } else { max_v });
+                }
+                b"=SUM(LEFT)" => return Ok(accum(false).0),
+                b"=AVERAGE(LEFT)" => {
+                    let (sum, count, _, _) = accum(false);
+                    return Ok(if count == 0 {
+                        0.0
+                    } else {
+                        sum / (count as f64)
+                    });
+                }
+                b"=COUNT(LEFT)" => return Ok(accum(false).1 as f64),
+                b"=MIN(LEFT)" => {
+                    let (_, count, min_v, _) = accum(false);
+                    return Ok(if count == 0 { 0.0 } else { min_v });
+                }
+                b"=MAX(LEFT)" => {
+                    let (_, count, _, max_v) = accum(false);
+                    return Ok(if count == 0 { 0.0 } else { max_v });
+                }
+                _ => {}
             }
-            "=COUNT(LEFT)" => Ok(collect_left().len() as f64),
-            _ => raw.parse::<f64>().map_err(|_| {
-                EasyOfficeError::FormulaError(format!("지원하지 않는 표 수식입니다: {raw}"))
-            }),
         }
+        raw.parse::<f64>().map_err(|_| {
+            EasyOfficeError::FormulaError(format!("지원하지 않는 표 수식입니다: {raw}"))
+        })
     }
 }
 
@@ -365,16 +425,53 @@ impl DocumentDomainEngine {
     }
 
     pub fn render_mail_merge(template: &str, records: &[HashMap<String, String>]) -> Vec<String> {
+        if records.is_empty() {
+            return Vec::new();
+        }
+        enum Segment<'a> {
+            Literal(&'a str),
+            Placeholder(&'a str, &'a str),
+        }
+        let mut segments = Vec::new();
+        let mut cursor = 0usize;
+        while let Some(rel_open) = template[cursor..].find("{{") {
+            let open = cursor + rel_open;
+            if open > cursor {
+                segments.push(Segment::Literal(&template[cursor..open]));
+            }
+            let key_start = open + 2;
+            if let Some(rel_close) = template[key_start..].find("}}") {
+                let close = key_start + rel_close;
+                let full_end = close + 2;
+                segments.push(Segment::Placeholder(
+                    &template[key_start..close],
+                    &template[open..full_end],
+                ));
+                cursor = full_end;
+            } else {
+                segments.push(Segment::Literal(&template[open..]));
+                cursor = template.len();
+                break;
+            }
+        }
+        if cursor < template.len() {
+            segments.push(Segment::Literal(&template[cursor..]));
+        }
+
         records
             .iter()
             .map(|record| {
-                let mut rendered = template.to_string();
-                let mut keys: Vec<&String> = record.keys().collect();
-                keys.sort();
-                for key in keys {
-                    if let Some(val) = record.get(key) {
-                        let token = format!("{{{{{key}}}}}");
-                        rendered = rendered.replace(&token, val);
+                let mut rendered = String::with_capacity(template.len());
+                for seg in &segments {
+                    match *seg {
+                        Segment::Literal(lit) => rendered.push_str(lit),
+                        Segment::Placeholder(key, raw_tok) => {
+                            if let Some(val) = record.get(key) {
+                                rendered.push_str(val);
+                            } else {
+                                rendered.push_str(raw_tok);
+                            }
+                        }
                     }
                 }
                 rendered

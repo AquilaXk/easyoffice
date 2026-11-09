@@ -136,12 +136,73 @@ fn build_shared_strings_xml(shared_strings: &[&str], total_str_count: usize) -> 
         shared_strings.len()
     );
     for s in shared_strings {
-        sst_xml.push_str("<si><t>");
+        if s.starts_with(char::is_whitespace)
+            || s.ends_with(char::is_whitespace)
+            || s.contains(['\n', '\r'])
+        {
+            sst_xml.push_str("<si><t xml:space=\"preserve\">");
+        } else {
+            sst_xml.push_str("<si><t>");
+        }
         sst_xml.push_str(&XmlSanitizer::escape(s));
         sst_xml.push_str("</t></si>");
     }
     sst_xml.push_str("</sst>");
     sst_xml
+}
+
+/// Decodes ECMA-376 `_xHHHH_` UTF-16 escape sequences (including surrogate pairs) in XLSX strings.
+fn decode_xlsx_escapes(s: String) -> String {
+    if !s.contains("_x") {
+        return s;
+    }
+    let bytes = s.as_bytes();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    let mut high_surrogate: Option<u16> = None;
+    while i < bytes.len() {
+        if i + 7 <= bytes.len() && bytes[i] == b'_' && bytes[i + 1] == b'x' && bytes[i + 6] == b'_'
+        {
+            if let Ok(hex_str) = std::str::from_utf8(&bytes[i + 2..i + 6]) {
+                if let Ok(unit) = u16::from_str_radix(hex_str, 16) {
+                    if (0xD800..=0xDBFF).contains(&unit) {
+                        if high_surrogate.replace(unit).is_some() {
+                            out.push(char::REPLACEMENT_CHARACTER);
+                        }
+                        i += 7;
+                        continue;
+                    } else if (0xDC00..=0xDFFF).contains(&unit) {
+                        if let Some(hi) = high_surrogate.take() {
+                            let cp = 0x10000
+                                + (((u32::from(hi) - 0xD800) << 10) | (u32::from(unit) - 0xDC00));
+                            out.push(char::from_u32(cp).unwrap_or(char::REPLACEMENT_CHARACTER));
+                            i += 7;
+                            continue;
+                        }
+                    } else {
+                        if high_surrogate.take().is_some() {
+                            out.push(char::REPLACEMENT_CHARACTER);
+                        }
+                        out.push(
+                            char::from_u32(u32::from(unit)).unwrap_or(char::REPLACEMENT_CHARACTER),
+                        );
+                        i += 7;
+                        continue;
+                    }
+                }
+            }
+        }
+        if high_surrogate.take().is_some() {
+            out.push(char::REPLACEMENT_CHARACTER);
+        }
+        let ch = s[i..].chars().next().unwrap_or(char::REPLACEMENT_CHARACTER);
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    if high_surrogate.is_some() {
+        out.push(char::REPLACEMENT_CHARACTER);
+    }
+    out
 }
 
 /// Appends the XML of one cell (`raw` is the stored text: formula, number, string or blank).
@@ -594,7 +655,7 @@ impl OoxmlCodec {
                         .map(XmlSanitizer::unescape)
                         .collect::<Vec<_>>()
                         .join("");
-                    shared_strings.push(joined);
+                    shared_strings.push(decode_xlsx_escapes(joined));
                 }
             }
         }
@@ -692,19 +753,22 @@ impl OoxmlCodec {
                 Self::resolve_xlsx_formula(inner, row, col, &mut shared_masters)
             {
                 cells.push((row, col, format!("={formula_str}")));
-            } else if cell_type == "inlineStr" {
+            } else if cell_type == "inlineStr" || (cell_type.is_empty() && inner.contains("<is")) {
                 let without_phonetic = strip_tag_blocks(inner, "rPh");
                 let inline_txt = extract_tag_bodies(&without_phonetic, "t")
                     .into_iter()
                     .map(XmlSanitizer::unescape)
                     .collect::<Vec<_>>()
                     .join("");
-                cells.push((row, col, inline_txt));
+                cells.push((row, col, decode_xlsx_escapes(inline_txt)));
             } else if let Some(v_body) = extract_tag_bodies(inner, "v").first() {
                 let raw_v = XmlSanitizer::unescape(v_body);
                 if cell_type == "s" {
                     let idx = raw_v.parse::<usize>().unwrap_or(0);
-                    let resolved = shared_strings.get(idx).cloned().unwrap_or(raw_v);
+                    let resolved = shared_strings
+                        .get(idx)
+                        .cloned()
+                        .unwrap_or_else(|| decode_xlsx_escapes(raw_v));
                     cells.push((row, col, resolved));
                 } else if cell_type == "b" {
                     let b_str = match raw_v.trim() {
@@ -713,8 +777,10 @@ impl OoxmlCodec {
                         _ => raw_v,
                     };
                     cells.push((row, col, b_str));
+                } else if cell_type == "d" {
+                    cells.push((row, col, raw_v.trim().to_string()));
                 } else {
-                    cells.push((row, col, raw_v));
+                    cells.push((row, col, decode_xlsx_escapes(raw_v)));
                 }
             }
         }

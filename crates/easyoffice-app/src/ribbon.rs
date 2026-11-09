@@ -1,5 +1,7 @@
 use easyoffice_formats::EasyOfficeError;
 use easyoffice_layout::{ContextualObjectToolKind, OfficeModuleKind, RibbonLayoutStyle};
+use std::collections::{HashMap, VecDeque};
+use std::sync::OnceLock;
 
 /// "실제 크기"(Cmd+0, `view-zoom`) 배율이자 새 작업 상태의 기본 배율(%).
 const ACTUAL_SIZE_ZOOM_PERCENT: u32 = 100;
@@ -15,11 +17,11 @@ pub struct RibbonCommandDescriptor {
     pub shortcut: &'static str,
 }
 
-/// Bounded generic Undo/Redo state snapshot stack (max 64 snapshots).
+/// Bounded generic Undo/Redo state snapshot stack (max 64 snapshots) backed by O(1) VecDeque ring buffers.
 #[derive(Debug, Clone)]
 pub struct UndoRedoStack<T: Clone> {
-    undo_stack: Vec<T>,
-    redo_stack: Vec<T>,
+    undo_stack: VecDeque<T>,
+    redo_stack: VecDeque<T>,
     max_depth: usize,
 }
 
@@ -34,36 +36,35 @@ impl<T: Clone> UndoRedoStack<T> {
 
     pub fn new() -> Self {
         Self {
-            undo_stack: Vec::new(),
-            redo_stack: Vec::new(),
+            undo_stack: VecDeque::new(),
+            redo_stack: VecDeque::new(),
             max_depth: Self::MAX_SNAPSHOTS,
         }
     }
 
     pub fn push_state(&mut self, snapshot: T) {
-        if self.undo_stack.len() >= self.max_depth {
-            let overflow = self.undo_stack.len() + 1 - self.max_depth;
-            self.undo_stack.drain(0..overflow);
+        while self.undo_stack.len() >= self.max_depth {
+            self.undo_stack.pop_front();
         }
-        self.undo_stack.push(snapshot);
+        self.undo_stack.push_back(snapshot);
         self.redo_stack.clear();
     }
 
     pub fn undo(&mut self, current: T) -> Option<T> {
-        let prev = self.undo_stack.pop()?;
+        let prev = self.undo_stack.pop_back()?;
         if self.redo_stack.len() >= self.max_depth {
-            self.redo_stack.remove(0);
+            self.redo_stack.pop_front();
         }
-        self.redo_stack.push(current);
+        self.redo_stack.push_back(current);
         Some(prev)
     }
 
     pub fn redo(&mut self, current: T) -> Option<T> {
-        let next = self.redo_stack.pop()?;
+        let next = self.redo_stack.pop_back()?;
         if self.undo_stack.len() >= self.max_depth {
-            self.undo_stack.remove(0);
+            self.undo_stack.pop_front();
         }
-        self.undo_stack.push(current);
+        self.undo_stack.push_back(current);
         Some(next)
     }
 
@@ -502,13 +503,26 @@ impl RibbonCommandRouter {
         catalog
     }
 
+    fn cached_catalog() -> &'static (Vec<RibbonCommandDescriptor>, HashMap<String, usize>) {
+        static CATALOG: OnceLock<(Vec<RibbonCommandDescriptor>, HashMap<String, usize>)> =
+            OnceLock::new();
+        CATALOG.get_or_init(|| {
+            let list = Self::all_commands();
+            let mut index = HashMap::with_capacity(list.len());
+            for (idx, desc) in list.iter().enumerate() {
+                index.insert(desc.id.clone(), idx);
+            }
+            (list, index)
+        })
+    }
+
     /// Resolves the owning office module of a catalog command ID (e.g. `sheet-home-italic` → Sheet).
     pub fn module_for_command(command_id: &str) -> Result<OfficeModuleKind, EasyOfficeError> {
         let trimmed = command_id.trim();
-        Self::all_commands()
-            .iter()
-            .find(|c| c.id == trimmed)
-            .map(|c| c.module)
+        let (catalog, index) = Self::cached_catalog();
+        index
+            .get(trimmed)
+            .map(|&idx| catalog[idx].module)
             .ok_or_else(|| {
                 EasyOfficeError::InvalidArgument(format!(
                     "등록되지 않은 리본 명령 ID입니다: {trimmed}"
@@ -522,10 +536,15 @@ impl RibbonCommandRouter {
         state: &mut RibbonWorkspaceState,
     ) -> Result<String, EasyOfficeError> {
         let trimmed = command_id.trim();
-        let catalog = Self::all_commands();
-        let matched = catalog.iter().find(|c| c.id == trimmed).ok_or_else(|| {
-            EasyOfficeError::InvalidArgument(format!("등록되지 않은 리본 명령 ID입니다: {trimmed}"))
-        })?;
+        let (catalog, index) = Self::cached_catalog();
+        let matched = index
+            .get(trimmed)
+            .map(|&idx| &catalog[idx])
+            .ok_or_else(|| {
+                EasyOfficeError::InvalidArgument(format!(
+                    "등록되지 않은 리본 명령 ID입니다: {trimmed}"
+                ))
+            })?;
 
         state.active_module = matched.module;
         state.last_command_id = matched.id.clone();

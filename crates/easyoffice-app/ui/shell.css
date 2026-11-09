@@ -53,6 +53,8 @@
 .statusbar-zoom-btn, .statusbar-mode-btn { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 18px; padding: 0 5px; font-size: 11px; font-weight: 600; color: var(--ui-text-secondary); border-radius: 3px; }
 .statusbar-zoom-btn:hover, .statusbar-mode-btn:hover { background: var(--ui-hover); color: var(--ui-text); }
 .statusbar-zoom-btn .eo-icon { width: 13px; height: 13px; }
+#status-studio-pos, #status-zoom-label { cursor: pointer; border-radius: var(--radius-xs); padding: 1px 6px; }
+#status-studio-pos:hover, #status-zoom-label:hover { background: var(--ui-hover); color: var(--color-text); }
 #status-zoom-label { min-width: 38px; text-align: center; }
 .statusbar .stb-zoom-slider { width: 88px; flex-shrink: 1; }
 /* ---- diagnostics (About dialog) and toasts ------------------------------------------------------ */

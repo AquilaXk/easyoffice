@@ -16,10 +16,33 @@ const SELECT_SELECTOR = [
   'select.sb-ls-select',
   'select.dialog-select',
   'select.formula-select',
+  'select.fse-select',
 ].join(',');
+
+const OBSERVED_BODIES = new WeakSet<Node>();
+
+function observeDynamicSelects(doc: Document): void {
+  const body = doc.body;
+  if (!body || OBSERVED_BODIES.has(body) || typeof MutationObserver !== 'function') return;
+  OBSERVED_BODIES.add(body);
+  const bodyObserver = new MutationObserver((records) => {
+    for (const record of records) {
+      for (const node of Array.from(record.addedNodes)) {
+        if (node instanceof HTMLSelectElement && node.matches(SELECT_SELECTOR)) {
+          enhanceCustomSelect(node);
+        } else if (node instanceof Element || node instanceof DocumentFragment) {
+          node.querySelectorAll<HTMLSelectElement>(SELECT_SELECTOR).forEach(enhanceCustomSelect);
+        }
+      }
+    }
+  });
+  bodyObserver.observe(body, { childList: true });
+}
 
 export function enhanceCustomSelects(root: ParentNode = document): void {
   root.querySelectorAll<HTMLSelectElement>(SELECT_SELECTOR).forEach(enhanceCustomSelect);
+  const doc = root instanceof Document ? root : root.ownerDocument;
+  if (doc) observeDynamicSelects(doc);
 }
 
 export function syncCustomSelect(select: HTMLSelectElement): void {

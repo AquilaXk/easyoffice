@@ -25,7 +25,8 @@
 .custom-select.sb-combo,
 .custom-select.sb-ls-select,
 .custom-select.dialog-select,
-.custom-select.formula-select {
+.custom-select.formula-select,
+.custom-select.fse-select {
   padding: 0;
   border: 0;
   background: transparent;
@@ -155,21 +156,20 @@
   background: var(--color-surface);
 }
 
-#style-bar .custom-select[data-select-id="style-name"] {
-  width: 112px;
-}
-
-#style-bar .custom-select[data-select-id="font-lang"] {
-  width: 76px;
+#style-bar .custom-select[data-select-id="style-name"],
+#style-bar .custom-select[data-select-id="font-lang"],
+#style-bar .custom-select[data-select-id="font-name"],
+#style-bar .custom-select[data-select-id="linespacing-select"] {
+  width: 100%;
+  min-width: 0;
 }
 
 #style-bar .custom-select[data-select-id="font-name"] {
-  width: 180px;
   overflow: visible;
 }
 
 #style-bar .custom-select[data-select-id="linespacing-select"] {
-  width: 78px;
+  flex: 1 1 auto;
 }
 
 .dialog-wrap .custom-select {

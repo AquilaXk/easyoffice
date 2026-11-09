@@ -68,18 +68,20 @@ impl XlsxStyleTable {
 
     fn font_xml(key: Option<StyleKey>) -> String {
         let mut out = String::from("<font>");
-        if let Some((bold, italic, underline, strike, size)) = key {
+        if let Some(k) = key {
             for (on, tag) in [
-                (bold, "<b/>"),
-                (italic, "<i/>"),
-                (strike, "<strike/>"),
-                (underline, "<u/>"),
+                (k.bold(), "<b/>"),
+                (k.italic(), "<i/>"),
+                (k.strike(), "<strike/>"),
+                (k.underline(), "<u/>"),
             ] {
                 if on {
                     out.push_str(tag);
                 }
             }
-            let sz = size.map_or_else(|| "11".to_string(), format_centipt);
+            let sz = k
+                .size_centipt()
+                .map_or_else(|| "11".to_string(), format_centipt);
             out.push_str(&format!("<sz val=\"{sz}\"/>"));
         } else {
             out.push_str("<sz val=\"11\"/>");
@@ -260,4 +262,104 @@ pub(crate) fn parse_worksheet_styling(sheet_xml: &str, xf_styles: &[CellStyle]) 
         }
     }
     styling
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{OdfCodec, OoxmlCodec, OoxmlXlsxPayload, ZipArchiveCodec, ZipSecurityPolicy};
+
+    #[test]
+    fn xlsx_escapes_inline_str_iso_date_and_preserve_space() {
+        let payload = OoxmlXlsxPayload {
+            sheet_name: "Sheet1".to_string(),
+            cells: vec![
+                (0, 0, "  leading and trailing  ".to_string()),
+                (0, 1, "line1\nline2".to_string()),
+            ],
+        };
+        let packed = OoxmlCodec::pack_xlsx(&payload).unwrap();
+        let entries = ZipArchiveCodec::unpack(&packed, &ZipSecurityPolicy::default()).unwrap();
+        let sst_entry = entries
+            .iter()
+            .find(|e| e.path == "xl/sharedStrings.xml")
+            .unwrap();
+        let sst_xml = std::str::from_utf8(&sst_entry.data).unwrap();
+        assert!(sst_xml.contains("<t xml:space=\"preserve\">  leading and trailing  </t>"));
+        assert!(sst_xml.contains("<t xml:space=\"preserve\">line1\nline2</t>"));
+        let unpacked = OoxmlCodec::unpack_xlsx(&packed).unwrap();
+        assert_eq!(unpacked.cells, payload.cells);
+
+        let custom_entries: Vec<(String, Vec<u8>)> = entries
+            .into_iter()
+            .map(|e| {
+                if e.path == "xl/sharedStrings.xml" {
+                    (
+                        e.path,
+                        b"<?xml version=\"1.0\" encoding=\"UTF-8\"?><sst xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" count=\"2\" uniqueCount=\"2\"><si><t>Hello_x000A_World</t></si><si><t>_xD83D__xDE00_</t></si></sst>".to_vec(),
+                    )
+                } else if e.path == "xl/worksheets/sheet1.xml" {
+                    (
+                        e.path,
+                        b"<?xml version=\"1.0\" encoding=\"UTF-8\"?><worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData><row r=\"1\"><c r=\"A1\" t=\"s\"><v>0</v></c><c r=\"B1\" t=\"s\"><v>1</v></c><c r=\"C1\"><is><t>Inline_x0020_NoType</t></is></c><c r=\"D1\" t=\"d\"><v> 2026-11-10 </v></c></row></sheetData></worksheet>".to_vec(),
+                    )
+                } else {
+                    (e.path, e.data)
+                }
+            })
+            .collect();
+        let custom_xlsx = ZipArchiveCodec::pack_compressed(&custom_entries).unwrap();
+        let parsed = OoxmlCodec::unpack_xlsx(&custom_xlsx).unwrap();
+        assert_eq!(
+            parsed.cells,
+            vec![
+                (0, 0, "Hello\nWorld".to_string()),
+                (0, 1, "😀".to_string()),
+                (0, 2, "Inline NoType".to_string()),
+                (0, 3, "2026-11-10".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn ods_boolean_and_date_value_fallback_when_text_p_is_empty() {
+        let base_ods = OdfCodec::pack_ods("Sheet1", &[(0, 0, "1".to_string())]).unwrap();
+        let entries = ZipArchiveCodec::unpack(&base_ods, &ZipSecurityPolicy::default()).unwrap();
+        let custom_entries: Vec<(String, Vec<u8>)> = entries
+            .into_iter()
+            .map(|e| {
+                if e.path == "content.xml" {
+                    (
+                        e.path,
+                        concat!(
+                            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+                            "<office:document-content xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" ",
+                            "xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" ",
+                            "xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">",
+                            "<office:body><office:spreadsheet><table:table table:name=\"Sheet1\">",
+                            "<table:table-row>",
+                            "<table:table-cell office:value-type=\"boolean\" office:boolean-value=\"true\"><text:p></text:p></table:table-cell>",
+                            "<table:table-cell office:value-type=\"boolean\" office:boolean-value=\"false\"/>",
+                            "<table:table-cell office:value-type=\"date\" office:date-value=\"2026-11-10\"><text:p></text:p></table:table-cell>",
+                            "</table:table-row>",
+                            "</table:table></office:spreadsheet></office:body></office:document-content>"
+                        )
+                        .as_bytes()
+                        .to_vec(),
+                    )
+                } else {
+                    (e.path, e.data)
+                }
+            })
+            .collect();
+        let custom_ods = ZipArchiveCodec::pack_compressed(&custom_entries).unwrap();
+        let (_, cells) = OdfCodec::unpack_ods(&custom_ods).unwrap();
+        assert_eq!(
+            cells,
+            vec![
+                (0, 0, "TRUE".to_string()),
+                (0, 1, "FALSE".to_string()),
+                (0, 2, "2026-11-10".to_string()),
+            ]
+        );
+    }
 }

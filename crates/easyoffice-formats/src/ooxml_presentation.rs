@@ -182,12 +182,12 @@ fn utf8_entry<'a>(entry: &'a ZipArchiveEntry, label: &str) -> Result<&'a str, Ea
 
 /// Reads speaker notes from the notes slide related to `slide_path`, if any.
 fn read_notes_slide(
-    entries: &[ZipArchiveEntry],
+    entry_map: &std::collections::HashMap<&str, &ZipArchiveEntry>,
     slide_path: &str,
 ) -> Result<Option<String>, EasyOfficeError> {
     let (dir, file) = slide_path.rsplit_once('/').unwrap_or(("", slide_path));
     let rels_path = format!("{dir}/_rels/{file}.rels");
-    let Some(rels_entry) = entries.iter().find(|e| e.path == rels_path) else {
+    let Some(&rels_entry) = entry_map.get(rels_path.as_str()) else {
         return Ok(None);
     };
     let rels = utf8_entry(rels_entry, &rels_path)?;
@@ -201,7 +201,7 @@ fn read_notes_slide(
             continue;
         }
         let notes_path = resolve_rel_target(dir, target);
-        let Some(notes_entry) = entries.iter().find(|e| e.path == notes_path) else {
+        let Some(&notes_entry) = entry_map.get(notes_path.as_str()) else {
             continue;
         };
         let notes_xml = utf8_entry(notes_entry, &notes_path)?;
@@ -426,10 +426,12 @@ impl OoxmlCodec {
     }
 
     /// Presentation title: core properties first, then the root attributes, then a default.
-    fn pptx_title(entries: &[ZipArchiveEntry], pres_xml: &str) -> String {
-        let core_title = entries
-            .iter()
-            .find(|e| e.path == "docProps/core.xml")
+    fn pptx_title(
+        entry_map: &std::collections::HashMap<&str, &ZipArchiveEntry>,
+        pres_xml: &str,
+    ) -> String {
+        let core_title = entry_map
+            .get("docProps/core.xml")
             .and_then(|e| std::str::from_utf8(&e.data).ok())
             .and_then(|xml| extract_tag_bodies(xml, "dc:title").into_iter().next())
             .map(XmlSanitizer::unescape)
@@ -445,13 +447,10 @@ impl OoxmlCodec {
 
     /// Relationship id to normalized `ppt/...` target path.
     fn pptx_relationship_targets(
-        entries: &[ZipArchiveEntry],
+        entry_map: &std::collections::HashMap<&str, &ZipArchiveEntry>,
     ) -> Result<std::collections::HashMap<String, String>, EasyOfficeError> {
         let mut rel_targets = std::collections::HashMap::new();
-        let Some(rels_entry) = entries
-            .iter()
-            .find(|e| e.path == "ppt/_rels/presentation.xml.rels")
-        else {
+        let Some(&rels_entry) = entry_map.get("ppt/_rels/presentation.xml.rels") else {
             return Ok(rel_targets);
         };
         let rels_xml = utf8_entry(rels_entry, "ppt/_rels/presentation.xml.rels")?;
@@ -494,35 +493,64 @@ impl OoxmlCodec {
         slide_entries
     }
 
+    /// Extracts table rows from `<p:graphicFrame>` `<a:tbl>`/`<a:tr>`/`<a:tc>` on a slide.
+    fn pptx_slide_table_lines(s_xml: &str) -> Vec<String> {
+        let mut lines = Vec::new();
+        for gf in extract_tag_bodies(s_xml, "p:graphicFrame") {
+            for tbl in extract_tag_bodies(gf, "a:tbl") {
+                for tr in extract_tag_bodies(tbl, "a:tr") {
+                    let cells: Vec<String> = extract_tag_bodies(tr, "a:tc")
+                        .into_iter()
+                        .map(|tc| {
+                            shape_paragraph_texts(tc)
+                                .into_iter()
+                                .filter(|s| !s.is_empty())
+                                .collect::<Vec<_>>()
+                                .join(" ")
+                        })
+                        .collect();
+                    if cells.iter().any(|c| !c.is_empty()) {
+                        lines.push(cells.join("\t"));
+                    }
+                }
+            }
+        }
+        lines
+    }
+
     /// Title and bullet texts of one slide (title placeholder first, legacy layout otherwise).
     fn pptx_slide_title_and_bullets(s_xml: &str) -> (String, Vec<String>) {
         let shapes = extract_tag_bodies(s_xml, "p:sp");
+        let table_lines = Self::pptx_slide_table_lines(s_xml);
         if let Some(t_idx) = shapes.iter().position(|sp| is_title_placeholder(sp)) {
             let title_text = shape_paragraph_texts(shapes[t_idx])
                 .into_iter()
                 .filter(|s| !s.is_empty())
                 .collect::<Vec<_>>()
                 .join("\n");
-            let bullets: Vec<String> = shapes
+            let mut bullets: Vec<String> = shapes
                 .iter()
                 .enumerate()
                 .filter(|(i, _)| *i != t_idx)
                 .flat_map(|(_, sp)| shape_paragraph_texts(sp))
                 .filter(|s| !s.is_empty())
                 .collect();
+            bullets.extend(table_lines);
             return (title_text, bullets);
         }
-        let mut bullets: Vec<String> = if extract_tag_bodies(s_xml, "a:p").is_empty() {
-            extract_tag_bodies(s_xml, "a:t")
+        let xml_no_gf = crate::rtf_xml_helpers::strip_tag_blocks(s_xml, "p:graphicFrame");
+        let mut bullets: Vec<String> = if extract_tag_bodies(&xml_no_gf, "a:p").is_empty() {
+            extract_tag_bodies(&xml_no_gf, "a:t")
                 .into_iter()
                 .map(XmlSanitizer::unescape)
                 .collect()
         } else {
-            shape_paragraph_texts(s_xml)
+            shape_paragraph_texts(&xml_no_gf)
                 .into_iter()
                 .filter(|s| !s.is_empty())
                 .collect()
         };
+        bullets.extend(table_lines);
         let legacy_title = match extract_attr(s_xml, "<p:sld", "title") {
             Some(t) => XmlSanitizer::unescape(t),
             None if bullets.is_empty() => String::new(),
@@ -534,31 +562,30 @@ impl OoxmlCodec {
     pub fn unpack_pptx(bytes: &[u8]) -> Result<OoxmlPptxPayload, EasyOfficeError> {
         let entries = ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default())?;
         validate_zip_xml_entries(&entries)?;
-        let pres_entry = entries
-            .iter()
-            .find(|e| e.path == "ppt/presentation.xml")
-            .ok_or_else(|| {
-                EasyOfficeError::CorruptedContainer(
-                    "PPTX 필수 엔트리 'ppt/presentation.xml'이 누락되었습니다.".to_string(),
-                )
-            })?;
+        let entry_map: std::collections::HashMap<&str, &ZipArchiveEntry> =
+            entries.iter().map(|e| (e.path.as_str(), e)).collect();
+        let &pres_entry = entry_map.get("ppt/presentation.xml").ok_or_else(|| {
+            EasyOfficeError::CorruptedContainer(
+                "PPTX 필수 엔트리 'ppt/presentation.xml'이 누락되었습니다.".to_string(),
+            )
+        })?;
         let pres_xml = utf8_entry(pres_entry, "ppt/presentation.xml")?;
 
-        let title = Self::pptx_title(&entries, pres_xml);
-        let slideshow_ct = entries.iter().any(|e| {
-            e.path == "[Content_Types].xml"
-                && std::str::from_utf8(&e.data).is_ok_and(|ct| ct.contains(SLIDESHOW_MAIN_CT))
-        });
+        let title = Self::pptx_title(&entry_map, pres_xml);
+        let slideshow_ct = entry_map
+            .get("[Content_Types].xml")
+            .and_then(|e| std::str::from_utf8(&e.data).ok())
+            .is_some_and(|ct| ct.contains(SLIDESHOW_MAIN_CT));
         let is_slideshow =
             slideshow_ct || extract_attr(pres_xml, "<p:presentation", "slideshow") == Some("1");
 
-        let rel_targets = Self::pptx_relationship_targets(&entries)?;
+        let rel_targets = Self::pptx_relationship_targets(&entry_map)?;
         let mut ordered_slide_entries: Vec<&ZipArchiveEntry> = Vec::new();
         for (sld_id_attrs, _) in extract_balanced_elements(pres_xml, "p:sldId") {
             let rid = extract_attr_from_fragment(sld_id_attrs, "r:id")
                 .or_else(|| extract_attr_from_fragment(sld_id_attrs, "id"));
             let target = rid.and_then(|rid| rel_targets.get(rid));
-            if let Some(entry) = target.and_then(|path| entries.iter().find(|e| &e.path == path)) {
+            if let Some(&entry) = target.and_then(|path| entry_map.get(path.as_str())) {
                 ordered_slide_entries.push(entry);
             }
         }
@@ -570,7 +597,7 @@ impl OoxmlCodec {
         for s_entry in ordered_slide_entries {
             let s_xml = utf8_entry(s_entry, "ppt/slides/slide.xml")?;
             let (s_title, bullets) = Self::pptx_slide_title_and_bullets(s_xml);
-            let notes = match read_notes_slide(&entries, &s_entry.path)? {
+            let notes = match read_notes_slide(&entry_map, &s_entry.path)? {
                 Some(n) => n,
                 None => extract_attr(s_xml, "<p:sld", "notes")
                     .map(XmlSanitizer::unescape)
@@ -584,5 +611,38 @@ impl OoxmlCodec {
             is_slideshow,
             slides,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pptx_slide_extracts_graphic_frame_table_cells() {
+        let slide_xml = concat!(
+            "<p:sld><p:cSld><p:spTree>",
+            "<p:sp><p:nvSpPr><p:nvPr><p:ph type=\"title\"/></p:nvPr></p:nvSpPr>",
+            "<p:txBody><a:p><a:r><a:t>분기 실적</a:t></a:r></a:p></p:txBody></p:sp>",
+            "<p:sp><p:nvSpPr><p:nvPr><p:ph idx=\"1\"/></p:nvPr></p:nvSpPr>",
+            "<p:txBody><a:p><a:r><a:t>요약 항목</a:t></a:r></a:p></p:txBody></p:sp>",
+            "<p:graphicFrame><a:graphic><a:graphicData><a:tbl>",
+            "<a:tr><a:tc><a:txBody><a:p><a:r><a:t>항목</a:t></a:r></a:p></a:txBody></a:tc>",
+            "<a:tc><a:txBody><a:p><a:r><a:t>매출</a:t></a:r></a:p></a:txBody></a:tc></a:tr>",
+            "<a:tr><a:tc><a:txBody><a:p><a:r><a:t>1분기</a:t></a:r></a:p></a:txBody></a:tc>",
+            "<a:tc><a:txBody><a:p><a:r><a:t>1200</a:t></a:r></a:p></a:txBody></a:tc></a:tr>",
+            "</a:tbl></a:graphicData></a:graphic></p:graphicFrame>",
+            "</p:spTree></p:cSld></p:sld>"
+        );
+        let (title, bullets) = OoxmlCodec::pptx_slide_title_and_bullets(slide_xml);
+        assert_eq!(title, "분기 실적");
+        assert_eq!(
+            bullets,
+            vec![
+                "요약 항목".to_string(),
+                "항목\t매출".to_string(),
+                "1분기\t1200".to_string()
+            ]
+        );
     }
 }

@@ -651,4 +651,166 @@ impl SheetEngine {
         }
         number_result((if neg { -total } else { total }) as f64)
     }
+
+    /// Paired-array statistical and linear regression functions (`CORREL`, `PEARSON`,
+    /// `COVARIANCE.P`, `COVARIANCE.S`, `SLOPE`, `INTERCEPT`, `RSQ`, `FORECAST`, `FORECAST.LINEAR`;
+    /// reference implementation: `FormulaJS`, MIT License, Copyright (c) Sutoiku, Inc.).
+    pub(crate) fn eval_stat_regression(
+        &self,
+        name: &str,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> CellResult {
+        let is_forecast = matches!(name, "FORECAST" | "FORECAST.LINEAR");
+        let expected_arity = if is_forecast { 3 } else { 2 };
+        check_math_arity(args, expected_arity, expected_arity)?;
+        let forecast_x = if is_forecast {
+            Some(self.eval_arg_num(&args[0], ctx, depth)?)
+        } else {
+            None
+        };
+        let (y_arg, x_arg) = if is_forecast {
+            (&args[1], &args[2])
+        } else {
+            (&args[0], &args[1])
+        };
+        let ys = self.eval_range_vec(y_arg, ctx, depth)?;
+        let xs = self.eval_range_vec(x_arg, ctx, depth)?;
+        if ys.len() != xs.len() || ys.is_empty() {
+            return Err(FormulaError::Na);
+        }
+        let mut pairs = Vec::with_capacity(ys.len());
+        for (yv, xv) in ys.iter().zip(xs.iter()) {
+            if let EvaluatedCellValue::Error(e) = yv {
+                return Err(*e);
+            }
+            if let EvaluatedCellValue::Error(e) = xv {
+                return Err(*e);
+            }
+            if let (EvaluatedCellValue::Number(y), EvaluatedCellValue::Number(x)) = (yv, xv) {
+                pairs.push((*y, *x));
+            }
+        }
+        let n = pairs.len();
+        if n == 0 || (name != "COVARIANCE.P" && n < 2) {
+            return Err(FormulaError::DivByZero);
+        }
+        let nf = n as f64;
+        let mean_y = pairs.iter().map(|&(y, _)| y).sum::<f64>() / nf;
+        let mean_x = pairs.iter().map(|&(_, x)| x).sum::<f64>() / nf;
+        let mut s_yy = 0.0;
+        let mut s_xx = 0.0;
+        let mut s_xy = 0.0;
+        for &(y, x) in &pairs {
+            let dy = y - mean_y;
+            let dx = x - mean_x;
+            s_yy += dy * dy;
+            s_xx += dx * dx;
+            s_xy += dx * dy;
+        }
+        match name {
+            "COVARIANCE.P" => number_result(s_xy / nf),
+            "COVARIANCE.S" => number_result(s_xy / ((n - 1) as f64)),
+            "CORREL" | "PEARSON" => {
+                if s_xx == 0.0 || s_yy == 0.0 {
+                    return Err(FormulaError::DivByZero);
+                }
+                number_result(s_xy / (s_xx * s_yy).sqrt())
+            }
+            "RSQ" => {
+                if s_xx == 0.0 || s_yy == 0.0 {
+                    return Err(FormulaError::DivByZero);
+                }
+                number_result((s_xy * s_xy) / (s_xx * s_yy))
+            }
+            "SLOPE" | "INTERCEPT" | "FORECAST" | "FORECAST.LINEAR" => {
+                if s_xx == 0.0 {
+                    return Err(FormulaError::DivByZero);
+                }
+                let slope = s_xy / s_xx;
+                let intercept = mean_y - slope * mean_x;
+                match name {
+                    "SLOPE" => number_result(slope),
+                    "INTERCEPT" => number_result(intercept),
+                    _ => number_result(intercept + slope * forecast_x.unwrap_or(0.0)),
+                }
+            }
+            _ => Err(FormulaError::Name),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn correl_covariance_slope_intercept_rsq_forecast_parity() {
+        let mut s = SheetEngine::new("StatRegTest");
+        for (i, (y, x)) in [
+            ("6", "20"),
+            ("7", "28"),
+            ("9", "31"),
+            ("15", "38"),
+            ("21", "40"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let r = i + 1;
+            s.set_cell(&format!("A{r}"), y).unwrap();
+            s.set_cell(&format!("B{r}"), x).unwrap();
+        }
+        let EvaluatedCellValue::Number(correl) = s.evaluate_formula_str("=CORREL(A1:A5, B1:B5)")
+        else {
+            panic!("expected CORREL number");
+        };
+        let EvaluatedCellValue::Number(pearson) = s.evaluate_formula_str("=PEARSON(A1:A5, B1:B5)")
+        else {
+            panic!("expected PEARSON number");
+        };
+        assert!((correl - pearson).abs() < 1e-12);
+        let expected_correl = 183.8 / (159.2_f64 * 259.2).sqrt();
+        assert!((correl - expected_correl).abs() < 1e-12, "correl={correl}");
+
+        let EvaluatedCellValue::Number(rsq) = s.evaluate_formula_str("=RSQ(A1:A5, B1:B5)") else {
+            panic!("expected RSQ number");
+        };
+        assert!((rsq - correl * correl).abs() < 1e-12);
+
+        let EvaluatedCellValue::Number(cov_p) =
+            s.evaluate_formula_str("=COVARIANCE.P(A1:A5, B1:B5)")
+        else {
+            panic!("expected COVARIANCE.P number");
+        };
+        let EvaluatedCellValue::Number(cov_s) =
+            s.evaluate_formula_str("=COVARIANCE.S(A1:A5, B1:B5)")
+        else {
+            panic!("expected COVARIANCE.S number");
+        };
+        assert!((cov_p * 5.0 - cov_s * 4.0).abs() < 1e-12);
+
+        let EvaluatedCellValue::Number(slope) = s.evaluate_formula_str("=SLOPE(A1:A5, B1:B5)")
+        else {
+            panic!("expected SLOPE number");
+        };
+        let EvaluatedCellValue::Number(intercept) =
+            s.evaluate_formula_str("=INTERCEPT(A1:A5, B1:B5)")
+        else {
+            panic!("expected INTERCEPT number");
+        };
+        let EvaluatedCellValue::Number(fc) = s.evaluate_formula_str("=FORECAST(30, A1:A5, B1:B5)")
+        else {
+            panic!("expected FORECAST number");
+        };
+        let EvaluatedCellValue::Number(fc_lin) =
+            s.evaluate_formula_str("=FORECAST.LINEAR(30, A1:A5, B1:B5)")
+        else {
+            panic!("expected FORECAST.LINEAR number");
+        };
+        assert!((fc - (intercept + slope * 30.0)).abs() < 1e-12);
+        assert!((fc - fc_lin).abs() < 1e-12);
+        assert!((fc - 10.607253).abs() < 1e-5, "fc={fc}");
+    }
 }

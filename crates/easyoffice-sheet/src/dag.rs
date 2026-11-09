@@ -11,6 +11,7 @@ use crate::{
     CellRange, EvalContext, EvaluatedCellValue, Expr, FormulaError, MemoTable,
     PackedCellCoordinate, SheetEngine, WorkbookEngine,
 };
+use std::collections::HashMap;
 
 /// Ranges at most this large are walked cell by cell; larger ones use the column index.
 const SMALL_RANGE_CELLS: usize = 256;
@@ -75,9 +76,80 @@ impl FormulaIndex {
     }
 }
 
+/// Populated cells indexed by column (`HashMap<u32, Vec<u32>>` with sorted `row` indices per `col`)
+/// plus a pre-sorted `Vec<PackedCellCoordinate>` of all populated coordinates.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct CellIndex {
+    pub(crate) by_col: HashMap<u32, Vec<u32>>,
+    pub(crate) sorted_coords: Vec<PackedCellCoordinate>,
+}
+
+impl CellIndex {
+    fn build(sheet: &SheetEngine) -> Self {
+        let mut sorted_coords: Vec<PackedCellCoordinate> = sheet.cells.keys().copied().collect();
+        sorted_coords.sort_unstable();
+        let mut by_col: HashMap<u32, Vec<u32>> = HashMap::new();
+        for &coord in &sorted_coords {
+            by_col.entry(coord.col()).or_default().push(coord.row());
+        }
+        Self {
+            by_col,
+            sorted_coords,
+        }
+    }
+
+    /// Populated coordinates inside `[min_r..=max_r, min_c..=max_c]` in row-major order.
+    pub(crate) fn range_coords(
+        &self,
+        min_r: u32,
+        max_r: u32,
+        min_c: u32,
+        max_c: u32,
+    ) -> Vec<PackedCellCoordinate> {
+        if min_r > max_r || min_c > max_c || self.sorted_coords.is_empty() {
+            return Vec::new();
+        }
+        let col_span = (max_c - min_c + 1) as usize;
+        let mut out = Vec::new();
+        if col_span <= self.by_col.len().saturating_mul(4) {
+            for col in min_c..=max_c {
+                if let Some(rows) = self.by_col.get(&col) {
+                    let lo = rows.partition_point(|&r| r < min_r);
+                    let hi = rows.partition_point(|&r| r <= max_r);
+                    out.extend(
+                        rows[lo..hi]
+                            .iter()
+                            .map(|&r| PackedCellCoordinate((u64::from(r) << 32) | u64::from(col))),
+                    );
+                }
+            }
+        } else {
+            for (&col, rows) in &self.by_col {
+                if col >= min_c && col <= max_c {
+                    let lo = rows.partition_point(|&r| r < min_r);
+                    let hi = rows.partition_point(|&r| r <= max_r);
+                    out.extend(
+                        rows[lo..hi]
+                            .iter()
+                            .map(|&r| PackedCellCoordinate((u64::from(r) << 32) | u64::from(col))),
+                    );
+                }
+            }
+        }
+        if out.len() > 1 && min_c < max_c {
+            out.sort_unstable();
+        }
+        out
+    }
+}
+
 impl SheetEngine {
     pub(crate) fn formula_index(&self) -> &FormulaIndex {
         self.formula_index.get_or_init(|| FormulaIndex::build(self))
+    }
+
+    pub(crate) fn cell_index(&self) -> &CellIndex {
+        self.cell_index.get_or_init(|| CellIndex::build(self))
     }
 }
 
@@ -105,8 +177,7 @@ impl RecalcPlan {
 
     /// Runs the pre-pass for every populated cell (recording the order) on a fresh context.
     pub(crate) fn build(sheet: &SheetEngine, ctx: &mut EvalContext<'_>) -> Self {
-        let mut coords: Vec<PackedCellCoordinate> = sheet.cells.keys().copied().collect();
-        coords.sort_unstable();
+        let coords = sheet.cell_index().sorted_coords.clone();
         let mut rec = PlanRecorder::default();
         sheet.pre_evaluate_dag(&coords, ctx, Some(&mut rec));
         Self {

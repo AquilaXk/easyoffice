@@ -83,6 +83,62 @@ fn update_best_floor(
     }
 }
 
+/// Attempts an $O(\log N)$ binary search over `0..len` for approximate ascending (`ascending == true`,
+/// largest `key <= lookup`) or descending (`ascending == false`, smallest `key >= lookup`) lookup.
+///
+/// Falls back (`Ok(Err(()))`) to linear scan if any probed element has a different type (including
+/// empty or error cells) or violates monotonicity.
+fn sorted_approx_binary_search(
+    len: usize,
+    ascending: bool,
+    lookup: &EvaluatedCellValue,
+    mut eval_at: impl FnMut(usize) -> Result<EvaluatedCellValue, FormulaError>,
+) -> Result<Result<Option<usize>, ()>, FormulaError> {
+    if len == 0 {
+        return Ok(Ok(None));
+    }
+    let mut lo = 0usize;
+    let mut hi = len;
+    let mut best: Option<usize> = None;
+    let mut lower_bound_val: Option<EvaluatedCellValue> = None;
+    let mut upper_bound_val: Option<EvaluatedCellValue> = None;
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        let k = eval_at(mid)?;
+        if !same_value_type(&k, lookup) {
+            return Ok(Err(()));
+        }
+        let Some(ord) = SheetEngine::compare_excel_values(&k, lookup) else {
+            return Ok(Err(()));
+        };
+        if let Some(ref lb) = lower_bound_val {
+            let Some(lb_ord) = SheetEngine::compare_excel_values(&k, lb) else {
+                return Ok(Err(()));
+            };
+            if (ascending && lb_ord.is_lt()) || (!ascending && lb_ord.is_gt()) {
+                return Ok(Err(()));
+            }
+        }
+        if let Some(ref ub) = upper_bound_val {
+            let Some(ub_ord) = SheetEngine::compare_excel_values(&k, ub) else {
+                return Ok(Err(()));
+            };
+            if (ascending && ub_ord.is_gt()) || (!ascending && ub_ord.is_lt()) {
+                return Ok(Err(()));
+            }
+        }
+        if (ascending && ord.is_le()) || (!ascending && ord.is_ge()) {
+            best = Some(mid);
+            lower_bound_val = Some(k);
+            lo = mid + 1;
+        } else {
+            upper_bound_val = Some(k);
+            hi = mid;
+        }
+    }
+    Ok(Ok(best))
+}
+
 /// XLOOKUP match / search mode pair.
 struct XlookupModes {
     match_mode: i32,
@@ -314,6 +370,19 @@ impl SheetEngine {
             target_idx: idx_num as u32 - 1,
         };
         let sheet = sheet_opt.as_deref();
+        if range_lookup && outer_count > 0 {
+            let bsearch = sorted_approx_binary_search(outer_count, true, &lookup_val, |off| {
+                let (kc, _) = geom.coord_pair(off as u32)?;
+                Ok(self.eval_sheet_coord(sheet, kc, ctx, depth))
+            })?;
+            if let Ok(hit) = bsearch {
+                let Some(best_off) = hit else {
+                    return Err(FormulaError::Na);
+                };
+                let (_, rc) = geom.coord_pair(best_off as u32)?;
+                return Ok(self.eval_sheet_coord(sheet, rc, ctx, depth));
+            }
+        }
         let mut best: Option<(u32, EvaluatedCellValue)> = None;
         for off in 0..outer_count {
             let (kc, rc) = geom.coord_pair(off as u32)?;
@@ -533,6 +602,29 @@ impl SheetEngine {
         };
         if let Some(spec) = self.extract_streaming_range_ctx(&args[1], ctx, depth)? {
             let (_, _, _, rows, cols, _) = spec;
+            let total_len = rows.saturating_mul(cols);
+            if match_type != 0 && total_len > 0 && cols > 0 {
+                let bsearch = sorted_approx_binary_search(
+                    total_len,
+                    match_type > 0,
+                    &lookup_val,
+                    |flat_idx| {
+                        self.eval_streaming_cell_allow_error(
+                            &spec,
+                            flat_idx / cols,
+                            flat_idx % cols,
+                            ctx,
+                            depth,
+                        )
+                    },
+                )?;
+                if let Ok(hit) = bsearch {
+                    return match hit {
+                        Some(zero_idx) => number_value((zero_idx + 1) as f64),
+                        None => Err(FormulaError::Na),
+                    };
+                }
+            }
             let mut idx = 0usize;
             for r_off in 0..rows {
                 for c_off in 0..cols {
@@ -547,6 +639,18 @@ impl SheetEngine {
             return state.result();
         }
         let arr = self.eval_range_vec(&args[1], ctx, depth)?;
+        if match_type != 0 && !arr.is_empty() {
+            let bsearch =
+                sorted_approx_binary_search(arr.len(), match_type > 0, &lookup_val, |idx| {
+                    Ok(arr[idx].clone())
+                })?;
+            if let Ok(hit) = bsearch {
+                return match hit {
+                    Some(zero_idx) => number_value((zero_idx + 1) as f64),
+                    None => Err(FormulaError::Na),
+                };
+            }
+        }
         for (zero_idx, v) in arr.iter().enumerate() {
             if state.consider(zero_idx + 1, v, &lookup_val) {
                 return number_value((zero_idx + 1) as f64);
@@ -696,6 +800,44 @@ mod tests {
         assert_eq!(
             s.evaluate_formula_str("=XLOOKUP(25, B1:B5, C1:C5, -1, 1, -2)"),
             EvaluatedCellValue::Number(300.0)
+        );
+    }
+
+    #[test]
+    fn match_and_vlookup_binary_search_with_fallback() {
+        let mut s = SheetEngine::new("Sheet1");
+        for (i, (asc, desc, ret)) in [
+            ("10", "50", "100"),
+            ("20", "40", "200"),
+            ("20", "40", "250"),
+            ("30", "30", "300"),
+            ("50", "10", "500"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let r = i + 1;
+            s.set_cell(&format!("A{r}"), asc).unwrap();
+            s.set_cell(&format!("B{r}"), desc).unwrap();
+            s.set_cell(&format!("C{r}"), ret).unwrap();
+        }
+        assert_eq!(
+            s.evaluate_formula_str("=MATCH(25, A1:A5, 1)"),
+            EvaluatedCellValue::Number(3.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=MATCH(25, B1:B5, -1)"),
+            EvaluatedCellValue::Number(4.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=VLOOKUP(20, A1:C5, 3, TRUE)"),
+            EvaluatedCellValue::Number(250.0)
+        );
+        // Mixed-type cell at midpoint triggers fallback to linear scan.
+        s.set_cell("A3", "label").unwrap();
+        assert_eq!(
+            s.evaluate_formula_str("=MATCH(25, A1:A5, 1)"),
+            EvaluatedCellValue::Number(2.0)
         );
     }
 }

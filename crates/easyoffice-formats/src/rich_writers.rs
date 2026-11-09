@@ -258,26 +258,32 @@ pub(crate) fn pack_docx_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeEr
 // ---------------------------------------------------------------- ODT
 
 /// Interned automatic-style keys, in first-use order.
-struct StyleTable<K: PartialEq + Clone> {
+struct StyleTable<K: Eq + std::hash::Hash + Clone> {
     keys: Vec<K>,
+    index: std::collections::HashMap<K, usize>,
 }
 
-impl<K: PartialEq + Clone> StyleTable<K> {
+impl<K: Eq + std::hash::Hash + Clone> StyleTable<K> {
     fn new() -> Self {
-        Self { keys: Vec::new() }
+        Self {
+            keys: Vec::new(),
+            index: std::collections::HashMap::new(),
+        }
     }
 
     fn intern(&mut self, key: &K) -> usize {
-        if let Some(pos) = self.keys.iter().position(|k| k == key) {
-            return pos + 1;
+        if let Some(&pos) = self.index.get(key) {
+            return pos;
         }
         self.keys.push(key.clone());
-        self.keys.len()
+        let pos = self.keys.len();
+        self.index.insert(key.clone(), pos);
+        pos
     }
 }
 
 /// Automatic paragraph style identity.
-#[derive(Clone, PartialEq, Default)]
+#[derive(Clone, PartialEq, Eq, Hash, Default)]
 struct OdtParaKey {
     align: Option<RichAlignment>,
     level: u8,

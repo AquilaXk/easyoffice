@@ -211,17 +211,31 @@ impl HwpxCodec {
     /// each distinct alignment/indent a `paraPr`, and heading levels use "개요 N" styles.
     pub fn pack_rich(doc: &RichDocument, is_template: bool) -> Result<Vec<u8>, EasyOfficeError> {
         let mut char_shapes = vec![HwpxCharShape::default()];
+        let mut char_map: std::collections::HashMap<HwpxCharShape, usize> =
+            std::collections::HashMap::from([(HwpxCharShape::default(), 0)]);
         let mut para_shapes = vec![HwpxParaShape::default()];
+        let mut para_map: std::collections::HashMap<HwpxParaShape, usize> =
+            std::collections::HashMap::from([(HwpxParaShape::default(), 0)]);
         let mut styles: Vec<HwpxStyle> = Vec::new();
+        let mut style_map: std::collections::HashMap<u8, usize> = std::collections::HashMap::new();
         let mut fonts: Vec<String> = Vec::new();
+        let mut font_map: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
         fn hex_rgb(hex: &str) -> Option<u32> {
             u32::from_str_radix(hex, 16).ok()
         }
-        fn intern<T: PartialEq + Copy>(table: &mut Vec<T>, item: T) -> usize {
-            table.iter().position(|x| *x == item).unwrap_or_else(|| {
-                table.push(item);
-                table.len() - 1
-            })
+        fn intern<T: Eq + std::hash::Hash + Copy>(
+            table: &mut Vec<T>,
+            map: &mut std::collections::HashMap<T, usize>,
+            item: T,
+        ) -> usize {
+            if let Some(&idx) = map.get(&item) {
+                return idx;
+            }
+            let idx = table.len();
+            table.push(item);
+            map.insert(item, idx);
+            idx
         }
         check_document_images(doc)?;
         let mut media = MediaParts::default();
@@ -272,7 +286,7 @@ impl HwpxCodec {
                     .line_spacing_percent
                     .map_or(DEFAULT_LINE_PERCENT, u32::from),
             };
-            let para_pr = intern(&mut para_shapes, para);
+            let para_pr = intern(&mut para_shapes, &mut para_map, para);
             let base = HwpxCharShape {
                 bold: level > 0,
                 height: [1600, 1400, 1300, 1200, 1100, 1000]
@@ -282,36 +296,36 @@ impl HwpxCodec {
                 ..HwpxCharShape::default()
             };
             let style = if level > 0 {
-                let char_pr = intern(&mut char_shapes, base);
-                let name = format!("개요 {level}");
-                styles
-                    .iter()
-                    .position(|s| s.name == name)
-                    .unwrap_or_else(|| {
-                        styles.push(HwpxStyle {
-                            name,
-                            eng_name: format!("Outline {level}"),
-                            para_pr,
-                            char_pr,
-                        });
-                        styles.len() - 1
-                    })
-                    + 1
+                let char_pr = intern(&mut char_shapes, &mut char_map, base);
+                let idx = *style_map.entry(level).or_insert_with(|| {
+                    styles.push(HwpxStyle {
+                        name: format!("개요 {level}"),
+                        eng_name: format!("Outline {level}"),
+                        para_pr,
+                        char_pr,
+                    });
+                    styles.len() - 1
+                });
+                idx + 1
             } else {
                 0
             };
             sec.open_paragraph_with(para_pr, style);
             let runs: Vec<_> = p.runs.iter().filter(|r| !r.text.is_empty()).collect();
             if runs.is_empty() {
-                let char_pr = intern(&mut char_shapes, base);
+                let char_pr = intern(&mut char_shapes, &mut char_map, base);
                 sec.run(char_pr, "");
             }
             for run in runs {
                 let font = run.font.as_ref().map_or(0, |f| {
-                    1 + fonts.iter().position(|x| x == f).unwrap_or_else(|| {
+                    if let Some(&idx) = font_map.get(f) {
+                        idx
+                    } else {
                         fonts.push(f.clone());
-                        fonts.len() - 1
-                    })
+                        let idx = fonts.len();
+                        font_map.insert(f.clone(), idx);
+                        idx
+                    }
                 });
                 let shape = HwpxCharShape {
                     bold: base.bold || run.bold,
@@ -324,7 +338,7 @@ impl HwpxCodec {
                     shade_color: run.highlight.as_deref().and_then(hex_rgb),
                     script: run.script,
                 };
-                let char_pr = intern(&mut char_shapes, shape);
+                let char_pr = intern(&mut char_shapes, &mut char_map, shape);
                 sec.run(char_pr, &run.text);
             }
             sec.xml.push_str("</hp:p>");

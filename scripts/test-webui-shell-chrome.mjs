@@ -417,3 +417,74 @@ test("icon toolbar wheel/focus scroller, custom-select dblclick/aria/keys, and d
   dialog.close();
   assert.equal(wrap.style.transform, "");
 });
+
+test("font-mono token, status bar interactive position/zoom, proportional fit zoom, style-bar custom inputs, and recent-dialog drag match rhwp-studio", async () => {
+  assert.match(
+    TOKENS_CSS,
+    /--font-mono:\s*'SFMono-Regular',\s*Consolas,\s*'Liberation Mono',\s*Menlo,\s*monospace;/
+  );
+  const posRule = cssRule("#status-studio-pos, #status-zoom-label", SHELL_CSS);
+  assert.ok(hasDecl(posRule, "cursor", "pointer") && hasDecl(posRule, "border-radius", "var(--radius-xs)") && hasDecl(posRule, "padding", "1px 6px"));
+
+  const docSelection = { _range: null, get rangeCount() { return this._range ? 1 : 0; }, getRangeAt() { return this._range; }, removeAllRanges() { this._range = null; }, addRange(r) { this._range = r; } };
+  const { document, userClick, sandbox } = await createWorkspaceHarness({ search: "?module=DOC&win=w-parity-controls", selection: docSelection });
+  const outlineDialog = document.getElementById("outline-dialog");
+  assert.equal(Boolean(outlineDialog.open), false);
+  userClick(document.getElementById("status-studio-pos"));
+  assert.equal(Boolean(outlineDialog.open), true);
+  outlineDialog.close();
+
+  const zoomSlider = document.getElementById("status-zoom-slider");
+  const zoomLabel = document.getElementById("status-zoom-label");
+  zoomSlider.value = "155";
+  zoomSlider.dispatchEvent({ type: "input" });
+  assert.equal(zoomLabel.textContent, "155%");
+  userClick(zoomLabel);
+  assert.equal(zoomLabel.textContent, "100%");
+  assert.equal(zoomSlider.value, "100");
+
+  const docScroll = document.querySelector(".doc-scroll-container");
+  const docEditor = document.getElementById("doc-editor");
+  docEditor.offsetWidth = 800;
+  docEditor.offsetHeight = 1000;
+  docScroll.clientWidth = 1000;
+  docScroll.clientHeight = 820;
+  userClick(document.getElementById("btn-zoom-fit-width"));
+  assert.equal(zoomLabel.textContent, "120%");
+  userClick(document.getElementById("btn-zoom-fit-page"));
+  assert.equal(zoomLabel.textContent, "80%");
+  docScroll.clientWidth = 0;
+  docScroll.clientHeight = 0;
+
+  const titleText = document.querySelector("#doc-editor .eo-h-title").childNodes[0];
+  docSelection.addRange({ startContainer: titleText, startOffset: 1, endContainer: titleText, endOffset: 3, collapsed: false });
+  const sizeInput = document.getElementById("doc-font-size-input");
+  sizeInput.value = "144";
+  sizeInput.dispatchEvent({ type: "keydown", key: "Enter", target: sizeInput, preventDefault() {} });
+  assert.equal(sizeInput.value, "144.0");
+  assert.equal(docEditor.querySelector(".eo-run").dataset.eoSize, "288");
+
+  const lsSelect = document.getElementById("doc-linespacing-select");
+  const lsRoot = lsSelect.parentElement;
+  lsSelect.dispatchEvent({ type: "dblclick", target: lsSelect, preventDefault() {} });
+  const lsInput = lsRoot.parentElement.querySelector("input.sb-ls-select");
+  assert.ok(lsInput, "double-clicking line spacing opens inline custom input");
+  lsInput.value = "225";
+  lsInput.dispatchEvent({ type: "keydown", key: "Enter", target: lsInput, preventDefault() {} });
+  assert.equal(lsSelect.value, "225");
+  assert.equal(docEditor.dataset.lineSpacing, "225");
+
+  const recentPromise = document.defaultView.__EASYOFFICE_RECENT_DIALOG__.open(document, []);
+  const recentDlg = document.querySelector(".recent-documents-dialog.recent-dialog");
+  assert.ok(recentDlg);
+  const recentHeader = recentDlg.querySelector(".dialog-header");
+  assert.ok(recentHeader);
+  recentHeader.dispatchEvent({ type: "mousedown", button: 0, clientX: 50, clientY: 60, target: recentHeader });
+  document.dispatchEvent({ type: "mousemove", clientX: 90, clientY: 110 });
+  assert.equal(recentDlg.style.transform, "translate(40px, 50px)");
+  document.dispatchEvent({ type: "mouseup", clientX: 90, clientY: 110 });
+  recentDlg.querySelector(".dialog-close").click();
+  await recentPromise;
+  assert.equal(document.querySelector(".recent-documents-dialog"), null);
+});
+

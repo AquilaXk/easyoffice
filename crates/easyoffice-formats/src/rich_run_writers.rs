@@ -142,9 +142,10 @@ pub(crate) fn odt_text_style_xml(index: usize, key: &OdtTextKey) -> String {
 
 /// `<office:font-face-decls>` declaring every distinct font used by the text styles.
 pub(crate) fn odt_font_face_decls(keys: &[OdtTextKey]) -> String {
+    let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
     let mut fonts: Vec<&str> = Vec::new();
     for font in keys.iter().filter_map(|k| k.2.as_deref()) {
-        if !fonts.contains(&font) {
+        if seen.insert(font) {
             fonts.push(font);
         }
     }
@@ -168,21 +169,29 @@ pub(crate) fn odt_font_face_decls(keys: &[OdtTextKey]) -> String {
 #[derive(Default)]
 pub(crate) struct RtfRunTables {
     fonts: Vec<String>,
+    font_map: std::collections::HashMap<String, usize>,
     colors: Vec<String>,
+    color_map: std::collections::HashMap<String, usize>,
 }
 
 impl RtfRunTables {
     pub(crate) fn collect<'a>(runs: impl Iterator<Item = &'a RichRun>) -> Self {
         let mut t = Self::default();
         for run in runs.filter(|r| !r.text.is_empty()) {
-            if let Some(f) = run.font.as_ref().filter(|f| !t.fonts.contains(f)) {
-                t.fonts.push(f.clone());
+            if let Some(f) = run.font.as_ref() {
+                if !t.font_map.contains_key(f) {
+                    let idx = t.fonts.len() + 1;
+                    t.font_map.insert(f.clone(), idx);
+                    t.fonts.push(f.clone());
+                }
             }
             for c in [run.color.as_ref(), run.highlight.as_ref()]
                 .into_iter()
                 .flatten()
             {
-                if !t.colors.contains(c) {
+                if !t.color_map.contains_key(c) {
+                    let idx = t.colors.len() + 1;
+                    t.color_map.insert(c.clone(), idx);
                     t.colors.push(c.clone());
                 }
             }
@@ -226,21 +235,21 @@ impl RtfRunTables {
     pub(crate) fn run_words(&self, run: &RichRun) -> String {
         let mut out = String::new();
         if let Some(font) = &run.font {
-            if let Some(i) = self.fonts.iter().position(|f| f == font) {
-                out.push_str(&format!("\\f{} ", i + 1));
+            if let Some(&idx) = self.font_map.get(font) {
+                out.push_str(&format!("\\f{idx} "));
             }
         }
         if let Some(size) = run.size_half_pt {
             out.push_str(&format!("\\fs{size} "));
         }
         if let Some(color) = &run.color {
-            if let Some(i) = self.colors.iter().position(|c| c == color) {
-                out.push_str(&format!("\\cf{} ", i + 1));
+            if let Some(&idx) = self.color_map.get(color) {
+                out.push_str(&format!("\\cf{idx} "));
             }
         }
         if let Some(hl) = &run.highlight {
-            if let Some(i) = self.colors.iter().position(|c| c == hl) {
-                out.push_str(&format!("\\highlight{} ", i + 1));
+            if let Some(&idx) = self.color_map.get(hl) {
+                out.push_str(&format!("\\highlight{idx} "));
             }
         }
         out

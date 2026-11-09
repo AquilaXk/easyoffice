@@ -511,6 +511,28 @@ mod tests {
         assert!((table.evaluate_cell_formula(0, 2).unwrap() - 200.0).abs() < 1e-6);
         assert!((table.evaluate_cell_formula(1, 2).unwrap() - 150.0).abs() < 1e-6);
 
+        let min_max_table = DocumentTableModel::new(vec![
+            vec![
+                "120".to_string(),
+                "80".to_string(),
+                "=MIN(LEFT)".to_string(),
+            ],
+            vec![
+                "180".to_string(),
+                "120".to_string(),
+                "=MAX(LEFT)".to_string(),
+            ],
+            vec![
+                "=MIN(ABOVE)".to_string(),
+                "=MAX(ABOVE)".to_string(),
+                "0".to_string(),
+            ],
+        ]);
+        assert!((min_max_table.evaluate_cell_formula(0, 2).unwrap() - 80.0).abs() < 1e-6);
+        assert!((min_max_table.evaluate_cell_formula(1, 2).unwrap() - 180.0).abs() < 1e-6);
+        assert!((min_max_table.evaluate_cell_formula(2, 0).unwrap() - 120.0).abs() < 1e-6);
+        assert!((min_max_table.evaluate_cell_formula(2, 1).unwrap() - 120.0).abs() < 1e-6);
+
         table.merge_cells(0, 0, 2, 2).unwrap();
         assert!(table.is_covered_by_span(0, 1));
         assert!(table.is_covered_by_span(1, 1));

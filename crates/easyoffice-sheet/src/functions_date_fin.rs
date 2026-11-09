@@ -1,3 +1,6 @@
+//! Date, time, and cell-inspection functions, including `WORKDAY.INTL` and `NETWORKDAYS.INTL`
+//! backed by a 7-bit `u8` weekend bitmask (`FormulaJS`, MIT License, Copyright (c) Sutoiku, Inc.).
+
 use crate::{EvalContext, EvaluatedCellValue, Expr, FormulaError, SheetEngine};
 
 const MAX_SERIAL: i64 = 2_958_465;
@@ -12,6 +15,8 @@ const DAY_BOUNDS: (f64, f64) = (-100_000_000.0, 100_000_000.0);
 const TIME_BOUNDS: (f64, f64) = (-1_000_000_000.0, 1_000_000_000.0);
 const SERIAL_BOUNDS_FROM_ZERO: (f64, f64) = (0.0, MAX_SERIAL_F);
 const SERIAL_BOUNDS_FROM_ONE: (f64, f64) = (1.0, MAX_SERIAL_F);
+/// Default Saturday (bit 5) + Sunday (bit 6) weekend bitmask (`0b110_0000`).
+const DEFAULT_WEEKEND_MASK: u8 = (1 << 5) | (1 << 6);
 
 fn check_date_arity(args: &[Expr], min: usize, max: usize) -> Result<(), FormulaError> {
     if args.len() < min || args.len() > max {
@@ -26,8 +31,60 @@ fn number(v: f64) -> Result<EvaluatedCellValue, FormulaError> {
 }
 
 #[inline]
-fn is_weekday(serial: i64) -> bool {
-    (serial - 2).rem_euclid(7) < 5
+fn is_workday_with_mask(serial: i64, weekend_mask: u8) -> bool {
+    let weekday_mon0 = (serial - 2).rem_euclid(7) as u8;
+    ((weekend_mask >> weekday_mon0) & 1) == 0
+}
+
+/// Compiles an Excel weekend code (`1..=7`, `11..=17`) or 7-character `"0000011"` string
+/// (Monday..Sunday) into a 7-bit `u8` bitmask where bit `weekday_mon0` is `1` for weekend days.
+fn compile_weekend_mask(val: &EvaluatedCellValue) -> Result<u8, FormulaError> {
+    match val {
+        EvaluatedCellValue::Error(e) => Err(*e),
+        EvaluatedCellValue::Empty => Ok(DEFAULT_WEEKEND_MASK),
+        EvaluatedCellValue::Boolean(_) => Err(FormulaError::Value),
+        EvaluatedCellValue::Number(n) => {
+            if !n.is_finite() {
+                return Err(FormulaError::Num);
+            }
+            let code = n.trunc() as i64;
+            match code {
+                1 => Ok((1 << 5) | (1 << 6)),
+                2 => Ok((1 << 6) | (1 << 0)),
+                3 => Ok((1 << 0) | (1 << 1)),
+                4 => Ok((1 << 1) | (1 << 2)),
+                5 => Ok((1 << 2) | (1 << 3)),
+                6 => Ok((1 << 3) | (1 << 4)),
+                7 => Ok((1 << 4) | (1 << 5)),
+                11 => Ok(1 << 6),
+                12 => Ok(1 << 0),
+                13 => Ok(1 << 1),
+                14 => Ok(1 << 2),
+                15 => Ok(1 << 3),
+                16 => Ok(1 << 4),
+                17 => Ok(1 << 5),
+                _ => Err(FormulaError::Num),
+            }
+        }
+        EvaluatedCellValue::Text(s) => {
+            if s.len() == 7 && s.bytes().all(|b| b == b'0' || b == b'1') {
+                let mut mask = 0u8;
+                for (i, b) in s.bytes().enumerate() {
+                    if b == b'1' {
+                        mask |= 1u8 << i;
+                    }
+                }
+                if mask == 0b111_1111 {
+                    return Err(FormulaError::Value);
+                }
+                Ok(mask)
+            } else if let Some(n) = crate::coercion::parse_strict_number(s) {
+                compile_weekend_mask(&EvaluatedCellValue::Number(n))
+            } else {
+                Err(FormulaError::Value)
+            }
+        }
+    }
 }
 
 /// Shifts a year/month pair by `months`, returning the normalized `(year, month)`.
@@ -105,8 +162,12 @@ impl SheetEngine {
             "WEEKNUM" | "ISOWEEKNUM" => self.date_weeknum(name == "ISOWEEKNUM", args, ctx, depth),
             "YEARFRAC" => self.date_yearfrac(args, ctx, depth),
             "DATEDIF" => self.date_datedif(args, ctx, depth),
-            "WORKDAY" => self.date_workday(args, ctx, depth),
-            "NETWORKDAYS" => self.date_networkdays(args, ctx, depth),
+            "WORKDAY" | "WORKDAY.INTL" => {
+                self.date_workday(name == "WORKDAY.INTL", args, ctx, depth)
+            }
+            "NETWORKDAYS" | "NETWORKDAYS.INTL" => {
+                self.date_networkdays(name == "NETWORKDAYS.INTL", args, ctx, depth)
+            }
             _ => Err(FormulaError::Name),
         }
     }
@@ -380,30 +441,57 @@ impl SheetEngine {
     ) -> Result<std::collections::HashSet<i64>, FormulaError> {
         let mut holidays = std::collections::HashSet::new();
         if let Some(arg) = args.get(idx) {
-            for v in self.eval_range_vec(arg, ctx, depth)? {
-                if let Some(n) = v.as_number() {
-                    holidays.insert(n.floor() as i64);
+            if !matches!(arg, Expr::Missing) {
+                for v in self.eval_range_vec(arg, ctx, depth)? {
+                    if let EvaluatedCellValue::Error(e) = v {
+                        return Err(e);
+                    }
+                    if let Some(n) = v.as_number() {
+                        holidays.insert(n.floor() as i64);
+                    }
                 }
             }
         }
         Ok(holidays)
     }
 
+    fn eval_weekend_mask_arg(
+        &self,
+        args: &[Expr],
+        is_intl: bool,
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<(u8, usize), FormulaError> {
+        if !is_intl {
+            return Ok((DEFAULT_WEEKEND_MASK, 2));
+        }
+        let mask = match args.get(2) {
+            None | Some(Expr::Missing) => DEFAULT_WEEKEND_MASK,
+            Some(arg) => {
+                let v = self.eval_arg_val(arg, ctx, depth)?;
+                compile_weekend_mask(&v)?
+            }
+        };
+        Ok((mask, 3))
+    }
+
     fn date_workday(
         &self,
+        is_intl: bool,
         args: &[Expr],
         ctx: &mut EvalContext<'_>,
         depth: usize,
     ) -> Result<EvaluatedCellValue, FormulaError> {
-        check_date_arity(args, 2, 3)?;
+        check_date_arity(args, 2, if is_intl { 4 } else { 3 })?;
         let mut cur = self.arg_i64(&args[0], SERIAL_BOUNDS_FROM_ONE, true, ctx, depth)?;
         let rem = self.arg_i64(&args[1], MONTH_BOUNDS, false, ctx, depth)?;
-        let holidays = self.eval_holidays(args, 2, ctx, depth)?;
+        let (weekend_mask, holiday_idx) = self.eval_weekend_mask_arg(args, is_intl, ctx, depth)?;
+        let holidays = self.eval_holidays(args, holiday_idx, ctx, depth)?;
         let step = if rem >= 0 { 1 } else { -1 };
         let mut rem = rem.abs();
         while rem > 0 {
             cur += step;
-            if is_weekday(cur) && !holidays.contains(&cur) {
+            if is_workday_with_mask(cur, weekend_mask) && !holidays.contains(&cur) {
                 rem -= 1;
             }
         }
@@ -415,14 +503,16 @@ impl SheetEngine {
 
     fn date_networkdays(
         &self,
+        is_intl: bool,
         args: &[Expr],
         ctx: &mut EvalContext<'_>,
         depth: usize,
     ) -> Result<EvaluatedCellValue, FormulaError> {
-        check_date_arity(args, 2, 3)?;
+        check_date_arity(args, 2, if is_intl { 4 } else { 3 })?;
         let s1 = self.arg_i64(&args[0], SERIAL_BOUNDS_FROM_ONE, true, ctx, depth)?;
         let s2 = self.arg_i64(&args[1], SERIAL_BOUNDS_FROM_ONE, true, ctx, depth)?;
-        let holidays = self.eval_holidays(args, 2, ctx, depth)?;
+        let (weekend_mask, holiday_idx) = self.eval_weekend_mask_arg(args, is_intl, ctx, depth)?;
+        let holidays = self.eval_holidays(args, holiday_idx, ctx, depth)?;
         let (lo, hi, sign) = if s1 <= s2 {
             (s1, s2, 1i64)
         } else {
@@ -432,7 +522,7 @@ impl SheetEngine {
             return Err(FormulaError::Num);
         }
         let cnt = (lo..=hi)
-            .filter(|d| is_weekday(*d) && !holidays.contains(d))
+            .filter(|d| is_workday_with_mask(*d, weekend_mask) && !holidays.contains(d))
             .count() as i64;
         number((cnt * sign) as f64)
     }
@@ -693,5 +783,42 @@ fn days_in_month(y: i64, m: i64) -> i64 {
             }
         }
         _ => 30,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn workday_intl_and_networkdays_intl_weekend_bitmask() {
+        let mut s = SheetEngine::new("DateIntlTest");
+        s.set_cell("A1", "=DATE(2026,1,5)").unwrap(); // Monday
+        s.set_cell("A2", "=DATE(2026,1,16)").unwrap(); // Friday (next week)
+        s.set_cell("H1", "=DATE(2026,1,7)").unwrap();
+        assert_eq!(
+            s.evaluate_formula_str("=NETWORKDAYS.INTL(A1, A2, 1)"),
+            EvaluatedCellValue::Number(10.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=NETWORKDAYS.INTL(A1, A2, 11)"),
+            EvaluatedCellValue::Number(11.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=NETWORKDAYS.INTL(A1, A2, \"0000111\", H1)"),
+            EvaluatedCellValue::Number(7.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=WORKDAY.INTL(A1, 5, 1)"),
+            s.evaluate_formula_str("=DATE(2026,1,12)")
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=WORKDAY.INTL(A1, 5, \"0000111\")"),
+            s.evaluate_formula_str("=DATE(2026,1,13)")
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=WORKDAY.INTL(A1, 5, \"1111111\")"),
+            EvaluatedCellValue::Error(FormulaError::Value)
+        );
     }
 }

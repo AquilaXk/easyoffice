@@ -59,33 +59,59 @@ pub struct BundleFile {
 }
 
 pub fn content_type_for(rel: &str) -> &'static str {
-    let ext = rel
-        .rsplit_once('.')
-        .map(|(_, e)| e.to_ascii_lowercase())
-        .unwrap_or_default();
-    match ext.as_str() {
-        "html" => "text/html; charset=utf-8",
-        "js" | "mjs" => "text/javascript; charset=utf-8",
-        "css" => "text/css; charset=utf-8",
-        "wasm" => "application/wasm",
-        "woff2" => "font/woff2",
-        "json" => "application/json; charset=utf-8",
-        "txt" => "text/plain; charset=utf-8",
-        "svg" => "image/svg+xml; charset=utf-8",
-        "png" => "image/png",
-        "ico" => "image/x-icon",
-        _ => "application/octet-stream",
+    let Some((_, ext)) = rel.rsplit_once('.') else {
+        return "application/octet-stream";
+    };
+    if ext.eq_ignore_ascii_case("html") {
+        "text/html; charset=utf-8"
+    } else if ext.eq_ignore_ascii_case("js") || ext.eq_ignore_ascii_case("mjs") {
+        "text/javascript; charset=utf-8"
+    } else if ext.eq_ignore_ascii_case("css") {
+        "text/css; charset=utf-8"
+    } else if ext.eq_ignore_ascii_case("wasm") {
+        "application/wasm"
+    } else if ext.eq_ignore_ascii_case("woff2") {
+        "font/woff2"
+    } else if ext.eq_ignore_ascii_case("json") {
+        "application/json; charset=utf-8"
+    } else if ext.eq_ignore_ascii_case("txt") {
+        "text/plain; charset=utf-8"
+    } else if ext.eq_ignore_ascii_case("svg") {
+        "image/svg+xml; charset=utf-8"
+    } else if ext.eq_ignore_ascii_case("png") {
+        "image/png"
+    } else if ext.eq_ignore_ascii_case("ico") {
+        "image/x-icon"
+    } else {
+        "application/octet-stream"
+    }
+}
+
+#[inline]
+fn hex_nibble(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
     }
 }
 
 fn percent_decode(raw: &str) -> Option<String> {
     let bytes = raw.as_bytes();
+    if !bytes.contains(&b'%') {
+        return Some(raw.to_string());
+    }
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' {
-            let hex = raw.get(i + 1..i + 3)?;
-            out.push(u8::from_str_radix(hex, 16).ok()?);
+            if i + 2 >= bytes.len() {
+                return None;
+            }
+            let hi = hex_nibble(bytes[i + 1])?;
+            let lo = hex_nibble(bytes[i + 2])?;
+            out.push((hi << 4) | lo);
             i += 3;
         } else {
             out.push(bytes[i]);
@@ -100,14 +126,34 @@ fn percent_decode(raw: &str) -> Option<String> {
 /// against, so `/hwp%2Dstudio/...` and `/%68wp-studio/...` cannot slip past a check that the file
 /// lookup would still resolve.
 pub fn fold_request_path(raw_path: &str) -> Option<String> {
-    let decoded = percent_decode(raw_path)?;
-    Some(
-        decoded
-            .replace('\\', "/")
-            .to_ascii_lowercase()
-            .trim_start_matches('/')
-            .to_string(),
-    )
+    let bytes = raw_path.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = if bytes[i] == b'%' {
+            if i + 2 >= bytes.len() {
+                return None;
+            }
+            let hi = hex_nibble(bytes[i + 1])?;
+            let lo = hex_nibble(bytes[i + 2])?;
+            i += 3;
+            (hi << 4) | lo
+        } else {
+            let cur = bytes[i];
+            i += 1;
+            cur
+        };
+        let norm = if b == b'\\' {
+            b'/'
+        } else {
+            b.to_ascii_lowercase()
+        };
+        if out.is_empty() && norm == b'/' {
+            continue;
+        }
+        out.push(norm);
+    }
+    String::from_utf8(out).ok()
 }
 
 /// True when a request path (query removed, not yet percent-decoded) addresses the editor bundle.

@@ -4,6 +4,7 @@ use std::sync::OnceLock;
 
 mod agg_stream;
 pub mod coercion;
+mod criteria;
 mod dag;
 pub mod functions;
 mod functions_date_fin;
@@ -94,6 +95,8 @@ pub struct SheetEngine {
     pub(crate) plan: OnceLock<dag::RecalcPlan>,
     /// Cached per-column index of formula cells for range dependency walks; dropped on edit.
     pub(crate) formula_index: OnceLock<dag::FormulaIndex>,
+    /// Cached per-column index of all populated cells for sparse range queries; dropped on edit.
+    pub(crate) cell_index: OnceLock<dag::CellIndex>,
 }
 
 impl SheetEngine {
@@ -122,6 +125,7 @@ impl SheetEngine {
             validation_rule: None,
             plan: OnceLock::new(),
             formula_index: OnceLock::new(),
+            cell_index: OnceLock::new(),
         }
     }
 
@@ -142,7 +146,7 @@ impl SheetEngine {
         &self.cells
     }
 
-    /// Drops the cached recalculation plan and formula index (called by every mutator).
+    /// Drops the cached recalculation plan, formula index, and cell index (called by every mutator).
     #[inline]
     pub(crate) fn invalidate_caches(&mut self) {
         if self.plan.get().is_some() {
@@ -150,6 +154,9 @@ impl SheetEngine {
         }
         if self.formula_index.get().is_some() {
             self.formula_index = OnceLock::new();
+        }
+        if self.cell_index.get().is_some() {
+            self.cell_index = OnceLock::new();
         }
     }
 

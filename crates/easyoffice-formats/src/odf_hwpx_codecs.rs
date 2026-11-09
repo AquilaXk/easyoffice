@@ -646,7 +646,7 @@ impl OdfCodec {
         Ok((parsed_row_cells, last_populated_idx))
     }
 
-    /// Cell text by priority: formula, paragraph text, office value, then empty for explicit cells.
+    /// Cell text by priority: formula, paragraph text, office value/boolean/date, then empty for explicit cells.
     fn resolve_ods_cell_text(
         cell_attrs: &str,
         cell_inner: &str,
@@ -656,19 +656,30 @@ impl OdfCodec {
             return Some(Self::normalize_ods_formula(&XmlSanitizer::unescape(raw_f)));
         }
         let text_p_bodies = extract_tag_bodies(cell_inner, "text:p");
-        if !text_p_bodies.is_empty() {
-            return Some(
-                text_p_bodies
-                    .into_iter()
-                    .map(extract_odf_inline_text)
-                    .collect::<Vec<_>>()
-                    .join("\n"),
-            );
+        let has_text_p = !text_p_bodies.is_empty();
+        if has_text_p {
+            let joined = text_p_bodies
+                .into_iter()
+                .map(extract_odf_inline_text)
+                .collect::<Vec<_>>()
+                .join("\n");
+            if !joined.is_empty() {
+                return Some(joined);
+            }
+        }
+        if let Some(b_val) = extract_attr_from_fragment(cell_attrs, "office:boolean-value") {
+            let trimmed = b_val.trim();
+            return Some(if trimmed.eq_ignore_ascii_case("true") || trimmed == "1" {
+                "TRUE".to_string()
+            } else {
+                "FALSE".to_string()
+            });
         }
         extract_attr_from_fragment(cell_attrs, "office:value")
             .or_else(|| extract_attr_from_fragment(cell_attrs, "office:string-value"))
+            .or_else(|| extract_attr_from_fragment(cell_attrs, "office:date-value"))
             .map(XmlSanitizer::unescape)
-            .or_else(|| has_explicit_position.then(String::new))
+            .or_else(|| (has_text_p || has_explicit_position).then(String::new))
     }
 
     /// Expands one parsed row (with column repeats) at `target_row` into `cells`.

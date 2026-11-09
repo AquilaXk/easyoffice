@@ -18,7 +18,7 @@
     bold: "eoBold", italic: "eoItalic", underline: "eoUnderline", strike: "eoStrike",
   };
   const MIN_HALF_PT = 2;
-  const MAX_HALF_PT = 1638;
+  const MAX_HALF_PT = 8192;
   const DEFAULT_HALF_PT = 22;
   const MIXED = "mixed";
   const SKIP_TAGS = new Set(["BUTTON", "SCRIPT", "STYLE", "TEMPLATE", "NOSCRIPT", "FOOTER"]);

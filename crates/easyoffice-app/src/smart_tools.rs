@@ -49,23 +49,38 @@ impl LocalSmartAssistant {
             return sentences.into_iter().map(|(_, s)| s).collect();
         }
 
-        let mut tf: HashMap<String, usize> = HashMap::new();
+        let mut token_ids: HashMap<String, u32> = HashMap::new();
+        let mut counts: Vec<usize> = Vec::new();
+        let mut sentence_tokens: Vec<Vec<u32>> = Vec::with_capacity(sentences.len());
+
         for (_, sent) in &sentences {
+            let mut ids = Vec::new();
             for token in sent.split(|c: char| !c.is_alphanumeric()) {
+                if token.len() < 2 {
+                    continue;
+                }
                 let lower = token.to_lowercase();
                 if lower.chars().count() >= 2 {
-                    *tf.entry(lower).or_insert(0) += 1;
+                    let id = if let Some(&id) = token_ids.get(&lower) {
+                        counts[id as usize] += 1;
+                        id
+                    } else {
+                        let id = counts.len() as u32;
+                        token_ids.insert(lower, id);
+                        counts.push(1);
+                        id
+                    };
+                    ids.push(id);
                 }
             }
+            sentence_tokens.push(ids);
         }
 
         let mut scored: Vec<(usize, usize, String)> = sentences
             .into_iter()
-            .map(|(idx, sent)| {
-                let score: usize = sent
-                    .split(|c: char| !c.is_alphanumeric())
-                    .map(|tok| tf.get(&tok.to_lowercase()).copied().unwrap_or(0))
-                    .sum();
+            .zip(sentence_tokens)
+            .map(|((idx, sent), ids)| {
+                let score: usize = ids.iter().map(|&id| counts[id as usize]).sum();
                 (idx, score, sent)
             })
             .collect();
@@ -135,59 +150,117 @@ impl LocalSmartAssistant {
     pub fn diff_documents_lcs(before: &[String], after: &[String]) -> Vec<DocumentDiffLine> {
         let before = &before[..before.len().min(Self::MAX_DIFF_PARAGRAPHS)];
         let after = &after[..after.len().min(Self::MAX_DIFF_PARAGRAPHS)];
-        let m = before.len();
-        let n = after.len();
-        let stride = n + 1;
-        let mut dp = vec![0usize; (m + 1) * stride];
 
-        for i in (0..m).rev() {
-            for j in (0..n).rev() {
-                if before[i] == after[j] {
-                    dp[i * stride + j] = 1 + dp[(i + 1) * stride + (j + 1)];
-                } else {
-                    dp[i * stride + j] = dp[(i + 1) * stride + j].max(dp[i * stride + (j + 1)]);
+        let mut prefix = 0usize;
+        let max_prefix = before.len().min(after.len());
+        while prefix < max_prefix && before[prefix] == after[prefix] {
+            prefix += 1;
+        }
+        let mut suffix = 0usize;
+        while suffix < (before.len() - prefix).min(after.len() - prefix)
+            && before[before.len() - 1 - suffix] == after[after.len() - 1 - suffix]
+        {
+            suffix += 1;
+        }
+
+        let mid_before = &before[prefix..before.len() - suffix];
+        let mid_after = &after[prefix..after.len() - suffix];
+        let m = mid_before.len();
+        let n = mid_after.len();
+        let mut out = Vec::with_capacity(before.len() + after.len());
+        for s in &before[..prefix] {
+            out.push(DocumentDiffLine {
+                kind: DiffLineKind::Unchanged,
+                text: s.clone(),
+            });
+        }
+
+        if m > 0 && n > 0 {
+            fn fnv1a_64(s: &str) -> u64 {
+                let mut h = 0xcbf29ce484222325u64;
+                for &b in s.as_bytes() {
+                    h ^= u64::from(b);
+                    h = h.wrapping_mul(0x100000001b3);
+                }
+                h
+            }
+            let hb: Vec<u64> = mid_before.iter().map(|s| fnv1a_64(s)).collect();
+            let ha: Vec<u64> = mid_after.iter().map(|s| fnv1a_64(s)).collect();
+            let stride = n + 1;
+            let mut dp = vec![0u16; (m + 1) * stride];
+
+            for i in (0..m).rev() {
+                let row_off = i * stride;
+                let next_off = (i + 1) * stride;
+                let h_bi = hb[i];
+                let s_bi = &mid_before[i];
+                for j in (0..n).rev() {
+                    if h_bi == ha[j] && s_bi == &mid_after[j] {
+                        dp[row_off + j] = 1 + dp[next_off + j + 1];
+                    } else {
+                        dp[row_off + j] = dp[next_off + j].max(dp[row_off + j + 1]);
+                    }
                 }
             }
-        }
 
-        let mut out = Vec::with_capacity(m + n);
-        let mut i = 0;
-        let mut j = 0;
-        while i < m && j < n {
-            if before[i] == after[j] {
-                out.push(DocumentDiffLine {
-                    kind: DiffLineKind::Unchanged,
-                    text: before[i].clone(),
-                });
-                i += 1;
-                j += 1;
-            } else if dp[(i + 1) * stride + j] >= dp[i * stride + (j + 1)] {
+            let mut i = 0;
+            let mut j = 0;
+            while i < m && j < n {
+                if hb[i] == ha[j] && mid_before[i] == mid_after[j] {
+                    out.push(DocumentDiffLine {
+                        kind: DiffLineKind::Unchanged,
+                        text: mid_before[i].clone(),
+                    });
+                    i += 1;
+                    j += 1;
+                } else if dp[(i + 1) * stride + j] >= dp[i * stride + (j + 1)] {
+                    out.push(DocumentDiffLine {
+                        kind: DiffLineKind::Removed,
+                        text: mid_before[i].clone(),
+                    });
+                    i += 1;
+                } else {
+                    out.push(DocumentDiffLine {
+                        kind: DiffLineKind::Added,
+                        text: mid_after[j].clone(),
+                    });
+                    j += 1;
+                }
+            }
+            while i < m {
                 out.push(DocumentDiffLine {
                     kind: DiffLineKind::Removed,
-                    text: before[i].clone(),
+                    text: mid_before[i].clone(),
                 });
                 i += 1;
-            } else {
+            }
+            while j < n {
                 out.push(DocumentDiffLine {
                     kind: DiffLineKind::Added,
-                    text: after[j].clone(),
+                    text: mid_after[j].clone(),
                 });
                 j += 1;
             }
+        } else {
+            for s in mid_before {
+                out.push(DocumentDiffLine {
+                    kind: DiffLineKind::Removed,
+                    text: s.clone(),
+                });
+            }
+            for s in mid_after {
+                out.push(DocumentDiffLine {
+                    kind: DiffLineKind::Added,
+                    text: s.clone(),
+                });
+            }
         }
-        while i < m {
+
+        for s in &before[before.len() - suffix..] {
             out.push(DocumentDiffLine {
-                kind: DiffLineKind::Removed,
-                text: before[i].clone(),
+                kind: DiffLineKind::Unchanged,
+                text: s.clone(),
             });
-            i += 1;
-        }
-        while j < n {
-            out.push(DocumentDiffLine {
-                kind: DiffLineKind::Added,
-                text: after[j].clone(),
-            });
-            j += 1;
         }
         out
     }

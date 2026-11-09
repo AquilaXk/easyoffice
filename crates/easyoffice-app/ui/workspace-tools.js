@@ -678,10 +678,27 @@
       if (typeof onStudioCmd === "function") onStudioCmd(cmd);
     }
 
+    function ensureLsOption(lsSelect, val) {
+      if (!lsSelect) return;
+      const str = String(val);
+      const opts = Array.from(lsSelect.querySelectorAll?.("option") || lsSelect.children || []);
+      if (opts.some((o) => o.value === str)) return;
+      const opt = document.createElement("option");
+      opt.value = str;
+      opt.textContent = `${val} %`;
+      const next = opts.find((o) => Number(o.value) > val);
+      if (next && typeof lsSelect.insertBefore === "function") lsSelect.insertBefore(opt, next);
+      else lsSelect.appendChild(opt);
+    }
+
     function applyStudioLineSpacing(editor, lsSelect, pct) {
       withDocStyleUndo(() => {
-        const clamped = Math.max(100, Math.min(300, Number.isFinite(pct) ? pct : 160));
-        if (lsSelect) lsSelect.value = String(clamped);
+        const clamped = Math.max(5, Math.min(500, Number.isFinite(pct) ? pct : 160));
+        if (lsSelect) {
+          ensureLsOption(lsSelect, clamped);
+          lsSelect.value = String(clamped);
+          host.__EASYOFFICE_CUSTOM_SELECT__?.syncCustomSelect?.(lsSelect);
+        }
         if (editor) {
           editor.dataset.lineSpacing = String(clamped);
           editor.style.lineHeight = (clamped / 100).toFixed(2);
@@ -700,12 +717,49 @@
       const sizeInput = document.getElementById("doc-font-size-input");
       document.getElementById("doc-font-select")?.addEventListener("change", (ev) => runs().setFont(ev.target.value));
       sizeInput?.addEventListener("change", () => runs().setSize(Number.parseFloat(sizeInput.value)));
+      sizeInput?.addEventListener("keydown", (ev) => {
+        if (ev.key !== "Enter") return;
+        ev.preventDefault?.();
+        runs().setSize(Number.parseFloat(sizeInput.value));
+      });
       document.getElementById("btn-size-up")?.addEventListener("click", () => runs().bumpSize(1));
       document.getElementById("btn-size-down")?.addEventListener("click", () => runs().bumpSize(-1));
       document.getElementById("btn-stylebar-strike")?.addEventListener("click", () => runs().toggle("strike"));
       [["btn-stylebar-textcolor", "doc-textcolor-input", "color"], ["btn-stylebar-highlight", "doc-highlight-input", "highlight"]].forEach(([btnId, inputId, prop]) => {
         document.getElementById(btnId)?.addEventListener("click", () => runs().toggleColor(prop));
         document.getElementById(inputId)?.addEventListener("change", (ev) => runs().setColor(prop, ev.target.value));
+      });
+    }
+
+    function bindLineSpacingDoubleClick(editor, lsSelect) {
+      if (!lsSelect) return;
+      lsSelect.addEventListener("dblclick", (ev) => {
+        ev.preventDefault?.();
+        const hostEl = lsSelect.parentElement?.classList?.contains?.("custom-select") ? lsSelect.parentElement : lsSelect;
+        if (!hostEl?.parentElement) return;
+        const input = document.createElement("input");
+        input.type = "text";
+        input.className = "sb-select sb-ls-select";
+        input.setAttribute("aria-label", "줄 간격 직접 입력");
+        input.value = lsSelect.value || "160";
+        hostEl.hidden = true;
+        hostEl.parentElement.insertBefore(input, hostEl);
+        input.focus?.();
+        input.select?.();
+        let done = false;
+        const finish = (apply) => {
+          if (done) return;
+          done = true;
+          const num = Number.parseInt(input.value, 10);
+          if (apply && Number.isFinite(num) && num > 0) applyStudioLineSpacing(editor, lsSelect, num);
+          input.remove?.();
+          hostEl.hidden = false;
+        };
+        input.addEventListener("keydown", (ke) => {
+          if (ke.key === "Enter") { ke.preventDefault?.(); finish(true); }
+          else if (ke.key === "Escape") { ke.preventDefault?.(); finish(false); }
+        });
+        input.addEventListener("blur", () => finish(true));
       });
     }
 
@@ -722,6 +776,7 @@
       bindCharacterRunControls();
       const lsSelect = document.getElementById("doc-linespacing-select");
       lsSelect?.addEventListener("change", () => applyStudioLineSpacing(editor, lsSelect, Number.parseInt(lsSelect.value, 10)));
+      bindLineSpacingDoubleClick(editor, lsSelect);
       document.getElementById("btn-ls-up")?.addEventListener("click", () => {
         const cur = Number.parseInt(lsSelect?.value || "160", 10) || 160;
         applyStudioLineSpacing(editor, lsSelect, LS_STEPS.find((s) => s > cur) || 300);
@@ -778,6 +833,20 @@
       computeSmartStats();
     }
 
+    function computeFitZoom(editor, mode, fallback) {
+      const vp = [".doc-canvas-scroll", ".doc-scroll-container", "#sheet-grid", ".slide-canvas-stage", "#slide-stage-box", "#pane-pdf", ".canvas-stage"]
+        .map((sel) => document.querySelector(sel))
+        .find((el) => el && !el.hidden && !el.closest?.("[hidden]") && Number(el.clientWidth) > 0);
+      const cw = Number(vp?.clientWidth) || 0;
+      const ch = Number(vp?.clientHeight) || 0;
+      if (cw <= 0 || (mode === "page" && ch <= 0)) return fallback;
+      const pw = Number(editor?.offsetWidth) || 794;
+      const ph = Number(editor?.offsetHeight) || 1123;
+      const wPct = ((cw - 40) / pw) * 100;
+      const raw = mode === "page" ? Math.min(wPct, ((ch - 20) / ph) * 100) : wPct;
+      return Math.max(50, Math.min(200, Math.round(raw)));
+    }
+
     function setupStudioChromeControls(applyZoomPercent, onStudioCmd, actions) {
       studioActions = actions || {};
       const editor = document.getElementById("doc-editor");
@@ -797,6 +866,11 @@
       const insertBtn = document.getElementById("status-insert-mode");
       insertBtn?.addEventListener("click", () => toggleStudioInsertMode(insertBtn));
       host.addEventListener("keydown", (ev) => { if (ev.key === "Insert") toggleStudioInsertMode(insertBtn); });
+      document.getElementById("status-studio-pos")?.addEventListener("click", () => {
+        document.getElementById("btn-doc-outline")?.click?.();
+        openToolDialog("outline-dialog");
+      });
+      document.getElementById("status-zoom-label")?.addEventListener("click", () => applyZoomPercent?.(100));
       const zoomSlider = document.getElementById("status-zoom-slider");
       if (zoomSlider && typeof applyZoomPercent === "function") {
         const onSlide = () => applyZoomPercent(Number(zoomSlider.value) || 100);
@@ -809,7 +883,9 @@
           applyZoomPercent(Math.max(50, Math.min(200, next)));
         });
       }
-      for (const [id, pct, mode] of [["btn-zoom-fit-width", 120, "width"], ["btn-zoom-fit-page", 100, "page"]]) document.getElementById(id)?.addEventListener("click", () => applyZoomPercent?.(pct, mode));
+      for (const [id, pct, mode] of [["btn-zoom-fit-width", 120, "width"], ["btn-zoom-fit-page", 100, "page"]]) {
+        document.getElementById(id)?.addEventListener("click", () => applyZoomPercent?.(computeFitZoom(editor, mode, pct), mode));
+      }
     }
 
     const { runPiiScrubAction } = host.__EASYOFFICE_CREATE_WORKSPACE_SCRUB__(deps, panelHooks, { resolveSourceScopeKind, computeSmartStats });

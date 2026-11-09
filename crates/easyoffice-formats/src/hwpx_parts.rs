@@ -57,7 +57,7 @@ fn border_fill(id: u32, line_type: &str) -> String {
 
 /// Character shape (`hh:charPr`) written to `header.xml`; `height` is in 1/100 pt, `font` indexes
 /// the font table (0 is the default face), and the colors are `0xRRGGBB`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct HwpxCharShape {
     pub bold: bool,
     pub italic: bool,
@@ -87,7 +87,7 @@ impl Default for HwpxCharShape {
 }
 
 /// Paragraph shape (`hh:paraPr`): OWPML horizontal alignment, list heading type, and left margin (HWPUNIT).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct HwpxParaShape {
     pub align: Option<&'static str>,
     pub heading_type: &'static str,

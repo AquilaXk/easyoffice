@@ -129,17 +129,44 @@ impl PdfToUnicodeMap {
         }
     }
 
-    /// Maps `lo..=hi` onto consecutive code points starting at the `<dst>` base.
+    /// Maps `lo..=hi` onto consecutive code points or multi-code-unit UTF-16 sequences starting at `<dst>`.
     fn apply_bfrange_base(dst_hex: &str, (lo, hi): (u16, u16), out: &mut PdfToUnicodeMap) {
-        let Some((dst_base, _)) = Self::parse_code_hex(dst_hex) else {
-            return;
-        };
-        if lo == 0x0000 && hi == 0xFFFF && dst_base == 0x0000 {
+        if let Some((dst_base, _)) = Self::parse_code_hex(dst_hex) {
+            if lo == 0x0000 && hi == 0xFFFF && dst_base == 0x0000 {
+                return;
+            }
+            for offset in 0..=(hi - lo) {
+                if let Some(ch) = char::from_u32(u32::from(dst_base) + u32::from(offset)) {
+                    out.map.insert(lo + offset, ch.to_string());
+                }
+            }
             return;
         }
+        let Some(bytes) = decode_hex_bytes_single_pass(dst_hex) else {
+            return;
+        };
+        if bytes.len() < 4 || bytes.len() % 2 != 0 {
+            return;
+        }
+        let base_units: Vec<u16> = bytes
+            .chunks_exact(2)
+            .map(|p| u16::from_be_bytes([p[0], p[1]]))
+            .collect();
+        let base_last = *base_units.last().unwrap_or(&0);
+        let mut cur_units = base_units;
         for offset in 0..=(hi - lo) {
-            if let Some(ch) = char::from_u32(u32::from(dst_base) + u32::from(offset)) {
-                out.map.insert(lo + offset, ch.to_string());
+            let Some(inc) = base_last.checked_add(offset) else {
+                break;
+            };
+            if let Some(last) = cur_units.last_mut() {
+                *last = inc;
+            }
+            if let Ok(s) =
+                char::decode_utf16(cur_units.iter().copied()).collect::<Result<String, _>>()
+            {
+                if !s.is_empty() {
+                    out.map.insert(lo + offset, s);
+                }
             }
         }
     }
@@ -662,27 +689,53 @@ fn map_bytes_with_cmap(cm: &PdfToUnicodeMap, bytes: &[u8]) -> Option<String> {
     any_hit.then_some(mapped)
 }
 
+const HEX_NIBBLE: [u8; 256] = {
+    let mut table = [0xFFu8; 256];
+    let mut i = 0usize;
+    while i < 10 {
+        table[b'0' as usize + i] = i as u8;
+        i += 1;
+    }
+    let mut i = 0usize;
+    while i < 6 {
+        table[b'A' as usize + i] = (10 + i) as u8;
+        table[b'a' as usize + i] = (10 + i) as u8;
+        i += 1;
+    }
+    table
+};
+
+fn decode_hex_bytes_single_pass(hex: &str) -> Option<Vec<u8>> {
+    let mut bytes = Vec::with_capacity(hex.len() / 2 + 1);
+    let mut hi_nibble: Option<u8> = None;
+    for b in hex.bytes() {
+        if b.is_ascii_whitespace() {
+            continue;
+        }
+        let n = HEX_NIBBLE[usize::from(b)];
+        if n == 0xFF {
+            return None;
+        }
+        if let Some(hi) = hi_nibble.take() {
+            bytes.push((hi << 4) | n);
+        } else {
+            hi_nibble = Some(n);
+        }
+    }
+    if let Some(hi) = hi_nibble {
+        bytes.push(hi << 4);
+    }
+    Some(bytes)
+}
+
 pub(crate) fn decode_pdf_hex_string_with_cmap(
     hex: &str,
     prefer_utf16be: bool,
     cmap: Option<&PdfToUnicodeMap>,
 ) -> Option<String> {
-    let mut clean: Vec<u8> = hex.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
-    if clean.is_empty() {
+    let bytes = decode_hex_bytes_single_pass(hex)?;
+    if bytes.is_empty() {
         return Some(String::new());
-    }
-    if !clean.iter().all(u8::is_ascii_hexdigit) {
-        return None;
-    }
-    if clean.len() % 2 != 0 {
-        clean.push(b'0');
-    }
-    let mut bytes = Vec::with_capacity(clean.len() / 2);
-    let mut idx = 0usize;
-    while idx + 2 <= clean.len() {
-        let chunk = std::str::from_utf8(&clean[idx..idx + 2]).ok()?;
-        bytes.push(u8::from_str_radix(chunk, 16).ok()?);
-        idx += 2;
     }
     if let Some(rest) = bytes.strip_prefix(&[0xFE, 0xFF]) {
         if rest.len() % 2 != 0 {
@@ -852,4 +905,32 @@ pub(crate) fn encode_utf16be_hex_impl(text: &str) -> String {
         out.push(HEX[(unit & 0x0F) as usize] as char);
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn single_pass_hex_decoder_and_bfrange_multi_unit_utf16() {
+        assert_eq!(
+            decode_pdf_hex_string("48 65 6C 6C 6F", false).as_deref(),
+            Some("Hello")
+        );
+        assert_eq!(decode_pdf_hex_string("4", false).as_deref(), Some("@"));
+        assert!(decode_pdf_hex_string("4G", false).is_none());
+
+        let cmap_stream = concat!(
+            "2 beginbfrange\n",
+            "<0001> <0002> <00660069>\n",
+            "<0010> <0011> <D83DDE00>\n",
+            "endbfrange\n"
+        );
+        let mut cmap = PdfToUnicodeMap::default();
+        PdfToUnicodeMap::parse_cmap_stream(cmap_stream, &mut cmap);
+        assert_eq!(cmap.map.get(&0x0001).map(String::as_str), Some("fi"));
+        assert_eq!(cmap.map.get(&0x0002).map(String::as_str), Some("fj"));
+        assert_eq!(cmap.map.get(&0x0010).map(String::as_str), Some("😀"));
+        assert_eq!(cmap.map.get(&0x0011).map(String::as_str), Some("😁"));
+    }
 }

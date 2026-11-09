@@ -38,16 +38,25 @@ fn module_slot_index(module: OfficeModuleKind) -> usize {
 }
 
 fn parse_module_key(raw: &str) -> Result<OfficeModuleKind, EasyOfficeError> {
-    match raw.trim().to_ascii_uppercase().as_str() {
-        "DOC" | "DOCUMENT" | "CONV" => Ok(OfficeModuleKind::Document),
-        "HWP" => Ok(OfficeModuleKind::Hwp),
-        "SHEET" => Ok(OfficeModuleKind::Sheet),
-        "SLIDE" => Ok(OfficeModuleKind::Slide),
-        "PDF" => Ok(OfficeModuleKind::Pdf),
-        _ => Err(EasyOfficeError::InvalidArgument(format!(
+    let trimmed = raw.trim();
+    if trimmed.eq_ignore_ascii_case("DOC")
+        || trimmed.eq_ignore_ascii_case("DOCUMENT")
+        || trimmed.eq_ignore_ascii_case("CONV")
+    {
+        Ok(OfficeModuleKind::Document)
+    } else if trimmed.eq_ignore_ascii_case("HWP") {
+        Ok(OfficeModuleKind::Hwp)
+    } else if trimmed.eq_ignore_ascii_case("SHEET") {
+        Ok(OfficeModuleKind::Sheet)
+    } else if trimmed.eq_ignore_ascii_case("SLIDE") {
+        Ok(OfficeModuleKind::Slide)
+    } else if trimmed.eq_ignore_ascii_case("PDF") {
+        Ok(OfficeModuleKind::Pdf)
+    } else {
+        Err(EasyOfficeError::InvalidArgument(format!(
             "지원하지 않는 리본 모듈입니다: {}",
-            EasyOfficeIpcRouter::escape_json_str(raw.trim())
-        ))),
+            EasyOfficeIpcRouter::escape_json_str(trimmed)
+        )))
     }
 }
 

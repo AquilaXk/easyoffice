@@ -1,3 +1,9 @@
+//! Financial functions (`PMT`, `IPMT`, `PPMT`, `FV`, `PV`, `NPV`, `IRR`, `XNPV`, `XIRR`, `MIRR`,
+//! `CUMIPMT`, `CUMPRINC`, `RATE`, `NPER`, `SLN`, `DB`, `DDB`, `SYD`, `EFFECT`, `NOMINAL`).
+//!
+//! Reference implementation for `XNPV`, `XIRR`, `MIRR`, `CUMIPMT`, `CUMPRINC`:
+//! `FormulaJS` (`@formulajs/formulajs`, MIT License, Copyright (c) Sutoiku, Inc.).
+
 use crate::range_refs::StreamingRangeSpec;
 use crate::{EvalContext, EvaluatedCellValue, Expr, FormulaError, SheetEngine};
 
@@ -20,6 +26,7 @@ const MAX_DEPRECIATION_PERIODS: usize = 10_000;
 const MONTHS_PER_YEAR: usize = 12;
 const DB_RATE_SCALE: f64 = 1000.0;
 const DDB_DEFAULT_FACTOR: f64 = 2.0;
+const DAYS_PER_YEAR_XIRR: f64 = 365.0;
 
 fn check_arity(args: &[Expr], min: usize, max: usize) -> Result<(), FormulaError> {
     if args.len() < min || args.len() > max {
@@ -108,6 +115,62 @@ fn irr_bisect(cfs: &[f64]) -> Result<f64, FormulaError> {
     for _ in 0..SOLVER_MAX_ITERATIONS {
         let mid = 0.5 * (lo + hi);
         let f_mid = irr_npv(cfs, mid);
+        if f_mid.abs() < IRR_BISECT_TOLERANCE || (hi - lo).abs() < IRR_BISECT_WIDTH {
+            return Ok(mid);
+        }
+        if f_lo * f_mid <= 0.0 {
+            hi = mid;
+        } else {
+            lo = mid;
+            f_lo = f_mid;
+        }
+    }
+    Ok(0.5 * (lo + hi))
+}
+
+fn xirr_npv(pairs: &[(f64, f64)], d0: f64, rate: f64) -> f64 {
+    pairs
+        .iter()
+        .map(|&(cf, d)| cf / (1.0 + rate).powf((d - d0) / DAYS_PER_YEAR_XIRR))
+        .sum()
+}
+
+fn xirr_newton(pairs: &[(f64, f64)], d0: f64, mut r: f64) -> Option<f64> {
+    for _ in 0..SOLVER_MAX_ITERATIONS {
+        if r <= RATE_FLOOR || !r.is_finite() {
+            return None;
+        }
+        let mut f = 0.0;
+        let mut df = 0.0;
+        for &(cf, d) in pairs {
+            let t = (d - d0) / DAYS_PER_YEAR_XIRR;
+            f += cf / (1.0 + r).powf(t);
+            if t != 0.0 {
+                df -= t * cf / (1.0 + r).powf(t + 1.0);
+            }
+        }
+        if f.abs() < IRR_NEWTON_TOLERANCE {
+            return Some(r);
+        }
+        if !df.is_finite() || df.abs() < DERIVATIVE_EPSILON {
+            return None;
+        }
+        r -= f / df;
+    }
+    None
+}
+
+fn xirr_bisect(pairs: &[(f64, f64)], d0: f64) -> Result<f64, FormulaError> {
+    let mut lo = BRACKET_LOW;
+    let mut hi = BRACKET_HIGH;
+    let mut f_lo = xirr_npv(pairs, d0, lo);
+    let f_hi = xirr_npv(pairs, d0, hi);
+    if !(f_lo.is_finite() && f_hi.is_finite() && f_lo * f_hi <= 0.0) {
+        return Err(FormulaError::Num);
+    }
+    for _ in 0..SOLVER_MAX_ITERATIONS {
+        let mid = 0.5 * (lo + hi);
+        let f_mid = xirr_npv(pairs, d0, mid);
         if f_mid.abs() < IRR_BISECT_TOLERANCE || (hi - lo).abs() < IRR_BISECT_WIDTH {
             return Ok(mid);
         }
@@ -253,10 +316,14 @@ impl SheetEngine {
         match name {
             "PMT" => self.fin_pmt(args, ctx, depth),
             "IPMT" | "PPMT" => self.fin_ipmt_ppmt(name == "IPMT", args, ctx, depth),
+            "CUMIPMT" | "CUMPRINC" => self.fin_cum_ipmt_princ(name == "CUMIPMT", args, ctx, depth),
             "FV" => self.fin_fv(args, ctx, depth),
             "PV" => self.fin_pv(args, ctx, depth),
             "NPV" => self.fin_npv(args, ctx, depth),
+            "XNPV" => self.fin_xnpv(args, ctx, depth),
             "IRR" => self.fin_irr(args, ctx, depth),
+            "XIRR" => self.fin_xirr(args, ctx, depth),
+            "MIRR" => self.fin_mirr(args, ctx, depth),
             "RATE" => self.fin_rate(args, ctx, depth),
             "NPER" => self.fin_nper(args, ctx, depth),
             "SLN" => self.fin_sln(args, ctx, depth),
@@ -598,5 +665,225 @@ impl SheetEngine {
             return Err(FormulaError::Num);
         }
         num(((effect + 1.0).powf(1.0 / npery) - 1.0) * npery)
+    }
+
+    fn fin_cum_ipmt_princ(
+        &self,
+        is_interest: bool,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<EvaluatedCellValue, FormulaError> {
+        check_arity(args, 6, 6)?;
+        let [rate, nper, pv, start_p, end_p, t] = self.arg_nums(args, ctx, depth)?;
+        let start_period = start_p.ceil() as i64;
+        let end_period = end_p.trunc() as i64;
+        if rate <= 0.0
+            || nper <= 0.0
+            || pv <= 0.0
+            || start_p < 1.0
+            || end_p < 1.0
+            || start_period > end_period
+            || end_p > nper
+            || (t != 0.0 && t != 1.0)
+        {
+            return Err(FormulaError::Num);
+        }
+        let pmt = calc_pmt(rate, nper, pv, 0.0, t)?;
+        let mut total = 0.0;
+        for per in start_period..=end_period {
+            let ipmt = if per == 1 && t != 0.0 {
+                0.0
+            } else {
+                calc_fv(rate, (per - 1) as f64, pmt, pv, t)? * rate / type_adjust(rate, t)
+            };
+            total += if is_interest { ipmt } else { pmt - ipmt };
+        }
+        num(total)
+    }
+
+    fn eval_cf_date_pairs(
+        &self,
+        val_expr: &Expr,
+        date_expr: &Expr,
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<Vec<(f64, f64)>, FormulaError> {
+        let vals = self.eval_range_vec(val_expr, ctx, depth)?;
+        let dates = self.eval_range_vec(date_expr, ctx, depth)?;
+        if vals.len() != dates.len() || vals.is_empty() {
+            return Err(FormulaError::Num);
+        }
+        let mut pairs = Vec::with_capacity(vals.len());
+        for (v, d) in vals.iter().zip(dates.iter()) {
+            if let EvaluatedCellValue::Error(e) = v {
+                return Err(*e);
+            }
+            if let EvaluatedCellValue::Error(e) = d {
+                return Err(*e);
+            }
+            let dv = match d {
+                EvaluatedCellValue::Number(n) => Some(n.trunc()),
+                EvaluatedCellValue::Text(s) => {
+                    crate::functions_date_fin::parse_iso_date_serial(s).map(f64::trunc)
+                }
+                _ => None,
+            };
+            if let (Some(cf), Some(dt)) = (v.as_number(), dv) {
+                pairs.push((cf, dt));
+            }
+        }
+        if pairs.is_empty() {
+            return Err(FormulaError::Num);
+        }
+        Ok(pairs)
+    }
+
+    fn fin_xnpv(
+        &self,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<EvaluatedCellValue, FormulaError> {
+        check_arity(args, 3, 3)?;
+        let rate = self.eval_arg_num(&args[0], ctx, depth)?;
+        if rate <= -1.0 {
+            return Err(FormulaError::Num);
+        }
+        let pairs = self.eval_cf_date_pairs(&args[1], &args[2], ctx, depth)?;
+        let d0 = pairs[0].1;
+        if pairs.iter().any(|&(_, d)| d < d0) {
+            return Err(FormulaError::Num);
+        }
+        num(xirr_npv(&pairs, d0, rate))
+    }
+
+    fn fin_xirr(
+        &self,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<EvaluatedCellValue, FormulaError> {
+        check_arity(args, 2, 3)?;
+        let pairs = self.eval_cf_date_pairs(&args[0], &args[1], ctx, depth)?;
+        let max_cf = pairs.iter().map(|(v, _)| v.abs()).fold(0.0_f64, f64::max);
+        if pairs.len() < 2
+            || max_cf == 0.0
+            || !pairs.iter().any(|&(v, _)| v > 0.0)
+            || !pairs.iter().any(|&(v, _)| v < 0.0)
+        {
+            return Err(FormulaError::Num);
+        }
+        let d0 = pairs[0].1;
+        let scaled: Vec<(f64, f64)> = pairs.iter().map(|&(v, d)| (v / max_cf, d)).collect();
+        let guess = self.opt_arg_num(args, 2, DEFAULT_RATE_GUESS, ctx, depth)?;
+        match xirr_newton(&scaled, d0, guess) {
+            Some(r) => num(r),
+            None => num(xirr_bisect(&scaled, d0)?),
+        }
+    }
+
+    fn fin_mirr(
+        &self,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<EvaluatedCellValue, FormulaError> {
+        check_arity(args, 3, 3)?;
+        let vals = self.eval_range_vec(&args[0], ctx, depth)?;
+        for v in &vals {
+            if let EvaluatedCellValue::Error(e) = v {
+                return Err(*e);
+            }
+        }
+        let cfs: Vec<f64> = vals
+            .iter()
+            .filter_map(EvaluatedCellValue::as_number)
+            .collect();
+        let f_rate = self.eval_arg_num(&args[1], ctx, depth)?;
+        let r_rate = self.eval_arg_num(&args[2], ctx, depth)?;
+        if cfs.len() < 2
+            || f_rate <= -1.0
+            || r_rate <= -1.0
+            || !cfs.iter().any(|&v| v > 0.0)
+            || !cfs.iter().any(|&v| v < 0.0)
+        {
+            return Err(FormulaError::DivByZero);
+        }
+        let n = cfs.len();
+        let mut fv_pos = 0.0;
+        let mut pv_neg = 0.0;
+        for (i, &cf) in cfs.iter().enumerate() {
+            if cf > 0.0 {
+                fv_pos += cf * (1.0 + r_rate).powi((n - 1 - i) as i32);
+            } else if cf < 0.0 {
+                pv_neg += cf / (1.0 + f_rate).powi(i as i32);
+            }
+        }
+        if pv_neg == 0.0 || fv_pos <= 0.0 {
+            return Err(FormulaError::DivByZero);
+        }
+        num((fv_pos / -pv_neg).powf(1.0 / ((n - 1) as f64)) - 1.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn xnpv_xirr_mirr_cumipmt_cumprinc_formulajs_parity() {
+        let mut s = SheetEngine::new("FinTest");
+        for (i, (cf, dt)) in [
+            ("-10000", "2008-01-01"),
+            ("2750", "2008-03-01"),
+            ("4250", "2008-10-30"),
+            ("3250", "2009-02-15"),
+            ("2750", "2009-04-01"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let r = i + 1;
+            s.set_cell(&format!("A{r}"), cf).unwrap();
+            s.set_cell(&format!("B{r}"), dt).unwrap();
+        }
+        let EvaluatedCellValue::Number(xnpv) = s.evaluate_formula_str("=XNPV(0.09, A1:A5, B1:B5)")
+        else {
+            panic!("expected XNPV number");
+        };
+        assert!((xnpv - 2086.647602).abs() < 1e-4, "xnpv={xnpv}");
+
+        let EvaluatedCellValue::Number(xirr) = s.evaluate_formula_str("=XIRR(A1:A5, B1:B5, 0.1)")
+        else {
+            panic!("expected XIRR number");
+        };
+        assert!((xirr - 0.3733625).abs() < 1e-5, "xirr={xirr}");
+
+        for (i, cf) in ["-120000", "39000", "30000", "21000", "37000", "46000"]
+            .into_iter()
+            .enumerate()
+        {
+            s.set_cell(&format!("C{}", i + 1), cf).unwrap();
+        }
+        let EvaluatedCellValue::Number(mirr) = s.evaluate_formula_str("=MIRR(C1:C6, 0.10, 0.12)")
+        else {
+            panic!("expected MIRR number");
+        };
+        assert!((mirr - 0.12609413).abs() < 1e-6, "mirr={mirr}");
+
+        let EvaluatedCellValue::Number(cum_i) =
+            s.evaluate_formula_str("=CUMIPMT(0.09/12, 30*12, 125000, 13, 24, 0)")
+        else {
+            panic!("expected CUMIPMT number");
+        };
+        assert!((cum_i - -11135.23213).abs() < 1e-3, "cum_i={cum_i}");
+
+        let EvaluatedCellValue::Number(cum_p) =
+            s.evaluate_formula_str("=CUMPRINC(0.09/12, 30*12, 125000, 13, 24, 0)")
+        else {
+            panic!("expected CUMPRINC number");
+        };
+        assert!((cum_p - -934.10712).abs() < 1e-3, "cum_p={cum_p}");
     }
 }

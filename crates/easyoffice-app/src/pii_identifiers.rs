@@ -60,17 +60,31 @@ fn match_digit_groups(
     Some(p - idx)
 }
 
-/// Luhn (mod 10) checksum over ASCII digits.
+/// Branchless Luhn doubled-digit lookup table (`(d * 2) - if d * 2 > 9 { 9 } else { 0 }`).
+const LUHN_DOUBLE: [u8; 10] = [0, 2, 4, 6, 8, 1, 3, 5, 7, 9];
+
+/// Bitmask for single-letter Korean passport type prefixes (`M`, `S`, `R`, `O`, `D`, `G`).
+const PASSPORT_PREFIX_MASK: u32 = (1 << (b'M' - b'A'))
+    | (1 << (b'S' - b'A'))
+    | (1 << (b'R' - b'A'))
+    | (1 << (b'O' - b'A'))
+    | (1 << (b'D' - b'A'))
+    | (1 << (b'G' - b'A'));
+
+/// Bitmask of valid first digit-group lengths for structured identifiers (`2`, `3`, `4`, `6`).
+const VALID_FIRST_GROUP_MASK: u32 = (1 << 2) | (1 << 3) | (1 << 4) | (1 << 6);
+
+/// Luhn (mod 10) checksum over ASCII digits using branchless table lookup.
+#[allow(clippy::manual_is_multiple_of)]
 pub(crate) fn passes_luhn(digits: &[u8]) -> bool {
     let mut sum = 0u32;
     for (i, &d) in digits.iter().rev().enumerate() {
-        let mut v = u32::from(d - b'0');
-        if i % 2 == 1 {
-            v *= 2;
-            if v > 9 {
-                v -= 9;
-            }
-        }
+        let digit = (d - b'0') as usize;
+        let v = if (i & 1) != 0 {
+            u32::from(LUHN_DOUBLE[digit])
+        } else {
+            digit as u32
+        };
         sum += v;
     }
     sum % 10 == 0
@@ -100,13 +114,14 @@ fn match_passport(bytes: &[u8], idx: usize) -> Option<usize> {
     if idx + 9 > bytes.len() {
         return None;
     }
-    let is_type = matches!(bytes[idx], b'M' | b'S' | b'R' | b'O' | b'D' | b'G');
+    let first = bytes[idx];
+    let is_type = first.is_ascii_uppercase() && ((PASSPORT_PREFIX_MASK >> (first - b'A')) & 1) != 0;
     let legacy = is_type && all_digits(bytes, idx + 1, 8);
     let new_format = is_type
         && all_digits(bytes, idx + 1, 3)
         && bytes[idx + 4].is_ascii_uppercase()
         && all_digits(bytes, idx + 5, 4);
-    let two_letter = bytes[idx].is_ascii_uppercase()
+    let two_letter = first.is_ascii_uppercase()
         && bytes[idx + 1].is_ascii_uppercase()
         && all_digits(bytes, idx + 2, 7);
     if !(legacy || new_format || two_letter) {
@@ -127,24 +142,59 @@ pub(crate) fn match_identifier_at(bytes: &[u8], idx: usize) -> Option<usize> {
     if !bytes[idx].is_ascii_digit() || (idx > 0 && bytes[idx - 1].is_ascii_digit()) {
         return None;
     }
-    match_digit_groups(bytes, idx, &CARD_GROUPS, is_card_separator)
-        .or_else(|| match_digit_groups(bytes, idx, &DRIVER_LICENSE_GROUPS, is_hyphen))
-        .or_else(|| match_digit_groups(bytes, idx, &BUSINESS_REGISTRATION_GROUPS, is_hyphen))
-        .or_else(|| {
-            BANK_ACCOUNT_GROUPS
-                .iter()
-                .find_map(|groups| match_digit_groups(bytes, idx, groups, is_hyphen))
-        })
-        .or_else(|| match_contiguous_card(bytes, idx))
+    // Count the first contiguous digit group once (`<= 7` for grouped identifiers)
+    let mut first_end = idx + 1;
+    let limit = (idx + 7).min(bytes.len());
+    while first_end < limit && bytes[first_end].is_ascii_digit() {
+        first_end += 1;
+    }
+    let first_len = first_end - idx;
+    if first_len <= 6
+        && (first_end >= bytes.len() || !bytes[first_end].is_ascii_digit())
+        && ((VALID_FIRST_GROUP_MASK >> first_len) & 1) != 0
+    {
+        let grouped = match first_len {
+            2 => match_digit_groups(bytes, idx, &DRIVER_LICENSE_GROUPS, is_hyphen),
+            3 => match_digit_groups(bytes, idx, &BUSINESS_REGISTRATION_GROUPS, is_hyphen).or_else(
+                || {
+                    BANK_ACCOUNT_GROUPS
+                        .iter()
+                        .filter(|g| g[0] == 3)
+                        .find_map(|groups| match_digit_groups(bytes, idx, groups, is_hyphen))
+                },
+            ),
+            4 => match_digit_groups(bytes, idx, &CARD_GROUPS, is_card_separator).or_else(|| {
+                BANK_ACCOUNT_GROUPS
+                    .iter()
+                    .filter(|g| g[0] == 4)
+                    .find_map(|groups| match_digit_groups(bytes, idx, groups, is_hyphen))
+            }),
+            6 => match_digit_groups(bytes, idx, &[6, 2, 6], is_hyphen),
+            _ => None,
+        };
+        if grouped.is_some() {
+            return grouped;
+        }
+    }
+    match_contiguous_card(bytes, idx)
 }
 
 /// Masks every ASCII letter and digit while keeping separators, so the mask has
 /// the same UTF-16 length as the matched ASCII identifier.
 pub(crate) fn mask_identifier(matched: &str) -> String {
-    matched
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { '*' } else { c })
-        .collect()
+    let mut buf = matched.as_bytes().to_vec();
+    for b in &mut buf {
+        if b.is_ascii_alphanumeric() {
+            *b = b'*';
+        }
+    }
+    // Safety invariant: replacing ASCII alphanumeric bytes with ASCII '*' preserves valid UTF-8.
+    String::from_utf8(buf).unwrap_or_else(|_| {
+        matched
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { '*' } else { c })
+            .collect()
+    })
 }
 
 #[cfg(test)]
