@@ -24,7 +24,8 @@
 .tb-btn[aria-pressed="true"] { background: var(--ui-hover); color: var(--ui-text); }
 .sb-step-btn { display: inline-flex; align-items: center; justify-content: center; color: var(--ui-text-secondary); }
 .sb-step-btn .eo-icon { width: 10px; height: 10px; }
-.eo-doc-style-bar .sb-select, .eo-doc-style-bar .sb-size-input { color: var(--ui-text); background: var(--ui-bg-light); border-color: var(--ui-border); }
+.eo-doc-style-bar .sb-select { color: var(--ui-text); background: var(--ui-surface); border-color: var(--color-border-input); }
+.eo-doc-style-bar .sb-size-input { color: var(--ui-text); background: transparent; border: 0; }
 .icon-btn.secondary-btn { width: 28px; height: 28px; padding: 0; }
 /* The embedded HWP editor brings its own complete toolbar: no second EasyOffice toolbar above it. */
 .app-shell[data-hwp-embed="true"] #icon-toolbar,
@@ -87,13 +88,6 @@
 .cp-item:hover .cp-item-label, .cp-item.cp-item--selected .cp-item-label { color: var(--ui-text); }
 .cp-empty { padding: 14px; color: var(--ui-text-muted); }
 /* ---- modal panel (제품 정보) ----------------------------------------------------------------------- */
-.close-dialog { margin: auto; width: min(420px, calc(100vw - 32px)); padding: 0; color: var(--ui-text); background: var(--ui-bg-light); border: 1px solid var(--ui-border); border-radius: 10px; }
-.close-dialog::backdrop { background: var(--overlay-bg); }
-.close-dialog-panel { display: flex; flex-direction: column; gap: 10px; padding: 20px 22px 16px; }
-.close-dialog-title { font-size: 15px; font-weight: 700; }
-.close-dialog-text { font-size: 13px; color: var(--ui-text-muted); }
-.close-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
-.close-dialog-actions .secondary-btn { border: 1px solid var(--ui-border); border-radius: 4px; }
 button:focus-visible, .md-item:focus-visible, .md-sub:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 1px; }
 .about-version { margin-bottom: 12px; font-size: var(--font-size-md); color: var(--color-text-muted); }
 

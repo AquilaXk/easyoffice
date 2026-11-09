@@ -113,6 +113,8 @@
     trigger.type = "button";
     trigger.setAttribute("aria-haspopup", "listbox");
     trigger.setAttribute("aria-expanded", "false");
+    const selectLabel = select.getAttribute("aria-label") || select.getAttribute("title");
+    if (selectLabel) trigger.setAttribute("aria-label", selectLabel);
     const value = el(document, "span", "custom-select-value");
     const arrow = el(document, "span", "custom-select-arrow");
     arrow.textContent = "▾";

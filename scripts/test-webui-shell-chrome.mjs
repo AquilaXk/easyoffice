@@ -295,12 +295,31 @@ test("menu shortcut labels follow the platform: command glyphs on macOS, Ctrl el
   assert.ok(macLabels.includes("⌘N") && macLabels.includes("⇧⌘Z") && macLabels.includes("⌥⌘O") && macLabels.includes("⌥⌘D"), macLabels.join(" "));
   assert.ok(macLabels.every((label) => !/Ctrl|Alt|Shift/.test(label)), "no Windows words left on macOS");
   assert.ok(macLabels.includes("/"), "labels that are not key combinations stay");
+  assert.equal(mac.document.getElementById("btn-stylebar-bold").getAttribute("title"), "굵게 (⌘B)");
+  assert.equal(mac.document.getElementById("btn-slide-move-up").getAttribute("title"), "위로 이동 · ⌥↑ (목록에서)");
 
   const win = await createWorkspaceHarness({ platform: "Win32" });
   await flushAsyncTurns(10);
   const winLabels = menuLabels(win.document);
   assert.ok(winLabels.includes("Ctrl+N") && winLabels.includes("Ctrl+Shift+Z") && winLabels.includes("Ctrl+Alt+O"));
   assert.ok(winLabels.every((label) => !/[⌘⌥⇧⌃]/.test(label)));
+  assert.equal(win.document.getElementById("btn-stylebar-bold").getAttribute("title"), "굵게 (Ctrl+B)");
+});
+
+test("doc-style-bar selects are enhanced as custom-select combo boxes and style-bar overflow stays visible", async () => {
+  const { document } = await createWorkspaceHarness({ search: "?module=DOC&win=w-doc-combos" });
+  for (const id of ["doc-style-select", "doc-font-lang", "doc-font-select", "doc-linespacing-select"]) {
+    const select = document.getElementById(id);
+    assert.ok(select.classList.contains("sb-combo"), `${id} is a combo box`);
+    assert.ok(select.classList.contains("native-select-hidden"), `${id} stays as hidden state holder`);
+    assert.equal(select.parentElement.dataset.selectId, id, `${id} is wrapped by custom-select`);
+  }
+  const styleBarRule = cssRule(".eo-doc-style-bar", CSS);
+  assert.ok(hasDecl(styleBarRule, "overflow", "visible"), "style-bar allows custom-select dropdowns to overflow");
+  assert.match(
+    CSS,
+    /\.app-shell:not\(\[data-module="DOC"\]\):not\(\[data-module="HWP"\]\)\s+\.statusbar-left-group,\s*\.app-shell:not\(\[data-module="SHEET"\]\)\s+#status-sheet-agg\s*\{\s*display:\s*none;\s*\}/
+  );
 });
 
 test("formatPlatformShortcut writes both notations from either one and leaves other text alone", async () => {

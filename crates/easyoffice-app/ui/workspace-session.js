@@ -667,11 +667,16 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       return true;
     }
 
-    // Writes the menu shortcut labels in the platform's notation (the markup holds the "Ctrl+X" form).
+    // Writes the menu shortcut labels and toolbar tooltips in the platform's notation (the markup holds the "Ctrl+X" form).
     function normalizeMenuShortcuts(modifier) {
       const { formatPlatformShortcut } = host.__EASYOFFICE_RIBBON_CATALOG__;
       for (const label of document.querySelectorAll(".md-shortcut")) {
         label.textContent = formatPlatformShortcut(label.textContent.trim(), modifier);
+      }
+      for (const el of document.querySelectorAll("[title]")) {
+        const title = el.getAttribute("title") || "";
+        const next = title.replace(/(?:(?:Ctrl|Cmd|Option|Alt|Shift)\+)+[^+\s)]+/g, (m) => formatPlatformShortcut(m, modifier));
+        if (next !== title) el.setAttribute("title", next);
       }
     }
 
