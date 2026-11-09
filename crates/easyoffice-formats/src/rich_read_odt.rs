@@ -288,9 +288,8 @@ impl<'a> OdtWalker<'a> {
             "office:automatic-styles" | "office:font-face-decls" => self.in_automatic_styles = true,
             "text:note" | "office:annotation" | "text:tracked-changes" => return true,
             "draw:custom-shape" => {
-                let note = UNSUPPORTED_OBJECT_NOTE.to_string();
-                if !self.warnings.contains(&note) {
-                    self.warnings.push(note);
+                if !self.warnings.iter().any(|w| w == UNSUPPORTED_OBJECT_NOTE) {
+                    self.warnings.push(UNSUPPORTED_OBJECT_NOTE.to_string());
                 }
                 return true;
             }

@@ -17,6 +17,7 @@ use easyoffice_formats::{
 };
 use easyoffice_sheet::PackedCellCoordinate;
 use std::collections::HashSet;
+use std::fmt::Write;
 
 use crate::convert_structured::{encode_structured, StructuredContent};
 use crate::EasyOfficeIpcRouter;
@@ -46,43 +47,42 @@ fn json_str(s: &str) -> String {
 }
 
 fn paragraph_json(p: &RichParagraph) -> String {
-    let runs: Vec<String> = p
-        .runs
-        .iter()
-        .map(|r| {
-            let mut out = format!("{{\"text\":{}", json_str(&r.text));
-            for (on, key) in [
-                (r.bold, "bold"),
-                (r.italic, "italic"),
-                (r.underline, "underline"),
-                (r.strike, "strike"),
-            ] {
-                if on {
-                    out.push_str(&format!(",\"{key}\":true"));
-                }
+    let mut out = String::from("{\"type\":\"paragraph\",\"runs\":[");
+    for (idx, r) in p.runs.iter().enumerate() {
+        if idx > 0 {
+            out.push(',');
+        }
+        let _ = write!(out, "{{\"text\":{}", json_str(&r.text));
+        for (on, key) in [
+            (r.bold, "bold"),
+            (r.italic, "italic"),
+            (r.underline, "underline"),
+            (r.strike, "strike"),
+        ] {
+            if on {
+                let _ = write!(out, ",\"{key}\":true");
             }
-            if let Some(size) = r.size_half_pt {
-                out.push_str(&format!(",\"sizeHalfPt\":{size}"));
+        }
+        if let Some(size) = r.size_half_pt {
+            let _ = write!(out, ",\"sizeHalfPt\":{size}");
+        }
+        match r.script {
+            RichScript::Normal => {}
+            RichScript::Superscript => out.push_str(",\"script\":\"superscript\""),
+            RichScript::Subscript => out.push_str(",\"script\":\"subscript\""),
+        }
+        for (value, key) in [
+            (&r.font, "font"),
+            (&r.color, "color"),
+            (&r.highlight, "highlight"),
+        ] {
+            if let Some(v) = value {
+                let _ = write!(out, ",\"{key}\":{}", json_str(v));
             }
-            match r.script {
-                RichScript::Normal => {}
-                RichScript::Superscript => out.push_str(",\"script\":\"superscript\""),
-                RichScript::Subscript => out.push_str(",\"script\":\"subscript\""),
-            }
-            for (value, key) in [
-                (&r.font, "font"),
-                (&r.color, "color"),
-                (&r.highlight, "highlight"),
-            ] {
-                if let Some(v) = value {
-                    out.push_str(&format!(",\"{key}\":{}", json_str(v)));
-                }
-            }
-            out.push('}');
-            out
-        })
-        .collect();
-    let mut out = format!("{{\"type\":\"paragraph\",\"runs\":[{}]", runs.join(","));
+        }
+        out.push('}');
+    }
+    out.push(']');
     if let Some(a) = p.alignment {
         let token = match a {
             RichAlignment::Left => "left",
@@ -90,26 +90,26 @@ fn paragraph_json(p: &RichParagraph) -> String {
             RichAlignment::Right => "right",
             RichAlignment::Justify => "justify",
         };
-        out.push_str(&format!(",\"align\":\"{token}\""));
+        let _ = write!(out, ",\"align\":\"{token}\"");
     }
     if p.heading_level > 0 {
-        out.push_str(&format!(",\"heading\":{}", p.heading_level));
+        let _ = write!(out, ",\"heading\":{}", p.heading_level);
     }
     if let Some(l) = p.list {
         let token = match l {
             RichListKind::Bullet => "bullet",
             RichListKind::Ordered => "ordered",
         };
-        out.push_str(&format!(",\"list\":\"{token}\""));
+        let _ = write!(out, ",\"list\":\"{token}\"");
     }
     if let Some(v) = p.left_indent_twips {
-        out.push_str(&format!(",\"leftIndentTwips\":{v}"));
+        let _ = write!(out, ",\"leftIndentTwips\":{v}");
     }
     if let Some(v) = p.first_line_indent_twips {
-        out.push_str(&format!(",\"firstLineIndentTwips\":{v}"));
+        let _ = write!(out, ",\"firstLineIndentTwips\":{v}");
     }
     if let Some(v) = p.line_spacing_percent {
-        out.push_str(&format!(",\"lineSpacingPercent\":{v}"));
+        let _ = write!(out, ",\"lineSpacingPercent\":{v}");
     }
     out.push('}');
     out

@@ -15,7 +15,7 @@
   const CLOSE_CHOICES = Object.freeze(["save", "discard", "cancel"]);
   const ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
   const EXTENSION_KINDS = Object.freeze({
-    DOC: ["docx", "doc", "odt", "rtf", "md", "markdown", "txt"],
+    DOC: ["docx", "doc", "odt", "rtf", "md", "markdown", "txt", "pages"],
     HWP: ["hwp", "hwpx", "hwt", "hwtx"],
     SHEET: ["xlsx", "xls", "ods", "csv", "tsv"],
     SLIDE: ["pptx", "ppt", "ppsx", "odp"],

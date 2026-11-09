@@ -15,11 +15,13 @@ use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
 use crate::pages_package::load_package;
-use crate::pages_proto::{ArchiveObject, Message, ObjectTable};
+use crate::pages_proto::{read_reference, ArchiveObject, Message, ObjectTable};
 use crate::pages_schema::{attachment, baseline, char_props_layout, compact_para, heading};
 use crate::pages_schema::{list_type, para_props, root};
 use crate::pages_schema::{storage, style, ty};
-use crate::pages_schema::{CharPropFields, COLOR_RGBA};
+use crate::pages_schema::{
+    CharPropFields, ParaPropFields, COLOR_RGBA, COMPACT_PARA_FIELDS, FULL_PARA_FIELDS,
+};
 use crate::pages_table::{read_table, TableBudget, TableOutcome};
 use crate::rich_read_pages_image::{PageImage, PageImages, CROPPED};
 use crate::{
@@ -44,7 +46,7 @@ fn corrupt(detail: &str) -> EasyOfficeError {
 }
 
 fn reference(m: &Message, field: u32) -> Option<u64> {
-    m.sub(field).ok().flatten().and_then(|r| r.varint(1))
+    m.bytes(field).and_then(read_reference)
 }
 
 /// Attribute table `{ entries { index, value } }` sorted by index.
@@ -163,8 +165,8 @@ fn points_to_twips(points: f32) -> Option<i32> {
 
 /// Line spacing as a percentage of single spacing, for the "multiple" mode only; 100% is the
 /// default and reported as unset.
-fn line_spacing_percent(p: &Message) -> Option<u16> {
-    let spacing = p.sub(compact_para::LINE_SPACING).ok().flatten()?;
+fn line_spacing_percent(p: &Message, field: u32) -> Option<u16> {
+    let spacing = p.sub(field).ok().flatten()?;
     if spacing
         .varint(compact_para::SPACING_MODE)
         .unwrap_or(compact_para::SPACING_MULTIPLE)
@@ -221,21 +223,23 @@ impl Fmt {
         }
     }
 
-    /// Indents and line spacing of a compact paragraph property message.
-    fn merge_para_layout(&mut self, p: &Message) {
+    /// Indents and line spacing of a paragraph property message.
+    fn merge_para_layout(&mut self, p: &Message, l: &ParaPropFields) {
         if self.left_indent_twips.is_none() {
             self.left_indent_twips = p
-                .float(compact_para::LEFT_INDENT)
+                .float(l.left_indent)
                 .and_then(points_to_twips)
-                .and_then(|t| u32::try_from(t).ok());
+                .and_then(|t| u32::try_from(t).ok())
+                .filter(|t| *t > 0);
         }
         if self.first_line_indent_twips.is_none() {
             self.first_line_indent_twips = p
-                .float(compact_para::FIRST_LINE_INDENT)
-                .and_then(points_to_twips);
+                .float(l.first_line_indent)
+                .and_then(points_to_twips)
+                .filter(|t| *t != 0);
         }
         if self.line_spacing_percent.is_none() {
-            self.line_spacing_percent = line_spacing_percent(p);
+            self.line_spacing_percent = line_spacing_percent(p, l.line_spacing);
         }
     }
 
@@ -250,12 +254,15 @@ impl Fmt {
         if let Some((props, layout)) = char_props_layout(&m) {
             self.merge_props(&props, layout);
         }
-        if obj.type_id == ty::PARA_STYLE && self.align.is_none() {
-            self.align = para_props_of(&m).and_then(|p| p.varint(para_props::ALIGNMENT));
-        }
-        if obj.type_id == ty::PARA_STYLE && matches!(m.sub(style::PARA_PROPS), Ok(None)) {
+        if obj.type_id == ty::PARA_STYLE {
+            if self.align.is_none() {
+                self.align = para_props_of(&m).and_then(|p| p.varint(para_props::ALIGNMENT));
+            }
             if let Ok(Some(p)) = m.sub(style::COMPACT_PARA_PROPS) {
-                self.merge_para_layout(&p);
+                self.merge_para_layout(&p, &COMPACT_PARA_FIELDS);
+            }
+            if let Ok(Some(p)) = m.sub(style::PARA_PROPS) {
+                self.merge_para_layout(&p, &FULL_PARA_FIELDS);
             }
         }
     }
@@ -515,9 +522,10 @@ impl<'a> Reader<'a> {
         t: &StorageTables,
         line: &str,
         start: u64,
+        len_u16: u64,
         pfmt: Option<&Fmt>,
     ) -> Result<LineContent, EasyOfficeError> {
-        let end = start.saturating_add(line.encode_utf16().count() as u64);
+        let end = start.saturating_add(len_u16);
         let mut cuts = t.char_styles.boundaries(start, end).peekable();
         let mut content = LineContent::default();
         let mut cur = String::new();
@@ -561,11 +569,10 @@ impl<'a> Reader<'a> {
                 ));
             }
             let start = pos;
-            pos = start
-                .saturating_add(line.encode_utf16().count() as u64)
-                .saturating_add(1);
+            let len_u16 = line.encode_utf16().count() as u64;
+            pos = start.saturating_add(len_u16).saturating_add(1);
             let (mut para, pfmt) = self.paragraph_header(&tables, start);
-            let content = self.convert_line(&tables, line, start, pfmt.as_deref())?;
+            let content = self.convert_line(&tables, line, start, len_u16, pfmt.as_deref())?;
             para.runs = content.runs;
             if !para.runs.is_empty() || content.attachments.is_empty() {
                 blocks.push(RichBlock::Paragraph(para));
@@ -706,9 +713,19 @@ pub(crate) fn read_pages(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Ea
         "Pages 문서는 읽기 전용으로 열고, 머리글·바닥글·각주는 본문 뒤 부록 문단으로 옮기며, 변경 추적·차트 등은 가져오지 않고 서식이 일부 단순화될 수 있습니다."
             .to_string(),
     );
+    let title = blocks
+        .iter()
+        .find_map(|b| match b {
+            RichBlock::Paragraph(p) if p.heading_level == 1 => {
+                let text = p.plain_text();
+                (!text.trim().is_empty()).then_some(text)
+            }
+            _ => None,
+        })
+        .unwrap_or_default();
     Ok((
         RichDocument {
-            title: String::new(),
+            title,
             blocks,
             official_agency: None,
         },

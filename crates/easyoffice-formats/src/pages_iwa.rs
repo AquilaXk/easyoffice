@@ -32,9 +32,16 @@ fn budget(detail: &str) -> EasyOfficeError {
 
 /// Little-endian unsigned value of up to `size_of::<usize>()` bytes.
 fn read_le_usize(raw: &[u8]) -> usize {
-    raw.iter()
-        .enumerate()
-        .fold(0usize, |acc, (i, b)| acc | (usize::from(*b) << (8 * i)))
+    match raw.len() {
+        1 => usize::from(raw[0]),
+        2 => usize::from(u16::from_le_bytes([raw[0], raw[1]])),
+        3 => usize::from(u16::from_le_bytes([raw[0], raw[1]])) | (usize::from(raw[2]) << 16),
+        4 => u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]) as usize,
+        _ => raw
+            .iter()
+            .enumerate()
+            .fold(0usize, |acc, (i, b)| acc | (usize::from(*b) << (8 * i))),
+    }
 }
 
 /// Takes `count` bytes at `*pos`, advancing it; errors with `what` when truncated.
@@ -105,9 +112,22 @@ fn snappy_copy(
         return Err(bad("invalid copy offset"));
     }
     ensure_within_declared(out, len, declared)?;
-    for _ in 0..len {
-        let b = out[out.len() - offset];
-        out.push(b);
+    if offset >= len {
+        let start = out.len() - offset;
+        out.extend_from_within(start..start + len);
+    } else if offset == 1 {
+        let byte = out[out.len() - 1];
+        out.resize(out.len() + len, byte);
+    } else {
+        let base = out.len() - offset;
+        let mut remaining = len;
+        let mut avail = offset;
+        while remaining > 0 {
+            let take = remaining.min(avail);
+            out.extend_from_within(base..base + take);
+            remaining -= take;
+            avail += take;
+        }
     }
     Ok(())
 }

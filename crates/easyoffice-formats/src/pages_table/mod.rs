@@ -9,7 +9,7 @@ mod format;
 mod merge;
 mod packed;
 
-use crate::pages_proto::{ArchiveObject, Message, ObjectTable};
+use crate::pages_proto::{read_reference, ArchiveObject, Message, ObjectTable};
 use crate::pages_schema::{cell, table, ty};
 use crate::{CellMerge, EasyOfficeError};
 
@@ -69,7 +69,7 @@ pub(crate) enum TableOutcome {
 }
 
 fn reference(m: &Message, field: u32) -> Option<u64> {
-    m.sub(field).ok().flatten().and_then(|r| r.varint(1))
+    m.bytes(field).and_then(read_reference)
 }
 
 /// Text of a rich-text cell storage: control characters and attachment marks removed, line

@@ -26,8 +26,13 @@ fn bad(detail: &str) -> EasyOfficeError {
 
 /// Decodes one varint at `*pos` (advancing it). At most 10 bytes; overflow bits are rejected.
 pub fn read_varint(buf: &[u8], pos: &mut usize) -> Result<u64, EasyOfficeError> {
-    let mut value: u64 = 0;
-    for i in 0..10u32 {
+    let b0 = *buf.get(*pos).ok_or_else(|| bad("varint truncated"))?;
+    *pos = pos.checked_add(1).ok_or_else(|| bad("offset overflow"))?;
+    if b0 < 0x80 {
+        return Ok(u64::from(b0));
+    }
+    let mut value = u64::from(b0 & 0x7F);
+    for i in 1..10u32 {
         let byte = *buf.get(*pos).ok_or_else(|| bad("varint truncated"))?;
         *pos = pos.checked_add(1).ok_or_else(|| bad("offset overflow"))?;
         let low = u64::from(byte & 0x7F);
@@ -238,9 +243,47 @@ impl<'a> Message<'a> {
     }
 }
 
-/// Reads an object reference (`{ identifier = 1 }`) from message bytes.
+/// Reads an object reference (`{ identifier = 1 }`) from message bytes in a single zero-allocation pass.
 pub fn read_reference(bytes: &[u8]) -> Option<u64> {
-    Message::parse(bytes).ok()?.varint(1)
+    if bytes.len() >= 2 && bytes[0] == 0x08 && bytes[1] < 0x80 {
+        return Some(u64::from(bytes[1]));
+    }
+    let mut pos = 0usize;
+    let mut count = 0usize;
+    while pos < bytes.len() {
+        if count >= MAX_PROTO_FIELDS {
+            return None;
+        }
+        count += 1;
+        let key = read_varint(bytes, &mut pos).ok()?;
+        let number = u32::try_from(key >> 3).ok()?;
+        if number == 0 {
+            return None;
+        }
+        match key & 7 {
+            0 => {
+                let v = read_varint(bytes, &mut pos).ok()?;
+                if number == 1 {
+                    return Some(v);
+                }
+            }
+            1 => {
+                pos = pos.checked_add(8)?;
+                bytes.get(..pos)?;
+            }
+            2 => {
+                let len = usize::try_from(read_varint(bytes, &mut pos).ok()?).ok()?;
+                pos = pos.checked_add(len)?;
+                bytes.get(..pos)?;
+            }
+            5 => {
+                pos = pos.checked_add(4)?;
+                bytes.get(..pos)?;
+            }
+            _ => return None,
+        }
+    }
+    None
 }
 
 /// `MessageInfo` entry of an `ArchiveInfo`.

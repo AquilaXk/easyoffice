@@ -125,10 +125,10 @@ fn parse_legacy_scalar(head: &[u8], kind: u8, flags: u32) -> Option<PackedCell> 
         value: CellScalar::None,
     };
     let mut cursor = cell::LEGACY_FIELDS_OFFSET;
-    for bit in 0..=cell::LEGACY_LAST_BIT {
-        if flags & (1 << bit) == 0 {
-            continue;
-        }
+    let mut mask = flags & ((1u32 << (cell::LEGACY_LAST_BIT + 1)) - 1);
+    while mask != 0 {
+        let bit = mask.trailing_zeros();
+        mask &= mask - 1;
         let end = cursor.checked_add(legacy_field_size(bit)?)?;
         let field = head.get(cursor..end)?;
         match bit {
@@ -181,10 +181,10 @@ fn parse_current(head: &[u8]) -> Option<PackedCell> {
         value: CellScalar::None,
     };
     let mut cursor = cell::FIELDS_OFFSET;
-    for bit in 0..cell::KNOWN_FLAG_BITS {
-        if flags & (1 << bit) == 0 {
-            continue;
-        }
+    let mut mask = flags & ((1u32 << cell::KNOWN_FLAG_BITS) - 1);
+    while mask != 0 {
+        let bit = mask.trailing_zeros();
+        mask &= mask - 1;
         let size = field_size(bit, kind)?;
         let end = cursor.checked_add(size)?;
         let field = head.get(cursor..end)?;

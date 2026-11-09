@@ -59,7 +59,7 @@ function openPrompt() {
 test("launch parameters are parsed strictly", () => {
   const env = {};
   loadUiModule(WINDOW_BRIDGE_JS, env);
-  const { parseLaunch, formatWindowTitle } = env.__EASYOFFICE_WINDOW_BRIDGE__;
+  const { parseLaunch, formatWindowTitle, kindForFileName } = env.__EASYOFFICE_WINDOW_BRIDGE__;
   assert.deepEqual(parseLaunch("?module=hwp&win=doc-1-ab12"), { module: "HWP", windowId: "doc-1-ab12", handoff: "" });
   assert.equal(parseLaunch("?module=START").module, "START");
   assert.equal(parseLaunch("?module=EVIL").module, null);
@@ -68,6 +68,7 @@ test("launch parameters are parsed strictly", () => {
   assert.equal(formatWindowTitle("보고서.docx", false), "보고서.docx — EasyOffice");
   assert.equal(formatWindowTitle("보고서.docx", true), "● 보고서.docx — EasyOffice");
   assert.equal(formatWindowTitle("", false), "제목 없음 — EasyOffice");
+  assert.equal(kindForFileName("초안.pages"), "DOC");
 });
 
 test("a window shows exactly one module and has no tab strip or module switcher", async () => {

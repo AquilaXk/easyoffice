@@ -212,8 +212,15 @@
     return PROPS.some((p) => fmt[p] !== undefined && fmt[p] !== null && fmt[p] !== false);
   }
 
-  function runKey(fmt) {
-    return PROPS.map((p) => (fmt[p] === undefined || fmt[p] === null || fmt[p] === false ? "" : String(fmt[p]))).join("|");
+  function runFlags(fmt) {
+    return (
+      (fmt.bold ? 1 : 0) |
+      (fmt.italic ? 2 : 0) |
+      (fmt.underline ? 4 : 0) |
+      (fmt.strike ? 8 : 0) |
+      (fmt.superscript || fmt.script === "superscript" ? 16 : 0) |
+      (fmt.subscript || fmt.script === "subscript" ? 32 : 0)
+    );
   }
 
   function createRun(doc, fmt) {
@@ -313,18 +320,30 @@
   function textEntries(scope, root, extra) {
     const out = [];
     if (isExcluded(scope, root, extra)) return out;
-    const walk = (node, path) => {
+    const path = pathTo(root, scope);
+    const walk = (node) => {
       node.childNodes.forEach((child, i) => {
-        if (child.nodeType === 3) out.push({ node: child, path: path.concat([i]) });
-        else if (child.nodeType === 1 && !isSkippedElement(child, extra)) walk(child, path.concat([i]));
+        path.push(i);
+        if (child.nodeType === 3) out.push({ node: child, path: path.slice() });
+        else if (child.nodeType === 1 && !isSkippedElement(child, extra)) walk(child);
+        path.pop();
       });
     };
-    walk(scope, pathTo(root, scope));
+    walk(scope);
     return out;
   }
 
   function collectTextNodes(scope, root, extra) {
-    return textEntries(scope, root, extra).map((e) => e.node);
+    const out = [];
+    if (isExcluded(scope, root, extra)) return out;
+    const walk = (node) => {
+      node.childNodes.forEach((child) => {
+        if (child.nodeType === 3) out.push(child);
+        else if (child.nodeType === 1 && !isSkippedElement(child, extra)) walk(child);
+      });
+    };
+    walk(scope);
+    return out;
   }
 
   // Whitespace-only text between blocks (or inside tables/lists) is layout, not content.
@@ -436,7 +455,13 @@
   }
 
   function sameFormat(a, b) {
-    return runKey(a) === runKey(b);
+    return (
+      runFlags(a) === runFlags(b) &&
+      (a.size || "") === (b.size || "") &&
+      (a.font || "") === (b.font || "") &&
+      (a.color || "") === (b.color || "") &&
+      (a.highlight || "") === (b.highlight || "")
+    );
   }
 
   // ---------------------------------------------------------------- normalization
@@ -476,7 +501,7 @@
     let child = container.childNodes[0] ?? null;
     while (child) {
       const next = child.nextSibling ?? null;
-      if (isRunElement(child) && isRunElement(next) && runKey(readRunFormat(child)) === runKey(readRunFormat(next))) {
+      if (isRunElement(child) && isRunElement(next) && sameFormat(readRunFormat(child), readRunFormat(next))) {
         Array.from(next.childNodes).forEach((c) => child.appendChild(c));
         removeNode(next);
         mergeAdjacentText(child);
@@ -711,20 +736,22 @@
     const out = [];
     const sp = pathTo(root, start.node);
     const ep = pathTo(root, end.node);
-    const walk = (el, path) => {
+    const path = [];
+    const walk = (el) => {
       el.childNodes.forEach((child, i) => {
         if (child.nodeType !== 1 || isSkippedElement(child, extraExclude)) return;
-        const childPath = path.concat([i]);
+        path.push(i);
         if (BLOCK_TAGS.has((child.tagName || "").toUpperCase()) && !hasBlockChild(child)) {
-          const startsBeforeEnd = cmpPathOffset(childPath, 0, ep, end.offset) <= 0;
-          const endsAfterStart = cmpPathOffset(childPath, child.childNodes.length, sp, start.offset) >= 0;
+          const startsBeforeEnd = cmpPathOffset(path, 0, ep, end.offset) <= 0;
+          const endsAfterStart = cmpPathOffset(path, child.childNodes.length, sp, start.offset) >= 0;
           if (startsBeforeEnd && endsAfterStart) out.push(child);
         } else {
-          walk(child, childPath);
+          walk(child);
         }
+        path.pop();
       });
     };
-    walk(root, []);
+    walk(root);
     if (out.length === 0) {
       const own = blockOf(start.node, root);
       if (own !== root) out.push(own);

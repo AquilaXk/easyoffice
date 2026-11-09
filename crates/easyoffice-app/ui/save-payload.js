@@ -188,13 +188,52 @@
     return count;
   }
 
+  const TABLE_SECTION_TAGS = new Set(["THEAD", "TBODY", "TFOOT"]);
+
+  function collectTableRows(table) {
+    const trs = [];
+    for (const child of Array.from(table.children || [])) {
+      const tag = (child.tagName || "").toUpperCase();
+      if (tag === "TR") {
+        trs.push(child);
+      } else if (TABLE_SECTION_TAGS.has(tag)) {
+        for (const row of Array.from(child.children || [])) {
+          if ((row.tagName || "").toUpperCase() === "TR") trs.push(row);
+        }
+      }
+    }
+    return trs;
+  }
+
+  function runFlags(fmt) {
+    return (
+      (fmt.bold ? 1 : 0) |
+      (fmt.italic ? 2 : 0) |
+      (fmt.underline ? 4 : 0) |
+      (fmt.strike ? 8 : 0) |
+      (fmt.script === "superscript" ? 16 : 0) |
+      (fmt.script === "subscript" ? 32 : 0)
+    );
+  }
+
+  function sameFormat(a, b) {
+    return Boolean(
+      a &&
+        runFlags(a) === runFlags(b) &&
+        a.sizeHalfPt === b.size &&
+        a.font === b.font &&
+        a.color === b.color &&
+        a.highlight === b.highlight
+    );
+  }
+
   // Cell text grid and merged regions of a table, read as the HTML table model lays it out: a cell
   // with colspan/rowspan covers the slots to its right and below, and the cells after it start
   // behind them. Covered slots are empty strings. Spans stop at the table's last row, at
   // MAX_TABLE_COLUMNS and at slots another cell covers; hidden cells are not part of the grid; rows
   // without any slot are dropped.
   function readTableGrid(table) {
-    const trs = Array.from(table.querySelectorAll("tr")).filter((tr) => tr.closest("table") === table);
+    const trs = collectTableRows(table);
     const taken = trs.map(() => []);
     const texts = trs.map(() => []);
     const merges = [];
@@ -263,10 +302,7 @@
       if (!text) return;
       if (!cur) cur = { ctx, runs: [] };
       const last = cur.runs[cur.runs.length - 1];
-      const same = last && last.script === fmt.script
-        && BOOL_KEYS.every((k) => Boolean(last[k]) === Boolean(fmt[k]))
-        && VALUE_KEYS.every((k) => last[RUN_FIELDS[k]] === fmt[k]);
-      if (same) {
+      if (sameFormat(last, fmt)) {
         last.text += text;
         return;
       }

@@ -8,7 +8,7 @@ use easyoffice_formats::pages_proto::{
 };
 use easyoffice_formats::{
     DecodedContent, DocumentFormat, EasyOfficeError, FormatDetector, RichAlignment, RichBlock,
-    RichListKind, UniversalDocumentModel, UniversalFormatConverter, ZipArchiveCodec,
+    RichListKind, RichScript, UniversalDocumentModel, UniversalFormatConverter, ZipArchiveCodec,
 };
 use pages_fixture::*;
 
@@ -18,6 +18,7 @@ fn sample_blocks() -> (Vec<RichBlock>, Vec<String>) {
     let DecodedContent::Document(d) = doc.content else {
         panic!("expected a document");
     };
+    assert_eq!(d.title, "Title text");
     (d.blocks, doc.warnings)
 }
 
@@ -43,6 +44,10 @@ fn snappy_overlapping_copy_repeats_bytes() {
     enc.push((((6 - 1) as u8) << 2) | 2);
     enc.extend_from_slice(&2u16.to_le_bytes());
     assert_eq!(snappy_decompress(&enc, 64).unwrap(), b"abababab");
+
+    // literal "x" then copy len 5 offset 1 -> "xxxxxx"
+    let rle = vec![6u8, 0, b'x', (((5 - 4) as u8) << 2) | 1, 1];
+    assert_eq!(snappy_decompress(&rle, 64).unwrap(), b"xxxxxx");
 }
 
 #[test]
@@ -330,4 +335,99 @@ fn pages_is_a_source_but_never_a_target() {
         UniversalFormatConverter::encode(&UniversalDocumentModel::default(), DocumentFormat::Pages)
             .unwrap_err();
     assert!(matches!(err, EasyOfficeError::InvalidArgument(_)));
+}
+
+#[test]
+fn full_style_properties_and_title_extraction() {
+    let mut b = DocBuilder::default();
+    let color =
+        |r: f32, g: f32, bl: f32| cat(&[f_f32(3, r), f_f32(4, g), f_f32(5, bl), f_f32(6, 1.0)]);
+    let spacing = |amount: f32| cat(&[f_varint(1, 0), f_f32(2, amount)]);
+
+    // Full paragraph style (PARA_PROPS = 12) with first_line_indent (13), left_indent (16),
+    // line_spacing (19), plus default char props (CHAR_PROPS = 11) with highlight (19) and subscript (10).
+    let full_para = b.add(
+        2022,
+        &cat(&[
+            f_bytes(1, &f_str(2, "x-paragraphstyle-Body")),
+            f_bytes(
+                11,
+                &cat(&[
+                    f_varint(10, 2),
+                    f_str(16, "Menlo"),
+                    f_bytes(19, &color(1.0, 1.0, 0.0)),
+                ]),
+            ),
+            f_bytes(
+                12,
+                &cat(&[f_f32(13, 18.0), f_f32(16, 36.0), f_bytes(19, &spacing(1.5))]),
+            ),
+        ]),
+    );
+
+    // Style with both COMPACT_PARA_PROPS (3) and PARA_PROPS (12): compact takes precedence for
+    // left_indent, while full supplies first_line_indent and line_spacing.
+    let mixed_para = b.add(
+        2022,
+        &cat(&[
+            f_bytes(1, &f_str(2, "x-paragraphstyle-Body")),
+            f_bytes(3, &f_f32(7, 24.0)),
+            f_bytes(
+                12,
+                &cat(&[f_f32(13, 12.0), f_f32(16, 36.0), f_bytes(19, &spacing(2.0))]),
+            ),
+        ]),
+    );
+
+    // Named character style (CHAR_PROPS = 11) with superscript (10), font (16), highlight (19).
+    let full_char = b.add(
+        2021,
+        &f_bytes(
+            11,
+            &cat(&[
+                f_varint(10, 1),
+                f_str(16, "Courier New"),
+                f_bytes(19, &color(0.0, 1.0, 0.0)),
+            ]),
+        ),
+    );
+
+    let text = "Base Styled\nMixed";
+    let para_tbl = [(0, Some(full_para)), (12, Some(mixed_para))];
+    let char_tbl = [(5, Some(full_char)), (12, None)];
+    let st = b.add(
+        2001,
+        &DocBuilder::storage_payload(text, &para_tbl, &char_tbl, &[], &[]),
+    );
+    let zip = pages_zip(b.finish(st));
+
+    let doc = UniversalFormatConverter::decode_rich(&zip, Some("no-title.pages")).unwrap();
+    let DecodedContent::Document(d) = doc.content else {
+        panic!("expected a document");
+    };
+    assert_eq!(d.title, "");
+
+    let RichBlock::Paragraph(p0) = &d.blocks[0] else {
+        panic!("p0");
+    };
+    assert_eq!(p0.first_line_indent_twips, Some(360));
+    assert_eq!(p0.left_indent_twips, Some(720));
+    assert_eq!(p0.line_spacing_percent, Some(150));
+    // Run 0 inherits paragraph default char props (subscript + yellow highlight, no template font).
+    assert_eq!(p0.runs[0].text, "Base ");
+    assert_eq!(p0.runs[0].script, RichScript::Subscript);
+    assert_eq!(p0.runs[0].highlight.as_deref(), Some("FFFF00"));
+    assert_eq!(p0.runs[0].font, None);
+    // Run 1 overrides with full character style (superscript + Courier New + green highlight).
+    assert_eq!(p0.runs[1].text, "Styled");
+    assert_eq!(p0.runs[1].script, RichScript::Superscript);
+    assert_eq!(p0.runs[1].font.as_deref(), Some("Courier New"));
+    assert_eq!(p0.runs[1].highlight.as_deref(), Some("00FF00"));
+
+    let RichBlock::Paragraph(p1) = &d.blocks[1] else {
+        panic!("p1");
+    };
+    assert_eq!(p1.left_indent_twips, Some(480));
+    assert_eq!(p1.first_line_indent_twips, Some(240));
+    assert_eq!(p1.line_spacing_percent, Some(200));
 }

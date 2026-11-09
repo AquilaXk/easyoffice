@@ -631,11 +631,10 @@ fn read_section(
             }
             XmlEvent::Start { name, attrs } => {
                 if SKIPPED_SUBTREES.contains(&name.as_str()) {
-                    if !matches!(name.as_str(), "hp:secPr" | "hp:ctrl") {
-                        let note = SHAPE_SKIP_NOTE.to_string();
-                        if !warnings.contains(&note) {
-                            warnings.push(note);
-                        }
+                    if !matches!(name.as_str(), "hp:secPr" | "hp:ctrl")
+                        && !warnings.iter().any(|w| w == SHAPE_SKIP_NOTE)
+                    {
+                        warnings.push(SHAPE_SKIP_NOTE.to_string());
                     }
                     i = skip_subtree(&events, i);
                     continue;

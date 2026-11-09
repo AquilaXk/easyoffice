@@ -148,7 +148,7 @@
     return out;
   }
 
-  const cellKey = (row, col) => row + "," + col;
+  const cellKey = (row, col) => (row << 16) | col;
 
   // Anchors (with their spans) and covered cells of a decoded table's `merges` (PD-130). A region is
   // used only when it is inside the grid, every cell of it exists and no other region has it.

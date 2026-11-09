@@ -185,8 +185,9 @@ pub(crate) struct CharPropFields {
 }
 
 /// Full layout (`style::CHAR_PROPS`): bold (varint bool) 1, italic 2 (검증 필요: only ever 0 in
-/// the fixtures), size in points (fixed32 float) 3, color message 7, underline 11 (확인: the
-/// hyperlink character style), strikethrough 12 (검증 필요: only ever 0 in the fixtures).
+/// the fixtures), size in points (fixed32 float) 3, color message 7, script 10, underline 11
+/// (확인: the hyperlink character style), strikethrough 12 (검증 필요: only ever 0 in the
+/// fixtures), font name 16, highlight 19.
 pub(crate) const FULL_CHAR_FIELDS: CharPropFields = CharPropFields {
     bold: 1,
     italic: 2,
@@ -194,9 +195,9 @@ pub(crate) const FULL_CHAR_FIELDS: CharPropFields = CharPropFields {
     strike: 12,    // 검증 필요
     size_pt: 3,
     color: 7,
-    highlight: None, // 검증 필요: highlight field of the full layout
-    font: None,      // 검증 필요: font and baseline fields of the full layout
-    script: None,
+    highlight: Some(19),
+    font: Some(16),
+    script: Some(10),
 };
 
 /// Compact layout (`style::COMPACT_CHAR_PROPS`), every field 확인 against the fixture text file:
@@ -237,6 +238,12 @@ pub(crate) mod para_props {
     pub const ALIGN_RIGHT: u64 = 1;
     pub const ALIGN_CENTER: u64 = 2;
     pub const ALIGN_JUSTIFY: u64 = 3;
+    /// First-line indent in points (`style::PARA_PROPS`).
+    pub const FIRST_LINE_INDENT: u32 = 13;
+    /// Left indent in points (`style::PARA_PROPS`).
+    pub const LEFT_INDENT: u32 = 16;
+    /// Line spacing message (`style::PARA_PROPS`).
+    pub const LINE_SPACING: u32 = 19;
 }
 
 /// Compact paragraph property layout (`style::COMPACT_PARA_PROPS`), 확인 against the fixture text
@@ -250,6 +257,25 @@ pub(crate) mod compact_para {
     pub const SPACING_AMOUNT: u32 = 2;
     pub const SPACING_MULTIPLE: u64 = 0;
 }
+
+/// Field numbers of one paragraph property layout.
+pub(crate) struct ParaPropFields {
+    pub first_line_indent: u32,
+    pub left_indent: u32,
+    pub line_spacing: u32,
+}
+
+pub(crate) const FULL_PARA_FIELDS: ParaPropFields = ParaPropFields {
+    first_line_indent: para_props::FIRST_LINE_INDENT,
+    left_indent: para_props::LEFT_INDENT,
+    line_spacing: para_props::LINE_SPACING,
+};
+
+pub(crate) const COMPACT_PARA_FIELDS: ParaPropFields = ParaPropFields {
+    first_line_indent: compact_para::FIRST_LINE_INDENT,
+    left_indent: compact_para::LEFT_INDENT,
+    line_spacing: compact_para::LINE_SPACING,
+};
 
 /// Baseline values of the character `script` field.
 pub(crate) mod baseline {
