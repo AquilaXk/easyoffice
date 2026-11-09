@@ -163,8 +163,28 @@ impl UniversalFormatConverter {
         bytes: &[u8],
         file_name_hint: Option<&str>,
     ) -> Result<DecodedDocument, EasyOfficeError> {
+        Ok(Self::decode_rich_inner(bytes, file_name_hint, false)?.0)
+    }
+
+    /// Decodes `bytes` into the structured editor model together with per-sheet styling in a
+    /// single archive/XML pass for XLSX and ODS containers.
+    #[allow(clippy::type_complexity)]
+    pub fn decode_rich_with_styling(
+        bytes: &[u8],
+        file_name_hint: Option<&str>,
+    ) -> Result<(DecodedDocument, Vec<(String, crate::SheetStyling)>), EasyOfficeError> {
+        Self::decode_rich_inner(bytes, file_name_hint, true)
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn decode_rich_inner(
+        bytes: &[u8],
+        file_name_hint: Option<&str>,
+        with_styling: bool,
+    ) -> Result<(DecodedDocument, Vec<(String, crate::SheetStyling)>), EasyOfficeError> {
         let format = detect_for_open(bytes, file_name_hint)?;
         let mut warnings: Vec<String> = Vec::new();
+        let mut styling: Vec<(String, crate::SheetStyling)> = Vec::new();
         let content = match format {
             DocumentFormat::Docx => {
                 let (doc, w) = read_docx(bytes)?;
@@ -225,7 +245,14 @@ impl UniversalFormatConverter {
             }
             DocumentFormat::Xlsx => {
                 warnings.push(NOTE_SHEET_STYLED.to_string());
-                DecodedContent::Workbook(normalize_sheets(OoxmlCodec::unpack_xlsx_multi(bytes)?))
+                let sheets = if with_styling {
+                    let (s, st) = OoxmlCodec::unpack_xlsx_with_styling(bytes)?;
+                    styling = st;
+                    s
+                } else {
+                    OoxmlCodec::unpack_xlsx_multi(bytes)?
+                };
+                DecodedContent::Workbook(normalize_sheets(sheets))
             }
             DocumentFormat::Xls => {
                 warnings.push(NOTE_SHEET.to_string());
@@ -237,7 +264,14 @@ impl UniversalFormatConverter {
             }
             DocumentFormat::Ods => {
                 warnings.push(NOTE_SHEET_STYLED.to_string());
-                DecodedContent::Workbook(normalize_sheets(OdfCodec::unpack_ods_multi(bytes)?))
+                let sheets = if with_styling {
+                    let (s, st) = OdfCodec::unpack_ods_with_styling(bytes)?;
+                    styling = st;
+                    s
+                } else {
+                    OdfCodec::unpack_ods_multi(bytes)?
+                };
+                DecodedContent::Workbook(normalize_sheets(sheets))
             }
             DocumentFormat::Csv | DocumentFormat::Tsv => {
                 let delim = if format == DocumentFormat::Csv {
@@ -271,11 +305,14 @@ impl UniversalFormatConverter {
             DecodedContent::Workbook(s) => s.first().map(|(n, _)| n.clone()).unwrap_or_default(),
             DecodedContent::Slides(s) => s.first().map(|(t, _, _)| t.clone()).unwrap_or_default(),
         };
-        Ok(DecodedDocument {
-            format,
-            title,
-            content,
-            warnings,
-        })
+        Ok((
+            DecodedDocument {
+                format,
+                title,
+                content,
+                warnings,
+            },
+            styling,
+        ))
     }
 }

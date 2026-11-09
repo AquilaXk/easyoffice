@@ -166,7 +166,7 @@ fn parse_text_properties(attrs: &str) -> CellStyle {
         underline: on("style:text-underline-style"),
         strike: on("style:text-line-through-style"),
         size_pt: get("fo:font-size")
-            .and_then(|s| length_to_px(&s))
+            .and_then(length_to_px)
             .map(|px| (px / PX_PER_INCH * PT_PER_INCH * 100.0).round() / 100.0)
             .filter(|pt| *pt >= 1.0),
     }
@@ -196,7 +196,7 @@ fn parse_automatic_styles(content_xml: &str) -> AutomaticStyles {
         ) else {
             continue;
         };
-        let name = XmlSanitizer::unescape(&name);
+        let name = XmlSanitizer::unescape(name);
         if family == "table-cell" {
             if let Some((props, _)) =
                 extract_tags_or_self_closing_with_attrs(body, "style:text-properties")
@@ -210,7 +210,7 @@ fn parse_automatic_styles(content_xml: &str) -> AutomaticStyles {
                 .into_iter()
                 .next()
                 .and_then(|(props, _)| extract_attr_from_fragment(props, "style:column-width"))
-                .and_then(|w| length_to_px(&w));
+                .and_then(length_to_px);
             if let Some(px) = px {
                 let px = px
                     .round()
@@ -238,7 +238,7 @@ fn parse_table_columns(table_xml: &str, styles: &AutomaticStyles) -> BTreeMap<u3
     for (attrs, _) in extract_balanced_elements(head, "table:table-column") {
         let repeat = repeat_of(attrs, "table:number-columns-repeated");
         let px = extract_attr_from_fragment(attrs, "table:style-name")
-            .and_then(|n| styles.columns.get(&XmlSanitizer::unescape(&n)).copied());
+            .and_then(|n| styles.columns.get(&XmlSanitizer::unescape(n)).copied());
         if let Some(px) = px {
             for c in col..col.saturating_add(repeat).min(OdfCodec::MAX_COLS + 1) {
                 if columns.len() >= MAX_STYLED_CELLS {
@@ -261,7 +261,7 @@ fn parse_table_cells(table_xml: &str, styles: &AutomaticStyles) -> BTreeMap<(u32
         for (_, attrs, _) in extract_ods_cells_from_row(row_inner) {
             let col_repeat = repeat_of(attrs, "table:number-columns-repeated");
             let style = extract_attr_from_fragment(attrs, "table:style-name")
-                .and_then(|n| styles.cells.get(&XmlSanitizer::unescape(&n)))
+                .and_then(|n| styles.cells.get(&XmlSanitizer::unescape(n)))
                 .filter(|s| !s.is_plain());
             if let Some(style) = style {
                 // A style repeated across a whole row/column band (a "format the sheet" fill) is
@@ -293,7 +293,7 @@ pub(crate) fn parse_ods_styling(content_xml: &str) -> Vec<(String, SheetStyling)
         .enumerate()
         .map(|(idx, (attrs, inner))| {
             let name = extract_attr_from_fragment(attrs, "table:name")
-                .map(|s| XmlSanitizer::unescape(&s))
+                .map(XmlSanitizer::unescape)
                 .unwrap_or_else(|| format!("Sheet{}", idx + 1));
             let styling = SheetStyling {
                 cells: parse_table_cells(inner, &styles),

@@ -10,9 +10,9 @@
 //! ceilings, path-traversal checks, and XXE/DTD rejection apply to every path.
 
 use easyoffice_formats::{
-    base64_codec, evaluate_table_formulas, read_sheet_styling, CellMerge, CellStyle,
-    DecodedContent, DecodedDocument, DocumentFormat, EasyOfficeError, OdsUnpacked, RichAlignment,
-    RichBlock, RichImage, RichListKind, RichParagraph, RichScript, SheetStyling, StrictJsonValue,
+    base64_codec, evaluate_table_formulas, CellMerge, CellStyle, DecodedContent, DecodedDocument,
+    DocumentFormat, EasyOfficeError, OdsUnpacked, RichAlignment, RichBlock, RichImage,
+    RichListKind, RichParagraph, RichScript, SheetStyling, StrictJsonValue,
     UniversalFormatConverter,
 };
 use easyoffice_sheet::PackedCellCoordinate;
@@ -345,18 +345,6 @@ fn styling_of<'a>(styling: &'a [(String, SheetStyling)], name: &str) -> Option<&
     styling.iter().find(|(n, _)| n == name).map(|(_, s)| s)
 }
 
-/// Reads the formatting of an XLSX/ODS source; a damaged styles part only costs the formatting.
-fn source_styling(
-    bytes: &[u8],
-    format: DocumentFormat,
-    warnings: &mut Vec<String>,
-) -> Vec<(String, SheetStyling)> {
-    read_sheet_styling(bytes, format).unwrap_or_else(|_| {
-        warnings.push("셀 서식과 열 너비를 읽지 못해 가져오지 않았습니다.".to_string());
-        Vec::new()
-    })
-}
-
 fn into_structured(
     content: DecodedContent,
     styling: &[(String, SheetStyling)],
@@ -412,8 +400,8 @@ impl EasyOfficeIpcRouter {
                 .map(str::trim)
                 .filter(|s| !s.is_empty()),
         };
-        let mut decoded = UniversalFormatConverter::decode_rich(&bytes, source_hint)?;
-        let styling = source_styling(&bytes, decoded.format, &mut decoded.warnings);
+        let (decoded, styling) =
+            UniversalFormatConverter::decode_rich_with_styling(&bytes, source_hint)?;
         let action = Self::optional_json_str(entries, "action")?.unwrap_or("convert");
         if action == "decode" {
             let max_rows = limit(entries, "maxRows")?;

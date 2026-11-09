@@ -93,6 +93,7 @@ impl RtfCodec {
     }
 
     pub fn escape_rtf_text(input: &str) -> String {
+        use std::fmt::Write;
         let mut out = String::with_capacity(input.len() * 2);
         for unit in input.encode_utf16() {
             match unit {
@@ -103,7 +104,7 @@ impl RtfCodec {
                 0x20..=0x7E => out.push(unit as u8 as char),
                 _ => {
                     let signed = unit as i16;
-                    out.push_str(&format!("\\u{signed}?"));
+                    let _ = write!(out, "\\u{signed}?");
                 }
             }
         }
@@ -224,15 +225,22 @@ pub fn unescape_xml_five_pass_baseline(text: &str) -> String {
         .replace("&amp;", "&")
 }
 
-pub(crate) fn format_col_letters(col: u32) -> String {
-    let mut n = col + 1;
-    let mut chars = Vec::new();
-    while n > 0 {
+#[inline]
+pub(crate) fn write_col_letters(buf: &mut [u8; 4], col_zero_based: usize) -> &str {
+    let mut n = col_zero_based.saturating_add(1);
+    let mut pos = buf.len();
+    while n > 0 && pos > 0 {
+        pos -= 1;
         let rem = ((n - 1) % 26) as u8;
-        chars.push((b'A' + rem) as char);
+        buf[pos] = b'A' + rem;
         n = (n - 1) / 26;
     }
-    chars.into_iter().rev().collect()
+    std::str::from_utf8(&buf[pos..]).unwrap_or("")
+}
+
+pub(crate) fn format_col_letters(col: u32) -> String {
+    let mut buf = [0u8; 4];
+    write_col_letters(&mut buf, col as usize).to_string()
 }
 
 pub(crate) fn parse_a1_zero_based(a1: &str) -> Option<(u32, u32)> {
@@ -275,12 +283,6 @@ pub(crate) fn parse_a1_zero_based(a1: &str) -> Option<(u32, u32)> {
     } else {
         None
     }
-}
-
-#[allow(non_snake_case)]
-#[inline]
-pub(crate) fn parse_a1_ZeroBased(a1: &str) -> Option<(u32, u32)> {
-    parse_a1_zero_based(a1)
 }
 
 pub(crate) fn extract_between<'a>(src: &'a str, start_pat: &str, end_pat: &str) -> Option<&'a str> {
@@ -391,14 +393,17 @@ fn find_matching_close_tag(
     None
 }
 
-pub(crate) fn extract_attr(xml: &str, tag_prefix: &str, attr_name: &str) -> Option<String> {
+pub(crate) fn extract_attr<'a>(xml: &'a str, tag_prefix: &str, attr_name: &str) -> Option<&'a str> {
     let tag_start = xml.find(tag_prefix)?;
     let rest = &xml[tag_start + tag_prefix.len()..];
     let tag_end = find_tag_close_gt(rest.as_bytes(), 0)?;
     extract_attr_from_fragment(&rest[..tag_end], attr_name)
 }
 
-pub(crate) fn extract_attr_from_fragment(fragment: &str, attr_name: &str) -> Option<String> {
+pub(crate) fn extract_attr_from_fragment<'a>(
+    fragment: &'a str,
+    attr_name: &str,
+) -> Option<&'a str> {
     let frag_bytes = fragment.as_bytes();
     let attr_bytes = attr_name.as_bytes();
     let need_len = attr_bytes.len() + 3;
@@ -437,7 +442,7 @@ pub(crate) fn extract_attr_from_fragment(fragment: &str, attr_name: &str) -> Opt
                     let val_start = q_pos + 1;
                     let val_end =
                         crate::XmlSanitizer::find_byte_swar(frag_bytes, val_start, quote_b)?;
-                    return Some(fragment[val_start..val_end].to_string());
+                    return Some(&fragment[val_start..val_end]);
                 }
             }
         }
@@ -907,20 +912,17 @@ mod tests {
         let newline_tag = "<c\n  other_r=\"Z99\"\n  r='B3'\n  t=\"s\"><v>0</v></c>";
         let tags = extract_tags_with_attrs(newline_tag, "c");
         assert_eq!(tags.len(), 1);
-        assert_eq!(
-            extract_attr_from_fragment(tags[0].0, "r"),
-            Some("B3".to_string())
-        );
+        assert_eq!(extract_attr_from_fragment(tags[0].0, "r"), Some("B3"));
     }
 
     #[test]
     fn test_f10_parse_a1_zero_based_checked_bounds() {
-        assert_eq!(parse_a1_ZeroBased("A1"), Some((0, 0)));
-        assert_eq!(parse_a1_ZeroBased("XFD1048576"), Some((1_048_575, 16_383)));
-        assert_eq!(parse_a1_ZeroBased("XFE1"), None);
-        assert_eq!(parse_a1_ZeroBased("A1048577"), None);
-        assert_eq!(parse_a1_ZeroBased("AAAA1"), None);
-        assert_eq!(parse_a1_ZeroBased("ZZZZZZZZZZ999999999999"), None);
+        assert_eq!(parse_a1_zero_based("A1"), Some((0, 0)));
+        assert_eq!(parse_a1_zero_based("XFD1048576"), Some((1_048_575, 16_383)));
+        assert_eq!(parse_a1_zero_based("XFE1"), None);
+        assert_eq!(parse_a1_zero_based("A1048577"), None);
+        assert_eq!(parse_a1_zero_based("AAAA1"), None);
+        assert_eq!(parse_a1_zero_based("ZZZZZZZZZZ999999999999"), None);
     }
 
     #[test]

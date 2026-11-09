@@ -370,22 +370,33 @@ impl FormatDetector {
     pub const PDF_MAGIC: [u8; 5] = *b"%PDF-";
     pub const RTF_MAGIC: [u8; 5] = *b"{\\rtf";
 
-    /// Whether any archive entry satisfies `pred` (archives that fail to unpack count as no).
-    fn zip_entries_any(bytes: &[u8], pred: impl Fn(&ZipArchiveEntry) -> bool) -> bool {
-        ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default())
-            .is_ok_and(|entries| entries.iter().any(pred))
+    /// Checks whether a header/entry-name marker appears in the Central Directory (or leading
+    /// local header window) without scanning the entire compressed payload of large archives.
+    #[inline]
+    fn zip_header_contains(bytes: &[u8], cd_opt: Option<&[u8]>, needle: &[u8]) -> bool {
+        if let Some(cd) = cd_opt {
+            let head = &bytes[..bytes.len().min(4096)];
+            Self::slice_contains(head, needle) || Self::slice_contains(cd, needle)
+        } else {
+            Self::slice_contains(bytes, needle)
+        }
     }
 
-    fn detect_hwpx_family(bytes: &[u8]) -> DocumentFormat {
+    fn detect_hwpx_family(bytes: &[u8], cd_opt: Option<&[u8]>) -> DocumentFormat {
         let template_meta = hwpx_codec::HWPX_TEMPLATE_META_MARKER.as_bytes();
-        let is_template = Self::slice_contains(bytes, b"isTemplate=\"1\"")
-            || Self::slice_contains(bytes, template_meta)
-            || Self::zip_entries_any(bytes, |e| {
-                (e.path == "Contents/header.xml"
-                    && Self::slice_contains(&e.data, b"isTemplate=\"1\""))
-                    || (e.path == "Contents/content.hpf"
-                        && Self::slice_contains(&e.data, template_meta))
-            });
+        let is_template = Self::zip_header_contains(bytes, cd_opt, b"isTemplate=\"1\"")
+            || Self::zip_header_contains(bytes, cd_opt, template_meta)
+            || ZipArchiveCodec::any_selected_entry(
+                bytes,
+                &ZipSecurityPolicy::default(),
+                |path| path == "Contents/header.xml" || path == "Contents/content.hpf",
+                |e| {
+                    (e.path == "Contents/header.xml"
+                        && Self::slice_contains(&e.data, b"isTemplate=\"1\""))
+                        || (e.path == "Contents/content.hpf"
+                            && Self::slice_contains(&e.data, template_meta))
+                },
+            );
         if is_template {
             DocumentFormat::Hwtx
         } else {
@@ -394,15 +405,13 @@ impl FormatDetector {
     }
 
     fn detect_zip_family(bytes: &[u8]) -> DocumentFormat {
-        if Self::slice_contains(bytes, b"Contents/header.xml")
-            || Self::slice_contains(bytes, b"version.xml")
-        {
-            return Self::detect_hwpx_family(bytes);
+        let cd_opt = ZipArchiveCodec::central_dir_slice(bytes);
+        let has = |needle: &[u8]| Self::zip_header_contains(bytes, cd_opt, needle);
+        if has(b"Contents/header.xml") || has(b"version.xml") {
+            return Self::detect_hwpx_family(bytes, cd_opt);
         }
-        if Self::slice_contains(bytes, b"Index/Document.iwa")
-            || (Self::slice_contains(bytes, b"index.xml")
-                && !Self::slice_contains(bytes, b"[Content_Types].xml")
-                && !Self::slice_contains(bytes, b"mimetype"))
+        if has(b"Index/Document.iwa")
+            || (has(b"index.xml") && !has(b"[Content_Types].xml") && !has(b"mimetype"))
         {
             return DocumentFormat::Pages;
         }
@@ -416,7 +425,7 @@ impl FormatDetector {
         ];
         let Some(found) = MARKERS
             .iter()
-            .find(|(marker, _)| Self::slice_contains(bytes, marker))
+            .find(|(marker, _)| has(marker))
             .map(|(_, format)| *format)
         else {
             return DocumentFormat::Docx;
@@ -424,12 +433,17 @@ impl FormatDetector {
         if found != DocumentFormat::Pptx {
             return found;
         }
-        let is_slideshow = Self::zip_entries_any(bytes, |e| {
-            (e.path == "[Content_Types].xml"
-                && Self::slice_contains(&e.data, b"presentationml.slideshow"))
-                || (e.path == "ppt/presentation.xml"
-                    && Self::slice_contains(&e.data, b"slideshow=\"1\""))
-        });
+        let is_slideshow = ZipArchiveCodec::any_selected_entry(
+            bytes,
+            &ZipSecurityPolicy::default(),
+            |path| path == "[Content_Types].xml" || path == "ppt/presentation.xml",
+            |e| {
+                (e.path == "[Content_Types].xml"
+                    && Self::slice_contains(&e.data, b"presentationml.slideshow"))
+                    || (e.path == "ppt/presentation.xml"
+                        && Self::slice_contains(&e.data, b"slideshow=\"1\""))
+            },
+        );
         if is_slideshow {
             DocumentFormat::Ppsx
         } else {

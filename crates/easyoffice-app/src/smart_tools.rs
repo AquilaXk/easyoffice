@@ -223,6 +223,25 @@ enum EmailScanOutcome {
     Failed(usize),
 }
 
+/// 256-byte lookup table for PII candidate start bytes:
+/// - bit `0x01`: can start a resident ID, phone number, or identifier (`0-9`, `+`, `A-Z`)
+/// - bit `0x02`: can start an email local part (`0-9`, `A-Z`, `a-z`, or non-ASCII UTF-8 lead byte)
+const PII_START_LUT: [u8; 256] = {
+    let mut table = [0u8; 256];
+    let mut i = 0usize;
+    while i < 256 {
+        let b = i as u8;
+        let non_email = (b >= b'0' && b <= b'9') || b == b'+' || (b >= b'A' && b <= b'Z');
+        let email = (b >= b'0' && b <= b'9')
+            || (b >= b'A' && b <= b'Z')
+            || (b >= b'a' && b <= b'z')
+            || b >= 0x80;
+        table[i] = (if non_email { 0x01 } else { 0 }) | (if email { 0x02 } else { 0 });
+        i += 1;
+    }
+    table
+};
+
 pub struct DocumentSecurityAuditor;
 
 impl DocumentSecurityAuditor {
@@ -242,11 +261,23 @@ impl DocumentSecurityAuditor {
         let mut masked_identifier_numbers = 0usize;
         let mut spans: Vec<PiiReplacementSpan> = Vec::new();
         let mut idx = 0usize;
+        let mut plain_start = 0usize;
         let mut utf16_pos = 0usize;
-        let mut email_failed_until = 0usize;
+        let mut email_failed_until = if bytes.contains(&b'@') {
+            0
+        } else {
+            bytes.len()
+        };
 
         while idx < bytes.len() {
-            if idx >= email_failed_until {
+            let b = bytes[idx];
+            let flags = PII_START_LUT[b as usize];
+            if flags == 0 {
+                idx += 1;
+                utf16_pos += 1;
+                continue;
+            }
+            if (flags & 0x02) != 0 && idx >= email_failed_until {
                 match Self::scan_email_at(text, idx) {
                     EmailScanOutcome::Matched(matched_len) => {
                         let utf16_len: usize = text[idx..idx + matched_len]
@@ -254,6 +285,9 @@ impl DocumentSecurityAuditor {
                             .map(char::len_utf16)
                             .sum();
                         let replacement = "***@***";
+                        if plain_start < idx {
+                            scrubbed_text.push_str(&text[plain_start..idx]);
+                        }
                         scrubbed_text.push_str(replacement);
                         spans.push(PiiReplacementSpan {
                             start_utf16: utf16_pos,
@@ -262,6 +296,7 @@ impl DocumentSecurityAuditor {
                         });
                         masked_emails += 1;
                         idx += matched_len;
+                        plain_start = idx;
                         utf16_pos += utf16_len;
                         continue;
                     }
@@ -270,48 +305,69 @@ impl DocumentSecurityAuditor {
                     }
                 }
             }
-            if let Some((matched_len, replacement)) = Self::match_resident_id_at(bytes, idx) {
-                scrubbed_text.push_str(replacement);
-                spans.push(PiiReplacementSpan {
-                    start_utf16: utf16_pos,
-                    end_utf16: utf16_pos + matched_len,
-                    replacement: replacement.to_string(),
-                });
-                masked_resident_ids += 1;
-                idx += matched_len;
-                utf16_pos += matched_len;
-                continue;
+            if (flags & 0x01) != 0 {
+                if let Some((matched_len, replacement)) = Self::match_resident_id_at(bytes, idx) {
+                    if plain_start < idx {
+                        scrubbed_text.push_str(&text[plain_start..idx]);
+                    }
+                    scrubbed_text.push_str(replacement);
+                    spans.push(PiiReplacementSpan {
+                        start_utf16: utf16_pos,
+                        end_utf16: utf16_pos + matched_len,
+                        replacement: replacement.to_string(),
+                    });
+                    masked_resident_ids += 1;
+                    idx += matched_len;
+                    plain_start = idx;
+                    utf16_pos += matched_len;
+                    continue;
+                }
+                if let Some((matched_len, replacement)) = Self::match_phone_at(bytes, idx) {
+                    if plain_start < idx {
+                        scrubbed_text.push_str(&text[plain_start..idx]);
+                    }
+                    scrubbed_text.push_str(replacement);
+                    spans.push(PiiReplacementSpan {
+                        start_utf16: utf16_pos,
+                        end_utf16: utf16_pos + matched_len,
+                        replacement: replacement.to_string(),
+                    });
+                    masked_phone_numbers += 1;
+                    idx += matched_len;
+                    plain_start = idx;
+                    utf16_pos += matched_len;
+                    continue;
+                }
+                if let Some(matched_len) = crate::pii_identifiers::match_identifier_at(bytes, idx) {
+                    let replacement =
+                        crate::pii_identifiers::mask_identifier(&text[idx..idx + matched_len]);
+                    if plain_start < idx {
+                        scrubbed_text.push_str(&text[plain_start..idx]);
+                    }
+                    scrubbed_text.push_str(&replacement);
+                    spans.push(PiiReplacementSpan {
+                        start_utf16: utf16_pos,
+                        end_utf16: utf16_pos + matched_len,
+                        replacement,
+                    });
+                    masked_identifier_numbers += 1;
+                    idx += matched_len;
+                    plain_start = idx;
+                    utf16_pos += matched_len;
+                    continue;
+                }
             }
-            if let Some((matched_len, replacement)) = Self::match_phone_at(bytes, idx) {
-                scrubbed_text.push_str(replacement);
-                spans.push(PiiReplacementSpan {
-                    start_utf16: utf16_pos,
-                    end_utf16: utf16_pos + matched_len,
-                    replacement: replacement.to_string(),
-                });
-                masked_phone_numbers += 1;
-                idx += matched_len;
-                utf16_pos += matched_len;
-                continue;
+            if b < 0x80 {
+                idx += 1;
+                utf16_pos += 1;
+            } else {
+                let ch = text[idx..].chars().next().unwrap();
+                idx += ch.len_utf8();
+                utf16_pos += ch.len_utf16();
             }
-            if let Some(matched_len) = crate::pii_identifiers::match_identifier_at(bytes, idx) {
-                let replacement =
-                    crate::pii_identifiers::mask_identifier(&text[idx..idx + matched_len]);
-                scrubbed_text.push_str(&replacement);
-                spans.push(PiiReplacementSpan {
-                    start_utf16: utf16_pos,
-                    end_utf16: utf16_pos + matched_len,
-                    replacement,
-                });
-                masked_identifier_numbers += 1;
-                idx += matched_len;
-                utf16_pos += matched_len;
-                continue;
-            }
-            let ch = text[idx..].chars().next().unwrap();
-            scrubbed_text.push(ch);
-            idx += ch.len_utf8();
-            utf16_pos += ch.len_utf16();
+        }
+        if plain_start < text.len() {
+            scrubbed_text.push_str(&text[plain_start..]);
         }
 
         let stripped_metadata_fields = metadata_entries

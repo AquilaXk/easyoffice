@@ -739,25 +739,86 @@ impl EasyOfficeIpcRouter {
     }
 
     pub fn escape_json_str(s: &str) -> String {
+        use std::fmt::Write;
+        let bytes = s.as_bytes();
         let mut out = String::with_capacity(s.len());
-        for ch in s.chars() {
-            match ch {
-                '\\' => out.push_str("\\\\"),
-                '"' => out.push_str("\\\""),
-                '\n' => out.push_str("\\n"),
-                '\r' => out.push_str("\\r"),
-                '\t' => out.push_str("\\t"),
-                c if (c as u32) < 0x20 => {
-                    out.push_str(&format!("\\u{:04x}", c as u32));
+        let mut last = 0;
+        for (i, &b) in bytes.iter().enumerate() {
+            let escaped = match b {
+                b'\\' => "\\\\",
+                b'"' => "\\\"",
+                b'\n' => "\\n",
+                b'\r' => "\\r",
+                b'\t' => "\\t",
+                0x00..=0x1f => {
+                    if last < i {
+                        out.push_str(&s[last..i]);
+                    }
+                    let _ = write!(out, "\\u{:04x}", b);
+                    last = i + 1;
+                    continue;
                 }
-                c => out.push(c),
+                _ => continue,
+            };
+            if last < i {
+                out.push_str(&s[last..i]);
             }
+            out.push_str(escaped);
+            last = i + 1;
+        }
+        if last < s.len() {
+            out.push_str(&s[last..]);
         }
         out
     }
 
     pub(crate) fn decode_hex(hex: &str) -> Result<Vec<u8>, EasyOfficeError> {
-        let cleaned: Vec<u8> = hex.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
+        const HEX_LUT: [u8; 256] = {
+            let mut lut = [0xFFu8; 256];
+            let mut i = b'0';
+            while i <= b'9' {
+                lut[i as usize] = i - b'0';
+                i += 1;
+            }
+            let mut i = b'a';
+            while i <= b'f' {
+                lut[i as usize] = i - b'a' + 10;
+                i += 1;
+            }
+            let mut i = b'A';
+            while i <= b'F' {
+                lut[i as usize] = i - b'A' + 10;
+                i += 1;
+            }
+            lut
+        };
+
+        let bytes = hex.as_bytes();
+        if !bytes.iter().any(|b| b.is_ascii_whitespace()) {
+            if bytes.len() % 2 != 0 {
+                return Err(EasyOfficeError::InvalidArgument(
+                    "16진수 문자열 길이가 짝수가 아닙니다.".to_string(),
+                ));
+            }
+            let mut out = Vec::with_capacity(bytes.len() / 2);
+            for chunk in bytes.chunks_exact(2) {
+                let hi = HEX_LUT[chunk[0] as usize];
+                let lo = HEX_LUT[chunk[1] as usize];
+                if (hi | lo) == 0xFF {
+                    return Err(EasyOfficeError::InvalidArgument(
+                        "유효하지 않은 16진수 문자입니다.".to_string(),
+                    ));
+                }
+                out.push((hi << 4) | lo);
+            }
+            return Ok(out);
+        }
+
+        let cleaned: Vec<u8> = bytes
+            .iter()
+            .copied()
+            .filter(|b| !b.is_ascii_whitespace())
+            .collect();
         if cleaned.len() % 2 != 0 {
             return Err(EasyOfficeError::InvalidArgument(
                 "16진수 문자열 길이가 짝수가 아닙니다.".to_string(),
@@ -765,22 +826,16 @@ impl EasyOfficeIpcRouter {
         }
         let mut out = Vec::with_capacity(cleaned.len() / 2);
         for chunk in cleaned.chunks_exact(2) {
-            let hi = Self::hex_val(chunk[0])?;
-            let lo = Self::hex_val(chunk[1])?;
+            let hi = HEX_LUT[chunk[0] as usize];
+            let lo = HEX_LUT[chunk[1] as usize];
+            if (hi | lo) == 0xFF {
+                return Err(EasyOfficeError::InvalidArgument(
+                    "유효하지 않은 16진수 문자입니다.".to_string(),
+                ));
+            }
             out.push((hi << 4) | lo);
         }
         Ok(out)
-    }
-
-    fn hex_val(byte: u8) -> Result<u8, EasyOfficeError> {
-        match byte {
-            b'0'..=b'9' => Ok(byte - b'0'),
-            b'a'..=b'f' => Ok(byte - b'a' + 10),
-            b'A'..=b'F' => Ok(byte - b'A' + 10),
-            _ => Err(EasyOfficeError::InvalidArgument(
-                "유효하지 않은 16진수 문자입니다.".to_string(),
-            )),
-        }
     }
 
     pub fn encode_base64(bytes: &[u8]) -> String {

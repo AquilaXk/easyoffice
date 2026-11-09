@@ -21,7 +21,9 @@ use easyoffice_formats::{
     UniversalFormatConverter, XlsxCachedValue, XlsxFormulaCache, MAX_COLUMN_PX, MAX_IMAGE_BYTES,
     MAX_SIZE_PT, MIN_COLUMN_PX, MIN_SIZE_PT,
 };
-use easyoffice_sheet::{EvaluatedCellValue, PackedCellCoordinate, WorkbookEngine};
+use easyoffice_sheet::{
+    EvaluatedCellValue, PackedCellCoordinate, WorkbookEngine, WorkbookEvalTarget,
+};
 
 use crate::convert_ipc::compute_xlsx_formula_cache;
 
@@ -558,10 +560,10 @@ fn cached_value(v: &EvaluatedCellValue) -> Option<XlsxCachedValue> {
 fn workbook_engine(sheets: &[OdsUnpacked]) -> WorkbookEngine {
     let mut wb = WorkbookEngine::new();
     for (name, cells) in sheets {
-        wb.add_sheet(name.clone());
+        let sheet = wb.add_sheet(name.clone());
         for (row, col, raw) in cells {
             if let Ok(coord) = PackedCellCoordinate::new(*row, *col) {
-                let _ = wb.set_cell(name, &coord.to_a1(), raw.clone());
+                sheet.set_cell_coord(coord, raw.clone());
             }
         }
     }
@@ -573,7 +575,27 @@ fn workbook_engine(sheets: &[OdsUnpacked]) -> WorkbookEngine {
 /// returns how many formulas were replaced.
 fn computed_sheets(sheets: &[OdsUnpacked]) -> (Vec<OdsUnpacked>, usize) {
     let wb = workbook_engine(sheets);
-    let mut formulas = 0usize;
+    let mut a1_pairs: Vec<(&str, String)> = Vec::new();
+    for (name, cells) in sheets {
+        for (row, col, raw) in cells {
+            if raw.starts_with('=') {
+                if let Ok(coord) = PackedCellCoordinate::new(*row, *col) {
+                    a1_pairs.push((name.as_str(), coord.to_a1()));
+                }
+            }
+        }
+    }
+    let formulas = a1_pairs.len();
+    let targets: Vec<WorkbookEvalTarget<'_>> = a1_pairs
+        .iter()
+        .map(|(sheet, a1)| WorkbookEvalTarget {
+            sheet,
+            expr: a1.as_str(),
+            anchor: None,
+        })
+        .collect();
+    let mut eval_iter = wb.evaluate_targets(&targets).values.into_iter();
+
     let mut computed = Vec::with_capacity(sheets.len());
     for (name, cells) in sheets {
         let mut values = Vec::with_capacity(cells.len());
@@ -582,11 +604,13 @@ fn computed_sheets(sheets: &[OdsUnpacked]) -> (Vec<OdsUnpacked>, usize) {
                 values.push((*row, *col, raw.clone()));
                 continue;
             }
-            let Ok(coord) = PackedCellCoordinate::new(*row, *col) else {
+            if PackedCellCoordinate::new(*row, *col).is_err() {
                 continue;
-            };
-            formulas += 1;
-            let value = wb.evaluate_cell(name, &coord.to_a1()).to_display_string();
+            }
+            let value = eval_iter
+                .next()
+                .unwrap_or(EvaluatedCellValue::Empty)
+                .to_display_string();
             values.push((*row, *col, value));
         }
         computed.push((name.clone(), values));
@@ -697,14 +721,33 @@ fn evaluate_sheet(
     with_grids: bool,
     grid_cells: &mut usize,
 ) -> Result<(XlsxFormulaCache, BTreeMap<u32, Vec<String>>), EasyOfficeError> {
+    let a1_addrs: Vec<String> = cells
+        .iter()
+        .filter(|(_, _, raw)| raw.starts_with('='))
+        .filter_map(|(r, c, _)| {
+            PackedCellCoordinate::new(*r, *c)
+                .ok()
+                .map(|coord| coord.to_a1())
+        })
+        .collect();
+    let targets: Vec<WorkbookEvalTarget<'_>> = a1_addrs
+        .iter()
+        .map(|a1| WorkbookEvalTarget {
+            sheet: name,
+            expr: a1.as_str(),
+            anchor: None,
+        })
+        .collect();
+    let mut eval_iter = wb.evaluate_targets(&targets).values.into_iter();
+
     let mut cache = XlsxFormulaCache::new();
     let mut rows: BTreeMap<u32, Vec<String>> = BTreeMap::new();
     for (row, col, raw) in cells {
         let display = if raw.starts_with('=') {
-            let Ok(coord) = PackedCellCoordinate::new(*row, *col) else {
+            if PackedCellCoordinate::new(*row, *col).is_err() {
                 continue;
             };
-            let value = wb.evaluate_cell(name, &coord.to_a1());
+            let value = eval_iter.next().unwrap_or(EvaluatedCellValue::Empty);
             if let Some(c) = cached_value(&value) {
                 cache.insert((*row, *col), c);
             }

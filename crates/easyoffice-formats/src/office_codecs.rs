@@ -147,38 +147,49 @@ fn build_shared_strings_xml(shared_strings: &[&str], total_str_count: usize) -> 
 /// Appends the XML of one cell (`raw` is the stored text: formula, number, string or blank).
 fn push_cell_xml(
     sheet_xml: &mut String,
-    a1: &str,
-    s: &str,
+    col_ref: &str,
+    row_num: u32,
+    xf: usize,
     raw: &str,
     cached: Option<&XlsxCachedValue>,
     sst_map: &SharedStringMap<'_>,
 ) {
+    use std::fmt::Write;
+    let _ = write!(sheet_xml, "<c r=\"{col_ref}{row_num}\"");
+    if xf > 0 {
+        let _ = write!(sheet_xml, " s=\"{xf}\"");
+    }
     if raw.is_empty() {
-        sheet_xml.push_str(&format!("<c r=\"{a1}\"{s}/>"));
+        sheet_xml.push_str("/>");
     } else if let Some(formula) = raw.strip_prefix('=') {
         let f = XmlSanitizer::escape(formula);
         match cached {
             Some(XlsxCachedValue::Number(n)) if n.is_finite() => {
-                sheet_xml.push_str(&format!("<c r=\"{a1}\"{s}><f>{f}</f><v>{n}</v></c>"));
+                let _ = write!(sheet_xml, "><f>{f}</f><v>{n}</v></c>");
             }
-            Some(XlsxCachedValue::Text(text)) => sheet_xml.push_str(&format!(
-                "<c r=\"{a1}\"{s} t=\"str\"><f>{f}</f><v>{}</v></c>",
-                XmlSanitizer::escape(text)
-            )),
-            Some(XlsxCachedValue::Boolean(b)) => sheet_xml.push_str(&format!(
-                "<c r=\"{a1}\"{s} t=\"b\"><f>{f}</f><v>{}</v></c>",
-                u8::from(*b)
-            )),
-            _ => sheet_xml.push_str(&format!("<c r=\"{a1}\"{s}><f>{f}</f></c>")),
+            Some(XlsxCachedValue::Text(text)) => {
+                let _ = write!(
+                    sheet_xml,
+                    " t=\"str\"><f>{f}</f><v>{}</v></c>",
+                    XmlSanitizer::escape(text)
+                );
+            }
+            Some(XlsxCachedValue::Boolean(b)) => {
+                let _ = write!(sheet_xml, " t=\"b\"><f>{f}</f><v>{}</v></c>", u8::from(*b));
+            }
+            _ => {
+                let _ = write!(sheet_xml, "><f>{f}</f></c>");
+            }
         }
     } else if crate::LegacyOle2Codec::parse_finite_f64(raw).is_some() {
-        sheet_xml.push_str(&format!(
-            "<c r=\"{a1}\"{s} t=\"n\"><v>{}</v></c>",
+        let _ = write!(
+            sheet_xml,
+            " t=\"n\"><v>{}</v></c>",
             XmlSanitizer::escape(raw)
-        ));
+        );
     } else {
         let idx = sst_map.get(raw).copied().unwrap_or(0);
-        sheet_xml.push_str(&format!("<c r=\"{a1}\"{s} t=\"s\"><v>{idx}</v></c>"));
+        let _ = write!(sheet_xml, " t=\"s\"><v>{idx}</v></c>");
     }
 }
 
@@ -212,31 +223,29 @@ fn build_sheet_xml(
     style_table: &XlsxStyleTable,
     sst_map: &SharedStringMap<'_>,
 ) -> String {
+    use std::fmt::Write;
     let blank = String::new();
     let rows_map = group_cells_by_row(cells, styling, &blank);
-    let mut sheet_xml = String::from(
+    let mut sheet_xml = String::with_capacity(cells.len().saturating_mul(64) + 256);
+    sheet_xml.push_str(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?><worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">",
     );
     if let Some(st) = styling {
         sheet_xml.push_str(&cols_xml(&st.columns));
     }
     sheet_xml.push_str("<sheetData>");
+    let mut col_buf = [0u8; 4];
     for (row, mut row_cells) in rows_map {
         row_cells.sort_by_key(|(col, _)| *col);
         let row_num = row.saturating_add(1);
-        sheet_xml.push_str(&format!("<row r=\"{row_num}\">"));
+        let _ = write!(sheet_xml, "<row r=\"{row_num}\">");
         for (col, raw) in row_cells {
-            let a1 = format!("{}{}", format_col_letters(col), row_num);
+            let col_ref = write_col_letters(&mut col_buf, col as usize);
             let xf = styling
                 .and_then(|st| st.cells.get(&(row, col)))
                 .map_or(0, |style| style_table.xf_index(style));
-            let s = if xf > 0 {
-                format!(" s=\"{xf}\"")
-            } else {
-                String::new()
-            };
             let cached = cache.and_then(|c| c.get(&(row, col)));
-            push_cell_xml(&mut sheet_xml, &a1, &s, raw, cached, sst_map);
+            push_cell_xml(&mut sheet_xml, col_ref, row_num, xf, raw, cached, sst_map);
         }
         sheet_xml.push_str("</row>");
     }
@@ -334,7 +343,7 @@ impl OoxmlCodec {
             .filter(|s| !s.is_empty());
 
         let title = extract_attr(xml, "<w:document", "title")
-            .map(|s| XmlSanitizer::unescape(&s))
+            .map(XmlSanitizer::unescape)
             .filter(|s| !s.is_empty())
             .or(core_title)
             .unwrap_or_else(|| "문서".to_string());
@@ -515,6 +524,14 @@ impl OoxmlCodec {
         Ok(Self::unpack_xlsx_inner(bytes, true)?.1)
     }
 
+    /// Unpacks all XLSX worksheets together with their cell and column styling in a single ZIP pass.
+    #[allow(clippy::type_complexity)]
+    pub fn unpack_xlsx_with_styling(
+        bytes: &[u8],
+    ) -> Result<(Vec<OdsUnpacked>, Vec<(String, SheetStyling)>), EasyOfficeError> {
+        Self::unpack_xlsx_inner(bytes, true)
+    }
+
     #[allow(clippy::type_complexity)]
     fn unpack_xlsx_inner(
         bytes: &[u8],
@@ -552,11 +569,11 @@ impl OoxmlCodec {
                     let normalized = if let Some(stripped) = target.strip_prefix('/') {
                         stripped.to_string()
                     } else if target.starts_with("xl/") {
-                        target
+                        target.to_string()
                     } else {
                         format!("xl/{target}")
                     };
-                    rel_targets.insert(id, normalized);
+                    rel_targets.insert(id.to_string(), normalized);
                 }
             }
         }
@@ -586,11 +603,11 @@ impl OoxmlCodec {
         let mut sheet_specs: Vec<(String, String)> = Vec::new();
         for (idx, (s_attrs, _)) in sheet_tags.into_iter().enumerate() {
             let name = extract_attr_from_fragment(s_attrs, "name")
-                .map(|s| XmlSanitizer::unescape(&s))
+                .map(XmlSanitizer::unescape)
                 .unwrap_or_else(|| format!("Sheet{}", idx + 1));
             let target_path = extract_attr_from_fragment(s_attrs, "r:id")
                 .or_else(|| extract_attr_from_fragment(s_attrs, "id"))
-                .and_then(|rid| rel_targets.get(&rid).cloned())
+                .and_then(|rid| rel_targets.get(rid).cloned())
                 .unwrap_or_else(|| format!("xl/worksheets/sheet{}.xml", idx + 1));
             sheet_specs.push((name, target_path));
         }
@@ -660,7 +677,7 @@ impl OoxmlCodec {
                 }
                 (r, c)
             } else if let Some(a1) = r_attr {
-                parse_a1_ZeroBased(&a1).ok_or_else(|| {
+                parse_a1_zero_based(a1).ok_or_else(|| {
                     EasyOfficeError::ResourceBudgetExceeded(
                         "XLSX A1 셀 참조가 ECMA-376 허용 범위를 초과했거나 잘못되었습니다."
                             .to_string(),
@@ -711,7 +728,7 @@ impl OoxmlCodec {
         shared_masters: &mut std::collections::HashMap<u32, (u32, u32, String)>,
     ) -> Option<String> {
         let &(f_attrs, f_body) = extract_tags_or_self_closing_with_attrs(inner, "f").first()?;
-        let is_shared = extract_attr_from_fragment(f_attrs, "t").as_deref() == Some("shared");
+        let is_shared = extract_attr_from_fragment(f_attrs, "t") == Some("shared");
         let si = extract_attr_from_fragment(f_attrs, "si").and_then(|s| s.parse::<u32>().ok());
         if !f_body.is_empty() {
             let unescaped = XmlSanitizer::unescape(f_body);

@@ -137,12 +137,10 @@ fn parse_attrs(raw: &str) -> Result<Vec<(String, String)>, EasyOfficeError> {
         let quote = bytes[i];
         i += 1;
         let value_start = i;
-        while i < bytes.len() && bytes[i] != quote {
-            i += 1;
-        }
-        if i >= bytes.len() {
+        let Some(val_end) = crate::XmlSanitizer::find_byte_swar(bytes, value_start, quote) else {
             return Err(corrupt("XML 속성 값이 닫히지 않았습니다."));
-        }
+        };
+        i = val_end;
         attrs.push((
             name.to_string(),
             XmlSanitizer::unescape(&raw[value_start..i]),
@@ -155,7 +153,7 @@ fn parse_attrs(raw: &str) -> Result<Vec<(String, String)>, EasyOfficeError> {
 /// Tokenizes `xml` into start/end/text events; empty elements yield a start and an end.
 pub(crate) fn tokenize(xml: &str) -> Result<Vec<XmlEvent>, EasyOfficeError> {
     let bytes = xml.as_bytes();
-    let mut events = Vec::new();
+    let mut events = Vec::with_capacity((bytes.len() / 24).min(MAX_XML_EVENTS));
     let mut i = 0usize;
     while i < bytes.len() {
         if events.len() > MAX_XML_EVENTS {
@@ -164,7 +162,7 @@ pub(crate) fn tokenize(xml: &str) -> Result<Vec<XmlEvent>, EasyOfficeError> {
             ));
         }
         if bytes[i] != b'<' {
-            let end = xml[i..].find('<').map_or(bytes.len(), |p| i + p);
+            let end = crate::XmlSanitizer::find_byte_swar(bytes, i, b'<').unwrap_or(bytes.len());
             events.push(XmlEvent::Text(XmlSanitizer::unescape(&xml[i..end])));
             i = end;
             continue;

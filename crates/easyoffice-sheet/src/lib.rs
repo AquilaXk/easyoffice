@@ -215,6 +215,11 @@ impl SheetEngine {
         raw_value: impl Into<String>,
     ) -> Result<(), EasyOfficeError> {
         let coord = PackedCellCoordinate::parse_a1(a1)?;
+        self.set_cell_coord(coord, raw_value);
+        Ok(())
+    }
+
+    pub fn set_cell_coord(&mut self, coord: PackedCellCoordinate, raw_value: impl Into<String>) {
         self.invalidate_caches();
         let val = raw_value.into();
         if val.is_empty() {
@@ -231,7 +236,6 @@ impl SheetEngine {
             }
             self.cells.insert(coord, val);
         }
-        Ok(())
     }
 
     #[inline]

@@ -126,25 +126,40 @@ pub fn parse_value_text(s: &str) -> Option<f64> {
     if let Some(serial) = parse_iso_date_serial(trimmed) {
         return Some(serial);
     }
-    let mut work = trimmed.to_string();
+    let mut work = trimmed;
     let mut is_neg_paren = false;
     if work.starts_with('(') && work.ends_with(')') && work.len() >= 3 {
         is_neg_paren = true;
-        work = work[1..work.len() - 1].trim().to_string();
+        work = work[1..work.len() - 1].trim();
     }
     let mut is_percent = false;
     if let Some(stripped) = work.strip_suffix('%') {
         is_percent = true;
-        work = stripped.trim().to_string();
+        work = stripped.trim();
     }
     for prefix in ["$", "₩", "€", "¥", "£"] {
         if let Some(stripped) = work.strip_prefix(prefix) {
-            work = stripped.trim().to_string();
+            work = stripped.trim();
             break;
         }
     }
-    let degrouped = work.replace(',', "");
-    let mut val = parse_strict_number(&degrouped)?;
+    let mut val = if !work.as_bytes().contains(&b',') {
+        parse_strict_number(work)?
+    } else if work.len() <= 64 {
+        let mut buf = [0u8; 64];
+        let mut len = 0usize;
+        for &b in work.as_bytes() {
+            if b != b',' {
+                buf[len] = b;
+                len += 1;
+            }
+        }
+        let degrouped = std::str::from_utf8(&buf[..len]).ok()?;
+        parse_strict_number(degrouped)?
+    } else {
+        let degrouped = work.replace(',', "");
+        parse_strict_number(&degrouped)?
+    };
     if is_neg_paren {
         val = -val.abs();
     }

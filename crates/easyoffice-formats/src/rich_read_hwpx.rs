@@ -8,7 +8,6 @@ use crate::hwpx_parts::{
     DEFAULT_CHAR_HEIGHT, DEFAULT_FONT_FACE, DEFAULT_LINE_PERCENT, HWPUNIT_PER_TWIP,
     LIST_LEFT_MARGIN,
 };
-use crate::office_codecs::validate_zip_xml_entries;
 use crate::rich_document::normalize_hex_color;
 use crate::rich_image::{safe_package_path, ImageBudget};
 use crate::rich_table::{table_from_placed, PlacedCell};
@@ -659,20 +658,10 @@ fn push_text(runs: &mut [RunState], text: &str) {
 
 /// Decodes every `Contents/section*.xml` of a HWPX/HWTX package in order.
 pub(crate) fn read_hwpx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), EasyOfficeError> {
-    // Reuses the legacy reader for package validation, title, and issuing agency.
-    let meta = HwpxCodec::unpack(bytes)?;
     let entries = ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default())?;
-    validate_zip_xml_entries(&entries)?;
-    let header = match entries.iter().find(|e| e.path == "Contents/header.xml") {
-        Some(e) => {
-            let xml = std::str::from_utf8(&e.data).map_err(|_| {
-                EasyOfficeError::InvalidUtf8("Contents/header.xml UTF-8 오류".to_string())
-            })?;
-            XmlSanitizer::validate_safe_xml(xml)?;
-            read_header(xml)?
-        }
-        None => Header::default(),
-    };
+    let (header_xml, title, _is_template, official_agency, _approval_lines) =
+        HwpxCodec::extract_header_and_metadata(&entries)?;
+    let header = read_header(header_xml)?;
     let mut sections: Vec<(usize, &crate::ZipArchiveEntry)> = entries
         .iter()
         .filter_map(|e| {
@@ -685,6 +674,11 @@ pub(crate) fn read_hwpx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Eas
         })
         .collect();
     sections.sort_by_key(|(idx, _)| *idx);
+    if sections.is_empty() {
+        return Err(EasyOfficeError::CorruptedContainer(
+            "HWPX 필수 엔트리 'Contents/section0.xml'이 누락되었습니다.".to_string(),
+        ));
+    }
     let mut blocks = Vec::new();
     let mut warnings = Vec::new();
     let media = HwpxMedia::load(&entries)?;
@@ -709,14 +703,14 @@ pub(crate) fn read_hwpx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Eas
             walker.dropped_merges
         ));
     }
-    if meta.official_agency.is_some() {
+    if official_agency.is_some() {
         warnings.push("기관명 등 공문서 메타데이터는 저장 시 다시 기록되지 않습니다.".to_string());
     }
     Ok((
         RichDocument {
-            title: meta.title,
+            title,
             blocks,
-            official_agency: meta.official_agency,
+            official_agency,
         },
         warnings,
     ))

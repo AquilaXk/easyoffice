@@ -150,7 +150,7 @@ fn is_title_placeholder(sp_body: &str) -> bool {
         .iter()
         .any(|(attrs, _)| {
             matches!(
-                extract_attr_from_fragment(attrs, "type").as_deref(),
+                extract_attr_from_fragment(attrs, "type"),
                 Some("title") | Some("ctrTitle")
             )
         })
@@ -200,7 +200,7 @@ fn read_notes_slide(
         if !is_notes {
             continue;
         }
-        let notes_path = resolve_rel_target(dir, &target);
+        let notes_path = resolve_rel_target(dir, target);
         let Some(notes_entry) = entries.iter().find(|e| e.path == notes_path) else {
             continue;
         };
@@ -208,7 +208,7 @@ fn read_notes_slide(
         for sp in extract_tag_bodies(notes_xml, "p:sp") {
             let body_ph = extract_balanced_elements(sp, "p:ph")
                 .iter()
-                .any(|(a, _)| extract_attr_from_fragment(a, "type").as_deref() == Some("body"));
+                .any(|(a, _)| extract_attr_from_fragment(a, "type") == Some("body"));
             if body_ph {
                 return Ok(Some(shape_paragraph_texts(sp).join("\n")));
             }
@@ -438,7 +438,7 @@ impl OoxmlCodec {
             .or_else(|| {
                 extract_attr(pres_xml, "<p:presentation", "title")
                     .or_else(|| extract_attr(pres_xml, "<p:presentation", "name"))
-                    .map(|s| XmlSanitizer::unescape(&s))
+                    .map(XmlSanitizer::unescape)
             })
             .unwrap_or_else(|| "발표자료".to_string())
     }
@@ -465,11 +465,11 @@ impl OoxmlCodec {
             let normalized = if let Some(stripped) = target.strip_prefix('/') {
                 stripped.to_string()
             } else if target.starts_with("ppt/") {
-                target
+                target.to_string()
             } else {
                 format!("ppt/{target}")
             };
-            rel_targets.insert(id, normalized);
+            rel_targets.insert(id.to_string(), normalized);
         }
         Ok(rel_targets)
     }
@@ -524,7 +524,7 @@ impl OoxmlCodec {
                 .collect()
         };
         let legacy_title = match extract_attr(s_xml, "<p:sld", "title") {
-            Some(t) => XmlSanitizer::unescape(&t),
+            Some(t) => XmlSanitizer::unescape(t),
             None if bullets.is_empty() => String::new(),
             None => bullets.remove(0),
         };
@@ -549,15 +549,15 @@ impl OoxmlCodec {
             e.path == "[Content_Types].xml"
                 && std::str::from_utf8(&e.data).is_ok_and(|ct| ct.contains(SLIDESHOW_MAIN_CT))
         });
-        let is_slideshow = slideshow_ct
-            || extract_attr(pres_xml, "<p:presentation", "slideshow").is_some_and(|s| s == "1");
+        let is_slideshow =
+            slideshow_ct || extract_attr(pres_xml, "<p:presentation", "slideshow") == Some("1");
 
         let rel_targets = Self::pptx_relationship_targets(&entries)?;
         let mut ordered_slide_entries: Vec<&ZipArchiveEntry> = Vec::new();
         for (sld_id_attrs, _) in extract_balanced_elements(pres_xml, "p:sldId") {
             let rid = extract_attr_from_fragment(sld_id_attrs, "r:id")
                 .or_else(|| extract_attr_from_fragment(sld_id_attrs, "id"));
-            let target = rid.and_then(|rid| rel_targets.get(&rid));
+            let target = rid.and_then(|rid| rel_targets.get(rid));
             if let Some(entry) = target.and_then(|path| entries.iter().find(|e| &e.path == path)) {
                 ordered_slide_entries.push(entry);
             }
@@ -573,7 +573,7 @@ impl OoxmlCodec {
             let notes = match read_notes_slide(&entries, &s_entry.path)? {
                 Some(n) => n,
                 None => extract_attr(s_xml, "<p:sld", "notes")
-                    .map(|s| XmlSanitizer::unescape(&s))
+                    .map(XmlSanitizer::unescape)
                     .unwrap_or_default(),
             };
             slides.push((s_title, bullets, notes));

@@ -795,7 +795,7 @@ mod tests {
             "<table:table table:name=\"A > B\"><table:table-row><table:table-cell><text:p>셀값</text:p></table:table-cell></table:table-row></table:table>";
         assert_eq!(
             crate::rtf_xml_helpers::extract_attr(xml_with_gt_attr, "table:table", "table:name"),
-            Some("A > B".to_string())
+            Some("A > B")
         );
         let blocks = crate::rtf_xml_helpers::extract_tag_bodies(xml_with_gt_attr, "table:table");
         assert_eq!(blocks.len(), 1);

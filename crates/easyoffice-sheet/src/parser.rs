@@ -738,7 +738,7 @@ impl Parser {
         if matches!(self.peek(), Some(Token::Bang)) {
             return Err(FormulaError::Ref);
         }
-        match CellRange::parse(&format!("{start}:{end}")) {
+        match CellRange::parse_endpoints(start, &end) {
             Ok(range) => Ok(Expr::Range(range)),
             Err(_) => Ok(Expr::ErrorLiteral(FormulaError::Ref)),
         }
@@ -795,7 +795,7 @@ impl Parser {
             if !same_sheet {
                 return Ok(Expr::ErrorLiteral(FormulaError::Ref));
             }
-            return match CellRange::parse(&format!("{cell_ident}:{end_ident}")) {
+            return match CellRange::parse_endpoints(&cell_ident, &end_ident) {
                 Ok(range) => Ok(Expr::SheetRange { sheet: name, range }),
                 Err(_) => Ok(Expr::ErrorLiteral(FormulaError::Ref)),
             };

@@ -260,6 +260,27 @@ impl ZipArchiveCodec {
         Ok(paths)
     }
 
+    /// Returns the raw Central Directory byte slice when a valid EOCD record is present.
+    pub(crate) fn central_dir_slice(bytes: &[u8]) -> Option<&[u8]> {
+        let eocd_offset = Self::find_eocd_offset(bytes)?;
+        let cd_size = read_u32_le(bytes, eocd_offset + 12).ok()? as usize;
+        let cd_offset = read_u32_le(bytes, eocd_offset + 16).ok()? as usize;
+        let cd_end = cd_offset.checked_add(cd_size)?;
+        (cd_end <= eocd_offset).then_some(&bytes[cd_offset..cd_end])
+    }
+
+    /// Evaluates `pred` on entries selected by `path_filter`, decompressing only matching paths
+    /// and stopping as soon as `pred` returns `true`.
+    pub(crate) fn any_selected_entry(
+        bytes: &[u8],
+        policy: &ZipSecurityPolicy,
+        path_filter: impl FnMut(&str) -> bool,
+        mut pred: impl FnMut(&ZipArchiveEntry) -> bool,
+    ) -> bool {
+        Self::unpack_each_selected(bytes, policy, path_filter, |entry| pred(&entry))
+            .unwrap_or(false)
+    }
+
     /// [`Self::unpack`] that hands each verified entry to `visit` in archive order instead of
     /// collecting them.
     pub fn unpack_each(
@@ -267,6 +288,24 @@ impl ZipArchiveCodec {
         policy: &ZipSecurityPolicy,
         mut visit: impl FnMut(ZipArchiveEntry),
     ) -> Result<(), EasyOfficeError> {
+        Self::unpack_each_selected(
+            bytes,
+            policy,
+            |_| true,
+            |entry| {
+                visit(entry);
+                false
+            },
+        )
+        .map(|_| ())
+    }
+
+    fn unpack_each_selected(
+        bytes: &[u8],
+        policy: &ZipSecurityPolicy,
+        mut path_filter: impl FnMut(&str) -> bool,
+        mut visit: impl FnMut(ZipArchiveEntry) -> bool,
+    ) -> Result<bool, EasyOfficeError> {
         if bytes.is_empty() {
             return Err(EasyOfficeError::EmptyPayload);
         }
@@ -451,6 +490,10 @@ impl ZipArchiveCodec {
                 )));
             }
 
+            if !path_filter(&path) {
+                continue;
+            }
+
             let slot = policy.slot(&path);
             let (max_single, max_total) = policy.limits(slot);
             let compressed_slice = &bytes[data_start..data_end];
@@ -486,14 +529,16 @@ impl ZipArchiveCodec {
                 )));
             }
 
-            visit(ZipArchiveEntry {
+            if visit(ZipArchiveEntry {
                 path,
                 data: payload,
                 crc32: actual_crc,
-            });
+            }) {
+                return Ok(true);
+            }
         }
 
-        Ok(())
+        Ok(false)
     }
 
     fn find_eocd_offset(bytes: &[u8]) -> Option<usize> {

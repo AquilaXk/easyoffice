@@ -183,7 +183,7 @@ impl SectionWriter {
     }
 }
 
-fn opf_meta_values(hpf_xml: &str) -> Vec<(String, String)> {
+fn opf_meta_values(hpf_xml: &str) -> Vec<(&str, String)> {
     extract_tags_with_attrs(hpf_xml, "opf:meta")
         .into_iter()
         .filter_map(|(attrs, body)| {
@@ -416,9 +416,12 @@ impl HwpxCodec {
         ZipArchiveCodec::pack_compressed(&entries)
     }
 
-    pub fn unpack(bytes: &[u8]) -> Result<HwpxPayload, EasyOfficeError> {
-        let entries = ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default())?;
-        validate_zip_xml_entries(&entries)?;
+    /// Validates XML entries, extracts `Contents/header.xml`, and parses package metadata.
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn extract_header_and_metadata(
+        entries: &[crate::ZipArchiveEntry],
+    ) -> Result<(&str, String, bool, Option<String>, Vec<String>), EasyOfficeError> {
+        validate_zip_xml_entries(entries)?;
         let header_entry = entries
             .iter()
             .find(|e| e.path == "Contents/header.xml")
@@ -446,14 +449,14 @@ impl HwpxCodec {
         let meta = |key: &str| {
             metas
                 .iter()
-                .find(|(name, _)| name == key)
+                .find(|(name, _)| *name == key)
                 .map(|(_, value)| value.clone())
                 .filter(|s| !s.is_empty())
         };
         // Legacy EasyOffice output stored metadata as attributes on `hh:head`; still read it.
         let legacy = |attr: &str| {
             extract_attr(header_xml, "<hh:head", attr)
-                .map(|s| XmlSanitizer::unescape(&s))
+                .map(XmlSanitizer::unescape)
                 .filter(|s| !s.is_empty())
         };
 
@@ -467,6 +470,20 @@ impl HwpxCodec {
             .or_else(|| meta(META_APPROVAL))
             .map(|s| s.split('|').map(ToString::to_string).collect())
             .unwrap_or_default();
+
+        Ok((
+            header_xml,
+            title,
+            is_template,
+            official_agency,
+            approval_lines,
+        ))
+    }
+
+    pub fn unpack(bytes: &[u8]) -> Result<HwpxPayload, EasyOfficeError> {
+        let entries = ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default())?;
+        let (_header_xml, title, is_template, official_agency, approval_lines) =
+            Self::extract_header_and_metadata(&entries)?;
 
         let mut sec_entries: Vec<(usize, &crate::ZipArchiveEntry)> = entries
             .iter()

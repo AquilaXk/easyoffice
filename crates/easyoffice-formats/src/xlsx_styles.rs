@@ -147,7 +147,7 @@ pub(crate) fn cols_xml(columns: &BTreeMap<u32, u32>) -> String {
 }
 
 fn truthy(attrs: &str, name: &str, default: bool) -> bool {
-    match extract_attr_from_fragment(attrs, name).as_deref() {
+    match extract_attr_from_fragment(attrs, name) {
         None => default,
         Some("0" | "false") => false,
         Some(_) => true,
@@ -162,9 +162,7 @@ fn parse_font(body: &str) -> CellStyle {
     };
     let underline = extract_tags_or_self_closing_with_attrs(body, "u")
         .first()
-        .is_some_and(|(attrs, _)| {
-            extract_attr_from_fragment(attrs, "val").as_deref() != Some("none")
-        });
+        .is_some_and(|(attrs, _)| extract_attr_from_fragment(attrs, "val") != Some("none"));
     let size_pt = extract_tags_or_self_closing_with_attrs(body, "sz")
         .first()
         .and_then(|(attrs, _)| extract_attr_from_fragment(attrs, "val"))
@@ -227,7 +225,7 @@ pub(crate) fn parse_worksheet_styling(sheet_xml: &str, xf_styles: &[CellStyle]) 
                 continue;
             };
             let Some((row, col)) = extract_attr_from_fragment(attrs, "r")
-                .and_then(|a1| crate::rtf_xml_helpers::parse_a1_zero_based(&a1))
+                .and_then(crate::rtf_xml_helpers::parse_a1_zero_based)
             else {
                 continue;
             };

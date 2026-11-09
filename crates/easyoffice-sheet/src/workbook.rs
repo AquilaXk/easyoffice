@@ -156,6 +156,27 @@ impl WorkbookEngine {
             .and_then(|t| self.sheet(t.sheet))
             .map_or(0, SheetEngine::resolved_sheet_id);
         let mut ctx = EvalContext::with_workbook(self, primary_id);
+
+        if targets.len() > 1 {
+            let mut roots_by_sheet: Vec<Vec<PackedCellCoordinate>> =
+                vec![Vec::new(); self.sheets.len()];
+            for target in targets {
+                if let Some(idx) = self.find_sheet_index(target.sheet) {
+                    let expr = target.expr.trim();
+                    if crate::parser::strip_open_formula_prefix(expr).is_none() {
+                        if let Ok(coord) = PackedCellCoordinate::parse_a1(expr) {
+                            roots_by_sheet[idx].push(coord);
+                        }
+                    }
+                }
+            }
+            for (idx, roots) in roots_by_sheet.into_iter().enumerate() {
+                if !roots.is_empty() {
+                    self.sheets[idx].pre_evaluate_dag_iterative(&roots, &mut ctx);
+                }
+            }
+        }
+
         let mut values = Vec::with_capacity(targets.len());
         for target in targets {
             let Some(sheet) = self.sheet(target.sheet) else {
@@ -170,7 +191,9 @@ impl WorkbookEngine {
                 ctx.current_coord = None;
                 v
             } else if let Ok(coord) = PackedCellCoordinate::parse_a1(expr) {
-                sheet.pre_evaluate_dag_iterative(std::slice::from_ref(&coord), &mut ctx);
+                if !ctx.memo.contains_at(sheet.resolved_sheet_id(), coord) {
+                    sheet.pre_evaluate_dag_iterative(std::slice::from_ref(&coord), &mut ctx);
+                }
                 ctx.steps = 0;
                 sheet.eval_coord_ctx(coord, &mut ctx, 0)
             } else {

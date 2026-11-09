@@ -156,7 +156,21 @@ impl PackedCellCoordinate {
     }
 
     pub fn to_a1(self) -> String {
-        format!("{}{}", Self::format_col_label(self.col()), self.row() + 1)
+        use std::fmt::Write;
+        let mut idx = self.col() + 1;
+        let mut buf = [0u8; 8];
+        let mut pos = buf.len();
+        while idx > 0 && pos > 0 {
+            let rem = ((idx - 1) % 26) as u8;
+            pos -= 1;
+            buf[pos] = b'A' + rem;
+            idx = (idx - 1) / 26;
+        }
+        let col_str = std::str::from_utf8(&buf[pos..]).unwrap_or("");
+        let mut out = String::with_capacity(col_str.len() + 8);
+        out.push_str(col_str);
+        let _ = write!(out, "{}", self.row() + 1);
+        out
     }
 }
 
@@ -210,35 +224,37 @@ impl CellRange {
         Ok(Self { start, end })
     }
 
+    pub fn parse_endpoints(lhs: &str, rhs: &str) -> Result<Self, EasyOfficeError> {
+        if let (Ok(start), Ok(end)) = (
+            PackedCellCoordinate::parse_a1(lhs),
+            PackedCellCoordinate::parse_a1(rhs),
+        ) {
+            return Self::new(start, end);
+        }
+        if let (Ok(c1), Ok(c2)) = (
+            PackedCellCoordinate::parse_col_only(lhs),
+            PackedCellCoordinate::parse_col_only(rhs),
+        ) {
+            let start = PackedCellCoordinate::new(0, c1.min(c2))?;
+            let end = PackedCellCoordinate::new(PackedCellCoordinate::MAX_ROWS - 1, c1.max(c2))?;
+            return Self::new(start, end);
+        }
+        if let (Ok(r1), Ok(r2)) = (
+            PackedCellCoordinate::parse_row_only(lhs),
+            PackedCellCoordinate::parse_row_only(rhs),
+        ) {
+            let start = PackedCellCoordinate::new(r1.min(r2), 0)?;
+            let end = PackedCellCoordinate::new(r1.max(r2), PackedCellCoordinate::MAX_COLS - 1)?;
+            return Self::new(start, end);
+        }
+        Err(EasyOfficeError::InvalidArgument(format!(
+            "유효하지 않은 셀 범위: {lhs}:{rhs}"
+        )))
+    }
+
     pub fn parse(notation: &str) -> Result<Self, EasyOfficeError> {
         if let Some((lhs, rhs)) = notation.split_once(':') {
-            if let (Ok(start), Ok(end)) = (
-                PackedCellCoordinate::parse_a1(lhs),
-                PackedCellCoordinate::parse_a1(rhs),
-            ) {
-                return Self::new(start, end);
-            }
-            if let (Ok(c1), Ok(c2)) = (
-                PackedCellCoordinate::parse_col_only(lhs),
-                PackedCellCoordinate::parse_col_only(rhs),
-            ) {
-                let start = PackedCellCoordinate::new(0, c1.min(c2))?;
-                let end =
-                    PackedCellCoordinate::new(PackedCellCoordinate::MAX_ROWS - 1, c1.max(c2))?;
-                return Self::new(start, end);
-            }
-            if let (Ok(r1), Ok(r2)) = (
-                PackedCellCoordinate::parse_row_only(lhs),
-                PackedCellCoordinate::parse_row_only(rhs),
-            ) {
-                let start = PackedCellCoordinate::new(r1.min(r2), 0)?;
-                let end =
-                    PackedCellCoordinate::new(r1.max(r2), PackedCellCoordinate::MAX_COLS - 1)?;
-                return Self::new(start, end);
-            }
-            Err(EasyOfficeError::InvalidArgument(format!(
-                "유효하지 않은 셀 범위: {notation}"
-            )))
+            Self::parse_endpoints(lhs, rhs)
         } else {
             let single = PackedCellCoordinate::parse_a1(notation)?;
             Self::new(single, single)
@@ -389,6 +405,16 @@ impl ConditionalFormatRule {
                 if needle.is_empty() {
                     return false;
                 }
+                if let EvaluatedCellValue::Text(s) = value {
+                    if s.is_ascii() && needle.is_ascii() {
+                        let nb = needle.as_bytes();
+                        return s
+                            .as_bytes()
+                            .windows(nb.len())
+                            .any(|w| w.eq_ignore_ascii_case(nb));
+                    }
+                    return s.to_lowercase().contains(&needle.to_lowercase());
+                }
                 value
                     .to_display_string()
                     .to_lowercase()
@@ -398,18 +424,39 @@ impl ConditionalFormatRule {
                 if *value == EvaluatedCellValue::Empty {
                     return false;
                 }
-                let mut hits = 0usize;
-                for item in range_values {
-                    if item == value {
-                        hits += 1;
-                        if hits > 1 {
-                            return true;
-                        }
-                    }
-                }
-                false
+                range_values
+                    .iter()
+                    .filter(|&item| item == value)
+                    .take(2)
+                    .count()
+                    > 1
             }
         }
+    }
+
+    /// Evaluates the rule across `range_values` in $O(N)$ time (using a frequency map when
+    /// `DuplicateValues` is evaluated on ranges larger than 16 cells).
+    pub fn matches_batch(&self, range_values: &[EvaluatedCellValue]) -> Vec<bool> {
+        if matches!(self, Self::DuplicateValues) && range_values.len() > 16 {
+            let mut counts: std::collections::HashMap<String, usize> =
+                std::collections::HashMap::with_capacity(range_values.len());
+            for v in range_values {
+                if *v != EvaluatedCellValue::Empty {
+                    *counts.entry(v.to_display_string()).or_insert(0) += 1;
+                }
+            }
+            return range_values
+                .iter()
+                .map(|v| {
+                    *v != EvaluatedCellValue::Empty
+                        && counts.get(&v.to_display_string()).copied().unwrap_or(0) > 1
+                })
+                .collect();
+        }
+        range_values
+            .iter()
+            .map(|v| self.matches(v, range_values))
+            .collect()
     }
 }
 

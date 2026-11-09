@@ -244,7 +244,7 @@ impl OdfCodec {
         let (content_xml, meta_xml_opt) =
             Self::extract_content_and_meta_xml(bytes, Self::MIMETYPE_ODT)?;
         let title = extract_attr(&content_xml, "<office:document-content", "title")
-            .map(|s| XmlSanitizer::unescape(&s))
+            .map(XmlSanitizer::unescape)
             .filter(|s| !s.is_empty())
             .or_else(|| {
                 meta_xml_opt
@@ -520,7 +520,21 @@ impl OdfCodec {
 
     pub fn unpack_ods_multi(bytes: &[u8]) -> Result<OdsMultiUnpacked, EasyOfficeError> {
         let (content_xml, _) = Self::extract_content_and_meta_xml(bytes, Self::MIMETYPE_ODS)?;
-        let table_blocks = extract_balanced_elements(&content_xml, "table:table");
+        Self::parse_ods_multi_xml(&content_xml)
+    }
+
+    /// Unpacks all ODS tables together with their cell and column styling in a single ZIP pass.
+    pub fn unpack_ods_with_styling(
+        bytes: &[u8],
+    ) -> Result<(OdsMultiUnpacked, Vec<(String, SheetStyling)>), EasyOfficeError> {
+        let (content_xml, _) = Self::extract_content_and_meta_xml(bytes, Self::MIMETYPE_ODS)?;
+        let sheets = Self::parse_ods_multi_xml(&content_xml)?;
+        let styling = parse_ods_styling(&content_xml);
+        Ok((sheets, styling))
+    }
+
+    fn parse_ods_multi_xml(content_xml: &str) -> Result<OdsMultiUnpacked, EasyOfficeError> {
+        let table_blocks = extract_balanced_elements(content_xml, "table:table");
         if table_blocks.is_empty() {
             return Ok(vec![("Sheet1".to_string(), Vec::new())]);
         }
@@ -530,7 +544,7 @@ impl OdfCodec {
         for (idx, (tbl_attrs, tbl_inner)) in table_blocks.into_iter().enumerate() {
             let sheet_name = extract_attr_from_fragment(tbl_attrs, "table:name")
                 .or_else(|| extract_attr_from_fragment(tbl_attrs, "name"))
-                .map(|s| XmlSanitizer::unescape(&s))
+                .map(XmlSanitizer::unescape)
                 .unwrap_or_else(|| format!("Sheet{}", idx + 1));
             let cells = Self::parse_ods_sheet_cells(tbl_inner, &mut total_cells_across_sheets)?;
             all_sheets.push((sheet_name, cells));
@@ -639,7 +653,7 @@ impl OdfCodec {
         has_explicit_position: bool,
     ) -> Option<String> {
         if let Some(raw_f) = extract_attr_from_fragment(cell_attrs, "table:formula") {
-            return Some(Self::normalize_ods_formula(&XmlSanitizer::unescape(&raw_f)));
+            return Some(Self::normalize_ods_formula(&XmlSanitizer::unescape(raw_f)));
         }
         let text_p_bodies = extract_tag_bodies(cell_inner, "text:p");
         if !text_p_bodies.is_empty() {
@@ -653,7 +667,7 @@ impl OdfCodec {
         }
         extract_attr_from_fragment(cell_attrs, "office:value")
             .or_else(|| extract_attr_from_fragment(cell_attrs, "office:string-value"))
-            .map(|s| XmlSanitizer::unescape(&s))
+            .map(XmlSanitizer::unescape)
             .or_else(|| has_explicit_position.then(String::new))
     }
 
@@ -755,7 +769,7 @@ impl OdfCodec {
         let (content_xml, meta_xml_opt) =
             Self::extract_content_and_meta_xml(bytes, Self::MIMETYPE_ODP)?;
         let title = extract_attr(&content_xml, "<office:document-content", "title")
-            .map(|s| XmlSanitizer::unescape(&s))
+            .map(XmlSanitizer::unescape)
             .filter(|s| !s.is_empty())
             .or_else(|| {
                 meta_xml_opt
@@ -776,7 +790,7 @@ impl OdfCodec {
     /// Speaker notes of a slide: the `notes` attribute, else the notes pages' paragraph text.
     fn odp_slide_notes(attrs: &str, inner: &str) -> String {
         let notes = extract_attr_from_fragment(attrs, "notes")
-            .map(|s| XmlSanitizer::unescape(&s))
+            .map(XmlSanitizer::unescape)
             .unwrap_or_default();
         let notes_blocks = extract_balanced_elements(inner, "presentation:notes");
         if !notes.is_empty() || notes_blocks.is_empty() {
@@ -800,8 +814,7 @@ impl OdfCodec {
         extract_balanced_elements(without_page_num, "draw:frame")
             .into_iter()
             .filter(|(f_attrs, _)| {
-                extract_attr_from_fragment(f_attrs, "presentation:class").as_deref()
-                    == Some("title")
+                extract_attr_from_fragment(f_attrs, "presentation:class") == Some("title")
             })
             .find_map(|(_, f_inner)| {
                 let t_parts: Vec<String> =
@@ -821,7 +834,7 @@ impl OdfCodec {
         let frame_title = Self::odp_frame_title(&without_page_num);
         let attr_title = extract_attr_from_fragment(attrs, "draw:name")
             .or_else(|| extract_attr_from_fragment(attrs, "title"))
-            .map(|s| XmlSanitizer::unescape(&s))
+            .map(XmlSanitizer::unescape)
             .unwrap_or_default();
 
         let mut bullets: Vec<String> =
