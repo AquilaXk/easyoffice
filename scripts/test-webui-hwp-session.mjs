@@ -807,6 +807,8 @@ test("converter: the open HWP document is exported by the editor in the chosen s
   assert.equal(hwpx.fields.fileName, "제안서.hwpx");
   assert.equal(Buffer.from(hwpx.fields.sourceBase64, "base64")[0], 0x50);
   assert.equal(await ctx.session.getConverterSource("docx"), null);
+  assert.equal(hwp.size, Buffer.from(hwp.fields.sourceBase64, "base64").length, "the byte size travels with the source");
+  assert.equal(hwpx.size, Buffer.from(hwpx.fields.sourceBase64, "base64").length);
 });
 
 test("utils: only the HWP family is routed and the limit is 64 MiB", () => {

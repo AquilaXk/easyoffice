@@ -636,6 +636,7 @@
         const stem = (current?.name || "변환_문서").replace(/\.[A-Za-z0-9]+$/, "") || "변환_문서";
         return {
           baseName: stem,
+          size: bytes.length,
           fields: { fileName: stem + "." + srcFormat, sourceBase64: bytesToBase64(bytes, (s) => env.btoa(s)) },
         };
       } catch (err) {

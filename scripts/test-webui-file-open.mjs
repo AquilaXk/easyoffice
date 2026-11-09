@@ -479,6 +479,46 @@ test("converter rejects an oversized or corrupt source without converting", asyn
   assert.ok(converts().some((c) => c.sourceBase64));
 });
 
+test("converter source files share the backend's limit, HWP family included", async () => {
+  const { document, converts } = await createOpenHarness();
+  switchModule(document, "CONV");
+  await flushAsyncTurns(10);
+  const input = document.getElementById("conv-source-file");
+  for (const name of ["한글.hwp", "한글.hwpx"]) {
+    input.files = [makeFile(name, new Uint8Array(4), 20 * 1024 * 1024)];
+    input.dispatchEvent({ type: "change", target: input });
+    await flushAsyncTurns(10);
+    const box = document.getElementById("conv-result-box").textContent;
+    assert.match(box, /원본 파일을 사용할 수 없습니다: 파일이 너무 큽니다 \(20\.0 MiB\)/, name);
+    assert.match(box, /변환기 원본은 최대 10 MiB/, name);
+  }
+  assert.equal(document.getElementById("btn-conv-clear-source").hidden, true);
+  assert.equal(converts().length, 0, "nothing reached the backend");
+});
+
+test("a Hangul file the editor could not open is refused as text with a message that says why", async () => {
+  const { document, sandbox, converts } = await createOpenHarness();
+  const open = sandbox.__EASYOFFICE_WORKSPACE_API__.openDocumentFromBytes;
+  const result = await open("큰한글.hwp", new Uint8Array(11 * 1024 * 1024), { textOnly: true });
+  assert.equal(result.ok, false);
+  assert.match(feedback(document), /한글 편집기를 쓰지 못하는 경우 텍스트로 불러올 수 있는 한도는 10 MiB/);
+  assert.match(feedback(document), /11\.0 MiB/);
+  assert.equal(converts().length, 0);
+});
+
+test("a converter source over the limit is described the same way wherever its bytes come from", async () => {
+  const { sandbox } = await createOpenHarness();
+  const utils = sandbox.__EASYOFFICE_FILE_OPEN_UTILS__;
+  assert.equal(utils.converterSourceProblem(utils.MAX_FILE_BYTES), "");
+  assert.match(utils.converterSourceProblem(utils.MAX_FILE_BYTES + 1), /^파일이 너무 큽니다 \(10\.0 MiB\)\. 변환기 원본은 최대 10 MiB까지 선택할 수 있습니다$/);
+  const app = readText(fileURLToPath(new URL("../crates/easyoffice-app/ui/app.js", import.meta.url)));
+  assert.match(
+    app,
+    /const fileSrc = fileOpen\.getConverterSource\(\) \|\| \(await hwpSession\.getConverterSource\(src\)\);\s+const sourceProblem = fileSrc \? fileOpen\.converterSourceProblem\(fileSrc\.size\) : "";/,
+    "the editor's exported bytes are checked before they are sent"
+  );
+});
+
 test("dropping a file while the converter is active selects it as the conversion source", async () => {
   const { document } = await createOpenHarness();
   switchModule(document, "CONV");

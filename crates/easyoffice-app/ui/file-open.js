@@ -7,7 +7,10 @@
   // this module loads that model into the matching workspace module as one undoable state.
   // Also lets the converter panel convert a chosen source file instead of the editor text.
 
-  const MAX_FILE_BYTES = 10 * 1024 * 1024; // base64 inflates 4/3; the HTTP IPC body limit is 16 MiB
+  // Files that travel through IPC (decoded by the engine, or sent as a converter source). The same number as
+  // `MAX_SOURCE_BYTES` in convert_open.rs (scripts/test-file-size-limits.mjs keeps them equal); base64 inflates
+  // 4/3, so 10 MiB stays under the 16 MiB HTTP IPC body limit.
+  const MAX_FILE_BYTES = 10 * 1024 * 1024;
   const MAX_FILE_LABEL = "10 MiB";
   const MAX_HWP_BYTES = 64 * 1024 * 1024; // HWP bytes go straight to the editor frame, not through the IPC body
   const MAX_HWP_LABEL = "64 MiB";
@@ -40,12 +43,26 @@
     return btoaFn(bin);
   }
 
+  const tooLarge = (size) => "파일이 너무 큽니다 (" + (size / 1048576).toFixed(1) + " MiB). ";
+
+  // The converter takes its source through IPC whatever the file type: an HWP file is not routed to the editor.
+  function converterSourceProblem(size) {
+    return size > MAX_FILE_BYTES ? tooLarge(size) + "변환기 원본은 최대 " + MAX_FILE_LABEL + "까지 선택할 수 있습니다" : "";
+  }
+
+  // `hwpRoute`: the file goes to the embedded editor, which takes the larger HWP limit. `"converter"`: the
+  // file is the converter's source. Otherwise an HWP file is read as text through IPC like any other, and the
+  // message says why the limit is lower.
   function validateFile(name, size, hwpRoute) {
     if (!name) return "파일 이름을 확인할 수 없습니다";
     if (size === 0) return "빈 파일은 열 수 없습니다";
-    const hwp = hwpRoute === true && HWP_EXTENSIONS.has(extensionOf(name));
+    if (hwpRoute === "converter") return converterSourceProblem(size);
+    const hwpFamily = HWP_EXTENSIONS.has(extensionOf(name));
+    const hwp = hwpRoute === true && hwpFamily;
     if (size > (hwp ? MAX_HWP_BYTES : MAX_FILE_BYTES)) {
-      return "파일이 너무 큽니다 (" + (size / 1048576).toFixed(1) + " MiB). 최대 " + (hwp ? MAX_HWP_LABEL : MAX_FILE_LABEL) + "까지 열 수 있습니다";
+      if (hwp) return tooLarge(size) + "최대 " + MAX_HWP_LABEL + "까지 열 수 있습니다";
+      if (hwpFamily) return tooLarge(size) + "한글 편집기를 쓰지 못하는 경우 텍스트로 불러올 수 있는 한도는 " + MAX_FILE_LABEL + "입니다";
+      return tooLarge(size) + "최대 " + MAX_FILE_LABEL + "까지 열 수 있습니다";
     }
     return "";
   }
@@ -429,8 +446,8 @@
       return { ok: true, module: res.module, format: res.format, warnings: res.warnings || [], title: name };
     }
 
-    async function readFileBytes(file) {
-      const invalid = validateFile(baseName(file?.name), Number(file?.size ?? 0), hasHwpRoute());
+    async function readFileBytes(file, hwpRoute) {
+      const invalid = validateFile(baseName(file?.name), Number(file?.size ?? 0), hwpRoute);
       if (invalid) return { error: invalid };
       try {
         return { bytes: new Uint8Array(await file.arrayBuffer()) };
@@ -441,7 +458,7 @@
 
     async function openFile(file) {
       const name = baseName(file?.name);
-      const read = await readFileBytes(file);
+      const read = await readFileBytes(file, hasHwpRoute());
       if (read.error) return fail(read.error + (name ? " (" + name + ")" : ""));
       return openDocumentFromBytes(name, read.bytes);
     }
@@ -458,7 +475,7 @@
     async function setConverterSource(file) {
       const box = document.getElementById("conv-result-box");
       const name = baseName(file?.name);
-      const read = await readFileBytes(file);
+      const read = await readFileBytes(file, "converter");
       if (read.error) {
         if (box) box.textContent = "원본 파일을 사용할 수 없습니다: " + read.error + (name ? " (" + name + ")" : "");
         return false;
@@ -485,6 +502,7 @@
       const stem = converterSource.name.replace(/\.[A-Za-z0-9]+$/, "") || "변환_문서";
       return {
         baseName: stem,
+        size: converterSource.bytes.length,
         fields: { fileName: converterSource.name, sourceBase64: bytesToBase64(converterSource.bytes, btoaFn) },
       };
     }
@@ -562,12 +580,13 @@
 
     return {
       openDocumentFromBytes, openFile, openFilePicker, bindUi, captureBaselines, markModuleSaved,
-      getConverterSource, setConverterSource, clearConverterSource,
+      getConverterSource, setConverterSource, clearConverterSource, converterSourceProblem,
     };
   }
 
   host.__EASYOFFICE_CREATE_FILE_OPEN__ = createFileOpen;
   host.__EASYOFFICE_FILE_OPEN_UTILS__ = {
     MAX_FILE_BYTES, MAX_HWP_BYTES, SUPPORTED_EXTENSIONS, GRID_LIMITS, buildEditorNodes, buildSheetStore, bytesToBase64,
+    converterSourceProblem,
   };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

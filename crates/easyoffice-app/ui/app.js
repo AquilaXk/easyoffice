@@ -553,13 +553,18 @@
             const src = document.getElementById("conv-src-fmt").value;
             const dst = document.getElementById("conv-dst-fmt").value;
             const fileSrc = fileOpen.getConverterSource() || (await hwpSession.getConverterSource(src));
+            const sourceProblem = fileSrc ? fileOpen.converterSourceProblem(fileSrc.size) : "";
+            const box = document.getElementById("conv-result-box");
+            if (sourceProblem) {
+              if (box) box.textContent = "원본 파일을 사용할 수 없습니다: " + sourceProblem;
+              return;
+            }
             const convTitle = fileSrc ? fileSrc.baseName : "통합_변환_문서";
             const content = fileSrc ? fileSrc.fields : workspacePanels.buildConversionContent(src);
             const res = await invokeIpc(
               "convert_document_format",
               JSON.stringify({ sourceFormat: src, targetFormat: dst, title: convTitle, ...content })
             );
-            const box = document.getElementById("conv-result-box");
             const delivery = await workspacePanels.deliverSavedFile(res?.convertedBase64, convTitle, dst);
             if (box && res) {
               box.textContent =

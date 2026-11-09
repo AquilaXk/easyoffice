@@ -21,8 +21,10 @@ use std::collections::HashSet;
 use crate::convert_structured::{encode_structured, StructuredContent};
 use crate::EasyOfficeIpcRouter;
 
-/// Upper bound on a decoded source file (matches the WebUI limit before base64 inflation).
-const MAX_SOURCE_BYTES: usize = 12 * 1_048_576;
+/// Upper bound on a decoded source file: the number the page checks before it sends
+/// (`MAX_FILE_BYTES` in `ui/file-open.js`; `scripts/test-file-size-limits.mjs` keeps them equal).
+/// Its base64 form plus the request's other fields stays under `MAX_IPC_HTTP_BODY_BYTES`.
+const MAX_SOURCE_BYTES: usize = 10 * 1_048_576;
 
 type JsonEntries = [(String, StrictJsonValue)];
 
@@ -769,6 +771,36 @@ mod tests {
         assert!(md.contains("굵게"), "{md}");
         assert!(md.contains("| 가 | 나 |"), "{md}");
         assert!(!md.contains("에디터 텍스트"), "{md}");
+    }
+
+    #[test]
+    fn source_limit_fits_the_http_ipc_body_with_room_for_the_other_fields() {
+        let base64_len = MAX_SOURCE_BYTES.div_ceil(3) * 4;
+        let envelope_room = 64 * 1024;
+        assert!(
+            base64_len + envelope_room < crate::http_server::MAX_IPC_HTTP_BODY_BYTES,
+            "a source at the limit must still fit one HTTP IPC request"
+        );
+    }
+
+    #[test]
+    fn source_one_byte_over_the_limit_is_refused_before_decoding() {
+        let over = vec![b'a'; MAX_SOURCE_BYTES + 1];
+        let err = EasyOfficeIpcRouter::dispatch(
+            "convert_document_format",
+            &request(Some("decode"), "a.txt", &over, ""),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, EasyOfficeError::PayloadTooLarge { max, .. } if max == MAX_SOURCE_BYTES),
+            "{err:?}"
+        );
+        let at_limit = vec![b'a'; MAX_SOURCE_BYTES];
+        let ok = EasyOfficeIpcRouter::dispatch(
+            "convert_document_format",
+            &request(Some("decode"), "a.txt", &at_limit, ""),
+        );
+        assert!(ok.is_ok(), "{ok:?}");
     }
 
     #[test]
