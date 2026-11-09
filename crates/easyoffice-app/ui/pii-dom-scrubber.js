@@ -59,10 +59,10 @@
   function collectEditableInlineTokens(rootEl, options = {}) {
     const includeTables = Boolean(options.includeTables);
     const out = [];
-    function walk(node) {
+    function walk(node, currentBlock) {
       if (!node) return;
       if (node.nodeType === 3) {
-        out.push({ type: "text", node });
+        out.push({ type: "text", node, block: currentBlock });
         return;
       }
       if (node.nodeType !== 1) return;
@@ -74,23 +74,14 @@
         return;
       }
       if (tag === "TABLE" && !includeTables) return;
+      const nextBlock =
+        node !== rootEl && INLINE_SCRUB_BLOCK_TAGS.has(tag) ? node : currentBlock;
       for (let child = node.firstChild; child; child = child.nextSibling) {
-        walk(child);
+        walk(child, nextBlock);
       }
     }
-    walk(rootEl);
+    walk(rootEl, rootEl);
     return out;
-  }
-
-  function findNearestScrubBlock(textNode, rootEl) {
-    let cur = textNode.parentElement;
-    while (cur && cur !== rootEl) {
-      if (INLINE_SCRUB_BLOCK_TAGS.has((cur.tagName || "").toUpperCase())) {
-        return cur;
-      }
-      cur = cur.parentElement;
-    }
-    return rootEl;
   }
 
   function deriveSingleDiffSpan(origText, scrubbedText) {
@@ -189,7 +180,7 @@
         return;
       }
       const tn = tok.node;
-      const block = findNearestScrubBlock(tn, rootEl);
+      const block = tok.block;
       const last = groups.at(-1);
       if (last && last.block === block && last.lineEpoch === lineEpoch) {
         last.nodes.push(tn);

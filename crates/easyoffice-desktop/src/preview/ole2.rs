@@ -156,8 +156,8 @@ fn find_entries<R: Read + Seek>(src: &mut R, c: &Container) -> Option<(DirEntry,
     let mut root = None;
     let mut target = None;
     let mut seen = 0_usize;
+    let mut data = vec![0_u8; c.sector_len()];
     for sector in c.chain(src, c.first_dir, max_sectors)? {
-        let mut data = vec![0_u8; c.sector_len()];
         read_at(src, c.sector_offset(sector)?, &mut data)?;
         let (records, _) = data.as_chunks::<DIR_ENTRY_LEN>();
         for raw in records {
@@ -175,6 +175,9 @@ fn find_entries<R: Read + Seek>(src: &mut R, c: &Container) -> Option<(DirEntry,
                     target = Some(entry);
                 }
                 _ => {}
+            }
+            if root.is_some() && target.is_some() {
+                return Some((root?, target?));
             }
         }
     }
@@ -197,14 +200,18 @@ fn read_regular<R: Read + Seek>(
     size: usize,
 ) -> Option<Vec<u8>> {
     let sectors = c.chain(src, entry.start, size.div_ceil(c.sector_len()))?;
-    let mut out = Vec::with_capacity(size);
+    let mut out = vec![0_u8; size];
+    let mut written = 0_usize;
     for sector in sectors {
-        let take = (size - out.len()).min(c.sector_len());
-        let mut part = vec![0_u8; take];
-        read_at(src, c.sector_offset(sector)?, &mut part)?;
-        out.extend_from_slice(&part);
+        let take = (size - written).min(c.sector_len());
+        read_at(
+            src,
+            c.sector_offset(sector)?,
+            &mut out[written..written + take],
+        )?;
+        written += take;
     }
-    (out.len() == size).then_some(out)
+    (written == size).then_some(out)
 }
 
 fn read_mini<R: Read + Seek>(
@@ -221,7 +228,8 @@ fn read_mini<R: Read + Seek>(
     )?;
     let mini_stream = c.chain(src, root.start, MAX_CHAIN_SECTORS)?;
     let per_fat = c.sector_len() / FAT_ENTRY_LEN;
-    let mut out = Vec::with_capacity(size);
+    let mut out = vec![0_u8; size];
+    let mut written = 0_usize;
     let mut current = entry.start;
     for _ in 0..size.div_ceil(MINI_SECTOR_LEN) {
         if current > MAX_REGULAR_SECTOR {
@@ -230,13 +238,12 @@ fn read_mini<R: Read + Seek>(
         let index = usize::try_from(current).ok()?;
         let offset = index.checked_mul(MINI_SECTOR_LEN)?;
         let holder = *mini_stream.get(offset / c.sector_len())?;
-        let take = (size - out.len()).min(MINI_SECTOR_LEN);
-        let mut part = vec![0_u8; take];
+        let take = (size - written).min(MINI_SECTOR_LEN);
         let at = c
             .sector_offset(holder)?
             .checked_add(u64::try_from(offset % c.sector_len()).ok()?)?;
-        read_at(src, at, &mut part)?;
-        out.extend_from_slice(&part);
+        read_at(src, at, &mut out[written..written + take])?;
+        written += take;
         let fat_sector = *mini_fat.get(index / per_fat)?;
         let entry_at = c
             .sector_offset(fat_sector)?
@@ -245,7 +252,7 @@ fn read_mini<R: Read + Seek>(
         read_at(src, entry_at, &mut raw)?;
         current = u32::from_le_bytes(raw);
     }
-    (out.len() == size && current == END_OF_CHAIN).then_some(out)
+    (written == size && current == END_OF_CHAIN).then_some(out)
 }
 
 pub fn read_prv_image<R: Read + Seek>(src: &mut R) -> Option<Vec<u8>> {

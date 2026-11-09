@@ -130,12 +130,19 @@ fn verify_ole2(format: DocumentFormat, bytes: &[u8]) -> Result<(), EasyOfficeErr
 
 fn verify_pdf_tail(bytes: &[u8]) -> Result<(), EasyOfficeError> {
     let tail = &bytes[bytes.len().saturating_sub(PDF_TAIL_BYTES)..];
-    let has = |needle: &[u8]| tail.windows(needle.len()).any(|window| window == needle);
-    if has(b"startxref") && has(b"%%EOF") {
-        Ok(())
-    } else {
-        Err(corrupted("PDF 끝 표시가 없습니다."))
+    let mut has_xref = false;
+    let mut has_eof = false;
+    for i in 0..tail.len() {
+        if !has_xref && tail[i..].starts_with(b"startxref") {
+            has_xref = true;
+        } else if !has_eof && tail[i..].starts_with(b"%%EOF") {
+            has_eof = true;
+        }
+        if has_xref && has_eof {
+            return Ok(());
+        }
     }
+    Err(corrupted("PDF 끝 표시가 없습니다."))
 }
 
 #[cfg(test)]

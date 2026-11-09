@@ -78,23 +78,18 @@ export function createPrintPage(svg: string, pageInfo: PrintPageInfo, pageIndex:
   };
 }
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
-}
+const SVG_URL_REF_RE = /url\((['"]?)#([^)'"\s]+)\1\)/g;
 
 export function namespaceSvgReferenceValue(value: string, idMap: Map<string, string>): string {
-  let next = value;
-  for (const [oldId, newId] of idMap) {
-    const escapedOldId = escapeRegExp(oldId);
-    next = next.replace(
-      new RegExp(String.raw`url\((['"]?)#${escapedOldId}\1\)`, 'g'),
-      () => `url(#${newId})`,
-    );
-    if (next === `#${oldId}`) {
-      next = `#${newId}`;
-    }
+  if (!value.includes('#')) return value;
+  if (value.startsWith('#')) {
+    const mapped = idMap.get(value.slice(1));
+    if (mapped !== undefined) return `#${mapped}`;
   }
-  return next;
+  return value.replace(SVG_URL_REF_RE, (full, _quote: string, id: string) => {
+    const mapped = idMap.get(id);
+    return mapped !== undefined ? `url(#${mapped})` : full;
+  });
 }
 
 function collectSvgIdMap(root: Element, namespace: string): Map<string, string> {

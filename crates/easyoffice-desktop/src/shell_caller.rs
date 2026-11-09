@@ -34,9 +34,15 @@ pub struct ShellTokens {
 impl ShellTokens {
     /// Creates (or replaces) the token of `label` and returns it.
     pub fn issue(&self, label: &str) -> Result<String, getrandom::Error> {
+        const HEX: &[u8; 16] = b"0123456789abcdef";
         let mut bytes = [0u8; TOKEN_BYTES];
         getrandom::fill(&mut bytes)?;
-        let token: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+        let mut hex = [0u8; TOKEN_BYTES * 2];
+        for (i, &byte) in bytes.iter().enumerate() {
+            hex[i * 2] = HEX[usize::from(byte >> 4)];
+            hex[i * 2 + 1] = HEX[usize::from(byte & 0x0f)];
+        }
+        let token = std::str::from_utf8(&hex).unwrap_or_default().to_string();
         self.by_label
             .lock()
             .unwrap_or_else(PoisonError::into_inner)

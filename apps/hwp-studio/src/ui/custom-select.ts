@@ -78,8 +78,21 @@ function enhanceCustomSelect(select: HTMLSelectElement): void {
     sync();
   };
 
+  const optionRows = new Map<string, HTMLElement>();
+  let selectedRow: HTMLElement | null = null;
+
+  const appendRow = (option: HTMLOptionElement) => {
+    const row = createOptionRow(option, commit);
+    if (!optionRows.has(option.value)) {
+      optionRows.set(option.value, row);
+    }
+    menu.appendChild(row);
+  };
+
   const rebuildMenu = () => {
     menu.innerHTML = '';
+    optionRows.clear();
+    selectedRow = null;
     const children = Array.from(select.children);
     for (const child of children) {
       if (child instanceof HTMLOptGroupElement) {
@@ -89,9 +102,9 @@ function enhanceCustomSelect(select: HTMLSelectElement): void {
         menu.appendChild(groupLabel);
         Array.from(child.children)
           .filter((item): item is HTMLOptionElement => item instanceof HTMLOptionElement)
-          .forEach((option) => menu.appendChild(createOptionRow(option, commit)));
+          .forEach(appendRow);
       } else if (child instanceof HTMLOptionElement) {
-        menu.appendChild(createOptionRow(child, commit));
+        appendRow(child);
       }
     }
   };
@@ -106,10 +119,16 @@ function enhanceCustomSelect(select: HTMLSelectElement): void {
     value.title = value.textContent;
     if (label) trigger.setAttribute('aria-label', `${label}: ${value.textContent}`);
 
-    menu.querySelectorAll<HTMLElement>('.custom-select-option').forEach((row) => {
-      row.classList.toggle('selected', row.dataset.value === select.value);
-      row.setAttribute('aria-selected', String(row.dataset.value === select.value));
-    });
+    const nextRow = optionRows.get(select.value) ?? null;
+    if (selectedRow && selectedRow !== nextRow) {
+      selectedRow.classList.remove('selected');
+      selectedRow.setAttribute('aria-selected', 'false');
+    }
+    if (nextRow) {
+      nextRow.classList.add('selected');
+      nextRow.setAttribute('aria-selected', 'true');
+    }
+    selectedRow = nextRow;
   };
 
   trigger.addEventListener('mousedown', (event) => {

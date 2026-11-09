@@ -131,6 +131,7 @@ pub(crate) fn pdf_of(
     let tree_ref = alloc.bump();
     let mut first = None;
     let mut pages = Vec::with_capacity(count as usize);
+    let mut renumbered_to = HashMap::new();
     let mut total = 0_usize;
     let started = Instant::now();
     for index in 0..count {
@@ -146,7 +147,8 @@ pub(crate) fn pdf_of(
             Err(_) if index > 0 => break,
             Err(code) => return Err(code),
         };
-        let mut renumbered_to = HashMap::new();
+        renumbered_to.clear();
+        renumbered_to.reserve(chunk.refs().len());
         let chunk = chunk.renumber(|old| *renumbered_to.entry(old).or_insert_with(|| alloc.bump()));
         let xobject = renumbered_to.get(&xobject).copied().unwrap_or(xobject);
         total = total.saturating_add(chunk.len());

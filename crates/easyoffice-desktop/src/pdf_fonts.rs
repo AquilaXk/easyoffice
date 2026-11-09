@@ -94,35 +94,31 @@ pub fn set_generic_families(db: &mut Database) {
     db.set_monospace_family(FALLBACK_FAMILY);
 }
 
-/// Which faces were probed for one character and which of them have it. Bit `i` is the `i`-th face
-/// of the database.
+/// Which faces were probed for one character and which of them have it: two bits per face
+/// (bit 0 = probed, bit 1 = covered) packed 32 faces per `u64` word.
 #[derive(Default)]
 struct Coverage {
-    probed: Vec<u64>,
-    covered: Vec<u64>,
+    bits: Vec<u64>,
 }
 
 impl Coverage {
-    const fn locate(face: usize) -> (usize, u64) {
-        (face / 64, 1 << (face % 64))
+    const fn locate(face: usize) -> (usize, usize) {
+        (face >> 5, (face & 31) << 1)
     }
 
     fn get(&self, face: usize) -> Option<bool> {
-        let (word, bit) = Self::locate(face);
-        let probed = self.probed.get(word).is_some_and(|w| w & bit != 0);
-        probed.then(|| self.covered[word] & bit != 0)
+        let (word, shift) = Self::locate(face);
+        let pair = (self.bits.get(word).copied().unwrap_or(0) >> shift) & 0b11;
+        (pair & 1 != 0).then_some(pair & 2 != 0)
     }
 
     fn set(&mut self, face: usize, covered: bool) {
-        let (word, bit) = Self::locate(face);
-        if self.probed.len() <= word {
-            self.probed.resize(word + 1, 0);
-            self.covered.resize(word + 1, 0);
+        let (word, shift) = Self::locate(face);
+        if self.bits.len() <= word {
+            self.bits.resize(word + 1, 0);
         }
-        self.probed[word] |= bit;
-        if covered {
-            self.covered[word] |= bit;
-        }
+        let pair = 1u64 | (u64::from(covered) << 1);
+        self.bits[word] = (self.bits[word] & !(0b11u64 << shift)) | (pair << shift);
     }
 }
 

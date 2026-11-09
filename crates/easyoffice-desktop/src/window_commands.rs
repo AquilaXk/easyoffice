@@ -692,8 +692,9 @@ pub async fn open_file_in_new_window(
         .add_filter(
             "문서",
             &[
-                "docx", "doc", "odt", "rtf", "md", "markdown", "txt", "hwp", "hwpx", "hwt", "hwtx",
-                "xlsx", "xls", "ods", "csv", "tsv", "pptx", "ppt", "ppsx", "odp", "pdf",
+                "docx", "doc", "odt", "rtf", "md", "markdown", "txt", "pages", "hwp", "hwpx",
+                "hwt", "hwtx", "xlsx", "xls", "ods", "csv", "tsv", "pptx", "ppt", "ppsx", "odp",
+                "pdf",
             ],
         )
         .pick_file(move |picked| {

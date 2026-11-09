@@ -108,8 +108,8 @@ function copySelectionToWasm(wasm: ClipboardWasm, { start, end }: SelectionRange
   return exportOrEmpty(() => wasm.exportSelectionHtml(...args));
 }
 
-function selectionKey(selection: SelectionRange): string {
-  const keyOf = (p: DocumentPosition) => ({
+function snapshotPosition(p: DocumentPosition): DocumentPosition {
+  return {
     sectionIndex: p.sectionIndex,
     paragraphIndex: p.paragraphIndex,
     charOffset: p.charOffset,
@@ -117,10 +117,48 @@ function selectionKey(selection: SelectionRange): string {
     controlIndex: p.controlIndex,
     cellIndex: p.cellIndex,
     cellParaIndex: p.cellParaIndex,
-    cellPath: p.cellPath,
+    cellPath: p.cellPath?.map((step) => ({
+      controlIndex: step.controlIndex,
+      cellIndex: step.cellIndex,
+      cellParaIndex: step.cellParaIndex,
+    })),
     isTextBox: p.isTextBox,
-  });
-  return JSON.stringify({ start: keyOf(selection.start), end: keyOf(selection.end) });
+  };
+}
+
+function sameCellPath(a: DocumentPosition['cellPath'], b: DocumentPosition['cellPath']): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    const stepA = a[i];
+    const stepB = b[i];
+    if (
+      stepA.controlIndex !== stepB.controlIndex ||
+      stepA.cellIndex !== stepB.cellIndex ||
+      stepA.cellParaIndex !== stepB.cellParaIndex
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function samePosition(a: DocumentPosition, b: DocumentPosition): boolean {
+  return (
+    a.sectionIndex === b.sectionIndex &&
+    a.paragraphIndex === b.paragraphIndex &&
+    a.charOffset === b.charOffset &&
+    a.parentParaIndex === b.parentParaIndex &&
+    a.controlIndex === b.controlIndex &&
+    a.cellIndex === b.cellIndex &&
+    a.cellParaIndex === b.cellParaIndex &&
+    a.isTextBox === b.isTextBox &&
+    sameCellPath(a.cellPath, b.cellPath)
+  );
+}
+
+function sameSelection(a: SelectionRange, b: SelectionRange): boolean {
+  return samePosition(a.start, b.start) && samePosition(a.end, b.end);
 }
 
 /**
@@ -168,12 +206,15 @@ export function textCutPlan(wasm: ClipboardWasm, handler: CutHandler, deps: Clip
   const html = copySelectionToWasm(wasm, selection);
   const text = wasm.getClipboardText();
   const marked = deps.markInternalHtml(html, text);
-  const key = selectionKey(selection);
+  const snapshot: SelectionRange = {
+    start: snapshotPosition(selection.start),
+    end: snapshotPosition(selection.end),
+  };
   return {
     write: () => deps.writeTextHtml(text, marked),
     unchanged() {
       const now = handler.getSelection();
-      return now !== null && selectionKey(now) === key;
+      return now !== null && sameSelection(now, snapshot);
     },
     remove: () => handler.performDelete(),
   };

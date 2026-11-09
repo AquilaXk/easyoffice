@@ -564,12 +564,27 @@ export class Toolbar {
     }
   }
 
+  private knownFontValues = new Set<string>();
+
+  private rebuildKnownFontValues(): void {
+    this.knownFontValues.clear();
+    for (const opt of Array.from(this.fontName.options)) {
+      this.knownFontValues.add(opt.value);
+    }
+  }
+
   private setFontNameValue(displayFont: string): void {
-    if (!this.fontName.querySelector(`option[value="${CSS.escape(displayFont)}"]`)) {
+    if (this.knownFontValues.size === 0 && this.fontName.options.length > 0) {
+      this.rebuildKnownFontValues();
+    }
+    if (this.knownFontValues.has(displayFont)) {
+      if (this.fontName.value === displayFont) return;
+    } else {
       const opt = document.createElement('option');
       opt.value = displayFont;
       opt.textContent = displayFont;
       this.fontName.appendChild(opt);
+      this.knownFontValues.add(displayFont);
     }
     this.fontName.value = displayFont;
     syncCustomSelect(this.fontName);
@@ -598,6 +613,7 @@ export class Toolbar {
     }
 
     this.fontName.insertBefore(group, this.fontName.firstChild);
+    this.rebuildKnownFontValues();
     syncCustomSelect(this.fontName);
   }
 
@@ -605,6 +621,7 @@ export class Toolbar {
   private populateLocalFontOptions(): void {
     // 기존 로컬 글꼴 optgroup 제거 (재호출 대비)
     this.fontName.querySelectorAll('optgroup[label="로컬 글꼴"]').forEach(g => g.remove());
+    this.rebuildKnownFontValues();
 
     const localFonts = filterAuthoringFontFamilies(getLocalFonts());
     if (localFonts.length === 0) return;
@@ -617,6 +634,7 @@ export class Toolbar {
       opt.value = name;
       opt.textContent = name;
       group.appendChild(opt);
+      this.knownFontValues.add(name);
     }
 
     // 대표 글꼴 optgroup 다음에 삽입

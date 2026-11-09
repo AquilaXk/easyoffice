@@ -94,6 +94,7 @@
 
   function rewriteAttribute(attribute, renamed) {
     if (attribute.name === "id") return renamed(attribute.value);
+    if (!attribute.value.includes("#")) return attribute.value;
     if (LINK_ATTRIBUTES.has(attribute.name.toLowerCase()) && attribute.value.startsWith("#")) {
       return "#" + renamed(attribute.value.slice(1));
     }

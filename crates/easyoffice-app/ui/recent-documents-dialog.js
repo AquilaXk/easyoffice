@@ -68,20 +68,31 @@
         resolve(value);
       }
 
+      let items = [];
+      let selectedItem = null;
+
       function updateSelection() {
-        for (const item of list.querySelectorAll(".recent-documents-item")) {
-          const isSelected = Number(item.dataset.index) === selected;
-          item.setAttribute("aria-selected", String(isSelected));
-          if (isSelected) item.scrollIntoView?.({ block: "nearest" });
+        const nextItem = items[selected] || null;
+        if (selectedItem && selectedItem !== nextItem) {
+          selectedItem.setAttribute("aria-selected", "false");
         }
+        if (nextItem) {
+          nextItem.setAttribute("aria-selected", "true");
+          nextItem.scrollIntoView?.({ block: "nearest" });
+        }
+        selectedItem = nextItem;
       }
 
       function renderList() {
         clear(list);
+        items = [];
+        selectedItem = null;
         for (const [index, entry] of entries.entries()) {
           const item = button("recent-documents-item");
           item.setAttribute("role", "option");
-          item.setAttribute("aria-selected", String(index === selected));
+          const isSelected = index === selected;
+          item.setAttribute("aria-selected", String(isSelected));
+          if (isSelected) selectedItem = item;
           item.dataset.index = String(index);
           item.dataset.recentId = entry.id;
           add(
@@ -94,6 +105,7 @@
             updateSelection();
           });
           item.addEventListener("dblclick", () => close(entries[index] || null));
+          items.push(item);
           add(list, item);
         }
       }

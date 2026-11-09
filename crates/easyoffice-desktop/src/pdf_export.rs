@@ -345,6 +345,7 @@ pub struct PdfAssembler {
     catalog_ref: Ref,
     tree_ref: Ref,
     page_refs: Vec<Ref>,
+    renumber_map: HashMap<Ref, Ref>,
     pdf: Pdf,
 }
 
@@ -362,6 +363,7 @@ impl PdfAssembler {
             catalog_ref,
             tree_ref,
             page_refs: Vec::new(),
+            renumber_map: HashMap::new(),
             pdf: Pdf::new(),
         }
     }
@@ -389,6 +391,7 @@ impl PdfAssembler {
                 place_page(
                     &mut self.pdf,
                     &mut self.alloc,
+                    &mut self.renumber_map,
                     self.tree_ref,
                     page_ref,
                     page,
@@ -420,11 +423,23 @@ impl PdfAssembler {
 
 /// Writes one page: its objects renumbered straight into the output (the chunk is dropped
 /// afterwards), the page dictionary, and the content stream that places the form XObject.
-fn place_page(pdf: &mut Pdf, alloc: &mut Ref, tree_ref: Ref, page_ref: Ref, page: PageChunk) {
-    let mut map: HashMap<Ref, Ref> = HashMap::with_capacity(page.chunk.refs().len());
-    page.chunk
-        .renumber_into(pdf, |old| *map.entry(old).or_insert_with(|| alloc.bump()));
-    let xobject = map.get(&page.xobject).copied().unwrap_or(page.xobject);
+fn place_page(
+    pdf: &mut Pdf,
+    alloc: &mut Ref,
+    renumber_map: &mut HashMap<Ref, Ref>,
+    tree_ref: Ref,
+    page_ref: Ref,
+    page: PageChunk,
+) {
+    renumber_map.clear();
+    renumber_map.reserve(page.chunk.refs().len());
+    page.chunk.renumber_into(pdf, |old| {
+        *renumber_map.entry(old).or_insert_with(|| alloc.bump())
+    });
+    let xobject = renumber_map
+        .get(&page.xobject)
+        .copied()
+        .unwrap_or(page.xobject);
     let content_ref = alloc.bump();
     let mut writer = pdf.page(page_ref);
     writer.media_box(Rect::new(0.0, 0.0, page.width, page.height));
@@ -442,9 +457,6 @@ fn place_page(pdf: &mut Pdf, alloc: &mut Ref, tree_ref: Ref, page_ref: Ref, page
 const MAX_VERIFIED_PDF_BYTES: usize = 256 * 1_048_576;
 /// Dictionary keys the check looks for. The writer emits them as plain text (no object streams).
 const KEY_COUNT: &[u8] = b"/Count ";
-const KEY_MEDIA_BOX: &[u8] = b"/MediaBox";
-const KEY_TO_UNICODE: &[u8] = b"/ToUnicode";
-const KEYS_FONT_FILE: [&[u8]; 2] = [b"/FontFile2", b"/FontFile3"];
 
 /// What [`verify_exported_pdf`] found.
 #[derive(Debug, PartialEq, Eq)]
@@ -454,36 +466,81 @@ pub struct PdfCheck {
     pub warning: Option<String>,
 }
 
-fn count_of(haystack: &[u8], needle: &[u8]) -> usize {
-    haystack
-        .windows(needle.len())
-        .filter(|w| *w == needle)
-        .count()
+/// Digits read after `/Count `: more than this cannot be a page count.
+const MAX_COUNT_DIGITS: usize = 7;
+
+fn parse_count_at(bytes: &[u8]) -> Option<usize> {
+    let mut value = 0usize;
+    let mut len = 0usize;
+    for &b in bytes.iter().take(MAX_COUNT_DIGITS) {
+        if !b.is_ascii_digit() {
+            break;
+        }
+        value = value * 10 + usize::from(b - b'0');
+        len += 1;
+    }
+    (len > 0).then_some(value)
 }
 
+#[cfg(test)]
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {
     haystack.windows(needle.len()).any(|w| w == needle)
 }
 
-/// The numbers that follow each `/Count ` key (page tree sizes).
+#[cfg(test)]
 fn declared_counts(pdf: &[u8]) -> Vec<usize> {
     pdf.windows(KEY_COUNT.len())
         .enumerate()
         .filter(|(_, window)| *window == KEY_COUNT)
-        .filter_map(|(at, _)| {
-            let digits: Vec<u8> = pdf[at + KEY_COUNT.len()..]
-                .iter()
-                .copied()
-                .take_while(u8::is_ascii_digit)
-                .take(MAX_COUNT_DIGITS)
-                .collect();
-            std::str::from_utf8(&digits).ok()?.parse().ok()
-        })
+        .filter_map(|(at, _)| parse_count_at(&pdf[at + KEY_COUNT.len()..]))
         .collect()
 }
 
-/// Digits read after `/Count `: more than this cannot be a page count.
-const MAX_COUNT_DIGITS: usize = 7;
+struct ScannedKeys {
+    count_matched: bool,
+    media_boxes: usize,
+    has_font: bool,
+    has_map: bool,
+}
+
+fn scan_pdf_keys(pdf: &[u8], expected_pages: usize) -> ScannedKeys {
+    const WORD_COUNT: u32 = u32::from_le_bytes(*b"/Cou");
+    const WORD_MEDIA: u32 = u32::from_le_bytes(*b"/Med");
+    const WORD_FONT: u32 = u32::from_le_bytes(*b"/Fon");
+    const WORD_TO_UNI: u32 = u32::from_le_bytes(*b"/ToU");
+    let mut out = ScannedKeys {
+        count_matched: false,
+        media_boxes: 0,
+        has_font: false,
+        has_map: false,
+    };
+    let len = pdf.len();
+    let mut i = 0;
+    while i + 4 <= len {
+        if pdf[i] == b'/' {
+            let word = u32::from_le_bytes([pdf[i], pdf[i + 1], pdf[i + 2], pdf[i + 3]]);
+            match word {
+                WORD_COUNT if pdf.get(i + 4..i + 7) == Some(b"nt ") => {
+                    if parse_count_at(&pdf[i + KEY_COUNT.len()..]) == Some(expected_pages) {
+                        out.count_matched = true;
+                    }
+                }
+                WORD_MEDIA if pdf.get(i + 4..i + 9) == Some(b"iaBox") => {
+                    out.media_boxes += 1;
+                }
+                WORD_FONT if matches!(pdf.get(i + 4..i + 10), Some(b"tFile2" | b"tFile3")) => {
+                    out.has_font = true;
+                }
+                WORD_TO_UNI if pdf.get(i + 4..i + 10) == Some(b"nicode") => {
+                    out.has_map = true;
+                }
+                _ => {}
+            }
+        }
+        i += 1;
+    }
+    out
+}
 
 /// Checks the bytes of an exported PDF against what the export promises: the `%PDF-` header, a page
 /// tree of `expected_pages` pages with one `/MediaBox` per page, and, when a font is embedded, a
@@ -503,23 +560,22 @@ pub fn verify_exported_pdf(
     if !pdf.starts_with(b"%PDF-") {
         return Err("PDF 머리글(%PDF-)이 없습니다.".to_string());
     }
-    if !declared_counts(pdf).contains(&expected_pages) {
+    let scanned = scan_pdf_keys(pdf, expected_pages);
+    if !scanned.count_matched {
         return Err(format!(
             "PDF 쪽 수(/Count)가 {expected_pages}쪽이 아닙니다."
         ));
     }
-    let media_boxes = count_of(pdf, KEY_MEDIA_BOX);
-    if media_boxes != expected_pages {
+    if scanned.media_boxes != expected_pages {
         return Err(format!(
-            "PDF에 쪽 크기(/MediaBox)가 {media_boxes}개 있습니다. {expected_pages}개여야 합니다."
+            "PDF에 쪽 크기(/MediaBox)가 {}개 있습니다. {expected_pages}개여야 합니다.",
+            scanned.media_boxes
         ));
     }
-    let has_font = KEYS_FONT_FILE.iter().any(|key| contains(pdf, key));
-    let has_map = contains(pdf, KEY_TO_UNICODE);
-    if has_font && !has_map {
+    if scanned.has_font && !scanned.has_map {
         return Err("PDF에 글꼴은 있으나 글자 대응표(/ToUnicode)가 없습니다.".to_string());
     }
-    let warning = (has_text && !has_font).then(|| {
+    let warning = (has_text && !scanned.has_font).then(|| {
         "글꼴이 포함되지 않아 글자가 윤곽선으로 나갔습니다(PDF는 올바르지만 글자 검색 불가)."
             .to_string()
     });

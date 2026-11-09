@@ -10,7 +10,7 @@
 //! menu items), so it sends the ids of the items its module cannot use; nothing is duplicated here.
 //! Every id is checked against the item table.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use tauri::{AppHandle, Manager, WebviewWindow};
@@ -21,17 +21,17 @@ use crate::update_check::UpdateService;
 use crate::windows::is_window_label;
 
 /// The menu state one window reported.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WindowMenu {
     theme: &'static str,
-    disabled: HashSet<String>,
+    disabled_mask: u128,
 }
 
 impl Default for WindowMenu {
     fn default() -> Self {
         Self {
             theme: "system",
-            disabled: HashSet::new(),
+            disabled_mask: 0,
         }
     }
 }
@@ -46,15 +46,16 @@ impl WindowMenu {
             .into_iter()
             .find(|mode| *mode == theme)
             .ok_or_else(|| "알 수 없는 테마입니다.".to_string())?;
-        if let Some(unknown) = disabled
-            .iter()
-            .find(|id| !ITEMS.iter().any(|spec| spec.id == id.as_str()))
-        {
-            return Err(format!("알 수 없는 메뉴 항목입니다: {unknown}"));
+        let mut disabled_mask = 0u128;
+        for id in &disabled {
+            let Some(index) = native_menu::item_index(id.as_str()) else {
+                return Err(format!("알 수 없는 메뉴 항목입니다: {id}"));
+            };
+            disabled_mask |= 1u128 << index;
         }
         Ok(Self {
             theme,
-            disabled: disabled.into_iter().collect(),
+            disabled_mask,
         })
     }
 }
@@ -71,7 +72,7 @@ impl MenuStates {
     }
 
     fn get(&self, label: &str) -> WindowMenu {
-        self.states().get(label).cloned().unwrap_or_default()
+        self.states().get(label).copied().unwrap_or_default()
     }
 
     pub fn forget(&self, label: &str) {
@@ -105,7 +106,7 @@ pub fn refresh(app: &AppHandle) -> Result<(), String> {
         &menu,
         &MenuView {
             theme: state.theme,
-            disabled: &state.disabled,
+            disabled_mask: state.disabled_mask,
             update_check,
         },
     )
@@ -143,6 +144,16 @@ pub fn report_menu_state(
 mod tests {
     use super::*;
 
+    impl WindowMenu {
+        pub fn is_enabled(&self, index: usize) -> bool {
+            (self.disabled_mask & (1u128 << index)) == 0
+        }
+
+        pub fn is_disabled(&self, id: &str) -> bool {
+            native_menu::item_index(id).is_some_and(|index| !self.is_enabled(index))
+        }
+    }
+
     fn ids(list: &[&str]) -> Vec<String> {
         list.iter().map(|id| (*id).to_string()).collect()
     }
@@ -151,7 +162,8 @@ mod tests {
     fn a_report_is_accepted_only_with_a_known_theme_and_known_items() {
         let ok = WindowMenu::parse("dark", ids(&["table:sort", "edit:undo"])).unwrap();
         assert_eq!(ok.theme, "dark");
-        assert!(ok.disabled.contains("table:sort"));
+        assert!(ok.is_disabled("table:sort"));
+        assert!(!ok.is_disabled("file:save"));
         assert!(WindowMenu::parse("purple", Vec::new()).is_err());
         assert!(WindowMenu::parse("light", ids(&["app:quit"])).is_err());
         assert!(WindowMenu::parse("light", ids(&["nope"])).is_err());

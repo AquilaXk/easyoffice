@@ -45,26 +45,32 @@
     return row;
   }
 
-  function appendMenuRows(document, menu, select, commit) {
+  function appendMenuRows(document, menu, select, commit, options, optionByValue, rowByValue) {
+    const addOption = (option) => {
+      const row = createOptionRow(document, option, commit);
+      options.push(option);
+      if (!optionByValue.has(option.value)) optionByValue.set(option.value, option);
+      if (!rowByValue.has(option.value)) rowByValue.set(option.value, row);
+      menu.appendChild(row);
+    };
     for (const child of select.children) {
       if (child.tagName === "OPTGROUP") {
         const label = el(document, "div", "custom-select-group");
         label.textContent = child.label || child.getAttribute("label") || "";
         menu.appendChild(label);
-        for (const option of child.children) menu.appendChild(createOptionRow(document, option, commit));
+        for (const option of child.children) addOption(option);
       } else if (child.tagName === "OPTION") {
-        menu.appendChild(createOptionRow(document, child, commit));
+        addOption(child);
       }
     }
   }
 
-  function selectedOption(select) {
-    const options = Array.from(select.querySelectorAll("option"));
-    return options.find((option) => option.value === select.value) || options[0] || null;
+  function selectedOption(select, options, optionByValue) {
+    return optionByValue.get(select.value) || options[0] || null;
   }
 
-  function stepSelection(select, delta) {
-    const options = Array.from(select.querySelectorAll("option"));
+  function stepSelection(select, options, delta) {
+    if (options.length === 0) return;
     const start = options.findIndex((option) => option.value === select.value);
     for (let i = 1; i <= options.length; i += 1) {
       const next = options[(start + delta * i + options.length * i) % options.length];
@@ -129,17 +135,27 @@
     root.appendChild(select);
     select.classList.add("native-select-hidden");
 
+    const options = [];
+    const optionByValue = new Map();
+    const rowByValue = new Map();
+    let selectedRow = null;
+
     const sync = () => {
       root.classList.toggle("disabled", Boolean(select.disabled));
       root.tabIndex = -1;
       trigger.disabled = Boolean(select.disabled);
-      value.textContent = (selectedOption(select)?.textContent || "").trim();
+      value.textContent = (selectedOption(select, options, optionByValue)?.textContent || "").trim();
       value.title = value.textContent;
-      for (const row of menu.querySelectorAll(".custom-select-option")) {
-        const isSelected = row.dataset.value === select.value;
-        row.classList.toggle("selected", isSelected);
-        row.setAttribute("aria-selected", isSelected ? "true" : "false");
+      const nextRow = rowByValue.get(select.value) || null;
+      if (selectedRow && selectedRow !== nextRow) {
+        selectedRow.classList.remove("selected");
+        selectedRow.setAttribute("aria-selected", "false");
       }
+      if (nextRow) {
+        nextRow.classList.add("selected");
+        nextRow.setAttribute("aria-selected", "true");
+      }
+      selectedRow = nextRow;
     };
     const close = () => {
       root.classList.remove("open");
@@ -163,7 +179,15 @@
     };
     const rebuild = () => {
       menu.replaceChildren();
-      appendMenuRows(document, menu, select, commit);
+      options.length = 0;
+      optionByValue.clear();
+      rowByValue.clear();
+      selectedRow = null;
+      appendMenuRows(document, menu, select, commit, options, optionByValue, rowByValue);
+      for (const row of rowByValue.values()) {
+        row.classList.remove("selected");
+        row.setAttribute("aria-selected", "false");
+      }
       sync();
     };
 
@@ -172,7 +196,7 @@
       event.stopPropagation?.();
       toggle();
     });
-    root.addEventListener("keydown", (event) => onKeydown(event, { select, close, toggle, sync }));
+    root.addEventListener("keydown", (event) => onKeydown(event, { select, options, close, toggle, sync }));
     document.addEventListener("mousedown", (event) => {
       if (!root.contains(event.target)) close();
     });
@@ -186,7 +210,7 @@
   }
 
   function onKeydown(event, ctl) {
-    const { select, close, toggle, sync } = ctl;
+    const { select, options, close, toggle, sync } = ctl;
     if (select.disabled) return;
     if (event.key === "Escape") {
       close();
@@ -195,7 +219,7 @@
       toggle();
       event.preventDefault?.();
     } else if (KEY_STEP[event.key]) {
-      stepSelection(select, KEY_STEP[event.key]);
+      stepSelection(select, options, KEY_STEP[event.key]);
       select.dispatchEvent(makeChangeEvent(select));
       sync();
       event.preventDefault?.();

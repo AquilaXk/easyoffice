@@ -18,11 +18,12 @@ const ZIP64_MARKER_32: u32 = 0xFFFF_FFFF;
 const METHOD_STORED: u16 = 0;
 const METHOD_DEFLATED: u16 = 8;
 const FLAG_ENCRYPTED: u16 = 1;
-/// Name stems of the thumbnail entries: HWPX, OOXML and ODF.
-const STEMS: [&str; 3] = [
+/// Name stems of the thumbnail entries: HWPX, OOXML, ODF and Pages.
+const STEMS: [&str; 4] = [
     "Preview/PrvImage",
     "docProps/thumbnail",
     "Thumbnails/thumbnail",
+    "QuickLook/Thumbnail",
 ];
 const EXTENSIONS: [&str; 5] = ["png", "jpg", "jpeg", "gif", "bmp"];
 

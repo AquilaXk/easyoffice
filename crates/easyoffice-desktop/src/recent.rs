@@ -39,12 +39,18 @@ pub struct RecentView {
 
 /// Opaque, stable id of a path (FNV-1a over the comparison key); it cannot be turned back into a path.
 pub fn recent_id(path: &Path) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in path_key(path).bytes() {
         hash ^= u64::from(byte);
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }
-    format!("{hash:016x}")
+    let mut hex = [0u8; 16];
+    for (i, &byte) in hash.to_be_bytes().iter().enumerate() {
+        hex[i * 2] = HEX[usize::from(byte >> 4)];
+        hex[i * 2 + 1] = HEX[usize::from(byte & 0x0f)];
+    }
+    std::str::from_utf8(&hex).unwrap_or_default().to_string()
 }
 
 #[derive(Debug, Default, Clone)]

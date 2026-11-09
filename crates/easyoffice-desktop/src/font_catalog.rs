@@ -44,9 +44,6 @@ const MAX_NAME_CHARS: usize = 1024;
 const MAX_ALIASES: usize = 32;
 /// Bytes of a random list revision.
 const REVISION_BYTES: usize = 8;
-const FONT_EXTENSIONS: [&str; 4] = ["ttf", "otf", "ttc", "otc"];
-/// First four bytes of a TrueType (1.0 and `true`), OpenType (CFF) and collection file.
-const SFNT_SIGNATURES: [[u8; 4]; 4] = [[0, 1, 0, 0], *b"true", *b"OTTO", *b"ttcf"];
 
 const MSG_NO_LIST: &str = "글꼴 목록이 없거나 오래되어 읽기를 거부했습니다.";
 const MSG_UNREADABLE: &str = "시스템 글꼴을 읽을 수 없습니다.";
@@ -145,13 +142,16 @@ impl Catalog {
 }
 
 fn has_font_extension(path: &Path) -> bool {
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| {
-            FONT_EXTENSIONS
-                .iter()
-                .any(|known| ext.eq_ignore_ascii_case(known))
-        })
+    let Some(ext) = path.extension().and_then(|ext| ext.to_str()) else {
+        return false;
+    };
+    let [b0, b1, b2] = *ext.as_bytes() else {
+        return false;
+    };
+    matches!(
+        &[b0 | 0x20, b1 | 0x20, b2 | 0x20],
+        b"ttf" | b"otf" | b"ttc" | b"otc"
+    )
 }
 
 /// The family names of a face, English (United States) first, trimmed, without empty or oversized
@@ -175,10 +175,10 @@ fn family_names(families: &[(String, Language)]) -> Vec<String> {
 
 fn bounded(text: &str) -> String {
     let text = text.trim();
-    if text.chars().count() > MAX_NAME_CHARS {
-        String::new()
-    } else {
+    if text.len() <= MAX_NAME_CHARS || text.chars().count() <= MAX_NAME_CHARS {
         text.to_string()
+    } else {
+        String::new()
     }
 }
 
@@ -341,6 +341,13 @@ impl SystemFonts {
     }
 }
 
+fn is_sfnt(head: &[u8; 4]) -> bool {
+    matches!(
+        u32::from_be_bytes(*head),
+        0x0001_0000 | 0x7472_7565 | 0x4F54_544F | 0x7474_6366
+    )
+}
+
 /// Reads at most [`MAX_FONT_BYTES`] and accepts only a font signature. Reading one byte more than
 /// the bound catches a file that grew after it was measured.
 fn read_font(source: &mut impl Read) -> Result<Vec<u8>, String> {
@@ -353,15 +360,21 @@ fn read_font(source: &mut impl Read) -> Result<Vec<u8>, String> {
         return Err(MSG_TOO_LARGE.to_string());
     }
     match bytes.first_chunk::<4>() {
-        Some(head) if SFNT_SIGNATURES.contains(head) => Ok(bytes),
+        Some(head) if is_sfnt(head) => Ok(bytes),
         _ => Err(MSG_NOT_A_FONT.to_string()),
     }
 }
 
 fn new_revision() -> Result<String, String> {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut bytes = [0u8; REVISION_BYTES];
     getrandom::fill(&mut bytes).map_err(|_| MSG_UNREADABLE.to_string())?;
-    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+    let mut hex = [0u8; REVISION_BYTES * 2];
+    for (i, &byte) in bytes.iter().enumerate() {
+        hex[i * 2] = HEX[usize::from(byte >> 4)];
+        hex[i * 2 + 1] = HEX[usize::from(byte & 0x0f)];
+    }
+    Ok(std::str::from_utf8(&hex).unwrap_or_default().to_string())
 }
 
 fn worker_failed(err: tauri::Error) -> IpcError {

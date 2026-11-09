@@ -32,8 +32,6 @@
 //!   state of the bar follows the focused window ([`sync`], fed by `menu_state.rs`).
 //!   The disabled ids come from the page, which owns the module rules (`studioCommandApplies`).
 
-use std::collections::HashSet;
-
 use tauri::menu::{
     CheckMenuItem, CheckMenuItemBuilder, Menu, MenuItemBuilder, MenuItemKind, PredefinedMenuItem,
     Submenu, SubmenuBuilder,
@@ -520,12 +518,16 @@ fn is_check_item(id: &str) -> bool {
 const MAX_ID_LEN: usize = 32;
 const SCRIPT_PREFIX: &str = "window.__EASYOFFICE_NATIVE_MENU__&&window.__EASYOFFICE_NATIVE_MENU__(";
 
+const _: () = assert!(ITEMS.len() <= u128::BITS as usize);
+
+/// Index of a menu id in [`ITEMS`], if the id is one of ours.
+pub fn item_index(id: &str) -> Option<usize> {
+    ITEMS.iter().position(|spec| spec.id == id)
+}
+
 /// The page action of a menu id, if the id is one of ours.
 pub fn action_for(id: &str) -> Option<&'static str> {
-    ITEMS
-        .iter()
-        .find(|spec| spec.id == id)
-        .map(|spec| spec.action)
+    item_index(id).map(|index| ITEMS[index].action)
 }
 
 /// The script that runs a menu item in the page. Only ids of [`ITEMS`] produce one, and the id is
@@ -840,8 +842,8 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
 pub struct MenuView<'a> {
     /// Theme mode of the window: `system`, `light` or `dark`.
     pub theme: &'a str,
-    /// Ids of the table items the window's module cannot use.
-    pub disabled: &'a HashSet<String>,
+    /// Bit `i` is set when `ITEMS[i]` cannot be used in the window's module.
+    pub disabled_mask: u128,
     /// The update-check switch: `None` when the app does not check at all (it is then disabled).
     pub update_check: Option<bool>,
 }
@@ -852,7 +854,11 @@ fn check_state(id: &str, view: &MenuView) -> Option<(bool, bool)> {
         return Some((view.update_check == Some(true), view.update_check.is_some()));
     }
     let theme = theme_item_id(view.theme);
-    is_check_item(id).then(|| (theme == Some(id), !view.disabled.contains(id)))
+    is_check_item(id).then(|| {
+        let enabled =
+            item_index(id).is_none_or(|index| (view.disabled_mask & (1u128 << index)) == 0);
+        (theme == Some(id), enabled)
+    })
 }
 
 /// Visits every item of the bar, submenus included.
@@ -885,9 +891,10 @@ pub fn sync<R: Runtime>(menu: &Menu<R>, view: &MenuView) -> tauri::Result<()> {
                 .map_or(Ok(()), |(checked, enabled)| {
                     check.set_checked(checked).and(check.set_enabled(enabled))
                 }),
-            MenuItemKind::MenuItem(plain) if ITEMS.iter().any(|spec| spec.id == id) => {
-                plain.set_enabled(!view.disabled.contains(id))
-            }
+            MenuItemKind::MenuItem(plain) => match item_index(id) {
+                Some(index) => plain.set_enabled((view.disabled_mask & (1u128 << index)) == 0),
+                None => Ok(()),
+            },
             _ => Ok(()),
         };
         failed = failed.take().or(result.err());
@@ -1319,10 +1326,9 @@ mod tests {
 
     #[test]
     fn exactly_the_current_theme_is_checked_and_the_update_switch_follows_the_app() {
-        let none = HashSet::new();
         let view = |theme, update_check| MenuView {
             theme,
-            disabled: &none,
+            disabled_mask: 0,
             update_check,
         };
         for mode in ["system", "light", "dark"] {

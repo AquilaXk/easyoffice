@@ -50,7 +50,7 @@ impl WindowKind {
     /// Document kind a file opens in, by extension (the same families the WebUI file open accepts).
     pub fn for_extension(ext: &str) -> Option<Self> {
         match ext.to_ascii_lowercase().as_str() {
-            "docx" | "doc" | "odt" | "rtf" | "md" | "markdown" | "txt" => Some(Self::Doc),
+            "docx" | "doc" | "odt" | "rtf" | "md" | "markdown" | "txt" | "pages" => Some(Self::Doc),
             "hwp" | "hwpx" | "hwt" | "hwtx" => Some(Self::Hwp),
             "xlsx" | "xls" | "ods" | "csv" | "tsv" => Some(Self::Sheet),
             "pptx" | "ppt" | "ppsx" | "odp" => Some(Self::Slide),
@@ -395,6 +395,7 @@ mod tests {
         }
         assert_eq!(WindowKind::parse("evil"), None);
         assert_eq!(WindowKind::for_extension("DOCX"), Some(WindowKind::Doc));
+        assert_eq!(WindowKind::for_extension("pages"), Some(WindowKind::Doc));
         assert_eq!(WindowKind::for_extension("hwpx"), Some(WindowKind::Hwp));
         assert_eq!(WindowKind::for_extension("csv"), Some(WindowKind::Sheet));
         assert_eq!(WindowKind::for_extension("ppsx"), Some(WindowKind::Slide));
