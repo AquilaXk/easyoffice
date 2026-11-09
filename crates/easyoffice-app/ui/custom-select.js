@@ -108,7 +108,7 @@
     if (ENHANCED.has(select) || select.dataset.nativeSelect === "true") return;
     const root = el(document, "div", ("custom-select " + select.className).trim());
     root.dataset.selectId = select.id || "";
-    root.tabIndex = select.disabled ? -1 : 0;
+    root.tabIndex = -1;
     const trigger = el(document, "button", "custom-select-trigger");
     trigger.type = "button";
     trigger.setAttribute("aria-haspopup", "listbox");
@@ -131,12 +131,14 @@
 
     const sync = () => {
       root.classList.toggle("disabled", Boolean(select.disabled));
-      root.tabIndex = select.disabled ? -1 : 0;
+      root.tabIndex = -1;
       trigger.disabled = Boolean(select.disabled);
       value.textContent = (selectedOption(select)?.textContent || "").trim();
       value.title = value.textContent;
       for (const row of menu.querySelectorAll(".custom-select-option")) {
-        row.classList.toggle("selected", row.dataset.value === select.value);
+        const isSelected = row.dataset.value === select.value;
+        row.classList.toggle("selected", isSelected);
+        row.setAttribute("aria-selected", isSelected ? "true" : "false");
       }
     };
     const close = () => {
@@ -157,7 +159,7 @@
       select.dispatchEvent(makeChangeEvent(select));
       sync();
       close();
-      root.focus?.();
+      trigger.focus?.();
     };
     const rebuild = () => {
       menu.replaceChildren();

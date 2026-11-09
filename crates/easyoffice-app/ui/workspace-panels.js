@@ -838,12 +838,8 @@
       return true;
     }
 
-    function insertSlideStageObject(cmdId, execRes) {
-      const lowerZone = document.getElementById("slide-lower-zone");
-      const curSlide = slideDeckState[getActiveSlideIndex()];
-      const summary = execRes?.summary || cmdId;
-      if (!lowerZone || !curSlide) return false;
-      if (cmdId === "slide-insert-table") {
+    const SLIDE_STAGE_OBJECT_BUILDERS = {
+      "slide-insert-table": (summary) => {
         const tbl = document.createElement("table");
         tbl.className = "sheet-table slide-table-obj";
         tbl.dataset.slideObject = "table";
@@ -863,22 +859,30 @@
         tbody.appendChild(r1);
         tbody.appendChild(r2);
         tbl.appendChild(tbody);
-        lowerZone.appendChild(tbl);
-      } else if (cmdId === "slide-insert-chart") {
+        return tbl;
+      },
+      "slide-insert-chart": (summary) => {
         const chartDiv = document.createElement("div");
         chartDiv.className = "slide-chart-obj";
         chartDiv.dataset.slideObject = "chart";
         chartDiv.textContent = "[슬라이드 차트 개체 · 분기 실적 추이 (" + summary + ")]";
-        lowerZone.appendChild(chartDiv);
-      } else if (cmdId === "slide-insert-shape") {
+        return chartDiv;
+      },
+      "slide-insert-shape": (summary) => {
         const shapeDiv = document.createElement("div");
         shapeDiv.className = "slide-shape-obj";
         shapeDiv.dataset.slideObject = "shape";
         shapeDiv.textContent = "[슬라이드 도형·프로세스 블록 (" + summary + ")]";
-        lowerZone.appendChild(shapeDiv);
-      } else {
-        return false;
-      }
+        return shapeDiv;
+      },
+    };
+
+    function insertSlideStageObject(cmdId, execRes) {
+      const lowerZone = document.getElementById("slide-lower-zone");
+      const curSlide = slideDeckState[getActiveSlideIndex()];
+      const buildNode = SLIDE_STAGE_OBJECT_BUILDERS[cmdId];
+      if (!lowerZone || !curSlide || typeof buildNode !== "function") return false;
+      lowerZone.appendChild(buildNode(execRes?.summary || cmdId));
       syncActiveSlideDomStylesToDeck();
       return true;
     }

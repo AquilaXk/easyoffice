@@ -123,6 +123,7 @@
   // Mirrors easyoffice_formats::evaluate_table_formulas: row-major, so a later formula sees the
   // computed value of an earlier one. Returns a same-shaped grid of computed values (null = none).
   function evaluateDocTableFormulas(textRows) {
+    const { aggregateNumbers } = host.__EASYOFFICE_SHEET_UTILS__;
     const rows = textRows.map((r) => r.slice());
     const values = textRows.map((r) => r.map(() => null));
     rows.forEach((row, r) => {
@@ -135,13 +136,14 @@
         else if (f.dir === "LEFT") operands = row.slice(0, c);
         else operands = row.slice(c + 1);
         const nums = operands.map(parseTableNumber).filter((n) => n !== null);
+        const { count, sum, min, max, avg } = aggregateNumbers(nums);
         let v = 0;
-        if (f.func === "SUM") v = nums.reduce((a, b) => a + b, 0);
-        else if (f.func === "COUNT") v = nums.length;
-        else if (nums.length > 0 && f.func === "AVERAGE") v = nums.reduce((a, b) => a + b, 0) / nums.length;
-        else if (nums.length > 0 && f.func === "MAX") v = Math.max(...nums);
-        else if (nums.length > 0 && f.func === "MIN") v = Math.min(...nums);
-        else if (nums.length > 0 && f.func === "PRODUCT") v = nums.reduce((a, b) => a * b, 1);
+        if (f.func === "SUM") v = sum;
+        else if (f.func === "COUNT") v = count;
+        else if (count > 0 && f.func === "AVERAGE") v = avg;
+        else if (count > 0 && f.func === "MAX") v = max;
+        else if (count > 0 && f.func === "MIN") v = min;
+        else if (count > 0 && f.func === "PRODUCT") v = nums.reduce((a, b) => a * b, 1);
         const shown = formatTableNumber(v);
         rows[r][c] = shown;
         values[r][c] = shown;

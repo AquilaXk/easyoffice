@@ -235,10 +235,12 @@
 
     // Raw value of a cell: the unformatted number when the display was rounded.
 
-    function createTd(ref) {
+    function createTd(ref, r, c) {
       const td = document.createElement("td");
       td.setAttribute("contenteditable", "true");
       td.dataset.cell = ref;
+      td._row = r;
+      td._col = c;
       paintTd(td, getEntry(ref));
       if (hooks.bindTd) hooks.bindTd(td);
       return td;
@@ -291,7 +293,10 @@
       if (v.layout && v.c0 > 1) list.push(spacerCell());
       for (let c = v.c0; c <= v.c1; c += 1) {
         const ref = refOf(r, c);
-        list.push(old.get(ref) || createTd(ref));
+        const td = old.get(ref) || createTd(ref, r, c);
+        td._row = r;
+        td._col = c;
+        list.push(td);
       }
       if (v.layout && v.c1 < MAX_COLS) list.push(spacerCell());
       tr.replaceChildren(...list);
@@ -377,9 +382,11 @@
     }
 
     function insertMissingRows(tbody, existing, next) {
-      const rowsAsc = Array.from(existing.keys()).sort((a, b) => a - b);
-      const firstTr = rowsAsc.length > 0 ? existing.get(rowsAsc[0]) : null;
-      const minExisting = rowsAsc.length > 0 ? rowsAsc[0] : Number.POSITIVE_INFINITY;
+      let minExisting = Number.POSITIVE_INFINITY;
+      for (const k of existing.keys()) {
+        if (k < minExisting) minExisting = k;
+      }
+      const firstTr = minExisting < Number.POSITIVE_INFINITY ? existing.get(minExisting) : null;
       for (let r = next.r0; r <= next.r1; r += 1) {
         if (existing.has(r)) continue;
         const tr = buildRow(r, next);

@@ -312,9 +312,26 @@
       menu.querySelector("button:not([disabled])")?.focus();
     }
 
+    function handleThumbKeydown(ev) {
+      if (ev.defaultPrevented || ev.altKey || ev.ctrlKey || ev.metaKey || ev.shiftKey) return false;
+      if (!deck.length) return false;
+      const cur = getActiveSlideIndex();
+      let next = -1;
+      if (ev.key === "ArrowUp") next = Math.max(0, cur - 1);
+      else if (ev.key === "ArrowDown") next = Math.min(deck.length - 1, cur + 1);
+      else if (ev.key === "Home") next = 0;
+      else if (ev.key === "End") next = deck.length - 1;
+      else return false;
+      ev.preventDefault();
+      getPanels().switchToSlideIndex(next);
+      focusThumb(next);
+      return true;
+    }
+
     function bindThumbList() {
       const list = byId("slide-thumb-list");
       if (!list) return;
+      list.addEventListener("keydown", handleThumbKeydown);
       list.addEventListener("click", (ev) => {
         const idx = thumbIndexFromEvent(ev);
         if (idx < 0) return;
@@ -517,6 +534,11 @@
         e.preventDefault();
         closeMenu();
         return true;
+      }
+      const list = byId("slide-thumb-list");
+      const target = e.target || document.activeElement;
+      if (getActiveModule() === "SLIDE" && list && target && list.contains?.(target)) {
+        if (handleThumbKeydown(e)) return true;
       }
       return false;
     }

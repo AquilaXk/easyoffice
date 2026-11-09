@@ -20,9 +20,24 @@
   ];
 
   function asciiUpperJs(str) {
-    return String(str ?? "").replaceAll(/[a-z]/g, (c) =>
-      String.fromCodePoint(c.codePointAt(0) - 32)
-    );
+    const s = String(str ?? "");
+    for (let i = 0; i < s.length; i++) {
+      const c = s.charCodeAt(i);
+      if (c >= 97 && c <= 122) {
+        let out = s.slice(0, i) + String.fromCharCode(c - 32);
+        let start = i + 1;
+        for (let j = start; j < s.length; j++) {
+          const cj = s.charCodeAt(j);
+          if (cj >= 97 && cj <= 122) {
+            if (j > start) out += s.slice(start, j);
+            out += String.fromCharCode(cj - 32);
+            start = j + 1;
+          }
+        }
+        return start < s.length ? out + s.slice(start) : out;
+      }
+    }
+    return s;
   }
 
   function quoteFormulaSheetName(sheetName) {
@@ -512,6 +527,7 @@
     const counts = { resident: 0, phone: 0, email: 0, identifier: 0 };
     const spans = [];
     let idx = 0;
+    let plainStart = 0;
     let emailFailedUntil = 0;
 
     while (idx < text.length) {
@@ -523,16 +539,18 @@
       }
       hit ??= matchNonEmailPiiAtJs(text, idx);
       if (hit) {
+        if (idx > plainStart) scrubbedText += text.slice(plainStart, idx);
         scrubbedText += hit.replacement;
         spans.push({ start: idx, end: idx + hit.len, replacement: hit.replacement });
         counts[hit.kind] += 1;
         idx += hit.len;
+        plainStart = idx;
         continue;
       }
-      const step = text.codePointAt(idx) > 0xffff ? 2 : 1;
-      scrubbedText += text.slice(idx, idx + step);
-      idx += step;
+      idx += text.codePointAt(idx) > 0xffff ? 2 : 1;
     }
+    if (plainStart === 0) scrubbedText = text;
+    else if (plainStart < text.length) scrubbedText += text.slice(plainStart);
 
     return {
       scrubbedText,
@@ -741,6 +759,21 @@
     }
   }
 
+  function aggregateNumbers(nums) {
+    const count = Array.isArray(nums) ? nums.length : 0;
+    if (count === 0) return { count: 0, sum: 0, min: 0, max: 0, avg: 0 };
+    let sum = 0;
+    let min = Number(nums[0]);
+    let max = min;
+    for (let i = 0; i < count; i++) {
+      const v = Number(nums[i]);
+      sum += v;
+      if (v < min) min = v;
+      if (v > max) max = v;
+    }
+    return { count, sum, min, max, avg: sum / count };
+  }
+
   host.__EASYOFFICE_SHEET_UTILS__ = {
     asciiUpperJs,
     quoteFormulaSheetName,
@@ -749,6 +782,8 @@
     colIndexToLetters,
     colLettersToIndex,
     normalizeFormattedNumericCell,
+    aggregateNumbers,
+    base64ToBytes,
     localScrubPii,
     serializeDomChildren,
     restoreDomChildren,

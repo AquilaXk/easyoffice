@@ -1,40 +1,10 @@
 (function (host) {
   "use strict";
 
-  const astApi = host.__EASYOFFICE_SHEET_UTILS__ || {};
-  function fallbackIsFormulaStr(raw) {
-    const s = String(raw ?? "").trim();
-    return s.startsWith("=") || /^(?:of|oooc|msoxl):\s*=/i.test(s);
-  }
-  function fallbackAsciiUpper(str) {
-    return String(str ?? "").replaceAll(/[a-z]/g, (c) =>
-      String.fromCodePoint(c.codePointAt(0) - 32)
-    );
-  }
-  function fallbackQuoteFormulaSheetName(sheetName) {
-    const raw = String(sheetName ?? "");
-    if (!raw) return "''";
-    const needsQuote =
-      raw !== raw.trim() ||
-      !/^\w+$/.test(raw) ||
-      /^\d/.test(raw) ||
-      /^[A-Za-z]{1,3}\d+$/.test(raw) ||
-      /^(?:TRUE|FALSE)$/i.test(raw);
-    if (needsQuote) {
-      return "'" + raw.replaceAll("'", "''") + "'";
-    }
-    return raw;
-  }
-  const isFormulaStr =
-    typeof astApi.isFormulaStringJs === "function"
-      ? astApi.isFormulaStringJs
-      : fallbackIsFormulaStr;
-  const asciiUpper =
-    typeof astApi.asciiUpperJs === "function" ? astApi.asciiUpperJs : fallbackAsciiUpper;
-  const quoteFormulaSheetName =
-    typeof astApi.quoteFormulaSheetName === "function"
-      ? astApi.quoteFormulaSheetName
-      : fallbackQuoteFormulaSheetName;
+  const astApi = host.__EASYOFFICE_SHEET_UTILS__;
+  const isFormulaStr = astApi.isFormulaStringJs;
+  const asciiUpper = astApi.asciiUpperJs;
+  const quoteFormulaSheetName = astApi.quoteFormulaSheetName;
 
   function cloneStore(sheets) {
     const fast = host.__EASYOFFICE_SHEET_GRID_UTILS__?.cloneSheetStore;

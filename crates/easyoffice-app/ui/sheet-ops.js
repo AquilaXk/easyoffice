@@ -149,12 +149,12 @@
     }
 
     function applySheetPivotOrChartSummary(mode, execRes) {
+      const { aggregateNumbers } = host.__EASYOFFICE_SHEET_UTILS__;
       const map = snapshotDomSheetCells();
       const nums = [];
       scanDataRange(map, nums);
-      const sum = nums.reduce((acc, v) => acc + v, 0);
-      const avg = nums.length > 0 ? Math.round((sum / nums.length) * 10) / 10 : 0;
-      const maxVal = nums.length > 0 ? Math.max(...nums) : 0;
+      const { count, sum, max: maxVal, avg: rawAvg } = aggregateNumbers(nums);
+      const avg = count > 0 ? Math.round(rawAvg * 10) / 10 : 0;
       const prefix = mode === "pivot" ? "피벗 집계" : "차트 데이터 요약";
       const summaryToken = execRes?.summary || mode;
       const summaryLine =
@@ -178,12 +178,14 @@
     }
 
     function toggleSheetConditionalFormatting(enabled) {
+      const { aggregateNumbers } = host.__EASYOFFICE_SHEET_UTILS__;
       const curSheet = getActiveSheetName();
       const map = snapshotDomSheetCells();
       sheetDataStore[curSheet] = map;
       const refNums = [];
       scanDataRange(map, refNums);
-      const avg = refNums.length > 0 ? refNums.reduce((a, b) => a + b, 0) / refNums.length : 800;
+      const { count, avg: rawAvg } = aggregateNumbers(refNums);
+      const avg = count > 0 ? rawAvg : 800;
       Object.keys(map).forEach((ref) => {
         const entry = map[ref];
         if (!enabled) {

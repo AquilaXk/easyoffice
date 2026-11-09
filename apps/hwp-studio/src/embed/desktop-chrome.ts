@@ -14,6 +14,7 @@ export function macShortcutLabel(label: string): string {
   return label
     .replace(/\bCtrl\+/g, '⌘')
     .replace(/\bAlt\+/g, '⌥')
+    .replace(/\bOption\+/g, '⌥')
     .replace(/\bShift\+/g, '⇧');
 }
 

@@ -180,11 +180,11 @@
     function triggerBase64Download(base64Data, baseFilename, ext) {
       if (!base64Data) return false;
       try {
-        const binStr = host.atob(base64Data);
-        const bytes = new Uint8Array(binStr.length);
-        for (let i = 0; i < binStr.length; i += 1) {
-          bytes[i] = binStr.codePointAt(i);
-        }
+        const base64ToBytes = host.__EASYOFFICE_SHEET_UTILS__?.base64ToBytes;
+        const bytes =
+          typeof base64ToBytes === "function"
+            ? base64ToBytes(base64Data)
+            : Uint8Array.from(host.atob(base64Data), (c) => c.codePointAt(0));
         const blob = new Blob([bytes], { type: "application/octet-stream" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
@@ -324,12 +324,49 @@
 
     let insertModeLabel = "삽입";
 
-    function updateStudioPosition(text, chars, estPages) {
+    function isWhitespaceCode(c) {
+      if (c <= 0x20) return c === 0x20 || (c >= 0x09 && c <= 0x0d);
+      return (
+        c === 0xa0 ||
+        c === 0x1680 ||
+        (c >= 0x2000 && c <= 0x200a) ||
+        c === 0x2028 ||
+        c === 0x2029 ||
+        c === 0x202f ||
+        c === 0x205f ||
+        c === 0x3000 ||
+        c === 0xfeff
+      );
+    }
+
+    function countTextMetrics(text) {
+      const s = String(text || "");
+      if (s.length === 0) return { chars: 0, words: 0, lineCount: 1 };
+      let chars = 0;
+      let words = 1;
+      let lineCount = 1;
+      let inSpace = false;
+      let inNewline = false;
+      for (let i = 0; i < s.length; ) {
+        const cp = s.codePointAt(i);
+        chars += 1;
+        i += cp > 0xffff ? 2 : 1;
+        const space = isWhitespaceCode(cp);
+        if (space && !inSpace) words += 1;
+        inSpace = space;
+        const nl = cp === 10;
+        if (nl && !inNewline) lineCount += 1;
+        inNewline = nl;
+      }
+      return { chars, words, lineCount };
+    }
+
+    function updateStudioPosition(text, chars, estPages, precomputedLines) {
       const posEl = document.getElementById("status-studio-pos");
       if (!posEl) return;
       const editor = document.getElementById("doc-editor");
       const cols = Number.parseInt(editor?.style?.columnCount || "1", 10) || 1;
-      const lineCount = Math.max(1, text ? text.split(/\n+/).length : 1);
+      const lineCount = precomputedLines ?? countTextMetrics(text).lineCount;
       const colChars = Math.max(1, chars % 60 || Math.min(60, chars));
       posEl.textContent =
         "1/" + estPages + " 쪽   " + cols + "단   " + lineCount + "줄   " + colChars + "칸 | 구역: 1 / 1 |";
@@ -350,8 +387,7 @@
       const statsEl = document.getElementById("smart-stats");
       if (!statsEl) return;
       const text = extractEditableDocumentText();
-      const chars = Array.from(text).length;
-      const words = text ? text.split(/\s+/).length : 0;
+      const { chars, words, lineCount } = countTextMetrics(text);
       const secs = Math.max(1, Math.ceil((words / 220) * 60));
       statsEl.textContent = "문자: " + chars + " · 단어: " + words + " · 읽기 시간: " + secs + "초";
       const estPages = Math.max(1, Math.ceil(chars / 1200));
@@ -359,7 +395,7 @@
       if (zoneEl) {
         zoneEl.textContent = "1 / " + estPages + " 쪽 · 구역: 1 / 1 · " + insertModeLabel;
       }
-      updateStudioPosition(text, chars, estPages);
+      updateStudioPosition(text, chars, estPages, lineCount);
       updateDocFilename(estPages);
     }
 
@@ -745,6 +781,11 @@
       studioActions = actions || {};
       const editor = document.getElementById("doc-editor");
       for (const closer of document.querySelectorAll("[data-dialog-close]")) closer.addEventListener("click", () => closer.closest("dialog")?.close?.());
+      for (const dlg of document.querySelectorAll("dialog.tool-dialog")) {
+        dlg.addEventListener("click", (ev) => {
+          if (ev.target === dlg) dlg.close?.();
+        });
+      }
       bindStudioMenuBar(editor, onStudioCmd);
       for (const btn of document.querySelectorAll("#icon-toolbar [data-studio-cmd]")) {
         btn.addEventListener("click", () => {

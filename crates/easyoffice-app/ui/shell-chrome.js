@@ -43,6 +43,7 @@
     "view:zoom-out": "studio-cmd:zoom-out",
     "view:zoom-fit-page": "studio-cmd:zoom-fit-page",
     "view:zoom-fit-width": "studio-cmd:zoom-fit-width",
+    "view:zoom-dialog": "hwp-editor",
     "view:zoom-100": "studio-cmd:view-zoom",
     "view:split": "studio-cmd:view-split",
     "view:outline": "studio-cmd:view-outline",
@@ -50,6 +51,8 @@
     "view:theme-light": "theme:light",
     "view:theme-dark": "theme:dark",
     "view:theme-toggle": "studio-cmd:view-theme",
+    "view:toolbar-labels": "hwp-editor",
+    "view:form-mode": "hwp-editor",
     "view:ctrl-marks": "studio-cmd:ctrl-marks",
     "view:para-marks": "studio-cmd:para-marks",
     "view:doc-grid": "studio-cmd:doc-grid",
@@ -128,6 +131,9 @@
     "view:zoom-100": "view:zoom-100",
     "view:zoom-fit-page": "view:zoom-fit-page",
     "view:zoom-fit-width": "view:zoom-fit-width",
+    "view:zoom-dialog": "view:zoom-dialog",
+    "view:toolbar-labels": "view:toolbar-labels",
+    "view:form-mode": "view:form-mode",
     "table:cell-select": "table:cell-selection-enter",
     "table:merge": "table:cell-merge",
     "table:cell-split": "table:cell-split",
@@ -331,6 +337,9 @@
       }
       const closeBtn = document.getElementById("btn-about-close");
       if (closeBtn && dialog) closeBtn.addEventListener("click", () => dialog.close?.());
+      dialog?.addEventListener?.("click", (ev) => {
+        if (ev.target === dialog) dialog.close?.();
+      });
     }
 
     // "Version x.y.z" under the product name (the reference app's wording).

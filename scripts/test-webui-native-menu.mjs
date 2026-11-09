@@ -63,6 +63,9 @@ const EXPECTED_EDITOR_COMMANDS = {
   "view:zoom-100": "view:zoom-100",
   "view:zoom-fit-page": "view:zoom-fit-page",
   "view:zoom-fit-width": "view:zoom-fit-width",
+  "view:zoom-dialog": "view:zoom-dialog",
+  "view:toolbar-labels": "view:toolbar-labels",
+  "view:form-mode": "view:form-mode",
   "table:cell-select": "table:cell-selection-enter",
   "table:merge": "table:cell-merge",
   "table:cell-split": "table:cell-split",
@@ -81,7 +84,13 @@ test("the native menu ids that reach the Hangul editor map to the reference app'
   for (const id of Object.keys(EXPECTED_EDITOR_COMMANDS)) assert.ok(rust.has(id), `${id} is in the Rust table`);
   // Items that exist only for the editor have no page action of their own: they are the `hwp-editor` ones.
   const editorOnly = Object.keys(NATIVE_MENU_ACTIONS).filter((id) => NATIVE_MENU_ACTIONS[id] === "hwp-editor");
-  assert.deepEqual(editorOnly.sort((a, b) => a.localeCompare(b)), ["table:cell-select", "table:cell-split"]);
+  assert.deepEqual(editorOnly.sort((a, b) => a.localeCompare(b)), [
+    "table:cell-select",
+    "table:cell-split",
+    "view:form-mode",
+    "view:toolbar-labels",
+    "view:zoom-dialog",
+  ]);
   assert.equal(rust.get("table:cell-select").accelerator, "CmdOrCtrl+Alt+T");
   assert.equal(rust.get("view:zoom-100").accelerator, "CmdOrCtrl+0");
   assert.deepEqual(["table:cell-select", "table:merge", "table:cell-split"].map((id) => rust.get(id).label), ["셀 선택", "셀 합치기", "셀 나누기"]);

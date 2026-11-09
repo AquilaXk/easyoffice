@@ -726,6 +726,7 @@
       isFormulaStr,
       getSheetName: () => getActiveSheetName(),
       getEntry: entryAt,
+      getEntryCount: () => Object.keys(activeSheetMap()).length,
       forEachEntryRef: (cb) => {
         Object.keys(activeSheetMap()).forEach((ref) => {
           const p = gridUtils.parseRef(ref);

@@ -192,9 +192,11 @@ async function loadHelpers() {
   const env = {};
   globalThis.__EASYOFFICE_HOST_ENV__ = env;
   try {
-    const path = require.resolve("../crates/easyoffice-app/ui/save-payload.js");
-    delete require.cache[path];
-    require(path);
+    for (const rel of ["../crates/easyoffice-app/ui/sheet-utils.js", "../crates/easyoffice-app/ui/save-payload.js"]) {
+      const path = require.resolve(rel);
+      delete require.cache[path];
+      require(path);
+    }
   } finally {
     delete globalThis.__EASYOFFICE_HOST_ENV__;
   }

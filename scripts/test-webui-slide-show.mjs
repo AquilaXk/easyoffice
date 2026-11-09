@@ -276,7 +276,15 @@ test("Alt+Up / Alt+Down / Delete work from the focused thumbnail and never insid
   await flushAsyncTurns();
   const second = document.activeElement;
   assert.equal(second.dataset.slideIdx, "1", "clicking a thumbnail keeps keyboard focus on it");
-  const ev = sandbox.dispatchWindowKeydown({ key: "ArrowUp", altKey: true, target: second });
+  sandbox.dispatchWindowKeydown({ key: "ArrowUp", target: second });
+  assert.equal(document.activeElement.dataset.slideIdx, "0", "ArrowUp selects previous slide");
+  sandbox.dispatchWindowKeydown({ key: "End", target: document.activeElement });
+  assert.equal(document.activeElement.dataset.slideIdx, "2", "End selects last slide");
+  sandbox.dispatchWindowKeydown({ key: "Home", target: document.activeElement });
+  assert.equal(document.activeElement.dataset.slideIdx, "0", "Home selects first slide");
+  sandbox.dispatchWindowKeydown({ key: "ArrowDown", target: document.activeElement });
+  assert.equal(document.activeElement.dataset.slideIdx, "1", "ArrowDown selects next slide");
+  const ev = sandbox.dispatchWindowKeydown({ key: "ArrowUp", altKey: true, target: document.activeElement });
   assert.equal(ev.defaultPrevented, true);
   assert.deepEqual(thumbTitles(document), [original[1], original[0], original[2]]);
   const focused = document.activeElement;

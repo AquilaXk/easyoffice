@@ -74,7 +74,9 @@
         return;
       }
       if (tag === "TABLE" && !includeTables) return;
-      Array.from(node.childNodes || []).forEach(walk);
+      for (let child = node.firstChild; child; child = child.nextSibling) {
+        walk(child);
+      }
     }
     walk(rootEl);
     return out;
@@ -300,7 +302,9 @@
           node !== targetRoot &&
           (DOC_BLOCK_TAGS.has(tag) || (allowTables && (tag === "TR" || tag === "TD" || tag === "TH")));
         if (isBlock) flushInline();
-        Array.from(node.childNodes || []).forEach(walk);
+        for (let child = node.firstChild; child; child = child.nextSibling) {
+          walk(child);
+        }
         if (isBlock) flushInline();
       }
       walk(targetRoot);

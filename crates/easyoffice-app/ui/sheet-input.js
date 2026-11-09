@@ -16,18 +16,11 @@
 
   function formatAggregate(nums) {
     if (nums.length === 0) return "선택 집계 · 숫자 데이터 없음";
-    let sum = 0;
-    let min = nums[0];
-    let max = nums[0];
-    nums.forEach((n) => {
-      sum += n;
-      if (n < min) min = n;
-      if (n > max) max = n;
-    });
-    const avg = Math.round((sum / nums.length) * 10) / 10;
+    const { count, sum, min, max, avg: rawAvg } = host.__EASYOFFICE_SHEET_UTILS__.aggregateNumbers(nums);
+    const avg = Math.round(rawAvg * 10) / 10;
     const fmt = (n) => Number(n.toPrecision(12)).toLocaleString();
     return (
-      "선택 집계 · 합계 " + fmt(sum) + " · 평균 " + avg.toLocaleString() + " · 개수 " + nums.length +
+      "선택 집계 · 합계 " + fmt(sum) + " · 평균 " + avg.toLocaleString() + " · 개수 " + count +
       " · 최소 " + fmt(min) + " · 최대 " + fmt(max)
     );
   }
@@ -111,15 +104,29 @@
         if (n !== null) nums.push(n);
       };
       const area = (range.r2 - range.r1 + 1) * (range.c2 - range.c1 + 1);
-      if (area <= 20000) {
+      const mapSize =
+        typeof api.getEntryCount === "function"
+          ? api.getEntryCount()
+          : (api.activeSheetMap?.size ?? 20000);
+      if (area <= mapSize) {
         for (let r = range.r1; r <= range.r2; r += 1) {
           for (let c = range.c1; c <= range.c2; c += 1) push(grid.refOf(r, c));
         }
         return nums;
       }
+      let visitedLive = false;
       api.forEachEntryRef((ref, row, col) => {
-        if (row >= range.r1 && row <= range.r2 && col >= range.c1 && col <= range.c2) push(ref);
+        if (row >= range.r1 && row <= range.r2 && col >= range.c1 && col <= range.c2) {
+          if (ref === liveRef) visitedLive = true;
+          push(ref);
+        }
       });
+      if (liveRef && !visitedLive) {
+        const p = grid.parseRef(liveRef);
+        if (p && p.row >= range.r1 && p.row <= range.r2 && p.col >= range.c1 && p.col <= range.c2) {
+          push(liveRef);
+        }
+      }
       return nums;
     }
 
@@ -130,11 +137,18 @@
       const tbody = document.querySelector("#pane-sheet tbody");
       if (!tbody) return;
       tbody.querySelectorAll("td[data-cell]").forEach((td) => {
-        const p = grid.parseRef(td.dataset.cell);
-        if (!p) return;
-        const active = p.row === sel.ar && p.col === sel.ac;
-        const inside =
-          multi && p.row >= rg.r1 && p.row <= rg.r2 && p.col >= rg.c1 && p.col <= rg.c2;
+        let r = td._row;
+        let c = td._col;
+        if (!(r > 0 && c > 0)) {
+          const p = grid.parseRef(td.dataset.cell);
+          if (!p) return;
+          r = p.row;
+          c = p.col;
+          td._row = r;
+          td._col = c;
+        }
+        const active = r === sel.ar && c === sel.ac;
+        const inside = multi && r >= rg.r1 && r <= rg.r2 && c >= rg.c1 && c <= rg.c2;
         td.classList.toggle("selected-cell", active);
         td.classList.toggle("in-range", inside);
       });

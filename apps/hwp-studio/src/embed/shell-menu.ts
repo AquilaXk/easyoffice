@@ -118,15 +118,33 @@ export function renderShellRecents(panel: HTMLElement, recents: readonly ShellRe
   };
   if (recents.length === 0) {
     panel.append(make('(최근 문서 없음)', true));
-    return;
+  } else {
+    for (const entry of recents) {
+      const item = make(entry.name, false);
+      item.dataset.shellCmd = 'recent';
+      item.dataset.shellId = entry.id;
+      item.title = entry.name;
+      panel.append(item);
+    }
   }
-  for (const entry of recents) {
-    const item = make(entry.name, false);
-    item.dataset.shellCmd = 'recent';
-    item.dataset.shellId = entry.id;
-    item.title = entry.name;
-    panel.append(item);
-  }
+  const sep = document.createElement('div');
+  sep.className = 'md-sep';
+  sep.setAttribute?.('role', 'separator');
+  const more = document.createElement('button');
+  more.type = 'button';
+  more.className = 'md-item';
+  more.dataset.shellCmd = 'recent-dialog';
+  more.setAttribute?.('role', 'menuitem');
+  const moreIcon = document.createElement('span');
+  moreIcon.className = 'md-icon';
+  const moreLabel = document.createElement('span');
+  moreLabel.className = 'md-label';
+  moreLabel.textContent = '최근 문서 목록…';
+  const moreShortcut = document.createElement('span');
+  moreShortcut.className = 'md-shortcut';
+  moreShortcut.textContent = 'Ctrl+Alt+O';
+  more.append(moreIcon, moreLabel, moreShortcut);
+  panel.append(sep, more);
 }
 
 /** Wires the 파일 menu items (`data-shell-cmd`) to the relay and closes the menu after a click. */

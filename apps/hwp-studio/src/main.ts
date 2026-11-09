@@ -1660,7 +1660,12 @@ installEmbedRuntime({
         const context = sanitizeShellContext(raw);
         if (context.theme && context.theme !== getThemeMode()) setThemeMode(context.theme);
         const panel = document.getElementById('shell-recents-panel');
-        if (context.recents && panel) renderShellRecents(panel, context.recents);
+        if (context.recents && panel) {
+          renderShellRecents(panel, context.recents);
+          if (detectPlatformKind() === 'mac') {
+            applyMacShortcutPresentation(panel as unknown as Document);
+          }
+        }
         // "PDF로 내보내기" is shown only when the shell says it can do it (desktop app).
         const pdfItem = document.querySelector<HTMLElement>('[data-shell-cmd="export-pdf"]');
         if (pdfItem && context.pdfExport !== null) pdfItem.hidden = !context.pdfExport;

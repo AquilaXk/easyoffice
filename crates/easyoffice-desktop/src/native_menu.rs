@@ -135,6 +135,7 @@ pub const ITEMS: &[MenuItemSpec] = &[
         None,
         "studio-cmd:zoom-fit-width",
     ),
+    item("view:zoom-dialog", "확대/축소…", None, "hwp-editor"),
     item(
         "view:zoom-100",
         "100% 실제 배율",
@@ -162,6 +163,13 @@ pub const ITEMS: &[MenuItemSpec] = &[
         Some("CmdOrCtrl+Alt+D"),
         "studio-cmd:view-theme",
     ),
+    item(
+        "view:toolbar-labels",
+        "도구 상자 글자 표시",
+        None,
+        "hwp-editor",
+    ),
+    item("view:form-mode", "양식 모드", None, "hwp-editor"),
     item(
         "view:ctrl-marks",
         "조판 부호",
@@ -684,6 +692,7 @@ fn view_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
         SEPARATOR,
         "view:zoom-fit-page",
         "view:zoom-fit-width",
+        "view:zoom-dialog",
         SEPARATOR,
         "view:split",
         "view:outline",
@@ -693,6 +702,8 @@ fn view_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
     lines.extend(entries(&[
         "view:theme-toggle",
         SEPARATOR,
+        "view:toolbar-labels",
+        "view:form-mode",
         "view:ctrl-marks",
         "view:para-marks",
         "view:doc-grid",
@@ -1064,7 +1075,16 @@ mod tests {
             .filter(|spec| spec.action == "hwp-editor")
             .map(|spec| spec.id)
             .collect();
-        assert_eq!(editor_only, ["table:cell-select", "table:cell-split"]);
+        assert_eq!(
+            editor_only,
+            [
+                "view:zoom-dialog",
+                "view:toolbar-labels",
+                "view:form-mode",
+                "table:cell-select",
+                "table:cell-split",
+            ]
+        );
         assert_eq!(
             spec("table:cell-select").accelerator,
             Some("CmdOrCtrl+Alt+T")

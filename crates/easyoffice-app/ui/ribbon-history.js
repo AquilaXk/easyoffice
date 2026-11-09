@@ -451,30 +451,39 @@
       }
     }
 
-    const MODULE_SPECIFIC_DOC_COMMANDS = new Set(["doc-mod-toc", "doc-mod-footnote", "doc-mod-mailmerge", "hwp-mod-header", "hwp-mod-field"]);
-    const INSERT_NOTE_SUFFIXES = ["-insert-chart", "-insert-shape", "-insert-link", "-data-fn-browser", "-review-comment"];
+    const DOC_EXACT_EFFECTS = {
+      "hwp-mod-border": docEffectBorder,
+      "doc-mod-toc": docEffectModuleSpecific,
+      "doc-mod-footnote": docEffectModuleSpecific,
+      "doc-mod-mailmerge": docEffectModuleSpecific,
+      "hwp-mod-header": docEffectModuleSpecific,
+      "hwp-mod-field": docEffectModuleSpecific,
+      "doc-mod-tableformula": () => getWorkspacePanels().computeDocTableSummary(),
+    };
+    const DOC_SUFFIX_EFFECTS = {
+      "-home-style": docEffectHomeStyle,
+      "-review-track": docEffectTrack,
+      "-layout-columns": docEffectColumns,
+      "-layout-orientation": docEffectOrientation,
+      "-layout-margins": docEffectMargins,
+      "-layout-paper": docEffectPaper,
+      "-insert-chart": docEffectInsertNote,
+      "-insert-shape": docEffectInsertNote,
+      "-insert-link": docEffectInsertNote,
+      "-data-fn-browser": docEffectInsertNote,
+      "-review-comment": docEffectInsertNote,
+      "-insert-table": () => getWorkspacePanels().appendDocTableRow(),
+      "-data-autosum": () => getWorkspacePanels().computeDocTableSummary(),
+      "-data-sort": docEffectSort,
+    };
 
-    // First matching entry wins; the order mirrors the original command precedence.
-    const DOC_EDITOR_EFFECTS = [
-      [(id) => id.endsWith("-home-style"), docEffectHomeStyle],
-      [(id) => id.endsWith("-review-track"), docEffectTrack],
-      [(id) => id.endsWith("-layout-columns"), docEffectColumns],
-      [(id) => id.endsWith("-layout-orientation"), docEffectOrientation],
-      [(id) => id.endsWith("-layout-margins"), docEffectMargins],
-      [(id) => id.endsWith("-layout-paper"), docEffectPaper],
-      [(id) => id === "hwp-mod-border", docEffectBorder],
-      [(id) => MODULE_SPECIFIC_DOC_COMMANDS.has(id), docEffectModuleSpecific],
-      [(id) => endsWithAny(id, INSERT_NOTE_SUFFIXES), docEffectInsertNote],
-      [(id) => id.endsWith("-insert-table"), () => getWorkspacePanels().appendDocTableRow()],
-      [(id) => id.endsWith("-data-autosum") || id === "doc-mod-tableformula", () => getWorkspacePanels().computeDocTableSummary()],
-      [(id) => id.endsWith("-data-sort"), docEffectSort],
-    ];
+    function commandSuffixOf(cmdId) {
+      const idx = cmdId.indexOf("-");
+      return idx >= 0 ? cmdId.slice(idx) : "";
+    }
 
     function docEditorEffectFor(cmdId) {
-      for (const [matches, run] of DOC_EDITOR_EFFECTS) {
-        if (matches(cmdId)) return run;
-      }
-      return null;
+      return DOC_EXACT_EFFECTS[cmdId] || DOC_SUFFIX_EFFECTS[commandSuffixOf(cmdId)] || null;
     }
 
     function applyDocEditorRibbonEffect(docEditor, cmdId, execRes) {
@@ -563,16 +572,26 @@
       getWorkspacePanels().saveActiveDocTabState();
     }
 
-    // First matching entry wins and ends the dispatch (these commands have no module-specific follow-up).
-    const VIEW_RIBBON_EFFECTS = [
-      [(id) => id.endsWith("-view-theme"), viewEffectTheme],
-      [(id) => id.endsWith("-view-zoom"), viewEffectZoom],
-      [(id) => id.endsWith("-view-ribbon"), viewEffectRibbon],
-      [(id) => id.endsWith("-view-split"), viewEffectSplit],
-      [(id) => endsWithAny(id, ["-review-verify", "-data-validation"]), (_id, _res, prepared) => getWorkspacePanels().applySecurityAuditDom(prepared?.auditOutcome)],
-      [(id) => id.endsWith("-review-stats"), (_id, _res, prepared) => getWorkspacePanels().applySmartDiagnoseDom(prepared?.smartRes, false)],
-      [(id) => id === "hwp-mod-manuscript" || id.endsWith("-manuscript"), viewEffectManuscript],
-    ];
+    const applyAuditFromPrepared = (_id, _res, prepared) =>
+      getWorkspacePanels().applySecurityAuditDom(prepared?.auditOutcome);
+    const applyStatsFromPrepared = (_id, _res, prepared) =>
+      getWorkspacePanels().applySmartDiagnoseDom(prepared?.smartRes, false);
+
+    const VIEW_SUFFIX_EFFECTS = {
+      "-view-theme": viewEffectTheme,
+      "-view-zoom": viewEffectZoom,
+      "-view-ribbon": viewEffectRibbon,
+      "-view-split": viewEffectSplit,
+      "-review-verify": applyAuditFromPrepared,
+      "-data-validation": applyAuditFromPrepared,
+      "-review-stats": applyStatsFromPrepared,
+      "-manuscript": viewEffectManuscript,
+      "-mod-manuscript": viewEffectManuscript,
+    };
+
+    function viewRibbonEffectFor(cmdId) {
+      return VIEW_SUFFIX_EFFECTS[commandSuffixOf(cmdId)] || (cmdId.endsWith("-manuscript") ? viewEffectManuscript : null);
+    }
 
     // Document pane commands; true when the doc editor handled the command.
     function applyDocumentPaneEffect(cmdId, execRes) {
@@ -644,8 +663,6 @@
     const SLIDE_TITLE_COLORS = ["", "var(--accent-strong)", "var(--accent-light)", ""];
     const SLIDE_PADDINGS = ["20px", "12px", "28px"];
     const SLIDE_TRANSITIONS = ["fade", "push", "zoom", "none"];
-    const SLIDE_INSERT_OBJECT_COMMANDS = new Set(["slide-insert-table", "slide-insert-chart", "slide-insert-shape"]);
-    const SLIDE_NOTE_COMMANDS = new Set(["slide-insert-link", "slide-data-autosum", "slide-data-fn-browser", "slide-review-comment"]);
 
     function slideTitleEffect(cmdId, ctx) {
       const { titleZone } = ctx;
@@ -705,36 +722,68 @@
       getWorkspacePanels().renderSlideDeck(curIdx);
     }
 
-    function slideContentEffect(cmdId, execRes, ctx) {
-      if (SLIDE_INSERT_OBJECT_COMMANDS.has(cmdId)) {
-        getWorkspacePanels().insertSlideStageObject(cmdId, execRes);
-      } else if (SLIDE_NOTE_COMMANDS.has(cmdId)) {
-        slideAppendNote(cmdId, execRes, ctx);
-      } else if (cmdId === "slide-data-sort" && ctx.curSlide?.lower) {
-        slideSortLower(execRes, ctx);
-      } else if (cmdId === "slide-mod-presenter") {
-        slidePresenterMode(ctx);
-      } else if (cmdId === "slide-mod-transition") {
-        slideCycleTransition(ctx);
-      } else {
-        return false;
-      }
+    const insertSlideObjectHandler = (cmdId, execRes) => {
+      getWorkspacePanels().insertSlideStageObject(cmdId, execRes);
       return true;
+    };
+    const appendSlideNoteHandler = (cmdId, execRes, ctx) => {
+      slideAppendNote(cmdId, execRes, ctx);
+      return true;
+    };
+
+    const SLIDE_CONTENT_HANDLERS = {
+      "slide-insert-table": insertSlideObjectHandler,
+      "slide-insert-chart": insertSlideObjectHandler,
+      "slide-insert-shape": insertSlideObjectHandler,
+      "slide-insert-link": appendSlideNoteHandler,
+      "slide-data-autosum": appendSlideNoteHandler,
+      "slide-data-fn-browser": appendSlideNoteHandler,
+      "slide-review-comment": appendSlideNoteHandler,
+      "slide-data-sort": (_cmdId, execRes, ctx) => {
+        if (!ctx.curSlide?.lower) return false;
+        slideSortLower(execRes, ctx);
+        return true;
+      },
+      "slide-mod-presenter": (_cmdId, _execRes, ctx) => {
+        slidePresenterMode(ctx);
+        return true;
+      },
+      "slide-mod-transition": (_cmdId, _execRes, ctx) => {
+        slideCycleTransition(ctx);
+        return true;
+      },
+    };
+
+    function slideContentEffect(cmdId, execRes, ctx) {
+      const handler = SLIDE_CONTENT_HANDLERS[cmdId];
+      return typeof handler === "function" ? handler(cmdId, execRes, ctx) : false;
     }
 
-    function slideStageEffect(cmdId, execRes, ctx) {
-      const { stageBox, lowerZone } = ctx;
-      if (cmdId === "slide-layout-columns" && lowerZone) {
+    const toggleStageOutline = ({ stageBox }) => {
+      stageBox.style.outline = stageBox.style.outline ? "" : "2px dashed var(--accent-strong)";
+    };
+
+    const SLIDE_STAGE_HANDLERS = {
+      "slide-layout-columns": ({ stageBox, lowerZone }, cmdId, execRes) => {
+        if (!lowerZone) {
+          stageBox.dataset.layoutState = execRes?.summary || cmdId;
+          return;
+        }
         const curCols = Number(lowerZone.style.columnCount || "1");
         const cols = curCols >= MAX_DOC_COLUMNS ? 1 : curCols + 1;
         lowerZone.style.columnCount = cols > 1 ? String(cols) : "";
-      } else if (cmdId === "slide-layout-margins") {
+      },
+      "slide-layout-margins": ({ stageBox }) => {
         stageBox.style.padding = cyclePreset(SLIDE_PADDINGS, stageBox.style.padding);
-      } else if (cmdId === "slide-mod-snap" || cmdId === "slide-review-track") {
-        stageBox.style.outline = stageBox.style.outline ? "" : "2px dashed var(--accent-strong)";
-      } else {
-        stageBox.dataset.layoutState = execRes?.summary || cmdId;
-      }
+      },
+      "slide-mod-snap": toggleStageOutline,
+      "slide-review-track": toggleStageOutline,
+    };
+
+    function slideStageEffect(cmdId, execRes, ctx) {
+      const handler = SLIDE_STAGE_HANDLERS[cmdId];
+      if (typeof handler === "function") handler(ctx, cmdId, execRes);
+      else ctx.stageBox.dataset.layoutState = execRes?.summary || cmdId;
       getWorkspacePanels().syncActiveSlideDomStylesToDeck();
     }
 
@@ -773,9 +822,9 @@
     }
 
     async function applyRibbonDomSideEffects(cmdId, execRes, preparedEffect) {
-      const viewEffect = VIEW_RIBBON_EFFECTS.find(([matches]) => matches(cmdId));
+      const viewEffect = viewRibbonEffectFor(cmdId);
       if (viewEffect) {
-        viewEffect[1](cmdId, execRes, preparedEffect);
+        viewEffect(cmdId, execRes, preparedEffect);
         return;
       }
       if (applyDocumentPaneEffect(cmdId, execRes)) return;

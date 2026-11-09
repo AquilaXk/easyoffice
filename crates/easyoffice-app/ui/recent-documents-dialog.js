@@ -70,7 +70,9 @@
 
       function updateSelection() {
         for (const item of list.querySelectorAll(".recent-documents-item")) {
-          item.setAttribute("aria-selected", String(Number(item.dataset.index) === selected));
+          const isSelected = Number(item.dataset.index) === selected;
+          item.setAttribute("aria-selected", String(isSelected));
+          if (isSelected) item.scrollIntoView?.({ block: "nearest" });
         }
       }
 

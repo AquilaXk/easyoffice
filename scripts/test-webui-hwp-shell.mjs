@@ -298,13 +298,18 @@ test("home actions use one SVG icon per format and one shared accent token", asy
 
 test("the PDF item is in the overlay 파일 menu, hidden until the shell says it can export", () => {
   const html = read("index.html", OVERLAY);
-  const item = /<div class="md-item" data-shell-cmd="export-pdf"([^>]*)>/.exec(html);
+  const item = /<div class="md-item" data-shell-cmd="export-pdf"([^>]*)>([\s\S]*?)<\/div>/.exec(html);
   assert.ok(item, "the 파일 menu has the export-pdf item");
   assert.match(item[1], /\bhidden\b/, "hidden by default");
   assert.ok(!/data-shell-/.test(item[1].replace(/hidden/, "")), "no extra arguments travel with it");
+  assert.match(item[2], /<span class="md-shortcut">Ctrl\+E<\/span>/, "carries Ctrl+E shortcut");
   assert.match(read("src/eo-overrides.css", OVERLAY), /\.md-item\[hidden\]\s*\{\s*display:\s*none/);
   const ts = read("src/embed/shell-menu.ts", OVERLAY);
   assert.match(ts, /pdfExport = typeof params\.pdfExport === 'boolean'/, "only a boolean flag is accepted from the shell");
+  assert.match(ts, /more\.dataset\.shellCmd = 'recent-dialog'/, "renderShellRecents preserves recent-dialog item");
+  assert.match(ts, /moreLabel\.textContent = '최근 문서 목록…'/, "renderShellRecents preserves label");
+  assert.match(ts, /moreShortcut\.textContent = 'Ctrl\+Alt\+O'/, "renderShellRecents preserves shortcut");
+  assert.match(read("src/embed/desktop-chrome.ts", OVERLAY), /\\bOption\\\+\/g,\s*'⌥'/, "Option+ maps to ⌥ on macOS");
   const main = read("src/main.ts", OVERLAY);
   assert.match(main, /context\.pdfExport !== null\) pdfItem\.hidden = !context\.pdfExport/);
 });

@@ -71,7 +71,13 @@ test("the disabled ids are exactly the table items the page's own rule refuses i
     const editorOnly = Object.entries(page.__EASYOFFICE_NATIVE_MENU_TABLE__.NATIVE_MENU_ACTIONS)
       .filter(([, action]) => action === "hwp-editor")
       .map(([id]) => id);
-    assert.deepEqual(editorOnly.sort(byName), ["table:cell-select", "table:cell-split"]);
+    assert.deepEqual(editorOnly.sort(byName), [
+      "table:cell-select",
+      "table:cell-split",
+      "view:form-mode",
+      "view:toolbar-labels",
+      "view:zoom-dialog",
+    ]);
     // PDF export and print work on the editor's pages: gray in every window but the editor window.
     const { EMBED_ONLY_ACTIONS } = page.__EASYOFFICE_NATIVE_MENU_TABLE__;
     const embedOnly = Object.entries(page.__EASYOFFICE_NATIVE_MENU_TABLE__.NATIVE_MENU_ACTIONS)
