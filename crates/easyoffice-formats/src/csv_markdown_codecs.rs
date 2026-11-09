@@ -335,6 +335,8 @@ impl ScalarCsvParser {
 impl CsvCodec {
     pub const MAX_ROWS: usize = 1_000_000;
     pub const MAX_COLS: usize = 16_384;
+    /// Cells (rows x columns) of the text grid a sheet is written from.
+    pub const MAX_GRID_CELLS: usize = 2_000_000;
 
     #[inline]
     fn find_csv_unquoted_special_swar(bytes: &[u8], start: usize, delim_b: u8) -> usize {

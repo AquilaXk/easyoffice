@@ -14,12 +14,12 @@
 use std::collections::BTreeMap;
 
 use easyoffice_formats::{
-    base64_codec, evaluate_table_formulas, normalize_hex_color, CellMerge, CellStyle,
-    DocumentFormat, EasyOfficeError, OdfCodec, OdsUnpacked, OoxmlCodec, RichAlignment, RichBlock,
-    RichDocument, RichImage, RichListKind, RichParagraph, RichRun, RichScript, RichTable,
-    SheetStyling, StrictJsonValue, UniversalDocumentModel, UniversalFormatConverter,
-    XlsxCachedValue, XlsxFormulaCache, MAX_COLUMN_PX, MAX_IMAGE_BYTES, MAX_SIZE_PT, MIN_COLUMN_PX,
-    MIN_SIZE_PT,
+    base64_codec, evaluate_table_formulas, normalize_hex_color, CellMerge, CellStyle, CsvCodec,
+    DocumentFormat, EasyOfficeError, LegacyOle2Codec, LegacyXlsPayload, OdfCodec, OdsUnpacked,
+    OoxmlCodec, RichAlignment, RichBlock, RichDocument, RichImage, RichListKind, RichParagraph,
+    RichRun, RichScript, RichTable, SheetStyling, StrictJsonValue, UniversalDocumentModel,
+    UniversalFormatConverter, XlsxCachedValue, XlsxFormulaCache, MAX_COLUMN_PX, MAX_IMAGE_BYTES,
+    MAX_SIZE_PT, MIN_COLUMN_PX, MIN_SIZE_PT,
 };
 use easyoffice_sheet::{EvaluatedCellValue, PackedCellCoordinate, WorkbookEngine};
 
@@ -36,7 +36,7 @@ const MAX_SHEETS: usize = 256;
 /// Upper bound on custom column widths of one sheet (the XLSX grid has 16,384 columns).
 const MAX_COLUMN_ENTRIES: usize = 16_384;
 /// Upper bound on cells of the value grids rendered when a workbook is saved to a document format.
-const MAX_GRID_CELLS: usize = 2_000_000;
+const MAX_GRID_CELLS: usize = CsvCodec::MAX_GRID_CELLS;
 
 pub(crate) type SlideTriple = (String, Vec<String>, String);
 /// Displayed values of one sheet, row by row (rows without cells are omitted).
@@ -554,12 +554,8 @@ fn cached_value(v: &EvaluatedCellValue) -> Option<XlsxCachedValue> {
     }
 }
 
-/// Evaluates every formula cell across all sheets (cross-sheet references resolve) and returns
-/// one formula cache per sheet plus, when `with_grids`, the displayed-value grid of each sheet.
-fn evaluate_workbook(
-    sheets: &[OdsUnpacked],
-    with_grids: bool,
-) -> Result<(Vec<XlsxFormulaCache>, Vec<ValueGrid>), EasyOfficeError> {
+/// A formula engine holding every sheet, so cross-sheet references resolve.
+fn workbook_engine(sheets: &[OdsUnpacked]) -> WorkbookEngine {
     let mut wb = WorkbookEngine::new();
     for (name, cells) in sheets {
         wb.add_sheet(name.clone());
@@ -569,6 +565,117 @@ fn evaluate_workbook(
             }
         }
     }
+    wb
+}
+
+/// Every sheet with each formula replaced by the value it displays, for the formats that hold
+/// values only (a BIFF8 formula needs a compiled token stream, and CSV has no formulas). Also
+/// returns how many formulas were replaced.
+fn computed_sheets(sheets: &[OdsUnpacked]) -> (Vec<OdsUnpacked>, usize) {
+    let wb = workbook_engine(sheets);
+    let mut formulas = 0usize;
+    let mut computed = Vec::with_capacity(sheets.len());
+    for (name, cells) in sheets {
+        let mut values = Vec::with_capacity(cells.len());
+        for (row, col, raw) in cells {
+            if !raw.starts_with('=') {
+                values.push((*row, *col, raw.clone()));
+                continue;
+            }
+            let Ok(coord) = PackedCellCoordinate::new(*row, *col) else {
+                continue;
+            };
+            formulas += 1;
+            let value = wb.evaluate_cell(name, &coord.to_a1()).to_display_string();
+            values.push((*row, *col, value));
+        }
+        computed.push((name.clone(), values));
+    }
+    (computed, formulas)
+}
+
+/// Longest list of sheet names a warning spells out.
+const WARNED_SHEET_NAMES: usize = 5;
+
+/// XLS: every sheet, formulas as values.
+fn encode_xls(
+    sheets: &[OdsUnpacked],
+    title: &str,
+    warnings: &mut Vec<String>,
+) -> Result<Vec<u8>, EasyOfficeError> {
+    let (computed, formulas) = computed_sheets(sheets);
+    if formulas > 0 {
+        warnings.push(format!(
+            "수식 {formulas}개는 계산된 값으로 저장했습니다. XLS 파일에는 수식이 아니라 값이 들어갑니다."
+        ));
+    }
+    let mut payloads: Vec<LegacyXlsPayload> = computed
+        .into_iter()
+        .map(|(sheet_name, cells)| LegacyXlsPayload { sheet_name, cells })
+        .collect();
+    if payloads.is_empty() {
+        payloads.push(LegacyXlsPayload {
+            sheet_name: title.to_string(),
+            cells: Vec::new(),
+        });
+    }
+    LegacyOle2Codec::pack_xls_multi(&payloads)
+}
+
+/// CSV/TSV hold one sheet: the first, as values. Sheets left out and cells outside what the CSV
+/// reader accepts are reported, never dropped silently.
+fn encode_delimited(
+    sheets: &[OdsUnpacked],
+    format: DocumentFormat,
+    title: &str,
+    warnings: &mut Vec<String>,
+) -> Result<Vec<u8>, EasyOfficeError> {
+    let label = format.extension().to_uppercase();
+    let (computed, _) = computed_sheets(sheets);
+    let mut computed = computed.into_iter();
+    let (first_name, mut cells) = computed.next().unwrap_or_default();
+    let left_out: Vec<String> = computed.map(|(name, _)| name).collect();
+    if !left_out.is_empty() {
+        let shown = left_out.len().min(WARNED_SHEET_NAMES);
+        let more = left_out.len() - shown;
+        let names = left_out[..shown].join(", ");
+        let rest = if more > 0 {
+            format!(" 외 {more}개")
+        } else {
+            String::new()
+        };
+        warnings.push(format!(
+            "{label}는 시트 하나만 담을 수 있어 첫 시트 '{first_name}'만 저장했습니다. 나머지 시트 {}개({names}{rest})는 포함되지 않았습니다.",
+            left_out.len()
+        ));
+    }
+    let total = cells.len();
+    cells.retain(|(row, col, _)| {
+        (*row as usize) < CsvCodec::MAX_ROWS && (*col as usize) < CsvCodec::MAX_COLS
+    });
+    if cells.len() < total {
+        warnings.push(format!(
+            "{label}가 읽을 수 있는 범위({}행 x {}열)를 벗어난 셀 {}개는 제외했습니다.",
+            CsvCodec::MAX_ROWS,
+            CsvCodec::MAX_COLS,
+            total - cells.len()
+        ));
+    }
+    let model = UniversalDocumentModel {
+        title: title.to_string(),
+        sheet_cells: cells,
+        ..UniversalDocumentModel::default()
+    };
+    UniversalFormatConverter::encode(&model, format)
+}
+
+/// Evaluates every formula cell across all sheets (cross-sheet references resolve) and returns
+/// one formula cache per sheet plus, when `with_grids`, the displayed-value grid of each sheet.
+fn evaluate_workbook(
+    sheets: &[OdsUnpacked],
+    with_grids: bool,
+) -> Result<(Vec<XlsxFormulaCache>, Vec<ValueGrid>), EasyOfficeError> {
+    let wb = workbook_engine(sheets);
     let mut caches = Vec::with_capacity(sheets.len());
     let mut grids = Vec::new();
     let mut grid_cells = 0usize;
@@ -638,11 +745,13 @@ fn set_grid_cell(
     Ok(())
 }
 
-/// Encodes structured content to `format`, titling the output `title`.
+/// Encodes structured content to `format`, titling the output `title`. What the format cannot
+/// hold of the content is added to `warnings`.
 pub(crate) fn encode_structured(
     content: &StructuredContent,
     format: DocumentFormat,
     title: &str,
+    warnings: &mut Vec<String>,
 ) -> Result<Vec<u8>, EasyOfficeError> {
     match content {
         StructuredContent::Document(doc) => {
@@ -660,13 +769,9 @@ pub(crate) fn encode_structured(
                 OoxmlCodec::pack_xlsx_multi_styled(sheets, &caches, stylings)
             }
             DocumentFormat::Ods => OdfCodec::pack_ods_multi_styled(sheets, stylings),
-            DocumentFormat::Xls | DocumentFormat::Csv | DocumentFormat::Tsv => {
-                let model = UniversalDocumentModel {
-                    title: title.to_string(),
-                    sheet_cells: sheets.first().map(|(_, c)| c.clone()).unwrap_or_default(),
-                    ..UniversalDocumentModel::default()
-                };
-                UniversalFormatConverter::encode(&model, format)
+            DocumentFormat::Xls => encode_xls(sheets, title, warnings),
+            DocumentFormat::Csv | DocumentFormat::Tsv => {
+                encode_delimited(sheets, format, title, warnings)
             }
             _ => {
                 let (_, grids) = evaluate_workbook(sheets, true)?;

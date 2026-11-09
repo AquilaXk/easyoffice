@@ -207,7 +207,7 @@ impl UniversalFormatConverter {
                 } else {
                     '\t'
                 };
-                let rows = cells_to_grid(&sheet_cells, &title);
+                let rows = cells_to_grid(&sheet_cells, &title)?;
                 Ok(CsvCodec::serialize_with_bom(&rows, delim))
             }
             DocumentFormat::Pptx | DocumentFormat::Ppsx => {
@@ -572,26 +572,36 @@ fn doc_to_sheet_cells(
     cells
 }
 
-fn cells_to_grid(cells: &[(u32, u32, String)], fallback_title: &str) -> Vec<Vec<String>> {
+/// Rectangular text grid of a sheet for CSV/TSV. Sized to the cells' real extent; a sheet the CSV
+/// reader would refuse (beyond its row or column limit) or whose grid is too large to build is
+/// refused here instead of being cut short.
+fn cells_to_grid(
+    cells: &[(u32, u32, String)],
+    fallback_title: &str,
+) -> Result<Vec<Vec<String>>, EasyOfficeError> {
     if cells.is_empty() {
-        return vec![vec![fallback_title.to_string(), String::new()]];
+        return Ok(vec![vec![fallback_title.to_string(), String::new()]]);
     }
-    let max_r = cells.iter().map(|(r, _, _)| *r).max().unwrap_or(0).min(512) as usize;
-    let max_c = cells
-        .iter()
-        .map(|(_, c, _)| *c)
-        .max()
-        .unwrap_or(0)
-        .clamp(1, 64) as usize;
-    let mut grid = vec![vec![String::new(); max_c + 1]; max_r + 1];
+    let max_r = cells.iter().map(|(r, _, _)| *r).max().unwrap_or(0) as usize;
+    let max_c = cells.iter().map(|(_, c, _)| *c).max().unwrap_or(0).max(1) as usize;
+    let (rows, cols) = (max_r + 1, max_c + 1);
+    if rows > CsvCodec::MAX_ROWS || cols > CsvCodec::MAX_COLS {
+        return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+            "CSV/TSV는 {}행 x {}열까지 저장할 수 있어 이 시트({rows}행 x {cols}열)는 저장할 수 없습니다.",
+            CsvCodec::MAX_ROWS,
+            CsvCodec::MAX_COLS
+        )));
+    }
+    if rows.saturating_mul(cols) > CsvCodec::MAX_GRID_CELLS {
+        return Err(EasyOfficeError::ResourceBudgetExceeded(
+            "시트 값 표가 너무 커서 CSV/TSV로 저장할 수 없습니다.".to_string(),
+        ));
+    }
+    let mut grid = vec![vec![String::new(); cols]; rows];
     for (r, c, val) in cells {
-        let ri = *r as usize;
-        let ci = *c as usize;
-        if ri <= max_r && ci <= max_c {
-            grid[ri][ci] = val.clone();
-        }
+        grid[*r as usize][*c as usize].clone_from(val);
     }
-    grid
+    Ok(grid)
 }
 
 #[cfg(test)]

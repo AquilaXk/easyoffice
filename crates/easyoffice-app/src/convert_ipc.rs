@@ -245,9 +245,10 @@ impl EasyOfficeIpcRouter {
         })?;
 
         let (src_bytes, dst_bytes) = if let Some(content) = &structured {
+            // Only what the target loses is reported; the source-side encode is just for its size.
             (
-                encode_structured(content, src_fmt, title)?,
-                encode_structured(content, dst_fmt, title)?,
+                encode_structured(content, src_fmt, title, &mut Vec::new())?,
+                encode_structured(content, dst_fmt, title, &mut warnings)?,
             )
         } else {
             let model = Self::legacy_body_model(body, title);

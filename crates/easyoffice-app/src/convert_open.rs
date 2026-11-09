@@ -436,9 +436,9 @@ impl EasyOfficeIpcRouter {
             .filter(|s| !s.is_empty())
             .unwrap_or("변환_문서");
         let src_fmt = decoded.format;
-        let warnings = decoded.warnings.clone();
+        let mut warnings = decoded.warnings.clone();
         let content = into_structured(decoded.content, &styling);
-        let dst_bytes = encode_structured(&content, dst_fmt, title)?;
+        let dst_bytes = encode_structured(&content, dst_fmt, title, &mut warnings)?;
         Self::conversion_response(src_fmt, dst_fmt, &bytes, &dst_bytes, &warnings)
     }
 }
