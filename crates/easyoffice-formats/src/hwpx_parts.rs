@@ -86,10 +86,11 @@ impl Default for HwpxCharShape {
     }
 }
 
-/// Paragraph shape (`hh:paraPr`): OWPML horizontal alignment and left margin (HWPUNIT).
+/// Paragraph shape (`hh:paraPr`): OWPML horizontal alignment, list heading type, and left margin (HWPUNIT).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct HwpxParaShape {
-    pub align: &'static str,
+    pub align: Option<&'static str>,
+    pub heading_type: &'static str,
     pub left_margin: u32,
     /// First-line indent (`hc:intent`), HWPUNIT; negative for a hanging indent.
     pub intent: i32,
@@ -100,7 +101,8 @@ pub(crate) struct HwpxParaShape {
 impl Default for HwpxParaShape {
     fn default() -> Self {
         Self {
-            align: "JUSTIFY",
+            align: None,
+            heading_type: "NONE",
             left_margin: 0,
             intent: 0,
             line_percent: DEFAULT_LINE_PERCENT,
@@ -162,11 +164,15 @@ fn char_pr_xml(id: usize, shape: &HwpxCharShape) -> String {
 }
 
 fn para_pr_xml(id: usize, shape: &HwpxParaShape) -> String {
+    let align_xml = match shape.align {
+        Some(a) => format!("<hh:align horizontal=\"{a}\" vertical=\"BASELINE\"/>"),
+        None => "<hh:align vertical=\"BASELINE\"/>".to_string(),
+    };
     format!(
         concat!(
             "<hh:paraPr id=\"{id}\" tabPrIDRef=\"0\" condense=\"0\" fontLineHeight=\"0\" snapToGrid=\"1\" suppressLineNumbers=\"0\" checked=\"0\">",
-            "<hh:align horizontal=\"{align}\" vertical=\"BASELINE\"/>",
-            "<hh:heading type=\"NONE\" idRef=\"0\" level=\"0\"/>",
+            "{align}",
+            "<hh:heading type=\"{heading_type}\" idRef=\"0\" level=\"0\"/>",
             "<hh:breakSetting breakLatinWord=\"KEEP_WORD\" breakNonLatinWord=\"KEEP_WORD\" widowOrphan=\"0\" keepWithNext=\"0\" keepLines=\"0\" pageBreakBefore=\"0\" lineWrap=\"BREAK\"/>",
             "<hh:autoSpacing eAsianEng=\"0\" eAsianNum=\"0\"/>",
             "<hh:margin><hc:intent value=\"{intent}\" unit=\"HWPUNIT\"/><hc:left value=\"{left}\" unit=\"HWPUNIT\"/>",
@@ -176,7 +182,8 @@ fn para_pr_xml(id: usize, shape: &HwpxParaShape) -> String {
             "</hh:paraPr>"
         ),
         id = id,
-        align = shape.align,
+        align = align_xml,
+        heading_type = shape.heading_type,
         left = shape.left_margin,
         intent = shape.intent,
         line = shape.line_percent

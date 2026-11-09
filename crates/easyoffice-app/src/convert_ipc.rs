@@ -252,12 +252,13 @@ impl EasyOfficeIpcRouter {
             )
         } else {
             let model = Self::legacy_body_model(body, title);
-            let formula_cache =
-                if src_fmt == DocumentFormat::Xlsx || dst_fmt == DocumentFormat::Xlsx {
-                    Some(compute_xlsx_formula_cache(&model))
-                } else {
-                    None
-                };
+            let formula_cache = if matches!(src_fmt, DocumentFormat::Xlsx | DocumentFormat::Ods)
+                || matches!(dst_fmt, DocumentFormat::Xlsx | DocumentFormat::Ods)
+            {
+                Some(compute_xlsx_formula_cache(&model))
+            } else {
+                None
+            };
             (
                 UniversalFormatConverter::encode_with_formula_cache(
                     &model,

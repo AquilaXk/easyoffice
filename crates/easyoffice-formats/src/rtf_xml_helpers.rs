@@ -46,8 +46,11 @@ impl RtfCodec {
                 detail: "RTF 시그니처 불일치".to_string(),
             });
         }
-        let raw = std::str::from_utf8(bytes)
-            .map_err(|_| EasyOfficeError::InvalidUtf8("RTF UTF-8 디코딩 실패".to_string()))?;
+        let raw_cow = match std::str::from_utf8(bytes) {
+            Ok(s) => std::borrow::Cow::Borrowed(s),
+            Err(_) => std::borrow::Cow::Owned(crate::cp949::decode_cp949_or_latin1_bytes(bytes)),
+        };
+        let raw = raw_cow.as_ref();
 
         let mut title = "RTF 문서".to_string();
         let mut paragraphs: Vec<String> = Vec::new();

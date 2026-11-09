@@ -141,13 +141,263 @@ fn hwpx_roundtrip_keeps_runs_alignment_headings_lists_and_tables_in_place() {
     assert_document_roundtrip(
         DocumentFormat::Hwpx,
         "기안문.hwpx",
-        sample_blocks(false, false),
+        sample_blocks(true, true),
     );
 }
 
 #[test]
 fn odt_roundtrip_keeps_runs_alignment_headings_lists_and_tables_in_place() {
-    assert_document_roundtrip(DocumentFormat::Odt, "문서.odt", sample_blocks(false, true));
+    assert_document_roundtrip(DocumentFormat::Odt, "문서.odt", sample_blocks(true, true));
+}
+
+#[test]
+fn rtf_roundtrip_keeps_ordered_and_bullet_lists_and_alignments() {
+    assert_document_roundtrip(DocumentFormat::Rtf, "문서.rtf", sample_blocks(true, true));
+}
+
+#[test]
+fn hwpx_distribute_and_justify_alignments_decode_as_justify() {
+    let header_xml = concat!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+        "<hh:head xmlns:hh=\"http://www.owpml.org/owpml/2011/head\" xmlns:hc=\"http://www.owpml.org/owpml/2011/core\">",
+        "<hh:refList>",
+        "<hh:paraProperties itemCnt=\"3\">",
+        "<hh:paraPr id=\"0\"><hh:align horizontal=\"JUSTIFY\" vertical=\"BASELINE\"/></hh:paraPr>",
+        "<hh:paraPr id=\"1\"><hh:align horizontal=\"DISTRIBUTE\" vertical=\"BASELINE\"/></hh:paraPr>",
+        "<hh:paraPr id=\"2\"><hh:align horizontal=\"DISTRIBUTE_SPACE\" vertical=\"BASELINE\"/></hh:paraPr>",
+        "</hh:paraProperties>",
+        "</hh:refList></hh:head>"
+    );
+    let section_xml = concat!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+        "<hs:sec xmlns:hs=\"http://www.owpml.org/owpml/2011/section\" xmlns:hp=\"http://www.owpml.org/owpml/2011/paragraph\">",
+        "<hp:p paraPrIDRef=\"0\"><hp:run charPrIDRef=\"0\"><hp:t>양쪽</hp:t></hp:run></hp:p>",
+        "<hp:p paraPrIDRef=\"1\"><hp:run charPrIDRef=\"0\"><hp:t>배분</hp:t></hp:run></hp:p>",
+        "<hp:p paraPrIDRef=\"2\"><hp:run charPrIDRef=\"0\"><hp:t>공백배분</hp:t></hp:run></hp:p>",
+        "</hs:sec>"
+    );
+    let bytes = ZipArchiveCodec::pack(&[
+        ("mimetype".to_string(), b"application/hwp+zip".to_vec()),
+        (
+            "Contents/header.xml".to_string(),
+            header_xml.as_bytes().to_vec(),
+        ),
+        (
+            "Contents/section0.xml".to_string(),
+            section_xml.as_bytes().to_vec(),
+        ),
+    ])
+    .unwrap();
+    let decoded = UniversalFormatConverter::decode_rich(&bytes, Some("align.hwpx")).unwrap();
+    let doc = document_of(&decoded);
+    let aligns: Vec<Option<RichAlignment>> = doc
+        .blocks
+        .iter()
+        .filter_map(|b| match b {
+            RichBlock::Paragraph(p) => Some(p.alignment),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        aligns,
+        vec![
+            Some(RichAlignment::Justify),
+            Some(RichAlignment::Justify),
+            Some(RichAlignment::Justify),
+        ]
+    );
+}
+
+#[test]
+fn non_finite_float_strings_are_preserved_as_text_cells_in_xls_xlsx_and_ods() {
+    use easyoffice_formats::{LegacyOle2Codec, LegacyXlsPayload, OdfCodec};
+    let cells = vec![
+        (0, 0, "NaN".to_string()),
+        (0, 1, "inf".to_string()),
+        (0, 2, "-inf".to_string()),
+        (0, 3, "Infinity".to_string()),
+        (0, 4, "42.5".to_string()),
+    ];
+    let xls = LegacyOle2Codec::pack_xls(&LegacyXlsPayload {
+        sheet_name: "S1".to_string(),
+        cells: cells.clone(),
+    })
+    .unwrap();
+    let unpacked_xls = LegacyOle2Codec::unpack_xls(&xls).unwrap();
+    assert_eq!(unpacked_xls.cells, cells);
+
+    let xlsx = OoxmlCodec::pack_xlsx_multi(&[(String::from("S1"), cells.clone())]).unwrap();
+    let unpacked_xlsx = OoxmlCodec::unpack_xlsx_multi(&xlsx).unwrap();
+    assert_eq!(unpacked_xlsx[0].1, cells);
+
+    let ods = OdfCodec::pack_ods("S1", &cells).unwrap();
+    let entries = ZipArchiveCodec::unpack(&ods, &ZipSecurityPolicy::default()).unwrap();
+    let content_xml = entries
+        .iter()
+        .find(|e| e.path == "content.xml")
+        .map(|e| std::str::from_utf8(&e.data).unwrap())
+        .unwrap();
+    assert!(
+        !content_xml.contains("office:value=\"NaN\""),
+        "{content_xml}"
+    );
+    assert!(
+        !content_xml.contains("office:value=\"inf\""),
+        "{content_xml}"
+    );
+    let unpacked_ods = OdfCodec::unpack_ods(&ods).unwrap();
+    assert_eq!(unpacked_ods.1, cells);
+}
+
+#[test]
+fn biff8_boolerr_and_formula_cached_bool_and_error_cells_decode() {
+    use easyoffice_formats::{LegacyOle2Codec, Ole2ContainerCodec};
+    let mut wb = Vec::new();
+    let push_rec = |buf: &mut Vec<u8>, opcode: u16, data: &[u8]| {
+        buf.extend_from_slice(&opcode.to_le_bytes());
+        buf.extend_from_slice(&(data.len() as u16).to_le_bytes());
+        buf.extend_from_slice(data);
+    };
+    // Workbook globals BOF
+    push_rec(
+        &mut wb,
+        LegacyOle2Codec::BIFF8_BOF,
+        &[0x00, 0x06, 0x05, 0x00],
+    );
+    // BoundSheet "Sheet1"
+    push_rec(
+        &mut wb,
+        LegacyOle2Codec::BIFF8_BOUNDSHEET,
+        &[
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x00, b'S', b'h', b'e', b'e', b't', b'1',
+        ],
+    );
+    push_rec(&mut wb, LegacyOle2Codec::BIFF8_EOF, &[]);
+    // Worksheet BOF
+    push_rec(
+        &mut wb,
+        LegacyOle2Codec::BIFF8_BOF,
+        &[0x00, 0x06, 0x10, 0x00],
+    );
+    // BOOLERR (0x0205) row=0, col=0: FALSE (b6=0, b7=0)
+    push_rec(
+        &mut wb,
+        0x0205,
+        &[0x00, 0x00, 0x00, 0x00, 0x0F, 0x00, 0x00, 0x00],
+    );
+    // BOOLERR (0x0205) row=0, col=1: TRUE (b6=0, b7=1)
+    push_rec(
+        &mut wb,
+        0x0205,
+        &[0x00, 0x00, 0x01, 0x00, 0x0F, 0x00, 0x00, 0x01],
+    );
+    // BOOLERR (0x0205) row=0, col=2: #DIV/0! (b6=1, b7=0x07)
+    push_rec(
+        &mut wb,
+        0x0205,
+        &[0x00, 0x00, 0x02, 0x00, 0x0F, 0x00, 0x01, 0x07],
+    );
+    // BOOLERR (0x0205) row=0, col=3: #NULL! (b6=1, b7=0x00)
+    push_rec(
+        &mut wb,
+        0x0205,
+        &[0x00, 0x00, 0x03, 0x00, 0x0F, 0x00, 0x01, 0x00],
+    );
+    // FORMULA (0x0006) row=1, col=0: cached boolean TRUE (byte6=1, byte8=1, byte12..14=0xFFFF)
+    push_rec(
+        &mut wb,
+        LegacyOle2Codec::BIFF8_FORMULA,
+        &[
+            0x01, 0x00, 0x00, 0x00, 0x0F, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0xFF, 0xFF,
+            0x00, 0x00,
+        ],
+    );
+    // FORMULA (0x0006) row=1, col=1: cached error #DIV/0! (byte6=2, byte8=0x07, byte12..14=0xFFFF)
+    push_rec(
+        &mut wb,
+        LegacyOle2Codec::BIFF8_FORMULA,
+        &[
+            0x01, 0x00, 0x01, 0x00, 0x0F, 0x00, 0x02, 0x00, 0x07, 0x00, 0x00, 0x00, 0xFF, 0xFF,
+            0x00, 0x00,
+        ],
+    );
+    push_rec(&mut wb, LegacyOle2Codec::BIFF8_EOF, &[]);
+    let ole = Ole2ContainerCodec::pack(&[("Workbook".to_string(), wb)]).unwrap();
+    let unpacked = LegacyOle2Codec::unpack_xls(&ole).unwrap();
+    assert_eq!(
+        unpacked.cells,
+        vec![
+            (0, 0, "FALSE".to_string()),
+            (0, 1, "TRUE".to_string()),
+            (0, 2, "#DIV/0!".to_string()),
+            (0, 3, "#NULL!".to_string()),
+            (1, 0, "TRUE".to_string()),
+            (1, 1, "#DIV/0!".to_string()),
+        ]
+    );
+}
+
+#[test]
+fn xlsx_boolean_cells_and_shared_formulas_decode() {
+    let workbook = r#"<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheets><sheet name="S1" sheetId="1" r:id="rId1" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/></sheets></workbook>"#;
+    let sheet = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>"#,
+        r#"<row r="1"><c r="A1" t="b"><v>1</v></c><c r="B1" t="b"><v>0</v></c><c r="C1"><f t="shared" ref="C1:C2" si="0">A1+10</f><v>11</v></c></row>"#,
+        r#"<row r="2"><c r="A2"><v>5</v></c><c r="C2"><f t="shared" si="0"/><v>15</v></c><c r="D2"><f t="shared" si="9"/><v>99</v></c></row>"#,
+        r#"</sheetData></worksheet>"#
+    );
+    let bytes = ZipArchiveCodec::pack(&[
+        ("xl/workbook.xml".to_string(), workbook.as_bytes().to_vec()),
+        (
+            "xl/worksheets/sheet1.xml".to_string(),
+            sheet.as_bytes().to_vec(),
+        ),
+    ])
+    .unwrap();
+    let sheets = OoxmlCodec::unpack_xlsx_multi(&bytes).unwrap();
+    let cells = &sheets[0].1;
+    assert!(cells.contains(&(0, 0, "TRUE".to_string())), "{cells:?}");
+    assert!(cells.contains(&(0, 1, "FALSE".to_string())), "{cells:?}");
+    assert!(cells.contains(&(0, 2, "=A1+10".to_string())), "{cells:?}");
+    assert!(cells.contains(&(1, 2, "=A2+10".to_string())), "{cells:?}");
+    assert!(cells.contains(&(1, 3, "99".to_string())), "{cells:?}");
+}
+
+#[test]
+fn odp_pack_emits_standard_draw_frame_text_box_and_presentation_notes() {
+    use easyoffice_formats::OdfCodec;
+    let slides = vec![(
+        "제목 슬라이드".to_string(),
+        vec!["첫 항목".to_string(), "둘째 항목".to_string()],
+        "발표자 노트".to_string(),
+    )];
+    let bytes = OdfCodec::pack_odp("발표 문서", &slides).unwrap();
+    let entries = ZipArchiveCodec::unpack(&bytes, &ZipSecurityPolicy::default()).unwrap();
+    let xml = entries
+        .iter()
+        .find(|e| e.path == "content.xml")
+        .map(|e| std::str::from_utf8(&e.data).unwrap())
+        .unwrap();
+    assert!(xml.contains("<draw:frame draw:layer=\"layout\""), "{xml}");
+    assert!(xml.contains("<draw:text-box>"), "{xml}");
+    assert!(xml.contains("<presentation:notes><draw:frame"), "{xml}");
+    let (title, unpacked) = OdfCodec::unpack_odp(&bytes).unwrap();
+    assert_eq!(title, "발표 문서");
+    assert_eq!(unpacked, slides);
+}
+
+#[test]
+fn markdown_codec_parses_h5_and_h6_headings() {
+    use easyoffice_formats::{CommonMarkCodec, MarkdownBlock};
+    let blocks = CommonMarkCodec::parse("# H1\n##### H5 제목\n###### H6 제목\n").unwrap();
+    assert!(blocks.contains(&MarkdownBlock::Heading {
+        level: 5,
+        text: "H5 제목".to_string()
+    }));
+    assert!(blocks.contains(&MarkdownBlock::Heading {
+        level: 6,
+        text: "H6 제목".to_string()
+    }));
 }
 
 #[test]

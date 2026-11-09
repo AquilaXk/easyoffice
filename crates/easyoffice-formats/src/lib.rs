@@ -3,6 +3,7 @@ use std::fmt;
 pub mod base64_codec;
 pub mod biff8_xls_codec;
 pub mod converter;
+pub(crate) mod cp949;
 mod crc32;
 pub mod csv_markdown_codecs;
 pub mod deflate;
@@ -489,7 +490,7 @@ impl FormatDetector {
         }
 
         if bytes.starts_with(&Self::RTF_MAGIC) {
-            Self::validate_utf8_without_nul(bytes, "rtf")?;
+            Self::validate_without_nul(bytes, "rtf")?;
             return Ok(DocumentFormat::Rtf);
         }
 
@@ -556,7 +557,7 @@ impl FormatDetector {
                             detail: "RTF({\\rtf) 매직 시그니처가 없습니다.".to_string(),
                         });
                     }
-                    Self::validate_utf8_without_nul(bytes, format.extension())?;
+                    Self::validate_without_nul(bytes, format.extension())?;
                 } else {
                     if bytes.starts_with(&Self::ZIP_MAGIC)
                         || bytes.starts_with(&Self::OLE2_MAGIC)
@@ -576,12 +577,17 @@ impl FormatDetector {
         Ok(())
     }
 
-    fn validate_utf8_without_nul(bytes: &[u8], label: &str) -> Result<(), EasyOfficeError> {
+    fn validate_without_nul(bytes: &[u8], label: &str) -> Result<(), EasyOfficeError> {
         if bytes.contains(&0x00) {
             return Err(EasyOfficeError::InvalidUtf8(format!(
                 "{label} 스트림에 NUL(0x00) 바이트가 포함되어 있습니다."
             )));
         }
+        Ok(())
+    }
+
+    fn validate_utf8_without_nul(bytes: &[u8], label: &str) -> Result<(), EasyOfficeError> {
+        Self::validate_without_nul(bytes, label)?;
         std::str::from_utf8(bytes).map(|_| ()).map_err(|_| {
             EasyOfficeError::InvalidUtf8(format!("{label} 스트림이 유효한 UTF-8이 아닙니다."))
         })

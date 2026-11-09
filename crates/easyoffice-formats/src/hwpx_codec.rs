@@ -246,11 +246,16 @@ impl HwpxCodec {
             };
             let para = HwpxParaShape {
                 align: match p.alignment {
-                    None => HwpxParaShape::default().align,
-                    Some(RichAlignment::Left) => "LEFT",
-                    Some(RichAlignment::Center) => "CENTER",
-                    Some(RichAlignment::Right) => "RIGHT",
-                    Some(RichAlignment::Justify) => "JUSTIFY",
+                    None => None,
+                    Some(RichAlignment::Left) => Some("LEFT"),
+                    Some(RichAlignment::Center) => Some("CENTER"),
+                    Some(RichAlignment::Right) => Some("RIGHT"),
+                    Some(RichAlignment::Justify) => Some("JUSTIFY"),
+                },
+                heading_type: match p.list {
+                    Some(crate::RichListKind::Bullet) => "BULLET",
+                    Some(crate::RichListKind::Ordered) => "NUMBER",
+                    None => "NONE",
                 },
                 left_margin: p
                     .left_indent_twips

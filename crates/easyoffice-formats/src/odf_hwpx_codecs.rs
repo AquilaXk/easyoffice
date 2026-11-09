@@ -311,6 +311,15 @@ impl OdfCodec {
         sheets: &[OdsUnpacked],
         stylings: &[SheetStyling],
     ) -> Result<Vec<u8>, EasyOfficeError> {
+        Self::pack_ods_multi_styled_with_cache(sheets, &[], stylings)
+    }
+
+    /// Like [`Self::pack_ods_multi_styled`], additionally writing evaluated formula cached values.
+    pub fn pack_ods_multi_styled_with_cache(
+        sheets: &[OdsUnpacked],
+        caches: &[crate::XlsxFormulaCache],
+        stylings: &[SheetStyling],
+    ) -> Result<Vec<u8>, EasyOfficeError> {
         Self::validate_ods_bounds(sheets, stylings)?;
         let style_table = OdsStyleTable::build(stylings);
 
@@ -332,6 +341,7 @@ impl OdfCodec {
                 &mut content,
                 sheet_name,
                 cells,
+                caches.get(sheet_idx),
                 stylings.get(sheet_idx),
                 &style_table,
             );
@@ -387,6 +397,7 @@ impl OdfCodec {
         content: &mut String,
         sheet_name: &str,
         cells: &[(u32, u32, String)],
+        cache: Option<&crate::XlsxFormulaCache>,
         styling: Option<&SheetStyling>,
         style_table: &OdsStyleTable,
     ) {
@@ -428,7 +439,8 @@ impl OdfCodec {
                     .map_or(String::new(), |name| {
                         format!(" table:style-name=\"{name}\"")
                     });
-                Self::push_ods_cell(content, (row, col), raw, &style_attr);
+                let cached = cache.and_then(|c| c.get(&(row, col)));
+                Self::push_ods_cell(content, (row, col), raw, cached, &style_attr);
                 expected_col = col.saturating_add(1);
             }
             content.push_str("</table:table-row>");
@@ -437,17 +449,46 @@ impl OdfCodec {
         content.push_str("</table:table>");
     }
 
-    fn push_ods_cell(content: &mut String, (row, col): (u32, u32), raw: &str, style_attr: &str) {
+    fn push_ods_cell(
+        content: &mut String,
+        (row, col): (u32, u32),
+        raw: &str,
+        cached: Option<&crate::XlsxCachedValue>,
+        style_attr: &str,
+    ) {
         if raw.is_empty() {
             content.push_str(&format!("<table:table-cell{style_attr}/>"));
         } else if let Some(formula) = raw.strip_prefix('=') {
             let of_expr = Self::to_open_formula_syntax(formula);
             let escaped_formula = XmlSanitizer::escape(&of_expr);
-            content.push_str(&format!(
-                "<table:table-cell row=\"{row}\" col=\"{col}\"{style_attr} table:formula=\"of:={escaped_formula}\" office:value-type=\"string\"><text:p>{}</text:p></table:table-cell>",
-                XmlSanitizer::escape(raw)
-            ));
-        } else if raw.parse::<f64>().is_ok() {
+            match cached {
+                Some(crate::XlsxCachedValue::Number(n)) if n.is_finite() => {
+                    let disp = crate::LegacyOle2Codec::format_biff_number(*n);
+                    content.push_str(&format!(
+                        "<table:table-cell row=\"{row}\" col=\"{col}\"{style_attr} table:formula=\"of:={escaped_formula}\" office:value-type=\"float\" office:value=\"{n}\"><text:p>{disp}</text:p></table:table-cell>"
+                    ));
+                }
+                Some(crate::XlsxCachedValue::Boolean(b)) => {
+                    let disp = if *b { "TRUE" } else { "FALSE" };
+                    let val = if *b { "true" } else { "false" };
+                    content.push_str(&format!(
+                        "<table:table-cell row=\"{row}\" col=\"{col}\"{style_attr} table:formula=\"of:={escaped_formula}\" office:value-type=\"boolean\" office:boolean-value=\"{val}\"><text:p>{disp}</text:p></table:table-cell>"
+                    ));
+                }
+                Some(crate::XlsxCachedValue::Text(text)) => {
+                    content.push_str(&format!(
+                        "<table:table-cell row=\"{row}\" col=\"{col}\"{style_attr} table:formula=\"of:={escaped_formula}\" office:value-type=\"string\"><text:p>{}</text:p></table:table-cell>",
+                        XmlSanitizer::escape(text)
+                    ));
+                }
+                _ => {
+                    content.push_str(&format!(
+                        "<table:table-cell row=\"{row}\" col=\"{col}\"{style_attr} table:formula=\"of:={escaped_formula}\" office:value-type=\"string\"><text:p>{}</text:p></table:table-cell>",
+                        XmlSanitizer::escape(raw)
+                    ));
+                }
+            }
+        } else if crate::LegacyOle2Codec::parse_finite_f64(raw).is_some() {
             let escaped_val = XmlSanitizer::escape(raw);
             content.push_str(&format!(
                 "<table:table-cell row=\"{row}\" col=\"{col}\"{style_attr} office:value-type=\"float\" office:value=\"{escaped_val}\"><text:p>{escaped_val}</text:p></table:table-cell>"
@@ -670,14 +711,30 @@ impl OdfCodec {
         );
         for (s_title, bullets, notes) in slides {
             content.push_str(&format!(
-                "<draw:page draw:name=\"{}\" notes=\"{}\">",
-                XmlSanitizer::escape(s_title),
-                XmlSanitizer::escape(notes)
+                "<draw:page draw:name=\"{}\">",
+                XmlSanitizer::escape(s_title)
             ));
+            if !s_title.is_empty() {
+                content.push_str(&format!(
+                    "<draw:frame draw:layer=\"layout\" presentation:class=\"title\"><draw:text-box><text:p>{}</text:p></draw:text-box></draw:frame>",
+                    XmlSanitizer::escape(s_title)
+                ));
+            }
+            content.push_str("<draw:frame draw:layer=\"layout\"><draw:text-box>");
             for b in bullets {
                 content.push_str("<text:p>");
                 content.push_str(&XmlSanitizer::escape(b));
                 content.push_str("</text:p>");
+            }
+            content.push_str("</draw:text-box></draw:frame>");
+            if !notes.is_empty() {
+                content.push_str("<presentation:notes><draw:frame><draw:text-box>");
+                for line in notes.split('\n') {
+                    content.push_str("<text:p>");
+                    content.push_str(&XmlSanitizer::escape(line));
+                    content.push_str("</text:p>");
+                }
+                content.push_str("</draw:text-box></draw:frame></presentation:notes>");
             }
             content.push_str("</draw:page>");
         }

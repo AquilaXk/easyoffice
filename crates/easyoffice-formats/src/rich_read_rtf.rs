@@ -70,6 +70,7 @@ struct Group {
 struct ParaProps {
     align: Option<RichAlignment>,
     heading: u8,
+    list: Option<crate::RichListKind>,
 }
 
 struct Reader {
@@ -158,6 +159,7 @@ impl Reader {
     }
 
     fn emit(&mut self, text: &str) {
+        self.high_surrogate = None;
         match self.top().dest {
             Dest::Body => {
                 if self.in_row {
@@ -221,6 +223,9 @@ impl Reader {
         let para = std::mem::take(&mut self.para);
         if para.heading > 0 {
             let inherited = u16::try_from(heading_half_points(para.heading)).ok();
+            if self.top().chars.size == inherited {
+                self.top().chars.size = None;
+            }
             let mut merged: Vec<RichRun> = Vec::new();
             for r in runs {
                 let fmt = CharFmt {
@@ -244,7 +249,7 @@ impl Reader {
                 runs,
                 alignment: para.align,
                 heading_level: para.heading,
-                list: None,
+                list: if para.heading > 0 { None } else { para.list },
                 ..RichParagraph::default()
             }));
         }
@@ -289,7 +294,8 @@ impl Reader {
             }
             _ => char::from_u32(u32::from(unit)),
         };
-        self.emit(&ch.unwrap_or('\u{FFFD}').to_string());
+        let mut buf = [0u8; 4];
+        self.emit(ch.unwrap_or('\u{FFFD}').encode_utf8(&mut buf));
     }
 
     fn control_word(&mut self, word: &str, param: Option<i32>) {
@@ -301,7 +307,7 @@ impl Reader {
             self.top().unicode_skip = usize::try_from(param.unwrap_or(1)).unwrap_or(0);
             return;
         }
-        if word == "u" && self.top().dest != Dest::Skip {
+        if word == "u" && param.is_some() && self.top().dest != Dest::Skip {
             self.top().first_word = false;
             self.emit_unicode(param.unwrap_or(0));
             return;
@@ -349,8 +355,14 @@ impl Reader {
         let on = param != Some(0);
         match word {
             "par" if !self.in_row => self.end_paragraph(),
+            "par" | "line" if self.in_row => {
+                self.high_surrogate = None;
+                if !self.cell.is_empty() {
+                    self.cell.push('\n');
+                }
+            }
             "pard" => {
-                self.para.align = None;
+                self.para = ParaProps::default();
             }
             "line" => self.emit("\n"),
             "tab" => self.emit("\t"),
@@ -381,6 +393,18 @@ impl Reader {
             "qc" => self.para.align = Some(RichAlignment::Center),
             "qr" => self.para.align = Some(RichAlignment::Right),
             "qj" => self.para.align = Some(RichAlignment::Justify),
+            "pnlvlblt" => self.para.list = Some(crate::RichListKind::Bullet),
+            "pnlvlbody" | "pnlvl" => self.para.list = Some(crate::RichListKind::Ordered),
+            "ls" => {
+                self.para.list = Some(if param == Some(2) {
+                    crate::RichListKind::Ordered
+                } else {
+                    crate::RichListKind::Bullet
+                });
+            }
+            "li" if param == Some(720) && self.para.list.is_none() => {
+                self.para.list = Some(crate::RichListKind::Bullet);
+            }
             "outlinelevel" => {
                 let level = param.unwrap_or(0).clamp(0, 5) as u8 + 1;
                 self.para.heading = level;
@@ -409,12 +433,13 @@ impl Reader {
         }
     }
 
-    fn escape_symbol(&mut self, rest: &str) {
+    fn escape_symbol(&mut self, rest: &str) -> usize {
         let Some(sym) = rest.chars().next() else {
-            return;
+            return 0;
         };
+        let mut buf = [0u8; 4];
         match sym {
-            '\\' | '{' | '}' => self.emit(&sym.to_string()),
+            '\\' | '{' | '}' => self.emit(sym.encode_utf8(&mut buf)),
             '~' => self.emit("\u{00A0}"),
             '_' => self.emit("-"),
             '*' => self.top().dest = Dest::Skip,
@@ -424,12 +449,23 @@ impl Reader {
                     .get(1..3)
                     .filter(|_| escape_len(rest) == 3)
                     .and_then(|h| u8::from_str_radix(h, 16).ok());
-                if let Some(byte) = hex {
-                    self.emit(&char::from(byte).to_string());
+                if let Some(b1) = hex {
+                    if let Some(b2) = rest
+                        .get(3..7)
+                        .and_then(|s| s.strip_prefix("\\'"))
+                        .and_then(|h| u8::from_str_radix(h, 16).ok())
+                    {
+                        if let Some(ch) = crate::cp949::decode_cp949_pair(b1, b2) {
+                            self.emit(ch.encode_utf8(&mut buf));
+                            return 7;
+                        }
+                    }
+                    self.emit(char::from(b1).encode_utf8(&mut buf));
                 }
             }
             _ => {}
         }
+        escape_len(rest)
     }
 
     /// Reads `\ucN` fallback units as the text runs: each plain character, `\'hh`, control
@@ -470,12 +506,13 @@ impl Reader {
                     let name_len = after.bytes().take_while(u8::is_ascii_alphabetic).count();
                     if name_len == 0 {
                         // `\*` marks an ignorable destination; `\'hh` is a code-page byte.
-                        if skip_fallback > 0 {
+                        let adv = if skip_fallback > 0 {
                             skip_fallback -= 1;
+                            escape_len(after)
                         } else {
-                            self.escape_symbol(after);
-                        }
-                        i += 1 + escape_len(after);
+                            self.escape_symbol(after)
+                        };
+                        i += 1 + adv;
                         continue;
                     }
                     let word = &after[..name_len];
@@ -495,7 +532,7 @@ impl Reader {
                         continue;
                     }
                     self.control_word(word, param);
-                    if word == "u" {
+                    if word == "u" && param.is_some() {
                         skip_fallback = self.top().unicode_skip;
                     }
                 }
@@ -552,10 +589,12 @@ fn group_len(rest: &str) -> usize {
 
 /// Decodes an RTF document into runs, paragraph properties, and tables.
 pub(crate) fn read_rtf(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), EasyOfficeError> {
-    let text = std::str::from_utf8(bytes)
-        .map_err(|_| EasyOfficeError::InvalidUtf8("RTF UTF-8 디코딩 실패".to_string()))?;
+    let text_cow = match std::str::from_utf8(bytes) {
+        Ok(s) => std::borrow::Cow::Borrowed(s),
+        Err(_) => std::borrow::Cow::Owned(crate::cp949::decode_cp949_or_latin1_bytes(bytes)),
+    };
     let mut reader = Reader::new();
-    reader.run(text)?;
+    reader.run(text_cow.as_ref())?;
     reader.end_paragraph();
     reader.flush_table();
     let title = if reader.title.trim().is_empty() {

@@ -143,3 +143,37 @@ fn a_sheet_too_sparse_and_wide_to_write_as_a_grid_is_refused_not_cut() {
         .to_string();
     assert!(err.contains("너무 커서"), "{err}");
 }
+
+#[test]
+fn xls_save_preserves_computed_string_starting_with_equals_as_text() {
+    let eq_str = r#""sheets":[{"name":"수식문자열","cells":[{"ref":"A1","raw":"=CONCAT(\"=\",\"SUM(A1:A2)\")"},{"ref":"A2","raw":"=\"=\""}]}]"#;
+    let (_, bytes) = convert(&payload("xls", eq_str));
+    let sheets = LegacyOle2Codec::unpack_xls_multi(&bytes).unwrap();
+    assert_eq!(
+        sheets[0].cells,
+        vec![(0, 0, "=SUM(A1:A2)".to_string()), (1, 0, "=".to_string()),],
+        "computed string starting with '=' must be stored in SST, not as a 0.0 BIFF8 formula"
+    );
+}
+
+#[test]
+fn ods_save_writes_evaluated_formula_display_and_float_value() {
+    use easyoffice_formats::{OdfCodec, ZipArchiveCodec, ZipSecurityPolicy};
+    let (_, bytes) = convert(&payload("ods", SHEETS));
+    let entries = ZipArchiveCodec::unpack(&bytes, &ZipSecurityPolicy::default()).unwrap();
+    let content_xml = entries
+        .iter()
+        .find(|e| e.path == "content.xml")
+        .map(|e| std::str::from_utf8(&e.data).unwrap())
+        .unwrap();
+    assert!(
+        content_xml.contains("office:value-type=\"float\" office:value=\"30\"><text:p>30</text:p>"),
+        "{content_xml}"
+    );
+    assert!(
+        content_xml.contains("office:value-type=\"float\" office:value=\"60\"><text:p>60</text:p>"),
+        "{content_xml}"
+    );
+    let unpacked = OdfCodec::unpack_ods_multi(&bytes).unwrap();
+    assert!(unpacked[0].1.contains(&(2, 0, "=SUM(A1:A2)".to_string())));
+}

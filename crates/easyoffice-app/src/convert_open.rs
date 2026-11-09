@@ -10,9 +10,9 @@
 //! ceilings, path-traversal checks, and XXE/DTD rejection apply to every path.
 
 use easyoffice_formats::{
-    base64_codec, read_sheet_styling, CellMerge, CellStyle, DecodedContent, DecodedDocument,
-    DocumentFormat, EasyOfficeError, OdsUnpacked, RichAlignment, RichBlock, RichImage,
-    RichListKind, RichParagraph, RichScript, SheetStyling, StrictJsonValue,
+    base64_codec, evaluate_table_formulas, read_sheet_styling, CellMerge, CellStyle,
+    DecodedContent, DecodedDocument, DocumentFormat, EasyOfficeError, OdsUnpacked, RichAlignment,
+    RichBlock, RichImage, RichListKind, RichParagraph, RichScript, SheetStyling, StrictJsonValue,
     UniversalFormatConverter,
 };
 use easyoffice_sheet::PackedCellCoordinate;
@@ -362,7 +362,14 @@ fn into_structured(
     styling: &[(String, SheetStyling)],
 ) -> StructuredContent {
     match content {
-        DecodedContent::Document(doc) => StructuredContent::Document(doc),
+        DecodedContent::Document(mut doc) => {
+            for block in &mut doc.blocks {
+                if let RichBlock::Table(table) = block {
+                    evaluate_table_formulas(&mut table.rows);
+                }
+            }
+            StructuredContent::Document(doc)
+        }
         DecodedContent::Workbook(sheets) => {
             let stylings = sheets
                 .iter()
@@ -433,14 +440,24 @@ impl EasyOfficeIpcRouter {
         let dst_fmt = DocumentFormat::from_extension(dst_ext).ok_or_else(|| {
             EasyOfficeError::InvalidArgument(format!("지원하지 않는 대상 포맷: {dst_ext}"))
         })?;
-        let title = Self::optional_json_str(entries, "title")?
+        let fallback_title = Self::optional_json_str(entries, "title")?
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .unwrap_or("변환_문서");
+        let decoded_title = decoded.title.trim();
+        let title = if !decoded_title.is_empty()
+            && !matches!(
+                decoded_title,
+                "Untitled" | "EasyOffice Document" | " EasyOffice Document"
+            ) {
+            decoded_title.to_string()
+        } else {
+            fallback_title.to_string()
+        };
         let src_fmt = decoded.format;
         let mut warnings = decoded.warnings.clone();
         let content = into_structured(decoded.content, &styling);
-        let dst_bytes = encode_structured(&content, dst_fmt, title, &mut warnings)?;
+        let dst_bytes = encode_structured(&content, dst_fmt, &title, &mut warnings)?;
         Self::conversion_response(src_fmt, dst_fmt, &bytes, &dst_bytes, &warnings)
     }
 }
@@ -771,6 +788,43 @@ mod tests {
         assert!(md.contains("굵게"), "{md}");
         assert!(md.contains("| 가 | 나 |"), "{md}");
         assert!(!md.contains("에디터 텍스트"), "{md}");
+    }
+
+    #[test]
+    fn source_file_convert_evaluates_table_formulas_and_preserves_metadata_title() {
+        let doc = RichDocument {
+            title: "원본 메타 제목".to_string(),
+            blocks: vec![RichBlock::Table(
+                vec![
+                    vec!["항목".to_string(), "금액".to_string()],
+                    vec!["A".to_string(), "15".to_string()],
+                    vec!["B".to_string(), "25".to_string()],
+                    vec!["합계".to_string(), "=SUM(ABOVE)".to_string()],
+                ]
+                .into(),
+            )],
+            official_agency: None,
+        };
+        let src_bytes =
+            UniversalFormatConverter::encode_rich(&doc, DocumentFormat::Docx, None).unwrap();
+        let json = EasyOfficeIpcRouter::dispatch(
+            "convert_document_format",
+            &request(None, "원본.docx", &src_bytes, ",\"targetFormat\":\"docx\""),
+        )
+        .unwrap();
+        let key = "\"convertedBase64\":\"";
+        let start = json.find(key).unwrap() + key.len();
+        let end = json[start..].find('"').unwrap() + start;
+        let out_bytes = EasyOfficeIpcRouter::decode_base64(&json[start..end]).unwrap();
+        let decoded = UniversalFormatConverter::decode_rich(&out_bytes, Some("out.docx")).unwrap();
+        assert_eq!(decoded.title, "원본 메타 제목");
+        let DecodedContent::Document(out_doc) = decoded.content else {
+            panic!("document expected");
+        };
+        let RichBlock::Table(tbl) = &out_doc.blocks[0] else {
+            panic!("table expected");
+        };
+        assert_eq!(tbl.rows[3][1], "40");
     }
 
     #[test]

@@ -281,7 +281,7 @@ impl<K: PartialEq + Clone> StyleTable<K> {
 struct OdtParaKey {
     align: Option<RichAlignment>,
     level: u8,
-    is_list: bool,
+    list: Option<RichListKind>,
     left_twips: Option<u32>,
     first_line_twips: Option<i32>,
     line_percent: Option<u16>,
@@ -315,7 +315,7 @@ fn push_odt_paragraph(
     let key = OdtParaKey {
         align: p.alignment,
         level,
-        is_list: p.list.is_some(),
+        list: if level > 0 { None } else { p.list },
         left_twips: p.left_indent_twips,
         first_line_twips: p.first_line_indent_twips,
         line_percent: p.line_spacing_percent,
@@ -363,13 +363,18 @@ fn odt_para_style_xml(number: usize, key: &OdtParaKey) -> String {
     let OdtParaKey {
         align,
         level,
-        is_list,
+        list,
         left_twips,
         first_line_twips,
         line_percent,
     } = key;
+    let list_attr = match list {
+        Some(RichListKind::Ordered) => " style:list-style-name=\"L_Ordered\"",
+        Some(RichListKind::Bullet) => " style:list-style-name=\"L_Bullet\"",
+        None => "",
+    };
     let mut styles = format!(
-        "<style:style style:name=\"P{number}\" style:family=\"paragraph\"><style:paragraph-properties"
+        "<style:style style:name=\"P{number}\" style:family=\"paragraph\"{list_attr}><style:paragraph-properties"
     );
     if let Some(a) = align {
         let v = match a {
@@ -385,7 +390,7 @@ fn odt_para_style_xml(number: usize, key: &OdtParaKey) -> String {
             " fo:margin-left=\"{}\"",
             odt_twips_to_pt(i64::from(*left))
         ));
-    } else if *is_list {
+    } else if list.is_some() {
         styles.push_str(" fo:margin-left=\"0.5in\"");
     }
     if let Some(first) = first_line_twips {
@@ -472,7 +477,7 @@ pub(crate) fn pack_odt_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeErr
 // ---------------------------------------------------------------- RTF
 
 /// Formatting control words the RTF writer emits (each followed by one delimiter space).
-const RTF_FORMAT_WORDS: [&str; 18] = [
+const RTF_FORMAT_WORDS: [&str; 20] = [
     "pard",
     "ql",
     "qc",
@@ -485,6 +490,8 @@ const RTF_FORMAT_WORDS: [&str; 18] = [
     "strike",
     "fs",
     "li",
+    "pnlvlblt",
+    "pnlvlbody",
     "outlinelevel",
     "plain",
     "s",
@@ -562,8 +569,11 @@ fn rtf_paragraph_line(p: &RichParagraph, tables: &RtfRunTables) -> String {
             p.heading_level - 1,
             heading_half_points(p.heading_level)
         ));
-    } else if p.list.is_some() {
-        line.push_str("\\li720");
+    } else if let Some(list_kind) = p.list {
+        line.push_str(match list_kind {
+            RichListKind::Bullet => "\\pnlvlblt\\li720",
+            RichListKind::Ordered => "\\pnlvlbody\\li720",
+        });
     }
     line.push(' ');
     for run in &p.runs {

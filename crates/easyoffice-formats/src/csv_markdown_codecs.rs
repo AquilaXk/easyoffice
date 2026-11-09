@@ -518,15 +518,22 @@ fn is_table_separator_cell(cell: &str) -> bool {
     core.len() >= 3 && core.chars().all(|ch| ch == '-')
 }
 
-/// Heading level and text for an ATX heading line (`#` to `####`).
+/// Heading level and text for an ATX heading line (`#` to `######`).
 fn atx_heading(trimmed: &str) -> Option<(u8, &str)> {
-    [("#### ", 4u8), ("### ", 3), ("## ", 2), ("# ", 1)]
-        .iter()
-        .find_map(|(prefix, level)| {
-            trimmed
-                .strip_prefix(prefix)
-                .map(|text| (*level, text.trim()))
-        })
+    [
+        ("###### ", 6u8),
+        ("##### ", 5),
+        ("#### ", 4),
+        ("### ", 3),
+        ("## ", 2),
+        ("# ", 1),
+    ]
+    .iter()
+    .find_map(|(prefix, level)| {
+        trimmed
+            .strip_prefix(prefix)
+            .map(|text| (*level, text.trim()))
+    })
 }
 
 /// Block accumulator for the line-oriented Markdown parser.

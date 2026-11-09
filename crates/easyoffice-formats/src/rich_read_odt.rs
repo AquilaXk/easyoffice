@@ -33,6 +33,7 @@ struct StyleProps {
     align: Option<RichAlignment>,
     fmt: CharFmt,
     list_margin: bool,
+    list_kind: Option<RichListKind>,
     left_twips: Option<u32>,
     first_line_twips: Option<i32>,
     line_percent: Option<u16>,
@@ -142,7 +143,20 @@ fn read_styles(
         match ev {
             XmlEvent::Start { name, attrs } => match name.as_str() {
                 "style:style" => {
-                    cur = attr(attrs, "style:name").map(|n| (n.to_string(), StyleProps::default()));
+                    let list_kind = match attr(attrs, "style:list-style-name") {
+                        Some("L_Ordered" | "Numbering" | "Ordered") => Some(RichListKind::Ordered),
+                        Some("L_Bullet" | "Bullet") => Some(RichListKind::Bullet),
+                        _ => None,
+                    };
+                    cur = attr(attrs, "style:name").map(|n| {
+                        (
+                            n.to_string(),
+                            StyleProps {
+                                list_kind,
+                                ..StyleProps::default()
+                            },
+                        )
+                    });
                 }
                 "style:paragraph-properties" => {
                     if let Some((_, p)) = cur.as_mut() {
@@ -477,6 +491,8 @@ impl<'a> OdtWalker<'a> {
                 None
             } else if let Some(kind) = self.list_stack.last() {
                 Some(*kind)
+            } else if let Some(kind) = p.style.list_kind {
+                Some(kind)
             } else if p.style.list_margin {
                 Some(RichListKind::Bullet)
             } else {

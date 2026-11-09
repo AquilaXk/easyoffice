@@ -150,9 +150,33 @@ impl LegacyOle2Codec {
     pub const BIFF8_DIMENSIONS: u16 = 0x0200;
     pub const BIFF8_NUMBER: u16 = 0x0203;
     pub const BIFF8_LABEL: u16 = 0x0204;
+    pub const BIFF8_BOOLERR: u16 = 0x0205;
     pub const BIFF8_STRING: u16 = 0x0207;
     pub const BIFF8_RK: u16 = 0x027E;
     pub const BIFF8_FORMULA: u16 = 0x0006;
+
+    #[inline]
+    pub(crate) fn parse_finite_f64(s: &str) -> Option<f64> {
+        let first = *s.as_bytes().first()?;
+        if !(first.is_ascii_digit() || matches!(first, b'-' | b'+' | b'.')) {
+            return None;
+        }
+        s.parse::<f64>().ok().filter(|n| n.is_finite())
+    }
+
+    #[inline]
+    fn biff_error_str(code: u8) -> &'static str {
+        match code {
+            0x00 => "#NULL!",
+            0x07 => "#DIV/0!",
+            0x0F => "#VALUE!",
+            0x17 => "#REF!",
+            0x1D => "#NAME?",
+            0x24 => "#NUM!",
+            0x2A => "#N/A",
+            _ => "#ERROR!",
+        }
+    }
 
     #[inline]
     pub(crate) fn decode_latin1_bytes(slice: &[u8]) -> String {
@@ -234,6 +258,17 @@ impl LegacyOle2Codec {
     }
 
     pub fn pack_xls_multi(sheets: &[LegacyXlsPayload]) -> Result<Vec<u8>, EasyOfficeError> {
+        Self::pack_xls_multi_inner(sheets, true)
+    }
+
+    pub fn pack_xls_multi_values(sheets: &[LegacyXlsPayload]) -> Result<Vec<u8>, EasyOfficeError> {
+        Self::pack_xls_multi_inner(sheets, false)
+    }
+
+    fn pack_xls_multi_inner(
+        sheets: &[LegacyXlsPayload],
+        allow_formulas: bool,
+    ) -> Result<Vec<u8>, EasyOfficeError> {
         if sheets.is_empty() {
             return Err(EasyOfficeError::EmptyPayload);
         }
@@ -310,16 +345,17 @@ impl LegacyOle2Codec {
         }
 
         let mut sst_strings: Vec<String> = Vec::new();
-        let mut sst_index_map: std::collections::HashMap<String, u32> =
+        let mut sst_index_map: std::collections::HashMap<&str, u32> =
             std::collections::HashMap::new();
         for sheet in sheets {
             for (_, _, val) in &sheet.cells {
-                if !val.starts_with('=')
-                    && val.parse::<f64>().is_err()
-                    && !sst_index_map.contains_key(val)
+                let is_formula = allow_formulas && val.starts_with('=');
+                if !is_formula
+                    && Self::parse_finite_f64(val).is_none()
+                    && !sst_index_map.contains_key(val.as_str())
                 {
                     let idx = sst_strings.len() as u32;
-                    sst_index_map.insert(val.clone(), idx);
+                    sst_index_map.insert(val.as_str(), idx);
                     sst_strings.push(val.clone());
                 }
             }
@@ -368,7 +404,7 @@ impl LegacyOle2Codec {
             for (row, col, raw) in &sheet.cells {
                 let r16 = *row as u16;
                 let c16 = *col as u16;
-                if let Some(expr_str) = raw.strip_prefix('=') {
+                if let Some(expr_str) = raw.strip_prefix('=').filter(|_| allow_formulas) {
                     let expr_utf16 = encode_utf16le(expr_str);
                     let rec_len = (16 + expr_utf16.len()) as u16;
                     stream.extend_from_slice(&Self::BIFF8_FORMULA.to_le_bytes());
@@ -380,7 +416,7 @@ impl LegacyOle2Codec {
                     stream
                         .extend_from_slice(&(expr_str.encode_utf16().count() as u16).to_le_bytes());
                     stream.extend_from_slice(&expr_utf16);
-                } else if let Ok(num) = raw.parse::<f64>() {
+                } else if let Some(num) = Self::parse_finite_f64(raw) {
                     stream.extend_from_slice(&Self::BIFF8_NUMBER.to_le_bytes());
                     stream.extend_from_slice(&14u16.to_le_bytes());
                     stream.extend_from_slice(&r16.to_le_bytes());
@@ -388,7 +424,7 @@ impl LegacyOle2Codec {
                     stream.extend_from_slice(&0u16.to_le_bytes()); // xf
                     stream.extend_from_slice(&num.to_bits().to_le_bytes());
                 } else {
-                    let sst_idx = sst_index_map.get(raw).copied().unwrap_or(0);
+                    let sst_idx = sst_index_map.get(raw.as_str()).copied().unwrap_or(0);
                     stream.extend_from_slice(&Self::BIFF8_LABELSST.to_le_bytes());
                     stream.extend_from_slice(&10u16.to_le_bytes());
                     stream.extend_from_slice(&r16.to_le_bytes());
@@ -521,10 +557,35 @@ impl LegacyOle2Codec {
             Self::BIFF8_FORMULA => Self::xls_formula(state, data, rec)?,
             Self::BIFF8_STRING => Self::xls_string(state, data, rec)?,
             Self::BIFF8_LABEL => Self::xls_label(state, data, rec)?,
+            Self::BIFF8_BOOLERR => Self::xls_boolerr(state, data, rec)?,
             Self::BIFF8_EOF => state.end_substream(),
             _ => {}
         }
         Ok(rec.end)
+    }
+
+    fn xls_boolerr(
+        state: &mut XlsParseState,
+        data: &[u8],
+        rec: XlsRecord,
+    ) -> Result<(), EasyOfficeError> {
+        if rec.len() < 8 {
+            return Ok(());
+        }
+        let start = rec.start;
+        let row = read_u16_le(data, start)? as u32;
+        let col = read_u16_le(data, start + 2)? as u32;
+        let b6 = data[start + 6];
+        let b7 = data[start + 7];
+        let text = match (b6, b7) {
+            (0, 0) => "FALSE",
+            (0, _) => "TRUE",
+            (1, code) => Self::biff_error_str(code),
+            (code, 1) => Self::biff_error_str(code),
+            _ => "TRUE",
+        };
+        state.push_cell(row, col, text.to_string());
+        Ok(())
     }
 
     fn xls_bof(
@@ -717,11 +778,20 @@ impl LegacyOle2Codec {
         }))
     }
 
-    /// Cached numeric result of a FORMULA record as display text.
+    /// Cached result of a FORMULA record as display text.
     fn xls_formula_cached(data: &[u8], start: usize) -> Result<String, EasyOfficeError> {
-        let is_special = data[start + 12] == 0xFF && data[start + 13] == 0xFF;
-        if is_special && data[start + 6] == 0 {
-            return Ok(String::new());
+        if data[start + 12] == 0xFF && data[start + 13] == 0xFF {
+            return Ok(match data[start + 6] {
+                1 => {
+                    if data[start + 8] != 0 {
+                        "TRUE".to_string()
+                    } else {
+                        "FALSE".to_string()
+                    }
+                }
+                2 => Self::biff_error_str(data[start + 8]).to_string(),
+                _ => String::new(),
+            });
         }
         let num = f64::from_bits(read_u64_le(data, start + 6)?);
         Ok(if num.is_finite() {

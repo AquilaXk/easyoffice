@@ -27,6 +27,33 @@ pub(crate) fn decode_rtf_escape(
     if matches!(next, RTF_BACKSLASH | RTF_OPEN_BRACE | RTF_CLOSE_BRACE) {
         return Some((Some(next), i + 2));
     }
+    if next == b'\'' as u16 {
+        let hex_u8 = |u: u16| {
+            u8::try_from(u)
+                .ok()?
+                .is_ascii_hexdigit()
+                .then(|| char::from(u as u8).to_digit(16).unwrap_or(0) as u8)
+        };
+        if let (Some(h1), Some(l1)) = (
+            units.get(i + 2).copied().and_then(hex_u8),
+            units.get(i + 3).copied().and_then(hex_u8),
+        ) {
+            let b1 = (h1 << 4) | l1;
+            if units.get(i + 4) == Some(&RTF_BACKSLASH) && units.get(i + 5) == Some(&(b'\'' as u16))
+            {
+                if let (Some(h2), Some(l2)) = (
+                    units.get(i + 6).copied().and_then(hex_u8),
+                    units.get(i + 7).copied().and_then(hex_u8),
+                ) {
+                    let b2 = (h2 << 4) | l2;
+                    if let Some(ch) = crate::cp949::decode_cp949_pair(b1, b2) {
+                        return Some((Some(ch as u16), i + 8));
+                    }
+                }
+            }
+            return Some((Some(u16::from(b1)), i + 4));
+        }
+    }
     let rest = &units[i + 1..];
     if rest.starts_with(&RTF_LINE_WORD) {
         let mut end = i + 1 + RTF_LINE_WORD.len();
@@ -40,7 +67,11 @@ pub(crate) fn decode_rtf_escape(
         *unicode_skip = usize::try_from(count).unwrap_or(0);
         return Some((None, end));
     }
-    if next == b'u' as u16 {
+    if next == b'u' as u16
+        && units
+            .get(i + 2)
+            .is_some_and(|&u| u == b'-' as u16 || (b'0' as u16..=b'9' as u16).contains(&u))
+    {
         return decode_rtf_unicode(units, i + 2, *unicode_skip);
     }
     None

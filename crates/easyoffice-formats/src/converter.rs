@@ -200,7 +200,11 @@ impl UniversalFormatConverter {
                 sheet_name: title,
                 cells: sheet_cells,
             }),
-            DocumentFormat::Ods => OdfCodec::pack_ods(&title, &sheet_cells),
+            DocumentFormat::Ods => OdfCodec::pack_ods_multi_styled_with_cache(
+                &[(title, sheet_cells)],
+                formula_cache.map(std::slice::from_ref).unwrap_or_default(),
+                &[],
+            ),
             DocumentFormat::Csv | DocumentFormat::Tsv => {
                 let delim = if format == DocumentFormat::Csv {
                     ','

@@ -302,7 +302,7 @@ fn finish_paragraph(header: &Header, p: ParaState) -> RichParagraph {
         Some("LEFT") => Some(RichAlignment::Left),
         Some("CENTER") => Some(RichAlignment::Center),
         Some("RIGHT") => Some(RichAlignment::Right),
-        Some("DISTRIBUTE" | "DISTRIBUTE_SPACE") => Some(RichAlignment::Justify),
+        Some("JUSTIFY" | "DISTRIBUTE" | "DISTRIBUTE_SPACE") => Some(RichAlignment::Justify),
         _ => None,
     };
     // Heading styles are bold and sized by definition, so those are not user formatting there;

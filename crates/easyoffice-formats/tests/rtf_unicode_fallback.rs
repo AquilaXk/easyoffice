@@ -114,4 +114,54 @@ fn plain_decoder_skips_the_same_fallback_units() {
         "the writer's own form is unchanged"
     );
     assert_eq!(decode("\\uc1\\u-10179?\\u-8704?"), ["😀"]);
+    assert_eq!(decode("\\up10 밑줄"), ["\\up10 밑줄"]);
+    assert_eq!(
+        RtfCodec::unescape_rtf_text("\\ul 텍스트\\up4 끝"),
+        "\\ul 텍스트\\up4 끝"
+    );
+}
+
+#[test]
+fn cp949_hex_escapes_and_raw_bytes_decode_to_hangul_with_latin1_fallback() {
+    assert_eq!(
+        read("\\ansicpg949\\fcharset129 \\'b0\\'a1\\'b3\\'aa\\'81\\'41"),
+        "가나갂"
+    );
+    assert_eq!(read("\\'e9X"), "\u{00e9}X");
+    let raw_rtf = b"{\\rtf1\\ansi\\ansicpg949 \xb0\xa1\xb3\xaa}";
+    let decoded = UniversalFormatConverter::decode_rich(raw_rtf, Some("cp949.rtf")).unwrap();
+    let DecodedContent::Document(doc) = decoded.content else {
+        panic!("document expected");
+    };
+    assert_eq!(doc.blocks.len(), 1);
+    let RichBlock::Paragraph(p) = &doc.blocks[0] else {
+        panic!("paragraph expected");
+    };
+    assert_eq!(p.plain_text(), "가나");
+}
+
+#[test]
+fn lone_high_surrogate_resets_on_plain_text_or_bmp_unicode() {
+    assert_eq!(read("\\uc1\\u-10179?A\\u-8704?"), "A\u{FFFD}");
+    assert_eq!(read("\\uc1\\u-10179?\\u44032?\\u-8704?"), "가\u{FFFD}");
+}
+
+#[test]
+fn table_cells_preserve_par_and_line_breaks_and_bare_u_is_not_unicode_zero() {
+    let rtf = "{\\rtf1\\ansi{\\trowd\\cellx3000\\cellx6000 첫줄\\par 둘째줄\\cell 가\\line 나\\cell\\row}\\pard \\u 끝\\par}";
+    let decoded = UniversalFormatConverter::decode_rich(rtf.as_bytes(), Some("t.rtf")).unwrap();
+    let DecodedContent::Document(doc) = decoded.content else {
+        panic!("document expected");
+    };
+    let RichBlock::Table(tbl) = &doc.blocks[0] else {
+        panic!("table expected");
+    };
+    assert_eq!(
+        tbl.rows,
+        vec![vec!["첫줄\n둘째줄".to_string(), "가\n나".to_string()]]
+    );
+    let RichBlock::Paragraph(p) = &doc.blocks[1] else {
+        panic!("paragraph expected");
+    };
+    assert_eq!(p.plain_text(), "끝");
 }

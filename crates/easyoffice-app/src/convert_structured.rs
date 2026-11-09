@@ -619,7 +619,7 @@ fn encode_xls(
             cells: Vec::new(),
         });
     }
-    LegacyOle2Codec::pack_xls_multi(&payloads)
+    LegacyOle2Codec::pack_xls_multi_values(&payloads)
 }
 
 /// CSV/TSV hold one sheet: the first, as values. Sheets left out and cells outside what the CSV
@@ -759,7 +759,7 @@ pub(crate) fn encode_structured(
                 title: title.to_string(),
                 ..doc.clone()
             };
-            let cache = (format == DocumentFormat::Xlsx)
+            let cache = matches!(format, DocumentFormat::Xlsx | DocumentFormat::Ods)
                 .then(|| compute_xlsx_formula_cache(&doc.to_universal_model()));
             UniversalFormatConverter::encode_rich(&doc, format, cache.as_ref())
         }
@@ -768,7 +768,10 @@ pub(crate) fn encode_structured(
                 let (caches, _) = evaluate_workbook(sheets, false)?;
                 OoxmlCodec::pack_xlsx_multi_styled(sheets, &caches, stylings)
             }
-            DocumentFormat::Ods => OdfCodec::pack_ods_multi_styled(sheets, stylings),
+            DocumentFormat::Ods => {
+                let (caches, _) = evaluate_workbook(sheets, false)?;
+                OdfCodec::pack_ods_multi_styled_with_cache(sheets, &caches, stylings)
+            }
             DocumentFormat::Xls => encode_xls(sheets, title, warnings),
             DocumentFormat::Csv | DocumentFormat::Tsv => {
                 encode_delimited(sheets, format, title, warnings)

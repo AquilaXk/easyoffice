@@ -117,7 +117,7 @@ fn collect_shared_strings(
     let mut total_str_count = 0usize;
     for (_, cells) in active_sheets {
         for (_, _, val) in cells {
-            if val.starts_with('=') || val.parse::<f64>().is_ok() {
+            if val.starts_with('=') || crate::LegacyOle2Codec::parse_finite_f64(val).is_some() {
                 continue;
             }
             total_str_count += 1;
@@ -171,7 +171,7 @@ fn push_cell_xml(
             )),
             _ => sheet_xml.push_str(&format!("<c r=\"{a1}\"{s}><f>{f}</f></c>")),
         }
-    } else if raw.parse::<f64>().is_ok() {
+    } else if crate::LegacyOle2Codec::parse_finite_f64(raw).is_some() {
         sheet_xml.push_str(&format!(
             "<c r=\"{a1}\"{s} t=\"n\"><v>{}</v></c>",
             XmlSanitizer::escape(raw)
@@ -645,6 +645,8 @@ impl OoxmlCodec {
         shared_strings: &[String],
     ) -> Result<Vec<(u32, u32, String)>, EasyOfficeError> {
         let mut cells: Vec<(u32, u32, String)> = Vec::new();
+        let mut shared_masters: std::collections::HashMap<u32, (u32, u32, String)> =
+            std::collections::HashMap::new();
         for (attrs_raw, inner) in extract_tags_with_attrs(sheet_xml, "c") {
             let r_attr = extract_attr_from_fragment(attrs_raw, "r");
             let (row, col) = if let (Some(r), Some(c)) = (
@@ -669,8 +671,10 @@ impl OoxmlCodec {
             };
 
             let cell_type = extract_attr_from_fragment(attrs_raw, "t").unwrap_or_default();
-            if let Some(f_body) = extract_tag_bodies(inner, "f").first() {
-                cells.push((row, col, format!("={}", XmlSanitizer::unescape(f_body))));
+            if let Some(formula_str) =
+                Self::resolve_xlsx_formula(inner, row, col, &mut shared_masters)
+            {
+                cells.push((row, col, format!("={formula_str}")));
             } else if cell_type == "inlineStr" {
                 let without_phonetic = strip_tag_blocks(inner, "rPh");
                 let inline_txt = extract_tag_bodies(&without_phonetic, "t")
@@ -685,6 +689,13 @@ impl OoxmlCodec {
                     let idx = raw_v.parse::<usize>().unwrap_or(0);
                     let resolved = shared_strings.get(idx).cloned().unwrap_or(raw_v);
                     cells.push((row, col, resolved));
+                } else if cell_type == "b" {
+                    let b_str = match raw_v.trim() {
+                        "1" | "true" | "TRUE" => "TRUE".to_string(),
+                        "0" | "false" | "FALSE" => "FALSE".to_string(),
+                        _ => raw_v,
+                    };
+                    cells.push((row, col, b_str));
                 } else {
                     cells.push((row, col, raw_v));
                 }
@@ -692,6 +703,137 @@ impl OoxmlCodec {
         }
         Ok(cells)
     }
+
+    fn resolve_xlsx_formula(
+        inner: &str,
+        row: u32,
+        col: u32,
+        shared_masters: &mut std::collections::HashMap<u32, (u32, u32, String)>,
+    ) -> Option<String> {
+        let &(f_attrs, f_body) = extract_tags_or_self_closing_with_attrs(inner, "f").first()?;
+        let is_shared = extract_attr_from_fragment(f_attrs, "t").as_deref() == Some("shared");
+        let si = extract_attr_from_fragment(f_attrs, "si").and_then(|s| s.parse::<u32>().ok());
+        if !f_body.is_empty() {
+            let unescaped = XmlSanitizer::unescape(f_body);
+            if is_shared {
+                if let Some(si_idx) = si {
+                    shared_masters.insert(si_idx, (row, col, unescaped.clone()));
+                }
+            }
+            return Some(unescaped);
+        }
+        if is_shared {
+            let (mr, mc, ref master_expr) = *shared_masters.get(&si?)?;
+            let dr = row as i64 - mr as i64;
+            let dc = col as i64 - mc as i64;
+            return shift_shared_formula(master_expr, dr, dc);
+        }
+        None
+    }
+}
+
+fn shift_shared_formula(formula: &str, dr: i64, dc: i64) -> Option<String> {
+    if formula.as_bytes().contains(&b'[') {
+        return None;
+    }
+    let bytes = formula.as_bytes();
+    let mut out = String::with_capacity(formula.len() + 8);
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'"' {
+            out.push('"');
+            i += 1;
+            while i < bytes.len() {
+                let b = bytes[i];
+                out.push(b as char);
+                i += 1;
+                if b == b'"' {
+                    if i < bytes.len() && bytes[i] == b'"' {
+                        out.push('"');
+                        i += 1;
+                    } else {
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
+        let prev_ok = i == 0
+            || !(bytes[i - 1].is_ascii_alphanumeric() || matches!(bytes[i - 1], b'_' | b'.'));
+        if prev_ok {
+            if let Some((end_idx, abs_col, col0, abs_row, row0)) = match_a1_ref(bytes, i) {
+                let new_col = if abs_col {
+                    col0 as i64
+                } else {
+                    col0 as i64 + dc
+                };
+                let new_row = if abs_row {
+                    row0 as i64
+                } else {
+                    row0 as i64 + dr
+                };
+                if !(0..=16_383).contains(&new_col) || !(0..=1_048_575).contains(&new_row) {
+                    return None;
+                }
+                if abs_col {
+                    out.push('$');
+                }
+                out.push_str(&format_col_letters(new_col as u32));
+                if abs_row {
+                    out.push('$');
+                }
+                out.push_str(&(new_row + 1).to_string());
+                i = end_idx;
+                continue;
+            }
+        }
+        let ch = formula[i..].chars().next()?;
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    Some(out)
+}
+
+fn match_a1_ref(bytes: &[u8], start: usize) -> Option<(usize, bool, u32, bool, u32)> {
+    let mut p = start;
+    let abs_col = if p < bytes.len() && bytes[p] == b'$' {
+        p += 1;
+        true
+    } else {
+        false
+    };
+    let col_start = p;
+    let mut col: u32 = 0;
+    while p < bytes.len() && bytes[p].is_ascii_alphabetic() && p - col_start < 3 {
+        col = col * 26 + (bytes[p].to_ascii_uppercase() - b'A') as u32 + 1;
+        p += 1;
+    }
+    if p == col_start || (p < bytes.len() && bytes[p].is_ascii_alphabetic()) {
+        return None;
+    }
+    let abs_row = if p < bytes.len() && bytes[p] == b'$' {
+        p += 1;
+        true
+    } else {
+        false
+    };
+    let row_start = p;
+    if p >= bytes.len() || !bytes[p].is_ascii_digit() || bytes[p] == b'0' {
+        return None;
+    }
+    let mut row: u32 = 0;
+    while p < bytes.len() && bytes[p].is_ascii_digit() && p - row_start < 7 {
+        row = row.checked_mul(10)?.checked_add((bytes[p] - b'0') as u32)?;
+        p += 1;
+    }
+    if p < bytes.len()
+        && (bytes[p].is_ascii_alphanumeric() || matches!(bytes[p], b'_' | b'.' | b'(' | b'!'))
+    {
+        return None;
+    }
+    let col0 = col.checked_sub(1)?;
+    let row0 = row.checked_sub(1)?;
+    (col0 <= 16_383 && row0 <= 1_048_575).then_some((p, abs_col, col0, abs_row, row0))
 }
 
 pub(crate) fn validate_zip_xml_entries(
