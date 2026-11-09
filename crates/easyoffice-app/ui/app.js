@@ -407,6 +407,7 @@
       },
       {
         save: () => void saveWorkspaceDocument().catch(() => {}),
+        saveAs: () => void saveWorkspaceDocument({ saveAs: true }).catch(() => {}),
         undo: () => void ribbonHistory.performWorkspaceUndo().catch(() => {}),
         redo: () => void ribbonHistory.performWorkspaceRedo().catch(() => {}),
         benchmark: () => void workspacePanels.runBenchmarkAction().catch(() => {}),
@@ -789,7 +790,7 @@
       "hwp-print": () => void hwpPrint.print().catch((err) => setStatusFeedback(err?.message || String(err))),
       "hwp-export-pdf": () => void hwpSession.exportPdf(),
       "studio-save": () => void saveWorkspaceDocument().catch(() => {}),
-      "file-save-as": () => (activeModule === "HWP" ? void hwpSession.saveAs("hwp") : void saveWorkspaceDocument().catch(() => {})),
+      "file-save-as": () => (activeModule === "HWP" && hwpHost.isEmbedActive() ? void hwpSession.saveAs("hwp") : void saveWorkspaceDocument({ saveAs: true }).catch(() => {})),
       "zoom-in": () => void runNativeMenu("view:zoom-in"),
       "zoom-out": () => void runNativeMenu("view:zoom-out"),
       "studio-undo": () => void ribbonHistory.performWorkspaceUndo().catch(() => {}),

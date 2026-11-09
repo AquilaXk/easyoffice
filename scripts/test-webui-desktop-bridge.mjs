@@ -156,6 +156,27 @@ test("desktop save uses the native save command instead of a Blob download", asy
   assert.match(feedback(document), /^문서 저장 완료 \(분기_경영실적_보고서\.docx · /);
 });
 
+test("save as never overwrites the opened file: the menu item, the shortcut and the native menu all go through the dialog", async () => {
+  for (const moduleName of ["DOC", "SHEET", "SLIDE", "PDF"]) {
+    const saves = [];
+    const { document, userClick } = await createShellHarness({
+      saveFile: (args) => {
+        saves.push(args);
+        return { status: "saved", name: args.fileName, bytes: 42 };
+      },
+    });
+    switchModule(document, moduleName);
+    const run = document.defaultView.__EASYOFFICE_NATIVE_MENU__;
+    userClick(studioItem(document, "studio-save-as"));
+    await flushAsyncTurns(12);
+    assert.equal(run("file:save-as"), true, moduleName);
+    await flushAsyncTurns(12);
+    userClick(studioItem(document, "studio-save"));
+    await flushAsyncTurns(12);
+    assert.deepEqual(saves.map((save) => save.inPlace), [false, false, true], moduleName + ": only Save writes back to the opened file");
+  }
+});
+
 test("the first page of a Hangul document is sent to the shell only when the page gives one", async () => {
   const saves = [];
   const shell = await createShellHarness({

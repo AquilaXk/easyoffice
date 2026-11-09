@@ -16,7 +16,7 @@
   // Menu command -> tool dialog (PD-098 step 3b); the action buttons keep their ids.
   const TOOL_DIALOGS = { "smart-diagnose": "smart-dialog", "scrub-pii": "pii-dialog", "security-audit": "security-dialog", "bench-run": "bench-dialog", "view-outline": "outline-dialog" };
   // Menu command -> app-provided action.
-  const STUDIO_DIRECT_ACTIONS = { "studio-save": "save", "studio-undo": "undo", "studio-redo": "redo", "bench-run": "benchmark" };
+  const STUDIO_DIRECT_ACTIONS = { "studio-save": "save", "studio-save-as": "saveAs", "studio-undo": "undo", "studio-redo": "redo", "bench-run": "benchmark" };
   const INSERT_MOD_DISPATCH = {
     "mod-symbol": { hwp: true, target: "hwp-mod-field", label: "문자표 기호 삽입 완료" },
     "mod-header": { hwp: true, target: "hwp-mod-header", label: "머리말 · 꼬리말 적용 완료" },
@@ -245,7 +245,8 @@
 
     const SAVE_EXT_BY_MODULE = { DOC: "docx", HWP: "hwpx", SHEET: "xlsx", SLIDE: "pptx", PDF: "pdf" };
 
-    async function runSaveActiveModuleDocument(closing) {
+    // `saveAs` always asks where to save (the shell's save dialog), never writes back to the opened file.
+    async function runSaveActiveModuleDocument(closing, saveAs) {
       await sheetController.commitPendingFocusedSheetCell(true);
       const curMod = getActiveModule();
       const hwpHost = getHwpHost?.();
@@ -258,7 +259,7 @@
       const content = buildConversionContent(isConv ? srcExt : curMod);
       const converted = await convertForSave(srcExt, dstExt, title, content);
       let failure = converted.failure;
-      const deliver = isConv ? deliverSavedFile : deliverInPlace;
+      const deliver = isConv || saveAs ? deliverSavedFile : deliverInPlace;
       const delivery = failure ? null : await deliver(converted.b64, title, dstExt);
       if (delivery?.cancelled) {
         setStatusFeedback("문서 저장 취소 (" + dstExt.toUpperCase() + "): 저장 위치를 선택하지 않았습니다");
@@ -278,7 +279,7 @@
     }
 
     function saveActiveModuleDocument(options) {
-      return enqueueWorkspaceHistoryOp(() => runSaveActiveModuleDocument(options?.closing));
+      return enqueueWorkspaceHistoryOp(() => runSaveActiveModuleDocument(options?.closing, options?.saveAs === true));
     }
 
     let insertModeLabel = "삽입";

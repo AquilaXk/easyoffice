@@ -37,7 +37,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
   ].flatMap(([prefix, mod, names]) => names.map((name) => [`${prefix}-mod-${name}`, [mod]])));
   // Studio menu/toolbar command -> modules where it has a real effect (default: DOC/HWP only).
   const STUDIO_COMMAND_MODULES = {
-    "studio-save": ALL_MODULES, "studio-undo": ALL_MODULES, "studio-redo": ALL_MODULES,
+    "studio-save": ALL_MODULES, "studio-save-as": ALL_MODULES, "studio-undo": ALL_MODULES, "studio-redo": ALL_MODULES,
     palette: ALL_MODULES, "view-theme": ALL_MODULES, "zoom-in": ALL_MODULES, "zoom-out": ALL_MODULES,
     "zoom-fit-page": ALL_MODULES, "zoom-fit-width": ALL_MODULES, "smart-diagnose": ALL_MODULES,
     "scrub-pii": ALL_MODULES, "security-audit": ALL_MODULES, "bench-run": ALL_MODULES, "view-outline": ALL_MODULES,
