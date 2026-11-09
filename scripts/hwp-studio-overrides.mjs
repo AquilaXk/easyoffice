@@ -39,6 +39,9 @@ const OVERLAY_NON_OVERRIDE = new Set([
   "src/embed/text-field-edit.ts",
   // EasyOffice-only module (참조 앱 port): macOS shortcut labels and the chrome context-menu guard.
   "src/embed/desktop-chrome.ts",
+  // EasyOffice-only modules (참조 앱 port): cut deletes a text selection only after the clipboard accepted it.
+  "src/command/clipboard-cut.ts",
+  "src/command/safe-cut.ts",
 ]);
 
 /** SHA-256 of upstream text with CRLF normalised to LF (the baseline the manifest pins). */

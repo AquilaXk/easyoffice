@@ -35,6 +35,10 @@
   // editor's hyperlink preview and print preview windows (printing is done by hwp-print.js from
   // the shell window).
   const FRAME_SANDBOX = "allow-scripts allow-modals";
+  // Permissions Policy delegation, not a sandbox flag: it lets the opaque-origin editor write (never read) the
+  // system clipboard with the browser's own user-activation rule, so a cut can confirm the write before it
+  // deletes (PD-151). The origin, DOM, IPC and navigation limits above are untouched.
+  const FRAME_ALLOW = "clipboard-write";
   // An opaque origin can only be addressed with "*". The target is `contentWindow` of the frame this
   // host created, and the handshake carries only a protocol version, a session id and capability
   // names; everything after it travels over the transferred MessagePort.
@@ -532,6 +536,7 @@
       el.id = "hwp-frame";
       el.title = "한글 편집기";
       el.setAttribute("sandbox", FRAME_SANDBOX);
+      el.setAttribute("allow", FRAME_ALLOW);
       const query = [];
       if (shellShortcuts.length > 0) query.push("shellKeys=" + encodeURIComponent(shellShortcuts.join(",")));
       if (shellContext.theme !== "system") query.push("theme=" + shellContext.theme);
@@ -716,6 +721,7 @@
       probe.hidden = true;
       probe.title = "격리 점검";
       probe.setAttribute("sandbox", FRAME_SANDBOX);
+      probe.setAttribute("allow", FRAME_ALLOW);
       probe.setAttribute("src", PROBE_SRC);
       let onMessage = null;
       let timer = null;
@@ -755,5 +761,5 @@
   }
 
   host.__EASYOFFICE_CREATE_HWP_HOST__ = createHwpHost;
-  host.__EASYOFFICE_HWP_HOST_CONSTANTS__ = { STUDIO_SRC, FRAME_SANDBOX, CAPABILITIES, MSG_UNAVAILABLE, SHELL_COMMANDS, sanitizeShellCommand };
+  host.__EASYOFFICE_HWP_HOST_CONSTANTS__ = { STUDIO_SRC, FRAME_SANDBOX, FRAME_ALLOW, CAPABILITIES, MSG_UNAVAILABLE, SHELL_COMMANDS, sanitizeShellCommand };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

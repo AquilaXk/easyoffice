@@ -154,6 +154,8 @@ test("lazy start: no frame until HWP is activated, then connect handshake, ready
   assert.equal(frame.getAttribute("src"), "./hwp-studio/index.html");
   assert.equal(frame.getAttribute("sandbox"), constants.FRAME_SANDBOX);
   assert.deepEqual(frame.getAttribute("sandbox").split(" "), ["allow-scripts", "allow-modals"], "exactly these two tokens");
+  assert.equal(frame.getAttribute("allow"), "clipboard-write", "the editor may write the clipboard, nothing else is delegated");
+  assert.equal(constants.FRAME_ALLOW, "clipboard-write");
   const { message, origin, ports } = studio.state.connect;
   assert.equal(message.type, "rhwp-connect");
   assert.equal(message.version, 1);
@@ -407,6 +409,7 @@ test("frame probe: loads frame-probe.html in a sandbox without allow-same-origin
   const { done, frame } = startProbe(h);
   assert.equal(frame.getAttribute("src"), "./frame-probe.html");
   assert.deepEqual(frame.getAttribute("sandbox").split(" "), ["allow-scripts", "allow-modals"]);
+  assert.equal(frame.getAttribute("allow"), "clipboard-write", "the probe frame is delegated exactly like the editor frame");
   h.post({}, { type: "eo-frame-probe", internals: "present", webview: "present", invoke: "rejected" });
   assert.equal(h.listenerCount(), 1, "a message from another window is ignored");
   h.post(frame.contentWindow, { type: "eo-frame-probe", internals: "present", webview: "present", invoke: "rejected" });
