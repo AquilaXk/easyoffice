@@ -768,30 +768,30 @@ impl SheetEngine {
         l_val: &EvaluatedCellValue,
         r_val: &EvaluatedCellValue,
     ) -> Option<std::cmp::Ordering> {
+        use EvaluatedCellValue as V;
         match (l_val, r_val) {
-            (EvaluatedCellValue::Error(_), _) | (_, EvaluatedCellValue::Error(_)) => None,
-            (EvaluatedCellValue::Empty, EvaluatedCellValue::Empty) => {
-                Some(std::cmp::Ordering::Equal)
-            }
-            (EvaluatedCellValue::Empty, EvaluatedCellValue::Number(b)) => 0.0f64.partial_cmp(b),
-            (EvaluatedCellValue::Number(a), EvaluatedCellValue::Empty) => a.partial_cmp(&0.0),
-            (EvaluatedCellValue::Empty, EvaluatedCellValue::Text(b)) => Some("".cmp(b.as_str())),
-            (EvaluatedCellValue::Text(a), EvaluatedCellValue::Empty) => Some(a.as_str().cmp("")),
-            (EvaluatedCellValue::Empty, EvaluatedCellValue::Boolean(b)) => Some(false.cmp(b)),
-            (EvaluatedCellValue::Boolean(a), EvaluatedCellValue::Empty) => Some(a.cmp(&false)),
-            (EvaluatedCellValue::Number(a), EvaluatedCellValue::Number(b)) => a.partial_cmp(b),
-            (EvaluatedCellValue::Text(a), EvaluatedCellValue::Text(b)) => {
-                Some(a.to_lowercase().cmp(&b.to_lowercase()))
-            }
-            (EvaluatedCellValue::Boolean(a), EvaluatedCellValue::Boolean(b)) => Some(a.cmp(b)),
-            (EvaluatedCellValue::Number(_), _) => Some(std::cmp::Ordering::Less),
-            (_, EvaluatedCellValue::Number(_)) => Some(std::cmp::Ordering::Greater),
-            (EvaluatedCellValue::Text(_), EvaluatedCellValue::Boolean(_)) => {
-                Some(std::cmp::Ordering::Less)
-            }
-            (EvaluatedCellValue::Boolean(_), EvaluatedCellValue::Text(_)) => {
-                Some(std::cmp::Ordering::Greater)
-            }
+            (V::Error(_), _) | (_, V::Error(_)) => None,
+            (V::Empty, V::Empty) => Some(std::cmp::Ordering::Equal),
+            (V::Empty, V::Number(b)) => 0.0f64.partial_cmp(b),
+            (V::Number(a), V::Empty) => a.partial_cmp(&0.0),
+            (V::Empty, V::Text(b)) => Some("".cmp(b.as_str())),
+            (V::Text(a), V::Empty) => Some(a.as_str().cmp("")),
+            (V::Empty, V::Boolean(b)) => Some(false.cmp(b)),
+            (V::Boolean(a), V::Empty) => Some(a.cmp(&false)),
+            (V::Number(a), V::Number(b)) => a.partial_cmp(b),
+            (V::Text(a), V::Text(b)) if a.is_ascii() && b.is_ascii() => Some(
+                a.bytes()
+                    .map(|c| c.to_ascii_lowercase())
+                    .cmp(b.bytes().map(|c| c.to_ascii_lowercase())),
+            ),
+            (V::Text(a), V::Text(b)) => Some(
+                a.chars()
+                    .flat_map(char::to_lowercase)
+                    .cmp(b.chars().flat_map(char::to_lowercase)),
+            ),
+            (V::Boolean(a), V::Boolean(b)) => Some(a.cmp(b)),
+            (V::Number(_), _) | (V::Text(_), V::Boolean(_)) => Some(std::cmp::Ordering::Less),
+            (_, V::Number(_)) | (V::Boolean(_), V::Text(_)) => Some(std::cmp::Ordering::Greater),
         }
     }
 
@@ -810,19 +810,19 @@ impl SheetEngine {
     }
 
     pub(crate) fn values_match(a: &EvaluatedCellValue, b: &EvaluatedCellValue) -> bool {
+        use EvaluatedCellValue as V;
         match (a, b) {
-            (EvaluatedCellValue::Number(na), EvaluatedCellValue::Number(nb)) => na == nb,
-            (EvaluatedCellValue::Boolean(ba), EvaluatedCellValue::Boolean(bb)) => ba == bb,
-            (EvaluatedCellValue::Text(sa), EvaluatedCellValue::Text(sb)) => {
-                if sa.is_ascii() && sb.is_ascii() {
-                    sa.eq_ignore_ascii_case(sb)
-                } else {
-                    sa.to_lowercase() == sb.to_lowercase()
-                }
+            (V::Number(na), V::Number(nb)) => na == nb,
+            (V::Boolean(ba), V::Boolean(bb)) => ba == bb,
+            (V::Text(sa), V::Text(sb)) if sa.is_ascii() && sb.is_ascii() => {
+                sa.eq_ignore_ascii_case(sb)
             }
-            (EvaluatedCellValue::Empty, EvaluatedCellValue::Empty) => true,
-            (EvaluatedCellValue::Empty, EvaluatedCellValue::Text(s))
-            | (EvaluatedCellValue::Text(s), EvaluatedCellValue::Empty) => s.is_empty(),
+            (V::Text(sa), V::Text(sb)) => sa
+                .chars()
+                .flat_map(char::to_lowercase)
+                .eq(sb.chars().flat_map(char::to_lowercase)),
+            (V::Empty, V::Empty) => true,
+            (V::Empty, V::Text(s)) | (V::Text(s), V::Empty) => s.is_empty(),
             _ => false,
         }
     }
@@ -848,14 +848,6 @@ pub(crate) fn expr_contains_subtotal(expr: &Expr) -> bool {
             expr_contains_subtotal(inner)
         }
         Expr::Binary { lhs, rhs, .. } => expr_contains_subtotal(lhs) || expr_contains_subtotal(rhs),
-        Expr::Number(_)
-        | Expr::Text(_)
-        | Expr::Boolean(_)
-        | Expr::ErrorLiteral(_)
-        | Expr::Missing
-        | Expr::Cell(_)
-        | Expr::Range(_)
-        | Expr::SheetCell { .. }
-        | Expr::SheetRange { .. } => false,
+        _ => false,
     }
 }

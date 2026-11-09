@@ -116,18 +116,18 @@ fn data_list<'a, T>(
     let Ok(list) = Message::parse(&obj.payload) else {
         return out;
     };
-    let Ok(entries) = list.subs(table::LIST_ENTRIES) else {
-        return out;
-    };
-    for e in entries.into_iter().take(MAX_LIST_ENTRIES) {
-        let Some(key) = e.varint(table::ENTRY_KEY) else {
-            continue;
-        };
-        let value = e.sub(entry_field).ok().flatten().and_then(|m| convert(&m));
-        if let Some(v) = value {
-            out.push((key, v));
+    let mut seen = 0usize;
+    let _ = list.for_each_sub(table::LIST_ENTRIES, |e| {
+        if seen < MAX_LIST_ENTRIES {
+            seen += 1;
+            if let Some(key) = e.varint(table::ENTRY_KEY) {
+                if let Some(v) = e.sub(entry_field).ok().flatten().and_then(|m| convert(&m)) {
+                    out.push((key, v));
+                }
+            }
         }
-    }
+        Ok(())
+    });
     out.sort_by_key(|(k, _)| *k);
     out
 }
@@ -144,17 +144,19 @@ fn string_list(objects: &ObjectTable, list_id: u64) -> KeyedList<&str> {
     let Ok(list) = Message::parse(&obj.payload) else {
         return out;
     };
-    let Ok(entries) = list.subs(table::LIST_ENTRIES) else {
-        return out;
-    };
-    for e in entries.into_iter().take(MAX_LIST_ENTRIES) {
-        let text = e
-            .bytes(table::ENTRY_STRING)
-            .and_then(|b| std::str::from_utf8(b).ok());
-        if let (Some(key), Some(text)) = (e.varint(table::ENTRY_KEY), text) {
-            out.push((key, text));
+    let mut seen = 0usize;
+    let _ = list.for_each_sub(table::LIST_ENTRIES, |e| {
+        if seen < MAX_LIST_ENTRIES {
+            seen += 1;
+            let text = e
+                .bytes(table::ENTRY_STRING)
+                .and_then(|b| std::str::from_utf8(b).ok());
+            if let (Some(key), Some(text)) = (e.varint(table::ENTRY_KEY), text) {
+                out.push((key, text));
+            }
         }
-    }
+        Ok(())
+    });
     out.sort_by_key(|(k, _)| *k);
     out
 }
@@ -303,14 +305,16 @@ fn fill_tiles(
         .filter(|v| *v > 0 && *v <= MAX_TILE_ROWS)
         .unwrap_or(table::DEFAULT_TILE_ROWS);
     let mut unsupported = 0usize;
-    for entry in tiles.subs(table::TILES_ENTRIES)? {
+    tiles.for_each_sub(table::TILES_ENTRIES, |entry| {
         let tile_id = entry.varint(table::TILE_ID).unwrap_or(0);
         let tile_obj = reference(&entry, table::TILE_REF)
             .and_then(|id| ctx.objects.get(id))
             .filter(|o| o.type_id == ty::TABLE_TILE || o.type_id == ty::TABLE_TILE_V2);
-        let Some(tile_obj) = tile_obj else { continue };
+        let Some(tile_obj) = tile_obj else {
+            return Ok(());
+        };
         let tile = Message::parse(&tile_obj.payload)?;
-        for row in tile.subs(table::TILE_ROWS)? {
+        tile.for_each_sub(table::TILE_ROWS, |row| {
             let target = row
                 .varint(table::ROW_INDEX)
                 .and_then(|i| absolute_row(tile_id, tile_rows, i))
@@ -318,8 +322,9 @@ fn fill_tiles(
             if let Some(cells) = target {
                 unsupported += fill_row(ctx, &row, cols, cells);
             }
-        }
-    }
+            Ok(())
+        })
+    })?;
     Ok(unsupported)
 }
 

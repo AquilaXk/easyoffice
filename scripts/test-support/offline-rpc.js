@@ -748,10 +748,11 @@
           xlsx: 680, xls: 1024, ods: 620, pptx: 760, ppsx: 760, ppt: 1024, odp: 640,
           pdf: 480, rtf: 180, md: 16, csv: 24, tsv: 24, txt: 0,
         };
-        if (!(src in containerOverhead) || !(dst in containerOverhead)) {
+        const sizeSrc = src === "pages" ? "docx" : src;
+        if (!(sizeSrc in containerOverhead) || !(dst in containerOverhead)) {
           throw new Error("지원하지 않는 포맷: " + src + "->" + dst);
         }
-        const srcBytes = rawBytes + (containerOverhead[src] ?? 256);
+        const srcBytes = rawBytes + (containerOverhead[sizeSrc] ?? 256);
         const dstBytes = rawBytes + (containerOverhead[dst] ?? 256);
         const b64 = encodeUtf8Base64(title + "\n" + body);
         let tableCount = structuredTables;

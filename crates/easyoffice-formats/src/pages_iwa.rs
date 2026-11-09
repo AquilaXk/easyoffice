@@ -9,7 +9,7 @@
 //! No `unsafe`; every index computation is checked and every size is capped.
 
 use crate::pages_proto::{
-    parse_archive_info, read_varint, ArchiveInfo, ArchiveObject, ObjectTable,
+    parse_archive_header, parse_archive_info, read_varint, ArchiveInfo, ArchiveObject, ObjectTable,
 };
 use crate::EasyOfficeError;
 
@@ -59,9 +59,13 @@ fn take_bytes<'a>(
     Ok(raw)
 }
 
-/// Fails when appending `len` bytes would exceed the declared output length.
-fn ensure_within_declared(out: &[u8], len: usize, declared: usize) -> Result<(), EasyOfficeError> {
-    if out.len().checked_add(len).is_none_or(|n| n > declared) {
+/// Fails when appending `len` bytes would exceed `target_len`.
+fn ensure_within_declared(
+    out: &[u8],
+    len: usize,
+    target_len: usize,
+) -> Result<(), EasyOfficeError> {
+    if out.len().checked_add(len).is_none_or(|n| n > target_len) {
         return Err(bad("snappy output exceeds declared length"));
     }
     Ok(())
@@ -73,7 +77,7 @@ fn snappy_literal(
     pos: &mut usize,
     tag: u8,
     out: &mut Vec<u8>,
-    declared: usize,
+    target_len: usize,
 ) -> Result<(), EasyOfficeError> {
     let mut len = usize::from(tag >> 2);
     if len >= 60 {
@@ -84,18 +88,19 @@ fn snappy_literal(
         .checked_add(1)
         .ok_or_else(|| bad("literal length overflow"))?;
     let lit = take_bytes(input, pos, len, "literal truncated")?;
-    ensure_within_declared(out, len, declared)?;
+    ensure_within_declared(out, len, target_len)?;
     out.extend_from_slice(lit);
     Ok(())
 }
 
-/// Copies from earlier output as described by a copy tag (types 1-3).
+/// Copies from earlier output within the current block (`base_len..out.len()`).
 fn snappy_copy(
     input: &[u8],
     pos: &mut usize,
     tag: u8,
     out: &mut Vec<u8>,
-    declared: usize,
+    base_len: usize,
+    target_len: usize,
 ) -> Result<(), EasyOfficeError> {
     let kind = tag & 3;
     let (len, offset_bytes) = match kind {
@@ -108,10 +113,11 @@ fn snappy_copy(
     if kind == 1 {
         offset |= usize::from(tag >> 5) << 8;
     }
-    if offset == 0 || offset > out.len() {
+    let block_len = out.len() - base_len;
+    if offset == 0 || offset > block_len {
         return Err(bad("invalid copy offset"));
     }
-    ensure_within_declared(out, len, declared)?;
+    ensure_within_declared(out, len, target_len)?;
     if offset >= len {
         let start = out.len() - offset;
         out.extend_from_within(start..start + len);
@@ -132,37 +138,52 @@ fn snappy_copy(
     Ok(())
 }
 
-/// Decompresses one raw Snappy block whose declared length may not exceed `max_len`.
-pub fn snappy_decompress(input: &[u8], max_len: usize) -> Result<Vec<u8>, EasyOfficeError> {
+/// Appends one decompressed raw Snappy block directly to `out`, returning the block's byte length.
+pub fn snappy_decompress_into(
+    input: &[u8],
+    max_len: usize,
+    out: &mut Vec<u8>,
+) -> Result<usize, EasyOfficeError> {
     let mut pos = 0usize;
     let declared = usize::try_from(read_varint(input, &mut pos)?)
         .map_err(|_| bad("snappy length too large"))?;
     if declared > max_len {
         return Err(budget("snappy 선언 길이 한도 초과"));
     }
-    let mut out: Vec<u8> = Vec::with_capacity(declared);
+    let base_len = out.len();
+    let target_len = base_len
+        .checked_add(declared)
+        .ok_or_else(|| bad("size overflow"))?;
+    out.reserve(declared);
     while pos < input.len() {
         let tag = input[pos];
         pos += 1;
         if tag & 3 == 0 {
-            snappy_literal(input, &mut pos, tag, &mut out, declared)?;
+            snappy_literal(input, &mut pos, tag, out, target_len)?;
         } else {
-            snappy_copy(input, &mut pos, tag, &mut out, declared)?;
+            snappy_copy(input, &mut pos, tag, out, base_len, target_len)?;
         }
     }
-    if out.len() != declared {
+    if out.len() != target_len {
         return Err(bad("snappy output shorter than declared length"));
     }
+    Ok(declared)
+}
+
+/// Decompresses one raw Snappy block whose declared length may not exceed `max_len`.
+pub fn snappy_decompress(input: &[u8], max_len: usize) -> Result<Vec<u8>, EasyOfficeError> {
+    let mut out = Vec::new();
+    snappy_decompress_into(input, max_len, &mut out)?;
     Ok(out)
 }
 
-/// Decompresses a whole `.iwa` file into its record stream. `document_budget` is the remaining
-/// per-document decompressed byte allowance and is reduced by the produced size.
-pub fn decompress_iwa(
+/// Decompresses a whole `.iwa` file directly into `out` (clearing any previous bytes).
+pub fn decompress_iwa_into(
     data: &[u8],
     document_budget: &mut usize,
-) -> Result<Vec<u8>, EasyOfficeError> {
-    let mut out: Vec<u8> = Vec::new();
+    out: &mut Vec<u8>,
+) -> Result<(), EasyOfficeError> {
+    out.clear();
     let mut pos = 0usize;
     while pos < data.len() {
         let header = data
@@ -177,20 +198,26 @@ pub fn decompress_iwa(
         let end = pos.checked_add(len).ok_or_else(|| bad("offset overflow"))?;
         let body = data.get(pos..end).ok_or_else(|| bad("chunk truncated"))?;
         pos = end;
-        let chunk = snappy_decompress(body, MAX_CHUNK_BYTES)?;
-        let new_len = out
-            .len()
-            .checked_add(chunk.len())
-            .ok_or_else(|| bad("size overflow"))?;
-        if new_len > MAX_IWA_FILE_BYTES {
+        let chunk_len = snappy_decompress_into(body, MAX_CHUNK_BYTES, out)?;
+        if out.len() > MAX_IWA_FILE_BYTES {
             return Err(budget(".iwa 파일 크기 한도 초과"));
         }
-        if chunk.len() > *document_budget {
+        if chunk_len > *document_budget {
             return Err(budget("문서 전체 크기 한도 초과"));
         }
-        *document_budget -= chunk.len();
-        out.extend_from_slice(&chunk);
+        *document_budget -= chunk_len;
     }
+    Ok(())
+}
+
+/// Decompresses a whole `.iwa` file into its record stream. `document_budget` is the remaining
+/// per-document decompressed byte allowance and is reduced by the produced size.
+pub fn decompress_iwa(
+    data: &[u8],
+    document_budget: &mut usize,
+) -> Result<Vec<u8>, EasyOfficeError> {
+    let mut out = Vec::new();
+    decompress_iwa_into(data, document_budget, &mut out)?;
     Ok(out)
 }
 
@@ -254,4 +281,60 @@ pub fn add_to_table(table: &mut ObjectTable, records: Vec<IwaRecord>) {
             },
         );
     }
+}
+
+/// Decodes a decompressed `.iwa` record stream directly into `table` without intermediate record or header `Vec` allocations.
+pub fn decode_stream_into_table(
+    stream: &[u8],
+    table: &mut ObjectTable,
+) -> Result<(), EasyOfficeError> {
+    let mut pos = 0usize;
+    let mut count = 0usize;
+    while pos < stream.len() {
+        if count >= MAX_RECORDS {
+            return Err(budget("레코드 수 한도 초과"));
+        }
+        count += 1;
+        let info_len = usize::try_from(read_varint(stream, &mut pos)?)
+            .map_err(|_| bad("ArchiveInfo length too large"))?;
+        let info_end = pos
+            .checked_add(info_len)
+            .ok_or_else(|| bad("offset overflow"))?;
+        let info_slice = stream
+            .get(pos..info_end)
+            .ok_or_else(|| bad("ArchiveInfo truncated"))?;
+        let header = parse_archive_header(info_slice)?;
+        pos = info_end;
+        if header.count == 0 {
+            continue;
+        }
+        let (first_type, first_len) = header.infos[0];
+        let first_end = pos
+            .checked_add(first_len)
+            .ok_or_else(|| bad("offset overflow"))?;
+        let first_payload = stream
+            .get(pos..first_end)
+            .ok_or_else(|| bad("record payload truncated"))?
+            .to_vec();
+        pos = first_end;
+        let mut extra = Vec::with_capacity(header.count.saturating_sub(1));
+        for &(type_id, len) in &header.infos[1..header.count] {
+            let end = pos.checked_add(len).ok_or_else(|| bad("offset overflow"))?;
+            let payload = stream
+                .get(pos..end)
+                .ok_or_else(|| bad("record payload truncated"))?
+                .to_vec();
+            pos = end;
+            extra.push((type_id, payload));
+        }
+        table.objects.insert(
+            header.identifier,
+            ArchiveObject {
+                type_id: first_type,
+                payload: first_payload,
+                extra,
+            },
+        );
+    }
+    Ok(())
 }

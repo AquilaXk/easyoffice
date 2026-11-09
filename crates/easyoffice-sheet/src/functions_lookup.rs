@@ -139,6 +139,53 @@ impl XlookupModes {
             step
         }
     }
+
+    /// $O(\log N)$ binary search for `search_mode == 2` (ascending) or `-2` (descending).
+    fn binary_search(
+        &self,
+        total_len: usize,
+        lookup: &EvaluatedCellValue,
+        mut eval_at: impl FnMut(usize) -> Result<EvaluatedCellValue, FormulaError>,
+    ) -> Result<Option<usize>, FormulaError> {
+        if self.match_mode == 2 {
+            return Err(FormulaError::Value);
+        }
+        let ascending = self.search_mode == 2;
+        let mut lo = 0usize;
+        let mut hi = total_len;
+        let mut approx_hit: Option<usize> = None;
+        while lo < hi {
+            let mid = lo + (hi - lo) / 2;
+            let k = eval_at(mid)?;
+            let Some(ord) = SheetEngine::compare_excel_values(&k, lookup) else {
+                lo = mid + 1;
+                continue;
+            };
+            if ord.is_eq() && same_value_type(&k, lookup) {
+                return Ok(Some(mid));
+            }
+            if ord.is_lt() {
+                if self.match_mode == -1 && same_value_type(&k, lookup) {
+                    approx_hit = Some(mid);
+                }
+                if ascending {
+                    lo = mid + 1;
+                } else {
+                    hi = mid;
+                }
+            } else {
+                if self.match_mode == 1 && same_value_type(&k, lookup) {
+                    approx_hit = Some(mid);
+                }
+                if ascending {
+                    hi = mid;
+                } else {
+                    lo = mid + 1;
+                }
+            }
+        }
+        Ok(approx_hit)
+    }
 }
 
 /// MATCH candidate tracking for approximate (1 / -1) modes.
@@ -351,6 +398,14 @@ impl SheetEngine {
             return Err(FormulaError::Value);
         }
         let total_len = lookup_arr.len();
+        if modes.search_mode.abs() == 2 {
+            return match modes
+                .binary_search(total_len, &lookup_val, |i| Ok(lookup_arr[i].clone()))?
+            {
+                Some(idx) => Ok(return_arr[idx].clone()),
+                None => self.xlookup_not_found(args, ctx, depth),
+            };
+        }
         let mut best_approx: Option<(usize, EvaluatedCellValue)> = None;
         for step in 0..total_len {
             let idx = modes.scan_index(step, total_len);
@@ -381,6 +436,23 @@ impl SheetEngine {
         let total_len = l_rows * l_cols;
         if total_len != r_rows * r_cols || r_cols == 0 || l_cols == 0 {
             return Err(FormulaError::Value);
+        }
+        if modes.search_mode.abs() == 2 {
+            let hit = modes.binary_search(total_len, lookup_val, |flat_idx| {
+                self.eval_streaming_cell_allow_error(
+                    lookup_spec,
+                    flat_idx / l_cols,
+                    flat_idx % l_cols,
+                    ctx,
+                    depth,
+                )
+            })?;
+            return match hit {
+                Some(idx) => {
+                    self.eval_streaming_cell(return_spec, idx / r_cols, idx % r_cols, ctx, depth)
+                }
+                None => self.xlookup_not_found(args, ctx, depth),
+            };
         }
         let mut best_approx: Option<(usize, EvaluatedCellValue)> = None;
         for step in 0..total_len {
@@ -576,5 +648,54 @@ impl SheetEngine {
             .collect::<Vec<_>>()
             .join(",");
         Ok(EvaluatedCellValue::Text(joined))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn xlookup_binary_search_ascending_and_descending() {
+        let mut s = SheetEngine::new("Sheet1");
+        for (i, (asc, desc, ret)) in [
+            ("10", "50", "100"),
+            ("20", "40", "200"),
+            ("30", "30", "300"),
+            ("40", "20", "400"),
+            ("50", "10", "500"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let r = i + 1;
+            s.set_cell(&format!("A{r}"), asc).unwrap();
+            s.set_cell(&format!("B{r}"), desc).unwrap();
+            s.set_cell(&format!("C{r}"), ret).unwrap();
+        }
+        assert_eq!(
+            s.evaluate_formula_str("=XLOOKUP(30, A1:A5, C1:C5, -1, 0, 2)"),
+            EvaluatedCellValue::Number(300.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=XLOOKUP(25, A1:A5, C1:C5, -1, -1, 2)"),
+            EvaluatedCellValue::Number(200.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=XLOOKUP(25, A1:A5, C1:C5, -1, 1, 2)"),
+            EvaluatedCellValue::Number(300.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=XLOOKUP(20, B1:B5, C1:C5, -1, 0, -2)"),
+            EvaluatedCellValue::Number(400.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=XLOOKUP(25, B1:B5, C1:C5, -1, -1, -2)"),
+            EvaluatedCellValue::Number(400.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=XLOOKUP(25, B1:B5, C1:C5, -1, 1, -2)"),
+            EvaluatedCellValue::Number(300.0)
+        );
     }
 }

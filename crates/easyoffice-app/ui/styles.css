@@ -67,8 +67,8 @@ select:focus-visible,
 .sb-color-input { width: 18px; height: 22px; padding: 0; border: 1px solid var(--ui-border); background: none; cursor: pointer; }
 .eo-glyph-btn[aria-pressed="mixed"] { background: repeating-linear-gradient(45deg, var(--ui-surface-muted), var(--ui-surface-muted) 3px, var(--ui-bg-light) 3px, var(--ui-bg-light) 6px); }
 .eo-style-zone { font-size: 11px; color: var(--ui-text); white-space: nowrap; }
-.doc-studio-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: 20px 1fr; grid-template-rows: 20px 1fr; max-width: none; width: 100%; margin: 0; overflow: hidden; }
-.ruler-corner { display: flex; align-items: center; justify-content: center; font-size: 9px; color: var(--ui-text); background: var(--ui-surface-muted); border-right: 1px solid var(--ui-border); border-bottom: 1px solid var(--ui-border); }
+.doc-studio-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: 20px minmax(0, 1fr); grid-template-rows: 20px minmax(0, 1fr); max-width: none; width: 100%; margin: 0; overflow: hidden; }
+.ruler-corner { display: flex; align-items: center; justify-content: center; font-size: 9px; color: var(--ui-text); background: var(--ruler-bg); border-right: 1px solid var(--ui-border); border-bottom: 1px solid var(--ui-border); }
 .page-ruler { display: flex; align-items: center; justify-content: center; gap: 3px; padding: 0; font-size: 9px; color: var(--ui-text); background: var(--ruler-bg); border-bottom: 1px solid var(--ui-border); overflow: hidden; white-space: nowrap; }
 .ruler-pin { font-size: 9px; color: var(--ui-text); user-select: none; }
 .ruler-track { width: 682px; flex: 0 0 682px; height: 16px; line-height: 16px; padding: 0 6px; background: var(--ui-surface); color: var(--ui-text-secondary); letter-spacing: 0.4px; overflow: hidden; text-overflow: clip; }

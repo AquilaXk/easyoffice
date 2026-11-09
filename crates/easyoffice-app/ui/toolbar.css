@@ -114,6 +114,32 @@
   user-select: none;
 }
 
+.stb-divider {
+  width: 2px;
+  height: 12px;
+  border-left: 1px solid var(--ui-border-strong);
+  border-right: 1px solid var(--doc-paper);
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.stb-zoom-range-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.stb-zoom-neutral-mark {
+  position: absolute;
+  z-index: 1;
+  left: 33.33%;
+  top: calc((100% - 12px) / 2);
+  width: 1px;
+  height: 12px;
+  border-left: 1px solid var(--color-text-secondary);
+  pointer-events: none;
+}
+
 /* Combo boxes (custom-select.js). Adapted from the reference app `styles/custom-select.css` (MIT, see
    THIRD_PARTY_NOTICES.md): native select popups vary by OS, so the select stays the state holder
    and this layer draws the control and its menu. Slide toolbar widths are EasyOffice's. */

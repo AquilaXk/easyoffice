@@ -35,10 +35,22 @@ struct CentralEntry {
     local_offset: u32,
 }
 
+fn strip_pages_dir_prefix(name: &str) -> &str {
+    let Some((dir, rest)) = name.split_once('/') else {
+        return name;
+    };
+    if dir.len() > 6 && dir[dir.len() - 6..].eq_ignore_ascii_case(".pages") && !rest.is_empty() {
+        rest
+    } else {
+        name
+    }
+}
+
 fn is_thumbnail_name(name: &[u8]) -> bool {
-    let Ok(name) = std::str::from_utf8(name) else {
+    let Ok(raw) = std::str::from_utf8(name) else {
         return false;
     };
+    let name = strip_pages_dir_prefix(raw);
     STEMS.iter().any(|stem| {
         let Some(rest) = name.get(stem.len()..) else {
             return false;

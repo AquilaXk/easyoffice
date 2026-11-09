@@ -10,7 +10,9 @@ use crate::rich_rtf_table::{merges_from_marks, CellMarks, HMark, VMark};
 use crate::rich_table::RichTable;
 use crate::rich_writers::heading_half_points;
 use crate::rich_xml::{push_run, CharFmt};
-use crate::{EasyOfficeError, RichAlignment, RichBlock, RichDocument, RichParagraph, RichRun};
+use crate::{
+    EasyOfficeError, RichAlignment, RichBlock, RichDocument, RichParagraph, RichRun, RichScript,
+};
 
 const MAX_GROUP_DEPTH: usize = 256;
 const DEFAULT_TITLE: &str = "RTF 문서";
@@ -55,6 +57,7 @@ struct CharState {
     font: Option<i32>,
     color: Option<usize>,
     highlight: Option<usize>,
+    script: RichScript,
 }
 
 #[derive(Clone)]
@@ -71,6 +74,10 @@ struct ParaProps {
     align: Option<RichAlignment>,
     heading: u8,
     list: Option<crate::RichListKind>,
+    left_indent: Option<u32>,
+    first_line: Option<i32>,
+    sl: Option<i32>,
+    slmult: bool,
 }
 
 struct Reader {
@@ -154,7 +161,7 @@ impl Reader {
                 .and_then(|f| self.fonts.get(&f).cloned()),
             color: color_at(st.color),
             highlight: color_at(st.highlight),
-            ..CharFmt::default()
+            script: st.script,
         }
     }
 
@@ -237,7 +244,7 @@ impl Reader {
                     font: r.font,
                     color: r.color,
                     highlight: r.highlight,
-                    ..CharFmt::default()
+                    script: r.script,
                 };
                 push_run(&mut merged, &r.text, &fmt);
             }
@@ -245,12 +252,24 @@ impl Reader {
         }
         if runs.iter().any(|r| !r.text.trim().is_empty()) {
             self.flush_table();
+            let list = if para.heading > 0 { None } else { para.list };
+            let left_indent_twips = if list.is_some() && para.left_indent == Some(720) {
+                None
+            } else {
+                para.left_indent
+            };
+            let line_spacing_percent = para
+                .sl
+                .filter(|s| para.slmult && *s > 0)
+                .and_then(|s| u16::try_from((i64::from(s) * 100 + 120) / 240).ok());
             self.blocks.push(RichBlock::Paragraph(RichParagraph {
                 runs,
                 alignment: para.align,
                 heading_level: para.heading,
-                list: if para.heading > 0 { None } else { para.list },
-                ..RichParagraph::default()
+                list,
+                left_indent_twips,
+                first_line_indent_twips: para.first_line,
+                line_spacing_percent,
             }));
         }
     }
@@ -368,6 +387,13 @@ impl Reader {
             "tab" => self.emit("\t"),
             "emdash" => self.emit("\u{2014}"),
             "endash" => self.emit("\u{2013}"),
+            "bullet" => self.emit("\u{2022}"),
+            "lquote" => self.emit("\u{2018}"),
+            "rquote" => self.emit("\u{2019}"),
+            "ldblquote" => self.emit("\u{201C}"),
+            "rdblquote" => self.emit("\u{201D}"),
+            "enspace" => self.emit("\u{2002}"),
+            "emspace" => self.emit("\u{2003}"),
             "deff" => self.default_font = param.unwrap_or(0),
             "trowd" => {
                 self.in_row = true;
@@ -402,8 +428,18 @@ impl Reader {
                     crate::RichListKind::Bullet
                 });
             }
-            "li" if param == Some(720) && self.para.list.is_none() => {
-                self.para.list = Some(crate::RichListKind::Bullet);
+            "li" => {
+                self.para.left_indent =
+                    param.filter(|v| *v > 0).and_then(|v| u32::try_from(v).ok());
+            }
+            "fi" => {
+                self.para.first_line = param.filter(|v| *v != 0);
+            }
+            "sl" => {
+                self.para.sl = param;
+            }
+            "slmult" => {
+                self.para.slmult = on;
             }
             "outlinelevel" => {
                 let level = param.unwrap_or(0).clamp(0, 5) as u8 + 1;
@@ -422,6 +458,21 @@ impl Reader {
             "ul" | "uld" | "uldb" | "ulw" => st.underline = on,
             "ulnone" => st.underline = false,
             "strike" | "striked" => st.strike = on,
+            "super" => {
+                st.script = if on {
+                    RichScript::Superscript
+                } else {
+                    RichScript::Normal
+                }
+            }
+            "sub" => {
+                st.script = if on {
+                    RichScript::Subscript
+                } else {
+                    RichScript::Normal
+                }
+            }
+            "nosupersub" => st.script = RichScript::Normal,
             "fs" => {
                 st.size = param.and_then(|v| u16::try_from(v).ok()).filter(|v| *v > 0);
             }
@@ -441,7 +492,7 @@ impl Reader {
         match sym {
             '\\' | '{' | '}' => self.emit(sym.encode_utf8(&mut buf)),
             '~' => self.emit("\u{00A0}"),
-            '_' => self.emit("-"),
+            '_' => self.emit("\u{2011}"),
             '*' => self.top().dest = Dest::Skip,
             '\n' | '\r' => self.body_word("par", None),
             '\'' => {
@@ -617,4 +668,46 @@ pub(crate) fn read_rtf(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Easy
         },
         warnings,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rtf_reads_super_sub_para_layout_and_special_characters() {
+        let rtf = concat!(
+            "{\\rtf1\\ansi\\pard\\li720\\fi-360\\sl360\\slmult1 ",
+            "H{\\sub 2}O X\\super 3\\nosupersub !\\par",
+            "\\pard \\bullet \\lquote A\\rquote \\ldblquote B\\rdblquote \\enspace\\emspace\\~\\_\\par}"
+        );
+        let (doc, _) = read_rtf(rtf.as_bytes()).unwrap();
+        assert_eq!(doc.blocks.len(), 2);
+        let RichBlock::Paragraph(p0) = &doc.blocks[0] else {
+            panic!("paragraph 0");
+        };
+        assert_eq!(p0.left_indent_twips, Some(720));
+        assert_eq!(p0.first_line_indent_twips, Some(-360));
+        assert_eq!(p0.line_spacing_percent, Some(150));
+        assert!(p0
+            .runs
+            .iter()
+            .any(|r| r.text == "2" && r.script == RichScript::Subscript));
+        assert!(p0
+            .runs
+            .iter()
+            .any(|r| r.text == "3" && r.script == RichScript::Superscript));
+        assert!(p0
+            .runs
+            .iter()
+            .any(|r| r.text == "!" && r.script == RichScript::Normal));
+
+        let RichBlock::Paragraph(p1) = &doc.blocks[1] else {
+            panic!("paragraph 1");
+        };
+        assert_eq!(
+            p1.plain_text(),
+            "\u{2022}\u{2018}A\u{2019}\u{201C}B\u{201D}\u{2002}\u{2003}\u{00A0}\u{2011}"
+        );
+    }
 }

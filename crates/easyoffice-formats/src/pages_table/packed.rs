@@ -82,7 +82,11 @@ fn parse_legacy(head: &[u8]) -> Option<PackedCell> {
     let flags = read_u32(head, cell::LEGACY_FLAGS_OFFSET)?;
     if matches!(
         kind,
-        cell::TYPE_NUMBER | cell::TYPE_STRING | cell::TYPE_DURATION | cell::TYPE_ERROR
+        cell::TYPE_NUMBER
+            | cell::TYPE_STRING
+            | cell::TYPE_DURATION
+            | cell::TYPE_ERROR
+            | cell::TYPE_BOOL
     ) {
         return parse_legacy_scalar(head, kind, flags);
     }
@@ -135,12 +139,12 @@ fn parse_legacy_scalar(head: &[u8], kind: u8, flags: u32) -> Option<PackedCell> 
             cell::LEGACY_BIT_DECIMAL if kind == cell::TYPE_NUMBER => {
                 out.value = decode_scalar(kind, field)?;
             }
-            cell::LEGACY_BIT_DOUBLE if kind == cell::TYPE_DURATION => {
+            cell::LEGACY_BIT_DOUBLE if matches!(kind, cell::TYPE_DURATION | cell::TYPE_BOOL) => {
                 out.value = decode_scalar(kind, field)?;
             }
             cell::LEGACY_BIT_STRING_KEY => out.string_key = Some(read_u32(field, 0)?),
             cell::LEGACY_BIT_RICH_TEXT_KEY => out.rich_text_key = Some(read_u32(field, 0)?),
-            b if out.format_key.is_none() && cell::LEGACY_FORMAT_BITS.contains(&b) => {
+            b if out.format_key.is_none() && (cell::LEGACY_FORMAT_MASK & (1 << b) != 0) => {
                 out.format_key = Some(read_u32(field, 0)?);
             }
             _ => {}
@@ -157,7 +161,7 @@ fn field_size(bit: u32, kind: u8) -> Option<usize> {
     }
     match kind {
         cell::TYPE_NUMBER => Some(cell::DECIMAL_BYTES),
-        cell::TYPE_DATE | cell::TYPE_BOOL => Some(cell::DOUBLE_BYTES),
+        cell::TYPE_DATE | cell::TYPE_BOOL | cell::TYPE_DURATION => Some(cell::DOUBLE_BYTES),
         _ => None,
     }
 }
@@ -270,5 +274,32 @@ mod tests {
         assert_eq!(parse_cell(&ok, 0).unwrap().string_key, Some(7));
         ok.truncate(14);
         assert!(parse_cell(&ok, 0).is_none());
+    }
+
+    #[test]
+    fn version_5_bool_and_checkbox_cells_read_double_value_and_control_format_key() {
+        let mut bytes = vec![cell::LEGACY_VERSION, cell::TYPE_BOOL, 0, 0, 0, 0, 0, 0];
+        let flags = (1u32 << cell::LEGACY_BIT_DOUBLE) | (1u32 << 5) | (1u32 << 17);
+        bytes.extend_from_slice(&flags.to_le_bytes());
+        bytes.extend_from_slice(&1.0f64.to_le_bytes());
+        bytes.extend_from_slice(&3u32.to_le_bytes());
+        bytes.extend_from_slice(&9u32.to_le_bytes());
+        let parsed = parse_cell(&bytes, 0).unwrap();
+        assert_eq!(parsed.kind, cell::TYPE_BOOL);
+        assert_eq!(parsed.value, CellScalar::Double(1.0));
+        assert_eq!(parsed.format_key, Some(9));
+    }
+
+    #[test]
+    fn current_version_duration_cells_read_double_value_and_format_key() {
+        let mut bytes = vec![cell::CURRENT_VERSION, cell::TYPE_DURATION, 0, 0];
+        let flags = (1u32 << cell::VALUE_BIT) | (1u32 << cell::FORMAT_KEY_BIT);
+        bytes.extend_from_slice(&flags.to_le_bytes());
+        bytes.extend_from_slice(&5400.0f64.to_le_bytes());
+        bytes.extend_from_slice(&7u32.to_le_bytes());
+        let parsed = parse_cell(&bytes, 0).unwrap();
+        assert_eq!(parsed.kind, cell::TYPE_DURATION);
+        assert_eq!(parsed.value, CellScalar::Double(5400.0));
+        assert_eq!(parsed.format_key, Some(7));
     }
 }

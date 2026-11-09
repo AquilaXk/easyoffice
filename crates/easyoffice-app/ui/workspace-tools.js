@@ -99,9 +99,7 @@
     } = panelHooks;
 
     function resolveSourceScopeKind(sourceFormatOrModule) {
-      const token = String(sourceFormatOrModule || getActiveModule() || "DOC")
-        .trim()
-        .toLowerCase();
+      const token = String(sourceFormatOrModule || getActiveModule() || "DOC").trim().toLowerCase();
       if (["xlsx", "xls", "ods", "csv", "tsv", "sheet"].includes(token)) return "SHEET";
       if (["pptx", "ppsx", "ppt", "odp", "slide"].includes(token)) return "SLIDE";
       if (["pdf"].includes(token)) return "PDF";
@@ -294,7 +292,8 @@
         ? { ext: document.getElementById("conv-dst-fmt")?.value || "hwpx", inPlace: false }
         : defaultSaveSpecForModule(curMod, saveAs);
       const dstExt = spec.ext || "docx";
-      const srcExt = isConv ? document.getElementById("conv-src-fmt")?.value || "docx" : dstExt;
+      const convSrc = document.getElementById("conv-src-fmt")?.value;
+      const srcExt = isConv && convSrc && convSrc !== "pages" ? convSrc : dstExt;
       const title = resolveSaveFileBase(curMod);
       const content = buildConversionContent(isConv ? srcExt : curMod);
       const converted = await convertForSave(srcExt, dstExt, title, content);
@@ -420,7 +419,9 @@
 
     function resolveModuleContainerExt(targetMod) {
       const effectiveMod = targetMod || getActiveModule();
-      const extMap = { DOC: "docx", HWP: "hwpx", SHEET: "xlsx", SLIDE: "pptx", PDF: "pdf", CONV: document.getElementById("conv-src-fmt")?.value || "docx" };
+      const convSrc = document.getElementById("conv-src-fmt")?.value;
+      const convExt = convSrc && convSrc !== "pages" ? convSrc : document.getElementById("conv-dst-fmt")?.value || "docx";
+      const extMap = { DOC: "docx", HWP: "hwpx", SHEET: "xlsx", SLIDE: "pptx", PDF: "pdf", CONV: convExt };
       return extMap[effectiveMod] || "docx";
     }
 
@@ -781,42 +782,32 @@
       studioActions = actions || {};
       const editor = document.getElementById("doc-editor");
       for (const closer of document.querySelectorAll("[data-dialog-close]")) closer.addEventListener("click", () => closer.closest("dialog")?.close?.());
-      for (const dlg of document.querySelectorAll("dialog.tool-dialog")) {
-        dlg.addEventListener("click", (ev) => {
-          if (ev.target === dlg) dlg.close?.();
-        });
-      }
+      for (const dlg of document.querySelectorAll("dialog.tool-dialog")) dlg.addEventListener("click", (ev) => { if (ev.target === dlg) dlg.close?.(); });
       bindStudioMenuBar(editor, onStudioCmd);
-      for (const btn of document.querySelectorAll("#icon-toolbar [data-studio-cmd]")) {
-        btn.addEventListener("click", () => {
-          if (!btn.disabled) dispatchStudioIconCmd(btn.dataset.studioCmd, editor, onStudioCmd);
-        });
-      }
+      for (const btn of document.querySelectorAll("#icon-toolbar [data-studio-cmd]")) btn.addEventListener("click", () => { if (!btn.disabled) dispatchStudioIconCmd(btn.dataset.studioCmd, editor, onStudioCmd); });
       bindStudioTypographyControls(editor);
-      for (const [id, key] of [
-        ["btn-stylebar-charfx", "charfx"],
-        ["btn-toggle-ctrl-marks", "showCtrlMarks"], ["btn-toggle-para-marks", "showParaMarks"],
-      ]) {
+      for (const [id, key] of [["btn-stylebar-charfx", "charfx"], ["btn-toggle-ctrl-marks", "showCtrlMarks"], ["btn-toggle-para-marks", "showParaMarks"]]) {
         const btn = document.getElementById(id);
         btn?.addEventListener("click", () => toggleEditorDatasetBtn(btn, editor, key));
       }
-      const alignMap = ["left", "center", "right", "justify", "distribute", "divide"].map((mode) => [
-        "btn-align-" + mode, mode, mode === "distribute" || mode === "divide" ? "justify" : mode,
-      ]);
-      for (const [id, mode, cssAlign] of alignMap) {
-        document.getElementById(id)?.addEventListener("click", () => applyEditorAlignment(id, mode, cssAlign, editor, alignMap));
-      }
+      const alignMap = ["left", "center", "right", "justify", "distribute", "divide"].map((mode) => ["btn-align-" + mode, mode, mode === "distribute" || mode === "divide" ? "justify" : mode]);
+      for (const [id, mode, cssAlign] of alignMap) document.getElementById(id)?.addEventListener("click", () => applyEditorAlignment(id, mode, cssAlign, editor, alignMap));
       const docGridBtn = document.getElementById("btn-toggle-doc-grid");
       if (docGridBtn && editor) docGridBtn.addEventListener("click", () => toggleDocManuscriptGrid(docGridBtn, editor));
       const insertBtn = document.getElementById("status-insert-mode");
       insertBtn?.addEventListener("click", () => toggleStudioInsertMode(insertBtn));
-      host.addEventListener("keydown", (ev) => {
-        if (ev.key === "Insert") toggleStudioInsertMode(insertBtn);
-      });
+      host.addEventListener("keydown", (ev) => { if (ev.key === "Insert") toggleStudioInsertMode(insertBtn); });
       const zoomSlider = document.getElementById("status-zoom-slider");
       if (zoomSlider && typeof applyZoomPercent === "function") {
         const onSlide = () => applyZoomPercent(Number(zoomSlider.value) || 100);
         for (const evt of ["input", "change"]) zoomSlider.addEventListener(evt, onSlide);
+        zoomSlider.addEventListener("keydown", (ev) => {
+          const cur = Number(zoomSlider.value) || 100;
+          const next = { PageUp: cur + 10, PageDown: cur - 10, Home: 50, End: 200, ArrowUp: cur + 5, ArrowRight: cur + 5, ArrowDown: cur - 5, ArrowLeft: cur - 5 }[ev.key];
+          if (next === undefined) return;
+          ev.preventDefault?.();
+          applyZoomPercent(Math.max(50, Math.min(200, next)));
+        });
       }
       for (const [id, pct, mode] of [["btn-zoom-fit-width", 120, "width"], ["btn-zoom-fit-page", 100, "page"]]) document.getElementById(id)?.addEventListener("click", () => applyZoomPercent?.(pct, mode));
     }

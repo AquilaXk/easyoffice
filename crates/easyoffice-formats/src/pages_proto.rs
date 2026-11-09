@@ -236,10 +236,29 @@ impl<'a> Message<'a> {
 
     /// Decodes every length-delimited value of `number` as nested messages.
     pub fn subs(&self, number: u32) -> Result<Vec<Message<'a>>, EasyOfficeError> {
-        self.all_bytes(number)
-            .into_iter()
-            .map(|b| Message::parse_at(b, self.depth.saturating_add(1)))
-            .collect()
+        let mut out = Vec::new();
+        self.for_each_sub(number, |m| {
+            out.push(m);
+            Ok(())
+        })?;
+        Ok(out)
+    }
+
+    /// Streams every length-delimited value of `number` as a nested message without allocating an intermediate `Vec`.
+    pub fn for_each_sub(
+        &self,
+        number: u32,
+        mut f: impl FnMut(Message<'a>) -> Result<(), EasyOfficeError>,
+    ) -> Result<(), EasyOfficeError> {
+        let next_depth = self.depth.saturating_add(1);
+        for field in &self.fields {
+            if field.number == number {
+                if let WireValue::Bytes(b) = field.value {
+                    f(Message::parse_at(b, next_depth)?)?;
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -334,6 +353,130 @@ pub fn parse_archive_info(buf: &[u8]) -> Result<ArchiveInfo, EasyOfficeError> {
     Ok(ArchiveInfo {
         identifier,
         messages,
+    })
+}
+
+fn skip_wire_field(buf: &[u8], pos: &mut usize, wire_type: u64) -> Result<(), EasyOfficeError> {
+    match wire_type {
+        0 => {
+            read_varint(buf, pos)?;
+        }
+        1 => {
+            let end = pos.checked_add(8).ok_or_else(|| bad("offset overflow"))?;
+            buf.get(*pos..end).ok_or_else(|| bad("fixed64 truncated"))?;
+            *pos = end;
+        }
+        2 => {
+            let len =
+                usize::try_from(read_varint(buf, pos)?).map_err(|_| bad("length too large"))?;
+            let end = pos.checked_add(len).ok_or_else(|| bad("offset overflow"))?;
+            buf.get(*pos..end)
+                .ok_or_else(|| bad("length-delimited truncated"))?;
+            *pos = end;
+        }
+        5 => {
+            let end = pos.checked_add(4).ok_or_else(|| bad("offset overflow"))?;
+            buf.get(*pos..end).ok_or_else(|| bad("fixed32 truncated"))?;
+            *pos = end;
+        }
+        3 | 4 => return Err(bad("group wire types are not supported")),
+        _ => return Err(bad("reserved wire type")),
+    }
+    Ok(())
+}
+
+fn parse_message_info_fast(buf: &[u8]) -> Result<(u32, usize), EasyOfficeError> {
+    let mut pos = 0usize;
+    let mut fields = 0usize;
+    let mut type_id: Option<u32> = None;
+    let mut length: Option<usize> = None;
+    while pos < buf.len() {
+        if fields >= MAX_PROTO_FIELDS {
+            return Err(EasyOfficeError::ResourceBudgetExceeded(
+                "Pages protobuf 필드 수 한도 초과".to_string(),
+            ));
+        }
+        fields += 1;
+        let key = read_varint(buf, &mut pos)?;
+        let number = u32::try_from(key >> 3).map_err(|_| bad("field number too large"))?;
+        if number == 0 {
+            return Err(bad("field number 0"));
+        }
+        match (number, key & 7) {
+            (1, 0) if type_id.is_none() => {
+                type_id = Some(
+                    u32::try_from(read_varint(buf, &mut pos)?)
+                        .map_err(|_| bad("type id too large"))?,
+                );
+            }
+            (3, 0) if length.is_none() => {
+                let raw = u32::try_from(read_varint(buf, &mut pos)?)
+                    .map_err(|_| bad("payload length too large"))?;
+                length = Some(usize::try_from(raw).map_err(|_| bad("payload length too large"))?);
+            }
+            (_, wt) => skip_wire_field(buf, &mut pos, wt)?,
+        }
+    }
+    Ok((
+        type_id.ok_or_else(|| bad("MessageInfo without type"))?,
+        length.ok_or_else(|| bad("MessageInfo without length"))?,
+    ))
+}
+
+/// Zero-allocation header summary of an `ArchiveInfo`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ArchiveHeader {
+    pub identifier: u64,
+    pub infos: [(u32, usize); MAX_MESSAGE_INFOS],
+    pub count: usize,
+}
+
+/// Zero-allocation parser for `ArchiveInfo`: returns `ArchiveHeader` on the stack.
+pub fn parse_archive_header(buf: &[u8]) -> Result<ArchiveHeader, EasyOfficeError> {
+    let mut pos = 0usize;
+    let mut fields = 0usize;
+    let mut identifier: Option<u64> = None;
+    let mut infos = [(0u32, 0usize); MAX_MESSAGE_INFOS];
+    let mut count = 0usize;
+    while pos < buf.len() {
+        if fields >= MAX_PROTO_FIELDS {
+            return Err(EasyOfficeError::ResourceBudgetExceeded(
+                "Pages protobuf 필드 수 한도 초과".to_string(),
+            ));
+        }
+        fields += 1;
+        let key = read_varint(buf, &mut pos)?;
+        let number = u32::try_from(key >> 3).map_err(|_| bad("field number too large"))?;
+        if number == 0 {
+            return Err(bad("field number 0"));
+        }
+        match (number, key & 7) {
+            (1, 0) if identifier.is_none() => {
+                identifier = Some(read_varint(buf, &mut pos)?);
+            }
+            (2, 2) => {
+                let len = usize::try_from(read_varint(buf, &mut pos)?)
+                    .map_err(|_| bad("length too large"))?;
+                let end = pos.checked_add(len).ok_or_else(|| bad("offset overflow"))?;
+                let raw = buf
+                    .get(pos..end)
+                    .ok_or_else(|| bad("length-delimited truncated"))?;
+                pos = end;
+                if count >= MAX_MESSAGE_INFOS {
+                    return Err(EasyOfficeError::ResourceBudgetExceeded(
+                        "ArchiveInfo의 MessageInfo 수 한도 초과".to_string(),
+                    ));
+                }
+                infos[count] = parse_message_info_fast(raw)?;
+                count += 1;
+            }
+            (_, wt) => skip_wire_field(buf, &mut pos, wt)?,
+        }
+    }
+    Ok(ArchiveHeader {
+        identifier: identifier.ok_or_else(|| bad("ArchiveInfo without identifier"))?,
+        infos,
+        count,
     })
 }
 

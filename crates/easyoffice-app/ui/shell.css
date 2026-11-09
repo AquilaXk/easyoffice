@@ -89,7 +89,8 @@ button:not(.md-item):focus-visible { outline: 2px solid var(--accent-strong); ou
 .tool-dialog { margin: auto; padding: 0; width: min(460px, calc(100vw - 32px)); color: var(--ui-text); background: transparent; border: 0; }
 .tool-dialog::backdrop { background: var(--overlay-bg); }
 .tool-dialog .dialog-body { display: flex; flex-direction: column; gap: 8px; font-size: 12.5px; line-height: 1.5; }
-.tool-dialog .dialog-title { cursor: default; }
+.tool-dialog .dialog-title { cursor: move; user-select: none; }
+.tool-dialog input:focus-visible, .tool-dialog select:focus-visible { border-color: var(--color-focus-border); box-shadow: 0 0 0 2px var(--ui-focus-soft); outline: none; }
 
 /* HWP printing (hwp-print.js, PD-104): the pages live in a hidden root that only the print output shows. */
 #eo-print-root { display: none; }

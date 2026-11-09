@@ -46,6 +46,7 @@ export class Toolbar {
   private styleDropdownInitialized = false;
   /** 마지막으로 받은 fontFamilies (언어별 7개 배열) */
   private lastFontFamilies?: string[];
+  private fontMenuDocumentFonts: string[] = [];
 
   constructor(
     private container: HTMLElement,
@@ -104,8 +105,9 @@ export class Toolbar {
     });
 
     eventBus.on('local-fonts-changed', () => {
-      this.populateLocalFontOptions();
+      this.populateFontSelect();
     });
+    window.addEventListener('local-fonts-changed', () => this.populateFontSelect());
   }
 
   /** B/I/U/S 토글 버튼 클릭 이벤트 → 커맨드 디스패치 */
@@ -246,8 +248,7 @@ export class Toolbar {
 
   /** 글꼴 선택 + 크기 변경 이벤트 */
   private setupFontControls(): void {
-    this.populateFontSetOptions();
-    this.populateLocalFontOptions();
+    this.populateFontSelect();
 
     this.fontName.addEventListener('change', () => {
       const name = this.fontName.value;
@@ -304,11 +305,25 @@ export class Toolbar {
     closeToolbarPopup();
     this.beginFontApplyRequest();
     this.lastFontFamilies = undefined;
+    this.fontMenuDocumentFonts = [];
+    const seenDoc = new Set<string>();
+    for (const raw of docFonts ?? []) {
+      const name = raw.trim();
+      if (!name || seenDoc.has(name)) continue;
+      seenDoc.add(name);
+      this.fontMenuDocumentFonts.push(name);
+    }
+    this.populateFontSelect();
+  }
+
+  /** 글꼴 선택 드롭다운을 기본/문서/대표/로컬 글꼴로 중복 없이 채우고 선택값을 보존한다. */
+  populateFontSelect(): void {
+    const previousValue = this.fontName.value;
     const baseFonts = ['함초롬바탕', '함초롬돋움', '맑은 고딕', '나눔고딕', '바탕', '돋움', '궁서'];
     this.fontName.replaceChildren();
     const seen = new Set<string>();
-    for (const name of [...baseFonts, ...(docFonts ?? [])]) {
-      if (seen.has(name)) continue;
+    for (const name of [...baseFonts, ...this.fontMenuDocumentFonts]) {
+      if (!name || seen.has(name)) continue;
       const option = document.createElement('option');
       option.value = name;
       option.textContent = name;
@@ -317,6 +332,9 @@ export class Toolbar {
     }
     this.populateFontSetOptions();
     this.populateLocalFontOptions();
+    if (previousValue && this.knownFontValues.has(previousValue)) {
+      this.fontName.value = previousValue;
+    }
     syncCustomSelect(this.fontName);
   }
 
@@ -630,12 +648,14 @@ export class Toolbar {
     group.label = '로컬 글꼴';
 
     for (const name of localFonts) {
+      if (this.knownFontValues.has(name)) continue;
       const opt = document.createElement('option');
       opt.value = name;
       opt.textContent = name;
       group.appendChild(opt);
       this.knownFontValues.add(name);
     }
+    if (!group.firstChild) return;
 
     // 대표 글꼴 optgroup 다음에 삽입
     const fontSetGroup = this.fontName.querySelector('optgroup[label="대표 글꼴"]');

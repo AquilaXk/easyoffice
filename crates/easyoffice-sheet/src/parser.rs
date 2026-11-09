@@ -447,7 +447,7 @@ fn lex_ascii_ident(src: &str, start: usize) -> Result<(Token, usize), FormulaErr
     let mut i = start;
     while i < bytes.len() {
         let cur = bytes[i];
-        if cur.is_ascii_alphanumeric() || cur == b'$' || cur == b'_' {
+        if cur.is_ascii_alphanumeric() || matches!(cur, b'$' | b'_' | b'.') {
             i += 1;
             continue;
         }

@@ -146,6 +146,8 @@
       trigger.disabled = Boolean(select.disabled);
       value.textContent = (selectedOption(select, options, optionByValue)?.textContent || "").trim();
       value.title = value.textContent;
+      const label = select.getAttribute("aria-label") || select.getAttribute("title") || selectLabel;
+      if (label) trigger.setAttribute("aria-label", value.textContent ? `${label}: ${value.textContent}` : label);
       const nextRow = rowByValue.get(select.value) || null;
       if (selectedRow && selectedRow !== nextRow) {
         selectedRow.classList.remove("selected");
@@ -196,21 +198,37 @@
       event.stopPropagation?.();
       toggle();
     });
-    root.addEventListener("keydown", (event) => onKeydown(event, { select, options, close, toggle, sync }));
+    trigger.addEventListener("dblclick", (event) => {
+      close();
+      const MouseEventCtor = host.MouseEvent;
+      const dbl = typeof MouseEventCtor === "function"
+        ? new MouseEventCtor("dblclick", { bubbles: true, cancelable: true })
+        : { type: "dblclick", bubbles: true, cancelable: true, target: select };
+      select.dispatchEvent(dbl);
+      event.preventDefault?.();
+      event.stopPropagation?.();
+    });
+    root.addEventListener("keydown", (event) => onKeydown(event, { root, menu, select, options, rowByValue, close, toggle, sync }));
     document.addEventListener("mousedown", (event) => {
       if (!root.contains(event.target)) close();
     });
     select.addEventListener("change", sync);
     if (typeof host.MutationObserver === "function") {
-      new host.MutationObserver(rebuild).observe(select, { childList: true, subtree: true, attributes: true, attributeFilter: ["disabled", "label"] });
+      new host.MutationObserver(rebuild).observe(select, { childList: true, subtree: true, attributes: true, attributeFilter: ["disabled", "label", "aria-label"] });
     }
     observeValue(select, sync);
     rebuild();
     ENHANCED.set(select, { root, sync });
   }
 
+  function stepEdgeSelection(select, options, toEnd) {
+    const ordered = toEnd ? [...options].reverse() : options;
+    const hit = ordered.find((option) => !option.disabled);
+    if (hit) select.value = hit.value;
+  }
+
   function onKeydown(event, ctl) {
-    const { select, options, close, toggle, sync } = ctl;
+    const { root, menu, select, options, rowByValue, close, toggle, sync } = ctl;
     if (select.disabled) return;
     if (event.key === "Escape") {
       close();
@@ -218,10 +236,14 @@
     } else if (event.key === "Enter" || event.key === " ") {
       toggle();
       event.preventDefault?.();
-    } else if (KEY_STEP[event.key]) {
-      stepSelection(select, options, KEY_STEP[event.key]);
+    } else if (KEY_STEP[event.key] || event.key === "Home" || event.key === "End") {
+      if (KEY_STEP[event.key]) stepSelection(select, options, KEY_STEP[event.key]);
+      else stepEdgeSelection(select, options, event.key === "End");
       select.dispatchEvent(makeChangeEvent(select));
       sync();
+      if (root.classList.contains("open") || menu.contains?.(event.target)) {
+        rowByValue.get(select.value)?.focus?.();
+      }
       event.preventDefault?.();
     }
   }

@@ -334,3 +334,86 @@ test("formatPlatformShortcut writes both notations from either one and leaves ot
   assert.equal(fmt("⌘B", "Ctrl"), "Ctrl+B");
   assert.equal(fmt("Ctrl+N", "Ctrl"), "Ctrl+N");
 });
+
+test("reference chrome tokens, grid resize ratchet fix, and status bar bevel/zoom mark match rhwp-studio", async () => {
+  assert.match(TOKENS_CSS, /:root\s*\{[\s\S]*?--ui-align-icon-filter:\s*none;/);
+  assert.match(TOKENS_CSS, /:root\[data-theme-effective="dark"\]\s*\{[\s\S]*?--ui-align-icon-filter:\s*invert\(1\)\s+brightness\(1\.6\);/);
+  const vhRule = cssRule(".visually-hidden", TOKENS_CSS);
+  assert.ok(hasDecl(vhRule, "position", "absolute") && hasDecl(vhRule, "clip", "rect(0, 0, 0, 0)"));
+
+  const gridRule = cssRule(".doc-studio-grid", CSS);
+  assert.ok(hasDecl(gridRule, "grid-template-columns", "20px minmax(0, 1fr)"));
+  assert.ok(hasDecl(gridRule, "grid-template-rows", "20px minmax(0, 1fr)"));
+  const cornerRule = cssRule(".ruler-corner", CSS);
+  assert.ok(hasDecl(cornerRule, "background", "var(--ruler-bg)"));
+
+  const dividerRule = cssRule(".stb-divider", TOOLBAR_CSS);
+  assert.ok(hasDecl(dividerRule, "border-left", "1px solid var(--ui-border-strong)"));
+  assert.ok(hasDecl(dividerRule, "border-right", "1px solid var(--doc-paper)"));
+  const markRule = cssRule(".stb-zoom-neutral-mark", TOOLBAR_CSS);
+  assert.ok(hasDecl(markRule, "left", "33.33%"));
+
+  const { document } = await createWorkspaceHarness({ search: "?module=DOC&win=w-zoom-keys" });
+  const slider = document.getElementById("status-zoom-slider");
+  assert.ok(slider.parentElement.classList.contains("stb-zoom-range-wrap"));
+  assert.ok(slider.parentElement.querySelector(".stb-zoom-neutral-mark"));
+
+  const sendKey = (key) => !slider.dispatchEvent({ type: "keydown", key, target: slider });
+  assert.equal(sendKey("PageUp"), true);
+  assert.equal(slider.value, "110");
+  assert.equal(sendKey("PageDown"), true);
+  assert.equal(slider.value, "100");
+  assert.equal(sendKey("End"), true);
+  assert.equal(slider.value, "200");
+  assert.equal(sendKey("Home"), true);
+  assert.equal(slider.value, "50");
+});
+
+test("icon toolbar wheel/focus scroller, custom-select dblclick/aria/keys, and dialog title drag work", async () => {
+  const { document } = await createWorkspaceHarness({ search: "?module=DOC&win=w-chrome-interactions" });
+  const toolbar = document.getElementById("icon-toolbar");
+  toolbar.clientWidth = 200;
+  toolbar.scrollWidth = 600;
+  toolbar.scrollLeft = 10;
+  let wheelPrevented = false;
+  for (const fn of toolbar._listeners.get("wheel") || []) {
+    fn({
+      type: "wheel",
+      deltaX: 0,
+      deltaY: 45,
+      target: toolbar,
+      preventDefault() { wheelPrevented = true; },
+    });
+  }
+  assert.equal(wheelPrevented, true);
+  assert.equal(toolbar.scrollLeft, 55);
+
+  const fontSelect = document.getElementById("doc-font-select");
+  const root = fontSelect.parentElement;
+  const trigger = root.querySelector(".custom-select-trigger");
+  assert.match(trigger.getAttribute("aria-label") || "", /^글꼴 선택:/);
+
+  let dblClicked = 0;
+  fontSelect.addEventListener("dblclick", () => { dblClicked += 1; });
+  const optionEls = fontSelect.querySelectorAll("option");
+  trigger.dispatchEvent({ type: "mousedown", target: trigger });
+  assert.equal(root.classList.contains("open"), true);
+  trigger.dispatchEvent({ type: "keydown", key: "End", target: trigger });
+  assert.equal(fontSelect.value, optionEls.at(-1).value);
+  trigger.dispatchEvent({ type: "keydown", key: "Home", target: trigger });
+  assert.equal(fontSelect.value, optionEls[0].value);
+  trigger.dispatchEvent({ type: "dblclick", target: trigger });
+  assert.equal(root.classList.contains("open"), false);
+  assert.equal(dblClicked, 1);
+
+  const dialog = document.getElementById("about-dialog");
+  const wrap = dialog.querySelector(".dialog-wrap");
+  const title = dialog.querySelector(".dialog-title");
+  dialog.showModal();
+  title.dispatchEvent({ type: "mousedown", button: 0, clientX: 100, clientY: 120, target: title });
+  document.dispatchEvent({ type: "mousemove", clientX: 135, clientY: 145 });
+  assert.equal(wrap.style.transform, "translate(35px, 25px)");
+  document.dispatchEvent({ type: "mouseup", clientX: 135, clientY: 145 });
+  dialog.close();
+  assert.equal(wrap.style.transform, "");
+});

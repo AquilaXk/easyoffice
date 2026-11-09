@@ -5,7 +5,9 @@
 //! beyond those markers.
 
 use crate::rich_xml::{push_run, CharFmt};
-use crate::{CommonMarkCodec, EasyOfficeError, RichBlock, RichListKind, RichParagraph, RichRun};
+use crate::{
+    CommonMarkCodec, EasyOfficeError, RichBlock, RichListKind, RichParagraph, RichRun, RichScript,
+};
 
 const MAX_MARKDOWN_BLOCKS: usize = 1_000_000;
 
@@ -48,6 +50,10 @@ impl MdInline {
             '\n' => self.soft_break(),
             '<' if self.starts(i, "<u>") => self.toggle_underline(true, 3),
             '<' if self.starts(i, "</u>") => self.toggle_underline(false, 4),
+            '<' if self.starts(i, "<sup>") => self.set_script(RichScript::Superscript, 5),
+            '<' if self.starts(i, "</sup>") => self.set_script(RichScript::Normal, 6),
+            '<' if self.starts(i, "<sub>") => self.set_script(RichScript::Subscript, 5),
+            '<' if self.starts(i, "</sub>") => self.set_script(RichScript::Normal, 6),
             '*' if next == Some('*') => {
                 let can_open = !self.fmt.bold && !is_ws(self.at(i + 2));
                 let can_close = self.fmt.bold && !is_ws(prev);
@@ -69,6 +75,38 @@ impl MdInline {
                     self.buf.push_str("~~");
                 }
                 self.i += 2;
+            }
+            '=' if next == Some('=') => {
+                let active = self.fmt.highlight.is_some();
+                let can_open = !active && !is_ws(self.at(i + 2));
+                let can_close = active && !is_ws(prev);
+                if can_open || can_close {
+                    self.flush();
+                    self.fmt.highlight = if active {
+                        None
+                    } else {
+                        Some("FFFF00".to_string())
+                    };
+                } else {
+                    self.buf.push_str("==");
+                }
+                self.i += 2;
+            }
+            '^' => {
+                let active = self.fmt.script == RichScript::Superscript;
+                let can_open = !active && !is_ws(next) && self.chars[i + 1..].contains(&'^');
+                let can_close = active && !is_ws(prev);
+                if can_open || can_close {
+                    self.flush();
+                    self.fmt.script = if active {
+                        RichScript::Normal
+                    } else {
+                        RichScript::Superscript
+                    };
+                } else {
+                    self.buf.push('^');
+                }
+                self.i += 1;
             }
             '*' | '_' => self.emphasis(c, prev, next),
             '`' => self.code_span(),
@@ -111,6 +149,12 @@ impl MdInline {
     fn toggle_underline(&mut self, on: bool, len: usize) {
         self.flush();
         self.fmt.underline = on;
+        self.i += len;
+    }
+
+    fn set_script(&mut self, script: RichScript, len: usize) {
+        self.flush();
+        self.fmt.script = script;
         self.i += len;
     }
 
@@ -171,6 +215,18 @@ impl MdInline {
 
 /// Parses inline markers into formatted runs.
 pub(crate) fn parse_md_inline(text: &str) -> Vec<RichRun> {
+    if !text.bytes().any(|b| {
+        matches!(
+            b,
+            b'\\' | b'\n' | b'<' | b'*' | b'~' | b'_' | b'`' | b'!' | b'[' | b'^' | b'='
+        )
+    }) {
+        return if text.is_empty() {
+            Vec::new()
+        } else {
+            vec![RichRun::plain(text)]
+        };
+    }
     let mut scanner = MdInline {
         chars: text.chars().collect(),
         runs: Vec::new(),
@@ -203,10 +259,26 @@ fn is_separator_row(cells: &[String]) -> bool {
         })
 }
 
-fn list_marker(trimmed: &str) -> Option<(RichListKind, &str)> {
+fn list_marker(trimmed: &str) -> Option<(RichListKind, std::borrow::Cow<'_, str>)> {
     for marker in ["- ", "* ", "+ "] {
         if let Some(rest) = trimmed.strip_prefix(marker) {
-            return Some((RichListKind::Bullet, rest.trim()));
+            let rest = rest.trim();
+            if let Some(task) = rest.strip_prefix("[ ] ") {
+                return Some((
+                    RichListKind::Bullet,
+                    format!("\u{2610} {}", task.trim()).into(),
+                ));
+            }
+            if let Some(task) = rest
+                .strip_prefix("[x] ")
+                .or_else(|| rest.strip_prefix("[X] "))
+            {
+                return Some((
+                    RichListKind::Bullet,
+                    format!("\u{2611} {}", task.trim()).into(),
+                ));
+            }
+            return Some((RichListKind::Bullet, rest.into()));
         }
     }
     let digits = trimmed.chars().take_while(char::is_ascii_digit).count();
@@ -214,7 +286,7 @@ fn list_marker(trimmed: &str) -> Option<(RichListKind, &str)> {
         let rest = &trimmed[digits..];
         for marker in [". ", ") "] {
             if let Some(body) = rest.strip_prefix(marker) {
-                return Some((RichListKind::Ordered, body.trim()));
+                return Some((RichListKind::Ordered, body.trim().into()));
             }
         }
     }
@@ -311,7 +383,7 @@ pub(crate) fn read_markdown(text: &str) -> Result<Vec<RichBlock>, EasyOfficeErro
         }
         if let Some((kind, body)) = list_marker(trimmed) {
             flush(&mut blocks, &mut pending);
-            blocks.push(paragraph(body, 0, Some(kind)));
+            blocks.push(paragraph(&body, 0, Some(kind)));
             i += 1;
             continue;
         }
@@ -359,5 +431,40 @@ mod tests {
     fn code_fence_lines_become_plain_paragraphs() {
         let blocks = read_markdown("```\nlet x = 1;\n```\n").unwrap();
         assert_eq!(blocks.len(), 1);
+    }
+
+    #[test]
+    fn inline_fast_path_sup_sub_highlight_and_gfm_task_lists() {
+        assert_eq!(
+            parse_md_inline("평문 텍스트 Fast Path 123"),
+            vec![RichRun::plain("평문 텍스트 Fast Path 123")]
+        );
+        let runs = parse_md_inline("H<sub>2</sub>O X<sup>3</sup> Y^4^ ==강조==");
+        assert!(runs
+            .iter()
+            .any(|r| r.text == "2" && r.script == RichScript::Subscript));
+        assert!(runs
+            .iter()
+            .any(|r| r.text == "3" && r.script == RichScript::Superscript));
+        assert!(runs
+            .iter()
+            .any(|r| r.text == "4" && r.script == RichScript::Superscript));
+        assert!(runs
+            .iter()
+            .any(|r| r.text == "강조" && r.highlight.as_deref() == Some("FFFF00")));
+
+        let blocks = read_markdown("- [ ] 미완료\n- [x] 완료1\n- [X] 완료2\n").unwrap();
+        assert_eq!(blocks.len(), 3);
+        let texts: Vec<String> = blocks
+            .iter()
+            .map(|b| match b {
+                RichBlock::Paragraph(p) => {
+                    assert_eq!(p.list, Some(RichListKind::Bullet));
+                    p.plain_text()
+                }
+                _ => panic!("expected paragraph"),
+            })
+            .collect();
+        assert_eq!(texts, vec!["☐ 미완료", "☑ 완료1", "☑ 완료2"]);
     }
 }

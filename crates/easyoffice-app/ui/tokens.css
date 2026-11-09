@@ -1,11 +1,10 @@
 /* Colour, type and spacing tokens of the whole UI (PD-098).
  *
  * Adapted from rhwp-studio `src/styles/base.css` (MIT, Copyright (c) 2025-2026 Edward Kim; see
- * THIRD_PARTY_NOTICES.md). The values are unchanged; the icon-sprite and align-icon filter tokens
- * are left out because EasyOffice draws its icons with `ui/icons.js`. Light is the default, dark
- * applies under `:root[data-theme-effective="dark"]` (set by `ui/theme.js`). Every colour in
- * `styles.css` and `shell.css` comes from these tokens; fixed document colours live in
- * `content.css`. */
+ * THIRD_PARTY_NOTICES.md). The values are unchanged; only the icon-sprite filter token is left out
+ * because EasyOffice draws its icons with `ui/icons.js`. Light is the default, dark applies under
+ * `:root[data-theme-effective="dark"]` (set by `ui/theme.js`). Every colour in `styles.css` and
+ * `shell.css` comes from these tokens; fixed document colours live in `content.css`. */
 /* ─── 디자인 토큰 ───────────────────────────────────── */
 :root {
   /* 앱 UI semantic token */
@@ -58,6 +57,7 @@
   --selection-fill: #b8d7ff;
   --caret-color: #111111;
   --resize-handle: #3f78d8;
+  --ui-align-icon-filter: none;
   --table-selection-fill: rgba(51, 122, 183, 0.25);
   --table-selection-stroke: #337ab7;
   --table-selection-marker-single: #74777c;
@@ -153,6 +153,7 @@
   /* mobile: ~767px, tablet: 768~1023px, desktop: 1024px~ */
 }
 
+[data-theme="dark"],
 :root[data-theme-effective="dark"] {
   --ui-bg: #25292f;
   --ui-bg-light: #2b3037;
@@ -201,6 +202,7 @@
   --selection-fill: #315f91;
   --caret-color: #111111;
   --resize-handle: #8bb8ff;
+  --ui-align-icon-filter: invert(1) brightness(1.6);
   --table-selection-fill: rgba(139, 184, 255, 0.28);
   --table-selection-stroke: #8bb8ff;
   --table-selection-marker-single: #aeb4bd;
@@ -222,4 +224,16 @@
   --shadow-dialog: 4px 4px 16px rgba(0, 0, 0, 0.55);
   --shadow-light: 2px 2px 8px rgba(0, 0, 0, 0.32);
   --overlay-bg: rgba(0, 0, 0, 0.45);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }

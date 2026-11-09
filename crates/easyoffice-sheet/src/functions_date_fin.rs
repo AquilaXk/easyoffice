@@ -100,7 +100,10 @@ impl SheetEngine {
             "EDATE" | "EOMONTH" => self.date_edate(name == "EOMONTH", args, ctx, depth),
             "TODAY" | "NOW" => date_today_now(name == "TODAY", args),
             "DATEVALUE" => self.date_datevalue(args, ctx, depth),
+            "TIMEVALUE" => self.date_timevalue(args, ctx, depth),
             "WEEKDAY" => self.date_weekday(args, ctx, depth),
+            "WEEKNUM" | "ISOWEEKNUM" => self.date_weeknum(name == "ISOWEEKNUM", args, ctx, depth),
+            "YEARFRAC" => self.date_yearfrac(args, ctx, depth),
             "DATEDIF" => self.date_datedif(args, ctx, depth),
             "WORKDAY" => self.date_workday(args, ctx, depth),
             "NETWORKDAYS" => self.date_networkdays(args, ctx, depth),
@@ -254,6 +257,21 @@ impl SheetEngine {
             .ok_or(FormulaError::Value)
     }
 
+    fn date_timevalue(
+        &self,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<EvaluatedCellValue, FormulaError> {
+        check_date_arity(args, 1, 1)?;
+        let EvaluatedCellValue::Text(s) = self.eval_arg_val(&args[0], ctx, depth)? else {
+            return Err(FormulaError::Value);
+        };
+        parse_time_serial(&s)
+            .map(EvaluatedCellValue::Number)
+            .ok_or(FormulaError::Value)
+    }
+
     fn date_weekday(
         &self,
         args: &[Expr],
@@ -273,6 +291,63 @@ impl SheetEngine {
             _ => return Err(FormulaError::Num),
         };
         number(w as f64)
+    }
+
+    fn date_weeknum(
+        &self,
+        is_iso: bool,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<EvaluatedCellValue, FormulaError> {
+        check_date_arity(args, 1, if is_iso { 1 } else { 2 })?;
+        let serial = self.arg_i64(&args[0], SERIAL_BOUNDS_FROM_ONE, true, ctx, depth)?;
+        let ret_type = if is_iso {
+            21
+        } else if let Some(arg) = args.get(1) {
+            self.arg_i64(arg, (1.0, 21.0), false, ctx, depth)?
+        } else {
+            1
+        };
+        if ret_type == 21 {
+            let thu = serial + 3 - (serial - 2).rem_euclid(7);
+            let (iso_y, _, _) = civil_from_serial(thu);
+            let jan1 = serial_from_civil(iso_y, 1, 1);
+            return number(((thu - jan1) / 7 + 1) as f64);
+        }
+        let week_start = match ret_type {
+            1 | 17 => 0,
+            2 | 11 => 1,
+            12 => 2,
+            13 => 3,
+            14 => 4,
+            15 => 5,
+            16 => 6,
+            _ => return Err(FormulaError::Num),
+        };
+        let (y, _, _) = civil_from_serial(serial);
+        let jan1 = serial_from_civil(y, 1, 1);
+        let jan1_off = ((jan1 - 1).rem_euclid(7) - week_start).rem_euclid(7);
+        number(((serial - jan1 + jan1_off) / 7 + 1) as f64)
+    }
+
+    fn date_yearfrac(
+        &self,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<EvaluatedCellValue, FormulaError> {
+        check_date_arity(args, 2, 3)?;
+        let s1 = self.arg_i64(&args[0], SERIAL_BOUNDS_FROM_ONE, true, ctx, depth)?;
+        let s2 = self.arg_i64(&args[1], SERIAL_BOUNDS_FROM_ONE, true, ctx, depth)?;
+        let basis = match args.get(2) {
+            Some(arg) if !matches!(arg, Expr::Missing) => {
+                self.arg_i64(arg, (0.0, 4.0), false, ctx, depth)?
+            }
+            _ => 0,
+        };
+        let (d1, d2) = if s1 <= s2 { (s1, s2) } else { (s2, s1) };
+        number(compute_yearfrac(d1, d2, basis))
     }
 
     fn date_datedif(
@@ -427,8 +502,110 @@ impl SheetEngine {
                 };
                 Ok(EvaluatedCellValue::Number(code))
             }
+            "ERROR.TYPE" => match val {
+                EvaluatedCellValue::Error(e) => number(match e {
+                    FormulaError::DivByZero => 2.0,
+                    FormulaError::Value => 3.0,
+                    FormulaError::Ref => 4.0,
+                    FormulaError::Name => 5.0,
+                    FormulaError::Num | FormulaError::Cycle => 6.0,
+                    FormulaError::Na => 7.0,
+                }),
+                _ => Err(FormulaError::Na),
+            },
             _ => Err(FormulaError::Name),
         }
+    }
+}
+
+fn parse_time_serial(s: &str) -> Option<f64> {
+    let mut t = s.trim();
+    if let Some((date_part, rest)) = t.split_once(' ') {
+        if parse_iso_date_serial(date_part).is_some() {
+            t = rest.trim();
+        }
+    }
+    let up = t.to_ascii_uppercase();
+    let (body, ampm) = if let Some(b) = up.strip_suffix("AM") {
+        (b.trim(), Some(false))
+    } else if let Some(b) = up.strip_suffix("PM") {
+        (b.trim(), Some(true))
+    } else {
+        (up.as_str(), None)
+    };
+    let mut parts = body.split(':');
+    let mut h: u32 = parts.next()?.trim().parse().ok()?;
+    let m: u32 = parts.next()?.trim().parse().ok()?;
+    let sec: f64 = match parts.next() {
+        Some(sp) => sp.trim().parse().ok()?,
+        None => 0.0,
+    };
+    if parts.next().is_some() || m >= 60 || !sec.is_finite() || !(0.0..60.0).contains(&sec) {
+        return None;
+    }
+    if let Some(is_pm) = ampm {
+        if !(1..=12).contains(&h) {
+            return None;
+        }
+        h = (h % 12) + if is_pm { 12 } else { 0 };
+    } else if h >= 24 {
+        return None;
+    }
+    Some((h as f64 * 3600.0 + m as f64 * 60.0 + sec) / SECONDS_PER_DAY as f64)
+}
+
+fn compute_yearfrac(d1: i64, d2: i64, basis: i64) -> f64 {
+    if d1 == d2 {
+        return 0.0;
+    }
+    let (y1, m1, mut day1) = civil_from_serial(d1);
+    let (y2, m2, mut day2) = civil_from_serial(d2);
+    match basis {
+        0 => {
+            if m1 == 2 && day1 == days_in_month(y1, 2) {
+                if m2 == 2 && day2 == days_in_month(y2, 2) {
+                    day2 = 30;
+                }
+                day1 = 30;
+            }
+            if day2 == 31 && day1 >= 30 {
+                day2 = 30;
+            }
+            if day1 == 31 {
+                day1 = 30;
+            }
+            ((y2 - y1) * 360 + (m2 - m1) * 30 + (day2 - day1)) as f64 / 360.0
+        }
+        1 => {
+            let denom = if (y2 - y1) > 1 || (y2 == y1 + 1 && (m2, day2) > (m1, day1)) {
+                (y1..=y2)
+                    .map(|y| {
+                        if days_in_month(y, 2) == 29 {
+                            366.0
+                        } else {
+                            365.0
+                        }
+                    })
+                    .sum::<f64>()
+                    / (y2 - y1 + 1) as f64
+            } else {
+                let feb29_y1 = days_in_month(y1, 2) == 29
+                    && serial_from_civil(y1, 2, 29) >= d1
+                    && serial_from_civil(y1, 2, 29) <= d2;
+                let feb29_y2 = days_in_month(y2, 2) == 29
+                    && serial_from_civil(y2, 2, 29) >= d1
+                    && serial_from_civil(y2, 2, 29) <= d2;
+                if feb29_y1 || feb29_y2 || (y1 == y2 && days_in_month(y1, 2) == 29) {
+                    366.0
+                } else {
+                    365.0
+                }
+            };
+            (d2 - d1) as f64 / denom
+        }
+        2 => (d2 - d1) as f64 / 360.0,
+        3 => (d2 - d1) as f64 / 365.0,
+        _ => ((y2 - y1) * 360 + (m2 - m1) * 30 + (day2.min(30) - day1.min(30))) as f64 / 360.0,
     }
 }
 

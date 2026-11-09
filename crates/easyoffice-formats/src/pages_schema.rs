@@ -451,8 +451,8 @@ pub(crate) mod cell {
     pub const LEGACY_UNVERIFIED_BITS: u32 = (1 << 2) | (1 << 7) | (1 << 8) | (1 << 10) | (1 << 15);
     /// Highest flag bit that is decoded.
     pub const LEGACY_LAST_BIT: u32 = 17;
-    /// Format list key bits: number (13), currency (14) and duration (16) format.
-    pub const LEGACY_FORMAT_BITS: [u32; 3] = [13, 14, 16];
+    /// Bitmask of format list key bits: number (13), currency (14), duration (16) and control/checkbox (17) format.
+    pub const LEGACY_FORMAT_MASK: u32 = (1 << 13) | (1 << 14) | (1 << 16) | (1 << 17);
     /// Current layout: version byte 1, type byte, flags word at byte 4, fields from byte 8 in
     /// flag-bit order. 확인 (fixture documents)
     pub const CURRENT_VERSION: u8 = 1;

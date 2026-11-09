@@ -151,6 +151,8 @@ test("hwp-studio wires font-authoring-policy into toolbar and font-loader and im
   const toolbarTs = readText(path.join(REPO, "apps/hwp-studio/src/ui/toolbar.ts"));
   assert.match(toolbarTs, /from\s+'\.\.\/core\/font-authoring-policy'/);
   assert.match(toolbarTs, /filterAuthoringFontFamilies\(getLocalFonts\(\)\)/);
+  assert.match(toolbarTs, /window\.addEventListener\('local-fonts-changed',\s*\(\)\s*=>\s*this\.populateFontSelect\(\)\)/);
+  assert.match(toolbarTs, /populateFontSelect\(\):\s*void/);
   assert.match(toolbarTs, /const\s+authoringName\s*=\s*sanitizeAuthoringFontFamily\(name\)/);
   assert.match(toolbarTs, /langKeys\.map\(\(key\)\s*=>\s*sanitizeAuthoringFontFamily\(fs\[key\]\)\)/);
 

@@ -128,21 +128,103 @@ fn search_wildcard(needle: &str, hay: &str, start: isize) -> CellResult {
 
 /// FIND: case-sensitive literal search; `start` is 1-based.
 fn find_literal(needle: &str, hay: &str, start: isize) -> CellResult {
-    let hay_chars: Vec<char> = hay.chars().collect();
-    let needle_chars: Vec<char> = needle.chars().collect();
-    if start < 1 || (start as usize) > hay_chars.len().max(1) {
+    if start < 1 {
         return Err(FormulaError::Value);
     }
-    if needle_chars.is_empty() {
+    let st = (start - 1) as usize;
+    if hay.is_ascii() && needle.is_ascii() {
+        if st + 1 > hay.len().max(1) {
+            return Err(FormulaError::Value);
+        }
+        if needle.is_empty() {
+            return number_cell(start as f64);
+        }
+        return hay
+            .get(st..)
+            .and_then(|s| s.find(needle))
+            .map(|p| EvaluatedCellValue::Number((st + p + 1) as f64))
+            .ok_or(FormulaError::Value);
+    }
+    let hay_len = hay.chars().count();
+    if st + 1 > hay_len.max(1) {
+        return Err(FormulaError::Value);
+    }
+    if needle.is_empty() {
         return number_cell(start as f64);
     }
-    let st = (start - 1) as usize;
-    for idx in st..=hay_chars.len().saturating_sub(needle_chars.len()) {
-        if hay_chars[idx..].starts_with(&needle_chars) {
-            return number_cell((idx + 1) as f64);
+    let start_byte = hay.char_indices().nth(st).map_or(hay.len(), |(i, _)| i);
+    let rel_byte = hay[start_byte..].find(needle).ok_or(FormulaError::Value)?;
+    let char_offset = hay[start_byte..start_byte + rel_byte].chars().count();
+    number_cell((st + char_offset + 1) as f64)
+}
+
+fn find_delim_matches(text: &str, delim: &str, case_insensitive: bool) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    if !case_insensitive {
+        let mut offset = 0;
+        while let Some(pos) = text[offset..].find(delim) {
+            let s = offset + pos;
+            let e = s + delim.len();
+            out.push((s, e));
+            offset = e;
+        }
+        return out;
+    }
+    let d_low = delim.to_lowercase();
+    let d_chars = d_low.chars().count();
+    let mut skip_until = 0usize;
+    for (b_idx, _) in text.char_indices() {
+        if b_idx < skip_until {
+            continue;
+        }
+        let rem = &text[b_idx..];
+        let end_rel = rem
+            .char_indices()
+            .nth(d_chars)
+            .map_or(rem.len(), |(i, _)| i);
+        if rem.chars().count() >= d_chars && rem[..end_rel].to_lowercase() == d_low {
+            out.push((b_idx, b_idx + end_rel));
+            skip_until = b_idx + end_rel;
         }
     }
-    Err(FormulaError::Value)
+    out
+}
+
+fn parse_numbervalue(text: &str, dec_sep: char, grp_sep: char) -> CellResult {
+    if dec_sep == grp_sep {
+        return Err(FormulaError::Value);
+    }
+    let mut s = text.trim();
+    if s.is_empty() {
+        return number_cell(0.0);
+    }
+    let mut pct = 0i32;
+    while let Some(rest) = s.strip_suffix('%') {
+        pct += 1;
+        s = rest.trim_end();
+    }
+    let mut norm = String::with_capacity(s.len());
+    let mut seen_dec = false;
+    for ch in s.chars() {
+        if ch == dec_sep {
+            if seen_dec {
+                return Err(FormulaError::Value);
+            }
+            seen_dec = true;
+            norm.push('.');
+        } else if ch == grp_sep {
+            if seen_dec {
+                return Err(FormulaError::Value);
+            }
+        } else if !ch.is_whitespace() {
+            norm.push(ch);
+        }
+    }
+    let v = norm.parse::<f64>().map_err(|_| FormulaError::Value)?;
+    if !v.is_finite() {
+        return Err(FormulaError::Value);
+    }
+    number_cell(v / 100.0_f64.powi(pct))
 }
 
 impl SheetEngine {
@@ -179,6 +261,11 @@ impl SheetEngine {
                 let v = self.eval_arg_val(&args[0], ctx, depth)?;
                 crate::coercion::coerce_to_number(&v).map(EvaluatedCellValue::Number)
             }
+            "NUMBERVALUE" => self.text_numbervalue(args, ctx, depth),
+            "VALUETOTEXT" => self.text_valuetotext(args, ctx, depth),
+            "TEXTBEFORE" | "TEXTAFTER" => {
+                self.text_before_after(name == "TEXTBEFORE", args, ctx, depth)
+            }
             "TEXT" => self.text_format(args, ctx, depth),
             "FIXED" => self.text_fixed(args, ctx, depth),
             "CLEAN" => {
@@ -188,7 +275,7 @@ impl SheetEngine {
                     s.chars().filter(|&c| (c as u32) >= MIN_PRINTABLE).collect(),
                 ))
             }
-            "CHAR" => {
+            "CHAR" | "UNICHAR" => {
                 check_text_arity(args, 1, 1)?;
                 let code = self.eval_arg_num(&args[0], ctx, depth)?.trunc() as i64;
                 if !(1..=MAX_CHAR_CODE).contains(&code) {
@@ -197,7 +284,7 @@ impl SheetEngine {
                 let ch = char::from_u32(code as u32).ok_or(FormulaError::Value)?;
                 Ok(EvaluatedCellValue::Text(ch.to_string()))
             }
-            "CODE" => {
+            "CODE" | "UNICODE" => {
                 check_text_arity(args, 1, 1)?;
                 let s = self.text_arg(&args[0], ctx, depth)?;
                 let ch = s.chars().next().ok_or(FormulaError::Value)?;
@@ -270,7 +357,7 @@ impl SheetEngine {
         depth: usize,
     ) -> CellResult {
         check_text_arity(args, 1, 2)?;
-        let s = self.text_chars_arg(&args[0], ctx, depth)?;
+        let s = self.text_arg(&args[0], ctx, depth)?;
         let n = match args.get(1) {
             Some(arg) => {
                 let k = self.eval_arg_num(arg, ctx, depth)?.trunc() as isize;
@@ -278,26 +365,48 @@ impl SheetEngine {
             }
             None => 1,
         };
-        let take = n.min(s.len());
-        let slice = if is_left {
-            &s[..take]
+        let sub = if s.is_ascii() {
+            let take = n.min(s.len());
+            if is_left {
+                &s[..take]
+            } else {
+                &s[s.len() - take..]
+            }
+        } else if is_left {
+            let end = s.char_indices().nth(n).map_or(s.len(), |(i, _)| i);
+            &s[..end]
         } else {
-            &s[s.len() - take..]
+            let start = if n == 0 {
+                s.len()
+            } else {
+                s.char_indices().rev().nth(n - 1).map_or(0, |(i, _)| i)
+            };
+            &s[start..]
         };
-        Ok(EvaluatedCellValue::Text(slice.iter().collect()))
+        Ok(EvaluatedCellValue::Text(sub.to_string()))
     }
 
     fn text_mid(&self, args: &[Expr], ctx: &mut EvalContext<'_>, depth: usize) -> CellResult {
         check_text_arity(args, 3, 3)?;
-        let s = self.text_chars_arg(&args[0], ctx, depth)?;
+        let s = self.text_arg(&args[0], ctx, depth)?;
         let start = self.eval_arg_num(&args[1], ctx, depth)?.trunc() as isize;
         let count = self.eval_arg_num(&args[2], ctx, depth)?.trunc() as isize;
         if start < 1 || count < 0 {
             return Err(FormulaError::Value);
         }
-        let st = ((start - 1) as usize).min(s.len());
-        let end = (st + count as usize).min(s.len());
-        Ok(EvaluatedCellValue::Text(s[st..end].iter().collect()))
+        let st = (start - 1) as usize;
+        let cnt = count as usize;
+        let sub = if s.is_ascii() {
+            let b_st = st.min(s.len());
+            let b_end = b_st.saturating_add(cnt).min(s.len());
+            &s[b_st..b_end]
+        } else {
+            let b_st = s.char_indices().nth(st).map_or(s.len(), |(i, _)| i);
+            let rem = &s[b_st..];
+            let b_end = rem.char_indices().nth(cnt).map_or(rem.len(), |(i, _)| i);
+            &rem[..b_end]
+        };
+        Ok(EvaluatedCellValue::Text(sub.to_string()))
     }
 
     fn text_case(
@@ -430,6 +539,114 @@ impl SheetEngine {
         bounded_text(crate::coercion::format_fixed_number(
             num, decimals, !no_commas,
         ))
+    }
+
+    fn opt_int_arg(
+        &self,
+        args: &[Expr],
+        idx: usize,
+        def: isize,
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<isize, FormulaError> {
+        match args.get(idx) {
+            Some(a) if !matches!(a, Expr::Missing) => {
+                Ok(self.eval_arg_num(a, ctx, depth)?.trunc() as isize)
+            }
+            _ => Ok(def),
+        }
+    }
+
+    fn text_numbervalue(
+        &self,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> CellResult {
+        check_text_arity(args, 1, 3)?;
+        let text = self.text_arg(&args[0], ctx, depth)?;
+        let mut sep = |idx: usize, def: char| -> Result<char, FormulaError> {
+            match args.get(idx) {
+                Some(a) if !matches!(a, Expr::Missing) => self
+                    .text_arg(a, ctx, depth)?
+                    .chars()
+                    .next()
+                    .ok_or(FormulaError::Value),
+                _ => Ok(def),
+            }
+        };
+        let dec = sep(1, '.')?;
+        let grp = sep(2, ',')?;
+        parse_numbervalue(&text, dec, grp)
+    }
+
+    fn text_valuetotext(
+        &self,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> CellResult {
+        check_text_arity(args, 1, 2)?;
+        let val = self.eval_expr_ctx(&args[0], ctx, depth);
+        let fmt = self.opt_int_arg(args, 1, 0, ctx, depth)?;
+        if fmt != 0 && fmt != 1 {
+            return Err(FormulaError::Value);
+        }
+        let s = match (&val, fmt) {
+            (EvaluatedCellValue::Text(t), 1) => format!("\"{}\"", t.replace('"', "\"\"")),
+            _ => val.to_display_string(),
+        };
+        bounded_text(s)
+    }
+
+    fn text_before_after(
+        &self,
+        is_before: bool,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> CellResult {
+        check_text_arity(args, 2, 6)?;
+        let text = self.text_arg(&args[0], ctx, depth)?;
+        let delim = self.text_arg(&args[1], ctx, depth)?;
+        let inst = self.opt_int_arg(args, 2, 1, ctx, depth)?;
+        let mode = self.opt_int_arg(args, 3, 0, ctx, depth)?;
+        let match_end = self.opt_int_arg(args, 4, 0, ctx, depth)?;
+        if inst == 0 || (mode != 0 && mode != 1) || (match_end != 0 && match_end != 1) {
+            return Err(FormulaError::Value);
+        }
+        if delim.is_empty() {
+            let take = if (is_before && inst < 0) || (!is_before && inst > 0) {
+                text
+            } else {
+                String::new()
+            };
+            return Ok(EvaluatedCellValue::Text(take));
+        }
+        let hits = find_delim_matches(&text, &delim, mode == 1);
+        let picked = if inst > 0 {
+            hits.get((inst - 1) as usize).copied()
+        } else {
+            hits.len()
+                .checked_sub((-inst) as usize)
+                .and_then(|i| hits.get(i).copied())
+        };
+        if let Some((s, e)) = picked {
+            let sub = if is_before { &text[..s] } else { &text[e..] };
+            return Ok(EvaluatedCellValue::Text(sub.to_string()));
+        }
+        if match_end == 1 && (inst == 1 || inst == -1) {
+            let take = if (is_before && inst > 0) || (!is_before && inst < 0) {
+                text
+            } else {
+                String::new()
+            };
+            return Ok(EvaluatedCellValue::Text(take));
+        }
+        match args.get(5) {
+            Some(fb) if !matches!(fb, Expr::Missing) => Ok(self.eval_expr_ctx(fb, ctx, depth)),
+            _ => Err(FormulaError::Na),
+        }
     }
 
     pub(crate) fn eval_logical_func(

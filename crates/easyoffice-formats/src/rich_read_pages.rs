@@ -73,12 +73,13 @@ impl AttrTable {
     ) -> Result<Self, EasyOfficeError> {
         let mut entries = Vec::new();
         if let Some(t) = storage_msg.sub(field)? {
-            for e in t.subs(storage::TABLE_ENTRIES)? {
+            t.for_each_sub(storage::TABLE_ENTRIES, |e| {
                 let idx = e
                     .varint(storage::ENTRY_INDEX)
                     .ok_or_else(|| corrupt("속성 표 항목에 위치가 없습니다"))?;
                 entries.push((idx, value_of(&e)));
-            }
+                Ok(())
+            })?;
         }
         entries.sort_by_key(|(i, _)| *i);
         Ok(Self { entries })
@@ -97,12 +98,10 @@ impl AttrTable {
             .and_then(|k| self.entries[k].1)
     }
 
-    /// Indexes strictly inside `(start, end)` where the value changes.
-    fn boundaries(&self, start: u64, end: u64) -> impl Iterator<Item = u64> + '_ {
-        self.entries
-            .iter()
-            .map(|(i, _)| *i)
-            .filter(move |i| *i > start && *i < end)
+    /// Indexes strictly greater than `start` where the value changes, found via O(log N) binary search.
+    fn boundaries_after(&self, start: u64) -> impl Iterator<Item = u64> + '_ {
+        let first = self.entries.partition_point(|(i, _)| *i <= start);
+        self.entries[first..].iter().map(|(i, _)| *i)
     }
 
     /// Number of entries that point at something.
@@ -112,12 +111,11 @@ impl AttrTable {
 }
 
 /// Resolved format of a style chain (first definition along the chain wins).
+/// `style_bits` packs 4 tri-state flags (`bold`, `italic`, `underline`, `strike`):
+/// low nibble (bits 0..4) = known mask, high nibble (bits 4..8) = value mask.
 #[derive(Default)]
 struct Fmt {
-    bold: Option<bool>,
-    italic: Option<bool>,
-    underline: Option<bool>,
-    strike: Option<bool>,
+    style_bits: u8,
     size_half_pt: Option<u16>,
     color: Option<String>,
     highlight: Option<String>,
@@ -130,16 +128,24 @@ struct Fmt {
     line_spacing_percent: Option<u16>,
 }
 
+const FLAG_BOLD: u8 = 1 << 0;
+const FLAG_ITALIC: u8 = 1 << 1;
+const FLAG_UNDERLINE: u8 = 1 << 2;
+const FLAG_STRIKE: u8 = 1 << 3;
+const HEX_UPPER: &[u8; 16] = b"0123456789ABCDEF";
+
 fn color_hex(color: &Message) -> Option<String> {
-    let mut rgb = [0u8; 3];
-    for (slot, field) in rgb.iter_mut().zip(COLOR_RGBA) {
+    let mut hex = [0u8; 6];
+    for (i, field) in COLOR_RGBA[..3].iter().copied().enumerate() {
         let v = color.float(field)?;
         if !v.is_finite() {
             return None;
         }
-        *slot = (v.clamp(0.0, 1.0) * COLOR_CHANNEL_MAX).round() as u8;
+        let byte = (v.clamp(0.0, 1.0) * COLOR_CHANNEL_MAX).round() as usize;
+        hex[i * 2] = HEX_UPPER[byte >> 4];
+        hex[i * 2 + 1] = HEX_UPPER[byte & 0x0F];
     }
-    Some(format!("{:02X}{:02X}{:02X}", rgb[0], rgb[1], rgb[2]))
+    Some(String::from_utf8(hex.to_vec()).unwrap_or_default())
 }
 
 fn size_half_pt(props: &Message, field: u32) -> Option<u16> {
@@ -193,13 +199,20 @@ fn alignment_of(value: u64) -> Option<RichAlignment> {
 }
 
 impl Fmt {
+    fn set_flag_if_unset(&mut self, bit: u8, p: &Message, field: u32) {
+        if self.style_bits & bit == 0 {
+            if let Some(v) = p.varint(field) {
+                self.style_bits |= bit | (u8::from(v != 0) * (bit << 4));
+            }
+        }
+    }
+
     /// Fills the properties that are still unset from a character property message.
     fn merge_props(&mut self, p: &Message, l: &CharPropFields) {
-        let flag = |n: u32| p.varint(n).map(|v| v != 0);
-        self.bold = self.bold.or_else(|| flag(l.bold));
-        self.italic = self.italic.or_else(|| flag(l.italic));
-        self.underline = self.underline.or_else(|| flag(l.underline));
-        self.strike = self.strike.or_else(|| flag(l.strike));
+        self.set_flag_if_unset(FLAG_BOLD, p, l.bold);
+        self.set_flag_if_unset(FLAG_ITALIC, p, l.italic);
+        self.set_flag_if_unset(FLAG_UNDERLINE, p, l.underline);
+        self.set_flag_if_unset(FLAG_STRIKE, p, l.strike);
         if self.size_half_pt.is_none() {
             self.size_half_pt = size_half_pt(p, l.size_pt);
         }
@@ -367,12 +380,16 @@ fn pick<T>(c: Option<&Fmt>, p: Option<&Fmt>, field: impl Fn(&Fmt) -> Option<T>) 
 
 /// Run formatted by a character style layered over the paragraph style.
 fn styled_run(text: String, c: Option<&Fmt>, p: Option<&Fmt>) -> RichRun {
+    let c_bits = c.map_or(0, |f| f.style_bits);
+    let p_bits = p.map_or(0, |f| f.style_bits);
+    let c_known = c_bits & 0x0F;
+    let resolved = ((c_bits >> 4) & c_known) | ((p_bits >> 4) & !c_known & (p_bits & 0x0F));
     RichRun {
         text,
-        bold: pick(c, p, |f| f.bold).unwrap_or(false),
-        italic: pick(c, p, |f| f.italic).unwrap_or(false),
-        underline: pick(c, p, |f| f.underline).unwrap_or(false),
-        strike: pick(c, p, |f| f.strike).unwrap_or(false),
+        bold: (resolved & FLAG_BOLD) != 0,
+        italic: (resolved & FLAG_ITALIC) != 0,
+        underline: (resolved & FLAG_UNDERLINE) != 0,
+        strike: (resolved & FLAG_STRIKE) != 0,
         size_half_pt: pick(c, p, |f| f.size_half_pt),
         color: pick(c, p, |f| f.color.clone()),
         highlight: pick(c, p, |f| f.highlight.clone()),
@@ -516,17 +533,15 @@ impl<'a> Reader<'a> {
         Ok(())
     }
 
-    /// Splits one line at character-style boundaries into runs and collects its attachments.
+    /// Splits one line at character-style boundaries into runs and collects its attachments in a single UTF-16 pass.
     fn convert_line(
         &mut self,
         t: &StorageTables,
         line: &str,
         start: u64,
-        len_u16: u64,
         pfmt: Option<&Fmt>,
-    ) -> Result<LineContent, EasyOfficeError> {
-        let end = start.saturating_add(len_u16);
-        let mut cuts = t.char_styles.boundaries(start, end).peekable();
+    ) -> Result<(LineContent, u64), EasyOfficeError> {
+        let mut cuts = t.char_styles.boundaries_after(start).peekable();
         let mut content = LineContent::default();
         let mut cur = String::new();
         let mut seg_start = start;
@@ -549,7 +564,7 @@ impl<'a> Reader<'a> {
             utf16 += ch.len_utf16() as u64;
         }
         self.flush_run(&mut content, &mut cur, t.char_styles.at(seg_start), pfmt)?;
-        Ok(content)
+        Ok((content, utf16 - start))
     }
 
     fn convert_storage(
@@ -569,10 +584,9 @@ impl<'a> Reader<'a> {
                 ));
             }
             let start = pos;
-            let len_u16 = line.encode_utf16().count() as u64;
-            pos = start.saturating_add(len_u16).saturating_add(1);
             let (mut para, pfmt) = self.paragraph_header(&tables, start);
-            let content = self.convert_line(&tables, line, start, len_u16, pfmt.as_deref())?;
+            let (content, len_u16) = self.convert_line(&tables, line, start, pfmt.as_deref())?;
+            pos = start.saturating_add(len_u16).saturating_add(1);
             para.runs = content.runs;
             if !para.runs.is_empty() || content.attachments.is_empty() {
                 blocks.push(RichBlock::Paragraph(para));

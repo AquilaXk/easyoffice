@@ -141,6 +141,52 @@ fn average_a_value(
     Ok(())
 }
 
+fn gcd_u64(mut a: u64, mut b: u64) -> u64 {
+    while b != 0 {
+        let t = b;
+        b = a % b;
+        a = t;
+    }
+    a
+}
+
+fn lcm_u64(a: u64, b: u64) -> Option<u64> {
+    if a == 0 || b == 0 {
+        Some(0)
+    } else {
+        (a / gcd_u64(a, b)).checked_mul(b)
+    }
+}
+
+const ROMAN_TABLE: [(u32, &str); 13] = [
+    (1000, "M"),
+    (900, "CM"),
+    (500, "D"),
+    (400, "CD"),
+    (100, "C"),
+    (90, "XC"),
+    (50, "L"),
+    (40, "XL"),
+    (10, "X"),
+    (9, "IX"),
+    (5, "V"),
+    (4, "IV"),
+    (1, "I"),
+];
+
+fn roman_value(b: u8) -> Option<i64> {
+    match b.to_ascii_uppercase() {
+        b'I' => Some(1),
+        b'V' => Some(5),
+        b'X' => Some(10),
+        b'L' => Some(50),
+        b'C' => Some(100),
+        b'D' => Some(500),
+        b'M' => Some(1000),
+        _ => None,
+    }
+}
+
 impl SheetEngine {
     /// Math, trigonometry and scalar-conversion functions.
     pub(crate) fn eval_math_func(
@@ -151,7 +197,8 @@ impl SheetEngine {
         depth: usize,
     ) -> CellResult {
         match name {
-            "ABS" | "SIGN" | "INT" | "SQRT" | "FACT" => self.math_unary(name, args, ctx, depth),
+            "ABS" | "SIGN" | "INT" | "SQRT" | "FACT" | "EVEN" | "ODD" | "FACTDOUBLE" | "SQRTPI"
+            | "DEGREES" | "RADIANS" => self.math_unary(name, args, ctx, depth),
             "ROUND" | "ROUNDUP" | "ROUNDDOWN" | "TRUNC" => self.math_round(name, args, ctx, depth),
             "MROUND" => self.math_mround(args, ctx, depth),
             "RANDBETWEEN" => self.math_randbetween(args, ctx, depth),
@@ -179,8 +226,16 @@ impl SheetEngine {
                 }
                 number_result(res)
             }
-            "EXP" | "LN" | "LOG10" | "SIN" | "COS" | "TAN" => {
-                self.math_transcendental(name, args, ctx, depth)
+            "EXP" | "LN" | "LOG10" | "SIN" | "COS" | "TAN" | "ASIN" | "ACOS" | "ATAN" | "SINH"
+            | "COSH" | "TANH" => self.math_transcendental(name, args, ctx, depth),
+            "ATAN2" => {
+                check_math_arity(args, 2, 2)?;
+                let x = self.eval_arg_num(&args[0], ctx, depth)?;
+                let y = self.eval_arg_num(&args[1], ctx, depth)?;
+                if x == 0.0 && y == 0.0 {
+                    return Err(FormulaError::DivByZero);
+                }
+                number_result(y.atan2(x))
             }
             "LOG" => self.math_log(args, ctx, depth),
             "PI" | "RAND" => {
@@ -205,6 +260,13 @@ impl SheetEngine {
                 }
             }
             "AVERAGEA" => self.math_average_a(args, ctx, depth),
+            "SUMSQ" => self.math_sumsq(args, ctx, depth),
+            "GCD" | "LCM" => self.math_gcd_lcm(name == "LCM", args, ctx, depth),
+            "COMBIN" | "PERMUT" => self.math_combin_permut(name == "PERMUT", args, ctx, depth),
+            "BASE" => self.math_base(args, ctx, depth),
+            "DECIMAL" => self.math_decimal(args, ctx, depth),
+            "ROMAN" => self.math_roman(args, ctx, depth),
+            "ARABIC" => self.math_arabic(args, ctx, depth),
             _ => Err(FormulaError::Name),
         }
     }
@@ -230,6 +292,42 @@ impl SheetEngine {
             }),
             "SQRT" if n < 0.0 => Err(FormulaError::Num),
             "SQRT" => number_result(n.sqrt()),
+            "SQRTPI" if n < 0.0 => Err(FormulaError::Num),
+            "SQRTPI" => number_result((n * std::f64::consts::PI).sqrt()),
+            "DEGREES" => number_result(n.to_degrees()),
+            "RADIANS" => number_result(n.to_radians()),
+            "EVEN" => {
+                if n == 0.0 {
+                    return number_result(0.0);
+                }
+                let c = n.abs().ceil();
+                let even = if (c as i64) % 2 == 0 { c } else { c + 1.0 };
+                number_result(clean_zero(even.copysign(n)))
+            }
+            "ODD" => {
+                if n == 0.0 {
+                    return number_result(1.0);
+                }
+                let c = n.abs().ceil();
+                let odd = if (c as i64) % 2 != 0 { c } else { c + 1.0 };
+                number_result(odd.copysign(n))
+            }
+            "FACTDOUBLE" => {
+                let n = n.trunc();
+                if !(-1.0..=300.0).contains(&n) {
+                    return Err(FormulaError::Num);
+                }
+                let mut k = n.max(0.0) as u32;
+                let mut acc = 1.0f64;
+                while k >= 2 {
+                    acc *= k as f64;
+                    k -= 2;
+                }
+                if !acc.is_finite() {
+                    return Err(FormulaError::Num);
+                }
+                number_result(acc)
+            }
             _ => {
                 let n = n.trunc();
                 if !(0.0..=MAX_FACTORIAL_ARG).contains(&n) {
@@ -327,12 +425,21 @@ impl SheetEngine {
         if (name == "LN" || name == "LOG10") && n <= 0.0 {
             return Err(FormulaError::Num);
         }
+        if (name == "ASIN" || name == "ACOS") && !(-1.0..=1.0).contains(&n) {
+            return Err(FormulaError::Num);
+        }
         let res = match name {
             "EXP" => n.exp(),
             "LN" => n.ln(),
             "LOG10" => n.log10(),
             "SIN" => n.sin(),
             "COS" => n.cos(),
+            "ASIN" => n.asin(),
+            "ACOS" => n.acos(),
+            "ATAN" => n.atan(),
+            "SINH" => n.sinh(),
+            "COSH" => n.cosh(),
+            "TANH" => n.tanh(),
             _ => n.tan(),
         };
         if !res.is_finite() {
@@ -374,5 +481,174 @@ impl SheetEngine {
             return Err(FormulaError::DivByZero);
         }
         number_result(sum / (count as f64))
+    }
+
+    fn math_sumsq(&self, args: &[Expr], ctx: &mut EvalContext<'_>, depth: usize) -> CellResult {
+        check_math_arity(args, 1, usize::MAX)?;
+        let mut sum = 0.0f64;
+        self.visit_args_streaming(args, ctx, depth, |v| {
+            if let EvaluatedCellValue::Number(x) = v {
+                sum += x * x;
+            }
+            Ok(())
+        })?;
+        number_result(sum)
+    }
+
+    fn math_gcd_lcm(
+        &self,
+        is_lcm: bool,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> CellResult {
+        check_math_arity(args, 1, usize::MAX)?;
+        let mut acc: Option<u64> = None;
+        self.visit_args_streaming(args, ctx, depth, |v| {
+            let x = match v {
+                EvaluatedCellValue::Empty => return Ok(()),
+                EvaluatedCellValue::Number(n) => n,
+                _ => return Err(FormulaError::Value),
+            };
+            if !(0.0..9_007_199_254_740_992.0).contains(&x) {
+                return Err(FormulaError::Num);
+            }
+            let n = x.trunc() as u64;
+            acc = Some(match acc {
+                None => n,
+                Some(prev) if is_lcm => lcm_u64(prev, n).ok_or(FormulaError::Num)?,
+                Some(prev) => gcd_u64(prev, n),
+            });
+            Ok(())
+        })?;
+        number_result(acc.unwrap_or(0) as f64)
+    }
+
+    fn math_combin_permut(
+        &self,
+        is_permut: bool,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> CellResult {
+        check_math_arity(args, 2, 2)?;
+        let n_raw = self.eval_arg_num(&args[0], ctx, depth)?.trunc();
+        let k_raw = self.eval_arg_num(&args[1], ctx, depth)?.trunc();
+        if n_raw < 0.0 || k_raw < 0.0 || k_raw > n_raw || n_raw > 1e9 {
+            return Err(FormulaError::Num);
+        }
+        let n = n_raw as u64;
+        let k = k_raw as u64;
+        let res = if is_permut {
+            ((n - k + 1)..=n).fold(1.0f64, |acc, i| acc * i as f64)
+        } else {
+            let k = k.min(n - k);
+            (1..=k)
+                .fold(1.0f64, |acc, i| acc * ((n - k + i) as f64) / (i as f64))
+                .round()
+        };
+        if !res.is_finite() {
+            return Err(FormulaError::Num);
+        }
+        number_result(res)
+    }
+
+    fn math_base(&self, args: &[Expr], ctx: &mut EvalContext<'_>, depth: usize) -> CellResult {
+        check_math_arity(args, 2, 3)?;
+        let num = self.eval_arg_num(&args[0], ctx, depth)?.trunc();
+        let radix = self.eval_arg_num(&args[1], ctx, depth)?.trunc();
+        if !(0.0..9_007_199_254_740_992.0).contains(&num) || !(2.0..=36.0).contains(&radix) {
+            return Err(FormulaError::Num);
+        }
+        let min_len = match args.get(2) {
+            Some(arg) => {
+                let l = self.eval_arg_num(arg, ctx, depth)?.trunc();
+                if !(0.0..=255.0).contains(&l) {
+                    return Err(FormulaError::Num);
+                }
+                l as usize
+            }
+            None => 0,
+        };
+        let r = radix as u64;
+        let mut n = num as u64;
+        let mut buf = [0u8; 64];
+        let mut len = 0usize;
+        loop {
+            let d = (n % r) as u8;
+            buf[len] = if d < 10 { b'0' + d } else { b'A' + (d - 10) };
+            len += 1;
+            n /= r;
+            if n == 0 {
+                break;
+            }
+        }
+        let mut out = String::with_capacity(len.max(min_len));
+        for _ in len..min_len {
+            out.push('0');
+        }
+        for &b in buf[..len].iter().rev() {
+            out.push(char::from(b));
+        }
+        Ok(EvaluatedCellValue::Text(out))
+    }
+
+    fn math_decimal(&self, args: &[Expr], ctx: &mut EvalContext<'_>, depth: usize) -> CellResult {
+        check_math_arity(args, 2, 2)?;
+        let s = self.eval_arg_val(&args[0], ctx, depth)?.to_display_string();
+        let radix = self.eval_arg_num(&args[1], ctx, depth)?.trunc();
+        if !(2.0..=36.0).contains(&radix) {
+            return Err(FormulaError::Num);
+        }
+        let parsed = u128::from_str_radix(s.trim(), radix as u32).map_err(|_| FormulaError::Num)?;
+        number_result(parsed as f64)
+    }
+
+    fn math_roman(&self, args: &[Expr], ctx: &mut EvalContext<'_>, depth: usize) -> CellResult {
+        check_math_arity(args, 1, 2)?;
+        let n = self.eval_arg_num(&args[0], ctx, depth)?.trunc();
+        if let Some(arg) = args.get(1) {
+            let _ = self.eval_arg_val(arg, ctx, depth)?;
+        }
+        if !(0.0..=3999.0).contains(&n) {
+            return Err(FormulaError::Value);
+        }
+        let mut rem = n as u32;
+        let mut out = String::new();
+        for (val, sym) in ROMAN_TABLE {
+            while rem >= val {
+                out.push_str(sym);
+                rem -= val;
+            }
+        }
+        Ok(EvaluatedCellValue::Text(out))
+    }
+
+    fn math_arabic(&self, args: &[Expr], ctx: &mut EvalContext<'_>, depth: usize) -> CellResult {
+        check_math_arity(args, 1, 1)?;
+        let raw = self.eval_arg_val(&args[0], ctx, depth)?.to_display_string();
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return number_result(0.0);
+        }
+        let (neg, body) = match trimmed.strip_prefix('-') {
+            Some(rest) => (true, rest.trim()),
+            None => (false, trimmed),
+        };
+        if neg && body.is_empty() {
+            return Err(FormulaError::Value);
+        }
+        let mut total = 0i64;
+        let mut prev = 0i64;
+        for &b in body.as_bytes().iter().rev() {
+            let v = roman_value(b).ok_or(FormulaError::Value)?;
+            if v < prev {
+                total -= v;
+            } else {
+                total += v;
+                prev = v;
+            }
+        }
+        number_result((if neg { -total } else { total }) as f64)
     }
 }

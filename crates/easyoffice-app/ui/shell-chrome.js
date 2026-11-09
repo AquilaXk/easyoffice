@@ -351,13 +351,82 @@
       el.hidden = false;
     }
 
+    function bindIconToolbarScroller() {
+      const bar = document.getElementById("icon-toolbar");
+      if (!bar?.addEventListener) return;
+      bar.addEventListener("wheel", (ev) => {
+        if ((bar.scrollWidth || 0) <= (bar.clientWidth || 0)) return;
+        const delta = ev.deltaY || ev.deltaX || 0;
+        if (!delta) return;
+        bar.scrollLeft = Math.max(0, Math.min(bar.scrollWidth - bar.clientWidth, (bar.scrollLeft || 0) + delta));
+        ev.preventDefault?.();
+      });
+      bar.addEventListener("focusin", (ev) => {
+        const btn = ev.target?.closest?.(".tb-btn");
+        if (!btn) return;
+        if ((bar.scrollWidth || 0) > (bar.clientWidth || 0) && typeof bar.getBoundingClientRect === "function" && typeof btn.getBoundingClientRect === "function") {
+          const barRect = bar.getBoundingClientRect();
+          const btnRect = btn.getBoundingClientRect();
+          if (btnRect.left < barRect.left) bar.scrollLeft -= barRect.left - btnRect.left;
+          else if (btnRect.right > barRect.right) bar.scrollLeft += btnRect.right - barRect.right;
+        }
+        btn.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+      });
+    }
+
+    function enableDialogDrag(dialog) {
+      const wrap = dialog?.querySelector?.(".dialog-wrap");
+      const title = dialog?.querySelector?.(".dialog-title");
+      if (!wrap || !title) return;
+      let dx = 0, dy = 0, dragging = false, startX = 0, startY = 0;
+      const onMove = (ev) => {
+        if (!dragging) return;
+        dx = (Number(ev.clientX) || 0) - startX;
+        dy = (Number(ev.clientY) || 0) - startY;
+        wrap.style.transform = `translate(${dx}px, ${dy}px)`;
+      };
+      const stopDrag = () => {
+        if (!dragging) return;
+        dragging = false;
+        document.removeEventListener?.("mousemove", onMove);
+        document.removeEventListener?.("mouseup", stopDrag);
+      };
+      const reset = () => {
+        stopDrag();
+        dx = 0;
+        dy = 0;
+        wrap.style.transform = "";
+      };
+      title.addEventListener("mousedown", (ev) => {
+        if (ev.button !== undefined && ev.button !== 0) return;
+        if (ev.target?.closest?.(".dialog-close, button, [data-dialog-close]")) return;
+        startX = (Number(ev.clientX) || 0) - dx;
+        startY = (Number(ev.clientY) || 0) - dy;
+        dragging = true;
+        document.addEventListener?.("mousemove", onMove);
+        document.addEventListener?.("mouseup", stopDrag);
+        ev.preventDefault?.();
+      });
+      dialog.addEventListener?.("close", reset);
+      const origClose = dialog.close;
+      if (typeof origClose === "function") {
+        dialog.close = function (...args) {
+          const out = origClose.apply(this, args);
+          reset();
+          return out;
+        };
+      }
+    }
+
     function bind() {
       bindAbout();
+      bindIconToolbarScroller();
+      for (const dlg of document.querySelectorAll("dialog.tool-dialog")) enableDialogDrag(dlg);
       mirrorFeedbackToToast();
       hwpHost.onCommand(runShellCommand);
     }
 
-    return { bind, openAbout, setAppVersion, applyStoredTheme, pushMenuState, pushRecents, toast, runShellCommand, currentTheme, getThemeMode: () => themeApi().getMode() };
+    return { bind, openAbout, setAppVersion, applyStoredTheme, pushMenuState, pushRecents, toast, runShellCommand, currentTheme, enableDialogDrag, getThemeMode: () => themeApi().getMode() };
   }
 
   host.__EASYOFFICE_CREATE_SHELL_CHROME__ = createShellChrome;

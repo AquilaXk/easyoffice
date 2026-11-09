@@ -608,3 +608,20 @@ test("undo and redo of an opened picture keep it displayable and savable", async
   await flushAsyncTurns(20);
   assert.deepEqual(converts().at(-1).blocks, SAVED_RICH_BLOCKS);
 });
+
+test("converter with read-only pages source format supports studio save and security audit", async () => {
+  const { document, userClick, downloads } = await createOpenHarness();
+  switchModule(document, "CONV");
+  await flushAsyncTurns(10);
+  document.getElementById("conv-src-fmt").value = "pages";
+  document.getElementById("conv-dst-fmt").value = "docx";
+
+  userClick(studioItem(document, "studio-save"));
+  await flushAsyncTurns(20);
+  assert.equal(downloads.at(-1).download, "EasyOffice_CONV_문서.docx");
+  assert.match(document.getElementById("status-command-feedback").textContent, /문서 저장 완료/);
+
+  userClick(document.getElementById("btn-run-security-audit"));
+  await flushAsyncTurns(20);
+  assert.match(document.getElementById("security-status-text").textContent, /SAFE/);
+});

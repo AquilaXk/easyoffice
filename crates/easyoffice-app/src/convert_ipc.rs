@@ -244,15 +244,21 @@ impl EasyOfficeIpcRouter {
             EasyOfficeError::InvalidArgument(format!("지원하지 않는 대상 포맷: {dst_ext}"))
         })?;
 
+        // A read-only source format (.pages) without sourceBase64 uses DOCX as the size baseline.
+        let size_fmt = if src_fmt.is_read_only() {
+            DocumentFormat::Docx
+        } else {
+            src_fmt
+        };
         let (src_bytes, dst_bytes) = if let Some(content) = &structured {
             // Only what the target loses is reported; the source-side encode is just for its size.
             (
-                encode_structured(content, src_fmt, title, &mut Vec::new())?,
+                encode_structured(content, size_fmt, title, &mut Vec::new())?,
                 encode_structured(content, dst_fmt, title, &mut warnings)?,
             )
         } else {
             let model = Self::legacy_body_model(body, title);
-            let formula_cache = if matches!(src_fmt, DocumentFormat::Xlsx | DocumentFormat::Ods)
+            let formula_cache = if matches!(size_fmt, DocumentFormat::Xlsx | DocumentFormat::Ods)
                 || matches!(dst_fmt, DocumentFormat::Xlsx | DocumentFormat::Ods)
             {
                 Some(compute_xlsx_formula_cache(&model))
@@ -262,7 +268,7 @@ impl EasyOfficeIpcRouter {
             (
                 UniversalFormatConverter::encode_with_formula_cache(
                     &model,
-                    src_fmt,
+                    size_fmt,
                     formula_cache.as_ref(),
                 )?,
                 UniversalFormatConverter::encode_with_formula_cache(
@@ -439,5 +445,22 @@ mod tests {
                 "{spec}"
             );
         }
+    }
+
+    #[test]
+    fn pages_source_without_binary_payload_encodes_writable_target_and_rejects_pages_target() {
+        let json = EasyOfficeIpcRouter::dispatch(
+            "convert_document_format",
+            r#"{"sourceFormat":"pages","targetFormat":"docx","title":"Pages변환","blocks":[{"type":"paragraph","runs":[{"text":"본문"}]}]}"#,
+        )
+        .unwrap();
+        assert_eq!(json_str_field(&json, "sourceFormat"), "pages");
+        assert_eq!(json_str_field(&json, "targetFormat"), "docx");
+        assert_eq!(json_str_field(&json, "detectedTarget"), "docx");
+        assert!(EasyOfficeIpcRouter::dispatch(
+            "convert_document_format",
+            r#"{"sourceFormat":"docx","targetFormat":"pages","title":"읽기전용","blocks":[{"type":"paragraph","runs":[{"text":"본문"}]}]}"#,
+        )
+        .is_err());
     }
 }

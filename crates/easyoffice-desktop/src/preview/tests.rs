@@ -284,7 +284,15 @@ fn zip_documents_give_their_stored_or_deflated_thumbnail() {
     let jpg = vec![0xFF, 0xD8, 0xFF, 0xE0, 0, 16, b'J', b'F', b'I', b'F', 0];
     let pages = zip(&[("QuickLook/Thumbnail.jpg", 0, jpg.clone(), jpg.len())]);
     let found = extract(pages).unwrap();
-    assert_eq!((found.mime, found.bytes), ("image/jpeg", jpg));
+    assert_eq!((found.mime, found.bytes), ("image/jpeg", jpg.clone()));
+    let pkg_pages = zip(&[(
+        "Report.pages/QuickLook/Thumbnail.jpg",
+        0,
+        jpg.clone(),
+        jpg.len(),
+    )]);
+    let pkg_found = extract(pkg_pages).unwrap();
+    assert_eq!((pkg_found.mime, pkg_found.bytes), ("image/jpeg", jpg));
 }
 
 #[test]

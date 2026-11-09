@@ -101,8 +101,20 @@ fn currency_symbol(code: &str) -> Option<&'static str> {
         "KRW" => Some("\u{20A9}"),
         "USD" => Some("$"),
         "EUR" => Some("\u{20AC}"),
-        "JPY" => Some("\u{A5}"),
+        "JPY" | "CNY" => Some("\u{A5}"),
         "GBP" => Some("\u{A3}"),
+        "AUD" => Some("A$"),
+        "CAD" => Some("CA$"),
+        "HKD" => Some("HK$"),
+        "SGD" => Some("S$"),
+        "TWD" => Some("NT$"),
+        "INR" => Some("\u{20B9}"),
+        "BRL" => Some("R$"),
+        "MXN" => Some("MX$"),
+        "VND" => Some("\u{20AB}"),
+        "THB" => Some("\u{0E3F}"),
+        "RUB" => Some("\u{20BD}"),
+        "TRY" => Some("\u{20BA}"),
         _ => None,
     }
 }
@@ -184,17 +196,26 @@ fn write_number(out: &mut String, d: Decimal, st: &NumberStyle) -> Option<()> {
     if st.gap {
         out.push(' ');
     }
-    let digit = |i: usize| char::from(if i < count { rev[i] } else { b'0' });
+    let mut buf = [0u8; 64];
+    let mut pos = 0usize;
+    let digit = |i: usize| if i < count { rev[i] } else { b'0' };
     for i in (places..total).rev() {
-        out.push(digit(i));
+        buf[pos] = digit(i);
+        pos += 1;
         if st.thousands && i > places && (i - places) % THOUSANDS_GROUP == 0 {
-            out.push(',');
+            buf[pos] = b',';
+            pos += 1;
         }
     }
     if places > 0 {
-        out.push('.');
-        (0..places).rev().for_each(|i| out.push(digit(i)));
+        buf[pos] = b'.';
+        pos += 1;
+        for i in (0..places).rev() {
+            buf[pos] = digit(i);
+            pos += 1;
+        }
     }
+    out.push_str(std::str::from_utf8(&buf[..pos]).ok()?);
     out.push_str(st.suffix);
     Some(())
 }
@@ -242,14 +263,19 @@ fn date_parts(seconds: f64) -> Option<DateParts> {
     })
 }
 
-/// Writes one pattern field (`yyyy`, `yy`, `M`/`MM`, `d`/`dd`, `H`/`HH`, `m`/`mm`, `s`/`ss`).
+/// Writes one pattern field (`yyyy`, `yy`, `M`/`MM`, `d`/`dd`, `H`/`HH`, `h`/`hh`, `m`/`mm`, `s`/`ss`, `a`/`aa`).
 fn write_field(out: &mut String, letter: char, run: usize, t: &DateParts) -> Option<()> {
+    if matches!((letter, run), ('a', 1..=2)) {
+        out.push_str(if t.hour < 12 { "AM" } else { "PM" });
+        return Some(());
+    }
     let (value, width) = match (letter, run) {
         ('y', 4) => (t.year, 4),
         ('y', 2) => (t.year.rem_euclid(100), 2),
         ('M', 1 | 2) => (t.month, run),
         ('d', 1 | 2) => (t.day, run),
         ('H', 1 | 2) => (t.hour, run),
+        ('h', 1 | 2) => ((t.hour + 11).rem_euclid(12) + 1, run),
         ('m', 1 | 2) => (t.minute, run),
         ('s', 1 | 2) => (t.second, run),
         _ => return None,
@@ -260,6 +286,25 @@ fn write_field(out: &mut String, letter: char, run: usize, t: &DateParts) -> Opt
 fn write_pattern(out: &mut String, pattern: &str, t: &DateParts) -> Option<()> {
     let mut chars = pattern.chars().peekable();
     while let Some(c) = chars.next() {
+        if c == '\'' {
+            if chars.next_if_eq(&'\'').is_some() {
+                out.push('\'');
+                continue;
+            }
+            loop {
+                let q = chars.next()?;
+                if q == '\'' {
+                    if chars.next_if_eq(&'\'').is_some() {
+                        out.push('\'');
+                    } else {
+                        break;
+                    }
+                } else {
+                    out.push(q);
+                }
+            }
+            continue;
+        }
         if !c.is_ascii_alphabetic() {
             out.push(c);
             continue;
@@ -439,6 +484,27 @@ mod tests {
             render_value(&number(10000, 0, false), Some(&krw)).unwrap(),
             "\u{20A9}10,000"
         );
+        for (code, expected) in [
+            ("CNY", "\u{A5}25.50"),
+            ("AUD", "A$25.50"),
+            ("CAD", "CA$25.50"),
+            ("HKD", "HK$25.50"),
+            ("SGD", "S$25.50"),
+            ("TWD", "NT$25.50"),
+            ("INR", "\u{20B9}25.50"),
+            ("BRL", "R$25.50"),
+            ("MXN", "MX$25.50"),
+            ("VND", "\u{20AB}25.50"),
+            ("THB", "\u{0E3F}25.50"),
+            ("RUB", "\u{20BD}25.50"),
+            ("TRY", "\u{20BA}25.50"),
+        ] {
+            let cur = spec(cell_format::KIND_CURRENCY, Some(2), false, code);
+            assert_eq!(
+                render_value(&number(255, -1, false), Some(&cur)).unwrap(),
+                expected
+            );
+        }
         let chf = spec(cell_format::KIND_CURRENCY, Some(2), false, "CHF");
         assert_eq!(
             render_value(&number(1, 0, false), Some(&chf)).unwrap(),
@@ -478,6 +544,15 @@ mod tests {
         };
         // 2001-01-01 00:00:00 is the epoch; 86400 * 31 + 3661 is 2001-02-01 01:01:01.
         assert_eq!(at(0.0, None).unwrap(), "2001-01-01");
+        assert_eq!(at(0.0, Some("hh:mm a")).unwrap(), "12:00 AM");
+        assert_eq!(
+            at(
+                13.0 * 3_600.0 + 300.0,
+                Some("yyyy'년' M'월' d'일' a h'시' mm'분' '''o''clock'''")
+            )
+            .unwrap(),
+            "2001년 1월 1일 PM 1시 05분 'o'clock'"
+        );
         let feb = 86_400.0 * 31.0 + 3_661.0;
         assert_eq!(
             at(feb, Some("yyyy.M.d HH:mm:ss")).unwrap(),
