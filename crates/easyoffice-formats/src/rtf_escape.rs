@@ -1,14 +1,28 @@
 //! RTF escape sequence decoding on UTF-16 units.
+//!
+//! `\uN` is followed by `\ucN` fallback units (RTF 1.9.1; one unless a `\ucN` says otherwise): a
+//! plain unit, a `\'hh` byte, a control word or symbol, or a whole `{...}` group each count as one
+//! and are dropped.
 
 pub(crate) const RTF_BACKSLASH: u16 = 0x5C;
 const RTF_OPEN_BRACE: u16 = 0x7B;
 const RTF_CLOSE_BRACE: u16 = 0x7D;
 /// UTF-16 units of the `line` control word.
 const RTF_LINE_WORD: [u16; 4] = [b'l' as u16, b'i' as u16, b'n' as u16, b'e' as u16];
+/// UTF-16 units of the `uc` control word.
+const RTF_UC_WORD: [u16; 2] = [b'u' as u16, b'c' as u16];
+
+/// `\uc1` is in force until a `\ucN` says otherwise.
+pub(crate) const DEFAULT_UNICODE_SKIP: usize = 1;
 
 /// Decodes the RTF escape starting at the backslash at `i` (`\\`, `\{`, `\}`, `\line`,
-/// `\uN?`). Returns the produced UTF-16 units (at most one) and the next index.
-pub(crate) fn decode_rtf_escape(units: &[u16], i: usize) -> Option<(Option<u16>, usize)> {
+/// `\ucN`, `\uN` with its fallback). `unicode_skip` is the caller's `\ucN` state. Returns the
+/// produced UTF-16 units (at most one) and the next index.
+pub(crate) fn decode_rtf_escape(
+    units: &[u16],
+    i: usize,
+    unicode_skip: &mut usize,
+) -> Option<(Option<u16>, usize)> {
     let next = *units.get(i + 1)?;
     if matches!(next, RTF_BACKSLASH | RTF_OPEN_BRACE | RTF_CLOSE_BRACE) {
         return Some((Some(next), i + 2));
@@ -21,36 +35,110 @@ pub(crate) fn decode_rtf_escape(units: &[u16], i: usize) -> Option<(Option<u16>,
         }
         return Some((Some(b'\n' as u16), end));
     }
+    if rest.starts_with(&RTF_UC_WORD) {
+        let (count, end) = read_param(units, i + 1 + RTF_UC_WORD.len())?;
+        *unicode_skip = usize::try_from(count).unwrap_or(0);
+        return Some((None, end));
+    }
     if next == b'u' as u16 {
-        return decode_rtf_unicode(units, i + 2);
+        return decode_rtf_unicode(units, i + 2, *unicode_skip);
     }
     None
 }
 
-/// Decodes the signed decimal of `\uN?` starting at `num_start`.
-fn decode_rtf_unicode(units: &[u16], mut num_start: usize) -> Option<(Option<u16>, usize)> {
-    let neg = units.get(num_start) == Some(&(b'-' as u16));
-    if neg {
-        num_start += 1;
-    }
-    let mut num_end = num_start;
+/// Reads the signed decimal at `start` and the single space that ends the control word.
+fn read_param(units: &[u16], start: usize) -> Option<(i32, usize)> {
+    let neg = units.get(start) == Some(&(b'-' as u16));
+    let digits = start + usize::from(neg);
+    let mut end = digits;
     let mut acc: i32 = 0;
     while let Some(&digit) = units
-        .get(num_end)
+        .get(end)
         .filter(|d| (b'0' as u16..=b'9' as u16).contains(d))
     {
         acc = acc
             .wrapping_mul(10)
             .wrapping_add((digit - b'0' as u16) as i32);
-        num_end += 1;
+        end += 1;
     }
-    if num_end == num_start {
+    if end == digits {
         return None;
     }
-    let signed_val = if neg { -acc } else { acc };
-    let mut next_i = num_end;
-    if units.get(next_i) == Some(&(b'?' as u16)) {
-        next_i += 1;
+    if units.get(end) == Some(&(b' ' as u16)) {
+        end += 1;
     }
-    Some((Some((signed_val as i16) as u16), next_i))
+    Some((if neg { acc.wrapping_neg() } else { acc }, end))
+}
+
+/// Decodes the signed decimal of `\uN` starting at `num_start` and drops its `unicode_skip` fallback units.
+fn decode_rtf_unicode(
+    units: &[u16],
+    num_start: usize,
+    unicode_skip: usize,
+) -> Option<(Option<u16>, usize)> {
+    let (value, after_number) = read_param(units, num_start)?;
+    Some((
+        Some((value as i16) as u16),
+        skip_fallback(units, after_number, unicode_skip),
+    ))
+}
+
+/// Index after `count` fallback units starting at `from`, never past the end of the text or of the
+/// group that holds them.
+fn skip_fallback(units: &[u16], mut from: usize, count: usize) -> usize {
+    for _ in 0..count {
+        from = match units.get(from) {
+            None => break,
+            Some(&RTF_CLOSE_BRACE) => break,
+            Some(&RTF_OPEN_BRACE) => group_end(units, from),
+            Some(&RTF_BACKSLASH) => escape_end(units, from),
+            Some(_) => from + 1,
+        };
+    }
+    from
+}
+
+/// Index after the control word or symbol that starts with the backslash at `at`.
+fn escape_end(units: &[u16], at: usize) -> usize {
+    let is_letter = |u: &u16| u8::try_from(*u).is_ok_and(|b| b.is_ascii_alphabetic());
+    let is_hex = |u: &u16| u8::try_from(*u).is_ok_and(|b| b.is_ascii_hexdigit());
+    match units.get(at + 1) {
+        None => at + 1,
+        Some(&quote) if quote == b'\'' as u16 => {
+            if units.get(at + 2).is_some_and(is_hex) && units.get(at + 3).is_some_and(is_hex) {
+                at + 4
+            } else {
+                at + 2
+            }
+        }
+        Some(letter) if is_letter(letter) => {
+            let word_end = at + 1 + units[at + 1..].iter().take_while(|u| is_letter(u)).count();
+            read_param(units, word_end).map_or_else(
+                || word_end + usize::from(units.get(word_end) == Some(&(b' ' as u16))),
+                |(_, end)| end,
+            )
+        }
+        Some(_) => at + 2,
+    }
+}
+
+/// Index after the `{...}` group that opens at `at` (the end of the text when it is never closed).
+fn group_end(units: &[u16], at: usize) -> usize {
+    let mut depth = 0usize;
+    let mut i = at;
+    while i < units.len() {
+        match units[i] {
+            RTF_BACKSLASH => i += 1,
+            RTF_OPEN_BRACE => depth += 1,
+            RTF_CLOSE_BRACE => {
+                depth -= 1;
+                if depth == 0 {
+                    return i + 1;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    units.len()
 }

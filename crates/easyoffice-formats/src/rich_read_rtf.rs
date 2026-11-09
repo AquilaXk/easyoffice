@@ -14,6 +14,8 @@ use crate::{EasyOfficeError, RichAlignment, RichBlock, RichDocument, RichParagra
 
 const MAX_GROUP_DEPTH: usize = 256;
 const DEFAULT_TITLE: &str = "RTF 문서";
+/// RTF 1.9.1: `\uc1` is in force until a `\ucN` says otherwise.
+const DEFAULT_UNICODE_SKIP: usize = 1;
 const SKIPPED_DESTINATIONS: [&str; 15] = [
     "stylesheet",
     "pict",
@@ -60,6 +62,8 @@ struct Group {
     dest: Dest,
     chars: CharState,
     first_word: bool,
+    /// `\ucN`: how many fallback units follow each `\uN` (scoped to the group, 1 by default).
+    unicode_skip: usize,
 }
 
 #[derive(Default)]
@@ -105,6 +109,7 @@ impl Reader {
                 dest: Dest::Body,
                 chars: CharState::default(),
                 first_word: false,
+                unicode_skip: DEFAULT_UNICODE_SKIP,
             }],
             fonts: HashMap::new(),
             colors: Vec::new(),
@@ -292,6 +297,10 @@ impl Reader {
             self.table_idx = usize::try_from(param.unwrap_or(0)).unwrap_or(0);
             return;
         }
+        if word == "uc" {
+            self.top().unicode_skip = usize::try_from(param.unwrap_or(1)).unwrap_or(0);
+            return;
+        }
         if word == "u" && self.top().dest != Dest::Skip {
             self.top().first_word = false;
             self.emit_unicode(param.unwrap_or(0));
@@ -400,9 +409,9 @@ impl Reader {
         }
     }
 
-    fn escape_symbol(&mut self, rest: &str) -> usize {
+    fn escape_symbol(&mut self, rest: &str) {
         let Some(sym) = rest.chars().next() else {
-            return 0;
+            return;
         };
         match sym {
             '\\' | '{' | '}' => self.emit(&sym.to_string()),
@@ -411,17 +420,21 @@ impl Reader {
             '*' => self.top().dest = Dest::Skip,
             '\n' | '\r' => self.body_word("par", None),
             '\'' => {
-                let hex = rest.get(1..3).and_then(|h| u8::from_str_radix(h, 16).ok());
+                let hex = rest
+                    .get(1..3)
+                    .filter(|_| escape_len(rest) == 3)
+                    .and_then(|h| u8::from_str_radix(h, 16).ok());
                 if let Some(byte) = hex {
                     self.emit(&char::from(byte).to_string());
-                    return 3;
                 }
             }
             _ => {}
         }
-        sym.len_utf8()
     }
 
+    /// Reads `\ucN` fallback units as the text runs: each plain character, `\'hh`, control
+    /// word, control symbol or whole `{...}` group is one unit, and nothing is skipped past the
+    /// end of the group that holds the `\uN`.
     fn run(&mut self, text: &str) -> Result<(), EasyOfficeError> {
         let mut i = 0usize;
         let mut skip_fallback = 0usize;
@@ -429,6 +442,10 @@ impl Reader {
             let rest = &text[i..];
             let Some(ch) = rest.chars().next() else { break };
             match ch {
+                '{' if skip_fallback > 0 => {
+                    skip_fallback -= 1;
+                    i += group_len(rest);
+                }
                 '{' => {
                     if self.stack.len() >= MAX_GROUP_DEPTH {
                         return Err(EasyOfficeError::ResourceBudgetExceeded(
@@ -453,9 +470,12 @@ impl Reader {
                     let name_len = after.bytes().take_while(u8::is_ascii_alphabetic).count();
                     if name_len == 0 {
                         // `\*` marks an ignorable destination; `\'hh` is a code-page byte.
-                        let used = self.escape_symbol(after);
-                        skip_fallback = skip_fallback.saturating_sub(1);
-                        i += 1 + used;
+                        if skip_fallback > 0 {
+                            skip_fallback -= 1;
+                        } else {
+                            self.escape_symbol(after);
+                        }
+                        i += 1 + escape_len(after);
                         continue;
                     }
                     let word = &after[..name_len];
@@ -469,9 +489,15 @@ impl Reader {
                     if after[j..].starts_with(' ') {
                         j += 1;
                     }
-                    skip_fallback = usize::from(word == "u");
-                    self.control_word(word, param);
                     i += 1 + j;
+                    if skip_fallback > 0 {
+                        skip_fallback -= 1;
+                        continue;
+                    }
+                    self.control_word(word, param);
+                    if word == "u" {
+                        skip_fallback = self.top().unicode_skip;
+                    }
                 }
                 '\r' | '\n' => i += 1,
                 _ => {
@@ -493,6 +519,35 @@ impl Reader {
         }
         Ok(())
     }
+}
+
+/// Bytes of the control symbol after a backslash: `\'hh` is three, any other symbol its character.
+fn escape_len(after: &str) -> usize {
+    match after.as_bytes() {
+        [b'\'', hi, lo, ..] if hi.is_ascii_hexdigit() && lo.is_ascii_hexdigit() => 3,
+        _ => after.chars().next().map_or(0, char::len_utf8),
+    }
+}
+
+/// Bytes of the `{...}` group at the start of `rest` (to the end of the text when it is never closed).
+fn group_len(rest: &str) -> usize {
+    let bytes = rest.as_bytes();
+    let (mut depth, mut i) = (0usize, 0usize);
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\\' => i += 1,
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return i + 1;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    rest.len()
 }
 
 /// Decodes an RTF document into runs, paragraph properties, and tables.

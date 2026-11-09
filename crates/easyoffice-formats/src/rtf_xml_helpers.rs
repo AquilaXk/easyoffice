@@ -114,10 +114,13 @@ impl RtfCodec {
         let units: Vec<u16> = input.encode_utf16().collect();
         let mut out_units: Vec<u16> = Vec::with_capacity(units.len());
         let mut i = 0usize;
+        let mut unicode_skip = crate::rtf_escape::DEFAULT_UNICODE_SKIP;
 
         while i < units.len() {
             if units[i] == crate::rtf_escape::RTF_BACKSLASH {
-                if let Some((decoded, next_i)) = crate::rtf_escape::decode_rtf_escape(&units, i) {
+                if let Some((decoded, next_i)) =
+                    crate::rtf_escape::decode_rtf_escape(&units, i, &mut unicode_skip)
+                {
                     out_units.extend(decoded);
                     i = next_i;
                     continue;
