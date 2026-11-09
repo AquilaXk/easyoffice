@@ -436,7 +436,6 @@
   const LEGACY_MENU_ALIASES = {
     "mod-footnote": { DOC: "doc-mod-footnote" },
     "mod-header": { HWP: "hwp-mod-header" },
-    "mod-symbol": { HWP: "hwp-mod-field" },
   };
 
   function allRibbonCommandIds() {

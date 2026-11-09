@@ -153,6 +153,7 @@
     captureWorkspaceSnapshot: ribbonHistory.captureWorkspaceSnapshot,
     commitDeferredUndoSnapshot: ribbonHistory.commitDeferredUndoSnapshot,
     runStudioClipboardCommand: (cmd, withUndo) => workspaceSession.runClipboardCommand(cmd, withUndo),
+    insertTextAtSelection: (text) => workspaceSession.insertTextAtSelection(text),
   });
 
   workspaceSession = host.__EASYOFFICE_CREATE_WORKSPACE_SESSION__({

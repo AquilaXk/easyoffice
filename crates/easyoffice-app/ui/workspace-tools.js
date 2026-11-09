@@ -17,8 +17,10 @@
   const TOOL_DIALOGS = { "smart-diagnose": "smart-dialog", "scrub-pii": "pii-dialog", "security-audit": "security-dialog", "bench-run": "bench-dialog", "view-outline": "outline-dialog" };
   // Menu command -> app-provided action.
   const STUDIO_DIRECT_ACTIONS = { "studio-save": "save", "studio-save-as": "saveAs", "studio-undo": "undo", "studio-redo": "redo", "bench-run": "benchmark" };
+  const SYMBOL_TABLE_CHAR = "※";
+  // `target`: the ribbon command a module runs for it (`hwp` tells which module); none means the page inserts it itself.
   const INSERT_MOD_DISPATCH = {
-    "mod-symbol": { hwp: true, target: "hwp-mod-field", label: "문자표 기호 삽입 완료" },
+    "mod-symbol": { label: "문자표 기호 삽입 완료" },
     "mod-header": { hwp: true, target: "hwp-mod-header", label: "머리말 · 꼬리말 적용 완료" },
     "mod-footnote": { hwp: false, target: "doc-mod-footnote", label: "각주 · 미주 삽입 완료" },
   };
@@ -84,6 +86,7 @@
       captureWorkspaceSnapshot,
       commitDeferredUndoSnapshot,
       runStudioClipboardCommand,
+      insertTextAtSelection,
       getDocRuns,
       getWindowBridge,
     } = deps;
@@ -518,8 +521,9 @@
     }
 
     function applyFallbackInsertMod(cmd, editor, textTarget) {
-      if (cmd === "mod-symbol" && textTarget) {
-        textTarget.textContent = (textTarget.textContent || "") + " ※";
+      if (cmd === "mod-symbol") {
+        // A text node at the caret: the paragraph's inline runs keep their markup.
+        if (!insertTextAtSelection(SYMBOL_TABLE_CHAR) && textTarget) textTarget.append(document.createTextNode(SYMBOL_TABLE_CHAR));
         computeSmartStats();
       } else if (cmd === "mod-header") {
         upsertDocHeaderBlock(editor);
@@ -532,7 +536,7 @@
       const spec = INSERT_MOD_DISPATCH[cmd];
       if (!spec) return false;
       if (!isDocMod) return true;
-      if ((curMod === "HWP") === spec.hwp && typeof onStudioCmd === "function") {
+      if (spec.target && (curMod === "HWP") === spec.hwp && typeof onStudioCmd === "function") {
         onStudioCmd(spec.target);
         return true;
       }

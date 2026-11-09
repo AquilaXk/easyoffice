@@ -55,6 +55,10 @@ function createSelectionHolder() {
       this.isCollapsed = true;
       this._range = null;
     },
+    addRange(range) {
+      this._range = range;
+      this.rangeCount = 1;
+    },
   };
 }
 
@@ -74,6 +78,8 @@ function selectTextRange(selection, document, textNode, start, end) {
       textNode.data = textNode.data.slice(0, state.start) + textNode.data.slice(state.end);
       state.end = state.start;
     },
+    setStartAfter() {},
+    collapse() {},
     insertNode(node) {
       const parent = textNode.parentElement;
       const tail = document.createTextNode(textNode.data.slice(state.start));
@@ -414,6 +420,30 @@ test("Edit menu cut/copy/paste act on the real selection and the system clipboar
   sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
   await flushAsyncTurns();
   assert.equal(docEditor.querySelector("p").textContent, original);
+});
+
+test("the symbol table inserts at the caret and keeps the paragraph's inline runs, in DOC and in the Hangul fallback", async () => {
+  for (const moduleName of ["DOC", "HWP"]) {
+    const selection = createSelectionHolder();
+    const { document, userClick } = await createWorkspaceHarness({ selection });
+    switchModule(document, moduleName);
+    await flushAsyncTurns();
+    const editor = document.getElementById("doc-editor");
+    editor.innerHTML = '<p>앞 <span class="eo-run" style="font-weight: 700">굵은글씨</span> 뒤</p>';
+    const para = editor.querySelector("p");
+    const run = editor.querySelector("span.eo-run");
+    selectTextRange(selection, document, firstTextNode(run), 2, 2);
+
+    userClick(document.querySelector('.md-item[data-studio-menu-cmd="mod-symbol"]'));
+    await flushAsyncTurns();
+
+    assert.equal(editor.querySelector("span.eo-run"), run, moduleName + ": the run element survives");
+    assert.equal(run.getAttribute("style"), "font-weight: 700", moduleName + ": its formatting survives");
+    assert.equal(run.textContent, "굵은※글씨", moduleName + ": the symbol lands at the caret");
+    assert.equal(para.textContent, "앞 굵은※글씨 뒤", moduleName);
+    assert.equal(editor.querySelector(".eo-hwp-field"), null, moduleName + ": the symbol table is not the field command");
+    assert.match(document.getElementById("status-command-feedback").textContent, /문자표/);
+  }
 });
 
 test("bootstrap IPC failure shows an error with retry and never claims macOS on Windows", async () => {

@@ -546,6 +546,22 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       else editor.appendChild(p);
     }
 
+    // Replaces the selection (or inserts at the caret) with a text node and puts the caret after it, so
+    // inline runs around it keep their markup. False when the document has no selection to use.
+    function insertTextAtSelection(text) {
+      const range = resolveActiveRange(getActiveModule());
+      if (!range) return false;
+      const node = document.createTextNode(text);
+      range.deleteContents();
+      range.insertNode(node);
+      range.setStartAfter(node);
+      range.collapse(true);
+      const sel = typeof host.getSelection === "function" ? host.getSelection() : null;
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+      return true;
+    }
+
     async function runSheetClipboard(cmd) {
       const where = await getSheetController().runSheetClipboardCommand(cmd);
       const verb = { "clip-cut": "오려 두기", "clip-copy": "복사", "clip-paste": "붙여넣기" }[cmd];
@@ -700,7 +716,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       restoreFromStorage,
       installActivityTracking,
       applyModuleContext,
-      runClipboardCommand,
+      runClipboardCommand, insertTextAtSelection,
       handleShortcutKeydown,
       runForwardedShortcut,
       isMacClient,
