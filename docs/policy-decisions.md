@@ -2299,3 +2299,54 @@
 - **Alternatives rejected** 루트 `rust-toolchain.toml`(로컬과 `rhwp` 빌드에 영향), 러너 stable 그대로 두고 경고만 대응(같은 문제 재발), 서드파티 툴체인 액션(핀할 SHA를 하나 더 관리).
 - **Verified by** `node --test scripts/test-rust-toolchain-pin.mjs`(버전 원천 하나, 모든 Rust 잡이 cargo 전에 `setup-rust`, 개별 `rustup` 호출 없음, 캐시 키에 버전).
 - **Revisit when** 1.93.1에서 기존 코드가 빌드되지 않거나 의존성이 더 새로운 MSRV를 요구할 때(그 시점의 stable 숫자로 올림).
+
+## PD-148. 다른 이름으로 저장은 어느 모듈에서나 저장 대화상자를 거친다
+
+- **Status** Implemented (`workspace-tools.js`의 `saveActiveModuleDocument({ saveAs })`, 메뉴 명령 `studio-save-as`, 단축키 `file-save-as`)
+- **Context** 한글 편집기 밖의 모듈(문서·시트·슬라이드·PDF)에서 "다른 이름으로 저장"(메뉴 항목, Ctrl+Shift+S/⌘⇧S, macOS 메뉴 막대)이 일반 저장과 같은 `studio-save`를 불러 열린 파일이 있으면 대화상자 없이 원본을 덮어썼습니다.
+- **Decision (`PD-148`)** 다른 이름으로 저장은 항상 셸 저장 대화상자로 보냅니다(`save_document_file`의 `inPlace`를 보내지 않음). 일반 저장(`studio-save`, Ctrl+S)만 열린 파일에 되돌려 씁니다. 메뉴 항목은 `studio-save-as`, 단축키와 네이티브 메뉴는 한글 편집기가 활성이면 편집기의 `saveAs("hwp")`, 아니면 `saveAs: true` 저장을 부릅니다. 저장에 성공하면 열린 파일이 새 경로로 바뀌는 것은 기존 셸 동작 그대로입니다.
+- **Why** 이름을 바꿔 저장하려는 사용자가 원본을 잃는 것이 가장 큰 데이터 손실이고, 한글 편집기는 이미 같은 규칙이었습니다.
+- **Alternatives rejected** 일반 저장과 같은 경로에서 파일이 바뀌었는지 묻기(저장 대화상자를 건너뛴다는 결함은 그대로).
+- **Verified by** `node --test scripts/test-webui-desktop-bridge.mjs`(DOC·SHEET·SLIDE·PDF에서 메뉴 항목과 네이티브 메뉴 `file:save-as`는 `inPlace: false`, 일반 저장만 `true`). 구현 전 RED는 같은 시험에서 `inPlace: true`로 확인.
+- **Revisit when** 비-HWP 모듈이 "복사본으로 저장"처럼 열린 파일을 유지하는 저장을 따로 두어야 할 때.
+
+## PD-149. 다중 시트 XLS는 모든 시트를 계산값으로, CSV·TSV는 첫 시트만 경고와 함께, 범위는 읽는 쪽 한도에 맞춤
+
+- **Status** Implemented (`convert_structured.rs`의 `encode_xls`·`encode_delimited`·`computed_sheets`, `converter.rs`의 `cells_to_grid`, `CsvCodec::MAX_GRID_CELLS`)
+- **Context** 구조화 저장(`sheets`)에서 XLS·CSV·TSV는 `sheets.first()`만 모델에 담아 둘째 시트부터 알림 없이 사라졌고, 수식은 계산하지 않아 XLS에는 값 0인 수식 레코드가, CSV에는 `=SUM(…)` 글자가 들어갔습니다. CSV·TSV 격자는 512행 x 64열에서 조용히 잘렸습니다.
+- **Decision (`PD-149`)**
+  1. **XLS**: 모든 시트를 `LegacyOle2Codec::pack_xls_multi`로 시트 이름 그대로 저장합니다. 수식 셀은 `WorkbookEngine`(모든 시트를 함께 올려 시트 간 참조까지)이 계산한 표시값으로 바꿔 숫자는 NUMBER, 글자는 LABELSST 셀로 씁니다. 수식 식 자체는 쓰지 않습니다. 쓸 수 있는 올바른 BIFF8 수식 토큰 열(RPN) 인코더가 없고, 식을 글자로 넣은 FORMULA 레코드는 외부 프로그램이 읽지 못하거나 캐시 값 0으로 보일 수 있어 값 셀이 더 안전하다고 판단했습니다(외부 프로그램으로는 열어 보지 않았음). 바꾼 수식이 있으면 응답 `warnings`에 개수를 알립니다.
+  2. **CSV·TSV**: 단일 시트 형식이라 첫 시트만 계산값으로 저장하고, 나머지가 있으면 `warnings`에 첫 시트 이름·빠진 시트 수와 이름(5개까지)을 알립니다.
+  3. **범위**: CSV·TSV를 다음에 여는 엔진(`CsvCodec::MAX_ROWS` 1,000,000행 x `MAX_COLS` 16,384열) 안의 셀만 쓰고, 벗어난 셀은 개수를 `warnings`에 알립니다. 격자는 셀 실제 범위로 만들고 행 x 열이 `CsvCodec::MAX_GRID_CELLS`(2,000,000, 문서 형식용 값 표 한도와 같은 값)를 넘으면 잘라 쓰지 않고 `ResourceBudgetExceeded`로 거부합니다(Fail-Closed). 모델 경로(`UniversalFormatConverter::encode`)에서 읽는 쪽 한도를 넘는 시트도 같은 오류입니다.
+- **Why** 시트가 말없이 사라지거나 수식이 글자로 남는 것은 데이터 손실입니다. 저장 검증은 "다음에 여는 엔진이 받아들이는가"가 기준이라 한도를 CSV 읽기 한도에 맞췄습니다.
+- **Trade-offs** XLS를 다시 열어도 수식은 없고 값만 남습니다. 숫자는 일반 서식의 15자리 표시값으로 저장됩니다. 수식이 만든 글자가 `=`로 시작하면 XLS 코덱이 수식으로 다시 해석합니다(알려진 한계). 열 너비·셀 서식은 XLS·CSV에서 계속 빠집니다.
+- **Alternatives rejected** BIFF8 수식 인코더를 새로 쓰기(범위가 크고 검증 수단이 없음), 512x64 상한 유지(조용한 절단), 읽는 쪽 한도 초과를 경고만 하고 거대한 격자를 만들기(메모리 폭탄).
+- **Verified by** `cargo test -p easyoffice-app --test structured_sheet_export`(XLS 세 시트와 시트 간 참조 값, CSV·TSV 첫 시트 값과 빠진 시트 경고, 700행·BO열 보존, 읽는 쪽 한도 밖 셀 제외 경고, 희소하고 넓은 시트 거부). 구현 전 RED는 같은 시험에서 시트 하나(`예산`)만 저장되는 것으로 확인.
+- **Revisit when** BIFF8 수식 RPN 인코더가 생길 때(수식 유지), XLS 저장에 셀 서식이 필요할 때.
+
+## PD-150. IPC로 보내는 파일의 크기 한도는 엔진과 화면이 같은 10 MiB
+
+- **Status** Implemented (`convert_open.rs`의 `MAX_SOURCE_BYTES`, `file-open.js`의 `MAX_FILE_BYTES`·`converterSourceProblem`)
+- **Context** 화면은 IPC로 보내는 파일을 10 MiB, 한글 편집기 경로를 64 MiB로 받고 엔진은 12 MiB까지 디코드했습니다(PD-075의 "화면 10 / 서버 12"). 그래서 (1) 변환기 원본으로 12~64 MiB 한글 파일을 고르면 화면은 받고 엔진이 `PayloadTooLarge`로 거부했고, (2) 편집기가 열지 못한 10~64 MiB 한글 파일의 텍스트 대체 경로는 한글 경로 플래그 없이 10 MiB로 거부해 왜 거부되는지 알 수 없었고, (3) 편집기에서 내보낸 한글 바이트를 변환기에 보낼 때는 크기를 보지 않았습니다. 12 MiB의 Base64(16 MiB)는 HTTP IPC 본문 한도(16 MiB)에도 맞지 않았습니다.
+- **Decision (`PD-150`)**
+  1. IPC로 가는 파일(엔진 디코드, 변환기 원본, 편집기에서 내보낸 변환기 원본)의 한도는 한 값, 10 MiB입니다. Rust `MAX_SOURCE_BYTES`(12 -> 10 MiB)와 JS `MAX_FILE_BYTES`가 같고 `scripts/test-file-size-limits.mjs`가 두 소스에서 값을 읽어 같음을 강제합니다. Rust 단위 시험은 10 MiB의 Base64에 다른 필드 여유 64 KiB를 더해도 `MAX_IPC_HTTP_BODY_BYTES`(16 MiB) 안임을 확인합니다. 근거는 Base64가 4/3로 커져 13.3 MiB이고 본문 한도 16 MiB 아래입니다.
+  2. 한글 편집기 경로의 64 MiB는 IPC를 거치지 않는 값이라 그대로 두고, `file-open.js`와 `hwp-session.js`의 값이 같고 셸의 파일 열기 한도(`MAX_OPEN_BYTES` 256 MiB) 이하임을 같은 시험이 강제합니다.
+  3. 변환기 원본은 종류와 관계없이 10 MiB입니다(한글 파일 포함). 초과는 보내기 전에 "파일이 너무 큽니다 (N MiB). 변환기 원본은 최대 10 MiB까지 선택할 수 있습니다"로 알립니다. 변환기를 누를 때 편집기에서 내보낸 한글 바이트가 넘으면 변환하지 않고 같은 문구를 변환기 결과 칸에 보입니다. 편집기가 열지 못한 한글 파일의 텍스트 대체 경로는 "한글 편집기를 쓰지 못하는 경우 텍스트로 불러올 수 있는 한도는 10 MiB입니다"로 이유를 밝힙니다.
+- **Why** 화면이 받은 파일을 엔진이 거부하거나 이유를 알 수 없게 거부하지 않고, 한도가 한 곳 값이라 한쪽만 바뀌는 어긋남을 시험이 막습니다.
+- **Trade-offs** 엔진의 직접 호출 한도가 12에서 10 MiB로 줄었습니다(사용자 경로는 이미 10 MiB였음). 한글 파일을 변환기에 쓰려면 10 MiB 이하여야 합니다.
+- **Alternatives rejected** 화면을 12 MiB로 올리기(HTTP 본문 한도 초과), IPC 본문 한도 상향 또는 분할 전송(PD-075에서 기각), 셸이 부팅 때 한도를 알려 주는 구조(새 IPC 필드와 모든 시험 하니스 변경에 비해 값 두 개를 시험으로 묶는 쪽이 작음).
+- **Verified by** `node --test scripts/test-file-size-limits.mjs scripts/test-webui-file-open.mjs scripts/test-webui-hwp-session.mjs`, `cargo test -p easyoffice-app --lib source_`. 구현 전 RED: 크기 시험이 엔진 12 MiB와 화면 10 MiB의 불일치로 실패, 변환기 원본 20 MiB 한글 파일이 받아들여짐.
+- **Revisit when** IPC 본문 한도를 올릴 때, 또는 큰 한글 파일을 변환기에 써야 한다는 요구가 있을 때(스트리밍 전송).
+
+## PD-151. 한글 편집기의 오려 두기는 시스템 클립보드가 받은 뒤에만 지우고, 편집기 프레임에 `clipboard-write`를 위임
+
+- **Status** Implemented (`apps/hwp-studio/src/command/safe-cut.ts`·`clipboard-cut.ts`, `hwp-host.js`의 `FRAME_ALLOW`; macOS 메뉴·실제 WebKit 동작은 사람이 확인해야 함)
+- **Context** macOS 메뉴의 ⌘X는 PD-119에 따라 편집기의 `edit:cut`(`automation.execute`)로 갑니다. 업스트림 `performCut`은 텍스트 선택에서 `document.execCommand('cut')`을 부르는데, 메뉴가 보낸 명령에는 사용자 제스처가 없고 편집기 프레임은 불투명 출처라 시스템 클립보드 쓰기가 막혀도 `cut` 이벤트의 삭제가 일어날 수 있었습니다. 참조 앱은 클립보드 쓰기 성공 뒤에만 지웁니다(`edit.ts` 120-150행).
+- **Decision (`PD-151`)**
+  1. 편집기 오버레이가 `edit:cut`을 안전한 명령으로 바꿉니다(`main.ts`가 등록 직후 덮어씀. 메뉴, Ctrl+X, 도구줄, `automation.execute`가 모두 이 한 명령을 지남). 텍스트 선택(본문·셀·중첩 표)은 내부 클립보드에 복사하고 텍스트와 HTML을 비동기 클립보드 API로 쓴 뒤, 쓰기가 받아들여졌고 선택이 그대로일 때만 `performDelete`합니다. 거부되면 아무것도 지우지 않고 콘솔에 남깁니다. 개체(그림·표) 선택, 머리말·꼬리말, 각주, 셀 블록, 양식 모드의 오려 두기는 편집기 기존 명령 그대로입니다.
+  2. 편집기 iframe에 `allow="clipboard-write"`를 더합니다(`sandbox="allow-scripts allow-modals"`는 그대로). 이것은 Permissions Policy 위임이지 sandbox 플래그가 아닙니다. 프레임의 출처(불투명), 부모 DOM·전역 접근 차단, Tauri IPC 거부, 팝업·폼·다운로드·내비게이션 금지, CSP(`connect-src 'self'`)에 영향이 없고, `clipboard-read`는 위임하지 않아 프레임이 클립보드 내용을 읽지 못합니다. 쓰기도 브라우저의 사용자 활성화 규칙을 따릅니다. 격리 점검용 프레임(`runFrameProbe`)에도 같은 `allow`를 붙여, 위임이 IPC를 열지 않음을 `frame_ipc` 스모크가 계속 확인합니다.
+- **Why** 클립보드에 못 쓴 내용을 지우면 붙여넣을 곳이 없습니다. 편집기가 이미 `copy` 이벤트로 같은 클립보드에 쓸 수 있으므로 쓰기 위임이 새 능력을 주지 않고, 읽기와 IPC 경계는 그대로입니다.
+- **Trade-offs** 사용자 제스처가 없는 메뉴 경로에서 WebKit이 비동기 클립보드 쓰기를 거부하면 ⌘X는 아무것도 하지 않습니다(데이터는 안전). 이 경우의 안내 문구는 아직 없습니다. 개체 오려 두기는 안전 경로에 포함되지 않습니다(실행 취소로 되돌릴 수 있음).
+- **Alternatives rejected** 업스트림 `input-handler.ts` 포크(5천 줄 이상, 업스트림 갱신 부담), 쓰기 실패를 클립보드 내용 되읽기로 확인(읽기 권한 필요), 셸의 클립보드 명령으로 쓰기(새 IPC 면).
+- **Verified by** `node --test scripts/test-hwp-clipboard-cut.mjs scripts/test-webui-hwp-host.mjs`(쓰기 뒤에만 삭제, 거부·동기 예외·선택 변경 시 삭제 없음, 셀·중첩 셀 복사 주소, 안전 경로 밖 컨텍스트는 기존 명령 유지, 프레임 `allow`), `node scripts/build-hwp-studio.mjs --skip-install`(번들에 포함됨). 실제 macOS 메뉴 ⌘X와 WebKit의 쓰기 허용 여부는 이 환경에서 GUI를 실행하지 못해 확인하지 못했습니다.
+- **Revisit when** macOS에서 메뉴 ⌘X가 쓰기 거부로 동작하지 않는다고 확인될 때(셸이 클립보드를 쓰는 길을 검토), 개체 오려 두기도 같은 규칙이 필요할 때.
