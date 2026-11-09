@@ -41,6 +41,29 @@
     return typeof fast === "function" ? fast(sheets || {}) : structuredClone(sheets || {});
   }
 
+  function styleFlagsMask(s) {
+    if (!s) return 0;
+    const td = s.textDecoration || "";
+    const bold = s.bold || s.fontWeight === "700" || s.fontWeight === "bold";
+    const italic = s.italic || s.fontStyle === "italic";
+    const underline = s.underline || td.includes("underline");
+    const strike = s.strike || td.includes("line-through");
+    return (
+      (bold ? 1 : 0) |
+      (italic ? 2 : 0) |
+      (underline ? 4 : 0) |
+      (strike ? 8 : 0) |
+      (s.condfmtHigh ? 16 : 0) |
+      (s.frozenPanes ? 32 : 0)
+    );
+  }
+
+  function cellStyleChanged(sa, sb) {
+    if (sa === sb) return false;
+    if (styleFlagsMask(sa) !== styleFlagsMask(sb)) return true;
+    return (sa?.sizePt || 0) !== (sb?.sizePt || 0) || (sa?.fontSize || "") !== (sb?.fontSize || "");
+  }
+
   function sheetCellDataChanged(sheetsA, sheetsB) {
     const keysA = Object.keys(sheetsA || {});
     const keysB = Object.keys(sheetsB || {});
@@ -58,7 +81,8 @@
         if (
           !eb ||
           (ea?.value || "") !== (eb?.value || "") ||
-          (ea?.formula || "") !== (eb?.formula || "")
+          (ea?.formula || "") !== (eb?.formula || "") ||
+          cellStyleChanged(ea?.style, eb?.style)
         ) {
           return true;
         }

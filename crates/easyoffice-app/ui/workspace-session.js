@@ -42,6 +42,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     "zoom-fit-page": ALL_MODULES, "zoom-fit-width": ALL_MODULES, "smart-diagnose": ALL_MODULES,
     "scrub-pii": ALL_MODULES, "security-audit": ALL_MODULES, "bench-run": ALL_MODULES, "view-outline": ALL_MODULES,
     "clip-copy": EDIT_MODULES, "clip-cut": DOC_SHEET_MODULES, "clip-paste": DOC_SHEET_MODULES,
+    "mod-symbol": EDIT_MODULES,
     // Every ribbon command exists for the five editing modules, so its menu item is enabled in all
     // of them (PD-098: the menu bar reaches every command the ribbon has).
     ...Object.fromEntries(RIBBON_SUFFIX_COMMANDS.map((cmd) => [cmd, RIBBON_MODULES])),
@@ -63,10 +64,13 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
   const URL_ATTRS = new Set(["href", "src", "action", "formaction", "xlink:href", "srcset", "poster"]);
 
   // Commands that still apply while the embedded HWP editor is the active surface.
-  const HWP_EMBED_COMMANDS = new Set(["studio-save", "palette", "view-theme", "scrub-pii", "security-audit"]);
+  const HWP_EMBED_COMMANDS = new Set(["studio-save", "studio-save-as", "palette", "view-theme", "scrub-pii", "security-audit"]);
 
   // The start window has no document: only the window-level commands apply.
   const START_COMMANDS = new Set(["palette", "view-theme"]);
+  const START_SHORTCUT_ACTIONS = new Set([
+    "file-open", "file-new", "window-close", "app-quit", "recent-dialog", "palette", "view-theme",
+  ]);
 
   function studioCommandApplies(cmd, mod) {
     if (!cmd || cmd.startsWith("module:")) return true;
@@ -114,7 +118,10 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
   }
 
   function contentFingerprint(snap) {
-    const parts = [snap.docTabs, snap.sheets, snap.sheetRowCounts, snap.slides, snap.pdfStudio, snap.pdfRotationDeg];
+    const parts = [
+      snap.docTabs, snap.sheets, snap.sheetRowCounts, snap.sheetColumnWidths, snap.sheetFrozen,
+      snap.slides, snap.pdfStudio, snap.pdfRotationDeg,
+    ];
     return hashFingerprint(JSON.stringify(canonicalizeContent(parts, "")));
   }
 
@@ -123,7 +130,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     const parts = {
       DOC: [snap.docTabs?.DOC],
       HWP: [snap.docTabs?.HWP],
-      SHEET: [snap.sheets, snap.sheetRowCounts],
+      SHEET: [snap.sheets, snap.sheetRowCounts, snap.sheetColumnWidths, snap.sheetFrozen],
       SLIDE: [snap.slides],
       PDF: [snap.pdfStudio, snap.pdfRotationDeg],
     }[mod] || [];
@@ -641,10 +648,15 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       return true;
     }
 
+    function isStartWindow() {
+      return getActiveModule() === "START" || document.getElementById("app")?.dataset.windowKind === "start";
+    }
+
     function handleShortcutKeydown(e, actions) {
       const combo = shortcutComboFromEvent(e);
       const binding = bindingFor(combo);
       if (!binding) return false;
+      if (isStartWindow() && !START_SHORTCUT_ACTIONS.has(binding.action)) return false;
       if (binding.module && getActiveModule() !== binding.module) return false;
       if (binding.bareKey && isTextEntryTarget(document.activeElement)) return false;
       if (binding.scope && !document.activeElement?.closest?.(binding.scope)) return false;

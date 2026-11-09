@@ -119,7 +119,12 @@
         const saved = docTabStore[scope];
         const tempDiv = document.createElement("div");
         restoreDomChildren(tempDiv, saved?.editorNodes || [], document);
-        return { blocks: savePayload.collectDocBlocks(tempDiv, { baseAlign: saved?.layoutStyle?.textAlign }) };
+        return {
+          blocks: savePayload.collectDocBlocks(tempDiv, {
+            baseAlign: saved?.layoutStyle?.textAlign,
+            baseLineHeight: saved?.layoutStyle?.lineHeight,
+          }),
+        };
       }
       if (scope === "SHEET") {
         sheetDataStore[getActiveSheetName()] = sheetController.snapshotDomSheetCells();
@@ -220,9 +225,15 @@
 
     // Embedded HWP editor: HWP 5.0 bytes exported by the editor itself, same delivery as every save.
     // `closing`: the save runs for a window close or quit, where a password document goes to a save-as.
-    async function saveEmbeddedHwp(session, closing) {
+    async function saveEmbeddedHwp(session, closing, saveAs) {
       const fb = document.getElementById("status-command-feedback");
-      const result = await session.save({ deliver: deliverInPlace, inPlace: true, closing, baseName: resolveSaveFileBase("HWP") });
+      const inPlace = !saveAs;
+      const result = await session.save({
+        deliver: inPlace ? deliverInPlace : deliverSavedFile,
+        inPlace,
+        closing,
+        baseName: resolveSaveFileBase("HWP"),
+      });
       if (fb) fb.textContent = result.message;
       if (result.ok) noteSavedName(result.name);
       return result.ok;
@@ -247,22 +258,48 @@
     }
 
     const SAVE_EXT_BY_MODULE = { DOC: "docx", HWP: "hwpx", SHEET: "xlsx", SLIDE: "pptx", PDF: "pdf" };
+    const BIDIRECTIONAL_SAVE_EXTS = {
+      DOC: new Set(["docx", "odt", "rtf", "md", "txt", "hwpx"]),
+      HWP: new Set(["hwpx"]),
+      SHEET: new Set(["xlsx", "xls", "ods", "csv", "tsv"]),
+      SLIDE: new Set(["pptx", "ppsx", "odp"]),
+    };
 
-    // `saveAs` always asks where to save (the shell's save dialog), never writes back to the opened file.
+    function openedExtensionOf(mod) {
+      const name = String(getWindowBridge?.()?.getDocumentName(mod) || "").trim();
+      const m = /\.([A-Za-z0-9]+)$/.exec(name);
+      if (!m) return "";
+      const ext = m[1].toLowerCase();
+      return ext === "markdown" ? "md" : ext;
+    }
+
+    function defaultSaveSpecForModule(mod, saveAs) {
+      const fallbackExt = SAVE_EXT_BY_MODULE[mod] || "docx";
+      if (saveAs || mod === "PDF") return { ext: fallbackExt, inPlace: false };
+      const openedExt = openedExtensionOf(mod);
+      if (!openedExt) return { ext: fallbackExt, inPlace: true };
+      if (BIDIRECTIONAL_SAVE_EXTS[mod]?.has(openedExt)) return { ext: openedExt, inPlace: true };
+      return { ext: fallbackExt, inPlace: false };
+    }
+
+    // `saveAs` and lossy decode formats always ask where to save (the shell's save dialog), never overwriting the opened file.
     async function runSaveActiveModuleDocument(closing, saveAs) {
       await sheetController.commitPendingFocusedSheetCell(true);
       const curMod = getActiveModule();
       const hwpHost = getHwpHost?.();
       const hwpSession = getHwpSession?.();
-      if (curMod === "HWP" && hwpHost?.isEmbedActive() && hwpSession) return saveEmbeddedHwp(hwpSession, closing === true);
+      if (curMod === "HWP" && hwpHost?.isEmbedActive() && hwpSession) return saveEmbeddedHwp(hwpSession, closing === true, saveAs);
       const isConv = curMod === "CONV";
-      const dstExt = (isConv ? document.getElementById("conv-dst-fmt")?.value || "hwpx" : SAVE_EXT_BY_MODULE[curMod]) || "docx";
+      const spec = isConv
+        ? { ext: document.getElementById("conv-dst-fmt")?.value || "hwpx", inPlace: false }
+        : defaultSaveSpecForModule(curMod, saveAs);
+      const dstExt = spec.ext || "docx";
       const srcExt = isConv ? document.getElementById("conv-src-fmt")?.value || "docx" : dstExt;
       const title = resolveSaveFileBase(curMod);
       const content = buildConversionContent(isConv ? srcExt : curMod);
       const converted = await convertForSave(srcExt, dstExt, title, content);
       let failure = converted.failure;
-      const deliver = isConv || saveAs ? deliverSavedFile : deliverInPlace;
+      const deliver = spec.inPlace ? deliverInPlace : deliverSavedFile;
       const delivery = failure ? null : await deliver(converted.b64, title, dstExt);
       if (delivery?.cancelled) {
         setStatusFeedback("문서 저장 취소 (" + dstExt.toUpperCase() + "): 저장 위치를 선택하지 않았습니다");
@@ -523,7 +560,13 @@
     function applyFallbackInsertMod(cmd, editor, textTarget) {
       if (cmd === "mod-symbol") {
         // A text node at the caret: the paragraph's inline runs keep their markup.
-        if (!insertTextAtSelection(SYMBOL_TABLE_CHAR) && textTarget) textTarget.append(document.createTextNode(SYMBOL_TABLE_CHAR));
+        if (!insertTextAtSelection(SYMBOL_TABLE_CHAR) && textTarget) {
+          const kids = textTarget.childNodes || [];
+          const last = kids[kids.length - 1];
+          const container = last?.classList?.contains?.("eo-run") ? last : textTarget;
+          container.appendChild(document.createTextNode(SYMBOL_TABLE_CHAR));
+        }
+        getDocRuns?.()?.refreshToolbarFromSelection?.();
         computeSmartStats();
       } else if (cmd === "mod-header") {
         upsertDocHeaderBlock(editor);
@@ -532,10 +575,37 @@
       }
     }
 
+    function insertSymbolInNonDocModule(curMod) {
+      if (insertTextAtSelection(SYMBOL_TABLE_CHAR)) {
+        if (curMod === "SHEET") sheetController.saveActiveSheetCellsToWorkbook();
+        if (curMod === "SLIDE") syncActiveSlideDomStylesToDeck();
+        return true;
+      }
+      if (curMod === "SHEET") {
+        const td = document.querySelector("#pane-sheet td.selected-cell") || document.querySelector('#pane-sheet td[data-cell="A1"]');
+        if (!td) return false;
+        td.textContent = (td.textContent || "") + SYMBOL_TABLE_CHAR;
+        sheetController.saveActiveSheetCellsToWorkbook();
+        return true;
+      }
+      if (curMod === "SLIDE") {
+        const zone = document.getElementById("slide-lower-zone") || document.getElementById("slide-title-zone");
+        if (!zone) return false;
+        const target = zone.querySelector("p") || zone;
+        target.appendChild(document.createTextNode(SYMBOL_TABLE_CHAR));
+        syncActiveSlideDomStylesToDeck();
+        return true;
+      }
+      return false;
+    }
+
     function execStudioInsertModCmd(cmd, editor, textTarget, fb, onStudioCmd, curMod, isDocMod) {
       const spec = INSERT_MOD_DISPATCH[cmd];
       if (!spec) return false;
-      if (!isDocMod) return true;
+      if (!isDocMod) {
+        if (cmd === "mod-symbol" && insertSymbolInNonDocModule(curMod) && fb) fb.textContent = spec.label;
+        return true;
+      }
       if (spec.target && (curMod === "HWP") === spec.hwp && typeof onStudioCmd === "function") {
         onStudioCmd(spec.target);
         return true;

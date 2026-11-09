@@ -105,13 +105,22 @@ pub struct TrackedFile {
     pub fingerprint: Fingerprint,
 }
 
+fn canonical_ext(ext: &str) -> &str {
+    if ext.eq_ignore_ascii_case("markdown") {
+        "md"
+    } else {
+        ext
+    }
+}
+
 impl TrackedFile {
     /// In-place saving keeps the format: a different extension goes through "save as" instead.
     pub fn extension_matches(&self, extension: &str) -> bool {
+        let want = canonical_ext(extension);
         self.path
             .extension()
             .and_then(std::ffi::OsStr::to_str)
-            .is_some_and(|e| e.eq_ignore_ascii_case(extension))
+            .is_some_and(|e| canonical_ext(e).eq_ignore_ascii_case(want))
     }
 }
 
@@ -303,6 +312,12 @@ mod tests {
         );
         files.untrack("doc-1");
         assert!(files.get("doc-1").is_none());
+        let md_file = TrackedFile {
+            path: dir.join("notes.markdown"),
+            fingerprint: fp,
+        };
+        assert!(md_file.extension_matches("md"));
+        assert!(md_file.extension_matches("MARKDOWN"));
         let _ = fs::remove_dir_all(&dir);
     }
 }

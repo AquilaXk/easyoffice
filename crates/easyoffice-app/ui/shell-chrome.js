@@ -211,11 +211,14 @@
     let menuContext = null;
     let lastMenuState = "";
 
+    const START_DISABLED_ACTIONS = ["studio-save", "file-save-as", "find"];
+
     function disabledMenuIds(commandModule) {
       const applies = host.__EASYOFFICE_WORKSPACE_SESSION_UTILS__.studioCommandApplies;
       return Object.entries(NATIVE_MENU_ACTIONS)
         .filter(([id, entry]) => {
           const [name, command] = entry.split(":");
+          if (commandModule === "START" && START_DISABLED_ACTIONS.includes(name)) return true;
           if (Object.hasOwn(EMBED_EDITOR_COMMANDS, id) && commandModule === "HWP_EMBED") return false;
           if (EMBED_ONLY_ACTIONS.includes(name)) return commandModule !== "HWP_EMBED";
           return name === "hwp-editor" || (name === "studio-cmd" && !applies(command, commandModule));

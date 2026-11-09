@@ -368,13 +368,14 @@ test("outline sheet names match the tab labels", async () => {
   assert.ok(!outline.some((o) => o.includes("(Sheet1)")), "internal sheet ids are not shown");
 });
 
-test("SHEET home shows spreadsheet commands only", async () => {
+test("SHEET home shows spreadsheet commands only (while mod-symbol is enabled in SHEET)", async () => {
   const { document } = await openSheet();
-  const hiddenCmds = ["para-numbering", "para-bullet", "mod-symbol", "mod-footnote", "indent-in"];
+  const hiddenCmds = ["para-numbering", "para-bullet", "mod-footnote", "indent-in"];
   for (const cmd of hiddenCmds) {
     const btn = document.querySelector(`#icon-toolbar [data-studio-cmd="${cmd}"]`);
     assert.ok(btn.hidden, `${cmd} is hidden in SHEET`);
   }
+  assert.equal(document.querySelector('#icon-toolbar [data-studio-cmd="mod-symbol"]').hidden, false, "mod-symbol is available in SHEET");
   const save = studioItem(document, "studio-save");
   assert.equal(save.hidden, false);
   assert.equal(document.getElementById("btn-toggle-ctrl-marks").hidden, true);
@@ -382,3 +383,50 @@ test("SHEET home shows spreadsheet commands only", async () => {
   await flushAsyncTurns();
   assert.equal(document.querySelector('#icon-toolbar [data-studio-cmd="para-numbering"]').hidden, false, "DOC shows them again");
 });
+
+test("formatted currency, grouped numbers and percentages participate in SUM/AVERAGE and selection aggregates, and sheet ops cover populated rows past row 6", async () => {
+  const { document, userClick } = await openSheet();
+  await pickFile(
+    document,
+    makeFixtureFile("포맷집계.xlsx", {
+      sheets: [
+        {
+          name: "Sheet1",
+          cells: [
+            { ref: "A1", raw: "항목" },
+            { ref: "B1", raw: "값" },
+            { ref: "B2", raw: "₩1,000" },
+            { ref: "B3", raw: "1,500" },
+            { ref: "B4", raw: "50.0%" },
+            { ref: "B9", raw: "2,000" },
+            { ref: "C2", raw: "=SUM(B2:B9)" },
+          ],
+        },
+      ],
+    })
+  );
+  await flushAsyncTurns(12);
+  assert.equal(cell(document, "C2").textContent, "4550", "SUM includes ₩1,000 + 1,500 + 50.0% + 2,000 (row 9)");
+
+  const b2 = cell(document, "B2");
+  b2.focus();
+  key(b2, "ArrowDown", { shiftKey: true });
+  key(b2, "ArrowDown", { shiftKey: true });
+  const text = agg(document);
+  assert.match(text, /합계 2,550/, "selection aggregate parses ₩1,000 + 1,500 + 50.0%");
+  assert.match(text, /개수 3/);
+
+  userClick(document.querySelector('.md-item[data-studio-menu-cmd="sheet-mod-pivot"]'));
+  await flushAsyncTurns(10);
+  const evalOut = document.getElementById("sheet-eval-result").textContent;
+  assert.match(evalOut, /합계 4550.*최대 2000/, "pivot summary scans populated rows beyond row 6");
+
+  userClick(document.querySelector('.md-item[data-studio-menu-cmd="data-sort"]'));
+  await flushAsyncTurns(10);
+  assert.equal(cell(document, "B2").textContent, "50.0%", "first sort orders ascending");
+  assert.equal(cell(document, "B5").textContent, "2,000", "row 9 (2,000) is included in the sorted range");
+  userClick(document.querySelector('.md-item[data-studio-menu-cmd="data-sort"]'));
+  await flushAsyncTurns(10);
+  assert.equal(cell(document, "B2").textContent, "2,000", "second sort orders descending with row 9 at B2");
+});
+

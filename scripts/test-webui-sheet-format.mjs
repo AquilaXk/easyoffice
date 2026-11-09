@@ -141,3 +141,46 @@ test("DOC module Ctrl+B is unaffected by the sheet range formatting", async () =
   await press(sandbox, "b");
   assert.equal(document.querySelector("#pane-sheet td[data-cell]")?.style.fontWeight || "", "", "no sheet cell is bolded from DOC");
 });
+
+test("sheetCellDataChanged detects style changes, and column widths + freeze panes update SHEET fingerprint and undo/redo", async () => {
+  const { document, sandbox, advanceTimers } = await openModule("SHEET");
+  const storeApi = sandbox.__EASYOFFICE_CREATE_SHEET_STORE__({
+    invokeIpc: async () => ({}),
+    normalizeFormattedNumericCell: (v) => v,
+    tokenizeFormulaStringLiterals: () => [],
+  });
+  const baseA = { Sheet1: { B2: { value: "100", formula: "" } } };
+  const boldB = { Sheet1: { B2: { value: "100", formula: "", style: { bold: true } } } };
+  const sizeB = { Sheet1: { B2: { value: "100", formula: "", style: { sizePt: 14 } } } };
+  const condB = { Sheet1: { B2: { value: "100", formula: "", style: { condfmtHigh: true } } } };
+  assert.equal(storeApi.sheetCellDataChanged(baseA, structuredClone(baseA)), false);
+  assert.equal(storeApi.sheetCellDataChanged(baseA, boldB), true, "bold style change detected");
+  assert.equal(storeApi.sheetCellDataChanged(baseA, sizeB), true, "sizePt style change detected");
+  assert.equal(storeApi.sheetCellDataChanged(baseA, condB), true, "condfmtHigh style change detected");
+
+  const sessionUtils = document.defaultView.__EASYOFFICE_WORKSPACE_SESSION_UTILS__;
+  const snap0 = { sheets: baseA, sheetRowCounts: { Sheet1: 12 }, sheetColumnWidths: {}, sheetFrozen: {} };
+  const snapWidth = { sheets: baseA, sheetRowCounts: { Sheet1: 12 }, sheetColumnWidths: { Sheet1: { 2: 180 } }, sheetFrozen: {} };
+  const snapFreeze = { sheets: baseA, sheetRowCounts: { Sheet1: 12 }, sheetColumnWidths: {}, sheetFrozen: { Sheet1: true } };
+  assert.notEqual(
+    sessionUtils.moduleFingerprint(snap0, "SHEET"),
+    sessionUtils.moduleFingerprint(snapWidth, "SHEET"),
+    "column width change updates SHEET moduleFingerprint"
+  );
+  assert.notEqual(
+    sessionUtils.moduleFingerprint(snap0, "SHEET"),
+    sessionUtils.moduleFingerprint(snapFreeze, "SHEET"),
+    "freeze panes change updates SHEET moduleFingerprint"
+  );
+
+  const th = document.querySelector('#pane-sheet th[data-col="B"]');
+  const handle = th.querySelector(".col-resizer");
+  handle.dispatchEvent({ type: "mousedown", target: handle, clientX: 200, button: 0 });
+  const vp = document.getElementById("sheet-viewport");
+  vp.dispatchEvent({ type: "mousemove", target: vp, clientX: 250 });
+  vp.dispatchEvent({ type: "mouseup", target: vp, clientX: 250 });
+  advanceTimers(2000);
+  await flushAsyncTurns(6);
+  assert.equal(document.getElementById("app").dataset.dirty, "true", "column resize marks workspace dirty");
+});
+

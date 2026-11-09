@@ -96,7 +96,7 @@ import { renderPrintBatch } from './embed/print-batch.ts';
 import { createShellFontBridge } from './embed/host-fonts.ts';
 import { initToolbarLabels, toolbarLabelsCommand } from './ui/toolbar-labels.ts';
 import { cellSelectionEnterCommand } from './command/cell-selection.ts';
-import { safeCutCommand } from './command/safe-cut.ts';
+import { safeCopyCommand, safeCutCommand } from './command/safe-cut.ts';
 import type { EmbedRendererRuntimeRequestV1 } from '@/embed/rpc-router';
 import { enrichFontDecisionTrace } from '@/core/font-decision-trace';
 import { DocumentAgentController } from '@/document-agent/controller';
@@ -266,6 +266,8 @@ registry.registerAll(
 // 오려 두기는 시스템 클립보드가 받은 뒤에만 선택 영역을 지운다 (메뉴가 보낸 명령에는 사용자 제스처가 없다).
 const upstreamCut = registry.get('edit:cut');
 if (upstreamCut) registry.register(safeCutCommand(upstreamCut));
+const upstreamCopy = registry.get('edit:copy');
+if (upstreamCopy) registry.register(safeCopyCommand(upstreamCopy));
 registry.registerAll(viewCommands);
 registry.register(toolbarLabelsCommand);
 initToolbarLabels();

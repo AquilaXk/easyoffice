@@ -1,12 +1,14 @@
 (function (host) {
   "use strict";
 
+  const { normalizeFormattedNumericCell } = host.__EASYOFFICE_SHEET_UTILS__;
+
   function isEditing(st) {
     return Boolean(st && (st.mode || st.userEdited));
   }
 
   function numericOf(raw) {
-    const t = String(raw ?? "").replaceAll(",", "").trim();
+    const t = normalizeFormattedNumericCell(raw);
     if (t === "") return null;
     const n = Number(t);
     return Number.isFinite(n) ? n : null;
@@ -563,8 +565,10 @@
     }
 
     function onMouseUp() {
+      const wasResize = Boolean(resize);
       drag = null;
       resize = null;
+      if (wasResize) document.documentElement?.dispatchEvent?.({ type: "eo-doc-mutated" });
     }
 
     function onDblClick(ev) {

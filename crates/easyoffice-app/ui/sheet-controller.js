@@ -792,6 +792,7 @@
       snapshotDomSheetCells,
       saveActiveSheetCellsToWorkbook,
       refreshWindowFromModel,
+      refreshFocusedSheetCellPendingSnapshot,
       enqueueWorkspaceHistoryOp,
       drainInFlightSheetWork,
       pushRawUndoSnapshot,

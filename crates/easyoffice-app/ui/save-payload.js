@@ -6,7 +6,7 @@
 
   const BLOCK_TAGS = new Set([
     "P", "DIV", "H1", "H2", "H3", "H4", "H5", "H6", "LI", "UL", "OL",
-    "BLOCKQUOTE", "SECTION", "ARTICLE", "PRE", "HEADER", "FIGURE", "FIGCAPTION", "DL", "DT", "DD",
+    "BLOCKQUOTE", "SECTION", "ARTICLE", "PRE", "HEADER", "ASIDE", "FIGURE", "FIGCAPTION", "DL", "DT", "DD",
   ]);
   const SKIP_TAGS = new Set(["FOOTER", "SCRIPT", "STYLE", "BUTTON", "TEMPLATE", "NOSCRIPT"]);
   const CSS_ALIGN = { left: "left", start: "left", center: "center", right: "right", end: "right", justify: "justify" };
@@ -17,7 +17,7 @@
   // Run fields of the structured payload (PD-077): `size` is sent as `sizeHalfPt`.
   const RUN_FIELDS = { size: "sizeHalfPt", font: "font", color: "color", highlight: "highlight" };
   const SCRIPT_TAGS = { SUP: "superscript", SUB: "subscript" };
-  const LAYOUT_TAGS = new Set(["P", "H1", "H2", "H3", "H4", "H5", "H6", "LI"]);
+  const LAYOUT_TAGS = new Set(["P", "H1", "H2", "H3", "H4", "H5", "H6", "LI", "ASIDE"]);
   const TWIPS_PER_PX = 15; // 1 px = 3/4 pt = 15 twips
   const MAX_LINE_PERCENT = 1000;
   const MAX_TABLE_COLUMNS = 1024; // the readers' padded-column cap (PD-117)
@@ -83,7 +83,7 @@
     return Number.isFinite(stored) && Math.abs(stored - computed) <= 1 ? stored : computed;
   }
 
-  function paragraphLayout(node) {
+  function paragraphLayout(node, baseLineHeight) {
     const st = node.style || {};
     const data = node.dataset || {};
     const out = {};
@@ -91,7 +91,8 @@
     if (left !== null && left > 0) out.leftIndentTwips = left;
     const first = twipsFor(st.textIndent, data.eoFirstLineTwips);
     if (first !== null && first !== 0) out.firstLineIndentTwips = first;
-    const spacing = /^(\d+(?:\.\d+)?)(%?)$/.exec(String(st.lineHeight || "").trim());
+    const rawLineHeight = String(st.lineHeight || baseLineHeight || "").trim();
+    const spacing = /^(\d+(?:\.\d+)?)(%?)$/.exec(rawLineHeight);
     if (spacing) {
       const percent = Math.round(Number(spacing[1]) * (spacing[2] ? 1 : 100));
       if (percent >= 1 && percent <= MAX_LINE_PERCENT && percent !== 100) out.lineSpacingPercent = percent;
@@ -234,6 +235,7 @@
   function collectDocBlocks(root, options = {}) {
     const blocks = [];
     const baseAlign = normalizeAlign(options.baseAlign);
+    const baseLineHeight = String(options.baseLineHeight || root?.style?.lineHeight || "").trim();
     let cur = null;
 
     function flush() {
@@ -305,7 +307,7 @@
         align: normalizeAlign(node.style?.textAlign) || ctx.align,
         heading: headingMatch ? Number(headingMatch[1]) : ctx.heading,
         list: nextList,
-        layout: LAYOUT_TAGS.has(tag) ? paragraphLayout(node) : ctx.layout,
+        layout: LAYOUT_TAGS.has(tag) ? paragraphLayout(node, baseLineHeight) : ctx.layout,
       };
     }
 
@@ -400,7 +402,7 @@
   }
 
   const KNOWN_DOC_EXTENSIONS = [
-    "docx?", "hwpx?", "hwtx?", "hwt", "xlsx?", "ods", "csv", "tsv", "pptx?", "ppsx", "odp", "odt", "pdf", "rtf", "md", "txt", "pages",
+    "docx?", "hwpx?", "hwtx?", "hwt", "xlsx?", "ods", "csv", "tsv", "pptx?", "ppsx", "odp", "odt", "pdf", "rtf", "md", "markdown", "txt", "pages",
   ];
   const KNOWN_DOC_EXT_RE = new RegExp(String.raw`\.(?:${KNOWN_DOC_EXTENSIONS.join("|")})$`, "i");
 

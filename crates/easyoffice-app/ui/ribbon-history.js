@@ -134,6 +134,12 @@
       if (!sheetRowCounts[curSheet]) {
         sheetRowCounts[curSheet] = sheetController.getSheetRowCount(curSheet);
       }
+      const sheetColumnWidths =
+        typeof sheetController.getColumnWidths === "function" ? sheetController.getColumnWidths() : {};
+      const sheetFrozen = {};
+      for (const sh of Object.keys(sheetDataStore)) {
+        if (sheetDataStore[sh]?.A1?.style?.frozenPanes) sheetFrozen[sh] = true;
+      }
       return {
         isRibbon: Boolean(isRibbon),
         activeModule: getActiveModule(),
@@ -147,6 +153,8 @@
         docTabs: structuredClone(docTabStore),
         sheets: cloneSheets(sheetDataStore),
         sheetRowCounts: structuredClone(sheetRowCounts),
+        sheetColumnWidths,
+        sheetFrozen,
         slides: structuredClone(slideDeckState),
         ribbonState: structuredClone(localRibbonState),
         tabTitles: readTabTitles(),
@@ -271,6 +279,9 @@
       if (snap.sheets) {
         const clonedRowCounts = snap.sheetRowCounts ? structuredClone(snap.sheetRowCounts) : null;
         sheetController.replaceLiveSheetDataStore(cloneSheets(snap.sheets), clonedRowCounts);
+      }
+      if (snap.sheetColumnWidths && typeof sheetController.replaceColumnWidths === "function") {
+        sheetController.replaceColumnWidths(structuredClone(snap.sheetColumnWidths));
       }
       if (Array.isArray(snap.slides)) {
         slideDeckState.splice(0, slideDeckState.length, ...structuredClone(snap.slides));

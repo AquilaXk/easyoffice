@@ -220,4 +220,14 @@ test("in the Hangul editor window the zoom and cell items are enabled, and the e
   const last = sent.at(-1);
   for (const id of Object.keys(EMBED_EDITOR_COMMANDS)) assert.ok(!last.disabled.includes(id), `${id} is enabled in the editor window`);
   for (const id of ["file:export-pdf", "file:print"]) assert.ok(!last.disabled.includes(id), `${id} is enabled in the editor window`);
+
+  shellChrome.pushMenuState("START");
+  const startState = sent.at(-1);
+  for (const id of ["file:save", "file:save-as", "edit:find"]) {
+    assert.ok(startState.disabled.includes(id), `${id} is disabled in the start window`);
+  }
+  for (const id of ["file:new", "file:open", "file:open-recent", "file:close", "tool:palette", "view:theme-toggle"]) {
+    assert.ok(!startState.disabled.includes(id), `${id} remains enabled in the start window`);
+  }
 });
+

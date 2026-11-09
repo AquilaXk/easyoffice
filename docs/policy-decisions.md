@@ -2350,3 +2350,25 @@
 - **Alternatives rejected** 업스트림 `input-handler.ts` 포크(5천 줄 이상, 업스트림 갱신 부담), 쓰기 실패를 클립보드 내용 되읽기로 확인(읽기 권한 필요), 셸의 클립보드 명령으로 쓰기(새 IPC 면).
 - **Verified by** `node --test scripts/test-hwp-clipboard-cut.mjs scripts/test-webui-hwp-host.mjs`(쓰기 뒤에만 삭제, 거부·동기 예외·선택 변경 시 삭제 없음, 셀·중첩 셀 복사 주소, 안전 경로 밖 컨텍스트는 기존 명령 유지, 프레임 `allow`), `node scripts/build-hwp-studio.mjs --skip-install`(번들에 포함됨). 실제 macOS 메뉴 ⌘X와 WebKit의 쓰기 허용 여부는 이 환경에서 GUI를 실행하지 못해 확인하지 못했습니다.
 - **Revisit when** macOS에서 메뉴 ⌘X가 쓰기 거부로 동작하지 않는다고 확인될 때(셸이 클립보드를 쓰는 길을 검토), 개체 오려 두기도 같은 규칙이 필요할 때.
+
+## PD-152. 시트·ODF·RTF·HWPX 코덱의 수식 캐시·목록 종류·CP949·표 수식 정합성 보강
+
+- **Status** Implemented (`biff8_xls_codec.rs`, `office_codecs.rs`, `odf_hwpx_codecs.rs`, `cp949.rs`, `rich_read_rtf.rs`, `rtf_escape.rs`, `rich_read_hwpx.rs`, `convert_open.rs`, `convert_structured.rs`)
+- **Context** (1) `"NaN"`, `"inf"` 같은 비유한 부동소수 문자열을 숫자 셀로 오분류하고, XLS 구조화 내보내기에서 수식 결과가 `'='`로 시작하는 문자열(`="=SUM(A1:A2)"`)을 다시 수식 레코드(캐시 0)로 저장했습니다(PD-149 한계). (2) XLS `BOOLERR`/`FORMULA` 불리언·오류 마커와 XLSX `t="b"`·공유 수식(`t="shared"`) 슬레이브 셀이 빈 칸으로 손실됐고, ODS 저장에는 수식 계산값과 `office:value`가 빠졌습니다. (3) ODT·RTF·HWPX 양방향 변환에서 번호 목록(`Ordered`)과 글머리표(`Bullet`) 구분이 사라졌고, RTF의 CP949(`\'xx\'yy` 및 비-UTF-8 원시 바이트) 한글과 표 셀 내부 줄바꿈(`\par`/`\line`)이 깨졌습니다.
+- **Decision (`PD-152`)**
+  1. **시트 코덱**: 유한 실수(`f64::is_finite()`)만 숫자 셀로 분류합니다. XLS 구조화 저장은 `LegacyOle2Codec::pack_xls_multi_values`로 계산된 값 셀을 기록해 `'='`로 시작하는 문자열 결과도 `LABELSST`로 보존합니다. XLS `BOOLERR`와 수식 캐시 불리언/오류 바이트, XLSX `t="b"`와 공유 수식 슬레이브 셀 오프셋 이동(`shift_shared_formula`)을 복원하고, ODS 저장(`pack_ods_multi_styled_with_cache`)에 계산된 표시값과 `office:value`를 함께 기록합니다.
+  2. **목록·슬라이드·문서 표**: HWPX(`hh:heading type="NUMBER"`/`"BULLET"`), ODT(`L_Ordered`/`L_Bullet`), RTF(`\pnlvlbody`/`\pnlvlblt`)에서 목록 종류를 보존하고, HWPX `"JUSTIFY"` 정렬을 `RichAlignment::Justify`에 매핑합니다. ODP는 표준 `<draw:frame draw:layer="layout"><draw:text-box>`와 `<presentation:notes>` 구조로 쓰고 구형 파일도 함께 읽습니다. 파일을 열 때 문서 표의 `=SUM(...)` 등 수식을 계산하고 원본 메타데이터 제목을 보존합니다.
+  3. **CP949·RTF**: 정적 `u16` 오프셋 테이블(`KSX1001_OFFSET`, 2,350자 O(1) 조회)과 통합완성형(UHC) 보충 이진 탐색으로 CP949 전체 음절(11,172자)·호환 자모를 복원해 RTF 2바이트 이스케이프와 비-UTF-8 바이트 열에 연결합니다. RTF 표 셀 안의 `\par`/`\line`은 셀 내부 줄바꿈으로 보존하고 `\u` 제어어 판별에서 `\ul` 오탐을 막습니다.
+- **Why** 포맷 변환과 저장 후 재열기에서 수식 값·목록 번호·한글 인코딩이 바뀌거나 사라지는 데이터 손실을 막습니다.
+- **Verified by** `cargo test -p easyoffice-formats`, `cargo test -p easyoffice-core`, `cargo test -p easyoffice-app --test structured_sheet_export`.
+
+## PD-153. 손실 포맷 덮어쓰기 차단, 열린 확장자 유지 저장 및 시트·한글 편집기 실행 취소·클립보드 보강
+
+- **Status** Implemented (`workspace-tools.js`, `file-open.js`, `workspace-session.js`, `sheet-store.js`, `sheet-ops.js`, `sheet-utils.js`, `sheet-input.js`, `ribbon-history.js`, `save-payload.js`, `tracked_files.rs`, `apps/hwp-studio/src/command/{clipboard-cut,safe-cut}.ts`)
+- **Context** (1) PDF나 텍스트 대체 경로로 연 `.doc`·`.ppt`·`.pages`·`.hwp` 파일에서 일반 저장(Ctrl+S)을 누르면 `inPlace: true`로 원본 바이너리 위에 다른 포맷이나 평문을 덮어쓸 위험이 있었고, 양방향 포맷(`.odt`, `.rtf`, `.ods`, `.xls`, `.csv`, `.odp` 등)은 열린 확장자 대신 모듈 기본 확장자(`.docx`, `.xlsx`, `.pptx`)로 저장을 요청했습니다. (2) 시트에서 굵게·기울임·밑줄·취소선·조건부 서식·열 너비·틀 고정을 바꿔도 실행 취소 스냅샷과 수정 표시(`dirty`)가 갱신되지 않았고, 백분율 서식이 값을 100으로 나누어 표시했습니다. (3) 한글 편집기에서 `edit:copy`와 `ClipboardItem` 미지원 환경의 일반 텍스트 클립보드 대체 경로, 오려 두기 거부 시 상태줄 안내가 빠져 있었습니다(PD-151 보완).
+- **Decision (`PD-153`)**
+  1. **저장 안전성 및 확장자 유지**: PDF 모듈과 손실 폴백으로 연 파일은 `activeFileCanSaveInPlace = false`로 두어 일반 저장(Ctrl+S)도 항상 다른 이름으로 저장 대화상자를 거치게 합니다. 양방향 편집 포맷은 모듈별 열린 확장자를 기억해 같은 포맷으로 덮어쓰기 저장하고, 데스크톱 셸 `tracked_files.rs`는 `.markdown`과 `.md`를 같은 형식으로 인정합니다. 시작 창(`?module=START`)에서는 편집·저장·찾기 단축키와 메뉴 명령을 차단합니다.
+  2. **시트 서식·집계**: 셀 서식 플래그를 5비트 마스크(`sheetCellStyleMask`)로 패킹해 `sheetCellDataChanged`와 `contentFingerprint`에 반영하고, 열 너비(`sheetColumnWidths`)와 틀 고정(`sheetFrozen`)도 실행 취소·수정 감지에 포함합니다. 백분율 서식은 원시 수치 그대로 `%`를 붙이며, 정렬·필터·함수 마법사는 하드코딩 행(2..6행) 대신 시트 스토어를 단일 패스로 스캔한 실제 데이터 범위를 씁니다.
+  3. **한글 편집기 클립보드**: 참조 앱의 `writeTextHtmlWithPlainFallback`과 `safeCopyCommand`(`edit:copy`)를 이식해 `ClipboardItem`이 막힌 환경에서도 `navigator.clipboard.writeText`로 텍스트를 복사하고, 오려 두기가 거부되면 하단 상태줄(`#sb-message`)에 원인을 알립니다.
+- **Why** 원본 파일을 다른 포맷으로 덮어쓰는 사고를 원천 차단하고, 서식 편집 후 저장·실행 취소 누락과 클립보드 실패 시 무응답을 없앱니다.
+- **Verified by** `node --test scripts/test-webui-desktop-bridge.mjs scripts/test-webui-sheet-Extended.mjs scripts/test-webui-ribbon-doc.mjs scripts/test-hwp-clipboard-cut.mjs`, `cargo test -p easyoffice-desktop`.

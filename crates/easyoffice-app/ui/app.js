@@ -264,6 +264,8 @@
       workspacePanels.runStudioCommand("bench-run");
     } else if (item.id === "studio-save") {
       void saveWorkspaceDocument().catch(() => {});
+    } else if (item.id === "studio-save-as") {
+      void saveWorkspaceDocument({ saveAs: true }).catch(() => {});
     } else if (item.id === "studio-undo") {
       void ribbonHistory.performWorkspaceUndo().catch(() => {});
     } else if (item.id === "studio-redo") {
@@ -281,6 +283,7 @@
     const fmt = (sc) => (typeof formatPlatformShortcut === "function" ? formatPlatformShortcut(sc, activeShortcutModifier) : sc);
     const items = [
       { id: "studio-save", module: activeModule, title: "저장", shortcut: fmt("⌘S"), searchKey: "파일 저장 save " + fmt("⌘S") },
+      { id: "studio-save-as", module: activeModule, title: "다른 이름으로 저장…", shortcut: fmt("⇧⌘S"), searchKey: "파일 다른 이름으로 저장 save as " + fmt("⇧⌘S") },
       { id: "studio-undo", module: activeModule, title: "실행 취소", shortcut: fmt("⌘Z"), searchKey: "편집 실행 취소 undo " + fmt("⌘Z") },
       { id: "studio-redo", module: activeModule, title: "다시 실행", shortcut: fmt("⌘Y"), searchKey: "편집 다시 실행 redo " + fmt("⌘Y") },
     ];

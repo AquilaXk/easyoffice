@@ -156,7 +156,7 @@ test("desktop save uses the native save command instead of a Blob download", asy
   assert.match(feedback(document), /^문서 저장 완료 \(분기_경영실적_보고서\.docx · /);
 });
 
-test("save as never overwrites the opened file: the menu item, the shortcut and the native menu all go through the dialog", async () => {
+test("save as never overwrites the opened file: the menu item, the shortcut and the native menu all go through the dialog, and PDF never overwrites in place", async () => {
   for (const moduleName of ["DOC", "SHEET", "SLIDE", "PDF"]) {
     const saves = [];
     const { document, userClick } = await createShellHarness({
@@ -173,9 +173,61 @@ test("save as never overwrites the opened file: the menu item, the shortcut and 
     await flushAsyncTurns(12);
     userClick(studioItem(document, "studio-save"));
     await flushAsyncTurns(12);
-    assert.deepEqual(saves.map((save) => save.inPlace), [false, false, true], moduleName + ": only Save writes back to the opened file");
+    const expectedInPlace = moduleName === "PDF" ? [false, false, false] : [false, false, true];
+    assert.deepEqual(saves.map((save) => save.inPlace), expectedInPlace, moduleName);
   }
 });
+
+test("bidirectional opened formats preserve their extension on Save (inPlace: true), while lossy decode formats force Save As (inPlace: false)", async () => {
+  const saves = [];
+  const { document, userClick } = await createShellHarness({
+    saveFile: (args) => {
+      saves.push(args);
+      return { status: "saved", name: args.fileName, bytes: 42 };
+    },
+  });
+  const bridge = document.defaultView.__EASYOFFICE_WINDOW_BRIDGE__.instance;
+  const sessionUtils = document.defaultView.__EASYOFFICE_WORKSPACE_SESSION_UTILS__;
+  assert.equal(sessionUtils.studioCommandApplies("studio-save-as", "HWP_EMBED"), true);
+
+  userClick(document.getElementById("btn-command-palette"));
+  const paletteInput = document.getElementById("cmd-search-input");
+  paletteInput.value = "다른 이름으로 저장";
+  paletteInput.dispatchEvent({ type: "input" });
+  const labels = [...document.querySelectorAll("#cmd-palette-list .cp-item-label")].map((el) => el.textContent);
+  assert.ok(labels.includes("다른 이름으로 저장…"), "command palette lists Save As");
+  document.getElementById("cmd-palette-modal").close();
+
+  const cases = [
+    { mod: "DOC", opened: "공문.odt", saveFile: "공문.odt", saveInPlace: true, saveAsFile: "공문.docx" },
+    { mod: "DOC", opened: "노트.markdown", saveFile: "노트.md", saveInPlace: true, saveAsFile: "노트.docx" },
+    { mod: "DOC", opened: "구버전.doc", saveFile: "구버전.docx", saveInPlace: false, saveAsFile: "구버전.docx" },
+    { mod: "DOC", opened: "애플문서.pages", saveFile: "애플문서.docx", saveInPlace: false, saveAsFile: "애플문서.docx" },
+    { mod: "SHEET", opened: "매출.csv", saveFile: "매출.csv", saveInPlace: true, saveAsFile: "매출.xlsx" },
+    { mod: "SHEET", opened: "집계.ods", saveFile: "집계.ods", saveInPlace: true, saveAsFile: "집계.xlsx" },
+    { mod: "SLIDE", opened: "발표.odp", saveFile: "발표.odp", saveInPlace: true, saveAsFile: "발표.pptx" },
+    { mod: "SLIDE", opened: "구발표.ppt", saveFile: "구발표.pptx", saveInPlace: false, saveAsFile: "구발표.pptx" },
+    { mod: "HWP", opened: "기안문.hwp", saveFile: "기안문.hwpx", saveInPlace: false, saveAsFile: "기안문.hwpx" },
+  ];
+
+  for (const c of cases) {
+    saves.length = 0;
+    switchModule(document, c.mod);
+    await flushAsyncTurns(6);
+    bridge.applyTitles({ ...bridge.getTitles(), [c.mod]: c.opened });
+    userClick(studioItem(document, "studio-save"));
+    await flushAsyncTurns(12);
+    assert.equal(saves[0]?.fileName, c.saveFile, `${c.mod} (${c.opened}) Save fileName`);
+    assert.equal(saves[0]?.inPlace, c.saveInPlace, `${c.mod} (${c.opened}) Save inPlace`);
+
+    bridge.applyTitles({ ...bridge.getTitles(), [c.mod]: c.opened });
+    userClick(studioItem(document, "studio-save-as"));
+    await flushAsyncTurns(12);
+    assert.equal(saves[1]?.fileName, c.saveAsFile, `${c.mod} (${c.opened}) Save As fileName`);
+    assert.equal(saves[1]?.inPlace, false, `${c.mod} (${c.opened}) Save As inPlace`);
+  }
+});
+
 
 test("the first page of a Hangul document is sent to the shell only when the page gives one", async () => {
   const saves = [];

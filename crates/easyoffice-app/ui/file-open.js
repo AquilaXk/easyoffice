@@ -351,6 +351,7 @@
         const evaluated = await computeEvaluatedSheetStore(store, first, null);
         next.sheets = evaluated.sheets;
         next.sheetRowCounts = rowCounts;
+        next.sheetColumnWidths = columnWidths;
         next.activeSheetName = first;
         next.activeSheetCellRef = "A1";
         if (typeof replaceColumnWidths === "function") replaceColumnWidths(columnWidths);

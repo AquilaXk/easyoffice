@@ -200,3 +200,26 @@ async function loadHelpers() {
   }
   return env.__EASYOFFICE_SAVE_PAYLOAD__;
 }
+
+test("DOC save keeps multiple ASIDE footnotes as separate paragraph blocks and falls back to editor lineHeight", async () => {
+  const { document, userClick, converts } = await createSaveHarness();
+  const editor = document.getElementById("doc-editor");
+  editor.innerHTML =
+    "<p>본문 첫 문단</p>" +
+    '<aside class="eo-doc-footnote" data-doc-footnote="true">각주 1) 첫 번째 각주</aside>' +
+    '<aside class="eo-doc-footnote" data-doc-footnote="true">각주 2) 두 번째 각주</aside>';
+  editor.dataset.lineSpacing = "200";
+  editor.style.lineHeight = "2.00";
+
+  userClick(studioItem(document, "studio-save"));
+  await flushAsyncTurns(10);
+
+  assert.equal(converts.length, 1);
+  const blocks = converts[0].blocks;
+  assert.equal(blocks.length, 3, "two aside footnotes must not merge into one paragraph");
+  assert.equal(blocks[0].runs[0].text, "본문 첫 문단");
+  assert.equal(blocks[1].runs[0].text, "각주 1) 첫 번째 각주");
+  assert.equal(blocks[2].runs[0].text, "각주 2) 두 번째 각주");
+  assert.equal(blocks[0].lineSpacingPercent, 200, "paragraph without own lineHeight inherits editor lineHeight");
+});
+

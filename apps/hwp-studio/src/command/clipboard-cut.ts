@@ -123,6 +123,44 @@ function selectionKey(selection: SelectionRange): string {
   return JSON.stringify({ start: keyOf(selection.start), end: keyOf(selection.end) });
 }
 
+/**
+ * Writes text and HTML to the system clipboard; if the rich write fails (for example when
+ * `ClipboardItem` is unavailable or denied), falls back to `writeText(text)` before rejecting.
+ */
+export async function writeTextHtmlWithPlainFallback(
+  text: string,
+  html: string,
+  writeTextHtml: (text: string, html: string) => Promise<void>,
+  writeText?: ((text: string) => Promise<void>) | null,
+): Promise<void> {
+  try {
+    await writeTextHtml(text, html);
+  } catch (richError) {
+    if (typeof writeText !== 'function') throw richError;
+    await writeText(text);
+  }
+}
+
+export interface CopyPlan {
+  write(): Promise<void>;
+}
+
+/** A copy of the current text selection (WASM clipboard + system clipboard write), or null when nothing is selected. */
+export function textCopyPlan(
+  wasm: ClipboardWasm,
+  handler: Pick<CutHandler, 'getSelection'>,
+  deps: ClipboardCutDeps,
+): CopyPlan | null {
+  const selection = handler.getSelection();
+  if (!selection) return null;
+  const html = copySelectionToWasm(wasm, selection);
+  const text = wasm.getClipboardText();
+  const marked = deps.markInternalHtml(html, text);
+  return {
+    write: () => deps.writeTextHtml(text, marked),
+  };
+}
+
 /** A cut of the current text selection, or null when nothing is selected. */
 export function textCutPlan(wasm: ClipboardWasm, handler: CutHandler, deps: ClipboardCutDeps): CutPlan | null {
   const selection = handler.getSelection();

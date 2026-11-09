@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
-import { cutAfterWrite, textCutPlan } from "../apps/hwp-studio/src/command/clipboard-cut.ts";
+import {
+  cutAfterWrite,
+  textCopyPlan,
+  textCutPlan,
+  writeTextHtmlWithPlainFallback,
+} from "../apps/hwp-studio/src/command/clipboard-cut.ts";
 import { readText } from "./test-support/read-text.mjs";
 
 // Cut in the Hangul editor (PD-151): the selection is deleted only after the system clipboard accepted
@@ -109,14 +114,41 @@ test("cell and nested cell selections are copied by the address the editor's cop
   assert.deepEqual(nested.log[0], ["copySelectionInCellByPath", 0, 7, JSON.stringify(path), 5, 1, 5, 4]);
 });
 
-test("the editor wires the safe cut over its own command and keeps every other cut as it was", () => {
+test("writeTextHtmlWithPlainFallback falls back to plain writeText when ClipboardItem write rejects, and textCopyPlan copies without deleting", async () => {
+  const calls = [];
+  await writeTextHtmlWithPlainFallback(
+    "본문 텍스트",
+    "<p>본문 텍스트</p>",
+    async () => {
+      calls.push("rich");
+      throw new Error("ClipboardItem not supported");
+    },
+    async (text) => {
+      calls.push(["plain", text]);
+    },
+  );
+  assert.deepEqual(calls, ["rich", ["plain", "본문 텍스트"]]);
+
+  const f = createFakes();
+  const copy = textCopyPlan(f.wasm, f.handler, f.deps);
+  assert.ok(copy);
+  await copy.write();
+  assert.deepEqual(f.log.map((entry) => entry[0]), ["copySelection", "exportSelectionHtml", "write"]);
+  assert.equal(f.log.some((entry) => entry[0] === "performDelete"), false);
+});
+
+test("the editor wires safe cut and safe copy over its own commands, and shows a status message when cut cannot write to clipboard", () => {
   const read = (relative) => readText(fileURLToPath(new URL(relative, import.meta.url)));
   const main = read("../apps/hwp-studio/src/main.ts");
   assert.match(main, /const upstreamCut = registry\.get\('edit:cut'\);\s+if \(upstreamCut\) registry\.register\(safeCutCommand\(upstreamCut\)\);/);
+  assert.match(main, /const upstreamCopy = registry\.get\('edit:copy'\);\s+if \(upstreamCopy\) registry\.register\(safeCopyCommand\(upstreamCopy\)\);/);
   assert.ok(main.indexOf("safeCutCommand(upstreamCut)") > main.indexOf("registry.registerAll(\n  chromeMode === 'embed'\n    ? editCommands"), "registered after the editor's own edit commands");
   const glue = read("../apps/hwp-studio/src/command/safe-cut.ts");
   for (const keep of ["inPictureObjectSelection", "inTableObjectSelection", "inCellSelectionMode", "isFormMode", "isInHeaderFooter", "isInFootnote"]) {
     assert.ok(glue.includes(keep), `${keep} cuts keep the editor's own command`);
   }
   assert.match(glue, /base\.execute\(services, params\)/);
+  assert.ok(glue.includes("클립보드에 쓰지 못해 선택한 내용을 지우지 않았습니다."), "updates status bar on not-written cut");
+  assert.ok(glue.includes("#sb-message"), "writes cut refusal notice to #sb-message");
 });
+

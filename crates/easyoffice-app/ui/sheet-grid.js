@@ -52,12 +52,12 @@
     return colName(col) + row;
   }
 
+  const { normalizeFormattedNumericCell } = host.__EASYOFFICE_SHEET_UTILS__;
   const NUMERIC_RE = /^-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
-  const GROUPED_NUMERIC_RE = /^-?\d{1,3}(?:,\d{3})+(?:\.\d+)?$/;
 
   function isNumericText(text) {
-    const t = String(text ?? "").trim();
-    return t !== "" && (NUMERIC_RE.test(t) || GROUPED_NUMERIC_RE.test(t));
+    const t = normalizeFormattedNumericCell(text);
+    return t !== "" && NUMERIC_RE.test(t);
   }
 
   // "General" display: long decimals (float noise such as 0.30000000000000004 or

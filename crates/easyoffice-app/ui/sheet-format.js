@@ -118,6 +118,7 @@
       snapshotDomSheetCells,
       saveActiveSheetCellsToWorkbook,
       refreshWindowFromModel,
+      refreshFocusedSheetCellPendingSnapshot,
       enqueueWorkspaceHistoryOp,
       drainInFlightSheetWork,
       pushRawUndoSnapshot,
@@ -205,6 +206,7 @@
         await drainInFlightSheetWork();
         pushRawUndoSnapshot(captureWorkspaceSnapshot(false));
         const count = applyToModel(kind, value);
+        refreshFocusedSheetCellPendingSnapshot?.();
         const fb = document.getElementById("status-command-feedback");
         if (fb) fb.textContent = "셀 서식: " + count + "칸";
         return count;

@@ -483,3 +483,57 @@ test("bootstrap IPC failure shows an error with retry and never claims macOS on 
   assert.ok(commandItem(document, "document-home-bold"), "menu item for the catalog command is present after retry");
   assert.equal(document.getElementById("platform-pill").textContent, "Windows · Ctrl");
 });
+
+test("mod-symbol without selection appends inside a trailing .eo-run in DOC, and also inserts in SHEET and SLIDE", async () => {
+  const { document, userClick } = await createWorkspaceHarness();
+  const editor = document.getElementById("doc-editor");
+  editor.innerHTML = '<p>앞 <span class="eo-run" style="font-weight: 700">끝런</span></p>';
+  const run = editor.querySelector("span.eo-run");
+  userClick(document.querySelector('.md-item[data-studio-menu-cmd="mod-symbol"]'));
+  await flushAsyncTurns();
+  assert.equal(run.textContent, "끝런※", "appended inside the trailing .eo-run when there is no selection");
+
+  switchModule(document, "SHEET");
+  await flushAsyncTurns();
+  const b2 = document.querySelector('#pane-sheet td[data-cell="B2"]');
+  b2.focus();
+  userClick(document.querySelector('.md-item[data-studio-menu-cmd="mod-symbol"]'));
+  await flushAsyncTurns(6);
+  assert.ok(b2.textContent.endsWith("※"), "mod-symbol appends ※ into the active sheet cell");
+
+  switchModule(document, "SLIDE");
+  await flushAsyncTurns();
+  userClick(document.querySelector('.md-item[data-studio-menu-cmd="mod-symbol"]'));
+  await flushAsyncTurns(6);
+  const lower = document.getElementById("slide-lower-zone");
+  assert.ok(lower.textContent.includes("※"), "mod-symbol appends ※ into the slide content");
+});
+
+test("start window (?module=START) blocks document editing and saving shortcuts while allowing palette and theme shortcuts", async () => {
+  const { document, sandbox } = await createWorkspaceHarness({ search: "?module=START&win=main" });
+  await flushAsyncTurns(10);
+  const editor = document.getElementById("doc-editor");
+  const beforeHtml = editor.innerHTML;
+  const fb = document.getElementById("status-command-feedback");
+  const beforeFb = fb.textContent;
+
+  for (const combo of [
+    { key: "s", ctrlKey: true },
+    { key: "S", ctrlKey: true, shiftKey: true },
+    { key: "b", ctrlKey: true },
+    { key: "z", ctrlKey: true },
+    { key: "y", ctrlKey: true },
+    { key: "=", ctrlKey: true },
+  ]) {
+    const ev = sandbox.dispatchWindowKeydown(combo);
+    await flushAsyncTurns(4);
+    assert.equal(ev.defaultPrevented, false, "start window must not intercept " + JSON.stringify(combo));
+  }
+  assert.equal(editor.innerHTML, beforeHtml, "background DOC editor untouched");
+  assert.equal(fb.textContent, beforeFb, "no save or format feedback in start window");
+
+  const themeEv = sandbox.dispatchWindowKeydown({ key: "d", ctrlKey: true, altKey: true });
+  await flushAsyncTurns(4);
+  assert.equal(themeEv.defaultPrevented, true, "theme shortcut still works in start window");
+});
+

@@ -94,10 +94,24 @@
     return Math.max(0, col1 - 1);
   }
 
+  const GROUPED_NUMERIC_RE = /^[+-]?\d{1,3}(,\d{3})+(\.\d+)?$/;
+  const CURRENCY_NUMERIC_RE = /^([+-]?)\s*[₩$€£¥]\s*([+-]?\d{1,3}(?:,\d{3})*(?:\.\d+)?|[+-]?\d+(?:\.\d+)?)$/;
+  const PERCENT_NUMERIC_RE = /^([+-]?\d{1,3}(?:,\d{3})*(?:\.\d+)?|[+-]?\d+(?:\.\d+)?)\s*%$/;
+
   function normalizeFormattedNumericCell(raw) {
     const trimmed = String(raw || "").trim();
-    if (/^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(trimmed)) {
+    if (GROUPED_NUMERIC_RE.test(trimmed)) {
       return trimmed.replaceAll(",", "");
+    }
+    const curMatch = CURRENCY_NUMERIC_RE.exec(trimmed);
+    if (curMatch) {
+      const sign = curMatch[1] === "-" || curMatch[2].startsWith("-") ? "-" : "";
+      const digits = curMatch[2].replace(/^[+-]/, "").replaceAll(",", "");
+      return sign + digits;
+    }
+    const pctMatch = PERCENT_NUMERIC_RE.exec(trimmed);
+    if (pctMatch) {
+      return pctMatch[1].replaceAll(",", "");
     }
     return trimmed;
   }
