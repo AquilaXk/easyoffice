@@ -18,6 +18,7 @@ import {
   resolveProjectedCanvasKitFontPlan,
   type ProjectedWebFontEntry,
 } from '@/core/font-rule-runtime.ts';
+import { filterAuthoringFontFamilies, isAuthoringBlockedFontFamily } from './font-authoring-policy';
 
 type FontEntry = ProjectedWebFontEntry;
 
@@ -69,8 +70,8 @@ const BUNDLED_ALIAS_ENTRIES: readonly FontEntry[] = [
 
 const FONT_LIST: readonly FontEntry[] = [...FONT_RULE_WEBFONT_ENTRIES, ...BUNDLED_ALIAS_ENTRIES];
 
-/** @font-face에 등록된 폰트 이름 Set */
-export const REGISTERED_FONTS = new Set(FONT_LIST.map(f => f.name));
+/** @font-face에 등록된 저작 허용 폰트 이름 Set */
+export const REGISTERED_FONTS = new Set(filterAuthoringFontFamilies(FONT_LIST.map(f => f.name)));
 
 /** 초기 렌더링에 필수인 폰트 (대부분의 HWP 문서 기본 서체) */
 const CRITICAL_FONTS = new Set(['함초롬바탕', '함초롬돋움']);
@@ -212,6 +213,7 @@ function isSystemFontAvailable(name: string): boolean {
 function detectOSFonts(fontNames: readonly string[]): void {
   const candidates = new Set([...OS_FONT_CANDIDATES, ...fontNames]);
   for (const name of candidates) {
+    if (isAuthoringBlockedFontFamily(name)) continue;
     const normalized = normalizeFontFamily(name);
     if (!normalized || detectedOSFontFamilies.has(normalized) || isRegisteredFontFamily(name)) continue;
     try {

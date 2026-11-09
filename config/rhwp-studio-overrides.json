@@ -29,7 +29,7 @@
     {
       "id": "core/font-loader",
       "strategy": "fork",
-      "reason": "Registers fonts only through FontFace (no injected style element) and only requests the OFL fonts bundled in assets/fonts; CDN and non-shipped catalog entries are never fetched."
+      "reason": "Registers fonts only through FontFace (no injected style element), only requests the OFL fonts bundled in assets/fonts (CDN and non-shipped catalog entries are never fetched), and filters authoring-blocked commercial families from REGISTERED_FONTS and OS font detection (src/core/font-authoring-policy.ts)."
     },
     {
       "id": "command/print-pages",
@@ -49,7 +49,7 @@
     {
       "id": "ui/toolbar",
       "strategy": "fork",
-      "reason": "Uses the reference app's custom-select combo boxes and shared color-picker palette (src/ui/custom-select.ts, src/ui/color-picker.ts, src/ui/toolbar-popup.ts) for style, language, font, line-spacing, text color and highlight controls."
+      "reason": "Uses the reference app's custom-select combo boxes, shared color-picker palette and authoring font policy (src/ui/custom-select.ts, src/ui/color-picker.ts, src/ui/toolbar-popup.ts, src/core/font-authoring-policy.ts) for style, language, font, line-spacing, text color and highlight controls."
     }
   ],
   "assetOverrides": [

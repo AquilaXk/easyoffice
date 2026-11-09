@@ -1,4 +1,5 @@
 @import "@upstream/style.css";
 @import "./styles/custom-select.css";
 @import "./styles/color-picker.css";
+@import "./styles/font-set-dialog.css";
 @import "./eo-overrides.css";

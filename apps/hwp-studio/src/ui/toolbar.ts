@@ -8,6 +8,7 @@ import { userSettings } from '@/core/user-settings';
 import type { FontSet } from '@/core/user-settings';
 import { loadWebFonts } from '@/core/font-loader';
 import { getLocalFonts } from '@/core/local-fonts';
+import { filterAuthoringFontFamilies, sanitizeAuthoringFontFamily } from '../core/font-authoring-policy';
 import { getCustomSelectRoot, syncCustomSelect } from './custom-select';
 import { setupColorPicker } from './color-picker';
 import { closeToolbarPopup } from './toolbar-popup';
@@ -605,7 +606,7 @@ export class Toolbar {
     // 기존 로컬 글꼴 optgroup 제거 (재호출 대비)
     this.fontName.querySelectorAll('optgroup[label="로컬 글꼴"]').forEach(g => g.remove());
 
-    const localFonts = getLocalFonts();
+    const localFonts = filterAuthoringFontFamilies(getLocalFonts());
     if (localFonts.length === 0) return;
 
     const group = document.createElement('optgroup');
@@ -646,7 +647,7 @@ export class Toolbar {
 
   private async applyFontSelection(name: string): Promise<void> {
     const requestId = this.beginFontApplyRequest();
-    const authoringName = name.trim();
+    const authoringName = sanitizeAuthoringFontFamily(name);
     if (!authoringName) return;
     await loadWebFonts([authoringName]).catch(() => undefined);
     if (!this.isLatestFontApplyRequest(requestId)) return;
@@ -686,7 +687,7 @@ export class Toolbar {
     const langKeys: (keyof Omit<FontSet, 'name'>)[] = [
       'korean', 'english', 'chinese', 'japanese', 'other', 'symbol', 'user',
     ];
-    const authoringFonts = langKeys.map((key) => fs[key].trim());
+    const authoringFonts = langKeys.map((key) => sanitizeAuthoringFontFamily(fs[key]));
     await loadWebFonts(authoringFonts).catch(() => undefined);
     if (!this.isLatestFontApplyRequest(requestId)) return;
     const ids: number[] = [];

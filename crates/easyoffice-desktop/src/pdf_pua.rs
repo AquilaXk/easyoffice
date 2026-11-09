@@ -14,6 +14,7 @@
 //! 11018-11145) (rhwp 0.8.7 at `1a76570`; MIT, Copyright (c) 2025-2026 Edward Kim, see
 //! THIRD_PARTY_NOTICES.md).
 //! Differences: the three sources are one binary-searched table (a unit test checks the order),
+//! the BMP `0xF000..=0xF0FF` range is pre-filtered by a compile-time 256-bit `[u64; 4]` bitmap,
 //! the enclosed numbers are computed from their range, and the HWP 5.0 raw form of the symbols
 //! (`0xA000 | n`, indistinguishable from real Yi syllables without the parser) is not mapped: the
 //! renderer already turns the raw codes that its parser table lists (`src/parser/tags.rs`, the 66
@@ -38,6 +39,8 @@ const SQUARE_FIRST: u32 = 0xF02B1;
 const SQUARE_LAST: u32 = 0xF02C4;
 const SQUARE_ZERO: u32 = 0xF02B0;
 const SQUARE_TWELVE: u32 = 0xF02C5;
+const MIN_MAPPED_CODE: u32 = 0xF022;
+const MAX_MAPPED_CODE: u32 = 0xF0855;
 
 /// Symbols checked against the word processor's own PDF output, then the symbol-font bullets
 /// (U+F020..U+F0FF) and the book-bracket and ruling pieces. Sorted by code point.
@@ -64,10 +67,37 @@ const TABLE: &[(u32, &str)] = &[
     (0xF0855, "》"),
 ];
 
+/// Compile-time 256-bit membership bitmap for `0xF000..=0xF0FF` derived from [`TABLE`].
+const BMP_F0_BITMAP: [u64; 4] = {
+    let mut bits = [0u64; 4];
+    let mut i = 0;
+    while i < TABLE.len() {
+        let code = TABLE[i].0;
+        if (code & 0xFFFF_FF00) == 0xF000 {
+            let low = (code & 0xFF) as usize;
+            bits[low >> 6] |= 1u64 << (low & 63);
+        }
+        i += 1;
+    }
+    bits
+};
+
 /// The standard text for a private-use character, or `None` when it has none (an ordinary
 /// character or a private-use code whose meaning is not known).
+#[inline]
 pub fn replacement(c: char) -> Option<&'static str> {
     let code = c as u32;
+    if !(MIN_MAPPED_CODE..=MAX_MAPPED_CODE).contains(&code) {
+        return None;
+    }
+    if (code & 0xFFFF_FF00) == 0xF000 {
+        let low = (code & 0xFF) as usize;
+        if (BMP_F0_BITMAP[low >> 6] & (1u64 << (low & 63))) == 0 {
+            return None;
+        }
+    } else if (code & 0xFFFF_F000) != 0xF0000 {
+        return None;
+    }
     match code {
         SQUARE_ZERO => Some("⓪"),
         SQUARE_FIRST..=SQUARE_LAST => enclosed((code - SQUARE_FIRST) as usize),
@@ -106,6 +136,10 @@ mod tests {
             assert!(
                 text.chars().all(|c| !is_private_use(c)),
                 "U+{code:X} maps to private use"
+            );
+            assert!(
+                (MIN_MAPPED_CODE..=MAX_MAPPED_CODE).contains(code),
+                "U+{code:X} within bounds"
             );
         }
         assert_eq!(ENCLOSED.chars().count(), 20);

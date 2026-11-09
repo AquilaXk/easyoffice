@@ -20,8 +20,10 @@
 //! 2025-2026 Edward Kim, see THIRD_PARTY_NOTICES.md). Changes: both decisions come from one parse
 //! of the page and one edit pass, so a page costs one parse when nothing needs synthesis (the port
 //! parses a page up to three times) and two when it does; the work is skipped for a page that does
-//! not ask for bold or italic at all; an element count, a one-pass id prefix and a duplicate id
-//! check keep a hostile page from costing more than its size; nothing panics on odd markup.
+//! not ask for bold or italic at all (detected in a single-pass 32-bit ASCII-lowercased word scan);
+//! glyph face flags (`Faces`) and XML node request flags (`own | inherited | inside`) are packed
+//! into single-byte bitmasks; an element count, a one-pass id prefix and a duplicate id check keep
+//! a hostile page from costing more than its size; nothing panics on odd markup.
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -40,6 +42,24 @@ const SHEAR: f32 = 0.25;
 const MAX_TEXTS: usize = 50_000;
 /// Start of the ids given to elements that have none.
 const ID_PREFIX: &str = "eo-pdf-style-";
+
+// Bit-packed glyph face flags (`Faces`).
+const FACE_PLAIN_WEIGHT: u8 = 1 << 0;
+const FACE_BOLD: u8 = 1 << 1;
+const FACE_UPRIGHT: u8 = 1 << 2;
+const FACE_SLANTED: u8 = 1 << 3;
+
+// Bit-packed XML node emphasis request flags.
+const NODE_OWN: u8 = 1 << 0;
+const NODE_INHERITED: u8 = 1 << 1;
+const NODE_INSIDE: u8 = 1 << 2;
+
+// 32-bit little-endian ASCII-lowercased word constants for single-pass emphasis detection.
+const WORD_BOLD: u32 = u32::from_le_bytes(*b"bold");
+const WORD_ITAL: u32 = u32::from_le_bytes(*b"ital");
+const WORD_OBLI: u32 = u32::from_le_bytes(*b"obli");
+const WORD_FONT: u32 = u32::from_le_bytes(*b"font");
+const HALF_IC: u16 = u16::from_le_bytes(*b"ic");
 
 /// What happened to the text elements of one page; for tests and diagnostics, no text or names.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -72,54 +92,53 @@ struct Decision {
     italic: Italic,
 }
 
-/// Faces of the glyphs of one element: whether some are regular/upright and some bold/slanted,
-/// counted over glyphs that are not white space. `None` when a glyph's face is not in the database.
-struct Faces {
-    plain_weight: bool,
-    bold: bool,
-    upright: bool,
-    slanted: bool,
+/// Bit-packed faces of the glyphs of one element (`FACE_*` bits): whether some are regular/upright
+/// and some bold/slanted, counted over glyphs that are not white space. `None` when a glyph's face
+/// is not in the database.
+#[derive(Clone, Copy)]
+struct Faces(u8);
+
+impl Faces {
+    #[inline]
+    const fn has(self, bit: u8) -> bool {
+        (self.0 & bit) != 0
+    }
 }
 
 fn faces_of(text: &usvg::Text, db: &Database) -> Option<Faces> {
-    let mut faces = Faces {
-        plain_weight: false,
-        bold: false,
-        upright: false,
-        slanted: false,
-    };
+    let mut bits = 0u8;
     for span in text.layouted().iter().filter(|span| span.visible) {
         for glyph in &span.positioned_glyphs {
             if glyph.text.chars().all(char::is_whitespace) {
                 continue;
             }
             let face = db.face(glyph.font)?;
-            if face.weight.0 >= BOLD_WEIGHT {
-                faces.bold = true;
+            bits |= if face.weight.0 >= BOLD_WEIGHT {
+                FACE_BOLD
             } else {
-                faces.plain_weight = true;
-            }
-            if face.style == Style::Normal {
-                faces.upright = true;
+                FACE_PLAIN_WEIGHT
+            };
+            bits |= if face.style == Style::Normal {
+                FACE_UPRIGHT
             } else {
-                faces.slanted = true;
-            }
+                FACE_SLANTED
+            };
         }
     }
-    Some(faces)
+    Some(Faces(bits))
 }
 
 /// Bold decision of an element that asks for a bold weight in some visible span.
-fn decide_bold(text: &usvg::Text, faces: Option<&Faces>) -> Bold {
+fn decide_bold(text: &usvg::Text, faces: Option<Faces>) -> Bold {
     let Some(faces) = faces else {
         return Bold::Unsupported;
     };
-    if !faces.plain_weight {
+    if !faces.has(FACE_PLAIN_WEIGHT) {
         return Bold::Unchanged;
     }
     // The page's text runs are uniform clusters. Arbitrary mixed text must never embolden a real
     // bold face, or a regular span together with a fallback.
-    if faces.bold || visible_spans(text).any(|span| span.font().weight() < BOLD_WEIGHT) {
+    if faces.has(FACE_BOLD) || visible_spans(text).any(|span| span.font().weight() < BOLD_WEIGHT) {
         return Bold::Unsupported;
     }
     let mut paint: Option<(usvg::Color, f32, f32)> = None;
@@ -157,11 +176,11 @@ fn visible_spans(text: &usvg::Text) -> impl Iterator<Item = &usvg::TextSpan> {
 }
 
 /// Italic decision of an element that asks for a slanted style in some visible span.
-fn decide_italic(text: &usvg::Text, faces: Option<&Faces>) -> Italic {
+fn decide_italic(text: &usvg::Text, faces: Option<Faces>) -> Italic {
     let Some(faces) = faces else {
         return Italic::Unsupported;
     };
-    if !faces.upright {
+    if !faces.has(FACE_UPRIGHT) {
         return Italic::Unchanged;
     }
     // One transform for the whole element is right only when every visible glyph needs the same
@@ -182,7 +201,7 @@ fn decide_italic(text: &usvg::Text, faces: Option<&Faces>) -> Italic {
             baseline.get_or_insert(ts.ty);
         }
     }
-    if faces.slanted
+    if faces.has(FACE_SLANTED)
         || visible_spans(text).any(|span| span.font().style() == usvg::FontStyle::Normal)
         || !uniform
         || text.writing_mode() != usvg::WritingMode::LeftToRight
@@ -207,12 +226,12 @@ fn collect(group: &usvg::Group, db: &Database, decisions: &mut HashMap<String, D
                 let faces = (bold || italic).then(|| faces_of(text, db)).flatten();
                 let mut decision = Decision {
                     bold: if bold {
-                        decide_bold(text, faces.as_ref())
+                        decide_bold(text, faces)
                     } else {
                         Bold::Unchanged
                     },
                     italic: if italic {
-                        decide_italic(text, faces.as_ref())
+                        decide_italic(text, faces)
                     } else {
                         Italic::Unchanged
                     },
@@ -232,30 +251,53 @@ fn collect(group: &usvg::Group, db: &Database, decisions: &mut HashMap<String, D
 }
 
 /// Whether the page mentions bold or italic at all, case-insensitively and loosely (an attribute
-/// or a style declaration): a page that does not is parsed once and untouched.
+/// or a style declaration), in a single 32-bit word-folded pass: a page that does not is parsed
+/// once and untouched.
 fn asks_for_emphasis(svg: &str) -> bool {
     let bytes = svg.as_bytes();
-    let has = |word: &[u8]| {
-        bytes
-            .windows(word.len())
-            .any(|window| window.eq_ignore_ascii_case(word))
-    };
-    has(b"italic") || has(b"oblique") || has(b"bold") || has_numeric_bold_weight(bytes)
-}
-
-/// `font-weight` followed (after `=`, `:`, quotes and spaces) by a digit from 6 to 9.
-fn has_numeric_bold_weight(bytes: &[u8]) -> bool {
-    const KEY: &[u8] = b"font-weight";
-    bytes
-        .windows(KEY.len())
-        .enumerate()
-        .filter(|(_, window)| window.eq_ignore_ascii_case(KEY))
-        .any(|(at, _)| {
-            bytes[at + KEY.len()..]
-                .iter()
-                .find(|b| !matches!(b, b'=' | b':' | b'"' | b'\'' | b' '))
-                .is_some_and(|b| (b'6'..=b'9').contains(b))
-        })
+    let len = bytes.len();
+    if len < 4 {
+        return false;
+    }
+    let end = len - 3;
+    let mut i = 0;
+    while i < end {
+        let w =
+            u32::from_le_bytes([bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3]]) | 0x2020_2020;
+        if w == WORD_BOLD {
+            return true;
+        }
+        if w == WORD_ITAL && i + 6 <= len {
+            let tail = u16::from_le_bytes([bytes[i + 4], bytes[i + 5]]) | 0x2020;
+            if tail == HALF_IC {
+                return true;
+            }
+        }
+        if w == WORD_OBLI
+            && i + 7 <= len
+            && (bytes[i + 4] | 0x20) == b'q'
+            && (bytes[i + 5] | 0x20) == b'u'
+            && (bytes[i + 6] | 0x20) == b'e'
+        {
+            return true;
+        }
+        if w == WORD_FONT && i + 11 <= len && bytes[i + 4] == b'-' {
+            let w2 = u32::from_le_bytes([bytes[i + 5], bytes[i + 6], bytes[i + 7], bytes[i + 8]])
+                | 0x2020_2020;
+            let tail = u16::from_le_bytes([bytes[i + 9], bytes[i + 10]]) | 0x2020;
+            if w2 == u32::from_le_bytes(*b"weig")
+                && tail == u16::from_le_bytes(*b"ht")
+                && bytes[i + 11..]
+                    .iter()
+                    .find(|b| !matches!(b, b'=' | b':' | b'"' | b'\'' | b' '))
+                    .is_some_and(|b| (b'6'..=b'9').contains(b))
+            {
+                return true;
+            }
+        }
+        i += 1;
+    }
+    false
 }
 
 /// Position just after the tag name of an element, where an attribute can be inserted.
@@ -304,8 +346,15 @@ fn style_declaration(color: usvg::Color, opacity: f32, width: f32) -> String {
     )
 }
 
+#[inline]
 fn mentions(attribute: Option<&str>, word: &str) -> bool {
-    attribute.is_some_and(|value| value.to_ascii_lowercase().contains(word))
+    let word_bytes = word.as_bytes();
+    attribute.is_some_and(|value| {
+        value
+            .as_bytes()
+            .windows(word_bytes.len())
+            .any(|w| w.eq_ignore_ascii_case(word_bytes))
+    })
 }
 
 /// The edits one element needs, and what they add to `report`.
@@ -386,34 +435,43 @@ fn attribute_asks(name: &str, value: &str) -> bool {
 }
 
 /// For each of `texts`, whether the element, an element above it (the font properties are
-/// inherited) or one inside it (a `<tspan>`) asks for bold or italic. Two passes over the
-/// document, whatever its depth.
+/// inherited) or one inside it (a `<tspan>`) asks for bold or italic. Uses a single bit-packed
+/// `Vec<u8>` (`NODE_OWN | NODE_INHERITED | NODE_INSIDE`) so attributes are inspected once per node.
 fn text_requests(xml: &roxmltree::Document, texts: &[roxmltree::Node]) -> Vec<bool> {
-    let own = |node: &roxmltree::Node| {
-        node.attributes()
-            .any(|attr| attribute_asks(attr.name(), attr.value()))
-    };
-    let slots = xml.descendants().count() + 1;
-    let (mut inherited, mut inside) = (vec![false; slots], vec![false; slots]);
-    // A parent comes before its children in document order, so one forward pass spreads the
-    // requests down and one backward pass collects them up.
-    for node in xml.descendants() {
+    let nodes: Vec<_> = xml.descendants().collect();
+    let slots = nodes.len() + 1;
+    let mut flags = vec![0u8; slots];
+    // Forward pass in document order: inspect attributes once and propagate `NODE_INHERITED` down.
+    for node in &nodes {
+        let id = node.id().get_usize();
+        let own = node
+            .attributes()
+            .any(|attr| attribute_asks(attr.name(), attr.value()));
         let above = node
             .parent()
-            .is_some_and(|parent| inherited[parent.id().get_usize()]);
-        inherited[node.id().get_usize()] = above || own(&node);
+            .is_some_and(|parent| (flags[parent.id().get_usize()] & NODE_INHERITED) != 0);
+        let mut f = if own {
+            NODE_OWN | NODE_INHERITED | NODE_INSIDE
+        } else {
+            0
+        };
+        if above {
+            f |= NODE_INHERITED;
+        }
+        flags[id] = f;
     }
-    let nodes: Vec<_> = xml.descendants().collect();
+    // Reverse pass: propagate `NODE_INSIDE` up without re-inspecting attributes.
     for node in nodes.iter().rev() {
-        let asks = inside[node.id().get_usize()] || own(node);
-        inside[node.id().get_usize()] = asks;
-        if let Some(parent) = node.parent() {
-            inside[parent.id().get_usize()] |= asks;
+        let id = node.id().get_usize();
+        if (flags[id] & NODE_INSIDE) != 0 {
+            if let Some(parent) = node.parent() {
+                flags[parent.id().get_usize()] |= NODE_INSIDE;
+            }
         }
     }
     texts
         .iter()
-        .map(|text| inherited[text.id().get_usize()] || inside[text.id().get_usize()])
+        .map(|text| (flags[text.id().get_usize()] & (NODE_INHERITED | NODE_INSIDE)) != 0)
         .collect()
 }
 

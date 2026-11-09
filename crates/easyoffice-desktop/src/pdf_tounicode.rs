@@ -13,7 +13,8 @@
 //! with spaces inside the brackets, which PDF ignores in a hex string, ISO 32000-1 7.3.4.3), so no
 //! `/Length` or cross-reference offset moves. Changes to the port: only text between `begincmap`
 //! and `endcmap` is read (the rest of the file is never edited), every loop has a bound, and the
-//! work is one allocation-free pass over the bytes.
+//! work is one allocation-free pass over the bytes using a 256-entry nibble lookup table and a
+//! bitwise PUA prefix gate.
 
 use crate::pdf_pua;
 
@@ -29,6 +30,27 @@ const MAX_DST_UNITS: usize = 32;
 const MAX_BLOCK_ENTRIES: usize = 256;
 /// The writer's digits are upper case.
 const HEX_DIGITS: &[u8; 16] = b"0123456789ABCDEF";
+
+/// Compile-time 256-entry hex nibble lookup table (`0..=15` for valid hex digits, `0xFF` otherwise).
+const HEX_NIBBLE: [u8; 256] = {
+    let mut table = [0xFFu8; 256];
+    let mut b = b'0';
+    while b <= b'9' {
+        table[b as usize] = b - b'0';
+        b += 1;
+    }
+    let mut b = b'A';
+    while b <= b'F' {
+        table[b as usize] = b - b'A' + 10;
+        b += 1;
+    }
+    let mut b = b'a';
+    while b <= b'f' {
+        table[b as usize] = b - b'a' + 10;
+        b += 1;
+    }
+    table
+};
 
 /// Index of the first `needle` in `hay`.
 fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
@@ -94,33 +116,41 @@ fn remap_block(block: &mut [u8]) -> usize {
     changed
 }
 
-fn hex_digit(byte: u8) -> Option<u16> {
-    char::from(byte)
-        .to_digit(16)
-        .and_then(|digit| u16::try_from(digit).ok())
-}
-
-/// UTF-16 units of the hex text (four digits each), or `None` when it is not that.
-fn decode_units(hex: &[u8], units: &mut [u16; MAX_DST_UNITS]) -> Option<usize> {
-    if hex.is_empty() || hex.len() & 3 != 0 || hex.len() / 4 > MAX_DST_UNITS {
+/// UTF-16 units of the hex text (four digits each) and whether any unit can belong to a mapped PUA
+/// code point (`0xF0xx` BMP or `0xDB80` high surrogate for `U+F0000..U+F03FF`/`U+F08xx`).
+#[inline]
+fn decode_units(hex: &[u8], units: &mut [u16; MAX_DST_UNITS]) -> Option<(usize, bool)> {
+    if hex.is_empty() || (hex.len() & 3) != 0 || (hex.len() >> 2) > MAX_DST_UNITS {
         return None;
     }
-    let count = hex.len() / 4;
+    let count = hex.len() >> 2;
+    let mut has_pua_candidate = false;
     for (at, unit) in units[..count].iter_mut().enumerate() {
-        *unit = hex[at * 4..at * 4 + 4]
-            .iter()
-            .try_fold(0u16, |value, &byte| Some(value << 4 | hex_digit(byte)?))?;
+        let base = at << 2;
+        let n0 = HEX_NIBBLE[usize::from(hex[base])];
+        let n1 = HEX_NIBBLE[usize::from(hex[base + 1])];
+        let n2 = HEX_NIBBLE[usize::from(hex[base + 2])];
+        let n3 = HEX_NIBBLE[usize::from(hex[base + 3])];
+        if ((n0 | n1 | n2 | n3) & 0xF0) != 0 {
+            return None;
+        }
+        let u = (u16::from(n0) << 12) | (u16::from(n1) << 8) | (u16::from(n2) << 4) | u16::from(n3);
+        has_pua_candidate |= (u & 0xFF00) == 0xF000 || (u & 0xFFFC) == 0xDB80;
+        *unit = u;
     }
-    Some(count)
+    Some((count, has_pua_candidate))
 }
 
 /// Rewrites one destination text in place. Nothing changes (and `false` comes back) when it has no
 /// known private-use character, is not valid UTF-16, or the standard text is longer than the code.
 fn remap_entry(hex: &mut [u8]) -> bool {
     let mut units = [0u16; MAX_DST_UNITS];
-    let Some(count) = decode_units(hex, &mut units) else {
+    let Some((count, has_pua_candidate)) = decode_units(hex, &mut units) else {
         return false;
     };
+    if !has_pua_candidate {
+        return false;
+    }
     let mut out = [0u16; MAX_DST_UNITS];
     let (mut written, mut changed) = (0, false);
     for decoded in char::decode_utf16(units[..count].iter().copied()) {
@@ -140,12 +170,14 @@ fn remap_entry(hex: &mut [u8]) -> bool {
     if !changed {
         return false;
     }
-    for (at, unit) in out[..written].iter().enumerate() {
-        for (place, shift) in hex[at * 4..at * 4 + 4].iter_mut().zip([12, 8, 4, 0]) {
-            *place = HEX_DIGITS[usize::from(unit >> shift & 0xF)];
-        }
+    for (at, &unit) in out[..written].iter().enumerate() {
+        let base = at << 2;
+        hex[base] = HEX_DIGITS[usize::from(unit >> 12)];
+        hex[base + 1] = HEX_DIGITS[usize::from((unit >> 8) & 0xF)];
+        hex[base + 2] = HEX_DIGITS[usize::from((unit >> 4) & 0xF)];
+        hex[base + 3] = HEX_DIGITS[usize::from(unit & 0xF)];
     }
-    hex[written * 4..].fill(b' ');
+    hex[(written << 2)..].fill(b' ');
     true
 }
 

@@ -42,12 +42,14 @@ const OVERLAY_NON_OVERRIDE = new Set([
   // EasyOffice-only modules (참조 앱 port): cut deletes a text selection only after the clipboard accepted it.
   "src/command/clipboard-cut.ts",
   "src/command/safe-cut.ts",
-  // EasyOffice-only modules (참조 앱 port): custom select combo boxes, color picker palette and popup coordinator.
+  // EasyOffice-only modules (참조 앱 port): custom select combo boxes, color picker palette, font authoring policy, font-set dialog rules and popup coordinator.
+  "src/core/font-authoring-policy.ts",
   "src/ui/toolbar-popup.ts",
   "src/ui/custom-select.ts",
   "src/ui/color-picker.ts",
   "src/styles/custom-select.css",
   "src/styles/color-picker.css",
+  "src/styles/font-set-dialog.css",
 ]);
 
 /** SHA-256 of upstream text with CRLF normalised to LF (the baseline the manifest pins). */
