@@ -683,10 +683,7 @@ fn parse_time_serial(s: &str) -> Option<f64> {
     Some((h as f64 * 3600.0 + m as f64 * 60.0 + sec) / SECONDS_PER_DAY as f64)
 }
 
-fn compute_yearfrac(d1: i64, d2: i64, basis: i64) -> f64 {
-    if d1 == d2 {
-        return 0.0;
-    }
+pub(crate) fn day_count_and_year_basis(d1: i64, d2: i64, basis: i64) -> (f64, f64) {
     let (y1, m1, mut day1) = civil_from_serial(d1);
     let (y2, m2, mut day2) = civil_from_serial(d2);
     match basis {
@@ -703,7 +700,10 @@ fn compute_yearfrac(d1: i64, d2: i64, basis: i64) -> f64 {
             if day1 == 31 {
                 day1 = 30;
             }
-            ((y2 - y1) * 360 + (m2 - m1) * 30 + (day2 - day1)) as f64 / 360.0
+            (
+                ((y2 - y1) * 360 + (m2 - m1) * 30 + (day2 - day1)) as f64,
+                360.0,
+            )
         }
         1 => {
             let denom = if (y2 - y1) > 1 || (y2 == y1 + 1 && (m2, day2) > (m1, day1)) {
@@ -728,12 +728,23 @@ fn compute_yearfrac(d1: i64, d2: i64, basis: i64) -> f64 {
                     365.0
                 }
             };
-            (d2 - d1) as f64 / denom
+            ((d2 - d1) as f64, denom)
         }
-        2 => (d2 - d1) as f64 / 360.0,
-        3 => (d2 - d1) as f64 / 365.0,
-        _ => ((y2 - y1) * 360 + (m2 - m1) * 30 + (day2.min(30) - day1.min(30))) as f64 / 360.0,
+        2 => ((d2 - d1) as f64, 360.0),
+        3 => ((d2 - d1) as f64, 365.0),
+        _ => (
+            ((y2 - y1) * 360 + (m2 - m1) * 30 + (day2.min(30) - day1.min(30))) as f64,
+            360.0,
+        ),
     }
+}
+
+fn compute_yearfrac(d1: i64, d2: i64, basis: i64) -> f64 {
+    if d1 == d2 {
+        return 0.0;
+    }
+    let (days, year_basis) = day_count_and_year_basis(d1, d2, basis);
+    days / year_basis
 }
 
 pub(crate) fn parse_iso_date_serial(s: &str) -> Option<f64> {

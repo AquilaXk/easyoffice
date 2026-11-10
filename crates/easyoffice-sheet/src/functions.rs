@@ -349,6 +349,13 @@ impl SheetEngine {
             | "ISEVEN" | "ISODD" | "TYPE" | "ERROR.TYPE" => {
                 self.eval_info_func(name, args, ctx, depth)
             }
+            "DELTA" | "GESTEP" | "ERF" | "ERF.PRECISE" | "ERFC" | "ERFC.PRECISE" | "PHI"
+            | "GAUSS" | "NORM.S.DIST" | "NORMSDIST" | "Z.TEST" | "ZTEST" | "FVSCHEDULE"
+            | "INTRATE" | "COMPLEX" | "IMREAL" | "IMAGINARY" | "IMABS" | "IMARGUMENT"
+            | "IMCONJUGATE" | "IMSUM" | "IMSUB" | "IMPRODUCT" | "IMDIV" | "IMPOWER" | "IMSQRT"
+            | "IMEXP" | "IMLN" | "IMLOG10" | "IMLOG2" | "IMSIN" | "IMCOS" => {
+                self.eval_complex_stat_func(name, args, ctx, depth)
+            }
             _ => Err(FormulaError::Name),
         }
     }

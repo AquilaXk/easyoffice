@@ -108,13 +108,14 @@
     function buildCellsAndFormulaTargets(sheetsMap) {
       const cells = [];
       const formulaTargets = [];
-      Object.keys(sheetsMap || {}).forEach((shName) => {
+      for (const shName of Object.keys(sheetsMap || {})) {
         const snap = sheetsMap[shName] || {};
-        Object.keys(snap).forEach((ref) => {
+        const shPrefix = shName + "!";
+        for (const ref of Object.keys(snap)) {
           const entry = snap[ref];
-          if (!entry) return;
+          if (!entry) continue;
           if (isFormulaStr(entry.formula || "")) {
-            formulaTargets.push({ sheet: shName, cell: ref, key: shName + "!" + ref });
+            formulaTargets.push({ sheet: shName, cell: ref, key: shPrefix + ref });
           }
           if (entry.formula || entry.value) {
             const val = entry.formula
@@ -122,8 +123,8 @@
               : normalizeFormattedNumericCell(entry.value);
             cells.push({ sheet: shName, cell: ref, value: val });
           }
-        });
-      });
+        }
+      }
       return { cells, formulaTargets };
     }
 
@@ -138,18 +139,21 @@
       const sheets = cloneStore(baseSheets);
       const { cells, formulaTargets } = buildCellsAndFormulaTargets(sheets);
       const rpcTargets = [];
+      const targetSpecs = [];
       if (extraTarget) {
         rpcTargets.push({
           sheet: extraTarget.sheet,
           cell: extraTarget.cell,
           key: extraTarget.sheet + "!" + extraTarget.cell,
         });
+        targetSpecs.push({ sheet: extraTarget.sheet, cell: extraTarget.cell });
       }
-      formulaTargets.forEach((ft) => {
+      for (const ft of formulaTargets) {
         if (!extraTarget || ft.sheet !== extraTarget.sheet || ft.cell !== extraTarget.cell) {
           rpcTargets.push(ft);
+          targetSpecs.push({ sheet: ft.sheet, cell: ft.cell });
         }
-      });
+      }
 
       if (rpcTargets.length === 0) {
         return { sheets, extraValue: "", circular: false };
@@ -158,7 +162,7 @@
       const rpcPayload = JSON.stringify({
         sheet: defaultSheet,
         sheets: Object.keys(sheets),
-        targets: rpcTargets.map(({ sheet, cell }) => ({ sheet, cell })),
+        targets: targetSpecs,
         cells,
       });
       const rpcRes = await invokeIpc("evaluate_sheet", rpcPayload);

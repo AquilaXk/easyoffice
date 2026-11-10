@@ -70,25 +70,15 @@
 
     function inferMaxRowFromSheetMap(sheetObj) {
       let maxRow = DEFAULT_SHEET_ROW_COUNT;
-      const keys = Object.keys(sheetObj || {});
-      for (const key of keys) {
+      for (const key of Object.keys(sheetObj || {})) {
         const packed = gridUtils.packRef(key);
         if (packed > 0) {
-          const rowNum = Math.floor(packed / 32768);
+          const col = packed & 32767;
+          const rowNum = (packed - col) / 32768;
           if (rowNum > maxRow) maxRow = rowNum;
         }
       }
       return maxRow;
-    }
-
-    function getSheetRowCount(sheetName) {
-      const stored = sheetRowCounts[sheetName];
-      if (typeof stored === "number" && Number.isSafeInteger(stored) && stored >= 1) {
-        return stored;
-      }
-      const inferred = inferMaxRowFromSheetMap(sheetDataStore[sheetName]);
-      sheetRowCounts[sheetName] = inferred;
-      return inferred;
     }
 
     // ---- used extent (rows/cols that hold data) ---------------------------------------------
@@ -98,14 +88,35 @@
       const map = sheetDataStore[sheetName] || {};
       let dataRows = 0;
       let dataCols = 0;
-      Object.keys(map).forEach((ref) => {
-        if (!hasCellContent(map[ref])) return;
-        const p = gridUtils.parseRef(ref);
-        if (!p) return;
-        if (p.row > dataRows) dataRows = p.row;
-        if (p.col > dataCols) dataCols = p.col;
-      });
+      let maxRow = DEFAULT_SHEET_ROW_COUNT;
+      for (const ref of Object.keys(map)) {
+        const packed = gridUtils.packRef(ref);
+        if (packed > 0) {
+          const col = packed & 32767;
+          const row = (packed - col) / 32768;
+          if (row > maxRow) maxRow = row;
+          if (hasCellContent(map[ref])) {
+            if (row > dataRows) dataRows = row;
+            if (col > dataCols) dataCols = col;
+          }
+        }
+      }
+      const stored = sheetRowCounts[sheetName];
+      if (!(typeof stored === "number" && Number.isSafeInteger(stored) && stored >= 1)) {
+        sheetRowCounts[sheetName] = maxRow;
+      }
       return { dataRows, dataCols };
+    }
+
+    function getSheetRowCount(sheetName) {
+      const stored = sheetRowCounts[sheetName];
+      if (typeof stored === "number" && Number.isSafeInteger(stored) && stored >= 1) {
+        return stored;
+      }
+      if (!extentCache[sheetName]) {
+        extentCache[sheetName] = scanExtent(sheetName);
+      }
+      return sheetRowCounts[sheetName];
     }
 
     function getSheetExtent(sheetName) {
@@ -219,8 +230,12 @@
       }
       map[ref] = cellEntry;
       if (value !== "" || formula !== "") {
-        const p = gridUtils.parseRef(ref);
-        if (p) bumpExtent(getActiveSheetName(), p.row, p.col);
+        const packed = gridUtils.packRef(ref);
+        if (packed > 0) {
+          const col = packed & 32767;
+          const row = (packed - col) / 32768;
+          bumpExtent(getActiveSheetName(), row, col);
+        }
       }
     }
 
@@ -268,12 +283,16 @@
     }
 
     function cellRefOfRange(range, cb) {
-      Object.keys(activeSheetMap()).forEach((ref) => {
-        const p = gridUtils.parseRef(ref);
-        if (p && p.row >= range.r1 && p.row <= range.r2 && p.col >= range.c1 && p.col <= range.c2) {
-          cb(ref);
+      for (const ref of Object.keys(activeSheetMap())) {
+        const packed = gridUtils.packRef(ref);
+        if (packed > 0) {
+          const col = packed & 32767;
+          const row = (packed - col) / 32768;
+          if (row >= range.r1 && row <= range.r2 && col >= range.c1 && col <= range.c2) {
+            cb(ref);
+          }
         }
-      });
+      }
     }
 
     function clearExisting(range) {
@@ -301,8 +320,12 @@
           map[e.ref] = style
             ? { value: e.value, formula: e.formula, style }
             : { value: e.value, formula: e.formula };
-          const p = gridUtils.parseRef(e.ref);
-          if (p) bumpExtent(curSheet, p.row, p.col);
+          const packed = gridUtils.packRef(e.ref);
+          if (packed > 0) {
+            const col = packed & 32767;
+            const row = (packed - col) / 32768;
+            bumpExtent(curSheet, row, col);
+          }
         });
         grid.renderWindow(false);
         refreshWindowFromModel();
@@ -373,7 +396,7 @@
       if (Object.keys(sheetDataStore).length === 0) {
         sheetDataStore.Sheet1 = snapshotDomSheetCells();
       }
-      delete extentCache[sheetName];
+      extentCache[sheetName] = scanExtent(sheetName);
       const targetSnap = sheetDataStore[sheetName] || {};
       const targetFrozen = Boolean(targetSnap.A1?.style?.frozenPanes);
       toggleSheetFreezePanes(targetFrozen, true);
@@ -396,7 +419,7 @@
         });
         Object.keys(sheetDataStore).forEach((k) => {
           if (!sheetRowCounts[k]) {
-            sheetRowCounts[k] = inferMaxRowFromSheetMap(sheetDataStore[k]);
+            extentCache[k] = scanExtent(k);
           }
         });
       }
@@ -725,10 +748,14 @@
       getEntry: entryAt,
       getEntryCount: () => Object.keys(activeSheetMap()).length,
       forEachEntryRef: (cb) => {
-        Object.keys(activeSheetMap()).forEach((ref) => {
-          const p = gridUtils.parseRef(ref);
-          if (p) cb(ref, p.row, p.col);
-        });
+        for (const ref of Object.keys(activeSheetMap())) {
+          const packed = gridUtils.packRef(ref);
+          if (packed > 0) {
+            const col = packed & 32767;
+            const row = (packed - col) / 32768;
+            cb(ref, row, col);
+          }
+        }
       },
       getExtent: () => getSheetExtent(getActiveSheetName()),
       hasValue: (r, c) => hasCellContent(entryAt(gridUtils.refOf(r, c))),
@@ -827,9 +854,6 @@
           A1: { value: targetSheetName + " 항목", formula: "" },
           B1: { value: "500", formula: "" },
         };
-      }
-      if (!sheetRowCounts[targetSheetName]) {
-        sheetRowCounts[targetSheetName] = inferMaxRowFromSheetMap(sheetDataStore[targetSheetName]);
       }
       restoreDomSheetCells(targetSheetName);
       refreshFocusedSheetCellPendingSnapshot();

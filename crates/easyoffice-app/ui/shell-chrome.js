@@ -120,6 +120,18 @@
   // in the page's own menu row: the editor's 파일 menu carries them in the Hangul window, and no other
   // window has them, so the native items are grayed out everywhere but in the editor window.
   const EMBED_ONLY_ACTIONS = Object.freeze(["hwp-export-pdf", "hwp-print"]);
+  const EMBED_ONLY_SET = new Set(EMBED_ONLY_ACTIONS);
+  const START_DISABLED_ACTIONS = Object.freeze(["studio-save", "file-save-as", "find"]);
+  const START_DISABLED_SET = new Set(START_DISABLED_ACTIONS);
+  const PARSED_NATIVE_MENU_ACTIONS = Object.freeze(
+    Object.fromEntries(
+      Object.entries(NATIVE_MENU_ACTIONS).map(([id, entry]) => {
+        const [name, argument] = entry.split(":");
+        return [id, Object.freeze({ id, name, argument })];
+      })
+    )
+  );
+  const PARSED_NATIVE_MENU_LIST = Object.freeze(Object.values(PARSED_NATIVE_MENU_ACTIONS));
 
   // Menu id -> command id of the Hangul editor (the rhwp-studio command registry, over the embed port's
   // `automation.execute`). While the editor owns the window these items go to it, the zoom and cell
@@ -169,12 +181,11 @@
 
   // Runs the page action of a menu id; false for an unknown id or an action the page does not have.
   function runNativeMenuAction(id, actions) {
-    const entry = Object.hasOwn(NATIVE_MENU_ACTIONS, id) ? NATIVE_MENU_ACTIONS[id] : null;
-    if (!entry) return false;
-    const [name, argument] = entry.split(":");
-    const run = actions[name];
+    const parsed = Object.hasOwn(PARSED_NATIVE_MENU_ACTIONS, id) ? PARSED_NATIVE_MENU_ACTIONS[id] : null;
+    if (!parsed) return false;
+    const run = actions[parsed.name];
     if (typeof run !== "function") return false;
-    run(argument, id);
+    run(parsed.argument, id);
     return true;
   }
 
@@ -217,19 +228,24 @@
     let menuContext = null;
     let lastMenuState = "";
 
-    const START_DISABLED_ACTIONS = ["studio-save", "file-save-as", "find"];
-
     function disabledMenuIds(commandModule) {
       const applies = host.__EASYOFFICE_WORKSPACE_SESSION_UTILS__.studioCommandApplies;
-      return Object.entries(NATIVE_MENU_ACTIONS)
-        .filter(([id, entry]) => {
-          const [name, command] = entry.split(":");
-          if (commandModule === "START" && START_DISABLED_ACTIONS.includes(name)) return true;
-          if (Object.hasOwn(EMBED_EDITOR_COMMANDS, id) && commandModule === "HWP_EMBED") return false;
-          if (EMBED_ONLY_ACTIONS.includes(name)) return commandModule !== "HWP_EMBED";
-          return name === "hwp-editor" || (name === "studio-cmd" && !applies(command, commandModule));
-        })
-        .map(([id]) => id);
+      const out = [];
+      for (let i = 0; i < PARSED_NATIVE_MENU_LIST.length; i += 1) {
+        const { id, name, argument } = PARSED_NATIVE_MENU_LIST[i];
+        let isDisabled;
+        if (commandModule === "START" && START_DISABLED_SET.has(name)) {
+          isDisabled = true;
+        } else if (Object.hasOwn(EMBED_EDITOR_COMMANDS, id) && commandModule === "HWP_EMBED") {
+          isDisabled = false;
+        } else if (EMBED_ONLY_SET.has(name)) {
+          isDisabled = commandModule !== "HWP_EMBED";
+        } else {
+          isDisabled = name === "hwp-editor" || (name === "studio-cmd" && !applies(argument, commandModule));
+        }
+        if (isDisabled) out.push(id);
+      }
+      return out;
     }
 
     // Without a new module context the last one is reused (a theme change); nothing is sent before the
@@ -430,5 +446,5 @@
   }
 
   host.__EASYOFFICE_CREATE_SHELL_CHROME__ = createShellChrome;
-  host.__EASYOFFICE_NATIVE_MENU_TABLE__ = { NATIVE_MENU_ACTIONS, EMBED_EDITOR_COMMANDS, EMBED_ONLY_ACTIONS, TEXT_FIELD_EDIT_COMMANDS, runNativeMenuAction, pageMenuActions };
+  host.__EASYOFFICE_NATIVE_MENU_TABLE__ = { NATIVE_MENU_ACTIONS, PARSED_NATIVE_MENU_ACTIONS, EMBED_EDITOR_COMMANDS, EMBED_ONLY_ACTIONS, EMBED_ONLY_SET, START_DISABLED_SET, TEXT_FIELD_EDIT_COMMANDS, runNativeMenuAction, pageMenuActions };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

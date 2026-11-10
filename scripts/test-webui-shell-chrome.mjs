@@ -606,4 +606,25 @@ test("reference app CSS parity (disabled menu shortcuts/arrows, style-bar sep, z
   assert.equal(firstLiBefore.getAttribute("aria-selected"), "false");
   assert.equal(secondLiBefore.getAttribute("aria-selected"), "true");
   assert.equal(secondLiBefore.classList.contains("cp-item--selected"), true);
+
+  const tbActiveRule = cssRule(".tb-btn:active:not(:disabled)", TOOLBAR_CSS);
+  assert.ok(hasDecl(tbActiveRule, "background", "var(--ui-active)") && hasDecl(tbActiveRule, "border-color", "var(--ui-border)"));
+  const zoomHoverNotDisabled = cssRule(".statusbar-zoom-btn:hover:not(:disabled)", TOOLBAR_CSS);
+  assert.ok(hasDecl(zoomHoverNotDisabled, "background", "var(--ui-hover)") && hasDecl(zoomHoverNotDisabled, "color", "var(--color-text)"));
+  const zoomActiveNotDisabled = cssRule(".statusbar-zoom-btn:active:not(:disabled)", TOOLBAR_CSS);
+  assert.ok(hasDecl(zoomActiveNotDisabled, "background", "var(--ui-active)"));
+  const zoomFocusVisible = cssRule(".statusbar-zoom-slider:focus-visible", TOOLBAR_CSS);
+  assert.ok(hasDecl(zoomFocusVisible, "outline", "1px solid var(--color-focus-border)") && hasDecl(zoomFocusVisible, "outline-offset", "2px"));
+  const dlgPlaceholder = cssRule(".tool-dialog input::placeholder, .tool-dialog textarea::placeholder", SHELL_CSS);
+  assert.ok(hasDecl(dlgPlaceholder, "color", "var(--color-text-placeholder)"));
+  const dlgDisabled = cssRule(".tool-dialog input:disabled, .tool-dialog select:disabled, .tool-dialog textarea:disabled", SHELL_CSS);
+  assert.ok(
+    hasDecl(dlgDisabled, "background", "var(--ui-surface-muted)") &&
+      hasDecl(dlgDisabled, "border-color", "var(--color-border-lighter)") &&
+      hasDecl(dlgDisabled, "color", "var(--color-text-disabled)") &&
+      hasDecl(dlgDisabled, "cursor", "not-allowed")
+  );
+  const cpSelectedLabel = cssRule(".cp-item:hover .cp-item-label, .cp-item--selected .cp-item-label", SHELL_CSS);
+  assert.ok(hasDecl(cpSelectedLabel, "color", "var(--color-primary-dark)"));
 });
+

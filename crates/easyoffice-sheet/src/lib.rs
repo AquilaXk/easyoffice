@@ -7,6 +7,7 @@ pub mod coercion;
 mod criteria;
 mod dag;
 pub mod functions;
+pub mod functions_complex;
 mod functions_date_fin;
 mod functions_eng;
 mod functions_fin;
@@ -21,6 +22,7 @@ pub mod workbook;
 
 pub use coercion::*;
 pub use functions::*;
+pub use functions_complex::{format_complex, parse_complex};
 pub use memo::{CellMap, CoordHasher, FastMap, MemoTable};
 pub use parser::{compile_formula_expr, BinaryOp, Expr};
 pub use types::*;

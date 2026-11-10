@@ -126,8 +126,13 @@ fn normalize_sheets(mut sheets: Vec<OdsUnpacked>) -> Vec<OdsUnpacked> {
             *name = "Sheet1".to_string();
         }
         cells.retain(|(_, _, raw)| !raw.is_empty());
-        cells.sort_by_key(|(r, c, _)| (*r, *c));
-        cells.dedup_by_key(|(r, c, _)| (*r, *c));
+        let is_strictly_sorted = cells
+            .windows(2)
+            .all(|w| (w[0].0, w[0].1) < (w[1].0, w[1].1));
+        if !is_strictly_sorted {
+            cells.sort_by_key(|(r, c, _)| (*r, *c));
+            cells.dedup_by_key(|(r, c, _)| (*r, *c));
+        }
     }
     sheets
 }
@@ -135,15 +140,13 @@ fn normalize_sheets(mut sheets: Vec<OdsUnpacked>) -> Vec<OdsUnpacked> {
 fn read_delimited(bytes: &[u8], delim: char) -> Result<Vec<OdsUnpacked>, EasyOfficeError> {
     let text = std::str::from_utf8(bytes)
         .map_err(|_| EasyOfficeError::InvalidUtf8("CSV/TSV UTF-8 디코딩 오류".to_string()))?;
-    let rows = CsvCodec::parse(text, delim)?;
+    let text = text.strip_prefix('\u{FEFF}').unwrap_or(text);
     let mut cells = Vec::new();
-    for (r, row) in rows.iter().enumerate() {
-        for (c, val) in row.iter().enumerate() {
-            if !val.is_empty() {
-                cells.push((r as u32, c as u32, val.clone()));
-            }
+    CsvCodec::visit_fields_swar(text, delim, |r, c, val| {
+        if !val.is_empty() {
+            cells.push((r as u32, c as u32, val.into_owned()));
         }
-    }
+    })?;
     Ok(vec![("Sheet1".to_string(), cells)])
 }
 
@@ -314,5 +317,41 @@ impl UniversalFormatConverter {
             },
             styling,
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn read_delimited_strips_utf8_bom_and_skips_empty_cells_via_swar() {
+        let csv = "\u{FEFF}이름,,점수\n홍길동,,95\n";
+        let sheets = read_delimited(csv.as_bytes(), ',').unwrap();
+        assert_eq!(sheets.len(), 1);
+        assert_eq!(
+            sheets[0].1,
+            vec![
+                (0, 0, "이름".to_string()),
+                (0, 2, "점수".to_string()),
+                (1, 0, "홍길동".to_string()),
+                (1, 2, "95".to_string()),
+            ]
+        );
+        let unsorted = vec![(
+            "  ".to_string(),
+            vec![
+                (1, 0, "B".to_string()),
+                (0, 0, "A".to_string()),
+                (0, 0, "DUP".to_string()),
+                (0, 1, String::new()),
+            ],
+        )];
+        let norm = normalize_sheets(unsorted);
+        assert_eq!(norm[0].0, "Sheet1");
+        assert_eq!(
+            norm[0].1,
+            vec![(0, 0, "A".to_string()), (1, 0, "B".to_string())]
+        );
     }
 }

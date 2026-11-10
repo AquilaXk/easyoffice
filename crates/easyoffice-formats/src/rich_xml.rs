@@ -168,7 +168,7 @@ fn parse_attrs(raw: &str) -> Result<Vec<(String, String)>, EasyOfficeError> {
         let quote = bytes[i];
         i += 1;
         let value_start = i;
-        let Some(val_end) = crate::XmlSanitizer::find_byte_swar(bytes, value_start, quote) else {
+        let Some(val_end) = XmlSanitizer::find_byte_swar(bytes, value_start, quote) else {
             return Err(corrupt("XML 속성 값이 닫히지 않았습니다."));
         };
         i = val_end;
@@ -193,7 +193,7 @@ pub(crate) fn tokenize(xml: &str) -> Result<Vec<XmlEvent>, EasyOfficeError> {
             ));
         }
         if bytes[i] != b'<' {
-            let end = crate::XmlSanitizer::find_byte_swar(bytes, i, b'<').unwrap_or(bytes.len());
+            let end = XmlSanitizer::find_byte_swar(bytes, i, b'<').unwrap_or(bytes.len());
             events.push(XmlEvent::Text(XmlSanitizer::unescape(&xml[i..end])));
             i = end;
             continue;
@@ -216,11 +216,10 @@ pub(crate) fn tokenize(xml: &str) -> Result<Vec<XmlEvent>, EasyOfficeError> {
                 .ok_or_else(|| corrupt("XML 처리 명령이 닫히지 않았습니다."))?;
             i += end + 2;
         } else if rest.starts_with("</") {
-            let end = rest
-                .find('>')
+            let close_idx = XmlSanitizer::find_byte_swar(bytes, i + 2, b'>')
                 .ok_or_else(|| corrupt("XML 끝 태그가 닫히지 않았습니다."))?;
-            events.push(XmlEvent::End(rest[2..end].trim().to_string()));
-            i += end + 1;
+            events.push(XmlEvent::End(xml[i + 2..close_idx].trim().to_string()));
+            i = close_idx + 1;
         } else {
             let mut end = None;
             let mut quote: Option<u8> = None;

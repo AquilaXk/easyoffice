@@ -1,8 +1,11 @@
-//! Markdown and plain-text readers producing [`RichBlock`]s. Markdown is read as the subset the
-//! writer emits and common CommonMark documents use: ATX headings, bullet/ordered list items,
-//! pipe tables, block quotes, fenced code (as plain paragraphs), and inline `**`, `*`/`_`, `~~`,
-//! `<u>`, links, inline code, and backslash escapes. Nothing is ever interpreted as markup
-//! beyond those markers.
+//! Markdown and plain-text readers producing [`RichBlock`]s.
+//!
+//! Reference implementation: `pulldown-cmark` (MIT License, Copyright 2015 Google Inc.) and
+//! CommonMark / GFM / Pandoc inline & block specifications: ATX and Setext headings,
+//! bullet/ordered/task list items, pipe tables, nested block quotes, fenced code, inline
+//! `**`/`__`, `*`/`_`, `~~`, `==`, `^sup^`, `~sub~`, inline HTML (`<u>`, `<sup>`, `<sub>`,
+//! `<mark>`, `<b>`/`<strong>`, `<i>`/`<em>`, `<s>`/`<del>`, `<br>`), links, inline code, and
+//! backslash escapes.
 
 use crate::rich_xml::{push_run, CharFmt};
 use crate::{
@@ -15,6 +18,66 @@ fn is_ws(c: Option<char>) -> bool {
     c.is_none_or(char::is_whitespace)
 }
 
+/// Zero-allocation CommonMark thematic break check (`---`, `***`, `___` with optional spaces).
+#[inline]
+fn is_thematic_break(trimmed: &str) -> bool {
+    if trimmed.len() < 3 {
+        return false;
+    }
+    let mut marker: u8 = 0;
+    let mut count: usize = 0;
+    for &b in trimmed.as_bytes() {
+        if b == b' ' || b == b'\t' {
+            continue;
+        }
+        if !matches!(b, b'-' | b'*' | b'_') {
+            return false;
+        }
+        if marker == 0 {
+            marker = b;
+        } else if marker != b {
+            return false;
+        }
+        count += 1;
+    }
+    count >= 3
+}
+
+#[inline]
+fn setext_heading_level(trimmed: &str) -> Option<u8> {
+    if trimmed.len() < 2 {
+        return None;
+    }
+    let bytes = trimmed.as_bytes();
+    if bytes.iter().all(|&b| b == b'=') {
+        Some(1)
+    } else if bytes.iter().all(|&b| b == b'-') {
+        Some(2)
+    } else {
+        None
+    }
+}
+
+fn blockquote_depth_and_body(trimmed: &str) -> Option<(usize, &str)> {
+    if !trimmed.starts_with('>') {
+        return None;
+    }
+    let bytes = trimmed.as_bytes();
+    let mut i = 0usize;
+    let mut depth = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'>' {
+            depth += 1;
+            i += 1;
+        } else if bytes[i] == b' ' || bytes[i] == b'\t' {
+            i += 1;
+        } else {
+            break;
+        }
+    }
+    Some((depth, trimmed[i..].trim()))
+}
+
 /// Inline Markdown scanner state.
 struct MdInline {
     chars: Vec<char>,
@@ -25,10 +88,38 @@ struct MdInline {
 }
 
 impl MdInline {
+    #[inline]
     fn starts(&self, at: usize, pat: &str) -> bool {
-        pat.chars()
-            .enumerate()
-            .all(|(k, p)| self.chars.get(at + k) == Some(&p))
+        let pb = pat.as_bytes();
+        if at + pb.len() > self.chars.len() {
+            return false;
+        }
+        let slice = &self.chars[at..at + pb.len()];
+        let mut k = 0;
+        while k < pb.len() {
+            if slice[k] != (pb[k] as char) {
+                return false;
+            }
+            k += 1;
+        }
+        true
+    }
+
+    fn has_closing_single_tilde(&self, from: usize) -> bool {
+        let mut k = from;
+        while k < self.chars.len() {
+            if self.chars[k] == '~' {
+                if self.at(k + 1) == Some('~') {
+                    while k < self.chars.len() && self.chars[k] == '~' {
+                        k += 1;
+                    }
+                    continue;
+                }
+                return !is_ws(self.at(k - 1));
+            }
+            k += 1;
+        }
+        false
     }
 
     fn flush(&mut self) {
@@ -40,6 +131,62 @@ impl MdInline {
         self.chars.get(idx).copied()
     }
 
+    fn step_html_tag(&mut self, i: usize) -> bool {
+        if self.starts(i, "<u>") {
+            self.toggle_underline(true, 3);
+        } else if self.starts(i, "</u>") {
+            self.toggle_underline(false, 4);
+        } else if self.starts(i, "<sup>") {
+            self.set_script(RichScript::Superscript, 5);
+        } else if self.starts(i, "</sup>") {
+            self.set_script(RichScript::Normal, 6);
+        } else if self.starts(i, "<sub>") {
+            self.set_script(RichScript::Subscript, 5);
+        } else if self.starts(i, "</sub>") {
+            self.set_script(RichScript::Normal, 6);
+        } else if self.starts(i, "<mark>") {
+            self.set_highlight(Some("FFFF00".to_string()), 6);
+        } else if self.starts(i, "</mark>") {
+            self.set_highlight(None, 7);
+        } else if self.starts(i, "<b>") {
+            self.toggle_bold(true, 3);
+        } else if self.starts(i, "</b>") {
+            self.toggle_bold(false, 4);
+        } else if self.starts(i, "<strong>") {
+            self.toggle_bold(true, 8);
+        } else if self.starts(i, "</strong>") {
+            self.toggle_bold(false, 9);
+        } else if self.starts(i, "<i>") {
+            self.toggle_italic(true, 3);
+        } else if self.starts(i, "</i>") {
+            self.toggle_italic(false, 4);
+        } else if self.starts(i, "<em>") {
+            self.toggle_italic(true, 4);
+        } else if self.starts(i, "</em>") {
+            self.toggle_italic(false, 5);
+        } else if self.starts(i, "<s>") {
+            self.toggle_strike(true, 3);
+        } else if self.starts(i, "</s>") {
+            self.toggle_strike(false, 4);
+        } else if self.starts(i, "<del>") {
+            self.toggle_strike(true, 5);
+        } else if self.starts(i, "</del>") {
+            self.toggle_strike(false, 6);
+        } else if self.starts(i, "<br />") {
+            self.buf.push('\n');
+            self.i += 6;
+        } else if self.starts(i, "<br/>") {
+            self.buf.push('\n');
+            self.i += 5;
+        } else if self.starts(i, "<br>") {
+            self.buf.push('\n');
+            self.i += 4;
+        } else {
+            return false;
+        }
+        true
+    }
+
     fn step(&mut self) {
         let i = self.i;
         let c = self.chars[i];
@@ -48,12 +195,7 @@ impl MdInline {
         match c {
             '\\' => self.escape(next),
             '\n' => self.soft_break(),
-            '<' if self.starts(i, "<u>") => self.toggle_underline(true, 3),
-            '<' if self.starts(i, "</u>") => self.toggle_underline(false, 4),
-            '<' if self.starts(i, "<sup>") => self.set_script(RichScript::Superscript, 5),
-            '<' if self.starts(i, "</sup>") => self.set_script(RichScript::Normal, 6),
-            '<' if self.starts(i, "<sub>") => self.set_script(RichScript::Subscript, 5),
-            '<' if self.starts(i, "</sub>") => self.set_script(RichScript::Normal, 6),
+            '<' if self.step_html_tag(i) => {}
             '*' | '_' if next == Some(c) => {
                 let can_open = !self.fmt.bold && !is_ws(self.at(i + 2));
                 let can_close = self.fmt.bold && !is_ws(prev);
@@ -76,6 +218,22 @@ impl MdInline {
                     self.buf.push_str("~~");
                 }
                 self.i += 2;
+            }
+            '~' => {
+                let active = self.fmt.script == RichScript::Subscript;
+                let can_open = !active && !is_ws(next) && self.has_closing_single_tilde(i + 1);
+                let can_close = active && !is_ws(prev);
+                if can_open || can_close {
+                    self.flush();
+                    self.fmt.script = if active {
+                        RichScript::Normal
+                    } else {
+                        RichScript::Subscript
+                    };
+                } else {
+                    self.buf.push('~');
+                }
+                self.i += 1;
             }
             '=' if next == Some('=') => {
                 let active = self.fmt.highlight.is_some();
@@ -147,9 +305,33 @@ impl MdInline {
         self.i += 1;
     }
 
+    fn toggle_bold(&mut self, on: bool, len: usize) {
+        self.flush();
+        self.fmt.bold = on;
+        self.i += len;
+    }
+
+    fn toggle_italic(&mut self, on: bool, len: usize) {
+        self.flush();
+        self.fmt.italic = on;
+        self.i += len;
+    }
+
     fn toggle_underline(&mut self, on: bool, len: usize) {
         self.flush();
         self.fmt.underline = on;
+        self.i += len;
+    }
+
+    fn toggle_strike(&mut self, on: bool, len: usize) {
+        self.flush();
+        self.fmt.strike = on;
+        self.i += len;
+    }
+
+    fn set_highlight(&mut self, hl: Option<String>, len: usize) {
+        self.flush();
+        self.fmt.highlight = hl;
         self.i += len;
     }
 
@@ -367,16 +549,15 @@ pub(crate) fn read_markdown(text: &str) -> Result<Vec<RichBlock>, EasyOfficeErro
             i += 1;
             continue;
         }
-        if trimmed.len() >= 3
-            && trimmed.chars().all(|c| matches!(c, '-' | '*' | '_' | ' '))
-            && trimmed.chars().filter(|c| *c != ' ').count() >= 3
-            && trimmed
-                .chars()
-                .filter(|c| *c != ' ')
-                .collect::<std::collections::HashSet<_>>()
-                .len()
-                == 1
-        {
+        if !pending.is_empty() {
+            if let Some(level) = setext_heading_level(trimmed) {
+                blocks.push(paragraph(&pending.join("\n"), level, None));
+                pending.clear();
+                i += 1;
+                continue;
+            }
+        }
+        if is_thematic_break(trimmed) {
             flush(&mut blocks, &mut pending);
             i += 1;
             continue;
@@ -416,11 +597,11 @@ pub(crate) fn read_markdown(text: &str) -> Result<Vec<RichBlock>, EasyOfficeErro
             i += 1;
             continue;
         }
-        if let Some(quote) = trimmed.strip_prefix('>') {
+        if let Some((depth, quote_body)) = blockquote_depth_and_body(trimmed) {
             flush(&mut blocks, &mut pending);
             blocks.push(RichBlock::Paragraph(RichParagraph {
-                runs: parse_md_inline(quote.trim()),
-                left_indent_twips: Some(720),
+                runs: parse_md_inline(quote_body),
+                left_indent_twips: Some((depth.min(6) as u32) * 720),
                 ..RichParagraph::default()
             }));
             i += 1;
@@ -525,5 +706,49 @@ mod tests {
         assert_eq!(tbl.rows.len(), 3);
         assert_eq!(tbl.rows[0][0], "항목");
         assert_eq!(tbl.rows[2][1], "20");
+    }
+
+    #[test]
+    fn setext_headings_pandoc_subscript_inline_html_and_nested_blockquotes() {
+        let runs = parse_md_inline(
+            "H~2~O <mark>형광</mark> <b>굵음1</b> <strong>굵음2</strong> <i>기울임1</i> <em>기울임2</em> <s>취소1</s> <del>취소2</del> 줄1<br/>줄2",
+        );
+        assert!(runs
+            .iter()
+            .any(|r| r.text == "2" && r.script == RichScript::Subscript));
+        assert!(runs
+            .iter()
+            .any(|r| r.text == "형광" && r.highlight.as_deref() == Some("FFFF00")));
+        assert!(runs.iter().any(|r| r.text == "굵음1" && r.bold));
+        assert!(runs.iter().any(|r| r.text == "굵음2" && r.bold));
+        assert!(runs.iter().any(|r| r.text == "기울임1" && r.italic));
+        assert!(runs.iter().any(|r| r.text == "기울임2" && r.italic));
+        assert!(runs.iter().any(|r| r.text == "취소1" && r.strike));
+        assert!(runs.iter().any(|r| r.text == "취소2" && r.strike));
+        assert!(runs.iter().any(|r| r.text.contains("줄1\n줄2")));
+
+        let md = "대제목\n===\n\n중제목\n---\n\n---\n\n>> 2단 인용\n> > > 3단 인용\n";
+        let blocks = read_markdown(md).unwrap();
+        assert_eq!(blocks.len(), 4);
+        let RichBlock::Paragraph(h1) = &blocks[0] else {
+            panic!("expected h1");
+        };
+        assert_eq!(h1.heading_level, 1);
+        assert_eq!(h1.plain_text(), "대제목");
+        let RichBlock::Paragraph(h2) = &blocks[1] else {
+            panic!("expected h2");
+        };
+        assert_eq!(h2.heading_level, 2);
+        assert_eq!(h2.plain_text(), "중제목");
+        let RichBlock::Paragraph(q2) = &blocks[2] else {
+            panic!("expected q2");
+        };
+        assert_eq!(q2.left_indent_twips, Some(1440));
+        assert_eq!(q2.plain_text(), "2단 인용");
+        let RichBlock::Paragraph(q3) = &blocks[3] else {
+            panic!("expected q3");
+        };
+        assert_eq!(q3.left_indent_twips, Some(2160));
+        assert_eq!(q3.plain_text(), "3단 인용");
     }
 }

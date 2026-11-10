@@ -22,6 +22,12 @@
   const MAX_LINE_PERCENT = 1000;
   const MAX_TABLE_COLUMNS = 1024; // the readers' padded-column cap (PD-117)
   const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
+  const PX_VALUE_RE = /^(-?\d+(?:\.\d+)?)px$/;
+  const LINE_SPACING_RE = /^(\d+(?:\.\d+)?)(%?)$/;
+  const TABLE_NUM_RE = /^[+-]?(\d+(?:\.\d*)?|\.\d+)([eE][+-]?\d+)?$/;
+  const TABLE_FORMULA_RE = /^=\s*([A-Za-z]+)\s*\(\s*([A-Za-z]+)\s*\)\s*$/;
+  const CELL_TAG_RE = /^(TD|TH)$/i;
+  const HEADING_TAG_RE = /^H([1-6])$/;
 
   function isSkippedElement(el) {
     const tag = (el.tagName || "").toUpperCase();
@@ -71,7 +77,7 @@
   // Paragraph indents (px -> twips) and line height of a paragraph-like element. The exact twip
   // values written when a file was opened win while the style still matches them.
   function pxValue(raw) {
-    const m = /^(-?\d+(?:\.\d+)?)px$/.exec(String(raw || "").trim());
+    const m = PX_VALUE_RE.exec(String(raw || "").trim());
     return m ? Number(m[1]) : null;
   }
 
@@ -92,7 +98,7 @@
     const first = twipsFor(st.textIndent, data.eoFirstLineTwips);
     if (first !== null && first !== 0) out.firstLineIndentTwips = first;
     const rawLineHeight = String(st.lineHeight || baseLineHeight || "").trim();
-    const spacing = /^(\d+(?:\.\d+)?)(%?)$/.exec(rawLineHeight);
+    const spacing = LINE_SPACING_RE.exec(rawLineHeight);
     if (spacing) {
       const percent = Math.round(Number(spacing[1]) * (spacing[2] ? 1 : 100));
       if (percent >= 1 && percent <= MAX_LINE_PERCENT && percent !== 100) out.lineSpacingPercent = percent;
@@ -102,7 +108,7 @@
 
   function parseTableNumber(text) {
     const cleaned = String(text || "").replaceAll(",", "").replaceAll(/\s+/g, "");
-    if (!cleaned || !/^[+-]?(\d+(?:\.\d*)?|\.\d+)([eE][+-]?\d+)?$/.test(cleaned)) return null;
+    if (!cleaned || !TABLE_NUM_RE.test(cleaned)) return null;
     const n = Number(cleaned);
     return Number.isFinite(n) ? n : null;
   }
@@ -113,7 +119,7 @@
   }
 
   function parseTableFormula(text) {
-    const m = /^=\s*([A-Za-z]+)\s*\(\s*([A-Za-z]+)\s*\)\s*$/.exec(String(text || "").trim());
+    const m = TABLE_FORMULA_RE.exec(String(text || "").trim());
     if (!m) return null;
     const func = m[1].toUpperCase();
     const dir = m[2].toUpperCase();
@@ -192,13 +198,20 @@
 
   function collectTableRows(table) {
     const trs = [];
-    for (const child of Array.from(table.children || [])) {
+    const tableChildren = table.children;
+    if (!tableChildren) return trs;
+    for (let i = 0; i < tableChildren.length; i += 1) {
+      const child = tableChildren[i];
       const tag = (child.tagName || "").toUpperCase();
       if (tag === "TR") {
         trs.push(child);
       } else if (TABLE_SECTION_TAGS.has(tag)) {
-        for (const row of Array.from(child.children || [])) {
-          if ((row.tagName || "").toUpperCase() === "TR") trs.push(row);
+        const secChildren = child.children;
+        if (secChildren) {
+          for (let j = 0; j < secChildren.length; j += 1) {
+            const row = secChildren[j];
+            if ((row.tagName || "").toUpperCase() === "TR") trs.push(row);
+          }
         }
       }
     }
@@ -239,8 +252,11 @@
     const merges = [];
     trs.forEach((tr, r) => {
       let col = 0;
-      for (const cell of Array.from(tr.children || [])) {
-        if (!/^(TD|TH)$/i.test(cell.tagName || "") || isSkippedElement(cell)) continue;
+      const cells = tr.children;
+      if (!cells) return;
+      for (let i = 0; i < cells.length; i += 1) {
+        const cell = cells[i];
+        if (!CELL_TAG_RE.test(cell.tagName || "") || isSkippedElement(cell)) continue;
         while (taken[r][col]) col += 1;
         if (col >= MAX_TABLE_COLUMNS) break;
         const colSpan = freeRun(taken[r], col, Math.min(spanOf(cell.colSpan), MAX_TABLE_COLUMNS - col));
@@ -337,7 +353,7 @@
     }
 
     function blockContext(node, tag, ctx) {
-      const headingMatch = /^H([1-6])$/.exec(tag);
+      const headingMatch = HEADING_TAG_RE.exec(tag);
       const listParent = tag === "LI" ? node.parentElement : null;
       let nextList = ctx.list;
       if (listParent) nextList = (listParent.tagName || "").toUpperCase() === "OL" ? "ordered" : "bullet";
@@ -378,18 +394,27 @@
       if (tag === "TABLE") return walkTable(node);
       if (tag === "IMG" && node.dataset?.eoImageId) return pushImage(node);
       const nextFmt = styleFormat(node, fmt);
+      const childNodes = node.childNodes;
       if (!BLOCK_TAGS.has(tag)) {
-        Array.from(node.childNodes || []).forEach((child) => walk(child, ctx, nextFmt));
+        if (childNodes) {
+          for (let i = 0; i < childNodes.length; i += 1) walk(childNodes[i], ctx, nextFmt);
+        }
         return;
       }
       flush();
       const nextCtx = blockContext(node, tag, ctx);
-      Array.from(node.childNodes || []).forEach((child) => walk(child, nextCtx, nextFmt));
+      if (childNodes) {
+        for (let i = 0; i < childNodes.length; i += 1) walk(childNodes[i], nextCtx, nextFmt);
+      }
       flush();
     }
 
     const rootFmt = { bold: false, italic: false, underline: false, strike: false };
-    Array.from(root?.childNodes || []).forEach((child) => walk(child, { align: baseAlign, heading: 0, list: null }, rootFmt));
+    const rootChildren = root?.childNodes;
+    if (rootChildren) {
+      const rootCtx = { align: baseAlign, heading: 0, list: null };
+      for (let i = 0; i < rootChildren.length; i += 1) walk(rootChildren[i], rootCtx, rootFmt);
+    }
     flush();
     return blocks;
   }
@@ -415,15 +440,14 @@
     return ordered.map((name) => {
       const store = sheetDataStore?.[name] || {};
       const codec = host.__EASYOFFICE_SHEET_STYLE_CODEC__;
-      const cells = Object.keys(store)
-        .map((ref) => {
-          const entry = store[ref];
-          const raw = String(entry?.formula || entry?.value || "").trim();
-          const style = codec ? codec.styleToPayload(entry?.style) : null;
-          if (!raw && !style) return null;
-          return style ? { ref, raw, style } : { ref, raw };
-        })
-        .filter(Boolean);
+      const cells = [];
+      for (const ref of Object.keys(store)) {
+        const entry = store[ref];
+        const raw = String(entry?.formula || entry?.value || "").trim();
+        const style = codec ? codec.styleToPayload(entry?.style) : null;
+        if (!raw && !style) continue;
+        cells.push(style ? { ref, raw, style } : { ref, raw });
+      }
       const columns = buildColumnsPayload(columnWidths?.[name]);
       return columns.length > 0 ? { name, cells, columns } : { name, cells };
     });

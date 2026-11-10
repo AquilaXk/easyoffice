@@ -43,6 +43,11 @@
   color: var(--color-primary-dark);
 }
 
+.tb-btn:active:not(:disabled) {
+  background: var(--ui-active);
+  border-color: var(--ui-border);
+}
+
 .tb-label {
   font-size: var(--font-size-xs);
   line-height: 1.1;
@@ -390,6 +395,20 @@ input.sb-ls-select {
   background: var(--ui-text-secondary);
   border: 2px solid var(--ui-chrome);
   box-shadow: var(--shadow-xs);
+}
+
+.statusbar-zoom-btn:hover:not(:disabled) {
+  background: var(--ui-hover);
+  color: var(--color-text);
+}
+
+.statusbar-zoom-btn:active:not(:disabled) {
+  background: var(--ui-active);
+}
+
+.statusbar-zoom-slider:focus-visible {
+  outline: 1px solid var(--color-focus-border);
+  outline-offset: 2px;
 }
 
 .cp-item-shortcut {

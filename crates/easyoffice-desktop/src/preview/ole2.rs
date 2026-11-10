@@ -175,7 +175,6 @@ fn entry_name_is(raw: &[u8], target: &str) -> Option<bool> {
 }
 
 /// The root entry (the mini stream) and the `PrvImage` stream entry of the directory.
-#[allow(clippy::chunks_exact_to_as_chunks)]
 fn find_entries<R: Read + Seek>(src: &mut R, c: &Container) -> Option<(DirEntry, DirEntry)> {
     let per_sector = c.sector_len() / DIR_ENTRY_LEN;
     let max_sectors = MAX_DIR_ENTRIES.div_ceil(per_sector);
@@ -185,7 +184,7 @@ fn find_entries<R: Read + Seek>(src: &mut R, c: &Container) -> Option<(DirEntry,
     let mut data = vec![0_u8; c.sector_len()];
     for sector in c.chain(src, c.first_dir, max_sectors)? {
         read_at(src, c.sector_offset(sector)?, &mut data)?;
-        for raw in data.chunks_exact(DIR_ENTRY_LEN) {
+        for raw in data.as_chunks::<DIR_ENTRY_LEN>().0 {
             seen += 1;
             if seen > MAX_DIR_ENTRIES {
                 return None;

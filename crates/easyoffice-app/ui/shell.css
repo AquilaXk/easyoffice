@@ -96,6 +96,9 @@ button:not(.md-item):focus-visible { outline: 2px solid var(--accent-strong); ou
 .tool-dialog .dialog-body { display: flex; flex-direction: column; gap: 8px; font-size: 12.5px; line-height: 1.5; }
 .tool-dialog .dialog-title { cursor: move; user-select: none; }
 .tool-dialog input:focus-visible, .tool-dialog select:focus-visible { border-color: var(--color-focus-border); box-shadow: 0 0 0 2px var(--ui-focus-soft); outline: none; }
+.tool-dialog input::placeholder, .tool-dialog textarea::placeholder { color: var(--color-text-placeholder); }
+.tool-dialog input:disabled, .tool-dialog select:disabled, .tool-dialog textarea:disabled { background: var(--ui-surface-muted); border-color: var(--color-border-lighter); color: var(--color-text-disabled); cursor: not-allowed; }
+.cp-item:hover .cp-item-label, .cp-item--selected .cp-item-label { color: var(--color-primary-dark); }
 
 /* HWP printing (hwp-print.js, PD-104): the pages live in a hidden root that only the print output shows. */
 #eo-print-root { display: none; }
