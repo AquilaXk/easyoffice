@@ -9,7 +9,7 @@ const FIXED_MAX_DECIMALS: f64 = 20.0;
 const FIXED_DEFAULT_DECIMALS: i32 = 2;
 
 fn check_text_arity(args: &[Expr], min: usize, max: usize) -> Result<(), FormulaError> {
-    if args.len() < min || args.len() > max {
+    if !(min..=max).contains(&args.len()) {
         Err(FormulaError::Value)
     } else {
         Ok(())
@@ -278,6 +278,7 @@ impl SheetEngine {
             }
             "TEXT" => self.text_format(args, ctx, depth),
             "FIXED" => self.text_fixed(args, ctx, depth),
+            "DOLLAR" => self.text_dollar(args, ctx, depth),
             "CLEAN" => {
                 check_text_arity(args, 1, 1)?;
                 let s = self.text_arg(&args[0], ctx, depth)?;
@@ -561,6 +562,26 @@ impl SheetEngine {
         bounded_text(crate::coercion::format_fixed_number(
             num, decimals, !no_commas,
         ))
+    }
+
+    fn text_dollar(&self, args: &[Expr], ctx: &mut EvalContext<'_>, depth: usize) -> CellResult {
+        check_text_arity(args, 1, 2)?;
+        let num = self.eval_arg_num(&args[0], ctx, depth)?;
+        let decimals = match args.get(1) {
+            Some(arg) if !matches!(arg, Expr::Missing) => {
+                self.eval_arg_num(arg, ctx, depth)?
+                    .trunc()
+                    .clamp(FIXED_MIN_DECIMALS, FIXED_MAX_DECIMALS) as i32
+            }
+            _ => FIXED_DEFAULT_DECIMALS,
+        };
+        let formatted = crate::coercion::format_fixed_number(num.abs(), decimals, true);
+        let is_neg = num < 0.0 && formatted.bytes().any(|b| (b'1'..=b'9').contains(&b));
+        bounded_text(if is_neg {
+            format!("(${formatted})")
+        } else {
+            format!("${formatted}")
+        })
     }
 
     fn opt_int_arg(

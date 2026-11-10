@@ -719,6 +719,20 @@
       return 20;
     }
 
+    function getTdByRef(ref) {
+      seedDomMaps();
+      const packed = packRef(ref);
+      const td = packed > 0 ? tdByPacked.get(packed) : null;
+      return td && td.isConnected !== false ? td : null;
+    }
+
+    function forEachMaterializedTd(cb) {
+      seedDomMaps();
+      tdByPacked.forEach((td) => {
+        if (td && td.isConnected !== false) cb(td);
+      });
+    }
+
     function install() {
       const vp = viewportEl();
       if (vp && typeof vp.addEventListener === "function") {
@@ -753,6 +767,8 @@
       ensureVisible,
       visibleRowSpan,
       getTdAt,
+      getTdByRef,
+      forEachMaterializedTd,
       paintSelectionRange,
       paintTd,
       setDisplayValue,

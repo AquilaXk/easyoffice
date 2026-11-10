@@ -365,7 +365,7 @@ impl SheetEngine {
         ctx: &mut EvalContext<'_>,
         depth: usize,
     ) -> Result<EvaluatedCellValue, FormulaError> {
-        if args.len() < 2 || args.len() > 3 {
+        if !(2..=3).contains(&args.len()) {
             return Err(FormulaError::Value);
         }
         let Some(range_spec) = self.extract_streaming_range_ctx(&args[0], ctx, depth)? else {

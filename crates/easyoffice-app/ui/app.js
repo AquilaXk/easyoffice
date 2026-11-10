@@ -724,29 +724,25 @@
       workspacePanels.computeSmartStats();
     }
 
-    const diagnoseBtn = document.getElementById("btn-smart-diagnose");
-    if (diagnoseBtn) {
-      diagnoseBtn.addEventListener("click", () => {
-        void workspacePanels.runSmartDiagnoseAction().catch(() => {});
-      });
-    }
-
-    const auditBtn =
-      document.getElementById("btn-run-security-audit") ||
-      document.getElementById("btn-security-audit");
-    if (auditBtn) {
-      auditBtn.addEventListener("click", () => {
-        void workspacePanels.runSecurityAuditAction().catch(() => {});
-      });
-    }
-
-    const piiBtn = document.getElementById("btn-scrub-pii");
-    if (piiBtn) {
-      piiBtn.addEventListener("click", () => {
-        void workspacePanels.runPiiScrubAction(true).catch(() => {});
-      });
-    }
+    document.getElementById("btn-smart-diagnose")?.addEventListener("click", () => void workspacePanels.runSmartDiagnoseAction().catch(() => {}));
+    const auditBtn = document.getElementById("btn-run-security-audit") || document.getElementById("btn-security-audit");
+    auditBtn?.addEventListener("click", () => void workspacePanels.runSecurityAuditAction().catch(() => {}));
+    document.getElementById("btn-scrub-pii")?.addEventListener("click", () => void workspacePanels.runPiiScrubAction(true).catch(() => {}));
   }
+
+  const EXT_TO_FORMAT = Object.freeze({
+    docx: "docx", doc: "docx", odt: "odt", rtf: "rtf", md: "md", markdown: "md", txt: "txt",
+    hwpx: "hwpx", hwp: "hwp", hwt: "hwp", hwtx: "hwpx",
+    xlsx: "xlsx", xls: "xls", ods: "ods", csv: "csv", tsv: "tsv",
+    pptx: "pptx", ppsx: "ppsx", ppt: "pptx", odp: "odp", pdf: "pdf",
+  });
+
+  function inferFormatFromFileName(fileName) {
+    const raw = String(fileName || "").trim();
+    const dot = raw.lastIndexOf(".");
+    return dot >= 0 && dot < raw.length - 1 ? EXT_TO_FORMAT[raw.slice(dot + 1).toLowerCase()] || "" : "";
+  }
+  host.__EASYOFFICE_INFER_FORMAT__ = inferFormatFromFileName;
 
   function togglePaletteModal(modal, cmdSearchInput) {
     if (!modal) return;
@@ -772,7 +768,24 @@
     const step = { ArrowDown: 1, ArrowUp: -1 }[e.key] || 0;
     if (step !== 0 && paletteFilteredItems.length > 0) {
       e.preventDefault();
-      paletteSelectedIdx = Math.max(0, Math.min(paletteFilteredItems.length - 1, paletteSelectedIdx + step));
+      const prevIdx = paletteSelectedIdx;
+      paletteSelectedIdx = Math.max(0, Math.min(paletteFilteredItems.length - 1, prevIdx + step));
+      const listEl = document.getElementById("cmd-palette-list");
+      if (listEl && listEl.children.length === paletteFilteredItems.length) {
+        const prevLi = listEl.children[prevIdx];
+        const nextLi = listEl.children[paletteSelectedIdx];
+        if (prevLi && prevIdx !== paletteSelectedIdx) {
+          prevLi.className = "cp-item";
+          prevLi.setAttribute("aria-selected", "false");
+        }
+        if (nextLi) {
+          nextLi.className = "cp-item cp-item--selected";
+          nextLi.setAttribute("aria-selected", "true");
+          cmdSearchInput?.setAttribute("aria-activedescendant", nextLi.id);
+          nextLi.scrollIntoView?.({ block: "nearest" });
+        }
+        return;
+      }
       renderCommandPaletteList(cmdSearchInput ? cmdSearchInput.value : "");
       return;
     }

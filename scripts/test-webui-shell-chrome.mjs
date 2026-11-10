@@ -549,4 +549,61 @@ test("menu-bar .md-icon & menuitemcheckbox centering, .sb-ls-icon in #doc-linesp
   assert.equal(p.style.paddingLeft, "16px", "32px drag at 200% zoom equals 1 indent step (16px)");
 });
 
+test("reference app CSS parity (disabled menu shortcuts/arrows, style-bar sep, zoom slider thumb, glyph hover/active, ruler tokens) and O(1) palette/format helpers", async () => {
+  assert.match(
+    MENU_CSS,
+    /\.md-item\[aria-disabled="true"\]\s+\.md-shortcut,\s*\.md-item\.disabled\s+\.md-shortcut,\s*\.md-item:disabled\s+\.md-shortcut\s*\{\s*color:\s*var\(--ui-border\);\s*\}/
+  );
+  assert.match(
+    MENU_CSS,
+    /\.md-sub\[aria-disabled="true"\]\s*>\s*\.md-arrow,\s*\.md-sub\.disabled\s*>\s*\.md-arrow\s*\{\s*color:\s*var\(--ui-border-light\);\s*\}/
+  );
+  const sepRule = cssRule("#doc-style-bar > .eo-style-sep", TOOLBAR_CSS);
+  assert.ok(hasDecl(sepRule, "width", "1px") && hasDecl(sepRule, "height", "20px") && hasDecl(sepRule, "background", "var(--ui-border)"));
+  const sliderRule = cssRule(".statusbar-zoom-slider", TOOLBAR_CSS);
+  assert.ok(hasDecl(sliderRule, "width", "88px") && hasDecl(sliderRule, "height", "2px") && hasDecl(sliderRule, "background", "var(--ui-border-strong)"));
+  const thumbRule = cssRule(".statusbar-zoom-slider::-webkit-slider-thumb", TOOLBAR_CSS);
+  assert.ok(hasDecl(thumbRule, "width", "12px") && hasDecl(thumbRule, "height", "12px") && hasDecl(thumbRule, "border-radius", "var(--radius-pill)"));
+  const cpShortcutRule = cssRule(".cp-item-shortcut", TOOLBAR_CSS);
+  assert.ok(hasDecl(cpShortcutRule, "border-radius", "var(--radius-md)"));
 
+  const glyphHoverRule = cssRule(".eo-glyph-btn:hover", SHELL_CSS);
+  assert.ok(hasDecl(glyphHoverRule, "background", "var(--ui-hover-strong)") && hasDecl(glyphHoverRule, "outline", "1px solid var(--ui-border-light)"));
+  const glyphActiveRule = cssRule('.eo-glyph-btn.active, .eo-glyph-btn[aria-pressed="true"]', SHELL_CSS);
+  assert.ok(hasDecl(glyphActiveRule, "background", "var(--ui-active)") && hasDecl(glyphActiveRule, "color", "var(--accent-ink)") && hasDecl(glyphActiveRule, "outline", "1px solid var(--ui-border-strong)"));
+  const zoomBtnHover = cssRule(".statusbar-zoom-btn:hover", SHELL_CSS);
+  assert.ok(hasDecl(zoomBtnHover, "outline", "1px solid var(--ui-border-strong)"));
+  const pageRulerRule = cssRule(".page-ruler", CSS);
+  assert.ok(hasDecl(pageRulerRule, "background", "var(--ruler-bg)") && hasDecl(pageRulerRule, "color", "var(--ruler-text)"));
+  const rulerTrackRule = cssRule(".ruler-track", CSS);
+  assert.ok(hasDecl(rulerTrackRule, "background", "var(--ruler-body)") && hasDecl(rulerTrackRule, "color", "var(--ruler-text)"));
+  const rulerPinRule = cssRule(".ruler-pin", CSS);
+  assert.ok(hasDecl(rulerPinRule, "color", "var(--ruler-marker)"));
+  const vRulerRule = cssRule(".v-ruler", CSS);
+  assert.ok(hasDecl(vRulerRule, "color", "var(--ruler-text)"));
+
+  const { document, userClick, sandbox } = await createWorkspaceHarness({ search: "?module=DOC&win=w-o1-helpers" });
+  const inferFmt = document.defaultView.__EASYOFFICE_INFER_FORMAT__;
+  assert.equal(typeof inferFmt, "function");
+  assert.equal(inferFmt("report.DOCX"), "docx");
+  assert.equal(inferFmt("budget.xlsx"), "xlsx");
+  assert.equal(inferFmt("deck.pptx"), "pptx");
+  assert.equal(inferFmt("manual.pdf"), "pdf");
+  assert.equal(inferFmt("official.hwp"), "hwp");
+  assert.equal(inferFmt("official.hwpx"), "hwpx");
+  assert.equal(inferFmt("notes.txt"), "txt");
+  assert.equal(inferFmt("noext"), "");
+
+  userClick(document.getElementById("btn-command-palette"));
+  const listEl = document.getElementById("cmd-palette-list");
+  const firstLiBefore = listEl.children[0];
+  const secondLiBefore = listEl.children[1];
+  assert.ok(firstLiBefore && secondLiBefore, "command palette renders items");
+  assert.equal(firstLiBefore.getAttribute("aria-selected"), "true");
+  sandbox.dispatchWindowKeydown({ key: "ArrowDown" });
+  assert.equal(listEl.children[0], firstLiBefore, "ArrowDown preserves existing DOM nodes in O(1)");
+  assert.equal(listEl.children[1], secondLiBefore, "ArrowDown preserves second DOM node in O(1)");
+  assert.equal(firstLiBefore.getAttribute("aria-selected"), "false");
+  assert.equal(secondLiBefore.getAttribute("aria-selected"), "true");
+  assert.equal(secondLiBefore.classList.contains("cp-item--selected"), true);
+});

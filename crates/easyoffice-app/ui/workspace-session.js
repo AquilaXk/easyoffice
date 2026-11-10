@@ -621,10 +621,12 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       return Boolean(el.closest?.('[contenteditable="true"]'));
     }
 
+    const bindingByKeys = new Map((shortcutBindings || []).map((b) => [b.keys, b]));
+
     // Browser-reserved combos (new/close window) are only bound inside the desktop shell; `macOnly`
     // combos only on macOS (the other systems keep the key for the editor).
     function bindingFor(combo) {
-      const binding = shortcutBindings.find((b) => b.keys === combo);
+      const binding = bindingByKeys.get(combo);
       if (!binding || binding.native || binding.external) return null;
       if (binding.macOnly && !isMacClient()) return null;
       return binding.desktopOnly && !isDesktopShell() ? null : binding;

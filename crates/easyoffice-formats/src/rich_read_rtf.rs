@@ -346,6 +346,14 @@ impl Reader {
                 return;
             }
         }
+        if word == "pnlvlblt" {
+            self.para.list = Some(crate::RichListKind::Bullet);
+            return;
+        }
+        if matches!(word, "pnlvlbody" | "pnlvl") {
+            self.para.list = Some(crate::RichListKind::Ordered);
+            return;
+        }
         match self.top().dest {
             Dest::FontTbl => {
                 if word == "f" {
@@ -419,8 +427,6 @@ impl Reader {
             "qc" => self.para.align = Some(RichAlignment::Center),
             "qr" => self.para.align = Some(RichAlignment::Right),
             "qj" => self.para.align = Some(RichAlignment::Justify),
-            "pnlvlblt" => self.para.list = Some(crate::RichListKind::Bullet),
-            "pnlvlbody" | "pnlvl" => self.para.list = Some(crate::RichListKind::Ordered),
             "ls" => {
                 self.para.list = Some(if param == Some(2) {
                     crate::RichListKind::Ordered
@@ -442,8 +448,9 @@ impl Reader {
                 self.para.slmult = on;
             }
             "outlinelevel" => {
-                let level = param.unwrap_or(0).clamp(0, 5) as u8 + 1;
-                self.para.heading = level;
+                if let Some(n) = param.filter(|n| (0..=5).contains(n)) {
+                    self.para.heading = (n + 1) as u8;
+                }
             }
             _ => self.char_word(word, param, on),
         }
@@ -478,7 +485,9 @@ impl Reader {
             }
             "f" => st.font = param,
             "cf" => st.color = param.and_then(|v| usize::try_from(v).ok()),
-            "highlight" => st.highlight = param.and_then(|v| usize::try_from(v).ok()),
+            "highlight" | "chcbpat" | "cb" => {
+                st.highlight = param.and_then(|v| usize::try_from(v).ok());
+            }
             "plain" => *st = CharState::default(),
             _ => {}
         }
@@ -709,5 +718,31 @@ mod tests {
             p1.plain_text(),
             "\u{2022}\u{2018}A\u{2019}\u{201C}B\u{201D}\u{2002}\u{2003}\u{00A0}\u{2011}"
         );
+    }
+
+    #[test]
+    fn rtf_reads_chcbpat_cb_outlinelevel_and_pn_list_levels() {
+        let rtf = concat!(
+            "{\\rtf1\\ansi{\\colortbl ;\\red255\\green255\\blue0;\\red0\\green255\\blue255;}",
+            "\\pard\\outlinelevel1 HeadingTwo\\par",
+            "\\pard{\\*\\pn\\pnlvlblt}\\chcbpat1 BulletItem\\par",
+            "\\pard\\pnlvlbody\\cb2 OrderedItem\\par}"
+        );
+        let (doc, _) = read_rtf(rtf.as_bytes()).unwrap();
+        assert_eq!(doc.blocks.len(), 3);
+        let RichBlock::Paragraph(h2) = &doc.blocks[0] else {
+            panic!("paragraph 0");
+        };
+        assert_eq!(h2.heading_level, 2);
+        let RichBlock::Paragraph(b_item) = &doc.blocks[1] else {
+            panic!("paragraph 1");
+        };
+        assert_eq!(b_item.list, Some(crate::RichListKind::Bullet));
+        assert_eq!(b_item.runs[0].highlight.as_deref(), Some("FFFF00"));
+        let RichBlock::Paragraph(o_item) = &doc.blocks[2] else {
+            panic!("paragraph 2");
+        };
+        assert_eq!(o_item.list, Some(crate::RichListKind::Ordered));
+        assert_eq!(o_item.runs[0].highlight.as_deref(), Some("00FFFF"));
     }
 }

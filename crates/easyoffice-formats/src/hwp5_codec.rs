@@ -528,7 +528,7 @@ impl Hwp5Codec {
             let mut parsed = Vec::with_capacity(rows);
             for r in 0..rows {
                 let c = read_u16_le(slice, 8 + r * 2)? as usize;
-                if c > 0 && c <= crate::MAX_HWP_TABLE_COLS {
+                if (1..=crate::MAX_HWP_TABLE_COLS).contains(&c) {
                     parsed.push(c);
                 } else {
                     break;

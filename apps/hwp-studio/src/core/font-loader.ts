@@ -69,6 +69,13 @@ const BUNDLED_ALIAS_ENTRIES: readonly FontEntry[] = [
 ];
 
 const FONT_LIST: readonly FontEntry[] = [...FONT_RULE_WEBFONT_ENTRIES, ...BUNDLED_ALIAS_ENTRIES];
+const FONT_ENTRIES_BY_NORMALIZED_NAME = new Map<string, FontEntry[]>();
+for (const entry of FONT_LIST) {
+  const norm = normalizeProjectedFontFamily(entry.name);
+  const bucket = FONT_ENTRIES_BY_NORMALIZED_NAME.get(norm);
+  if (bucket) bucket.push(entry);
+  else FONT_ENTRIES_BY_NORMALIZED_NAME.set(norm, [entry]);
+}
 
 /** @font-face에 등록된 저작 허용 폰트 이름 Set */
 export const REGISTERED_FONTS = new Set(filterAuthoringFontFamilies(FONT_LIST.map(f => f.name)));
@@ -79,6 +86,7 @@ const CRITICAL_FONTS = new Set(['함초롬바탕', '함초롬돋움']);
 /** CSS @font-face에 등록한 글꼴 (문서 요청 단위로 누적) */
 const registeredFontFaces: FontEntry[] = [];
 const registeredFontFaceKeys = new Set<string>();
+const registeredFontFamilies = new Set<string>();
 
 /** 한번이라도 요청한 실제 글꼴 파일 (진단용) */
 const loadedFiles = new Set<string>();
@@ -134,8 +142,7 @@ function isDetectedOSFont(name: string): boolean {
 }
 
 function isRegisteredFontFamily(name: string): boolean {
-  const normalized = normalizeFontFamily(name);
-  return registeredFontFaces.some(entry => normalizeFontFamily(entry.name) === normalized);
+  return registeredFontFamilies.has(normalizeFontFamily(name));
 }
 
 function registerFontFaces(entries: readonly FontEntry[], _options?: WebFontLoadOptions): void {
@@ -144,6 +151,7 @@ function registerFontFaces(entries: readonly FontEntry[], _options?: WebFontLoad
     if (!registeredFontFaceKeys.has(key)) {
       registeredFontFaceKeys.add(key);
       registeredFontFaces.push(entry);
+      registeredFontFamilies.add(normalizeFontFamily(entry.name));
     }
   }
 }
@@ -163,40 +171,49 @@ const OS_FONT_CANDIDATES = [
 ];
 const detectedOSFonts = new Set<string>();
 const detectedOSFontFamilies = new Set<string>();
+const GENERIC_FAMILIES = ['monospace', 'serif', 'sans-serif'] as const;
+
+interface FontMeasurementBatch {
+  probe: HTMLSpanElement;
+  fallbackWidths: number[];
+}
+
+function createFontMeasurementBatch(): FontMeasurementBatch | null {
+  const body = document.body;
+  if (!body) return null;
+  try {
+    const probe = document.createElement('span');
+    probe.textContent = 'mmmmmmmmmwwwwwwwWMWMWM한글글꼴측정0123456789';
+    probe.style.position = 'absolute';
+    probe.style.visibility = 'hidden';
+    probe.style.whiteSpace = 'nowrap';
+    probe.style.fontSize = '72px';
+    probe.style.fontStyle = 'normal';
+    probe.style.fontWeight = 'normal';
+    body.appendChild(probe);
+    const fallbackWidths = GENERIC_FAMILIES.map(family => {
+      probe.style.fontFamily = family;
+      return probe.offsetWidth;
+    });
+    return { probe, fallbackWidths };
+  } catch {
+    return null;
+  }
+}
 
 /**
  * 등록 전 시스템 글꼴을 generic fallback과의 폭 비교로 감지한다.
  * `document.fonts.check()`만 사용하면 일치하는 @font-face가 없을 때도
  * fallback으로 렌더할 수 있어 설치 여부를 확정할 수 없다.
  */
-function isSystemFontAvailable(name: string): boolean {
-  const body = document.body;
-  if (body) {
+function isSystemFontAvailable(name: string, batch: FontMeasurementBatch | null): boolean {
+  if (batch) {
     try {
-      const probe = document.createElement('span');
-      probe.textContent = 'mmmmmmmmmwwwwwwwWMWMWM한글글꼴측정0123456789';
-      probe.style.position = 'absolute';
-      probe.style.visibility = 'hidden';
-      probe.style.whiteSpace = 'nowrap';
-      probe.style.fontSize = '72px';
-      probe.style.fontStyle = 'normal';
-      probe.style.fontWeight = 'normal';
-      body.appendChild(probe);
-
-      try {
-        const genericFamilies = ['monospace', 'serif', 'sans-serif'];
-        const fallbackWidths = genericFamilies.map(family => {
-          probe.style.fontFamily = family;
-          return probe.offsetWidth;
-        });
-        const escapedName = name.replace(/(["\\])/g, String.raw`\$1`);
-        return genericFamilies.some((family, index) => {
-          probe.style.fontFamily = `"${escapedName}", ${family}`;
-          return probe.offsetWidth !== fallbackWidths[index];
-        });
-      } finally {
-        probe.remove();
-      }
+      const escapedName = name.replace(/(["\\])/g, String.raw`\$1`);
+      return GENERIC_FAMILIES.some((family, index) => {
+        batch.probe.style.fontFamily = `"${escapedName}", ${family}`;
+        return batch.probe.offsetWidth !== batch.fallbackWidths[index];
+      });
     } catch {
       // body가 아직 없거나 레이아웃 측정을 지원하지 않는 surface는 기존 API로 보수적으로 처리한다.
     }
@@ -212,16 +229,21 @@ function isSystemFontAvailable(name: string): boolean {
 /** OS 폰트 감지 실행 (@font-face 등록 전에 호출) */
 function detectOSFonts(fontNames: readonly string[]): void {
   const candidates = new Set([...OS_FONT_CANDIDATES, ...fontNames]);
-  for (const name of candidates) {
-    if (isAuthoringBlockedFontFamily(name)) continue;
-    const normalized = normalizeFontFamily(name);
-    if (!normalized || detectedOSFontFamilies.has(normalized) || isRegisteredFontFamily(name)) continue;
-    try {
-      if (isSystemFontAvailable(name)) {
-        detectedOSFonts.add(name);
-        detectedOSFontFamilies.add(normalized);
-      }
-    } catch { /* 무시 */ }
+  const batch = createFontMeasurementBatch();
+  try {
+    for (const name of candidates) {
+      if (isAuthoringBlockedFontFamily(name)) continue;
+      const normalized = normalizeFontFamily(name);
+      if (!normalized || detectedOSFontFamilies.has(normalized) || isRegisteredFontFamily(name)) continue;
+      try {
+        if (isSystemFontAvailable(name, batch)) {
+          detectedOSFonts.add(name);
+          detectedOSFontFamilies.add(normalized);
+        }
+      } catch { /* 무시 */ }
+    }
+  } finally {
+    batch?.probe.remove();
   }
   if (detectedOSFonts.size > 0) {
     console.log(`[FontLoader] OS 폰트 감지: ${Array.from(detectedOSFonts).join(', ')}`);
@@ -248,7 +270,7 @@ function fontSupplyStatus(loaded: boolean, registered: boolean, catalogued: bool
 /** W2 trace용 상세 경로. 공개 snapshot의 기존 두 필드는 그대로 유지한다. */
 export function getWebFontSupplySnapshotWithRules(fontName: string): WebFontSupplyDecision {
   const normalized = normalizeFontFamily(fontName);
-  const entries = FONT_LIST.filter(entry => normalizeFontFamily(entry.name) === normalized);
+  const entries = FONT_ENTRIES_BY_NORMALIZED_NAME.get(normalized) ?? [];
   const loaded = entries.some(entry => loadedFontFaceKeys.has(fontFaceKey(entry)));
   const registered = entries.some(entry => registeredFontFaceKeys.has(fontFaceKey(entry)));
   return {

@@ -208,7 +208,7 @@ fn deflate_zlib_scalar_baseline(input: &[u8]) -> Vec<u8> {
             while cand >= (min_pos as i32) && steps < 64 {
                 let c_pos = cand as usize;
                 let dist = pos - c_pos;
-                if dist > 0 && dist <= 32_768 {
+                if (1..=32_768).contains(&dist) {
                     let mut m_len = 0usize;
                     while m_len < max_len && input[c_pos + m_len] == input[pos + m_len] {
                         m_len += 1;

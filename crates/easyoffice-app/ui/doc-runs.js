@@ -11,6 +11,7 @@
 
   const RUN_CLASS = "eo-run";
   const BOOL_PROPS = ["bold", "italic", "underline", "strike"];
+  const BOOL_PROP_SET = new Set(BOOL_PROPS);
   const VALUE_PROPS = ["size", "font", "color", "highlight"];
   const PROPS = [...VALUE_PROPS, ...BOOL_PROPS];
   const DATA_KEY = {
@@ -64,7 +65,7 @@
   // Returns the normalized value of one property, `null` to clear it, or `undefined` if invalid.
   function normalizeProp(prop, value) {
     if (value === null || value === false || value === "") return null;
-    if (BOOL_PROPS.includes(prop)) return value === true ? true : undefined;
+    if (BOOL_PROP_SET.has(prop)) return value === true ? true : undefined;
     if (prop === "size") {
       const n = Number(value);
       return Number.isInteger(n) && n >= MIN_HALF_PT && n <= MAX_HALF_PT ? n : undefined;
@@ -371,6 +372,27 @@
 
   // Characters of document text before the point (stable across splits and merges).
   function textOffsetOf(root, node, offset, extraExclude, scope = root) {
+    if (node?.nodeType === 3 && !isExcluded(scope, root, extraExclude)) {
+      let acc = 0;
+      let hit = -1;
+      const walk = (cur) => {
+        const children = cur.childNodes;
+        for (let i = 0; i < children.length; i += 1) {
+          const child = children[i];
+          if (child === node) {
+            hit = acc + offset;
+            return true;
+          }
+          if (child.nodeType === 3) {
+            acc += textLength(child);
+          } else if (child.nodeType === 1 && !isSkippedElement(child, extraExclude) && walk(child)) {
+            return true;
+          }
+        }
+        return false;
+      };
+      if (walk(scope)) return hit;
+    }
     const point = pathTo(root, node);
     let total = 0;
     for (const entry of textEntries(scope, root, extraExclude)) {
@@ -778,7 +800,7 @@
   }
 
   host.__EASYOFFICE_DOC_RUNS__ = {
-    RUN_CLASS, PROPS, BOOL_PROPS, VALUE_PROPS, DATA_KEY, MIXED, DEFAULT_HALF_PT, MIN_HALF_PT, MAX_HALF_PT,
+    RUN_CLASS, PROPS, BOOL_PROPS, BOOL_PROP_SET, VALUE_PROPS, DATA_KEY, MIXED, DEFAULT_HALF_PT, MIN_HALF_PT, MAX_HALF_PT,
     normalizeColor, normalizeFont, normalizeProp, normalizePatch, ptToHalfPt, halfPtToCss,
     isRunElement, readRunFormat, readLegacyFormat, fromModelRun, buildRunSpec, formatOfText, applyFormat, queryFormat, wordRangeAt,
     insertFormattedText, blocksInRange, blockOf, containerOf, collectTextNodes, textOffsetOf,

@@ -340,11 +340,14 @@ fn lex_quoted(src: &str, i: usize, quote: u8) -> Result<(String, usize), Formula
     let mut i = i + 1;
     let mut text = String::new();
     while i < bytes.len() {
-        if bytes[i] != quote {
-            let ch = src[i..].chars().next().ok_or(FormulaError::Value)?;
-            text.push(ch);
-            i += ch.len_utf8();
-        } else if bytes.get(i + 1) == Some(&quote) {
+        let Some(rel) = bytes[i..].iter().position(|&b| b == quote) else {
+            return Err(FormulaError::Value);
+        };
+        if rel > 0 {
+            text.push_str(&src[i..i + rel]);
+            i += rel;
+        }
+        if bytes.get(i + 1) == Some(&quote) {
             text.push(quote as char);
             i += 2;
         } else {

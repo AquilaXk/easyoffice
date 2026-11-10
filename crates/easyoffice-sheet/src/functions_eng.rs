@@ -27,7 +27,7 @@ const BIN_SIGN_BIT: u64 = 512;
 
 #[inline]
 fn check_arity(args: &[Expr], min: usize, max: usize) -> Result<(), FormulaError> {
-    if args.len() < min || args.len() > max {
+    if !(min..=max).contains(&args.len()) {
         Err(FormulaError::Value)
     } else {
         Ok(())
@@ -45,7 +45,7 @@ fn finite_num(x: f64) -> Result<EvaluatedCellValue, FormulaError> {
 
 #[inline]
 fn parse_uint48(n: f64) -> Result<u64, FormulaError> {
-    if !n.is_finite() || n < 0.0 || n > (MAX_BIT_UINT48 as f64) {
+    if !n.is_finite() || !(0.0..=(MAX_BIT_UINT48 as f64)).contains(&n) {
         return Err(FormulaError::Num);
     }
     let rounded = n.round();
@@ -120,6 +120,48 @@ impl SheetEngine {
             "DEC2BIN" => {
                 self.eng_dec_to_radix(args, 2, BIN_NEG_MIN, BIN_POS_MAX, BIN_TWOS_COMP, ctx, depth)
             }
+            "BIN2HEX" => self.eng_radix_to_radix(
+                args,
+                (2, BIN_SIGN_BIT, BIN_TWOS_COMP),
+                (16, HEX_NEG_MIN, HEX_POS_MAX, HEX_TWOS_COMP),
+                ctx,
+                depth,
+            ),
+            "BIN2OCT" => self.eng_radix_to_radix(
+                args,
+                (2, BIN_SIGN_BIT, BIN_TWOS_COMP),
+                (8, OCT_NEG_MIN, OCT_POS_MAX, OCT_TWOS_COMP),
+                ctx,
+                depth,
+            ),
+            "OCT2BIN" => self.eng_radix_to_radix(
+                args,
+                (8, OCT_SIGN_BIT, OCT_TWOS_COMP),
+                (2, BIN_NEG_MIN, BIN_POS_MAX, BIN_TWOS_COMP),
+                ctx,
+                depth,
+            ),
+            "OCT2HEX" => self.eng_radix_to_radix(
+                args,
+                (8, OCT_SIGN_BIT, OCT_TWOS_COMP),
+                (16, HEX_NEG_MIN, HEX_POS_MAX, HEX_TWOS_COMP),
+                ctx,
+                depth,
+            ),
+            "HEX2BIN" => self.eng_radix_to_radix(
+                args,
+                (16, HEX_SIGN_BIT, HEX_TWOS_COMP),
+                (2, BIN_NEG_MIN, BIN_POS_MAX, BIN_TWOS_COMP),
+                ctx,
+                depth,
+            ),
+            "HEX2OCT" => self.eng_radix_to_radix(
+                args,
+                (16, HEX_SIGN_BIT, HEX_TWOS_COMP),
+                (8, OCT_NEG_MIN, OCT_POS_MAX, OCT_TWOS_COMP),
+                ctx,
+                depth,
+            ),
             "MULTINOMIAL" => self.eng_multinomial(args, ctx, depth),
             "SERIESSUM" => self.eng_seriessum(args, ctx, depth),
             "SUMX2MY2" | "SUMX2PY2" | "SUMXMY2" => self.eng_sum_paired(name, args, ctx, depth),
@@ -241,7 +283,7 @@ impl SheetEngine {
             return Err(FormulaError::Value);
         }
         let n = v0.as_number().ok_or(FormulaError::Value)?.trunc();
-        if !n.is_finite() || n < (neg_min as f64) || n > (pos_max as f64) {
+        if !n.is_finite() || !((neg_min as f64)..=(pos_max as f64)).contains(&n) {
             return Err(FormulaError::Num);
         }
         let places = if let Some(arg1) = args.get(1) {
@@ -281,6 +323,37 @@ impl SheetEngine {
         format_with_places(raw, places)
     }
 
+    fn eng_radix_to_radix(
+        &self,
+        args: &[Expr],
+        src: (u32, u64, i64),
+        dst: (u32, i64, i64, i64),
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<EvaluatedCellValue, FormulaError> {
+        check_arity(args, 1, 2)?;
+        if matches!(args.first(), Some(Expr::Boolean(_))) {
+            return Err(FormulaError::Value);
+        }
+        let dec = self.eng_radix_to_dec(
+            std::slice::from_ref(&args[0]),
+            src.0,
+            src.1,
+            src.2,
+            ctx,
+            depth,
+        )?;
+        let EvaluatedCellValue::Number(n) = dec else {
+            return Err(FormulaError::Value);
+        };
+        let mut dec_args = Vec::with_capacity(args.len());
+        dec_args.push(Expr::Number(n));
+        if let Some(arg1) = args.get(1) {
+            dec_args.push(arg1.clone());
+        }
+        self.eng_dec_to_radix(&dec_args, dst.0, dst.1, dst.2, dst.3, ctx, depth)
+    }
+
     fn eng_multinomial(
         &self,
         args: &[Expr],
@@ -308,7 +381,7 @@ impl SheetEngine {
                         }
                         if let EvaluatedCellValue::Number(x) = cell_val {
                             let t = x.trunc();
-                            if !t.is_finite() || t < 0.0 || t > 10_000.0 {
+                            if !t.is_finite() || !(0.0..=10_000.0).contains(&t) {
                                 return Err(FormulaError::Num);
                             }
                             let k = t as u64;
@@ -322,7 +395,7 @@ impl SheetEngine {
                 }
             } else {
                 let x = self.eval_arg_num(arg, ctx, depth)?.trunc();
-                if !x.is_finite() || x < 0.0 || x > 10_000.0 {
+                if !x.is_finite() || !(0.0..=10_000.0).contains(&x) {
                     return Err(FormulaError::Num);
                 }
                 let k = x as u64;
@@ -629,6 +702,150 @@ mod tests {
         assert_eq!(
             s.evaluate_formula_str("=합계(A1:A3)"),
             EvaluatedCellValue::Number(70.0)
+        );
+    }
+
+    #[test]
+    fn cross_radix_skew_p_percentrank_days360_dollar_steyx_combina_permutationa() {
+        let mut s = SheetEngine::new("Round2UpgradeTest");
+        // Cross-radix 10-place two's complement conversions
+        assert_eq!(
+            s.evaluate_formula_str("=BIN2HEX(\"11111011\", 4)"),
+            EvaluatedCellValue::Text("00FB".to_string())
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=BIN2HEX(\"1111111111\")"),
+            EvaluatedCellValue::Text("FFFFFFFFFF".to_string())
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=BIN2OCT(\"1001\", 3)"),
+            EvaluatedCellValue::Text("011".to_string())
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=BIN2OCT(\"1111111111\")"),
+            EvaluatedCellValue::Text("7777777777".to_string())
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=OCT2BIN(\"3\", 3)"),
+            EvaluatedCellValue::Text("011".to_string())
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=OCT2BIN(\"7777777000\")"),
+            EvaluatedCellValue::Text("1000000000".to_string())
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=OCT2HEX(\"100\", 4)"),
+            EvaluatedCellValue::Text("0040".to_string())
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=OCT2HEX(\"7777777533\")"),
+            EvaluatedCellValue::Text("FFFFFFFF5B".to_string())
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=HEX2BIN(\"F\", 8)"),
+            EvaluatedCellValue::Text("00001111".to_string())
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=HEX2BIN(\"FFFFFFFFFF\")"),
+            EvaluatedCellValue::Text("1111111111".to_string())
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=HEX2OCT(\"F\", 3)"),
+            EvaluatedCellValue::Text("017".to_string())
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=HEX2OCT(\"FFFFFFFF00\")"),
+            EvaluatedCellValue::Text("7777777400".to_string())
+        );
+
+        // SKEW.P
+        for (i, v) in [3, 4, 5, 2, 3, 4, 5, 6, 4, 7].into_iter().enumerate() {
+            s.set_cell(&format!("A{}", i + 1), v.to_string()).unwrap();
+        }
+        let EvaluatedCellValue::Number(skew_p) = s.evaluate_formula_str("=SKEW.P(A1:A10)") else {
+            panic!("expected SKEW.P number");
+        };
+        assert!((skew_p - 0.30319333935499).abs() < 1e-8);
+
+        // PERCENTRANK, PERCENTRANK.INC, PERCENTRANK.EXC
+        for (i, v) in [1, 2, 3, 4, 6, 8, 9, 11, 12, 13].into_iter().enumerate() {
+            s.set_cell(&format!("B{}", i + 1), v.to_string()).unwrap();
+        }
+        assert_eq!(
+            s.evaluate_formula_str("=PERCENTRANK(B1:B10, 4)"),
+            EvaluatedCellValue::Number(0.333)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=PERCENTRANK.INC(B1:B10, 5, 4)"),
+            EvaluatedCellValue::Number(0.3888)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=PERCENTRANK.EXC(B1:B10, 4)"),
+            EvaluatedCellValue::Number(0.363)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=PERCENTRANK.INC(B1:B10, 20)"),
+            EvaluatedCellValue::Error(FormulaError::Na)
+        );
+
+        // DAYS360 (U.S. NASD 30/360 and European 30E/360)
+        assert_eq!(
+            s.evaluate_formula_str("=DAYS360(DATE(2024,1,30), DATE(2024,2,1))"),
+            EvaluatedCellValue::Number(1.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=DAYS360(DATE(2024,1,1), DATE(2024,3,31), FALSE)"),
+            EvaluatedCellValue::Number(90.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=DAYS360(DATE(2024,1,1), DATE(2024,3,31), TRUE)"),
+            EvaluatedCellValue::Number(89.0)
+        );
+
+        // DOLLAR
+        assert_eq!(
+            s.evaluate_formula_str("=DOLLAR(1234.567, 2)"),
+            EvaluatedCellValue::Text("$1,234.57".to_string())
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=DOLLAR(-1234.567, -2)"),
+            EvaluatedCellValue::Text("($1,200)".to_string())
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=DOLLAR(-0.001, 2)"),
+            EvaluatedCellValue::Text("$0.00".to_string())
+        );
+
+        // STEYX
+        for (i, (y, x)) in [(2, 6), (3, 5), (9, 11), (1, 7), (8, 5), (7, 4), (5, 4)]
+            .into_iter()
+            .enumerate()
+        {
+            s.set_cell(&format!("C{}", i + 1), y.to_string()).unwrap();
+            s.set_cell(&format!("D{}", i + 1), x.to_string()).unwrap();
+        }
+        let EvaluatedCellValue::Number(steyx) = s.evaluate_formula_str("=STEYX(C1:C7, D1:D7)")
+        else {
+            panic!("expected STEYX number");
+        };
+        assert!((steyx - 3.3057189502).abs() < 1e-6);
+
+        // PERMUTATIONA and COMBINA
+        assert_eq!(
+            s.evaluate_formula_str("=PERMUTATIONA(3, 2)"),
+            EvaluatedCellValue::Number(9.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=PERMUTATIONA(0, 0)"),
+            EvaluatedCellValue::Number(1.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=COMBINA(4, 3)"),
+            EvaluatedCellValue::Number(20.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=COMBINA(10, 3)"),
+            EvaluatedCellValue::Number(220.0)
         );
     }
 }

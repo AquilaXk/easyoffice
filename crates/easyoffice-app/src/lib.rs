@@ -740,10 +740,44 @@ impl EasyOfficeIpcRouter {
 
     pub fn escape_json_str(s: &str) -> String {
         use std::fmt::Write;
+        const LO: u64 = 0x0101_0101_0101_0101;
+        const HI: u64 = 0x8080_8080_8080_8080;
         let bytes = s.as_bytes();
         let mut out = String::with_capacity(s.len());
-        let mut last = 0;
-        for (i, &b) in bytes.iter().enumerate() {
+        let mut last = 0usize;
+        let mut i = 0usize;
+        while i + 8 <= bytes.len() {
+            let word = u64::from_le_bytes(bytes[i..i + 8].try_into().unwrap());
+            let d_quot = word ^ (0x22u64.wrapping_mul(LO));
+            let d_bs = word ^ (0x5Cu64.wrapping_mul(LO));
+            let m_quot = d_quot.wrapping_sub(LO) & !d_quot;
+            let m_bs = d_bs.wrapping_sub(LO) & !d_bs;
+            let m_ctrl = !(word | (word << 1) | (word << 2));
+            let mask = (m_quot | m_bs | m_ctrl) & HI;
+            if mask == 0 {
+                i += 8;
+                continue;
+            }
+            i += (mask.trailing_zeros() >> 3) as usize;
+            let b = bytes[i];
+            if last < i {
+                out.push_str(&s[last..i]);
+            }
+            match b {
+                b'\\' => out.push_str("\\\\"),
+                b'"' => out.push_str("\\\""),
+                b'\n' => out.push_str("\\n"),
+                b'\r' => out.push_str("\\r"),
+                b'\t' => out.push_str("\\t"),
+                _ => {
+                    let _ = write!(out, "\\u{:04x}", b);
+                }
+            }
+            i += 1;
+            last = i;
+        }
+        while i < bytes.len() {
+            let b = bytes[i];
             let escaped = match b {
                 b'\\' => "\\\\",
                 b'"' => "\\\"",
@@ -755,16 +789,21 @@ impl EasyOfficeIpcRouter {
                         out.push_str(&s[last..i]);
                     }
                     let _ = write!(out, "\\u{:04x}", b);
-                    last = i + 1;
+                    i += 1;
+                    last = i;
                     continue;
                 }
-                _ => continue,
+                _ => {
+                    i += 1;
+                    continue;
+                }
             };
             if last < i {
                 out.push_str(&s[last..i]);
             }
             out.push_str(escaped);
-            last = i + 1;
+            i += 1;
+            last = i;
         }
         if last < s.len() {
             out.push_str(&s[last..]);

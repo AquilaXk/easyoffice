@@ -27,17 +27,20 @@ impl WorkbookEngine {
         let mut out = String::with_capacity(inner.len());
         let mut i = 0usize;
         while i < bytes.len() {
-            if bytes[i] == b'\'' {
-                if i + 1 < bytes.len() && bytes[i + 1] == b'\'' {
+            if let Some(rel) = bytes[i..].iter().position(|&b| b == b'\'') {
+                if rel > 0 {
+                    out.push_str(&inner[i..i + rel]);
+                    i += rel;
+                }
+                if bytes.get(i + 1) == Some(&b'\'') {
                     out.push('\'');
                     i += 2;
                 } else {
                     return None;
                 }
             } else {
-                let ch = inner[i..].chars().next()?;
-                out.push(ch);
-                i += ch.len_utf8();
+                out.push_str(&inner[i..]);
+                break;
             }
         }
         Some(out)
@@ -269,7 +272,7 @@ impl SheetEngine {
         let mut row_map: HashMap<u32, Vec<(u32, String)>> = HashMap::with_capacity(row_span);
         for (&coord, raw) in &self.cells {
             let r = coord.row();
-            if r >= start_row && r <= end_row {
+            if (start_row..=end_row).contains(&r) {
                 row_map
                     .entry(r)
                     .or_default()

@@ -174,9 +174,15 @@
   padding-left: 8px;
 }
 
+.md-item[aria-disabled="true"] .md-shortcut,
 .md-item.disabled .md-shortcut,
-.md-item[aria-disabled="true"] .md-shortcut {
-  color: var(--color-text-disabled);
+.md-item:disabled .md-shortcut {
+  color: var(--ui-border);
+}
+
+.md-sub[aria-disabled="true"] > .md-arrow,
+.md-sub.disabled > .md-arrow {
+  color: var(--ui-border-light);
 }
 
 /* separator */

@@ -4,7 +4,7 @@ mod pdf_damaged_encrypt;
 mod pdf_splice_classifier;
 #[path = "pdf_value_parser.rs"]
 mod pdf_value_parser;
-pub(super) use pdf_value_parser::parse_pdf_value_with_table;
+pub(super) use pdf_value_parser::{decode_pdf_stream_filters, parse_pdf_value_with_table};
 
 use crate::pdf_stream_parser::{
     advance_past_stream_eol, contains_subslice, decode_pdf_hex_string,
@@ -493,29 +493,6 @@ pub(super) fn resolve_stream_length_hint(
     }
 }
 
-pub(super) fn dict_has_flate_filter(
-    entries: &[(String, PdfObjValue)],
-    objects: &HashMap<(u32, u16), PdfIndirectObject>,
-) -> Result<bool, &'static str> {
-    let Some(raw_filter) = dict_get(entries, "/Filter") else {
-        return Ok(false);
-    };
-    let Some(filter_val) = resolve_value(raw_filter, objects) else {
-        return Err("PDF 스트림 /Filter 간접 참조를 해석할 수 없습니다.");
-    };
-    match filter_val {
-        PdfObjValue::Null => Ok(false),
-        PdfObjValue::Name(n) if n == "/FlateDecode" => Ok(true),
-        PdfObjValue::Array(arr) if arr.is_empty() => Ok(false),
-        PdfObjValue::Array(arr) if arr.len() == 1 => match resolve_value(&arr[0], objects) {
-            Some(PdfObjValue::Name(n)) if n == "/FlateDecode" => Ok(true),
-            None => Err("PDF 스트림 /Filter 배열 원소 간접 참조를 해석할 수 없습니다."),
-            _ => Err("지원하지 않는 PDF 스트림 필터 배열입니다."),
-        },
-        _ => Err("지원하지 않는 PDF 스트림 필터입니다."),
-    }
-}
-
 pub(super) fn decode_and_validate_pdf_streams(
     bytes: &[u8],
     objects: &HashMap<(u32, u16), PdfIndirectObject>,
@@ -535,23 +512,10 @@ pub(super) fn decode_and_validate_pdf_streams(
             ));
         };
         let raw_stream = &bytes[s_start..s_end];
-        let is_flate = dict_has_flate_filter(entries, objects)
-            .map_err(|detail| EasyOfficeError::CorruptedContainer(detail.to_string()))?;
+        let decoded_opt =
+            decode_pdf_stream_filters(raw_stream, entries, objects, remaining_budget)?;
         let is_meta = is_studio_metadata_dict(entries);
-        if is_flate {
-            let cap = MAX_PDF_STREAM_DECODE_BYTES.min(*remaining_budget);
-            let inflated = match crate::deflate::inflate_auto(raw_stream, cap) {
-                Ok(d) => d,
-                Err(e @ EasyOfficeError::ResourceBudgetExceeded(_)) => return Err(e),
-                Err(_) => {
-                    return Err(EasyOfficeError::CorruptedContainer(
-                        "PDF FlateDecode 스트림 압축 해제에 실패했습니다.".to_string(),
-                    ))
-                }
-            };
-            *remaining_budget = remaining_budget.saturating_sub(inflated.len());
-            let decoded = apply_flate_decode_parms(inflated, entries, objects)
-                .map_err(|detail| EasyOfficeError::CorruptedContainer(detail.to_string()))?;
+        if let Some(decoded) = decoded_opt {
             if is_meta {
                 let meta_text = String::from_utf8_lossy(&decoded);
                 for s_line in meta_text.split(['\r', '\n']) {
@@ -696,9 +660,11 @@ pub(super) fn stream_contains_forbidden_b64_comment(stream_bytes: &[u8]) -> bool
 /// row filters None=0, Sub=1, Up=2, Average=3, Paeth=4).
 /// Adapted from reference implementations `lopdf` (MIT) and `pypdf` (BSD-3-Clause) with
 /// fail-closed bounds checking (`1..=65536` columns).
-fn apply_flate_decode_parms(
+pub(super) fn apply_flate_decode_parms_at(
     mut data: Vec<u8>,
     entries: &[(String, PdfObjValue)],
+    stage_idx: usize,
+    filter_count: usize,
     objects: &HashMap<(u32, u16), PdfIndirectObject>,
 ) -> Result<Vec<u8>, &'static str> {
     let Some(raw_parms) = dict_get(entries, "/DecodeParms") else {
@@ -711,11 +677,13 @@ fn apply_flate_decode_parms(
         PdfObjValue::Null => return Ok(data),
         PdfObjValue::Dict(d) => d,
         PdfObjValue::Array(arr) if arr.is_empty() => return Ok(data),
-        PdfObjValue::Array(arr) if arr.len() == 1 => match resolve_value(&arr[0], objects) {
-            Some(PdfObjValue::Null) => return Ok(data),
-            Some(PdfObjValue::Dict(d)) => d,
-            _ => return Err("PDF 스트림 /DecodeParms 배열 원소가 올바르지 않습니다."),
-        },
+        PdfObjValue::Array(arr) if arr.len() == filter_count => {
+            match resolve_value(&arr[stage_idx], objects) {
+                Some(PdfObjValue::Null) => return Ok(data),
+                Some(PdfObjValue::Dict(d)) => d,
+                _ => return Err("PDF 스트림 /DecodeParms 배열 원소가 올바르지 않습니다."),
+            }
+        }
         _ => return Err("PDF 스트림 /DecodeParms 형식이 올바르지 않습니다."),
     };
     let predictor = match dict_get(parms, "/Predictor") {

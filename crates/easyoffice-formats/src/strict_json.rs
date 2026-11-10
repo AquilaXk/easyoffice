@@ -98,12 +98,16 @@ fn decimal_to_u64(is_neg: bool, int_bytes: &[u8], frac_bytes: &[u8], exp: i64) -
 impl StrictJsonValue {
     pub fn parse(input: &str) -> Result<Self, EasyOfficeError> {
         let trimmed = input.strip_prefix('\u{FEFF}').unwrap_or(input);
-        let mut chars = trimmed.chars().peekable();
-        let root = Self::parse_value(&mut chars, 0).ok_or_else(|| {
+        let mut cursor = JsonCursor {
+            src: trimmed,
+            bytes: trimmed.as_bytes(),
+            pos: 0,
+        };
+        let root = cursor.parse_value(0).ok_or_else(|| {
             EasyOfficeError::InvalidArgument("유효하지 않은 RFC 8259 JSON 구문입니다.".to_string())
         })?;
-        Self::skip_ws(&mut chars);
-        if chars.peek().is_some() {
+        cursor.skip_ws();
+        if cursor.pos < cursor.bytes.len() {
             return Err(EasyOfficeError::InvalidArgument(
                 "JSON 루트 값 뒤에 허용되지 않는 후행 토큰이 존재합니다.".to_string(),
             ));
@@ -242,216 +246,256 @@ impl StrictJsonValue {
     pub fn get_str<'a>(entries: &'a [(String, StrictJsonValue)], key: &str) -> Option<&'a str> {
         Self::get_field(entries, key).and_then(Self::as_str)
     }
+}
 
-    fn skip_ws(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) {
-        while chars
-            .peek()
-            .is_some_and(|ch| matches!(ch, ' ' | '\t' | '\r' | '\n'))
+struct JsonCursor<'a> {
+    src: &'a str,
+    bytes: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> JsonCursor<'a> {
+    #[inline]
+    fn skip_ws(&mut self) {
+        while self.pos < self.bytes.len()
+            && matches!(self.bytes[self.pos], b' ' | b'\t' | b'\r' | b'\n')
         {
-            let _ = chars.next();
+            self.pos += 1;
         }
     }
 
-    fn parse_string_literal(
-        chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
-    ) -> Option<String> {
+    #[inline]
+    fn peek_byte(&self) -> Option<u8> {
+        self.bytes.get(self.pos).copied()
+    }
+
+    fn parse_hex4(&mut self) -> Option<u16> {
+        if self.pos + 4 > self.bytes.len() {
+            return None;
+        }
+        let s = self.src.get(self.pos..self.pos + 4)?;
+        let val = u16::from_str_radix(s, 16).ok()?;
+        self.pos += 4;
+        Some(val)
+    }
+
+    fn parse_str(&mut self) -> Option<String> {
+        const LO: u64 = 0x0101_0101_0101_0101;
+        const HI: u64 = 0x8080_8080_8080_8080;
         let mut out = String::new();
-        while let Some(c) = chars.next() {
-            if c == '"' {
+        loop {
+            let run_start = self.pos;
+            while self.pos + 8 <= self.bytes.len() {
+                let word =
+                    u64::from_le_bytes(self.bytes[self.pos..self.pos + 8].try_into().unwrap());
+                let d_quot = word ^ (0x22u64.wrapping_mul(LO));
+                let d_bs = word ^ (0x5Cu64.wrapping_mul(LO));
+                let m_quot = d_quot.wrapping_sub(LO) & !d_quot;
+                let m_bs = d_bs.wrapping_sub(LO) & !d_bs;
+                let m_ctrl = !(word | (word << 1) | (word << 2));
+                let mask = (m_quot | m_bs | m_ctrl) & HI;
+                if mask == 0 {
+                    self.pos += 8;
+                    continue;
+                }
+                self.pos += (mask.trailing_zeros() >> 3) as usize;
+                break;
+            }
+            while self.pos < self.bytes.len() {
+                let b = self.bytes[self.pos];
+                if b < 0x20 || b == b'"' || b == b'\\' {
+                    break;
+                }
+                self.pos += 1;
+            }
+            let b = *self.bytes.get(self.pos)?;
+            if b == b'"' {
+                let end = self.pos;
+                self.pos += 1;
+                if out.is_empty() {
+                    return Some(self.src[run_start..end].to_string());
+                }
+                out.push_str(&self.src[run_start..end]);
                 return Some(out);
             }
-            if (c as u32) < 0x20 {
+            if b < 0x20 {
                 return None;
             }
-            if c != '\\' {
-                out.push(c);
-                continue;
+            if self.pos > run_start {
+                out.push_str(&self.src[run_start..self.pos]);
             }
-            match chars.next()? {
-                '"' => out.push('"'),
-                '\\' => out.push('\\'),
-                '/' => out.push('/'),
-                'b' => out.push('\u{0008}'),
-                'f' => out.push('\u{000C}'),
-                'n' => out.push('\n'),
-                'r' => out.push('\r'),
-                't' => out.push('\t'),
-                'u' => {
-                    let mut hex4 = String::with_capacity(4);
-                    for _ in 0..4 {
-                        hex4.push(chars.next()?);
-                    }
-                    let hi = u16::from_str_radix(&hex4, 16).ok()?;
+            self.pos += 1;
+            let esc = *self.bytes.get(self.pos)?;
+            self.pos += 1;
+            match esc {
+                b'"' => out.push('"'),
+                b'\\' => out.push('\\'),
+                b'/' => out.push('/'),
+                b'b' => out.push('\u{0008}'),
+                b'f' => out.push('\u{000C}'),
+                b'n' => out.push('\n'),
+                b'r' => out.push('\r'),
+                b't' => out.push('\t'),
+                b'u' => {
+                    let hi = self.parse_hex4()?;
                     if (0xD800..=0xDBFF).contains(&hi) {
-                        if chars.next()? != '\\' || chars.next()? != 'u' {
+                        if self.bytes.get(self.pos..self.pos + 2) != Some(b"\\u") {
                             return None;
                         }
-                        let mut lo_hex = String::with_capacity(4);
-                        for _ in 0..4 {
-                            lo_hex.push(chars.next()?);
-                        }
-                        let lo = u16::from_str_radix(&lo_hex, 16).ok()?;
+                        self.pos += 2;
+                        let lo = self.parse_hex4()?;
                         if !(0xDC00..=0xDFFF).contains(&lo) {
                             return None;
                         }
-                        let cp = 0x10000 + (((hi as u32 - 0xD800) << 10) | (lo as u32 - 0xDC00));
+                        let cp =
+                            0x10000 + (((u32::from(hi) - 0xD800) << 10) | (u32::from(lo) - 0xDC00));
                         out.push(char::from_u32(cp)?);
                     } else if (0xDC00..=0xDFFF).contains(&hi) {
                         return None;
                     } else {
-                        out.push(char::from_u32(hi as u32)?);
+                        out.push(char::from_u32(u32::from(hi))?);
                     }
                 }
                 _ => return None,
             }
         }
-        None
     }
 
-    fn parse_number(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> Option<String> {
-        let mut raw = String::new();
-        if chars.peek() == Some(&'-') {
-            raw.push(chars.next()?);
+    fn parse_number(&mut self) -> Option<String> {
+        let start = self.pos;
+        if self.peek_byte() == Some(b'-') {
+            self.pos += 1;
         }
-        match chars.next()? {
-            '0' => raw.push('0'),
-            first @ '1'..='9' => {
-                raw.push(first);
-                while let Some(&d) = chars.peek() {
-                    if d.is_ascii_digit() {
-                        raw.push(d);
-                        let _ = chars.next();
-                    } else {
-                        break;
-                    }
+        match self.peek_byte()? {
+            b'0' => self.pos += 1,
+            b'1'..=b'9' => {
+                self.pos += 1;
+                while self.peek_byte().is_some_and(|d| d.is_ascii_digit()) {
+                    self.pos += 1;
                 }
             }
             _ => return None,
         }
-        if chars.peek() == Some(&'.') {
-            raw.push(chars.next()?);
-            if !chars.peek().is_some_and(char::is_ascii_digit) {
+        if self.peek_byte() == Some(b'.') {
+            self.pos += 1;
+            if !self.peek_byte().is_some_and(|d| d.is_ascii_digit()) {
                 return None;
             }
-            while let Some(&d) = chars.peek() {
-                if d.is_ascii_digit() {
-                    raw.push(d);
-                    let _ = chars.next();
-                } else {
-                    break;
-                }
+            while self.peek_byte().is_some_and(|d| d.is_ascii_digit()) {
+                self.pos += 1;
             }
         }
-        if chars.peek().is_some_and(|c| *c == 'e' || *c == 'E') {
-            raw.push(chars.next()?);
-            if chars.peek().is_some_and(|c| *c == '+' || *c == '-') {
-                raw.push(chars.next()?);
+        if self.peek_byte().is_some_and(|b| b == b'e' || b == b'E') {
+            self.pos += 1;
+            if self.peek_byte().is_some_and(|b| b == b'+' || b == b'-') {
+                self.pos += 1;
             }
-            if !chars.peek().is_some_and(char::is_ascii_digit) {
+            if !self.peek_byte().is_some_and(|d| d.is_ascii_digit()) {
                 return None;
             }
-            while let Some(&d) = chars.peek() {
-                if d.is_ascii_digit() {
-                    raw.push(d);
-                    let _ = chars.next();
-                } else {
-                    break;
-                }
+            while self.peek_byte().is_some_and(|d| d.is_ascii_digit()) {
+                self.pos += 1;
             }
         }
-        Some(raw)
+        Some(self.src[start..self.pos].to_string())
     }
 
-    fn consume_keyword(
-        chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
-        kw: &str,
-    ) -> Option<()> {
-        for expected in kw.chars() {
-            if chars.next()? != expected {
-                return None;
-            }
+    fn consume_keyword(&mut self, kw: &[u8]) -> Option<()> {
+        if self.bytes.get(self.pos..self.pos + kw.len()) == Some(kw) {
+            self.pos += kw.len();
+            Some(())
+        } else {
+            None
         }
-        Some(())
     }
 
-    fn parse_value(
-        chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
-        depth: usize,
-    ) -> Option<Self> {
+    fn parse_value(&mut self, depth: usize) -> Option<StrictJsonValue> {
         if depth > MAX_JSON_NESTING_DEPTH {
             return None;
         }
-        Self::skip_ws(chars);
-        match *chars.peek()? {
-            '"' => {
-                let _ = chars.next();
-                Some(Self::Str(Self::parse_string_literal(chars)?))
+        self.skip_ws();
+        match self.peek_byte()? {
+            b'"' => {
+                self.pos += 1;
+                Some(StrictJsonValue::Str(self.parse_str()?))
             }
-            '{' => {
-                let _ = chars.next();
-                Self::skip_ws(chars);
-                let mut entries: Vec<(String, Self)> = Vec::new();
-                if chars.peek() == Some(&'}') {
-                    let _ = chars.next();
-                    return Some(Self::Object(entries));
+            b'{' => {
+                self.pos += 1;
+                self.skip_ws();
+                let mut entries: Vec<(String, StrictJsonValue)> = Vec::new();
+                if self.peek_byte() == Some(b'}') {
+                    self.pos += 1;
+                    return Some(StrictJsonValue::Object(entries));
                 }
                 let mut seen_keys: HashSet<String> = HashSet::new();
                 loop {
-                    Self::skip_ws(chars);
-                    if chars.next()? != '"' {
+                    self.skip_ws();
+                    if self.peek_byte()? != b'"' {
                         return None;
                     }
-                    let key = Self::parse_string_literal(chars)?;
+                    self.pos += 1;
+                    let key = self.parse_str()?;
                     if !seen_keys.insert(key.clone()) {
                         return None;
                     }
-                    Self::skip_ws(chars);
-                    if chars.next()? != ':' {
+                    self.skip_ws();
+                    if self.peek_byte()? != b':' {
                         return None;
                     }
-                    let val = Self::parse_value(chars, depth + 1)?;
+                    self.pos += 1;
+                    let val = self.parse_value(depth + 1)?;
                     entries.push((key, val));
-                    Self::skip_ws(chars);
-                    match chars.next()? {
-                        ',' => continue,
-                        '}' => break,
+                    self.skip_ws();
+                    match self.peek_byte()? {
+                        b',' => {
+                            self.pos += 1;
+                        }
+                        b'}' => {
+                            self.pos += 1;
+                            break;
+                        }
                         _ => return None,
                     }
                 }
-                Some(Self::Object(entries))
+                Some(StrictJsonValue::Object(entries))
             }
-            '[' => {
-                let _ = chars.next();
-                Self::skip_ws(chars);
+            b'[' => {
+                self.pos += 1;
+                self.skip_ws();
                 let mut items = Vec::new();
-                if chars.peek() == Some(&']') {
-                    let _ = chars.next();
-                    return Some(Self::Array(items));
+                if self.peek_byte() == Some(b']') {
+                    self.pos += 1;
+                    return Some(StrictJsonValue::Array(items));
                 }
                 loop {
-                    items.push(Self::parse_value(chars, depth + 1)?);
-                    Self::skip_ws(chars);
-                    match chars.next()? {
-                        ',' => continue,
-                        ']' => break,
+                    items.push(self.parse_value(depth + 1)?);
+                    self.skip_ws();
+                    match self.peek_byte()? {
+                        b',' => {
+                            self.pos += 1;
+                        }
+                        b']' => {
+                            self.pos += 1;
+                            break;
+                        }
                         _ => return None,
                     }
                 }
-                Some(Self::Array(items))
+                Some(StrictJsonValue::Array(items))
             }
-            't' => {
-                Self::consume_keyword(chars, "true")?;
-                Some(Self::Bool(true))
+            b't' => {
+                self.consume_keyword(b"true")?;
+                Some(StrictJsonValue::Bool(true))
             }
-            'f' => {
-                Self::consume_keyword(chars, "false")?;
-                Some(Self::Bool(false))
+            b'f' => {
+                self.consume_keyword(b"false")?;
+                Some(StrictJsonValue::Bool(false))
             }
-            'n' => {
-                Self::consume_keyword(chars, "null")?;
-                Some(Self::Null)
+            b'n' => {
+                self.consume_keyword(b"null")?;
+                Some(StrictJsonValue::Null)
             }
-            '-' | '0'..='9' => Some(Self::Number(Self::parse_number(chars)?)),
+            b'-' | b'0'..=b'9' => Some(StrictJsonValue::Number(self.parse_number()?)),
             _ => None,
         }
     }

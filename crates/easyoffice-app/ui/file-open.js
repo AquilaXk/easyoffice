@@ -31,16 +31,19 @@
   }
 
   function extensionOf(name) {
-    const m = /\.([A-Za-z0-9]+)$/.exec(name);
-    return m ? m[1].toLowerCase() : "";
+    const s = String(name || "");
+    const dot = s.lastIndexOf(".");
+    return dot >= 0 && dot < s.length - 1 ? s.slice(dot + 1).toLowerCase() : "";
   }
 
   function bytesToBase64(bytes, btoaFn) {
-    let bin = "";
+    const shared = host.__EASYOFFICE_SHEET_UTILS__?.bytesToBase64;
+    if (typeof shared === "function") return shared(bytes, btoaFn);
+    const chunks = [];
     for (let i = 0; i < bytes.length; i += BASE64_CHUNK) {
-      bin += String.fromCodePoint.apply(null, bytes.subarray(i, i + BASE64_CHUNK));
+      chunks.push(String.fromCharCode.apply(null, bytes.subarray(i, i + BASE64_CHUNK)));
     }
-    return btoaFn(bin);
+    return btoaFn(chunks.join(""));
   }
 
   const tooLarge = (size) => "파일이 너무 큽니다 (" + (size / 1048576).toFixed(1) + " MiB). ";
@@ -246,6 +249,7 @@
   // shows after opening and is written again by the next save; styled blank cells are kept too.
   function buildSheetStore(sheets) {
     const codec = host.__EASYOFFICE_SHEET_STYLE_CODEC__;
+    const gridUtils = host.__EASYOFFICE_SHEET_GRID_UTILS__;
     const store = {};
     const rowCounts = {};
     const columnWidths = {};
@@ -259,8 +263,14 @@
         const entry = raw.startsWith("=") ? { value: "", formula: raw } : { value: raw, formula: "" };
         if (style) entry.style = style;
         map[cell.ref] = entry;
-        const m = /(?<!\d)(\d+)$/.exec(cell.ref);
-        if (m) maxRow = Math.max(maxRow, Number(m[1]));
+        const packed = gridUtils ? gridUtils.packRef(cell.ref) : 0;
+        if (packed > 0) {
+          const r = Math.floor(packed / 32768);
+          if (r > maxRow) maxRow = r;
+        } else {
+          const m = /(?<!\d)(\d+)$/.exec(cell.ref);
+          if (m) maxRow = Math.max(maxRow, Number(m[1]));
+        }
       });
       store[sheet.name] = map;
       rowCounts[sheet.name] = Math.max(12, maxRow);

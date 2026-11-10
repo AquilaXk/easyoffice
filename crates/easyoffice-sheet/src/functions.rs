@@ -213,6 +213,21 @@ fn stat_skew_kurt(is_kurt: bool, nums: &[f64]) -> Result<EvaluatedCellValue, For
     }
 }
 
+fn stat_skew_p(nums: &[f64]) -> Result<EvaluatedCellValue, FormulaError> {
+    let n = nums.len();
+    if n < 3 {
+        return Err(FormulaError::DivByZero);
+    }
+    let nf = n as f64;
+    let mean = nums.iter().sum::<f64>() / nf;
+    let m2 = nums.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / nf;
+    if m2 == 0.0 {
+        return Err(FormulaError::DivByZero);
+    }
+    let m3 = nums.iter().map(|&x| (x - mean).powi(3)).sum::<f64>() / nf;
+    Ok(EvaluatedCellValue::Number(m3 / (m2 * m2.sqrt())))
+}
+
 impl SheetEngine {
     /// Returns the slice of all 122 canonical built-in spreadsheet function names.
     pub fn supported_function_names() -> &'static [&'static str] {
@@ -276,26 +291,30 @@ impl SheetEngine {
             "ABS" | "SIGN" | "ROUND" | "ROUNDUP" | "ROUNDDOWN" | "TRUNC" | "MROUND" | "FACT"
             | "RANDBETWEEN" | "INT" | "CEILING" | "FLOOR" | "MOD" | "QUOTIENT" | "SQRT"
             | "POWER" | "EXP" | "LN" | "LOG10" | "SIN" | "COS" | "TAN" | "LOG" | "PI" | "RAND"
-            | "NA" | "N" | "T" | "AVERAGEA" | "SUMSQ" | "GCD" | "LCM" | "COMBIN" | "PERMUT"
-            | "EVEN" | "ODD" | "FACTDOUBLE" | "SQRTPI" | "DEGREES" | "RADIANS" | "ASIN"
-            | "ACOS" | "ATAN" | "ATAN2" | "SINH" | "COSH" | "TANH" | "BASE" | "DECIMAL"
-            | "ROMAN" | "ARABIC" => self.eval_math_func(name, args, ctx, depth),
+            | "NA" | "N" | "T" | "AVERAGEA" | "SUMSQ" | "GCD" | "LCM" | "COMBIN" | "COMBINA"
+            | "PERMUT" | "PERMUTATIONA" | "EVEN" | "ODD" | "FACTDOUBLE" | "SQRTPI" | "DEGREES"
+            | "RADIANS" | "ASIN" | "ACOS" | "ATAN" | "ATAN2" | "SINH" | "COSH" | "TANH"
+            | "BASE" | "DECIMAL" | "ROMAN" | "ARABIC" => {
+                self.eval_math_func(name, args, ctx, depth)
+            }
             "AVERAGE" | "AVG" | "MIN" | "MAX" | "COUNT" | "COUNTA" | "COUNTBLANK" => {
                 self.eval_streaming_range_agg_ctx(name, args, ctx, depth)
             }
             "STDEV" | "STDEVP" | "VAR" | "VARP" | "STDEV.S" | "STDEV.P" | "VAR.S" | "VAR.P"
             | "DEVSQ" => self.eval_welford_variance_streaming(name, args, ctx, depth),
             "MEDIAN" | "MODE" | "MODE.SNGL" | "AVEDEV" | "GEOMEAN" | "HARMEAN" | "SKEW"
-            | "KURT" => self.eval_stat_basic(name, args, ctx, depth),
+            | "SKEW.P" | "KURT" => self.eval_stat_basic(name, args, ctx, depth),
             "CORREL" | "PEARSON" | "COVARIANCE.P" | "COVARIANCE.S" | "SLOPE" | "INTERCEPT"
-            | "RSQ" | "FORECAST" | "FORECAST.LINEAR" => {
+            | "RSQ" | "STEYX" | "FORECAST" | "FORECAST.LINEAR" => {
                 self.eval_stat_regression(name, args, ctx, depth)
             }
             "AVERAGEIF" => self.eval_single_criteria_streaming(name, args, ctx, depth),
             "AVERAGEIFS" => self.eval_multi_criteria_streaming(name, args, ctx, depth),
             "SMALL" | "LARGE" | "RANK" | "RANK.EQ" | "RANK.AVG" | "PERCENTILE" | "QUARTILE"
             | "PERCENTILE.INC" | "QUARTILE.INC" | "PERCENTILE.EXC" | "QUARTILE.EXC"
-            | "TRIMMEAN" => self.eval_stat_order(name, args, ctx, depth),
+            | "PERCENTRANK" | "PERCENTRANK.INC" | "PERCENTRANK.EXC" | "TRIMMEAN" => {
+                self.eval_stat_order(name, args, ctx, depth)
+            }
             "COUNTIF" => self.eval_single_criteria_streaming(name, args, ctx, depth),
             "COUNTIFS" => self.eval_multi_criteria_streaming(name, args, ctx, depth),
             "IF" | "IFS" | "AND" | "OR" | "XOR" | "NOT" | "IFERROR" | "IFNA" | "SWITCH"
@@ -306,21 +325,24 @@ impl SheetEngine {
             }
             "LEN" | "TRIM" | "UPPER" | "LOWER" | "PROPER" | "VALUE" | "CHAR" | "CODE"
             | "CONCAT" | "CONCATENATE" | "TEXTJOIN" | "LEFT" | "RIGHT" | "MID" | "SUBSTITUTE"
-            | "REPLACE" | "FIND" | "SEARCH" | "EXACT" | "REPT" | "TEXT" | "FIXED" | "CLEAN"
-            | "TEXTBEFORE" | "TEXTAFTER" | "NUMBERVALUE" | "VALUETOTEXT" | "UNICODE"
+            | "REPLACE" | "FIND" | "SEARCH" | "EXACT" | "REPT" | "TEXT" | "FIXED" | "DOLLAR"
+            | "CLEAN" | "TEXTBEFORE" | "TEXTAFTER" | "NUMBERVALUE" | "VALUETOTEXT" | "UNICODE"
             | "UNICHAR" => self.eval_text_func(name, args, ctx, depth),
             "DATE" | "YEAR" | "MONTH" | "DAY" | "TIME" | "HOUR" | "MINUTE" | "SECOND" | "DAYS"
-            | "EDATE" | "EOMONTH" | "DATEDIF" | "TODAY" | "NOW" | "WEEKDAY" | "DATEVALUE"
-            | "WORKDAY" | "WORKDAY.INTL" | "NETWORKDAYS" | "NETWORKDAYS.INTL" | "TIMEVALUE"
-            | "WEEKNUM" | "ISOWEEKNUM" | "YEARFRAC" => self.eval_date_func(name, args, ctx, depth),
+            | "DAYS360" | "EDATE" | "EOMONTH" | "DATEDIF" | "TODAY" | "NOW" | "WEEKDAY"
+            | "DATEVALUE" | "WORKDAY" | "WORKDAY.INTL" | "NETWORKDAYS" | "NETWORKDAYS.INTL"
+            | "TIMEVALUE" | "WEEKNUM" | "ISOWEEKNUM" | "YEARFRAC" => {
+                self.eval_date_func(name, args, ctx, depth)
+            }
             "PMT" | "IPMT" | "PPMT" | "CUMIPMT" | "CUMPRINC" | "FV" | "PV" | "NPV" | "XNPV"
             | "IRR" | "XIRR" | "MIRR" | "RATE" | "NPER" | "SLN" | "DB" | "DDB" | "SYD"
             | "EFFECT" | "NOMINAL" | "PDURATION" | "RRI" | "DOLLARDE" | "DOLLARFR" => {
                 self.eval_financial_func(name, args, ctx, depth)
             }
             "BITAND" | "BITOR" | "BITXOR" | "BITLSHIFT" | "BITRSHIFT" | "HEX2DEC" | "DEC2HEX"
-            | "BIN2DEC" | "DEC2BIN" | "OCT2DEC" | "DEC2OCT" | "MULTINOMIAL" | "SERIESSUM"
-            | "SUMX2MY2" | "SUMX2PY2" | "SUMXMY2" | "STANDARDIZE" | "FISHER" | "FISHERINV" => {
+            | "BIN2DEC" | "DEC2BIN" | "OCT2DEC" | "DEC2OCT" | "BIN2HEX" | "BIN2OCT" | "OCT2BIN"
+            | "OCT2HEX" | "HEX2BIN" | "HEX2OCT" | "MULTINOMIAL" | "SERIESSUM" | "SUMX2MY2"
+            | "SUMX2PY2" | "SUMXMY2" | "STANDARDIZE" | "FISHER" | "FISHERINV" => {
                 self.eval_eng_func(name, args, ctx, depth)
             }
             "ISBLANK" | "ISNUMBER" | "ISTEXT" | "ISLOGICAL" | "ISERR" | "ISERROR" | "ISNA"
@@ -426,6 +448,7 @@ impl SheetEngine {
                 Ok(EvaluatedCellValue::Number((nums.len() as f64) / inv_sum))
             }
             "SKEW" | "KURT" => stat_skew_kurt(name == "KURT", &nums),
+            "SKEW.P" => stat_skew_p(&nums),
             _ => Err(FormulaError::Name),
         }
     }
@@ -441,6 +464,9 @@ impl SheetEngine {
             "SMALL" | "LARGE" => self.stat_small_large(name == "SMALL", args, ctx, depth),
             "RANK" | "RANK.EQ" | "RANK.AVG" => self.stat_rank(name == "RANK.AVG", args, ctx, depth),
             "TRIMMEAN" => self.stat_trimmean(args, ctx, depth),
+            "PERCENTRANK" | "PERCENTRANK.INC" | "PERCENTRANK.EXC" => {
+                self.stat_percentrank(name == "PERCENTRANK.EXC", args, ctx, depth)
+            }
             _ => self.stat_percentile(name, args, ctx, depth),
         }
     }
@@ -503,7 +529,7 @@ impl SheetEngine {
         ctx: &mut EvalContext<'_>,
         depth: usize,
     ) -> Result<EvaluatedCellValue, FormulaError> {
-        if args.len() < 2 || args.len() > 3 {
+        if !(2..=3).contains(&args.len()) {
             return Err(FormulaError::Value);
         }
         let target = self.eval_arg_num(&args[0], ctx, depth)?;
@@ -532,6 +558,66 @@ impl SheetEngine {
             (better_count + 1) as f64
         };
         Ok(EvaluatedCellValue::Number(rank))
+    }
+
+    fn stat_percentrank(
+        &self,
+        is_exc: bool,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<EvaluatedCellValue, FormulaError> {
+        if !(2..=3).contains(&args.len()) {
+            return Err(FormulaError::Value);
+        }
+        let vals = self.eval_range_vec(&args[0], ctx, depth)?;
+        for v in &vals {
+            if let EvaluatedCellValue::Error(e) = v {
+                return Err(*e);
+            }
+        }
+        let x = self.eval_arg_num(&args[1], ctx, depth)?;
+        let sig = match args.get(2) {
+            Some(arg) if !matches!(arg, Expr::Missing) => {
+                let s = self.eval_arg_num(arg, ctx, depth)?.trunc();
+                if !s.is_finite() || s < 1.0 {
+                    return Err(FormulaError::Num);
+                }
+                (s as i32).min(15)
+            }
+            _ => 3,
+        };
+        let mut nums = numeric_values(&vals);
+        if nums.is_empty() {
+            return Err(FormulaError::Num);
+        }
+        nums.sort_unstable_by(cmp_f64);
+        let n = nums.len();
+        if x < nums[0] || x > nums[n - 1] {
+            return Err(FormulaError::Na);
+        }
+        let rank_at = |idx: usize| -> f64 {
+            if is_exc {
+                ((idx + 1) as f64) / ((n + 1) as f64)
+            } else if n == 1 {
+                1.0
+            } else {
+                (idx as f64) / ((n - 1) as f64)
+            }
+        };
+        let raw_rank = if let Some(first_idx) = nums.iter().position(|&v| v == x) {
+            rank_at(first_idx)
+        } else {
+            let hi = nums.partition_point(|&v| v < x);
+            let lo = hi - 1;
+            let r_lo = rank_at(lo);
+            let r_hi = rank_at(hi);
+            let frac = (x - nums[lo]) / (nums[hi] - nums[lo]);
+            r_lo + frac * (r_hi - r_lo)
+        };
+        let factor = 10.0_f64.powi(sig);
+        let truncated = ((raw_rank * factor) + 1e-12).trunc() / factor;
+        Ok(EvaluatedCellValue::Number(truncated))
     }
 
     fn stat_percentile(

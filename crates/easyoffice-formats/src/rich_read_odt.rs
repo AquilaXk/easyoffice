@@ -98,7 +98,9 @@ fn script_of(position: Option<&str>) -> RichScript {
 fn parse_points(value: &str) -> Option<u16> {
     let pt: f32 = value.trim().strip_suffix("pt")?.parse().ok()?;
     let half = (pt * 2.0).round();
-    (half >= 1.0 && half <= f32::from(u16::MAX)).then_some(half as u16)
+    (1.0..=f32::from(u16::MAX))
+        .contains(&half)
+        .then_some(half as u16)
 }
 
 /// Character format described by a `style:text-properties` element.

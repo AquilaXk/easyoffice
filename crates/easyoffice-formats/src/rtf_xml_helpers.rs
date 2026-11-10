@@ -312,20 +312,16 @@ fn is_self_closing_open_tag(bytes: &[u8], after_tag: usize, gt_pos: usize) -> bo
 
 #[inline]
 fn find_tag_close_gt(bytes: &[u8], start: usize) -> Option<usize> {
-    let mut in_quote: Option<u8> = None;
     let mut i = start;
     while i < bytes.len() {
-        let b = bytes[i];
-        if let Some(q) = in_quote {
-            if b == q {
-                in_quote = None;
+        match bytes[i] {
+            b'"' | b'\'' => {
+                let q = bytes[i];
+                i = crate::XmlSanitizer::find_byte_swar(bytes, i + 1, q)? + 1;
             }
-        } else if b == b'"' || b == b'\'' {
-            in_quote = Some(b);
-        } else if b == b'>' {
-            return Some(i);
+            b'>' => return Some(i),
+            _ => i += 1,
         }
-        i += 1;
     }
     None
 }

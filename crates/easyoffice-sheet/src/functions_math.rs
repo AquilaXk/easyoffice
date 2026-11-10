@@ -10,7 +10,7 @@ const SNAP_ULPS: f64 = 4.0;
 const LOG_BASE_EPSILON: f64 = 1e-15;
 
 fn check_math_arity(args: &[Expr], min: usize, max: usize) -> Result<(), FormulaError> {
-    if args.len() < min || args.len() > max {
+    if !(min..=max).contains(&args.len()) {
         Err(FormulaError::Value)
     } else {
         Ok(())
@@ -262,7 +262,9 @@ impl SheetEngine {
             "AVERAGEA" => self.math_average_a(args, ctx, depth),
             "SUMSQ" => self.math_sumsq(args, ctx, depth),
             "GCD" | "LCM" => self.math_gcd_lcm(name == "LCM", args, ctx, depth),
-            "COMBIN" | "PERMUT" => self.math_combin_permut(name == "PERMUT", args, ctx, depth),
+            "COMBIN" | "COMBINA" | "PERMUT" | "PERMUTATIONA" => {
+                self.math_combin_permut(name, args, ctx, depth)
+            }
             "BASE" => self.math_base(args, ctx, depth),
             "DECIMAL" => self.math_decimal(args, ctx, depth),
             "ROMAN" => self.math_roman(args, ctx, depth),
@@ -526,7 +528,7 @@ impl SheetEngine {
 
     fn math_combin_permut(
         &self,
-        is_permut: bool,
+        name: &str,
         args: &[Expr],
         ctx: &mut EvalContext<'_>,
         depth: usize,
@@ -534,18 +536,47 @@ impl SheetEngine {
         check_math_arity(args, 2, 2)?;
         let n_raw = self.eval_arg_num(&args[0], ctx, depth)?.trunc();
         let k_raw = self.eval_arg_num(&args[1], ctx, depth)?.trunc();
-        if n_raw < 0.0 || k_raw < 0.0 || k_raw > n_raw || n_raw > 1e9 {
+        if !(0.0..=1e9).contains(&n_raw) || !(0.0..=1e9).contains(&k_raw) {
             return Err(FormulaError::Num);
         }
         let n = n_raw as u64;
         let k = k_raw as u64;
-        let res = if is_permut {
-            ((n - k + 1)..=n).fold(1.0f64, |acc, i| acc * i as f64)
-        } else {
-            let k = k.min(n - k);
-            (1..=k)
-                .fold(1.0f64, |acc, i| acc * ((n - k + i) as f64) / (i as f64))
-                .round()
+        let res = match name {
+            "PERMUTATIONA" => {
+                if k == 0 {
+                    1.0
+                } else {
+                    (n as f64).powf(k as f64)
+                }
+            }
+            "COMBINA" => {
+                if k == 0 {
+                    1.0
+                } else if n == 0 {
+                    0.0
+                } else {
+                    let m = n + k - 1;
+                    let c = k.min(m - k);
+                    (1..=c)
+                        .fold(1.0f64, |acc, i| acc * ((m - c + i) as f64) / (i as f64))
+                        .round()
+                }
+            }
+            "PERMUT" => {
+                if k > n {
+                    return Err(FormulaError::Num);
+                }
+                ((n - k + 1)..=n).fold(1.0f64, |acc, i| acc * i as f64)
+            }
+            _ => {
+                if k > n {
+                    return Err(FormulaError::Num);
+                }
+                let k = k.min(n - k);
+                (1..=k)
+                    .fold(1.0f64, |acc, i| acc * ((n - k + i) as f64) / (i as f64))
+                    .round()
+            }
         };
         if !res.is_finite() {
             return Err(FormulaError::Num);
@@ -693,7 +724,7 @@ impl SheetEngine {
             }
         }
         let n = pairs.len();
-        if n == 0 || (name != "COVARIANCE.P" && n < 2) {
+        if n == 0 || (name == "STEYX" && n < 3) || (name != "COVARIANCE.P" && n < 2) {
             return Err(FormulaError::DivByZero);
         }
         let nf = n as f64;
@@ -723,6 +754,13 @@ impl SheetEngine {
                     return Err(FormulaError::DivByZero);
                 }
                 number_result((s_xy * s_xy) / (s_xx * s_yy))
+            }
+            "STEYX" => {
+                if s_xx == 0.0 {
+                    return Err(FormulaError::DivByZero);
+                }
+                let residual_ss = (s_yy - (s_xy * s_xy) / s_xx).max(0.0);
+                number_result((residual_ss / ((n - 2) as f64)).sqrt())
             }
             "SLOPE" | "INTERCEPT" | "FORECAST" | "FORECAST.LINEAR" => {
                 if s_xx == 0.0 {

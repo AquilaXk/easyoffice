@@ -180,6 +180,41 @@ fn utf8_entry<'a>(entry: &'a ZipArchiveEntry, label: &str) -> Result<&'a str, Ea
     Ok(xml)
 }
 
+fn extract_notes_xml_text(notes_xml: &str) -> Option<String> {
+    let mut non_empty = Vec::new();
+    let mut saw_included = false;
+    for sp in extract_tag_bodies(notes_xml, "p:sp") {
+        let nv_pr = extract_tag_bodies(sp, "p:nvSpPr")
+            .first()
+            .copied()
+            .unwrap_or(sp);
+        let ph_elems = extract_balanced_elements(nv_pr, "p:ph");
+        let include = if ph_elems.is_empty() && !nv_pr.contains("<p:ph") {
+            true
+        } else {
+            ph_elems.iter().any(|(a, _)| {
+                let ph_type = extract_attr_from_fragment(a, "type");
+                !matches!(ph_type, Some("sldImg" | "sldNum" | "hdr" | "ftr" | "dt"))
+                    && ph_type == Some("body")
+            })
+        };
+        if include {
+            saw_included = true;
+            let text = shape_paragraph_texts(sp).join("\n");
+            if !text.is_empty() {
+                non_empty.push(text);
+            }
+        }
+    }
+    if !non_empty.is_empty() {
+        Some(non_empty.join("\n"))
+    } else if saw_included {
+        Some(String::new())
+    } else {
+        None
+    }
+}
+
 /// Reads speaker notes from the notes slide related to `slide_path`, if any.
 fn read_notes_slide(
     entry_map: &std::collections::HashMap<&str, &ZipArchiveEntry>,
@@ -205,13 +240,8 @@ fn read_notes_slide(
             continue;
         };
         let notes_xml = utf8_entry(notes_entry, &notes_path)?;
-        for sp in extract_tag_bodies(notes_xml, "p:sp") {
-            let body_ph = extract_balanced_elements(sp, "p:ph")
-                .iter()
-                .any(|(a, _)| extract_attr_from_fragment(a, "type") == Some("body"));
-            if body_ph {
-                return Ok(Some(shape_paragraph_texts(sp).join("\n")));
-            }
+        if let Some(notes) = extract_notes_xml_text(notes_xml) {
+            return Ok(Some(notes));
         }
     }
     Ok(None)
@@ -643,6 +673,26 @@ mod tests {
                 "항목\t매출".to_string(),
                 "1분기\t1200".to_string()
             ]
+        );
+    }
+
+    #[test]
+    fn pptx_notes_slide_includes_body_and_custom_shapes_excluding_chrome() {
+        let notes_xml = concat!(
+            "<p:notes><p:cSld><p:spTree>",
+            "<p:sp><p:nvSpPr><p:nvPr><p:ph type=\"sldImg\"/></p:nvPr></p:nvSpPr>",
+            "<p:txBody><a:p><a:r><a:t>슬라이드 썸네일</a:t></a:r></a:p></p:txBody></p:sp>",
+            "<p:sp><p:nvSpPr><p:nvPr><p:ph type=\"body\" idx=\"1\"/></p:nvPr></p:nvSpPr>",
+            "<p:txBody><a:p><a:r><a:t>발표자 핵심 메모</a:t></a:r></a:p></p:txBody></p:sp>",
+            "<p:sp><p:nvSpPr><p:nvPr/></p:nvSpPr>",
+            "<p:txBody><a:p><a:r><a:t>추가 자유 텍스트 상자</a:t></a:r></a:p></p:txBody></p:sp>",
+            "<p:sp><p:nvSpPr><p:nvPr><p:ph type=\"sldNum\" idx=\"10\"/></p:nvPr></p:nvSpPr>",
+            "<p:txBody><a:p><a:r><a:t>3</a:t></a:r></a:p></p:txBody></p:sp>",
+            "</p:spTree></p:cSld></p:notes>"
+        );
+        assert_eq!(
+            extract_notes_xml_text(notes_xml).as_deref(),
+            Some("발표자 핵심 메모\n추가 자유 텍스트 상자")
         );
     }
 }

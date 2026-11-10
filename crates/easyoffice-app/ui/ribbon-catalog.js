@@ -447,6 +447,7 @@
     }
     return ids;
   }
+  const ALL_RIBBON_COMMAND_ID_SET = new Set(allRibbonCommandIds());
 
   // The ribbon command id a menu command runs in `moduleCode`, or null when it has none there.
   function resolveMenuCommand(cmd, moduleCode) {
@@ -456,7 +457,7 @@
       return MODULE_SPECIFIC_PREFIX[moduleCode] && cmd.startsWith(MODULE_SPECIFIC_PREFIX[moduleCode] + "-mod-") ? cmd : null;
     }
     const id = (MENU_MODULE_PREFIX[moduleCode] || "document") + "-" + cmd;
-    return allRibbonCommandIds().includes(id) ? id : null;
+    return ALL_RIBBON_COMMAND_ID_SET.has(id) ? id : null;
   }
 
   function resolveRibbonShortcutLabel(commandId, rawShortcut) {

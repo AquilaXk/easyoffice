@@ -116,11 +116,13 @@
   }
 
   function bytesToBase64(bytes, btoaFn) {
-    let bin = "";
+    const shared = host.__EASYOFFICE_SHEET_UTILS__?.bytesToBase64;
+    if (typeof shared === "function") return shared(bytes, btoaFn);
+    const chunks = [];
     for (let i = 0; i < bytes.length; i += 0x8000) {
-      bin += String.fromCodePoint.apply(null, bytes.subarray(i, i + 0x8000));
+      chunks.push(String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000)));
     }
-    return btoaFn(bin);
+    return btoaFn(chunks.join(""));
   }
 
   function createHwpHost(deps) {

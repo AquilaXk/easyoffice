@@ -63,7 +63,7 @@ pub fn parse_strict_number(s: &str) -> Option<f64> {
 
 pub fn parse_iso_date_serial(s: &str) -> Option<f64> {
     let trimmed = s.trim();
-    if trimmed.len() < 8 || trimmed.len() > 10 {
+    if !(8..=10).contains(&trimmed.len()) {
         return None;
     }
     let sep = if trimmed.contains('-') {

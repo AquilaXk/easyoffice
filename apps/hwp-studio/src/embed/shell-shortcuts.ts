@@ -43,10 +43,15 @@ export function comboFromKeyEvent(event: ShellKeyEvent): string | null {
 }
 
 /** The combo to forward for this key event, or null when the editor keeps the key. */
-export function matchShellShortcut(event: ShellKeyEvent, allowed: readonly string[]): string | null {
+export function matchShellShortcut(
+  event: ShellKeyEvent,
+  allowed: ReadonlySet<string> | readonly string[],
+): string | null {
   if (event.isComposing) return null;
   const combo = comboFromKeyEvent(event);
-  return combo !== null && allowed.includes(combo) ? combo : null;
+  if (combo === null) return null;
+  const matched = 'has' in allowed ? allowed.has(combo) : allowed.includes(combo);
+  return matched ? combo : null;
 }
 
 export type ShellShortcutSink = (payload: { schemaVersion: 1; reason: typeof SHELL_SHORTCUT_REASON; shortcut: string }) => void;

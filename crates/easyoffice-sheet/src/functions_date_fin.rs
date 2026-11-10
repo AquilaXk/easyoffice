@@ -19,7 +19,7 @@ const SERIAL_BOUNDS_FROM_ONE: (f64, f64) = (1.0, MAX_SERIAL_F);
 const DEFAULT_WEEKEND_MASK: u8 = (1 << 5) | (1 << 6);
 
 fn check_date_arity(args: &[Expr], min: usize, max: usize) -> Result<(), FormulaError> {
-    if args.len() < min || args.len() > max {
+    if !(min..=max).contains(&args.len()) {
         Err(FormulaError::Value)
     } else {
         Ok(())
@@ -154,6 +154,7 @@ impl SheetEngine {
             "TIME" => self.date_time(args, ctx, depth),
             "HOUR" | "MINUTE" | "SECOND" => self.date_time_part(name, args, ctx, depth),
             "DAYS" => self.date_days(args, ctx, depth),
+            "DAYS360" => self.date_days360(args, ctx, depth),
             "EDATE" | "EOMONTH" => self.date_edate(name == "EOMONTH", args, ctx, depth),
             "TODAY" | "NOW" => date_today_now(name == "TODAY", args),
             "DATEVALUE" => self.date_datevalue(args, ctx, depth),
@@ -280,6 +281,44 @@ impl SheetEngine {
         let end_d = self.arg_i64(&args[0], DAY_BOUNDS, false, ctx, depth)?;
         let start_d = self.arg_i64(&args[1], DAY_BOUNDS, false, ctx, depth)?;
         number((end_d - start_d) as f64)
+    }
+
+    fn date_days360(
+        &self,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<EvaluatedCellValue, FormulaError> {
+        check_date_arity(args, 2, 3)?;
+        let s1 = self.arg_i64(&args[0], SERIAL_BOUNDS_FROM_ONE, true, ctx, depth)?;
+        let s2 = self.arg_i64(&args[1], SERIAL_BOUNDS_FROM_ONE, true, ctx, depth)?;
+        let method = match args.get(2) {
+            Some(arg) if !matches!(arg, Expr::Missing) => self
+                .eval_arg_val(arg, ctx, depth)?
+                .as_bool()
+                .ok_or(FormulaError::Value)?,
+            _ => false,
+        };
+        let (y1, m1, mut d1) = civil_from_serial(s1);
+        let (y2, m2, mut d2) = civil_from_serial(s2);
+        if method {
+            d1 = d1.min(30);
+            d2 = d2.min(30);
+        } else {
+            if m1 == 2 && d1 == days_in_month(y1, 2) {
+                if m2 == 2 && d2 == days_in_month(y2, 2) {
+                    d2 = 30;
+                }
+                d1 = 30;
+            }
+            if d2 == 31 && d1 >= 30 {
+                d2 = 30;
+            }
+            if d1 == 31 {
+                d1 = 30;
+            }
+        }
+        number(((y2 - y1) * 360 + (m2 - m1) * 30 + (d2 - d1)) as f64)
     }
 
     fn date_edate(
@@ -679,12 +718,10 @@ fn compute_yearfrac(d1: i64, d2: i64, basis: i64) -> f64 {
                     .sum::<f64>()
                     / (y2 - y1 + 1) as f64
             } else {
-                let feb29_y1 = days_in_month(y1, 2) == 29
-                    && serial_from_civil(y1, 2, 29) >= d1
-                    && serial_from_civil(y1, 2, 29) <= d2;
-                let feb29_y2 = days_in_month(y2, 2) == 29
-                    && serial_from_civil(y2, 2, 29) >= d1
-                    && serial_from_civil(y2, 2, 29) <= d2;
+                let feb29_y1 =
+                    days_in_month(y1, 2) == 29 && (d1..=d2).contains(&serial_from_civil(y1, 2, 29));
+                let feb29_y2 =
+                    days_in_month(y2, 2) == 29 && (d1..=d2).contains(&serial_from_civil(y2, 2, 29));
                 if feb29_y1 || feb29_y2 || (y1 == y2 && days_in_month(y1, 2) == 29) {
                     366.0
                 } else {
@@ -715,14 +752,17 @@ pub(crate) fn parse_iso_date_serial(s: &str) -> Option<f64> {
     if parts.next().is_some() || !(1900..=9999).contains(&y) || !(1..=12).contains(&m) {
         return None;
     }
-    if d < 1 || d > days_in_month(y, m) {
+    if !(1..=days_in_month(y, m)).contains(&d) {
         return None;
     }
     Some(serial_from_civil(y, m, d) as f64)
 }
 
 pub(crate) fn ymd_to_excel_serial(y: i64, m: i64, d: i64) -> Result<i64, FormulaError> {
-    if !(1900..=9999).contains(&y) || !(1..=12).contains(&m) || d < 1 || d > days_in_month(y, m) {
+    if !(1900..=9999).contains(&y)
+        || !(1..=12).contains(&m)
+        || !(1..=days_in_month(y, m)).contains(&d)
+    {
         return Err(FormulaError::Value);
     }
     Ok(serial_from_civil(y, m, d))
@@ -730,7 +770,7 @@ pub(crate) fn ymd_to_excel_serial(y: i64, m: i64, d: i64) -> Result<i64, Formula
 
 #[inline]
 fn checked_f64_to_i64(n: f64, min: f64, max: f64) -> Result<i64, FormulaError> {
-    if !n.is_finite() || n < min || n > max {
+    if !n.is_finite() || !(min..=max).contains(&n) {
         return Err(FormulaError::Num);
     }
     Ok(n.trunc() as i64)

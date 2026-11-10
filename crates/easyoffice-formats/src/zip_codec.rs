@@ -547,18 +547,20 @@ impl ZipArchiveCodec {
             return None;
         }
         let min_offset = bytes.len().saturating_sub(22 + 65_535);
-        let mut pos = bytes.len() - 22;
-        loop {
-            if bytes[pos..pos + 4] == Self::END_OF_CENTRAL_DIR_SIG.to_le_bytes() {
+        let sig = Self::END_OF_CENTRAL_DIR_SIG.to_le_bytes();
+        let mut search_end = bytes.len() - 21;
+        while search_end > min_offset {
+            let rel = bytes[min_offset..search_end]
+                .iter()
+                .rposition(|&b| b == 0x50)?;
+            let pos = min_offset + rel;
+            if bytes[pos..pos + 4] == sig {
                 let comment_len = u16::from_le_bytes([bytes[pos + 20], bytes[pos + 21]]) as usize;
                 if pos + 22 + comment_len == bytes.len() {
                     return Some(pos);
                 }
             }
-            if pos <= min_offset || pos == 0 {
-                break;
-            }
-            pos -= 1;
+            search_end = pos;
         }
         None
     }

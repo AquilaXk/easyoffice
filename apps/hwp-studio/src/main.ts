@@ -323,8 +323,9 @@ const shellShortcutRelay = createShellShortcutRelay();
 if (chromeMode === 'embed') {
   const shellKeys = parseShellKeys(window.location.search);
   if (shellKeys.length > 0) {
+    const shellKeySet: ReadonlySet<string> = new Set(shellKeys);
     document.addEventListener('keydown', (e) => {
-      const combo = matchShellShortcut(e, shellKeys);
+      const combo = matchShellShortcut(e, shellKeySet);
       if (combo === null || !shellShortcutRelay.hasListener()) return;
       e.preventDefault();
       e.stopPropagation();

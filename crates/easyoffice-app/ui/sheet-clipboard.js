@@ -103,17 +103,16 @@
     }
 
     function shiftFormula(formula, dRow, dCol) {
+      const replaceRef = (_m, cAbs, letters, rAbs, digits) => {
+        const col = grid.colIndex(letters.toUpperCase()) + (cAbs ? 0 : dCol);
+        const row = Number(digits) + (rAbs ? 0 : dRow);
+        if (col < 1 || col > grid.MAX_COLS || row < 1 || row > grid.MAX_ROWS) return "#REF!";
+        return cAbs + grid.colName(col) + rAbs + row;
+      };
+      if (!formula.includes('"')) return formula.replace(REF_RE, replaceRef);
       return formula
         .split(/("(?:[^"]|"")*")/)
-        .map((part, idx) => {
-          if (idx % 2 === 1) return part;
-          return part.replace(REF_RE, (m, cAbs, letters, rAbs, digits) => {
-            const col = grid.colIndex(letters.toUpperCase()) + (cAbs ? 0 : dCol);
-            const row = Number(digits) + (rAbs ? 0 : dRow);
-            if (col < 1 || col > grid.MAX_COLS || row < 1 || row > grid.MAX_ROWS) return "#REF!";
-            return cAbs + grid.colName(col) + rAbs + row;
-          });
-        })
+        .map((part, idx) => (idx % 2 === 1 ? part : part.replace(REF_RE, replaceRef)))
         .join("");
     }
 

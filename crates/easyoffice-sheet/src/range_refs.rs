@@ -172,7 +172,7 @@ impl SheetEngine {
         ctx: &mut EvalContext<'_>,
         depth: usize,
     ) -> Result<Option<ResolvedRangeRef<'b>>, FormulaError> {
-        if args.len() < 3 || args.len() > 5 {
+        if !(3..=5).contains(&args.len()) {
             return Err(FormulaError::Value);
         }
         let Some((sheet_opt, base_range, _)) =

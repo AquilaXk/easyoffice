@@ -461,6 +461,14 @@ test("sheet-grid packRef, COL_NAMES cache, getTdAt, and paintSelectionRange upda
   assert.equal(qsaCount, 0, "selection painting does not call table.querySelectorAll");
   const selected = [...document.querySelectorAll("#pane-sheet td.in-range")].map((td) => td.dataset.cell).sort((a, b) => a.localeCompare(b));
   assert.deepEqual(selected, ["B2", "B3", "C2", "C3"]);
+
+  const sheetUtils = document.defaultView.__EASYOFFICE_SHEET_UTILS__;
+  assert.equal(typeof sheetUtils?.bytesToBase64, "function", "bytesToBase64 exposed on __EASYOFFICE_SHEET_UTILS__");
+  for (const len of [0, 1, 2, 3, 4, 255, 4097]) {
+    const src = new Uint8Array(len);
+    for (let i = 0; i < len; i += 1) src[i] = (i * 73 + 19) & 0xff;
+    const b64 = sheetUtils.bytesToBase64(src);
+    const decoded = sheetUtils.base64ToBytes(b64);
+    assert.deepEqual(Array.from(decoded), Array.from(src), `round-trip base64 for length ${len}`);
+  }
 });
-
-

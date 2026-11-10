@@ -93,13 +93,12 @@ export function namespaceSvgReferenceValue(value: string, idMap: Map<string, str
 }
 
 function collectSvgIdMap(root: Element, namespace: string): Map<string, string> {
-  const idElements = [
-    ...(root.hasAttribute('id') ? [root] : []),
-    ...Array.from(root.querySelectorAll('[id]')),
-  ];
   const idMap = new Map<string, string>();
-  for (const element of idElements) {
-    const id = element.getAttribute('id');
+  const rootId = root.getAttribute('id');
+  if (rootId) idMap.set(rootId, `${namespace}-${rootId}`);
+  const idElements = root.querySelectorAll('[id]');
+  for (let i = 0; i < idElements.length; i += 1) {
+    const id = idElements[i]!.getAttribute('id');
     if (id) idMap.set(id, `${namespace}-${id}`);
   }
   return idMap;
@@ -112,13 +111,21 @@ function rewriteSvgAttribute(element: Element, attr: Attr, idMap: Map<string, st
   if (nextValue && nextValue !== attr.value) element.setAttribute(attr.name, nextValue);
 }
 
+function rewriteElementSvgAttributes(element: Element, idMap: Map<string, string>): void {
+  const attrs = element.attributes;
+  for (let i = 0; i < attrs.length; i += 1) {
+    rewriteSvgAttribute(element, attrs[i]!, idMap);
+  }
+}
+
 function namespaceSvgIds(root: Element, namespace: string): void {
   const idMap = collectSvgIdMap(root, namespace);
   if (idMap.size === 0) return;
 
-  const allElements = [root, ...Array.from(root.querySelectorAll('*'))];
-  for (const element of allElements) {
-    for (const attr of Array.from(element.attributes)) rewriteSvgAttribute(element, attr, idMap);
+  rewriteElementSvgAttributes(root, idMap);
+  const descendants = root.querySelectorAll('*');
+  for (let i = 0; i < descendants.length; i += 1) {
+    rewriteElementSvgAttributes(descendants[i]!, idMap);
   }
 }
 

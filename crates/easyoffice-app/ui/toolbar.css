@@ -337,3 +337,61 @@ input.sb-ls-select {
   flex-shrink: 0;
 }
 
+#doc-style-bar > .eo-style-sep {
+  display: inline-block;
+  width: 1px;
+  height: 20px;
+  background: var(--ui-border);
+  margin: 0 4px;
+  font-size: 0;
+  line-height: 0;
+  overflow: hidden;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+.fr-btn:active {
+  background: var(--ui-active);
+}
+
+.fr-input:disabled,
+.fr-btn:disabled,
+.fr-opt-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.statusbar-zoom-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 88px;
+  height: 2px;
+  background: var(--ui-border-strong);
+  border-radius: 1px;
+  outline: none;
+  cursor: pointer;
+}
+
+.statusbar-zoom-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-pill);
+  background: var(--ui-text-secondary);
+  border: 2px solid var(--ui-chrome);
+  box-shadow: var(--shadow-xs);
+}
+
+.statusbar-zoom-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-pill);
+  background: var(--ui-text-secondary);
+  border: 2px solid var(--ui-chrome);
+  box-shadow: var(--shadow-xs);
+}
+
+.cp-item-shortcut {
+  border-radius: var(--radius-md);
+}

@@ -10,6 +10,9 @@ export type ShellCommand = (typeof SHELL_COMMANDS)[number];
 export const SHELL_THEMES = ['light', 'dark', 'system'] as const;
 export type ShellTheme = (typeof SHELL_THEMES)[number];
 export const SHELL_SAVE_FORMATS = ['hwp', 'hwpx'] as const;
+const SHELL_COMMAND_SET: ReadonlySet<string> = new Set<string>(SHELL_COMMANDS);
+const SHELL_THEME_SET: ReadonlySet<string> = new Set<string>(SHELL_THEMES);
+const SHELL_SAVE_FORMAT_SET: ReadonlySet<string> = new Set<string>(SHELL_SAVE_FORMATS);
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const MAX_RECENTS = 10;
 const MAX_NAME_LENGTH = 200;
@@ -35,7 +38,7 @@ export interface ShellCommandPayload {
 }
 
 export function isShellTheme(value: unknown): value is ShellTheme {
-  return typeof value === 'string' && (SHELL_THEMES as readonly string[]).includes(value);
+  return typeof value === 'string' && SHELL_THEME_SET.has(value);
 }
 
 /** Theme named in the frame URL (first paint), if valid. */
@@ -83,7 +86,7 @@ export function createShellCommandRelay() {
 /** The command a menu item stands for, or null when it names none of the whitelisted commands. */
 export function payloadForItem(item: { dataset: DOMStringMap }): ShellCommandPayload | null {
   const command = item.dataset.shellCmd;
-  if (!command || !(SHELL_COMMANDS as readonly string[]).includes(command)) return null;
+  if (!command || !SHELL_COMMAND_SET.has(command)) return null;
   const payload: ShellCommandPayload = {
     schemaVersion: 1,
     reason: SHELL_COMMAND_REASON,
@@ -96,7 +99,7 @@ export function payloadForItem(item: { dataset: DOMStringMap }): ShellCommandPay
   }
   if (command === 'save-as') {
     const format = item.dataset.shellFormat ?? 'hwp';
-    if (!(SHELL_SAVE_FORMATS as readonly string[]).includes(format)) return null;
+    if (!SHELL_SAVE_FORMAT_SET.has(format)) return null;
     payload.format = format as (typeof SHELL_SAVE_FORMATS)[number];
   }
   return payload;

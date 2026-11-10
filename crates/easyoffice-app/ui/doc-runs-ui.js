@@ -54,12 +54,21 @@
     let pending = null;
     let syncQueued = false;
     const lastColor = { ...DEFAULT_COLORS };
+    const elCache = new Map();
 
-    const editor = () => document.getElementById("doc-editor");
+    function byId(id) {
+      const cached = elCache.get(id);
+      if (cached && cached.isConnected !== false) return cached;
+      const found = document.getElementById(id);
+      if (found) elCache.set(id, found);
+      return found;
+    }
+
+    const editor = () => byId("doc-editor");
     const isDocModule = () => ["DOC", "HWP"].includes(getActiveModule());
 
     function setFeedback(text) {
-      const fb = document.getElementById("status-command-feedback");
+      const fb = byId("status-command-feedback");
       if (fb) fb.textContent = text;
     }
 
@@ -102,7 +111,7 @@
       const out = { ...state };
       Object.keys(pending.patch).forEach((p) => {
         const v = pending.patch[p];
-        if (R.BOOL_PROPS.includes(p)) {
+        if (R.BOOL_PROP_SET.has(p)) {
           out[p] = v === true;
         } else {
           out[p] = v ?? (p === "size" ? baseHalfPt() : "");
@@ -231,7 +240,7 @@
     // ------------------------------------------------------------ toolbar state
 
     function setPressed(id, value) {
-      const el = document.getElementById(id);
+      const el = byId(id);
       if (!el) return;
       let pressed = "false";
       if (value === R.MIXED) pressed = "mixed";
@@ -241,8 +250,8 @@
     }
 
     function syncSizeControls(state) {
-      const input = document.getElementById("doc-font-size-input");
-      const badge = document.getElementById("doc-style-size-badge");
+      const input = byId("doc-font-size-input");
+      const badge = byId("doc-style-size-badge");
       const mixed = state.size === R.MIXED;
       const text = mixed ? "" : (state.size / 2).toFixed(1);
       if (input) {
@@ -254,8 +263,8 @@
     }
 
     function syncFontControls(state) {
-      const select = document.getElementById("doc-font-select");
-      const badge = document.getElementById("doc-style-font-badge");
+      const select = byId("doc-font-select");
+      const badge = byId("doc-style-font-badge");
       const fallback = editor()?.style?.fontFamily?.replace(/^["']|["']$/g, "") || "휴먼명조";
       const font = state.font === R.MIXED ? "" : state.font || fallback;
       if (select) select.value = font;
@@ -264,12 +273,13 @@
 
     function syncColorButtons(state) {
       [["btn-stylebar-textcolor", "color"], ["btn-stylebar-highlight", "highlight"]].forEach(([id, prop]) => {
-        const btn = document.getElementById(id);
+        const btn = byId(id);
         if (!btn) return;
         const v = state[prop];
         btn.setAttribute("aria-pressed", v && v !== R.MIXED ? "true" : "false");
         const shown = v && v !== R.MIXED ? "#" + v : "";
         btn.style.boxShadow = shown ? "inset 0 -3px 0 " + shown : "";
+        btn.style.borderBottomColor = shown || "";
       });
     }
 
@@ -341,7 +351,7 @@
           for (let i = 1; i <= 40; i += 1) labels.push(String(i * stepCm));
           hTrack.textContent = labels.join(" · · · ");
         }
-        const vRuler = document.getElementById("v-ruler");
+        const vRuler = byId("v-ruler");
         if (vRuler) {
           const spans = vRuler.querySelectorAll("span");
           for (let i = 0; i < spans.length; i += 1) {
@@ -351,7 +361,7 @@
       }
       const blk = targetBlocks()[0];
       Object.entries(RULER_PINS).forEach(([id, prop]) => {
-        const pin = document.getElementById(id);
+        const pin = byId(id);
         if (!pin) return;
         const left = blk ? readPx(blk, "paddingLeft") : 0;
         const px = blk ? readPx(blk, prop) : 0;

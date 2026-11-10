@@ -124,6 +124,7 @@
       const rowData = [...populatedRows, ...blankRows];
       rowData.forEach((item, idx) => {
         const targetRow = idx + 2;
+        const origRowRe = new RegExp("([A-Z]+)" + item.origRow + String.raw`\b`, "g");
         SORT_COL_LETTERS.forEach((col) => {
           const src = item.cells[col];
           if (!src) {
@@ -132,10 +133,9 @@
           }
           const moved = { value: src.value, formula: "" };
           if (src.formula) {
-            moved.formula = src.formula.replace(
-              new RegExp("([A-Z]+)" + item.origRow + String.raw`\b`, "g"),
-              "$1" + targetRow
-            );
+            moved.formula = src.formula.includes("=")
+              ? src.formula.replace(origRowRe, "$1" + targetRow)
+              : src.formula;
           }
           const style = cloneStyleWithoutFreeze(src.style);
           if (style) moved.style = style;

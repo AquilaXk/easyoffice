@@ -98,13 +98,16 @@
       syncActiveSlideDomStylesToDeck,
     } = panelHooks;
 
+    const SCOPE_BY_FORMAT = Object.freeze({
+      xlsx: "SHEET", xls: "SHEET", ods: "SHEET", csv: "SHEET", tsv: "SHEET", sheet: "SHEET",
+      pptx: "SLIDE", ppsx: "SLIDE", ppt: "SLIDE", odp: "SLIDE", slide: "SLIDE",
+      pdf: "PDF",
+      hwp: "HWP", hwt: "HWP", hwpx: "HWP", hwtx: "HWP",
+    });
+
     function resolveSourceScopeKind(sourceFormatOrModule) {
       const token = String(sourceFormatOrModule || getActiveModule() || "DOC").trim().toLowerCase();
-      if (["xlsx", "xls", "ods", "csv", "tsv", "sheet"].includes(token)) return "SHEET";
-      if (["pptx", "ppsx", "ppt", "odp", "slide"].includes(token)) return "SLIDE";
-      if (["pdf"].includes(token)) return "PDF";
-      if (["hwp", "hwt", "hwpx", "hwtx"].includes(token)) return "HWP";
-      return "DOC";
+      return SCOPE_BY_FORMAT[token] || "DOC";
     }
 
     // Structured save content (PD-073): `blocks` for DOC/HWP/PDF, every sheet for SHEET, `slides`
@@ -265,9 +268,9 @@
 
     function openedExtensionOf(mod) {
       const name = String(getWindowBridge?.()?.getDocumentName(mod) || "").trim();
-      const m = /\.([A-Za-z0-9]+)$/.exec(name);
-      if (!m) return "";
-      const ext = m[1].toLowerCase();
+      const dot = name.lastIndexOf(".");
+      if (dot < 0 || dot === name.length - 1) return "";
+      const ext = name.slice(dot + 1).toLowerCase();
       return ext === "markdown" ? "md" : ext;
     }
 
@@ -324,9 +327,9 @@
     let insertModeLabel = "삽입";
 
     function isWhitespaceCode(c) {
-      if (c <= 0x20) return c === 0x20 || (c >= 0x09 && c <= 0x0d);
+      if (c <= 0x20) return c === 0x20 || ((c - 9) >>> 0) <= 4;
       return (
-        c === 0xa0 ||
+        c === 0x00a0 ||
         c === 0x1680 ||
         (c >= 0x2000 && c <= 0x200a) ||
         c === 0x2028 ||
@@ -726,8 +729,12 @@
       document.getElementById("btn-size-down")?.addEventListener("click", () => runs().bumpSize(-1));
       document.getElementById("btn-stylebar-strike")?.addEventListener("click", () => runs().toggle("strike"));
       [["btn-stylebar-textcolor", "doc-textcolor-input", "color"], ["btn-stylebar-highlight", "doc-highlight-input", "highlight"]].forEach(([btnId, inputId, prop]) => {
-        document.getElementById(btnId)?.addEventListener("click", () => runs().toggleColor(prop));
-        document.getElementById(inputId)?.addEventListener("change", (ev) => runs().setColor(prop, ev.target.value));
+        const btn = document.getElementById(btnId);
+        btn?.addEventListener("click", () => runs().toggleColor(prop));
+        document.getElementById(inputId)?.addEventListener("change", (ev) => {
+          if (btn) btn.style.borderBottomColor = ev.target.value || "";
+          runs().setColor(prop, ev.target.value);
+        });
       });
     }
 
@@ -815,8 +822,9 @@
       }
       // rhwp-studio: with a menu open, a single unmodified key runs the item whose shortcut label is that key.
       host.addEventListener?.("keydown", (ev) => {
+        if (ev.ctrlKey || ev.metaKey || ev.altKey || ev.shiftKey || !ev.key || ev.key.length !== 1) return;
         const open = document.querySelector(".menu-item.open");
-        if (!open || ev.ctrlKey || ev.altKey || ev.metaKey || ev.shiftKey || String(ev.key || "").length !== 1) return;
+        if (!open) return;
         const key = ev.key.toUpperCase();
         const hit = Array.from(open.querySelectorAll(".md-item[data-studio-menu-cmd]")).find(
           (item) => item.getAttribute("aria-disabled") !== "true" && item.querySelector(".md-shortcut")?.textContent.toUpperCase() === key

@@ -54,14 +54,15 @@ impl MdInline {
             '<' if self.starts(i, "</sup>") => self.set_script(RichScript::Normal, 6),
             '<' if self.starts(i, "<sub>") => self.set_script(RichScript::Subscript, 5),
             '<' if self.starts(i, "</sub>") => self.set_script(RichScript::Normal, 6),
-            '*' if next == Some('*') => {
+            '*' | '_' if next == Some(c) => {
                 let can_open = !self.fmt.bold && !is_ws(self.at(i + 2));
                 let can_close = self.fmt.bold && !is_ws(prev);
                 if can_open || can_close {
                     self.flush();
                     self.fmt.bold = !self.fmt.bold;
                 } else {
-                    self.buf.push_str("**");
+                    self.buf.push(c);
+                    self.buf.push(c);
                 }
                 self.i += 2;
             }
@@ -259,6 +260,23 @@ fn is_separator_row(cells: &[String]) -> bool {
         })
 }
 
+fn parse_gfm_table_row_line(t: &str) -> Option<Vec<String>> {
+    if t.len() >= 2 && t.starts_with('|') && t.ends_with('|') {
+        return Some(CommonMarkCodec::parse_markdown_table_row(
+            &t[1..t.len() - 1],
+        ));
+    }
+    if t.contains('|') {
+        let inner = t.strip_prefix('|').unwrap_or(t);
+        let inner = inner.strip_suffix('|').unwrap_or(inner);
+        let cells = CommonMarkCodec::parse_markdown_table_row(inner);
+        if cells.len() >= 2 {
+            return Some(cells);
+        }
+    }
+    None
+}
+
 fn list_marker(trimmed: &str) -> Option<(RichListKind, std::borrow::Cow<'_, str>)> {
     for marker in ["- ", "* ", "+ "] {
         if let Some(rest) = trimmed.strip_prefix(marker) {
@@ -282,7 +300,7 @@ fn list_marker(trimmed: &str) -> Option<(RichListKind, std::borrow::Cow<'_, str>
         }
     }
     let digits = trimmed.chars().take_while(char::is_ascii_digit).count();
-    if digits > 0 && digits <= 9 {
+    if (1..=9).contains(&digits) {
         let rest = &trimmed[digits..];
         for marker in [". ", ") "] {
             if let Some(body) = rest.strip_prefix(marker) {
@@ -363,16 +381,27 @@ pub(crate) fn read_markdown(text: &str) -> Result<Vec<RichBlock>, EasyOfficeErro
             i += 1;
             continue;
         }
-        if trimmed.len() >= 2 && trimmed.starts_with('|') && trimmed.ends_with('|') {
+        let is_outer_pipe =
+            trimmed.len() >= 2 && trimmed.starts_with('|') && trimmed.ends_with('|');
+        let is_pipeless_table = !is_outer_pipe
+            && trimmed.contains('|')
+            && lines
+                .get(i + 1)
+                .and_then(|next| parse_gfm_table_row_line(next.trim()))
+                .is_some_and(|sep| sep.len() >= 2 && is_separator_row(&sep));
+        if is_outer_pipe || is_pipeless_table {
             flush(&mut blocks, &mut pending);
             let mut rows: Vec<Vec<String>> = Vec::new();
             while i < lines.len() {
                 let t = lines[i].trim();
-                if !(t.len() >= 2 && t.starts_with('|') && t.ends_with('|')) {
+                let Some(cells) = (if is_outer_pipe {
+                    (t.len() >= 2 && t.starts_with('|') && t.ends_with('|'))
+                        .then(|| CommonMarkCodec::parse_markdown_table_row(&t[1..t.len() - 1]))
+                } else {
+                    parse_gfm_table_row_line(t)
+                }) else {
                     break;
-                }
-                let inner = &t[1..t.len() - 1];
-                let cells = CommonMarkCodec::parse_markdown_table_row(inner);
+                };
                 if !(rows.len() == 1 && is_separator_row(&cells)) {
                     rows.push(cells);
                 }
@@ -389,7 +418,11 @@ pub(crate) fn read_markdown(text: &str) -> Result<Vec<RichBlock>, EasyOfficeErro
         }
         if let Some(quote) = trimmed.strip_prefix('>') {
             flush(&mut blocks, &mut pending);
-            blocks.push(paragraph(quote.trim(), 0, None));
+            blocks.push(RichBlock::Paragraph(RichParagraph {
+                runs: parse_md_inline(quote.trim()),
+                left_indent_twips: Some(720),
+                ..RichParagraph::default()
+            }));
             i += 1;
             continue;
         }
@@ -466,5 +499,31 @@ mod tests {
             })
             .collect();
         assert_eq!(texts, vec!["☐ 미완료", "☑ 완료1", "☑ 완료2"]);
+    }
+
+    #[test]
+    fn gfm_double_underscore_bold_code_span_blockquote_and_pipeless_table() {
+        let runs = parse_md_inline("__굵게__ `*안바뀜*` _기울임_");
+        assert!(runs.iter().any(|r| r.bold && r.text == "굵게"));
+        assert!(runs
+            .iter()
+            .any(|r| !r.italic && r.text.contains("*안바뀜*")));
+        assert!(runs.iter().any(|r| r.italic && r.text == "기울임"));
+
+        let md = "> 인용 문단\n\n항목 | 값\n--- | ---\nA | 10\nB | 20\n";
+        let blocks = read_markdown(md).unwrap();
+        assert_eq!(blocks.len(), 2);
+        let RichBlock::Paragraph(quote_p) = &blocks[0] else {
+            panic!("expected blockquote paragraph");
+        };
+        assert_eq!(quote_p.left_indent_twips, Some(720));
+        assert_eq!(quote_p.plain_text(), "인용 문단");
+
+        let RichBlock::Table(tbl) = &blocks[1] else {
+            panic!("expected pipeless GFM table");
+        };
+        assert_eq!(tbl.rows.len(), 3);
+        assert_eq!(tbl.rows[0][0], "항목");
+        assert_eq!(tbl.rows[2][1], "20");
     }
 }

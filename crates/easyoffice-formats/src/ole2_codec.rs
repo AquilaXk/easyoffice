@@ -81,7 +81,7 @@ impl Ole2ContainerCodec {
 
     #[inline]
     pub(crate) fn fold_cfb_utf16_unit(u: u16) -> u16 {
-        if u >= u16::from(b'a') && u <= u16::from(b'z') {
+        if (u16::from(b'a')..=u16::from(b'z')).contains(&u) {
             u - 32
         } else if u < 0x80 {
             u

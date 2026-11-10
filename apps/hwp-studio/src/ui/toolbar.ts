@@ -34,7 +34,9 @@ export class Toolbar {
   private charfxBtn: HTMLButtonElement;
   private charfxIcon: HTMLElement;
   private charfxMenu: HTMLElement;
+  private charfxItems: HTMLElement[];
   private lsSelect: HTMLSelectElement;
+  private knownLsValues = new Set<number>();
   private btnLsUp: HTMLButtonElement;
   private btnLsDown: HTMLButtonElement;
   private fontLang: HTMLSelectElement;
@@ -72,7 +74,12 @@ export class Toolbar {
     this.charfxBtn = container.querySelector('#btn-charfx')!;
     this.charfxIcon = container.querySelector('#charfx-icon')!;
     this.charfxMenu = container.querySelector('#charfx-menu')!;
+    this.charfxItems = Array.from(this.charfxMenu.querySelectorAll<HTMLElement>('.sb-dropdown-item'));
     this.lsSelect = container.querySelector('#linespacing-select')!;
+    for (const opt of this.lsSelect.options) {
+      const n = Number(opt.value);
+      if (n > 0) this.knownLsValues.add(n);
+    }
     this.btnLsUp = container.querySelector('#btn-ls-up')!;
     this.btnLsDown = container.querySelector('#btn-ls-down')!;
     this.fontLang = container.querySelector('#font-lang')!;
@@ -227,8 +234,9 @@ export class Toolbar {
 
   /** 프리셋에 없는 줄간격 값이면 option을 동적 추가한다 */
   private ensureLsOption(val: number): void {
-    const str = String(val);
-    if (!this.lsSelect.querySelector(`option[value="${str}"]`)) {
+    if (!this.knownLsValues.has(val)) {
+      this.knownLsValues.add(val);
+      const str = String(val);
       const opt = document.createElement('option');
       opt.value = str;
       opt.textContent = `${val} %`;
@@ -502,7 +510,7 @@ export class Toolbar {
       subscript: !!props.subscript,
     };
     let anyFxActive = false;
-    for (const item of this.charfxMenu.querySelectorAll<HTMLElement>('.sb-dropdown-item')) {
+    for (const item of this.charfxItems) {
       const fmt = item.dataset.format ?? '';
       const on = fxState[fmt] ?? false;
       item.classList.toggle('active', on);

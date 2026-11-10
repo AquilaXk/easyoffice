@@ -109,7 +109,21 @@ impl CellIndex {
         if min_r > max_r || min_c > max_c || self.sorted_coords.is_empty() {
             return Vec::new();
         }
+        let min_key = PackedCellCoordinate((u64::from(min_r) << 32) | u64::from(min_c));
+        let max_key = PackedCellCoordinate((u64::from(max_r) << 32) | u64::from(max_c));
+        let lo_sorted = self.sorted_coords.partition_point(|&c| c < min_key);
+        let hi_sorted = self.sorted_coords.partition_point(|&c| c <= max_key);
+        if lo_sorted >= hi_sorted {
+            return Vec::new();
+        }
         let col_span = (max_c - min_c + 1) as usize;
+        if hi_sorted - lo_sorted <= col_span.saturating_mul(16) {
+            return self.sorted_coords[lo_sorted..hi_sorted]
+                .iter()
+                .copied()
+                .filter(|c| (min_c..=max_c).contains(&c.col()))
+                .collect();
+        }
         let mut out = Vec::new();
         if col_span <= self.by_col.len().saturating_mul(4) {
             for col in min_c..=max_c {
@@ -125,7 +139,7 @@ impl CellIndex {
             }
         } else {
             for (&col, rows) in &self.by_col {
-                if col >= min_c && col <= max_c {
+                if (min_c..=max_c).contains(&col) {
                     let lo = rows.partition_point(|&r| r < min_r);
                     let hi = rows.partition_point(|&r| r <= max_r);
                     out.extend(

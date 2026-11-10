@@ -76,8 +76,11 @@
   --accent-light: #4a90d9;
   --accent-hover: #a0b0d8;
   --accent-subtle: #748bc9;
+  --accent: var(--accent-primary);
+  --accent-ink: var(--accent-strong);
 
   /* 기존 CSS 호환 alias */
+  --ui-chrome: var(--ui-surface-raised);
   --color-primary: var(--accent-primary);
   --color-primary-dark: var(--accent-strong);
   --color-primary-light: var(--accent-light);
@@ -112,6 +115,7 @@
   --shadow-dropdown: 2px 2px 8px rgba(0, 0, 0, 0.15);
   --shadow-dialog: 4px 4px 12px rgba(0, 0, 0, 0.2);
   --shadow-light: 2px 2px 6px rgba(0, 0, 0, 0.12);
+  --shadow-xs: var(--shadow-light);
 
   --overlay-bg: rgba(0, 0, 0, 0.2);
 
@@ -142,6 +146,7 @@
   --radius-sm: 2px;
   --radius-md: 3px;
   --radius-lg: 4px;
+  --radius-pill: 999px;
 
   /* 컨트롤 크기 */
   --control-height-sm: 22px;

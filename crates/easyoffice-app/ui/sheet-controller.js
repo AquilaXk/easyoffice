@@ -66,16 +66,16 @@
       } while (inFlightSheetWorkPromise !== prev);
     }
 
+    const gridUtils = host.__EASYOFFICE_SHEET_GRID_UTILS__;
+
     function inferMaxRowFromSheetMap(sheetObj) {
       let maxRow = DEFAULT_SHEET_ROW_COUNT;
       const keys = Object.keys(sheetObj || {});
       for (const key of keys) {
-        const m = /^[A-Za-z]+([1-9]\d*)$/.exec(key);
-        if (m) {
-          const rowNum = Number(m[1]);
-          if (Number.isSafeInteger(rowNum) && rowNum > maxRow) {
-            maxRow = rowNum;
-          }
+        const packed = gridUtils.packRef(key);
+        if (packed > 0) {
+          const rowNum = Math.floor(packed / 32768);
+          if (rowNum > maxRow) maxRow = rowNum;
         }
       }
       return maxRow;
@@ -167,7 +167,6 @@
         },
       },
     });
-    const gridUtils = host.__EASYOFFICE_SHEET_GRID_UTILS__;
 
     function appendSheetRow() {
       const curSheet = getActiveSheetName();
@@ -433,10 +432,6 @@
         }
         const { rpcRes, formulaTargets, targetValues, batchValues } = liveEval;
         let updatedActiveSheet = false;
-        const tdByRef = new Map();
-        document.querySelectorAll("#pane-sheet td[data-cell]").forEach((el) => {
-          tdByRef.set(el.dataset.cell, el);
-        });
         formulaTargets.forEach((target, idx) => {
           const rawVal = extractEvaluatedTargetValue(
             rpcRes,
@@ -454,7 +449,9 @@
           }
           if (getActiveSheetName() === target.sheet) {
             updatedActiveSheet = true;
-            const td = tdByRef.get(target.cell);
+            const td =
+              grid.getTdByRef(target.cell) ||
+              document.querySelector('#pane-sheet td[data-cell="' + target.cell + '"]');
             const focusSt = td ? sheetCellFocusState.get(td) : null;
             if (!td || !isFormulaStr(td.dataset.formula || "")) return;
             if (!forceFocusedDisplay && (focusSt?.userEdited || focusSt?.snapshotPushed)) return;

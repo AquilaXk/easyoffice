@@ -592,7 +592,7 @@ impl FormatDetector {
     }
 
     fn validate_without_nul(bytes: &[u8], label: &str) -> Result<(), EasyOfficeError> {
-        if bytes.contains(&0x00) {
+        if XmlSanitizer::find_byte_swar(bytes, 0, 0x00).is_some() {
             return Err(EasyOfficeError::InvalidUtf8(format!(
                 "{label} 스트림에 NUL(0x00) 바이트가 포함되어 있습니다."
             )));
@@ -608,12 +608,17 @@ impl FormatDetector {
     }
 
     fn slice_contains(haystack: &[u8], needle: &[u8]) -> bool {
-        if needle.is_empty() || haystack.len() < needle.len() {
+        let Some(&first) = needle.first() else {
             return false;
+        };
+        let mut pos = 0;
+        while let Some(hit) = XmlSanitizer::find_byte_swar(haystack, pos, first) {
+            if haystack.get(hit..hit + needle.len()) == Some(needle) {
+                return true;
+            }
+            pos = hit + 1;
         }
-        haystack
-            .windows(needle.len())
-            .any(|window| window == needle)
+        false
     }
 }
 
@@ -818,29 +823,20 @@ impl XmlSanitizer {
     fn xml_escape_mask(word: u64) -> u64 {
         const LO: u64 = 0x0101_0101_0101_0101;
         const HI: u64 = 0x8080_8080_8080_8080;
-        let d_amp = word ^ (0x26u64 * LO);
-        let d_lt = word ^ (0x3Cu64 * LO);
-        let d_gt = word ^ (0x3Eu64 * LO);
-        let d_quot = word ^ (0x22u64 * LO);
-        let d_apos = word ^ (0x27u64 * LO);
-        let d_ef = word ^ (0xEFu64 * LO);
-        let m_amp = d_amp.wrapping_sub(LO) & !d_amp;
-        let m_lt = d_lt.wrapping_sub(LO) & !d_lt;
-        let m_gt = d_gt.wrapping_sub(LO) & !d_gt;
-        let m_quot = d_quot.wrapping_sub(LO) & !d_quot;
-        let m_apos = d_apos.wrapping_sub(LO) & !d_apos;
-        let m_ef = d_ef.wrapping_sub(LO) & !d_ef;
+        let z = |b: u8| {
+            let d = word ^ ((b as u64) * LO);
+            d.wrapping_sub(LO) & !d
+        };
         let mut m_ctrl = !(word | (word << 1) | (word << 2)) & HI;
         if m_ctrl != 0 {
             const MASK7F: u64 = 0x7F7F_7F7F_7F7F_7F7F;
-            let zero_byte = |d: u64| !(((d & MASK7F).wrapping_add(MASK7F)) | d) & HI;
-            let d_tab = word ^ (0x09u64 * LO);
-            let d_lf = word ^ (0x0Au64 * LO);
-            let d_cr = word ^ (0x0Du64 * LO);
-            let m_ws = zero_byte(d_tab) | zero_byte(d_lf) | zero_byte(d_cr);
-            m_ctrl &= !m_ws;
+            let zb = |b: u8| {
+                let d = word ^ ((b as u64) * LO);
+                !(((d & MASK7F).wrapping_add(MASK7F)) | d) & HI
+            };
+            m_ctrl &= !(zb(0x09) | zb(0x0A) | zb(0x0D));
         }
-        ((m_amp | m_lt | m_gt | m_quot | m_apos | m_ef) & HI) | m_ctrl
+        ((z(0x26) | z(0x3C) | z(0x3E) | z(0x22) | z(0x27) | z(0xEF)) & HI) | m_ctrl
     }
 
     pub fn validate_safe_xml(xml: &str) -> Result<(), EasyOfficeError> {

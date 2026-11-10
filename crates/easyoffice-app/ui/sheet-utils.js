@@ -752,11 +752,41 @@
     return docImages.get(String(id)) || null;
   }
 
+  const BASE64_CHUNK = 0x8000;
+
   function base64ToBytes(base64) {
+    if (host.atob === globalThis.atob && typeof Uint8Array.fromBase64 === "function") {
+      return Uint8Array.fromBase64(String(base64 || ""));
+    }
     const bin = host.atob(base64);
-    const out = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i += 1) out[i] = bin.codePointAt(i);
+    const len = bin.length;
+    const out = new Uint8Array(len);
+    let i = 0;
+    const limit = len - 3;
+    for (; i < limit; i += 4) {
+      out[i] = bin.charCodeAt(i);
+      out[i + 1] = bin.charCodeAt(i + 1);
+      out[i + 2] = bin.charCodeAt(i + 2);
+      out[i + 3] = bin.charCodeAt(i + 3);
+    }
+    for (; i < len; i += 1) out[i] = bin.charCodeAt(i);
     return out;
+  }
+
+  function bytesToBase64(bytes, btoaFn) {
+    const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
+    const enc = btoaFn || host.btoa || globalThis.btoa;
+    if (!btoaFn && enc === globalThis.btoa && typeof u8.toBase64 === "function") {
+      return u8.toBase64();
+    }
+    if (u8.length <= BASE64_CHUNK) {
+      return enc(String.fromCharCode.apply(null, u8));
+    }
+    const chunks = [];
+    for (let i = 0; i < u8.length; i += BASE64_CHUNK) {
+      chunks.push(String.fromCharCode.apply(null, u8.subarray(i, i + BASE64_CHUNK)));
+    }
+    return enc(chunks.join(""));
   }
 
   // blob: URL of a stored picture (created once); "" when the host cannot make one.
@@ -823,6 +853,7 @@
     normalizeFormattedNumericCell,
     aggregateNumbers,
     base64ToBytes,
+    bytesToBase64,
     localScrubPii,
     serializeDomChildren,
     restoreDomChildren,

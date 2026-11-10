@@ -20,7 +20,9 @@
 .eo-doc-style-bar { border-bottom-color: var(--ui-border); color: var(--ui-text); }
 .tb-btn, .eo-glyph-btn { color: var(--ui-text-secondary); }
 .tb-btn { min-width: 28px; height: 26px; }
-.eo-glyph-btn:hover, .eo-glyph-btn.active { background: var(--ui-hover); color: var(--ui-text); outline: 1px solid var(--ui-border); font-weight: inherit; }
+.eo-glyph-btn:hover { background: var(--ui-hover-strong); color: var(--ui-text); outline: 1px solid var(--ui-border-light); font-weight: inherit; }
+.eo-glyph-btn.active, .eo-glyph-btn[aria-pressed="true"] { background: var(--ui-active); color: var(--accent-ink); outline: 1px solid var(--ui-border-strong); font-weight: inherit; }
+:root[data-theme-effective="dark"] .eo-glyph-btn.active, :root[data-theme-effective="dark"] .eo-glyph-btn[aria-pressed="true"] { color: var(--accent); }
 .sb-step-btn { display: inline-flex; align-items: center; justify-content: center; color: var(--ui-text-secondary); }
 .sb-step-btn .eo-icon { width: 10px; height: 10px; }
 .eo-doc-style-bar .sb-select { color: var(--ui-text); background: var(--ui-surface); border-color: var(--color-border-input); }
@@ -52,6 +54,7 @@
 #status-command-feedback { flex: 0 1 auto; min-width: 0; max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
 .statusbar-zoom-btn, .statusbar-mode-btn { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 18px; padding: 0 5px; font-size: 11px; font-weight: 600; color: var(--ui-text-secondary); border-radius: 3px; }
 .statusbar-zoom-btn:hover, .statusbar-mode-btn:hover { background: var(--ui-hover); color: var(--ui-text); }
+.statusbar-zoom-btn:hover { outline: 1px solid var(--ui-border-strong); }
 .statusbar-zoom-btn .eo-icon { width: 13px; height: 13px; }
 #status-studio-pos, #status-zoom-label { cursor: pointer; border-radius: var(--radius-xs); padding: 1px 6px; }
 #status-studio-pos:hover, #status-zoom-label:hover { background: var(--ui-hover); color: var(--color-text); }
@@ -83,7 +86,7 @@
 .cmd-input.cp-input { display: block; width: 100%; height: 34px; padding-left: 40px; padding-right: 12px; font-size: 14px; color: var(--ui-text); background: transparent; }
 .cmd-input.cp-input::placeholder { color: var(--ui-text-muted); opacity: 1; }
 /* ---- modal panel (제품 정보) ----------------------------------------------------------------------- */
-.dialog-btn-primary, :root[data-theme-effective="dark"] .dialog-btn-primary { color: var(--ui-text-on-accent); }
+.dialog-btn-primary { color: var(--ui-text-on-accent); }
 button:not(.md-item):focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 1px; }
 .about-version { margin-bottom: 12px; font-size: var(--font-size-md); color: var(--color-text-muted); }
 
