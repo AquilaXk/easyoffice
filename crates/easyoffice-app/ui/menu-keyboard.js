@@ -28,9 +28,14 @@
   }
 
   function createMenuKeyboard({ document }) {
+    let activeOpenMenu = null;
     const menuList = () => Array.from(document.querySelectorAll(MENU_SELECTOR));
     const titleOf = (menu) => menu.querySelector(TITLE_SELECTOR);
-    const openMenu = () => document.querySelector(".menu-item.open");
+    const openMenu = () => {
+      if (activeOpenMenu && activeOpenMenu.classList.contains("open")) return activeOpenMenu;
+      activeOpenMenu = document.querySelector(".menu-item.open");
+      return activeOpenMenu;
+    };
     const isDisabled = (el) => el.getAttribute("aria-disabled") === "true";
 
     // Direct items of one `role="menu"` list (nested submenu items belong to their own list).
@@ -44,12 +49,22 @@
       return menu.querySelector(':scope > [role="menu"]');
     }
 
-    const closeAll = () => closeAllMenus(document);
+    function closeAll() {
+      if (activeOpenMenu) {
+        activeOpenMenu.classList.remove("open");
+        delete activeOpenMenu.dataset.openedByHover;
+        titleOf(activeOpenMenu)?.setAttribute("aria-expanded", "false");
+        activeOpenMenu = null;
+        return;
+      }
+      closeAllMenus(document);
+    }
 
     function open(menu) {
       closeAll();
       menu.classList.add("open");
       titleOf(menu)?.setAttribute("aria-expanded", "true");
+      activeOpenMenu = menu;
     }
 
     function focusAt(items, index) {
@@ -175,6 +190,7 @@
       for (const title of document.querySelectorAll(TITLE_SELECTOR)) bindTitle(title, host);
       document.querySelector(".studio-menubar")?.addEventListener("keydown", onMenubarKeydown);
       document.addEventListener("click", (ev) => {
+        if (!activeOpenMenu) return;
         if (!ev?.target?.closest?.(".studio-menubar")) closeAll();
       });
       host.addEventListener("keydown", onEscape);

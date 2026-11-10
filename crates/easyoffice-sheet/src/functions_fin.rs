@@ -332,6 +332,9 @@ impl SheetEngine {
             "SYD" => self.fin_syd(args, ctx, depth),
             "EFFECT" => self.fin_effect(args, ctx, depth),
             "NOMINAL" => self.fin_nominal(args, ctx, depth),
+            "PDURATION" => self.fin_pduration(args, ctx, depth),
+            "RRI" => self.fin_rri(args, ctx, depth),
+            "DOLLARDE" | "DOLLARFR" => self.fin_dollar_de_fr(name == "DOLLARDE", args, ctx, depth),
             _ => Err(FormulaError::Name),
         }
     }
@@ -824,6 +827,60 @@ impl SheetEngine {
             return Err(FormulaError::DivByZero);
         }
         num((fv_pos / -pv_neg).powf(1.0 / ((n - 1) as f64)) - 1.0)
+    }
+
+    fn fin_pduration(
+        &self,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<EvaluatedCellValue, FormulaError> {
+        check_arity(args, 3, 3)?;
+        let [rate, pv, fv] = self.arg_nums(args, ctx, depth)?;
+        if rate <= 0.0 || pv <= 0.0 || fv <= 0.0 {
+            return Err(FormulaError::Num);
+        }
+        num((fv.ln() - pv.ln()) / (1.0 + rate).ln())
+    }
+
+    fn fin_rri(
+        &self,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<EvaluatedCellValue, FormulaError> {
+        check_arity(args, 3, 3)?;
+        let [nper, pv, fv] = self.arg_nums(args, ctx, depth)?;
+        if nper <= 0.0 || pv <= 0.0 || fv < 0.0 {
+            return Err(FormulaError::Num);
+        }
+        num((fv / pv).powf(1.0 / nper) - 1.0)
+    }
+
+    fn fin_dollar_de_fr(
+        &self,
+        is_de: bool,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<EvaluatedCellValue, FormulaError> {
+        check_arity(args, 2, 2)?;
+        let [val, frac_raw] = self.arg_nums(args, ctx, depth)?;
+        let frac = frac_raw.trunc();
+        if frac < 0.0 {
+            return Err(FormulaError::Num);
+        }
+        if frac == 0.0 {
+            return Err(FormulaError::DivByZero);
+        }
+        let dollars = val.trunc();
+        let rem = val - dollars;
+        let digits = 10.0_f64.powi((frac.log10().ceil() as i32).max(0));
+        if is_de {
+            num(dollars + (rem * digits) / frac)
+        } else {
+            num(dollars + (rem * frac) / digits)
+        }
     }
 }
 

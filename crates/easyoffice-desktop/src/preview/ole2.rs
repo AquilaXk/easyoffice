@@ -43,6 +43,29 @@ struct DirEntry {
     size: u64,
 }
 
+struct SectorCache {
+    cached_id: Option<u32>,
+    cached_buf: Vec<u8>,
+}
+
+impl SectorCache {
+    fn new(sector_len: usize) -> Self {
+        Self {
+            cached_id: None,
+            cached_buf: vec![0_u8; sector_len],
+        }
+    }
+
+    fn load<R: Read + Seek>(&mut self, src: &mut R, c: &Container, sector: u32) -> Option<&[u8]> {
+        if self.cached_id != Some(sector) {
+            let at = c.sector_offset(sector)?;
+            read_at(src, at, &mut self.cached_buf)?;
+            self.cached_id = Some(sector);
+        }
+        Some(&self.cached_buf)
+    }
+}
+
 impl Container {
     fn sector_len(&self) -> usize {
         1 << self.shift
@@ -52,21 +75,23 @@ impl Container {
         u64::from(sector).checked_add(1)?.checked_shl(self.shift)
     }
 
-    /// The FAT entry (next sector) of `sector`, read from the FAT sector that holds it.
-    fn next_sector<R: Read + Seek>(&self, src: &mut R, sector: u32) -> Option<u32> {
+    /// The FAT entry (next sector) of `sector`, read from the cached FAT sector that holds it.
+    fn next_sector<R: Read + Seek>(
+        &self,
+        src: &mut R,
+        cache: &mut SectorCache,
+        sector: u32,
+    ) -> Option<u32> {
         let per_sector = self.sector_len() / FAT_ENTRY_LEN;
         let index = usize::try_from(sector).ok()?;
         let fat_sector = *self.fat_sectors.get(index / per_sector)?;
-        let at = self
-            .sector_offset(fat_sector)?
-            .checked_add(u64::try_from((index % per_sector) * FAT_ENTRY_LEN).ok()?)?;
-        let mut raw = [0_u8; FAT_ENTRY_LEN];
-        read_at(src, at, &mut raw)?;
-        Some(u32::from_le_bytes(raw))
+        let buf = cache.load(src, self, fat_sector)?;
+        le_u32(buf, (index % per_sector) * FAT_ENTRY_LEN)
     }
 
     /// The sectors of a chain, at most `limit` of them; a damaged or cyclic chain is `None`.
     fn chain<R: Read + Seek>(&self, src: &mut R, first: u32, limit: usize) -> Option<Vec<u32>> {
+        let mut cache = SectorCache::new(self.sector_len());
         let mut sectors = Vec::new();
         let mut current = first;
         while current != END_OF_CHAIN {
@@ -74,7 +99,7 @@ impl Container {
                 return None;
             }
             sectors.push(current);
-            current = self.next_sector(src, current)?;
+            current = self.next_sector(src, &mut cache, current)?;
         }
         Some(sectors)
     }
@@ -150,6 +175,7 @@ fn entry_name_is(raw: &[u8], target: &str) -> Option<bool> {
 }
 
 /// The root entry (the mini stream) and the `PrvImage` stream entry of the directory.
+#[allow(clippy::chunks_exact_to_as_chunks)]
 fn find_entries<R: Read + Seek>(src: &mut R, c: &Container) -> Option<(DirEntry, DirEntry)> {
     let per_sector = c.sector_len() / DIR_ENTRY_LEN;
     let max_sectors = MAX_DIR_ENTRIES.div_ceil(per_sector);
@@ -159,8 +185,7 @@ fn find_entries<R: Read + Seek>(src: &mut R, c: &Container) -> Option<(DirEntry,
     let mut data = vec![0_u8; c.sector_len()];
     for sector in c.chain(src, c.first_dir, max_sectors)? {
         read_at(src, c.sector_offset(sector)?, &mut data)?;
-        let (records, _) = data.as_chunks::<DIR_ENTRY_LEN>();
-        for raw in records {
+        for raw in data.chunks_exact(DIR_ENTRY_LEN) {
             seen += 1;
             if seen > MAX_DIR_ENTRIES {
                 return None;
@@ -227,7 +252,10 @@ fn read_mini<R: Read + Seek>(
         c.mini_fat_count.min(MAX_CHAIN_SECTORS),
     )?;
     let mini_stream = c.chain(src, root.start, MAX_CHAIN_SECTORS)?;
-    let per_fat = c.sector_len() / FAT_ENTRY_LEN;
+    let sector_len = c.sector_len();
+    let per_fat = sector_len / FAT_ENTRY_LEN;
+    let mut data_cache = SectorCache::new(sector_len);
+    let mut fat_cache = SectorCache::new(sector_len);
     let mut out = vec![0_u8; size];
     let mut written = 0_usize;
     let mut current = entry.start;
@@ -237,20 +265,15 @@ fn read_mini<R: Read + Seek>(
         }
         let index = usize::try_from(current).ok()?;
         let offset = index.checked_mul(MINI_SECTOR_LEN)?;
-        let holder = *mini_stream.get(offset / c.sector_len())?;
+        let holder = *mini_stream.get(offset / sector_len)?;
+        let in_sector = offset % sector_len;
         let take = (size - written).min(MINI_SECTOR_LEN);
-        let at = c
-            .sector_offset(holder)?
-            .checked_add(u64::try_from(offset % c.sector_len()).ok()?)?;
-        read_at(src, at, &mut out[written..written + take])?;
+        let holder_buf = data_cache.load(src, c, holder)?;
+        out[written..written + take].copy_from_slice(holder_buf.get(in_sector..in_sector + take)?);
         written += take;
         let fat_sector = *mini_fat.get(index / per_fat)?;
-        let entry_at = c
-            .sector_offset(fat_sector)?
-            .checked_add(u64::try_from((index % per_fat) * FAT_ENTRY_LEN).ok()?)?;
-        let mut raw = [0_u8; FAT_ENTRY_LEN];
-        read_at(src, entry_at, &mut raw)?;
-        current = u32::from_le_bytes(raw);
+        let fat_buf = fat_cache.load(src, c, fat_sector)?;
+        current = le_u32(fat_buf, (index % per_fat) * FAT_ENTRY_LEN)?;
     }
     (written == size && current == END_OF_CHAIN).then_some(out)
 }

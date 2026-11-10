@@ -752,8 +752,17 @@ impl Parser {
         if matches!(self.peek(), Some(Token::LParen)) {
             self.next();
             let args = self.parse_call_args(depth)?;
+            let canonical = match normalize_korean_function_aliases(&name) {
+                std::borrow::Cow::Borrowed(s)
+                    if s.len() != name.len() || s.as_ptr() != name.as_ptr() =>
+                {
+                    s.to_string()
+                }
+                std::borrow::Cow::Owned(s) => s,
+                _ => name.to_ascii_uppercase(),
+            };
             return Ok(Expr::FuncCall {
-                name: name.to_ascii_uppercase(),
+                name: canonical,
                 args,
             });
         }
@@ -830,6 +839,25 @@ impl Parser {
             return Err(FormulaError::Value);
         }
         Ok(args)
+    }
+}
+
+#[inline]
+pub(crate) fn normalize_korean_function_aliases(expr: &str) -> std::borrow::Cow<'_, str> {
+    if expr.is_ascii() {
+        return std::borrow::Cow::Borrowed(expr);
+    }
+    match expr {
+        "합계" => std::borrow::Cow::Borrowed("SUM"),
+        "평균" => std::borrow::Cow::Borrowed("AVERAGE"),
+        "최대" | "최댓값" => std::borrow::Cow::Borrowed("MAX"),
+        "최소" | "최솟값" => std::borrow::Cow::Borrowed("MIN"),
+        "개수" => std::borrow::Cow::Borrowed("COUNT"),
+        "오늘" => std::borrow::Cow::Borrowed("TODAY"),
+        "지금" => std::borrow::Cow::Borrowed("NOW"),
+        "만약" | "조건" => std::borrow::Cow::Borrowed("IF"),
+        "반올림" => std::borrow::Cow::Borrowed("ROUND"),
+        _ => std::borrow::Cow::Borrowed(expr),
     }
 }
 

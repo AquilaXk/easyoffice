@@ -76,6 +76,7 @@
     const stateOf = (td) => sheetCellFocusState.get(td);
 
     function tdAt(row, col) {
+      if (typeof grid.getTdAt === "function") return grid.getTdAt(row, col);
       return document.querySelector('#pane-sheet td[data-cell="' + grid.refOf(row, col) + '"]');
     }
 
@@ -133,6 +134,10 @@
     // ---- selection painting ----------------------------------------------------------------
     function paintSelection() {
       const rg = getRange();
+      if (typeof grid.paintSelectionRange === "function") {
+        grid.paintSelectionRange({ r1: rg.r1, r2: rg.r2, c1: rg.c1, c2: rg.c2, ar: sel.ar, ac: sel.ac });
+        return;
+      }
       const multi = rg.r1 !== rg.r2 || rg.c1 !== rg.c2;
       const tbody = document.querySelector("#pane-sheet tbody");
       if (!tbody) return;

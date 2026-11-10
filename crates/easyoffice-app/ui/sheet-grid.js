@@ -20,7 +20,21 @@
   const DEFAULT_COLS = 8;
   const MIN_ROWS = 12;
 
+  const COL_NAMES = new Array(257);
+  COL_NAMES[0] = "";
+  for (let i = 1; i <= 256; i += 1) {
+    let n = i;
+    let out = "";
+    while (n > 0) {
+      const rem = (n - 1) % 26;
+      out = String.fromCodePoint(65 + rem) + out;
+      n = Math.floor((n - 1) / 26);
+    }
+    COL_NAMES[i] = out;
+  }
+
   function colName(idx) {
+    if (idx >= 1 && idx <= 256) return COL_NAMES[idx];
     let n = idx;
     let out = "";
     while (n > 0) {
@@ -34,17 +48,89 @@
   function colIndex(letters) {
     let n = 0;
     for (let i = 0; i < letters.length; i += 1) {
-      n = n * 26 + (letters.codePointAt(i) - 64);
+      n = n * 26 + (letters.charCodeAt(i) - 64);
     }
     return n;
   }
 
+  const PACK_STRIDE = 32768;
+
+  function packCoord(row, col) {
+    return row * PACK_STRIDE + col;
+  }
+
+  function packRef(ref) {
+    if (typeof ref !== "string") return 0;
+    const len = ref.length;
+    if (len < 2 || len > 12) return 0;
+    let i = 0;
+    while (i < len && ref.charCodeAt(i) <= 32) i += 1;
+    let end = len;
+    while (end > i && ref.charCodeAt(end - 1) <= 32) end -= 1;
+    if (i < end && ref.charCodeAt(i) === 36) i += 1;
+    let col = 0;
+    let colLen = 0;
+    while (i < end) {
+      const ch = ref.charCodeAt(i);
+      const upper = ch >= 97 && ch <= 122 ? ch - 32 : ch;
+      if (upper < 65 || upper > 90) break;
+      col = col * 26 + (upper - 64);
+      colLen += 1;
+      if (colLen > 3) return 0;
+      i += 1;
+    }
+    if (colLen === 0 || col < 1 || col > MAX_COLS) return 0;
+    if (i < end && ref.charCodeAt(i) === 36) i += 1;
+    if (i >= end) return 0;
+    const firstDigit = ref.charCodeAt(i);
+    if (firstDigit < 49 || firstDigit > 57) return 0;
+    let row = 0;
+    let rowLen = 0;
+    while (i < end) {
+      const ch = ref.charCodeAt(i);
+      if (ch < 48 || ch > 57) return 0;
+      row = row * 10 + (ch - 48);
+      rowLen += 1;
+      if (rowLen > 7) return 0;
+      i += 1;
+    }
+    if (row < 1 || row > MAX_ROWS) return 0;
+    return row * PACK_STRIDE + col;
+  }
+
   function parseRef(ref) {
-    const m = /^([A-Za-z]{1,3})([1-9]\d{0,6})$/.exec(String(ref || "").trim());
-    if (!m) return null;
-    const col = colIndex(m[1].toUpperCase());
-    const row = Number(m[2]);
-    if (col < 1 || col > MAX_COLS || row < 1 || row > MAX_ROWS) return null;
+    if (typeof ref !== "string") return null;
+    const len = ref.length;
+    if (len < 2 || len > 12) return null;
+    let i = 0;
+    while (i < len && ref.charCodeAt(i) <= 32) i += 1;
+    let end = len;
+    while (end > i && ref.charCodeAt(end - 1) <= 32) end -= 1;
+    let col = 0;
+    let colLen = 0;
+    while (i < end) {
+      const ch = ref.charCodeAt(i);
+      const upper = ch >= 97 && ch <= 122 ? ch - 32 : ch;
+      if (upper < 65 || upper > 90) break;
+      col = col * 26 + (upper - 64);
+      colLen += 1;
+      if (colLen > 3) return null;
+      i += 1;
+    }
+    if (colLen === 0 || col < 1 || col > MAX_COLS || i >= end) return null;
+    const firstDigit = ref.charCodeAt(i);
+    if (firstDigit < 49 || firstDigit > 57) return null;
+    let row = 0;
+    let rowLen = 0;
+    while (i < end) {
+      const ch = ref.charCodeAt(i);
+      if (ch < 48 || ch > 57) return null;
+      row = row * 10 + (ch - 48);
+      rowLen += 1;
+      if (rowLen > 7) return null;
+      i += 1;
+    }
+    if (row < 1 || row > MAX_ROWS) return null;
     return { row, col };
   }
 
@@ -90,7 +176,8 @@
     return out;
   }
 
-  function hasLayout(vp) {      return Boolean(vp) && vp.clientHeight > 0 && vp.clientWidth > 0;
+  function hasLayout(vp) {
+    return Boolean(vp) && vp.clientHeight > 0 && vp.clientWidth > 0;
   }
 
   function rowOf(tr) {
@@ -123,6 +210,16 @@
     const { document, getSheetName, getEntry, getExtent, getCursor, hooks } = deps;
     const widthsBySheet = Object.create(null);
     const fallback = { firstRow: 1, cols: DEFAULT_COLS };
+    const tdByPacked = new Map();
+    const colHeadByCol = new Map();
+    const rowHeadByRow = new Map();
+    let selectedTd = null;
+    const rangeTds = [];
+    const activeColHeads = [];
+    const activeRowHeads = [];
+    let widthCacheSheet = null;
+    let widthCacheCols = [];
+    let widthCachePrefix = [];
     let view = null;
     let spacerTop = null;
     let spacerBottom = null;
@@ -138,17 +235,47 @@
       return widthsBySheet[name];
     }
 
+    function ensureWidthCache() {
+      const name = getSheetName();
+      if (widthCacheSheet === name) return;
+      widthCacheSheet = name;
+      const w = widths();
+      const keys = Object.keys(w);
+      if (keys.length === 0) {
+        widthCacheCols = [];
+        widthCachePrefix = [];
+        return;
+      }
+      const cols = keys.map(Number).sort((a, b) => a - b);
+      const prefix = new Array(cols.length);
+      let acc = 0;
+      for (let i = 0; i < cols.length; i += 1) {
+        acc += w[cols[i]] - DEFAULT_COL_W;
+        prefix[i] = acc;
+      }
+      widthCacheCols = cols;
+      widthCachePrefix = prefix;
+    }
+
     function colWidth(c) {
       return widths()[c] || DEFAULT_COL_W;
     }
 
     function colLeft(c) {
       let x = (c - 1) * DEFAULT_COL_W;
-      const w = widths();
-      Object.keys(w).forEach((k) => {
-        if (Number(k) < c) x += w[k] - DEFAULT_COL_W;
-      });
-      return x;
+      ensureWidthCache();
+      const cols = widthCacheCols;
+      const n = cols.length;
+      if (n === 0 || cols[0] >= c) return x;
+      if (cols[n - 1] < c) return x + widthCachePrefix[n - 1];
+      let lo = 0;
+      let hi = n - 1;
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        if (cols[mid] < c) lo = mid;
+        else hi = mid - 1;
+      }
+      return x + widthCachePrefix[lo];
     }
 
     function colAtX(x) {
@@ -162,6 +289,7 @@
       const w = Math.max(MIN_COL_W, Math.min(MAX_COL_W, Math.round(px)));
       if (w === DEFAULT_COL_W) delete widths()[c];
       else widths()[c] = w;
+      widthCacheSheet = null;
       return w;
     }
 
@@ -185,6 +313,7 @@
         });
         widthsBySheet[name] = next;
       });
+      widthCacheSheet = null;
     }
 
     function computeView() {
@@ -272,12 +401,17 @@
     }
 
     function rebuildHead(headRow, v) {
+      colHeadByCol.clear();
       const corner = headRow.children[0];
       const list = [];
       if (corner) list.push(corner);
       const left = colLeft(v.c0);
       if (v.layout && left > 0) list.push(spacerHead(left));
-      for (let c = v.c0; c <= v.c1; c += 1) list.push(createHeaderCell(c));
+      for (let c = v.c0; c <= v.c1; c += 1) {
+        const th = createHeaderCell(c);
+        colHeadByCol.set(c, th);
+        list.push(th);
+      }
       const right = colLeft(MAX_COLS + 1) - colLeft(v.c1 + 1);
       if (v.layout && right > 0) list.push(spacerHead(right));
       headRow.replaceChildren(...list);
@@ -286,16 +420,23 @@
 
     function buildCells(tr, r, v) {
       const old = new Map();
-      Array.from(tr.children).forEach((el) => {
-        if (el.tagName === "TD" && el.dataset.cell) old.set(el.dataset.cell, el);
-      });
-      const list = [tr.children[0]];
+      const children = tr.children;
+      const rowBase = r * PACK_STRIDE;
+      for (let i = 0; i < children.length; i += 1) {
+        const el = children[i];
+        if (el.tagName === "TD" && el.dataset.cell) {
+          old.set(el.dataset.cell, el);
+          if (el._col > 0) tdByPacked.delete(rowBase + el._col);
+        }
+      }
+      const list = [children[0]];
       if (v.layout && v.c0 > 1) list.push(spacerCell());
       for (let c = v.c0; c <= v.c1; c += 1) {
         const ref = refOf(r, c);
         const td = old.get(ref) || createTd(ref, r, c);
         td._row = r;
         td._col = c;
+        tdByPacked.set(rowBase + c, td);
         list.push(td);
       }
       if (v.layout && v.c1 < MAX_COLS) list.push(spacerCell());
@@ -308,6 +449,7 @@
       const th = document.createElement("th");
       th.dataset.row = String(r);
       th.textContent = String(r);
+      rowHeadByRow.set(r, th);
       tr.appendChild(th);
       buildCells(tr, r, v);
       return tr;
@@ -371,10 +513,21 @@
         if (tr.className && String(tr.className).includes("sheet-spacer")) continue;
         const r = rowOf(tr);
         if (r < next.r0 || r > next.r1 || r === 0) {
+          if (r > 0) {
+            rowHeadByRow.delete(r);
+            const rowBase = r * PACK_STRIDE;
+            const ch = tr.children;
+            for (let i = 0; i < ch.length; i += 1) {
+              const el = ch[i];
+              if (el._col > 0) tdByPacked.delete(rowBase + el._col);
+              else if (el.dataset?.cell) tdByPacked.delete(packRef(el.dataset.cell));
+            }
+          }
           tr.remove();
           continue;
         }
         existing.set(r, tr);
+        if (tr.children[0]) rowHeadByRow.set(r, tr.children[0]);
         if (!tr.dataset.row) tr.dataset.row = String(r);
         if (!sameCols) buildCells(tr, r, next);
       }
@@ -421,12 +574,115 @@
       return true;
     }
 
+    function seedDomMaps() {
+      if (tdByPacked.size > 0) return;
+      const headRow = theadRowEl();
+      if (headRow) {
+        const ch = headRow.children;
+        for (let i = 0; i < ch.length; i += 1) {
+          const colStr = ch[i].dataset?.col;
+          if (colStr) colHeadByCol.set(colIndex(colStr), ch[i]);
+        }
+      }
+      const tbody = tbodyEl();
+      if (!tbody) return;
+      const rows = tbody.children;
+      for (let i = 0; i < rows.length; i += 1) {
+        const tr = rows[i];
+        const r = rowOf(tr);
+        if (r <= 0) continue;
+        if (tr.children[0]) rowHeadByRow.set(r, tr.children[0]);
+        const cells = tr.children;
+        for (let j = 1; j < cells.length; j += 1) {
+          const td = cells[j];
+          const ref = td.dataset?.cell;
+          if (!ref) continue;
+          const packed = packRef(ref);
+          if (packed !== 0) {
+            td._row = r;
+            td._col = packed & 0x7fff;
+            tdByPacked.set(packed, td);
+          }
+        }
+      }
+    }
+
+    function getTdAt(row, col) {
+      seedDomMaps();
+      const td = tdByPacked.get(packCoord(row, col));
+      if (td && td.isConnected !== false) return td;
+      const found = document.querySelector('#pane-sheet td[data-cell="' + refOf(row, col) + '"]');
+      if (found) {
+        found._row = row;
+        found._col = col;
+        tdByPacked.set(packCoord(row, col), found);
+      }
+      return found;
+    }
+
+    function paintSelectionRange(rg) {
+      seedDomMaps();
+      if (selectedTd) {
+        selectedTd.classList.remove("selected-cell");
+        selectedTd = null;
+      }
+      for (let i = 0; i < rangeTds.length; i += 1) rangeTds[i].classList.remove("in-range");
+      rangeTds.length = 0;
+      for (let i = 0; i < activeColHeads.length; i += 1) activeColHeads[i].classList.remove("active-axis");
+      activeColHeads.length = 0;
+      for (let i = 0; i < activeRowHeads.length; i += 1) activeRowHeads[i].classList.remove("active-axis");
+      activeRowHeads.length = 0;
+      if (!rg) return;
+      const ar = rg.ar ?? rg.r1;
+      const ac = rg.ac ?? rg.c1;
+      const anchor = tdByPacked.get(packCoord(ar, ac));
+      if (anchor) {
+        anchor.classList.add("selected-cell");
+        selectedTd = anchor;
+      }
+      const v = view;
+      const mr1 = v ? Math.max(rg.r1, v.r0) : rg.r1;
+      const mr2 = v ? Math.min(rg.r2, v.r1) : rg.r2;
+      const mc1 = v ? Math.max(rg.c1, v.c0) : rg.c1;
+      const mc2 = v ? Math.min(rg.c2, v.c1) : rg.c2;
+      if (rg.r1 !== rg.r2 || rg.c1 !== rg.c2) {
+        for (let r = mr1; r <= mr2; r += 1) {
+          const rowBase = r * PACK_STRIDE;
+          for (let c = mc1; c <= mc2; c += 1) {
+            const td = tdByPacked.get(rowBase + c);
+            if (td) {
+              td.classList.add("in-range");
+              rangeTds.push(td);
+            }
+          }
+        }
+      }
+      for (let c = mc1; c <= mc2; c += 1) {
+        const th = colHeadByCol.get(c);
+        if (th) {
+          th.classList.add("active-axis");
+          activeColHeads.push(th);
+        }
+      }
+      for (let r = mr1; r <= mr2; r += 1) {
+        const th = rowHeadByRow.get(r);
+        if (th) {
+          th.classList.add("active-axis");
+          activeRowHeads.push(th);
+        }
+      }
+    }
+
     // Repaints every materialized cell from the model (keeps the elements, so focus survives).
     function refreshCells() {
       const tbody = tbodyEl();
       if (!tbody) return [];
-      const tds = Array.from(tbody.querySelectorAll("td[data-cell]"));
-      tds.forEach((td) => paintTd(td, getEntry(td.dataset.cell)));
+      seedDomMaps();
+      const tds = [];
+      for (const td of tdByPacked.values()) {
+        paintTd(td, getEntry(td.dataset.cell));
+        tds.push(td);
+      }
       return tds;
     }
 
@@ -450,7 +706,7 @@
     // Applies a new column width to the live header cell and the table width.
     function applyColWidth(c, px) {
       const w = setColWidth(c, px);
-      const th = document.querySelector('#pane-sheet th[data-col="' + colName(c) + '"]');
+      const th = colHeadByCol.get(c) || document.querySelector('#pane-sheet th[data-col="' + colName(c) + '"]');
       if (th) th.style.width = w + "px";
       const table = tableEl();
       if (table && view) syncTableWidth(table, view);
@@ -482,6 +738,8 @@
       DEFAULT_COL_W,
       colName,
       colIndex,
+      packCoord,
+      packRef,
       parseRef,
       refOf,
       colWidth,
@@ -494,6 +752,8 @@
       refreshCells,
       ensureVisible,
       visibleRowSpan,
+      getTdAt,
+      paintSelectionRange,
       paintTd,
       setDisplayValue,
       readTdValue,
@@ -508,6 +768,8 @@
     MAX_COLS,
     colName,
     colIndex,
+    packCoord,
+    packRef,
     parseRef,
     refOf,
     isNumericText,

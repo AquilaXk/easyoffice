@@ -25,25 +25,38 @@
     strike: "btn-stylebar-strike",
   };
 
-  function decorationTokens(style) {
-    return String(style?.textDecoration || "").split(/\s+/).filter(Boolean);
+  const FLAG_BITS = { bold: 1, italic: 2, underline: 4, strike: 8 };
+
+  function entryMask(entry) {
+    const st = entry?.style;
+    if (!st) return 0;
+    let m = 0;
+    const fw = st.fontWeight;
+    if (fw === "600" || fw === "bold" || Number(fw) >= 600) m |= 1;
+    if (st.fontStyle === "italic") m |= 2;
+    const td = st.textDecoration;
+    if (typeof td === "string" && td.length > 0) {
+      if (td.includes("underline")) m |= 4;
+      if (td.includes("line-through")) m |= 8;
+    }
+    return m;
   }
 
   function hasFlag(entry, kind) {
-    const st = entry?.style;
-    if (!st) return false;
-    if (kind === "bold") return st.fontWeight === "600" || st.fontWeight === "bold" || Number(st.fontWeight) >= 600;
-    if (kind === "italic") return st.fontStyle === "italic";
-    return decorationTokens(st).includes(kind === "underline" ? "underline" : "line-through");
+    return (entryMask(entry) & (FLAG_BITS[kind] || 0)) !== 0;
   }
 
   function writeFlag(style, kind, on) {
     if (kind === "bold") style.fontWeight = on ? "600" : "";
     else if (kind === "italic") style.fontStyle = on ? "italic" : "";
     else {
-      const token = kind === "underline" ? "underline" : "line-through";
-      const rest = decorationTokens(style).filter((t) => t !== token);
-      style.textDecoration = (on ? [...rest, token] : rest).join(" ");
+      const td = typeof style.textDecoration === "string" ? style.textDecoration : "";
+      const hasU = kind === "underline" ? on : td.includes("underline");
+      const hasS = kind === "strike" ? on : td.includes("line-through");
+      if (hasU && hasS) style.textDecoration = "underline line-through";
+      else if (hasU) style.textDecoration = "underline";
+      else if (hasS) style.textDecoration = "line-through";
+      else style.textDecoration = "";
     }
   }
 
@@ -58,9 +71,11 @@
   function styleToPayload(style) {
     if (!style) return null;
     const out = {};
-    FLAG_KINDS.forEach((kind) => {
-      if (hasFlag({ style }, kind)) out[kind] = true;
-    });
+    const mask = entryMask({ style });
+    if (mask & 1) out.bold = true;
+    if (mask & 2) out.italic = true;
+    if (mask & 4) out.underline = true;
+    if (mask & 8) out.strike = true;
     const px = /^(\d+(?:\.\d+)?)px$/.exec(String(style.fontSize || "").trim());
     if (px) {
       const pt = Math.round(Number(px[1]) * PT_PER_PX * 100) / 100;
@@ -143,23 +158,46 @@
       }
     }
 
-    // "true" / "false" / "mixed" for a boolean format over the range (absent cells count as off).
-    function rangeFlagState(map, rg, kind) {
+    function computeRangeMasks(map, rg) {
       const area = (rg.r2 - rg.r1 + 1) * (rg.c2 - rg.c1 + 1);
-      let on = 0;
+      let orMask = 0;
+      let andMask = 15;
       const keys = Object.keys(map);
       if (keys.length < area) {
-        for (const ref of keys) {
+        let visited = 0;
+        for (let i = 0; i < keys.length; i += 1) {
+          const ref = keys[i];
           const p = gridUtils.parseRef(ref);
-          if (p && p.row >= rg.r1 && p.row <= rg.r2 && p.col >= rg.c1 && p.col <= rg.c2 && hasFlag(map[ref], kind)) on += 1;
+          if (p && p.row >= rg.r1 && p.row <= rg.r2 && p.col >= rg.c1 && p.col <= rg.c2) {
+            const mask = entryMask(map[ref]);
+            orMask |= mask;
+            andMask &= mask;
+            visited += 1;
+          }
         }
+        if (visited < area) andMask = 0;
       } else {
-        forEachRef(rg, (ref) => {
-          if (hasFlag(map[ref], kind)) on += 1;
-        });
+        for (let r = rg.r1; r <= rg.r2; r += 1) {
+          for (let c = rg.c1; c <= rg.c2; c += 1) {
+            const mask = entryMask(map[gridUtils.refOf(r, c)]);
+            orMask |= mask;
+            andMask &= mask;
+          }
+        }
       }
-      if (on === 0) return "false";
-      return on === area ? "true" : "mixed";
+      return { orMask, andMask };
+    }
+
+    function flagStateFromMasks(orMask, andMask, kind) {
+      const bit = FLAG_BITS[kind] || 0;
+      if ((orMask & bit) === 0) return "false";
+      return (andMask & bit) !== 0 ? "true" : "mixed";
+    }
+
+    // "true" / "false" / "mixed" for a boolean format over the range (absent cells count as off).
+    function rangeFlagState(map, rg, kind) {
+      const { orMask, andMask } = computeRangeMasks(map, rg);
+      return flagStateFromMasks(orMask, andMask, kind);
     }
 
     function nextSize(map) {
@@ -217,10 +255,11 @@
       if (getActiveModule() !== "SHEET") return;
       const map = sheetDataStore[getActiveSheetName()] || {};
       const rg = getRange();
-      Object.keys(BUTTON_IDS).forEach((kind) => {
-        const state = rangeFlagState(map, rg, kind);
-        setPressed(document.getElementById(BUTTON_IDS[kind]), state);
-      });
+      const { orMask, andMask } = computeRangeMasks(map, rg);
+      for (let i = 0; i < FLAG_KINDS.length; i += 1) {
+        const kind = FLAG_KINDS[i];
+        setPressed(document.getElementById(BUTTON_IDS[kind]), flagStateFromMasks(orMask, andMask, kind));
+      }
     }
 
     // Selection moves while navigating: small ranges update at once, huge ones after a short delay.

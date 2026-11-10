@@ -870,21 +870,22 @@
         document.getElementById("btn-doc-outline")?.click?.();
         openToolDialog("outline-dialog");
       });
-      document.getElementById("status-zoom-label")?.addEventListener("click", () => applyZoomPercent?.(100));
+      const applyZoom = (pct, mode) => { applyZoomPercent?.(pct, mode); getDocRuns()?.syncRuler?.((Number(pct) || 100) / 100); };
+      document.getElementById("status-zoom-label")?.addEventListener("click", () => applyZoom(100));
       const zoomSlider = document.getElementById("status-zoom-slider");
       if (zoomSlider && typeof applyZoomPercent === "function") {
-        const onSlide = () => applyZoomPercent(Number(zoomSlider.value) || 100);
+        const onSlide = () => applyZoom(Number(zoomSlider.value) || 100);
         for (const evt of ["input", "change"]) zoomSlider.addEventListener(evt, onSlide);
         zoomSlider.addEventListener("keydown", (ev) => {
           const cur = Number(zoomSlider.value) || 100;
           const next = { PageUp: cur + 10, PageDown: cur - 10, Home: 50, End: 200, ArrowUp: cur + 5, ArrowRight: cur + 5, ArrowDown: cur - 5, ArrowLeft: cur - 5 }[ev.key];
           if (next === undefined) return;
           ev.preventDefault?.();
-          applyZoomPercent(Math.max(50, Math.min(200, next)));
+          applyZoom(Math.max(50, Math.min(200, next)));
         });
       }
       for (const [id, pct, mode] of [["btn-zoom-fit-width", 120, "width"], ["btn-zoom-fit-page", 100, "page"]]) {
-        document.getElementById(id)?.addEventListener("click", () => applyZoomPercent?.(computeFitZoom(editor, mode, pct), mode));
+        document.getElementById(id)?.addEventListener("click", () => applyZoom(computeFitZoom(editor, mode, pct), mode));
       }
     }
 

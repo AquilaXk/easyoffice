@@ -50,14 +50,37 @@ pub(crate) struct CharFmt {
 }
 
 impl CharFmt {
+    #[inline]
+    pub(crate) fn style_bits(&self) -> u8 {
+        let script_bits = match self.script {
+            RichScript::Normal => 0,
+            RichScript::Superscript => 1 << 4,
+            RichScript::Subscript => 2 << 4,
+        };
+        u8::from(self.bold)
+            | (u8::from(self.italic) << 1)
+            | (u8::from(self.underline) << 2)
+            | (u8::from(self.strike) << 3)
+            | script_bits
+    }
+
+    #[inline]
     fn matches_run(&self, run: &RichRun) -> bool {
-        (self.bold, self.italic, self.underline, self.strike)
-            == (run.bold, run.italic, run.underline, run.strike)
+        let run_script_bits = match run.script {
+            RichScript::Normal => 0,
+            RichScript::Superscript => 1 << 4,
+            RichScript::Subscript => 2 << 4,
+        };
+        let run_bits = u8::from(run.bold)
+            | (u8::from(run.italic) << 1)
+            | (u8::from(run.underline) << 2)
+            | (u8::from(run.strike) << 3)
+            | run_script_bits;
+        self.style_bits() == run_bits
             && self.size_half_pt == run.size_half_pt
             && self.font == run.font
             && self.color == run.color
             && self.highlight == run.highlight
-            && self.script == run.script
     }
 }
 
@@ -85,17 +108,25 @@ pub(crate) fn push_run(runs: &mut Vec<RichRun>, text: &str, fmt: &CharFmt) {
         script: fmt.script,
     });
 }
+
 /// Heading level from a style name such as `heading 2`, `Heading2`, `제목 3`, `개요 1`, `Title`.
 pub(crate) fn heading_level_from_name(name: &str) -> u8 {
-    let lower = name.trim().to_lowercase().replace(['_', '-'], " ");
-    if lower == "title" {
+    let s = name.trim_matches(|c: char| c.is_whitespace() || c == '_' || c == '-');
+    if s.eq_ignore_ascii_case("title") {
         return 1;
     }
-    for prefix in ["heading", "제목", "개요", "outline"] {
-        if let Some(rest) = lower.strip_prefix(prefix) {
-            if let Ok(n) = rest.trim().parse::<u8>() {
-                return n.clamp(1, 6);
-            }
+    let rest = if s
+        .get(..7)
+        .is_some_and(|p| p.eq_ignore_ascii_case("heading") || p.eq_ignore_ascii_case("outline"))
+    {
+        Some(&s[7..])
+    } else {
+        s.strip_prefix("제목").or_else(|| s.strip_prefix("개요"))
+    };
+    if let Some(tail) = rest {
+        let digits = tail.trim_matches(|c: char| c.is_whitespace() || c == '_' || c == '-');
+        if let Ok(n) = digits.parse::<u8>() {
+            return n.clamp(1, 6);
         }
     }
     0

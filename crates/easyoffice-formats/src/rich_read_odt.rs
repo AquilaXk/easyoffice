@@ -28,8 +28,12 @@ const SINGLE_LINE_PERCENT: u16 = 100;
 /// Left margin the ODT writer gives list paragraphs; the reader treats it as the list marker.
 const LIST_MARGIN: &str = "0.5in";
 
+const MAX_STYLE_INHERIT_DEPTH: usize = 16;
+const SPACES_64: &str = "                                                                ";
+
 #[derive(Default, Clone)]
 struct StyleProps {
+    parent: Option<String>,
     align: Option<RichAlignment>,
     fmt: CharFmt,
     list_margin: bool,
@@ -132,11 +136,11 @@ fn apply_paragraph_properties(p: &mut StyleProps, attrs: &[(String, String)]) {
     p.line_percent = attr(attrs, "fo:line-height").and_then(line_height_percent);
 }
 
-fn read_styles(
+fn read_styles_into(
     events: &[XmlEvent],
-) -> (HashMap<String, StyleProps>, HashMap<String, RichListKind>) {
-    let mut styles: HashMap<String, StyleProps> = HashMap::new();
-    let mut lists: HashMap<String, RichListKind> = HashMap::new();
+    styles: &mut HashMap<String, StyleProps>,
+    lists: &mut HashMap<String, RichListKind>,
+) {
     let mut cur: Option<(String, StyleProps)> = None;
     let mut cur_list: Option<String> = None;
     for ev in events {
@@ -148,10 +152,12 @@ fn read_styles(
                         Some("L_Bullet" | "Bullet") => Some(RichListKind::Bullet),
                         _ => None,
                     };
+                    let parent = attr(attrs, "style:parent-style-name").map(str::to_string);
                     cur = attr(attrs, "style:name").map(|n| {
                         (
                             n.to_string(),
                             StyleProps {
+                                parent,
                                 list_kind,
                                 ..StyleProps::default()
                             },
@@ -193,7 +199,44 @@ fn read_styles(
             XmlEvent::Text(_) => {}
         }
     }
-    (styles, lists)
+}
+
+fn resolve_style_parents(styles: &mut HashMap<String, StyleProps>) {
+    let snapshot = styles.clone();
+    for (name, props) in styles.iter_mut() {
+        let mut cur_parent = props.parent.as_deref();
+        for _ in 0..MAX_STYLE_INHERIT_DEPTH {
+            let Some(p_name) = cur_parent else {
+                break;
+            };
+            if p_name == name {
+                break;
+            }
+            let Some(p) = snapshot.get(p_name) else {
+                break;
+            };
+            if props.align.is_none() {
+                props.align = p.align;
+            }
+            if !props.list_margin {
+                props.list_margin = p.list_margin;
+            }
+            if props.list_kind.is_none() {
+                props.list_kind = p.list_kind;
+            }
+            if props.left_twips.is_none() {
+                props.left_twips = p.left_twips;
+            }
+            if props.first_line_twips.is_none() {
+                props.first_line_twips = p.first_line_twips;
+            }
+            if props.line_percent.is_none() {
+                props.line_percent = p.line_percent;
+            }
+            props.fmt = merge_span_fmt(p.fmt.clone(), props.fmt.clone());
+            cur_parent = p.parent.as_deref();
+        }
+    }
 }
 
 struct Para {
@@ -298,10 +341,15 @@ impl<'a> OdtWalker<'a> {
             "text:tab" => self.push_inline("\t"),
             "text:line-break" => self.push_inline("\n"),
             "text:s" => {
-                let n = attr(attrs, "text:c")
+                let mut rem = attr(attrs, "text:c")
                     .and_then(|c| c.parse::<usize>().ok())
-                    .unwrap_or(1);
-                self.push_inline(&" ".repeat(n.min(MAX_REPEATED_SPACES)));
+                    .unwrap_or(1)
+                    .min(MAX_REPEATED_SPACES);
+                while rem > 0 {
+                    let chunk = rem.min(SPACES_64.len());
+                    self.push_inline(&SPACES_64[..chunk]);
+                    rem -= chunk;
+                }
             }
             "text:list" => {
                 let kind = attr(attrs, "text:style-name")
@@ -390,7 +438,7 @@ impl<'a> OdtWalker<'a> {
     fn on_frame(
         &mut self,
         events: &[XmlEvent],
-        entries: &[ZipArchiveEntry],
+        entry_by_path: &HashMap<&str, &ZipArchiveEntry>,
     ) -> Result<(), EasyOfficeError> {
         let Some(frame) = read_frame(events) else {
             self.warn_once(UNSUPPORTED_OBJECT_NOTE);
@@ -400,8 +448,8 @@ impl<'a> OdtWalker<'a> {
             self.warn_once("표 안의 그림은 가져오지 않았습니다.");
             return Ok(());
         }
-        let entry =
-            safe_package_path(&frame.href).and_then(|path| entries.iter().find(|e| e.path == path));
+        let entry = safe_package_path(&frame.href)
+            .and_then(|path| entry_by_path.get(path.as_str()).copied());
         let Some(entry) = entry else {
             self.warn_once("외부 링크이거나 찾을 수 없는 그림은 가져오지 않았습니다.");
             return Ok(());
@@ -519,11 +567,13 @@ impl<'a> OdtWalker<'a> {
     }
 }
 
-/// Decodes `content.xml` of an ODT package.
+/// Decodes `content.xml` (and `styles.xml`) of an ODT package.
 pub(crate) fn read_odt(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), EasyOfficeError> {
     let entries = ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default())?;
     validate_zip_xml_entries(&entries)?;
-    if let Some(m) = entries.iter().find(|e| e.path == "mimetype") {
+    let entry_by_path: HashMap<&str, &ZipArchiveEntry> =
+        entries.iter().map(|e| (e.path.as_str(), e)).collect();
+    if let Some(&m) = entry_by_path.get("mimetype") {
         if std::str::from_utf8(&m.data).unwrap_or_default().trim() != OdfCodec::MIMETYPE_ODT {
             return Err(EasyOfficeError::SignatureMismatch {
                 expected: crate::ContainerFamily::ZipOdf,
@@ -531,19 +581,26 @@ pub(crate) fn read_odt(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Easy
             });
         }
     }
-    let content = entries
-        .iter()
-        .find(|e| e.path == "content.xml")
-        .ok_or_else(|| {
-            EasyOfficeError::CorruptedContainer(
-                "ODF 필수 엔트리 'content.xml'이 누락되었습니다.".to_string(),
-            )
-        })?;
+    let content = entry_by_path.get("content.xml").copied().ok_or_else(|| {
+        EasyOfficeError::CorruptedContainer(
+            "ODF 필수 엔트리 'content.xml'이 누락되었습니다.".to_string(),
+        )
+    })?;
+    let mut styles: HashMap<String, StyleProps> = HashMap::new();
+    let mut list_styles: HashMap<String, RichListKind> = HashMap::new();
+    if let Some(&styles_entry) = entry_by_path.get("styles.xml") {
+        let s_xml = std::str::from_utf8(&styles_entry.data)
+            .map_err(|_| EasyOfficeError::InvalidUtf8("ODF styles.xml UTF-8 오류".to_string()))?;
+        XmlSanitizer::validate_safe_xml(s_xml)?;
+        let s_events = tokenize(s_xml)?;
+        read_styles_into(&s_events, &mut styles, &mut list_styles);
+    }
     let xml = std::str::from_utf8(&content.data)
         .map_err(|_| EasyOfficeError::InvalidUtf8("ODF content.xml UTF-8 오류".to_string()))?;
     XmlSanitizer::validate_safe_xml(xml)?;
     let events = tokenize(xml)?;
-    let (styles, list_styles) = read_styles(&events);
+    read_styles_into(&events, &mut styles, &mut list_styles);
+    resolve_style_parents(&mut styles);
 
     let mut walker = OdtWalker::new(&styles, &list_styles);
     let mut i = 0usize;
@@ -551,7 +608,7 @@ pub(crate) fn read_odt(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Easy
         match &events[i] {
             XmlEvent::Start { name, .. } if name == "draw:frame" => {
                 let end = skip_subtree(&events, i);
-                walker.on_frame(&events[i..end], &entries)?;
+                walker.on_frame(&events[i..end], &entry_by_path)?;
                 i = end;
                 continue;
             }
@@ -579,7 +636,7 @@ pub(crate) fn read_odt(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Easy
         ));
     }
     if title.is_empty() {
-        if let Some(meta) = entries.iter().find(|e| e.path == "meta.xml") {
+        if let Some(&meta) = entry_by_path.get("meta.xml") {
             if let Ok(m) = std::str::from_utf8(&meta.data) {
                 title = crate::rtf_xml_helpers::extract_tag_bodies(m, "dc:title")
                     .into_iter()
@@ -651,5 +708,42 @@ fn push_inline(paras: &mut [Para], span_fmts: &[CharFmt], text: &str) {
             text,
             &span_fmts.last().cloned().unwrap_or_default(),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn odt_resolves_parent_style_inheritance_and_cycle_guard() {
+        let styles_xml = r##"<office:document-styles>
+            <office:styles>
+                <style:style style:name="ParentPara" style:family="paragraph">
+                    <style:paragraph-properties fo:text-align="center" fo:line-height="150%"/>
+                    <style:text-properties fo:font-weight="bold" fo:color="#112233"/>
+                </style:style>
+                <style:style style:name="Cycle1" style:parent-style-name="Cycle2"/>
+                <style:style style:name="Cycle2" style:parent-style-name="Cycle1"/>
+            </office:styles>
+        </office:document-styles>"##;
+        let auto_xml = r#"<office:document-content>
+            <office:automatic-styles>
+                <style:style style:name="P1" style:parent-style-name="ParentPara">
+                    <style:text-properties fo:font-style="italic"/>
+                </style:style>
+            </office:automatic-styles>
+        </office:document-content>"#;
+        let mut styles = HashMap::new();
+        let mut lists = HashMap::new();
+        read_styles_into(&tokenize(styles_xml).unwrap(), &mut styles, &mut lists);
+        read_styles_into(&tokenize(auto_xml).unwrap(), &mut styles, &mut lists);
+        resolve_style_parents(&mut styles);
+        let p1 = styles.get("P1").expect("P1 resolved");
+        assert_eq!(p1.align, Some(RichAlignment::Center));
+        assert_eq!(p1.line_percent, Some(150));
+        assert!(p1.fmt.bold);
+        assert!(p1.fmt.italic);
+        assert_eq!(p1.fmt.color.as_deref(), Some("112233"));
     }
 }

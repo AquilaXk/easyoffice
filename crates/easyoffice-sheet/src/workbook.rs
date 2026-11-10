@@ -4,7 +4,7 @@ use crate::{
 };
 use easyoffice_formats::EasyOfficeError;
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 /// Multi-sheet workbook engine supporting cross-sheet references (`=Sheet2!A1`, `=SUM(Sheet2!A1:A3)`)
 /// and cross-sheet cycle detection.
@@ -333,7 +333,7 @@ impl SheetEngine {
         if let EvaluatedCellValue::Number(n) = val {
             if let Some(Ok(crate::Expr::FuncCall { name, .. })) = self.compiled_asts.get(&coord) {
                 if matches!(
-                    name.to_uppercase().as_str(),
+                    name.as_str(),
                     "DATE" | "EDATE" | "EOMONTH" | "WORKDAY" | "TODAY" | "DATEVALUE" | "오늘"
                 ) && (1.0..=2_958_465.999_999).contains(&n)
                 {
@@ -378,12 +378,12 @@ impl SheetEngine {
 
         let mut ctx = EvalContext::standalone_id(self.resolved_sheet_id());
         let mut row_keys: Vec<String> = Vec::new();
-        let mut row_key_set: HashSet<String> = HashSet::new();
+        let mut row_key_idx: HashMap<String, usize> = HashMap::new();
         let mut col_keys: Vec<String> = Vec::new();
-        let mut col_key_set: HashSet<String> = HashSet::new();
-        let mut cell_buckets: HashMap<(String, String), Vec<f64>> = HashMap::new();
-        let mut row_buckets: HashMap<String, Vec<f64>> = HashMap::new();
-        let mut col_buckets: HashMap<String, Vec<f64>> = HashMap::new();
+        let mut col_key_idx: HashMap<String, usize> = HashMap::new();
+        let mut cell_buckets: HashMap<(usize, usize), Vec<f64>> = HashMap::new();
+        let mut row_buckets: Vec<Vec<f64>> = Vec::new();
+        let mut col_buckets: Vec<Vec<f64>> = Vec::new();
         let mut all_values: Vec<f64> = Vec::new();
 
         if row_field_col_offset < col_count && value_field_col_offset < col_count {
@@ -405,66 +405,58 @@ impl SheetEngine {
                 if key_str.is_empty() {
                     continue;
                 }
-                if row_key_set.insert(canonical_row.clone()) {
-                    row_keys.push(key_str);
-                }
+                let r_idx = match row_key_idx.get(&canonical_row) {
+                    Some(&idx) => idx,
+                    None => {
+                        let idx = row_keys.len();
+                        row_keys.push(key_str);
+                        row_buckets.push(Vec::new());
+                        row_key_idx.insert(canonical_row, idx);
+                        idx
+                    }
+                };
                 let (col_str, canonical_col) = match opt_col_col {
                     Some(cc_idx) => self.pivot_column_key(row_idx, cc_idx, &mut ctx),
                     None => pivot_total_key(),
                 };
-                if col_key_set.insert(canonical_col.clone()) {
-                    col_keys.push(col_str);
-                }
+                let c_idx = match col_key_idx.get(&canonical_col) {
+                    Some(&idx) => idx,
+                    None => {
+                        let idx = col_keys.len();
+                        col_keys.push(col_str);
+                        col_buckets.push(Vec::new());
+                        col_key_idx.insert(canonical_col, idx);
+                        idx
+                    }
+                };
                 let val = self.eval_coord_ctx(vc, &mut ctx, 0);
                 if let Some(num) = pivot_numeric_value(&val, aggregation) {
-                    cell_buckets
-                        .entry((canonical_row.clone(), canonical_col.clone()))
-                        .or_default()
-                        .push(num);
-                    row_buckets.entry(canonical_row).or_default().push(num);
-                    col_buckets.entry(canonical_col).or_default().push(num);
+                    cell_buckets.entry((r_idx, c_idx)).or_default().push(num);
+                    row_buckets[r_idx].push(num);
+                    col_buckets[c_idx].push(num);
                     all_values.push(num);
                 }
             }
         }
         if col_keys.is_empty() {
             col_keys.push("Total".to_string());
+            col_buckets.push(Vec::new());
         }
 
-        let row_totals: Vec<f64> = row_keys
+        let row_totals: Vec<f64> = row_buckets
             .iter()
-            .map(|k| {
-                Self::aggregate_slice(
-                    row_buckets
-                        .get(&k.to_lowercase())
-                        .map_or(&[], Vec::as_slice),
-                    aggregation,
-                )
-            })
+            .map(|b| Self::aggregate_slice(b, aggregation))
             .collect();
-        let column_totals: Vec<f64> = col_keys
+        let column_totals: Vec<f64> = col_buckets
             .iter()
-            .map(|ck| {
-                Self::aggregate_slice(
-                    col_buckets
-                        .get(&ck.to_lowercase())
-                        .map_or(&[], Vec::as_slice),
-                    aggregation,
-                )
-            })
+            .map(|b| Self::aggregate_slice(b, aggregation))
             .collect();
-        let matrix: Vec<Vec<f64>> = row_keys
-            .iter()
-            .map(|rk| {
-                let r_canon = rk.to_lowercase();
-                col_keys
-                    .iter()
-                    .map(|ck| {
-                        let c_canon = ck.to_lowercase();
+        let matrix: Vec<Vec<f64>> = (0..row_keys.len())
+            .map(|r_idx| {
+                (0..col_keys.len())
+                    .map(|c_idx| {
                         Self::aggregate_slice(
-                            cell_buckets
-                                .get(&(r_canon.clone(), c_canon))
-                                .map_or(&[], Vec::as_slice),
+                            cell_buckets.get(&(r_idx, c_idx)).map_or(&[], Vec::as_slice),
                             aggregation,
                         )
                     })

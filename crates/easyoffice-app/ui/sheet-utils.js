@@ -141,11 +141,23 @@
     return body.startsWith("=");
   }
 
+  // ASCII_CLASS bitmask: 1=digit, 2=upper, 4=lower, 8=email_punct, 16=card_sep, 32=passport_type
+  const ASCII_CLASS = new Uint8Array(128);
+  for (let c = 48; c <= 57; c += 1) ASCII_CLASS[c] |= 1;
+  for (let c = 65; c <= 90; c += 1) ASCII_CLASS[c] |= 2;
+  for (let c = 97; c <= 122; c += 1) ASCII_CLASS[c] |= 4;
+  for (const ch of ["_", "%", "+", "-"]) ASCII_CLASS[ch.charCodeAt(0)] |= 8;
+  for (const ch of ["-", " ", "\t", "\n", "\r", "\f"]) ASCII_CLASS[ch.charCodeAt(0)] |= 16;
+  for (const ch of ["M", "S", "R", "O", "D", "G"]) ASCII_CLASS[ch.charCodeAt(0)] |= 32;
+
   function isAsciiDigitCode(c) {
-    return c >= 48 && c <= 57;
+    return c < 128 && (ASCII_CLASS[c] & 1) !== 0;
   }
 
   function isUnicodeAlnum(ch) {
+    if (!ch) return false;
+    const cp = ch.charCodeAt(0);
+    if (cp < 128) return (ASCII_CLASS[cp] & 7) !== 0;
     return UNICODE_ALNUM_RE.test(ch);
   }
 
@@ -155,13 +167,16 @@
 
   function charAlphaScript(ch) {
     const code = ch.codePointAt(0);
-    if ((code >= 65 && code <= 90) || (code >= 97 && code <= 122)) return 1;
-    if (code > 127 && isUnicodeAlpha(ch)) return 2;
+    if (code < 128) return (ASCII_CLASS[code] & 6) !== 0 ? 1 : 0;
+    if (isUnicodeAlpha(ch)) return 2;
     return 0;
   }
 
   function isEmailLocalNonDot(ch) {
-    return isUnicodeAlnum(ch) || ch === "_" || ch === "%" || ch === "+" || ch === "-";
+    if (!ch) return false;
+    const cp = ch.charCodeAt(0);
+    if (cp < 128) return (ASCII_CLASS[cp] & 15) !== 0;
+    return UNICODE_ALNUM_RE.test(ch);
   }
 
   function readCodePointAt(str, pos) {
@@ -296,29 +311,29 @@
     return { matchedLen: endDom - idx, skipUntil: endDom };
   }
 
-  function isValidRrnDateAndGenderJs(front6, genderChar) {
-    if (!/^\d{6}$/.test(front6)) return false;
-    const month = Number(front6.slice(2, 4));
-    const day = Number(front6.slice(4, 6));
-    const gender = Number(genderChar);
+  function isValidRrnAtJs(str, idx, genderIdx) {
+    const month = (str.charCodeAt(idx + 2) - 48) * 10 + (str.charCodeAt(idx + 3) - 48);
+    const day = (str.charCodeAt(idx + 4) - 48) * 10 + (str.charCodeAt(idx + 5) - 48);
+    const gender = str.charCodeAt(genderIdx) - 48;
     return month >= 1 && month <= 12 && day >= 1 && day <= 31 && gender >= 1 && gender <= 8;
   }
 
   function matchRrnAtJs(str, idx) {
-    if (idx > 0 && isAsciiDigitCode(str.codePointAt(idx - 1))) return null;
+    if (!allDigitsJs(str, idx, 6) || (idx > 0 && isAsciiDigitCode(str.charCodeAt(idx - 1)))) return null;
     if (
       idx + 14 <= str.length &&
-      /^\d{6}-\d{7}$/.test(str.slice(idx, idx + 14)) &&
-      isValidRrnDateAndGenderJs(str.slice(idx, idx + 6), str[idx + 7]) &&
-      (idx + 14 === str.length || !isAsciiDigitCode(str.codePointAt(idx + 14)))
+      str.charCodeAt(idx + 6) === 45 &&
+      allDigitsJs(str, idx + 7, 7) &&
+      isValidRrnAtJs(str, idx, idx + 7) &&
+      (idx + 14 === str.length || !isAsciiDigitCode(str.charCodeAt(idx + 14)))
     ) {
       return { len: 14, replacement: "******-*******" };
     }
     if (
       idx + 13 <= str.length &&
-      /^\d{13}$/.test(str.slice(idx, idx + 13)) &&
-      isValidRrnDateAndGenderJs(str.slice(idx, idx + 6), str[idx + 6]) &&
-      (idx + 13 === str.length || !isAsciiDigitCode(str.codePointAt(idx + 13)))
+      allDigitsJs(str, idx + 6, 7) &&
+      isValidRrnAtJs(str, idx, idx + 6) &&
+      (idx + 13 === str.length || !isAsciiDigitCode(str.charCodeAt(idx + 13)))
     ) {
       return { len: 13, replacement: "******-*******" };
     }
@@ -327,7 +342,7 @@
 
   function consumeDigitsJs(str, pos, minLen, maxLen) {
     let end = pos;
-    while (end < str.length && end - pos < maxLen && isAsciiDigitCode(str.codePointAt(end))) {
+    while (end < str.length && end - pos < maxLen && isAsciiDigitCode(str.charCodeAt(end))) {
       end += 1;
     }
     return end - pos >= minLen ? end : -1;
@@ -342,7 +357,7 @@
   }
 
   function endsDigitRunJs(str, pos) {
-    return pos === str.length || !isAsciiDigitCode(str.codePointAt(pos));
+    return pos === str.length || !isAsciiDigitCode(str.charCodeAt(pos));
   }
 
   // +82 [sep] area(1-3) [sep] mid(3-4) [sep] last(4)
@@ -366,29 +381,40 @@
   }
 
   function matchMobilePhoneJs(str, idx) {
+    if (idx + 10 > str.length || str.charCodeAt(idx) !== 48 || str.charCodeAt(idx + 1) !== 49) return null;
+    const c2 = str.charCodeAt(idx + 2);
+    if (c2 !== 48 && c2 !== 49 && (c2 < 54 || c2 > 57)) return null;
     const prefix3 = str.slice(idx, idx + 3);
-    if (!/^01[016789]$/.test(prefix3)) return null;
     const replacement = prefix3 + "-****-****";
     const p = idx + 3;
     if (p < str.length && isPhoneSepChar(str[p])) {
       const pEnd = matchSeparatedTailJs(str, p + 1, str[p]);
       return pEnd > 0 ? { len: pEnd - idx, replacement } : null;
     }
-    const compact = idx + 11 <= str.length && /^\d{11}$/.test(str.slice(idx, idx + 11)) && endsDigitRunJs(str, idx + 11);
+    const compact = allDigitsJs(str, idx + 3, 8) && endsDigitRunJs(str, idx + 11);
     return compact ? { len: 11, replacement } : null;
   }
 
   function matchLandlinePhoneJs(str, idx) {
-    const landlineMatch = /^(02|0[3-6][1-5])([-.\s])/.exec(str.slice(idx, idx + 4));
-    if (!landlineMatch) return null;
-    const area = landlineMatch[1];
-    const pEnd = matchSeparatedTailJs(str, idx + area.length + 1, landlineMatch[2]);
+    if (idx + 9 > str.length || str.charCodeAt(idx) !== 48) return null;
+    const c1 = str.charCodeAt(idx + 1);
+    let areaLen = 0;
+    if (c1 === 50) {
+      areaLen = 2;
+    } else if (c1 >= 51 && c1 <= 54) {
+      const c2 = str.charCodeAt(idx + 2);
+      if (c2 >= 49 && c2 <= 53) areaLen = 3;
+    }
+    if (areaLen === 0) return null;
+    const sep = str[idx + areaLen];
+    if (!isPhoneSepChar(sep)) return null;
+    const pEnd = matchSeparatedTailJs(str, idx + areaLen + 1, sep);
     if (pEnd < 0) return null;
-    return { len: pEnd - idx, replacement: area === "02" ? "02-****-****" : "***-****-****" };
+    return { len: pEnd - idx, replacement: areaLen === 2 ? "02-****-****" : "***-****-****" };
   }
 
   function matchPhoneAtJs(str, idx) {
-    if (idx > 0 && (isAsciiDigitCode(str.codePointAt(idx - 1)) || str[idx - 1] === "+")) {
+    if (idx > 0 && (isAsciiDigitCode(str.charCodeAt(idx - 1)) || str.charCodeAt(idx - 1) === 43)) {
       return null;
     }
     return matchIntlPhoneJs(str, idx) ?? matchMobilePhoneJs(str, idx) ?? matchLandlinePhoneJs(str, idx);
@@ -400,10 +426,21 @@
     [3, 2, 6], [3, 3, 6], [3, 6, 3], [3, 6, 5], [4, 3, 6], [4, 2, 7], [6, 2, 6], [3, 4, 4, 2], [3, 6, 2, 3],
   ];
   const isHyphenChar = (ch) => ch === "-";
-  const isCardSepChar = (ch) => ch === "-" || ch === " " || ch === "\t" || ch === "\n" || ch === "\r" || ch === "\f";
-  const isAsciiUpperChar = (ch) => ch !== undefined && ch >= "A" && ch <= "Z";
-  const isAsciiAlnumChar = (ch) =>
-    ch !== undefined && (isAsciiUpperChar(ch) || (ch >= "a" && ch <= "z") || (ch >= "0" && ch <= "9"));
+  const isCardSepChar = (ch) => {
+    if (!ch) return false;
+    const cp = ch.charCodeAt(0);
+    return cp < 128 && (ASCII_CLASS[cp] & 16) !== 0;
+  };
+  const isAsciiUpperChar = (ch) => {
+    if (!ch) return false;
+    const cp = ch.charCodeAt(0);
+    return cp < 128 && (ASCII_CLASS[cp] & 2) !== 0;
+  };
+  const isAsciiAlnumChar = (ch) => {
+    if (!ch) return false;
+    const cp = ch.charCodeAt(0);
+    return cp < 128 && (ASCII_CLASS[cp] & 7) !== 0;
+  };
   // Card 4-4-4-4, driver's licence 2-2-6-2, business registration 3-2-5, then bank accounts.
   const IDENTIFIER_DIGIT_LAYOUTS = [
     [[4, 4, 4, 4], isCardSepChar],
@@ -415,7 +452,7 @@
   function allDigitsJs(str, from, len) {
     if (from + len > str.length) return false;
     for (let i = from; i < from + len; i += 1) {
-      if (!isAsciiDigitCode(str.codePointAt(i))) return false;
+      if (!isAsciiDigitCode(str.charCodeAt(i))) return false;
     }
     return true;
   }
@@ -430,14 +467,14 @@
       if (!allDigitsJs(str, p, groups[i])) return 0;
       p += groups[i];
     }
-    if (p < str.length && isAsciiDigitCode(str.codePointAt(p))) return 0;
+    if (p < str.length && isAsciiDigitCode(str.charCodeAt(p))) return 0;
     return p - idx;
   }
 
   function passesLuhnJs(digits) {
     let sum = 0;
     for (let i = 0; i < digits.length; i += 1) {
-      let v = digits.codePointAt(digits.length - 1 - i) - 48;
+      let v = digits.charCodeAt(digits.length - 1 - i) - 48;
       if (i % 2 === 1) {
         v *= 2;
         if (v > 9) v -= 9;
@@ -448,17 +485,19 @@
   }
 
   function matchContiguousCardJs(str, idx) {
-    if (!/[2-69]/.test(str[idx])) return 0;
+    const first = str.charCodeAt(idx);
+    if (!((first >= 50 && first <= 54) || first === 57)) return 0;
     let end = idx;
-    while (end < str.length && end - idx < 20 && isAsciiDigitCode(str.codePointAt(end))) end += 1;
+    while (end < str.length && end - idx < 20 && isAsciiDigitCode(str.charCodeAt(end))) end += 1;
     const len = end - idx;
-    if (len < 13 || len > 19 || (end < str.length && isAsciiDigitCode(str.codePointAt(end)))) return 0;
+    if (len < 13 || len > 19 || (end < str.length && isAsciiDigitCode(str.charCodeAt(end)))) return 0;
     return passesLuhnJs(str.slice(idx, end)) ? len : 0;
   }
 
   function matchPassportJs(str, idx) {
     if ((idx > 0 && isAsciiAlnumChar(str[idx - 1])) || idx + 9 > str.length) return 0;
-    const isType = "MSRODG".includes(str[idx]);
+    const c0 = str.charCodeAt(idx);
+    const isType = c0 < 128 && (ASCII_CLASS[c0] & 32) !== 0;
     const legacy = isType && allDigitsJs(str, idx + 1, 8);
     const newFormat =
       isType && allDigitsJs(str, idx + 1, 3) && isAsciiUpperChar(str[idx + 4]) && allDigitsJs(str, idx + 5, 4);
@@ -470,7 +509,7 @@
 
   function matchIdentifierAtJs(str, idx) {
     if (isAsciiUpperChar(str[idx])) return matchPassportJs(str, idx);
-    if (!isAsciiDigitCode(str.codePointAt(idx)) || (idx > 0 && isAsciiDigitCode(str.codePointAt(idx - 1)))) {
+    if (!isAsciiDigitCode(str.charCodeAt(idx)) || (idx > 0 && isAsciiDigitCode(str.charCodeAt(idx - 1)))) {
       return 0;
     }
     for (const [groups, isSep] of IDENTIFIER_DIGIT_LAYOUTS) {

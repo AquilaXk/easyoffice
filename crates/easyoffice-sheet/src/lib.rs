@@ -1,5 +1,5 @@
 use easyoffice_formats::EasyOfficeError;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 mod agg_stream;
@@ -8,6 +8,7 @@ mod criteria;
 mod dag;
 pub mod functions;
 mod functions_date_fin;
+mod functions_eng;
 mod functions_fin;
 mod functions_lookup;
 mod functions_lookup_text;
@@ -88,6 +89,7 @@ pub struct SheetEngine {
     pub(crate) has_workbook_assigned_id: bool,
     pub(crate) cells: CellMap<String>,
     pub(crate) compiled_asts: CellMap<Result<Expr, FormulaError>>,
+    pub(crate) subtotal_coords: HashSet<PackedCellCoordinate>,
     pub(crate) dense_numbers: Vec<f64>,
     pub conditional_rules: Vec<ConditionalFormatRule>,
     pub validation_rule: Option<DataValidationRule>,
@@ -120,6 +122,7 @@ impl SheetEngine {
             has_workbook_assigned_id: false,
             cells: CellMap::default(),
             compiled_asts: CellMap::default(),
+            subtotal_coords: HashSet::new(),
             dense_numbers: Vec::new(),
             conditional_rules: Vec::new(),
             validation_rule: None,
@@ -232,14 +235,21 @@ impl SheetEngine {
         if val.is_empty() {
             self.cells.remove(&coord);
             self.compiled_asts.remove(&coord);
+            self.subtotal_coords.remove(&coord);
             self.update_dense_number(coord, None);
         } else {
             let compiled = Self::compile_cell_entry(&val);
             self.update_dense_number(coord, compiled.as_ref());
             if let Some(comp) = compiled {
+                if matches!(comp, Ok(ref expr) if expr_contains_subtotal(expr)) {
+                    self.subtotal_coords.insert(coord);
+                } else {
+                    self.subtotal_coords.remove(&coord);
+                }
                 self.compiled_asts.insert(coord, comp);
             } else {
                 self.compiled_asts.remove(&coord);
+                self.subtotal_coords.remove(&coord);
             }
             self.cells.insert(coord, val);
         }
@@ -251,6 +261,7 @@ impl SheetEngine {
         let comp = Ok(Expr::Number(num));
         self.update_dense_number(coord, Some(&comp));
         self.compiled_asts.insert(coord, comp);
+        self.subtotal_coords.remove(&coord);
         self.cells.insert(coord, format!("{num}"));
     }
 
@@ -260,6 +271,7 @@ impl SheetEngine {
             self.sheet_id = compute_sheet_id(&self.name);
         }
         self.compiled_asts.clear();
+        self.subtotal_coords.clear();
         self.dense_numbers.clear();
         let coords_and_compiled: Vec<(PackedCellCoordinate, Option<Result<Expr, FormulaError>>)> =
             self.cells
@@ -269,6 +281,9 @@ impl SheetEngine {
         for (coord, compiled) in coords_and_compiled {
             self.update_dense_number(coord, compiled.as_ref());
             if let Some(comp) = compiled {
+                if matches!(comp, Ok(ref expr) if expr_contains_subtotal(expr)) {
+                    self.subtotal_coords.insert(coord);
+                }
                 self.compiled_asts.insert(coord, comp);
             }
         }
@@ -372,10 +387,7 @@ impl SheetEngine {
                 ts
             }
         };
-        matches!(
-            target_sheet.compiled_asts.get(&coord),
-            Some(Ok(expr)) if expr_contains_subtotal(expr)
-        )
+        target_sheet.subtotal_coords.contains(&coord)
     }
 
     /// Evaluates a cell and hands the value to `f` by reference: memo hits are borrowed from the

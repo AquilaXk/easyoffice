@@ -37,7 +37,9 @@ fn resolve_target(target: &str) -> Option<String> {
 impl<'a> DocxMedia<'a> {
     pub(crate) fn load(entries: &'a [ZipArchiveEntry]) -> Result<Self, EasyOfficeError> {
         let mut by_rel = HashMap::new();
-        let Some(rels) = entries.iter().find(|e| e.path == DOCUMENT_RELS_PATH) else {
+        let entry_by_path: HashMap<&str, &'a ZipArchiveEntry> =
+            entries.iter().map(|e| (e.path.as_str(), e)).collect();
+        let Some(&rels) = entry_by_path.get(DOCUMENT_RELS_PATH) else {
             return Ok(Self { by_rel });
         };
         let xml = std::str::from_utf8(&rels.data).map_err(|_| {
@@ -52,12 +54,12 @@ impl<'a> DocxMedia<'a> {
             let external = attr(&attrs, "TargetMode") == Some("External");
             if name != "Relationship" || !is_image || external {
                 continue;
-            }
+            };
             let (Some(id), Some(target)) = (attr(&attrs, "Id"), attr(&attrs, "Target")) else {
                 continue;
             };
             let entry =
-                resolve_target(target).and_then(|path| entries.iter().find(|e| e.path == path));
+                resolve_target(target).and_then(|path| entry_by_path.get(path.as_str()).copied());
             if let Some(entry) = entry {
                 by_rel.insert(id.to_string(), entry);
             }

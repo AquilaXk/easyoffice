@@ -109,14 +109,15 @@ impl ZipArchiveCodec {
         if path == "mimetype" {
             return true;
         }
-        let ext = match path.rsplit_once('.') {
-            Some((_, ext)) => ext.to_ascii_lowercase(),
-            None => return false,
+        let Some((_, ext)) = path.rsplit_once('.') else {
+            return false;
         };
-        matches!(
-            ext.as_str(),
-            "png" | "jpg" | "jpeg" | "gif" | "webp" | "zip" | "jar" | "gz" | "mp3" | "mp4"
-        )
+        const STORED_EXTS: [&str; 10] = [
+            "png", "jpg", "jpeg", "gif", "webp", "zip", "jar", "gz", "mp3", "mp4",
+        ];
+        STORED_EXTS
+            .iter()
+            .any(|candidate| ext.eq_ignore_ascii_case(candidate))
     }
 
     fn pack_internal<E: AsZipEntry>(

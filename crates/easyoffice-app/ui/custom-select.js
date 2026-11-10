@@ -102,16 +102,29 @@
     });
   }
 
-  function closeOthers(document, current) {
-    for (const other of document.querySelectorAll(".custom-select.open")) {
-      if (other === current) continue;
-      other.classList.remove("open");
-      other.querySelector(".custom-select-trigger")?.setAttribute("aria-expanded", "false");
-    }
+  const BOUND_DOCS = new WeakSet();
+  const OPEN_SELECT_BY_DOC = new WeakMap();
+
+  function closeOpenSelect(document, exceptRoot) {
+    const openSelectEl = OPEN_SELECT_BY_DOC.get(document);
+    if (!openSelectEl || openSelectEl.root === exceptRoot) return;
+    openSelectEl.close();
+  }
+
+  function ensureDocMousedownListener(document) {
+    if (BOUND_DOCS.has(document)) return;
+    BOUND_DOCS.add(document);
+    document.addEventListener("mousedown", (event) => {
+      const openSelectEl = OPEN_SELECT_BY_DOC.get(document);
+      if (openSelectEl && !openSelectEl.root.contains(event.target)) {
+        openSelectEl.close();
+      }
+    });
   }
 
   function enhanceCustomSelect(document, select) {
     if (ENHANCED.has(select) || select.dataset.nativeSelect === "true") return;
+    ensureDocMousedownListener(document);
     const root = el(document, "div", ("custom-select " + select.className).trim());
     root.dataset.selectId = select.id || "";
     root.tabIndex = -1;
@@ -162,13 +175,17 @@
     const close = () => {
       root.classList.remove("open");
       trigger.setAttribute("aria-expanded", "false");
+      if (OPEN_SELECT_BY_DOC.get(document)?.root === root) {
+        OPEN_SELECT_BY_DOC.delete(document);
+      }
     };
     const open = () => {
       if (select.disabled) return;
-      closeOthers(document, root);
+      closeOpenSelect(document, root);
       sync();
       root.classList.add("open");
       trigger.setAttribute("aria-expanded", "true");
+      OPEN_SELECT_BY_DOC.set(document, { root, close });
     };
     const toggle = () => (root.classList.contains("open") ? close() : open());
     const commit = (option) => {
@@ -209,9 +226,6 @@
       event.stopPropagation?.();
     });
     root.addEventListener("keydown", (event) => onKeydown(event, { root, menu, select, options, rowByValue, close, toggle, sync }));
-    document.addEventListener("mousedown", (event) => {
-      if (!root.contains(event.target)) close();
-    });
     select.addEventListener("change", sync);
     if (typeof host.MutationObserver === "function") {
       new host.MutationObserver(rebuild).observe(select, { childList: true, subtree: true, attributes: true, attributeFilter: ["disabled", "label", "aria-label"] });

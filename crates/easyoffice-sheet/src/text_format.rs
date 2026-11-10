@@ -63,13 +63,13 @@ fn run_len(chars: &[char], start: usize, target: char) -> usize {
         .count()
 }
 
+#[inline]
 fn starts_with_ci(chars: &[char], start: usize, pat: &str) -> bool {
-    let pat_chars: Vec<char> = pat.chars().collect();
-    start + pat_chars.len() <= chars.len()
-        && pat_chars
-            .iter()
+    start + pat.len() <= chars.len()
+        && pat
+            .bytes()
             .zip(&chars[start..])
-            .all(|(p, c)| c.eq_ignore_ascii_case(p))
+            .all(|(p, &c)| c.is_ascii() && (c as u8).eq_ignore_ascii_case(&p))
 }
 
 fn parse_bracket(content: &str) -> Option<Tok> {

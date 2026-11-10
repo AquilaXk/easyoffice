@@ -4,10 +4,25 @@ pub(crate) mod pdf_boundary_lexer;
 pub(crate) use pdf_boundary_lexer::*;
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub(crate) struct PdfToUnicodeMap {
     pub(crate) map: HashMap<u16, String>,
+    pub(crate) bmp_single: HashMap<u16, char>,
+    pub(crate) single_byte_mask: [u64; 4],
+    pub(crate) single_byte_chars: [char; 256],
     pub(crate) is_two_byte: bool,
+}
+
+impl Default for PdfToUnicodeMap {
+    fn default() -> Self {
+        Self {
+            map: HashMap::new(),
+            bmp_single: HashMap::new(),
+            single_byte_mask: [0u64; 4],
+            single_byte_chars: ['\0'; 256],
+            is_two_byte: false,
+        }
+    }
 }
 
 /// Next `<...>` token at or after `*idx` (advancing past it); stray `<` without `>` are skipped.
@@ -27,6 +42,31 @@ fn next_hex_token<'a>(block: &'a str, idx: &mut usize) -> Option<&'a str> {
 }
 
 impl PdfToUnicodeMap {
+    #[inline]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.single_byte_mask == [0u64; 4] && self.bmp_single.is_empty() && self.map.is_empty()
+    }
+
+    #[inline]
+    pub(crate) fn insert_char(&mut self, code: u16, ch: char) {
+        if code <= 0xFF {
+            self.single_byte_mask[usize::from(code >> 6)] |= 1u64 << (code & 63);
+            self.single_byte_chars[usize::from(code)] = ch;
+        } else {
+            self.bmp_single.insert(code, ch);
+        }
+    }
+
+    #[inline]
+    pub(crate) fn insert_mapping(&mut self, code: u16, dst: String) {
+        let mut chars = dst.chars();
+        if let (Some(ch), None) = (chars.next(), chars.next()) {
+            self.insert_char(code, ch);
+        } else {
+            self.map.insert(code, dst);
+        }
+    }
+
     pub(crate) fn parse_cmap_stream(cmap_text: &str, out: &mut Self) {
         let mut rest = cmap_text;
         while let Some(pos) = rest.find("beginbfchar") {
@@ -44,7 +84,7 @@ impl PdfToUnicodeMap {
                     if byte_len == 2 {
                         out.is_two_byte = true;
                     }
-                    out.map.insert(code, dst);
+                    out.insert_mapping(code, dst);
                 }
             }
             rest = &after[end_pos + "endbfchar".len()..];
@@ -118,7 +158,7 @@ impl PdfToUnicodeMap {
                     *i += close + 2;
                     if code <= hi {
                         if let Some(dst) = decode_pdf_hex_string(dst_hex, true) {
-                            out.map.insert(code, dst);
+                            out.insert_mapping(code, dst);
                         }
                         code = code.saturating_add(1);
                     }
@@ -137,7 +177,7 @@ impl PdfToUnicodeMap {
             }
             for offset in 0..=(hi - lo) {
                 if let Some(ch) = char::from_u32(u32::from(dst_base) + u32::from(offset)) {
-                    out.map.insert(lo + offset, ch.to_string());
+                    out.insert_char(lo + offset, ch);
                 }
             }
             return;
@@ -661,15 +701,23 @@ pub(crate) fn decode_pdf_hex_string(hex: &str, prefer_utf16be: bool) -> Option<S
 
 /// Decodes string bytes through a ToUnicode map; `None` when the map has no hit (or no usable width).
 fn map_bytes_with_cmap(cm: &PdfToUnicodeMap, bytes: &[u8]) -> Option<String> {
-    if cm.map.is_empty() {
+    if cm.is_empty() {
         return None;
     }
-    let mut mapped = String::new();
+    let mut mapped = String::with_capacity(bytes.len());
     let mut any_hit = false;
     if cm.is_two_byte && bytes.len() % 2 == 0 {
         for pair in bytes.chunks_exact(2) {
             let code = u16::from_be_bytes([pair[0], pair[1]]);
-            if let Some(s) = cm.map.get(&code) {
+            if code <= 0xFF
+                && (cm.single_byte_mask[usize::from(code >> 6)] & (1u64 << (code & 63))) != 0
+            {
+                mapped.push(cm.single_byte_chars[usize::from(code)]);
+                any_hit = true;
+            } else if let Some(&ch) = cm.bmp_single.get(&code) {
+                mapped.push(ch);
+                any_hit = true;
+            } else if let Some(s) = cm.map.get(&code) {
                 mapped.push_str(s);
                 any_hit = true;
             } else if let Some(ch) = char::from_u32(u32::from(code)) {
@@ -678,7 +726,10 @@ fn map_bytes_with_cmap(cm: &PdfToUnicodeMap, bytes: &[u8]) -> Option<String> {
         }
     } else if !cm.is_two_byte {
         for &b in bytes {
-            if let Some(s) = cm.map.get(&u16::from(b)) {
+            if (cm.single_byte_mask[usize::from(b >> 6)] & (1u64 << (b & 63))) != 0 {
+                mapped.push(cm.single_byte_chars[usize::from(b)]);
+                any_hit = true;
+            } else if let Some(s) = cm.map.get(&u16::from(b)) {
                 mapped.push_str(s);
                 any_hit = true;
             } else {

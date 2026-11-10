@@ -321,7 +321,34 @@
       return targets.length;
     }
 
-    function syncRuler() {
+    let lastLabelStepMm = 10;
+
+    function currentZoomRatio(overrideZoom) {
+      if (Number.isFinite(overrideZoom) && overrideZoom > 0) return overrideZoom;
+      const stageZoom = Number.parseFloat(document.querySelector(".canvas-stage")?.style?.zoom || "100");
+      return Number.isFinite(stageZoom) && stageZoom > 0 ? stageZoom / 100 : 1;
+    }
+
+    function syncRuler(overrideZoom) {
+      const zoomRatio = currentZoomRatio(overrideZoom);
+      const scale = resolveRulerScale(zoomRatio);
+      if (scale.labelStepMm !== lastLabelStepMm) {
+        lastLabelStepMm = scale.labelStepMm;
+        const stepCm = scale.labelStepMm / 10;
+        const hTrack = document.querySelector("#h-ruler .ruler-track");
+        if (hTrack) {
+          const labels = [];
+          for (let i = 1; i <= 40; i += 1) labels.push(String(i * stepCm));
+          hTrack.textContent = labels.join(" · · · ");
+        }
+        const vRuler = document.getElementById("v-ruler");
+        if (vRuler) {
+          const spans = vRuler.querySelectorAll("span");
+          for (let i = 0; i < spans.length; i += 1) {
+            spans[i].textContent = String((i + 1) * stepCm);
+          }
+        }
+      }
       const blk = targetBlocks()[0];
       Object.entries(RULER_PINS).forEach(([id, prop]) => {
         const pin = document.getElementById(id);
@@ -348,7 +375,8 @@
       });
       pin.addEventListener("pointermove", (ev) => {
         if (!drag) return;
-        const delta = Math.round((ev.clientX - drag.startX) / INDENT_STEP_PX) * INDENT_STEP_PX;
+        const zoomRatio = currentZoomRatio();
+        const delta = Math.round((ev.clientX - drag.startX) / (INDENT_STEP_PX * zoomRatio)) * INDENT_STEP_PX;
         if (delta !== 0) drag.moved = true;
         const sign = prop === "paddingRight" ? -1 : 1;
         drag.blocks.forEach((b, i) => writePx(b, prop, drag.base[i] + sign * delta));
@@ -417,12 +445,39 @@
 
     return {
       bind, applyPatch, toggle, setSize, bumpSize, setFont, setColor, toggleColor, getState, syncToolbar,
-      shiftIndent, setBlockIndent, syncRuler, handleBeforeInput, handleSelectionChange,
+      shiftIndent, setBlockIndent, syncRuler, resolveRulerScale, handleBeforeInput, handleSelectionChange,
       getPending: () => pending,
       getLastRange: () => lastRange,
       setLastRange: (r) => { lastRange = r ? plainRange(r) : null; },
     };
   }
 
+  const PX_PER_MM = 96 / 25.4;
+  const MIN_LABEL_SPACING_PX = 30;
+  const MIN_TICK_SPACING_PX = 3.5;
+  const MIN_LABEL_STEP_MM = 10;
+
+  function niceStepCeil(value) {
+    const safeValue = Number.isFinite(value) && value > 0 ? value : 1;
+    const exponent = Math.floor(Math.log10(safeValue));
+    const power = 10 ** exponent;
+    const normalized = safeValue / power;
+    if (normalized <= 1) return power;
+    if (normalized <= 2) return 2 * power;
+    if (normalized <= 5) return 5 * power;
+    return 10 * power;
+  }
+
+  function resolveRulerScale(zoom) {
+    const safeZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+    const pixelsPerMm = PX_PER_MM * safeZoom;
+    return {
+      labelStepMm: niceStepCeil(Math.max(MIN_LABEL_STEP_MM, MIN_LABEL_SPACING_PX / pixelsPerMm)),
+      tickStepMm: niceStepCeil(MIN_TICK_SPACING_PX / pixelsPerMm),
+    };
+  }
+
+  host.__EASYOFFICE_DOC_RUNS_UI__ = { niceStepCeil, resolveRulerScale };
   host.__EASYOFFICE_CREATE_DOC_RUNS_UI__ = createDocRunsUi;
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);
+

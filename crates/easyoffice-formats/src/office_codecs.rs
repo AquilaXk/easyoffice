@@ -600,25 +600,26 @@ impl OoxmlCodec {
     ) -> Result<(Vec<OdsUnpacked>, Vec<(String, SheetStyling)>), EasyOfficeError> {
         let entries = ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default())?;
         validate_zip_xml_entries(&entries)?;
-        let wb_entry = entries
+        let entry_by_path: std::collections::HashMap<&str, &[u8]> = entries
             .iter()
-            .find(|e| e.path == "xl/workbook.xml")
+            .map(|e| (e.path.as_str(), e.data.as_slice()))
+            .collect();
+        let wb_data = entry_by_path
+            .get("xl/workbook.xml")
+            .copied()
             .ok_or_else(|| {
                 EasyOfficeError::CorruptedContainer(
                     "XLSX 필수 엔트리 'xl/workbook.xml'이 누락되었습니다.".to_string(),
                 )
             })?;
-        let wb_xml = std::str::from_utf8(&wb_entry.data)
+        let wb_xml = std::str::from_utf8(wb_data)
             .map_err(|_| EasyOfficeError::InvalidUtf8("xl/workbook.xml UTF-8 오류".to_string()))?;
         XmlSanitizer::validate_safe_xml(wb_xml)?;
 
         let mut rel_targets: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
-        if let Some(rels_entry) = entries
-            .iter()
-            .find(|e| e.path == "xl/_rels/workbook.xml.rels")
-        {
-            let rels_xml = std::str::from_utf8(&rels_entry.data).map_err(|_| {
+        if let Some(&rels_data) = entry_by_path.get("xl/_rels/workbook.xml.rels") {
+            let rels_xml = std::str::from_utf8(rels_data).map_err(|_| {
                 EasyOfficeError::InvalidUtf8("xl/_rels/workbook.xml.rels UTF-8 오류".to_string())
             })?;
             XmlSanitizer::validate_safe_xml(rels_xml)?;
@@ -640,8 +641,8 @@ impl OoxmlCodec {
         }
 
         let mut shared_strings: Vec<String> = Vec::new();
-        if let Some(sst_entry) = entries.iter().find(|e| e.path == "xl/sharedStrings.xml") {
-            let sst_xml = std::str::from_utf8(&sst_entry.data).map_err(|_| {
+        if let Some(&sst_data) = entry_by_path.get("xl/sharedStrings.xml") {
+            let sst_xml = std::str::from_utf8(sst_data).map_err(|_| {
                 EasyOfficeError::InvalidUtf8("xl/sharedStrings.xml UTF-8 오류".to_string())
             })?;
             XmlSanitizer::validate_safe_xml(sst_xml)?;
@@ -677,10 +678,9 @@ impl OoxmlCodec {
         }
 
         let xf_styles = if with_styling {
-            entries
-                .iter()
-                .find(|e| e.path == "xl/styles.xml")
-                .and_then(|e| std::str::from_utf8(&e.data).ok())
+            entry_by_path
+                .get("xl/styles.xml")
+                .and_then(|d| std::str::from_utf8(d).ok())
                 .map(parse_cell_xf_styles)
                 .unwrap_or_default()
         } else {
@@ -689,11 +689,14 @@ impl OoxmlCodec {
         let mut stylings = Vec::new();
         let mut parsed_sheets = Vec::with_capacity(sheet_specs.len());
         for (idx, (sheet_name, target_path)) in sheet_specs.into_iter().enumerate() {
-            let sheet_entry = entries.iter().find(|e| e.path == target_path).or_else(|| {
-                let fallback = format!("xl/worksheets/sheet{}.xml", idx + 1);
-                entries.iter().find(|e| e.path == fallback)
-            });
-            let Some(s_entry) = sheet_entry else {
+            let sheet_data = entry_by_path
+                .get(target_path.as_str())
+                .copied()
+                .or_else(|| {
+                    let fallback = format!("xl/worksheets/sheet{}.xml", idx + 1);
+                    entry_by_path.get(fallback.as_str()).copied()
+                });
+            let Some(s_data) = sheet_data else {
                 if idx == 0 {
                     return Err(EasyOfficeError::CorruptedContainer(
                         "XLSX 필수 엔트리 'xl/worksheets/sheet1.xml'이 누락되었습니다.".to_string(),
@@ -701,7 +704,7 @@ impl OoxmlCodec {
                 }
                 continue;
             };
-            let sheet_xml = std::str::from_utf8(&s_entry.data).map_err(|_| {
+            let sheet_xml = std::str::from_utf8(s_data).map_err(|_| {
                 EasyOfficeError::InvalidUtf8("xl/worksheets/sheet.xml UTF-8 오류".to_string())
             })?;
             XmlSanitizer::validate_safe_xml(sheet_xml)?;

@@ -540,7 +540,7 @@ pub(super) fn decode_and_validate_pdf_streams(
         let is_meta = is_studio_metadata_dict(entries);
         if is_flate {
             let cap = MAX_PDF_STREAM_DECODE_BYTES.min(*remaining_budget);
-            let decoded = match crate::deflate::inflate_auto(raw_stream, cap) {
+            let inflated = match crate::deflate::inflate_auto(raw_stream, cap) {
                 Ok(d) => d,
                 Err(e @ EasyOfficeError::ResourceBudgetExceeded(_)) => return Err(e),
                 Err(_) => {
@@ -549,7 +549,9 @@ pub(super) fn decode_and_validate_pdf_streams(
                     ))
                 }
             };
-            *remaining_budget = remaining_budget.saturating_sub(decoded.len());
+            *remaining_budget = remaining_budget.saturating_sub(inflated.len());
+            let decoded = apply_flate_decode_parms(inflated, entries, objects)
+                .map_err(|detail| EasyOfficeError::CorruptedContainer(detail.to_string()))?;
             if is_meta {
                 let meta_text = String::from_utf8_lossy(&decoded);
                 for s_line in meta_text.split(['\r', '\n']) {
@@ -690,8 +692,141 @@ pub(super) fn stream_contains_forbidden_b64_comment(stream_bytes: &[u8]) -> bool
     }
 }
 
-fn strip_ws(s: &str) -> String {
-    s.chars().filter(|c| !c.is_whitespace()).collect()
+/// Applies PDF `/DecodeParms` `/Predictor` (`2` TIFF horizontal differencing and `10..=15` PNG
+/// row filters None=0, Sub=1, Up=2, Average=3, Paeth=4).
+/// Adapted from reference implementations `lopdf` (MIT) and `pypdf` (BSD-3-Clause) with
+/// fail-closed bounds checking (`1..=65536` columns).
+fn apply_flate_decode_parms(
+    mut data: Vec<u8>,
+    entries: &[(String, PdfObjValue)],
+    objects: &HashMap<(u32, u16), PdfIndirectObject>,
+) -> Result<Vec<u8>, &'static str> {
+    let Some(raw_parms) = dict_get(entries, "/DecodeParms") else {
+        return Ok(data);
+    };
+    let Some(parms_val) = resolve_value(raw_parms, objects) else {
+        return Err("PDF 스트림 /DecodeParms 간접 참조를 해석할 수 없습니다.");
+    };
+    let parms = match parms_val {
+        PdfObjValue::Null => return Ok(data),
+        PdfObjValue::Dict(d) => d,
+        PdfObjValue::Array(arr) if arr.is_empty() => return Ok(data),
+        PdfObjValue::Array(arr) if arr.len() == 1 => match resolve_value(&arr[0], objects) {
+            Some(PdfObjValue::Null) => return Ok(data),
+            Some(PdfObjValue::Dict(d)) => d,
+            _ => return Err("PDF 스트림 /DecodeParms 배열 원소가 올바르지 않습니다."),
+        },
+        _ => return Err("PDF 스트림 /DecodeParms 형식이 올바르지 않습니다."),
+    };
+    let predictor = match dict_get(parms, "/Predictor") {
+        Some(v) => resolve_int(v, objects).ok_or("PDF /Predictor 값이 정수가 아닙니다.")?,
+        None => 1,
+    };
+    if predictor == 1 {
+        return Ok(data);
+    }
+    let columns = match dict_get(parms, "/Columns") {
+        Some(v) => resolve_int(v, objects).ok_or("PDF /Columns 값이 정수가 아닙니다.")?,
+        None => 1,
+    };
+    if !(1..=65536).contains(&columns) {
+        return Err("PDF /Columns 값이 허용 범위(1..=65536)를 벗어났습니다.");
+    }
+    let colors = match dict_get(parms, "/Colors") {
+        Some(v) => resolve_int(v, objects).ok_or("PDF /Colors 값이 정수가 아닙니다.")?,
+        None => 1,
+    };
+    if !(1..=16).contains(&colors) {
+        return Err("PDF /Colors 값이 허용 범위(1..=16)를 벗어났습니다.");
+    }
+    let bpc = match dict_get(parms, "/BitsPerComponent") {
+        Some(v) => resolve_int(v, objects).ok_or("PDF /BitsPerComponent 값이 정수가 아닙니다.")?,
+        None => 8,
+    };
+    if !matches!(bpc, 1 | 2 | 4 | 8 | 16) {
+        return Err("PDF /BitsPerComponent 값이 허용되지 않습니다.");
+    }
+    let cols_u = columns as usize;
+    let colors_u = colors as usize;
+    let bpc_u = bpc as usize;
+    let bpp = (colors_u * bpc_u).div_ceil(8).max(1);
+    let row_bytes = cols_u
+        .checked_mul(colors_u)
+        .and_then(|v| v.checked_mul(bpc_u))
+        .map(|bits| bits.div_ceil(8))
+        .ok_or("PDF /Predictor 행 크기가 오버플로우되었습니다.")?;
+    if row_bytes == 0 {
+        return Err("PDF /Predictor 행 크기가 0입니다.");
+    }
+    if data.is_empty() {
+        return Ok(data);
+    }
+    match predictor {
+        2 => {
+            if bpc_u != 8 || data.len() % row_bytes != 0 {
+                return Err("PDF TIFF Predictor 2 스트림 길이가 행 크기의 배수가 아닙니다.");
+            }
+            for row in data.chunks_exact_mut(row_bytes) {
+                for i in bpp..row_bytes {
+                    row[i] = row[i].wrapping_add(row[i - bpp]);
+                }
+            }
+            Ok(data)
+        }
+        10..=15 => {
+            let stride = row_bytes
+                .checked_add(1)
+                .ok_or("PDF PNG Predictor stride 오버플로우입니다.")?;
+            if data.len() % stride != 0 {
+                return Err("PDF PNG Predictor 스트림 길이가 stride의 배수가 아닙니다.");
+            }
+            let mut out = vec![0u8; (data.len() / stride) * row_bytes];
+            for (r, src_chunk) in data.chunks_exact(stride).enumerate() {
+                let (filter, raw) = (src_chunk[0], &src_chunk[1..]);
+                if filter > 4 {
+                    return Err("지원하지 않는 PDF PNG Predictor 행 필터입니다.");
+                }
+                let (prev_rows, cur_and_rest) = out.split_at_mut(r * row_bytes);
+                let cur = &mut cur_and_rest[..row_bytes];
+                let prev = r
+                    .checked_sub(1)
+                    .map(|p| &prev_rows[p * row_bytes..(p + 1) * row_bytes]);
+                for i in 0..row_bytes {
+                    let left = if i >= bpp { cur[i - bpp] } else { 0 };
+                    let up = prev.map_or(0, |p| p[i]);
+                    let up_left = if i >= bpp {
+                        prev.map_or(0, |p| p[i - bpp])
+                    } else {
+                        0
+                    };
+                    let pred = match filter {
+                        0 => 0,
+                        1 => left,
+                        2 => up,
+                        3 => ((u16::from(left) + u16::from(up)) >> 1) as u8,
+                        _ => paeth_predict_byte(left, up, up_left),
+                    };
+                    cur[i] = raw[i].wrapping_add(pred);
+                }
+            }
+            Ok(out)
+        }
+        _ => Err("지원하지 않는 PDF /Predictor 값입니다."),
+    }
+}
+
+#[inline]
+fn paeth_predict_byte(a: u8, b: u8, c: u8) -> u8 {
+    let (ia, ib, ic) = (i16::from(a), i16::from(b), i16::from(c));
+    let p = ia + ib - ic;
+    let (pa, pb, pc) = ((p - ia).abs(), (p - ib).abs(), (p - ic).abs());
+    if pa <= pb && pa <= pc {
+        a
+    } else if pb <= pc {
+        b
+    } else {
+        c
+    }
 }
 
 fn wrap_line_64(s: &str, trim_blank: bool) -> Vec<String> {
@@ -732,7 +867,12 @@ fn expand_logical_pages_to_chunks(logical_pages: &[&str], mode: u8) -> Vec<Strin
 }
 
 fn same_ws_stripped(a: &[&str], b: &[&str]) -> bool {
-    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| strip_ws(x) == strip_ws(y))
+    a.len() == b.len()
+        && a.iter().zip(b).all(|(x, y)| {
+            x.bytes()
+                .filter(|b| !b.is_ascii_whitespace())
+                .eq(y.bytes().filter(|b| !b.is_ascii_whitespace()))
+        })
 }
 
 fn matches_pages_1to1(logical_pages: &[&str], page_body_texts: &[&str]) -> bool {
@@ -819,7 +959,14 @@ pub(super) fn validate_pdf_trailer_json(
         }
         if let Some(rb) = root_body_field {
             let rb_str = rb.as_str()?;
-            if strip_ws(rb_str) != strip_ws(&json_page_texts.join("\n")) {
+            if !rb_str
+                .bytes()
+                .filter(|b| !b.is_ascii_whitespace())
+                .eq(json_page_texts
+                    .iter()
+                    .flat_map(|s| s.bytes())
+                    .filter(|b| !b.is_ascii_whitespace()))
+            {
                 return None;
             }
         }

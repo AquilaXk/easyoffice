@@ -430,3 +430,37 @@ test("formatted currency, grouped numbers and percentages participate in SUM/AVE
   assert.equal(cell(document, "B2").textContent, "2,000", "second sort orders descending with row 9 at B2");
 });
 
+test("sheet-grid packRef, COL_NAMES cache, getTdAt, and paintSelectionRange update selection without querySelectorAll", async () => {
+  const { document } = await openSheet();
+  const gridUtils = document.defaultView.__EASYOFFICE_SHEET_GRID_UTILS__;
+  assert.equal(typeof gridUtils?.packRef, "function", "packRef exposed on __EASYOFFICE_SHEET_GRID_UTILS__");
+  assert.equal(gridUtils.packRef("A1"), gridUtils.packCoord(1, 1));
+  assert.equal(gridUtils.packRef("C12"), gridUtils.packCoord(12, 3));
+  assert.equal(gridUtils.packRef("AA25"), gridUtils.packCoord(25, 27));
+  assert.equal(gridUtils.packRef("$B$4"), gridUtils.packCoord(4, 2));
+  assert.equal(gridUtils.packRef("XFD1048576"), gridUtils.packCoord(1048576, 16384));
+  assert.notEqual(gridUtils.packRef("XFD1048576"), gridUtils.packRef("XFD524288"));
+  assert.equal(gridUtils.packRef("invalid"), 0);
+  assert.equal(gridUtils.colName(1), "A");
+  assert.equal(gridUtils.colName(26), "Z");
+  assert.equal(gridUtils.colName(27), "AA");
+  assert.equal(gridUtils.colName(256), "IV");
+
+  const b2 = cell(document, "B2");
+  b2.focus();
+  const table = document.querySelector("#pane-sheet .sheet-grid");
+  let qsaCount = 0;
+  const origQsa = table.querySelectorAll.bind(table);
+  table.querySelectorAll = (...args) => {
+    qsaCount += 1;
+    return origQsa(...args);
+  };
+  key(b2, "ArrowRight", { shiftKey: true });
+  key(b2, "ArrowDown", { shiftKey: true });
+  table.querySelectorAll = origQsa;
+  assert.equal(qsaCount, 0, "selection painting does not call table.querySelectorAll");
+  const selected = [...document.querySelectorAll("#pane-sheet td.in-range")].map((td) => td.dataset.cell).sort((a, b) => a.localeCompare(b));
+  assert.deepEqual(selected, ["B2", "B3", "C2", "C3"]);
+});
+
+

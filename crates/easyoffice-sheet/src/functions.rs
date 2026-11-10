@@ -315,7 +315,14 @@ impl SheetEngine {
             | "WEEKNUM" | "ISOWEEKNUM" | "YEARFRAC" => self.eval_date_func(name, args, ctx, depth),
             "PMT" | "IPMT" | "PPMT" | "CUMIPMT" | "CUMPRINC" | "FV" | "PV" | "NPV" | "XNPV"
             | "IRR" | "XIRR" | "MIRR" | "RATE" | "NPER" | "SLN" | "DB" | "DDB" | "SYD"
-            | "EFFECT" | "NOMINAL" => self.eval_financial_func(name, args, ctx, depth),
+            | "EFFECT" | "NOMINAL" | "PDURATION" | "RRI" | "DOLLARDE" | "DOLLARFR" => {
+                self.eval_financial_func(name, args, ctx, depth)
+            }
+            "BITAND" | "BITOR" | "BITXOR" | "BITLSHIFT" | "BITRSHIFT" | "HEX2DEC" | "DEC2HEX"
+            | "BIN2DEC" | "DEC2BIN" | "OCT2DEC" | "DEC2OCT" | "MULTINOMIAL" | "SERIESSUM"
+            | "SUMX2MY2" | "SUMX2PY2" | "SUMXMY2" | "STANDARDIZE" | "FISHER" | "FISHERINV" => {
+                self.eval_eng_func(name, args, ctx, depth)
+            }
             "ISBLANK" | "ISNUMBER" | "ISTEXT" | "ISLOGICAL" | "ISERR" | "ISERROR" | "ISNA"
             | "ISEVEN" | "ISODD" | "TYPE" | "ERROR.TYPE" => {
                 self.eval_info_func(name, args, ctx, depth)

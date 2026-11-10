@@ -229,16 +229,19 @@
         const spans = resolveScrubSpans(origText, res);
         const emittedSpans = new Set();
         let offset = 0;
+        let spanCursor = 0;
         nodes.forEach((node) => {
           const text = node.nodeValue || "";
           const nodeStart = offset;
           const nodeEnd = offset + text.length;
           offset = nodeEnd;
+          while (spanCursor < spans.length && spans[spanCursor].end <= nodeStart) {
+            spanCursor += 1;
+          }
           let cursor = nodeStart;
           let rebuilt = "";
-          for (let sIdx = 0; sIdx < spans.length; sIdx += 1) {
+          for (let sIdx = spanCursor; sIdx < spans.length; sIdx += 1) {
             const sp = spans[sIdx];
-            if (sp.end <= nodeStart) continue;
             if (sp.start >= nodeEnd) break;
             if (sp.start > cursor) {
               rebuilt += text.slice(cursor - nodeStart, sp.start - nodeStart);

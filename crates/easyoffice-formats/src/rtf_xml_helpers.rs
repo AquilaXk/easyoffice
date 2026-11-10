@@ -525,10 +525,16 @@ pub(crate) fn extract_ods_cells_from_row(row_xml: &str) -> Vec<(bool, &str, &str
     let bytes = row_xml.as_bytes();
     let mut out = Vec::new();
     let mut cursor = 0usize;
+    let mut next_cell = find_valid_open_tag(bytes, 0, CELL_TAG);
+    let mut next_covered = find_valid_open_tag(bytes, 0, COVERED_TAG);
 
     while cursor < bytes.len() {
-        let next_cell = find_valid_open_tag(bytes, cursor, CELL_TAG);
-        let next_covered = find_valid_open_tag(bytes, cursor, COVERED_TAG);
+        if next_cell.is_some_and(|(p, _)| p < cursor) {
+            next_cell = find_valid_open_tag(bytes, cursor, CELL_TAG);
+        }
+        if next_covered.is_some_and(|(p, _)| p < cursor) {
+            next_covered = find_valid_open_tag(bytes, cursor, COVERED_TAG);
+        }
         let (is_covered, open_pos, gt_pos, tag_bytes) = match (next_cell, next_covered) {
             (Some((p1, g1)), Some((p2, g2))) => {
                 if p1 <= p2 {
@@ -603,11 +609,18 @@ pub(crate) fn extract_odf_blocks_in_order<'a>(
     let bytes = xml.as_bytes();
     let mut out = Vec::new();
     let mut cursor = 0usize;
+    let mut cached_open: Vec<Option<(usize, usize)>> = tags
+        .iter()
+        .map(|t| find_valid_open_tag(bytes, 0, t.as_bytes()))
+        .collect();
 
     while cursor < bytes.len() {
         let mut best: Option<(&'a str, usize, usize)> = None;
-        for &tag in tags {
-            if let Some((open_pos, gt_pos)) = find_valid_open_tag(bytes, cursor, tag.as_bytes()) {
+        for (idx, &tag) in tags.iter().enumerate() {
+            if cached_open[idx].is_some_and(|(pos, _)| pos < cursor) {
+                cached_open[idx] = find_valid_open_tag(bytes, cursor, tag.as_bytes());
+            }
+            if let Some((open_pos, gt_pos)) = cached_open[idx] {
                 if best.is_none_or(|(_, best_pos, _)| open_pos < best_pos) {
                     best = Some((tag, open_pos, gt_pos));
                 }

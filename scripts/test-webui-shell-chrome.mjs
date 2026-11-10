@@ -488,3 +488,65 @@ test("font-mono token, status bar interactive position/zoom, proportional fit zo
   assert.equal(document.querySelector(".recent-documents-dialog"), null);
 });
 
+test("menu-bar .md-icon & menuitemcheckbox centering, .sb-ls-icon in #doc-linespacing-group, and zoom-aware ruler scale match rhwp-studio", async () => {
+  const mdIconRule = cssRule(".md-icon", MENU_CSS);
+  assert.ok(hasDecl(mdIconRule, "top", "50%"), ".md-icon top: 50%");
+  assert.ok(hasDecl(mdIconRule, "transform", "translateY(-50%)"), ".md-icon translateY(-50%)");
+  assert.ok(hasDecl(mdIconRule, "display", "inline-flex"), ".md-icon display: inline-flex");
+  assert.ok(hasDecl(mdIconRule, "align-items", "center"), ".md-icon align-items: center");
+  assert.ok(hasDecl(mdIconRule, "justify-content", "center"), ".md-icon justify-content: center");
+
+  assert.match(
+    MENU_CSS,
+    /\.md-item\.checked::before,\s*\.md-item\[role="menuitemradio"\]\[aria-checked="true"\]::before,\s*\.md-item\[role="menuitemcheckbox"\]\[aria-checked="true"\]::before\s*\{([^}]*)\}/
+  );
+  const checkMatch = /\.md-item\.checked::before,\s*\.md-item\[role="menuitemradio"\]\[aria-checked="true"\]::before,\s*\.md-item\[role="menuitemcheckbox"\]\[aria-checked="true"\]::before\s*\{([^}]*)\}/.exec(MENU_CSS);
+  assert.ok(checkMatch && hasDecl(checkMatch[1], "left", "8px") && hasDecl(checkMatch[1], "top", "50%") && hasDecl(checkMatch[1], "transform", "translateY(-50%)") && hasDecl(checkMatch[1], "width", "16px") && hasDecl(checkMatch[1], "text-align", "center"));
+
+  const lsIconRule = cssRule(".sb-ls-icon", TOOLBAR_CSS);
+  assert.ok(hasDecl(lsIconRule, "display", "inline-flex"), ".sb-ls-icon styled in toolbar.css");
+
+  const docSelection = { _range: null, get rangeCount() { return this._range ? 1 : 0; }, getRangeAt() { return this._range; }, removeAllRanges() { this._range = null; }, addRange(r) { this._range = r; } };
+  const { document } = await createWorkspaceHarness({ search: "?module=DOC&win=w-ruler-zoom", selection: docSelection });
+  const lsGroup = document.getElementById("doc-linespacing-group");
+  assert.ok(lsGroup, "#doc-linespacing-group exists");
+  const lsIcon = lsGroup.querySelector(".sb-ls-icon");
+  assert.ok(lsIcon && lsIcon.dataset.icon === "line-spacing" && lsIcon.querySelector("svg"), ".sb-ls-icon rendered with line-spacing SVG");
+  const lsSelect = document.getElementById("doc-linespacing-select");
+  assert.equal(lsSelect.parentElement.parentElement, lsGroup, "custom-select wrapper stays inside #doc-linespacing-group");
+
+  const docRunsUi = document.defaultView.__EASYOFFICE_DOC_RUNS_UI__;
+  assert.equal(typeof docRunsUi?.resolveRulerScale, "function", "resolveRulerScale exported");
+  assert.deepEqual(docRunsUi.resolveRulerScale(1.0), { labelStepMm: 10, tickStepMm: 1 });
+  assert.deepEqual(docRunsUi.resolveRulerScale(0.5), { labelStepMm: 20, tickStepMm: 2 });
+  assert.deepEqual(docRunsUi.resolveRulerScale(0.25), { labelStepMm: 50, tickStepMm: 5 });
+  assert.deepEqual(docRunsUi.resolveRulerScale(2.0), { labelStepMm: 10, tickStepMm: 0.5 });
+  assert.deepEqual(docRunsUi.resolveRulerScale(0), docRunsUi.resolveRulerScale(1));
+
+  const hTrack = document.querySelector("#h-ruler .ruler-track");
+  const vSpans = () => [...document.querySelectorAll("#v-ruler span")];
+  assert.equal(vSpans().length, 13);
+  assert.ok(hTrack.textContent.startsWith("1 · · · 2 · · · 3"), hTrack.textContent);
+  assert.deepEqual(vSpans().slice(0, 3).map((s) => s.textContent), ["1", "2", "3"]);
+
+  const zoomSlider = document.getElementById("status-zoom-slider");
+  zoomSlider.value = "50";
+  zoomSlider.dispatchEvent({ type: "input" });
+  assert.equal(vSpans().length, 13, "#v-ruler keeps 13 spans at 50% zoom");
+  assert.ok(hTrack.textContent.startsWith("2 · · · 4 · · · 6"), `50% zoom h-ruler: ${hTrack.textContent}`);
+  assert.deepEqual(vSpans().slice(0, 3).map((s) => s.textContent), ["2", "4", "6"]);
+
+  zoomSlider.value = "200";
+  zoomSlider.dispatchEvent({ type: "input" });
+  assert.ok(hTrack.textContent.startsWith("1 · · · 2 · · · 3"));
+  const docEditor = document.getElementById("doc-editor");
+  const p = docEditor.querySelector("p");
+  docSelection.addRange({ startContainer: p, startOffset: 0, endContainer: p, endOffset: 0, collapsed: true });
+  const leftPin = document.getElementById("ruler-pin-left-margin");
+  leftPin.dispatchEvent({ type: "pointerdown", button: 0, clientX: 100, target: leftPin, preventDefault() {} });
+  leftPin.dispatchEvent({ type: "pointermove", clientX: 132, target: leftPin });
+  leftPin.dispatchEvent({ type: "pointerup", clientX: 132, target: leftPin });
+  assert.equal(p.style.paddingLeft, "16px", "32px drag at 200% zoom equals 1 indent step (16px)");
+});
+
+

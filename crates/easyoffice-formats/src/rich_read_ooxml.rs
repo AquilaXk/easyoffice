@@ -60,18 +60,45 @@ fn entry_xml<'a>(
     Ok(Some(xml))
 }
 
-/// styleId -> lower-cased style name.
-fn read_styles(xml: &str) -> Result<HashMap<String, String>, EasyOfficeError> {
-    let mut out = HashMap::new();
+const MAX_STYLE_INHERIT_DEPTH: usize = 16;
+
+#[derive(Default, Clone, Debug)]
+struct DocxStyle {
+    name: Option<String>,
+    based_on: Option<String>,
+    outline_lvl: Option<u8>,
+}
+
+/// styleId -> style metadata (`w:name`, `w:basedOn`, `w:outlineLvl`).
+/// Adapted from reference implementations `mammoth.js` (BSD-2-Clause) and `docx-rs` (MIT).
+fn read_styles(xml: &str) -> Result<HashMap<String, DocxStyle>, EasyOfficeError> {
+    let mut out: HashMap<String, DocxStyle> = HashMap::new();
     let mut current: Option<String> = None;
     for ev in tokenize(xml)? {
         match ev {
             XmlEvent::Start { name, attrs } if name == "w:style" => {
-                current = attr(&attrs, "w:styleId").map(str::to_string);
+                if let Some(id) = attr(&attrs, "w:styleId") {
+                    out.entry(id.to_string()).or_default();
+                    current = Some(id.to_string());
+                } else {
+                    current = None;
+                }
             }
             XmlEvent::Start { name, attrs } if name == "w:name" => {
                 if let (Some(id), Some(val)) = (current.as_ref(), attr(&attrs, "w:val")) {
-                    out.insert(id.clone(), val.to_string());
+                    out.entry(id.clone()).or_default().name = Some(val.to_string());
+                }
+            }
+            XmlEvent::Start { name, attrs } if name == "w:basedOn" => {
+                if let (Some(id), Some(val)) = (current.as_ref(), attr(&attrs, "w:val")) {
+                    out.entry(id.clone()).or_default().based_on = Some(val.to_string());
+                }
+            }
+            XmlEvent::Start { name, attrs } if name == "w:outlineLvl" => {
+                if let (Some(id), Some(val)) = (current.as_ref(), attr(&attrs, "w:val")) {
+                    if let Ok(lvl) = val.parse::<u8>() {
+                        out.entry(id.clone()).or_default().outline_lvl = Some(lvl);
+                    }
                 }
             }
             XmlEvent::End(name) if name == "w:style" => current = None,
@@ -133,33 +160,67 @@ fn alignment(jc: Option<&str>) -> Option<RichAlignment> {
     jc.and_then(RichAlignment::parse)
 }
 
+#[inline]
+fn starts_with_ignore_ascii_case(s: &str, prefix: &str) -> bool {
+    s.len() >= prefix.len() && s.as_bytes()[..prefix.len()].eq_ignore_ascii_case(prefix.as_bytes())
+}
+
 struct Resolver<'a> {
-    styles: &'a HashMap<String, String>,
+    styles: &'a HashMap<String, DocxStyle>,
     numbering: &'a HashMap<String, RichListKind>,
 }
 
 impl Resolver<'_> {
+    fn resolve_style_chain(&self, start_id: &str) -> (u8, Option<RichListKind>) {
+        let mut heading = 0u8;
+        let mut list_from_style = None;
+        let mut cur_id = Some(start_id);
+        for _ in 0..MAX_STYLE_INHERIT_DEPTH {
+            let Some(id) = cur_id else {
+                break;
+            };
+            if heading == 0 {
+                heading = heading_level_from_name(id);
+            }
+            let Some(st) = self.styles.get(id) else {
+                break;
+            };
+            if let Some(name) = st.name.as_deref() {
+                if heading == 0 {
+                    heading = heading_level_from_name(name);
+                }
+                if list_from_style.is_none() {
+                    if starts_with_ignore_ascii_case(name, "list bullet") {
+                        list_from_style = Some(RichListKind::Bullet);
+                    } else if starts_with_ignore_ascii_case(name, "list number") {
+                        list_from_style = Some(RichListKind::Ordered);
+                    }
+                }
+            }
+            if heading == 0 {
+                if let Some(lvl) = st.outline_lvl.filter(|&l| l < 9) {
+                    heading = (lvl + 1).min(6);
+                }
+            }
+            cur_id = st.based_on.as_deref();
+        }
+        (heading, list_from_style)
+    }
+
     fn finish(&self, p: ParaState) -> RichParagraph {
-        let style_name = p
+        let (mut heading, style_list) = p
             .style_id
-            .as_ref()
-            .map(|id| self.styles.get(id).cloned().unwrap_or_else(|| id.clone()));
-        let mut heading = style_name
             .as_deref()
-            .map_or(0, heading_level_from_name)
-            .max(p.style_id.as_deref().map_or(0, heading_level_from_name));
+            .map_or((0, None), |id| self.resolve_style_chain(id));
         if heading == 0 {
             if let Some(level) = p.outline.filter(|l| *l < 9) {
                 heading = (level + 1).min(6);
             }
         }
-        let lower_name = style_name.unwrap_or_default().to_lowercase();
         let list = if heading > 0 {
             None
-        } else if lower_name.starts_with("list bullet") {
-            Some(RichListKind::Bullet)
-        } else if lower_name.starts_with("list number") {
-            Some(RichListKind::Ordered)
+        } else if style_list.is_some() {
+            style_list
         } else {
             p.num_id.as_deref().filter(|id| *id != "0").map(|id| {
                 self.numbering
@@ -544,4 +605,41 @@ pub(crate) fn read_docx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Eas
         },
         warnings,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn docx_style_inheritance_resolves_based_on_and_outline_lvl_and_breaks_cycles() {
+        let styles_xml = r#"<w:styles>
+            <w:style w:type="paragraph" w:styleId="BaseH2">
+                <w:name w:val="Heading 2"/>
+            </w:style>
+            <w:style w:type="paragraph" w:styleId="CustomSub">
+                <w:name w:val="Custom Subheading"/>
+                <w:basedOn w:val="BaseH2"/>
+            </w:style>
+            <w:style w:type="paragraph" w:styleId="Outline3">
+                <w:name w:val="Section Title"/>
+                <w:pPr><w:outlineLvl w:val="2"/></w:pPr>
+            </w:style>
+            <w:style w:type="paragraph" w:styleId="CycleA">
+                <w:basedOn w:val="CycleB"/>
+            </w:style>
+            <w:style w:type="paragraph" w:styleId="CycleB">
+                <w:basedOn w:val="CycleA"/>
+            </w:style>
+        </w:styles>"#;
+        let styles = read_styles(styles_xml).expect("styles parse");
+        let numbering = HashMap::new();
+        let resolver = Resolver {
+            styles: &styles,
+            numbering: &numbering,
+        };
+        assert_eq!(resolver.resolve_style_chain("CustomSub"), (2, None));
+        assert_eq!(resolver.resolve_style_chain("Outline3"), (3, None));
+        assert_eq!(resolver.resolve_style_chain("CycleA"), (0, None));
+    }
 }

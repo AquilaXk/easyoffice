@@ -508,6 +508,10 @@ fn scan_pdf_keys(pdf: &[u8], expected_pages: usize) -> ScannedKeys {
     const WORD_MEDIA: u32 = u32::from_le_bytes(*b"/Med");
     const WORD_FONT: u32 = u32::from_le_bytes(*b"/Fon");
     const WORD_TO_UNI: u32 = u32::from_le_bytes(*b"/ToU");
+    const SLASH_MASK: u64 = 0x2F2F_2F2F_2F2F_2F2F;
+    const LO_BITS: u64 = 0x0101_0101_0101_0101;
+    const HI_BITS: u64 = 0x8080_8080_8080_8080;
+
     let mut out = ScannedKeys {
         count_matched: false,
         media_boxes: 0,
@@ -517,6 +521,28 @@ fn scan_pdf_keys(pdf: &[u8], expected_pages: usize) -> ScannedKeys {
     let len = pdf.len();
     let mut i = 0;
     while i + 4 <= len {
+        if i + 8 <= len {
+            let chunk = u64::from_le_bytes([
+                pdf[i],
+                pdf[i + 1],
+                pdf[i + 2],
+                pdf[i + 3],
+                pdf[i + 4],
+                pdf[i + 5],
+                pdf[i + 6],
+                pdf[i + 7],
+            ]);
+            let x = chunk ^ SLASH_MASK;
+            let hits = x.wrapping_sub(LO_BITS) & !x & HI_BITS;
+            if hits == 0 {
+                i += 8;
+                continue;
+            }
+            i += (hits.trailing_zeros() >> 3) as usize;
+            if i + 4 > len {
+                break;
+            }
+        }
         if pdf[i] == b'/' {
             let word = u32::from_le_bytes([pdf[i], pdf[i + 1], pdf[i + 2], pdf[i + 3]]);
             match word {

@@ -254,16 +254,27 @@
       const sheetTabBar = document.getElementById("sheet-tab-bar");
       if (!sheetTabBar) return;
       const addSheetBtn = document.getElementById("btn-add-sheet-tab");
-      const tabSelector = ".sheet-tab-btn[data-sheet-tab]";
       const knownKeys = new Set(["Sheet1", "Sheet2", ...Object.keys(sheetDataStore)]);
-      for (const btn of sheetTabBar.querySelectorAll(tabSelector)) {
-        if (!knownKeys.has(btn.dataset.sheetTab)) btn.remove();
+      const renderedKeys = new Set();
+      const survivingBtns = [];
+      for (const btn of sheetTabBar.querySelectorAll(".sheet-tab-btn[data-sheet-tab]")) {
+        const key = btn.dataset.sheetTab;
+        if (!knownKeys.has(key)) {
+          btn.remove();
+        } else {
+          renderedKeys.add(key);
+          survivingBtns.push(btn);
+        }
       }
-      const renderedKeys = new Set(Array.from(sheetTabBar.querySelectorAll(tabSelector)).map((btn) => btn.dataset.sheetTab));
       for (const shKey of Object.keys(sheetDataStore)) {
-        if (!renderedKeys.has(shKey) && addSheetBtn) addSheetBtn.before(createSheetTabButton(shKey));
+        if (!renderedKeys.has(shKey) && addSheetBtn) {
+          const newBtn = createSheetTabButton(shKey);
+          addSheetBtn.before(newBtn);
+          survivingBtns.push(newBtn);
+        }
       }
-      for (const btn of sheetTabBar.querySelectorAll(tabSelector)) {
+      for (let i = 0; i < survivingBtns.length; i += 1) {
+        const btn = survivingBtns[i];
         const isAct = btn.dataset.sheetTab === activeSheetName;
         btn.classList.toggle("active", isAct);
         btn.setAttribute("role", "tab");

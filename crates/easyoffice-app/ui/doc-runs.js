@@ -172,15 +172,25 @@
 
   // Writes `fmt` onto a run span through dataset + CSSOM (all values already validated).
   function writeRun(span, fmt) {
-    PROPS.forEach((p) => {
-      delete span.dataset[DATA_KEY[p]];
-    });
-    Object.entries(dataFor(fmt)).forEach(([k, v]) => {
-      span.dataset[k] = v;
-    });
-    Object.entries(styleFor(fmt)).forEach(([k, v]) => {
-      span.style[k] = v;
-    });
+    const ds = span.dataset;
+    for (let i = 0; i < PROPS.length; i += 1) {
+      const p = PROPS[i];
+      const key = DATA_KEY[p];
+      const val = fmt[p];
+      if (val !== undefined && val !== null && val !== false) ds[key] = String(val);
+      else delete ds[key];
+    }
+    const st = span.style;
+    st.fontSize = fmt.size ? halfPtToCss(fmt.size) : "";
+    st.fontFamily = fmt.font ? '"' + fmt.font + '"' : "";
+    st.color = fmt.color ? "#" + fmt.color : "";
+    st.backgroundColor = fmt.highlight ? "#" + fmt.highlight : "";
+    st.fontWeight = fmt.bold ? "bold" : "";
+    st.fontStyle = fmt.italic ? "italic" : "";
+    if (fmt.underline && fmt.strike) st.textDecoration = "underline line-through";
+    else if (fmt.underline) st.textDecoration = "underline";
+    else if (fmt.strike) st.textDecoration = "line-through";
+    else st.textDecoration = "";
   }
 
   // Format of a structured-payload / decoded model run ({sizeHalfPt, font, color, highlight,
@@ -292,9 +302,10 @@
     while (cur && cur !== root) {
       const parent = cur.parentElement;
       if (!parent) break;
-      path.unshift(indexOfChild(parent, cur));
+      path.push(indexOfChild(parent, cur));
       cur = parent;
     }
+    path.reverse();
     return path;
   }
 
@@ -436,11 +447,15 @@
     const chain = [];
     let cur = text.parentElement;
     while (cur && cur !== container && cur !== root) {
-      chain.unshift(cur);
+      chain.push(cur);
       cur = cur.parentElement;
     }
+    chain.reverse();
     const fmt = {};
-    chain.forEach((el) => Object.assign(fmt, isRunElement(el) ? readRunFormat(el) : readLegacyFormat(el)));
+    for (let i = 0; i < chain.length; i += 1) {
+      const el = chain[i];
+      Object.assign(fmt, isRunElement(el) ? readRunFormat(el) : readLegacyFormat(el));
+    }
     return fmt;
   }
 
@@ -499,15 +514,18 @@
       else if (!hasAnyProp(readRunFormat(child))) unwrapElement(child);
     });
     let child = container.childNodes[0] ?? null;
+    let childFmt = isRunElement(child) ? readRunFormat(child) : null;
     while (child) {
       const next = child.nextSibling ?? null;
-      if (isRunElement(child) && isRunElement(next) && sameFormat(readRunFormat(child), readRunFormat(next))) {
+      const nextFmt = isRunElement(next) ? readRunFormat(next) : null;
+      if (childFmt && nextFmt && sameFormat(childFmt, nextFmt)) {
         Array.from(next.childNodes).forEach((c) => child.appendChild(c));
         removeNode(next);
         mergeAdjacentText(child);
         continue;
       }
       child = next;
+      childFmt = nextFmt;
     }
     mergeAdjacentText(container);
   }

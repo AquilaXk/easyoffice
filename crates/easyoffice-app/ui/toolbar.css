@@ -325,3 +325,15 @@ input.sb-ls-select {
 #slide-toolbar .custom-select[data-select-id="slide-transition-select"] {
   width: 96px;
 }
+
+.sb-ls-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-right: 4px;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+

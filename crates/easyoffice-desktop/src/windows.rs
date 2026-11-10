@@ -22,14 +22,22 @@ pub enum WindowKind {
 
 impl WindowKind {
     pub fn parse(raw: &str) -> Option<Self> {
-        match raw.trim().to_ascii_uppercase().as_str() {
-            "START" => Some(Self::Start),
-            "DOC" => Some(Self::Doc),
-            "HWP" => Some(Self::Hwp),
-            "SHEET" => Some(Self::Sheet),
-            "SLIDE" => Some(Self::Slide),
-            "PDF" => Some(Self::Pdf),
-            "CONV" => Some(Self::Conv),
+        let trimmed = raw.trim().as_bytes();
+        if trimmed.len() > 8 {
+            return None;
+        }
+        let mut buf = [0u8; 8];
+        for (dst, &b) in buf.iter_mut().zip(trimmed) {
+            *dst = b.to_ascii_lowercase();
+        }
+        match &buf[..trimmed.len()] {
+            b"start" => Some(Self::Start),
+            b"doc" => Some(Self::Doc),
+            b"hwp" => Some(Self::Hwp),
+            b"sheet" => Some(Self::Sheet),
+            b"slide" => Some(Self::Slide),
+            b"pdf" => Some(Self::Pdf),
+            b"conv" => Some(Self::Conv),
             _ => None,
         }
     }
@@ -49,12 +57,22 @@ impl WindowKind {
 
     /// Document kind a file opens in, by extension (the same families the WebUI file open accepts).
     pub fn for_extension(ext: &str) -> Option<Self> {
-        match ext.to_ascii_lowercase().as_str() {
-            "docx" | "doc" | "odt" | "rtf" | "md" | "markdown" | "txt" | "pages" => Some(Self::Doc),
-            "hwp" | "hwpx" | "hwt" | "hwtx" => Some(Self::Hwp),
-            "xlsx" | "xls" | "ods" | "csv" | "tsv" => Some(Self::Sheet),
-            "pptx" | "ppt" | "ppsx" | "odp" => Some(Self::Slide),
-            "pdf" => Some(Self::Pdf),
+        let raw = ext.as_bytes();
+        if raw.len() > 8 {
+            return None;
+        }
+        let mut buf = [0u8; 8];
+        for (dst, &b) in buf.iter_mut().zip(raw) {
+            *dst = b.to_ascii_lowercase();
+        }
+        match &buf[..raw.len()] {
+            b"docx" | b"doc" | b"odt" | b"rtf" | b"md" | b"markdown" | b"txt" | b"pages" => {
+                Some(Self::Doc)
+            }
+            b"hwp" | b"hwpx" | b"hwt" | b"hwtx" => Some(Self::Hwp),
+            b"xlsx" | b"xls" | b"ods" | b"csv" | b"tsv" => Some(Self::Sheet),
+            b"pptx" | b"ppt" | b"ppsx" | b"odp" => Some(Self::Slide),
+            b"pdf" => Some(Self::Pdf),
             _ => None,
         }
     }

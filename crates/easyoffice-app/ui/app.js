@@ -380,6 +380,7 @@
     if (zoomLabel) zoomLabel.textContent = nextZoom + "%";
     const zoomSlider = document.getElementById("status-zoom-slider");
     if (zoomSlider) zoomSlider.value = String(nextZoom);
+    docRunsUi?.syncRuler?.(nextZoom / 100);
   }
 
   function applyZoomStepDelta(delta) {

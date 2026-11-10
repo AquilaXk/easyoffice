@@ -134,16 +134,20 @@ fn merges_json(merges: &[CellMerge]) -> String {
     if merges.is_empty() {
         return String::new();
     }
-    let items: Vec<String> = merges
-        .iter()
-        .map(|m| {
-            format!(
-                "{{\"row\":{},\"col\":{},\"rowSpan\":{},\"colSpan\":{}}}",
-                m.row, m.col, m.row_span, m.col_span
-            )
-        })
-        .collect();
-    format!(",\"merges\":[{}]", items.join(","))
+    let mut out = String::with_capacity(12 + merges.len() * 44);
+    out.push_str(",\"merges\":[");
+    for (idx, m) in merges.iter().enumerate() {
+        if idx > 0 {
+            out.push(',');
+        }
+        let _ = write!(
+            out,
+            "{{\"row\":{},\"col\":{},\"rowSpan\":{},\"colSpan\":{}}}",
+            m.row, m.col, m.row_span, m.col_span
+        );
+    }
+    out.push(']');
+    out
 }
 
 fn block_json(b: &RichBlock) -> String {
@@ -151,22 +155,25 @@ fn block_json(b: &RichBlock) -> String {
         RichBlock::Paragraph(p) => paragraph_json(p),
         RichBlock::Image(img) => image_json(img),
         RichBlock::Table(table) => {
-            let rows: Vec<String> = table
-                .rows
-                .iter()
-                .map(|row| {
-                    let cells: Vec<String> = row
-                        .iter()
-                        .map(|c| format!("{{\"text\":{}}}", json_str(c)))
-                        .collect();
-                    format!("[{}]", cells.join(","))
-                })
-                .collect();
-            let merges = merges_json(&table.merges);
-            format!(
-                "{{\"type\":\"table\",\"rows\":[{}]{merges}}}",
-                rows.join(",")
-            )
+            let mut out = String::with_capacity(32 + table.rows.len() * 32);
+            out.push_str("{\"type\":\"table\",\"rows\":[");
+            for (r_idx, row) in table.rows.iter().enumerate() {
+                if r_idx > 0 {
+                    out.push(',');
+                }
+                out.push('[');
+                for (c_idx, cell) in row.iter().enumerate() {
+                    if c_idx > 0 {
+                        out.push(',');
+                    }
+                    let _ = write!(out, "{{\"text\":{}}}", json_str(cell));
+                }
+                out.push(']');
+            }
+            out.push(']');
+            out.push_str(&merges_json(&table.merges));
+            out.push('}');
+            out
         }
     }
 }
@@ -185,41 +192,59 @@ fn clip_sheets(sheets: &mut [OdsUnpacked], max_rows: Option<u32>, max_cols: Opti
 
 /// `{"bold":true,"sizePt":11.25}`: only the set flags and the explicit size.
 fn style_json(style: &CellStyle) -> String {
-    let mut parts: Vec<String> = [
+    let mut out = String::with_capacity(48);
+    out.push('{');
+    let mut first = true;
+    for (on, key) in [
         (style.bold, "bold"),
         (style.italic, "italic"),
         (style.underline, "underline"),
         (style.strike, "strike"),
-    ]
-    .iter()
-    .filter(|(on, _)| *on)
-    .map(|(_, key)| format!("\"{key}\":true"))
-    .collect();
-    if let Some(size) = style.size_pt {
-        parts.push(format!("\"sizePt\":{size}"));
+    ] {
+        if on {
+            if !first {
+                out.push(',');
+            }
+            first = false;
+            let _ = write!(out, "\"{key}\":true");
+        }
     }
-    format!("{{{}}}", parts.join(","))
+    if let Some(size) = style.size_pt {
+        if !first {
+            out.push(',');
+        }
+        let _ = write!(out, "\"sizePt\":{size}");
+    }
+    out.push('}');
+    out
+}
+
+#[inline]
+const fn pack_row_col(r: u32, c: u32) -> u64 {
+    ((r as u64) << 32) | (c as u64)
 }
 
 /// Cells of one sheet as JSON: valued cells first, then styled cells without a value.
 fn sheet_cells_json(cells: &[(u32, u32, String)], styling: Option<&SheetStyling>) -> Vec<String> {
     let style_of = |r: u32, c: u32| styling.and_then(|s| s.cells.get(&(r, c)));
-    let mut out: Vec<String> = cells
-        .iter()
-        .filter_map(|(r, c, raw)| {
-            let a1 = PackedCellCoordinate::new(*r, *c).ok()?.to_a1();
-            let style =
-                style_of(*r, *c).map_or(String::new(), |s| format!(",\"style\":{}", style_json(s)));
-            Some(format!(
-                "{{\"ref\":\"{a1}\",\"raw\":{}{style}}}",
-                json_str(raw)
-            ))
-        })
-        .collect();
-    let valued: HashSet<(u32, u32)> = cells.iter().map(|(r, c, _)| (*r, *c)).collect();
+    let mut valued: HashSet<u64> = HashSet::with_capacity(cells.len());
+    let mut out: Vec<String> = Vec::with_capacity(cells.len());
+    for (r, c, raw) in cells {
+        valued.insert(pack_row_col(*r, *c));
+        if let Ok(coord) = PackedCellCoordinate::new(*r, *c) {
+            let a1 = coord.to_a1();
+            let mut item = String::with_capacity(32 + raw.len());
+            let _ = write!(item, "{{\"ref\":\"{a1}\",\"raw\":{}", json_str(raw));
+            if let Some(s) = style_of(*r, *c) {
+                let _ = write!(item, ",\"style\":{}", style_json(s));
+            }
+            item.push('}');
+            out.push(item);
+        }
+    }
     if let Some(st) = styling {
         for (&(r, c), style) in &st.cells {
-            if valued.contains(&(r, c)) {
+            if valued.contains(&pack_row_col(r, c)) {
                 continue;
             }
             if let Ok(coord) = PackedCellCoordinate::new(r, c) {
@@ -236,15 +261,20 @@ fn sheet_cells_json(cells: &[(u32, u32, String)], styling: Option<&SheetStyling>
 
 /// Custom column widths as JSON (1-based `index`).
 fn columns_json(styling: Option<&SheetStyling>) -> String {
-    let items: Vec<String> = styling
-        .map(|s| {
-            s.columns
-                .iter()
-                .map(|(c, px)| format!("{{\"index\":{},\"widthPx\":{px}}}", c + 1))
-                .collect()
-        })
-        .unwrap_or_default();
-    items.join(",")
+    let Some(s) = styling else {
+        return String::new();
+    };
+    if s.columns.is_empty() {
+        return String::new();
+    }
+    let mut out = String::with_capacity(s.columns.len() * 28);
+    for (idx, (c, px)) in s.columns.iter().enumerate() {
+        if idx > 0 {
+            out.push(',');
+        }
+        let _ = write!(out, "{{\"index\":{},\"widthPx\":{px}}}", c + 1);
+    }
+    out
 }
 
 fn decode_response(

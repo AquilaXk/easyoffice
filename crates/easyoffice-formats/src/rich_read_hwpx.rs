@@ -392,7 +392,9 @@ struct HwpxMedia<'a> {
 impl<'a> HwpxMedia<'a> {
     fn load(entries: &'a [ZipArchiveEntry]) -> Result<Self, EasyOfficeError> {
         let mut by_id = HashMap::new();
-        let Some(hpf) = entries.iter().find(|e| e.path == "Contents/content.hpf") else {
+        let entry_by_path: HashMap<&str, &'a ZipArchiveEntry> =
+            entries.iter().map(|e| (e.path.as_str(), e)).collect();
+        let Some(&hpf) = entry_by_path.get("Contents/content.hpf") else {
             return Ok(Self { by_id });
         };
         let xml = std::str::from_utf8(&hpf.data).map_err(|_| {
@@ -406,7 +408,7 @@ impl<'a> HwpxMedia<'a> {
                 continue;
             };
             let entry =
-                safe_package_path(href).and_then(|path| entries.iter().find(|e| e.path == path));
+                safe_package_path(href).and_then(|path| entry_by_path.get(path.as_str()).copied());
             if let (true, Some(entry)) = (name == "opf:item", entry) {
                 by_id.insert(id.to_string(), entry);
             }
