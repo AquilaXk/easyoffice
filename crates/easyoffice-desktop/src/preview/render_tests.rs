@@ -94,6 +94,7 @@ fn without_picture(name: &str, dir: &tempfile::TempDir) -> PathBuf {
 
 #[test]
 fn a_hangul_file_without_a_picture_gets_its_first_page_drawn() {
+    let _ = shared_font_db(&[]);
     let dir = tempfile::tempdir().unwrap();
     let path = without_picture("biz_plan.hwp", &dir);
     let found =
@@ -111,6 +112,7 @@ fn a_hangul_file_without_a_picture_gets_its_first_page_drawn() {
 
 #[test]
 fn a_hwpx_file_is_drawn_too() {
+    let _ = shared_font_db(&[]);
     let dir = tempfile::tempdir().unwrap();
     let path = without_picture("form-002.hwpx", &dir);
     let found =

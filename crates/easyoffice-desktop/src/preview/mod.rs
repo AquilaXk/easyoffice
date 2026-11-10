@@ -182,9 +182,9 @@ impl PreviewState {
 
 /// The picture of a recent document: the one inside the file, else (Hangul only) its first page.
 pub(crate) fn load_preview(state: &PreviewState, id: &str, path: &Path) -> Option<Arc<Thumbnail>> {
-    let fonts = shared_font_db(&state.font_dirs);
+    let font_dirs = Arc::clone(&state.font_dirs);
     load_preview_with(state, id, path, move |document| {
-        render::first_page_png(&document, &fonts)
+        render::first_page_png(&document, &shared_font_db(&font_dirs))
     })
 }
 
