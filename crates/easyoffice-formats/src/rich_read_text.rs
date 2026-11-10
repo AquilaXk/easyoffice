@@ -85,6 +85,7 @@ struct MdInline {
     fmt: CharFmt,
     buf: String,
     i: usize,
+    no_more_single_tilde: bool,
 }
 
 impl MdInline {
@@ -105,7 +106,10 @@ impl MdInline {
         true
     }
 
-    fn has_closing_single_tilde(&self, from: usize) -> bool {
+    fn has_closing_single_tilde(&mut self, from: usize) -> bool {
+        if self.no_more_single_tilde {
+            return false;
+        }
         let mut k = from;
         while k < self.chars.len() {
             if self.chars[k] == '~' {
@@ -115,10 +119,15 @@ impl MdInline {
                     }
                     continue;
                 }
-                return !is_ws(self.at(k - 1));
+                if !is_ws(self.at(k - 1)) {
+                    return true;
+                }
+                self.no_more_single_tilde = true;
+                return false;
             }
             k += 1;
         }
+        self.no_more_single_tilde = true;
         false
     }
 
@@ -416,6 +425,7 @@ pub(crate) fn parse_md_inline(text: &str) -> Vec<RichRun> {
         fmt: CharFmt::default(),
         buf: String::new(),
         i: 0,
+        no_more_single_tilde: false,
     };
     while scanner.i < scanner.chars.len() {
         scanner.step();
@@ -535,6 +545,11 @@ pub(crate) fn read_markdown(text: &str) -> Result<Vec<RichBlock>, EasyOfficeErro
                         runs: vec![RichRun::plain(lines[i].trim_end())],
                         ..RichParagraph::default()
                     }));
+                    if blocks.len() > MAX_MARKDOWN_BLOCKS {
+                        return Err(EasyOfficeError::ResourceBudgetExceeded(
+                            "Markdown 블록 수가 허용 예산을 초과했습니다.".to_string(),
+                        ));
+                    }
                 }
                 i += 1;
             }
@@ -585,6 +600,11 @@ pub(crate) fn read_markdown(text: &str) -> Result<Vec<RichBlock>, EasyOfficeErro
                 };
                 if !(rows.len() == 1 && is_separator_row(&cells)) {
                     rows.push(cells);
+                    if rows.len() > MAX_MARKDOWN_BLOCKS {
+                        return Err(EasyOfficeError::ResourceBudgetExceeded(
+                            "Markdown 블록 수가 허용 예산을 초과했습니다.".to_string(),
+                        ));
+                    }
                 }
                 i += 1;
             }
@@ -615,18 +635,22 @@ pub(crate) fn read_markdown(text: &str) -> Result<Vec<RichBlock>, EasyOfficeErro
 }
 
 /// Reads plain text: every non-blank line is one paragraph.
-pub(crate) fn read_plain_text(text: &str) -> Vec<RichBlock> {
-    text.strip_prefix('\u{FEFF}')
-        .unwrap_or(text)
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .map(|l| {
-            RichBlock::Paragraph(RichParagraph {
+pub(crate) fn read_plain_text(text: &str) -> Result<Vec<RichBlock>, EasyOfficeError> {
+    let mut blocks = Vec::new();
+    for l in text.strip_prefix('\u{FEFF}').unwrap_or(text).lines() {
+        if !l.trim().is_empty() {
+            blocks.push(RichBlock::Paragraph(RichParagraph {
                 runs: vec![RichRun::plain(l.trim_end())],
                 ..RichParagraph::default()
-            })
-        })
-        .collect()
+            }));
+            if blocks.len() > MAX_MARKDOWN_BLOCKS {
+                return Err(EasyOfficeError::ResourceBudgetExceeded(
+                    "텍스트 블록 수가 허용 예산을 초과했습니다.".to_string(),
+                ));
+            }
+        }
+    }
+    Ok(blocks)
 }
 
 #[cfg(test)]

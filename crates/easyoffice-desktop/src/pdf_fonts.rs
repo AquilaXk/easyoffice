@@ -44,7 +44,7 @@ fn build_font_db(font_dirs: &[PathBuf]) -> Database {
     }
     db.load_system_fonts();
     set_generic_families(&mut db);
-    db
+    with_mapped_faces(&db)
 }
 
 /// Whether the database holds a face loaded from one of `dirs` (the bundled font folder).
@@ -165,7 +165,7 @@ impl FallbackIndex {
         if !self.by_char.contains_key(&c) && self.by_char.len() >= self.max_chars {
             return self.disable();
         }
-        let Some(base) = db.face(used[0]) else {
+        let Some(base) = used.first().and_then(|&id| db.face(id)) else {
             return Lookup::Face(None);
         };
         let coverage = self.by_char.entry(c).or_default();

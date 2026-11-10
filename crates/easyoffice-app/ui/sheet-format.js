@@ -167,8 +167,11 @@
         let visited = 0;
         for (let i = 0; i < keys.length; i += 1) {
           const ref = keys[i];
-          const p = gridUtils.parseRef(ref);
-          if (p && p.row >= rg.r1 && p.row <= rg.r2 && p.col >= rg.c1 && p.col <= rg.c2) {
+          const packed = gridUtils.packRef(ref);
+          if (packed <= 0) continue;
+          const col = packed & 32767;
+          const row = (packed - col) / 32768;
+          if (row >= rg.r1 && row <= rg.r2 && col >= rg.c1 && col <= rg.c2) {
             const mask = entryMask(map[ref]);
             orMask |= mask;
             andMask &= mask;

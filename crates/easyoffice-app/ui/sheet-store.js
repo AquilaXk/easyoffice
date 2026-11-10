@@ -14,7 +14,12 @@
   function styleFlagsMask(s) {
     if (!s) return 0;
     const td = s.textDecoration || "";
-    const bold = s.bold || s.fontWeight === "700" || s.fontWeight === "bold";
+    const bold =
+      s.bold ||
+      s.fontWeight === "600" ||
+      s.fontWeight === "700" ||
+      s.fontWeight === "bold" ||
+      Number(s.fontWeight) >= 600;
     const italic = s.italic || s.fontStyle === "italic";
     const underline = s.underline || td.includes("underline");
     const strike = s.strike || td.includes("line-through");
@@ -34,7 +39,7 @@
     return (sa?.sizePt || 0) !== (sb?.sizePt || 0) || (sa?.fontSize || "") !== (sb?.fontSize || "");
   }
 
-  function sheetCellDataChanged(sheetsA, sheetsB) {
+  function sheetCellDataChanged(sheetsA, sheetsB, includeStyle = true) {
     const keysA = Object.keys(sheetsA || {});
     const keysB = Object.keys(sheetsB || {});
     if (keysA.length !== keysB.length) return true;
@@ -52,7 +57,7 @@
           !eb ||
           (ea?.value || "") !== (eb?.value || "") ||
           (ea?.formula || "") !== (eb?.formula || "") ||
-          cellStyleChanged(ea?.style, eb?.style)
+          (includeStyle && cellStyleChanged(ea?.style, eb?.style))
         ) {
           return true;
         }
@@ -208,7 +213,6 @@
     }
 
     async function evaluateLiveFormulaTargets(sheetsMap, defaultSheet) {
-      if (!sheetMapHasAnyFormula(sheetsMap)) return null;
       const { cells, formulaTargets } = buildCellsAndFormulaTargets(sheetsMap);
       if (formulaTargets.length === 0) {
         return null;

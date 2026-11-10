@@ -39,7 +39,10 @@ fn strip_pages_dir_prefix(name: &str) -> &str {
     let Some((dir, rest)) = name.split_once('/') else {
         return name;
     };
-    if dir.len() > 6 && dir[dir.len() - 6..].eq_ignore_ascii_case(".pages") && !rest.is_empty() {
+    if dir.len() > 6
+        && dir.as_bytes()[dir.len() - 6..].eq_ignore_ascii_case(b".pages")
+        && !rest.is_empty()
+    {
         rest
     } else {
         name
@@ -143,4 +146,27 @@ pub fn read_thumbnail<R: Read + Seek>(src: &mut R) -> Option<Vec<u8>> {
     read_at(src, offset, &mut directory)?;
     let entry = find_entry(&directory, entries)?;
     read_entry_data(src, &entry)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strip_pages_dir_prefix_handles_multibyte_utf8_names_without_panic() {
+        assert_eq!(
+            strip_pages_dir_prefix("가나다A/Preview/PrvImage.png"),
+            "가나다A/Preview/PrvImage.png"
+        );
+        assert!(!is_thumbnail_name(
+            "가나다A/Preview/PrvImage.png".as_bytes()
+        ));
+        assert_eq!(
+            strip_pages_dir_prefix("한글문서.pages/QuickLook/Thumbnail.png"),
+            "QuickLook/Thumbnail.png"
+        );
+        assert!(is_thumbnail_name(
+            "한글문서.pages/QuickLook/Thumbnail.png".as_bytes()
+        ));
+    }
 }

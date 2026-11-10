@@ -167,6 +167,9 @@ pub fn parse_complex(s: &str) -> Result<(f64, f64, char), FormulaError> {
 }
 
 fn parse_complex_opt(s: &str) -> Result<(f64, f64, Option<char>), FormulaError> {
+    if s.len() > SheetEngine::MAX_CELL_TEXT_CHARS {
+        return Err(FormulaError::Num);
+    }
     let s = s.trim();
     if s.is_empty() {
         return Err(FormulaError::Num);
@@ -467,11 +470,25 @@ impl SheetEngine {
                 let (a, b, s1) = self.eval_complex_arg_opt(&args[0], ctx, depth)?;
                 let (c, d, s2) = self.eval_complex_arg_opt(&args[1], ctx, depth)?;
                 let suffix = merge_suffix(s1, s2)?.unwrap_or('i');
-                let denom = c * c + d * d;
-                if denom == 0.0 {
+                if c == 0.0 && d == 0.0 {
                     return Err(FormulaError::Num);
                 }
-                format_complex_res((a * c + b * d) / denom, (b * c - a * d) / denom, suffix)
+                let (re, im) = if c.abs() >= d.abs() {
+                    let r = d / c;
+                    let denom = c + d * r;
+                    if denom == 0.0 {
+                        return Err(FormulaError::Num);
+                    }
+                    ((a + b * r) / denom, (b - a * r) / denom)
+                } else {
+                    let r = c / d;
+                    let denom = d + c * r;
+                    if denom == 0.0 {
+                        return Err(FormulaError::Num);
+                    }
+                    ((a * r + b) / denom, (b * r - a) / denom)
+                };
+                format_complex_res(re, im, suffix)
             }
             "IMPOWER" => {
                 check_arity(args, 2, 2)?;
@@ -869,6 +886,14 @@ mod tests {
         assert_eq!(
             s.evaluate_formula_str("=IMDIV(\"-238+240i\", \"10+24i\")"),
             EvaluatedCellValue::Text("5+12i".to_string())
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=IMDIV(\"1e300+1e300i\", \"1e300+1e300i\")"),
+            EvaluatedCellValue::Text("1".to_string())
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=IMDIV(\"1e-300+1e-300i\", \"1e-300+1e-300i\")"),
+            EvaluatedCellValue::Text("1".to_string())
         );
         assert_eq!(
             s.evaluate_formula_str("=IMSQRT(\"3+4i\")"),

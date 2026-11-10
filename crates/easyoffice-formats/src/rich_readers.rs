@@ -217,7 +217,7 @@ impl UniversalFormatConverter {
                 let blocks = if format == DocumentFormat::Markdown {
                     read_markdown(text)?
                 } else {
-                    read_plain_text(text)
+                    read_plain_text(text)?
                 };
                 DecodedContent::Document(RichDocument {
                     title: String::new(),

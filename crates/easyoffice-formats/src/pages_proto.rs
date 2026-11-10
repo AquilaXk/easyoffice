@@ -539,11 +539,30 @@ impl ObjectTable {
         max_depth: usize,
         parent_of: impl Fn(&ArchiveObject) -> Option<u64>,
     ) -> Vec<u64> {
-        let mut seen = HashSet::new();
+        let mut seen = [0u64; 16];
+        let mut seen_len = 0usize;
+        let mut spill: Option<HashSet<u64>> = None;
         let mut out = Vec::new();
         let mut cur = Some(start);
         while let Some(id) = cur {
-            if out.len() > max_depth || !seen.insert(id) {
+            if out.len() > max_depth {
+                break;
+            }
+            let already_seen = if let Some(set) = &mut spill {
+                !set.insert(id)
+            } else if seen[..seen_len].contains(&id) {
+                true
+            } else if seen_len < seen.len() {
+                seen[seen_len] = id;
+                seen_len += 1;
+                false
+            } else {
+                let mut set: HashSet<u64> = seen.into_iter().collect();
+                let dup = !set.insert(id);
+                spill = Some(set);
+                dup
+            };
+            if already_seen {
                 break;
             }
             let Some(obj) = self.objects.get(&id) else {

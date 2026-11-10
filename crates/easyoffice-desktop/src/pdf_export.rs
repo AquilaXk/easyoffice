@@ -643,18 +643,24 @@ mod tests {
     }
 
     pub(super) fn system_font_db() -> Option<Arc<Database>> {
-        let mut db = Database::new();
-        for dir in [
-            "/usr/share/fonts",
-            "/System/Library/Fonts",
-            "C:/Windows/Fonts",
-        ] {
-            if Path::new(dir).is_dir() {
-                db.load_fonts_dir(dir);
+        static DB: std::sync::OnceLock<Option<Arc<Database>>> = std::sync::OnceLock::new();
+        DB.get_or_init(|| {
+            let mut db = Database::new();
+            db.load_system_fonts();
+            if db.is_empty() {
+                for dir in [
+                    "/usr/share/fonts",
+                    "/System/Library/Fonts",
+                    "C:/Windows/Fonts",
+                ] {
+                    if Path::new(dir).is_dir() {
+                        db.load_fonts_dir(dir);
+                    }
+                }
             }
-        }
-        db.load_system_fonts();
-        (!db.is_empty()).then(|| Arc::new(db))
+            (!db.is_empty()).then(|| Arc::new(crate::pdf_fonts::with_mapped_faces(&db)))
+        })
+        .clone()
     }
 
     fn admit(pages: &[String]) -> Result<(), String> {

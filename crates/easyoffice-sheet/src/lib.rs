@@ -475,7 +475,9 @@ impl SheetEngine {
                     if crate::parser::strip_formula_prefix(raw).is_some_and(|s| s.trim().is_empty())
                     {
                         EvaluatedCellValue::Empty
-                    } else if raw.chars().count() > Self::MAX_CELL_TEXT_CHARS {
+                    } else if raw.len() > Self::MAX_CELL_TEXT_CHARS
+                        && raw.chars().count() > Self::MAX_CELL_TEXT_CHARS
+                    {
                         EvaluatedCellValue::Error(FormulaError::Value)
                     } else {
                         EvaluatedCellValue::Text(raw.clone())
@@ -501,7 +503,8 @@ impl SheetEngine {
         ctx.current_coord = prev_coord;
         result = crate::coercion::sanitize_evaluated_value(result);
         if let EvaluatedCellValue::Text(ref s) = result {
-            if s.chars().count() > Self::MAX_CELL_TEXT_CHARS {
+            if s.len() > Self::MAX_CELL_TEXT_CHARS && s.chars().count() > Self::MAX_CELL_TEXT_CHARS
+            {
                 result = EvaluatedCellValue::Error(FormulaError::Value);
             }
         }
@@ -547,7 +550,8 @@ impl SheetEngine {
         };
         res = crate::coercion::sanitize_evaluated_value(res);
         if let EvaluatedCellValue::Text(ref s) = res {
-            if s.chars().count() > Self::MAX_CELL_TEXT_CHARS {
+            if s.len() > Self::MAX_CELL_TEXT_CHARS && s.chars().count() > Self::MAX_CELL_TEXT_CHARS
+            {
                 res = EvaluatedCellValue::Error(FormulaError::Value);
             }
         }
@@ -571,7 +575,9 @@ impl SheetEngine {
             Expr::Missing => EvaluatedCellValue::Number(0.0),
             Expr::Number(n) => EvaluatedCellValue::Number(*n),
             Expr::Text(s) => {
-                if s.chars().count() > Self::MAX_CELL_TEXT_CHARS {
+                if s.len() > Self::MAX_CELL_TEXT_CHARS
+                    && s.chars().count() > Self::MAX_CELL_TEXT_CHARS
+                {
                     EvaluatedCellValue::Error(FormulaError::Value)
                 } else {
                     EvaluatedCellValue::Text(s.clone())
@@ -721,7 +727,9 @@ impl SheetEngine {
             BinaryOp::Concat => {
                 let ls = l_val.to_display_string();
                 let rs = r_val.to_display_string();
-                if ls.chars().count().saturating_add(rs.chars().count()) > Self::MAX_CELL_TEXT_CHARS
+                if ls.len().saturating_add(rs.len()) > Self::MAX_CELL_TEXT_CHARS
+                    && ls.chars().count().saturating_add(rs.chars().count())
+                        > Self::MAX_CELL_TEXT_CHARS
                 {
                     EvaluatedCellValue::Error(FormulaError::Value)
                 } else {

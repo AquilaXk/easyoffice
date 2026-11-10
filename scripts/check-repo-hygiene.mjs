@@ -565,7 +565,7 @@ if (fs.existsSync(desktopConfigFull)) {
     if (DESKTOP_SHELL_PERMISSIONS.size < 9) errors.push(`${APP_COMMANDS_FILE} must list the app commands (found ${DESKTOP_SHELL_PERMISSIONS.size})`);
   }
 }
-const POST_185_RUST_APIS = [".is_multiple_of(", ".as_chunks(", ".floor_char_boundary("];
+const POST_185_RUST_APIS = [".is_multiple_of(", ".as_chunks(", ".as_chunks::<", ".floor_char_boundary("];
 for (const file of files) {
   const rel = path.relative(ROOT, file).replaceAll("\\", "/");
   if (rel.startsWith("crates/") && rel.endsWith("/Cargo.toml")) {

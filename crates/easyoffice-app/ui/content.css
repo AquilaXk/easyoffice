@@ -3,8 +3,8 @@
  * The page, the official-document templates and the slideshow keep their own colours in both
  * themes, like rhwp-studio's `--doc-paper` (paper stays white in the dark theme). Nothing in the
  * UI chrome may use a literal colour; `scripts/test-webui-theme.mjs` allows them only here. */
-.sb-textcolor-btn { border-bottom: 3px solid #d93025; }
-.sb-highlight-btn { border-bottom: 3px solid #fbbc04; }
+.sb-textcolor-btn { border-bottom: 3px solid #ff0000; }
+.sb-highlight-btn { border-bottom: 3px solid #fff000; }
 /* The slide editing stage and the PDF page card are sheets of paper like the page: dark text on
    white in both themes. */
 .slide-stage,
@@ -73,9 +73,9 @@
   border-style: none;
   filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.16));
 }
-#doc-editor[data-show-para-marks="true"] p::after { content: " ↵"; color: #0284c7; font-size: 0.82em; }
+#doc-editor[data-show-para-marks="true"] p::after { content: " ↵"; color: var(--accent-light); font-size: 0.82em; }
 #doc-editor[data-show-ctrl-marks="true"] h1::after,
-#doc-editor[data-show-ctrl-marks="true"] h2::after { content: " ¶"; color: #d97706; font-size: 0.75em; }
+#doc-editor[data-show-ctrl-marks="true"] h2::after { content: " ¶"; color: var(--accent-light); font-size: 0.75em; }
 #doc-editor:not(.manuscript-grid) {
   background-image:
     linear-gradient(#d0d0d0, #d0d0d0),
@@ -271,7 +271,7 @@
 .slide-show-exit .eo-icon { width: 14px; height: 14px; }
 #doc-editor.manuscript-grid {
   background-image:
-    linear-gradient(to right, rgba(110, 86, 207, 0.18) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(110, 86, 207, 0.18) 1px, transparent 1px);
+    linear-gradient(to right, var(--border-primary) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--border-primary) 1px, transparent 1px);
   background-size: calc(100% / 20) 28px;
 }

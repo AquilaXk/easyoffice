@@ -15,6 +15,8 @@ use crate::EasyOfficeError;
 
 /// Maximum decompressed bytes of a single chunk.
 pub const MAX_CHUNK_BYTES: usize = 1024 * 1024;
+/// Maximum chunks in one `.iwa` file.
+pub const MAX_IWA_CHUNKS: usize = 65_536;
 /// Maximum decompressed bytes of one `.iwa` file.
 pub const MAX_IWA_FILE_BYTES: usize = 64 * 1024 * 1024;
 /// Maximum decompressed bytes across all `.iwa` files of one document.
@@ -30,17 +32,17 @@ fn budget(detail: &str) -> EasyOfficeError {
     EasyOfficeError::ResourceBudgetExceeded(format!("Pages IWA {detail}"))
 }
 
-/// Little-endian unsigned value of up to `size_of::<usize>()` bytes.
+/// Little-endian unsigned value of 1..=4 bytes.
 fn read_le_usize(raw: &[u8]) -> usize {
     match raw.len() {
         1 => usize::from(raw[0]),
         2 => usize::from(u16::from_le_bytes([raw[0], raw[1]])),
         3 => usize::from(u16::from_le_bytes([raw[0], raw[1]])) | (usize::from(raw[2]) << 16),
         4 => u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]) as usize,
-        _ => raw
-            .iter()
-            .enumerate()
-            .fold(0usize, |acc, (i, b)| acc | (usize::from(*b) << (8 * i))),
+        _ => {
+            debug_assert!(false, "read_le_usize expects 1..=4 bytes");
+            0
+        }
     }
 }
 
@@ -185,7 +187,12 @@ pub fn decompress_iwa_into(
 ) -> Result<(), EasyOfficeError> {
     out.clear();
     let mut pos = 0usize;
+    let mut chunks = 0usize;
     while pos < data.len() {
+        chunks += 1;
+        if chunks > MAX_IWA_CHUNKS {
+            return Err(budget(".iwa 청크 수 한도 초과"));
+        }
         let header = data
             .get(pos..pos.checked_add(4).ok_or_else(|| bad("offset overflow"))?)
             .ok_or_else(|| bad("chunk header truncated"))?;

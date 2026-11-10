@@ -79,6 +79,7 @@ const SERIF_BITS_WINDOWS: &[(&str, u64)] = &[
     ("바탕", BIT_BATANG),
     ("Noto Serif KR", BIT_NOTO_SERIF),
     ("AppleMyungjo", BIT_APPLE_MYEONGJO),
+    ("맑은 고딕", BIT_MALGUN),
     ("serif", BIT_SERIF),
 ];
 const SERIF_BITS_MACOS: &[(&str, u64)] = &[

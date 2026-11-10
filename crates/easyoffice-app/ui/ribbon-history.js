@@ -358,7 +358,7 @@
         currentSnap.ribbonModule = targetSnap.ribbonModule;
         let evaluatedSheets = null;
         if (
-          sheetCellDataChanged(currentSnap.sheets, targetSnap.sheets) &&
+          sheetCellDataChanged(currentSnap.sheets, targetSnap.sheets, false) &&
           sheetMapHasAnyFormula(targetSnap.sheets)
         ) {
           const evalRes = await sheetController.trackSheetAsyncWork(

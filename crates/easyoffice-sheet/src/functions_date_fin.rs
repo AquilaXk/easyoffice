@@ -102,26 +102,32 @@ fn shift_year_month(year: i64, month: i64, months: i64) -> Result<(i64, i64), Fo
 
 /// Difference between two serials for a DATEDIF unit, or `None` for an unknown unit.
 fn datedif_diff(unit: &str, s1: i64, s2: i64) -> Option<i64> {
+    let u = unit.trim();
     let (y1, m1, d1) = civil_from_serial(s1);
     let (y2, m2, d2) = civil_from_serial(s2);
-    let diff = match unit {
-        "D" => s2 - s1,
-        "M" => (y2 - y1) * 12 + (m2 - m1) - i64::from(d2 < d1),
-        "Y" => (y2 - y1) - i64::from((m2, d2) < (m1, d1)),
-        "YM" => ((m2 - m1) - i64::from(d2 < d1)).rem_euclid(12),
-        "MD" if d2 >= d1 => d2 - d1,
-        "MD" => {
+    let diff = if u.eq_ignore_ascii_case("D") {
+        s2 - s1
+    } else if u.eq_ignore_ascii_case("M") {
+        (y2 - y1) * 12 + (m2 - m1) - i64::from(d2 < d1)
+    } else if u.eq_ignore_ascii_case("Y") {
+        (y2 - y1) - i64::from((m2, d2) < (m1, d1))
+    } else if u.eq_ignore_ascii_case("YM") {
+        ((m2 - m1) - i64::from(d2 < d1)).rem_euclid(12)
+    } else if u.eq_ignore_ascii_case("MD") {
+        if d2 >= d1 {
+            d2 - d1
+        } else {
             let (py, pm) = if m2 == 1 { (y2 - 1, 12) } else { (y2, m2 - 1) };
             days_in_month(py, pm) - d1 + d2
         }
-        "YD" => {
-            let mut cand = serial_from_civil(y2, m1, d1);
-            if cand > s2 {
-                cand = serial_from_civil(y2 - 1, m1, d1);
-            }
-            s2 - cand
+    } else if u.eq_ignore_ascii_case("YD") {
+        let mut cand = serial_from_civil(y2, m1, d1);
+        if cand > s2 {
+            cand = serial_from_civil(y2 - 1, m1, d1);
         }
-        _ => return None,
+        s2 - cand
+    } else {
+        return None;
     };
     Some(diff)
 }
@@ -465,8 +471,7 @@ impl SheetEngine {
         let EvaluatedCellValue::Text(unit) = self.eval_arg_val(&args[2], ctx, depth)? else {
             return Err(FormulaError::Value);
         };
-        let diff = datedif_diff(unit.trim().to_ascii_uppercase().as_str(), s1, s2)
-            .ok_or(FormulaError::Num)?;
+        let diff = datedif_diff(&unit, s1, s2).ok_or(FormulaError::Num)?;
         number(diff as f64)
     }
 
@@ -530,12 +535,12 @@ impl SheetEngine {
         let mut rem = rem.abs();
         while rem > 0 {
             cur += step;
+            if !(1..=MAX_SERIAL).contains(&cur) {
+                return Err(FormulaError::Num);
+            }
             if is_workday_with_mask(cur, weekend_mask) && !holidays.contains(&cur) {
                 rem -= 1;
             }
-        }
-        if !(1..=MAX_SERIAL).contains(&cur) {
-            return Err(FormulaError::Num);
         }
         number(cur as f64)
     }

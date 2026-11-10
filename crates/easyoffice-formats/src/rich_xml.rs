@@ -184,7 +184,7 @@ fn parse_attrs(raw: &str) -> Result<Vec<(String, String)>, EasyOfficeError> {
 /// Tokenizes `xml` into start/end/text events; empty elements yield a start and an end.
 pub(crate) fn tokenize(xml: &str) -> Result<Vec<XmlEvent>, EasyOfficeError> {
     let bytes = xml.as_bytes();
-    let mut events = Vec::with_capacity((bytes.len() / 24).min(MAX_XML_EVENTS));
+    let mut events = Vec::with_capacity((bytes.len() / 24).min(65_536));
     let mut i = 0usize;
     while i < bytes.len() {
         if events.len() > MAX_XML_EVENTS {

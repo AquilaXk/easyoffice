@@ -184,7 +184,7 @@ fn find_entries<R: Read + Seek>(src: &mut R, c: &Container) -> Option<(DirEntry,
     let mut data = vec![0_u8; c.sector_len()];
     for sector in c.chain(src, c.first_dir, max_sectors)? {
         read_at(src, c.sector_offset(sector)?, &mut data)?;
-        for raw in data.as_chunks::<DIR_ENTRY_LEN>().0 {
+        for raw in data.chunks(DIR_ENTRY_LEN) {
             seen += 1;
             if seen > MAX_DIR_ENTRIES {
                 return None;

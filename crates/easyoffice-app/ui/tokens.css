@@ -94,6 +94,7 @@
   --color-bg: var(--ui-bg);
   --color-bg-light: var(--ui-bg-light);
 
+  --border-primary: var(--ui-border);
   --color-border: var(--ui-border);
   --color-border-light: var(--ui-border-light);
   --color-border-lighter: var(--ui-border-subtle);
@@ -160,7 +161,6 @@
   /* mobile: ~767px, tablet: 768~1023px, desktop: 1024px~ */
 }
 
-[data-theme="dark"],
 :root[data-theme-effective="dark"] {
   --ui-bg: #25292f;
   --ui-bg-light: #2b3037;

@@ -138,7 +138,9 @@
       const underBtn = document.getElementById("btn-stylebar-underline");
       const sizeBadge = document.getElementById("doc-style-size-badge");
       const sizeInput = document.getElementById("doc-font-size-input");
-      if (boldBtn) boldBtn.setAttribute("aria-pressed", targetEl?.style?.fontWeight === "600" ? "true" : "false");
+      const fw = targetEl?.style?.fontWeight || "";
+      const isBold = fw === "600" || fw === "700" || fw === "bold" || Number(fw) >= 600;
+      if (boldBtn) boldBtn.setAttribute("aria-pressed", isBold ? "true" : "false");
       if (italicBtn) italicBtn.setAttribute("aria-pressed", targetEl?.style?.fontStyle === "italic" ? "true" : "false");
       if (underBtn) underBtn.setAttribute("aria-pressed", targetEl?.style?.textDecoration === "underline" ? "true" : "false");
       const rawSize = targetEl?.style?.fontSize || docEditor?.style?.fontSize || "11.0pt";
@@ -748,11 +750,12 @@
     }
 
     function mergeTokensInLeafBlock(el) {
-      if (el.querySelector("p, li, td, th, div")) return;
+      if (el.childElementCount > 0 || el.children?.length > 0) return false;
       const raw = el.textContent || "";
-      if (!MAIL_MERGE_TOKEN_TEST_RE.test(raw)) return;
+      if (!MAIL_MERGE_TOKEN_TEST_RE.test(raw)) return false;
       const nextText = mergeKnownTokens(raw);
       if (nextText !== raw) el.textContent = nextText;
+      return true;
     }
 
     function docEffectToc(docEditor, summary) {
