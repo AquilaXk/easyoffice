@@ -186,6 +186,7 @@
     commitPendingSheetCell: (flush) => sheetController.commitPendingFocusedSheetCell(flush),
     computeEvaluatedSheetStore: sheetStoreHelpers.computeEvaluatedSheetStore,
     replaceColumnWidths: (widths) => sheetController.replaceColumnWidths(widths),
+    replaceSheetRules: (rules) => host.__EASYOFFICE_SHEET_RULES__.replaceAll(rules),
   });
 
   hwpHost = host.__EASYOFFICE_CREATE_HWP_HOST__({

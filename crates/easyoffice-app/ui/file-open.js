@@ -260,6 +260,7 @@
     const store = {};
     const rowCounts = {};
     const columnWidths = {};
+    const rulesBySheet = {};
     (sheets || []).forEach((sheet) => {
       const map = {};
       let maxRow = 0;
@@ -283,8 +284,9 @@
       rowCounts[sheet.name] = Math.max(12, maxRow);
       const widths = columnWidthMap(sheet.columns);
       if (Object.keys(widths).length > 0) columnWidths[sheet.name] = widths;
+      if ((sheet.rules?.cf || []).length > 0 || (sheet.rules?.dv || []).length > 0) rulesBySheet[sheet.name] = sheet.rules;
     });
-    return { store, rowCounts, columnWidths };
+    return { store, rowCounts, columnWidths, rulesBySheet };
   }
 
   function hasFiles(ev) {
@@ -315,7 +317,7 @@
     const {
       document, invokeIpc, enqueueOp, runExclusive, captureWorkspaceSnapshot, pushRawUndoSnapshot,
       restoreWorkspaceSnapshot, commitPendingSheetCell, computeEvaluatedSheetStore,
-      createEmptySlideStyleFields, getActiveModule, replaceColumnWidths,
+      createEmptySlideStyleFields, getActiveModule, replaceColumnWidths, replaceSheetRules,
     } = deps;
     const hasHwpRoute = () => Boolean(deps.getHwpSession?.());
     // A named kind answered by the native dialog (`confirm_dialog` in the shell); without a way to ask, no.
@@ -363,8 +365,11 @@
         };
       } else if (mod === "SHEET") {
         const sheets = Array.isArray(res.sheets) && res.sheets.length > 0 ? res.sheets : [{ name: "Sheet1", cells: [] }];
-        const { store, rowCounts, columnWidths } = buildSheetStore(sheets);
+        const { store, rowCounts, columnWidths, rulesBySheet } = buildSheetStore(sheets);
         const first = sheets[0].name;
+        // The rules go in first, so the evaluation below learns them with the cells.
+        if (typeof replaceSheetRules === "function") replaceSheetRules(rulesBySheet);
+        next.sheetRules = rulesBySheet;
         const evaluated = await computeEvaluatedSheetStore(store, first, null);
         next.sheets = evaluated.sheets;
         next.sheetRowCounts = rowCounts;

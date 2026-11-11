@@ -126,7 +126,7 @@ test("DOC and HWP module-specific ribbon tools build real DOM structures and dir
   assert.equal(docEditor.querySelector("h1").textContent, "포커스 유지 재타이핑 제목");
 });
 
-test("SHEET supports keyboard arrow/Tab/Delete cell navigation, inline editing key pass-through, sort baseline/blank-row preservation, condfmt, freeze, and autosum actions", async () => {
+test("SHEET supports keyboard arrow/Tab/Delete cell navigation, inline editing key pass-through, sort baseline/blank-row preservation, rule dialogs, freeze, and autosum actions", async () => {
   const { document, sandbox, userClick } = await createWorkspaceHarness();
   await openDemoWorkbook(document);
   switchModule(document, "SHEET");
@@ -201,7 +201,7 @@ test("SHEET supports keyboard arrow/Tab/Delete cell navigation, inline editing k
   await flushAsyncTurns();
   userClick(commandItem(document, "sheet-mod-pivot"));
   await flushAsyncTurns();
-  assert.match(document.getElementById("sheet-eval-result").textContent, /피벗 집계 · 합계/);
+  assert.equal(document.getElementById("sheet-pivot-dialog").open, true);
 
   userClick(commandItem(document, "sheet-mod-chart"));
   await flushAsyncTurns();
@@ -209,7 +209,7 @@ test("SHEET supports keyboard arrow/Tab/Delete cell navigation, inline editing k
 
   userClick(commandItem(document, "sheet-mod-condfmt"));
   await flushAsyncTurns();
-  assert.ok(document.querySelectorAll("#pane-sheet td.condfmt-high").length > 0);
+  assert.equal(document.getElementById("sheet-cf-dialog").open, true);
 
   userClick(commandItem(document, "sheet-mod-freeze"));
   await flushAsyncTurns();
@@ -221,11 +221,9 @@ test("SHEET supports keyboard arrow/Tab/Delete cell navigation, inline editing k
   assert.equal(sheetThead.classList.contains("frozen-header"), false);
   sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
   await flushAsyncTurns();
-  assert.equal(document.querySelectorAll("#pane-sheet td.condfmt-high").length, 0);
 
   sandbox.dispatchWindowKeydown({ key: "y", ctrlKey: true });
   await flushAsyncTurns();
-  assert.ok(document.querySelectorAll("#pane-sheet td.condfmt-high").length > 0);
   sandbox.dispatchWindowKeydown({ key: "y", ctrlKey: true });
   await flushAsyncTurns();
   assert.equal(sheetThead.classList.contains("frozen-header"), true);
@@ -233,7 +231,6 @@ test("SHEET supports keyboard arrow/Tab/Delete cell navigation, inline editing k
   userClick(document.querySelector('#sheet-tab-bar .sheet-tab-btn[data-sheet-tab="Sheet2"]'));
   await flushAsyncTurns();
   assert.equal(sheetThead.classList.contains("frozen-header"), false);
-  assert.equal(document.querySelectorAll("#pane-sheet td.condfmt-high").length, 0);
 
   await flushAsyncTurns();
   userClick(commandItem(document, "sheet-data-sort"));
@@ -247,7 +244,6 @@ test("SHEET supports keyboard arrow/Tab/Delete cell navigation, inline editing k
   userClick(document.querySelector('#sheet-tab-bar .sheet-tab-btn[data-sheet-tab="Sheet1"]'));
   await flushAsyncTurns();
   assert.equal(sheetThead.classList.contains("frozen-header"), true);
-  assert.ok(document.querySelectorAll("#pane-sheet td.condfmt-high").length > 0);
 });
 
 test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node PII scrub, presenter mode, and PDF badges work end-to-end", async () => {

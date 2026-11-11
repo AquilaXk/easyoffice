@@ -1,7 +1,7 @@
 (function (host) {
   "use strict";
 
-  // Row/column-oriented sheet commands (sort, pivot/chart summary, conditional formatting)
+  // Row/column-oriented sheet commands (sort, chart summary)
   // operating on the sheet model so they work for rows that are not currently materialized.
   const { normalizeFormattedNumericCell } = host.__EASYOFFICE_SHEET_UTILS__;
 
@@ -54,26 +54,6 @@
     const copy = structuredClone(style);
     delete copy.frozenPanes;
     return copy;
-  }
-
-  function setCondfmtFlag(entry, on) {
-    if (on) {
-      entry.style = {
-        fontWeight: "",
-        fontStyle: "",
-        textDecoration: "",
-        fontSize: "",
-        ...entry.style,
-        condfmtHigh: true,
-      };
-      return;
-    }
-    if (!entry.style?.condfmtHigh) return;
-    delete entry.style.condfmtHigh;
-    const s = entry.style;
-    if (!(s.fontWeight || s.fontStyle || s.textDecoration || s.fontSize || s.frozenPanes)) {
-      delete entry.style;
-    }
   }
 
   function createSheetOps(api) {
@@ -199,15 +179,15 @@
       return recalculateActiveSheetFormulas({ updateFocusedDisplay: true });
     }
 
-    function applySheetPivotOrChartSummary(mode, execRes) {
+    function applySheetChartSummary(execRes) {
       const { aggregateNumbers } = host.__EASYOFFICE_SHEET_UTILS__;
       const map = snapshotDomSheetCells();
       const nums = [];
       scanDataRange(map, nums);
       const { count, sum, max: maxVal, avg: rawAvg } = aggregateNumbers(nums);
       const avg = count > 0 ? Math.round(rawAvg * 10) / 10 : 0;
-      const prefix = mode === "pivot" ? "피벗 집계" : "차트 데이터 요약";
-      const summaryToken = execRes?.summary || mode;
+      const prefix = "차트 데이터 요약";
+      const summaryToken = execRes?.summary || "chart";
       const summaryLine =
         prefix +
         " · 합계 " +
@@ -228,34 +208,9 @@
       if (smartOut) smartOut.textContent = summaryLine;
     }
 
-    function toggleSheetConditionalFormatting(enabled) {
-      const { aggregateNumbers } = host.__EASYOFFICE_SHEET_UTILS__;
-      const curSheet = getActiveSheetName();
-      const map = snapshotDomSheetCells();
-      sheetDataStore[curSheet] = map;
-      const refNums = [];
-      scanDataRange(map, refNums);
-      const { count, avg: rawAvg } = aggregateNumbers(refNums);
-      const avg = count > 0 ? rawAvg : 800;
-      Object.keys(map).forEach((ref) => {
-        const entry = map[ref];
-        if (!enabled) {
-          setCondfmtFlag(entry, false);
-        } else {
-          const n = numberOf(entry);
-          setCondfmtFlag(entry, n !== null && n >= avg);
-        }
-        if (!hasCellContent(entry) && !entry.style) delete map[ref];
-      });
-      refreshWindowFromModel();
-      saveActiveSheetCellsToWorkbook();
-    }
-
-
     return {
       sortActiveSheetRange,
-      applySheetPivotOrChartSummary,
-      toggleSheetConditionalFormatting,
+      applySheetChartSummary,
     };
   }
 

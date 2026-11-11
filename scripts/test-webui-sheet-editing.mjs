@@ -422,8 +422,9 @@ test("formatted currency, grouped numbers and percentages participate in SUM/AVE
 
   userClick(document.querySelector('.md-item[data-studio-menu-cmd="sheet-mod-pivot"]'));
   await flushAsyncTurns(10);
-  const evalOut = document.getElementById("sheet-eval-result").textContent;
-  assert.match(evalOut, /합계 4550.*최대 2000/, "pivot summary scans populated rows beyond row 6");
+  const pivotDialog = document.getElementById("sheet-pivot-dialog");
+  assert.equal(pivotDialog.open, true, "the pivot command opens its dialog");
+  assert.equal(document.getElementById("sheet-pivot-range").value, "B2:B4", "a multi-cell selection is the default range");
 
   // A single active cell is no selection: the sort covers the whole data range.
   userClick(cell(document, "A1"));

@@ -357,7 +357,7 @@
       td.style.fontStyle = st?.fontStyle || "";
       td.style.textDecoration = st?.textDecoration || "";
       td.style.fontSize = st?.fontSize || "";
-      td.classList.toggle("condfmt-high", Boolean(st?.condfmtHigh));
+      host.__EASYOFFICE_SHEET_RULES__?.paintTd(td, getSheetName());
     }
 
     // Shows `value` with the General format; the raw value is remembered for editing/saving.
@@ -686,6 +686,14 @@
       return tds;
     }
 
+    // Repaints only the rule appearance (conditional formatting) of the materialized cells, so
+    // a cell being edited keeps its text.
+    function repaintFx() {
+      seedDomMaps();
+      const sheet = getSheetName();
+      for (const td of tdByPacked.values()) host.__EASYOFFICE_SHEET_RULES__?.paintTd(td, sheet);
+    }
+
     function ensureVisible(row, col) {
       const vp = viewportEl();
       if (hasLayout(vp)) {
@@ -762,6 +770,7 @@
       applyColWidth,
       getAllWidths,
       replaceAllWidths,
+      repaintFx,
       renderWindow,
       refreshCells,
       ensureVisible,

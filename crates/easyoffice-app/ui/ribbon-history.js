@@ -155,6 +155,7 @@
         sheets: cloneSheets(sheetDataStore),
         sheetRowCounts: structuredClone(sheetRowCounts),
         sheetColumnWidths,
+        sheetRules: typeof sheetController.getSheetRules === "function" ? sheetController.getSheetRules() : {},
         sheetFrozen,
         slides: structuredClone(slideDeckState),
         ribbonState: structuredClone(localRibbonState),
@@ -295,6 +296,7 @@
       if (snap.sheetColumnWidths && typeof sheetController.replaceColumnWidths === "function") {
         sheetController.replaceColumnWidths(structuredClone(snap.sheetColumnWidths));
       }
+      if (snap.sheetRules) host.__EASYOFFICE_SHEET_RULES__.replaceAll(structuredClone(snap.sheetRules));
       if (Array.isArray(snap.slides)) {
         slideDeckState.splice(0, slideDeckState.length, ...structuredClone(snap.slides));
       }
@@ -516,7 +518,7 @@
     async function prepareRibbonAsyncEffect(cmdId, effectiveModule) {
       const sheetController = getSheetController();
       const workspacePanels = getWorkspacePanels();
-      if (cmdId.endsWith("-review-verify") || cmdId.endsWith("-data-validation")) {
+      if (cmdId.endsWith("-review-verify") || (cmdId.endsWith("-data-validation") && !cmdId.startsWith("sheet-"))) {
         await workspacePanels.runModuleSecurityAudit(effectiveModule);
         return { kind: "securityAudit", auditOutcome: { ok: true, errorMessage: "" } };
       }
@@ -595,7 +597,8 @@
       "-view-ribbon": viewEffectRibbon,
       "-view-split": viewEffectSplit,
       "-review-verify": applyAuditFromPrepared,
-      "-data-validation": applyAuditFromPrepared,
+      "-data-validation": (id, res, prepared) =>
+        id.startsWith("sheet-") ? getSheetController().openDataValidationDialog() : applyAuditFromPrepared(id, res, prepared),
       "-review-stats": applyStatsFromPrepared,
       "-manuscript": viewEffectManuscript,
       "-mod-manuscript": viewEffectManuscript,
@@ -647,14 +650,14 @@
           setSheetSummary(execRes);
           break;
         case "sheet-mod-pivot":
-          sheetController.applySheetPivotOrChartSummary("pivot", execRes);
+          sheetController.openPivotDialog();
           break;
         case "sheet-mod-chart":
         case "sheet-insert-chart":
-          sheetController.applySheetPivotOrChartSummary("chart", execRes);
+          sheetController.applySheetChartSummary(execRes);
           break;
         case "sheet-mod-condfmt":
-          sheetController.toggleSheetConditionalFormatting(!document.querySelector("#pane-sheet td.condfmt-high"));
+          sheetController.openConditionalFormatDialog();
           setSheetSummary(execRes);
           break;
         case "sheet-mod-freeze":

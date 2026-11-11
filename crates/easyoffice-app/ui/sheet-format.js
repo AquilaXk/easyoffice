@@ -10,7 +10,7 @@
   // Selections larger than this refresh the toolbar state after a short delay while navigating.
   const EAGER_STATE_CELLS = 20000;
   const STATE_DELAY_MS = 120;
-  const STYLE_KEYS = ["fontWeight", "fontStyle", "textDecoration", "fontSize", "condfmtHigh", "frozenPanes"];
+  const STYLE_KEYS = ["fontWeight", "fontStyle", "textDecoration", "fontSize", "frozenPanes"];
   const COMMANDS = {
     "sheet-home-bold": "bold",
     "sheet-home-italic": "italic",

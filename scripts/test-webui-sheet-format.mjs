@@ -152,11 +152,9 @@ test("sheetCellDataChanged detects style changes, and column widths + freeze pan
   const baseA = { Sheet1: { B2: { value: "100", formula: "" } } };
   const boldB = { Sheet1: { B2: { value: "100", formula: "", style: { bold: true } } } };
   const sizeB = { Sheet1: { B2: { value: "100", formula: "", style: { sizePt: 14 } } } };
-  const condB = { Sheet1: { B2: { value: "100", formula: "", style: { condfmtHigh: true } } } };
   assert.equal(storeApi.sheetCellDataChanged(baseA, structuredClone(baseA)), false);
   assert.equal(storeApi.sheetCellDataChanged(baseA, boldB), true, "bold style change detected");
   assert.equal(storeApi.sheetCellDataChanged(baseA, sizeB), true, "sizePt style change detected");
-  assert.equal(storeApi.sheetCellDataChanged(baseA, condB), true, "condfmtHigh style change detected");
 
   const sessionUtils = document.defaultView.__EASYOFFICE_WORKSPACE_SESSION_UTILS__;
   const snap0 = { sheets: baseA, sheetRowCounts: { Sheet1: 12 }, sheetColumnWidths: {}, sheetFrozen: {} };

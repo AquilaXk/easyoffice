@@ -485,7 +485,6 @@ test("failed ribbon async prep (autosum, smart stats, security audit) preserves 
   const secStatus = document.getElementById("security-status-text");
   const boldBtn = commandItem(document, "sheet-home-bold");
   const autosumBtn = commandItem(document, "sheet-data-autosum");
-  const dataValBtn = commandItem(document, "sheet-data-validation");
   const verifyBtn = commandItem(document, "sheet-review-verify");
   const statsBtn = commandItem(document, "sheet-review-stats");
 
@@ -528,11 +527,6 @@ test("failed ribbon async prep (autosum, smart stats, security audit) preserves 
   assert.match(feedback.textContent, /^\[요청 거부\].*SecurityViolation/);
   assert.match(secStatus.textContent, /^\[요청 거부\].*SecurityViolation/);
 
-  userClick(dataValBtn);
-  await flushAsyncTurns(10);
-  assert.equal(mock.executeRibbonCalls, 1);
-  assert.equal(mock.backendRedoStack.length, 1);
-  assert.match(feedback.textContent, /^\[요청 거부\].*SecurityViolation/);
   mock.failSecurityAudit = false;
 
   sandbox.dispatchWindowKeydown({ key: "y", ctrlKey: true });

@@ -153,6 +153,7 @@
     }
 
     let refocusAfterRender = false;
+    let rulesUi = null;
     // `input` is created right below; the grid only calls these hooks after both exist.
     const grid = host.__EASYOFFICE_CREATE_SHEET_GRID__({
       document,
@@ -213,8 +214,7 @@
       const fontStyle = td.style.fontStyle || "";
       const textDecoration = td.style.textDecoration || "";
       const fontSize = td.style.fontSize || "";
-      const condfmtHigh = td.classList.contains("condfmt-high");
-      const hasStyle = Boolean(fontWeight || fontStyle || textDecoration || fontSize || condfmtHigh);
+      const hasStyle = Boolean(fontWeight || fontStyle || textDecoration || fontSize);
       if (value === "" && formula === "" && !hasStyle) {
         delete map[ref];
         return;
@@ -222,7 +222,6 @@
       const cellEntry = { value, formula };
       if (hasStyle) {
         cellEntry.style = { fontWeight, fontStyle, textDecoration, fontSize };
-        if (condfmtHigh) cellEntry.style.condfmtHigh = true;
       }
       map[ref] = cellEntry;
       if (value !== "" || formula !== "") {
@@ -252,7 +251,7 @@
       } else if (a1?.style?.frozenPanes) {
         delete a1.style.frozenPanes;
         const s = a1.style;
-        if (!(s.fontWeight || s.fontStyle || s.textDecoration || s.fontSize || s.condfmtHigh)) {
+        if (!(s.fontWeight || s.fontStyle || s.textDecoration || s.fontSize)) {
           delete a1.style;
         }
         if (!hasCellContent(a1) && !a1.style) delete map.A1;
@@ -649,7 +648,24 @@
       return true;
     }
 
+    // An entry under a data validation waits for the engine's verdict; a refused entry takes the
+    // old value back before the ordinary commit runs.
     function commitSheetCellEdit(td, keepFocus) {
+      const st = sheetCellFocusState.get(td);
+      const gate = rulesUi?.gateEntry(td, st) ?? null;
+      if (!gate) return commitSheetCellEditNow(td, keepFocus);
+      return trackSheetAsyncWork(
+        gate.then((accepted) => {
+          if (!accepted) {
+            st.userEdited = false;
+            grid.setDisplayValue(td, st.initialText);
+          }
+          return commitSheetCellEditNow(td, keepFocus);
+        })
+      );
+    }
+
+    function commitSheetCellEditNow(td, keepFocus) {
       const st = sheetCellFocusState.get(td);
       if (!st || st.sheetName !== getActiveSheetName()) {
         if (!keepFocus) sheetCellFocusState.delete(td);
@@ -757,7 +773,10 @@
       hasValue: (r, c) => hasCellContent(entryAt(gridUtils.refOf(r, c))),
       setActiveSheetCellRef,
       getActiveSheetCellRef,
-      onSelectionChanged: () => format.scheduleToolbarSync(),
+      onSelectionChanged: () => {
+        format.scheduleToolbarSync();
+        rulesUi?.syncArrow();
+      },
       onFormatKey: (kind) => void format.formatRange(kind).catch(() => {}),
       commitSheetCellEdit,
       ensureSheetCellFocusEntry,
@@ -822,6 +841,29 @@
       pushRawUndoSnapshot,
       captureWorkspaceSnapshot,
     });
+
+    const sheetRules = host.__EASYOFFICE_SHEET_RULES__;
+    rulesUi = host.__EASYOFFICE_CREATE_SHEET_RULES_UI__({
+      document,
+      sheetDataStore,
+      sheetRowCounts,
+      getActiveSheetName,
+      getRange: () => input.getRange(),
+      isFormulaStr,
+      sheetStoreHelpers,
+      enqueueWorkspaceHistoryOp,
+      drainInFlightSheetWork,
+      pushRawUndoSnapshot,
+      captureWorkspaceSnapshot,
+      flushFocusedSheetCellBeforeSwitch,
+      performSwitchSheetTabAsync,
+      applyCellEdits,
+      readTdValue: (td) => grid.readTdValue(td),
+    });
+    // Rule changes (dialogs, undo, open) re-evaluate; new appearances repaint the cells.
+    sheetRules.on("changed", () => void recalculateActiveSheetFormulas().catch(() => {}));
+    sheetRules.on("repaint", () => grid.repaintFx());
+    sheetRules.on("readCells", (sheet, ref) => String(sheetDataStore[sheet]?.[ref]?.value ?? ""));
 
     function toggleSheetFreezePanes(enabled, skipSave = false) {
       const thead = document.querySelector("#pane-sheet table thead");
@@ -897,9 +939,12 @@
       bindSheetCellEvents,
       runSheetClipboardCommand,
       sortActiveSheetRange: ops.sortActiveSheetRange,
-      applySheetPivotOrChartSummary: ops.applySheetPivotOrChartSummary,
-      toggleSheetConditionalFormatting: ops.toggleSheetConditionalFormatting,
+      applySheetChartSummary: ops.applySheetChartSummary,
       applySheetFormatCommand: format.applyCommand,
+      openConditionalFormatDialog: () => rulesUi.openConditionalFormatDialog(),
+      openDataValidationDialog: () => rulesUi.openDataValidationDialog(),
+      openPivotDialog: () => rulesUi.openPivotDialog(),
+      getSheetRules: () => sheetRules.getAll(),
       getColumnWidths: grid.getAllWidths,
       replaceColumnWidths: grid.replaceAllWidths,
       formatSheetRange: format.formatRange,

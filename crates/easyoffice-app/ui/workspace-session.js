@@ -121,8 +121,8 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
 
   function contentFingerprint(snap) {
     const parts = [
-      snap.docTabs, snap.sheets, snap.sheetRowCounts, snap.sheetColumnWidths, snap.sheetFrozen,
-      snap.slides, snap.pdfStudio, snap.pdfRotationDeg,
+      snap.docTabs, snap.sheets, snap.sheetRowCounts, snap.sheetColumnWidths, snap.sheetRules,
+      snap.sheetFrozen, snap.slides, snap.pdfStudio, snap.pdfRotationDeg,
     ];
     return hashFingerprint(JSON.stringify(canonicalizeContent(parts, "")));
   }
@@ -132,7 +132,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     const parts = {
       DOC: [snap.docTabs?.DOC],
       HWP: [snap.docTabs?.HWP],
-      SHEET: [snap.sheets, snap.sheetRowCounts, snap.sheetColumnWidths, snap.sheetFrozen],
+      SHEET: [snap.sheets, snap.sheetRowCounts, snap.sheetColumnWidths, snap.sheetRules, snap.sheetFrozen],
       SLIDE: [snap.slides],
       PDF: [snap.pdfStudio, snap.pdfRotationDeg],
     }[mod] || [];

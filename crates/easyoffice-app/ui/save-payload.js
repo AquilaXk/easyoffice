@@ -431,7 +431,7 @@
 
   // Every sheet in tab order (then any stored sheet without a tab); keys are the formula-visible
   // sheet names. `raw` is the formula when present, otherwise the typed value.
-  function buildSheetsPayload(sheetKeys, sheetDataStore, columnWidths) {
+  function buildSheetsPayload(sheetKeys, sheetDataStore, columnWidths, rulesBySheet) {
     const ordered = [];
     const seen = new Set();
     [...sheetKeys, ...Object.keys(sheetDataStore || {})].forEach((key) => {
@@ -452,7 +452,10 @@
         cells.push(style ? { ref, raw, style } : { ref, raw });
       }
       const columns = buildColumnsPayload(columnWidths?.[name]);
-      return columns.length > 0 ? { name, cells, columns } : { name, cells };
+      const sheet = columns.length > 0 ? { name, cells, columns } : { name, cells };
+      const rules = rulesBySheet?.[name];
+      if (rules && ((rules.cf || []).length > 0 || (rules.dv || []).length > 0)) sheet.rules = rules;
+      return sheet;
     });
   }
 

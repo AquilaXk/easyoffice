@@ -5,6 +5,8 @@
   const isFormulaStr = astApi.isFormulaStringJs;
   const asciiUpper = astApi.asciiUpperJs;
   const quoteFormulaSheetName = astApi.quoteFormulaSheetName;
+  // Conditional formatting / validation rules (PD-165); absent in pages that do not load them.
+  const rulesApi = host.__EASYOFFICE_SHEET_RULES__;
 
   function cloneStore(sheets) {
     const fast = host.__EASYOFFICE_SHEET_GRID_UTILS__?.cloneSheetStore;
@@ -28,7 +30,6 @@
       (italic ? 2 : 0) |
       (underline ? 4 : 0) |
       (strike ? 8 : 0) |
-      (s.condfmtHigh ? 16 : 0) |
       (s.frozenPanes ? 32 : 0)
     );
   }
@@ -156,6 +157,8 @@
       refusedKey: null,
       raw: new Map(),
       values: new Map(),
+      // Rule payload the session holds per sheet (see `syncRules`).
+      rules: new Map(),
       gen: 0,
     };
     let sessionChain = Promise.resolve();
@@ -170,6 +173,7 @@
       session.sheetKey = "";
       session.raw = new Map();
       session.values = new Map();
+      session.rules = new Map();
     }
 
     // Forgets the session and tells the engine to release it (an unknown id is harmless there).
@@ -280,11 +284,71 @@
           throw refusal;
         }
         if (!last || last.expired === true) throw new Error("시트 세션이 만료되었습니다.");
+        takeRuleChanges(last);
       } while (at < changes.length);
       for (const c of Array.isArray(last.changed) ? last.changed : []) {
         session.values.set(c.sheet + "!" + c.cell, c.value);
       }
+      await syncRules(names);
       return { formulaTargets, circular: last.circular === true };
+    }
+
+    // Rules exist on the page, or the session still holds rules the page has since cleared.
+    function rulesInPlay() {
+      return Boolean(rulesApi) && (rulesApi.hasAny() || session.rules.size > 0);
+    }
+
+    // Appearance changes the engine reports with an `apply` answer.
+    function takeRuleChanges(answer) {
+      if (!rulesApi) return;
+      for (const entry of Array.isArray(answer.cf) ? answer.cf : []) {
+        rulesApi.applyPacked(entry.sheet, entry, false);
+      }
+      for (const name of Array.isArray(answer.cfDropped) ? answer.cfDropped : []) {
+        rulesApi.clearFx(name);
+        session.rules.delete(name);
+      }
+    }
+
+    // Sends a sheet's rules when they differ from what the session holds; the answer is the
+    // appearance of every formatted cell, which replaces what the page showed.
+    async function syncRules(names) {
+      if (!rulesApi) return;
+      for (const name of names) {
+        const payload = rulesApi.payloadFor(name);
+        const sent = session.rules.get(name);
+        if (sent === payload || (sent === undefined && rulesApi.isEmpty(rulesApi.get(name)))) continue;
+        const res = await sessionCall({
+          sessionAction: "rules",
+          session: session.id,
+          sheet: name,
+          rules: JSON.parse(payload),
+        });
+        if (!res || res.expired === true) throw new Error("시트 세션이 만료되었습니다.");
+        if (rulesApi.isEmpty(rulesApi.get(name))) session.rules.delete(name);
+        else session.rules.set(name, payload);
+        if (res.refused) rulesApi.clearFx(name);
+        else rulesApi.applyPacked(name, res.cf, true);
+      }
+    }
+
+    // Asks the engine whether `text` may be entered in a cell; `null` when it cannot say.
+    function validateEntry(sheet, cell, text) {
+      return runSessionExclusive(async () => {
+        if (!session.enabled || session.id === null) return null;
+        try {
+          const res = await sessionCall({
+            sessionAction: "validate",
+            session: session.id,
+            sheet,
+            cell,
+            value: String(text ?? ""),
+          });
+          return res && res.expired !== true && typeof res.ok === "boolean" ? res : null;
+        } catch {
+          return null;
+        }
+      });
     }
 
     // One retry after a reset covers an expired or evicted session. `null` sends the caller to the
@@ -360,10 +424,11 @@
       const extraIsFormula =
         !extraTarget || isFormulaStr(sheets[extraTarget.sheet]?.[extraTarget.cell]?.formula || "");
       if (session.enabled) {
-        const hasFormula = sheetMapHasAnyFormula(sheets);
-        if (!extraTarget && !hasFormula) return { sheets, extraValue: "", circular: false };
+        // Rules count like formulas: the session has to hold the cells they judge.
+        const needsSession = sheetMapHasAnyFormula(sheets) || rulesInPlay();
+        if (!extraTarget && !needsSession) return { sheets, extraValue: "", circular: false };
         const viaSession =
-          extraIsFormula || hasFormula
+          extraIsFormula || needsSession
             ? await syncSession(sheets)
             : { formulaTargets: [], circular: false };
         if (viaSession) {
@@ -442,7 +507,7 @@
 
     async function evaluateLiveFormulaTargets(sheetsMap, defaultSheet) {
       if (session.enabled) {
-        if (!sheetMapHasAnyFormula(sheetsMap)) return null;
+        if (!sheetMapHasAnyFormula(sheetsMap) && !rulesInPlay()) return null;
         const viaSession = await syncSession(sheetsMap);
         if (viaSession) {
           return {
@@ -568,6 +633,8 @@
       extractEvaluatedTargetValue,
       computeEvaluatedSheetStore,
       evaluateLiveFormulaTargets,
+      validateEntry,
+      callSheetAction: sessionCall,
       enableSheetSessions,
       scrubSheetStoreMap,
     };
