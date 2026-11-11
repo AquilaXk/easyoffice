@@ -6,6 +6,7 @@
 
   const rules = host.__EASYOFFICE_SHEET_RULES__;
   const PIVOT_MAX_FIELDS = 256;
+  const PLACEHOLDER = "(범위를 먼저 입력)";
 
   function createSheetPivotUi(deps, kit) {
     const {
@@ -81,6 +82,13 @@
           opt.textContent = name;
           el.appendChild(opt);
         });
+        // Without a range a combo would collapse to its arrow; a placeholder gives it a width.
+        if (names.length === 0 && !withNone) {
+          const hint = document.createElement("option");
+          hint.value = "";
+          hint.textContent = PLACEHOLDER;
+          el.appendChild(hint);
+        }
         const all = optionsOf(el);
         el.value = all.some((o) => o.value === prev) ? prev : (all[0]?.value ?? "");
         fireChange(el);
@@ -169,6 +177,10 @@
         return;
       }
       const sheet = getActiveSheetName();
+      if (val("sheet-pivot-row-select") === "" || val("sheet-pivot-value-select") === "") {
+        note("sheet-pivot-status", "데이터 범위를 입력하고 행과 값 열을 고르세요.");
+        return;
+      }
       const colValue = val("sheet-pivot-col-select");
       const request = {
         sessionAction: "pivot",
@@ -217,6 +229,9 @@
       });
       closeDialog("sheet-pivot-dialog");
     }
+
+    // The combos have their placeholder from the start, however the dialog gets opened.
+    refreshPivotFields();
 
     return { openPivotDialog, pivotCells };
   }

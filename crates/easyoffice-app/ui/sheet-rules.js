@@ -94,6 +94,30 @@
   // Engine order (`ICON_SETS` in sheet_rules.rs).
   const ICON_SET_NAMES = Object.keys(ICON_SETS);
 
+  // Screen labels of the sets (the values stay the file format's identifiers).
+  const ICON_SET_LABELS = {
+    "3Arrows": "화살표 3개",
+    "3ArrowsGray": "회색 화살표 3개",
+    "3Flags": "깃발 3개",
+    "3TrafficLights1": "신호등 3개",
+    "3TrafficLights2": "신호등(속 빈 원) 3개",
+    "3Signs": "표지 3개",
+    "3Symbols": "기호 3개",
+    "3Symbols2": "기호(굵게) 3개",
+    "3Stars": "별 3개",
+    "3Triangles": "삼각형 3개",
+    "4Arrows": "화살표 4개",
+    "4ArrowsGray": "회색 화살표 4개",
+    "4RedToBlack": "빨강에서 검정 4개",
+    "4Rating": "등급 막대 4개",
+    "4TrafficLights": "신호등 4개",
+    "5Arrows": "화살표 5개",
+    "5ArrowsGray": "회색 화살표 5개",
+    "5Rating": "등급 막대 5개",
+    "5Quarters": "4분면 5개",
+    "5Boxes": "상자 5개",
+  };
+
   const maskCache = new Map();
   // `url(data:...)` of one shape, for the CSS mask of an icon cell.
   function iconMask(shape) {
@@ -393,6 +417,7 @@
     return {
       ICON_SET_NAMES,
       ICON_SETS,
+      ICON_SET_LABELS,
       iconMask,
       parseRanges,
       formatRanges,

@@ -606,3 +606,29 @@ test("the alert dialog follows the reference confirm dialog: 360px, padded body,
   assert.match(css, /#sheet-dv-alert-dialog \{ width: min\(360px/);
   assert.match(css, /#sheet-dv-alert-dialog \.dialog-body \{ padding: 16px 20px; line-height: 1\.6; white-space: pre-line; \}/);
 });
+
+test("the icon set combo shows Korean labels and keeps the file format identifiers as values", async () => {
+  const { document, rules } = await dialogHarness();
+  const options = [...document.getElementById("sheet-cf-icon-set-select").querySelectorAll("option")];
+  assert.deepEqual(options.map((o) => o.value), rules.ICON_SET_NAMES);
+  for (const o of options) {
+    assert.match(o.textContent, /[가-힣]/, o.value);
+    assert.ok(!/[A-Za-z]/.test(o.textContent), o.textContent);
+    assert.equal(o.textContent.endsWith(o.value[0] + "개"), true, o.textContent);
+  }
+  assert.equal(options.find((o) => o.value === "3TrafficLights1").textContent, "신호등 3개");
+});
+
+test("the pivot combos have a placeholder option until a range names fields, and refuse to build without one", async () => {
+  const { document, userClick, rulesUi } = await dialogHarness();
+  const text = (id) => [...document.getElementById(id).querySelectorAll("option")].map((o) => o.textContent);
+  assert.deepEqual(text("sheet-pivot-row-select"), ["(범위를 먼저 입력)"]);
+  assert.deepEqual(text("sheet-pivot-value-select"), ["(범위를 먼저 입력)"]);
+  assert.deepEqual(text("sheet-pivot-col-select"), ["(없음)"]);
+  rulesUi.openPivotDialog();
+  document.getElementById("sheet-pivot-range").value = "";
+  userClick(document.getElementById("btn-sheet-pivot-apply"));
+  await flushAsyncTurns();
+  assert.match(document.getElementById("sheet-pivot-status").textContent, /데이터 범위/);
+  assert.equal(document.getElementById("sheet-pivot-dialog").open, true, "nothing was built");
+});

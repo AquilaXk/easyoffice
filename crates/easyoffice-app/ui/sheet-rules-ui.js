@@ -109,7 +109,7 @@
       else if (rule.t === "text") detail = " " + rule.op + " " + rule.text;
       else if (rule.t === "top") detail = (rule.bottom ? " 하위 " : " 상위 ") + rule.n + (rule.percent ? "%" : "");
       else if (rule.t === "expr") detail = " " + rule.formula;
-      else if (rule.t === "icons") detail = " " + rule.set;
+      else if (rule.t === "icons") detail = " " + (rules.ICON_SET_LABELS[rule.set] || rule.set);
       return rule.r + " · " + kind + detail;
     }
 
@@ -185,7 +185,7 @@
     // when the page starts, so the dialog is right however it gets opened.
     function bindCfLayout() {
       for (const [kindId] of valueRows()) fillOptions(kindId, VALUE_KINDS);
-      fillOptions("sheet-cf-icon-set-select", rules.ICON_SET_NAMES.map((n) => [n, n]));
+      fillOptions("sheet-cf-icon-set-select", rules.ICON_SET_NAMES.map((n) => [n, rules.ICON_SET_LABELS[n]]));
       $("sheet-cf-type-select")?.addEventListener("change", () => {
         const type = val("sheet-cf-type-select");
         refreshKindRows("sheet-cf-dialog", type, STYLE_TYPES);
