@@ -8,6 +8,14 @@
 
 use crate::rtf_xml_helpers::format_col_letters;
 
+// The readers and writers of the model sit beside it; they are internal to the crate.
+#[path = "ods_rules.rs"]
+pub(crate) mod ods_rules;
+#[path = "ods_rules_read.rs"]
+pub(crate) mod ods_rules_read;
+#[path = "xlsx_rules.rs"]
+pub(crate) mod xlsx_rules;
+
 /// Rules (formatting plus validation) one sheet may carry.
 pub const MAX_RULES_PER_SHEET: usize = 256;
 /// Ranges one rule may cover.

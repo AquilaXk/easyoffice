@@ -1,4 +1,3 @@
-use crate::ods_rules::{OdsRuleTable, CALCEXT_NS};
 use crate::office_codecs::validate_zip_xml_entries;
 use crate::rtf_xml_helpers::{
     extract_attr, extract_attr_from_fragment, extract_balanced_elements,
@@ -7,6 +6,7 @@ use crate::rtf_xml_helpers::{
 };
 use crate::sheet_styling::ods_grid::{read_ods_sheets, read_ods_sheets_with_styling};
 use crate::sheet_styling::ods_styles::{parse_ods_styling, table_columns_xml, OdsStyleTable};
+use crate::sheet_styling::sheet_rules::ods_rules::{OdsRuleTable, CALCEXT_NS};
 use crate::sheet_styling::SheetStyling;
 use crate::{ContainerFamily, EasyOfficeError, XmlSanitizer, ZipArchiveCodec, ZipSecurityPolicy};
 

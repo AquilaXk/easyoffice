@@ -6,17 +6,19 @@
 
 use std::collections::BTreeMap;
 
-use crate::sheet_rules::SheetRules;
-
 // XLSX and ODS style tables live beside this module's model; they are internal to the crate.
 #[path = "ods_grid.rs"]
 pub(crate) mod ods_grid;
 #[path = "ods_styles.rs"]
 pub(crate) mod ods_styles;
+#[path = "sheet_rules.rs"]
+pub(crate) mod sheet_rules;
 #[path = "xlsx_sheet.rs"]
 pub(crate) mod xlsx_sheet;
 #[path = "xlsx_styles.rs"]
 pub(crate) mod xlsx_styles;
+
+pub use sheet_rules::*;
 
 use crate::{DocumentFormat, EasyOfficeError, OdfCodec, OoxmlCodec};
 

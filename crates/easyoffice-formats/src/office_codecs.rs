@@ -1,10 +1,12 @@
 use crate::decode_budget::DecodeBudget;
 pub use crate::odf_hwpx_codecs::*;
 pub use crate::rtf_xml_helpers::*;
+use crate::sheet_styling::sheet_rules::xlsx_rules::{
+    parse_dxf_styles, parse_worksheet_rules, rules_xml,
+};
 use crate::sheet_styling::xlsx_sheet::{read_shared_strings, scan_worksheet, SharedStrings};
 use crate::sheet_styling::xlsx_styles::{cols_xml, parse_cell_xf_styles, XlsxStyleTable};
 use crate::sheet_styling::SheetStyling;
-use crate::xlsx_rules::{parse_dxf_styles, parse_worksheet_rules, rules_xml};
 use crate::{EasyOfficeError, XmlSanitizer, ZipArchiveCodec, ZipSecurityPolicy};
 
 /// Payload for OOXML WordprocessingML (`.docx`).

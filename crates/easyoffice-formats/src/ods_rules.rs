@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::fmt::Write;
 
-use crate::sheet_rules::{
+use crate::sheet_styling::sheet_rules::{
     CellBox, CfKind, CfRule, CfStyle, CfValue, Cmp, DataValidation, DvKind, SheetRules, TextOp,
     ValueKind, FLAG_BOLD, FLAG_ITALIC, FLAG_STRIKE, FLAG_UNDERLINE, ICON_SETS,
 };

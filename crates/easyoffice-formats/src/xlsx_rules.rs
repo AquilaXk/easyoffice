@@ -12,7 +12,7 @@ use std::fmt::Write;
 use crate::rtf_xml_helpers::{
     extract_attr_from_fragment, extract_tag_bodies, extract_tags_or_self_closing_with_attrs,
 };
-use crate::sheet_rules::{
+use crate::sheet_styling::sheet_rules::{
     format_sqref, icon_set_index, parse_sqref, CellBox, CfKind, CfRule, CfStyle, CfValue, Cmp,
     DataValidation, DvAlert, DvKind, SheetRules, TextOp, ValueKind, FLAG_BOLD, FLAG_ITALIC,
     FLAG_STRIKE, FLAG_UNDERLINE, ICON_SETS, MAX_RULES_PER_SHEET, MAX_RULE_STOPS,

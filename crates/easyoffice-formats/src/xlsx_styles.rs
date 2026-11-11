@@ -11,10 +11,10 @@ use std::collections::{BTreeMap, HashMap};
 use crate::rtf_xml_helpers::{
     extract_attr_from_fragment, extract_tag_bodies, extract_tags_or_self_closing_with_attrs,
 };
+use crate::sheet_styling::sheet_rules::xlsx_rules::DxfTable;
 use crate::sheet_styling::{
     format_centipt, CellStyle, SheetStyling, StyleKey, MAX_COLUMN_PX, MIN_COLUMN_PX,
 };
-use crate::xlsx_rules::DxfTable;
 
 /// Width of the widest digit of the default font (Calibri 11) in CSS pixels. Excel's column width
 /// unit is the number of such digits; the stored width includes the 5 px cell padding:

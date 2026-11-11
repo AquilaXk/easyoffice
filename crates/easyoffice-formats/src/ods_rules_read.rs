@@ -3,17 +3,17 @@
 
 use std::collections::{BTreeSet, HashMap};
 
-use crate::ods_rules::range_from_ods;
 use crate::rtf_xml_helpers::{
     extract_attr_from_fragment, extract_tag_bodies, extract_tags_or_self_closing_with_attrs,
     extract_tags_with_attrs,
 };
-use crate::sheet_rules::{
+use crate::sheet_styling::ods_grid::{OdsCell, OdsSink};
+use crate::sheet_styling::sheet_rules::ods_rules::range_from_ods;
+use crate::sheet_styling::sheet_rules::{
     icon_set_index, CellBox, CfKind, CfRule, CfStyle, CfValue, Cmp, DataValidation, DvAlert,
     DvKind, SheetRules, TextOp, ValueKind, FLAG_BOLD, FLAG_ITALIC, FLAG_STRIKE, FLAG_UNDERLINE,
     ICON_SETS, MAX_RANGES_PER_RULE, MAX_RULES_PER_SHEET, MAX_RULE_STOPS, MAX_RULE_TEXT_CHARS,
 };
-use crate::sheet_styling::ods_grid::{OdsCell, OdsSink};
 use crate::xml_stream::Attrs;
 use crate::{EasyOfficeError, OdfCodec, XmlSanitizer};
 

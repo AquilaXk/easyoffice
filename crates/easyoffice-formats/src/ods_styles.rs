@@ -3,12 +3,12 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use crate::ods_rules_read::{OdsRuleReader, ValidationSink};
 use crate::rtf_xml_helpers::{
     extract_attr_from_fragment, extract_balanced_elements, extract_tags_or_self_closing_with_attrs,
     extract_tags_with_attrs,
 };
 use crate::sheet_styling::ods_grid::{repeat_value, walk_ods, OdsCell, OdsSink};
+use crate::sheet_styling::sheet_rules::ods_rules_read::{OdsRuleReader, ValidationSink};
 use crate::sheet_styling::{
     format_centipt, CellStyle, SheetStyling, StyleKey, MAX_COLUMN_PX, MAX_STYLED_CELLS,
     MIN_COLUMN_PX,
