@@ -37,6 +37,7 @@ pub mod rich_document;
 mod rich_image;
 mod rich_image_probe;
 mod rich_image_writers;
+mod rich_list_writers;
 mod rich_read_hwpx;
 mod rich_read_images;
 mod rich_read_odt;

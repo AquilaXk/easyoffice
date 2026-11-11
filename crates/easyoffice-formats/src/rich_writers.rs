@@ -15,6 +15,10 @@ use crate::rich_image_writers::{
     docx_content_type_defaults, docx_image_paragraph, docx_image_relationship, emu_to_points,
     odt_image_paragraph, MediaParts, DOCX_PICTURE_NAMESPACES, ODT_PICTURE_NAMESPACES,
 };
+use crate::rich_list_writers::{
+    docx_num_pr, docx_numbering_xml, level_of, list_kind_of, odt_list_styles_xml, plan_lists,
+    OdtListWriter,
+};
 use crate::rich_run_writers::{
     docx_run_properties, odt_font_face_decls, odt_text_key, odt_text_key_is_plain,
     odt_text_style_xml, OdtTextKey,
@@ -39,6 +43,9 @@ pub(crate) fn heading_half_points(level: u8) -> u32 {
 
 const DOCX_STYLES_CONTENT_TYPE: &str =
     "application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml";
+const DOCX_NUMBERING_CONTENT_TYPE: &str =
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml";
+const DOCX_NUMBERING_REL_ID: &str = "rIdNumbering";
 
 fn docx_styles_xml() -> String {
     let mut xml = String::from(concat!(
@@ -65,7 +72,7 @@ fn docx_styles_xml() -> String {
     }
     for (id, name) in [("ListBullet", "List Bullet"), ("ListNumber", "List Number")] {
         xml.push_str(&format!(
-            "<w:style w:type=\"paragraph\" w:styleId=\"{id}\"><w:name w:val=\"{name}\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:ind w:left=\"720\" w:hanging=\"360\"/></w:pPr></w:style>"
+            "<w:style w:type=\"paragraph\" w:styleId=\"{id}\"><w:name w:val=\"{name}\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:contextualSpacing/></w:pPr></w:style>"
         ));
     }
     xml.push_str("<w:style w:type=\"table\" w:default=\"1\" w:styleId=\"TableNormal\"><w:name w:val=\"Normal Table\"/><w:tblPr><w:tblInd w:w=\"0\" w:type=\"dxa\"/><w:tblCellMar><w:left w:w=\"108\" w:type=\"dxa\"/><w:right w:w=\"108\" w:type=\"dxa\"/></w:tblCellMar></w:tblPr></w:style>");
@@ -118,12 +125,13 @@ fn docx_paragraph_layout(p: &RichParagraph) -> String {
     xml
 }
 
-fn push_docx_paragraph(out: &mut String, p: &RichParagraph) {
+/// `run` is the list (see `rich_list_writers`) a list paragraph belongs to.
+fn push_docx_paragraph(out: &mut String, p: &RichParagraph, run: Option<usize>) {
     out.push_str("<w:p>");
     let style = if (1..=6).contains(&p.heading_level) {
         Some(format!("Heading{}", p.heading_level))
     } else {
-        p.list.map(|kind| match kind {
+        list_kind_of(p).map(|kind| match kind {
             RichListKind::Bullet => "ListBullet".to_string(),
             RichListKind::Ordered => "ListNumber".to_string(),
         })
@@ -139,6 +147,9 @@ fn push_docx_paragraph(out: &mut String, p: &RichParagraph) {
         out.push_str("<w:pPr>");
         if let Some(s) = style {
             out.push_str(&format!("<w:pStyle w:val=\"{s}\"/>"));
+        }
+        if let Some(run) = run {
+            out.push_str(&docx_num_pr(run, p));
         }
         out.push_str(&layout);
         if let Some(j) = jc {
@@ -162,7 +173,7 @@ fn push_docx_paragraph(out: &mut String, p: &RichParagraph) {
 const DOCX_FIRST_IMAGE_REL: usize = 2;
 const DOCX_MEDIA_DIR: &str = "word/media";
 
-fn docx_content_types(media: &MediaParts) -> String {
+fn docx_content_types(media: &MediaParts, numbering: bool) -> String {
     format!(
         concat!(
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
@@ -171,11 +182,19 @@ fn docx_content_types(media: &MediaParts) -> String {
             "<Default Extension=\"xml\" ContentType=\"application/xml\"/>{}",
             "<Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/>",
             "<Override PartName=\"/word/styles.xml\" ContentType=\"{}\"/>",
+            "{}",
             "<Override PartName=\"/docProps/core.xml\" ContentType=\"application/vnd.openxmlformats-package.core-properties+xml\"/>",
             "</Types>"
         ),
         docx_content_type_defaults(media),
-        DOCX_STYLES_CONTENT_TYPE
+        DOCX_STYLES_CONTENT_TYPE,
+        if numbering {
+            format!(
+                "<Override PartName=\"/word/numbering.xml\" ContentType=\"{DOCX_NUMBERING_CONTENT_TYPE}\"/>"
+            )
+        } else {
+            String::new()
+        }
     )
 }
 
@@ -190,6 +209,7 @@ pub(crate) fn pack_docx_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeEr
     );
     let core_xml = crate::ooxml_shared_parts::core_properties_xml(&doc.display_title());
     let styles = docx_styles_xml();
+    let lists = plan_lists(&doc.blocks);
 
     let mut body = String::with_capacity(1024);
     body.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
@@ -200,9 +220,9 @@ pub(crate) fn pack_docx_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeEr
     body.push_str("><w:body>");
     let mut media = MediaParts::default();
     let mut image_rels = String::new();
-    for block in &doc.blocks {
+    for (index, block) in doc.blocks.iter().enumerate() {
         match block {
-            RichBlock::Paragraph(p) => push_docx_paragraph(&mut body, p),
+            RichBlock::Paragraph(p) => push_docx_paragraph(&mut body, p, lists.block_run[index]),
             RichBlock::Image(img) => {
                 let (number, path) = media.add(DOCX_MEDIA_DIR, img);
                 let rel_id = format!("rId{}", number + DOCX_FIRST_IMAGE_REL - 1);
@@ -220,18 +240,30 @@ pub(crate) fn pack_docx_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeEr
     body.push_str("<w:sectPr><w:pgSz w:w=\"11906\" w:h=\"16838\"/></w:sectPr>");
     body.push_str("</w:body></w:document>");
 
-    let content_types = docx_content_types(&media);
+    let has_lists = !lists.runs.is_empty();
+    let numbering = has_lists.then(|| docx_numbering_xml(&lists));
+    let content_types = docx_content_types(&media, has_lists);
+    let numbering_rel = if has_lists {
+        format!(
+            "<Relationship Id=\"{DOCX_NUMBERING_REL_ID}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering\" Target=\"numbering.xml\"/>"
+        )
+    } else {
+        String::new()
+    };
     let doc_rels = format!(
         concat!(
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
             "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">",
             "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>",
-            "{}</Relationships>"
+            "{}{}</Relationships>"
         ),
-        image_rels
+        numbering_rel, image_rels
     );
 
-    for xml in [&body, &core_xml, &styles, &doc_rels] {
+    for xml in [&body, &core_xml, &styles, &doc_rels]
+        .into_iter()
+        .chain(numbering.as_ref())
+    {
         XmlSanitizer::validate_safe_xml(xml)?;
     }
 
@@ -249,6 +281,9 @@ pub(crate) fn pack_docx_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeEr
         ("word/styles.xml".to_string(), styles.into_bytes()),
         ("docProps/core.xml".to_string(), core_xml.into_bytes()),
     ];
+    if let Some(numbering) = numbering {
+        entries.push(("word/numbering.xml".to_string(), numbering.into_bytes()));
+    }
     entries.extend(media.into_entries());
     ZipArchiveCodec::pack_compressed(&entries)
 }
@@ -285,7 +320,6 @@ impl<K: Eq + std::hash::Hash + Clone> StyleTable<K> {
 struct OdtParaKey {
     align: Option<RichAlignment>,
     level: u8,
-    list: Option<RichListKind>,
     left_twips: Option<u32>,
     first_line_twips: Option<i32>,
     line_percent: Option<u16>,
@@ -319,7 +353,6 @@ fn push_odt_paragraph(
     let key = OdtParaKey {
         align: p.alignment,
         level,
-        list: if level > 0 { None } else { p.list },
         left_twips: p.left_indent_twips,
         first_line_twips: p.first_line_indent_twips,
         line_percent: p.line_spacing_percent,
@@ -367,18 +400,12 @@ fn odt_para_style_xml(number: usize, key: &OdtParaKey) -> String {
     let OdtParaKey {
         align,
         level,
-        list,
         left_twips,
         first_line_twips,
         line_percent,
     } = key;
-    let list_attr = match list {
-        Some(RichListKind::Ordered) => " style:list-style-name=\"L_Ordered\"",
-        Some(RichListKind::Bullet) => " style:list-style-name=\"L_Bullet\"",
-        None => "",
-    };
     let mut styles = format!(
-        "<style:style style:name=\"P{number}\" style:family=\"paragraph\"{list_attr}><style:paragraph-properties"
+        "<style:style style:name=\"P{number}\" style:family=\"paragraph\"><style:paragraph-properties"
     );
     if let Some(a) = align {
         let v = match a {
@@ -394,8 +421,6 @@ fn odt_para_style_xml(number: usize, key: &OdtParaKey) -> String {
             " fo:margin-left=\"{}\"",
             odt_twips_to_pt(i64::from(*left))
         ));
-    } else if list.is_some() {
-        styles.push_str(" fo:margin-left=\"0.5in\"");
     }
     if let Some(first) = first_line_twips {
         styles.push_str(&format!(
@@ -425,7 +450,17 @@ pub(crate) fn pack_odt_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeErr
     let mut para_styles: StyleTable<OdtParaKey> = StyleTable::new();
     let mut text_styles: StyleTable<OdtTextKey> = StyleTable::new();
     let mut body = String::with_capacity(1024);
-    for block in &doc.blocks {
+    let lists = plan_lists(&doc.blocks);
+    let mut open_lists = OdtListWriter::default();
+    for (index, block) in doc.blocks.iter().enumerate() {
+        match (block, lists.block_run[index]) {
+            (RichBlock::Paragraph(p), Some(run)) => {
+                open_lists.enter(&mut body, &lists, run, level_of(p));
+                push_odt_paragraph(&mut body, p, &mut para_styles, &mut text_styles);
+                continue;
+            }
+            _ => open_lists.leave(&mut body),
+        }
         match block {
             RichBlock::Paragraph(p) => {
                 push_odt_paragraph(&mut body, p, &mut para_styles, &mut text_styles);
@@ -437,6 +472,7 @@ pub(crate) fn pack_odt_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeErr
             }
         }
     }
+    open_lists.leave(&mut body);
 
     let mut styles = String::from("<office:automatic-styles>");
     for (idx, key) in para_styles.keys.iter().enumerate() {
@@ -445,6 +481,7 @@ pub(crate) fn pack_odt_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeErr
     for (idx, key) in text_styles.keys.iter().enumerate() {
         styles.push_str(&odt_text_style_xml(idx + 1, key));
     }
+    styles.push_str(&odt_list_styles_xml(&lists));
     styles.push_str("</office:automatic-styles>");
     let styles = format!("{}{styles}", odt_font_face_decls(&text_styles.keys));
 

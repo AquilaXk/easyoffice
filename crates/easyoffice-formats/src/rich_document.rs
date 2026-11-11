@@ -171,11 +171,11 @@ pub struct RichParagraph {
     pub alignment: Option<RichAlignment>,
     pub heading_level: u8,
     pub list: Option<RichListKind>,
-    /// Nesting level of a list paragraph, 0 for the outermost (read from Pages; the writers do
-    /// not emit levels yet).
+    /// Nesting level of a list paragraph, 0 for the outermost (read from Pages; the DOCX and ODT
+    /// writers emit it as `w:ilvl` and nested `text:list`).
     pub list_level: u8,
     /// Number format of an ordered list paragraph; `None` is the plain `1.` (read from Pages; the
-    /// writers do not emit formats yet).
+    /// DOCX and ODT writers emit it in `word/numbering.xml` and `text:list-style`).
     pub list_number: Option<RichListNumber>,
     /// Left indent in twips (1/20 point); `None` inherits.
     pub left_indent_twips: Option<u32>,
