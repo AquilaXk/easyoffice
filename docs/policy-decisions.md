@@ -2709,6 +2709,21 @@
 - **열기 시간(전→후, 릴리스 빌드)** XLSX 100만 셀 140 ms → 130 ms, ODS 18만 셀 33.7 ms → 33.6 ms, XLS 6만 5천 셀 1.06~1.10 ms → 1.15~1.31 ms, HWP 5.0 압축 문단 4만 개 6.1~6.3 ms → 6.2~6.5 ms, DOC 조각 2만 개 2.65~2.73 ms → 2.77~2.88 ms. 측정 때 기계 부하가 커서 한 자리 퍼센트 차이는 잡음 안입니다.
 - **Verified by** `tests/decode_budget_xlsx.rs`(공유 문자열 300×1 MiB, 공유 수식 슬레이브 300×1 MiB, 두 시트 합산, 같은 파트를 가리키는 시트 둘, 시트 항목 2,000개 거부, 참조가 늘어나는 마스터의 슬레이브 400개 거부, 쓰기 상한, 10만 셀 정상 파일 통과), `tests/decode_budget_ods.rs`(열 반복 300×1 MiB, 행 반복 300×1 MiB 거부, 정상 반복 2만 셀 통과), `tests/decode_budget_ole2.rs`(8,000자 문자열을 가리키는 `LABELSST` 4만 개 거부, 정상 2만 셀 통과, 같은 1 MiB를 가리키는 조각 300개 거부, 정상 조각 표 통과), 같은 `tests/decode_budget_ole2.rs`(100 MiB로 풀리는 구역 4개 거부, 작은 구역 3개 통과), `deflate/tests.rs`(512 MiB 주장·입력 100 MB 첫 버퍼 4 MiB 이하, 주장 크기까지만 성장), Quick Look `tests.rs`(PNG·GIF·BMP 헤더의 100,000² 등 4종과 HWP 5.0 샘플의 IHDR를 고친 파일이 `STATUS_NO_THUMBNAIL`, 정상 64×48 PNG는 그대로 반환), `decode_budget.rs` 단위 시험.
 
+## PD-176. 새 창은 데모 내용 없이 빈 문서로 시작하고, 시스템 메뉴 항목은 한국어로 표시
+
+- **Status** Implemented (`crates/easyoffice-app/ui/index.html`, `ribbon-catalog.js`, `app.js`, `crates/easyoffice-desktop/src/macos_language.rs`, `Info.plist`, `scripts/test-webui-blank-start.mjs`)
+- **Context** 새 스프레드시트가 분기 실적 표와 `=SUM(B2:E2)`·"결과: 4950"으로, 새 문서가 보고서 한 편으로, 새 프레젠테이션이 슬라이드 3장으로, PDF 화면이 결재 양식과 샘플 이름·워터마크로 시작했습니다. 참조 앱의 새 창은 내용 없는 편집기 하나입니다(`apps/desktop/src-tauri/src/windows.rs` `create_editor_window`가 `index.html`을 문서 없이 열고, `menu.rs`의 `file:new-window`가 그 함수를 부름). 파일을 열 때도 탭 이름·수식 결과 같은 데모 값이 남았습니다.
+- **Decision (`PD-176`)**
+  1. **빈 상태**: 시트는 "시트 1" 한 장, A1 선택, 수식 줄·결과 비어 있음. 문서는 빈 문단 하나("제목 없음"). 슬라이드는 빈 슬라이드 한 장. PDF는 열린 파일이 없을 때 종이 카드(양식·스탬프·배지)를 숨기고 홈 화면의 빈 상태 요소(`home-drop-hint`, `home-screen.js`의 "끌어다 놓아도 열 수 있습니다" 안내와 같은 문법)로 "열린 PDF가 없습니다. 파일 메뉴에서 열거나 이 창으로 끌어다 놓으세요."만 보입니다. 안내는 작업 영역 가운데에 놓고, 회전·스탬프·워터마크·적용 컨트롤은 비활성입니다(rhwp-studio 도구줄이 문서 없이 도구를 끄는 것과 같음). 파일을 열면 카드가 돌아오고 컨트롤이 켜집니다(`#pane-pdf[data-empty]`, 기본값 `true`). 한글 탭 기본 노드는 빈 문단과 원고지 안내 줄만 둡니다.
+  2. **파일 열기**: 열 때 수식 결과 문구를 비우고, 열린 파일의 시트 이름만 탭에 남깁니다. 빈 스탬프 상자는 숨깁니다(`.pdf-stamp:empty`).
+  3. **시스템 메뉴 항목**: AppKit이 윈도우 메뉴에 스스로 넣는 항목("Close All" 등)은 `AppleLanguages`의 첫 언어로 제목을 정합니다. 셸은 시작할 때 인수 도메인(저장하지 않는 임시 층)에 `ko`를 넣고, 설치본은 `Info.plist`의 `CFBundleLocalizations`로 한국어를 선언합니다.
+  4. **시험**: 데모에 기대던 시험은 `scripts/test-support/demo-fixtures.mjs`의 픽스처(시험 쪽 HTML 변환과 파일 열기)로 자기 입력을 만듭니다.
+- **Why** 참조 앱처럼 새 문서는 비어 있어야 하고, 데모 값이 열린 파일 위에 남으면 사용자 데이터와 섞여 보입니다.
+- **Trade-offs** 표 수식·표 테두리 도구처럼 데모 표(`#doc-table`)를 대상으로 삼던 문서 도구는 빈 문서에서 대상이 없습니다(표 삽입 뒤에 동작). 개발용 바이너리(번들 없음)에서 시스템 항목이 한국어로 바뀌는지는 화면으로 확인해야 합니다.
+- **Alternatives rejected** 데모를 "샘플 열기" 메뉴로 옮기기(참조 앱에 없음), 메뉴 항목을 직접 만들어 "Close All"을 숨기기(시스템 항목과 단축키·대체 동작이 갈라짐).
+- **Verified by** `node --test scripts/test-webui-blank-start.mjs`와 전체 `scripts/test-*.mjs`, `cargo test -p easyoffice-desktop`(`macos_language` 시험).
+- **Revisit when** 문서 표 도구를 커서가 있는 표 기준으로 바꿀 때, 영어 UI를 지원할 때.
+
 ## PD-177. 데스크톱 셸의 열기·저장·종료 경계: 열지 못한 파일은 놓고, 한도는 셸에서 먼저, 저장은 대상 파일에
 
 - **Status** Implemented (`window_commands.rs`, `windows.rs`, `desktop-bridge.js`, `window-bridge.js`, `workspace-tools.js`)
