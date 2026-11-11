@@ -149,6 +149,21 @@ fn preview_pdf_has_one_page_per_document_page() {
 }
 
 #[test]
+fn preview_pdf_embeds_the_text_as_fonts() {
+    let result = preview_pdf(&sample("field-01.hwp"));
+    assert_eq!(result.status, STATUS_OK);
+    let pdf = take(result.bytes);
+    assert!(
+        count_of(&pdf, b"/Type /Font") > 0,
+        "text is drawn as outlines"
+    );
+    assert!(
+        count_of(&pdf, b"/ToUnicode") > 0,
+        "the text cannot be searched"
+    );
+}
+
+#[test]
 fn a_later_page_that_fails_ends_the_pdf_there_and_a_first_page_that_fails_fails_it() {
     let good = || render::parse_svg(&svg(r#"<rect width="50" height="50"/>"#));
     let (pdf, first) = render::pdf_of(5, |index| {
