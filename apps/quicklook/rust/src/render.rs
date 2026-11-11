@@ -23,7 +23,7 @@ pub const MAX_PAGE_SVG_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_PNG_SIDE: u32 = 2048;
 /// Pages put into the preview PDF; the rest of a long document is left out.
 pub const MAX_PREVIEW_PAGES: u32 = 64;
-/// Largest preview PDF (the page objects; the page tree adds a few KB). Text is drawn as outlines, so a page of a form can take 1 MB.
+/// Largest preview PDF (the page objects; the page tree adds a few KB). A page of a form can take 1 MB.
 pub const MAX_PDF_BYTES: usize = 32 * 1024 * 1024;
 /// Pages are added until this much time has passed; the pages done so far are the preview.
 pub const PDF_PAGE_BUDGET: Duration = Duration::from_secs(15);
@@ -104,7 +104,8 @@ pub fn png(page: &Page, max_side: u32) -> Result<Vec<u8>, i32> {
     pixmap.encode_png().map_err(|_| STATUS_RENDER_FAILED)
 }
 
-/// One PDF page per document page; text is drawn as outlines. It stops at [`MAX_PREVIEW_PAGES`],
+/// One PDF page per document page; text is embedded as subset fonts (outlines on a page whose font
+/// cannot be subset). It stops at [`MAX_PREVIEW_PAGES`],
 /// when [`MAX_PDF_BYTES`] would be passed or when [`PDF_PAGE_BUDGET`] has run out, and keeps the
 /// pages before (a first page that alone is too large is `STATUS_TOO_LARGE`).
 /// Ported from the reference app's `apps/desktop/quicklook/rust/src/pdf.rs` (MIT, see
@@ -112,6 +113,22 @@ pub fn png(page: &Page, max_side: u32) -> Result<Vec<u8>, i32> {
 /// in as SVG trees directly, where the reference app rasterized them first.
 pub fn pdf(core: &DocumentCore, page_count: u32) -> Result<(Vec<u8>, Page), i32> {
     pdf_of(page_count, |index| page(core, index))
+}
+
+/// Converts a page with its text embedded; when the font subsetter fails on it (a font it cannot
+/// cut), the page is converted again with its text as outlines: right on screen, not searchable
+/// (the same retry as the shell's PDF export, PD-114).
+fn to_chunk_with_text(
+    tree: &usvg::Tree,
+) -> Result<(pdf_writer::Chunk, pdf_writer::Ref), svg2pdf::ConversionError> {
+    let options = |embed_text| svg2pdf::ConversionOptions {
+        embed_text,
+        ..svg2pdf::ConversionOptions::default()
+    };
+    match svg2pdf::to_chunk(tree, options(true)) {
+        Err(svg2pdf::ConversionError::SubsetError(_)) => svg2pdf::to_chunk(tree, options(false)),
+        result => result,
+    }
 }
 
 /// [`pdf`] over any source of pages. A page after the first that cannot be drawn or converted ends
@@ -122,10 +139,6 @@ pub(crate) fn pdf_of(
 ) -> Result<(Vec<u8>, Page), i32> {
     use pdf_writer::{Content, Finish, Name, Pdf, Rect, Ref, TextStr};
     let count = page_count.min(MAX_PREVIEW_PAGES);
-    let options = svg2pdf::ConversionOptions {
-        embed_text: false,
-        ..svg2pdf::ConversionOptions::default()
-    };
     let mut alloc = Ref::new(1);
     let catalog_ref = alloc.bump();
     let tree_ref = alloc.bump();
@@ -139,7 +152,7 @@ pub(crate) fn pdf_of(
             break;
         }
         let converted = next_page(index).and_then(|parsed| {
-            let chunk = svg2pdf::to_chunk(&parsed.tree, options).map_err(|_| STATUS_RENDER_FAILED);
+            let chunk = to_chunk_with_text(&parsed.tree).map_err(|_| STATUS_RENDER_FAILED);
             chunk.map(|(chunk, xobject)| (parsed, chunk, xobject))
         });
         let (parsed, chunk, xobject) = match converted {
