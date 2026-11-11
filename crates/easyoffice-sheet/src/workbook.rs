@@ -59,7 +59,7 @@ impl WorkbookEngine {
         !a.trim().is_empty() && a.eq_ignore_ascii_case(b)
     }
 
-    fn find_sheet_index(&self, name: &str) -> Option<usize> {
+    pub(crate) fn find_sheet_index(&self, name: &str) -> Option<usize> {
         if name.trim().is_empty() {
             return None;
         }
@@ -97,6 +97,14 @@ impl WorkbookEngine {
     pub fn sheet_mut(&mut self, name: &str) -> Option<&mut SheetEngine> {
         self.find_sheet_index(name)
             .map(move |pos| &mut self.sheets[pos])
+    }
+
+    pub(crate) fn sheets(&self) -> &[SheetEngine] {
+        &self.sheets
+    }
+
+    pub(crate) fn sheets_mut(&mut self) -> &mut [SheetEngine] {
+        &mut self.sheets
     }
 
     pub fn sheet_count(&self) -> usize {

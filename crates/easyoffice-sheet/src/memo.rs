@@ -103,6 +103,8 @@ pub struct MemoTable {
     primary_sheet_id: u16,
     pages: Vec<Option<Box<MemoPage>>>,
     arena: Vec<EvaluatedCellValue>,
+    /// Arena slots (index + 1) released by `remove_at`, reused before the arena grows.
+    free: Vec<u32>,
     overflow: FastMap<u64, EvaluatedCellValue>,
     visiting_overflow: FastMap<u64, ()>,
 }
@@ -113,6 +115,7 @@ impl MemoTable {
             primary_sheet_id,
             pages: Vec::new(),
             arena: Vec::new(),
+            free: Vec::new(),
             overflow: FastMap::default(),
             visiting_overflow: FastMap::default(),
         }
@@ -168,6 +171,9 @@ impl MemoTable {
                 let existing = self.page_mut(page).slots[slot];
                 if existing != 0 {
                     self.arena[existing as usize - 1] = value;
+                } else if let Some(reused) = self.free.pop() {
+                    self.arena[reused as usize - 1] = value;
+                    self.page_mut(page).slots[slot] = reused;
                 } else {
                     // The step budget keeps memoized cells far below u32::MAX.
                     let next = u32::try_from(self.arena.len() + 1).unwrap_or(u32::MAX);
@@ -179,6 +185,32 @@ impl MemoTable {
                 self.overflow
                     .insert(PackedWorkbookCoord::new(sheet_id, coord).0, value);
             }
+        }
+    }
+
+    /// Forgets the cell's memoized value and returns it. A long-lived memo (an editing session)
+    /// uses this to drop the values of cells that must be recomputed.
+    pub fn remove_at(
+        &mut self,
+        sheet_id: u16,
+        coord: PackedCellCoordinate,
+    ) -> Option<EvaluatedCellValue> {
+        match self.dense(sheet_id, coord) {
+            Some((page, slot)) => {
+                let page = self.pages.get_mut(page)?.as_mut()?;
+                let index = std::mem::take(&mut page.slots[slot]);
+                if index == 0 {
+                    return None;
+                }
+                self.free.push(index);
+                Some(std::mem::replace(
+                    &mut self.arena[index as usize - 1],
+                    EvaluatedCellValue::Empty,
+                ))
+            }
+            None => self
+                .overflow
+                .remove(&PackedWorkbookCoord::new(sheet_id, coord).0),
         }
     }
 

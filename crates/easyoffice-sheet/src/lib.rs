@@ -17,6 +17,7 @@ mod functions_lookup_text;
 mod functions_math;
 mod memo;
 mod parser;
+mod recalc;
 mod special;
 mod text_format;
 pub mod types;
@@ -27,6 +28,7 @@ pub use functions::*;
 pub use functions_complex::{format_complex, parse_complex};
 pub use memo::{CellMap, CoordHasher, FastMap, MemoTable};
 pub use parser::{compile_formula_expr, BinaryOp, Expr};
+pub use recalc::{CellChange, ChangedCell, RecalcOutcome, RecalcSession};
 pub use types::*;
 pub use workbook::*;
 
@@ -153,12 +155,19 @@ impl SheetEngine {
         &self.cells
     }
 
-    /// Drops the cached recalculation plan, formula index, and cell index (called by every mutator).
+    /// Drops the cached recalculation plan (it covers the cell set, so any edit invalidates it).
     #[inline]
-    pub(crate) fn invalidate_caches(&mut self) {
+    pub(crate) fn invalidate_plan(&mut self) {
         if self.plan.get().is_some() {
             self.plan = OnceLock::new();
         }
+    }
+
+    /// Drops the cached recalculation plan, formula index, and cell index (called by every mutator
+    /// that does not keep the indexes in step itself).
+    #[inline]
+    pub(crate) fn invalidate_caches(&mut self) {
+        self.invalidate_plan();
         if self.formula_index.get().is_some() {
             self.formula_index = OnceLock::new();
         }
@@ -234,8 +243,34 @@ impl SheetEngine {
     }
 
     pub fn set_cell_coord(&mut self, coord: PackedCellCoordinate, raw_value: impl Into<String>) {
-        self.invalidate_caches();
-        let val = raw_value.into();
+        self.invalidate_plan();
+        let was_populated = self.cells.contains_key(&coord);
+        let was_formula = dag::is_formula(self.compiled_asts.get(&coord));
+        self.store_cell(coord, raw_value.into());
+        // Indexes that exist are patched instead of rebuilt: an edit that does not add or remove a
+        // populated / formula cell leaves them untouched.
+        let is_populated = self.cells.contains_key(&coord);
+        let is_formula = dag::is_formula(self.compiled_asts.get(&coord));
+        if was_populated != is_populated {
+            if let Some(index) = self.cell_index.get_mut() {
+                index.set_populated(coord, is_populated);
+            }
+        }
+        if was_formula != is_formula {
+            if let Some(index) = self.formula_index.get_mut() {
+                index.set_formula(coord, is_formula);
+            }
+        }
+    }
+
+    /// Drops the cached indexes; the next evaluation rebuilds them in one sorted pass, which is
+    /// cheaper than patching them cell by cell when many cells change at once.
+    pub(crate) fn drop_indexes(&mut self) {
+        self.formula_index = OnceLock::new();
+        self.cell_index = OnceLock::new();
+    }
+
+    fn store_cell(&mut self, coord: PackedCellCoordinate, val: String) {
         if val.is_empty() {
             self.cells.remove(&coord);
             self.compiled_asts.remove(&coord);

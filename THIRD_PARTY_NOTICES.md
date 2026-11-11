@@ -91,6 +91,38 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## formualizer (ported functions, MIT OR Apache-2.0, used under MIT)
+
+Source: https://github.com/PSU3D0/formualizer (commit `214bf226e4a4ee4927d96f3e9cb42ef742fa61e7`). Nothing is vendored or linked; the incremental recalculation graph of `easyoffice-sheet` (`crates/easyoffice-sheet/src/recalc/`, PD-161) is a port of these functions, rewritten without the reference's Arrow or workbook dependencies and with different data layouts (each file starts with a header naming the source path and the changes):
+
+- `crates/formualizer-eval/src/engine/idset.rs` (`DenseIdSet`) -> `recalc/id_set.rs`.
+- `crates/formualizer-eval/src/engine/interval_tree.rs` (`IntervalTree`) -> `recalc/interval.rs`.
+- `crates/formualizer-eval/src/engine/graph/range_deps.rs` (range registration and candidate lookup) and `graph/mod.rs` (`mark_dirty_many`, the dirty closure) -> `recalc/graph.rs`.
+
+```
+MIT License
+
+Copyright (c) 2025-2026 Frank Colson and Formualizer contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ## Rust dependencies compiled into the rhwp WebAssembly module
 
 These are the crates statically linked into `vendor/rhwp-core/rhwp_bg.wasm` (built from the pinned rhwp commit with Rust 1.93.1 and wasm-pack 0.14.0, see `vendor/rhwp-core/PROVENANCE.json`). The list and texts below are generated offline by `scripts/generate-wasm-notices.mjs` from `cargo metadata` and the crates' own license and NOTICE files, and must be regenerated whenever the WebAssembly package is rebuilt.

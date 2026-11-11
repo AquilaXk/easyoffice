@@ -19,7 +19,7 @@ const SMALL_RANGE_CELLS: usize = 256;
 type Frame = (u16, PackedCellCoordinate, bool);
 
 #[inline]
-fn is_formula(entry: Option<&Result<Expr, FormulaError>>) -> bool {
+pub(crate) fn is_formula(entry: Option<&Result<Expr, FormulaError>>) -> bool {
     matches!(
         entry,
         Some(Ok(expr)) if !matches!(expr, Expr::Number(_) | Expr::Boolean(_))
@@ -33,7 +33,7 @@ pub(crate) struct FormulaIndex {
 }
 
 impl FormulaIndex {
-    fn build(sheet: &SheetEngine) -> Self {
+    pub(crate) fn build(sheet: &SheetEngine) -> Self {
         let mut pairs: Vec<(u32, u32)> = sheet
             .compiled_asts
             .iter()
@@ -51,8 +51,30 @@ impl FormulaIndex {
         Self { columns }
     }
 
+    /// Adds or removes one formula cell, keeping each column's rows sorted.
+    pub(crate) fn set_formula(&mut self, coord: PackedCellCoordinate, present: bool) {
+        let (col, row) = (coord.col(), coord.row());
+        match self.columns.binary_search_by_key(&col, |(c, _)| *c) {
+            Ok(i) => {
+                let rows = &mut self.columns[i].1;
+                match (rows.binary_search(&row), present) {
+                    (Err(pos), true) => rows.insert(pos, row),
+                    (Ok(pos), false) => {
+                        rows.remove(pos);
+                        if rows.is_empty() {
+                            self.columns.remove(i);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Err(i) if present => self.columns.insert(i, (col, vec![row])),
+            Err(_) => {}
+        }
+    }
+
     /// Formula cells inside the rectangle, appended to `out` in no particular order.
-    fn collect(
+    pub(crate) fn collect(
         &self,
         min_r: u32,
         max_r: u32,
@@ -85,7 +107,7 @@ pub(crate) struct CellIndex {
 }
 
 impl CellIndex {
-    fn build(sheet: &SheetEngine) -> Self {
+    pub(crate) fn build(sheet: &SheetEngine) -> Self {
         let mut sorted_coords: Vec<PackedCellCoordinate> = sheet.cells.keys().copied().collect();
         sorted_coords.sort_unstable();
         let mut by_col: HashMap<u32, Vec<u32>> = HashMap::new();
@@ -95,6 +117,32 @@ impl CellIndex {
         Self {
             by_col,
             sorted_coords,
+        }
+    }
+
+    /// Adds or removes one populated cell in both views of the index.
+    pub(crate) fn set_populated(&mut self, coord: PackedCellCoordinate, present: bool) {
+        let (col, row) = (coord.col(), coord.row());
+        match (self.sorted_coords.binary_search(&coord), present) {
+            (Err(pos), true) => {
+                self.sorted_coords.insert(pos, coord);
+                let rows = self.by_col.entry(col).or_default();
+                if let Err(at) = rows.binary_search(&row) {
+                    rows.insert(at, row);
+                }
+            }
+            (Ok(pos), false) => {
+                self.sorted_coords.remove(pos);
+                if let Some(rows) = self.by_col.get_mut(&col) {
+                    if let Ok(at) = rows.binary_search(&row) {
+                        rows.remove(at);
+                    }
+                    if rows.is_empty() {
+                        self.by_col.remove(&col);
+                    }
+                }
+            }
+            _ => {}
         }
     }
 
