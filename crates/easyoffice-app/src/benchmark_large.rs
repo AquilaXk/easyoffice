@@ -2,9 +2,8 @@
 //! rounds (flipping the order each round to cancel cache and clock bias); the gate only enforces
 //! ratios in release builds, and with loose floors so shared CI runners do not flake.
 
-use crate::benchmark::{
-    recalculate_all_uncompiled_baseline, BenchmarkSuiteResult, EngineBenchmarkReport,
-};
+use crate::benchmark::{BenchmarkSuiteResult, EngineBenchmarkReport};
+use crate::benchmark_baselines::recalculate_all_uncompiled_baseline;
 use crate::benchmark_real::RELEASE_GATING;
 use easyoffice_formats::IeeeCrc32;
 use easyoffice_sheet::{EvaluatedCellValue, PackedCellCoordinate, SheetEngine};
