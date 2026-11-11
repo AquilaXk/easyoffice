@@ -3,9 +3,9 @@
 
 use std::collections::HashSet;
 
-use super::{object_kind, reference, AttrTable, Flow, Reader};
+use super::{object_kind, reference, Flow, Reader};
 use crate::pages_proto::{ArchiveObject, Message};
-use crate::pages_schema::{floating, footnote, header_footer, shape, storage, ty};
+use crate::pages_schema::{floating, footnote, header_footer, shape, ty};
 use crate::{EasyOfficeError, RichBlock, RichParagraph, RichRun};
 
 /// Appendix headings (heading level 2 paragraphs).
@@ -92,10 +92,9 @@ impl Reader<'_> {
     /// Footnote text in mark order, each led by its superscript number (the one shown at the
     /// mark in the body).
     fn footnote_blocks(&mut self, body: &Message<'_>) -> Result<Vec<RichBlock>, EasyOfficeError> {
-        let table = AttrTable::parse(body, storage::FOOTNOTE_TABLE)?;
         let mut out = Vec::new();
-        for (number, id) in table.entries.iter().filter_map(|(_, v)| *v).enumerate() {
-            let Some(obj) = self.object(id, ty::FOOTNOTE) else {
+        for (number, (_, id)) in self.footnote_marks(body).into_iter().enumerate() {
+            let Some(obj) = self.objects.get(id) else {
                 continue;
             };
             let payload = Message::parse(&obj.payload)?;

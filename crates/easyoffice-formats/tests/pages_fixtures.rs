@@ -265,6 +265,7 @@ fn objects_fixture_reports_only_what_is_still_skipped() {
         warnings,
         vec![
             "가져오지 않은 요소: 댓글 1개".to_string(),
+            "가져오지 않은 요소: 쪽·단 나누기 1개".to_string(),
             GENERIC_WARNING.to_string(),
         ]
     );
@@ -273,12 +274,13 @@ fn objects_fixture_reports_only_what_is_still_skipped() {
         .iter()
         .map(|p| (p.heading_level, p.plain_text()))
         .collect();
-    assert_eq!(texts.len(), 21);
+    // The page break between the text box and the second page is an extra empty paragraph.
+    assert_eq!(texts.len(), 22);
     assert_eq!(texts[0].1, "미지원 항목 안내 확인용 문서 (객체 테스트)");
     // The footnote mark is a superscript number at the end of the sentence.
     assert_eq!(texts[5].1, "이 문장 끝에는 각주가 달려 있습니다.1");
     assert_eq!(
-        texts[14].1,
+        texts[15].1,
         "페이지 나누기(Page Break) 뒤에 이어지는 두 번째 페이지의 본문 문단입니다."
     );
 }
@@ -442,4 +444,45 @@ fn text_fixture_font_script_indent_and_line_spacing() {
     let plain = paragraph_with(&doc, "왼쪽 정렬이");
     assert_eq!(plain.left_indent_twips, None);
     assert_eq!(plain.line_spacing_percent, None);
+}
+
+#[test]
+fn lists_fixture_merge_regions_come_from_the_real_merge_map() {
+    let (doc, warnings) = open("eo-pages-lists-tables.pages");
+    let merged: Vec<_> = doc
+        .blocks
+        .iter()
+        .filter_map(|b| match b {
+            RichBlock::Table(t) if !t.merges.is_empty() => Some(t),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(merged.len(), 1, "only table 3 is merged");
+    let merges: Vec<(u32, u32, u32, u32)> = merged[0]
+        .merges
+        .iter()
+        .map(|m| (m.row, m.col, m.row_span, m.col_span))
+        .collect();
+    // Horizontal merge over "가로 병합 셀" (row 1, columns 0-1) and a vertical one over "세로 병합 셀".
+    assert_eq!(merges, vec![(1, 0, 1, 2), (1, 2, 2, 1)]);
+    assert!(!warnings.iter().any(|w| w.contains("병합")), "{warnings:?}");
+}
+
+#[test]
+fn cellkinds_fixture_merge_regions() {
+    let (doc, _) = open("eo-pages-cellkinds.pages");
+    let merges: Vec<(u32, u32, u32, u32)> = doc
+        .blocks
+        .iter()
+        .filter_map(|b| match b {
+            RichBlock::Table(t) => Some(t),
+            _ => None,
+        })
+        .flat_map(|t| {
+            t.merges
+                .iter()
+                .map(|m| (m.row, m.col, m.row_span, m.col_span))
+        })
+        .collect();
+    assert_eq!(merges, vec![(3, 0, 1, 2), (3, 2, 2, 1)]);
 }

@@ -293,11 +293,26 @@ impl DocBuilder {
     }
 
     /// Like [`Self::table`] with a merge region map; each region is `(row, col, rows, cols)`,
-    /// stored as ranges whose origin and size are `column << 16 | row` (fixed32).
+    /// stored as entries whose origin and size are varints packing `row << 16 | column`.
     pub fn table_with_merges(
         &mut self,
         grid: &[Vec<&str>],
         merges: &[(u32, u32, u32, u32)],
+    ) -> u64 {
+        self.table_full(grid, merges, &[])
+    }
+
+    /// Table whose merges are formulas (each given as its AST node list payload) in the merge
+    /// owner's formula store (model field 47).
+    pub fn table_with_owner_formulas(&mut self, grid: &[Vec<&str>], nodes: &[Vec<u8>]) -> u64 {
+        self.table_full(grid, &[], nodes)
+    }
+
+    fn table_full(
+        &mut self,
+        grid: &[Vec<&str>],
+        merges: &[(u32, u32, u32, u32)],
+        owner_nodes: &[Vec<u8>],
     ) -> u64 {
         let rows = grid.len();
         let cols = grid[0].len();
@@ -345,31 +360,38 @@ impl DocBuilder {
         ]);
         let mut store = cat(&[f_bytes(3, &tiles), f_ref(17, list)]);
         if !merges.is_empty() {
-            let packed = |col: u32, row: u32| {
-                let mut o = vec![0x0D];
-                o.extend_from_slice(&(col << 16 | row).to_le_bytes());
-                o
-            };
             let ranges: Vec<Vec<u8>> = merges
                 .iter()
                 .map(|&(r, c, nr, nc)| {
                     f_bytes(
                         1,
-                        &cat(&[f_bytes(1, &packed(c, r)), f_bytes(2, &packed(nc, nr))]),
+                        &cat(&[
+                            f_varint(1, u64::from(r << 16 | c)),
+                            f_varint(2, u64::from(nr << 16 | nc)),
+                        ]),
                     )
                 })
                 .collect();
-            let map = self.add(6144, &cat(&ranges));
+            let map = self.add(6007, &cat(&ranges));
             store.extend(f_ref(13, map));
         }
-        let model = self.add(
-            6001,
-            &cat(&[
-                f_bytes(4, &store),
-                f_varint(6, rows as u64),
-                f_varint(7, cols as u64),
-            ]),
-        );
+        let mut model_fields = vec![
+            f_bytes(4, &store),
+            f_varint(6, rows as u64),
+            f_varint(7, cols as u64),
+        ];
+        if !owner_nodes.is_empty() {
+            let pairs: Vec<Vec<u8>> = owner_nodes
+                .iter()
+                .enumerate()
+                .map(|(i, node)| {
+                    let formula = f_bytes(1, &f_bytes(1, node));
+                    f_bytes(3, &cat(&[f_varint(1, i as u64), f_bytes(2, &formula)]))
+                })
+                .collect();
+            model_fields.push(f_bytes(47, &f_bytes(2, &cat(&pairs))));
+        }
+        let model = self.add(6001, &cat(&model_fields));
         self.add(6000, &f_ref(2, model))
     }
 

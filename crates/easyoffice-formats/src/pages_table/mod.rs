@@ -3,6 +3,8 @@
 //! slices of the decoded buffers ([`packed`]); the only allocation per cell is its
 //! final text. All limits are errors or skips, never silent truncation.
 
+use std::cell::Cell;
+
 use self::format::{render_value, FormatSpec};
 use self::packed::{parse_cell, CellScalar, PackedCell};
 mod format;
@@ -58,6 +60,8 @@ pub(crate) struct TableRead {
     /// Merged regions as declared by the file (validated by the rich table).
     pub merges: Vec<CellMerge>,
     pub unsupported: usize,
+    /// Attachment marks (pictures, fields) found inside cell text and not imported.
+    pub cell_objects: usize,
 }
 
 #[derive(Debug)]
@@ -72,22 +76,27 @@ fn reference(m: &Message, field: u32) -> Option<u64> {
     m.bytes(field).and_then(read_reference)
 }
 
-/// Text of a rich-text cell storage: control characters and attachment marks removed, line
-/// separators turned into spaces, trailing paragraph breaks trimmed.
-pub(crate) fn cell_plain_text(storage: &Message, field: u32) -> Result<String, EasyOfficeError> {
+/// Text of a rich-text cell storage and the number of attachment marks (pictures, fields) that
+/// were left out: control characters and attachment marks removed, line separators turned into
+/// spaces, trailing paragraph breaks trimmed.
+pub(crate) fn cell_plain_text(
+    storage: &Message,
+    field: u32,
+) -> Result<(String, usize), EasyOfficeError> {
     let raw = storage.text(field)?;
     let mut out = String::with_capacity(raw.len());
+    let mut attachments = 0usize;
     for c in raw.chars() {
         match c {
             '\u{2028}' => out.push(' '),
             '\n' | '\t' => out.push(c),
-            '\u{FFFC}' => {}
+            '\u{FFFC}' => attachments += 1,
             c if c.is_control() => {}
             c => out.push(c),
         }
     }
     out.truncate(out.trim_end_matches('\n').len());
-    Ok(out)
+    Ok((out, attachments))
 }
 
 /// Sorted `(key, value)` pairs for fast lookup by key.
@@ -167,6 +176,7 @@ struct CellContext<'a> {
     rich_text: KeyedList<u64>,
     strings: KeyedList<&'a str>,
     formats: KeyedList<FormatSpec<'a>>,
+    cell_objects: Cell<usize>,
 }
 
 enum Rendered {
@@ -195,6 +205,7 @@ impl<'a> CellContext<'a> {
             rich_text,
             strings,
             formats,
+            cell_objects: Cell::new(0),
         }
     }
 
@@ -208,9 +219,11 @@ impl<'a> CellContext<'a> {
             .and_then(|id| self.objects.get(id))
             .filter(|o| o.type_id == ty::STORAGE)
             .and_then(|o| Message::parse(&o.payload).ok());
-        storage
+        let (text, objects) = storage
             .and_then(|st| cell_plain_text(&st, crate::pages_schema::storage::TEXT).ok())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        self.cell_objects.set(self.cell_objects.get() + objects);
+        text
     }
 
     fn render(&self, packed: &PackedCell) -> Rendered {
@@ -359,10 +372,11 @@ pub(crate) fn read_table(
         Some(tiles) => fill_tiles(&ctx, &tiles, &mut grid, cols)?,
         None => 0,
     };
-    let merges = merge::read_merges(objects, &store);
+    let merges = merge::read_merges(objects, &model_msg, &store);
     Ok(TableOutcome::Read(TableRead {
         grid,
         merges,
         unsupported,
+        cell_objects: ctx.cell_objects.get(),
     }))
 }

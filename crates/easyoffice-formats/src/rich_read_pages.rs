@@ -9,6 +9,7 @@
 //! values) are skipped and reported as warnings with kinds and counts; legacy
 //! XML and encrypted packages are refused by [`crate::pages_package::load_package`].
 
+mod marks;
 mod notes;
 
 use std::collections::{BTreeMap, HashMap};
@@ -102,11 +103,6 @@ impl AttrTable {
     fn boundaries_after(&self, start: u64) -> impl Iterator<Item = u64> + '_ {
         let first = self.entries.partition_point(|(i, _)| *i <= start);
         self.entries[first..].iter().map(|(i, _)| *i)
-    }
-
-    /// Number of entries that point at something.
-    fn referenced(&self) -> usize {
-        self.entries.iter().filter(|(_, v)| v.is_some()).count()
     }
 }
 
@@ -327,16 +323,7 @@ impl StorageTables {
             .map(|k| k + 1)
     }
 
-    fn parse(st: &Message, flow: Flow) -> Result<Self, EasyOfficeError> {
-        let footnote_marks = if flow == Flow::Body {
-            AttrTable::parse(st, storage::FOOTNOTE_TABLE)?
-                .entries
-                .into_iter()
-                .filter_map(|(i, v)| v.map(|id| (i, id)))
-                .collect()
-        } else {
-            Vec::new()
-        };
+    fn parse(st: &Message, footnote_marks: Vec<(u64, u64)>) -> Result<Self, EasyOfficeError> {
         Ok(Self {
             footnote_marks,
             para_styles: AttrTable::parse(st, storage::PARA_STYLE_TABLE)?,
@@ -348,6 +335,18 @@ impl StorageTables {
     }
 }
 
+/// Characters that end a paragraph in a text storage: line feed, carriage return, page or column
+/// break, layout change mid-storage and section break.
+const fn ends_paragraph(c: char) -> bool {
+    matches!(c, '\n' | '\r' | '\u{c}' | '\u{4}' | '\u{5}')
+}
+
+const PAGE_BREAK: char = '\u{c}';
+const SECTION_BREAK: char = '\u{4}';
+/// Warning kinds for breaks that the rich model cannot hold.
+const PAGE_BREAKS: &str = "쪽·단 나누기";
+const SECTION_BREAKS: &str = "구역 나누기";
+
 /// Where a storage sits: the main flow takes every drawable; text inside a shape, footnote,
 /// header or footer takes pictures only (tables and shapes cannot nest in the rich model).
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -355,6 +354,9 @@ enum Flow {
     Body,
     Nested,
 }
+
+/// Warning kind for shapes and text boxes that hold no text.
+const EMPTY_SHAPE: &str = "글이 없는 도형";
 
 /// Warning kind for tables and shapes found inside nested text.
 const NESTED_UNSUPPORTED: &str = "도형·각주·머리글·바닥글 안의 표·도형";
@@ -551,7 +553,7 @@ impl<'a> Reader<'a> {
                 self.flush_run(&mut content, &mut cur, t.char_styles.at(seg_start), pfmt)?;
                 seg_start = utf16;
             }
-            if ch == '\u{FFFC}' {
+            if ch == '\u{FFFC}' || ch == storage::FOOTNOTE_MARK_CHAR {
                 content.attachments.extend(t.attachments.exact(utf16));
                 if let Some(number) = t.footnote_number(utf16) {
                     self.flush_run(&mut content, &mut cur, t.char_styles.at(seg_start), pfmt)?;
@@ -573,10 +575,27 @@ impl<'a> Reader<'a> {
         flow: Flow,
     ) -> Result<Vec<RichBlock>, EasyOfficeError> {
         let text = st.text(storage::TEXT)?;
-        let tables = StorageTables::parse(st, flow)?;
+        let marks = if flow == Flow::Body {
+            self.footnote_marks(st)
+        } else {
+            Vec::new()
+        };
+        let tables = StorageTables::parse(st, marks)?;
+        self.note_marks(st, flow);
+        if flow == Flow::Body {
+            self.note_columns(st);
+        }
         let mut blocks = Vec::new();
         let mut pos: u64 = 0;
-        for line in text.split('\n') {
+        let (mut page_breaks, mut section_breaks) = (0usize, 0usize);
+        let mut offset = 0usize;
+        for line in text.split(ends_paragraph) {
+            match text[offset + line.len()..].chars().next() {
+                Some(PAGE_BREAK) => page_breaks += 1,
+                Some(SECTION_BREAK) => section_breaks += 1,
+                _ => {}
+            }
+            offset += line.len() + 1;
             self.paragraphs += 1;
             if self.paragraphs > MAX_PARAGRAPHS {
                 return Err(EasyOfficeError::ResourceBudgetExceeded(
@@ -595,6 +614,8 @@ impl<'a> Reader<'a> {
                 blocks.extend(self.attachment_blocks(att, flow)?);
             }
         }
+        self.skip_many(PAGE_BREAKS, page_breaks);
+        self.skip_many(SECTION_BREAKS, section_breaks);
         Ok(blocks)
     }
 
@@ -605,6 +626,14 @@ impl<'a> Reader<'a> {
         att_id: u64,
         flow: Flow,
     ) -> Result<Vec<RichBlock>, EasyOfficeError> {
+        if self
+            .objects
+            .get(att_id)
+            .is_some_and(|o| o.type_id == ty::NUMBER_ATTACHMENT)
+        {
+            self.skip("쪽 번호·쪽 수 필드");
+            return Ok(Vec::new());
+        }
         let drawable = self
             .object(att_id, ty::ATTACHMENT)
             .and_then(|o| Message::parse(&o.payload).ok())
@@ -627,7 +656,13 @@ impl<'a> Reader<'a> {
                 .into_iter()
                 .collect()),
             Some(o) if o.type_id == ty::IMAGE => Ok(self.read_picture(o)?.into_iter().collect()),
-            Some(o) if o.type_id == ty::SHAPE_WITH_TEXT => self.shape_blocks(o),
+            Some(o) if o.type_id == ty::SHAPE_WITH_TEXT => {
+                let blocks = self.shape_blocks(o)?;
+                if blocks.is_empty() {
+                    self.skip(EMPTY_SHAPE);
+                }
+                Ok(blocks)
+            }
             Some(o) => {
                 self.skip(format!("{}(형식 {})", object_kind(o.type_id), o.type_id));
                 Ok(Vec::new())
@@ -658,6 +693,7 @@ impl<'a> Reader<'a> {
         match read_table(self.objects, info, &mut self.tables)? {
             TableOutcome::Read(t) => {
                 self.skip_many("표 셀의 읽을 수 없는 값(문자열·기간 등)", t.unsupported);
+                self.skip_many("표 셀 안의 개체(그림·필드 등)", t.cell_objects);
                 let (table, dropped) = RichTable::with_merges(t.grid, t.merges);
                 self.skip_many("범위를 벗어나거나 겹치는 표 병합 영역", dropped);
                 Ok(Some(table))
@@ -669,19 +705,19 @@ impl<'a> Reader<'a> {
             }
         }
     }
-
-    /// Counts comments, which are not imported.
-    fn note_unimported_text(&mut self, body: &Message) -> Result<(), EasyOfficeError> {
-        let comments = AttrTable::parse(body, storage::COMMENT_TABLE)?.referenced();
-        self.skip_many("댓글", comments);
-        Ok(())
-    }
 }
 
 /// Display name of a drawable object type that is not imported.
 fn object_kind(type_id: u32) -> &'static str {
     match type_id {
         ty::IMAGE => "그림",
+        ty::SHAPE | ty::SHAPE_WITH_TEXT => "도형",
+        ty::MOVIE => "동영상·오디오",
+        ty::GROUP => "개체 그룹",
+        ty::CONNECTION_LINE => "선·연결선",
+        ty::CHART => "차트",
+        ty::TOC => "목차",
+        ty::TABLE_INFO => "표",
         _ => "그림·도형 등 개체",
     }
 }
@@ -712,7 +748,6 @@ pub(crate) fn read_pages(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Ea
         .storage_message(body_id)
         .ok_or_else(|| corrupt("본문 저장소를 읽을 수 없습니다"))?;
     let mut blocks = reader.convert_storage(&body, Flow::Body)?;
-    reader.note_unimported_text(&body)?;
     reader.note_floating_drawables();
     while matches!(blocks.last(), Some(RichBlock::Paragraph(p)) if p.runs.is_empty()) {
         blocks.pop();

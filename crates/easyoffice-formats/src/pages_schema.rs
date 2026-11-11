@@ -52,6 +52,54 @@ pub(crate) mod ty {
     /// Drawables floating on pages (page-layout documents). 검증 필요: field layout is from a
     /// public independent implementation's notes; the fixtures only carry an empty list.
     pub const FLOATING_DRAWABLES: u32 = 10010;
+    /// Footnote reference attachment of newer files (the same two fields as [`FOOTNOTE`]: the
+    /// text storage reference is field 2). 검증 필요: public notes only; the fixtures use 2012.
+    pub const FOOTNOTE_ATTACHMENT: u32 = 2008;
+    /// Column style (columns live in its properties, see [`super::column`]). 확인 (fixtures)
+    pub const COLUMN_STYLE: u32 = 2024;
+    /// Hyperlink field: field 2 is the address. 검증 필요: public notes only; no fixture link.
+    pub const HYPERLINK: u32 = 2032;
+    /// Comment anchor field of the fixtures (points at the comment text, type 3059). 확인
+    pub const COMMENT_FIELD: u32 = 2033;
+    /// Date/time field (the text it last rendered stays in the storage). 검증 필요
+    pub const DATE_FIELD: u32 = 2034;
+    /// Bookmark field. 검증 필요
+    pub const BOOKMARK: u32 = 2035;
+    /// Placeholder, merge and ruby fields. 검증 필요
+    pub const PLACEHOLDER_FIELD: u32 = 2031;
+    pub const MERGE_FIELD: u32 = 2036;
+    pub const RUBY_FIELD: u32 = 2042;
+    /// Highlight (comment anchor of newer files). 검증 필요
+    pub const HIGHLIGHT: u32 = 2013;
+    pub const COMMENT_INFO: u32 = 2014;
+    /// Tracked change (insertion or deletion). 검증 필요
+    pub const CHANGE: u32 = 2060;
+    /// Page-number / page-count attachment. 검증 필요
+    pub const NUMBER_ATTACHMENT: u32 = 2043;
+    /// Table of contents drawable. 검증 필요
+    pub const TOC: u32 = 2240;
+    /// Bare shape, movie, group and connection line drawables. 검증 필요
+    pub const SHAPE: u32 = 3004;
+    pub const MOVIE: u32 = 3007;
+    pub const GROUP: u32 = 3008;
+    pub const CONNECTION_LINE: u32 = 3009;
+    /// Chart drawable. 검증 필요
+    pub const CHART: u32 = 5021;
+}
+
+/// Column style properties. 확인 for a single column against the fixtures (`11.7.1.1 = 1`);
+/// the unequal layout is 검증 필요 (public notes only).
+pub(crate) mod column {
+    /// Properties message of a column style.
+    pub const PROPS: u32 = 11;
+    /// Columns message inside the properties.
+    pub const COLUMNS: u32 = 7;
+    /// Equal columns `{ count = 1, gap = 2 }`.
+    pub const EQUAL: u32 = 1;
+    pub const EQUAL_COUNT: u32 = 1;
+    /// Unequal columns `{ first = 1, repeated { gap, width } = 2 }`.
+    pub const UNEQUAL: u32 = 2;
+    pub const UNEQUAL_FOLLOWING: u32 = 2;
 }
 
 /// Shape / text box field numbers. 확인 (fixture objects file)
@@ -137,9 +185,21 @@ pub(crate) mod storage {
     pub const ATTACHMENT_TABLE: u32 = 9;
     /// Footnote attribute table (index of the reference mark to a footnote, type 2012). 확인
     pub const FOOTNOTE_TABLE: u32 = 11;
-    /// Comment attribute table (index of the commented range start to a comment, type 2033).
-    /// 확인
-    pub const COMMENT_TABLE: u32 = 19;
+    /// Footnote table of newer files (the mark sits on U+000E); the fixtures use
+    /// [`FOOTNOTE_TABLE`]. 검증 필요: public notes only.
+    pub const FOOTNOTE_TABLE_V2: u32 = 16;
+    /// Column layout style table (paragraph anchored). 확인
+    pub const LAYOUT_STYLE_TABLE: u32 = 12;
+    /// Run tables whose entries point at smart fields, bookmarks, tracked changes and comment
+    /// anchors. The same object kinds sit in different fields in different file versions (the
+    /// fixtures put footnotes in 11 and comments (type 2033) in 19; public notes put hyperlinks in 11 and
+    /// comments in 23), so entries are classified by the type of the object they point at.
+    pub const MARK_TABLES: [u32; 7] = [11, 15, 16, 19, 21, 22, 23];
+    /// Tracked insertion and deletion tables (entries point at a change object).
+    pub const INSERTION_TABLE: u32 = 21;
+    pub const DELETION_TABLE: u32 = 22;
+    /// Footnote mark character of newer files.
+    pub const FOOTNOTE_MARK_CHAR: char = '\u{E}';
     /// Attribute table entry: character index (UTF-16 code units). 확인 (BMP and non-BMP: the
     /// fixture text file places a bold run after two emoji)
     pub const ENTRY_INDEX: u32 = 1;
@@ -358,17 +418,36 @@ pub(crate) mod table {
     pub const ENTRY_STRING: u32 = 3;
     /// Rich text payload: storage reference. 확인
     pub const PAYLOAD_STORAGE: u32 = 1;
-    /// Data store: merge region map reference (an object with repeated cell ranges). 검증 필요:
-    /// field numbers are from a public independent implementation's schema notes (the data store
-    /// fields 17 and 22 of the same notes match the fixtures); the fixtures carry no merged cell.
+    /// Data store: merge region map reference (an object of type 6007 with repeated entries).
+    /// 확인: the lists-tables and cellkinds fixtures carry merged cells in this form.
     pub const STORE_MERGE_REGION_MAP: u32 = 13;
-    /// Merge region map: repeated cell range. 검증 필요 (see [`STORE_MERGE_REGION_MAP`]).
+    /// Merge region map: repeated entry. 확인
     pub const MERGE_RANGES: u32 = 1;
-    /// Cell range: origin `{ packed = 1 }` and size `{ packed = 1 }`, each a fixed32 with the
-    /// column in the high 16 bits and the row in the low 16 bits. 검증 필요 (see above).
+    /// Entry: origin and size, each a varint packing `row << 16 | column` (the size packs
+    /// `rows << 16 | columns`). 확인 (row in the high half, checked against the cell grids of
+    /// both fixtures; the public notes' column-high fixed32 layout does not occur).
     pub const RANGE_ORIGIN: u32 = 1;
     pub const RANGE_SIZE: u32 = 2;
-    pub const RANGE_PACKED: u32 = 1;
+    /// Model: merge owner message whose formula store keeps one formula per merged range
+    /// (newer file versions). 검증 필요: public `iwork` notes only, absent from the fixtures.
+    pub const MODEL_MERGE_OWNER: u32 = 47;
+    /// Owner: formula store `{ pairs = 3 { index = 1, formula = 2 } }`; formula: nodes `1 { 1 }`.
+    pub const OWNER_FORMULA_STORE: u32 = 2;
+    pub const OWNER_STORE_PAIRS: u32 = 3;
+    pub const OWNER_PAIR_FORMULA: u32 = 2;
+    pub const FORMULA_NODES: u32 = 1;
+    pub const NODE_LIST: u32 = 1;
+    /// Node kind (varint), colon tract (67) with its tract in field 40 (`columns = 3`,
+    /// `rows = 4`, each `{ begin = 1, end = 2 }`) and single cell reference (36) with zigzag
+    /// column field 26 and row field 27 (each `{ 1 }`).
+    pub const NODE_KIND: u32 = 1;
+    pub const NODE_COLON_TRACT: u32 = 40;
+    pub const TRACT_COLUMNS: u32 = 3;
+    pub const TRACT_ROWS: u32 = 4;
+    pub const TRACT_BEGIN: u32 = 1;
+    pub const TRACT_END: u32 = 2;
+    pub const NODE_COLUMN: u32 = 26;
+    pub const NODE_ROW: u32 = 27;
 }
 
 /// Cell format message fields and format kinds (fixture lists file). Date formats (kind 261)

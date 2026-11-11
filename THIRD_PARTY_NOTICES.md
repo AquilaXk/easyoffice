@@ -33,6 +33,35 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## iwork crate (MIT, reference implementation of the Pages table merge formula store)
+
+Source: https://crates.io/crates/iwork (version 0.4.0, `src/table.rs` `merges_from_owner`, `FORMAT.md` sections 5 and 8).
+Only the reading of table merge regions from the merge owner's formula store (colon tract and single cell reference nodes) and the notes on footnote, column, hyperlink and tracked-change layouts in `crates/easyoffice-formats/src/pages_schema.rs` were taken from it, re-implemented against this repository's protobuf reader with added budgets (`crates/easyoffice-formats/src/pages_table/merge.rs`, `rich_read_pages/marks.rs`). Every constant that no fixture of ours confirms is marked as unverified in `pages_schema.rs`.
+
+```
+MIT License
+
+Copyright (c) 2026 Zebra Pig
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ## Rust dependencies compiled into the rhwp WebAssembly module
 
 These are the crates statically linked into `vendor/rhwp-core/rhwp_bg.wasm` (built from the pinned rhwp commit with Rust 1.93.1 and wasm-pack 0.14.0, see `vendor/rhwp-core/PROVENANCE.json`). The list and texts below are generated offline by `scripts/generate-wasm-notices.mjs` from `cargo metadata` and the crates' own license and NOTICE files, and must be regenerated whenever the WebAssembly package is rebuilt.
