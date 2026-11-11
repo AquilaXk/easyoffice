@@ -141,6 +141,10 @@ impl PdfEditState {
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 pub enum PdfEditOp {
+    /// Set the turn of every page to `degrees` (the rotation control of the page shows one number
+    /// for the file, and sends it before a save).
+    #[serde(rename_all = "camelCase")]
+    Turn { degrees: i32 },
     /// Turn the pages of `pages` ("1-3, 5"; all pages without it) `degrees` more, clockwise.
     #[serde(rename_all = "camelCase")]
     Rotate { degrees: i32, pages: Option<String> },
@@ -154,6 +158,7 @@ pub enum PdfEditOp {
 
 fn apply(session: &mut EditSession, op: PdfEditOp) -> Result<(), String> {
     match op {
+        PdfEditOp::Turn { degrees } => session.set_turn(degrees),
         PdfEditOp::Rotate { degrees, pages } => session.rotate(pages.as_deref(), degrees),
         PdfEditOp::Overlay { stamp, watermark } => {
             session.set_overlay(Overlay::new(watermark.as_deref(), stamp.as_deref())?);
@@ -237,6 +242,8 @@ pub async fn pdf_edit_open(
         return Err(IpcError::new(MSG_ONLY_PDF));
     }
     let stem = file_stem(&base);
+    // A file that is refused leaves the window with no session, not with the previous file's.
+    edits.forget(window.label());
     let session = tauri::async_runtime::spawn_blocking(move || open_session(&base64, &stem))
         .await
         .map_err(worker_failed)?
@@ -820,7 +827,7 @@ mod tests {
         let dir = scratch_dir("read");
         let a = dir.join("a.pdf");
         std::fs::write(&a, sample_pdf(1, 1, &[])).unwrap();
-        assert_eq!(read_pdfs(&[a.clone()]).unwrap().len(), 1);
+        assert_eq!(read_pdfs(std::slice::from_ref(&a)).unwrap().len(), 1);
         let missing = read_pdfs(&[dir.join("missing.pdf")]).unwrap_err();
         assert_eq!(missing, MSG_READ_FAILED);
         assert!(!missing.contains(dir.to_str().unwrap()));

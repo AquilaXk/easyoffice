@@ -60,7 +60,31 @@ pub const MSG_TIMEOUT: &str =
 pub const MSG_BUSY: &str = "이전 PDF 작업이 아직 끝나지 않았습니다. 잠시 뒤 다시 시도해 주세요.";
 pub const MSG_PANIC: &str = "PDF를 처리하는 중 내부 오류가 발생해 작업을 중단했습니다.";
 
-static ACTIVE_JOBS: AtomicUsize = AtomicUsize::new(0);
+/// The places for jobs: [`MAX_ACTIVE_JOBS`] at a time in the process (`JOBS`); tests make their own.
+struct Jobs {
+    active: AtomicUsize,
+    max: usize,
+}
+
+static JOBS: Jobs = Jobs::new(MAX_ACTIVE_JOBS);
+
+impl Jobs {
+    const fn new(max: usize) -> Self {
+        Self {
+            active: AtomicUsize::new(0),
+            max,
+        }
+    }
+
+    fn claim(&'static self) -> Option<Slot> {
+        self.active
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+                (n < self.max).then_some(n + 1)
+            })
+            .ok()
+            .map(|_| Slot(self))
+    }
+}
 
 /// When a request has to be over. The work polls it between pages and files; a single call into
 /// the PDF reader cannot be interrupted, which is why the caller stops waiting at the same time.
@@ -81,24 +105,13 @@ impl Deadline {
     }
 }
 
-/// A claim on one of the [`MAX_ACTIVE_JOBS`] places; the thread that holds it gives it back when it
-/// ends, however it ends.
-struct Slot;
-
-impl Slot {
-    fn claim() -> Option<Self> {
-        ACTIVE_JOBS
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
-                (n < MAX_ACTIVE_JOBS).then_some(n + 1)
-            })
-            .ok()
-            .map(|_| Self)
-    }
-}
+/// A claim on one of the places; the thread that holds it gives it back when it ends, however it
+/// ends.
+struct Slot(&'static Jobs);
 
 impl Drop for Slot {
     fn drop(&mut self) {
-        ACTIVE_JOBS.fetch_sub(1, Ordering::AcqRel);
+        self.0.active.fetch_sub(1, Ordering::AcqRel);
     }
 }
 
@@ -109,7 +122,15 @@ pub fn run_guarded<T: Send + 'static>(
     limit: Duration,
     work: impl FnOnce(&Deadline) -> Result<T, String> + Send + 'static,
 ) -> Result<T, String> {
-    let slot = Slot::claim().ok_or_else(|| MSG_BUSY.to_string())?;
+    run_in(&JOBS, limit, work)
+}
+
+fn run_in<T: Send + 'static>(
+    jobs: &'static Jobs,
+    limit: Duration,
+    work: impl FnOnce(&Deadline) -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    let slot = jobs.claim().ok_or_else(|| MSG_BUSY.to_string())?;
     let deadline = Deadline::after(limit);
     let (tx, rx) = mpsc::channel();
     std::thread::Builder::new()
@@ -135,77 +156,94 @@ pub fn run_guarded<T: Send + 'static>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
 
-    /// The jobs counter is process-wide, so the tests that fill it take turns.
-    static TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    /// A set of places of its own, so these tests neither wait for nor starve the real jobs.
+    fn jobs(max: usize) -> &'static Jobs {
+        Box::leak(Box::new(Jobs::new(max)))
+    }
 
-    fn turn() -> std::sync::MutexGuard<'static, ()> {
-        TURN.lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    fn held(jobs: &Jobs) -> usize {
+        jobs.active.load(Ordering::Acquire)
+    }
+
+    /// Waits (briefly) until a thread that ended has given its place back.
+    fn settled(jobs: &Jobs, expected: usize) {
+        for _ in 0..200 {
+            if held(jobs) == expected {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        panic!("places held: {} (expected {expected})", held(jobs));
     }
 
     #[test]
     fn a_result_comes_back_and_the_place_is_given_up() {
-        let _turn = turn();
-        let out = run_guarded(Duration::from_secs(5), |_| Ok(7)).unwrap();
-        assert_eq!(out, 7);
-        assert_eq!(ACTIVE_JOBS.load(Ordering::Acquire), 0);
+        let jobs = jobs(1);
+        assert_eq!(run_in(jobs, Duration::from_secs(5), |_| Ok(7)), Ok(7));
+        settled(jobs, 0);
     }
 
     #[test]
     fn a_panic_is_reported_not_propagated() {
-        let _turn = turn();
-        let err = run_guarded::<()>(Duration::from_secs(5), |_| panic!("bad pdf")).unwrap_err();
+        let jobs = jobs(1);
+        let err = run_in::<()>(jobs, Duration::from_secs(5), |_| panic!("bad pdf")).unwrap_err();
         assert_eq!(err, MSG_PANIC);
-        std::thread::sleep(Duration::from_millis(50));
-        assert_eq!(ACTIVE_JOBS.load(Ordering::Acquire), 0, "the place is back");
+        settled(jobs, 0);
+        assert_eq!(
+            run_in(jobs, Duration::from_secs(5), |_| Ok(1)),
+            Ok(1),
+            "usable again"
+        );
     }
 
     #[test]
     fn a_work_that_never_checks_in_is_reported_as_too_slow_and_holds_its_place() {
-        let _turn = turn();
-        let release = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let held = std::sync::Arc::clone(&release);
-        let err = run_guarded::<()>(Duration::from_millis(30), move |_| {
-            while !held.load(Ordering::Acquire) {
+        let jobs = jobs(1);
+        let release = Arc::new(AtomicBool::new(false));
+        let held_open = Arc::clone(&release);
+        let err = run_in::<()>(jobs, Duration::from_millis(30), move |_| {
+            while !held_open.load(Ordering::Acquire) {
                 std::thread::sleep(Duration::from_millis(5));
             }
             Ok(())
         })
         .unwrap_err();
         assert_eq!(err, MSG_TIMEOUT);
-        assert_eq!(ACTIVE_JOBS.load(Ordering::Acquire), 1, "still running");
+        assert_eq!(held(jobs), 1, "still running");
         release.store(true, Ordering::Release);
-        std::thread::sleep(Duration::from_millis(100));
-        assert_eq!(ACTIVE_JOBS.load(Ordering::Acquire), 0);
+        settled(jobs, 0);
     }
 
     #[test]
     fn jobs_past_the_limit_are_refused_until_one_ends() {
-        let _turn = turn();
-        let release = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let mut stuck = Vec::new();
-        for _ in 0..MAX_ACTIVE_JOBS {
-            let held = std::sync::Arc::clone(&release);
-            stuck.push(std::thread::spawn(move || {
-                run_guarded::<()>(Duration::from_millis(20), move |_| {
-                    while !held.load(Ordering::Acquire) {
-                        std::thread::sleep(Duration::from_millis(5));
-                    }
-                    Ok(())
+        let jobs = jobs(MAX_ACTIVE_JOBS);
+        let release = Arc::new(AtomicBool::new(false));
+        let stuck: Vec<_> = (0..MAX_ACTIVE_JOBS)
+            .map(|_| {
+                let held_open = Arc::clone(&release);
+                std::thread::spawn(move || {
+                    run_in::<()>(jobs, Duration::from_millis(20), move |_| {
+                        while !held_open.load(Ordering::Acquire) {
+                            std::thread::sleep(Duration::from_millis(5));
+                        }
+                        Ok(())
+                    })
                 })
-            }));
-        }
+            })
+            .collect();
         for handle in stuck {
             assert_eq!(handle.join().unwrap().unwrap_err(), MSG_TIMEOUT);
         }
         assert_eq!(
-            run_guarded(Duration::from_secs(1), |_| Ok(1)).unwrap_err(),
+            run_in(jobs, Duration::from_secs(1), |_| Ok(1)).unwrap_err(),
             MSG_BUSY
         );
         release.store(true, Ordering::Release);
-        std::thread::sleep(Duration::from_millis(100));
-        assert_eq!(run_guarded(Duration::from_secs(1), |_| Ok(1)).unwrap(), 1);
+        settled(jobs, 0);
+        assert_eq!(run_in(jobs, Duration::from_secs(1), |_| Ok(1)), Ok(1));
     }
 
     #[test]
@@ -214,5 +252,23 @@ mod tests {
         std::thread::sleep(Duration::from_millis(2));
         assert_eq!(past.check().unwrap_err(), MSG_TIMEOUT);
         assert!(Deadline::after(Duration::from_secs(60)).check().is_ok());
+    }
+
+    #[test]
+    fn the_work_sees_its_deadline() {
+        let jobs = jobs(1);
+        let out = run_in::<()>(jobs, Duration::from_millis(40), |deadline| {
+            while deadline.check().is_ok() {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Err("stopped at the deadline".to_string())
+        });
+        // The work noticed the deadline on its own; either side may report it first.
+        let message = out.unwrap_err();
+        assert!(
+            message == MSG_TIMEOUT || message == "stopped at the deadline",
+            "{message}"
+        );
+        settled(jobs, 0);
     }
 }

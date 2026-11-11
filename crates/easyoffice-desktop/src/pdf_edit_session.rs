@@ -80,13 +80,27 @@ impl EditSession {
         }
         let chosen = match range {
             Some(spec) => parse_ranges(spec, self.pages.len())?,
-            None => vec![0..self.pages.len()],
+            None => std::iter::once(0..self.pages.len()).collect(),
         };
         for range in chosen {
             for page in &mut self.pages[range] {
                 let turned = (i32::from(page.turn) + degrees).rem_euclid(360);
                 page.turn = u16::try_from(turned).unwrap_or(0);
             }
+        }
+        Ok(())
+    }
+
+    /// Makes every page's extra turn exactly `degrees` (0, 90, 180 or 270): the page's rotation
+    /// control shows one number for the whole file, and this is how that number reaches the plan
+    /// whatever was turned or undone on the way.
+    pub fn set_turn(&mut self, degrees: i32) -> Result<(), String> {
+        if degrees % 90 != 0 {
+            return Err(MSG_ROTATION.to_string());
+        }
+        let turn = u16::try_from(degrees.rem_euclid(360)).unwrap_or(0);
+        for page in &mut self.pages {
+            page.turn = turn;
         }
         Ok(())
     }
@@ -239,6 +253,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[allow(clippy::single_range_in_vec_init)] // the expected values are lists of ranges
     fn ranges_are_read_from_one_and_ends_may_be_open() {
         assert_eq!(parse_ranges("1-3, 5, 7-", 9), Ok(vec![0..3, 4..5, 6..9]));
         assert_eq!(parse_ranges("-2", 5), Ok(vec![0..2]));
@@ -294,6 +309,19 @@ mod tests {
         assert_eq!(s.first_turn(), 0);
         assert!(s.rotate(None, 45).is_err());
         assert!(s.rotate(Some("4"), 90).is_err());
+    }
+
+    #[test]
+    fn a_turn_is_set_for_every_page_not_added() {
+        let mut s = session(3);
+        s.rotate(Some("2"), 90).unwrap();
+        s.set_turn(270).unwrap();
+        assert!(s.pages.iter().all(|p| p.turn == 270));
+        s.set_turn(-90).unwrap();
+        assert!(s.pages.iter().all(|p| p.turn == 270));
+        s.set_turn(360).unwrap();
+        assert!(s.pages.iter().all(|p| p.turn == 0));
+        assert!(s.set_turn(30).is_err());
     }
 
     #[test]

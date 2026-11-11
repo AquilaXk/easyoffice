@@ -132,7 +132,7 @@ pub fn inspect_within(
     check_page_tree(&pdf, deadline, limits)?;
     let mut total = 0usize;
     for (n, page) in pages.iter().enumerate() {
-        if n % 64 == 0 {
+        if n.is_multiple_of(64) {
             deadline.check()?;
         }
         total = total.saturating_add(page_content_bytes(page, limits)?);
@@ -227,7 +227,7 @@ fn check_page_tree(pdf: &Pdf, deadline: &Deadline, limits: &Limits) -> Result<()
                 limits.tree_nodes
             ));
         }
-        if nodes % 1024 == 0 {
+        if nodes.is_multiple_of(1024) {
             deadline.check()?;
         }
         if node.obj_id().is_some_and(|id| !seen.insert(id)) {

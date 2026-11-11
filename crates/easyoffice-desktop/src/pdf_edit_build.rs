@@ -160,7 +160,7 @@ pub fn build(
 
     let mut page_refs = Vec::with_capacity(pages.len());
     for (n, (plan, place)) in pages.iter().zip(&placements).enumerate() {
-        if n % 64 == 0 {
+        if n.is_multiple_of(64) {
             deadline.check()?;
         }
         let form = *forms
@@ -354,6 +354,9 @@ fn copy_overlays(
     Ok(forms)
 }
 
+/// A key of the document information and the bytes the source has for it.
+type InfoField<'a> = (&'a [u8], &'a Option<Box<[u8]>>);
+
 /// The document information: the producer, and the title, author, subject and keywords of the
 /// source of the first page (their bytes are copied as they are, whatever their encoding).
 fn write_info(out: &mut Pdf, info_ref: Ref, pages: &[PagePlan], parsed: &BTreeMap<usize, ReadPdf>) {
@@ -364,7 +367,7 @@ fn write_info(out: &mut Pdf, info_ref: Ref, pages: &[PagePlan], parsed: &BTreeMa
     let mut info = out.document_info(info_ref);
     info.producer(TextStr(PRODUCER));
     if let Some(meta) = meta {
-        let fields: [(&[u8], &Option<Box<[u8]>>); 4] = [
+        let fields: [InfoField<'_>; 4] = [
             (b"Title", &meta.title),
             (b"Author", &meta.author),
             (b"Subject", &meta.subject),

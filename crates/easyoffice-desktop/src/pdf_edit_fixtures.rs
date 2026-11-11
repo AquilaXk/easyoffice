@@ -119,7 +119,7 @@ pub fn read(bytes: &[u8]) -> ReadPdf {
 /// result is a page that draws a copy of the original page; an edited result of an edited result
 /// has one more level of forms).
 pub fn pictures_by_page(bytes: &[u8]) -> Vec<Vec<u8>> {
-    use hayro_syntax::object::dict::keys::{RESOURCES, XOBJECT};
+    use hayro_syntax::object::dict::keys::RESOURCES;
     let pdf = read(bytes);
     pdf.pages()
         .iter()
