@@ -224,7 +224,7 @@ pub(crate) fn parse_automatic_styles(content_xml: &str) -> AutomaticStyles {
 }
 
 /// Collects cell and column styles of each table while the grid is walked.
-struct StyleSink<'s> {
+pub(crate) struct StyleSink<'s> {
     styles: &'s AutomaticStyles,
     tables: Vec<(String, SheetStyling)>,
     columns: BTreeMap<u32, u32>,
@@ -232,6 +232,24 @@ struct StyleSink<'s> {
     name: String,
     row: u32,
     column: u32,
+}
+
+impl<'s> StyleSink<'s> {
+    pub(crate) fn new(styles: &'s AutomaticStyles) -> Self {
+        Self {
+            styles,
+            tables: Vec::new(),
+            columns: BTreeMap::new(),
+            cells: BTreeMap::new(),
+            name: String::new(),
+            row: 0,
+            column: 0,
+        }
+    }
+
+    pub(crate) fn into_tables(self) -> Vec<(String, SheetStyling)> {
+        self.tables
+    }
 }
 
 impl OdsSink for StyleSink<'_> {
@@ -313,15 +331,7 @@ pub(crate) fn parse_ods_styling(
     content_xml: &str,
 ) -> Result<Vec<(String, SheetStyling)>, EasyOfficeError> {
     let styles = parse_automatic_styles(content_xml);
-    let mut sink = StyleSink {
-        styles: &styles,
-        tables: Vec::new(),
-        columns: BTreeMap::new(),
-        cells: BTreeMap::new(),
-        name: String::new(),
-        row: 0,
-        column: 0,
-    };
+    let mut sink = StyleSink::new(&styles);
     walk_ods(content_xml, false, &mut sink)?;
-    Ok(sink.tables)
+    Ok(sink.into_tables())
 }

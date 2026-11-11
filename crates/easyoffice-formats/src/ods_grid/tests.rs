@@ -386,6 +386,9 @@ fn styling_matches_the_substring_scanner() {
     let old = legacy_ods_styling(&xml);
     let new = crate::sheet_styling::ods_styles::parse_ods_styling(&xml).unwrap();
     assert_eq!(old, new);
+    let (sheets, together) = crate::ods_cells::read_ods_sheets_with_styling(&xml).unwrap();
+    assert_eq!(together, old, "one walk gives the same styling");
+    assert_eq!(sheets, Legacy::parse_ods_multi_xml(&xml).unwrap());
     assert_eq!(old[0].0, "T&1");
     assert!(!old[0].1.cells.is_empty() && !old[0].1.columns.is_empty());
 }

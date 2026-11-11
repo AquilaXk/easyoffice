@@ -3,6 +3,8 @@
 
 use crate::odf_hwpx_codecs::{ods_budget_error, OdsMultiUnpacked};
 use crate::ods_grid::{table_name, walk_ods, OdsCell, OdsSink};
+use crate::sheet_styling::ods_styles::{parse_automatic_styles, StyleSink};
+use crate::sheet_styling::SheetStyling;
 use crate::xml_stream::Attrs;
 use crate::{EasyOfficeError, OdfCodec};
 
@@ -111,18 +113,39 @@ impl OdsSink for TextSink {
     }
 }
 
-/// Reads every table of `content_xml`; a document without a table has one empty `Sheet1`.
-pub(crate) fn read_ods_sheets(content_xml: &str) -> Result<OdsMultiUnpacked, EasyOfficeError> {
-    let mut sink = TextSink {
-        sheets: Vec::new(),
-        name: String::new(),
-        cells: Vec::new(),
-        current_row: 0,
-        total_cells: 0,
-    };
-    walk_ods(content_xml, true, &mut sink)?;
-    if sink.sheets.is_empty() {
-        return Ok(vec![("Sheet1".to_string(), Vec::new())]);
+impl TextSink {
+    fn new() -> Self {
+        Self {
+            sheets: Vec::new(),
+            name: String::new(),
+            cells: Vec::new(),
+            current_row: 0,
+            total_cells: 0,
+        }
     }
-    Ok(sink.sheets)
+
+    /// The sheets read; a document without a table has one empty `Sheet1`.
+    fn into_sheets(self) -> OdsMultiUnpacked {
+        if self.sheets.is_empty() {
+            return vec![("Sheet1".to_string(), Vec::new())];
+        }
+        self.sheets
+    }
+}
+
+/// Reads every table of `content_xml`.
+pub(crate) fn read_ods_sheets(content_xml: &str) -> Result<OdsMultiUnpacked, EasyOfficeError> {
+    let mut sink = TextSink::new();
+    walk_ods(content_xml, true, &mut sink)?;
+    Ok(sink.into_sheets())
+}
+
+/// The tables and their styling from one walk of `content_xml`.
+pub(crate) fn read_ods_sheets_with_styling(
+    content_xml: &str,
+) -> Result<(OdsMultiUnpacked, Vec<(String, SheetStyling)>), EasyOfficeError> {
+    let styles = parse_automatic_styles(content_xml);
+    let mut sinks = (TextSink::new(), StyleSink::new(&styles));
+    walk_ods(content_xml, true, &mut sinks)?;
+    Ok((sinks.0.into_sheets(), sinks.1.into_tables()))
 }

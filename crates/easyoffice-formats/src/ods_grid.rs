@@ -26,8 +26,28 @@ pub(crate) struct OdsCell<'a> {
     pub(crate) explicit_col: Option<u32>,
     /// The cell text by priority (formula, paragraphs, value); only read when text is wanted.
     pub(crate) text: Option<String>,
-    /// `table:style-name`; only read when text is not wanted.
+    /// `table:style-name`, as written.
     pub(crate) style: Option<&'a str>,
+}
+
+/// Passes the grid to two sinks, the first one's error ends the walk.
+impl<A: OdsSink, B: OdsSink> OdsSink for (A, B) {
+    fn table(&mut self, attrs: &Attrs<'_>) {
+        self.0.table(attrs);
+        self.1.table(attrs);
+    }
+    fn column(&mut self, attrs: &Attrs<'_>) {
+        self.0.column(attrs);
+        self.1.column(attrs);
+    }
+    fn row(&mut self, repeat: u32, cells: &[OdsCell<'_>]) -> Result<(), EasyOfficeError> {
+        self.0.row(repeat, cells)?;
+        self.1.row(repeat, cells)
+    }
+    fn table_end(&mut self) {
+        self.0.table_end();
+        self.1.table_end();
+    }
 }
 
 /// Receives the grid in document order.
@@ -85,7 +105,7 @@ impl<'a> CellBuilder<'a> {
                 ("table:number-columns-repeated", _) => cell.col_repeat = repeat_value(value),
                 ("row", _) if cell.explicit_row.is_none() => cell.explicit_row = value.parse().ok(),
                 ("col", _) if cell.explicit_col.is_none() => cell.explicit_col = value.parse().ok(),
-                ("table:style-name", false) if cell.style.is_none() => cell.style = Some(value),
+                ("table:style-name", _) if cell.style.is_none() => cell.style = Some(value),
                 ("table:formula", true) => {
                     fields.formula.get_or_insert_with(|| unescape_cow(value));
                 }

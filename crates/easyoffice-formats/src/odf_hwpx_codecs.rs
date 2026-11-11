@@ -1,4 +1,4 @@
-use crate::ods_cells::read_ods_sheets;
+use crate::ods_cells::{read_ods_sheets, read_ods_sheets_with_styling};
 use crate::office_codecs::validate_zip_xml_entries;
 use crate::rtf_xml_helpers::{
     extract_attr, extract_attr_from_fragment, extract_balanced_elements,
@@ -517,9 +517,7 @@ impl OdfCodec {
         bytes: &[u8],
     ) -> Result<(OdsMultiUnpacked, Vec<(String, SheetStyling)>), EasyOfficeError> {
         let (content_xml, _) = Self::extract_content_and_meta_xml(bytes, Self::MIMETYPE_ODS)?;
-        let sheets = read_ods_sheets(&content_xml)?;
-        let styling = parse_ods_styling(&content_xml)?;
-        Ok((sheets, styling))
+        read_ods_sheets_with_styling(&content_xml)
     }
 
     pub fn pack_odp(
