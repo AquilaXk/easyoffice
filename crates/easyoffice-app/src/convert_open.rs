@@ -487,7 +487,7 @@ impl EasyOfficeIpcRouter {
             renderer,
             &mut warnings,
         )?;
-        Self::conversion_response(src_fmt, dst_fmt, &bytes, &dst_bytes, &warnings)
+        Self::conversion_response(src_fmt, dst_fmt, bytes.len(), &dst_bytes, &warnings)
     }
 }
 

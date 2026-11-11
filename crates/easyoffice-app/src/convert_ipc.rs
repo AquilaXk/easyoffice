@@ -256,12 +256,19 @@ impl EasyOfficeIpcRouter {
         } else {
             src_fmt
         };
-        let (src_bytes, dst_bytes) = if let Some(content) = &structured {
-            // Only what the target loses is reported; the source-side encode is just for its size.
-            (
-                encode_structured(content, size_fmt, title, &mut Vec::new())?,
-                encode_target(content, dst_fmt, src_fmt, title, renderer, &mut warnings)?,
-            )
+        // `sourceBytes` is the size of the document in its source format. When that is the target
+        // format (an ordinary save) the encode that makes the output already is that size, so the
+        // document is not encoded a second time.
+        let (source_len, dst_bytes) = if let Some(content) = &structured {
+            let dst_bytes =
+                encode_target(content, dst_fmt, src_fmt, title, renderer, &mut warnings)?;
+            let source_len = if size_fmt == dst_fmt {
+                dst_bytes.len()
+            } else {
+                // Only what the target loses is reported; the source-side encode is just for its size.
+                encode_structured(content, size_fmt, title, &mut Vec::new())?.len()
+            };
+            (source_len, dst_bytes)
         } else {
             let model = Self::legacy_body_model(body, title);
             let formula_cache = if matches!(size_fmt, DocumentFormat::Xlsx | DocumentFormat::Ods)
@@ -271,20 +278,22 @@ impl EasyOfficeIpcRouter {
             } else {
                 None
             };
-            (
+            let encode = |format| {
                 UniversalFormatConverter::encode_with_formula_cache(
                     &model,
-                    size_fmt,
+                    format,
                     formula_cache.as_ref(),
-                )?,
-                UniversalFormatConverter::encode_with_formula_cache(
-                    &model,
-                    dst_fmt,
-                    formula_cache.as_ref(),
-                )?,
-            )
+                )
+            };
+            let dst_bytes = encode(dst_fmt)?;
+            let source_len = if size_fmt == dst_fmt {
+                dst_bytes.len()
+            } else {
+                encode(size_fmt)?.len()
+            };
+            (source_len, dst_bytes)
         };
-        Self::conversion_response(src_fmt, dst_fmt, &src_bytes, &dst_bytes, &warnings)
+        Self::conversion_response(src_fmt, dst_fmt, source_len, &dst_bytes, &warnings)
     }
 
     /// Legacy text-markup `body` (`[[TABLE_ROW]]`, `[[SHEET_A1]]`, `[[SLIDE]]`, `[[AGENCY]]` lines).
@@ -303,7 +312,7 @@ impl EasyOfficeIpcRouter {
     pub(crate) fn conversion_response(
         src_fmt: DocumentFormat,
         dst_fmt: DocumentFormat,
-        src_bytes: &[u8],
+        source_len: usize,
         dst_bytes: &[u8],
         warnings: &[String],
     ) -> Result<String, EasyOfficeError> {
@@ -344,7 +353,7 @@ impl EasyOfficeIpcRouter {
             ),
             src_fmt.extension(),
             dst_fmt.extension(),
-            src_bytes.len(),
+            source_len,
             dst_bytes.len(),
             dst_bytes.len(),
             detected_dst.extension(),
@@ -423,6 +432,39 @@ mod tests {
         assert_eq!(
             bytes.len().to_string(),
             json_num_field(&json, "outputBytes")
+        );
+    }
+
+    /// An ordinary save does not encode the document twice, and `sourceBytes` stays what the
+    /// source-format encode measures.
+    #[test]
+    fn source_bytes_is_the_source_format_size_with_or_without_a_second_encode() {
+        let blocks = r#""blocks":[{"type":"paragraph","runs":[{"text":"본문"}]},{"type":"table","rows":[[{"text":"가"},{"text":"나"}]]}]"#;
+        let save = |source: &str, target: &str| {
+            EasyOfficeIpcRouter::dispatch(
+                "convert_document_format",
+                &format!(
+                    r#"{{"sourceFormat":"{source}","targetFormat":"{target}","title":"크기",{blocks}}}"#
+                ),
+            )
+            .unwrap()
+        };
+        let same = save("docx", "docx");
+        assert_eq!(
+            json_num_field(&same, "sourceBytes"),
+            json_num_field(&same, "outputBytes")
+        );
+        let cross = save("docx", "hwpx");
+        assert_eq!(
+            json_num_field(&cross, "sourceBytes"),
+            json_num_field(&same, "outputBytes")
+        );
+        let legacy =
+            EasyOfficeIpcRouter::dispatch("convert_document_format", "docx->docx|제목|본문")
+                .unwrap();
+        assert_eq!(
+            json_num_field(&legacy, "sourceBytes"),
+            json_num_field(&legacy, "outputBytes")
         );
     }
 
