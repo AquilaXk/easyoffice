@@ -306,3 +306,15 @@ test("saving keeps an empty paragraph and a line break inside a paragraph or lis
   assert.equal(blocks[2].list, "bullet");
   assert.equal(blocks[3].runs[0].text, "다음");
 });
+
+test("the sheets payload keeps the spaces around a cell's text", async () => {
+  const h = await createRunHarness([p("본문")]);
+  const sheets = h.host.__EASYOFFICE_SAVE_PAYLOAD__.buildSheetsPayload(["S"], {
+    S: { A1: { value: "  들여쓰기 " }, A2: { value: " " }, A3: { value: "", formula: "=A1 " } },
+  });
+  assert.deepEqual(sheets[0].cells, [
+    { ref: "A1", raw: "  들여쓰기 " },
+    { ref: "A2", raw: " " },
+    { ref: "A3", raw: "=A1 " },
+  ]);
+});

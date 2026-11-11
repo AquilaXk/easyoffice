@@ -446,7 +446,7 @@
       const cells = [];
       for (const ref of Object.keys(store)) {
         const entry = store[ref];
-        const raw = String(entry?.formula || entry?.value || "").trim();
+        const raw = String(entry?.formula || entry?.value || "");
         const style = codec ? codec.styleToPayload(entry?.style) : null;
         if (!raw && !style) continue;
         cells.push(style ? { ref, raw, style } : { ref, raw });
