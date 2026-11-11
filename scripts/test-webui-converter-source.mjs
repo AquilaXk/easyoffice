@@ -195,27 +195,47 @@ test("the watermark input is limited to the length the engine accepts", async ()
   assert.equal(document.getElementById("pdf-watermark-input").getAttribute("maxlength"), "200");
 });
 
-test("the PDF Studio takes a phrase, a kind and a color for highlight annotations, in the form's own input shape", async () => {
-  const { document } = await createConverterHarness();
-  const input = document.getElementById("pdf-highlight-input");
-  assert.ok(input.classList.contains("sb-select"), "same input class as the form fields");
+test("the highlight command opens the reference-style dialog: phrase row, then kind and color on one line", async () => {
+  const { document, userClick } = await createConverterHarness();
+  switchModule(document, "PDF");
+  await flushAsyncTurns(10);
+  const dialog = document.getElementById("pdf-highlight-dialog");
+  assert.ok(dialog.classList.contains("tool-dialog"));
+  assert.ok(dialog.querySelector(".dialog-wrap .dialog-title"));
+  const [phraseRow, pickRow] = [...dialog.querySelectorAll(".dialog-body .dialog-row")];
+  const input = phraseRow.querySelector("input");
+  assert.ok(input.classList.contains("dialog-input"));
   assert.equal(input.getAttribute("maxlength"), "200");
-  assert.equal(input.getAttribute("aria-label"), "형광펜·밑줄을 칠할 문구");
-  assert.equal(input.getAttribute("title"), "형광펜·밑줄을 칠할 문구");
-  assert.equal(input.value, "", "no phrase, no annotation by default");
-  // Short one-line labels like "신청인 성명": the grid reads 문구 | 종류 and then 색.
-  const grid = document.querySelector(".pdf-acroform-grid");
-  const labels = [...grid.querySelectorAll("label")].map((l) => l.textContent.trim().split(/\s*\n\s*/)[0].trim());
-  assert.deepEqual(labels.slice(-3), ["주석 문구", "주석 종류", "주석 색"]);
-  assert.ok(labels.every((l) => l.length <= 8), labels.join("|"));
-  for (const id of ["pdf-highlight-kind", "pdf-highlight-color"]) {
-    const select = document.getElementById(id);
-    assert.ok(select.classList.contains("sb-combo") && select.classList.contains("native-select-hidden"), id);
+  assert.equal(phraseRow.querySelector("label").textContent.trim(), "주석 문구");
+  const selects = [...pickRow.querySelectorAll("select")];
+  assert.deepEqual(selects.map((s) => s.id), ["pdf-highlight-kind-select", "pdf-highlight-color-select"]);
+  for (const select of selects) {
+    assert.ok(select.classList.contains("dialog-select") && select.classList.contains("native-select-hidden"), select.id);
   }
-  const values = (id) => [...document.getElementById(id).querySelectorAll("option")].map((o) => o.value);
-  assert.deepEqual(values("pdf-highlight-kind"), ["highlight", "underline"]);
-  assert.ok(values("pdf-highlight-color").every((v) => /^#[0-9A-F]{6}$/.test(v)));
+  assert.deepEqual([...selects[0].querySelectorAll("option")].map((o) => o.value), ["highlight", "underline"]);
+  assert.ok([...selects[1].querySelectorAll("option")].every((o) => /^#[0-9A-F]{6}$/.test(o.value)));
+  assert.ok(dialog.querySelector(".dialog-footer #btn-pdf-highlight-apply.dialog-btn-primary"));
+  assert.ok(dialog.querySelector(".dialog-footer [data-dialog-close]"), "취소");
+  // The paper card keeps no input for it: the state is hidden.
+  const card = document.getElementById("pdf-page-card");
+  assert.equal(card.querySelector(".pdf-acroform-grid").querySelectorAll("label").length, 2);
+  assert.equal(document.getElementById("pdf-highlight-input").getAttribute("type"), "hidden");
+
+  userClick(document.querySelector('.md-item[data-studio-menu-cmd="pdf-mod-highlight"]'));
+  await flushAsyncTurns(10);
+  assert.equal(card.querySelector(".pdf-highlight-badge"), null, "opening the dialog changes nothing");
 });
+
+// The command opens the dialog; 확인 applies what it holds as one undoable command.
+async function confirmHighlight(document, userClick, text, kind, color) {
+  userClick(document.querySelector('.md-item[data-studio-menu-cmd="pdf-mod-highlight"]'));
+  await flushAsyncTurns(10);
+  document.getElementById("pdf-highlight-text").value = text;
+  document.getElementById("pdf-highlight-kind-select").value = kind;
+  document.getElementById("pdf-highlight-color-select").value = color;
+  userClick(document.getElementById("btn-pdf-highlight-apply"));
+  await flushAsyncTurns(20);
+}
 
 test("saving the PDF Studio sends the highlight phrase, kind and color in the pdf object", async () => {
   const { document, userClick, converts } = await createConverterHarness();
@@ -225,40 +245,54 @@ test("saving the PDF Studio sends the highlight phrase, kind and color in the pd
   await flushAsyncTurns(30);
   assert.equal(converts().at(-1).pdf.highlight, undefined, "empty phrase sends nothing");
 
-  document.getElementById("pdf-highlight-input").value = "  핵심 문구 ";
-  document.getElementById("pdf-highlight-kind").value = "underline";
-  document.getElementById("pdf-highlight-color").value = "#00FFFF";
+  await confirmHighlight(document, userClick, "  핵심 문구 ", "underline", "#00FFFF");
   userClick(studioItem(document, "studio-save"));
   await flushAsyncTurns(30);
   assert.deepEqual(converts().at(-1).pdf.highlight, { text: "핵심 문구", kind: "underline", color: "#00FFFF" });
 });
 
-test("the highlight inputs are part of the PDF Studio's undoable state", async () => {
+test("confirming the highlight dialog is one undo step, and cancelling changes nothing", async () => {
   const { document, userClick } = await createConverterHarness();
   switchModule(document, "PDF");
   await flushAsyncTurns(10);
-  const input = document.getElementById("pdf-highlight-input");
-  const kind = document.getElementById("pdf-highlight-kind");
-  input.value = "첫 문구";
-  kind.value = "underline";
-  userClick(document.getElementById("btn-pdf-rotate"));
-  await flushAsyncTurns(20);
-  input.value = "바뀐 문구";
-  kind.value = "highlight";
+  const card = document.getElementById("pdf-page-card");
+  await confirmHighlight(document, userClick, "첫 문구", "underline", "#00FF00");
+  assert.equal(card.querySelector(".pdf-highlight-badge").textContent, "밑줄: '첫 문구'");
+  assert.equal(document.getElementById("pdf-highlight-input").value, "첫 문구");
+
+  // The dialog starts from the stored values; a change that is cancelled is not stored.
+  userClick(document.querySelector('.md-item[data-studio-menu-cmd="pdf-mod-highlight"]'));
+  await flushAsyncTurns(10);
+  assert.equal(document.getElementById("pdf-highlight-text").value, "첫 문구");
+  assert.equal(document.getElementById("pdf-highlight-kind-select").value, "underline");
+  document.getElementById("pdf-highlight-text").value = "버릴 문구";
+  assert.equal(document.getElementById("pdf-highlight-input").value, "첫 문구");
+
+  await confirmHighlight(document, userClick, "바뀐 문구", "highlight", "#FFFF00");
+  assert.equal(card.querySelector(".pdf-highlight-badge").textContent, "형광펜: '바뀐 문구'");
   userClick(studioItem(document, "studio-undo"));
   await flushAsyncTurns(30);
-  assert.equal(input.value, "첫 문구");
-  assert.equal(kind.value, "underline");
+  assert.equal(document.getElementById("pdf-highlight-input").value, "첫 문구");
+  assert.equal(document.getElementById("pdf-highlight-kind").value, "underline");
+  assert.equal(card.querySelector(".pdf-highlight-badge").textContent, "밑줄: '첫 문구'");
+
+  // An empty phrase clears the annotation.
+  await confirmHighlight(document, userClick, "  ", "highlight", "#FFFF00");
+  assert.equal(card.querySelector(".pdf-highlight-badge"), null);
+  assert.equal(document.getElementById("pdf-highlight-input").value, "");
 });
 
 test("the PII scrub also masks the highlight phrase", async () => {
   const { document, userClick } = await createConverterHarness();
   switchModule(document, "PDF");
   await flushAsyncTurns(10);
+  await confirmHighlight(document, userClick, "연락처 010-5555-6666", "highlight", "#FFFF00");
   const input = document.getElementById("pdf-highlight-input");
-  input.value = "연락처 010-5555-6666";
   userClick(document.getElementById("btn-scrub-pii"));
   await flushAsyncTurns(30);
   assert.ok(!input.value.includes("010-5555-6666"), input.value);
   assert.match(input.value, /010-\*\*\*\*-\*\*\*\*/);
+  const badge = document.querySelector("#pdf-page-card .pdf-highlight-badge").textContent;
+  assert.ok(!badge.includes("010-5555-6666"), badge);
+  assert.match(badge, /^형광펜: '연락처 010-\*\*\*\*-\*\*\*\*'$/);
 });

@@ -13,7 +13,7 @@
   // `select.value = x` assignments also refresh the visible label, because the app sets values
   // directly when it loads a deck.
 
-  const SELECT_SELECTOR = "select.sb-combo";
+  const SELECT_SELECTOR = "select.sb-combo, select.dialog-select";
   const ENHANCED = new WeakMap();
   const KEY_STEP = { ArrowDown: 1, ArrowUp: -1 };
 

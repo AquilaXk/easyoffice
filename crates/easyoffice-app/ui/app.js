@@ -621,6 +621,7 @@
   }
 
   function setupSlideAndPdfHandlers() {
+    ribbonHistory.bindPdfHighlightDialog();
     document.getElementById("btn-add-slide")?.addEventListener("click", () => slideStudio.addSlide());
     const slideTransSelect = document.getElementById("slide-transition-select");
     if (slideTransSelect) {

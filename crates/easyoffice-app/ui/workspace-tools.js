@@ -39,6 +39,11 @@
     return count > 0 ? " · 배분·나눔 정렬 " + count + "개 문단은 양쪽 정렬로 저장" : "";
   }
 
+  // The PDF Studio's highlight annotation as the card badge shows it: "형광펜: '문구'".
+  function describePdfHighlight(text, kind) {
+    return (kind === "underline" ? "밑줄" : "형광펜") + ": '" + text + "'";
+  }
+
   function describeDeliveryFailure(delivery, prefix) {
     if (delivery?.ok) return "";
     if (delivery?.cancelled) return prefix + "저장 취소: 저장 위치를 선택하지 않았습니다";
@@ -883,11 +888,11 @@
       }
     }
 
-    const { runPiiScrubAction } = host.__EASYOFFICE_CREATE_WORKSPACE_SCRUB__(deps, panelHooks, { resolveSourceScopeKind, computeSmartStats });
+    const { runPiiScrubAction } = host.__EASYOFFICE_CREATE_WORKSPACE_SCRUB__(deps, panelHooks, { resolveSourceScopeKind, computeSmartStats, describePdfHighlight });
 
     return {
       runPiiScrubAction, resolveSourceScopeKind, buildConversionContent, resolveConverterInput, resolveSaveFileBase, triggerBase64Download, deliverSavedFile,
-      describeDeliveryFailure, describeConversionSpec, saveActiveModuleDocument,
+      describeDeliveryFailure, describeConversionSpec, describePdfHighlight, openToolDialog, saveActiveModuleDocument,
       computeSmartStats, applySmartDiagnoseDom, runSmartDiagnoseAction, runModuleSecurityAudit,
       fetchSecurityAuditOutcome, applySecurityAuditDom, runSecurityAuditAction, runBenchmarkAction,
       setupStudioChromeControls, runStudioCommand: (cmd) => dispatchStudioIconCmd(cmd, document.getElementById("doc-editor"), null),

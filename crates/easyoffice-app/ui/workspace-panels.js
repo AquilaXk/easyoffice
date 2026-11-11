@@ -457,6 +457,39 @@
       if (formStatus && pdfStudio.formStatus !== undefined) formStatus.textContent = pdfStudio.formStatus;
     }
 
+    // The highlight annotation lives in three hidden state fields (so snapshots, the PII scrub and the
+    // save payload read one place); the dialog edits a copy and the command applies it.
+    function openPdfHighlightDialog() {
+      const field = (id) => document.getElementById(id);
+      const sync = host.__EASYOFFICE_CUSTOM_SELECT__?.syncCustomSelect;
+      field("pdf-highlight-text").value = field("pdf-highlight-input")?.value ?? "";
+      for (const [pick, state] of [["pdf-highlight-kind-select", "pdf-highlight-kind"], ["pdf-highlight-color-select", "pdf-highlight-color"]]) {
+        const select = field(pick);
+        if (!select) continue;
+        select.value = field(state)?.value || select.querySelector("option")?.value || "";
+        sync?.(select);
+      }
+      tools.openToolDialog("pdf-highlight-dialog");
+      field("pdf-highlight-text").focus?.();
+    }
+
+    // Stores the confirmed phrase, kind and color (an empty phrase clears them) and shows the card badge.
+    function applyPdfHighlight(highlight) {
+      const text = String(highlight?.text ?? "").trim();
+      const set = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) el.value = value;
+      };
+      set("pdf-highlight-input", text);
+      if (text) {
+        set("pdf-highlight-kind", highlight.kind === "underline" ? "underline" : "highlight");
+        set("pdf-highlight-color", highlight.color || "#FFFF00");
+      }
+      const card = document.getElementById("pdf-page-card");
+      const kind = document.getElementById("pdf-highlight-kind")?.value;
+      if (card) syncPdfCardBadge(card, { cls: "pdf-highlight-badge", dataKey: "pdfHighlight" }, text ? tools.describePdfHighlight(text, kind) : "");
+    }
+
     function applyPdfStudioFormState() {
       const stampSel = document.getElementById("pdf-stamp-select");
       const wmInput = document.getElementById("pdf-watermark-input");
@@ -928,6 +961,8 @@
       capturePdfStudioState,
       restorePdfStudioState,
       applyPdfStudioFormState,
+      openPdfHighlightDialog,
+      applyPdfHighlight,
       syncSplitComparePane,
       captureWorkspaceViewState,
       restoreWorkspaceViewState,

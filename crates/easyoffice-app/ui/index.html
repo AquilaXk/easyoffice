@@ -732,27 +732,10 @@
                   소속 부서명
                   <input id="pdf-form-dept" type="text" class="sb-select" value="디지털행정혁신과" />
                 </label>
-                <label>
-                  주석 문구
-                  <input id="pdf-highlight-input" type="text" class="sb-select" maxlength="200" aria-label="형광펜·밑줄을 칠할 문구" title="형광펜·밑줄을 칠할 문구" />
-                </label>
-                <label>
-                  주석 종류
-                  <select id="pdf-highlight-kind" class="sb-combo pdf-stamp-select">
-                    <option value="highlight" selected>형광펜</option>
-                    <option value="underline">밑줄</option>
-                  </select>
-                </label>
-                <label>
-                  주석 색
-                  <select id="pdf-highlight-color" class="sb-combo pdf-stamp-select">
-                    <option value="#FFFF00" selected>노랑</option>
-                    <option value="#00FF00">초록</option>
-                    <option value="#00FFFF">하늘</option>
-                    <option value="#FF00FF">분홍</option>
-                  </select>
-                </label>
               </div>
+              <input id="pdf-highlight-input" type="hidden" />
+              <input id="pdf-highlight-kind" type="hidden" value="highlight" />
+              <input id="pdf-highlight-color" type="hidden" value="#FFFF00" />
               <p id="pdf-form-status" class="formula-result">양식 준비 완료</p>
             </div>
           </div>
@@ -891,6 +874,37 @@
         <div class="dialog-footer">
           <button id="btn-smart-diagnose" type="button" class="dialog-btn dialog-btn-primary">진단 실행</button>
           <button type="button" class="dialog-btn" data-dialog-close>닫기</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="pdf-highlight-dialog" class="tool-dialog" aria-labelledby="pdf-highlight-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="pdf-highlight-dialog-title">형광펜·밑줄 주석</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row">
+            <label class="dialog-label" for="pdf-highlight-text">주석 문구</label>
+            <input id="pdf-highlight-text" type="text" class="dialog-input" maxlength="200" autocomplete="off" />
+          </div>
+          <div class="dialog-row">
+            <label class="dialog-label" for="pdf-highlight-kind-select">종류</label>
+            <select id="pdf-highlight-kind-select" class="sb-combo dialog-select">
+              <option value="highlight" selected>형광펜</option>
+              <option value="underline">밑줄</option>
+            </select>
+            <label class="dialog-label" for="pdf-highlight-color-select">색</label>
+            <select id="pdf-highlight-color-select" class="sb-combo dialog-select">
+              <option value="#FFFF00" selected>노랑</option>
+              <option value="#00FF00">초록</option>
+              <option value="#00FFFF">하늘</option>
+              <option value="#FF00FF">분홍</option>
+            </select>
+          </div>
+          <p>문구가 나오는 모든 곳에 칠합니다. 비우면 주석을 지웁니다.</p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-pdf-highlight-apply" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
         </div>
       </div>
     </dialog>

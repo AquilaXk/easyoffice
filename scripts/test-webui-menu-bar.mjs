@@ -79,6 +79,11 @@ for (const mod of MODULES) {
       if (id && !clicked.has(id)) clicked.set(id, item);
     }
     for (const item of clicked.values()) item.click();
+    // The highlight command asks for its phrase first; the dialog's 확인 runs it.
+    if (mod === "PDF") {
+      document.getElementById("pdf-highlight-text").value = "문구";
+      document.getElementById("btn-pdf-highlight-apply").click();
+    }
     await flushAsyncTurns(4 * clicked.size);
     // `view-theme` runs the theme toggle itself (the menu item behaves like the ribbon button).
     const expected = idsOf(catalog, mod).filter((id) => !id.endsWith("-view-theme"));

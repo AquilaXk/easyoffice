@@ -817,7 +817,6 @@
     }
 
     const PDF_BADGE_EFFECTS = {
-      "pdf-mod-highlight": { cls: "pdf-highlight-badge", dataKey: "pdfHighlight", fallback: "형광펜 주석 강조 적용" },
       "pdf-mod-splitmerge": { cls: "pdf-splitmerge-badge", dataKey: "pdfSplitmerge", fallback: "페이지 분할·병합 준비 완료" },
     };
 
@@ -832,7 +831,7 @@
       if (!existing) card.appendChild(badge);
     }
 
-    async function applyRibbonDomSideEffects(cmdId, execRes, preparedEffect) {
+    async function applyRibbonDomSideEffects(cmdId, execRes, preparedEffect, options = {}) {
       const viewEffect = viewRibbonEffectFor(cmdId);
       if (viewEffect) {
         viewEffect(cmdId, execRes, preparedEffect);
@@ -857,6 +856,7 @@
         await activatePaneInternal("CONV", false);
         return;
       }
+      if (cmdId === "pdf-mod-highlight") getWorkspacePanels().applyPdfHighlight(options.highlight);
       if (PDF_BADGE_EFFECTS[cmdId]) applyPdfBadge(PDF_BADGE_EFFECTS[cmdId], execRes);
       if (cmdId.startsWith("pdf-")) getWorkspacePanels().applyPdfStudioFormState();
     }
@@ -871,6 +871,11 @@
     }
 
     function executeTrackedRibbonCommand(cmdId, options = {}) {
+      // The highlight command asks for its phrase, kind and color first; the dialog's 확인 runs it again with them.
+      if (cmdId === "pdf-mod-highlight" && !options.highlight) {
+        getWorkspacePanels().openPdfHighlightDialog();
+        return Promise.resolve(null);
+      }
       return enqueueWorkspaceHistoryOp(async () => {
         const sheetController = getSheetController();
         await sheetController.commitPendingFocusedSheetCell(true);
@@ -892,7 +897,7 @@
         } else {
           localRibbonState.activeModule = getActiveModule();
         }
-        await applyRibbonDomSideEffects(cmdId, execRes, preparedEffect);
+        await applyRibbonDomSideEffects(cmdId, execRes, preparedEffect, options);
         commitDeferredUndoSnapshot(preSnapshot);
         sheetController.refreshFocusedSheetCellPendingSnapshot();
         const fb = document.getElementById("status-command-feedback");
@@ -901,6 +906,27 @@
           fb.textContent = execRes.summary || fallbackMsg;
         }
         return execRes;
+      });
+    }
+
+    // 형광펜·밑줄 주석 대화상자: 확인은 입력을 명령에 실어 실행하고(실행 취소 한 단계), 빈 문구는 주석을 지웁니다.
+    function bindPdfHighlightDialog() {
+      const dialog = document.getElementById("pdf-highlight-dialog");
+      const apply = () => {
+        const value = (id) => document.getElementById(id)?.value ?? "";
+        const highlight = {
+          text: value("pdf-highlight-text").trim(),
+          kind: value("pdf-highlight-kind-select"),
+          color: value("pdf-highlight-color-select"),
+        };
+        dialog?.close?.();
+        void executeTrackedRibbonCommand("pdf-mod-highlight", { highlight }).catch(() => {});
+      };
+      document.getElementById("btn-pdf-highlight-apply")?.addEventListener("click", apply);
+      document.getElementById("pdf-highlight-text")?.addEventListener("keydown", (ev) => {
+        if (ev.key !== "Enter" || ev.isComposing) return;
+        ev.preventDefault();
+        apply();
       });
     }
 
@@ -919,6 +945,7 @@
       activatePaneInternal,
       activatePane,
       executeTrackedRibbonCommand,
+      bindPdfHighlightDialog,
     };
   }
 

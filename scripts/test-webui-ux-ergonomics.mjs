@@ -315,11 +315,15 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   await flushAsyncTurns();
   userClick(commandItem(document, "pdf-mod-highlight"));
   await flushAsyncTurns();
+  assert.ok(!document.getElementById("pdf-page-card").querySelector(".pdf-highlight-badge"), "the command asks first");
+  document.getElementById("pdf-highlight-text").value = "핵심";
+  userClick(document.getElementById("btn-pdf-highlight-apply"));
+  await flushAsyncTurns();
   userClick(commandItem(document, "pdf-mod-splitmerge"));
   await flushAsyncTurns();
 
   const pdfCard = document.getElementById("pdf-page-card");
-  assert.ok(pdfCard.querySelector(".pdf-highlight-badge"));
+  assert.equal(pdfCard.querySelector(".pdf-highlight-badge").textContent, "형광펜: '핵심'");
   assert.ok(pdfCard.querySelector(".pdf-splitmerge-badge"));
 
   sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });

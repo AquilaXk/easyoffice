@@ -54,7 +54,7 @@
       renderSlideDeck,
       applyPdfStudioFormState,
     } = panelHooks;
-    const { resolveSourceScopeKind, computeSmartStats } = shared;
+    const { resolveSourceScopeKind, computeSmartStats, describePdfHighlight } = shared;
 
 
     function assertValidScrubResult(origText, res) {
@@ -123,6 +123,10 @@
       if (wmLayer && wmInput && wmLayer.textContent === prevWmInputVal) wmLayer.textContent = wmInput.value;
       totalMasked += applyFieldScrub(fields[1], fieldResults[1]);
       for (let i = 2; i < fields.length; i += 1) totalMasked += applyFieldScrub(fields[i], fieldResults[i]);
+      // The card badge shows the highlight phrase, so it follows the masked state.
+      const badge = document.querySelector("#pdf-page-card .pdf-highlight-badge");
+      const phrase = document.getElementById("pdf-highlight-input")?.value || "";
+      if (badge && phrase) badge.textContent = describePdfHighlight(phrase, document.getElementById("pdf-highlight-kind")?.value);
       const formStatus = document.getElementById("pdf-form-status");
       if (formStatus && (formStatus.textContent || "").startsWith("양식 반영 완료")) {
         applyPdfStudioFormState();

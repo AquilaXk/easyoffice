@@ -2504,10 +2504,10 @@
 
 ## PD-161. PDF 스튜디오의 형광펜·밑줄은 문구를 칠하는 텍스트 마크업 주석으로 쓰고, 원본 PDF 위 주석은 2단계로 둔다
 
-- **Status** Implemented (`pdf_highlight.rs`, `pdf_writer.rs`, `pdf_text_wrap.rs`, `convert_structured_doc.rs`, `index.html`, `workspace-tools.js`, `workspace-panels.js`)
+- **Status** Implemented (`pdf_highlight.rs`, `pdf_writer.rs`, `pdf_text_wrap.rs`, `convert_structured_doc.rs`, `index.html`, `shell.css`, `custom-select.js`, `ribbon-history.js`, `workspace-tools.js`, `workspace-panels.js`)
 - **Context** 형광펜·밑줄 주석이 범위 없는 배지라 저장해도 PDF에 아무것도 남지 않았습니다(PD-159 Trade-offs).
 - **Decision (`PD-161`)**
-  1. PDF 카드의 양식 입력 형태 그대로 문구 입력(`#pdf-highlight-input`, 200자), 종류(형광펜·밑줄), 색(노랑·초록·하늘·분홍)을 받습니다. 문구가 비어 있으면 주석을 쓰지 않습니다. 구조화 저장의 `pdf` 객체에 `highlight:{text, kind, color}`를 더하고 엔진이 검증합니다(문구 1~200자·제어문자 거부, kind는 `highlight`·`underline`, 색은 `#RRGGBB`). PDF 대상에서만 쓰고 다른 대상은 무시합니다.
+  1. 메뉴 명령 "형광펜·밑줄 주석"(`pdf-mod-highlight`, ⌃⌘H)은 참조 앱의 옵션 대화상자 틀(`<dialog class="tool-dialog">`, `.dialog-row`·`.dialog-input`·`dialog-select` 콤보, 확인·취소)을 열어 문구(200자), 종류(형광펜·밑줄), 색(노랑·초록·하늘·분홍)을 받습니다. 종이(PDF 카드)에는 입력 칸을 두지 않고, 확인한 값은 카드 안 숨김 상태(`#pdf-highlight-input`·`-kind`·`-color`)에 저장해 실행 취소 스냅샷·개인정보 지우기·저장이 한 곳을 읽습니다. 확인은 명령을 한 번 실행하는 실행 취소 한 단계이고, 카드의 기존 `.pdf-highlight-badge`에 "형광펜: '문구'"(밑줄은 "밑줄: '문구'")를 보입니다. 문구를 비우고 확인하면 주석을 지웁니다. 취소·닫기는 저장된 값을 바꾸지 않습니다. 구조화 저장의 `pdf` 객체에 `highlight:{text, kind, color}`를 더하고 엔진이 검증합니다(문구 1~200자·제어문자 거부, kind는 `highlight`·`underline`, 색은 `#RRGGBB`). PDF 대상에서만 쓰고 다른 대상은 무시합니다. 대화상자 행 규칙은 참조 앱 `dialogs.css` 110-170의 `.dialog-row`·`.dialog-label`·`.dialog-input`을 `shell.css`에 옮겼습니다.
   2. 엔진(`PdfWriteOptions.highlight`)은 줄바꿈 전의 원문 줄에서 문구의 모든 출현을 찾고, 출력 줄마다 글자 너비(줄바꿈과 같은 Helvetica·한글 선언 너비)로 사각형을 계산합니다. 줄이나 쪽 경계를 넘는 출현은 쪽마다 주석 하나에 줄별 QuadPoints를 담습니다. 주석은 ISO 32000-1 12.5.6.10의 `/Subtype /Highlight`·`/Underline`, `/Rect`, `/QuadPoints`(왼쪽 위·오른쪽 위·왼쪽 아래·오른쪽 아래 순서), `/C`, `/Contents`, `/F 4`와 `/AP /N` 폼 XObject로 씁니다. 형광펜 AP는 `/BM /Multiply`로 칠해 글자가 가려지지 않습니다.
   3. 검색은 `str::match_indices`와 이분 탐색으로 입력에 선형이고, 주석은 문서당 10,000개까지 쓰며 넘는 출현은 건너뛰고 응답 경고로 알립니다. 문구를 본문에서 못 찾으면 주석 없이 경고합니다.
   4. 엔진 의존성이 없으므로 pdf-writer 0.15(MIT OR Apache-2.0)와 pdf.js 편집기(Apache-2.0)의 구조만 참조해 직접 썼고 출처를 `THIRD_PARTY_NOTICES.md`와 파일 머리 주석에 남겼습니다. 이 기능은 새로 만드는 PDF(저장·변환)에만 해당합니다.
