@@ -537,15 +537,15 @@ pub fn parse_page(svg: &str, options: &usvg::Options<'_>) -> Result<(usvg::Tree,
             probe_edits.push((at, " display=\"none\"".to_string()));
         }
     }
-    if hide {
-        for picture in xml
-            .descendants()
-            .filter(|node| node.has_tag_name((SVG_NS, "image")))
-            .filter(|node| node.attribute("display").is_none())
-        {
-            if let Some(at) = attribute_position(svg, picture) {
-                probe_edits.push((at, " display=\"none\"".to_string()));
-            }
+    // The pictures decide nothing about the faces, and the options carry the page's picture budget,
+    // which the full parse spends again: a picture decoded here would be charged twice.
+    for picture in xml
+        .descendants()
+        .filter(|node| node.has_tag_name((SVG_NS, "image")))
+        .filter(|node| node.attribute("display").is_none())
+    {
+        if let Some(at) = attribute_position(svg, picture) {
+            probe_edits.push((at, " display=\"none\"".to_string()));
         }
     }
     let probe = insertions(svg, probe_edits);
@@ -559,12 +559,10 @@ pub fn parse_page(svg: &str, options: &usvg::Options<'_>) -> Result<(usvg::Tree,
             edits_for(svg, *text, decision, &mut report, &mut edits);
         }
     }
-    if !edits.is_empty() {
-        Ok((parse(&insertions(svg, edits))?, report))
-    } else if hide {
+    if edits.is_empty() {
         Ok((parse(svg)?, report))
     } else {
-        Ok((probe_tree, report))
+        Ok((parse(&insertions(svg, edits))?, report))
     }
 }
 

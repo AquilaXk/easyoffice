@@ -246,6 +246,39 @@ fn only_the_analysis_copy_is_reduced() {
     assert_eq!(report.bold, 1, "{report:?}");
 }
 
+fn images_in(group: &usvg::Group) -> usize {
+    group
+        .children()
+        .iter()
+        .map(|node| match node {
+            usvg::Node::Group(inner) => images_in(inner),
+            usvg::Node::Image(_) => 1,
+            _ => 0,
+        })
+        .sum()
+}
+
+/// With a style sheet the analysis copy cannot hide the pictures, so it decodes them: the page is
+/// parsed twice, and a budget that is shared would be spent twice and drop the picture from the page
+/// that is converted.
+#[test]
+fn a_page_with_a_style_sheet_is_charged_for_its_picture_once() {
+    let Some(db) = styled_db() else { return };
+    let png = tiny_skia::Pixmap::new(2, 2).unwrap().encode_png().unwrap();
+    let href = format!(
+        "data:image/png;base64,{}",
+        easyoffice_app::EasyOfficeIpcRouter::encode_base64(&png)
+    );
+    let body = format!(
+        r#"<style>.b {{ font-weight: bold }}</style><text class="b" x="16" y="64" font-family="serif" font-size="24">AB</text><image x="0" y="0" width="4" height="4" href="{href}"/>"#
+    );
+    // The page may decode exactly one 2 x 2 picture.
+    let options = bitmap_parse_options(&db, RasterBudget::new(4, 4));
+    let (tree, report) = pdf_synthetic::parse_page(&page(&body), &options).expect("page");
+    assert_eq!(report.bold, 1, "the class made the text bold: {report:?}");
+    assert_eq!(images_in(tree.root()), 1, "the picture is in the page");
+}
+
 #[test]
 fn a_page_without_bold_or_italic_is_not_analysed_and_a_hidden_word_is_harmless() {
     let Some(db) = styled_db() else { return };
