@@ -314,17 +314,58 @@
       return session.values.get(key);
     }
 
+    async function evaluatePlainCell(sheets, defaultSheet, extraTarget) {
+      const { sheet, cell } = extraTarget;
+      const { cells } = buildCellsAndFormulaTargets({ [sheet]: { [cell]: sheets[sheet]?.[cell] } });
+      const rpcRes = await invokeIpc(
+        "evaluate_sheet",
+        JSON.stringify({
+          sheet: defaultSheet,
+          sheets: Object.keys(sheets),
+          targets: [{ sheet, cell }],
+          cells,
+        })
+      );
+      return readExtraValue(rpcRes, sheets, extraTarget, 1);
+    }
+
+    // The formula bar's value from a stateless response: the first target's value, else the
+    // response's own `value`, else what the cell already holds.
+    function readExtraValue(rpcRes, sheets, extraTarget, totalTargets) {
+      const targetValues = Array.isArray(rpcRes?.targetValues) ? rpcRes.targetValues : null;
+      const batchValues =
+        rpcRes && typeof rpcRes.values === "object" && rpcRes.values ? rpcRes.values : null;
+      const target = {
+        ...extraTarget,
+        key: extraTarget.sheet + "!" + extraTarget.cell,
+      };
+      const rawExtra = extractEvaluatedTargetValue(
+        rpcRes,
+        targetValues,
+        batchValues,
+        target,
+        0,
+        totalTargets
+      );
+      if (rawExtra !== undefined && rawExtra !== null) return String(rawExtra);
+      if (rpcRes?.value !== undefined && rpcRes.value !== null) return String(rpcRes.value);
+      return sheets[extraTarget.sheet]?.[extraTarget.cell]?.value ?? "";
+    }
+
     async function computeEvaluatedSheetStore(baseSheets, defaultSheet, extraTarget = null) {
       const sheets = cloneStore(baseSheets);
       // A plain-value extra target (formula bar) is evaluated by the stateless command so its
-      // display text matches what that command has always returned.
+      // display text matches what that command has always returned. Such a cell depends on no
+      // other cell, so only that cell is sent and the formulas still come from the session.
       const extraIsFormula =
         !extraTarget || isFormulaStr(sheets[extraTarget.sheet]?.[extraTarget.cell]?.formula || "");
-      if (session.enabled && extraIsFormula) {
-        if (!extraTarget && !sheetMapHasAnyFormula(sheets)) {
-          return { sheets, extraValue: "", circular: false };
-        }
-        const viaSession = await syncSession(sheets);
+      if (session.enabled) {
+        const hasFormula = sheetMapHasAnyFormula(sheets);
+        if (!extraTarget && !hasFormula) return { sheets, extraValue: "", circular: false };
+        const viaSession =
+          extraIsFormula || hasFormula
+            ? await syncSession(sheets)
+            : { formulaTargets: [], circular: false };
         if (viaSession) {
           for (const target of viaSession.formulaTargets) {
             const stored = sheets[target.sheet]?.[target.cell];
@@ -332,12 +373,14 @@
             if (stored && value !== undefined && value !== null) stored.value = String(value);
           }
           let extraValue = "";
-          if (extraTarget) {
+          if (extraTarget && extraIsFormula) {
             const raw = sessionValue(extraTarget.sheet + "!" + extraTarget.cell);
             extraValue =
               raw !== undefined && raw !== null
                 ? String(raw)
                 : (sheets[extraTarget.sheet]?.[extraTarget.cell]?.value ?? "");
+          } else if (extraTarget) {
+            extraValue = await evaluatePlainCell(sheets, defaultSheet, extraTarget);
           }
           return { sheets, extraValue, circular: viaSession.circular };
         }
@@ -391,24 +434,9 @@
         }
       });
 
-      let extraValue = "";
-      if (extraTarget) {
-        const rawExtra = extractEvaluatedTargetValue(
-          rpcRes,
-          targetValues,
-          batchValues,
-          rpcTargets[0],
-          0,
-          rpcTargets.length
-        );
-        if (rawExtra !== undefined && rawExtra !== null) {
-          extraValue = String(rawExtra);
-        } else if (rpcRes?.value !== undefined && rpcRes.value !== null) {
-          extraValue = String(rpcRes.value);
-        } else {
-          extraValue = sheets[extraTarget.sheet]?.[extraTarget.cell]?.value ?? "";
-        }
-      }
+      const extraValue = extraTarget
+        ? readExtraValue(rpcRes, sheets, extraTarget, rpcTargets.length)
+        : "";
       return { sheets, extraValue, circular: rpcRes?.circular === true };
     }
 

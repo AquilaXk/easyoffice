@@ -208,6 +208,9 @@ test("the formula bar evaluation reads its value from the session; a plain value
   const plain = await store.computeEvaluatedSheetStore(sheets, "Sheet1", { sheet: "Sheet1", cell: "E1" });
   assert.equal(engine.only("evaluate_sheet").length, 1);
   assert.equal(plain.extraValue, "legacy:E1");
+  const request = engine.only("evaluate_sheet")[0].body;
+  assert.deepEqual(request.cells, [{ sheet: "Sheet1", cell: "E1", value: "42" }], "only the plain cell goes to the stateless command");
+  assert.equal(plain.sheets.Sheet1.B1.value, "v:=A1+1", "the formulas still come from the session");
 });
 
 test("a failed sync closes the session it abandons before opening a new one", async () => {
