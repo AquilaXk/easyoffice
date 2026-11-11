@@ -19,6 +19,9 @@ pub(crate) const MAX_DECODED_DOCUMENT_BYTES: usize = 256 * MIB;
 /// Bytes a cell record costs besides its text: the `(row, column, String)` tuple the readers keep.
 pub(crate) const CELL_OVERHEAD_BYTES: usize = std::mem::size_of::<(u32, u32, String)>();
 
+/// Most UTF-8 bytes one UTF-16 code unit or one Windows-1252 byte can decode to.
+pub(crate) const MAX_UTF8_BYTES_PER_UNIT: usize = 3;
+
 /// Remaining decoded-byte allowance of one document.
 #[derive(Debug)]
 pub(crate) struct DecodeBudget {

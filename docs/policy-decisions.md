@@ -2692,7 +2692,7 @@
 
 ## PD-175. 포맷 디코더는 문서 하나가 복원하는 바이트 총량에 예산을 둔다 (256 MiB)
 
-- **Status** Implemented (`decode_budget.rs`, `xlsx_sheet.rs`, `office_codecs.rs`, `ods_grid.rs`, `biff8_xls_codec.rs`)
+- **Status** Implemented (`decode_budget.rs`, `xlsx_sheet.rs`, `office_codecs.rs`, `ods_grid.rs`, `biff8_xls_codec.rs`, `legacy_ole2_codec.rs`)
 - **Context** PD-168이 XLSX·ODS 읽기에서 이벤트 상한(600만)을 풀면서, 한 단계(요소·레코드·셀)만 재던 한도가 합계를 막지 못하는 경로가 드러났습니다. 공유 문자열 하나를 셀 수십만 개가 가리키면 셀마다 문자열 사본이 생기고, 같은 시트 파트를 가리키는 `<sheet>` 항목이 파트를 항목 수만큼 다시 읽습니다. 작은 파일이 수십 GiB를 복원할 수 있습니다.
 - **Decision (`PD-175`)**
   1. **검토 3단계**: (1) 외부 크레이트는 엔진 무의존(PD-053, PD-095) 때문에 쓰지 않습니다. (2) 같은 구조가 이미 Pages 읽기에 있습니다(`pages_iwa.rs`의 문서 단위 `document_budget`, 256 MiB). (3) 그 방식을 `DecodeBudget`(`decode_budget.rs`)으로 일반화해 읽기 경로가 같은 값과 같은 오류(`ResourceBudgetExceeded`)를 씁니다. `pages_iwa::MAX_DOCUMENT_BYTES`는 같은 상수를 가리킵니다.
@@ -2700,5 +2700,6 @@
   3. **XLSX**: 공유 문자열 참조, 공유 수식 슬레이브가 만드는 수식 사본, 인라인·값 문자열을 시트 전체가 한 예산으로 냅니다. 워크시트 파트는 한 번만 읽고(같은 파트를 가리키는 `<sheet>` 둘 이상은 손상 처리), 시트 항목은 1,024개까지만 받습니다.
   4. **ODS**: 반복 행·열이 만드는 셀 텍스트 사본을 복사 전에 같은 예산에서 뺍니다. 셀 20만 개 상한은 그대로 둡니다(셀 하나가 1 MiB이면 20만 개 상한만으로는 200 GiB까지 갑니다).
   5. **XLS(BIFF8)**: 모든 셀 추가가 셀 텍스트와 셀 레코드 크기를 예산에서 뺍니다. 레코드 하나(14바이트)가 SST의 64 Ki자 문자열을 가리킬 수 있어서, `LABELSST`는 문자열을 복사하기 전에 값을 냅니다.
+  6. **MS-DOC**: 조각 표(최대 6만 5,536개)의 조각이 같은 구간을 다시 가리켜도 되므로, 조각마다 글자 수 × 3바이트(UTF-8로 풀었을 때 한 글자의 최대)를 디코딩 전에 뺍니다.
 - **Why** 입력 크기로 출력 크기를 묶을 수 없는 읽기는 합계 예산이 유일한 방어선입니다. 한 문서의 복원량이 256 MiB를 넘는 정상 파일은 없습니다(ZIP 합계 한도가 512 MiB이고 셀 하나가 수십 바이트).
-- **Verified by** `tests/decode_budget_xlsx.rs`(공유 문자열 300×1 MiB, 공유 수식 슬레이브 300×1 MiB, 두 시트 합산, 같은 파트를 가리키는 시트 둘, 시트 항목 2,000개 거부, 10만 셀 정상 파일 통과), `tests/decode_budget_ods.rs`(열 반복 300×1 MiB, 행 반복 300×1 MiB 거부, 정상 반복 2만 셀 통과), `tests/decode_budget_ole2.rs`(8,000자 문자열을 가리키는 `LABELSST` 4만 개 거부, 정상 2만 셀 통과), `decode_budget.rs` 단위 시험.
+- **Verified by** `tests/decode_budget_xlsx.rs`(공유 문자열 300×1 MiB, 공유 수식 슬레이브 300×1 MiB, 두 시트 합산, 같은 파트를 가리키는 시트 둘, 시트 항목 2,000개 거부, 10만 셀 정상 파일 통과), `tests/decode_budget_ods.rs`(열 반복 300×1 MiB, 행 반복 300×1 MiB 거부, 정상 반복 2만 셀 통과), `tests/decode_budget_ole2.rs`(8,000자 문자열을 가리키는 `LABELSST` 4만 개 거부, 정상 2만 셀 통과, 같은 1 MiB를 가리키는 조각 300개 거부, 정상 조각 표 통과), `decode_budget.rs` 단위 시험.

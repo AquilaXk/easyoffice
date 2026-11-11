@@ -3,6 +3,7 @@ pub use crate::biff8_xls_codec::*;
 mod doc_writer;
 #[path = "legacy_ppt_writer.rs"]
 mod ppt_writer;
+use crate::decode_budget::{DecodeBudget, MAX_UTF8_BYTES_PER_UNIT};
 use crate::ole2_codec::{
     decode_utf16le, read_len_prefixed_utf16le, read_u16_le, read_u32_le, Ole2ContainerCodec,
     Ole2StreamEntry,
@@ -156,6 +157,7 @@ impl LegacyOle2Codec {
         }
         let plc = &clx_slice[plc_start..plc_end];
         let mut out = String::new();
+        let mut budget = DecodeBudget::new();
         for i in 0..piece_count {
             let cp_start = read_u32_le(plc, i * 4)? as usize;
             let cp_end = read_u32_le(plc, (i + 1) * 4)? as usize;
@@ -165,6 +167,12 @@ impl LegacyOle2Codec {
                 ));
             }
             let char_count = cp_end - cp_start;
+            // Pieces may name the same run again and again: the text is paid for before it is
+            // decoded, at the most bytes one UTF-16 unit or Windows-1252 byte can become in UTF-8.
+            budget.charge(
+                char_count.saturating_mul(MAX_UTF8_BYTES_PER_UNIT),
+                "DOC 조각 텍스트",
+            )?;
             let pcd_off = (piece_count + 1) * 4 + i * 8;
             let fc_raw = read_u32_le(plc, pcd_off + 2)?;
             let is_compressed = (fc_raw & 0x4000_0000) != 0;
