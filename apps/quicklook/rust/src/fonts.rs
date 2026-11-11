@@ -35,6 +35,20 @@ fn build() -> Database {
     db.set_serif_family(BUNDLED_FAMILY);
     db.set_sans_serif_family(BUNDLED_FAMILY);
     db.set_monospace_family(BUNDLED_FAMILY);
+    with_mapped_faces(db)
+}
+
+/// `db` with every file face mapped once for the life of the process. A face loaded from a file is
+/// otherwise opened, mapped and unmapped on every access, and text layout accesses it per text run
+/// (the PD-114 export fix; here it was 63% of a first page PNG and 35% of a preview PDF).
+fn with_mapped_faces(mut db: Database) -> Database {
+    let ids: Vec<_> = db.faces().map(|face| face.id).collect();
+    for id in ids {
+        // SAFETY: the same read-only mapping fontdb makes per access, held longer. A font file
+        // truncated by another process would fault in either case. A face that cannot be mapped
+        // keeps reading its file per call.
+        let _ = unsafe { db.make_shared_face_data(id) };
+    }
     db
 }
 
