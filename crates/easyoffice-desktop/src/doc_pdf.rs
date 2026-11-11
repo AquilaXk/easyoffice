@@ -8,21 +8,29 @@
 //! writer stay: the rotation is the page's `/Rotate`, the watermark and the stamp are drawn into the
 //! page SVG (`doc_pdf_marks.rs`).
 //!
-//! Pages are laid out and converted a batch at a time, so the SVGs of a long document are never
-//! alive together. rhwp's layout recurses with the document's nesting and the platform's default
-//! thread stack is small, so the work runs on one thread with a large stack; a panic in the layout
-//! comes back as an error, and the caller writes the engine's PDF instead.
+//! Pages are laid out and drawn as SVG on one thread (rhwp's layout recurses with the document's
+//! nesting and the platform's default thread stack is small, so that thread has a large stack; a
+//! panic in it comes back as an error) while the calling thread converts the previous batch into
+//! PDF pages, so the SVG drawing and the conversion overlap. Only a few batches are alive at once,
+//! the SVGs of a long document never are. The caller writes the engine's PDF when this fails.
 
 use crate::doc_pdf_marks::mark_page;
 use crate::pdf_export::{PdfAssembler, BATCH_PAGES, MAX_PAGES};
 use easyoffice_formats::PdfWriteOptions;
 use rhwp::DocumentCore;
+use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 use std::sync::Arc;
 use std::thread;
 use usvg::fontdb::Database;
 
 /// Layout recurses with the document's nesting (same size as the start window's render worker).
 const WORKER_STACK_BYTES: usize = 32 * 1024 * 1024;
+/// Batches drawn ahead of the conversion. One keeps the drawing thread busy while a batch is
+/// converted; a longer queue only holds more SVG text.
+const BATCHES_AHEAD: usize = 1;
+
+type Batch = Result<Vec<String>, String>;
 
 /// The PDF of `hwpx`, a document the engine wrote, with the page settings of `options`.
 pub fn hwpx_to_pdf(
@@ -31,21 +39,54 @@ pub fn hwpx_to_pdf(
     fonts: &Arc<Database>,
 ) -> Result<Vec<u8>, String> {
     thread::scope(|scope| {
-        thread::Builder::new()
-            .name("doc-pdf".into())
+        let (send, batches) = sync_channel::<Batch>(BATCHES_AHEAD);
+        let drawing = thread::Builder::new()
+            .name("doc-pdf-layout".into())
             .stack_size(WORKER_STACK_BYTES)
-            .spawn_scoped(scope, || render(hwpx, options, fonts))
-            .map_err(|err| format!("PDF 작업을 시작하지 못했습니다: {err}"))?
+            .spawn_scoped(scope, move || draw_pages(hwpx, options, &send))
+            .map_err(|err| format!("PDF 작업을 시작하지 못했습니다: {err}"))?;
+        // A page conversion that panics is an error too: the caller has the engine's PDF to fall
+        // back on, a panic would only fail the request.
+        let converted = catch_unwind(AssertUnwindSafe(|| {
+            convert_batches(&batches, options, fonts)
+        }))
+        .unwrap_or_else(|_| Err("쪽을 PDF로 바꾸는 중 오류가 났습니다.".to_string()));
+        // A failed conversion ends the drawing too: its next send finds nobody receiving.
+        drop(batches);
+        drawing
             .join()
-            .map_err(|_| "문서 배치 중 오류가 났습니다.".to_string())?
+            .map_err(|_| "문서 배치 중 오류가 났습니다.".to_string())?;
+        converted
     })
 }
 
-fn render(
-    hwpx: &[u8],
+/// Converts the batches as they arrive and finishes the PDF.
+fn convert_batches(
+    batches: &Receiver<Batch>,
     options: &PdfWriteOptions,
     fonts: &Arc<Database>,
 ) -> Result<Vec<u8>, String> {
+    let mut assembler = PdfAssembler::new(fonts, true);
+    assembler.set_rotation(options.rotation_degrees);
+    for batch in batches {
+        assembler.add_pages(&batch?)?;
+    }
+    assembler.finish()
+}
+
+/// Lays `hwpx` out and sends its pages, [`BATCH_PAGES`] at a time. A failure is sent as the last
+/// message; a receiver that is gone (the conversion failed) ends the drawing quietly.
+fn draw_pages(hwpx: &[u8], options: &PdfWriteOptions, send: &SyncSender<Batch>) {
+    if let Err(reason) = try_draw_pages(hwpx, options, send) {
+        let _ = send.send(Err(reason));
+    }
+}
+
+fn try_draw_pages(
+    hwpx: &[u8],
+    options: &PdfWriteOptions,
+    send: &SyncSender<Batch>,
+) -> Result<(), String> {
     let core = DocumentCore::from_bytes(hwpx)
         .map_err(|err| format!("문서를 배치하지 못했습니다: {err}"))?;
     let pages = core.page_count() as usize;
@@ -54,8 +95,6 @@ fn render(
             "쪽 수({pages})가 PDF로 내보낼 수 있는 범위가 아닙니다."
         ));
     }
-    let mut assembler = PdfAssembler::new(fonts, true);
-    assembler.set_rotation(options.rotation_degrees);
     let mut batch = Vec::with_capacity(BATCH_PAGES);
     for page in 0..pages {
         let mut svg = core
@@ -64,11 +103,13 @@ fn render(
         mark_page(&mut svg, page, options)?;
         batch.push(svg);
         if batch.len() == BATCH_PAGES || page + 1 == pages {
-            assembler.add_pages(&batch)?;
-            batch.clear();
+            let full = std::mem::replace(&mut batch, Vec::with_capacity(BATCH_PAGES));
+            if send.send(Ok(full)).is_err() {
+                return Ok(());
+            }
         }
     }
-    assembler.finish()
+    Ok(())
 }
 
 #[cfg(test)]
