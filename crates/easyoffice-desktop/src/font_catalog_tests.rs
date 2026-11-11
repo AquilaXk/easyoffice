@@ -170,14 +170,65 @@ fn a_window_is_served_a_bounded_amount_of_distinct_fonts() {
         "a font already served costs nothing again"
     );
     assert!(fonts.read("main", &revision, 1).is_ok());
-    // The budget belongs to the window and to the list.
+    // The budget belongs to the window.
     let other = listed(&fonts, "doc-1", files.clone());
     assert!(fonts.read("doc-1", &other, 2).is_ok());
+}
+
+/// A window asking for a new list (the page reloads, or loops) must not start a new budget: the
+/// limit is for the window's life, and what it was served stays served.
+#[test]
+fn a_new_list_does_not_give_the_window_a_new_budget() {
+    let dir = tempfile::tempdir().unwrap();
+    let files: Vec<PathBuf> = (0..3)
+        .map(|i| file_with(dir.path(), &format!("f{i}.ttf"), b"OTTO", 100))
+        .collect();
+    let fonts = SystemFonts::with_budget(250);
+    let first = listed(&fonts, "main", files.clone());
+    assert!(fonts.read("main", &first, 0).is_ok());
+    assert!(fonts.read("main", &first, 1).is_ok());
     let again = fonts.list("main", || unreachable!()).unwrap().revision;
-    assert!(
-        fonts.read("main", &again, 2).is_ok(),
-        "a new list starts anew"
+    assert_ne!(first, again);
+    assert_eq!(
+        fonts.read("main", &first, 0),
+        Err(MSG_NO_LIST.to_string()),
+        "the old list's numbers stop working"
     );
+    assert_eq!(
+        fonts.read("main", &again, 2),
+        Err(MSG_BUDGET.to_string()),
+        "200 already served, 300 > 250"
+    );
+    assert!(
+        fonts.read("main", &again, 0).is_ok(),
+        "a font served before the new list costs nothing again"
+    );
+}
+
+/// Only a regular file is read: opening a named pipe would block the worker until some program
+/// writes to it.
+#[cfg(unix)]
+#[test]
+fn a_file_that_is_not_a_regular_file_is_refused_without_being_opened() {
+    let dir = tempfile::tempdir().unwrap();
+    let pipe = dir.path().join("pipe.ttf");
+    let made = std::process::Command::new("mkfifo").arg(&pipe).status();
+    if !made.is_ok_and(|status| status.success()) {
+        return;
+    }
+    let fonts = Arc::new(SystemFonts::default());
+    let revision = listed(&fonts, "main", vec![pipe.clone()]);
+    let (tx, rx) = std::sync::mpsc::channel();
+    let reader = Arc::clone(&fonts);
+    std::thread::spawn(move || {
+        let _ = tx.send(reader.read("main", &revision, 0));
+    });
+    let answer = rx.recv_timeout(std::time::Duration::from_secs(5));
+    if answer.is_err() {
+        // A reader stuck in `open` (a failing run): a writer lets it go, so the test ends.
+        let _ = fs::OpenOptions::new().write(true).open(&pipe);
+    }
+    assert_eq!(answer, Ok(Err(MSG_UNREADABLE.to_string())));
 }
 
 #[test]

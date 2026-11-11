@@ -35,7 +35,7 @@ use usvg::fontdb::{Database, Language, Source, Stretch, Style};
 pub const MAX_FONT_BYTES: u64 = 64 * 1024 * 1024;
 /// Most faces in the list (the editor refuses a longer catalog).
 pub const MAX_FACES: usize = 25_000;
-/// Most distinct font bytes one window may be served over its life. A document names a handful of
+/// Most distinct font bytes one window may be served over its life (a new list does not renew it). A document names a handful of
 /// fonts; this leaves room for a few large CJK collections and stops a loop that asks for all.
 pub const MAX_SESSION_BYTES: u64 = 512 * 1024 * 1024;
 /// Longest family or style text the editor accepts.
@@ -246,7 +246,9 @@ impl SystemFonts {
     }
 
     /// The window's new list. `build` runs only the first time (the font folders are scanned once
-    /// per process); every call replaces the window's revision, so older numbers stop working.
+    /// per process); every call replaces the window's revision, so older numbers stop working. What
+    /// the window was served stays counted (file numbers belong to the process's one catalog), so
+    /// asking for a list again does not start a new budget.
     pub fn list(
         &self,
         label: &str,
@@ -254,14 +256,15 @@ impl SystemFonts {
     ) -> Result<SystemFontList, String> {
         let catalog = self.catalog.get_or_init(|| Arc::new(build()));
         let revision = new_revision()?;
-        self.lock().insert(
-            label.to_string(),
-            Session {
-                revision: revision.clone(),
+        self.lock()
+            .entry(label.to_string())
+            .or_insert_with(|| Session {
+                revision: String::new(),
                 served: HashSet::new(),
                 bytes: 0,
-            },
-        );
+            })
+            .revision
+            .clone_from(&revision);
         Ok(SystemFontList {
             revision,
             faces: catalog.faces.clone(),
@@ -271,11 +274,16 @@ impl SystemFonts {
     /// The bytes of font file `file` of the list `revision` that `label` holds.
     pub fn read(&self, label: &str, revision: &str, file: u32) -> Result<Vec<u8>, String> {
         let path = self.path_of(label, revision, file)?;
+        // Checked before opening: opening a named pipe blocks until a program writes to it.
+        if !std::fs::metadata(&path).is_ok_and(|meta| meta.is_file()) {
+            return Err(MSG_UNREADABLE.to_string());
+        }
         let mut handle = File::open(&path).map_err(|_| MSG_UNREADABLE.to_string())?;
-        let size = handle
-            .metadata()
-            .map_err(|_| MSG_UNREADABLE.to_string())?
-            .len();
+        let meta = handle.metadata().map_err(|_| MSG_UNREADABLE.to_string())?;
+        if !meta.is_file() {
+            return Err(MSG_UNREADABLE.to_string());
+        }
+        let size = meta.len();
         if size == 0 || size > MAX_FONT_BYTES {
             return Err(MSG_TOO_LARGE.to_string());
         }
