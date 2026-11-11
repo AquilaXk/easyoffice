@@ -18,15 +18,13 @@ const MAX_GROUP_DEPTH: usize = 256;
 const DEFAULT_TITLE: &str = "RTF 문서";
 /// RTF 1.9.1: `\uc1` is in force until a `\ucN` says otherwise.
 const DEFAULT_UNICODE_SKIP: usize = 1;
-const SKIPPED_DESTINATIONS: [&str; 15] = [
+const SKIPPED_DESTINATIONS: [&str; 13] = [
     "stylesheet",
     "pict",
     "header",
     "footer",
     "footnote",
     "fldinst",
-    "listtable",
-    "listoverridetable",
     "generator",
     "themedata",
     "colorschememapping",
@@ -43,8 +41,25 @@ enum Dest {
     ColorTbl,
     Info,
     Title,
+    /// `\listtable`: each `\list` with its `\listid` and the `\levelnfc` of its first level.
+    ListTable,
+    /// `\listoverridetable`: `\listoverride\listid` and the `\lsN` that refers to it.
+    ListOverrides,
     Skip,
 }
+
+/// `\levelnfc` values that are not numbers: bullet (23) and none (255).
+const NFC_BULLET: i32 = 23;
+const NFC_NONE: i32 = 255;
+/// Code page of the `\'hh` bytes when no `\ansicpgN` says (the engine's Korean default).
+const DEFAULT_CODE_PAGE: u32 = 949;
+/// Windows-1252 characters of 0x80..=0x9F (the rest of the code page is Latin-1).
+const WINDOWS_1252_HIGH: [char; 32] = [
+    '\u{20AC}', '\u{81}', '\u{201A}', '\u{0192}', '\u{201E}', '\u{2026}', '\u{2020}', '\u{2021}',
+    '\u{02C6}', '\u{2030}', '\u{0160}', '\u{2039}', '\u{0152}', '\u{8D}', '\u{017D}', '\u{8F}',
+    '\u{90}', '\u{2018}', '\u{2019}', '\u{201C}', '\u{201D}', '\u{2022}', '\u{2013}', '\u{2014}',
+    '\u{02DC}', '\u{2122}', '\u{0161}', '\u{203A}', '\u{0153}', '\u{9D}', '\u{017E}', '\u{0178}',
+];
 
 /// Character state of one RTF group (resolved against the tables when text is emitted).
 #[derive(Clone, Default)]
@@ -69,7 +84,7 @@ struct Group {
     unicode_skip: usize,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct ParaProps {
     align: Option<RichAlignment>,
     heading: u8,
@@ -101,6 +116,21 @@ struct Reader {
     row_marks: Vec<CellMarks>,
     merges_dropped: usize,
     high_surrogate: Option<u16>,
+    /// `\ansicpgN`: the code page of `\'hh` bytes.
+    code_page: u32,
+    unsupported_code_page: bool,
+    /// `\lsN` -> `\listid` -> number format of the first level.
+    list_first_nfc: HashMap<i32, i32>,
+    ls_list: HashMap<i32, i32>,
+    open_list: OpenList,
+}
+
+/// The `\list` or `\listoverride` being read; its parts come in either order.
+#[derive(Default)]
+struct OpenList {
+    levels: usize,
+    nfc: Option<i32>,
+    id: Option<i32>,
 }
 
 /// Rows (text and merge marks) of the table being read, numbered by `\tblidx`.
@@ -138,6 +168,11 @@ impl Reader {
             row_marks: Vec::new(),
             merges_dropped: 0,
             high_surrogate: None,
+            code_page: DEFAULT_CODE_PAGE,
+            unsupported_code_page: false,
+            list_first_nfc: HashMap::new(),
+            ls_list: HashMap::new(),
+            open_list: OpenList::default(),
         }
     }
 
@@ -210,7 +245,7 @@ impl Reader {
                 }
             }
             Dest::Title => self.title.push_str(text),
-            Dest::Info | Dest::Skip => {}
+            Dest::Info | Dest::Skip | Dest::ListTable | Dest::ListOverrides => {}
         }
     }
 
@@ -227,7 +262,8 @@ impl Reader {
 
     fn end_paragraph(&mut self) {
         let mut runs = std::mem::take(&mut self.runs);
-        let para = std::mem::take(&mut self.para);
+        // Paragraph properties last until `\pard`, not until the end of the paragraph.
+        let para = self.para.clone();
         if para.heading > 0 {
             let inherited = u16::try_from(heading_half_points(para.heading)).ok();
             if self.top().chars.size == inherited {
@@ -324,6 +360,10 @@ impl Reader {
             self.table_idx = usize::try_from(param.unwrap_or(0)).unwrap_or(0);
             return;
         }
+        if word == "ansicpg" {
+            self.code_page = param.and_then(|n| u32::try_from(n).ok()).unwrap_or(0);
+            return;
+        }
         if word == "uc" {
             self.top().unicode_skip = usize::try_from(param.unwrap_or(1)).unwrap_or(0);
             return;
@@ -337,6 +377,8 @@ impl Reader {
         if first {
             let dest = match word {
                 "fonttbl" => Some(Dest::FontTbl),
+                "listtable" => Some(Dest::ListTable),
+                "listoverridetable" => Some(Dest::ListOverrides),
                 "colortbl" => Some(Dest::ColorTbl),
                 "info" => Some(Dest::Info),
                 "title" if self.top().dest == Dest::Info => Some(Dest::Title),
@@ -374,10 +416,51 @@ impl Reader {
                 }
                 return;
             }
+            Dest::ListTable | Dest::ListOverrides => {
+                self.list_table_word(word, param);
+                return;
+            }
             Dest::Skip | Dest::Info | Dest::Title => return,
             Dest::Body => {}
         }
         self.body_word(word, param);
+    }
+
+    /// One control word of the list table or the override table.
+    fn list_table_word(&mut self, word: &str, param: Option<i32>) {
+        let in_overrides = self.top().dest == Dest::ListOverrides;
+        let open = &mut self.open_list;
+        match word {
+            "list" | "listoverride" => *open = OpenList::default(),
+            "listlevel" => open.levels += 1,
+            "levelnfc" if open.levels == 1 => open.nfc = param,
+            "listid" => open.id = param,
+            "ls" if in_overrides => {
+                if let (Some(ls), Some(id)) = (param, open.id) {
+                    self.ls_list.insert(ls, id);
+                }
+            }
+            _ => {}
+        }
+        if !in_overrides {
+            if let (Some(id), Some(nfc)) = (open.id, open.nfc) {
+                self.list_first_nfc.insert(id, nfc);
+            }
+        }
+    }
+
+    /// Kind of the list `\lsN` names: bullet or none for the list table's first level, numbers
+    /// otherwise. Without a table entry, `\ls2` is the numbered list (the engine's own writer).
+    fn list_kind(&self, ls: Option<i32>) -> crate::RichListKind {
+        let nfc = ls
+            .and_then(|ls| self.ls_list.get(&ls))
+            .and_then(|id| self.list_first_nfc.get(id));
+        match nfc {
+            Some(&NFC_BULLET | &NFC_NONE) => crate::RichListKind::Bullet,
+            Some(_) => crate::RichListKind::Ordered,
+            None if ls == Some(2) => crate::RichListKind::Ordered,
+            None => crate::RichListKind::Bullet,
+        }
     }
 
     fn body_word(&mut self, word: &str, param: Option<i32>) {
@@ -430,11 +513,7 @@ impl Reader {
             "qr" => self.para.align = Some(RichAlignment::Right),
             "qj" => self.para.align = Some(RichAlignment::Justify),
             "ls" => {
-                self.para.list = Some(if param == Some(2) {
-                    crate::RichListKind::Ordered
-                } else {
-                    crate::RichListKind::Bullet
-                });
+                self.para.list = Some(self.list_kind(param));
             }
             "li" => {
                 self.para.left_indent =
@@ -495,6 +574,26 @@ impl Reader {
         }
     }
 
+    /// The character of a `\'hh` byte that is not half of a CP949 pair. Windows-1252 and the
+    /// ASCII range decode; any other code page is reported once and its high bytes become U+FFFD
+    /// (the engine has no table for them, and a guess would show wrong letters).
+    fn single_byte_char(&mut self, byte: u8) -> char {
+        if byte < 0x80 {
+            return char::from(byte);
+        }
+        match self.code_page {
+            1252 => match byte {
+                0x80..=0x9F => WINDOWS_1252_HIGH[usize::from(byte - 0x80)],
+                _ => char::from(byte),
+            },
+            DEFAULT_CODE_PAGE => char::from(byte),
+            _ => {
+                self.unsupported_code_page = true;
+                '\u{FFFD}'
+            }
+        }
+    }
+
     fn escape_symbol(&mut self, rest: &str) -> usize {
         let Some(sym) = rest.chars().next() else {
             return 0;
@@ -512,17 +611,20 @@ impl Reader {
                     .filter(|_| escape_len(rest) == 3)
                     .and_then(|h| u8::from_str_radix(h, 16).ok());
                 if let Some(b1) = hex {
-                    if let Some(b2) = rest
-                        .get(3..7)
-                        .and_then(|s| s.strip_prefix("\\'"))
-                        .and_then(|h| u8::from_str_radix(h, 16).ok())
-                    {
-                        if let Some(ch) = crate::cp949::decode_cp949_pair(b1, b2) {
-                            self.emit(ch.encode_utf8(&mut buf));
-                            return 7;
+                    if self.code_page == DEFAULT_CODE_PAGE {
+                        if let Some(b2) = rest
+                            .get(3..7)
+                            .and_then(|s| s.strip_prefix("\\'"))
+                            .and_then(|h| u8::from_str_radix(h, 16).ok())
+                        {
+                            if let Some(ch) = crate::cp949::decode_cp949_pair(b1, b2) {
+                                self.emit(ch.encode_utf8(&mut buf));
+                                return 7;
+                            }
                         }
                     }
-                    self.emit(char::from(b1).encode_utf8(&mut buf));
+                    let ch = self.single_byte_char(b1);
+                    self.emit(ch.encode_utf8(&mut buf));
                 }
             }
             _ => {}
@@ -665,6 +767,12 @@ pub(crate) fn read_rtf(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Easy
         reader.title.trim().to_string()
     };
     let mut warnings = vec!["표 셀 서식·그림·머리말은 가져오지 않았습니다.".to_string()];
+    if reader.unsupported_code_page {
+        warnings.push(format!(
+            "코드 페이지 {}의 글자는 변환표가 없어 가져오지 못했습니다(\u{FFFD}로 표시).",
+            reader.code_page
+        ));
+    }
     if reader.merges_dropped > 0 {
         warnings.push(format!(
             "표의 병합 {}곳은 범위를 벗어나거나 겹쳐 가져오지 않았습니다.",
