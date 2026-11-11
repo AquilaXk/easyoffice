@@ -434,6 +434,12 @@ pub(crate) fn parse_md_inline(text: &str) -> Vec<RichRun> {
     scanner.runs
 }
 
+/// A table cell holds text only: the inline syntax is resolved like a paragraph's and the
+/// formatting it set (bold, italic, code, link, script) is dropped, the text stays.
+fn inline_plain_text(cell: &str) -> String {
+    parse_md_inline(cell).into_iter().map(|r| r.text).collect()
+}
+
 fn paragraph(text: &str, heading: u8, list: Option<RichListKind>) -> RichBlock {
     RichBlock::Paragraph(RichParagraph {
         runs: parse_md_inline(text),
@@ -599,7 +605,7 @@ pub(crate) fn read_markdown(text: &str) -> Result<Vec<RichBlock>, EasyOfficeErro
                     break;
                 };
                 if !(rows.len() == 1 && is_separator_row(&cells)) {
-                    rows.push(cells);
+                    rows.push(cells.iter().map(|c| inline_plain_text(c)).collect());
                     if rows.len() > MAX_MARKDOWN_BLOCKS {
                         return Err(EasyOfficeError::ResourceBudgetExceeded(
                             "Markdown 블록 수가 허용 예산을 초과했습니다.".to_string(),

@@ -481,16 +481,29 @@ pub(crate) fn pack_odt_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeErr
 
 fn escape_markdown_inline(text: &str) -> String {
     let mut out = String::with_capacity(text.len() + 8);
-    for ch in text.chars() {
-        if matches!(
-            ch,
-            '\\' | '`' | '*' | '_' | '~' | '[' | ']' | '<' | '>' | '|' | '#' | '!'
-        ) {
+    let mut prev = None;
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        // `^` opens a superscript and `==` a highlight in the reader; a lone `=` is plain text.
+        let doubled_equals = ch == '=' && (prev == Some('=') || chars.peek() == Some(&'='));
+        if doubled_equals
+            || matches!(
+                ch,
+                '\\' | '`' | '*' | '_' | '~' | '^' | '[' | ']' | '<' | '>' | '|' | '#' | '!'
+            )
+        {
             out.push('\\');
         }
         out.push(ch);
+        prev = Some(ch);
     }
     out
+}
+
+/// Table cell text as Markdown: inline marks escaped, except `|`, which the table renderer
+/// escapes itself.
+fn escape_markdown_cell(text: &str) -> String {
+    escape_markdown_inline(text).replace("\\|", "|")
 }
 
 /// Escapes characters that would start a block construct at the beginning of a line.
@@ -612,9 +625,12 @@ pub(crate) fn render_markdown_rich(doc: &RichDocument) -> String {
                 flush(&mut parts, &mut list_buf);
                 ordinal = 0;
                 if table.rows.iter().any(|r| !r.is_empty()) {
-                    parts.push(CommonMarkCodec::render(&[MarkdownBlock::Table(
-                        table.rows.clone(),
-                    )]));
+                    let rows = table
+                        .rows
+                        .iter()
+                        .map(|row| row.iter().map(|c| escape_markdown_cell(c)).collect())
+                        .collect();
+                    parts.push(CommonMarkCodec::render(&[MarkdownBlock::Table(rows)]));
                 }
             }
         }
