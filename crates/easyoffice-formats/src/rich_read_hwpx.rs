@@ -504,7 +504,13 @@ impl SectionWalker {
 }
 
 impl SectionWalker {
-    fn on_start(&mut self, name: &str, attrs: &[(String, String)]) {
+    fn on_start(
+        &mut self,
+        name: &str,
+        attrs: &[(String, String)],
+        header: &Header,
+        blocks: &mut Vec<RichBlock>,
+    ) {
         match name {
             "hp:p" => self.paras.push(ParaState {
                 runs: Vec::new(),
@@ -522,6 +528,9 @@ impl SectionWalker {
             "hp:nbSpace" | "hp:fwSpace" if self.t_depth > 0 => push_text(&mut self.runs, " "),
             "hp:hyphen" if self.t_depth > 0 => push_text(&mut self.runs, "-"),
             "hp:tbl" => {
+                if self.tbl_depth == 0 {
+                    self.flush_text_before_table(header, blocks);
+                }
                 self.tbl_depth += 1;
                 if self.tbl_depth == 1 {
                     self.placed.clear();
@@ -599,7 +608,7 @@ impl SectionWalker {
     }
 
     fn finish_paragraph(&mut self, header: &Header, blocks: &mut Vec<RichBlock>) {
-        let Some(mut p) = self.paras.pop() else {
+        let Some(p) = self.paras.pop() else {
             return;
         };
         if self.tbl_depth > 0 {
@@ -607,12 +616,38 @@ impl SectionWalker {
                 .push(p.runs.iter().map(|r| r.text.as_str()).collect());
             return;
         }
-        let images = std::mem::take(&mut p.images);
-        if p.runs.iter().any(|r| !r.text.trim().is_empty()) {
-            blocks.push(RichBlock::Paragraph(finish_paragraph(header, p)));
-        }
-        blocks.extend(images.into_iter().map(RichBlock::Image));
+        push_paragraph_blocks(header, p, blocks);
     }
+
+    /// A table is written inside the paragraph that holds it, but the paragraph is only complete
+    /// at its end tag, after the table. The text (and pictures) before the table become their
+    /// own paragraph now, so the table block follows them; what comes after the table is read
+    /// as a paragraph of its own.
+    fn flush_text_before_table(&mut self, header: &Header, blocks: &mut Vec<RichBlock>) {
+        if let (Some(run), Some(top)) = (self.runs.last_mut(), self.paras.last_mut()) {
+            let fmt = header.chars.get(&run.char_pr).cloned().unwrap_or_default();
+            push_run(&mut top.runs, &std::mem::take(&mut run.text), &fmt);
+        }
+        let Some(top) = self.paras.last_mut() else {
+            return;
+        };
+        let before = ParaState {
+            runs: std::mem::take(&mut top.runs),
+            para_pr: top.para_pr.clone(),
+            style: top.style.clone(),
+            images: std::mem::take(&mut top.images),
+        };
+        push_paragraph_blocks(header, before, blocks);
+    }
+}
+
+/// The paragraph block (when it has text) and its pictures, in that order.
+fn push_paragraph_blocks(header: &Header, mut p: ParaState, blocks: &mut Vec<RichBlock>) {
+    let images = std::mem::take(&mut p.images);
+    if p.runs.iter().any(|r| !r.text.trim().is_empty()) {
+        blocks.push(RichBlock::Paragraph(finish_paragraph(header, p)));
+    }
+    blocks.extend(images.into_iter().map(RichBlock::Image));
 }
 
 fn read_section(
@@ -643,7 +678,7 @@ fn read_section(
                     i = skip_subtree(&events, i);
                     continue;
                 }
-                walker.on_start(name, attrs);
+                walker.on_start(name, attrs, header, blocks);
             }
             XmlEvent::Text(text) => walker.on_text(text),
             XmlEvent::End(name) => walker.on_end(name, header, blocks),
