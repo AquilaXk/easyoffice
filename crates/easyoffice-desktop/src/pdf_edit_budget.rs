@@ -12,8 +12,10 @@ use std::time::{Duration, Instant};
 
 const MIB: usize = 1_048_576;
 
-/// Largest single PDF that is opened or merged (bytes).
-pub const MAX_SOURCE_BYTES: usize = 64 * MIB;
+/// Largest single PDF that is opened or merged (bytes). The PDF window opens a file up to the same
+/// size (`WindowKind::max_open_bytes`; a test in `windows.rs` keeps the two equal; this file is
+/// also included by path in a test crate, so it cannot name that constant).
+pub const MAX_SOURCE_BYTES: usize = 10 * MIB;
 /// Largest sum of the PDFs one window keeps open for editing (bytes).
 pub const MAX_SESSION_BYTES: usize = 256 * MIB;
 /// Most PDFs one window edits together (the first one plus merged ones).

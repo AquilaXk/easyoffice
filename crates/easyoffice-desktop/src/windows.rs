@@ -667,6 +667,17 @@ mod tests {
         );
     }
 
+    /// The PDF window opens a file up to the page's limit, and the PDF editor takes the same file
+    /// as its source: one number, so no file is opened that cannot be edited and none is refused
+    /// by one side that the other would take.
+    #[test]
+    fn the_pdf_window_and_the_pdf_editor_take_the_same_source_size() {
+        assert_eq!(
+            crate::pdf_edit_budget::MAX_SOURCE_BYTES as u64,
+            WindowKind::Pdf.max_open_bytes()
+        );
+    }
+
     #[test]
     fn a_prompt_is_confirmed_from_the_pages_answer_until_it_ends() {
         let (mut reg, now) = dirty_window();

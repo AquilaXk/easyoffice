@@ -346,10 +346,11 @@ fn a_hundred_pages_merge_in_a_moment() {
 
 #[test]
 fn a_hundred_heavy_pages_merge_without_touching_their_pictures() {
-    // Two reports of 50 pages: 400 KiB of drawing operators and a 300 KiB picture on every page.
+    // Two reports of 50 pages, each below the source limit: 100 KiB of drawing operators and a
+    // 60 KiB picture on every page.
     let (first, second) = (
-        heavy_pdf(50, 400 * 1024, 300 * 1024),
-        heavy_pdf(50, 400 * 1024, 300 * 1024),
+        heavy_pdf(50, 100 * 1024, 60 * 1024),
+        heavy_pdf(50, 100 * 1024, 60 * 1024),
     );
     let input = first.len() + second.len();
     let mut session = open(first);
@@ -365,7 +366,7 @@ fn a_hundred_heavy_pages_merge_without_touching_their_pictures() {
     assert_eq!(read(&out).pages().len(), 100);
     // Every picture is in the result byte for byte (the pictures are copied, not decoded), and the
     // size is what the inputs add up to, give or take the page contents' new compression.
-    assert_eq!(all_pictures_len(&out, 300 * 1024), 100);
+    assert_eq!(all_pictures_len(&out, 60 * 1024), 100);
     assert!(out.len() < input + input / 4, "{} vs {input}", out.len());
     assert!(elapsed < std::time::Duration::from_secs(60), "{elapsed:?}");
 }
