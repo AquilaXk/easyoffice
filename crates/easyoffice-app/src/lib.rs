@@ -14,6 +14,7 @@ mod benchmark_baselines;
 pub mod benchmark_large;
 pub mod benchmark_real;
 pub mod cli_args;
+mod convert_hwp;
 mod convert_ipc;
 mod convert_open;
 mod convert_structured;
@@ -36,6 +37,7 @@ mod sheet_session;
 pub mod smart_tools;
 
 pub use benchmark::*;
+pub use convert_hwp::{RichHwpWriter, ShellWriters};
 pub use convert_structured::RichPdfRenderer;
 pub use ffi::*;
 pub use http_server::{
@@ -54,7 +56,7 @@ pub struct EasyOfficeIpcRouter;
 
 impl EasyOfficeIpcRouter {
     pub fn dispatch(command: &str, payload: &str) -> Result<String, EasyOfficeError> {
-        Self::dispatch_inner(command, payload, "", None)
+        Self::dispatch_inner(command, payload, "", ShellWriters::default())
     }
 
     /// Like [`Self::dispatch`], tagging state the command creates with `owner` (a window label) so
@@ -64,7 +66,7 @@ impl EasyOfficeIpcRouter {
         payload: &str,
         owner: &str,
     ) -> Result<String, EasyOfficeError> {
-        Self::dispatch_inner(command, payload, owner, None)
+        Self::dispatch_inner(command, payload, owner, ShellWriters::default())
     }
 
     /// [`Self::dispatch`] for a host that can draw pages: a rich document converted to PDF is
@@ -75,24 +77,30 @@ impl EasyOfficeIpcRouter {
         payload: &str,
         renderer: &RichPdfRenderer<'_>,
     ) -> Result<String, EasyOfficeError> {
-        Self::dispatch_inner(command, payload, "", Some(renderer))
+        let writers = ShellWriters {
+            pdf: Some(renderer),
+            hwp: None,
+        };
+        Self::dispatch_inner(command, payload, "", writers)
     }
 
-    /// [`Self::dispatch_for_owner`] with the page renderer of [`Self::dispatch_with_pdf_renderer`].
-    pub fn dispatch_for_owner_with_pdf_renderer(
+    /// [`Self::dispatch_for_owner`] with the writers of a host that has the Hangul layout core:
+    /// the page renderer of [`Self::dispatch_with_pdf_renderer`] and the HWP 5.0 writer (PD-172),
+    /// without which `.hwp` targets are refused.
+    pub fn dispatch_for_owner_with_shell_writers(
         command: &str,
         payload: &str,
         owner: &str,
-        renderer: &RichPdfRenderer<'_>,
+        writers: ShellWriters<'_>,
     ) -> Result<String, EasyOfficeError> {
-        Self::dispatch_inner(command, payload, owner, Some(renderer))
+        Self::dispatch_inner(command, payload, owner, writers)
     }
 
     fn dispatch_inner(
         command: &str,
         payload: &str,
         owner: &str,
-        renderer: Option<&RichPdfRenderer<'_>>,
+        writers: ShellWriters<'_>,
     ) -> Result<String, EasyOfficeError> {
         // The same ceiling the HTTP server puts on a request body. The desktop shell calls this
         // directly, so the check lives here: no command decodes or parses what the server would
@@ -118,7 +126,7 @@ impl EasyOfficeIpcRouter {
             "switch_ribbon_style" => Self::handle_switch_ribbon_style(payload),
             "run_smart_assistant" => Self::handle_run_smart_assistant(payload),
             "scrub_pii" => Self::handle_scrub_pii(payload),
-            "convert_document_format" => Self::handle_convert_document_format(payload, renderer),
+            "convert_document_format" => Self::handle_convert_document_format(payload, writers),
             "get_ribbon_category_commands" => Self::handle_get_ribbon_category_commands(payload),
             "run_engine_benchmark" => Self::handle_run_engine_benchmark(payload),
             other => Err(EasyOfficeError::InvalidArgument(format!(

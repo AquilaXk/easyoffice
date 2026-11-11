@@ -7,6 +7,7 @@
 mod app_commands;
 mod app_quit;
 mod confirm_dialog;
+mod doc_hwp;
 mod doc_pdf;
 mod doc_pdf_marks;
 mod font_catalog;
@@ -70,7 +71,7 @@ mod menu_state {
     pub fn forget(_app: &AppHandle, _label: &str) {}
 }
 
-use easyoffice_app::EasyOfficeIpcRouter;
+use easyoffice_app::{EasyOfficeIpcRouter, ShellWriters};
 use easyoffice_formats::PdfWriteOptions;
 use save_error::SaveError;
 use save_file::{save_in_place, write_document_bytes, InPlaceResult, SaveOutcome, SaveRequest};
@@ -117,11 +118,19 @@ async fn ipc_dispatch(
     let font_dirs = pdf_job::pdf_font_dirs(&app);
     let result = tauri::async_runtime::spawn_blocking(move || {
         // A rich document converted to PDF is laid out and drawn here (PD-167); the engine keeps
-        // its own PDF as the fallback. The font database is built when a PDF is first drawn.
+        // its own PDF as the fallback. The font database is built when a PDF is first drawn. A
+        // document converted to HWP is written by rhwp here (PD-172); there is no fallback.
         let draw = |hwpx: &[u8], options: &PdfWriteOptions| {
             doc_pdf::hwpx_to_pdf(hwpx, options, &pdf_fonts::shared_font_db(&font_dirs))
         };
-        EasyOfficeIpcRouter::dispatch_for_owner_with_pdf_renderer(&command, &payload, &owner, &draw)
+        let save_hwp = |hwpx: &[u8]| doc_hwp::hwpx_to_hwp(hwpx);
+        let writers = ShellWriters {
+            pdf: Some(&draw),
+            hwp: Some(&save_hwp),
+        };
+        EasyOfficeIpcRouter::dispatch_for_owner_with_shell_writers(
+            &command, &payload, &owner, writers,
+        )
     })
     .await
     .map_err(|err| IpcError::new(format!("엔진 작업을 실행하지 못했습니다: {err}")))?

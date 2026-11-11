@@ -208,7 +208,10 @@ impl UniversalFormatConverter {
                 if model.sheet_cells.is_empty() {
                     LegacyOle2Codec::pack_xls_multi_values(std::slice::from_ref(&payload))
                 } else {
-                    LegacyOle2Codec::pack_xls(&payload)
+                    LegacyOle2Codec::pack_xls_multi_with_formula_cache(
+                        std::slice::from_ref(&payload),
+                        formula_cache.map(std::slice::from_ref).unwrap_or_default(),
+                    )
                 }
             }
             DocumentFormat::Ods => OdfCodec::pack_ods_multi_styled_with_cache(

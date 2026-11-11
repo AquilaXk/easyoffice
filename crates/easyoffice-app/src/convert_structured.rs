@@ -25,6 +25,7 @@ use easyoffice_sheet::{
     EvaluatedCellValue, PackedCellCoordinate, WorkbookEngine, WorkbookEvalTarget,
 };
 
+use crate::convert_hwp::{write_hwp, ShellWriters};
 use crate::convert_ipc::compute_xlsx_formula_cache;
 use crate::convert_structured_doc::{is_document_format, parse_pdf_options, slides_to_document};
 
@@ -844,17 +845,22 @@ fn host_draws_pdf(
 }
 
 /// [`encode_structured`], except that a document converted to PDF is drawn by `renderer` when
-/// there is one (see [`host_draws_pdf`]). When the renderer fails the engine PDF is written and
+/// there is one (see [`host_draws_pdf`]), and a document converted to HWP 5.0 is written by
+/// `writers.hwp` (PD-172). When the renderer fails the engine PDF is written and
 /// `warnings` says why.
 pub(crate) fn encode_target(
     content: &StructuredContent,
     format: DocumentFormat,
     source: DocumentFormat,
     title: &str,
-    renderer: Option<&RichPdfRenderer<'_>>,
+    writers: ShellWriters<'_>,
     warnings: &mut Vec<String>,
 ) -> Result<Vec<u8>, EasyOfficeError> {
-    if let (Some(render), StructuredContent::Document(doc, options)) = (renderer, content) {
+    if format == DocumentFormat::Hwp {
+        let hwpx = encode_structured(content, DocumentFormat::Hwpx, title, warnings)?;
+        return write_hwp(&hwpx, writers.hwp);
+    }
+    if let (Some(render), StructuredContent::Document(doc, options)) = (writers.pdf, content) {
         if host_draws_pdf(format, source, options) {
             match render_document(doc, title, options, render) {
                 Ok(pdf) => return Ok(pdf),

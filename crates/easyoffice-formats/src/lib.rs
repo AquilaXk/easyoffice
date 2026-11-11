@@ -1,6 +1,7 @@
 use std::fmt;
 
 pub mod base64_codec;
+mod biff8_formula;
 pub mod biff8_xls_codec;
 pub mod converter;
 pub(crate) mod cp949;

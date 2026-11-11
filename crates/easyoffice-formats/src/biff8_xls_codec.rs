@@ -1,9 +1,9 @@
+use crate::biff8_formula::{checked_rgce, formula_records, formula_text, FORMULA_FIXED_LEN};
 use crate::decode_budget::DecodeBudget;
 use crate::ole2_codec::{
-    decode_utf16le, encode_utf16le, read_u16_le, read_u32_le, read_u64_le, write_u32_le,
-    Ole2ContainerCodec,
+    decode_utf16le, read_u16_le, read_u32_le, read_u64_le, write_u32_le, Ole2ContainerCodec,
 };
-use crate::{DocumentFormat, EasyOfficeError, LegacyOle2Codec};
+use crate::{DocumentFormat, EasyOfficeError, LegacyOle2Codec, XlsxFormulaCache};
 
 /// Legacy `.xls` BIFF8 spreadsheet payload model.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -11,9 +11,6 @@ pub struct LegacyXlsPayload {
     pub sheet_name: String,
     pub cells: Vec<(u32, u32, String)>,
 }
-
-/// Bytes of a FORMULA record besides the expression text: cell, cached value and length fields.
-const BIFF8_FORMULA_FIXED_LEN: usize = 16;
 
 struct SstContinueCursor<'a> {
     chunks: &'a [&'a [u8]],
@@ -266,22 +263,36 @@ impl LegacyOle2Codec {
         Self::pack_xls_multi(std::slice::from_ref(payload))
     }
 
+    /// Writes `=` cells as FORMULA records (token strings, PD-172). A formula outside the token set
+    /// of `biff8_formula` is refused with its cell, never written as text in a formula record.
     pub fn pack_xls_multi(sheets: &[LegacyXlsPayload]) -> Result<Vec<u8>, EasyOfficeError> {
-        Self::pack_xls_multi_inner(sheets, true)
+        Self::pack_xls_multi_with_formula_cache(sheets, &[])
+    }
+
+    /// [`Self::pack_xls_multi`] with the computed result of each formula cell (one cache per
+    /// sheet, keyed by zero-based `(row, col)`) as its cached value.
+    pub fn pack_xls_multi_with_formula_cache(
+        sheets: &[LegacyXlsPayload],
+        caches: &[XlsxFormulaCache],
+    ) -> Result<Vec<u8>, EasyOfficeError> {
+        Self::pack_xls_multi_inner(sheets, true, caches)
     }
 
     pub fn pack_xls_multi_values(sheets: &[LegacyXlsPayload]) -> Result<Vec<u8>, EasyOfficeError> {
-        Self::pack_xls_multi_inner(sheets, false)
+        Self::pack_xls_multi_inner(sheets, false, &[])
     }
 
     fn pack_xls_multi_inner(
         sheets: &[LegacyXlsPayload],
         allow_formulas: bool,
+        caches: &[XlsxFormulaCache],
     ) -> Result<Vec<u8>, EasyOfficeError> {
         if sheets.is_empty() {
             return Err(EasyOfficeError::EmptyPayload);
         }
+        let mut rgces: Vec<Vec<Option<Vec<u8>>>> = Vec::with_capacity(sheets.len());
         for sheet in sheets {
+            let mut sheet_rgces = Vec::with_capacity(sheet.cells.len());
             for &(row, col, ref val) in &sheet.cells {
                 if row > crate::MAX_BIFF8_ROW || col > crate::MAX_BIFF8_COL {
                     return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
@@ -290,16 +301,10 @@ impl LegacyOle2Codec {
                         crate::MAX_BIFF8_COL
                     )));
                 }
-                let formula_text = val.strip_prefix('=').filter(|_| allow_formulas);
-                if let Some(expr) = formula_text {
-                    let record_len = BIFF8_FORMULA_FIXED_LEN + 2 * expr.encode_utf16().count();
-                    if record_len > crate::MAX_BIFF8_RECORD_DATA_LEN {
-                        return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
-                            "BIFF8 수식 레코드({record_len}바이트)가 레코드 한도 {}바이트를 초과했습니다.",
-                            crate::MAX_BIFF8_RECORD_DATA_LEN
-                        )));
-                    }
-                }
+                sheet_rgces.push(match val.strip_prefix('=').filter(|_| allow_formulas) {
+                    Some(expr) => Some(checked_rgce(row, col, expr)?),
+                    None => None,
+                });
                 if val.encode_utf16().count() > 32_765 {
                     return Err(EasyOfficeError::ResourceBudgetExceeded(
                         "BIFF8 셀 문자열 길이가 32,765 UTF-16 코드 유닛 한도를 초과했습니다."
@@ -307,6 +312,7 @@ impl LegacyOle2Codec {
                     ));
                 }
             }
+            rgces.push(sheet_rgces);
         }
 
         let mut stream = Vec::with_capacity(512);
@@ -426,21 +432,12 @@ impl LegacyOle2Codec {
             stream.extend_from_slice(&(max_c.min(u16::MAX as u32) as u16).to_le_bytes()); // last_col + 1
             stream.extend_from_slice(&0u16.to_le_bytes()); // reserved
 
-            for (row, col, raw) in &sheet.cells {
+            for ((row, col, raw), rgce) in sheet.cells.iter().zip(&rgces[sheet_idx]) {
                 let r16 = *row as u16;
                 let c16 = *col as u16;
-                if let Some(expr_str) = raw.strip_prefix('=').filter(|_| allow_formulas) {
-                    let expr_utf16 = encode_utf16le(expr_str);
-                    let rec_len = (BIFF8_FORMULA_FIXED_LEN + expr_utf16.len()) as u16; // checked above
-                    stream.extend_from_slice(&Self::BIFF8_FORMULA.to_le_bytes());
-                    stream.extend_from_slice(&rec_len.to_le_bytes());
-                    stream.extend_from_slice(&r16.to_le_bytes());
-                    stream.extend_from_slice(&c16.to_le_bytes());
-                    stream.extend_from_slice(&0u16.to_le_bytes()); // xf
-                    stream.extend_from_slice(&0.0f64.to_bits().to_le_bytes());
-                    stream
-                        .extend_from_slice(&(expr_str.encode_utf16().count() as u16).to_le_bytes());
-                    stream.extend_from_slice(&expr_utf16);
+                if let Some(rgce) = rgce {
+                    let cached = caches.get(sheet_idx).and_then(|c| c.get(&(*row, *col)));
+                    stream.extend_from_slice(&formula_records(r16, c16, rgce, cached));
                 } else if let Some(num) = Self::parse_finite_f64(raw) {
                     stream.extend_from_slice(&Self::BIFF8_NUMBER.to_le_bytes());
                     stream.extend_from_slice(&14u16.to_le_bytes());
@@ -767,7 +764,8 @@ impl LegacyOle2Codec {
         Ok(())
     }
 
-    /// Extracts the inline `=expr` text stored after a FORMULA record, when present.
+    /// Extracts the inline `=expr` text that older versions of this writer stored after a FORMULA
+    /// record in place of tokens, when present.
     fn xls_formula_inline(data: &[u8], rec: XlsRecord) -> Result<Option<String>, EasyOfficeError> {
         let XlsRecord { start, end } = rec;
         if rec.len() <= 16 {
@@ -837,8 +835,15 @@ impl LegacyOle2Codec {
         let start = rec.start;
         let row = read_u16_le(data, start)? as u32;
         let col = read_u16_le(data, start + 2)? as u32;
-        let text = match Self::xls_formula_inline(data, rec)? {
-            Some(inline) => inline,
+        let has_tokens = rec.len() >= FORMULA_FIXED_LEN
+            && rec.len() == FORMULA_FIXED_LEN + read_u16_le(data, start + 20)? as usize;
+        let expression = if has_tokens {
+            formula_text(&data[start + FORMULA_FIXED_LEN..rec.end])
+        } else {
+            Self::xls_formula_inline(data, rec)?
+        };
+        let text = match expression {
+            Some(expression) => expression,
             None => Self::xls_formula_cached(data, start)?,
         };
         state.budget.charge_cell(text.len(), XLS_BUDGET_WHAT)?;

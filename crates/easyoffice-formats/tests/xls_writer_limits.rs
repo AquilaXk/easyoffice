@@ -121,9 +121,14 @@ fn identical_long_names_stay_distinct_after_truncation() {
     assert_eq!(clean[2], format!("{}_3", "나".repeat(29)));
 }
 
+/// `1+1+...` with `terms` terms: 3 token bytes per integer and one per `+`, so `4 * terms - 1`.
+fn sum_of_ones(terms: usize) -> String {
+    format!("={}", vec!["1"; terms].join("+"))
+}
+
 #[test]
 fn a_formula_that_cannot_fit_one_record_is_refused_not_truncated() {
-    let long = format!("={}", "A".repeat(5_000));
+    let long = sum_of_ones(2_100); // 8,399 token bytes + 22 fixed > 8,224
     let payload = LegacyXlsPayload {
         sheet_name: "수식".to_string(),
         cells: vec![(0, 0, long)],
@@ -134,7 +139,7 @@ fn a_formula_that_cannot_fit_one_record_is_refused_not_truncated() {
         "{err}"
     );
 
-    let max_fit = format!("={}", "A".repeat(4_000));
+    let max_fit = sum_of_ones(2_000); // 7,999 + 22
     let ok = LegacyXlsPayload {
         sheet_name: "수식".to_string(),
         cells: vec![(0, 0, max_fit.clone())],
@@ -144,6 +149,17 @@ fn a_formula_that_cannot_fit_one_record_is_refused_not_truncated() {
         LegacyOle2Codec::unpack_xls(&xls).unwrap().cells[0].2,
         max_fit
     );
+}
+
+#[test]
+fn a_formula_outside_the_token_set_is_refused_with_its_cell() {
+    let payload = LegacyXlsPayload {
+        sheet_name: "수식".to_string(),
+        cells: vec![(0, 0, "1".to_string()), (4, 2, "=Sheet2!A1+1".to_string())],
+    };
+    let err = LegacyOle2Codec::pack_xls(&payload).unwrap_err();
+    assert!(matches!(err, EasyOfficeError::InvalidArgument(_)), "{err}");
+    assert!(err.to_string().contains("행 5, 열 3"), "{err}");
 }
 
 #[test]

@@ -19,7 +19,8 @@ use easyoffice_sheet::PackedCellCoordinate;
 use std::collections::HashSet;
 use std::fmt::Write;
 
-use crate::convert_structured::{encode_source_target, RichPdfRenderer, StructuredContent};
+use crate::convert_hwp::ShellWriters;
+use crate::convert_structured::{encode_source_target, StructuredContent};
 use crate::convert_structured_doc::parse_pdf_options;
 use crate::EasyOfficeIpcRouter;
 
@@ -406,7 +407,7 @@ impl EasyOfficeIpcRouter {
     pub(crate) fn handle_source_file_request(
         entries: &JsonEntries,
         source_base64: &str,
-        renderer: Option<&RichPdfRenderer<'_>>,
+        writers: ShellWriters<'_>,
     ) -> Result<String, EasyOfficeError> {
         let b64 = source_base64.trim();
         if b64.len() > MAX_SOURCE_BYTES / 3 * 4 + 8 {
@@ -484,7 +485,7 @@ impl EasyOfficeIpcRouter {
             dst_fmt,
             src_fmt,
             &title,
-            renderer,
+            writers,
             &mut warnings,
         )?;
         Self::conversion_response(src_fmt, dst_fmt, bytes.len(), &dst_bytes, &warnings)

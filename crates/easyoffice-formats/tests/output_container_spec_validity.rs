@@ -536,10 +536,19 @@ fn csv_output_starts_with_utf8_bom_and_round_trips() {
 // ---------------------------------------------------------------- DOC / PPT
 
 #[test]
-fn legacy_doc_and_ppt_outputs_report_standard_compatibility() {
+fn engine_hwp_writer_reports_limited_and_the_rest_report_standard() {
     for fmt in DocumentFormat::ALL {
-        assert_eq!(fmt.output_compatibility(), OutputCompatibility::Standard);
-        assert_eq!(fmt.output_specification(), fmt.standard_specification());
+        if matches!(fmt, DocumentFormat::Hwp | DocumentFormat::Hwt) {
+            // The engine's HWP container has no DocInfo mappings, shapes or 22-byte PARA_HEADER, so
+            // it is not an HWP 5.0 file other readers must accept (PD-172).
+            let compatibility = fmt.output_compatibility();
+            assert_eq!(compatibility.as_str(), "limited", "{fmt:?}");
+            assert!(compatibility.warning().is_some_and(|w| !w.is_empty()));
+            assert_ne!(fmt.output_specification(), fmt.standard_specification());
+        } else {
+            assert_eq!(fmt.output_compatibility(), OutputCompatibility::Standard);
+            assert_eq!(fmt.output_specification(), fmt.standard_specification());
+        }
     }
     assert!(OutputCompatibility::Standard.warning().is_none());
     assert_eq!(OutputCompatibility::Limited("사유").as_str(), "limited");

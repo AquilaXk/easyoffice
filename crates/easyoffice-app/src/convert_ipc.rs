@@ -4,8 +4,9 @@ use easyoffice_formats::{
 };
 use easyoffice_sheet::{EvaluatedCellValue, PackedCellCoordinate, SheetEngine};
 
+use crate::convert_hwp::{write_hwp, written_compatibility, ShellWriters};
 use crate::convert_structured::{
-    encode_structured, encode_target, parse_structured_content, RichPdfRenderer, StructuredContent,
+    encode_structured, encode_target, parse_structured_content, StructuredContent,
 };
 use crate::EasyOfficeIpcRouter;
 
@@ -152,7 +153,7 @@ impl LegacyBodyAccumulator {
 impl EasyOfficeIpcRouter {
     pub(crate) fn handle_convert_document_format(
         payload: &str,
-        renderer: Option<&RichPdfRenderer<'_>>,
+        writers: ShellWriters<'_>,
     ) -> Result<String, EasyOfficeError> {
         let trimmed = payload.strip_prefix('\u{FEFF}').unwrap_or(payload).trim();
         let mut structured: Option<StructuredContent> = None;
@@ -160,7 +161,7 @@ impl EasyOfficeIpcRouter {
         let (src_owned, dst_owned, title_owned, body_owned) = if trimmed.starts_with('{') {
             let entries = Self::parse_rpc_json_object(trimmed)?;
             if let Some(b64) = Self::optional_json_str(&entries, "sourceBase64")? {
-                return Self::handle_source_file_request(&entries, b64, renderer);
+                return Self::handle_source_file_request(&entries, b64, writers);
             }
             if Self::optional_json_str(&entries, "action")? == Some("decode") {
                 return Err(EasyOfficeError::InvalidArgument(
@@ -261,7 +262,7 @@ impl EasyOfficeIpcRouter {
         // document is not encoded a second time.
         let (source_len, dst_bytes) = if let Some(content) = &structured {
             let dst_bytes =
-                encode_target(content, dst_fmt, src_fmt, title, renderer, &mut warnings)?;
+                encode_target(content, dst_fmt, src_fmt, title, writers, &mut warnings)?;
             let source_len = if size_fmt == dst_fmt {
                 dst_bytes.len()
             } else {
@@ -271,9 +272,12 @@ impl EasyOfficeIpcRouter {
             (source_len, dst_bytes)
         } else {
             let model = Self::legacy_body_model(body, title);
-            let formula_cache = if matches!(size_fmt, DocumentFormat::Xlsx | DocumentFormat::Ods)
-                || matches!(dst_fmt, DocumentFormat::Xlsx | DocumentFormat::Ods)
-            {
+            let cached = [
+                DocumentFormat::Xlsx,
+                DocumentFormat::Ods,
+                DocumentFormat::Xls,
+            ];
+            let formula_cache = if cached.contains(&size_fmt) || cached.contains(&dst_fmt) {
                 Some(compute_xlsx_formula_cache(&model))
             } else {
                 None
@@ -285,7 +289,12 @@ impl EasyOfficeIpcRouter {
                     formula_cache.as_ref(),
                 )
             };
-            let dst_bytes = encode(dst_fmt)?;
+            let dst_bytes = if dst_fmt == DocumentFormat::Hwp {
+                let hwpx = UniversalFormatConverter::encode(&model, DocumentFormat::Hwpx)?;
+                write_hwp(&hwpx, writers.hwp)?
+            } else {
+                encode(dst_fmt)?
+            };
             let source_len = if size_fmt == dst_fmt {
                 dst_bytes.len()
             } else {
@@ -324,7 +333,7 @@ impl EasyOfficeIpcRouter {
         let (detected_dst, decoded) =
             UniversalFormatConverter::decode(dst_bytes, Some(dst_fmt.extension()))?;
         let b64 = Self::encode_base64(dst_bytes);
-        let compatibility = dst_fmt.output_compatibility();
+        let (compatibility, specification) = written_compatibility(dst_fmt);
         let compatibility_warning = compatibility.warning().map_or_else(
             || "null".to_string(),
             |w| format!("\"{}\"", Self::escape_json_str(w)),
@@ -358,7 +367,7 @@ impl EasyOfficeIpcRouter {
             dst_bytes.len(),
             detected_dst.extension(),
             dst_fmt.container_family().as_str(),
-            dst_fmt.output_specification(),
+            specification,
             compatibility.as_str(),
             compatibility_warning,
             decoded.paragraphs.len(),
@@ -415,6 +424,34 @@ mod tests {
         assert!(sheet.contains("<c r=\"B2\"><f>A3/0</f></c>"), "{sheet}");
         assert!(json.contains("\"compatibility\":\"standard\""));
         assert!(json.contains("\"compatibilityWarning\":null"));
+    }
+
+    #[test]
+    fn xls_target_writes_formula_tokens_with_the_computed_result() {
+        let json = EasyOfficeIpcRouter::dispatch(
+            "convert_document_format",
+            r#"{"sourceFormat":"xlsx","targetFormat":"xls","title":"수식","body":"[[SHEET_A1]]\tA1\t10\n[[SHEET_A1]]\tA2\t32\n[[SHEET_A1]]\tA3\t=SUM(A1:A2)"}"#,
+        )
+        .unwrap();
+        let bytes =
+            EasyOfficeIpcRouter::decode_base64(json_str_field(&json, "convertedBase64")).unwrap();
+        let workbook = easyoffice_formats::Ole2ContainerCodec::unpack(&bytes)
+            .unwrap()
+            .into_iter()
+            .find(|s| s.name == "Workbook")
+            .unwrap()
+            .data;
+        // FORMULA (0x0006): A3 = row 2, column 0; result 42.0; tokens ptgArea(A1:A2) ptgFuncVar SUM.
+        let record = workbook
+            .windows(6)
+            .position(|w| w == [0x06, 0x00, 0x23, 0x00, 0x02, 0x00])
+            .expect("FORMULA record for A3");
+        let body = &workbook[record + 4..record + 4 + 0x23];
+        assert_eq!(&body[6..14], 42.0f64.to_le_bytes());
+        assert_eq!(
+            &body[22..],
+            [0x25, 0, 0, 1, 0, 0, 0xC0, 0, 0xC0, 0x42, 1, 4, 0]
+        );
     }
 
     #[test]

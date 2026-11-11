@@ -649,7 +649,7 @@ mod tests {
 
         let hwp_conv_json = EasyOfficeIpcRouter::dispatch(
             "convert_document_format",
-            "docx->hwp|공문서|본문문단\n[[AGENCY]]\t행정안전부\n[[TABLE_NEW]]\n[[TABLE_ROW]]\t구분\t비고\n[[TABLE_ROW]]\t승인\t정상",
+            "docx->hwt|공문서|본문문단\n[[AGENCY]]\t행정안전부\n[[TABLE_NEW]]\n[[TABLE_ROW]]\t구분\t비고\n[[TABLE_ROW]]\t승인\t정상",
         )
         .unwrap();
         assert!(hwp_conv_json.contains("\"tableCount\":1"));

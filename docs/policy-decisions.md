@@ -2727,3 +2727,15 @@
   11. **PDF 내보내기의 굵게·기울임 분석 복사본은 그림을 풀지 않습니다**: 스타일시트가 있는 쪽은 분석용 복사본에서도 글자를 숨길 수 없지만 그림은 항상 숨깁니다(`pdf_synthetic::parse_page`). 이전에는 스타일시트가 있으면 그림을 숨기지 않아, 분석 파싱과 본 파싱이 같은 쪽 그림 예산(`RasterBudget`)을 두 번 차감해 본 파싱에서 그림이 빠질 수 있었습니다. 분석 결과가 편집을 만들지 않는 쪽은 원본을 한 번 더 파싱합니다.
 - **Why** 열기에 실패한 빈 창이 원본을 덮어쓰면 원본 데이터를 잃습니다. 셸이 읽은 파일을 페이지가 거부하는 경우는 한도, 손상, 암호 취소로 여럿이므로, 거부 사유와 상관없이 이 길을 닫아 둡니다.
 - **Verified by** `cargo test -p easyoffice-desktop`: `windows`(경로 해제 후 다른 창이 점유, 확인 응답 조회), `window_commands`(포기한 열기가 추적·대기·점유를 놓음, 종류별 열기 한도 경계, 링크로 연 파일의 이름, 창 명령 목록), `save_file`(링크를 통한 저장과 끊긴 링크), `tracked_files`(확장자 비교), `app_quit`(확인 응답한 창은 정체가 아님), `update_check`(사전 릴리스 빌드의 비교), `font_catalog`(목록을 다시 받아도 예산 유지, 파이프 거부), `pdf_export`(스타일시트 쪽의 그림 한 번 차감), `cargo test -p easyoffice-app a_payload_over`(상한 초과 페이로드는 모든 명령이 거부하고 상한 크기는 명령까지 도달), `node --test scripts/test-webui-windows.mjs scripts/test-webui-desktop-bridge.mjs`(11 MiB DOCX·깨진 문서·암호 취소는 `abandon_tracked_open` 한 번, 열린 문서는 부르지 않음, 이름 없는 문서의 저장은 `inPlace: false`), `node --test scripts/test-file-size-limits.mjs`(셸·페이지·엔진 한도 일치).
+
+## PD-178. 포맷 호환 보고와 라운드트립 손실 정정 (엔진 HWP·XLS 수식, DOCX·ODT 목록, XLSX·ODS 셀 읽기, 시트 쓰기 셀 타입, XML·RTF·PPTX 파서)
+
+- **Status** Implemented (항목별 커밋, 아래 번호)
+- **Context** 외부 점검이 쓰기·읽기 경로의 포맷 호환 주장을 지적했습니다. 항목마다 사실을 확인하고 명세·독립 구현(rhwp, 다른 스프레드시트 프로그램의 읽기)으로 검증했습니다.
+- **Decision (`PD-172`)**
+  1. **엔진 HWP 컨테이너는 HWP 5.0이 아니다 (사실)**: `Hwp5Codec`의 DocInfo에는 ID_MAPPINGS·글자 모양·문단 모양이 없고 문단 머리는 22바이트가 아니라 자체 UTF-16 구조입니다. rhwp는 관대한 읽기로 열지만 첫 문단의 끝 글자가 빠졌습니다(`본문 하나` → `본문 하`). `.hwp` 변환은 엔진이 HWPX로 쓰고 셸이 rhwp로 HWP를 직렬화합니다(편집기가 HWPX를 HWP로 저장하는 같은 경로, `export_hwp_with_adapter_snapshot`). 쓴 바이트는 rhwp로 다시 열어 쪽이 있는지 확인한 뒤에만 내보냅니다. 셸이 없는 `--serve`는 `.hwp` 대상을 거부합니다(대체 없음). 엔진 컨테이너가 남는 `.hwt`와 엔진 API의 `output_compatibility`는 `limited`와 사유를 보고하고 화면은 기존 `호환성 제한` 문구로 보입니다.
+  2. **BIFF8 FORMULA는 토큰이어야 한다 (사실)**: 쓰기 레코드는 고정부가 16바이트(grbit·chn 누락)이고 식이 UTF-16 글자였습니다. 다른 스프레드시트 프로그램이 `Err:520`으로 읽었습니다. MS-XLS 2.4.127대로 22바이트 고정부와 `rgce`를 씁니다. 토큰 집합은 숫자·문자열·불리언·셀/범위(`$` 유지)·사칙·`^`·`&`·비교·단항 부호·괄호와 함수 28개(합계·평균·IF·ROUND 등)입니다. 집합 밖 식은 셀 위치와 함께 거부합니다(텍스트로 쓰지 않음). 계산된 값은 캐시로 쓰고(숫자·불리언·STRING 레코드) 모든 수식에 `fAlwaysCalc`를 켭니다. 읽기는 같은 집합이면 식 텍스트를, 그 밖의 토큰은 캐시 값을 돌려줍니다. 구버전이 쓴 인라인 텍스트 레코드도 계속 읽습니다.
+- **Why** 한글·스프레드시트 프로그램이 열지 못하는 파일을 표준이라 부르지 않습니다. 새 직렬화 코드를 짜지 않고 rhwp와 MS-XLS 명세를 따릅니다(구현 원칙 3단계: 허용 라이선스의 XLS 쓰기 크레이트는 엔진 무의존 원칙으로 제외, 이미 쓰는 rhwp에 HWP 직렬화가 있어 셸에서 사용, XLS 토큰은 명세 기준으로 작성).
+- **Trade-offs** HWP 변환은 셸이 있어야 하고 한 번에 HWPX 50 MiB까지입니다(32 MiB 스택 스레드). 엔진 XLS 읽기가 같은 토큰 집합의 수식을 식으로 돌려주므로 실제 XLS를 열 때 캐시 값 대신 식이 보일 수 있습니다(시트가 다시 계산).
+- **Verified by** `cargo test -p easyoffice-desktop doc_hwp`(rhwp가 변환 결과를 읽어 문단·표 글자를 확인), `-p easyoffice-app --test hwp_shell_writer`, `-p easyoffice-formats --test xls_formula_records`·`xls_writer_limits`·`output_container_spec_validity`. 독립 확인: 쓴 XLS의 수식 32개를 LibreOffice가 모두 올바른 값으로 계산했고(변경 전은 `Err:520`), 쓴 HWP를 rhwp가 읽었습니다.
+- **Revisit when** HWT 쓰기 규격을 확인할 때, XLS 토큰 집합을 넓힐 때(공유 수식·이름·시트 참조).
