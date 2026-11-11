@@ -87,6 +87,26 @@ fn sheet_names_follow_the_excel_rules() {
 }
 
 #[test]
+fn a_cut_name_never_ends_in_an_apostrophe_and_history_is_reserved() {
+    let cut = format!("{}'뒤", "a".repeat(30));
+    let reserved = LegacyOle2Codec::sanitize_sheet_names(&[cut.as_str(), "History", "history"]);
+    assert_eq!(
+        reserved[0],
+        "a".repeat(30),
+        "the apostrophe left at the cut is dropped"
+    );
+    assert_eq!(
+        reserved[1], "History_2",
+        "History is reserved by the workbook format"
+    );
+    assert_eq!(reserved[2], "history_3");
+    let only = LegacyOle2Codec::sanitize_sheet_names(&[format!("{}'", "b".repeat(30)).as_str()]);
+    assert_eq!(only[0], "b".repeat(30));
+    let all_quotes = LegacyOle2Codec::sanitize_sheet_names(&["''", "x"]);
+    assert_eq!(all_quotes, ["Sheet1", "x"]);
+}
+
+#[test]
 fn clean_names_are_left_alone() {
     let input = ["매출", "요약 2026", "Sheet1"];
     assert_eq!(LegacyOle2Codec::sanitize_sheet_names(&input), input);

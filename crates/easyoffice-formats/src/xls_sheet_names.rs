@@ -14,12 +14,23 @@ fn truncate_utf16_units(text: &str, max_units: usize) -> String {
         .collect()
 }
 
+/// Sheet name the workbook format reserves for its change history (compared ignoring case).
+const RESERVED: &str = "history";
+
+/// [`truncate_utf16_units`] without an apostrophe left at the cut: a sheet name may not end in one.
+fn fit(text: &str, max_units: usize) -> String {
+    truncate_utf16_units(text, max_units)
+        .trim_end_matches('\'')
+        .to_string()
+}
+
 /// At most 31 UTF-16 units, none of `: \ / ? * [ ]` (replaced by `_`), no leading or trailing
-/// apostrophe, not empty, unique ignoring case. A repeated name gets `_2`, `_3`, ... within the 31
-/// units. Names that already comply are returned unchanged, so a caller can compare to report
-/// what was renamed.
+/// apostrophe, not empty, not `History`, unique ignoring case. A repeated name gets `_2`, `_3`,
+/// ... within the 31 units. Names that already comply are returned unchanged, so a caller can
+/// compare to report what was renamed.
 pub(crate) fn sanitize_sheet_names<S: AsRef<str>>(names: &[S]) -> Vec<String> {
-    let mut used = std::collections::HashSet::with_capacity(names.len());
+    let mut used = std::collections::HashSet::with_capacity(names.len() + 1);
+    used.insert(RESERVED.to_string());
     names
         .iter()
         .enumerate()
@@ -35,13 +46,12 @@ pub(crate) fn sanitize_sheet_names<S: AsRef<str>>(names: &[S]) -> Vec<String> {
             } else {
                 trimmed.to_string()
             };
-            let mut candidate = truncate_utf16_units(&base, MAX_SHEET_NAME_UNITS);
+            let mut candidate = fit(&base, MAX_SHEET_NAME_UNITS);
             let mut n = 1u32;
             while !used.insert(candidate.to_lowercase()) {
                 n += 1;
                 let suffix = format!("_{n}");
-                candidate =
-                    truncate_utf16_units(&base, MAX_SHEET_NAME_UNITS - suffix.len()) + &suffix;
+                candidate = fit(&base, MAX_SHEET_NAME_UNITS - suffix.len()) + &suffix;
             }
             candidate
         })
