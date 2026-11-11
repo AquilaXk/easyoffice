@@ -74,6 +74,7 @@
   } = host.__EASYOFFICE_CREATE_PII_SCRUBBER__({ document, localScrubPii });
 
   const { invokeIpc } = host.__EASYOFFICE_CREATE_IPC_TRANSPORT__({ document, host, desktopBridge });
+  const pdfEdit = host.__EASYOFFICE_CREATE_PDF_EDIT__({ document, desktopBridge, getPdfRotationDeg: () => pdfRotationDeg });
   host.__EASYOFFICE_INVOKE_BACKEND__ = invokeIpc;
 
   let sheetController = null;
@@ -111,6 +112,7 @@
     getActiveSlideIndex: () => activeSlideIndex,
     getPdfRotationDeg: () => pdfRotationDeg,
     setPdfRotationDeg: (next) => { pdfRotationDeg = next; },
+    getPdfEdit: () => pdfEdit,
     enqueueWorkspaceHistoryOp,
     onModuleApplied: (mod) => workspaceSession?.applyModuleContext(mod),
   });
@@ -148,6 +150,7 @@
     getActiveSlideIndex: () => activeSlideIndex,
     setActiveSlideIndex: (next) => { activeSlideIndex = next; },
     getPdfRotationDeg: () => pdfRotationDeg,
+    getPdfEdit: () => pdfEdit,
     onSlideRendered: (idx) => slideStudio?.afterRender(idx),
     enqueueWorkspaceHistoryOp,
     captureWorkspaceSnapshot: ribbonHistory.captureWorkspaceSnapshot,
@@ -181,7 +184,7 @@
   });
 
   const fileOpen = host.__EASYOFFICE_CREATE_FILE_OPEN__({
-    document, invokeIpc, createEmptySlideStyleFields, getActiveModule: () => activeModule,
+    document, invokeIpc, pdfEdit, createEmptySlideStyleFields, getActiveModule: () => activeModule,
     getHwpSession: () => hwpSession,
     confirm: (kind) => desktopBridge.confirm(kind),
     onOpenRequest: () => windowBridge.requestOpenFile(),
@@ -673,6 +676,8 @@
           .enqueueWorkspaceHistoryOp(() => {
             ribbonHistory.pushUndoSnapshot(false);
             workspacePanels.applyPdfStudioFormState();
+            const note = pdfEdit.noteApplied();
+            if (note) setStatusFeedback(note);
           })
           .catch(() => {});
       });

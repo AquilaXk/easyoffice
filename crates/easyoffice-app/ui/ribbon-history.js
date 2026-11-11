@@ -74,6 +74,7 @@
       getActiveSlideIndex,
       getPdfRotationDeg,
       setPdfRotationDeg,
+      getPdfEdit,
       enqueueWorkspaceHistoryOp,
       onModuleApplied,
       getWindowBridge,
@@ -857,6 +858,11 @@
         return;
       }
       if (cmdId === "pdf-mod-highlight") getWorkspacePanels().applyPdfHighlight(options.highlight);
+      if (cmdId === "pdf-mod-splitmerge" && getPdfEdit?.()?.isActive()) {
+        // On the opened file the shell asks and does it; the badge tells what happened.
+        applyPdfBadge(PDF_BADGE_EFFECTS[cmdId], { summary: await getPdfEdit().splitMerge() });
+        return;
+      }
       if (PDF_BADGE_EFFECTS[cmdId]) applyPdfBadge(PDF_BADGE_EFFECTS[cmdId], execRes);
       if (cmdId.startsWith("pdf-")) getWorkspacePanels().applyPdfStudioFormState();
     }

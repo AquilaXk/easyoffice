@@ -15,6 +15,13 @@
     pages: "pdf_export_pages",
     finish: "pdf_export_finish",
   });
+  // Editing the PDF a window opened, on its objects (PD-156): the shell keeps the file after `open`.
+  const PDF_EDIT_COMMANDS = Object.freeze({
+    open: "pdf_edit_open",
+    apply: "pdf_edit_apply",
+    splitMerge: "pdf_edit_split_merge",
+    save: "pdf_edit_save",
+  });
   // Installed fonts for the Hangul editor (PD-128). The list holds names, styles and numbers, never a path;
   // a read quotes the revision of the list and a file number, and gets the font file as an ArrayBuffer.
   const SYSTEM_FONT_COMMANDS = Object.freeze({ list: "list_system_fonts", read: "read_system_font" });
@@ -159,6 +166,35 @@
       throw new Error("PDF 저장 결과를 확인하지 못했습니다.");
     },
   });
+  // The PDF studio on the opened file's own objects (PD-156). Rust owns the file, every dialog and the
+  // limits; the page sends the opened bytes once and gets names, counts and sentences back.
+  //   open(fileName, base64)  -> { pages, sources, turn, stamp, watermark } | rejects with the reason (encrypted, over a limit, damaged)
+  //   apply(op)               -> the same state; op is { kind: "turn", degrees } (every page), { kind: "rotate", degrees, pages? }
+  //                              or { kind: "overlay", stamp, watermark } (empty text clears)
+  //   splitMerge()            -> { action: "merged" | "split" | "cancelled", count, pages, ... } (Rust asks which, and where)
+  //   save()                  -> { status: "saved", name, bytes, pages } | { status: "cancelled" }
+  const pdfEdit = Object.freeze({
+    async open(fileName, base64) {
+      const res = await callShell(PDF_EDIT_COMMANDS.open, { fileName: String(fileName), base64: String(base64) });
+      if (Number.isSafeInteger(res?.pages)) return res;
+      throw new Error("PDF 열기 결과를 확인하지 못했습니다.");
+    },
+    async apply(op) {
+      const res = await callShell(PDF_EDIT_COMMANDS.apply, { op });
+      if (Number.isSafeInteger(res?.pages)) return res;
+      throw new Error("PDF 편집 결과를 확인하지 못했습니다.");
+    },
+    async splitMerge() {
+      const res = await callShell(PDF_EDIT_COMMANDS.splitMerge, {});
+      if (res && ["merged", "split", "cancelled"].includes(res.action) && Number.isSafeInteger(res.count)) return res;
+      throw new Error("분할·병합 결과를 확인하지 못했습니다.");
+    },
+    async save() {
+      const res = await callShell(PDF_EDIT_COMMANDS.save, {});
+      if (res && (res.status === "saved" || res.status === "cancelled")) return res;
+      throw new Error("PDF 저장 결과를 확인하지 못했습니다.");
+    },
+  });
   const systemFonts = Object.freeze({
     list: () => callShell(SYSTEM_FONT_COMMANDS.list, {}),
     read: (revision, file) => callShell(SYSTEM_FONT_COMMANDS.read, { revision: String(revision), file }),
@@ -185,5 +221,5 @@
     return callShell(command, args || {});
   }
 
-  host.__EASYOFFICE_DESKTOP_BRIDGE__ = { isAvailable, invokeIpc, saveFile, pdfExport, systemFonts, getUpdateNotice, setUpdateCheck, openReleasePage, installUpdate, describeShellError, windowCommand, confirm, CONFIRM_BROWSER_TEXT, WINDOW_COMMANDS };
+  host.__EASYOFFICE_DESKTOP_BRIDGE__ = { isAvailable, invokeIpc, saveFile, pdfExport, pdfEdit, systemFonts, getUpdateNotice, setUpdateCheck, openReleasePage, installUpdate, describeShellError, windowCommand, confirm, CONFIRM_BROWSER_TEXT, WINDOW_COMMANDS };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

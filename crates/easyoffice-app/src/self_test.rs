@@ -466,6 +466,10 @@ const WEBUI_ASSET_MARKERS: &[(&str, &str)] = &[
         "__EASYOFFICE_CREATE_FILE_OPEN__",
     ),
     (
+        include_str!("../ui/pdf-edit.js"),
+        "__EASYOFFICE_CREATE_PDF_EDIT__",
+    ),
+    (
         include_str!("../ui/slide-studio.js"),
         "__EASYOFFICE_CREATE_SLIDE_STUDIO__",
     ),

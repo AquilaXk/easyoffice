@@ -355,3 +355,37 @@ test("the desktop bridge's PDF export sends a file name, job numbers and page SV
   delete env.__EASYOFFICE_SHELL_TOKEN__;
   await assert.rejects(pdfExport.start("a.pdf"), /연결할 수 없습니다/);
 });
+
+test("the desktop bridge's PDF edit sends the opened bytes once, small ops after, never a path, with the shell token (PD-156)", async () => {
+  const calls = [];
+  const answers = [];
+  const env = {
+    __EASYOFFICE_SHELL_TOKEN__: "token",
+    __TAURI_INTERNALS__: { invoke: async (command, args, options) => { calls.push({ command, args, options }); return answers.shift(); } },
+  };
+  loadUiModule(new URL("../crates/easyoffice-app/ui/desktop-bridge.js", import.meta.url), env);
+  const { pdfEdit } = env.__EASYOFFICE_DESKTOP_BRIDGE__;
+  const state = { pages: 3, sources: 1, turn: 0, stamp: null, watermark: null };
+  answers.push(state, state, { action: "merged", count: 1, ...state }, { status: "saved", name: "a.pdf", bytes: 3, pages: 3 }, { status: "cancelled" });
+  assert.deepEqual(await pdfEdit.open("보고서.pdf", "QUJD"), state);
+  assert.deepEqual(await pdfEdit.apply({ kind: "turn", degrees: 90 }), state);
+  assert.equal((await pdfEdit.splitMerge()).action, "merged");
+  assert.equal((await pdfEdit.save()).status, "saved");
+  assert.equal((await pdfEdit.save()).status, "cancelled");
+  assert.deepEqual(calls.map(({ command, args }) => [command, args]), [
+    ["pdf_edit_open", { fileName: "보고서.pdf", base64: "QUJD" }],
+    ["pdf_edit_apply", { op: { kind: "turn", degrees: 90 } }],
+    ["pdf_edit_split_merge", {}],
+    ["pdf_edit_save", {}],
+    ["pdf_edit_save", {}],
+  ]);
+  assert.ok(calls.every((c) => c.options.headers["x-easyoffice-shell"] === "token"), "every call carries the window token");
+  assert.ok(calls.every((c) => !/path|dir/i.test(Object.keys(c.args).join())), "no argument names a path");
+  answers.push({ pages: "3" }, null, { action: "weird", count: 1 }, { status: "weird" });
+  await assert.rejects(pdfEdit.open("a.pdf", ""), /PDF 열기 결과를 확인하지 못했습니다/);
+  await assert.rejects(pdfEdit.apply({ kind: "turn", degrees: 0 }), /PDF 편집 결과를 확인하지 못했습니다/);
+  await assert.rejects(pdfEdit.splitMerge(), /분할·병합 결과를 확인하지 못했습니다/);
+  await assert.rejects(pdfEdit.save(), /PDF 저장 결과를 확인하지 못했습니다/);
+  delete env.__EASYOFFICE_SHELL_TOKEN__;
+  await assert.rejects(pdfEdit.open("a.pdf", ""), /연결할 수 없습니다/);
+});

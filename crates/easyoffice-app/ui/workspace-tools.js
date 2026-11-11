@@ -257,6 +257,23 @@
       return result.ok;
     }
 
+    // The PDF studio on the opened file (PD-156): the shell asks where, and writes the edited file.
+    async function savePdfEdit(pdfEdit) {
+      try {
+        const res = await pdfEdit.save();
+        if (res.cancelled) {
+          setStatusFeedback("문서 저장 취소 (PDF): 저장 위치를 선택하지 않았습니다");
+          return false;
+        }
+        setStatusFeedback("문서 저장 완료 (" + res.name + " · " + res.bytes + "B · " + res.pages + "쪽 · 원본 PDF의 그림·글꼴·배치 보존)");
+        noteSavedName(res.name);
+        return true;
+      } catch (err) {
+        setStatusFeedback("문서 저장 실패 (PDF): " + (err?.message || String(err)));
+        return false;
+      }
+    }
+
     function setStatusFeedback(text) {
       const fb = document.getElementById("status-command-feedback");
       if (fb) fb.textContent = text;
@@ -307,6 +324,7 @@
       const hwpHost = getHwpHost?.();
       const hwpSession = getHwpSession?.();
       if (curMod === "HWP" && hwpHost?.isEmbedActive() && hwpSession) return saveEmbeddedHwp(hwpSession, closing === true, saveAs);
+      if (curMod === "PDF" && deps.getPdfEdit?.()?.isActive()) return savePdfEdit(deps.getPdfEdit());
       const isConv = curMod === "CONV";
       const spec = isConv
         ? { ext: document.getElementById("conv-dst-fmt")?.value || "hwpx", inPlace: false }
