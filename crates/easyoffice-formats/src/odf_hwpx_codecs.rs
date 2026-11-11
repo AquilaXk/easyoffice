@@ -477,7 +477,7 @@ impl OdfCodec {
                     ));
                 }
             }
-        } else if crate::LegacyOle2Codec::parse_finite_f64(raw).is_some() {
+        } else if crate::cell_numbers::numeric_cell_value(raw).is_some() {
             let escaped_val = XmlSanitizer::escape(raw);
             content.push_str(&format!(
                 "<table:table-cell row=\"{row}\" col=\"{col}\"{style_attr} office:value-type=\"float\" office:value=\"{escaped_val}\"><text:p>{escaped_val}</text:p></table:table-cell>"

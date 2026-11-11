@@ -1,4 +1,5 @@
 use crate::biff8_formula::{checked_rgce, formula_records, formula_text, FORMULA_FIXED_LEN};
+use crate::cell_numbers::numeric_cell_value;
 use crate::decode_budget::DecodeBudget;
 use crate::ole2_codec::{
     decode_utf16le, read_u16_le, read_u32_le, read_u64_le, write_u32_le, Ole2ContainerCodec,
@@ -155,15 +156,6 @@ impl LegacyOle2Codec {
     pub const BIFF8_STRING: u16 = 0x0207;
     pub const BIFF8_RK: u16 = 0x027E;
     pub const BIFF8_FORMULA: u16 = 0x0006;
-
-    #[inline]
-    pub(crate) fn parse_finite_f64(s: &str) -> Option<f64> {
-        let first = *s.as_bytes().first()?;
-        if !(first.is_ascii_digit() || matches!(first, b'-' | b'+' | b'.')) {
-            return None;
-        }
-        s.parse::<f64>().ok().filter(|n| n.is_finite())
-    }
 
     #[inline]
     fn biff_error_str(code: u8) -> &'static str {
@@ -382,7 +374,7 @@ impl LegacyOle2Codec {
             for (_, _, val) in &sheet.cells {
                 let is_formula = allow_formulas && val.starts_with('=');
                 if !is_formula
-                    && Self::parse_finite_f64(val).is_none()
+                    && numeric_cell_value(val).is_none()
                     && !sst_index_map.contains_key(val.as_str())
                 {
                     let idx = sst_strings.len() as u32;
@@ -438,7 +430,7 @@ impl LegacyOle2Codec {
                 if let Some(rgce) = rgce {
                     let cached = caches.get(sheet_idx).and_then(|c| c.get(&(*row, *col)));
                     stream.extend_from_slice(&formula_records(r16, c16, rgce, cached));
-                } else if let Some(num) = Self::parse_finite_f64(raw) {
+                } else if let Some(num) = numeric_cell_value(raw) {
                     stream.extend_from_slice(&Self::BIFF8_NUMBER.to_le_bytes());
                     stream.extend_from_slice(&14u16.to_le_bytes());
                     stream.extend_from_slice(&r16.to_le_bytes());

@@ -3,6 +3,7 @@ use std::fmt;
 pub mod base64_codec;
 mod biff8_formula;
 pub mod biff8_xls_codec;
+mod cell_numbers;
 pub mod converter;
 pub(crate) mod cp949;
 mod cp949_tables;

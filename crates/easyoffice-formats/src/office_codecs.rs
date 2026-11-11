@@ -117,7 +117,7 @@ fn collect_shared_strings(
     let mut total_str_count = 0usize;
     for (_, cells) in active_sheets {
         for (_, _, val) in cells {
-            if val.starts_with('=') || crate::LegacyOle2Codec::parse_finite_f64(val).is_some() {
+            if val.starts_with('=') || crate::cell_numbers::numeric_cell_value(val).is_some() {
                 continue;
             }
             total_str_count += 1;
@@ -188,7 +188,7 @@ fn push_cell_xml(
                 let _ = write!(sheet_xml, "><f>{f}</f></c>");
             }
         }
-    } else if crate::LegacyOle2Codec::parse_finite_f64(raw).is_some() {
+    } else if crate::cell_numbers::numeric_cell_value(raw).is_some() {
         let _ = write!(
             sheet_xml,
             " t=\"n\"><v>{}</v></c>",
