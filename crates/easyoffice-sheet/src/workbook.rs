@@ -666,6 +666,16 @@ fn take_dollar(bytes: &[u8], cur: usize) -> (usize, bool) {
     }
 }
 
+/// Length of an unquoted sheet-name prefix (`Q1!`, `Sheet2!`) starting at `i`, `!` included, so the
+/// name's digits are never read as a row. Non-ASCII bytes belong to the name.
+fn sheet_prefix_len(bytes: &[u8], i: usize) -> Option<usize> {
+    let run = bytes[i..]
+        .iter()
+        .take_while(|&&b| is_ident_byte(b) || b == b'.' || !b.is_ascii())
+        .count();
+    (run > 0 && bytes.get(i + run) == Some(&b'!')).then_some(run + 1)
+}
+
 /// Rewrites an A1-style reference starting at `i` into `out`, shifting relative rows by `delta`.
 /// Returns the index after the reference, or `None` when `i` does not start a reference.
 fn rewrite_cell_ref(raw: &str, i: usize, delta: i64, out: &mut String) -> Option<usize> {
@@ -736,6 +746,14 @@ fn adjust_formula_row_refs(raw: &str, orig_row: u32, target_row: u32) -> String 
             in_single_quotes = !in_single_quotes;
         } else if !in_double_quotes && !in_single_quotes {
             let prev_is_ident = i > 0 && (is_ident_byte(bytes[i - 1]) || bytes[i - 1] == b'.');
+            if let Some(prefix) = (!prev_is_ident)
+                .then(|| sheet_prefix_len(bytes, i))
+                .flatten()
+            {
+                out.push_str(&raw[i..i + prefix]);
+                i += prefix;
+                continue;
+            }
             if let Some(next) = (!prev_is_ident)
                 .then(|| rewrite_cell_ref(raw, i, delta, &mut out))
                 .flatten()
