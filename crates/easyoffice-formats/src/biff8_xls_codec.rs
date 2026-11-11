@@ -1,3 +1,4 @@
+use crate::decode_budget::DecodeBudget;
 use crate::ole2_codec::{
     decode_utf16le, encode_utf16le, read_u16_le, read_u32_le, read_u64_le, write_u32_le,
     Ole2ContainerCodec,
@@ -608,7 +609,7 @@ impl LegacyOle2Codec {
             (code, 1) => Self::biff_error_str(code),
             _ => "TRUE",
         };
-        state.push_cell(row, col, text.to_string());
+        state.push_cell(row, col, text.to_string())?;
         Ok(())
     }
 
@@ -702,12 +703,15 @@ impl LegacyOle2Codec {
         let row = read_u16_le(data, start)? as u32;
         let col = read_u16_le(data, start + 2)? as u32;
         let sst_idx = read_u32_le(data, start + 6)? as usize;
-        let text = state.sst_strings.get(sst_idx).cloned().ok_or_else(|| {
+        let text = state.sst_strings.get(sst_idx).ok_or_else(|| {
             EasyOfficeError::CorruptedContainer(
                 "BIFF8 LABELSST 인덱스가 SST 범위를 벗어났습니다.".to_string(),
             )
         })?;
-        state.push_cell(row, col, text);
+        // One record can name a string of up to 64 Ki characters: pay for the copy before it.
+        state.budget.charge_cell(text.len(), XLS_BUDGET_WHAT)?;
+        state.current_cells.push((row, col, text.clone()));
+        state.last_formula_cell_idx = None;
         Ok(())
     }
 
@@ -723,7 +727,7 @@ impl LegacyOle2Codec {
         let row = read_u16_le(data, start)? as u32;
         let col = read_u16_le(data, start + 2)? as u32;
         let num = f64::from_bits(read_u64_le(data, start + 6)?);
-        state.push_cell(row, col, Self::format_biff_number(num));
+        state.push_cell(row, col, Self::format_biff_number(num))?;
         Ok(())
     }
 
@@ -739,7 +743,7 @@ impl LegacyOle2Codec {
         let row = read_u16_le(data, start)? as u32;
         let col = read_u16_le(data, start + 2)? as u32;
         let num = Self::decode_rk_number(read_u32_le(data, start + 6)?);
-        state.push_cell(row, col, Self::format_biff_number(num));
+        state.push_cell(row, col, Self::format_biff_number(num))?;
         Ok(())
     }
 
@@ -758,11 +762,8 @@ impl LegacyOle2Codec {
         for i in 0..count {
             let rk = read_u32_le(data, start + 4 + i * 6 + 2)?;
             let num = Self::decode_rk_number(rk);
-            state
-                .current_cells
-                .push((row, first_col + i as u32, Self::format_biff_number(num)));
+            state.push_cell(row, first_col + i as u32, Self::format_biff_number(num))?;
         }
-        state.last_formula_cell_idx = None;
         Ok(())
     }
 
@@ -840,6 +841,7 @@ impl LegacyOle2Codec {
             Some(inline) => inline,
             None => Self::xls_formula_cached(data, start)?,
         };
+        state.budget.charge_cell(text.len(), XLS_BUDGET_WHAT)?;
         state.current_cells.push((row, col, text));
         state.last_formula_cell_idx = Some(state.current_cells.len() - 1);
         Ok(())
@@ -868,6 +870,7 @@ impl LegacyOle2Codec {
             .and_then(|idx| state.current_cells.get_mut(idx))
         {
             if !entry.2.starts_with('=') {
+                state.budget.charge(s.len(), XLS_BUDGET_WHAT)?;
                 entry.2 = s;
             }
         }
@@ -891,18 +894,21 @@ impl LegacyOle2Codec {
             let std_len = if is_utf16 { cch * 2 } else { cch };
             if start + 9 + std_len == end {
                 let s = Self::decode_biff_text(&data[start + 9..end], is_utf16)?;
-                state.push_cell(row, col, s);
+                state.push_cell(row, col, s)?;
                 return Ok(());
             }
         }
         let byte_len = cch * 2;
         if start + 8 + byte_len <= end {
             let s = decode_utf16le(&data[start + 8..start + 8 + byte_len])?;
-            state.push_cell(row, col, s);
+            state.push_cell(row, col, s)?;
         }
         Ok(())
     }
 }
+
+/// What the decoded-budget error names when a cell's text is refused.
+const XLS_BUDGET_WHAT: &str = "XLS 셀 텍스트";
 
 /// BIFF8 BOF substream type of a worksheet.
 const XLS_SUBSTREAM_WORKSHEET: u16 = 0x0010;
@@ -930,12 +936,16 @@ struct XlsParseState {
     current_cells: Vec<(u32, u32, String)>,
     in_worksheet: bool,
     last_formula_cell_idx: Option<usize>,
+    /// Decoded bytes of the cell texts, over all worksheets of the workbook (PD-175).
+    budget: DecodeBudget,
 }
 
 impl XlsParseState {
-    fn push_cell(&mut self, row: u32, col: u32, text: String) {
+    fn push_cell(&mut self, row: u32, col: u32, text: String) -> Result<(), EasyOfficeError> {
+        self.budget.charge_cell(text.len(), XLS_BUDGET_WHAT)?;
         self.current_cells.push((row, col, text));
         self.last_formula_cell_idx = None;
+        Ok(())
     }
 
     /// Closes the current worksheet substream (EOF record).

@@ -25,6 +25,12 @@ pub(crate) struct DecodeBudget {
     remaining: usize,
 }
 
+impl Default for DecodeBudget {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DecodeBudget {
     pub(crate) const fn new() -> Self {
         Self::with_limit(MAX_DECODED_DOCUMENT_BYTES)
