@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { readText } from "./test-support/read-text.mjs";
 
-// The style bar's colour pickers (PD-165): palette popup, recent colours, keyboard, outside press.
+// The style bar's colour pickers (PD-166): palette popup, recent colours, keyboard, outside press.
 
 const UI_DIR = new URL("../crates/easyoffice-app/ui/", import.meta.url);
 const read = (name) => readText(fileURLToPath(new URL(name, UI_DIR)));

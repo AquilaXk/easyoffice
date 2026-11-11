@@ -1,7 +1,7 @@
 (function (host) {
   "use strict";
 
-  // Colour picker of the style bar (PD-098, PD-165): a palette popup with the recent colours and a
+  // Colour picker of the style bar (PD-098, PD-166): a palette popup with the recent colours and a
   // hidden native `<input type="color">` for "other colour", in place of the visible native input.
   //
   // Reference implementation: the reference app `apps/studio-host/src/ui/color-picker.ts` and

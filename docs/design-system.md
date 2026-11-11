@@ -6,7 +6,7 @@ EasyOffice는 자체 디자인 시스템을 두지 않습니다. 모든 창은 �
 
 - `crates/easyoffice-app/ui/tokens.css`가 색·글꼴·간격·반경·그림자 토큰의 유일한 정의입니다. 값은 rhwp-studio `src/styles/base.css`와 같습니다(`--ui-*`, `--accent-*`, `--doc-*`, `--focus-ring`, `--font-family-ui` 등). 라이트가 기본이고 다크는 `:root[data-theme-effective="dark"]`가 덮어씁니다.
 - `styles.css`와 `shell.css`는 색을 `var(--…)`로만 씁니다. 리터럴 색, `--eo-*` 변수, `data-theme="…"` 선택자는 둘 수 없습니다(`test-webui-theme.mjs`가 검사).
-- 문서 종이·공문서 서식·슬라이드 쇼처럼 테마와 무관한 고정 색은 `content.css`에만 둡니다. `#doc-editor`는 라이트 토큰을 다시 선언해 어두운 테마에서도 종이가 밝게 유지됩니다.
+- 문서 종이·공문서 서식·슬라이드 쇼처럼 테마와 무관한 고정 색은 `content.css`에만 둡니다. 종이(`#doc-editor`, `.slide-stage`, `.pdf-page-card`)는 라이트 `--ui-*`·`--accent-*`와 `--color-*` 별칭을 `content.css`의 한 규칙에서 다시 선언해 어두운 테마에서도 밝게 유지됩니다. 별칭은 `:root`에서 이미 풀리므로 `--ui-*`만 다시 선언하면 다크 값이 새어 들어옵니다. 종이 안 컨트롤은 토큰만 읽으면 됩니다.
 
 | 용도 | 토큰 |
 | --- | --- |
@@ -30,6 +30,9 @@ EasyOffice는 자체 디자인 시스템을 두지 않습니다. 모든 창은 �
 
 - UI 글꼴은 `--font-family-ui`(`-apple-system, BlinkMacSystemFont, '맑은 고딕', 'Malgun Gothic', 'Segoe UI', sans-serif`). 문서용 글꼴은 OFL 번들(PD-081, PD-092)입니다.
 - 아이콘은 `ui/icons.js`의 24x24 선 아이콘 한 벌(`currentColor`)만 씁니다. 이모지·화살표·도형 문자를 아이콘 대용으로 쓰지 않고, 아이콘만 있는 컨트롤은 `aria-label`을 갖습니다.
+- 예외 두 가지. `▾`(콤보 화살표, 색 선택 단추)는 참조 앱과 같은 글리프라 `aria-hidden` 요소 안에 둡니다. 메뉴 `✓`(체크·라디오 항목, `menu-bar.css`)는 참조 앱에 없는 EasyOffice 표시이고 `aria-checked`와 함께 둡니다.
+- 포커스는 어디서나 `--color-focus-border` 1px 윤곽을 안쪽에 그립니다(`styles.css`의 `:focus-visible`, rhwp-studio `.sb-btn:focus-visible`). 컨트롤마다 따로 링을 만들지 않습니다(메뉴 항목·홈 화면처럼 참조 앱이 따로 정한 곳 제외).
+- 색 선택은 `ui/color-picker.js`(팔레트 + 최근 색 + 숨긴 네이티브 입력)를 씁니다. 보이는 `<input type="color">`는 두지 않습니다.
 
 ## 4. 창 구성 (현재, 단계적으로 참조 앱 구조로 이동 중)
 
@@ -41,3 +44,4 @@ EasyOffice는 자체 디자인 시스템을 두지 않습니다. 모든 창은 �
 2. 새 클래스를 만들기 전에 rhwp-studio의 `tb-btn`, `sb-*`, `dialog-btn`, `md-item` 같은 기존 클래스를 씁니다.
 3. 인라인 `style="…"` 속성과 `<style>` 주입을 쓰지 않습니다(CSP).
 4. 라이트와 다크 둘 다에서 확인하고, 문서 내용 색이 필요하면 `content.css`에 둡니다.
+5. 기본 버튼은 `--accent-strong` 바탕입니다(참조 앱은 `--accent-primary`, 흰 글자 대비 3.7:1이라 4.5:1에 못 미쳐 의도적으로 다릅니다, PD-098 5항·PD-166).
