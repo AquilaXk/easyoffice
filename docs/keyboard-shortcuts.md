@@ -45,10 +45,9 @@ EasyOffice의 단축키 목록이다. macOS는 ⌘(Command), Windows와 Linux는
 
 | 동작 | 키 |
 | --- | --- |
-| 다음 / 이전 일치 | Enter / Shift+Enter (찾을 내용 입력란) |
+| 다음 / 이전 일치 | Enter / Shift+Enter (단추 위는 제외, 조합 중 제외) |
 | 바꾸기 | Enter (바꿀 내용 입력란) |
 | 닫기 | Esc |
-| 찾기 / 바꾸기 모드 전환 | Ctrl+F / Ctrl+F2 |
 
 Ctrl+H는 쓰지 않는다. macOS에서는 ⌘H가 앱 숨기기이고 브라우저에서는 기록 보기다. 참조 편집기도 바꾸기를 Ctrl+F2에 둔다.
 

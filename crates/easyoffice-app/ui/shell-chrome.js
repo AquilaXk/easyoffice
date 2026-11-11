@@ -389,11 +389,11 @@
       });
     }
 
-    // Dragging by the title bar (reference `dialog-drag.ts`); the position stays after the dialog is closed. The find dialog is not dragged.
+    // Dragging by the title bar (reference `dialog-drag.ts`); the position stays after the dialog is closed.
     function enableDialogDrag(dialog) {
       const wrap = dialog?.querySelector?.(".dialog-wrap");
       const title = dialog?.querySelector?.(".dialog-title");
-      if (!wrap || !title || dialog.classList.contains("find-dialog")) return;
+      if (!wrap || !title) return;
       let dx = 0, dy = 0, dragging = false, startX = 0, startY = 0;
       const onMove = (ev) => {
         if (!dragging) return;

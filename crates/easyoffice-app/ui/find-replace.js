@@ -218,6 +218,7 @@
       if (!els.dialog.open) {
         origin = source.anchor();
         els.dialog.show();
+        document.addEventListener("keydown", onKeyCapture, true);
       }
       els.query.focus();
       els.query.select();
@@ -227,6 +228,7 @@
 
     function close() {
       if (ui().dialog.open) return;
+      document.removeEventListener("keydown", onKeyCapture, true);
       source?.dispose();
       source = null;
       current = null;
@@ -245,29 +247,31 @@
       byId("btn-find-replace").addEventListener("click", () => void replaceCurrent().catch((err) => showStatus(err.message)));
       byId("btn-find-replace-all").addEventListener("click", () => void replaceAll().catch((err) => showStatus(err.message)));
       els.dialog.addEventListener("close", close);
-      els.dialog.addEventListener("keydown", onDialogKeydown);
     }
 
-    // The dialog keeps its keys to itself: the page-wide shortcuts (undo, bold, ...) must not act on the document while a field has the focus.
-    function onDialogKeydown(event) {
-      event.stopPropagation();
-      if (event.isComposing || composing) return;
+    // Key handling while the dialog is open, as in the reference (`find-dialog.ts` 318-357): a document
+    // capture handler. Esc closes; Enter on a button stays with the button; Enter elsewhere (not
+    // composing, no modifier) goes to the next match, Shift+Enter to the previous one, and in the
+    // replace field replaces; every other key inside the dialog stays there (page shortcuts such as undo do not run).
+    function onKeyCapture(event) {
       const els = ui();
-      const key = String(event.key);
-      const withCtrl = event.ctrlKey || event.metaKey;
-      if (key === "Escape") return void els.dialog.close();
-      if (withCtrl && key.toLowerCase() === "f") {
+      const inDialog = els.dialog.contains(event.target);
+      if (event.key === "Escape") {
         event.preventDefault();
-        return void open("find");
-      }
-      if (withCtrl && key === "F2") {
+        event.stopPropagation();
+        els.dialog.close();
+      } else if (inDialog && event.target.tagName === "BUTTON" && event.key === "Enter") {
+        event.stopPropagation();
+      } else if (event.key === "Enter" && !event.altKey && !event.ctrlKey && !event.metaKey && !event.isComposing) {
         event.preventDefault();
-        return void open("replace");
+        event.stopPropagation();
+        if (event.target === els.replacement && !event.shiftKey) void replaceCurrent().catch((err) => showStatus(err.message));
+        else step(!event.shiftKey);
+        els.query.focus();
+        els.query.select();
+      } else if (inDialog) {
+        event.stopPropagation();
       }
-      if (key !== "Enter") return;
-      event.preventDefault();
-      if (event.target === els.replacement) void replaceCurrent().catch((err) => showStatus(err.message));
-      else step(!event.shiftKey);
     }
 
     return { bind, open, close };

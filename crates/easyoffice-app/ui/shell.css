@@ -93,7 +93,6 @@
 .tool-dialog::backdrop { background: var(--overlay-bg); }
 .tool-dialog .dialog-body { font-size: var(--font-size-base); line-height: normal; }
 .tool-dialog .dialog-title { cursor: move; }
-.find-dialog .dialog-title { cursor: default; }
 /* Dialog rows, labels, fields and combo boxes: reference `dialogs.css` 110-165, 572-585, 634-655 (MIT, see THIRD_PARTY_NOTICES.md), same values. */
 .tool-dialog .dialog-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .tool-dialog .dialog-row:last-child { margin-bottom: 0; }

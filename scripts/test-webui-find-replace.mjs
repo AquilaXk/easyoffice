@@ -115,21 +115,38 @@ test("replace one replaces the current match and moves to the next", async () =>
   assert.equal(count(h), "1 / 3", "the next match is current and the replaced one is gone from the count");
 });
 
-test("Enter in the query goes to the next match; Escape closes and clears; the dialog keeps its keys to itself", async () => {
+test("find dialog keys follow the reference: Enter next, Shift+Enter previous, Enter in the replace field replaces, Esc closes, other keys stay inside", async () => {
   const h = await openDoc();
-  ctrl(h, "f");
+  ctrl(h, "F2");
   type(h, "find-query", "apple");
   const query = $(h.document, "find-query");
-  let leaked = 0;
-  h.document.body.addEventListener("keydown", () => { leaked += 1; });
-  query.dispatchEvent({ type: "keydown", key: "Enter" });
+  const press = (target, key, extra = {}) => {
+    const ev = { type: "keydown", key, target, altKey: false, ctrlKey: false, metaKey: false, shiftKey: false, isComposing: false, calls: [], stopPropagation() { this.calls.push("stop"); }, preventDefault() { this.calls.push("prevent"); }, ...extra };
+    h.document.dispatchEvent(ev);
+    return ev;
+  };
+  press(query, "Enter");
   assert.equal(count(h), "2 / 4");
-  query.dispatchEvent({ type: "keydown", key: "Enter", shiftKey: true });
+  press(query, "Enter", { shiftKey: true });
   assert.equal(count(h), "1 / 4", "Shift+Enter goes back");
-  query.dispatchEvent({ type: "keydown", key: "z", ctrlKey: true });
-  assert.equal(leaked, 0, "page shortcuts like undo do not run while the dialog has the focus");
-  query.dispatchEvent({ type: "keydown", key: "Escape" });
+  press(query, "Enter", { isComposing: true });
+  assert.equal(count(h), "1 / 4", "Enter while composing is left to the input method");
+  press($(h.document, "doc-editor"), "Enter");
+  assert.equal(count(h), "2 / 4", "Enter outside the dialog also goes to the next match, as in the reference");
+  const button = press($(h.document, "btn-find-next"), "Enter");
+  assert.deepEqual(button.calls, ["stop"], "Enter on a button stays with the button");
+  assert.equal(count(h), "2 / 4");
+  type(h, "find-replacement", "pear");
+  press($(h.document, "find-replacement"), "Enter");
+  await flushAsyncTurns(6);
+  assert.equal(editorText(h).split("pear").length - 1, 1, "Enter in the replace field replaces");
+  const undo = press(query, "z", { ctrlKey: true });
+  assert.deepEqual(undo.calls, ["stop"], "page shortcuts like undo stay out of the document while the dialog has the focus");
+  const esc = press(query, "Escape");
+  assert.deepEqual(esc.calls, ["prevent", "stop"]);
   assert.equal($(h.document, "find-dialog").open, false);
+  const after = press(h.document.body, "x");
+  assert.deepEqual(after.calls, [], "keys are not captured once the dialog is closed");
 });
 
 test("the sheet module finds cell text, replaces values (not formula results), as one undo step", async () => {
@@ -252,22 +269,19 @@ test("a tool dialog takes Esc and Enter like the reference, keeps other keys ins
   assert.deepEqual(after.calls, [], "keys are not captured once the dialog is closed");
 });
 
-test("the dragged position of a tool dialog stays after it is closed; the find dialog is not dragged", async () => {
+test("the dragged position of a dialog stays after it is closed; the find dialog is dragged by its title like the reference", async () => {
   const h = await createWorkspaceHarness();
   await flushAsyncTurns(10);
-  const dialog = $(h.document, "pii-dialog");
-  const wrap = dialog.querySelector(".dialog-wrap");
-  const title = dialog.querySelector(".dialog-title");
-  dialog.showModal();
-  title.dispatchEvent({ type: "mousedown", button: 0, clientX: 10, clientY: 10 });
-  h.document.dispatchEvent({ type: "mousemove", clientX: 60, clientY: 40 });
-  h.document.dispatchEvent({ type: "mouseup" });
-  assert.equal(wrap.style.transform, "translate(50px, 30px)");
-  dialog.close();
-  dialog.dispatchEvent({ type: "close", target: dialog });
-  assert.equal(wrap.style.transform, "translate(50px, 30px)", "the position is kept");
-  const findTitle = $(h.document, "find-dialog").querySelector(".dialog-title");
-  findTitle.dispatchEvent({ type: "mousedown", button: 0, clientX: 10, clientY: 10 });
-  h.document.dispatchEvent({ type: "mousemove", clientX: 60, clientY: 40 });
-  assert.equal($(h.document, "find-dialog").querySelector(".dialog-wrap").style.transform || "", "");
+  for (const id of ["pii-dialog", "find-dialog"]) {
+    const dialog = $(h.document, id);
+    const wrap = dialog.querySelector(".dialog-wrap");
+    dialog.showModal();
+    dialog.querySelector(".dialog-title").dispatchEvent({ type: "mousedown", button: 0, clientX: 10, clientY: 10 });
+    h.document.dispatchEvent({ type: "mousemove", clientX: 60, clientY: 40 });
+    h.document.dispatchEvent({ type: "mouseup" });
+    assert.equal(wrap.style.transform, "translate(50px, 30px)", id);
+    dialog.close();
+    dialog.dispatchEvent({ type: "close", target: dialog });
+    assert.equal(wrap.style.transform, "translate(50px, 30px)", id + " keeps the position");
+  }
 });
