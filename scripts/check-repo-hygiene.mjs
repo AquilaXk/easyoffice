@@ -469,18 +469,28 @@ for (const uiRel of ["crates/easyoffice-app/ui/index.html", ...webuiJsRels]) {
   }
 }
 
+// Sources under these roots stay below the 1,000-line ceiling (Rust and the hwp-studio overlay TypeScript).
+const LINE_CEILING_ROOTS = [
+  "crates/easyoffice-sheet/src/",
+  "crates/easyoffice-formats/src/",
+  "crates/easyoffice-layout/src/",
+  "crates/easyoffice-app/src/",
+  "crates/easyoffice-desktop/src/",
+  "apps/hwp-studio/src/",
+  "apps/quicklook/rust/src/",
+];
+const LINE_CEILING_EXTENSIONS = [".rs", ".ts"];
+
 for (const file of files) {
   const rel = path.relative(ROOT, file).replaceAll("\\", "/");
   if (
-    (rel.startsWith("crates/easyoffice-sheet/src/") ||
-      rel.startsWith("crates/easyoffice-formats/src/") ||
-      rel.startsWith("crates/easyoffice-layout/src/")) &&
-    rel.endsWith(".rs")
+    LINE_CEILING_ROOTS.some((root) => rel.startsWith(root)) &&
+    LINE_CEILING_EXTENSIONS.some((extension) => rel.endsWith(extension))
   ) {
-    const rsText = fs.readFileSync(file, "utf8");
-    const lineCount = rsText.split("\n").length - (rsText.endsWith("\n") ? 1 : 0);
+    const sourceText = fs.readFileSync(file, "utf8");
+    const lineCount = sourceText.split("\n").length - (sourceText.endsWith("\n") ? 1 : 0);
     if (lineCount >= 1000) {
-      errors.push(`Rust module ${rel} exceeds 1,000-line ceiling (${lineCount} lines)`);
+      errors.push(`Source file ${rel} exceeds 1,000-line ceiling (${lineCount} lines)`);
     }
   }
 }
