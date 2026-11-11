@@ -135,6 +135,9 @@ node scripts/bench-profile.mjs --suite desktop --case pdf_doc --input <hwp> --re
 1. `fonts.rs`가 글꼴 면을 프로세스당 한 번 매핑(`make_shared_face_data`, 셸의 `with_mapped_faces`와 같은 방식).
 2. 미리보기 PDF가 글자를 글꼴 서브셋으로 포함(`embed_text: true`). 서브셋이 실패한 쪽만 윤곽선으로 다시 변환한다(셸 PDF의 PD-114 5와 같은 재시도).
 3. 쪽 콘텐츠 스트림 deflate 수준 6 → 1(`vendor/svg2pdf`의 `ConversionOptions::compression_level`, 기본 6이라 셸 출력은 그대로).
+4. (PD-163, 이 작업이 아님) `fill_fonts`가 글꼴 파일을 복사하지 않고 면 매핑을 공유(후보 3). 아래 RSS 표의 1~4번 열은 이 패치를 더한 값이다.
+
+최대 RSS MB (PDF, 적용 전 / 1~3번 / 1~4번): biz_plan 31 / 215 / 22, form-002 64 / 293 / 49, kps-ai 172 / 398 / 91, issue1949 130 / 134 / 67, KTX 83 / 241 / 84, number-bullet 23 / 205 / 21. 첫 쪽 PNG는 모두 적용 전과 같은 수준(number-bullet 17 → 21, kps-ai 28 → 27 MB). 1~4번의 PDF CPU ms: biz_plan 100, form-002 430, kps-ai 1410, KTX 150, number-bullet 60(표의 1+2+3 열과 같은 범위).
 
 미리보기 PDF, CPU ms (괄호는 출력 크기 KB)
 
@@ -150,7 +153,7 @@ node scripts/bench-profile.mjs --suite desktop --case pdf_doc --input <hwp> --re
 - 77쪽 문서(kps-ai) 시간(wall)은 9600 → 1493 ms, 크기는 32.7 → 4.0 MB(참조 앱 7.4 MB보다 작다). 윤곽선 대신 글꼴 서브셋이 크기와 시간을 가장 크게 줄였고(2번), 면 매핑이 그 앞의 큰 몫(1번), deflate 수준 1은 추가로 CPU 약 20%를 줄였다(PDF 크기는 약 3% 늘어남, 3번).
 - 첫 쪽 PNG(CPU ms, 적용 전 → 후): KTX 380 → 130, form-002 220 → 90, number-bullet 140 → 50, kps-ai 110 → 140(잡음 범위), biz_plan 20 → 40. 글꼴 DB를 만드는 `fonts` 단계가 약 10 ms에서 약 20 ms로 늘어 작은 문서(shift-return, blank2010, biz_plan)는 오히려 10~15 ms 더 걸린다. 면 파일을 미리 모두 매핑하는 비용이다. 쓰인 면만 지연 매핑하면 줄일 수 있으나 `fontdb`가 면 단위 지연 매핑을 주지 않아 구현하지 않았다.
 - PNG 바이트 수는 전 입력에서 적용 전과 같다(9494, 5685, 19092, 163263, 24652, 122923, 135972, 102901 B). 글꼴과 그리기 경로가 같아 픽셀이 같다는 정황이며, 바이트 비교는 아니다.
-- 최대 RSS가 늘었다(PDF): biz_plan 31 → 215 MB, form-002 64 → 293 MB, kps-ai 172 → 398 MB, number-bullet 23 → 205 MB. 글꼴 서브셋이 시스템 CJK 글꼴 전체를 읽고(매핑된 파일 쪽이라 되돌릴 수 있는 쪽이 대부분), 쪽마다 서브셋을 만들기 때문으로 보이며 분해하지 않았다. 확장 프로세스의 메모리 한도 안인지는 실기기 Quick Look에서 못 쟀다.
+- 최대 RSS: 3번까지만 적용했을 때 PDF가 biz_plan 31 → 215 MB, number-bullet 23 → 205 MB, kps-ai 172 → 398 MB로 늘었다. 원인은 면 매핑이 아니라 `vendor/svg2pdf`의 `fill_fonts`가 쓰인 면의 글꼴 파일 전체(`Vec::from(data)`, 시스템 한국어 글꼴 `AppleSDGothicNeo.ttc`는 55 MB)를 복사하던 것이다(면 매핑만 적용한 측정은 number-bullet 27 MB로 정상). PD-163의 `fill_fonts` 패치(DB가 매핑해 둔 면이면 복사 없이 공유)가 이를 없앤다.
 
 ### 2.5 한 줄 요약
 

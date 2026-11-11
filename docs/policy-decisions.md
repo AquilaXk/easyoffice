@@ -2559,7 +2559,7 @@
 - **Verified by** `cargo test -p easyoffice-sheet --lib recalc`(무작위 편집 속성 시험, 순환, 시트 간 참조, 행 삽입·삭제 뒤 의존 갱신), `cargo test -p easyoffice-app --lib sheet_session`(상한·owner·락 오염·수식 3만 개 읽기 패턴 거부/상한), `node --test scripts/test-webui-sheet-session.mjs`.
 - **Revisit when** 시트 집합 변경에도 세션을 유지해야 할 때, 순환 참조가 흔한 문서에서 편집이 느려질 때, 응답이 매우 큰 첫 계산을 나눠 받아야 할 때.
 - **Context** Quick Look 측정(`docs/performance.md` 2.4.1)에서 미리보기 PDF가 글자를 윤곽선으로 내보내 77쪽 문서가 32.7MB·9.6초였고, 글꼴 면을 접근마다 열고 매핑해 첫 쪽 PNG의 63%를 시스템 호출이 차지했습니다.
-- **Decision (`PD-164`)** (1) Quick Look 확장은 글꼴 DB의 면을 프로세스당 한 번 읽기 전용으로 매핑합니다(셸 PD-114 3과 같은 방식). (2) 미리보기 PDF는 글자를 글꼴 서브셋으로 포함하고, 서브셋이 실패한 쪽만 윤곽선으로 다시 변환합니다(PD-114 5와 같은 재시도, PD-140 2의 "글자는 윤곽선"을 바꿈). (3) 쪽 콘텐츠 스트림 deflate 수준을 1로 낮춥니다(미리보기는 한 번 읽는 용도라 속도 우선). `vendor/svg2pdf`에 `ConversionOptions::compression_level`(기본 6)을 더했고 셸 출력은 그대로입니다.
+- **Decision (`PD-164`)** (1) Quick Look 확장은 글꼴 DB의 면을 프로세스당 한 번 읽기 전용으로 매핑합니다(셸 PD-114 3과 같은 방식). (2) 미리보기 PDF는 글자를 글꼴 서브셋으로 포함하고, 서브셋이 실패한 쪽만 윤곽선으로 다시 변환합니다(PD-114 5와 같은 재시도, PD-140 2의 "글자는 윤곽선"을 바꿈). (3) 글꼴 파일을 복사하지 않고 DB 매핑을 공유하는 `fill_fonts` 패치(PD-163)가 있어야 RSS가 늘지 않습니다. (4) 쪽 콘텐츠 스트림 deflate 수준을 1로 낮춥니다(미리보기는 한 번 읽는 용도라 속도 우선). `vendor/svg2pdf`에 `ConversionOptions::compression_level`(기본 6)을 더했고 셸 출력은 그대로입니다.
 - **Why** 77쪽 문서 PDF가 9.6초 → 1.5초, 32.7MB → 4.0MB로 줄고, 글자를 검색·복사할 수 있습니다.
-- **Trade-offs** 최대 RSS가 늘었습니다(77쪽 172 → 398MB, 시스템 CJK 글꼴을 서브셋으로 읽음). 확장의 메모리 한도 안인지는 실기기에서 재지 못했습니다. 글꼴 DB를 만드는 단계가 약 10ms 늘어 작은 문서의 첫 쪽 PNG가 10~15ms 느려졌습니다. deflate 수준 1은 PDF를 약 3% 키웁니다.
+- **Trade-offs** 최대 RSS는 적용 전 이하입니다(77쪽 172 → 91MB, number-bullet 23 → 21MB). 글꼴 DB를 만드는 단계가 약 10ms 늘어 작은 문서의 첫 쪽 PNG가 10~15ms 느려졌습니다. deflate 수준 1은 PDF를 약 3% 키웁니다.
 - **Verified by** `node scripts/run-quicklook-tests.mjs`, `node scripts/bench-run.mjs --runs 5 --suite quicklook`.
