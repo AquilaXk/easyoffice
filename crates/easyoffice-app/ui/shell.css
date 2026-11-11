@@ -99,6 +99,8 @@
 .tool-dialog .dialog-label { min-width: 56px; text-align: right; }
 .tool-dialog .dialog-input { flex: 1; min-width: 0; height: 22px; padding: 0 6px; box-sizing: border-box; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); caret-color: var(--caret-color); color-scheme: inherit; font-size: var(--font-size-base); }
 .tool-dialog .custom-select.dialog-select { width: 96px; padding: 0; border: 0; background: transparent; outline: none; }
+/* The 작업 combo of the PDF split/merge dialog fills the row like the 쪽 범위 field under it (96px cut "다른 PDF 병합"). */
+#pdf-splitmerge-dialog .custom-select.dialog-select { flex: 1; width: auto; }
 .tool-dialog input:focus-visible, .tool-dialog select:focus-visible { border-color: var(--color-focus-border); box-shadow: 0 0 0 2px var(--ui-focus-soft); outline: none; }
 .tool-dialog input::placeholder, .tool-dialog textarea::placeholder { color: var(--color-text-placeholder); }
 .tool-dialog input:disabled, .tool-dialog select:disabled, .tool-dialog textarea:disabled { background: var(--ui-surface-muted); border-color: var(--color-border-lighter); color: var(--color-text-disabled); cursor: not-allowed; }
