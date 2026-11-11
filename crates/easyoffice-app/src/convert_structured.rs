@@ -824,7 +824,7 @@ fn rectangular_grid(
 }
 
 /// Draws a document's pages for a host that can: the document as HWPX and the page settings in,
-/// the PDF out (PD-164).
+/// the PDF out (PD-166).
 pub type RichPdfRenderer<'a> = dyn Fn(&[u8], &PdfWriteOptions) -> Result<Vec<u8>, String> + 'a;
 
 /// [`encode_structured`], except that a document converted to PDF is drawn by `renderer` when

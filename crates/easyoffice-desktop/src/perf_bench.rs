@@ -4,7 +4,7 @@
 //! and take the median time and the peak RSS.
 //!
 //! `EASYOFFICE_BENCH_CASE` is one of `save_verify`, `preview_embedded`, `preview_render`,
-//! `thumb_embed`, `pdf_doc`, `pdf_svgs`, `doc_pdf_engine`, `doc_pdf_shell` (a DOCX/ODT/RTF/MD/TXT file as a PDF by the engine's writer, and by HWPX + rhwp layout, PD-164); `EASYOFFICE_BENCH_INPUT` is a document, or a folder of page SVGs for `pdf_svgs`. A name with the
+//! `thumb_embed`, `pdf_doc`, `pdf_svgs`, `doc_pdf_engine`, `doc_pdf_shell` (a DOCX/ODT/RTF/MD/TXT file as a PDF by the engine's writer, and by HWPX + rhwp layout, PD-166); `EASYOFFICE_BENCH_INPUT` is a document, or a folder of page SVGs for `pdf_svgs`. A name with the
 //! prefix `ref:` (`ref:save_verify`, `ref:preview`, `ref:pdf`, `ref:pdf_svgs`) runs the path the
 //! reference app takes for the same job with the same rhwp (parse and convert to the editable form,
 //! first-page SVG, `svgs_to_pdf_with_options`), printed as `tool=ref-repro`.

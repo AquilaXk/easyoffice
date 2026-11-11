@@ -1,4 +1,4 @@
-//! The rich-document PDF (PD-164): a document the engine wrote as HWPX comes out as laid-out pages
+//! The rich-document PDF (PD-166): a document the engine wrote as HWPX comes out as laid-out pages
 //! with real text, a table, a picture, the page rotation and the watermark and stamp. The fonts are
 //! the bundled face (the tests return early where the rhwp checkout is missing, like the other
 //! font tests).

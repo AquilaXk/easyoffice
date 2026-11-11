@@ -1,4 +1,4 @@
-//! Watermark and approval stamp of a rich-document PDF, drawn into the page SVG (PD-164).
+//! Watermark and approval stamp of a rich-document PDF, drawn into the page SVG (PD-166).
 //!
 //! The engine's PDF writer puts these two labels into the page content as marker text. Pages that
 //! come from rhwp's layout are SVG, so the same two page settings are drawn there instead: the
