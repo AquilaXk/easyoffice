@@ -59,6 +59,12 @@ pub const MAX_CHILD_RSS_BYTES: u64 = 1536 * MIB as u64;
 /// Address space of a worker on Linux (bytes); larger than the resident limit because the shell
 /// binary maps its libraries too.
 pub const MAX_CHILD_ADDRESS_SPACE_BYTES: u64 = 8 * 1024 * MIB as u64;
+/// How long the worker of a start window card may draw one first page before it is killed. A
+/// little less than the card's own deadline (`preview/mod.rs`), so the kill comes first.
+pub const PREVIEW_DEADLINE: Duration = Duration::from_secs(8);
+/// Resident memory at which the worker of a card is killed (bytes): a card is not worth the
+/// 1.5 GiB an edit may use.
+pub const PREVIEW_MAX_RSS_BYTES: u64 = 1024 * MIB as u64;
 /// How often the memory of a worker is looked at.
 pub const MEMORY_POLL: Duration = Duration::from_millis(10);
 /// Workers that may run at once. A worker past its deadline is killed at once, so this is the
@@ -109,6 +115,9 @@ pub struct Jobs {
 }
 
 pub static JOBS: Jobs = Jobs::new(MAX_ACTIVE_JOBS);
+/// The places of the card previews: their own, so that a card never takes the place of an edit
+/// (the card's own gate keeps at most this many in flight).
+pub static PREVIEW_JOBS: Jobs = Jobs::new(MAX_ACTIVE_JOBS);
 
 impl Jobs {
     pub const fn new(max: usize) -> Self {

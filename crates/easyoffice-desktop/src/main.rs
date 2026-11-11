@@ -30,6 +30,7 @@ mod pdf_edit_supervisor;
 mod pdf_edit_wire;
 mod pdf_edit_worker;
 mod pdf_export;
+mod pdf_first_page;
 mod pdf_font_fallbacks;
 mod pdf_font_select;
 mod pdf_fonts;

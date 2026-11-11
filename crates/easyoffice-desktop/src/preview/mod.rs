@@ -6,23 +6,29 @@
 //! bytes (PNG, JPEG, GIF, BMP) and size, and hands the page the bytes in Base64 for a given opaque
 //! recent id. The page never gets a path, and never gets a document's bytes: only this picture.
 //!
-//! A Hangul file without such a picture gets its first page drawn instead (PD-142): rhwp lays the
-//! page out, `usvg`/`resvg` draw it as a PNG. That runs on its own bounded worker (`bounded.rs`) and
-//! fails to nothing, which the page shows as the empty card.
+//! A file without such a picture gets its first page drawn instead. A Hangul file (PD-142): rhwp lays
+//! the page out, `usvg`/`resvg` draw it as a PNG. A PDF (PD-179): the PDF worker process draws it.
+//! Any other document: a card of its first paragraphs, cells or slide is drawn from the content the
+//! engine reads (`card_source.rs`). Each runs on its own bounded worker (`bounded.rs`) and fails to
+//! nothing, which the page shows as the skeleton card.
 
 mod bounded;
 mod cache;
+mod card;
+mod card_source;
 mod ole2;
+mod pdf_page;
 mod render;
+mod source;
 mod zip;
 
 use crate::pdf_fonts::shared_font_db;
 use crate::shell_caller::ShellCaller;
-use crate::windows::WindowKind;
 use crate::AppWindows;
 use bounded::{Gate, RenderError};
 use cache::{FileStamp, PreviewCache};
 use serde::Serialize;
+use source::Source;
 use std::fs::{File, Metadata};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -180,11 +186,22 @@ impl PreviewState {
     }
 }
 
-/// The picture of a recent document: the one inside the file, else (Hangul only) its first page.
+/// The picture of a recent document: the one inside the file, else its first page.
 pub(crate) fn load_preview(state: &PreviewState, id: &str, path: &Path) -> Option<Arc<Thumbnail>> {
     let font_dirs = Arc::clone(&state.font_dirs);
-    load_preview_with(state, id, path, move |document| {
-        render::first_page_png(&document, &shared_font_db(&font_dirs))
+    let source = Source::of(path);
+    let extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    load_preview_with(state, id, path, move |document| match source {
+        Some(Source::Hangul) => render::first_page_png(&document, &shared_font_db(&font_dirs)),
+        Some(Source::Pdf) => pdf_page::first_page_png(document, &shared_font_db(&font_dirs)),
+        Some(Source::Document | Source::Text) => {
+            card_source::card_png(&document, &extension, &shared_font_db(&font_dirs))
+        }
+        None => Err(RenderError::Unreadable),
     })
 }
 
@@ -217,28 +234,33 @@ fn load_preview_with(
     found
 }
 
-/// The whole of `source` within the render input limit. The file may have grown since its size
-/// was read, so one byte past the limit is read and refused.
-fn read_document<R: Read + Seek>(source: &mut R, size_hint: u64) -> Result<Vec<u8>, RenderError> {
-    let mut document =
-        Vec::with_capacity(size_hint.min(render::MAX_RENDER_INPUT_BYTES as u64) as usize);
+/// The part of `source` a drawing of this kind reads: the whole file within the kind's limit, or
+/// for a text file its start cut at a line break. The file may have grown since its size was
+/// read, so one byte past the limit is read and refused.
+fn read_document<R: Read + Seek>(
+    source: &mut R,
+    size_hint: u64,
+    kind: Source,
+) -> Result<Vec<u8>, RenderError> {
+    let limit = kind.read_bytes();
+    let mut document = Vec::with_capacity(size_hint.min(limit as u64) as usize);
     source
         .seek(SeekFrom::Start(0))
-        .and_then(|_| {
-            source
-                .take(render::MAX_RENDER_INPUT_BYTES as u64 + 1)
-                .read_to_end(&mut document)
-        })
+        .and_then(|_| source.take(limit as u64 + 1).read_to_end(&mut document))
         .map_err(|_| RenderError::Unreadable)?;
-    if document.len() > render::MAX_RENDER_INPUT_BYTES {
+    if document.len() <= limit {
+        return Ok(document);
+    }
+    if kind != Source::Text {
         return Err(RenderError::TooLarge);
     }
-    Ok(document)
+    document.truncate(limit);
+    Ok(source::whole_lines(document))
 }
 
-/// The first page of a Hangul file within the size limit, drawn by the bounded worker. The file is
-/// read on the worker, after it holds a render permit: a request that finds none free reads nothing,
-/// so a stream of them cannot each hold up to 50 MiB of file bytes.
+/// The first page of a document within the size limit of its kind, drawn by the bounded worker. The
+/// file is read on the worker, after it holds a render permit: a request that finds none free reads
+/// nothing, so a stream of them cannot each hold up to 50 MiB of file bytes.
 fn draw_first_page<R: Read + Seek + Send + 'static>(
     state: &PreviewState,
     mut source: R,
@@ -246,18 +268,16 @@ fn draw_first_page<R: Read + Seek + Send + 'static>(
     meta: &Metadata,
     render: impl FnOnce(Vec<u8>) -> Result<Vec<u8>, RenderError> + Send + 'static,
 ) -> Result<Thumbnail, RenderError> {
-    if WindowKind::for_path(path) != Some(WindowKind::Hwp)
-        || meta.len() > render::MAX_RENDER_INPUT_BYTES as u64
-    {
-        return Err(RenderError::Unreadable);
-    }
+    let kind = Source::of(path)
+        .filter(|kind| meta.len() <= kind.max_file_bytes())
+        .ok_or(RenderError::Unreadable)?;
     let size = meta.len();
     let limits = state.limits;
     let png = bounded::run(
         &state.gate,
         limits.permit_wait,
         limits.deadline,
-        move || render(read_document(&mut source, size)?),
+        move || render(read_document(&mut source, size, kind)?),
     )?;
     if png.len() > MAX_RENDERED_PNG_BYTES || sniff_image(&png) != Some("image/png") {
         return Err(RenderError::TooLarge);
@@ -296,6 +316,8 @@ pub async fn get_recent_preview(
     .map_err(|err| format!("미리보기를 읽지 못했습니다: {err}"))
 }
 
+#[cfg(test)]
+mod card_tests;
 #[cfg(test)]
 mod render_tests;
 #[cfg(test)]

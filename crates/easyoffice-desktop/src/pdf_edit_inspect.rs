@@ -111,6 +111,18 @@ pub fn inspect_within(
     deadline: &Deadline,
     limits: &Limits,
 ) -> Result<SourceInfo, String> {
+    let pdf = open_within(bytes, deadline, limits)?;
+    Ok(SourceInfo {
+        pages: pdf.pages().len(),
+    })
+}
+
+/// The parsed file once it has passed every check of [`inspect_within`].
+pub fn open_within(
+    bytes: &Arc<Vec<u8>>,
+    deadline: &Deadline,
+    limits: &Limits,
+) -> Result<Pdf, String> {
     if bytes.is_empty() || !has_header(bytes) {
         return Err(MSG_UNREADABLE.to_string());
     }
@@ -160,7 +172,7 @@ pub fn inspect_within(
             return Err(too_much_content());
         }
     }
-    Ok(SourceInfo { pages: pages.len() })
+    Ok(pdf)
 }
 
 /// How many entries the resource dictionaries of a page hold (fonts, pictures, colour spaces, ...).

@@ -18,12 +18,16 @@ const ZIP64_MARKER_32: u32 = 0xFFFF_FFFF;
 const METHOD_STORED: u16 = 0;
 const METHOD_DEFLATED: u16 = 8;
 const FLAG_ENCRYPTED: u16 = 1;
-/// Name stems of the thumbnail entries: HWPX, OOXML, ODF and Pages.
-const STEMS: [&str; 4] = [
+/// Name stems of the thumbnail entries, best first: HWPX, OOXML, ODF, then Pages (`QuickLook/` in
+/// the 2009 package, `preview` and the smaller `preview-web` since 2013; `preview-micro` is a
+/// few hundred bytes wide and never shown).
+const STEMS: [&str; 6] = [
     "Preview/PrvImage",
     "docProps/thumbnail",
     "Thumbnails/thumbnail",
     "QuickLook/Thumbnail",
+    "preview",
+    "preview-web",
 ];
 const EXTENSIONS: [&str; 5] = ["png", "jpg", "jpeg", "gif", "bmp"];
 
@@ -49,12 +53,10 @@ fn strip_pages_dir_prefix(name: &str) -> &str {
     }
 }
 
-fn is_thumbnail_name(name: &[u8]) -> bool {
-    let Ok(raw) = std::str::from_utf8(name) else {
-        return false;
-    };
-    let name = strip_pages_dir_prefix(raw);
-    STEMS.iter().any(|stem| {
+/// Position of the entry's name in [`STEMS`] (0 is best), `None` when it is no thumbnail name.
+fn thumbnail_rank(name: &[u8]) -> Option<usize> {
+    let name = strip_pages_dir_prefix(std::str::from_utf8(name).ok()?);
+    STEMS.iter().position(|stem| {
         let Some(rest) = name.get(stem.len()..) else {
             return false;
         };
@@ -84,8 +86,15 @@ fn find_central_directory<R: Read + Seek>(src: &mut R) -> Option<(u64, u32, usiz
     Some((u64::from(offset), size, usize::from(entries)))
 }
 
-/// The first thumbnail entry of the central directory, with its sizes and position.
+/// Whether the entry may be read at all: not encrypted and within the picture limit.
+fn is_readable(entry: &CentralEntry) -> bool {
+    let limit = u32::try_from(MAX_THUMBNAIL_BYTES).unwrap_or(u32::MAX);
+    entry.flags & FLAG_ENCRYPTED == 0 && entry.compressed <= limit && entry.uncompressed <= limit
+}
+
+/// The best-ranked readable thumbnail entry of the central directory, with its sizes and position.
 fn find_entry(directory: &[u8], entries: usize) -> Option<CentralEntry> {
+    let mut best: Option<(usize, CentralEntry)> = None;
     let mut at = 0_usize;
     for _ in 0..entries.min(MAX_ENTRIES) {
         if le_u32(directory, at)? != CENTRAL_SIGNATURE {
@@ -96,26 +105,32 @@ fn find_entry(directory: &[u8], entries: usize) -> Option<CentralEntry> {
         let comment_len = usize::from(le_u16(directory, at + 32)?);
         let name_start = at.checked_add(CENTRAL_FIXED_LEN)?;
         let name = directory.get(name_start..name_start.checked_add(name_len)?)?;
-        if is_thumbnail_name(name) {
-            return Some(CentralEntry {
+        if let Some(rank) = thumbnail_rank(name).filter(|r| best.as_ref().is_none_or(|b| *r < b.0))
+        {
+            let entry = CentralEntry {
                 flags: le_u16(directory, at + 8)?,
                 method: le_u16(directory, at + 10)?,
                 compressed: le_u32(directory, at + 20)?,
                 uncompressed: le_u32(directory, at + 24)?,
                 local_offset: le_u32(directory, at + 42)?,
-            });
+            };
+            if is_readable(&entry) {
+                if rank == 0 {
+                    return Some(entry);
+                }
+                best = Some((rank, entry));
+            }
         }
         at = name_start
             .checked_add(name_len)?
             .checked_add(extra_len)?
             .checked_add(comment_len)?;
     }
-    None
+    best.map(|(_, entry)| entry)
 }
 
 fn read_entry_data<R: Read + Seek>(src: &mut R, entry: &CentralEntry) -> Option<Vec<u8>> {
-    let limit = u32::try_from(MAX_THUMBNAIL_BYTES).ok()?;
-    if entry.flags & FLAG_ENCRYPTED != 0 || entry.compressed > limit || entry.uncompressed > limit {
+    if !is_readable(entry) {
         return None;
     }
     let mut local = [0_u8; LOCAL_FIXED_LEN];
@@ -135,6 +150,31 @@ fn read_entry_data<R: Read + Seek>(src: &mut R, entry: &CentralEntry) -> Option<
         METHOD_DEFLATED => easyoffice_formats::inflate_raw(&data, MAX_THUMBNAIL_BYTES).ok(),
         _ => None,
     }
+}
+
+/// What the central directory declares the parts of the package to inflate to, added up. `None`
+/// when the directory cannot be read (damaged, ZIP64) or has more than [`MAX_ENTRIES`] entries.
+pub fn declared_total<R: Read + Seek>(src: &mut R) -> Option<u64> {
+    let (offset, size, entries) = find_central_directory(src)?;
+    if size == 0 || size > MAX_CENTRAL_DIR_BYTES || entries > MAX_ENTRIES {
+        return None;
+    }
+    let mut directory = vec![0_u8; usize::try_from(size).ok()?];
+    read_at(src, offset, &mut directory)?;
+    let mut at = 0_usize;
+    let mut total = 0_u64;
+    for _ in 0..entries {
+        if le_u32(&directory, at)? != CENTRAL_SIGNATURE {
+            return None;
+        }
+        total = total.checked_add(u64::from(le_u32(&directory, at + 24)?))?;
+        at = at
+            .checked_add(CENTRAL_FIXED_LEN)?
+            .checked_add(usize::from(le_u16(&directory, at + 28)?))?
+            .checked_add(usize::from(le_u16(&directory, at + 30)?))?
+            .checked_add(usize::from(le_u16(&directory, at + 32)?))?;
+    }
+    Some(total)
 }
 
 pub fn read_thumbnail<R: Read + Seek>(src: &mut R) -> Option<Vec<u8>> {
@@ -158,15 +198,17 @@ mod tests {
             strip_pages_dir_prefix("가나다A/Preview/PrvImage.png"),
             "가나다A/Preview/PrvImage.png"
         );
-        assert!(!is_thumbnail_name(
-            "가나다A/Preview/PrvImage.png".as_bytes()
-        ));
+        assert_eq!(
+            thumbnail_rank("가나다A/Preview/PrvImage.png".as_bytes()),
+            None
+        );
         assert_eq!(
             strip_pages_dir_prefix("한글문서.pages/QuickLook/Thumbnail.png"),
             "QuickLook/Thumbnail.png"
         );
-        assert!(is_thumbnail_name(
-            "한글문서.pages/QuickLook/Thumbnail.png".as_bytes()
-        ));
+        assert_eq!(
+            thumbnail_rank("한글문서.pages/QuickLook/Thumbnail.png".as_bytes()),
+            Some(3)
+        );
     }
 }

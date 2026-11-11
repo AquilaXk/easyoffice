@@ -2,7 +2,8 @@
 //!
 //! It is started by `pdf_edit_supervisor.rs`, before anything of the shell exists: no window, no
 //! IPC, no plugin. It reads one request from its standard input (`pdf_edit_wire.rs`), does it with
-//! the PDF reader and writer (`pdf_edit_inspect.rs`, `pdf_edit_build.rs`), writes the answer to its
+//! the PDF reader and writer (`pdf_edit_inspect.rs`, `pdf_edit_build.rs`) or the page renderer
+//! (`pdf_first_page.rs`, PD-179), writes the answer to its
 //! standard output and exits. It is given bytes and returns bytes: a path never reaches it, and
 //! the stamp and watermark forms it needs come from the shell as bytes too (the shell owns the
 //! fonts).
@@ -21,9 +22,11 @@ use crate::pdf_edit_inspect::inspect;
 use crate::pdf_edit_os::{limit_own_address_space, own_resident_bytes};
 use crate::pdf_edit_overlay::Overlay;
 use crate::pdf_edit_wire::{
-    from_shell_cap, read_frame, write_frame, BuildHead, EXIT_DEADLINE, EXIT_MEMORY, NEED_OVERLAY,
-    OVERLAY_REPLY, REQ_BUILD, REQ_INSPECT, RES_ERR, RES_OK, SOURCE,
+    from_shell_cap, read_frame, split_render_request, write_frame, BuildHead, EXIT_DEADLINE,
+    EXIT_MEMORY, NEED_OVERLAY, OVERLAY_REPLY, REQ_BUILD, REQ_INSPECT, REQ_RENDER, RES_ERR, RES_OK,
+    SOURCE,
 };
+use crate::pdf_first_page::first_page_png;
 use std::io::{self, Read, Write};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::Arc;
@@ -79,6 +82,7 @@ fn serve(input: &mut impl Read, output: &mut impl Write) -> io::Result<()> {
                 .to_le_bytes()
                 .to_vec()
         }),
+        REQ_RENDER => render_request(&payload, &deadline),
         REQ_BUILD => build_request(&payload, input, output, &deadline),
         _ => Err(MSG_PANIC.to_string()),
     };
@@ -86,6 +90,13 @@ fn serve(input: &mut impl Read, output: &mut impl Write) -> io::Result<()> {
         Ok(bytes) => write_frame(output, RES_OK, &[&bytes]),
         Err(message) => write_frame(output, RES_ERR, &[message.as_bytes()]),
     }
+}
+
+/// A first-page render: the font file and the PDF are in the payload.
+fn render_request(payload: &[u8], deadline: &Deadline) -> Result<Vec<u8>, String> {
+    let (font, pdf) = split_render_request(payload).ok_or_else(bad_request)?;
+    let font = (!font.is_empty()).then(|| font.to_vec());
+    first_page_png(&Arc::new(pdf.to_vec()), font, deadline)
 }
 
 /// A build: the head is in `head`, the sources follow on the input. The overlays are asked of the

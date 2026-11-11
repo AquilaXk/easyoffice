@@ -179,10 +179,10 @@ fn damaged_and_hostile_hangul_files_give_no_picture_and_no_panic() {
 // --- limits --------------------------------------------------------------------------------
 
 #[test]
-fn only_hangul_files_are_drawn() {
+fn only_files_a_window_opens_are_drawn() {
     let dir = tempfile::tempdir().unwrap();
     let calls = Arc::new(AtomicUsize::new(0));
-    for (n, name) in ["a.docx", "b.pdf", "c.txt", "noext"]
+    for (n, name) in ["a.zip", "b.png", "c.exe", "noext", "d.hwp.bak"]
         .into_iter()
         .enumerate()
     {

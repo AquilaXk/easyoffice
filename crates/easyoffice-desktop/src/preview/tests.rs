@@ -296,6 +296,45 @@ fn zip_documents_give_their_stored_or_deflated_thumbnail() {
 }
 
 #[test]
+fn pages_documents_give_the_preview_picture_of_their_package() {
+    let jpg = vec![0xFF, 0xD8, 0xFF, 0xE0, 0, 16, b'J', b'F', b'I', b'F', 0];
+    let mut micro = jpg.clone();
+    micro.push(1);
+    let mut web = jpg.clone();
+    web.push(2);
+    let entry = |name: &'static str, bytes: &Vec<u8>| (name, 0_u16, bytes.clone(), bytes.len());
+    // The picture of a 2013 package, next to the web and micro copies in any order.
+    let package = zip(&[
+        entry("preview-micro.jpg", &micro),
+        entry("preview-web.jpg", &web),
+        entry("preview.jpg", &jpg),
+    ]);
+    assert_eq!(
+        extract(package).unwrap().bytes,
+        jpg,
+        "the full picture wins"
+    );
+    let only_web = zip(&[
+        entry("preview-micro.jpg", &micro),
+        entry("preview-web.jpg", &web),
+    ]);
+    assert_eq!(extract(only_web).unwrap().bytes, web, "micro is never used");
+    assert!(extract(zip(&[entry("preview-micro.jpg", &micro)])).is_none());
+    // A picture over the limit does not hide the smaller copy behind it.
+    let mut big = jpg.clone();
+    big.resize(MAX_THUMBNAIL_BYTES + 1, 0);
+    let oversized = zip(&[entry("preview.jpg", &big), entry("preview-web.jpg", &web)]);
+    assert_eq!(extract(oversized).unwrap().bytes, web);
+    // The picture of the older format is still found, and the first-listed one is not preferred
+    // over a better-ranked one.
+    let ranked = zip(&[
+        entry("preview.jpg", &jpg),
+        entry("QuickLook/Thumbnail.jpg", &web),
+    ]);
+    assert_eq!(extract(ranked).unwrap().bytes, web);
+}
+
+#[test]
 fn zip_thumbnails_with_other_names_types_or_limits_are_ignored() {
     assert!(extract(zip(&[("docProps/thumbnail.emf", 0, vec![1, 0, 0, 0], 4)])).is_none());
     assert!(extract(zip(&[(

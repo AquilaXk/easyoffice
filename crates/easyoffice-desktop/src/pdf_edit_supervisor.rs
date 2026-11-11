@@ -11,13 +11,14 @@
 
 use crate::pdf_edit_budget::{
     Jobs, JOBS, MAX_CHILD_RSS_BYTES, MAX_OVERLAY_SIZES, MEMORY_POLL, MSG_BUSY, MSG_MEMORY,
-    MSG_PANIC, MSG_TIMEOUT, MSG_WORKER_DIED, WORK_DEADLINE,
+    MSG_PANIC, MSG_TIMEOUT, MSG_WORKER_DIED, PREVIEW_DEADLINE, PREVIEW_JOBS, PREVIEW_MAX_RSS_BYTES,
+    WORK_DEADLINE,
 };
 use crate::pdf_edit_os::{child_resident_bytes, confine};
 use crate::pdf_edit_wire::{
     decode_overlay_need, from_worker_cap, read_frame, write_frame, BuildHead, OverlayMaker,
     EXIT_DEADLINE, EXIT_MEMORY, NEED_OVERLAY, OVERLAY_FAIL, OVERLAY_REPLY, REQ_BUILD, REQ_INSPECT,
-    RES_ERR, RES_OK, SOURCE, WORKER_ARG,
+    REQ_RENDER, RES_ERR, RES_OK, SOURCE, WORKER_ARG,
 };
 use std::io::{self, BufReader, BufWriter, Write};
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -51,6 +52,12 @@ impl Supervisor {
         Self::with_limits(exe, &JOBS, WORK_DEADLINE, MAX_CHILD_RSS_BYTES)
     }
 
+    /// A supervisor for the card previews (PD-179): its own places, a shorter deadline and a lower
+    /// memory limit than an edit.
+    pub fn for_preview(exe: PathBuf) -> Self {
+        Self::with_limits(exe, &PREVIEW_JOBS, PREVIEW_DEADLINE, PREVIEW_MAX_RSS_BYTES)
+    }
+
     /// The same with other limits and places (tests).
     pub fn with_limits(exe: PathBuf, jobs: &'static Jobs, deadline: Duration, memory: u64) -> Self {
         Self {
@@ -69,6 +76,18 @@ impl Supervisor {
         )?;
         let bytes: [u8; 4] = answer.try_into().map_err(|_| MSG_WORKER_DIED.to_string())?;
         Ok(u32::from_le_bytes(bytes) as usize)
+    }
+
+    /// The PNG of the first page of `pdf` (PD-179), drawn by the worker after the same checks.
+    ///
+    /// `font` (may be empty) draws the text of a file that does not embed the font of its Korean
+    /// text; the worker has no fonts of its own.
+    pub fn render_first_page(&self, pdf: &Arc<Vec<u8>>, font: &[u8]) -> Result<Vec<u8>, String> {
+        let head = u32::try_from(font.len()).unwrap_or(0).to_le_bytes();
+        self.run(
+            &|out| write_frame(out, REQ_RENDER, &[&head, font, pdf.as_slice()]),
+            &mut |_, _, _| Err(MSG_WORKER_DIED.to_string()),
+        )
     }
 
     /// The PDF of the plan in `head`, built from `sources`; `make_overlay` is asked for the stamp

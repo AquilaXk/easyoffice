@@ -8,8 +8,9 @@
 //!
 //! A frame is one tag byte, a little-endian `u32` length and that many payload bytes.
 //!
-//! * shell -> worker: [`REQ_INSPECT`] (the PDF), or [`REQ_BUILD`] (the plan, see [`BuildHead`])
-//!   followed by one [`SOURCE`] frame per PDF; later [`OVERLAY_REPLY`] / [`OVERLAY_FAIL`].
+//! * shell -> worker: [`REQ_INSPECT`] (the PDF), [`REQ_RENDER`] (the PDF, answered with the PNG of
+//!   its first page), or [`REQ_BUILD`] (the plan, see [`BuildHead`]) followed by one [`SOURCE`]
+//!   frame per PDF; later [`OVERLAY_REPLY`] / [`OVERLAY_FAIL`].
 //! * worker -> shell: [`NEED_OVERLAY`] (the stamp and watermark are made by the shell, which owns
 //!   the fonts), then exactly one of [`RES_OK`] and [`RES_ERR`].
 
@@ -20,6 +21,23 @@ pub const WORKER_ARG: &str = "--pdf-edit-worker";
 
 pub const REQ_INSPECT: u8 = 1;
 pub const REQ_BUILD: u8 = 2;
+/// The first page of the PDF as a PNG for the start window's card (PD-179). The payload is the
+/// length of a font file (`u32`, little-endian, may be 0), the font that draws the text of a PDF
+/// that does not embed its Korean font, and the PDF.
+pub const REQ_RENDER: u8 = 4;
+
+/// The largest font file the shell hands the worker (bytes).
+pub const MAX_RENDER_FONT_BYTES: usize = 16 * 1_048_576;
+
+/// Splits the payload of a [`REQ_RENDER`] request into the font file and the PDF.
+pub fn split_render_request(payload: &[u8]) -> Option<(&[u8], &[u8])> {
+    let len = u32::from_le_bytes(payload.get(..4)?.try_into().ok()?) as usize;
+    if len > MAX_RENDER_FONT_BYTES {
+        return None;
+    }
+    let rest = payload.get(4..)?;
+    (len <= rest.len()).then(|| rest.split_at(len))
+}
 pub const SOURCE: u8 = 3;
 pub const OVERLAY_REPLY: u8 = 5;
 pub const OVERLAY_FAIL: u8 = 6;
@@ -77,7 +95,7 @@ pub fn from_worker_cap(tag: u8) -> usize {
 /// Largest payload of each tag the worker accepts from the shell.
 pub fn from_shell_cap(tag: u8) -> usize {
     match tag {
-        REQ_INSPECT | SOURCE => MAX_FRAME_BYTES,
+        REQ_INSPECT | REQ_RENDER | SOURCE => MAX_FRAME_BYTES,
         // 5,000 pages of 10 bytes, two 100-character texts and the counts.
         REQ_BUILD => 128 * 1024,
         OVERLAY_REPLY => 16 * 1_048_576,
