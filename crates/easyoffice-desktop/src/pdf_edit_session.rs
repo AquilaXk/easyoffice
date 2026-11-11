@@ -1,4 +1,4 @@
-//! The PDF a window is editing: the files as they were opened, and the plan of the result (PD-163).
+//! The PDF a window is editing: the files as they were opened, and the plan of the result (PD-164).
 //!
 //! An edit never rewrites a file. The session keeps each opened PDF untouched and a list of the
 //! pages the result will have (which file, which page, how much more turned), plus the stamp and

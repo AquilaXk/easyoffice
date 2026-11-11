@@ -1,4 +1,4 @@
-//! Hostile PDFs (PD-163): every one must end in a result or a sentence, never in a panic, a hang or
+//! Hostile PDFs (PD-164): every one must end in a result or a sentence, never in a panic, a hang or
 //! an allocation the file did not pay for. The files are written by hand; most have no cross-
 //! reference table, so the reader has to repair them, which is the path a crafted file takes.
 

@@ -1,5 +1,5 @@
 //! Writes the result of an edit: the chosen pages of the open PDFs, in order, as one new PDF
-//! (PD-163).
+//! (PD-164).
 //!
 //! Library choice (the three steps of the implementation rule): (1) `hayro-syntax` reads the files
 //! and `hayro-write` copies a page together with every object it uses (fonts, pictures, shadings,
