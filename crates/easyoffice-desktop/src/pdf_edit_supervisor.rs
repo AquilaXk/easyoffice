@@ -16,9 +16,9 @@ use crate::pdf_edit_budget::{
 };
 use crate::pdf_edit_os::{child_resident_bytes, confine};
 use crate::pdf_edit_wire::{
-    decode_overlay_need, from_worker_cap, read_frame, write_frame, BuildHead, OverlayMaker,
-    EXIT_DEADLINE, EXIT_MEMORY, NEED_OVERLAY, OVERLAY_FAIL, OVERLAY_REPLY, REQ_BUILD, REQ_INSPECT,
-    REQ_RENDER, RES_ERR, RES_OK, SOURCE, WORKER_ARG,
+    decode_overlay_need, from_worker_cap, from_worker_render_cap, read_frame, write_frame,
+    BuildHead, OverlayMaker, EXIT_DEADLINE, EXIT_MEMORY, NEED_OVERLAY, OVERLAY_FAIL, OVERLAY_REPLY,
+    REQ_BUILD, REQ_INSPECT, REQ_RENDER, RES_ERR, RES_OK, SOURCE, WORKER_ARG,
 };
 use std::io::{self, BufReader, BufWriter, Write};
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -72,6 +72,7 @@ impl Supervisor {
     pub fn inspect(&self, pdf: &Arc<Vec<u8>>) -> Result<usize, String> {
         let answer = self.run(
             &|out| write_frame(out, REQ_INSPECT, &[pdf.as_slice()]),
+            from_worker_cap,
             &mut |_, _, _| Err(MSG_WORKER_DIED.to_string()),
         )?;
         let bytes: [u8; 4] = answer.try_into().map_err(|_| MSG_WORKER_DIED.to_string())?;
@@ -86,6 +87,7 @@ impl Supervisor {
         let head = u32::try_from(font.len()).unwrap_or(0).to_le_bytes();
         self.run(
             &|out| write_frame(out, REQ_RENDER, &[&head, font, pdf.as_slice()]),
+            from_worker_render_cap,
             &mut |_, _, _| Err(MSG_WORKER_DIED.to_string()),
         )
     }
@@ -106,6 +108,7 @@ impl Supervisor {
                     .iter()
                     .try_for_each(|source| write_frame(out, SOURCE, &[source.as_slice()]))
             },
+            from_worker_cap,
             make_overlay,
         )
     }
@@ -113,6 +116,7 @@ impl Supervisor {
     fn run(
         &self,
         request: &(dyn Fn(&mut dyn Write) -> io::Result<()> + Sync),
+        cap: fn(u8) -> usize,
         make_overlay: &mut OverlayMaker<'_>,
     ) -> Result<Vec<u8>, String> {
         let _place = self.jobs.claim().ok_or_else(|| MSG_BUSY.to_string())?;
@@ -152,7 +156,7 @@ impl Supervisor {
             scope.spawn(move || {
                 let mut out = BufReader::new(stdout);
                 loop {
-                    let frame = read_frame(&mut out, from_worker_cap);
+                    let frame = read_frame(&mut out, cap);
                     let last = !matches!(&frame, Ok((tag, _)) if *tag == NEED_OVERLAY);
                     if frames.send(frame).is_err() || last {
                         break;

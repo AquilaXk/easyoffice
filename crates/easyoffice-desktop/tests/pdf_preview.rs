@@ -428,6 +428,51 @@ fn a_shared_resource_bomb_costs_the_worker_and_nothing_else() {
         .is_ok());
 }
 
+/// A worker that answers a render request with a `RES_OK` frame of `payload` zero bytes (a shell
+/// script standing in for the worker binary, so the answer's size is the test's choice).
+#[cfg(unix)]
+fn worker_answering_with(dir: &std::path::Path, payload: usize) -> Supervisor {
+    use std::os::unix::fs::PermissionsExt;
+    let len = u32::try_from(payload).unwrap().to_le_bytes();
+    let octal: String = len.iter().map(|b| format!("\\{b:03o}")).collect();
+    let script = dir.join(format!("worker-{payload}.sh"));
+    std::fs::write(
+        &script,
+        format!("#!/bin/sh\nprintf '\\012{octal}'\nhead -c {payload} /dev/zero\n"),
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let jobs: &'static Jobs = Box::leak(Box::new(Jobs::new(1)));
+    Supervisor::with_limits(script, jobs, Duration::from_secs(10), 1024 * MIB)
+}
+
+#[cfg(unix)]
+#[test]
+fn an_answer_larger_than_a_card_picture_ends_the_request_without_reading_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let pdf = Arc::new(sample_pdf(1, 1, &[]));
+    let limit = pdf_edit_wire::MAX_RENDER_RESPONSE_BYTES;
+    let at_limit = worker_answering_with(dir.path(), limit).render_first_page(&pdf, &[]);
+    assert_eq!(
+        at_limit.map(|bytes| bytes.len()),
+        Ok(limit),
+        "the limit itself passes"
+    );
+    for payload in [limit + 1, 64 << 20, 290 << 20] {
+        let started = Instant::now();
+        let outcome = worker_answering_with(dir.path(), payload).render_first_page(&pdf, &[]);
+        assert_eq!(
+            outcome.map(|bytes| bytes.len()),
+            Err(pdf_edit_budget::MSG_WORKER_DIED.to_string()),
+            "{payload} bytes"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "{payload} bytes"
+        );
+    }
+}
+
 #[test]
 fn a_worker_that_is_not_there_gives_a_sentence() {
     let jobs: &'static Jobs = Box::leak(Box::new(Jobs::new(1)));

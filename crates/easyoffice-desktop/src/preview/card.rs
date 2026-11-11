@@ -52,11 +52,29 @@ fn text_width(text: &str, size: f32) -> f32 {
     text.chars().map(advance_em).sum::<f32>() * size
 }
 
-/// The text with control characters turned into spaces (XML 1.0 forbids most of them) and at most
-/// [`MAX_TEXT_CHARS`] characters.
+/// Whether XML 1.0 can carry the character: its `Char` production (tab, line feeds, U+0020 up to
+/// U+D7FF, U+E000 up to U+FFFD, and the supplementary planes) without the Unicode noncharacters
+/// (U+FDD0 to U+FDEF, U+FFFE and U+FFFF of every plane), which parsers refuse in practice. A Rust
+/// string holds no lone surrogate, so none is left to test for.
+fn is_xml_char(c: char) -> bool {
+    let code = c as u32;
+    matches!(code, 0x9 | 0xA | 0xD | 0x20..=0xD7FF | 0xE000..=0xFFFD | 0x1_0000..=0x10_FFFF)
+        && !(0xFDD0..=0xFDEF).contains(&code)
+        && code & 0xFFFE != 0xFFFE
+}
+
+/// The text with control characters and characters XML cannot carry turned into spaces (one stray
+/// character must not make the parser refuse the whole card) and at most [`MAX_TEXT_CHARS`]
+/// characters.
 fn clean(text: &str) -> String {
     text.chars()
-        .map(|c| if c.is_control() { ' ' } else { c })
+        .map(|c| {
+            if c.is_control() || !is_xml_char(c) {
+                ' '
+            } else {
+                c
+            }
+        })
         .take(MAX_TEXT_CHARS)
         .collect()
 }

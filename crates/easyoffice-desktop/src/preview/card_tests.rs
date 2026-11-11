@@ -200,6 +200,40 @@ fn every_text_is_escaped_and_the_svg_is_valid_xml() {
 use crate::save_thumbnail::render_png_sized;
 
 #[test]
+fn characters_outside_xml_are_dropped_and_the_card_keeps_its_text() {
+    // XML 1.0 has no U+FFFE, U+FFFF or other noncharacters; a Rust string has no lone surrogate
+    // (a lossy decode turns it into U+FFFD, which XML allows).
+    let hostile = "가\u{FFFE}나\u{FFFF}다\u{FDD0}라\u{1FFFE}마\u{10FFFF}바\u{FFFD}사";
+    let content = Content::Page(vec![Block::Paragraph {
+        text: hostile.to_string(),
+        heading: 0,
+        bullet: false,
+        align: Align::Left,
+    }]);
+    let svg = card::svg(&content);
+    let document = roxmltree::Document::parse(&svg).expect("well-formed XML");
+    let text: String = document
+        .descendants()
+        .filter(|node| node.has_tag_name("text"))
+        .filter_map(|node| node.text())
+        .collect();
+    assert!(text.starts_with("가 나 다 라 마 바"), "{text:?}");
+    assert!(
+        text.contains('\u{FFFD}'),
+        "a replacement character is valid and kept"
+    );
+    let png = render_png_sized(&svg, &fonts(), 480).expect("drawn");
+    assert!(non_white(&png) > 100, "the card is not blank");
+    let grid = card::svg(&Content::Grid(vec![vec![hostile.to_string(); 5]; 2]));
+    assert!(roxmltree::Document::parse(&grid).is_ok());
+    let slide = card::svg(&Content::Slide {
+        title: hostile.to_string(),
+        lines: vec![hostile.to_string()],
+    });
+    assert!(roxmltree::Document::parse(&slide).is_ok());
+}
+
+#[test]
 fn the_svg_does_not_grow_with_the_document() {
     let long = "가나다라 ".repeat(5_000);
     let blocks: Vec<Block> = (0..2_000)

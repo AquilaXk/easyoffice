@@ -318,6 +318,9 @@ fn the_renderer_refuses_empty_and_oversized_input_itself() {
     );
 }
 
+/// The worker may answer with every picture the shell accepts.
+const _: () = assert!(MAX_RENDERED_PNG_BYTES <= crate::pdf_edit_wire::MAX_RENDER_RESPONSE_BYTES);
+
 #[test]
 fn a_picture_that_is_too_large_or_not_a_png_is_dropped() {
     let dir = tempfile::tempdir().unwrap();

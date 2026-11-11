@@ -80,6 +80,21 @@ pub fn write_frame<W: Write + ?Sized>(out: &mut W, tag: u8, parts: &[&[u8]]) -> 
     out.flush()
 }
 
+/// Largest answer to a [`REQ_RENDER`] request (bytes): the card picture the shell accepts is at most
+/// 1 MiB (`MAX_RENDERED_PNG_BYTES` in `preview/mod.rs`, which a test keeps within this), plus room
+/// for what a PNG encoder adds.
+pub const MAX_RENDER_RESPONSE_BYTES: usize = 1_048_576 + 16 * 1024;
+
+/// [`from_worker_cap`] for a render request: only the answer or a sentence, and the answer is a
+/// small picture, not an edit's result of up to 256 MiB.
+pub fn from_worker_render_cap(tag: u8) -> usize {
+    match tag {
+        RES_ERR => 4096,
+        RES_OK => MAX_RENDER_RESPONSE_BYTES,
+        _ => 0,
+    }
+}
+
 /// Largest payload of each tag the shell accepts from a worker (0: the tag is not expected). A
 /// worker that has been fed a crafted file is not trusted: it may ask for an overlay (nine
 /// bytes), fail with a sentence, or answer; only the answer may be large.
@@ -299,6 +314,18 @@ mod tests {
         assert!(read_frame(&mut &frame(RES_OK, 1 << 20)[..], from_worker_cap).is_ok());
         assert!(read_frame(&mut &frame(OVERLAY_REPLY, 1)[..], from_worker_cap).is_err());
         assert!(read_frame(&mut &frame(99, 0)[..], from_worker_cap).is_err());
+        // The answer to a render request is a card picture: far less than an edit's result.
+        let render =
+            |tag: u8, len: usize| read_frame(&mut &frame(tag, len)[..], from_worker_render_cap);
+        assert!(render(RES_OK, MAX_RENDER_RESPONSE_BYTES).is_ok());
+        assert!(render(RES_OK, MAX_RENDER_RESPONSE_BYTES + 1).is_err());
+        assert!(render(RES_OK, 2 << 20).is_err());
+        assert!(render(RES_ERR, 4096).is_ok());
+        assert!(render(RES_ERR, 4097).is_err());
+        assert!(
+            render(NEED_OVERLAY, 9).is_err(),
+            "a render never asks for an overlay"
+        );
         // The same for what the worker takes from the shell.
         assert!(read_frame(&mut &frame(REQ_BUILD, 128 * 1024)[..], from_shell_cap).is_ok());
         assert!(read_frame(&mut &frame(REQ_BUILD, 128 * 1024 + 1)[..], from_shell_cap).is_err());
