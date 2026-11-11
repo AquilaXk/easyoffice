@@ -359,3 +359,38 @@ fn hundreds_of_styled_pages_are_measured() {
         assert!(verify_exported_pdf(&pdf, 300, true).is_ok());
     }
 }
+
+/// One page's PDF objects with the text embedded, from a tree parsed against `fonts` as they are.
+fn page_chunk_bytes(fonts: &Arc<Database>) -> Vec<u8> {
+    let svg =
+        page(r#"<text x="16" y="64" font-family="Noto Sans KR" font-size="24">한글 Search</text>"#);
+    let tree = usvg::Tree::from_str(&svg, &parse_options(fonts)).expect("tree");
+    let (chunk, _) =
+        svg2pdf::to_chunk(&tree, svg2pdf::ConversionOptions::default()).expect("chunk");
+    chunk.as_bytes().to_vec()
+}
+
+/// svg2pdf shares the data of a face the database holds in memory (a file mapping or binary data)
+/// and copies the file of a face that is read from disk on every access (PD-163). The copy is only
+/// a different way to hold the same bytes, so all three sources give the same objects.
+#[test]
+fn a_face_gives_the_same_objects_whether_its_data_is_shared_or_copied() {
+    let Some(dir) = crate::pdf_fonts::tests::bundled_font_dir() else {
+        return;
+    };
+    let Some(on_disk) = crate::pdf_fonts::tests::bundled_only_db() else {
+        return;
+    };
+    let mapped = crate::pdf_fonts::with_mapped_faces(&on_disk);
+    let mut binary = Database::new();
+    binary.load_font_data(std::fs::read(dir.join("NotoSansKR-Regular.ttf")).expect("font"));
+    crate::pdf_fonts::set_generic_families(&mut binary);
+    let copied = page_chunk_bytes(&Arc::new(on_disk));
+    assert!(copied.len() > 1_000, "the page embeds its font");
+    assert_eq!(
+        page_chunk_bytes(&Arc::new(mapped)),
+        copied,
+        "shared file mapping"
+    );
+    assert_eq!(page_chunk_bytes(&Arc::new(binary)), copied, "binary data");
+}

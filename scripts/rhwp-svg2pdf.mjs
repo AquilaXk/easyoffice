@@ -13,6 +13,8 @@ import path from "node:path";
 import { cargoVersion } from "./verify-rhwp-upstream.mjs";
 
 export const SVG2PDF_DIR = "vendor/svg2pdf";
+/** Records the files of `vendor/svg2pdf` that carry an easyoffice patch on top of rhwp's copy. */
+export const LOCAL_PATCHES_FILE = "config/svg2pdf-local-patches.json";
 const OID_SHORT = 10;
 
 /** Git blob object id of `data`. */
@@ -57,7 +59,41 @@ export function diffTrees(local, upstream) {
   return { changed: changed.sort(byPath), added: added.sort(byPath), removed: removed.sort(byPath) };
 }
 
+/**
+ * Local patches by path relative to `vendor/svg2pdf`: `{ id, base, patched, summary }`, where `base`
+ * is the blob id of rhwp's file the patch applies to and `patched` the blob id of our file. Empty
+ * when the file does not exist.
+ */
+export function loadLocalPatches(root) {
+  const file = path.join(root, LOCAL_PATCHES_FILE);
+  if (!fs.existsSync(file)) return new Map();
+  return new Map(Object.entries(JSON.parse(fs.readFileSync(file, "utf8")).files ?? {}));
+}
+
 const short = (oid) => oid.slice(0, OID_SHORT);
+
+/**
+ * Takes the recorded local patches out of the drift: a file whose local blob is the recorded
+ * `patched` one and whose upstream blob is still the recorded `base` is expected to differ. When
+ * rhwp changed a patched file the patch must be merged by hand, so that file is reported in
+ * `conflicts` and never offered to the sync (which would drop the patch). A file that differs but
+ * does not match its record stays in the drift (it was edited without updating the record).
+ */
+export function applyLocalPatches(diff, local, upstream, patches) {
+  const conflicts = [];
+  const changed = diff.changed.filter((rel) => {
+    const patch = patches.get(rel);
+    if (!patch || local.get(rel) !== patch.patched) return true;
+    if (upstream.get(rel) !== patch.base) {
+      conflicts.push(
+        `${SVG2PDF_DIR}/${rel} carries ${patch.id} but rhwp changed it (${short(patch.base)} -> ${short(upstream.get(rel))}); `
+          + `merge the patch by hand and update ${LOCAL_PATCHES_FILE}`,
+      );
+    }
+    return false;
+  });
+  return { diff: { ...diff, changed }, conflicts };
+}
 
 function describeDiff(diff, local, upstream) {
   return [
@@ -70,7 +106,8 @@ function describeDiff(diff, local, upstream) {
 /**
  * Plans the svg2pdf check. `problems` block the update; with `sync` a file drift becomes a
  * `sync` action (writes, removes and backups) instead of a problem. A differing `[patch]` entry
- * is never synced because it lives in our root Cargo.toml.
+ * is never synced because it lives in our root Cargo.toml. Files recorded in
+ * `config/svg2pdf-local-patches.json` may differ from rhwp's copy (see [`applyLocalPatches`]).
  */
 export function planSvg2pdf({ root, remote, url, commit, sync }) {
   const problems = [];
@@ -83,7 +120,9 @@ export function planSvg2pdf({ root, remote, url, commit, sync }) {
   }
   const local = localTree(root);
   const upstream = remote.listTreeAt(url, commit, SVG2PDF_DIR);
-  const diff = diffTrees(local, upstream);
+  const patched = applyLocalPatches(diffTrees(local, upstream), local, upstream, loadLocalPatches(root));
+  const { diff } = patched;
+  problems.push(...patched.conflicts);
   const drift = diff.changed.length + diff.added.length + diff.removed.length > 0;
   if (!drift) return { problems, sync: null, drift };
 

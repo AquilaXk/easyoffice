@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { normalizedSha256Text } from "./hwp-studio-overrides.mjs";
-import { blobOid, patchEntry } from "./rhwp-svg2pdf.mjs";
+import { applyLocalPatches, blobOid, loadLocalPatches, localTree, patchEntry } from "./rhwp-svg2pdf.mjs";
 import { commitFromLsRemote, parseArgs, runUpdate } from "./update-rhwp.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -359,4 +359,52 @@ test("svg2pdf: --dry-run with --sync-svg2pdf writes nothing; a failing checkout 
   assert.throws(() => runUpdate(["v0.9.0", "--sync-svg2pdf"], env), /restored.*fetch failed/);
   assert.deepEqual(svg2pdfFiles(root), before);
   assert.equal(fs.existsSync(path.join(root, "vendor/svg2pdf/src/new.rs")), false);
+});
+
+const LIB_REL = "vendor/svg2pdf/src/lib.rs";
+const PATCHED_LIB = "pub fn patched() {}\n";
+
+/** A root whose lib.rs carries a recorded local patch on top of rhwp's copy. */
+function makePatchedRoot(record = {}) {
+  const root = makeRoot();
+  fs.writeFileSync(path.join(root, LIB_REL), PATCHED_LIB);
+  const patch = { id: "PD-163", base: blobOid(Buffer.from(SVG2PDF[LIB_REL])), patched: blobOid(Buffer.from(PATCHED_LIB)), ...record };
+  fs.writeFileSync(path.join(root, "config/svg2pdf-local-patches.json"), stringify({ schemaVersion: 1, files: { "src/lib.rs": patch } }));
+  return root;
+}
+
+test("svg2pdf: a recorded local patch is not drift while rhwp's file is the one it was made against", () => {
+  const root = makePatchedRoot();
+  const env = makeEnv(root, makeRemote());
+  runUpdate(["v0.9.0", "--dry-run"], env);
+  assert.deepEqual(env.calls, []);
+});
+
+test("svg2pdf: a patched file that rhwp changed is a conflict, and --sync-svg2pdf does not overwrite it", () => {
+  const root = makePatchedRoot();
+  const env = makeEnv(root, makeRemote({ files: { [LIB_REL]: "pub fn upstream() {}\n" } }));
+  for (const args of [["v0.9.0"], ["v0.9.0", "--sync-svg2pdf"]]) {
+    assert.throws(() => runUpdate(args, env), /src\/lib\.rs carries PD-163 but rhwp changed it/);
+  }
+  assert.equal(fs.readFileSync(path.join(root, LIB_REL), "utf8"), PATCHED_LIB);
+  assert.deepEqual(env.calls, []);
+});
+
+test("svg2pdf: a file edited without updating its record is still drift", () => {
+  const root = makePatchedRoot({ patched: blobOid(Buffer.from("something else\n")) });
+  const env = makeEnv(root, makeRemote());
+  assert.throws(() => runUpdate(["v0.9.0"], env), /changed src\/lib\.rs/);
+});
+
+test("svg2pdf: the recorded patches of this repository match the vendored files", () => {
+  const patches = loadLocalPatches(REPO);
+  assert.ok(patches.size > 0);
+  const local = localTree(REPO);
+  for (const [rel, patch] of patches) {
+    assert.equal(local.get(rel), patch.patched, `${rel}: update ${patch.id}'s record in config/svg2pdf-local-patches.json after editing the file`);
+    assert.notEqual(patch.base, patch.patched, rel);
+  }
+  const diff = applyLocalPatches({ changed: [...patches.keys()], added: [], removed: [] }, local, new Map([...patches].map(([rel, patch]) => [rel, patch.base])), patches);
+  assert.deepEqual(diff.diff.changed, []);
+  assert.deepEqual(diff.conflicts, []);
 });

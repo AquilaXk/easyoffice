@@ -39,7 +39,8 @@ pub fn write_font(
 ) -> Result<()> {
     // We've already parsed all fonts when creating the font objects, so each font
     // should be valid.
-    let ttf = Face::parse(&font.face_data, font.face_index)
+    let face_data: &[u8] = (*font.face_data).as_ref();
+    let ttf = Face::parse(face_data, font.face_index)
         .map_err(|_| InvalidFont(font.id))?;
     let units_per_em = ttf.units_per_em();
 
@@ -162,7 +163,7 @@ pub fn write_font(
     chunk.cmap(cmap_ref, &cmap.finish()).writing_mode(WMode::Horizontal);
 
     // Subset and write the font's bytes.
-    let data = subset_font(&font.face_data, font.face_index, glyph_remapper, font.id)?;
+    let data = subset_font(face_data, font.face_index, glyph_remapper, font.id)?;
 
     let mut stream = chunk.stream(data_ref, &data);
     stream.filter(Filter::FlateDecode);
@@ -517,9 +518,25 @@ pub struct Font {
     pub glyph_set: BTreeMap<u16, String>,
     pub glyph_remapper: GlyphRemapper,
     pub reference: Ref,
-    pub face_data: Arc<Vec<u8>>,
+    // easyoffice patch (PD-163): shares the database's font data instead of copying the file for
+    // every page.
+    pub face_data: Arc<dyn AsRef<[u8]> + Send + Sync>,
     pub units_per_em: u16,
     pub face_index: u32,
+}
+
+/// The data of a face the database holds in memory (`Binary` or a shared file mapping), to share
+/// it instead of copying it; `None` for a face that is read from its file on every access.
+fn shared_face_data(
+    fontdb: &fontdb::Database,
+    id: fontdb::ID,
+) -> Option<Arc<dyn AsRef<[u8]> + Send + Sync>> {
+    match &fontdb.face(id)?.source {
+        fontdb::Source::Binary(data) | fontdb::Source::SharedFile(_, data) => {
+            Some(Arc::clone(data))
+        }
+        fontdb::Source::File(_) => None,
+    }
 }
 
 pub fn fill_fonts(
@@ -534,6 +551,7 @@ pub fn fill_fonts(
                 for span in t.layouted() {
                     for g in &span.positioned_glyphs {
                         let font = ctx.fonts.entry(g.font).or_insert_with(|| {
+                            let shared = shared_face_data(fontdb, g.font);
                             fontdb
                                 .with_face_data(g.font, |data, face_index| {
                                     // TODO: Currently, we are parsing each font twice, once here
@@ -548,7 +566,8 @@ pub fn fill_fonts(
                                         return Some(Font {
                                             id: g.font,
                                             reference,
-                                            face_data: Arc::new(Vec::from(data)),
+                                            face_data: shared
+                                                .unwrap_or_else(|| Arc::new(Vec::from(data))),
                                             units_per_em: ttf.units_per_em(),
                                             glyph_set,
                                             glyph_remapper,

@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "files": {
+    "src/render/text.rs": {
+      "id": "PD-163",
+      "base": "66cd7dd72fef3fcd662f950f80c9dcc3d9672091",
+      "patched": "ff68b91aaa2d224e4e388dd6b4b25ed843e15b6f",
+      "summary": "Font.face_data shares the font database's data (Arc<dyn AsRef<[u8]>>) instead of copying the font file for every page"
+    }
+  }
+}
