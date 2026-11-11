@@ -322,6 +322,7 @@ impl SheetEngine {
         match name {
             "VLOOKUP" | "HLOOKUP" => self.lookup_table(name == "VLOOKUP", args, ctx, depth),
             "XLOOKUP" => self.lookup_x(args, ctx, depth),
+            "XMATCH" => self.lookup_xmatch(args, ctx, depth),
             "INDEX" => self.lookup_index(args, ctx, depth),
             "MATCH" => self.lookup_match(args, ctx, depth),
             "CHOOSE" => self.lookup_choose(args, ctx, depth),
@@ -487,6 +488,42 @@ impl SheetEngine {
         match best_approx {
             Some((best_idx, _)) => Ok(return_arr[best_idx].clone()),
             None => self.xlookup_not_found(args, ctx, depth),
+        }
+    }
+
+    /// `XMATCH(lookup, array, [match_mode], [search_mode])`: the 1-based position of the match,
+    /// with the same match and search modes as `XLOOKUP`.
+    fn lookup_xmatch(&self, args: &[Expr], ctx: &mut EvalContext<'_>, depth: usize) -> CellResult {
+        check_lookup_arity(args, 2, 4)?;
+        let lookup_val = self.eval_arg_val(&args[0], ctx, depth)?;
+        let match_mode = self.xlookup_mode(args, 2, 0, ctx, depth)?;
+        let search_mode = self.xlookup_mode(args, 3, 1, ctx, depth)?;
+        if !matches!(match_mode, -1..=2) || !matches!(search_mode, -2 | -1 | 1 | 2) {
+            return Err(FormulaError::Value);
+        }
+        let modes = XlookupModes {
+            match_mode,
+            search_mode,
+        };
+        let arr = self.eval_range_vec(&args[1], ctx, depth)?;
+        let hit = if search_mode.abs() == 2 {
+            modes.binary_search(arr.len(), &lookup_val, |i| Ok(arr[i].clone()))?
+        } else {
+            let mut best_approx: Option<(usize, EvaluatedCellValue)> = None;
+            let exact = (0..arr.len())
+                .map(|step| modes.scan_index(step, arr.len()))
+                .find(|&idx| {
+                    let hit = modes.cell_matches(&arr[idx], &lookup_val);
+                    if !hit {
+                        modes.update_approx(&mut best_approx, idx, &arr[idx], &lookup_val);
+                    }
+                    hit
+                });
+            exact.or(best_approx.map(|(idx, _)| idx))
+        };
+        match hit {
+            Some(idx) => number_value((idx + 1) as f64),
+            None => Err(FormulaError::Na),
         }
     }
 

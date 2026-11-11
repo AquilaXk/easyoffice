@@ -9064,3 +9064,31 @@ THE SOFTWARE.
 ### SheetJS SSF and IronCalc number formatter (Apache-2.0; MIT OR Apache-2.0)
 
 Sources: https://github.com/SheetJS/sheetjs (`packages/ssf/ssf.js`, Apache License 2.0, Copyright (C) 2012-present SheetJS LLC) and https://github.com/ironcalc/IronCalc (`base/src/formatter`, used under the MIT license). `crates/easyoffice-sheet/src/text_format*` re-implements, in safe Rust, the SSF section choice with `[>100]`-style conditions and its continued-fraction search for `# ?/?` codes (extended with the closest semiconvergent), and follows IronCalc's split of a format code into sections and tokens. No locale data is taken from either project; the Korean month, weekday and AM/PM names and the `DBNum` glyph tables are written directly. The full Apache License 2.0 text is reproduced in the generated section above.
+
+### statrs (MIT)
+
+Source: https://github.com/statrs-dev/statrs (`src/function/gamma.rs`, `src/function/beta.rs`). `crates/easyoffice-sheet/src/special.rs` ports its Lanczos `ln_gamma` (g = 10.900511), the regularized incomplete gamma series and continued fraction, and the regularized incomplete beta continued fraction in safe Rust with bounded loops; the distribution inverter is written in this repository. Used under the MIT license:
+
+```
+MIT License
+
+Copyright (c) 2016 Michael Ma
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```

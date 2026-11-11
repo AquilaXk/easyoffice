@@ -319,8 +319,8 @@ impl SheetEngine {
             "COUNTIFS" => self.eval_multi_criteria_streaming(name, args, ctx, depth),
             "IF" | "IFS" | "AND" | "OR" | "XOR" | "NOT" | "IFERROR" | "IFNA" | "SWITCH"
             | "TRUE" | "FALSE" => self.eval_logical_func(name, args, ctx, depth),
-            "VLOOKUP" | "HLOOKUP" | "XLOOKUP" | "INDEX" | "MATCH" | "CHOOSE" | "OFFSET" | "ROW"
-            | "COLUMN" | "ROWS" | "COLUMNS" | "TRANSPOSE" | "INDIRECT" => {
+            "VLOOKUP" | "HLOOKUP" | "XLOOKUP" | "XMATCH" | "INDEX" | "MATCH" | "CHOOSE"
+            | "OFFSET" | "ROW" | "COLUMN" | "ROWS" | "COLUMNS" | "TRANSPOSE" | "INDIRECT" => {
                 self.eval_lookup_func(name, args, ctx, depth)
             }
             "LEN" | "TRIM" | "UPPER" | "LOWER" | "PROPER" | "VALUE" | "CHAR" | "CODE"
@@ -355,6 +355,14 @@ impl SheetEngine {
             | "IMCONJUGATE" | "IMSUM" | "IMSUB" | "IMPRODUCT" | "IMDIV" | "IMPOWER" | "IMSQRT"
             | "IMEXP" | "IMLN" | "IMLOG10" | "IMLOG2" | "IMSIN" | "IMCOS" => {
                 self.eval_complex_stat_func(name, args, ctx, depth)
+            }
+            "T.DIST" | "T.DIST.RT" | "T.DIST.2T" | "T.INV" | "T.INV.2T" | "TDIST" | "TINV"
+            | "CHISQ.DIST" | "CHISQ.DIST.RT" | "CHISQ.INV" | "CHISQ.INV.RT" | "CHIDIST"
+            | "CHIINV" | "BETA.DIST" | "BETA.INV" | "BETADIST" | "BETAINV" | "GAMMA.DIST"
+            | "GAMMADIST" | "GAMMA.INV" | "GAMMAINV" | "GAMMALN" | "GAMMALN.PRECISE" | "GAMMA"
+            | "BINOM.DIST" | "BINOMDIST" | "BINOM.INV" | "CRITBINOM" | "NORM.DIST" | "NORMDIST"
+            | "NORM.INV" | "NORMINV" | "NORM.S.INV" | "NORMSINV" => {
+                self.eval_dist_func(name, args, ctx, depth)
             }
             _ => Err(FormulaError::Name),
         }

@@ -150,12 +150,12 @@ fn erfc_cody(x: f64) -> f64 {
 }
 
 #[inline]
-fn std_normal_pdf(x: f64) -> f64 {
+pub(crate) fn std_normal_pdf(x: f64) -> f64 {
     FRAC_1_SQRT_2PI * (-0.5 * x * x).exp()
 }
 
 #[inline]
-fn std_normal_cdf(z: f64) -> f64 {
+pub(crate) fn std_normal_cdf(z: f64) -> f64 {
     0.5 * erfc_cody(-z * std::f64::consts::FRAC_1_SQRT_2)
 }
 
@@ -296,7 +296,7 @@ fn coerce_cell_to_complex(
 }
 
 impl SheetEngine {
-    fn eval_strict_num_arg(
+    pub(crate) fn eval_strict_num_arg(
         &self,
         arg: &Expr,
         ctx: &mut EvalContext<'_>,
