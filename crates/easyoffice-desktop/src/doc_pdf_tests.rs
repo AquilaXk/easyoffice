@@ -1,0 +1,218 @@
+//! The rich-document PDF (PD-164): a document the engine wrote as HWPX comes out as laid-out pages
+//! with real text, a table, a picture, the page rotation and the watermark and stamp. The fonts are
+//! the bundled face (the tests return early where the rhwp checkout is missing, like the other
+//! font tests).
+
+use super::*;
+use crate::pdf_export::verify_exported_pdf;
+use easyoffice_formats::{
+    DocumentFormat, RichAlignment, RichBlock, RichDocument, RichImage, RichListKind, RichParagraph,
+    RichRun, UniversalFormatConverter,
+};
+use std::collections::HashSet;
+
+fn fonts() -> Option<Arc<Database>> {
+    crate::pdf_fonts::tests::bundled_only_db().map(Arc::new)
+}
+
+fn paragraph(text: &str) -> RichBlock {
+    RichBlock::Paragraph(RichParagraph {
+        runs: vec![RichRun::plain(text)],
+        ..RichParagraph::default()
+    })
+}
+
+/// A 2x2 opaque PNG (one stored zlib block), enough for the layout to place a picture.
+fn png() -> Vec<u8> {
+    let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+    let mut chunk = |kind: &[u8; 4], data: &[u8]| {
+        png.extend((data.len() as u32).to_be_bytes());
+        let mut body = kind.to_vec();
+        body.extend(data);
+        png.extend(&body);
+        let mut crc = 0xFFFF_FFFFu32;
+        for byte in &body {
+            crc ^= u32::from(*byte);
+            for _ in 0..8 {
+                crc = (crc >> 1) ^ (0xEDB8_8320 & 0u32.wrapping_sub(crc & 1));
+            }
+        }
+        png.extend((!crc).to_be_bytes());
+    };
+    chunk(b"IHDR", &[0, 0, 0, 2, 0, 0, 0, 2, 8, 2, 0, 0, 0]);
+    let raw: Vec<u8> = (0..2).flat_map(|_| [0, 200, 30, 30, 30, 30, 200]).collect();
+    let mut zlib = vec![
+        0x78,
+        0x01,
+        0x01,
+        raw.len() as u8,
+        0,
+        !(raw.len() as u8),
+        0xFF,
+    ];
+    zlib.extend(&raw);
+    let (mut a, mut b) = (1u32, 0u32);
+    for byte in &raw {
+        a = (a + u32::from(*byte)) % 65_521;
+        b = (b + a) % 65_521;
+    }
+    zlib.extend(((b << 16) | a).to_be_bytes());
+    chunk(b"IDAT", &zlib);
+    chunk(b"IEND", &[]);
+    png
+}
+
+fn document(extra_paragraphs: usize) -> RichDocument {
+    let mut blocks = vec![
+        RichBlock::Paragraph(RichParagraph {
+            runs: vec![RichRun::plain("분기 보고서 Quarterly")],
+            heading_level: 1,
+            alignment: Some(RichAlignment::Center),
+            ..RichParagraph::default()
+        }),
+        paragraph("한글과 English가 섞인 본문입니다."),
+        RichBlock::Table(
+            vec![
+                vec!["구분".to_string(), "합계".to_string()],
+                vec!["매출".to_string(), "2,650".to_string()],
+            ]
+            .into(),
+        ),
+        RichBlock::Image(RichImage::new(png(), "그림").expect("png")),
+    ];
+    blocks.extend((0..extra_paragraphs).map(|n| paragraph(&format!("{n}번째 줄 filler text"))));
+    RichDocument {
+        title: "보고서".into(),
+        blocks,
+        official_agency: None,
+    }
+}
+
+fn hwpx(doc: &RichDocument) -> Vec<u8> {
+    UniversalFormatConverter::encode_rich(doc, DocumentFormat::Hwpx, None).expect("hwpx")
+}
+
+fn page_count(pdf: &[u8]) -> usize {
+    let text = String::from_utf8_lossy(pdf);
+    text.matches("/Type /Page\n").count() + text.matches("/Type /Page ").count()
+}
+
+/// Every character the PDF's text maps (`/ToUnicode`) can give back: what a viewer can search and
+/// copy. The maps are written as plain text, one `<code> <UTF-16 hex>` line per glyph.
+fn searchable_chars(pdf: &[u8]) -> HashSet<char> {
+    let text = String::from_utf8_lossy(pdf);
+    let mut chars = HashSet::new();
+    for block in text.split("beginbfchar").skip(1) {
+        let block = block.split("endbfchar").next().unwrap_or_default();
+        for line in block.lines() {
+            let Some(target) = line.rsplit('<').next().map(|t| t.trim_end_matches('>')) else {
+                continue;
+            };
+            let units: Vec<u16> = (0..target.len() / 4)
+                .filter_map(|i| u16::from_str_radix(target.get(i * 4..i * 4 + 4)?, 16).ok())
+                .collect();
+            chars.extend(char::decode_utf16(units).flatten());
+        }
+    }
+    chars
+}
+
+fn assert_searchable(pdf: &[u8], phrase: &str) {
+    let chars = searchable_chars(pdf);
+    for c in phrase.chars().filter(|c| !c.is_whitespace()) {
+        assert!(chars.contains(&c), "{c:?} of {phrase:?} is not searchable");
+    }
+}
+
+#[test]
+fn a_rich_document_becomes_laid_out_pages_with_text_a_table_and_a_picture() {
+    let Some(fonts) = fonts() else { return };
+    let pdf = hwpx_to_pdf(&hwpx(&document(0)), &PdfWriteOptions::default(), &fonts).expect("pdf");
+    verify_exported_pdf(&pdf, 1, true).expect("one page with embedded text");
+    for wanted in [
+        "분기 보고서 Quarterly",
+        "한글과 English가 섞인 본문",
+        "구분 합계 매출 2,650",
+    ] {
+        assert_searchable(&pdf, wanted);
+    }
+    assert!(
+        String::from_utf8_lossy(&pdf).contains("/Subtype /Image"),
+        "the picture is in the PDF"
+    );
+}
+
+/// The markers are drawn by the layout from the definitions the writer puts in the header; the
+/// items hold no digits or bullets themselves.
+#[test]
+fn list_items_get_their_bullet_and_number() {
+    let Some(fonts) = fonts() else { return };
+    let item = |kind, text: &str| {
+        RichBlock::Paragraph(RichParagraph {
+            runs: vec![RichRun::plain(text)],
+            list: Some(kind),
+            ..RichParagraph::default()
+        })
+    };
+    let doc = RichDocument {
+        title: "목록".into(),
+        blocks: vec![
+            item(RichListKind::Ordered, "가나"),
+            item(RichListKind::Ordered, "다라"),
+            item(RichListKind::Ordered, "마바"),
+        ],
+        official_agency: None,
+    };
+    let numbered = hwpx_to_pdf(&hwpx(&doc), &PdfWriteOptions::default(), &fonts).unwrap();
+    assert_searchable(&numbered, "123.");
+    let doc = RichDocument {
+        blocks: vec![item(RichListKind::Bullet, "가나")],
+        ..doc
+    };
+    let bulleted = hwpx_to_pdf(&hwpx(&doc), &PdfWriteOptions::default(), &fonts).unwrap();
+    assert_searchable(&bulleted, "•");
+}
+
+#[test]
+fn a_long_document_crosses_the_conversion_batches() {
+    let Some(fonts) = fonts() else { return };
+    let pdf =
+        hwpx_to_pdf(&hwpx(&document(1500)), &PdfWriteOptions::default(), &fonts).expect("pdf");
+    let pages = page_count(&pdf);
+    assert!(pages > crate::pdf_export::BATCH_PAGES, "{pages} pages");
+    verify_exported_pdf(&pdf, pages, true).expect("every page is in the tree");
+    assert_searchable(&pdf, "1499번째 줄 filler text");
+}
+
+#[test]
+fn page_settings_become_rotation_watermark_and_stamp() {
+    let Some(fonts) = fonts() else { return };
+    let options = PdfWriteOptions {
+        rotation_degrees: 90,
+        watermark: Some("대외비".into()),
+        approval_stamp: Some("승인필".into()),
+    };
+    let pdf = hwpx_to_pdf(&hwpx(&document(120)), &options, &fonts).expect("pdf");
+    let pages = page_count(&pdf);
+    assert!(pages >= 2, "{pages} pages");
+    assert_eq!(
+        String::from_utf8_lossy(&pdf).matches("/Rotate 90").count(),
+        pages
+    );
+    // Neither label is in the body, so their characters can only come from the drawn marks.
+    assert_searchable(&pdf, "대외비 승인필");
+
+    let plain = hwpx_to_pdf(&hwpx(&document(0)), &PdfWriteOptions::default(), &fonts).unwrap();
+    assert!(!String::from_utf8_lossy(&plain).contains("/Rotate"));
+}
+
+#[test]
+fn bytes_that_are_no_document_are_an_error_not_a_panic() {
+    let Some(fonts) = fonts() else { return };
+    let options = PdfWriteOptions::default();
+    assert!(hwpx_to_pdf(b"not a document", &options, &fonts).is_err());
+    assert!(hwpx_to_pdf(&[], &options, &fonts).is_err());
+    let mut broken = hwpx(&document(0));
+    broken.truncate(broken.len() / 2);
+    assert!(hwpx_to_pdf(&broken, &options, &fonts).is_err());
+}

@@ -37,7 +37,7 @@ pub const MAX_PAGE_SVG_BYTES: usize = 64 * 1_048_576;
 /// Largest sum of all page SVGs (bytes).
 pub const MAX_TOTAL_SVG_BYTES: usize = 512 * 1_048_576;
 /// Pages converted before their chunks are written out; it bounds the converted data kept alive.
-const BATCH_PAGES: usize = 16;
+pub const BATCH_PAGES: usize = 16;
 /// Threads that convert pages at once. A dense page needs on the order of 100 MB to convert, so the
 /// count stays small whatever the machine offers.
 const MAX_CONVERT_THREADS: usize = 4;
@@ -359,6 +359,8 @@ pub struct PdfAssembler {
     embed_text: bool,
     budget: Budget,
     skipped_pictures: u32,
+    /// Clockwise turn of every page when it is shown (`/Rotate`), a multiple of 90.
+    rotation: i32,
     alloc: Ref,
     catalog_ref: Ref,
     tree_ref: Ref,
@@ -377,6 +379,7 @@ impl PdfAssembler {
             embed_text,
             budget: Budget::default(),
             skipped_pictures: 0,
+            rotation: 0,
             alloc,
             catalog_ref,
             tree_ref,
@@ -384,6 +387,12 @@ impl PdfAssembler {
             renumber_map: HashMap::new(),
             pdf: Pdf::new(),
         }
+    }
+
+    /// Shows every page turned clockwise by `degrees` (0, 90, 180 or 270); the page content is not
+    /// touched. Call before the first page is added.
+    pub fn set_rotation(&mut self, degrees: u16) {
+        self.rotation = i32::from(degrees % 360);
     }
 
     /// Pages written so far.
@@ -412,6 +421,7 @@ impl PdfAssembler {
                     &mut self.renumber_map,
                     self.tree_ref,
                     page_ref,
+                    self.rotation,
                     page,
                 );
             }
@@ -447,6 +457,7 @@ fn place_page(
     renumber_map: &mut HashMap<Ref, Ref>,
     tree_ref: Ref,
     page_ref: Ref,
+    rotation: i32,
     page: PageChunk,
 ) {
     renumber_map.clear();
@@ -463,6 +474,9 @@ fn place_page(
     writer.media_box(Rect::new(0.0, 0.0, page.width, page.height));
     writer.parent(tree_ref);
     writer.contents(content_ref);
+    if rotation != 0 {
+        writer.rotate(rotation);
+    }
     writer.resources().x_objects().pair(PAGE_XOBJECT, xobject);
     writer.finish();
     let mut content = Content::new();

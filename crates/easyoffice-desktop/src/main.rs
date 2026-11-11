@@ -7,6 +7,8 @@
 mod app_commands;
 mod app_quit;
 mod confirm_dialog;
+mod doc_pdf;
+mod doc_pdf_marks;
 mod font_catalog;
 // Linux webview runtime fixes (PD-125); other OSes compile it only for its decision-logic tests.
 #[cfg(any(target_os = "linux", test))]
@@ -57,6 +59,7 @@ mod menu_state {
 }
 
 use easyoffice_app::EasyOfficeIpcRouter;
+use easyoffice_formats::PdfWriteOptions;
 use save_error::SaveError;
 use save_file::{save_in_place, write_document_bytes, InPlaceResult, SaveOutcome, SaveRequest};
 use serde::Serialize;
@@ -99,8 +102,16 @@ async fn ipc_dispatch(
     let probe_payload = app.try_state::<SmokeProbe>().map(|_| payload.clone());
     // The window label owns the sheet sessions the command opens; they close with the window.
     let owner = window.label().to_string();
+    let font_dirs = pdf_job::pdf_font_dirs(&app);
     let result = tauri::async_runtime::spawn_blocking(move || {
-        EasyOfficeIpcRouter::dispatch_for_owner(&command, &payload, &owner)
+        // A rich document converted to PDF is laid out and drawn here (PD-166); the engine keeps
+        // its own PDF as the fallback. The font database is built when a PDF is first drawn.
+        let draw = |hwpx: &[u8], options: &PdfWriteOptions| {
+            doc_pdf::hwpx_to_pdf(hwpx, options, &pdf_fonts::shared_font_db(&font_dirs))
+        };
+        EasyOfficeIpcRouter::dispatch_for_owner_with_pdf_renderer(
+            &command, &payload, &owner, &draw,
+        )
     })
     .await
     .map_err(|err| IpcError::new(format!("엔진 작업을 실행하지 못했습니다: {err}")))?

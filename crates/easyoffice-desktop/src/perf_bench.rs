@@ -4,7 +4,7 @@
 //! and take the median time and the peak RSS.
 //!
 //! `EASYOFFICE_BENCH_CASE` is one of `save_verify`, `preview_embedded`, `preview_render`,
-//! `thumb_embed`, `pdf_doc`, `pdf_svgs`; `EASYOFFICE_BENCH_INPUT` is a document, or a folder of page SVGs for `pdf_svgs`. A name with the
+//! `thumb_embed`, `pdf_doc`, `pdf_svgs`, `doc_pdf_engine`, `doc_pdf_shell` (a DOCX/ODT/RTF/MD/TXT file as a PDF by the engine's writer, and by HWPX + rhwp layout, PD-164); `EASYOFFICE_BENCH_INPUT` is a document, or a folder of page SVGs for `pdf_svgs`. A name with the
 //! prefix `ref:` (`ref:save_verify`, `ref:preview`, `ref:pdf`, `ref:pdf_svgs`) runs the path the
 //! reference app takes for the same job with the same rhwp (parse and convert to the editable form,
 //! first-page SVG, `svgs_to_pdf_with_options`), printed as `tool=ref-repro`.
@@ -12,12 +12,16 @@
 //! `EASYOFFICE_BENCH_REPEAT` repeats the timed part inside one process (for a sampling profiler; the
 //! line shows the last run).
 
+use crate::doc_pdf::hwpx_to_pdf;
 use crate::pdf_export::{verify_exported_pdf, PdfAssembler};
 use crate::pdf_font_fallbacks::add_font_fallbacks;
 use crate::pdf_fonts::shared_font_db;
 use crate::preview::extract_thumbnail;
 use crate::save_thumbnail::{render_png_sized, with_first_page};
 use crate::save_verify::verify_document_bytes;
+use easyoffice_formats::{
+    DecodedContent, DocumentFormat, PdfWriteOptions, RichDocument, UniversalFormatConverter,
+};
 use rhwp::DocumentCore;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -119,6 +123,23 @@ fn with_fallbacks(pages: &[String]) -> Vec<String> {
         .iter()
         .map(|svg| add_font_fallbacks(svg).into_owned())
         .collect()
+}
+
+/// The rich document a DOCX/ODT/RTF/MD/TXT file reads as.
+fn rich_document(input: &Path, bytes: &[u8]) -> RichDocument {
+    let name = input.file_name().unwrap().to_string_lossy();
+    let decoded = UniversalFormatConverter::decode_rich(bytes, Some(&name)).expect("decode");
+    match decoded.content {
+        DecodedContent::Document(doc) => doc,
+        _ => panic!("{name} is no document"),
+    }
+}
+
+/// Keeps the PDF of a `doc_pdf_*` case when `EASYOFFICE_BENCH_PDF_OUT` names a file.
+fn keep_pdf(pdf: &[u8]) {
+    if let Some(out) = std::env::var_os("EASYOFFICE_BENCH_PDF_OUT") {
+        std::fs::write(out, pdf).expect("write the PDF");
+    }
 }
 
 fn run_pdf(pages: &[String], fonts: &Arc<Database>) -> Vec<u8> {
@@ -284,6 +305,35 @@ fn run_case(case: &str, input: &Path) -> Line {
             let pdf = run_pdf(&pages, &fonts);
             phases.push(("pdf", ms(t)));
             (pdf.len(), pages.len())
+        }
+        "doc_pdf_engine" => {
+            let bytes = std::fs::read(input).expect("read");
+            let t = Instant::now();
+            let doc = rich_document(input, &bytes);
+            phases.push(("decode", ms(t)));
+            let t = Instant::now();
+            let pdf = UniversalFormatConverter::encode_rich_pdf(&doc, &PdfWriteOptions::default());
+            phases.push(("pdf", ms(t)));
+            keep_pdf(&pdf);
+            (pdf.len(), 0)
+        }
+        "doc_pdf_shell" => {
+            let bytes = std::fs::read(input).expect("read");
+            let t = Instant::now();
+            let fonts = shared_font_db(&bundled_font_dirs());
+            phases.push(("fonts", ms(t)));
+            let t = Instant::now();
+            let doc = rich_document(input, &bytes);
+            phases.push(("decode", ms(t)));
+            let t = Instant::now();
+            let hwpx = UniversalFormatConverter::encode_rich(&doc, DocumentFormat::Hwpx, None)
+                .expect("hwpx");
+            phases.push(("hwpx", ms(t)));
+            let t = Instant::now();
+            let pdf = hwpx_to_pdf(&hwpx, &PdfWriteOptions::default(), &fonts).expect("pdf");
+            phases.push(("pdf", ms(t)));
+            keep_pdf(&pdf);
+            (pdf.len(), 0)
         }
         other => panic!("unknown case {other}"),
     };
