@@ -14,6 +14,7 @@ mod font_catalog;
 // Linux webview runtime fixes (PD-125); other OSes compile it only for its decision-logic tests.
 #[cfg(any(target_os = "linux", test))]
 mod linux_runtime;
+mod macos_language;
 mod open_feedback;
 mod os_recent;
 mod pdf_edit_budget;
@@ -366,6 +367,9 @@ fn main() {
     // Before any webview exists: WebKitGTK reads these variables when it starts.
     #[cfg(target_os = "linux")]
     linux_runtime::apply_linux_runtime_fixes();
+
+    // Before the menu bar exists: AppKit reads the language when it builds its own menu items.
+    macos_language::prefer_korean();
 
     let smoke_mode = std::env::args().skip(1).any(|arg| arg == "--smoke");
     let mut builder = tauri::Builder::default();
