@@ -1,4 +1,4 @@
-//! The stamp and watermark laid over the pages of an edited PDF (PD-156).
+//! The stamp and watermark laid over the pages of an edited PDF (PD-161).
 //!
 //! The text is not drawn here. It is written as a small SVG with the text as real text, and the
 //! searchable-export pipeline of the shell (`pdf_export.rs`: `svg2pdf` with the bundled Noto Sans KR

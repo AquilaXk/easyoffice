@@ -1,4 +1,4 @@
-//! Budgets and the guarded runner for editing PDFs that cannot be trusted (PD-156).
+//! Budgets and the guarded runner for editing PDFs that cannot be trusted (PD-161).
 //!
 //! `hayro-syntax` (the reader) lists timeouts and out-of-memory protection among its open tasks, so
 //! none of it comes from the crate. Everything that touches a PDF here runs on its own thread with

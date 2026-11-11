@@ -257,7 +257,7 @@
       return result.ok;
     }
 
-    // The PDF studio on the opened file (PD-156): the shell asks where, and writes the edited file.
+    // The PDF studio on the opened file (PD-161): the shell asks where, and writes the edited file.
     async function savePdfEdit(pdfEdit) {
       try {
         const res = await pdfEdit.save();

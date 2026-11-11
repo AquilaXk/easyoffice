@@ -462,7 +462,7 @@
         return { ok: false, cancelled: true };
       }
       if (outcome.error) return fail(name + " — " + outcome.error);
-      // A PDF is also handed to the shell, so that the studio edits its objects (PD-156).
+      // A PDF is also handed to the shell, so that the studio edits its objects (PD-161).
       const pdfNote = res.module === "PDF" && deps.pdfEdit ? await deps.pdfEdit.open(name, data) : "";
       setFeedback(describe(res, name) + pdfNote);
       return { ok: true, module: res.module, format: res.format, warnings: res.warnings || [], title: name };
