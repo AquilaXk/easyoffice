@@ -98,6 +98,15 @@ test("isAuthoringBlockedFontFamily blocks restricted commercial prefixes and all
   assert.equal(isAuthoringBlockedFontFamily(undefined), false);
 });
 
+test("a blocked prefix still blocks when non-ASCII text follows it (the reference prefix rule)", () => {
+  for (const family of ["HYmyeong가", "hymj견고딕", "hygp헤드라인", "HYsmgp휴먼", "-hymjİ", "hysnsn중고딕"]) {
+    assert.equal(isAuthoringBlockedFontFamily(family), true, `expected blocked: ${family}`);
+  }
+  for (const family of ["hyg가", "hyx가", "hci가"]) {
+    assert.equal(isAuthoringBlockedFontFamily(family), family === "hci가", `unexpected result: ${family}`);
+  }
+});
+
 test("sanitizeAuthoringFontFamily maps blocked families to HCR Batang or HCR Dotum and preserves allowed families", () => {
   for (const family of BLOCKED_SERIF_FAMILIES) {
     assert.equal(sanitizeAuthoringFontFamily(family), "함초롬바탕", `serif fallback for ${family}`);

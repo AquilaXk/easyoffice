@@ -141,7 +141,7 @@ export function isAuthoringBlockedFontFamily(family: string | null | undefined):
         hyLo = (hyLo | ((c & 0xff) << ((7 - rel) << 3))) >>> 0;
       }
     } else {
-      return false;
+      break;
     }
     count += 1;
     if (count === 10) break;
