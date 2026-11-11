@@ -375,7 +375,7 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   styleSelect.value = "개요 1";
   styleSelect.dispatchEvent({ type: "change" });
   assert.equal(document.getElementById("doc-style-role-badge").textContent, "개요 1");
-  assert.equal(docEditor.dataset.styleRole, "개요 1");
+  assert.equal(docEditor.querySelector(".eo-h-title").closest("h1").tagName, "H1", "the selected paragraph is an outline-1 heading");
 
   const fontSelect = document.getElementById("doc-font-select");
   fontSelect.value = "함초롬바탕";
@@ -394,20 +394,21 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
 
   userClick(document.getElementById("btn-ls-up"));
   assert.equal(document.getElementById("doc-linespacing-select").value, "180");
-  assert.equal(docEditor.dataset.lineSpacing, "180");
+  const selectedBlock = docEditor.querySelector(".eo-h-title").closest("h1");
+  assert.equal(selectedBlock.style.lineHeight, "1.80", "line spacing is set on the selected paragraph");
+  assert.equal(docEditor.style.lineHeight, "");
   userClick(document.getElementById("btn-ls-down"));
   assert.equal(document.getElementById("doc-linespacing-select").value, "160");
 
   userClick(document.getElementById("btn-align-distribute"));
   assert.equal(document.getElementById("btn-align-distribute").classList.contains("active"), true);
   assert.equal(document.getElementById("btn-align-justify").classList.contains("active"), false);
-  assert.equal(docEditor.dataset.textAlign, "distribute");
+  assert.equal(selectedBlock.dataset.eoAlign, "distribute");
+  assert.equal(selectedBlock.style.textAlign, "justify", "distributed text is saved as justified");
 
   userClick(document.getElementById("btn-stylebar-strike"));
   await flushAsyncTurns();
   assert.equal(docEditor.querySelector(".eo-run").dataset.eoStrike, "true");
-  userClick(document.getElementById("btn-stylebar-charfx"));
-  assert.equal(docEditor.dataset.charfx, "true");
   userClick(document.getElementById("btn-stylebar-textcolor"));
   await flushAsyncTurns();
   assert.equal(docEditor.querySelector(".eo-run").dataset.eoColor, "FF0000");
@@ -435,18 +436,12 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   userClick(document.getElementById("btn-toggle-para-marks"));
   assert.equal(docEditor.dataset.showParaMarks, "false");
 
-  const fontLang = document.getElementById("doc-font-lang");
-  fontLang.value = "한글";
-  fontLang.dispatchEvent({ type: "change" });
-  assert.equal(docEditor.dataset.fontLang, "한글");
-
   switchModule(document, "HWP");
   await flushAsyncTurns();
   assert.equal(styleSelect.value, "공문서 바탕글");
   assert.ok(
     Array.from(styleSelect.querySelectorAll("option")).some((o) => o.value === "공문서 바탕글")
   );
-  assert.equal(fontLang.value, "대표");
   assert.equal(document.getElementById("btn-toggle-ctrl-marks").classList.contains("active"), false);
   assert.equal(document.getElementById("btn-toggle-para-marks").classList.contains("active"), true);
   assert.equal(document.getElementById("btn-toggle-doc-grid").classList.contains("active"), false);
@@ -454,13 +449,12 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
 
   switchModule(document, "DOC");
   await flushAsyncTurns();
-  assert.equal(styleSelect.value, "개요 1");
-  assert.equal(fontLang.value, "한글");
+  assert.equal(styleSelect.value, "바탕글", "without a selection the box shows the document default");
   assert.equal(document.getElementById("doc-style-font-badge").textContent, "휴먼명조", "the font box shows the document default until a selection carries a run font");
   assert.equal(document.getElementById("btn-toggle-ctrl-marks").classList.contains("active"), true);
   assert.equal(document.getElementById("btn-toggle-para-marks").classList.contains("active"), false);
   assert.equal(document.getElementById("btn-toggle-doc-grid").classList.contains("active"), true);
-  assert.equal(document.getElementById("btn-align-distribute").classList.contains("active"), true);
+  assert.equal(docEditor.querySelector('[data-eo-align="distribute"]').tagName, "H1", "the paragraph's alignment survives a module switch");
 
   assert.equal(document.getElementById("ruler-corner").textContent, "mm");
   assert.ok(document.getElementById("h-ruler").querySelector("#ruler-pin-first-indent"));

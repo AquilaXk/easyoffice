@@ -18,17 +18,10 @@
         fontSize: "",
         lineHeight: "",
         textAlign: "",
-        textAlignMode: "",
         paperSize: "",
         styleRole: "",
-        fontLang: "",
-        lineSpacing: "",
         showCtrlMarks: "",
         showParaMarks: "true",
-        strike: "",
-        charfx: "",
-        textcolor: "",
-        highlight: "",
         manuscriptGrid: false,
       };
     }
@@ -41,17 +34,10 @@
       fontSize: editor.style.fontSize || "",
       lineHeight: editor.style.lineHeight || "",
       textAlign: editor.style.textAlign || "",
-      textAlignMode: editor.dataset.textAlign || "",
       paperSize: editor.dataset.paperSize || "",
       styleRole: editor.dataset.styleRole || "",
-      fontLang: editor.dataset.fontLang || "",
-      lineSpacing: editor.dataset.lineSpacing || "",
       showCtrlMarks: editor.dataset.showCtrlMarks || "",
       showParaMarks: editor.dataset.showParaMarks || "",
-      strike: editor.dataset.strike || "",
-      charfx: editor.dataset.charfx || "",
-      textcolor: editor.dataset.textcolor || "",
-      highlight: editor.dataset.highlight || "",
       manuscriptGrid: editor.classList.contains("manuscript-grid"),
     };
   }
@@ -67,22 +53,11 @@
     editor.style.fontSize = ls.fontSize || "";
     editor.style.lineHeight = ls.lineHeight || "";
     editor.style.textAlign = ls.textAlign || "";
-    if (ls.textAlignMode) {
-      editor.dataset.textAlign = ls.textAlignMode;
-    } else {
-      delete editor.dataset.textAlign;
-    }
     [
       "paperSize",
       "styleRole",
-      "fontLang",
-      "lineSpacing",
       "showCtrlMarks",
       "showParaMarks",
-      "strike",
-      "charfx",
-      "textcolor",
-      "highlight",
     ].forEach((k) => {
       if (ls[k]) {
         editor.dataset[k] = ls[k];
@@ -660,22 +635,22 @@
       const roleVal = editor?.dataset?.styleRole || (mod === "HWP" ? "공문서 바탕글" : "바탕글");
       setElField("doc-style-role-badge", "textContent", roleVal);
       setElField("doc-style-select", "value", roleVal);
-      setElField("doc-font-lang", "value", editor?.dataset?.fontLang || "대표");
       const fontVal = editor?.style?.fontFamily || "휴먼명조";
       setElField("doc-font-select", "value", fontVal);
       setElField("doc-style-font-badge", "textContent", fontVal);
-      setElField("doc-linespacing-select", "value", editor?.dataset?.lineSpacing || "160");
+      // Without a selection the controls show the document-level values; a selection shows its paragraph (doc-runs-ui).
+      const alignMode = editor?.style?.textAlign || "justify";
+      ["left", "center", "right", "justify", "distribute", "divide"].forEach((m) =>
+        syncBtnPressed("btn-align-" + m, m === alignMode)
+      );
+      const rootLine = Math.round(Number.parseFloat(editor?.style?.lineHeight || "") * 100);
+      deps.getDocRuns?.()?.showLineSpacing(rootLine > 0 ? rootLine : 160);
       [
-        ["btn-stylebar-charfx", "charfx"],
         ["btn-toggle-ctrl-marks", "showCtrlMarks"],
         ["btn-toggle-para-marks", "showParaMarks"],
       ].forEach(([id, key]) => syncBtnPressed(id, editor?.dataset?.[key] === "true"));
       const isGrid = Boolean(editor?.classList?.contains("manuscript-grid"));
       syncBtnPressed("btn-toggle-doc-grid", isGrid);
-      const alignMode = editor?.dataset?.textAlign || editor?.style?.textAlign || "justify";
-      ["left", "center", "right", "justify", "distribute", "divide"].forEach((m) =>
-        syncBtnPressed("btn-align-" + m, m === alignMode)
-      );
       document.getElementById("hwp-manuscript-preview")?.classList.toggle("manuscript-grid", isGrid);
       activeDocBlockEl = null;
       syncDocStyleBarFromTarget(editor ? getFocusedDocBlock(editor) : null);

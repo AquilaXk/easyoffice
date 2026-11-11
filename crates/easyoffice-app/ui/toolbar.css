@@ -306,10 +306,6 @@ input.sb-ls-select {
   width: 112px;
 }
 
-#doc-style-bar .custom-select[data-select-id="doc-font-lang"] {
-  width: 76px;
-}
-
 #doc-style-bar #doc-font-select,
 #doc-style-bar .custom-select[data-select-id="doc-font-select"] {
   width: 180px;

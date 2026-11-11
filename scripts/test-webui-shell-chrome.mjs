@@ -315,7 +315,7 @@ test("menu shortcut labels follow the platform: command glyphs on macOS, Ctrl el
 
 test("doc-style-bar selects are enhanced as custom-select combo boxes and style-bar overflow stays visible", async () => {
   const { document } = await createWorkspaceHarness({ search: "?module=DOC&win=w-doc-combos" });
-  for (const id of ["doc-style-select", "doc-font-lang", "doc-font-select", "doc-linespacing-select"]) {
+  for (const id of ["doc-style-select", "doc-font-select", "doc-linespacing-select"]) {
     const select = document.getElementById(id);
     assert.ok(select.classList.contains("sb-combo"), `${id} is a combo box`);
     assert.ok(select.classList.contains("native-select-hidden"), `${id} stays as hidden state holder`);
@@ -479,7 +479,7 @@ test("font-mono token, status bar interactive position/zoom, proportional fit zo
   lsInput.value = "225";
   lsInput.dispatchEvent({ type: "keydown", key: "Enter", target: lsInput, preventDefault() {} });
   assert.equal(lsSelect.value, "225");
-  assert.equal(docEditor.dataset.lineSpacing, "225");
+  assert.equal(titleText.parentElement.closest("h1").style.lineHeight, "2.25", "the custom value applies to the selected paragraph");
 
   const recentPromise = document.defaultView.__EASYOFFICE_RECENT_DIALOG__.open(document, []);
   const recentDlg = document.querySelector(".recent-documents-dialog.recent-dialog");

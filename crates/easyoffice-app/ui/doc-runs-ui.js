@@ -25,6 +25,21 @@
     "ruler-pin-right-margin": "paddingRight",
   };
   const INDENT_STEP_PX = 4;
+  // Paragraph alignment buttons. The rich model has left, center, right and justify only, so the
+  // distributed and divided modes are shown per paragraph and saved as justify.
+  const ALIGN_CSS = { left: "left", center: "center", right: "right", justify: "justify", distribute: "justify", divide: "justify" };
+  const ALIGN_BUTTON_MODES = Object.keys(ALIGN_CSS);
+  const APPROXIMATED_ALIGN_LABEL = { distribute: "배분", divide: "나눔" };
+  const MIN_LINE_PERCENT = 5;
+  const MAX_LINE_PERCENT = 500;
+  const DEFAULT_LINE_PERCENT = 160;
+  const NON_PARAGRAPH_TAGS = new Set(["TD", "TH", "CAPTION"]);
+  const HEADING_TAG_RE = /^H[1-6]$/;
+  const STYLE_HEADING_RE = /^개요 ([1-3])$/;
+  const PLAIN_STYLES = new Set(["바탕글", "공문서 바탕글"]);
+  const LIST_TAGS = { ordered: "OL", bullet: "UL" };
+  // Look carried over when a paragraph changes its tag (the style whitelist of the saved document state).
+  const CARRIED_STYLE_PROPS = ["paddingLeft", "paddingRight", "textIndent", "lineHeight", "textAlign"];
 
   function plainRange(r) {
     return {
@@ -290,7 +305,9 @@
       syncSizeControls(state);
       syncFontControls(state);
       syncColorButtons(state);
-      syncRuler();
+      const blk = targetBlocks()[0];
+      syncParagraphControls(blk);
+      syncRuler(undefined, blk);
       return state;
     }
 
@@ -331,6 +348,208 @@
       return targets.length;
     }
 
+
+    // ------------------------------------------------------------ paragraph blocks
+
+    function paragraphTargets() {
+      return targetBlocks().filter((b) => !NON_PARAGRAPH_TAGS.has((b.tagName || "").toUpperCase()));
+    }
+
+    // Runs `exec(blocks)` on the paragraphs the selection touches as one undo step; `hint` is shown
+    // when nothing is selected.
+    function runOnParagraphs(exec, hint, pick = paragraphTargets) {
+      if (!isDocModule()) return { changed: false, blocks: 0 };
+      const blocks = pick();
+      if (blocks.length === 0) {
+        setFeedback(hint);
+        return { changed: false, blocks: 0 };
+      }
+      const range = currentRange();
+      withUndo(() => {
+        exec(blocks, range);
+        return { changed: true };
+      });
+      refocusEditor(editor());
+      syncToolbar();
+      return { changed: true, blocks: blocks.length };
+    }
+
+    function setAlign(mode) {
+      const css = ALIGN_CSS[mode];
+      if (!css) return { changed: false, blocks: 0 };
+      const res = runOnParagraphs((blocks) => blocks.forEach((b) => {
+        b.style.textAlign = css;
+        if (APPROXIMATED_ALIGN_LABEL[mode]) b.dataset.eoAlign = mode;
+        else delete b.dataset.eoAlign;
+      }), "정렬할 문단을 먼저 선택하세요");
+      if (res.changed && APPROXIMATED_ALIGN_LABEL[mode]) setFeedback(APPROXIMATED_ALIGN_LABEL[mode] + " 정렬은 저장할 때 양쪽 정렬로 기록됩니다");
+      return res;
+    }
+
+    // The line spacing list gets an entry for a custom value, then shows it.
+    function showLineSpacing(percent) {
+      const select = byId("doc-linespacing-select");
+      if (!select) return;
+      const str = String(percent);
+      const options = Array.from(select.querySelectorAll("option"));
+      if (!options.some((o) => o.value === str)) {
+        const opt = document.createElement("option");
+        opt.value = str;
+        opt.textContent = percent + " %";
+        const next = options.find((o) => Number(o.value) > percent);
+        select.insertBefore(opt, next || null);
+      }
+      select.value = str;
+      host.__EASYOFFICE_CUSTOM_SELECT__?.syncCustomSelect?.(select);
+    }
+
+    function setLineSpacing(percent) {
+      const clamped = Math.max(MIN_LINE_PERCENT, Math.min(MAX_LINE_PERCENT, Number.isFinite(percent) ? Math.round(percent) : DEFAULT_LINE_PERCENT));
+      const res = runOnParagraphs((blocks) => blocks.forEach((b) => {
+        b.style.lineHeight = (clamped / 100).toFixed(2);
+        delete b.dataset.eoLineSpacing; // the exact value read from a file no longer matches
+      }), "줄 간격을 적용할 문단을 먼저 선택하세요");
+      if (!res.changed) showLineSpacing(lineSpacingOf(null)); // nothing selected: the box keeps showing what applies
+      return res;
+    }
+
+    // Replaces `el` by an element of another tag in the same place, keeping its look, data and children.
+    function retag(el, tag) {
+      const next = el.ownerDocument.createElement(tag);
+      CARRIED_STYLE_PROPS.forEach((prop) => {
+        if (el.style[prop]) next.style[prop] = el.style[prop];
+      });
+      Object.keys(el.dataset).forEach((key) => { next.dataset[key] = el.dataset[key]; });
+      const cls = el.getAttribute("class");
+      if (cls) next.setAttribute("class", cls);
+      while (el.firstChild) next.appendChild(el.firstChild);
+      el.parentNode.insertBefore(next, el);
+      el.parentNode.removeChild(el);
+      return next;
+    }
+
+    // Keeps the selection on the replacement elements after paragraphs changed their tag.
+    function restoreSelection(range, replaced) {
+      if (!range) return;
+      const map = (node) => replaced.get(node) || node;
+      setSelection({
+        startContainer: map(range.startContainer), startOffset: range.startOffset,
+        endContainer: map(range.endContainer), endOffset: range.endOffset, collapsed: range.collapsed,
+      });
+    }
+
+    function hasElementChild(node) {
+      return Array.from(node.childNodes).some((n) => n.nodeType === 1);
+    }
+
+    // A list item becomes a plain paragraph after the list; the items behind it continue in a new list.
+    function itemToParagraph(li) {
+      const list = li.parentNode;
+      const para = retag(li, "p");
+      const tail = [];
+      for (let n = para.nextSibling; n; n = n.nextSibling) tail.push(n);
+      const holder = list.parentNode;
+      holder.insertBefore(para, list.nextSibling);
+      if (tail.some((n) => n.nodeType === 1)) {
+        const rest = list.cloneNode(false);
+        tail.forEach((n) => rest.appendChild(n));
+        holder.insertBefore(rest, para.nextSibling);
+      }
+      if (!hasElementChild(list)) holder.removeChild(list);
+      return para;
+    }
+
+    // A paragraph becomes an item of the list just before it (or of a new list), joined to a list behind it.
+    function paragraphToItem(block, listTag) {
+      const item = retag(block, "li");
+      const holder = item.parentNode;
+      const prev = item.previousSibling;
+      let list = prev && prev.nodeType === 1 && prev.tagName === listTag ? prev : null;
+      if (!list) {
+        list = item.ownerDocument.createElement(listTag);
+        holder.insertBefore(list, item);
+      }
+      list.appendChild(item);
+      const next = list.nextSibling;
+      if (next && next.nodeType === 1 && next.tagName === listTag) {
+        while (next.firstChild) list.appendChild(next.firstChild);
+        holder.removeChild(next);
+      }
+      return item;
+    }
+
+    function isItemOf(block, listTag) {
+      return block.tagName === "LI" && block.parentNode?.tagName === listTag;
+    }
+
+    // Numbered / bulleted paragraphs as `<ol>/<ul><li>`; applying the same kind to list items again takes them out.
+    function toggleList(kind) {
+      const listTag = LIST_TAGS[kind];
+      if (!listTag) return { changed: false, blocks: 0 };
+      const pick = () => paragraphTargets().filter((b) => b.tagName === "P" || b.tagName === "LI");
+      return runOnParagraphs((blocks, range) => {
+        const replaced = new Map();
+        const off = blocks.every((b) => isItemOf(b, listTag));
+        blocks.forEach((b) => {
+          if (off) replaced.set(b, itemToParagraph(b));
+          else if (isItemOf(b, listTag)) return;
+          else replaced.set(b, paragraphToItem(b.tagName === "LI" ? itemToParagraph(b) : b, listTag));
+        });
+        restoreSelection(range, replaced);
+      }, "번호·글머리표를 적용할 문단을 먼저 선택하세요", pick);
+    }
+
+    // The style box: outline levels are headings, the plain styles are paragraphs.
+    function setStyle(name) {
+      const level = STYLE_HEADING_RE.exec(name)?.[1];
+      if (!level && !PLAIN_STYLES.has(name)) return { changed: false, blocks: 0 };
+      const tag = level ? "h" + level : "p";
+      const pick = () => paragraphTargets().filter((b) => b.tagName === "P" || HEADING_TAG_RE.test(b.tagName));
+      const res = runOnParagraphs((blocks, range) => {
+        const replaced = new Map();
+        if (!level) editor().dataset.styleRole = name;
+        blocks.forEach((b) => { if (b.tagName.toLowerCase() !== tag) replaced.set(b, retag(b, tag)); });
+        restoreSelection(range, replaced);
+      }, "스타일을 적용할 문단을 먼저 선택하세요", pick);
+      if (!res.changed) {
+        const select = byId("doc-style-select");
+        if (select) select.value = styleNameOf(null);
+      }
+      return res;
+    }
+
+    function lineSpacingOf(block) {
+      const raw = Number.parseFloat(block?.style?.lineHeight || editor()?.style?.lineHeight || "");
+      return Number.isFinite(raw) && raw > 0 ? Math.round(raw * 100) : DEFAULT_LINE_PERCENT;
+    }
+
+    function styleNameOf(block) {
+      const level = HEADING_TAG_RE.test(block?.tagName || "") ? Number(block.tagName[1]) : 0;
+      if (level >= 1 && level <= 3) return "개요 " + level;
+      const role = editor()?.dataset?.styleRole;
+      return PLAIN_STYLES.has(role) ? role : "바탕글";
+    }
+
+    function alignModeOf(block) {
+      const mode = block?.dataset?.eoAlign;
+      if (APPROXIMATED_ALIGN_LABEL[mode]) return mode;
+      const css = (block?.style?.textAlign || editor()?.style?.textAlign || "justify").trim().toLowerCase();
+      return ALIGN_BUTTON_MODES.includes(css) ? css : "justify";
+    }
+
+    // Alignment buttons, line spacing and style box show the first paragraph of the selection.
+    function syncParagraphControls(blk) {
+      if (!blk) return;
+      const mode = alignModeOf(blk);
+      ALIGN_BUTTON_MODES.forEach((m) => setPressed("btn-align-" + m, m === mode));
+      showLineSpacing(lineSpacingOf(blk));
+      const style = byId("doc-style-select");
+      const name = styleNameOf(blk);
+      if (style) style.value = name;
+      const badge = byId("doc-style-role-badge");
+      if (badge) badge.textContent = name;
+    }
+
     let lastLabelStepMm = 10;
 
     function currentZoomRatio(overrideZoom) {
@@ -339,7 +558,7 @@
       return Number.isFinite(stageZoom) && stageZoom > 0 ? stageZoom / 100 : 1;
     }
 
-    function syncRuler(overrideZoom) {
+    function syncRuler(overrideZoom, firstBlock) {
       const zoomRatio = currentZoomRatio(overrideZoom);
       const scale = resolveRulerScale(zoomRatio);
       if (scale.labelStepMm !== lastLabelStepMm) {
@@ -359,7 +578,7 @@
           }
         }
       }
-      const blk = targetBlocks()[0];
+      const blk = firstBlock || targetBlocks()[0];
       Object.entries(RULER_PINS).forEach(([id, prop]) => {
         const pin = byId(id);
         if (!pin) return;
@@ -455,7 +674,7 @@
 
     return {
       bind, applyPatch, toggle, setSize, bumpSize, setFont, setColor, toggleColor, getState, syncToolbar,
-      shiftIndent, setBlockIndent, syncRuler, resolveRulerScale, handleBeforeInput, handleSelectionChange,
+      shiftIndent, setBlockIndent, setAlign, setLineSpacing, showLineSpacing, toggleList, setStyle, syncRuler, resolveRulerScale, handleBeforeInput, handleSelectionChange,
       getPending: () => pending,
       getLastRange: () => lastRange,
       setLastRange: (r) => { lastRange = r ? plainRange(r) : null; },

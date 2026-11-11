@@ -26,30 +26,17 @@
     "mod-footnote": { hwp: false, target: "doc-mod-footnote", label: "각주 · 미주 삽입 완료" },
   };
 
-  function firstTextNodeOf(node) {
-    for (const child of node.childNodes) {
-      if (child.nodeType === 3 && String(child.data).length > 0) return child;
-      const inner = child.nodeType === 1 ? firstTextNodeOf(child) : null;
-      if (inner) return inner;
-    }
-    return null;
-  }
-
-  // Adds or removes a list prefix without rebuilding the paragraph, so character runs survive.
-  function toggleBlockPrefix(textTarget, prefix) {
-    if (!textTarget) return;
-    const first = firstTextNodeOf(textTarget);
-    if (first && String(first.data).startsWith(prefix)) {
-      first.data = String(first.data).slice(prefix.length);
-      return;
-    }
-    textTarget.insertBefore(textTarget.ownerDocument.createTextNode(prefix), textTarget.childNodes[0] ?? null);
-  }
-
   function describeConversionSpec(res) {
     const limited = res?.compatibility === "limited" ? " · 호환성 제한: " + (res.compatibilityWarning || "") : "";
     const notes = Array.isArray(res?.warnings) && res.warnings.length > 0 ? " · 참고: " + res.warnings.join(" ") : "";
     return (res?.specification || "") + limited + notes;
+  }
+
+  // Distributed / divided paragraphs have no counterpart in the document model and are written as justified.
+  function describeApproximatedAlign(doc, mod) {
+    if (mod !== "DOC" && mod !== "HWP") return "";
+    const count = doc.querySelectorAll("#doc-editor [data-eo-align]").length;
+    return count > 0 ? " · 배분·나눔 정렬 " + count + "개 문단은 양쪽 정렬로 저장" : "";
   }
 
   function describeDeliveryFailure(delivery, prefix) {
@@ -315,7 +302,7 @@
       }
       const res = converted.res;
       setStatusFeedback(
-        "문서 저장 완료 (" + delivery.name + " · " + (res.outputBytes || 0) + "B · " + describeConversionSpec(res) + ")"
+        "문서 저장 완료 (" + delivery.name + " · " + (res.outputBytes || 0) + "B · " + describeConversionSpec(res) + ")" + describeApproximatedAlign(document, curMod)
       );
       noteSavedName(delivery.name);
       return true;
@@ -531,22 +518,6 @@
       });
     }
 
-    function applyEditorAlignment(id, mode, cssAlign, editor, alignMap) {
-      withDocStyleUndo(() => {
-        for (const [otherId] of alignMap) {
-          const other = document.getElementById(otherId);
-          if (other) {
-            other.classList.toggle("active", otherId === id);
-            other.setAttribute("aria-pressed", otherId === id ? "true" : "false");
-          }
-        }
-        if (editor) {
-          editor.dataset.textAlign = mode;
-          editor.style.textAlign = cssAlign;
-        }
-      });
-    }
-
     // Cut/copy/paste act on the live editor selection and the system clipboard
     // (workspace-session.js); a missing selection never erases the whole paragraph.
     function execStudioClipboardCmd(cmd) {
@@ -557,16 +528,18 @@
       return true;
     }
 
-    const PARA_PREFIX_CMDS = { "para-numbering": { prefix: "1. ", label: "문단 번호 서식 적용 완료" }, "para-bullet": { prefix: "○ ", label: "글머리표 서식 적용 완료" } };
+    const PARA_LIST_CMDS = { "para-numbering": { kind: "ordered", label: "문단 번호 서식 적용 완료" }, "para-bullet": { kind: "bullet", label: "글머리표 서식 적용 완료" } };
     const PARA_INDENT_CMDS = { "indent-in": { delta: 16, label: "한 수준 증가 적용 완료" }, "indent-out": { delta: -16, label: "한 수준 감소 적용 완료" } };
-    function execStudioParaCmd(cmd, blk, textTarget, fb, isDocMod) {
-      const pfx = PARA_PREFIX_CMDS[cmd];
+    function execStudioParaCmd(cmd, fb, isDocMod) {
+      const list = PARA_LIST_CMDS[cmd];
       const ind = PARA_INDENT_CMDS[cmd];
-      if (!pfx && !ind && cmd !== "para-shape") return false;
+      if (!list && !ind && cmd !== "para-shape") return false;
       if (!isDocMod) return true;
-      if (pfx) {
-        withDocStyleUndo(() => { toggleBlockPrefix(textTarget, pfx.prefix); computeSmartStats(); });
-        if (fb) fb.textContent = pfx.label;
+      if (list) {
+        if (getDocRuns().toggleList(list.kind).changed) {
+          computeSmartStats();
+          if (fb) fb.textContent = list.label;
+        }
       } else if (ind) {
         getDocRuns().shiftIndent(ind.delta);
         if (fb) fb.textContent = ind.label;
@@ -679,43 +652,12 @@
       const blk = resolveActiveDocBlock(editor);
       const textTarget = blk?.querySelector?.(".eo-h-title") || blk;
       if (execStudioClipboardCmd(cmd)) return;
-      if (execStudioParaCmd(cmd, blk, textTarget, fb, isDocMod)) return;
+      if (execStudioParaCmd(cmd, fb, isDocMod)) return;
       if (execStudioInsertModCmd(cmd, editor, textTarget, fb, onStudioCmd, curMod, isDocMod)) return;
       if (typeof onStudioCmd === "function") onStudioCmd(cmd);
     }
 
-    function ensureLsOption(lsSelect, val) {
-      if (!lsSelect) return;
-      const str = String(val);
-      const opts = Array.from(lsSelect.querySelectorAll?.("option") || lsSelect.children || []);
-      if (opts.some((o) => o.value === str)) return;
-      const opt = document.createElement("option");
-      opt.value = str;
-      opt.textContent = `${val} %`;
-      const next = opts.find((o) => Number(o.value) > val);
-      if (next && typeof lsSelect.insertBefore === "function") lsSelect.insertBefore(opt, next);
-      else lsSelect.appendChild(opt);
-    }
-
-    function applyStudioLineSpacing(editor, lsSelect, pct) {
-      withDocStyleUndo(() => {
-        const clamped = Math.max(5, Math.min(500, Number.isFinite(pct) ? pct : 160));
-        if (lsSelect) {
-          ensureLsOption(lsSelect, clamped);
-          lsSelect.value = String(clamped);
-          host.__EASYOFFICE_CUSTOM_SELECT__?.syncCustomSelect?.(lsSelect);
-        }
-        if (editor) {
-          editor.dataset.lineSpacing = String(clamped);
-          editor.style.lineHeight = (clamped / 100).toFixed(2);
-        }
-      });
-    }
-
-    function bindSelectUndo(selectEl, editor, onApply) {
-      if (!selectEl || !editor) return;
-      selectEl.addEventListener("change", () => withDocStyleUndo(() => onApply(selectEl.value)));
-    }
+    const applyStudioLineSpacing = (pct) => getDocRuns().setLineSpacing(pct);
 
     // Font, size, color, highlight and strikethrough act on the selection only (run model).
     function bindCharacterRunControls() {
@@ -761,7 +703,7 @@
           if (done) return;
           done = true;
           const num = Number.parseInt(input.value, 10);
-          if (apply && Number.isFinite(num) && num > 0) applyStudioLineSpacing(editor, lsSelect, num);
+          if (apply && Number.isFinite(num) && num > 0) applyStudioLineSpacing(num);
           input.remove?.();
           hostEl.hidden = false;
         };
@@ -774,26 +716,18 @@
     }
 
     function bindStudioTypographyControls(editor) {
-      const styleSelect = document.getElementById("doc-style-select");
-      const roleBadge = document.getElementById("doc-style-role-badge");
-      bindSelectUndo(styleSelect, editor, (val) => {
-        if (roleBadge) roleBadge.textContent = val;
-        editor.dataset.styleRole = val;
-      });
-      bindSelectUndo(document.getElementById("doc-font-lang"), editor, (val) => {
-        editor.dataset.fontLang = val;
-      });
+      document.getElementById("doc-style-select")?.addEventListener("change", (ev) => getDocRuns().setStyle(ev.target.value));
       bindCharacterRunControls();
       const lsSelect = document.getElementById("doc-linespacing-select");
-      lsSelect?.addEventListener("change", () => applyStudioLineSpacing(editor, lsSelect, Number.parseInt(lsSelect.value, 10)));
+      lsSelect?.addEventListener("change", () => applyStudioLineSpacing(Number.parseInt(lsSelect.value, 10)));
       bindLineSpacingDoubleClick(editor, lsSelect);
       document.getElementById("btn-ls-up")?.addEventListener("click", () => {
         const cur = Number.parseInt(lsSelect?.value || "160", 10) || 160;
-        applyStudioLineSpacing(editor, lsSelect, LS_STEPS.find((s) => s > cur) || 300);
+        applyStudioLineSpacing(LS_STEPS.find((s) => s > cur) || 300);
       });
       document.getElementById("btn-ls-down")?.addEventListener("click", () => {
         const cur = Number.parseInt(lsSelect?.value || "160", 10) || 160;
-        applyStudioLineSpacing(editor, lsSelect, LS_STEPS_REV.find((s) => s < cur) || 100);
+        applyStudioLineSpacing(LS_STEPS_REV.find((s) => s < cur) || 100);
       });
     }
 
@@ -866,12 +800,13 @@
       bindStudioMenuBar(editor, onStudioCmd);
       for (const btn of document.querySelectorAll("#icon-toolbar [data-studio-cmd]")) btn.addEventListener("click", () => { if (!btn.disabled) dispatchStudioIconCmd(btn.dataset.studioCmd, editor, onStudioCmd); });
       bindStudioTypographyControls(editor);
-      for (const [id, key] of [["btn-stylebar-charfx", "charfx"], ["btn-toggle-ctrl-marks", "showCtrlMarks"], ["btn-toggle-para-marks", "showParaMarks"]]) {
+      for (const [id, key] of [["btn-toggle-ctrl-marks", "showCtrlMarks"], ["btn-toggle-para-marks", "showParaMarks"]]) {
         const btn = document.getElementById(id);
         btn?.addEventListener("click", () => toggleEditorDatasetBtn(btn, editor, key));
       }
-      const alignMap = ["left", "center", "right", "justify", "distribute", "divide"].map((mode) => ["btn-align-" + mode, mode, mode === "distribute" || mode === "divide" ? "justify" : mode]);
-      for (const [id, mode, cssAlign] of alignMap) document.getElementById(id)?.addEventListener("click", () => applyEditorAlignment(id, mode, cssAlign, editor, alignMap));
+      for (const mode of ["left", "center", "right", "justify", "distribute", "divide"]) {
+        document.getElementById("btn-align-" + mode)?.addEventListener("click", () => getDocRuns().setAlign(mode));
+      }
       const docGridBtn = document.getElementById("btn-toggle-doc-grid");
       if (docGridBtn && editor) docGridBtn.addEventListener("click", () => toggleDocManuscriptGrid(docGridBtn, editor));
       const insertBtn = document.getElementById("status-insert-mode");
