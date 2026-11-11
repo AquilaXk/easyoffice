@@ -21,8 +21,10 @@ button:focus-visible,
 input:focus-visible,
 select:focus-visible,
 [contenteditable="true"]:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
+  /* rhwp-studio `.sb-btn:focus-visible`: a 1px ring drawn inside the control. */
+  border-color: var(--color-focus-border);
+  outline: 1px solid var(--color-focus-border);
+  outline-offset: -2px;
 }
 .app-shell { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 .topbar { position: relative; z-index: 1000; display: flex; align-items: center; justify-content: space-between; height: 28px; flex-shrink: 0; padding: 0 8px; background: var(--ui-bg-light); border-bottom: 1px solid var(--ui-border-light); gap: 8px; }
@@ -63,7 +65,6 @@ select:focus-visible,
 .sb-step-btn { height: 50%; width: 100%; padding: 0; font-size: 7px; line-height: 1; color: var(--ui-text-secondary); background: transparent; outline: none; }
 .eo-glyph-btn { display: inline-flex; align-items: center; justify-content: center; min-width: 27px; height: 25px; padding: 0 4px; font-size: 13px; color: var(--ui-text); background: transparent; white-space: nowrap; }
 .eo-glyph-btn:hover, .eo-glyph-btn.active { background: var(--ui-hover-strong); outline: 1px solid var(--ui-border-strong); color: var(--accent-strong); font-weight: 700; }
-.sb-color-input { width: 18px; height: 22px; padding: 0; border: 1px solid var(--ui-border); background: none; cursor: pointer; }
 .eo-glyph-btn[aria-pressed="mixed"] { background: repeating-linear-gradient(45deg, var(--ui-surface-muted), var(--ui-surface-muted) 3px, var(--ui-bg-light) 3px, var(--ui-bg-light) 6px); }
 .eo-style-zone { font-size: 11px; color: var(--ui-text); white-space: nowrap; }
 .doc-studio-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: 20px minmax(0, 1fr); grid-template-rows: 20px minmax(0, 1fr); max-width: none; width: 100%; margin: 0; overflow: hidden; }

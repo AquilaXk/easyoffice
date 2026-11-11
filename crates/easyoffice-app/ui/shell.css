@@ -87,7 +87,6 @@
 .cmd-input.cp-input::placeholder { color: var(--ui-text-muted); opacity: 1; }
 /* ---- modal panel (제품 정보) ----------------------------------------------------------------------- */
 .dialog-btn-primary { color: var(--ui-text-on-accent); }
-button:not(.md-item):focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 1px; }
 .about-version { margin-bottom: 12px; font-size: var(--font-size-md); color: var(--color-text-muted); }
 
 /* ---- tool dialogs (smart assistant, personal data, security, benchmark, outline) -------------- */
