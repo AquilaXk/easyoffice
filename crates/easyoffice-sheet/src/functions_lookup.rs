@@ -210,37 +210,66 @@ impl XlookupModes {
         let mut lo = 0usize;
         let mut hi = total_len;
         let mut approx_hit: Option<usize> = None;
+        let mut first_exact: Option<usize> = None;
         while lo < hi {
+            // An error cell has no place in the order: probe to its right, then its left, for the
+            // nearest cell that can be compared.
             let mid = lo + (hi - lo) / 2;
-            let k = eval_at(mid)?;
-            let Some(ord) = SheetEngine::compare_excel_values(&k, lookup) else {
-                lo = mid + 1;
-                continue;
-            };
-            if ord.is_eq() && same_value_type(&k, lookup) {
-                return Ok(Some(mid));
+            let mut probe = mid;
+            let mut key = eval_at(probe)?;
+            if matches!(key, EvaluatedCellValue::Error(_)) {
+                let right = (mid + 1..hi).chain((lo..mid).rev());
+                let Some((idx, value)) = Self::first_comparable(right, &mut eval_at)? else {
+                    break;
+                };
+                probe = idx;
+                key = value;
             }
+            let Some(ord) = SheetEngine::compare_excel_values(&key, lookup) else {
+                break;
+            };
+            if ord.is_eq() && same_value_type(&key, lookup) {
+                // Duplicates: keep narrowing left so the first one in array order wins.
+                first_exact = Some(probe);
+                hi = probe;
+                continue;
+            }
+            let same_type = same_value_type(&key, lookup);
             if ord.is_lt() {
-                if self.match_mode == -1 && same_value_type(&k, lookup) {
-                    approx_hit = Some(mid);
+                if self.match_mode == -1 && same_type {
+                    approx_hit = Some(probe);
                 }
                 if ascending {
-                    lo = mid + 1;
+                    lo = probe + 1;
                 } else {
-                    hi = mid;
+                    hi = probe;
                 }
             } else {
-                if self.match_mode == 1 && same_value_type(&k, lookup) {
-                    approx_hit = Some(mid);
+                if self.match_mode == 1 && same_type {
+                    approx_hit = Some(probe);
                 }
                 if ascending {
-                    hi = mid;
+                    hi = probe;
                 } else {
-                    lo = mid + 1;
+                    lo = probe + 1;
                 }
             }
         }
-        Ok(approx_hit)
+        Ok(first_exact.or(approx_hit))
+    }
+
+    /// The first index of `indices` whose cell is not an error, with its value.
+    fn first_comparable(
+        indices: impl Iterator<Item = usize>,
+        eval_at: &mut impl FnMut(usize) -> Result<EvaluatedCellValue, FormulaError>,
+    ) -> Result<Option<(usize, EvaluatedCellValue)>, FormulaError> {
+        for idx in indices {
+            let value = eval_at(idx)?;
+            if !matches!(value, EvaluatedCellValue::Error(_)) {
+                return Ok(Some((idx, value)));
+            }
+        }
+        Ok(None)
     }
 }
 
@@ -837,6 +866,68 @@ mod tests {
         assert_eq!(
             s.evaluate_formula_str("=XLOOKUP(25, B1:B5, C1:C5, -1, 1, -2)"),
             EvaluatedCellValue::Number(300.0)
+        );
+    }
+
+    #[test]
+    fn binary_search_skips_error_cells_in_either_order() {
+        let mut s = SheetEngine::new("Sheet1");
+        for (i, (asc, desc)) in [
+            ("10", "50"),
+            ("20", "40"),
+            ("=NA()", "=NA()"),
+            ("40", "20"),
+            ("50", "10"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            s.set_cell(&format!("A{}", i + 1), asc).unwrap();
+            s.set_cell(&format!("B{}", i + 1), desc).unwrap();
+            s.set_cell(&format!("C{}", i + 1), (i + 1).to_string())
+                .unwrap();
+        }
+        assert_eq!(
+            s.evaluate_formula_str("=XLOOKUP(10, A1:A5, C1:C5, -1, 0, 2)"),
+            EvaluatedCellValue::Number(1.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=XLOOKUP(50, A1:A5, C1:C5, -1, 0, 2)"),
+            EvaluatedCellValue::Number(5.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=XLOOKUP(50, B1:B5, C1:C5, -1, 0, -2)"),
+            EvaluatedCellValue::Number(1.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=XLOOKUP(10, B1:B5, C1:C5, -1, 0, -2)"),
+            EvaluatedCellValue::Number(5.0)
+        );
+    }
+
+    #[test]
+    fn binary_search_returns_the_first_of_duplicate_keys() {
+        let mut s = SheetEngine::new("Sheet1");
+        for (i, (k, v)) in [(10, 100), (20, 200), (20, 201), (20, 202), (30, 300)]
+            .into_iter()
+            .enumerate()
+        {
+            s.set_cell(&format!("A{}", i + 1), k.to_string()).unwrap();
+            s.set_cell(&format!("B{}", i + 1), (60 - k).to_string())
+                .unwrap();
+            s.set_cell(&format!("C{}", i + 1), v.to_string()).unwrap();
+        }
+        assert_eq!(
+            s.evaluate_formula_str("=XLOOKUP(20, A1:A5, C1:C5, -1, 0, 2)"),
+            EvaluatedCellValue::Number(200.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=XMATCH(20, A1:A5, 0, 2)"),
+            EvaluatedCellValue::Number(2.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=XMATCH(40, B1:B5, 0, -2)"),
+            EvaluatedCellValue::Number(2.0)
         );
     }
 
