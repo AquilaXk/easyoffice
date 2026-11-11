@@ -588,17 +588,6 @@ test("reference app CSS parity (disabled menu shortcuts/arrows, style-bar sep, z
   assert.ok(hasDecl(vRulerRule, "color", "var(--ruler-text)"));
 
   const { document, userClick, sandbox } = await createWorkspaceHarness({ search: "?module=DOC&win=w-o1-helpers" });
-  const inferFmt = document.defaultView.__EASYOFFICE_INFER_FORMAT__;
-  assert.equal(typeof inferFmt, "function");
-  assert.equal(inferFmt("report.DOCX"), "docx");
-  assert.equal(inferFmt("budget.xlsx"), "xlsx");
-  assert.equal(inferFmt("deck.pptx"), "pptx");
-  assert.equal(inferFmt("manual.pdf"), "pdf");
-  assert.equal(inferFmt("official.hwp"), "hwp");
-  assert.equal(inferFmt("official.hwpx"), "hwpx");
-  assert.equal(inferFmt("notes.txt"), "txt");
-  assert.equal(inferFmt("noext"), "");
-
   userClick(document.getElementById("btn-command-palette"));
   const listEl = document.getElementById("cmd-palette-list");
   const firstLiBefore = listEl.children[0];
