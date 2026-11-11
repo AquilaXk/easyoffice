@@ -41,8 +41,10 @@ const MAX_COLUMN_ENTRIES: usize = 16_384;
 const MAX_GRID_CELLS: usize = CsvCodec::MAX_GRID_CELLS;
 
 pub(crate) type SlideTriple = (String, Vec<String>, String);
-/// Displayed values of one sheet, row by row (rows without cells are omitted).
+/// Displayed values of one sheet as a rectangle over its used range.
 type ValueGrid = Vec<Vec<String>>;
+/// Displayed cells of one sheet as `(row, col, text)`.
+type DisplayCells = Vec<(u32, u32, String)>;
 
 pub(crate) enum StructuredContent {
     Document(RichDocument),
@@ -704,23 +706,22 @@ fn evaluate_workbook(
     let mut grids = Vec::new();
     let mut grid_cells = 0usize;
     for (name, cells) in sheets {
-        let (cache, rows) = evaluate_sheet(&wb, name, cells, with_grids, &mut grid_cells)?;
+        let (cache, displays) = evaluate_sheet(&wb, name, cells, with_grids)?;
         caches.push(cache);
         if with_grids {
-            grids.push(rows.into_values().collect());
+            grids.push(rectangular_grid(&displays, &mut grid_cells)?);
         }
     }
     Ok((caches, grids))
 }
 
-/// Evaluates one sheet: the formula cache and (when `with_grids`) the displayed rows.
+/// Evaluates one sheet: the formula cache and (when `with_grids`) the displayed cells.
 fn evaluate_sheet(
     wb: &WorkbookEngine,
     name: &str,
     cells: &[(u32, u32, String)],
     with_grids: bool,
-    grid_cells: &mut usize,
-) -> Result<(XlsxFormulaCache, BTreeMap<u32, Vec<String>>), EasyOfficeError> {
+) -> Result<(XlsxFormulaCache, DisplayCells), EasyOfficeError> {
     let a1_addrs: Vec<String> = cells
         .iter()
         .filter(|(_, _, raw)| raw.starts_with('='))
@@ -741,7 +742,7 @@ fn evaluate_sheet(
     let mut eval_iter = wb.evaluate_targets(&targets).values.into_iter();
 
     let mut cache = XlsxFormulaCache::new();
-    let mut rows: BTreeMap<u32, Vec<String>> = BTreeMap::new();
+    let mut displays = Vec::new();
     for (row, col, raw) in cells {
         let display = if raw.starts_with('=') {
             if PackedCellCoordinate::new(*row, *col).is_err() {
@@ -756,36 +757,41 @@ fn evaluate_sheet(
             raw.clone()
         };
         if with_grids {
-            set_grid_cell(
-                rows.entry(*row).or_default(),
-                *col as usize,
-                display,
-                grid_cells,
-            )?;
+            displays.push((*row, *col, display));
         }
     }
-    Ok((cache, rows))
+    Ok((cache, displays))
 }
 
-/// Writes `display` at column `col`, growing the row within the total grid budget.
-fn set_grid_cell(
-    line: &mut Vec<String>,
-    col: usize,
-    display: String,
+/// The displayed cells as a rectangle over their used range, so every row has the same width and
+/// empty rows inside the range keep their place. The grid counts against the total budget before
+/// it is allocated, so a sheet that is sparse over a huge range is refused, never cut.
+fn rectangular_grid(
+    displays: &[(u32, u32, String)],
     grid_cells: &mut usize,
-) -> Result<(), EasyOfficeError> {
-    let needed = col + 1;
-    if line.len() < needed {
-        *grid_cells = grid_cells.saturating_add(needed - line.len());
-        if *grid_cells > MAX_GRID_CELLS {
-            return Err(EasyOfficeError::ResourceBudgetExceeded(
-                "시트 값 표가 너무 커서 문서 형식으로 저장할 수 없습니다.".to_string(),
-            ));
-        }
-        line.resize(needed, String::new());
+) -> Result<ValueGrid, EasyOfficeError> {
+    let Some(first) = displays.first() else {
+        return Ok(Vec::new());
+    };
+    let (mut r0, mut r1, mut c0, mut c1) = (first.0, first.0, first.1, first.1);
+    for &(row, col, _) in displays {
+        r0 = r0.min(row);
+        r1 = r1.max(row);
+        c0 = c0.min(col);
+        c1 = c1.max(col);
     }
-    line[col] = display;
-    Ok(())
+    let (rows, cols) = ((r1 - r0) as usize + 1, (c1 - c0) as usize + 1);
+    *grid_cells = grid_cells.saturating_add(rows.saturating_mul(cols));
+    if *grid_cells > MAX_GRID_CELLS {
+        return Err(EasyOfficeError::ResourceBudgetExceeded(
+            "시트 값 표가 너무 커서 문서 형식으로 저장할 수 없습니다.".to_string(),
+        ));
+    }
+    let mut grid = vec![vec![String::new(); cols]; rows];
+    for (row, col, display) in displays {
+        grid[(row - r0) as usize][(col - c0) as usize].clone_from(display);
+    }
+    Ok(grid)
 }
 
 /// Encodes structured content to `format`, titling the output `title`. What the format cannot

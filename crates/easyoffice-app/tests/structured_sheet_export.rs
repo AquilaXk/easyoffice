@@ -177,3 +177,82 @@ fn ods_save_writes_evaluated_formula_display_and_float_value() {
     let unpacked = OdfCodec::unpack_ods_multi(&bytes).unwrap();
     assert!(unpacked[0].1.contains(&(2, 0, "=SUM(A1:A2)".to_string())));
 }
+
+fn first_table(bytes: &[u8], file: &str) -> Vec<Vec<String>> {
+    use easyoffice_formats::{RichBlock, UniversalFormatConverter};
+    let decoded = UniversalFormatConverter::decode_rich(bytes, Some(file)).unwrap();
+    let easyoffice_formats::DecodedContent::Document(doc) = decoded.content else {
+        panic!("document expected");
+    };
+    doc.blocks
+        .into_iter()
+        .find_map(|b| match b {
+            RichBlock::Table(t) => Some(t.rows),
+            _ => None,
+        })
+        .expect("table block")
+}
+
+#[test]
+fn document_export_of_a_sparse_sheet_is_a_rectangular_grid_over_the_used_range() {
+    let sparse = r#""sheets":[{"name":"성기","cells":[
+      {"ref":"B2","raw":"a"},{"ref":"D2","raw":"c"},{"ref":"B5","raw":"d"}]}]"#;
+    let (_, bytes) = convert(&payload("docx", sparse));
+    let rows = first_table(&bytes, "x.docx");
+    assert_eq!(
+        rows,
+        vec![
+            vec!["a", "", "c"],
+            vec!["", "", ""],
+            vec!["", "", ""],
+            vec!["d", "", ""],
+        ],
+        "empty rows inside the used range are kept and every row has the same width"
+    );
+}
+
+#[test]
+fn a_document_grid_over_a_huge_used_range_is_refused_not_cut() {
+    let huge = r#""sheets":[{"name":"거대","cells":[{"ref":"A1","raw":"x"},{"ref":"XFD1048576","raw":"y"}]}]"#;
+    let err = EasyOfficeIpcRouter::dispatch("convert_document_format", &payload("docx", huge))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("너무 커서"), "{err}");
+}
+
+#[test]
+fn xlsx_and_ods_sources_convert_directly_with_bold_size_and_column_width_kept() {
+    use easyoffice_formats::{
+        read_sheet_styling, CellStyle, DocumentFormat, OoxmlCodec, SheetStyling,
+    };
+    let cells = vec![(0u32, 0u32, "굵게".to_string()), (1, 1, "값".to_string())];
+    let mut styling = SheetStyling::default();
+    styling.cells.insert(
+        (0, 0),
+        CellStyle {
+            bold: true,
+            size_pt: Some(14.0),
+            ..CellStyle::default()
+        },
+    );
+    styling.columns.insert(1, 160);
+    let xlsx = OoxmlCodec::pack_xlsx_multi_styled(
+        &[("시트".to_string(), cells)],
+        &[],
+        std::slice::from_ref(&styling),
+    )
+    .unwrap();
+    let direct = |bytes: &[u8], file: &str, dst: &str| {
+        let payload = format!(
+            r#"{{"fileName":"{file}","targetFormat":"{dst}","sourceBase64":"{}"}}"#,
+            EasyOfficeIpcRouter::encode_base64(bytes)
+        );
+        convert(&payload).1
+    };
+    let ods = direct(&xlsx, "s.xlsx", "ods");
+    let back = read_sheet_styling(&ods, DocumentFormat::Ods).unwrap();
+    assert_eq!(back[0].1, styling, "XLSX to ODS keeps the styling");
+    let xlsx_again = direct(&ods, "s.ods", "xlsx");
+    let back = read_sheet_styling(&xlsx_again, DocumentFormat::Xlsx).unwrap();
+    assert_eq!(back[0].1, styling, "ODS to XLSX keeps the styling");
+}
