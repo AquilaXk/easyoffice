@@ -16,6 +16,7 @@ import { readConfig, resolveGitExecutable, verifyUpstream } from "./verify-rhwp-
 import { verifyOverrides } from "./hwp-studio-overrides.mjs";
 import { checkFonts } from "./verify-fonts.mjs";
 import { findBareSorts, isSortRuleScoped } from "./sort-comparator-rule.mjs";
+import { findHtmlSinkViolations } from "./html-sink-rule.mjs";
 import { findServeReleaseViolations } from "./release-serve-rule.mjs";
 import { checkDesktopBundleConfig } from "./desktop-file-associations.mjs";
 
@@ -168,6 +169,8 @@ const REQUIRED_TRACKED_CONTRACTS = [
   "scripts/hwp-studio-harness.mjs",
   "scripts/hwp-roundtrip-cdp.mjs",
   "scripts/test-hwp-studio.mjs",
+  "scripts/html-sink-rule.mjs",
+  "scripts/test-html-sink-rule.mjs",
   "scripts/sort-comparator-rule.mjs",
   "scripts/test-sort-comparator-rule.mjs",
   "scripts/release-serve-rule.mjs",
@@ -457,14 +460,8 @@ for (const uiRel of ["crates/easyoffice-app/ui/index.html", ...webuiJsRels]) {
     if (lineCount >= 1000) {
       errors.push(`WebUI JS file ${uiRel} exceeds 1,000-line ceiling (${lineCount} lines)`);
     }
-    if (/\.innerHTML\s*\+=/u.test(uiText)) {
-      errors.push(`Prohibited .innerHTML += mutation detected in ${uiRel}`);
-    }
-    for (const match of uiText.matchAll(/\.innerHTML\s*=\s*([^\n;]+)/g)) {
-      const rhs = match[1].trim();
-      if (rhs !== '""' && rhs !== "''") {
-        errors.push(`Dynamic .innerHTML assignment detected in ${uiRel}: ${match[0].trim()}`);
-      }
+    for (const violation of findHtmlSinkViolations(uiText)) {
+      errors.push(`Prohibited HTML sink in ${uiRel} (${violation})`);
     }
     if (/\.setAttribute\(\s*["']style["']/i.test(uiText)) {
       errors.push(`Prohibited setAttribute("style", ...) detected in ${uiRel} (violates CSP default-src 'self')`);
