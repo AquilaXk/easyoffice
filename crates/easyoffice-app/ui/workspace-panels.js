@@ -104,10 +104,38 @@
     }
   }
 
+  // Picking an entry closes the dialog first, so the focus the action sets is not undone by the
+  // dialog handing focus back to its opener.
   function activateOutlineItem(outlineList, li, item) {
-    for (const el of outlineList.querySelectorAll(".outline-item")) el.classList.remove("active");
+    for (const el of outlineList.querySelectorAll(".outline-item")) {
+      el.classList.remove("active");
+      el.setAttribute("aria-selected", "false");
+      el.tabIndex = -1;
+    }
     li.classList.add("active");
+    li.setAttribute("aria-selected", "true");
+    li.tabIndex = 0;
+    const dialog = outlineList.closest?.("dialog");
+    if (dialog?.open) dialog.close();
     if (typeof item.action === "function") item.action();
+  }
+
+  const OUTLINE_KEY_STEP = { ArrowDown: 1, ArrowUp: -1 };
+
+  // Arrow keys move between entries (roving tabindex), Home/End jump, Enter/Space pick.
+  function onOutlineKeydown(event, outlineList) {
+    const rows = Array.from(outlineList.querySelectorAll(".outline-item"));
+    const at = rows.indexOf(event.target);
+    if (at < 0) return;
+    let next = null;
+    if (OUTLINE_KEY_STEP[event.key]) next = rows[Math.max(0, Math.min(rows.length - 1, at + OUTLINE_KEY_STEP[event.key]))];
+    else if (event.key === "Home") next = rows[0];
+    else if (event.key === "End") next = rows[rows.length - 1];
+    else if (event.key === "Enter" || event.key === " ") return void (event.preventDefault(), event.target.click());
+    else return;
+    event.preventDefault();
+    for (const row of rows) row.tabIndex = row === next ? 0 : -1;
+    next.focus();
   }
 
   function createWorkspacePanels(deps) {
@@ -579,10 +607,19 @@
       if (!outlineList) return;
       const items = buildOutlineItems(mod);
       outlineList.innerHTML = "";
-      for (const item of items) {
+      outlineList.setAttribute("role", "listbox");
+      if (!outlineList.dataset.keysBound) {
+        outlineList.dataset.keysBound = "true";
+        outlineList.addEventListener("keydown", (event) => onOutlineKeydown(event, outlineList));
+      }
+      const tabStop = Math.max(0, items.findIndex((item) => item.active));
+      for (const [index, item] of items.entries()) {
         const li = document.createElement("li");
         li.className = "outline-item" + (item.active ? " active" : "");
         li.textContent = item.label;
+        li.setAttribute("role", "option");
+        li.setAttribute("aria-selected", item.active ? "true" : "false");
+        li.tabIndex = index === tabStop ? 0 : -1;
         li.addEventListener("click", () => activateOutlineItem(outlineList, li, item));
         outlineList.appendChild(li);
       }
