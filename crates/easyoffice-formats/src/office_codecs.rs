@@ -1,8 +1,8 @@
 pub use crate::odf_hwpx_codecs::*;
 pub use crate::rtf_xml_helpers::*;
+use crate::sheet_styling::xlsx_sheet::{read_shared_strings, scan_worksheet, SharedStrings};
 use crate::sheet_styling::xlsx_styles::{cols_xml, parse_cell_xf_styles, XlsxStyleTable};
 use crate::sheet_styling::SheetStyling;
-use crate::xlsx_sheet::{read_shared_strings, scan_worksheet, SharedStrings};
 use crate::{EasyOfficeError, XmlSanitizer, ZipArchiveCodec, ZipSecurityPolicy};
 
 /// Payload for OOXML WordprocessingML (`.docx`).

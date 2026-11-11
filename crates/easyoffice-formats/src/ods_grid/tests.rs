@@ -337,7 +337,7 @@ fn content(tables: &[(&str, &str)]) -> String {
 
 fn assert_same_sheets(xml: &str) {
     let old = Legacy::parse_ods_multi_xml(xml);
-    let new = crate::ods_cells::read_ods_sheets(xml);
+    let new = crate::sheet_styling::ods_grid::read_ods_sheets(xml);
     match (&old, &new) {
         (Ok(a), Ok(b)) => assert_eq!(a, b, "sheets differ for {xml}"),
         (Err(a), Err(b)) => assert_eq!(
@@ -373,7 +373,9 @@ fn cell_budget_is_shared_across_sheets() {
         ("table:name=\"A\"", row),
         ("table:name=\"B\"", row),
     ]));
-    assert!(crate::ods_cells::read_ods_sheets(&content(&[("", row), ("", row)])).is_err());
+    assert!(
+        crate::sheet_styling::ods_grid::read_ods_sheets(&content(&[("", row), ("", row)])).is_err()
+    );
 }
 
 #[test]
@@ -386,7 +388,8 @@ fn styling_matches_the_substring_scanner() {
     let old = legacy_ods_styling(&xml);
     let new = crate::sheet_styling::ods_styles::parse_ods_styling(&xml).unwrap();
     assert_eq!(old, new);
-    let (sheets, together) = crate::ods_cells::read_ods_sheets_with_styling(&xml).unwrap();
+    let (sheets, together) =
+        crate::sheet_styling::ods_grid::read_ods_sheets_with_styling(&xml).unwrap();
     assert_eq!(together, old, "one walk gives the same styling");
     assert_eq!(sheets, Legacy::parse_ods_multi_xml(&xml).unwrap());
     assert_eq!(old[0].0, "T&1");
@@ -400,7 +403,7 @@ fn hostile_grids_stay_bounded() {
     for _ in 0..50_000 {
         rows.push_str(r#"<table:table-row><table:table-cell office:value="1"/></table:table-row>"#);
     }
-    let sheets = crate::ods_cells::read_ods_sheets(&content(&[("", &rows)])).unwrap();
+    let sheets = crate::sheet_styling::ods_grid::read_ods_sheets(&content(&[("", &rows)])).unwrap();
     assert_eq!(sheets[0].1.len(), 50_000);
     let deep = format!(
         "<table:table-row><table:table-cell>{}<text:p>x</text:p>{}</table:table-cell></table:table-row>",
@@ -409,13 +412,13 @@ fn hostile_grids_stay_bounded() {
     );
     assert_same_sheets(&content(&[("", &deep)]));
     // Truncated markup is refused, not read past the end.
-    assert!(
-        crate::ods_cells::read_ods_sheets("<table:table><table:table-row><table:table-cell")
-            .is_err()
-    );
+    assert!(crate::sheet_styling::ods_grid::read_ods_sheets(
+        "<table:table><table:table-row><table:table-cell"
+    )
+    .is_err());
     // More than the cell budget fails closed.
     let many = r#"<table:table-row table:number-rows-repeated="1000000"><table:table-cell table:number-columns-repeated="16000" office:value="1"/></table:table-row>"#;
-    assert!(crate::ods_cells::read_ods_sheets(&content(&[("", many)])).is_err());
+    assert!(crate::sheet_styling::ods_grid::read_ods_sheets(&content(&[("", many)])).is_err());
 }
 
 /// A 1,000 x 104 table with styled text, number and formula cells.
@@ -456,7 +459,11 @@ fn measure_one_pass_against_the_substring_scanner() {
         best
     };
     let old = time(&|| Legacy::parse_ods_multi_xml(&xml).unwrap()[0].1.len());
-    let new = time(&|| crate::ods_cells::read_ods_sheets(&xml).unwrap()[0].1.len());
+    let new = time(&|| {
+        crate::sheet_styling::ods_grid::read_ods_sheets(&xml).unwrap()[0]
+            .1
+            .len()
+    });
     println!(
         "ods table {} bytes: substring scanner {old:.2} ms, one-pass {new:.2} ms",
         xml.len()

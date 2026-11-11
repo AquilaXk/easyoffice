@@ -588,4 +588,5 @@ fn match_a1_ref(bytes: &[u8], start: usize) -> Option<(usize, bool, u32, bool, u
 }
 
 #[cfg(test)]
+#[path = "xlsx_sheet/tests.rs"]
 mod tests;

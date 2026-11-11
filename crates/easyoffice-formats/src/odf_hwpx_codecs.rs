@@ -1,10 +1,10 @@
-use crate::ods_cells::{read_ods_sheets, read_ods_sheets_with_styling};
 use crate::office_codecs::validate_zip_xml_entries;
 use crate::rtf_xml_helpers::{
     extract_attr, extract_attr_from_fragment, extract_balanced_elements,
     extract_odf_blocks_in_order, extract_odf_inline_text, extract_tag_bodies, scan_single_a1_coord,
     strip_tag_blocks, to_open_formula_syntax_impl,
 };
+use crate::sheet_styling::ods_grid::{read_ods_sheets, read_ods_sheets_with_styling};
 use crate::sheet_styling::ods_styles::{parse_ods_styling, table_columns_xml, OdsStyleTable};
 use crate::sheet_styling::SheetStyling;
 use crate::{ContainerFamily, EasyOfficeError, XmlSanitizer, ZipArchiveCodec, ZipSecurityPolicy};

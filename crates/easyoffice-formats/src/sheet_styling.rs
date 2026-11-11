@@ -7,8 +7,12 @@
 use std::collections::BTreeMap;
 
 // XLSX and ODS style tables live beside this module's model; they are internal to the crate.
+#[path = "ods_grid.rs"]
+pub(crate) mod ods_grid;
 #[path = "ods_styles.rs"]
 pub(crate) mod ods_styles;
+#[path = "xlsx_sheet.rs"]
+pub(crate) mod xlsx_sheet;
 #[path = "xlsx_styles.rs"]
 pub(crate) mod xlsx_styles;
 
