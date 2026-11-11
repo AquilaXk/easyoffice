@@ -163,6 +163,22 @@ fn many_streams_that_are_each_small_but_together_too_large_are_refused() {
 }
 
 #[test]
+fn a_file_of_nothing_but_tiny_streams_is_scanned_in_linear_time() {
+    let mut file = one_page_with_content("", b"BT ET");
+    file.truncate(file.len() - b"trailer\n<< /Root 1 0 R >>\n%%EOF\n".len());
+    file.extend_from_slice(&b"<< /Filter /FlateDecode >>\nstream\nx\nendstream\n".repeat(60_000));
+    file.extend_from_slice(b"trailer\n<< /Root 1 0 R >>\n%%EOF\n");
+    let started = Instant::now();
+    // The reader may or may not accept the damaged objects; the scan itself must not be the slow part.
+    let _ = inspect_bytes(file, Limits::DEFAULT);
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "{:?}",
+        started.elapsed()
+    );
+}
+
+#[test]
 fn the_counting_inflater_stops_at_the_cap_and_rejects_what_is_not_flate() {
     let data = zeros_zlib(4 << 20);
     assert_eq!(inflated_len(&data, 8 << 20), Ok(4 << 20));

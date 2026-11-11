@@ -41,6 +41,8 @@ const HEADER_WINDOW: usize = 1024;
 const ENCRYPT_KEY: &[u8] = b"/Encrypt";
 /// Bytes before `stream` that are searched for the stream's filter.
 const DICT_LOOKBACK: usize = 1024;
+/// Keyword spans of the stream scan between two looks at the deadline.
+const SPANS_PER_CHECK: usize = 4096;
 /// Output buffer of the counting inflater (its contents are thrown away).
 const SCRATCH_BYTES: usize = 32 * 1024;
 
@@ -285,8 +287,13 @@ fn scan_streams(bytes: &[u8], deadline: &Deadline, limits: &Limits) -> Result<()
     let too_big = || "PDF의 압축 해제 크기가 한도를 초과합니다.".to_string();
     let mut total = 0u64;
     let mut at = 0usize;
+    let mut spans = 0usize;
     while let Some(found) = find(bytes, b"stream", at) {
         at = found + b"stream".len();
+        spans += 1;
+        if spans.is_multiple_of(SPANS_PER_CHECK) {
+            deadline.check()?;
+        }
         if found >= 3 && &bytes[found - 3..found] == b"end" {
             continue;
         }

@@ -111,6 +111,52 @@ pub fn sample_pdf(tag: u8, pages: usize, rotates: &[i32]) -> Vec<u8> {
     pdf.finish()
 }
 
+/// A PDF whose pages are heavy like a scanned or illustrated report: `content_bytes` of
+/// Flate-compressed drawing operators and one `image_bytes` picture per page (incompressible bytes,
+/// stored as they are), all pages sharing one font. For timing, not for assertions on content.
+pub fn heavy_pdf(pages: usize, content_bytes: usize, image_bytes: usize) -> Vec<u8> {
+    let mut next = Ref::new(1);
+    let (catalog, tree, font) = (next.bump(), next.bump(), next.bump());
+    let mut pdf = Pdf::new();
+    pdf.catalog(catalog).pages(tree);
+    pdf.type1_font(font).base_font(WName(b"Helvetica"));
+    let line = b"BT /F1 9 Tf 36 700 Td (The quick brown fox jumps over the lazy dog 0123456789) Tj ET\n0.5 w 36 690 m 560 690 l S\n";
+    let content = line.repeat(content_bytes / line.len() + 1);
+    let content = flate(&content);
+    let mut seed = 0x9e37_79b9_u32;
+    let image: Vec<u8> = (0..image_bytes)
+        .map(|_| {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (seed >> 24) as u8
+        })
+        .collect();
+    let mut kids = Vec::new();
+    for _ in 0..pages {
+        let (page_ref, image_ref, content_ref) = (next.bump(), next.bump(), next.bump());
+        kids.push(page_ref);
+        let side = i32::try_from((image_bytes / 3).isqrt()).unwrap();
+        let mut picture = pdf.image_xobject(image_ref, &image);
+        picture.width(side).height(side).bits_per_component(8);
+        picture.color_space().device_rgb();
+        picture.finish();
+        pdf.stream(content_ref, &content)
+            .filter(Filter::FlateDecode);
+        let mut page = pdf.page(page_ref);
+        page.media_box(Rect::new(0.0, 0.0, 595.0, 842.0))
+            .parent(tree)
+            .contents(content_ref);
+        let mut resources = page.resources();
+        resources.x_objects().pair(WName(b"Im1"), image_ref);
+        resources.fonts().pair(WName(b"F1"), font);
+        resources.finish();
+        page.finish();
+    }
+    pdf.pages(tree)
+        .count(i32::try_from(pages).unwrap())
+        .kids(kids);
+    pdf.finish()
+}
+
 pub fn read(bytes: &[u8]) -> ReadPdf {
     ReadPdf::new(Arc::new(bytes.to_vec())).expect("the result is a PDF the reader opens")
 }

@@ -3,8 +3,8 @@
 
 use crate::pdf_edit_budget::MAX_PAGES;
 use crate::pdf_edit_fixtures::{
-    all_pictures, deadline, picture_bytes, pictures_by_page, read, sample_pdf, PAGE_HEIGHT,
-    PAGE_WIDTH,
+    all_pictures, deadline, heavy_pdf, picture_bytes, pictures_by_page, read, sample_pdf,
+    PAGE_HEIGHT, PAGE_WIDTH,
 };
 use crate::pdf_edit_overlay::Overlay;
 use crate::pdf_edit_session::EditSession;
@@ -339,4 +339,38 @@ fn a_hundred_pages_merge_in_a_moment() {
     let mut expected = expected_pictures(17, 1..=50);
     expected.extend(expected_pictures(18, 1..=50));
     assert_eq!(pictures_by_page(&out), expected);
+}
+
+#[test]
+fn a_hundred_heavy_pages_merge_without_touching_their_pictures() {
+    // Two reports of 50 pages: 400 KiB of drawing operators and a 300 KiB picture on every page.
+    let (first, second) = (
+        heavy_pdf(50, 400 * 1024, 300 * 1024),
+        heavy_pdf(50, 400 * 1024, 300 * 1024),
+    );
+    let input = first.len() + second.len();
+    let mut session = open(first);
+    session.merge(vec![second], &deadline()).unwrap();
+    let started = std::time::Instant::now();
+    let out = session.render(None, &no_fonts(), &deadline()).unwrap();
+    let elapsed = started.elapsed();
+    eprintln!(
+        "merge of 100 heavy pages: {elapsed:?} ({} MiB in, {} MiB out)",
+        input / 1_048_576,
+        out.len() / 1_048_576
+    );
+    assert_eq!(read(&out).pages().len(), 100);
+    // Every picture is in the result byte for byte (the pictures are copied, not decoded), and the
+    // size is what the inputs add up to, give or take the page contents' new compression.
+    assert_eq!(all_pictures_len(&out, 300 * 1024), 100);
+    assert!(out.len() < input + input / 4, "{} vs {input}", out.len());
+    assert!(elapsed < std::time::Duration::from_secs(60), "{elapsed:?}");
+}
+
+fn all_pictures_len(bytes: &[u8], size: usize) -> usize {
+    read(bytes)
+        .objects()
+        .into_iter()
+        .filter(|o| matches!(o, Object::Stream(s) if s.raw_data().len() == size))
+        .count()
 }
