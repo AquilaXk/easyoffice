@@ -18,6 +18,7 @@ mod convert_ipc;
 mod convert_open;
 mod convert_structured;
 mod convert_structured_doc;
+mod convert_structured_encode;
 #[cfg(test)]
 mod editor_merge_tests;
 pub mod ffi;
