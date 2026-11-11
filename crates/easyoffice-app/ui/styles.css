@@ -537,7 +537,7 @@ select:focus-visible,
 .sheet-grid td.cf-strike { text-decoration: line-through; }
 .sheet-grid td.cf-underline.cf-strike { text-decoration: underline line-through; }
 .sheet-grid td.cf-hide-value:not(.editing) { color: transparent; }
-.sheet-grid td[data-cf-icon]::before { content: ""; display: inline-block; width: 14px; height: 14px; margin-right: 4px; vertical-align: -2px; background: var(--cf-icon-color, currentColor); -webkit-mask: var(--cf-icon-mask) center / contain no-repeat; mask: var(--cf-icon-mask) center / contain no-repeat; }
+.sheet-grid td[data-cf-icon]::before { content: ""; display: inline-block; width: 14px; height: 14px; margin-right: 4px; vertical-align: -2px; background: var(--cf-icon-color, currentColor); -webkit-mask: var(--cf-icon-mask, none) center / contain no-repeat; mask: var(--cf-icon-mask, none) center / contain no-repeat; }
 .sheet-grid td.cf-hide-value[data-cf-icon] { text-align: center; }
 .sheet-grid td.cf-hide-value[data-cf-icon]::before { margin-right: 0; }
 .sheet-grid td.cf-dropdown-cell { position: relative; }
