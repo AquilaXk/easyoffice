@@ -111,7 +111,8 @@ pub unsafe extern "C" fn eo_ql_render_first_page_png(
 }
 
 /// The preview picture stored in the file (`PrvImage`), if it has one. The parser's own size limit
-/// applies; the picture is returned as stored (PNG, BMP or GIF) for the system image decoder.
+/// applies and so does the pixel limit of a thumbnail (4096 x 4096, read from the picture's
+/// header); the picture is returned as stored (PNG, BMP or GIF) for the system image decoder.
 ///
 /// # Safety
 ///
@@ -128,6 +129,10 @@ pub unsafe extern "C" fn eo_ql_extract_embedded_thumbnail(
     let outcome = bounded::run(EMBEDDED_DEADLINE, move || {
         rhwp::parser::extract_thumbnail_only(&bytes)
             .filter(|found| !found.data.is_empty())
+            // The system decoder allocates by the size in the picture's header, which the file
+            // controls: a picture over the thumbnail pixel limit (or with no readable header) is
+            // not handed over (PD-175).
+            .filter(|found| raster::RasterBudget::for_page().admit(&found.data))
             .ok_or(STATUS_NO_THUMBNAIL)
     });
     match outcome {

@@ -2692,7 +2692,7 @@
 
 ## PD-175. 포맷 디코더는 문서 하나가 복원하는 바이트 총량에 예산을 둔다 (256 MiB)
 
-- **Status** Implemented (`decode_budget.rs`, `xlsx_sheet.rs`, `office_codecs.rs`, `ods_grid.rs`, `biff8_xls_codec.rs`, `legacy_ole2_codec.rs`, `hwp5_codec.rs`, `deflate.rs`)
+- **Status** Implemented (`decode_budget.rs`, `xlsx_sheet.rs`, `office_codecs.rs`, `ods_grid.rs`, `biff8_xls_codec.rs`, `legacy_ole2_codec.rs`, `hwp5_codec.rs`, `deflate.rs`, `apps/quicklook/rust/src/lib.rs`)
 - **Context** PD-168이 XLSX·ODS 읽기에서 이벤트 상한(600만)을 풀면서, 한 단계(요소·레코드·셀)만 재던 한도가 합계를 막지 못하는 경로가 드러났습니다. 공유 문자열 하나를 셀 수십만 개가 가리키면 셀마다 문자열 사본이 생기고, 같은 시트 파트를 가리키는 `<sheet>` 항목이 파트를 항목 수만큼 다시 읽습니다. 작은 파일이 수십 GiB를 복원할 수 있습니다.
 - **Decision (`PD-175`)**
   1. **검토 3단계**: (1) 외부 크레이트는 엔진 무의존(PD-053, PD-095) 때문에 쓰지 않습니다. (2) 같은 구조가 이미 Pages 읽기에 있습니다(`pages_iwa.rs`의 문서 단위 `document_budget`, 256 MiB). (3) 그 방식을 `DecodeBudget`(`decode_budget.rs`)으로 일반화해 읽기 경로가 같은 값과 같은 오류(`ResourceBudgetExceeded`)를 씁니다. `pages_iwa::MAX_DOCUMENT_BYTES`는 같은 상수를 가리킵니다.
@@ -2703,5 +2703,6 @@
   6. **MS-DOC**: 조각 표(최대 6만 5,536개)의 조각이 같은 구간을 다시 가리켜도 되므로, 조각마다 글자 수 × 3바이트(UTF-8로 풀었을 때 한 글자의 최대)를 디코딩 전에 뺍니다.
   7. **HWP 5.0**: DocInfo와 모든 BodyText 구역이 해제 바이트를 한 예산으로 냅니다. 해제기는 남은 예산에서 멈춥니다(구역당 128 MiB 한도 안쪽에서). 이전에는 구역마다 128 MiB씩 몇 번이든 풀 수 있었습니다. 압축비 규칙은 두지 않습니다. 참조 앱도 두지 않고, 평평한 그림은 1000:1을 넘기 때문입니다(PD-112의 `ZipSecurityPolicy::hangul_editor`와 같은 판단).
   8. **DEFLATE 출력 버퍼**: ZIP 헤더가 주장하는 크기(최대 512 MiB)를 읽기 전에 통째로 잡던 것을 4 MiB까지로 줄입니다. 주장이 더 크면 실제 출력이 나오는 만큼 4배씩 주장 크기까지만 키웁니다. 주장이 4 MiB 이하이고 맞으면 이전처럼 한 번에 잡습니다. 주장 없는 스트림의 첫 버퍼는 입력의 8배(4 MiB 상한)입니다.
+  9. **Quick Look 내장 썸네일**: `eo_ql_extract_embedded_thumbnail`이 `PrvImage`(최대 10 MiB)를 시스템 디코더에 넘기기 전에 헤더의 크기를 `RasterBudget::for_page()`(그림 하나 4096×4096 픽셀, PD-145의 같은 값·같은 헤더 읽기)로 검사합니다. 넘거나 헤더를 읽을 수 없으면 `STATUS_NO_THUMBNAIL`이고, 확장은 기본 아이콘으로 답합니다.
 - **Why** 입력 크기로 출력 크기를 묶을 수 없는 읽기는 합계 예산이 유일한 방어선입니다. 한 문서의 복원량이 256 MiB를 넘는 정상 파일은 없습니다(ZIP 합계 한도가 512 MiB이고 셀 하나가 수십 바이트).
-- **Verified by** `tests/decode_budget_xlsx.rs`(공유 문자열 300×1 MiB, 공유 수식 슬레이브 300×1 MiB, 두 시트 합산, 같은 파트를 가리키는 시트 둘, 시트 항목 2,000개 거부, 10만 셀 정상 파일 통과), `tests/decode_budget_ods.rs`(열 반복 300×1 MiB, 행 반복 300×1 MiB 거부, 정상 반복 2만 셀 통과), `tests/decode_budget_ole2.rs`(8,000자 문자열을 가리키는 `LABELSST` 4만 개 거부, 정상 2만 셀 통과, 같은 1 MiB를 가리키는 조각 300개 거부, 정상 조각 표 통과), 같은 `tests/decode_budget_ole2.rs`(100 MiB로 풀리는 구역 4개 거부, 작은 구역 3개 통과), `deflate/tests.rs`(512 MiB 주장·입력 100 MB 첫 버퍼 4 MiB 이하, 주장 크기까지만 성장), `decode_budget.rs` 단위 시험.
+- **Verified by** `tests/decode_budget_xlsx.rs`(공유 문자열 300×1 MiB, 공유 수식 슬레이브 300×1 MiB, 두 시트 합산, 같은 파트를 가리키는 시트 둘, 시트 항목 2,000개 거부, 10만 셀 정상 파일 통과), `tests/decode_budget_ods.rs`(열 반복 300×1 MiB, 행 반복 300×1 MiB 거부, 정상 반복 2만 셀 통과), `tests/decode_budget_ole2.rs`(8,000자 문자열을 가리키는 `LABELSST` 4만 개 거부, 정상 2만 셀 통과, 같은 1 MiB를 가리키는 조각 300개 거부, 정상 조각 표 통과), 같은 `tests/decode_budget_ole2.rs`(100 MiB로 풀리는 구역 4개 거부, 작은 구역 3개 통과), `deflate/tests.rs`(512 MiB 주장·입력 100 MB 첫 버퍼 4 MiB 이하, 주장 크기까지만 성장), Quick Look `tests.rs`(PNG·GIF·BMP 헤더의 100,000² 등 4종과 HWP 5.0 샘플의 IHDR를 고친 파일이 `STATUS_NO_THUMBNAIL`, 정상 64×48 PNG는 그대로 반환), `decode_budget.rs` 단위 시험.

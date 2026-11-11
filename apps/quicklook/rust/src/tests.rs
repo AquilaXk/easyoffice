@@ -201,6 +201,80 @@ fn embedded_picture_is_returned_as_stored_or_reported_missing() {
     );
 }
 
+/// An HWPX package (the entries the parser needs to recognize one) whose preview picture holds
+/// `picture` as stored.
+fn hwpx_with_preview(picture: &[u8]) -> Vec<u8> {
+    let mut out = std::io::Cursor::new(Vec::new());
+    let mut zip = zip::ZipWriter::new(&mut out);
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+    zip.start_file("mimetype", options).unwrap();
+    zip.write_all(b"application/hwp+zip").unwrap();
+    for part in ["Contents/content.hpf", "Contents/header.xml"] {
+        zip.start_file(part, options).unwrap();
+        zip.write_all(b"<x/>").unwrap();
+    }
+    zip.start_file("Preview/PrvImage.png", options).unwrap();
+    zip.write_all(picture).unwrap();
+    zip.finish().unwrap();
+    out.into_inner()
+}
+
+fn gif_header(width: u16, height: u16) -> Vec<u8> {
+    let mut bytes = b"GIF89a".to_vec();
+    bytes.extend_from_slice(&width.to_le_bytes());
+    bytes.extend_from_slice(&height.to_le_bytes());
+    bytes.extend_from_slice(&[0, 0, 0]);
+    bytes
+}
+
+fn bmp_header(width: i32, height: i32) -> Vec<u8> {
+    let mut bytes = b"BM".to_vec();
+    bytes.extend_from_slice(&[0; 12]);
+    bytes.extend_from_slice(&40u32.to_le_bytes());
+    bytes.extend_from_slice(&width.to_le_bytes());
+    bytes.extend_from_slice(&height.to_le_bytes());
+    bytes.extend_from_slice(&[1, 0, 24, 0]);
+    bytes
+}
+
+#[test]
+fn an_embedded_picture_declaring_too_many_pixels_is_not_handed_to_the_image_decoder() {
+    // 100,000 x 100,000 is 40 GB as RGBA: the extension's CGImageSource would allocate by the
+    // header. A picture over 4096 x 4096 pixels (the thumbnail limit) is never handed over.
+    let bombs: [(&str, Vec<u8>); 4] = [
+        ("PNG 100,000 x 100,000", png_header(100_000, 100_000)),
+        ("PNG just over the limit", png_header(4097, 4096)),
+        ("GIF 65,535 x 65,535", gif_header(u16::MAX, u16::MAX)),
+        ("BMP 100,000 x 100,000", bmp_header(100_000, 100_000)),
+    ];
+    for (what, picture) in bombs {
+        let result = embedded(&hwpx_with_preview(&picture));
+        assert_eq!(result.status, STATUS_NO_THUMBNAIL, "{what} must be refused");
+        assert!(result.bytes.ptr.is_null());
+    }
+    // The same through the Hangul 5.0 container: the sample's PNG header with a huge size.
+    let mut hwp = sample("field-01.hwp");
+    let ihdr = hwp
+        .windows(4)
+        .position(|w| w == b"IHDR")
+        .expect("PNG in sample")
+        + 4;
+    hwp[ihdr..ihdr + 4].copy_from_slice(&100_000u32.to_be_bytes());
+    hwp[ihdr + 4..ihdr + 8].copy_from_slice(&100_000u32.to_be_bytes());
+    assert_eq!(embedded(&hwp).status, STATUS_NO_THUMBNAIL);
+}
+
+#[test]
+fn an_embedded_picture_within_the_pixel_limit_is_still_returned() {
+    let mut red = tiny_skia::Pixmap::new(64, 48).unwrap();
+    red.fill(tiny_skia::Color::from_rgba8(255, 0, 0, 255));
+    let package = hwpx_with_preview(&red.encode_png().unwrap());
+    let result = embedded(&package);
+    assert_eq!(result.status, STATUS_OK);
+    assert_eq!(png_size(&take(result.bytes)), (64, 48));
+}
+
 // --- hostile files ---------------------------------------------------------------------------
 
 /// Every outcome is a status (never a crash or a hang), and a failure carries no buffer.
