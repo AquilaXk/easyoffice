@@ -428,6 +428,7 @@ impl OoxmlCodec {
             sheets
         };
 
+        Self::check_sheet_count(active_sheets.len())?;
         Self::validate_xlsx_bounds(active_sheets, stylings)?;
         let style_table = XlsxStyleTable::build(stylings);
         let (workbook_xml, wb_rels_xml) = build_workbook_parts(active_sheets);
@@ -473,6 +474,18 @@ impl OoxmlCodec {
         }
 
         ZipArchiveCodec::pack_compressed(&entries)
+    }
+
+    /// Fails when a workbook lists more than [`Self::MAX_XLSX_SHEETS`] worksheets, so a file this
+    /// codec writes is one it can read back.
+    fn check_sheet_count(count: usize) -> Result<(), EasyOfficeError> {
+        if count > Self::MAX_XLSX_SHEETS {
+            return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+                "XLSX 워크시트 개수({count})가 허용 상한({})을 초과했습니다.",
+                Self::MAX_XLSX_SHEETS
+            )));
+        }
+        Ok(())
     }
 
     /// Rejects cell / style coordinates outside the ECMA-376 limits.
@@ -599,12 +612,7 @@ impl OoxmlCodec {
         }
 
         let sheet_tags = extract_balanced_elements(wb_xml, "sheet");
-        if sheet_tags.len() > Self::MAX_XLSX_SHEETS {
-            return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
-                "XLSX 워크시트 개수가 허용 상한({})을 초과했습니다.",
-                Self::MAX_XLSX_SHEETS
-            )));
-        }
+        Self::check_sheet_count(sheet_tags.len())?;
         let mut sheet_specs: Vec<(String, String)> = Vec::new();
         for (idx, (s_attrs, _)) in sheet_tags.into_iter().enumerate() {
             let name = extract_attr_from_fragment(s_attrs, "name")

@@ -68,6 +68,26 @@ fn shared_formula_slaves_copying_a_huge_master_hit_the_decoded_budget() {
 }
 
 #[test]
+fn shared_formula_slaves_whose_references_grow_are_charged_for_the_shifted_text() {
+    // "A1+" shifted to the far corner becomes "XFD1048576+": 3.7 times the master. 400 slaves of a
+    // 256 KiB master are 100 MiB as stored on the master's length and 376 MiB as shifted.
+    let master = "A1+".repeat(86_000);
+    let mut cells =
+        format!("<c r=\"A1\"><f t=\"shared\" ref=\"A1:XFD1048576\" si=\"0\">{master}0</f></c>");
+    for k in 0..400 {
+        cells.push_str(&format!(
+            "<c r=\"XFD{}\"><f t=\"shared\" si=\"0\"/></c>",
+            1_048_576 - k
+        ));
+    }
+    let bytes = xlsx(one_sheet_workbook(), None, &[sheet_of(&cells)]);
+    assert_budget_error(
+        OoxmlCodec::unpack_xlsx_multi(&bytes),
+        "growing shared formula",
+    );
+}
+
+#[test]
 fn the_budget_spans_all_sheets_of_the_workbook() {
     // Two sheets of 150 x 1 MiB each: neither passes 256 MiB alone, together they do.
     let shared = format!("<sst><si><t>{}</t></si></sst>", "A".repeat(MIB));
@@ -139,4 +159,21 @@ fn a_large_ordinary_sheet_still_opens() {
     let bytes = xlsx(one_sheet_workbook(), Some(&shared), &[sheet]);
     let sheets = OoxmlCodec::unpack_xlsx_multi(&bytes).expect("ordinary 100k-cell sheet opens");
     assert_eq!(sheets[0].1.len(), 100_000);
+}
+
+#[test]
+fn a_workbook_the_reader_would_refuse_is_not_written() {
+    let sheets: Vec<easyoffice_formats::OdsUnpacked> = (0..=OoxmlCodec::MAX_XLSX_SHEETS)
+        .map(|i| (format!("S{i}"), vec![(0, 0, "x".to_string())]))
+        .collect();
+    assert_budget_error(
+        OoxmlCodec::pack_xlsx_multi(&sheets),
+        "pack over the sheet limit",
+    );
+    let at_limit = &sheets[..OoxmlCodec::MAX_XLSX_SHEETS];
+    let bytes = OoxmlCodec::pack_xlsx_multi(at_limit).expect("the limit itself is written");
+    assert_eq!(
+        OoxmlCodec::unpack_xlsx_multi(&bytes).unwrap().len(),
+        OoxmlCodec::MAX_XLSX_SHEETS
+    );
 }

@@ -324,7 +324,7 @@ impl<'s> SheetScanner<'s> {
 
     /// The cell's formula as cell text (`=` first), or `None` when it has no usable one. The
     /// copies it makes (a master kept for its slaves, a slave's shifted text) are charged to the
-    /// decoded budget before they are made.
+    /// decoded budget.
     fn formula_text(&mut self, cell: &CellState<'_>) -> Result<Option<String>, EasyOfficeError> {
         let Some(formula) = cell.formula.as_ref() else {
             return Ok(None);
@@ -347,11 +347,16 @@ impl<'s> SheetScanner<'s> {
         else {
             return Ok(None);
         };
-        self.budget
-            .charge_cell(master.len() + 1, CELL_BUDGET_WHAT)?;
         let dr = i64::from(row) - i64::from(*mr);
         let dc = i64::from(col) - i64::from(*mc);
-        Ok(shift_shared_formula(master, dr, dc).map(|text| with_equals(&text)))
+        // The shifted text can be longer than the master (`A1` becomes `XFD1048576`), so it is
+        // charged by its own length; the temporary comes from a master already paid for.
+        let Some(shifted) = shift_shared_formula(master, dr, dc) else {
+            return Ok(None);
+        };
+        self.budget
+            .charge_cell(shifted.len() + 1, CELL_BUDGET_WHAT)?;
+        Ok(Some(with_equals(&shifted)))
     }
 
     /// The text a finished cell contributes, charged to the decoded budget; `None` when the cell
