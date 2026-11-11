@@ -147,15 +147,6 @@
   background: #e8e6e1;
   border-right: 1px solid #b8a082;
 }
-#doc-editor h2:not(.eo-boxed-heading) {
-  margin: 6px 0 14px;
-  padding: 7px 14px;
-  background: #f5e6d3;
-  outline: 1px solid #b8a082;
-  font-size: 16px;
-  font-weight: 700;
-  color: #111827;
-}
 .eo-lead-square {
   font-size: 15px;
   font-weight: 700;

@@ -660,3 +660,8 @@ test("an opened PDF shows no empty stamp box and its watermark field has a label
   assert.ok(document.querySelector('label[for="pdf-watermark-input"]'));
   assert.ok(document.getElementById("pdf-watermark-input").getAttribute("placeholder"));
 });
+
+test("a level-2 heading of an opened document is plain text, the boxed look belongs to the sample's own class", () => {
+  const css = readText(fileURLToPath(new URL("../crates/easyoffice-app/ui/content.css", import.meta.url)));
+  assert.doesNotMatch(css, /#doc-editor h2/);
+});
