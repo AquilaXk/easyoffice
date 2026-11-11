@@ -174,7 +174,8 @@ async fn save_document_file(
     save_via_dialog(&app, &window, request).await
 }
 
-/// Asks where to save with the native save dialog; `None` when the user cancels. The page proposes
+/// Asks where to save with the native save dialog; `None` when the user cancels (or declines to save
+/// under an extension of another format, PD-177). The page proposes
 /// the file name only (`file_name`, `label` for the filter), the path stays in Rust.
 pub(crate) async fn pick_save_path(
     app: &AppHandle,
@@ -197,13 +198,57 @@ pub(crate) async fn pick_save_path(
     let picked = tauri::async_runtime::spawn_blocking(move || rx.recv().ok().flatten())
         .await
         .map_err(|err| IpcError::new(format!("저장 대화상자를 열지 못했습니다: {err}")))?;
-    picked
-        .map(|picked| {
-            picked
-                .into_path()
-                .map_err(|err| IpcError::new(format!("저장 위치를 확인할 수 없습니다: {err}")))
-        })
-        .transpose()
+    let Some(picked) = picked else {
+        return Ok(None);
+    };
+    let path = picked
+        .into_path()
+        .map_err(|err| IpcError::new(format!("저장 위치를 확인할 수 없습니다: {err}")))?;
+    // The dialog lets the user retype the name: a document is not silently written under an
+    // extension of another format.
+    if !tracked_files::path_has_extension(&path, extension)
+        && !confirm_other_extension(app, window, &path, extension).await?
+    {
+        return Ok(None);
+    }
+    Ok(Some(path))
+}
+
+const OTHER_EXTENSION_TITLE: &str = "확장자 확인";
+
+/// The wording for a name whose extension is not the format of the bytes; the file is named by its
+/// name only (PD-088).
+fn other_extension_message(file_name: &str, extension: &str) -> String {
+    format!(
+        "저장할 파일의 확장자가 문서 형식과 다릅니다.\n파일: {file_name}\n내용은 .{extension} 형식으로 저장됩니다.\n\n이 이름으로 저장하면 다른 프로그램이 파일을 열지 못할 수 있습니다."
+    )
+}
+
+/// Asks (native dialog) whether to save under a name whose extension is not `extension`'s format.
+async fn confirm_other_extension(
+    app: &AppHandle,
+    window: &WebviewWindow,
+    path: &std::path::Path,
+    extension: &str,
+) -> Result<bool, IpcError> {
+    let dialog_app = app.clone();
+    let parent = window.clone();
+    let message = other_extension_message(&windows::display_name(path), extension);
+    tauri::async_runtime::spawn_blocking(move || {
+        dialog_app
+            .dialog()
+            .message(message)
+            .title(OTHER_EXTENSION_TITLE)
+            .kind(MessageDialogKind::Warning)
+            .parent(&parent)
+            .buttons(MessageDialogButtons::OkCancelCustom(
+                "그대로 저장".to_string(),
+                "저장 취소".to_string(),
+            ))
+            .blocking_show()
+    })
+    .await
+    .map_err(|err| IpcError::new(format!("확인 대화상자를 열지 못했습니다: {err}")))
 }
 
 /// Asks where to save with the native dialog and writes the request there.
@@ -459,6 +504,17 @@ mod tests {
             !text.contains('/') && !text.contains('\\'),
             "a name, never a path"
         );
+    }
+
+    #[test]
+    fn the_other_extension_dialog_names_both_formats_and_never_a_path() {
+        let text = other_extension_message("보고서.pdf", "docx");
+        assert_eq!(
+            text,
+            "저장할 파일의 확장자가 문서 형식과 다릅니다.\n파일: 보고서.pdf\n내용은 .docx 형식으로 저장됩니다.\n\n이 이름으로 저장하면 다른 프로그램이 파일을 열지 못할 수 있습니다."
+        );
+        assert!(!text.contains('/') && !text.contains('\\'));
+        assert_eq!(OTHER_EXTENSION_TITLE, "확장자 확인");
     }
 
     #[test]

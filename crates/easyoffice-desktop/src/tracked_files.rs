@@ -113,14 +113,18 @@ fn canonical_ext(ext: &str) -> &str {
     }
 }
 
+/// Whether the last extension of `path` is `extension` (`markdown` counts as `md`).
+pub fn path_has_extension(path: &Path, extension: &str) -> bool {
+    let want = canonical_ext(extension);
+    path.extension()
+        .and_then(std::ffi::OsStr::to_str)
+        .is_some_and(|e| canonical_ext(e).eq_ignore_ascii_case(want))
+}
+
 impl TrackedFile {
     /// In-place saving keeps the format: a different extension goes through "save as" instead.
     pub fn extension_matches(&self, extension: &str) -> bool {
-        let want = canonical_ext(extension);
-        self.path
-            .extension()
-            .and_then(std::ffi::OsStr::to_str)
-            .is_some_and(|e| canonical_ext(e).eq_ignore_ascii_case(want))
+        path_has_extension(&self.path, extension)
     }
 }
 
@@ -291,6 +295,21 @@ mod tests {
             );
         }
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_path_matches_the_format_it_is_saved_as_by_its_extension() {
+        let has = |name: &str, ext: &str| path_has_extension(Path::new(name), ext);
+        assert!(has("/a/보고서.docx", "docx"));
+        assert!(has("/a/보고서.DOCX", "docx"));
+        assert!(has("/a/notes.markdown", "md"));
+        assert!(has("/a/notes.md", "MARKDOWN"));
+        assert!(!has("/a/보고서.pdf", "docx"), "another format");
+        assert!(!has("/a/보고서", "docx"), "no extension");
+        assert!(
+            !has("/a/보고서.docx.txt", "docx"),
+            "the last extension counts"
+        );
     }
 
     #[test]
