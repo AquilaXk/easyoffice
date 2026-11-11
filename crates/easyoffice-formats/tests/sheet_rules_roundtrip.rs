@@ -266,6 +266,112 @@ fn rules_count_is_bounded_on_read() {
     );
 }
 
+fn ods_sample() -> SheetRules {
+    let mut rules = sample_rules();
+    // ODS has no blank/error/std-dev/reverse/stop-if-true forms: keep the rules it can express.
+    rules
+        .cf
+        .retain(|r| !matches!(r.kind, CfKind::Blanks { .. } | CfKind::Errors { .. }));
+    for r in &mut rules.cf {
+        r.stop_if_true = false;
+        match &mut r.kind {
+            CfKind::Average { std_dev, .. } => *std_dev = 0,
+            CfKind::IconSet {
+                reverse,
+                thresholds,
+                ..
+            } => {
+                *reverse = false;
+                thresholds.iter_mut().for_each(|t| t.gte = true);
+            }
+            _ => {}
+        }
+    }
+    for (i, r) in rules.cf.iter_mut().enumerate() {
+        r.priority = i as u32 + 1;
+    }
+    for v in &mut rules.dv {
+        v.show_error = true;
+    }
+    rules.dv[0].show_prompt = true;
+    // Only the cells in range carry a validation: single-cell and small ranges are exact.
+    rules
+}
+
+#[test]
+fn ods_rules_round_trip_through_calc_extension_elements() {
+    let rules = ods_sample();
+    let sheets = vec![(
+        "Sheet1".to_string(),
+        vec![(0, 0, "1".to_string()), (3, 1, "5".to_string())],
+    )];
+    let bytes = OdfCodec::pack_ods_multi_styled(&sheets, &[styling(rules.clone())]).unwrap();
+    let back =
+        easyoffice_formats::read_sheet_styling(&bytes, easyoffice_formats::DocumentFormat::Ods)
+            .unwrap();
+    let mut got = back[0].1.rules.clone();
+    for r in &mut got.cf {
+        if let CfKind::DataBar {
+            negative, gradient, ..
+        } = &mut r.kind
+        {
+            // Preserved by ODS, unlike XLSX.
+            assert_eq!((*negative, *gradient), (0xFF0000, true));
+        }
+    }
+    let norm = |mut v: Vec<DataValidation>| {
+        v.sort_by_key(|d| d.ranges[0]);
+        v
+    };
+    assert_eq!(got.cf, rules.cf);
+    assert_eq!(norm(got.dv.clone()), norm(rules.dv.clone()));
+    assert!(got.unsupported.is_empty(), "{:?}", got.unsupported);
+    // The cells are still there and unchanged.
+    let cells = OdfCodec::unpack_ods_multi(&bytes).unwrap();
+    assert_eq!(cells[0].1.iter().filter(|c| !c.2.is_empty()).count(), 2);
+}
+
+#[test]
+fn ods_names_conditions_it_cannot_read() {
+    let sheets = vec![("Sheet1".to_string(), vec![(0, 0, "1".to_string())])];
+    let rules = SheetRules {
+        cf: vec![rule("A1", 1, CfKind::Duplicates { unique: false })],
+        ..SheetRules::default()
+    };
+    let bytes = OdfCodec::pack_ods_multi_styled(&sheets, &[styling(rules)]).unwrap();
+    let mut entries = easyoffice_formats::ZipArchiveCodec::unpack(
+        &bytes,
+        &easyoffice_formats::ZipSecurityPolicy::default(),
+    )
+    .unwrap();
+    for e in &mut entries {
+        if e.path == "content.xml" {
+            e.data = String::from_utf8(e.data.clone())
+                .unwrap()
+                .replace(
+                    "calcext:value=\"duplicate\"",
+                    "calcext:value=\"date(today)\"",
+                )
+                .into_bytes();
+        }
+    }
+    let repacked = easyoffice_formats::ZipArchiveCodec::pack_compressed(
+        &entries
+            .into_iter()
+            .map(|e| (e.path, e.data))
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
+    let back =
+        easyoffice_formats::read_sheet_styling(&repacked, easyoffice_formats::DocumentFormat::Ods)
+            .unwrap();
+    assert!(back[0].1.rules.cf.is_empty());
+    assert_eq!(
+        back[0].1.rules.unsupported,
+        vec!["조건부 서식 date".to_string()]
+    );
+}
+
 #[test]
 fn ods_is_untouched_by_empty_rules() {
     let sheets = vec![("Sheet1".to_string(), vec![(0, 0, "1".to_string())])];

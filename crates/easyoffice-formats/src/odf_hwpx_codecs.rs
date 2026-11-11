@@ -1,3 +1,4 @@
+use crate::ods_rules::{OdsRuleTable, CALCEXT_NS};
 use crate::office_codecs::validate_zip_xml_entries;
 use crate::rtf_xml_helpers::{
     extract_attr, extract_attr_from_fragment, extract_balanced_elements,
@@ -47,6 +48,13 @@ pub type OdpUnpacked = (String, Vec<(String, Vec<String>, String)>);
 
 /// ISO/IEC 26300 OpenDocument Format (ODF) container codec for `.odt`, `.ods`, and `.odp`.
 pub struct OdfCodec;
+
+/// What the table writer needs to name validations and write rules.
+struct RuleContext<'a> {
+    table: &'a OdsRuleTable,
+    sheet: usize,
+    stylings: &'a [SheetStyling],
+}
 
 impl OdfCodec {
     pub const MIMETYPE_ODT: &str = "application/vnd.oasis.opendocument.text";
@@ -311,12 +319,17 @@ impl OdfCodec {
     ) -> Result<Vec<u8>, EasyOfficeError> {
         Self::validate_ods_bounds(sheets, stylings)?;
         let style_table = OdsStyleTable::build(stylings);
+        let rule_table = OdsRuleTable::build(stylings);
 
         let manifest = Self::build_manifest(Self::MIMETYPE_ODS);
         let mut content = String::from(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><office:document-content xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" xmlns:style=\"urn:oasis:names:tc:opendocument:xmlns:style:1.0\" xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\" office:version=\"1.2\">",
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><office:document-content xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" xmlns:style=\"urn:oasis:names:tc:opendocument:xmlns:style:1.0\" xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\" office:version=\"1.2\"",
         );
-        content.push_str(&style_table.automatic_styles_xml());
+        content.push_str(&format!(" xmlns:calcext=\"{CALCEXT_NS}\">"));
+        content.push_str(&Self::automatic_styles_with_rules(
+            &style_table,
+            &rule_table,
+        ));
         content.push_str("<office:body><office:spreadsheet>");
 
         let default_sheet = vec![("Sheet1".to_string(), Vec::new())];
@@ -325,14 +338,21 @@ impl OdfCodec {
         } else {
             sheets
         };
+        let names: Vec<&str> = active_sheets.iter().map(|(n, _)| n.as_str()).collect();
+        content.push_str(&rule_table.validations_xml(stylings, &names));
         for (sheet_idx, (sheet_name, cells)) in active_sheets.iter().enumerate() {
+            let rules = RuleContext {
+                table: &rule_table,
+                sheet: sheet_idx,
+                stylings,
+            };
             Self::push_ods_table(
                 &mut content,
                 sheet_name,
                 cells,
                 caches.get(sheet_idx),
                 stylings.get(sheet_idx),
-                &style_table,
+                (&style_table, &rules),
             );
         }
 
@@ -347,6 +367,22 @@ impl OdfCodec {
             ("META-INF/manifest.xml".to_string(), manifest.into_bytes()),
             ("content.xml".to_string(), content.into_bytes()),
         ])
+    }
+
+    /// The automatic styles of the cells, columns and conditional formatting rules.
+    fn automatic_styles_with_rules(styles: &OdsStyleTable, rules: &OdsRuleTable) -> String {
+        let base = styles.automatic_styles_xml();
+        let extra = rules.styles_xml();
+        if extra.is_empty() {
+            base
+        } else if base.is_empty() {
+            format!("<office:automatic-styles>{extra}</office:automatic-styles>")
+        } else {
+            base.replace(
+                "</office:automatic-styles>",
+                &format!("{extra}</office:automatic-styles>"),
+            )
+        }
     }
 
     /// Rejects cell / style coordinates and counts above the ODS budgets.
@@ -388,7 +424,7 @@ impl OdfCodec {
         cells: &[(u32, u32, String)],
         cache: Option<&crate::XlsxFormulaCache>,
         styling: Option<&SheetStyling>,
-        style_table: &OdsStyleTable,
+        (style_table, rules): (&OdsStyleTable, &RuleContext<'_>),
     ) {
         let blank = String::new();
         let mut grid: std::collections::BTreeMap<u32, std::collections::BTreeMap<u32, &String>> =
@@ -403,6 +439,10 @@ impl OdfCodec {
                     grid.entry(row).or_default().entry(col).or_insert(&blank);
                 }
             }
+            // Cells that only carry a data validation.
+            for (row, col) in rules.table.blank_cells(&st.rules) {
+                grid.entry(row).or_default().entry(col).or_insert(&blank);
+            }
         }
         content.push_str(&format!(
             "<table:table table:name=\"{}\">",
@@ -410,6 +450,7 @@ impl OdfCodec {
         ));
         if let Some(st) = styling {
             content.push_str(&table_columns_xml(&st.columns, style_table));
+            content.push_str(&rules.table.conditional_xml(sheet_name, &st.rules));
         }
         let mut expected_row: u32 = 0;
         for (row, row_cells) in grid {
@@ -427,7 +468,8 @@ impl OdfCodec {
                     .and_then(|style| style_table.cell_style_name(style))
                     .map_or(String::new(), |name| {
                         format!(" table:style-name=\"{name}\"")
-                    });
+                    })
+                    + &rules.table.cell_attr(rules.sheet, rules.stylings, row, col);
                 let cached = cache.and_then(|c| c.get(&(row, col)));
                 Self::push_ods_cell(content, (row, col), raw, cached, &style_attr);
                 expected_col = col.saturating_add(1);

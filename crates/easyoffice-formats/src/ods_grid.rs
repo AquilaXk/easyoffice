@@ -32,6 +32,8 @@ pub(crate) struct OdsCell<'a> {
     pub(crate) text: Option<String>,
     /// `table:style-name`, as written.
     pub(crate) style: Option<&'a str>,
+    /// `table:content-validation-name`, as written.
+    pub(crate) validation: Option<&'a str>,
 }
 
 /// Passes the grid to two sinks, the first one's error ends the walk.
@@ -102,6 +104,7 @@ impl<'a> CellBuilder<'a> {
             explicit_col: None,
             text: None,
             style: None,
+            validation: None,
         };
         let mut fields = CellFields::default();
         for (name, value) in attrs.iter_raw() {
@@ -110,6 +113,9 @@ impl<'a> CellBuilder<'a> {
                 ("row", _) if cell.explicit_row.is_none() => cell.explicit_row = value.parse().ok(),
                 ("col", _) if cell.explicit_col.is_none() => cell.explicit_col = value.parse().ok(),
                 ("table:style-name", _) if cell.style.is_none() => cell.style = Some(value),
+                ("table:content-validation-name", _) if cell.validation.is_none() => {
+                    cell.validation = Some(value);
+                }
                 ("table:formula", true) => {
                     fields.formula.get_or_insert_with(|| unescape_cow(value));
                 }

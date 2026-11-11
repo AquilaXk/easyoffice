@@ -18,6 +18,8 @@ pub mod hwpx_codec;
 mod hwpx_parts;
 mod legacy_ole2_codec;
 pub mod odf_hwpx_codecs;
+mod ods_rules;
+mod ods_rules_read;
 pub mod office_codecs;
 pub mod ole2_codec;
 mod ooxml_presentation;
