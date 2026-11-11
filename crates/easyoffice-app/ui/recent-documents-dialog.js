@@ -86,11 +86,41 @@
         ev.preventDefault?.();
       });
 
+      // Modal: the rest of the page cannot take focus while it is open, and closing hands the focus back.
+      const opener = document.activeElement;
+      const inertRoots = [];
+      function makeBackgroundInert() {
+        for (const child of Array.from(document.body.children)) {
+          if (child === overlay || child.inert) continue;
+          child.inert = true;
+          inertRoots.push(child);
+        }
+      }
+
       function close(value) {
         stopDrag();
         document.removeEventListener("keydown", onKeyDown, true);
         overlay.remove();
+        for (const root of inertRoots) root.inert = false;
+        opener?.focus?.();
         resolve(value);
+      }
+
+      // Tab and Shift+Tab cycle inside the dialog.
+      function trapTab(event) {
+        const stops = Array.from(dialog.querySelectorAll("button")).filter((el) => !el.disabled);
+        if (stops.length === 0) return;
+        const first = stops[0];
+        const last = stops[stops.length - 1];
+        const active = document.activeElement;
+        const outside = !dialog.contains(active);
+        if (event.shiftKey && (outside || active === first)) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && (outside || active === last)) {
+          event.preventDefault();
+          first.focus();
+        }
       }
 
       let items = [];
@@ -137,7 +167,9 @@
 
       function onKeyDown(event) {
         if (event.stopPropagation) event.stopPropagation();
-        if (event.key === "Escape") {
+        if (event.key === "Tab") {
+          trapTab(event);
+        } else if (event.key === "Escape") {
           event.preventDefault();
           close(null);
         } else if (event.key === "Enter") {
@@ -168,6 +200,7 @@
 
       renderList();
       add(document.body, overlay);
+      makeBackgroundInert();
       document.addEventListener("keydown", onKeyDown, true);
       openBtn.focus();
     });
