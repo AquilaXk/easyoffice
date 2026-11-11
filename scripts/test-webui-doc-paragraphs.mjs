@@ -291,3 +291,18 @@ test("the line spacing list keeps one custom value", async () => {
   await selectAcross(h, b, b);
   assert.equal(customs().length, 1);
 });
+
+test("saving keeps an empty paragraph and a line break inside a paragraph or list item", async () => {
+  const br = { tag: "br" };
+  const h = await createRunHarness([
+    p("가"),
+    { tag: "p", children: [br] },
+    { tag: "ul", children: [{ tag: "li", children: ["첫 줄", br, "둘째 줄"] }, { tag: "li", children: ["다음"] }] },
+  ]);
+  const blocks = saved(h);
+  assert.equal(blocks.length, 4);
+  assert.deepEqual(blocks[1].runs, [], "a blank paragraph is not dropped");
+  assert.deepEqual(blocks[2].runs, [{ text: "첫 줄\n둘째 줄" }], "the break stays inside one list item");
+  assert.equal(blocks[2].list, "bullet");
+  assert.equal(blocks[3].runs[0].text, "다음");
+});

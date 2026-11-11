@@ -299,11 +299,13 @@
       if (!cur) return;
       const runs = cur.runs;
       if (runs.length > 0) {
-        runs[0].text = runs[0].text.replace(/^\s+/, "");
-        runs[runs.length - 1].text = runs[runs.length - 1].text.replace(/(?<!\s)\s+$/, "");
+        // Text nodes are collapsed to single spaces; a line break in the run is content, and one
+        // at the very end is the placeholder `<br>` of a blank line.
+        runs[0].text = runs[0].text.replace(/^ +/, "");
+        runs[runs.length - 1].text = runs[runs.length - 1].text.replace(/ +$/, "").replace(/\n$/, "").replace(/ +$/, "");
       }
       const kept = runs.filter((r) => r.text.length > 0);
-      if (kept.length > 0) {
+      if (kept.length > 0 || cur.blank) {
         const block = { type: "paragraph", runs: kept };
         Object.assign(block, cur.ctx.layout);
         if (cur.ctx.align) block.align = cur.ctx.align;
@@ -336,14 +338,15 @@
     function walkTextNode(node, ctx, fmt) {
       const prev = cur?.runs[cur.runs.length - 1]?.text || "";
       let text = String(node.nodeValue || "").replaceAll(/\s+/g, " ");
-      if ((!cur || prev.endsWith(" ")) && text.startsWith(" ")) text = text.slice(1);
+      if ((!cur || /[ \n]$/.test(prev)) && text.startsWith(" ")) text = text.slice(1);
       appendText(text, ctx, fmt);
     }
 
-    function walkLineBreak(ctx) {
-      const keepCtx = cur ? cur.ctx : ctx;
-      flush();
-      cur = { ctx: keepCtx, runs: [] };
+    // A `<br>` is a line break inside the paragraph (`\n` in the run text); as the only content
+    // of a block it is a blank paragraph.
+    function walkLineBreak(ctx, fmt) {
+      if (!cur) cur = { ctx, runs: [], blank: true };
+      else appendText("\n", cur.ctx, fmt);
     }
 
     function walkTable(node) {
@@ -390,7 +393,7 @@
       }
       if (node.nodeType !== 1 || isSkippedElement(node)) return;
       const tag = (node.tagName || "").toUpperCase();
-      if (tag === "BR") return walkLineBreak(ctx);
+      if (tag === "BR") return walkLineBreak(ctx, fmt);
       if (tag === "TABLE") return walkTable(node);
       if (tag === "IMG" && node.dataset?.eoImageId) return pushImage(node);
       const nextFmt = styleFormat(node, fmt);
