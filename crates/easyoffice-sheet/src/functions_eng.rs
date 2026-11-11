@@ -366,19 +366,10 @@ impl SheetEngine {
         let mut total_n = 0u64;
         let mut acc = 1.0_f64;
         for arg in args {
-            if let Some((sheet_opt, min_r, max_r, min_c, max_c, _)) =
-                self.extract_streaming_range_ctx(arg, ctx, depth)?
-            {
-                for r in min_r..=max_r {
-                    for c in min_c..=max_c {
-                        let Ok(coord) = crate::PackedCellCoordinate::new(r, c as u32) else {
-                            continue;
-                        };
-                        let cell_val =
-                            self.eval_sheet_coord(sheet_opt.as_deref(), coord, ctx, depth);
-                        if let EvaluatedCellValue::Error(e) = cell_val {
-                            return Err(e);
-                        }
+            if let Some(spec) = self.extract_streaming_range_ctx(arg, ctx, depth)? {
+                for dr in 0..spec.3 {
+                    for dc in 0..spec.4 {
+                        let cell_val = self.eval_streaming_cell(&spec, dr, dc, ctx, depth)?;
                         if let EvaluatedCellValue::Number(x) = cell_val {
                             let t = x.trunc();
                             if !t.is_finite() || !(0.0..=10_000.0).contains(&t) {
@@ -604,6 +595,22 @@ mod tests {
         assert_eq!(
             s.evaluate_formula_str("=DEC2OCT(-100)"),
             EvaluatedCellValue::Text("7777777634".to_string())
+        );
+    }
+
+    #[test]
+    fn multinomial_reads_range_arguments() {
+        let mut s = SheetEngine::new("MultinomialRange");
+        for (r, v) in [(2, 2), (3, 3), (4, 4)] {
+            s.set_cell(&format!("A{r}"), v.to_string()).unwrap();
+        }
+        assert_eq!(
+            s.evaluate_formula_str("=MULTINOMIAL(A2:A4)"),
+            EvaluatedCellValue::Number(1260.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=MULTINOMIAL(A2:A3, 4)"),
+            EvaluatedCellValue::Number(1260.0)
         );
     }
 
