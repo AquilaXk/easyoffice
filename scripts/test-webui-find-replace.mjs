@@ -212,3 +212,21 @@ test("the find dialog's hidden elements stay hidden under the stylesheet's displ
     assert.equal(winner?.display, "none", `${id} resolves to display:none, not "${winner?.display}" from ${winner?.selector}`);
   }
 });
+
+test("every tool dialog opens with the focus on a field or the primary button, never on the title bar's close button", async () => {
+  const h = await createWorkspaceHarness();
+  await flushAsyncTurns(10);
+  const dialogs = h.document.querySelectorAll("dialog.tool-dialog");
+  assert.ok(dialogs.length >= 8);
+  for (const dialog of dialogs) {
+    h.document.body.focus?.();
+    dialog.showModal();
+    const active = h.document.activeElement;
+    assert.ok(active, dialog.id + " has a focused element");
+    assert.equal(active.hasAttribute?.("data-dialog-close") || active.classList.contains("dialog-close"), false, dialog.id + " does not focus the close button");
+    dialog.close();
+  }
+  const find = $(h.document, "find-dialog");
+  find.showModal();
+  assert.equal(h.document.activeElement, $(h.document, "find-query"), "find focuses the query field");
+});

@@ -436,15 +436,47 @@
       }
     }
 
+    const FIRST_FIELD = "input:not([type=hidden]):not([disabled]), select, textarea";
+    const isShown = (el, root) => {
+      for (let cur = el; cur && cur !== root; cur = cur.parentElement) if (cur.hidden) return false;
+      return true;
+    };
+
+    // The reference editor's dialogs open with the focus on their first field, else the primary
+    // button (`dialog.ts`); the browser would put it on the title bar's close button and draw a focus ring there.
+    function focusInitialControl(dialog) {
+      const target =
+        Array.from(dialog.querySelectorAll(FIRST_FIELD)).find((el) => isShown(el, dialog)) ||
+        dialog.querySelector(".dialog-btn-primary:not([hidden])");
+      if (target) return void target.focus();
+      dialog.tabIndex = -1;
+      dialog.focus();
+    }
+
+    function enableInitialFocus(dialog) {
+      for (const method of ["showModal", "show"]) {
+        const open = dialog[method];
+        if (typeof open !== "function") continue;
+        dialog[method] = function (...args) {
+          const out = open.apply(this, args);
+          focusInitialControl(this);
+          return out;
+        };
+      }
+    }
+
     function bind() {
       bindAbout();
       bindIconToolbarScroller();
-      for (const dlg of document.querySelectorAll("dialog.tool-dialog")) enableDialogDrag(dlg);
+      for (const dlg of document.querySelectorAll("dialog.tool-dialog")) {
+        enableDialogDrag(dlg);
+        enableInitialFocus(dlg);
+      }
       mirrorFeedbackToToast();
       hwpHost.onCommand(runShellCommand);
     }
 
-    return { bind, openAbout, setAppVersion, applyStoredTheme, pushMenuState, pushRecents, toast, runShellCommand, currentTheme, enableDialogDrag, getThemeMode: () => themeApi().getMode() };
+    return { bind, openAbout, setAppVersion, applyStoredTheme, pushMenuState, pushRecents, toast, runShellCommand, currentTheme, enableDialogDrag, enableInitialFocus, getThemeMode: () => themeApi().getMode() };
   }
 
   host.__EASYOFFICE_CREATE_SHELL_CHROME__ = createShellChrome;
