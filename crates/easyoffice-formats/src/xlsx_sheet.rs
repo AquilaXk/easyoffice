@@ -144,11 +144,13 @@ fn append<'a>(acc: &mut Cow<'a, str>, text: Cow<'a, str>) {
     }
 }
 
-/// The zero-based position of a cell from `row`/`col`, else `r`, else `(0, 0)`.
+/// The zero-based position of a cell from `row`/`col`, else `r`, else `follow`: the cell after the
+/// previous one in its row (ECMA-376 18.3.1.4 makes `r` optional).
 fn cell_position(
     row: Option<&str>,
     col: Option<&str>,
     a1: Option<&str>,
+    follow: (u32, u32),
 ) -> Result<(u32, u32), EasyOfficeError> {
     let numbers = row
         .and_then(|v| v.parse::<u32>().ok())
@@ -167,7 +169,12 @@ fn cell_position(
                 "XLSX A1 셀 참조가 ECMA-376 허용 범위를 초과했거나 잘못되었습니다.".to_string(),
             )
         }),
-        None => Ok((0, 0)),
+        None if follow.0 >= OoxmlCodec::MAX_XLSX_ROWS || follow.1 >= OoxmlCodec::MAX_XLSX_COLS => {
+            Err(EasyOfficeError::ResourceBudgetExceeded(
+                "XLSX 셀 위치가 ECMA-376 허용 범위를 초과했습니다.".to_string(),
+            ))
+        }
+        None => Ok(follow),
     }
 }
 
@@ -183,9 +190,31 @@ struct SheetScanner<'s> {
     styling: SheetStyling,
     /// First master formula text of each shared formula index with the cell it sits in.
     masters: HashMap<u32, (u32, u32, String)>,
+    /// Row of the open `row` element and the row, column a following cell or row without `r` gets.
+    row: u32,
+    next_row: u32,
+    next_col: u32,
 }
 
 impl<'s> SheetScanner<'s> {
+    /// Opens a `row`: its `r` (1-based), else the row after the previous one.
+    fn open_row(&mut self, attrs: &Attrs<'_>) -> Result<(), EasyOfficeError> {
+        let declared = attrs
+            .iter_raw()
+            .find(|(name, _)| plain_name(name) == "r")
+            .and_then(|(_, value)| unescape_cow(value).parse::<u32>().ok())
+            .and_then(|r| r.checked_sub(1));
+        self.row = declared.unwrap_or(self.next_row);
+        if self.row >= OoxmlCodec::MAX_XLSX_ROWS {
+            return Err(EasyOfficeError::ResourceBudgetExceeded(
+                "XLSX 행 번호가 ECMA-376 허용 범위를 초과했습니다.".to_string(),
+            ));
+        }
+        self.next_row = self.row + 1;
+        self.next_col = 0;
+        Ok(())
+    }
+
     /// Opens a `c` element; only a cell with content is read, styling also covers empty ones.
     fn open_cell<'a>(
         &mut self,
@@ -204,13 +233,24 @@ impl<'s> SheetScanner<'s> {
             };
             slot.get_or_insert_with(|| unescape_cow(value));
         }
+        let follow = (self.row, self.next_col);
         if self.want_styling && !self.xf_styles.is_empty() {
-            self.record_style(style.as_deref(), a1.as_deref());
+            let at = a1
+                .as_deref()
+                .and_then(parse_a1_zero_based)
+                .unwrap_or(follow);
+            self.record_style(style.as_deref(), at);
         }
         if empty {
+            self.next_col = a1
+                .as_deref()
+                .and_then(parse_a1_zero_based)
+                .map_or(follow.1, |(_, c)| c)
+                .saturating_add(1);
             return Ok(None);
         }
-        let pos = cell_position(row.as_deref(), col.as_deref(), a1.as_deref())?;
+        let pos = cell_position(row.as_deref(), col.as_deref(), a1.as_deref(), follow)?;
+        self.next_col = pos.1.saturating_add(1);
         Ok(Some(CellState {
             pos,
             cell_type: cell_type.unwrap_or_default(),
@@ -223,7 +263,7 @@ impl<'s> SheetScanner<'s> {
         }))
     }
 
-    fn record_style(&mut self, style: Option<&str>, a1: Option<&str>) {
+    fn record_style(&mut self, style: Option<&str>, at: (u32, u32)) {
         if self.styling.cells.len() >= MAX_STYLED_CELLS {
             return;
         }
@@ -234,9 +274,7 @@ impl<'s> SheetScanner<'s> {
         else {
             return;
         };
-        if let Some(pos) = a1.and_then(parse_a1_zero_based) {
-            self.styling.cells.insert(pos, *style);
-        }
+        self.styling.cells.insert(at, *style);
     }
 
     /// A `col` element with a custom width becomes a column width in CSS pixels.
@@ -430,6 +468,9 @@ pub(crate) fn scan_worksheet(
         cells: Vec::new(),
         styling: SheetStyling::default(),
         masters: HashMap::new(),
+        row: 0,
+        next_row: 0,
+        next_col: 0,
     };
     let mut reader = XmlReader::unbounded(sheet_xml);
     let mut cell: Option<CellState<'_>> = None;
@@ -441,6 +482,10 @@ pub(crate) fn scan_worksheet(
             } => {
                 cell = scanner.open_cell(attrs, reader.last_start_was_empty())?;
             }
+            XmlEvent::Start {
+                name: "row",
+                ref attrs,
+            } => scanner.open_row(attrs)?,
             XmlEvent::Start {
                 name: "col",
                 ref attrs,

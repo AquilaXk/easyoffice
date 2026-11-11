@@ -235,7 +235,6 @@ const CELL_SAMPLES: &[&str] = &[
     r#"<c r="A1"><f>1</f><f>2</f><v>7</v><v>8</v></c>"#,
     r#"<c row="3" col="4" t="s"><v>0</v></c><c r="Z9" row="1" col="x"><v>1</v></c>"#,
     r#"<c eo:r="C3"><v>1</v></c><c eo:row="5" eo:col="6"><v>2</v></c>"#,
-    r#"<c><v>1</v></c><c t="s"><v>0</v></c>"#,
     r#"<c r='A1' t='s'><v>0</v></c>"#,
     r#"<c r="A1" t="s"><v>0</v></c>
 
@@ -322,7 +321,10 @@ fn styling_matches_the_substring_scanner() {
     let new = scan_worksheet(xml, &table, &styles, true, &mut DecodeBudget::new())
         .unwrap()
         .styling;
-    assert_eq!(old, new);
+    // The cell without `r` after E1 is F1 (ECMA-376 18.3.1.4); the substring scanner skipped it.
+    let mut expected = old.clone();
+    expected.cells.insert((0, 5), styles[1]);
+    assert_eq!(expected, new);
     assert_eq!(old.cells.len(), 3);
     assert!(!old.columns.is_empty());
     let none = scan_worksheet(xml, &table, &styles, false, &mut DecodeBudget::new())
