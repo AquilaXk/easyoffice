@@ -140,7 +140,7 @@
       });
     }
 
-    // --- Engine sheet session (PD-163) -------------------------------------------------------
+    // --- Engine sheet session (PD-164) -------------------------------------------------------
     // The engine keeps the workbook between edits. The page keeps a mirror of what the session
     // holds (`raw`: the text it was last sent per cell, `values`: the last value it reported per
     // formula cell), diffs every full store against that mirror and sends only the cells that
@@ -148,7 +148,16 @@
     // store (undo, load and scrub restore arbitrary snapshots), so the diff also repairs a mirror
     // that drifted, e.g. after a discarded formula-bar preview.
     const SESSION_CHUNK_CHARS = 1_500_000;
-    const session = { enabled: false, id: null, sheetKey: "", raw: new Map(), values: new Map(), gen: 0 };
+    const session = {
+      enabled: false,
+      id: null,
+      sheetKey: "",
+      // Sheet set the engine refused for size (PD-164): evaluated without a session until it changes.
+      refusedKey: null,
+      raw: new Map(),
+      values: new Map(),
+      gen: 0,
+    };
     let sessionChain = Promise.resolve();
 
     // Session actions travel in the `evaluate_sheet` command (the 15-command IPC contract).
@@ -163,10 +172,20 @@
       session.values = new Map();
     }
 
+    // Forgets the session and tells the engine to release it (an unknown id is harmless there).
+    function dropSession() {
+      const previous = session.id;
+      resetSession();
+      if (previous !== null) {
+        void Promise.resolve(sessionCall({ sessionAction: "close", session: previous })).catch(() => {});
+      }
+    }
+
     // The shell tells the page at start-up whether the engine has session commands.
     function enableSheetSessions(enabled) {
       session.enabled = enabled === true;
-      if (!session.enabled) resetSession();
+      session.refusedKey = null;
+      if (!session.enabled) dropSession();
     }
 
     function runSessionExclusive(work) {
@@ -175,12 +194,12 @@
       return next;
     }
 
+    function sheetSetKey(names) {
+      return names.slice().sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).join("\u0000");
+    }
+
     async function openSession(names, sheetKey) {
-      const previous = session.id;
-      resetSession();
-      if (previous !== null) {
-        void Promise.resolve(sessionCall({ sessionAction: "close", session: previous })).catch(() => {});
-      }
+      dropSession();
       const res = await sessionCall({ sessionAction: "open", sheets: names });
       if (!res || typeof res.session !== "string") throw new Error("시트 세션을 열지 못했습니다.");
       session.id = res.session;
@@ -233,7 +252,7 @@
 
     async function syncSessionOnce(sheetsMap) {
       const names = Object.keys(sheetsMap || {});
-      const sheetKey = names.slice().sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).join("\u0000");
+      const sheetKey = sheetSetKey(names);
       if (session.id === null || session.sheetKey !== sheetKey) {
         await openSession(names, sheetKey);
       }
@@ -255,6 +274,11 @@
           recalc: finalChunk,
           changes: chunk,
         });
+        if (last?.refused) {
+          const refusal = new Error("시트가 세션 상한을 넘었습니다.");
+          refusal.refused = true;
+          throw refusal;
+        }
         if (!last || last.expired === true) throw new Error("시트 세션이 만료되었습니다.");
       } while (at < changes.length);
       for (const c of Array.isArray(last.changed) ? last.changed : []) {
@@ -263,15 +287,23 @@
       return { formulaTargets, circular: last.circular === true };
     }
 
-    // One retry after a reset covers an expired or evicted session; `null` sends the caller to the
-    // stateless command.
+    // One retry after a reset covers an expired or evicted session. `null` sends the caller to the
+    // stateless command: after two failures, and at once for a sheet set the engine refused for
+    // size (the engine already dropped that session, so reopening it would only repeat the load).
     async function syncSession(sheetsMap) {
       return runSessionExclusive(async () => {
+        const names = Object.keys(sheetsMap || {});
+        if (session.refusedKey !== null && session.refusedKey === sheetSetKey(names)) return null;
         for (let attempt = 0; attempt < 2; attempt += 1) {
           try {
             return await syncSessionOnce(sheetsMap);
-          } catch {
-            resetSession();
+          } catch (err) {
+            if (err?.refused === true) {
+              resetSession();
+              session.refusedKey = sheetSetKey(names);
+              return null;
+            }
+            dropSession();
           }
         }
         return null;

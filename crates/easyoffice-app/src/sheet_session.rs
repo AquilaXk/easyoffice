@@ -3,16 +3,21 @@
 //! The stateless `evaluate_sheet` command rebuilds the whole workbook and recomputes every formula
 //! on every call, so each edit ships every cell. A session keeps the workbook and its dependency
 //! graph in the process (`easyoffice_sheet::RecalcSession`); the page sends only the cells that
-//! changed and receives only the formula cells whose value changed (PD-163).
+//! changed and receives only the formula cells whose value changed (PD-164).
 //!
-//! The registry is bounded: a session count, per-session and total memory (cells and raw text
-//! bytes) and an idle lifetime. When a session is gone (idle expiry, eviction by a newer session,
-//! its window closed) the commands answer `{"expired":true}` instead of an error, and the page
-//! reopens a session and resends its cells.
+//! The registry is bounded: a session count, sheets per session, cells, memory (raw text plus the
+//! dependency graph and compiled formulas, per session and over all sessions) and an idle
+//! lifetime. When a session is gone (idle expiry, eviction by a newer session, its window closed,
+//! a poisoned lock) the commands answer `{"expired":true}` instead of an error, and the page
+//! reopens a session and resends its cells. A session that outgrows its graph budget is dropped
+//! and answers `{"refused":"limit"}`: the page evaluates that workbook without a session. A
+//! session id is only valid for the window (owner) that opened it.
 
 use crate::EasyOfficeIpcRouter;
 use easyoffice_formats::{EasyOfficeError, StrictJsonValue};
-use easyoffice_sheet::{CellChange, PackedCellCoordinate, RecalcSession, WorkbookEngine};
+use easyoffice_sheet::{
+    Budget, CellChange, PackedCellCoordinate, RecalcError, RecalcSession, WorkbookEngine,
+};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
@@ -22,13 +27,22 @@ use std::time::{Duration, Instant};
 pub(crate) struct Limits {
     /// Open sessions; a newer one evicts the least recently used.
     pub max_sessions: usize,
+    /// Sheets in one session (the engine addresses sheets with 16 bits and a workbook with many
+    /// sheets only grows its sheet-id collision search).
+    pub max_sheets: usize,
+    /// Bytes of one sheet name.
+    pub max_sheet_name_bytes: usize,
     /// Populated cells in one session.
     pub max_session_cells: usize,
-    /// Raw cell text bytes in one session.
+    /// Reverse edges of one session's dependency graph.
+    pub max_session_edges: usize,
+    /// Text, graph and compiled formulas of one session (`Footprint::total_bytes`).
     pub max_session_bytes: usize,
-    /// Raw cell text bytes over all sessions; older sessions are evicted to make room.
+    /// Populated cells over all sessions; older sessions are evicted to make room.
+    pub max_total_cells: usize,
+    /// `max_session_bytes` summed over all sessions; older sessions are evicted to make room.
     pub max_total_bytes: usize,
-    /// Cell edits in one `sheet_session_apply`.
+    /// Cell edits in one `apply`.
     pub max_changes: usize,
     /// A session unused this long is dropped.
     pub idle_ttl: Duration,
@@ -36,19 +50,43 @@ pub(crate) struct Limits {
 
 pub(crate) const LIMITS: Limits = Limits {
     max_sessions: 16,
+    max_sheets: 1_024,
+    max_sheet_name_bytes: 1_024,
     max_session_cells: 2_000_000,
-    max_session_bytes: 256 << 20,
-    max_total_bytes: 512 << 20,
+    max_session_edges: 8_000_000,
+    max_session_bytes: 512 << 20,
+    max_total_cells: 4_000_000,
+    max_total_bytes: 1 << 30,
     max_changes: 250_000,
     idle_ttl: Duration::from_secs(30 * 60),
 };
+
+impl Limits {
+    fn budget(&self) -> Budget {
+        Budget {
+            max_edges: self.max_session_edges,
+            max_graph_bytes: self.max_session_bytes,
+            max_bytes: self.max_session_bytes,
+        }
+    }
+}
 
 struct Entry {
     session: Arc<Mutex<RecalcSession>>,
     owner: String,
     last_used: Instant,
-    /// Raw text bytes the session held after its last call (counted against `max_total_bytes`).
+    /// Cells and bytes the session held after its last call (counted against the totals).
+    cells: usize,
     bytes: usize,
+}
+
+/// Answer to `apply`.
+pub(crate) enum Applied {
+    Done(String),
+    /// No such session for this owner (expired, evicted, closed, or another window's).
+    Expired,
+    /// The session outgrew its budget and was dropped.
+    Refused,
 }
 
 pub(crate) struct Registry {
@@ -98,11 +136,22 @@ impl Registry {
         owner: &str,
         now: Instant,
     ) -> Result<String, EasyOfficeError> {
+        if sheets.len() > self.limits.max_sheets
+            || sheets
+                .iter()
+                .any(|name| name.len() > self.limits.max_sheet_name_bytes)
+        {
+            return Err(EasyOfficeError::InvalidArgument(format!(
+                "시트 세션은 시트 {}개, 시트 이름 {}바이트까지 지원합니다.",
+                self.limits.max_sheets, self.limits.max_sheet_name_bytes
+            )));
+        }
         let mut wb = WorkbookEngine::new();
         for name in sheets {
             wb.add_sheet(name);
         }
-        let session = RecalcSession::new(wb)?;
+        let session = RecalcSession::with_budget(wb, self.limits.budget())
+            .map_err(|err| EasyOfficeError::InvalidArgument(err.to_string()))?;
         let mut inner = lock(&self.inner);
         self.drop_idle(&mut inner, now);
         while inner.sessions.len() >= self.limits.max_sessions {
@@ -111,28 +160,34 @@ impl Registry {
             }
         }
         inner.counter += 1;
-        let id = format!("ss{:x}-{:x}", inner.counter, process_nonce());
+        let mut id = fresh_id(inner.counter);
+        while inner.sessions.contains_key(&id) {
+            inner.counter += 1;
+            id = fresh_id(inner.counter);
+        }
         inner.sessions.insert(
             id.clone(),
             Entry {
                 session: Arc::new(Mutex::new(session)),
                 owner: owner.to_string(),
                 last_used: now,
+                cells: 0,
                 bytes: 0,
             },
         );
         Ok(id)
     }
 
-    /// Stages `changes` and, when `recalc`, recomputes; returns the response JSON, or `Ok(None)`
-    /// when the session no longer exists.
+    /// Stages `changes` and, when `recalc`, recomputes. A session another owner opened does not
+    /// exist for `owner`.
     pub(crate) fn apply(
         &self,
         id: &str,
+        owner: &str,
         changes: &[CellChange],
         recalc: bool,
         now: Instant,
-    ) -> Result<Option<String>, EasyOfficeError> {
+    ) -> Result<Applied, EasyOfficeError> {
         if changes.len() > self.limits.max_changes {
             return Err(EasyOfficeError::InvalidArgument(format!(
                 "한 번에 보낼 수 있는 셀 변경은 최대 {}개입니다.",
@@ -143,24 +198,40 @@ impl Registry {
         let handle = {
             let mut inner = lock(&self.inner);
             self.drop_idle(&mut inner, now);
-            let Some(entry) = inner.sessions.get_mut(id) else {
-                return Ok(None);
+            let Some(entry) = inner.sessions.get_mut(id).filter(|e| e.owner == owner) else {
+                return Ok(Applied::Expired);
             };
             entry.last_used = now;
             entry.session.clone()
         };
-        let mut session = lock(&handle);
-        let (cells, bytes) = session.footprint();
-        // Upper bound before anything is staged: every change adds a cell and its text.
-        if cells + changes.len() > self.limits.max_session_cells
-            || bytes + incoming > self.limits.max_session_bytes
+        // A panic inside the engine poisons the lock; the session's state can no longer be trusted.
+        let Ok(mut session) = handle.lock() else {
+            lock(&self.inner).sessions.remove(id);
+            return Ok(Applied::Expired);
+        };
+        let before = session.footprint();
+        // Upper bounds before anything is staged: every change adds a cell and its text.
+        if before.cells.saturating_add(changes.len()) > self.limits.max_session_cells
+            || before.total_bytes().saturating_add(incoming) > self.limits.max_session_bytes
+            || !self.reserve_total(
+                id,
+                before.total_bytes().saturating_add(incoming),
+                before.cells.saturating_add(changes.len()),
+            )
         {
-            return Err(EasyOfficeError::InvalidArgument(
-                "시트 세션이 허용 크기(셀 수 또는 텍스트 양)를 넘습니다.".to_string(),
-            ));
+            drop(session);
+            lock(&self.inner).sessions.remove(id);
+            return Ok(Applied::Refused);
         }
-        self.reserve_total(id, bytes + incoming)?;
-        session.apply(changes)?;
+        match session.apply(changes) {
+            Ok(()) => {}
+            Err(RecalcError::Invalid(err)) => return Err(err),
+            Err(RecalcError::OverBudget) => {
+                drop(session);
+                lock(&self.inner).sessions.remove(id);
+                return Ok(Applied::Refused);
+            }
+        }
         let json = if recalc {
             let outcome = session.recalculate();
             let mut out = String::with_capacity(64 + outcome.changed.len() * 40);
@@ -191,38 +262,46 @@ impl Registry {
         } else {
             format!("{{\"session\":\"{id}\",\"staged\":{}}}", changes.len())
         };
-        let after = session.footprint().1;
+        let after = session.footprint();
         drop(session);
         if let Some(entry) = lock(&self.inner).sessions.get_mut(id) {
-            entry.bytes = after;
+            entry.cells = after.cells;
+            entry.bytes = after.total_bytes();
         }
-        Ok(Some(json))
+        Ok(Applied::Done(json))
     }
 
-    /// Makes room for `projected` bytes in session `id` under the all-session bound by evicting
-    /// the least recently used other sessions.
-    fn reserve_total(&self, id: &str, projected: usize) -> Result<(), EasyOfficeError> {
+    /// Makes room for a session of `projected_bytes` and `projected_cells` under the all-session bounds by evicting the
+    /// least recently used other sessions; false when even that is not enough.
+    fn reserve_total(&self, id: &str, projected_bytes: usize, projected_cells: usize) -> bool {
         let mut inner = lock(&self.inner);
         loop {
-            let others: usize = inner
+            let (cells, bytes) = inner
                 .sessions
                 .iter()
                 .filter(|(other, _)| other.as_str() != id)
-                .map(|(_, e)| e.bytes)
-                .sum();
-            if others + projected <= self.limits.max_total_bytes {
-                return Ok(());
+                .fold((0usize, 0usize), |(c, b), (_, e)| {
+                    (c + e.cells, b + e.bytes)
+                });
+            if bytes.saturating_add(projected_bytes) <= self.limits.max_total_bytes
+                && cells.saturating_add(projected_cells) <= self.limits.max_total_cells
+            {
+                return true;
             }
             if !Self::evict_oldest(&mut inner, Some(id)) {
-                return Err(EasyOfficeError::InvalidArgument(
-                    "시트 세션의 전체 메모리 상한을 넘습니다.".to_string(),
-                ));
+                return false;
             }
         }
     }
 
-    pub(crate) fn close(&self, id: &str) -> bool {
-        lock(&self.inner).sessions.remove(id).is_some()
+    pub(crate) fn close(&self, id: &str, owner: &str) -> bool {
+        let mut inner = lock(&self.inner);
+        if inner.sessions.get(id).is_some_and(|e| e.owner == owner) {
+            inner.sessions.remove(id);
+            true
+        } else {
+            false
+        }
     }
 
     pub(crate) fn close_owner(&self, owner: &str) -> usize {
@@ -232,20 +311,21 @@ impl Registry {
         before - inner.sessions.len()
     }
 
+    /// Test hook: the number of open sessions.
     #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
         lock(&self.inner).sessions.len()
     }
 }
 
-/// Not secret (every window of the process is equally trusted); it only keeps ids from repeating
-/// across restarts of a long-lived page.
-fn process_nonce() -> u64 {
-    static NONCE: OnceLock<u64> = OnceLock::new();
-    *NONCE.get_or_init(|| {
-        use std::hash::{BuildHasher, RandomState};
-        RandomState::new().hash_one(0x5E55_1011_u64) & 0xFFFF_FFFF
-    })
+/// An unguessable id: 128 bits from the standard library's randomly keyed hasher (seeded from the
+/// operating system), which needs no dependency. The owner check, not secrecy, is what keeps one
+/// window out of another's session.
+fn fresh_id(counter: u64) -> String {
+    use std::hash::{BuildHasher, RandomState};
+    let hi = RandomState::new().hash_one(counter);
+    let lo = RandomState::new().hash_one(hi ^ counter.rotate_left(32));
+    format!("ss{hi:016x}{lo:016x}")
 }
 
 fn registry() -> &'static Registry {
@@ -259,6 +339,7 @@ pub fn close_sheet_sessions_of(owner: &str) -> usize {
 }
 
 const EXPIRED: &str = "{\"expired\":true}";
+const REFUSED: &str = "{\"refused\":\"limit\"}";
 
 fn session_id(entries: &[(String, StrictJsonValue)]) -> Result<&str, EasyOfficeError> {
     EasyOfficeIpcRouter::optional_json_str(entries, "session")?
@@ -318,9 +399,9 @@ impl EasyOfficeIpcRouter {
     ) -> Result<String, EasyOfficeError> {
         match action {
             "open" => Self::sheet_session_open(entries, owner),
-            "apply" => Self::sheet_session_apply(entries),
+            "apply" => Self::sheet_session_apply(entries, owner),
             "close" => {
-                let closed = registry().close(session_id(entries)?);
+                let closed = registry().close(session_id(entries)?, owner);
                 Ok(format!("{{\"closed\":{closed}}}"))
             }
             other => Err(EasyOfficeError::InvalidArgument(format!(
@@ -358,6 +439,7 @@ impl EasyOfficeIpcRouter {
 
     fn sheet_session_apply(
         entries: &[(String, StrictJsonValue)],
+        owner: &str,
     ) -> Result<String, EasyOfficeError> {
         let id = session_id(entries)?;
         let changes = parse_changes(entries)?;
@@ -365,9 +447,10 @@ impl EasyOfficeIpcRouter {
             StrictJsonValue::get_field(entries, "recalc"),
             Some(StrictJsonValue::Bool(false))
         );
-        match registry().apply(id, &changes, recalc, Instant::now())? {
-            Some(json) => Ok(json),
-            None => Ok(EXPIRED.to_string()),
+        match registry().apply(id, owner, &changes, recalc, Instant::now())? {
+            Applied::Done(json) => Ok(json),
+            Applied::Expired => Ok(EXPIRED.to_string()),
+            Applied::Refused => Ok(REFUSED.to_string()),
         }
     }
 }

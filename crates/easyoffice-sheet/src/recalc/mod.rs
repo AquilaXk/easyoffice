@@ -28,6 +28,83 @@ use easyoffice_formats::EasyOfficeError;
 use graph::{cell_key, collect_refs, CellKey, DepGraph, Ref};
 use id_set::IdSet;
 
+/// Bounds on what the dependency graph may hold. A sheet can register far more edges than it has
+/// cells (every formula can read thousands of cells), so the graph is metered, not just the text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Budget {
+    /// Reverse edges: (cell, formula) and (range, formula) pairs.
+    pub max_edges: usize,
+    /// Estimated heap bytes of the graph (see `DepGraph::heap_bytes_estimate`).
+    pub max_graph_bytes: usize,
+    /// [`Footprint::total_bytes`]: text, graph and syntax trees together.
+    pub max_bytes: usize,
+}
+
+impl Default for Budget {
+    fn default() -> Self {
+        Self {
+            max_edges: 8_000_000,
+            max_graph_bytes: 256 << 20,
+            max_bytes: 512 << 20,
+        }
+    }
+}
+
+/// What a session holds, for callers that meter it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Footprint {
+    /// Populated cells over all sheets.
+    pub cells: usize,
+    /// Bytes of raw cell text.
+    pub raw_bytes: usize,
+    /// Reverse edges in the dependency graph.
+    pub edges: usize,
+    /// Estimated heap bytes of the dependency graph.
+    pub graph_bytes: usize,
+    /// Estimated heap bytes of the compiled formulas (their syntax trees).
+    pub ast_bytes: usize,
+}
+
+impl Footprint {
+    /// Text, graph and syntax trees: the figure a memory cap compares against.
+    pub fn total_bytes(&self) -> usize {
+        self.raw_bytes
+            .saturating_add(self.graph_bytes)
+            .saturating_add(self.ast_bytes)
+    }
+}
+
+/// Heap bytes of a compiled formula per byte of its text. Measured on a 100,000-formula sheet of
+/// 40-term sums (27 MB of text, about 450 MB of syntax trees) and rounded up.
+const AST_BYTES_PER_FORMULA_BYTE: usize = 24;
+
+/// Why an edit was refused.
+#[derive(Debug)]
+pub enum RecalcError {
+    /// The request itself is wrong (unknown sheet, ...).
+    Invalid(EasyOfficeError),
+    /// The dependency graph outgrew its [`Budget`]. The session is no longer usable: drop it and
+    /// evaluate without one.
+    OverBudget,
+}
+
+impl std::fmt::Display for RecalcError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Invalid(err) => err.fmt(f),
+            Self::OverBudget => f.write_str("의존 그래프가 허용 크기를 넘었습니다."),
+        }
+    }
+}
+
+impl std::error::Error for RecalcError {}
+
+impl From<EasyOfficeError> for RecalcError {
+    fn from(err: EasyOfficeError) -> Self {
+        Self::Invalid(err)
+    }
+}
+
 /// A batch this large rebuilds a sheet's cell indexes once instead of patching them per cell.
 const BULK_CHANGE_THRESHOLD: usize = 64;
 
@@ -73,6 +150,11 @@ pub struct RecalcSession {
     rng_state: u64,
     /// Total bytes of raw cell text held by the workbook.
     raw_bytes: usize,
+    /// Bytes of raw text of the formula cells (the part that becomes syntax trees).
+    formula_bytes: usize,
+    budget: Budget,
+    /// The graph outgrew `budget`; every further edit is refused.
+    over_budget: bool,
     refs: Vec<Ref>,
     queue: Vec<u32>,
 }
@@ -80,11 +162,18 @@ pub struct RecalcSession {
 impl RecalcSession {
     /// Builds the dependency graph of `workbook`; every formula starts dirty, so the first
     /// [`recalculate`](Self::recalculate) computes all of them.
-    pub fn new(workbook: WorkbookEngine) -> Result<Self, EasyOfficeError> {
+    pub fn new(workbook: WorkbookEngine) -> Result<Self, RecalcError> {
+        Self::with_budget(workbook, Budget::default())
+    }
+
+    /// [`new`](Self::new) with an explicit graph [`Budget`]; a workbook that already exceeds it is
+    /// refused.
+    pub fn with_budget(workbook: WorkbookEngine, budget: Budget) -> Result<Self, RecalcError> {
         if workbook.sheet_count() > usize::from(u16::MAX) {
             return Err(EasyOfficeError::InvalidArgument(
                 "시트가 너무 많아 증분 재계산 세션을 만들 수 없습니다.".to_string(),
-            ));
+            )
+            .into());
         }
         let primary_id = workbook
             .sheets()
@@ -99,6 +188,9 @@ impl RecalcSession {
             dynamic_circular: false,
             rng_state: EvalContext::standalone_id(primary_id).rng_state,
             raw_bytes: 0,
+            formula_bytes: 0,
+            budget,
+            over_budget: false,
             refs: Vec::new(),
             queue: Vec::new(),
             wb: WorkbookEngine::new(),
@@ -114,6 +206,10 @@ impl RecalcSession {
                     session.graph.register(vertex, &session.refs);
                     session.graph.set_volatile(vertex, volatile);
                     session.dirty.insert(vertex);
+                    session.formula_bytes += sheet.cells.get(&coord).map_or(0, String::len);
+                    if session.exceeds_budget() {
+                        return Err(RecalcError::OverBudget);
+                    }
                 }
             }
         }
@@ -129,10 +225,31 @@ impl RecalcSession {
         self.wb.sheets().get(sheet).map(|s| s.name.as_str())
     }
 
-    /// Populated cells and bytes of raw cell text the session holds (what a caller meters).
-    pub fn footprint(&self) -> (usize, usize) {
-        let cells = self.wb.sheets().iter().map(|s| s.cells.len()).sum();
-        (cells, self.raw_bytes)
+    /// Cells, text and graph the session holds (what a caller meters).
+    pub fn footprint(&self) -> Footprint {
+        Footprint {
+            cells: self.wb.sheets().iter().map(|s| s.cells.len()).sum(),
+            raw_bytes: self.raw_bytes,
+            edges: self.graph.edge_count(),
+            graph_bytes: self.graph.heap_bytes_estimate(),
+            ast_bytes: self
+                .formula_bytes
+                .saturating_mul(AST_BYTES_PER_FORMULA_BYTE),
+        }
+    }
+
+    fn exceeds_budget(&self) -> bool {
+        let graph_bytes = self.graph.heap_bytes_estimate();
+        let ast_bytes = self
+            .formula_bytes
+            .saturating_mul(AST_BYTES_PER_FORMULA_BYTE);
+        self.graph.edge_count() > self.budget.max_edges
+            || graph_bytes > self.budget.max_graph_bytes
+            || self
+                .raw_bytes
+                .saturating_add(graph_bytes)
+                .saturating_add(ast_bytes)
+                > self.budget.max_bytes
     }
 
     /// Number of formula cells and of distinct range references tracked by the graph.
@@ -146,15 +263,20 @@ impl RecalcSession {
         sheet: &str,
         coord: PackedCellCoordinate,
         raw: &str,
-    ) -> Result<(), EasyOfficeError> {
+    ) -> Result<(), RecalcError> {
+        if self.over_budget {
+            return Err(RecalcError::OverBudget);
+        }
         let idx = self.sheet_index(sheet)?;
-        self.stage(idx, coord, raw);
-        Ok(())
+        self.stage(idx, coord, raw)
     }
 
     /// Stages a batch of edits. A large batch rebuilds the cell indexes once instead of patching
     /// them per edit.
-    pub fn apply(&mut self, changes: &[CellChange]) -> Result<(), EasyOfficeError> {
+    pub fn apply(&mut self, changes: &[CellChange]) -> Result<(), RecalcError> {
+        if self.over_budget {
+            return Err(RecalcError::OverBudget);
+        }
         let mut resolved = Vec::with_capacity(changes.len());
         for change in changes {
             resolved.push(self.sheet_index(&change.sheet)?);
@@ -165,7 +287,7 @@ impl RecalcSession {
             }
         }
         for (change, idx) in changes.iter().zip(resolved) {
-            self.stage(idx, change.coord, &change.raw);
+            self.stage(idx, change.coord, &change.raw)?;
         }
         Ok(())
     }
@@ -179,11 +301,16 @@ impl RecalcSession {
             })
     }
 
-    fn stage(&mut self, sheet: u16, coord: PackedCellCoordinate, raw: &str) {
+    fn stage(
+        &mut self,
+        sheet: u16,
+        coord: PackedCellCoordinate,
+        raw: &str,
+    ) -> Result<(), RecalcError> {
         let engine = &self.wb.sheets()[usize::from(sheet)];
         let old_raw = engine.cells.get(&coord).map_or("", String::as_str);
         if old_raw == raw {
-            return;
+            return Ok(());
         }
         self.raw_bytes = self.raw_bytes - old_raw.len() + raw.len();
         if let Some(vertex) = self.graph.vertex_at(sheet, coord) {
@@ -191,6 +318,7 @@ impl RecalcSession {
                 collect_refs(&self.wb, sheet, ast, &mut self.refs);
                 self.graph.unregister(vertex, &self.refs);
             }
+            self.formula_bytes -= old_raw.len();
             self.graph.remove_vertex(vertex);
             self.dirty.remove(vertex);
             self.cyclic.remove(vertex);
@@ -205,9 +333,15 @@ impl RecalcSession {
                 self.graph.register(vertex, &self.refs);
                 self.graph.set_volatile(vertex, volatile);
                 self.dirty.insert(vertex);
+                self.formula_bytes += raw.len();
             }
         }
         self.edited.push((sheet, coord));
+        if self.exceeds_budget() {
+            self.over_budget = true;
+            return Err(RecalcError::OverBudget);
+        }
+        Ok(())
     }
 
     /// Recomputes every formula that depends on a staged edit (and every volatile formula) and

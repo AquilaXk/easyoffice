@@ -367,14 +367,125 @@ fn shifting_rows_and_rewriting_references_matches_a_full_recalculation() {
 }
 
 #[test]
-fn the_footprint_counts_cells_and_raw_text_through_edits() {
+fn the_footprint_counts_cells_text_and_edges_through_edits() {
     let mut s = session(&["S"], &[("S", "A1", "12"), ("S", "B1", "=A1+1")]);
-    assert_eq!(s.footprint(), (2, 2 + 5));
+    let f = s.footprint();
+    assert_eq!((f.cells, f.raw_bytes, f.edges), (2, 2 + 5, 1));
+    assert!(f.graph_bytes > 0 && f.ast_bytes == 5 * AST_BYTES_PER_FORMULA_BYTE);
+    assert_eq!(f.total_bytes(), f.raw_bytes + f.graph_bytes + f.ast_bytes);
     s.set_cell("S", at("A1"), "1234").unwrap();
     s.set_cell("S", at("C1"), "abc").unwrap();
-    assert_eq!(s.footprint(), (3, 4 + 5 + 3));
+    let f = s.footprint();
+    assert_eq!((f.cells, f.raw_bytes, f.edges), (3, 4 + 5 + 3, 1));
     s.set_cell("S", at("B1"), "").unwrap();
-    assert_eq!(s.footprint(), (2, 4 + 3));
+    let f = s.footprint();
+    assert_eq!((f.cells, f.raw_bytes, f.edges), (2, 4 + 3, 0));
+    assert_eq!(
+        (f.graph_bytes, f.ast_bytes),
+        (0, 0),
+        "an emptied graph holds nothing"
+    );
+}
+
+/// `=Z{b*40+1}+...+Z{b*40+40}` for the 33 formulas of bundle `b`: every read cell has 33
+/// dependents (enough to leave any small-set representation) and every bundle reads other cells.
+pub(super) fn bundled_formula(i: u32) -> String {
+    let first = i / 33 * 40;
+    let terms: Vec<String> = (1..=40).map(|k| format!("Z{}", first + k)).collect();
+    format!("={}", terms.join("+"))
+}
+
+#[test]
+fn crowded_dependents_cost_memory_by_edges_not_by_vertex_ids() {
+    const FORMULAS: u32 = 30_000;
+    let mut wb = WorkbookEngine::new();
+    wb.add_sheet("S");
+    for i in 0..FORMULAS {
+        wb.set_cell("S", &format!("A{}", i + 1), bundled_formula(i))
+            .unwrap();
+    }
+    let mut s = RecalcSession::new(wb).unwrap();
+    s.recalculate();
+    let f = s.footprint();
+    assert_eq!(f.edges, FORMULAS as usize * 40);
+    // A bit set per read cell sized by the highest vertex id was 296 MB here; edges cost 4 bytes.
+    assert!(f.graph_bytes < 64 << 20, "{} bytes", f.graph_bytes);
+    s.set_cell("S", at("Z7"), "5").unwrap();
+    assert_eq!(
+        s.recalculate().recomputed,
+        33,
+        "only the bundle that reads Z7"
+    );
+}
+
+#[test]
+fn a_graph_over_budget_is_refused_and_stays_refused() {
+    let budget = Budget {
+        max_edges: 100,
+        max_graph_bytes: usize::MAX,
+        max_bytes: usize::MAX,
+    };
+    let mut wb = WorkbookEngine::new();
+    wb.add_sheet("S");
+    let mut s = RecalcSession::with_budget(wb, budget).unwrap();
+    // 40 edges each: the third formula passes 100.
+    s.set_cell("S", at("A1"), &bundled_formula(0)).unwrap();
+    s.set_cell("S", at("A2"), &bundled_formula(40)).unwrap();
+    assert!(matches!(
+        s.set_cell("S", at("A3"), &bundled_formula(80)),
+        Err(RecalcError::OverBudget)
+    ));
+    assert!(matches!(
+        s.set_cell("S", at("B1"), "1"),
+        Err(RecalcError::OverBudget)
+    ));
+    let change = CellChange {
+        sheet: "S".into(),
+        coord: at("B2"),
+        raw: "2".into(),
+    };
+    assert!(matches!(s.apply(&[change]), Err(RecalcError::OverBudget)));
+
+    let mut big = WorkbookEngine::new();
+    big.add_sheet("S");
+    for i in 0..3 {
+        big.set_cell("S", &format!("A{}", i + 1), bundled_formula(i * 33))
+            .unwrap();
+    }
+    assert!(matches!(
+        RecalcSession::with_budget(big, budget),
+        Err(RecalcError::OverBudget)
+    ));
+
+    let total_only = Budget {
+        max_edges: usize::MAX,
+        max_graph_bytes: usize::MAX,
+        max_bytes: 5_000,
+    };
+    let mut wb = WorkbookEngine::new();
+    wb.add_sheet("S");
+    let mut s = RecalcSession::with_budget(wb, total_only).unwrap();
+    s.set_cell("S", at("A1"), &"x".repeat(4_000)).unwrap();
+    assert!(
+        matches!(
+            s.set_cell("S", at("A2"), &"y".repeat(2_000)),
+            Err(RecalcError::OverBudget)
+        ),
+        "text counts toward max_bytes"
+    );
+
+    let bytes_only = Budget {
+        max_edges: usize::MAX,
+        max_graph_bytes: 1_000,
+        max_bytes: usize::MAX,
+    };
+    let mut wb = WorkbookEngine::new();
+    wb.add_sheet("S");
+    let mut s = RecalcSession::with_budget(wb, bytes_only).unwrap();
+    assert!(matches!(
+        s.set_cell("S", at("A1"), &bundled_formula(0)),
+        Err(RecalcError::OverBudget)
+    ));
 }
 
 struct Rng(u64);

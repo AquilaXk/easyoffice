@@ -22,6 +22,10 @@ function createFakeEngine(options = {}) {
     if (action === "sheet_session_apply") {
       const cells = sessions.get(body.session);
       if (!cells) return { expired: true };
+      if (options.refuseApplies) {
+        sessions.delete(body.session);
+        return { refused: "limit" };
+      }
       for (const c of body.changes) {
         const key = c.sheet + "!" + c.cell;
         if (c.value === "") cells.delete(key);
@@ -204,4 +208,53 @@ test("the formula bar evaluation reads its value from the session; a plain value
   const plain = await store.computeEvaluatedSheetStore(sheets, "Sheet1", { sheet: "Sheet1", cell: "E1" });
   assert.equal(engine.only("evaluate_sheet").length, 1);
   assert.equal(plain.extraValue, "legacy:E1");
+});
+
+test("a failed sync closes the session it abandons before opening a new one", async () => {
+  const engine = createFakeEngine();
+  const store = await createStore(engine);
+  const sheets = baseStore();
+  await store.evaluateLiveFormulaTargets(sheets, "Sheet1");
+  // The next apply fails once (a transport error), then works.
+  const realInvoke = engine.invokeIpc;
+  let failed = false;
+  const flaky = async (command, payload) => {
+    const body = JSON.parse(payload);
+    if (!failed && body.sessionAction === "apply") {
+      failed = true;
+      throw new Error("전송 실패");
+    }
+    return realInvoke(command, payload);
+  };
+  const { sandbox } = await createWorkspaceHarness();
+  const flakyStore = sandbox.__EASYOFFICE_CREATE_SHEET_STORE__({
+    invokeIpc: flaky,
+    normalizeFormattedNumericCell: (v) => v,
+    tokenizeFormulaStringLiterals: () => [],
+  });
+  flakyStore.enableSheetSessions(true);
+  await flakyStore.evaluateLiveFormulaTargets(sheets, "Sheet1");
+  const closes = engine.only("sheet_session_close");
+  const opens = engine.only("sheet_session_open");
+  assert.equal(opens.length, 3, "one for the first store, two for the flaky one");
+  assert.equal(closes.length, 1, "the abandoned session was closed");
+  assert.equal(closes[0].body.session, "s2", "the session the failed call had opened");
+  assert.deepEqual([...engine.sessions.keys()], ["s1", "s3"]);
+});
+
+test("a workbook the engine refuses for size is evaluated without a session until its sheets change", async () => {
+  const engine = createFakeEngine({ refuseApplies: true });
+  const store = await createStore(engine);
+  const sheets = baseStore();
+  const first = await store.evaluateLiveFormulaTargets(sheets, "Sheet1");
+  assert.deepEqual(first.targetValues, ["legacy:B1"]);
+  assert.equal(engine.only("sheet_session_open").length, 1);
+  assert.equal(engine.only("sheet_session_apply").length, 1);
+  sheets.Sheet1.A1 = entry("9");
+  await store.evaluateLiveFormulaTargets(sheets, "Sheet1");
+  assert.equal(engine.only("sheet_session_open").length, 1, "not reopened");
+  assert.equal(engine.only("evaluate_sheet").length, 2);
+  sheets.Sheet2 = { A1: entry("1") };
+  await store.evaluateLiveFormulaTargets(sheets, "Sheet1");
+  assert.equal(engine.only("sheet_session_open").length, 2, "a new sheet set tries a session again");
 });

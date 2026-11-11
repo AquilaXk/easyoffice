@@ -142,9 +142,21 @@ fn unknown_closed_and_owner_closed_sessions_answer_expired_not_an_error() {
     )
     .unwrap();
     let id = owned.split('"').nth(3).unwrap().to_string();
-    assert!(apply(&id, &change("S", "A1", "1")).contains("\"changed\":[]"));
+    let payload = format!(
+        "{{\"sessionAction\":\"apply\",\"session\":\"{id}\",\"changes\":[{}]}}",
+        change("S", "A1", "1")
+    );
+    let as_owner = |owner: &str| {
+        EasyOfficeIpcRouter::dispatch_for_owner("evaluate_sheet", &payload, owner).unwrap()
+    };
+    assert!(as_owner("win-owner-test").contains("\"changed\":[]"));
+    assert_eq!(
+        as_owner("another-window"),
+        expired,
+        "not that window's session"
+    );
     assert_eq!(close_sheet_sessions_of("win-owner-test"), 1);
-    assert_eq!(apply(&id, &change("S", "A1", "1")), expired);
+    assert_eq!(as_owner("win-owner-test"), expired);
     assert_eq!(close_sheet_sessions_of("win-owner-test"), 0);
 }
 
@@ -179,8 +191,12 @@ fn malformed_requests_are_rejected_and_leave_the_session_intact() {
 fn limits() -> Limits {
     Limits {
         max_sessions: 2,
+        max_sheets: 3,
+        max_sheet_name_bytes: 8,
         max_session_cells: 5,
+        max_session_edges: 50,
         max_session_bytes: 64,
+        max_total_cells: 6,
         max_total_bytes: 100,
         max_changes: 4,
         idle_ttl: Duration::from_secs(60),
@@ -197,33 +213,38 @@ fn put(raw: &str, n: u32) -> Vec<CellChange> {
         .collect()
 }
 
+fn alive(r: Result<Applied, EasyOfficeError>) -> bool {
+    matches!(r.unwrap(), Applied::Done(_))
+}
+
+fn gone(r: Result<Applied, EasyOfficeError>) -> bool {
+    matches!(r.unwrap(), Applied::Expired)
+}
+
+fn refused(r: Result<Applied, EasyOfficeError>) -> bool {
+    matches!(r.unwrap(), Applied::Refused)
+}
+
+fn sec(t: Instant, s: u64) -> Instant {
+    t + Duration::from_secs(s)
+}
+
 #[test]
 fn the_registry_evicts_the_least_recently_used_session_over_the_count_limit() {
     let reg = Registry::new(limits());
     let t = Instant::now();
     let sheets = vec!["S".to_string()];
     let a = reg.open(&sheets, "", t).unwrap();
-    let b = reg.open(&sheets, "", t + Duration::from_secs(1)).unwrap();
-    assert!(reg
-        .apply(&a, &put("1", 1), true, t + Duration::from_secs(2))
-        .unwrap()
-        .is_some());
-    let c = reg.open(&sheets, "", t + Duration::from_secs(3)).unwrap();
+    let b = reg.open(&sheets, "", sec(t, 1)).unwrap();
+    assert!(alive(reg.apply(&a, "", &put("1", 1), true, sec(t, 2))));
+    let c = reg.open(&sheets, "", sec(t, 3)).unwrap();
     assert_eq!(reg.len(), 2);
     assert!(
-        reg.apply(&b, &put("1", 1), true, t + Duration::from_secs(4))
-            .unwrap()
-            .is_none(),
+        gone(reg.apply(&b, "", &put("1", 1), true, sec(t, 4))),
         "b was the least recently used"
     );
-    assert!(reg
-        .apply(&a, &put("1", 1), true, t + Duration::from_secs(4))
-        .unwrap()
-        .is_some());
-    assert!(reg
-        .apply(&c, &put("1", 1), true, t + Duration::from_secs(4))
-        .unwrap()
-        .is_some());
+    assert!(alive(reg.apply(&a, "", &put("1", 1), true, sec(t, 4))));
+    assert!(alive(reg.apply(&c, "", &put("1", 1), true, sec(t, 4))));
 }
 
 #[test]
@@ -231,40 +252,90 @@ fn an_idle_session_expires() {
     let reg = Registry::new(limits());
     let t = Instant::now();
     let id = reg.open(&["S".to_string()], "", t).unwrap();
-    assert!(reg
-        .apply(&id, &put("1", 1), true, t + Duration::from_secs(59))
-        .unwrap()
-        .is_some());
-    assert!(reg
-        .apply(&id, &put("2", 1), true, t + Duration::from_secs(59 + 61))
-        .unwrap()
-        .is_none());
+    assert!(alive(reg.apply(&id, "", &put("1", 1), true, sec(t, 59))));
+    assert!(gone(reg.apply(
+        &id,
+        "",
+        &put("2", 1),
+        true,
+        sec(t, 59 + 61)
+    )));
     assert_eq!(reg.len(), 0);
 }
 
 #[test]
-fn size_limits_reject_a_session_that_would_grow_past_them() {
+fn a_session_belongs_to_the_owner_that_opened_it() {
     let reg = Registry::new(limits());
     let t = Instant::now();
-    let id = reg.open(&["S".to_string()], "", t).unwrap();
+    let id = reg.open(&["S".to_string()], "win-a", t).unwrap();
+    assert!(id.starts_with("ss") && id.len() == 2 + 32);
+    assert_ne!(id, reg.open(&["S".to_string()], "win-a", t).unwrap());
+    assert!(gone(reg.apply(&id, "win-b", &put("1", 1), true, t)));
+    assert!(!reg.close(&id, "win-b"), "another window cannot close it");
+    assert!(alive(reg.apply(&id, "win-a", &put("1", 1), true, t)));
+    assert!(reg.close(&id, "win-a"));
+}
+
+#[test]
+fn open_bounds_the_sheet_count_and_name_length_before_building_a_workbook() {
+    let reg = Registry::new(limits());
+    let t = Instant::now();
+    let four: Vec<String> = (0..4).map(|i| format!("S{i}")).collect();
+    assert!(reg.open(&four, "", t).is_err(), "4 sheets > 3");
+    assert!(reg.open(&["x".repeat(9)], "", t).is_err());
+    assert!(reg.open(&four[..3], "", t).is_ok());
+    // The shipped limit stays far below the 65,535 sheet ids the workbook can hand out.
+    assert!(LIMITS.max_sheets < usize::from(u16::MAX) / 8);
+    let many: Vec<String> = (0..=LIMITS.max_sheets).map(|i| format!("S{i}")).collect();
+    assert!(Registry::new(LIMITS).open(&many, "", t).is_err());
+}
+
+#[test]
+fn size_limits_drop_a_session_that_would_grow_past_them() {
+    let reg = Registry::new(limits());
+    let t = Instant::now();
+    let sheets = vec!["S".to_string()];
+    let id = reg.open(&sheets, "", t).unwrap();
     assert!(
-        reg.apply(&id, &put("1", 5), true, t).is_err(),
-        "more changes than max_changes"
+        reg.apply(&id, "", &put("1", 5), true, t).is_err(),
+        "more changes than max_changes is a malformed request"
     );
-    reg.apply(&id, &put("1", 3), true, t).unwrap();
+    assert!(alive(reg.apply(&id, "", &put("1", 3), true, t)));
     assert!(
-        reg.apply(&id, &put("2", 3), true, t).is_err(),
+        refused(reg.apply(&id, "", &put("2", 3), true, t)),
         "3 + 3 cells > 5"
     );
-    let long = "x".repeat(40);
     assert!(
-        reg.apply(&id, &put(&long, 2), true, t).is_err(),
+        gone(reg.apply(&id, "", &put("9", 1), true, t)),
+        "and the session is gone"
+    );
+    let id = reg.open(&sheets, "", t).unwrap();
+    assert!(
+        refused(reg.apply(&id, "", &put(&"x".repeat(40), 2), true, t)),
         "bytes over max_session_bytes"
     );
-    assert!(
-        reg.apply(&id, &put("9", 1), true, t).unwrap().is_some(),
-        "still usable after a refusal"
-    );
+}
+
+#[test]
+fn a_dependency_graph_past_the_edge_budget_is_refused_and_dropped() {
+    let reg = Registry::new(Limits {
+        max_session_bytes: 1 << 20,
+        max_total_bytes: 1 << 20,
+        ..limits()
+    });
+    let t = Instant::now();
+    let id = reg.open(&["S".to_string()], "", t).unwrap();
+    // 40 reads per formula: the second formula passes max_session_edges = 50.
+    let reads: Vec<String> = (1..=40).map(|k| format!("Z{k}")).collect();
+    let formula = |row: u32| CellChange {
+        sheet: "S".into(),
+        coord: PackedCellCoordinate::new(row, 0).unwrap(),
+        raw: format!("={}", reads.join("+")),
+    };
+    assert!(alive(reg.apply(&id, "", &[formula(0)], true, t)));
+    assert!(refused(reg.apply(&id, "", &[formula(1)], true, t)));
+    assert!(gone(reg.apply(&id, "", &[], true, t)));
+    assert_eq!(reg.len(), 0);
 }
 
 #[test]
@@ -273,19 +344,67 @@ fn total_memory_pressure_evicts_older_sessions_first() {
     let t = Instant::now();
     let sheets = vec!["S".to_string()];
     let a = reg.open(&sheets, "", t).unwrap();
-    let b = reg.open(&sheets, "", t + Duration::from_secs(1)).unwrap();
+    let b = reg.open(&sheets, "", sec(t, 1)).unwrap();
     let raw = "y".repeat(30);
-    reg.apply(&a, &put(&raw, 2), true, t + Duration::from_secs(2))
-        .unwrap();
+    assert!(alive(reg.apply(&a, "", &put(&raw, 2), true, sec(t, 2))));
     // b needs 60 bytes while a holds 60: 120 > 100 evicts a.
-    assert!(reg
-        .apply(&b, &put(&raw, 2), true, t + Duration::from_secs(3))
-        .unwrap()
-        .is_some());
-    assert!(reg
-        .apply(&a, &put("1", 1), true, t + Duration::from_secs(4))
-        .unwrap()
-        .is_none());
+    assert!(alive(reg.apply(&b, "", &put(&raw, 2), true, sec(t, 3))));
+    assert!(gone(reg.apply(&a, "", &put("1", 1), true, sec(t, 4))));
+}
+
+#[test]
+fn total_cell_pressure_evicts_older_sessions_first() {
+    let reg = Registry::new(limits());
+    let t = Instant::now();
+    let sheets = vec!["S".to_string()];
+    let a = reg.open(&sheets, "", t).unwrap();
+    let b = reg.open(&sheets, "", sec(t, 1)).unwrap();
+    assert!(alive(reg.apply(&a, "", &put("1", 4), true, sec(t, 2))));
+    assert!(
+        alive(reg.apply(&b, "", &put("1", 3), true, sec(t, 3))),
+        "4 + 3 cells > 6 evicts a"
+    );
+    assert!(gone(reg.apply(&a, "", &put("1", 1), true, sec(t, 4))));
+}
+
+#[test]
+fn a_poisoned_session_is_dropped_and_reported_as_expired() {
+    let reg = Registry::new(limits());
+    let t = Instant::now();
+    let id = reg.open(&["S".to_string()], "", t).unwrap();
+    let handle = lock(&reg.inner).sessions[&id].session.clone();
+    let poisoner = std::thread::spawn(move || {
+        let _guard = handle.lock().unwrap();
+        panic!("engine panic while the session was locked");
+    });
+    assert!(poisoner.join().is_err());
+    assert!(gone(reg.apply(&id, "", &put("1", 1), true, t)));
+    assert_eq!(reg.len(), 0, "the poisoned session is removed");
+}
+
+#[test]
+fn the_crowded_dependents_pattern_is_bounded_by_the_shipped_limits() {
+    // 33 formulas per group read the same 40 cells, groups read other cells: a bit set per read
+    // cell sized by the highest vertex id used 296 MB at 30,000 formulas.
+    let t = Instant::now();
+    let reg = Registry::new(LIMITS);
+    let id = reg.open(&["S".to_string()], "", t).unwrap();
+    let changes: Vec<CellChange> = (0..30_000u32)
+        .map(|i| {
+            let first = i / 33 * 40;
+            let terms: Vec<String> = (1..=40).map(|k| format!("Z{}", first + k)).collect();
+            CellChange {
+                sheet: "S".into(),
+                coord: PackedCellCoordinate::new(i, 0).unwrap(),
+                raw: format!("={}", terms.join("+")),
+            }
+        })
+        .collect();
+    assert!(alive(reg.apply(&id, "", &changes, true, t)));
+    let handle = lock(&reg.inner).sessions[&id].session.clone();
+    let fp = handle.lock().unwrap().footprint();
+    assert_eq!(fp.edges, 30_000 * 40);
+    assert!(fp.total_bytes() < LIMITS.max_session_bytes / 2, "{fp:?}");
 }
 
 #[test]

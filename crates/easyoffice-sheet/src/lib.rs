@@ -28,7 +28,9 @@ pub use functions::*;
 pub use functions_complex::{format_complex, parse_complex};
 pub use memo::{CellMap, CoordHasher, FastMap, MemoTable};
 pub use parser::{compile_formula_expr, BinaryOp, Expr};
-pub use recalc::{CellChange, ChangedCell, RecalcOutcome, RecalcSession};
+pub use recalc::{
+    Budget, CellChange, ChangedCell, Footprint, RecalcError, RecalcOutcome, RecalcSession,
+};
 pub use types::*;
 pub use workbook::*;
 

@@ -30,8 +30,6 @@ pub(crate) fn cell_key(sheet: u16, coord: PackedCellCoordinate) -> CellKey {
 
 /// Ranges at most this wide are indexed once per column; wider ones share one row index.
 const NARROW_MAX_WIDTH: u32 = 16;
-/// A dependents list this long is replaced by a bit set.
-const PROMOTE_AT: usize = 32;
 /// Functions whose result changes without any referenced cell changing, or whose references are
 /// computed at run time. Their cells are recomputed on every pass.
 const VOLATILE_FUNCTIONS: [&str; 6] = ["RAND", "RANDBETWEEN", "NOW", "TODAY", "OFFSET", "INDIRECT"];
@@ -133,65 +131,43 @@ pub(crate) fn collect_refs(
     volatile
 }
 
-/// Set of vertex ids: a short vector that becomes a bit set once it grows.
-#[derive(Debug, Clone)]
-enum Dependents {
-    Few(Vec<u32>),
-    Many(Box<IdSet>),
-}
+/// Set of vertex ids as a sorted vector: 4 bytes per member whatever the ids are (a bit set costs
+/// `max id / 8` bytes per set, which a crafted sheet turns into quadratic memory), binary-search
+/// membership, and ascending iteration. Inserting into the middle of a very large set moves the
+/// tail, which only a cell read by tens of thousands of formulas in random order pays.
+#[derive(Debug, Clone, Default)]
+struct Dependents(Vec<u32>);
 
 impl Dependents {
-    fn new() -> Self {
-        Self::Few(Vec::new())
-    }
-
-    fn insert(&mut self, id: u32) {
-        match self {
-            Self::Few(ids) => {
-                if ids.contains(&id) {
-                    return;
-                }
-                ids.push(id);
-                if ids.len() > PROMOTE_AT {
-                    let mut set = IdSet::default();
-                    ids.iter().for_each(|&v| {
-                        set.insert(v);
-                    });
-                    *self = Self::Many(Box::new(set));
-                }
-            }
-            Self::Many(set) => {
-                set.insert(id);
+    /// Adds `id`; whether it was new.
+    fn insert(&mut self, id: u32) -> bool {
+        match self.0.binary_search(&id) {
+            Ok(_) => false,
+            Err(pos) => {
+                self.0.insert(pos, id);
+                true
             }
         }
     }
 
-    fn remove(&mut self, id: u32) {
-        match self {
-            Self::Few(ids) => {
-                if let Some(pos) = ids.iter().position(|&v| v == id) {
-                    ids.swap_remove(pos);
-                }
+    /// Removes `id`; whether it was present.
+    fn remove(&mut self, id: u32) -> bool {
+        match self.0.binary_search(&id) {
+            Ok(pos) => {
+                self.0.remove(pos);
+                true
             }
-            Self::Many(set) => {
-                set.remove(id);
-            }
+            Err(_) => false,
         }
     }
 
     fn is_empty(&self) -> bool {
-        match self {
-            Self::Few(ids) => ids.is_empty(),
-            Self::Many(set) => set.is_empty(),
-        }
+        self.0.is_empty()
     }
 
     #[inline]
     fn for_each(&self, mut f: impl FnMut(u32)) {
-        match self {
-            Self::Few(ids) => ids.iter().for_each(|&v| f(v)),
-            Self::Many(set) => set.for_each(f),
-        }
+        self.0.iter().for_each(|&v| f(v));
     }
 }
 
@@ -229,17 +205,23 @@ struct RangeDeps {
     entries: Vec<Option<RangeEntry>>,
     free: Vec<u32>,
     sheets: Vec<SheetRanges>,
+    /// (rectangle, formula) pairs.
+    edges: usize,
+    /// Interval entries over all column indexes (a rectangle is entered once per column it spans).
+    slots: usize,
+    /// Per-column interval indexes currently allocated.
+    containers: usize,
+}
+
+fn sheet_ranges(sheets: &mut Vec<SheetRanges>, sheet: u16) -> &mut SheetRanges {
+    let idx = usize::from(sheet);
+    if sheets.len() <= idx {
+        sheets.resize_with(idx + 1, SheetRanges::default);
+    }
+    &mut sheets[idx]
 }
 
 impl RangeDeps {
-    fn sheet_ranges(&mut self, sheet: u16) -> &mut SheetRanges {
-        let idx = usize::from(sheet);
-        if self.sheets.len() <= idx {
-            self.sheets.resize_with(idx + 1, SheetRanges::default);
-        }
-        &mut self.sheets[idx]
-    }
-
     fn add(&mut self, sheet: u16, rect: (u32, u32, u32, u32), dependent: u32) {
         let (r0, r1, c0, c1) = rect;
         let key = RectKey::new(sheet, r0, r1, c0, c1);
@@ -249,7 +231,7 @@ impl RangeDeps {
                 let entry = RangeEntry {
                     c0,
                     c1,
-                    deps: Dependents::new(),
+                    deps: Dependents::default(),
                 };
                 let id = match self.free.pop() {
                     Some(id) => {
@@ -262,19 +244,23 @@ impl RangeDeps {
                     }
                 };
                 self.by_rect.insert(key, id);
-                let ranges = self.sheet_ranges(sheet);
+                let ranges = sheet_ranges(&mut self.sheets, sheet);
                 if c1 - c0 < NARROW_MAX_WIDTH {
                     for col in c0..=c1 {
+                        let before = ranges.narrow.len();
                         ranges.narrow.entry(col).or_default().insert(r0, r1, id);
+                        self.containers += ranges.narrow.len() - before;
+                        self.slots += 1;
                     }
                 } else {
                     ranges.wide.insert(r0, r1, id);
+                    self.slots += 1;
                 }
                 id
             }
         };
         if let Some(entry) = self.entries[id as usize].as_mut() {
-            entry.deps.insert(dependent);
+            self.edges += usize::from(entry.deps.insert(dependent));
         }
     }
 
@@ -287,25 +273,28 @@ impl RangeDeps {
         let Some(entry) = self.entries[id as usize].as_mut() else {
             return;
         };
-        entry.deps.remove(dependent);
+        self.edges -= usize::from(entry.deps.remove(dependent));
         if !entry.deps.is_empty() {
             return;
         }
         self.entries[id as usize] = None;
         self.free.push(id);
         self.by_rect.remove(&key);
-        let ranges = self.sheet_ranges(sheet);
+        let ranges = sheet_ranges(&mut self.sheets, sheet);
         if c1 - c0 < NARROW_MAX_WIDTH {
             for col in c0..=c1 {
                 if let Some(index) = ranges.narrow.get_mut(&col) {
                     index.remove(r0, r1, id);
+                    self.slots -= 1;
                     if index.is_empty() {
                         ranges.narrow.remove(&col);
+                        self.containers -= 1;
                     }
                 }
             }
         } else {
             ranges.wide.remove(r0, r1, id);
+            self.slots -= 1;
         }
     }
 
@@ -345,6 +334,8 @@ pub(crate) struct DepGraph {
     coord: Vec<PackedCellCoordinate>,
     free: Vec<u32>,
     cell_deps: FastMap<CellKey, Dependents>,
+    /// (cell, formula) pairs in `cell_deps`.
+    cell_edges: usize,
     ranges: RangeDeps,
     volatile: IdSet,
 }
@@ -365,6 +356,29 @@ impl DepGraph {
 
     pub(crate) fn range_count(&self) -> usize {
         self.ranges.len()
+    }
+
+    /// Reverse edges held: (cell, formula) pairs plus (rectangle, formula) pairs.
+    pub(crate) fn edge_count(&self) -> usize {
+        self.cell_edges + self.ranges.edges
+    }
+
+    /// Estimated heap bytes of the graph. The per-item sizes are conservative averages (map slot,
+    /// header and growth slack included); the point is a bound that grows with what the sheet
+    /// registers, not a byte-exact count.
+    pub(crate) fn heap_bytes_estimate(&self) -> usize {
+        const EDGE: usize = 4;
+        const CELL_KEY: usize = 80;
+        const RECT: usize = 112;
+        const INTERVAL_SLOT: usize = 80;
+        const INDEX_CONTAINER: usize = 512;
+        const VERTEX: usize = 56;
+        self.edge_count() * EDGE
+            + self.cell_deps.len() * CELL_KEY
+            + self.ranges.len() * RECT
+            + self.ranges.slots * INTERVAL_SLOT
+            + self.ranges.containers * INDEX_CONTAINER
+            + self.vertex_of.len() * VERTEX
     }
 
     /// Adds a formula cell and returns its id (a freed id is reused).
@@ -418,11 +432,10 @@ impl DepGraph {
     pub(crate) fn register(&mut self, vertex: u32, refs: &[Ref]) {
         for &r in refs {
             match r {
-                Ref::Cell { sheet, coord } => self
-                    .cell_deps
-                    .entry(cell_key(sheet, coord))
-                    .or_insert_with(Dependents::new)
-                    .insert(vertex),
+                Ref::Cell { sheet, coord } => {
+                    let deps = self.cell_deps.entry(cell_key(sheet, coord)).or_default();
+                    self.cell_edges += usize::from(deps.insert(vertex));
+                }
                 Ref::Rect {
                     sheet,
                     r0,
@@ -440,7 +453,7 @@ impl DepGraph {
                 Ref::Cell { sheet, coord } => {
                     let key = cell_key(sheet, coord);
                     if let Some(deps) = self.cell_deps.get_mut(&key) {
-                        deps.remove(vertex);
+                        self.cell_edges -= usize::from(deps.remove(vertex));
                         if deps.is_empty() {
                             self.cell_deps.remove(&key);
                         }

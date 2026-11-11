@@ -93,7 +93,7 @@ SOFTWARE.
 
 ## formualizer (ported functions, MIT OR Apache-2.0, used under MIT)
 
-Source: https://github.com/PSU3D0/formualizer (commit `214bf226e4a4ee4927d96f3e9cb42ef742fa61e7`). Nothing is vendored or linked; the incremental recalculation graph of `easyoffice-sheet` (`crates/easyoffice-sheet/src/recalc/`, PD-163) is a port of these functions, rewritten without the reference's Arrow or workbook dependencies and with different data layouts (each file starts with a header naming the source path and the changes):
+Source: https://github.com/PSU3D0/formualizer (commit `214bf226e4a4ee4927d96f3e9cb42ef742fa61e7`). Nothing is vendored or linked; the incremental recalculation graph of `easyoffice-sheet` (`crates/easyoffice-sheet/src/recalc/`, PD-164) is a port of these functions, rewritten without the reference's Arrow or workbook dependencies and with different data layouts (each file starts with a header naming the source path and the changes):
 
 - `crates/formualizer-eval/src/engine/idset.rs` (`DenseIdSet`) -> `recalc/id_set.rs`.
 - `crates/formualizer-eval/src/engine/interval_tree.rs` (`IntervalTree`) -> `recalc/interval.rs`.

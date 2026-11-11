@@ -100,3 +100,35 @@ fn recalc_bench() {
         report("head edit (whole D chain)", 1, &mut session);
     }
 }
+
+/// Graph memory under the crowded-dependents pattern (33 formulas per group read the same 40
+/// cells): run with `/usr/bin/time -l` to see the peak RSS next to the estimate.
+#[test]
+#[ignore = "measurement harness"]
+fn graph_memory_bench() {
+    let formulas: u32 = std::env::var("BENCH_FORMULAS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(100_000);
+    let mut wb = WorkbookEngine::new();
+    wb.add_sheet("S");
+    let raw: usize = (0..formulas)
+        .map(|i| {
+            let text = super::tests::bundled_formula(i);
+            let len = text.len();
+            wb.set_cell("S", &format!("A{}", i + 1), text).unwrap();
+            len
+        })
+        .sum();
+    let start = Instant::now();
+    let mut session = RecalcSession::new(wb).unwrap();
+    session.recalculate();
+    let f = session.footprint();
+    println!(
+        "formulas={formulas} raw={} MB edges={} graph_estimate={} MB open+recalc={:.0} ms",
+        raw >> 20,
+        f.edges,
+        f.graph_bytes >> 20,
+        start.elapsed().as_secs_f64() * 1e3
+    );
+}
