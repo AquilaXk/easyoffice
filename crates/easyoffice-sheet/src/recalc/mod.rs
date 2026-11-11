@@ -15,6 +15,7 @@
 mod graph;
 mod id_set;
 mod interval;
+mod rule_session;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -157,6 +158,8 @@ pub struct RecalcSession {
     over_budget: bool,
     refs: Vec<Ref>,
     queue: Vec<u32>,
+    /// Rules per sheet index (see `rule_session`).
+    rules: std::collections::HashMap<u16, crate::rules::RuleRuntime>,
 }
 
 impl RecalcSession {
@@ -193,6 +196,7 @@ impl RecalcSession {
             over_budget: false,
             refs: Vec::new(),
             queue: Vec::new(),
+            rules: std::collections::HashMap::new(),
             wb: WorkbookEngine::new(),
         };
         for idx in 0..workbook.sheet_count() {

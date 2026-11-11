@@ -5,8 +5,7 @@ use easyoffice_layout::{
     RibbonLayoutStyle, SlideDeckTheme, SlideStageLayout,
 };
 use easyoffice_sheet::{
-    ConditionalFormatRule, DataValidationRule, EvaluatedCellValue, PackedCellCoordinate,
-    WorkbookEngine, WorkbookEvalTarget,
+    EvaluatedCellValue, PackedCellCoordinate, WorkbookEngine, WorkbookEvalTarget,
 };
 
 pub mod benchmark;
@@ -305,11 +304,6 @@ impl EasyOfficeIpcRouter {
     }
 
     fn handle_evaluate_sheet(payload: &str, owner: &str) -> Result<String, EasyOfficeError> {
-        let rule = ConditionalFormatRule::GreaterThan(100.0);
-        let dv_rule = DataValidationRule::NumberRange {
-            min: 0.0,
-            max: 1_000_000.0,
-        };
         let entries = Self::parse_rpc_json_object(payload)?;
         if let Some(action) = Self::optional_json_str(&entries, "sessionAction")? {
             return Self::handle_sheet_session_action(action, &entries, owner);
@@ -370,16 +364,12 @@ impl EasyOfficeIpcRouter {
                 }
                 let first_expr = requests[0].1;
                 let first_eval = &batch.values[0];
-                let cf_match = rule.matches(first_eval, &[]);
-                let dv_valid = dv_rule.validate(first_eval);
                 return Ok(format!(
-                    "{{\"query\":\"{}\",\"value\":\"{}\",\"values\":{{{}}},\"targetValues\":[{}],\"conditionalMatch\":{},\"validationPassed\":{},\"circular\":{}}}",
+                    "{{\"query\":\"{}\",\"value\":\"{}\",\"values\":{{{}}},\"targetValues\":[{}],\"circular\":{}}}",
                     Self::escape_json_str(first_expr),
                     Self::escape_json_str(&first_eval.to_display_string()),
                     values_entries.join(","),
                     target_values_entries.join(","),
-                    cf_match,
-                    dv_valid,
                     batch.circular
                 ));
             }
@@ -397,17 +387,13 @@ impl EasyOfficeIpcRouter {
         };
         let (evaluated, circular) =
             Self::evaluate_single_target(&wb, default_sh, anchor_coord, expr);
-        let cf_match = rule.matches(&evaluated, &[]);
-        let dv_valid = dv_rule.validate(&evaluated);
         let display_val = evaluated.to_display_string();
         let escaped_display = Self::escape_json_str(&display_val);
         Ok(format!(
-            "{{\"query\":\"{0}\",\"value\":\"{1}\",\"values\":{{\"{2}!{0}\":\"{1}\"}},\"targetValues\":[\"{1}\"],\"conditionalMatch\":{3},\"validationPassed\":{4},\"circular\":{5}}}",
+            "{{\"query\":\"{0}\",\"value\":\"{1}\",\"values\":{{\"{2}!{0}\":\"{1}\"}},\"targetValues\":[\"{1}\"],\"circular\":{3}}}",
             Self::escape_json_str(expr),
             escaped_display,
             Self::escape_json_str(default_sh),
-            cf_match,
-            dv_valid,
             circular
         ))
     }

@@ -147,7 +147,6 @@ mod tests {
         )
         .unwrap();
         assert!(sheet_res.contains("\"value\":\"400\""));
-        assert!(sheet_res.contains("\"conditionalMatch\":true"));
 
         let wb_res = EasyOfficeIpcRouter::dispatch(
             "evaluate_workbook_formula",

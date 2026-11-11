@@ -18,6 +18,7 @@ mod functions_math;
 mod memo;
 mod parser;
 mod recalc;
+mod rules;
 mod special;
 mod text_format;
 pub mod types;
@@ -30,6 +31,10 @@ pub use memo::{CellMap, CoordHasher, FastMap, MemoTable};
 pub use parser::{compile_formula_expr, BinaryOp, Expr};
 pub use recalc::{
     Budget, CellChange, ChangedCell, Footprint, RecalcError, RecalcOutcome, RecalcSession,
+};
+pub use rules::{
+    decode_visuals, encode_visuals, validate_input, Bar, CellVisual, Icon, PackedVisuals,
+    RuleRuntime, Verdict,
 };
 pub use types::*;
 pub use workbook::*;
@@ -99,8 +104,6 @@ pub struct SheetEngine {
     pub(crate) compiled_asts: CellMap<Result<Expr, FormulaError>>,
     pub(crate) subtotal_coords: HashSet<PackedCellCoordinate>,
     pub(crate) dense_numbers: Vec<f64>,
-    pub conditional_rules: Vec<ConditionalFormatRule>,
-    pub validation_rule: Option<DataValidationRule>,
     /// Cached dependency order of the last full recalculation; dropped on every edit.
     pub(crate) plan: OnceLock<dag::RecalcPlan>,
     /// Cached per-column index of formula cells for range dependency walks; dropped on edit.
@@ -132,8 +135,6 @@ impl SheetEngine {
             compiled_asts: CellMap::default(),
             subtotal_coords: HashSet::new(),
             dense_numbers: Vec::new(),
-            conditional_rules: Vec::new(),
-            validation_rule: None,
             plan: OnceLock::new(),
             formula_index: OnceLock::new(),
             cell_index: OnceLock::new(),
