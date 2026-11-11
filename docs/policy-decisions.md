@@ -2397,7 +2397,7 @@
 
 ## PD-156. 시트 정렬 범위·수식 조정, 새 행·없는 시트의 빈 상태, 사용 범위 격자 내보내기, XLS 쓰기 한계
 
-- **Status** Implemented (`sheet-ops.js`, `sheet-controller.js`, `ribbon-history.js`, `convert_structured.rs`, `biff8_xls_codec.rs`, `converter.rs`)
+- **Status** Implemented (`sheet-ops.js`, `sheet-controller.js`, `ribbon-history.js`, `convert_structured.rs`, `biff8_xls_codec.rs`, `xls_sheet_names.rs`, `converter.rs`)
 - **Context** (1) 시트 정렬이 A–H열과 B열 키로 고정이고, 옮긴 행의 수식에서 원래 행 번호만 바꿔 다른 행을 참조한 수식이 틀어졌으며, 정렬 뒤 재계산이 없었습니다. (2) 행 추가가 새 행 8칸에 `"0"`을, 없는 시트로 전환이 `"<이름> 항목"`·`500`을 넣었고, 탭 줄 정리가 `Sheet1`·`Sheet2`를 항상 남겼습니다. (3) 시트를 문서·PDF로 내보낼 때 행 길이가 제각각이고 빈 행이 사라졌습니다. (4) XLS 쓰기가 시트 이름 규칙·레코드 길이 한계를 지키지 않았고, 문서 텍스트가 `=`로 시작하면 수식 레코드로 나갔습니다.
 - **Decision (`PD-156`)**
   1. **정렬**: 둘 이상의 셀을 선택하면 그 블록만 첫 열 기준으로 정렬하고(머리 행 판별 없음), 선택이 없으면 2행부터 사용 중인 모든 열을 B열(없으면 A열) 기준으로 정렬합니다. 선택 없는 정렬의 끝 행은 키 열에 값이 직접 들어 있는 마지막 행이라 아래의 수식 합계 행은 제자리에 남습니다. 키는 숫자 먼저, 텍스트는 로캘 순서, 빈 키는 항상 끝입니다. 이미 오름차순이면 내림차순으로 뒤집습니다(기존 동작). 옮긴 행의 수식은 클립보드 붙여넣기와 같은 규칙(`shiftFormula`)으로 상대 행 참조를 이동 거리만큼 조정하고(`$` 고정 참조·문자열 리터럴은 그대로, 범위를 벗어나면 `#REF!`), 끝나면 활성 시트를 재계산합니다.

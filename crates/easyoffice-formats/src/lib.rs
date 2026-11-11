@@ -52,6 +52,7 @@ mod sheet_styling;
 pub mod strict_json;
 pub mod text_pdf_codecs;
 pub mod utf16_swar;
+mod xls_sheet_names;
 pub mod zip_codec;
 mod zip_path_tracker;
 mod zip_policy;
