@@ -211,7 +211,8 @@ mod tests {
                 "{spans:?}"
             );
         }
-        assert_eq!(wrap_spans("", 1_000), [0..0]);
+        assert_eq!(wrap_spans("", 1_000).len(), 1);
+        assert_eq!(wrap_spans("", 1_000)[0], 0..0);
     }
 
     #[test]
