@@ -595,6 +595,11 @@
   color: var(--ui-text-on-accent);
 }
 
+/* --color-primary is light in the dark theme: dark text, as on .dialog-btn-primary. */
+:root[data-theme-effective="dark"] .update-notice__button--primary {
+  color: var(--ui-bg);
+}
+
 .update-notice__button:disabled {
   cursor: default;
   opacity: 0.6;

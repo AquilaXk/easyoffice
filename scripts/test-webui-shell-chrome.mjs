@@ -246,7 +246,7 @@ test("shell chrome colours meet WCAG AA in the light and dark themes", () => {
   const stateful = {
     // The open menu title and the primary button swap text colour per theme (styles.css, shell.css).
     light: [["--ui-text-on-accent", "--ui-menu-open", 4.5], ["--ui-text-on-accent", "--accent-strong", 4.5]],
-    dark: [["--ui-text", "--ui-selected", 4.5], ["--ui-bg", "--accent-strong", 4.5]],
+    dark: [["--ui-text", "--ui-selected", 4.5], ["--ui-bg", "--accent-strong", 4.5], ["--ui-bg", "--accent-primary", 4.5]],
   };
   for (const theme of ["light", "dark"]) {
     const t = tokens(theme);
@@ -256,6 +256,13 @@ test("shell chrome colours meet WCAG AA in the light and dark themes", () => {
       assert.ok(ratio >= min, `${theme}: ${fg} on ${bg} is ${ratio.toFixed(2)}:1 (need ${min}:1)`);
     }
   }
+});
+
+test("the update notice's primary button swaps to dark text in the dark theme (--color-primary is light there)", () => {
+  const HOME_CSS = readText(fileURLToPath(new URL("home.css", UI_DIR)));
+  const dark = cssRule(':root[data-theme-effective="dark"] .update-notice__button--primary', HOME_CSS);
+  assert.ok(hasDecl(dark, "color", "var(--ui-bg)"));
+  assert.ok(hasDecl(cssRule(".update-notice__button--primary", HOME_CSS), "background", "var(--color-primary)"));
 });
 
 test("no UI file exceeds the line ceiling and the new modules are registered", () => {
