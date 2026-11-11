@@ -109,3 +109,10 @@ test("slide chrome rules use tokens only; the stage paper is the fixed light pal
   const light = new Map(cssDeclarations(tokens.slice(tokens.indexOf("\n:root {"), tokens.indexOf('\n:root[data-theme-effective="dark"] {'))));
   for (const [name, value] of redeclared) assert.equal(value, light.get(name), `${name} equals the light token`);
 });
+
+test("custom-select.js enhances the same select classes as the reference app", () => {
+  const source = read("custom-select.js");
+  for (const cls of ["sb-combo", "sb-ls-select", "dialog-select", "formula-select"]) {
+    assert.ok(source.includes(`"select.${cls}"`), `select.${cls} is enhanced`);
+  }
+});
