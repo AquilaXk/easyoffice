@@ -12,7 +12,7 @@
 //! 64 MiB and without FNV's weak spots), a read cap, and a fingerprint built from bytes the caller
 //! already holds so the open and save paths do not read the file a second time.
 
-use crate::window_commands::MAX_OPEN_BYTES;
+use crate::save_file::MAX_SAVE_BYTES;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::fs;
@@ -43,11 +43,11 @@ impl Fingerprint {
     }
 
     /// Reads the file once: metadata from the opened handle, then the content through a fixed
-    /// buffer. Files above the open limit hash only their first bytes; the length already differs.
+    /// buffer. Files above the save limit hash only their first bytes; the length already differs.
     pub fn of(path: &Path) -> std::io::Result<Self> {
         let file = fs::File::open(path)?;
         let meta = file.metadata()?;
-        let content_hash = hash_reader(file.take(MAX_OPEN_BYTES + 1))?;
+        let content_hash = hash_reader(file.take(MAX_SAVE_BYTES as u64 + 1))?;
         Ok(Self::from_parts(&meta, content_hash))
     }
 

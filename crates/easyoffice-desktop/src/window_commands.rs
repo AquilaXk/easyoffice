@@ -24,8 +24,6 @@ use tauri::{
 };
 use tauri_plugin_dialog::DialogExt;
 
-/// Upper bound for one opened document (bytes read in Rust and handed to the new window).
-pub const MAX_OPEN_BYTES: u64 = 256 * 1_048_576;
 /// Runs the page's own 저장 / 저장 안 함 / 취소 flow when the native close button is used.
 const CLOSE_REQUEST_SCRIPT: &str =
     "window.__EASYOFFICE_CLOSE_REQUEST__ && window.__EASYOFFICE_CLOSE_REQUEST__();";
@@ -475,13 +473,7 @@ pub fn open_path(app: &AppHandle, path: &Path) -> Result<OpenOutcome, String> {
     }
     let meta = fs::metadata(&canonical)
         .map_err(|err| open_failure("파일 정보를 읽지 못했습니다", &canonical, &err))?;
-    let size = meta.len();
-    if size == 0 || size > MAX_OPEN_BYTES {
-        return Err(format!(
-            "열 수 없는 파일 크기입니다 ({}): 빈 파일이거나 256MiB를 넘습니다",
-            display_name(&canonical)
-        ));
-    }
+    check_open_size(kind, meta.len(), &display_name(&canonical))?;
     let bytes = fs::read(&canonical)
         .map_err(|err| open_failure("파일을 읽지 못했습니다", &canonical, &err))?;
     // Metadata from before the read, hash of the bytes the editor receives: a change in between
@@ -521,6 +513,18 @@ pub fn open_path(app: &AppHandle, path: &Path) -> Result<OpenOutcome, String> {
     crate::os_recent::note_recent_document(app, &canonical);
     close_empty_start_windows(app);
     Ok(OpenOutcome::OPENED)
+}
+
+/// The file is read only when its size fits what the page opens of this kind (PD-177).
+fn check_open_size(kind: WindowKind, size: u64, name: &str) -> Result<(), String> {
+    let limit = kind.max_open_bytes();
+    if size == 0 || size > limit {
+        return Err(format!(
+            "열 수 없는 파일 크기입니다 ({name}): 빈 파일이거나 {}MiB를 넘습니다",
+            limit / 1_048_576
+        ));
+    }
+    Ok(())
 }
 
 /// A user sentence naming the file; the operating system's own error text stays in the log.

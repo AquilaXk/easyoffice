@@ -20,7 +20,25 @@ pub enum WindowKind {
     Conv,
 }
 
+/// Largest file a Hangul editor window opens: `MAX_HWP_BYTES` of the page (it hands the bytes to
+/// the editor frame, not through the IPC body).
+const MAX_HWP_OPEN_BYTES: u64 = 64 * 1_048_576;
+/// Largest file any other window opens: `MAX_FILE_BYTES` of the page and `MAX_SOURCE_BYTES` of the
+/// engine, which decodes it through the IPC body. `scripts/test-file-size-limits.mjs` keeps the
+/// numbers equal.
+const MAX_ENGINE_OPEN_BYTES: u64 = 10 * 1_048_576;
+
 impl WindowKind {
+    /// Largest file a window of this kind opens. The shell reads the file whole and hands it to the
+    /// page as Base64, so a limit above the page's own would only read, encode and copy a file
+    /// that the page then refuses.
+    pub fn max_open_bytes(self) -> u64 {
+        match self {
+            Self::Hwp => MAX_HWP_OPEN_BYTES,
+            _ => MAX_ENGINE_OPEN_BYTES,
+        }
+    }
+
     pub fn parse(raw: &str) -> Option<Self> {
         let trimmed = raw.trim().as_bytes();
         if trimmed.len() > 8 {

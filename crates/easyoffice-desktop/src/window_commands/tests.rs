@@ -230,3 +230,26 @@ fn app_state_shares_the_registry_and_queue_by_label() {
     assert!(locked(&state.pending).take("doc-1-a").is_none());
     assert!(locked(&state.registry).remove("doc-1-a"));
 }
+
+/// What the shell reads and hands over is bounded by what the page opens of that kind (10 MiB
+/// through the engine, 64 MiB for the Hangul editor), so no larger file is read, encoded and
+/// copied only to be refused there.
+#[test]
+fn the_open_size_limit_is_the_pages_limit_of_the_kind() {
+    let mib = 1_048_576;
+    assert_eq!(WindowKind::Doc.max_open_bytes(), 10 * mib);
+    assert_eq!(WindowKind::Hwp.max_open_bytes(), 64 * mib);
+    for kind in [WindowKind::Sheet, WindowKind::Slide, WindowKind::Pdf] {
+        assert_eq!(kind.max_open_bytes(), 10 * mib, "{kind:?}");
+    }
+    assert!(check_open_size(WindowKind::Doc, 10 * mib, "a.docx").is_ok());
+    let over = check_open_size(WindowKind::Doc, 10 * mib + 1, "a.docx").unwrap_err();
+    assert!(over.contains("a.docx") && over.contains("10MiB"), "{over}");
+    assert!(check_open_size(WindowKind::Hwp, 64 * mib, "a.hwp").is_ok());
+    let over = check_open_size(WindowKind::Hwp, 64 * mib + 1, "a.hwp").unwrap_err();
+    assert!(over.contains("64MiB"), "{over}");
+    assert!(
+        check_open_size(WindowKind::Pdf, 0, "a.pdf").is_err(),
+        "empty"
+    );
+}
