@@ -3,6 +3,7 @@
 //! value in a document passed the same format, size and pixel-count checks (fail closed).
 
 use std::fmt;
+use std::sync::Arc;
 
 use crate::rich_document::{RichBlock, RichDocument};
 use crate::rich_image_probe::{probe_jpeg, probe_png, sniff_format};
@@ -36,7 +37,8 @@ const MAX_REQUESTED_SIDE_EMU: u64 = 182_880_000;
 #[derive(Clone, PartialEq, Eq)]
 pub struct RichImage {
     format: RichImageFormat,
-    bytes: Vec<u8>,
+    /// Shared so that a picture referenced again (a clone) does not copy its bytes.
+    bytes: Arc<Vec<u8>>,
     width_px: u32,
     height_px: u32,
     width_emu: u64,
@@ -112,13 +114,19 @@ impl RichImage {
         );
         Ok(Self {
             format,
-            bytes,
+            bytes: Arc::new(bytes),
             width_px,
             height_px,
             width_emu,
             height_emu,
             alt: truncate_alt(alt.into()),
         })
+    }
+
+    /// The same picture (bytes shared, already validated) with other alternative text.
+    pub(crate) fn with_alt(mut self, alt: &str) -> Self {
+        self.alt = truncate_alt(alt.to_string());
+        self
     }
 
     /// Replaces the display size (EMU). The size is rejected when a side is zero or absurdly

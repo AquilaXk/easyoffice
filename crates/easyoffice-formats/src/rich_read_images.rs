@@ -4,6 +4,7 @@
 //! count and byte limits are enforced by the caller.
 
 use std::borrow::Cow;
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 use crate::xml_stream::{attr, XmlEvent, XmlReader};
@@ -23,6 +24,9 @@ pub(crate) enum DrawingOutcome {
 /// Relationship id -> media entry of `word/document.xml`.
 pub(crate) struct DocxMedia<'a> {
     by_rel: HashMap<String, &'a ZipArchiveEntry>,
+    /// The picture of each media entry read so far, so one referenced again is neither checked
+    /// (PNG CRC) nor copied again. Its alternative text is set per reference.
+    pictures: RefCell<HashMap<&'a str, Result<RichImage, EasyOfficeError>>>,
 }
 
 /// Part path a relationship `target` refers to, or `None` when it could leave the package.
@@ -41,7 +45,7 @@ impl<'a> DocxMedia<'a> {
         let entry_by_path: HashMap<&str, &'a ZipArchiveEntry> =
             entries.iter().map(|e| (e.path.as_str(), e)).collect();
         let Some(&rels) = entry_by_path.get(DOCUMENT_RELS_PATH) else {
-            return Ok(Self { by_rel });
+            return Ok(Self::new(by_rel));
         };
         let xml = std::str::from_utf8(&rels.data).map_err(|_| {
             EasyOfficeError::InvalidUtf8(format!("{DOCUMENT_RELS_PATH} UTF-8 오류"))
@@ -65,7 +69,24 @@ impl<'a> DocxMedia<'a> {
                 by_rel.insert(id.to_string(), entry);
             }
         }
-        Ok(Self { by_rel })
+        Ok(Self::new(by_rel))
+    }
+
+    fn new(by_rel: HashMap<String, &'a ZipArchiveEntry>) -> Self {
+        Self {
+            by_rel,
+            pictures: RefCell::default(),
+        }
+    }
+
+    /// The picture stored in `entry`, validated on its first use only.
+    fn picture(&self, entry: &'a ZipArchiveEntry, alt: &str) -> Result<RichImage, EasyOfficeError> {
+        self.pictures
+            .borrow_mut()
+            .entry(entry.path.as_str())
+            .or_insert_with(|| RichImage::new(entry.data.clone(), ""))
+            .clone()
+            .map(|image| image.with_alt(alt))
     }
 }
 
@@ -104,17 +125,15 @@ pub(crate) fn drawing_picture(events: &[XmlEvent<'_>], media: &DocxMedia<'_>) ->
             "포함된 그림이 아닌 도형·차트 등 그리기 개체는 가져오지 않았습니다.".to_string(),
         );
     };
-    let built = RichImage::new(
-        entry.data.clone(),
-        fields.alt.as_deref().unwrap_or_default(),
-    )
-    .map(|mut img| {
-        if let Some((cx, cy)) = fields.extent {
-            // An out-of-range extent keeps the default size derived from the pixels.
-            let _ = img.set_display_emu(cx, cy);
-        }
-        img
-    });
+    let built = media
+        .picture(entry, fields.alt.as_deref().unwrap_or_default())
+        .map(|mut img| {
+            if let Some((cx, cy)) = fields.extent {
+                // An out-of-range extent keeps the default size derived from the pixels.
+                let _ = img.set_display_emu(cx, cy);
+            }
+            img
+        });
     match built {
         Ok(img) => DrawingOutcome::Picture(img),
         Err(err) => DrawingOutcome::Skipped(format!(
