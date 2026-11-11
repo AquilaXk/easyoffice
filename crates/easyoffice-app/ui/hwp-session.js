@@ -630,22 +630,25 @@
 
     // ---- converter source ----------------------------------------------------------------
 
-    // The open HWP document as converter input: bytes exported by the editor, not editor text.
+    // The open HWP document as converter input: bytes exported by the editor, not editor text. The engine
+    // reads HWP 5.0 (and HWT) as plain text only, so every HWP-family source is exported as HWPX, which
+    // keeps formatting, tables and pictures; `format` tells the caller which source format that is.
     async function getConverterSource(srcFormat) {
-      if (!(srcFormat === "hwp" || srcFormat === "hwpx") || hwpHost.getStatus() !== "ready") return null;
+      if (!HWP_EXTENSIONS.has(srcFormat) || hwpHost.getStatus() !== "ready") return null;
       if (!current && !dirty) return null;
+      let bytes;
       try {
-        const bytes = await hwpHost.exportBytes(srcFormat);
-        const stem = (current?.name || "변환_문서").replace(/\.[A-Za-z0-9]+$/, "") || "변환_문서";
-        return {
-          baseName: stem,
-          size: bytes.length,
-          fields: { fileName: stem + "." + srcFormat, sourceBase64: bytesToBase64(bytes, (s) => env.btoa(s)) },
-        };
+        bytes = await hwpHost.exportBytes("hwpx");
       } catch (err) {
-        feedback("한글 문서를 변환용으로 내보내지 못했습니다: " + describeError(err));
-        return null;
+        throw new Error("한글 문서를 변환용으로 내보내지 못했습니다: " + describeError(err));
       }
+      const stem = (current?.name || "변환_문서").replace(/\.[A-Za-z0-9]+$/, "") || "변환_문서";
+      return {
+        baseName: stem,
+        size: bytes.length,
+        format: "hwpx",
+        fields: { fileName: stem + ".hwpx", sourceBase64: bytesToBase64(bytes, (s) => env.btoa(s)) },
+      };
     }
 
     // ---- DOM ---------------------------------------------------------------------------

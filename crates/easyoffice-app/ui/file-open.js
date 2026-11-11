@@ -46,6 +46,12 @@
     return btoaFn(chunks.join(""));
   }
 
+  // The converter's format selector value for a file name, or "" when it has none.
+  function converterFormatOption(name) {
+    const ext = extensionOf(name);
+    return ext === "markdown" ? "md" : ext;
+  }
+
   const tooLarge = (size) => "파일이 너무 큽니다 (" + (size / 1048576).toFixed(1) + " MiB). ";
 
   // The converter takes its source through IPC whatever the file type: an HWP file is not routed to the editor.
@@ -413,9 +419,12 @@
       const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
       const hwpSession = options?.textOnly ? null : deps.getHwpSession?.();
       if (hwpSession && HWP_EXTENSIONS.has(extensionOf(name))) {
-        return hwpSession.openFromBytes(name, data, {
+        const opened = await hwpSession.openFromBytes(name, data, {
           textFallback: () => openDocumentFromBytes(name, data, { textOnly: true }),
         });
+        // The embedded editor now holds this document, which the converter offers as its source.
+        if (opened?.ok && opened.module === "HWP") selectConverterFormat(name);
+        return opened;
       }
       const invalid = validateFile(name, data.length);
       if (invalid) return fail(invalid + (name ? " (" + name + ")" : ""));
@@ -483,6 +492,12 @@
       if (clearBtn) clearBtn.hidden = !converterSource;
     }
 
+    function selectConverterFormat(name) {
+      const srcSel = document.getElementById("conv-src-fmt");
+      const option = converterFormatOption(name);
+      if (srcSel && option && srcSel.querySelector('option[value="' + option + '"]')) srcSel.value = option;
+    }
+
     async function setConverterSource(file) {
       const box = document.getElementById("conv-result-box");
       const name = baseName(file?.name);
@@ -492,11 +507,7 @@
         return false;
       }
       converterSource = { name, bytes: read.bytes };
-      const ext = extensionOf(name);
-      const srcSel = document.getElementById("conv-src-fmt");
-      if (srcSel && ext && srcSel.querySelector('option[value="' + (ext === "markdown" ? "md" : ext) + '"]')) {
-        srcSel.value = ext === "markdown" ? "md" : ext;
-      }
+      selectConverterFormat(name);
       renderConverterSource();
       if (box) box.textContent = "원본 파일 선택됨: " + name + " — [즉시 변환 검증]을 누르면 이 파일의 내용을 변환합니다.";
       return true;
@@ -598,6 +609,6 @@
   host.__EASYOFFICE_CREATE_FILE_OPEN__ = createFileOpen;
   host.__EASYOFFICE_FILE_OPEN_UTILS__ = {
     MAX_FILE_BYTES, MAX_HWP_BYTES, SUPPORTED_EXTENSIONS, GRID_LIMITS, buildEditorNodes, buildSheetStore, bytesToBase64,
-    converterSourceProblem,
+    converterSourceProblem, converterFormatOption,
   };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

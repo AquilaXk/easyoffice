@@ -4,7 +4,7 @@
   // Engine request transport. Every engine call from the page goes through one of three paths, chosen
   // per call: the test hook (`__EASYOFFICE_TEST_IPC__`), the desktop shell bridge, or the local
   // HTTP endpoint of the `--serve` preview. Failures are shown next to the control that asked
-  // (`reportFailure`) and rethrown as Errors; connection failures carry `connection = true`.
+  // (`reportFailure`) and rethrown as Errors with `reported = true` (callers need not show them again); connection failures also carry `connection = true`.
 
   const DISCONNECTED_MESSAGE = "연결할 수 없습니다. 앱을 다시 시작해 주세요.";
   const REQUEST_FAILED_MESSAGE = "요청을 처리하지 못했습니다. 다시 시도해 주세요.";
@@ -17,8 +17,14 @@
     run_engine_benchmark: "bench-result-box",
   });
 
-  function connectionError(message) {
+  function reportedError(message) {
     const err = new Error(message);
+    err.reported = true;
+    return err;
+  }
+
+  function connectionError(message) {
+    const err = reportedError(message);
     err.connection = true;
     return err;
   }
@@ -59,7 +65,7 @@
         const errBody = await resp.json().catch(() => ({}));
         const msg = errBody.error || errBody.message || REQUEST_FAILED_MESSAGE + " (" + resp.status + ")";
         reportFailure(command, msg);
-        throw new Error(msg);
+        throw reportedError(msg);
       }
       return await resp.json();
     }
@@ -73,7 +79,7 @@
       } catch (err) {
         const msg = err?.message || String(err);
         reportFailure(command, msg);
-        throw new Error(msg);
+        throw reportedError(msg);
       }
     }
 

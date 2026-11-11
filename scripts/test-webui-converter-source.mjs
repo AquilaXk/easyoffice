@@ -1,0 +1,149 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { createWebUiDom, createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
+import { switchModule, studioItem } from "./test-support/modules.mjs";
+
+// C3/C4: every converter entry (즉시 변환 검증, Ctrl+S in the converter, the security audit) decides its
+// input with one function: the chosen source file, else the open HWP document, else the editor.
+
+const enc = new TextEncoder();
+
+function makeFile(name, bytes) {
+  return {
+    name,
+    size: bytes.length,
+    arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+  };
+}
+
+const DOC_MODEL = { title: "보고서", blocks: [{ type: "paragraph", runs: [{ text: "개요" }] }] };
+const fixtureFile = (name) => makeFile(name, enc.encode("EOFIXTURE:" + JSON.stringify(DOC_MODEL)));
+
+async function createConverterHarness(options = {}) {
+  const { sandbox } = await createWebUiDom();
+  const cat = sandbox.__EASYOFFICE_RIBBON_CATALOG__;
+  const offline = sandbox.__EASYOFFICE_CREATE_OFFLINE_RPC__({
+    getActiveModule: () => "DOC",
+    ribbonCategoryTools: cat.RIBBON_CATEGORY_TOOLS,
+    ribbonStyleLabels: cat.RIBBON_STYLE_LABELS,
+    contextualToolBadges: cat.CONTEXTUAL_TOOL_BADGES,
+    moduleSpecs: cat.MODULE_SPECS,
+    localRibbonState: cat.createDefaultRibbonState(),
+  });
+  const calls = [];
+  const harness = await createWorkspaceHarness({
+    testIpc: async (command, payload) => {
+      calls.push({ command, payload: String(payload) });
+      return options.respond?.(command, payload) ?? offline[command](payload);
+    },
+  });
+  const converts = () => calls.filter((c) => c.command === "convert_document_format").map((c) => JSON.parse(c.payload));
+  return { ...harness, calls, converts };
+}
+
+async function chooseSourceFile(document, file) {
+  const input = document.getElementById("conv-source-file");
+  input.files = [file];
+  input.dispatchEvent({ type: "change", target: input });
+  await flushAsyncTurns(20);
+}
+
+test("Ctrl+S in the converter saves the chosen source file, not the default editor", async () => {
+  const { document, userClick, converts, downloads } = await createConverterHarness();
+  switchModule(document, "CONV");
+  await flushAsyncTurns(10);
+  await chooseSourceFile(document, fixtureFile("원본.docx"));
+  document.getElementById("conv-dst-fmt").value = "md";
+  userClick(studioItem(document, "studio-save"));
+  await flushAsyncTurns(30);
+  const sent = converts().at(-1);
+  assert.equal(sent.fileName, "원본.docx");
+  assert.ok(sent.sourceBase64.length > 10);
+  assert.equal(sent.blocks, undefined, "editor content is not used");
+  assert.equal(downloads.at(-1).download, "원본.md");
+});
+
+test("the converter's security audit checks the chosen source file", async () => {
+  const { document, userClick, converts } = await createConverterHarness();
+  switchModule(document, "CONV");
+  await flushAsyncTurns(10);
+  await chooseSourceFile(document, fixtureFile("원본.docx"));
+  userClick(document.getElementById("btn-run-security-audit"));
+  await flushAsyncTurns(30);
+  const sent = converts().at(-1);
+  assert.equal(sent.fileName, "원본.docx");
+  assert.ok(sent.sourceBase64.length > 10);
+});
+
+test("a conversion that fails after the request shows the reason in the result box and the status line", async () => {
+  const { document, userClick } = await createConverterHarness({
+    respond: (command) => (command === "convert_document_format" ? { status: "OK", convertedBase64: "" } : undefined),
+  });
+  switchModule(document, "CONV");
+  await flushAsyncTurns(10);
+  userClick(document.getElementById("btn-run-convert"));
+  await flushAsyncTurns(30);
+  assert.match(document.getElementById("conv-result-box").textContent, /^변환 실패: /);
+  assert.match(document.getElementById("status-command-feedback").textContent, /^변환 실패: /);
+});
+
+test("resolveConverterInput: chosen file, then the open HWP document, then the editor", async () => {
+  const { host, document } = await createWebUiDom();
+  const hwpCalls = [];
+  const fileSource = { baseName: "고른파일", size: 3, fields: { fileName: "고른파일.docx", sourceBase64: "AAAA" } };
+  const hwpSource = { baseName: "열린문서", size: 4, format: "hwpx", fields: { fileName: "열린문서.hwpx", sourceBase64: "BBBB" } };
+  let chosen = fileSource;
+  let hwp = hwpSource;
+  const tools = host.__EASYOFFICE_CREATE_WORKSPACE_TOOLS__(
+    {
+      document, URL, invokeIpc: async () => ({}), getActiveModule: () => "CONV",
+      docTabStore: {}, sheetDataStore: {}, slideDeckState: [],
+      sheetController: { commitPendingFocusedSheetCell: async () => {} },
+      enqueueWorkspaceHistoryOp: (op) => op(), getWindowBridge: () => null,
+      getFileOpen: () => ({ getConverterSource: () => chosen, converterSourceProblem: (size) => (size > 100 ? "너무 큽니다" : "") }),
+      getHwpSession: () => ({ getConverterSource: async (fmt) => { hwpCalls.push(fmt); return hwp; } }),
+    },
+    { saveActiveDocTabState() {}, ensureDefaultDocTabStore() {} }
+  );
+
+  const file = await tools.resolveConverterInput("docx");
+  assert.deepEqual([file.title, file.content.fileName, file.srcFormat], ["고른파일", "고른파일.docx", "docx"]);
+  assert.deepEqual(hwpCalls, [], "a chosen file wins before the HWP document is exported");
+
+  chosen = null;
+  const open = await tools.resolveConverterInput("hwp");
+  assert.deepEqual([open.title, open.content.fileName, open.srcFormat], ["열린문서", "열린문서.hwpx", "hwpx"]);
+  assert.deepEqual(hwpCalls, ["hwp"]);
+
+  hwp = null;
+  const editor = await tools.resolveConverterInput("docx");
+  assert.equal(editor.title, null);
+  assert.ok(Array.isArray(editor.content.blocks));
+  assert.equal(editor.srcFormat, "docx");
+
+  chosen = { ...fileSource, size: 101 };
+  const big = await tools.resolveConverterInput("docx");
+  assert.match(big.problem, /너무 큽니다/);
+});
+
+test("opening a file in the embedded HWP editor selects its format as the converter source", async () => {
+  const { host, document } = await createWebUiDom();
+  const select = document.getElementById("conv-src-fmt");
+  let result = { ok: true, module: "HWP", format: "hwtx" };
+  const fileOpen = host.__EASYOFFICE_CREATE_FILE_OPEN__({
+    document, invokeIpc: async () => ({}), getActiveModule: () => "HWP",
+    getHwpSession: () => ({ openFromBytes: async () => result }),
+  });
+  select.value = "docx";
+  await fileOpen.openDocumentFromBytes("서식.hwtx", new Uint8Array([1, 2, 3]));
+  assert.equal(select.value, "hwtx");
+
+  result = { ok: false, error: "열 수 없습니다" };
+  select.value = "docx";
+  await fileOpen.openDocumentFromBytes("서식.hwp", new Uint8Array([1, 2, 3]));
+  assert.equal(select.value, "docx", "a failed open leaves the converter alone");
+
+  result = { ok: true, module: "DOC", format: "hwp", textOnly: true };
+  await fileOpen.openDocumentFromBytes("서식.hwp", new Uint8Array([1, 2, 3]));
+  assert.equal(select.value, "docx", "a text-only fallback is not an embedded HWP document");
+});

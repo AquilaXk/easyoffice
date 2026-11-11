@@ -795,20 +795,27 @@ test("restore: declining keeps the record, no record is a no-op, stale foreign r
 
 // ---- converter ----------------------------------------------------------------------------
 
-test("converter: the open HWP document is exported by the editor in the chosen source format", async () => {
+test("converter: every HWP-family source is exported as HWPX, the format the engine reads with formatting", async () => {
   const ctx = load();
   assert.equal(await ctx.session.getConverterSource("hwp"), null, "an untouched blank editor converts the editor text path as before");
-  await ctx.session.openFromBytes("제안서.hwpx", new Uint8Array([...ZIP_MAGIC, 1]));
-  const hwp = await ctx.session.getConverterSource("hwp");
-  assert.equal(hwp.baseName, "제안서");
-  assert.equal(hwp.fields.fileName, "제안서.hwp");
-  assert.equal(Buffer.from(hwp.fields.sourceBase64, "base64")[0], 0xd0);
-  const hwpx = await ctx.session.getConverterSource("hwpx");
-  assert.equal(hwpx.fields.fileName, "제안서.hwpx");
-  assert.equal(Buffer.from(hwpx.fields.sourceBase64, "base64")[0], 0x50);
+  await ctx.session.openFromBytes("제안서.hwp", new Uint8Array([...ZIP_MAGIC, 1]));
+  for (const format of ["hwp", "hwpx", "hwt", "hwtx"]) {
+    const source = await ctx.session.getConverterSource(format);
+    assert.equal(source.baseName, "제안서", format);
+    assert.equal(source.format, "hwpx", format);
+    assert.equal(source.fields.fileName, "제안서.hwpx", format);
+    const bytes = Buffer.from(source.fields.sourceBase64, "base64");
+    assert.equal(bytes[0], 0x50, format + ": ZIP bytes, not the OLE2 HWP export");
+    assert.equal(source.size, bytes.length, "the byte size travels with the source");
+  }
   assert.equal(await ctx.session.getConverterSource("docx"), null);
-  assert.equal(hwp.size, Buffer.from(hwp.fields.sourceBase64, "base64").length, "the byte size travels with the source");
-  assert.equal(hwpx.size, Buffer.from(hwpx.fields.sourceBase64, "base64").length);
+});
+
+test("converter: a failed export is an error for the caller, never a silent switch to the editor text", async () => {
+  const ctx = load();
+  await ctx.session.openFromBytes("제안서.hwpx", new Uint8Array([...ZIP_MAGIC, 1]));
+  ctx.fake.state.handlers.exportBytes = () => { throw new Error("편집기 응답 없음"); };
+  await assert.rejects(() => ctx.session.getConverterSource("hwp"), /한글 문서를 변환용으로 내보내지 못했습니다/);
 });
 
 test("utils: only the HWP family is routed and the limit is 64 MiB", () => {

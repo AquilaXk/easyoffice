@@ -77,6 +77,7 @@
       insertTextAtSelection,
       getDocRuns,
       getWindowBridge,
+      getFileOpen,
     } = deps;
 
     const {
@@ -153,6 +154,19 @@
       if (valOf("pdf-form-applicant")) lines.push("신청인: " + valOf("pdf-form-applicant"));
       if (valOf("pdf-form-dept")) lines.push("부서: " + valOf("pdf-form-dept"));
       return { blocks: savePayload.plainParagraphBlocks(lines) };
+    }
+
+    // The one place the converter decides its input (conversion, Ctrl+S in the converter, security audit):
+    // the chosen source file, else the open HWP document (exported by the editor), else the editor content.
+    // `srcFormat` is the converter's source selection; `domFormat` the format the editor content is read as.
+    // Resolves { srcFormat, title, content } (`title` is null for editor content) or { problem }.
+    async function resolveConverterInput(srcFormat, domFormat = srcFormat) {
+      const fileOpen = getFileOpen?.();
+      const source = fileOpen?.getConverterSource() || (await getHwpSession?.()?.getConverterSource(srcFormat));
+      if (!source) return { srcFormat: domFormat, title: null, content: buildConversionContent(domFormat) };
+      const problem = fileOpen?.converterSourceProblem(source.size) || "";
+      if (problem) return { problem };
+      return { srcFormat: source.format || srcFormat, title: source.baseName, content: source.fields };
     }
 
     // Download file name from the module's document tab title (PD-073).
@@ -283,10 +297,21 @@
         ? { ext: document.getElementById("conv-dst-fmt")?.value || "hwpx", inPlace: false }
         : defaultSaveSpecForModule(curMod, saveAs);
       const dstExt = spec.ext || "docx";
-      const convSrc = document.getElementById("conv-src-fmt")?.value;
-      const srcExt = isConv && convSrc && convSrc !== "pages" ? convSrc : dstExt;
-      const title = resolveSaveFileBase(curMod);
-      const content = buildConversionContent(isConv ? srcExt : curMod);
+      let srcExt = dstExt;
+      let title = resolveSaveFileBase(curMod);
+      let content;
+      if (isConv) {
+        const convSrc = document.getElementById("conv-src-fmt")?.value;
+        const input = await resolveConverterInput(convSrc, convSrc && convSrc !== "pages" ? convSrc : dstExt);
+        if (input.problem) {
+          setStatusFeedback("문서 저장 실패 (" + dstExt.toUpperCase() + "): 원본 파일을 사용할 수 없습니다: " + input.problem);
+          return false;
+        }
+        ({ srcFormat: srcExt, content } = input);
+        title = input.title ?? title;
+      } else {
+        content = buildConversionContent(curMod);
+      }
       const converted = await convertForSave(srcExt, dstExt, title, content);
       let failure = converted.failure;
       const deliver = spec.inPlace ? deliverInPlace : deliverSavedFile;
@@ -419,11 +444,19 @@
     async function runModuleSecurityAudit(targetMod) {
       const effectiveMod = targetMod || getActiveModule();
       const ext = resolveModuleContainerExt(effectiveMod);
-      const content = buildConversionContent(effectiveMod === "CONV" ? ext : effectiveMod);
+      let srcExt = ext;
+      let content;
+      if (effectiveMod === "CONV") {
+        const input = await resolveConverterInput(document.getElementById("conv-src-fmt")?.value, ext);
+        if (input.problem) throw new Error("원본 파일을 사용할 수 없습니다: " + input.problem);
+        ({ srcFormat: srcExt, content } = input);
+      } else {
+        content = buildConversionContent(effectiveMod);
+      }
       const title = "SecurityAudit_" + effectiveMod;
       const convRes = await invokeIpc(
         "convert_document_format",
-        JSON.stringify({ sourceFormat: ext, targetFormat: ext, title, ...content })
+        JSON.stringify({ sourceFormat: srcExt, targetFormat: ext, title, ...content })
       );
       const containerBase64 = String(convRes?.convertedBase64 || "");
       return await invokeIpc("audit_security", JSON.stringify({ fileName: title + "." + ext, containerBase64 }));
@@ -838,7 +871,7 @@
     const { runPiiScrubAction } = host.__EASYOFFICE_CREATE_WORKSPACE_SCRUB__(deps, panelHooks, { resolveSourceScopeKind, computeSmartStats });
 
     return {
-      runPiiScrubAction, resolveSourceScopeKind, buildConversionContent, resolveSaveFileBase, triggerBase64Download, deliverSavedFile,
+      runPiiScrubAction, resolveSourceScopeKind, buildConversionContent, resolveConverterInput, resolveSaveFileBase, triggerBase64Download, deliverSavedFile,
       describeDeliveryFailure, describeConversionSpec, saveActiveModuleDocument,
       computeSmartStats, applySmartDiagnoseDom, runSmartDiagnoseAction, runModuleSecurityAudit,
       fetchSecurityAuditOutcome, applySecurityAuditDom, runSecurityAuditAction, runBenchmarkAction,

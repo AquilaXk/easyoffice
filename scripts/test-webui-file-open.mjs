@@ -520,8 +520,14 @@ test("a converter source over the limit is described the same way wherever its b
   const app = readText(fileURLToPath(new URL("../crates/easyoffice-app/ui/app.js", import.meta.url)));
   assert.match(
     app,
-    /const fileSrc = fileOpen\.getConverterSource\(\) \|\| \(await hwpSession\.getConverterSource\(src\)\);\s+const sourceProblem = fileSrc \? fileOpen\.converterSourceProblem\(fileSrc\.size\) : "";/,
-    "the editor's exported bytes are checked before they are sent"
+    /const input = await workspacePanels\.resolveConverterInput\(src\);\s+const box = document\.getElementById\("conv-result-box"\);\s+if \(input\.problem\)/,
+    "the converter's input, including the editor's exported bytes, is size-checked before it is sent"
+  );
+  const tools = readText(fileURLToPath(new URL("../crates/easyoffice-app/ui/workspace-tools.js", import.meta.url)));
+  assert.match(
+    tools,
+    /const source = fileOpen\?\.getConverterSource\(\) \|\| \(await getHwpSession\?\.\(\)\?\.getConverterSource\(srcFormat\)\);\s+if \(!source\) return[^\n]+\s+const problem = fileOpen\?\.converterSourceProblem\(source\.size\)/,
+    "one resolver orders the sources and checks the size"
   );
 });
 

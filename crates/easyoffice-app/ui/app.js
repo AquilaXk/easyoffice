@@ -142,7 +142,7 @@
     collectActiveScrubGroups, applyScrubResultsToGroups,
     scrubSheetStoreMap: sheetStoreHelpers.scrubSheetStoreMap, sheetController,
     getActiveModule: () => activeModule, getHwpHost: () => hwpHost, getHwpSession: () => hwpSession,
-    getWindowBridge: () => windowBridge,
+    getWindowBridge: () => windowBridge, getFileOpen: () => fileOpen,
     getActiveSheetName: () => activeSheetName,
     getActiveSheetCellRef: () => activeSheetCellRef,
     getActiveSlideIndex: () => activeSlideIndex,
@@ -547,6 +547,15 @@
     }
   }
 
+  // A failure the transport has not shown yet (everything but the engine request itself).
+  function reportConvertFailure(err) {
+    if (err?.reported) return;
+    const text = "변환 실패: " + (err?.message || String(err));
+    const box = document.getElementById("conv-result-box");
+    if (box) box.textContent = text;
+    setStatusFeedback(text);
+  }
+
   function setupSheetAndConverterHandlers() {
     const btnConvert = document.getElementById("btn-run-convert");
     if (btnConvert) {
@@ -556,18 +565,16 @@
             await sheetController.commitPendingFocusedSheetCell(true);
             const src = document.getElementById("conv-src-fmt").value;
             const dst = document.getElementById("conv-dst-fmt").value;
-            const fileSrc = fileOpen.getConverterSource() || (await hwpSession.getConverterSource(src));
-            const sourceProblem = fileSrc ? fileOpen.converterSourceProblem(fileSrc.size) : "";
+            const input = await workspacePanels.resolveConverterInput(src);
             const box = document.getElementById("conv-result-box");
-            if (sourceProblem) {
-              if (box) box.textContent = "원본 파일을 사용할 수 없습니다: " + sourceProblem;
+            if (input.problem) {
+              if (box) box.textContent = "원본 파일을 사용할 수 없습니다: " + input.problem;
               return;
             }
-            const convTitle = fileSrc ? fileSrc.baseName : "통합_변환_문서";
-            const content = fileSrc ? fileSrc.fields : workspacePanels.buildConversionContent(src);
+            const convTitle = input.title ?? "통합_변환_문서";
             const res = await invokeIpc(
               "convert_document_format",
-              JSON.stringify({ sourceFormat: src, targetFormat: dst, title: convTitle, ...content })
+              JSON.stringify({ sourceFormat: input.srcFormat, targetFormat: dst, title: convTitle, ...input.content })
             );
             const delivery = await workspacePanels.deliverSavedFile(res?.convertedBase64, convTitle, dst);
             if (box && res) {
@@ -587,7 +594,7 @@
                 workspacePanels.describeDeliveryFailure(delivery, " · ");
             }
           });
-        void runConvert().catch(() => {});
+        void runConvert().catch(reportConvertFailure);
       });
     }
 
