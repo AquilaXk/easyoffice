@@ -1,4 +1,4 @@
-//! Minimal Pages writer (experimental, PD-161): a [`RichDocument`] as an `.pages` package.
+//! Minimal Pages writer (experimental, PD-162): a [`RichDocument`] as an `.pages` package.
 //!
 //! Scope of this first step: body paragraphs, headings 1-6, alignment and the character formats
 //! bold, italic, underline, size and colour. Tables, pictures and list markers are not written;

@@ -166,7 +166,7 @@ pub enum DocumentFormat {
 }
 
 impl DocumentFormat {
-    /// Formats written experimentally (PD-161): a first, partial writer whose files were not
+    /// Formats written experimentally (PD-162): a first, partial writer whose files were not
     /// opened in the app that owns the format. Not part of [`Self::ALL`].
     pub const EXPERIMENTAL_WRITE: [DocumentFormat; 1] = [Self::Pages];
 
