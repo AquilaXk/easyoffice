@@ -1,3 +1,4 @@
+use crate::decode_budget::DecodeBudget;
 use crate::ole2_codec::{
     append_len_prefixed_utf16le, decode_utf16le, encode_utf16le, read_len_prefixed_utf16le,
     read_u16_le, read_u32_le, write_u32_le, Ole2ContainerCodec, Ole2StreamEntry,
@@ -261,6 +262,24 @@ impl Hwp5Codec {
         chosen.into_iter().map(|(_, entry)| entry).collect()
     }
 
+    /// The bytes of a DocInfo or BodyText stream: inflated when the file is compressed. All the
+    /// streams of one document share `inflated`, so many sections of the per-stream limit cannot
+    /// add up past the document budget; the inflater stops at what the budget has left.
+    fn stream_bytes<'a>(
+        data: &'a [u8],
+        is_compressed: bool,
+        inflated: &mut DecodeBudget,
+    ) -> Result<std::borrow::Cow<'a, [u8]>, EasyOfficeError> {
+        if !is_compressed {
+            return Ok(std::borrow::Cow::Borrowed(data));
+        }
+        let limit =
+            crate::ZipSecurityGuard::MAX_SINGLE_ENTRY_UNCOMPRESSED_BYTES.min(inflated.remaining());
+        let bytes = crate::deflate::inflate_auto(data, limit)?;
+        inflated.charge(bytes.len(), "HWP 5.0 스트림 해제")?;
+        Ok(std::borrow::Cow::Owned(bytes))
+    }
+
     pub fn unpack_multi_tables(
         bytes: &[u8],
     ) -> Result<(Hwp5DocumentPayload, Vec<Hwp5TableGrid>), EasyOfficeError> {
@@ -288,18 +307,13 @@ impl Hwp5Codec {
 
         let mut total_records = 0usize;
         let mut total_table_cells = 0usize;
+        let mut inflated = DecodeBudget::new();
         let mut agency_name = String::new();
         let mut document_number = String::new();
         if let Some(doc_info) = streams.iter().find(|s| s.name == "DocInfo") {
             if !doc_info.data.is_empty() {
-                let doc_info_bytes: std::borrow::Cow<'_, [u8]> = if is_compressed {
-                    std::borrow::Cow::Owned(crate::deflate::inflate_auto(
-                        &doc_info.data,
-                        crate::ZipSecurityGuard::MAX_SINGLE_ENTRY_UNCOMPRESSED_BYTES,
-                    )?)
-                } else {
-                    std::borrow::Cow::Borrowed(&doc_info.data)
-                };
+                let doc_info_bytes =
+                    Self::stream_bytes(&doc_info.data, is_compressed, &mut inflated)?;
 
                 let mut offset = 0usize;
                 while offset < doc_info_bytes.len() {
@@ -349,14 +363,7 @@ impl Hwp5Codec {
         let mut all_tables: Vec<Vec<Vec<String>>> = Vec::new();
 
         for sec_entry in section_entries {
-            let section_bytes: std::borrow::Cow<'_, [u8]> = if is_compressed {
-                std::borrow::Cow::Owned(crate::deflate::inflate_auto(
-                    &sec_entry.data,
-                    crate::ZipSecurityGuard::MAX_SINGLE_ENTRY_UNCOMPRESSED_BYTES,
-                )?)
-            } else {
-                std::borrow::Cow::Borrowed(&sec_entry.data)
-            };
+            let section_bytes = Self::stream_bytes(&sec_entry.data, is_compressed, &mut inflated)?;
 
             Self::parse_section_records(
                 &section_bytes,

@@ -1,7 +1,11 @@
 //! Legacy OLE2 documents (BIFF8 workbook, Word, Hangul 5.0) whose records point at the same bytes
 //! over and over must hit the decoded-byte budget, not memory (PD-175).
 
-use easyoffice_formats::{EasyOfficeError, LegacyOle2Codec, LegacyXlsPayload, Ole2ContainerCodec};
+use easyoffice_formats::deflate::deflate_raw;
+use easyoffice_formats::{
+    EasyOfficeError, Hwp5Codec, Hwp5DocumentPayload, Hwp5ParagraphRecord, LegacyOle2Codec,
+    LegacyXlsPayload, Ole2ContainerCodec,
+};
 
 fn assert_budget_error<T>(result: Result<T, EasyOfficeError>, what: &str) {
     match result {
@@ -84,4 +88,50 @@ fn an_ordinary_piece_table_still_opens() {
     let bytes = doc_with_repeated_pieces(50, 100);
     let doc = LegacyOle2Codec::unpack_doc(&bytes).expect("small piece table opens");
     assert_eq!(doc.paragraphs.concat().len(), 5_000);
+}
+
+fn hwp_payload() -> Hwp5DocumentPayload {
+    Hwp5DocumentPayload {
+        version: (5, 1, 0, 0),
+        is_template: false,
+        agency_name: String::new(),
+        document_number: String::new(),
+        paragraphs: vec![Hwp5ParagraphRecord {
+            text: "본문".to_string(),
+            style_name: "본문".to_string(),
+            is_official_header: false,
+        }],
+        table_cells: Vec::new(),
+    }
+}
+
+/// A compressed HWP 5.0 file whose `sections` body sections each inflate to `section_bytes`
+/// (one unknown record of zeros, so the section parses in a handful of records).
+fn hwp_with_inflating_sections(sections: usize, section_bytes: usize) -> Vec<u8> {
+    let base = Hwp5Codec::pack_compressed(&hwp_payload()).expect("pack hwp fixture");
+    let mut streams = Ole2ContainerCodec::unpack(&base).expect("unpack hwp fixture");
+    streams.retain(|s| !s.name.starts_with("BodyText/"));
+    let mut record = Hwp5Codec::encode_record_header(1, 0, section_bytes - 8);
+    record.resize(section_bytes, 0);
+    let packed_section = deflate_raw(&record);
+    let mut entries: Vec<(String, Vec<u8>)> =
+        streams.into_iter().map(|s| (s.name, s.data)).collect();
+    for index in 0..sections {
+        entries.push((format!("BodyText/Section{index}"), packed_section.clone()));
+    }
+    Ole2ContainerCodec::pack(&entries).expect("pack hwp sections")
+}
+
+#[test]
+fn compressed_sections_that_together_inflate_past_the_budget_are_refused() {
+    // 4 sections of 100 MiB: each is below the per-stream limit (128 MiB), together 400 MiB.
+    let bytes = hwp_with_inflating_sections(4, 100 * 1024 * 1024);
+    assert_budget_error(Hwp5Codec::unpack_multi_tables(&bytes), "inflating sections");
+}
+
+#[test]
+fn ordinary_compressed_sections_still_open() {
+    let bytes = hwp_with_inflating_sections(3, 1024 * 1024);
+    let (payload, _) = Hwp5Codec::unpack_multi_tables(&bytes).expect("small sections open");
+    assert!(payload.paragraphs.is_empty());
 }

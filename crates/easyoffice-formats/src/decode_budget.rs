@@ -43,6 +43,11 @@ impl DecodeBudget {
         Self { remaining: limit }
     }
 
+    /// Bytes still available: the output ceiling for a decoder that can stop at a given size.
+    pub(crate) const fn remaining(&self) -> usize {
+        self.remaining
+    }
+
     /// Takes `bytes` out of the allowance, or fails when the document has used it up.
     pub(crate) fn charge(&mut self, bytes: usize, what: &str) -> Result<(), EasyOfficeError> {
         match self.remaining.checked_sub(bytes) {

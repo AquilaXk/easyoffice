@@ -240,3 +240,35 @@ fn test_inflate_raw_sized_treats_the_declared_size_only_as_a_hint() {
     assert!(inflate_raw_sized(&packed, input.len() - 1, 10).is_err());
     assert!(inflate_raw_sized(&packed, 1_000, 10_000_000).is_err());
 }
+
+#[test]
+fn test_initial_output_allocation_is_bounded_whatever_the_container_declares() {
+    const BOUND: usize = 4 * 1024 * 1024 + OUT_SLACK;
+    const GIB_HALF: usize = 512 * 1024 * 1024;
+    // A tiny stream whose ZIP header claims 512 MiB, and a 100 MB stream without any claim.
+    assert!(OutBuf::new(100, GIB_HALF, GIB_HALF).buf.len() <= BOUND);
+    assert!(OutBuf::new(100_000_000, GIB_HALF, 0).buf.len() <= BOUND);
+    // An honest small claim is still allocated exactly once.
+    assert_eq!(
+        OutBuf::new(100, GIB_HALF, 1_000).buf.len(),
+        1_000 + OUT_SLACK
+    );
+}
+
+#[test]
+fn test_output_grows_toward_the_declared_size_without_passing_it() {
+    let input: Vec<u8> = (0..=250u8).cycle().take(20 * 1024 * 1024).collect();
+    let packed = deflate_raw(&input);
+    let mut out = OutBuf::new(packed.len(), 64 * 1024 * 1024, input.len());
+    out.reserve_extra(input.len());
+    assert!(
+        out.buf.len() <= input.len() + OUT_SLACK,
+        "growth stops at the declared size ({} > {})",
+        out.buf.len(),
+        input.len() + OUT_SLACK
+    );
+    assert_eq!(
+        inflate_raw_sized(&packed, input.len(), input.len()).unwrap(),
+        input
+    );
+}

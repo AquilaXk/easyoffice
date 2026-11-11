@@ -467,6 +467,12 @@ fn read_dynamic_huffman_tables(
 /// (longest match 258 + 7 bytes of chunk overshoot).
 const OUT_SLACK: usize = MAX_MATCH_LEN + 8;
 const MIN_OUT_CAPACITY: usize = 4_096;
+/// Most output allocated before any byte is produced. The declared size is untrusted (a ZIP
+/// header can claim 512 MiB for a 100-byte stream), so a bigger buffer is only reached by growing
+/// with the output that really appears (PD-175).
+const MAX_INITIAL_OUT_CAPACITY: usize = 4 * 1024 * 1024;
+/// Growth factor while the declared size is still ahead of the buffer.
+const HINTED_GROWTH: usize = 4;
 /// Non-overlapping matches longer than this use `memmove` instead of the 8-byte chunk loop.
 const LONG_COPY_MIN: usize = 32;
 
@@ -477,24 +483,31 @@ struct OutBuf {
     pos: usize,
     /// Largest `buf.len()` worth allocating (the output budget plus slack).
     hard_cap: usize,
+    /// Output size the container declares (0 when unknown); a growth target, never trusted.
+    expected_len: usize,
 }
 
 impl OutBuf {
-    /// `expected_len` is the output size the container declares (0 when unknown): allocating it
-    /// at once spares the doubling growth, which for a large picture copies the output about
-    /// twice over and, on some allocators, leaves every outgrown block resident.
+    /// `expected_len` is the output size the container declares (0 when unknown): an honest claim
+    /// up to [`MAX_INITIAL_OUT_CAPACITY`] is allocated at once, sparing the doubling growth, which
+    /// for a small picture copies the output about twice over. A larger or false claim is not
+    /// allocated up front: the buffer grows toward it as the output appears (see `grow`).
     fn new(input_len: usize, max_output_bytes: usize, expected_len: usize) -> Self {
         let hard_cap = max_output_bytes.saturating_add(OUT_SLACK);
         let guess = if expected_len > 0 {
             expected_len
         } else {
-            input_len.saturating_mul(4).max(MIN_OUT_CAPACITY)
+            input_len.saturating_mul(8).max(MIN_OUT_CAPACITY)
         };
-        let initial = guess.saturating_add(OUT_SLACK).min(hard_cap);
+        let initial = guess
+            .min(MAX_INITIAL_OUT_CAPACITY)
+            .saturating_add(OUT_SLACK)
+            .min(hard_cap);
         Self {
             buf: vec![0u8; initial],
             pos: 0,
             hard_cap,
+            expected_len,
         }
     }
 
@@ -520,11 +533,16 @@ impl OutBuf {
 
     #[cold]
     fn grow(&mut self, need: usize) {
-        let wanted = self
-            .buf
-            .len()
-            .saturating_mul(2)
-            .max(self.pos.saturating_add(need));
+        let len = self.buf.len();
+        let hint_end = self.expected_len.saturating_add(OUT_SLACK);
+        // Output that is still short of the declared size grows quickly toward it and stops there;
+        // otherwise (no claim, or a claim already passed) the buffer doubles.
+        let step = if hint_end > len {
+            len.saturating_mul(HINTED_GROWTH).min(hint_end)
+        } else {
+            len.saturating_mul(2)
+        };
+        let wanted = step.max(self.pos.saturating_add(need));
         // The budget is checked before every write, so more than `hard_cap` is never required
         // for output that passes the check (a single stored block may exceed it only by `need`).
         let target = wanted.min(self.hard_cap.max(self.pos.saturating_add(need)));
