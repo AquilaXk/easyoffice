@@ -4,8 +4,10 @@
 //! latest release at most once a day. When that release is a newer, final `x.y.z` version, the page
 //! shows a small card (the reference app's "update notice") with a button that installs it and
 //! restarts the app (`update_install.rs`: signed package, refused while a window has unsaved
-//! changes) and a button that opens the release page in the default browser, the way to update an
-//! installation the signed install does not cover (deb, rpm).
+//! changes) and a button that opens the release page in the default browser, the way to update when
+//! the signed install is unavailable or fails (a debug build, a platform entry missing from the
+//! release, a failed download or signature check). Every updatable bundle (AppImage, deb, rpm, NSIS,
+//! macOS app archive) is signed and listed in `latest.json` by `scripts/release-assets.mjs`.
 //!
 //! Privacy and safety:
 //! * The request carries no information about the user or the document; the only identifying text is
