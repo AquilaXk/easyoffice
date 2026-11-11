@@ -638,3 +638,25 @@ test("converter with read-only pages source format supports studio save and secu
   await flushAsyncTurns(20);
   assert.match(document.getElementById("security-status-text").textContent, /SAFE/);
 });
+
+test("opening a sheet file leaves no demo tab label, formula bar value or result", async () => {
+  for (const [name, bytes] of [["데이터.csv", enc.encode("이름,값\r\n가,1\r\n")], ["통계.xlsx", null]]) {
+    const { document } = await createOpenHarness();
+    await pickFile(document, bytes ? makeFile(name, bytes) : fixtureFile(name, SHEET_MODEL));
+    const labels = [...document.querySelectorAll("#sheet-tab-bar .sheet-tab-btn[data-sheet-tab]")]
+      .map((b) => b.textContent);
+    assert.ok(!labels.some((l) => /분기별 실적|부문별 요약/.test(l)), name + " tabs: " + labels);
+    assert.ok(!/4950/.test(document.getElementById("sheet-eval-result").textContent), name);
+    assert.notEqual(document.getElementById("formula-input").value, "=SUM(B2:E2)", name);
+  }
+});
+
+test("an opened PDF shows no empty stamp box and its watermark field has a label", async () => {
+  const { document } = await createOpenHarness();
+  await pickFile(document, fixtureFile("계약서.pdf", { title: "계약서", blocks: [] }));
+  assert.equal(document.getElementById("pdf-stamp-badge").textContent, "");
+  assert.match(readText(fileURLToPath(new URL("../crates/easyoffice-app/ui/styles.css", import.meta.url))),
+    /\.pdf-stamp:empty\s*\{\s*display:\s*none/);
+  assert.ok(document.querySelector('label[for="pdf-watermark-input"]'));
+  assert.ok(document.getElementById("pdf-watermark-input").getAttribute("placeholder"));
+});

@@ -387,7 +387,10 @@
       next.tabTitles = { ...next.tabTitles, [mod]: name };
     }
 
+    // A file replaces the whole workbook: its tabs stay, and the sample formula result goes away.
     function pruneSheetTabs(names) {
+      const result = document.getElementById("sheet-eval-result");
+      if (result) result.textContent = "";
       const keep = new Set(names);
       document.querySelectorAll("#sheet-tab-bar .sheet-tab-btn[data-sheet-tab]").forEach((btn) => {
         if (!keep.has(btn.dataset.sheetTab)) btn.remove();

@@ -633,8 +633,8 @@
               </div>
             </div>
             <div id="sheet-tab-bar" class="sheet-tab-bar" role="tablist" aria-label="시트 탭 전환">
-              <button class="sheet-tab-btn active" role="tab" aria-selected="true" data-sheet-tab="Sheet1">2026 분기별 실적</button>
-              <button class="sheet-tab-btn" role="tab" aria-selected="false" data-sheet-tab="Sheet2">부문별 요약</button>
+              <button class="sheet-tab-btn active" role="tab" aria-selected="true" data-sheet-tab="Sheet1">시트 1</button>
+              <button class="sheet-tab-btn" role="tab" aria-selected="false" data-sheet-tab="Sheet2">시트 2</button>
               <button id="btn-add-sheet-tab" class="sheet-tab-btn">+ 시트 추가</button>
             </div>
           </div>
@@ -712,12 +712,14 @@
                   <option value="초안">초안</option>
                   <option value="최종본">최종본</option>
                 </select>
+                <label for="pdf-watermark-input" class="sb-size-unit">워터마크</label>
                 <input
                   id="pdf-watermark-input"
                   type="text"
                   class="sb-select pdf-watermark-input"
                   maxlength="200"
                   value="대외비 · 기획조정실"
+                  placeholder="워터마크 문구"
                   aria-label="워터마크 문구"
                 />
               </div>
