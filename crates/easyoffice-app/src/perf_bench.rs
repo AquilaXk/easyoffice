@@ -14,7 +14,8 @@ use crate::benchmark_large::build_recalc_sheet;
 use crate::convert_structured::{encode_structured, StructuredContent};
 use crate::EasyOfficeIpcRouter;
 use easyoffice_formats::{
-    CellMerge, DocumentFormat, RichBlock, RichDocument, RichParagraph, RichRun, RichTable,
+    CellMerge, DocumentFormat, PdfWriteOptions, RichBlock, RichDocument, RichParagraph, RichRun,
+    RichTable,
 };
 use std::hint::black_box;
 use std::path::PathBuf;
@@ -169,7 +170,7 @@ fn out_dir() -> PathBuf {
 fn bench_generate_inputs() {
     let dir = out_dir();
     std::fs::create_dir_all(&dir).expect("dir");
-    let document = StructuredContent::Document(large_document());
+    let document = StructuredContent::Document(large_document(), PdfWriteOptions::default());
     let families: [(&str, StructuredContent, &[DocumentFormat]); 3] = [
         (
             "doc",
@@ -284,7 +285,7 @@ fn run(case: &str, input: &str) -> String {
             let content = match format {
                 DocumentFormat::Xlsx | DocumentFormat::Ods => large_workbook(),
                 DocumentFormat::Pptx => large_slides(),
-                _ => StructuredContent::Document(large_document()),
+                _ => StructuredContent::Document(large_document(), PdfWriteOptions::default()),
             };
             let t = Instant::now();
             let bytes =
