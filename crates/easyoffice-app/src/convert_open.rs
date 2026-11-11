@@ -19,7 +19,7 @@ use easyoffice_sheet::PackedCellCoordinate;
 use std::collections::HashSet;
 use std::fmt::Write;
 
-use crate::convert_structured::{encode_structured, StructuredContent};
+use crate::convert_structured::{encode_target, RichPdfRenderer, StructuredContent};
 use crate::EasyOfficeIpcRouter;
 
 /// Upper bound on a decoded source file: the number the page checks before it sends
@@ -404,6 +404,7 @@ impl EasyOfficeIpcRouter {
     pub(crate) fn handle_source_file_request(
         entries: &JsonEntries,
         source_base64: &str,
+        renderer: Option<&RichPdfRenderer<'_>>,
     ) -> Result<String, EasyOfficeError> {
         let b64 = source_base64.trim();
         if b64.len() > MAX_SOURCE_BYTES / 3 * 4 + 8 {
@@ -475,7 +476,7 @@ impl EasyOfficeIpcRouter {
         let src_fmt = decoded.format;
         let mut warnings = decoded.warnings.clone();
         let content = into_structured(decoded.content, &styling);
-        let dst_bytes = encode_structured(&content, dst_fmt, &title, &mut warnings)?;
+        let dst_bytes = encode_target(&content, dst_fmt, src_fmt, &title, renderer, &mut warnings)?;
         Self::conversion_response(src_fmt, dst_fmt, &bytes, &dst_bytes, &warnings)
     }
 }

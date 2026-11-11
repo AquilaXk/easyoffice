@@ -34,6 +34,7 @@ mod sheet_session;
 pub mod smart_tools;
 
 pub use benchmark::*;
+pub use convert_structured::RichPdfRenderer;
 pub use ffi::*;
 pub use http_server::{
     serve_http_on_listener, serve_http_on_listener_with_handler, serve_webui, ConnectionSlotGuard,
@@ -51,7 +52,7 @@ pub struct EasyOfficeIpcRouter;
 
 impl EasyOfficeIpcRouter {
     pub fn dispatch(command: &str, payload: &str) -> Result<String, EasyOfficeError> {
-        Self::dispatch_for_owner(command, payload, "")
+        Self::dispatch_inner(command, payload, "", None)
     }
 
     /// Like [`Self::dispatch`], tagging state the command creates with `owner` (a window label) so
@@ -60,6 +61,36 @@ impl EasyOfficeIpcRouter {
         command: &str,
         payload: &str,
         owner: &str,
+    ) -> Result<String, EasyOfficeError> {
+        Self::dispatch_inner(command, payload, owner, None)
+    }
+
+    /// [`Self::dispatch`] for a host that can draw pages: a rich document converted to PDF is
+    /// handed to `renderer` as HWPX instead of being written by the engine's text-only PDF
+    /// writer (PD-166). The engine PDF stays the fallback when the renderer fails.
+    pub fn dispatch_with_pdf_renderer(
+        command: &str,
+        payload: &str,
+        renderer: &RichPdfRenderer<'_>,
+    ) -> Result<String, EasyOfficeError> {
+        Self::dispatch_inner(command, payload, "", Some(renderer))
+    }
+
+    /// [`Self::dispatch_for_owner`] with the page renderer of [`Self::dispatch_with_pdf_renderer`].
+    pub fn dispatch_for_owner_with_pdf_renderer(
+        command: &str,
+        payload: &str,
+        owner: &str,
+        renderer: &RichPdfRenderer<'_>,
+    ) -> Result<String, EasyOfficeError> {
+        Self::dispatch_inner(command, payload, owner, Some(renderer))
+    }
+
+    fn dispatch_inner(
+        command: &str,
+        payload: &str,
+        owner: &str,
+        renderer: Option<&RichPdfRenderer<'_>>,
     ) -> Result<String, EasyOfficeError> {
         match command {
             "get_workspace_bootstrap" => Self::handle_workspace_bootstrap(),
@@ -76,7 +107,7 @@ impl EasyOfficeIpcRouter {
             "switch_ribbon_style" => Self::handle_switch_ribbon_style(payload),
             "run_smart_assistant" => Self::handle_run_smart_assistant(payload),
             "scrub_pii" => Self::handle_scrub_pii(payload),
-            "convert_document_format" => Self::handle_convert_document_format(payload),
+            "convert_document_format" => Self::handle_convert_document_format(payload, renderer),
             "get_ribbon_category_commands" => Self::handle_get_ribbon_category_commands(payload),
             "run_engine_benchmark" => Self::handle_run_engine_benchmark(payload),
             other => Err(EasyOfficeError::InvalidArgument(format!(

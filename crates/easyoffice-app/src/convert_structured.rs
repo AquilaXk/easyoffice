@@ -823,6 +823,44 @@ fn rectangular_grid(
     Ok(grid)
 }
 
+/// Draws a document's pages for a host that can: the document as HWPX and the page settings in,
+/// the PDF out (PD-164).
+pub type RichPdfRenderer<'a> = dyn Fn(&[u8], &PdfWriteOptions) -> Result<Vec<u8>, String> + 'a;
+
+/// [`encode_structured`], except that a document converted to PDF is drawn by `renderer` when
+/// there is one. A PDF studio save (`source` is PDF) keeps the engine's PDF, which writes the
+/// page markers the studio reads back. When the renderer fails the engine PDF is written and
+/// `warnings` says why.
+pub(crate) fn encode_target(
+    content: &StructuredContent,
+    format: DocumentFormat,
+    source: DocumentFormat,
+    title: &str,
+    renderer: Option<&RichPdfRenderer<'_>>,
+    warnings: &mut Vec<String>,
+) -> Result<Vec<u8>, EasyOfficeError> {
+    if let (Some(render), StructuredContent::Document(doc, options), DocumentFormat::Pdf) =
+        (renderer, content, format)
+    {
+        if source != DocumentFormat::Pdf {
+            let doc = RichDocument {
+                title: title.to_string(),
+                ..doc.clone()
+            };
+            let rendered = UniversalFormatConverter::encode_rich(&doc, DocumentFormat::Hwpx, None)
+                .map_err(|err| err.to_string())
+                .and_then(|hwpx| render(&hwpx, options));
+            match rendered {
+                Ok(pdf) => return Ok(pdf),
+                Err(reason) => warnings.push(format!(
+                    "서식을 살린 PDF를 만들지 못해 기본 PDF(글자 중심)로 저장했습니다: {reason}"
+                )),
+            }
+        }
+    }
+    encode_structured(content, format, title, warnings)
+}
+
 /// Encodes structured content to `format`, titling the output `title`. What the format cannot
 /// hold of the content is added to `warnings`.
 pub(crate) fn encode_structured(

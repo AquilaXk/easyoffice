@@ -4,7 +4,9 @@ use easyoffice_formats::{
 };
 use easyoffice_sheet::{EvaluatedCellValue, PackedCellCoordinate, SheetEngine};
 
-use crate::convert_structured::{encode_structured, parse_structured_content, StructuredContent};
+use crate::convert_structured::{
+    encode_structured, encode_target, parse_structured_content, RichPdfRenderer, StructuredContent,
+};
 use crate::EasyOfficeIpcRouter;
 
 /// Evaluates every formula cell XLSX output will contain with the sheet engine, so the written
@@ -148,14 +150,17 @@ impl LegacyBodyAccumulator {
 }
 
 impl EasyOfficeIpcRouter {
-    pub(crate) fn handle_convert_document_format(payload: &str) -> Result<String, EasyOfficeError> {
+    pub(crate) fn handle_convert_document_format(
+        payload: &str,
+        renderer: Option<&RichPdfRenderer<'_>>,
+    ) -> Result<String, EasyOfficeError> {
         let trimmed = payload.strip_prefix('\u{FEFF}').unwrap_or(payload).trim();
         let mut structured: Option<StructuredContent> = None;
         let mut warnings: Vec<String> = Vec::new();
         let (src_owned, dst_owned, title_owned, body_owned) = if trimmed.starts_with('{') {
             let entries = Self::parse_rpc_json_object(trimmed)?;
             if let Some(b64) = Self::optional_json_str(&entries, "sourceBase64")? {
-                return Self::handle_source_file_request(&entries, b64);
+                return Self::handle_source_file_request(&entries, b64, renderer);
             }
             if Self::optional_json_str(&entries, "action")? == Some("decode") {
                 return Err(EasyOfficeError::InvalidArgument(
@@ -255,7 +260,7 @@ impl EasyOfficeIpcRouter {
             // Only what the target loses is reported; the source-side encode is just for its size.
             (
                 encode_structured(content, size_fmt, title, &mut Vec::new())?,
-                encode_structured(content, dst_fmt, title, &mut warnings)?,
+                encode_target(content, dst_fmt, src_fmt, title, renderer, &mut warnings)?,
             )
         } else {
             let model = Self::legacy_body_model(body, title);
