@@ -132,7 +132,9 @@
     trigger.type = "button";
     trigger.setAttribute("aria-haspopup", "listbox");
     trigger.setAttribute("aria-expanded", "false");
-    const selectLabel = select.getAttribute("aria-label") || select.getAttribute("title");
+    // The native select leaves the accessibility tree, so a `<label for>` name moves to the trigger.
+    const labelEl = select.id ? document.querySelector(`label[for="${select.id}"]`) : null;
+    const selectLabel = select.getAttribute("aria-label") || select.getAttribute("title") || (labelEl?.textContent || "").trim();
     if (selectLabel) trigger.setAttribute("aria-label", selectLabel);
     const value = el(document, "span", "custom-select-value");
     const arrow = el(document, "span", "custom-select-arrow");
@@ -147,6 +149,9 @@
     root.appendChild(menu);
     root.appendChild(select);
     select.classList.add("native-select-hidden");
+    // The trigger is the one Tab stop and the accessible control; the native select only holds state.
+    select.tabIndex = -1;
+    select.setAttribute("aria-hidden", "true");
 
     const options = [];
     const optionByValue = new Map();
