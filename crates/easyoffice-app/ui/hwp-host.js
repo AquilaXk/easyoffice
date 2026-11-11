@@ -46,7 +46,6 @@
   const MSG_UNAVAILABLE = "한글 편집기 구성 요소가 포함되지 않은 빌드입니다. 텍스트 전용 편집기로 대체합니다.";
   const MSG_LOADING = "한글 편집기를 불러오는 중입니다…";
   const MSG_FAILED = "한글 편집기에 연결하지 못했습니다.";
-  const TOOL_HINT = "한글 편집기 도구줄을 사용하세요";
   const SHORTCUT_REASON = "shell_shortcut";
   // The editor's 파일 menu forwards shell commands by name only (#158); the shell re-checks each one
   // here before anything runs, so a compromised frame can only ask for these actions.
@@ -758,7 +757,6 @@
       getStatus: () => status,
       getCapabilities: () => capabilities.slice(),
       getFrame: () => frame,
-      toolHint: TOOL_HINT,
     };
   }
 

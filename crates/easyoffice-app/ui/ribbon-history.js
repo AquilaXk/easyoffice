@@ -871,8 +871,6 @@
     function isHwpEmbedCommandBlocked(cmdId, mod) {
       const hwpHost = getHwpHost?.();
       if (mod !== "HWP" || !hwpHost?.isEmbedActive() || cmdId.endsWith("-view-theme")) return false;
-      const fb = document.getElementById("status-command-feedback");
-      if (fb) fb.textContent = hwpHost.toolHint;
       return true;
     }
 

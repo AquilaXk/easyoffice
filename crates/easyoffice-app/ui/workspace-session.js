@@ -593,7 +593,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     async function runClipboardCommand(cmd, withDocStyleUndo) {
       const mod = getActiveModule();
       if (!studioCommandApplies(cmd, mod)) {
-        setFeedback("현재 모듈에서는 키보드 Ctrl+X / Ctrl+C / Ctrl+V를 사용하세요");
+        setFeedback("지원하지 않는 명령");
         return;
       }
       if (mod === "SHEET" && typeof getSheetController === "function") return runSheetClipboard(cmd);
