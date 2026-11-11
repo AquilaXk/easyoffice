@@ -6,7 +6,7 @@
 
   const rules = host.__EASYOFFICE_SHEET_RULES__;
   const PIVOT_MAX_FIELDS = 256;
-  const PLACEHOLDER = "(범위를 먼저 입력)";
+  const PLACEHOLDER = "범위 없음";
 
   function createSheetPivotUi(deps, kit) {
     const {
@@ -115,7 +115,7 @@
       setVal("sheet-pivot-range", multi ? selectionText() : usedRangeText());
       setChecked("sheet-pivot-header", true);
       refreshPivotFields();
-      note("sheet-pivot-status", "결과는 새 시트에 만듭니다.");
+      note("sheet-pivot-status", "");
       return openDialog("sheet-pivot-dialog");
     }
 

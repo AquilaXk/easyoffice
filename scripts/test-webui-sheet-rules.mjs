@@ -622,10 +622,11 @@ test("the icon set combo shows Korean labels and keeps the file format identifie
 test("the pivot combos have a placeholder option until a range names fields, and refuse to build without one", async () => {
   const { document, userClick, rulesUi } = await dialogHarness();
   const text = (id) => [...document.getElementById(id).querySelectorAll("option")].map((o) => o.textContent);
-  assert.deepEqual(text("sheet-pivot-row-select"), ["(범위를 먼저 입력)"]);
-  assert.deepEqual(text("sheet-pivot-value-select"), ["(범위를 먼저 입력)"]);
+  assert.deepEqual(text("sheet-pivot-row-select"), ["범위 없음"]);
+  assert.deepEqual(text("sheet-pivot-value-select"), ["범위 없음"]);
   assert.deepEqual(text("sheet-pivot-col-select"), ["(없음)"]);
   rulesUi.openPivotDialog();
+  assert.equal(document.getElementById("sheet-pivot-status").textContent, "", "no explanatory sentence on screen");
   document.getElementById("sheet-pivot-range").value = "";
   userClick(document.getElementById("btn-sheet-pivot-apply"));
   await flushAsyncTurns();
