@@ -270,7 +270,6 @@
 .slide-show[data-screen="white"] .slide-show-counter { color: #555; }
 .slide-show-exit { position: absolute; top: 10px; right: 12px; color: #ddd; background: rgba(0, 0, 0, 0.5); border: 1px solid #555; opacity: 0.35; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; }
 .slide-show-exit:hover, .slide-show-exit:focus-visible { opacity: 1; }
-.slide-show-hint { position: absolute; left: 16px; bottom: 10px; margin: 0; color: #aaa; font-size: 12px; }
 .slide-show-presenter { position: absolute; right: 16px; bottom: 40px; width: min(380px, 44vw); padding: 12px; background: rgba(20, 20, 24, 0.92); color: #f2f2f2; border-radius: 8px; font-size: 13px; }
 .slide-show-presenter[hidden] { display: none; }
 .slide-show-presenter-row { margin: 0 0 6px; display: flex; gap: 8px; justify-content: space-between; white-space: nowrap; align-items: baseline; }

@@ -128,7 +128,7 @@ test("the start window shows creation buttons and the recent list", async () => 
 test("the start window says so when there are no recent files", async () => {
   const { document } = await openWindow("?module=START&win=main");
   assert.ok(document.querySelector("#home-screen .home-recent").classList.contains("is-empty"));
-  assert.match(document.querySelector(".home-recent-hint").textContent, /아직 최근 문서가 없습니다/);
+  assert.equal(document.querySelector(".home-recent-hint"), null, "no hint sentence");
   assert.equal(document.querySelectorAll(".home-recent-card").length, 0);
 });
 
@@ -167,13 +167,13 @@ test("the home screen keeps the reference app's structure and is the only visibl
   const siblings = screen.parentElement.childNodes;
   assert.equal(siblings[siblings.indexOf(screen) - 1].id, "menu-bar", "the screen sits right below the menu bar");
   assert.deepEqual(
-    [".home-hero .home-title", ".home-hero .home-subtitle", ".home-hero .home-actions", ".home-recent .home-section-header .home-section-title", ".home-recent .home-recent-hint", ".home-recent .home-recent-track", ".home-drop-hint"].map((sel) => screen.querySelector(sel) !== null),
-    new Array(7).fill(true)
+    [".home-hero .home-actions", ".home-recent .home-section-header .home-section-title", ".home-recent .home-recent-track"].map((sel) => screen.querySelector(sel) !== null),
+    new Array(3).fill(true)
   );
   assert.equal(screen.querySelector(".home-section-title").textContent, "최근 문서");
   for (const action of screen.querySelectorAll(".home-action")) {
     assert.ok(action.querySelector(".home-action-title").textContent.length > 0);
-    assert.ok(action.querySelector(".home-action-description").textContent.length > 0);
+    assert.equal(action.querySelector(".home-action-description"), null, "an action is its title and icon");
     assert.ok(action.querySelector(".home-action-icon svg"), "every action has an SVG icon");
   }
   assert.equal(document.querySelectorAll(".start-card, #start-screen").length, 0, "the old start markup is gone");

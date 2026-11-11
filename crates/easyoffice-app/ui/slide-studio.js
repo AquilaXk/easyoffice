@@ -139,7 +139,7 @@
         deck.splice(idx, 1);
         return Math.min(idx, deck.length - 1);
       });
-      setFeedback("슬라이드를 삭제했습니다. Ctrl+Z로 되돌릴 수 있습니다");
+      setFeedback("슬라이드를 삭제했습니다");
     }
 
     function moveSlide(from, to) {

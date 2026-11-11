@@ -78,12 +78,7 @@
 
     // ---- 페이지 분할·병합 dialog ---------------------------------------------------------------
 
-    const MODE_HINTS = {
-      merge: "고른 PDF의 쪽을 현재 쪽 뒤에 붙입니다. 실행 취소로 되돌릴 수 없습니다.",
-      range: "쪽 범위마다 파일 하나로 저장합니다. 예: 1-3, 5, 7-",
-      each: "쪽마다 파일 하나로 저장합니다.",
-    };
-    const RANGE_MISSING = "쪽 범위를 입력해 주세요. 예: 1-3, 5, 7-";
+    const RANGE_MISSING = "쪽 범위를 입력해 주세요";
     let pendingChoice = null;
     let dialogBound = false;
 
@@ -95,18 +90,24 @@
       if (resolve) resolve(choice);
     }
 
+    function showError(text) {
+      const error = field("pdf-splitmerge-error");
+      error.textContent = text;
+      error.hidden = !text;
+    }
+
     function syncMode() {
       const mode = field("pdf-splitmerge-mode").value;
       const range = field("pdf-splitmerge-range");
       range.disabled = mode !== "range";
-      field("pdf-splitmerge-hint").textContent = MODE_HINTS[mode] || "";
+      showError("");
     }
 
     function confirmChoice() {
       const mode = field("pdf-splitmerge-mode").value;
       const ranges = field("pdf-splitmerge-range").value.trim();
       if (mode === "range" && !ranges) {
-        field("pdf-splitmerge-hint").textContent = RANGE_MISSING;
+        showError(RANGE_MISSING);
         return;
       }
       finishChoice({ mode, ranges: mode === "range" ? ranges : "" });

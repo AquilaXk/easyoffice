@@ -47,16 +47,13 @@ test("a new presentation is one empty slide", async () => {
   assert.match(byId(document, "slide-meta-status").textContent, /슬라이드 1 \/ 1/);
 });
 
-test("the PDF screen without a file shows only the home screen's empty hint, and a file brings the card back", async () => {
+test("the PDF screen without a file shows only an empty work area, and a file brings the card back", async () => {
   const { document } = await createWorkspaceHarness();
   switchModule(document, "PDF");
   await flushAsyncTurns();
   const pane = byId(document, "pane-pdf");
   assert.equal(pane.dataset.empty, "true");
-  const hint = byId(document, "pdf-empty-hint");
-  assert.ok(hint.classList.contains("home-drop-hint"));
-  assert.match(hint.textContent, /열린 PDF가 없습니다/);
-  assert.match(hint.textContent, /끌어다 놓으세요/);
+  assert.equal(byId(document, "pdf-empty-hint"), null, "no instruction sentence");
   for (const id of ["pdf-form-applicant", "pdf-form-dept", "pdf-watermark-input"]) {
     assert.equal(byId(document, id).value, "", id);
   }
@@ -66,9 +63,7 @@ test("the PDF screen without a file shows only the home screen's empty hint, and
   for (const id of controls) assert.equal(byId(document, id).disabled, true, id + " is disabled without a file");
   const css = readText(fileURLToPath(new URL("../crates/easyoffice-app/ui/styles.css", import.meta.url)));
   assert.match(css, /\.pdf-page-card\[hidden\][^{]*\{\s*display:\s*none/);
-  assert.match(css, /#pdf-empty-hint\s*\{[^}]*margin:\s*auto/, "the hint sits in the middle of the work area");
   assert.match(css, /#pane-pdf\[data-empty="true"\] \.pdf-page-card[^{]*\{\s*display:\s*none/);
-  assert.match(css, /#pane-pdf\[data-empty="false"\] #pdf-empty-hint[^{]*\{\s*display:\s*none/);
 
   await pickFile(document, makeFixtureFile("계약서.pdf", { title: "", blocks: [] }));
   assert.equal(pane.dataset.empty, "false");

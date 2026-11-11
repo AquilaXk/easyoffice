@@ -203,10 +203,8 @@ select:focus-visible,
 @keyframes slide-show-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes slide-show-push { from { transform: translateX(8%); opacity: 0; } to { transform: none; opacity: 1; } }
 @keyframes slide-show-zoom { from { transform: scale(0.92); opacity: 0; } to { transform: none; opacity: 1; } }
-@keyframes slide-show-hint-fade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
 /* Motion is opt-in: reduced-motion users get no transitions or hint fade. */
 @media (prefers-reduced-motion: no-preference) {
-  .slide-show-hint { animation: slide-show-hint-fade 6s forwards; }
   .slide-show-frame[data-transition="fade"] { animation: slide-show-fade 0.4s ease; }
   .slide-show-frame[data-transition="push"] { animation: slide-show-push 0.4s ease; }
   .slide-show-frame[data-transition="zoom"] { animation: slide-show-zoom 0.4s ease; }
@@ -258,11 +256,7 @@ select:focus-visible,
 .slide-title-zone h2 { margin: 0; font-size: inherit; overflow-wrap: anywhere; }
 .slide-lower-zone { flex: 1 1 auto; min-height: 0; overflow: auto; margin: 0 5cqw 4cqw; padding-top: 2cqw; border-top: 1px solid var(--ui-border-light); font-size: 2.5cqw; line-height: 1.45; }
 .slide-lower-zone p { margin: 0; white-space: pre-line; }
-.slide-title-zone h2:empty::before { content: "제목을 입력하세요"; opacity: 0.4; }
-.slide-lower-zone p:empty::before { content: "내용을 입력하세요"; opacity: 0.4; }
-#pane-pdf[data-empty="true"] .pdf-page-card, #pane-pdf[data-empty="false"] #pdf-empty-hint, .pdf-page-card[hidden] { display: none; }
-#pane-pdf[data-empty="true"]:not([hidden]) { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-#pdf-empty-hint { margin: auto; padding: 24px; text-align: center; }
+#pane-pdf[data-empty="true"] .pdf-page-card, .pdf-page-card[hidden] { display: none; }
 .pdf-page-card[data-rotated-quarter="true"] { margin: 110px auto; }
 .slide-notes-box { padding-top: 8px; border-top: 1px solid var(--ui-border-light); font-size: 12px; }
 .pdf-stamp {

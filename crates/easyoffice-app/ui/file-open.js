@@ -494,7 +494,7 @@
     function renderConverterSource() {
       const label = document.getElementById("conv-source-name");
       const clearBtn = document.getElementById("btn-conv-clear-source");
-      if (label) label.textContent = converterSource ? converterSource.name + " (" + converterSource.bytes.length + "B)" : "선택 안 함 — 편집기 내용을 변환합니다";
+      if (label) label.textContent = converterSource ? converterSource.name + " (" + converterSource.bytes.length + "B)" : "선택 안 함";
       if (clearBtn) clearBtn.hidden = !converterSource;
     }
 
@@ -515,7 +515,7 @@
       converterSource = { name, bytes: read.bytes };
       selectConverterFormat(name);
       renderConverterSource();
-      if (box) box.textContent = "원본 파일 선택됨: " + name + " — [즉시 변환 검증]을 누르면 이 파일의 내용을 변환합니다.";
+      if (box) box.textContent = "원본 파일 선택됨: " + name;
       return true;
     }
 

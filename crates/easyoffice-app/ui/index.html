@@ -303,13 +303,13 @@
           <span class="eo-style-sep" aria-hidden="true">|</span>
           <div class="sb-color-group">
             <div id="doc-textcolor-host" class="sb-color-host">
-              <button id="btn-stylebar-textcolor" class="eo-glyph-btn sb-textcolor-btn" type="button" data-icon="text-color" title="글자 색 (선택한 글자에만 적용)" aria-label="글자 색 적용"></button>
+              <button id="btn-stylebar-textcolor" class="eo-glyph-btn sb-textcolor-btn" type="button" data-icon="text-color" title="글자 색" aria-label="글자 색 적용"></button>
               <button class="sb-color-arrow" type="button" data-color-toggle aria-haspopup="true" aria-expanded="false" title="글자 색 선택" aria-label="글자 색 선택"><span aria-hidden="true">▾</span></button>
               <input id="doc-textcolor-input" type="color" value="#ff0000" aria-label="글자 색 선택" />
               <div id="doc-textcolor-palette" class="sb-hl-palette" hidden></div>
             </div>
             <div id="doc-highlight-host" class="sb-color-host">
-              <button id="btn-stylebar-highlight" class="eo-glyph-btn sb-highlight-btn" type="button" data-icon="highlighter" title="형광펜 (선택한 글자에만 적용)" aria-label="형광펜 적용"></button>
+              <button id="btn-stylebar-highlight" class="eo-glyph-btn sb-highlight-btn" type="button" data-icon="highlighter" title="형광펜" aria-label="형광펜 적용"></button>
               <button class="sb-color-arrow" type="button" data-color-toggle aria-haspopup="true" aria-expanded="false" title="형광펜 색 선택" aria-label="형광펜 색 선택"><span aria-hidden="true">▾</span></button>
               <input id="doc-highlight-input" type="color" value="#ffff00" aria-label="형광펜 색 선택" />
               <div id="doc-highlight-palette" class="sb-hl-palette" hidden></div>
@@ -559,11 +559,11 @@
           <div id="pane-slide" class="editor-pane" hidden>
             <div id="slide-toolbar" class="formula-bar slide-toolbar eo-doc-style-bar" role="toolbar" aria-label="슬라이드 도구줄">
               <div class="tb-group">
-                <button id="btn-add-slide" type="button" class="tb-btn" data-icon="plus" title="빈 슬라이드를 맨 뒤에 추가" aria-label="슬라이드 추가"></button>
-                <button id="btn-slide-duplicate" type="button" class="tb-btn" data-icon="copy" title="현재 슬라이드 복제" aria-label="슬라이드 복제"></button>
-                <button id="btn-slide-delete" type="button" class="tb-btn" data-icon="trash" title="현재 슬라이드 삭제 · Delete (목록에서)" aria-label="슬라이드 삭제"></button>
-                <button id="btn-slide-move-up" type="button" class="tb-btn" data-icon="arrow-up" title="위로 이동 · Alt+↑ (목록에서)" aria-label="슬라이드 위로 이동"></button>
-                <button id="btn-slide-move-down" type="button" class="tb-btn" data-icon="arrow-down" title="아래로 이동 · Alt+↓ (목록에서)" aria-label="슬라이드 아래로 이동"></button>
+                <button id="btn-add-slide" type="button" class="tb-btn" data-icon="plus" title="슬라이드 추가" aria-label="슬라이드 추가"></button>
+                <button id="btn-slide-duplicate" type="button" class="tb-btn" data-icon="copy" title="슬라이드 복제" aria-label="슬라이드 복제"></button>
+                <button id="btn-slide-delete" type="button" class="tb-btn" data-icon="trash" title="슬라이드 삭제 · Delete" aria-label="슬라이드 삭제"></button>
+                <button id="btn-slide-move-up" type="button" class="tb-btn" data-icon="arrow-up" title="위로 이동 · Alt+↑" aria-label="슬라이드 위로 이동"></button>
+                <button id="btn-slide-move-down" type="button" class="tb-btn" data-icon="arrow-down" title="아래로 이동 · Alt+↓" aria-label="슬라이드 아래로 이동"></button>
               </div>
               <span class="tb-sep" aria-hidden="true"></span>
               <div class="sb-field-grid">
@@ -583,8 +583,8 @@
               </div>
               <span class="tb-sep" aria-hidden="true"></span>
               <div class="tb-group">
-                <button id="btn-slide-show" type="button" class="tb-btn" data-icon="play" title="처음부터 슬라이드 쇼 (F5)" aria-label="처음부터 슬라이드 쇼"></button>
-                <button id="btn-slide-show-current" type="button" class="tb-btn" data-icon="play-current" title="현재 슬라이드부터 슬라이드 쇼 (Shift+F5)" aria-label="현재 슬라이드부터 슬라이드 쇼"></button>
+                <button id="btn-slide-show" type="button" class="tb-btn" data-icon="play" title="슬라이드 쇼 (F5)" aria-label="처음부터 슬라이드 쇼"></button>
+                <button id="btn-slide-show-current" type="button" class="tb-btn" data-icon="play-current" title="현재 슬라이드부터 쇼 (Shift+F5)" aria-label="현재 슬라이드부터 슬라이드 쇼"></button>
                 <button id="btn-slide-laser" type="button" class="tb-btn" data-icon="laser" aria-pressed="false" title="레이저 포인터: 끔" aria-label="레이저 포인터"></button>
               </div>
               <span id="slide-meta-status" class="formula-result">슬라이드 1 / 1 · 전환: 페이드</span>
@@ -607,7 +607,6 @@
                     id="slide-presenter-notes"
                     type="text"
                     class="cmd-input"
-                    placeholder="발표자 노트를 입력하세요"
                   />
                 </div>
               </div>
@@ -644,7 +643,6 @@
               </div>
               <span id="pdf-rotation-badge" class="sb-size-unit">회전: 0°</span>
             </div>
-            <p id="pdf-empty-hint" class="home-drop-hint">열린 PDF가 없습니다. 파일 메뉴에서 열거나 이 창으로 끌어다 놓으세요.</p>
             <div class="pdf-page-card" id="pdf-page-card" hidden>
               <div class="pdf-stamp" id="pdf-stamp-badge"></div>
               <div class="pdf-watermark" id="pdf-watermark-layer"></div>
@@ -669,9 +667,6 @@
           <div id="pane-converter" class="editor-pane" hidden>
             <div class="editor-surface converter-surface">
               <h2>통합 문서 포맷 변환기</h2>
-              <p>
-                DOCX, HWP/HWPX, ODF, XLSX, PPTX, PDF, RTF, CSV, Markdown, TXT 간 문서를 변환합니다.
-              </p>
               <div class="formula-bar conv-source-row">
                 <label for="conv-source-file" class="sb-size-unit">원본 파일</label>
                 <input
@@ -681,7 +676,7 @@
                   accept=".docx,.doc,.odt,.rtf,.md,.markdown,.txt,.hwp,.hwpx,.hwt,.hwtx,.xlsx,.xls,.ods,.csv,.tsv,.pptx,.ppt,.ppsx,.odp,.pdf,.pages"
                   aria-label="변환할 원본 파일 선택"
                 />
-                <span id="conv-source-name">선택 안 함 — 편집기 내용을 변환합니다</span>
+                <span id="conv-source-name">선택 안 함</span>
                 <button id="btn-conv-clear-source" type="button" class="dialog-btn" hidden>선택 해제</button>
               </div>
               <div class="formula-bar conv-format-row">
@@ -736,9 +731,7 @@
                 </select>
                 <button id="btn-run-convert" type="button" class="dialog-btn dialog-btn-primary">즉시 변환 검증</button>
               </div>
-              <div id="conv-result-box" class="security-card">
-                원본과 대상 포맷을 선택한 뒤 [즉시 변환 검증]을 누르면 문서 변환 결과를 확인합니다.
-              </div>
+              <div id="conv-result-box" class="security-card"></div>
             </div>
           </div>
         </section>
@@ -849,7 +842,6 @@
               <option value="#FF00FF">분홍</option>
             </select>
           </div>
-          <p class="dialog-pdf-note">문구가 나오는 모든 곳에 칠합니다. 비우면 주석을 지웁니다.</p>
         </div>
         <div class="dialog-footer">
           <button id="btn-pdf-highlight-apply" type="button" class="dialog-btn dialog-btn-primary">확인</button>
@@ -888,7 +880,7 @@
       <div class="dialog-wrap">
         <div class="dialog-title"><span id="bench-dialog-title">문서 엔진 성능 진단</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
         <div class="dialog-body">
-          <p id="bench-result-box">[성능 진단] 버튼을 눌러 측정하세요.</p>
+          <p id="bench-result-box"></p>
         </div>
         <div class="dialog-footer">
           <button id="btn-run-benchmark" type="button" class="dialog-btn dialog-btn-primary" title="문서 처리 성능 진단 실행">성능 진단</button>
@@ -923,7 +915,7 @@
             <label class="dialog-label" for="pdf-splitmerge-range">쪽 범위</label>
             <input id="pdf-splitmerge-range" class="dialog-text-input" type="text" placeholder="1-3, 5, 7-" autocomplete="off" disabled />
           </div>
-          <p id="pdf-splitmerge-hint" class="dialog-pdf-note">고른 PDF의 쪽을 현재 쪽 뒤에 붙입니다. 실행 취소로 되돌릴 수 없습니다.</p>
+          <p id="pdf-splitmerge-error" class="dialog-pdf-note" role="alert" hidden></p>
         </div>
         <div class="dialog-footer">
           <button id="btn-pdf-splitmerge-run" type="button" class="dialog-btn dialog-btn-primary">확인</button>
@@ -937,7 +929,6 @@
         <div class="dialog-title"><span id="about-dialog-title">제품 정보</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
         <div class="dialog-body about-body">
         <div class="about-product-name">EasyOffice</div>
-        <div class="about-product-name-ko">문서 · 한글 · 스프레드시트 · 프레젠테이션 · PDF를 오프라인으로 다루는 작업 공간입니다.</div>
         <div id="about-version" class="about-version" hidden></div>
         <p class="about-notice">본 제품은 한글과컴퓨터의 한글 문서 파일(.hwp) 공개 문서를 참고하여 개발하였습니다.</p>
         <div class="about-license-title">오픈소스 라이선스</div>
@@ -960,7 +951,6 @@
             <tr><td>console_error_panic_hook</td><td>MIT / Apache-2.0</td></tr>
           </tbody>
         </table>
-        <div class="about-license-note">WASM 번들에 포함되는 핵심 크레이트만 표시합니다. 전체 목록은 THIRD_PARTY_NOTICES.md를 참조하세요.</div>
         <div class="about-diagnostics" aria-label="진단 정보">
           <span id="platform-pill" class="platform-pill">플랫폼 확인 중</span>
           <span id="status-module">모듈: 문서 (DOCX)</span>
@@ -987,7 +977,6 @@
       <div id="slide-show-viewport" class="slide-show-viewport" data-aspect="16:9"></div>
       <span id="slide-show-counter" class="slide-show-counter" aria-live="polite">1 / 1</span>
       <button id="slide-show-exit" class="slide-show-exit" type="button" aria-label="슬라이드 쇼 종료 (Esc)" data-icon="close"></button>
-      <p class="slide-show-hint">→ Space 다음 · ← 이전 · Home End · B W 화면 가리기 · P 발표자 보기 · Esc 종료</p>
       <aside id="slide-show-presenter" class="slide-show-presenter" aria-label="발표자 보기" hidden>
         <p class="slide-show-presenter-row"><strong>경과 시간</strong> <span id="slide-show-timer">00:00</span></p>
         <p class="slide-show-presenter-row"><strong>다음 슬라이드</strong> <span id="slide-show-next"></span></p>

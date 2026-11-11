@@ -149,7 +149,6 @@ test("reference values: 28px menu bar with the light border, bottom-left update 
   assert.ok(!hasDecl(card, "top") && !hasDecl(card, "right"));
   const loaded = cssRule(".home-recent-preview.is-loaded", home);
   assert.ok(hasDecl(loaded, "padding", "14px") && hasDecl(cssRule(".home-preview-canvas", home), "border-radius", "var(--radius-lg)"));
-  assert.match(readText(fileURLToPath(new URL("home-screen.js", UI_DIR))), /앱을 실행하자마자 이어서 작업할 수 있도록 최근에 연 문서를 보여줍니다\./);
   const html = readText(fileURLToPath(new URL("index.html", UI_DIR)));
   const about = html.slice(html.indexOf('<dialog id="about-dialog"'));
   assert.match(about, /class="tool-dialog"[\s\S]*?<div class="dialog-wrap">\s*<div class="dialog-title"><span id="about-dialog-title">제품 정보<\/span>/);
@@ -304,7 +303,7 @@ test("menu shortcut labels follow the platform: command glyphs on macOS, Ctrl el
   assert.ok(macLabels.every((label) => !/Ctrl|Alt|Shift/.test(label)), "no Windows words left on macOS");
   assert.ok(macLabels.includes("/"), "labels that are not key combinations stay");
   assert.equal(mac.document.getElementById("btn-stylebar-bold").getAttribute("title"), "굵게 (⌘B)");
-  assert.equal(mac.document.getElementById("btn-slide-move-up").getAttribute("title"), "위로 이동 · ⌥↑ (목록에서)");
+  assert.equal(mac.document.getElementById("btn-slide-move-up").getAttribute("title"), "위로 이동 · ⌥↑");
 
   const win = await createWorkspaceHarness({ platform: "Win32" });
   await flushAsyncTurns(10);

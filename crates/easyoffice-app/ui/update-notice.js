@@ -146,8 +146,8 @@
       const laterButton = (label) => button(label, false, dismiss);
       if (view.status === "available") {
         title.textContent = "새 버전 " + view.version + " 사용 가능";
-        body.textContent = "원할 때 설치하고 다시 시작할 수 있습니다.";
-        setText(meta, "업데이트는 직접 시작할 때만 진행되며, 서명을 확인한 파일만 설치합니다.");
+        body.textContent = "";
+        setText(meta, "");
         actions.replaceChildren(button("설치하고 다시 시작", true, () => void installUpdate()), releaseButton(), laterButton("나중에"));
       } else if (view.status === "downloading") {
         title.textContent = "버전 " + view.version + " 준비 중";

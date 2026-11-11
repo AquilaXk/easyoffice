@@ -234,7 +234,7 @@ test("new slides start with empty placeholders instead of copying defaults", asy
   assert.doesNotMatch(document.getElementById("pane-slide").textContent, /핵심 요약 및 다이어그램 영역/);
   assert.equal(thumbs(document)[3].classList.contains("active"), true);
   assert.match(thumbTitles(document)[3], /제목 없음/);
-  assert.match(STYLES_CSS, /slide-title-zone[^{]*:empty::before/);
+  assert.doesNotMatch(STYLES_CSS, /slide-title-zone[^{]*:empty::before/, "no placeholder sentence in an empty slide");
 });
 
 test("duplicate, delete with undo, and reorder via buttons keep selection, snapshot and save order", async () => {

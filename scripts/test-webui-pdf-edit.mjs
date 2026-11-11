@@ -155,7 +155,7 @@ test("페이지 분할·병합 opens the tool dialog on the opened file and merg
   assert.equal(named("pdf_edit_split_merge").length, 0, "nothing is done before the dialog is confirmed");
   assert.equal(document.getElementById("pdf-splitmerge-mode").value, "merge");
   assert.equal(document.getElementById("pdf-splitmerge-range").disabled, true, "the range field waits for 범위 분할");
-  assert.match(document.getElementById("pdf-splitmerge-hint").textContent, /현재 쪽 뒤에 붙입니다/);
+  assert.equal(document.getElementById("pdf-splitmerge-error").hidden, true, "no note until something is wrong");
   userClick(document.getElementById("btn-pdf-splitmerge-run"));
   await flushAsyncTurns(12);
   assert.equal(dialog.open, false);
@@ -173,7 +173,8 @@ test("a range split needs a range, sends the text as typed and reports the files
   userClick(document.getElementById("btn-pdf-splitmerge-run"));
   await flushAsyncTurns(6);
   assert.equal(dialogOf(document).open, true, "an empty range keeps the dialog open");
-  assert.match(document.getElementById("pdf-splitmerge-hint").textContent, /쪽 범위를 입력해 주세요/);
+  assert.equal(document.getElementById("pdf-splitmerge-error").hidden, false);
+  assert.match(document.getElementById("pdf-splitmerge-error").textContent, /쪽 범위를 입력해 주세요/);
   assert.equal(named("pdf_edit_split_merge").length, 0);
   choose(document, "range", " 1-3, 5, 7- ");
   userClick(document.getElementById("btn-pdf-splitmerge-run"));
@@ -281,17 +282,10 @@ test("outside the desktop shell nothing changes: no shell call is made and the a
   assert.doesNotMatch(feedback(document), /겹쳐 씁니다/);
 });
 
-test("the note lines of the PDF dialogs use the reference note style, not the blue result style", async () => {
+test("the error line of the split and merge dialog uses the reference note style, not the blue result style", async () => {
   const { document } = await createWorkspaceHarness({ search: "?module=PDF&win=w-pdf" });
-  const notes = [
-    document.getElementById("pdf-splitmerge-hint"),
-    document.querySelector("#pdf-highlight-dialog .dialog-body > p"),
-  ];
-  for (const note of notes) {
-    assert.ok(note, "the note exists");
-    assert.ok(note.classList.contains("dialog-pdf-note"));
-    assert.ok(!note.classList.contains("formula-result"));
-  }
-  assert.match(notes[0].textContent, /현재 쪽 뒤에 붙입니다/, "the text is unchanged");
-  assert.match(notes[1].textContent, /문구가 나오는 모든 곳에 칠합니다/);
+  const note = document.getElementById("pdf-splitmerge-error");
+  assert.ok(note.classList.contains("dialog-pdf-note"));
+  assert.ok(!note.classList.contains("formula-result"));
+  assert.equal(document.querySelector("#pdf-highlight-dialog .dialog-body > p"), null, "the highlight dialog has no note line");
 });

@@ -43,7 +43,7 @@ test("a newer release shows the reference app's card with the version and three 
   assert.equal(card.hidden, false);
   assert.equal(card.getAttribute("role"), "region");
   assert.equal(card.querySelector(".update-notice__title").textContent, "새 버전 1.2.0 사용 가능");
-  assert.match(card.querySelector(".update-notice__meta").textContent, /서명을 확인한 파일만 설치/);
+  assert.equal(card.querySelector(".update-notice__meta").hidden, true, "no explanation line");
   const buttons = card.querySelectorAll(".update-notice__actions .update-notice__button");
   assert.deepEqual(buttons.map((b) => b.textContent), ["설치하고 다시 시작", "릴리스 페이지", "나중에"]);
   assert.ok(buttons[0].classList.contains("update-notice__button--primary"));
