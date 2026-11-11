@@ -540,6 +540,8 @@ function shownKinds(document, dialogId) {
   return out;
 }
 
+const bySort = (list) => [...list].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+
 function choose(document, id, value) {
   const el = document.getElementById(id);
   el.value = value;
@@ -550,7 +552,7 @@ test("each conditional formatting kind shows exactly its own rows, without the d
   const { document } = await dialogHarness();
   for (const [type, rows] of Object.entries(CF_VISIBLE)) {
     choose(document, "sheet-cf-type-select", type);
-    assert.deepEqual(shownKinds(document, "sheet-cf-dialog").sort(), [...rows].sort(), type);
+    assert.deepEqual(bySort(shownKinds(document, "sheet-cf-dialog")), bySort(rows), type);
   }
   choose(document, "sheet-cf-type-select", "icons");
   assert.equal(document.getElementById("sheet-cf-icon-th").children.length, 2, "the 3-icon default set has two thresholds");
@@ -560,7 +562,7 @@ test("each data validation kind shows exactly its own rows", async () => {
   const { document } = await dialogHarness();
   for (const [type, rows] of Object.entries(DV_VISIBLE)) {
     choose(document, "sheet-dv-type-select", type);
-    assert.deepEqual(shownKinds(document, "sheet-dv-dialog").sort(), [...rows].sort(), type);
+    assert.deepEqual(bySort(shownKinds(document, "sheet-dv-dialog")), bySort(rows), type);
   }
 });
 
