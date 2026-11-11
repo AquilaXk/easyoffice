@@ -31,7 +31,7 @@ flowchart TD
 EasyOffice/
 ├── Cargo.toml                                     # Rust 멀티 크레이트 워크스페이스 매니페스트 (macOS / Windows / Linux 공통 코어)
 ├── crates/
-│   ├── easyoffice-formats/                        # 20종 포맷 시그니처 검증(+ 읽기 전용 Pages: IWA/Snappy 변형/protobuf 자체 디코더), ZIP/OLE2/HWP5/XML 보안 가드, CSV/MD/PDF 코덱
+│   ├── easyoffice-formats/                        # 20종 포맷 시그니처 검증(+ Pages(읽기, 실험적 쓰기 `pages_write`): IWA/Snappy 변형/protobuf 자체 디코더), ZIP/OLE2/HWP5/XML 보안 가드, CSV/MD/PDF 코덱
 │   ├── easyoffice-sheet/                          # 64-bit 패킹 셀 좌표, 순환 참조 탐지 수식 파서/평가기, 피벗 요약 엔진
 │   ├── easyoffice-layout/                         # 시그니처 라벤더 토큰, A4 다단/원고지, KS X 6101 공문서, 슬라이드/PDF 레이아웃
 │   ├── easyoffice-app/                            # 15종 IPC 라우터, 루프백 HTTP 서버(--serve), C-ABI FFI, WebUI(ui/)
