@@ -1,7 +1,7 @@
 //! OpenDocument spreadsheet cell and column styles (PD-089): automatic styles written into
 //! `content.xml` and read back (`style:text-properties`, `style:column-width`).
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, HashMap};
 
 use crate::rtf_xml_helpers::{
     extract_attr_from_fragment, extract_balanced_elements, extract_tags_or_self_closing_with_attrs,
@@ -331,14 +331,15 @@ impl OdsSink for StyleSink<'_> {
 
 /// Conditional formatting and validation rules of every table (a text scan, skipped when the
 /// file has none).
-fn attach_rules(
+pub(crate) fn with_rules(
     content_xml: &str,
-    tables: &mut [(String, SheetStyling)],
-    validated: Vec<HashMap<String, BTreeSet<(u32, u32)>>>,
-) {
+    mut tables: Vec<(String, SheetStyling)>,
+    validation: ValidationSink,
+) -> Vec<(String, SheetStyling)> {
+    let validated = validation.into_tables();
     let mut reader = OdsRuleReader::new(content_xml);
     if !reader.has_rules() {
-        return;
+        return tables;
     }
     let tables_xml = extract_balanced_elements(content_xml, "table:table");
     for (i, (_, styling)) in tables.iter_mut().enumerate() {
@@ -347,6 +348,7 @@ fn attach_rules(
         };
         styling.rules = reader.table_rules(inner, cells);
     }
+    tables
 }
 
 /// Styling of every table of an ODS `content.xml`, keyed by table name.
@@ -356,8 +358,5 @@ pub(crate) fn parse_ods_styling(
     let styles = parse_automatic_styles(content_xml);
     let mut sinks = (StyleSink::new(&styles), ValidationSink::default());
     walk_ods(content_xml, false, &mut sinks)?;
-    let (style_sink, validation_sink) = sinks;
-    let mut tables = style_sink.into_tables();
-    attach_rules(content_xml, &mut tables, validation_sink.into_tables());
-    Ok(tables)
+    Ok(with_rules(content_xml, sinks.0.into_tables(), sinks.1))
 }
