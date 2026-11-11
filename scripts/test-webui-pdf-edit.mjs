@@ -4,7 +4,7 @@ import { createWorkspaceHarness, createWebUiDom, flushAsyncTurns } from "./webui
 import { makeFixtureFile, pickFile } from "./test-support/fixture-files.mjs";
 import { studioItem, commandItem } from "./test-support/modules.mjs";
 
-// The PDF studio on the opened file's own objects (PD-166): in the desktop shell the opened PDF is
+// The PDF studio on the opened file's own objects (PD-168): in the desktop shell the opened PDF is
 // handed to the shell once, the rotation, stamp, watermark, merge and save controls then work on it,
 // and a file the shell refuses leaves the old text-model behaviour untouched. The shell is a stub
 // that records its calls; the Rust side has its own tests (`pdf_edit_*`).

@@ -1,4 +1,4 @@
-//! The PDF worker process (PD-166): `EasyOffice --pdf-edit-worker`.
+//! The PDF worker process (PD-168): `EasyOffice --pdf-edit-worker`.
 //!
 //! It is started by `pdf_edit_supervisor.rs`, before anything of the shell exists: no window, no
 //! IPC, no plugin. It reads one request from its standard input (`pdf_edit_wire.rs`), does it with

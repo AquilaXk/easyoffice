@@ -1,4 +1,4 @@
-//! The shell's side of the PDF worker process (PD-166): start it, give it the request, answer its
+//! The shell's side of the PDF worker process (PD-168): start it, give it the request, answer its
 //! requests for overlays, and kill it the moment it is too slow or holds too much memory.
 //!
 //! The worker is the shell's own binary started as `EasyOffice --pdf-edit-worker` with its

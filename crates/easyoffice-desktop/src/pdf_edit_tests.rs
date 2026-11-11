@@ -1,4 +1,4 @@
-//! Tests of the edit pipeline on well-formed files (PD-166): rotation, split, merge, overlays, and
+//! Tests of the edit pipeline on well-formed files (PD-168): rotation, split, merge, overlays, and
 //! that the original objects survive. The results are read back with the reader.
 
 use crate::pdf_edit_budget::MAX_PAGES;

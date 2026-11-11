@@ -1,4 +1,4 @@
-//! Per-OS memory measuring and limits for the PDF worker process (PD-166).
+//! Per-OS memory measuring and limits for the PDF worker process (PD-168).
 //!
 //! The shell watches the worker's resident memory and kills it past the limit; the worker watches
 //! itself the same way (so a parent that is slow to look cannot be outrun). On top of that Linux

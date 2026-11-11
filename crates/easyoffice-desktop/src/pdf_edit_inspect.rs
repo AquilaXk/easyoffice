@@ -1,4 +1,4 @@
-//! What a PDF declares, counted against the budgets before any page is copied (PD-166).
+//! What a PDF declares, counted against the budgets before any page is copied (PD-168).
 //!
 //! `inspect` is the gate every PDF passes on its way into an edit: the size, the header, what the
 //! compressed streams inflate to (`pdf_edit_scan.rs`), then, after the reader has parsed the

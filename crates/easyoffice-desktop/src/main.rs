@@ -304,7 +304,7 @@ pub(crate) fn is_app_origin(url: &tauri::Url) -> bool {
 }
 
 fn main() {
-    // The PDF worker process (PD-166): the shell's own binary, started by the shell with its
+    // The PDF worker process (PD-168): the shell's own binary, started by the shell with its
     // standard input and output connected to it. It must not start anything of the shell.
     if std::env::args().nth(1).as_deref() == Some(pdf_edit_wire::WORKER_ARG) {
         std::process::exit(pdf_edit_worker::run());
