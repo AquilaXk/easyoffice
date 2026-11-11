@@ -123,6 +123,7 @@ mod tests {
             rotation_degrees: 0,
             watermark: watermark.map(str::to_string),
             approval_stamp: stamp.map(str::to_string),
+            ..PdfWriteOptions::default()
         }
     }
 

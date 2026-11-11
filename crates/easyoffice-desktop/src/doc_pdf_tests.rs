@@ -191,6 +191,7 @@ fn page_settings_become_rotation_watermark_and_stamp() {
         rotation_degrees: 90,
         watermark: Some("대외비".into()),
         approval_stamp: Some("승인필".into()),
+        ..PdfWriteOptions::default()
     };
     let pdf = hwpx_to_pdf(&hwpx(&document(120)), &options, &fonts).expect("pdf");
     let pages = page_count(&pdf);

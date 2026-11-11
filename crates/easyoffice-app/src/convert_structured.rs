@@ -828,8 +828,9 @@ fn rectangular_grid(
 pub type RichPdfRenderer<'a> = dyn Fn(&[u8], &PdfWriteOptions) -> Result<Vec<u8>, String> + 'a;
 
 /// [`encode_structured`], except that a document converted to PDF is drawn by `renderer` when
-/// there is one. A PDF studio save (`source` is PDF) keeps the engine's PDF, which writes the
-/// page markers the studio reads back. When the renderer fails the engine PDF is written and
+/// there is one. Two kinds of request keep the engine's PDF: a PDF studio save (`source` is PDF),
+/// whose page markers the studio reads back, and a highlight phrase, which is an annotation
+/// object only the engine writes. When the renderer fails the engine PDF is written and
 /// `warnings` says why.
 pub(crate) fn encode_target(
     content: &StructuredContent,
@@ -839,18 +840,12 @@ pub(crate) fn encode_target(
     renderer: Option<&RichPdfRenderer<'_>>,
     warnings: &mut Vec<String>,
 ) -> Result<Vec<u8>, EasyOfficeError> {
-    if let (Some(render), StructuredContent::Document(doc, options), DocumentFormat::Pdf) =
-        (renderer, content, format)
-    {
-        if source != DocumentFormat::Pdf {
-            let doc = RichDocument {
-                title: title.to_string(),
-                ..doc.clone()
-            };
-            let rendered = UniversalFormatConverter::encode_rich(&doc, DocumentFormat::Hwpx, None)
-                .map_err(|err| err.to_string())
-                .and_then(|hwpx| render(&hwpx, options));
-            match rendered {
+    if let (Some(render), StructuredContent::Document(doc, options)) = (renderer, content) {
+        if format == DocumentFormat::Pdf
+            && source != DocumentFormat::Pdf
+            && options.highlight.is_none()
+        {
+            match render_document(doc, title, options, render) {
                 Ok(pdf) => return Ok(pdf),
                 Err(reason) => warnings.push(format!(
                     "서식을 살린 PDF를 만들지 못해 기본 PDF(글자 중심)로 저장했습니다: {reason}"
@@ -859,6 +854,22 @@ pub(crate) fn encode_target(
         }
     }
     encode_structured(content, format, title, warnings)
+}
+
+/// The document as HWPX, drawn by `render`.
+fn render_document(
+    doc: &RichDocument,
+    title: &str,
+    options: &PdfWriteOptions,
+    render: &RichPdfRenderer<'_>,
+) -> Result<Vec<u8>, String> {
+    let doc = RichDocument {
+        title: title.to_string(),
+        ..doc.clone()
+    };
+    let hwpx = UniversalFormatConverter::encode_rich(&doc, DocumentFormat::Hwpx, None)
+        .map_err(|err| err.to_string())?;
+    render(&hwpx, options)
 }
 
 /// Encodes structured content to `format`, titling the output `title`. What the format cannot

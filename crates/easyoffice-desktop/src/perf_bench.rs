@@ -150,6 +150,7 @@ fn pdf_settings() -> PdfWriteOptions {
         rotation_degrees: label().and_then(|text| text.parse().ok()).unwrap_or(0),
         watermark: label(),
         approval_stamp: label(),
+        ..PdfWriteOptions::default()
     }
 }
 
@@ -330,7 +331,7 @@ fn run_case(case: &str, input: &Path) -> Line {
             let doc = rich_document(input, &bytes);
             phases.push(("decode", ms(t)));
             let t = Instant::now();
-            let pdf = UniversalFormatConverter::encode_rich_pdf(&doc, &pdf_settings());
+            let (pdf, _) = UniversalFormatConverter::encode_rich_pdf(&doc, &pdf_settings());
             phases.push(("pdf", ms(t)));
             keep_pdf(&pdf);
             (pdf.len(), 0)

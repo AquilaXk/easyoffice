@@ -2,7 +2,7 @@
 //! engine hands it the document as HWPX and the page settings, and keeps its own PDF as the
 //! fallback when the renderer fails or when there is none (the `--serve` preview).
 
-use easyoffice_app::EasyOfficeIpcRouter;
+use easyoffice_app::{EasyOfficeIpcRouter, RichPdfRenderer};
 use easyoffice_formats::{
     DocumentFormat, PdfSerializer, PdfWriteOptions, RichBlock, RichDocument, RichParagraph,
     RichRun, UniversalFormatConverter,
@@ -23,8 +23,11 @@ fn pdf_of(response: &str) -> Vec<u8> {
 }
 
 /// A renderer that records what it was given and answers with a PDF whose text says so.
+/// What a renderer was asked to draw: the HWPX and the page settings.
+type Request = (Vec<u8>, PdfWriteOptions);
+
 struct Recorder {
-    seen: RefCell<Vec<(Vec<u8>, PdfWriteOptions)>>,
+    seen: RefCell<Vec<Request>>,
 }
 
 impl Recorder {
@@ -46,17 +49,11 @@ impl Recorder {
             })],
             official_agency: None,
         };
-        Ok(UniversalFormatConverter::encode_rich_pdf(
-            &doc,
-            &PdfWriteOptions::default(),
-        ))
+        Ok(UniversalFormatConverter::encode_rich_pdf(&doc, &PdfWriteOptions::default()).0)
     }
 }
 
-fn dispatch(
-    payload: &str,
-    renderer: &dyn Fn(&[u8], &PdfWriteOptions) -> Result<Vec<u8>, String>,
-) -> String {
+fn dispatch(payload: &str, renderer: &RichPdfRenderer<'_>) -> String {
     EasyOfficeIpcRouter::dispatch_with_pdf_renderer("convert_document_format", payload, renderer)
         .unwrap()
 }
@@ -95,6 +92,7 @@ fn a_document_saved_as_pdf_is_rendered_by_the_host_from_its_hwpx() {
             rotation_degrees: 90,
             watermark: Some("대외비".into()),
             approval_stamp: Some("승인필".into()),
+            highlight: None,
         }
     );
 }
@@ -137,6 +135,23 @@ fn only_documents_that_do_not_come_from_a_pdf_use_the_host() {
     let sheet = r#"{"sourceFormat":"xlsx","targetFormat":"pdf","title":"시트","sheets":[{"name":"S","cells":[{"ref":"A1","raw":"1"}]}]}"#;
     dispatch(sheet, &render);
     assert!(host.seen.borrow().is_empty());
+}
+
+/// A highlight is a PDF annotation object the engine writes (with notes for a phrase that is not
+/// in the text); the host draws pages, not annotations, so a request with one stays with the engine.
+#[test]
+fn a_highlight_request_stays_with_the_engine_writer() {
+    let host = Recorder::new();
+    let payload = format!(
+        r##"{{"sourceFormat":"docx","targetFormat":"pdf","title":"보고서",{DOCUMENT},"pdf":{{"highlight":{{"text":"본문","kind":"highlight","color":"#FFFF00"}}}}}}"##
+    );
+    let response = dispatch(&payload, &|h, o| host.render(h, o));
+    assert!(host.seen.borrow().is_empty());
+    let pdf = pdf_of(&response);
+    assert!(
+        String::from_utf8_lossy(&pdf).contains("/Subtype /Highlight"),
+        "the engine's annotation"
+    );
 }
 
 #[test]
