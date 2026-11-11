@@ -269,7 +269,16 @@
       structuredTables: null,
     };
     const structured = structuredSaveBody(parsed);
-    return structured ? { ...fields, ...structured } : fields;
+    const merged = structured ? { ...fields, ...structured } : fields;
+    return merged.dst === "pdf" ? { ...merged, body: merged.body + pdfPageSettingLines(parsed.pdf) } : merged;
+  }
+
+  // The real PDF writer prints the watermark and the stamp as `[WM]` / `[STAMP]` text on the page.
+  function pdfPageSettingLines(pdf) {
+    const lines = [];
+    if (pdf?.watermark) lines.push("[WM] " + pdf.watermark);
+    if (pdf?.stamp) lines.push("[STAMP] " + pdf.stamp);
+    return lines.map((line) => "\n" + line).join("");
   }
 
   function parseConvertPipeFields(raw) {

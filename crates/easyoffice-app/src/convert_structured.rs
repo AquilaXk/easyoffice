@@ -16,16 +16,17 @@ use std::collections::BTreeMap;
 use easyoffice_formats::{
     base64_codec, evaluate_table_formulas, normalize_hex_color, CellMerge, CellStyle, CsvCodec,
     DocumentFormat, EasyOfficeError, LegacyOle2Codec, LegacyXlsPayload, OdfCodec, OdsUnpacked,
-    OoxmlCodec, RichAlignment, RichBlock, RichDocument, RichImage, RichListKind, RichParagraph,
-    RichRun, RichScript, RichTable, SheetStyling, StrictJsonValue, UniversalDocumentModel,
-    UniversalFormatConverter, XlsxCachedValue, XlsxFormulaCache, MAX_COLUMN_PX, MAX_IMAGE_BYTES,
-    MAX_SIZE_PT, MIN_COLUMN_PX, MIN_SIZE_PT,
+    OoxmlCodec, PdfWriteOptions, RichAlignment, RichBlock, RichDocument, RichImage, RichListKind,
+    RichParagraph, RichRun, RichScript, RichTable, SheetStyling, StrictJsonValue,
+    UniversalDocumentModel, UniversalFormatConverter, XlsxCachedValue, XlsxFormulaCache,
+    MAX_COLUMN_PX, MAX_IMAGE_BYTES, MAX_SIZE_PT, MIN_COLUMN_PX, MIN_SIZE_PT,
 };
 use easyoffice_sheet::{
     EvaluatedCellValue, PackedCellCoordinate, WorkbookEngine, WorkbookEvalTarget,
 };
 
 use crate::convert_ipc::compute_xlsx_formula_cache;
+use crate::convert_structured_doc::{is_document_format, parse_pdf_options, slides_to_document};
 
 /// Largest indent (twips, 1/20 pt) a paragraph may carry: 200 inches.
 const MAX_INDENT_TWIPS: i64 = 288_000;
@@ -47,26 +48,30 @@ type ValueGrid = Vec<Vec<String>>;
 type DisplayCells = Vec<(u32, u32, String)>;
 
 pub(crate) enum StructuredContent {
-    Document(RichDocument),
+    /// A document and the page settings a PDF target writes with it.
+    Document(RichDocument, PdfWriteOptions),
     /// Sheets plus their cell formatting and column widths (one SheetStyling per sheet).
     Workbook(Vec<OdsUnpacked>, Vec<SheetStyling>),
     Slides(Vec<SlideTriple>),
 }
 
-fn invalid(msg: impl Into<String>) -> EasyOfficeError {
+pub(crate) fn invalid(msg: impl Into<String>) -> EasyOfficeError {
     EasyOfficeError::InvalidArgument(msg.into())
 }
 
-type JsonObject = [(String, StrictJsonValue)];
+pub(crate) type JsonObject = [(String, StrictJsonValue)];
 
-fn field<'a>(obj: &'a JsonObject, key: &str) -> Option<&'a StrictJsonValue> {
+pub(crate) fn field<'a>(obj: &'a JsonObject, key: &str) -> Option<&'a StrictJsonValue> {
     match StrictJsonValue::get_field(obj, key) {
         None | Some(StrictJsonValue::Null) => None,
         Some(v) => Some(v),
     }
 }
 
-fn opt_str<'a>(obj: &'a JsonObject, key: &str) -> Result<Option<&'a str>, EasyOfficeError> {
+pub(crate) fn opt_str<'a>(
+    obj: &'a JsonObject,
+    key: &str,
+) -> Result<Option<&'a str>, EasyOfficeError> {
     field(obj, key)
         .map(|v| {
             v.as_str()
@@ -159,11 +164,12 @@ pub(crate) fn parse_structured_content(
     if let Some(v) = field(entries, "blocks") {
         let mut warnings = Vec::new();
         let blocks = parse_blocks(as_array(v, "blocks")?, &mut budget, &mut warnings)?;
-        let content = StructuredContent::Document(RichDocument {
+        let doc = RichDocument {
             title: String::new(),
             blocks,
             official_agency: None,
-        });
+        };
+        let content = StructuredContent::Document(doc, parse_pdf_options(entries)?);
         return Ok(Some((content, warnings)));
     }
     if let Some(v) = field(entries, "sheets") {
@@ -248,7 +254,7 @@ fn parse_paragraph(
 }
 
 /// Optional integer field within `min..=max`.
-fn opt_bounded(
+pub(crate) fn opt_bounded(
     obj: &JsonObject,
     key: &str,
     min: i64,
@@ -826,11 +832,14 @@ pub(crate) fn encode_structured(
     warnings: &mut Vec<String>,
 ) -> Result<Vec<u8>, EasyOfficeError> {
     match content {
-        StructuredContent::Document(doc) => {
+        StructuredContent::Document(doc, pdf) => {
             let doc = RichDocument {
                 title: title.to_string(),
                 ..doc.clone()
             };
+            if format == DocumentFormat::Pdf {
+                return Ok(UniversalFormatConverter::encode_rich_pdf(&doc, pdf));
+            }
             let cache = matches!(format, DocumentFormat::Xlsx | DocumentFormat::Ods)
                 .then(|| compute_xlsx_formula_cache(&doc.to_universal_model()));
             UniversalFormatConverter::encode_rich(&doc, format, cache.as_ref())
@@ -869,6 +878,10 @@ pub(crate) fn encode_structured(
                 UniversalFormatConverter::encode_rich(&doc, format, None)
             }
         },
+        StructuredContent::Slides(slides) if is_document_format(format) => {
+            let doc = slides_to_document(slides, title);
+            UniversalFormatConverter::encode_rich(&doc, format, None)
+        }
         StructuredContent::Slides(slides) => {
             let model = UniversalDocumentModel {
                 title: title.to_string(),

@@ -78,6 +78,7 @@
       getDocRuns,
       getWindowBridge,
       getFileOpen,
+      getPdfRotationDeg,
     } = deps;
 
     const {
@@ -146,14 +147,15 @@
       });
       const valOf = (id) => (document.getElementById(id)?.value || "").trim();
       const wmLayerVal = (document.getElementById("pdf-watermark-layer")?.textContent || "").trim();
-      const wmVal = valOf("pdf-watermark-input") || wmLayerVal;
-      if (wmVal) lines.push("워터마크: " + wmVal);
-      if (wmLayerVal && wmLayerVal !== wmVal) lines.push("워터마크 레이어: " + wmLayerVal);
       const stampVal = (valOf("pdf-stamp-select") || document.getElementById("pdf-stamp-badge")?.textContent || "").trim();
-      if (stampVal) lines.push("결재 스탬프: " + stampVal);
       if (valOf("pdf-form-applicant")) lines.push("신청인: " + valOf("pdf-form-applicant"));
       if (valOf("pdf-form-dept")) lines.push("부서: " + valOf("pdf-form-dept"));
-      return { blocks: savePayload.plainParagraphBlocks(lines) };
+      // Page settings travel as fields (a PDF target writes them as page rotation, watermark and stamp).
+      const pdf = { rotationDegrees: getPdfRotationDeg?.() ?? 0 };
+      const watermark = valOf("pdf-watermark-input") || wmLayerVal;
+      if (watermark) pdf.watermark = watermark;
+      if (stampVal) pdf.stamp = stampVal;
+      return { blocks: savePayload.plainParagraphBlocks(lines), pdf };
     }
 
     // The one place the converter decides its input (conversion, Ctrl+S in the converter, security audit):

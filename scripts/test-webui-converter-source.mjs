@@ -147,3 +147,23 @@ test("opening a file in the embedded HWP editor selects its format as the conver
   await fileOpen.openDocumentFromBytes("서식.hwp", new Uint8Array([1, 2, 3]));
   assert.equal(select.value, "docx", "a text-only fallback is not an embedded HWP document");
 });
+
+test("saving the PDF Studio sends rotation, watermark and stamp as page fields, not as body text", async () => {
+  const { document, userClick, converts } = await createConverterHarness();
+  switchModule(document, "PDF");
+  await flushAsyncTurns(10);
+  document.getElementById("pdf-watermark-input").value = "대외비 사본";
+  document.getElementById("pdf-stamp-select").value = "최종본";
+  userClick(document.getElementById("btn-pdf-apply"));
+  await flushAsyncTurns(10);
+  userClick(document.getElementById("btn-pdf-rotate"));
+  await flushAsyncTurns(20);
+  userClick(studioItem(document, "studio-save"));
+  await flushAsyncTurns(30);
+  const sent = converts().at(-1);
+  assert.equal(sent.targetFormat, "pdf");
+  assert.deepEqual(sent.pdf, { rotationDegrees: 90, watermark: "대외비 사본", stamp: "최종본" });
+  const body = JSON.stringify(sent.blocks);
+  assert.doesNotMatch(body, /워터마크: |결재 스탬프: /);
+  assert.match(body, /신청인/, "form fields stay in the body");
+});

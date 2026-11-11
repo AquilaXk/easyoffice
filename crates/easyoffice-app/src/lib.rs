@@ -15,6 +15,7 @@ pub mod cli_args;
 mod convert_ipc;
 mod convert_open;
 mod convert_structured;
+mod convert_structured_doc;
 #[cfg(test)]
 mod editor_merge_tests;
 pub mod ffi;

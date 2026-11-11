@@ -11,8 +11,8 @@
 
 use easyoffice_formats::{
     base64_codec, evaluate_table_formulas, CellMerge, CellStyle, DecodedContent, DecodedDocument,
-    DocumentFormat, EasyOfficeError, OdsUnpacked, RichAlignment, RichBlock, RichImage,
-    RichListKind, RichParagraph, RichScript, SheetStyling, StrictJsonValue,
+    DocumentFormat, EasyOfficeError, OdsUnpacked, PdfWriteOptions, RichAlignment, RichBlock,
+    RichImage, RichListKind, RichParagraph, RichScript, SheetStyling, StrictJsonValue,
     UniversalFormatConverter,
 };
 use easyoffice_sheet::PackedCellCoordinate;
@@ -386,7 +386,7 @@ fn into_structured(
                     evaluate_table_formulas(&mut table.rows);
                 }
             }
-            StructuredContent::Document(doc)
+            StructuredContent::Document(doc, PdfWriteOptions::default())
         }
         DecodedContent::Workbook(sheets) => {
             let stylings = sheets
