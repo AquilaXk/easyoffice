@@ -4,8 +4,8 @@
  * binaries in release mode and runs each case in a fresh process N times under `/usr/bin/time -l`
  * (macOS), then prints the median time and the median peak RSS per case.
  *
- * Usage: node scripts/bench-run.mjs [--runs 5] [--suite hwp|synthetic|engine|quicklook|all]
- *          [--work <dir>] [--json <file>] [--only <text in the case id>]
+ * Usage: node scripts/bench-run.mjs [--runs 5] [--suite hwp|synthetic|engine|docpdf|quicklook|all]
+ *          [--work <dir>] [--json <file>] [--only <text in the case id>] [--docs <file,file>]
  *          [--ref-bin <path>] [--ref-skia-bin <path>]
  *   --ref-bin / --ref-skia-bin  a binary of the reference app's document paths (built apart from this
  *              repository) that takes `<case> <input>` and prints the same `BENCH ...` line; the
@@ -41,7 +41,7 @@ const HWP_INPUTS = [
 ];
 
 function parseArgs(argv) {
-  const opts = { runs: 5, suite: "all", work: path.join(os.tmpdir(), "easyoffice-bench"), json: null, only: null, refBin: null, refSkiaBin: null };
+  const opts = { runs: 5, suite: "all", work: path.join(os.tmpdir(), "easyoffice-bench"), json: null, only: null, docs: [], refBin: null, refSkiaBin: null };
   for (let i = 0; i < argv.length; i++) {
     const next = () => argv[++i];
     if (argv[i] === "--runs") opts.runs = Number(next());
@@ -49,6 +49,7 @@ function parseArgs(argv) {
     else if (argv[i] === "--work") opts.work = next();
     else if (argv[i] === "--json") opts.json = next();
     else if (argv[i] === "--only") opts.only = next();
+    else if (argv[i] === "--docs") opts.docs = next().split(",").filter(Boolean).map((file) => path.resolve(file));
     else if (argv[i] === "--ref-bin") opts.refBin = next();
     else if (argv[i] === "--ref-skia-bin") opts.refSkiaBin = next();
     else throw new Error(`unknown argument ${argv[i]}`);
@@ -208,6 +209,20 @@ function main() {
     for (const extension of ["docx", "hwpx", "xlsx", "pptx"]) jobs.push(benchJob({ tool: "eo", binary: app, args, benchCase: "encode", input: extension, label: `encode ${extension}` }));
     for (const rows of ["1000", "10000", "50000"]) jobs.push(benchJob({ tool: "eo", binary: app, args, benchCase: "recalc", input: rows, label: `${rows}행` }));
     jobs.push(benchJob({ tool: "eo", binary: app, args, benchCase: "layout", input: "100000", label: "100000회" }));
+  }
+
+  if (want("docpdf")) {
+    // A rich document converted to PDF: the engine's writer and the HWPX + rhwp page layout (PD-164).
+    // The inputs are the engine suite's generated documents, plus any `--docs` file.
+    const app = testBinary(["-p", "easyoffice-app"]);
+    const generated = path.join(opts.work, "engine-inputs");
+    spawnSync(app, ["perf_bench::bench_generate_inputs", "--ignored", "--exact", "--nocapture"], { env: { ...process.env, EASYOFFICE_BENCH_OUT: generated }, stdio: "inherit" });
+    const desktop = testBinary(["-p", "easyoffice-desktop"]);
+    const args = ["perf_bench::bench_case", "--ignored", "--exact", "--nocapture"];
+    const files = [...["docx", "odt", "rtf"].map((ext) => path.join(generated, `doc-large.${ext}`)), ...opts.docs];
+    for (const file of files) {
+      for (const benchCase of ["doc_pdf_engine", "doc_pdf_shell"]) jobs.push(benchJob({ tool: "eo", binary: desktop, args, benchCase, input: file, label: path.basename(file) }));
+    }
   }
 
   const results = [];

@@ -9,6 +9,7 @@
 //! reference app takes for the same job with the same rhwp (parse and convert to the editable form,
 //! first-page SVG, `svgs_to_pdf_with_options`), printed as `tool=ref-repro`.
 //! `EASYOFFICE_BENCH_PDF_OUT` (a file path) keeps the PDF of the `pdf_*` cases.
+//! `EASYOFFICE_BENCH_PDF_SETTINGS` (`rotation,watermark,stamp`, each optional) sets the page settings of the `doc_pdf_*` cases.
 //! `EASYOFFICE_BENCH_REPEAT` repeats the timed part inside one process (for a sampling profiler; the
 //! line shows the last run).
 
@@ -132,6 +133,23 @@ fn rich_document(input: &Path, bytes: &[u8]) -> RichDocument {
     match decoded.content {
         DecodedContent::Document(doc) => doc,
         _ => panic!("{name} is no document"),
+    }
+}
+
+/// The page settings named by `EASYOFFICE_BENCH_PDF_SETTINGS`, none when it is unset.
+fn pdf_settings() -> PdfWriteOptions {
+    let value = std::env::var("EASYOFFICE_BENCH_PDF_SETTINGS").unwrap_or_default();
+    let mut parts = value.split(',');
+    let mut label = || {
+        parts
+            .next()
+            .filter(|text| !text.is_empty())
+            .map(str::to_string)
+    };
+    PdfWriteOptions {
+        rotation_degrees: label().and_then(|text| text.parse().ok()).unwrap_or(0),
+        watermark: label(),
+        approval_stamp: label(),
     }
 }
 
@@ -312,7 +330,7 @@ fn run_case(case: &str, input: &Path) -> Line {
             let doc = rich_document(input, &bytes);
             phases.push(("decode", ms(t)));
             let t = Instant::now();
-            let pdf = UniversalFormatConverter::encode_rich_pdf(&doc, &PdfWriteOptions::default());
+            let pdf = UniversalFormatConverter::encode_rich_pdf(&doc, &pdf_settings());
             phases.push(("pdf", ms(t)));
             keep_pdf(&pdf);
             (pdf.len(), 0)
@@ -330,7 +348,7 @@ fn run_case(case: &str, input: &Path) -> Line {
                 .expect("hwpx");
             phases.push(("hwpx", ms(t)));
             let t = Instant::now();
-            let pdf = hwpx_to_pdf(&hwpx, &PdfWriteOptions::default(), &fonts).expect("pdf");
+            let pdf = hwpx_to_pdf(&hwpx, &pdf_settings(), &fonts).expect("pdf");
             phases.push(("pdf", ms(t)));
             keep_pdf(&pdf);
             (pdf.len(), 0)
