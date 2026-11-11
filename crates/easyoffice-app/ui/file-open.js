@@ -157,7 +157,8 @@
     return out;
   }
 
-  const cellKey = (row, col) => (row << 16) | col;
+  // A safe integer: `(row << 16) | col` wraps at 32 bits, so rows 65536 apart shared a key.
+  const cellKey = (row, col) => row * 2 ** 32 + col;
 
   // Anchors (with their spans) and covered cells of a decoded table's `merges` (PD-130). A region is
   // used only when it is inside the grid, every cell of it exists and no other region has it.

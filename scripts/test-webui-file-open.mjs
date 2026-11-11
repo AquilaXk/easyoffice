@@ -155,6 +155,20 @@ test("opening a DOCX-style model loads formatted blocks into the DOC module and 
   assert.ok(decode.sourceBase64.length > 10);
 });
 
+test("merged regions far down a tall table do not collide with rows 65536 above", async () => {
+  const { document } = await createOpenHarness();
+  const rows = Array.from({ length: 65539 }, (_, r) => [String(r)]);
+  const merges = [
+    { row: 0, col: 0, rowSpan: 2, colSpan: 1 },
+    { row: 65536, col: 0, rowSpan: 3, colSpan: 1 },
+  ];
+  await pickFile(document, fixtureFile("큰표.docx", { title: "큰표", blocks: [{ type: "table", rows, merges }] }));
+  const spans = Array.from(document.getElementById("doc-editor").querySelectorAll("td[rowspan]")).map(
+    (td) => td.textContent + ":" + td.getAttribute("rowspan")
+  );
+  assert.deepEqual(spans, ["0:2", "65536:3"]);
+});
+
 test("open then save round-trips the structured blocks and names the download after the file", async () => {
   const { document, userClick, converts, downloads } = await createOpenHarness();
   await pickFile(document, fixtureFile("보고서.docx", DOC_MODEL));
