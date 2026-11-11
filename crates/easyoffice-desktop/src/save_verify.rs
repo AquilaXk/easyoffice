@@ -16,7 +16,7 @@
 //!   HWP also needs a `FileHeader` stream that starts with the HWP signature;
 //! * PDF: the header, a `startxref` and the `%%EOF` marker within the last kilobyte.
 //!
-//! * Pages (experimental writer, PD-158): the ZIP walk and the engine's own Pages reader, which must
+//! * Pages (experimental writer, PD-160): the ZIP walk and the engine's own Pages reader, which must
 //!   open the bytes as a document. This is circular: the reader is the engine's, not the app's, so
 //!   it shows that the next EasyOffice open accepts the file, not that Pages does.
 //!

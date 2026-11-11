@@ -1,4 +1,4 @@
-//! Pages minimal writer (PD-158): structure rules of the package, read-back through our own reader
+//! Pages minimal writer (PD-160): structure rules of the package, read-back through our own reader
 //! (a circular check: it proves the writer and the reader agree, not that Pages opens the file),
 //! limits and the loss counts behind the save warnings.
 
