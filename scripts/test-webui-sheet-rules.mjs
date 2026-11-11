@@ -504,3 +504,89 @@ test("colour fields use the shell's palette popup and no visible native colour i
   document.getElementById("sheet-cf-bg-palette").querySelector("button").click?.();
   assert.match(document.getElementById("sheet-cf-bg").value, /^#[0-9a-f]{6}$/i);
 });
+
+// ---- which rows a rule kind shows ------------------------------------------------------------
+
+const STYLE_ROWS = ["배경", "글자", "글꼴"];
+const CF_VISIBLE = {
+  cellIs: ["조건", ...STYLE_ROWS],
+  text: ["텍스트", ...STYLE_ROWS],
+  top: ["순위", ...STYLE_ROWS],
+  average: ["평균", ...STYLE_ROWS],
+  dup: ["값", ...STYLE_ROWS],
+  blanks: ["대상", ...STYLE_ROWS],
+  errors: ["대상", ...STYLE_ROWS],
+  expr: ["수식", ...STYLE_ROWS],
+  scale: ["최소", "중간", "최대"],
+  bar: ["막대 시작", "막대 끝", "막대 색", "표시"],
+  icons: ["아이콘", "아이콘 2", "표시"],
+};
+const DV_VISIBLE = {
+  whole: ["조건", "값"],
+  decimal: ["조건", "값"],
+  date: ["조건", "값"],
+  time: ["조건", "값"],
+  textLength: ["조건", "값"],
+  list: ["목록"],
+  custom: ["값"],
+};
+
+function shownKinds(document, dialogId) {
+  const out = [];
+  for (const el of document.getElementById(dialogId).querySelectorAll("[data-cf-kinds]")) {
+    if (el.hidden) continue;
+    out.push(el.querySelector?.(".dialog-label")?.textContent || el.id);
+  }
+  return out;
+}
+
+function choose(document, id, value) {
+  const el = document.getElementById(id);
+  el.value = value;
+  el.dispatchEvent({ type: "change", target: el, bubbles: true });
+}
+
+test("each conditional formatting kind shows exactly its own rows, without the dialog being opened first", async () => {
+  const { document } = await dialogHarness();
+  for (const [type, rows] of Object.entries(CF_VISIBLE)) {
+    choose(document, "sheet-cf-type-select", type);
+    assert.deepEqual(shownKinds(document, "sheet-cf-dialog").sort(), [...rows].sort(), type);
+  }
+  choose(document, "sheet-cf-type-select", "icons");
+  assert.equal(document.getElementById("sheet-cf-icon-th").children.length, 2, "the 3-icon default set has two thresholds");
+});
+
+test("each data validation kind shows exactly its own rows", async () => {
+  const { document } = await dialogHarness();
+  for (const [type, rows] of Object.entries(DV_VISIBLE)) {
+    choose(document, "sheet-dv-type-select", type);
+    assert.deepEqual(shownKinds(document, "sheet-dv-dialog").sort(), [...rows].sort(), type);
+  }
+});
+
+// The cascade: a row that is `hidden` must lose its `display: flex` to a rule of at least the same
+// specificity that comes later (no `!important`).
+function specificity(selector) {
+  const ids = (selector.match(/#[\w-]+/g) || []).length;
+  const classes = (selector.match(/\.[\w-]+|\[[^\]]+\]|:(?!:)[\w-]+/g) || []).length;
+  const elements = (selector.replace(/#[\w-]+|\.[\w-]+|\[[^\]]+\]|::?[\w-]+/g, " ").match(/\b[a-z][\w-]*/gi) || []).length;
+  return ids * 10000 + classes * 100 + elements;
+}
+
+test("hidden rows of a tool dialog lose no cascade to the row layout rules", () => {
+  const css = fs.readFileSync(new URL("../crates/easyoffice-app/ui/shell.css", import.meta.url), "utf8");
+  const rules = [...css.matchAll(/^([^{}\n@/][^{\n]*)\{([^}]*)\}/gm)].map((m, index) => ({
+    selectors: m[1].split(",").map((s) => s.trim()),
+    body: m[2],
+    index,
+  }));
+  const hiding = rules.filter((r) => /display:\s*none/.test(r.body) && r.selectors.some((s) => /\[hidden\]/.test(s) && s.startsWith(".tool-dialog")));
+  assert.ok(hiding.length > 0);
+  const showing = rules.filter((r) => /display:\s*(flex|inline-flex)/.test(r.body) && r.selectors.some((s) => s.startsWith(".tool-dialog") && !/\[hidden\]/.test(s)));
+  for (const show of showing) {
+    for (const sel of show.selectors.filter((s) => s.startsWith(".tool-dialog"))) {
+      const winner = hiding.find((h) => h.index > show.index && h.selectors.some((hs) => specificity(hs) >= specificity(sel)));
+      assert.ok(winner, `a hidden element keeps no display rule over "${sel}"`);
+    }
+  }
+});

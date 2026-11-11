@@ -181,16 +181,24 @@
       return out;
     }
 
+    // What the dialog shows for a rule kind: filled selects and the rows of the chosen kind. Bound
+    // when the page starts, so the dialog is right however it gets opened.
+    function bindCfLayout() {
+      for (const [kindId] of valueRows()) fillOptions(kindId, VALUE_KINDS);
+      fillOptions("sheet-cf-icon-set-select", rules.ICON_SET_NAMES.map((n) => [n, n]));
+      $("sheet-cf-type-select")?.addEventListener("change", () => {
+        const type = val("sheet-cf-type-select");
+        refreshKindRows("sheet-cf-dialog", type, STYLE_TYPES);
+        if (type === "icons" && !$("sheet-cf-icon-th")?.children.length) buildThresholdRows();
+      });
+      $("sheet-cf-icon-set-select")?.addEventListener("change", () => buildThresholdRows());
+    }
+
+    // Buttons and colour popups, bound when the dialog is first opened.
     function ensureCfControls() {
       if (cf.ready) return;
       cf.ready = true;
-      for (const [kindId] of valueRows()) fillOptions(kindId, VALUE_KINDS);
-      fillOptions("sheet-cf-icon-set-select", rules.ICON_SET_NAMES.map((n) => [n, n]));
       bindColors(COLOR_FIELDS);
-      $("sheet-cf-type-select")?.addEventListener("change", () => {
-        refreshKindRows("sheet-cf-dialog", val("sheet-cf-type-select"), STYLE_TYPES);
-      });
-      $("sheet-cf-icon-set-select")?.addEventListener("change", () => buildThresholdRows());
       $("btn-sheet-cf-apply")?.addEventListener("click", () => void applyCfForm());
       $("btn-sheet-cf-new")?.addEventListener("click", () => selectCf(-1));
       $("btn-sheet-cf-delete")?.addEventListener("click", () => void deleteCf());
@@ -484,12 +492,15 @@
 
     const dv = { ready: false };
 
-    function ensureDvControls() {
-      if (dv.ready) return;
-      dv.ready = true;
+    function bindDvLayout() {
       $("sheet-dv-type-select")?.addEventListener("change", () => {
         refreshKindRows("sheet-dv-dialog", val("sheet-dv-type-select"));
       });
+    }
+
+    function ensureDvControls() {
+      if (dv.ready) return;
+      dv.ready = true;
       $("btn-sheet-dv-apply")?.addEventListener("click", () => void applyDvForm());
       $("btn-sheet-dv-clear")?.addEventListener("click", () => void clearDv());
     }
@@ -745,6 +756,12 @@
       },
       kit
     );
+
+    // The dialogs answer their kind selects from the start, however they get opened.
+    bindCfLayout();
+    defaultCfForm();
+    bindDvLayout();
+    fillDvForm();
 
     return {
       openConditionalFormatDialog,
