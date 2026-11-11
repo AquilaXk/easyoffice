@@ -27,6 +27,9 @@ pub const MAX_PREVIEW_PAGES: u32 = 64;
 pub const MAX_PDF_BYTES: usize = 32 * 1024 * 1024;
 /// Pages are added until this much time has passed; the pages done so far are the preview.
 pub const PDF_PAGE_BUDGET: Duration = Duration::from_secs(15);
+/// Deflate level of the page streams: a preview is read once, so speed wins over size (level 1 is
+/// about 20% faster and 20% larger than the default 6, `docs/performance.md`).
+const PDF_DEFLATE_LEVEL: u8 = 1;
 /// CSS pixels (96 per inch) to PDF points (72 per inch).
 const PX_TO_PT: f32 = 72.0 / 96.0;
 
@@ -123,6 +126,7 @@ fn to_chunk_with_text(
 ) -> Result<(pdf_writer::Chunk, pdf_writer::Ref), svg2pdf::ConversionError> {
     let options = |embed_text| svg2pdf::ConversionOptions {
         embed_text,
+        compression_level: PDF_DEFLATE_LEVEL,
         ..svg2pdf::ConversionOptions::default()
     };
     match svg2pdf::to_chunk(tree, options(true)) {

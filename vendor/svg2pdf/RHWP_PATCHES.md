@@ -18,3 +18,5 @@
   기본 SVG→PDF 경로의 합성 굵게가 텍스트 검색·추출을 중복시키지 않게 하는 패치다.
   제품 경로 회귀는 `tests/cases/issue_6936_pdf_synthetic_bold.rs`, 상용 뷰어 대조 및 음성 대조군 증적은
   `samples/issue6936/README.md`와 `mydocs/pr/assets/issue_6936/README.md`에 있다.
+
+- `ConversionOptions::compression_level`(기본 6): 쪽 콘텐츠 스트림의 deflate 수준. 글꼴·ICC는 기본 수준 그대로다. Quick Look 확장이 크기 대신 속도를 고르려고 더한 로컬 패치이며 기본값이라 셸 출력은 그대로다.

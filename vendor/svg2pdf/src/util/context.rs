@@ -9,7 +9,7 @@ use {
     usvg::fontdb::ID,
 };
 
-use super::helper::deflate;
+use super::helper::deflate_at;
 use crate::util::allocate::RefAllocator;
 use crate::Result;
 use crate::{ConversionOptions, GRAY_ICC_DEFLATED, SRGB_ICC_DEFLATED};
@@ -111,7 +111,7 @@ impl Context {
     /// set in the [ConversionOptions] struct.
     pub fn finish_content(&self, content: Content) -> Vec<u8> {
         if self.options.compress {
-            deflate(&content.finish())
+            deflate_at(&content.finish(), self.options.compression_level)
         } else {
             content.finish()
         }

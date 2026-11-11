@@ -179,10 +179,16 @@ pub fn bbox_to_non_zero_rect(rect: Option<usvg::Rect>) -> NonZeroRect {
         .unwrap_or(NonZeroRect::from_xywh(0.0, 0.0, 1.0, 1.0).unwrap())
 }
 
+pub const DEFAULT_COMPRESSION_LEVEL: u8 = 6;
+
 /// Compress data using the deflate algorithm.
 pub fn deflate(data: &[u8]) -> Vec<u8> {
-    const COMPRESSION_LEVEL: u8 = 6;
-    miniz_oxide::deflate::compress_to_vec_zlib(data, COMPRESSION_LEVEL)
+    deflate_at(data, DEFAULT_COMPRESSION_LEVEL)
+}
+
+/// [`deflate`] at an explicit level (1 fastest to 10 smallest).
+pub fn deflate_at(data: &[u8], level: u8) -> Vec<u8> {
+    miniz_oxide::deflate::compress_to_vec_zlib(data, level)
 }
 
 pub fn clip_to_rect(rect: NonZeroRect, content: &mut Content) {

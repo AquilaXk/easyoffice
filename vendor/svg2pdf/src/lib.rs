@@ -67,7 +67,9 @@ use usvg::{Size, Transform, Tree};
 
 use crate::render::{tree_to_stream, tree_to_xobject};
 use crate::util::context::Context;
-use crate::util::helper::{deflate, ContentExt, RectExt, TransformExt};
+use crate::util::helper::{
+    deflate, ContentExt, RectExt, TransformExt, DEFAULT_COMPRESSION_LEVEL,
+};
 use crate::util::resources::ResourceContainer;
 
 // The ICC profiles.
@@ -141,6 +143,13 @@ pub struct ConversionOptions {
     /// _Default:_ `true`.
     pub compress: bool,
 
+    /// Deflate level (1 fastest to 10 smallest) of the page content streams. Fonts and ICC
+    /// profiles stay at the default level. Local patch: the Quick Look extension trades size for
+    /// speed.
+    ///
+    /// _Default:_ `DEFAULT_COMPRESSION_LEVEL` (6).
+    pub compression_level: u8,
+
     /// How much raster images of rasterized effects should be scaled up.
     ///
     /// Higher values will lead to better quality, but will increase the size of
@@ -168,6 +177,7 @@ impl Default for ConversionOptions {
     fn default() -> Self {
         Self {
             compress: true,
+            compression_level: DEFAULT_COMPRESSION_LEVEL,
             raster_scale: 1.5,
             embed_text: true,
             pdfa: false,
