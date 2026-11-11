@@ -6,6 +6,24 @@ EasyOffice (`v0.1.0`)는 Rust 엔진과 오프라인 WebUI를 하나의 Tauri v2
 
 ---
 
+## 내려받기
+
+모든 릴리스는 버전이 들어가지 않는 같은 자산 이름을 쓰므로, 아래 링크는 항상 가장 최근에 공개된 릴리스를 가리킵니다. `SHA256SUMS.txt`에는 모든 자산의 SHA-256 체크섬이 들어 있습니다.
+
+- [macOS 유니버설 (.dmg)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-macos-universal.dmg)
+- [Windows x64 (설치 프로그램)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-windows-x64-setup.exe)
+- [Linux x64 (AppImage, 설치 없이 실행)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-linux-x64.AppImage)
+- [Linux x64 (.deb, Ubuntu·Debian 계열)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-linux-x64.deb)
+- [Linux x64 (.rpm, Fedora·openSUSE 계열)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-linux-x64.rpm)
+- [Linux arm64 (.deb, Ubuntu·Debian 계열)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-linux-arm64.deb)
+- [SHA256SUMS.txt](https://github.com/AquilaXk/easyoffice/releases/latest/download/SHA256SUMS.txt)
+
+단축키는 [docs/keyboard-shortcuts.md](docs/keyboard-shortcuts.md)에 정리했습니다.
+
+전체 릴리스는 [GitHub Releases](https://github.com/AquilaXk/easyoffice/releases)에서 볼 수 있습니다.
+
+---
+
 ## 핵심 특징
 
 - **macOS·Windows·Linux 단일 코드베이스**: Rust 엔진(`crates/`), WebUI(`crates/easyoffice-app/ui/`), Tauri v2 데스크톱 셸(`crates/easyoffice-desktop`, macOS는 WKWebView·Windows는 WebView2·Linux는 WebKitGTK). 문서마다 개별 창으로 열리고 시작 창에서 새 문서·최근 문서·열기를 고릅니다. 단일 인스턴스, 외부 변경 감지가 있는 제자리 원자적 저장, 파일 연결은 Rust가 처리하며 WebView는 파일 경로를 받지 않습니다.
@@ -56,10 +74,10 @@ EasyOffice/
 ## 빠른 시작 (Quick Start)
 
 ### 시스템 요구 사항
-- macOS 11.0 (Big Sur) 이상 (Apple Silicon `arm64` 및 Intel `x86_64` 유니버설 `.dmg`; 데스크톱 셸 빌드에는 Rust 1.90+, Node.js, Xcode 명령줄 도구 필요)
-- Windows 설치형 데스크톱 앱: Windows 10/11 x64 및 WebView2 런타임 (데스크톱 셸 빌드는 MSVC 툴체인의 Rust 1.90+ 필요)
-- Linux x64(AppImage·deb·rpm) 또는 arm64(deb): WebKitGTK 4.1과 glibc 2.35 이상, 예를 들어 Ubuntu 22.04, Debian 12, Fedora (데스크톱 셸 빌드에는 Rust 1.90+와 WebKitGTK 4.1 개발 패키지 필요)
-- 크로스플랫폼 엔진 크레이트와 개발 전용 로컬 WebUI 서버 빌드는 Rust 1.85+
+- macOS 11.0 (Big Sur) 이상 (Apple Silicon `arm64` 및 Intel `x86_64` 유니버설 `.dmg`; 데스크톱 셸 빌드에는 Rust 1.93+, Node.js, Xcode 명령줄 도구 필요)
+- Windows 설치형 데스크톱 앱: Windows 10/11 x64 및 WebView2 런타임 (데스크톱 셸 빌드는 MSVC 툴체인의 Rust 1.93+ 필요)
+- Linux x64(AppImage·deb·rpm) 또는 arm64(deb): WebKitGTK 4.1과 glibc 2.35 이상, 예를 들어 Ubuntu 22.04, Debian 12, Fedora (데스크톱 셸 빌드에는 Rust 1.93+와 WebKitGTK 4.1 개발 패키지 필요)
+- 크로스플랫폼 엔진 크레이트와 개발 전용 로컬 WebUI 서버 빌드는 Rust 1.85+(워크스페이스 MSRV). 데스크톱 셸 크레이트는 1.93이 필요하고 CI는 1.93.1로 고정합니다(`.github/rust-toolchain-version`)
 
 ### 로컬 위생 검증 · 빌드 · 테스트 · 실행
 
@@ -83,19 +101,7 @@ cargo run -p easyoffice-desktop
 
 ### 릴리스 실행 안내
 
-모든 릴리스는 버전이 들어가지 않는 같은 자산 이름을 쓰므로, 아래 링크는 항상 가장 최근에 공개된 릴리스를 가리킵니다. `SHA256SUMS.txt`에는 모든 자산의 SHA-256 체크섬이 들어 있습니다.
-
-- [macOS 유니버설 (.dmg)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-macos-universal.dmg)
-- [Windows x64 (설치 프로그램)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-windows-x64-setup.exe)
-- [Linux x64 (AppImage, 설치 없이 실행)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-linux-x64.AppImage)
-- [Linux x64 (.deb, Ubuntu·Debian 계열)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-linux-x64.deb)
-- [Linux x64 (.rpm, Fedora·openSUSE 계열)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-linux-x64.rpm)
-- [Linux arm64 (.deb, Ubuntu·Debian 계열)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-linux-arm64.deb)
-- [SHA256SUMS.txt](https://github.com/AquilaXk/easyoffice/releases/latest/download/SHA256SUMS.txt)
-
-단축키는 [docs/keyboard-shortcuts.md](docs/keyboard-shortcuts.md)에 정리했습니다.
-
-전체 릴리스는 [GitHub Releases](https://github.com/AquilaXk/easyoffice/releases)에서 볼 수 있습니다.
+플랫폼별 안내, 첫 실행, 업데이트는 아래에 이어집니다.
 
 **업데이트.** 설치된 앱은 하루 1회 이하로 새 릴리스를 확인합니다(도움말 메뉴에서 끌 수 있습니다). 새 버전이 있으면 카드에 **설치하고 다시 시작**이 나타나며, 앱이 릴리스에서 패키지를 내려받아 앱에 들어 있는 공개 키로 서명을 확인한 뒤 설치하고 다시 시작합니다. 저장하지 않은 변경 사항이 있는 창이 있으면 설치하지 않고, 서명이 맞지 않는 패키지는 설치하지 않습니다. `.deb`·`.rpm` 업데이트는 관리자 권한을 요청하며, 업데이터가 다루지 못하는 설치 형태는 릴리스 페이지에서 직접 받습니다(카드에 버튼이 있습니다). 릴리스에는 패키지마다 `.sig` 파일과 업데이터가 읽는 `latest.json`도 들어 있습니다.
 
@@ -126,7 +132,7 @@ Windows 릴리스는 설치 프로그램 `EasyOffice-windows-x64-setup.exe`(NSIS
 
 설치 프로그램은 **코드 서명이 되어 있지 않아** `EasyOffice-windows-x64-setup.exe`를 처음 실행할 때 Windows SmartScreen이 "Windows의 PC 보호" 창을 띄울 수 있습니다. **추가 정보**를 누른 뒤 **실행**을 선택하세요. 브라우저가 다운로드를 막으면 다운로드 목록에서 먼저 **유지**를 선택합니다. 의심스러우면 `SHA256SUMS.txt`와 비교합니다(`Get-FileHash .\EasyOffice-windows-x64-setup.exe`).
 
-소스에서 설치 프로그램을 빌드하려면 Windows에서 MSVC Rust 툴체인 1.90+, Visual Studio Build Tools, Node.js가 필요합니다.
+소스에서 설치 프로그램을 빌드하려면 Windows에서 MSVC Rust 툴체인 1.93+, Visual Studio Build Tools, Node.js가 필요합니다.
 
 ```powershell
 cd crates/easyoffice-desktop
@@ -135,7 +141,7 @@ npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --bundles nsis   # targe
 
 #### Linux
 
-Linux 릴리스는 `EasyOffice-linux-x64.AppImage`, `EasyOffice-linux-x64.deb`, `EasyOffice-linux-x64.rpm`, `EasyOffice-linux-arm64.deb`로 배포됩니다. 배포판에 맞는 네이티브 패키지를 먼저 쓰세요. 한글 입력기(IME)와 WebKitGTK 런타임은 배포판이 제공하는 것을 쓸 때 가장 안정적이고, 패키지가 이를 의존성으로 선언합니다. Ubuntu·Debian은 `sudo apt install ./EasyOffice-linux-x64.deb`, Fedora는 `sudo dnf install ./EasyOffice-linux-x64.rpm`으로 설치합니다. arm64는 `.deb`만 만듭니다. AppImage는 설치가 필요 없지만(`chmod +x EasyOffice-linux-x64.AppImage` 뒤 실행, FUSE 2인 `libfuse2` 패키지 필요) 네이티브 패키지를 쓸 수 없을 때만 권장합니다. 일부 Wayland·IME 환경에서는 한영 전환이나 창 표시가 불안정할 수 있습니다. 패키지는 주요 문서 형식(HWP, HWPX, DOCX, ODT, XLSX, ODS, PPTX, ODP, PDF)을 다른 앱의 기본 프로그램을 가로채지 않고 "다음으로 열기" 대상으로 등록하며, Ubuntu 22.04에서 빌드하므로 glibc 2.35 이상과 WebKitGTK 4.1이 필요합니다. 내려받은 파일은 `sha256sum --check --ignore-missing SHA256SUMS.txt`로 확인합니다. Linux에서 소스로 패키지를 빌드하려면 Rust 1.90+, Node.js, `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libxdo-dev`, `librsvg2-dev`, `libssl-dev`, `patchelf`, `rpm`이 필요합니다.
+Linux 릴리스는 `EasyOffice-linux-x64.AppImage`, `EasyOffice-linux-x64.deb`, `EasyOffice-linux-x64.rpm`, `EasyOffice-linux-arm64.deb`로 배포됩니다. 배포판에 맞는 네이티브 패키지를 먼저 쓰세요. 한글 입력기(IME)와 WebKitGTK 런타임은 배포판이 제공하는 것을 쓸 때 가장 안정적이고, 패키지가 이를 의존성으로 선언합니다. Ubuntu·Debian은 `sudo apt install ./EasyOffice-linux-x64.deb`, Fedora는 `sudo dnf install ./EasyOffice-linux-x64.rpm`으로 설치합니다. arm64는 `.deb`만 만듭니다. AppImage는 설치가 필요 없지만(`chmod +x EasyOffice-linux-x64.AppImage` 뒤 실행, FUSE 2인 `libfuse2` 패키지 필요) 네이티브 패키지를 쓸 수 없을 때만 권장합니다. 일부 Wayland·IME 환경에서는 한영 전환이나 창 표시가 불안정할 수 있습니다. 패키지는 주요 문서 형식(HWP, HWPX, DOCX, ODT, XLSX, ODS, PPTX, ODP, PDF)을 다른 앱의 기본 프로그램을 가로채지 않고 "다음으로 열기" 대상으로 등록하며, Ubuntu 22.04에서 빌드하므로 glibc 2.35 이상과 WebKitGTK 4.1이 필요합니다. 내려받은 파일은 `sha256sum --check --ignore-missing SHA256SUMS.txt`로 확인합니다. Linux에서 소스로 패키지를 빌드하려면 Rust 1.93+, Node.js, `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libxdo-dev`, `librsvg2-dev`, `libssl-dev`, `patchelf`, `rpm`이 필요합니다.
 
 ```bash
 cd crates/easyoffice-desktop

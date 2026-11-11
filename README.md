@@ -6,6 +6,24 @@ EasyOffice (`v0.1.0`) is a 100% standalone, serverless, offline-capable all-in-o
 
 ---
 
+## Download
+
+Every release carries the same fixed asset names, without a version in them, so the links below always point at the latest published release. `SHA256SUMS.txt` lists the SHA-256 checksum of every asset.
+
+- [macOS universal (.dmg)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-macos-universal.dmg)
+- [Windows x64 (installer)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-windows-x64-setup.exe)
+- [Linux x64 (AppImage, portable)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-linux-x64.AppImage)
+- [Linux x64 (.deb, Ubuntu / Debian)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-linux-x64.deb)
+- [Linux x64 (.rpm, Fedora / openSUSE)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-linux-x64.rpm)
+- [Linux arm64 (.deb, Ubuntu / Debian)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-linux-arm64.deb)
+- [SHA256SUMS.txt](https://github.com/AquilaXk/easyoffice/releases/latest/download/SHA256SUMS.txt)
+
+Keyboard shortcuts are listed in [docs/keyboard-shortcuts.md](docs/keyboard-shortcuts.md) (Korean).
+
+All releases are listed on the [GitHub Releases](https://github.com/AquilaXk/easyoffice/releases) page.
+
+---
+
 ## Key Highlights
 
 - **One code base on macOS, Windows and Linux**: a Rust engine (`crates/`), a WebUI (`crates/easyoffice-app/ui/`) and a Tauri v2 desktop shell (`crates/easyoffice-desktop`, WKWebView on macOS, WebView2 on Windows, WebKitGTK on Linux). Every document opens in its own window; a start window offers new documents, recent files and open. Single instance, in-place atomic save with external-change detection, and file associations are handled in Rust; the WebView never receives a file path.
@@ -56,10 +74,10 @@ EasyOffice/
 ## Requirements & Quick Start
 
 ### System Requirements
-- macOS 11.0 (Big Sur) or later on Apple Silicon (`arm64`) and Intel (`x86_64`) for the universal `.dmg` (building the desktop shell needs Rust 1.90+, Node.js and Xcode command line tools)
-- Windows 10/11 x64 with the WebView2 runtime for the installed Windows desktop app (building the desktop shell needs Rust 1.90+ with the MSVC toolchain)
-- Linux x64 (AppImage, deb, rpm) or arm64 (deb) with WebKitGTK 4.1 and glibc 2.35 or newer, e.g. Ubuntu 22.04, Debian 12 or Fedora (building the desktop shell needs Rust 1.90+ and the WebKitGTK 4.1 development packages)
-- Rust 1.85+ for the cross-platform engine crates and the developer-only local WebUI server
+- macOS 11.0 (Big Sur) or later on Apple Silicon (`arm64`) and Intel (`x86_64`) for the universal `.dmg` (building the desktop shell needs Rust 1.93+, Node.js and Xcode command line tools)
+- Windows 10/11 x64 with the WebView2 runtime for the installed Windows desktop app (building the desktop shell needs Rust 1.93+ with the MSVC toolchain)
+- Linux x64 (AppImage, deb, rpm) or arm64 (deb) with WebKitGTK 4.1 and glibc 2.35 or newer, e.g. Ubuntu 22.04, Debian 12 or Fedora (building the desktop shell needs Rust 1.93+ and the WebKitGTK 4.1 development packages)
+- Rust 1.85+ (the workspace MSRV) for the cross-platform engine crates and the developer-only local WebUI server; the desktop shell crate requires 1.93, and CI pins 1.93.1 (`.github/rust-toolchain-version`)
 
 ### Build, Verify & Run Locally
 
@@ -83,19 +101,7 @@ cargo run -p easyoffice-desktop
 
 ### Release Artifacts & First Launch
 
-Every release carries the same fixed asset names, without a version in them, so the links below always point at the latest published release. `SHA256SUMS.txt` lists the SHA-256 checksum of every asset.
-
-- [macOS universal (.dmg)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-macos-universal.dmg)
-- [Windows x64 (installer)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-windows-x64-setup.exe)
-- [Linux x64 (AppImage, portable)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-linux-x64.AppImage)
-- [Linux x64 (.deb, Ubuntu / Debian)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-linux-x64.deb)
-- [Linux x64 (.rpm, Fedora / openSUSE)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-linux-x64.rpm)
-- [Linux arm64 (.deb, Ubuntu / Debian)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-linux-arm64.deb)
-- [SHA256SUMS.txt](https://github.com/AquilaXk/easyoffice/releases/latest/download/SHA256SUMS.txt)
-
-Keyboard shortcuts are listed in [docs/keyboard-shortcuts.md](docs/keyboard-shortcuts.md) (Korean).
-
-All releases are listed on the [GitHub Releases](https://github.com/AquilaXk/easyoffice/releases) page.
+Platform notes, the first launch and updates follow.
 
 **Updates.** The installed app checks for a newer release at most once a day (switch it off in the Help menu). When one exists, a card offers **Install and restart**: the app downloads the package from the release, verifies its signature against the public key built into the app, installs it and restarts. Nothing is installed while a window has unsaved changes, and a package whose signature does not verify is never installed. A `.deb` or `.rpm` update asks for administrator permission; an installation the updater does not cover is updated from the release page (the card has a button for it). The release also carries each package's `.sig` file and `latest.json`, which the updater reads.
 
@@ -126,7 +132,7 @@ Windows releases ship an installer, `EasyOffice-windows-x64-setup.exe` (NSIS, pe
 
 The installer is **not code-signed**, so Windows SmartScreen may show "Windows protected your PC" the first time you run `EasyOffice-windows-x64-setup.exe`. Click **More info**, then **Run anyway**. If the browser blocks the download, choose **Keep** in its download list first. Compare the file with `SHA256SUMS.txt` if in doubt (`Get-FileHash .\EasyOffice-windows-x64-setup.exe`).
 
-To build the installer from source on Windows (MSVC Rust toolchain 1.90+, Visual Studio Build Tools, Node.js):
+To build the installer from source on Windows (MSVC Rust toolchain 1.93+, Visual Studio Build Tools, Node.js):
 
 ```powershell
 cd crates/easyoffice-desktop
@@ -135,7 +141,7 @@ npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --bundles nsis   # targe
 
 #### Linux
 
-Linux releases ship `EasyOffice-linux-x64.AppImage`, `EasyOffice-linux-x64.deb`, `EasyOffice-linux-x64.rpm` and `EasyOffice-linux-arm64.deb`. Prefer the native package of your distribution: the Korean input method (IME) and the WebKitGTK runtime are most reliable when they come from the distribution, and the package declares them as dependencies. Install it with `sudo apt install ./EasyOffice-linux-x64.deb` (Ubuntu, Debian) or `sudo dnf install ./EasyOffice-linux-x64.rpm` (Fedora); on arm64 only the `.deb` is built. The AppImage needs no installation (`chmod +x EasyOffice-linux-x64.AppImage`, then run it; it needs FUSE 2, the `libfuse2` package) and is meant for cases where a native package is not an option: on some Wayland and IME setups switching between Korean and English input or showing the window can be unreliable. The packages register the main document formats (HWP, HWPX, DOCX, ODT, XLSX, ODS, PPTX, ODP, PDF) as "Open with" targets without taking over another application's default, and they are built on Ubuntu 22.04, so glibc 2.35 or newer and WebKitGTK 4.1 are required. Check a download with `sha256sum --check --ignore-missing SHA256SUMS.txt`. To build the packages from source on Linux (Rust 1.90+, Node.js, `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libxdo-dev`, `librsvg2-dev`, `libssl-dev`, `patchelf`, `rpm`):
+Linux releases ship `EasyOffice-linux-x64.AppImage`, `EasyOffice-linux-x64.deb`, `EasyOffice-linux-x64.rpm` and `EasyOffice-linux-arm64.deb`. Prefer the native package of your distribution: the Korean input method (IME) and the WebKitGTK runtime are most reliable when they come from the distribution, and the package declares them as dependencies. Install it with `sudo apt install ./EasyOffice-linux-x64.deb` (Ubuntu, Debian) or `sudo dnf install ./EasyOffice-linux-x64.rpm` (Fedora); on arm64 only the `.deb` is built. The AppImage needs no installation (`chmod +x EasyOffice-linux-x64.AppImage`, then run it; it needs FUSE 2, the `libfuse2` package) and is meant for cases where a native package is not an option: on some Wayland and IME setups switching between Korean and English input or showing the window can be unreliable. The packages register the main document formats (HWP, HWPX, DOCX, ODT, XLSX, ODS, PPTX, ODP, PDF) as "Open with" targets without taking over another application's default, and they are built on Ubuntu 22.04, so glibc 2.35 or newer and WebKitGTK 4.1 are required. Check a download with `sha256sum --check --ignore-missing SHA256SUMS.txt`. To build the packages from source on Linux (Rust 1.93+, Node.js, `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libxdo-dev`, `librsvg2-dev`, `libssl-dev`, `patchelf`, `rpm`):
 
 ```bash
 cd crates/easyoffice-desktop
