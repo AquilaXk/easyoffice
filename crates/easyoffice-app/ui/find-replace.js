@@ -31,7 +31,7 @@
     let elements = null;
     const ui = () => (elements ??= {
       dialog: byId(DIALOG_ID), title: byId("find-dialog-title"), query: byId("find-query"),
-      replacement: byId("find-replacement"), replaceRow: byId("find-replace-row"), count: byId("find-count"),
+      replacement: byId("find-replacement"), replaceRow: byId("find-replace-row"), count: byId("find-count"), status: byId("find-status"),
       caseBox: byId("find-opt-case"), wordBox: byId("find-opt-word"), regexBox: byId("find-opt-regex"),
       formulaBox: byId("find-opt-formula"), formulaLabel: byId("find-opt-formula-label"),
       replaceButtons: byId("find-replace-buttons"),
@@ -61,9 +61,12 @@
 
     // ---- state -> screen --------------------------------------------------------------------
 
-    function showCount(text) {
-      const { count } = ui();
-      if (count) count.textContent = text;
+    // The reference dialog's two text places: the "n / total" label in the option row and the status line under it.
+    function showStatus(text, position = "") {
+      const { count, status } = ui();
+      count.textContent = position;
+      count.hidden = position === "";
+      status.textContent = text;
     }
 
     function totalLabel(result) {
@@ -86,12 +89,12 @@
       current = n < 0 ? null : index.at(n);
       if (!current) {
         source.clearHighlight();
-        showCount(matcher.empty ? "" : MSG_NO_MATCH);
+        showStatus(matcher.empty ? "" : MSG_NO_MATCH);
         return;
       }
       origin = { id: current.id, offset: current.start };
       source.show(nearMatches(n), current);
-      showCount(n + 1 + " / " + totalLabel(result));
+      showStatus("", n + 1 + " / " + totalLabel(result));
     }
 
     // ---- search -----------------------------------------------------------------------------
@@ -101,7 +104,7 @@
       if (!matcher.ok) {
         current = null;
         source.clearHighlight();
-        showCount(matcher.error);
+        showStatus(matcher.error);
         return null;
       }
       source.sync(index);
@@ -115,7 +118,7 @@
       if (matcher.empty) {
         current = null;
         source.clearHighlight();
-        return showCount("");
+        return showStatus("");
       }
       goTo(index.neighbour(origin?.id, origin?.offset ?? 0, true), result);
     }
@@ -147,26 +150,26 @@
       current = null;
       const next = refresh();
       goTo(next ? index.neighbour(id, origin.offset, true) : -1, next);
-      if (outcome.replaced === 0) showCount("수식 셀의 결과 값은 바꿀 수 없습니다");
+      if (outcome.replaced === 0) showStatus("수식 셀의 결과 값은 바꿀 수 없습니다");
     }
 
     async function replaceAll() {
       const result = refresh();
       if (!result || matcher.empty) return;
-      if (!result.complete) return showCount(MSG_TOO_MANY);
+      if (!result.complete) return showStatus(MSG_TOO_MANY);
       const replacement = ui().replacement.value;
       const plan = [];
       for (const id of index.blockIds()) {
         const found = index.matchesInBlock(id);
         if (found.length > 0) plan.push({ id, edits: found.map((m) => ({ start: m.start, end: m.end, value: replacementValue(m, replacement) })) });
       }
-      if (plan.length === 0) return showCount(MSG_NO_MATCH);
+      if (plan.length === 0) return showStatus(MSG_NO_MATCH);
       const outcome = await source.replace(plan);
       current = null;
       origin = null;
       const after = refresh();
       source.clearHighlight();
-      showCount(reportReplaced(outcome) + (after && after.total > 0 ? " · 남은 일치 " + totalLabel(after) : ""));
+      showStatus(reportReplaced(outcome) + (after && after.total > 0 ? " · 남은 일치 " + totalLabel(after) : ""));
     }
 
     // ---- dialog -----------------------------------------------------------------------------
@@ -200,8 +203,8 @@
       countTimer = null;
       if (!source) return;
       const result = refresh();
-      if (result && current) showCount(index.neighbour(current.id, current.start, true) + 1 + " / " + totalLabel(result));
-      else if (result) showCount(result.total === 0 ? MSG_NO_MATCH : totalLabel(result) + "개 찾음");
+      if (result && current) showStatus("", index.neighbour(current.id, current.start, true) + 1 + " / " + totalLabel(result));
+      else if (result) showStatus(result.total === 0 ? MSG_NO_MATCH : totalLabel(result) + "개 찾음");
     }
 
     // Opens the dialog for the active module; false when the module has no find (the caller falls back).
@@ -245,8 +248,8 @@
       });
       byId("btn-find-next").addEventListener("click", () => step(true));
       byId("btn-find-prev").addEventListener("click", () => step(false));
-      byId("btn-find-replace").addEventListener("click", () => void replaceCurrent().catch((err) => showCount(err.message)));
-      byId("btn-find-replace-all").addEventListener("click", () => void replaceAll().catch((err) => showCount(err.message)));
+      byId("btn-find-replace").addEventListener("click", () => void replaceCurrent().catch((err) => showStatus(err.message)));
+      byId("btn-find-replace-all").addEventListener("click", () => void replaceAll().catch((err) => showStatus(err.message)));
       els.dialog.addEventListener("close", close);
       els.dialog.addEventListener("keydown", onDialogKeydown);
     }
@@ -269,7 +272,7 @@
       }
       if (key !== "Enter") return;
       event.preventDefault();
-      if (event.target === els.replacement) void replaceCurrent().catch((err) => showCount(err.message));
+      if (event.target === els.replacement) void replaceCurrent().catch((err) => showStatus(err.message));
       else step(!event.shiftKey);
     }
 

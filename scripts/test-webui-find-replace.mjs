@@ -24,7 +24,8 @@ const type = (h, id, value) => {
   input.value = value;
   input.dispatchEvent({ type: "input", target: input });
 };
-const count = (h) => $(h.document, "find-count").textContent;
+// The "n / total" label when there is one, else the status line.
+const count = (h) => $(h.document, "find-count").textContent || $(h.document, "find-status").textContent;
 const editorText = (h) => $(h.document, "doc-editor").textContent;
 
 test("Ctrl+F opens the find dialog (not the palette), Ctrl+F2 adds the replace row, Ctrl+K keeps the palette", async () => {
@@ -203,7 +204,7 @@ test("the find dialog's hidden elements stay hidden under the stylesheet's displ
     .filter((r) => r.display);
   const h = await createWorkspaceHarness();
   const { document } = h;
-  for (const id of ["find-opt-formula-label", "find-replace-row", "find-replace-buttons"]) {
+  for (const id of ["find-opt-formula-label", "find-replace-row", "find-replace-buttons", "find-count"]) {
     const el = document.getElementById(id);
     assert.equal(el.hidden, true, id + " starts hidden");
     const hits = rules.filter((r) => r.selector.split(",").some((sel) => matchesSelectorList(el, sel.trim(), null)));

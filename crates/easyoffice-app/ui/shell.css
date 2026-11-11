@@ -109,14 +109,20 @@
 .cp-item:hover .cp-item-label, .cp-item--selected .cp-item-label { color: var(--color-primary-dark); }
 
 /* Find and replace (find-replace.js): a floating, non-modal dialog; the matches are painted with the Custom Highlight API. */
-/* Layout of the reference editor's find dialog (rhwp-studio `find-dialog.css`, MIT, Copyright (c) 2025-2026 Edward Kim; see THIRD_PARTY_NOTICES.md):
-   fixed at the top right, label column of 70px, status line right-aligned, button rows right-aligned (find, then replace). */
-.find-dialog { position: fixed; top: 80px; right: 24px; left: auto; margin: 0; width: min(380px, calc(100vw - 32px)); }
-.find-dialog .dialog-body { padding: 10px 12px 4px; }
-.find-dialog .dialog-label { width: 70px; flex-shrink: 0; }
-.find-dialog .find-options { flex-wrap: wrap; gap: 4px 12px; }
+/* The reference editor's find dialog (rhwp-studio `find-dialog.css`, MIT, Copyright (c) 2025-2026 Edward Kim; see THIRD_PARTY_NOTICES.md):
+   same placement, sizes and spacing; the colours are this app's tokens. */
+.find-dialog { position: fixed; top: 80px; right: 24px; left: auto; margin: 0; width: min(380px, calc(100vw - 32px)); z-index: 9999; }
+.find-dialog .dialog-title { padding: 6px 12px; background: var(--color-accent-bg); font-weight: bold; font-size: var(--font-size-base); display: flex; align-items: center; justify-content: space-between; }
+.find-dialog .dialog-body { display: block; padding: 10px 12px 4px; }
+.find-dialog .dialog-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.find-dialog .dialog-label { width: 70px; flex-shrink: 0; text-align: right; }
+.find-dialog .dialog-input { flex: 1; height: 24px; border: 1px solid var(--ui-border-strong); border-radius: 0; background: var(--color-surface); color: var(--color-text); padding: 0 4px; font-size: var(--font-size-base); box-sizing: border-box; min-width: 0; }
+.find-dialog .dialog-input:focus { border-color: var(--color-focus-border); outline: none; }
+.find-dialog .find-options { flex-wrap: wrap; }
 .find-dialog .find-options label:not([hidden]) { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
-.find-dialog .find-count { flex: 1; min-width: 0; margin: 0; align-self: center; text-align: left; color: var(--ui-text-muted); font-size: var(--font-size-sm, 11px); }
+.find-dialog .find-count { margin-left: auto; color: var(--color-text-muted); font-size: var(--font-size-sm); white-space: nowrap; }
+.find-dialog .find-status { color: var(--color-text-secondary); font-size: var(--font-size-sm); }
+.find-dialog .find-status-row { min-height: 18px; line-height: 18px; text-align: right; }
 .find-dialog .find-buttons { display: flex; gap: 6px; padding: 4px 12px 8px; justify-content: flex-end; }
 .find-dialog [hidden] { display: none; }
 .find-dialog .dialog-btn { white-space: nowrap; }

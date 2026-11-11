@@ -888,10 +888,11 @@
             <label><input id="find-opt-word" type="checkbox" /> 전체 단어</label>
             <label><input id="find-opt-regex" type="checkbox" /> 정규식</label>
             <label id="find-opt-formula-label" hidden><input id="find-opt-formula" type="checkbox" /> 수식 원문 포함</label>
+            <span id="find-count" class="find-count" hidden></span>
           </div>
+          <div class="find-status-row"><span id="find-status" class="find-status" role="status" aria-live="polite"></span></div>
         </div>
         <div class="find-buttons">
-          <p id="find-count" class="find-count" role="status" aria-live="polite"></p>
           <button id="btn-find-prev" type="button" class="dialog-btn">이전</button>
           <button id="btn-find-next" type="button" class="dialog-btn dialog-btn-primary">다음</button>
         </div>
