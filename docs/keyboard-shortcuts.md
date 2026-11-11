@@ -24,7 +24,7 @@ EasyOffice의 단축키 목록이다. macOS는 ⌘(Command), Windows와 Linux는
 | 최근 문서 | ⌥⌘O | Ctrl+Alt+O | |
 | 되돌리기 | ⌘Z | Ctrl+Z | |
 | 다시 실행 | ⇧⌘Z | Ctrl+Y, Ctrl+Shift+Z | macOS 메뉴는 ⇧⌘Z |
-| 오려 두기 / 복사 / 붙이기 | ⌘X / ⌘C / ⌘V | Ctrl+X / Ctrl+C / Ctrl+V | 브라우저 기본 동작 |
+| 오려 두기 / 복사 / 붙이기 | ⌘X / ⌘C / ⌘V | Ctrl+X / Ctrl+C / Ctrl+V | macOS의 ⌘X·⌘C는 편집 메뉴 항목(PD-119)이 받아 한글 창에서는 편집기 명령으로, 다른 창에서는 페이지 명령(입력란이면 브라우저 편집 명령)으로 보낸다. ⌘V는 시스템 붙이기. Windows·Linux는 브라우저 기본 동작 |
 | 명령 팔레트 | ⌘K | Ctrl+K | `/`도 같은 동작(입력란 밖) |
 | 찾기(명령 팔레트) | ⌘F | Ctrl+F | |
 | 굵게 | ⌘B | Ctrl+B | |
@@ -37,6 +37,14 @@ EasyOffice의 단축키 목록이다. macOS는 ⌘(Command), Windows와 Linux는
 | 한글 문서 인쇄 | ⌘P | Ctrl+P | 데스크톱 앱, 한글 모듈 |
 | 한글 문서 PDF 내보내기 | ⌘E | 없음 | macOS만. 다른 OS의 Ctrl+E는 편집기의 삭제 키 |
 | 삽입/덮어쓰기 전환 | Insert | Insert | 입력란 밖, 해당 모듈이 처리 |
+
+## 시트
+
+시트 모듈에서만 동작한다. Ctrl은 macOS에서 ⌘다(`crates/easyoffice-app/ui/sheet-input.js`).
+
+| 동작 | 키 |
+| --- | --- |
+| 취소선 | Ctrl+5 (macOS는 ⌘5) |
 
 ## 슬라이드
 
