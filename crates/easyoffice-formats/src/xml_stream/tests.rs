@@ -180,7 +180,6 @@ const SAMPLES: &[&str] = &[
     "<a x=\"a>b\" y='c>d'>t</a>",
     "<a>&#x41;&#65;&#0;&#xD800;&bogus;&amp</a>",
     "<a   ></a  ><b/ >",
-    "<!DOCTYPE a><a/>",
     "<a><!-->x</a>",
     "<a>\n  <b>\n</b>\n</a>",
     "<a b=\"1\"c=\"2\"/>",
@@ -219,6 +218,33 @@ fn tokenizes_nested_elements_attributes_and_entities() {
             Legacy::End("a".into()),
         ]
     );
+}
+
+#[test]
+fn a_doctype_declaration_is_no_element() {
+    // The owned tokenizer read it as a start tag named `!DOCTYPE` (and ended it at the first `>`
+    // inside an internal subset).
+    for xml in [
+        "<!DOCTYPE a><a/>",
+        "<!DOCTYPE a SYSTEM \"a.dtd\"><a/>",
+        "<!DOCTYPE a [<!ELEMENT a ANY>]><a/>",
+        "<!DOCTYPE a [<!ENTITY x \"]>\">]><a/>",
+    ] {
+        let ev = owned(tokenize(xml).unwrap());
+        assert_eq!(
+            ev,
+            vec![
+                Legacy::Start {
+                    name: "a".into(),
+                    attrs: vec![]
+                },
+                Legacy::End("a".into()),
+            ],
+            "{xml}"
+        );
+    }
+    assert!(tokenize("<!DOCTYPE a [<a/>").is_err());
+    assert!(tokenize("<!DOCTYPE a \"x><a/>").is_err());
 }
 
 #[test]

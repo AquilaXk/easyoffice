@@ -134,6 +134,31 @@ fn find_tag_end(bytes: &[u8], from: usize) -> Option<usize> {
     None
 }
 
+/// Length of the `<!DOCTYPE ...>` declaration at the start of `rest`, including an internal subset
+/// (`[...]`, where `>` is not the end) and quoted literals. A declaration is not an element: it
+/// produces no event (PD-172). Entities it declares are not expanded (only the five predefined
+/// ones are), and the safe-XML check (`XmlSanitizer::validate_safe_xml`) still refuses the
+/// declaration for the packages this reader is given.
+fn doctype_len(rest: &str) -> Result<usize, EasyOfficeError> {
+    let bytes = rest.as_bytes();
+    let mut i = "<!DOCTYPE".len();
+    let mut subset_depth = 0usize;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'>' if subset_depth == 0 => return Ok(i + 1),
+            b'[' => subset_depth += 1,
+            b']' => subset_depth = subset_depth.saturating_sub(1),
+            q @ (b'"' | b'\'') => {
+                i = XmlSanitizer::find_byte_swar(bytes, i + 1, q)
+                    .ok_or_else(|| corrupt("DOCTYPE의 따옴표가 닫히지 않았습니다."))?;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    Err(corrupt("DOCTYPE 선언이 닫히지 않았습니다."))
+}
+
 /// Pull reader: an iterator of events that stops after the first error.
 pub(crate) struct XmlReader<'a> {
     xml: &'a str,
@@ -251,6 +276,9 @@ impl<'a> XmlReader<'a> {
                     self.pos = i + end + 3;
                     self.emitted += 1;
                     return Ok(Some(XmlEvent::Text(Cow::Borrowed(&rest[9..end]))));
+                }
+                Some(b'!') if rest.starts_with("<!DOCTYPE") => {
+                    self.pos = i + doctype_len(rest)?;
                 }
                 Some(b'?') => {
                     let end = rest
