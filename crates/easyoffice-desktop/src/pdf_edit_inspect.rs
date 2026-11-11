@@ -1,4 +1,4 @@
-//! What a PDF declares, counted against the budgets before any page is copied (PD-161).
+//! What a PDF declares, counted against the budgets before any page is copied (PD-163).
 //!
 //! `inspect` is the gate every PDF passes on its way into an edit: the size, the header, an
 //! encryption marker, what the compressed streams inflate to, then (after the reader has parsed
@@ -10,7 +10,7 @@
 //! is counted here first with a streaming inflater (`inflated_len`) that allocates nothing. The
 //! stream scan before parsing is a best effort for everything else the reader decodes on its own
 //! (object streams): it finds `stream ... endstream` spans by their keywords, which a crafted file
-//! can hide from. It stops the common bomb, not a determined one (the remaining risk is in PD-161).
+//! can hide from. It stops the common bomb, not a determined one (the remaining risk is in PD-163).
 
 use crate::pdf_edit_budget::{
     Deadline, MAX_OBJECTS, MAX_PAGES, MAX_PAGE_CONTENT_BYTES, MAX_PAGE_TREE_DEPTH,

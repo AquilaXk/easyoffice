@@ -1,4 +1,4 @@
-//! The commands that edit the PDF of a window (PD-161): rotate, stamp and watermark, merge, split
+//! The commands that edit the PDF of a window (PD-163): rotate, stamp and watermark, merge, split
 //! and save, on the objects of the opened file instead of on the text model.
 //!
 //! Like the other shell commands they are behind the window's [`ShellCaller`] token, and the page

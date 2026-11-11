@@ -356,7 +356,7 @@ test("the desktop bridge's PDF export sends a file name, job numbers and page SV
   await assert.rejects(pdfExport.start("a.pdf"), /연결할 수 없습니다/);
 });
 
-test("the desktop bridge's PDF edit sends the opened bytes once, small ops after, never a path, with the shell token (PD-161)", async () => {
+test("the desktop bridge's PDF edit sends the opened bytes once, small ops after, never a path, with the shell token (PD-163)", async () => {
   const calls = [];
   const answers = [];
   const env = {
