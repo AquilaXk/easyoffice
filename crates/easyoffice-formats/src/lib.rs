@@ -15,6 +15,8 @@ pub mod hwpx_codec;
 mod hwpx_parts;
 mod legacy_ole2_codec;
 pub mod odf_hwpx_codecs;
+mod ods_cells;
+mod ods_grid;
 pub mod office_codecs;
 pub mod ole2_codec;
 mod ooxml_presentation;

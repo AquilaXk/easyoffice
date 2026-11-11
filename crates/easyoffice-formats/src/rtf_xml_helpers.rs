@@ -515,6 +515,7 @@ pub(crate) fn extract_tags_or_self_closing_with_attrs<'a>(
     out
 }
 
+#[cfg(test)]
 pub(crate) fn extract_ods_cells_from_row(row_xml: &str) -> Vec<(bool, &str, &str)> {
     const CELL_TAG: &[u8] = b"table:table-cell";
     const COVERED_TAG: &[u8] = b"table:covered-table-cell";

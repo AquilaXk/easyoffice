@@ -3,15 +3,16 @@
 
 use std::collections::{BTreeMap, HashMap};
 
+use crate::ods_grid::{repeat_value, walk_ods, OdsCell, OdsSink};
 use crate::rtf_xml_helpers::{
-    extract_attr_from_fragment, extract_balanced_elements, extract_ods_cells_from_row,
-    extract_tags_or_self_closing_with_attrs, extract_tags_with_attrs,
+    extract_attr_from_fragment, extract_tags_or_self_closing_with_attrs, extract_tags_with_attrs,
 };
 use crate::sheet_styling::{
     format_centipt, CellStyle, SheetStyling, StyleKey, MAX_COLUMN_PX, MAX_STYLED_CELLS,
     MIN_COLUMN_PX,
 };
-use crate::{OdfCodec, XmlSanitizer};
+use crate::xml_stream::{unescape_cow, Attrs};
+use crate::{EasyOfficeError, OdfCodec, XmlSanitizer};
 
 const PX_PER_INCH: f64 = 96.0;
 const CM_PER_INCH: f64 = 2.54;
@@ -173,12 +174,12 @@ fn parse_text_properties(attrs: &str) -> CellStyle {
 }
 
 /// Cell styles and column widths declared by the automatic styles of `content.xml`.
-struct AutomaticStyles {
-    cells: HashMap<String, CellStyle>,
-    columns: HashMap<String, u32>,
+pub(crate) struct AutomaticStyles {
+    pub(crate) cells: HashMap<String, CellStyle>,
+    pub(crate) columns: HashMap<String, u32>,
 }
 
-fn parse_automatic_styles(content_xml: &str) -> AutomaticStyles {
+pub(crate) fn parse_automatic_styles(content_xml: &str) -> AutomaticStyles {
     let mut styles = AutomaticStyles {
         cells: HashMap::new(),
         columns: HashMap::new(),
@@ -222,84 +223,105 @@ fn parse_automatic_styles(content_xml: &str) -> AutomaticStyles {
     styles
 }
 
-fn repeat_of(attrs: &str, name: &str) -> u32 {
-    extract_attr_from_fragment(attrs, name)
-        .and_then(|v| v.parse::<u32>().ok())
-        .unwrap_or(1)
-        .max(1)
+/// Collects cell and column styles of each table while the grid is walked.
+struct StyleSink<'s> {
+    styles: &'s AutomaticStyles,
+    tables: Vec<(String, SheetStyling)>,
+    columns: BTreeMap<u32, u32>,
+    cells: BTreeMap<(u32, u32), CellStyle>,
+    name: String,
+    row: u32,
+    column: u32,
 }
 
-fn parse_table_columns(table_xml: &str, styles: &AutomaticStyles) -> BTreeMap<u32, u32> {
-    let head = &table_xml[..table_xml
-        .find("<table:table-row")
-        .unwrap_or(table_xml.len())];
-    let mut columns = BTreeMap::new();
-    let mut col = 0u32;
-    for (attrs, _) in extract_balanced_elements(head, "table:table-column") {
-        let repeat = repeat_of(attrs, "table:number-columns-repeated");
-        let px = extract_attr_from_fragment(attrs, "table:style-name")
-            .and_then(|n| styles.columns.get(&XmlSanitizer::unescape(n)).copied());
+impl OdsSink for StyleSink<'_> {
+    fn table(&mut self, attrs: &Attrs<'_>) {
+        self.name = attrs
+            .get("table:name")
+            .map(|n| n.into_owned())
+            .unwrap_or_else(|| format!("Sheet{}", self.tables.len() + 1));
+        self.columns = BTreeMap::new();
+        self.cells = BTreeMap::new();
+        self.row = 0;
+        self.column = 0;
+    }
+
+    fn column(&mut self, attrs: &Attrs<'_>) {
+        let repeat = attrs
+            .get("table:number-columns-repeated")
+            .map_or(1, |v| repeat_value(&v));
+        let px = attrs
+            .get("table:style-name")
+            .and_then(|n| self.styles.columns.get(&*n).copied());
         if let Some(px) = px {
-            for c in col..col.saturating_add(repeat).min(OdfCodec::MAX_COLS + 1) {
-                if columns.len() >= MAX_STYLED_CELLS {
+            for c in self.column
+                ..self
+                    .column
+                    .saturating_add(repeat)
+                    .min(OdfCodec::MAX_COLS + 1)
+            {
+                if self.columns.len() >= MAX_STYLED_CELLS {
                     break;
                 }
-                columns.insert(c, px);
+                self.columns.insert(c, px);
             }
         }
-        col = col.saturating_add(repeat);
+        self.column = self.column.saturating_add(repeat);
     }
-    columns
-}
 
-fn parse_table_cells(table_xml: &str, styles: &AutomaticStyles) -> BTreeMap<(u32, u32), CellStyle> {
-    let mut cells = BTreeMap::new();
-    let mut row = 0u32;
-    for (row_attrs, row_inner) in extract_balanced_elements(table_xml, "table:table-row") {
-        let row_repeat = repeat_of(row_attrs, "table:number-rows-repeated");
+    fn row(&mut self, repeat: u32, cells: &[OdsCell<'_>]) -> Result<(), EasyOfficeError> {
         let mut col = 0u32;
-        for (_, attrs, _) in extract_ods_cells_from_row(row_inner) {
-            let col_repeat = repeat_of(attrs, "table:number-columns-repeated");
-            let style = extract_attr_from_fragment(attrs, "table:style-name")
-                .and_then(|n| styles.cells.get(&XmlSanitizer::unescape(n)))
+        for cell in cells {
+            let style = cell
+                .style
+                .and_then(|n| self.styles.cells.get(&*unescape_cow(n)))
                 .filter(|s| !s.is_plain());
             if let Some(style) = style {
                 // A style repeated across a whole row/column band (a "format the sheet" fill) is
                 // not individual cell formatting; only bounded blocks are kept.
-                let block = u64::from(row_repeat) * u64::from(col_repeat);
-                let in_grid = u64::from(row) + u64::from(row_repeat)
+                let block = u64::from(repeat) * u64::from(cell.col_repeat);
+                let in_grid = u64::from(self.row) + u64::from(repeat)
                     <= u64::from(OdfCodec::MAX_ROWS) + 1
-                    && u64::from(col) + u64::from(col_repeat) <= u64::from(OdfCodec::MAX_COLS) + 1;
-                if in_grid && block <= 1024 && cells.len() + block as usize <= MAX_STYLED_CELLS {
-                    for r in row..row + row_repeat {
-                        for c in col..col + col_repeat {
-                            cells.insert((r, c), *style);
+                    && u64::from(col) + u64::from(cell.col_repeat)
+                        <= u64::from(OdfCodec::MAX_COLS) + 1;
+                if in_grid && block <= 1024 && self.cells.len() + block as usize <= MAX_STYLED_CELLS
+                {
+                    for r in self.row..self.row + repeat {
+                        for c in col..col + cell.col_repeat {
+                            self.cells.insert((r, c), *style);
                         }
                     }
                 }
             }
-            col = col.saturating_add(col_repeat);
+            col = col.saturating_add(cell.col_repeat);
         }
-        row = row.saturating_add(row_repeat);
+        self.row = self.row.saturating_add(repeat);
+        Ok(())
     }
-    cells
+
+    fn table_end(&mut self) {
+        let styling = SheetStyling {
+            cells: std::mem::take(&mut self.cells),
+            columns: std::mem::take(&mut self.columns),
+        };
+        self.tables.push((std::mem::take(&mut self.name), styling));
+    }
 }
 
 /// Styling of every table of an ODS `content.xml`, keyed by table name.
-pub(crate) fn parse_ods_styling(content_xml: &str) -> Vec<(String, SheetStyling)> {
+pub(crate) fn parse_ods_styling(
+    content_xml: &str,
+) -> Result<Vec<(String, SheetStyling)>, EasyOfficeError> {
     let styles = parse_automatic_styles(content_xml);
-    extract_balanced_elements(content_xml, "table:table")
-        .into_iter()
-        .enumerate()
-        .map(|(idx, (attrs, inner))| {
-            let name = extract_attr_from_fragment(attrs, "table:name")
-                .map(XmlSanitizer::unescape)
-                .unwrap_or_else(|| format!("Sheet{}", idx + 1));
-            let styling = SheetStyling {
-                cells: parse_table_cells(inner, &styles),
-                columns: parse_table_columns(inner, &styles),
-            };
-            (name, styling)
-        })
-        .collect()
+    let mut sink = StyleSink {
+        styles: &styles,
+        tables: Vec::new(),
+        columns: BTreeMap::new(),
+        cells: BTreeMap::new(),
+        name: String::new(),
+        row: 0,
+        column: 0,
+    };
+    walk_ods(content_xml, false, &mut sink)?;
+    Ok(sink.tables)
 }
