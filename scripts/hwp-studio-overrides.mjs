@@ -25,6 +25,15 @@ const OVERLAY_NON_OVERRIDE = new Set([
   "src/vite-env.d.ts",
   // EasyOffice-only module (no upstream counterpart): shell shortcut forwarding over the embed port.
   "src/embed/shell-shortcuts.ts",
+  // EasyOffice-only modules split out of main.ts: global shortcuts, file input and drop, open pipeline,
+  // status-bar zoom controls, toolbar wiring and the contextual toolbar groups.
+  "src/embed/global-shortcuts.ts",
+  "src/embed/file-drop.ts",
+  "src/embed/open-pipeline.ts",
+  "src/embed/password-open.ts",
+  "src/ui/zoom-controls.ts",
+  "src/ui/toolbar-wiring.ts",
+  "src/ui/context-toolbar-groups.ts",
   // EasyOffice-only module: the 파일 menu as shell commands, shell theme and recent documents.
   "src/embed/shell-menu.ts",
   // EasyOffice-only module: page batches for the shell's print path (getPrintPages RPC).

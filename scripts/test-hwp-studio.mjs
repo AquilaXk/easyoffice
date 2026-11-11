@@ -431,20 +431,19 @@ test("print styles carry an @page size rule and a page box per page (#173)", asy
 });
 
 // ---- password-protected HWP (PD-100) ---------------------------------------------------------
-// The overlay's open funnel (apps/hwp-studio/src/main.ts) already tries a plain load first and only
+// The overlay's open funnel (apps/hwp-studio/src/embed/password-open.ts) already tries a plain load first and only
 // asks for a password after the engine reports an encrypted document. These tests run the real
-// flow code (sliced out of main.ts, types stripped) with a mock engine and dialog, and guard that
+// flow code (sliced out of that module, types stripped) with a mock engine and dialog, and guard that
 // the password never reaches the shell, the embed port, storage or logs.
 
-const OVERLAY_MAIN = readText(path.join(REPO, "apps/hwp-studio/src/main.ts"));
+const PASSWORD_OPEN = readText(path.join(REPO, "apps/hwp-studio/src/embed/password-open.ts"));
 const PASSWORD_REQUIRED = "비밀번호가 필요한 암호 문서";
 const PASSWORD_REJECTED = "비밀번호가 일치하지 않거나 암호화 데이터가 손상되었습니다";
 
 function openFlowSource() {
-  const start = OVERLAY_MAIN.indexOf("class DocumentOpenCancelledError");
-  const end = OVERLAY_MAIN.indexOf("/**\n * 문서 열기가 실패하면 빈 쪽 상태로");
-  assert.ok(start >= 0 && end > start, "the open-flow markers exist");
-  return stripTypeScriptTypes(OVERLAY_MAIN.slice(start, end));
+  const start = PASSWORD_OPEN.indexOf("export class DocumentOpenCancelledError");
+  assert.ok(start >= 0, "the open-flow marker exists");
+  return stripTypeScriptTypes(PASSWORD_OPEN.slice(start).replaceAll(/^export /gm, ""));
 }
 
 // The sliced flow becomes a module whose factory receives the mock engine and dialog, so the real
@@ -453,7 +452,7 @@ const OPEN_FLOW_MODULE = (() => {
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "eo-open-flow-")), "open-flow.mjs");
   fs.writeFileSync(
     file,
-    `export function makeOpenFlow(wasm, showHwpPasswordDialog) {\n${openFlowSource()}\nreturn { open: loadDocumentForOpen, Cancelled: DocumentOpenCancelledError };\n}\n`
+    `export function makeOpenFlow(wasm, showHwpPasswordDialog) {\n${openFlowSource()}\nreturn { open: (data, name) => loadDocumentForOpen(wasm, data, name), Cancelled: DocumentOpenCancelledError };\n}\n`
   );
   return import(pathToFileURL(file).href);
 })();
@@ -555,8 +554,8 @@ test("unsupported encryption, DRM and corrupt data end with fixed Korean errors 
 });
 
 test("the password stays inside the open flow: no storage, logs, embed port or shell command carries it", () => {
-  const start = OVERLAY_MAIN.indexOf("async function openPasswordProtectedDocument");
-  const flow = OVERLAY_MAIN.slice(start, OVERLAY_MAIN.indexOf("async function loadDocumentForOpen"));
+  const start = PASSWORD_OPEN.indexOf("async function openPasswordProtectedDocument");
+  const flow = PASSWORD_OPEN.slice(start, PASSWORD_OPEN.indexOf("export async function loadDocumentForOpen"));
   assert.match(flow, /password = '';/, "the local reference is cleared after each attempt");
   assert.doesNotMatch(flow, /localStorage|sessionStorage|addRecentDoc|autosave|console\.|postMessage|emit\(/);
   const outside = [
@@ -648,8 +647,10 @@ test("the editor tells the shell whether the document was opened with a password
   assert.match(main, /async clearSaveProtection\(\) \{\s+await initPromise;\s+wasm\.requiresPasswordForSave = false;/);
   const { EMBED_CAPABILITIES } = await import("../apps/hwp-studio/src/embed/protocol.ts");
   assert.ok(EMBED_CAPABILITIES.includes("save-protection-v1"));
-  assert.match(main, /wasm\.loadDocumentWithPassword\(data, password, fileName\)/);
-  assert.doesNotMatch(main, /passwordProtected:\s*password|requiresPasswordForSave\s*=\s*password/, "the password string is never kept");
+  assert.match(PASSWORD_OPEN, /wasm\.loadDocumentWithPassword\(data, password, fileName\)/);
+  for (const source of [main, PASSWORD_OPEN]) {
+    assert.doesNotMatch(source, /passwordProtected:\s*password|requiresPasswordForSave\s*=\s*password/, "the password string is never kept");
+  }
 });
 
 const UPSTREAM_BRIDGE = path.join(REPO, "third_party/rhwp/rhwp-studio/src/core/wasm-bridge.ts");
