@@ -140,18 +140,55 @@ test("tokens.css keeps the rhwp-studio values: light default, dark under data-th
   assert.match(css, /Adapted from rhwp-studio/);
 });
 
-test("the document page keeps the light palette in the dark theme", () => {
+const PAPER_SELECTORS = ["#doc-editor", ".slide-stage", ".pdf-page-card"];
+const PAPER_COLOUR_TOKEN = /^--(accent$|ui-(?!align-icon-filter)|color-|accent-|doc-|border-primary$|focus-ring$|selection-fill$)/;
+
+function lightTokens() {
   const tokens = read("tokens.css");
-  const light = tokens.slice(tokens.indexOf("\n:root {"), tokens.indexOf('\n:root[data-theme-effective="dark"] {'));
+  return new Map(cssDeclarations(tokens.slice(tokens.indexOf("\n:root {"), tokens.indexOf('\n:root[data-theme-effective="dark"] {'))));
+}
+
+function paperPalette() {
   const content = read("content.css");
-  const pageStart = content.indexOf("#doc-editor {");
-  const page = content.slice(content.indexOf("{", pageStart) + 1, content.indexOf("\n}", pageStart));
-  const pageTokens = Object.fromEntries(cssDeclarations(page));
-  assert.ok(Object.keys(pageTokens).length > 30, "the page redeclares the palette");
-  for (const [name, value] of Object.entries(pageTokens)) {
-    const lightValue = new Map(cssDeclarations(light)).get(name);
-    assert.equal(value, lightValue, `${name} on the page matches the light token`);
-  }
+  const head = PAPER_SELECTORS.join(",\n") + " {";
+  const start = content.indexOf(head);
+  assert.ok(start >= 0, "one rule gives the page, the slide stage and the PDF card the same palette");
+  return new Map(cssDeclarations(content.slice(start + head.length, content.indexOf("\n}", start))));
+}
+
+test("paper surfaces (page, slide stage, PDF card) keep the light palette in the dark theme", () => {
+  const light = lightTokens();
+  const palette = paperPalette();
+  assert.ok(palette.size > 60, "the paper redeclares the palette");
+  for (const [name, value] of palette) assert.equal(value, light.get(name), `${name} on paper matches the light token`);
+});
+
+test("every light colour token and alias the chrome rules read is fixed on paper", () => {
+  const palette = paperPalette();
+  const missing = [...lightTokens().keys()].filter((name) => PAPER_COLOUR_TOKEN.test(name) && !palette.has(name));
+  // `--doc-workspace` is the area around the paper, `--doc-shadow` is already a paper token.
+  assert.deepEqual(missing.filter((name) => name !== "--doc-workspace"), []);
+});
+
+test("controls on the PDF card are tinted by paper tokens, not by the dark chrome", () => {
+  const css = read("styles.css");
+  assert.match(css, /\.sb-select, \.sb-size-input \{[^}]*background: var\(--ui-surface\)/);
+  assert.match(css, /\.pdf-stamp \{[^}]*var\(--accent-strong\)/);
+  assert.ok(paperPalette().get("--ui-surface") === "#ffffff" && paperPalette().get("--accent-strong") === "#335095");
+  assert.ok(paperPalette().get("--color-border-input") === "var(--ui-border-light)");
+});
+
+test("one focus ring for buttons, inputs and the page: 1px inside the control (rhwp-studio)", () => {
+  const css = read("styles.css");
+  assert.match(css, /button:focus-visible,\ninput:focus-visible,\nselect:focus-visible,\n\[contenteditable="true"\]:focus-visible \{[^}]*outline: 1px solid var\(--color-focus-border\);[^}]*outline-offset: -2px;/);
+  assert.doesNotMatch(read("shell.css"), /button:not\(\.md-item\):focus-visible/);
+});
+
+test("toolbar button hover changes the surface and border only, never the glyph colour", () => {
+  const css = read("toolbar.css");
+  const rule = css.slice(css.indexOf(".tb-btn:hover,"), css.indexOf("}", css.indexOf(".tb-btn:hover,")));
+  assert.match(rule, /background: var\(--ui-hover-strong\)/);
+  assert.doesNotMatch(rule, /color:\s*var\(--color-primary-dark\)/);
 });
 
 test("index.html loads theme.js before the style sheets and has the three theme choices", () => {

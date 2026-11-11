@@ -5,18 +5,14 @@
  * UI chrome may use a literal colour; `scripts/test-webui-theme.mjs` allows them only here. */
 .sb-textcolor-btn { border-bottom: 3px solid #ff0000; }
 .sb-highlight-btn { border-bottom: 3px solid #fff000; }
-/* The slide editing stage and the PDF page card are sheets of paper like the page: dark text on
-   white in both themes. */
+/* Paper surfaces: the page, the slide stage and the PDF page card are sheets of paper that keep
+   the light palette in both themes. Everything the chrome rules read inside them is redeclared
+   here, the `--color-*` aliases included: an alias resolves where it is declared (`:root`), so
+   redeclaring only `--ui-*` would leave the dark value in `var(--color-*)`. scripts/test-webui-theme.mjs
+   checks each value against the light tokens and that every light colour token is covered. */
+#doc-editor,
 .slide-stage,
 .pdf-page-card {
-  --ui-text: #333333;
-  --ui-text-muted: #666666;
-  --ui-border-light: #d0d0d0;
-  color: var(--ui-text);
-}
-#doc-editor {
-  /* The page keeps the light palette in both themes: scripts/test-webui-theme.mjs checks these
-     against the light tokens. */
   --ui-bg: #f0f0f0;
   --ui-bg-light: #f5f5f5;
   --ui-surface: #ffffff;
@@ -64,6 +60,40 @@
   --accent-light: #4a90d9;
   --accent-hover: #a0b0d8;
   --accent-subtle: #748bc9;
+  --accent: var(--accent-primary);
+  --accent-ink: var(--accent-strong);
+  --ui-chrome: var(--ui-surface-raised);
+  --color-primary: var(--accent-primary);
+  --color-primary-dark: var(--accent-strong);
+  --color-primary-light: var(--accent-light);
+  --color-primary-hover: var(--accent-hover);
+  --color-primary-subtle: var(--accent-subtle);
+  --color-accent-bg: var(--ui-accent-bg);
+  --color-accent-bg-light: var(--ui-accent-bg-light);
+  --color-surface: var(--ui-surface);
+  --color-surface-raised: var(--ui-surface-raised);
+  --color-bg: var(--ui-bg);
+  --color-bg-light: var(--ui-bg-light);
+  --border-primary: var(--ui-border);
+  --color-border: var(--ui-border);
+  --color-border-light: var(--ui-border-light);
+  --color-border-lighter: var(--ui-border-subtle);
+  --color-border-dark: var(--ui-border-strong);
+  --color-border-input: var(--ui-border-light);
+  --color-text: var(--ui-text);
+  --color-text-secondary: var(--ui-text-secondary);
+  --color-text-muted: var(--ui-text-muted);
+  --color-text-hint: var(--ui-text-hint);
+  --color-text-disabled: var(--ui-text-disabled);
+  --color-text-placeholder: var(--ui-text-placeholder);
+  --color-hover-bg: var(--ui-hover);
+  --color-active-bg: var(--ui-active);
+  --color-selected-bg: var(--ui-selected);
+  --color-focus-border: var(--focus-ring);
+}
+.slide-stage,
+.pdf-page-card { color: var(--ui-text); }
+#doc-editor {
   width: 794px;
   max-width: 794px;
   min-height: 1050px;
