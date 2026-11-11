@@ -827,10 +827,24 @@ fn rectangular_grid(
 /// the PDF out (PD-167).
 pub type RichPdfRenderer<'a> = dyn Fn(&[u8], &PdfWriteOptions) -> Result<Vec<u8>, String> + 'a;
 
+/// Warning for a host render that failed and left the engine PDF to be written.
+fn render_fallback_warning(reason: &str) -> String {
+    format!("서식을 살린 PDF를 만들지 못해 기본 PDF(글자 중심)로 저장했습니다: {reason}")
+}
+
+/// Whether a host that draws pages takes this conversion. Two kinds of request keep the engine's
+/// PDF: a PDF studio save (`source` is PDF), whose page markers the studio reads back, and a
+/// highlight phrase, which is an annotation object only the engine writes.
+fn host_draws_pdf(
+    format: DocumentFormat,
+    source: DocumentFormat,
+    options: &PdfWriteOptions,
+) -> bool {
+    format == DocumentFormat::Pdf && source != DocumentFormat::Pdf && options.highlight.is_none()
+}
+
 /// [`encode_structured`], except that a document converted to PDF is drawn by `renderer` when
-/// there is one. Two kinds of request keep the engine's PDF: a PDF studio save (`source` is PDF),
-/// whose page markers the studio reads back, and a highlight phrase, which is an annotation
-/// object only the engine writes. When the renderer fails the engine PDF is written and
+/// there is one (see [`host_draws_pdf`]). When the renderer fails the engine PDF is written and
 /// `warnings` says why.
 pub(crate) fn encode_target(
     content: &StructuredContent,
@@ -841,19 +855,42 @@ pub(crate) fn encode_target(
     warnings: &mut Vec<String>,
 ) -> Result<Vec<u8>, EasyOfficeError> {
     if let (Some(render), StructuredContent::Document(doc, options)) = (renderer, content) {
-        if format == DocumentFormat::Pdf
-            && source != DocumentFormat::Pdf
-            && options.highlight.is_none()
-        {
+        if host_draws_pdf(format, source, options) {
             match render_document(doc, title, options, render) {
                 Ok(pdf) => return Ok(pdf),
-                Err(reason) => warnings.push(format!(
-                    "서식을 살린 PDF를 만들지 못해 기본 PDF(글자 중심)로 저장했습니다: {reason}"
-                )),
+                Err(reason) => warnings.push(render_fallback_warning(&reason)),
             }
         }
     }
     encode_structured(content, format, title, warnings)
+}
+
+/// [`encode_target`] for a converted source file. A `.hwp`/`.hwpx` source goes to the host as the
+/// file it is: writing it back through the engine's model would drop its page size, margins,
+/// headers and fonts. Other sources go through the model as HWPX. Either way the host also gets
+/// the request's page settings.
+pub(crate) fn encode_source_target(
+    content: &StructuredContent,
+    source_bytes: &[u8],
+    format: DocumentFormat,
+    source: DocumentFormat,
+    title: &str,
+    renderer: Option<&RichPdfRenderer<'_>>,
+    warnings: &mut Vec<String>,
+) -> Result<Vec<u8>, EasyOfficeError> {
+    if let (Some(render), StructuredContent::Document(_, options)) = (renderer, content) {
+        let native = matches!(source, DocumentFormat::Hwp | DocumentFormat::Hwpx);
+        if native && host_draws_pdf(format, source, options) {
+            match render(source_bytes, options) {
+                Ok(pdf) => return Ok(pdf),
+                Err(reason) => {
+                    warnings.push(render_fallback_warning(&reason));
+                    return encode_structured(content, format, title, warnings);
+                }
+            }
+        }
+    }
+    encode_target(content, format, source, title, renderer, warnings)
 }
 
 /// The document as HWPX, drawn by `render`.

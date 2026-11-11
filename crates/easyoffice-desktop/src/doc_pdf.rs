@@ -36,7 +36,8 @@ const BATCHES_AHEAD: usize = 1;
 
 type Batch = Result<Vec<String>, String>;
 
-/// The PDF of `hwpx`, a document the engine wrote, with the page settings of `options`.
+/// The PDF of `hwpx`, a document the engine wrote or a `.hwp`/`.hwpx` source file as it is, with
+/// the page settings of `options`.
 pub fn hwpx_to_pdf(
     hwpx: &[u8],
     options: &PdfWriteOptions,

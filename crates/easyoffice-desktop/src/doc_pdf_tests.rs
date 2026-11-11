@@ -243,3 +243,42 @@ fn a_converted_document_passes_through_the_engine_response_and_the_save_check() 
     verify_exported_pdf(pdf, 1, true).expect("one page");
     assert_searchable(pdf, "제목 본문 text 초안");
 }
+
+/// The PDF the engine's request handler answers for a source file of `file`, drawn by `fonts`.
+fn converted_source_pdf(source: &[u8], file: &str, fonts: &Arc<Database>) -> Vec<u8> {
+    let draw = |bytes: &[u8], options: &PdfWriteOptions| hwpx_to_pdf(bytes, options, fonts);
+    let request = format!(
+        r#"{{"fileName":"{file}","sourceBase64":"{}","targetFormat":"pdf","pdf":{{"watermark":"초안"}}}}"#,
+        easyoffice_app::EasyOfficeIpcRouter::encode_base64(source)
+    );
+    let response = easyoffice_app::EasyOfficeIpcRouter::dispatch_with_pdf_renderer(
+        "convert_document_format",
+        &request,
+        &draw,
+    )
+    .expect("response");
+    assert!(!response.contains("기본 PDF"), "{file}: {response}");
+    let marker = "\"convertedBase64\":\"";
+    let start = response.find(marker).unwrap() + marker.len();
+    let base64 = &response[start..start + response[start..].find('"').unwrap()];
+    easyoffice_app::EasyOfficeIpcRouter::decode_base64(base64).unwrap()
+}
+
+/// A converted `.hwpx` or `.hwp` is laid out from its own bytes (the request handler no longer
+/// writes it back through the engine's model), with the request's page settings drawn in.
+#[test]
+fn a_native_hangul_source_is_drawn_from_its_own_bytes() {
+    let Some(fonts) = fonts() else { return };
+    let hwpx = converted_source_pdf(&hwpx(&document(0)), "보고서.hwpx", &fonts);
+    verify_exported_pdf(&hwpx, 1, true).expect("one page");
+    assert_searchable(&hwpx, "분기 보고서 Quarterly 초안");
+
+    let sample = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../third_party/rhwp/saved/blank2010.hwp");
+    let Ok(blank_hwp) = std::fs::read(sample) else {
+        return;
+    };
+    let hwp = converted_source_pdf(&blank_hwp, "빈.hwp", &fonts);
+    verify_exported_pdf(&hwp, 1, true).expect("one page");
+    assert_searchable(&hwp, "초안");
+}

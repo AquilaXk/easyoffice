@@ -178,3 +178,81 @@ fn a_source_file_saved_as_pdf_is_rendered_by_the_host() {
     assert_eq!(text_of(&pdf_of(&response)), "rendered by the host");
     assert_eq!(host.seen.borrow().len(), 1);
 }
+
+fn source_document() -> RichDocument {
+    RichDocument {
+        title: "파일".into(),
+        blocks: vec![RichBlock::Paragraph(RichParagraph {
+            runs: vec![RichRun::plain("원본 문장")],
+            ..RichParagraph::default()
+        })],
+        official_agency: None,
+    }
+}
+
+fn source_pdf_request(file: &str, bytes: &[u8], extra: &str) -> String {
+    format!(
+        r#"{{"fileName":"{file}","sourceBase64":"{}","targetFormat":"pdf"{extra}}}"#,
+        EasyOfficeIpcRouter::encode_base64(bytes)
+    )
+}
+
+const PAGE_SETTINGS: &str =
+    r#","pdf":{"rotationDegrees":90,"watermark":"대외비","stamp":"승인필"}"#;
+
+fn page_settings() -> PdfWriteOptions {
+    PdfWriteOptions {
+        rotation_degrees: 90,
+        watermark: Some("대외비".into()),
+        approval_stamp: Some("승인필".into()),
+        highlight: None,
+    }
+}
+
+/// A converted `.hwp`/`.hwpx` goes to the host as the file it is: re-encoding it through the
+/// engine's model would drop its page size, margins, headers and fonts.
+#[test]
+fn a_native_hangul_source_reaches_the_host_unchanged_with_its_page_settings() {
+    for (format, file) in [
+        (DocumentFormat::Hwpx, "파일.hwpx"),
+        (DocumentFormat::Hwp, "파일.hwp"),
+    ] {
+        let original =
+            UniversalFormatConverter::encode_rich(&source_document(), format, None).unwrap();
+        let host = Recorder::new();
+        let request = source_pdf_request(file, &original, PAGE_SETTINGS);
+        let response = dispatch(&request, &|h, o| host.render(h, o));
+        assert_eq!(text_of(&pdf_of(&response)), "rendered by the host");
+        let seen = host.seen.borrow();
+        assert_eq!(seen.len(), 1, "{file}");
+        assert!(seen[0].0 == original, "{file}: the original bytes");
+        assert_eq!(seen[0].1, page_settings(), "{file}");
+    }
+}
+
+#[test]
+fn page_settings_of_a_source_file_request_reach_the_host() {
+    let docx =
+        UniversalFormatConverter::encode_rich(&source_document(), DocumentFormat::Docx, None)
+            .unwrap();
+    let host = Recorder::new();
+    dispatch(
+        &source_pdf_request("파일.docx", &docx, PAGE_SETTINGS),
+        &|h, o| host.render(h, o),
+    );
+    assert_eq!(host.seen.borrow()[0].1, page_settings());
+}
+
+#[test]
+fn a_highlight_on_a_native_hangul_source_stays_with_the_engine_writer() {
+    let hwpx =
+        UniversalFormatConverter::encode_rich(&source_document(), DocumentFormat::Hwpx, None)
+            .unwrap();
+    let host = Recorder::new();
+    let extra = r##","pdf":{"highlight":{"text":"원본","kind":"highlight","color":"#FFFF00"}}"##;
+    let response = dispatch(&source_pdf_request("파일.hwpx", &hwpx, extra), &|h, o| {
+        host.render(h, o)
+    });
+    assert!(host.seen.borrow().is_empty());
+    assert!(String::from_utf8_lossy(&pdf_of(&response)).contains("/Subtype /Highlight"));
+}

@@ -19,7 +19,8 @@ use easyoffice_sheet::PackedCellCoordinate;
 use std::collections::HashSet;
 use std::fmt::Write;
 
-use crate::convert_structured::{encode_target, RichPdfRenderer, StructuredContent};
+use crate::convert_structured::{encode_source_target, RichPdfRenderer, StructuredContent};
+use crate::convert_structured_doc::parse_pdf_options;
 use crate::EasyOfficeIpcRouter;
 
 /// Upper bound on a decoded source file: the number the page checks before it sends
@@ -378,6 +379,7 @@ fn styling_of<'a>(styling: &'a [(String, SheetStyling)], name: &str) -> Option<&
 fn into_structured(
     content: DecodedContent,
     styling: &[(String, SheetStyling)],
+    pdf: PdfWriteOptions,
 ) -> StructuredContent {
     match content {
         DecodedContent::Document(mut doc) => {
@@ -386,7 +388,7 @@ fn into_structured(
                     evaluate_table_formulas(&mut table.rows);
                 }
             }
-            StructuredContent::Document(doc, PdfWriteOptions::default())
+            StructuredContent::Document(doc, pdf)
         }
         DecodedContent::Workbook(sheets) => {
             let stylings = sheets
@@ -475,8 +477,16 @@ impl EasyOfficeIpcRouter {
         };
         let src_fmt = decoded.format;
         let mut warnings = decoded.warnings.clone();
-        let content = into_structured(decoded.content, &styling);
-        let dst_bytes = encode_target(&content, dst_fmt, src_fmt, &title, renderer, &mut warnings)?;
+        let content = into_structured(decoded.content, &styling, parse_pdf_options(entries)?);
+        let dst_bytes = encode_source_target(
+            &content,
+            &bytes,
+            dst_fmt,
+            src_fmt,
+            &title,
+            renderer,
+            &mut warnings,
+        )?;
         Self::conversion_response(src_fmt, dst_fmt, &bytes, &dst_bytes, &warnings)
     }
 }
