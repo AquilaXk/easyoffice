@@ -155,7 +155,7 @@
         const input = document.createElement("input");
         input.id = "sheet-cf-icon-val-" + i;
         input.type = "text";
-        input.className = "dialog-input";
+        input.className = "dialog-text-input";
         input.setAttribute("aria-label", "아이콘 " + (i + 1) + " 기준 값");
         label.htmlFor = kind.id;
         for (const [value, text] of VALUE_KINDS.filter(([v]) => v !== "min" && v !== "max")) {

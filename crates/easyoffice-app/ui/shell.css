@@ -128,7 +128,31 @@
 .find-dialog .find-buttons { display: flex; gap: 6px; padding: 4px 12px 8px; justify-content: flex-end; }
 .find-dialog .dialog-btn { white-space: nowrap; }
 /* After every display rule above, so `hidden` wins at equal specificity. */
+/* Sheet rule dialogs (conditional formatting, data validation, pivot, entry alert). Widths follow the reference dialogs of the same kind:
+   rule manager = style-dialog.ts:69 (560), validation = options-dialog.ts:30 (480), pivot = formula-dialog.ts:75 (420), alert = confirm-dialog.ts:14-26 (360, body 16px 20px, line-height 1.6, pre-line). */
+#sheet-cf-dialog { width: min(560px, calc(100vw - 32px)); }
+#sheet-dv-dialog { width: min(480px, calc(100vw - 32px)); }
+#sheet-pivot-dialog { width: min(420px, calc(100vw - 32px)); }
+#sheet-dv-alert-dialog { width: min(360px, calc(100vw - 32px)); }
+#sheet-dv-alert-dialog .dialog-body { padding: 16px 20px; line-height: 1.6; white-space: pre-line; }
+/* A text field that holds a range, formula or message fills its row, as the reference's `.formula-input` (dialogs.css:1046) and find field (find-dialog.css:42-47). */
+.sheet-rule-dialog .dialog-text-input { flex: 1; min-width: 0; }
+/* Colour field: the shell's palette popup (color-picker.js) behind a chip button. */
+.tool-dialog .dialog-swatch { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 4px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text-muted); font-size: 8px; }
+.tool-dialog .dialog-swatch-chip { width: 22px; height: 12px; border: 1px solid var(--color-border-dark); background: var(--dialog-swatch, var(--color-surface)); }
+.tool-dialog .dialog-color-host .sb-hl-palette { z-index: 300; }
+.tool-dialog .dialog-stack { display: flex; flex-direction: column; }
+.tool-dialog .dialog-list { list-style: none; margin: 0 0 6px; padding: 0; max-height: 120px; overflow-y: auto; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); font-size: var(--font-size-sm); }
+.tool-dialog .dialog-list:empty::before { content: "규칙이 없습니다."; display: block; padding: 4px 8px; color: var(--color-text-muted); }
+.tool-dialog .dialog-list li { padding: 3px 8px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tool-dialog .dialog-list li[aria-selected="true"] { background: var(--color-accent-bg); font-weight: 700; }
+/* Last of the dialog display rules, so a hidden row, stack or control stays hidden. */
 .tool-dialog [hidden] { display: none; }
+/* In-cell list arrow and menu of a data validation list (sheet-rules-ui.js). */
+.cf-dropdown-btn { position: fixed; z-index: 30; width: 18px; height: 18px; padding: 0; border: 1px solid var(--color-border-dark); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); cursor: pointer; }
+.cf-dropdown-menu { position: fixed; z-index: 31; min-width: 96px; max-height: 220px; overflow-y: auto; margin: 0; padding: 2px 0; list-style: none; border: 1px solid var(--color-border-dark); background: var(--color-surface-raised); color: var(--color-text); box-shadow: var(--shadow-dropdown); }
+.cf-dropdown-menu li { padding: 3px 10px; cursor: pointer; white-space: nowrap; }
+.cf-dropdown-menu li:hover, .cf-dropdown-menu li[aria-selected="true"] { background: var(--color-accent-bg); }
 
 /* HWP printing (hwp-print.js, PD-104): the pages live in a hidden root that only the print output shows. */
 #eo-print-root { display: none; }

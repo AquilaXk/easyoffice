@@ -593,10 +593,16 @@ test("hidden rows of a tool dialog lose no cascade to the row layout rules", () 
   }
 });
 
-test("a rule dialog puts the focus on its first text field, not on the close button", async () => {
+test("a rule dialog takes the shell's common open path: the focus starts on the primary button", async () => {
   const { rulesUi, document } = await dialogHarness();
   rulesUi.openDataValidationDialog();
-  assert.equal(document.activeElement.id, "sheet-dv-range");
+  assert.equal(document.activeElement.id, "btn-sheet-dv-apply");
   rulesUi.openConditionalFormatDialog();
-  assert.equal(document.activeElement.id, "sheet-cf-range");
+  assert.equal(document.activeElement.id, "btn-sheet-cf-apply");
+});
+
+test("the alert dialog follows the reference confirm dialog: 360px, padded body, line breaks kept", () => {
+  const css = fs.readFileSync(new URL("../crates/easyoffice-app/ui/shell.css", import.meta.url), "utf8");
+  assert.match(css, /#sheet-dv-alert-dialog \{ width: min\(360px/);
+  assert.match(css, /#sheet-dv-alert-dialog \.dialog-body \{ padding: 16px 20px; line-height: 1\.6; white-space: pre-line; \}/);
 });
