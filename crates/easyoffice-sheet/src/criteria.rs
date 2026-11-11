@@ -48,12 +48,14 @@ impl CompiledCriteria {
                 Self::TextEq(if *b { "true" } else { "false" }.to_string())
             }
             EvaluatedCellValue::Error(e) => Self::TextEq(e.code().to_lowercase()),
-            EvaluatedCellValue::Text(s) => Self::compile_text(s.trim()),
+            EvaluatedCellValue::Text(s) => Self::compile_text(s),
         }
     }
 
-    /// Compiles a text criterion (`">=5"`, `"abc*"`, `"2026-01-01"`, ...).
-    fn compile_text(trimmed: &str) -> Self {
+    /// Compiles a text criterion (`">=5"`, `"abc*"`, `"2026-01-01"`, ...). Surrounding spaces stay
+    /// part of a text match (`" "` matches a single space); only the numeric and date parsers
+    /// ignore them.
+    fn compile_text(text: &str) -> Self {
         const OPERATORS: [(&str, CritNumOp); 6] = [
             (">=", CritNumOp::Ge),
             ("<=", CritNumOp::Le),
@@ -64,40 +66,40 @@ impl CompiledCriteria {
         ];
         if let Some((op_kind, rhs)) = OPERATORS
             .iter()
-            .find_map(|(op_str, op_kind)| trimmed.strip_prefix(op_str).map(|rhs| (*op_kind, rhs)))
+            .find_map(|(op_str, op_kind)| text.strip_prefix(op_str).map(|rhs| (*op_kind, rhs)))
         {
-            return Self::compile_operator_rhs(op_kind, rhs.trim());
+            return Self::compile_operator_rhs(op_kind, rhs);
         }
-        if let Some(rhs_num) = crate::coercion::parse_strict_number(trimmed) {
+        if let Some(rhs_num) = crate::coercion::parse_strict_number(text) {
             return Self::Number(rhs_num);
         }
-        if let Some(rhs_serial) = parse_iso_date_serial(trimmed) {
+        if let Some(rhs_serial) = parse_iso_date_serial(text) {
             return Self::IsoDateEq(rhs_serial);
         }
-        if Self::has_wildcard_meta(trimmed) {
-            Self::Wildcard(trimmed.to_string())
+        if Self::has_wildcard_meta(text) {
+            Self::Wildcard(text.to_string())
         } else {
-            Self::TextEq(trimmed.to_lowercase())
+            Self::TextEq(text.to_lowercase())
         }
     }
 
     /// Compiles the right-hand side of an operator criterion.
-    fn compile_operator_rhs(op_kind: CritNumOp, rhs_trim: &str) -> Self {
-        if let Some(rhs_num) = crate::coercion::parse_strict_number(rhs_trim) {
+    fn compile_operator_rhs(op_kind: CritNumOp, rhs: &str) -> Self {
+        if let Some(rhs_num) = crate::coercion::parse_strict_number(rhs) {
             return Self::NumericCmp(op_kind, rhs_num);
         }
-        if let Some(rhs_serial) = parse_iso_date_serial(rhs_trim) {
+        if let Some(rhs_serial) = parse_iso_date_serial(rhs) {
             return Self::IsoDateCmp(op_kind, rhs_serial);
         }
         let is_eq = matches!(op_kind, CritNumOp::Eq);
-        if (is_eq || matches!(op_kind, CritNumOp::Ne)) && Self::has_wildcard_meta(rhs_trim) {
+        if (is_eq || matches!(op_kind, CritNumOp::Ne)) && Self::has_wildcard_meta(rhs) {
             return if is_eq {
-                Self::Wildcard(rhs_trim.to_string())
+                Self::Wildcard(rhs.to_string())
             } else {
-                Self::NotWildcard(rhs_trim.to_string())
+                Self::NotWildcard(rhs.to_string())
             };
         }
-        let rhs_lower = rhs_trim.to_lowercase();
+        let rhs_lower = rhs.to_lowercase();
         match op_kind {
             CritNumOp::Eq => Self::TextEq(rhs_lower),
             CritNumOp::Ne => Self::TextNe(rhs_lower),
@@ -638,6 +640,31 @@ impl SheetEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn text_criteria_keep_surrounding_spaces() {
+        let mut s = SheetEngine::new("SpaceCrit");
+        s.set_cell("A1", " ").unwrap();
+        s.set_cell("A2", "x").unwrap();
+        s.set_cell("A3", "  ").unwrap();
+        assert_eq!(
+            s.evaluate_formula_str("=COUNTIF(A1:A3, \" \")"),
+            EvaluatedCellValue::Number(1.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=COUNTIF(A1:A3, \"=  \")"),
+            EvaluatedCellValue::Number(1.0)
+        );
+        s.set_cell("B1", "5").unwrap();
+        assert_eq!(
+            s.evaluate_formula_str("=COUNTIF(B1:B1, \" >= 5 \")"),
+            EvaluatedCellValue::Number(0.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=COUNTIF(B1:B1, \">= 5 \")"),
+            EvaluatedCellValue::Number(1.0)
+        );
+    }
 
     #[test]
     fn cell_index_sparse_range_queries_and_invalidation() {
