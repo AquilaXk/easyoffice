@@ -21,6 +21,8 @@ mod editor_merge_tests;
 pub mod ffi;
 pub mod http_server;
 pub mod hwp_bundle;
+#[cfg(test)]
+mod perf_bench;
 mod pii_identifiers;
 pub mod ribbon;
 mod ribbon_session;

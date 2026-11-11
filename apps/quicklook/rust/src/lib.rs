@@ -7,6 +7,8 @@
 //! extension then answers with the system's default icon. Nothing unwinds across the C boundary.
 //! No path, document text or log line leaves this crate.
 
+#[cfg(test)]
+mod bench_tests;
 mod bounded;
 mod fonts;
 mod raster;

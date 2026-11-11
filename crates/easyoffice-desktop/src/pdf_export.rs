@@ -612,7 +612,7 @@ pub fn verify_exported_pdf(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::path::Path;
 
@@ -776,7 +776,7 @@ mod tests {
 
     /// Synthetic page of a Hangul report: 46 lines of mixed Korean/Latin text in document faces that
     /// are not installed (so the fallback chain runs) plus a table border.
-    fn report_page_svg(page: usize) -> String {
+    pub(crate) fn report_page_svg(page: usize) -> String {
         let mut svg = String::from(
             r#"<svg xmlns="http://www.w3.org/2000/svg" width="794" height="1123"><rect width="794" height="1123" fill="white"/>"#,
         );

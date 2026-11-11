@@ -520,3 +520,6 @@ mod tests {
 
 #[cfg(test)]
 mod path_leak_tests;
+
+#[cfg(test)]
+mod perf_bench;
