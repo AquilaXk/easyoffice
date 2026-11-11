@@ -200,7 +200,14 @@ test("the PDF Studio takes a phrase, a kind and a color for highlight annotation
   const input = document.getElementById("pdf-highlight-input");
   assert.ok(input.classList.contains("sb-select"), "same input class as the form fields");
   assert.equal(input.getAttribute("maxlength"), "200");
+  assert.equal(input.getAttribute("aria-label"), "형광펜·밑줄을 칠할 문구");
+  assert.equal(input.getAttribute("title"), "형광펜·밑줄을 칠할 문구");
   assert.equal(input.value, "", "no phrase, no annotation by default");
+  // Short one-line labels like "신청인 성명": the grid reads 문구 | 종류 and then 색.
+  const grid = document.querySelector(".pdf-acroform-grid");
+  const labels = [...grid.querySelectorAll("label")].map((l) => l.textContent.trim().split(/\s*\n\s*/)[0].trim());
+  assert.deepEqual(labels.slice(-3), ["주석 문구", "주석 종류", "주석 색"]);
+  assert.ok(labels.every((l) => l.length <= 8), labels.join("|"));
   for (const id of ["pdf-highlight-kind", "pdf-highlight-color"]) {
     const select = document.getElementById(id);
     assert.ok(select.classList.contains("sb-combo") && select.classList.contains("native-select-hidden"), id);
