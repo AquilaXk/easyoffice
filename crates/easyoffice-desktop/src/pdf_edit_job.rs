@@ -6,22 +6,23 @@
 //! page learns names, counts and sentences. The page hands over the opened PDF once
 //! (`pdf_edit_open`, base64, the same 10 MiB the file picker allows); after that the shell holds it
 //! and the edits are small requests (`pdf_edit_apply`). Merge and split ask in native dialogs.
-//! Everything that parses a PDF runs under [`run_guarded`] (budgets, deadline, panics caught), and
+//! Everything that parses a PDF runs in a worker process that is killed at its deadline or memory
+//! limit (`pdf_edit_engine.rs`, `pdf_edit_supervisor.rs`), and
 //! nothing is written before the whole result exists: a split that fails removes the files it made.
 
-use crate::pdf_edit_budget::{
-    run_guarded, Deadline, MAX_SOURCE_BYTES, MAX_SPLIT_TOTAL_BYTES, WORK_DEADLINE,
-};
+use crate::pdf_edit_budget::{Deadline, MAX_SOURCE_BYTES, MAX_SPLIT_TOTAL_BYTES, SPLIT_DEADLINE};
+use crate::pdf_edit_engine::{ChildEngine, PdfEngine};
 use crate::pdf_edit_overlay::Overlay;
 use crate::pdf_edit_session::EditSession;
 use crate::save_file::{split_file_name, write_document_bytes, SaveRequest};
 use crate::shell_caller::ShellCaller;
-use crate::{pdf_export, pdf_job, IpcError};
+use crate::{pdf_job, IpcError};
 use easyoffice_app::EasyOfficeIpcRouter;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use tauri::{AppHandle, Manager, State, WebviewWindow};
 use tauri_plugin_dialog::{
@@ -42,8 +43,16 @@ const CHOICE_CANCEL: &str = "취소";
 /// The longest file name stem that is kept for the names of the results (characters).
 const MAX_STEM_CHARS: usize = 80;
 
-/// One window's session and the number of the version of it (every change makes a new one), so a
-/// long operation that started from an old version does not overwrite a newer one.
+/// The versions of sessions are numbered from one counter for all windows and never reused, so a
+/// long operation that started from an old version cannot overwrite a newer one, not even one
+/// that replaced a session that was dropped in between.
+static VERSIONS: AtomicU64 = AtomicU64::new(1);
+
+fn next_version() -> u64 {
+    VERSIONS.fetch_add(1, Ordering::Relaxed)
+}
+
+/// One window's session and the number of its version (every change makes a new one).
 struct Entry {
     session: EditSession,
     version: u64,
@@ -63,8 +72,13 @@ impl PdfEdits {
     /// Starts (or replaces) the window's session.
     fn begin(&self, label: &str, session: EditSession) {
         let mut table = self.lock();
-        let version = table.get(label).map_or(1, |e| e.version + 1);
-        table.insert(label.to_string(), Entry { session, version });
+        table.insert(
+            label.to_string(),
+            Entry {
+                session,
+                version: next_version(),
+            },
+        );
     }
 
     /// A copy of the session and its version, to work on without holding the lock.
@@ -81,7 +95,7 @@ impl PdfEdits {
         match table.get_mut(label) {
             Some(entry) if entry.version == from => {
                 entry.session = session;
-                entry.version += 1;
+                entry.version = next_version();
                 Ok(())
             }
             Some(_) => Err(MSG_CHANGED.to_string()),
@@ -102,7 +116,7 @@ impl PdfEdits {
         let mut edited = entry.session.clone();
         let out = change(&mut edited)?;
         entry.session = edited.clone();
-        entry.version += 1;
+        entry.version = next_version();
         Ok((out, edited))
     }
 
@@ -244,10 +258,12 @@ pub async fn pdf_edit_open(
     let stem = file_stem(&base);
     // A file that is refused leaves the window with no session, not with the previous file's.
     edits.forget(window.label());
-    let session = tauri::async_runtime::spawn_blocking(move || open_session(&base64, &stem))
-        .await
-        .map_err(worker_failed)?
-        .map_err(IpcError::new)?;
+    let engine = ChildEngine::new(pdf_job::pdf_font_dirs(&app)).map_err(IpcError::new)?;
+    let session =
+        tauri::async_runtime::spawn_blocking(move || open_session(&base64, &stem, &engine))
+            .await
+            .map_err(worker_failed)?
+            .map_err(IpcError::new)?;
     let state = PdfEditState::of(&session);
     edits.begin(window.label(), session);
     // The window may have closed while the file was read: its session must not outlive it.
@@ -257,16 +273,13 @@ pub async fn pdf_edit_open(
     Ok(state)
 }
 
-fn open_session(base64: &str, stem: &str) -> Result<EditSession, String> {
+fn open_session(base64: &str, stem: &str, engine: &dyn PdfEngine) -> Result<EditSession, String> {
     if base64.len() / 4 * 3 > MAX_SOURCE_BYTES + 3 {
         return Err(too_big_message());
     }
     let bytes =
         EasyOfficeIpcRouter::decode_base64(base64.trim()).ok_or_else(|| MSG_BASE64.to_string())?;
-    run_guarded(WORK_DEADLINE, move |deadline| {
-        EditSession::open(bytes, deadline)
-    })
-    .map(|session| session.with_stem(stem))
+    EditSession::open(bytes, engine).map(|session| session.with_stem(stem))
 }
 
 fn too_big_message() -> String {
@@ -331,9 +344,12 @@ pub async fn pdf_edit_split_merge(
             state: PdfEditState::of(&session),
         });
     };
-    edits
-        .commit(&label, version, session.clone())
-        .map_err(IpcError::new)?;
+    // A split writes files and leaves the session as it was; only a merge changes it.
+    if action == "merged" {
+        edits
+            .commit(&label, version, session.clone())
+            .map_err(IpcError::new)?;
+    }
     Ok(PdfSplitMerge {
         action,
         count,
@@ -392,11 +408,10 @@ async fn merge_flow(
         .map(|p| p.into_path().map_err(|_| MSG_READ_FAILED.to_string()))
         .collect::<Result<_, _>>()
         .map_err(IpcError::new)?;
+    let engine = ChildEngine::new(pdf_job::pdf_font_dirs(app)).map_err(IpcError::new)?;
     let merged = tauri::async_runtime::spawn_blocking(move || {
         let files = read_pdfs(&paths)?;
-        run_guarded(WORK_DEADLINE, move |deadline| {
-            merge_files(session, files, deadline)
-        })
+        merge_files(session, files, &engine)
     })
     .await
     .map_err(worker_failed)?
@@ -407,9 +422,9 @@ async fn merge_flow(
 fn merge_files(
     mut session: EditSession,
     files: Vec<Vec<u8>>,
-    deadline: &Deadline,
+    engine: &dyn PdfEngine,
 ) -> Result<(EditSession, usize), String> {
-    let merged = session.merge(files, deadline)?;
+    let merged = session.merge(files, engine)?;
     Ok((session, merged))
 }
 
@@ -459,13 +474,16 @@ async fn split_flow(
     let folder = picked
         .into_path()
         .map_err(|_| IpcError::new("저장할 폴더를 확인할 수 없습니다."))?;
-    let font_dirs = pdf_job::pdf_font_dirs(app);
+    let engine = ChildEngine::new(pdf_job::pdf_font_dirs(app)).map_err(IpcError::new)?;
     let session = session.clone();
     let written = tauri::async_runtime::spawn_blocking(move || {
-        let fonts = pdf_export::shared_font_db(&font_dirs);
-        run_guarded(WORK_DEADLINE, move |deadline| {
-            write_split(&session, &ranges, &folder, &fonts, deadline)
-        })
+        write_split(
+            &session,
+            &ranges,
+            &folder,
+            &engine,
+            &Deadline::after(SPLIT_DEADLINE),
+        )
     })
     .await
     .map_err(worker_failed)?
@@ -480,7 +498,7 @@ fn write_split(
     session: &EditSession,
     ranges: &[Range<usize>],
     folder: &Path,
-    fonts: &Arc<usvg::fontdb::Database>,
+    engine: &dyn PdfEngine,
     deadline: &Deadline,
 ) -> Result<usize, String> {
     let names: Vec<String> = ranges
@@ -497,7 +515,7 @@ fn write_split(
     let outcome = (|| {
         for (name, range) in names.iter().zip(ranges) {
             deadline.check()?;
-            let bytes = session.render(Some(range.clone()), fonts, deadline)?;
+            let bytes = session.render(Some(range.clone()), engine)?;
             total = total.saturating_add(bytes.len());
             if total > MAX_SPLIT_TOTAL_BYTES {
                 return Err(format!(
@@ -578,16 +596,11 @@ pub async fn pdf_edit_save(
         return Ok(PdfEditSaved::cancelled());
     };
     let pages = session.page_count();
-    let font_dirs = pdf_job::pdf_font_dirs(&app);
-    let bytes = tauri::async_runtime::spawn_blocking(move || {
-        let fonts = pdf_export::shared_font_db(&font_dirs);
-        run_guarded(WORK_DEADLINE, move |deadline| {
-            session.render(None, &fonts, deadline)
-        })
-    })
-    .await
-    .map_err(worker_failed)?
-    .map_err(IpcError::new)?;
+    let engine = ChildEngine::new(pdf_job::pdf_font_dirs(&app)).map_err(IpcError::new)?;
+    let bytes = tauri::async_runtime::spawn_blocking(move || session.render(None, &engine))
+        .await
+        .map_err(worker_failed)?
+        .map_err(IpcError::new)?;
     let name = target.file_name().map_or_else(
         || "edited.pdf".to_string(),
         |n| n.to_string_lossy().into_owned(),
@@ -605,11 +618,16 @@ pub async fn pdf_edit_save(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pdf_edit_engine::InProcessEngine;
     use crate::pdf_edit_fixtures::{deadline, read, sample_pdf};
     use usvg::fontdb::Database;
 
+    fn engine() -> InProcessEngine {
+        InProcessEngine::new(Arc::new(Database::new()))
+    }
+
     fn session(pages: usize) -> EditSession {
-        EditSession::open(sample_pdf(1, pages, &[]), &deadline())
+        EditSession::open(sample_pdf(1, pages, &[]), &engine())
             .unwrap()
             .with_stem("보고서")
     }
@@ -770,16 +788,21 @@ mod tests {
     fn opening_takes_base64_within_the_size_limit_and_refuses_the_rest() {
         let pdf = sample_pdf(1, 2, &[]);
         let base64 = base64_of(&pdf);
-        let opened = open_session(&base64, "보고서").unwrap();
+        let opened = open_session(&base64, "보고서", &engine()).unwrap();
         assert_eq!((opened.page_count(), opened.stem()), (2, "보고서"));
         assert_eq!(
-            open_session("!!!not base64!!!", "x").err().as_deref(),
+            open_session("!!!not base64!!!", "x", &engine())
+                .err()
+                .as_deref(),
             Some(MSG_BASE64)
         );
         let huge = "A".repeat(MAX_SOURCE_BYTES / 3 * 4 + 400);
-        assert_eq!(open_session(&huge, "x").err(), Some(too_big_message()));
+        assert_eq!(
+            open_session(&huge, "x", &engine()).err(),
+            Some(too_big_message())
+        );
         let not_pdf = base64_of(b"hello world, this is not a pdf");
-        assert!(open_session(&not_pdf, "x").is_err());
+        assert!(open_session(&not_pdf, "x", &engine()).is_err());
     }
 
     fn base64_of(bytes: &[u8]) -> String {
@@ -791,14 +814,16 @@ mod tests {
         let dir = scratch_dir("split");
         let s = session(3);
         let ranges = s.split_ranges(None).unwrap();
-        let fonts = Arc::new(Database::new());
-        assert_eq!(write_split(&s, &ranges, &dir, &fonts, &deadline()), Ok(3));
+        assert_eq!(
+            write_split(&s, &ranges, &dir, &engine(), &deadline()),
+            Ok(3)
+        );
         for n in 1..=3 {
             let bytes = std::fs::read(dir.join(format!("보고서_{n}.pdf"))).unwrap();
             assert_eq!(read(&bytes).pages().len(), 1);
         }
         // A second run finds the names taken and writes nothing more.
-        let err = write_split(&s, &ranges, &dir, &fonts, &deadline()).unwrap_err();
+        let err = write_split(&s, &ranges, &dir, &engine(), &deadline()).unwrap_err();
         assert!(err.contains("같은 이름"), "{err}");
         assert_eq!(
             std::fs::read_dir(&dir).unwrap().count(),
@@ -813,11 +838,10 @@ mod tests {
         let dir = scratch_dir("split-fail");
         let s = session(4);
         let ranges = s.split_ranges(None).unwrap();
-        let fonts = Arc::new(Database::new());
         // The deadline passes after the first file: the rest never starts and the first goes away.
         let tight = Deadline::after(std::time::Duration::from_millis(1));
         std::thread::sleep(std::time::Duration::from_millis(5));
-        assert!(write_split(&s, &ranges, &dir, &fonts, &tight).is_err());
+        assert!(write_split(&s, &ranges, &dir, &engine(), &tight).is_err());
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -837,8 +861,8 @@ mod tests {
     #[test]
     fn merging_through_the_helper_returns_the_grown_session() {
         let (merged, count) =
-            merge_files(session(2), vec![sample_pdf(2, 3, &[])], &deadline()).unwrap();
+            merge_files(session(2), vec![sample_pdf(2, 3, &[])], &engine()).unwrap();
         assert_eq!((count, merged.page_count()), (1, 5));
-        assert!(merge_files(session(2), vec![b"not a pdf".to_vec()], &deadline()).is_err());
+        assert!(merge_files(session(2), vec![b"not a pdf".to_vec()], &engine()).is_err());
     }
 }

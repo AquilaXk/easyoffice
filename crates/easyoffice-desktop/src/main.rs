@@ -17,10 +17,16 @@ mod open_feedback;
 mod os_recent;
 mod pdf_edit_budget;
 mod pdf_edit_build;
+mod pdf_edit_engine;
 mod pdf_edit_inspect;
 mod pdf_edit_job;
+mod pdf_edit_os;
 mod pdf_edit_overlay;
+mod pdf_edit_scan;
 mod pdf_edit_session;
+mod pdf_edit_supervisor;
+mod pdf_edit_wire;
+mod pdf_edit_worker;
 mod pdf_export;
 mod pdf_font_fallbacks;
 mod pdf_font_select;
@@ -298,6 +304,11 @@ pub(crate) fn is_app_origin(url: &tauri::Url) -> bool {
 }
 
 fn main() {
+    // The PDF worker process (PD-164): the shell's own binary, started by the shell with its
+    // standard input and output connected to it. It must not start anything of the shell.
+    if std::env::args().nth(1).as_deref() == Some(pdf_edit_wire::WORKER_ARG) {
+        std::process::exit(pdf_edit_worker::run());
+    }
     // Before any webview exists: WebKitGTK reads these variables when it starts.
     #[cfg(target_os = "linux")]
     linux_runtime::apply_linux_runtime_fixes();

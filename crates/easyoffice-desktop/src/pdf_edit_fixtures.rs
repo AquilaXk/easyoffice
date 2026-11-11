@@ -239,7 +239,75 @@ pub fn hand_written(objects: &[(u32, String)], trailer_extra: &str) -> Vec<u8> {
     out.into_bytes()
 }
 
+/// The same objects with a real cross-reference table (offsets computed), so the reader does not
+/// have to repair the file. Object numbers must run from 1 without gaps.
+pub fn hand_written_with_xref(objects: &[(u32, String)], trailer_extra: &str) -> Vec<u8> {
+    let mut out = String::from("%PDF-1.7\n");
+    let mut offsets = Vec::new();
+    for (number, body) in objects {
+        offsets.push(out.len());
+        out.push_str(&format!("{number} 0 obj\n{body}\nendobj\n"));
+    }
+    let table_at = out.len();
+    out.push_str(&format!(
+        "xref\n0 {}\n0000000000 65535 f \n",
+        objects.len() + 1
+    ));
+    for offset in offsets {
+        out.push_str(&format!("{offset:010} 00000 n \n"));
+    }
+    out.push_str(&format!(
+        "trailer\n<< /Size {} /Root 1 0 R {trailer_extra} >>\nstartxref\n{table_at}\n%%EOF\n",
+        objects.len() + 1
+    ));
+    out.into_bytes()
+}
+
 /// One valid page object of 100 x 100 points that has no content.
 pub fn blank_page(parent: u32) -> String {
     format!("<< /Type /Page /Parent {parent} 0 R /MediaBox [0 0 100 100] >>")
+}
+
+/// Raw deflate that inflates to `copies` x 8 MiB of zeros: the same 8 MiB block repeated (each ends
+/// on a byte boundary) and a last empty block.
+pub fn raw_deflate_bomb(copies: usize) -> Vec<u8> {
+    use flate2::write::DeflateEncoder;
+    use std::io::Write;
+    let mut block = DeflateEncoder::new(Vec::new(), flate2::Compression::best());
+    block.write_all(&vec![0u8; 8 << 20]).unwrap();
+    block.flush().unwrap();
+    let block = block.get_ref().clone();
+    let mut out = Vec::with_capacity(block.len() * copies + 8);
+    for _ in 0..copies {
+        out.extend_from_slice(&block);
+    }
+    let mut last = DeflateEncoder::new(Vec::new(), flate2::Compression::best());
+    last.write_all(b"").unwrap();
+    out.extend_from_slice(&last.finish().unwrap());
+    out
+}
+
+/// An object stream with a bomb in it, written so that the scan before the parse cannot see it: the
+/// dictionary holds the text `obj` after its `/Filter`, so the part that is read starts after it,
+/// and the data is raw deflate, which does not announce itself. The reader decodes it anyway.
+pub fn hidden_object_stream_bomb(copies: usize) -> Vec<u8> {
+    let bomb = raw_deflate_bomb(copies);
+    let mut file = b"%PDF-1.7\n".to_vec();
+    for (n, body) in [
+        (1, "<< /Type /Catalog /Pages 2 0 R >>"),
+        (2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+        (3, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 10 10] >>"),
+    ] {
+        file.extend_from_slice(format!("{n} 0 obj\n{body}\nendobj\n").as_bytes());
+    }
+    file.extend_from_slice(
+        format!(
+            "4 0 obj\n<< /Filter /FlateDecode /Type /ObjStm /N 1 /First 4 /Pad (obj) /Length {} >>\nstream\n",
+            bomb.len()
+        )
+        .as_bytes(),
+    );
+    file.extend_from_slice(&bomb);
+    file.extend_from_slice(b"\nendstream\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n");
+    file
 }

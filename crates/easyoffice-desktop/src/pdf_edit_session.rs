@@ -5,15 +5,12 @@
 //! watermark. Rotating, merging and choosing a range change the plan only; the new PDF is written
 //! from the plan when it is saved (`pdf_edit_build.rs`), so nothing is lost by editing twice.
 
-use crate::pdf_edit_budget::{
-    Deadline, MAX_PAGES, MAX_SESSION_BYTES, MAX_SOURCES, MAX_SPLIT_FILES,
-};
-use crate::pdf_edit_build::{build, PagePlan};
-use crate::pdf_edit_inspect::inspect;
+use crate::pdf_edit_budget::{MAX_PAGES, MAX_SESSION_BYTES, MAX_SOURCES, MAX_SPLIT_FILES};
+use crate::pdf_edit_engine::PdfEngine;
 use crate::pdf_edit_overlay::Overlay;
+use crate::pdf_edit_wire::PagePlan;
 use std::ops::Range;
 use std::sync::Arc;
-use usvg::fontdb::Database;
 
 const MSG_ROTATION: &str = "회전 각도는 90도 단위여야 합니다.";
 const MSG_RANGE_SYNTAX: &str = "쪽 범위를 읽을 수 없습니다. 예: 1-3, 5, 7- (쉼표로 나눕니다)";
@@ -29,13 +26,13 @@ pub struct EditSession {
 
 impl EditSession {
     /// Opens a PDF for editing; it passes the checks of `inspect` or is refused.
-    pub fn open(bytes: Vec<u8>, deadline: &Deadline) -> Result<Self, String> {
+    pub fn open(bytes: Vec<u8>, engine: &dyn PdfEngine) -> Result<Self, String> {
         let bytes = Arc::new(bytes);
-        let info = inspect(&bytes, deadline)?;
+        let pages = engine.inspect(&bytes)?;
         Ok(Self {
             stem: String::new(),
             sources: vec![bytes],
-            pages: plan_of(0, info.pages),
+            pages: plan_of(0, pages),
             overlay: Overlay::default(),
         })
     }
@@ -111,7 +108,7 @@ impl EditSession {
 
     /// Appends all pages of `files` after the current ones. Each file passes `inspect`, and the
     /// totals (files, bytes, pages) stay within the budgets, or nothing is appended.
-    pub fn merge(&mut self, files: Vec<Vec<u8>>, deadline: &Deadline) -> Result<usize, String> {
+    pub fn merge(&mut self, files: Vec<Vec<u8>>, engine: &dyn PdfEngine) -> Result<usize, String> {
         if self.sources.len() + files.len() > MAX_SOURCES {
             return Err(format!(
                 "함께 편집할 수 있는 PDF는 {MAX_SOURCES}개까지입니다."
@@ -130,12 +127,12 @@ impl EditSession {
                 ));
             }
             let file = Arc::new(file);
-            let info = inspect(&file, deadline)?;
-            pages += info.pages;
+            let count = engine.inspect(&file)?;
+            pages += count;
             if pages > MAX_PAGES {
                 return Err(format!("합친 쪽 수가 한도({MAX_PAGES})를 초과합니다."));
             }
-            added.push((file, info.pages));
+            added.push((file, count));
         }
         let merged = added.len();
         for (file, count) in added {
@@ -164,14 +161,13 @@ impl EditSession {
     pub fn render(
         &self,
         range: Option<Range<usize>>,
-        fonts: &Arc<Database>,
-        deadline: &Deadline,
+        engine: &dyn PdfEngine,
     ) -> Result<Vec<u8>, String> {
         let pages = match range {
             Some(range) => self.pages.get(range).ok_or("없는 쪽 범위입니다.")?,
             None => &self.pages[..],
         };
-        build(&self.sources, pages, &self.overlay, fonts, deadline)
+        engine.build(&self.sources, pages, &self.overlay)
     }
 }
 

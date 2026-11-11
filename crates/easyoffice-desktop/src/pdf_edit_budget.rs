@@ -1,14 +1,13 @@
-//! Budgets and the guarded runner for editing PDFs that cannot be trusted (PD-164).
+//! Budgets, deadlines and the places for jobs of the PDF edit pipeline (PD-164).
 //!
 //! `hayro-syntax` (the reader) lists timeouts and out-of-memory protection among its open tasks, so
-//! none of it comes from the crate. Everything that touches a PDF here runs on its own thread with
-//! a deadline and `catch_unwind` ([`run_guarded`]), after the checks of `pdf_edit_inspect.rs` have
-//! counted what the file declares against the limits below. Past a limit the request is refused
-//! (fail closed); nothing is shortened, skipped or guessed.
+//! none of it comes from the crate, and counting what a file declares is not enough: a file of a
+//! few hundred kilobytes can make the reader allocate gigabytes without breaking any count. So the
+//! reader and the writer run in a worker process (`pdf_edit_worker.rs`) that the shell kills at the
+//! deadline or when it holds too much memory (`pdf_edit_supervisor.rs`). The limits below are the
+//! counts the worker applies on top (fail closed: nothing is shortened, skipped or guessed).
 
-use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 const MIB: usize = 1_048_576;
@@ -46,48 +45,43 @@ pub const MAX_SPLIT_TOTAL_BYTES: usize = 1024 * MIB;
 pub const MAX_OVERLAY_SIZES: usize = 128;
 /// Longest stamp or watermark text (characters).
 pub const MAX_OVERLAY_CHARS: usize = 100;
-/// How long one request may run before the caller is told it took too long.
+/// How long one request may run before the worker is killed.
 pub const WORK_DEADLINE: Duration = Duration::from_secs(60);
-/// Jobs that may run at once. A job that outlives its deadline keeps its place until it ends, so a
-/// stuck file cannot pile up threads: after this many, new requests are refused.
+/// How long a split may take in all (each file has the deadline of a request of its own).
+pub const SPLIT_DEADLINE: Duration = Duration::from_secs(600);
+/// A worker that is still alive this long after the deadline stops itself (the shell normally
+/// kills it first; this is for a shell that is gone).
+pub const WORKER_GRACE: Duration = Duration::from_secs(5);
+/// Resident memory at which a worker is killed (bytes).
+pub const MAX_CHILD_RSS_BYTES: u64 = 1536 * MIB as u64;
+/// Address space of a worker on Linux (bytes); larger than the resident limit because the shell
+/// binary maps its libraries too.
+pub const MAX_CHILD_ADDRESS_SPACE_BYTES: u64 = 8 * 1024 * MIB as u64;
+/// How often the memory of a worker is looked at.
+pub const MEMORY_POLL: Duration = Duration::from_millis(10);
+/// Workers that may run at once. A worker past its deadline is killed at once, so this is the
+/// number of requests in flight.
 pub const MAX_ACTIVE_JOBS: usize = 2;
-/// The worker's stack. Parsing and copying recurse over nested objects (the reader stops at 512
-/// levels), which fits well inside this.
-const WORKER_STACK_BYTES: usize = 32 * MIB;
+/// Stack of the thread the worker does its work on. Parsing and copying recurse over nested objects
+/// (the reader stops at 512 levels), which fits well inside this.
+pub const WORKER_STACK_BYTES: usize = 32 * MIB;
+/// Most entries of the resource dictionaries (fonts, pictures, ...) of the chosen pages together.
+/// The library writes every entry again for every page, so this bounds the size of the result
+/// before the copy starts.
+pub const MAX_RESOURCE_ENTRIES: usize = 4_000_000;
+/// Most items of a page's `/Contents` array.
+pub const MAX_CONTENT_STREAMS: usize = 10_000;
 
 pub const MSG_TIMEOUT: &str =
     "PDF 처리 시간이 한도를 넘어 중단했습니다. 파일이 지나치게 크거나 손상됐을 수 있습니다.";
 pub const MSG_BUSY: &str = "이전 PDF 작업이 아직 끝나지 않았습니다. 잠시 뒤 다시 시도해 주세요.";
 pub const MSG_PANIC: &str = "PDF를 처리하는 중 내부 오류가 발생해 작업을 중단했습니다.";
+pub const MSG_MEMORY: &str =
+    "PDF 처리에 필요한 메모리가 한도를 넘어 중단했습니다. 파일이 지나치게 크거나 손상됐을 수 있습니다.";
+pub const MSG_WORKER_DIED: &str = "PDF 처리 프로세스가 비정상 종료해 작업을 중단했습니다.";
 
-/// The places for jobs: [`MAX_ACTIVE_JOBS`] at a time in the process (`JOBS`); tests make their own.
-struct Jobs {
-    active: AtomicUsize,
-    max: usize,
-}
-
-static JOBS: Jobs = Jobs::new(MAX_ACTIVE_JOBS);
-
-impl Jobs {
-    const fn new(max: usize) -> Self {
-        Self {
-            active: AtomicUsize::new(0),
-            max,
-        }
-    }
-
-    fn claim(&'static self) -> Option<Slot> {
-        self.active
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
-                (n < self.max).then_some(n + 1)
-            })
-            .ok()
-            .map(|_| Slot(self))
-    }
-}
-
-/// When a request has to be over. The work polls it between pages and files; a single call into
-/// the PDF reader cannot be interrupted, which is why the caller stops waiting at the same time.
+/// When a request has to be over. The work polls it between pages and files; the supervisor kills
+/// the worker at the same moment, so a single long call into the PDF reader is cut off too.
 #[derive(Clone, Copy, Debug)]
 pub struct Deadline(Instant);
 
@@ -105,9 +99,41 @@ impl Deadline {
     }
 }
 
-/// A claim on one of the places; the thread that holds it gives it back when it ends, however it
-/// ends.
-struct Slot(&'static Jobs);
+/// The places for workers: [`MAX_ACTIVE_JOBS`] at a time in the process ([`JOBS`]); tests make
+/// their own.
+pub struct Jobs {
+    active: AtomicUsize,
+    max: usize,
+}
+
+pub static JOBS: Jobs = Jobs::new(MAX_ACTIVE_JOBS);
+
+impl Jobs {
+    pub const fn new(max: usize) -> Self {
+        Self {
+            active: AtomicUsize::new(0),
+            max,
+        }
+    }
+
+    /// A place, or `None` when all are taken. The place is given back when the claim is dropped.
+    pub fn claim(&'static self) -> Option<Slot> {
+        self.active
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+                (n < self.max).then_some(n + 1)
+            })
+            .ok()
+            .map(|_| Slot(self))
+    }
+
+    #[cfg(test)]
+    pub fn held(&self) -> usize {
+        self.active.load(Ordering::Acquire)
+    }
+}
+
+/// A claim on one of the places.
+pub struct Slot(&'static Jobs);
 
 impl Drop for Slot {
     fn drop(&mut self) {
@@ -115,135 +141,25 @@ impl Drop for Slot {
     }
 }
 
-/// Runs `work` on a thread of its own and waits for it at most `limit`. A panic of the work is
-/// caught and reported as [`MSG_PANIC`] (the details go to the log); a work that does not return in
-/// time is reported as [`MSG_TIMEOUT`] and left to end by itself at its next [`Deadline::check`].
-pub fn run_guarded<T: Send + 'static>(
-    limit: Duration,
-    work: impl FnOnce(&Deadline) -> Result<T, String> + Send + 'static,
-) -> Result<T, String> {
-    run_in(&JOBS, limit, work)
-}
-
-fn run_in<T: Send + 'static>(
-    jobs: &'static Jobs,
-    limit: Duration,
-    work: impl FnOnce(&Deadline) -> Result<T, String> + Send + 'static,
-) -> Result<T, String> {
-    let slot = jobs.claim().ok_or_else(|| MSG_BUSY.to_string())?;
-    let deadline = Deadline::after(limit);
-    let (tx, rx) = mpsc::channel();
-    std::thread::Builder::new()
-        .name("pdf-edit".to_string())
-        .stack_size(WORKER_STACK_BYTES)
-        .spawn(move || {
-            let _slot = slot;
-            let outcome = catch_unwind(AssertUnwindSafe(|| work(&deadline)));
-            let _ = tx.send(outcome);
-        })
-        .map_err(|err| {
-            eprintln!("pdf edit: the worker thread did not start: {err}");
-            MSG_PANIC.to_string()
-        })?;
-    match rx.recv_timeout(limit + Duration::from_millis(250)) {
-        Ok(Ok(result)) => result,
-        Ok(Err(_)) => Err(MSG_PANIC.to_string()),
-        Err(mpsc::RecvTimeoutError::Timeout) => Err(MSG_TIMEOUT.to_string()),
-        Err(mpsc::RecvTimeoutError::Disconnected) => Err(MSG_PANIC.to_string()),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::AtomicBool;
-    use std::sync::Arc;
 
-    /// A set of places of its own, so these tests neither wait for nor starve the real jobs.
     fn jobs(max: usize) -> &'static Jobs {
         Box::leak(Box::new(Jobs::new(max)))
     }
 
-    fn held(jobs: &Jobs) -> usize {
-        jobs.active.load(Ordering::Acquire)
-    }
-
-    /// Waits (briefly) until a thread that ended has given its place back.
-    fn settled(jobs: &Jobs, expected: usize) {
-        for _ in 0..200 {
-            if held(jobs) == expected {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        panic!("places held: {} (expected {expected})", held(jobs));
-    }
-
     #[test]
-    fn a_result_comes_back_and_the_place_is_given_up() {
-        let jobs = jobs(1);
-        assert_eq!(run_in(jobs, Duration::from_secs(5), |_| Ok(7)), Ok(7));
-        settled(jobs, 0);
-    }
-
-    #[test]
-    fn a_panic_is_reported_not_propagated() {
-        let jobs = jobs(1);
-        let err = run_in::<()>(jobs, Duration::from_secs(5), |_| panic!("bad pdf")).unwrap_err();
-        assert_eq!(err, MSG_PANIC);
-        settled(jobs, 0);
-        assert_eq!(
-            run_in(jobs, Duration::from_secs(5), |_| Ok(1)),
-            Ok(1),
-            "usable again"
-        );
-    }
-
-    #[test]
-    fn a_work_that_never_checks_in_is_reported_as_too_slow_and_holds_its_place() {
-        let jobs = jobs(1);
-        let release = Arc::new(AtomicBool::new(false));
-        let held_open = Arc::clone(&release);
-        let err = run_in::<()>(jobs, Duration::from_millis(30), move |_| {
-            while !held_open.load(Ordering::Acquire) {
-                std::thread::sleep(Duration::from_millis(5));
-            }
-            Ok(())
-        })
-        .unwrap_err();
-        assert_eq!(err, MSG_TIMEOUT);
-        assert_eq!(held(jobs), 1, "still running");
-        release.store(true, Ordering::Release);
-        settled(jobs, 0);
-    }
-
-    #[test]
-    fn jobs_past_the_limit_are_refused_until_one_ends() {
+    fn places_are_limited_and_given_back() {
         let jobs = jobs(MAX_ACTIVE_JOBS);
-        let release = Arc::new(AtomicBool::new(false));
-        let stuck: Vec<_> = (0..MAX_ACTIVE_JOBS)
-            .map(|_| {
-                let held_open = Arc::clone(&release);
-                std::thread::spawn(move || {
-                    run_in::<()>(jobs, Duration::from_millis(20), move |_| {
-                        while !held_open.load(Ordering::Acquire) {
-                            std::thread::sleep(Duration::from_millis(5));
-                        }
-                        Ok(())
-                    })
-                })
-            })
-            .collect();
-        for handle in stuck {
-            assert_eq!(handle.join().unwrap().unwrap_err(), MSG_TIMEOUT);
-        }
-        assert_eq!(
-            run_in(jobs, Duration::from_secs(1), |_| Ok(1)).unwrap_err(),
-            MSG_BUSY
-        );
-        release.store(true, Ordering::Release);
-        settled(jobs, 0);
-        assert_eq!(run_in(jobs, Duration::from_secs(1), |_| Ok(1)), Ok(1));
+        let first = jobs.claim().expect("first");
+        let second = jobs.claim().expect("second");
+        assert!(jobs.claim().is_none(), "past the limit");
+        assert_eq!(jobs.held(), 2);
+        drop(first);
+        let third = jobs.claim().expect("a place came back");
+        drop((second, third));
+        assert_eq!(jobs.held(), 0);
     }
 
     #[test]
@@ -252,23 +168,5 @@ mod tests {
         std::thread::sleep(Duration::from_millis(2));
         assert_eq!(past.check().unwrap_err(), MSG_TIMEOUT);
         assert!(Deadline::after(Duration::from_secs(60)).check().is_ok());
-    }
-
-    #[test]
-    fn the_work_sees_its_deadline() {
-        let jobs = jobs(1);
-        let out = run_in::<()>(jobs, Duration::from_millis(40), |deadline| {
-            while deadline.check().is_ok() {
-                std::thread::sleep(Duration::from_millis(5));
-            }
-            Err("stopped at the deadline".to_string())
-        });
-        // The work noticed the deadline on its own; either side may report it first.
-        let message = out.unwrap_err();
-        assert!(
-            message == MSG_TIMEOUT || message == "stopped at the deadline",
-            "{message}"
-        );
-        settled(jobs, 0);
     }
 }

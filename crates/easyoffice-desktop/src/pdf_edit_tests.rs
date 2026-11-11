@@ -2,9 +2,10 @@
 //! that the original objects survive. The results are read back with the reader.
 
 use crate::pdf_edit_budget::MAX_PAGES;
+use crate::pdf_edit_engine::InProcessEngine;
 use crate::pdf_edit_fixtures::{
-    all_pictures, deadline, heavy_pdf, picture_bytes, pictures_by_page, read, sample_pdf,
-    PAGE_HEIGHT, PAGE_WIDTH,
+    all_pictures, heavy_pdf, picture_bytes, pictures_by_page, read, sample_pdf, PAGE_HEIGHT,
+    PAGE_WIDTH,
 };
 use crate::pdf_edit_overlay::Overlay;
 use crate::pdf_edit_session::EditSession;
@@ -15,12 +16,12 @@ use hayro_syntax::page::Rotation;
 use std::sync::Arc;
 use usvg::fontdb::Database;
 
-fn no_fonts() -> Arc<Database> {
-    Arc::new(Database::new())
+fn engine() -> InProcessEngine {
+    InProcessEngine::new(Arc::new(Database::new()))
 }
 
 fn open(bytes: Vec<u8>) -> EditSession {
-    EditSession::open(bytes, &deadline()).expect("opens")
+    EditSession::open(bytes, &engine()).expect("opens")
 }
 
 fn rotations(bytes: &[u8]) -> Vec<u16> {
@@ -47,7 +48,7 @@ fn expected_pictures(tag: u8, pages: impl IntoIterator<Item = usize>) -> Vec<Vec
 fn a_file_opens_and_comes_back_whole() {
     let session = open(sample_pdf(1, 4, &[]));
     assert_eq!((session.page_count(), session.source_count()), (4, 1));
-    let out = session.render(None, &no_fonts(), &deadline()).unwrap();
+    let out = session.render(None, &engine()).unwrap();
     assert_eq!(read(&out).pages().len(), 4);
     assert_eq!(rotations(&out), [0, 0, 0, 0]);
     assert_eq!(pictures_by_page(&out), expected_pictures(1, 1..=4));
@@ -61,7 +62,7 @@ fn rotation_sets_rotate_and_adds_to_the_pages_own() {
     session.rotate(None, 90).unwrap();
     session.rotate(Some("1"), 90).unwrap();
     session.rotate(Some("4"), -180).unwrap();
-    let out = session.render(None, &no_fonts(), &deadline()).unwrap();
+    let out = session.render(None, &engine()).unwrap();
     assert_eq!(rotations(&out), [180, 180, 270, 180]);
     // The size of the page does not change: only `/Rotate` does.
     let pdf = read(&out);
@@ -79,7 +80,7 @@ fn rotation_sets_rotate_and_adds_to_the_pages_own() {
 fn an_unrotated_page_gets_exactly_the_requested_rotate() {
     let mut session = open(sample_pdf(3, 2, &[]));
     session.rotate(Some("2"), 270).unwrap();
-    let out = session.render(None, &no_fonts(), &deadline()).unwrap();
+    let out = session.render(None, &engine()).unwrap();
     assert_eq!(rotations(&out), [0, 270]);
     let pdf = read(&out);
     assert_eq!(
@@ -95,7 +96,7 @@ fn a_range_becomes_its_own_file_with_only_its_pictures() {
     let ranges = session.split_ranges(Some("2-3, 6")).unwrap();
     let files: Vec<Vec<u8>> = ranges
         .into_iter()
-        .map(|r| session.render(Some(r), &no_fonts(), &deadline()).unwrap())
+        .map(|r| session.render(Some(r), &engine()).unwrap())
         .collect();
     assert_eq!(files.len(), 2);
     assert_eq!(read(&files[0]).pages().len(), 2);
@@ -117,7 +118,7 @@ fn a_split_keeps_the_turns_chosen_before_it() {
     let ranges = session.split_ranges(None).unwrap();
     let files: Vec<Vec<u8>> = ranges
         .into_iter()
-        .map(|r| session.render(Some(r), &no_fonts(), &deadline()).unwrap())
+        .map(|r| session.render(Some(r), &engine()).unwrap())
         .collect();
     let turns: Vec<u16> = files.iter().map(|f| rotations(f)[0]).collect();
     assert_eq!(turns, [0, 90, 0]);
@@ -129,14 +130,14 @@ fn merging_appends_the_pages_of_the_other_files_in_order() {
     let merged = session
         .merge(
             vec![sample_pdf(7, 2, &[90, 0]), sample_pdf(8, 1, &[])],
-            &deadline(),
+            &engine(),
         )
         .unwrap();
     assert_eq!(
         (merged, session.page_count(), session.source_count()),
         (2, 6, 3)
     );
-    let out = session.render(None, &no_fonts(), &deadline()).unwrap();
+    let out = session.render(None, &engine()).unwrap();
     assert_eq!(read(&out).pages().len(), 6);
     assert_eq!(rotations(&out), [0, 0, 0, 90, 0, 0]);
     let mut expected = expected_pictures(6, 1..=3);
@@ -148,7 +149,7 @@ fn merging_appends_the_pages_of_the_other_files_in_order() {
 #[test]
 fn a_font_the_pages_share_is_copied_once_and_stays_a_font() {
     let session = open(sample_pdf(9, 5, &[]));
-    let out = session.render(None, &no_fonts(), &deadline()).unwrap();
+    let out = session.render(None, &engine()).unwrap();
     let pdf = read(&out);
     let mut fonts = 0;
     for object in pdf.objects() {
@@ -180,9 +181,7 @@ fn a_font_the_pages_share_is_copied_once_and_stays_a_font() {
 #[test]
 fn the_text_of_a_page_is_still_in_its_content() {
     let session = open(sample_pdf(10, 3, &[]));
-    let out = session
-        .render(Some(1..2), &no_fonts(), &deadline())
-        .unwrap();
+    let out = session.render(Some(1..2), &engine()).unwrap();
     let pdf = read(&out);
     let form = pdf.pages()[0]
         .raw()
@@ -202,11 +201,11 @@ fn the_text_of_a_page_is_still_in_its_content() {
 fn a_result_opens_again_and_can_be_edited_again() {
     let mut first = open(sample_pdf(11, 3, &[0, 90, 0]));
     first.rotate(Some("1"), 90).unwrap();
-    let out = first.render(None, &no_fonts(), &deadline()).unwrap();
+    let out = first.render(None, &engine()).unwrap();
     let mut second = open(out);
     assert_eq!(second.page_count(), 3);
     second.rotate(Some("1"), 90).unwrap();
-    let again = second.render(None, &no_fonts(), &deadline()).unwrap();
+    let again = second.render(None, &engine()).unwrap();
     assert_eq!(rotations(&again), [180, 90, 0]);
     assert_eq!(pictures_by_page(&again), expected_pictures(11, 1..=3));
 }
@@ -225,7 +224,7 @@ fn the_title_of_the_first_file_is_kept() {
         .title(hayro_write::pdf_writer::TextStr("보고서 제목"));
     let bytes = pdf.finish();
     let source_title = read(&bytes).metadata().title.clone().expect("source title");
-    let out = open(bytes).render(None, &no_fonts(), &deadline()).unwrap();
+    let out = open(bytes).render(None, &engine()).unwrap();
     assert_eq!(read(&out).metadata().title.clone(), Some(source_title));
 }
 
@@ -235,7 +234,7 @@ fn merged_pages_past_the_page_limit_are_refused_and_nothing_is_added() {
     session.pages_for_test(MAX_PAGES - 1);
     let before = session.page_count();
     let err = session
-        .merge(vec![sample_pdf(13, 2, &[])], &deadline())
+        .merge(vec![sample_pdf(13, 2, &[])], &engine())
         .unwrap_err();
     assert!(err.contains("쪽 수"), "{err}");
     assert_eq!((session.page_count(), session.source_count()), (before, 1));
@@ -249,7 +248,9 @@ fn the_overlay_text_is_a_real_font_and_the_original_is_still_there() {
     let db = Arc::new(db);
     let mut session = open(sample_pdf(14, 3, &[0, 90, 0]));
     session.set_overlay(Overlay::new(Some("대외비 · 기획조정실"), Some("승인필")).unwrap());
-    let out = session.render(None, &db, &deadline()).unwrap();
+    let out = session
+        .render(None, &InProcessEngine::new(Arc::clone(&db)))
+        .unwrap();
     let pdf = read(&out);
     assert_eq!(pdf.pages().len(), 3);
     assert_eq!(pictures_by_page(&out), expected_pictures(14, 1..=3));
@@ -286,7 +287,9 @@ fn only_pages_of_equal_size_share_an_overlay_form() {
     let db = Arc::new(db);
     let mut session = open(sample_pdf(15, 5, &[]));
     session.set_overlay(Overlay::new(Some("초안"), None).unwrap());
-    let out = session.render(None, &db, &deadline()).unwrap();
+    let out = session
+        .render(None, &InProcessEngine::new(Arc::clone(&db)))
+        .unwrap();
     let pdf = read(&out);
     let mut forms = std::collections::HashSet::new();
     for page in pdf.pages().iter() {
@@ -327,11 +330,11 @@ fn the_form_matrix_agrees_with_the_direction_of_rotate() {
 fn a_hundred_pages_merge_in_a_moment() {
     let mut session = open(sample_pdf(17, 50, &[]));
     session
-        .merge(vec![sample_pdf(18, 50, &[0, 90])], &deadline())
+        .merge(vec![sample_pdf(18, 50, &[0, 90])], &engine())
         .unwrap();
     assert_eq!(session.page_count(), 100);
     let started = std::time::Instant::now();
-    let out = session.render(None, &no_fonts(), &deadline()).unwrap();
+    let out = session.render(None, &engine()).unwrap();
     let elapsed = started.elapsed();
     eprintln!("merge of 100 pages: {elapsed:?}, {} bytes", out.len());
     assert_eq!(read(&out).pages().len(), 100);
@@ -350,9 +353,9 @@ fn a_hundred_heavy_pages_merge_without_touching_their_pictures() {
     );
     let input = first.len() + second.len();
     let mut session = open(first);
-    session.merge(vec![second], &deadline()).unwrap();
+    session.merge(vec![second], &engine()).unwrap();
     let started = std::time::Instant::now();
-    let out = session.render(None, &no_fonts(), &deadline()).unwrap();
+    let out = session.render(None, &engine()).unwrap();
     let elapsed = started.elapsed();
     eprintln!(
         "merge of 100 heavy pages: {elapsed:?} ({} MiB in, {} MiB out)",

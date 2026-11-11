@@ -24,16 +24,15 @@
 use crate::pdf_edit_budget::{
     Deadline, MAX_OUTPUT_BYTES, MAX_OVERLAY_SIZES, MAX_PAGES, MAX_TOTAL_CONTENT_BYTES,
 };
-use crate::pdf_edit_inspect::{open_pdf, page_content_bytes, Limits};
+use crate::pdf_edit_inspect::{open_pdf, page_content_bytes, resource_entries, Limits};
 use crate::pdf_edit_overlay::{upright_matrix, Overlay};
-use crate::pdf_export::PdfAssembler;
+pub use crate::pdf_edit_wire::{OverlayMaker, PagePlan};
 use hayro_syntax::page::{Page, Rotation};
 use hayro_syntax::Pdf as ReadPdf;
 use hayro_write::pdf_writer::{Content, Finish, Name, Pdf, Rect, Ref, Str, TextStr};
 use hayro_write::{extract, ChunkSettings, ExtractionQuery};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
-use usvg::fontdb::Database;
 
 const PRODUCER: &str = "EasyOffice";
 /// Pages between two looks at the deadline, as a mask (a power of two minus one).
@@ -42,15 +41,6 @@ const ORIGINAL_FORM: Name<'static> = Name(b"P");
 const OVERLAY_FORM: Name<'static> = Name(b"W");
 
 pub const MSG_TOO_BIG: &str = "편집 결과가 허용 크기(256MiB)를 초과합니다.";
-
-/// One page of the result: page `index` of source `source`, turned `turn` degrees (0, 90, 180 or
-/// 270) more than it already is.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct PagePlan {
-    pub source: usize,
-    pub index: usize,
-    pub turn: u16,
-}
 
 /// A 2x3 matrix `[a b c d e f]` as the PDF writes it: x' = a x + c y + e, y' = b x + d y + f.
 type Affine = [f64; 6];
@@ -142,7 +132,7 @@ pub fn build(
     sources: &[Arc<Vec<u8>>],
     pages: &[PagePlan],
     overlay: &Overlay,
-    fonts: &Arc<Database>,
+    make_overlay: &mut OverlayMaker<'_>,
     deadline: &Deadline,
 ) -> Result<Vec<u8>, String> {
     if pages.is_empty() {
@@ -152,13 +142,20 @@ pub fn build(
         return Err(format!("결과의 쪽 수가 한도({MAX_PAGES})를 초과합니다."));
     }
     let parsed = parse_used(sources, pages, deadline)?;
-    let placements = place_all(&parsed, pages)?;
+    let placements = place_all(&parsed, pages, deadline)?;
 
     let mut next = Ref::new(1);
     let (catalog_ref, tree_ref, info_ref) = (next.bump(), next.bump(), next.bump());
     let mut out = Pdf::new();
     let forms = copy_pages(&mut out, &mut next, &parsed, pages, deadline)?;
-    let overlays = copy_overlays(&mut out, &mut next, overlay, &placements, fonts, deadline)?;
+    let overlays = copy_overlays(
+        &mut out,
+        &mut next,
+        overlay,
+        &placements,
+        make_overlay,
+        deadline,
+    )?;
 
     let mut page_refs = Vec::with_capacity(pages.len());
     for (n, (plan, place)) in pages.iter().zip(&placements).enumerate() {
@@ -236,15 +233,23 @@ fn parse_used(
 fn place_all(
     parsed: &BTreeMap<usize, ReadPdf>,
     pages: &[PagePlan],
+    deadline: &Deadline,
 ) -> Result<Vec<Placement>, String> {
-    let mut total = 0usize;
+    let (mut total, mut entries) = (0usize, 0usize);
     let mut placements = Vec::with_capacity(pages.len());
-    for plan in pages {
+    for (n, plan) in pages.iter().enumerate() {
+        if n & PAGES_PER_CHECK_MASK == 0 {
+            deadline.check()?;
+        }
         let pdf = parsed
             .get(&plan.source)
             .ok_or("쪽의 원본 PDF가 없습니다.")?;
         let page = pdf.pages().get(plan.index).ok_or("없는 쪽을 가리킵니다.")?;
-        total = total.saturating_add(page_content_bytes(page, &Limits::DEFAULT)?);
+        entries = entries.saturating_add(resource_entries(
+            page,
+            Limits::DEFAULT.resource_entries - entries.min(Limits::DEFAULT.resource_entries),
+        )?);
+        total = total.saturating_add(page_content_bytes(page, &Limits::DEFAULT, deadline)?);
         if total > MAX_TOTAL_CONTENT_BYTES {
             return Err(format!(
                 "쪽 내용의 압축 해제 크기가 한도({}MiB)를 초과합니다.",
@@ -311,7 +316,7 @@ fn copy_overlays(
     next: &mut Ref,
     overlay: &Overlay,
     placements: &[Placement],
-    fonts: &Arc<Database>,
+    make_overlay: &mut OverlayMaker<'_>,
     deadline: &Deadline,
 ) -> Result<HashMap<OverlayKey, Ref>, String> {
     let mut forms = HashMap::new();
@@ -330,12 +335,10 @@ fn copy_overlays(
                 "쪽 크기가 {MAX_OVERLAY_SIZES}가지를 넘어 스탬프와 워터마크를 넣을 수 없습니다."
             ));
         }
-        let Some(svg) = overlay.svg(shown.0, shown.1, n == 0) else {
+        if overlay.svg(shown.0, shown.1, n == 0).is_none() {
             continue;
-        };
-        let mut assembler = PdfAssembler::new(fonts, true);
-        assembler.add_pages(&[svg])?;
-        let bytes = Arc::new(assembler.finish()?);
+        }
+        let bytes = Arc::new(make_overlay(shown.0, shown.1, n == 0)?);
         let pdf = open_pdf(&bytes)?;
         let copied = extract(
             &pdf,

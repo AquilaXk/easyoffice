@@ -1,23 +1,25 @@
 //! What a PDF declares, counted against the budgets before any page is copied (PD-164).
 //!
-//! `inspect` is the gate every PDF passes on its way into an edit: the size, the header, an
-//! encryption marker, what the compressed streams inflate to, then (after the reader has parsed
-//! the file) the object count, the page count, the depth of the page tree and the decoded size of
-//! the page contents. Past any limit the file is refused with a fixed sentence (fail closed); the
-//! reader's own reasons go to the log only.
+//! `inspect` is the gate every PDF passes on its way into an edit: the size, the header, what the
+//! compressed streams inflate to (`pdf_edit_scan.rs`), then, after the reader has parsed the
+//! file, whether it is encrypted, the object count, the page count, the depth of the page tree,
+//! the entries of the resource dictionaries and the decoded size of the page contents. Past any
+//! limit the file is refused with a fixed sentence (fail closed); the reader's own reasons go to
+//! the log only.
+//!
+//! All of it runs in the worker process (`pdf_edit_worker.rs`). The counts here cannot cover
+//! everything the reader may do with a crafted file; what is left is contained by the worker's
+//! memory and time limits, which end the process.
 //!
 //! The content check is exact: `hayro-write` decodes each page's content into memory, so the size
-//! is counted here first with a streaming inflater (`inflated_len`) that allocates nothing. The
-//! stream scan before parsing is a best effort for everything else the reader decodes on its own
-//! (object streams): it finds `stream ... endstream` spans by their keywords, which a crafted file
-//! can hide from. It stops the common bomb, not a determined one (the remaining risk is in PD-164).
+//! is counted here first with a streaming inflater that allocates nothing.
 
 use crate::pdf_edit_budget::{
-    Deadline, MAX_OBJECTS, MAX_PAGES, MAX_PAGE_CONTENT_BYTES, MAX_PAGE_TREE_DEPTH,
-    MAX_PAGE_TREE_NODES, MAX_SOURCE_BYTES, MAX_STREAM_INFLATED_BYTES, MAX_TOTAL_CONTENT_BYTES,
-    MAX_TOTAL_INFLATED_BYTES,
+    Deadline, MAX_CONTENT_STREAMS, MAX_OBJECTS, MAX_PAGES, MAX_PAGE_CONTENT_BYTES,
+    MAX_PAGE_TREE_DEPTH, MAX_PAGE_TREE_NODES, MAX_RESOURCE_ENTRIES, MAX_SOURCE_BYTES,
+    MAX_STREAM_INFLATED_BYTES, MAX_TOTAL_CONTENT_BYTES, MAX_TOTAL_INFLATED_BYTES,
 };
-use flate2::{Decompress, FlushDecompress, Status};
+use crate::pdf_edit_scan::{find, inflated_len, scan_streams, Inflate};
 use hayro_syntax::object::dict::keys::{CONTENTS, DECODE_PARMS, DP, KIDS, PAGES, PREDICTOR};
 use hayro_syntax::object::{Array, Dict, Stream};
 use hayro_syntax::page::Page;
@@ -33,21 +35,21 @@ pub const MSG_CONTENT_FILTER: &str =
 pub const MSG_CONTENT_BROKEN: &str =
     "쪽 내용을 읽을 수 없어(손상된 압축) 이 PDF는 편집할 수 없습니다.";
 const MSG_EMPTY: &str = "쪽이 없는 PDF는 편집할 수 없습니다.";
+const MSG_TOO_MANY_STREAMS: &str = "쪽 하나의 내용 스트림 수가 한도를 초과합니다.";
+const MSG_TOO_MANY_RESOURCES: &str = "쪽 리소스(글꼴·그림 등) 항목 수가 한도를 초과합니다.";
 
 /// How far into the file the `%PDF-` header may sit (the specification allows some leading bytes).
 const HEADER_WINDOW: usize = 1024;
-/// The encryption entry of the trailer. A file that has it is refused even when it opens with an
-/// empty password, because the result would silently lose the protection it was given.
-const ENCRYPT_KEY: &[u8] = b"/Encrypt";
-/// Bytes before `stream` that are searched for the stream's filter.
-const DICT_LOOKBACK: usize = 1024;
-/// How often the checks look at the deadline, as masks (a power of two minus one): every 4096th
-/// keyword span of the stream scan, every 1024th page tree node, every 64th page.
-const SPANS_PER_CHECK_MASK: usize = 4095;
+/// A password nobody has. An encrypted file does not open with it, an unencrypted one ignores it:
+/// that is how the reader's own reading of the trailer tells whether a file is encrypted. A file
+/// that opens with the empty password is refused all the same, because the result would silently
+/// lose the protection it was given.
+const PROBE_PASSWORD: &str = "\u{1}easyoffice-encryption-probe\u{2}";
+/// How often the checks look at the deadline, as masks (a power of two minus one): every 1024th
+/// page tree node, every 64th page, every 1024th content stream.
 const NODES_PER_CHECK_MASK: usize = 1023;
 const PAGES_PER_CHECK_MASK: usize = 63;
-/// Output buffer of the counting inflater (its contents are thrown away).
-const SCRATCH_BYTES: usize = 32 * 1024;
+const STREAMS_PER_CHECK_MASK: usize = 1023;
 
 /// The numbers a file is counted against. [`Limits::DEFAULT`] is what the shell uses (the constants
 /// of `pdf_edit_budget.rs`); tests pass small ones so a bomb does not have to be a real one.
@@ -62,6 +64,8 @@ pub struct Limits {
     pub total_content: usize,
     pub stream_inflated: u64,
     pub total_inflated: u64,
+    pub resource_entries: usize,
+    pub content_streams: usize,
 }
 
 impl Limits {
@@ -75,6 +79,8 @@ impl Limits {
         total_content: MAX_TOTAL_CONTENT_BYTES,
         stream_inflated: MAX_STREAM_INFLATED_BYTES,
         total_inflated: MAX_TOTAL_INFLATED_BYTES,
+        resource_entries: MAX_RESOURCE_ENTRIES,
+        content_streams: MAX_CONTENT_STREAMS,
     };
 }
 
@@ -84,9 +90,12 @@ pub struct SourceInfo {
     pub pages: usize,
 }
 
-/// Parses `bytes` as an unencrypted PDF. The reader's own failure reasons go to the log.
+/// Parses `bytes` as an unencrypted PDF. The file is opened with a password nobody has: a file the
+/// reader finds encrypted does not open (and is refused), an unencrypted one does, so the
+/// answer comes from the reader's reading of the trailer and cannot be hidden by how the entry is
+/// spelled. The reader's own failure reasons go to the log.
 pub fn open_pdf(bytes: &Arc<Vec<u8>>) -> Result<Pdf, String> {
-    Pdf::new(Arc::clone(bytes)).map_err(|err| match err {
+    Pdf::new_with_password(Arc::clone(bytes), PROBE_PASSWORD).map_err(|err| match err {
         LoadPdfError::Decryption(_) => MSG_ENCRYPTED.to_string(),
         LoadPdfError::Invalid => MSG_UNREADABLE.to_string(),
     })
@@ -111,10 +120,12 @@ pub fn inspect_within(
             limits.source_bytes / 1_048_576
         ));
     }
-    if find(bytes, ENCRYPT_KEY, 0).is_some() {
-        return Err(MSG_ENCRYPTED.to_string());
-    }
-    scan_streams(bytes, deadline, limits)?;
+    scan_streams(
+        bytes,
+        deadline,
+        limits.stream_inflated,
+        limits.total_inflated,
+    )?;
     deadline.check()?;
     let pdf = open_pdf(bytes)?;
     deadline.check()?;
@@ -135,17 +146,44 @@ pub fn inspect_within(
         ));
     }
     check_page_tree(&pdf, deadline, limits)?;
-    let mut total = 0usize;
+    let (mut total, mut entries) = (0usize, 0usize);
     for (n, page) in pages.iter().enumerate() {
         if n & PAGES_PER_CHECK_MASK == 0 {
             deadline.check()?;
         }
-        total = total.saturating_add(page_content_bytes(page, limits)?);
+        entries = entries.saturating_add(resource_entries(
+            page,
+            limits.resource_entries - entries.min(limits.resource_entries),
+        )?);
+        total = total.saturating_add(page_content_bytes(page, limits, deadline)?);
         if total > limits.total_content {
             return Err(too_much_content());
         }
     }
     Ok(SourceInfo { pages: pages.len() })
+}
+
+/// How many entries the resource dictionaries of a page hold (fonts, pictures, colour spaces, ...).
+/// The library writes every entry again for every page it copies, so a file whose pages share a
+/// huge dictionary is as large as pages times entries. Counting stops past `room`.
+pub fn resource_entries(page: &Page<'_>, room: usize) -> Result<usize, String> {
+    let r = page.resources();
+    let mut count = 0usize;
+    for dict in [
+        &r.ext_g_states,
+        &r.shadings,
+        &r.patterns,
+        &r.x_objects,
+        &r.color_spaces,
+        &r.fonts,
+        &r.properties,
+    ] {
+        count = count.saturating_add(dict.len());
+        if count > room {
+            return Err(MSG_TOO_MANY_RESOURCES.to_string());
+        }
+    }
+    Ok(count)
 }
 
 fn too_much_content() -> String {
@@ -155,13 +193,23 @@ fn too_much_content() -> String {
 /// The decoded size of a page's content (all of its content streams), counted without decoding it
 /// into memory. Only uncompressed and plain Flate streams are accepted: they are the ones that
 /// can be counted exactly, and nearly every file uses nothing else for page contents.
-pub fn page_content_bytes(page: &Page<'_>, limits: &Limits) -> Result<usize, String> {
+pub fn page_content_bytes(
+    page: &Page<'_>,
+    limits: &Limits,
+    deadline: &Deadline,
+) -> Result<usize, String> {
     let raw = page.raw();
     let mut total = 0usize;
     if let Some(stream) = raw.get::<Stream<'_>>(CONTENTS) {
         total = stream_content_bytes(&stream, limits.page_content)?;
     } else if let Some(streams) = raw.get::<Array<'_>>(CONTENTS) {
-        for stream in streams.iter::<Stream<'_>>() {
+        for (n, stream) in streams.iter::<Stream<'_>>().enumerate() {
+            if n >= limits.content_streams {
+                return Err(MSG_TOO_MANY_STREAMS.to_string());
+            }
+            if n & STREAMS_PER_CHECK_MASK == 0 {
+                deadline.check()?;
+            }
             // The reader puts one separator after each stream.
             total = total.saturating_add(
                 stream_content_bytes(&stream, limits.page_content)?.saturating_add(1),
@@ -245,130 +293,6 @@ fn check_page_tree(pdf: &Pdf, deadline: &Deadline, limits: &Limits) -> Result<()
     Ok(())
 }
 
-/// Why a stream could not be counted.
-#[derive(Debug, PartialEq, Eq)]
-pub enum Inflate {
-    /// It inflates past the cap.
-    TooLarge,
-    /// It is not a complete Flate stream.
-    Invalid,
-}
-
-/// Inflates `data` (zlib, or raw deflate when it has no zlib header) into a scratch buffer and
-/// returns how many bytes it makes, stopping with [`Inflate::TooLarge`] once that passes `cap`.
-pub fn inflated_len(data: &[u8], cap: u64) -> Result<u64, Inflate> {
-    let zlib = data.len() >= 2
-        && data[0] & 0x0f == 8
-        && ((u16::from(data[0]) << 8) | u16::from(data[1])) % 31 == 0;
-    let mut inflater = Decompress::new(zlib);
-    let mut scratch = [0u8; SCRATCH_BYTES];
-    loop {
-        let (read, written) = (inflater.total_in(), inflater.total_out());
-        let input = data.get(usize::try_from(read).map_err(|_| Inflate::Invalid)?..);
-        let status = inflater
-            .decompress(input.unwrap_or(&[]), &mut scratch, FlushDecompress::None)
-            .map_err(|_| Inflate::Invalid)?;
-        if inflater.total_out() > cap {
-            return Err(Inflate::TooLarge);
-        }
-        match status {
-            Status::StreamEnd => return Ok(inflater.total_out()),
-            Status::Ok | Status::BufError => {
-                if inflater.total_in() == read && inflater.total_out() == written {
-                    return Err(Inflate::Invalid);
-                }
-            }
-        }
-    }
-}
-
-/// Best-effort bomb check over the whole file (see the module comment): every Flate stream found
-/// by its keywords must inflate to at most `limits.stream_inflated`, and all of them together to
-/// at most `limits.total_inflated`. A span that is not a complete Flate stream is left to
-/// the reader.
-fn scan_streams(bytes: &[u8], deadline: &Deadline, limits: &Limits) -> Result<(), String> {
-    let too_big = || "PDF의 압축 해제 크기가 한도를 초과합니다.".to_string();
-    let mut total = 0u64;
-    let mut at = 0usize;
-    let mut spans = 0usize;
-    while let Some(found) = find(bytes, b"stream", at) {
-        at = found + b"stream".len();
-        spans += 1;
-        if spans & SPANS_PER_CHECK_MASK == 0 {
-            deadline.check()?;
-        }
-        if found >= 3 && &bytes[found - 3..found] == b"end" {
-            continue;
-        }
-        let Some(start) = stream_data_start(bytes, at) else {
-            continue;
-        };
-        let end = find(bytes, b"endstream", start).unwrap_or(bytes.len());
-        let lookback = &bytes[found.saturating_sub(DICT_LOOKBACK)..found];
-        if find(lookback, b"FlateDecode", 0).is_some() {
-            deadline.check()?;
-            match inflated_len(&bytes[start..end], limits.stream_inflated) {
-                Ok(n) => total += n,
-                Err(Inflate::TooLarge) => return Err(too_big()),
-                Err(Inflate::Invalid) => {}
-            }
-            if total > limits.total_inflated {
-                return Err(too_big());
-            }
-        }
-        at = end;
-    }
-    Ok(())
-}
-
-/// Where the data of a stream starts: after the line break that follows the `stream` keyword.
-fn stream_data_start(bytes: &[u8], after_keyword: usize) -> Option<usize> {
-    match bytes.get(after_keyword)? {
-        b'\n' => Some(after_keyword + 1),
-        b'\r' if bytes.get(after_keyword + 1) == Some(&b'\n') => Some(after_keyword + 2),
-        b'\r' => Some(after_keyword + 1),
-        _ => None,
-    }
-}
-
 fn has_header(bytes: &[u8]) -> bool {
     find(&bytes[..bytes.len().min(HEADER_WINDOW)], b"%PDF-", 0).is_some()
-}
-
-/// The first position of `needle` in `hay` at or after `from`.
-fn find(hay: &[u8], needle: &[u8], from: usize) -> Option<usize> {
-    let tail = hay.get(from..)?;
-    let first = *needle.first()?;
-    let mut at = 0;
-    while let Some(i) = tail[at..].iter().position(|&b| b == first) {
-        let pos = at + i;
-        if tail[pos..].starts_with(needle) {
-            return Some(from + pos);
-        }
-        at = pos + 1;
-    }
-    None
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn find_locates_needles_after_an_offset() {
-        assert_eq!(find(b"abcabc", b"bc", 0), Some(1));
-        assert_eq!(find(b"abcabc", b"bc", 2), Some(4));
-        assert_eq!(find(b"abc", b"bd", 0), None);
-        assert_eq!(find(b"abc", b"abc", 4), None);
-        assert_eq!(find(b"", b"a", 0), None);
-    }
-
-    #[test]
-    fn stream_data_starts_after_the_line_break() {
-        assert_eq!(stream_data_start(b"stream\nX", 6), Some(7));
-        assert_eq!(stream_data_start(b"stream\r\nX", 6), Some(8));
-        assert_eq!(stream_data_start(b"stream\rX", 6), Some(7));
-        assert_eq!(stream_data_start(b"streamX", 6), None);
-        assert_eq!(stream_data_start(b"stream", 6), None);
-    }
 }

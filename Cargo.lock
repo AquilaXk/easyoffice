@@ -1196,6 +1196,7 @@ dependencies = [
  "hayro-syntax",
  "hayro-write",
  "imagesize",
+ "libc",
  "miniz_oxide 0.8.9",
  "native-tls",
  "objc2-app-kit",
@@ -1218,6 +1219,7 @@ dependencies = [
  "ttf-parser",
  "ureq",
  "usvg",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

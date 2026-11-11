@@ -3,11 +3,15 @@
 //! reference table, so the reader has to repair them, which is the path a crafted file takes.
 
 use crate::pdf_edit_budget::{MAX_PAGES, MAX_PAGE_TREE_DEPTH};
-use crate::pdf_edit_fixtures::{blank_page, deadline, hand_written, read, sample_pdf};
-use crate::pdf_edit_inspect::{
-    inflated_len, inspect, inspect_within, Inflate, Limits, MSG_CONTENT_BROKEN, MSG_CONTENT_FILTER,
-    MSG_ENCRYPTED, MSG_UNREADABLE,
+use crate::pdf_edit_engine::InProcessEngine;
+use crate::pdf_edit_fixtures::{
+    blank_page, deadline, hand_written, hand_written_with_xref, read, sample_pdf,
 };
+use crate::pdf_edit_inspect::{
+    inspect, inspect_within, Limits, MSG_CONTENT_BROKEN, MSG_CONTENT_FILTER, MSG_ENCRYPTED,
+    MSG_UNREADABLE,
+};
+use crate::pdf_edit_scan::{inflated_len, Inflate, MSG_STREAM_FILTER, MSG_STREAM_TOO_BIG};
 use crate::pdf_edit_session::EditSession;
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
@@ -32,8 +36,9 @@ fn on_worker_stack<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static)
 fn open_and_rebuild(bytes: Vec<u8>, within: Duration) -> Result<usize, String> {
     let started = Instant::now();
     let outcome = on_worker_stack(move || {
-        let session = EditSession::open(bytes, &deadline())?;
-        let out = session.render(None, &Arc::new(Database::new()), &deadline())?;
+        let engine = InProcessEngine::new(Arc::new(Database::new()));
+        let session = EditSession::open(bytes, &engine)?;
+        let out = session.render(None, &engine)?;
         Ok(read(&out).pages().len())
     });
     assert!(started.elapsed() < within, "took {:?}", started.elapsed());
@@ -138,7 +143,153 @@ fn a_flate_bomb_hidden_in_a_picture_is_stopped_by_the_stream_scan() {
     ));
     file.extend_from_slice(b"\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n");
     let err = inspect_bytes(file, small()).unwrap_err();
-    assert_eq!(err, "PDF의 압축 해제 크기가 한도를 초과합니다.");
+    assert_eq!(err, MSG_STREAM_TOO_BIG);
+}
+
+/// A zlib stream whose compressed bytes hold the text `endstream` in the middle (a stored block),
+/// followed by `zeros` zero bytes compressed: cut at the first `endstream` it looks like nine bytes.
+fn zlib_with_endstream_inside(zeros: usize) -> Vec<u8> {
+    use flate2::write::DeflateEncoder;
+    let mut inflated = b"endstream".to_vec();
+    inflated.resize(inflated.len() + zeros, 0);
+    let mut raw = vec![0x00, 9, 0, !9u8, 0xff];
+    raw.extend_from_slice(b"endstream");
+    let mut tail = DeflateEncoder::new(Vec::new(), Compression::fast());
+    tail.write_all(&vec![0u8; zeros]).unwrap();
+    raw.extend_from_slice(&tail.finish().unwrap());
+    let (mut a, mut b) = (1u32, 0u32);
+    for byte in &inflated {
+        a = (a + u32::from(*byte)) % 65_521;
+        b = (b + a) % 65_521;
+    }
+    let mut out = vec![0x78, 0x01];
+    out.extend_from_slice(&raw);
+    out.extend_from_slice(&((b << 16) | a).to_be_bytes());
+    out
+}
+
+fn with_stream_object(dict: &str, data: &[u8]) -> Vec<u8> {
+    let mut file = one_page_with_content("", b"BT ET");
+    file.truncate(file.len() - b"trailer\n<< /Root 1 0 R >>\n%%EOF\n".len());
+    file.extend_from_slice(b"5 0 obj\n");
+    file.extend_from_slice(&stream_object(dict, data));
+    file.extend_from_slice(b"\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n");
+    file
+}
+
+#[test]
+fn a_bomb_is_counted_however_the_dictionary_hides_it() {
+    let bomb = zeros_zlib(8 << 20);
+    let hidden_endstream = zlib_with_endstream_inside(8 << 20);
+    let far_dictionary = format!("/Pad ({}) /Type /ObjStm", "x".repeat(4000));
+    for (name, file) in [
+        (
+            "no filter entry at all",
+            with_stream_object("/Type /ObjStm", &bomb),
+        ),
+        (
+            "dictionary far from the stream",
+            with_stream_object(&far_dictionary, &bomb),
+        ),
+        (
+            "endstream inside the compressed data",
+            with_stream_object("/Type /ObjStm /Filter /FlateDecode", &hidden_endstream),
+        ),
+        (
+            "endstream inside the data, no filter entry",
+            with_stream_object("/Type /ObjStm", &hidden_endstream),
+        ),
+    ] {
+        assert_eq!(
+            inspect_bytes(file, small()).unwrap_err(),
+            MSG_STREAM_TOO_BIG,
+            "{name}"
+        );
+    }
+    // The helper really makes a stream that a reader inflates in full.
+    assert_eq!(inflated_len(&hidden_endstream, 64 << 20), Ok(9 + (8 << 20)));
+}
+
+#[test]
+fn a_bomb_in_a_stream_whose_dictionary_the_scan_misreads_gets_past_the_scan() {
+    // This is why the worker has a memory limit: the scan is a courtesy, not a guarantee. The bomb
+    // is 8 MiB here; the worker test (`tests/pdf_isolation.rs`) uses 400 MiB.
+    use crate::pdf_edit_fixtures::hidden_object_stream_bomb;
+    use crate::pdf_edit_scan::scan_streams;
+    let file = hidden_object_stream_bomb(1);
+    assert!(scan_streams(&file, &deadline(), 1 << 20, 1 << 20).is_ok());
+}
+
+#[test]
+fn filters_that_hide_a_bomb_are_refused_before_anything_is_decoded() {
+    let bomb = zeros_zlib(1 << 20);
+    for dict in [
+        "/Type /ObjStm /Filter /Fl#61teDecode",
+        "/Type /ObjStm /Filter /Fl",
+        "/Type /ObjStm /Filter [/ASCII85Decode /FlateDecode]",
+        "/Type /ObjStm /Filter 7 0 R",
+        "/Type /ObjStm /Filter [7 0 R]",
+        "/Type /ObjStm /F#69lter /LZWDecode",
+    ] {
+        assert_eq!(
+            inspect_bytes(with_stream_object(dict, &bomb), Limits::DEFAULT).unwrap_err(),
+            MSG_STREAM_FILTER,
+            "{dict}"
+        );
+    }
+}
+
+#[test]
+fn a_dictionary_of_one_page_cannot_make_every_page_expensive() {
+    let entries: String = (0..300).map(|n| format!("/F{n} 4 0 R ")).collect();
+    let mut objects = vec![
+        (1u32, "<< /Type /Catalog /Pages 2 0 R >>".to_string()),
+        (
+            2,
+            "<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 /Resources 4 0 R >>".to_string(),
+        ),
+        (3, blank_page(2)),
+        (4, format!("<< /Font << {entries}>> >>")),
+        (5, blank_page(2)),
+    ];
+    objects.sort_by_key(|(n, _)| *n);
+    let file = hand_written_with_xref(&objects, "");
+    let tight = Limits {
+        resource_entries: 500,
+        ..Limits::DEFAULT
+    };
+    // Two pages share 300 entries: 600 written, past 500.
+    assert!(inspect_bytes(file.clone(), tight)
+        .unwrap_err()
+        .contains("리소스"));
+    assert_eq!(inspect_bytes(file, Limits::DEFAULT), Ok(2));
+}
+
+#[test]
+fn a_contents_array_with_endless_items_is_refused_by_its_length() {
+    let items: String = (0..50).map(|_| "4 0 R ").collect();
+    let file = hand_written_with_xref(
+        &[
+            (1, "<< /Type /Catalog /Pages 2 0 R >>".to_string()),
+            (2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string()),
+            (
+                3,
+                format!(
+                    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 10 10] /Contents [{items}] >>"
+                ),
+            ),
+            (4, "<< /Length 0 >>\nstream\n\nendstream".to_string()),
+        ],
+        "",
+    );
+    let tight = Limits {
+        content_streams: 10,
+        ..Limits::DEFAULT
+    };
+    assert!(inspect_bytes(file.clone(), tight)
+        .unwrap_err()
+        .contains("내용 스트림"));
+    assert_eq!(inspect_bytes(file, Limits::DEFAULT), Ok(1));
 }
 
 #[test]
@@ -197,9 +348,11 @@ fn the_counting_inflater_stops_at_the_cap_and_rejects_what_is_not_flate() {
 #[test]
 fn page_content_the_check_cannot_count_is_refused_not_guessed() {
     for (dict, message) in [
-        ("/Filter /ASCIIHexDecode", MSG_CONTENT_FILTER),
-        ("/Filter /LZWDecode", MSG_CONTENT_FILTER),
-        ("/Filter [/ASCII85Decode /FlateDecode]", MSG_CONTENT_FILTER),
+        ("/Filter /ASCIIHexDecode", MSG_STREAM_FILTER),
+        ("/Filter /LZWDecode", MSG_STREAM_FILTER),
+        ("/Filter [/ASCII85Decode /FlateDecode]", MSG_STREAM_FILTER),
+        ("/Filter /Fl#61teDecode", MSG_STREAM_FILTER),
+        ("/Filter /Fl", MSG_STREAM_FILTER),
         (
             "/Filter /FlateDecode /DecodeParms << /Predictor 12 /Columns 4 >>",
             MSG_CONTENT_FILTER,
@@ -461,28 +614,56 @@ fn flipped_bytes_do_not_panic_the_reader() {
     }
 }
 
+fn encrypted_objects() -> Vec<(u32, String)> {
+    vec![
+        (1, "<< /Type /Catalog /Pages 2 0 R >>".to_string()),
+        (2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string()),
+        (3, blank_page(2)),
+        (
+            4,
+            "<< /Filter /Standard /V 1 /R 2 /O (aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa) /U (bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb) /P -4 >>"
+                .to_string(),
+        ),
+    ]
+}
+
+const ENCRYPT_ID: &str =
+    "/ID [<00112233445566778899aabbccddeeff> <00112233445566778899aabbccddeeff>]";
+
 #[test]
-fn an_encrypted_file_is_refused_with_the_instruction() {
-    let marked = hand_written(
+fn an_encrypted_file_is_refused_with_the_instruction_however_the_entry_is_spelled() {
+    for key in ["/Encrypt", "/Enc#72ypt", "/En#63#72ypt"] {
+        let marked =
+            hand_written_with_xref(&encrypted_objects(), &format!("{key} 4 0 R {ENCRYPT_ID}"));
+        assert_eq!(
+            inspect_bytes(marked.clone(), Limits::DEFAULT).unwrap_err(),
+            MSG_ENCRYPTED,
+            "{key}"
+        );
+        let engine = InProcessEngine::new(Arc::new(Database::new()));
+        assert!(EditSession::open(marked, &engine)
+            .err()
+            .is_some_and(|e| e.contains("암호")));
+    }
+    // Without a table the reader repairs the file; whatever it makes of it, it is refused.
+    let repaired = hand_written(
+        &encrypted_objects(),
+        &format!("/Encrypt 4 0 R {ENCRYPT_ID}"),
+    );
+    assert!(inspect_bytes(repaired, Limits::DEFAULT).is_err());
+}
+
+#[test]
+fn the_word_encrypt_in_an_ordinary_file_does_not_refuse_it() {
+    let file = hand_written_with_xref(
         &[
             (1, "<< /Type /Catalog /Pages 2 0 R >>".to_string()),
             (2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string()),
-            (3, blank_page(2)),
-            (
-                4,
-                "<< /Filter /Standard /V 1 /R 2 /O (aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa) /U (bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb) /P -4 >>"
-                    .to_string(),
-            ),
+            (3, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Note (see /Encrypt in the trailer) >>".to_string()),
         ],
-        "/Encrypt 4 0 R /ID [<00112233445566778899aabbccddeeff> <00112233445566778899aabbccddeeff>]",
+        "",
     );
-    assert_eq!(
-        inspect_bytes(marked.clone(), Limits::DEFAULT).unwrap_err(),
-        MSG_ENCRYPTED
-    );
-    assert!(EditSession::open(marked, &deadline())
-        .err()
-        .is_some_and(|e| e.contains("암호")));
+    assert_eq!(inspect_bytes(file, Limits::DEFAULT), Ok(1));
 }
 
 #[test]
