@@ -6,6 +6,7 @@
 //! HWPX, ODT, RTF, Markdown) are written by [`crate::rich_writers`]; every other format receives
 //! the flattened [`UniversalDocumentModel`].
 
+use crate::pdf_writer::PdfWriteOptions;
 use crate::rich_image::RichImage;
 use crate::rich_table::RichTable;
 use crate::{
@@ -334,9 +335,15 @@ impl UniversalFormatConverter {
             DocumentFormat::Rtf => Ok(crate::rich_rtf_writer::encode_rtf_rich(doc).into_bytes()),
             DocumentFormat::Markdown => Ok(w::render_markdown_rich(doc).into_bytes()),
             DocumentFormat::Txt => Ok(w::render_plain_text(doc, "\t", true).into_bytes()),
-            DocumentFormat::Pdf => Ok(w::serialize_pdf_rich(doc)),
+            DocumentFormat::Pdf => Ok(w::serialize_pdf_rich(doc, &PdfWriteOptions::default())),
             _ => Self::encode_with_formula_cache(&doc.to_universal_model(), format, formula_cache),
         }
+    }
+
+    /// PDF encoding of a [`RichDocument`] with the page settings of the PDF Studio (rotation,
+    /// watermark, approval stamp); the default options give what [`Self::encode_rich`] gives.
+    pub fn encode_rich_pdf(doc: &RichDocument, options: &PdfWriteOptions) -> Vec<u8> {
+        crate::rich_writers::serialize_pdf_rich(doc, options)
     }
 
     /// [`Self::encode_rich`] with a preview picture in the file (PD-132). The engine draws no

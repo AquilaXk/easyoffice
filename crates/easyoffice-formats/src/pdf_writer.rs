@@ -9,9 +9,16 @@
 
 use crate::pdf_image::PdfImageObject;
 use crate::pdf_stream_parser::{encode_utf16be_hex_impl, escape_pdf_text};
+use crate::pdf_text_wrap::wrap_line;
 use crate::{PdfDocumentModel, PdfPageModel, PdfSerializer};
 
 const MAX_LINES_PER_PDF_PAGE: usize = 42;
+/// Body text starts at the left margin in 12 pt; a line ends at the right margin, which is as wide.
+const PDF_TEXT_FONT_PT: u64 = 12;
+const PDF_TEXT_MARGIN_PT: u64 = 54;
+/// Width available to a text line in thousandths of the font size (the unit of glyph advances).
+const PDF_TEXT_LINE_UNITS: u32 =
+    ((PDF_PAGE_WIDTH_PT - 2 * PDF_TEXT_MARGIN_PT) * 1000 / PDF_TEXT_FONT_PT) as u32;
 /// Page box (A4, points) and the margin kept free around a placed picture.
 pub(crate) const PDF_PAGE_WIDTH_PT: u64 = 595;
 pub(crate) const PDF_PAGE_HEIGHT_PT: u64 = 842;
@@ -52,26 +59,27 @@ fn paginate(doc: &PdfDocumentModel) -> Vec<PdfPageModel> {
     paginate_pages(source_pages)
 }
 
-/// Splits pages longer than [`MAX_LINES_PER_PDF_PAGE`] lines; the stamp stays on the first piece.
+/// Breaks every line at the text width, then splits pages longer than [`MAX_LINES_PER_PDF_PAGE`]
+/// lines; the stamp stays on the first piece. Pages are numbered in output order.
 pub(crate) fn paginate_pages(source_pages: Vec<PdfPageModel>) -> Vec<PdfPageModel> {
     let mut effective_pages: Vec<PdfPageModel> = Vec::with_capacity(source_pages.len());
     for page in source_pages {
-        let lines: Vec<&str> = page.body_text.split('\n').collect();
-        if lines.len() <= MAX_LINES_PER_PDF_PAGE {
-            effective_pages.push(page);
-        } else {
-            for (c_idx, chunk) in lines.chunks(MAX_LINES_PER_PDF_PAGE).enumerate() {
-                effective_pages.push(PdfPageModel {
-                    page_number: effective_pages.len() + 1,
-                    rotation_degrees: page.rotation_degrees,
-                    body_text: chunk.join("\n"),
-                    approval_stamp: if c_idx == 0 {
-                        page.approval_stamp.clone()
-                    } else {
-                        None
-                    },
-                });
-            }
+        let lines: Vec<String> = page
+            .body_text
+            .split('\n')
+            .flat_map(|line| wrap_line(line, PDF_TEXT_LINE_UNITS))
+            .collect();
+        for (c_idx, chunk) in lines.chunks(MAX_LINES_PER_PDF_PAGE).enumerate() {
+            effective_pages.push(PdfPageModel {
+                page_number: effective_pages.len() + 1,
+                rotation_degrees: page.rotation_degrees,
+                body_text: chunk.join("\n"),
+                approval_stamp: if c_idx == 0 {
+                    page.approval_stamp.clone()
+                } else {
+                    None
+                },
+            });
         }
     }
     effective_pages
@@ -131,9 +139,33 @@ impl PdfObjectWriter {
     }
 }
 
+/// Page settings a PDF save can carry besides the text: rotation of every page, the watermark
+/// shown on text pages, and the approval stamp on the first page. The default writes none.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PdfWriteOptions {
+    /// Clockwise page rotation in degrees (a multiple of 90).
+    pub rotation_degrees: u16,
+    pub watermark: Option<String>,
+    pub approval_stamp: Option<String>,
+}
+
+impl PdfWriteOptions {
+    pub(crate) fn rotate(&self, entries: &mut [PdfPageEntry]) {
+        for entry in entries {
+            match entry {
+                PdfPageEntry::Text(page) => {
+                    page.rotation_degrees = i32::from(self.rotation_degrees)
+                }
+                PdfPageEntry::Image(page) => page.rotation_degrees = self.rotation_degrees,
+            }
+        }
+    }
+}
+
 /// A page that shows one picture scaled to `width_pt` x `height_pt` at the top-left margin.
 pub(crate) struct PdfImagePage {
     pub page_number: usize,
+    pub rotation_degrees: u16,
     pub image: PdfImageObject,
     pub width_pt: u64,
     pub height_pt: u64,
@@ -286,7 +318,7 @@ fn write_page(
         ),
         (PdfPageEntry::Image(page), Some(image_obj)) => (
             page.page_number,
-            0,
+            i32::from(page.rotation_degrees),
             format!(" /XObject << /Im1 {image_obj} 0 R >>"),
             image_content_stream(page),
         ),

@@ -27,6 +27,7 @@ mod pages_schema;
 mod pages_table;
 mod pdf_image;
 mod pdf_stream_parser;
+mod pdf_text_wrap;
 mod pdf_writer;
 pub mod rich_document;
 mod rich_image;
@@ -72,6 +73,7 @@ pub use hwp_eqedit::*;
 pub use office_codecs::*;
 pub use ole2_codec::*;
 pub use output_compatibility::OutputCompatibility;
+pub use pdf_writer::PdfWriteOptions;
 pub use rich_document::{
     evaluate_table_formulas, normalize_hex_color, RichAlignment, RichBlock, RichDocument,
     RichListKind, RichListNumber, RichNumberEnclosure, RichNumberFormat, RichParagraph, RichRun,

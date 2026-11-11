@@ -9056,3 +9056,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
+
+### PDF standard font metrics (Helvetica widths)
+
+`crates/easyoffice-formats/src/pdf_text_wrap.rs` holds the glyph advance widths of the PDF base-14 Helvetica font for ASCII codes 32 to 126 (thousandths of the font size), as published in the Core 14 AFM font metrics files (Copyright (c) 1985, 1987, 1989, 1990, 1997 Adobe Systems Incorporated). The metrics notice allows use, copying and distribution for any purpose without charge as long as the copyright notices are kept; only the numbers are used, no font program or AFM file is included.

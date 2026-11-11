@@ -5,8 +5,8 @@
 
 use crate::pdf_image::pdf_image_object;
 use crate::pdf_writer::{
-    paginate_pages, PdfImagePage, PdfPageEntry, PDF_IMAGE_MARGIN_PT, PDF_PAGE_HEIGHT_PT,
-    PDF_PAGE_WIDTH_PT,
+    paginate_pages, PdfImagePage, PdfPageEntry, PdfWriteOptions, PDF_IMAGE_MARGIN_PT,
+    PDF_PAGE_HEIGHT_PT, PDF_PAGE_WIDTH_PT,
 };
 use crate::rich_document::{RichAlignment, RichBlock, RichDocument, RichListKind, RichParagraph};
 use crate::rich_image::{check_document_images, fit_within};
@@ -677,10 +677,9 @@ fn flush_pdf_text(
 
 /// Text pages with every embeddable picture on a page of its own, in document order; pictures
 /// the PDF writer cannot embed are printed as alternative text.
-fn pdf_entries(doc: &RichDocument) -> Vec<PdfPageEntry> {
+fn pdf_entries(doc: &RichDocument, mut stamp: Option<String>) -> Vec<PdfPageEntry> {
     let mut entries = Vec::new();
     let mut lines = Vec::new();
-    let mut stamp = doc.official_agency.clone();
     for block in &doc.blocks {
         let embedded = match block {
             RichBlock::Image(img) => pdf_image_object(img).map(|object| (img, object)),
@@ -700,6 +699,7 @@ fn pdf_entries(doc: &RichDocument) -> Vec<PdfPageEntry> {
         );
         entries.push(PdfPageEntry::Image(PdfImagePage {
             page_number: 0,
+            rotation_degrees: 0,
             image,
             width_pt,
             height_pt,
@@ -715,22 +715,31 @@ fn pdf_entries(doc: &RichDocument) -> Vec<PdfPageEntry> {
     entries
 }
 
-pub(crate) fn serialize_pdf_rich(doc: &RichDocument) -> Vec<u8> {
+pub(crate) fn serialize_pdf_rich(doc: &RichDocument, options: &PdfWriteOptions) -> Vec<u8> {
+    let stamp = options
+        .approval_stamp
+        .clone()
+        .or_else(|| doc.official_agency.clone());
     if doc.blocks.iter().any(|b| matches!(b, RichBlock::Image(_))) {
-        let entries = pdf_entries(doc);
+        let mut entries = pdf_entries(doc, stamp.clone());
         if entries.iter().any(|e| matches!(e, PdfPageEntry::Image(_))) {
-            return PdfSerializer::serialize_entries(&doc.display_title(), None, &entries);
+            options.rotate(&mut entries);
+            return PdfSerializer::serialize_entries(
+                &doc.display_title(),
+                options.watermark.as_deref(),
+                &entries,
+            );
         }
     }
     PdfSerializer::serialize(&PdfDocumentModel {
         title: doc.display_title(),
         pages: vec![PdfPageModel {
             page_number: 1,
-            rotation_degrees: 0,
+            rotation_degrees: i32::from(options.rotation_degrees),
             body_text: render_plain_text(doc, " | ", false),
-            approval_stamp: doc.official_agency.clone(),
+            approval_stamp: stamp,
         }],
-        watermark_text: None,
+        watermark_text: options.watermark.clone(),
     })
 }
 

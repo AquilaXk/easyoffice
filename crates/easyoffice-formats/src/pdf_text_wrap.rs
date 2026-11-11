@@ -1,0 +1,177 @@
+//! Line breaking for the text pages of the PDF writer, by glyph advance width.
+//!
+//! A line is shown with one font: Helvetica when it is ASCII, otherwise the predefined Korean CID
+//! font. Helvetica advances are the published metrics of that standard font (the PDF base-14
+//! Helvetica AFM, WinAnsi codes 32..=126, thousandths of the font size). The Korean font is
+//! measured with the widths the writer declares for it (`/DW 1000`, `/W [1 95 500]`): ASCII is half
+//! width, every other character full width. Breaks fall after spaces; a word wider than a whole
+//! line is split between characters, and breaking never drops text except the spaces at a break.
+
+/// Thousandths of the font size by ASCII code `0x20..=0x7E` (Helvetica).
+const HELVETICA_WIDTHS: [u16; 95] = [
+    278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278,
+    278, // space .. /
+    556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 278, 278, 584, 584, 584, 556, // 0 .. ?
+    1015, 667, 667, 722, 722, 667, 611, 778, 722, 278, 500, 667, 556, 833, 722, 778, // @ .. O
+    667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611, 278, 278, 278, 469, 556, // P .. _
+    333, 556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500, 222, 833, 556, 556, // ` .. o
+    556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500, 334, 260, 334, 584, // p .. ~
+];
+const SPACE_UNITS: u32 = 278;
+/// ASCII advance in the Korean font (`/W [1 95 500]`) and the advance of every other character.
+const CID_ASCII_UNITS: u32 = 500;
+const CID_WIDE_UNITS: u32 = 1000;
+
+fn latin_units(c: char) -> u32 {
+    match c {
+        ' '..='~' => u32::from(HELVETICA_WIDTHS[c as usize - 0x20]),
+        _ => SPACE_UNITS,
+    }
+}
+
+fn cid_units(c: char) -> u32 {
+    if c.is_ascii() {
+        CID_ASCII_UNITS
+    } else {
+        CID_WIDE_UNITS
+    }
+}
+
+/// Width of `text` as the writer will show it (one font for the whole string), in thousandths of
+/// the font size. Trailing spaces are not counted: they hang past the right edge.
+fn text_units(text: &str) -> u32 {
+    let text = text.trim_end_matches(' ');
+    if text.is_ascii() {
+        text.chars().map(latin_units).sum()
+    } else {
+        text.chars().map(cid_units).sum()
+    }
+}
+
+/// Splits `line` into lines no wider than `max_units` (thousandths of the font size).
+pub(crate) fn wrap_line(line: &str, max_units: u32) -> Vec<String> {
+    if text_units(line) <= max_units {
+        return vec![line.to_string()];
+    }
+    let mut out: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    for word in words_with_trailing_spaces(line) {
+        if text_units_joined(&cur, word) <= max_units {
+            cur.push_str(word);
+            continue;
+        }
+        if !cur.trim_end().is_empty() {
+            out.push(cur.trim_end().to_string());
+            cur.clear();
+            if text_units(word) <= max_units {
+                cur.push_str(word);
+                continue;
+            }
+        }
+        for ch in word.chars() {
+            let mut next = [0u8; 4];
+            let piece = ch.encode_utf8(&mut next);
+            if !cur.trim_end().is_empty() && text_units_joined(&cur, piece) > max_units {
+                out.push(cur.trim_end().to_string());
+                cur.clear();
+            }
+            cur.push(ch);
+        }
+    }
+    if !cur.trim_end().is_empty() || out.is_empty() {
+        out.push(cur.trim_end().to_string());
+    }
+    out
+}
+
+fn text_units_joined(head: &str, tail: &str) -> u32 {
+    let mut joined = String::with_capacity(head.len() + tail.len());
+    joined.push_str(head);
+    joined.push_str(tail);
+    text_units(&joined)
+}
+
+/// Each run of non-space characters with the spaces after it; leading spaces form the first item.
+fn words_with_trailing_spaces(line: &str) -> impl Iterator<Item = &str> {
+    let mut rest = line;
+    let spaces_len = |s: &str| s.len() - s.trim_start_matches(' ').len();
+    std::iter::from_fn(move || {
+        if rest.is_empty() {
+            return None;
+        }
+        let end = if rest.starts_with(' ') {
+            spaces_len(rest)
+        } else {
+            let word = rest.find(' ').unwrap_or(rest.len());
+            word + spaces_len(&rest[word..])
+        };
+        let (item, tail) = rest.split_at(end);
+        rest = tail;
+        Some(item)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn helvetica_widths_match_the_published_metrics() {
+        assert_eq!(latin_units(' '), 278);
+        assert_eq!(latin_units('W'), 944);
+        assert_eq!(latin_units('i'), 222);
+        assert_eq!(latin_units('~'), 584);
+        assert_eq!(text_units("Hello"), 722 + 556 + 222 + 222 + 556);
+    }
+
+    #[test]
+    fn korean_lines_use_the_declared_cid_widths() {
+        assert_eq!(text_units("한글 ab"), 1000 + 1000 + 500 + 500 + 500);
+        assert_eq!(text_units("한글   "), 2000, "trailing spaces hang");
+    }
+
+    #[test]
+    fn words_keep_their_trailing_spaces_and_leading_spaces_are_an_item() {
+        let items: Vec<&str> = words_with_trailing_spaces("  가나  다 라").collect();
+        assert_eq!(items, ["  ", "가나  ", "다 ", "라"]);
+        assert_eq!(words_with_trailing_spaces("").count(), 0);
+    }
+
+    #[test]
+    fn a_fitting_line_is_returned_as_is_and_a_long_one_breaks_after_spaces() {
+        assert_eq!(wrap_line("짧은 줄", 10_000), ["짧은 줄"]);
+        assert_eq!(wrap_line("", 10_000), [""]);
+        assert_eq!(wrap_line("가나 다라 마바", 4_500), ["가나 다라", "마바"]);
+    }
+
+    #[test]
+    fn an_over_wide_word_is_split_between_characters() {
+        assert_eq!(wrap_line("가나다라마", 2_000), ["가나", "다라", "마"]);
+        assert_eq!(
+            wrap_line("앞 가나다라마 뒤", 2_000),
+            ["앞", "가나", "다라", "마", "뒤"]
+        );
+    }
+
+    #[test]
+    fn indentation_survives_on_the_first_line_only() {
+        assert_eq!(wrap_line("  가나 다라", 3_000), ["  가나", "다라"]);
+    }
+
+    #[test]
+    fn a_hostile_single_line_is_broken_in_linear_time() {
+        let started = std::time::Instant::now();
+        let max = 40_583;
+        let ascii = "x".repeat(1_000_000);
+        let lines = wrap_line(&ascii, max);
+        assert_eq!(lines.len(), 1_000_000usize.div_ceil(81));
+        assert_eq!(lines.concat(), ascii);
+        let mixed = "한a".repeat(250_000);
+        let lines = wrap_line(&mixed, max);
+        assert!(lines.iter().all(|l| text_units(l) <= max));
+        assert_eq!(lines.concat(), mixed);
+        let spaced = "가 ".repeat(250_000);
+        assert!(wrap_line(&spaced, max).iter().all(|l| text_units(l) <= max));
+        assert!(started.elapsed().as_secs() < 20, "{:?}", started.elapsed());
+    }
+}
