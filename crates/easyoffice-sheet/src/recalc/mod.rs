@@ -210,6 +210,9 @@ impl RecalcSession {
                     if session.exceeds_budget() {
                         return Err(RecalcError::OverBudget);
                     }
+                } else {
+                    // `=5`, `=TRUE`, a parse error: no vertex, but the first pass reports them.
+                    session.edited.push((idx as u16, coord));
                 }
             }
         }

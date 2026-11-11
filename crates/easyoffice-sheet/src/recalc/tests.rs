@@ -262,6 +262,31 @@ fn constant_formula_text_is_reported_when_edited() {
 }
 
 #[test]
+fn first_recalculation_reports_constant_formulas_of_a_loaded_workbook() {
+    let mut s = RecalcSession::new(workbook(
+        &["S"],
+        &[
+            ("S", "A1", "=5"),
+            ("S", "A2", "=TRUE"),
+            ("S", "A3", "=1+"),
+            ("S", "A4", "x"),
+        ],
+    ))
+    .unwrap();
+    let changed = changed_map(&s.recalculate());
+    assert_eq!(changed[&(0, "A1".into())], num(5.0));
+    assert_eq!(
+        changed[&(0, "A2".into())],
+        EvaluatedCellValue::Boolean(true)
+    );
+    assert!(matches!(
+        changed[&(0, "A3".into())],
+        EvaluatedCellValue::Error(_)
+    ));
+    assert!(!changed.contains_key(&(0, "A4".into())));
+}
+
+#[test]
 fn a_formula_replaced_by_a_literal_leaves_no_stale_value_or_edge() {
     let mut s = session(
         &["S"],
