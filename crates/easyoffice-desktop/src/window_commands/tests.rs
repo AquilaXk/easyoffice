@@ -72,7 +72,7 @@ fn window_command_signatures_never_carry_a_path() {
         );
         checked += 1;
     }
-    assert_eq!(checked, 10, "every window command is covered");
+    assert_eq!(checked, 11, "every window command is covered");
 }
 
 fn scratch_dir(tag: &str) -> PathBuf {
@@ -174,6 +174,42 @@ fn labels_are_unique_and_pass_the_capability_pattern() {
         a.starts_with("doc-"),
         "matches the doc-* capability window pattern"
     );
+}
+
+/// A window opened for a file that its page could not show: nothing of the file is left to
+/// save to, and the file can be opened again in a window of its own.
+#[test]
+fn an_abandoned_open_lets_go_of_the_file_and_its_bytes() {
+    let dir = scratch_dir("abandon");
+    let file = dir.join("a.docx");
+    fs::write(&file, b"x").unwrap();
+    let canonical = fs::canonicalize(&file).unwrap();
+    let state = AppWindows::new(None);
+    locked(&state.registry).register("doc-1-a", WindowKind::Doc);
+    locked(&state.registry)
+        .claim_path("doc-1-a", path_key(&canonical))
+        .unwrap();
+    let fingerprint = Fingerprint::of(&canonical).unwrap();
+    locked(&state.files).track("doc-1-a", canonical.clone(), fingerprint);
+    locked(&state.pending).push(
+        "doc-1-a",
+        PendingOpen {
+            name: "a.docx".into(),
+            bytes: vec![1],
+        },
+    );
+    state.abandon_open("doc-1-a");
+    assert!(locked(&state.files).get("doc-1-a").is_none());
+    assert!(locked(&state.pending).take("doc-1-a").is_none());
+    assert_eq!(
+        locked(&state.registry).find_by_path(&path_key(&canonical)),
+        None
+    );
+    assert!(
+        locked(&state.registry).remove("doc-1-a"),
+        "the window stays"
+    );
+    let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]

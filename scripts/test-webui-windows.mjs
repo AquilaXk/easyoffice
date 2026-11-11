@@ -16,7 +16,7 @@ function recordingShell(overrides = {}) {
   const commands = {};
   for (const name of [
     "open_document_window", "open_file_in_new_window", "take_pending_open", "report_window_state",
-    "close_current_window", "list_recent_documents", "clear_recent_documents", "open_recent_document", "report_menu_state", "end_close_prompt", "ack_close_prompt", "confirm_close", "quit_app",
+    "close_current_window", "list_recent_documents", "clear_recent_documents", "open_recent_document", "report_menu_state", "end_close_prompt", "ack_close_prompt", "confirm_close", "quit_app", "abandon_tracked_open",
   ]) {
     commands[name] = (args) => {
       calls.push({ name, args });
@@ -508,6 +508,49 @@ test("a pending open decodes every byte value and every padding length through t
   const taken = await host.__EASYOFFICE_WINDOW_BRIDGE__.instance.takePendingOpen();
   assert.equal(taken.name, "바이트.docx");
   assert.deepEqual([...taken.bytes], [...every]);
+});
+
+// A window that was opened for a file but could not show it has nothing of that file: the shell lets
+// go of the path (no save to it, the file may be opened again), and only then.
+test("a pending open that cannot be shown tells the shell to let go of the file", async () => {
+  const tooBig = Buffer.alloc(11 * 1024 * 1024, 1).toString("base64");
+  const { shell, document } = await openWindow("?module=DOC&win=w-big", {
+    take_pending_open: () => ({ name: "큰 문서.docx", base64: tooBig }),
+  });
+  assert.equal(shell.named("take_pending_open").length, 1);
+  assert.match(document.getElementById("status-command-feedback").textContent, /파일 열기 실패/);
+  assert.deepEqual(shell.named("abandon_tracked_open").map((c) => c.args), [{}]);
+});
+
+test("a pending open that is not a document of its kind also lets go of the file", async () => {
+  const docx = Buffer.from("PK\u0003\u0004fake").toString("base64");
+  const { shell } = await openWindow("?module=DOC&win=w-bad", {
+    take_pending_open: () => ({ name: "깨진 문서.docx", base64: docx }),
+  });
+  assert.equal(shell.named("abandon_tracked_open").length, 1);
+});
+
+test("the shell lets go of the file after a cancelled password or a failed open, and keeps it after a shown document", async () => {
+  const pending = { take_pending_open: () => ({ name: "암호 문서.hwp", base64: Buffer.from("x").toString("base64") }) };
+  const outcomes = [
+    [{ ok: false, cancelled: true }, 1, "password cancelled"],
+    [{ ok: false, error: "손상" }, 1, "refused"],
+    [undefined, 1, "no answer"],
+    [{ ok: true, module: "HWP" }, 0, "shown"],
+  ];
+  for (const [outcome, abandons, why] of outcomes) {
+    const { shell, document } = await openWindow("?module=HWP&win=w-pw", pending);
+    const before = shell.named("abandon_tracked_open").length;
+    await document.defaultView.__EASYOFFICE_WINDOW_BRIDGE__.instance.loadPending(async () => outcome);
+    assert.equal(shell.named("abandon_tracked_open").length - before, abandons, why);
+  }
+  const { shell, document } = await openWindow("?module=HWP&win=w-throw", pending);
+  const before = shell.named("abandon_tracked_open").length;
+  await assert.rejects(
+    document.defaultView.__EASYOFFICE_WINDOW_BRIDGE__.instance.loadPending(async () => { throw new Error("멈춤"); }),
+    /멈춤/
+  );
+  assert.equal(shell.named("abandon_tracked_open").length - before, 1, "a thrown open lets go too");
 });
 
 test("windows keep separate autosave records keyed by their window id", async () => {

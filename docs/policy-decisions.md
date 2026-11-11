@@ -2708,3 +2708,13 @@
 - **Trade-offs** (a) 한 문서의 복원량이 256 MiB를 넘는 파일은 열리지 않습니다. 셀은 텍스트에 32바이트를 더해 세므로 셀 수백만 개짜리 시트도 같은 예산을 씁니다. (b) 같은 시트 파트를 가리키는 `<sheet>` 항목이 있는 XLSX는 거부합니다. (c) 평평한 큰 그림(주장 크기가 4 MiB를 넘는 ZIP 항목)은 첫 버퍼를 한 번에 잡지 못해 풀기가 느려집니다. 같은 입력 열 번 중 가장 빠른 값(릴리스 빌드, 부하가 큰 기계): 16 MiB 0.77 ms → 1.46 ms, 64 MiB 3.1 ms → 5.7 ms, 256 MiB 13 ms → 26 ms. 주장 없는 스트림은 같거나 빨라졌습니다(256 MiB 77 ms → 40 ms).
 - **열기 시간(전→후, 릴리스 빌드)** XLSX 100만 셀 140 ms → 130 ms, ODS 18만 셀 33.7 ms → 33.6 ms, XLS 6만 5천 셀 1.06~1.10 ms → 1.15~1.31 ms, HWP 5.0 압축 문단 4만 개 6.1~6.3 ms → 6.2~6.5 ms, DOC 조각 2만 개 2.65~2.73 ms → 2.77~2.88 ms. 측정 때 기계 부하가 커서 한 자리 퍼센트 차이는 잡음 안입니다.
 - **Verified by** `tests/decode_budget_xlsx.rs`(공유 문자열 300×1 MiB, 공유 수식 슬레이브 300×1 MiB, 두 시트 합산, 같은 파트를 가리키는 시트 둘, 시트 항목 2,000개 거부, 참조가 늘어나는 마스터의 슬레이브 400개 거부, 쓰기 상한, 10만 셀 정상 파일 통과), `tests/decode_budget_ods.rs`(열 반복 300×1 MiB, 행 반복 300×1 MiB 거부, 정상 반복 2만 셀 통과), `tests/decode_budget_ole2.rs`(8,000자 문자열을 가리키는 `LABELSST` 4만 개 거부, 정상 2만 셀 통과, 같은 1 MiB를 가리키는 조각 300개 거부, 정상 조각 표 통과), 같은 `tests/decode_budget_ole2.rs`(100 MiB로 풀리는 구역 4개 거부, 작은 구역 3개 통과), `deflate/tests.rs`(512 MiB 주장·입력 100 MB 첫 버퍼 4 MiB 이하, 주장 크기까지만 성장), Quick Look `tests.rs`(PNG·GIF·BMP 헤더의 100,000² 등 4종과 HWP 5.0 샘플의 IHDR를 고친 파일이 `STATUS_NO_THUMBNAIL`, 정상 64×48 PNG는 그대로 반환), `decode_budget.rs` 단위 시험.
+
+## PD-177. 데스크톱 셸의 열기·저장·종료 경계: 열지 못한 파일은 놓고, 한도는 셸에서 먼저, 저장은 대상 파일에
+
+- **Status** Implemented (`window_commands.rs`, `windows.rs`, `desktop-bridge.js`, `window-bridge.js`, `workspace-tools.js`)
+- **Context** 외부 점검 결과(QA 요청)를 코드로 확인했습니다. 열기 경로가 셸에서 먼저 파일을 읽고 경로를 점유한 뒤 페이지가 파싱하는 구조라, 페이지가 열지 못한 파일의 경로가 창에 남았습니다.
+- **Decision (`PD-177`)**
+  1. **열지 못한 파일 놓기**: 페이지가 대기 열기(`take_pending_open`)로 받은 파일을 보여 주지 못하면(크기 한도, 손상, 암호 입력 취소) 인수 없는 명령 `abandon_tracked_open`을 부릅니다. 셸은 그 창의 추적 파일·경로 점유·대기 바이트를 놓습니다(`AppWindows::abandon_open`). 창은 남고, 같은 파일을 다시 열면 새 창이 열립니다. 페이지는 `loadPending`의 결과가 `ok`가 아닐 때만 부르고, 셸이 아닌 환경에서는 부르지 않습니다. 명령은 `ShellCaller`·`APP_COMMANDS`·capability(`allow-abandon-tracked-open`)에 1:1로 있습니다.
+  2. **파일 이름 없는 문서의 저장**: 문서 이름에 확장자가 없으면(새 문서이거나 열기에 실패한 빈 창) 저장은 `inPlace: false`입니다. 저장 대화상자가 뜨고, 저장한 뒤 창이 파일 이름을 받으면 다음 저장부터 그 파일에 덮어씁니다. 이전에는 이름이 비면 `inPlace: true`라, 추적 파일이 남은 빈 창의 Ctrl+S가 원본을 대화상자 없이 덮어쓸 수 있었습니다.
+- **Why** 열기에 실패한 빈 창이 원본을 덮어쓰면 원본 데이터를 잃습니다. 셸이 읽은 파일을 페이지가 거부하는 경우는 한도, 손상, 암호 취소로 여럿이므로, 거부 사유와 상관없이 이 길이 닫혀 있어야 합니다.
+- **Verified by** `cargo test -p easyoffice-desktop windows window_commands`(경로 해제 후 다른 창이 점유, 포기한 열기가 추적·대기·점유를 놓음, 창 명령 목록), `node --test scripts/test-webui-windows.mjs scripts/test-webui-desktop-bridge.mjs`(11 MiB DOCX와 깨진 DOCX가 열리지 않으면 `abandon_tracked_open` 한 번, 이름 없는 문서의 저장은 `inPlace: false`).

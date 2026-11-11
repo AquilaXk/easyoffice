@@ -22,6 +22,7 @@ pub const APP_COMMANDS: &[&str] = &[
     "open_document_window",
     "open_file_in_new_window",
     "take_pending_open",
+    "abandon_tracked_open",
     "report_window_state",
     "close_current_window",
     "list_recent_documents",

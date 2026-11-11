@@ -40,6 +40,7 @@
     openDocumentWindow: "open_document_window",
     openFileInNewWindow: "open_file_in_new_window",
     takePendingOpen: "take_pending_open",
+    abandonTrackedOpen: "abandon_tracked_open",
     reportWindowState: "report_window_state",
     closeCurrentWindow: "close_current_window",
     quitApp: "quit_app",

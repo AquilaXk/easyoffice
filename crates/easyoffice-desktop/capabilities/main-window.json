@@ -23,6 +23,7 @@
     "allow-open-document-window",
     "allow-open-file-in-new-window",
     "allow-take-pending-open",
+    "allow-abandon-tracked-open",
     "allow-report-window-state",
     "allow-close-current-window",
     "allow-list-recent-documents",

@@ -465,10 +465,19 @@
     }
 
     // The desktop shell queues the bytes of the file this window was opened for; take them once.
+    // `openBytes` resolves `{ ok }`. A file the page could not show (too large for its kind, damaged,
+    // a password cancelled) leaves an empty window, and the shell forgets the file: Save from that
+    // window must ask where to write, never replace the original.
     async function loadPending(openBytes) {
       if (isStart) return;
       const pending = await takePendingOpen().catch(() => null);
-      if (pending) await openBytes(pending.name, pending.bytes);
+      if (!pending) return;
+      let shown = false;
+      try {
+        shown = (await openBytes(pending.name, pending.bytes))?.ok === true;
+      } finally {
+        if (!shown && desktopAvailable()) await shell("abandonTrackedOpen", {}).catch(() => {});
+      }
     }
 
     // Long status texts are clipped with an ellipsis; hovering or focusing one shows the full text.

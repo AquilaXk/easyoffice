@@ -346,6 +346,7 @@ fn main() {
             window_commands::open_document_window,
             window_commands::open_file_in_new_window,
             window_commands::take_pending_open,
+            window_commands::abandon_tracked_open,
             window_commands::report_window_state,
             window_commands::close_current_window,
             window_commands::list_recent_documents,
@@ -496,7 +497,7 @@ mod tests {
         );
         assert_eq!(value["windows"], serde_json::json!(["main", "doc-*"]));
         assert_eq!(value["local"], serde_json::json!(true));
-        assert_eq!(app_commands::APP_COMMANDS.len(), 31);
+        assert_eq!(app_commands::APP_COMMANDS.len(), 32);
     }
 
     #[test]

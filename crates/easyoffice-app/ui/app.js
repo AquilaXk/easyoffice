@@ -971,8 +971,8 @@
     await loadWorkspaceBootstrap();
     void shellChrome.pushRecents(await windowBridge.start());
     await windowBridge.loadPending(async (name, bytes) => {
-      await fileOpen.openDocumentFromBytes(name, bytes);
-      await workspaceSession.markSaved();
+      const opened = await fileOpen.openDocumentFromBytes(name, bytes);
+      return Promise.resolve(workspaceSession.markSaved()).then(() => opened);
     });
     if (!windowBridge.isStart) void hwpSession.restore().catch(() => {});
     const smokeSteps = { hwp: () => hwpHost.runSmoke(() => ribbonHistory.activatePane("HWP")), pdf: () => hwpSession.smokePdf(), print: () => hwpPrint.smoke(), frame_ipc: () => hwpHost.runFrameProbe() };

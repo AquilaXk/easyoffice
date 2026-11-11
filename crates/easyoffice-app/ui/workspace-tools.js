@@ -312,7 +312,9 @@
       const fallbackExt = SAVE_EXT_BY_MODULE[mod] || "docx";
       if (saveAs || mod === "PDF") return { ext: fallbackExt, inPlace: false };
       const openedExt = openedExtensionOf(mod);
-      if (!openedExt) return { ext: fallbackExt, inPlace: true };
+      // No file name: the document came from no file (or its open failed). Save asks where to write;
+      // a window that saved once carries the file's name, so its next Save goes back to that file.
+      if (!openedExt) return { ext: fallbackExt, inPlace: false };
       if (BIDIRECTIONAL_SAVE_EXTS[mod]?.has(openedExt)) return { ext: openedExt, inPlace: true };
       return { ext: fallbackExt, inPlace: false };
     }

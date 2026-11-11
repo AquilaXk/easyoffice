@@ -178,6 +178,27 @@ test("save as never overwrites the opened file: the menu item, the shortcut and 
   }
 });
 
+test("a window whose document has no file name never saves in place: Save asks where to write", async () => {
+  const saves = [];
+  const { document, userClick } = await createShellHarness({
+    saveFile: (args) => {
+      saves.push(args);
+      return { status: "saved", name: args.fileName, bytes: 42 };
+    },
+  });
+  const bridge = document.defaultView.__EASYOFFICE_WINDOW_BRIDGE__.instance;
+  for (const mod of ["DOC", "SHEET", "SLIDE"]) {
+    saves.length = 0;
+    switchModule(document, mod);
+    await flushAsyncTurns(6);
+    bridge.applyTitles({ ...bridge.getTitles(), [mod]: "" });
+    userClick(studioItem(document, "studio-save"));
+    await flushAsyncTurns(12);
+    assert.equal(saves.length, 1, mod);
+    assert.equal(saves[0].inPlace, false, `${mod}: a document that came from no file (or whose open failed) must not reach a tracked file`);
+  }
+});
+
 test("bidirectional opened formats preserve their extension on Save (inPlace: true), while lossy decode formats force Save As (inPlace: false)", async () => {
   const saves = [];
   const { document, userClick } = await createShellHarness({

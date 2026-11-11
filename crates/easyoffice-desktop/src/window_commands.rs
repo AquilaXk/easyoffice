@@ -123,6 +123,14 @@ impl AppWindows {
         new_label(n, millis)
     }
 
+    /// The window was opened for a file its page could not show: nothing of that file is left, so
+    /// the window is no longer its owner, has no path to save to and holds none of its bytes.
+    fn abandon_open(&self, label: &str) {
+        locked(&self.registry).release_path(label);
+        locked(&self.files).untrack(label);
+        locked(&self.pending).discard(label);
+    }
+
     fn remember(&self, app: &AppHandle, path: &Path) {
         match locked(&self.recents)
             .update(self.recents_dir.as_deref(), |r| r.add(path.to_path_buf()))
@@ -732,6 +740,15 @@ pub fn take_pending_open(
     let state = app.state::<AppWindows>();
     let taken = locked(&state.pending).take(window.label());
     taken.map(|open| PendingOpenView::from_pending(&open))
+}
+
+/// The page could not show the file this window was opened for (too large for its kind, damaged,
+/// a password asked for and not given): the shell forgets the file, so a save from the empty
+/// window asks where to write instead of replacing the original, and the file can be opened again.
+/// Takes no argument: what is forgotten is decided here, by the window.
+#[tauri::command]
+pub fn abandon_tracked_open(_caller: ShellCaller, app: AppHandle, window: WebviewWindow) {
+    app.state::<AppWindows>().abandon_open(window.label());
 }
 
 #[tauri::command]

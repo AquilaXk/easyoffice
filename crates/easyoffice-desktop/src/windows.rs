@@ -230,6 +230,20 @@ impl WindowRegistry {
         Ok(())
     }
 
+    /// `label` no longer shows the document it claimed (its page could not open it): the path is
+    /// free again. True when the window held one.
+    pub fn release_path(&mut self, label: &str) -> bool {
+        let Some(key) = self
+            .windows
+            .get_mut(label)
+            .and_then(|entry| entry.path_key.take())
+        else {
+            return false;
+        };
+        self.by_path.remove(&key);
+        true
+    }
+
     /// The page reports its document name and unsaved state. A saved document has nothing left to
     /// ask about, so a pending close prompt ends; a report that is still unsaved leaves the prompt
     /// alone (it may be on screen).
@@ -437,6 +451,24 @@ mod tests {
         assert_eq!(
             window_url(WindowKind::Sheet, &label),
             "index.html?module=SHEET&win=doc-3-abc"
+        );
+    }
+
+    #[test]
+    fn a_released_path_can_be_claimed_again() {
+        let mut reg = WindowRegistry::default();
+        reg.register("doc-1-a", WindowKind::Doc);
+        reg.register("doc-2-b", WindowKind::Doc);
+        reg.claim_path("doc-1-a", "/x/a.docx".to_string()).unwrap();
+        assert!(reg.release_path("doc-1-a"));
+        assert_eq!(reg.find_by_path("/x/a.docx"), None);
+        assert!(reg.claim_path("doc-2-b", "/x/a.docx".to_string()).is_ok());
+        assert!(!reg.release_path("doc-1-a"), "nothing left to release");
+        assert!(!reg.release_path("missing"));
+        assert_eq!(
+            reg.find_by_path("/x/a.docx"),
+            Some("doc-2-b"),
+            "the other window keeps its claim"
         );
     }
 
