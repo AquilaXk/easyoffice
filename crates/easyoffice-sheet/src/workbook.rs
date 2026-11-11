@@ -937,3 +937,7 @@ impl ChartSeriesBuilder {
 #[cfg(test)]
 #[path = "workbook_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "workbook_sort_tests.rs"]
+mod sort_tests;
