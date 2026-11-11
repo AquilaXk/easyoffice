@@ -7,7 +7,6 @@ use super::card_source::{self, card_png, content_of};
 use super::source::{whole_lines, Source, TEXT_PREFIX_BYTES};
 use super::tests::zip;
 use super::*;
-use crate::pdf_fonts::shared_font_db;
 use easyoffice_formats::{
     DocumentFormat, OdfCodec, OdsUnpacked, OoxmlCodec, OoxmlPptxPayload, RichBlock, RichDocument,
     RichListKind, RichParagraph, RichRun, UniversalFormatConverter,
@@ -24,9 +23,28 @@ const PNG_1X1: &[u8] = &[
 
 const KOREAN: &str = "분기 실적 보고서 첫 문단입니다. 매출은 전 분기보다 늘었고 비용은 줄었습니다.";
 
+/// The font database of these tests: the bundled Noto Sans KR of the rhwp checkout and nothing
+/// else, the way the installed app draws (the generic families resolve to it). The machine's own
+/// fonts are left out on purpose: a runner without a Korean font would draw no text at all, and a
+/// developer machine with one would draw it, so a test about ink would pass or fail by machine. It
+/// is not the process-wide `shared_font_db`, whose first caller decides what it holds.
 fn fonts() -> Arc<usvg::fontdb::Database> {
-    shared_font_db(&[])
+    static FONTS: std::sync::OnceLock<Arc<usvg::fontdb::Database>> = std::sync::OnceLock::new();
+    Arc::clone(FONTS.get_or_init(|| {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(BUNDLED_FONT_DIR);
+        let mut db = usvg::fontdb::Database::new();
+        db.load_fonts_dir(&dir);
+        assert!(
+            db.faces().next().is_some(),
+            "no font in {}; run `node scripts/checkout-rhwp.mjs` first",
+            dir.display()
+        );
+        crate::pdf_fonts::set_generic_families(&mut db);
+        Arc::new(db)
+    }))
 }
+
+const BUNDLED_FONT_DIR: &str = "../../third_party/rhwp/ttfs/opensource";
 
 fn png_size(png: &[u8]) -> (u32, u32) {
     assert!(png.starts_with(&[0x89, b'P', b'N', b'G']), "not a PNG");
