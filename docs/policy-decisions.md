@@ -2584,3 +2584,20 @@
 - **Alternatives rejected** 종이 안 규칙마다 라이트 값 지정(누락이 생김), 네이티브 입력 유지(OS별 모양, 최근 색 없음), 색 선택기를 새로 설계(구현 원칙 1단계: 참조 구현 이식).
 - **Verified by** `node --test scripts/test-webui-theme.mjs scripts/test-webui-color-picker.mjs scripts/test-webui-slide-chrome.mjs scripts/test-webui-shell-chrome.mjs`(종이 팔레트 일치·누락 없음, 포커스·hover 규칙, 팔레트 선택, 최근 색, 키보드, 바깥 누름), `node scripts/check-repo-hygiene.mjs`.
 - **Revisit when** 종이로 그리는 영역이 늘 때(시트 인쇄 미리보기 등), 참조 앱이 포커스 링이나 색 선택기를 바꿀 때.
+
+## PD-167. 문서→PDF는 셸에서 HWPX 쪽 배치로 그리고, 엔진 PDF는 대체 경로로 둔다
+
+- **Status** Implemented (`doc_pdf.rs`, `doc_pdf_marks.rs`, `main.rs` `ipc_dispatch`, `pdf_export.rs` `set_rotation`, `convert_structured.rs` `encode_target`, `lib.rs` `dispatch_with_pdf_renderer`, `hwpx_parts.rs`)
+- **Revises PD-159 (4항)**: 셸에서 문서가 PDF로 바뀔 때 본문 줄을 엔진이 A4 평문으로 쓰던 방식을 새 경로가 대신합니다. 엔진 PDF 작성기와 그 쪽 설정은 그대로 남아 대체 경로가 됩니다.
+- **Context** 변환기와 다른 이름으로 저장의 PDF 대상은 엔진 `pdf_writer.rs`를 거쳐 서식·표·그림이 모두 사라졌습니다. 셸에는 rhwp 레이아웃이 그린 쪽 SVG를 글꼴이 든 PDF로 바꾸는 경로가 이미 있고(PD-101·114·163), 엔진은 리치 문서를 HWPX로 씁니다.
+- **Decision (`PD-167`)**
+  1. **대상**: `convert_document_format`의 PDF 대상 중 내용이 문서이고 원본 형식이 PDF가 아닌 요청(구조화 저장, 원본 파일 변환)입니다. 시트·슬라이드는 엔진 PDF를 그대로 씁니다. 원본이 PDF인 요청은 PDF 스튜디오의 쪽 설정 저장이어서 엔진이 쓴 `[WM]`·`[STAMP]` 표지를 스튜디오가 다시 읽으므로 엔진 PDF를 유지합니다.
+  2. **경로**: 엔진이 문서를 HWPX로 쓰고 → 셸이 rhwp로 쪽 배치 → 쪽 SVG를 16쪽씩 `PdfAssembler`에 넘깁니다. 배치·SVG 그리기는 32 MiB 스택 스레드 하나에서, 변환은 호출 스레드에서 돌아 서로 겹칩니다. 글꼴은 기존 번들·시스템 글꼴 DB와 대체 글꼴 표를 씁니다. 한도는 HWPX 50 MiB, 2,000쪽, 기존 SVG 바이트 상한이고, 넘거나 읽지 못하거나 패닉이 나면 엔진 PDF로 대체하고 응답 `warnings`에 사유를 적습니다("서식을 살린 PDF를 만들지 못해 기본 PDF(글자 중심)로 저장했습니다: …").
+  3. **쪽 설정**: 회전은 쪽의 `/Rotate`(내용은 그대로), 워터마크는 모든 쪽에 대각선 회색 글자, 결재 스탬프는 첫 쪽 오른쪽 위 붉은 상자 글자로 쪽 SVG에 그립니다. 모두 글자라 검색·복사가 됩니다. 쪽 크기를 읽지 못해 못 그리면 이 경로를 실패로 보고 엔진 PDF(표지 글자 포함)로 대체합니다. 형광펜 주석은 엔진 옵션에 없고, 원본 객체 보존 편집(별도 작업)과 겹치지 않습니다.
+  4. **셸이 없는 경우**: `--serve`는 렌더러가 없어 엔진 PDF를 그대로 쓰고 경고도 붙이지 않습니다(예전 동작과 같음).
+  5. **HWPX 작성기**: 목록 문단의 `hh:heading idRef`가 가리키는 번호·글머리표 정의가 머리말에 없어 레이아웃이 표지를 그리지 못했습니다. 목록을 쓰는 문서에 한해 `hh:numberings`(`^1.`)와 `hh:bullets`(`•`)를 한 개씩 쓰고 `idRef="1"`로 가리킵니다.
+  6. **남은 손실**(엔진 모델에 없어 이 변경으로 못 고침): 각주·미주 본문, 표 셀 안 글자 서식·배경, 목록 중첩 수준(작성기가 수준을 쓰지 않음), 하이퍼링크 주소, 원본 쪽 크기·여백·머리글·바닥글·쪽 번호(항상 A4, 좌우 30 mm), 도형·차트·수식, 문단 간격, 문서 글꼴(번들 글꼴과 시스템 글꼴로 대체).
+- **Why** 같은 변환기 입력이 PDF에서 제목·굵기·색·목록·표·그림·한글/영문 혼합을 살린 채 나옵니다. 새 레이아웃 코드를 짜지 않고 편집기가 인쇄하는 쪽과 같은 경로를 씁니다.
+- **Trade-offs** 작은 문서도 글꼴 DB 로드와 레이아웃으로 약 60 ms가 듭니다(엔진 PDF는 1 ms 이하). 큰 문서(428쪽)는 CPU 15초, 최대 RSS 약 380 MB, PDF 크기가 엔진 PDF의 약 3배입니다(쪽마다 글꼴 부분집합 포함, `docs/performance.md` 4.2절). 응답의 `paragraphCount`는 엔진이 이 PDF에서 글을 읽지 못해 0입니다(화면은 쓰지 않음). 렌더러 쪽 오류는 사용자에게 경고로만 보입니다.
+- **Verified by** `cargo test -p easyoffice-app --test rich_pdf_renderer`, `cargo test -p easyoffice-formats --test hwpx_list_definitions`, `cargo test -p easyoffice-desktop doc_pdf`(쪽 배치·표·그림·목록 표지·회전·워터마크·스탬프·배치 경계 넘는 긴 문서·응답과 저장 검사까지), 전후 PDF 렌더 비교와 시간·RSS 측정(`docs/performance.md` 4.2절).
+- **Revisit when** 엔진 문서 모델이 각주·셀 서식·쪽 설정을 담게 될 때, 쪽마다 글꼴을 다시 넣는 크기를 줄일 때.
