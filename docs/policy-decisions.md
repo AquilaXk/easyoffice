@@ -2470,3 +2470,19 @@
 - **Trade-offs** 저장은 UTF-8만 합니다. CP949로 보이는 임의의 바이너리가 우연히 유효한 쌍으로만 이루어지면 텍스트로 열립니다. BOM 없는 UTF-16은 열리지 않습니다.
 - **Verified by** `cargo test -p easyoffice-formats`(`cp949::tests`, `text_decode::tests`, `tests/text_encoding_open.rs`, `office_codecs::tests`). 10MB CP949 CSV 디코딩은 릴리스 빌드에서 이전 한글 전용 경로 19.4ms, 새 엄격 디코더 12.0ms(7회 중 최소).
 - **Revisit when** BOM 없는 UTF-16 파일 요청이 실제로 들어오거나 CP949 외 지역 인코딩이 필요할 때.
+
+## PD-159. 변환기 입력 소스 단일화, 한글 원본은 HWPX로 내보내기, PDF 줄바꿈·쪽 설정, 슬라이드 구조 보존, Markdown 표 셀·HWPX 표 순서
+
+- **Status** Implemented (`workspace-tools.js` `resolveConverterInput`, `app.js`, `file-open.js`, `hwp-session.js`, `ipc-transport.js`, `rich_rtf_writer.rs`, `pdf_text_wrap.rs`, `pdf_writer.rs`, `convert_structured_doc.rs`, `rich_read_text.rs`, `rich_read_hwpx.rs`)
+- **Context** (1) 변환 버튼, 변환기의 Ctrl+S, 보안 감사가 입력 소스를 각자 골라 선택한 원본 파일이나 열린 한글 문서 대신 기본 편집기 내용이 변환되기도 했고, 변환 실패는 오류가 침묵했습니다. (2) 엔진은 HWP 5.0·HWT를 평문으로만 읽어 한글 문서를 `exportBytes("hwp")`로 보내면 서식·표·그림이 사라집니다. (3) RTF 작성기는 제목 크기를 다음 문단으로 흘리고 첨자·들여쓰기·줄 간격·목록을 쓰지 않았습니다. (4) PDF 본문은 줄바꿈이 없어 긴 문단이 A4 밖으로 나갔고, PDF 스튜디오의 회전·워터마크·스탬프는 본문 줄로만 저장됐으며, 슬라이드를 문서로 저장하면 제목·글머리표·노트가 평문 단락으로 합쳐졌습니다.
+- **Decision (`PD-159`)**
+  1. 변환기 입력은 `resolveConverterInput` 한 곳에서 정합니다: 선택한 원본 파일 → 열린 한글 문서(편집기가 내보낸 바이트) → 편집기 내용 순이고, 크기 한도 검사도 여기서 합니다. 변환 요청의 예외는 전송 계층이 이미 보여준 것(`reported`)을 뺀 나머지를 `#conv-result-box`와 상태 문구에 "변환 실패: 사유"로 보입니다. 한글 편집기로 파일을 열면 `#conv-src-fmt`를 그 형식으로 맞춥니다.
+  2. 한글 문서(HWP·HWPX·HWT·HWTX)가 변환 원본이면 항상 HWPX로 내보내 `hwpx` 원본으로 보냅니다. 내보내기가 실패하면 편집기 텍스트로 몰래 바꾸지 않고 오류로 알립니다.
+  3. RTF는 문단마다 `\pard\plain`으로 시작하고, 런 서식 뒤 `\plain`에는 제목 크기를 다시 씁니다. 첨자(`\super`/`\sub`), `\li`, `\fi`, `\slN\slmult1`, 목록은 `\listtable`+`\lsN\ilvl0`(1=글머리표, 2=번호)로 씁니다.
+  4. PDF 본문 줄은 쪽 너비(A4, 좌우 여백 54pt, 12pt)에서 글꼴 너비로 줄바꿈합니다. 공백 뒤에서 끊고, 한 줄보다 넓은 단어만 글자 사이에서 끊으며, 쪽은 출력 순서로 번호를 매깁니다. 영문 줄은 Helvetica 표준 너비, 한글이 섞인 줄은 글꼴 선언 너비(ASCII 0.5em, 그 외 1em)로 잽니다. 구조화 저장 본문 옆의 `pdf: {rotationDegrees, watermark, stamp}`는 PDF 대상에서만 쪽 회전·워터마크·결재 스탬프로 쓰고(`rotationDegrees`는 0·90·180·270), 다른 대상은 무시합니다.
+  5. 슬라이드를 문서 계열 형식(DOCX·DOC·ODT·RTF·MD·TXT·HWP·HWT·HWPX·HWTX·PDF)으로 저장하면 제목은 2단계 제목, 글머리표는 글머리표 목록, 발표자 노트는 기울임 단락으로 씁니다.
+  6. Markdown 표 셀은 문단과 같이 인라인 문법을 풀되 셀 모델이 글자 서식을 담지 못하므로 서식 기호만 벗기고 텍스트는 남깁니다. Markdown 작성기는 셀 글자(`*`, `_`, `` ` ``, `[`, `^`, `==` 등)를 이스케이프해 다시 읽어도 같은 글이 되게 합니다.
+  7. HWPX에서 문단의 런 안에 표가 있으면 표 앞의 텍스트(와 그림)를 먼저 별도 문단으로 내보내 표가 그 뒤에 오게 하고, 표 뒤의 텍스트는 다음 문단이 됩니다.
+- **Why** 입력 소스가 경로마다 달라 엉뚱한 내용이 변환되는 것과 실패의 침묵, 서식 손실, PDF에서 글자가 쪽 밖으로 나가는 것을 막습니다.
+- **Trade-offs** PDF 하이라이트(형광펜) 주석은 쪽 설정으로 보내지 않습니다. 엔진의 PDF 모델에 주석이 없고 카드의 하이라이트는 범위가 없는 배지라 결정이 필요합니다. 줄 머리·끝 금칙 처리는 하지 않습니다. PDF 스튜디오의 워터마크·결재 스탬프는 PDF 대상에만 쓰고 PDF가 아닌 변환에서는 빠집니다(이전에는 본문 줄로 남았음). Markdown 표 셀의 링크는 텍스트만 남고 주소는 버려집니다.
+- **Verified by** `cargo test -p easyoffice-formats --test rtf_writer_roundtrip --test pdf_line_wrap`, `cargo test -p easyoffice-app --test structured_pdf_slides`, `cargo test -p easyoffice-formats --test markdown_table_cells --test hwpx_table_in_run`, `node --test scripts/test-webui-converter-source.mjs scripts/test-webui-hwp-session.mjs scripts/test-webui-file-open.mjs`.
