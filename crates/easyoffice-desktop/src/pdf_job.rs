@@ -196,15 +196,38 @@ impl PdfFinish {
     }
 }
 
+/// A job's place in the tables: its window and its number. Two exports of one window never share
+/// an entry, so what happens to the old one (a drop, its late end) cannot reach the newer one.
+type JobKey = (String, u64);
+
 /// The jobs of all windows and which of them are converting right now.
 #[derive(Default)]
 struct Table {
     jobs: HashMap<String, ExportJob>,
-    /// Window -> number of the job that was taken out of `jobs` to convert pages.
-    working: HashMap<String, u64>,
-    /// Windows whose working job was dropped (`finish(false)`, the window closed) while it
-    /// converted: it must not come back when the conversion ends.
-    dropped: HashSet<String>,
+    /// Jobs that were taken out of `jobs` to convert pages or to finish.
+    working: HashSet<JobKey>,
+    /// Working jobs that were dropped (`finish(false)`, a newer export, the window closed) while
+    /// they ran: such a job must not come back when it ends.
+    dropped: HashSet<JobKey>,
+}
+
+impl Table {
+    /// Marks every job of the window that is working now as dropped.
+    fn drop_working_of(&mut self, label: &str) {
+        let Self {
+            working, dropped, ..
+        } = self;
+        dropped.extend(working.iter().filter(|(owner, _)| owner == label).cloned());
+    }
+}
+
+/// Runs `work`; a panic in it (the SVG, font and PDF code all handle untrusted input) becomes an
+/// error, so the job is settled instead of staying "working" for good.
+fn guarded<T>(work: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(work)).unwrap_or_else(|_| {
+        eprintln!("pdf export: the conversion panicked");
+        Err(pdf_export::MSG_CONVERT_PANICKED.to_string())
+    })
 }
 
 /// The jobs in progress, one per window. A job is taken out of the table while it works, so a
@@ -217,19 +240,31 @@ pub struct PdfExports {
 }
 
 impl PdfExports {
-    /// Makes `job` the window's job (a job the window left behind is dropped) and returns its number.
+    /// Makes `job` the window's job and returns its number. A job the window left behind is
+    /// dropped, also one that is converting right now.
     pub fn begin(&self, label: &str, mut job: ExportJob) -> u64 {
         job.id = self.last_id.fetch_add(1, Ordering::Relaxed) + 1;
         let id = job.id;
-        self.lock().jobs.insert(label.to_string(), job);
+        let mut table = self.lock();
+        table.drop_working_of(label);
+        table.jobs.insert(label.to_string(), job);
         id
     }
 
     /// Converts the next pages of the window's job. An error ends the job.
     pub fn add_pages(&self, label: &str, id: u64, pages: &[String]) -> Result<usize, String> {
+        self.convert(label, id, |job| job.add_pages(pages))
+    }
+
+    fn convert(
+        &self,
+        label: &str,
+        id: u64,
+        work: impl FnOnce(&mut ExportJob) -> Result<usize, String>,
+    ) -> Result<usize, String> {
         let mut job = self.take(label, id)?;
-        let result = job.add_pages(pages);
-        let kept = self.settle(label, result.is_ok().then_some(job));
+        let result = guarded(|| work(&mut job));
+        let kept = self.settle(label, id, result.is_ok().then_some(job));
         result.and_then(|count| kept.then_some(count).ok_or_else(|| MSG_DROPPED.to_string()))
     }
 
@@ -245,16 +280,17 @@ impl PdfExports {
             self.discard(label, id);
             return Ok(PdfFinish::cancelled());
         }
-        self.take(label, id)?.complete(open)
+        let job = self.take(label, id)?;
+        let result = guarded(|| job.complete(open));
+        self.settle(label, id, None);
+        result
     }
 
     /// Drops the window's job whatever its number (the window is gone).
     pub fn forget(&self, label: &str) {
         let mut table = self.lock();
         table.jobs.remove(label);
-        if table.working.contains_key(label) {
-            table.dropped.insert(label.to_string());
-        }
+        table.drop_working_of(label);
     }
 
     /// Drops the job only if it is still number `id`, also while it converts: a late abort of an old
@@ -263,19 +299,22 @@ impl PdfExports {
         let mut table = self.lock();
         if table.jobs.get(label).is_some_and(|job| job.id == id) {
             table.jobs.remove(label);
-        } else if table.working.get(label) == Some(&id) {
-            table.dropped.insert(label.to_string());
+        } else {
+            let key = (label.to_string(), id);
+            if table.working.contains(&key) {
+                table.dropped.insert(key);
+            }
         }
     }
 
-    /// Takes the job out of the table to work on it; `settle` puts it back.
+    /// Takes the job out of the table to work on it; `settle` ends the work.
     fn take(&self, label: &str, id: u64) -> Result<ExportJob, String> {
         let mut table = self.lock();
         match table.jobs.get(label) {
             None => Err(MSG_NO_JOB.to_string()),
             Some(job) if job.id != id => Err(MSG_OTHER_JOB.to_string()),
             Some(_) => {
-                table.working.insert(label.to_string(), id);
+                table.working.insert((label.to_string(), id));
                 table
                     .jobs
                     .remove(label)
@@ -284,12 +323,13 @@ impl PdfExports {
         }
     }
 
-    /// Ends a conversion: the job returns to the table unless it failed (`None`), was dropped
-    /// meanwhile, or the window started a newer job. True when it returned.
-    fn settle(&self, label: &str, job: Option<ExportJob>) -> bool {
+    /// Ends the work of job `id`: it returns to the table unless it failed or finished (`None`),
+    /// was dropped meanwhile, or the window started a newer job. True when it returned.
+    fn settle(&self, label: &str, id: u64, job: Option<ExportJob>) -> bool {
         let mut table = self.lock();
-        table.working.remove(label);
-        let dropped = table.dropped.remove(label);
+        let key = (label.to_string(), id);
+        table.working.remove(&key);
+        let dropped = table.dropped.remove(&key);
         match job {
             Some(job) if !dropped && !table.jobs.contains_key(label) => {
                 table.jobs.insert(label.to_string(), job);
@@ -622,7 +662,7 @@ mod tests {
             Ok(PdfFinish::cancelled())
         );
         assert!(
-            !exports.settle("doc-1", Some(job)),
+            !exports.settle("doc-1", id, Some(job)),
             "the job does not come back"
         );
         assert_eq!(
@@ -637,13 +677,13 @@ mod tests {
         let id = exports.begin("doc-1", job_to(&target));
         let job = exports.take("doc-1", id).unwrap();
         exports.forget("doc-1");
-        assert!(!exports.settle("doc-1", Some(job)), "the window closed");
+        assert!(!exports.settle("doc-1", id, Some(job)), "the window closed");
 
         let old = exports.begin("doc-1", job_to(&target));
         let job = exports.take("doc-1", old).unwrap();
         let new = exports.begin("doc-1", job_to(&target));
         assert!(
-            !exports.settle("doc-1", Some(job)),
+            !exports.settle("doc-1", old, Some(job)),
             "a newer export owns the window"
         );
         assert_eq!(exports.add_pages("doc-1", new, &[page()]), Ok(1));
@@ -651,8 +691,65 @@ mod tests {
         // A drop that names another number, or arrives after the conversion, changes nothing.
         let job = exports.take("doc-1", new).unwrap();
         exports.discard("doc-1", new + 5);
-        assert!(exports.settle("doc-1", Some(job)));
+        assert!(exports.settle("doc-1", new, Some(job)));
         assert_eq!(exports.add_pages("doc-1", new, &[page()]), Ok(2));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The tables were keyed by the window alone: the drop of job 1 was spent on job 2, and job 1
+    /// came back over it.
+    #[test]
+    fn a_dropped_job_does_not_swallow_the_newer_job_and_does_not_come_back() {
+        let dir = scratch_dir("two-jobs");
+        let target = dir.join("a.pdf");
+        let exports = PdfExports::default();
+        let old = exports.begin("doc-1", job_to(&target));
+        let old_job = exports.take("doc-1", old).unwrap();
+        exports.discard("doc-1", old);
+        let new = exports.begin("doc-1", job_to(&target));
+        let new_job = exports.take("doc-1", new).unwrap();
+        assert!(
+            exports.settle("doc-1", new, Some(new_job)),
+            "the newer job returns"
+        );
+        assert!(
+            !exports.settle("doc-1", old, Some(old_job)),
+            "the dropped one stays dropped"
+        );
+        assert_eq!(exports.add_pages("doc-1", new, &[page()]), Ok(1));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_late_abort_of_a_finished_job_does_not_drop_the_next_one() {
+        let dir = scratch_dir("late-abort");
+        let exports = PdfExports::default();
+        let done = exports.begin("doc-1", job_to(&dir.join("a.pdf")));
+        exports.add_pages("doc-1", done, &[page()]).unwrap();
+        exports.finish("doc-1", done, true, |_| Ok(())).unwrap();
+        exports.finish("doc-1", done, false, no_open).unwrap();
+        let next = exports.begin("doc-1", job_to(&dir.join("b.pdf")));
+        assert_eq!(exports.add_pages("doc-1", next, &[page()]), Ok(1));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_panic_in_a_conversion_ends_the_job_and_leaves_nothing_working() {
+        let dir = scratch_dir("panic");
+        let exports = PdfExports::default();
+        let id = exports.begin("doc-1", job_to(&dir.join("a.pdf")));
+        let err = exports
+            .convert("doc-1", id, |_| panic!("a hostile page"))
+            .unwrap_err();
+        assert_eq!(err, pdf_export::MSG_CONVERT_PANICKED);
+        assert!(exports.lock().working.is_empty(), "no job stays working");
+        assert_eq!(
+            exports.add_pages("doc-1", id, &[page()]),
+            Err(MSG_NO_JOB.to_string()),
+            "the failed job is gone"
+        );
+        let next = exports.begin("doc-1", job_to(&dir.join("b.pdf")));
+        assert_eq!(exports.add_pages("doc-1", next, &[page()]), Ok(1));
         let _ = fs::remove_dir_all(&dir);
     }
 

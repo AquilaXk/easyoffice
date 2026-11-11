@@ -41,6 +41,9 @@ pub const BATCH_PAGES: usize = 16;
 /// Threads that convert pages at once. A dense page needs on the order of 100 MB to convert, so the
 /// count stays small whatever the machine offers.
 const MAX_CONVERT_THREADS: usize = 4;
+/// What a page-conversion thread that panicked turns into.
+pub(crate) const MSG_CONVERT_PANICKED: &str =
+    "PDF 변환 중 내부 오류가 발생해 내보내기를 중단했습니다.";
 /// Deepest `<image>` inside `<image>` of SVG data URLs that is kept; deeper pictures are dropped.
 /// WMF/EMF pictures are one level (an SVG that holds a bitmap); the bound keeps a hostile chain of
 /// nested data URLs from recursing without end.
@@ -321,7 +324,7 @@ fn convert_batch(
             .collect();
     }
     let next = AtomicUsize::new(0);
-    let mut done: Vec<(usize, Result<PageChunk, String>)> = std::thread::scope(|scope| {
+    let done = std::thread::scope(|scope| {
         let workers: Vec<_> = (0..threads)
             .map(|_| {
                 scope.spawn(|| {
@@ -340,11 +343,17 @@ fn convert_batch(
                 })
             })
             .collect();
-        workers
-            .into_iter()
-            .flat_map(|worker| worker.join().expect("a page conversion thread panicked"))
-            .collect()
+        // Every thread is joined before the result is looked at: a scoped thread that is left
+        // unjoined and panicked panics the scope.
+        let joined: Vec<_> = workers.into_iter().map(|worker| worker.join()).collect();
+        let mut done: Vec<(usize, Result<PageChunk, String>)> = Vec::new();
+        for local in joined {
+            // A thread that panicked (hostile page content) fails the export, not this thread.
+            done.extend(local.map_err(|_| MSG_CONVERT_PANICKED.to_string())?);
+        }
+        Ok::<_, String>(done)
     });
+    let mut done = done?;
     done.sort_unstable_by_key(|(offset, _)| *offset);
     done.into_iter().map(|(_, page)| page).collect()
 }
