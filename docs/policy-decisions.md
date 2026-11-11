@@ -2526,3 +2526,20 @@
 - **Why** 출력이 바이트 단위로 같은 채 CPU 시간과 최대 RSS를 줄입니다. 메모는 글꼴 DB가 고정이라는 전제 위에서만 맞고, 그래서 내보내기 단위입니다.
 - **Trade-offs** 다음 rhwp 갱신 때 `text.rs`를 상위가 바꾸면 패치를 손으로 합쳐야 합니다. 상위가 같은 수정을 넣으면 기록에서 지우면 됩니다.
 - **Verified by** `cargo test -p easyoffice-desktop pdf_font_select a_face_gives`, `node --test scripts/test-update-rhwp.mjs`, 전후 PDF 바이트 비교(7개 입력 동일), `docs/performance.md` 4.1절 측정.
+
+## PD-164. 시트 재계산은 엔진이 열어 둔 세션에서 변경분만 증분으로 하고, 화면은 바뀐 셀만 주고받는다
+
+- **Status** Implemented (`crates/easyoffice-sheet/src/recalc/`, `crates/easyoffice-app/src/sheet_session.rs`, `ui/sheet-store.js`, `ui/app.js`, `crates/easyoffice-desktop/src/{main,window_commands}.rs`)
+- **Context** 시트 재계산은 편집마다 통합 문서를 새로 만들고 모든 수식을 다시 계산했고(`evaluate_sheet`는 상태가 없음), 화면은 편집마다 모든 셀과 모든 수식 대상을 JSON으로 보냈습니다. 수식 10만 개(셀 13만 개) 시트의 요청은 10.9 MB로 PD-150의 10 MiB(10,485,760 B)를 넘어 재계산 자체를 보낼 수 없었습니다.
+- **Decision (`PD-164`)**
+  1. **엔진**: `RecalcSession`이 통합 문서, 수식 셀의 값(메모), 역의존 그래프를 들고 있습니다. 편집은 그 셀을 읽는 수식(직접 참조와 범위 참조)만 변경 전파(너비 우선, 비트셋)로 더럽히고, 더러운 수식만 기존 의존 사전 패스(반복 DFS, 순환 감지)로 위상 순서대로 계산합니다. 결과는 값이 바뀐 수식 셀 목록입니다. 범위 참조는 같은 사각형을 한 항목으로 두고 열별(폭 16 이하) 또는 공용(그보다 넓음) 행 구간 색인에서 점 조회로 찾으므로 `SUM(A:A)`도 셀 단위 간선을 만들지 않습니다. 셀·수식 색인(`CellIndex`·`FormulaIndex`)은 편집마다 버리지 않고 제자리에서 고칩니다.
+  2. **휘발성·순환**: `RAND`·`RANDBETWEEN`·`NOW`·`TODAY`·`OFFSET`·`INDIRECT` 수식은 매 패스 더럽다고 봅니다(`OFFSET`·`INDIRECT`는 참조가 실행 때 정해짐). 순환 참조가 하나라도 있으면 어느 셀이 오류를 지니는지가 진입 순서에 달려 있어서, 그동안은 전체 수식을 전체 계산과 같은 순서로 다시 계산합니다(결과가 전체 재계산과 같음을 보장). 순환이 풀리면 다시 증분입니다.
+  3. **IPC 계약**: 새 명령을 늘리지 않습니다(15종 계약 유지, PD-069 선례). `evaluate_sheet` 페이로드에 `sessionAction`이 있으면 세션 동작입니다. `open {sheets:[이름]}` -> `{session}`; `apply {session, changes:[{sheet,cell,value}], recalc?}` -> `{changed:[{sheet,cell,value}], circular, recomputed}` (`recalc:false`는 적재만 하고 `{staged}`를 돌려줌, 큰 시트를 나눠 보낼 때); `close {session}` -> `{closed}`. 부트스트랩에 `sheetSessions:true`가 새로 있습니다. 세션이 없으면(만료·밀려남·창 닫힘) 오류가 아니라 `{expired:true}`로 답하고 화면이 다시 열어 모든 셀을 한 번 보냅니다. `sessionAction`이 없는 `evaluate_sheet`와 `evaluate_workbook_formula`는 그대로이고, 화면은 부트스트랩이 `sheetSessions`를 알릴 때만 세션을 쓰며 열기·적용이 실패하면 그 호출만 기존 방식으로 대신합니다.
+  4. **상한(`sheet_session.rs`)**: 세션 16개(넘으면 가장 오래 안 쓴 것을 내보냄), 세션당 셀 200만 개·원문 256 MiB, 전체 원문 512 MiB(넘으면 오래된 세션부터 내보냄), 한 요청의 변경 25만 개, 유휴 30분이면 만료. 창이 닫히면(`Destroyed`) 그 창 라벨로 연 세션을 닫습니다. 시트 집합은 세션 동안 고정이라 시트가 늘거나 줄거나 이름이 바뀌면 화면이 새 세션을 엽니다.
+  5. **화면**: `sheet-store.js`는 여전히 전체 저장소를 받지만(실행 취소·불러오기·개인정보 지우기가 임의 스냅샷을 되돌림) 세션이 마지막으로 받은 셀 원문의 거울과 비교해 달라진 셀만 보내고(1.5M자 단위로 나눔), 받은 바뀐 값을 거울에 합칩니다. 비교 기반이라 버려진 수식 입력줄 미리보기처럼 거울이 어긋나도 다음 호출이 바로잡습니다. 호출은 한 줄로 직렬화합니다. 수식이 아닌 셀을 수식 입력줄로 평가하는 호출은 표시 문자열을 그대로 두려고 기존 방식(`sessionAction` 없음)을 씁니다.
+- **Measured** (`cargo test -p easyoffice-sheet --release --lib -- --ignored --nocapture recalc_bench`, `cargo test -p easyoffice-app --release --lib -- --ignored --nocapture ipc_recalc_bench`, 셀 한 개 변경): 수식 1만 개·셀 1.3만 개에서 기존 `evaluate_sheet`는 요청 1,045,964 B + 응답 304,187 B에 14.6 ms, 세션은 요청 87 B + 응답 271 B(말단 셀 편집)에 0.03 ms입니다. 수식 10만 개·셀 13만 개에서 기존 `evaluate_sheet`는 요청 10,889,319 B(상한 초과) + 응답 3,406,238 B에 165.8 ms, 세션은 요청 88 B + 응답 278 B에 0.33 ms입니다. 계산 사슬의 중간·머리 셀을 바꿔 수식 1.6만~3.3만 개가 바뀌면 9.7~18.9 ms에 응답 0.9~1.8 MB로, 전체 계산(65 ms)과 요청 전송보다 낮습니다.
+- **Why** 편집 비용이 시트 전체가 아니라 영향을 받는 수식 수에 비례하고, 요청이 10 MiB 상한과 무관해집니다. 결과는 무작위 편집(비순환·순환 각 수백 시드)에서 전체 재계산과 같음을 시험으로 강제합니다.
+- **Trade-offs** 세션은 프로세스 메모리를 씁니다(상한으로 묶음). 세션을 처음 열 때 한 번은 모든 셀을 보냅니다(수식 10만 개 시트 약 7.4 MB 요청·5.2 MB 응답, 0.16 s). 순환 참조가 있는 동안은 편집마다 전체 계산입니다. 화면의 차이 계산(JS)은 셀 수에 비례합니다.
+- **Alternatives rejected** `evaluate_sheet` 요청의 압축·분할(편집마다 전체 재계산이 남음), 화면이 의존 그래프를 직접 들고 있기(엔진과 이중 구현), 순환 구성요소별 부분 재계산(진입 순서에 따라 오류를 지닌 셀이 달라져 전체 재계산과 어긋남).
+- **Verified by** `cargo test -p easyoffice-sheet --lib recalc`(무작위 편집 속성 시험, 순환, 시트 간 참조, 행 삽입·삭제 뒤 의존 갱신), `cargo test -p easyoffice-app --lib sheet_session`, `node --test scripts/test-webui-sheet-session.mjs`.
+- **Revisit when** 시트 집합 변경에도 세션을 유지해야 할 때, 순환 참조가 흔한 문서에서 편집이 느려질 때, 응답이 매우 큰 첫 계산을 나눠 받아야 할 때.

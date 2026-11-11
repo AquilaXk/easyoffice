@@ -91,13 +91,16 @@ impl IpcError {
 async fn ipc_dispatch(
     _caller: ShellCaller,
     app: AppHandle,
+    window: WebviewWindow,
     command: String,
     payload: String,
 ) -> Result<String, IpcError> {
     let probe_command = command.clone();
     let probe_payload = app.try_state::<SmokeProbe>().map(|_| payload.clone());
+    // The window label owns the sheet sessions the command opens; they close with the window.
+    let owner = window.label().to_string();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        EasyOfficeIpcRouter::dispatch(&command, &payload)
+        EasyOfficeIpcRouter::dispatch_for_owner(&command, &payload, &owner)
     })
     .await
     .map_err(|err| IpcError::new(format!("엔진 작업을 실행하지 못했습니다: {err}")))?

@@ -394,6 +394,7 @@ fn attach_handlers(app: &AppHandle, window: &WebviewWindow) {
             }
         }
         WindowEvent::Destroyed => {
+            easyoffice_app::close_sheet_sessions_of(&label);
             app.state::<shell_caller::ShellTokens>().forget(&label);
             app.state::<std::sync::Arc<crate::pdf_job::PdfExports>>()
                 .forget(&label);

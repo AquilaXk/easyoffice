@@ -366,6 +366,17 @@ fn shifting_rows_and_rewriting_references_matches_a_full_recalculation() {
     assert_matches_full(&session, "row delete");
 }
 
+#[test]
+fn the_footprint_counts_cells_and_raw_text_through_edits() {
+    let mut s = session(&["S"], &[("S", "A1", "12"), ("S", "B1", "=A1+1")]);
+    assert_eq!(s.footprint(), (2, 2 + 5));
+    s.set_cell("S", at("A1"), "1234").unwrap();
+    s.set_cell("S", at("C1"), "abc").unwrap();
+    assert_eq!(s.footprint(), (3, 4 + 5 + 3));
+    s.set_cell("S", at("B1"), "").unwrap();
+    assert_eq!(s.footprint(), (2, 4 + 3));
+}
+
 struct Rng(u64);
 
 impl Rng {

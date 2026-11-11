@@ -980,6 +980,7 @@
       return;
     }
     workspaceSession.hideBootstrapError();
+    sheetStoreHelpers.enableSheetSessions(boot?.sheetSessions === true);
     setupRibbonChrome(boot);
   }
 

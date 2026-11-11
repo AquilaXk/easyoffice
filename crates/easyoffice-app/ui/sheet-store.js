@@ -140,8 +140,176 @@
       });
     }
 
+    // --- Engine sheet session (PD-163) -------------------------------------------------------
+    // The engine keeps the workbook between edits. The page keeps a mirror of what the session
+    // holds (`raw`: the text it was last sent per cell, `values`: the last value it reported per
+    // formula cell), diffs every full store against that mirror and sends only the cells that
+    // differ, then folds the reported changes into `values`. The callers still hand in a whole
+    // store (undo, load and scrub restore arbitrary snapshots), so the diff also repairs a mirror
+    // that drifted, e.g. after a discarded formula-bar preview.
+    const SESSION_CHUNK_CHARS = 1_500_000;
+    const session = { enabled: false, id: null, sheetKey: "", raw: new Map(), values: new Map(), gen: 0 };
+    let sessionChain = Promise.resolve();
+
+    // Session actions travel in the `evaluate_sheet` command (the 15-command IPC contract).
+    function sessionCall(body) {
+      return invokeIpc("evaluate_sheet", JSON.stringify(body));
+    }
+
+    function resetSession() {
+      session.id = null;
+      session.sheetKey = "";
+      session.raw = new Map();
+      session.values = new Map();
+    }
+
+    // The shell tells the page at start-up whether the engine has session commands.
+    function enableSheetSessions(enabled) {
+      session.enabled = enabled === true;
+      if (!session.enabled) resetSession();
+    }
+
+    function runSessionExclusive(work) {
+      const next = sessionChain.then(work, work);
+      sessionChain = next.catch(() => {});
+      return next;
+    }
+
+    async function openSession(names, sheetKey) {
+      const previous = session.id;
+      resetSession();
+      if (previous !== null) {
+        void Promise.resolve(sessionCall({ sessionAction: "close", session: previous })).catch(() => {});
+      }
+      const res = await sessionCall({ sessionAction: "open", sheets: names });
+      if (!res || typeof res.session !== "string") throw new Error("시트 세션을 열지 못했습니다.");
+      session.id = res.session;
+      session.sheetKey = sheetKey;
+    }
+
+    // Brings the mirror up to `sheetsMap`; returns the cells to send and the formula targets.
+    function diffAgainstMirror(sheetsMap, names) {
+      session.gen += 1;
+      const gen = session.gen;
+      const changes = [];
+      const formulaTargets = [];
+      for (const shName of names) {
+        const snap = sheetsMap[shName] || {};
+        let mirror = session.raw.get(shName);
+        if (!mirror) {
+          mirror = new Map();
+          session.raw.set(shName, mirror);
+        }
+        const shPrefix = shName + "!";
+        for (const ref of Object.keys(snap)) {
+          const entry = snap[ref];
+          if (!entry) continue;
+          if (isFormulaStr(entry.formula || "")) {
+            formulaTargets.push({ sheet: shName, cell: ref, key: shPrefix + ref });
+          }
+          if (!entry.formula && !entry.value) continue;
+          const raw = entry.formula ? entry.formula : normalizeFormattedNumericCell(entry.value);
+          const known = mirror.get(ref);
+          if (known === undefined) {
+            mirror.set(ref, { raw, gen });
+            changes.push({ sheet: shName, cell: ref, value: raw });
+          } else {
+            known.gen = gen;
+            if (known.raw !== raw) {
+              known.raw = raw;
+              changes.push({ sheet: shName, cell: ref, value: raw });
+            }
+          }
+        }
+        for (const [ref, known] of mirror) {
+          if (known.gen !== gen) {
+            mirror.delete(ref);
+            changes.push({ sheet: shName, cell: ref, value: "" });
+          }
+        }
+      }
+      return { changes, formulaTargets };
+    }
+
+    async function syncSessionOnce(sheetsMap) {
+      const names = Object.keys(sheetsMap || {});
+      const sheetKey = names.slice().sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).join("\u0000");
+      if (session.id === null || session.sheetKey !== sheetKey) {
+        await openSession(names, sheetKey);
+      }
+      const { changes, formulaTargets } = diffAgainstMirror(sheetsMap, names);
+      let at = 0;
+      let last = null;
+      do {
+        const chunk = [];
+        let chars = 0;
+        while (at < changes.length && (chunk.length === 0 || chars < SESSION_CHUNK_CHARS)) {
+          const change = changes[at++];
+          chunk.push(change);
+          chars += change.value.length + change.sheet.length + change.cell.length + 40;
+        }
+        const finalChunk = at >= changes.length;
+        last = await sessionCall({
+          sessionAction: "apply",
+          session: session.id,
+          recalc: finalChunk,
+          changes: chunk,
+        });
+        if (!last || last.expired === true) throw new Error("시트 세션이 만료되었습니다.");
+      } while (at < changes.length);
+      for (const c of Array.isArray(last.changed) ? last.changed : []) {
+        session.values.set(c.sheet + "!" + c.cell, c.value);
+      }
+      return { formulaTargets, circular: last.circular === true };
+    }
+
+    // One retry after a reset covers an expired or evicted session; `null` sends the caller to the
+    // stateless command.
+    async function syncSession(sheetsMap) {
+      return runSessionExclusive(async () => {
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          try {
+            return await syncSessionOnce(sheetsMap);
+          } catch {
+            resetSession();
+          }
+        }
+        return null;
+      });
+    }
+
+    function sessionValue(key) {
+      return session.values.get(key);
+    }
+
     async function computeEvaluatedSheetStore(baseSheets, defaultSheet, extraTarget = null) {
       const sheets = cloneStore(baseSheets);
+      // A plain-value extra target (formula bar) is evaluated by the stateless command so its
+      // display text matches what that command has always returned.
+      const extraIsFormula =
+        !extraTarget || isFormulaStr(sheets[extraTarget.sheet]?.[extraTarget.cell]?.formula || "");
+      if (session.enabled && extraIsFormula) {
+        if (!extraTarget && !sheetMapHasAnyFormula(sheets)) {
+          return { sheets, extraValue: "", circular: false };
+        }
+        const viaSession = await syncSession(sheets);
+        if (viaSession) {
+          for (const target of viaSession.formulaTargets) {
+            const stored = sheets[target.sheet]?.[target.cell];
+            const value = sessionValue(target.key);
+            if (stored && value !== undefined && value !== null) stored.value = String(value);
+          }
+          let extraValue = "";
+          if (extraTarget) {
+            const raw = sessionValue(extraTarget.sheet + "!" + extraTarget.cell);
+            extraValue =
+              raw !== undefined && raw !== null
+                ? String(raw)
+                : (sheets[extraTarget.sheet]?.[extraTarget.cell]?.value ?? "");
+          }
+          return { sheets, extraValue, circular: viaSession.circular };
+        }
+      }
       const { cells, formulaTargets } = buildCellsAndFormulaTargets(sheets);
       const rpcTargets = [];
       const targetSpecs = [];
@@ -213,6 +381,18 @@
     }
 
     async function evaluateLiveFormulaTargets(sheetsMap, defaultSheet) {
+      if (session.enabled) {
+        if (!sheetMapHasAnyFormula(sheetsMap)) return null;
+        const viaSession = await syncSession(sheetsMap);
+        if (viaSession) {
+          return {
+            rpcRes: { circular: viaSession.circular },
+            formulaTargets: viaSession.formulaTargets,
+            targetValues: viaSession.formulaTargets.map((t) => sessionValue(t.key)),
+            batchValues: null,
+          };
+        }
+      }
       const { cells, formulaTargets } = buildCellsAndFormulaTargets(sheetsMap);
       if (formulaTargets.length === 0) {
         return null;
@@ -328,6 +508,7 @@
       extractEvaluatedTargetValue,
       computeEvaluatedSheetStore,
       evaluateLiveFormulaTargets,
+      enableSheetSessions,
       scrubSheetStoreMap,
     };
   }

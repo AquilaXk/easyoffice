@@ -30,6 +30,7 @@ mod security_ipc;
 pub mod self_test;
 #[cfg(test)]
 mod sheet_ipc_tests;
+mod sheet_session;
 pub mod smart_tools;
 
 pub use benchmark::*;
@@ -40,6 +41,7 @@ pub use http_server::{
 };
 pub use ribbon::*;
 pub use self_test::run_self_test;
+pub use sheet_session::close_sheet_sessions_of;
 pub use smart_tools::*;
 
 /// IPC router dispatching the 15 workspace commands to the pure Rust engines. Shared by the Windows
@@ -49,10 +51,22 @@ pub struct EasyOfficeIpcRouter;
 
 impl EasyOfficeIpcRouter {
     pub fn dispatch(command: &str, payload: &str) -> Result<String, EasyOfficeError> {
+        Self::dispatch_for_owner(command, payload, "")
+    }
+
+    /// Like [`Self::dispatch`], tagging state the command creates with `owner` (a window label) so
+    /// it can be released when that window closes (see [`close_sheet_sessions_of`]).
+    pub fn dispatch_for_owner(
+        command: &str,
+        payload: &str,
+        owner: &str,
+    ) -> Result<String, EasyOfficeError> {
         match command {
             "get_workspace_bootstrap" => Self::handle_workspace_bootstrap(),
             "detect_format" => Self::handle_detect_format(payload),
-            "evaluate_sheet" | "evaluate_sheet_formula" => Self::handle_evaluate_sheet(payload),
+            "evaluate_sheet" | "evaluate_sheet_formula" => {
+                Self::handle_evaluate_sheet(payload, owner)
+            }
             "evaluate_workbook_formula" => Self::handle_evaluate_workbook_formula(payload),
             "compute_layout" => Self::handle_compute_layout(payload),
             "audit_security" => Self::handle_audit_security(payload),
@@ -79,6 +93,7 @@ impl EasyOfficeIpcRouter {
                 "\"platform\":\"{}\",",
                 "\"shortcutModifier\":\"{}\",",
                 "\"appVersion\":\"{}\",",
+                "\"sheetSessions\":true,",
                 "\"openTabs\":[",
                 "{{\"id\":\"tab-doc\",\"title\":\"분기_경영실적_보고서.docx\",\"module\":\"DOC\",\"isPinned\":true,\"isFavorite\":true}},",
                 "{{\"id\":\"tab-hwp\",\"title\":\"행정안전부_기안문.hwpx\",\"module\":\"HWP\",\"isPinned\":true,\"isFavorite\":false}},",
@@ -239,13 +254,16 @@ impl EasyOfficeIpcRouter {
         Ok(wb)
     }
 
-    fn handle_evaluate_sheet(payload: &str) -> Result<String, EasyOfficeError> {
+    fn handle_evaluate_sheet(payload: &str, owner: &str) -> Result<String, EasyOfficeError> {
         let rule = ConditionalFormatRule::GreaterThan(100.0);
         let dv_rule = DataValidationRule::NumberRange {
             min: 0.0,
             max: 1_000_000.0,
         };
         let entries = Self::parse_rpc_json_object(payload)?;
+        if let Some(action) = Self::optional_json_str(&entries, "sessionAction")? {
+            return Self::handle_sheet_session_action(action, &entries, owner);
+        }
         let default_sh_owned = Self::resolve_default_sheet_from_entries(&entries)?;
         let default_sh = default_sh_owned.as_str();
         let anchor_coord = Self::resolve_optional_anchor_coord(&entries)?;

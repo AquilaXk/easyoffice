@@ -71,6 +71,8 @@ pub struct RecalcSession {
     /// A dynamic (run-time) circular reference was met in the last pass.
     dynamic_circular: bool,
     rng_state: u64,
+    /// Total bytes of raw cell text held by the workbook.
+    raw_bytes: usize,
     refs: Vec<Ref>,
     queue: Vec<u32>,
 }
@@ -96,12 +98,14 @@ impl RecalcSession {
             edited: Vec::new(),
             dynamic_circular: false,
             rng_state: EvalContext::standalone_id(primary_id).rng_state,
+            raw_bytes: 0,
             refs: Vec::new(),
             queue: Vec::new(),
             wb: WorkbookEngine::new(),
         };
         for idx in 0..workbook.sheet_count() {
             let sheet = &workbook.sheets()[idx];
+            session.raw_bytes += sheet.cells.values().map(String::len).sum::<usize>();
             for (&coord, entry) in &sheet.compiled_asts {
                 if let (true, Ok(ast)) = (is_formula(Some(entry)), entry) {
                     let sheet_idx = idx as u16;
@@ -123,6 +127,12 @@ impl RecalcSession {
 
     pub fn sheet_name(&self, sheet: usize) -> Option<&str> {
         self.wb.sheets().get(sheet).map(|s| s.name.as_str())
+    }
+
+    /// Populated cells and bytes of raw cell text the session holds (what a caller meters).
+    pub fn footprint(&self) -> (usize, usize) {
+        let cells = self.wb.sheets().iter().map(|s| s.cells.len()).sum();
+        (cells, self.raw_bytes)
     }
 
     /// Number of formula cells and of distinct range references tracked by the graph.
@@ -171,9 +181,11 @@ impl RecalcSession {
 
     fn stage(&mut self, sheet: u16, coord: PackedCellCoordinate, raw: &str) {
         let engine = &self.wb.sheets()[usize::from(sheet)];
-        if engine.cells.get(&coord).map_or("", String::as_str) == raw {
+        let old_raw = engine.cells.get(&coord).map_or("", String::as_str);
+        if old_raw == raw {
             return;
         }
+        self.raw_bytes = self.raw_bytes - old_raw.len() + raw.len();
         if let Some(vertex) = self.graph.vertex_at(sheet, coord) {
             if let Some(Ok(ast)) = engine.compiled_asts.get(&coord) {
                 collect_refs(&self.wb, sheet, ast, &mut self.refs);
