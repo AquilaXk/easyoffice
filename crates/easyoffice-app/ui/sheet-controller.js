@@ -184,9 +184,6 @@
       const map = snapshotDomSheetCells();
       const nextCount = getSheetRowCount(curSheet) + 1;
       sheetRowCounts[curSheet] = nextCount;
-      for (let c = 1; c <= 8; c += 1) {
-        map[gridUtils.refOf(nextCount, c)] = { value: "0", formula: "" };
-      }
       sheetDataStore[curSheet] = map;
       bumpExtent(curSheet, nextCount, 8);
       grid.renderWindow(true);
@@ -801,6 +798,9 @@
       saveActiveSheetCellsToWorkbook,
       refreshWindowFromModel,
       refreshFocusedSheetCellPendingSnapshot,
+      recalculateActiveSheetFormulas,
+      getRange: () => input.getRange(),
+      shiftFormula: input.shiftFormula,
       updateSheetSelectionAndAggregates,
       hasCellContent,
     });

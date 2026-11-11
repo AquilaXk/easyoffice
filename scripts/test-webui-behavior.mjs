@@ -284,13 +284,28 @@ test("trailing backslashes, special-character sheet names, and unblurred save wo
 
   userClick(apostropheTab);
   await flushAsyncTurns();
-  assert.equal(document.querySelector('#pane-sheet td[data-cell="B1"]').textContent, "500");
+  assert.equal(
+    document.querySelector('#pane-sheet td[data-cell="B1"]').textContent,
+    "",
+    "switching to a sheet with no data shows an empty sheet, not placeholder values"
+  );
+  assert.equal(document.querySelector('#pane-sheet td[data-cell="A1"]').textContent, "");
+  const typeB1 = async () => {
+    const b1 = document.querySelector('#pane-sheet td[data-cell="B1"]');
+    b1.focus();
+    b1.textContent = "500";
+    b1.dispatchEvent({ type: "input", target: b1 });
+    b1.blur();
+    await flushAsyncTurns();
+  };
+  await typeB1();
 
   userClick(customTab);
   await flushAsyncTurns();
 
   const customB1 = document.querySelector('#pane-sheet td[data-cell="B1"]');
-  assert.equal(customB1.textContent, "500");
+  assert.equal(customB1.textContent, "");
+  await typeB1();
 
   userClick(sheetTabBar.querySelector('.sheet-tab-btn[data-sheet-tab="Sheet1"]'));
   await flushAsyncTurns();

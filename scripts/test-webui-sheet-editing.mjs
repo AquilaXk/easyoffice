@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { makeFixtureFile, pickFile } from "./test-support/fixture-files.mjs";
-import { switchModule, studioItem } from "./test-support/modules.mjs";
+import { switchModule, studioItem, commandItem } from "./test-support/modules.mjs";
 
 async function openSheet(options = {}) {
   const h = await createWorkspaceHarness(options);
@@ -421,6 +421,8 @@ test("formatted currency, grouped numbers and percentages participate in SUM/AVE
   const evalOut = document.getElementById("sheet-eval-result").textContent;
   assert.match(evalOut, /합계 4550.*최대 2000/, "pivot summary scans populated rows beyond row 6");
 
+  // A single active cell is no selection: the sort covers the whole data range.
+  userClick(cell(document, "A1"));
   userClick(document.querySelector('.md-item[data-studio-menu-cmd="data-sort"]'));
   await flushAsyncTurns(10);
   assert.equal(cell(document, "B2").textContent, "50.0%", "first sort orders ascending");
@@ -471,4 +473,13 @@ test("sheet-grid packRef, COL_NAMES cache, getTdAt, and paintSelectionRange upda
     const decoded = sheetUtils.base64ToBytes(b64);
     assert.deepEqual(Array.from(decoded), Array.from(src), `round-trip base64 for length ${len}`);
   }
+});
+
+test("adding a table row appends blank cells, not zeros", async () => {
+  const { document, userClick } = await openSheet();
+  const before = document.querySelectorAll("#pane-sheet tbody tr").length;
+  userClick(commandItem(document, "sheet-insert-table"));
+  await flushAsyncTurns();
+  assert.equal(document.querySelectorAll("#pane-sheet tbody tr").length, before + 1);
+  for (const letter of "ABCDEFGH") assert.equal(cell(document, letter + (before + 1)).textContent, "", letter);
 });

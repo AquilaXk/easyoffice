@@ -254,7 +254,7 @@
       const sheetTabBar = document.getElementById("sheet-tab-bar");
       if (!sheetTabBar) return;
       const addSheetBtn = document.getElementById("btn-add-sheet-tab");
-      const knownKeys = new Set(["Sheet1", "Sheet2", ...Object.keys(sheetDataStore)]);
+      const knownKeys = new Set([...Object.keys(sheetDataStore), activeSheetName]);
       const renderedKeys = new Set();
       const survivingBtns = [];
       for (const btn of sheetTabBar.querySelectorAll(".sheet-tab-btn[data-sheet-tab]")) {
