@@ -101,13 +101,12 @@
 .tool-dialog .dialog-input { width: 72px; text-align: right; }
 .tool-dialog .dialog-text-input { width: 120px; }
 .tool-dialog .dialog-input:focus, .tool-dialog .dialog-text-input:focus { border-color: var(--color-focus-border); box-shadow: 0 0 0 2px var(--ui-focus-soft); }
-.tool-dialog .custom-select.dialog-select { width: 96px; height: 22px; padding: 0 4px; font-size: var(--font-size-sm); border: 0; background: transparent; outline: none; }
+/* Combo boxes in dialogs size to their content, like the reference's `.dialog-select` (no width, `custom-select.css`: inline-flex, the trigger fills the root). */
+.tool-dialog .custom-select.dialog-select { height: 22px; padding: 0; font-size: var(--font-size-sm); border: 0; background: transparent; outline: none; }
 .tool-dialog .dialog-checkbox { font-size: var(--font-size-sm); display: flex; align-items: center; gap: 4px; cursor: pointer; }
 .tool-dialog .dialog-checkbox input[type="checkbox"] { margin: 0; accent-color: var(--color-primary); }
 /* Note line of a dialog: reference `dialogs.css` 249-275 `.dialog-pdf-note` (MIT, see THIRD_PARTY_NOTICES.md), same name and values; the PDF print dialog uses it for its hint. */
 .dialog-pdf-note { margin: 0; color: var(--color-text-secondary); font-size: var(--font-size-sm); }
-/* The 작업 combo of the PDF split/merge dialog fills the row like the 쪽 범위 field under it (96px cut "다른 PDF 병합"). */
-#pdf-splitmerge-dialog .custom-select.dialog-select { flex: 1; width: auto; }
 .tool-dialog input:focus-visible, .tool-dialog select:focus-visible { border-color: var(--color-focus-border); box-shadow: 0 0 0 2px var(--ui-focus-soft); outline: none; }
 .tool-dialog input::placeholder, .tool-dialog textarea::placeholder { color: var(--color-text-placeholder); }
 .tool-dialog input:disabled, .tool-dialog select:disabled, .tool-dialog textarea:disabled { background: var(--ui-surface-muted); border-color: var(--color-border-lighter); color: var(--color-text-disabled); cursor: not-allowed; }

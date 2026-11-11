@@ -285,3 +285,16 @@ test("the dragged position of a dialog stays after it is closed; the find dialog
     assert.equal(wrap.style.transform, "translate(50px, 30px)", id + " keeps the position");
   }
 });
+
+test("combo boxes in dialogs have no fixed or stretched width anywhere, so they size to their content like the reference", async () => {
+  const { readFileSync, readdirSync } = await import("node:fs");
+  const dir = new URL("../crates/easyoffice-app/ui/", import.meta.url);
+  const offenders = [];
+  for (const name of readdirSync(dir).filter((n) => n.endsWith(".css"))) {
+    const css = readFileSync(new URL(name, dir), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    for (const [, selector, body] of css.matchAll(/([^{}]*dialog-select[^{}]*)\{([^}]*)\}/g)) {
+      if (/(^|;)\s*(width|min-width|max-width|flex(-grow|-basis)?)\s*:/.test(body)) offenders.push(name + ": " + selector.trim());
+    }
+  }
+  assert.deepEqual(offenders, []);
+});
