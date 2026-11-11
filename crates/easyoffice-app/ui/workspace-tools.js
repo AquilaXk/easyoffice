@@ -304,7 +304,12 @@
       let content;
       if (isConv) {
         const convSrc = document.getElementById("conv-src-fmt")?.value;
-        const input = await resolveConverterInput(convSrc, convSrc && convSrc !== "pages" ? convSrc : dstExt);
+        let input;
+        try {
+          input = await resolveConverterInput(convSrc, convSrc && convSrc !== "pages" ? convSrc : dstExt);
+        } catch (err) {
+          input = { problem: err?.message || String(err) };
+        }
         if (input.problem) {
           setStatusFeedback("문서 저장 실패 (" + dstExt.toUpperCase() + "): 원본 파일을 사용할 수 없습니다: " + input.problem);
           return false;

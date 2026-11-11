@@ -167,3 +167,30 @@ test("saving the PDF Studio sends rotation, watermark and stamp as page fields, 
   assert.doesNotMatch(body, /워터마크: |결재 스탬프: /);
   assert.match(body, /신청인/, "form fields stay in the body");
 });
+
+test("Ctrl+S in the converter shows why the source could not be read instead of failing silently", async () => {
+  const { host, document } = await createWebUiDom();
+  const tools = host.__EASYOFFICE_CREATE_WORKSPACE_TOOLS__(
+    {
+      document, URL, invokeIpc: async () => ({}), getActiveModule: () => "CONV",
+      docTabStore: {}, sheetDataStore: {}, slideDeckState: [],
+      sheetController: { commitPendingFocusedSheetCell: async () => {} },
+      enqueueWorkspaceHistoryOp: (op) => op(), getWindowBridge: () => null,
+      getFileOpen: () => ({ getConverterSource: () => null, converterSourceProblem: () => "" }),
+      getHwpSession: () => ({ getConverterSource: async () => { throw new Error("한글 문서를 변환용으로 내보내지 못했습니다: 편집기 응답 없음"); } }),
+    },
+    { saveActiveDocTabState() {}, ensureDefaultDocTabStore() {} }
+  );
+  document.getElementById("conv-src-fmt").value = "hwp";
+  document.getElementById("conv-dst-fmt").value = "docx";
+  assert.equal(await tools.saveActiveModuleDocument(), false);
+  assert.match(
+    document.getElementById("status-command-feedback").textContent,
+    /^문서 저장 실패 \(DOCX\): 원본 파일을 사용할 수 없습니다: 한글 문서를 변환용으로 내보내지 못했습니다/
+  );
+});
+
+test("the watermark input is limited to the length the engine accepts", async () => {
+  const { document } = await createConverterHarness();
+  assert.equal(document.getElementById("pdf-watermark-input").getAttribute("maxlength"), "200");
+});
