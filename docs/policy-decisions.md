@@ -2663,3 +2663,29 @@
 - **Trade-offs** 중복 키를 첫 일치로 좁히려고 이진 검색이 일치 뒤에도 왼쪽 절반을 더 봅니다(여전히 O(log N)). 오류 셀이 많으면 이웃 탐색이 길어질 수 있습니다.
 - **Alternatives rejected** 오류 셀을 항상 가장 큰 값으로 취급하기(내림차순 데이터와 어긋남), 정렬 수식 조정에서 다른 시트 참조를 건너뛰기(`shiftFormula`·표준 복사 규칙과 다름).
 - **Verified by** `cargo test -p easyoffice-sheet --lib`, `node --test scripts/test-webui-doc-paragraphs.mjs scripts/test-webui-file-open.mjs scripts/test-webui-sheet-session.mjs`.
+
+## PD-173. PDF 리더는 이미지·글꼴 스트림을 풀지 않고, 글자 해독은 쪽의 글꼴 리소스별로 한다
+
+- **Status** Implemented (`pdf_object_graph.rs`, `pdf_opaque_stream.rs`, `text_pdf_codecs.rs`, `pdf_stream_parser.rs`, `pdf_tounicode_map.rs`)
+- **Context** 텍스트 추출이 이미지 샘플과 글꼴 프로그램까지 풀어 32 MiB 예산을 썼습니다. 40 MiB로 풀리는 이미지 세 개를 가진 122,969 B PDF가 16 MiB 상한에서 거부됐습니다. `DCTDecode` 이미지는 지원하지 않는 필터로 거부됐습니다. 또 문서 전체의 `ToUnicode`를 맵 하나에 합치고 글꼴 이름이 `/F2`인 글꼴만 UTF-16BE로 읽었습니다.
+- **Decision (`PD-173`)**
+  1. **불투명 스트림**: 딕셔너리가 `/Subtype /Image`이거나, `/Length1`이 있거나(`FontFile`·`FontFile2`), `/Subtype`이 `Type1C`·`CIDFontType0C`·`OpenType`(`FontFile3`)인 스트림은 풀지 않고 예산에도 넣지 않습니다. 이미지는 선언한 쪽×높이가 2^30 픽셀을 넘으면 `ResourceBudgetExceeded`로 거부하고, 필터가 `FlateDecode` 하나인데 압축 데이터가 선언 크기의 DEFLATE 최대 팽창(1032배)에 못 미치면 `CorruptedContainer`로 거부합니다. `%EasyOfficePDFModelBase64:` 주석은 원본 바이트에서 찾아 있으면 거부합니다(풀지 않으므로 더 엄격한 검사). 콘텐츠 스트림·`ToUnicode`·객체 스트림·메타데이터는 이전처럼 풀고 예산을 씁니다. `/Contents`가 불투명 스트림을 가리키면 거부합니다.
+  2. **글꼴별 해독**: 쪽의 `/Resources /Font`(상위 `/Pages`에서 상속) 이름마다 그 글꼴의 `/ToUnicode` 맵 하나를 씁니다. 맵은 글꼴 사전이 가리키는 스트림마다 한 번만 읽습니다. UTF-16BE 우선 읽기는 `/Subtype /Type0`이고 `/Encoding` 이름에 `UCS2`나 `UTF16`이 든 글꼴(`UniKS-UCS2-H` 등)에만 씁니다. 리소스에 없는 이름은 맵 없음·UTF-16BE 아님으로 읽습니다.
+- **Why** 정상 스캔·사진 PDF가 열리고, 같은 글자 코드가 글꼴마다 다른 글자로 읽히는 문제가 없어집니다. 이미지는 텍스트 경로가 읽지 않으므로 풀 이유가 없습니다.
+- **Trade-offs** 글꼴 리소스가 없는 PDF의 `/F2`는 더 이상 UTF-16BE로 읽히지 않습니다(`BOM`이 붙은 문자열은 그대로 읽힘). 엔진이 쓰는 PDF는 리소스에 `Type0` 글꼴을 쓰므로 영향이 없습니다. `Type0`이어도 `Identity-H`이고 `ToUnicode`가 없으면 글자를 복원할 수 없습니다(이전에도 같음).
+- **Verified by** `cargo test -p easyoffice-formats --test pdf_reader_streams_and_fonts`(40 MiB 이미지·글꼴 프로그램·`DCTDecode`가 있는 PDF 열림, 선언 픽셀 초과·압축 부족 거부, 콘텐츠 스트림 예산 유지, 쪽별 `ToUnicode`, `Type0` 판정), `pdf_codecs_parity`, `docs/performance.md` 4.4절.
+- **Revisit when** 양식·주석 안의 글자를 읽어야 할 때(`XObject` 폼의 글꼴 리소스), `Identity-H` 글꼴의 `CIDToGIDMap` 해독이 필요할 때.
+
+## PD-174. 원본 HWP·HWPX를 PDF로 바꿀 때 파일 바이트를 그대로 셸에 넘기고, 요청의 쪽 설정을 전달한다
+
+- **Status** Implemented (`convert_structured.rs` `encode_source_target`, `convert_open.rs`, `doc_pdf.rs`)
+- **Revises PD-167 (1·2항)**: 원본 파일 변환 요청 중 원본이 HWP·HWPX인 경우에 한합니다.
+- **Context** `sourceBase64` 요청은 원본을 엔진 모델로 읽고 A4 HWPX로 다시 써서 셸에 넘겼습니다. 원본의 쪽 크기·여백·머리글·글꼴이 사라졌고, 요청의 `pdf` 객체(회전·워터마크·스탬프·형광펜)는 이 경로에서 읽지 않았습니다.
+- **Decision (`PD-174`)**
+  1. 원본이 `.hwp`·`.hwpx`이고 대상이 PDF이며 셸 렌더러가 있으면, 원본 바이트를 렌더러(rhwp `DocumentCore::from_bytes`는 둘 다 읽음)에 그대로 넘깁니다. 한도·대체 경로(실패 시 엔진 PDF와 경고)는 PD-167과 같습니다.
+  2. 원본 파일 요청도 `pdf` 객체를 읽어 렌더러(모든 원본)와 엔진 PDF에 전달합니다. 형광펜이 있으면 PD-167처럼 엔진 PDF를 씁니다.
+  3. 엔진 모델을 거치는 다른 원본(DOCX 등)은 그대로 HWPX로 다시 씁니다. 기관명(`official_agency`)은 모델에 있는 값이 HWPX에 쓰이고, 요청의 `blocks` 저장에는 기관명 필드가 없습니다(화면이 보내지 않음).
+- **Why** 원본 한글 문서의 배치가 PDF에 그대로 나옵니다. 모델을 거치며 잃던 서식이 없어집니다.
+- **Trade-offs** 원본이 `.hwp`·`.hwpx`일 때 응답의 `paragraphCount`·`tableCount`는 PD-167처럼 0일 수 있습니다.
+- **Verified by** `cargo test -p easyoffice-app --test rich_pdf_renderer`(원본 바이트가 같은 채 렌더러에 도착, 쪽 설정 전달, 형광펜은 엔진), `cargo test -p easyoffice-desktop a_native_hangul_source_is_drawn_from_its_own_bytes`(HWPX·HWP 원본이 한 쪽 PDF로 나오고 워터마크가 검색됨).
+- **Revisit when** 엔진 HWP 작성기 출력을 rhwp가 일부만 읽는 문제(엔진이 쓴 HWP의 영문 본문이 PDF에 빠짐)를 고칠 때.
