@@ -171,7 +171,8 @@
   //   open(fileName, base64)  -> { pages, sources, turn, stamp, watermark } | rejects with the reason (encrypted, over a limit, damaged)
   //   apply(op)               -> the same state; op is { kind: "turn", degrees } (every page), { kind: "rotate", degrees, pages? }
   //                              or { kind: "overlay", stamp, watermark } (empty text clears)
-  //   splitMerge()            -> { action: "merged" | "split" | "cancelled", count, pages, ... } (Rust asks which, and where)
+  //   splitMerge({ mode, ranges }) -> { action: "merged" | "split" | "cancelled", count, pages, ... } (mode "merge", "range" or
+  //                              "each"; ranges is the text of "range", e.g. "1-3, 5, 7-"; Rust asks which files, or which folder)
   //   save()                  -> { status: "saved", name, bytes, pages } | { status: "cancelled" }
   const pdfEdit = Object.freeze({
     async open(fileName, base64) {
@@ -184,8 +185,11 @@
       if (Number.isSafeInteger(res?.pages)) return res;
       throw new Error("PDF 편집 결과를 확인하지 못했습니다.");
     },
-    async splitMerge() {
-      const res = await callShell(PDF_EDIT_COMMANDS.splitMerge, {});
+    async splitMerge(choice) {
+      const res = await callShell(PDF_EDIT_COMMANDS.splitMerge, {
+        mode: String(choice?.mode),
+        ranges: choice?.ranges ? String(choice.ranges) : null,
+      });
       if (res && ["merged", "split", "cancelled"].includes(res.action) && Number.isSafeInteger(res.count)) return res;
       throw new Error("분할·병합 결과를 확인하지 못했습니다.");
     },

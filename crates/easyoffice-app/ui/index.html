@@ -966,6 +966,31 @@
       </div>
     </dialog>
 
+    <dialog id="pdf-splitmerge-dialog" class="tool-dialog" aria-labelledby="pdf-splitmerge-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="pdf-splitmerge-title">페이지 분할·병합</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row">
+            <label class="dialog-label" for="pdf-splitmerge-mode">작업</label>
+            <select id="pdf-splitmerge-mode" class="sb-combo dialog-select">
+              <option value="merge" selected>다른 PDF 병합</option>
+              <option value="range">쪽 범위로 분할</option>
+              <option value="each">쪽별로 분할</option>
+            </select>
+          </div>
+          <div class="dialog-row">
+            <label class="dialog-label" for="pdf-splitmerge-range">쪽 범위</label>
+            <input id="pdf-splitmerge-range" class="dialog-input" type="text" placeholder="1-3, 5, 7-" autocomplete="off" disabled />
+          </div>
+          <p id="pdf-splitmerge-hint" class="formula-result"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-pdf-splitmerge-run" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
     <dialog id="about-dialog" class="tool-dialog" aria-labelledby="about-dialog-title">
       <div class="dialog-wrap">
         <div class="dialog-title"><span id="about-dialog-title">제품 정보</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>

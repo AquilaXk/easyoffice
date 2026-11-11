@@ -25,21 +25,13 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use tauri::{AppHandle, Manager, State, WebviewWindow};
-use tauri_plugin_dialog::{
-    DialogExt, MessageDialogButtons, MessageDialogKind, MessageDialogResult,
-};
+use tauri_plugin_dialog::DialogExt;
 
 const MSG_NO_SESSION: &str = "편집할 원본 PDF가 없습니다.";
 const MSG_CHANGED: &str = "작업하는 사이 문서가 바뀌어 중단했습니다. 다시 시도해 주세요.";
 const MSG_READ_FAILED: &str = "선택한 PDF 파일을 읽지 못했습니다.";
 const MSG_BASE64: &str = "PDF 데이터가 올바른 Base64가 아닙니다.";
 const MSG_ONLY_PDF: &str = "PDF 파일만 편집할 수 있습니다.";
-const SPLIT_MERGE_TITLE: &str = "페이지 분할·병합";
-const SPLIT_MERGE_MESSAGE: &str =
-    "다른 PDF를 이어 붙이거나(병합), 쪽마다 파일 하나씩으로 나눕니다(분할).\n어느 쪽을 할까요?";
-const CHOICE_MERGE: &str = "병합";
-const CHOICE_SPLIT: &str = "쪽별 분할";
-const CHOICE_CANCEL: &str = "취소";
 /// The longest file name stem that is kept for the names of the results (characters).
 const MAX_STEM_CHARS: usize = 80;
 
@@ -215,24 +207,17 @@ fn split_file_name_of(stem: &str, range: &Range<usize>) -> String {
     }
 }
 
-/// What the user chose in the merge-or-split dialog.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SplitMerge {
+/// What `pdf_edit_split_merge` is asked to do. The page's dialog (`pdf-edit.js`) offers the three;
+/// an unknown name fails to deserialize and the command is refused.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum SplitMergeMode {
+    /// Append other PDFs (a multi-file open dialog).
     Merge,
-    Split,
-    Cancel,
-}
-
-/// The answer of the three-button dialog: the label of a custom button, or yes / no / cancel
-/// depending on the system. Closing the dialog is cancel.
-fn split_merge_choice(result: MessageDialogResult) -> SplitMerge {
-    match result {
-        MessageDialogResult::Yes => SplitMerge::Merge,
-        MessageDialogResult::No => SplitMerge::Split,
-        MessageDialogResult::Custom(label) if label == CHOICE_MERGE => SplitMerge::Merge,
-        MessageDialogResult::Custom(label) if label == CHOICE_SPLIT => SplitMerge::Split,
-        _ => SplitMerge::Cancel,
-    }
+    /// One file for each range of pages the page typed (`1-3, 5, 7-`).
+    Range,
+    /// One file for each page.
+    Each,
 }
 
 fn worker_failed(err: tauri::Error) -> IpcError {
@@ -316,69 +301,50 @@ pub struct PdfSplitMerge {
     state: PdfEditState,
 }
 
-/// Asks "병합 / 쪽별 분할 / 취소" in a native dialog, then merges (a multi-file open dialog; the
-/// files are appended after the current pages) or splits (a folder dialog; one file per page).
+/// Merges or splits the window's PDF as the page's dialog chose. A merge asks which PDFs in a
+/// native open dialog and appends their pages after the current ones; a split asks for a folder
+/// and writes one file for each range (`ranges`, or each page when the mode is `each`). Ranges
+/// that cannot be read are refused before any dialog opens.
 #[tauri::command]
 pub async fn pdf_edit_split_merge(
     _caller: ShellCaller,
     app: AppHandle,
     window: WebviewWindow,
     edits: State<'_, Arc<PdfEdits>>,
+    mode: SplitMergeMode,
+    ranges: Option<String>,
 ) -> Result<PdfSplitMerge, IpcError> {
     let label = window.label().to_string();
     let (session, version) = edits.snapshot(&label).map_err(IpcError::new)?;
-    let choice = ask_split_or_merge(&app, &window).await?;
-    let outcome = match choice {
-        SplitMerge::Cancel => None,
-        SplitMerge::Merge => merge_flow(&app, &window, session.clone())
-            .await?
-            .map(|(merged, count)| (merged, "merged", count)),
-        SplitMerge::Split => split_flow(&app, &window, &session)
-            .await?
-            .map(|count| (session.clone(), "split", count)),
-    };
-    let Some((session, action, count)) = outcome else {
-        return Ok(PdfSplitMerge {
-            action: "cancelled",
-            count: 0,
-            state: PdfEditState::of(&session),
-        });
+    let (merged, action, count) = match mode {
+        SplitMergeMode::Merge => match merge_flow(&app, &window, session.clone()).await? {
+            Some((merged, count)) => (Some(merged), "merged", count),
+            None => (None, "cancelled", 0),
+        },
+        SplitMergeMode::Range | SplitMergeMode::Each => {
+            let spec = (mode == SplitMergeMode::Range).then_some(ranges.as_deref().unwrap_or(""));
+            let parts = session.split_ranges(spec).map_err(IpcError::new)?;
+            match split_flow(&app, &window, &session, parts).await? {
+                Some(count) => (None, "split", count),
+                None => (None, "cancelled", 0),
+            }
+        }
     };
     // A split writes files and leaves the session as it was; only a merge changes it.
-    if action == "merged" {
-        edits
-            .commit(&label, version, session.clone())
-            .map_err(IpcError::new)?;
-    }
+    let session = match merged {
+        Some(merged) => {
+            edits
+                .commit(&label, version, merged.clone())
+                .map_err(IpcError::new)?;
+            merged
+        }
+        None => session,
+    };
     Ok(PdfSplitMerge {
         action,
         count,
         state: PdfEditState::of(&session),
     })
-}
-
-async fn ask_split_or_merge(
-    app: &AppHandle,
-    window: &WebviewWindow,
-) -> Result<SplitMerge, IpcError> {
-    let (app, window) = (app.clone(), window.clone());
-    tauri::async_runtime::spawn_blocking(move || {
-        split_merge_choice(
-            app.dialog()
-                .message(SPLIT_MERGE_MESSAGE)
-                .title(SPLIT_MERGE_TITLE)
-                .kind(MessageDialogKind::Info)
-                .parent(&window)
-                .buttons(MessageDialogButtons::YesNoCancelCustom(
-                    CHOICE_MERGE.to_string(),
-                    CHOICE_SPLIT.to_string(),
-                    CHOICE_CANCEL.to_string(),
-                ))
-                .blocking_show_with_result(),
-        )
-    })
-    .await
-    .map_err(|err| IpcError::new(format!("확인 창을 열지 못했습니다: {err}")))
 }
 
 /// Which PDFs to append: a multi-file open dialog, the files read in Rust, then merged under the
@@ -449,14 +415,14 @@ fn read_pdfs(paths: &[PathBuf]) -> Result<Vec<Vec<u8>>, String> {
         .collect()
 }
 
-/// Which folder gets the files: a folder dialog, then one file per page (`보고서_3.pdf`). Nothing is
+/// Which folder gets the files: a folder dialog, then one file for each range (`보고서_1-3.pdf`). Nothing is
 /// overwritten: if any name is taken, nothing is written. `None` when the dialog was cancelled.
 async fn split_flow(
     app: &AppHandle,
     window: &WebviewWindow,
     session: &EditSession,
+    ranges: Vec<Range<usize>>,
 ) -> Result<Option<usize>, IpcError> {
-    let ranges = session.split_ranges(None).map_err(IpcError::new)?;
     let (tx, rx) = std::sync::mpsc::channel();
     app.dialog()
         .file()
@@ -760,28 +726,18 @@ mod tests {
     }
 
     #[test]
-    fn the_dialog_answers_map_to_a_choice_and_closing_is_cancel() {
-        use MessageDialogResult as R;
-        assert_eq!(split_merge_choice(R::Yes), SplitMerge::Merge);
-        assert_eq!(split_merge_choice(R::No), SplitMerge::Split);
-        assert_eq!(
-            split_merge_choice(R::Custom(CHOICE_MERGE.into())),
-            SplitMerge::Merge
-        );
-        assert_eq!(
-            split_merge_choice(R::Custom(CHOICE_SPLIT.into())),
-            SplitMerge::Split
-        );
-        assert_eq!(
-            split_merge_choice(R::Custom(CHOICE_CANCEL.into())),
-            SplitMerge::Cancel
-        );
-        assert_eq!(split_merge_choice(R::Cancel), SplitMerge::Cancel);
-        assert_eq!(split_merge_choice(R::Ok), SplitMerge::Cancel);
-        assert_eq!(
-            split_merge_choice(R::Custom("다른 글자".into())),
-            SplitMerge::Cancel
-        );
+    fn the_modes_of_a_split_or_merge_are_the_three_the_dialog_offers() {
+        for (name, mode) in [
+            ("merge", SplitMergeMode::Merge),
+            ("range", SplitMergeMode::Range),
+            ("each", SplitMergeMode::Each),
+        ] {
+            let parsed: SplitMergeMode = serde_json::from_value(serde_json::json!(name)).unwrap();
+            assert_eq!(parsed, mode);
+        }
+        for bad in ["", "Merge", "split", "ask", "merge ", "range,each"] {
+            assert!(serde_json::from_value::<SplitMergeMode>(serde_json::json!(bad)).is_err());
+        }
     }
 
     #[test]

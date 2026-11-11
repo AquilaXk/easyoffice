@@ -369,13 +369,13 @@ test("the desktop bridge's PDF edit sends the opened bytes once, small ops after
   answers.push(state, state, { action: "merged", count: 1, ...state }, { status: "saved", name: "a.pdf", bytes: 3, pages: 3 }, { status: "cancelled" });
   assert.deepEqual(await pdfEdit.open("보고서.pdf", "QUJD"), state);
   assert.deepEqual(await pdfEdit.apply({ kind: "turn", degrees: 90 }), state);
-  assert.equal((await pdfEdit.splitMerge()).action, "merged");
+  assert.equal((await pdfEdit.splitMerge({ mode: "range", ranges: "1-2" })).action, "merged");
   assert.equal((await pdfEdit.save()).status, "saved");
   assert.equal((await pdfEdit.save()).status, "cancelled");
   assert.deepEqual(calls.map(({ command, args }) => [command, args]), [
     ["pdf_edit_open", { fileName: "보고서.pdf", base64: "QUJD" }],
     ["pdf_edit_apply", { op: { kind: "turn", degrees: 90 } }],
-    ["pdf_edit_split_merge", {}],
+    ["pdf_edit_split_merge", { mode: "range", ranges: "1-2" }],
     ["pdf_edit_save", {}],
     ["pdf_edit_save", {}],
   ]);

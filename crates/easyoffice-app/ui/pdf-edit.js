@@ -76,13 +76,87 @@
       return res.status === "cancelled" ? { cancelled: true } : { cancelled: false, name: String(res.name || ""), bytes: res.bytes, pages: res.pages };
     }
 
-    // 페이지 분할·병합: the shell asks (병합 / 쪽별 분할 / 취소) and does it. Resolves the sentence
-    // for the status line and the badge.
+    // ---- 페이지 분할·병합 dialog ---------------------------------------------------------------
+
+    const MODE_HINTS = {
+      merge: "고른 PDF의 쪽을 현재 쪽 뒤에 붙입니다. 실행 취소로 되돌릴 수 없습니다.",
+      range: "쪽 범위마다 파일 하나로 저장합니다. 예: 1-3, 5, 7-",
+      each: "쪽마다 파일 하나로 저장합니다.",
+    };
+    const RANGE_MISSING = "쪽 범위를 입력해 주세요. 예: 1-3, 5, 7-";
+    let pendingChoice = null;
+    let dialogBound = false;
+
+    const field = (id) => document.getElementById(id);
+
+    function finishChoice(choice) {
+      const resolve = pendingChoice;
+      pendingChoice = null;
+      if (resolve) resolve(choice);
+    }
+
+    function syncMode() {
+      const mode = field("pdf-splitmerge-mode").value;
+      const range = field("pdf-splitmerge-range");
+      range.disabled = mode !== "range";
+      field("pdf-splitmerge-hint").textContent = MODE_HINTS[mode] || "";
+    }
+
+    function confirmChoice() {
+      const mode = field("pdf-splitmerge-mode").value;
+      const ranges = field("pdf-splitmerge-range").value.trim();
+      if (mode === "range" && !ranges) {
+        field("pdf-splitmerge-hint").textContent = RANGE_MISSING;
+        return;
+      }
+      finishChoice({ mode, ranges: mode === "range" ? ranges : "" });
+      field("pdf-splitmerge-dialog").close?.();
+    }
+
+    function bindDialog() {
+      if (dialogBound) return;
+      dialogBound = true;
+      const dialog = field("pdf-splitmerge-dialog");
+      field("pdf-splitmerge-mode").addEventListener("change", syncMode);
+      field("btn-pdf-splitmerge-run").addEventListener("click", confirmChoice);
+      field("pdf-splitmerge-range").addEventListener("keydown", (ev) => {
+        if (ev.key !== "Enter") return;
+        ev.preventDefault?.();
+        confirmChoice();
+      });
+      // Close button, 취소, Esc and a click on the backdrop all end the dialog without a choice.
+      dialog.addEventListener("close", () => finishChoice(null));
+      for (const closer of dialog.querySelectorAll("[data-dialog-close]")) closer.addEventListener("click", () => finishChoice(null));
+    }
+
+    // Shows the dialog and resolves what was chosen ({ mode, ranges }) or null.
+    function chooseSplitMerge() {
+      const dialog = field("pdf-splitmerge-dialog");
+      if (!dialog || typeof dialog.showModal !== "function") return Promise.resolve(null);
+      bindDialog();
+      finishChoice(null);
+      const mode = field("pdf-splitmerge-mode");
+      mode.value = "merge";
+      host.__EASYOFFICE_CUSTOM_SELECT__?.syncCustomSelect?.(mode);
+      field("pdf-splitmerge-range").value = "";
+      syncMode();
+      return new Promise((resolve) => {
+        pendingChoice = resolve;
+        dialog.showModal();
+      });
+    }
+
+    // 페이지 분할·병합: the dialog asks what to do, the shell asks which files or which folder and does
+    // it. Resolves the sentence for the status line and the badge.
     async function splitMerge() {
+      const choice = await chooseSplitMerge();
+      if (!choice) return "페이지 분할·병합을 취소했습니다";
       try {
-        const res = await shell().splitMerge();
+        const res = await shell().splitMerge(choice);
         if (res.action === "merged") return "PDF " + res.count + "개를 이어 붙였습니다 (총 " + res.pages + "쪽 · 실행 취소로 되돌릴 수 없습니다)";
-        if (res.action === "split") return "쪽마다 " + res.count + "개 파일로 나누어 저장했습니다";
+        if (res.action === "split") {
+          return (choice.mode === "range" ? "쪽 범위 " + res.count + "개를 파일로 나누어 저장했습니다" : "쪽마다 " + res.count + "개 파일로 나누어 저장했습니다");
+        }
         return "페이지 분할·병합을 취소했습니다";
       } catch (err) {
         return "페이지 분할·병합 실패: " + reason(err);

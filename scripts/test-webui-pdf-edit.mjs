@@ -135,28 +135,105 @@ test("a failed save says why and is not reported as saved", async () => {
   assert.match(feedback(document), /문서 저장 실패 \(PDF\): 디스크 공간이 부족합니다\./);
 });
 
-test("페이지 분할·병합 is done by the shell on the opened file and the badge says what happened", async () => {
+const dialogOf = (document) => document.getElementById("pdf-splitmerge-dialog");
+const badgeOf = (document) => document.querySelector("#pdf-page-card .pdf-splitmerge-badge")?.textContent;
+
+function choose(document, mode, ranges = "") {
+  const select = document.getElementById("pdf-splitmerge-mode");
+  select.value = mode;
+  select.dispatchEvent({ type: "change", target: select });
+  document.getElementById("pdf-splitmerge-range").value = ranges;
+}
+
+test("페이지 분할·병합 opens the tool dialog on the opened file and merging asks the shell", async () => {
   const { document, named, userClick } = await createPdfShell();
   await open(document);
   userClick(commandItem(document, "pdf-mod-splitmerge"));
   await flushAsyncTurns(12);
-  assert.equal(named("pdf_edit_split_merge").length, 1);
-  const badge = document.querySelector("#pdf-page-card .pdf-splitmerge-badge");
-  assert.match(badge.textContent, /PDF 2개를 이어 붙였습니다 \(총 7쪽 · 실행 취소로 되돌릴 수 없습니다\)/);
+  const dialog = dialogOf(document);
+  assert.equal(dialog.open, true);
+  assert.equal(named("pdf_edit_split_merge").length, 0, "nothing is done before the dialog is confirmed");
+  assert.equal(document.getElementById("pdf-splitmerge-mode").value, "merge");
+  assert.equal(document.getElementById("pdf-splitmerge-range").disabled, true, "the range field waits for 범위 분할");
+  assert.match(document.getElementById("pdf-splitmerge-hint").textContent, /현재 쪽 뒤에 붙입니다/);
+  userClick(document.getElementById("btn-pdf-splitmerge-run"));
+  await flushAsyncTurns(12);
+  assert.equal(dialog.open, false);
+  assert.deepEqual(named("pdf_edit_split_merge").map((c) => c.args), [{ mode: "merge", ranges: null }]);
+  assert.match(badgeOf(document), /PDF 2개를 이어 붙였습니다 \(총 7쪽 · 실행 취소로 되돌릴 수 없습니다\)/);
 });
 
-test("a split reports how many files were written and a cancel says so", async () => {
-  const split = await createPdfShell({ splitMerge: () => ({ action: "split", count: 3, pages: 3 }) });
-  await open(split.document);
-  split.userClick(commandItem(split.document, "pdf-mod-splitmerge"));
+test("a range split needs a range, sends the text as typed and reports the files written", async () => {
+  const { document, named, userClick } = await createPdfShell({ splitMerge: () => ({ action: "split", count: 3, pages: 9, sources: 1, turn: 0, stamp: null, watermark: null }) });
+  await open(document);
+  userClick(commandItem(document, "pdf-mod-splitmerge"));
   await flushAsyncTurns(12);
-  assert.match(split.document.querySelector("#pdf-page-card .pdf-splitmerge-badge").textContent, /쪽마다 3개 파일로 나누어 저장했습니다/);
+  choose(document, "range", "");
+  assert.equal(document.getElementById("pdf-splitmerge-range").disabled, false);
+  userClick(document.getElementById("btn-pdf-splitmerge-run"));
+  await flushAsyncTurns(6);
+  assert.equal(dialogOf(document).open, true, "an empty range keeps the dialog open");
+  assert.match(document.getElementById("pdf-splitmerge-hint").textContent, /쪽 범위를 입력해 주세요/);
+  assert.equal(named("pdf_edit_split_merge").length, 0);
+  choose(document, "range", " 1-3, 5, 7- ");
+  userClick(document.getElementById("btn-pdf-splitmerge-run"));
+  await flushAsyncTurns(12);
+  assert.deepEqual(named("pdf_edit_split_merge").map((c) => c.args), [{ mode: "range", ranges: "1-3, 5, 7-" }]);
+  assert.match(badgeOf(document), /쪽 범위 3개를 파일로 나누어 저장했습니다/);
+});
 
-  const cancelled = await createPdfShell({ splitMerge: () => ({ action: "cancelled", count: 0, pages: 3 }) });
+test("a split by page sends no range even if one was typed before the mode changed", async () => {
+  const { document, named, userClick } = await createPdfShell({ splitMerge: () => ({ action: "split", count: 3, pages: 3, sources: 1, turn: 0, stamp: null, watermark: null }) });
+  await open(document);
+  userClick(commandItem(document, "pdf-mod-splitmerge"));
+  await flushAsyncTurns(12);
+  choose(document, "range", "2-3");
+  choose(document, "each", "2-3");
+  assert.equal(document.getElementById("pdf-splitmerge-range").disabled, true);
+  userClick(document.getElementById("btn-pdf-splitmerge-run"));
+  await flushAsyncTurns(12);
+  assert.deepEqual(named("pdf_edit_split_merge").map((c) => c.args), [{ mode: "each", ranges: null }]);
+  assert.match(badgeOf(document), /쪽마다 3개 파일로 나누어 저장했습니다/);
+});
+
+test("cancelling the dialog, its close button and Esc do nothing to the file", async () => {
+  for (const how of ["cancel", "x", "esc"]) {
+    const { document, named, userClick } = await createPdfShell();
+    await open(document);
+    userClick(commandItem(document, "pdf-mod-splitmerge"));
+    await flushAsyncTurns(12);
+    const dialog = dialogOf(document);
+    assert.equal(dialog.open, true, how);
+    if (how === "cancel") userClick(dialog.querySelector(".dialog-footer [data-dialog-close]"));
+    else if (how === "x") userClick(dialog.querySelector(".dialog-title [data-dialog-close]"));
+    else {
+      dialog.close();
+      dialog.dispatchEvent({ type: "close", target: dialog });
+    }
+    await flushAsyncTurns(12);
+    assert.equal(dialog.open, false, how);
+    assert.equal(named("pdf_edit_split_merge").length, 0, how);
+    assert.match(badgeOf(document), /분할·병합을 취소했습니다/, how);
+  }
+});
+
+test("a merge the shell cancels or refuses is reported, not mistaken for a merge", async () => {
+  const cancelled = await createPdfShell({ splitMerge: () => ({ action: "cancelled", count: 0, pages: 3, sources: 1, turn: 0, stamp: null, watermark: null }) });
   await open(cancelled.document);
   cancelled.userClick(commandItem(cancelled.document, "pdf-mod-splitmerge"));
   await flushAsyncTurns(12);
-  assert.match(cancelled.document.querySelector("#pdf-page-card .pdf-splitmerge-badge").textContent, /분할·병합을 취소했습니다/);
+  cancelled.userClick(cancelled.document.getElementById("btn-pdf-splitmerge-run"));
+  await flushAsyncTurns(12);
+  assert.match(badgeOf(cancelled.document), /분할·병합을 취소했습니다/);
+
+  const refused = await createPdfShell({ splitMerge: () => { throw { status: "error", message: "쪽 범위를 읽을 수 없습니다." }; } });
+  await open(refused.document);
+  refused.userClick(commandItem(refused.document, "pdf-mod-splitmerge"));
+  await flushAsyncTurns(12);
+  choose(refused.document, "range", "x");
+  refused.userClick(refused.document.getElementById("btn-pdf-splitmerge-run"));
+  await flushAsyncTurns(12);
+  assert.match(badgeOf(refused.document), /페이지 분할·병합 실패: 쪽 범위를 읽을 수 없습니다\./);
 });
 
 test("a PDF the shell refuses keeps the text model path: the reason is shown and saving is the old save", async () => {
