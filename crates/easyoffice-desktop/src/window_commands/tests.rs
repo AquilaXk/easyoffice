@@ -253,3 +253,26 @@ fn the_open_size_limit_is_the_pages_limit_of_the_kind() {
         "empty"
     );
 }
+
+/// A file opened through a symbolic link is one document under two names: the registry,
+/// tracking and saving use the real file, while the title, the page's file type and the recent
+/// list keep the name the user opened it by.
+#[cfg(unix)]
+#[test]
+fn a_file_opened_through_a_link_keeps_the_links_name() {
+    let dir = scratch_dir("open-link");
+    let real = dir.join("data").join("a1b2c3.docx");
+    fs::create_dir_all(real.parent().unwrap()).unwrap();
+    fs::write(&real, b"x").unwrap();
+    let link = dir.join("분기 보고서.docx");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    let target = OpenTarget::of(&link).unwrap();
+    assert_eq!(target.canonical, fs::canonicalize(&real).unwrap());
+    assert_eq!(display_name(&target.shown), "분기 보고서.docx");
+    assert_eq!(WindowKind::for_path(&target.shown), Some(WindowKind::Doc));
+    // A plain file is shown as the disk names it (the case of the name on a case-insensitive disk).
+    let plain = OpenTarget::of(&real).unwrap();
+    assert_eq!(plain.shown, plain.canonical);
+    assert!(OpenTarget::of(&dir.join("missing.docx")).is_err());
+    let _ = fs::remove_dir_all(&dir);
+}

@@ -457,12 +457,34 @@ fn focus_window(app: &AppHandle, label: &str) {
     }
 }
 
+/// The file an open names. `canonical` is where it really is: the registry key, the tracked path
+/// and the file that is read and saved. `shown` is the path the document goes by: its title, the
+/// file type the page reads it as and the recent list. They differ only when the opened path is a
+/// symbolic link, which keeps its own name.
+struct OpenTarget {
+    canonical: PathBuf,
+    shown: PathBuf,
+}
+
+impl OpenTarget {
+    fn of(path: &Path) -> std::io::Result<Self> {
+        let canonical = fs::canonicalize(path)?;
+        let is_link = fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink());
+        let shown = if is_link {
+            std::path::absolute(path).unwrap_or_else(|_| canonical.clone())
+        } else {
+            canonical.clone()
+        };
+        Ok(Self { canonical, shown })
+    }
+}
+
 /// Opens the document at `path` in its own window, or focuses the window that already has it.
 pub fn open_path(app: &AppHandle, path: &Path) -> Result<OpenOutcome, String> {
-    let canonical = fs::canonicalize(path)
-        .map_err(|err| open_failure("파일을 찾을 수 없습니다", path, &err))?;
-    let kind = WindowKind::for_path(&canonical)
-        .ok_or_else(|| format!("{} ({})", UNSUPPORTED, display_name(&canonical)))?;
+    let OpenTarget { canonical, shown } =
+        OpenTarget::of(path).map_err(|err| open_failure("파일을 찾을 수 없습니다", path, &err))?;
+    let name = display_name(&shown);
+    let kind = WindowKind::for_path(&shown).ok_or_else(|| format!("{UNSUPPORTED} ({name})"))?;
     let state = app.state::<AppWindows>();
     let key = path_key(&canonical);
     let existing = locked(&state.registry).find_by_path(&key).map(String::from);
@@ -473,7 +495,7 @@ pub fn open_path(app: &AppHandle, path: &Path) -> Result<OpenOutcome, String> {
     }
     let meta = fs::metadata(&canonical)
         .map_err(|err| open_failure("파일 정보를 읽지 못했습니다", &canonical, &err))?;
-    check_open_size(kind, meta.len(), &display_name(&canonical))?;
+    check_open_size(kind, meta.len(), &name)?;
     let bytes = fs::read(&canonical)
         .map_err(|err| open_failure("파일을 읽지 못했습니다", &canonical, &err))?;
     // Metadata from before the read, hash of the bytes the editor receives: a change in between
@@ -495,7 +517,7 @@ pub fn open_path(app: &AppHandle, path: &Path) -> Result<OpenOutcome, String> {
     locked(&state.pending).push(
         &label,
         PendingOpen {
-            name: display_name(&canonical),
+            name: name.clone(),
             bytes,
         },
     );
@@ -504,13 +526,10 @@ pub fn open_path(app: &AppHandle, path: &Path) -> Result<OpenOutcome, String> {
         locked(&state.pending).discard(&label);
         locked(&state.files).untrack(&label);
         eprintln!("open: {err}");
-        return Err(format!(
-            "문서 창을 만들지 못했습니다 ({})",
-            display_name(&canonical)
-        ));
+        return Err(format!("문서 창을 만들지 못했습니다 ({name})"));
     }
-    state.remember(app, &canonical);
-    crate::os_recent::note_recent_document(app, &canonical);
+    state.remember(app, &shown);
+    crate::os_recent::note_recent_document(app, &shown);
     close_empty_start_windows(app);
     Ok(OpenOutcome::OPENED)
 }
@@ -552,7 +571,7 @@ pub fn note_saved_path(
     path: &Path,
     fingerprint: Option<Fingerprint>,
 ) {
-    let Ok(canonical) = fs::canonicalize(path) else {
+    let Ok(OpenTarget { canonical, shown }) = OpenTarget::of(path) else {
         return;
     };
     let state = app.state::<AppWindows>();
@@ -566,8 +585,8 @@ pub fn note_saved_path(
         }
         _ => locked(&state.files).untrack(label),
     }
-    state.remember(app, &canonical);
-    crate::os_recent::note_recent_document(app, &canonical);
+    state.remember(app, &shown);
+    crate::os_recent::note_recent_document(app, &shown);
 }
 
 /// The file this window's document came from (or was last saved to), if any. Rust-internal.
