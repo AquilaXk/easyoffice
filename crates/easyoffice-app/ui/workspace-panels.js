@@ -68,7 +68,7 @@
     editor.classList.toggle("manuscript-grid", Boolean(ls.manuscriptGrid));
   }
 
-  const { serializeDomChildren, restoreDomChildren } = host.__EASYOFFICE_SHEET_UTILS__;
+  const { serializeDomChildren, restoreDomChildren, releaseDocImageUrls } = host.__EASYOFFICE_SHEET_UTILS__;
 
   function insertBeforeDocFooter(docEditor, el) {
     const footer = docEditor.querySelector("footer.doc-page-footer");
@@ -669,6 +669,7 @@
       const editor = document.getElementById("doc-editor");
       if (editor) {
         restoreDomChildren(editor, saved.editorNodes || [], document);
+        releaseDocImageUrls(editor);
         applyDocLayoutStyle(editor, saved.layoutStyle);
       }
       const roleVal = editor?.dataset?.styleRole || (mod === "HWP" ? "공문서 바탕글" : "바탕글");

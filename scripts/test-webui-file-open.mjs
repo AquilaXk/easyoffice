@@ -582,6 +582,14 @@ const RICH_MODEL = {
 // The pixel size is informational on open; a save sends the bytes and the display size only.
 const SAVED_RICH_BLOCKS = RICH_MODEL.blocks.map(({ widthPx, heightPx, ...rest }) => rest);
 
+test("opening another document revokes the blob URLs of pictures the editor no longer shows", async () => {
+  const { document, revokedUrls } = await createOpenHarness();
+  await pickFile(document, fixtureFile("그림.docx", RICH_MODEL));
+  assert.equal(revokedUrls.length, 0, "a shown picture keeps its URL");
+  await pickFile(document, fixtureFile("글.docx", { title: "글", blocks: [{ type: "paragraph", runs: [{ text: "본문" }] }] }));
+  assert.equal(revokedUrls.length, 1);
+});
+
 test("pictures, super/subscripts, indents and line spacing show in the editor", async () => {
   const { document } = await createOpenHarness();
   await pickFile(document, fixtureFile("그림.docx", RICH_MODEL));

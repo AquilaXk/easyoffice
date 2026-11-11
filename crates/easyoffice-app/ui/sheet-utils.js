@@ -807,6 +807,18 @@
     return entry.url;
   }
 
+  // Revokes the blob: URL of every stored picture that `root` no longer shows. The bytes stay (an
+  // undo can bring the picture back, and `docImageUrl` then makes a fresh URL).
+  function releaseDocImageUrls(root) {
+    const shown = new Set();
+    root?.querySelectorAll?.("img[data-eo-image-id]").forEach((img) => shown.add(img.dataset.eoImageId));
+    docImages.forEach((entry, id) => {
+      if (!entry.url || shown.has(id)) return;
+      host.URL?.revokeObjectURL?.(entry.url);
+      entry.url = null;
+    });
+  }
+
   function hydrateDocImage(el, data) {
     const url = docImageUrl(data.eoImageId);
     if (url) el.setAttribute("src", url);
@@ -860,5 +872,6 @@
     registerDocImage,
     getDocImage,
     docImageUrl,
+    releaseDocImageUrls,
   };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);
