@@ -304,13 +304,25 @@ impl PdfExports {
     }
 }
 
-/// The folders of the shared font database: the installer's bundled font. The first caller of
-/// `shared_font_db` decides them, so the PDF export and the editor's font list both pass these.
+/// The Windows font folder as WSL mounts it; the system font scan of Linux does not look there.
+const WSL_WINDOWS_FONT_DIR: &str = "/mnt/c/Windows/Fonts";
+
+/// `dir` when this is Linux (WSL) and the folder exists.
+fn wsl_windows_font_dir(dir: &Path) -> Option<PathBuf> {
+    (cfg!(target_os = "linux") && dir.is_dir()).then(|| dir.to_path_buf())
+}
+
+/// The folders of the shared font database: the installer's bundled font, plus the Windows fonts
+/// under WSL. The first caller of `shared_font_db` decides them, so the PDF export and the
+/// editor's font list both pass these.
 pub fn pdf_font_dirs(app: &AppHandle) -> Vec<PathBuf> {
-    app.path()
+    let mut dirs: Vec<PathBuf> = app
+        .path()
         .resource_dir()
         .map(|dir| vec![dir.join(PDF_FONT_DIR)])
-        .unwrap_or_default()
+        .unwrap_or_default();
+    dirs.extend(wsl_windows_font_dir(Path::new(WSL_WINDOWS_FONT_DIR)));
+    dirs
 }
 
 fn worker_failed(err: tauri::Error) -> IpcError {
@@ -421,6 +433,15 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn wsl_windows_font_dir_only_counts_on_linux_when_the_folder_exists() {
+        let dir = scratch_dir("wsl-fonts");
+        let expected = cfg!(target_os = "linux").then(|| dir.clone());
+        assert_eq!(wsl_windows_font_dir(&dir), expected);
+        assert_eq!(wsl_windows_font_dir(&dir.join("missing")), None);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     fn page() -> String {
