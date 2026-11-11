@@ -194,9 +194,11 @@ pub struct Written {
 /// Writes through a uniquely named sibling temporary file and renames it into place, so a failed
 /// write never leaves a truncated document where an existing one used to be, and two saves into the
 /// same folder never share a temporary file. `fs::rename` replaces an existing file on Windows too
-/// (`MoveFileExW` with `MOVEFILE_REPLACE_EXISTING`).
+/// (`MoveFileExW` with `MOVEFILE_REPLACE_EXISTING`). A symbolic link as `path` is saved through to
+/// its target.
 pub fn write_document_bytes(path: &Path, bytes: &[u8]) -> Result<Written, SaveError> {
     let failed = |err: std::io::Error| SaveError::from_io(path, &err);
+    let path = &resolve_link(path).map_err(failed)?;
     let (tmp_path, tmp_file) = create_unique_sibling(path).map_err(failed)?;
     if let Err(err) = write_then_rename(&tmp_path, tmp_file, path, bytes) {
         let _ = fs::remove_file(&tmp_path);
@@ -209,6 +211,16 @@ pub fn write_document_bytes(path: &Path, bytes: &[u8]) -> Result<Written, SaveEr
         bytes: bytes.len(),
         fingerprint,
     })
+}
+
+/// The file a save really replaces. A symbolic link is followed: renaming the temporary file over
+/// the link would swap the link for a regular file and leave its target unchanged. A link that
+/// points nowhere is an error, so nothing is created behind it.
+fn resolve_link(path: &Path) -> std::io::Result<PathBuf> {
+    match fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_symlink() => fs::canonicalize(path),
+        _ => Ok(path.to_path_buf()),
+    }
 }
 
 /// Options that create the temporary file with the permissions the target already has, so the
@@ -406,6 +418,46 @@ mod tests {
         assert_eq!(written.bytes, 9);
         assert_eq!(fs::read(&target).unwrap(), b"new-bytes");
         assert_no_leftovers(&dir);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Renaming the temporary file over a symbolic link would replace the link with a regular file
+    /// and leave the file it pointed at unchanged: the write goes to the target instead.
+    #[cfg(unix)]
+    #[test]
+    fn a_write_through_a_symbolic_link_updates_the_target_and_keeps_the_link() {
+        let dir = scratch_dir("symlink");
+        let real = dir.join("real").join("원본.docx");
+        fs::create_dir_all(real.parent().unwrap()).unwrap();
+        fs::write(&real, b"old").unwrap();
+        let link = dir.join("바로가기.docx");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let written = write_document_bytes(&link, b"new-bytes").unwrap();
+        assert_eq!(written.bytes, 9);
+        assert!(
+            fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+            "the link is still a link"
+        );
+        assert_eq!(
+            fs::read(&real).unwrap(),
+            b"new-bytes",
+            "the target is saved"
+        );
+        assert_eq!(written.fingerprint, Some(Fingerprint::of(&real).unwrap()));
+        assert_no_leftovers(&dir);
+        assert_no_leftovers(real.parent().unwrap());
+        // A link that points nowhere is not written through (nothing is created behind it).
+        let dangling = dir.join("끊김.docx");
+        std::os::unix::fs::symlink(dir.join("nowhere.docx"), &dangling).unwrap();
+        assert!(write_document_bytes(&dangling, b"x").is_err());
+        assert!(!dir.join("nowhere.docx").exists());
+        assert!(fs::symlink_metadata(&dangling)
+            .unwrap()
+            .file_type()
+            .is_symlink());
         let _ = fs::remove_dir_all(&dir);
     }
 
