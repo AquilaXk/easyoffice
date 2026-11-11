@@ -136,7 +136,7 @@ fn find_tag_end(bytes: &[u8], from: usize) -> Option<usize> {
 
 /// Length of the `<!DOCTYPE ...>` declaration at the start of `rest`, including an internal subset
 /// (`[...]`, where `>` is not the end) and quoted literals. A declaration is not an element: it
-/// produces no event (PD-172). Entities it declares are not expanded (only the five predefined
+/// produces no event (PD-178). Entities it declares are not expanded (only the five predefined
 /// ones are), and the safe-XML check (`XmlSanitizer::validate_safe_xml`) still refuses the
 /// declaration for the packages this reader is given.
 fn doctype_len(rest: &str) -> Result<usize, EasyOfficeError> {

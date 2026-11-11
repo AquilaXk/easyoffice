@@ -540,7 +540,7 @@ fn engine_hwp_writer_reports_limited_and_the_rest_report_standard() {
     for fmt in DocumentFormat::ALL {
         if matches!(fmt, DocumentFormat::Hwp | DocumentFormat::Hwt) {
             // The engine's HWP container has no DocInfo mappings, shapes or 22-byte PARA_HEADER, so
-            // it is not an HWP 5.0 file other readers must accept (PD-172).
+            // it is not an HWP 5.0 file other readers must accept (PD-178).
             let compatibility = fmt.output_compatibility();
             assert_eq!(compatibility.as_str(), "limited", "{fmt:?}");
             assert!(compatibility.warning().is_some_and(|w| !w.is_empty()));

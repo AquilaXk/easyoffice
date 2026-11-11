@@ -85,7 +85,7 @@ impl EasyOfficeIpcRouter {
     }
 
     /// [`Self::dispatch_for_owner`] with the writers of a host that has the Hangul layout core:
-    /// the page renderer of [`Self::dispatch_with_pdf_renderer`] and the HWP 5.0 writer (PD-172),
+    /// the page renderer of [`Self::dispatch_with_pdf_renderer`] and the HWP 5.0 writer (PD-178),
     /// without which `.hwp` targets are refused.
     pub fn dispatch_for_owner_with_shell_writers(
         command: &str,

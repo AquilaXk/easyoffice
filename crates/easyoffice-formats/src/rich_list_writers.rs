@@ -1,4 +1,4 @@
-//! List definitions of the DOCX and ODT writers (PD-172).
+//! List definitions of the DOCX and ODT writers (PD-178).
 //!
 //! A *run* is a stretch of consecutive list paragraphs of the same kind (bullet or ordered); a
 //! non-list block ends it. Each run is one list in the output (`w:num` in DOCX, `text:list` in

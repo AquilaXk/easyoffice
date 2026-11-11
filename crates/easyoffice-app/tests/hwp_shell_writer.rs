@@ -1,4 +1,4 @@
-//! HWP targets are written by the shell's Hangul core, never by the engine (PD-172).
+//! HWP targets are written by the shell's Hangul core, never by the engine (PD-178).
 
 use easyoffice_app::EasyOfficeIpcRouter;
 

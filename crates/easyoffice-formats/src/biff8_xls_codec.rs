@@ -255,7 +255,7 @@ impl LegacyOle2Codec {
         Self::pack_xls_multi(std::slice::from_ref(payload))
     }
 
-    /// Writes `=` cells as FORMULA records (token strings, PD-172). A formula outside the token set
+    /// Writes `=` cells as FORMULA records (token strings, PD-178). A formula outside the token set
     /// of `biff8_formula` is refused with its cell, never written as text in a formula record.
     pub fn pack_xls_multi(sheets: &[LegacyXlsPayload]) -> Result<Vec<u8>, EasyOfficeError> {
         Self::pack_xls_multi_with_formula_cache(sheets, &[])

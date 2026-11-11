@@ -1,4 +1,4 @@
-//! Which cell texts the sheet writers store as numbers (PD-172).
+//! Which cell texts the sheet writers store as numbers (PD-178).
 //!
 //! A sheet cell reaches the writers as text. A number type keeps only what an IEEE double holds,
 //! so text that looks like a number but would change as one stays text: an ID with a leading zero

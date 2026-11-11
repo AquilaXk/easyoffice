@@ -1,7 +1,7 @@
 //! Relationship targets in a PPTX are paths relative to the part that holds them, with `.` and
 //! `..` segments (ECMA-376 Part 2, 9.3.2). The reader resolved the notes slide target that way but
 //! took the targets of `presentation.xml.rels` literally after `ppt/`, so `./slides/slide2.xml`
-//! matched no part and the slide order fell back to file names (PD-172).
+//! matched no part and the slide order fell back to file names (PD-178).
 
 use easyoffice_formats::{OoxmlCodec, OoxmlPptxPayload, ZipArchiveCodec, ZipSecurityPolicy};
 

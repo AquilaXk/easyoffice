@@ -28,7 +28,7 @@ impl OutputCompatibility {
     }
 }
 
-/// Why the engine's own HWP container is not reported as HWP 5.0 (PD-172).
+/// Why the engine's own HWP container is not reported as HWP 5.0 (PD-178).
 const ENGINE_HWP_LIMITATION: &str =
     "엔진이 쓰는 HWP 구조에는 DocInfo의 ID 매핑·글자 모양·문단 모양과 22바이트 문단 머리가 없어 한글 프로그램이 열지 못할 수 있습니다. 데스크톱 앱의 HWP 저장(편집기 경로)을 쓰세요.";
 

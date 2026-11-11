@@ -1,4 +1,4 @@
-//! BIFF8 formula tokens (`rgce`, MS-XLS 2.5.198) for the `.xls` writer and reader (PD-172).
+//! BIFF8 formula tokens (`rgce`, MS-XLS 2.5.198) for the `.xls` writer and reader (PD-178).
 //!
 //! A FORMULA record holds the expression as a postfix token string, not as text. This module
 //! converts between the text of a formula and the tokens of a small set every Excel reads:

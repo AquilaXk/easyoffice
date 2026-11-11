@@ -846,7 +846,7 @@ fn host_draws_pdf(
 
 /// [`encode_structured`], except that a document converted to PDF is drawn by `renderer` when
 /// there is one (see [`host_draws_pdf`]), and a document converted to HWP 5.0 is written by
-/// `writers.hwp` (PD-172). When the renderer fails the engine PDF is written and
+/// `writers.hwp` (PD-178). When the renderer fails the engine PDF is written and
 /// `warnings` says why.
 pub(crate) fn encode_target(
     content: &StructuredContent,
@@ -881,10 +881,10 @@ pub(crate) fn encode_source_target(
     format: DocumentFormat,
     source: DocumentFormat,
     title: &str,
-    renderer: Option<&RichPdfRenderer<'_>>,
+    writers: ShellWriters<'_>,
     warnings: &mut Vec<String>,
 ) -> Result<Vec<u8>, EasyOfficeError> {
-    if let (Some(render), StructuredContent::Document(_, options)) = (renderer, content) {
+    if let (Some(render), StructuredContent::Document(_, options)) = (writers.pdf, content) {
         let native = matches!(source, DocumentFormat::Hwp | DocumentFormat::Hwpx);
         if native && host_draws_pdf(format, source, options) {
             match render(source_bytes, options) {
@@ -896,7 +896,7 @@ pub(crate) fn encode_source_target(
             }
         }
     }
-    encode_target(content, format, source, title, renderer, warnings)
+    encode_target(content, format, source, title, writers, warnings)
 }
 
 /// The document as HWPX, drawn by `render`.

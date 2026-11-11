@@ -1,5 +1,5 @@
 //! `r` on `<row>` and `<c>` is optional (ECMA-376 18.3.1.73, 18.3.1.4): a row without it follows the
-//! previous row, a cell without it follows the previous cell of the row (PD-172). Before, every
+//! previous row, a cell without it follows the previous cell of the row (PD-178). Before, every
 //! such cell was read at (0, 0) and overwrote the others.
 
 use easyoffice_formats::{OoxmlCodec, ZipArchiveCodec, ZipSecurityPolicy};

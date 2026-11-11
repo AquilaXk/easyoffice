@@ -6,7 +6,7 @@
 //! 참조 구현 (reference implementation): calamine 0.38.0 (MIT, Copyright (c) 2016 Johann Tuffe),
 //! https://github.com/tafia/calamine, `src/ods.rs` (`read_table`, `read_row`): one
 //! pull-reader loop with a state per table, row and cell. The budgets, the repeat rules and the
-//! cell text priority (raw value before the displayed text, PD-172) are this repository's own. Safe Rust
+//! cell text priority (raw value before the displayed text, PD-178) are this repository's own. Safe Rust
 //! only, no dependency (PD-053, PD-095).
 
 use std::borrow::Cow;
@@ -207,7 +207,7 @@ impl<'a> CellBuilder<'a> {
 
     /// Cell text by priority: formula, the raw typed value (boolean, number, date, string value),
     /// the paragraph text, then empty for explicit cells. The paragraphs are what a number format
-    /// displays (`1,234`, `11월 11일`), the attributes are what the cell holds (PD-172).
+    /// displays (`1,234`, `11월 11일`), the attributes are what the cell holds (PD-178).
     fn resolve_text(&mut self) -> Option<String> {
         let f = &mut self.fields;
         if let Some(raw) = f.formula.take() {

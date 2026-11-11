@@ -1,4 +1,4 @@
-//! A rich document as an HWP 5.0 file written by rhwp (PD-172).
+//! A rich document as an HWP 5.0 file written by rhwp (PD-178).
 //!
 //! The engine writes the document as HWPX; rhwp parses it and serializes the HWP records
 //! (DocInfo mappings, shapes, 22-byte paragraph headers) the way the editor saves a document

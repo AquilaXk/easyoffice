@@ -1,4 +1,4 @@
-//! ODS cells are read by their raw value, not by the text a number format displays (PD-172): a cell
+//! ODS cells are read by their raw value, not by the text a number format displays (PD-178): a cell
 //! shown as `1,234` holds 1234, a date shown as `11월 11일` holds `2026-11-11`, and a
 //! self-closing `<text:p/>` is still a paragraph.
 

@@ -1,4 +1,4 @@
-//! HWP 5.0 targets of `convert_document_format` (PD-172).
+//! HWP 5.0 targets of `convert_document_format` (PD-178).
 //!
 //! The engine's own `.hwp` container (`Hwp5Codec`) is not an HWP 5.0 file: it has no DocInfo
 //! mappings, shapes or 22-byte paragraph headers, so a conversion never hands it out as `.hwp`.
@@ -10,7 +10,7 @@ use easyoffice_formats::{DocumentFormat, EasyOfficeError, OutputCompatibility};
 
 use crate::convert_structured::RichPdfRenderer;
 
-/// Writes a document the engine wrote as HWPX out as HWP 5.0 bytes (PD-172).
+/// Writes a document the engine wrote as HWPX out as HWP 5.0 bytes (PD-178).
 pub type RichHwpWriter<'a> = dyn Fn(&[u8]) -> Result<Vec<u8>, String> + 'a;
 
 /// What a host with the Hangul layout core adds to the engine's writers.
@@ -18,7 +18,7 @@ pub type RichHwpWriter<'a> = dyn Fn(&[u8]) -> Result<Vec<u8>, String> + 'a;
 pub struct ShellWriters<'a> {
     /// Draws a document as PDF pages (PD-167).
     pub pdf: Option<&'a RichPdfRenderer<'a>>,
-    /// Writes a document as HWP 5.0 (PD-172).
+    /// Writes a document as HWP 5.0 (PD-178).
     pub hwp: Option<&'a RichHwpWriter<'a>>,
 }
 

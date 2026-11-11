@@ -1,4 +1,4 @@
-//! Sheet writers keep text that looks like a number as text (PD-172). `03045` and a 20-digit ID
+//! Sheet writers keep text that looks like a number as text (PD-178). `03045` and a 20-digit ID
 //! typed as text must not become numbers (a number loses the leading zero and the digits beyond the
 //! 15 an IEEE double keeps), while real numbers stay numbers.
 

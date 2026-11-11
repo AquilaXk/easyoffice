@@ -119,7 +119,7 @@ async fn ipc_dispatch(
     let result = tauri::async_runtime::spawn_blocking(move || {
         // A rich document converted to PDF is laid out and drawn here (PD-167); the engine keeps
         // its own PDF as the fallback. The font database is built when a PDF is first drawn. A
-        // document converted to HWP is written by rhwp here (PD-172); there is no fallback.
+        // document converted to HWP is written by rhwp here (PD-178); there is no fallback.
         let draw = |hwpx: &[u8], options: &PdfWriteOptions| {
             doc_pdf::hwpx_to_pdf(hwpx, options, &pdf_fonts::shared_font_db(&font_dirs))
         };

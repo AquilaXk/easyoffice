@@ -1,4 +1,4 @@
-//! Lists are defined where the specifications define them (PD-172): DOCX has `word/numbering.xml`
+//! Lists are defined where the specifications define them (PD-178): DOCX has `word/numbering.xml`
 //! (ECMA-376 17.9) and `w:numPr` in each list paragraph; ODT has `text:list-style` definitions and
 //! nested `text:list` / `text:list-item` around the paragraphs (ODF 1.2 5.3). Before, a list was
 //! only a paragraph style (DOCX) or an undefined style name (ODT), so no bullet or number showed.

@@ -1,4 +1,4 @@
-//! FORMULA records of the `.xls` writer follow MS-XLS 2.4.127 (PD-172): a 22-byte fixed part
+//! FORMULA records of the `.xls` writer follow MS-XLS 2.4.127 (PD-178): a 22-byte fixed part
 //! (cell, format index, cached result, flags, chain, token count) and the postfix tokens (`rgce`)
 //! of the expression, not its text. The expected bytes are written out from the specification, not
 //! read back with the engine's own reader.

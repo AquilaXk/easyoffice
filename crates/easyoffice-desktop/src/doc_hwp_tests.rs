@@ -1,4 +1,4 @@
-//! The HWP 5.0 target of a converted document (PD-172): rhwp writes the records, and its own
+//! The HWP 5.0 target of a converted document (PD-178): rhwp writes the records, and its own
 //! reader (the one the editor opens files with, not the engine's) gets the text back.
 
 use super::*;

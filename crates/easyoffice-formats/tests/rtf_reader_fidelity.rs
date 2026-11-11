@@ -1,4 +1,4 @@
-//! RTF reading follows the specification where the reader used to guess (PD-172): paragraph
+//! RTF reading follows the specification where the reader used to guess (PD-178): paragraph
 //! properties last until `\pard`, a list's kind comes from the list table, and `\'hh` bytes are
 //! decoded with the code page of `\ansicpgN`.
 
