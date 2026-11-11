@@ -12,9 +12,9 @@
 //! candidate lookup plus exact overlap check) and `graph/mod.rs` (`mark_dirty_many`: transitive
 //! dirty closure). Changes: ranges are indexed per column by row interval (tall and narrow ranges)
 //! or in one row-interval index with an exact column check (wide ranges) instead of the reference's
-//! row/column/block stripes, identical rectangles share one entry, dependents are a small vector
-//! that promotes to a bit set, and keys are the packed workbook coordinate. Source and license text:
-//! `THIRD_PARTY_NOTICES.md`.
+//! row/column/block stripes, identical rectangles share one entry, dependents are a sorted vector
+//! (a bit set per read cell grows with the highest vertex id), and keys are the packed workbook
+//! coordinate. Source and license text: `THIRD_PARTY_NOTICES.md`.
 
 use super::id_set::IdSet;
 use super::interval::IntervalIndex;
