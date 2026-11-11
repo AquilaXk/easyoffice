@@ -109,24 +109,12 @@
   justify-content: center;
 }
 
-.md-item.checked::before,
-.md-item[role="menuitemradio"][aria-checked="true"]::before,
-.md-item[role="menuitemcheckbox"][aria-checked="true"]::before {
-  content: '✓';
-  position: absolute;
-  left: 8px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 16px;
-  text-align: center;
-  font-size: 11px;
-  color: var(--color-primary);
-  font-weight: 600;
-}
-
+/* A checked toggle looks like rhwp-studio's `.md-item.active` (no check glyph); `aria-checked` carries it. */
 .md-item:hover,
 .md-item:focus-visible,
-.md-item.active {
+.md-item.active,
+.md-item[role="menuitemradio"][aria-checked="true"],
+.md-item[role="menuitemcheckbox"][aria-checked="true"] {
   background: var(--ui-selected);
   color: var(--color-primary-dark);
   outline: none;

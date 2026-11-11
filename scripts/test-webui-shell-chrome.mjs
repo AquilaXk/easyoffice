@@ -503,12 +503,10 @@ test("menu-bar .md-icon & menuitemcheckbox centering, .sb-ls-icon in #doc-linesp
   assert.ok(hasDecl(mdIconRule, "align-items", "center"), ".md-icon align-items: center");
   assert.ok(hasDecl(mdIconRule, "justify-content", "center"), ".md-icon justify-content: center");
 
-  assert.match(
-    MENU_CSS,
-    /\.md-item\.checked::before,\s*\.md-item\[role="menuitemradio"\]\[aria-checked="true"\]::before,\s*\.md-item\[role="menuitemcheckbox"\]\[aria-checked="true"\]::before\s*\{([^}]*)\}/
-  );
-  const checkMatch = /\.md-item\.checked::before,\s*\.md-item\[role="menuitemradio"\]\[aria-checked="true"\]::before,\s*\.md-item\[role="menuitemcheckbox"\]\[aria-checked="true"\]::before\s*\{([^}]*)\}/.exec(MENU_CSS);
-  assert.ok(checkMatch && hasDecl(checkMatch[1], "left", "8px") && hasDecl(checkMatch[1], "top", "50%") && hasDecl(checkMatch[1], "transform", "translateY(-50%)") && hasDecl(checkMatch[1], "width", "16px") && hasDecl(checkMatch[1], "text-align", "center"));
+  assert.ok(!MENU_CSS.includes("\u2713"), "no check glyph in the menu");
+  const activeRule = /\.md-item\.active,\s*\.md-item\[role="menuitemradio"\]\[aria-checked="true"\],\s*\.md-item\[role="menuitemcheckbox"\]\[aria-checked="true"\]\s*\{([^}]*)\}/.exec(MENU_CSS);
+  assert.ok(activeRule && hasDecl(activeRule[1], "background", "var(--ui-selected)") && hasDecl(activeRule[1], "color", "var(--color-primary-dark)"), "checked items share the active look");
+  assert.ok(!readText(fileURLToPath(new URL("update-notice.js", UI_DIR))).includes("\u2713"), "the update toggle shows no check glyph");
 
   const lsIconRule = cssRule(".sb-ls-icon", TOOLBAR_CSS);
   assert.ok(hasDecl(lsIconRule, "display", "inline-flex"), ".sb-ls-icon styled in toolbar.css");

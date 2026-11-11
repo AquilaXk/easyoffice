@@ -129,8 +129,6 @@
       for (const item of document.querySelectorAll("[data-update-check-toggle]")) {
         item.hidden = !view.supported;
         item.setAttribute("aria-checked", String(view.enabled));
-        const mark = item.querySelector(".md-icon");
-        if (mark) mark.textContent = view.enabled ? "✓" : "";
       }
     }
 
