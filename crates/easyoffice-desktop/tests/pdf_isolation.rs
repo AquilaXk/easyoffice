@@ -159,6 +159,33 @@ fn an_overlay_the_shell_cannot_make_ends_the_build_with_its_sentence() {
 }
 
 #[test]
+fn an_overlay_maker_that_panics_ends_the_worker_and_leaves_the_shell_standing() {
+    let places = jobs(1);
+    let supervisor = Supervisor::with_limits(
+        PathBuf::from(WORKER),
+        places,
+        Duration::from_secs(60),
+        1536 * MIB,
+    );
+    let source = Arc::new(sample_pdf(1, 1, &[]));
+    let mut plan = head(plan(1, 0), 1);
+    plan.watermark = Some("x".to_string());
+    let started = Instant::now();
+    let err = supervisor
+        .build(&[Arc::clone(&source)], &plan, &mut |_, _, _| {
+            panic!("the font code broke")
+        })
+        .unwrap_err();
+    assert_eq!(err, pdf_edit_budget::MSG_PANIC);
+    assert!(
+        started.elapsed() < Duration::from_secs(20),
+        "no wait for the worker's own deadline"
+    );
+    // The single place is back and no worker is left running behind the panic.
+    assert_eq!(supervisor.inspect(&source), Ok(1));
+}
+
+#[test]
 fn a_file_the_checks_refuse_comes_back_as_the_checks_sentence() {
     let supervisor = normal();
     let err = supervisor
@@ -202,7 +229,13 @@ fn a_file_that_makes_the_reader_allocate_without_end_costs_the_worker_and_nothin
     let supervisor = supervisor(Duration::from_secs(60), 300);
     let started = Instant::now();
     let err = supervisor.inspect(&file).unwrap_err();
-    assert!(err == MSG_MEMORY || err == MSG_WORKER_DIED, "{err}");
+    // Where the shell measures memory (macOS, Linux) it is the memory sentence; elsewhere the
+    // kernel's limit may end the worker first.
+    if cfg!(any(target_os = "macos", target_os = "linux")) {
+        assert_eq!(err, MSG_MEMORY);
+    } else {
+        assert!(err == MSG_MEMORY || err == MSG_WORKER_DIED, "{err}");
+    }
     assert!(
         started.elapsed() < Duration::from_secs(30),
         "{:?}",
@@ -298,7 +331,13 @@ fn a_bomb_the_scan_cannot_see_is_stopped_by_the_memory_limit() {
     let supervisor = supervisor(Duration::from_secs(60), 200);
     let started = Instant::now();
     let err = supervisor.inspect(&file).unwrap_err();
-    assert!(err == MSG_MEMORY || err == MSG_WORKER_DIED, "{err}");
+    // Where the shell measures memory (macOS, Linux) it is the memory sentence; elsewhere the
+    // kernel's limit may end the worker first.
+    if cfg!(any(target_os = "macos", target_os = "linux")) {
+        assert_eq!(err, MSG_MEMORY);
+    } else {
+        assert!(err == MSG_MEMORY || err == MSG_WORKER_DIED, "{err}");
+    }
     assert!(
         started.elapsed() < Duration::from_secs(30),
         "{:?}",

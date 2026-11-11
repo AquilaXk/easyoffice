@@ -11,15 +11,16 @@
 
 use crate::pdf_edit_budget::{
     Jobs, JOBS, MAX_CHILD_RSS_BYTES, MAX_OVERLAY_SIZES, MEMORY_POLL, MSG_BUSY, MSG_MEMORY,
-    MSG_TIMEOUT, MSG_WORKER_DIED, WORK_DEADLINE,
+    MSG_PANIC, MSG_TIMEOUT, MSG_WORKER_DIED, WORK_DEADLINE,
 };
-use crate::pdf_edit_os::{confine, resident_bytes};
+use crate::pdf_edit_os::{child_resident_bytes, confine};
 use crate::pdf_edit_wire::{
-    decode_overlay_need, read_frame, write_frame, BuildHead, OverlayMaker, EXIT_DEADLINE,
-    EXIT_MEMORY, NEED_OVERLAY, OVERLAY_FAIL, OVERLAY_REPLY, REQ_BUILD, REQ_INSPECT, RES_ERR,
-    RES_OK, SOURCE, WORKER_ARG,
+    decode_overlay_need, from_worker_cap, read_frame, write_frame, BuildHead, OverlayMaker,
+    EXIT_DEADLINE, EXIT_MEMORY, NEED_OVERLAY, OVERLAY_FAIL, OVERLAY_REPLY, REQ_BUILD, REQ_INSPECT,
+    RES_ERR, RES_OK, SOURCE, WORKER_ARG,
 };
 use std::io::{self, BufReader, BufWriter, Write};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::mpsc::{self, RecvTimeoutError};
@@ -111,21 +112,28 @@ impl Supervisor {
             eprintln!("pdf edit: the worker did not start: {err}");
             MSG_WORKER_DIED.to_string()
         })?;
-        let _confinement = confine(&child, usize::try_from(self.memory).unwrap_or(usize::MAX));
+        // A worker that cannot be confined does not run: the limit the OS enforces is part of the
+        // protection, so without it the request is refused.
+        let Ok(_confinement) = confine(&child, usize::try_from(self.memory).unwrap_or(usize::MAX))
+        else {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(MSG_WORKER_DIED.to_string());
+        };
         let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
             let _ = child.kill();
             let _ = child.wait();
             return Err(MSG_WORKER_DIED.to_string());
         };
         let started = Instant::now();
-        let pid = child.id();
         std::thread::scope(|scope| {
-            let (frames, frames_in) = mpsc::channel();
+            // One frame at a time: a worker that floods its output waits for this thread to look.
+            let (frames, frames_in) = mpsc::sync_channel(1);
             let (replies, replies_out) = mpsc::channel::<(u8, Vec<u8>)>();
             scope.spawn(move || {
                 let mut out = BufReader::new(stdout);
                 loop {
-                    let frame = read_frame(&mut out);
+                    let frame = read_frame(&mut out, from_worker_cap);
                     let last = !matches!(&frame, Ok((tag, _)) if *tag == NEED_OVERLAY);
                     if frames.send(frame).is_err() || last {
                         break;
@@ -156,9 +164,13 @@ impl Supervisor {
                         if asked > MAX_OVERLAY_SIZES + 1 {
                             break Err(MSG_WORKER_DIED.to_string());
                         }
-                        let reply = match make_overlay(width, height, stamp) {
-                            Ok(pdf) => (OVERLAY_REPLY, pdf),
-                            Err(message) => (OVERLAY_FAIL, message.into_bytes()),
+                        // A panic of the overlay code must not leave the worker running behind it.
+                        let made =
+                            catch_unwind(AssertUnwindSafe(|| make_overlay(width, height, stamp)));
+                        let reply = match made {
+                            Ok(Ok(pdf)) => (OVERLAY_REPLY, pdf),
+                            Ok(Err(message)) => (OVERLAY_FAIL, message.into_bytes()),
+                            Err(_) => break Err(MSG_PANIC.to_string()),
                         };
                         if replies.send(reply).is_err() {
                             break Err(MSG_WORKER_DIED.to_string());
@@ -173,13 +185,14 @@ impl Supervisor {
                 if started.elapsed() > self.deadline {
                     break Err(MSG_TIMEOUT.to_string());
                 }
-                if resident_bytes(pid).is_some_and(|rss| rss > self.memory) {
+                if child_resident_bytes(&child).is_some_and(|rss| rss > self.memory) {
                     break Err(MSG_MEMORY.to_string());
                 }
             };
             let _ = child.kill();
             let _ = child.wait();
             drop(replies);
+            drop(frames_in);
             outcome
         })
     }

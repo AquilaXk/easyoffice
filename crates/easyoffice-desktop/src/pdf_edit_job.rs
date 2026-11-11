@@ -10,7 +10,9 @@
 //! limit (`pdf_edit_engine.rs`, `pdf_edit_supervisor.rs`), and
 //! nothing is written before the whole result exists: a split that fails removes the files it made.
 
-use crate::pdf_edit_budget::{Deadline, MAX_SOURCE_BYTES, MAX_SPLIT_TOTAL_BYTES, SPLIT_DEADLINE};
+use crate::pdf_edit_budget::{
+    Deadline, MAX_SESSION_BYTES, MAX_SOURCE_BYTES, MAX_SPLIT_TOTAL_BYTES, SPLIT_DEADLINE,
+};
 use crate::pdf_edit_engine::{ChildEngine, PdfEngine};
 use crate::pdf_edit_overlay::Overlay;
 use crate::pdf_edit_session::EditSession;
@@ -20,6 +22,7 @@ use crate::{pdf_job, IpcError};
 use easyoffice_app::EasyOfficeIpcRouter;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::io::Read;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -267,6 +270,13 @@ fn open_session(base64: &str, stem: &str, engine: &dyn PdfEngine) -> Result<Edit
     EditSession::open(bytes, engine).map(|session| session.with_stem(stem))
 }
 
+fn session_too_big_message() -> String {
+    format!(
+        "함께 편집하는 PDF의 합계가 허용 크기({}MiB)를 초과합니다.",
+        MAX_SESSION_BYTES / 1_048_576
+    )
+}
+
 fn too_big_message() -> String {
     format!(
         "PDF가 허용 크기({}MiB)를 초과합니다.",
@@ -375,8 +385,9 @@ async fn merge_flow(
         .collect::<Result<_, _>>()
         .map_err(IpcError::new)?;
     let engine = ChildEngine::new(pdf_job::pdf_font_dirs(app)).map_err(IpcError::new)?;
+    let held = session.held_bytes();
     let merged = tauri::async_runtime::spawn_blocking(move || {
-        let files = read_pdfs(&paths)?;
+        let files = read_pdfs(&paths, held)?;
         merge_files(session, files, &engine)
     })
     .await
@@ -396,23 +407,36 @@ fn merge_files(
 
 /// Reads the chosen files, each no larger than [`MAX_SOURCE_BYTES`] (the size is read before the
 /// file is, so a huge file is never loaded to find out). The reason goes to the log only.
-fn read_pdfs(paths: &[PathBuf]) -> Result<Vec<Vec<u8>>, String> {
-    paths
-        .iter()
-        .map(|path| {
-            let size = std::fs::metadata(path).map(|m| m.len()).map_err(|err| {
-                eprintln!("pdf edit: {} could not be inspected: {err}", path.display());
-                MSG_READ_FAILED.to_string()
-            })?;
-            if size > MAX_SOURCE_BYTES as u64 {
-                return Err(too_big_message());
-            }
-            std::fs::read(path).map_err(|err| {
-                eprintln!("pdf edit: {} could not be read: {err}", path.display());
-                MSG_READ_FAILED.to_string()
+fn read_pdfs(paths: &[PathBuf], held: usize) -> Result<Vec<Vec<u8>>, String> {
+    let mut total = held;
+    let mut files = Vec::with_capacity(paths.len());
+    for path in paths {
+        let unreadable = |err: std::io::Error| {
+            eprintln!("pdf edit: {} could not be read: {err}", path.display());
+            MSG_READ_FAILED.to_string()
+        };
+        let size = std::fs::metadata(path).map_err(unreadable)?.len();
+        if size > MAX_SOURCE_BYTES as u64 {
+            return Err(too_big_message());
+        }
+        // The read is bounded too: a file that grows after its size was looked at is cut off.
+        let mut bytes = Vec::new();
+        std::fs::File::open(path)
+            .and_then(|file| {
+                file.take(MAX_SOURCE_BYTES as u64 + 1)
+                    .read_to_end(&mut bytes)
             })
-        })
-        .collect()
+            .map_err(unreadable)?;
+        total = total.saturating_add(bytes.len());
+        if bytes.len() > MAX_SOURCE_BYTES {
+            return Err(too_big_message());
+        }
+        if total > MAX_SESSION_BYTES {
+            return Err(session_too_big_message());
+        }
+        files.push(bytes);
+    }
+    Ok(files)
 }
 
 /// Which folder gets the files: a folder dialog, then one file for each range (`보고서_1-3.pdf`). Nothing is
@@ -807,10 +831,14 @@ mod tests {
         let dir = scratch_dir("read");
         let a = dir.join("a.pdf");
         std::fs::write(&a, sample_pdf(1, 1, &[])).unwrap();
-        assert_eq!(read_pdfs(std::slice::from_ref(&a)).unwrap().len(), 1);
-        let missing = read_pdfs(&[dir.join("missing.pdf")]).unwrap_err();
+        assert_eq!(read_pdfs(std::slice::from_ref(&a), 0).unwrap().len(), 1);
+        let missing = read_pdfs(&[dir.join("missing.pdf")], 0).unwrap_err();
         assert_eq!(missing, MSG_READ_FAILED);
         assert!(!missing.contains(dir.to_str().unwrap()));
+        // The files together with what the session already holds stay within the session limit,
+        // checked as the bytes come in.
+        let near_the_limit = read_pdfs(std::slice::from_ref(&a), MAX_SESSION_BYTES - 10);
+        assert_eq!(near_the_limit.unwrap_err(), session_too_big_message());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

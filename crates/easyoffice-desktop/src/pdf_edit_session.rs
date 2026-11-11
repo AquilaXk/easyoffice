@@ -57,6 +57,11 @@ impl EditSession {
         self.pages.len()
     }
 
+    /// Bytes of the PDFs the session holds.
+    pub fn held_bytes(&self) -> usize {
+        self.sources.iter().map(|s| s.len()).sum()
+    }
+
     pub fn source_count(&self) -> usize {
         self.sources.len()
     }
@@ -114,7 +119,7 @@ impl EditSession {
                 "함께 편집할 수 있는 PDF는 {MAX_SOURCES}개까지입니다."
             ));
         }
-        let held: usize = self.sources.iter().map(|s| s.len()).sum();
+        let held = self.held_bytes();
         let mut bytes = held;
         let mut added = Vec::with_capacity(files.len());
         let mut pages = self.pages.len();

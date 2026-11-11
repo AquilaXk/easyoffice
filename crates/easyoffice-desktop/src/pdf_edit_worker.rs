@@ -18,11 +18,11 @@ use crate::pdf_edit_budget::{
 };
 use crate::pdf_edit_build::build;
 use crate::pdf_edit_inspect::inspect;
-use crate::pdf_edit_os::{limit_own_address_space, resident_bytes};
+use crate::pdf_edit_os::{limit_own_address_space, own_resident_bytes};
 use crate::pdf_edit_overlay::Overlay;
 use crate::pdf_edit_wire::{
-    read_frame, write_frame, BuildHead, EXIT_DEADLINE, EXIT_MEMORY, NEED_OVERLAY, OVERLAY_REPLY,
-    REQ_BUILD, REQ_INSPECT, RES_ERR, RES_OK, SOURCE,
+    from_shell_cap, read_frame, write_frame, BuildHead, EXIT_DEADLINE, EXIT_MEMORY, NEED_OVERLAY,
+    OVERLAY_REPLY, REQ_BUILD, REQ_INSPECT, RES_ERR, RES_OK, SOURCE,
 };
 use std::io::{self, Read, Write};
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -62,7 +62,7 @@ fn watch_self() {
             if started.elapsed() > WORK_DEADLINE + WORKER_GRACE {
                 std::process::exit(EXIT_DEADLINE);
             }
-            if resident_bytes(std::process::id()).is_some_and(|rss| rss > MAX_CHILD_RSS_BYTES) {
+            if own_resident_bytes().is_some_and(|rss| rss > MAX_CHILD_RSS_BYTES) {
                 std::process::exit(EXIT_MEMORY);
             }
         });
@@ -71,7 +71,7 @@ fn watch_self() {
 /// Reads one request and writes its answer.
 fn serve(input: &mut impl Read, output: &mut impl Write) -> io::Result<()> {
     let deadline = Deadline::after(WORK_DEADLINE);
-    let (tag, payload) = read_frame(input)?;
+    let (tag, payload) = read_frame(input, from_shell_cap)?;
     let answer = match tag {
         REQ_INSPECT => inspect(&Arc::new(payload), &deadline).map(|info| {
             u32::try_from(info.pages)
@@ -100,7 +100,7 @@ fn build_request(
     let mut sources = Vec::with_capacity(head.sources);
     let mut held = 0usize;
     for _ in 0..head.sources {
-        let (tag, bytes) = read_frame(input).map_err(|_| bad_request())?;
+        let (tag, bytes) = read_frame(input, from_shell_cap).map_err(|_| bad_request())?;
         held = held.saturating_add(bytes.len());
         if tag != SOURCE || bytes.len() > MAX_SOURCE_BYTES || held > MAX_SESSION_BYTES {
             return Err(bad_request());
@@ -111,7 +111,7 @@ fn build_request(
     let mut ask = |width: f32, height: f32, stamp: bool| -> Result<Vec<u8>, String> {
         let need = crate::pdf_edit_wire::encode_overlay_need(width, height, stamp);
         write_frame(output, NEED_OVERLAY, &[&need]).map_err(|_| bad_request())?;
-        match read_frame(input) {
+        match read_frame(input, from_shell_cap) {
             Ok((OVERLAY_REPLY, pdf)) => Ok(pdf),
             Ok((_, message)) => Err(String::from_utf8_lossy(&message).into_owned()),
             Err(_) => Err(bad_request()),

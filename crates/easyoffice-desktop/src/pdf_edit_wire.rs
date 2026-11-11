@@ -62,13 +62,42 @@ pub fn write_frame<W: Write + ?Sized>(out: &mut W, tag: u8, parts: &[&[u8]]) -> 
     out.flush()
 }
 
-/// Reads one frame. The payload buffer grows with what actually arrives, so a length that lies
+/// Largest payload of each tag the shell accepts from a worker (0: the tag is not expected). A
+/// worker that has been fed a crafted file is not trusted: it may ask for an overlay (nine
+/// bytes), fail with a sentence, or answer; only the answer may be large.
+pub fn from_worker_cap(tag: u8) -> usize {
+    match tag {
+        NEED_OVERLAY => 9,
+        RES_ERR => 4096,
+        RES_OK => MAX_FRAME_BYTES,
+        _ => 0,
+    }
+}
+
+/// Largest payload of each tag the worker accepts from the shell.
+pub fn from_shell_cap(tag: u8) -> usize {
+    match tag {
+        REQ_INSPECT | SOURCE => MAX_FRAME_BYTES,
+        // 5,000 pages of 10 bytes, two 100-character texts and the counts.
+        REQ_BUILD => 128 * 1024,
+        OVERLAY_REPLY => 16 * 1_048_576,
+        OVERLAY_FAIL => 4096,
+        _ => 0,
+    }
+}
+
+/// Reads one frame whose payload may be at most `cap(tag)` bytes (checked on the header, before
+/// anything is read). The payload buffer grows with what actually arrives, so a length that lies
 /// costs nothing but the bytes that were sent.
-pub fn read_frame(input: &mut impl Read) -> io::Result<(u8, Vec<u8>)> {
+pub fn read_frame<R: Read + ?Sized>(
+    input: &mut R,
+    cap: fn(u8) -> usize,
+) -> io::Result<(u8, Vec<u8>)> {
     let mut head = [0u8; 5];
     input.read_exact(&mut head)?;
     let len = u32::from_le_bytes([head[1], head[2], head[3], head[4]]) as usize;
-    if len > MAX_FRAME_BYTES {
+    let allowed = cap(head[0]).min(MAX_FRAME_BYTES);
+    if allowed == 0 || len > allowed {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "frame too large",
@@ -216,19 +245,46 @@ mod tests {
         write_frame(&mut wire, RES_OK, &[]).unwrap();
         let mut input = &wire[..];
         assert_eq!(
-            read_frame(&mut input).unwrap(),
+            read_frame(&mut input, from_shell_cap).unwrap(),
             (REQ_INSPECT, b"abcd".to_vec())
         );
-        assert_eq!(read_frame(&mut input).unwrap(), (RES_OK, Vec::new()));
-        assert!(read_frame(&mut input).is_err(), "nothing left");
+        assert_eq!(
+            read_frame(&mut input, from_worker_cap).unwrap(),
+            (RES_OK, Vec::new())
+        );
+        assert!(
+            read_frame(&mut input, from_worker_cap).is_err(),
+            "nothing left"
+        );
         // A header that promises 100 MiB and delivers 3 bytes is an error, not an allocation.
         let mut lie = vec![RES_OK];
         lie.extend_from_slice(&(100u32 << 20).to_le_bytes());
         lie.extend_from_slice(b"abc");
-        assert!(read_frame(&mut &lie[..]).is_err());
+        assert!(read_frame(&mut &lie[..], from_worker_cap).is_err());
         let mut huge = vec![RES_OK];
         huge.extend_from_slice(&u32::MAX.to_le_bytes());
-        assert!(read_frame(&mut &huge[..]).is_err());
+        assert!(read_frame(&mut &huge[..], from_worker_cap).is_err());
+    }
+
+    #[test]
+    fn a_worker_cannot_send_more_than_its_tag_allows() {
+        let frame = |tag: u8, len: usize| {
+            let mut wire = Vec::new();
+            write_frame(&mut wire, tag, &[&vec![7u8; len]]).unwrap();
+            wire
+        };
+        // The right size passes, one byte more does not; unknown tags never do.
+        assert!(read_frame(&mut &frame(NEED_OVERLAY, 9)[..], from_worker_cap).is_ok());
+        assert!(read_frame(&mut &frame(NEED_OVERLAY, 10)[..], from_worker_cap).is_err());
+        assert!(read_frame(&mut &frame(RES_ERR, 4096)[..], from_worker_cap).is_ok());
+        assert!(read_frame(&mut &frame(RES_ERR, 4097)[..], from_worker_cap).is_err());
+        assert!(read_frame(&mut &frame(RES_OK, 1 << 20)[..], from_worker_cap).is_ok());
+        assert!(read_frame(&mut &frame(OVERLAY_REPLY, 1)[..], from_worker_cap).is_err());
+        assert!(read_frame(&mut &frame(99, 0)[..], from_worker_cap).is_err());
+        // The same for what the worker takes from the shell.
+        assert!(read_frame(&mut &frame(REQ_BUILD, 128 * 1024)[..], from_shell_cap).is_ok());
+        assert!(read_frame(&mut &frame(REQ_BUILD, 128 * 1024 + 1)[..], from_shell_cap).is_err());
+        assert!(read_frame(&mut &frame(RES_OK, 1)[..], from_shell_cap).is_err());
     }
 
     #[test]
