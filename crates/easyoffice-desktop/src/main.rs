@@ -109,9 +109,7 @@ async fn ipc_dispatch(
         let draw = |hwpx: &[u8], options: &PdfWriteOptions| {
             doc_pdf::hwpx_to_pdf(hwpx, options, &pdf_fonts::shared_font_db(&font_dirs))
         };
-        EasyOfficeIpcRouter::dispatch_for_owner_with_pdf_renderer(
-            &command, &payload, &owner, &draw,
-        )
+        EasyOfficeIpcRouter::dispatch_for_owner_with_pdf_renderer(&command, &payload, &owner, &draw)
     })
     .await
     .map_err(|err| IpcError::new(format!("엔진 작업을 실행하지 못했습니다: {err}")))?
