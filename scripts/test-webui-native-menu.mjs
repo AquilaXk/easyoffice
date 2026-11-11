@@ -241,7 +241,7 @@ test("Find goes to the editor's own find command in the Hangul window, to the fi
   const app = read("crates/easyoffice-app/ui/app.js");
   assert.match(app, /activeModule === "HWP" && hwpHost\.isEmbedActive\(\)/);
   assert.match(app, /id: mode === "find" \? "edit:find" : "edit:find-replace"/);
-  assert.match(app, /findReplace\.open\(mode\)[^\n]*\n\s*togglePaletteModal/);
+  assert.match(app, /findReplace\.open\(mode\)[^\n]*togglePaletteModal/);
   const router = read("apps/hwp-studio/src/embed/rpc-router.ts");
   assert.match(router, /case 'automation\.execute'/, "the embed port already carries editor commands");
 });
