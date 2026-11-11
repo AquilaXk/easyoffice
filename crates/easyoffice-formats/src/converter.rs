@@ -1,3 +1,4 @@
+use crate::text_decode::decode_text;
 use crate::{
     CommonMarkCodec, CsvCodec, DocumentFormat, EasyOfficeError, FormatDetector, Hwp5Codec,
     Hwp5DocumentPayload, Hwp5ParagraphRecord, HwpxCodec, HwpxPayload, LegacyDocPayload,
@@ -355,9 +356,8 @@ impl UniversalFormatConverter {
     }
 
     fn decode_markdown(bytes: &[u8]) -> Result<UniversalDocumentModel, EasyOfficeError> {
-        let text = std::str::from_utf8(bytes)
-            .map_err(|_| EasyOfficeError::InvalidUtf8("Markdown UTF-8 디코딩 오류".to_string()))?;
-        let blocks = CommonMarkCodec::parse(text)?;
+        let text = decode_text(bytes, "Markdown")?;
+        let blocks = CommonMarkCodec::parse(&text)?;
         let mut title = "Markdown 문서".to_string();
         let mut paragraphs = Vec::new();
         let mut tables: Vec<Vec<Vec<String>>> = Vec::new();
@@ -382,8 +382,7 @@ impl UniversalFormatConverter {
     }
 
     fn decode_txt(bytes: &[u8]) -> Result<UniversalDocumentModel, EasyOfficeError> {
-        let text = std::str::from_utf8(bytes)
-            .map_err(|_| EasyOfficeError::InvalidUtf8("TXT UTF-8 디코딩 오류".to_string()))?;
+        let text = decode_text(bytes, "TXT")?;
         let mut lines: Vec<String> = text.lines().map(ToString::to_string).collect();
         let title = if lines.is_empty() {
             "텍스트 문서".to_string()
@@ -405,9 +404,8 @@ impl UniversalFormatConverter {
         } else {
             '\t'
         };
-        let text = std::str::from_utf8(bytes)
-            .map_err(|_| EasyOfficeError::InvalidUtf8("CSV/TSV UTF-8 디코딩 오류".to_string()))?;
-        let rows = CsvCodec::parse(text, delim)?;
+        let text = decode_text(bytes, "CSV/TSV")?;
+        let rows = CsvCodec::parse(&text, delim)?;
         let mut cells = Vec::new();
         for (r_idx, row) in rows.iter().enumerate() {
             for (c_idx, val) in row.iter().enumerate() {

@@ -11,6 +11,7 @@ use crate::rich_read_ooxml::read_docx;
 use crate::rich_read_pages::read_pages;
 use crate::rich_read_rtf::read_rtf;
 use crate::rich_read_text::{read_markdown, read_plain_text};
+use crate::text_decode::decode_text;
 use crate::{
     ContainerFamily, CsvCodec, DocumentFormat, EasyOfficeError, FormatDetector, LegacyOle2Codec,
     OdfCodec, OdsUnpacked, OoxmlCodec, RichBlock, RichDocument, RichParagraph, RichRun,
@@ -138,11 +139,9 @@ fn normalize_sheets(mut sheets: Vec<OdsUnpacked>) -> Vec<OdsUnpacked> {
 }
 
 fn read_delimited(bytes: &[u8], delim: char) -> Result<Vec<OdsUnpacked>, EasyOfficeError> {
-    let text = std::str::from_utf8(bytes)
-        .map_err(|_| EasyOfficeError::InvalidUtf8("CSV/TSV UTF-8 디코딩 오류".to_string()))?;
-    let text = text.strip_prefix('\u{FEFF}').unwrap_or(text);
+    let text = decode_text(bytes, "CSV/TSV")?;
     let mut cells = Vec::new();
-    CsvCodec::visit_fields_swar(text, delim, |r, c, val| {
+    CsvCodec::visit_fields_swar(&text, delim, |r, c, val| {
         if !val.is_empty() {
             cells.push((r as u32, c as u32, val.into_owned()));
         }
@@ -210,14 +209,11 @@ impl UniversalFormatConverter {
                 DecodedContent::Document(doc)
             }
             DocumentFormat::Markdown | DocumentFormat::Txt => {
-                let text = std::str::from_utf8(bytes).map_err(|_| {
-                    EasyOfficeError::InvalidUtf8("텍스트 UTF-8 디코딩 오류".to_string())
-                })?;
-                let text = text.strip_prefix('\u{FEFF}').unwrap_or(text);
+                let text = decode_text(bytes, "텍스트")?;
                 let blocks = if format == DocumentFormat::Markdown {
-                    read_markdown(text)?
+                    read_markdown(&text)?
                 } else {
-                    read_plain_text(text)?
+                    read_plain_text(&text)?
                 };
                 DecodedContent::Document(RichDocument {
                     title: String::new(),

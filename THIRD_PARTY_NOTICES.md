@@ -8976,6 +8976,40 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+### encoding_rs (EUC-KR decoder and index, (Apache-2.0 OR MIT) AND BSD-3-Clause)
+
+Source: https://github.com/hsivonen/encoding_rs (v0.8.44, `src/euc_kr.rs` and the `index-euc-kr` data in `src/data.rs`; code `Apache-2.0 OR MIT`, Copyright Mozilla Foundation, table data BSD-3-Clause from the WHATWG Encoding Standard).
+`crates/easyoffice-formats/src/cp949.rs` follows the structure of its EUC-KR decoder (lead and trail byte ranges, a sorted Hangul offset table with an exact-complement UHC lookup) as independent safe Rust, and `crates/easyoffice-formats/src/cp949_tables.rs` holds the symbol (rows 0xA1..=0xAC) and Hanja (rows 0xCA..=0xFD) cells of the same `index-euc-kr` table, flattened to two `u16` arrays. The crate itself is not linked into the engine crates (PD-053, PD-095). The table data notice:
+
+```
+Copyright © WHATWG (Apple, Google, Mozilla, Microsoft).
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
 ### FormulaJS (MIT)
 
 Source: https://github.com/formulajs/formulajs (`@formulajs/formulajs`).

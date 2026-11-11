@@ -820,7 +820,7 @@ fn corrupt_empty_and_unsupported_inputs_fail_cleanly() {
     assert!(UniversalFormatConverter::decode_rich(b"PK\x03\x04garbage", Some("a.xlsx")).is_err());
     assert!(UniversalFormatConverter::decode_rich(b"hello", Some("a.exe")).is_err());
     assert!(
-        UniversalFormatConverter::decode_rich(&[0xFF, 0xFE, 0x00, 0x01], Some("a.txt")).is_err()
+        UniversalFormatConverter::decode_rich(&[0xFF, 0xFE, 0x00, 0x00], Some("a.txt")).is_err()
     );
     let truncated = {
         let doc = RichDocument::default();

@@ -4,6 +4,7 @@ pub mod base64_codec;
 pub mod biff8_xls_codec;
 pub mod converter;
 pub(crate) mod cp949;
+mod cp949_tables;
 mod crc32;
 pub mod csv_markdown_codecs;
 pub mod deflate;
@@ -50,6 +51,7 @@ mod rtf_escape;
 pub mod rtf_xml_helpers;
 mod sheet_styling;
 pub mod strict_json;
+mod text_decode;
 pub mod text_pdf_codecs;
 pub mod utf16_swar;
 mod xls_sheet_names;
@@ -510,7 +512,7 @@ impl FormatDetector {
             return Ok(DocumentFormat::Rtf);
         }
 
-        Self::validate_utf8_without_nul(bytes, "plain-text")?;
+        Self::validate_text_without_nul(bytes, "plain-text")?;
         if bytes.starts_with(b"# ") || bytes.starts_with(b"## ") {
             return Ok(DocumentFormat::Markdown);
         }
@@ -586,7 +588,7 @@ impl FormatDetector {
                                     .to_string(),
                         });
                     }
-                    Self::validate_utf8_without_nul(bytes, format.extension())?;
+                    Self::validate_text_without_nul(bytes, format.extension())?;
                 }
             }
         }
@@ -602,11 +604,11 @@ impl FormatDetector {
         Ok(())
     }
 
-    fn validate_utf8_without_nul(bytes: &[u8], label: &str) -> Result<(), EasyOfficeError> {
-        Self::validate_without_nul(bytes, label)?;
-        std::str::from_utf8(bytes).map(|_| ()).map_err(|_| {
-            EasyOfficeError::InvalidUtf8(format!("{label} 스트림이 유효한 UTF-8이 아닙니다."))
-        })
+    /// Text inputs may be UTF-8, UTF-16 with a BOM or CP949 (see `text_decode`); the decoded text
+    /// must not contain NUL.
+    fn validate_text_without_nul(bytes: &[u8], label: &str) -> Result<(), EasyOfficeError> {
+        let text = crate::text_decode::decode_text(bytes, label)?;
+        Self::validate_without_nul(text.as_bytes(), label)
     }
 
     fn slice_contains(haystack: &[u8], needle: &[u8]) -> bool {

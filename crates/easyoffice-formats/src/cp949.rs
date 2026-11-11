@@ -1,4 +1,12 @@
-//! Zero-allocation CP949 (KS X 1001 + Unified Hangul Code) decoder for RTF byte streams.
+//! Zero-allocation CP949 (KS X 1001 + Unified Hangul Code) decoder for RTF and legacy text bytes.
+//!
+//! 구조 참조: encoding_rs 0.8.44 `src/euc_kr.rs` (EUC-KR 디코더, (Apache-2.0 OR MIT) AND BSD-3-Clause,
+//! Copyright Mozilla Foundation). 한글은 정렬된 오프셋 표 한 장, 기호·한자는 `cp949_tables` 직접 인덱싱.
+
+use crate::cp949_tables::{KSX1001_HANJA, KSX1001_SYMBOL};
+
+/// Trail-byte count of one KS X 1001 row (`0xA1..=0xFE`).
+const KS_ROW_WIDTH: usize = 94;
 
 /// Sorted Unicode syllable offsets (`codepoint - 0xAC00`) for all 2,350 KS X 1001 syllables
 /// (`0xB0..=0xC8`, `0xA1..=0xFE`). UHC syllables (`0x81..=0xC6`) form the exact sorted complement
@@ -154,15 +162,30 @@ static KSX1001_OFFSET: [u16; 2350] = [
     11148, 11152, 11160, 11161, 11163, 11165,
 ];
 
-/// Decodes a 2-byte CP949 (KS X 1001 / UHC) Hangul syllable or Compatibility Jamo pair.
+/// Table value to `char`; `0` marks an unassigned cell.
+#[inline]
+fn table_char(cp: u16) -> Option<char> {
+    (cp != 0).then(|| char::from_u32(u32::from(cp))).flatten()
+}
+
+/// Decodes a 2-byte CP949 (KS X 1001 / UHC) pair: Hangul, symbols, Compatibility Jamo or Hanja.
 #[inline]
 pub(crate) fn decode_cp949_pair(b1: u8, b2: u8) -> Option<char> {
-    if (0xB0..=0xC8).contains(&b1) && (0xA1..=0xFE).contains(&b2) {
-        let idx = (b1 - 0xB0) as usize * 94 + (b2 - 0xA1) as usize;
-        return char::from_u32(0xAC00 + u32::from(KSX1001_OFFSET[idx]));
-    }
-    if b1 == 0xA4 && (0xA1..=0xFE).contains(&b2) {
-        return char::from_u32(0x3131 + u32::from(b2 - 0xA1));
+    if (0xA1..=0xFE).contains(&b2) {
+        let col = (b2 - 0xA1) as usize;
+        match b1 {
+            0xB0..=0xC8 => {
+                let idx = (b1 - 0xB0) as usize * KS_ROW_WIDTH + col;
+                return char::from_u32(0xAC00 + u32::from(KSX1001_OFFSET[idx]));
+            }
+            0xA1..=0xAC => {
+                return table_char(KSX1001_SYMBOL[(b1 - 0xA1) as usize * KS_ROW_WIDTH + col])
+            }
+            0xCA..=0xFD => {
+                return table_char(KSX1001_HANJA[(b1 - 0xCA) as usize * KS_ROW_WIDTH + col])
+            }
+            _ => {}
+        }
     }
     if !(0x81..=0xC6).contains(&b1) {
         return None;
@@ -246,4 +269,122 @@ pub(crate) fn decode_cp949_or_latin1_bytes(bytes: &[u8]) -> String {
         }
     }
     out
+}
+
+/// Length of the leading all-ASCII run, scanning 8 bytes per step.
+#[inline]
+fn ascii_prefix_len(bytes: &[u8]) -> usize {
+    const HIGH_BITS: u64 = 0x8080_8080_8080_8080;
+    let mut chunks = bytes.chunks_exact(8);
+    let mut len = 0usize;
+    for chunk in &mut chunks {
+        let word = u64::from_le_bytes(chunk.try_into().unwrap_or([0; 8]));
+        let high = word & HIGH_BITS;
+        if high != 0 {
+            return len + (high.trailing_zeros() / 8) as usize;
+        }
+        len += 8;
+    }
+    len + chunks.remainder().iter().take_while(|&&b| b < 0x80).count()
+}
+
+/// Strict CP949 decoder for whole text files: any lone lead byte, truncated pair or unassigned
+/// pair rejects the input (`None`) instead of substituting U+FFFD, so a mis-detected encoding is
+/// never silently opened as corrupted text.
+pub(crate) fn decode_cp949_strict(bytes: &[u8]) -> Option<String> {
+    let mut out = String::with_capacity(bytes.len() + bytes.len() / 2);
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let run = ascii_prefix_len(&bytes[i..]);
+        if run > 0 {
+            out.push_str(std::str::from_utf8(&bytes[i..i + run]).ok()?);
+            i += run;
+            continue;
+        }
+        out.push(decode_cp949_pair(bytes[i], *bytes.get(i + 1)?)?);
+        i += 2;
+    }
+    Some(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// FNV-1a over `(lead, trail, codepoint-or-0)` for every `0x81..=0xFE` x `0x41..=0xFE` pair.
+    /// The expected digest and the 17,048 assigned cells were produced by the reference decoder
+    /// (encoding_rs 0.8.44 EUC-KR, WHATWG index) so the whole mapping is pinned without a dependency.
+    #[test]
+    fn full_pair_space_matches_reference_index() {
+        let mut fnv: u64 = 0xcbf2_9ce4_8422_2325;
+        let mut assigned = 0usize;
+        for b1 in 0x81u8..=0xFE {
+            for b2 in 0x41u8..=0xFE {
+                let cp = decode_cp949_pair(b1, b2).map_or(0, u32::from);
+                assigned += usize::from(cp != 0);
+                for x in [u64::from(b1), u64::from(b2), u64::from(cp)] {
+                    fnv = (fnv ^ x).wrapping_mul(0x0000_0100_0000_01b3);
+                }
+            }
+        }
+        assert_eq!(assigned, 17_048);
+        assert_eq!(fnv, 0x0ce2_423b_8471_8f68);
+    }
+
+    #[test]
+    fn table_boundary_cells_decode() {
+        assert_eq!(decode_cp949_pair(0xA1, 0xA1), Some('\u{3000}'));
+        assert_eq!(decode_cp949_pair(0xA1, 0xFE), Some('\u{FFE2}'));
+        assert_eq!(decode_cp949_pair(0xA2, 0xE6), Some('€'));
+        assert_eq!(decode_cp949_pair(0xA4, 0xA1), Some('ㄱ'));
+        assert_eq!(decode_cp949_pair(0xB0, 0xA1), Some('가'));
+        assert_eq!(decode_cp949_pair(0xC8, 0xFE), Some('힝'));
+        assert_eq!(decode_cp949_pair(0xCA, 0xA1), Some('伽'));
+        assert_eq!(decode_cp949_pair(0xFD, 0xFE), Some('詰'));
+        assert_eq!(decode_cp949_pair(0x81, 0x41), Some('갂'));
+        assert_eq!(decode_cp949_pair(0xC6, 0x52), Some('\u{D7A3}'));
+    }
+
+    #[test]
+    fn unassigned_and_out_of_range_pairs_are_rejected() {
+        assert_eq!(decode_cp949_pair(0xC9, 0xA1), None);
+        assert_eq!(decode_cp949_pair(0xFE, 0xA1), None);
+        assert_eq!(decode_cp949_pair(0x80, 0x41), None);
+        assert_eq!(decode_cp949_pair(0xFF, 0xA1), None);
+        assert_eq!(decode_cp949_pair(0xB0, 0xFF), None);
+        assert_eq!(decode_cp949_pair(0xCA, 0x41), None);
+    }
+
+    #[test]
+    fn strict_decode_handles_mixed_ascii_hangul_hanja_symbols() {
+        // "A,가나 漢字 ※\n" in CP949.
+        let bytes = [
+            b'A', b',', 0xB0, 0xA1, 0xB3, 0xAA, b' ', 0xF9, 0xD3, 0xED, 0xAE, b' ', 0xA1, 0xD8,
+            b'\n',
+        ];
+        assert_eq!(
+            decode_cp949_strict(&bytes).as_deref(),
+            Some("A,가나 漢字 ※\n")
+        );
+    }
+
+    #[test]
+    fn strict_decode_rejects_truncated_and_invalid_sequences() {
+        assert_eq!(decode_cp949_strict(&[b'a', 0xB0]), None);
+        assert_eq!(decode_cp949_strict(&[0xB0, 0x20]), None);
+        assert_eq!(decode_cp949_strict(&[0xFF]), None);
+        assert_eq!(decode_cp949_strict(&[0x80, 0x41]), None);
+        assert_eq!(decode_cp949_strict(&[0xC9, 0xA1]), None);
+        assert_eq!(decode_cp949_strict(b""), Some(String::new()));
+    }
+
+    #[test]
+    fn ascii_prefix_len_finds_first_high_byte_in_every_lane() {
+        for pos in 0..20 {
+            let mut v = vec![b'x'; 20];
+            v[pos] = 0x80;
+            assert_eq!(ascii_prefix_len(&v), pos);
+        }
+        assert_eq!(ascii_prefix_len(&[b'a'; 21]), 21);
+    }
 }
