@@ -262,7 +262,7 @@ mod tests {
             + http_start;
         let http_fn = &transport_js[http_start..http_end];
         assert!(
-            http_fn.contains("if (!resp.ok)") && http_fn.contains("throw new Error(msg)"),
+            http_fn.contains("if (!resp.ok)") && http_fn.contains("throw reportedError(msg)"),
             "the HTTP transport must throw on non-OK responses instead of falling back to MOCK_IPC_HANDLERS"
         );
     }
