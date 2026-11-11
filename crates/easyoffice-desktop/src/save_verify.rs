@@ -16,12 +16,17 @@
 //!   HWP also needs a `FileHeader` stream that starts with the HWP signature;
 //! * PDF: the header, a `startxref` and the `%%EOF` marker within the last kilobyte.
 //!
+//! * Pages (experimental writer, PD-158): the ZIP walk and the engine's own Pages reader, which must
+//!   open the bytes as a document. This is circular: the reader is the engine's, not the app's, so
+//!   it shows that the next EasyOffice open accepts the file, not that Pages does.
+//!
 //! Hangul documents are checked at container level only: decoding their records needs rhwp, so a
 //! record-level fault in the page's HWP/HWPX output is not caught here.
 
 use easyoffice_formats::{
-    ContainerFamily, DocumentFormat, EasyOfficeError, FormatDetector, Ole2ContainerCodec,
-    Ole2SecurityGuard, ZipArchiveCodec, ZipSecurityPolicy,
+    ContainerFamily, DecodedContent, DocumentFormat, EasyOfficeError, FormatDetector,
+    Ole2ContainerCodec, Ole2SecurityGuard, UniversalFormatConverter, ZipArchiveCodec,
+    ZipSecurityPolicy,
 };
 
 /// What the user is told when the bytes are refused: no internal terms, and the file is untouched.
@@ -50,7 +55,6 @@ const HWP_FILE_HEADER_STREAM: &str = "FileHeader";
 /// Refuses bytes that are not a complete document of the format the extension names.
 pub fn verify_document_bytes(extension: &str, bytes: &[u8]) -> Result<(), EasyOfficeError> {
     let format = DocumentFormat::from_extension(extension)
-        .filter(|format| !format.is_read_only())
         .ok_or_else(|| EasyOfficeError::UnsupportedExtension(extension.to_string()))?;
     FormatDetector::detect(bytes, Some(extension))?;
     match format.container_family() {
@@ -60,9 +64,17 @@ pub fn verify_document_bytes(extension: &str, bytes: &[u8]) -> Result<(), EasyOf
         ContainerFamily::Ole2Cfbf => verify_ole2(format, bytes),
         ContainerFamily::PdfIso32000 => verify_pdf_tail(bytes),
         ContainerFamily::PlainTextUtf8 => Ok(()),
-        ContainerFamily::ZipIwork => {
-            Err(EasyOfficeError::UnsupportedExtension(extension.to_string()))
-        }
+        ContainerFamily::ZipIwork => verify_pages(bytes),
+    }
+}
+
+/// A Pages package passes when its ZIP is sound and the engine's reader opens it as a document.
+fn verify_pages(bytes: &[u8]) -> Result<(), EasyOfficeError> {
+    ZipArchiveCodec::verify(bytes, &ZipSecurityPolicy::default())?;
+    let read = UniversalFormatConverter::decode_rich(bytes, Some("pages"))?;
+    match read.content {
+        DecodedContent::Document(_) if read.format == DocumentFormat::Pages => Ok(()),
+        _ => Err(corrupted("Pages 문서 본문을 읽지 못했습니다.")),
     }
 }
 
@@ -193,10 +205,43 @@ mod tests {
     }
 
     #[test]
-    fn unknown_and_read_only_extensions_are_refused() {
+    fn unknown_extensions_are_refused() {
         assert!(verify_document_bytes("xyz", b"text").is_err());
-        assert!(verify_document_bytes("pages", &encoded(DocumentFormat::Docx)).is_err());
         assert!(verify_document_bytes("docx", b"").is_err());
+    }
+
+    fn pages_bytes() -> Vec<u8> {
+        let doc = easyoffice_formats::RichDocument {
+            title: "t".to_string(),
+            blocks: vec![easyoffice_formats::RichBlock::Paragraph(
+                easyoffice_formats::RichParagraph {
+                    runs: vec![easyoffice_formats::RichRun::plain("본문")],
+                    ..Default::default()
+                },
+            )],
+            official_agency: None,
+        };
+        UniversalFormatConverter::encode_rich(&doc, DocumentFormat::Pages, None).unwrap()
+    }
+
+    #[test]
+    fn a_pages_package_the_engine_wrote_passes_and_anything_else_under_that_name_is_refused() {
+        let pages = pages_bytes();
+        verify_document_bytes("pages", &pages).unwrap();
+        verify_document_bytes("PAGES", &pages).unwrap();
+        assert!(verify_document_bytes("pages", &encoded(DocumentFormat::Docx)).is_err());
+        assert!(verify_document_bytes("docx", &pages).is_err());
+        for cut in [pages.len() - 16, pages.len() / 2, 64, 8] {
+            assert!(
+                verify_document_bytes("pages", &pages[..cut]).is_err(),
+                "cut {cut}"
+            );
+        }
+        // A sound ZIP that holds the marker part but no readable document.
+        let hollow =
+            ZipArchiveCodec::pack(&[("Index/Document.iwa".to_string(), vec![0, 1, 0, 0, 7])])
+                .unwrap();
+        assert!(verify_document_bytes("pages", &hollow).is_err());
     }
 
     #[test]

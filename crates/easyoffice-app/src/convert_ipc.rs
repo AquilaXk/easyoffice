@@ -244,8 +244,9 @@ impl EasyOfficeIpcRouter {
             EasyOfficeError::InvalidArgument(format!("지원하지 않는 대상 포맷: {dst_ext}"))
         })?;
 
-        // A read-only source format (.pages) without sourceBase64 uses DOCX as the size baseline.
-        let size_fmt = if src_fmt.is_read_only() {
+        // A source format that is not written in full (.pages) without sourceBase64 uses DOCX as the
+        // size baseline.
+        let size_fmt = if src_fmt.is_experimental_write() {
             DocumentFormat::Docx
         } else {
             src_fmt
@@ -448,7 +449,8 @@ mod tests {
     }
 
     #[test]
-    fn pages_source_without_binary_payload_encodes_writable_target_and_rejects_pages_target() {
+    fn pages_source_without_binary_payload_encodes_writable_target_and_writes_pages_with_warnings()
+    {
         let json = EasyOfficeIpcRouter::dispatch(
             "convert_document_format",
             r#"{"sourceFormat":"pages","targetFormat":"docx","title":"Pages변환","blocks":[{"type":"paragraph","runs":[{"text":"본문"}]}]}"#,
@@ -457,9 +459,17 @@ mod tests {
         assert_eq!(json_str_field(&json, "sourceFormat"), "pages");
         assert_eq!(json_str_field(&json, "targetFormat"), "docx");
         assert_eq!(json_str_field(&json, "detectedTarget"), "docx");
+        let pages = EasyOfficeIpcRouter::dispatch(
+            "convert_document_format",
+            r#"{"sourceFormat":"docx","targetFormat":"pages","title":"쓰기","blocks":[{"type":"paragraph","runs":[{"text":"본문"}]},{"type":"table","rows":[[{"text":"a"}]]}]}"#,
+        )
+        .unwrap();
+        assert_eq!(json_str_field(&pages, "detectedTarget"), "pages");
+        assert!(pages.contains("Pages 저장에서 빠진 요소 1개"), "{pages}");
+        // Sheets and slides are not documents: they are refused, not silently emptied.
         assert!(EasyOfficeIpcRouter::dispatch(
             "convert_document_format",
-            r#"{"sourceFormat":"docx","targetFormat":"pages","title":"읽기전용","blocks":[{"type":"paragraph","runs":[{"text":"본문"}]}]}"#,
+            r#"{"sourceFormat":"xlsx","targetFormat":"pages","title":"시트","sheets":[{"name":"S","cells":[{"ref":"A1","raw":"1"}]}]}"#,
         )
         .is_err());
     }

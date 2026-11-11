@@ -997,7 +997,7 @@ mod tests {
     }
 
     #[test]
-    fn pages_opens_through_the_decode_action_and_is_never_a_target() {
+    fn pages_opens_through_the_decode_action_and_is_an_experimental_target() {
         let json = EasyOfficeIpcRouter::dispatch(
             "convert_document_format",
             &request(Some("decode"), "메모.pages", &tiny_pages(), ""),
@@ -1011,9 +1011,10 @@ mod tests {
             "convert_document_format",
             &request(None, "a.docx", &docx_bytes(), ",\"targetFormat\":\"pages\""),
         );
+        let to_pages = to_pages.expect("a document converts to Pages (experimental)");
         assert!(
-            to_pages.is_err(),
-            "Pages must be rejected as a conversion target"
+            to_pages.contains("\"detectedTarget\":\"pages\""),
+            "{to_pages}"
         );
         let legacy = easyoffice_formats::ZipArchiveCodec::pack(&[(
             "index.xml".to_string(),

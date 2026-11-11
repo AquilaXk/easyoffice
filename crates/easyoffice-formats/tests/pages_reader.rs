@@ -279,7 +279,7 @@ fn detection_covers_pages_legacy_and_encrypted() {
         DocumentFormat::from_extension("PAGES"),
         Some(DocumentFormat::Pages)
     );
-    assert!(DocumentFormat::Pages.is_read_only());
+    assert!(DocumentFormat::Pages.is_experimental_write());
     assert_eq!(DocumentFormat::Pages.editor_module(), "DOC");
     assert!(!DocumentFormat::ALL.contains(&DocumentFormat::Pages));
 

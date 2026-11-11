@@ -14,12 +14,12 @@
 use std::collections::BTreeMap;
 
 use easyoffice_formats::{
-    base64_codec, evaluate_table_formulas, normalize_hex_color, CellMerge, CellStyle, CsvCodec,
-    DocumentFormat, EasyOfficeError, LegacyOle2Codec, LegacyXlsPayload, OdfCodec, OdsUnpacked,
-    OoxmlCodec, PdfWriteOptions, RichAlignment, RichBlock, RichDocument, RichImage, RichListKind,
-    RichParagraph, RichRun, RichScript, RichTable, SheetStyling, StrictJsonValue,
-    UniversalDocumentModel, UniversalFormatConverter, XlsxCachedValue, XlsxFormulaCache,
-    MAX_COLUMN_PX, MAX_IMAGE_BYTES, MAX_SIZE_PT, MIN_COLUMN_PX, MIN_SIZE_PT,
+    base64_codec, evaluate_table_formulas, normalize_hex_color, pages_write_loss, CellMerge,
+    CellStyle, CsvCodec, DocumentFormat, EasyOfficeError, LegacyOle2Codec, LegacyXlsPayload,
+    OdfCodec, OdsUnpacked, OoxmlCodec, PdfWriteOptions, RichAlignment, RichBlock, RichDocument,
+    RichImage, RichListKind, RichParagraph, RichRun, RichScript, RichTable, SheetStyling,
+    StrictJsonValue, UniversalDocumentModel, UniversalFormatConverter, XlsxCachedValue,
+    XlsxFormulaCache, MAX_COLUMN_PX, MAX_IMAGE_BYTES, MAX_SIZE_PT, MIN_COLUMN_PX, MIN_SIZE_PT,
 };
 use easyoffice_sheet::{
     EvaluatedCellValue, PackedCellCoordinate, WorkbookEngine, WorkbookEvalTarget,
@@ -831,6 +831,12 @@ pub(crate) fn encode_structured(
     title: &str,
     warnings: &mut Vec<String>,
 ) -> Result<Vec<u8>, EasyOfficeError> {
+    if format == DocumentFormat::Pages && !matches!(content, StructuredContent::Document(..)) {
+        return Err(EasyOfficeError::InvalidArgument(
+            "Pages(.pages)로는 문서 내용만 저장할 수 있습니다. 시트·슬라이드는 다른 형식으로 저장하세요."
+                .to_string(),
+        ));
+    }
     match content {
         StructuredContent::Document(doc, pdf) => {
             let doc = RichDocument {
@@ -839,6 +845,9 @@ pub(crate) fn encode_structured(
             };
             if format == DocumentFormat::Pdf {
                 return Ok(UniversalFormatConverter::encode_rich_pdf(&doc, pdf));
+            }
+            if format == DocumentFormat::Pages {
+                warnings.extend(pages_write_loss(&doc).warnings());
             }
             let cache = matches!(format, DocumentFormat::Xlsx | DocumentFormat::Ods)
                 .then(|| compute_xlsx_formula_cache(&doc.to_universal_model()));

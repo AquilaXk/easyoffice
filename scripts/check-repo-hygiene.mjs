@@ -606,11 +606,11 @@ if (
   // (Windows release runners) the same way they match on Linux and macOS.
   const readSourceLf = (file) => fs.readFileSync(file, "utf8").replaceAll("\r\n", "\n");
 
-  // Read/write formats: the DocumentFormat variants minus the read-only sources.
+  // Read/write formats: the DocumentFormat variants minus the experimental-write formats (Pages).
   const formatsLib = readSourceLf(formatsLibPath);
   const enumBody = (formatsLib.split("pub enum DocumentFormat {")[1] || "").split("\n}")[0];
   const variantCount = enumBody.split("\n").filter((line) => /^\s+[A-Z][A-Za-z0-9]*,$/.test(line)).length;
-  const readOnlyCount = Number((formatsLib.match(/READ_ONLY:\s*\[DocumentFormat;\s*(\d+)\]/) || [])[1] || 0);
+  const readOnlyCount = Number((formatsLib.match(/EXPERIMENTAL_WRITE:\s*\[DocumentFormat;\s*(\d+)\]/) || [])[1] || 0);
   const formatCount = variantCount - readOnlyCount;
 
   const rustFnMatch = readSourceLf(rustSheetFunctionsPath).match(/CANONICAL_122_FUNCTIONS:\s*\[&str;\s*122\]\s*=\s*\[([\s\S]*?)\];/);

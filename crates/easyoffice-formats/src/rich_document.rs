@@ -318,7 +318,8 @@ pub fn evaluate_table_formulas(rows: &mut [Vec<String>]) {
 }
 
 impl UniversalFormatConverter {
-    /// Encodes a [`RichDocument`]. DOCX, HWPX/HWTX, ODT, RTF, Markdown, TXT, and PDF keep block
+    /// Encodes a [`RichDocument`]. DOCX, HWPX/HWTX, ODT, RTF, Markdown, TXT, PDF, and Pages (body text
+    /// and basic formats only) keep block
     /// order (and formatting where the format has it); other formats get the flattened model.
     pub fn encode_rich(
         doc: &RichDocument,
@@ -336,6 +337,7 @@ impl UniversalFormatConverter {
             DocumentFormat::Markdown => Ok(w::render_markdown_rich(doc).into_bytes()),
             DocumentFormat::Txt => Ok(w::render_plain_text(doc, "\t", true).into_bytes()),
             DocumentFormat::Pdf => Ok(w::serialize_pdf_rich(doc, &PdfWriteOptions::default())),
+            DocumentFormat::Pages => crate::pages_write::pack_pages(doc),
             _ => Self::encode_with_formula_cache(&doc.to_universal_model(), format, formula_cache),
         }
     }

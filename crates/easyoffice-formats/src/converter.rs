@@ -76,7 +76,7 @@ impl UniversalDocumentModel {
 pub struct UniversalFormatConverter;
 
 /// Targets whose rich writer keeps block order and character runs (see `encode_rich`).
-const RICH_ORDER_TARGETS: [DocumentFormat; 8] = [
+const RICH_ORDER_TARGETS: [DocumentFormat; 9] = [
     DocumentFormat::Docx,
     DocumentFormat::Hwpx,
     DocumentFormat::Hwtx,
@@ -85,6 +85,7 @@ const RICH_ORDER_TARGETS: [DocumentFormat; 8] = [
     DocumentFormat::Markdown,
     DocumentFormat::Txt,
     DocumentFormat::Pdf,
+    DocumentFormat::Pages,
 ];
 
 impl UniversalFormatConverter {
@@ -114,7 +115,7 @@ impl UniversalFormatConverter {
 
         match format {
             DocumentFormat::Pages => Err(EasyOfficeError::InvalidArgument(
-                "Pages(.pages)는 읽기 전용 형식이라 저장·변환 대상으로 쓸 수 없습니다.".to_string(),
+                "Pages(.pages) 저장은 본문·제목·기본 서식을 가진 문서 내용(블록)만 지원합니다. 시트·슬라이드·단순 본문은 쓸 수 없습니다.".to_string(),
             )),
             DocumentFormat::Docx => OoxmlCodec::pack_docx(&OoxmlDocxPayload {
                 title,

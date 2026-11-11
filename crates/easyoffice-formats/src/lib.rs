@@ -25,6 +25,7 @@ pub mod pages_package;
 pub mod pages_proto;
 mod pages_schema;
 mod pages_table;
+mod pages_write;
 mod pdf_image;
 mod pdf_stream_parser;
 mod pdf_text_wrap;
@@ -73,6 +74,7 @@ pub use hwp_eqedit::*;
 pub use office_codecs::*;
 pub use ole2_codec::*;
 pub use output_compatibility::OutputCompatibility;
+pub use pages_write::{pages_write_loss, PagesWriteLoss};
 pub use pdf_writer::PdfWriteOptions;
 pub use rich_document::{
     evaluate_table_formulas, normalize_hex_color, RichAlignment, RichBlock, RichDocument,
@@ -135,7 +137,8 @@ impl ContainerFamily {
 }
 
 /// 20 standard read/write document formats supported by EasyOffice across macOS and Windows,
-/// plus [DocumentFormat::Pages], a read-only source (listed in [DocumentFormat::READ_ONLY]).
+/// plus [DocumentFormat::Pages], which is read in full and written experimentally (listed in
+/// [DocumentFormat::EXPERIMENTAL_WRITE], outside [DocumentFormat::ALL]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DocumentFormat {
     Docx,
@@ -158,16 +161,17 @@ pub enum DocumentFormat {
     Ppsx,
     Odp,
     Pdf,
-    /// Apple Pages (read-only source; never an encode target).
+    /// Apple Pages (read; written experimentally, body text and basic formats only).
     Pages,
 }
 
 impl DocumentFormat {
-    /// Formats that can be opened but never written.
-    pub const READ_ONLY: [DocumentFormat; 1] = [Self::Pages];
+    /// Formats written experimentally (PD-158): a first, partial writer whose files were not
+    /// opened in the app that owns the format. Not part of [`Self::ALL`].
+    pub const EXPERIMENTAL_WRITE: [DocumentFormat; 1] = [Self::Pages];
 
-    pub fn is_read_only(&self) -> bool {
-        Self::READ_ONLY.contains(self)
+    pub fn is_experimental_write(&self) -> bool {
+        Self::EXPERIMENTAL_WRITE.contains(self)
     }
 
     pub const ALL: [DocumentFormat; 20] = [
@@ -244,7 +248,7 @@ impl DocumentFormat {
             Self::Hwp | Self::Hwt => "HWP 5.0 Binary (OLE2 CFBF)",
             Self::Hwpx | Self::Hwtx => "HWPX (KS X 6101 OWPML)",
             Self::Pdf => "PDF (ISO 32000)",
-            Self::Pages => "Apple Pages (IWA, 읽기 전용)",
+            Self::Pages => "Apple Pages (IWA, 쓰기는 실험적)",
             Self::Odt => "ODF (ISO/IEC 26300) Text",
             Self::Ods => "ODF (ISO/IEC 26300) Spreadsheet",
             Self::Odp => "ODF (ISO/IEC 26300) Presentation",
