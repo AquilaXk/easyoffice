@@ -1,6 +1,6 @@
 # 성능 측정과 병목 (참조 앱 대비, 경로별 프로파일)
 
-이 문서는 측정 결과와 최적화 후보를 적는다. 구현은 아직 하지 않았다. 아래 수치는 모두 이 저장소의 측정 하네스로 직접 잰 값이고, 못 잰 것은 "못 잼"으로 적었다. 측정 기준 커밋은 `bac25cf`(main)이다. 그 뒤 main에 올라온 커밋(`f729ebb`까지)은 시트·XLS 저장, Pages 읽기, 웹 UI를 바꿨고 PDF·미리보기·Quick Look 경로는 건드리지 않아 다시 재지 않았다(XLS 저장·시트 정렬 값은 달라졌을 수 있다).
+이 문서는 측정 결과와 최적화 후보를 적는다. 셸 PDF 내보내기의 후보 2·3·4와 병목 1~4는 PD-163으로 처리했고 결과는 4.1절에 있다. 나머지는 아직 구현하지 않았다. 아래 수치는 모두 이 저장소의 측정 하네스로 직접 잰 값이고, 못 잰 것은 "못 잼"으로 적었다. 측정 기준 커밋은 `bac25cf`(main)이다. 그 뒤 main에 올라온 커밋(`f729ebb`까지)은 시트·XLS 저장, Pages 읽기, 웹 UI를 바꿨고 PDF·미리보기·Quick Look 경로는 건드리지 않아 다시 재지 않았다(XLS 저장·시트 정렬 값은 달라졌을 수 있다).
 
 ## 1. 측정 방법과 환경
 
@@ -132,7 +132,7 @@ node scripts/bench-profile.mjs --suite desktop --case pdf_doc --input <hwp> --re
 
 | 경로 | 참조 앱 대비 |
 |---|---|
-| PDF 내보내기 | 빠름(2쪽 이상 7배 이상), 작은 문서 같음, RSS는 큼 |
+| PDF 내보내기 | 빠름(2쪽 이상 7배 이상), 작은 문서 같음. RSS는 4.1절 최적화 전 기준 큼(이후 참조 앱보다 작음) |
 | 저장 검증 | 빠름(단, 검사 범위가 좁음) |
 | 홈 미리보기 | 임베디드 그림이 있으면 훨씬 빠름. 그리는 경우 일이 달라 비교 불가, rhwp 파싱이 큰 문서는 같음 |
 | Quick Look PNG·PDF | 작은 문서 같음·빠름, 큰 문서 느림 |
@@ -179,6 +179,35 @@ node scripts/bench-profile.mjs --suite desktop --case pdf_doc --input <hwp> --re
 | 9 | 구조화 저장 | `convert_ipc.rs:253~258`(원본 형식도 한 번 더 `encode_structured`, 크기 용), `conversion_response`(`convert_ipc.rs:297`, 310줄에서 결과를 다시 `decode`) | XLSX 저장 프로파일: `encode_structured` 포함 55.6%, `evaluate_workbook` 27.2%, `conversion_response` 12.9%. 저장 180 ms 대 인코딩 한 번 62 ms | 원본 형식 인코딩은 응답의 `sourceBytes` 숫자 하나를 위해 쓰이고, 응답은 결과를 한 번 더 풀어 문단 수를 센다 |
 | 10 | ODS 열기 / 시트 | `rtf_xml_helpers::find_valid_open_tag`(`rtf_xml_helpers.rs:330`), `find_matching_close_tag`(348), `extract_ods_cells_from_row`(518), `sheet_cells_json`(`convert_open.rs:228`) | ODS 열기: `find_valid_open_tag` 자기 21.1% + `find_matching_close_tag` 10.0% + memcmp 7.7%, `extract_ods_cells_from_row` 포함 24.9%, `sheet_cells_json` 15.9% | 셀마다 태그를 다시 찾는다. ODS 83 ms 대 XLSX 47 ms. 같은 줄에서 일반 셀·덮인 셀 태그를 따로 훑는 구조가 남아 있다 |
 
+### 4.1 셸 PDF 내보내기 최적화 결과 (PD-163)
+
+병목 1(글꼴 질의), 3(글꼴 파일 복사), 4(압축 수준)와 병목 2(쪽마다 면 파싱)를 다뤘다. 전(`base`)과 후(`final`)는 같은 입력에 같은 하네스(`perf_bench.rs`의 `pdf_doc`, 합성은 `pdf_svgs`)로 5번 돌린 중앙값이다. 두 바이너리를 번갈아 돌렸고 측정 때 기기 부하는 31~49였다(12코어). 그래서 CPU 시간(user+sys)과 최대 RSS를 근거로 하고, 벽시계는 참고만 한다. 생성 PDF는 전후가 바이트 단위로 같다(biz_plan, form-002, kps-ai, issue1949, KTX, 합성 300쪽을 sha1로 비교). 쪽 수, 글꼴 포함, 텍스트 추출, 래스터가 모두 같다.
+
+| 입력 | 쪽 | CPU 전 → 후 | RSS 전 → 후 | 벽시계 전 → 후 |
+|---|---:|---|---|---|
+| shift-return.hwp | 1 | 20 → 20 ms | 44 → 19 MB | 27 → 24 ms |
+| biz_plan.hwp | 6 | 190 → 140 ms (-26%) | 426 → 48 MB (-89%) | 81 → 67 ms |
+| form-002.hwpx | 10 | 750 → 550 ms (-27%) | 738 → 92 MB (-88%) | 289 → 232 ms |
+| kps-ai.hwp | 77 | 2250 → 1690 ms (-25%) | 829 → 182 MB (-78%) | 864 → 700 ms |
+| issue1949 | 115 | 4210 → 3170 ms (-25%) | 439 → 201 MB (-54%) | 1893 → 1595 ms |
+| KTX.hwp | 1 | 190 → 170 ms (-11%) | 297 → 137 MB (-54%) | 189 → 172 ms |
+| 합성 300쪽 | 300 | 4670 → 4140 ms (-11%) | 423 → 71 MB (-83%) | 1399 → 1194 ms |
+
+변경별로 나눈 값(같은 방식, 같은 날 앞선 실행): 글꼴 질의 메모만 넣었을 때 kps-ai CPU 2580 → 2130 ms, issue1949 4990 → 3740 ms(-25%), form-002 790 → 710 ms, 합성 4910 → 4840 ms. 글꼴 데이터 공유까지 넣으면 RSS가 위 표 수준으로 내려가고 CPU가 더 준다(합성 4840 → 4340 ms).
+
+- **병목 1(질의 메모, `pdf_font_select.rs`)**: 표가 많아 글자 요소가 많은 문서(issue1949, kps-ai)에서 CPU 약 25% 감소. 요청 종류가 적은 합성 문서에서는 질의가 원래 작아 변화가 작다.
+- **병목 3(글꼴 공유, `vendor/svg2pdf`)**: 최대 RSS가 54~89% 줄었다. 쪽마다, 스레드 4개마다 글꼴 파일(Noto Sans KR 등) 전체를 복사하던 것이 RSS의 대부분이었다. 2.1절의 참조 앱 RSS와 견주면 모든 입력에서 우리가 작아졌다(shift-return 19 vs 35, biz_plan 48 vs 207, form-002 92 vs 247, kps-ai 182 vs 385, issue1949 201 vs 214, KTX 137 vs 310, 합성 71 vs 97 MB).
+- **병목 2(쪽마다 `Face::parse`)는 못 줄였다**: 이 호출은 usvg 안(`text::flatten`의 `with_face_data` 클로저)이라 공개 API로 면 파싱 결과를 넘길 수 없다. 합성 300쪽을 다시 `sample`로 보니 `usvg::text::flatten` 포함 66%, 그 안의 `ttf_parser::Face::parse` 포함 약 22%(`parse_tables` 약 11%)다. 줄이려면 usvg 사본을 패치해 면 파싱을 쪽 사이에 공유해야 한다. 상위 갱신 부담이 커서 이번에는 하지 않았다(결정 필요).
+- **병목 4(압축 수준)는 바꾸지 않았다**. 수준별 CPU(ms)와 출력 크기(바이트), 5회 중앙값, 수준 6이 현재 값이다.
+
+| 입력 | 수준 1 | 수준 2 | 수준 3 | 수준 4 | 수준 6 |
+|---|---|---|---|---|---|
+| form-002 | 510 / 1509832 | 530 / 1366266 | 530 / 1315816 | 500 / 1300198 | 530 / 1278597 |
+| kps-ai | 1540 / 5908293 | 1610 / 5281340 | 1640 / 5099641 | 1710 / 5055291 | 1690 / 4970382 |
+| 합성 300쪽 | 3560 / 14780073 | 3610 / 12948134 | 3770 / 12125739 | 3800 / 11971599 | 3630 / 11806944 |
+
+  수준 1이 가장 빠르지만 줄어드는 CPU는 2~9%이고 PDF는 18~25% 커진다. 수준 2~4는 수준 6과 CPU가 같거나 오히려 느린 값도 나온다(측정 노이즈). 근거가 부족해 6을 둔다.
+
 참고(상위 10에 못 든 것):
 
 - 시트 `set_cell`의 수식 컴파일(`easyoffice-sheet/src/parser.rs:867` `compile_formula_expr`)이 50,000행 시험의 포함 23.3%, `SheetEngine` 해제(`drop_glue`, `Expr` 트리)가 23.3%다. 사용자에게는 작은 값(50,000행 223 ms)이다.
@@ -192,9 +221,9 @@ node scripts/bench-profile.mjs --suite desktop --case pdf_doc --input <hwp> --re
 | 순위 | 후보 | 예상 효과 | 위험 | 관점 |
 |---:|---|---|---|---|
 | 1 | Quick Look에서 글꼴 면을 한 번만 매핑(`fonts.rs:build`에 `make_shared_face_data`, 셸의 `with_mapped_faces`와 같은 방식) | **측정함**: 임시로 적용해 재본 값은 첫 쪽 PNG KTX 456→214 ms(CPU 450→130), form-002 279→103, number-bullet 181→90, PDF 77쪽 6927→3625, form-002 3215→1364, biz_plan 892→439. 글꼴 DB 만들기 +약 10 ms | 낮음. 같은 코드가 셸에서 쓰이고 있다. 추출 프로세스 RSS 증가와 모든 면을 미리 매핑하는 비용은 쓰인 면만 지연 매핑하면 줄일 수 있다 | 할당·시스템 호출 제거(문서당 수만 번의 `open/mmap/munmap` 제거) |
-| 2 | 글꼴 선택 결과 캐시: `usvg::Options.font_resolver.select_font`를 (글꼴 목록, 굵기, 늘임, 모양)→면 ID 메모로 감싼다 | PDF에서 `fontdb::query` 14.7~28.6% 포함 시간 제거(추정 PDF 1.15~1.4배, 표·글꼴 반복이 많을수록 큼) | 낮음~중간. 캐시 키가 글꼴 DB와 한 몸이어야 한다. 내보내기마다 새로 만들고 상한을 둬 악의적 SVG에 대비해야 한다 | 분기·선형 탐색을 해시 조회로 |
-| 3 | `svg2pdf` `fill_fonts`가 글꼴 파일을 복사하지 않고 매핑된 데이터를 공유(`Arc<dyn AsRef<[u8]>>`, 또는 내보내기 전체에서 글꼴 한 번 파싱) | 합성 300쪽에서 `memmove` 21%와 `fill_fonts` 12%를 줄임(추정 1.2~1.3배), 최대 RSS도 줄 가능성(분해 못 함) | 중간. `vendor/svg2pdf`를 바꾸므로 `scripts/rhwp-svg2pdf.mjs`의 상위와 일치 검사를 통과하게 정책을 정해야 한다(PD-101) | 복사 제거, 파싱 한 번 |
-| 4 | 쪽 스트림 압축을 낮은 수준(1~3)으로, 또는 더 빠른 deflate 구현 | PDF 7~13%, Quick Look PDF 최대 약 40%(추정 Quick Look PDF 1.3~1.6배) | 낮음. PDF가 조금 커진다(수치 못 잼) | CPU 대 크기 교환 |
+| 2 | **처리함(PD-163, 4.1절).** 글꼴 선택 결과 캐시: `usvg::Options.font_resolver.select_font`를 (글꼴 목록, 굵기, 늘임, 모양)→면 ID 메모로 감싼다 | PDF에서 `fontdb::query` 14.7~28.6% 포함 시간 제거(추정 PDF 1.15~1.4배, 표·글꼴 반복이 많을수록 큼) | 낮음~중간. 캐시 키가 글꼴 DB와 한 몸이어야 한다. 내보내기마다 새로 만들고 상한을 둬 악의적 SVG에 대비해야 한다 | 분기·선형 탐색을 해시 조회로 |
+| 3 | **처리함(PD-163, 4.1절): CPU -11~27%, RSS -54~89%.** `svg2pdf` `fill_fonts`가 글꼴 파일을 복사하지 않고 매핑된 데이터를 공유(`Arc<dyn AsRef<[u8]>>`, 또는 내보내기 전체에서 글꼴 한 번 파싱) | 합성 300쪽에서 `memmove` 21%와 `fill_fonts` 12%를 줄임(추정 1.2~1.3배), 최대 RSS도 줄 가능성(분해 못 함) | 중간. `vendor/svg2pdf`를 바꾸므로 `scripts/rhwp-svg2pdf.mjs`의 상위와 일치 검사를 통과하게 정책을 정해야 한다(PD-101) | 복사 제거, 파싱 한 번 |
+| 4 | **측정 후 바꾸지 않음(4.1절).** 쪽 스트림 압축을 낮은 수준(1~3)으로, 또는 더 빠른 deflate 구현 | PDF 7~13%, Quick Look PDF 최대 약 40%(추정 Quick Look PDF 1.3~1.6배) | 낮음. PDF가 조금 커진다(수치 못 잼) | CPU 대 크기 교환 |
 | 5 | Quick Look 미리보기 PDF에서 글자를 윤곽선 대신 글꼴 포함(`embed_text: true`)으로, 또는 쪽당 비트맵 | 77쪽 32.7 MB → 수 MB, 시간 크게 감소 가능(못 잼) | 중간. 번들 글꼴이 필요하고 글자 모양·`ToUnicode` 검증이 따른다 | 출력 크기, 할당 |
 | 6 | 구조화 저장에서 원본 형식 인코딩을 없애고(`sourceBytes`는 입력 길이로), 응답용 `decode`를 인코더가 세는 문단·표 수로 대체 | XLSX 저장 약 30~40% 감소 추정(180→약 110 ms), 다른 형식은 약 25~35% | 중간. `sourceBytes`가 계약상 무엇이어야 하는지, 응답의 `detectedTarget` 검증 용도를 확인해야 한다 | 중복 계산 제거 |
 | 7 | 강조 여부 판정을 한 번 훑기(`asks_for_emphasis`)로, 강조가 있는 쪽의 이중 XML 파싱을 한 번으로 | 합성 PDF에서 2~5% 추정 | 낮음 | 분기·패스 수 줄이기(SWAR 후보) |
@@ -208,6 +237,6 @@ node scripts/bench-profile.mjs --suite desktop --case pdf_doc --input <hwp> --re
 
 - 실제 사용자 DOCX·XLSX·PPTX·PDF와 외부가 만든 PDF 열기, Pages 파일 열기.
 - 번들 글꼴이 있을 때의 Quick Look, Windows·Linux, 웹뷰 구간, 한글 편집기 안의 쪽 SVG 생성.
-- 최대 RSS가 우리 PDF에서 1.7~3.2배 큰 원인(전 면 매핑, 쪽당 글꼴 복사, 병렬 스레드 중 무엇이 얼마인지)은 분해하지 않았다.
+- 최대 RSS가 컸던 원인은 쪽·스레드마다 한 글꼴 파일 전체 복사가 대부분이었다(4.1절에서 제거). 남은 RSS(전 면 매핑, 병렬 스레드, 쪽 객체)의 분해는 하지 않았다.
 - 줄 단위 핫스팟(디버그 정보 없이 `sample`만 사용). 줄이 필요하면 `CARGO_PROFILE_RELEASE_DEBUG=line-tables-only`로 따로 빌드해야 한다(전체 재빌드).
 - 벽시계 값은 측정 중 기기 부하의 영향을 받았다. 낮은 부하에서 다시 재면 우리 쪽 벽시계 수치는 더 낮아질 가능성이 크다(1차와 2차 차이로 보인다).

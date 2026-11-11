@@ -2512,3 +2512,17 @@
 - **Alternatives rejected** 크레이트로 그대로 쓰기(자체 객체 모델·Snappy 압축 의존성·`/dev/urandom` 의존, 상한·Fail-Closed를 다시 짜야 함), Apple 템플릿에서 복사(경계 위반), 표·그림까지 1단계에 쓰기(셀 레코드 쓰기 규칙이 앱 확인 없이는 위험).
 - **Verified by** `cargo test -p easyoffice-formats --test pages_write`(왕복 문단·제목·정렬·서식, STORED, 64 KiB 블록, 필드 오름차순, 참조 목록, ID 범위, 구성 요소 색인, 색·변형 이름, 새 UUID, 200,001문단 거부, 손실 개수), `cargo test -p easyoffice-formats --lib pages_write`, `cargo test -p easyoffice-desktop save_verify`. Pages 앱 확인(QA 리드, 2026-11-11, AppleScript 판독): 샘플 3개(`pages-write-{1-basic,2-formats,3-long}.pages`)가 오류·복구 알림 없이 열렸고 문단 수는 10·3·1,200(마지막 `1200.` 문단 있음)이었습니다. 제목은 Helvetica-Bold 24/20/12pt, 굵게·기울임(Helvetica-Oblique)·굵은 기울임·20pt·14pt 굵게 파랑 구간과 이모지 뒤 굵은 구간 위치, long의 번호 굵게가 정확했습니다. basic을 다른 이름으로 저장하고 닫은 뒤 다시 열어도 10문단이 유지되었고 로그에 `TSPersistence`/`TSUAssert`가 없었습니다. 색은 Pages가 돌려주는 값이 FF0000→(251,0,7), D32F2F→(198,26,36), 1565C0→(19,78,178)로 일정한 색 공간 변환 차이로 보이며 문제로 판단하지 않았습니다(관찰만 기록). 밑줄·정렬은 AppleScript로 읽을 수 없어 미확인입니다.
 - **Revisit when** 밑줄·정렬·스타일 메뉴를 앱에서 확인했을 때, 표·그림·목록을 쓰려 할 때.
+
+## PD-163. PDF 내보내기: 글꼴 질의 메모, 글꼴 데이터 공유(svg2pdf 로컬 패치 기록), 압축 수준 유지
+
+- **Status** Implemented (`pdf_font_select.rs`, `pdf_export.rs`, `vendor/svg2pdf/src/render/text.rs`, `config/svg2pdf-local-patches.json`, `scripts/rhwp-svg2pdf.mjs`)
+- **Context** 성능 측정(`docs/performance.md` 4절)에서 셸 PDF 내보내기의 병목은 (1) 글자 요소마다 글꼴 면 수백 개를 걸러 찾는 `fontdb::Database::query`(포함 시간 20~28.6%), (2) 쪽마다 글꼴 파일 전체를 복사하는 `fill_fonts`(`memmove` 자기 시간 21%, 최대 RSS 425~829 MB), (3) 쪽 스트림 deflate 수준 6(7~13%)이었습니다. PD-101은 `vendor/svg2pdf`가 rhwp 고정 사본과 같아야 하고 다르면 갱신을 막는다고 정했습니다.
+- **Decision (`PD-163`)**
+  1. **글꼴 질의 메모**: usvg의 글꼴 선택기를 (패밀리 목록, 굵기, 늘이기, 모양) → 면 ID 메모로 감쌉니다(`pdf_font_select.rs`). 메모는 내보내기 한 번에 하나이고 모든 쪽 스레드가 읽기 잠금으로 공유하며 내보내기와 함께 버립니다(글꼴 DB는 내보내는 동안 바뀌지 않음). 요청 4,096개와 패밀리 이름 합계 512바이트를 넘는 요청은 저장하지 않고(신뢰할 수 없는 SVG의 메모리 상한) 매번 DB에 묻습니다. 대체 글꼴 선택기(PD-114)는 그대로입니다. 쪽을 비트맵으로 그리는 경로(`bitmap_parse_options`)는 쪽마다 새 메모를 씁니다.
+  2. **글꼴 데이터 공유**: `vendor/svg2pdf/src/render/text.rs`의 `Font.face_data`를 `Arc<Vec<u8>>`에서 `Arc<dyn AsRef<[u8]> + Send + Sync>`로 바꾸고, 글꼴 DB가 메모리에 쥔 면(`Binary`, 파일 매핑 `SharedFile`)은 복사하지 않고 같은 `Arc`를 씁니다. 파일을 접근마다 여는 면(`File`)만 이전처럼 복사합니다. 출력 바이트는 같습니다(세 원본으로 시험).
+  3. **svg2pdf 로컬 패치 기록**: 패치한 파일은 `config/svg2pdf-local-patches.json`에 `base`(rhwp 사본의 blob id), `patched`(우리 파일의 blob id), 요약을 적습니다. `update-rhwp.mjs`의 svg2pdf 검사는 로컬 blob이 `patched`이고 상위 blob이 `base`인 파일을 차이로 세지 않습니다. 상위가 그 파일을 바꿨으면 `--sync-svg2pdf`로도 덮어쓰지 않고 "패치를 손으로 합치고 기록을 갱신하라"고 막습니다. 기록과 맞지 않는 파일은 지금처럼 차이로 막습니다. `node --test scripts/test-update-rhwp.mjs`가 기록과 실제 파일의 blob id 일치를 확인하므로, 패치 파일을 고치면 기록도 함께 고쳐야 합니다.
+  4. **압축 수준은 6 그대로**: 수준 1~4를 재 보니 CPU는 2~9% 줄지만 PDF가 4~25% 커져(수준 1: form-002 +18%, kps-ai +19%, 합성 300쪽 +25%) 바꾸지 않습니다.
+  5. **쪽마다 `ttf_parser::Face::parse`**(usvg 글자→경로 변환, 합성 300쪽에서 포함 약 22%)는 usvg 공개 API로 재사용할 수 없어 손대지 않았습니다(usvg 사본을 패치해야 함).
+- **Why** 출력이 바이트 단위로 같은 채 CPU 시간과 최대 RSS를 줄입니다. 메모는 글꼴 DB가 고정이라는 전제 위에서만 맞고, 그래서 내보내기 단위입니다.
+- **Trade-offs** 다음 rhwp 갱신 때 `text.rs`를 상위가 바꾸면 패치를 손으로 합쳐야 합니다. 상위가 같은 수정을 넣으면 기록에서 지우면 됩니다.
+- **Verified by** `cargo test -p easyoffice-desktop pdf_font_select a_face_gives`, `node --test scripts/test-update-rhwp.mjs`, 전후 PDF 바이트 비교(7개 입력 동일), `docs/performance.md` 4.1절 측정.
