@@ -36,6 +36,8 @@ use std::sync::Arc;
 use usvg::fontdb::Database;
 
 const PRODUCER: &str = "EasyOffice";
+/// Pages between two looks at the deadline, as a mask (a power of two minus one).
+const PAGES_PER_CHECK_MASK: usize = 63;
 const ORIGINAL_FORM: Name<'static> = Name(b"P");
 const OVERLAY_FORM: Name<'static> = Name(b"W");
 
@@ -160,7 +162,7 @@ pub fn build(
 
     let mut page_refs = Vec::with_capacity(pages.len());
     for (n, (plan, place)) in pages.iter().zip(&placements).enumerate() {
-        if n.is_multiple_of(64) {
+        if n & PAGES_PER_CHECK_MASK == 0 {
             deadline.check()?;
         }
         let form = *forms

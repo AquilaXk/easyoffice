@@ -41,8 +41,11 @@ const HEADER_WINDOW: usize = 1024;
 const ENCRYPT_KEY: &[u8] = b"/Encrypt";
 /// Bytes before `stream` that are searched for the stream's filter.
 const DICT_LOOKBACK: usize = 1024;
-/// Keyword spans of the stream scan between two looks at the deadline.
-const SPANS_PER_CHECK: usize = 4096;
+/// How often the checks look at the deadline, as masks (a power of two minus one): every 4096th
+/// keyword span of the stream scan, every 1024th page tree node, every 64th page.
+const SPANS_PER_CHECK_MASK: usize = 4095;
+const NODES_PER_CHECK_MASK: usize = 1023;
+const PAGES_PER_CHECK_MASK: usize = 63;
 /// Output buffer of the counting inflater (its contents are thrown away).
 const SCRATCH_BYTES: usize = 32 * 1024;
 
@@ -134,7 +137,7 @@ pub fn inspect_within(
     check_page_tree(&pdf, deadline, limits)?;
     let mut total = 0usize;
     for (n, page) in pages.iter().enumerate() {
-        if n.is_multiple_of(64) {
+        if n & PAGES_PER_CHECK_MASK == 0 {
             deadline.check()?;
         }
         total = total.saturating_add(page_content_bytes(page, limits)?);
@@ -229,7 +232,7 @@ fn check_page_tree(pdf: &Pdf, deadline: &Deadline, limits: &Limits) -> Result<()
                 limits.tree_nodes
             ));
         }
-        if nodes.is_multiple_of(1024) {
+        if nodes & NODES_PER_CHECK_MASK == 0 {
             deadline.check()?;
         }
         if node.obj_id().is_some_and(|id| !seen.insert(id)) {
@@ -291,7 +294,7 @@ fn scan_streams(bytes: &[u8], deadline: &Deadline, limits: &Limits) -> Result<()
     while let Some(found) = find(bytes, b"stream", at) {
         at = found + b"stream".len();
         spans += 1;
-        if spans.is_multiple_of(SPANS_PER_CHECK) {
+        if spans & SPANS_PER_CHECK_MASK == 0 {
             deadline.check()?;
         }
         if found >= 3 && &bytes[found - 3..found] == b"end" {
