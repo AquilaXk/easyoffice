@@ -209,8 +209,8 @@
   const hwpPrint = host.__EASYOFFICE_CREATE_HWP_PRINT__({ document, hwpHost, env: host, notify: (text) => setStatusFeedback(text), desktopBridge });
 
   const officePrint = host.__EASYOFFICE_CREATE_OFFICE_PRINT__({
-    document, env: host, desktopBridge, getActiveModule: () => activeModule, slideDeckState, sheetController,
-    restoreDomChildren: host.__EASYOFFICE_SHEET_UTILS__.restoreDomChildren, notify: (text) => setStatusFeedback(text),
+    document, env: host, desktopBridge, getActiveModule: () => activeModule, slideDeckState, sheetController, notify: (text) => setStatusFeedback(text),
+    restoreDomChildren: host.__EASYOFFICE_SHEET_UTILS__.restoreDomChildren,
   });
   const findReplace = host.__EASYOFFICE_CREATE_FIND_REPLACE__({
     document, env: host, getActiveModule: () => activeModule, setFeedback: (text) => setStatusFeedback(text),
@@ -428,9 +428,7 @@
         undo: () => void ribbonHistory.performWorkspaceUndo().catch(() => {}),
         redo: () => void ribbonHistory.performWorkspaceRedo().catch(() => {}),
         benchmark: () => void workspacePanels.runBenchmarkAction().catch(() => {}),
-        find: () => findActiveModule("find"),
-        replace: () => findActiveModule("replace"),
-        print: () => void printActiveModule().catch((err) => setStatusFeedback(err?.message || String(err))),
+        ...(({ find, replace, print }) => ({ find, replace, print }))(shortcutActions()),
       }
     );
   }
@@ -806,8 +804,7 @@
     }
   }
 
-  // Print and find belong to the module in front: the Hangul editor has its own, the document and
-  // sheet modules use the find dialog, and a module without one keeps the command palette on Ctrl+F.
+  // Print and find belong to the module in front: the Hangul editor has its own, document and sheet use the find dialog, other modules keep the palette on Ctrl+F.
   function printActiveModule() {
     if (activeModule === "HWP") return hwpPrint.print();
     return officePrint.isSupported(activeModule) ? officePrint.print() : Promise.reject(new Error("이 모듈은 인쇄를 지원하지 않습니다."));
@@ -816,9 +813,7 @@
   function findActiveModule(mode) {
     if (activeModule === "HWP" && hwpHost.isEmbedActive()) {
       void hwpHost.call("automation.execute", { id: mode === "find" ? "edit:find" : "edit:find-replace", allowDialog: true }).catch(() => {});
-    } else if (!findReplace.open(mode) && mode === "find") {
-      togglePaletteModal(document.getElementById("cmd-palette-modal"), document.getElementById("cmd-search-input"));
-    }
+    } else if (!findReplace.open(mode) && mode === "find") togglePaletteModal(document.getElementById("cmd-palette-modal"), document.getElementById("cmd-search-input"));
   }
 
   // Dispatch is driven by ribbonCatalog.WORKSPACE_SHORTCUT_BINDINGS so every advertised label
