@@ -2381,3 +2381,16 @@
 - **Trade-offs** 한글 문서의 개인정보 점검은 편집기가 텍스트를 내보내는 호출을 갖출 때까지 없습니다.
 - **Verified by** `node --test scripts/test-webui-a11y.mjs`.
 - **Revisit when** 임베드 포트가 본문 텍스트를 넘겨줄 때.
+
+## PD-155. 문서 서식줄의 문단 서식은 선택 문단에 적용하고, 저장 모델에 없는 컨트롤은 두지 않는다
+
+- **Status** Implemented (`doc-runs-ui.js`, `workspace-tools.js`, `workspace-panels.js`, `index.html`, `styles.css`, `toolbar.css`)
+- **Context** 정렬·줄 간격·스타일 상자는 편집기 루트의 스타일과 `dataset`만 바꿔 문단별 값이 우선하는 저장 경로에서 사라졌고, 번호·글머리표는 "1. "·"○ " 평문 접두를 넣었으며, 언어별 글꼴 범주와 글자 효과는 `dataset`만 바꾸는 무동작 컨트롤이었습니다. 문서 모델(`RichAlignment`, `RichRun`)은 문단 정렬을 왼쪽·가운데·오른쪽·양쪽으로, 글자 글꼴을 run마다 하나로만 가집니다.
+- **Decision (`PD-155`)**
+  1. **선택 문단 적용**: 정렬·줄 간격·번호·글머리표·스타일은 선택 영역이 걸친 블록(P, H1-H6, LI)마다 적용하며 한 번의 실행 취소 단위입니다. 줄 간격은 블록 `style.lineHeight`, 정렬은 블록 `style.textAlign`으로 저장 경로(`save-payload.js`)가 읽는 값과 같습니다. 도구줄은 선택의 첫 문단 값을 보여 줍니다.
+  2. **배분·나눔 정렬**: 모델에 대응이 없어 문단에 `data-eo-align`을 두어 버튼 상태만 기억하고 `justify`로 저장합니다. 지정할 때와 저장이 끝났을 때 상태줄이 양쪽 정렬로 기록됨을 알립니다(HWPX 읽기도 배분 정렬을 양쪽으로 받습니다).
+  3. **번호·글머리표**: `<ol>/<ul><li>` 구조로 바꾸고 같은 종류를 다시 적용하면 문단으로 되돌립니다(중간 항목을 빼면 목록을 둘로 나눔). 문단의 정렬·들여쓰기·글자 run은 유지합니다.
+  4. **스타일 상자**: 개요 1-3은 H1-H3, 바탕글·공문서 바탕글은 문단입니다. 모델에 구분이 없는 본문·쪽 번호·머리말·각주 항목은 뺐습니다.
+  5. **제거**: 모델에 대응이 없는 언어별 글꼴 범주(`#doc-font-lang`)와 글자 효과(`#btn-stylebar-charfx`)를 뺐고, 쓰이지 않는 `data-strike`·`data-textcolor`·`data-highlight`·`data-charfx` 규칙과 루트 `dataset` 보존 필드를 지웠습니다.
+- **Why** 화면에서 바꾼 서식이 저장 파일에 그대로 남고, 동작하지 않는 컨트롤이 없게 합니다.
+- **Verified by** `node --test scripts/test-webui-doc-paragraphs.mjs scripts/test-webui-doc-runs.mjs scripts/test-webui-ux-ergonomics.mjs scripts/test-webui-shell-chrome.mjs`.
