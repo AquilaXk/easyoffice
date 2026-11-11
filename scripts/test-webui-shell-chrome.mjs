@@ -6,6 +6,7 @@ import { switchModule } from "./test-support/modules.mjs";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { cssDeclarations } from "./test-support/css-declarations.mjs";
 import { readText } from "./test-support/read-text.mjs";
+import { demoHtml } from "./test-support/demo-fixtures.mjs";
 
 // Shell chrome (#126, PD-088): one SVG icon set, accessible names on every control, compact top bar,
 // a status bar that never clips, a command palette overlay and readable contrast in both themes.
@@ -434,7 +435,7 @@ test("font-mono token, status bar interactive position/zoom, proportional fit zo
   assert.ok(hasDecl(posRule, "cursor", "pointer") && hasDecl(posRule, "border-radius", "var(--radius-xs)") && hasDecl(posRule, "padding", "1px 6px"));
 
   const docSelection = { _range: null, get rangeCount() { return this._range ? 1 : 0; }, getRangeAt() { return this._range; }, removeAllRanges() { this._range = null; }, addRange(r) { this._range = r; } };
-  const { document, userClick, sandbox } = await createWorkspaceHarness({ search: "?module=DOC&win=w-parity-controls", selection: docSelection });
+  const { document, userClick, sandbox } = await createWorkspaceHarness({ search: "?module=DOC&win=w-parity-controls", selection: docSelection, transformHtml: demoHtml });
   const outlineDialog = document.getElementById("outline-dialog");
   assert.equal(Boolean(outlineDialog.open), false);
   userClick(document.getElementById("status-studio-pos"));

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { switchModule, typeIntoDocParagraph, createMemoryStorage, studioItem, commandItem } from "./test-support/modules.mjs";
 import { readText } from "./test-support/read-text.mjs";
+import { demoHtml } from "./test-support/demo-fixtures.mjs";
 
 const UI_DIR = new URL("../crates/easyoffice-app/ui/", import.meta.url);
 const INDEX_HTML = readText(fileURLToPath(new URL("index.html", UI_DIR)));
@@ -273,7 +274,7 @@ test("unsafe or corrupted autosave records are ignored instead of being injected
     await flushAsyncTurns(10);
     const editor = document.getElementById("doc-editor");
     assert.equal(editor.querySelectorAll("script").length, 0);
-    assert.ok(editor.querySelector("h1"), "default document must remain");
+    assert.ok(editor.querySelector("p"), "default document must remain");
   }
 });
 
@@ -384,7 +385,7 @@ test("a window has no tab strip or module switcher; the File menu opens windows 
 test("Edit menu cut/copy/paste act on the real selection and the system clipboard", async () => {
   const selection = createSelectionHolder();
   const clipboard = createFakeClipboard();
-  const { document, sandbox, userClick } = await createWorkspaceHarness({ selection, clipboard });
+  const { document, sandbox, userClick } = await createWorkspaceHarness({ selection, clipboard, transformHtml: demoHtml });
   const docEditor = document.getElementById("doc-editor");
   const para = docEditor.querySelector("p");
   const textNode = firstTextNode(para);

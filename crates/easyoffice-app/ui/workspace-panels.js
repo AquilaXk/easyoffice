@@ -455,6 +455,25 @@
       }
       const formStatus = document.getElementById("pdf-form-status");
       if (formStatus && pdfStudio.formStatus !== undefined) formStatus.textContent = pdfStudio.formStatus;
+      syncPdfEmptyState();
+    }
+
+    // The toolbar controls that act on an opened file (rhwp-studio disables its tools without a document).
+    const PDF_FILE_CONTROL_IDS = ["btn-pdf-rotate", "pdf-stamp-select", "pdf-watermark-input", "btn-pdf-apply"];
+
+    // Without an opened file the pane shows only the home screen's empty hint, no paper card.
+    function syncPdfEmptyState() {
+      const pane = document.getElementById("pane-pdf");
+      const text = document.querySelectorAll("#pdf-page-card h3, #pdf-page-card p:not(#pdf-form-status)");
+      if (!pane) return;
+      const empty = Array.from(text).every((el) => !el.textContent.trim());
+      pane.dataset.empty = String(empty);
+      const card = document.getElementById("pdf-page-card");
+      if (card) card.hidden = empty;
+      for (const id of PDF_FILE_CONTROL_IDS) {
+        const control = document.getElementById(id);
+        if (control) control.disabled = empty;
+      }
     }
 
     // The highlight annotation lives in three hidden state fields (so snapshots, the PII scrub and the

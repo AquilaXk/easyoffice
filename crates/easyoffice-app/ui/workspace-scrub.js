@@ -152,7 +152,7 @@
         sheetController.replaceLiveSheetDataStore(scrubbed.nextSheets);
         sheetController.restoreDomSheetCells(curSheet);
         sheetController.refreshFocusedSheetCellPendingSnapshot();
-        sheetController.updateSheetSelectionAndAggregates(getActiveSheetCellRef() || "F2");
+        sheetController.updateSheetSelectionAndAggregates(getActiveSheetCellRef() || "A1");
       }
       return scrubbed.totalMasked;
     }

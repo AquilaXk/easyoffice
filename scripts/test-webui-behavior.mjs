@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { switchModule, studioItem, commandItem } from "./test-support/modules.mjs";
+import { demoHtml, typeDemoSheet2 } from "./test-support/demo-fixtures.mjs";
 
 test("focused cell edit supports undo, redo formula recalculation, and subsequent re-edit", async () => {
-  const { document, sandbox } = await createWorkspaceHarness();
+  const { document, sandbox } = await createWorkspaceHarness({ transformHtml: demoHtml });
   switchModule(document, "SHEET");
   await flushAsyncTurns();
 
@@ -60,6 +61,7 @@ test("clicking formula cell while async recalculation is in flight preserves dat
   let evaluateSheetCallCount = 0;
 
   const { document } = await createWorkspaceHarness({
+    transformHtml: demoHtml,
     tauriInvoke: (command, args) => {
       if (command === "get_workspace_bootstrap") {
         return {
@@ -125,6 +127,7 @@ test("real userClick on save waits for blur-triggered async evaluate_sheet befor
   const convertPayloads = [];
 
   const { document, userClick } = await createWorkspaceHarness({
+    transformHtml: demoHtml,
     tauriInvoke: (command, args) => {
       if (command === "get_workspace_bootstrap") {
         return {
@@ -189,7 +192,9 @@ test("real userClick on save waits for blur-triggered async evaluate_sheet befor
 
 test("switching sheet tabs with structured JSON IPC and special sheet names avoids contamination", async () => {
   const pendingEvaluations = [];
+  let holdEvaluations = false;
   const { document, userClick } = await createWorkspaceHarness({
+    transformHtml: demoHtml,
     tauriInvoke: (command, args) => {
       if (command === "get_workspace_bootstrap") {
         return {
@@ -203,6 +208,7 @@ test("switching sheet tabs with structured JSON IPC and special sheet names avoi
         return { commands: [] };
       }
       if (command === "evaluate_sheet") {
+        if (!holdEvaluations) return { query: "", value: "", values: {} };
         return new Promise((resolve) => {
           pendingEvaluations.push({ payload: args.payload, resolve });
         });
@@ -213,6 +219,10 @@ test("switching sheet tabs with structured JSON IPC and special sheet names avoi
 
   switchModule(document, "SHEET");
   await flushAsyncTurns();
+
+  // Sheet 2 holds a sum, typed while the engine answers at once; the rest of the test holds its answers.
+  await typeDemoSheet2(document, userClick, flushAsyncTurns);
+  holdEvaluations = true;
 
   const b2 = document.querySelector('#pane-sheet td[data-cell="B2"]');
   b2.focus();
@@ -683,7 +693,8 @@ test("multi-PII inline formatting, br boundaries, sheet formula literal PII, and
   const pdfCard = document.getElementById("pdf-page-card");
   const formStatus = document.getElementById("pdf-form-status");
   pdfCard.querySelector("h3").innerHTML = '결재문서 <span>010-1111-2222</span>';
-  const firstBodyP = pdfCard.querySelector("p:not(#pdf-form-status)");
+  const firstBodyP = document.createElement("p");
+  formStatus.before(firstBodyP);
   firstBodyP.innerHTML = '1문단 <strong>010-3333-4444</strong>';
   const secondBodyP = document.createElement("p");
   secondBodyP.innerHTML = '2문단 <em>sec@example.org</em>';
@@ -707,7 +718,7 @@ test("multi-PII inline formatting, br boundaries, sheet formula literal PII, and
 });
 
 test("focused formula undo-redo updates displayed result, missing sheet returns #REF!, and in-flight or failed ribbon IPC keeps undo stack consistent", async () => {
-  const { document, sandbox, advanceTimers } = await createWorkspaceHarness();
+  const { document, sandbox, advanceTimers } = await createWorkspaceHarness({ transformHtml: demoHtml });
   switchModule(document, "SHEET");
   await flushAsyncTurns();
 
@@ -766,6 +777,7 @@ test("focused formula undo-redo updates displayed result, missing sheet returns 
   let pendingRibbonResolve = null;
   let undoRpcCalls = 0;
   const asyncHarness = await createWorkspaceHarness({
+    transformHtml: demoHtml,
     tauriInvoke: (command) => {
       if (command === "get_workspace_bootstrap") {
         return {
@@ -883,6 +895,7 @@ test("failed undo-redo and formula-bar IPC keep stacks intact, offline sheet ide
   let failSheetEval = false;
   const retrySelection = { _range: null, get rangeCount() { return this._range ? 1 : 0; }, getRangeAt() { return this._range; }, removeAllRanges() { this._range = null; }, addRange(r) { this._range = r; } };
   const retryHarness = await createWorkspaceHarness({
+    transformHtml: demoHtml,
     selection: retrySelection,
     tauriInvoke: (command) => {
       if (command === "get_workspace_bootstrap") {
@@ -967,6 +980,7 @@ test("failed undo-redo and formula-bar IPC keep stacks intact, offline sheet ide
   const selA = makeSelection();
   const selB = makeSelection();
   const hA = await createWorkspaceHarness({
+    transformHtml: demoHtml,
     selection: selA,
     tauriInvoke: (cmd) => {
       if (cmd === "get_workspace_bootstrap") {
@@ -984,6 +998,7 @@ test("failed undo-redo and formula-bar IPC keep stacks intact, offline sheet ide
     },
   });
   const hB = await createWorkspaceHarness({
+    transformHtml: demoHtml,
     selection: selB,
     tauriInvoke: (cmd) => {
       if (cmd === "get_workspace_bootstrap") {

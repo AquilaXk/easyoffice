@@ -22,7 +22,7 @@
   let isImeComposing = false;
   let activeModule = "DOC";
   let activeSheetName = "Sheet1";
-  let activeSheetCellRef = "F2";
+  let activeSheetCellRef = "A1";
   let activeSlideIndex = 0;
   let slideLaserActive = false;
   let pdfRotationDeg = 0;
@@ -31,17 +31,7 @@
 
   const docTabStore = { DOC: null, HWP: null };
 
-  const sheetDataStore = {
-    Sheet1: null,
-    Sheet2: {
-      A1: { value: "100", formula: "" },
-      B1: { value: "250", formula: "" },
-      C1: { value: "350", formula: "=SUM(A1:B1)" },
-      A2: { value: "기획조정실", formula: "" },
-      B2: { value: "1200", formula: "" },
-      C2: { value: "1300", formula: "=B2+A1" },
-    },
-  };
+  const sheetDataStore = { Sheet1: null };
 
   const sheetRowCounts = {};
   let workspaceSession = null;
@@ -949,7 +939,7 @@
     setupSmartAndSecurityHandlers();
     setupCommandPaletteHandlers();
     workspacePanels.renderModuleOutline("DOC");
-    sheetController.updateSheetSelectionAndAggregates("F2");
+    sheetController.updateSheetSelectionAndAggregates("A1");
     slideStudio.bind();
     workspacePanels.renderSlideDeck(0);
     activeShortcutModifier = workspaceSession.applyPlatformChrome(

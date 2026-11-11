@@ -330,7 +330,7 @@
         setActiveSheetName(snap.activeSheetName);
         syncSheetTabBar(snap.activeSheetName);
         sheetController.restoreDomSheetCells(snap.activeSheetName);
-        sheetController.updateSheetSelectionAndAggregates(snap.activeSheetCellRef || "F2");
+        sheetController.updateSheetSelectionAndAggregates(snap.activeSheetCellRef || "A1");
       }
       if (typeof snap.activeSlideIndex === "number" && slideDeckState.length > 0) {
         workspacePanels.renderSlideDeck(Math.min(snap.activeSlideIndex, slideDeckState.length - 1));

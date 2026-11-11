@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { studioItem } from "./test-support/modules.mjs";
+import { demoHtml } from "./test-support/demo-fixtures.mjs";
 
 // PD-098 step 3b: the ribbon, the quick-access toolbar and the side panels are gone; the smart
 // assistant, PII scrub, security audit, benchmark and outline live in dialogs under the menus.
@@ -81,7 +82,7 @@ test("the dialog buttons keep working after the dialog is opened", async () => {
 });
 
 test("the outline dialog lists the document headings", async () => {
-  const { document, userClick } = await createWorkspaceHarness();
+  const { document, userClick } = await createWorkspaceHarness({ transformHtml: demoHtml });
   userClick(studioItem(document, "view-outline"));
   assert.equal(document.getElementById("outline-dialog").open, true);
   assert.ok(document.getElementById("outline-list").querySelectorAll("li").length > 0);

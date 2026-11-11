@@ -168,29 +168,7 @@
   }
 
   function createInitialSlideDeckState() {
-    return [
-      {
-        title: "연간 제품 전략 발표 자료 (16:9 와이드)",
-        lower: "핵심 지표 및 요약 다이어그램 영역",
-        notes: "핵심 메시지: 주요 문서 포맷 호환성과 수식 계산 결과를 요약하여 전달합니다.",
-        transition: "fade",
-        ...createEmptySlideStyleFields(),
-      },
-      {
-        title: "문서 포맷 호환성 및 일괄 변환 흐름",
-        lower: "DOCX · HWP 5.0 · HWPX · ODF · XLSX · PPTX · PDF · RTF · CSV · Markdown",
-        notes: "다양한 문서 포맷 간 서식과 표 구조를 유지하며 상호 변환합니다.",
-        transition: "push",
-        ...createEmptySlideStyleFields(),
-      },
-      {
-        title: "대용량 문서 및 다중 시트 처리 성능 요약",
-        lower: "빠른 문서 열기 · 수식 재계산 · 피벗 집계 · PDF 출력",
-        notes: "대용량 스프레드시트와 프레젠테이션 문서를 지연 없이 편집합니다.",
-        transition: "zoom",
-        ...createEmptySlideStyleFields(),
-      },
-    ];
+    return [{ title: "", lower: "", notes: "", transition: "fade", ...createEmptySlideStyleFields() }];
   }
 
   function textSpec(v) {
@@ -202,53 +180,7 @@
   }
 
   const DEFAULT_HWP_EDITOR_NODES = [
-    elSpec("h1", {}, {}, [textSpec("행정안전부 전자결재 표준 기안문 (KS X 6101 HWPX)")]),
-    elSpec("p", {}, {}, [
-      textSpec("문서번호: 기획재정담당관-2026-0418 · 시행일자: 2026. 10. 25. · 공개구분: 대국민 공개"),
-    ]),
-    elSpec("h2", {}, {}, [textSpec("1. 추진 배경 및 목적")]),
-    elSpec("p", {}, {}, [
-      textSpec(
-        "공공기관 행정 문서의 HWP 5.0(OLE2 CFBF) 및 HWPX(OWPML) 상호운용성 표준을 준수하고 다중 표·누름틀·원고지 조판 정합성을 확보합니다."
-      ),
-    ]),
-    elSpec("div", { class: "doc-table-toolbar", contenteditable: "false" }, {}, [
-      elSpec("button", { id: "btn-doc-add-row", class: "secondary-btn" }, {}, [
-        textSpec("+행 추가"),
-      ]),
-      elSpec("button", { id: "btn-doc-merge-toggle", class: "secondary-btn" }, {}, [
-        textSpec("셀 병합 토글"),
-      ]),
-      elSpec("button", { id: "btn-doc-eval-table", class: "secondary-btn" }, {}, [
-        textSpec("=SUM(ABOVE)"),
-      ]),
-    ]),
-    elSpec("table", { id: "doc-table", class: "sheet-table doc-inline-table" }, {}, [
-      elSpec("thead", {}, {}, [
-        elSpec("tr", {}, {}, [
-          elSpec("th", {}, {}, [textSpec("소관 부서")]),
-          elSpec("th", {}, {}, [textSpec("담당자")]),
-          elSpec("th", {}, {}, [textSpec("집행액(백만원)")]),
-        ]),
-      ]),
-      elSpec("tbody", { id: "doc-table-body" }, {}, [
-        elSpec("tr", {}, {}, [
-          elSpec("td", {}, {}, [textSpec("표준화 총괄과")]),
-          elSpec("td", {}, {}, [textSpec("김민준 서기관")]),
-          elSpec("td", {}, { docNum: "520" }, [textSpec("520")]),
-        ]),
-        elSpec("tr", {}, {}, [
-          elSpec("td", {}, {}, [textSpec("정보보호 감사팀")]),
-          elSpec("td", {}, {}, [textSpec("박서연 사무관")]),
-          elSpec("td", {}, { docNum: "340" }, [textSpec("340")]),
-        ]),
-        elSpec("tr", { id: "doc-table-sum-row" }, {}, [
-          elSpec("td", {}, {}, [textSpec("합계 (=SUM(ABOVE))")]),
-          elSpec("td", {}, {}, [textSpec("자동 집계")]),
-          elSpec("td", { id: "doc-table-sum-cell" }, { docNum: "860" }, [textSpec("860")]),
-        ]),
-      ]),
-    ]),
+    elSpec("p", {}, {}, [elSpec("br")]),
     elSpec("p", { id: "hwp-manuscript-preview", class: "manuscript-notice", hidden: "" }, {}, [
       textSpec("한글(HWP/HWPX) 전용 조판 영역: 결재란 · 누름틀 · 200자 원고지 격자 활성"),
     ]),

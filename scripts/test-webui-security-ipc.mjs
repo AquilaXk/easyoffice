@@ -6,6 +6,7 @@ import { createWebUiDom, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { switchModule, studioItem } from "./test-support/modules.mjs";
 import { loadUiModule } from "./test-support/load-ui-module.mjs";
 import { readText } from "./test-support/read-text.mjs";
+import { addDemoTable, openDemoDeck, openDemoWorkbook } from "./test-support/demo-fixtures.mjs";
 
 const VECTORS_PATH = fileURLToPath(
   new URL("../fixtures/pii-scrub-vectors.json", import.meta.url)
@@ -84,6 +85,7 @@ test("disconnected host refuses IPC fail-closed without mutating DOC, SHEET, or 
 test("stored XSS guard preserves literal HTML markup across slide, tab, and table mutations without creating DOM elements", async () => {
   const { document, userClick } = await createWebUiDom();
 
+  await openDemoDeck(document);
   switchModule(document, "SLIDE");
   await flushAsyncTurns(4);
 
@@ -113,6 +115,7 @@ test("stored XSS guard preserves literal HTML markup across slide, tab, and tabl
 
   switchModule(document, "HWP");
   await flushAsyncTurns(4);
+  addDemoTable(document);
   const addRowBtn = document.getElementById("btn-doc-add-row");
   assert.ok(addRowBtn);
   userClick(addRowBtn);
@@ -274,8 +277,10 @@ test("structured JSON IPC preserves ? and %3B in cross-sheet formulas, literals,
     },
   });
 
+  await openDemoWorkbook(wrappedHarness.document);
   switchModule(wrappedHarness.document, "SHEET");
   await flushAsyncTurns(4);
+  capturedCalls.length = 0;
 
   const d2 = wrappedHarness.document.querySelector('#pane-sheet td[data-cell="D2"]');
   d2.focus();

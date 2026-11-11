@@ -401,15 +401,15 @@ test("opening is one undoable workspace state (and redoable)", async () => {
   assert.equal(editor.querySelector("h1").textContent, "개요");
   assert.equal(tabTitle(document, "DOC"), "보고서.docx");
 
-  // Undo of a sheet import brings the default workbook tabs back.
+  // Undo of a sheet import brings the empty workbook back: one tab.
   await pickFile(document, fixtureFile("통계.xlsx", SHEET_MODEL));
   userClick(studioItem(document, "studio-undo"));
   await flushAsyncTurns(30);
   const tabs = [...document.querySelectorAll("#sheet-tab-bar .sheet-tab-btn[data-sheet-tab]")].map((b) => b.dataset.sheetTab);
-  assert.deepEqual(tabs, ["Sheet1", "Sheet2"]);
+  assert.deepEqual(tabs, ["Sheet1"]);
   assert.equal(tabTitle(document, "SHEET"), "예산집행_총괄표.xlsx");
 
-  // Redo drops the default tabs again: the tab bar follows the real sheet list.
+  // Redo shows the opened file's tabs: the tab bar follows the real sheet list.
   userClick(studioItem(document, "studio-redo"));
   await flushAsyncTurns(30);
   const redone = [...document.querySelectorAll("#sheet-tab-bar .sheet-tab-btn[data-sheet-tab]")].map((b) => b.dataset.sheetTab);

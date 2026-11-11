@@ -431,11 +431,7 @@
       const fileEl = document.getElementById("status-doc-filename");
       if (!fileEl) return;
       const activeTabTitle = getWindowBridge?.()?.getDocumentName(getActiveModule());
-      const fallbackName =
-        getActiveModule() === "HWP"
-          ? "[붙임2] 행정안전부 전자결재 표준 기안문.hwpx"
-          : "[붙임2] 2026년 디지털행정혁신 종합 추진계획(안).docx";
-      fileEl.textContent = (activeTabTitle || fallbackName) + " — " + estPages + "페이지";
+      fileEl.textContent = (activeTabTitle || "제목 없음") + " — " + estPages + "페이지";
     }
 
     function computeSmartStats() {

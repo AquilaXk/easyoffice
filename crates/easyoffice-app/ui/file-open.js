@@ -293,14 +293,14 @@
     return (dt.files && dt.files.length > 0) || Array.from(dt.types || []).includes("Files");
   }
 
-  function applyPdf(next, res) {
+  function applyPdf(next, res, name) {
     const lines = [];
     (res.blocks || []).forEach((b) => {
       if (b.type === "table") (b.rows || []).forEach((r) => lines.push(r.map((c) => c.text).join(" | ")));
       else if (b.type === "image") lines.push(String(b.alt || "[그림]"));
       else lines.push((b.runs || []).map((r) => r.text).join(""));
     });
-    const title = res.title || "";
+    const title = res.title || name;
     next.pdfStudio = {
       ...next.pdfStudio,
       stampValue: "", stampBadge: "", watermarkInput: "", watermarkLayer: "",
@@ -380,7 +380,7 @@
         }));
         next.activeSlideIndex = 0;
       } else if (mod === "PDF") {
-        applyPdf(next, res);
+        applyPdf(next, res, name);
       } else {
         throw new Error("지원하지 않는 모듈입니다: " + mod);
       }

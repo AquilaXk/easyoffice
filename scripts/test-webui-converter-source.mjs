@@ -152,6 +152,7 @@ test("saving the PDF Studio sends rotation, watermark and stamp as page fields, 
   const { document, userClick, converts } = await createConverterHarness();
   switchModule(document, "PDF");
   await flushAsyncTurns(10);
+  document.getElementById("pdf-form-applicant").value = "이수현 수석연구원";
   document.getElementById("pdf-watermark-input").value = "대외비 사본";
   document.getElementById("pdf-stamp-select").value = "최종본";
   userClick(document.getElementById("btn-pdf-apply"));

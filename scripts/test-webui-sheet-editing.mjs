@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { makeFixtureFile, pickFile } from "./test-support/fixture-files.mjs";
 import { switchModule, studioItem, commandItem } from "./test-support/modules.mjs";
+import { openDemoWorkbook } from "./test-support/demo-fixtures.mjs";
 
 async function openSheet(options = {}) {
   const h = await createWorkspaceHarness(options);
+  await openDemoWorkbook(h.document);
   switchModule(h.document, "SHEET");
   await flushAsyncTurns();
   return h;
@@ -349,10 +351,12 @@ test("column header drag resizes a column with a stable fixed width", async () =
 });
 
 test("formula bar shows the raw formula and the result cannot be clipped silently", async () => {
-  const { document } = await openSheet();
+  const { document, userClick } = await openSheet();
   const f2 = cell(document, "F2");
   f2.focus();
   assert.equal(document.getElementById("formula-input").value, "=SUM(B2:E2)");
+  userClick(document.getElementById("btn-eval-formula"));
+  await flushAsyncTurns(10);
   const out = document.getElementById("sheet-eval-result");
   assert.ok(out.textContent.length > 0);
   assert.equal(out.getAttribute("title"), out.textContent, "full result is available as a tooltip");

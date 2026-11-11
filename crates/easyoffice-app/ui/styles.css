@@ -260,6 +260,9 @@ select:focus-visible,
 .slide-lower-zone p { margin: 0; white-space: pre-line; }
 .slide-title-zone h2:empty::before { content: "제목을 입력하세요"; opacity: 0.4; }
 .slide-lower-zone p:empty::before { content: "내용을 입력하세요"; opacity: 0.4; }
+#pane-pdf[data-empty="true"] .pdf-page-card, #pane-pdf[data-empty="false"] #pdf-empty-hint, .pdf-page-card[hidden] { display: none; }
+#pane-pdf[data-empty="true"]:not([hidden]) { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+#pdf-empty-hint { margin: auto; padding: 24px; text-align: center; }
 .pdf-page-card[data-rotated-quarter="true"] { margin: 110px auto; }
 .slide-notes-box { padding-top: 8px; border-top: 1px solid var(--ui-border-light); font-size: 12px; }
 .pdf-stamp {

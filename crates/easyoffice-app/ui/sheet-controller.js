@@ -485,7 +485,7 @@
           }
         });
         if (updatedActiveSheet && getActiveModule() === "SHEET") {
-          updateSheetSelectionAndAggregates(getActiveSheetCellRef() || "F2");
+          updateSheetSelectionAndAggregates(getActiveSheetCellRef() || "A1");
         }
         announceCircularReference(rpcRes?.circular);
         refreshFocusedSheetCellPendingSnapshot();
@@ -494,7 +494,7 @@
     }
 
     function inferAutoSumFormulaForCell(cellRef, sheetMap) {
-      const m = /^([A-Z]+)(\d+)$/.exec(String(cellRef || "F2").toUpperCase());
+      const m = /^([A-Z]+)(\d+)$/.exec(String(cellRef || "A1").toUpperCase());
       const col = m ? m[1] : "B";
       const row = m ? Number(m[2]) : 7;
       if (row >= 3) {
@@ -862,8 +862,7 @@
           b.setAttribute("aria-selected", isAct ? "true" : "false");
         });
       }
-      const defaultRef = targetSheetName === "Sheet1" ? "F2" : "C1";
-      updateSheetSelectionAndAggregates(defaultRef);
+      updateSheetSelectionAndAggregates("A1");
       if (getActiveModule() === "SHEET" && typeof onSheetSwitchedOutline === "function") {
         onSheetSwitchedOutline();
       }

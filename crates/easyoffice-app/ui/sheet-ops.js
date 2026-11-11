@@ -195,7 +195,7 @@
       refreshWindowFromModel();
       saveActiveSheetCellsToWorkbook();
       refreshFocusedSheetCellPendingSnapshot();
-      updateSheetSelectionAndAggregates(getActiveSheetCellRef() || "F2");
+      updateSheetSelectionAndAggregates(getActiveSheetCellRef() || "A1");
       return recalculateActiveSheetFormulas({ updateFocusedDisplay: true });
     }
 

@@ -3,6 +3,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { createWorkspaceHarness, createWebUiDom, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { switchModule, studioItem } from "./test-support/modules.mjs";
+import { openDemoDeck } from "./test-support/demo-fixtures.mjs";
 import { readText } from "./test-support/read-text.mjs";
 
 const UI_DIR = new URL("../crates/easyoffice-app/ui/", import.meta.url);
@@ -24,6 +25,7 @@ function createMemoryStorage() {
 
 async function openSlideModule(options = {}) {
   const h = await createWorkspaceHarness(options);
+  await openDemoDeck(h.document);
   switchModule(h.document, "SLIDE");
   await flushAsyncTurns();
   return h;
@@ -63,6 +65,7 @@ test("F5 starts the show from slide 1, Shift+F5 from the current slide; reload i
   assert.equal(sandbox.dispatchWindowKeydown({ key: "F5" }).defaultPrevented, false, "DOC module keeps browser reload");
   assert.equal(isShowing(document), false);
 
+  await openDemoDeck(document);
   switchModule(document, "SLIDE");
   await flushAsyncTurns();
   userClick(document.querySelector('.slide-thumb[data-slide-idx="2"]'));
@@ -140,6 +143,16 @@ test("slideshow navigation keys, click, black/white screen, end of show and Esc"
 
 test("show content is the live slide text with the slide's transition", async () => {
   const { document, sandbox, userClick } = await openSlideModule();
+  for (const [idx, transition] of [[1, "push"], [2, "zoom"]]) {
+    userClick(document.querySelector(`.slide-thumb[data-slide-idx="${idx}"]`));
+    await flushAsyncTurns();
+    const select = $(document, "slide-transition-select");
+    select.value = transition;
+    select.dispatchEvent({ type: "change", target: select });
+    await flushAsyncTurns();
+  }
+  userClick(document.querySelector('.slide-thumb[data-slide-idx="0"]'));
+  await flushAsyncTurns();
   typeTitle(document, "수정한 제목");
   userClick($(document, "btn-slide-show"));
   assert.equal($(document, "slide-show-title").textContent, "수정한 제목");
@@ -426,6 +439,7 @@ test("autosave and save payload carry the managed slide order, titles, bullets a
       return offline[command](payload);
     },
   });
+  await openDemoDeck(document);
   switchModule(document, "SLIDE");
   await flushAsyncTurns();
   userClick(document.querySelector('.slide-thumb[data-slide-idx="2"]'));

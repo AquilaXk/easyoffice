@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createWebUiDom, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { switchModule, studioItem } from "./test-support/modules.mjs";
+import { demoHtml } from "./test-support/demo-fixtures.mjs";
 
 // Builds a harness whose IPC is the offline backend, with optional per-command overrides, and
 // records every convert_document_format payload.
@@ -88,7 +89,7 @@ test("HWP save carries no hardcoded agency and uses the HWP tab title", async ()
   const payload = converts.at(-1);
   assert.equal(payload.targetFormat, "hwpx");
   assert.equal(payload.title, "행정안전부_기안문");
-  assert.ok(Array.isArray(payload.blocks) && payload.blocks.length > 0);
+  assert.ok(Array.isArray(payload.blocks));
   const raw = JSON.stringify(payload);
   assert.doesNotMatch(raw, /\[\[AGENCY\]\]/);
   assert.equal(payload.officialAgency, undefined);
@@ -96,7 +97,7 @@ test("HWP save carries no hardcoded agency and uses the HWP tab title", async ()
 });
 
 test("SHEET save sends every sheet, not only the active one", async () => {
-  const { document, userClick, converts } = await createSaveHarness();
+  const { document, userClick, converts } = await createSaveHarness({}, { transformHtml: demoHtml });
   switchModule(document, "SHEET");
   await flushAsyncTurns(6);
   const b2 = document.querySelector('#pane-sheet td[data-cell="B2"]');

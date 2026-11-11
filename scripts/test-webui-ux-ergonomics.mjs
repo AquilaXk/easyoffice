@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { switchModule, commandItem } from "./test-support/modules.mjs";
+import { addDemoHeading, demoHtml, openDemoDeck, openDemoWorkbook } from "./test-support/demo-fixtures.mjs";
 
 test("design tokens, ARIA tab roles, zoom controls, split compare pane, and format filters stay synchronized", async () => {
   const { document, sandbox, userClick } = await createWorkspaceHarness();
@@ -41,7 +42,7 @@ test("design tokens, ARIA tab roles, zoom controls, split compare pane, and form
 });
 
 test("DOC and HWP module-specific ribbon tools build real DOM structures and direct typing supports Undo/Redo across repeated focus-retained edits", async () => {
-  const { document, sandbox, userClick } = await createWorkspaceHarness();
+  const { document, sandbox, userClick } = await createWorkspaceHarness({ transformHtml: demoHtml });
   const docEditor = document.getElementById("doc-editor");
 
   const sumCell = document.getElementById("doc-table-sum-cell");
@@ -77,6 +78,7 @@ test("DOC and HWP module-specific ribbon tools build real DOM structures and dir
 
   switchModule(document, "HWP");
   await flushAsyncTurns();
+  addDemoHeading(document);
   userClick(commandItem(document, "hwp-mod-header"));
   await flushAsyncTurns();
   assert.ok(docEditor.querySelector(".eo-hwp-header"));
@@ -126,6 +128,7 @@ test("DOC and HWP module-specific ribbon tools build real DOM structures and dir
 
 test("SHEET supports keyboard arrow/Tab/Delete cell navigation, inline editing key pass-through, sort baseline/blank-row preservation, condfmt, freeze, and autosum actions", async () => {
   const { document, sandbox, userClick } = await createWorkspaceHarness();
+  await openDemoWorkbook(document);
   switchModule(document, "SHEET");
   await flushAsyncTurns();
 
@@ -249,8 +252,9 @@ test("SHEET supports keyboard arrow/Tab/Delete cell navigation, inline editing k
 
 test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node PII scrub, presenter mode, and PDF badges work end-to-end", async () => {
   const docSelection = { _range: null, get rangeCount() { return this._range ? 1 : 0; }, getRangeAt() { return this._range; }, removeAllRanges() { this._range = null; }, addRange(r) { this._range = r; } };
-  const { document, sandbox, userClick } = await createWorkspaceHarness({ selection: docSelection });
+  const { document, sandbox, userClick } = await createWorkspaceHarness({ selection: docSelection, transformHtml: demoHtml });
 
+  await openDemoDeck(document);
   switchModule(document, "SLIDE");
   await flushAsyncTurns();
   assert.equal(document.querySelectorAll("#slide-thumb-list .slide-thumb").length, 3);

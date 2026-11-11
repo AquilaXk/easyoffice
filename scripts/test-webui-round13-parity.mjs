@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { switchModule, studioItem, commandItem } from "./test-support/modules.mjs";
+import { addDemoTable, demoHtml, openDemoDeck, typeDemoSheet2 } from "./test-support/demo-fixtures.mjs";
 
 function makeF2AnchoredOfflineRpc(sandbox) {
   return sandbox.__EASYOFFICE_CREATE_OFFLINE_RPC__({
@@ -296,6 +297,7 @@ test("DOC vs HWP and Slide 1 vs Slide 2 layout commands derive state from target
 
   switchModule(document, "HWP");
   await flushAsyncTurns();
+  addDemoTable(document);
 
   assert.equal(docEditor.style.maxWidth, "");
   assert.equal(docEditor.style.columnCount, "");
@@ -348,6 +350,7 @@ test("DOC vs HWP and Slide 1 vs Slide 2 layout commands derive state from target
   assert.equal(docEditor.classList.contains("manuscript-grid"), false);
   assert.equal(document.getElementById("hwp-manuscript-preview").hidden, true);
 
+  await openDemoDeck(document);
   switchModule(document, "SLIDE");
   await flushAsyncTurns();
   await flushAsyncTurns();
@@ -386,6 +389,7 @@ test("concurrent switchSheetTab and performWorkspaceUndo serialize ahead of save
   const eventLog = [];
 
   const { document, sandbox, userClick } = await createWorkspaceHarness({
+    transformHtml: demoHtml,
     tauriInvoke: async (command, args) => {
       if (command === "get_workspace_bootstrap") {
         return {
@@ -443,6 +447,7 @@ test("concurrent switchSheetTab and performWorkspaceUndo serialize ahead of save
 
   switchModule(document, "SHEET");
   await flushAsyncTurns();
+  await typeDemoSheet2(document, userClick, flushAsyncTurns);
 
   const b2 = document.querySelector('#pane-sheet td[data-cell="B2"]');
   b2.focus();

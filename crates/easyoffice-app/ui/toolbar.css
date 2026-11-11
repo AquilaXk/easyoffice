@@ -355,6 +355,7 @@ input.sb-ls-select {
 }
 
 .fr-input:disabled,
+.sb-select:disabled,
 .fr-btn:disabled,
 .fr-opt-btn:disabled {
   opacity: 0.45;

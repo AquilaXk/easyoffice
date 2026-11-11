@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { switchModule, commandItem } from "./test-support/modules.mjs";
+import { demoHtml, typeDemoSheet2 } from "./test-support/demo-fixtures.mjs";
 
 function makeStandaloneOfflineRpc(sandbox) {
   return sandbox.__EASYOFFICE_CREATE_OFFLINE_RPC__({
@@ -463,6 +464,7 @@ test("failed ribbon async prep (autosum, smart stats, security audit) preserves 
   const mock = createRibbonBackendMock();
 
   const { document, sandbox, userClick } = await createWorkspaceHarness({
+    transformHtml: demoHtml,
     tauriInvoke: (command, args) => mock.invoke(command, args),
   });
 
@@ -478,6 +480,7 @@ test("failed ribbon async prep (autosum, smart stats, security audit) preserves 
 
   const f2 = document.querySelector('#pane-sheet td[data-cell="F2"]');
   const formulaInput = document.getElementById("formula-input");
+  f2.focus();
   const feedback = document.getElementById("status-command-feedback");
   const secStatus = document.getElementById("security-status-text");
   const boldBtn = commandItem(document, "sheet-home-bold");
@@ -575,9 +578,14 @@ test("failed ribbon async prep (autosum, smart stats, security audit) preserves 
 });
 
 test("workspace snapshot SSOT restores per-sheet row counts, doc layout styles, slide title styles, and canvas-stage view state on Undo and Redo", async () => {
-  const { document, sandbox, userClick } = await createWorkspaceHarness();
+  const { document, sandbox, userClick } = await createWorkspaceHarness({ transformHtml: demoHtml });
 
   const docEditor = document.getElementById("doc-editor");
+  await flushAsyncTurns();
+  switchModule(document, "SHEET");
+  await flushAsyncTurns();
+  await typeDemoSheet2(document, userClick, flushAsyncTurns);
+  switchModule(document, "DOC");
   await flushAsyncTurns();
 
   userClick(commandItem(document, "document-layout-columns"));
@@ -724,6 +732,7 @@ test("JSON-only real-backend IPC syncs state, toggles per-cell inline styles ind
   const evalLog = [];
 
   const { document, userClick } = await createWorkspaceHarness({
+    transformHtml: demoHtml,
     tauriInvoke: async (command, args) => {
       if (command === "get_workspace_bootstrap") {
         return JSON.stringify({
@@ -946,7 +955,7 @@ test("issue #107: offline evaluator mirrors #NUM! circular flag, no demo seed, a
 });
 
 test("issue #107: circular reference shows #NUM! in the grid and a status-bar warning", async () => {
-  const { document } = await createWorkspaceHarness();
+  const { document } = await createWorkspaceHarness({ transformHtml: demoHtml });
   switchModule(document, "SHEET");
   await flushAsyncTurns();
 

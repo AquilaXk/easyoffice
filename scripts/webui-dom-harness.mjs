@@ -846,7 +846,7 @@ function resolveShellInternals(options) {
 
 export async function createWorkspaceHarness(options = {}) {
   const html = fs.readFileSync(INDEX_HTML_PATH, "utf8");
-  const document = new MiniDocument(html);
+  const document = new MiniDocument(options.transformHtml ? options.transformHtml(html) : html);
   const windowListeners = new Map();
   const downloads = [];
   const revokedUrls = [];
