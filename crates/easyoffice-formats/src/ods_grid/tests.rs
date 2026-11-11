@@ -299,6 +299,7 @@ fn legacy_ods_styling(content_xml: &str) -> Vec<(String, SheetStyling)> {
             let styling = SheetStyling {
                 cells: legacy_table_cells(inner, &styles),
                 columns: legacy_table_columns(inner, &styles),
+                ..SheetStyling::default()
             };
             (name, styling)
         })
