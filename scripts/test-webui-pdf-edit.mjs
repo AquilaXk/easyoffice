@@ -280,3 +280,18 @@ test("outside the desktop shell nothing changes: no shell call is made and the a
   await flushAsyncTurns(12);
   assert.doesNotMatch(feedback(document), /겹쳐 씁니다/);
 });
+
+test("the note lines of the PDF dialogs use the reference note style, not the blue result style", async () => {
+  const { document } = await createWorkspaceHarness({ search: "?module=PDF&win=w-pdf" });
+  const notes = [
+    document.getElementById("pdf-splitmerge-hint"),
+    document.querySelector("#pdf-highlight-dialog .dialog-body > p"),
+  ];
+  for (const note of notes) {
+    assert.ok(note, "the note exists");
+    assert.ok(note.classList.contains("dialog-pdf-note"));
+    assert.ok(!note.classList.contains("formula-result"));
+  }
+  assert.match(notes[0].textContent, /현재 쪽 뒤에 붙입니다/, "the text is unchanged");
+  assert.match(notes[1].textContent, /문구가 나오는 모든 곳에 칠합니다/);
+});
