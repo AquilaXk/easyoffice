@@ -226,12 +226,10 @@ pub(crate) async fn pick_save_path(
 
 const OTHER_EXTENSION_TITLE: &str = "확장자 확인";
 
-/// The wording for a name whose extension is not the format of the bytes; the file is named by its
-/// name only (PD-088).
+/// The wording for a name whose extension is not the format of the bytes: one status sentence (the
+/// buttons carry the choice), naming the file by its name only (PD-088).
 fn other_extension_message(file_name: &str, extension: &str) -> String {
-    format!(
-        "저장할 파일의 확장자가 문서 형식과 다릅니다.\n파일: {file_name}\n내용은 .{extension} 형식으로 저장됩니다.\n\n이 이름으로 저장하면 다른 프로그램이 파일을 열지 못할 수 있습니다."
-    )
+    format!("{file_name}의 확장자가 .{extension} 형식과 다릅니다.")
 }
 
 /// Asks (native dialog) whether to save under a name whose extension is not `extension`'s format.
@@ -520,11 +518,13 @@ mod tests {
     }
 
     #[test]
-    fn the_other_extension_dialog_names_both_formats_and_never_a_path() {
+    fn the_other_extension_dialog_is_one_status_sentence_without_a_path() {
         let text = other_extension_message("보고서.pdf", "docx");
+        assert_eq!(text, "보고서.pdf의 확장자가 .docx 형식과 다릅니다.");
         assert_eq!(
-            text,
-            "저장할 파일의 확장자가 문서 형식과 다릅니다.\n파일: 보고서.pdf\n내용은 .docx 형식으로 저장됩니다.\n\n이 이름으로 저장하면 다른 프로그램이 파일을 열지 못할 수 있습니다."
+            text.lines().count(),
+            1,
+            "one status sentence, no explanation"
         );
         assert!(!text.contains('/') && !text.contains('\\'));
         assert_eq!(OTHER_EXTENSION_TITLE, "확장자 확인");
