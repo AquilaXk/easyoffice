@@ -3,9 +3,10 @@
 //! (`**`/`*`/`~~`/`#`), TXT, and PDF (ordered text); RTF lives in `rich_rtf_writer.rs`. User text
 //! is always escaped for the target syntax and never parsed.
 
+use crate::pdf_highlight::HighlightPass;
 use crate::pdf_image::pdf_image_object;
 use crate::pdf_writer::{
-    paginate_pages, PdfImagePage, PdfPageEntry, PdfWriteOptions, PDF_IMAGE_MARGIN_PT,
+    text_entries, PdfImagePage, PdfPageEntry, PdfWriteOptions, PDF_IMAGE_MARGIN_PT,
     PDF_PAGE_HEIGHT_PT, PDF_PAGE_WIDTH_PT,
 };
 use crate::rich_document::{RichAlignment, RichBlock, RichDocument, RichListKind, RichParagraph};
@@ -673,6 +674,7 @@ fn flush_pdf_text(
     entries: &mut Vec<PdfPageEntry>,
     lines: &mut Vec<String>,
     stamp: &mut Option<String>,
+    pass: &mut Option<HighlightPass<'_>>,
 ) {
     if lines.is_empty() {
         return;
@@ -684,16 +686,16 @@ fn flush_pdf_text(
         approval_stamp: stamp.take(),
     };
     lines.clear();
-    entries.extend(
-        paginate_pages(vec![page])
-            .into_iter()
-            .map(PdfPageEntry::Text),
-    );
+    entries.extend(text_entries(&page, 1, pass.as_mut()));
 }
 
 /// Text pages with every embeddable picture on a page of its own, in document order; pictures
 /// the PDF writer cannot embed are printed as alternative text.
-fn pdf_entries(doc: &RichDocument, mut stamp: Option<String>) -> Vec<PdfPageEntry> {
+fn pdf_entries(
+    doc: &RichDocument,
+    mut stamp: Option<String>,
+    pass: &mut Option<HighlightPass<'_>>,
+) -> Vec<PdfPageEntry> {
     let mut entries = Vec::new();
     let mut lines = Vec::new();
     for block in &doc.blocks {
@@ -705,7 +707,7 @@ fn pdf_entries(doc: &RichDocument, mut stamp: Option<String>) -> Vec<PdfPageEntr
             push_plain_lines(block, " | ", &mut lines);
             continue;
         };
-        flush_pdf_text(&mut entries, &mut lines, &mut stamp);
+        flush_pdf_text(&mut entries, &mut lines, &mut stamp, pass);
         let (cx, cy) = img.display_emu();
         let (width_pt, height_pt) = fit_within(
             emu_to_points(cx),
@@ -721,42 +723,62 @@ fn pdf_entries(doc: &RichDocument, mut stamp: Option<String>) -> Vec<PdfPageEntr
             height_pt,
         }));
     }
-    flush_pdf_text(&mut entries, &mut lines, &mut stamp);
+    flush_pdf_text(&mut entries, &mut lines, &mut stamp, pass);
     for (idx, entry) in entries.iter_mut().enumerate() {
         match entry {
-            PdfPageEntry::Text(page) => page.page_number = idx + 1,
+            PdfPageEntry::Text(page, _) => page.page_number = idx + 1,
             PdfPageEntry::Image(page) => page.page_number = idx + 1,
         }
     }
     entries
 }
 
-pub(crate) fn serialize_pdf_rich(doc: &RichDocument, options: &PdfWriteOptions) -> Vec<u8> {
+/// The PDF of a document, and notes for the caller (a highlight phrase that was not found, or
+/// occurrences left out over the annotation limit).
+pub(crate) fn serialize_pdf_rich(
+    doc: &RichDocument,
+    options: &PdfWriteOptions,
+) -> (Vec<u8>, Vec<String>) {
     let stamp = options
         .approval_stamp
         .clone()
         .or_else(|| doc.official_agency.clone());
+    let highlight = options.highlight.as_ref().filter(|h| !h.text.is_empty());
+    let mut pass = highlight.map(HighlightPass::new);
     if doc.blocks.iter().any(|b| matches!(b, RichBlock::Image(_))) {
-        let mut entries = pdf_entries(doc, stamp.clone());
+        let mut entries = pdf_entries(doc, stamp.clone(), &mut pass);
         if entries.iter().any(|e| matches!(e, PdfPageEntry::Image(_))) {
             options.rotate(&mut entries);
-            return PdfSerializer::serialize_entries(
+            let bytes = PdfSerializer::serialize_entries(
                 &doc.display_title(),
                 options.watermark.as_deref(),
                 &entries,
             );
+            return (bytes, pass.map(|p| p.warnings()).unwrap_or_default());
         }
+        pass = highlight.map(HighlightPass::new);
     }
-    PdfSerializer::serialize(&PdfDocumentModel {
+    let page = PdfPageModel {
+        page_number: 1,
+        rotation_degrees: i32::from(options.rotation_degrees),
+        body_text: render_plain_text(doc, " | ", false),
+        approval_stamp: stamp,
+    };
+    if let Some(pass) = pass.as_mut() {
+        let entries = text_entries(&page, 1, Some(pass));
+        let bytes = PdfSerializer::serialize_entries(
+            &doc.display_title(),
+            options.watermark.as_deref(),
+            &entries,
+        );
+        return (bytes, pass.warnings());
+    }
+    let bytes = PdfSerializer::serialize(&PdfDocumentModel {
         title: doc.display_title(),
-        pages: vec![PdfPageModel {
-            page_number: 1,
-            rotation_degrees: i32::from(options.rotation_degrees),
-            body_text: render_plain_text(doc, " | ", false),
-            approval_stamp: stamp,
-        }],
+        pages: vec![page],
         watermark_text: options.watermark.clone(),
-    })
+    });
+    (bytes, Vec::new())
 }
 
 #[cfg(test)]

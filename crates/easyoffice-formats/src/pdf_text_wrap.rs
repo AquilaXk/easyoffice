@@ -7,6 +7,8 @@
 //! width, every other character full width. Breaks fall after spaces; a word wider than a whole
 //! line is split between characters, and breaking never drops text except the spaces at a break.
 
+use std::ops::Range;
+
 /// Thousandths of the font size by ASCII code `0x20..=0x7E` (Helvetica).
 const HELVETICA_WIDTHS: [u16; 95] = [
     278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278,
@@ -49,46 +51,68 @@ fn text_units(text: &str) -> u32 {
 }
 
 /// Splits `line` into lines no wider than `max_units` (thousandths of the font size).
-pub(crate) fn wrap_line(line: &str, max_units: u32) -> Vec<String> {
+#[cfg(test)]
+fn wrap_line(line: &str, max_units: u32) -> Vec<String> {
+    wrap_spans(line, max_units)
+        .into_iter()
+        .map(|span| line[span].to_string())
+        .collect()
+}
+
+/// [`wrap_line`] as byte ranges of `line`: each range is the text of one output line (spaces at
+/// a break are left out, a line that fits whole keeps its trailing spaces). Ranges are in order
+/// and do not overlap, so a caller can map a position of `line` to the output line holding it.
+pub(crate) fn wrap_spans(line: &str, max_units: u32) -> Vec<Range<usize>> {
     if text_units(line) <= max_units {
-        return vec![line.to_string()];
+        return std::iter::once(0..line.len()).collect();
     }
-    let mut out: Vec<String> = Vec::new();
-    let mut cur = String::new();
+    let trimmed = |start: usize, end: usize| start..start + line[start..end].trim_end().len();
+    let mut out: Vec<Range<usize>> = Vec::new();
+    // The line being built is `line[start..end]`; `off` is where the next word begins.
+    let (mut start, mut end, mut off) = (0usize, 0usize, 0usize);
     for word in words_with_trailing_spaces(line) {
-        if text_units_joined(&cur, word) <= max_units {
-            cur.push_str(word);
+        let word_end = off + word.len();
+        let word_off = off;
+        off = word_end;
+        if text_units(&line[start..word_end]) <= max_units {
+            end = word_end;
             continue;
         }
-        if !cur.trim_end().is_empty() {
-            out.push(cur.trim_end().to_string());
-            cur.clear();
+        if !line[start..end].trim_end().is_empty() {
+            out.push(trimmed(start, end));
+            (start, end) = (word_off, word_off);
             if text_units(word) <= max_units {
-                cur.push_str(word);
+                end = word_end;
                 continue;
             }
         }
-        for ch in word.chars() {
-            let mut next = [0u8; 4];
-            let piece = ch.encode_utf8(&mut next);
-            if !cur.trim_end().is_empty() && text_units_joined(&cur, piece) > max_units {
-                out.push(cur.trim_end().to_string());
-                cur.clear();
+        for (i, ch) in word.char_indices() {
+            let at = word_off + i;
+            let ch_end = at + ch.len_utf8();
+            if !line[start..end].trim_end().is_empty()
+                && text_units(&line[start..ch_end]) > max_units
+            {
+                out.push(trimmed(start, end));
+                start = at;
             }
-            cur.push(ch);
+            end = ch_end;
         }
     }
-    if !cur.trim_end().is_empty() || out.is_empty() {
-        out.push(cur.trim_end().to_string());
+    if !line[start..end].trim_end().is_empty() || out.is_empty() {
+        out.push(trimmed(start, end));
     }
     out
 }
 
-fn text_units_joined(head: &str, tail: &str) -> u32 {
-    let mut joined = String::with_capacity(head.len() + tail.len());
-    joined.push_str(head);
-    joined.push_str(tail);
-    text_units(&joined)
+/// Distance in thousandths of the font size from the start of `rendered` (one output line, shown
+/// with one font) to the character at `byte_offset`.
+pub(crate) fn units_before(rendered: &str, byte_offset: usize) -> u32 {
+    let head = &rendered[..byte_offset];
+    if rendered.is_ascii() {
+        head.chars().map(latin_units).sum()
+    } else {
+        head.chars().map(cid_units).sum()
+    }
 }
 
 /// Each run of non-space characters with the spaces after it; leading spaces form the first item.
@@ -173,5 +197,27 @@ mod tests {
         let spaced = "가 ".repeat(250_000);
         assert!(wrap_line(&spaced, max).iter().all(|l| text_units(l) <= max));
         assert!(started.elapsed().as_secs() < 20, "{:?}", started.elapsed());
+    }
+
+    #[test]
+    fn spans_are_the_text_of_each_output_line_in_order() {
+        let line = "앞 가나다라마 뒤  끝";
+        for max in [2_000, 3_000, 4_500] {
+            let spans = wrap_spans(line, max);
+            let texts: Vec<&str> = spans.iter().map(|s| &line[s.clone()]).collect();
+            assert_eq!(texts, wrap_line(line, max));
+            assert!(
+                spans.windows(2).all(|w| w[0].end <= w[1].start),
+                "{spans:?}"
+            );
+        }
+        assert_eq!(wrap_spans("", 1_000), [0..0]);
+    }
+
+    #[test]
+    fn units_before_uses_the_font_of_the_whole_line() {
+        assert_eq!(units_before("Hello", 2), 722 + 556);
+        assert_eq!(units_before("Hello 한", 2), 500 + 500);
+        assert_eq!(units_before("한글", "한".len()), 1000);
     }
 }

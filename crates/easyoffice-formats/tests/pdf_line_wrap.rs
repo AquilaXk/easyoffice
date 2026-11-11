@@ -143,8 +143,10 @@ mod write_options {
             rotation_degrees: 90,
             watermark: Some("대외비".to_string()),
             approval_stamp: Some("승인필".to_string()),
+            highlight: None,
         };
-        let bytes = UniversalFormatConverter::encode_rich_pdf(&doc(), &options);
+        let (bytes, warnings) = UniversalFormatConverter::encode_rich_pdf(&doc(), &options);
+        assert!(warnings.is_empty());
         let parsed = PdfSerializer::parse(&bytes).unwrap();
         assert_eq!(parsed.watermark_text.as_deref(), Some("대외비"));
         assert_eq!(parsed.pages[0].rotation_degrees, 90);
@@ -162,7 +164,7 @@ mod write_options {
         .unwrap();
         assert_eq!(
             plain,
-            UniversalFormatConverter::encode_rich_pdf(&doc(), &PdfWriteOptions::default())
+            UniversalFormatConverter::encode_rich_pdf(&doc(), &PdfWriteOptions::default()).0
         );
     }
 }

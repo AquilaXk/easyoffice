@@ -336,15 +336,20 @@ impl UniversalFormatConverter {
             DocumentFormat::Rtf => Ok(crate::rich_rtf_writer::encode_rtf_rich(doc).into_bytes()),
             DocumentFormat::Markdown => Ok(w::render_markdown_rich(doc).into_bytes()),
             DocumentFormat::Txt => Ok(w::render_plain_text(doc, "\t", true).into_bytes()),
-            DocumentFormat::Pdf => Ok(w::serialize_pdf_rich(doc, &PdfWriteOptions::default())),
+            DocumentFormat::Pdf => Ok(w::serialize_pdf_rich(doc, &PdfWriteOptions::default()).0),
             DocumentFormat::Pages => crate::pages_write::pack_pages(doc),
             _ => Self::encode_with_formula_cache(&doc.to_universal_model(), format, formula_cache),
         }
     }
 
     /// PDF encoding of a [`RichDocument`] with the page settings of the PDF Studio (rotation,
-    /// watermark, approval stamp); the default options give what [`Self::encode_rich`] gives.
-    pub fn encode_rich_pdf(doc: &RichDocument, options: &PdfWriteOptions) -> Vec<u8> {
+    /// watermark, approval stamp, highlight phrase); the default options give what
+    /// [`Self::encode_rich`] gives. Also returns notes for the person saving: a highlight phrase
+    /// that is not in the text, or occurrences left out over [`crate::MAX_HIGHLIGHT_ANNOTATIONS`].
+    pub fn encode_rich_pdf(
+        doc: &RichDocument,
+        options: &PdfWriteOptions,
+    ) -> (Vec<u8>, Vec<String>) {
         crate::rich_writers::serialize_pdf_rich(doc, options)
     }
 

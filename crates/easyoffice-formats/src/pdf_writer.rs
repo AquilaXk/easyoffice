@@ -7,15 +7,20 @@
 //! `docs/policy-decisions.md`). A `ToUnicode` CMap keeps text extraction exact. Document
 //! information strings use PDFDocEncoding for ASCII and UTF-16BE with a byte-order mark otherwise.
 
+use crate::pdf_highlight::{write_annotation, HighlightPass, PageAnnotation, PdfHighlight};
 use crate::pdf_image::PdfImageObject;
 use crate::pdf_stream_parser::{encode_utf16be_hex_impl, escape_pdf_text};
-use crate::pdf_text_wrap::wrap_line;
+use crate::pdf_text_wrap::wrap_spans;
 use crate::{PdfDocumentModel, PdfPageModel, PdfSerializer};
+use std::ops::Range;
 
 const MAX_LINES_PER_PDF_PAGE: usize = 42;
 /// Body text starts at the left margin in 12 pt; a line ends at the right margin, which is as wide.
-const PDF_TEXT_FONT_PT: u64 = 12;
-const PDF_TEXT_MARGIN_PT: u64 = 54;
+pub(crate) const PDF_TEXT_FONT_PT: u64 = 12;
+pub(crate) const PDF_TEXT_MARGIN_PT: u64 = 54;
+/// Baseline of the first body line and the distance between lines, in points.
+pub(crate) const PDF_BODY_FIRST_BASELINE_PT: i32 = 760;
+pub(crate) const PDF_BODY_LINE_PITCH_PT: i32 = 16;
 /// Width available to a text line in thousandths of the font size (the unit of glyph advances).
 const PDF_TEXT_LINE_UNITS: u32 =
     ((PDF_PAGE_WIDTH_PT - 2 * PDF_TEXT_MARGIN_PT) * 1000 / PDF_TEXT_FONT_PT) as u32;
@@ -59,38 +64,98 @@ fn paginate(doc: &PdfDocumentModel) -> Vec<PdfPageModel> {
     paginate_pages(source_pages)
 }
 
-/// Breaks every line at the text width, then splits pages longer than [`MAX_LINES_PER_PDF_PAGE`]
-/// lines; the stamp stays on the first piece. Pages are numbered in output order.
-pub(crate) fn paginate_pages(source_pages: Vec<PdfPageModel>) -> Vec<PdfPageModel> {
-    let mut effective_pages: Vec<PdfPageModel> = Vec::with_capacity(source_pages.len());
-    for page in source_pages {
-        let lines: Vec<String> = page
-            .body_text
-            .split('\n')
-            .flat_map(|line| wrap_line(line, PDF_TEXT_LINE_UNITS))
-            .collect();
-        for (c_idx, chunk) in lines.chunks(MAX_LINES_PER_PDF_PAGE).enumerate() {
-            effective_pages.push(PdfPageModel {
-                page_number: effective_pages.len() + 1,
+/// One output line of a laid-out page: the source line it comes from (by index in the page's
+/// text split at newlines) and the byte range of that line it shows.
+pub(crate) struct LaidLine {
+    pub source: usize,
+    pub range: Range<usize>,
+}
+
+/// A page with its lines broken at the text width, and where each line came from.
+pub(crate) struct LaidPage {
+    pub model: PdfPageModel,
+    pub lines: Vec<LaidLine>,
+}
+
+/// Breaks every line of `page` at the text width and splits it into pages of at most
+/// [`MAX_LINES_PER_PDF_PAGE`] lines (the stamp stays on the first). Pages are numbered from
+/// `first_number`.
+pub(crate) fn lay_out(page: &PdfPageModel, first_number: usize) -> Vec<LaidPage> {
+    let source: Vec<&str> = page.body_text.split('\n').collect();
+    let mut lines: Vec<LaidLine> = Vec::new();
+    for (idx, text) in source.iter().enumerate() {
+        lines.extend(
+            wrap_spans(text, PDF_TEXT_LINE_UNITS)
+                .into_iter()
+                .map(|range| LaidLine { source: idx, range }),
+        );
+    }
+    lines
+        .chunks(MAX_LINES_PER_PDF_PAGE)
+        .enumerate()
+        .map(|(c_idx, chunk)| LaidPage {
+            model: PdfPageModel {
+                page_number: first_number + c_idx,
                 rotation_degrees: page.rotation_degrees,
-                body_text: chunk.join("\n"),
+                body_text: chunk
+                    .iter()
+                    .map(|l| &source[l.source][l.range.clone()])
+                    .collect::<Vec<_>>()
+                    .join("\n"),
                 approval_stamp: if c_idx == 0 {
                     page.approval_stamp.clone()
                 } else {
                     None
                 },
-            });
-        }
+            },
+            lines: chunk
+                .iter()
+                .map(|l| LaidLine {
+                    source: l.source,
+                    range: l.range.clone(),
+                })
+                .collect(),
+        })
+        .collect()
+}
+
+/// Breaks every line at the text width, then splits pages longer than [`MAX_LINES_PER_PDF_PAGE`]
+/// lines. Pages are numbered in output order.
+pub(crate) fn paginate_pages(source_pages: Vec<PdfPageModel>) -> Vec<PdfPageModel> {
+    let mut effective_pages: Vec<PdfPageModel> = Vec::with_capacity(source_pages.len());
+    for page in &source_pages {
+        let first = effective_pages.len() + 1;
+        effective_pages.extend(lay_out(page, first).into_iter().map(|p| p.model));
     }
     effective_pages
+}
+
+/// [`paginate_pages`] for one page as output entries, with the annotations of the highlight
+/// search (`pass`) on the pages they fall on.
+pub(crate) fn text_entries(
+    page: &PdfPageModel,
+    first_number: usize,
+    pass: Option<&mut HighlightPass<'_>>,
+) -> Vec<PdfPageEntry> {
+    let laid = lay_out(page, first_number);
+    let annotations = match pass {
+        Some(pass) => pass.annotate(&page.body_text, &laid),
+        None => vec![Vec::new(); laid.len()],
+    };
+    laid.into_iter()
+        .zip(annotations)
+        .map(|(p, a)| PdfPageEntry::Text(p.model, a))
+        .collect()
 }
 
 fn page_content_stream(page: &PdfPageModel, watermark: Option<&str>) -> String {
     let mut stream_lines: Vec<String> = Vec::new();
     for (l_idx, line_str) in page.body_text.split('\n').enumerate() {
-        let y = 760 - (l_idx as i32) * 16;
+        let y = PDF_BODY_FIRST_BASELINE_PT - (l_idx as i32) * PDF_BODY_LINE_PITCH_PT;
         let (font_tag, operand) = tj_operand(line_str);
-        stream_lines.push(format!("BT {font_tag} 12 Tf 54 {y} Td {operand} Tj ET"));
+        stream_lines.push(format!(
+            "BT {font_tag} {PDF_TEXT_FONT_PT} Tf {PDF_TEXT_MARGIN_PT} {y} Td {operand} Tj ET"
+        ));
     }
     if let Some(stamp) = &page.approval_stamp {
         let (font_tag, operand) = tj_operand(&format!("[STAMP] {stamp}"));
@@ -105,7 +170,7 @@ fn page_content_stream(page: &PdfPageModel, watermark: Option<&str>) -> String {
 
 const TO_UNICODE_CMAP: &str = "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n/CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n1 beginbfrange\n<0000> <FFFF> <0000>\nendbfrange\nendcmap\nCMapName currentdict /CMap defineresource pop\nend\nend";
 
-struct PdfObjectWriter {
+pub(crate) struct PdfObjectWriter {
     out: Vec<u8>,
     offsets: Vec<usize>,
 }
@@ -116,14 +181,14 @@ impl PdfObjectWriter {
         self.out.push(b'\n');
     }
 
-    fn object(&mut self, id: usize, body: &str) {
+    pub(crate) fn object(&mut self, id: usize, body: &str) {
         self.offsets[id] = self.out.len();
         self.line(&format!("{id} 0 obj"));
         self.line(body);
         self.line("endobj");
     }
 
-    fn stream(&mut self, id: usize, dict_extra: &str, data: &str) {
+    pub(crate) fn stream(&mut self, id: usize, dict_extra: &str, data: &str) {
         self.stream_bytes(id, dict_extra, data.as_bytes());
     }
 
@@ -147,13 +212,15 @@ pub struct PdfWriteOptions {
     pub rotation_degrees: u16,
     pub watermark: Option<String>,
     pub approval_stamp: Option<String>,
+    /// A phrase marked with highlight or underline annotations wherever it occurs.
+    pub highlight: Option<PdfHighlight>,
 }
 
 impl PdfWriteOptions {
     pub(crate) fn rotate(&self, entries: &mut [PdfPageEntry]) {
         for entry in entries {
             match entry {
-                PdfPageEntry::Text(page) => {
+                PdfPageEntry::Text(page, _) => {
                     page.rotation_degrees = i32::from(self.rotation_degrees)
                 }
                 PdfPageEntry::Image(page) => page.rotation_degrees = self.rotation_degrees,
@@ -173,7 +240,7 @@ pub(crate) struct PdfImagePage {
 
 /// One output page: text lines or a picture.
 pub(crate) enum PdfPageEntry {
-    Text(PdfPageModel),
+    Text(PdfPageModel, Vec<PageAnnotation>),
     Image(PdfImagePage),
 }
 
@@ -183,6 +250,8 @@ struct PagePlan {
     content_obj: usize,
     image_obj: Option<usize>,
     mask_obj: Option<usize>,
+    /// Object numbers of the page's annotations and their appearance streams.
+    annotations: Vec<(usize, usize)>,
 }
 
 /// Assigns object numbers in page order (first page object is 3); returns the next free number.
@@ -207,6 +276,7 @@ fn plan_objects(entries: &[PdfPageEntry]) -> (Vec<PagePlan>, usize) {
             content_obj,
             image_obj,
             mask_obj,
+            annotations: Vec::new(),
         });
     }
     (plans, next)
@@ -222,8 +292,10 @@ fn image_content_stream(page: &PdfImagePage) -> String {
 
 impl PdfSerializer {
     pub fn serialize(doc: &PdfDocumentModel) -> Vec<u8> {
-        let entries: Vec<PdfPageEntry> =
-            paginate(doc).into_iter().map(PdfPageEntry::Text).collect();
+        let entries: Vec<PdfPageEntry> = paginate(doc)
+            .into_iter()
+            .map(|page| PdfPageEntry::Text(page, Vec::new()))
+            .collect();
         Self::serialize_entries(&doc.title, doc.watermark_text.as_deref(), &entries)
     }
 
@@ -234,7 +306,7 @@ impl PdfSerializer {
         entries: &[PdfPageEntry],
     ) -> Vec<u8> {
         let page_count = entries.len();
-        let (plans, latin_font_obj) = plan_objects(entries);
+        let (mut plans, latin_font_obj) = plan_objects(entries);
         let kids_refs = plans
             .iter()
             .map(|p| format!("{} 0 R", p.page_obj))
@@ -245,7 +317,16 @@ impl PdfSerializer {
         let descriptor_obj = latin_font_obj + 3;
         let cmap_obj = latin_font_obj + 4;
         let info_obj = latin_font_obj + 5;
-        let total_objects = info_obj + 1;
+        // Annotation objects follow the document objects.
+        let mut total_objects = info_obj + 1;
+        for (entry, plan) in entries.iter().zip(&mut plans) {
+            if let PdfPageEntry::Text(_, annotations) = entry {
+                for _ in annotations {
+                    plan.annotations.push((total_objects, total_objects + 1));
+                    total_objects += 2;
+                }
+            }
+        }
 
         let mut w = PdfObjectWriter {
             out: Vec::with_capacity(4096),
@@ -310,7 +391,7 @@ fn write_page(
     watermark: Option<&str>,
 ) {
     let (page_number, rotation, xobjects, body) = match (entry, plan.image_obj) {
-        (PdfPageEntry::Text(page), _) => (
+        (PdfPageEntry::Text(page, _), _) => (
             page.page_number,
             page.rotation_degrees,
             String::new(),
@@ -324,16 +405,31 @@ fn write_page(
         ),
         (PdfPageEntry::Image(_), None) => return,
     };
+    let annots = if plan.annotations.is_empty() {
+        String::new()
+    } else {
+        let refs: Vec<String> = plan
+            .annotations
+            .iter()
+            .map(|(annot, _)| format!("{annot} 0 R"))
+            .collect();
+        format!(" /Annots [{}]", refs.join(" "))
+    };
     w.object(
         plan.page_obj,
         &format!(
-            "<< /Type /Page /Parent 2 0 R /PageNumber {page_number} /Rotate {rotation} /MediaBox [0 0 {PDF_PAGE_WIDTH_PT} {PDF_PAGE_HEIGHT_PT}] /Resources << {fonts}{xobjects} >> /Contents {} 0 R >>",
+            "<< /Type /Page /Parent 2 0 R /PageNumber {page_number} /Rotate {rotation} /MediaBox [0 0 {PDF_PAGE_WIDTH_PT} {PDF_PAGE_HEIGHT_PT}] /Resources << {fonts}{xobjects} >> /Contents {} 0 R{annots} >>",
             plan.content_obj
         ),
     );
     w.stream(plan.content_obj, "", &body);
     if let (PdfPageEntry::Image(page), Some(image_obj)) = (entry, plan.image_obj) {
         write_image_objects(w, &page.image, image_obj, plan.mask_obj);
+    }
+    if let PdfPageEntry::Text(_, annotations) = entry {
+        for (annotation, (annot_id, ap_id)) in annotations.iter().zip(&plan.annotations) {
+            write_annotation(w, *annot_id, *ap_id, plan.page_obj, annotation);
+        }
     }
 }
 

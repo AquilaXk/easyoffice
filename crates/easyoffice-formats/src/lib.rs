@@ -26,6 +26,7 @@ pub mod pages_proto;
 mod pages_schema;
 mod pages_table;
 mod pages_write;
+mod pdf_highlight;
 mod pdf_image;
 mod pdf_stream_parser;
 mod pdf_text_wrap;
@@ -75,6 +76,7 @@ pub use office_codecs::*;
 pub use ole2_codec::*;
 pub use output_compatibility::OutputCompatibility;
 pub use pages_write::{pages_write_loss, PagesWriteLoss};
+pub use pdf_highlight::{PdfHighlight, PdfHighlightKind, MAX_HIGHLIGHT_ANNOTATIONS};
 pub use pdf_writer::PdfWriteOptions;
 pub use rich_document::{
     evaluate_table_formulas, normalize_hex_color, RichAlignment, RichBlock, RichDocument,
