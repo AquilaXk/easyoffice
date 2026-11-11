@@ -6,6 +6,7 @@ use easyoffice_formats::{
     ZipArchiveCodec, ZipSecurityPolicy,
 };
 
+#[allow(dead_code)]
 mod image_fixture;
 
 const REFERENCES: usize = 40;
