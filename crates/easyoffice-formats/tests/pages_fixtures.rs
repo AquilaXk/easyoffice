@@ -60,7 +60,7 @@ fn flags(r: &RichRun) -> Flags {
 /// `(bold, italic, underline, strike)`
 type Flags = (bool, bool, bool, bool);
 
-const GENERIC_WARNING: &str = "Pages 문서는 읽기 전용으로 열고, 머리글·바닥글·각주·댓글은 본문 뒤 부록 문단으로 옮기며, 쪽 번호 등 필드·구역 설정·표의 테두리·셀 배경·열 너비·차트 등은 가져오지 않고 서식이 일부 단순화될 수 있습니다.";
+const GENERIC_WARNING: &str = "Pages 문서의 머리글·바닥글·각주·댓글은 본문 뒤 부록 문단으로 옮기며, 쪽 번호 등 필드·구역 설정·표의 테두리·셀 배경·열 너비·차트 등은 가져오지 않고 서식이 일부 단순화될 수 있습니다. Pages로 저장하는 기능은 실험적입니다(본문·제목·정렬·기본 글자 서식만 씁니다).";
 
 #[test]
 fn text_fixture_paragraphs_and_headings() {

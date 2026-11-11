@@ -824,7 +824,7 @@ pub(crate) fn read_pages(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Ea
         warnings.push(PAGE_LAYOUT_NOTE.to_string());
     }
     warnings.push(
-        "Pages 문서는 읽기 전용으로 열고, 머리글·바닥글·각주·댓글은 본문 뒤 부록 문단으로 옮기며, 쪽 번호 등 필드·구역 설정·표의 테두리·셀 배경·열 너비·차트 등은 가져오지 않고 서식이 일부 단순화될 수 있습니다."
+        "Pages 문서의 머리글·바닥글·각주·댓글은 본문 뒤 부록 문단으로 옮기며, 쪽 번호 등 필드·구역 설정·표의 테두리·셀 배경·열 너비·차트 등은 가져오지 않고 서식이 일부 단순화될 수 있습니다. Pages로 저장하는 기능은 실험적입니다(본문·제목·정렬·기본 글자 서식만 씁니다)."
             .to_string(),
     );
     let title = blocks
