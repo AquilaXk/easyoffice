@@ -500,6 +500,16 @@ test("a pending open (bytes and display name only) is loaded into the new window
   assert.match(fb, /받은 문서\.docx/);
 });
 
+test("a pending open decodes every byte value and every padding length through the shared decoder", async () => {
+  const every = Uint8Array.from({ length: 259 }, (_, i) => i % 256);
+  const { host } = await openWindow("?module=DOC&win=w-bytes", {
+    take_pending_open: () => ({ name: "바이트.docx", base64: Buffer.from(every).toString("base64") }),
+  });
+  const taken = await host.__EASYOFFICE_WINDOW_BRIDGE__.instance.takePendingOpen();
+  assert.equal(taken.name, "바이트.docx");
+  assert.deepEqual([...taken.bytes], [...every]);
+});
+
 test("windows keep separate autosave records keyed by their window id", async () => {
   const storage = createMemoryStorage();
   const a = await openWindow("?module=DOC&win=w-a", {}, { localStorage: storage });

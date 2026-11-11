@@ -1,4 +1,5 @@
 use easyoffice_formats::{EasyOfficeError, StrictJsonValue};
+use std::borrow::Cow;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::process::ExitCode;
@@ -428,209 +429,231 @@ fn handle_http_connection(stream: &mut TcpStream, port: u16, ipc_handler: &IpcDi
     // Document windows are addressed with launch parameters (`/?module=DOC&win=...`); routing ignores them.
     let route = path.split('?').next().unwrap_or("/");
     let (status, content_type, response_body) = match (method, route) {
-        ("GET", "/" | "/index.html") => {
-            ("200 OK", "text/html; charset=utf-8", INDEX_HTML.to_string())
-        }
+        ("GET", "/" | "/index.html") => (
+            "200 OK",
+            "text/html; charset=utf-8",
+            Cow::Borrowed(INDEX_HTML),
+        ),
         ("GET", "/favicon.ico" | "/favicon.svg") => (
             "200 OK",
             "image/svg+xml; charset=utf-8",
-            FAVICON_SVG.to_string(),
+            Cow::Borrowed(FAVICON_SVG),
         ),
-        ("GET", "/styles.css") => ("200 OK", "text/css; charset=utf-8", STYLES_CSS.to_string()),
-        ("GET", "/shell.css") => ("200 OK", "text/css; charset=utf-8", SHELL_CSS.to_string()),
-        ("GET", "/tokens.css") => ("200 OK", "text/css; charset=utf-8", TOKENS_CSS.to_string()),
-        ("GET", "/content.css") => ("200 OK", "text/css; charset=utf-8", CONTENT_CSS.to_string()),
+        ("GET", "/styles.css") => (
+            "200 OK",
+            "text/css; charset=utf-8",
+            Cow::Borrowed(STYLES_CSS),
+        ),
+        ("GET", "/shell.css") => (
+            "200 OK",
+            "text/css; charset=utf-8",
+            Cow::Borrowed(SHELL_CSS),
+        ),
+        ("GET", "/tokens.css") => (
+            "200 OK",
+            "text/css; charset=utf-8",
+            Cow::Borrowed(TOKENS_CSS),
+        ),
+        ("GET", "/content.css") => (
+            "200 OK",
+            "text/css; charset=utf-8",
+            Cow::Borrowed(CONTENT_CSS),
+        ),
         ("GET", "/menu-bar.css") => (
             "200 OK",
             "text/css; charset=utf-8",
-            MENU_BAR_CSS.to_string(),
+            Cow::Borrowed(MENU_BAR_CSS),
         ),
-        ("GET", "/toolbar.css") => ("200 OK", "text/css; charset=utf-8", TOOLBAR_CSS.to_string()),
-        ("GET", "/home.css") => ("200 OK", "text/css; charset=utf-8", HOME_CSS.to_string()),
+        ("GET", "/toolbar.css") => (
+            "200 OK",
+            "text/css; charset=utf-8",
+            Cow::Borrowed(TOOLBAR_CSS),
+        ),
+        ("GET", "/home.css") => ("200 OK", "text/css; charset=utf-8", Cow::Borrowed(HOME_CSS)),
         ("GET", "/home-screen.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",
-            HOME_SCREEN_JS.to_string(),
+            Cow::Borrowed(HOME_SCREEN_JS),
         ),
         ("GET", "/recent-documents-dialog.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",
-            RECENT_DIALOG_JS.to_string(),
+            Cow::Borrowed(RECENT_DIALOG_JS),
         ),
         ("GET", "/update-notice.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",
-            UPDATE_NOTICE_JS.to_string(),
+            Cow::Borrowed(UPDATE_NOTICE_JS),
         ),
         ("GET", "/theme.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",
-            THEME_JS.to_string(),
+            Cow::Borrowed(THEME_JS),
         ),
         ("GET", "/icons.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",
-            ICONS_JS.to_string(),
+            Cow::Borrowed(ICONS_JS),
         ),
         ("GET", "/window-bridge.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",
-            WINDOW_BRIDGE_JS.to_string(),
+            Cow::Borrowed(WINDOW_BRIDGE_JS),
         ),
         ("GET", "/ipc-transport.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",
-            IPC_TRANSPORT_JS.to_string(),
+            Cow::Borrowed(IPC_TRANSPORT_JS),
         ),
         ("GET", "/menu-keyboard.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",
-            MENU_KEYBOARD_JS.to_string(),
+            Cow::Borrowed(MENU_KEYBOARD_JS),
         ),
         ("GET", "/sheet-utils.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",
-            SHEET_UTILS_JS.to_string(),
+            Cow::Borrowed(SHEET_UTILS_JS),
         ),
         ("GET", "/pii-dom-scrubber.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",
-            PII_DOM_SCRUBBER_JS.to_string(),
+            Cow::Borrowed(PII_DOM_SCRUBBER_JS),
         ),
         ("GET", "/sheet-store.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",
-            SHEET_STORE_JS.to_string(),
+            Cow::Borrowed(SHEET_STORE_JS),
         ),
         ("GET", "/ribbon-catalog.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",
-            RIBBON_CATALOG_JS.to_string(),
+            Cow::Borrowed(RIBBON_CATALOG_JS),
         ),
         ("GET", "/save-payload.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",
-            SAVE_PAYLOAD_JS.to_string(),
+            Cow::Borrowed(SAVE_PAYLOAD_JS),
         ),
         ("GET", "/desktop-bridge.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",
-            DESKTOP_BRIDGE_JS.to_string(),
+            Cow::Borrowed(DESKTOP_BRIDGE_JS),
         ),
         ("GET", "/custom-select.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",
-            CUSTOM_SELECT_JS.to_string(),
+            Cow::Borrowed(CUSTOM_SELECT_JS),
         ),
         ("GET", "/color-picker.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",
-            COLOR_PICKER_JS.to_string(),
+            Cow::Borrowed(COLOR_PICKER_JS),
         ),
         ("GET", "/workspace-scrub.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",
-            WORKSPACE_SCRUB_JS.to_string(),
+            Cow::Borrowed(WORKSPACE_SCRUB_JS),
         ),
         ("GET", "/workspace-tools.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",
-            WORKSPACE_TOOLS_JS.to_string(),
+            Cow::Borrowed(WORKSPACE_TOOLS_JS),
         ),
         ("GET", "/workspace-panels.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",
-            WORKSPACE_PANELS_JS.to_string(),
+            Cow::Borrowed(WORKSPACE_PANELS_JS),
         ),
         ("GET", "/sheet-grid.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",
-            SHEET_GRID_JS.to_string(),
+            Cow::Borrowed(SHEET_GRID_JS),
         ),
         ("GET", "/sheet-clipboard.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",
-            SHEET_CLIPBOARD_JS.to_string(),
+            Cow::Borrowed(SHEET_CLIPBOARD_JS),
         ),
         ("GET", "/sheet-input.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",
-            SHEET_INPUT_JS.to_string(),
+            Cow::Borrowed(SHEET_INPUT_JS),
         ),
         ("GET", "/sheet-ops.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",
-            SHEET_OPS_JS.to_string(),
+            Cow::Borrowed(SHEET_OPS_JS),
         ),
         ("GET", "/sheet-format.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",
-            SHEET_FORMAT_JS.to_string(),
+            Cow::Borrowed(SHEET_FORMAT_JS),
         ),
         ("GET", "/sheet-controller.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",
-            SHEET_CONTROLLER_JS.to_string(),
+            Cow::Borrowed(SHEET_CONTROLLER_JS),
         ),
         ("GET", "/ribbon-history.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",
-            RIBBON_HISTORY_JS.to_string(),
+            Cow::Borrowed(RIBBON_HISTORY_JS),
         ),
         ("GET", "/workspace-session.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",
-            WORKSPACE_SESSION_JS.to_string(),
+            Cow::Borrowed(WORKSPACE_SESSION_JS),
         ),
         ("GET", "/file-open.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",
-            FILE_OPEN_JS.to_string(),
+            Cow::Borrowed(FILE_OPEN_JS),
         ),
         ("GET", "/pdf-edit.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",
-            PDF_EDIT_JS.to_string(),
+            Cow::Borrowed(PDF_EDIT_JS),
         ),
         ("GET", "/slide-studio.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",
-            SLIDE_STUDIO_JS.to_string(),
+            Cow::Borrowed(SLIDE_STUDIO_JS),
         ),
         ("GET", "/doc-runs.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",
-            DOC_RUNS_JS.to_string(),
+            Cow::Borrowed(DOC_RUNS_JS),
         ),
         ("GET", "/doc-runs-ui.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",
-            DOC_RUNS_UI_JS.to_string(),
+            Cow::Borrowed(DOC_RUNS_UI_JS),
         ),
         ("GET", "/hwp-host.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",
-            HWP_HOST_JS.to_string(),
+            Cow::Borrowed(HWP_HOST_JS),
         ),
         ("GET", "/hwp-print.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",
-            HWP_PRINT_JS.to_string(),
+            Cow::Borrowed(HWP_PRINT_JS),
         ),
         ("GET", "/hwp-session.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",
-            HWP_SESSION_JS.to_string(),
+            Cow::Borrowed(HWP_SESSION_JS),
         ),
         ("GET", "/shell-chrome.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",
-            SHELL_CHROME_JS.to_string(),
+            Cow::Borrowed(SHELL_CHROME_JS),
         ),
         ("GET", "/app.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",
-            APP_JS.to_string(),
+            Cow::Borrowed(APP_JS),
         ),
         ("POST", "/api/ipc") => {
             let dispatched = std::str::from_utf8(body_slice)
@@ -642,15 +665,19 @@ fn handle_http_connection(stream: &mut TcpStream, port: u16, ipc_handler: &IpcDi
                 .and_then(parse_ipc_http_body)
                 .and_then(|(cmd, payload)| ipc_handler(&cmd, &payload));
             match dispatched {
-                Ok(json) => ("200 OK", "application/json; charset=utf-8", json),
+                Ok(json) => (
+                    "200 OK",
+                    "application/json; charset=utf-8",
+                    Cow::Owned(json),
+                ),
                 Err(err) => {
                     let escaped = EasyOfficeIpcRouter::escape_json_str(&err.to_string());
                     (
                         "400 Bad Request",
                         "application/json; charset=utf-8",
-                        format!(
+                        Cow::Owned(format!(
                             "{{\"status\":\"error\",\"error\":\"{escaped}\",\"message\":\"{escaped}\"}}"
-                        ),
+                        )),
                     )
                 }
             }
@@ -658,7 +685,7 @@ fn handle_http_connection(stream: &mut TcpStream, port: u16, ipc_handler: &IpcDi
         _ => (
             "404 Not Found",
             "application/json; charset=utf-8",
-            "{\"status\":\"not_found\"}".to_string(),
+            Cow::Borrowed("{\"status\":\"not_found\"}"),
         ),
     };
 

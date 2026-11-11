@@ -230,9 +230,9 @@
       if (desktopAvailable()) {
         const res = await shell("takePendingOpen", {});
         if (!res || typeof res.base64 !== "string" || !res.name) return null;
-        const bin = env.atob(res.base64);
-        const bytes = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.codePointAt(i);
+        // The shared decoder uses the webview's `Uint8Array.fromBase64` when it has one and an
+        // unrolled byte loop otherwise (`sheet-utils.js`, loaded before this file).
+        const bytes = host.__EASYOFFICE_SHEET_UTILS__.base64ToBytes(res.base64);
         return { name: baseName(res.name), bytes };
       }
       const opener = env.opener;
