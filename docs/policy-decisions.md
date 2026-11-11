@@ -2491,13 +2491,13 @@
 
 - **Status** Implemented (`easyoffice-sheet`: `text_format*`, `special.rs`, `functions_dist.rs`, `functions_lookup.rs`)
 - **Context** `TEXT()`의 서식 해석은 색·조건·분수·로캘·`DBNum`을 몰랐고 호출마다 서식 문자열을 다시 쪼갰습니다. 통계 함수에는 분포와 역함수가 없었습니다. 시트 셀 모델(`sheet-store.js`)과 XLSX 저장(`numFmtId="0"`)에는 셀별 표시 형식 자체가 없어 서식 결과가 화면에 닿는 경로가 `TEXT()`뿐입니다.
-- **Decision (`PD-156`)**
+- **Decision (`PD-160`)**
   1. **서식**: 서식 코드는 한 번 파싱해 스레드별 캐시(256개)에 두고, 색(`[Red]`, `[Color1-56]`)·조건(`[>100]`)·분수(`# ?/?`, `?/16`, 분모 최대 5자리)·`[$기호-LCID]`·한국어 이름(`[$-412]`의 `오전/오후`, `1월`, `월요일`, `aaa`·`aaaa` 요일)·`[DBNum1-4]`·`_x`(공백 하나)·`*x`(채움 위치와 문자를 결과에 실음)를 지원합니다. 색과 채움은 `format_number_styled`가 돌려주고 `TEXT()`는 글자만 씁니다.
   2. **조건 구간 선택**: 첫 조건이 맞으면 1구간, 아니면 둘째 조건, 둘 다 조건이 있고 구간이 셋이면 셋째입니다. 둘째 구간은 음수에 부호를 붙이지 않습니다. 조건이 없으면 양수;음수;0 순서입니다.
   3. **DBNum**: 1은 한자(`一千二百三十四`), 2는 갖은자(`壹阡貳百參拾四`), 3은 전각 숫자, 4는 한글(`일천이백삼십사`)입니다. 1·2·4는 자리 단위를 쓰고 앞자리 1도 적습니다(`일십`). 날짜 구간의 숫자는 바꾸지 않습니다.
-  4. **분포 함수**: `T`·`CHISQ`·`BETA`·`GAMMA`·`BINOM`·`NORM`의 `.DIST`/`.INV`와 옛 이름, `GAMMA`, `GAMMALN`, `XMATCH`를 더했습니다. 수치는 불완전 감마·베타(statrs 이식)와 이분 역함수이며 정의역 밖은 `#NUM!`, 숫자가 아닌 인수는 `#VALUE!`입니다.
+  4. **분포 함수**: `T`·`CHISQ`·`BETA`·`GAMMA`·`BINOM`·`NORM`의 `.DIST`/`.INV`와 옛 이름, `GAMMA`, `GAMMALN`, `XMATCH`를 더했습니다. 수치는 불완전 감마·베타(오픈소스 참조 구현 이식, 출처는 `THIRD_PARTY_NOTICES.md`)와 이분 역함수이며 정의역 밖은 `#NUM!`, 숫자가 아닌 인수는 `#VALUE!`입니다.
   5. **범위 밖**: 배열 결과가 필요한 `TEXTSPLIT`, `FILTER`, `SORT`, `UNIQUE`, `SEQUENCE`와 `LET`은 셀이 한 값만 갖는 현재 모델에서는 넣지 않았습니다(스필 모델 도입 때). 셀별 표시 형식(저장 포함)이 없어 서식 색을 화면에 반영하는 UI는 두지 않았습니다.
 - **Why** 참조 앱과 같은 서식 결과를 내고, 10만 셀 렌더링에서 파싱·할당 비용을 줄입니다. 값이 한 칸을 넘는 결과는 잘못된 근사 대신 만들지 않습니다.
-- **Trade-offs** 조건 구간의 부호 처리는 참조 구현(SheetJS SSF)을 따른 근사입니다. 모델이 없는 표시 형식 UI는 저장 형식(`numFmt`)과 함께 설계해야 합니다.
+- **Trade-offs** 조건 구간의 부호 처리는 오픈소스 참조 구현을 따른 근사입니다. 모델이 없는 표시 형식 UI는 저장 형식(`numFmt`)과 함께 설계해야 합니다.
 - **Verified by** `cargo test -p easyoffice-sheet`(`sheet_number_format_codes`, `sheet_distribution_functions`), 렌더링 측정 `cargo test -p easyoffice-sheet --release --test format_render_bench -- --ignored --nocapture`.
 - **Revisit when** 셀별 표시 형식이 모델·저장에 들어오거나 동적 배열 스필을 도입할 때.
