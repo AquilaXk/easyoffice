@@ -212,7 +212,33 @@ fn bytes_that_are_no_document_are_an_error_not_a_panic() {
     let options = PdfWriteOptions::default();
     assert!(hwpx_to_pdf(b"not a document", &options, &fonts).is_err());
     assert!(hwpx_to_pdf(&[], &options, &fonts).is_err());
+    // Over the size limit it is refused before any layout starts.
+    assert!(hwpx_to_pdf(&vec![0; MAX_HWPX_BYTES + 1], &options, &fonts).is_err());
     let mut broken = hwpx(&document(0));
     broken.truncate(broken.len() / 2);
     assert!(hwpx_to_pdf(&broken, &options, &fonts).is_err());
+}
+
+/// The whole save path of a converted document: the engine's request handler hands the HWPX to the
+/// renderer, answers with the PDF, and the shell's save check accepts that PDF.
+#[test]
+fn a_converted_document_passes_through_the_engine_response_and_the_save_check() {
+    let Some(fonts) = fonts() else { return };
+    let draw = |hwpx: &[u8], options: &PdfWriteOptions| hwpx_to_pdf(hwpx, options, &fonts);
+    let payload = r#"{"sourceFormat":"docx","targetFormat":"pdf","title":"보고서","blocks":[{"type":"paragraph","heading":1,"runs":[{"text":"제목"}]},{"type":"paragraph","runs":[{"text":"본문 text","bold":true}]}],"pdf":{"watermark":"초안"}}"#;
+    let response = easyoffice_app::EasyOfficeIpcRouter::dispatch_with_pdf_renderer(
+        "convert_document_format",
+        payload,
+        &draw,
+    )
+    .expect("response");
+    assert!(response.contains("\"status\":\"OK\""), "{response}");
+    assert!(!response.contains("기본 PDF"), "no fallback notice");
+    let marker = "\"convertedBase64\":\"";
+    let start = response.find(marker).unwrap() + marker.len();
+    let base64 = &response[start..start + response[start..].find('"').unwrap()];
+    let request = crate::save_file::SaveRequest::parse("보고서.pdf", base64).expect("save check");
+    let pdf = request.bytes();
+    verify_exported_pdf(pdf, 1, true).expect("one page");
+    assert_searchable(pdf, "제목 본문 text 초안");
 }

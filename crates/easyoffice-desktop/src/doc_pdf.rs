@@ -24,6 +24,10 @@ use std::sync::Arc;
 use std::thread;
 use usvg::fontdb::Database;
 
+/// Largest HWPX laid out (bytes), the limit of the start window's render and of the Quick Look
+/// extensions. The layout cannot be cancelled and runs over the whole document before the first
+/// page is known, so a larger document takes the engine's PDF.
+pub const MAX_HWPX_BYTES: usize = 50 * 1024 * 1024;
 /// Layout recurses with the document's nesting (same size as the start window's render worker).
 const WORKER_STACK_BYTES: usize = 32 * 1024 * 1024;
 /// Batches drawn ahead of the conversion. One keeps the drawing thread busy while a batch is
@@ -38,6 +42,9 @@ pub fn hwpx_to_pdf(
     options: &PdfWriteOptions,
     fonts: &Arc<Database>,
 ) -> Result<Vec<u8>, String> {
+    if hwpx.len() > MAX_HWPX_BYTES {
+        return Err("문서가 쪽 배치로 그릴 수 있는 크기를 넘습니다.".to_string());
+    }
     thread::scope(|scope| {
         let (send, batches) = sync_channel::<Batch>(BATCHES_AHEAD);
         let drawing = thread::Builder::new()
