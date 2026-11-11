@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 
-// PD-165: conditional formatting and data validation rules, their dialogs, the packed answers of
+// PD-171: conditional formatting and data validation rules, their dialogs, the packed answers of
 // the sheet session, and the pivot dialog.
 
 const RUST_SETS = fs.readFileSync(
@@ -66,7 +66,14 @@ test("the icon set order matches the engine's", async () => {
   const block = RUST_SETS.slice(RUST_SETS.indexOf("pub const ICON_SETS"));
   const names = [...block.slice(0, block.indexOf("];")).matchAll(/\("(\w+)", \d\)/g)].map((m) => m[1]);
   assert.deepEqual(rules.ICON_SET_NAMES, names);
-  for (const name of names) assert.equal(rules.ICON_GLYPHS[name].length, Number(name[0]));
+  for (const name of names) {
+    assert.equal(rules.ICON_SETS[name].length, Number(name[0]), name);
+    for (const [shape, color] of rules.ICON_SETS[name]) {
+      assert.match(rules.iconMask(shape), /^url\("data:image\/svg\+xml,%3Csvg/, shape);
+      assert.match(color, /^#[0-9a-f]{6}$/);
+      assert.doesNotMatch(decodeURIComponent(rules.iconMask(shape)), /<path d=""|undefined/, shape);
+    }
+  }
 });
 
 test("a bar grows right of the axis for positive values and left of it for negative ones", async () => {
@@ -112,7 +119,9 @@ test("setting rules marks them for the session and paints the answers onto cells
   const prop = (name) => (td.style.getPropertyValue ? td.style.getPropertyValue(name) : td.style[name]);
   assert.equal(prop("--cf-bg"), "#ff0000");
   assert.equal(td.classList.contains("cf-bold"), true);
-  assert.equal(td.dataset.cfIcon, "●");
+  assert.equal(td.dataset.cfIcon, "disc");
+  assert.match(prop("--cf-icon-mask"), /^url\("data:image\/svg\+xml/);
+  assert.equal(prop("--cf-icon-color"), "#1e8e3e");
   assert.equal(td.style.fontWeight, "", "the cell's own font properties are left alone");
 
   // A delta that clears the cell removes its look.
@@ -471,4 +480,27 @@ test("the pivot dialog sends the sheet's cells and writes a new sheet with the a
   assert.deepEqual(switched, ["피벗1"]);
   assert.equal(stored["피벗1"].B2.value, "10");
   assert.equal(document.getElementById("sheet-pivot-dialog").open, false);
+});
+
+test("every dialog is a direct child of the page, so a dialog's markup cannot swallow the next one", async () => {
+  const { document } = await load();
+  const dialogs = document.querySelectorAll("dialog");
+  assert.ok(dialogs.length >= 10);
+  for (const dlg of dialogs) assert.equal(dlg.parentElement?.tagName, "BODY", dlg.id);
+  for (const id of ["sheet-cf-dialog", "sheet-dv-dialog", "sheet-dv-alert-dialog", "sheet-pivot-dialog"]) {
+    assert.ok(document.getElementById(id), id);
+  }
+});
+
+test("colour fields use the shell's palette popup and no visible native colour input", async () => {
+  const { rulesUi, document } = await dialogHarness();
+  rulesUi.openConditionalFormatDialog();
+  for (const id of ["sheet-cf-bg", "sheet-cf-fg", "sheet-cf-bar-pos", "sheet-cf-stop0-color"]) {
+    const host = document.getElementById(id + "-host");
+    assert.ok(host.querySelector("[data-color-toggle]"), id);
+    assert.ok(document.getElementById(id + "-palette").children.length > 0, "the palette is filled: " + id);
+    assert.equal(document.getElementById(id).getAttribute("aria-hidden"), "true", id);
+  }
+  document.getElementById("sheet-cf-bg-palette").querySelector("button").click?.();
+  assert.match(document.getElementById("sheet-cf-bg").value, /^#[0-9a-f]{6}$/i);
 });

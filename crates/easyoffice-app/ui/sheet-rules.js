@@ -1,45 +1,110 @@
 (function (host) {
   "use strict";
 
-  // Conditional formatting and data validation state of the sheets (PD-165). The rules are plain
+  // Conditional formatting and data validation state of the sheets (PD-171). The rules are plain
   // JSON (the shape `sheet_rules_json.rs` reads and writes); the engine evaluates them in the
   // sheet session and answers with packed cell appearances, which are decoded here into `fx`
   // and painted onto the cells the grid materializes.
 
   const MAX_COLS = 16384;
 
-  // Icon sets, lowest icon first: [glyph, color]. Glyphs are text, so no image assets are needed.
+  // Icon sets of the file formats, lowest icon first: [shape, color]. A shape is minimal SVG
+  // markup on a 24x24 grid; it is drawn as a CSS mask over the cell, so the color comes from the
+  // set (not from characters or emoji, see docs/design-system.md 3).
   const RED = "#d93025";
   const AMBER = "#f9ab00";
   const GREEN = "#1e8e3e";
   const GRAY = "#80868b";
   const DARK = "#202124";
   const BLUE = "#1a73e8";
-  const gray = (glyphs) => glyphs.map((g) => [g, GRAY]);
-  const ICON_GLYPHS = {
-    "3Arrows": [["▼", RED], ["▶", AMBER], ["▲", GREEN]],
-    "3ArrowsGray": gray(["▼", "▶", "▲"]),
-    "3Flags": [["⚑", RED], ["⚑", AMBER], ["⚑", GREEN]],
-    "3TrafficLights1": [["●", RED], ["●", AMBER], ["●", GREEN]],
-    "3TrafficLights2": [["◉", RED], ["◉", AMBER], ["◉", GREEN]],
-    "3Signs": [["◆", RED], ["▲", AMBER], ["●", GREEN]],
-    "3Symbols": [["✖", RED], ["!", AMBER], ["✔", GREEN]],
-    "3Symbols2": [["✖", RED], ["!", AMBER], ["✔", GREEN]],
-    "3Stars": [["☆", AMBER], ["✮", AMBER], ["★", AMBER]],
-    "3Triangles": [["▼", RED], ["◆", AMBER], ["▲", GREEN]],
-    "4Arrows": [["▼", RED], ["↘", AMBER], ["↗", AMBER], ["▲", GREEN]],
-    "4ArrowsGray": gray(["▼", "↘", "↗", "▲"]),
-    "4RedToBlack": [["●", DARK], ["●", GRAY], ["●", "#e8a0a0"], ["●", RED]],
-    "4Rating": gray(["▂", "▄", "▆", "█"]),
-    "4TrafficLights": [["●", DARK], ["●", RED], ["●", AMBER], ["●", GREEN]],
-    "5Arrows": [["▼", RED], ["↘", AMBER], ["▶", AMBER], ["↗", AMBER], ["▲", GREEN]],
-    "5ArrowsGray": gray(["▼", "↘", "▶", "↗", "▲"]),
-    "5Rating": gray(["▁", "▂", "▄", "▆", "█"]),
-    "5Quarters": [["○", BLUE], ["◔", BLUE], ["◑", BLUE], ["◕", BLUE], ["●", BLUE]],
-    "5Boxes": [["□", BLUE], ["◰", BLUE], ["◧", BLUE], ["◩", BLUE], ["■", BLUE]],
+  const PINK = "#e8a0a0";
+  const gray = (shapes) => shapes.map((shape) => [shape, GRAY]);
+  const mono = (shapes, color) => shapes.map((shape) => [shape, color]);
+  const STAR = "M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.5 2.9 1-6.1-4.4-4.3 6.1-.9z";
+  const outline = (d) => `<path d="${d}" fill="none" stroke="#000" stroke-width="1.8" stroke-linejoin="round"/>`;
+  const fill = (d, extra = "") => `<path d="${d}"${extra}/>`;
+  const RING = "M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18z";
+  const ARROW = "M5 4l14 8-14 8z";
+  const turned = (deg) => fill(ARROW, ` transform="rotate(${deg} 12 12)"`);
+  // `level` of `total` signal bars are solid, the rest faint.
+  const bars = (level, total) =>
+    Array.from({ length: total }, (_, i) => {
+      const x = 3 + i * (18 / total);
+      const h = 4 + (i * 14) / (total - 1);
+      return fill(`M${x} ${21 - h}h${(18 / total) * 0.7}V21H${x}z`, i < level ? "" : ' opacity=".3"');
+    }).join("");
+  // A circle with `quarters` quarters filled (pie), clockwise from twelve o'clock.
+  const pie = (quarters) => {
+    const rim = outline(RING);
+    if (quarters === 0) return rim;
+    if (quarters === 4) return fill(RING);
+    const end = [[12, 3], [21, 12], [12, 21], [3, 12]][quarters];
+    const large = quarters > 2 ? 1 : 0;
+    return rim + fill(`M12 12V3A9 9 0 ${large} 1 ${end[0]} ${end[1]}z`);
+  };
+  // A square filled from the bottom by `quarters` quarters.
+  const box = (quarters) => {
+    const rim = outline("M4 4h16v16H4z");
+    return quarters === 0 ? rim : rim + fill(`M4 ${20 - quarters * 4}h16v${quarters * 4}H4z`);
+  };
+  const SHAPES = {
+    up: fill("M12 4l9 16H3z"),
+    down: fill("M12 20L3 4h18z"),
+    right: fill(ARROW),
+    "up-right": turned(-45),
+    "down-right": turned(45),
+    disc: fill(RING),
+    ring: fill(RING + "M12 7a5 5 0 1 1 0 10a5 5 0 1 1 0-10z", ' fill-rule="evenodd"'),
+    diamond: fill("M12 3l9 9-9 9-9-9z"),
+    flag: fill("M5 3h2v18H5z") + fill("M7 4h12l-3.5 4 3.5 4H7z"),
+    cross: fill("M6 8l2-2 4 4 4-4 2 2-4 4 4 4-2 2-4-4-4 4-2-2 4-4z"),
+    check: fill("M4 13l2.5-2.5 3.5 3.5 7.5-7.5L20 9 10 19z"),
+    mark: fill("M10.5 4h3l-.5 10h-2z") + fill("M10.5 17h3v3h-3z"),
+    "star-0": outline(STAR),
+    "star-1": outline(STAR) + fill("M12 3v14l-5.5 2.9 1-6.1-4.4-4.3 6.1-.9z"),
+    "star-2": fill(STAR),
+  };
+  for (let n = 0; n <= 4; n += 1) {
+    SHAPES["pie-" + n] = pie(n);
+    SHAPES["box-" + n] = box(n);
+  }
+  for (const total of [4, 5]) for (let n = 1; n <= total; n += 1) SHAPES["bars" + total + "-" + n] = bars(n, total);
+  const ICON_SETS = {
+    "3Arrows": [["down", RED], ["right", AMBER], ["up", GREEN]],
+    "3ArrowsGray": gray(["down", "right", "up"]),
+    "3Flags": [["flag", RED], ["flag", AMBER], ["flag", GREEN]],
+    "3TrafficLights1": [["disc", RED], ["disc", AMBER], ["disc", GREEN]],
+    "3TrafficLights2": [["ring", RED], ["ring", AMBER], ["ring", GREEN]],
+    "3Signs": [["diamond", RED], ["up", AMBER], ["disc", GREEN]],
+    "3Symbols": [["cross", RED], ["mark", AMBER], ["check", GREEN]],
+    "3Symbols2": [["cross", RED], ["mark", AMBER], ["check", GREEN]],
+    "3Stars": mono(["star-0", "star-1", "star-2"], AMBER),
+    "3Triangles": [["down", RED], ["diamond", AMBER], ["up", GREEN]],
+    "4Arrows": [["down", RED], ["down-right", AMBER], ["up-right", AMBER], ["up", GREEN]],
+    "4ArrowsGray": gray(["down", "down-right", "up-right", "up"]),
+    "4RedToBlack": [["disc", DARK], ["disc", GRAY], ["disc", PINK], ["disc", RED]],
+    "4Rating": gray(["bars4-1", "bars4-2", "bars4-3", "bars4-4"]),
+    "4TrafficLights": [["disc", DARK], ["disc", RED], ["disc", AMBER], ["disc", GREEN]],
+    "5Arrows": [["down", RED], ["down-right", AMBER], ["right", AMBER], ["up-right", AMBER], ["up", GREEN]],
+    "5ArrowsGray": gray(["down", "down-right", "right", "up-right", "up"]),
+    "5Rating": gray(["bars5-1", "bars5-2", "bars5-3", "bars5-4", "bars5-5"]),
+    "5Quarters": mono(["pie-0", "pie-1", "pie-2", "pie-3", "pie-4"], BLUE),
+    "5Boxes": mono(["box-0", "box-1", "box-2", "box-3", "box-4"], BLUE),
   };
   // Engine order (`ICON_SETS` in sheet_rules.rs).
-  const ICON_SET_NAMES = Object.keys(ICON_GLYPHS);
+  const ICON_SET_NAMES = Object.keys(ICON_SETS);
+
+  const maskCache = new Map();
+  // `url(data:...)` of one shape, for the CSS mask of an icon cell.
+  function iconMask(shape) {
+    let mask = maskCache.get(shape);
+    if (mask === undefined) {
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">${SHAPES[shape] || ""}</svg>`;
+      mask = `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+      maskCache.set(shape, mask);
+    }
+    return mask;
+  }
 
   const hex = (n) => "#" + (n >>> 0).toString(16).padStart(6, "0");
 
@@ -265,7 +330,7 @@
     function clearTd(td) {
       delete td.dataset.cf;
       delete td.dataset.cfIcon;
-      for (const name of ["--cf-bg", "--cf-fg", "--cf-bar", "--cf-icon-color"]) setVar(td, name, "");
+      for (const name of ["--cf-bg", "--cf-fg", "--cf-bar", "--cf-icon-mask", "--cf-icon-color"]) setVar(td, name, "");
       td.classList.remove("cf-hide-value", ...CF_CLASSES.map(([name]) => name));
     }
 
@@ -283,12 +348,14 @@
       setVar(td, "--cf-bar", f.bar ? barBackground(f.bar) : "");
       for (const [name, bit] of CF_CLASSES) td.classList.toggle(name, (f.flags & bit) !== 0);
       td.classList.toggle("cf-hide-value", Boolean(f.hide));
-      const glyph = f.icon ? ICON_GLYPHS[ICON_SET_NAMES[f.icon.set]]?.[f.icon.index] : null;
-      if (glyph) {
-        td.dataset.cfIcon = glyph[0];
-        setVar(td, "--cf-icon-color", glyph[1]);
+      const icon = f.icon ? ICON_SETS[ICON_SET_NAMES[f.icon.set]]?.[f.icon.index] : null;
+      if (icon) {
+        td.dataset.cfIcon = icon[0];
+        setVar(td, "--cf-icon-mask", iconMask(icon[0]));
+        setVar(td, "--cf-icon-color", icon[1]);
       } else {
         delete td.dataset.cfIcon;
+        setVar(td, "--cf-icon-mask", "");
         setVar(td, "--cf-icon-color", "");
       }
     }
@@ -325,7 +392,8 @@
 
     return {
       ICON_SET_NAMES,
-      ICON_GLYPHS,
+      ICON_SETS,
+      iconMask,
       parseRanges,
       formatRanges,
       parseCell,

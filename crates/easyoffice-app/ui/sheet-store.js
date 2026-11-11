@@ -5,7 +5,7 @@
   const isFormulaStr = astApi.isFormulaStringJs;
   const asciiUpper = astApi.asciiUpperJs;
   const quoteFormulaSheetName = astApi.quoteFormulaSheetName;
-  // Conditional formatting / validation rules (PD-165); absent in pages that do not load them.
+  // Conditional formatting / validation rules (PD-171); absent in pages that do not load them.
   const rulesApi = host.__EASYOFFICE_SHEET_RULES__;
 
   function cloneStore(sheets) {

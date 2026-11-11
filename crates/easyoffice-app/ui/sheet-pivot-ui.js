@@ -1,7 +1,7 @@
 (function (host) {
   "use strict";
 
-  // The pivot table dialog (PD-165): picks the range and the row, column, value and aggregation
+  // The pivot table dialog (PD-171): picks the range and the row, column, value and aggregation
   // fields, asks the engine to group the values and writes the answer into a new sheet.
 
   const rules = host.__EASYOFFICE_SHEET_RULES__;

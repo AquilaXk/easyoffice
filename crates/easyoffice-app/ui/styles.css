@@ -528,7 +528,7 @@ select:focus-visible,
 .sheet-grid td.selected-cell { outline: 2px solid var(--accent-strong); outline-offset: -2px; background: var(--ui-surface); }
 .sheet-grid td.in-range.selected-cell { background: var(--ui-surface); }
 .sheet-grid td.editing { caret-color: auto; cursor: text; user-select: text; text-overflow: clip; text-align: left; }
-/* Conditional formatting (PD-165): sheet-rules.js sets the custom properties and classes. */
+/* Conditional formatting (PD-171): sheet-rules.js sets the custom properties and classes. */
 .sheet-grid td[data-cf]:not(.selected-cell):not(.in-range) { background-color: var(--cf-bg, transparent); }
 .sheet-grid td[data-cf] { color: var(--cf-fg, inherit); background-image: var(--cf-bar, none); }
 .sheet-grid td.cf-bold { font-weight: 700; }
@@ -537,7 +537,7 @@ select:focus-visible,
 .sheet-grid td.cf-strike { text-decoration: line-through; }
 .sheet-grid td.cf-underline.cf-strike { text-decoration: underline line-through; }
 .sheet-grid td.cf-hide-value:not(.editing) { color: transparent; }
-.sheet-grid td[data-cf-icon]::before { content: attr(data-cf-icon); color: var(--cf-icon-color, inherit); margin-right: 4px; }
+.sheet-grid td[data-cf-icon]::before { content: ""; display: inline-block; width: 14px; height: 14px; margin-right: 4px; vertical-align: -2px; background: var(--cf-icon-color, currentColor); -webkit-mask: var(--cf-icon-mask) center / contain no-repeat; mask: var(--cf-icon-mask) center / contain no-repeat; }
 .sheet-grid td.cf-hide-value[data-cf-icon] { text-align: center; }
 .sheet-grid td.cf-hide-value[data-cf-icon]::before { margin-right: 0; }
 .sheet-grid td.cf-dropdown-cell { position: relative; }

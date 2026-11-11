@@ -1,7 +1,7 @@
 (function (host) {
   "use strict";
 
-  // Dialogs and in-cell behavior of the sheet rules (PD-165): the conditional formatting rule
+  // Dialogs and in-cell behavior of the sheet rules (PD-171): the conditional formatting rule
   // manager, data validation settings (with the entry check and the list arrow), and the pivot
   // table dialog. The dialogs are static markup in index.html; this file reads and fills them.
 
@@ -40,6 +40,15 @@
     bar: "데이터 막대",
     icons: "아이콘 집합",
   };
+  const COLOR_FIELDS = [
+    "sheet-cf-stop0-color",
+    "sheet-cf-stop1-color",
+    "sheet-cf-stop2-color",
+    "sheet-cf-bar-pos",
+    "sheet-cf-bar-neg",
+    "sheet-cf-bg",
+    "sheet-cf-fg",
+  ];
   const DEFAULT_MESSAGE = "입력한 값이 이 셀에 설정된 제한을 만족하지 않습니다.";
 
   const strip = (text) => String(text ?? "").trim().replace(/^=/, "");
@@ -64,7 +73,7 @@
     } = deps;
 
     const kit = host.__EASYOFFICE_CREATE_SHEET_DIALOG_KIT__(document);
-    const { $, val, checked, setVal, setChecked, setSelect, openDialog, closeDialog, fillOptions, note } = kit;
+    const { $, val, checked, setVal, setChecked, bindColors, setSelect, openDialog, closeDialog, fillOptions, note } = kit;
 
     // The current selection as "A1:B9" (1-based grid range -> sqref).
     function selectionText() {
@@ -177,6 +186,7 @@
       cf.ready = true;
       for (const [kindId] of valueRows()) fillOptions(kindId, VALUE_KINDS);
       fillOptions("sheet-cf-icon-set-select", rules.ICON_SET_NAMES.map((n) => [n, n]));
+      bindColors(COLOR_FIELDS);
       $("sheet-cf-type-select")?.addEventListener("change", () => {
         refreshKindRows("sheet-cf-dialog", val("sheet-cf-type-select"), STYLE_TYPES);
       });
@@ -649,7 +659,7 @@
       button.className = "cf-dropdown-btn";
       button.setAttribute("aria-label", "목록에서 선택");
       button.setAttribute("aria-haspopup", "listbox");
-      button.textContent = "▾";
+      host.__EASYOFFICE_ICONS__?.setIcon(document, button, "chevron-down");
       button.hidden = true;
       // Keep the cell selected while the arrow is pressed.
       button.addEventListener("mousedown", (ev) => ev.preventDefault());

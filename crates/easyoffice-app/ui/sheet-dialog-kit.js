@@ -1,17 +1,39 @@
 (function (host) {
   "use strict";
 
-  // Small helpers the sheet rule dialogs share (PD-165): field access by id, change events a
+  // Small helpers the sheet rule dialogs share (PD-171): field access by id, change events a
   // custom-select follows, opening and closing a `<dialog>`, and the selection as an `sqref`.
 
   function createDialogKit(document) {
     const $ = (id) => document.getElementById(id);
     const val = (id) => $(id)?.value ?? "";
     const checked = (id) => Boolean($(id)?.checked);
+    // The chip of a colour field shows its value.
+    function paintChip(input) {
+      const chip = input.parentElement?.querySelector?.(".dialog-swatch-chip");
+      chip?.style?.setProperty("--dialog-swatch", input.value || "");
+    }
+
     const setVal = (id, v) => {
       const el = $(id);
-      if (el) el.value = v;
+      if (!el) return;
+      el.value = v;
+      if (el.type === "color") paintChip(el);
     };
+
+    // Colour fields use the shell's palette popup (color-picker.js), not a visible native input.
+    function bindColors(ids) {
+      const picker = host.__EASYOFFICE_COLOR_PICKER__;
+      for (const id of ids) {
+        const hostEl = $(id + "-host");
+        const input = $(id);
+        if (!hostEl || !input) continue;
+        picker?.setupColorPicker(hostEl, (color) => {
+          if (color) paintChip(input);
+        });
+        paintChip(input);
+      }
+    }
     const setChecked = (id, v) => {
       const el = $(id);
       if (el) el.checked = Boolean(v);
@@ -71,7 +93,7 @@
       if (el) el.textContent = text;
     }
 
-    return { $, val, checked, setVal, setChecked, fireChange, setSelect, openDialog, closeDialog, optionsOf, fillOptions, note };
+    return { $, val, checked, setVal, setChecked, bindColors, fireChange, setSelect, openDialog, closeDialog, optionsOf, fillOptions, note };
   }
 
   host.__EASYOFFICE_CREATE_SHEET_DIALOG_KIT__ = createDialogKit;
