@@ -2372,3 +2372,12 @@
   3. **한글 편집기 클립보드**: 참조 앱의 `writeTextHtmlWithPlainFallback`과 `safeCopyCommand`(`edit:copy`)를 이식해 `ClipboardItem`이 막힌 환경에서도 `navigator.clipboard.writeText`로 텍스트를 복사하고, 오려 두기가 거부되면 하단 상태줄(`#sb-message`)에 원인을 알립니다.
 - **Why** 원본 파일을 다른 포맷으로 덮어쓰는 사고를 원천 차단하고, 서식 편집 후 저장·실행 취소 누락과 클립보드 실패 시 무응답을 없앱니다.
 - **Verified by** `node --test scripts/test-webui-desktop-bridge.mjs scripts/test-webui-sheet-Extended.mjs scripts/test-webui-ribbon-doc.mjs scripts/test-hwp-clipboard-cut.mjs`, `cargo test -p easyoffice-desktop`.
+
+## PD-154. 한글 임베드 창에서는 개인정보 지우기·보안 점검을 쓰지 않고, 시작 창은 복구 기록을 복원하지 않는다
+
+- **Context** 두 도구는 페이지의 숨은 대체 DOM을 검사하는데, 한글 편집기가 문서를 맡는 동안 그 DOM은 비어 있어 "안전/0건"이라는 거짓 결과가 나왔습니다. 시작 창도 창 id로 정해진 복구 기록을 읽어 문서 창의 내용을 복원할 수 있었습니다.
+- **Decision (`PD-154`)** (1) 한글 임베드가 활성이면 `scrub-pii`·`security-audit`은 메뉴·도구줄에서 회색이고(`HWP_EMBED_COMMANDS`에서 제외) 명령 팔레트로도 실행되지 않습니다. 편집기 포트에 본문 텍스트를 받는 호출이 없어 임베드 문서를 대상으로 삼지는 않습니다. (2) 시작 창에서는 `restoreFromStorage()`를 부르지 않습니다. (3) 시작 화면(`#home-screen`)도 웹뷰 기본 우클릭 메뉴를 막습니다(입력란 제외, 참조 앱과 같은 가드).
+- **Why** 검사하지 못한 것을 안전하다고 알리는 것이 더 나쁩니다.
+- **Trade-offs** 한글 문서의 개인정보 점검은 편집기가 텍스트를 내보내는 호출을 갖출 때까지 없습니다.
+- **Verified by** `node --test scripts/test-webui-a11y.mjs`.
+- **Revisit when** 임베드 포트가 본문 텍스트를 넘겨줄 때.

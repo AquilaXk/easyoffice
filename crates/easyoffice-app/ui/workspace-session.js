@@ -60,11 +60,12 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
   // Parts of the window that are not the editing area: the web view's own right-click menu has
   // nothing to offer there (the editing area and text fields keep it). Reference implementation (MIT, Copyright (c) 2025-2026 Edward Kim; see THIRD_PARTY_NOTICES.md),
   // `apps/studio-host/src/core/desktop-chrome.ts`: the same chrome selector and context-menu guard.
-  const NON_EDITOR_CHROME_SELECTOR = "#menu-bar, #icon-toolbar, #doc-style-bar, #status-bar";
+  const NON_EDITOR_CHROME_SELECTOR = "#home-screen, #menu-bar, #icon-toolbar, #doc-style-bar, #status-bar";
   const URL_ATTRS = new Set(["href", "src", "action", "formaction", "xlink:href", "srcset", "poster"]);
 
   // Commands that still apply while the embedded HWP editor is the active surface.
-  const HWP_EMBED_COMMANDS = new Set(["studio-save", "studio-save-as", "palette", "view-theme", "scrub-pii", "security-audit"]);
+  // The PII scrub and security audit read the page's own (hidden) fallback DOM, not the embedded document, so they stay off here.
+  const HWP_EMBED_COMMANDS = new Set(["studio-save", "studio-save-as", "palette", "view-theme"]);
 
   // The start window has no document: only the window-level commands apply.
   const START_COMMANDS = new Set(["palette", "view-theme"]);
@@ -689,11 +690,10 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     function installChromeGuards() {
       if (chromeGuardsInstalled) return;
       chromeGuardsInstalled = true;
-      for (const part of document.querySelectorAll(NON_EDITOR_CHROME_SELECTOR)) {
-        part.addEventListener("contextmenu", (ev) => {
-          if (!isTextEntryTarget(ev.target)) ev.preventDefault();
-        });
-      }
+      // One listener on the body: the start screen is mounted after this runs.
+      document.body.addEventListener("contextmenu", (ev) => {
+        if (ev.target?.closest?.(NON_EDITOR_CHROME_SELECTOR) && !isTextEntryTarget(ev.target)) ev.preventDefault();
+      });
     }
 
     // Platform pill, palette hint and quick-access tooltips; returns the active modifier glyph.

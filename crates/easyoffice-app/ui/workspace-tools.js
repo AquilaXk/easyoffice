@@ -17,6 +17,7 @@
   const TOOL_DIALOGS = { "smart-diagnose": "smart-dialog", "scrub-pii": "pii-dialog", "security-audit": "security-dialog", "bench-run": "bench-dialog", "view-outline": "outline-dialog" };
   // Menu command -> app-provided action.
   const STUDIO_DIRECT_ACTIONS = { "studio-save": "save", "studio-save-as": "saveAs", "studio-undo": "undo", "studio-redo": "redo", "bench-run": "benchmark" };
+  const EMBED_BLIND_TOOLS = new Set(["scrub-pii", "security-audit"]);
   const SYMBOL_TABLE_CHAR = "※";
   // `target`: the ribbon command a module runs for it (`hwp` tells which module); none means the page inserts it itself.
   const INSERT_MOD_DISPATCH = {
@@ -664,6 +665,8 @@
 
     function dispatchStudioIconCmd(cmd, editor, onStudioCmd) {
       if (!cmd) return;
+      // These two inspect the page's own fallback DOM: with the embedded editor active that DOM is hidden and a scan would report a false "clean".
+      if (EMBED_BLIND_TOOLS.has(cmd) && getActiveModule() === "HWP" && getHwpHost?.()?.isEmbedActive()) return;
       if (TOOL_DIALOGS[cmd]) openToolDialog(TOOL_DIALOGS[cmd]);
       const direct = STUDIO_DIRECT_ACTIONS[cmd];
       if (direct) return void studioActions[direct]?.();

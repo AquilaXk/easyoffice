@@ -946,7 +946,8 @@
     if (windowBridge.isStart) workspaceSession.applyModuleContext(activeModule);
     windowBridge.bindStatusTooltips();
     hwpHost.onShortcut((combo) => handleForwardedShortcut(combo));
-    const restoredRecord = await workspaceSession.restoreFromStorage().catch(() => null);
+    // The start window has no document of its own: nothing to restore there.
+    const restoredRecord = windowBridge.isStart ? null : await workspaceSession.restoreFromStorage().catch(() => null);
     workspaceSession.establishBaseline(restoredRecord);
     workspaceSession.installActivityTracking();
     fileOpen.bindUi();
