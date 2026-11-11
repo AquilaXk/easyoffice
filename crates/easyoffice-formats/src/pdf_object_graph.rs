@@ -29,6 +29,11 @@ pub(super) const MAX_PDF_STREAM_DECODE_BYTES: usize = 16 * 1024 * 1024;
 pub(super) const MAX_PDF_TOTAL_DECODED_BYTES: usize = 32 * 1024 * 1024;
 pub(super) const MAX_PDF_PAGE_TREE_DEPTH: usize = 64;
 pub(super) const MAX_PDF_CONTENTS_ARRAY_LEN: usize = 256;
+const MODEL_B64_COMMENT_PREFIX: &[u8] = b"%EasyOfficePDFModelBase64:";
+/// Declared pixel count above which an image is refused (about 32768 x 32768).
+const MAX_PDF_IMAGE_PIXELS: u64 = 1 << 30;
+/// Longest expansion a single DEFLATE stream can reach (RFC 1951 stored-to-fixed worst case).
+const MAX_DEFLATE_EXPANSION: u64 = 1032;
 
 #[derive(Debug, Clone)]
 pub(super) enum PdfObjValue {
@@ -493,6 +498,53 @@ pub(super) fn resolve_stream_length_hint(
     }
 }
 
+/// Streams the text path never reads: image samples and embedded font programs.
+/// Font programs carry `/Length1` (`FontFile`, `FontFile2`) or a `FontFile3` `/Subtype`.
+pub(super) fn is_opaque_binary_stream(entries: &[(String, PdfObjValue)]) -> bool {
+    const FONT_PROGRAM_SUBTYPES: [&str; 3] = ["/Type1C", "/CIDFontType0C", "/OpenType"];
+    dict_name_eq(entries, "/Subtype", "/Image")
+        || dict_has_non_null_key(entries, "/Length1")
+        || FONT_PROGRAM_SUBTYPES
+            .iter()
+            .any(|sub| dict_name_eq(entries, "/Subtype", sub))
+}
+
+/// Checks an opaque stream's declared size without decoding it: the image pixel count is
+/// capped, and a lone `/FlateDecode` cannot be shorter than the declared size allows.
+fn validate_opaque_stream_declaration(
+    entries: &[(String, PdfObjValue)],
+    objects: &HashMap<(u32, u16), PdfIndirectObject>,
+    raw_len: usize,
+) -> Result<(), EasyOfficeError> {
+    if !dict_name_eq(entries, "/Subtype", "/Image") {
+        return Ok(());
+    }
+    let dim = |key: &str| {
+        dict_get(entries, key)
+            .and_then(|v| resolve_int(v, objects))
+            .and_then(|n| u64::try_from(n).ok())
+            .unwrap_or(0)
+    };
+    let pixels = dim("/Width").saturating_mul(dim("/Height"));
+    if pixels > MAX_PDF_IMAGE_PIXELS {
+        return Err(EasyOfficeError::ResourceBudgetExceeded(
+            "PDF 이미지가 선언한 픽셀 수가 상한(2^30)을 초과했습니다.".to_string(),
+        ));
+    }
+    let lone_flate = matches!(
+        dict_get(entries, "/Filter").and_then(|f| resolve_value(f, objects)),
+        Some(PdfObjValue::Name(n)) if n == "/FlateDecode" || n == "/Fl"
+    );
+    let min_decoded = pixels.div_ceil(8);
+    let max_reachable = (raw_len as u64 + 1).saturating_mul(MAX_DEFLATE_EXPANSION);
+    if lone_flate && min_decoded > max_reachable {
+        return Err(EasyOfficeError::CorruptedContainer(
+            "PDF 이미지 압축 데이터가 선언한 크기에 비해 지나치게 짧습니다.".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 pub(super) fn decode_and_validate_pdf_streams(
     bytes: &[u8],
     objects: &HashMap<(u32, u16), PdfIndirectObject>,
@@ -512,6 +564,16 @@ pub(super) fn decode_and_validate_pdf_streams(
             ));
         };
         let raw_stream = &bytes[s_start..s_end];
+        if is_opaque_binary_stream(entries) {
+            validate_opaque_stream_declaration(entries, objects, raw_stream.len())?;
+            if contains_subslice(raw_stream, MODEL_B64_COMMENT_PREFIX) {
+                return Err(EasyOfficeError::SecurityViolation(
+                    "PDF 비메타데이터 스트림 내부에 허용되지 않는 %EasyOfficePDFModelBase64 주석이 발견되었습니다."
+                        .to_string(),
+                ));
+            }
+            continue;
+        }
         let decoded_opt =
             decode_pdf_stream_filters(raw_stream, entries, objects, remaining_budget)?;
         let is_meta = is_studio_metadata_dict(entries);
@@ -650,9 +712,9 @@ fn has_pdf_comment_with_prefix(stream_bytes: &[u8], prefix: &[u8], skip_pdf_stri
 
 pub(super) fn stream_contains_forbidden_b64_comment(stream_bytes: &[u8]) -> bool {
     if validate_balanced_pdf_literals(stream_bytes) {
-        has_pdf_comment_with_prefix(stream_bytes, b"%EasyOfficePDFModelBase64:", true)
+        has_pdf_comment_with_prefix(stream_bytes, MODEL_B64_COMMENT_PREFIX, true)
     } else {
-        contains_subslice(stream_bytes, b"%EasyOfficePDFModelBase64:")
+        contains_subslice(stream_bytes, MODEL_B64_COMMENT_PREFIX)
     }
 }
 

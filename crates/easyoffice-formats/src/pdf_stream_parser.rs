@@ -238,18 +238,28 @@ impl PdfToUnicodeMap {
     }
 }
 
+/// Text decoding rules of one font resource of a page.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct PdfFontDecoder<'a> {
+    pub(crate) cmap: Option<&'a PdfToUnicodeMap>,
+    pub(crate) utf16be: bool,
+}
+
+/// Font resources of a page, keyed by resource name including the slash (`/F1`).
+pub(crate) type PdfPageFonts<'a> = HashMap<String, PdfFontDecoder<'a>>;
+
 #[derive(Debug, Clone, Copy)]
-struct PdfGraphicsState {
-    font_utf16be: bool,
+struct PdfGraphicsState<'a> {
+    font: PdfFontDecoder<'a>,
     font_size: f64,
     render_mode: i32,
     leading: f64,
 }
 
-impl Default for PdfGraphicsState {
+impl Default for PdfGraphicsState<'_> {
     fn default() -> Self {
         Self {
-            font_utf16be: false,
+            font: PdfFontDecoder::default(),
             font_size: 12.0,
             render_mode: 0,
             leading: 0.0,
@@ -295,7 +305,7 @@ const CANONICAL_FORM_SLOT: (bool, f64, f64, f64) = (true, 1.0, 0.0, 2.0);
 const CANONICAL_BODY_SLOT: (bool, f64, f64, f64) = (true, 1.0, 0.0, 0.0);
 
 /// Whether the graphics state and text position match a fixed marker slot.
-fn matches_slot(gs: &PdfGraphicsState, pos: (f64, f64), slot: (bool, f64, f64, f64)) -> bool {
+fn matches_slot(gs: &PdfGraphicsState<'_>, pos: (f64, f64), slot: (bool, f64, f64, f64)) -> bool {
     let (invisible, size, x, y) = slot;
     (gs.render_mode == INVISIBLE_RENDER_MODE) == invisible
         && (gs.font_size - size).abs() < POS_EPSILON
@@ -304,7 +314,7 @@ fn matches_slot(gs: &PdfGraphicsState, pos: (f64, f64), slot: (bool, f64, f64, f
 }
 
 impl PdfStreamCollector {
-    fn record(&mut self, text: String, gs: PdfGraphicsState, pos: (f64, f64), bt_id: usize) {
+    fn record(&mut self, text: String, gs: PdfGraphicsState<'_>, pos: (f64, f64), bt_id: usize) {
         if self.record_marker(&text, &gs, pos) {
             return;
         }
@@ -316,7 +326,7 @@ impl PdfStreamCollector {
     }
 
     /// Consumes watermark / stamp / form marker text; returns true when handled.
-    fn record_marker(&mut self, text: &str, gs: &PdfGraphicsState, pos: (f64, f64)) -> bool {
+    fn record_marker(&mut self, text: &str, gs: &PdfGraphicsState<'_>, pos: (f64, f64)) -> bool {
         if matches_slot(gs, pos, CANONICAL_WM_SLOT) || matches_slot(gs, pos, VISIBLE_WM_SLOT) {
             if let Some(wm) = text.strip_prefix("[WM] ") {
                 self.watermark = Some(wm.to_string());
@@ -365,12 +375,12 @@ const LEADING_EPSILON: f64 = 1e-6;
 const KERN_SPACE_THRESHOLD: f64 = -180.0;
 
 /// Mutable interpreter state for one content stream pass.
-#[derive(Default)]
-struct PdfStreamInterpreter {
+struct PdfStreamInterpreter<'a> {
+    fonts: &'a PdfPageFonts<'a>,
     in_text_object: bool,
     bt_counter: usize,
-    gs: PdfGraphicsState,
-    gs_stack: Vec<PdfGraphicsState>,
+    gs: PdfGraphicsState<'a>,
+    gs_stack: Vec<PdfGraphicsState<'a>>,
     tlm_x: f64,
     tlm_y: f64,
     dict_depth: usize,
@@ -419,7 +429,25 @@ fn font_operands(operands: &[PdfStreamOperand]) -> (Option<f64>, Option<&str>) {
     (size_opt, name_opt)
 }
 
-impl PdfStreamInterpreter {
+impl<'a> PdfStreamInterpreter<'a> {
+    fn new(fonts: &'a PdfPageFonts<'a>) -> Self {
+        Self {
+            fonts,
+            in_text_object: false,
+            bt_counter: 0,
+            gs: PdfGraphicsState::default(),
+            gs_stack: Vec::new(),
+            tlm_x: 0.0,
+            tlm_y: 0.0,
+            dict_depth: 0,
+            in_array: false,
+            array_buf: String::new(),
+            array_has_text: false,
+            operands: Vec::new(),
+            collector: PdfStreamCollector::default(),
+        }
+    }
+
     #[inline]
     fn in_active_text(&self) -> bool {
         self.dict_depth == 0 && self.in_text_object
@@ -434,12 +462,7 @@ impl PdfStreamInterpreter {
         }
     }
 
-    fn apply_non_code(
-        &mut self,
-        kind: PdfNonCodeKind,
-        stream: &str,
-        cmap: Option<&PdfToUnicodeMap>,
-    ) {
+    fn apply_non_code(&mut self, kind: PdfNonCodeKind, stream: &str) {
         match kind {
             PdfNonCodeKind::Comment { .. } => {}
             PdfNonCodeKind::DictOpen => self.dict_depth += 1,
@@ -460,8 +483,8 @@ impl PdfStreamInterpreter {
                     return;
                 }
                 let hex = &stream[inner_start..inner_end];
-                if let Some(decoded) =
-                    decode_pdf_hex_string_with_cmap(hex, self.gs.font_utf16be, cmap)
+                let font = self.gs.font;
+                if let Some(decoded) = decode_pdf_hex_string_with_cmap(hex, font.utf16be, font.cmap)
                 {
                     self.push_text(decoded);
                 }
@@ -601,7 +624,7 @@ impl PdfStreamInterpreter {
     fn set_font(&mut self) {
         let (size_opt, name_opt) = font_operands(&self.operands);
         if let Some(nm) = name_opt {
-            self.gs.font_utf16be = nm == "/F2";
+            self.gs.font = self.fonts.get(nm).copied().unwrap_or_default();
         }
         if let Some(sz) = size_opt {
             self.gs.font_size = sz;
@@ -657,13 +680,13 @@ impl PdfStreamInterpreter {
     }
 }
 
-pub(crate) fn parse_pdf_content_stream_with_cmap(
+pub(crate) fn parse_pdf_content_stream_with_fonts(
     stream: &str,
-    cmap: Option<&PdfToUnicodeMap>,
+    fonts: &PdfPageFonts<'_>,
 ) -> ParsedPdfContentStream {
     let bytes = stream.as_bytes();
     let mut i = 0usize;
-    let mut interp = PdfStreamInterpreter::default();
+    let mut interp = PdfStreamInterpreter::new(fonts);
     while i < bytes.len() {
         if bytes[i].is_ascii_whitespace() {
             i += 1;
@@ -671,7 +694,7 @@ pub(crate) fn parse_pdf_content_stream_with_cmap(
         }
         match step_pdf_non_code_token(bytes, i) {
             Ok(Some(step)) => {
-                interp.apply_non_code(step.kind, stream, cmap);
+                interp.apply_non_code(step.kind, stream);
                 i = step.next_index;
             }
             Err(()) => break,

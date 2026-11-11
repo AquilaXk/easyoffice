@@ -281,7 +281,7 @@ fn test_f5_ods_xlsx_hwpx_and_pdf_standard_compatibility() {
         structural_body_model
     );
 
-    let multiline_tj_comment_pdf = b"%PDF-1.7\n1 0 obj << /Type /Catalog /Title (StreamEdge) >> endobj\n2 0 obj << /Type /Page /PageNumber 1 /Contents 3 0 R >> endobj\n3 0 obj << /Length 260 >>\nstream\n/F2 11 Tf\nBT /F1 12 Tf 54 760 Td [(Hel) -15 (lo )\n(World)] TJ ET\nBT [3 2] 0 d /Span << /MCID 0 /Lang (ko-KR) >> BDC (\\101\\tLine\\\nCont) Tj EMC ET\nBT /F2 11 Tf ET\nBT <AC00> Tj ET\nendstream\nendobj\nxref\n0 4\ntrailer << /Size 4 /Root 1 0 R >>\nstartxref\n0\n%%EOF\n";
+    let multiline_tj_comment_pdf = b"%PDF-1.7\n1 0 obj << /Type /Catalog /Title (StreamEdge) >> endobj\n2 0 obj << /Type /Page /PageNumber 1 /Contents 3 0 R /Resources << /Font << /F2 5 0 R >> >> >> endobj\n5 0 obj << /Type /Font /Subtype /Type0 /Encoding /UniKS-UCS2-H >> endobj\n3 0 obj << /Length 260 >>\nstream\n/F2 11 Tf\nBT /F1 12 Tf 54 760 Td [(Hel) -15 (lo )\n(World)] TJ ET\nBT [3 2] 0 d /Span << /MCID 0 /Lang (ko-KR) >> BDC (\\101\\tLine\\\nCont) Tj EMC ET\nBT /F2 11 Tf ET\nBT <AC00> Tj ET\nendstream\nendobj\nxref\n0 4\ntrailer << /Size 4 /Root 1 0 R >>\nstartxref\n0\n%%EOF\n";
     let parsed_edge = PdfSerializer::parse(multiline_tj_comment_pdf).unwrap();
     assert_eq!(
         parsed_edge.pages[0].body_text,

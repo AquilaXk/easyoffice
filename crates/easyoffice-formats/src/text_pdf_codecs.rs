@@ -4,16 +4,16 @@ mod pdf_object_graph;
 use crate::pdf_stream_parser::{
     advance_past_stream_eol, contains_subslice, decode_base64_bytes_impl, escape_pdf_text,
     is_pdf_delim_or_ws, is_standalone_pdf_kw, parse_indirect_obj_header,
-    parse_pdf_content_stream_with_cmap, skip_pdf_ws_and_comments, span_crosses_object_boundary,
+    parse_pdf_content_stream_with_fonts, skip_pdf_ws_and_comments, span_crosses_object_boundary,
     step_pdf_non_code_token, unescape_pdf_text, validate_balanced_pdf_literals, ParenJumpTable,
-    PdfNonCodeKind, PdfNonCodeStep, PdfToUnicodeMap,
+    PdfFontDecoder, PdfNonCodeKind, PdfNonCodeStep, PdfPageFonts, PdfToUnicodeMap,
 };
 use crate::{ContainerFamily, DocumentFormat, EasyOfficeError, FormatDetector};
 use pdf_object_graph::{
     decode_and_validate_pdf_streams, dict_get, dict_has_non_null_key, dict_name_eq,
     expand_pdf_object_streams, fail_corrupted_or_encrypted, indirect_val_has_spliced_encrypt,
-    parse_pdf_value_with_table, resolve_catalog_and_pages_target, resolve_int,
-    resolve_stream_bounds, resolve_stream_length_hint, resolve_value,
+    is_opaque_binary_stream, parse_pdf_value_with_table, resolve_catalog_and_pages_target,
+    resolve_int, resolve_stream_bounds, resolve_stream_length_hint, resolve_value,
     trailer_or_xref_has_spliced_encrypt, validate_pdf_trailer_json, IntObjIndex, PageNodeTarget,
     PdfIndirectObject, PdfObjValue, MAX_PDF_CONTENTS_ARRAY_LEN, MAX_PDF_PAGE_TREE_DEPTH,
     MAX_PDF_TOTAL_DECODED_BYTES,
@@ -59,23 +59,85 @@ fn ordered_by_sequence(
     ordered
 }
 
-/// Merges every `/ToUnicode` CMap stream found among the objects.
-fn build_tounicode_map(
+/// Parsed `/ToUnicode` CMaps keyed by their stream object.
+type ToUnicodeMaps = HashMap<(u32, u16), PdfToUnicodeMap>;
+
+/// Parses each `/ToUnicode` stream referenced by a font dictionary once.
+fn build_tounicode_maps(
     bytes: &[u8],
-    ordered_objs: &[((u32, u16), &PdfIndirectObject)],
+    objects: &HashMap<(u32, u16), PdfIndirectObject>,
     flate_cache: &HashMap<(u32, u16), Vec<u8>>,
-) -> PdfToUnicodeMap {
-    let mut cmap = PdfToUnicodeMap::default();
-    for &(id, obj) in ordered_objs {
-        let stream_slice: Option<&[u8]> = match flate_cache.get(&id) {
-            Some(dec) => Some(dec.as_slice()),
-            None => obj.stream_range.map(|(s, e)| &bytes[s..e]),
+) -> ToUnicodeMaps {
+    let mut maps = ToUnicodeMaps::new();
+    for obj in objects.values() {
+        let PdfObjValue::Dict(ref entries) = obj.val else {
+            continue;
         };
-        if let Some(s_bytes) = stream_slice.filter(|s| contains_subslice(s, b"begincmap")) {
-            PdfToUnicodeMap::parse_cmap_stream(&String::from_utf8_lossy(s_bytes), &mut cmap);
+        let Some(&PdfObjValue::Ref(on, gn)) = dict_get(entries, "/ToUnicode") else {
+            continue;
+        };
+        if maps.contains_key(&(on, gn)) {
+            continue;
         }
+        let stream: Option<&[u8]> = match flate_cache.get(&(on, gn)) {
+            Some(dec) => Some(dec.as_slice()),
+            None => objects
+                .get(&(on, gn))
+                .and_then(|o| o.stream_range)
+                .map(|(s, e)| &bytes[s..e]),
+        };
+        let Some(stream) = stream else {
+            continue;
+        };
+        let mut cmap = PdfToUnicodeMap::default();
+        PdfToUnicodeMap::parse_cmap_stream(&String::from_utf8_lossy(stream), &mut cmap);
+        maps.insert((on, gn), cmap);
     }
-    cmap
+    maps
+}
+
+/// Whether a composite font's `/Encoding` CMap yields UTF-16BE code units (`UniKS-UCS2-H`, ...).
+fn encoding_is_utf16be(font: &[(String, PdfObjValue)]) -> bool {
+    matches!(
+        dict_get(font, "/Encoding"),
+        Some(PdfObjValue::Name(n)) if n.contains("UCS2") || n.contains("UTF16")
+    )
+}
+
+/// Decoding rules for the fonts in a page's `/Resources /Font`, keyed by resource name.
+fn page_font_decoders<'m>(
+    resources: Option<&PdfObjValue>,
+    objects: &HashMap<(u32, u16), PdfIndirectObject>,
+    maps: &'m ToUnicodeMaps,
+) -> PdfPageFonts<'m> {
+    let mut fonts = PdfPageFonts::new();
+    let Some(PdfObjValue::Dict(res)) = resources.and_then(|r| resolve_value(r, objects)) else {
+        return fonts;
+    };
+    let Some(PdfObjValue::Dict(font_dict)) =
+        dict_get(res, "/Font").and_then(|f| resolve_value(f, objects))
+    else {
+        return fonts;
+    };
+    for (name, value) in font_dict {
+        let Some(PdfObjValue::Dict(font)) = resolve_value(value, objects) else {
+            continue;
+        };
+        let cmap = match dict_get(font, "/ToUnicode") {
+            Some(&PdfObjValue::Ref(on, gn)) => maps.get(&(on, gn)),
+            _ => None,
+        };
+        let utf16be = dict_name_eq(font, "/Subtype", "/Type0") && encoding_is_utf16be(font);
+        fonts.insert(name.clone(), PdfFontDecoder { cmap, utf16be });
+    }
+    fonts
+}
+
+/// Page attributes a `/Pages` node passes down to its kids.
+#[derive(Clone, Copy)]
+struct PageInherited<'a> {
+    rotation: i32,
+    resources: Option<&'a PdfObjValue>,
 }
 
 /// State of the top-level token scan over a PDF file.
@@ -374,9 +436,14 @@ fn push_content_ref<'a>(
             "PDF /Contents 대상 객체에 stream 본문이 없습니다.".to_string(),
         ));
     };
-    if !matches!(stream_obj.val, PdfObjValue::Dict(_)) {
+    let PdfObjValue::Dict(ref entries) = stream_obj.val else {
         return Err(EasyOfficeError::CorruptedContainer(
             "PDF 스트림 객체 헤더가 딕셔너리가 아닙니다.".to_string(),
+        ));
+    };
+    if is_opaque_binary_stream(entries) {
+        return Err(EasyOfficeError::CorruptedContainer(
+            "PDF /Contents 대상이 이미지 또는 글꼴 프로그램 스트림입니다.".to_string(),
         ));
     }
     out.push(resolve_content_slice(state, so, sg, s_start, s_end)?);
@@ -408,11 +475,16 @@ fn collect_contents_array<'a>(
     Ok(out)
 }
 
+const NO_INHERITED: PageInherited<'static> = PageInherited {
+    rotation: 0,
+    resources: None,
+};
+
 struct PageWalkState<'a> {
     bytes: &'a [u8],
     objects: &'a HashMap<(u32, u16), PdfIndirectObject>,
     flate_cache: &'a HashMap<(u32, u16), Vec<u8>>,
-    cmap: &'a PdfToUnicodeMap,
+    to_unicode: &'a ToUnicodeMaps,
     first_used_flate: HashSet<(u32, u16)>,
     remaining_budget: usize,
     visited: HashSet<(u32, u16)>,
@@ -588,12 +660,12 @@ impl PdfSerializer {
         state: &mut PageWalkState<'a>,
         page_entries: &[(String, PdfObjValue)],
         inline_stream: Option<((u32, u16), (usize, usize))>,
-        inherited_rotation: i32,
+        inherited: PageInherited<'_>,
     ) -> Result<(), EasyOfficeError> {
         let rotation = dict_get(page_entries, "/Rotate")
             .and_then(|v| resolve_int(v, state.objects))
             .and_then(|n| i32::try_from(n).ok())
-            .unwrap_or(inherited_rotation);
+            .unwrap_or(inherited.rotation);
         let page_number = dict_get(page_entries, "/PageNumber")
             .and_then(|v| resolve_int(v, state.objects))
             .and_then(|n| usize::try_from(n).ok())
@@ -629,7 +701,9 @@ impl PdfSerializer {
             Cow::Owned(joined)
         };
         let stream_text = String::from_utf8_lossy(merged_cow.as_ref());
-        let parsed = parse_pdf_content_stream_with_cmap(&stream_text, Some(state.cmap));
+        let resources = dict_get(page_entries, "/Resources").or(inherited.resources);
+        let fonts = page_font_decoders(resources, state.objects, state.to_unicode);
+        let parsed = parse_pdf_content_stream_with_fonts(&stream_text, &fonts);
         if let Some(wm) = parsed.watermark {
             state.watermark_text = Some(wm);
         }
@@ -645,7 +719,7 @@ impl PdfSerializer {
     fn walk_page_tree_node<'a>(
         state: &mut PageWalkState<'a>,
         target: PageNodeTarget<'a>,
-        inherited_rotation: i32,
+        inherited: PageInherited<'a>,
         depth: usize,
     ) -> Result<(), EasyOfficeError> {
         if depth > MAX_PDF_PAGE_TREE_DEPTH {
@@ -685,7 +759,11 @@ impl PdfSerializer {
         let effective_rotation = dict_get(entries, "/Rotate")
             .and_then(|v| resolve_int(v, state.objects))
             .and_then(|n| i32::try_from(n).ok())
-            .unwrap_or(inherited_rotation);
+            .unwrap_or(inherited.rotation);
+        let inherited = PageInherited {
+            rotation: effective_rotation,
+            resources: dict_get(entries, "/Resources").or(inherited.resources),
+        };
 
         let is_pages = dict_name_eq(entries, "/Type", "/Pages")
             || (dict_get(entries, "/Type").is_none() && dict_get(entries, "/Kids").is_some());
@@ -705,13 +783,13 @@ impl PdfSerializer {
                     PdfObjValue::Ref(ko, kg) => Self::walk_page_tree_node(
                         state,
                         PageNodeTarget::Ref(*ko, *kg),
-                        effective_rotation,
+                        inherited,
                         depth + 1,
                     )?,
                     PdfObjValue::Dict(kd) => Self::walk_page_tree_node(
                         state,
                         PageNodeTarget::Inline(kd.as_slice()),
-                        effective_rotation,
+                        inherited,
                         depth + 1,
                     )?,
                     _ => {
@@ -731,7 +809,7 @@ impl PdfSerializer {
                 "PDF 페이지 트리에 허용되지 않는 객체 /Type이 포함되었습니다.".to_string(),
             ));
         }
-        Self::emit_page_from_node(state, entries, inline_stream, effective_rotation)
+        Self::emit_page_from_node(state, entries, inline_stream, inherited)
     }
 
     fn scan_pdf_structure(bytes: &[u8]) -> Result<ScannedPdfStructure, EasyOfficeError> {
@@ -779,7 +857,7 @@ impl PdfSerializer {
 
         expand_pdf_object_streams(bytes, &mut objects, &flate_cache, &mut order_seq);
         let ordered_objs = ordered_by_sequence(&objects);
-        let cmap = build_tounicode_map(bytes, &ordered_objs, &flate_cache);
+        let to_unicode = build_tounicode_maps(bytes, &objects, &flate_cache);
         let (title, pages_target) =
             resolve_catalog_and_pages_target(&objects, &ordered_objs, &trailers);
 
@@ -787,7 +865,7 @@ impl PdfSerializer {
             bytes,
             objects: &objects,
             flate_cache: &flate_cache,
-            cmap: &cmap,
+            to_unicode: &to_unicode,
             first_used_flate: HashSet::new(),
             remaining_budget,
             visited: HashSet::new(),
@@ -796,7 +874,7 @@ impl PdfSerializer {
             watermark_text: None,
         };
         match pages_target {
-            Some(target) => Self::walk_page_tree_node(&mut walk_state, target, 0, 0)?,
+            Some(target) => Self::walk_page_tree_node(&mut walk_state, target, NO_INHERITED, 0)?,
             None => Self::emit_unlinked_pages(&mut walk_state, &ordered_objs)?,
         }
 
@@ -828,7 +906,12 @@ impl PdfSerializer {
                     "PDF 페이지 트리 노드 상한(4096)을 초과했습니다.".to_string(),
                 ));
             }
-            Self::emit_page_from_node(walk_state, d, obj.stream_range.map(|r| (id, r)), 0)?;
+            Self::emit_page_from_node(
+                walk_state,
+                d,
+                obj.stream_range.map(|r| (id, r)),
+                NO_INHERITED,
+            )?;
         }
         Ok(())
     }
