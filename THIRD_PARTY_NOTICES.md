@@ -8893,7 +8893,75 @@ The desktop shell (`crates/easyoffice-desktop`, not the engine crates) depends o
 
 ## Desktop shell PDF editing crates (PD-170)
 
-The desktop shell (`crates/easyoffice-desktop`, not the engine crates) depends on `hayro-syntax` 0.9.0 (reads a PDF file, without its image decoders: `default-features = false, features = ["std"]`) and `hayro-write` 0.9.0 (copies a page and the objects it uses into a new file), both `Apache-2.0 OR MIT`, Copyright (c) The Hayro Authors, <https://github.com/LaurenzV/hayro>, used unmodified; and on `pdf-writer` 0.15.0 (`MIT OR Apache-2.0`, the version `hayro-write` writes with; the shell's own `pdf-writer` 0.12 is unchanged) and `flate2` (already in the closure), to edit a PDF without losing its pictures, fonts and layout. They add three crates to the compiled closure (`hayro-syntax`, `hayro-write`, `pdf-writer` 0.15.0; `rustc-hash`, `smallvec`, `memchr`, `itoa`, `ryu`, `bitflags` and `flate2` were already in it, checked with `cargo tree -p easyoffice-desktop -e normal`). The lock file also lists the optional `hayro-ccitt`, `hayro-jbig2` and `hayro-jpeg2000` (`Apache-2.0 OR MIT`, Copyright (c) The Hayro Authors), which are not compiled. The worker process limits (PD-170) call `libc` (Unix) and `windows-sys` 0.61 (Windows), both already in the closure through the Tauri stack. No code of these crates was copied. The license texts travel in their source packages. Every expression offers a permissive license; none is GPL, AGPL or LGPL.
+The desktop shell (`crates/easyoffice-desktop`, not the engine crates) depends on `hayro-syntax` 0.9.0 (reads a PDF file; requested without its image decoders, `default-features = false, features = ["std"]`, but PD-179 enables them through `hayro`) and `hayro-write` 0.9.0 (copies a page and the objects it uses into a new file), both `Apache-2.0 OR MIT`, Copyright (c) The Hayro Authors, <https://github.com/LaurenzV/hayro>, used unmodified; and on `pdf-writer` 0.15.0 (`MIT OR Apache-2.0`, the version `hayro-write` writes with; the shell's own `pdf-writer` 0.12 is unchanged) and `flate2` (already in the closure), to edit a PDF without losing its pictures, fonts and layout. They add three crates to the compiled closure (`hayro-syntax`, `hayro-write`, `pdf-writer` 0.15.0; `rustc-hash`, `smallvec`, `memchr`, `itoa`, `ryu`, `bitflags` and `flate2` were already in it, checked with `cargo tree -p easyoffice-desktop -e normal`). The lock file also lists the optional `hayro-ccitt`, `hayro-jbig2` and `hayro-jpeg2000` (`Apache-2.0 OR MIT`, Copyright (c) The Hayro Authors), which are not compiled. The worker process limits (PD-170) call `libc` (Unix) and `windows-sys` 0.61 (Windows), both already in the closure through the Tauri stack. No code of these crates was copied. The license texts travel in their source packages. Every expression offers a permissive license; none is GPL, AGPL or LGPL.
+
+## Desktop shell PDF first-page crates (start-window cards, PD-179)
+
+The desktop shell (`crates/easyoffice-desktop`, not the engine crates) depends on `hayro` 0.9.0 (rasterizes the first page of a PDF for the start-window card, in the PDF worker process of PD-170), `Apache-2.0 OR MIT`, Copyright (c) The Hayro Authors, <https://github.com/LaurenzV/hayro>, used unmodified, with its default features `embed-fonts` and `embed-cmaps`. `hayro` enables the image decoders and the `unsafe` feature of `hayro-syntax` (`hayro-jbig2`, `hayro-jpeg2000`, `hayro-ccitt`, `zune-jpeg`, `zlib-rs` through `flate2`), which the PD-170 section above lists as not compiled; the edit path still never draws a page. The desktop shell also names `easyoffice-sheet` (this repository) as a direct dependency. 22 crate versions are new in the compiled closure (checked with `cargo tree -p easyoffice-desktop -e normal` against the previous lock file): `hayro`, `hayro-interpret`, `hayro-font`, `hayro-cmap`, `hayro-postscript`, `vello_cpu`, `vello_common`, `peniko`, `color`, `linebender_resource_handle`, `guillotiere`, `fearless_simd` (0.7.0 and 1.2.0), `pic-scale`, `ab_glyph_rasterizer`, `font-types`, `read-fonts` 0.46.0, `skrifa` 0.49.0, `brotli`, `brotli-decompressor`, `alloc-stdlib` and `alloc-no-stdlib`. Licenses by SPDX expression: `Apache-2.0 OR MIT` (the `hayro-*` crates, `vello_*`, `peniko`, `color`, `linebender_resource_handle`, `fearless_simd`), `MIT OR Apache-2.0` (`font-types`, `read-fonts`, `skrifa`, `guillotiere`), `BSD-3-Clause OR Apache-2.0` (`pic-scale`), `Apache-2.0` (`ab_glyph_rasterizer`), `BSD-3-Clause AND MIT` (`brotli`), `BSD-3-Clause/MIT` (`brotli-decompressor`) and `BSD-3-Clause` (`alloc-stdlib`, `alloc-no-stdlib`). Every expression offers a permissive license; none is GPL, AGPL or LGPL. No code of these crates was copied; the license texts travel in their source packages.
+
+`hayro-font` embeds the 14 standard-font substitutes (Foxit PFB fonts extracted from PDFium) and `hayro-cmap` the predefined CMaps of the PDF specification (Adobe). Both are redistributed in the shell binary under BSD-3-Clause, and their notices are reproduced here.
+
+```
+Copyright 2014 PDFium Authors. All rights reserved.
+Original code copyright 2014 Foxit Software Inc. http://www.foxitsoftware.com
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+   * Redistributions of source code must retain the above copyright
+notice, this list of conditions and the following disclaimer.
+   * Redistributions in binary form must reproduce the above
+copyright notice, this list of conditions and the following disclaimer
+in the documentation and/or other materials provided with the
+distribution.
+   * Neither the name of Google Inc. nor the names of its
+contributors may be used to endorse or promote products derived from
+this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+```
+Copyright 1990-2023 Adobe. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+Redistributions of source code must retain the above copyright notice,
+this list of conditions and the following disclaimer.
+
+Redistributions in binary form must reproduce the above copyright
+notice, this list of conditions and the following disclaimer in the
+documentation and/or other materials provided with the distribution.
+
+Neither the name of Adobe nor the names of its contributors may be
+used to endorse or promote products derived from this software without
+specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
 
 ## Reference app (code adapted)
 
