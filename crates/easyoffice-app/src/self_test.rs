@@ -6,9 +6,8 @@ use easyoffice_formats::{
     ZipSecurityPolicy,
 };
 use easyoffice_layout::{
-    ContextualObjectToolKind, DesktopPlatform, DocumentDomainEngine, DocumentPageLayout,
-    DocumentTableModel, LayoutRect, OfficeModuleKind, PageOrientation, PdfDomainEngine,
-    PdfStudioLayout, RibbonLayoutStyle, SlideDeckTheme, SlideDomainEngine, SlideStageLayout,
+    ContextualObjectToolKind, DesktopPlatform, DocumentPageLayout, LayoutRect, OfficeModuleKind,
+    PageOrientation, PdfStudioLayout, RibbonLayoutStyle, SlideDeckTheme, SlideStageLayout,
 };
 use easyoffice_sheet::{
     CellRange, EvaluatedCellValue, PivotAggregation, SheetEngine, WorkbookEngine,
@@ -19,7 +18,7 @@ use crate::{
     EasyOfficeIpcRouter, RibbonCommandRouter, RibbonWorkspaceState,
 };
 
-fn check_codec_roundtrips() -> Result<PdfDocumentModel, EasyOfficeError> {
+fn check_codec_roundtrips() -> Result<(), EasyOfficeError> {
     if DocumentFormat::ALL.len() != 20 {
         return Err(EasyOfficeError::CorruptedContainer(
             "지원 포맷 수가 20종이 아닙니다.".to_string(),
@@ -132,7 +131,7 @@ fn check_codec_roundtrips() -> Result<PdfDocumentModel, EasyOfficeError> {
         ));
     }
 
-    Ok(pdf_model)
+    Ok(())
 }
 
 fn check_sheet_and_formats() -> Result<(), EasyOfficeError> {
@@ -252,39 +251,7 @@ fn check_layout_and_ribbon() -> Result<(), EasyOfficeError> {
     Ok(())
 }
 
-fn check_domain_engines(pdf_model: &PdfDocumentModel) -> Result<(), EasyOfficeError> {
-    let tbl = DocumentTableModel::new(vec![
-        vec!["100".to_string()],
-        vec!["250".to_string()],
-        vec!["=SUM(ABOVE)".to_string()],
-    ]);
-    if (tbl.evaluate_cell_formula(2, 0)? - 350.0).abs() > 1e-6 {
-        return Err(EasyOfficeError::FormulaError(
-            "표 =SUM(ABOVE) 수식 검증 실패".to_string(),
-        ));
-    }
-    let mut doc_domain = DocumentDomainEngine::new();
-    doc_domain.record_revision("r1", "검토자", "insert", "초안 추가");
-    if !doc_domain.accept_revision("r1") {
-        return Err(EasyOfficeError::InvalidArgument(
-            "문서 변경 내용 추적 승인 실패".to_string(),
-        ));
-    }
-    let mut slide_domain = SlideDomainEngine::default();
-    slide_domain.presenter.move_laser_pointer(300.0, 200.0);
-    slide_domain.presenter.append_ink_point(120.0, 180.0);
-    if slide_domain.presenter.laser_pointer != Some((300.0, 200.0)) {
-        return Err(EasyOfficeError::InvalidArgument(
-            "발표자 레이저 포인터 검증 실패".to_string(),
-        ));
-    }
-    let mut pdf_domain = PdfDomainEngine::new(pdf_model.clone());
-    if pdf_domain.rotate_page(0, 90)? != 90 {
-        return Err(EasyOfficeError::InvalidArgument(
-            "PDF 페이지 회전 검증 실패".to_string(),
-        ));
-    }
-
+fn check_security_and_ffi() -> Result<(), EasyOfficeError> {
     let pii_res =
         DocumentSecurityAuditor::scan_and_scrub_pii("900101-1234567 010-1234-5678 a@b.kr");
     if pii_res.total_masked_count() != 3 {
@@ -511,10 +478,10 @@ fn check_embedded_assets() -> Result<(), EasyOfficeError> {
 
 /// Executes deterministic end-to-end self-tests across all 4 crates and embedded WebUI assets.
 pub fn run_self_test() -> Result<String, EasyOfficeError> {
-    let pdf_model = check_codec_roundtrips()?;
+    check_codec_roundtrips()?;
     check_sheet_and_formats()?;
     check_layout_and_ribbon()?;
-    check_domain_engines(&pdf_model)?;
+    check_security_and_ffi()?;
     check_ipc_responses()?;
     check_embedded_assets()?;
 

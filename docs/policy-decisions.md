@@ -600,6 +600,7 @@
 ### 28. Rust 5대 모듈 도메인·140종 리본·오프라인 스마트 보조·C-ABI FFI 완비, 표준/한글(HWP) 리본 스위처 및 Windows CI/Release 파이프라인 정책 (2026-10-24)
 
 - **Superseded by PD-094 (부분)**: 이 항목 중 Swift 앱·`swift build`/`swift test`·`scripts/package-macos-release.sh`·Swift 대응 규칙에 해당하는 부분은 PD-094로 대체되었습니다. Rust 엔진·WebUI·Windows 관련 결정은 그대로 유효합니다.
+- **Superseded (부분)**: 1번의 `DocumentDomainEngine`·`SlideDomainEngine`·`PdfDomainEngine`과 표·슬라이드·PDF 도메인 모델은 제품 런타임에서 호출되지 않아 제거했습니다. `RibbonLayoutStyle`·`ContextualObjectToolKind`는 유지합니다.
 - **Decision (`PD-054`)**:
   1. **Rust 5대 도메인 엔진 및 140종 리본·스마트 보조·PII 감사·C-ABI FFI 완비 (`crates/easyoffice-layout/src/domain.rs`, `crates/easyoffice-app/src/{ribbon.rs,smart_tools.rs,ffi.rs}`)**:
      - `crates/easyoffice-layout/src/domain.rs`에 `RibbonLayoutStyle { StandardOffice, HangulHwp }`, `ContextualObjectToolKind`, `DocumentDomainEngine`(병합 표 `DocumentTableModel` 및 `=SUM(ABOVE)`/`=AVERAGE(LEFT)` 표 셀 수식, 변경 내용 추적 `RevisionRecord`, 각주·미주 `FootnoteEntry`, 1~3단계 자동 목차 생성, `{{필드}}` 메일 머지), `SlideDomainEngine`(5종 마스터 레이아웃, 전환 타이밍, 발표자 레이저 포인터·자유곡선 잉크 `PresenterSessionState`), `PdfDomainEngine`(90도 페이지 회전, 분할·병합, 결재 스탬프, 워터마크, AcroForm 필드)을 구현합니다.
