@@ -166,3 +166,36 @@ fn test_circular_reference_reports_standard_error_and_flag() {
     assert!(wb_res.contains("\"value\":\"#NUM!\""), "{wb_res}");
     assert!(wb_res.contains("\"circular\":true"), "{wb_res}");
 }
+
+/// The desktop shell calls `dispatch` directly, without the HTTP server's body ceiling: the router
+/// holds the same ceiling, so no command Base64-decodes or parses a payload larger than the server
+/// would have accepted.
+#[test]
+fn a_payload_over_the_ipc_ceiling_is_refused_by_every_command() {
+    use easyoffice_formats::EasyOfficeError;
+    let over = " ".repeat(MAX_IPC_HTTP_BODY_BYTES + 1);
+    for command in [
+        "detect_format",
+        "audit_security",
+        "convert_document_format",
+        "scrub_pii",
+        "evaluate_sheet",
+        "get_workspace_bootstrap",
+    ] {
+        let err = EasyOfficeIpcRouter::dispatch(command, &over).unwrap_err();
+        assert_eq!(
+            err,
+            EasyOfficeError::PayloadTooLarge {
+                actual: over.len(),
+                max: MAX_IPC_HTTP_BODY_BYTES
+            },
+            "{command}"
+        );
+    }
+    let at = " ".repeat(MAX_IPC_HTTP_BODY_BYTES);
+    let reached = EasyOfficeIpcRouter::dispatch("scrub_pii", &at);
+    assert!(
+        !matches!(reached, Err(EasyOfficeError::PayloadTooLarge { .. })),
+        "a payload at the ceiling still reaches the command"
+    );
+}

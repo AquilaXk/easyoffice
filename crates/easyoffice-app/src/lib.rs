@@ -1,3 +1,4 @@
+use crate::http_server::MAX_IPC_HTTP_BODY_BYTES;
 use easyoffice_formats::{EasyOfficeError, StrictJsonValue};
 use easyoffice_layout::{
     DesktopPlatform, DocumentPageLayout, OfficeModuleKind, PageOrientation, PdfStudioLayout,
@@ -93,6 +94,15 @@ impl EasyOfficeIpcRouter {
         owner: &str,
         renderer: Option<&RichPdfRenderer<'_>>,
     ) -> Result<String, EasyOfficeError> {
+        // The same ceiling the HTTP server puts on a request body. The desktop shell calls this
+        // directly, so the check lives here: no command decodes or parses what the server would
+        // have refused.
+        if payload.len() > MAX_IPC_HTTP_BODY_BYTES {
+            return Err(EasyOfficeError::PayloadTooLarge {
+                actual: payload.len(),
+                max: MAX_IPC_HTTP_BODY_BYTES,
+            });
+        }
         match command {
             "get_workspace_bootstrap" => Self::handle_workspace_bootstrap(),
             "detect_format" => Self::handle_detect_format(payload),
