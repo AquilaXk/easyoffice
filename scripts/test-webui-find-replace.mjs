@@ -184,3 +184,30 @@ test("the sheet module finds cell text, replaces values and (optionally) formula
   await flushAsyncTurns(14);
   assert.equal(h.document.querySelector('#pane-sheet td[data-cell="C2"]')?.textContent, "#VALUE!", "C2 is now =B1*2 and B1 is text");
 });
+
+// The harness has no cascade, so this one resolves `display` from shell.css with a small specificity
+// count: an element with `hidden` must lose to no rule that sets another display.
+function specificity(selector) {
+  const ids = (selector.match(/#[\w-]+/g) || []).length;
+  const classes = (selector.match(/\.[\w-]+|\[[^\]]*\]|(?<!:):(?!:)(?!not)[\w-]+/g) || []).length;
+  const tags = (selector.replace(/[#.][\w-]+|\[[^\]]*\]|:[\w-]+(\([^)]*\))?/g, " ").match(/(^|[\s>+~])[a-z][\w-]*/g) || []).length;
+  return ids * 10000 + classes * 100 + tags;
+}
+
+test("the find dialog's hidden elements stay hidden under the stylesheet's display rules", async () => {
+  const { matchesSelectorList } = await import("./webui-css-selector.mjs");
+  const { readFileSync } = await import("node:fs");
+  const css = readFileSync(new URL("../crates/easyoffice-app/ui/shell.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const rules = [...css.matchAll(/^([^@{}\n][^{}]*)\{([^}]*)\}/gm)]
+    .map(([, selector, body], order) => ({ selector: selector.trim(), display: body.match(/(?:^|;)\s*display:\s*([^;]+)/)?.[1].trim(), order }))
+    .filter((r) => r.display);
+  const h = await createWorkspaceHarness();
+  const { document } = h;
+  for (const id of ["find-opt-formula-label", "find-replace-row", "find-replace-buttons"]) {
+    const el = document.getElementById(id);
+    assert.equal(el.hidden, true, id + " starts hidden");
+    const hits = rules.filter((r) => r.selector.split(",").some((sel) => matchesSelectorList(el, sel.trim(), null)));
+    const winner = hits.sort((a, b) => specificity(a.selector) - specificity(b.selector) || a.order - b.order).at(-1);
+    assert.equal(winner?.display, "none", `${id} resolves to display:none, not "${winner?.display}" from ${winner?.selector}`);
+  }
+});

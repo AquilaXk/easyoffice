@@ -115,9 +115,8 @@
 .find-dialog .dialog-body { padding: 10px 12px 4px; }
 .find-dialog .dialog-label { width: 70px; flex-shrink: 0; }
 .find-dialog .find-options { flex-wrap: wrap; gap: 4px 12px; }
-.find-dialog .find-options label { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
-.find-dialog .find-status-row { min-height: 18px; line-height: 18px; text-align: right; }
-.find-dialog .find-count { margin: 0; color: var(--ui-text-muted); font-size: var(--font-size-sm, 11px); }
+.find-dialog .find-options label:not([hidden]) { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.find-dialog .find-count { flex: 1; min-width: 0; margin: 0; align-self: center; text-align: left; color: var(--ui-text-muted); font-size: var(--font-size-sm, 11px); }
 .find-dialog .find-buttons { display: flex; gap: 6px; padding: 4px 12px 8px; justify-content: flex-end; }
 .find-dialog [hidden] { display: none; }
 .find-dialog .dialog-btn { white-space: nowrap; }
