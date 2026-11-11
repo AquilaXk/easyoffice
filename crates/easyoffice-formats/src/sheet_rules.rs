@@ -1,4 +1,4 @@
-//! Conditional formatting and data validation rules of a sheet (PD-165).
+//! Conditional formatting and data validation rules of a sheet (PD-171).
 //!
 //! The model is shared by the XLSX/ODS readers and writers (`xlsx_rules.rs`, `ods_rules.rs`), the
 //! page's JSON (`easyoffice-app`) and the evaluator (`easyoffice-sheet`). Operands stay text: a

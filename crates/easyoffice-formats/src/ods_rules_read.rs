@@ -1,5 +1,5 @@
 //! Reading side of [`crate::ods_rules`]: conditional formatting and data validation back from
-//! `content.xml` (PD-165).
+//! `content.xml` (PD-171).
 
 use std::collections::{BTreeSet, HashMap};
 

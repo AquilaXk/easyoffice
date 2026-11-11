@@ -119,7 +119,7 @@ impl CellStyle {
 pub struct SheetStyling {
     pub cells: BTreeMap<(u32, u32), CellStyle>,
     pub columns: BTreeMap<u32, u32>,
-    /// Conditional formatting and data validation (PD-165).
+    /// Conditional formatting and data validation (PD-171).
     pub rules: SheetRules,
 }
 

@@ -1,5 +1,5 @@
 //! SpreadsheetML conditional formatting (`<conditionalFormatting>`, differential formats in
-//! `styles.xml`) and data validation (`<dataValidations>`) for [`SheetRules`] (PD-165).
+//! `styles.xml`) and data validation (`<dataValidations>`) for [`SheetRules`] (PD-171).
 //!
 //! Element order inside `<worksheet>` follows ECMA-376 `CT_Worksheet`: `sheetData`, then
 //! `conditionalFormatting`, then `dataValidations`. Rules whose type the model cannot hold

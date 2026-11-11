@@ -38,7 +38,7 @@ pub(crate) fn xlsx_width_to_px(width: f64) -> u32 {
 pub(crate) struct XlsxStyleTable {
     styles: Vec<StyleKey>,
     index: HashMap<StyleKey, usize>,
-    /// Differential formats of the conditional formatting rules (PD-165).
+    /// Differential formats of the conditional formatting rules (PD-171).
     pub(crate) dxf: DxfTable,
 }
 

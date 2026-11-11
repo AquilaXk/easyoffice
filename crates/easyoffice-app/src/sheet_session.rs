@@ -189,7 +189,7 @@ impl Registry {
     }
 
     /// Replaces the conditional formatting and validation rules of `sheet` and answers with the
-    /// appearance of every formatted cell (PD-165).
+    /// appearance of every formatted cell (PD-171).
     pub(crate) fn set_rules(
         &self,
         id: &str,
@@ -214,7 +214,7 @@ impl Registry {
         Ok(Applied::Done(json))
     }
 
-    /// Whether `input` may be entered in `cell` of `sheet` (PD-165).
+    /// Whether `input` may be entered in `cell` of `sheet` (PD-171).
     pub(crate) fn validate(
         &self,
         id: &str,
@@ -496,7 +496,7 @@ impl EasyOfficeIpcRouter {
     ///   changed; `recalc:false` only stages the edits (chunked loading of a big sheet).
     /// - `rules` `{session, sheet, rules:{cf,dv}}` -> `{cf}`: the packed appearance of every
     ///   formatted cell of the sheet. Later `apply` answers carry `cf` for the cells whose
-    ///   appearance changed (PD-165).
+    ///   appearance changed (PD-171).
     /// - `validate` `{session, sheet, cell, value}` -> `{ok}` or the rule's alert.
     /// - `pivot` `{sheet, cells, range, row, col?, value, agg}` -> the grouped values (no
     ///   session needed, see `sheet_pivot_ipc`).

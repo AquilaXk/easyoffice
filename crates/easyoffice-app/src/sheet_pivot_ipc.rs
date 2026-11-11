@@ -1,4 +1,4 @@
-//! Pivot tables over the sheet engine's `compute_pivot_grid` (PD-165).
+//! Pivot tables over the sheet engine's `compute_pivot_grid` (PD-171).
 //!
 //! `evaluate_sheet` with `sessionAction:"pivot"` takes the cells the page sends (the same
 //! `sheets`/`cells` the stateless evaluation takes) and answers with the grouped values; the page

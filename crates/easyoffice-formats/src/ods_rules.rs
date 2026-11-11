@@ -1,5 +1,5 @@
 //! OpenDocument conditional formatting (`calcext:conditional-formats`, the spreadsheet extension
-//! namespace) and data validation (`table:content-validations`) for [`SheetRules`] (PD-165).
+//! namespace) and data validation (`table:content-validations`) for [`SheetRules`] (PD-171).
 //!
 //! A validation is attached to cells (`table:content-validation-name`), so a validated range is
 //! written as cells: every populated cell inside it, plus empty cells while the range is small

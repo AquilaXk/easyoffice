@@ -1,4 +1,4 @@
-//! JSON form of [`SheetRules`] exchanged with the page (PD-165): the rules a file carries when it
+//! JSON form of [`SheetRules`] exchanged with the page (PD-171): the rules a file carries when it
 //! is opened, the rules the page sends to a sheet session and when it saves, and the packed
 //! appearance of formatted cells.
 //!

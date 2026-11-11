@@ -1,4 +1,4 @@
-//! Conditional formatting and data validation of a sheet (PD-165).
+//! Conditional formatting and data validation of a sheet (PD-171).
 //!
 //! [`RuleRuntime`] holds the rules of one sheet and, per rule, the cells it currently matches. A
 //! full evaluation fills them; an update after an edit re-evaluates only what the edit can have

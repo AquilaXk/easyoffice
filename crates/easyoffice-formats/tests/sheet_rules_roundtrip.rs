@@ -1,4 +1,4 @@
-//! Conditional formatting and data validation survive XLSX writing and reading (PD-165).
+//! Conditional formatting and data validation survive XLSX writing and reading (PD-171).
 
 use easyoffice_formats::{
     CellBox, CfKind, CfRule, CfStyle, CfValue, Cmp, DataValidation, DvAlert, DvKind, OdfCodec,

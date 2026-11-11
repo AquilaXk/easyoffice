@@ -1,4 +1,4 @@
-//! Conditional formatting and data validation inside a [`RecalcSession`] (PD-165).
+//! Conditional formatting and data validation inside a [`RecalcSession`] (PD-171).
 //!
 //! The session already holds the workbook and the up-to-date formula values, so a rule evaluates
 //! against them without a second workbook. After an edit batch the caller passes the edits and the

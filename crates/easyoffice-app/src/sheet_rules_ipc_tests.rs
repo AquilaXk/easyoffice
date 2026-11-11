@@ -1,5 +1,5 @@
 //! Rules over the IPC commands: session `rules`/`validate`, the `cf` answers of `apply`, and the
-//! save/open round trip of the page's rule JSON (PD-165).
+//! save/open round trip of the page's rule JSON (PD-171).
 
 use super::*;
 use easyoffice_formats::StrictJsonValue;
