@@ -11,6 +11,7 @@
 
 use std::borrow::Cow;
 
+use crate::decode_budget::DecodeBudget;
 use crate::odf_hwpx_codecs::{ods_budget_error, OdsMultiUnpacked};
 use crate::sheet_styling::ods_styles::{parse_automatic_styles, StyleSink};
 use crate::sheet_styling::SheetStyling;
@@ -324,6 +325,8 @@ struct TextSink {
     cells: Vec<(u32, u32, String)>,
     current_row: u32,
     total_cells: usize,
+    /// Decoded bytes of the cell texts copied into `cells`, over all tables of the document.
+    budget: DecodeBudget,
 }
 
 impl TextSink {
@@ -360,6 +363,7 @@ impl TextSink {
                             "ODS 셀 개수가 허용 예산(200,000)을 초과했습니다.",
                         ));
                     }
+                    self.budget.charge_cell(text.len(), "ODS 셀 텍스트")?;
                     self.cells.push((r, c, text.clone()));
                 }
             }
@@ -431,6 +435,7 @@ impl TextSink {
             cells: Vec::new(),
             current_row: 0,
             total_cells: 0,
+            budget: DecodeBudget::new(),
         }
     }
 
