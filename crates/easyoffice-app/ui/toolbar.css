@@ -40,7 +40,6 @@
 .tb-btn[aria-pressed="true"] {
   background: var(--ui-hover-strong);
   border-color: var(--ui-border-light);
-  color: var(--color-primary-dark);
 }
 
 .tb-btn:active:not(:disabled) {
@@ -409,4 +408,115 @@ input.sb-ls-select {
 
 .cp-item-shortcut {
   border-radius: var(--radius-md);
+}
+
+/* Colour picker (color-picker.js). Adapted from the reference app `styles/color-picker.css` and the
+   `.sb-hl-*` palette rules of rhwp-studio `style-bar.css` (MIT, see THIRD_PARTY_NOTICES.md). The
+   toggle arrow and the host are EasyOffice's: the glyph button applies the last colour, the arrow
+   opens the palette. */
+.sb-color-host {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.sb-color-arrow {
+  width: 12px;
+  height: 25px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 8px;
+  line-height: 1;
+}
+
+.sb-color-arrow:hover,
+.sb-color-host.open .sb-color-arrow {
+  background: var(--ui-hover-strong);
+  border-color: var(--ui-border-light);
+}
+
+/* WebKit shows no chooser for an input of size 0, so it stays 1px and transparent. */
+.sb-color-host > input[type="color"] {
+  position: absolute;
+  left: 0;
+  top: 100%;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: none;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.sb-hl-palette {
+  display: none;
+  position: absolute;
+  left: 0;
+  top: 100%;
+  z-index: 200;
+  padding: 4px;
+  border: 1px solid var(--ui-border-strong);
+  background: var(--color-surface-raised);
+  box-shadow: var(--shadow-light);
+}
+
+.eo-color-palette:not([hidden]) {
+  display: block;
+}
+
+.sb-hl-palette-row {
+  display: flex;
+  gap: 1px;
+  margin-bottom: 1px;
+}
+
+.sb-hl-palette-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 2px;
+  padding: 4px 0 2px;
+  border-top: 1px solid var(--ui-border-light);
+}
+
+.sb-hl-palette-actions button {
+  flex: 1;
+  padding: 2px 4px;
+  border: 1px solid var(--ui-border-strong);
+  background: var(--color-surface);
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.sb-hl-palette-actions button:hover {
+  background: var(--color-hover-bg);
+}
+
+.sb-hl-swatch {
+  box-sizing: content-box;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 1px solid var(--ui-border-strong);
+  cursor: pointer;
+}
+
+.sb-hl-swatch:hover {
+  border-color: var(--color-text);
+}
+
+.eo-recent-colors {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--ui-border-light);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.eo-recent-colors .sb-hl-palette-row {
+  min-height: 16px;
+  margin-top: 4px;
 }

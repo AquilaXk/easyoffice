@@ -726,13 +726,16 @@
       document.getElementById("btn-size-up")?.addEventListener("click", () => runs().bumpSize(1));
       document.getElementById("btn-size-down")?.addEventListener("click", () => runs().bumpSize(-1));
       document.getElementById("btn-stylebar-strike")?.addEventListener("click", () => runs().toggle("strike"));
-      [["btn-stylebar-textcolor", "doc-textcolor-input", "color"], ["btn-stylebar-highlight", "doc-highlight-input", "highlight"]].forEach(([btnId, inputId, prop]) => {
+      const colorPicker = host.__EASYOFFICE_COLOR_PICKER__;
+      [["btn-stylebar-textcolor", "doc-textcolor-host", "color", { remember: true }], ["btn-stylebar-highlight", "doc-highlight-host", "highlight", { clear: true }]].forEach(([btnId, hostId, prop, options]) => {
         const btn = document.getElementById(btnId);
         btn?.addEventListener("click", () => runs().toggleColor(prop));
-        document.getElementById(inputId)?.addEventListener("change", (ev) => {
-          if (btn) btn.style.borderBottomColor = ev.target.value || "";
-          runs().setColor(prop, ev.target.value);
-        });
+        const hostEl = document.getElementById(hostId);
+        if (!hostEl) return;
+        colorPicker.setupColorPicker(hostEl, (color) => {
+          if (btn) btn.style.borderBottomColor = color || "";
+          runs().setColor(prop, color);
+        }, options);
       });
     }
 

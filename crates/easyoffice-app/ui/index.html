@@ -299,10 +299,18 @@
           </div>
           <span class="eo-style-sep" aria-hidden="true">|</span>
           <div class="sb-color-group">
-            <button id="btn-stylebar-textcolor" class="eo-glyph-btn sb-textcolor-btn" type="button" data-icon="text-color" title="글자 색 (선택한 글자에만 적용)" aria-label="글자 색 적용"></button>
-            <input id="doc-textcolor-input" class="sb-color-input" type="color" value="#ff0000" aria-label="글자 색 선택" title="글자 색 선택" />
-            <button id="btn-stylebar-highlight" class="eo-glyph-btn sb-highlight-btn" type="button" data-icon="highlighter" title="형광펜 (선택한 글자에만 적용)" aria-label="형광펜 적용"></button>
-            <input id="doc-highlight-input" class="sb-color-input" type="color" value="#ffff00" aria-label="형광펜 색 선택" title="형광펜 색 선택" />
+            <div id="doc-textcolor-host" class="sb-color-host">
+              <button id="btn-stylebar-textcolor" class="eo-glyph-btn sb-textcolor-btn" type="button" data-icon="text-color" title="글자 색 (선택한 글자에만 적용)" aria-label="글자 색 적용"></button>
+              <button class="sb-color-arrow" type="button" data-color-toggle aria-haspopup="true" aria-expanded="false" title="글자 색 선택" aria-label="글자 색 선택"><span aria-hidden="true">▾</span></button>
+              <input id="doc-textcolor-input" type="color" value="#ff0000" aria-label="글자 색 선택" />
+              <div id="doc-textcolor-palette" class="sb-hl-palette" hidden></div>
+            </div>
+            <div id="doc-highlight-host" class="sb-color-host">
+              <button id="btn-stylebar-highlight" class="eo-glyph-btn sb-highlight-btn" type="button" data-icon="highlighter" title="형광펜 (선택한 글자에만 적용)" aria-label="형광펜 적용"></button>
+              <button class="sb-color-arrow" type="button" data-color-toggle aria-haspopup="true" aria-expanded="false" title="형광펜 색 선택" aria-label="형광펜 색 선택"><span aria-hidden="true">▾</span></button>
+              <input id="doc-highlight-input" type="color" value="#ffff00" aria-label="형광펜 색 선택" />
+              <div id="doc-highlight-palette" class="sb-hl-palette" hidden></div>
+            </div>
           </div>
           <span class="eo-style-sep" aria-hidden="true">|</span>
           <div class="sb-align-group">
@@ -1024,6 +1032,7 @@
 
     <script src="./icons.js"></script>
     <script src="./custom-select.js"></script>
+    <script src="./color-picker.js"></script>
     <script src="./sheet-utils.js"></script>
     <script src="./pii-dom-scrubber.js"></script>
     <script src="./sheet-store.js"></script>

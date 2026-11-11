@@ -414,6 +414,10 @@ const WEBUI_ASSET_MARKERS: &[(&str, &str)] = &[
         "__EASYOFFICE_CUSTOM_SELECT__",
     ),
     (
+        include_str!("../ui/color-picker.js"),
+        "__EASYOFFICE_COLOR_PICKER__",
+    ),
+    (
         include_str!("../ui/workspace-scrub.js"),
         "__EASYOFFICE_CREATE_WORKSPACE_SCRUB__",
     ),
