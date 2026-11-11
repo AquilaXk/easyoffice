@@ -297,6 +297,11 @@
     return Array.from(el.childNodes).some((c) => c.nodeType === 1 && BLOCK_TAGS.has((c.tagName || "").toUpperCase()));
   }
 
+  // A block that holds a list or a table (a cell with a list in it) is a container, not a leaf paragraph.
+  function holdsBlocks(el) {
+    return hasBlockChild(el) || Array.from(el.childNodes).some((c) => c.nodeType === 1 && STRUCTURAL_TAGS.has((c.tagName || "").toUpperCase()));
+  }
+
   function pathTo(root, node) {
     const path = [];
     let cur = node;
@@ -781,7 +786,7 @@
       el.childNodes.forEach((child, i) => {
         if (child.nodeType !== 1 || isSkippedElement(child, extraExclude)) return;
         path.push(i);
-        if (BLOCK_TAGS.has((child.tagName || "").toUpperCase()) && !hasBlockChild(child)) {
+        if (BLOCK_TAGS.has((child.tagName || "").toUpperCase()) && !holdsBlocks(child)) {
           const startsBeforeEnd = cmpPathOffset(path, 0, ep, end.offset) <= 0;
           const endsAfterStart = cmpPathOffset(path, child.childNodes.length, sp, start.offset) >= 0;
           if (startsBeforeEnd && endsAfterStart) out.push(child);

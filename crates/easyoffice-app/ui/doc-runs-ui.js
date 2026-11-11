@@ -38,8 +38,13 @@
   const STYLE_HEADING_RE = /^개요 ([1-3])$/;
   const PLAIN_STYLES = new Set(["바탕글", "공문서 바탕글"]);
   const LIST_TAGS = { ordered: "OL", bullet: "UL" };
+  const LIST_TAG_NAMES = new Set(Object.values(LIST_TAGS));
   // Look carried over when a paragraph changes its tag (the style whitelist of the saved document state).
-  const CARRIED_STYLE_PROPS = ["paddingLeft", "paddingRight", "textIndent", "lineHeight", "textAlign"];
+  const CARRIED_STYLE_PROPS = [
+    "paddingLeft", "paddingRight", "textIndent", "lineHeight", "textAlign",
+    "fontWeight", "fontStyle", "textDecoration", "fontSize", "fontFamily", "color", "backgroundColor",
+  ];
+  const CARRIED_ATTRS = ["class", "id", "lang"];
 
   function plainRange(r) {
     return {
@@ -355,8 +360,9 @@
       return targetBlocks().filter((b) => !NON_PARAGRAPH_TAGS.has((b.tagName || "").toUpperCase()));
     }
 
-    // Runs `exec(blocks)` on the paragraphs the selection touches as one undo step; `hint` is shown
-    // when nothing is selected.
+    // Runs `exec(blocks, range)` on the paragraphs the selection touches as one undo step; `hint` is
+    // shown when nothing is selected. `exec` returns false when it found nothing to change, which
+    // leaves no undo step.
     function runOnParagraphs(exec, hint, pick = paragraphTargets) {
       if (!isDocModule()) return { changed: false, blocks: 0 };
       const blocks = pick();
@@ -365,23 +371,25 @@
         return { changed: false, blocks: 0 };
       }
       const range = currentRange();
-      withUndo(() => {
-        exec(blocks, range);
-        return { changed: true };
-      });
+      const res = withUndo(() => ({ changed: exec(blocks, range) !== false }));
       refocusEditor(editor());
       syncToolbar();
-      return { changed: true, blocks: blocks.length };
+      return { changed: res.changed, blocks: blocks.length };
     }
 
     function setAlign(mode) {
       const css = ALIGN_CSS[mode];
       if (!css) return { changed: false, blocks: 0 };
-      const res = runOnParagraphs((blocks) => blocks.forEach((b) => {
-        b.style.textAlign = css;
-        if (APPROXIMATED_ALIGN_LABEL[mode]) b.dataset.eoAlign = mode;
-        else delete b.dataset.eoAlign;
-      }), "정렬할 문단을 먼저 선택하세요");
+      const mark = APPROXIMATED_ALIGN_LABEL[mode] ? mode : undefined;
+      const res = runOnParagraphs((blocks) => {
+        const stale = blocks.filter((b) => b.style.textAlign !== css || b.dataset.eoAlign !== mark);
+        stale.forEach((b) => {
+          b.style.textAlign = css;
+          if (mark) b.dataset.eoAlign = mark;
+          else delete b.dataset.eoAlign;
+        });
+        return stale.length > 0;
+      }, "정렬할 문단을 먼저 선택하세요");
       if (res.changed && APPROXIMATED_ALIGN_LABEL[mode]) setFeedback(APPROXIMATED_ALIGN_LABEL[mode] + " 정렬은 저장할 때 양쪽 정렬로 기록됩니다");
       return res;
     }
@@ -391,10 +399,13 @@
       const select = byId("doc-linespacing-select");
       if (!select) return;
       const str = String(percent);
+      // Only one custom value is kept in the list: the one that is showing.
+      Array.from(select.querySelectorAll("option")).filter((o) => o.dataset.custom && o.value !== str).forEach((o) => o.remove());
       const options = Array.from(select.querySelectorAll("option"));
       if (!options.some((o) => o.value === str)) {
         const opt = document.createElement("option");
         opt.value = str;
+        opt.dataset.custom = "true";
         opt.textContent = percent + " %";
         const next = options.find((o) => Number(o.value) > percent);
         select.insertBefore(opt, next || null);
@@ -405,11 +416,16 @@
 
     function setLineSpacing(percent) {
       const clamped = Math.max(MIN_LINE_PERCENT, Math.min(MAX_LINE_PERCENT, Number.isFinite(percent) ? Math.round(percent) : DEFAULT_LINE_PERCENT));
-      const res = runOnParagraphs((blocks) => blocks.forEach((b) => {
-        b.style.lineHeight = (clamped / 100).toFixed(2);
-        delete b.dataset.eoLineSpacing; // the exact value read from a file no longer matches
-      }), "줄 간격을 적용할 문단을 먼저 선택하세요");
-      if (!res.changed) showLineSpacing(lineSpacingOf(null)); // nothing selected: the box keeps showing what applies
+      const value = (clamped / 100).toFixed(2);
+      const res = runOnParagraphs((blocks) => {
+        const stale = blocks.filter((b) => b.style.lineHeight !== value);
+        stale.forEach((b) => {
+          b.style.lineHeight = value;
+          delete b.dataset.eoLineSpacing; // the exact value read from a file no longer matches
+        });
+        return stale.length > 0;
+      }, "줄 간격을 적용할 문단을 먼저 선택하세요");
+      if (res.blocks === 0) showLineSpacing(lineSpacingOf(null)); // nothing selected: the box keeps showing what applies
       return res;
     }
 
@@ -420,8 +436,10 @@
         if (el.style[prop]) next.style[prop] = el.style[prop];
       });
       Object.keys(el.dataset).forEach((key) => { next.dataset[key] = el.dataset[key]; });
-      const cls = el.getAttribute("class");
-      if (cls) next.setAttribute("class", cls);
+      CARRIED_ATTRS.forEach((name) => {
+        const value = el.getAttribute(name);
+        if (value) next.setAttribute(name, value);
+      });
       while (el.firstChild) next.appendChild(el.firstChild);
       el.parentNode.insertBefore(next, el);
       el.parentNode.removeChild(el);
@@ -442,8 +460,15 @@
       return Array.from(node.childNodes).some((n) => n.nodeType === 1);
     }
 
+    // Only an `<li>` inside `<ul>/<ol>` is a list item; a stray one (directly in the editor or in a
+    // table cell) is a plain paragraph-like block.
+    function isListItem(block) {
+      return block.tagName === "LI" && LIST_TAG_NAMES.has(block.parentNode?.tagName);
+    }
+
     // A list item becomes a plain paragraph after the list; the items behind it continue in a new list.
     function itemToParagraph(li) {
+      if (!isListItem(li)) return retag(li, "p");
       const list = li.parentNode;
       const para = retag(li, "p");
       const tail = [];
@@ -493,7 +518,7 @@
         blocks.forEach((b) => {
           if (off) replaced.set(b, itemToParagraph(b));
           else if (isItemOf(b, listTag)) return;
-          else replaced.set(b, paragraphToItem(b.tagName === "LI" ? itemToParagraph(b) : b, listTag));
+          else replaced.set(b, paragraphToItem(isListItem(b) ? itemToParagraph(b) : b, listTag));
         });
         restoreSelection(range, replaced);
       }, "번호·글머리표를 적용할 문단을 먼저 선택하세요", pick);
@@ -507,11 +532,16 @@
       const pick = () => paragraphTargets().filter((b) => b.tagName === "P" || HEADING_TAG_RE.test(b.tagName));
       const res = runOnParagraphs((blocks, range) => {
         const replaced = new Map();
+        // The plain styles are also the document's default paragraph style (the box shows it for
+        // every plain paragraph, and the Hangul module starts on 공문서 바탕글), so choosing one
+        // sets that document-level name on purpose.
+        const roleChanged = !level && editor().dataset.styleRole !== name;
         if (!level) editor().dataset.styleRole = name;
         blocks.forEach((b) => { if (b.tagName.toLowerCase() !== tag) replaced.set(b, retag(b, tag)); });
         restoreSelection(range, replaced);
+        return replaced.size > 0 || roleChanged;
       }, "스타일을 적용할 문단을 먼저 선택하세요", pick);
-      if (!res.changed) {
+      if (res.blocks === 0) {
         const select = byId("doc-style-select");
         if (select) select.value = styleNameOf(null);
       }

@@ -203,3 +203,91 @@ test("controls without a model counterpart are gone and no dead style rules rema
   const css = ["styles.css", "toolbar.css", "content.css"].map((f) => readText(new URL(f, UI_DIR))).join("\n");
   assert.doesNotMatch(css, /data-(strike|textcolor|highlight|charfx)|doc-font-lang|sb-lang-select/);
 });
+
+test("a list item outside a list or list-item in a table cell is wrapped, never moved out of the editor", async () => {
+  const h = await createRunHarness([
+    { tag: "li", children: ["고아"] },
+    p("뒤"),
+    { tag: "table", children: [{ tag: "tbody", children: [{ tag: "tr", children: [{ tag: "td", children: [{ tag: "li", children: ["칸"] }] }] }] }] },
+  ]);
+  const [orphan, after, table] = h.blocks;
+  await caretIn(h, orphan);
+  menu(h, "para-numbering").click();
+  await flushAsyncTurns(10);
+  assert.equal(h.document.getElementById("doc-editor"), h.editor, "the editor stays in the document");
+  assert.deepEqual(tags(h), ["OL", "P", "TABLE"]);
+  assert.equal(h.editor.childNodes[0].textContent, "고아");
+  assert.equal(after.textContent, "뒤");
+
+  // Applying the same kind again takes the (now real) item out of its list.
+  await caretIn(h, h.editor.childNodes[0].childNodes[0]);
+  menu(h, "para-numbering").click();
+  await flushAsyncTurns(10);
+  assert.deepEqual(tags(h), ["P", "P", "TABLE"]);
+
+  const cell = table.querySelector("td");
+  await caretIn(h, cell.childNodes[0]);
+  menu(h, "para-bullet").click();
+  await flushAsyncTurns(10);
+  assert.equal(h.document.getElementById("doc-editor"), h.editor);
+  assert.deepEqual(cell.childNodes.map((n) => n.tagName), ["UL"]);
+  assert.equal(cell.textContent, "칸");
+  menu(h, "para-bullet").click();
+  await flushAsyncTurns(10);
+  assert.deepEqual(cell.childNodes.map((n) => n.tagName), ["P"], "toggling off inside the cell stays in the cell");
+  assert.equal(h.editor.contains(cell), true);
+});
+
+test("changing a paragraph's tag keeps its own bold, color, id and language", async () => {
+  const h = await createRunHarness([p("가")]);
+  const [para] = h.blocks;
+  para.style.fontWeight = "700";
+  para.style.color = "#112233";
+  para.style.fontStyle = "italic";
+  para.setAttribute("id", "keep-me");
+  para.setAttribute("lang", "ko");
+  await selectAcross(h, para, para);
+  const style = h.document.getElementById("doc-style-select");
+  style.value = "개요 3";
+  style.dispatchEvent({ type: "change", target: style });
+  await flushAsyncTurns(10);
+  const heading = h.editor.childNodes[0];
+  assert.equal(heading.tagName, "H3");
+  assert.equal(heading.style.fontWeight, "700");
+  assert.equal(heading.style.fontStyle, "italic");
+  assert.equal(heading.style.color, "#112233");
+  assert.equal(heading.getAttribute("id"), "keep-me");
+  assert.equal(heading.getAttribute("lang"), "ko");
+  assert.equal(saved(h)[0].runs[0].bold, true, "the saved run still carries the block's bold");
+});
+
+test("a paragraph command that changes nothing leaves no undo step", async () => {
+  const h = await createRunHarness([p("가"), p("나")]);
+  const [a, b] = h.blocks;
+  await selectAcross(h, a, a);
+  await click(h, "btn-align-center");
+  await selectAcross(h, b, b);
+  await click(h, "btn-align-right");
+  await click(h, "btn-align-right"); // already right: nothing to record
+  assert.equal(b.style.textAlign, "right");
+  h.sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
+  await flushAsyncTurns(10);
+  assert.equal(h.editor.childNodes[1].style.textAlign, "", "one undo reverts the single change");
+  assert.equal(h.editor.childNodes[0].style.textAlign, "center", "the earlier paragraph keeps its alignment");
+});
+
+test("the line spacing list keeps one custom value", async () => {
+  const h = await createRunHarness([p("가"), p("나")]);
+  const [a, b] = h.blocks;
+  const box = h.document.getElementById("doc-linespacing-select");
+  const customs = () => Array.from(box.querySelectorAll("option")).filter((o) => !["100", "130", "150", "160", "180", "200", "300"].includes(o.value)).map((o) => o.value);
+  a.style.lineHeight = "1.25";
+  b.style.lineHeight = "1.75";
+  await selectAcross(h, a, a);
+  assert.deepEqual(customs(), ["125"]);
+  await selectAcross(h, b, b);
+  assert.deepEqual(customs(), ["175"], "the earlier custom entry is dropped");
+  await selectAcross(h, a, a);
+  await selectAcross(h, b, b);
+  assert.equal(customs().length, 1);
+});
