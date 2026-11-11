@@ -10,7 +10,8 @@ use crate::tracked_files::{Fingerprint, TrackedFile, TrackedFiles};
 use crate::window_state::{MonitorRect, WindowGeometry};
 use crate::windows::{
     display_name, is_window_label, new_label, path_key, window_title, window_url, CloseAction,
-    PendingOpen, PendingOpenQueue, PendingOpenView, WindowKind, WindowRegistry, PRIMARY_LABEL,
+    PendingOpen, PendingOpenQueue, PendingOpenView, PromptState, WindowKind, WindowRegistry,
+    PRIMARY_LABEL,
 };
 use serde::Serialize;
 use std::fs;
@@ -99,8 +100,8 @@ impl AppWindows {
     }
 
     /// Whether the page of `label` confirmed that it is showing its save prompt (PD-113).
-    pub fn shows_close_prompt(&self, label: &str) -> bool {
-        locked(&self.registry).prompt_acked(label)
+    pub fn close_prompt_state(&self, label: &str) -> PromptState {
+        locked(&self.registry).prompt_state(label)
     }
 
     /// True while any window reports unsaved changes (the signed update waits for them).

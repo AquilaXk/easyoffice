@@ -194,6 +194,15 @@ struct ClosePrompt {
     acked: bool,
 }
 
+/// Where the save prompt of a window stands: none was asked (or it ended, or the page was reloaded
+/// and lost it), the shell asked and the page has not confirmed, or the page confirmed it shows it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PromptState {
+    None,
+    Asked,
+    Confirmed,
+}
+
 /// What to do when the user asks to close a window.
 #[derive(Debug, PartialEq, Eq)]
 pub enum CloseAction {
@@ -334,12 +343,17 @@ impl WindowRegistry {
         }
     }
 
-    /// The page of `label` confirmed its save prompt and it has not ended since.
-    pub fn prompt_acked(&self, label: &str) -> bool {
-        self.windows
+    /// Where the save prompt of `label` stands.
+    pub fn prompt_state(&self, label: &str) -> PromptState {
+        match self
+            .windows
             .get(label)
             .and_then(|w| w.close_prompt.as_ref())
-            .is_some_and(|prompt| prompt.acked)
+        {
+            None => PromptState::None,
+            Some(prompt) if prompt.acked => PromptState::Confirmed,
+            Some(_) => PromptState::Asked,
+        }
     }
 
     /// The user answered the close prompt without closing (cancel, or the save failed): the next
@@ -656,14 +670,18 @@ mod tests {
     #[test]
     fn a_prompt_is_confirmed_from_the_pages_answer_until_it_ends() {
         let (mut reg, now) = dirty_window();
-        assert!(!reg.prompt_acked("doc-1-a"), "no prompt asked");
+        assert_eq!(reg.prompt_state("doc-1-a"), PromptState::None, "not asked");
         reg.begin_close("doc-1-a", now);
-        assert!(!reg.prompt_acked("doc-1-a"), "asked, not answered");
+        assert_eq!(reg.prompt_state("doc-1-a"), PromptState::Asked);
         reg.ack_close_prompt("doc-1-a");
-        assert!(reg.prompt_acked("doc-1-a"));
-        assert!(!reg.prompt_acked("missing"));
+        assert_eq!(reg.prompt_state("doc-1-a"), PromptState::Confirmed);
+        assert_eq!(reg.prompt_state("missing"), PromptState::None);
         reg.end_close_prompt("doc-1-a");
-        assert!(!reg.prompt_acked("doc-1-a"), "the answer ended the prompt");
+        assert_eq!(
+            reg.prompt_state("doc-1-a"),
+            PromptState::None,
+            "the answer ended the prompt"
+        );
     }
 
     #[test]

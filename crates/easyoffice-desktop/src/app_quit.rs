@@ -22,7 +22,7 @@ use std::time::Instant;
 use tauri::{AppHandle, Manager};
 
 use crate::shell_caller::ShellCaller;
-use crate::windows::CLOSE_ACK_TIMEOUT;
+use crate::windows::{PromptState, CLOSE_ACK_TIMEOUT};
 
 /// The windows still to be closed by a running quit, in order, and when the quit last moved.
 #[derive(Default)]
@@ -57,33 +57,33 @@ impl AppQuit {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Starts a quit over `labels`; returns the first window to ask (`None` when there is none).
-    /// A second request while one is running changes nothing, unless the running one has not moved
-    /// for [`CLOSE_ACK_TIMEOUT`] and the window it waits on never confirmed its prompt
-    /// (`shows_prompt`, PD-113): then the new request starts over, so a stuck quit cannot swallow
-    /// every later Cmd+Q. A window whose prompt is confirmed is only waiting for the user's answer.
-    fn begin(&self, labels: Vec<String>, shows_prompt: impl Fn(&str) -> bool) -> Option<String> {
-        self.begin_at(labels, Instant::now(), shows_prompt)
+    /// Starts a quit over `labels`; returns the window to ask (`None` when there is none). A second
+    /// request while one is running changes nothing, with two exceptions (`prompt`, PD-113). The
+    /// window the quit waits on may have lost its prompt (its page was reloaded): it is returned
+    /// to be asked again. And when the running one has not moved for [`CLOSE_ACK_TIMEOUT`] and that
+    /// window never confirmed its prompt, the new request starts over, so a stuck quit cannot
+    /// swallow every later Cmd+Q. A window whose prompt is confirmed is only waiting for the
+    /// user's answer.
+    fn begin(&self, labels: Vec<String>, prompt: impl Fn(&str) -> PromptState) -> Option<String> {
+        self.begin_at(labels, Instant::now(), prompt)
     }
 
     fn begin_at(
         &self,
         labels: Vec<String>,
         now: Instant,
-        shows_prompt: impl Fn(&str) -> bool,
+        prompt: impl Fn(&str) -> PromptState,
     ) -> Option<String> {
         let mut queue = self.queue();
         let running = !queue.pending.is_empty();
-        let waiting_on_user = queue
-            .pending
-            .front()
-            .is_some_and(|label| shows_prompt(label));
-        let stalled = !waiting_on_user
+        let front = queue.pending.front().cloned();
+        let front_prompt = front.as_deref().map(prompt);
+        let stalled = front_prompt != Some(PromptState::Confirmed)
             && queue
                 .progressed
                 .is_some_and(|at| now.saturating_duration_since(at) >= CLOSE_ACK_TIMEOUT);
         if running && !stalled {
-            return None;
+            return front.filter(|_| front_prompt == Some(PromptState::None));
         }
         queue.pending = labels.into();
         queue.progressed = Some(now);
@@ -125,14 +125,16 @@ fn ordered(mut labels: Vec<String>, focused: Option<&str>) -> Vec<String> {
 }
 
 /// Starts a quit: the 끝내기 items and `ExitRequested` on macOS, [`quit_app`] elsewhere. A quit that
-/// is already running ignores the request, so a second Cmd+Q cannot ask a window twice.
+/// is already running ignores the request, so a second Cmd+Q cannot start a second prompt; the
+/// only window it asks again is the one that lost its prompt (a window that shows its prompt keeps
+/// it when asked again, PD-113).
 pub fn request_app_quit(app: &AppHandle) {
     let labels = open_labels(app, None);
     if labels.is_empty() {
         app.exit(0);
     } else if let Some(first) = app
         .state::<AppQuit>()
-        .begin(labels, |label| shows_close_prompt(app, label))
+        .begin(labels, |label| close_prompt(app, label))
     {
         ask(app, &first);
     }
@@ -145,10 +147,10 @@ pub fn quit_app(_caller: ShellCaller, app: AppHandle) {
     request_app_quit(&app);
 }
 
-/// Whether the page of `label` confirmed that it shows its save prompt.
-fn shows_close_prompt(app: &AppHandle, label: &str) -> bool {
+/// What the shell knows of the save prompt of `label`.
+fn close_prompt(app: &AppHandle, label: &str) -> PromptState {
     app.state::<crate::window_commands::AppWindows>()
-        .shows_close_prompt(label)
+        .close_prompt_state(label)
 }
 
 /// The windows still open, the focused one first; `except` is a window that is going away.
@@ -173,7 +175,7 @@ pub fn window_destroyed(app: &AppHandle, label: &str) {
         Advance::Complete => {
             let quit = app.state::<AppQuit>();
             match quit.begin(open_labels(app, Some(label)), |next| {
-                shows_close_prompt(app, next)
+                close_prompt(app, next)
             }) {
                 Some(first) => ask(app, &first),
                 None => app.exit(0),
@@ -207,7 +209,7 @@ mod tests {
     fn windows_are_asked_in_order_and_the_last_one_completes() {
         let quit = AppQuit::default();
         assert_eq!(
-            quit.begin(labels(&["main", "doc-2"]), |_| false),
+            quit.begin(labels(&["main", "doc-2"]), |_| PromptState::Asked),
             Some("main".to_string())
         );
         assert_eq!(
@@ -220,7 +222,7 @@ mod tests {
     #[test]
     fn a_window_closed_out_of_turn_only_leaves_the_queue() {
         let quit = AppQuit::default();
-        quit.begin(labels(&["main", "doc-2", "doc-3"]), |_| false);
+        quit.begin(labels(&["main", "doc-2", "doc-3"]), |_| PromptState::Asked);
         assert_eq!(quit.advance_after_close("doc-2"), Advance::Waiting);
         assert_eq!(quit.advance_after_close("other"), Advance::Waiting);
         assert_eq!(
@@ -233,7 +235,7 @@ mod tests {
     fn the_asked_window_is_not_asked_again_when_another_window_closes() {
         let quit = AppQuit::default();
         assert_eq!(
-            quit.begin(labels(&["main", "doc-2"]), |_| false),
+            quit.begin(labels(&["main", "doc-2"]), |_| PromptState::Asked),
             Some("main".to_string())
         );
         // main shows its save prompt; doc-2 is closed meanwhile (by the user).
@@ -244,12 +246,15 @@ mod tests {
     #[test]
     fn cancel_ends_the_quit_and_a_second_request_while_running_is_ignored() {
         let quit = AppQuit::default();
-        quit.begin(labels(&["main"]), |_| false);
-        assert_eq!(quit.begin(labels(&["main", "doc-2"]), |_| false), None);
+        quit.begin(labels(&["main"]), |_| PromptState::Asked);
+        assert_eq!(
+            quit.begin(labels(&["main", "doc-2"]), |_| PromptState::Asked),
+            None
+        );
         quit.cancel();
         assert_eq!(quit.advance_after_close("main"), Advance::Idle);
         assert_eq!(
-            quit.begin(labels(&["doc-2"]), |_| false),
+            quit.begin(labels(&["doc-2"]), |_| PromptState::Asked),
             Some("doc-2".to_string())
         );
     }
@@ -259,19 +264,19 @@ mod tests {
         let quit = AppQuit::default();
         let start = Instant::now();
         assert_eq!(
-            quit.begin_at(labels(&["main", "doc-2"]), start, |_| false),
+            quit.begin_at(labels(&["main", "doc-2"]), start, |_| PromptState::Asked),
             Some("main".to_string())
         );
         let just_before = start + CLOSE_ACK_TIMEOUT - std::time::Duration::from_millis(1);
         assert_eq!(
-            quit.begin_at(labels(&["doc-2"]), just_before, |_| false),
+            quit.begin_at(labels(&["doc-2"]), just_before, |_| PromptState::Asked),
             None
         );
         assert_eq!(
             quit.begin_at(
                 labels(&["doc-2", "main"]),
                 start + CLOSE_ACK_TIMEOUT,
-                |_| false
+                |_| PromptState::Asked
             ),
             Some("doc-2".to_string()),
             "the stuck quit is replaced"
@@ -282,7 +287,7 @@ mod tests {
             Advance::Next("main".to_string())
         );
         assert_eq!(
-            quit.begin_at(labels(&["main"]), Instant::now(), |_| false),
+            quit.begin_at(labels(&["main"]), Instant::now(), |_| PromptState::Asked),
             None
         );
     }
@@ -294,20 +299,59 @@ mod tests {
         let quit = AppQuit::default();
         let start = Instant::now();
         assert_eq!(
-            quit.begin_at(labels(&["main", "doc-2"]), start, |_| false),
+            quit.begin_at(labels(&["main", "doc-2"]), start, |_| PromptState::Asked),
             Some("main".to_string())
         );
         let later = start + CLOSE_ACK_TIMEOUT * 3;
         assert_eq!(
-            quit.begin_at(labels(&["doc-2", "main"]), later, |label| label == "main"),
+            quit.begin_at(labels(&["doc-2", "main"]), later, confirmed("main")),
             None,
             "main shows its prompt"
         );
         assert_eq!(
-            quit.begin_at(labels(&["doc-2", "main"]), later, |label| label == "doc-2"),
+            quit.begin_at(labels(&["doc-2", "main"]), later, confirmed("doc-2")),
             Some("doc-2".to_string()),
             "the asked window never confirmed: the quit is stuck"
         );
+    }
+
+    /// The page of the window the quit waits on was reloaded: it lost the prompt it had confirmed
+    /// and nobody is answering. The next request asks that window again (it shows the prompt
+    /// anew) without starting the queue over.
+    #[test]
+    fn a_quit_whose_prompt_was_lost_asks_the_same_window_again() {
+        let quit = AppQuit::default();
+        let start = Instant::now();
+        assert_eq!(
+            quit.begin_at(labels(&["main", "doc-2"]), start, |_| PromptState::Asked),
+            Some("main".to_string())
+        );
+        let soon = start + std::time::Duration::from_secs(1);
+        assert_eq!(
+            quit.begin_at(labels(&["doc-2", "main"]), soon, |_| PromptState::None),
+            Some("main".to_string()),
+            "main lost its prompt: asked again"
+        );
+        assert_eq!(
+            quit.begin_at(labels(&["doc-2", "main"]), soon, |_| PromptState::Asked),
+            None,
+            "a prompt that was asked and not yet confirmed is waited for"
+        );
+        // The queue was not replaced: doc-2 is still behind main.
+        assert_eq!(
+            quit.advance_after_close("main"),
+            Advance::Next("doc-2".to_string())
+        );
+    }
+
+    fn confirmed(only: &str) -> impl Fn(&str) -> PromptState + '_ {
+        move |label| {
+            if label == only {
+                PromptState::Confirmed
+            } else {
+                PromptState::Asked
+            }
+        }
     }
 
     #[test]
