@@ -368,6 +368,9 @@
         watermarkLayer: document.getElementById("pdf-watermark-layer")?.textContent ?? "",
         applicant: document.getElementById("pdf-form-applicant")?.value ?? "",
         dept: document.getElementById("pdf-form-dept")?.value ?? "",
+        highlightInput: document.getElementById("pdf-highlight-input")?.value ?? "",
+        highlightKind: document.getElementById("pdf-highlight-kind")?.value,
+        highlightColor: document.getElementById("pdf-highlight-color")?.value,
         cardHeadingNodes: headingEl ? serializeDomChildren(headingEl) : [],
         cardBodyParagraphsNodes: bodyParagraphs.map((p) => serializeDomChildren(p)),
         formStatus: document.getElementById("pdf-form-status")?.textContent ?? "",
@@ -384,6 +387,9 @@
       ["pdf-watermark-layer", "textContent", "watermarkLayer"],
       ["pdf-form-applicant", "value", "applicant"],
       ["pdf-form-dept", "value", "dept"],
+      ["pdf-highlight-input", "value", "highlightInput"],
+      ["pdf-highlight-kind", "value", "highlightKind"],
+      ["pdf-highlight-color", "value", "highlightColor"],
     ];
 
     function restorePdfCardHeading(pdfStudio) {

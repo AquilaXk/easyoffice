@@ -844,7 +844,9 @@ pub(crate) fn encode_structured(
                 ..doc.clone()
             };
             if format == DocumentFormat::Pdf {
-                return Ok(UniversalFormatConverter::encode_rich_pdf(&doc, pdf));
+                let (bytes, notes) = UniversalFormatConverter::encode_rich_pdf(&doc, pdf);
+                warnings.extend(notes);
+                return Ok(bytes);
             }
             if format == DocumentFormat::Pages {
                 warnings.extend(pages_write_loss(&doc).warnings());

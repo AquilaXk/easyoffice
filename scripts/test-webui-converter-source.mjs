@@ -194,3 +194,64 @@ test("the watermark input is limited to the length the engine accepts", async ()
   const { document } = await createConverterHarness();
   assert.equal(document.getElementById("pdf-watermark-input").getAttribute("maxlength"), "200");
 });
+
+test("the PDF Studio takes a phrase, a kind and a color for highlight annotations, in the form's own input shape", async () => {
+  const { document } = await createConverterHarness();
+  const input = document.getElementById("pdf-highlight-input");
+  assert.ok(input.classList.contains("sb-select"), "same input class as the form fields");
+  assert.equal(input.getAttribute("maxlength"), "200");
+  assert.equal(input.value, "", "no phrase, no annotation by default");
+  for (const id of ["pdf-highlight-kind", "pdf-highlight-color"]) {
+    const select = document.getElementById(id);
+    assert.ok(select.classList.contains("sb-combo") && select.classList.contains("native-select-hidden"), id);
+  }
+  const values = (id) => [...document.getElementById(id).querySelectorAll("option")].map((o) => o.value);
+  assert.deepEqual(values("pdf-highlight-kind"), ["highlight", "underline"]);
+  assert.ok(values("pdf-highlight-color").every((v) => /^#[0-9A-F]{6}$/.test(v)));
+});
+
+test("saving the PDF Studio sends the highlight phrase, kind and color in the pdf object", async () => {
+  const { document, userClick, converts } = await createConverterHarness();
+  switchModule(document, "PDF");
+  await flushAsyncTurns(10);
+  userClick(studioItem(document, "studio-save"));
+  await flushAsyncTurns(30);
+  assert.equal(converts().at(-1).pdf.highlight, undefined, "empty phrase sends nothing");
+
+  document.getElementById("pdf-highlight-input").value = "  핵심 문구 ";
+  document.getElementById("pdf-highlight-kind").value = "underline";
+  document.getElementById("pdf-highlight-color").value = "#00FFFF";
+  userClick(studioItem(document, "studio-save"));
+  await flushAsyncTurns(30);
+  assert.deepEqual(converts().at(-1).pdf.highlight, { text: "핵심 문구", kind: "underline", color: "#00FFFF" });
+});
+
+test("the highlight inputs are part of the PDF Studio's undoable state", async () => {
+  const { document, userClick } = await createConverterHarness();
+  switchModule(document, "PDF");
+  await flushAsyncTurns(10);
+  const input = document.getElementById("pdf-highlight-input");
+  const kind = document.getElementById("pdf-highlight-kind");
+  input.value = "첫 문구";
+  kind.value = "underline";
+  userClick(document.getElementById("btn-pdf-rotate"));
+  await flushAsyncTurns(20);
+  input.value = "바뀐 문구";
+  kind.value = "highlight";
+  userClick(studioItem(document, "studio-undo"));
+  await flushAsyncTurns(30);
+  assert.equal(input.value, "첫 문구");
+  assert.equal(kind.value, "underline");
+});
+
+test("the PII scrub also masks the highlight phrase", async () => {
+  const { document, userClick } = await createConverterHarness();
+  switchModule(document, "PDF");
+  await flushAsyncTurns(10);
+  const input = document.getElementById("pdf-highlight-input");
+  input.value = "연락처 010-5555-6666";
+  userClick(document.getElementById("btn-scrub-pii"));
+  await flushAsyncTurns(30);
+  assert.ok(!input.value.includes("010-5555-6666"), input.value);
+  assert.match(input.value, /010-\*\*\*\*-\*\*\*\*/);
+});

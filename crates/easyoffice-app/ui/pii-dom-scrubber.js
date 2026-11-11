@@ -344,7 +344,7 @@
         const pdfParts = [];
         const cardText = extractWalkableText(document.getElementById("pdf-page-card"), true);
         if (cardText) pdfParts.push(cardText);
-        ["pdf-watermark-input", "pdf-form-applicant", "pdf-form-dept"].forEach((id) => {
+        ["pdf-watermark-input", "pdf-form-applicant", "pdf-form-dept", "pdf-highlight-input"].forEach((id) => {
           const val = (document.getElementById(id)?.value || "").trim();
           if (val) pdfParts.push(val);
         });

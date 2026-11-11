@@ -106,6 +106,7 @@
         layerScrubField(wmLayer, wmInput, prevWmInputVal),
         inputScrubField(document.getElementById("pdf-form-applicant")),
         inputScrubField(document.getElementById("pdf-form-dept")),
+        inputScrubField(document.getElementById("pdf-highlight-input")),
       ];
       const fieldPromises = fields.map(requestFieldScrub);
       const [groupResults, ...fieldResults] = await Promise.all([
@@ -121,8 +122,7 @@
       totalMasked += applyFieldScrub(fields[0], fieldResults[0]);
       if (wmLayer && wmInput && wmLayer.textContent === prevWmInputVal) wmLayer.textContent = wmInput.value;
       totalMasked += applyFieldScrub(fields[1], fieldResults[1]);
-      totalMasked += applyFieldScrub(fields[2], fieldResults[2]);
-      totalMasked += applyFieldScrub(fields[3], fieldResults[3]);
+      for (let i = 2; i < fields.length; i += 1) totalMasked += applyFieldScrub(fields[i], fieldResults[i]);
       const formStatus = document.getElementById("pdf-form-status");
       if (formStatus && (formStatus.textContent || "").startsWith("양식 반영 완료")) {
         applyPdfStudioFormState();

@@ -2502,6 +2502,21 @@
 - **Verified by** `cargo test -p easyoffice-sheet`(`sheet_number_format_codes`, `sheet_distribution_functions`), 렌더링 측정 `cargo test -p easyoffice-sheet --release --test format_render_bench -- --ignored --nocapture`.
 - **Revisit when** 셀별 표시 형식이 모델·저장에 들어오거나 동적 배열 스필을 도입할 때.
 
+## PD-161. PDF 스튜디오의 형광펜·밑줄은 문구를 칠하는 텍스트 마크업 주석으로 쓰고, 원본 PDF 위 주석은 2단계로 둔다
+
+- **Status** Implemented (`pdf_highlight.rs`, `pdf_writer.rs`, `pdf_text_wrap.rs`, `convert_structured_doc.rs`, `index.html`, `workspace-tools.js`, `workspace-panels.js`)
+- **Context** 형광펜·밑줄 주석이 범위 없는 배지라 저장해도 PDF에 아무것도 남지 않았습니다(PD-159 Trade-offs).
+- **Decision (`PD-161`)**
+  1. PDF 카드의 양식 입력 형태 그대로 문구 입력(`#pdf-highlight-input`, 200자), 종류(형광펜·밑줄), 색(노랑·초록·하늘·분홍)을 받습니다. 문구가 비어 있으면 주석을 쓰지 않습니다. 구조화 저장의 `pdf` 객체에 `highlight:{text, kind, color}`를 더하고 엔진이 검증합니다(문구 1~200자·제어문자 거부, kind는 `highlight`·`underline`, 색은 `#RRGGBB`). PDF 대상에서만 쓰고 다른 대상은 무시합니다.
+  2. 엔진(`PdfWriteOptions.highlight`)은 줄바꿈 전의 원문 줄에서 문구의 모든 출현을 찾고, 출력 줄마다 글자 너비(줄바꿈과 같은 Helvetica·한글 선언 너비)로 사각형을 계산합니다. 줄이나 쪽 경계를 넘는 출현은 쪽마다 주석 하나에 줄별 QuadPoints를 담습니다. 주석은 ISO 32000-1 12.5.6.10의 `/Subtype /Highlight`·`/Underline`, `/Rect`, `/QuadPoints`(왼쪽 위·오른쪽 위·왼쪽 아래·오른쪽 아래 순서), `/C`, `/Contents`, `/F 4`와 `/AP /N` 폼 XObject로 씁니다. 형광펜 AP는 `/BM /Multiply`로 칠해 글자가 가려지지 않습니다.
+  3. 검색은 `str::match_indices`와 이분 탐색으로 입력에 선형이고, 주석은 문서당 10,000개까지 쓰며 넘는 출현은 건너뛰고 응답 경고로 알립니다. 문구를 본문에서 못 찾으면 주석 없이 경고합니다.
+  4. 엔진 의존성이 없으므로 pdf-writer 0.15(MIT OR Apache-2.0)와 pdf.js 편집기(Apache-2.0)의 구조만 참조해 직접 썼고 출처를 `THIRD_PARTY_NOTICES.md`와 파일 머리 주석에 남겼습니다. 이 기능은 새로 만드는 PDF(저장·변환)에만 해당합니다.
+- **Why** 저장한 PDF를 다른 뷰어에서 열어도 형광펜·밑줄이 문구 위에 그대로 보여야 합니다.
+- **Trade-offs** 모양은 뷰어가 쓰는 글꼴에 따라 한 글자 너비 안에서 어긋날 수 있습니다(글꼴을 내장하지 않아 선언 너비로 계산). 색은 4가지 고정 선택지입니다. 주석은 글자 위치가 아닌 문구 일치로 정해져 같은 문구는 모두 칠해집니다.
+- **2단계(범위 밖)** 원본 PDF를 보존한 채 그 위에 주석을 더하는 편집(원본 보존 편집)과 글자 선택 영역 기반 주석은 이 작업에 넣지 않았습니다. 원본 PDF의 글자 위치를 읽는 경로가 먼저 필요합니다.
+- **Verified by** `cargo test -p easyoffice-formats --test pdf_highlight`, `cargo test -p easyoffice-app --test structured_pdf_slides`, `node --test scripts/test-webui-converter-source.mjs`, `qpdf --check`와 `pdftoppm` 렌더로 형광펜·밑줄이 글자 위에 맞게 그려지는 것을 확인했습니다.
+- **Revisit when** 원본 PDF 위 편집을 시작할 때, 글꼴을 내장할 때.
+
 ## PD-162. Pages 최소 쓰기(실험적)
 
 - **Revises PD-087 (1항)**: Pages는 더 이상 "읽기 전용 원본"이 아닙니다. `DocumentFormat::READ_ONLY`·`is_read_only()`를 `EXPERIMENTAL_WRITE`·`is_experimental_write()`로 바꾸었고, `ALL`(읽기·쓰기 20종)에는 넣지 않습니다. 열기 범위·보안·스키마 상수(PD-087 2~5항, PD-157)는 그대로입니다.

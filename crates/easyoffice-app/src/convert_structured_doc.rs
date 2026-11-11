@@ -2,8 +2,8 @@
 //! the PDF Studio's page settings (`"pdf"` next to `blocks`) and the document form of a slide deck.
 
 use easyoffice_formats::{
-    DocumentFormat, EasyOfficeError, PdfWriteOptions, RichBlock, RichDocument, RichListKind,
-    RichParagraph, RichRun,
+    DocumentFormat, EasyOfficeError, PdfHighlight, PdfHighlightKind, PdfWriteOptions, RichBlock,
+    RichDocument, RichListKind, RichParagraph, RichRun,
 };
 
 use crate::convert_structured::{field, invalid, opt_bounded, opt_str, JsonObject, SlideTriple};
@@ -15,8 +15,9 @@ const ROTATION_STEP_DEGREES: i64 = 90;
 /// Heading level of a slide title in a document (the document title itself is the level-1 title).
 const SLIDE_TITLE_HEADING_LEVEL: u8 = 2;
 
-/// `{"rotationDegrees":0|90|180|270,"watermark":"…","stamp":"…"}`; every key is optional and an
-/// absent `pdf` object writes no settings. Only a PDF target uses them.
+/// `{"rotationDegrees":0|90|180|270,"watermark":"…","stamp":"…","highlight":{"text":"…",
+/// "kind":"highlight"|"underline","color":"#RRGGBB"}}`; every key is optional and an absent `pdf`
+/// object writes no settings. Only a PDF target uses them.
 pub(crate) fn parse_pdf_options(entries: &JsonObject) -> Result<PdfWriteOptions, EasyOfficeError> {
     let Some(value) = field(entries, "pdf") else {
         return Ok(PdfWriteOptions::default());
@@ -34,7 +35,38 @@ pub(crate) fn parse_pdf_options(entries: &JsonObject) -> Result<PdfWriteOptions,
         rotation_degrees: rotation as u16,
         watermark: pdf_label(obj, "watermark")?,
         approval_stamp: pdf_label(obj, "stamp")?,
+        highlight: field(obj, "highlight")
+            .map(|v| {
+                parse_highlight(
+                    v.as_object().ok_or_else(|| {
+                        invalid("구조화 저장: 'pdf.highlight'는 객체여야 합니다.")
+                    })?,
+                )
+            })
+            .transpose()?,
     })
+}
+
+/// `{"text","kind","color"}`: a non-empty one-line phrase, `highlight` or `underline`, `#RRGGBB`.
+fn parse_highlight(obj: &JsonObject) -> Result<PdfHighlight, EasyOfficeError> {
+    let text = pdf_label(obj, "text")?
+        .ok_or_else(|| invalid("구조화 저장: 'pdf.highlight.text'가 필요합니다."))?;
+    let kind = match opt_str(obj, "kind")? {
+        Some("highlight") => PdfHighlightKind::Highlight,
+        Some("underline") => PdfHighlightKind::Underline,
+        _ => {
+            return Err(invalid(
+                "구조화 저장: 'pdf.highlight.kind'는 highlight 또는 underline이어야 합니다.",
+            ))
+        }
+    };
+    let color = opt_str(obj, "color")?
+        .and_then(|c| c.strip_prefix('#'))
+        .filter(|hex| hex.len() == 6 && hex.bytes().all(|b| b.is_ascii_hexdigit()))
+        .and_then(|hex| u32::from_str_radix(hex, 16).ok())
+        .map(|n| [(n >> 16) as u8, (n >> 8) as u8, n as u8])
+        .ok_or_else(|| invalid("구조화 저장: 'pdf.highlight.color'는 #RRGGBB여야 합니다."))?;
+    Ok(PdfHighlight { text, kind, color })
 }
 
 /// A one-line label: at most [`MAX_PDF_LABEL_CHARS`] characters, no control characters.

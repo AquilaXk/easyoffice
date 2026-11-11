@@ -732,6 +732,26 @@
                   소속 부서명
                   <input id="pdf-form-dept" type="text" class="sb-select" value="디지털행정혁신과" />
                 </label>
+                <label>
+                  형광펜·밑줄 문구
+                  <input id="pdf-highlight-input" type="text" class="sb-select" maxlength="200" />
+                </label>
+                <label>
+                  주석 종류
+                  <select id="pdf-highlight-kind" class="sb-combo pdf-stamp-select">
+                    <option value="highlight" selected>형광펜</option>
+                    <option value="underline">밑줄</option>
+                  </select>
+                </label>
+                <label>
+                  주석 색
+                  <select id="pdf-highlight-color" class="sb-combo pdf-stamp-select">
+                    <option value="#FFFF00" selected>노랑</option>
+                    <option value="#00FF00">초록</option>
+                    <option value="#00FFFF">하늘</option>
+                    <option value="#FF00FF">분홍</option>
+                  </select>
+                </label>
               </div>
               <p id="pdf-form-status" class="formula-result">양식 준비 완료</p>
             </div>

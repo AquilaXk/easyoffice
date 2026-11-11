@@ -155,6 +155,14 @@
       const watermark = valOf("pdf-watermark-input") || wmLayerVal;
       if (watermark) pdf.watermark = watermark;
       if (stampVal) pdf.stamp = stampVal;
+      const highlightText = valOf("pdf-highlight-input");
+      if (highlightText) {
+        pdf.highlight = {
+          text: highlightText,
+          kind: valOf("pdf-highlight-kind") || "highlight",
+          color: valOf("pdf-highlight-color") || "#FFFF00",
+        };
+      }
       return { blocks: savePayload.plainParagraphBlocks(lines), pdf };
     }
 

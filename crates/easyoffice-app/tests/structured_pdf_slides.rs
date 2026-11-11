@@ -167,3 +167,79 @@ fn a_chosen_pptx_file_converted_to_a_document_also_keeps_its_structure() {
         RichBlock::Paragraph(p) if p.list == Some(RichListKind::Bullet) && p.plain_text() == "첫째 항목"
     )));
 }
+
+fn pdf_payload(extra: &str) -> String {
+    format!(
+        r#"{{"sourceFormat":"pdf","targetFormat":"pdf","title":"주석",{BLOCKS_WITH_TEXT},"pdf":{{{extra}}}}}"#
+    )
+}
+
+const BLOCKS_WITH_TEXT: &str =
+    r#""blocks":[{"type":"paragraph","runs":[{"text":"보고서 본문의 핵심 문구"}]}]"#;
+
+#[test]
+fn a_highlight_phrase_becomes_annotations_on_the_pdf() {
+    let json = EasyOfficeIpcRouter::dispatch(
+        "convert_document_format",
+        &pdf_payload(r##""highlight":{"text":"핵심","kind":"highlight","color":"#ffee00"}"##),
+    )
+    .unwrap();
+    let bytes =
+        EasyOfficeIpcRouter::decode_base64(json_str_field(&json, "convertedBase64")).unwrap();
+    let pdf = String::from_utf8_lossy(&bytes);
+    assert_eq!(pdf.matches("/Subtype /Highlight").count(), 1, "{pdf}");
+    assert!(pdf.contains("/C [1 0.933 0]"), "{pdf}");
+    assert!(PdfSerializer::parse(&bytes).is_ok());
+
+    let json = EasyOfficeIpcRouter::dispatch(
+        "convert_document_format",
+        &pdf_payload(r##""highlight":{"text":"핵심","kind":"underline","color":"#FF0000"}"##),
+    )
+    .unwrap();
+    let bytes =
+        EasyOfficeIpcRouter::decode_base64(json_str_field(&json, "convertedBase64")).unwrap();
+    assert!(String::from_utf8_lossy(&bytes).contains("/Subtype /Underline"));
+}
+
+#[test]
+fn a_phrase_that_is_not_found_is_reported_in_the_response_warnings() {
+    let json = EasyOfficeIpcRouter::dispatch(
+        "convert_document_format",
+        &pdf_payload(r##""highlight":{"text":"없는 문구","kind":"highlight","color":"#FFFF00"}"##),
+    )
+    .unwrap();
+    assert!(json.contains("찾지 못"), "{json}");
+}
+
+#[test]
+fn invalid_highlight_settings_are_rejected() {
+    let long = "가".repeat(201);
+    let bad = [
+        r##""highlight":{"text":"","kind":"highlight","color":"#FFFF00"}"##.to_string(),
+        r##""highlight":{"kind":"highlight","color":"#FFFF00"}"##.to_string(),
+        format!(r##""highlight":{{"text":"{long}","kind":"highlight","color":"#FFFF00"}}"##),
+        r##""highlight":{"text":"a\u0007b","kind":"highlight","color":"#FFFF00"}"##.to_string(),
+        r##""highlight":{"text":"a\nb","kind":"highlight","color":"#FFFF00"}"##.to_string(),
+        r##""highlight":{"text":"가","kind":"squiggly","color":"#FFFF00"}"##.to_string(),
+        r##""highlight":{"text":"가","kind":"highlight","color":"red"}"##.to_string(),
+        r##""highlight":{"text":"가","kind":"highlight","color":"#FFF"}"##.to_string(),
+        r##""highlight":{"text":"가","kind":"highlight","color":"FFFF00"}"##.to_string(),
+        r##""highlight":{"text":"가","kind":"highlight"}"##.to_string(),
+        r##""highlight":"가""##.to_string(),
+        r##""highlight":{"text":5,"kind":"highlight","color":"#FFFF00"}"##.to_string(),
+    ];
+    for extra in bad {
+        assert!(
+            EasyOfficeIpcRouter::dispatch("convert_document_format", &pdf_payload(&extra)).is_err(),
+            "{extra}"
+        );
+    }
+}
+
+#[test]
+fn the_highlight_is_ignored_for_other_targets() {
+    let docx = format!(
+        r##"{{"sourceFormat":"pdf","targetFormat":"docx","title":"x",{BLOCKS_WITH_TEXT},"pdf":{{"highlight":{{"text":"핵심","kind":"highlight","color":"#FFFF00"}}}}}}"##
+    );
+    assert!(!convert(&docx).is_empty());
+}
