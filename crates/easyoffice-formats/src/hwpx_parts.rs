@@ -27,6 +27,25 @@ pub(crate) const HWPUNIT_PER_TWIP: u32 = 5;
 /// Default cell height for generated tables.
 pub(crate) const CELL_HEIGHT: u32 = 1_000;
 
+/// `hh:heading` type of a paragraph that is no list item.
+pub(crate) const HEADING_NONE: &str = "NONE";
+/// Heading types of list items; each names the one definition below by `idRef="1"`.
+pub(crate) const HEADING_BULLET: &str = "BULLET";
+pub(crate) const HEADING_NUMBER: &str = "NUMBER";
+
+/// The one numbering (`1.`, `2.`, ... at level 1) and the one bullet (`•`) a list paragraph refers
+/// to. Without a definition a layout engine has no marker to draw for the item.
+const NUMBERING_XML: &str = concat!(
+    "<hh:numberings itemCnt=\"1\"><hh:numbering id=\"1\" start=\"0\">",
+    "<hh:paraHead start=\"1\" level=\"1\" align=\"LEFT\" useInstWidth=\"1\" autoIndent=\"1\" widthAdjust=\"0\" textOffsetType=\"PERCENT\" textOffset=\"50\" numFormat=\"DIGIT\" charPrIDRef=\"4294967295\" checkable=\"0\">^1.</hh:paraHead>",
+    "</hh:numbering></hh:numberings>"
+);
+const BULLET_XML: &str = concat!(
+    "<hh:bullets itemCnt=\"1\"><hh:bullet id=\"1\" char=\"•\" useImage=\"0\">",
+    "<hh:paraHead level=\"0\" align=\"LEFT\" useInstWidth=\"0\" autoIndent=\"1\" widthAdjust=\"0\" textOffsetType=\"PERCENT\" textOffset=\"50\" numFormat=\"DIGIT\" charPrIDRef=\"4294967295\" checkable=\"0\"/>",
+    "</hh:bullet></hh:bullets>"
+);
+
 const FONT_LANGS: [&str; 7] = [
     "HANGUL", "LATIN", "HANJA", "JAPANESE", "OTHER", "SYMBOL", "USER",
 ];
@@ -102,7 +121,7 @@ impl Default for HwpxParaShape {
     fn default() -> Self {
         Self {
             align: None,
-            heading_type: "NONE",
+            heading_type: HEADING_NONE,
             left_margin: 0,
             intent: 0,
             line_percent: DEFAULT_LINE_PERCENT,
@@ -172,7 +191,7 @@ fn para_pr_xml(id: usize, shape: &HwpxParaShape) -> String {
         concat!(
             "<hh:paraPr id=\"{id}\" tabPrIDRef=\"0\" condense=\"0\" fontLineHeight=\"0\" snapToGrid=\"1\" suppressLineNumbers=\"0\" checked=\"0\">",
             "{align}",
-            "<hh:heading type=\"{heading_type}\" idRef=\"0\" level=\"0\"/>",
+            "<hh:heading type=\"{heading_type}\" idRef=\"{heading_ref}\" level=\"0\"/>",
             "<hh:breakSetting breakLatinWord=\"KEEP_WORD\" breakNonLatinWord=\"KEEP_WORD\" widowOrphan=\"0\" keepWithNext=\"0\" keepLines=\"0\" pageBreakBefore=\"0\" lineWrap=\"BREAK\"/>",
             "<hh:autoSpacing eAsianEng=\"0\" eAsianNum=\"0\"/>",
             "<hh:margin><hc:intent value=\"{intent}\" unit=\"HWPUNIT\"/><hc:left value=\"{left}\" unit=\"HWPUNIT\"/>",
@@ -184,6 +203,7 @@ fn para_pr_xml(id: usize, shape: &HwpxParaShape) -> String {
         id = id,
         align = align_xml,
         heading_type = shape.heading_type,
+        heading_ref = u8::from(shape.heading_type != HEADING_NONE),
         left = shape.left_margin,
         intent = shape.intent,
         line = shape.line_percent
@@ -250,6 +270,17 @@ pub(crate) fn header_xml_with(
     }
     xml.push_str("</hh:charProperties>");
     xml.push_str("<hh:tabProperties itemCnt=\"1\"><hh:tabPr id=\"0\" autoTabLeft=\"0\" autoTabRight=\"0\"/></hh:tabProperties>");
+    let uses = |heading: &str| {
+        para_shapes
+            .iter()
+            .any(|shape| shape.heading_type == heading)
+    };
+    if uses(HEADING_NUMBER) {
+        xml.push_str(NUMBERING_XML);
+    }
+    if uses(HEADING_BULLET) {
+        xml.push_str(BULLET_XML);
+    }
     xml.push_str(&format!(
         "<hh:paraProperties itemCnt=\"{}\">",
         para_shapes.len()

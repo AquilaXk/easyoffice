@@ -10,8 +10,8 @@
 use crate::hwpx_parts::{
     header_xml, header_xml_with, manifest_xml, section_properties_xml, HwpxCharShape,
     HwpxParaShape, HwpxStyle, CELL_HEIGHT, CONTAINER_XML, DEFAULT_CHAR_HEIGHT,
-    DEFAULT_LINE_PERCENT, HWPUNIT_PER_TWIP, LIST_LEFT_MARGIN, NS_PARAGRAPH, NS_SECTION,
-    SETTINGS_XML, TEXT_WIDTH, VERSION_XML,
+    DEFAULT_LINE_PERCENT, HEADING_BULLET, HEADING_NONE, HEADING_NUMBER, HWPUNIT_PER_TWIP,
+    LIST_LEFT_MARGIN, NS_PARAGRAPH, NS_SECTION, SETTINGS_XML, TEXT_WIDTH, VERSION_XML,
 };
 use crate::office_codecs::validate_zip_xml_entries;
 use crate::rich_document::{RichAlignment, RichBlock, RichDocument};
@@ -267,9 +267,9 @@ impl HwpxCodec {
                     Some(RichAlignment::Justify) => Some("JUSTIFY"),
                 },
                 heading_type: match p.list {
-                    Some(crate::RichListKind::Bullet) => "BULLET",
-                    Some(crate::RichListKind::Ordered) => "NUMBER",
-                    None => "NONE",
+                    Some(crate::RichListKind::Bullet) => HEADING_BULLET,
+                    Some(crate::RichListKind::Ordered) => HEADING_NUMBER,
+                    None => HEADING_NONE,
                 },
                 left_margin: p
                     .left_indent_twips
