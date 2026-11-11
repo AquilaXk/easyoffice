@@ -95,6 +95,7 @@ HWP·HWPX 편집기(rhwp-studio)가 자체로 처리하는 키다. 편집기에 
 | 입력 | 문자표 | Alt+F10 |
 | 표 | 줄/칸 추가 | Alt+Enter |
 | 표 | 줄/칸 지우기 | Alt+Delete |
+| 표 | 왼쪽에 칸 추가하기 | Alt+Insert |
 | 표 | 블록 평균 | Ctrl+Shift+A |
 | 표 | 블록 곱 | Ctrl+Shift+P |
 | 보기 | 도구 상자 | Ctrl+F1 |

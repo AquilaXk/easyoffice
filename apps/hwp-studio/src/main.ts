@@ -276,6 +276,8 @@ registry.registerAll(formatCommands);
 registry.registerAll(insertCommands);
 registry.registerAll(tableCommands);
 registry.register(cellSelectionEnterCommand);
+// 참조 앱 표 메뉴의 Alt+Insert(왼쪽에 칸 추가하기). Alt+Delete는 표 안에서 줄/칸 지우기 대화상자를 연다.
+defaultShortcuts.push([{ key: 'insert', alt: true }, 'table:insert-col-left']);
 registry.registerAll(pageCommands);
 registry.registerAll(toolCommands);
 

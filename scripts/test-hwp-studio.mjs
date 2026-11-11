@@ -727,6 +727,20 @@ test("the toolbar labels item, command, CSS and manifest agree", () => {
   assert.ok(readText(path.join(REPO, "THIRD_PARTY_NOTICES.md")).includes("src/ui/toolbar-labels.ts"));
 });
 
+test("the 표 menu lists the direct row/column commands upstream registers, Alt+Insert is bound, and 저장 as shows Ctrl+Shift+S", () => {
+  const html = readText(path.join(REPO, "apps/hwp-studio/index.html"));
+  const upstream = readText(path.join(REPO, "third_party/rhwp/rhwp-studio/src/command/commands/table.ts"));
+  for (const id of ["insert-row-above", "insert-row-below", "insert-col-left", "insert-col-right", "delete-row", "delete-col"]) {
+    assert.ok(upstream.includes(`id: 'table:${id}'`), `upstream registers table:${id}`);
+    assert.ok(html.includes(`data-cmd="table:${id}"`), `the 표 menu lists table:${id}`);
+  }
+  assert.match(html, /data-cmd="table:insert-col-left">.*?<span class="md-shortcut">Alt\+Insert<\/span>/);
+  assert.ok(html.includes('data-cmd="table:insert-row-col"') && html.includes('data-cmd="table:delete-row-col"'), "the dialog items stay");
+  const main = readText(path.join(REPO, "apps/hwp-studio/src/main.ts"));
+  assert.ok(main.includes("defaultShortcuts.push([{ key: 'insert', alt: true }, 'table:insert-col-left']);"));
+  assert.match(html, /data-shell-format="hwp">.*?<span class="md-shortcut">Ctrl\+Shift\+S<\/span>/);
+});
+
 test("the 셀 선택 command (table:cell-selection-enter) replays F5 through the editor's keyboard path, only in a table", async () => {
   const { cellSelectionEnterCommand } = await import("../apps/hwp-studio/src/command/cell-selection.ts");
   assert.equal(cellSelectionEnterCommand.id, "table:cell-selection-enter");
