@@ -2455,3 +2455,18 @@
 - **Alternatives rejected** 독립 구현의 `.proto`·생성 코드·템플릿 가져오기(경계 위반), 하이퍼링크를 글자 뒤에 주소로 덧붙이기(원문에 없는 글이 생김), 쪽 배치 문서를 본문 저장소로 읽기(그려지지 않는 저장소).
 - **Verified by** `cargo test -p easyoffice-formats --test pages_audit --test pages_fixtures --test pages_images --test pages_notes --test table_merge`(실픽스처의 병합 영역·목록 형식·수준·댓글 부록, 합성 패키지의 종류별 경고·수식 저장소·악의적 병합·링크 5,000개·쪽 위 개체 2,000개·미주 로마 번호·구역 재시작), `cargo test -p easyoffice-formats --lib pages_table`(셀 비트 크기).
 - **Revisit when** 실제 Pages(15.x)로 만든 각주·댓글·하이퍼링크·병합·쪽 배치 문서를 구했을 때(두 배치 중 하나를 정리), 작성기가 링크·수준·번호 형식을 쓸 때.
+
+## PD-158. 텍스트 계열 파일은 UTF-8·UTF-16(BOM)·CP949로 읽고, CP949 표에 기호·한자를 더한다
+
+- **Status** Implemented (`text_decode.rs`, `cp949.rs`, `cp949_tables.rs`, `office_codecs.rs`)
+- **Context** CSV·TSV·TXT·Markdown 읽기는 UTF-8이 아니면 거부했습니다. 한국어 스프레드시트의 기본 CSV 저장은 CP949이고 "유니코드 텍스트"는 BOM이 있는 UTF-16LE입니다. 엔진의 CP949 디코더는 한글 음절·호환 자모만 알아 기호(0xA1-0xAC행)와 한자(0xCA-0xFD행)가 빠져 있었습니다. XLSX 공유 문자열 인덱스를 못 읽으면 `unwrap_or(0)`으로 첫 문자열을 보여 주었습니다.
+- **Decision (`PD-158`)**
+  1. **판정 순서**: UTF-8 BOM, UTF-16LE/BE BOM, BOM 없는 유효 UTF-8, CP949. BOM은 벗기고 UTF-8이면 복사하지 않습니다. 형식 감지(`FormatDetector`)의 텍스트 검사도 같은 판정을 쓰며 해독한 글에 NUL이 있으면 거부합니다.
+  2. **BOM 없는 UTF-16은 추측하지 않습니다.** NUL이 섞인 ASCII 위주 UTF-16은 유효한 UTF-8과 구분되지 않고, 스프레드시트의 UTF-16 저장은 항상 BOM을 씁니다.
+  3. **Fail-Closed**: 홀수 길이 UTF-16, 짝 없는 서러게이트, BOM 뒤의 잘못된 UTF-8, 잘린 리드 바이트, 미할당 CP949 칸은 U+FFFD로 덮지 않고 `InvalidUtf8`로 거부합니다. 입력 크기 상한은 그대로입니다(디코더는 길이에 선형, 추가 상한 없음).
+  4. **CP949 표**: encoding_rs 0.8.44의 EUC-KR 구조와 WHATWG `index-euc-kr`의 기호 1,128칸·한자 4,888칸을 `u16` 배열 두 장으로 이식했습니다(한글은 기존 오프셋 표). 전체 쌍 공간(126x190)의 FNV 해시와 할당 칸 17,048개를 참조 구현 값으로 고정했습니다. 의존성은 늘리지 않습니다(PD-053, PD-095). RTF 읽기도 같은 표를 씁니다.
+  5. **XLSX 공유 문자열**: 인덱스가 숫자가 아니거나 범위를 벗어나면 `CorruptedContainer`로 거부합니다(A1 참조 오류와 같은 Fail-Closed).
+- **Why** 한국어 사용자가 가장 흔히 받는 CSV가 열리고, 못 읽는 파일을 다른 내용으로 보여 주지 않습니다.
+- **Trade-offs** 저장은 UTF-8만 합니다. CP949로 보이는 임의의 바이너리가 우연히 유효한 쌍으로만 이루어지면 텍스트로 열립니다. BOM 없는 UTF-16은 열리지 않습니다.
+- **Verified by** `cargo test -p easyoffice-formats`(`cp949::tests`, `text_decode::tests`, `tests/text_encoding_open.rs`, `office_codecs::tests`). 10MB CP949 CSV 디코딩은 릴리스 빌드에서 이전 한글 전용 경로 19.4ms, 새 엄격 디코더 12.0ms(7회 중 최소).
+- **Revisit when** BOM 없는 UTF-16 파일 요청이 실제로 들어오거나 CP949 외 지역 인코딩이 필요할 때.
