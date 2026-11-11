@@ -9153,6 +9153,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
 ### PDF text markup annotations (structure reference)
 
 `crates/easyoffice-formats/src/pdf_highlight.rs` writes highlight and underline annotations (ISO 32000-1 §12.5.6.10). It follows the annotation dictionary layout of pdf-writer 0.15 (https://github.com/typst/pdf-writer, `src/annotations.rs` `AnnotationType::Highlight` / `Underline` and `quad_points`; MIT OR Apache-2.0, authors Laurenz and Martin Haug) and the highlight appearance of the pdf.js editor (https://github.com/mozilla/pdf.js, Apache-2.0): a rectangle filled with the color under the multiply blend mode. No source is copied and no crate is linked; the notice is kept because the structure is derived from them.
