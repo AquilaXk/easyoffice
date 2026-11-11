@@ -635,6 +635,26 @@ fn encode_xls(
             "수식 {formulas}개는 계산된 값으로 저장했습니다. XLS 파일에는 수식이 아니라 값이 들어갑니다."
         ));
     }
+    let names: Vec<&str> = computed.iter().map(|(name, _)| name.as_str()).collect();
+    let clean = LegacyOle2Codec::sanitize_sheet_names(&names);
+    let renamed: Vec<String> = names
+        .iter()
+        .zip(&clean)
+        .filter(|(old, new)| old != new)
+        .map(|(old, new)| format!("'{old}' → '{new}'"))
+        .collect();
+    if !renamed.is_empty() {
+        let shown = renamed.len().min(WARNED_SHEET_NAMES);
+        let rest = match renamed.len() - shown {
+            0 => String::new(),
+            more => format!(" 외 {more}개"),
+        };
+        warnings.push(format!(
+            "XLS 시트 이름 규칙(31자 이하, : \\ / ? * [ ] 금지, 중복 불가)에 맞춰 시트 {}개의 이름을 바꿨습니다: {}{rest}.",
+            renamed.len(),
+            renamed[..shown].join(", ")
+        ));
+    }
     let mut payloads: Vec<LegacyXlsPayload> = computed
         .into_iter()
         .map(|(sheet_name, cells)| LegacyXlsPayload { sheet_name, cells })

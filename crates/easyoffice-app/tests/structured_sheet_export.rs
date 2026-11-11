@@ -256,3 +256,25 @@ fn xlsx_and_ods_sources_convert_directly_with_bold_size_and_column_width_kept() 
     let back = read_sheet_styling(&xlsx_again, DocumentFormat::Xlsx).unwrap();
     assert_eq!(back[0].1, styling, "ODS to XLSX keeps the styling");
 }
+
+#[test]
+fn xls_save_renames_sheets_to_the_excel_rules_and_says_so() {
+    let long = "가".repeat(40);
+    let sheets = format!(
+        r#""sheets":[{{"name":"예산:1/4","cells":[{{"ref":"A1","raw":"1"}}]}},
+        {{"name":"{long}","cells":[]}},{{"name":"요약","cells":[]}}]"#
+    );
+    let (json, bytes) = convert(&payload("xls", &sheets));
+    let names: Vec<String> = LegacyOle2Codec::unpack_xls_multi(&bytes)
+        .unwrap()
+        .into_iter()
+        .map(|s| s.sheet_name)
+        .collect();
+    assert_eq!(names, ["예산_1_4", &"가".repeat(31), "요약"]);
+    assert!(
+        json.contains("시트 2개의 이름을 바꿨습니다") && json.contains("'예산:1/4' → '예산_1_4'"),
+        "{json}"
+    );
+    let (json, _) = convert(&payload("xls", SHEETS));
+    assert!(!json.contains("이름을 바꿨습니다"), "{json}");
+}

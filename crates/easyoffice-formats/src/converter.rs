@@ -196,10 +196,19 @@ impl UniversalFormatConverter {
                 &[(title, sheet_cells)],
                 formula_cache.map(std::slice::from_ref).unwrap_or_default(),
             ),
-            DocumentFormat::Xls => LegacyOle2Codec::pack_xls(&LegacyXlsPayload {
-                sheet_name: title,
-                cells: sheet_cells,
-            }),
+            DocumentFormat::Xls => {
+                let payload = LegacyXlsPayload {
+                    sheet_name: title,
+                    cells: sheet_cells,
+                };
+                // Cells derived from document text are never formulas, even when they start
+                // with '='; only a model that carries explicit sheet cells keeps formulas.
+                if model.sheet_cells.is_empty() {
+                    LegacyOle2Codec::pack_xls_multi_values(std::slice::from_ref(&payload))
+                } else {
+                    LegacyOle2Codec::pack_xls(&payload)
+                }
+            }
             DocumentFormat::Ods => OdfCodec::pack_ods_multi_styled_with_cache(
                 &[(title, sheet_cells)],
                 formula_cache.map(std::slice::from_ref).unwrap_or_default(),

@@ -11,6 +11,23 @@ pub struct LegacyXlsPayload {
     pub cells: Vec<(u32, u32, String)>,
 }
 
+/// Longest sheet name in UTF-16 units and the characters a sheet name may not contain.
+const BIFF8_MAX_SHEET_NAME_UNITS: usize = 31;
+const BIFF8_SHEET_NAME_FORBIDDEN: [char; 7] = [':', '\\', '/', '?', '*', '[', ']'];
+/// Bytes of a FORMULA record besides the expression text: cell, cached value and length fields.
+const BIFF8_FORMULA_FIXED_LEN: usize = 16;
+
+/// The longest prefix of `text` that fits `max_units` UTF-16 units without splitting a character.
+fn truncate_utf16_units(text: &str, max_units: usize) -> String {
+    let mut units = 0;
+    text.chars()
+        .take_while(|c| {
+            units += c.len_utf16();
+            units <= max_units
+        })
+        .collect()
+}
+
 struct SstContinueCursor<'a> {
     chunks: &'a [&'a [u8]],
     chunk_idx: usize,
@@ -253,6 +270,46 @@ impl LegacyOle2Codec {
         }
     }
 
+    /// Sheet names a BIFF8 workbook accepts: at most 31 UTF-16 units, none of `: \ / ? * [ ]`
+    /// (replaced by `_`), no leading or trailing apostrophe, not empty, unique ignoring case. A
+    /// repeated name gets `_2`, `_3`, ... within the 31 units. Names that already comply are
+    /// returned unchanged, so a caller can compare to report what was renamed.
+    pub fn sanitize_sheet_names<S: AsRef<str>>(names: &[S]) -> Vec<String> {
+        let mut used = std::collections::HashSet::with_capacity(names.len());
+        names
+            .iter()
+            .enumerate()
+            .map(|(i, name)| {
+                let replaced: String = name
+                    .as_ref()
+                    .chars()
+                    .map(|c| {
+                        if BIFF8_SHEET_NAME_FORBIDDEN.contains(&c) {
+                            '_'
+                        } else {
+                            c
+                        }
+                    })
+                    .collect();
+                let trimmed = replaced.trim_matches('\'');
+                let base = if trimmed.trim().is_empty() {
+                    format!("Sheet{}", i + 1)
+                } else {
+                    trimmed.to_string()
+                };
+                let mut candidate = truncate_utf16_units(&base, BIFF8_MAX_SHEET_NAME_UNITS);
+                let mut n = 1u32;
+                while !used.insert(candidate.to_lowercase()) {
+                    n += 1;
+                    let suffix = format!("_{n}");
+                    let room = BIFF8_MAX_SHEET_NAME_UNITS - suffix.len();
+                    candidate = truncate_utf16_units(&base, room) + &suffix;
+                }
+                candidate
+            })
+            .collect()
+    }
+
     pub fn pack_xls(payload: &LegacyXlsPayload) -> Result<Vec<u8>, EasyOfficeError> {
         Self::pack_xls_multi(std::slice::from_ref(payload))
     }
@@ -280,6 +337,16 @@ impl LegacyOle2Codec {
                         crate::MAX_BIFF8_ROW,
                         crate::MAX_BIFF8_COL
                     )));
+                }
+                let formula_text = val.strip_prefix('=').filter(|_| allow_formulas);
+                if let Some(expr) = formula_text {
+                    let record_len = BIFF8_FORMULA_FIXED_LEN + 2 * expr.encode_utf16().count();
+                    if record_len > crate::MAX_BIFF8_RECORD_DATA_LEN {
+                        return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+                            "BIFF8 수식 레코드({record_len}바이트)가 레코드 한도 {}바이트를 초과했습니다.",
+                            crate::MAX_BIFF8_RECORD_DATA_LEN
+                        )));
+                    }
                 }
                 if val.encode_utf16().count() > 32_765 {
                     return Err(EasyOfficeError::ResourceBudgetExceeded(
@@ -326,8 +393,14 @@ impl LegacyOle2Codec {
 
         // 2. BOUNDSHEET records (0x0085)
         let mut lb_ply_pos_offsets = Vec::with_capacity(sheets.len());
-        for sheet in sheets {
-            let sheet_units: Vec<u16> = sheet.sheet_name.encode_utf16().take(255).collect();
+        let sheet_names = Self::sanitize_sheet_names(
+            &sheets
+                .iter()
+                .map(|s| s.sheet_name.as_str())
+                .collect::<Vec<_>>(),
+        );
+        for name in &sheet_names {
+            let sheet_units: Vec<u16> = name.encode_utf16().collect();
             let mut sheet_name_utf16 = Vec::with_capacity(sheet_units.len() * 2);
             for u in &sheet_units {
                 sheet_name_utf16.extend_from_slice(&u.to_le_bytes());
@@ -406,7 +479,7 @@ impl LegacyOle2Codec {
                 let c16 = *col as u16;
                 if let Some(expr_str) = raw.strip_prefix('=').filter(|_| allow_formulas) {
                     let expr_utf16 = encode_utf16le(expr_str);
-                    let rec_len = (16 + expr_utf16.len()) as u16;
+                    let rec_len = (BIFF8_FORMULA_FIXED_LEN + expr_utf16.len()) as u16; // checked above
                     stream.extend_from_slice(&Self::BIFF8_FORMULA.to_le_bytes());
                     stream.extend_from_slice(&rec_len.to_le_bytes());
                     stream.extend_from_slice(&r16.to_le_bytes());
