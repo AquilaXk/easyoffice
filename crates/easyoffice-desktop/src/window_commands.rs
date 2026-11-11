@@ -97,6 +97,11 @@ impl AppWindows {
         locked(&self.registry).shown_name(label)
     }
 
+    /// Whether the page of `label` confirmed that it is showing its save prompt (PD-113).
+    pub fn shows_close_prompt(&self, label: &str) -> bool {
+        locked(&self.registry).prompt_acked(label)
+    }
+
     /// True while any window reports unsaved changes (the signed update waits for them).
     pub fn has_unsaved_documents(&self) -> bool {
         locked(&self.registry).has_unsaved()

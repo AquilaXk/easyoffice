@@ -334,6 +334,14 @@ impl WindowRegistry {
         }
     }
 
+    /// The page of `label` confirmed its save prompt and it has not ended since.
+    pub fn prompt_acked(&self, label: &str) -> bool {
+        self.windows
+            .get(label)
+            .and_then(|w| w.close_prompt.as_ref())
+            .is_some_and(|prompt| prompt.acked)
+    }
+
     /// The user answered the close prompt without closing (cancel, or the save failed): the next
     /// close request asks again instead of keeping a prompt that is no longer there.
     pub fn end_close_prompt(&mut self, label: &str) {
@@ -643,6 +651,19 @@ mod tests {
             CloseAction::CloseNow,
             "the escape hatch for a hung page"
         );
+    }
+
+    #[test]
+    fn a_prompt_is_confirmed_from_the_pages_answer_until_it_ends() {
+        let (mut reg, now) = dirty_window();
+        assert!(!reg.prompt_acked("doc-1-a"), "no prompt asked");
+        reg.begin_close("doc-1-a", now);
+        assert!(!reg.prompt_acked("doc-1-a"), "asked, not answered");
+        reg.ack_close_prompt("doc-1-a");
+        assert!(reg.prompt_acked("doc-1-a"));
+        assert!(!reg.prompt_acked("missing"));
+        reg.end_close_prompt("doc-1-a");
+        assert!(!reg.prompt_acked("doc-1-a"), "the answer ended the prompt");
     }
 
     #[test]
