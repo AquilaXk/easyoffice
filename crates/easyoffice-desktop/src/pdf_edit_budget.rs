@@ -1,4 +1,4 @@
-//! Budgets, deadlines and the places for jobs of the PDF edit pipeline (PD-164).
+//! Budgets, deadlines and the places for jobs of the PDF edit pipeline (PD-166).
 //!
 //! `hayro-syntax` (the reader) lists timeouts and out-of-memory protection among its open tasks, so
 //! none of it comes from the crate, and counting what a file declares is not enough: a file of a

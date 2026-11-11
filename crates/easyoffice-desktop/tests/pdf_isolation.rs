@@ -1,4 +1,4 @@
-//! The PDF worker process, end to end (PD-164): the shell binary started as
+//! The PDF worker process, end to end (PD-166): the shell binary started as
 //! `EasyOffice --pdf-edit-worker`, the supervisor that watches it, and files that a reader inside
 //! the shell would not survive. Each hostile file must end with the worker killed, a fixed
 //! sentence for the caller, and this test process (standing in for the shell and its other

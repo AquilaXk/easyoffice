@@ -1,7 +1,7 @@
 (function (host) {
   "use strict";
 
-  // PDF studio edits on the opened file's objects (PD-164). In the desktop shell the PDF that a
+  // PDF studio edits on the opened file's objects (PD-166). In the desktop shell the PDF that a
   // window opens is also handed to the shell once (`pdf_edit_open`); the existing controls then
   // work on that file instead of on its text: the rotation control turns the pages, the stamp and
   // watermark controls lay text over them, 페이지 분할·병합 merges or splits, and saving writes the
