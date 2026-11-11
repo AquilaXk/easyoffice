@@ -192,12 +192,11 @@ fn marks_without_a_rich_model_equivalent_are_reported_by_kind_and_count() {
     let (doc, warnings) = open(&body_only(b, st)).expect("opens");
     assert_eq!(paragraph_texts(&doc), vec![text]);
     for expected in [
-        "하이퍼링크의 주소(글자만 가져옴) 2개",
         "날짜·시각 필드(저장된 글자만 가져옴) 1개",
         "책갈피 1개",
         "변경 추적 삽입 표시(글자는 그대로 가져옴) 1개",
         "변경 추적 삭제 표시(삭제된 글자도 그대로 가져옴) 1개",
-        "댓글 1개",
+        "읽을 수 없는 댓글 1개",
         "글 속 표시(형식 2099) 1개",
     ] {
         assert!(warned(&warnings, expected), "{expected}: {warnings:?}");
@@ -227,7 +226,23 @@ fn newer_footnote_table_and_mark_character_are_numbered_like_the_fixture_layout(
     );
     let (doc, warnings) = open(&body_only(b, st)).expect("opens");
     assert_eq!(paragraph_texts(&doc), vec!["가1나", "각주", "1 주석"]);
-    assert!(warned(&warnings, "하이퍼링크"), "{warnings:?}");
+    let RichBlock::Paragraph(p) = &doc.blocks[0] else {
+        panic!("paragraph")
+    };
+    let linked: Vec<(&str, Option<&str>)> = p
+        .runs
+        .iter()
+        .map(|r| (r.text.as_str(), r.link.as_deref()))
+        .collect();
+    assert_eq!(
+        linked,
+        vec![
+            ("가", None),
+            ("1", None),
+            ("나", Some("https://example.com"))
+        ]
+    );
+    assert!(!warned(&warnings, "하이퍼링크"), "{warnings:?}");
 }
 
 #[test]
@@ -318,4 +333,380 @@ fn attachment_marks_inside_table_cells_are_reported() {
         "{warnings:?}"
     );
     assert!(matches!(&doc.blocks[0], RichBlock::Table(t) if t.rows[0][0] == "가"));
+}
+
+/// Shape or text box (type 2011) with the given text paragraph and a geometry position.
+fn positioned_text_box(b: &mut DocBuilder, text: &str, at: Option<(f32, f32)>) -> u64 {
+    let st = b.add(2001, &DocBuilder::storage_payload(text, &[], &[], &[], &[]));
+    let mut payload = f_ref(2, st);
+    if let Some((x, y)) = at {
+        let position = cat(&[f_f32(1, x), f_f32(2, y)]);
+        let geometry = f_bytes(1, &position);
+        // ShapeInfo { 1: ShapeArchive { 1: DrawableArchive { 1: Geometry } } }
+        let shape = f_bytes(1, &f_bytes(1, &geometry));
+        payload = cat(&[f_bytes(1, &shape), payload]);
+    }
+    b.add(2011, &payload)
+}
+
+fn floating_list(b: &mut DocBuilder, pages: &[(u64, &[u64])]) {
+    let groups: Vec<Vec<u8>> = pages
+        .iter()
+        .map(|(page, ids)| {
+            let mut parts = vec![f_varint(1, *page)];
+            parts.extend(ids.iter().map(|id| f_bytes(4, &f_ref(1, *id))));
+            f_bytes(1, &cat(&parts))
+        })
+        .collect();
+    b.add(10010, &cat(&groups));
+}
+
+#[test]
+fn page_layout_documents_import_floating_text_in_page_then_reading_order() {
+    let mut b = DocBuilder::default();
+    // Settings: `body = false` marks a page-layout document.
+    b.add(10012, &f_varint(1, 0));
+    let late = positioned_text_box(&mut b, "아래 글상자", Some((10.0, 400.0)));
+    let right = positioned_text_box(&mut b, "오른쪽 글상자", Some((300.0, 20.0)));
+    let left = positioned_text_box(&mut b, "왼쪽 글상자", Some((10.0, 20.0)));
+    let second_page = positioned_text_box(&mut b, "둘째 쪽", Some((0.0, 0.0)));
+    let unplaced = positioned_text_box(&mut b, "위치 없음", None);
+    let chart = b.add(5021, &[]);
+    // Page 1 is listed first on purpose; a drawable named twice is read once.
+    floating_list(
+        &mut b,
+        &[
+            (1, &[second_page]),
+            (0, &[late, right, unplaced, left, chart, left]),
+        ],
+    );
+    let st = b.add(
+        2001,
+        &DocBuilder::storage_payload("\u{4}", &[], &[], &[], &[]),
+    );
+    let (doc, warnings) = open(&body_only(b, st)).expect("opens");
+    assert_eq!(
+        paragraph_texts(&doc),
+        vec![
+            "왼쪽 글상자",
+            "오른쪽 글상자",
+            "아래 글상자",
+            "위치 없음",
+            "둘째 쪽"
+        ]
+    );
+    assert!(warned(&warnings, "쪽 배치 문서입니다"), "{warnings:?}");
+    assert!(
+        warned(&warnings, "쪽 위의 개체: 차트(형식 5021) 1개"),
+        "{warnings:?}"
+    );
+}
+
+#[test]
+fn floating_pictures_and_tables_are_imported_and_hostile_lists_are_bounded() {
+    let mut b = DocBuilder::default();
+    let table = b.table(&[vec!["가", "나"]]);
+    // A self-referencing and a huge-page-index group must not hang or panic.
+    let mut ids = vec![table, 1, u64::MAX];
+    ids.extend((0..2_000).map(|i| 1_000_000 + i));
+    floating_list(&mut b, &[(u64::MAX, &ids)]);
+    let body = b.add(
+        2001,
+        &DocBuilder::storage_payload("본문", &[], &[], &[], &[]),
+    );
+    let start = std::time::Instant::now();
+    let (doc, warnings) = open(&body_only(b, body)).expect("opens");
+    assert!(start.elapsed().as_secs() < 30);
+    assert!(doc.blocks.iter().any(|b| matches!(b, RichBlock::Table(_))));
+    assert!(
+        warned(&warnings, "쪽 위의 끊어진 개체 참조 2001개"),
+        "{warnings:?}"
+    );
+}
+
+fn link_runs(doc: &easyoffice_formats::RichDocument) -> Vec<(String, Option<String>)> {
+    let RichBlock::Paragraph(p) = &doc.blocks[0] else {
+        panic!("paragraph")
+    };
+    p.runs
+        .iter()
+        .map(|r| (r.text.clone(), r.link.clone()))
+        .collect()
+}
+
+#[test]
+fn hyperlink_runs_carry_their_address_and_end_at_the_next_entry() {
+    let mut b = DocBuilder::default();
+    let web = b.add(2032, &f_str(2, "https://example.com/a"));
+    let mail = b.add(2032, &f_str(2, "mailto:a@example.com"));
+    let script = b.add(2032, &f_str(2, "javascript:alert(1)"));
+    let file = b.add(2032, &f_str(2, "file:///etc/passwd"));
+    let long = b.add(2032, &f_str(2, &format!("http://{}", "a".repeat(5_000))));
+    let st = b.add(
+        2001,
+        &with_tables(
+            "일이삼사오육칠팔구십",
+            &[table_field(
+                11,
+                &[
+                    (1, Some(web)),
+                    (3, None),
+                    (4, Some(mail)),
+                    (5, Some(script)),
+                    (6, Some(file)),
+                    (7, Some(long)),
+                    (8, None),
+                ],
+            )],
+        ),
+    );
+    let (doc, warnings) = open(&body_only(b, st)).expect("opens");
+    assert_eq!(
+        link_runs(&doc),
+        vec![
+            ("일".to_string(), None),
+            (
+                "이삼".to_string(),
+                Some("https://example.com/a".to_string())
+            ),
+            ("사".to_string(), None),
+            ("오".to_string(), Some("mailto:a@example.com".to_string())),
+            ("육칠팔구십".to_string(), None),
+        ]
+    );
+    assert!(
+        warned(
+            &warnings,
+            "허용되지 않는 형식의 하이퍼링크 주소(글자만 가져옴) 3개"
+        ),
+        "{warnings:?}"
+    );
+}
+
+#[test]
+fn many_hyperlinks_in_one_paragraph_stay_linear() {
+    let mut b = DocBuilder::default();
+    let link = b.add(2032, &f_str(2, "https://example.com"));
+    let text = "가".repeat(20_000);
+    let entries: Vec<(u64, Option<u64>)> = (0..10_000u64)
+        .flat_map(|i| [(i * 2, Some(link)), (i * 2 + 1, None)])
+        .collect();
+    let st = b.add(2001, &with_tables(&text, &[table_field(11, &entries)]));
+    let start = std::time::Instant::now();
+    let (doc, _) = open(&body_only(b, st)).expect("opens");
+    assert!(start.elapsed().as_secs() < 30);
+    assert_eq!(link_runs(&doc).len(), 20_000);
+}
+
+#[test]
+fn comments_are_listed_after_the_body_and_unreadable_ones_counted() {
+    let mut b = DocBuilder::default();
+    let text_a = b.add(3056, &f_str(1, "첫째 댓글"));
+    let text_b = b.add(3059, &f_str(1, "둘째 댓글"));
+    let anchor_a = b.add(2013, &f_ref(1, text_a));
+    let anchor_b = b.add(2033, &f_ref(1, text_b));
+    let anchor_empty = b.add(2013, &f_ref(1, 999_999));
+    let st = b.add(
+        2001,
+        &with_tables(
+            "본문 글",
+            &[
+                table_field(23, &[(3, Some(anchor_b)), (4, None)]),
+                table_field(19, &[(0, Some(anchor_a)), (1, Some(anchor_empty))]),
+            ],
+        ),
+    );
+    let (doc, warnings) = open(&body_only(b, st)).expect("opens");
+    assert_eq!(
+        paragraph_texts(&doc),
+        vec!["본문 글", "댓글", "첫째 댓글", "둘째 댓글"]
+    );
+    assert!(warned(&warnings, "읽을 수 없는 댓글 1개"), "{warnings:?}");
+}
+
+fn settings_object(b: &mut DocBuilder, kind: u64, format: u64, numbering: u64) {
+    b.add(
+        10012,
+        &cat(&[
+            f_varint(1, 1),
+            f_varint(30, kind),
+            f_varint(31, format),
+            f_varint(32, numbering),
+        ]),
+    );
+}
+
+#[test]
+fn endnotes_use_their_own_heading_and_note_settings_set_the_numbers() {
+    let mut b = DocBuilder::default();
+    settings_object(&mut b, 1, 1, 2); // endnotes, roman, restart each section
+    let notes: Vec<u64> = ["가", "나", "다"]
+        .iter()
+        .map(|t| {
+            let st = b.add(2001, &DocBuilder::storage_payload(t, &[], &[], &[], &[]));
+            b.add(2012, &f_ref(2, st))
+        })
+        .collect();
+    let section = b.add(10011, &[]);
+    // Marks at 1 and 3, a section starting at 4, a mark at 6.
+    let text = format!("일{FFFC}이{FFFC}\u{4}삼{FFFC}");
+    let st = b.add(
+        2001,
+        &with_tables(
+            &text,
+            &[
+                table_field(
+                    11,
+                    &[
+                        (1, Some(notes[0])),
+                        (3, Some(notes[1])),
+                        (6, Some(notes[2])),
+                    ],
+                ),
+                table_field(17, &[(0, Some(section)), (5, Some(section))]),
+            ],
+        ),
+    );
+    let (doc, _) = open(&body_only(b, st)).expect("opens");
+    let texts = paragraph_texts(&doc);
+    assert_eq!(texts[0], "일i이ii");
+    assert_eq!(texts[1], "삼i");
+    // Heading and numbers in the appendix agree with the marks.
+    assert_eq!(&texts[2..], ["미주", "i 가", "ii 나", "i 다"]);
+}
+
+#[test]
+fn per_page_footnote_restart_is_reported_because_pages_are_not_laid_out() {
+    let mut b = DocBuilder::default();
+    settings_object(&mut b, 0, 2, 1); // footnotes, symbolic, restart each page
+    let st_note = b.add(2001, &DocBuilder::storage_payload("주", &[], &[], &[], &[]));
+    let note = b.add(2012, &f_ref(2, st_note));
+    let st = b.add(
+        2001,
+        &with_tables(&format!("가{FFFC}"), &[table_field(11, &[(1, Some(note))])]),
+    );
+    let (doc, warnings) = open(&body_only(b, st)).expect("opens");
+    assert_eq!(paragraph_texts(&doc), vec!["가*", "각주", "* 주"]);
+    assert!(
+        warned(
+            &warnings,
+            "쪽마다 다시 시작하는 각주 번호(연속 번호로 표시) 1개"
+        ),
+        "{warnings:?}"
+    );
+}
+
+#[test]
+fn list_levels_and_number_formats_come_from_the_list_style() {
+    use easyoffice_formats::{RichNumberEnclosure, RichNumberFormat};
+    let mut b = DocBuilder::default();
+    // Ordered list style whose levels are `1.`, `(i)` (7: lower roman in parentheses), `A)` (14),
+    // with one unknown value at level 3.
+    let levels = [3u64, 3, 3, 3];
+    let formats = [0u64, 7, 14, 200];
+    let style = b.add(
+        2023,
+        &cat(&levels
+            .iter()
+            .zip(formats)
+            .flat_map(|(t, f)| [f_varint(11, *t), f_varint(15, f)])
+            .collect::<Vec<_>>()),
+    );
+    let text = "가\n나\n다\n라";
+    let st = b.add(
+        2001,
+        &cat(&[
+            DocBuilder::storage_payload(text, &[], &[], &[(0, Some(style))], &[]),
+            f_bytes(
+                6,
+                &cat(&[0u64, 2, 4, 6]
+                    .iter()
+                    .zip([0u64, 1, 2, 3])
+                    .map(|(i, l)| f_bytes(1, &cat(&[f_varint(1, *i), f_varint(2, l)])))
+                    .collect::<Vec<_>>()),
+            ),
+        ]),
+    );
+    let (doc, warnings) = open(&body_only(b, st)).expect("opens");
+    let paragraphs: Vec<_> = doc
+        .blocks
+        .iter()
+        .filter_map(|b| match b {
+            RichBlock::Paragraph(p) => Some((p.list_level, p.list_number)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        paragraphs.iter().map(|p| p.0).collect::<Vec<_>>(),
+        vec![0, 1, 2, 3]
+    );
+    assert_eq!(paragraphs[0].1, None);
+    let roman = paragraphs[1].1.expect("roman");
+    assert_eq!(
+        (roman.format, roman.enclosure),
+        (
+            RichNumberFormat::LowerRoman,
+            RichNumberEnclosure::Parentheses
+        )
+    );
+    assert_eq!(
+        paragraphs[2].1.expect("latin").format,
+        RichNumberFormat::UpperLatin
+    );
+    assert_eq!(paragraphs[3].1, None);
+    assert!(
+        warned(
+            &warnings,
+            "알 수 없는 목록 번호 형식(1. 형식으로 가져옴) 1개"
+        ),
+        "{warnings:?}"
+    );
+}
+
+#[test]
+fn independent_character_and_paragraph_layouts_are_read_next_to_the_fixture_layout() {
+    let mut b = DocBuilder::default();
+    let color =
+        |r: f32, g: f32, bl: f32| cat(&[f_f32(3, r), f_f32(4, g), f_f32(5, bl), f_f32(6, 1.0)]);
+    // Full layout: font name 5, text background 26, drawn color in the fill 46.1 (it wins over 7).
+    let style = b.add(
+        2021,
+        &f_bytes(
+            11,
+            &cat(&[
+                f_str(5, "Helvetica"),
+                f_bytes(7, &color(0.0, 0.0, 1.0)),
+                f_bytes(26, &color(1.0, 1.0, 0.0)),
+                f_bytes(46, &f_bytes(1, &color(1.0, 0.0, 0.0))),
+            ]),
+        ),
+    );
+    // Paragraph properties: first-line 7, left indent 11, line spacing 13 `{ 2: 1.5 }`.
+    let para = b.add(
+        2022,
+        &f_bytes(
+            12,
+            &cat(&[f_f32(7, 18.0), f_f32(11, 36.0), f_bytes(13, &f_f32(2, 1.5))]),
+        ),
+    );
+    let st = b.add(
+        2001,
+        &DocBuilder::storage_payload("가나", &[(0, Some(para))], &[(0, Some(style))], &[], &[]),
+    );
+    let (doc, _) = open(&body_only(b, st)).expect("opens");
+    let RichBlock::Paragraph(p) = &doc.blocks[0] else {
+        panic!("paragraph")
+    };
+    let run = &p.runs[0];
+    assert_eq!(run.font.as_deref(), Some("Helvetica"));
+    assert_eq!(run.color.as_deref(), Some("FF0000"));
+    assert_eq!(run.highlight.as_deref(), Some("FFFF00"));
+    assert_eq!(
+        (
+            p.first_line_indent_twips,
+            p.left_indent_twips,
+            p.line_spacing_percent
+        ),
+        (Some(360), Some(720), Some(150))
+    );
 }

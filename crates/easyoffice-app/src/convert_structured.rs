@@ -191,6 +191,7 @@ fn parse_paragraph(
                 .as_str()
                 .ok_or_else(|| invalid("구조화 저장: run 'text'는 문자열이어야 합니다."))?;
             runs.push(RichRun {
+                link: None,
                 text: text.to_string(),
                 bold: opt_bool(run, "bold")?,
                 italic: opt_bool(run, "italic")?,
@@ -226,6 +227,8 @@ fn parse_paragraph(
         Some(other) => return Err(invalid(format!("구조화 저장: 알 수 없는 목록 '{other}'"))),
     };
     Ok(RichParagraph {
+        list_level: 0,
+        list_number: None,
         runs,
         alignment,
         heading_level,

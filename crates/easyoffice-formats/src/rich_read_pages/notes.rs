@@ -1,15 +1,15 @@
 //! Text that lives outside the main text flow: shape/text-box text (placed where the shape is
 //! anchored) and footnotes, headers and footers (appended after the body under a heading).
 
-use std::collections::HashSet;
-
-use super::{object_kind, reference, Flow, Reader};
+use super::{reference, Flow, Reader};
 use crate::pages_proto::{ArchiveObject, Message};
-use crate::pages_schema::{floating, footnote, header_footer, shape, ty};
+use crate::pages_schema::{footnote, header_footer, shape, ty};
 use crate::{EasyOfficeError, RichBlock, RichParagraph, RichRun};
 
 /// Appendix headings (heading level 2 paragraphs).
 const FOOTNOTE_HEADING: &str = "각주";
+const ENDNOTE_HEADING: &str = "미주";
+const COMMENT_HEADING: &str = "댓글";
 const HEADER_HEADING: &str = "머리글";
 const FOOTER_HEADING: &str = "바닥글";
 const APPENDIX_HEADING_LEVEL: u8 = 2;
@@ -31,7 +31,7 @@ fn heading(text: &str) -> RichBlock {
 
 impl Reader<'_> {
     /// Text blocks of the storage referenced by `field.1` of `obj`'s payload (paragraphs only).
-    fn nested_text(
+    pub(super) fn nested_text(
         &mut self,
         payload: &Message<'_>,
         field: u32,
@@ -56,50 +56,19 @@ impl Reader<'_> {
         self.nested_text(&payload, shape::TEXT_STORAGE)
     }
 
-    /// Reports drawables floating on pages (page-layout documents), which are not imported.
-    /// Word-processing documents keep their objects anchored in the text and leave this list
-    /// empty. Each drawable is counted once; an unreadable list is ignored.
-    pub(super) fn note_floating_drawables(&mut self) {
-        let mut seen = HashSet::new();
-        for list in self.objects.objects.values() {
-            if list.type_id != ty::FLOATING_DRAWABLES {
-                continue;
-            }
-            let Ok(list) = Message::parse(&list.payload) else {
-                continue;
-            };
-            for group in list.subs(floating::PAGE_GROUPS).unwrap_or_default() {
-                for entry in group.subs(floating::GROUP_DRAWABLES).unwrap_or_default() {
-                    let Some(id) = reference(&entry, 1) else {
-                        continue;
-                    };
-                    if !seen.insert(id) {
-                        continue;
-                    }
-                    match self.objects.get(id) {
-                        Some(o) => self.skip(format!(
-                            "쪽 위의 개체: {}(형식 {})",
-                            object_kind(o.type_id),
-                            o.type_id
-                        )),
-                        None => self.skip("쪽 위의 끊어진 개체 참조"),
-                    }
-                }
-            }
-        }
-    }
-
     /// Footnote text in mark order, each led by its superscript number (the one shown at the
     /// mark in the body).
     fn footnote_blocks(&mut self, body: &Message<'_>) -> Result<Vec<RichBlock>, EasyOfficeError> {
         let mut out = Vec::new();
-        for (number, (_, id)) in self.footnote_marks(body).into_iter().enumerate() {
-            let Some(obj) = self.objects.get(id) else {
+        let marks = self.footnote_marks(body);
+        self.note_numbering_rule(!marks.is_empty());
+        for mark in marks {
+            let Some(obj) = self.objects.get(mark.id) else {
                 continue;
             };
             let payload = Message::parse(&obj.payload)?;
             let mut blocks = self.nested_text(&payload, footnote::TEXT_STORAGE)?;
-            let mut lead = vec![self.footnote_number_run(number + 1)?, RichRun::plain(" ")];
+            let mut lead = vec![self.footnote_number_run(mark.number)?, RichRun::plain(" ")];
             match blocks.first_mut() {
                 Some(RichBlock::Paragraph(p)) => {
                     lead.append(&mut p.runs);
@@ -164,8 +133,23 @@ impl Reader<'_> {
         &mut self,
         body: &Message<'_>,
     ) -> Result<Vec<RichBlock>, EasyOfficeError> {
+        let note_heading = if self.settings.notes.endnotes {
+            ENDNOTE_HEADING
+        } else {
+            FOOTNOTE_HEADING
+        };
+        let comments: Vec<RichBlock> = self
+            .comment_texts(body)
+            .into_iter()
+            .map(|text| {
+                RichBlock::Paragraph(RichParagraph {
+                    runs: vec![RichRun::plain(text)],
+                    ..RichParagraph::default()
+                })
+            })
+            .collect();
         let sections = [
-            (FOOTNOTE_HEADING, self.footnote_blocks(body)?),
+            (note_heading, self.footnote_blocks(body)?),
             (
                 HEADER_HEADING,
                 self.header_footer_blocks(header_footer::HEADERS)?,
@@ -174,6 +158,7 @@ impl Reader<'_> {
                 FOOTER_HEADING,
                 self.header_footer_blocks(header_footer::FOOTERS)?,
             ),
+            (COMMENT_HEADING, comments),
         ];
         let mut out = Vec::new();
         for (title, blocks) in sections {

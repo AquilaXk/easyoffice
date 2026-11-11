@@ -43,6 +43,43 @@ pub enum RichListKind {
     Ordered,
 }
 
+/// Numbering style of an ordered list level.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum RichNumberFormat {
+    /// 1, 2, 3
+    #[default]
+    Decimal,
+    /// a, b, c
+    LowerLatin,
+    /// A, B, C
+    UpperLatin,
+    /// i, ii, iii
+    LowerRoman,
+    /// I, II, III
+    UpperRoman,
+    /// 가, 나, 다
+    HangulSyllable,
+}
+
+/// Punctuation around the number of an ordered list level.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum RichNumberEnclosure {
+    /// `1.`
+    #[default]
+    Dot,
+    /// `(1)`
+    Parentheses,
+    /// `1)`
+    RightParenthesis,
+}
+
+/// How an ordered list paragraph is numbered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct RichListNumber {
+    pub format: RichNumberFormat,
+    pub enclosure: RichNumberEnclosure,
+}
+
 /// Vertical position of a run relative to the baseline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum RichScript {
@@ -70,6 +107,8 @@ pub struct RichRun {
     pub highlight: Option<String>,
     /// Superscript / subscript position.
     pub script: RichScript,
+    /// Hyperlink target the run belongs to (read from Pages; the writers do not emit links yet).
+    pub link: Option<String>,
 }
 
 /// Normalizes `#rrggbb`/`RRGGBB` to upper-case `RRGGBB`; anything else (including `auto`) is
@@ -131,6 +170,12 @@ pub struct RichParagraph {
     pub alignment: Option<RichAlignment>,
     pub heading_level: u8,
     pub list: Option<RichListKind>,
+    /// Nesting level of a list paragraph, 0 for the outermost (read from Pages; the writers do
+    /// not emit levels yet).
+    pub list_level: u8,
+    /// Number format of an ordered list paragraph; `None` is the plain `1.` (read from Pages; the
+    /// writers do not emit formats yet).
+    pub list_number: Option<RichListNumber>,
     /// Left indent in twips (1/20 point); `None` inherits.
     pub left_indent_twips: Option<u32>,
     /// First-line indent in twips; `None` inherits.

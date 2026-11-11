@@ -9,12 +9,16 @@
 //! values) are skipped and reported as warnings with kinds and counts; legacy
 //! XML and encrypted packages are refused by [`crate::pages_package::load_package`].
 
+mod floating;
 mod marks;
 mod notes;
+mod numbering;
 
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
+use self::marks::FootnoteMark;
+use self::numbering::DocumentSettings;
 use crate::pages_package::load_package;
 use crate::pages_proto::{read_reference, ArchiveObject, Message, ObjectTable};
 use crate::pages_schema::{attachment, baseline, char_props_layout, compact_para, heading};
@@ -22,6 +26,7 @@ use crate::pages_schema::{list_type, para_props, root};
 use crate::pages_schema::{storage, style, ty};
 use crate::pages_schema::{
     CharPropFields, ParaPropFields, COLOR_RGBA, COMPACT_PARA_FIELDS, FULL_PARA_FIELDS,
+    FULL_PARA_FIELDS_ALT,
 };
 use crate::pages_table::{read_table, TableBudget, TableOutcome};
 use crate::rich_read_pages_image::{PageImage, PageImages, CROPPED};
@@ -35,8 +40,12 @@ const MAX_RUNS: usize = 1_000_000;
 const MAX_STYLE_CHAIN: usize = 16;
 const MAX_FONT_SIZE_PT: f32 = 1000.0;
 const MAX_HEADING_LEVEL: u8 = 6;
+/// Deepest list level kept (Pages has nine levels).
+const MAX_LIST_LEVEL: u64 = 8;
 const COLOR_CHANNEL_MAX: f32 = 255.0;
 const MAX_FONT_NAME_BYTES: usize = 128;
+/// Field of a text fill message that holds the color.
+const FILL_COLOR: u32 = 1;
 const TWIPS_PER_POINT: f32 = 20.0;
 const MAX_INDENT_PT: f32 = 1000.0;
 const MAX_LINE_SPACING_MULTIPLE: f32 = 10.0;
@@ -84,6 +93,12 @@ impl AttrTable {
         }
         entries.sort_by_key(|(i, _)| *i);
         Ok(Self { entries })
+    }
+
+    /// Table from `(index, value)` entries in any order.
+    fn from_entries(mut entries: Vec<(u64, Option<u64>)>) -> Self {
+        entries.sort_by_key(|(i, _)| *i);
+        Self { entries }
     }
 
     /// Value in effect at `idx` (last entry at or before it; an entry without value resets).
@@ -213,18 +228,25 @@ impl Fmt {
             self.size_half_pt = size_half_pt(p, l.size_pt);
         }
         if self.color.is_none() {
-            self.color = p.sub(l.color).ok().flatten().and_then(|c| color_hex(&c));
+            // The fill is what Pages draws, so it wins over the plain color property.
+            let fill = l
+                .fill
+                .and_then(|n| p.sub(n).ok().flatten())
+                .and_then(|f| f.sub(FILL_COLOR).ok().flatten())
+                .and_then(|c| color_hex(&c));
+            self.color = fill.or_else(|| p.sub(l.color).ok().flatten().and_then(|c| color_hex(&c)));
         }
         if self.highlight.is_none() {
-            self.highlight = l
-                .highlight
-                .and_then(|n| p.sub(n).ok().flatten())
-                .and_then(|c| color_hex(&c));
+            self.highlight = [l.highlight, l.highlight_alt]
+                .into_iter()
+                .flatten()
+                .find_map(|n| p.sub(n).ok().flatten().and_then(|c| color_hex(&c)));
         }
         if self.font.is_none() {
-            self.font = l
-                .font
-                .and_then(|n| p.string(n).ok().flatten())
+            self.font = [l.font, l.font_alt]
+                .into_iter()
+                .flatten()
+                .find_map(|n| p.string(n).ok().flatten())
                 .filter(|f| !f.is_empty() && f.len() <= MAX_FONT_NAME_BYTES);
         }
         if self.script.is_none() {
@@ -272,6 +294,7 @@ impl Fmt {
             }
             if let Ok(Some(p)) = m.sub(style::PARA_PROPS) {
                 self.merge_para_layout(&p, &FULL_PARA_FIELDS);
+                self.merge_para_layout(&p, &FULL_PARA_FIELDS_ALT);
             }
         }
     }
@@ -309,23 +332,30 @@ struct StorageTables {
     list_styles: AttrTable,
     list_levels: AttrTable,
     attachments: AttrTable,
-    /// Footnote marks `(character index, footnote id)` in text order; only the main flow reads
-    /// them, so the number shown at a mark equals the footnote's place in the appendix.
-    footnote_marks: Vec<(u64, u64)>,
+    /// Hyperlink runs (the value is the hyperlink object, `None` outside a link).
+    links: AttrTable,
+    /// Footnote marks in text order; only the main flow reads them, so the number shown at a
+    /// mark equals the footnote's number in the appendix.
+    footnote_marks: Vec<FootnoteMark>,
 }
 
 impl StorageTables {
     /// 1-based footnote number of the mark at `idx`.
     fn footnote_number(&self, idx: u64) -> Option<usize> {
         self.footnote_marks
-            .binary_search_by_key(&idx, |(i, _)| *i)
+            .binary_search_by_key(&idx, |m| m.index)
             .ok()
-            .map(|k| k + 1)
+            .map(|k| self.footnote_marks[k].number)
     }
 
-    fn parse(st: &Message, footnote_marks: Vec<(u64, u64)>) -> Result<Self, EasyOfficeError> {
+    fn parse(
+        st: &Message,
+        footnote_marks: Vec<FootnoteMark>,
+        links: AttrTable,
+    ) -> Result<Self, EasyOfficeError> {
         Ok(Self {
             footnote_marks,
+            links,
             para_styles: AttrTable::parse(st, storage::PARA_STYLE_TABLE)?,
             char_styles: AttrTable::parse(st, storage::CHAR_STYLE_TABLE)?,
             list_styles: AttrTable::parse(st, storage::LIST_STYLE_TABLE)?,
@@ -354,6 +384,10 @@ enum Flow {
     Body,
     Nested,
 }
+
+/// Note for page-layout documents, whose content is not a flowing body.
+const PAGE_LAYOUT_NOTE: &str =
+    "쪽 배치 문서입니다. 본문 대신 쪽 위의 글상자·그림·표를 쪽 순서와 위·왼쪽 위치 순서로 가져왔습니다.";
 
 /// Warning kind for shapes and text boxes that hold no text.
 const EMPTY_SHAPE: &str = "글이 없는 도형";
@@ -387,6 +421,7 @@ fn styled_run(text: String, c: Option<&Fmt>, p: Option<&Fmt>) -> RichRun {
     let c_known = c_bits & 0x0F;
     let resolved = ((c_bits >> 4) & c_known) | ((p_bits >> 4) & !c_known & (p_bits & 0x0F));
     RichRun {
+        link: None,
         text,
         bold: (resolved & FLAG_BOLD) != 0,
         italic: (resolved & FLAG_ITALIC) != 0,
@@ -411,6 +446,7 @@ struct Reader<'a> {
     images: PageImages<'a>,
     /// Marks such as page-number fields in headers and footers are not reported as skipped.
     quiet: bool,
+    settings: DocumentSettings,
 }
 
 impl<'a> Reader<'a> {
@@ -491,10 +527,15 @@ impl<'a> Reader<'a> {
             para.line_spacing_percent = f.line_spacing_percent;
         }
         let level = t.list_levels.at(start).unwrap_or(0);
-        para.list = t
-            .list_styles
-            .at(start)
-            .and_then(|id| self.list_kind(id, level));
+        if let Some(style_id) = t.list_styles.at(start) {
+            para.list = self.list_kind(style_id, level);
+            if let Some(kind) = para.list {
+                para.list_level = u8::try_from(level.min(MAX_LIST_LEVEL)).unwrap_or(0);
+                if kind == RichListKind::Ordered {
+                    para.list_number = self.list_number_of(style_id, level);
+                }
+            }
+        }
         (para, pfmt)
     }
 
@@ -513,29 +554,33 @@ impl<'a> Reader<'a> {
         self.count_run()?;
         Ok(RichRun {
             script: RichScript::Superscript,
-            ..RichRun::plain(number.to_string())
+            ..RichRun::plain(self.note_label(number))
         })
     }
 
+    /// Closes the run collected in `cur`: formatted by the character style and carrying the
+    /// hyperlink in effect at `seg_start`.
     fn flush_run(
         &mut self,
         content: &mut LineContent,
         cur: &mut String,
-        char_style: Option<u64>,
+        t: &StorageTables,
+        seg_start: u64,
         pfmt: Option<&Fmt>,
     ) -> Result<(), EasyOfficeError> {
         if cur.is_empty() {
             return Ok(());
         }
         self.count_run()?;
-        let cfmt = char_style.map(|id| self.style_fmt(id));
-        content
-            .runs
-            .push(styled_run(std::mem::take(cur), cfmt.as_deref(), pfmt));
+        let cfmt = t.char_styles.at(seg_start).map(|id| self.style_fmt(id));
+        let mut run = styled_run(std::mem::take(cur), cfmt.as_deref(), pfmt);
+        run.link = t.links.at(seg_start).and_then(|id| self.link_url(id));
+        content.runs.push(run);
         Ok(())
     }
 
-    /// Splits one line at character-style boundaries into runs and collects its attachments in a single UTF-16 pass.
+    /// Splits one line at character-style and hyperlink boundaries into runs and collects its
+    /// attachments in a single UTF-16 pass.
     fn convert_line(
         &mut self,
         t: &StorageTables,
@@ -543,20 +588,28 @@ impl<'a> Reader<'a> {
         start: u64,
         pfmt: Option<&Fmt>,
     ) -> Result<(LineContent, u64), EasyOfficeError> {
-        let mut cuts = t.char_styles.boundaries_after(start).peekable();
+        let mut style_cuts = t.char_styles.boundaries_after(start).peekable();
+        let mut link_cuts = t.links.boundaries_after(start).peekable();
         let mut content = LineContent::default();
         let mut cur = String::new();
         let mut seg_start = start;
         let mut utf16 = start;
         for ch in line.chars() {
-            while cuts.next_if(|c| *c <= utf16).is_some() {
-                self.flush_run(&mut content, &mut cur, t.char_styles.at(seg_start), pfmt)?;
+            let mut cut = false;
+            while style_cuts.next_if(|c| *c <= utf16).is_some() {
+                cut = true;
+            }
+            while link_cuts.next_if(|c| *c <= utf16).is_some() {
+                cut = true;
+            }
+            if cut {
+                self.flush_run(&mut content, &mut cur, t, seg_start, pfmt)?;
                 seg_start = utf16;
             }
             if ch == '\u{FFFC}' || ch == storage::FOOTNOTE_MARK_CHAR {
                 content.attachments.extend(t.attachments.exact(utf16));
                 if let Some(number) = t.footnote_number(utf16) {
-                    self.flush_run(&mut content, &mut cur, t.char_styles.at(seg_start), pfmt)?;
+                    self.flush_run(&mut content, &mut cur, t, seg_start, pfmt)?;
                     seg_start = utf16 + 1;
                     content.runs.push(self.footnote_number_run(number)?);
                 }
@@ -565,7 +618,7 @@ impl<'a> Reader<'a> {
             }
             utf16 += ch.len_utf16() as u64;
         }
-        self.flush_run(&mut content, &mut cur, t.char_styles.at(seg_start), pfmt)?;
+        self.flush_run(&mut content, &mut cur, t, seg_start, pfmt)?;
         Ok((content, utf16 - start))
     }
 
@@ -580,7 +633,8 @@ impl<'a> Reader<'a> {
         } else {
             Vec::new()
         };
-        let tables = StorageTables::parse(st, marks)?;
+        let links = self.link_table(st);
+        let tables = StorageTables::parse(st, marks, links)?;
         self.note_marks(st, flow);
         if flow == Flow::Body {
             self.note_columns(st);
@@ -743,23 +797,34 @@ pub(crate) fn read_pages(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Ea
         fmt_cache: HashMap::new(),
         images: PageImages::new(&pkg.objects, &pkg.data_files),
         quiet: false,
+        settings: pkg
+            .objects
+            .objects
+            .values()
+            .find(|o| o.type_id == ty::SETTINGS)
+            .and_then(|o| Message::parse(&o.payload).ok())
+            .map(|m| DocumentSettings::read(&m))
+            .unwrap_or_default(),
     };
     let body = reader
         .storage_message(body_id)
         .ok_or_else(|| corrupt("본문 저장소를 읽을 수 없습니다"))?;
     let mut blocks = reader.convert_storage(&body, Flow::Body)?;
-    reader.note_floating_drawables();
     while matches!(blocks.last(), Some(RichBlock::Paragraph(p)) if p.runs.is_empty()) {
         blocks.pop();
     }
+    blocks.extend(reader.floating_blocks()?);
     blocks.extend(reader.appendix_blocks(&body)?);
     let mut warnings: Vec<String> = reader
         .skipped
         .iter()
         .map(|(kind, n)| format!("가져오지 않은 요소: {kind} {n}개"))
         .collect();
+    if reader.settings.page_layout {
+        warnings.push(PAGE_LAYOUT_NOTE.to_string());
+    }
     warnings.push(
-        "Pages 문서는 읽기 전용으로 열고, 머리글·바닥글·각주는 본문 뒤 부록 문단으로 옮기며, 변경 추적·차트 등은 가져오지 않고 서식이 일부 단순화될 수 있습니다."
+        "Pages 문서는 읽기 전용으로 열고, 머리글·바닥글·각주·댓글은 본문 뒤 부록 문단으로 옮기며, 쪽 번호 등 필드·구역 설정·표의 테두리·셀 배경·열 너비·차트 등은 가져오지 않고 서식이 일부 단순화될 수 있습니다."
             .to_string(),
     );
     let title = blocks

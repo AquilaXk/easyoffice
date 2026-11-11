@@ -96,6 +96,7 @@ pub(crate) fn push_run(runs: &mut Vec<RichRun>, text: &str, fmt: &CharFmt) {
         }
     }
     runs.push(RichRun {
+        link: None,
         text: text.to_string(),
         bold: fmt.bold,
         italic: fmt.italic,

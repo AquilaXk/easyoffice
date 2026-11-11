@@ -260,7 +260,7 @@ fn cropped_pictures_are_imported_whole_and_reported() {
 }
 
 #[test]
-fn page_layout_floating_drawables_are_reported_not_dropped_silently() {
+fn page_layout_floating_drawables_that_hold_nothing_are_reported() {
     let mut b = DocBuilder::default();
     let img = picture(&mut b, &Picture::default());
     let shape = b.add(2011, &[]);
@@ -277,12 +277,10 @@ fn page_layout_floating_drawables_are_reported_not_dropped_silently() {
     );
     let body = body_with(&mut b, "앞", &[], "뒤");
     let (_, warnings) = open(&pages_zip(b.finish(body))).expect("opens");
+    // The picture has no data file here, the shape no text; each is counted once.
+    assert!(warned(&warnings, "글이 없는 도형 1개"), "{warnings:?}");
     assert!(
-        warned(&warnings, "쪽 위의 개체: 그림(형식 3005) 1개"),
-        "{warnings:?}"
-    );
-    assert!(
-        warned(&warnings, "쪽 위의 개체: 그림·도형 등 개체(형식 2011) 1개"),
+        warned(&warnings, "파일 이름을 찾을 수 없는 그림 1개"),
         "{warnings:?}"
     );
     assert!(

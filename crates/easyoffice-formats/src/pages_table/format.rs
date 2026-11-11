@@ -407,7 +407,7 @@ fn format_bool(value: f64, spec: Option<&FormatSpec>) -> &'static str {
 /// Displayed text of a number, date or checkbox cell; `None` when the value cannot be shown.
 pub(crate) fn render_value(packed: &PackedCell, spec: Option<&FormatSpec>) -> Option<String> {
     match (packed.kind, packed.value) {
-        (cell::TYPE_NUMBER, CellScalar::Decimal(d)) => {
+        (cell::TYPE_NUMBER | cell::TYPE_CURRENCY, CellScalar::Decimal(d)) => {
             let mut out = String::with_capacity(U128_DIGITS);
             write_number(&mut out, d, &number_style(spec))?;
             Some(out)

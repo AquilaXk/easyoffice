@@ -2,9 +2,15 @@
 //!
 //! These numbers are our own constants for the wire format observed in documents and described by
 //! public format documentation; no Apple `.proto` file or third-party schema text is copied.
-//! Every constant is either confirmed against a real document ("확인") or carries the marker
+//! Every constant is either confirmed against a document ("확인") or carries the marker
 //! `// 검증 필요` (unconfirmed). To correct the mapping, edit only this file.
 //!
+//! Where the independent public implementation (MIT) and our fixtures disagree, its values are the
+//! default and ours stay as a second place that is read as well (QA 2026-11-11, "독립 구현 기준,
+//! 실파일 대조 전"): the fixtures are Pages templates with objects added by other tools, so a
+//! "확인" that rests on them alone only says that this reader reads those files. Layouts that the
+//! independent notes do not know (compact styles, tile type 6003, version-1 cells, footnote type
+//! 2012 in table 11, comment type 2033 in table 19) are marked 검증 필요 for that reason.
 //! Confirmation basis (see `docs/policy-decisions.md` PD-087):
 //! 1. one document created with the web edition (file format version 184): bold/underline
 //!    character styles, heading/body paragraph styles, list styles, 14 tables of rich-text cells
@@ -33,7 +39,7 @@ pub(crate) mod ty {
     pub const TABLE_MODEL: u32 = 6001;
     /// Table tile (rows of packed cells), web edition. 확인
     pub const TABLE_TILE: u32 = 6002;
-    /// Table tile, fixture documents (same message shape). 확인
+    /// Table tile, fixture documents (same message shape). 검증 필요: fixtures only
     pub const TABLE_TILE_V2: u32 = 6003;
     /// Table data list (strings, rich text payloads, styles, ...). 확인
     pub const TABLE_DATA_LIST: u32 = 6005;
@@ -45,10 +51,13 @@ pub(crate) mod ty {
     pub const SHAPE_WITH_TEXT: u32 = 2011;
     /// Header/footer text lists (`1` = header storages, `2` = footer storages). 확인
     pub const HEADER_FOOTER_LIST: u32 = 10143;
-    /// Footnote (points at the footnote text storage). 확인 (fixture)
+    /// Footnote (points at the footnote text storage). 검증 필요: fixtures only (newer files use
+    /// [`FOOTNOTE_ATTACHMENT`])
     pub const FOOTNOTE: u32 = 2012;
     /// Package metadata (list of data files with identifiers and names). 확인 (fixture)
     pub const PACKAGE_METADATA: u32 = 11006;
+    /// Document settings (body switch, note settings). 확인 as fields (fixtures)
+    pub const SETTINGS: u32 = 10012;
     /// Drawables floating on pages (page-layout documents). 검증 필요: field layout is from a
     /// public independent implementation's notes; the fixtures only carry an empty list.
     pub const FLOATING_DRAWABLES: u32 = 10010;
@@ -59,6 +68,9 @@ pub(crate) mod ty {
     pub const COLUMN_STYLE: u32 = 2024;
     /// Hyperlink field: field 2 is the address. 검증 필요: public notes only; no fixture link.
     pub const HYPERLINK: u32 = 2032;
+    /// Comment text objects: the fixtures' (3059) and newer files' (3056). Field 1 is the text.
+    pub const COMMENT_TEXT: u32 = 3056;
+    pub const COMMENT_TEXT_V2: u32 = 3059;
     /// Comment anchor field of the fixtures (points at the comment text, type 3059). 확인
     pub const COMMENT_FIELD: u32 = 2033;
     /// Date/time field (the text it last rendered stays in the storage). 검증 필요
@@ -85,6 +97,37 @@ pub(crate) mod ty {
     pub const CONNECTION_LINE: u32 = 3009;
     /// Chart drawable. 검증 필요
     pub const CHART: u32 = 5021;
+}
+
+/// Hyperlink field. 검증 필요: public notes only; no fixture link.
+pub(crate) mod hyperlink {
+    /// The address string.
+    pub const URL: u32 = 2;
+    /// Address prefixes that are imported (anything else, `javascript:` and local paths
+    /// included, is dropped and counted).
+    pub const ALLOWED_SCHEMES: [&str; 5] = ["http://", "https://", "mailto:", "tel:", "ftp://"];
+    /// Longest accepted address.
+    pub const MAX_URL_BYTES: usize = 4096;
+}
+
+/// Document settings (`TP.SettingsArchive`, type 10012). `BODY` and the note settings are 확인 as
+/// fields against the fixtures (`1 = 1`, `30..33 = 0, 0, 0, 10`); every non-default value is
+/// 검증 필요 (public notes only).
+pub(crate) mod settings {
+    /// Word-processing (true) or page-layout (false) document.
+    pub const BODY: u32 = 1;
+    /// 0 footnotes, 1 document endnotes, 2 section endnotes.
+    pub const NOTE_KIND: u32 = 30;
+    /// 0 numeric, 1 roman, 2 symbolic, 3 Japanese numeric, 4 Japanese ideographic, 5 Arabic.
+    pub const NOTE_FORMAT: u32 = 31;
+    pub const FORMAT_ROMAN: u64 = 1;
+    pub const FORMAT_SYMBOLIC: u64 = 2;
+    pub const FORMAT_JAPANESE_NUMERIC: u64 = 3;
+    pub const FORMAT_JAPANESE_IDEOGRAPHIC: u64 = 4;
+    /// 0 continuous, 1 restart each page, 2 restart each section.
+    pub const NOTE_NUMBERING: u32 = 32;
+    pub const NUMBERING_PER_PAGE: u64 = 1;
+    pub const NUMBERING_PER_SECTION: u64 = 2;
 }
 
 /// Column style properties. 확인 for a single column against the fixtures (`11.7.1.1 = 1`);
@@ -137,12 +180,16 @@ pub(crate) mod drawable {
 pub(crate) mod floating {
     /// Repeated page groups.
     pub const PAGE_GROUPS: u32 = 1;
+    /// Page index of a group (zero based).
+    pub const GROUP_PAGE: u32 = 1;
     /// Repeated `{ drawable reference = 1 }` entries inside a page group.
     pub const GROUP_DRAWABLES: u32 = 4;
 }
 
 /// Geometry field numbers.
 pub(crate) mod geometry {
+    /// Position message `{ x = 1, y = 2 }` as 32-bit floats in points.
+    pub const POSITION: u32 = 1;
     /// Size message `{ width = 1, height = 2 }` as 32-bit floats in points.
     pub const SIZE: u32 = 2;
 }
@@ -185,6 +232,10 @@ pub(crate) mod storage {
     pub const ATTACHMENT_TABLE: u32 = 9;
     /// Footnote attribute table (index of the reference mark to a footnote, type 2012). 확인
     pub const FOOTNOTE_TABLE: u32 = 11;
+    /// Smart field table of newer files (hyperlinks, date fields), and the table the fixtures use
+    /// for comment anchors (type 2033) where newer files keep language strings. 검증 필요
+    pub const SMARTFIELD_TABLE: u32 = 11;
+    pub const LANGUAGE_OR_FIELD_TABLE: u32 = 19;
     /// Footnote table of newer files (the mark sits on U+000E); the fixtures use
     /// [`FOOTNOTE_TABLE`]. 검증 필요: public notes only.
     pub const FOOTNOTE_TABLE_V2: u32 = 16;
@@ -195,6 +246,9 @@ pub(crate) mod storage {
     /// fixtures put footnotes in 11 and comments (type 2033) in 19; public notes put hyperlinks in 11 and
     /// comments in 23), so entries are classified by the type of the object they point at.
     pub const MARK_TABLES: [u32; 7] = [11, 15, 16, 19, 21, 22, 23];
+    /// Section table of the body (entries point at section objects; a section starts at the
+    /// character after its U+0004 break). 확인 (one entry in every fixture)
+    pub const SECTION_TABLE: u32 = 17;
     /// Tracked insertion and deletion tables (entries point at a change object).
     pub const INSERTION_TABLE: u32 = 21;
     pub const DELETION_TABLE: u32 = 22;
@@ -227,6 +281,9 @@ pub(crate) mod style {
     pub const COMPACT_PARA_PROPS: u32 = 3;
     /// List style: repeated per-level list type. 확인
     pub const LIST_LEVEL_TYPES: u32 = 11;
+    /// List style: repeated per-level number format (0 `1.`, 1 `(1)`, 2 `1)`, 3-5 upper-case
+    /// roman, 6-8 lower-case roman, 9-14 letters, ...). 검증 필요: public notes only.
+    pub const LIST_LEVEL_NUMBER_FORMATS: u32 = 15;
 }
 
 /// Field numbers of one character property layout.
@@ -242,6 +299,12 @@ pub(crate) struct CharPropFields {
     pub font: Option<u32>,
     /// Baseline enum: 1 superscript, 2 subscript.
     pub script: Option<u32>,
+    /// Second place for the font name (string) when `font` holds something else.
+    pub font_alt: Option<u32>,
+    /// Second place for the text background color message.
+    pub highlight_alt: Option<u32>,
+    /// Text fill message whose field 1 is the color that is drawn (it wins over `color`).
+    pub fill: Option<u32>,
 }
 
 /// Full layout (`style::CHAR_PROPS`): bold (varint bool) 1, italic 2 (검증 필요: only ever 0 in
@@ -258,9 +321,16 @@ pub(crate) const FULL_CHAR_FIELDS: CharPropFields = CharPropFields {
     highlight: Some(19),
     font: Some(16),
     script: Some(10),
+    // 검증 필요: independent notes put the PostScript font name in 5, the text background color
+    // in 26 and the drawn text color in the fill 46.1 of the same property message (our 16 and
+    // 19 come from one web-edition document). Both places are read.
+    font_alt: Some(5),
+    highlight_alt: Some(26),
+    fill: Some(46),
 };
 
-/// Compact layout (`style::COMPACT_CHAR_PROPS`), every field 확인 against the fixture text file:
+/// Compact layout (`style::COMPACT_CHAR_PROPS`), every field matches the fixture text file (검증 필요:
+/// the independent notes do not know this layout):
 /// bold 1, italic 2, underline 3, strikethrough 4, size 6 (float), color 7, highlight 19.
 pub(crate) const COMPACT_CHAR_FIELDS: CharPropFields = CharPropFields {
     bold: 1,
@@ -272,6 +342,9 @@ pub(crate) const COMPACT_CHAR_FIELDS: CharPropFields = CharPropFields {
     highlight: Some(19),
     font: Some(5),    // 확인: font name string (fixture text file)
     script: Some(10), // 확인: 1 superscript, 2 subscript
+    font_alt: None,
+    highlight_alt: None,
+    fill: None,
 };
 
 /// Character property message of a style object and the field layout that applies to it: the
@@ -306,7 +379,8 @@ pub(crate) mod para_props {
     pub const LINE_SPACING: u32 = 19;
 }
 
-/// Compact paragraph property layout (`style::COMPACT_PARA_PROPS`), 확인 against the fixture text
+/// Compact paragraph property layout (`style::COMPACT_PARA_PROPS`), matches the fixture text (검증 필요:
+/// not in the independent notes)
 /// file: first-line indent 6 (float, points), left indent 7 (float, points), line spacing 8
 /// (`{ mode = 1, amount = 2 }`, mode 0 = multiple of single spacing).
 pub(crate) mod compact_para {
@@ -329,6 +403,15 @@ pub(crate) const FULL_PARA_FIELDS: ParaPropFields = ParaPropFields {
     first_line_indent: para_props::FIRST_LINE_INDENT,
     left_indent: para_props::LEFT_INDENT,
     line_spacing: para_props::LINE_SPACING,
+};
+
+/// Paragraph properties of the full layout according to independent notes (검증 필요): first-line
+/// indent 7, left indent 11, line spacing 13 (`{ mode = 1, amount = 2 }`). Read after
+/// [`FULL_PARA_FIELDS`] so that either layout fills what the other leaves unset.
+pub(crate) const FULL_PARA_FIELDS_ALT: ParaPropFields = ParaPropFields {
+    first_line_indent: 7,
+    left_indent: 11,
+    line_spacing: 13,
 };
 
 pub(crate) const COMPACT_PARA_FIELDS: ParaPropFields = ParaPropFields {
@@ -512,28 +595,38 @@ pub(crate) mod cell {
     pub const LEGACY_BIT_DOUBLE: u32 = 1;
     pub const LEGACY_BIT_STRING_KEY: u32 = 3;
     pub const LEGACY_BIT_RICH_TEXT_KEY: u32 = 4;
+    /// Date value (a double of seconds since 2001-01-01) of a version-5 cell. 검증 필요: public
+    /// notes only (8 bytes); the fixtures hold no version-5 date cell.
+    pub const LEGACY_BIT_DATE: u32 = 2;
     /// Flag bits whose 4-byte fields are present in the fixtures: cell style, text style,
     /// formula, formula error, suggestion, and the number, currency, duration and text formats.
+    /// Bits 7, 8, 10, 15 and 18-20 (conditional style and rule, control spec, date and boolean
+    /// format, comment, import warning) are 4 bytes according to public notes (검증 필요).
     pub const LEGACY_FOUR_BYTE_BITS: u32 = (1 << 3)
         | (1 << 4)
         | (1 << 5)
         | (1 << 6)
+        | (1 << 7)
+        | (1 << 8)
         | (1 << 9)
+        | (1 << 10)
         | (1 << 11)
         | (1 << 12)
         | (1 << 13)
         | (1 << 14)
+        | (1 << 15)
         | (1 << 16)
-        | (1 << 17);
-    /// Flag bits whose field size was never seen (bits 2, 7, 8, 10, 15): such cells are not
-    /// read, because every later field offset would be a guess. 검증 필요
-    pub const LEGACY_UNVERIFIED_BITS: u32 = (1 << 2) | (1 << 7) | (1 << 8) | (1 << 10) | (1 << 15);
-    /// Highest flag bit that is decoded.
-    pub const LEGACY_LAST_BIT: u32 = 17;
-    /// Bitmask of format list key bits: number (13), currency (14), duration (16) and control/checkbox (17) format.
-    pub const LEGACY_FORMAT_MASK: u32 = (1 << 13) | (1 << 14) | (1 << 16) | (1 << 17);
+        | (1 << 17)
+        | (1 << 18)
+        | (1 << 19)
+        | (1 << 20);
+    /// Highest flag bit that is decoded; higher bits are never set by known writers.
+    pub const LEGACY_LAST_BIT: u32 = 20;
+    /// Bitmask of format list key bits: number (13), currency (14), date (15, 검증 필요),
+    /// duration (16) and control/checkbox (17) format.
+    pub const LEGACY_FORMAT_MASK: u32 = (1 << 13) | (1 << 14) | (1 << 15) | (1 << 16) | (1 << 17);
     /// Current layout: version byte 1, type byte, flags word at byte 4, fields from byte 8 in
-    /// flag-bit order. 확인 (fixture documents)
+    /// flag-bit order. 검증 필요: fixture documents only
     pub const CURRENT_VERSION: u8 = 1;
     pub const FLAGS_OFFSET: usize = 4;
     pub const FIELDS_OFFSET: usize = 8;
@@ -546,6 +639,8 @@ pub(crate) mod cell {
     pub const TYPE_DATE: u8 = 5;
     pub const TYPE_BOOL: u8 = 6;
     pub const TYPE_RICH_TEXT: u8 = 9;
+    /// Currency cell (decimal value like a number). 검증 필요: public notes only.
+    pub const TYPE_CURRENCY: u8 = 10;
     /// Number of flag bits that are decoded (bits 0..=10); higher bits come after every field
     /// that is read.
     pub const KNOWN_FLAG_BITS: u32 = 11;

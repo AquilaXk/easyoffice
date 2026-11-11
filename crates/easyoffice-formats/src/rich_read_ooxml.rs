@@ -230,6 +230,8 @@ impl Resolver<'_> {
             })
         };
         RichParagraph {
+            list_level: 0,
+            list_number: None,
             alignment: alignment(p.jc.as_deref()),
             runs: p.runs,
             heading_level: heading,

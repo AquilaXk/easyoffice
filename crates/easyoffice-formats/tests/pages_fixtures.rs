@@ -60,7 +60,7 @@ fn flags(r: &RichRun) -> Flags {
 /// `(bold, italic, underline, strike)`
 type Flags = (bool, bool, bool, bool);
 
-const GENERIC_WARNING: &str = "Pages 문서는 읽기 전용으로 열고, 머리글·바닥글·각주는 본문 뒤 부록 문단으로 옮기며, 변경 추적·차트 등은 가져오지 않고 서식이 일부 단순화될 수 있습니다.";
+const GENERIC_WARNING: &str = "Pages 문서는 읽기 전용으로 열고, 머리글·바닥글·각주·댓글은 본문 뒤 부록 문단으로 옮기며, 쪽 번호 등 필드·구역 설정·표의 테두리·셀 배경·열 너비·차트 등은 가져오지 않고 서식이 일부 단순화될 수 있습니다.";
 
 #[test]
 fn text_fixture_paragraphs_and_headings() {
@@ -264,7 +264,6 @@ fn objects_fixture_reports_only_what_is_still_skipped() {
     assert_eq!(
         warnings,
         vec![
-            "가져오지 않은 요소: 댓글 1개".to_string(),
             "가져오지 않은 요소: 쪽·단 나누기 1개".to_string(),
             GENERIC_WARNING.to_string(),
         ]
@@ -274,8 +273,9 @@ fn objects_fixture_reports_only_what_is_still_skipped() {
         .iter()
         .map(|p| (p.heading_level, p.plain_text()))
         .collect();
-    // The page break between the text box and the second page is an extra empty paragraph.
-    assert_eq!(texts.len(), 22);
+    // The page break between the text box and the second page is an extra empty paragraph; the
+    // comment appendix adds a heading and the comment.
+    assert_eq!(texts.len(), 24);
     assert_eq!(texts[0].1, "미지원 항목 안내 확인용 문서 (객체 테스트)");
     // The footnote mark is a superscript number at the end of the sentence.
     assert_eq!(texts[5].1, "이 문장 끝에는 각주가 달려 있습니다.1");
@@ -310,7 +310,7 @@ fn objects_fixture_appends_footnotes_headers_and_footers_after_the_body() {
     let tail: Vec<(u8, String)> = paragraphs(&doc)
         .iter()
         .rev()
-        .take(6)
+        .take(8)
         .rev()
         .map(|p| (p.heading_level, p.plain_text()))
         .collect();
@@ -326,6 +326,8 @@ fn objects_fixture_appends_footnotes_headers_and_footers_after_the_body() {
             (0, "머리말: Pages 객체 테스트 문서".to_string()),
             (2, "바닥글".to_string()),
             (0, "꼬리말 - 쪽 번호: ".to_string()),
+            (2, "댓글".to_string()),
+            (0, "이 문단에 달린 테스트용 댓글(메모)입니다.".to_string()),
         ]
     );
 }
@@ -421,7 +423,8 @@ fn text_fixture_font_script_indent_and_line_spacing() {
             left.first_line_indent_twips,
             left.line_spacing_percent
         ),
-        (Some(720), None, None)
+        // The 115% comes from the root style's line spacing (field 13 of the full layout).
+        (Some(720), None, Some(115))
     );
     let first = paragraph_with(&doc, "첫 줄 들여쓰기");
     assert_eq!(
@@ -430,7 +433,7 @@ fn text_fixture_font_script_indent_and_line_spacing() {
             first.first_line_indent_twips,
             first.line_spacing_percent
         ),
-        (None, Some(720), None)
+        (None, Some(720), Some(115))
     );
     let spacing = paragraph_with(&doc, "줄 간격 2배");
     assert_eq!(
@@ -443,7 +446,8 @@ fn text_fixture_font_script_indent_and_line_spacing() {
     );
     let plain = paragraph_with(&doc, "왼쪽 정렬이");
     assert_eq!(plain.left_indent_twips, None);
-    assert_eq!(plain.line_spacing_percent, None);
+    // The template's default spacing (1.1458) sits in field 13 of the style's paragraph properties.
+    assert_eq!(plain.line_spacing_percent, Some(115));
 }
 
 #[test]
@@ -485,4 +489,32 @@ fn cellkinds_fixture_merge_regions() {
         })
         .collect();
     assert_eq!(merges, vec![(3, 0, 1, 2), (3, 2, 2, 1)]);
+}
+
+#[test]
+fn lists_fixture_levels_and_number_formats() {
+    use easyoffice_formats::{RichListNumber, RichNumberEnclosure, RichNumberFormat};
+    let (doc, _) = open("eo-pages-lists-tables.pages");
+    let item = |prefix: &str| {
+        let p = paragraph_with(&doc, prefix);
+        (p.list_level, p.list_number)
+    };
+    // Plain `1.` numbering and bullets carry no format.
+    assert_eq!(item("번호 목록 첫 번째"), (0, None));
+    assert_eq!(item("상위 글머리표"), (0, None));
+    // Nested bullets keep their level.
+    assert_eq!(item("들여쓴 첫 번째 하위 항목입니다.").0, 1);
+    assert_eq!(item("들여쓴 두 번째 하위 항목입니다.").0, 1);
+    assert_eq!(item("두 번째 하위 항목 안의 세 번째 단계").0, 2);
+    // The a-b-c list is lower-case Latin; the 가나다 list is the Hangul syllable list.
+    let latin = RichListNumber {
+        format: RichNumberFormat::LowerLatin,
+        enclosure: RichNumberEnclosure::Dot,
+    };
+    let hangul = RichListNumber {
+        format: RichNumberFormat::HangulSyllable,
+        enclosure: RichNumberEnclosure::Dot,
+    };
+    assert_eq!(item("알파벳(a-b-c) 형식 첫 번째").1, Some(latin));
+    assert_eq!(item("가나다 형식 첫 번째").1, Some(hangul));
 }

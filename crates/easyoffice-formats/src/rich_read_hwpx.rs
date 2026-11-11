@@ -329,6 +329,8 @@ fn finish_paragraph(header: &Header, p: ParaState) -> RichParagraph {
         push_run(&mut runs, &r.text, &fmt);
     }
     RichParagraph {
+        list_level: 0,
+        list_number: None,
         runs,
         alignment,
         heading_level: heading,

@@ -548,6 +548,8 @@ impl<'a> OdtWalker<'a> {
                 None
             };
             self.blocks.push(RichBlock::Paragraph(RichParagraph {
+                list_level: 0,
+                list_number: None,
                 runs: p.runs,
                 alignment: p.style.align,
                 heading_level: p.outline,
