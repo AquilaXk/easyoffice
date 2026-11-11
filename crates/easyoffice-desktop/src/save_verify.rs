@@ -1,4 +1,4 @@
-//! Checks a document's bytes before they may replace a file (PD-109, #227).
+//! Checks a document's bytes before they may replace a file (PD-109).
 //!
 //! The page builds the bytes; the shell does not trust them. A save that would put a truncated or
 //! mislabelled document where a good one used to be is refused before any file is touched

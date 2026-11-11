@@ -1,4 +1,4 @@
-//! Honest write-side compatibility reporting for encoded containers (#105).
+//! Honest write-side compatibility reporting for encoded containers.
 
 use crate::DocumentFormat;
 
@@ -33,7 +33,7 @@ impl DocumentFormat {
     ///
     /// Every writer currently follows its governing specification. The `.doc` and `.ppt` writers
     /// emit real MS-DOC / MS-PPT streams (`1Table` + piece table + FKPs; `Current User` + persist
-    /// directory + user edit atom), so they no longer report a limitation (#112). A writer that
+    /// directory + user edit atom), so they no longer report a limitation. A writer that
     /// regresses to a subset must return [`OutputCompatibility::Limited`] here again.
     pub fn output_compatibility(&self) -> OutputCompatibility {
         OutputCompatibility::Standard

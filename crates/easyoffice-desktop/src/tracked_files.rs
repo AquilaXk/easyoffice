@@ -1,4 +1,4 @@
-//! The window label <-> file path map used by in-place saving (#133). Like the registry in
+//! The window label <-> file path map used by in-place saving. Like the registry in
 //! `windows.rs`, it lives in Rust only: the WebView never sees a path, only whether a save worked.
 //! Each entry also keeps a fingerprint of the file as it was opened (or last written): size,
 //! modification time and a hash of the content, so a save can notice that another program changed
