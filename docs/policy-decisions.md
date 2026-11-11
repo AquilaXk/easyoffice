@@ -2532,7 +2532,7 @@
 
 - **Status** Implemented (`pdf_font_select.rs`, `pdf_export.rs`, `vendor/svg2pdf/src/render/text.rs`, `config/svg2pdf-local-patches.json`, `scripts/rhwp-svg2pdf.mjs`)
 - **Context** 성능 측정(`docs/performance.md` 4절)에서 셸 PDF 내보내기의 병목은 (1) 글자 요소마다 글꼴 면 수백 개를 걸러 찾는 `fontdb::Database::query`(포함 시간 20~28.6%), (2) 쪽마다 글꼴 파일 전체를 복사하는 `fill_fonts`(`memmove` 자기 시간 21%, 최대 RSS 425~829 MB), (3) 쪽 스트림 deflate 수준 6(7~13%)이었습니다. PD-101은 `vendor/svg2pdf`가 rhwp 고정 사본과 같아야 하고 다르면 갱신을 막는다고 정했습니다.
-- **Decision (`PD-165`)**
+- **Decision (`PD-163`)**
   1. **글꼴 질의 메모**: usvg의 글꼴 선택기를 (패밀리 목록, 굵기, 늘이기, 모양) → 면 ID 메모로 감쌉니다(`pdf_font_select.rs`). 메모는 내보내기 한 번에 하나이고 모든 쪽 스레드가 읽기 잠금으로 공유하며 내보내기와 함께 버립니다(글꼴 DB는 내보내는 동안 바뀌지 않음). 요청 4,096개와 패밀리 이름 합계 512바이트를 넘는 요청은 저장하지 않고(신뢰할 수 없는 SVG의 메모리 상한) 매번 DB에 묻습니다. 대체 글꼴 선택기(PD-114)는 그대로입니다. 쪽을 비트맵으로 그리는 경로(`bitmap_parse_options`)는 쪽마다 새 메모를 씁니다.
   2. **글꼴 데이터 공유**: `vendor/svg2pdf/src/render/text.rs`의 `Font.face_data`를 `Arc<Vec<u8>>`에서 `Arc<dyn AsRef<[u8]> + Send + Sync>`로 바꾸고, 글꼴 DB가 메모리에 쥔 면(`Binary`, 파일 매핑 `SharedFile`)은 복사하지 않고 같은 `Arc`를 씁니다. 파일을 접근마다 여는 면(`File`)만 이전처럼 복사합니다. 출력 바이트는 같습니다(세 원본으로 시험).
   3. **svg2pdf 로컬 패치 기록**: 패치한 파일은 `config/svg2pdf-local-patches.json`에 `base`(rhwp 사본의 blob id), `patched`(우리 파일의 blob id), 요약을 적습니다. `update-rhwp.mjs`의 svg2pdf 검사는 로컬 blob이 `patched`이고 상위 blob이 `base`인 파일을 차이로 세지 않습니다. 상위가 그 파일을 바꿨으면 `--sync-svg2pdf`로도 덮어쓰지 않고 "패치를 손으로 합치고 기록을 갱신하라"고 막습니다. 기록과 맞지 않는 파일은 지금처럼 차이로 막습니다. `node --test scripts/test-update-rhwp.mjs`가 기록과 실제 파일의 blob id 일치를 확인하므로, 패치 파일을 고치면 기록도 함께 고쳐야 합니다.
@@ -2559,7 +2559,7 @@
 - **Verified by** `cargo test -p easyoffice-sheet --lib recalc`(무작위 편집 속성 시험, 순환, 시트 간 참조, 행 삽입·삭제 뒤 의존 갱신), `cargo test -p easyoffice-app --lib sheet_session`(상한·owner·락 오염·수식 3만 개 읽기 패턴 거부/상한), `node --test scripts/test-webui-sheet-session.mjs`.
 - **Revisit when** 시트 집합 변경에도 세션을 유지해야 할 때, 순환 참조가 흔한 문서에서 편집이 느려질 때, 응답이 매우 큰 첫 계산을 나눠 받아야 할 때.
 - **Context** Quick Look 측정(`docs/performance.md` 2.4.1)에서 미리보기 PDF가 글자를 윤곽선으로 내보내 77쪽 문서가 32.7MB·9.6초였고, 글꼴 면을 접근마다 열고 매핑해 첫 쪽 PNG의 63%를 시스템 호출이 차지했습니다.
-- **Decision (`PD-164`)** (1) Quick Look 확장은 글꼴 DB의 면을 프로세스당 한 번 읽기 전용으로 매핑합니다(셸 PD-114 3과 같은 방식). (2) 미리보기 PDF는 글자를 글꼴 서브셋으로 포함하고, 서브셋이 실패한 쪽만 윤곽선으로 다시 변환합니다(PD-114 5와 같은 재시도, PD-140 2의 "글자는 윤곽선"을 바꿈). (3) 글꼴 파일을 복사하지 않고 DB 매핑을 공유하는 `fill_fonts` 패치(PD-163)가 있어야 RSS가 늘지 않습니다. (4) 쪽 콘텐츠 스트림 deflate 수준을 1로 낮춥니다(미리보기는 한 번 읽는 용도라 속도 우선). `vendor/svg2pdf`에 `ConversionOptions::compression_level`(기본 6)을 더했고 셸 출력은 그대로입니다.
+- **Decision (`PD-165`)** (1) Quick Look 확장은 글꼴 DB의 면을 프로세스당 한 번 읽기 전용으로 매핑합니다(셸 PD-114 3과 같은 방식). (2) 미리보기 PDF는 글자를 글꼴 서브셋으로 포함하고, 서브셋이 실패한 쪽만 윤곽선으로 다시 변환합니다(PD-114 5와 같은 재시도, PD-140 2의 "글자는 윤곽선"을 바꿈). (3) 글꼴 파일을 복사하지 않고 DB 매핑을 공유하는 `fill_fonts` 패치(PD-163)가 있어야 RSS가 늘지 않습니다. (4) 쪽 콘텐츠 스트림 deflate 수준을 1로 낮춥니다(미리보기는 한 번 읽는 용도라 속도 우선). `vendor/svg2pdf`에 `ConversionOptions::compression_level`(기본 6)을 더했고(`config/svg2pdf-local-patches.json`에 기록) 셸 출력은 그대로입니다.
 - **Why** 77쪽 문서 PDF가 9.6초 → 1.5초, 32.7MB → 4.0MB로 줄고, 글자를 검색·복사할 수 있습니다.
 - **Trade-offs** 최대 RSS는 적용 전 이하입니다(77쪽 172 → 91MB, number-bullet 23 → 21MB). 글꼴 DB를 만드는 단계가 약 10ms 늘어 작은 문서의 첫 쪽 PNG가 10~15ms 느려졌습니다. deflate 수준 1은 PDF를 약 3% 키웁니다.
 - **Verified by** `node scripts/run-quicklook-tests.mjs`, `node scripts/bench-run.mjs --runs 5 --suite quicklook`.

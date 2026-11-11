@@ -1,11 +1,29 @@
 {
   "schemaVersion": 1,
   "files": {
+    "src/lib.rs": {
+      "id": "PD-165",
+      "base": "0b67237751c0a943c3f7d45deb3a191bc73d2ff2",
+      "patched": "bf33a3fadb369ab061bd78ebc9b082a79360a7cf",
+      "summary": "ConversionOptions::compression_level (default 6) sets the deflate level of the page content streams; the Quick Look extension uses 1"
+    },
     "src/render/text.rs": {
       "id": "PD-163",
       "base": "66cd7dd72fef3fcd662f950f80c9dcc3d9672091",
       "patched": "ff68b91aaa2d224e4e388dd6b4b25ed843e15b6f",
       "summary": "Font.face_data shares the font database's data (Arc<dyn AsRef<[u8]>>) instead of copying the font file for every page"
+    },
+    "src/util/context.rs": {
+      "id": "PD-165",
+      "base": "9c29ff785db4858be9e1bba3d3258782f29d38f4",
+      "patched": "d96fbe72525b49dfded2c22d8b0662cfa7860756",
+      "summary": "ConversionOptions::compression_level (default 6) sets the deflate level of the page content streams; the Quick Look extension uses 1"
+    },
+    "src/util/helper.rs": {
+      "id": "PD-165",
+      "base": "ac52e8b18ad9cef02848eeb6973d486e3c8f1ef8",
+      "patched": "eddcf5af81e29b848ede72add52f616edab84cc8",
+      "summary": "ConversionOptions::compression_level (default 6) sets the deflate level of the page content streams; the Quick Look extension uses 1"
     }
   }
 }

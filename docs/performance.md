@@ -128,7 +128,7 @@ node scripts/bench-profile.mjs --suite desktop --case pdf_doc --input <hwp> --re
 - 임베디드 미리보기 그림 읽기(`ql_embedded`)는 0.1~0.2 ms이고, 참조 앱도 같은 rhwp 함수(`extract_thumbnail_only`)를 부른다(참조 쪽은 따로 안 쟀다).
 - **판정: Quick Look은 작은 문서만 같거나 빠르고, 글자·그림·표가 많은 문서에서 느리다(PNG 1.2~6.4배, PDF 2.9~7.4배, PDF 크기 4~100배).** 원인은 아래 병목 6, 7이다.
 
-#### 2.4.1 Quick Look 적용 결과 (병목 6·7·4, 후보 1·4·5)
+#### 2.4.1 Quick Look 적용 결과 (병목 6·7·4, 후보 1·4·5, PD-165)
 
 세 가지를 적용하고 같은 하네스(`scripts/bench-run.mjs --runs 5 --suite quicklook`, 별도 `CARGO_TARGET_DIR`, 5회 중앙값)로 다시 쟀다. 기기 부하가 높아 시간(wall)이 흔들려서 CPU 시간으로 본다. 번들 글꼴 없이 시스템 글꼴만 쓰는 헤드리스 호출이다.
 
