@@ -10,33 +10,23 @@
   const MAX_QUERY_CHARS = 256;
   // Matches kept for one query. Past it the count reads "N+" and the rest is not indexed (fail-closed).
   const MAX_MATCHES = 100000;
-  // A pathological pattern runs inside one `exec` that cannot be interrupted, so the budget is checked
-  // between blocks: a search that runs over it stops there and the next call continues.
+  // The time budget is checked between blocks: a search that runs over it stops there and the next call continues.
   const SEARCH_BUDGET_MS = 1500;
-  const WORD_CHAR = "[\\p{L}\\p{N}_]";
   const MSG_TOO_LONG = "찾을 내용이 너무 깁니다 (최대 " + MAX_QUERY_CHARS + "자)";
 
   function escapeRegExp(text) {
     return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 
-  // `{ ok: true, re, key, regex }` or `{ ok: false, error }`. An empty query is not an error: it matches nothing.
-  function buildMatcher({ query, matchCase = false, wholeWord = false, regex = false }) {
+  // `{ ok: true, re, key }` or `{ ok: false, error }`. An empty query is not an error: it matches nothing.
+  function buildMatcher({ query, matchCase = false }) {
     const text = String(query ?? "").normalize("NFC");
     if (text === "") return { ok: true, empty: true, key: "" };
     if (text.length > MAX_QUERY_CHARS) return { ok: false, error: MSG_TOO_LONG };
-    let source = regex ? text : escapeRegExp(text);
-    if (wholeWord) source = "(?<!" + WORD_CHAR + ")(?:" + source + ")(?!" + WORD_CHAR + ")";
-    try {
-      const re = new RegExp(source, matchCase ? "gu" : "giu");
-      return { ok: true, re, regex, key: (matchCase ? "C" : "c") + (wholeWord ? "W" : "w") + (regex ? "R" : "r") + text };
-    } catch (err) {
-      return { ok: false, error: "정규식 오류: " + String(err.message || err).replace(/^Invalid regular expression: /, "") };
-    }
+    return { ok: true, re: new RegExp(escapeRegExp(text), matchCase ? "gu" : "giu"), key: (matchCase ? "C" : "c") + text };
   }
 
-  // Matches of `text` as `{ start, end, m }` (`m` is the exec result, kept only for regex replacement).
-  // Empty matches are skipped. `limit` caps how many are returned.
+  // Matches of `text` as `{ start, end }`. `limit` caps how many are returned.
   function matchesOf(text, matcher, limit = MAX_MATCHES) {
     const out = [];
     if (matcher.empty || text === "") return out;
@@ -44,26 +34,10 @@
     re.lastIndex = 0;
     let m = re.exec(text);
     while (m !== null && out.length < limit) {
-      if (m[0] === "") re.lastIndex += 1;
-      else out.push({ start: m.index, end: m.index + m[0].length, m: matcher.regex ? m : null });
+      out.push({ start: m.index, end: m.index + m[0].length });
       m = re.exec(text);
     }
     return out;
-  }
-
-  // Expands `$1`, `$&`, `$<name>`, `$$` the way String.prototype.replace does, from one exec result.
-  function expandReplacement(m, replacement) {
-    return replacement.replace(/\$(\$|&|\d{1,2}|<[^>]*>)/g, (all, token) => {
-      if (token === "$") return "$";
-      if (token === "&") return m[0];
-      if (token[0] === "<") return m.groups?.[token.slice(1, -1)] ?? "";
-      const group = Number(token);
-      return group >= 1 && group < m.length ? (m[group] ?? "") : all;
-    });
-  }
-
-  function replacementValue(match, replacement) {
-    return match.m ? expandReplacement(match.m, replacement) : replacement;
   }
 
   // ---- text-node offset table ---------------------------------------------------------------
@@ -196,7 +170,7 @@
         else hi = mid - 1;
       }
       const hit = matches[lo]?.[n - prefix[lo]];
-      return hit ? { index: n, id: ids[lo], start: hit.start, end: hit.end, m: hit.m } : null;
+      return hit ? { index: n, id: ids[lo], start: hit.start, end: hit.end } : null;
     }
 
     // Overall index of the first match at or after (`id`, `offset`) going forward, or of the last one
@@ -226,7 +200,7 @@
 
   host.__EASYOFFICE_FIND_CORE__ = {
     MAX_QUERY_CHARS, MAX_MATCHES, SEARCH_BUDGET_MS,
-    buildMatcher, matchesOf, expandReplacement, replacementValue,
+    buildMatcher, matchesOf,
     segmentStarts, segmentAt, applyEdits, createFindIndex,
   };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

@@ -870,7 +870,6 @@
       studioActions = actions || {};
       const editor = document.getElementById("doc-editor");
       for (const closer of document.querySelectorAll("[data-dialog-close]")) closer.addEventListener("click", () => closer.closest("dialog")?.close?.());
-      for (const dlg of document.querySelectorAll("dialog.tool-dialog")) dlg.addEventListener("click", (ev) => { if (ev.target === dlg) dlg.close?.(); });
       bindStudioMenuBar(editor, onStudioCmd);
       for (const btn of document.querySelectorAll("#icon-toolbar [data-studio-cmd]")) btn.addEventListener("click", () => { if (!btn.disabled) dispatchStudioIconCmd(btn.dataset.studioCmd, editor, onStudioCmd); });
       bindStudioTypographyControls(editor);

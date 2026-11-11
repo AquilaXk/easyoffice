@@ -13,39 +13,26 @@ const matcherOf = (query, options = {}) => {
 };
 const spans = (text, m) => core.matchesOf(text, m).map(({ start, end }) => [start, end]);
 
-test("case, whole word and regex options", () => {
+test("the case option; the query is always literal", () => {
   assert.deepEqual(spans("Foo foo FOO", matcherOf("foo")), [[0, 3], [4, 7], [8, 11]]);
   assert.deepEqual(spans("Foo foo FOO", matcherOf("foo", { matchCase: true })), [[4, 7]]);
-  assert.deepEqual(spans("cat concat cat_x cat.", matcherOf("cat", { wholeWord: true })), [[0, 3], [17, 20]]);
-  assert.deepEqual(spans("a1 b22 c333", matcherOf("[a-c]\\d+", { regex: true })), [[0, 2], [3, 6], [7, 11]]);
   assert.deepEqual(spans("a.b axb", matcherOf("a.b")), [[0, 3]], "a literal query is escaped");
   assert.deepEqual(spans("(x) x", matcherOf("(x)")), [[0, 3]]);
+  assert.deepEqual(spans("a1 b22", matcherOf("[a-c]\\d+")), [], "no regular expressions");
 });
 
 test("Korean text: syllables, whole word with particles, and a decomposed query", () => {
   assert.deepEqual(spans("한글 문서와 한글문서 한글", matcherOf("한글")), [[0, 2], [7, 9], [12, 14]]);
-  assert.deepEqual(spans("한글 한글은 한글", matcherOf("한글", { wholeWord: true })), [[0, 2], [7, 9]], "a particle makes it a different word");
   const decomposed = "한글";
   assert.equal(decomposed.normalize("NFC"), "한글");
   assert.deepEqual(spans("한글", matcherOf(decomposed)), [[0, 2]], "the query is composed before matching");
 });
 
-test("a bad or oversized query is refused with a message, an empty one matches nothing", () => {
-  const bad = core.buildMatcher({ query: "(", regex: true });
-  assert.equal(bad.ok, false);
-  assert.match(bad.error, /^정규식 오류/);
+test("an oversized query is refused with a message, an empty one matches nothing", () => {
   const long = core.buildMatcher({ query: "a".repeat(core.MAX_QUERY_CHARS + 1) });
   assert.equal(long.ok, false);
+  assert.match(long.error, /너무 깁니다/);
   assert.deepEqual(spans("abc", matcherOf("")), []);
-  assert.deepEqual(spans("abc", matcherOf("x*", { regex: true })), [], "empty matches are skipped");
-});
-
-test("regex replacements expand groups the way String.replace does", () => {
-  const m = matcherOf("(\\d+)-(?<name>[a-z]+)", { regex: true });
-  const [hit] = core.matchesOf("12-ab", m);
-  assert.equal(core.replacementValue(hit, "$2/$<name>/$1/$&/$$/$9"), "ab/ab/12/12-ab/$/$9");
-  const literal = core.matchesOf("a", matcherOf("a"))[0];
-  assert.equal(core.replacementValue(literal, "$1 $&"), "$1 $&", "a plain query replaces literally");
 });
 
 test("edits across text nodes keep each run and cut the covered text", () => {

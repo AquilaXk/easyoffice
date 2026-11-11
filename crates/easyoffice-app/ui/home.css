@@ -15,8 +15,7 @@
  *   accent background that the rest of the chrome uses for selected rows.
  * - `.recent-documents-dialog` is 520px wide (the reference sizes the dialog by its content); the
  *   fixed width keeps the list from reflowing when a long file name arrives.
- * - The primary button (`.dialog-btn-primary`) fills with `--accent-strong`, not `--accent-primary`: 
- *   white text on `--accent-primary` is 3.7:1 in the light theme. */
+ */
 
 /* The start window keeps the menu bar and the status bar (the reference app's start screen is a layer inside
  * the editor window, so its menu, toolbar and status bar stay); the editing chrome and the zoom controls
@@ -415,7 +414,6 @@
   align-items: center;
   justify-content: space-between;
   cursor: move;
-  user-select: none;
 }
 
 .dialog-close {
@@ -464,19 +462,29 @@
   border-color: var(--color-primary-subtle);
 }
 
+.dialog-input:disabled,
+.dialog-select:disabled,
+.dialog-btn:disabled {
+  background: var(--ui-surface-muted);
+  border-color: var(--color-border-lighter);
+  color: var(--color-text-disabled);
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+.dialog-btn:disabled:hover {
+  background: var(--ui-surface-muted);
+  border-color: var(--color-border-lighter);
+}
+
 .dialog-btn-primary {
-  background: var(--accent-strong);
+  background: var(--color-primary);
   color: var(--ui-text-on-accent);
   border-color: var(--accent-light);
 }
 
-:root[data-theme-effective="dark"] .dialog-btn-primary {
-  color: var(--ui-bg);
-}
-
 .dialog-btn-primary:hover {
-  filter: brightness(0.92);
-  background: var(--accent-strong);
+  background: var(--accent-light);
 }
 
 .recent-documents-dialog {
@@ -607,7 +615,7 @@
   color: var(--ui-text-on-accent);
 }
 
-/* --color-primary is light in the dark theme: dark text, as on .dialog-btn-primary. */
+/* --color-primary is light in the dark theme: dark text. */
 :root[data-theme-effective="dark"] .update-notice__button--primary {
   color: var(--ui-bg);
 }

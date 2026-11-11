@@ -422,7 +422,7 @@ test("icon toolbar wheel/focus scroller, custom-select dblclick/aria/keys, and d
   assert.equal(wrap.style.transform, "translate(35px, 25px)");
   document.dispatchEvent({ type: "mouseup", clientX: 135, clientY: 145 });
   dialog.close();
-  assert.equal(wrap.style.transform, "");
+  assert.equal(wrap.style.transform, "translate(35px, 25px)", "the dragged position is kept after closing, as in the reference");
 });
 
 test("font-mono token, status bar interactive position/zoom, proportional fit zoom, style-bar custom inputs, and recent-dialog drag match rhwp-studio", async () => {

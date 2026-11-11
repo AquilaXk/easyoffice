@@ -884,17 +884,14 @@
           <div class="dialog-row"><label class="dialog-label" for="find-query">찾을 내용</label><input id="find-query" class="dialog-input" type="text" autocomplete="off" spellcheck="false" /></div>
           <div id="find-replace-row" class="dialog-row" hidden><label class="dialog-label" for="find-replacement">바꿀 내용</label><input id="find-replacement" class="dialog-input" type="text" autocomplete="off" spellcheck="false" /></div>
           <div class="dialog-row find-options">
-            <label><input id="find-opt-case" type="checkbox" /> 대소문자 구분</label>
-            <label><input id="find-opt-word" type="checkbox" /> 전체 단어</label>
-            <label><input id="find-opt-regex" type="checkbox" /> 정규식</label>
-            <label id="find-opt-formula-label" hidden><input id="find-opt-formula" type="checkbox" /> 수식 원문 포함</label>
+            <label class="dialog-checkbox"><input id="find-opt-case" type="checkbox" />대소문자 구분</label>
             <span id="find-count" class="find-count" hidden></span>
           </div>
           <div class="find-status-row"><span id="find-status" class="find-status" role="status" aria-live="polite"></span></div>
         </div>
         <div class="find-buttons">
           <button id="btn-find-prev" type="button" class="dialog-btn">이전</button>
-          <button id="btn-find-next" type="button" class="dialog-btn dialog-btn-primary">다음</button>
+          <button id="btn-find-next" type="button" class="dialog-btn">다음</button>
         </div>
         <div id="find-replace-buttons" class="find-buttons" hidden>
           <button id="btn-find-replace" type="button" class="dialog-btn">바꾸기</button>
@@ -923,7 +920,7 @@
         <div class="dialog-body">
           <div class="dialog-row">
             <label class="dialog-label" for="pdf-highlight-text">주석 문구</label>
-            <input id="pdf-highlight-text" type="text" class="dialog-input" maxlength="200" autocomplete="off" />
+            <input id="pdf-highlight-text" type="text" class="dialog-text-input" maxlength="200" autocomplete="off" />
           </div>
           <div class="dialog-row">
             <label class="dialog-label" for="pdf-highlight-kind-select">종류</label>
@@ -1011,7 +1008,7 @@
           </div>
           <div class="dialog-row">
             <label class="dialog-label" for="pdf-splitmerge-range">쪽 범위</label>
-            <input id="pdf-splitmerge-range" class="dialog-input" type="text" placeholder="1-3, 5, 7-" autocomplete="off" disabled />
+            <input id="pdf-splitmerge-range" class="dialog-text-input" type="text" placeholder="1-3, 5, 7-" autocomplete="off" disabled />
           </div>
           <p id="pdf-splitmerge-hint" class="dialog-pdf-note">고른 PDF의 쪽을 현재 쪽 뒤에 붙입니다. 실행 취소로 되돌릴 수 없습니다.</p>
         </div>

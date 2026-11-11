@@ -86,19 +86,25 @@
 .cmd-input.cp-input { display: block; width: 100%; height: 34px; padding-left: 40px; padding-right: 12px; font-size: 14px; color: var(--ui-text); background: transparent; }
 .cmd-input.cp-input::placeholder { color: var(--ui-text-muted); opacity: 1; }
 /* ---- modal panel (제품 정보) ----------------------------------------------------------------------- */
-.dialog-btn-primary { color: var(--ui-text-on-accent); }
 .about-version { margin-bottom: 12px; font-size: var(--font-size-md); color: var(--color-text-muted); }
 
 /* ---- tool dialogs (smart assistant, personal data, security, benchmark, outline) -------------- */
 .tool-dialog { margin: auto; padding: 0; width: min(460px, calc(100vw - 32px)); color: var(--ui-text); background: transparent; border: 0; }
 .tool-dialog::backdrop { background: var(--overlay-bg); }
-.tool-dialog .dialog-body { display: flex; flex-direction: column; gap: 8px; font-size: 12.5px; line-height: 1.5; }
-.tool-dialog .dialog-title { cursor: move; user-select: none; }
-/* Dialog rows: a label, then an input or combo box, on one line (reference `dialogs.css` 110-170, MIT, see THIRD_PARTY_NOTICES.md). */
-.tool-dialog .dialog-row { display: flex; align-items: center; gap: 8px; }
-.tool-dialog .dialog-label { min-width: 56px; text-align: right; }
-.tool-dialog .dialog-input { flex: 1; min-width: 0; height: 22px; padding: 0 6px; box-sizing: border-box; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); caret-color: var(--caret-color); color-scheme: inherit; font-size: var(--font-size-base); }
-.tool-dialog .custom-select.dialog-select { width: 96px; padding: 0; border: 0; background: transparent; outline: none; }
+.tool-dialog .dialog-body { font-size: var(--font-size-base); line-height: normal; }
+.tool-dialog .dialog-title { cursor: move; }
+.find-dialog .dialog-title { cursor: default; }
+/* Dialog rows, labels, fields and combo boxes: reference `dialogs.css` 110-165, 572-585, 634-655 (MIT, see THIRD_PARTY_NOTICES.md), same values. */
+.tool-dialog .dialog-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.tool-dialog .dialog-row:last-child { margin-bottom: 0; }
+.tool-dialog .dialog-label { min-width: 40px; text-align: right; font-size: var(--font-size-sm); color: var(--color-text); }
+.tool-dialog .dialog-input, .tool-dialog .dialog-text-input { height: 22px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); caret-color: var(--caret-color); color-scheme: inherit; padding: 0 4px; font-size: var(--font-size-sm); outline: none; box-sizing: border-box; }
+.tool-dialog .dialog-input { width: 72px; text-align: right; }
+.tool-dialog .dialog-text-input { width: 120px; }
+.tool-dialog .dialog-input:focus, .tool-dialog .dialog-text-input:focus { border-color: var(--color-focus-border); box-shadow: 0 0 0 2px var(--ui-focus-soft); }
+.tool-dialog .custom-select.dialog-select { width: 96px; height: 22px; padding: 0 4px; font-size: var(--font-size-sm); border: 0; background: transparent; outline: none; }
+.tool-dialog .dialog-checkbox { font-size: var(--font-size-sm); display: flex; align-items: center; gap: 4px; cursor: pointer; }
+.tool-dialog .dialog-checkbox input[type="checkbox"] { margin: 0; accent-color: var(--color-primary); }
 /* Note line of a dialog: reference `dialogs.css` 249-275 `.dialog-pdf-note` (MIT, see THIRD_PARTY_NOTICES.md), same name and values; the PDF print dialog uses it for its hint. */
 .dialog-pdf-note { margin: 0; color: var(--color-text-secondary); font-size: var(--font-size-sm); }
 /* The 작업 combo of the PDF split/merge dialog fills the row like the 쪽 범위 field under it (96px cut "다른 PDF 병합"). */
@@ -116,16 +122,15 @@
 .find-dialog .dialog-body { display: block; padding: 10px 12px 4px; }
 .find-dialog .dialog-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .find-dialog .dialog-label { width: 70px; flex-shrink: 0; text-align: right; }
-.find-dialog .dialog-input { flex: 1; height: 24px; border: 1px solid var(--ui-border-strong); border-radius: 0; background: var(--color-surface); color: var(--color-text); padding: 0 4px; font-size: var(--font-size-base); box-sizing: border-box; min-width: 0; }
+.find-dialog .dialog-input { flex: 1; text-align: left; height: 24px; border: 1px solid var(--ui-border-strong); border-radius: 0; background: var(--color-surface); color: var(--color-text); padding: 0 4px; font-size: var(--font-size-base); box-sizing: border-box; min-width: 0; }
 .find-dialog .dialog-input:focus { border-color: var(--color-focus-border); outline: none; }
-.find-dialog .find-options { flex-wrap: wrap; }
-.find-dialog .find-options label:not([hidden]) { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 .find-dialog .find-count { margin-left: auto; color: var(--color-text-muted); font-size: var(--font-size-sm); white-space: nowrap; }
 .find-dialog .find-status { color: var(--color-text-secondary); font-size: var(--font-size-sm); }
 .find-dialog .find-status-row { min-height: 18px; line-height: 18px; text-align: right; }
 .find-dialog .find-buttons { display: flex; gap: 6px; padding: 4px 12px 8px; justify-content: flex-end; }
-.find-dialog [hidden] { display: none; }
 .find-dialog .dialog-btn { white-space: nowrap; }
+/* After every display rule above, so `hidden` wins at equal specificity. */
+.tool-dialog [hidden] { display: none; }
 
 /* HWP printing (hwp-print.js, PD-104): the pages live in a hidden root that only the print output shows. */
 #eo-print-root { display: none; }

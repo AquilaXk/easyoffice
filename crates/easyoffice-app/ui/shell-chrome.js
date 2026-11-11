@@ -355,9 +355,6 @@
       }
       const closeBtn = document.getElementById("btn-about-close");
       if (closeBtn && dialog) closeBtn.addEventListener("click", () => dialog.close?.());
-      dialog?.addEventListener?.("click", (ev) => {
-        if (ev.target === dialog) dialog.close?.();
-      });
     }
 
     // "Version x.y.z" under the product name (the reference app's wording).
@@ -392,10 +389,11 @@
       });
     }
 
+    // Dragging by the title bar (reference `dialog-drag.ts`); the position stays after the dialog is closed. The find dialog is not dragged.
     function enableDialogDrag(dialog) {
       const wrap = dialog?.querySelector?.(".dialog-wrap");
       const title = dialog?.querySelector?.(".dialog-title");
-      if (!wrap || !title) return;
+      if (!wrap || !title || dialog.classList.contains("find-dialog")) return;
       let dx = 0, dy = 0, dragging = false, startX = 0, startY = 0;
       const onMove = (ev) => {
         if (!dragging) return;
@@ -404,16 +402,9 @@
         wrap.style.transform = `translate(${dx}px, ${dy}px)`;
       };
       const stopDrag = () => {
-        if (!dragging) return;
         dragging = false;
         document.removeEventListener?.("mousemove", onMove);
         document.removeEventListener?.("mouseup", stopDrag);
-      };
-      const reset = () => {
-        stopDrag();
-        dx = 0;
-        dy = 0;
-        wrap.style.transform = "";
       };
       title.addEventListener("mousedown", (ev) => {
         if (ev.button !== undefined && ev.button !== 0) return;
@@ -425,41 +416,49 @@
         document.addEventListener?.("mouseup", stopDrag);
         ev.preventDefault?.();
       });
-      dialog.addEventListener?.("close", reset);
-      const origClose = dialog.close;
-      if (typeof origClose === "function") {
-        dialog.close = function (...args) {
-          const out = origClose.apply(this, args);
-          reset();
-          return out;
-        };
-      }
+      dialog.addEventListener?.("close", stopDrag);
     }
 
-    const FIRST_FIELD = "input:not([type=hidden]):not([disabled]), select, textarea";
-    const isShown = (el, root) => {
-      for (let cur = el; cur && cur !== root; cur = cur.parentElement) if (cur.hidden) return false;
-      return true;
-    };
-
-    // The reference editor's dialogs open with the focus on their first field, else the primary
-    // button (`dialog.ts`); the browser would put it on the title bar's close button and draw a focus ring there.
-    function focusInitialControl(dialog) {
-      const target =
-        Array.from(dialog.querySelectorAll(FIRST_FIELD)).find((el) => isShown(el, dialog)) ||
-        dialog.querySelector(".dialog-btn-primary:not([hidden])");
-      if (target) return void target.focus();
-      dialog.tabIndex = -1;
-      dialog.focus();
-    }
-
-    function enableInitialFocus(dialog) {
+    // Keys while a tool dialog is open, and its first focus (reference `dialog.ts` 95-123, MIT, see
+    // THIRD_PARTY_NOTICES.md): Esc closes it, Enter outside a text field presses the primary button,
+    // and every other key stays inside (typing in a field is untouched) so editor shortcuts such as
+    // Ctrl+Z never reach the document behind it. The focus starts on the primary button, so the
+    // browser does not put it on the title bar's close button and draw a focus ring there. The find
+    // dialog is the reference's own non-modal dialog and keeps its own keys and focus (`find-dialog.ts`).
+    function enableDialogKeys(dialog) {
+      if (dialog.classList.contains("find-dialog")) return;
+      const capture = (ev) => {
+        // The app's combo boxes (custom-select.js) work by keyboard on their own keydown handlers.
+        if (ev.target?.closest?.(".custom-select") && ev.key !== "Escape" && !ev.ctrlKey && !ev.metaKey) return;
+        const tag = String(ev.target?.tagName || "").toUpperCase();
+        const editable = tag === "INPUT" || tag === "TEXTAREA";
+        if (ev.key === "Escape") {
+          ev.stopPropagation();
+          ev.preventDefault();
+          dialog.close();
+        } else if (ev.key === "Enter" && !editable) {
+          ev.stopPropagation();
+          ev.preventDefault();
+          dialog.querySelector(".dialog-btn-primary")?.click();
+        } else {
+          ev.stopPropagation();
+          if (!editable) ev.preventDefault();
+        }
+      };
+      const release = () => document.removeEventListener("keydown", capture, true);
+      dialog.addEventListener("close", release);
       for (const method of ["showModal", "show"]) {
         const open = dialog[method];
         if (typeof open !== "function") continue;
         dialog[method] = function (...args) {
           const out = open.apply(this, args);
-          focusInitialControl(this);
+          document.addEventListener("keydown", capture, true);
+          const primary = this.querySelector(".dialog-btn-primary");
+          if (primary) primary.focus();
+          else {
+            this.tabIndex = -1;
+            this.focus();
+          }
           return out;
         };
       }
@@ -470,13 +469,13 @@
       bindIconToolbarScroller();
       for (const dlg of document.querySelectorAll("dialog.tool-dialog")) {
         enableDialogDrag(dlg);
-        enableInitialFocus(dlg);
+        enableDialogKeys(dlg);
       }
       mirrorFeedbackToToast();
       hwpHost.onCommand(runShellCommand);
     }
 
-    return { bind, openAbout, setAppVersion, applyStoredTheme, pushMenuState, pushRecents, toast, runShellCommand, currentTheme, enableDialogDrag, enableInitialFocus, getThemeMode: () => themeApi().getMode() };
+    return { bind, openAbout, setAppVersion, applyStoredTheme, pushMenuState, pushRecents, toast, runShellCommand, currentTheme, enableDialogDrag, enableDialogKeys, getThemeMode: () => themeApi().getMode() };
   }
 
   host.__EASYOFFICE_CREATE_SHELL_CHROME__ = createShellChrome;

@@ -7,7 +7,7 @@
   // otherwise the current match is selected. The text, the matches and the offset table live in
   // `find-core.js` and a source (`find-doc.js`, `find-sheet.js`); this file is the UI around them.
 
-  const { buildMatcher, replacementValue, createFindIndex } = host.__EASYOFFICE_FIND_CORE__;
+  const { buildMatcher, createFindIndex } = host.__EASYOFFICE_FIND_CORE__;
   const DIALOG_ID = "find-dialog";
   // Matches on each side of the current one that get an on-screen highlight range.
   const NEAR_WINDOW = 1000;
@@ -32,8 +32,7 @@
     const ui = () => (elements ??= {
       dialog: byId(DIALOG_ID), title: byId("find-dialog-title"), query: byId("find-query"),
       replacement: byId("find-replacement"), replaceRow: byId("find-replace-row"), count: byId("find-count"), status: byId("find-status"),
-      caseBox: byId("find-opt-case"), wordBox: byId("find-opt-word"), regexBox: byId("find-opt-regex"),
-      formulaBox: byId("find-opt-formula"), formulaLabel: byId("find-opt-formula-label"),
+      caseBox: byId("find-opt-case"),
       replaceButtons: byId("find-replace-buttons"),
     });
 
@@ -74,8 +73,8 @@
     }
 
     function readMatcher() {
-      const { query, caseBox, wordBox, regexBox } = ui();
-      return buildMatcher({ query: query.value, matchCase: caseBox.checked, wholeWord: wordBox.checked, regex: regexBox.checked });
+      const { query, caseBox } = ui();
+      return buildMatcher({ query: query.value, matchCase: caseBox.checked });
     }
 
     // Matches around `n` for the on-screen highlight.
@@ -143,7 +142,7 @@
       const result = refresh();
       if (!result || matcher.empty) return;
       if (!current) return step(true);
-      const value = replacementValue(current, ui().replacement.value);
+      const value = ui().replacement.value;
       const { id, start, end } = current;
       const outcome = await source.replace([{ id, edits: [{ start, end, value }] }]);
       origin = { id, offset: start + value.length };
@@ -161,7 +160,7 @@
       const plan = [];
       for (const id of index.blockIds()) {
         const found = index.matchesInBlock(id);
-        if (found.length > 0) plan.push({ id, edits: found.map((m) => ({ start: m.start, end: m.end, value: replacementValue(m, replacement) })) });
+        if (found.length > 0) plan.push({ id, edits: found.map((m) => ({ start: m.start, end: m.end, value: replacement })) });
       }
       if (plan.length === 0) return showStatus(MSG_NO_MATCH);
       const outcome = await source.replace(plan);
@@ -179,13 +178,12 @@
       return text !== "" && text.length <= MAX_SELECTION_QUERY && !/[\r\n]/.test(text) ? text : "";
     }
 
-    function applyMode(mode, moduleCode) {
-      const { title, replaceRow, replaceButtons, formulaLabel } = ui();
+    function applyMode(mode) {
+      const { title, replaceRow, replaceButtons } = ui();
       const replacing = mode === "replace";
       title.textContent = replacing ? "찾아 바꾸기" : "찾기";
       replaceRow.hidden = !replacing;
       replaceButtons.hidden = !replacing;
-      formulaLabel.hidden = moduleCode !== "SHEET";
     }
 
     function ensureSource(moduleCode) {
@@ -214,7 +212,7 @@
       const els = ui();
       if (!els.dialog) return false;
       ensureSource(moduleCode);
-      applyMode(mode, moduleCode);
+      applyMode(mode);
       const picked = moduleCode === "DOC" ? selectedQuery() : "";
       if (picked) els.query.value = picked;
       if (!els.dialog.open) {
@@ -241,11 +239,7 @@
       els.query.addEventListener("input", rerun);
       els.query.addEventListener("compositionstart", () => { composing = true; });
       els.query.addEventListener("compositionend", () => { composing = false; search(); });
-      for (const box of [els.caseBox, els.wordBox, els.regexBox]) box.addEventListener("change", search);
-      els.formulaBox.addEventListener("change", () => {
-        source.setIncludeFormulas?.(els.formulaBox.checked);
-        search();
-      });
+      els.caseBox.addEventListener("change", search);
       byId("btn-find-next").addEventListener("click", () => step(true));
       byId("btn-find-prev").addEventListener("click", () => step(false));
       byId("btn-find-replace").addEventListener("click", () => void replaceCurrent().catch((err) => showStatus(err.message)));

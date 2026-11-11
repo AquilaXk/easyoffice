@@ -87,17 +87,6 @@ test("Korean: typing waits for the composition to end, then finds the syllables"
   assert.equal(count(h), "1 / 1");
 });
 
-test("an invalid regex shows the reason and keeps the document untouched", async () => {
-  const h = await openDoc();
-  ctrl(h, "F2");
-  $(h.document, "find-opt-regex").checked = true;
-  type(h, "find-query", "(");
-  assert.match(count(h), /^정규식 오류/);
-  $(h.document, "btn-find-replace-all").click();
-  await flushAsyncTurns(4);
-  assert.equal(editorText(h).includes("apple"), true);
-});
-
 test("replace all is one undo step and keeps the run formatting", async () => {
   const h = await openDoc();
   const before = editorText(h);
@@ -115,7 +104,7 @@ test("replace all is one undo step and keeps the run formatting", async () => {
   assert.equal(editorText(h), before, "one Ctrl+Z restores every replacement");
 });
 
-test("replace one replaces the current match and moves to the next; regex groups expand", async () => {
+test("replace one replaces the current match and moves to the next", async () => {
   const h = await openDoc();
   ctrl(h, "F2");
   type(h, "find-query", "apple");
@@ -124,12 +113,6 @@ test("replace one replaces the current match and moves to the next; regex groups
   await flushAsyncTurns(6);
   assert.equal(editorText(h).split("pear").length - 1, 1);
   assert.equal(count(h), "1 / 3", "the next match is current and the replaced one is gone from the count");
-  $(h.document, "find-opt-regex").checked = true;
-  type(h, "find-query", "(\\S+) pie");
-  type(h, "find-replacement", "<$1>");
-  $(h.document, "btn-find-replace-all").click();
-  await flushAsyncTurns(6);
-  assert.ok(editorText(h).includes("둘째 <Apple>"), "the group spans two runs and is expanded into the replacement");
 });
 
 test("Enter in the query goes to the next match; Escape closes and clears; the dialog keeps its keys to itself", async () => {
@@ -149,7 +132,7 @@ test("Enter in the query goes to the next match; Escape closes and clears; the d
   assert.equal($(h.document, "find-dialog").open, false);
 });
 
-test("the sheet module finds cell text, replaces values and (optionally) formula text, as one undo step", async () => {
+test("the sheet module finds cell text, replaces values (not formula results), as one undo step", async () => {
   const h = await createWorkspaceHarness();
   switchModule(h.document, "SHEET");
   await flushAsyncTurns();
@@ -162,7 +145,6 @@ test("the sheet module finds cell text, replaces values and (optionally) formula
   await flushAsyncTurns(12);
   const cellText = (ref) => h.document.querySelector(`#pane-sheet td[data-cell="${ref}"]`)?.textContent;
   ctrl(h, "F2");
-  assert.equal($(h.document, "find-opt-formula-label").hidden, false, "the formula option exists in the sheet");
   type(h, "find-query", "사과");
   assert.equal(count(h), "1 / 2");
   $(h.document, "btn-find-next").click();
@@ -175,15 +157,13 @@ test("the sheet module finds cell text, replaces values and (optionally) formula
   await flushAsyncTurns(14);
   assert.deepEqual([cellText("A1"), cellText("B1")], ["사과 1", "사과 2"], "undo restores both cells in one step");
 
-  type(h, "find-query", "B2");
-  assert.equal(count(h), "일치하는 항목이 없습니다", "a formula's text is not searched by default");
-  $(h.document, "find-opt-formula").checked = true;
-  $(h.document, "find-opt-formula").dispatchEvent({ type: "change", target: $(h.document, "find-opt-formula") });
-  assert.equal(count(h), "1 / 1");
-  type(h, "find-replacement", "B1");
+  type(h, "find-query", "20");
+  assert.equal(count(h), "1 / 1", "a formula cell is found by the value it shows");
+  type(h, "find-replacement", "7");
   $(h.document, "btn-find-replace-all").click();
   await flushAsyncTurns(14);
-  assert.equal(h.document.querySelector('#pane-sheet td[data-cell="C2"]')?.textContent, "#VALUE!", "C2 is now =B1*2 and B1 is text");
+  assert.equal(cellText("C2"), "20", "a formula's result is not replaced");
+  assert.match(count(h), /수식 셀 1개는 건너뜀/);
 });
 
 // The harness has no cascade, so this one resolves `display` from shell.css with a small specificity
@@ -204,7 +184,7 @@ test("the find dialog's hidden elements stay hidden under the stylesheet's displ
     .filter((r) => r.display);
   const h = await createWorkspaceHarness();
   const { document } = h;
-  for (const id of ["find-opt-formula-label", "find-replace-row", "find-replace-buttons", "find-count"]) {
+  for (const id of ["find-replace-row", "find-replace-buttons", "find-count"]) {
     const el = document.getElementById(id);
     assert.equal(el.hidden, true, id + " starts hidden");
     const hits = rules.filter((r) => r.selector.split(",").some((sel) => matchesSelectorList(el, sel.trim(), null)));
@@ -213,20 +193,81 @@ test("the find dialog's hidden elements stay hidden under the stylesheet's displ
   }
 });
 
-test("every tool dialog opens with the focus on a field or the primary button, never on the title bar's close button", async () => {
+// Tool dialogs follow the reference's modal dialog (`dialog.ts`): the first focus is the primary button
+// (never the title bar's close button), Esc closes, Enter outside a text field presses the primary button,
+// every other key stays inside, and a click on the backdrop does nothing.
+const keyEvent = (target, key, extra = {}) => ({
+  type: "keydown", key, target, ctrlKey: false, calls: [],
+  stopPropagation() { this.calls.push("stop"); },
+  preventDefault() { this.calls.push("prevent"); },
+  ...extra,
+});
+const toolDialogs = (h) => h.document.querySelectorAll("dialog.tool-dialog").filter((d) => !d.classList.contains("find-dialog"));
+
+test("every tool dialog opens with the focus on its primary button or itself, never on the close button", async () => {
   const h = await createWorkspaceHarness();
   await flushAsyncTurns(10);
-  const dialogs = h.document.querySelectorAll("dialog.tool-dialog");
-  assert.ok(dialogs.length >= 8);
-  for (const dialog of dialogs) {
-    h.document.body.focus?.();
+  assert.ok(toolDialogs(h).length >= 7);
+  for (const dialog of toolDialogs(h)) {
     dialog.showModal();
     const active = h.document.activeElement;
-    assert.ok(active, dialog.id + " has a focused element");
-    assert.equal(active.hasAttribute?.("data-dialog-close") || active.classList.contains("dialog-close"), false, dialog.id + " does not focus the close button");
+    assert.equal(active.classList.contains("dialog-close"), false, dialog.id + " does not focus the close button");
+    const primary = dialog.querySelector(".dialog-btn-primary");
+    assert.equal(active.id, primary ? primary.id : dialog.id, dialog.id + " focus");
     dialog.close();
   }
-  const find = $(h.document, "find-dialog");
-  find.showModal();
-  assert.equal(h.document.activeElement, $(h.document, "find-query"), "find focuses the query field");
+});
+
+test("a tool dialog takes Esc and Enter like the reference, keeps other keys inside, and only while it is open", async () => {
+  const h = await createWorkspaceHarness();
+  await flushAsyncTurns(10);
+  const dialog = $(h.document, "pii-dialog");
+  const primary = dialog.querySelector(".dialog-btn-primary");
+  let pressed = 0;
+  primary.addEventListener("click", () => { pressed += 1; });
+  dialog.showModal();
+  const enter = keyEvent(dialog.querySelector(".dialog-body"), "Enter");
+  h.document.dispatchEvent(enter);
+  assert.equal(pressed, 1, "Enter outside a text field presses the primary button");
+  assert.deepEqual(enter.calls, ["stop", "prevent"]);
+  const undo = keyEvent(dialog.querySelector(".dialog-body"), "z", { ctrlKey: true });
+  h.document.dispatchEvent(undo);
+  assert.deepEqual(undo.calls, ["stop", "prevent"], "Ctrl+Z is stopped before the editor's shortcuts");
+  const field = h.document.createElement("input");
+  dialog.querySelector(".dialog-body").appendChild(field);
+  const typing = keyEvent(field, "a");
+  h.document.dispatchEvent(typing);
+  assert.deepEqual(typing.calls, ["stop"], "typing in a field is not prevented");
+  const fieldEnter = keyEvent(field, "Enter");
+  h.document.dispatchEvent(fieldEnter);
+  assert.equal(pressed, 1, "Enter in a text field does not press the primary button");
+  dialog.dispatchEvent({ type: "click", target: dialog });
+  assert.equal(dialog.open, true, "a click on the backdrop does not close it");
+  const esc = keyEvent(dialog, "Escape");
+  h.document.dispatchEvent(esc);
+  assert.equal(dialog.open, false, "Esc closes");
+  dialog.dispatchEvent({ type: "close", target: dialog });
+  const after = keyEvent(h.document.body, "x");
+  h.document.dispatchEvent(after);
+  assert.deepEqual(after.calls, [], "keys are not captured once the dialog is closed");
+});
+
+test("the dragged position of a tool dialog stays after it is closed; the find dialog is not dragged", async () => {
+  const h = await createWorkspaceHarness();
+  await flushAsyncTurns(10);
+  const dialog = $(h.document, "pii-dialog");
+  const wrap = dialog.querySelector(".dialog-wrap");
+  const title = dialog.querySelector(".dialog-title");
+  dialog.showModal();
+  title.dispatchEvent({ type: "mousedown", button: 0, clientX: 10, clientY: 10 });
+  h.document.dispatchEvent({ type: "mousemove", clientX: 60, clientY: 40 });
+  h.document.dispatchEvent({ type: "mouseup" });
+  assert.equal(wrap.style.transform, "translate(50px, 30px)");
+  dialog.close();
+  dialog.dispatchEvent({ type: "close", target: dialog });
+  assert.equal(wrap.style.transform, "translate(50px, 30px)", "the position is kept");
+  const findTitle = $(h.document, "find-dialog").querySelector(".dialog-title");
+  findTitle.dispatchEvent({ type: "mousedown", button: 0, clientX: 10, clientY: 10 });
+  h.document.dispatchEvent({ type: "mousemove", clientX: 60, clientY: 40 });
+  assert.equal($(h.document, "find-dialog").querySelector(".dialog-wrap").style.transform || "", "");
 });

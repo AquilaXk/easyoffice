@@ -119,12 +119,7 @@
       const dialog = field("pdf-splitmerge-dialog");
       field("pdf-splitmerge-mode").addEventListener("change", syncMode);
       field("btn-pdf-splitmerge-run").addEventListener("click", confirmChoice);
-      field("pdf-splitmerge-range").addEventListener("keydown", (ev) => {
-        if (ev.key !== "Enter") return;
-        ev.preventDefault?.();
-        confirmChoice();
-      });
-      // Close button, 취소, Esc and a click on the backdrop all end the dialog without a choice.
+      // Close button, 취소 and Esc end the dialog without a choice.
       dialog.addEventListener("close", () => finishChoice(null));
       for (const closer of dialog.querySelectorAll("[data-dialog-close]")) closer.addEventListener("click", () => finishChoice(null));
     }

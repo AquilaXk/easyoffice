@@ -204,7 +204,7 @@ test("the highlight command opens the reference-style dialog: phrase row, then k
   assert.ok(dialog.querySelector(".dialog-wrap .dialog-title"));
   const [phraseRow, pickRow] = [...dialog.querySelectorAll(".dialog-body .dialog-row")];
   const input = phraseRow.querySelector("input");
-  assert.ok(input.classList.contains("dialog-input"));
+  assert.ok(input.classList.contains("dialog-text-input"));
   assert.equal(input.getAttribute("maxlength"), "200");
   assert.equal(phraseRow.querySelector("label").textContent.trim(), "주석 문구");
   const selects = [...pickRow.querySelectorAll("select")];

@@ -1,10 +1,9 @@
 (function (host) {
   "use strict";
 
-  // Find source for the active sheet. A block is a cell, in row-major order. By default the text a
-  // cell shows is searched (a formula cell shows its result, so it cannot be replaced); with
-  // `includeFormulas` a formula cell is searched and replaced by its formula text. A replacement goes
-  // through the same evaluate-and-commit path as a formula-bar edit, as one undo step.
+  // Find source for the active sheet. A block is a cell, in row-major order, and the text a cell
+  // shows is searched (a formula cell shows its result, so it cannot be replaced). A replacement
+  // goes through the same evaluate-and-commit path as a formula-bar edit, as one undo step.
 
   const { applyEdits } = host.__EASYOFFICE_FIND_CORE__;
   const MSG_STALE = "시트가 바뀌어 바꾸기를 취소했습니다. 다시 시도하세요.";
@@ -14,10 +13,8 @@
       sheetDataStore, getActiveSheetName, sheetController, gridUtils,
       captureWorkspaceSnapshot, commitDeferredUndoSnapshot, computeEvaluatedSheetStore, isFormulaStr,
     } = deps;
-    let includeFormulas = false;
 
     function cellText(entry) {
-      if (includeFormulas && entry.formula) return entry.formula;
       return entry.value == null ? "" : String(entry.value);
     }
 
@@ -43,16 +40,15 @@
       if (current) sheetController.updateSheetSelectionAndAggregates(current.id);
     }
 
-    // Applies the edits of one cell to the candidate entry; false when the cell cannot take them.
+    // Applies the edits of one cell to the candidate entry; false for a formula cell (its value is a result).
     function editEntry(entry, edits) {
-      const onFormula = includeFormulas && Boolean(entry.formula);
-      if (!onFormula && entry.formula) return false;
+      if (entry.formula) return false;
       const next = applyEdits([cellText(entry)], edits)[0];
-      if (!onFormula && !isFormulaStr(next)) {
-        entry.value = next;
-      } else {
+      if (isFormulaStr(next)) {
         entry.formula = next;
         entry.value = "";
+      } else {
+        entry.value = next;
       }
       return true;
     }
@@ -83,7 +79,6 @@
 
     return {
       kind: "sheet", sync, watch: () => {}, anchor, show, clearHighlight: () => {}, replace, dispose: () => {},
-      setIncludeFormulas: (on) => { includeFormulas = Boolean(on); },
     };
   }
 

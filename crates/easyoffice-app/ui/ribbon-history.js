@@ -929,11 +929,6 @@
         void executeTrackedRibbonCommand("pdf-mod-highlight", { highlight }).catch(() => {});
       };
       document.getElementById("btn-pdf-highlight-apply")?.addEventListener("click", apply);
-      document.getElementById("pdf-highlight-text")?.addEventListener("keydown", (ev) => {
-        if (ev.key !== "Enter" || ev.isComposing) return;
-        ev.preventDefault();
-        apply();
-      });
     }
 
     return {
