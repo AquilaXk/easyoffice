@@ -1,4 +1,4 @@
-//! A rich document as a PDF drawn by rhwp's page layout (PD-166).
+//! A rich document as a PDF drawn by rhwp's page layout (PD-167).
 //!
 //! The engine writes the document as HWPX (headings, runs, lists, tables, pictures). rhwp, the
 //! layout engine of the Hangul editor, lays that HWPX out into pages and draws each as SVG, and the

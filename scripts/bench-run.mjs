@@ -212,7 +212,7 @@ function main() {
   }
 
   if (want("docpdf")) {
-    // A rich document converted to PDF: the engine's writer and the HWPX + rhwp page layout (PD-166).
+    // A rich document converted to PDF: the engine's writer and the HWPX + rhwp page layout (PD-167).
     // The inputs are the engine suite's generated documents, plus any `--docs` file.
     const app = testBinary(["-p", "easyoffice-app"]);
     const generated = path.join(opts.work, "engine-inputs");

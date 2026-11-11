@@ -104,7 +104,7 @@ async fn ipc_dispatch(
     let owner = window.label().to_string();
     let font_dirs = pdf_job::pdf_font_dirs(&app);
     let result = tauri::async_runtime::spawn_blocking(move || {
-        // A rich document converted to PDF is laid out and drawn here (PD-166); the engine keeps
+        // A rich document converted to PDF is laid out and drawn here (PD-167); the engine keeps
         // its own PDF as the fallback. The font database is built when a PDF is first drawn.
         let draw = |hwpx: &[u8], options: &PdfWriteOptions| {
             doc_pdf::hwpx_to_pdf(hwpx, options, &pdf_fonts::shared_font_db(&font_dirs))

@@ -67,7 +67,7 @@ impl EasyOfficeIpcRouter {
 
     /// [`Self::dispatch`] for a host that can draw pages: a rich document converted to PDF is
     /// handed to `renderer` as HWPX instead of being written by the engine's text-only PDF
-    /// writer (PD-166). The engine PDF stays the fallback when the renderer fails.
+    /// writer (PD-167). The engine PDF stays the fallback when the renderer fails.
     pub fn dispatch_with_pdf_renderer(
         command: &str,
         payload: &str,
