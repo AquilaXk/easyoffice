@@ -4,6 +4,7 @@ pub use crate::rtf_xml_helpers::*;
 use crate::sheet_styling::xlsx_sheet::{read_shared_strings, scan_worksheet, SharedStrings};
 use crate::sheet_styling::xlsx_styles::{cols_xml, parse_cell_xf_styles, XlsxStyleTable};
 use crate::sheet_styling::SheetStyling;
+use crate::xlsx_rules::{parse_dxf_styles, parse_worksheet_rules, rules_xml};
 use crate::{EasyOfficeError, XmlSanitizer, ZipArchiveCodec, ZipSecurityPolicy};
 
 /// Payload for OOXML WordprocessingML (`.docx`).
@@ -256,7 +257,11 @@ fn build_sheet_xml(
         }
         sheet_xml.push_str("</row>");
     }
-    sheet_xml.push_str("</sheetData></worksheet>");
+    sheet_xml.push_str("</sheetData>");
+    if let Some(st) = styling {
+        sheet_xml.push_str(&rules_xml(&st.rules, &style_table.dxf));
+    }
+    sheet_xml.push_str("</worksheet>");
     sheet_xml
 }
 
@@ -637,6 +642,15 @@ impl OoxmlCodec {
         } else {
             Vec::new()
         };
+        let dxf_styles = if with_styling {
+            entry_by_path
+                .get("xl/styles.xml")
+                .and_then(|d| std::str::from_utf8(d).ok())
+                .map(parse_dxf_styles)
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         let mut stylings = Vec::new();
         let mut parsed_sheets = Vec::with_capacity(sheet_specs.len());
         let mut scanned_parts = std::collections::HashSet::new();
@@ -675,7 +689,9 @@ impl OoxmlCodec {
                 &mut budget,
             )?;
             if with_styling {
-                stylings.push((sheet_name.clone(), scan.styling));
+                let mut styling = scan.styling;
+                styling.rules = parse_worksheet_rules(sheet_xml, &dxf_styles);
+                stylings.push((sheet_name.clone(), styling));
             }
             parsed_sheets.push((sheet_name, scan.cells));
         }

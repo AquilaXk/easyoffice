@@ -57,12 +57,14 @@ mod rich_writers;
 mod rich_xml;
 mod rtf_escape;
 pub mod rtf_xml_helpers;
+mod sheet_rules;
 mod sheet_styling;
 pub mod strict_json;
 mod text_decode;
 pub mod text_pdf_codecs;
 pub mod utf16_swar;
 mod xls_sheet_names;
+mod xlsx_rules;
 mod xml_stream;
 pub mod zip_codec;
 mod zip_path_tracker;
@@ -98,6 +100,7 @@ pub use rich_table::{CellMerge, CellSpan, RichTable, SpanMap, MAX_MERGE_SPAN};
 pub use rtf_xml_helpers::{
     unescape_xml_five_pass_baseline, unescape_xml_single_pass, RtfCodec, RtfPayload,
 };
+pub use sheet_rules::*;
 pub use sheet_styling::*;
 pub use strict_json::StrictJsonValue;
 pub use text_pdf_codecs::*;

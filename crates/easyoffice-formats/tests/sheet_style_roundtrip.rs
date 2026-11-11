@@ -15,6 +15,7 @@ fn styled(cells: Vec<((u32, u32), CellStyle)>, columns: Vec<(u32, u32)>) -> Shee
     SheetStyling {
         cells: cells.into_iter().collect(),
         columns: columns.into_iter().collect(),
+        ..Default::default()
     }
 }
 

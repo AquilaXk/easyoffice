@@ -6,6 +6,8 @@
 
 use std::collections::BTreeMap;
 
+use crate::sheet_rules::SheetRules;
+
 // XLSX and ODS style tables live beside this module's model; they are internal to the crate.
 #[path = "ods_grid.rs"]
 pub(crate) mod ods_grid;
@@ -115,11 +117,13 @@ impl CellStyle {
 pub struct SheetStyling {
     pub cells: BTreeMap<(u32, u32), CellStyle>,
     pub columns: BTreeMap<u32, u32>,
+    /// Conditional formatting and data validation (PD-165).
+    pub rules: SheetRules,
 }
 
 impl SheetStyling {
     pub fn is_empty(&self) -> bool {
-        self.cells.is_empty() && self.columns.is_empty()
+        self.cells.is_empty() && self.columns.is_empty() && self.rules.is_empty()
     }
 }
 

@@ -14,6 +14,7 @@ use crate::rtf_xml_helpers::{
 use crate::sheet_styling::{
     format_centipt, CellStyle, SheetStyling, StyleKey, MAX_COLUMN_PX, MIN_COLUMN_PX,
 };
+use crate::xlsx_rules::DxfTable;
 
 /// Width of the widest digit of the default font (Calibri 11) in CSS pixels. Excel's column width
 /// unit is the number of such digits; the stored width includes the 5 px cell padding:
@@ -37,6 +38,8 @@ pub(crate) fn xlsx_width_to_px(width: f64) -> u32 {
 pub(crate) struct XlsxStyleTable {
     styles: Vec<StyleKey>,
     index: HashMap<StyleKey, usize>,
+    /// Differential formats of the conditional formatting rules (PD-165).
+    pub(crate) dxf: DxfTable,
 }
 
 impl XlsxStyleTable {
@@ -44,6 +47,11 @@ impl XlsxStyleTable {
         let mut table = Self {
             styles: Vec::new(),
             index: HashMap::new(),
+            dxf: DxfTable::build(
+                stylings
+                    .iter()
+                    .flat_map(|st| st.rules.cf.iter().map(|rule| rule.style)),
+            ),
         };
         for styling in stylings {
             for style in styling.cells.values().filter(|s| !s.is_plain()) {
@@ -115,8 +123,10 @@ impl XlsxStyleTable {
         }
         xml.push_str("</cellXfs>");
         xml.push_str(
-            "<cellStyles count=\"1\"><cellStyle name=\"Normal\" xfId=\"0\" builtinId=\"0\"/></cellStyles></styleSheet>",
+            "<cellStyles count=\"1\"><cellStyle name=\"Normal\" xfId=\"0\" builtinId=\"0\"/></cellStyles>",
         );
+        xml.push_str(&self.dxf.to_xml());
+        xml.push_str("</styleSheet>");
         xml
     }
 }

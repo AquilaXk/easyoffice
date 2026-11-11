@@ -321,6 +321,7 @@ impl OdsSink for StyleSink<'_> {
         let styling = SheetStyling {
             cells: std::mem::take(&mut self.cells),
             columns: std::mem::take(&mut self.columns),
+            ..SheetStyling::default()
         };
         self.tables.push((std::mem::take(&mut self.name), styling));
     }
