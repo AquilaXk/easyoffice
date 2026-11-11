@@ -15,6 +15,12 @@ mod font_catalog;
 mod linux_runtime;
 mod open_feedback;
 mod os_recent;
+mod pdf_edit_budget;
+mod pdf_edit_build;
+mod pdf_edit_inspect;
+mod pdf_edit_job;
+mod pdf_edit_overlay;
+mod pdf_edit_session;
 mod pdf_export;
 mod pdf_font_fallbacks;
 mod pdf_font_select;
@@ -316,6 +322,10 @@ fn main() {
             pdf_job::pdf_export_start,
             pdf_job::pdf_export_pages,
             pdf_job::pdf_export_finish,
+            pdf_edit_job::pdf_edit_open,
+            pdf_edit_job::pdf_edit_apply,
+            pdf_edit_job::pdf_edit_split_merge,
+            pdf_edit_job::pdf_edit_save,
             font_catalog::list_system_fonts,
             font_catalog::read_system_font,
             update_check::get_update_notice,
@@ -345,6 +355,7 @@ fn main() {
             app.manage(AppWindows::new(app.path().app_data_dir().ok()));
             app.manage(app_quit::AppQuit::default());
             app.manage(std::sync::Arc::new(pdf_job::PdfExports::default()));
+            app.manage(std::sync::Arc::new(pdf_edit_job::PdfEdits::default()));
             app.manage(std::sync::Arc::new(font_catalog::SystemFonts::default()));
             // macOS gets the native menu bar beside the page's menu row; Windows and Linux have only
             // the page's row, as in the reference app (PD-121).
@@ -474,7 +485,7 @@ mod tests {
         );
         assert_eq!(value["windows"], serde_json::json!(["main", "doc-*"]));
         assert_eq!(value["local"], serde_json::json!(true));
-        assert_eq!(app_commands::APP_COMMANDS.len(), 27);
+        assert_eq!(app_commands::APP_COMMANDS.len(), 31);
     }
 
     #[test]
@@ -534,5 +545,11 @@ mod tests {
 #[cfg(test)]
 mod path_leak_tests;
 
+#[cfg(test)]
+mod pdf_edit_fixtures;
+#[cfg(test)]
+mod pdf_edit_hostile_tests;
+#[cfg(test)]
+mod pdf_edit_tests;
 #[cfg(test)]
 mod perf_bench;

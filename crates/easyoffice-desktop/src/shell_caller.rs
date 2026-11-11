@@ -169,6 +169,7 @@ mod tests {
             include_str!("confirm_dialog.rs"),
             include_str!("print_webview.rs"),
             include_str!("pdf_job.rs"),
+            include_str!("pdf_edit_job.rs"),
             include_str!("font_catalog.rs"),
         ];
         let mut checked = 0;

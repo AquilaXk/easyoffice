@@ -41,6 +41,14 @@ resvg = { version = "0.45", default-features = false, features = ["text", "raste
 imagesize = "0.13"
 tiny-skia = { version = "0.11", default-features = false, features = ["std", "png-format"] }
 pdf-writer = "0.12"
+# PD-156: editing a PDF keeps the original's objects (pictures, fonts, layout). `hayro-syntax` reads the
+# file (no image decoders: the pages are copied, never drawn), `hayro-write` copies a page and the
+# objects it uses into a new file, and `flate2` (already in the graph through it) counts what a
+# stream inflates to before anything allocates for it. Shell only: the engine crates stay
+# dependency-free (PD-053/095).
+hayro-syntax = { version = "0.9", default-features = false, features = ["std"] }
+hayro-write = "0.9"
+flate2 = "1"
 # PD-142: the first page of a recent document without a preview picture. Parser and layout only (no
 # `native-skia`, so no Skia download); the pages come out as SVG that the crates above draw. The
 # workspace `[patch.crates-io]` points this at the pinned checkout `third_party/rhwp`.

@@ -3,9 +3,10 @@
 //! `eprintln!` calls removed, and the test module cut off.
 
 /// The shell sources whose errors reach the page (commands and the code under them).
-const SOURCES: [(&str, &str); 10] = [
+const SOURCES: [(&str, &str); 11] = [
     ("main.rs", include_str!("main.rs")),
     ("pdf_job.rs", include_str!("pdf_job.rs")),
+    ("pdf_edit_job.rs", include_str!("pdf_edit_job.rs")),
     ("window_commands.rs", include_str!("window_commands.rs")),
     ("save_file.rs", include_str!("save_file.rs")),
     ("save_error.rs", include_str!("save_error.rs")),
