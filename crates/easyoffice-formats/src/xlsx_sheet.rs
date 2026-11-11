@@ -12,6 +12,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 
+use crate::decode_budget::DecodeBudget;
 use crate::rtf_xml_helpers::{format_col_letters, parse_a1_zero_based};
 use crate::sheet_styling::xlsx_styles::xlsx_width_to_px;
 use crate::sheet_styling::{CellStyle, SheetStyling, MAX_STYLED_CELLS};
@@ -170,8 +171,12 @@ fn cell_position(
     }
 }
 
+/// What the decoded-budget error names when a cell's copy of a string or formula is refused.
+const CELL_BUDGET_WHAT: &str = "XLSX 셀 텍스트";
+
 struct SheetScanner<'s> {
     shared: &'s SharedStrings,
+    budget: &'s mut DecodeBudget,
     xf_styles: &'s [CellStyle],
     want_styling: bool,
     cells: Vec<(u32, u32, String)>,
@@ -317,55 +322,83 @@ impl<'s> SheetScanner<'s> {
         }
     }
 
-    /// The cell's formula as cell text (`=` first), or `None` when it has no usable one.
-    fn formula_text(&mut self, cell: &CellState<'_>) -> Option<String> {
-        let formula = cell.formula.as_ref()?;
+    /// The cell's formula as cell text (`=` first), or `None` when it has no usable one. The
+    /// copies it makes (a master kept for its slaves, a slave's shifted text) are charged to the
+    /// decoded budget before they are made.
+    fn formula_text(&mut self, cell: &CellState<'_>) -> Result<Option<String>, EasyOfficeError> {
+        let Some(formula) = cell.formula.as_ref() else {
+            return Ok(None);
+        };
         let (row, col) = cell.pos;
         if !formula.body.is_empty() {
             if let (true, Some(index)) = (formula.shared, formula.index) {
+                self.budget.charge(formula.body.len(), CELL_BUDGET_WHAT)?;
                 self.masters
                     .insert(index, (row, col, formula.body.to_string()));
             }
-            return Some(with_equals(&formula.body));
+            self.budget
+                .charge_cell(formula.body.len() + 1, CELL_BUDGET_WHAT)?;
+            return Ok(Some(with_equals(&formula.body)));
         }
-        if formula.shared {
-            let (mr, mc, master) = self.masters.get(&formula.index?)?;
-            let dr = i64::from(row) - i64::from(*mr);
-            let dc = i64::from(col) - i64::from(*mc);
-            return shift_shared_formula(master, dr, dc).map(|text| with_equals(&text));
+        if !formula.shared {
+            return Ok(None);
         }
-        None
+        let Some((mr, mc, master)) = formula.index.and_then(|index| self.masters.get(&index))
+        else {
+            return Ok(None);
+        };
+        self.budget
+            .charge_cell(master.len() + 1, CELL_BUDGET_WHAT)?;
+        let dr = i64::from(row) - i64::from(*mr);
+        let dc = i64::from(col) - i64::from(*mc);
+        Ok(shift_shared_formula(master, dr, dc).map(|text| with_equals(&text)))
+    }
+
+    /// The text a finished cell contributes, charged to the decoded budget; `None` when the cell
+    /// has no content.
+    fn cell_text(&mut self, cell: CellState<'_>) -> Result<Option<String>, EasyOfficeError> {
+        if let Some(formula) = self.formula_text(&cell)? {
+            return Ok(Some(formula));
+        }
+        if cell.cell_type == "inlineStr" || (cell.cell_type.is_empty() && cell.has_inline) {
+            let text = decode_xlsx_escapes(cell.inline);
+            self.budget.charge_cell(text.len(), CELL_BUDGET_WHAT)?;
+            return Ok(Some(text));
+        }
+        let Some(raw) = cell.value else {
+            return Ok(None);
+        };
+        let text = match &*cell.cell_type {
+            "s" => {
+                let shared = self.shared_string(&raw)?;
+                self.budget.charge_cell(shared.len(), CELL_BUDGET_WHAT)?;
+                return Ok(Some(shared.to_string()));
+            }
+            "b" => match raw.trim() {
+                "1" | "true" | "TRUE" => "TRUE".to_string(),
+                "0" | "false" | "FALSE" => "FALSE".to_string(),
+                _ => raw.into_owned(),
+            },
+            "d" => raw.trim().to_string(),
+            _ => decode_xlsx_escapes(raw),
+        };
+        self.budget.charge_cell(text.len(), CELL_BUDGET_WHAT)?;
+        Ok(Some(text))
     }
 
     fn finish_cell(&mut self, cell: CellState<'_>) -> Result<(), EasyOfficeError> {
         let (row, col) = cell.pos;
-        if let Some(formula) = self.formula_text(&cell) {
-            self.cells.push((row, col, formula));
-        } else if cell.cell_type == "inlineStr" || (cell.cell_type.is_empty() && cell.has_inline) {
-            self.cells
-                .push((row, col, decode_xlsx_escapes(cell.inline)));
-        } else if let Some(raw) = cell.value {
-            let text = match &*cell.cell_type {
-                "s" => self.shared_string(&raw)?,
-                "b" => match raw.trim() {
-                    "1" | "true" | "TRUE" => "TRUE".to_string(),
-                    "0" | "false" | "FALSE" => "FALSE".to_string(),
-                    _ => raw.into_owned(),
-                },
-                "d" => raw.trim().to_string(),
-                _ => decode_xlsx_escapes(raw),
-            };
+        if let Some(text) = self.cell_text(cell)? {
             self.cells.push((row, col, text));
         }
         Ok(())
     }
 
-    fn shared_string(&self, raw: &str) -> Result<String, EasyOfficeError> {
+    fn shared_string(&self, raw: &str) -> Result<&'s str, EasyOfficeError> {
         raw.trim()
             .parse::<usize>()
             .ok()
             .and_then(|index| self.shared.get(index))
-            .map(str::to_string)
             .ok_or_else(|| {
                 EasyOfficeError::CorruptedContainer(format!(
                     "XLSX 공유 문자열 인덱스 '{raw}'를 읽을 수 없습니다."
@@ -375,15 +408,18 @@ impl<'s> SheetScanner<'s> {
 }
 
 /// Reads the cells of `sheet_xml` in document order; with `want_styling` also the style of every
-/// cell that `xf_styles` marks and the custom column widths.
+/// cell that `xf_styles` marks and the custom column widths. The text of the cells is charged to
+/// `budget`, which the caller shares across the sheets of one workbook.
 pub(crate) fn scan_worksheet(
     sheet_xml: &str,
     shared: &SharedStrings,
     xf_styles: &[CellStyle],
     want_styling: bool,
+    budget: &mut DecodeBudget,
 ) -> Result<WorksheetScan, EasyOfficeError> {
     let mut scanner = SheetScanner {
         shared,
+        budget,
         xf_styles,
         want_styling,
         cells: Vec::new(),

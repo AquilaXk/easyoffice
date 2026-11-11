@@ -1,3 +1,4 @@
+use crate::decode_budget::DecodeBudget;
 pub use crate::odf_hwpx_codecs::*;
 pub use crate::rtf_xml_helpers::*;
 use crate::sheet_styling::xlsx_sheet::{read_shared_strings, scan_worksheet, SharedStrings};
@@ -262,6 +263,9 @@ fn build_sheet_xml(
 impl OoxmlCodec {
     pub const MAX_XLSX_ROWS: u32 = 1_048_576;
     pub const MAX_XLSX_COLS: u32 = 16_384;
+    /// Worksheets one workbook may list. Excel limits them by memory only; the bound keeps a
+    /// workbook part that lists millions of them from becoming millions of scans (PD-175).
+    pub const MAX_XLSX_SHEETS: usize = 1_024;
 
     pub fn pack_docx(payload: &OoxmlDocxPayload) -> Result<Vec<u8>, EasyOfficeError> {
         let content_types = concat!(
@@ -595,6 +599,12 @@ impl OoxmlCodec {
         }
 
         let sheet_tags = extract_balanced_elements(wb_xml, "sheet");
+        if sheet_tags.len() > Self::MAX_XLSX_SHEETS {
+            return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+                "XLSX 워크시트 개수가 허용 상한({})을 초과했습니다.",
+                Self::MAX_XLSX_SHEETS
+            )));
+        }
         let mut sheet_specs: Vec<(String, String)> = Vec::new();
         for (idx, (s_attrs, _)) in sheet_tags.into_iter().enumerate() {
             let name = extract_attr_from_fragment(s_attrs, "name")
@@ -621,15 +631,16 @@ impl OoxmlCodec {
         };
         let mut stylings = Vec::new();
         let mut parsed_sheets = Vec::with_capacity(sheet_specs.len());
+        let mut scanned_parts = std::collections::HashSet::new();
+        let mut budget = DecodeBudget::new();
         for (idx, (sheet_name, target_path)) in sheet_specs.into_iter().enumerate() {
-            let sheet_data = entry_by_path
-                .get(target_path.as_str())
-                .copied()
+            let part = entry_by_path
+                .get_key_value(target_path.as_str())
                 .or_else(|| {
                     let fallback = format!("xl/worksheets/sheet{}.xml", idx + 1);
-                    entry_by_path.get(fallback.as_str()).copied()
+                    entry_by_path.get_key_value(fallback.as_str())
                 });
-            let Some(s_data) = sheet_data else {
+            let Some((&part_path, &s_data)) = part else {
                 if idx == 0 {
                     return Err(EasyOfficeError::CorruptedContainer(
                         "XLSX 필수 엔트리 'xl/worksheets/sheet1.xml'이 누락되었습니다.".to_string(),
@@ -637,11 +648,24 @@ impl OoxmlCodec {
                 }
                 continue;
             };
+            // Each worksheet part is scanned once: naming one part from many `<sheet>` entries
+            // would repeat the scan (and its copies) per entry.
+            if !scanned_parts.insert(part_path) {
+                return Err(EasyOfficeError::CorruptedContainer(format!(
+                    "XLSX 워크시트 파트 '{part_path}'를 여러 시트가 가리킵니다."
+                )));
+            }
             let sheet_xml = std::str::from_utf8(s_data).map_err(|_| {
                 EasyOfficeError::InvalidUtf8("xl/worksheets/sheet.xml UTF-8 오류".to_string())
             })?;
             XmlSanitizer::validate_safe_xml(sheet_xml)?;
-            let scan = scan_worksheet(sheet_xml, &shared_strings, &xf_styles, with_styling)?;
+            let scan = scan_worksheet(
+                sheet_xml,
+                &shared_strings,
+                &xf_styles,
+                with_styling,
+                &mut budget,
+            )?;
             if with_styling {
                 stylings.push((sheet_name.clone(), scan.styling));
             }
@@ -680,7 +704,7 @@ mod tests {
     ) -> Result<Vec<(u32, u32, String)>, EasyOfficeError> {
         let sheet = format!("<sheetData><row r=\"1\">{cell_xml}</row></sheetData>");
         let table = SharedStrings::from_strings(shared);
-        scan_worksheet(&sheet, &table, &[], false).map(|scan| scan.cells)
+        scan_worksheet(&sheet, &table, &[], false, &mut DecodeBudget::new()).map(|scan| scan.cells)
     }
 
     #[test]

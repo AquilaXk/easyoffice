@@ -20,7 +20,7 @@ pub const MAX_IWA_CHUNKS: usize = 65_536;
 /// Maximum decompressed bytes of one `.iwa` file.
 pub const MAX_IWA_FILE_BYTES: usize = 64 * 1024 * 1024;
 /// Maximum decompressed bytes across all `.iwa` files of one document.
-pub const MAX_DOCUMENT_BYTES: usize = 256 * 1024 * 1024;
+pub const MAX_DOCUMENT_BYTES: usize = crate::decode_budget::MAX_DECODED_DOCUMENT_BYTES;
 /// Maximum records read from one `.iwa` file.
 pub const MAX_RECORDS: usize = 1_000_000;
 

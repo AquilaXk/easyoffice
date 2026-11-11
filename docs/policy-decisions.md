@@ -2689,3 +2689,14 @@
 - **Trade-offs** 원본이 `.hwp`·`.hwpx`일 때 응답의 `paragraphCount`·`tableCount`는 PD-167처럼 0일 수 있습니다.
 - **Verified by** `cargo test -p easyoffice-app --test rich_pdf_renderer`(원본 바이트가 같은 채 렌더러에 도착, 쪽 설정 전달, 형광펜은 엔진), `cargo test -p easyoffice-desktop a_native_hangul_source_is_drawn_from_its_own_bytes`(HWPX·HWP 원본이 한 쪽 PDF로 나오고 워터마크가 검색됨).
 - **Revisit when** 엔진 HWP 작성기 출력을 rhwp가 일부만 읽는 문제(엔진이 쓴 HWP의 영문 본문이 PDF에 빠짐)를 고칠 때.
+
+## PD-175. 포맷 디코더는 문서 하나가 복원하는 바이트 총량에 예산을 둔다 (256 MiB)
+
+- **Status** Implemented (`decode_budget.rs`, `xlsx_sheet.rs`, `office_codecs.rs`)
+- **Context** PD-168이 XLSX·ODS 읽기에서 이벤트 상한(600만)을 풀면서, 한 단계(요소·레코드·셀)만 재던 한도가 합계를 막지 못하는 경로가 드러났습니다. 공유 문자열 하나를 셀 수십만 개가 가리키면 셀마다 문자열 사본이 생기고, 같은 시트 파트를 가리키는 `<sheet>` 항목이 파트를 항목 수만큼 다시 읽습니다. 작은 파일이 수십 GiB를 복원할 수 있습니다.
+- **Decision (`PD-175`)**
+  1. **검토 3단계**: (1) 외부 크레이트는 엔진 무의존(PD-053, PD-095) 때문에 쓰지 않습니다. (2) 같은 구조가 이미 Pages 읽기에 있습니다(`pages_iwa.rs`의 문서 단위 `document_budget`, 256 MiB). (3) 그 방식을 `DecodeBudget`(`decode_budget.rs`)으로 일반화해 읽기 경로가 같은 값과 같은 오류(`ResourceBudgetExceeded`)를 씁니다. `pages_iwa::MAX_DOCUMENT_BYTES`는 같은 상수를 가리킵니다.
+  2. **예산**: 문서당 256 MiB. 복사하기 전에 복사할 크기를 빼고, 모자라면 열기를 거부합니다(Fail-Closed). 셀은 텍스트 길이에 셀 레코드 크기(32바이트)를 더해 셀 개수도 함께 묶습니다.
+  3. **XLSX**: 공유 문자열 참조, 공유 수식 슬레이브가 만드는 수식 사본, 인라인·값 문자열을 시트 전체가 한 예산으로 냅니다. 워크시트 파트는 한 번만 읽고(같은 파트를 가리키는 `<sheet>` 둘 이상은 손상 처리), 시트 항목은 1,024개까지만 받습니다.
+- **Why** 입력 크기로 출력 크기를 묶을 수 없는 읽기는 합계 예산이 유일한 방어선입니다. 한 문서의 복원량이 256 MiB를 넘는 정상 파일은 없습니다(ZIP 합계 한도가 512 MiB이고 셀 하나가 수십 바이트).
+- **Verified by** `tests/decode_budget_xlsx.rs`(공유 문자열 300×1 MiB, 공유 수식 슬레이브 300×1 MiB, 두 시트 합산, 같은 파트를 가리키는 시트 둘, 시트 항목 2,000개 거부, 10만 셀 정상 파일 통과), `decode_budget.rs` 단위 시험.
