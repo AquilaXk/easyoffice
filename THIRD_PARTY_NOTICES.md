@@ -9060,3 +9060,7 @@ THE SOFTWARE.
 ### PDF standard font metrics (Helvetica widths)
 
 `crates/easyoffice-formats/src/pdf_text_wrap.rs` holds the glyph advance widths of the PDF base-14 Helvetica font for ASCII codes 32 to 126 (thousandths of the font size), as published in the Core 14 AFM font metrics files (Copyright (c) 1985, 1987, 1989, 1990, 1997 Adobe Systems Incorporated). The metrics notice allows use, copying and distribution for any purpose without charge as long as the copyright notices are kept; only the numbers are used, no font program or AFM file is included.
+
+### SheetJS SSF and IronCalc number formatter (Apache-2.0; MIT OR Apache-2.0)
+
+Sources: https://github.com/SheetJS/sheetjs (`packages/ssf/ssf.js`, Apache License 2.0, Copyright (C) 2012-present SheetJS LLC) and https://github.com/ironcalc/IronCalc (`base/src/formatter`, used under the MIT license). `crates/easyoffice-sheet/src/text_format*` re-implements, in safe Rust, the SSF section choice with `[>100]`-style conditions and its continued-fraction search for `# ?/?` codes (extended with the closest semiconvergent), and follows IronCalc's split of a format code into sections and tokens. No locale data is taken from either project; the Korean month, weekday and AM/PM names and the `DBNum` glyph tables are written directly. The full Apache License 2.0 text is reproduced in the generated section above.

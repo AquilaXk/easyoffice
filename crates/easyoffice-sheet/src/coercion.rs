@@ -351,7 +351,8 @@ pub fn format_fixed_number(num: f64, decimals: i32, use_commas: bool) -> String 
 }
 
 pub use crate::text_format::{
-    format_number_with_code, format_text_pattern, format_text_value_with_code,
+    compiled_format, format_number_styled, format_number_with_code, format_text_pattern,
+    format_text_value_with_code, CompiledFormat, FormatColor, FormattedText,
 };
 
 impl SheetEngine {
