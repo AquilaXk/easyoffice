@@ -4,7 +4,10 @@
 
 /// Files that never answer the page: test code, the offline smoke run and the benchmark harness.
 fn is_page_facing(name: &str) -> bool {
-    let tests = name.ends_with("_tests.rs") || name.contains("/tests/") || name.contains("_tests/");
+    let tests = name.ends_with("_tests.rs")
+        || name.ends_with("/tests.rs")
+        || name.contains("/tests/")
+        || name.contains("_tests/");
     let harness =
         name.starts_with("smoke") || name == "perf_bench.rs" || name.ends_with("_fixtures.rs");
     !(tests || harness)
