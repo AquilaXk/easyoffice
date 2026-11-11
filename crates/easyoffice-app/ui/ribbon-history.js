@@ -642,7 +642,7 @@
           sheetController.appendSheetRow();
           break;
         case "sheet-data-sort":
-          sheetController.sortActiveSheetByColumnB();
+          void sheetController.sortActiveSheetRange();
           setSheetSummary(execRes);
           break;
         case "sheet-mod-pivot":

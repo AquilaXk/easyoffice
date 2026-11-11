@@ -663,6 +663,7 @@
       endEdit,
       getRange,
       runClipboardCommand,
+      shiftFormula: clip.shiftFormula,
       getSelection: () => ({ ...sel }),
     };
   }

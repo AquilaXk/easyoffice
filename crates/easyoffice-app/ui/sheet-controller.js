@@ -185,7 +185,6 @@
       const nextCount = getSheetRowCount(curSheet) + 1;
       sheetRowCounts[curSheet] = nextCount;
       sheetDataStore[curSheet] = map;
-      bumpExtent(curSheet, nextCount, 8);
       grid.renderWindow(true);
       grid.refreshCells();
     }
@@ -790,7 +789,7 @@
 
     const ops = host.__EASYOFFICE_CREATE_SHEET_OPS__({
       document,
-      grid,
+      gridUtils,
       sheetDataStore,
       getActiveSheetName,
       getActiveSheetCellRef,
@@ -798,10 +797,10 @@
       saveActiveSheetCellsToWorkbook,
       refreshWindowFromModel,
       refreshFocusedSheetCellPendingSnapshot,
+      updateSheetSelectionAndAggregates,
       recalculateActiveSheetFormulas,
       getRange: () => input.getRange(),
       shiftFormula: input.shiftFormula,
-      updateSheetSelectionAndAggregates,
       hasCellContent,
     });
 
@@ -850,10 +849,7 @@
       saveActiveSheetCellsToWorkbook();
       setActiveSheetName(targetSheetName);
       if (!sheetDataStore[targetSheetName]) {
-        sheetDataStore[targetSheetName] = {
-          A1: { value: targetSheetName + " 항목", formula: "" },
-          B1: { value: "500", formula: "" },
-        };
+        sheetDataStore[targetSheetName] = {};
       }
       restoreDomSheetCells(targetSheetName);
       refreshFocusedSheetCellPendingSnapshot();
@@ -901,7 +897,7 @@
       commitPendingFocusedSheetCell,
       bindSheetCellEvents,
       runSheetClipboardCommand,
-      sortActiveSheetByColumnB: ops.sortActiveSheetByColumnB,
+      sortActiveSheetRange: ops.sortActiveSheetRange,
       applySheetPivotOrChartSummary: ops.applySheetPivotOrChartSummary,
       toggleSheetConditionalFormatting: ops.toggleSheetConditionalFormatting,
       applySheetFormatCommand: format.applyCommand,

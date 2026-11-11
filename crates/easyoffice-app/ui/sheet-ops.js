@@ -4,7 +4,6 @@
   // Row/column-oriented sheet commands (sort, pivot/chart summary, conditional formatting)
   // operating on the sheet model so they work for rows that are not currently materialized.
   const { normalizeFormattedNumericCell } = host.__EASYOFFICE_SHEET_UTILS__;
-  const SORT_COL_LETTERS = ["A", "B", "C", "D", "E", "F", "G", "H"];
 
   function numberOf(entry) {
     const text = normalizeFormattedNumericCell(entry?.value);
@@ -80,6 +79,7 @@
   function createSheetOps(api) {
     const {
       document,
+      gridUtils,
       sheetDataStore,
       getActiveSheetName,
       getActiveSheetCellRef,
@@ -88,64 +88,115 @@
       refreshWindowFromModel,
       refreshFocusedSheetCellPendingSnapshot,
       updateSheetSelectionAndAggregates,
+      recalculateActiveSheetFormulas,
+      getRange,
+      shiftFormula,
       hasCellContent,
     } = api;
 
-    function sortActiveSheetByColumnB() {
-      const curSheet = getActiveSheetName();
-      const map = snapshotDomSheetCells();
-      sheetDataStore[curSheet] = map;
-      const maxRow = scanDataRange(map, null);
-      const populatedRows = [];
-      const blankRows = [];
-      for (let r = 2; r <= maxRow; r += 1) {
-        const cells = {};
-        let isBlankRow = true;
-        SORT_COL_LETTERS.forEach((col) => {
-          const entry = map[col + r];
-          if (hasCellContent(entry)) isBlankRow = false;
-          if (entry) cells[col] = entry;
-        });
-        if (isBlankRow) {
-          blankRows.push({ origRow: r, bNum: 0, cells });
-        } else {
-          populatedRows.push({ origRow: r, bNum: numberOf(map["B" + r]) ?? 0, cells });
-        }
+    // Highest row/column that holds content (0 when the sheet is empty).
+    function usedExtent(map) {
+      let maxRow = 0;
+      let maxCol = 0;
+      for (const ref of Object.keys(map)) {
+        if (!hasCellContent(map[ref])) continue;
+        const pos = gridUtils.parseRef(ref);
+        if (!pos) continue;
+        if (pos.row > maxRow) maxRow = pos.row;
+        if (pos.col > maxCol) maxCol = pos.col;
       }
-      if (populatedRows.length < 2) return;
-      let isAscending = true;
-      for (let i = 1; i < populatedRows.length; i += 1) {
-        if (populatedRows[i].bNum < populatedRows[i - 1].bNum) {
-          isAscending = false;
+      return { maxRow, maxCol };
+    }
+
+    // A multi-cell selection sorts exactly that block (first column is the key). Without one the
+    // data range is every used column below the header row, keyed on column B (or A when alone),
+    // ending at the last row with a typed key so formula total rows below it stay in place.
+    function sortRange(map, used) {
+      const sel = getRange();
+      const hasSelection = sel.r1 !== sel.r2 || sel.c1 !== sel.c2;
+      if (hasSelection) {
+        return {
+          r1: sel.r1,
+          r2: Math.min(sel.r2, used.maxRow),
+          c1: sel.c1,
+          c2: Math.min(sel.c2, used.maxCol),
+          keyCol: sel.c1,
+        };
+      }
+      const keyCol = Math.min(2, used.maxCol);
+      let r2 = 1;
+      for (let r = used.maxRow; r >= 2; r -= 1) {
+        const entry = map[gridUtils.refOf(r, keyCol)];
+        if (hasCellContent(entry) && !entry.formula) {
+          r2 = r;
           break;
         }
       }
-      populatedRows.sort((a, b) => (isAscending ? b.bNum - a.bNum : a.bNum - b.bNum));
-      const rowData = [...populatedRows, ...blankRows];
-      rowData.forEach((item, idx) => {
-        const targetRow = idx + 2;
-        const origRowRe = new RegExp("([A-Z]+)" + item.origRow + String.raw`\b`, "g");
-        SORT_COL_LETTERS.forEach((col) => {
-          const src = item.cells[col];
+      return { r1: 2, r2, c1: 1, c2: used.maxCol, keyCol };
+    }
+
+    function sortKeyOf(entry) {
+      const text = String(entry?.value ?? "").trim();
+      return { empty: text === "", num: numberOf(entry), text };
+    }
+
+    // Numbers before text, text by locale order; blank keys always last.
+    function compareSortKeys(a, b, dir) {
+      if (a.empty || b.empty) return Number(a.empty) - Number(b.empty);
+      let cmp;
+      if (a.num !== null && b.num !== null) cmp = a.num - b.num;
+      else if (a.num !== null) cmp = -1;
+      else if (b.num !== null) cmp = 1;
+      else cmp = a.text.localeCompare(b.text, "ko");
+      return dir * cmp;
+    }
+
+    function sortActiveSheetRange() {
+      const curSheet = getActiveSheetName();
+      const map = snapshotDomSheetCells();
+      sheetDataStore[curSheet] = map;
+      const range = sortRange(map, usedExtent(map));
+      if (range.r2 <= range.r1) return Promise.resolve();
+      const populatedRows = [];
+      const blankRows = [];
+      for (let r = range.r1; r <= range.r2; r += 1) {
+        const cells = [];
+        let isBlankRow = true;
+        for (let c = range.c1; c <= range.c2; c += 1) {
+          const entry = map[gridUtils.refOf(r, c)];
+          if (hasCellContent(entry)) isBlankRow = false;
+          cells.push(entry);
+        }
+        const row = { origRow: r, key: sortKeyOf(map[gridUtils.refOf(r, range.keyCol)]), cells };
+        (isBlankRow ? blankRows : populatedRows).push(row);
+      }
+      if (populatedRows.length < 2) return Promise.resolve();
+      const isAscending = populatedRows.every(
+        (row, i) => i === 0 || compareSortKeys(populatedRows[i - 1].key, row.key, 1) <= 0
+      );
+      const dir = isAscending ? -1 : 1;
+      populatedRows.sort((a, b) => compareSortKeys(a.key, b.key, dir));
+      [...populatedRows, ...blankRows].forEach((item, idx) => {
+        const targetRow = range.r1 + idx;
+        const dRow = targetRow - item.origRow;
+        item.cells.forEach((src, offset) => {
+          const ref = gridUtils.refOf(targetRow, range.c1 + offset);
           if (!src) {
-            delete map[col + targetRow];
+            delete map[ref];
             return;
           }
           const moved = { value: src.value, formula: "" };
-          if (src.formula) {
-            moved.formula = src.formula.includes("=")
-              ? src.formula.replace(origRowRe, "$1" + targetRow)
-              : src.formula;
-          }
+          if (src.formula) moved.formula = dRow === 0 ? src.formula : shiftFormula(src.formula, dRow, 0);
           const style = cloneStyleWithoutFreeze(src.style);
           if (style) moved.style = style;
-          map[col + targetRow] = moved;
+          map[ref] = moved;
         });
       });
       refreshWindowFromModel();
       saveActiveSheetCellsToWorkbook();
       refreshFocusedSheetCellPendingSnapshot();
       updateSheetSelectionAndAggregates(getActiveSheetCellRef() || "F2");
+      return recalculateActiveSheetFormulas({ updateFocusedDisplay: true });
     }
 
     function applySheetPivotOrChartSummary(mode, execRes) {
@@ -202,7 +253,7 @@
 
 
     return {
-      sortActiveSheetByColumnB,
+      sortActiveSheetRange,
       applySheetPivotOrChartSummary,
       toggleSheetConditionalFormatting,
     };
