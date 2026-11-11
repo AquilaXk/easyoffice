@@ -81,15 +81,54 @@ pub fn parse_version(text: &[u8]) -> Option<Version> {
     (count == parts.len()).then_some(parts)
 }
 
-/// True when `candidate` is a newer version than `current`.
-pub fn is_newer(candidate: Version, current: Version) -> bool {
-    candidate > current
+/// The running build: its version numbers and whether it is a pre-release of them. Releases are
+/// compared as semantic versions: `1.2.0-rc.1` is older than `1.2.0` and newer than `1.1.9`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Running {
+    version: Version,
+    prerelease: bool,
 }
 
-/// The running version from the app's version text (the Tauri config version, which the release
-/// build overrides with the tag). Unparseable text counts as `0.0.0`.
-pub fn current_version(text: &str) -> Version {
-    parse_version(text.as_bytes()).unwrap_or([0, 0, 0])
+impl From<Version> for Running {
+    fn from(version: Version) -> Self {
+        Self {
+            version,
+            prerelease: false,
+        }
+    }
+}
+
+/// True when `candidate` (always a final release) is newer than the running build.
+pub fn is_newer(candidate: Version, current: impl Into<Running>) -> bool {
+    let current = current.into();
+    candidate > current.version || (current.prerelease && candidate == current.version)
+}
+
+/// Whether `text` is a semantic pre-release part: dot-separated, non-empty identifiers of ASCII
+/// letters, digits and hyphens.
+fn is_prerelease_part(text: &[u8]) -> bool {
+    text.split(|&byte| byte == b'.')
+        .all(|id| !id.is_empty() && id.iter().all(|&b| b.is_ascii_alphanumeric() || b == b'-'))
+}
+
+/// The running build from the app's version text (the Tauri config version, which the release
+/// build overrides with the tag): `1.2.3`, `1.2.3-rc.1` or either with `+build` metadata, which
+/// does not take part in the order. Unparseable text counts as the final release `0.0.0`.
+pub fn current_version(text: &str) -> Running {
+    let without_build = text.split_once('+').map_or(text, |(version, _)| version);
+    let (core, pre) = match without_build.split_once('-') {
+        Some((core, pre)) => (core, Some(pre)),
+        None => (without_build, None),
+    };
+    let version = parse_version(core.as_bytes());
+    match (version, pre) {
+        (Some(version), None) => version.into(),
+        (Some(version), Some(pre)) if is_prerelease_part(pre.as_bytes()) => Running {
+            version,
+            prerelease: true,
+        },
+        _ => Running::from([0, 0, 0]),
+    }
 }
 
 /// True for an address inside the project's releases page (no whitespace or control characters).
@@ -118,7 +157,10 @@ struct ReleaseJson {
 
 /// Reads an API response: `Ok(Some(..))` for a newer final release, `Ok(None)` for anything else
 /// that is well formed, `Err` for an oversized, malformed or unsafe response.
-pub fn parse_release(body: &[u8], current: Version) -> Result<Option<Available>, String> {
+pub fn parse_release(
+    body: &[u8],
+    current: impl Into<Running>,
+) -> Result<Option<Available>, String> {
     if body.len() as u64 > MAX_BODY_BYTES {
         return Err("업데이트 확인 응답이 너무 큽니다.".to_string());
     }
@@ -130,7 +172,7 @@ pub fn parse_release(body: &[u8], current: Version) -> Result<Option<Available>,
     let Some(version) = parse_version(release.tag_name.as_bytes()) else {
         return Ok(None);
     };
-    if !is_newer(version, current) {
+    if !is_newer(version, current.into()) {
         return Ok(None);
     }
     if !release_url_ok(&release.html_url) {
@@ -176,7 +218,7 @@ impl UpdateRecord {
 
     /// Drops a remembered release that is not newer than `current` or whose address is not ours (the
     /// file may have been edited).
-    fn sanitized(mut self, current: Version) -> Self {
+    fn sanitized(mut self, current: Running) -> Self {
         let keep = self.available.as_ref().is_some_and(|a| {
             parse_version(a.version.as_bytes()).is_some_and(|v| is_newer(v, current))
                 && release_url_ok(&a.url)
@@ -188,7 +230,7 @@ impl UpdateRecord {
     }
 }
 
-fn read_record(path: &Path, current: Version) -> UpdateRecord {
+fn read_record(path: &Path, current: Running) -> UpdateRecord {
     let bytes = std::fs::File::open(path).ok().and_then(|file| {
         let mut buf = Vec::new();
         file.take(MAX_RECORD_BYTES + 1)
@@ -224,13 +266,14 @@ pub struct UpdateService {
     path: Option<PathBuf>,
     /// False in the smoke run and when there is no app data folder: nothing is checked or stored.
     active: bool,
-    current: Version,
+    current: Running,
     /// The signed install in progress, if any (not stored: a restart starts clean).
     pub install: InstallProgress,
 }
 
 impl UpdateService {
-    pub fn new(data_dir: Option<&Path>, active: bool, current: Version) -> Self {
+    pub fn new(data_dir: Option<&Path>, active: bool, current: impl Into<Running>) -> Self {
+        let current = current.into();
         let path = data_dir.map(|dir| dir.join(RECORD_FILE));
         let record = match (&path, active) {
             (Some(path), true) => read_record(path, current),
@@ -611,13 +654,45 @@ mod tests {
     #[test]
     fn the_app_version_text_decides_which_release_is_news() {
         let built_as_0_1_0 = current_version("0.1.0");
-        assert_eq!(built_as_0_1_0, [0, 1, 0]);
+        assert_eq!(built_as_0_1_0, Running::from([0, 1, 0]));
         let notice =
             |tag: &str| parse_release(&release_json(tag, RELEASE_URL, ""), built_as_0_1_0).unwrap();
         assert!(notice("v0.1.0").is_none());
         assert!(notice("v0.1.1").is_some());
         assert!(notice("v0.2.0").is_some());
-        assert_eq!(current_version("not a version"), [0, 0, 0]);
+        assert_eq!(current_version("not a version"), Running::from([0, 0, 0]));
+    }
+
+    /// A build made from a pre-release tag (`1.2.0-rc.1`, which the release workflow accepts) used
+    /// to count as `0.0.0`: every older release looked like news.
+    #[test]
+    fn a_pre_release_build_is_older_than_its_release_and_newer_than_the_one_before() {
+        let news = |running: &str, tag: &str| {
+            parse_release(
+                &release_json(tag, RELEASE_URL, ""),
+                current_version(running),
+            )
+            .unwrap()
+            .is_some()
+        };
+        assert!(!news("1.2.0-rc.1", "v0.1.0"), "an older release is no news");
+        assert!(!news("1.2.0-rc.1", "v1.1.9"));
+        assert!(news("1.2.0-rc.1", "v1.2.0"), "its own release is news");
+        assert!(news("1.2.0-rc.1", "v1.2.1"));
+        assert!(
+            !news("1.2.0", "v1.2.0"),
+            "a release build is at its own version"
+        );
+        assert!(
+            !news("1.2.0+build.5", "v1.2.0"),
+            "build metadata is not a pre-release"
+        );
+        assert!(!news("1.2.3-rc.1+exp.sha", "v1.2.2"));
+        assert!(news("1.2.3-rc.1+exp.sha", "v1.2.3"));
+        // Text that is not a version at all still counts as 0.0.0.
+        assert!(news("1.2.0-", "v0.0.1"));
+        assert!(news("1.2.0-rc..1", "v0.0.1"));
+        assert!(news("not a version", "v0.0.1"));
     }
 
     #[test]
