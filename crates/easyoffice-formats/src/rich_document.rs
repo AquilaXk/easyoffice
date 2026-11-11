@@ -331,7 +331,7 @@ impl UniversalFormatConverter {
                 HwpxCodec::pack_rich(doc, format == DocumentFormat::Hwtx)
             }
             DocumentFormat::Odt => w::pack_odt_rich(doc),
-            DocumentFormat::Rtf => Ok(w::encode_rtf_rich(doc).into_bytes()),
+            DocumentFormat::Rtf => Ok(crate::rich_rtf_writer::encode_rtf_rich(doc).into_bytes()),
             DocumentFormat::Markdown => Ok(w::render_markdown_rich(doc).into_bytes()),
             DocumentFormat::Txt => Ok(w::render_plain_text(doc, "\t", true).into_bytes()),
             DocumentFormat::Pdf => Ok(w::serialize_pdf_rich(doc)),

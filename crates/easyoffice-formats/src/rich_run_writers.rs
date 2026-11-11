@@ -261,4 +261,5 @@ pub(crate) fn has_extra_run_format(run: &RichRun) -> bool {
         || run.font.is_some()
         || run.color.is_some()
         || run.highlight.is_some()
+        || run.script != RichScript::Normal
 }

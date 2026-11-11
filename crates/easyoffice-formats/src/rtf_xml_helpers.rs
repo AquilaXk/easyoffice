@@ -67,7 +67,7 @@ impl RtfCodec {
                 .strip_prefix("\\pard")
                 .and_then(|s| s.strip_suffix("\\par"))
             {
-                let text = crate::rich_writers::strip_rtf_format_words(rest);
+                let text = crate::rich_rtf_writer::strip_rtf_format_words(rest);
                 paragraphs.push(Self::unescape_rtf_text(&text));
             } else if line.starts_with("{\\trowd") && line.ends_with("\\row}") {
                 let tbl_idx = extract_between(line, "{\\*\\tblidx ", "}")

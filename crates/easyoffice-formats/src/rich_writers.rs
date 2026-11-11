@@ -1,30 +1,27 @@
 //! Writers that keep [`RichDocument`] block order and run/paragraph formatting for DOCX
-//! (`w:rPr`/`w:pPr`/`w:pStyle` plus `word/styles.xml`), ODT (automatic styles), RTF (control
-//! words), Markdown (`**`/`*`/`~~`/`#`), TXT, and PDF (ordered text). User text is always escaped
-//! for the target syntax and never parsed.
+//! (`w:rPr`/`w:pPr`/`w:pStyle` plus `word/styles.xml`), ODT (automatic styles), Markdown
+//! (`**`/`*`/`~~`/`#`), TXT, and PDF (ordered text); RTF lives in `rich_rtf_writer.rs`. User text
+//! is always escaped for the target syntax and never parsed.
 
 use crate::pdf_image::pdf_image_object;
 use crate::pdf_writer::{
     paginate_pages, PdfImagePage, PdfPageEntry, PDF_IMAGE_MARGIN_PT, PDF_PAGE_HEIGHT_PT,
     PDF_PAGE_WIDTH_PT,
 };
-use crate::rich_document::{
-    RichAlignment, RichBlock, RichDocument, RichListKind, RichParagraph, RichRun,
-};
+use crate::rich_document::{RichAlignment, RichBlock, RichDocument, RichListKind, RichParagraph};
 use crate::rich_image::{check_document_images, fit_within};
 use crate::rich_image_writers::{
     docx_content_type_defaults, docx_image_paragraph, docx_image_relationship, emu_to_points,
     odt_image_paragraph, MediaParts, DOCX_PICTURE_NAMESPACES, ODT_PICTURE_NAMESPACES,
 };
-use crate::rich_rtf_table::rtf_table_lines;
 use crate::rich_run_writers::{
-    docx_run_properties, has_extra_run_format, odt_font_face_decls, odt_text_key,
-    odt_text_key_is_plain, odt_text_style_xml, OdtTextKey, RtfRunTables,
+    docx_run_properties, odt_font_face_decls, odt_text_key, odt_text_key_is_plain,
+    odt_text_style_xml, OdtTextKey,
 };
 use crate::rich_table_writers::{push_docx_table, push_odt_table};
 use crate::{
     CommonMarkCodec, EasyOfficeError, MarkdownBlock, OdfCodec, PdfDocumentModel, PdfPageModel,
-    PdfSerializer, RtfCodec, XmlSanitizer, ZipArchiveCodec,
+    PdfSerializer, XmlSanitizer, ZipArchiveCodec,
 };
 
 /// `w:spacing/@w:line` value of single line spacing (240ths of a line).
@@ -480,173 +477,6 @@ pub(crate) fn pack_odt_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeErr
     ZipArchiveCodec::pack_compressed(&entries)
 }
 
-// ---------------------------------------------------------------- RTF
-
-/// Formatting control words the RTF writer emits (each followed by one delimiter space).
-const RTF_FORMAT_WORDS: [&str; 20] = [
-    "pard",
-    "ql",
-    "qc",
-    "qr",
-    "qj",
-    "b",
-    "i",
-    "ul",
-    "ulnone",
-    "strike",
-    "fs",
-    "li",
-    "pnlvlblt",
-    "pnlvlbody",
-    "outlinelevel",
-    "plain",
-    "s",
-    "f",
-    "cf",
-    "highlight",
-];
-
-/// Removes the formatting control words written by [`encode_rtf_rich`] (alignment, bold, italic,
-/// underline, strike, size, indent, outline level) so the line decoder sees escaped text only.
-/// Escapes (`\\`, `\{`, `\}`), `\uN?`, and `\line` are kept for the text unescaper.
-pub(crate) fn strip_rtf_format_words(input: &str) -> String {
-    let rest = input.strip_prefix(' ').unwrap_or(input);
-    let bytes = rest.as_bytes();
-    let mut out = String::with_capacity(rest.len());
-    let mut i = 0usize;
-    while i < bytes.len() {
-        if bytes[i] != b'\\' {
-            let ch = rest[i..].chars().next().unwrap_or(' ');
-            out.push(ch);
-            i += ch.len_utf8();
-            continue;
-        }
-        let word_start = i + 1;
-        let mut j = word_start;
-        while j < bytes.len() && bytes[j].is_ascii_lowercase() {
-            j += 1;
-        }
-        let word = &rest[word_start..j];
-        if word.is_empty() {
-            // Control symbol (`\\`, `\{`, `\}`): keep both bytes.
-            let end = (i + 2).min(bytes.len());
-            out.push_str(&rest[i..end]);
-            i = end;
-            continue;
-        }
-        if !RTF_FORMAT_WORDS.contains(&word) {
-            out.push_str(&rest[i..j]);
-            i = j;
-            continue;
-        }
-        let mut k = j;
-        if k < bytes.len() && bytes[k] == b'-' {
-            k += 1;
-        }
-        while k < bytes.len() && bytes[k].is_ascii_digit() {
-            k += 1;
-        }
-        if k < bytes.len() && bytes[k] == b' ' {
-            k += 1;
-        }
-        i = k;
-    }
-    out
-}
-
-fn rtf_alignment_word(a: RichAlignment) -> &'static str {
-    match a {
-        RichAlignment::Left => "\\ql",
-        RichAlignment::Center => "\\qc",
-        RichAlignment::Right => "\\qr",
-        RichAlignment::Justify => "\\qj",
-    }
-}
-
-/// One RTF paragraph line (`\pard ... \par`).
-fn rtf_paragraph_line(p: &RichParagraph, tables: &RtfRunTables) -> String {
-    let mut line = String::from("\\pard");
-    if let Some(a) = p.alignment {
-        line.push_str(rtf_alignment_word(a));
-    }
-    if (1..=6).contains(&p.heading_level) {
-        line.push_str(&format!(
-            "\\outlinelevel{}\\fs{}",
-            p.heading_level - 1,
-            heading_half_points(p.heading_level)
-        ));
-    } else if let Some(list_kind) = p.list {
-        line.push_str(match list_kind {
-            RichListKind::Bullet => "\\pnlvlblt\\li720",
-            RichListKind::Ordered => "\\pnlvlbody\\li720",
-        });
-    }
-    line.push(' ');
-    for run in &p.runs {
-        push_rtf_run(&mut line, run, tables);
-    }
-    line.push_str("\\par");
-    line
-}
-
-fn push_rtf_run(line: &mut String, run: &RichRun, tables: &RtfRunTables) {
-    let toggles = [
-        (run.bold, "\\b ", "\\b0 "),
-        (run.italic, "\\i ", "\\i0 "),
-        (run.underline, "\\ul ", "\\ulnone "),
-        (run.strike, "\\strike ", "\\strike0 "),
-    ];
-    for (on, open, _) in toggles {
-        if on {
-            line.push_str(open);
-        }
-    }
-    line.push_str(&tables.run_words(run));
-    line.push_str(&RtfCodec::escape_rtf_text(&run.text));
-    if has_extra_run_format(run) {
-        line.push_str("\\plain ");
-        return;
-    }
-    for (on, _, close) in toggles {
-        if on {
-            line.push_str(close);
-        }
-    }
-}
-
-pub(crate) fn encode_rtf_rich(doc: &RichDocument) -> String {
-    let mut lines: Vec<String> = Vec::with_capacity(doc.blocks.len() + 4);
-    lines.push("{\\rtf1\\ansi\\deff0".to_string());
-    lines.push(format!(
-        "{{\\info{{\\title {}}}}}",
-        RtfCodec::escape_rtf_text(&doc.display_title())
-    ));
-    let tables = RtfRunTables::collect(doc.blocks.iter().flat_map(|b| match b {
-        RichBlock::Paragraph(p) => p.runs.iter(),
-        RichBlock::Table(_) | RichBlock::Image(_) => [].iter(),
-    }));
-    lines.extend(tables.header_lines());
-    let mut table_idx = 0usize;
-    for block in &doc.blocks {
-        match block {
-            RichBlock::Paragraph(p) => lines.push(rtf_paragraph_line(p, &tables)),
-            RichBlock::Image(img) => {
-                let stand_in = RichParagraph {
-                    runs: vec![RichRun::plain(img.fallback_text())],
-                    ..RichParagraph::default()
-                };
-                lines.push(rtf_paragraph_line(&stand_in, &tables));
-            }
-            RichBlock::Table(table) => {
-                lines.extend(rtf_table_lines(table, table_idx));
-                table_idx += 1;
-            }
-        }
-    }
-    lines.push("}".to_string());
-    lines.join("\n")
-}
-
 // ---------------------------------------------------------------- Markdown / TXT / PDF
 
 fn escape_markdown_inline(text: &str) -> String {
@@ -907,15 +737,6 @@ pub(crate) fn serialize_pdf_rich(doc: &RichDocument) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn rtf_format_word_stripping_keeps_escapes_and_unicode() {
-        assert_eq!(
-            strip_rtf_format_words("\\qc\\outlinelevel0\\fs32 \\b A\\\\b\\b0 \\u-21504?\\line x"),
-            "A\\\\b\\u-21504?\\line x"
-        );
-        assert_eq!(strip_rtf_format_words(" plain"), "plain");
-    }
 
     #[test]
     fn markdown_escapes_block_starters_and_inline_markers() {
