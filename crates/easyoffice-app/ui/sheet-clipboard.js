@@ -5,9 +5,22 @@
   // events when the browser provides them, `navigator.clipboard` for toolbar commands) with an
   // in-app copy so paste keeps working when the system clipboard is unavailable. Relative A1
   // references in pasted formulas shift by the copy -> paste offset when the clipboard text is
-  // the in-app copy (plain A1 refs, ranges and `$` anchors; text that merely looks like a
-  // reference inside quoted sheet names is not recognised).
-  const REF_RE = /(?<![\w.!])(\$?)([A-Za-z]{1,3})(\$?)([1-9]\d{0,6})(?![\w(])/g;
+  // the in-app copy (see shiftFormula for what counts as a reference).
+
+  // One formula token is either a string literal (copied as is) or a reference: an optional sheet
+  // prefix (`Name!` or a quoted name with '' escapes) followed by a cell, a cell range, a column
+  // range or a row range, so a prefixed range moves as a unit. Names that merely look like a cell
+  // (`A1B`, `LOG10(`, `my_name1`) are rejected by the boundary checks.
+  const CELL = String.raw`\$?[A-Za-z]{1,3}\$?[1-9]\d{0,6}`;
+  const COL_RANGE = String.raw`\$?[A-Za-z]{1,3}:\$?[A-Za-z]{1,3}`;
+  const ROW_RANGE = String.raw`\$?[1-9]\d{0,6}:\$?[1-9]\d{0,6}`;
+  const TOKEN_RE = new RegExp(
+    String.raw`"(?:[^"]|"")*"|(?<![\p{L}\p{N}_.$!])((?:'(?:[^']|'')+'|[\p{L}\p{N}_.]+)!)?` +
+      `(${CELL}(?::${CELL})?|${COL_RANGE}|${ROW_RANGE})` +
+      String.raw`(?![\p{L}\p{N}_(!])`,
+    "gu"
+  );
+  const REF_END_RE = /^(\$?)([A-Za-z]*)(\$?)(\d*)$/;
 
   function entryRaw(entry) {
     if (!entry) return "";
@@ -102,18 +115,34 @@
       return lines.join("\n");
     }
 
+    // Moves one end of a reference; null when it leaves the grid.
+    function shiftRefEnd(end, dRow, dCol) {
+      const [, first, letters, second, digits] = REF_END_RE.exec(end);
+      const colAbs = letters ? first : "";
+      const rowAbs = letters ? second : first;
+      let out = "";
+      if (letters) {
+        const col = grid.colIndex(letters.toUpperCase()) + (colAbs ? 0 : dCol);
+        if (col < 1 || col > grid.MAX_COLS) return null;
+        out += colAbs + grid.colName(col);
+      }
+      if (digits) {
+        const row = Number(digits) + (rowAbs ? 0 : dRow);
+        if (row < 1 || row > grid.MAX_ROWS) return null;
+        out += rowAbs + row;
+      }
+      return out;
+    }
+
+    // Standard copy semantics: relative parts of every reference (other sheets included, both
+    // ends of a range) move by the offset, `$` parts stay, and a reference pushed off the grid
+    // becomes `#REF!`. String literals are never touched.
     function shiftFormula(formula, dRow, dCol) {
-      const replaceRef = (_m, cAbs, letters, rAbs, digits) => {
-        const col = grid.colIndex(letters.toUpperCase()) + (cAbs ? 0 : dCol);
-        const row = Number(digits) + (rAbs ? 0 : dRow);
-        if (col < 1 || col > grid.MAX_COLS || row < 1 || row > grid.MAX_ROWS) return "#REF!";
-        return cAbs + grid.colName(col) + rAbs + row;
-      };
-      if (!formula.includes('"')) return formula.replace(REF_RE, replaceRef);
-      return formula
-        .split(/("(?:[^"]|"")*")/)
-        .map((part, idx) => (idx % 2 === 1 ? part : part.replace(REF_RE, replaceRef)))
-        .join("");
+      return formula.replace(TOKEN_RE, (token, sheet, ref) => {
+        if (ref === undefined) return token;
+        const ends = ref.split(":").map((end) => shiftRefEnd(end, dRow, dCol));
+        return (sheet || "") + (ends.includes(null) ? "#REF!" : ends.join(":"));
+      });
     }
 
     function buildEdits(grid2d, target, origin) {
