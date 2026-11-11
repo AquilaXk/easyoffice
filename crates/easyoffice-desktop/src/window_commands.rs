@@ -14,6 +14,7 @@ use crate::windows::{
 };
 use serde::Serialize;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard};
@@ -501,8 +502,16 @@ pub fn open_path(app: &AppHandle, path: &Path) -> Result<OpenOutcome, String> {
     let meta = fs::metadata(&canonical)
         .map_err(|err| open_failure("파일 정보를 읽지 못했습니다", &canonical, &err))?;
     check_open_size(kind, meta.len(), &name)?;
-    let bytes = fs::read(&canonical)
-        .map_err(|err| open_failure("파일을 읽지 못했습니다", &canonical, &err))?;
+    let bytes = match fs::File::open(&canonical)
+        .and_then(|file| read_within(file, kind.max_open_bytes(), meta.len()))
+    {
+        Ok(bytes) => bytes,
+        // The file grew past the checked size while it was read.
+        Err(err) if err.kind() == std::io::ErrorKind::InvalidData => {
+            return Err(open_size_refusal(kind, &name));
+        }
+        Err(err) => return Err(open_failure("파일을 읽지 못했습니다", &canonical, &err)),
+    };
     // Metadata from before the read, hash of the bytes the editor receives: a change in between
     // makes the next save ask instead of silently overwriting.
     let fingerprint = Fingerprint::from_metadata_and_bytes(&meta, &bytes);
@@ -539,16 +548,33 @@ pub fn open_path(app: &AppHandle, path: &Path) -> Result<OpenOutcome, String> {
     Ok(OpenOutcome::OPENED)
 }
 
+/// Reads at most `limit` bytes of `source` (`expected` is the size that was checked, for the
+/// buffer). One byte more than `limit` is read to notice a file that grew since the check, which is
+/// an `InvalidData` error: the read never holds more than the limit allows.
+fn read_within(source: impl std::io::Read, limit: u64, expected: u64) -> std::io::Result<Vec<u8>> {
+    let mut bytes = Vec::with_capacity(usize::try_from(expected.min(limit)).unwrap_or(0));
+    source
+        .take(limit.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > limit {
+        return Err(std::io::ErrorKind::InvalidData.into());
+    }
+    Ok(bytes)
+}
+
 /// The file is read only when its size fits what the page opens of this kind (PD-177).
 fn check_open_size(kind: WindowKind, size: u64, name: &str) -> Result<(), String> {
-    let limit = kind.max_open_bytes();
-    if size == 0 || size > limit {
-        return Err(format!(
-            "열 수 없는 파일 크기입니다 ({name}): 빈 파일이거나 {}MiB를 넘습니다",
-            limit / 1_048_576
-        ));
+    if size == 0 || size > kind.max_open_bytes() {
+        return Err(open_size_refusal(kind, name));
     }
     Ok(())
+}
+
+fn open_size_refusal(kind: WindowKind, name: &str) -> String {
+    format!(
+        "열 수 없는 파일 크기입니다 ({name}): 빈 파일이거나 {}MiB를 넘습니다",
+        kind.max_open_bytes() / 1_048_576
+    )
 }
 
 /// A user sentence naming the file; the operating system's own error text stays in the log.

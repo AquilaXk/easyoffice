@@ -276,3 +276,15 @@ fn a_file_opened_through_a_link_keeps_the_links_name() {
     assert!(OpenTarget::of(&dir.join("missing.docx")).is_err());
     let _ = fs::remove_dir_all(&dir);
 }
+
+/// The size is checked before the read, and the file may grow in between: the read itself is
+/// bounded, so no more than the limit (plus the one byte that shows the overrun) is held.
+#[test]
+fn a_file_that_grew_after_its_size_was_checked_is_not_read_whole() {
+    let grown = std::io::repeat(7).take(1_000_000);
+    let err = read_within(grown, 4096, 16).unwrap_err();
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    let exact = read_within(std::io::repeat(7).take(4096), 4096, 4096).unwrap();
+    assert_eq!(exact.len(), 4096);
+    assert!(read_within(std::io::empty(), 4096, 0).unwrap().is_empty());
+}
