@@ -223,11 +223,12 @@ test("a Pages file opens into the DOC module and shows what was skipped in the s
   assert.equal(decode.fileName, "메모.pages");
 });
 
-test("the converter offers Pages as a source format only", async () => {
+test("the converter offers Pages as a source and as an experimental target", async () => {
   const src = /id="conv-src-fmt"[\s\S]*?<\/select>/.exec(INDEX_HTML)[0];
   const dst = /id="conv-dst-fmt"[\s\S]*?<\/select>/.exec(INDEX_HTML)[0];
   assert.match(src, /value="pages"/);
-  assert.doesNotMatch(dst, /value="pages"/);
+  assert.match(dst, /<option value="pages">Pages \(\.pages, 실험적\)<\/option>/);
+  assert.match(src, /Pages \(\.pages, 실험적\)/);
 });
 test("XLSX sheets keep every sheet name, values and formulas, and save back unchanged", async () => {
   const { document, userClick, converts } = await createOpenHarness();
