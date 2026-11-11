@@ -491,12 +491,12 @@ impl OoxmlCodec {
             ) else {
                 continue;
             };
-            let normalized = if let Some(stripped) = target.strip_prefix('/') {
-                stripped.to_string()
-            } else if target.starts_with("ppt/") {
+            // Relative to `ppt/`, with `.` and `..` segments resolved; a `ppt/...` target is
+            // accepted as already complete (writers that forget the base).
+            let normalized = if target.starts_with("ppt/") {
                 target.to_string()
             } else {
-                format!("ppt/{target}")
+                resolve_rel_target("ppt", target)
             };
             rel_targets.insert(id.to_string(), normalized);
         }
