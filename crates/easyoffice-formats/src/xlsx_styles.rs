@@ -12,8 +12,7 @@ use crate::rtf_xml_helpers::{
     extract_attr_from_fragment, extract_tag_bodies, extract_tags_or_self_closing_with_attrs,
 };
 use crate::sheet_styling::{
-    format_centipt, CellStyle, SheetStyling, StyleKey, MAX_COLUMN_PX, MAX_STYLED_CELLS,
-    MIN_COLUMN_PX,
+    format_centipt, CellStyle, SheetStyling, StyleKey, MAX_COLUMN_PX, MIN_COLUMN_PX,
 };
 
 /// Width of the widest digit of the default font (Calibri 11) in CSS pixels. Excel's column width
@@ -212,56 +211,6 @@ pub(crate) fn parse_cell_xf_styles(styles_xml: &str) -> Vec<CellStyle> {
             style
         })
         .collect()
-}
-
-/// Styled cells (`s="N"`) and custom column widths of one worksheet.
-pub(crate) fn parse_worksheet_styling(sheet_xml: &str, xf_styles: &[CellStyle]) -> SheetStyling {
-    let mut styling = SheetStyling::default();
-    if !xf_styles.is_empty() {
-        for (attrs, _) in extract_tags_or_self_closing_with_attrs(sheet_xml, "c") {
-            let Some(style) = extract_attr_from_fragment(attrs, "s")
-                .and_then(|v| v.parse::<usize>().ok())
-                .and_then(|i| xf_styles.get(i))
-                .filter(|s| !s.is_plain())
-            else {
-                continue;
-            };
-            let Some((row, col)) = extract_attr_from_fragment(attrs, "r")
-                .and_then(crate::rtf_xml_helpers::parse_a1_zero_based)
-            else {
-                continue;
-            };
-            if styling.cells.len() >= MAX_STYLED_CELLS {
-                break;
-            }
-            styling.cells.insert((row, col), *style);
-        }
-    }
-    for (attrs, _) in extract_tags_or_self_closing_with_attrs(sheet_xml, "col") {
-        if !truthy(attrs, "customWidth", false) {
-            continue;
-        }
-        let parse = |name: &str| extract_attr_from_fragment(attrs, name)?.parse::<u32>().ok();
-        let (Some(min), Some(max)) = (parse("min"), parse("max")) else {
-            continue;
-        };
-        let Some(width) =
-            extract_attr_from_fragment(attrs, "width").and_then(|w| w.parse::<f64>().ok())
-        else {
-            continue;
-        };
-        if !width.is_finite() || width <= 0.0 || min == 0 || max < min {
-            continue;
-        }
-        let px = xlsx_width_to_px(width);
-        for col in min..=max.min(crate::OoxmlCodec::MAX_XLSX_COLS) {
-            if styling.columns.len() >= MAX_STYLED_CELLS {
-                break;
-            }
-            styling.columns.insert(col - 1, px);
-        }
-    }
-    styling
 }
 
 #[cfg(test)]

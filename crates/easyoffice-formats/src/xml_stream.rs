@@ -35,15 +35,25 @@ pub(crate) struct Attrs<'a> {
 impl<'a> Attrs<'a> {
     /// The first attribute with this qualified name; the entities of its value are resolved.
     pub(crate) fn get(&self, name: &str) -> Option<Cow<'a, str>> {
-        self.iter().find(|(n, _)| *n == name).map(|(_, v)| v)
+        self.iter_raw()
+            .find(|(n, _)| *n == name)
+            .map(|(_, v)| unescape_cow(v))
     }
 
     /// Attributes in document order as (qualified name, decoded value).
+    #[cfg(test)]
     pub(crate) fn iter(&self) -> impl Iterator<Item = (&'a str, Cow<'a, str>)> {
+        self.iter_raw()
+            .map(|(name, value)| (name, unescape_cow(value)))
+    }
+
+    /// Attributes in document order with their values as written; decode the ones you keep with
+    /// [`unescape_cow`].
+    pub(crate) fn iter_raw(&self) -> impl Iterator<Item = (&'a str, &'a str)> {
         let raw = self.raw;
         let mut pos = 0usize;
         std::iter::from_fn(move || match next_attr(raw, &mut pos) {
-            Ok(Some((name, value))) => Some((name, unescape_cow(value))),
+            Ok(Some(pair)) => Some(pair),
             _ => None,
         })
     }
@@ -131,6 +141,7 @@ pub(crate) struct XmlReader<'a> {
     pending_end: Option<&'a str>,
     emitted: usize,
     budget: usize,
+    last_start_empty: bool,
 }
 
 impl<'a> XmlReader<'a> {
@@ -146,7 +157,19 @@ impl<'a> XmlReader<'a> {
             pending_end: None,
             emitted: 0,
             budget,
+            last_start_empty: false,
         }
+    }
+
+    /// A reader without an event limit, for consumers that keep no event: memory stays constant
+    /// and time is linear in the input, which the archive size policy already bounds.
+    pub(crate) fn unbounded(xml: &'a str) -> Self {
+        Self::with_budget(xml, usize::MAX)
+    }
+
+    /// Whether the start event returned last was written as `<name/>`.
+    pub(crate) fn last_start_was_empty(&self) -> bool {
+        self.last_start_empty
     }
 
     /// Reads on past the end of the element whose start event was just returned.
@@ -214,31 +237,35 @@ impl<'a> XmlReader<'a> {
                 return Ok(Some(XmlEvent::Text(unescape_cow(&xml[i..end]))));
             }
             let rest = &xml[i..];
-            if rest.starts_with("<!--") {
-                let end = rest
-                    .find("-->")
-                    .ok_or_else(|| corrupt("XML 주석이 닫히지 않았습니다."))?;
-                self.pos = i + end + 3;
-            } else if rest.starts_with("<![CDATA[") {
-                let end = rest
-                    .find("]]>")
-                    .ok_or_else(|| corrupt("CDATA가 닫히지 않았습니다."))?;
-                self.pos = i + end + 3;
-                self.emitted += 1;
-                return Ok(Some(XmlEvent::Text(Cow::Borrowed(&rest[9..end]))));
-            } else if rest.starts_with("<?") {
-                let end = rest
-                    .find("?>")
-                    .ok_or_else(|| corrupt("XML 처리 명령이 닫히지 않았습니다."))?;
-                self.pos = i + end + 2;
-            } else if rest.starts_with("</") {
-                let close = XmlSanitizer::find_byte_swar(bytes, i + 2, b'>')
-                    .ok_or_else(|| corrupt("XML 끝 태그가 닫히지 않았습니다."))?;
-                self.pos = close + 1;
-                self.emitted += 1;
-                return Ok(Some(XmlEvent::End(xml[i + 2..close].trim())));
-            } else {
-                return self.read_start_tag(i).map(Some);
+            match bytes.get(i + 1) {
+                Some(b'!') if rest.starts_with("<!--") => {
+                    let end = rest
+                        .find("-->")
+                        .ok_or_else(|| corrupt("XML 주석이 닫히지 않았습니다."))?;
+                    self.pos = i + end + 3;
+                }
+                Some(b'!') if rest.starts_with("<![CDATA[") => {
+                    let end = rest
+                        .find("]]>")
+                        .ok_or_else(|| corrupt("CDATA가 닫히지 않았습니다."))?;
+                    self.pos = i + end + 3;
+                    self.emitted += 1;
+                    return Ok(Some(XmlEvent::Text(Cow::Borrowed(&rest[9..end]))));
+                }
+                Some(b'?') => {
+                    let end = rest
+                        .find("?>")
+                        .ok_or_else(|| corrupt("XML 처리 명령이 닫히지 않았습니다."))?;
+                    self.pos = i + end + 2;
+                }
+                Some(b'/') => {
+                    let close = XmlSanitizer::find_byte_swar(bytes, i + 2, b'>')
+                        .ok_or_else(|| corrupt("XML 끝 태그가 닫히지 않았습니다."))?;
+                    self.pos = close + 1;
+                    self.emitted += 1;
+                    return Ok(Some(XmlEvent::End(xml[i + 2..close].trim())));
+                }
+                _ => return self.read_start_tag(i).map(Some),
             }
         }
         Ok(None)
@@ -265,6 +292,7 @@ impl<'a> XmlReader<'a> {
         while next_attr(raw, &mut attr_pos)?.is_some() {}
         self.pos = end + 1;
         self.emitted += 1 + usize::from(empty);
+        self.last_start_empty = empty;
         self.pending_end = empty.then_some(name);
         Ok(XmlEvent::Start {
             name,

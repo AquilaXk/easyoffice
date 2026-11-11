@@ -1,9 +1,8 @@
 pub use crate::odf_hwpx_codecs::*;
 pub use crate::rtf_xml_helpers::*;
-use crate::sheet_styling::xlsx_styles::{
-    cols_xml, parse_cell_xf_styles, parse_worksheet_styling, XlsxStyleTable,
-};
+use crate::sheet_styling::xlsx_styles::{cols_xml, parse_cell_xf_styles, XlsxStyleTable};
 use crate::sheet_styling::SheetStyling;
+use crate::xlsx_sheet::{read_shared_strings, scan_worksheet, SharedStrings};
 use crate::{EasyOfficeError, XmlSanitizer, ZipArchiveCodec, ZipSecurityPolicy};
 
 /// Payload for OOXML WordprocessingML (`.docx`).
@@ -149,60 +148,6 @@ fn build_shared_strings_xml(shared_strings: &[&str], total_str_count: usize) -> 
     }
     sst_xml.push_str("</sst>");
     sst_xml
-}
-
-/// Decodes ECMA-376 `_xHHHH_` UTF-16 escape sequences (including surrogate pairs) in XLSX strings.
-fn decode_xlsx_escapes(s: String) -> String {
-    if !s.contains("_x") {
-        return s;
-    }
-    let bytes = s.as_bytes();
-    let mut out = String::with_capacity(s.len());
-    let mut i = 0;
-    let mut high_surrogate: Option<u16> = None;
-    while i < bytes.len() {
-        if i + 7 <= bytes.len() && bytes[i] == b'_' && bytes[i + 1] == b'x' && bytes[i + 6] == b'_'
-        {
-            if let Ok(hex_str) = std::str::from_utf8(&bytes[i + 2..i + 6]) {
-                if let Ok(unit) = u16::from_str_radix(hex_str, 16) {
-                    if (0xD800..=0xDBFF).contains(&unit) {
-                        if high_surrogate.replace(unit).is_some() {
-                            out.push(char::REPLACEMENT_CHARACTER);
-                        }
-                        i += 7;
-                        continue;
-                    } else if (0xDC00..=0xDFFF).contains(&unit) {
-                        if let Some(hi) = high_surrogate.take() {
-                            let cp = 0x10000
-                                + (((u32::from(hi) - 0xD800) << 10) | (u32::from(unit) - 0xDC00));
-                            out.push(char::from_u32(cp).unwrap_or(char::REPLACEMENT_CHARACTER));
-                            i += 7;
-                            continue;
-                        }
-                    } else {
-                        if high_surrogate.take().is_some() {
-                            out.push(char::REPLACEMENT_CHARACTER);
-                        }
-                        out.push(
-                            char::from_u32(u32::from(unit)).unwrap_or(char::REPLACEMENT_CHARACTER),
-                        );
-                        i += 7;
-                        continue;
-                    }
-                }
-            }
-        }
-        if high_surrogate.take().is_some() {
-            out.push(char::REPLACEMENT_CHARACTER);
-        }
-        let ch = s[i..].chars().next().unwrap_or(char::REPLACEMENT_CHARACTER);
-        out.push(ch);
-        i += ch.len_utf8();
-    }
-    if high_surrogate.is_some() {
-        out.push(char::REPLACEMENT_CHARACTER);
-    }
-    out
 }
 
 /// Appends the XML of one cell (`raw` is the stored text: formula, number, string or blank).
@@ -640,25 +585,13 @@ impl OoxmlCodec {
             }
         }
 
-        let mut shared_strings: Vec<String> = Vec::new();
+        let mut shared_strings = SharedStrings::default();
         if let Some(&sst_data) = entry_by_path.get("xl/sharedStrings.xml") {
             let sst_xml = std::str::from_utf8(sst_data).map_err(|_| {
                 EasyOfficeError::InvalidUtf8("xl/sharedStrings.xml UTF-8 오류".to_string())
             })?;
             XmlSanitizer::validate_safe_xml(sst_xml)?;
-            for (_, si_inner) in extract_balanced_elements(sst_xml, "si") {
-                if si_inner.trim().is_empty() {
-                    shared_strings.push(String::new());
-                } else {
-                    let without_phonetic = strip_tag_blocks(si_inner, "rPh");
-                    let joined = extract_tag_bodies(&without_phonetic, "t")
-                        .into_iter()
-                        .map(XmlSanitizer::unescape)
-                        .collect::<Vec<_>>()
-                        .join("");
-                    shared_strings.push(decode_xlsx_escapes(joined));
-                }
-            }
+            shared_strings = read_shared_strings(sst_xml)?;
         }
 
         let sheet_tags = extract_balanced_elements(wb_xml, "sheet");
@@ -708,223 +641,15 @@ impl OoxmlCodec {
                 EasyOfficeError::InvalidUtf8("xl/worksheets/sheet.xml UTF-8 오류".to_string())
             })?;
             XmlSanitizer::validate_safe_xml(sheet_xml)?;
+            let scan = scan_worksheet(sheet_xml, &shared_strings, &xf_styles, with_styling)?;
             if with_styling {
-                stylings.push((
-                    sheet_name.clone(),
-                    parse_worksheet_styling(sheet_xml, &xf_styles),
-                ));
+                stylings.push((sheet_name.clone(), scan.styling));
             }
-            let cells = Self::parse_xlsx_worksheet_cells(sheet_xml, &shared_strings)?;
-            parsed_sheets.push((sheet_name, cells));
+            parsed_sheets.push((sheet_name, scan.cells));
         }
 
         Ok((parsed_sheets, stylings))
     }
-
-    fn parse_xlsx_worksheet_cells(
-        sheet_xml: &str,
-        shared_strings: &[String],
-    ) -> Result<Vec<(u32, u32, String)>, EasyOfficeError> {
-        let mut cells: Vec<(u32, u32, String)> = Vec::new();
-        let mut shared_masters: std::collections::HashMap<u32, (u32, u32, String)> =
-            std::collections::HashMap::new();
-        for (attrs_raw, inner) in extract_tags_with_attrs(sheet_xml, "c") {
-            let r_attr = extract_attr_from_fragment(attrs_raw, "r");
-            let (row, col) = if let (Some(r), Some(c)) = (
-                extract_attr_from_fragment(attrs_raw, "row").and_then(|v| v.parse::<u32>().ok()),
-                extract_attr_from_fragment(attrs_raw, "col").and_then(|v| v.parse::<u32>().ok()),
-            ) {
-                if r >= Self::MAX_XLSX_ROWS || c >= Self::MAX_XLSX_COLS {
-                    return Err(EasyOfficeError::ResourceBudgetExceeded(
-                        "XLSX 셀 좌표가 ECMA-376 허용 범위를 초과했습니다.".to_string(),
-                    ));
-                }
-                (r, c)
-            } else if let Some(a1) = r_attr {
-                parse_a1_zero_based(a1).ok_or_else(|| {
-                    EasyOfficeError::ResourceBudgetExceeded(
-                        "XLSX A1 셀 참조가 ECMA-376 허용 범위를 초과했거나 잘못되었습니다."
-                            .to_string(),
-                    )
-                })?
-            } else {
-                (0, 0)
-            };
-
-            let cell_type = extract_attr_from_fragment(attrs_raw, "t").unwrap_or_default();
-            if let Some(formula_str) =
-                Self::resolve_xlsx_formula(inner, row, col, &mut shared_masters)
-            {
-                cells.push((row, col, format!("={formula_str}")));
-            } else if cell_type == "inlineStr" || (cell_type.is_empty() && inner.contains("<is")) {
-                let without_phonetic = strip_tag_blocks(inner, "rPh");
-                let inline_txt = extract_tag_bodies(&without_phonetic, "t")
-                    .into_iter()
-                    .map(XmlSanitizer::unescape)
-                    .collect::<Vec<_>>()
-                    .join("");
-                cells.push((row, col, decode_xlsx_escapes(inline_txt)));
-            } else if let Some(v_body) = extract_tag_bodies(inner, "v").first() {
-                let raw_v = XmlSanitizer::unescape(v_body);
-                if cell_type == "s" {
-                    let resolved = raw_v
-                        .trim()
-                        .parse::<usize>()
-                        .ok()
-                        .and_then(|idx| shared_strings.get(idx))
-                        .ok_or_else(|| {
-                            EasyOfficeError::CorruptedContainer(format!(
-                                "XLSX 공유 문자열 인덱스 '{raw_v}'를 읽을 수 없습니다."
-                            ))
-                        })?;
-                    cells.push((row, col, resolved.clone()));
-                } else if cell_type == "b" {
-                    let b_str = match raw_v.trim() {
-                        "1" | "true" | "TRUE" => "TRUE".to_string(),
-                        "0" | "false" | "FALSE" => "FALSE".to_string(),
-                        _ => raw_v,
-                    };
-                    cells.push((row, col, b_str));
-                } else if cell_type == "d" {
-                    cells.push((row, col, raw_v.trim().to_string()));
-                } else {
-                    cells.push((row, col, decode_xlsx_escapes(raw_v)));
-                }
-            }
-        }
-        Ok(cells)
-    }
-
-    fn resolve_xlsx_formula(
-        inner: &str,
-        row: u32,
-        col: u32,
-        shared_masters: &mut std::collections::HashMap<u32, (u32, u32, String)>,
-    ) -> Option<String> {
-        let &(f_attrs, f_body) = extract_tags_or_self_closing_with_attrs(inner, "f").first()?;
-        let is_shared = extract_attr_from_fragment(f_attrs, "t") == Some("shared");
-        let si = extract_attr_from_fragment(f_attrs, "si").and_then(|s| s.parse::<u32>().ok());
-        if !f_body.is_empty() {
-            let unescaped = XmlSanitizer::unescape(f_body);
-            if is_shared {
-                if let Some(si_idx) = si {
-                    shared_masters.insert(si_idx, (row, col, unescaped.clone()));
-                }
-            }
-            return Some(unescaped);
-        }
-        if is_shared {
-            let (mr, mc, ref master_expr) = *shared_masters.get(&si?)?;
-            let dr = row as i64 - mr as i64;
-            let dc = col as i64 - mc as i64;
-            return shift_shared_formula(master_expr, dr, dc);
-        }
-        None
-    }
-}
-
-fn shift_shared_formula(formula: &str, dr: i64, dc: i64) -> Option<String> {
-    if formula.as_bytes().contains(&b'[') {
-        return None;
-    }
-    let bytes = formula.as_bytes();
-    let mut out = String::with_capacity(formula.len() + 8);
-    let mut i = 0usize;
-    while i < bytes.len() {
-        if bytes[i] == b'"' {
-            out.push('"');
-            i += 1;
-            while i < bytes.len() {
-                let b = bytes[i];
-                out.push(b as char);
-                i += 1;
-                if b == b'"' {
-                    if i < bytes.len() && bytes[i] == b'"' {
-                        out.push('"');
-                        i += 1;
-                    } else {
-                        break;
-                    }
-                }
-            }
-            continue;
-        }
-        let prev_ok = i == 0
-            || !(bytes[i - 1].is_ascii_alphanumeric() || matches!(bytes[i - 1], b'_' | b'.'));
-        if prev_ok {
-            if let Some((end_idx, abs_col, col0, abs_row, row0)) = match_a1_ref(bytes, i) {
-                let new_col = if abs_col {
-                    col0 as i64
-                } else {
-                    col0 as i64 + dc
-                };
-                let new_row = if abs_row {
-                    row0 as i64
-                } else {
-                    row0 as i64 + dr
-                };
-                if !(0..=16_383).contains(&new_col) || !(0..=1_048_575).contains(&new_row) {
-                    return None;
-                }
-                if abs_col {
-                    out.push('$');
-                }
-                out.push_str(&format_col_letters(new_col as u32));
-                if abs_row {
-                    out.push('$');
-                }
-                out.push_str(&(new_row + 1).to_string());
-                i = end_idx;
-                continue;
-            }
-        }
-        let ch = formula[i..].chars().next()?;
-        out.push(ch);
-        i += ch.len_utf8();
-    }
-    Some(out)
-}
-
-fn match_a1_ref(bytes: &[u8], start: usize) -> Option<(usize, bool, u32, bool, u32)> {
-    let mut p = start;
-    let abs_col = if p < bytes.len() && bytes[p] == b'$' {
-        p += 1;
-        true
-    } else {
-        false
-    };
-    let col_start = p;
-    let mut col: u32 = 0;
-    while p < bytes.len() && bytes[p].is_ascii_alphabetic() && p - col_start < 3 {
-        col = col * 26 + (bytes[p].to_ascii_uppercase() - b'A') as u32 + 1;
-        p += 1;
-    }
-    if p == col_start || (p < bytes.len() && bytes[p].is_ascii_alphabetic()) {
-        return None;
-    }
-    let abs_row = if p < bytes.len() && bytes[p] == b'$' {
-        p += 1;
-        true
-    } else {
-        false
-    };
-    let row_start = p;
-    if p >= bytes.len() || !bytes[p].is_ascii_digit() || bytes[p] == b'0' {
-        return None;
-    }
-    let mut row: u32 = 0;
-    while p < bytes.len() && bytes[p].is_ascii_digit() && p - row_start < 7 {
-        row = row.checked_mul(10)?.checked_add((bytes[p] - b'0') as u32)?;
-        p += 1;
-    }
-    if p < bytes.len()
-        && (bytes[p].is_ascii_alphanumeric() || matches!(bytes[p], b'_' | b'.' | b'(' | b'!'))
-    {
-        return None;
-    }
-    let col0 = col.checked_sub(1)?;
-    let row0 = row.checked_sub(1)?;
-    (col0 <= 16_383 && row0 <= 1_048_575).then_some((p, abs_col, col0, abs_row, row0))
 }
 
 pub(crate) fn validate_zip_xml_entries(
@@ -954,7 +679,8 @@ mod tests {
         shared: &[String],
     ) -> Result<Vec<(u32, u32, String)>, EasyOfficeError> {
         let sheet = format!("<sheetData><row r=\"1\">{cell_xml}</row></sheetData>");
-        OoxmlCodec::parse_xlsx_worksheet_cells(&sheet, shared)
+        let table = SharedStrings::from_strings(shared);
+        scan_worksheet(&sheet, &table, &[], false).map(|scan| scan.cells)
     }
 
     #[test]

@@ -9163,3 +9163,7 @@ SOFTWARE.
 ### quick-xml (MIT)
 
 Source: https://github.com/tafia/quick-xml 0.42.0 (`src/reader/slice_reader.rs`, `src/reader/state.rs`, `src/events/attributes.rs`, `src/escape.rs`). `crates/easyoffice-formats/src/xml_stream.rs` follows its pull-reader design in safe Rust without the dependency: events borrow the input string, an empty element yields a start and a deferred end, attributes are parsed on demand, and text is unescaped into a `Cow` that stays borrowed when it has no `&`. The tag grammar and the event budget are this repository's own. Used under the MIT license, whose text is the quick-xml entry of the generated section above (Copyright (c) 2016 Johann Tuffe).
+
+### calamine (MIT)
+
+Source: https://github.com/tafia/calamine 0.38.0 (`src/xlsx/mod.rs`: `read_shared_strings`, the worksheet cell reader). `crates/easyoffice-formats/src/xlsx_sheet.rs` follows its single event loop with a small state per cell and a shared string table built once, in safe Rust without the dependency; the table is an arena string with end offsets. The cell rules (formulas, shared formulas, inline strings, types) are this repository's own. Used under the MIT license (Copyright (c) 2016 Johann Tuffe), whose text is the quick-xml entry of the generated section above.
