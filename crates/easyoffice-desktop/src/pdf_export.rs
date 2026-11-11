@@ -154,6 +154,7 @@ fn image_href_resolver(budget: Arc<RasterBudget>) -> usvg::ImageHrefResolver<'st
 pub(crate) fn parse_options(fonts: &Arc<Database>) -> usvg::Options<'static> {
     options_with(
         fonts,
+        crate::pdf_font_select::memoized_stock_selector(),
         new_fallback_selector(),
         Arc::new(RasterBudget::for_export()),
     )
@@ -165,7 +166,12 @@ pub(crate) fn bitmap_parse_options(
     fonts: &Arc<Database>,
     budget: RasterBudget,
 ) -> usvg::Options<'static> {
-    options_with(fonts, new_fallback_selector(), Arc::new(budget))
+    options_with(
+        fonts,
+        crate::pdf_font_select::memoized_stock_selector(),
+        new_fallback_selector(),
+        Arc::new(budget),
+    )
 }
 
 fn new_fallback_selector() -> usvg::FallbackSelectionFn<'static> {
@@ -177,6 +183,7 @@ fn new_fallback_selector() -> usvg::FallbackSelectionFn<'static> {
 
 fn options_with(
     fonts: &Arc<Database>,
+    select_font: usvg::FontSelectionFn<'static>,
     select_fallback: usvg::FallbackSelectionFn<'static>,
     budget: Arc<RasterBudget>,
 ) -> usvg::Options<'static> {
@@ -184,16 +191,18 @@ fn options_with(
         fontdb: Arc::clone(fonts),
         ..usvg::Options::default()
     };
+    options.font_resolver.select_font = select_font;
     options.font_resolver.select_fallback = select_fallback;
     options.image_href_resolver = image_href_resolver(budget);
     options
 }
 
-/// The options of one export: the fonts and the fallback selector (one index per export) are
-/// shared by every page; each page gets a new picture budget, because the pages are converted
+/// The options of one export: the fonts, the font-request memo and the fallback selector (one
+/// index per export) are shared by every page; each page gets a new picture budget, because the pages are converted
 /// side by side and one page's photos must not use up another's.
 struct ExportOptions {
     fonts: Arc<Database>,
+    select_font: Arc<usvg::FontSelectionFn<'static>>,
     select_fallback: Arc<usvg::FallbackSelectionFn<'static>>,
 }
 
@@ -201,6 +210,7 @@ impl ExportOptions {
     fn new(fonts: Arc<Database>) -> Self {
         Self {
             fonts,
+            select_font: Arc::new(crate::pdf_font_select::memoized_stock_selector()),
             select_fallback: Arc::new(new_fallback_selector()),
         }
     }
@@ -208,10 +218,18 @@ impl ExportOptions {
     /// Options for one page and the budget they count its pictures in.
     fn page(&self) -> (usvg::Options<'static>, Arc<RasterBudget>) {
         let budget = Arc::new(RasterBudget::for_export());
+        let shared_font = Arc::clone(&self.select_font);
+        let select_font: usvg::FontSelectionFn<'static> =
+            Box::new(move |font, db| shared_font.as_ref()(font, db));
         let shared = Arc::clone(&self.select_fallback);
         let select_fallback: usvg::FallbackSelectionFn<'static> =
             Box::new(move |c, used, db| shared.as_ref()(c, used, db));
-        let options = options_with(&self.fonts, select_fallback, Arc::clone(&budget));
+        let options = options_with(
+            &self.fonts,
+            select_font,
+            select_fallback,
+            Arc::clone(&budget),
+        );
         (options, budget)
     }
 }

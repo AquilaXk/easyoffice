@@ -15,6 +15,7 @@ mod open_feedback;
 mod os_recent;
 mod pdf_export;
 mod pdf_font_fallbacks;
+mod pdf_font_select;
 mod pdf_fonts;
 mod pdf_job;
 mod pdf_pua;

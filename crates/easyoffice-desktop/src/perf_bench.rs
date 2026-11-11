@@ -8,6 +8,7 @@
 //! prefix `ref:` (`ref:save_verify`, `ref:preview`, `ref:pdf`, `ref:pdf_svgs`) runs the path the
 //! reference app takes for the same job with the same rhwp (parse and convert to the editable form,
 //! first-page SVG, `svgs_to_pdf_with_options`), printed as `tool=ref-repro`.
+//! `EASYOFFICE_BENCH_PDF_OUT` (a file path) keeps the PDF of the `pdf_*` cases.
 //! `EASYOFFICE_BENCH_REPEAT` repeats the timed part inside one process (for a sampling profiler; the
 //! line shows the last run).
 
@@ -125,6 +126,10 @@ fn run_pdf(pages: &[String], fonts: &Arc<Database>) -> Vec<u8> {
     assembler.add_pages(pages).expect("pages");
     let pdf = assembler.finish().expect("pdf");
     verify_exported_pdf(&pdf, pages.len(), true).expect("verified");
+    // `EASYOFFICE_BENCH_PDF_OUT` keeps the PDF, to compare the output of two builds byte for byte.
+    if let Some(out) = std::env::var_os("EASYOFFICE_BENCH_PDF_OUT") {
+        std::fs::write(out, &pdf).expect("write the PDF");
+    }
     pdf
 }
 
