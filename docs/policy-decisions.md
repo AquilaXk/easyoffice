@@ -2547,7 +2547,7 @@
 
 - **Status** Implemented (`crates/easyoffice-sheet/src/recalc/`, `crates/easyoffice-app/src/sheet_session.rs`, `ui/sheet-store.js`, `ui/app.js`, `crates/easyoffice-desktop/src/{main,window_commands}.rs`)
 - **Context** 시트 재계산은 편집마다 통합 문서를 새로 만들고 모든 수식을 다시 계산했고(`evaluate_sheet`는 상태가 없음), 화면은 편집마다 모든 셀과 모든 수식 대상을 JSON으로 보냈습니다. 수식 10만 개(셀 13만 개) 시트의 요청은 10.9 MB로 PD-150의 10 MiB(10,485,760 B)를 넘어 재계산 자체를 보낼 수 없었습니다.
-- **Decision (`PD-167`)**
+- **Decision (`PD-164`)**
   1. **엔진**: `RecalcSession`이 통합 문서, 수식 셀의 값(메모), 역의존 그래프를 들고 있습니다. 편집은 그 셀을 읽는 수식(직접 참조와 범위 참조)만 변경 전파(너비 우선, 더러운 집합은 비트셋)로 더럽히고, 더러운 수식만 기존 의존 사전 패스(반복 DFS, 순환 감지)로 위상 순서대로 계산합니다. 결과는 값이 바뀐 수식 셀 목록입니다. 범위 참조는 같은 사각형을 한 항목으로 두고 열별(폭 16 이하) 또는 공용(그보다 넓음) 행 구간 색인에서 점 조회로 찾으므로 `SUM(A:A)`도 셀 단위 간선을 만들지 않습니다. 셀·수식 색인(`CellIndex`·`FormulaIndex`)은 편집마다 버리지 않고 제자리에서 고칩니다.
   2. **휘발성·순환**: `RAND`·`RANDBETWEEN`·`NOW`·`TODAY`·`OFFSET`·`INDIRECT` 수식은 매 패스 더럽다고 봅니다(`OFFSET`·`INDIRECT`는 참조가 실행 때 정해짐). 순환 참조가 하나라도 있으면 어느 셀이 오류를 지니는지가 진입 순서에 달려 있어서, 그동안은 전체 수식을 전체 계산과 같은 순서로 다시 계산합니다(결과가 전체 재계산과 같음을 보장). 순환이 풀리면 다시 증분입니다.
   3. **IPC 계약**: 새 명령을 늘리지 않습니다(15종 계약 유지, PD-069 선례). `evaluate_sheet` 페이로드에 `sessionAction`이 있으면 세션 동작입니다. `open {sheets:[이름]}` -> `{session}`; `apply {session, changes:[{sheet,cell,value}], recalc?}` -> `{changed:[{sheet,cell,value}], circular, recomputed}` (`recalc:false`는 적재만 하고 `{staged}`를 돌려줌, 큰 시트를 나눠 보낼 때); `close {session}` -> `{closed}`. 부트스트랩에 `sheetSessions:true`가 새로 있습니다. 세션이 없으면(만료·밀려남·창 닫힘) 오류가 아니라 `{expired:true}`로 답하고 화면이 다시 열어 모든 셀을 한 번 보냅니다. `sessionAction`이 없는 `evaluate_sheet`와 `evaluate_workbook_formula`는 그대로이고, 화면은 부트스트랩이 `sheetSessions`를 알릴 때만 세션을 쓰며 열기·적용이 실패하면 그 호출만 기존 방식으로 대신합니다.
@@ -2614,7 +2614,7 @@
   5. **동작 차이(의도)**: XLSX·ODS 읽기가 잘못된 XML(따옴표 없는 속성 등)을 이제 거부합니다(이전에는 문자열 검색이라 넘어갔습니다). `<v>` 안 CDATA는 래퍼 없이 내용만 읽습니다. 그 밖에는 전·후 결과가 같습니다.
 - **Why** 같은 문서를 같은 결과로 열면서 할당과 시간을 줄입니다. 열기 경로는 모든 문서가 지납니다.
 - **Trade-offs** 이전 문자열 검색 구현은 비교 시험용으로 테스트 모듈에만 남겼습니다(`xml_stream/tests.rs`, `xlsx_sheet/tests.rs`, `ods_grid/tests.rs`). 구조가 바뀌면 함께 갱신해야 합니다.
-- **Verified by** 위 세 테스트 모듈의 전수·변이 비교, 악의적 입력(깊은 중첩 20만, 8 MiB 속성·값, 잘린 엔티티·주석, 예산 초과) 시험, 열기 응답 11개 입력의 바이트 비교, `docs/performance.md` 4.2절 측정.
+- **Verified by** 위 세 테스트 모듈의 전수·변이 비교, 악의적 입력(깊은 중첩 20만, 8 MiB 속성·값, 잘린 엔티티·주석, 예산 초과) 시험, 열기 응답 11개 입력의 바이트 비교, `docs/performance.md` 4.3절 측정.
 
 ## PD-169. 문서·시트 찾기·바꾸기와 문서·시트·슬라이드 인쇄, 단축키 정리
 
