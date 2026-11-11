@@ -889,14 +889,15 @@
             <label><input id="find-opt-regex" type="checkbox" /> 정규식</label>
             <label id="find-opt-formula-label" hidden><input id="find-opt-formula" type="checkbox" /> 수식 원문 포함</label>
           </div>
-          <p id="find-count" class="find-count" role="status" aria-live="polite"></p>
+          <div class="find-status-row"><p id="find-count" class="find-count" role="status" aria-live="polite"></p></div>
         </div>
-        <div class="dialog-footer">
-          <button id="btn-find-replace" type="button" class="dialog-btn" hidden>바꾸기</button>
-          <button id="btn-find-replace-all" type="button" class="dialog-btn" hidden>모두 바꾸기</button>
+        <div class="find-buttons">
           <button id="btn-find-prev" type="button" class="dialog-btn">이전</button>
           <button id="btn-find-next" type="button" class="dialog-btn dialog-btn-primary">다음</button>
-          <button type="button" class="dialog-btn" data-dialog-close>닫기</button>
+        </div>
+        <div id="find-replace-buttons" class="find-buttons" hidden>
+          <button id="btn-find-replace" type="button" class="dialog-btn">바꾸기</button>
+          <button id="btn-find-replace-all" type="button" class="dialog-btn">모두 바꾸기</button>
         </div>
       </div>
     </dialog>

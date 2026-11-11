@@ -35,7 +35,9 @@ test("Ctrl+F opens the find dialog (not the palette), Ctrl+F2 adds the replace r
   assert.equal($(h.document, "cmd-palette-modal").open, false);
   assert.equal($(h.document, "find-replace-row").hidden, true);
   assert.equal($(h.document, "find-dialog-title").textContent, "찾기");
+  assert.equal($(h.document, "find-replace-buttons").hidden, true);
   ctrl(h, "F2");
+  assert.equal($(h.document, "find-replace-buttons").hidden, false, "the replace button row follows the replace mode");
   assert.equal($(h.document, "find-replace-row").hidden, false);
   assert.equal($(h.document, "find-dialog-title").textContent, "찾아 바꾸기");
   assert.equal(ctrl(h, "h").defaultPrevented, false, "Ctrl+H is not taken (macOS hide, browser history)");

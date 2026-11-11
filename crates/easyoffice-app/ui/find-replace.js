@@ -34,7 +34,7 @@
       replacement: byId("find-replacement"), replaceRow: byId("find-replace-row"), count: byId("find-count"),
       caseBox: byId("find-opt-case"), wordBox: byId("find-opt-word"), regexBox: byId("find-opt-regex"),
       formulaBox: byId("find-opt-formula"), formulaLabel: byId("find-opt-formula-label"),
-      replaceBtn: byId("btn-find-replace"), replaceAllBtn: byId("btn-find-replace-all"),
+      replaceButtons: byId("find-replace-buttons"),
     });
 
     function createSource(moduleCode) {
@@ -177,12 +177,11 @@
     }
 
     function applyMode(mode, moduleCode) {
-      const { title, replaceRow, replaceBtn, replaceAllBtn, formulaLabel } = ui();
+      const { title, replaceRow, replaceButtons, formulaLabel } = ui();
       const replacing = mode === "replace";
       title.textContent = replacing ? "찾아 바꾸기" : "찾기";
       replaceRow.hidden = !replacing;
-      replaceBtn.hidden = !replacing;
-      replaceAllBtn.hidden = !replacing;
+      replaceButtons.hidden = !replacing;
       formulaLabel.hidden = moduleCode !== "SHEET";
     }
 
@@ -246,8 +245,8 @@
       });
       byId("btn-find-next").addEventListener("click", () => step(true));
       byId("btn-find-prev").addEventListener("click", () => step(false));
-      els.replaceBtn.addEventListener("click", () => void replaceCurrent().catch((err) => showCount(err.message)));
-      els.replaceAllBtn.addEventListener("click", () => void replaceAll().catch((err) => showCount(err.message)));
+      byId("btn-find-replace").addEventListener("click", () => void replaceCurrent().catch((err) => showCount(err.message)));
+      byId("btn-find-replace-all").addEventListener("click", () => void replaceAll().catch((err) => showCount(err.message)));
       els.dialog.addEventListener("close", close);
       els.dialog.addEventListener("keydown", onDialogKeydown);
     }
