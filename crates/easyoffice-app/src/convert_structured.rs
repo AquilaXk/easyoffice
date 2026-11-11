@@ -522,6 +522,9 @@ fn parse_sheets(
         if let Some(v) = field(obj, "columns") {
             styling.columns = parse_columns(as_array(v, "columns")?, budget)?;
         }
+        if let Some(v) = field(obj, "rules") {
+            styling.rules = crate::sheet_rules_json::parse_rules(v)?;
+        }
         sheets.push((
             name,
             cells.into_iter().map(|((r, c), raw)| (r, c, raw)).collect(),

@@ -85,12 +85,18 @@ struct RuleState {
     hits: CellMap<Hit>,
 }
 
+/// Cells all rules of one sheet may match at once (each match costs one map entry).
+pub const MAX_RULE_HITS: usize = 4_000_000;
+
 pub struct RuleRuntime {
     rules: Vec<CfRule>,
     states: Vec<RuleState>,
     emitted: CellMap<CellVisual>,
     stats: StatsCache,
     pub validations: Vec<DataValidation>,
+    max_hits: usize,
+    /// The rules matched more than `max_hits` cells; the runtime holds nothing and does nothing.
+    over_budget: bool,
 }
 
 fn needs_blanks(kind: &CfKind) -> bool {
@@ -121,6 +127,10 @@ fn expression_anchor(rule: &CfRule) -> (u32, u32) {
 
 impl RuleRuntime {
     pub fn new(rules: SheetRules) -> Self {
+        Self::with_max_hits(rules, MAX_RULE_HITS)
+    }
+
+    pub fn with_max_hits(rules: SheetRules, max_hits: usize) -> Self {
         let mut cf = rules.cf;
         cf.sort_by_key(|r| r.priority);
         let states = cf
@@ -138,6 +148,25 @@ impl RuleRuntime {
             emitted: CellMap::default(),
             stats: StatsCache::default(),
             validations: rules.dv,
+            max_hits,
+            over_budget: false,
+        }
+    }
+
+    /// True once the rules matched more cells than the budget allows.
+    pub fn is_over_budget(&self) -> bool {
+        self.over_budget
+    }
+
+    fn enforce_budget(&mut self) {
+        let total: usize = self.states.iter().map(|s| s.hits.len()).sum();
+        if total > self.max_hits {
+            self.over_budget = true;
+            for s in &mut self.states {
+                s.hits = CellMap::default();
+            }
+            self.emitted.clear();
+            self.stats.clear();
         }
     }
 
@@ -173,6 +202,7 @@ impl RuleRuntime {
             }
         }
         state.hits = hits;
+        self.enforce_budget();
     }
 
     /// Re-judges one edited cell for a rule that reads nothing but the cell.
@@ -240,6 +270,9 @@ impl RuleRuntime {
         self.stats.clear();
         for i in 0..self.rules.len() {
             self.compute_whole(i, cells);
+            if self.over_budget {
+                return Vec::new();
+            }
         }
         let mut coords: Vec<PackedCellCoordinate> = self
             .states
@@ -267,7 +300,7 @@ impl RuleRuntime {
         touched: &[PackedCellCoordinate],
         any_changed: bool,
     ) -> Vec<CellVisual> {
-        if self.rules.is_empty() || (touched.is_empty() && !any_changed) {
+        if self.rules.is_empty() || self.over_budget || (touched.is_empty() && !any_changed) {
             return Vec::new();
         }
         self.stats.invalidate(touched);
@@ -289,6 +322,10 @@ impl RuleRuntime {
                         self.update_cell(i, c, cells);
                         dirty.push(c);
                     }
+                    self.enforce_budget();
+                    if self.over_budget {
+                        return Vec::new();
+                    }
                 }
                 Locality::Range | Locality::Sheet => {
                     let affected = if self.states[i].locality == Locality::Sheet {
@@ -299,6 +336,9 @@ impl RuleRuntime {
                     if affected {
                         let before = std::mem::take(&mut self.states[i].hits);
                         self.compute_whole(i, cells);
+                        if self.over_budget {
+                            return Vec::new();
+                        }
                         let after = &self.states[i].hits;
                         dirty.extend(
                             before

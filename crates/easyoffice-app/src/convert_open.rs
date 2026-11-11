@@ -22,6 +22,7 @@ use std::fmt::Write;
 use crate::convert_hwp::ShellWriters;
 use crate::convert_structured::{encode_source_target, StructuredContent};
 use crate::convert_structured_doc::parse_pdf_options;
+use crate::sheet_rules_json::rules_json;
 use crate::EasyOfficeIpcRouter;
 
 /// Upper bound on a decoded source file: the number the page checks before it sends
@@ -308,6 +309,11 @@ fn decode_response(
                 ));
             }
             let count = sheets.len();
+            for (name, st) in styling {
+                warnings.extend(st.rules.unsupported.iter().map(|rule| {
+                    format!("{name} 시트의 {rule} 규칙은 지원하지 않아 가져오지 않았습니다.")
+                }));
+            }
             let items: Vec<String> = sheets
                 .iter()
                 .map(|(name, cells)| {
@@ -319,8 +325,14 @@ fn decode_response(
                         st.columns.retain(|c, _| max_cols.is_none_or(|m| *c < m));
                     }
                     let cells = sheet_cells_json(cells, sheet_styling.as_ref());
+                    let rules = sheet_styling
+                        .as_ref()
+                        .filter(|st| !st.rules.is_empty())
+                        .map_or(String::new(), |st| {
+                            format!(",\"rules\":{}", rules_json(&st.rules))
+                        });
                     format!(
-                        "{{\"name\":{},\"cells\":[{}],\"columns\":[{}]}}",
+                        "{{\"name\":{},\"cells\":[{}],\"columns\":[{}]{rules}}}",
                         json_str(name),
                         cells.join(","),
                         columns_json(sheet_styling.as_ref())

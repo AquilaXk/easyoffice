@@ -13,10 +13,11 @@
 //! and answers `{"refused":"limit"}`: the page evaluates that workbook without a session. A
 //! session id is only valid for the window (owner) that opened it.
 
+use crate::sheet_rules_json::{parse_rules, visuals_json};
 use crate::EasyOfficeIpcRouter;
-use easyoffice_formats::{EasyOfficeError, StrictJsonValue};
+use easyoffice_formats::{DvAlert, EasyOfficeError, SheetRules, StrictJsonValue};
 use easyoffice_sheet::{
-    Budget, CellChange, PackedCellCoordinate, RecalcError, RecalcSession, WorkbookEngine,
+    Budget, CellChange, PackedCellCoordinate, RecalcError, RecalcSession, Verdict, WorkbookEngine,
 };
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
@@ -178,6 +179,79 @@ impl Registry {
         Ok(id)
     }
 
+    /// The session `id` if `owner` opened it (marking it used); `None` otherwise.
+    fn checkout(&self, id: &str, owner: &str, now: Instant) -> Option<Arc<Mutex<RecalcSession>>> {
+        let mut inner = lock(&self.inner);
+        self.drop_idle(&mut inner, now);
+        let entry = inner.sessions.get_mut(id).filter(|e| e.owner == owner)?;
+        entry.last_used = now;
+        Some(entry.session.clone())
+    }
+
+    /// Replaces the conditional formatting and validation rules of `sheet` and answers with the
+    /// appearance of every formatted cell (PD-165).
+    pub(crate) fn set_rules(
+        &self,
+        id: &str,
+        owner: &str,
+        sheet: &str,
+        rules: SheetRules,
+        now: Instant,
+    ) -> Result<Applied, EasyOfficeError> {
+        let Some(handle) = self.checkout(id, owner, now) else {
+            return Ok(Applied::Expired);
+        };
+        let Ok(mut session) = handle.lock() else {
+            lock(&self.inner).sessions.remove(id);
+            return Ok(Applied::Expired);
+        };
+        let visuals = session.set_rules(sheet, rules)?;
+        let json = format!(
+            "{{\"session\":\"{id}\",\"sheet\":\"{}\",\"cf\":{}}}",
+            EasyOfficeIpcRouter::escape_json_str(sheet),
+            visuals_json(&visuals)
+        );
+        Ok(Applied::Done(json))
+    }
+
+    /// Whether `input` may be entered in `cell` of `sheet` (PD-165).
+    pub(crate) fn validate(
+        &self,
+        id: &str,
+        owner: &str,
+        sheet: &str,
+        cell: PackedCellCoordinate,
+        input: &str,
+        now: Instant,
+    ) -> Result<Applied, EasyOfficeError> {
+        let Some(handle) = self.checkout(id, owner, now) else {
+            return Ok(Applied::Expired);
+        };
+        let Ok(mut session) = handle.lock() else {
+            lock(&self.inner).sessions.remove(id);
+            return Ok(Applied::Expired);
+        };
+        let json = match session.validate(sheet, cell, input)? {
+            Verdict::Valid => "{\"ok\":true}".to_string(),
+            Verdict::Invalid {
+                alert,
+                title,
+                message,
+                show,
+            } => format!(
+                "{{\"ok\":false,\"alert\":\"{}\",\"title\":\"{}\",\"message\":\"{}\",\"show\":{show}}}",
+                match alert {
+                    DvAlert::Stop => "stop",
+                    DvAlert::Warning => "warning",
+                    DvAlert::Information => "information",
+                },
+                EasyOfficeIpcRouter::escape_json_str(&title),
+                EasyOfficeIpcRouter::escape_json_str(&message)
+            ),
+        };
+        Ok(Applied::Done(json))
+    }
+
     /// Stages `changes` and, when `recalc`, recomputes. A session another owner opened does not
     /// exist for `owner`.
     pub(crate) fn apply(
@@ -195,14 +269,8 @@ impl Registry {
             )));
         }
         let incoming: usize = changes.iter().map(|c| c.raw.len()).sum();
-        let handle = {
-            let mut inner = lock(&self.inner);
-            self.drop_idle(&mut inner, now);
-            let Some(entry) = inner.sessions.get_mut(id).filter(|e| e.owner == owner) else {
-                return Ok(Applied::Expired);
-            };
-            entry.last_used = now;
-            entry.session.clone()
+        let Some(handle) = self.checkout(id, owner, now) else {
+            return Ok(Applied::Expired);
         };
         // A panic inside the engine poisons the lock; the session's state can no longer be trusted.
         let Ok(mut session) = handle.lock() else {
@@ -255,9 +323,43 @@ impl Registry {
                 out.push_str("\"}");
             }
             out.push_str(&format!(
-                "],\"circular\":{},\"recomputed\":{}}}",
+                "],\"circular\":{},\"recomputed\":{}",
                 outcome.circular, outcome.recomputed
             ));
+            let rule_updates = session.rule_updates(changes, &outcome);
+            if !rule_updates.changed.is_empty() {
+                out.push_str(",\"cf\":[");
+                for (i, (sheet, visuals)) in rule_updates.changed.iter().enumerate() {
+                    if i > 0 {
+                        out.push(',');
+                    }
+                    let packed = visuals_json(visuals);
+                    out.push_str(&format!(
+                        "{{\"sheet\":\"{}\",{}",
+                        EasyOfficeIpcRouter::escape_json_str(
+                            session.sheet_name(*sheet).unwrap_or_default()
+                        ),
+                        &packed[1..]
+                    ));
+                }
+                out.push(']');
+            }
+            if !rule_updates.dropped.is_empty() {
+                let names: Vec<String> = rule_updates
+                    .dropped
+                    .iter()
+                    .map(|&i| {
+                        format!(
+                            "\"{}\"",
+                            EasyOfficeIpcRouter::escape_json_str(
+                                session.sheet_name(i).unwrap_or_default()
+                            )
+                        )
+                    })
+                    .collect();
+                out.push_str(&format!(",\"cfDropped\":[{}]", names.join(",")));
+            }
+            out.push('}');
             out
         } else {
             format!("{{\"session\":\"{id}\",\"staged\":{}}}", changes.len())
@@ -340,6 +442,7 @@ pub fn close_sheet_sessions_of(owner: &str) -> usize {
 
 const EXPIRED: &str = "{\"expired\":true}";
 const REFUSED: &str = "{\"refused\":\"limit\"}";
+const REFUSED_RULES: &str = "{\"refused\":\"rules\"}";
 
 fn session_id(entries: &[(String, StrictJsonValue)]) -> Result<&str, EasyOfficeError> {
     EasyOfficeIpcRouter::optional_json_str(entries, "session")?
@@ -391,6 +494,12 @@ impl EasyOfficeIpcRouter {
     /// - `open` `{sheets:[names]}` -> `{session}`; the sheet set is fixed for the session.
     /// - `apply` `{session, changes:[{sheet,cell,value}], recalc?}` -> the formula cells whose value
     ///   changed; `recalc:false` only stages the edits (chunked loading of a big sheet).
+    /// - `rules` `{session, sheet, rules:{cf,dv}}` -> `{cf}`: the packed appearance of every
+    ///   formatted cell of the sheet. Later `apply` answers carry `cf` for the cells whose
+    ///   appearance changed (PD-165).
+    /// - `validate` `{session, sheet, cell, value}` -> `{ok}` or the rule's alert.
+    /// - `pivot` `{sheet, cells, range, row, col?, value, agg}` -> the grouped values (no
+    ///   session needed, see `sheet_pivot_ipc`).
     /// - `close` `{session}` -> `{closed}`.
     pub(crate) fn handle_sheet_session_action(
         action: &str,
@@ -400,6 +509,9 @@ impl EasyOfficeIpcRouter {
         match action {
             "open" => Self::sheet_session_open(entries, owner),
             "apply" => Self::sheet_session_apply(entries, owner),
+            "rules" => Self::sheet_session_rules(entries, owner),
+            "validate" => Self::sheet_session_validate(entries, owner),
+            "pivot" => Self::sheet_pivot(entries),
             "close" => {
                 let closed = registry().close(session_id(entries)?, owner);
                 Ok(format!("{{\"closed\":{closed}}}"))
@@ -448,6 +560,44 @@ impl EasyOfficeIpcRouter {
             Some(StrictJsonValue::Bool(false))
         );
         match registry().apply(id, owner, &changes, recalc, Instant::now())? {
+            Applied::Done(json) => Ok(json),
+            Applied::Expired => Ok(EXPIRED.to_string()),
+            Applied::Refused => Ok(REFUSED.to_string()),
+        }
+    }
+}
+
+impl EasyOfficeIpcRouter {
+    fn sheet_session_rules(
+        entries: &[(String, StrictJsonValue)],
+        owner: &str,
+    ) -> Result<String, EasyOfficeError> {
+        let id = session_id(entries)?;
+        let sheet = Self::optional_json_str(entries, "sheet")?.unwrap_or("");
+        let rules =
+            parse_rules(StrictJsonValue::get_field(entries, "rules").ok_or_else(|| {
+                EasyOfficeError::InvalidArgument("JSON 'rules' 필드가 필요합니다.".to_string())
+            })?)?;
+        match registry().set_rules(id, owner, sheet, rules, Instant::now()) {
+            Ok(Applied::Done(json)) => Ok(json),
+            Ok(Applied::Expired) => Ok(EXPIRED.to_string()),
+            Ok(Applied::Refused) => Ok(REFUSED.to_string()),
+            // Rules over the hit budget leave the session usable; only the rules are refused.
+            Err(EasyOfficeError::ResourceBudgetExceeded(_)) => Ok(REFUSED_RULES.to_string()),
+            Err(err) => Err(err),
+        }
+    }
+
+    fn sheet_session_validate(
+        entries: &[(String, StrictJsonValue)],
+        owner: &str,
+    ) -> Result<String, EasyOfficeError> {
+        let id = session_id(entries)?;
+        let sheet = Self::optional_json_str(entries, "sheet")?.unwrap_or("");
+        let cell = Self::optional_json_str(entries, "cell")?.unwrap_or("");
+        let value = Self::optional_json_str(entries, "value")?.unwrap_or("");
+        let coord = PackedCellCoordinate::parse_a1(cell.trim())?;
+        match registry().validate(id, owner, sheet, coord, value, Instant::now())? {
             Applied::Done(json) => Ok(json),
             Applied::Expired => Ok(EXPIRED.to_string()),
             Applied::Refused => Ok(REFUSED.to_string()),

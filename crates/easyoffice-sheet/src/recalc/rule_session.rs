@@ -10,6 +10,15 @@ use crate::rules::{CellVisual, RuleRuntime, SheetCells, Verdict};
 use crate::{validate_input, EvalContext, MemoTable, PackedCellCoordinate};
 use easyoffice_formats::{EasyOfficeError, SheetRules};
 
+/// What an edit batch changed in the conditional formatting of the sheets.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct RuleUpdates {
+    /// Sheet index and the cells whose appearance changed (see [`CellVisual::is_none`]).
+    pub changed: Vec<(usize, Vec<CellVisual>)>,
+    /// Sheets whose rules were removed for matching too many cells.
+    pub dropped: Vec<usize>,
+}
+
 impl RecalcSession {
     fn with_rule_cells<R>(
         &mut self,
@@ -35,7 +44,8 @@ impl RecalcSession {
         out
     }
 
-    /// Replaces the rules of `sheet` and returns the appearance of every formatted cell.
+    /// Replaces the rules of `sheet` and returns the appearance of every formatted cell. Rules
+    /// that match more cells than the budget allows are refused.
     pub fn set_rules(
         &mut self,
         sheet: &str,
@@ -44,6 +54,12 @@ impl RecalcSession {
         let idx = self.sheet_index(sheet)?;
         let mut runtime = RuleRuntime::new(rules);
         let visuals = self.with_rule_cells(usize::from(idx), |cells| runtime.evaluate(cells));
+        if runtime.is_over_budget() {
+            self.rules.remove(&idx);
+            return Err(EasyOfficeError::ResourceBudgetExceeded(
+                "조건부 서식 규칙이 한 번에 칠하는 셀이 너무 많습니다.".to_string(),
+            ));
+        }
         self.rules.insert(idx, runtime);
         Ok(visuals)
     }
@@ -56,12 +72,9 @@ impl RecalcSession {
             .map(|(&i, _)| i)
     }
 
-    /// Appearance changes after `edits` and the recalculation `outcome`, per sheet index.
-    pub fn rule_updates(
-        &mut self,
-        edits: &[CellChange],
-        outcome: &RecalcOutcome,
-    ) -> Vec<(usize, Vec<CellVisual>)> {
+    /// Appearance changes after `edits` and the recalculation `outcome`, per sheet index. A sheet
+    /// whose rules outgrew the budget is listed in `dropped` and loses its rules.
+    pub fn rule_updates(&mut self, edits: &[CellChange], outcome: &RecalcOutcome) -> RuleUpdates {
         let mut touched: Vec<Vec<PackedCellCoordinate>> = vec![Vec::new(); self.wb.sheet_count()];
         for edit in edits {
             if let Some(i) = self.wb.find_sheet_index(&edit.sheet) {
@@ -72,7 +85,7 @@ impl RecalcSession {
             touched[c.sheet].push(c.coord);
         }
         let any = touched.iter().any(|t| !t.is_empty());
-        let mut out = Vec::new();
+        let mut out = RuleUpdates::default();
         let sheets: Vec<u16> = self.rule_sheets().collect();
         for idx in sheets {
             let Some(mut runtime) = self.rules.remove(&idx) else {
@@ -81,9 +94,13 @@ impl RecalcSession {
             let here = &touched[usize::from(idx)];
             let visuals =
                 self.with_rule_cells(usize::from(idx), |cells| runtime.update(cells, here, any));
+            if runtime.is_over_budget() {
+                out.dropped.push(usize::from(idx));
+                continue;
+            }
             self.rules.insert(idx, runtime);
             if !visuals.is_empty() {
-                out.push((usize::from(idx), visuals));
+                out.changed.push((usize::from(idx), visuals));
             }
         }
         out

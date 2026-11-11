@@ -8,9 +8,8 @@
 
 use crate::{EvalContext, EvaluatedCellValue, PackedCellCoordinate, SheetEngine};
 use easyoffice_formats::CellBox;
-use std::cell::OnceCell;
 use std::collections::HashMap;
-use std::rc::Rc;
+use std::sync::{Arc, OnceLock};
 
 /// Largest area (cells) of a range scanned cell by cell to find empty cells; larger ranges only
 /// look at populated cells, so `A:A` stays cheap.
@@ -75,7 +74,7 @@ pub(crate) struct RangeData {
     pub min: f64,
     pub max: f64,
     pub sum: f64,
-    sorted: OnceCell<Vec<f64>>,
+    sorted: OnceLock<Vec<f64>>,
 }
 
 impl RangeData {
@@ -100,7 +99,7 @@ impl RangeData {
             min: f64::INFINITY,
             max: f64::NEG_INFINITY,
             sum: 0.0,
-            sorted: OnceCell::new(),
+            sorted: OnceLock::new(),
         };
         for coord in coords {
             let value = cells.value(coord);
@@ -159,10 +158,15 @@ impl RangeData {
     }
 }
 
+/// Cells the cache may hold values of at once; past it the cache is emptied before the next
+/// entry, so many distinct ranges cannot each pin a copy of the whole sheet.
+const MAX_CACHED_CELLS: usize = 4_000_000;
+
 /// Range data shared by the rules that cover the same ranges.
 #[derive(Default)]
 pub(crate) struct StatsCache {
-    entries: HashMap<(Vec<CellBox>, bool), Rc<RangeData>>,
+    entries: HashMap<(Vec<CellBox>, bool), Arc<RangeData>>,
+    cached_cells: usize,
 }
 
 impl StatsCache {
@@ -171,11 +175,18 @@ impl StatsCache {
         cells: &mut dyn Cells,
         boxes: &[CellBox],
         with_blanks: bool,
-    ) -> Rc<RangeData> {
-        self.entries
-            .entry((boxes.to_vec(), with_blanks))
-            .or_insert_with(|| Rc::new(RangeData::load(cells, boxes, with_blanks)))
-            .clone()
+    ) -> Arc<RangeData> {
+        let key = (boxes.to_vec(), with_blanks);
+        if let Some(hit) = self.entries.get(&key) {
+            return hit.clone();
+        }
+        let data = Arc::new(RangeData::load(cells, boxes, with_blanks));
+        if self.cached_cells + data.cells.len() > MAX_CACHED_CELLS {
+            self.clear();
+        }
+        self.cached_cells += data.cells.len();
+        self.entries.insert(key, data.clone());
+        data
     }
 
     /// Forgets every entry that covers one of the changed cells.
@@ -185,9 +196,11 @@ impl StatsCache {
                 .iter()
                 .any(|t| boxes.iter().any(|b| b.contains(t.row(), t.col())))
         });
+        self.cached_cells = self.entries.values().map(|d| d.cells.len()).sum();
     }
 
     pub fn clear(&mut self) {
         self.entries.clear();
+        self.cached_cells = 0;
     }
 }

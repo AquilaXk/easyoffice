@@ -31,6 +31,7 @@ pub use memo::{CellMap, CoordHasher, FastMap, MemoTable};
 pub use parser::{compile_formula_expr, BinaryOp, Expr};
 pub use recalc::{
     Budget, CellChange, ChangedCell, Footprint, RecalcError, RecalcOutcome, RecalcSession,
+    RuleUpdates,
 };
 pub use rules::{
     decode_visuals, encode_visuals, validate_input, Bar, CellVisual, Icon, PackedVisuals,

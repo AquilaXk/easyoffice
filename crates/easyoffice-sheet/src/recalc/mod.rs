@@ -16,6 +16,7 @@ mod graph;
 mod id_set;
 mod interval;
 mod rule_session;
+pub use rule_session::RuleUpdates;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

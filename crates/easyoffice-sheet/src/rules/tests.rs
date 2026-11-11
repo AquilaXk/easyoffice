@@ -516,7 +516,7 @@ fn incremental_updates_equal_a_full_evaluation() {
                 .collect();
             session.apply(&edits).unwrap();
             let outcome = session.recalculate();
-            for (_, visuals) in session.rule_updates(&edits, &outcome) {
+            for (_, visuals) in session.rule_updates(&edits, &outcome).changed {
                 for v in visuals {
                     if v.is_none() {
                         shown.remove(&v.coord);
@@ -645,4 +645,23 @@ fn the_rejection_carries_the_rule_alert() {
             show: true
         }
     );
+}
+
+#[test]
+fn rules_that_match_too_many_cells_are_dropped() {
+    let wb = numbers_1_to_10();
+    let sheet = wb.sheet("Sheet1").unwrap();
+    let mut ctx = crate::EvalContext::with_workbook(&wb, sheet.resolved_sheet_id());
+    let mut cells = SheetCells {
+        sheet,
+        ctx: &mut ctx,
+    };
+    let all = rules(vec![rule("A1:A10", 1, cell_is(Cmp::Greater, "0", ""))]);
+    let mut roomy = RuleRuntime::with_max_hits(all.clone(), 10);
+    assert_eq!(roomy.evaluate(&mut cells).len(), 10);
+    assert!(!roomy.is_over_budget());
+    let mut tight = RuleRuntime::with_max_hits(all, 9);
+    assert!(tight.evaluate(&mut cells).is_empty());
+    assert!(tight.is_over_budget());
+    assert!(tight.update(&mut cells, &[coord("A1")], true).is_empty());
 }

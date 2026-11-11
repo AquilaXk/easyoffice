@@ -32,6 +32,10 @@ mod security_ipc;
 pub mod self_test;
 #[cfg(test)]
 mod sheet_ipc_tests;
+mod sheet_pivot_ipc;
+#[cfg(test)]
+mod sheet_rules_ipc_tests;
+mod sheet_rules_json;
 mod sheet_session;
 pub mod smart_tools;
 
