@@ -265,3 +265,102 @@ fn unsupported_rules_in_a_file_become_open_warnings() {
     );
     assert!(!opened.contains("\"rules\":"), "{opened}");
 }
+
+// ---- measurement (not run by default) ----------------------------------------------------------
+// `cargo test -p easyoffice-app --release --lib -- --ignored --nocapture rules_bench`
+
+fn bench_session(rows: u32) -> String {
+    let id = open();
+    let mut state = 0x2545_F491_4F6C_DD1Du64;
+    let mut changes = Vec::new();
+    for r in 1..=rows {
+        for col in 0..10u8 {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            let name = (b'A' + col) as char;
+            changes.push(cell(&format!("{name}{r}"), &(state % 1000).to_string()));
+        }
+        if changes.len() >= 20_000 || r == rows {
+            let body = changes.join(",");
+            session_call(&format!(
+                "{{\"sessionAction\":\"apply\",\"session\":\"{id}\",\"recalc\":false,\"changes\":[{body}]}}"
+            ));
+            changes.clear();
+        }
+    }
+    id
+}
+
+fn median_ms(mut samples: Vec<f64>) -> f64 {
+    samples.sort_by(f64::total_cmp);
+    samples[samples.len() / 2]
+}
+
+fn bench_rules(label: &str, rules: &str, rows: u32) {
+    use std::time::Instant;
+    let id = bench_session(rows);
+    let start = Instant::now();
+    let first = session_call(&format!(
+        "{{\"sessionAction\":\"rules\",\"session\":\"{id}\",\"sheet\":\"S\",\"rules\":{rules}}}"
+    ));
+    let full_ms = start.elapsed().as_secs_f64() * 1e3;
+    let visuals = unpack(&first);
+    let naive: usize = visuals
+        .iter()
+        .map(|v| {
+            // {"ref":"A1","bg":"#RRGGBB","fg":"#RRGGBB","fl":3,"bar":-73,"icon":"3Arrows:2"}
+            let mut n = 12 + v.coord.to_a1().len();
+            n += v.bg.map_or(0, |_| 16) + v.fg.map_or(0, |_| 16) + 9;
+            n += v.bar.map_or(0, |_| 24) + v.icon.map_or(0, |_| 22);
+            n
+        })
+        .sum();
+    let mut edit_ms = Vec::new();
+    let mut edit_bytes = Vec::new();
+    let mut state = 0x9E37_79B9_7F4A_7C15u64;
+    for _ in 0..30 {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        let (r, c) = (1 + (state >> 8) % u64::from(rows), (state >> 40) % 10);
+        let name = (b'A' + c as u8) as char;
+        let value = (state >> 20) % 1000;
+        let body = cell(&format!("{name}{r}"), &value.to_string());
+        let start = Instant::now();
+        let answer = apply(&id, &body);
+        edit_ms.push(start.elapsed().as_secs_f64() * 1e3);
+        edit_bytes.push(answer.len() as f64);
+    }
+    println!(
+        "{label}: {} cells, full rules call {full_ms:.1} ms, {} B answer ({} B naive per-cell JSON, {:.1}x), \
+         1-cell edit {:.2} ms median, {:.0} B median answer",
+        rows * 10,
+        first.len(),
+        naive,
+        naive as f64 / first.len() as f64,
+        median_ms(edit_ms),
+        median_ms(edit_bytes),
+    );
+}
+
+#[test]
+#[ignore = "measurement harness"]
+fn rules_bench() {
+    let five = r##"{"cf":[
+      {"r":"A1:J10000","p":1,"t":"cellIs","op":"greaterThan","a":"900","bg":"#FFC7CE","fg":"#9C0006"},
+      {"r":"A1:J10000","p":2,"t":"top","n":10,"percent":false,"bg":"#C6EFCE"},
+      {"r":"A1:J10000","p":3,"t":"scale","stops":[{"k":"min","v":"","c":"#F8696B"},{"k":"percentile","v":"50","c":"#FFEB84"},{"k":"max","v":"","c":"#63BE7B"}]},
+      {"r":"A1:J10000","p":4,"t":"bar","min":{"k":"min","v":""},"max":{"k":"max","v":""}},
+      {"r":"A1:J10000","p":5,"t":"icons","set":"3TrafficLights1","th":[{"k":"percent","v":"0"},{"k":"percent","v":"33"},{"k":"percent","v":"67"}]}
+    ]}"##;
+    bench_rules("5 rules (range statistics)", five, 10_000);
+    let local = r##"{"cf":[
+      {"r":"A1:J10000","p":1,"t":"cellIs","op":"greaterThan","a":"900","bg":"#FFC7CE","fg":"#9C0006"},
+      {"r":"A1:J10000","p":2,"t":"cellIs","op":"between","a":"100","b":"200","bg":"#C6EFCE"},
+      {"r":"A1:J10000","p":3,"t":"scale","stops":[{"k":"num","v":"0","c":"#F8696B"},{"k":"num","v":"500","c":"#FFEB84"},{"k":"num","v":"1000","c":"#63BE7B"}]},
+      {"r":"A1:J10000","p":4,"t":"bar","min":{"k":"num","v":"0"},"max":{"k":"num","v":"1000"}},
+      {"r":"A1:J10000","p":5,"t":"icons","set":"3TrafficLights1","th":[{"k":"num","v":"0"},{"k":"num","v":"333"},{"k":"num","v":"667"}]}
+    ]}"##;
+    bench_rules("5 rules (own-cell only)", local, 10_000);
+}
