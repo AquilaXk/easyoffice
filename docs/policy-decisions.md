@@ -2400,12 +2400,12 @@
 - **Status** Implemented (`sheet-ops.js`, `sheet-controller.js`, `ribbon-history.js`, `convert_structured.rs`, `biff8_xls_codec.rs`, `xls_sheet_names.rs`, `converter.rs`)
 - **Context** (1) 시트 정렬이 A–H열과 B열 키로 고정이고, 옮긴 행의 수식에서 원래 행 번호만 바꿔 다른 행을 참조한 수식이 틀어졌으며, 정렬 뒤 재계산이 없었습니다. (2) 행 추가가 새 행 8칸에 `"0"`을, 없는 시트로 전환이 `"<이름> 항목"`·`500`을 넣었고, 탭 줄 정리가 `Sheet1`·`Sheet2`를 항상 남겼습니다. (3) 시트를 문서·PDF로 내보낼 때 행 길이가 제각각이고 빈 행이 사라졌습니다. (4) XLS 쓰기가 시트 이름 규칙·레코드 길이 한계를 지키지 않았고, 문서 텍스트가 `=`로 시작하면 수식 레코드로 나갔습니다.
 - **Decision (`PD-156`)**
-  1. **정렬**: 둘 이상의 셀을 선택하면 그 블록만 첫 열 기준으로 정렬하고(머리 행 판별 없음), 선택이 없으면 2행부터 사용 중인 모든 열을 B열(없으면 A열) 기준으로 정렬합니다. 선택 없는 정렬의 끝 행은 키 열에 값이 직접 들어 있는 마지막 행이라 아래의 수식 합계 행은 제자리에 남습니다. 키는 숫자 먼저, 텍스트는 로캘 순서, 빈 키는 항상 끝입니다. 이미 오름차순이면 내림차순으로 뒤집습니다(기존 동작). 옮긴 행의 수식은 클립보드 붙여넣기와 같은 규칙(`shiftFormula`)으로 상대 행 참조를 이동 거리만큼 조정하고(`$` 고정 참조·문자열 리터럴은 그대로, 범위를 벗어나면 `#REF!`), 끝나면 활성 시트를 재계산합니다.
+  1. **정렬**: 둘 이상의 셀을 선택하면 그 블록만 첫 열 기준으로 정렬하고(머리 행 판별 없음), 선택이 없으면 2행부터 사용 중인 모든 열을 B열(없으면 A열) 기준으로 정렬합니다. 선택 없는 정렬의 끝 행은 키 열에 값이 직접 들어 있는 마지막 행이라 아래의 수식 합계 행은 제자리에 남습니다. 키는 숫자 먼저, 텍스트는 로캘 순서, 빈 키는 항상 끝입니다. 이미 오름차순이면 내림차순으로 뒤집습니다(기존 동작). 옮긴 행의 수식은 클립보드 붙여넣기와 같은 규칙(`shiftFormula`)으로 상대 참조를 이동 거리만큼 조정하고, 끝나면 활성 시트를 재계산합니다. `shiftFormula`는 시트 접두(`Name!`, 따옴표 이름)와 셀·셀 범위·열 범위·행 범위를 한 토큰으로 읽어 다른 시트 참조도 범위 양 끝을 함께 옮기며, `$` 고정 부분·문자열 리터럴·함수 이름·`A1B` 같은 이름은 그대로 두고 범위를 벗어나면 `#REF!`로 바꿉니다.
   2. **빈 상태**: 행 추가는 빈 행만 늘립니다. 없는 시트로 전환하면 빈 시트를 만듭니다. 탭 줄은 시트 저장소와 활성 시트 이름만 기준으로 정리합니다.
   3. **문서·PDF 내보내기**: 시트 값 표를 사용 범위(값이 있는 셀의 최소·최대 행·열)의 직사각형으로 만들고 안쪽 빈 행도 유지합니다. 격자 칸 수는 기존 총 예산(`MAX_GRID_CELLS`)에 할당 전에 합산하며, 넘으면 잘라내지 않고 거부합니다.
   4. **XLS**: 시트 이름을 31자(UTF-16)·금지 문자 `: \ / ? * [ ]`(`_`로 대체)·앞뒤 작은따옴표 제거·빈 이름(`SheetN`)·대소문자 무시 중복(`_2`, `_3`)으로 정리하고, 바뀐 이름은 변환 경고에 남깁니다. 수식 레코드가 레코드 한도(8,224바이트)를 넘으면 잘라내지 않고 거부합니다. 문서·슬라이드에서 만든 셀(명시적 시트 셀이 없는 모델)은 `=`로 시작해도 항상 값(`LABELSST`)으로 저장합니다.
 - **Why** 정렬과 행 추가가 데이터를 조용히 바꾸거나 깨뜨리지 않게 하고, 내보내기와 XLS 저장이 다음에 여는 엔진이 받아들이는 형태만 쓰게 합니다.
-- **Trade-offs** 정렬은 상대 참조를 복사 규칙으로 이동하므로 정렬한 행 밖을 가리키는 수식은 표준 스프레드시트처럼 가리키는 대상이 달라질 수 있습니다. 시트 간 참조(`Sheet2!A1`)는 클립보드와 같이 이동하지 않습니다. 문서 내보내기는 아주 넓게 흩어진 시트를 거부합니다. 빈 행만 늘린 시트는 저장하면 그 빈 행이 사라집니다.
+- **Trade-offs** 정렬은 상대 참조를 복사 규칙으로 이동하므로 정렬한 행 밖을 가리키는 수식은 표준 스프레드시트처럼 가리키는 대상이 달라질 수 있습니다. 문서 내보내기는 아주 넓게 흩어진 시트를 거부합니다. 빈 행만 늘린 시트는 저장하면 그 빈 행이 사라집니다.
 - **Alternatives rejected** 정렬을 항상 선택 영역 필수로 하기(선택 없는 기존 동작 유지), 문서 내보내기를 A1부터 시작하는 격자로 만들기(앞쪽 빈 행·열이 늘어남).
-- **Verified by** `node --test scripts/test-webui-sheet-rows-sort.mjs scripts/test-webui-sheet-editing.mjs scripts/test-webui-behavior.mjs scripts/test-webui-file-open.mjs scripts/test-webui-ux-ergonomics.mjs`, `cargo test -p easyoffice-app --test structured_sheet_export`, `cargo test -p easyoffice-formats --test xls_writer_limits`.
-- **Revisit when** 시트 간 참조도 정렬에서 조정해야 한다는 요구가 있을 때, 정렬에 머리 행 자동 판별이 필요할 때.
+- **Verified by** `node --test scripts/test-webui-sheet-formula-shift.mjs scripts/test-webui-sheet-rows-sort.mjs scripts/test-webui-sheet-editing.mjs scripts/test-webui-behavior.mjs scripts/test-webui-file-open.mjs scripts/test-webui-ux-ergonomics.mjs`, `cargo test -p easyoffice-app --test structured_sheet_export`, `cargo test -p easyoffice-formats --test xls_writer_limits`.
+- **Revisit when** 정렬에 머리 행 자동 판별이 필요할 때.
