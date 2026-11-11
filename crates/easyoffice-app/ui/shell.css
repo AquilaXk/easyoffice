@@ -108,6 +108,11 @@
 .tool-dialog input:disabled, .tool-dialog select:disabled, .tool-dialog textarea:disabled { background: var(--ui-surface-muted); border-color: var(--color-border-lighter); color: var(--color-text-disabled); cursor: not-allowed; }
 .cp-item:hover .cp-item-label, .cp-item--selected .cp-item-label { color: var(--color-primary-dark); }
 
+/* Find and replace (find-replace.js): a floating, non-modal dialog; the matches are painted with the Custom Highlight API. */
+.find-dialog { position: fixed; top: 72px; right: 24px; left: auto; margin: 0; width: min(380px, calc(100vw - 32px)); }
+.find-dialog .find-options { flex-wrap: wrap; gap: 4px 12px; }
+.find-dialog .find-count { margin: 0; min-height: 1.5em; color: var(--ui-text-muted); }
+
 /* HWP printing (hwp-print.js, PD-104): the pages live in a hidden root that only the print output shows. */
 #eo-print-root { display: none; }
 .eo-print-progress { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 60; display: flex; align-items: center; gap: 12px; padding: 9px 14px; font-size: 12.5px; line-height: 1.45; color: var(--ui-text); background: var(--ui-bg-light); border: 1px solid var(--ui-border); border-radius: 8px; filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.22)); }
@@ -120,4 +125,17 @@
   #eo-print-root .eo-print-page { margin: 0; padding: 0; overflow: hidden; break-after: page; page-break-after: always; background: var(--doc-paper); }
   #eo-print-root .eo-print-page:last-child { break-after: auto; page-break-after: auto; }
   #eo-print-root svg { display: block; width: 100%; height: 100%; }
+  /* Document, sheet and slide printing (office-print.js). */
+  #eo-print-root .eo-print-flow { background: var(--doc-paper); }
+  #eo-print-root .eo-print-sheet { border-collapse: collapse; font-size: 10pt; }
+  #eo-print-root .eo-print-sheet tr { break-inside: avoid; }
+  #eo-print-root .eo-print-sheet td { min-width: 16mm; padding: 1mm 2mm; border: 0.2mm solid; }
+  #eo-print-root .eo-print-num { text-align: right; }
+  #eo-print-root .eo-print-b { font-weight: 700; }
+  #eo-print-root .eo-print-i { font-style: italic; }
+  #eo-print-root .eo-print-u { text-decoration: underline; }
+  #eo-print-root .eo-print-s { text-decoration: line-through; }
+  #eo-print-root .slide-stage { width: 100%; height: 100%; aspect-ratio: auto; border: 0; border-radius: 0; box-shadow: none; }
+  #eo-print-root .slide-lower-zone { overflow: hidden; }
+  #eo-print-root :is(.slide-title-zone h2, .slide-lower-zone p):empty::before { content: none; }
 }

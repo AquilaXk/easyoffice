@@ -42,6 +42,10 @@ const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/custom-select.js",
   "../crates/easyoffice-app/ui/color-picker.js",
   "../crates/easyoffice-app/ui/workspace-scrub.js",
+  "../crates/easyoffice-app/ui/find-core.js",
+  "../crates/easyoffice-app/ui/find-doc.js",
+  "../crates/easyoffice-app/ui/find-sheet.js",
+  "../crates/easyoffice-app/ui/find-replace.js",
   "../crates/easyoffice-app/ui/workspace-tools.js",
   "../crates/easyoffice-app/ui/workspace-panels.js",
   "../crates/easyoffice-app/ui/sheet-grid.js",
@@ -57,6 +61,7 @@ const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/slide-studio.js",
   "../crates/easyoffice-app/ui/hwp-host.js",
   "../crates/easyoffice-app/ui/hwp-print.js",
+  "../crates/easyoffice-app/ui/office-print.js",
   "../crates/easyoffice-app/ui/hwp-session.js",
   "../crates/easyoffice-app/ui/shell-chrome.js",
   "../crates/easyoffice-app/ui/app.js",
@@ -274,7 +279,7 @@ function dispatchFrom(start, eventObj) {
     for (const fn of fns) {
       fn.call(cur, eventObj);
     }
-    if (eventObj.type === "focus" || eventObj.type === "blur") break;
+    if (eventObj.type === "focus" || eventObj.type === "blur" || eventObj.propagationStopped) break;
   }
 }
 
@@ -582,6 +587,9 @@ class MiniElement extends MiniNode {
       preventDefault() {
         this.defaultPrevented = true;
       },
+      stopPropagation() {
+        this.propagationStopped = true;
+      },
     };
     dispatchFrom(this, eventObj);
     return !eventObj.defaultPrevented;
@@ -615,6 +623,12 @@ class MiniElement extends MiniNode {
   showModal() {
     this.open = true;
   }
+
+  show() {
+    this.open = true;
+  }
+
+  select() {}
 
   close() {
     this.open = false;

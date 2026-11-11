@@ -49,6 +49,7 @@
               <div class="md-item" data-hwp-save-as="hwp" role="menuitem" tabindex="-1"><span class="md-label">다른 이름으로 저장</span><span class="md-hint">HWP</span><span class="md-shortcut">Ctrl+Shift+S</span></div>
               <div class="md-item" data-hwp-save-as="hwpx" role="menuitem" tabindex="-1"><span class="md-label">다른 이름으로 저장</span><span class="md-hint">HWPX</span></div>
               <div class="md-item" data-studio-menu-cmd="layout-paper" role="menuitem" tabindex="-1"><span class="md-label">편집 용지</span></div>
+              <div class="md-item" data-studio-menu-cmd="print" role="menuitem" tabindex="-1"><span class="md-label">인쇄…</span><span class="md-shortcut">Ctrl+P</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-window-close="true" role="menuitem" tabindex="-1"><span class="md-label">닫기</span><span class="md-shortcut">Ctrl+W</span></div>
             </div>
@@ -63,7 +64,9 @@
               <div class="md-item" data-studio-menu-cmd="clip-copy" role="menuitem" tabindex="-1"><span class="md-label">복사하기</span><span class="md-shortcut">Ctrl+C</span></div>
               <div class="md-item" data-studio-menu-cmd="clip-paste" role="menuitem" tabindex="-1"><span class="md-label">붙이기</span><span class="md-shortcut">Ctrl+V</span></div>
               <div class="md-sep"></div>
-              <div class="md-item" data-studio-menu-cmd="palette" role="menuitem" tabindex="-1"><span class="md-label">명령 검색</span><span class="md-shortcut">Ctrl+F</span></div>
+              <div class="md-item" data-studio-menu-cmd="find" role="menuitem" tabindex="-1"><span class="md-label">찾기</span><span class="md-shortcut">Ctrl+F</span></div>
+              <div class="md-item" data-studio-menu-cmd="replace" role="menuitem" tabindex="-1"><span class="md-label">찾아 바꾸기</span><span class="md-shortcut">Ctrl+F2</span></div>
+              <div class="md-item" data-studio-menu-cmd="palette" role="menuitem" tabindex="-1"><span class="md-label">명령 검색</span><span class="md-shortcut">Ctrl+K</span></div>
             </div>
           </div>
           <div class="menu-item" data-menu="view">
@@ -253,7 +256,7 @@
         <div class="tb-group">
           <button type="button" class="tb-btn" data-studio-cmd="mod-header" data-icon="header" title="머리말/꼬리말" aria-label="머리말/꼬리말"></button>
           <button type="button" class="tb-btn" data-studio-cmd="mod-footnote" data-icon="footnote" title="각주" aria-label="각주"></button>
-          <button type="button" class="tb-btn" data-studio-cmd="palette" data-icon="find" title="명령 검색 (Ctrl+F)" aria-label="명령 검색"></button>
+          <button type="button" class="tb-btn" data-studio-cmd="palette" data-icon="find" title="명령 검색 (Ctrl+K)" aria-label="명령 검색"></button>
         </div>
       </div>
 
@@ -874,6 +877,30 @@
       </div>
     </dialog>
 
+    <dialog id="find-dialog" class="tool-dialog find-dialog" aria-labelledby="find-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="find-dialog-title">찾기</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><label class="dialog-label" for="find-query">찾을 내용</label><input id="find-query" class="dialog-input" type="text" autocomplete="off" spellcheck="false" /></div>
+          <div id="find-replace-row" class="dialog-row" hidden><label class="dialog-label" for="find-replacement">바꿀 내용</label><input id="find-replacement" class="dialog-input" type="text" autocomplete="off" spellcheck="false" /></div>
+          <div class="dialog-row find-options">
+            <label><input id="find-opt-case" type="checkbox" /> 대소문자 구분</label>
+            <label><input id="find-opt-word" type="checkbox" /> 전체 단어</label>
+            <label><input id="find-opt-regex" type="checkbox" /> 정규식</label>
+            <label id="find-opt-formula-label" hidden><input id="find-opt-formula" type="checkbox" /> 수식 원문 포함</label>
+          </div>
+          <p id="find-count" class="find-count" role="status" aria-live="polite"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-find-replace" type="button" class="dialog-btn" hidden>바꾸기</button>
+          <button id="btn-find-replace-all" type="button" class="dialog-btn" hidden>모두 바꾸기</button>
+          <button id="btn-find-prev" type="button" class="dialog-btn">이전</button>
+          <button id="btn-find-next" type="button" class="dialog-btn dialog-btn-primary">다음</button>
+          <button type="button" class="dialog-btn" data-dialog-close>닫기</button>
+        </div>
+      </div>
+    </dialog>
+
     <dialog id="smart-dialog" class="tool-dialog" aria-labelledby="smart-dialog-title">
       <div class="dialog-wrap">
         <div class="dialog-title"><span id="smart-dialog-title">문장 진단 및 요약</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
@@ -1075,6 +1102,10 @@
     <script src="./ipc-transport.js"></script>
     <script src="./workspace-scrub.js"></script>
     <script src="./menu-keyboard.js"></script>
+    <script src="./find-core.js"></script>
+    <script src="./find-doc.js"></script>
+    <script src="./find-sheet.js"></script>
+    <script src="./find-replace.js"></script>
     <script src="./workspace-tools.js"></script>
     <script src="./workspace-panels.js"></script>
     <script src="./sheet-grid.js"></script>
@@ -1090,6 +1121,7 @@
     <script src="./slide-studio.js"></script>
     <script src="./hwp-host.js"></script>
     <script src="./hwp-print.js"></script>
+    <script src="./office-print.js"></script>
     <script src="./hwp-session.js"></script>
     <script src="./shell-chrome.js"></script>
     <script src="./app.js"></script>

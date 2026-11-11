@@ -107,19 +107,20 @@ test("outside the Hangul editor the editor-only items run nothing and the shared
 // The reference app's file menu ends in `Export PDF...` (CmdOrCtrl+E) and `Print...` (CmdOrCtrl+P). Both act on the
 // Hangul editor's pages, so they run the actions the editor's own 파일 menu and its Ctrl+P already run and have no item
 // in the page's menu row (like the editor-only cell items); the native items are grayed out outside the editor window.
-test("the native file menu has PDF export and print with the reference keys, run through the editor's own page actions", async () => {
+test("the native file menu has PDF export and print with the reference keys, run through the page actions", async () => {
   const rust = new Map(rustItems().map((r) => [r.id, r]));
   assert.deepEqual(
     ["file:export-pdf", "file:print"].map((id) => [rust.get(id).label, rust.get(id).accelerator, rust.get(id).action]),
-    [["PDF로 내보내기…", "CmdOrCtrl+E", "hwp-export-pdf"], ["인쇄…", "CmdOrCtrl+P", "hwp-print"]],
+    [["PDF로 내보내기…", "CmdOrCtrl+E", "hwp-export-pdf"], ["인쇄…", "CmdOrCtrl+P", "print"]],
   );
   const { NATIVE_MENU_ACTIONS, EMBED_ONLY_ACTIONS } = chromeTable();
   assert.equal(NATIVE_MENU_ACTIONS["file:export-pdf"], "hwp-export-pdf");
-  assert.equal(NATIVE_MENU_ACTIONS["file:print"], "hwp-print");
-  assert.deepEqual([...EMBED_ONLY_ACTIONS], ["hwp-export-pdf", "hwp-print"]);
+  assert.equal(NATIVE_MENU_ACTIONS["file:print"], "print");
+  assert.deepEqual([...EMBED_ONLY_ACTIONS], ["hwp-export-pdf"]);
   const html = read("crates/easyoffice-app/ui/index.html");
   const menu = html.slice(html.indexOf('<div class="studio-menubar"'), html.indexOf('class="topbar-actions"'));
-  assert.ok(!/export-pdf|hwp-print|인쇄|PDF로 내보내기/.test(menu), "no page menu item: the editor's own 파일 menu has them");
+  assert.ok(!/export-pdf|PDF로 내보내기/.test(menu), "no page menu item for PDF export: the editor's own 파일 menu has it");
+  assert.ok(/data-studio-menu-cmd="print"/.test(menu), "print is in the page menu for the document, sheet and slide modules");
   const { document } = await createWorkspaceHarness();
   await flushAsyncTurns(10);
   const run = document.defaultView.__EASYOFFICE_NATIVE_MENU__;
@@ -127,9 +128,9 @@ test("the native file menu has PDF export and print with the reference keys, run
   assert.equal(run("file:export-pdf"), true, "the page has the handler");
   await flushAsyncTurns(4);
   assert.match(feedback(), /PDF로 내보내기는 데스크톱 앱의 한글 편집기에서만/, "outside the editor window it only says it is unavailable");
+  // Print runs the print of the module in front (office-print.js, tested in test-webui-office-print.mjs).
   assert.equal(run("file:print"), true, "the page has the handler");
   await flushAsyncTurns(4);
-  assert.match(feedback(), /인쇄/);
 });
 
 // The page-side behaviour behind each kind of native action: the page element a native item clicks.
@@ -150,9 +151,10 @@ test("every menu id is handled by the real page; the page-item ids reach an exis
     const selector = PAGE_ITEM_SELECTORS[name];
     if (selector) assert.ok(document.querySelector(selector(argument)), `${id} has its page item`);
   }
-  for (const id of ["edit:find", "view:zoom-in", "view:zoom-out", "view:zoom-100", "app:about"]) assert.equal(run(id), true, id);
+  for (const id of ["edit:find", "edit:replace", "view:zoom-in", "view:zoom-out", "view:zoom-100", "app:about"]) assert.equal(run(id), true, id);
   await flushAsyncTurns(4);
-  assert.equal(document.getElementById("cmd-palette-modal").open, true, "Find opens the command palette");
+  assert.equal(document.getElementById("find-dialog").open, true, "Find opens the find dialog in a document window");
+  assert.equal(document.getElementById("find-replace-row").hidden, false, "the last find item was Replace");
   assert.equal(document.getElementById("status-zoom-label").textContent, "100%", "zoom in, zoom out, then the 100% command as Ctrl+0");
   assert.equal(document.getElementById("about-dialog").open, true, "About opens the dialog");
   assert.equal(run("nope"), false);
@@ -167,7 +169,7 @@ const OWN_ACTIONS = {
   "data-recent-dialog-open": "recent-dialog",
   "data-save-as-generic": "file-save-as",
 };
-const OWN_STUDIO_COMMANDS = { "studio-save": "studio-save", palette: "find" };
+const OWN_STUDIO_COMMANDS = { "studio-save": "studio-save", find: "find", replace: "replace", print: "print" };
 // Visible only in the Hangul editor window, where the whole menu row is hidden.
 const NEVER_VISIBLE = ["data-hwp-save-as"];
 
@@ -235,10 +237,11 @@ test("Actual size (view:zoom-100 and the page menu's 100% item) resets any zoom 
   }
 });
 
-test("Find goes to the editor's own find command in the Hangul window and to the palette elsewhere", () => {
+test("Find goes to the editor's own find command in the Hangul window, to the find dialog in the document and sheet, and to the palette elsewhere", () => {
   const app = read("crates/easyoffice-app/ui/app.js");
   assert.match(app, /activeModule === "HWP" && hwpHost\.isEmbedActive\(\)/);
-  assert.match(app, /hwpHost\.call\("automation\.execute", \{ id: "edit:find", allowDialog: true \}\)/);
+  assert.match(app, /id: mode === "find" \? "edit:find" : "edit:find-replace"/);
+  assert.match(app, /findReplace\.open\(mode\)[^\n]*\n\s*togglePaletteModal/);
   const router = read("apps/hwp-studio/src/embed/rpc-router.ts");
   assert.match(router, /case 'automation\.execute'/, "the embed port already carries editor commands");
 });
@@ -319,5 +322,5 @@ test("the native labels of the shared style, paper and justify commands are the 
     assert.ok(native.length > 0, cmd);
     assert.deepEqual([...new Set(pageLabels(cmd))], [...new Set(native)], cmd);
   }
-  assert.ok(!rustItems().some((item) => /글자 모양|문단 모양|모양 복사|찾아 바꾸기|개체 속성/.test(item.label)));
+  assert.ok(!rustItems().some((item) => /글자 모양|문단 모양|모양 복사|개체 속성/.test(item.label)));
 });

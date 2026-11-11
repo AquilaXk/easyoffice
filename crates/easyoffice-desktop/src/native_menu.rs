@@ -101,7 +101,7 @@ pub const ITEMS: &[MenuItemSpec] = &[
         Some("CmdOrCtrl+E"),
         "hwp-export-pdf",
     ),
-    item("file:print", "인쇄…", Some("CmdOrCtrl+P"), "hwp-print"),
+    item("file:print", "인쇄…", Some("CmdOrCtrl+P"), "print"),
     item("file:close", "닫기", Some("CmdOrCtrl+W"), "window-close"),
     item("edit:undo", "되돌리기", None, "studio-cmd:studio-undo"),
     item("edit:redo", "다시 실행", None, "studio-cmd:studio-redo"),
@@ -109,6 +109,7 @@ pub const ITEMS: &[MenuItemSpec] = &[
     item("edit:copy", "복사하기", None, "studio-cmd:clip-copy"),
     item("edit:paste", "붙이기", None, "studio-cmd:clip-paste"),
     item("edit:find", "찾기", Some("CmdOrCtrl+F"), "find"),
+    item("edit:replace", "찾아 바꾸기", None, "replace"),
     item(
         "view:zoom-in",
         "확대",
@@ -678,6 +679,7 @@ fn edit_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
         .item(&PredefinedMenuItem::select_all(app, Some("모두 선택"))?)
         .separator()
         .item(&custom(app, spec("edit:find"))?)
+        .item(&custom(app, spec("edit:replace"))?)
         .build()
 }
 
@@ -1113,6 +1115,7 @@ mod tests {
             "edit:cut",
             "edit:copy",
             "edit:find",
+            "edit:replace",
         ] {
             assert!(ids.contains(&id), "{id} is a custom item");
         }
@@ -1183,7 +1186,7 @@ mod tests {
         let print = spec("file:print");
         assert_eq!(
             (print.label, print.accelerator, print.action),
-            ("인쇄…", Some("CmdOrCtrl+P"), "hwp-print")
+            ("인쇄…", Some("CmdOrCtrl+P"), "print")
         );
         let source = include_str!("native_menu.rs");
         let production = source.split("#[cfg(test)]").next().unwrap();

@@ -396,10 +396,13 @@
     { keys: "Ctrl+Y", action: "studio-redo" },
     { keys: "Ctrl+Shift+Z", action: "studio-redo" },
     { keys: "Ctrl+Alt+O", action: "recent-dialog", forwardFromEditor: true },
-    { keys: "Ctrl+P", action: "hwp-print", module: "HWP", desktopOnly: true, forwardFromEditor: true },
+    { keys: "Ctrl+P", action: "print", desktopOnly: true, forwardFromEditor: true },
     { keys: "Ctrl+E", action: "hwp-export-pdf", module: "HWP", desktopOnly: true, macOnly: true, forwardFromEditor: true },
     { keys: "Ctrl+K", action: "palette", forwardFromEditor: true },
-    { keys: "Ctrl+F", action: "palette" },
+    // Find and replace as in the reference editor (Ctrl+F, Ctrl+F2). Ctrl+H is left alone: it is the
+    // system "hide" key on macOS and the history page in browsers.
+    { keys: "Ctrl+F", action: "find" },
+    { keys: "Ctrl+F2", action: "replace" },
     { keys: "Ctrl+B", action: "home-bold", ribbon: true },
     { keys: "Ctrl+I", action: "home-italic", ribbon: true },
     { keys: "Ctrl+U", action: "home-underline", ribbon: true },

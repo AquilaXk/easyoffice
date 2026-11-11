@@ -206,8 +206,17 @@
     systemFonts: desktopBridge.isAvailable() ? desktopBridge.systemFonts : null,
   });
 
-  const hwpPrint = host.__EASYOFFICE_CREATE_HWP_PRINT__({
-    document, hwpHost, env: host, notify: (text) => setStatusFeedback(text), desktopBridge,
+  const hwpPrint = host.__EASYOFFICE_CREATE_HWP_PRINT__({ document, hwpHost, env: host, notify: (text) => setStatusFeedback(text), desktopBridge });
+
+  const officePrint = host.__EASYOFFICE_CREATE_OFFICE_PRINT__({
+    document, env: host, desktopBridge, getActiveModule: () => activeModule, slideDeckState, sheetController,
+    restoreDomChildren: host.__EASYOFFICE_SHEET_UTILS__.restoreDomChildren, notify: (text) => setStatusFeedback(text),
+  });
+  const findReplace = host.__EASYOFFICE_CREATE_FIND_REPLACE__({
+    document, env: host, getActiveModule: () => activeModule, setFeedback: (text) => setStatusFeedback(text),
+    sheetDataStore, sheetController, sheetStoreHelpers, getActiveSheetName: () => activeSheetName, getActiveSheetCellRef: () => activeSheetCellRef,
+    captureWorkspaceSnapshot: ribbonHistory.captureWorkspaceSnapshot, commitDeferredUndoSnapshot: ribbonHistory.commitDeferredUndoSnapshot,
+    saveDocState: () => workspacePanels.saveActiveDocTabState(), noteActivity: () => workspaceSession.noteActivity(),
   });
 
   hwpSession = host.__EASYOFFICE_CREATE_HWP_SESSION__({
@@ -419,6 +428,9 @@
         undo: () => void ribbonHistory.performWorkspaceUndo().catch(() => {}),
         redo: () => void ribbonHistory.performWorkspaceRedo().catch(() => {}),
         benchmark: () => void workspacePanels.runBenchmarkAction().catch(() => {}),
+        find: () => findActiveModule("find"),
+        replace: () => findActiveModule("replace"),
+        print: () => void printActiveModule().catch((err) => setStatusFeedback(err?.message || String(err))),
       }
     );
   }
@@ -743,20 +755,6 @@
     document.getElementById("btn-scrub-pii")?.addEventListener("click", () => void workspacePanels.runPiiScrubAction(true).catch(() => {}));
   }
 
-  const EXT_TO_FORMAT = Object.freeze({
-    docx: "docx", doc: "docx", odt: "odt", rtf: "rtf", md: "md", markdown: "md", txt: "txt",
-    hwpx: "hwpx", hwp: "hwp", hwt: "hwp", hwtx: "hwpx",
-    xlsx: "xlsx", xls: "xls", ods: "ods", csv: "csv", tsv: "tsv",
-    pptx: "pptx", ppsx: "ppsx", ppt: "pptx", odp: "odp", pdf: "pdf",
-  });
-
-  function inferFormatFromFileName(fileName) {
-    const raw = String(fileName || "").trim();
-    const dot = raw.lastIndexOf(".");
-    return dot >= 0 && dot < raw.length - 1 ? EXT_TO_FORMAT[raw.slice(dot + 1).toLowerCase()] || "" : "";
-  }
-  host.__EASYOFFICE_INFER_FORMAT__ = inferFormatFromFileName;
-
   function togglePaletteModal(modal, cmdSearchInput) {
     if (!modal) return;
     if (modal.open && typeof modal.close === "function") return void modal.close();
@@ -808,6 +806,21 @@
     }
   }
 
+  // Print and find belong to the module in front: the Hangul editor has its own, the document and
+  // sheet modules use the find dialog, and a module without one keeps the command palette on Ctrl+F.
+  function printActiveModule() {
+    if (activeModule === "HWP") return hwpPrint.print();
+    return officePrint.isSupported(activeModule) ? officePrint.print() : Promise.reject(new Error("이 모듈은 인쇄를 지원하지 않습니다."));
+  }
+
+  function findActiveModule(mode) {
+    if (activeModule === "HWP" && hwpHost.isEmbedActive()) {
+      void hwpHost.call("automation.execute", { id: mode === "find" ? "edit:find" : "edit:find-replace", allowDialog: true }).catch(() => {});
+    } else if (!findReplace.open(mode) && mode === "find") {
+      togglePaletteModal(document.getElementById("cmd-palette-modal"), document.getElementById("cmd-search-input"));
+    }
+  }
+
   // Dispatch is driven by ribbonCatalog.WORKSPACE_SHORTCUT_BINDINGS so every advertised label
   // has exactly one handler here; unlisted (browser-reserved) combos are never intercepted.
   function shortcutActions(modal, cmdSearchInput) {
@@ -823,7 +836,9 @@
       "file-new": () => void windowBridge.newDocument(activeModule).catch((err) => setStatusFeedback(err?.message || String(err))),
       "window-close": () => void windowBridge.requestClose().catch(() => {}),
       "app-quit": () => void windowBridge.requestQuit().catch(() => {}),
-      "hwp-print": () => void hwpPrint.print().catch((err) => setStatusFeedback(err?.message || String(err))),
+      print: () => void printActiveModule().catch((err) => setStatusFeedback(err?.message || String(err))),
+      find: () => findActiveModule("find"),
+      replace: () => findActiveModule("replace"),
       "hwp-export-pdf": () => void hwpSession.exportPdf(),
       "studio-save": () => void saveWorkspaceDocument().catch(() => {}),
       "file-save-as": () => (activeModule === "HWP" && hwpHost.isEmbedActive() ? void hwpSession.saveAs("hwp") : void saveWorkspaceDocument({ saveAs: true }).catch(() => {})),
@@ -866,15 +881,6 @@
       ...host.__EASYOFFICE_NATIVE_MENU_TABLE__.pageMenuActions(document),
       "hwp-editor": (_argument, menuId) => void editorCommand(menuId),
       about: () => shellChrome.openAbout(),
-      // Inside the Hangul editor Find is the editor's own find dialog (its `edit:find` automation
-      // command over the embed port); every other window opens the command palette like Ctrl+F.
-      find: () => {
-        if (activeModule === "HWP" && hwpHost.isEmbedActive()) {
-          void hwpHost.call("automation.execute", { id: "edit:find", allowDialog: true }).catch(() => {});
-        } else {
-          togglePaletteModal(modal, input);
-        }
-      },
     };
     return host.__EASYOFFICE_NATIVE_MENU_TABLE__.runNativeMenuAction(id, actions);
   }
@@ -934,6 +940,7 @@
     host.__EASYOFFICE_CUSTOM_SELECT__.enhanceCustomSelects(document);
     void shellChrome.applyStoredTheme();
     shellChrome.bind();
+    findReplace.bind();
     workspacePanels.ensureDefaultDocTabStore();
     sheetDataStore.Sheet1 = snapshotDomSheetCells();
     sheetRowCounts.Sheet1 = sheetController.getSheetRowCount("Sheet1");

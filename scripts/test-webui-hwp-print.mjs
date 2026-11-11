@@ -187,13 +187,13 @@ test("the smoke step fails with a message when printing is unsupported, empty, c
 
 test("the shell wires printing: menu item, shortcut, no new shell command, only inline-free CSS", () => {
   const app = UI("app.js");
-  assert.ok(app.includes("__EASYOFFICE_CREATE_HWP_PRINT__") && app.includes('"hwp-print"'));
+  assert.ok(app.includes("__EASYOFFICE_CREATE_HWP_PRINT__") && app.includes("hwpPrint.print()"));
   const catalog = loadUiModule(new URL("../crates/easyoffice-app/ui/ribbon-catalog.js", import.meta.url), {}).__EASYOFFICE_RIBBON_CATALOG__;
   const binding = catalog.WORKSPACE_SHORTCUT_BINDINGS.find((b) => b.keys === "Ctrl+P");
   assert.deepEqual(
     { action: binding.action, module: binding.module, forward: binding.forwardFromEditor, desktopOnly: binding.desktopOnly },
-    { action: "hwp-print", module: "HWP", forward: true, desktopOnly: true },
-    "Ctrl+P is browser-reserved, so only the desktop shell takes it over",
+    { action: "print", module: undefined, forward: true, desktopOnly: true },
+    "Ctrl+P is browser-reserved, so only the desktop shell takes it over; the action picks the print of the module in front",
   );
   const js = UI("hwp-print.js");
   assert.ok(!/\.style\.|setAttribute\("style"|createElement\("style"\)|innerHTML|eval\(/.test(js), "no inline style, no markup injection");

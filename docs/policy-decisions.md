@@ -2615,6 +2615,25 @@
 - **Trade-offs** 이전 문자열 검색 구현은 비교 시험용으로 테스트 모듈에만 남겼습니다(`xml_stream/tests.rs`, `xlsx_sheet/tests.rs`, `ods_grid/tests.rs`). 구조가 바뀌면 함께 갱신해야 합니다.
 - **Verified by** 위 세 테스트 모듈의 전수·변이 비교, 악의적 입력(깊은 중첩 20만, 8 MiB 속성·값, 잘린 엔티티·주석, 예산 초과) 시험, 열기 응답 11개 입력의 바이트 비교, `docs/performance.md` 4.2절 측정.
 
+## PD-169. 문서·시트 찾기·바꾸기와 문서·시트·슬라이드 인쇄, 단축키 정리
+
+- **Status** Implemented (`ui/find-core.js`, `find-doc.js`, `find-sheet.js`, `find-replace.js`, `office-print.js`, `ribbon-catalog.js`, `app.js`, `index.html`, `crates/easyoffice-desktop/src/native_menu.rs`)
+- **Context** 문서·시트에는 찾기가 없었고 `Ctrl+F`가 명령 팔레트를 열었습니다. `Ctrl+P`와 `인쇄…`는 한글 모듈만 인쇄했습니다(`print_webview`는 PD-139로 이미 있음).
+- **Decision (`PD-169`)**
+  1. **단축키**: `Ctrl+F` 찾기, `Ctrl+F2` 찾아 바꾸기(참조 편집기와 같은 키). 명령 팔레트는 `Ctrl+K`(`/`)만 씁니다. 문서·시트가 아닌 모듈(슬라이드·PDF·변환)은 `Ctrl+F`가 팔레트로 가고, 한글 편집기 창은 편집기 자체 찾기(`edit:find`, `edit:find-replace`)로 보냅니다. `Ctrl+H`·`Ctrl+L`은 묶지 않습니다(macOS ⌘H는 앱 숨기기, 브라우저에서 둘 다 예약 키). `Ctrl+P`는 모듈 제한을 풀고 `print` 동작이 앞에 있는 모듈의 인쇄를 고릅니다(한글은 `hwp-print.js`). macOS 메뉴의 `file:print` 동작 이름은 `hwp-print`에서 `print`로, 편집 메뉴에 `찾아 바꾸기`(`edit:replace`, 키 없음)를 더했습니다. `인쇄…`는 한글 편집기 창과 문서·시트·슬라이드 창에서 켜지고 나머지에서 회색입니다. 페이지 메뉴 줄에 `찾기`·`찾아 바꾸기`·`인쇄…`를 더했습니다.
+  2. **대화상자**: 비모달 `<dialog id="find-dialog" class="tool-dialog">`(`.dialog-row`·`.dialog-label`·`.dialog-input` 재사용, 새 CSS는 위치 4줄). 대소문자·전체 단어(유니코드 글자·숫자·`_` 경계)·정규식, 시트는 `수식 원문 포함`. 이전/다음(Enter·Shift+Enter), 바꾸기, 모두 바꾸기, `n / 전체` 표시. 한글 조합 중에는 검색하지 않고 조합이 끝나면 검색하며, 찾을 내용은 NFC로 맞춥니다. 대화상자가 키를 받는 동안 되돌리기 같은 페이지 단축키는 막습니다.
+  3. **색인**: 블록(문단·표 칸·`<br>`로 끝나는 줄, 시트는 셀)마다 `{id, text}`와 일치 목록을 들고, 텍스트 노드의 시작 오프셋 표로 일치를 범위로 바꿉니다. 입력은 해당 텍스트 노드의 문단만 다시 읽고 다시 검색하며(`MutationObserver`), 구조가 바뀌면 트리를 한 번 걷되 바뀌지 않은 문단의 기록과 일치를 재사용합니다. 일치 번호는 접두합과 이분 탐색(O(log 블록))입니다.
+  4. **강조**: CSS Custom Highlight API가 있으면 DOM을 바꾸지 않고(현재 일치 주변 ±1,000개 범위만 만듦), 없으면 현재 일치를 선택합니다.
+  5. **바꾸기**: 일치가 시작하는 텍스트 노드에 바꿀 글을 넣고 이어지는 노드의 덮인 글만 지워 글자 서식(런)을 유지합니다. 모두 바꾸기는 워크스페이스 스냅샷 한 번(`captureWorkspaceSnapshot`/`commitDeferredUndoSnapshot`)이라 실행 취소 한 단계입니다. 정규식은 `$1`·`$&`·`$<이름>`·`$$`를 풉니다. 시트는 수식 입력줄과 같은 평가·커밋 경로(`computeEvaluatedSheetStore`, `replaceLiveSheetDataStore`)를 거치고 수식 셀은 `수식 원문 포함`일 때만 바꿉니다.
+  6. **상한(Fail-Closed)**: 찾을 내용 256자, 일치 100,000개(넘으면 `N+`로 표시하고 모두 바꾸기를 거부), 검색 1.5초 예산(블록 사이에서 확인, 넘으면 중단하고 다음 호출이 이어 검색). 정규식 오류는 대화상자에 사유를 보이고 문서는 건드리지 않습니다.
+  7. **인쇄**: `office-print.js`가 `#eo-print-root`(한글 인쇄와 같은 루트·정적 규칙)에 문서는 편집기 내용 복제(id·`contenteditable` 제거, A4 여백 20mm, 쪽 나눔은 브라우저), 시트는 사용 범위 표(격자선, 숫자 오른쪽 정렬, 열이 8개를 넘으면 가로, 셀 200,000개 초과는 거부), 슬라이드는 한 장당 한 쪽(덱 비율의 용지)을 쌓습니다. `@page`는 생성형 스타일시트로 더하고, 셸이 있으면 `print_webview`, 없으면 `window.print()`를 부른 뒤 `afterprint`(없으면 5분 뒤)나 실패 시 지웁니다.
+- **Measured** Node, 1 MiB 문서(1,032,399자, 문단 13,663개, 인라인 굵게 포함, `apple` 25,619건; 스크래치 `bench-find.mjs`·`bench-dialog.mjs`, DOM은 시험용 가벼운 구현이라 실제 웹뷰 DOM 쓰기는 더 느림): 색인 만들기(트리 걷기+오프셋 표) 14 ms, 새 질의 전체 검색 2~3 ms, 대화상자에서 입력부터 첫 결과 표시 19 ms, 한 문단 입력 뒤 동기화+검색 0.1 ms, 모두 바꾸기 25,619건 본체 8 ms(실행 취소 스냅샷 포함 대화상자 동작 1.1 s), 바꾼 뒤 재검색 5 ms.
+- **Why** 입력마다 전체를 훑지 않고 바뀐 문단만 다시 검색하며, 실행 취소는 기존 문서 편집(`withDocStyleUndo`)과 같은 스냅샷 한 번입니다. 일치 계산은 문자열만 다루므로 DOM 없이 시험합니다.
+- **Trade-offs** 모두 바꾸기 시간의 대부분은 문서 스냅샷(직렬화)입니다. 시트는 활성 시트만 검색하고, 바꾼 뒤 현재 일치는 다음 일치로 넘어갑니다. 정규식 한 번 실행은 끊을 수 없어 예산은 블록 사이에서만 확인합니다. 문서·시트가 아닌 모듈의 찾기와 시트의 모든 시트 검색은 없습니다. Univer `docs-find-replace`는 자체 문서 모델 위에 있어 `contenteditable` DOM에 맞지 않아 이식하지 않았습니다.
+- **Alternatives rejected** `Ctrl+H`(예약 키), 모달 대화상자(문서를 보면서 편집 못 함), 강조용 `<mark>` 삽입(저장 내용·실행 취소를 오염), 입력마다 전체 텍스트 재색인, 인쇄용 `iframe`(웹뷰별 차이, PD-104와 같은 이유).
+- **Verified by** `node --test scripts/test-webui-find-core.mjs scripts/test-webui-find-doc.mjs scripts/test-webui-find-replace.mjs scripts/test-webui-office-print.mjs`(여러 문단·표·런, 한글 조합, 모두 바꾸기 실행 취소, 단축키 표 충돌, 인쇄 루트 생성·정리, 상한), `node --test scripts/test-webui-native-menu.mjs scripts/test-webui-menu-state.mjs`, `cargo test -p easyoffice-desktop native_menu`.
+- **Revisit when** 시트 전체(모든 시트) 검색이 필요할 때, 슬라이드 텍스트 찾기를 넣을 때, 쪽 단위 문서 인쇄(편집기 쪽 나눔과 일치)가 필요할 때.
+
 ## PD-170. PDF 스튜디오 편집은 원본 PDF의 객체를 보존하는 방식으로, 신뢰할 수 없는 입력은 예산과 마감 안에서만 처리
 
 - **Status** Implemented (`crates/easyoffice-desktop/src/pdf_edit_budget.rs`·`pdf_edit_scan.rs`·`pdf_edit_inspect.rs`·`pdf_edit_build.rs`·`pdf_edit_overlay.rs`·`pdf_edit_session.rs`·`pdf_edit_engine.rs`·`pdf_edit_supervisor.rs`·`pdf_edit_worker.rs`·`pdf_edit_wire.rs`·`pdf_edit_os.rs`·`pdf_edit_job.rs`, `tests/pdf_isolation.rs`, `ui/pdf-edit.js`·`desktop-bridge.js`·`file-open.js`·`ribbon-history.js`·`workspace-tools.js`·`app.js`; 실제 데스크톱 창의 대화상자·화면은 이 환경에서 GUI를 실행하지 못해 확인하지 못했습니다)

@@ -611,6 +611,20 @@
     };
   }
 
+  const EXT_TO_FORMAT = Object.freeze({
+    docx: "docx", doc: "docx", odt: "odt", rtf: "rtf", md: "md", markdown: "md", txt: "txt",
+    hwpx: "hwpx", hwp: "hwp", hwt: "hwp", hwtx: "hwpx",
+    xlsx: "xlsx", xls: "xls", ods: "ods", csv: "csv", tsv: "tsv",
+    pptx: "pptx", ppsx: "ppsx", ppt: "pptx", odp: "odp", pdf: "pdf",
+  });
+
+  function inferFormatFromFileName(fileName) {
+    const raw = String(fileName || "").trim();
+    const dot = raw.lastIndexOf(".");
+    return dot >= 0 && dot < raw.length - 1 ? EXT_TO_FORMAT[raw.slice(dot + 1).toLowerCase()] || "" : "";
+  }
+  host.__EASYOFFICE_INFER_FORMAT__ = inferFormatFromFileName;
+
   host.__EASYOFFICE_CREATE_FILE_OPEN__ = createFileOpen;
   host.__EASYOFFICE_FILE_OPEN_UTILS__ = {
     MAX_FILE_BYTES, MAX_HWP_BYTES, SUPPORTED_EXTENSIONS, GRID_LIMITS, buildEditorNodes, buildSheetStore, bytesToBase64,

@@ -16,7 +16,7 @@
   // Menu command -> tool dialog (PD-098 step 3b); the action buttons keep their ids.
   const TOOL_DIALOGS = { "smart-diagnose": "smart-dialog", "scrub-pii": "pii-dialog", "security-audit": "security-dialog", "bench-run": "bench-dialog", "view-outline": "outline-dialog" };
   // Menu command -> app-provided action.
-  const STUDIO_DIRECT_ACTIONS = { "studio-save": "save", "studio-save-as": "saveAs", "studio-undo": "undo", "studio-redo": "redo", "bench-run": "benchmark" };
+  const STUDIO_DIRECT_ACTIONS = { "studio-save": "save", "studio-save-as": "saveAs", "studio-undo": "undo", "studio-redo": "redo", "bench-run": "benchmark", find: "find", replace: "replace", print: "print" };
   const EMBED_BLIND_TOOLS = new Set(["scrub-pii", "security-audit"]);
   const SYMBOL_TABLE_CHAR = "※";
   // `target`: the ribbon command a module runs for it (`hwp` tells which module); none means the page inserts it itself.

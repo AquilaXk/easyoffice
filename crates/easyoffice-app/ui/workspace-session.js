@@ -41,6 +41,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     palette: ALL_MODULES, "view-theme": ALL_MODULES, "zoom-in": ALL_MODULES, "zoom-out": ALL_MODULES,
     "zoom-fit-page": ALL_MODULES, "zoom-fit-width": ALL_MODULES, "smart-diagnose": ALL_MODULES,
     "scrub-pii": ALL_MODULES, "security-audit": ALL_MODULES, "bench-run": ALL_MODULES, "view-outline": ALL_MODULES,
+    find: ["DOC", "SHEET"], replace: ["DOC", "SHEET"], print: ["DOC", "SHEET", "SLIDE"],
     "clip-copy": EDIT_MODULES, "clip-cut": DOC_SHEET_MODULES, "clip-paste": DOC_SHEET_MODULES,
     "mod-symbol": EDIT_MODULES,
     // Every ribbon command exists for the five editing modules, so its menu item is enabled in all
@@ -65,7 +66,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
 
   // Commands that still apply while the embedded HWP editor is the active surface.
   // The PII scrub and security audit read the page's own (hidden) fallback DOM, not the embedded document, so they stay off here.
-  const HWP_EMBED_COMMANDS = new Set(["studio-save", "studio-save-as", "palette", "view-theme"]);
+  const HWP_EMBED_COMMANDS = new Set(["studio-save", "studio-save-as", "palette", "view-theme", "print"]);
 
   // The start window has no document: only the window-level commands apply.
   const START_COMMANDS = new Set(["palette", "view-theme"]);

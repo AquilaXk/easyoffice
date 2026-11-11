@@ -31,7 +31,7 @@
     "file:save": "studio-save",
     "file:save-as": "file-save-as",
     "file:export-pdf": "hwp-export-pdf",
-    "file:print": "hwp-print",
+    "file:print": "print",
     "file:close": "window-close",
     "edit:undo": "studio-cmd:studio-undo",
     "edit:redo": "studio-cmd:studio-redo",
@@ -39,6 +39,7 @@
     "edit:copy": "studio-cmd:clip-copy",
     "edit:paste": "studio-cmd:clip-paste",
     "edit:find": "find",
+    "edit:replace": "replace",
     "view:zoom-in": "studio-cmd:zoom-in",
     "view:zoom-out": "studio-cmd:zoom-out",
     "view:zoom-fit-page": "studio-cmd:zoom-fit-page",
@@ -116,12 +117,13 @@
     "help:update-check": "update-check",
   });
 
-  // Actions that work on the Hangul editor's pages (the shell's PDF export and print). They have no item
-  // in the page's own menu row: the editor's 파일 menu carries them in the Hangul window, and no other
-  // window has them, so the native items are grayed out everywhere but in the editor window.
-  const EMBED_ONLY_ACTIONS = Object.freeze(["hwp-export-pdf", "hwp-print"]);
+  // Actions that work on the Hangul editor's pages (the shell's PDF export). It has no item in the
+  // page's own menu row: the editor's 파일 menu carries it in the Hangul window, and no other window
+  // has it, so the native item is grayed out everywhere but in the editor window. Print is in the
+  // page's menu row too, for the modules that print (`studioCommandApplies("print", ...)`).
+  const EMBED_ONLY_ACTIONS = Object.freeze(["hwp-export-pdf"]);
   const EMBED_ONLY_SET = new Set(EMBED_ONLY_ACTIONS);
-  const START_DISABLED_ACTIONS = Object.freeze(["studio-save", "file-save-as", "find"]);
+  const START_DISABLED_ACTIONS = Object.freeze(["studio-save", "file-save-as", "find", "replace"]);
   const START_DISABLED_SET = new Set(START_DISABLED_ACTIONS);
   const PARSED_NATIVE_MENU_ACTIONS = Object.freeze(
     Object.fromEntries(
@@ -241,7 +243,7 @@
         } else if (EMBED_ONLY_SET.has(name)) {
           isDisabled = commandModule !== "HWP_EMBED";
         } else {
-          isDisabled = name === "hwp-editor" || (name === "studio-cmd" && !applies(argument, commandModule));
+          isDisabled = name === "hwp-editor" || (name === "studio-cmd" && !applies(argument, commandModule)) || (name === "print" && !applies("print", commandModule));
         }
         if (isDisabled) out.push(id);
       }

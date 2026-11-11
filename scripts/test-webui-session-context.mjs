@@ -171,12 +171,12 @@ test("command palette only displays shortcuts that the keydown handler really bi
   }
 });
 
-test("Ctrl+F opens the palette, '/' only fires outside text entry, and reserved browser keys are left untouched", async () => {
+test("Ctrl+K opens the palette, '/' only fires outside text entry, and reserved browser keys are left untouched", async () => {
   const { document, sandbox } = await createWorkspaceHarness();
   const modal = document.getElementById("cmd-palette-modal");
 
-  const ctrlF = sandbox.dispatchWindowKeydown({ key: "f", ctrlKey: true });
-  assert.equal(ctrlF.defaultPrevented, true);
+  const ctrlK = sandbox.dispatchWindowKeydown({ key: "k", ctrlKey: true });
+  assert.equal(ctrlK.defaultPrevented, true);
   assert.equal(modal.open, true);
   sandbox.dispatchWindowKeydown({ key: "Escape" });
   assert.equal(modal.open, false);

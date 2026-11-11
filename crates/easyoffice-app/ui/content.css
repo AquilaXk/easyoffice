@@ -296,3 +296,9 @@
     linear-gradient(to bottom, var(--border-primary) 1px, transparent 1px);
   background-size: calc(100% / 20) 28px;
 }
+
+/* Find matches (find-replace.js) and printed document / sheet text: fixed colours like the page itself. */
+::highlight(eo-find-match) { background-color: #ffe38a; color: #111827; }
+::highlight(eo-find-current) { background-color: #ff9632; color: #111827; }
+#eo-print-root .eo-print-flow,
+#eo-print-root .eo-print-sheet { color: #111827; border-color: #808080; }

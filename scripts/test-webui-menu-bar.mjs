@@ -213,8 +213,7 @@ test("menu-bar.css and toolbar.css name rhwp-studio as their source and are in t
   }
 });
 
-// A label must name what its command does. The app has no format painter, no find-and-replace and no
-// object properties dialog, so no menu item or toolbar button may be called that; `home-style` is the
+// A label must name what its command does. The app has no format painter and no object properties dialog, so no menu item or toolbar button may be called that; `home-style` is the
 // ribbon's "스타일 적용" and `layout-paper` the paper size toggle ("편집 용지").
 test("menu and toolbar labels name what their command does", async () => {
   const { document } = await openModule("DOC");
@@ -234,11 +233,14 @@ test("menu and toolbar labels name what their command does", async () => {
   assert.equal(buttonsOf("insert-chart").length, 0, "no picture button for the chart command");
   assert.deepEqual(labelsOf("insert-chart"), ["차트 개체"]);
   assert.deepEqual(labelsOf("palette"), ["명령 검색", "환경 설정 및 커맨드 검색"]);
+  assert.deepEqual(labelsOf("find"), ["찾기"]);
+  assert.deepEqual(labelsOf("replace"), ["찾아 바꾸기"]);
+  assert.deepEqual(labelsOf("print"), ["인쇄…"]);
   const named = [
     ...document.querySelectorAll(".md-label").map((el) => el.textContent),
     ...document.querySelectorAll("#icon-toolbar [title]").map((el) => el.getAttribute("title")),
   ];
-  for (const promised of ["모양 복사", "찾아 바꾸기", "개체 속성", "글자 모양", "문단 모양", "그림 삽입", "미주", "(F)"]) {
+  for (const promised of ["모양 복사", "개체 속성", "글자 모양", "문단 모양", "그림 삽입", "미주", "(F)"]) {
     assert.ok(!named.some((text) => text.includes(promised)), `${promised} is not a feature of the app`);
   }
 });

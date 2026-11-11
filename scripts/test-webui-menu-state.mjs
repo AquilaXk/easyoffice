@@ -78,13 +78,15 @@ test("the disabled ids are exactly the table items the page's own rule refuses i
       "view:toolbar-labels",
       "view:zoom-dialog",
     ]);
-    // PDF export and print work on the editor's pages: gray in every window but the editor window.
+    // PDF export works on the editor's pages: gray in every window but the editor window. Print also runs in the
+    // document, sheet and slide modules.
     const { EMBED_ONLY_ACTIONS } = page.__EASYOFFICE_NATIVE_MENU_TABLE__;
     const embedOnly = Object.entries(page.__EASYOFFICE_NATIVE_MENU_TABLE__.NATIVE_MENU_ACTIONS)
       .filter(([, action]) => EMBED_ONLY_ACTIONS.includes(action))
       .map(([id]) => id);
-    assert.deepEqual(embedOnly.sort(byName), ["file:export-pdf", "file:print"]);
-    const expected = [...commands.filter(([, command]) => !rule(command, mod)).map(([id]) => id), ...editorOnly, ...embedOnly];
+    assert.deepEqual(embedOnly.sort(byName), ["file:export-pdf"]);
+    const printOff = rule("print", mod) ? [] : ["file:print"];
+    const expected = [...commands.filter(([, command]) => !rule(command, mod)).map(([id]) => id), ...editorOnly, ...embedOnly, ...printOff];
     assert.ok(reports.length > 0, `${mod} reported`);
     assert.deepEqual([...reports.at(-1).disabled].sort(byName), expected.sort(byName), mod);
   }
@@ -213,7 +215,9 @@ test("in the Hangul editor window the zoom and cell items are enabled, and the e
   await flushAsyncTurns(10);
   assert.ok(reports.at(-1).disabled.includes("table:cell-select") && reports.at(-1).disabled.includes("table:cell-split"));
   assert.ok(!reports.at(-1).disabled.includes("view:zoom-100"), "zoom is the page's own in a document window");
-  for (const id of ["file:export-pdf", "file:print"]) assert.ok(reports.at(-1).disabled.includes(id), `${id} is grayed out in a document window`);
+  assert.ok(reports.at(-1).disabled.includes("file:export-pdf"), "PDF export is grayed out in a document window");
+  assert.ok(!reports.at(-1).disabled.includes("file:print"), "print works in a document window");
+  assert.ok(!reports.at(-1).disabled.includes("edit:replace"), "replace works in a document window");
   const sent = [];
   const shellChrome = page.__EASYOFFICE_CREATE_SHELL_CHROME__({
     document,
