@@ -190,7 +190,7 @@ fn an_abandoned_open_lets_go_of_the_file_and_its_bytes() {
         .claim_path("doc-1-a", path_key(&canonical))
         .unwrap();
     let fingerprint = Fingerprint::of(&canonical).unwrap();
-    locked(&state.files).track("doc-1-a", canonical.clone(), fingerprint);
+    locked(&state.files).track_opened("doc-1-a", canonical.clone(), fingerprint);
     locked(&state.pending).push(
         "doc-1-a",
         PendingOpen {
@@ -287,4 +287,43 @@ fn a_file_that_grew_after_its_size_was_checked_is_not_read_whole() {
     let exact = read_within(std::io::repeat(7).take(4096), 4096, 4096).unwrap();
     assert_eq!(exact.len(), 4096);
     assert!(read_within(std::io::empty(), 4096, 0).unwrap().is_empty());
+}
+
+/// Save As can finish before the page gives up on the open (a password question is still up): the
+/// window then belongs to the file it was saved to, which the failed open must not take away.
+#[test]
+fn an_abandoned_open_leaves_a_file_the_window_was_saved_to_meanwhile() {
+    let dir = scratch_dir("abandon-saved");
+    let opened = dir.join("a.docx");
+    let saved = dir.join("b.docx");
+    fs::write(&opened, b"x").unwrap();
+    fs::write(&saved, b"y").unwrap();
+    let state = AppWindows::new(None);
+    locked(&state.registry).register("doc-1-a", WindowKind::Doc);
+    let (opened_key, saved_key) = (path_key(&opened), path_key(&saved));
+    locked(&state.registry)
+        .claim_path("doc-1-a", opened_key.clone())
+        .unwrap();
+    locked(&state.files).track_opened("doc-1-a", opened, Fingerprint::of(&saved).unwrap());
+    // What `note_saved_path` does for a save to `b.docx`.
+    locked(&state.registry)
+        .claim_path("doc-1-a", saved_key.clone())
+        .unwrap();
+    locked(&state.files).track("doc-1-a", saved.clone(), Fingerprint::of(&saved).unwrap());
+    state.abandon_open("doc-1-a");
+    assert_eq!(locked(&state.files).get("doc-1-a").unwrap().path, saved);
+    assert_eq!(
+        locked(&state.registry).find_by_path(&saved_key),
+        Some("doc-1-a")
+    );
+    // A save to a path another window owns leaves the window untracked but still claiming the file
+    // it was opened for: that one is let go.
+    locked(&state.files).untrack("doc-1-a");
+    locked(&state.registry).release_path("doc-1-a");
+    locked(&state.registry)
+        .claim_path("doc-1-a", opened_key.clone())
+        .unwrap();
+    state.abandon_open("doc-1-a");
+    assert_eq!(locked(&state.registry).find_by_path(&opened_key), None);
+    let _ = fs::remove_dir_all(&dir);
 }

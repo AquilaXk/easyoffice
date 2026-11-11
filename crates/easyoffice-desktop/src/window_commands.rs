@@ -129,10 +129,17 @@ impl AppWindows {
 
     /// The window was opened for a file its page could not show: nothing of that file is left, so
     /// the window is no longer its owner, has no path to save to and holds none of its bytes.
+    /// A save to a file of its own that finished first (the page may still have been asking about
+    /// the open) is not the failed open's: that file and its claim stay.
     fn abandon_open(&self, label: &str) {
-        locked(&self.registry).release_path(label);
-        locked(&self.files).untrack(label);
         locked(&self.pending).discard(label);
+        let mut files = locked(&self.files);
+        if files.is_saved_file(label) {
+            return;
+        }
+        files.untrack(label);
+        drop(files);
+        locked(&self.registry).release_path(label);
     }
 
     fn remember(&self, app: &AppHandle, path: &Path) {
@@ -527,7 +534,7 @@ pub fn open_path(app: &AppHandle, path: &Path) -> Result<OpenOutcome, String> {
             return Ok(OpenOutcome::FOCUSED);
         }
     }
-    locked(&state.files).track(&label, canonical.clone(), fingerprint);
+    locked(&state.files).track_opened(&label, canonical.clone(), fingerprint);
     locked(&state.pending).push(
         &label,
         PendingOpen {

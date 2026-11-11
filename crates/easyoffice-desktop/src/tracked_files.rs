@@ -103,6 +103,8 @@ pub fn disk_state(path: &Path, expected: &Fingerprint) -> DiskState {
 pub struct TrackedFile {
     pub path: PathBuf,
     pub fingerprint: Fingerprint,
+    /// The window was opened for this file and nothing was saved to another file since.
+    pub from_open: bool,
 }
 
 fn canonical_ext(ext: &str) -> &str {
@@ -134,9 +136,32 @@ pub struct TrackedFiles {
 }
 
 impl TrackedFiles {
+    /// The file the window was saved to.
     pub fn track(&mut self, label: &str, path: PathBuf, fingerprint: Fingerprint) {
+        self.insert(label, path, fingerprint, false);
+    }
+
+    /// The file the window was opened for.
+    pub fn track_opened(&mut self, label: &str, path: PathBuf, fingerprint: Fingerprint) {
+        self.insert(label, path, fingerprint, true);
+    }
+
+    fn insert(&mut self, label: &str, path: PathBuf, fingerprint: Fingerprint, from_open: bool) {
+        self.by_label.insert(
+            label.to_string(),
+            TrackedFile {
+                path,
+                fingerprint,
+                from_open,
+            },
+        );
+    }
+
+    /// The window was saved to a file of its own (after it was opened, or from the start).
+    pub fn is_saved_file(&self, label: &str) -> bool {
         self.by_label
-            .insert(label.to_string(), TrackedFile { path, fingerprint });
+            .get(label)
+            .is_some_and(|tracked| !tracked.from_open)
     }
 
     pub fn get(&self, label: &str) -> Option<TrackedFile> {
@@ -334,6 +359,7 @@ mod tests {
         let md_file = TrackedFile {
             path: dir.join("notes.markdown"),
             fingerprint: fp,
+            from_open: true,
         };
         assert!(md_file.extension_matches("md"));
         assert!(md_file.extension_matches("MARKDOWN"));

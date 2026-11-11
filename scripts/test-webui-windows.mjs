@@ -553,6 +553,26 @@ test("the shell lets go of the file after a cancelled password or a failed open,
   assert.equal(shell.named("abandon_tracked_open").length - before, 1, "a thrown open lets go too");
 });
 
+// Only the result of the open decides whether the shell forgets the file: a step after a shown
+// document (marking it saved) that fails must not take the file's tracking away.
+test("a failing step after a shown open does not make the shell let go of the file", async () => {
+  const pending = { take_pending_open: () => ({ name: "문서.hwp", base64: Buffer.from("x").toString("base64") }) };
+  const { shell, document } = await openWindow("?module=HWP&win=w-after", pending);
+  const instance = document.defaultView.__EASYOFFICE_WINDOW_BRIDGE__.instance;
+  const before = shell.named("abandon_tracked_open").length;
+  let afterShown = 0;
+  await assert.rejects(
+    instance.loadPending(async () => ({ ok: true }), async () => { afterShown += 1; throw new Error("저장 표시 실패"); }),
+    /저장 표시 실패/
+  );
+  assert.equal(afterShown, 1);
+  assert.equal(shell.named("abandon_tracked_open").length - before, 0, "the document is shown: the file stays tracked");
+  afterShown = 0;
+  await instance.loadPending(async () => ({ ok: false }), async () => { afterShown += 1; });
+  assert.equal(afterShown, 0, "nothing is marked saved for a document that is not shown");
+  assert.equal(shell.named("abandon_tracked_open").length - before, 1);
+});
+
 test("windows keep separate autosave records keyed by their window id", async () => {
   const storage = createMemoryStorage();
   const a = await openWindow("?module=DOC&win=w-a", {}, { localStorage: storage });
