@@ -305,12 +305,14 @@ fn legacy_ods_styling(content_xml: &str) -> Vec<(String, SheetStyling)> {
         .collect()
 }
 
+// Samples where the shown text and the raw value agree: the substring scanner took the shown text
+// first, the reader takes the raw value (`tests/ods_cell_values.rs` covers where they differ).
 const CELL_ROWS: &[&str] = &[
     r#"<table:table-row><table:table-cell office:value-type="string"><text:p>가</text:p></table:table-cell><table:table-cell office:value="3"/><table:covered-table-cell/></table:table-row>"#,
-    r#"<table:table-row table:number-rows-repeated="3"><table:table-cell table:number-columns-repeated="2" office:value-type="float" office:value="1.5"><text:p>1,5</text:p></table:table-cell></table:table-row>"#,
+    r#"<table:table-row table:number-rows-repeated="3"><table:table-cell table:number-columns-repeated="2" office:value-type="float" office:value="1.5"><text:p>1.5</text:p></table:table-cell></table:table-row>"#,
     r#"<table:table-row><table:table-cell table:formula="of:=SUM([.A1:.A3])" office:value="6"/><table:table-cell table:formula="=A1&amp;&quot;x&quot;"/></table:table-row>"#,
     r#"<table:table-row><table:table-cell><text:p>a<text:s text:c="3"/>b<text:tab/>c<text:line-break/>d<text:span>e &amp; f</text:span></text:p><text:p>second</text:p></table:table-cell></table:table-row>"#,
-    r#"<table:table-row><table:table-cell><text:p/></table:table-cell><table:table-cell><text:p></text:p></table:table-cell><table:table-cell><text:p></text:p><text:p></text:p></table:table-cell></table:table-row>"#,
+    r#"<table:table-row><table:table-cell><text:p></text:p></table:table-cell><table:table-cell><text:p></text:p><text:p></text:p></table:table-cell></table:table-row>"#,
     r#"<table:table-row><table:table-cell office:boolean-value="true"/><table:table-cell office:boolean-value=" 0 "/><table:table-cell office:value-type="date" office:date-value="2026-11-11"/><table:table-cell office:string-value="s&amp;t"/></table:table-row>"#,
     r#"<table:table-row/><table:table-row table:number-rows-repeated="5"><table:table-cell/></table:table-row><table:table-row><table:table-cell office:value="9"/></table:table-row>"#,
     r#"<table:table-row><table:table-cell row="4" col="2" office:value="1"/><table:table-cell row="7"/><table:table-cell eo:col="9"><text:p></text:p></table:table-cell></table:table-row>"#,

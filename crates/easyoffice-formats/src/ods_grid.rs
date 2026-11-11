@@ -6,7 +6,7 @@
 //! 참조 구현 (reference implementation): calamine 0.38.0 (MIT, Copyright (c) 2016 Johann Tuffe),
 //! https://github.com/tafia/calamine, `src/ods.rs` (`read_table`, `read_row`): one
 //! pull-reader loop with a state per table, row and cell. The budgets, the repeat rules and the
-//! cell text priority are this repository's own, unchanged from the substring scanner. Safe Rust
+//! cell text priority (raw value before the displayed text, PD-172) are this repository's own. Safe Rust
 //! only, no dependency (PD-053, PD-095).
 
 use std::borrow::Cow;
@@ -166,7 +166,6 @@ impl<'a> CellBuilder<'a> {
 
     fn start(&mut self, name: &str, attrs: &Attrs<'_>, empty_start: bool) {
         match name {
-            "text:p" if empty_start => self.empty_paragraph = true,
             "text:p" => {
                 if self.paragraph_depth == 0 {
                     if self.fields.paragraph_count > 0 {
@@ -174,7 +173,12 @@ impl<'a> CellBuilder<'a> {
                     }
                     self.fields.paragraph_count += 1;
                 }
-                self.paragraph_depth += 1;
+                // `<text:p/>` is a paragraph with no text and no end event to balance.
+                if empty_start {
+                    self.empty_paragraph = true;
+                } else {
+                    self.paragraph_depth += 1;
+                }
             }
             _ if self.paragraph_depth == 0 => {}
             "text:s" => {
@@ -201,29 +205,33 @@ impl<'a> CellBuilder<'a> {
         self.cell
     }
 
-    /// Cell text by priority: formula, paragraph text, office value/boolean/date, then empty for
-    /// explicit cells.
+    /// Cell text by priority: formula, the raw typed value (boolean, number, date, string value),
+    /// the paragraph text, then empty for explicit cells. The paragraphs are what a number format
+    /// displays (`1,234`, `11월 11일`), the attributes are what the cell holds (PD-172).
     fn resolve_text(&mut self) -> Option<String> {
         let f = &mut self.fields;
         if let Some(raw) = f.formula.take() {
             return Some(OdfCodec::normalize_ods_formula(&raw));
-        }
-        let has_paragraph = f.paragraph_count > 0;
-        if has_paragraph && !f.paragraphs.is_empty() {
-            return Some(std::mem::take(&mut f.paragraphs));
         }
         if let Some(flag) = f.boolean {
             let flag = flag.trim();
             let truthy = flag.eq_ignore_ascii_case("true") || flag == "1";
             return Some(if truthy { "TRUE" } else { "FALSE" }.to_string());
         }
-        let explicit = self.cell.explicit_row.is_some() || self.cell.explicit_col.is_some();
-        f.value
+        if let Some(raw) = f
+            .value
             .take()
-            .or_else(|| f.string_value.take())
             .or_else(|| f.date_value.take())
-            .map(Cow::into_owned)
-            .or_else(|| (has_paragraph || explicit).then(String::new))
+            .or_else(|| f.string_value.take())
+        {
+            return Some(raw.into_owned());
+        }
+        let has_paragraph = f.paragraph_count > 0;
+        if has_paragraph && !f.paragraphs.is_empty() {
+            return Some(std::mem::take(&mut f.paragraphs));
+        }
+        let explicit = self.cell.explicit_row.is_some() || self.cell.explicit_col.is_some();
+        (has_paragraph || explicit).then(String::new)
     }
 }
 
