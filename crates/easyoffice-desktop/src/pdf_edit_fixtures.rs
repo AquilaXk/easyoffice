@@ -1,4 +1,4 @@
-//! PDFs for the tests of the edit pipeline (PD-168): a well-formed sample with a picture and a font
+//! PDFs for the tests of the edit pipeline (PD-170): a well-formed sample with a picture and a font
 //! on every page, helpers to read results back with the reader, and hand-written hostile files.
 
 use crate::pdf_edit_budget::Deadline;

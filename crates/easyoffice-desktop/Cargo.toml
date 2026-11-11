@@ -41,7 +41,7 @@ resvg = { version = "0.45", default-features = false, features = ["text", "raste
 imagesize = "0.13"
 tiny-skia = { version = "0.11", default-features = false, features = ["std", "png-format"] }
 pdf-writer = "0.12"
-# PD-168: editing a PDF keeps the original's objects (pictures, fonts, layout). `hayro-syntax` reads the
+# PD-170: editing a PDF keeps the original's objects (pictures, fonts, layout). `hayro-syntax` reads the
 # file (no image decoders: the pages are copied, never drawn), `hayro-write` copies a page and the
 # objects it uses into a new file, and `flate2` (already in the graph through it) counts what a
 # stream inflates to before anything allocates for it. Shell only: the engine crates stay
@@ -72,7 +72,7 @@ tauri-plugin-updater = { version = "2", default-features = false, features = ["n
 # `Abortable` ends a download that grows past the size limit.
 futures-util = { version = "0.3", default-features = false }
 
-# PD-168: the PDF worker process is measured and limited per OS (resident memory on macOS, an address
+# PD-170: the PDF worker process is measured and limited per OS (resident memory on macOS, an address
 # space limit on Linux, a job object on Windows); both crates are already in the graph through tauri.
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

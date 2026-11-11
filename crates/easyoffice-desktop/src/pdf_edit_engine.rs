@@ -1,4 +1,4 @@
-//! What reads and writes PDFs for the edit commands (PD-168): a worker process in the shell, the
+//! What reads and writes PDFs for the edit commands (PD-170): a worker process in the shell, the
 //! reader and writer themselves in the tests.
 //!
 //! [`ChildEngine`] is the one the shell uses: every request goes to a worker process

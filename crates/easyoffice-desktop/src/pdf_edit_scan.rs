@@ -1,4 +1,4 @@
-//! A cheap look at the compressed streams of a file before the PDF reader parses it (PD-168).
+//! A cheap look at the compressed streams of a file before the PDF reader parses it (PD-170).
 //!
 //! The reader decodes object streams and cross-reference streams on its own, without a limit, so
 //! a small file can make it allocate a lot. The worker process is what finally contains that (it is

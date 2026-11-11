@@ -15,7 +15,7 @@
     pages: "pdf_export_pages",
     finish: "pdf_export_finish",
   });
-  // Editing the PDF a window opened, on its objects (PD-168): the shell keeps the file after `open`.
+  // Editing the PDF a window opened, on its objects (PD-170): the shell keeps the file after `open`.
   const PDF_EDIT_COMMANDS = Object.freeze({
     open: "pdf_edit_open",
     apply: "pdf_edit_apply",
@@ -166,7 +166,7 @@
       throw new Error("PDF 저장 결과를 확인하지 못했습니다.");
     },
   });
-  // The PDF studio on the opened file's own objects (PD-168). Rust owns the file, every dialog and the
+  // The PDF studio on the opened file's own objects (PD-170). Rust owns the file, every dialog and the
   // limits; the page sends the opened bytes once and gets names, counts and sentences back.
   //   open(fileName, base64)  -> { pages, sources, turn, stamp, watermark } | rejects with the reason (encrypted, over a limit, damaged)
   //   apply(op)               -> the same state; op is { kind: "turn", degrees } (every page), { kind: "rotate", degrees, pages? }
