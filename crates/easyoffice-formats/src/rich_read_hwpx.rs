@@ -2,6 +2,7 @@
 //! paragraph shapes (`hh:paraPr`) alignment and list kind, styles (`hh:style`, "개요 N") heading
 //! levels, and `hp:tbl` tables keep their position in the section.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use crate::hwpx_parts::{
@@ -11,9 +12,8 @@ use crate::hwpx_parts::{
 use crate::rich_document::normalize_hex_color;
 use crate::rich_image::{safe_package_path, ImageBudget};
 use crate::rich_table::{table_from_placed, PlacedCell};
-use crate::rich_xml::{
-    attr, heading_level_from_name, push_run, skip_subtree, tokenize, CharFmt, XmlEvent,
-};
+use crate::rich_xml::{heading_level_from_name, push_run, CharFmt};
+use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
     EasyOfficeError, HwpxCodec, RichAlignment, RichBlock, RichDocument, RichImage, RichListKind,
     RichParagraph, RichRun, RichScript, XmlSanitizer, ZipArchiveCodec, ZipArchiveEntry,
@@ -71,16 +71,16 @@ impl HeaderBuilder {
         self.cur_para.as_mut().map(|(_, p, _)| p)
     }
 
-    fn on_start(&mut self, name: &str, attrs: &[(String, String)]) {
+    fn on_start(&mut self, name: &str, attrs: &Attrs<'_>) {
         if !self.on_char_start(name, attrs) {
             self.on_para_start(name, attrs);
         }
     }
 
     /// Fonts and character shapes; `false` when `name` is not one of them.
-    fn on_char_start(&mut self, name: &str, attrs: &[(String, String)]) -> bool {
+    fn on_char_start(&mut self, name: &str, attrs: &Attrs<'_>) -> bool {
         match name {
-            "hh:fontface" => self.hangul_slot = attr(attrs, "lang") == Some("HANGUL"),
+            "hh:fontface" => self.hangul_slot = attr(attrs, "lang").as_deref() == Some("HANGUL"),
             "hh:font" if self.hangul_slot => {
                 if let (Some(id), Some(face)) = (attr(attrs, "id"), attr(attrs, "face")) {
                     self.header.fonts.insert(id.to_string(), face.to_string());
@@ -92,6 +92,7 @@ impl HeaderBuilder {
             }
             "hh:fontRef" => {
                 let font = attr(attrs, "hangul")
+                    .as_deref()
                     .and_then(|id| self.header.fonts.get(id))
                     .filter(|face| face.as_str() != DEFAULT_FONT_FACE)
                     .cloned();
@@ -135,7 +136,7 @@ impl HeaderBuilder {
     }
 
     /// Paragraph shapes and styles.
-    fn on_para_start(&mut self, name: &str, attrs: &[(String, String)]) {
+    fn on_para_start(&mut self, name: &str, attrs: &Attrs<'_>) {
         match name {
             "hh:paraPr" => {
                 self.intent_seen = false;
@@ -144,13 +145,15 @@ impl HeaderBuilder {
             }
             "hh:align" => {
                 if let Some(p) = self.para_mut() {
-                    p.align = attr(attrs, "horizontal").map(str::to_string);
+                    p.align = attr(attrs, "horizontal").map(Cow::into_owned);
                 }
             }
             "hh:heading" => {
                 if let Some(p) = self.para_mut() {
-                    p.heading_type = attr(attrs, "type").unwrap_or("NONE").to_string();
+                    p.heading_type =
+                        attr(attrs, "type").map_or_else(|| "NONE".to_string(), Cow::into_owned);
                     p.heading_level = attr(attrs, "level")
+                        .as_deref()
                         .and_then(|l| l.parse().ok())
                         .unwrap_or(0);
                 }
@@ -160,6 +163,7 @@ impl HeaderBuilder {
                     if !*seen {
                         *seen = true;
                         p.left = attr(attrs, "value")
+                            .as_deref()
                             .and_then(|v| v.parse().ok())
                             .unwrap_or(0);
                     }
@@ -169,14 +173,15 @@ impl HeaderBuilder {
                 self.intent_seen = true;
                 if let Some(p) = self.para_mut() {
                     p.intent = attr(attrs, "value")
+                        .as_deref()
                         .and_then(|v| v.parse().ok())
                         .unwrap_or(0);
                 }
             }
             "hh:lineSpacing" => {
                 if let Some(p) = self.para_mut() {
-                    p.line_percent = (attr(attrs, "type") == Some("PERCENT"))
-                        .then(|| attr(attrs, "value").and_then(|v| v.parse().ok()))
+                    p.line_percent = (attr(attrs, "type").as_deref() == Some("PERCENT"))
+                        .then(|| attr(attrs, "value").as_deref().and_then(|v| v.parse().ok()))
                         .flatten();
                 }
             }
@@ -185,17 +190,17 @@ impl HeaderBuilder {
         }
     }
 
-    fn register_style(&mut self, attrs: &[(String, String)]) {
+    fn register_style(&mut self, attrs: &Attrs<'_>) {
         let Some(id) = attr(attrs, "id") else {
             return;
         };
         self.header.styles.insert(
             id.to_string(),
             StyleInfo {
-                name: attr(attrs, "name").unwrap_or("").to_string(),
-                eng_name: attr(attrs, "engName").unwrap_or("").to_string(),
-                para_pr: attr(attrs, "paraPrIDRef").unwrap_or("").to_string(),
-                char_pr: attr(attrs, "charPrIDRef").unwrap_or("").to_string(),
+                name: attr(attrs, "name").unwrap_or_default().into_owned(),
+                eng_name: attr(attrs, "engName").unwrap_or_default().into_owned(),
+                para_pr: attr(attrs, "paraPrIDRef").unwrap_or_default().into_owned(),
+                char_pr: attr(attrs, "charPrIDRef").unwrap_or_default().into_owned(),
             },
         );
     }
@@ -218,27 +223,31 @@ impl HeaderBuilder {
 }
 
 /// Base character format of a `hh:charPr` element (size, text and shade colours).
-fn char_fmt_from_attrs(attrs: &[(String, String)]) -> CharFmt {
+fn char_fmt_from_attrs(attrs: &Attrs<'_>) -> CharFmt {
     CharFmt {
         size_half_pt: attr(attrs, "height")
+            .as_deref()
             .and_then(|v| v.parse::<u32>().ok())
             .map(|v| v / 50)
             .and_then(|v| u16::try_from(v).ok())
             .filter(|v| *v > 0),
         color: attr(attrs, "textColor")
+            .as_deref()
             .and_then(normalize_hex_color)
             .filter(|c| c != "000000"),
-        highlight: attr(attrs, "shadeColor").and_then(normalize_hex_color),
+        highlight: attr(attrs, "shadeColor")
+            .as_deref()
+            .and_then(normalize_hex_color),
         ..CharFmt::default()
     }
 }
 
 fn read_header(xml: &str) -> Result<Header, EasyOfficeError> {
     let mut builder = HeaderBuilder::default();
-    for ev in tokenize(xml)? {
-        match ev {
-            XmlEvent::Start { name, attrs } => builder.on_start(&name, &attrs),
-            XmlEvent::End(name) => builder.on_end(&name),
+    for ev in XmlReader::new(xml) {
+        match ev? {
+            XmlEvent::Start { name, attrs } => builder.on_start(name, &attrs),
+            XmlEvent::End(name) => builder.on_end(name),
             XmlEvent::Text(_) => {}
         }
     }
@@ -360,7 +369,7 @@ const SKIPPED_SUBTREES: [&str; 13] = [
 const SHAPE_SKIP_NOTE: &str = "그림·도형·수식·머리말은 가져오지 않았습니다.";
 
 /// A non-negative integer attribute (`default` when absent or unreadable, saturating when huge).
-fn count_attr(attrs: &[(String, String)], name: &str, default: u32) -> u32 {
+fn count_attr(attrs: &Attrs<'_>, name: &str, default: u32) -> u32 {
     attr(attrs, name)
         .and_then(|v| v.trim().parse::<u64>().ok())
         .map_or(default, |v| u32::try_from(v).unwrap_or(u32::MAX))
@@ -402,15 +411,15 @@ impl<'a> HwpxMedia<'a> {
         let xml = std::str::from_utf8(&hpf.data).map_err(|_| {
             EasyOfficeError::InvalidUtf8("Contents/content.hpf UTF-8 오류".to_string())
         })?;
-        for event in tokenize(xml)? {
-            let XmlEvent::Start { name, attrs } = event else {
+        for event in XmlReader::new(xml) {
+            let XmlEvent::Start { name, attrs } = event? else {
                 continue;
             };
             let (Some(id), Some(href)) = (attr(&attrs, "id"), attr(&attrs, "href")) else {
                 continue;
             };
             let entry =
-                safe_package_path(href).and_then(|path| entry_by_path.get(path.as_str()).copied());
+                safe_package_path(&href).and_then(|path| entry_by_path.get(path.as_str()).copied());
             if let (true, Some(entry)) = (name == "opf:item", entry) {
                 by_id.insert(id.to_string(), entry);
             }
@@ -422,17 +431,17 @@ impl<'a> HwpxMedia<'a> {
 /// Fields of one `hp:pic`.
 #[derive(Default)]
 struct PictureFields<'e> {
-    item: Option<&'e str>,
+    item: Option<Cow<'e, str>>,
     size: Option<(u64, u64)>,
     alt: String,
 }
 
-fn scan_picture(events: &[XmlEvent]) -> PictureFields<'_> {
+fn scan_picture<'e>(events: &[XmlEvent<'e>]) -> PictureFields<'e> {
     let mut fields = PictureFields::default();
     let mut in_comment = false;
     for event in events {
         match event {
-            XmlEvent::Start { name, attrs } => match name.as_str() {
+            XmlEvent::Start { name, attrs } => match *name {
                 "hc:img" if fields.item.is_none() => fields.item = attr(attrs, "binaryItemIDRef"),
                 "hp:curSz" | "hp:sz" if fields.size.is_none() => {
                     let side = |key| {
@@ -451,7 +460,7 @@ fn scan_picture(events: &[XmlEvent]) -> PictureFields<'_> {
                 _ => {}
             },
             XmlEvent::Text(text) if in_comment => fields.alt.push_str(text),
-            XmlEvent::End(name) if name == "hp:shapeComment" => in_comment = false,
+            XmlEvent::End(name) if *name == "hp:shapeComment" => in_comment = false,
             _ => {}
         }
     }
@@ -462,12 +471,12 @@ impl SectionWalker {
     /// Reads an `hp:pic` (events span its start to its end) into the open paragraph.
     fn on_picture(
         &mut self,
-        events: &[XmlEvent],
+        events: &[XmlEvent<'_>],
         media: &HwpxMedia<'_>,
         warnings: &mut Vec<String>,
     ) -> Result<(), EasyOfficeError> {
         let fields = scan_picture(events);
-        let entry = fields.item.and_then(|id| media.by_id.get(id));
+        let entry = fields.item.as_deref().and_then(|id| media.by_id.get(id));
         let mut warn = |note: String| {
             if !warnings.contains(&note) {
                 warnings.push(note);
@@ -507,19 +516,19 @@ impl SectionWalker {
     fn on_start(
         &mut self,
         name: &str,
-        attrs: &[(String, String)],
+        attrs: &Attrs<'_>,
         header: &Header,
         blocks: &mut Vec<RichBlock>,
     ) {
         match name {
             "hp:p" => self.paras.push(ParaState {
                 runs: Vec::new(),
-                para_pr: attr(attrs, "paraPrIDRef").unwrap_or("").to_string(),
-                style: attr(attrs, "styleIDRef").unwrap_or("").to_string(),
+                para_pr: attr(attrs, "paraPrIDRef").unwrap_or_default().into_owned(),
+                style: attr(attrs, "styleIDRef").unwrap_or_default().into_owned(),
                 images: Vec::new(),
             }),
             "hp:run" => self.runs.push(RunState {
-                char_pr: attr(attrs, "charPrIDRef").unwrap_or("").to_string(),
+                char_pr: attr(attrs, "charPrIDRef").unwrap_or_default().into_owned(),
                 text: String::new(),
             }),
             "hp:t" => self.t_depth += 1,
@@ -658,32 +667,28 @@ fn read_section(
     blocks: &mut Vec<RichBlock>,
     warnings: &mut Vec<String>,
 ) -> Result<(), EasyOfficeError> {
-    let events = tokenize(xml)?;
-    let mut i = 0usize;
-    while i < events.len() {
-        match &events[i] {
-            XmlEvent::Start { name, .. } if name == "hp:pic" => {
-                let end = skip_subtree(&events, i);
-                walker.on_picture(&events[i..end], media, warnings)?;
-                i = end;
-                continue;
+    let mut reader = XmlReader::new(xml);
+    while let Some(event) = reader.next_event()? {
+        match event {
+            XmlEvent::Start { name: "hp:pic", .. } => {
+                let picture = reader.collect_subtree(event)?;
+                walker.on_picture(&picture, media, warnings)?;
             }
-            XmlEvent::Start { name, attrs } => {
-                if SKIPPED_SUBTREES.contains(&name.as_str()) {
-                    if !matches!(name.as_str(), "hp:secPr" | "hp:ctrl")
+            XmlEvent::Start { name, ref attrs } => {
+                if SKIPPED_SUBTREES.contains(&name) {
+                    if !matches!(name, "hp:secPr" | "hp:ctrl")
                         && !warnings.iter().any(|w| w == SHAPE_SKIP_NOTE)
                     {
                         warnings.push(SHAPE_SKIP_NOTE.to_string());
                     }
-                    i = skip_subtree(&events, i);
+                    reader.skip_subtree()?;
                     continue;
                 }
                 walker.on_start(name, attrs, header, blocks);
             }
-            XmlEvent::Text(text) => walker.on_text(text),
+            XmlEvent::Text(text) => walker.on_text(&text),
             XmlEvent::End(name) => walker.on_end(name, header, blocks),
         }
-        i += 1;
     }
     Ok(())
 }

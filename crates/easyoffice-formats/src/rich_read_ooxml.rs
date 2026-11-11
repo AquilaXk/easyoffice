@@ -2,15 +2,15 @@
 //! heading levels (style names and outline levels), list kinds (list styles and `numPr` through
 //! `numbering.xml`), and tables at their position in the body.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use crate::office_codecs::validate_zip_xml_entries;
 use crate::rich_document::{highlight_name_to_hex, normalize_hex_color};
 use crate::rich_read_images::{drawing_picture, DocxMedia, DrawingOutcome};
 use crate::rich_table::TableAssembler;
-use crate::rich_xml::{
-    attr, heading_level_from_name, push_run, skip_subtree, toggle_on, tokenize, CharFmt, XmlEvent,
-};
+use crate::rich_xml::{heading_level_from_name, push_run, toggle_on, CharFmt};
+use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
     EasyOfficeError, RichAlignment, RichBlock, RichDocument, RichImage, RichListKind,
     RichParagraph, RichScript, XmlSanitizer, ZipArchiveCodec, ZipArchiveEntry, ZipSecurityPolicy,
@@ -28,7 +28,7 @@ enum VMerge {
 
 /// `w:gridSpan/@w:val`, at least 1; an unreadable value is 1 and a huge one is left for the
 /// table assembler to reject.
-fn grid_span(attrs: &[(String, String)]) -> u32 {
+fn grid_span(attrs: &Attrs<'_>) -> u32 {
     attr(attrs, "w:val")
         .and_then(|v| v.trim().parse::<u64>().ok())
         .map_or(1, |v| u32::try_from(v).unwrap_or(u32::MAX).max(1))
@@ -74,34 +74,46 @@ struct DocxStyle {
 fn read_styles(xml: &str) -> Result<HashMap<String, DocxStyle>, EasyOfficeError> {
     let mut out: HashMap<String, DocxStyle> = HashMap::new();
     let mut current: Option<String> = None;
-    for ev in tokenize(xml)? {
-        match ev {
-            XmlEvent::Start { name, attrs } if name == "w:style" => {
+    for ev in XmlReader::new(xml) {
+        match ev? {
+            XmlEvent::Start {
+                name: "w:style",
+                attrs,
+            } => {
                 if let Some(id) = attr(&attrs, "w:styleId") {
                     out.entry(id.to_string()).or_default();
-                    current = Some(id.to_string());
+                    current = Some(id.into_owned());
                 } else {
                     current = None;
                 }
             }
-            XmlEvent::Start { name, attrs } if name == "w:name" => {
+            XmlEvent::Start {
+                name: "w:name",
+                attrs,
+            } => {
                 if let (Some(id), Some(val)) = (current.as_ref(), attr(&attrs, "w:val")) {
                     out.entry(id.clone()).or_default().name = Some(val.to_string());
                 }
             }
-            XmlEvent::Start { name, attrs } if name == "w:basedOn" => {
+            XmlEvent::Start {
+                name: "w:basedOn",
+                attrs,
+            } => {
                 if let (Some(id), Some(val)) = (current.as_ref(), attr(&attrs, "w:val")) {
                     out.entry(id.clone()).or_default().based_on = Some(val.to_string());
                 }
             }
-            XmlEvent::Start { name, attrs } if name == "w:outlineLvl" => {
+            XmlEvent::Start {
+                name: "w:outlineLvl",
+                attrs,
+            } => {
                 if let (Some(id), Some(val)) = (current.as_ref(), attr(&attrs, "w:val")) {
                     if let Ok(lvl) = val.parse::<u8>() {
                         out.entry(id.clone()).or_default().outline_lvl = Some(lvl);
                     }
                 }
             }
-            XmlEvent::End(name) if name == "w:style" => current = None,
+            XmlEvent::End("w:style") => current = None,
             _ => {}
         }
     }
@@ -115,11 +127,11 @@ fn read_numbering(xml: &str) -> Result<HashMap<String, RichListKind>, EasyOffice
     let mut cur_abstract: Option<String> = None;
     let mut cur_num: Option<String> = None;
     let mut first_level = false;
-    for ev in tokenize(xml)? {
-        match ev {
-            XmlEvent::Start { name, attrs } => match name.as_str() {
+    for ev in XmlReader::new(xml) {
+        match ev? {
+            XmlEvent::Start { name, attrs } => match name {
                 "w:abstractNum" => {
-                    cur_abstract = attr(&attrs, "w:abstractNumId").map(str::to_string);
+                    cur_abstract = attr(&attrs, "w:abstractNumId").map(Cow::into_owned);
                     first_level = true;
                 }
                 "w:lvl" if first_level => {}
@@ -131,7 +143,7 @@ fn read_numbering(xml: &str) -> Result<HashMap<String, RichListKind>, EasyOffice
                         first_level = false;
                     }
                 }
-                "w:num" => cur_num = attr(&attrs, "w:numId").map(str::to_string),
+                "w:num" => cur_num = attr(&attrs, "w:numId").map(Cow::into_owned),
                 "w:abstractNumId" if cur_num.is_some() => {
                     if let (Some(n), Some(a)) = (cur_num.as_ref(), attr(&attrs, "w:val")) {
                         num_to_abstract.insert(n.clone(), a.to_string());
@@ -139,8 +151,8 @@ fn read_numbering(xml: &str) -> Result<HashMap<String, RichListKind>, EasyOffice
                 }
                 _ => {}
             },
-            XmlEvent::End(name) if name == "w:num" => cur_num = None,
-            XmlEvent::End(name) if name == "w:abstractNum" => cur_abstract = None,
+            XmlEvent::End("w:num") => cur_num = None,
+            XmlEvent::End("w:abstractNum") => cur_abstract = None,
             _ => {}
         }
     }
@@ -269,8 +281,9 @@ const SINGLE_LINE_PERCENT: u16 = 100;
 const UNSUPPORTED_OBJECT_NOTE: &str = "그림·도형·OLE 개체는 가져오지 않았습니다.";
 
 /// Applies a run-property element (`w:b`, `w:sz`, ...) to `fmt`.
-fn apply_run_property(fmt: &mut CharFmt, name: &str, attrs: &[(String, String)]) {
+fn apply_run_property(fmt: &mut CharFmt, name: &str, attrs: &Attrs<'_>) {
     let val = attr(attrs, "w:val");
+    let val = val.as_deref();
     match name {
         "w:b" => fmt.bold = toggle_on(val),
         "w:i" => fmt.italic = toggle_on(val),
@@ -281,7 +294,7 @@ fn apply_run_property(fmt: &mut CharFmt, name: &str, attrs: &[(String, String)])
                 .iter()
                 .find_map(|k| attr(attrs, k))
                 .filter(|f| !f.trim().is_empty())
-                .map(str::to_string);
+                .map(Cow::into_owned);
         }
         "w:sz" => fmt.size_half_pt = val.and_then(|v| v.parse::<u16>().ok()).filter(|v| *v > 0),
         "w:color" => fmt.color = val.and_then(normalize_hex_color),
@@ -294,7 +307,10 @@ fn apply_run_property(fmt: &mut CharFmt, name: &str, attrs: &[(String, String)])
             };
         }
         "w:shd" => {
-            if let Some(fill) = attr(attrs, "w:fill").and_then(normalize_hex_color) {
+            if let Some(fill) = attr(attrs, "w:fill")
+                .as_deref()
+                .and_then(normalize_hex_color)
+            {
                 fmt.highlight = Some(fill);
             }
         }
@@ -303,7 +319,7 @@ fn apply_run_property(fmt: &mut CharFmt, name: &str, attrs: &[(String, String)])
 }
 
 /// `w:spacing` (auto line rule, 240ths of a line) and `w:ind` of a paragraph.
-fn apply_para_layout(top: &mut ParaState, name: &str, attrs: &[(String, String)]) {
+fn apply_para_layout(top: &mut ParaState, name: &str, attrs: &Attrs<'_>) {
     let number = |key: &str| attr(attrs, key).and_then(|v| v.trim().parse::<i64>().ok());
     match name {
         "w:spacing" if attr(attrs, "w:lineRule").is_none_or(|r| r == "auto") => {
@@ -348,7 +364,7 @@ struct DocxWalker {
 
 impl DocxWalker {
     /// Handles an element start; returns true when the whole subtree must be skipped.
-    fn on_start(&mut self, name: &str, attrs: &[(String, String)]) -> bool {
+    fn on_start(&mut self, name: &str, attrs: &Attrs<'_>) -> bool {
         if SKIPPED_ELEMENTS.contains(&name) {
             return true;
         }
@@ -361,7 +377,7 @@ impl DocxWalker {
         self.track_structure(name, attrs);
         if let Some(top) = self.paras.last_mut() {
             if self.in_ppr {
-                Self::apply_para_property(top, name, attr(attrs, "w:val"));
+                Self::apply_para_property(top, name, attr(attrs, "w:val").as_deref());
                 apply_para_layout(top, name, attrs);
             }
         }
@@ -373,7 +389,7 @@ impl DocxWalker {
         false
     }
 
-    fn track_structure(&mut self, name: &str, attrs: &[(String, String)]) {
+    fn track_structure(&mut self, name: &str, attrs: &Attrs<'_>) {
         match name {
             "w:tbl" => {
                 self.tbl_depth += 1;
@@ -389,7 +405,7 @@ impl DocxWalker {
             }
             "w:gridSpan" if self.tbl_depth == 1 => self.cell_span = grid_span(attrs),
             "w:vMerge" if self.tbl_depth == 1 => {
-                self.cell_v_merge = if attr(attrs, "w:val") == Some("restart") {
+                self.cell_v_merge = if attr(attrs, "w:val").as_deref() == Some("restart") {
                     VMerge::Restart
                 } else {
                     VMerge::Continue
@@ -418,10 +434,10 @@ impl DocxWalker {
         }
     }
 
-    fn apply_inline_break(&mut self, name: &str, attrs: &[(String, String)]) {
+    fn apply_inline_break(&mut self, name: &str, attrs: &Attrs<'_>) {
         match name {
             "w:tab" | "w:ptab" => self.cur_text.push('\t'),
-            "w:br" if !matches!(attr(attrs, "w:type"), Some("page" | "column")) => {
+            "w:br" if !matches!(attr(attrs, "w:type").as_deref(), Some("page" | "column")) => {
                 self.cur_text.push('\n');
             }
             "w:cr" => self.cur_text.push('\n'),
@@ -484,7 +500,7 @@ impl DocxWalker {
     /// Records the picture of a `w:drawing` in the open paragraph, or a warning when skipped.
     fn on_drawing(
         &mut self,
-        events: &[XmlEvent],
+        events: &[XmlEvent<'_>],
         media: &DocxMedia<'_>,
     ) -> Result<(), EasyOfficeError> {
         let img = match drawing_picture(events, media) {
@@ -563,28 +579,23 @@ pub(crate) fn read_docx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Eas
         styles: &styles,
         numbering: &numbering,
     };
-    let events = tokenize(doc_xml)?;
     let media = DocxMedia::load(&entries)?;
     let mut walker = DocxWalker::default();
-    let mut i = 0usize;
-    while i < events.len() {
-        match &events[i] {
+    let mut reader = XmlReader::new(doc_xml);
+    while let Some(event) = reader.next_event()? {
+        match event {
             XmlEvent::Start { name, .. } if name == DRAWING_ELEMENT => {
-                let end = skip_subtree(&events, i);
-                walker.on_drawing(&events[i..end], &media)?;
-                i = end;
-                continue;
+                let drawing = reader.collect_subtree(event)?;
+                walker.on_drawing(&drawing, &media)?;
             }
-            XmlEvent::Start { name, attrs } => {
+            XmlEvent::Start { name, ref attrs } => {
                 if walker.on_start(name, attrs) {
-                    i = skip_subtree(&events, i);
-                    continue;
+                    reader.skip_subtree()?;
                 }
             }
-            XmlEvent::Text(text) => walker.on_text(text),
+            XmlEvent::Text(text) => walker.on_text(&text),
             XmlEvent::End(name) => walker.on_end(name, &resolver),
         }
-        i += 1;
     }
     let mut warnings = walker.warnings;
     if walker.dropped_merges > 0 {

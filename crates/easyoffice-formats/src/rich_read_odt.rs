@@ -1,13 +1,15 @@
 //! ODT reader producing a [`RichDocument`] from `content.xml` automatic styles: span formats,
 //! paragraph alignment, `text:h` outline levels, list paragraphs, and tables in position.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use crate::office_codecs::validate_zip_xml_entries;
 use crate::rich_document::normalize_hex_color;
 use crate::rich_image::{safe_package_path, ImageBudget};
 use crate::rich_table::{TableAssembler, MAX_PADDED_COLUMNS};
-use crate::rich_xml::{attr, push_run, skip_subtree, tokenize, CharFmt, XmlEvent};
+use crate::rich_xml::{push_run, CharFmt};
+use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
     EasyOfficeError, OdfCodec, RichAlignment, RichBlock, RichDocument, RichImage, RichListKind,
     RichParagraph, RichRun, RichScript, XmlSanitizer, ZipArchiveCodec, ZipArchiveEntry,
@@ -104,57 +106,69 @@ fn parse_points(value: &str) -> Option<u16> {
 }
 
 /// Character format described by a `style:text-properties` element.
-fn char_fmt_from_text_properties(attrs: &[(String, String)]) -> CharFmt {
+fn char_fmt_from_text_properties(attrs: &Attrs<'_>) -> CharFmt {
     CharFmt {
         bold: attr(attrs, "fo:font-weight")
             .is_some_and(|w| w == "bold" || w.parse::<u32>().is_ok_and(|n| n >= 600)),
         italic: attr(attrs, "fo:font-style").is_some_and(|s| s == "italic" || s == "oblique"),
-        underline: !off(attr(attrs, "style:text-underline-style")),
-        strike: !off(attr(attrs, "style:text-line-through-style")),
-        size_half_pt: attr(attrs, "fo:font-size").and_then(parse_points),
+        underline: !off(attr(attrs, "style:text-underline-style").as_deref()),
+        strike: !off(attr(attrs, "style:text-line-through-style").as_deref()),
+        size_half_pt: attr(attrs, "fo:font-size")
+            .as_deref()
+            .and_then(parse_points),
         font: attr(attrs, "style:font-name")
             .or_else(|| attr(attrs, "fo:font-family"))
             .map(|f| f.trim().trim_matches('\'').to_string())
             .filter(|f| !f.is_empty()),
-        color: attr(attrs, "fo:color").and_then(normalize_hex_color),
-        highlight: attr(attrs, "fo:background-color").and_then(normalize_hex_color),
-        script: script_of(attr(attrs, "style:text-position")),
+        color: attr(attrs, "fo:color")
+            .as_deref()
+            .and_then(normalize_hex_color),
+        highlight: attr(attrs, "fo:background-color")
+            .as_deref()
+            .and_then(normalize_hex_color),
+        script: script_of(attr(attrs, "style:text-position").as_deref()),
     }
 }
 
 /// Alignment, list marker margin, indents and line spacing of `style:paragraph-properties`.
-fn apply_paragraph_properties(p: &mut StyleProps, attrs: &[(String, String)]) {
-    p.align = attr(attrs, "fo:text-align").and_then(RichAlignment::parse);
-    p.list_margin = attr(attrs, "fo:margin-left") == Some(LIST_MARGIN);
+fn apply_paragraph_properties(p: &mut StyleProps, attrs: &Attrs<'_>) {
+    p.align = attr(attrs, "fo:text-align")
+        .as_deref()
+        .and_then(RichAlignment::parse);
+    p.list_margin = attr(attrs, "fo:margin-left").as_deref() == Some(LIST_MARGIN);
     if !p.list_margin {
         p.left_twips = attr(attrs, "fo:margin-left")
+            .as_deref()
             .and_then(length_twips)
             .and_then(|t| u32::try_from(t).ok())
             .filter(|t| *t > 0);
     }
     p.first_line_twips = attr(attrs, "fo:text-indent")
+        .as_deref()
         .and_then(length_twips)
         .filter(|t| *t != 0);
-    p.line_percent = attr(attrs, "fo:line-height").and_then(line_height_percent);
+    p.line_percent = attr(attrs, "fo:line-height")
+        .as_deref()
+        .and_then(line_height_percent);
 }
 
 fn read_styles_into(
-    events: &[XmlEvent],
+    xml: &str,
     styles: &mut HashMap<String, StyleProps>,
     lists: &mut HashMap<String, RichListKind>,
-) {
+) -> Result<(), EasyOfficeError> {
     let mut cur: Option<(String, StyleProps)> = None;
     let mut cur_list: Option<String> = None;
-    for ev in events {
-        match ev {
-            XmlEvent::Start { name, attrs } => match name.as_str() {
+    for ev in XmlReader::new(xml) {
+        match ev? {
+            XmlEvent::Start { name, ref attrs } => match name {
                 "style:style" => {
-                    let list_kind = match attr(attrs, "style:list-style-name") {
+                    let list_kind = match attr(attrs, "style:list-style-name").as_deref() {
                         Some("L_Ordered" | "Numbering" | "Ordered") => Some(RichListKind::Ordered),
                         Some("L_Bullet" | "Bullet") => Some(RichListKind::Bullet),
                         _ => None,
                     };
-                    let parent = attr(attrs, "style:parent-style-name").map(str::to_string);
+                    let parent = attr(attrs, "style:parent-style-name").map(Cow::into_owned);
                     cur = attr(attrs, "style:name").map(|n| {
                         (
                             n.to_string(),
@@ -176,7 +190,7 @@ fn read_styles_into(
                         p.fmt = char_fmt_from_text_properties(attrs);
                     }
                 }
-                "text:list-style" => cur_list = attr(attrs, "style:name").map(str::to_string),
+                "text:list-style" => cur_list = attr(attrs, "style:name").map(Cow::into_owned),
                 "text:list-level-style-number" => {
                     if let Some(n) = cur_list.as_ref() {
                         lists.entry(n.clone()).or_insert(RichListKind::Ordered);
@@ -189,7 +203,7 @@ fn read_styles_into(
                 }
                 _ => {}
             },
-            XmlEvent::End(name) => match name.as_str() {
+            XmlEvent::End(name) => match name {
                 "style:style" => {
                     if let Some((n, p)) = cur.take() {
                         styles.insert(n, p);
@@ -201,6 +215,7 @@ fn read_styles_into(
             XmlEvent::Text(_) => {}
         }
     }
+    Ok(())
 }
 
 fn resolve_style_parents(styles: &mut HashMap<String, StyleProps>) {
@@ -254,7 +269,7 @@ const MAX_OUTLINE_LEVEL: u8 = 6;
 const UNSUPPORTED_OBJECT_NOTE: &str = "그림·도형·OLE 개체는 가져오지 않았습니다.";
 
 /// A positive count attribute; unreadable values are 1 and huge ones saturate.
-fn count_attr(attrs: &[(String, String)], name: &str) -> u32 {
+fn count_attr(attrs: &Attrs<'_>, name: &str) -> u32 {
     attr(attrs, name)
         .and_then(|v| v.trim().parse::<u64>().ok())
         .map_or(1, |v| u32::try_from(v).unwrap_or(u32::MAX).max(1))
@@ -325,10 +340,10 @@ impl<'a> OdtWalker<'a> {
     }
 
     /// Handles an element start; returns true when the subtree must be skipped.
-    fn on_start(&mut self, name: &str, attrs: &[(String, String)]) -> bool {
+    fn on_start(&mut self, name: &str, attrs: &Attrs<'_>) -> bool {
         match name {
             "office:document-content" => {
-                self.title = attr(attrs, "title").unwrap_or("").to_string()
+                self.title = attr(attrs, "title").unwrap_or_default().into_owned()
             }
             "office:automatic-styles" | "office:font-face-decls" => self.in_automatic_styles = true,
             "text:note" | "office:annotation" | "text:tracked-changes" => return true,
@@ -344,6 +359,7 @@ impl<'a> OdtWalker<'a> {
             "text:line-break" => self.push_inline("\n"),
             "text:s" => {
                 let mut rem = attr(attrs, "text:c")
+                    .as_deref()
                     .and_then(|c| c.parse::<usize>().ok())
                     .unwrap_or(1)
                     .min(MAX_REPEATED_SPACES);
@@ -355,6 +371,7 @@ impl<'a> OdtWalker<'a> {
             }
             "text:list" => {
                 let kind = attr(attrs, "text:style-name")
+                    .as_deref()
                     .and_then(|n| self.list_styles.get(n))
                     .copied()
                     .or_else(|| self.list_stack.last().copied())
@@ -387,13 +404,15 @@ impl<'a> OdtWalker<'a> {
         false
     }
 
-    fn start_paragraph(&mut self, name: &str, attrs: &[(String, String)]) {
+    fn start_paragraph(&mut self, name: &str, attrs: &Attrs<'_>) {
         let style = attr(attrs, "text:style-name")
+            .as_deref()
             .and_then(|n| self.styles.get(n))
             .cloned()
             .unwrap_or_default();
         let outline = if name == "text:h" {
             attr(attrs, "text:outline-level")
+                .as_deref()
                 .and_then(|l| l.parse::<u8>().ok())
                 .unwrap_or(1)
                 .clamp(1, MAX_OUTLINE_LEVEL)
@@ -416,9 +435,10 @@ impl<'a> OdtWalker<'a> {
         });
     }
 
-    fn start_span(&mut self, attrs: &[(String, String)]) {
+    fn start_span(&mut self, attrs: &Attrs<'_>) {
         let cur = self.span_fmts.last().cloned().unwrap_or_default();
         let add = attr(attrs, "text:style-name")
+            .as_deref()
             .and_then(|n| self.styles.get(n))
             .map(|s| s.fmt.clone())
             .unwrap_or_default();
@@ -439,7 +459,7 @@ impl<'a> OdtWalker<'a> {
     /// picture of the open paragraph; text boxes, charts and anything else are skipped.
     fn on_frame(
         &mut self,
-        events: &[XmlEvent],
+        events: &[XmlEvent<'_>],
         entry_by_path: &HashMap<&str, &ZipArchiveEntry>,
     ) -> Result<(), EasyOfficeError> {
         let Some(frame) = read_frame(events) else {
@@ -596,36 +616,32 @@ pub(crate) fn read_odt(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Easy
         let s_xml = std::str::from_utf8(&styles_entry.data)
             .map_err(|_| EasyOfficeError::InvalidUtf8("ODF styles.xml UTF-8 오류".to_string()))?;
         XmlSanitizer::validate_safe_xml(s_xml)?;
-        let s_events = tokenize(s_xml)?;
-        read_styles_into(&s_events, &mut styles, &mut list_styles);
+        read_styles_into(s_xml, &mut styles, &mut list_styles)?;
     }
     let xml = std::str::from_utf8(&content.data)
         .map_err(|_| EasyOfficeError::InvalidUtf8("ODF content.xml UTF-8 오류".to_string()))?;
     XmlSanitizer::validate_safe_xml(xml)?;
-    let events = tokenize(xml)?;
-    read_styles_into(&events, &mut styles, &mut list_styles);
+    read_styles_into(xml, &mut styles, &mut list_styles)?;
     resolve_style_parents(&mut styles);
 
     let mut walker = OdtWalker::new(&styles, &list_styles);
-    let mut i = 0usize;
-    while i < events.len() {
-        match &events[i] {
-            XmlEvent::Start { name, .. } if name == "draw:frame" => {
-                let end = skip_subtree(&events, i);
-                walker.on_frame(&events[i..end], &entry_by_path)?;
-                i = end;
-                continue;
+    let mut reader = XmlReader::new(xml);
+    while let Some(event) = reader.next_event()? {
+        match event {
+            XmlEvent::Start {
+                name: "draw:frame", ..
+            } => {
+                let frame = reader.collect_subtree(event)?;
+                walker.on_frame(&frame, &entry_by_path)?;
             }
-            XmlEvent::Start { name, attrs } => {
+            XmlEvent::Start { name, ref attrs } => {
                 if walker.on_start(name, attrs) {
-                    i = skip_subtree(&events, i);
-                    continue;
+                    reader.skip_subtree()?;
                 }
             }
-            XmlEvent::Text(text) => walker.push_inline(text),
+            XmlEvent::Text(text) => walker.push_inline(&text),
             XmlEvent::End(name) => walker.on_end(name),
         }
-        i += 1;
     }
     let OdtWalker {
         mut title,
@@ -667,22 +683,27 @@ struct Frame {
     size_emu: Option<(u64, u64)>,
 }
 
-fn read_frame(events: &[XmlEvent]) -> Option<Frame> {
+fn read_frame(events: &[XmlEvent<'_>]) -> Option<Frame> {
     let mut href = None;
     let mut size_emu = None;
     let (mut desc, mut title) = (String::new(), String::new());
     let mut capture: Option<&str> = None;
     for (idx, event) in events.iter().enumerate() {
         match event {
-            XmlEvent::Start { name, attrs } => match name.as_str() {
+            XmlEvent::Start { name, attrs } => match *name {
                 "draw:frame" if idx == 0 => {
-                    let side = |key| attr(attrs, key).and_then(length_emu).filter(|e| *e >= 1.0);
+                    let side = |key| {
+                        attr(attrs, key)
+                            .as_deref()
+                            .and_then(length_emu)
+                            .filter(|e| *e >= 1.0)
+                    };
                     size_emu = side("svg:width")
                         .zip(side("svg:height"))
                         .map(|(w, h)| (w.round() as u64, h.round() as u64));
                 }
                 "draw:image" if href.is_none() => {
-                    href = attr(attrs, "xlink:href").map(str::to_string);
+                    href = attr(attrs, "xlink:href").map(Cow::into_owned);
                 }
                 "svg:desc" => capture = Some("desc"),
                 "svg:title" => capture = Some("title"),
@@ -693,7 +714,7 @@ fn read_frame(events: &[XmlEvent]) -> Option<Frame> {
                 Some(_) => title.push_str(text),
                 None => {}
             },
-            XmlEvent::End(name) if name == "svg:desc" || name == "svg:title" => capture = None,
+            XmlEvent::End(name) if *name == "svg:desc" || *name == "svg:title" => capture = None,
             XmlEvent::End(_) => {}
         }
     }
@@ -740,8 +761,8 @@ mod tests {
         </office:document-content>"#;
         let mut styles = HashMap::new();
         let mut lists = HashMap::new();
-        read_styles_into(&tokenize(styles_xml).unwrap(), &mut styles, &mut lists);
-        read_styles_into(&tokenize(auto_xml).unwrap(), &mut styles, &mut lists);
+        read_styles_into(styles_xml, &mut styles, &mut lists).unwrap();
+        read_styles_into(auto_xml, &mut styles, &mut lists).unwrap();
         resolve_style_parents(&mut styles);
         let p1 = styles.get("P1").expect("P1 resolved");
         assert_eq!(p1.align, Some(RichAlignment::Center));

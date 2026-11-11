@@ -59,6 +59,7 @@ mod text_decode;
 pub mod text_pdf_codecs;
 pub mod utf16_swar;
 mod xls_sheet_names;
+mod xml_stream;
 pub mod zip_codec;
 mod zip_path_tracker;
 mod zip_policy;

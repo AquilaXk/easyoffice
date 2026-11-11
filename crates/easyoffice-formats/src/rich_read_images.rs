@@ -3,9 +3,10 @@
 //! not PNG/JPEG, is damaged or exceeds a size limit is skipped with a warning; the whole-document
 //! count and byte limits are enforced by the caller.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 
-use crate::rich_xml::{attr, tokenize, XmlEvent};
+use crate::xml_stream::{attr, XmlEvent, XmlReader};
 use crate::{EasyOfficeError, RichImage, XmlSanitizer, ZipArchiveEntry};
 
 const DOCUMENT_RELS_PATH: &str = "word/_rels/document.xml.rels";
@@ -46,12 +47,12 @@ impl<'a> DocxMedia<'a> {
             EasyOfficeError::InvalidUtf8(format!("{DOCUMENT_RELS_PATH} UTF-8 오류"))
         })?;
         XmlSanitizer::validate_safe_xml(xml)?;
-        for event in tokenize(xml)? {
-            let XmlEvent::Start { name, attrs } = event else {
+        for event in XmlReader::new(xml) {
+            let XmlEvent::Start { name, attrs } = event? else {
                 continue;
             };
             let is_image = attr(&attrs, "Type").is_some_and(|t| t.ends_with(IMAGE_REL_SUFFIX));
-            let external = attr(&attrs, "TargetMode") == Some("External");
+            let external = attr(&attrs, "TargetMode").as_deref() == Some("External");
             if name != "Relationship" || !is_image || external {
                 continue;
             };
@@ -59,7 +60,7 @@ impl<'a> DocxMedia<'a> {
                 continue;
             };
             let entry =
-                resolve_target(target).and_then(|path| entry_by_path.get(path.as_str()).copied());
+                resolve_target(&target).and_then(|path| entry_by_path.get(path.as_str()).copied());
             if let Some(entry) = entry {
                 by_rel.insert(id.to_string(), entry);
             }
@@ -71,18 +72,18 @@ impl<'a> DocxMedia<'a> {
 /// Fields collected from the events of one drawing.
 #[derive(Default)]
 struct DrawingFields<'e> {
-    embed: Option<&'e str>,
-    alt: Option<&'e str>,
+    embed: Option<Cow<'e, str>>,
+    alt: Option<Cow<'e, str>>,
     extent: Option<(u64, u64)>,
 }
 
-fn scan_drawing(events: &[XmlEvent]) -> DrawingFields<'_> {
+fn scan_drawing<'e>(events: &[XmlEvent<'e>]) -> DrawingFields<'e> {
     let mut fields = DrawingFields::default();
     for event in events {
         let XmlEvent::Start { name, attrs } = event else {
             continue;
         };
-        match name.as_str() {
+        match *name {
             "a:blip" if fields.embed.is_none() => fields.embed = attr(attrs, "r:embed"),
             "wp:docPr" if fields.alt.is_none() => fields.alt = attr(attrs, "descr"),
             "wp:extent" if fields.extent.is_none() => {
@@ -96,21 +97,24 @@ fn scan_drawing(events: &[XmlEvent]) -> DrawingFields<'_> {
 }
 
 /// Reads the picture of one `w:drawing` subtree (`events` spans its start to its end).
-pub(crate) fn drawing_picture(events: &[XmlEvent], media: &DocxMedia<'_>) -> DrawingOutcome {
+pub(crate) fn drawing_picture(events: &[XmlEvent<'_>], media: &DocxMedia<'_>) -> DrawingOutcome {
     let fields = scan_drawing(events);
-    let Some(entry) = fields.embed.and_then(|id| media.by_rel.get(id)) else {
+    let Some(entry) = fields.embed.as_deref().and_then(|id| media.by_rel.get(id)) else {
         return DrawingOutcome::Skipped(
             "포함된 그림이 아닌 도형·차트 등 그리기 개체는 가져오지 않았습니다.".to_string(),
         );
     };
-    let built =
-        RichImage::new(entry.data.clone(), fields.alt.unwrap_or_default()).map(|mut img| {
-            if let Some((cx, cy)) = fields.extent {
-                // An out-of-range extent keeps the default size derived from the pixels.
-                let _ = img.set_display_emu(cx, cy);
-            }
-            img
-        });
+    let built = RichImage::new(
+        entry.data.clone(),
+        fields.alt.as_deref().unwrap_or_default(),
+    )
+    .map(|mut img| {
+        if let Some((cx, cy)) = fields.extent {
+            // An out-of-range extent keeps the default size derived from the pixels.
+            let _ = img.set_display_emu(cx, cy);
+        }
+        img
+    });
     match built {
         Ok(img) => DrawingOutcome::Picture(img),
         Err(err) => DrawingOutcome::Skipped(format!(

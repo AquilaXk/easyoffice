@@ -9159,3 +9159,7 @@ SOFTWARE.
 ### PDF text markup annotations (structure reference)
 
 `crates/easyoffice-formats/src/pdf_highlight.rs` writes highlight and underline annotations (ISO 32000-1 §12.5.6.10). It follows the annotation dictionary layout of pdf-writer 0.15 (https://github.com/typst/pdf-writer, `src/annotations.rs` `AnnotationType::Highlight` / `Underline` and `quad_points`; MIT OR Apache-2.0, authors Laurenz and Martin Haug) and the highlight appearance of the pdf.js editor (https://github.com/mozilla/pdf.js, Apache-2.0): a rectangle filled with the color under the multiply blend mode. No source is copied and no crate is linked; the notice is kept because the structure is derived from them.
+
+### quick-xml (MIT)
+
+Source: https://github.com/tafia/quick-xml 0.42.0 (`src/reader/slice_reader.rs`, `src/reader/state.rs`, `src/events/attributes.rs`, `src/escape.rs`). `crates/easyoffice-formats/src/xml_stream.rs` follows its pull-reader design in safe Rust without the dependency: events borrow the input string, an empty element yields a start and a deferred end, attributes are parsed on demand, and text is unescaped into a `Cow` that stays borrowed when it has no `&`. The tag grammar and the event budget are this repository's own. Used under the MIT license, whose text is the quick-xml entry of the generated section above (Copyright (c) 2016 Johann Tuffe).
