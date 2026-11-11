@@ -590,3 +590,11 @@ test("hidden rows of a tool dialog lose no cascade to the row layout rules", () 
     }
   }
 });
+
+test("a rule dialog puts the focus on its first text field, not on the close button", async () => {
+  const { rulesUi, document } = await dialogHarness();
+  rulesUi.openDataValidationDialog();
+  assert.equal(document.activeElement.id, "sheet-dv-range");
+  rulesUi.openConditionalFormatDialog();
+  assert.equal(document.activeElement.id, "sheet-cf-range");
+});

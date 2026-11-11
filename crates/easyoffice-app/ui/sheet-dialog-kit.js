@@ -57,6 +57,12 @@
       fireChange(el);
     }
 
+    // The first visible text field takes the focus, else the primary button (not the close x).
+    function focusInitial(dlg) {
+      const fields = [...dlg.querySelectorAll('input[type="text"]')].filter((el) => !el.disabled && !el.closest?.("[hidden]"));
+      (fields[0] || dlg.querySelector(".dialog-btn-primary"))?.focus?.();
+    }
+
     function openDialog(id) {
       const dlg = $(id);
       if (!dlg) return null;
@@ -65,6 +71,7 @@
       } else {
         dlg.setAttribute("open", "");
       }
+      focusInitial(dlg);
       return dlg;
     }
 
