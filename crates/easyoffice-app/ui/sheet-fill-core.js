@@ -3,17 +3,17 @@
 //
 // 참조 구현 (reference implementation): Univer (https://github.com/dream-num/univer, Apache-2.0,
 // Copyright 2023-present DreamNum Co., Ltd., commit 5a06a7842c8e13fa0646d0733dc3662cf4b330b9):
-//   packages/sheets/src/services/auto-fill/tools.ts   -> isEqualDiff (:238), isEqualRatio (:333),
-//                                                        forecast (:463), fillSeries (:400),
-//                                                        matchExtendNumber (:156), fillExtendNumber (:498),
-//                                                        fillLoopSeries (:716), LOOP_SERIES (:662)
+//   packages/sheets/src/services/auto-fill/tools.ts   -> matchExtendNumber (:167), isEqualDiff (:279),
+//                                                        isEqualRatio (:376), fillSeries (:400),
+//                                                        forecast (:447), fillExtendNumber (:480),
+//                                                        LOOP_SERIES (:610), fillLoopSeries (:659)
 //   packages/sheets/src/services/auto-fill/rules.ts   -> the rule order and the isContinue tests
-//                                                        (date :41, number :72, extendNumber :94, loopSeries :126+)
+//                                                        (date :41, number :83, extendNumber :105, loopSeries :366)
 //   packages/sheets/src/controllers/auto-fill.controller.ts
-//                                                     -> _getCopyData (grouping of runs of one kind),
-//                                                        _getPreferredApplyType, _shouldDisableSeries
+//                                                     -> _getCopyData (:250, grouping of runs of one kind),
+//                                                        _shouldDisableSeries (:617), _getPreferredApplyType (:628)
 //   packages/sheets-ui/src/controllers/auto-fill-ui.controller.ts
-//                                                     -> detectAutoFillRange (the double click target)
+//                                                     -> detectAutoFillRange (:305, the double click target)
 // Differences: the cycle lists are Korean (요일, 월) and English instead of Chinese; a month name is
 // tried before the number-at-the-end rule so "1월" continues as "2월"; the cycle length, not 7, is
 // the stride of a repeated list; a negative cycle position wraps by modulo; the first matching
@@ -135,11 +135,6 @@
     const b = sn === 0 ? (forward ? 1 : -1) : sd / sn;
     return { a: ay - b * ax, b };
   }
-
-  const forecast = (x, ys, forward) => {
-    const { a, b } = fitLine(ys, forward);
-    return Math.round((a + b * x) * FORECAST_SCALE) / FORECAST_SCALE;
-  };
 
   // Each *Values function answers the `len` values that follow the cells of one run, in the order
   // the fill walks away from the source (`cells` are in source order; `reverse` is a fill upwards or
@@ -314,7 +309,5 @@
     classify,
     planFill,
     detectFillEnd,
-    isEqualDiff,
-    forecast,
   };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

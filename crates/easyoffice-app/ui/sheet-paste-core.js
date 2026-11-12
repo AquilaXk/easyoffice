@@ -5,7 +5,7 @@
 // Copyright 2023-present DreamNum Co., Ltd., commit 5a06a7842c8e13fa0646d0733dc3662cf4b330b9):
 //   packages/sheets-ui/src/services/clipboard/clipboard.service.ts :135-140
 //       (PREDEFINED_HOOK_NAME_PASTE: all, value, format, column width, all but border, formula)
-//   packages/sheets-ui/src/controllers/clipboard/clipboard.controller.ts :668-862
+//   packages/sheets-ui/src/controllers/clipboard/clipboard.controller.ts :665-862
 //       (the special paste hooks: value writes the cell values, format writes the styles, column
 //        width writes the widths of the pasted columns and cycles when the target is wider)
 //   packages/sheets-ui/src/services/clipboard/clipboard.service.ts :894-896
