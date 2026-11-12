@@ -327,3 +327,18 @@ fn an_abandoned_open_leaves_a_file_the_window_was_saved_to_meanwhile() {
     assert_eq!(locked(&state.registry).find_by_path(&opened_key), None);
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn persisting_writes_the_geometry_the_moves_recorded_and_needs_nothing_else() {
+    let dir = std::env::temp_dir().join(format!("eo-geometry-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let state = AppWindows::new(Some(dir.clone()));
+    state.persist_geometry();
+    assert_eq!(WindowGeometry::load(&dir), None, "nothing recorded yet");
+    let moved = WindowGeometry::from_logical((1200.0, 800.0), (140.0, 90.0), false).unwrap();
+    *locked(&state.geometry) = Some(moved);
+    state.persist_geometry();
+    assert_eq!(WindowGeometry::load(&dir), Some(moved));
+    let _ = std::fs::remove_dir_all(&dir);
+    AppWindows::new(None).persist_geometry();
+}

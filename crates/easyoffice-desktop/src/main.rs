@@ -466,10 +466,11 @@ fn handle_run_event(app: &AppHandle, event: tauri::RunEvent) {
         #[cfg(target_os = "macos")]
         tauri::RunEvent::Opened { urls } => window_commands::open_urls(app, urls),
         // Cmd+Q is the application menu's own quit item (`native_menu.rs`; Windows and Linux reach the
-        // queue from the page, `app_quit::quit_app`); the Dock's 종료 and a
-        // system shutdown arrive here. All of them take the same queue: one window at a time, a
+        // queue from the page, `app_quit::quit_app`). It takes the queue: one window at a time, a
         // cancelled save prompt stops the quit (`app_quit.rs`). An exit with a code (the queue's own
-        // `app.exit(0)`) and the end after the last window closed pass.
+        // `app.exit(0)`) and the end after the last window closed pass. The Dock's 종료 and a
+        // system shutdown do not arrive here with the tao in use: its delegate has no
+        // `applicationShouldTerminate:`, so `terminate:` reaches only `RunEvent::Exit` below.
         #[cfg(target_os = "macos")]
         tauri::RunEvent::ExitRequested {
             code: None, api, ..
@@ -477,6 +478,13 @@ fn handle_run_event(app: &AppHandle, event: tauri::RunEvent) {
             if !app.webview_windows().is_empty() {
                 api.prevent_exit();
                 app_quit::request_app_quit(app);
+            }
+        }
+        // Every end of the event loop passes here, also a macOS `terminate:` (AppleScript quit, Dock,
+        // shutdown) that destroys no window, so the remembered geometry is written once more.
+        tauri::RunEvent::Exit => {
+            if let Some(windows) = app.try_state::<AppWindows>() {
+                windows.persist_geometry();
             }
         }
         _ => {

@@ -377,13 +377,16 @@ fn note_geometry(app: &AppHandle, window: &WebviewWindow) {
     }
 }
 
-/// One small write when a window closes.
-fn persist_geometry(app: &AppHandle) {
-    let state = app.state::<AppWindows>();
-    let (Some(dir), Some(geometry)) = (&state.recents_dir, *locked(&state.geometry)) else {
-        return;
-    };
-    let _ = geometry.save(dir);
+impl AppWindows {
+    /// One small write of the remembered geometry: when a window is destroyed and when the event
+    /// loop ends. The second is the only write a quit gets that never destroys a window (macOS
+    /// `terminate:` from AppleScript, the Dock or a shutdown ends the loop with `RunEvent::Exit`).
+    pub fn persist_geometry(&self) {
+        let (Some(dir), Some(geometry)) = (&self.recents_dir, *locked(&self.geometry)) else {
+            return;
+        };
+        let _ = geometry.save(dir);
+    }
 }
 
 fn attach_handlers(app: &AppHandle, window: &WebviewWindow) {
@@ -422,8 +425,8 @@ fn attach_handlers(app: &AppHandle, window: &WebviewWindow) {
                 .forget(&label);
             app.state::<std::sync::Arc<crate::font_catalog::SystemFonts>>()
                 .forget(&label);
-            persist_geometry(&app);
             let state = app.state::<AppWindows>();
+            state.persist_geometry();
             locked(&state.registry).remove(&label);
             locked(&state.pending).discard(&label);
             locked(&state.files).untrack(&label);
