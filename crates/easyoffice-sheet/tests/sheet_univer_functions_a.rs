@@ -306,6 +306,27 @@ fn db_call(s: &SheetEngine, name: &str, field: &str, criteria: &str) -> V {
 }
 
 #[test]
+fn database_functions_evaluate_as_written_formulas() {
+    let s = db_sheet();
+    assert_eq!(eval(&s, "=DSUM(A1:E7,\"Yield\",G1:H2)"), num(24.0));
+    assert_eq!(eval(&s, "=DAVERAGE(A1:E7,\"Yield\",G1:H2)"), num(12.0));
+    assert_eq!(eval(&s, "=DCOUNT(A1:E7,\"Yield\",G1:H2)"), num(2.0));
+    assert_eq!(eval(&s, "=DCOUNTA(A1:E7,\"Yield\",G1:H2)"), num(2.0));
+    assert_eq!(eval(&s, "=DGET(A1:E7,\"Yield\",G1:H2)"), err(E::Num));
+    assert_eq!(eval(&s, "=DMAX(A1:E7,\"Yield\",G1:H2)"), num(14.0));
+    assert_eq!(eval(&s, "=DMIN(A1:E7,\"Yield\",G1:H2)"), num(10.0));
+    assert_eq!(eval(&s, "=DPRODUCT(A1:E7,\"Yield\",G1:H2)"), num(140.0));
+    close(
+        &eval(&s, "=DSTDEV(A1:E7,\"Yield\",G1:H2)"),
+        8.0_f64.sqrt(),
+        1e-12,
+    );
+    assert_eq!(eval(&s, "=DSTDEVP(A1:E7,\"Yield\",G1:H2)"), num(2.0));
+    assert_eq!(eval(&s, "=DVAR(A1:E7,\"Yield\",G1:H2)"), num(8.0));
+    assert_eq!(eval(&s, "=DVARP(A1:E7,\"Yield\",G1:H2)"), num(4.0));
+}
+
+#[test]
 fn database_functions_match_the_reference_on_its_sample_table() {
     let s = db_sheet();
     let stdev = 8.0_f64.sqrt();
