@@ -476,12 +476,26 @@ test("the panel is driven from the keyboard: Alt+Down opens it, arrows and space
   const panel = d.getElementById("sheet-filter-panel");
   assert.equal(panel.hidden, false);
   assert.equal(d.activeElement.id, "sheet-filter-search", "the search field takes the focus");
+  // Down from the search field moves into the list, on "모두 선택".
   key(d.getElementById("sheet-filter-search"), "ArrowDown");
-  key(d.getElementById("sheet-filter-search"), "ArrowDown");
+  assert.equal(d.activeElement.id, "sheet-filter-list");
+  assert.equal(d.getElementById("sheet-filter-list").getAttribute("aria-activedescendant"), "sheet-filter-row-0");
+  key(d.getElementById("sheet-filter-list"), "ArrowDown");
   assert.equal(d.getElementById("sheet-filter-list").getAttribute("aria-activedescendant"), "sheet-filter-row-1");
   key(d.getElementById("sheet-filter-list"), " ");
   assert.equal(d.getElementById("sheet-filter-count").textContent, "2 / 3", "개발 is unchecked");
-  key(d.getElementById("sheet-filter-list"), "Enter");
+  // Up from the first row goes back to the search field, up from there to the last menu row.
+  key(d.getElementById("sheet-filter-list"), "ArrowUp");
+  key(d.getElementById("sheet-filter-list"), "ArrowUp");
+  assert.equal(d.activeElement.id, "sheet-filter-search");
+  key(d.getElementById("sheet-filter-search"), "ArrowUp");
+  assert.equal(d.activeElement.dataset.filterAct, "custom", "the clear row is disabled while the column has no condition");
+  key(d.activeElement, "ArrowUp");
+  assert.equal(d.activeElement.dataset.filterAct, "sort-desc");
+  key(d.activeElement, "ArrowDown");
+  key(d.activeElement, "ArrowDown");
+  assert.equal(d.activeElement.id, "sheet-filter-search");
+  key(d.getElementById("sheet-filter-search"), "Enter");
   await flushAsyncTurns(10);
   assert.equal(panel.hidden, true);
   const layout = h.host.__EASYOFFICE_SHEET_LAYOUT__;

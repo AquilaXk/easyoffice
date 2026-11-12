@@ -3097,6 +3097,52 @@
 - **Revisit when** 시트 메뉴 항목에 선택 영역 조건 회색 처리가 생길 때.
 
 
+## PD-198. 시트 자동 필터: 열별 조건, 필터 숨김 행과 사용자 숨김 행의 분리, XLSX `autoFilter`
+
+- **Status** Implemented (QA 요청 2026-11-12). `crates/easyoffice-formats`의 `sheet_filter.rs`·`xlsx_filter.rs`·`xlsx_sheet.rs`·`office_codecs.rs`, `crates/easyoffice-sheet`의 `filter/`(`condition.rs`·`wildcard.rs`·`bits.rs`·`runs.rs`·`mod.rs`)·`axis/filter.rs`, `crates/easyoffice-app`의 `sheet_filter_ipc.rs`·`sheet_filter_json.rs`·`sheet_layout_json.rs`·`sheet_structure_ipc.rs`·`convert_open.rs`, `ui/sheet-filter.js`·`sheet-filter-ui.js`·`sheet-layout.js`·`sheet-grid.js`·`sheet-structure.js`·`ribbon-history.js`·`index.html`·`styles.css`·`shell.css`, `crates/easyoffice-desktop`의 `native_menu.rs`(`native_menu/layout.rs`). PD-192의 이식 범위, PD-194의 행 숨김 모델, PD-197의 시트 메뉴 항목 위에 만듭니다.
+- **Context** 자동 필터가 엔진·화면·XLSX 어디에도 없었습니다. 참조 엔진(Apache-2.0, 기준 커밋 `5a06a784`)의 필터 모델·조건·값 목록·범위 이동 로직을 가져오고, 모양은 참조 앱·rhwp-studio 틀(`.context-menu`, `tool-dialog`)을 따르며 설명 문구는 쓰지 않습니다.
+- **Decision (`PD-198`)**
+  1. **모델**: 시트마다 필터는 없거나 하나입니다. 범위(머리글 행 포함, 2행 이상), 열별 조건(절대 열 번호, 열마다 하나), 필터가 숨기는 행(`SheetFilter.hidden`)으로 이루어집니다. 열 조건은 값 목록(`values`, 빈 칸 포함 여부 `blank`) 또는 사용자 조건 1~2개(AND·OR)입니다. 사용자 조건의 연산자는 `equal`·`notEqual`·`greaterThan`·`greaterThanOrEqual`·`lessThan`·`lessThanOrEqual`이고 연산자가 없으면 와일드카드 텍스트 일치입니다. 화면의 조건(같음·같지 않음·큼·크거나 같음·작음·작거나 같음·포함·포함하지 않음·시작·끝·비어 있음·비어 있지 않음)은 이 형태로 바뀝니다(`*값*`, `값*`, `*값`, 빈 문자열, 공백 한 칸의 "다름").
+  2. **판정**: 셀이 보여 주는 텍스트(숫자 서식이 있으면 서식을 적용한 글자)로 판정합니다. 숫자 연산자는 숫자 셀만 받고, 조건 글자가 숫자가 아니면 아무 행도 받지 않습니다. "다름"은 숫자 조건이면 숫자가 아닌 셀을 모두 받고 패턴이면 패턴에 맞는 셀을 뺍니다(빈 셀은 빼지 않음). 텍스트 조건은 셀 전체가 패턴과 맞아야 하고(`*` 연속 글자, `?` 한 글자, `~`로 `*`·`?`·`~` 이스케이프) 대소문자를 가리지 않습니다. 숫자만 적은 조건 글자(와일드카드 없음)는 같은 값의 숫자 셀과도 같습니다(`1.0`과 `1`). 값 목록은 글자가 정확히 같아야 합니다. 다른 열이 이미 숨긴 행은 다시 판정하지 않습니다.
+  3. **선형 와일드카드**: 패턴을 `*` 사이의 조각으로 나눠 조각마다 비트 병렬 shift-and 탐색으로 한 번 훑습니다(조각 최대 255글자 = 상태 4워드, 되돌아가기 없음). 패턴 길이는 255글자까지이고 넘으면 요청을 거부합니다. COUNTIF의 `coercion::wildcard_match`는 같은 언어이며 시험에서 모든 짧은 입력에 대한 오라클입니다.
+  4. **필터 숨김과 사용자 숨김은 따로입니다**: `SheetStyling.hidden_rows`(사용자, PD-194)와 `SheetFilter.hidden`(필터)은 서로 다른 구간 목록이고, 화면은 둘의 합집합을 한 색인으로 봅니다. 행 숨기기·숨기기 취소는 사용자 쪽만 바꾸고, 필터 켜기·끄기·조건 변경은 필터 쪽만 바꿉니다. 엔진은 열마다 조건을 행 비트(`RowBits`, 64행 단위 워드)에 모으고 구간으로 바꿀 때도 워드 단위로 읽습니다.
+  5. **다시 적용은 요청할 때만**: 셀을 고쳐도 숨긴 행은 그대로입니다. 데이터 메뉴의 `다시 적용`이 지금 셀로 다시 판정하며 실행 취소 단계를 만들지 않습니다(참조 엔진의 규칙). 열 조건 설정·`필터 지우기`·켜기·끄기는 실행 취소 한 단계이고, 정렬(머리글 아래 데이터 행을 그 열 기준으로 정렬)은 행이 움직이므로 정렬 뒤 자동으로 다시 판정합니다. 필터 변경의 실행 취소 단계는 셀을 복사하지 않고(`captureWorkspaceSnapshot(false, true)`) 레이아웃만 담습니다.
+  6. **행·열 편집**: `evaluate_sheet`의 `structure` 요청은 `filter`를 받아 이동한 `filter`(필터가 없어지면 `null`)와 `filterReapply`를 답합니다. 범위는 `AxisEdit::shift_span`(PD-194)을 따르고 삽입은 범위 안이면 넓히고 앞이면 옮기며, 새 행은 보입니다. 머리글 행이 지워지거나 범위의 행·열이 모두 지워지면 필터가 없어지고, 행 수가 한도를 넘게 늘어나도 없어집니다. 지워진 열의 조건은 사라지고 `filterReapply: true`로 화면이 남은 조건으로 다시 판정합니다.
+  7. **XLSX**: `autoFilter`(`ref`), `filterColumn`(`colId`는 범위 첫 열부터의 오프셋), `filters`(`blank`, `filter val`), `customFilters`(`and`, `customFilter operator`·`val`)를 읽고 씁니다. `<autoFilter>`는 `sheetData` 뒤, `mergeCells` 앞입니다. 쓰기에서 `row hidden`은 사용자 숨김과 필터 숨김의 합집합이고, 열 때는 `hidden` 행 중 조건이 숨기는 행을 필터 몫, 나머지를 사용자 몫으로 가릅니다(값을 알 수 없는 수식 셀은 파일이 숨긴 행이면 필터 몫으로 봅니다). 조건이 숨기지만 파일이 보여 주는 행은 보이는 채로 둡니다(다시 적용 전까지, 파일을 캐시로 봄). 모델에 담을 수 없는 열(상위 N, 동적, 색, 아이콘, 날짜 묶음, 조건 3개 이상)은 그 열 조건만 버리고, 그 열이 숨긴 행은 사용자 숨김으로 남습니다. ODS·XLS는 필터를 읽거나 쓰지 않습니다.
+  8. **상한(Fail-Closed)**: 필터 범위 200,000행(머리글 포함), 조건 열 256개, 열마다 선택 값 10,000개, 조건 글자·선택 값 255글자, 한 요청의 셀 2,000,000개, 검색어 255글자. 넘는 저장 요청과 읽은 파일의 범위·목록은 거부하거나(읽을 때는 필터를 버림) 받지 않습니다. 값 목록은 고유값이 10,000개를 넘으면 처음 만난 10,000개만 담고(`more`) 화면은 목록을 읽기 전용으로 두며 검색으로 좁힐 때만 고를 수 있습니다. 255글자를 넘는 셀 글자는 목록에 나오지 않고, 값 필터가 걸리면 숨겨집니다.
+  9. **IPC**: 새 명령 없이 `evaluate_sheet`의 `sessionAction: "filter"`(15종 유지)입니다. 요청 `{op: "apply"|"values", filter, data: [{col, values: [글자...], fmt: [[첫, 끝, 서식 코드]...]}], col?, query?}`, 답 `apply` → `{hidden: [[첫, 끝]...], count}`, `values` → `{items: [[글자, 개수]...], blank, more}`. 필요한 열(조건 열과 값 목록의 열)만 보내고, 엔진이 서식 코드로 보이는 글자를 만들어 판정합니다. 세션 없이 상태를 두지 않습니다. 저장·열기 JSON의 시트마다 `filter: {range, columns, hidden}`(열·행 1부터)입니다.
+  10. **화면**: 데이터 메뉴에 `필터`(체크 표시), `다시 적용`, `필터 지우기`(페이지 메뉴, macOS 네이티브 막대, 명령 검색에 같은 항목, 네이티브 항목은 121개). 필터 범위의 머리글 칸 오른쪽 아래에 16px 단추(`td.filter-head::after`)가 있고 조건이 걸린 열은 강조색(`--accent-strong`, 새 색 없음)입니다. 단추의 모서리나 Alt+아래 화살표가 패널을 엽니다. 패널은 `.context-menu` 틀: 오름차순·내림차순 정렬, 조건 필터…, 열 필터 지우기, 검색 칸, 값 목록(모두 선택, 값, 개수, 빈 칸), 선택 개수, 확인·취소. 목록은 가상이라 보이는 행(약 17개)만 DOM에 있고 값이 수만 개여도 같습니다. 사용자 조건 대화상자(`tool-dialog`)는 연산자 콤보와 값 두 줄, 그리고·또는입니다. 숨긴 행은 `tr`을 만들지 않습니다(필터가 대부분의 행을 숨겨도 보이는 행 창이 가리키는 행 범위만큼 DOM이 늘지 않게). 사용자·필터 숨김 행의 위치 계산은 합집합의 정렬된 구간을 Int32Array 접두 합으로 두고 이진 탐색합니다.
+- **재사용 판단 (구현 원칙 3단계)** (1) 와일드카드 일치 크레이트는 `~` 이스케이프·글자 단위 `?`·대소문자 무시를 모두 맞추는 것이 없고, 엔진이 무의존입니다. (2) 이미 있는 `coercion::wildcard_match`(COUNTIF)는 같은 규칙이지만 최악에 O(n·m)이라 필터의 선형 조건에 맞지 않아 오라클로만 썼습니다. `axis/`의 `shift_span`·`shift_runs`, `format_cell_value`, `sheet-layout`, `.context-menu`·`tool-dialog` 틀, 시트 정렬(`sheet-ops.js`, 범위·방향 인자를 더함)은 그대로 재사용했습니다. (3) 조건 판정·값 목록·범위 이동·토글 규칙·대화상자 조건 사상을 이식했습니다(`THIRD_PARTY_NOTICES.md`).
+- **참조 엔진과 다른 곳** 와일드카드를 정규식 대신 선형 탐색으로 일치시킵니다. "다름" 패턴도 대소문자를 가리지 않습니다. 숫자 글자 조건이 같은 값의 숫자 셀과 같습니다. 판정은 셀 값이 아니라 보이는 글자입니다(숫자 서식 반영). 대화상자는 "사이"·"사이 아님"·사용자 정의를 따로 두지 않고 두 줄과 AND·OR로 같은 조건을 만듭니다. 색 필터와 날짜 묶음 트리는 가져오지 않았습니다. 필터 숨김 행은 비트로 계산하고 사용자 숨김과 분리해 저장합니다. 상한은 이 저장소의 추가입니다.
+- **Measured** 릴리스 빌드, 10만 데이터 행(머리글 별도), 중앙값.
+  | 엔진 요청(라우터 JSON 해석 포함, 필요한 열만) | 시간 |
+  |---|---|
+  | `apply` 값 목록 40개 / 숫자 조건 / 와일드카드 `*9?7*`(10만 글자) | 4.2 / 5.3 / 7.2 ms |
+  | `apply` 두 열(값 목록 + 숫자) | 8.9 ms |
+  | `values` 고유값 120개 / 10만 개(상한 1만) / 검색 | 4.1 / 11.7 / 14.5 ms |
+  | `values` 날짜 서식 열(10만 칸 서식 적용) | 20.3 ms |
+
+  `cargo test --release -p easyoffice-app --test filter_bench -- --ignored --nocapture`. 엔진 안에서 판정 자체는 열마다 몇 ms이고 시간 대부분이 요청 JSON 해석입니다. 페이지(헤드리스 Chrome 1440x900, 실제 엔진 `--serve` 릴리스, 10만 x 5 시트, 동작 시작부터 두 프레임 뒤까지이며 두 프레임 약 33 ms를 포함):
+
+  | 동작 | 시간 |
+  |---|---|
+  | 필터 켜기(영역 찾기, 머리글 단추) | 35~51 ms |
+  | 값 목록 열기: 고유값 120개 / 10만 개(상한 1만) / 다른 열 조건이 걸린 열 | 99 / 90~148 / 131 ms |
+  | 값 목록 검색(디바운스 120 ms 포함, 고유값 10만 중) | 233 ms |
+  | 필터 적용(부서 10개 선택 후 확인, 8,333행 표시) | 113~115 ms |
+  | 필터 적용(짝·홀, 5만 행 숨김, 구간 5만 개) | 98~113 ms |
+  | 다시 적용 / 필터 지우기 / 필터 끄기 | 81 / 34 / 30 ms |
+  | 스크롤 30걸음(필터 없음) 전 → 후 | 485 → 487 ms(걸음당 프레임 한 장, 변화 없음) |
+  | 스크롤 30걸음(구간 5만 개 필터 상태) | 502 ms |
+  | 80,000행으로 점프 전 → 후 | 46 → 46 ms |
+
+  실행 취소 단계가 셀 전체를 복사하던 처음 구현은 필터 켜기 183 ms, 적용 248~400 ms, 지우기 175~277 ms였고, 레이아웃만 담는 단계(`layoutOnly`)로 바꿔 줄였습니다. 숨긴 행의 `tr`을 만들지 않게 바꾼 뒤 5만 행을 숨긴 상태의 DOM 노드는 약 10,000개입니다(이전 구현 18,000개 이상, 90%를 숨기면 늘어나는 구조). 측정 스크립트는 `scripts/bench-webui-support.mjs`의 서버·CDP 도구를 씁니다.
+- **Why** 필터 결과를 별도 비트·구간으로 두면 행 숨기기와 충돌하지 않고, 열 때 파일의 한 가지 `hidden` 표시를 조건으로 갈라 낼 수 있습니다. 판정을 엔진 한 곳에 두어 TEXT 함수·셀 표시와 필터가 같은 글자를 판정합니다. 선형 일치와 상한은 신뢰할 수 없는 파일·입력에서 시간을 묶습니다.
+- **Trade-offs** 필터는 시트당 하나입니다. 필터 범위 아래에 이어 쓴 행은 범위에 들어오지 않습니다. 날짜 묶음·색·상위 N 조건은 읽을 때 버립니다. 값 목록이 한도를 넘으면 읽기 전용이라 검색으로 좁혀야 합니다. 요청은 필요한 열의 글자 전체를 보내므로 한 번에 16 MiB(IPC 본문 한도)를 넘는 큰 범위는 실행하지 못합니다(`필터를 적용하지 못함`). 필터가 숨긴 행이 있는 구간의 복사·정렬·집계는 PD-194처럼 숨김을 무시합니다. 와일드카드 문자를 글자 그대로 찾으려면 `~`를 직접 붙입니다(조건 입력이 그대로 패턴입니다).
+- **Alternatives rejected** 필터 결과를 `hidden_rows`에 섞기(조건을 지워도 사용자가 숨긴 행을 구분할 수 없음), 값 목록을 페이지에서 계산(서식 글자와 정렬 순서가 엔진과 어긋남), 모든 변경에 셀 전체 스냅숏(10만 행에서 한 동작이 200 ms 넘게 걸림), 데이터가 바뀔 때 자동 재적용(표준 동작과 다르고 큰 시트에서 입력마다 비용).
+- **Verified by** `cargo test -p easyoffice-sheet --lib filter axis`(조건 판정 표 56행, 와일드카드 오라클·적대 입력, 행 비트, 값 목록, 열 때의 숨김 분리, 행·열 편집 이동), `-p easyoffice-formats --test sheet_filter_roundtrip --lib xlsx_filter`, `-p easyoffice-app --lib sheet_filter sheet_structure`, `-p easyoffice-app --test sheet_filter_roundtrip`(저장·열기 왕복), `-p easyoffice-desktop --bin EasyOffice -- native_menu`, `node --test scripts/test-webui-sheet-filter.mjs`(조건 대화상자 사상, 범위, 행 색인 오라클, 켜기·끄기·조건·정렬·실행 취소·다시 실행, 가상 목록, 읽기 전용 목록, 키보드), `scripts/test-webui-sheet-native-menu.mjs`. 실제 화면: 헤드리스 Chrome과 실제 엔진에서 어두운·밝은 테마 전·후 캡처와 설계 점검(여백·글꼴·대비·포커스·화면 밖).
+- **Revisit when** 색 필터·날짜 묶음·상위 N 조건이 필요할 때, ODS 저장이 숨김 행을 쓸 때, 필터 범위가 이어 쓴 행으로 늘어나야 할 때, 요청 크기 때문에 큰 범위가 막힐 때(열 값을 엔진 세션에 두는 방식).
+
 ## PD-199. 문서 목차: 수준별 계층, 이동 링크, 목차 업데이트, DOCX·ODT 목차 블록
 
 - **Status** Implemented (QA 요청 2026-11-12). `ui/doc-toc.js`, `workspace-panels.js`, `ribbon-history.js`, `save-payload.js`, `file-open.js`, `index.html`; `easyoffice-formats`의 `rich_document.rs`(`RichToc`), `rich_toc_writers.rs`, DOCX·ODT 읽기·쓰기; `convert_structured.rs`, `convert_open.rs`; 네이티브 막대 `native_menu.rs`. PD-192의 이식 범위를 문서 목차로 넓힙니다.

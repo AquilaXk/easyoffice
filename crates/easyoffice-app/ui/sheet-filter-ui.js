@@ -290,43 +290,81 @@
       else if (ev.target?.closest?.("#btn-sheet-filter-ok")) confirm();
     }
 
-    function onPanelKeydown(ev) {
-      if (!state) return;
-      const inSearch = ev.target?.id === "sheet-filter-search";
+    // Keyboard order of the panel: the menu rows, the search field, the list, then the buttons
+    // (Tab). Arrow keys walk the menu rows and the search field; in the list they move its cursor.
+    const menuRows = () => [...panel().querySelectorAll('.md-item[data-filter-act]:not([aria-disabled="true"])')];
+
+    function focusList(cursor) {
+      const list = $("sheet-filter-list");
+      if (!list || !state) return;
+      state.cursor = Math.max(0, Math.min(rowCount(state) - 1, cursor));
+      list.focus();
+      ensureVisible(state.cursor);
+      renderRows();
+    }
+
+    function onListKey(ev) {
       const last = rowCount(state) - 1;
       const move = (to) => {
         ev.preventDefault();
-        state.cursor = Math.max(0, Math.min(last, to));
+        if (to < 0) {
+          state.cursor = -1;
+          renderRows();
+          $("sheet-filter-search")?.focus();
+          return;
+        }
+        state.cursor = Math.min(last, to);
         ensureVisible(state.cursor);
         renderRows();
       };
-      if (ev.key === "Escape") {
-        ev.preventDefault();
-        close(true);
-      } else if (ev.key === "ArrowDown") {
-        move(state.cursor + 1);
-      } else if (ev.key === "ArrowUp") {
-        move(state.cursor - 1);
-      } else if (ev.key === "PageDown") {
-        move(state.cursor + LIST_ROWS);
-      } else if (ev.key === "PageUp") {
-        move(state.cursor - LIST_ROWS);
-      } else if (ev.key === "Home" && !inSearch) {
-        move(0);
-      } else if (ev.key === "End" && !inSearch) {
-        move(last);
-      } else if (ev.key === " " && !inSearch && state.cursor >= 0) {
+      if (ev.key === "ArrowDown") move(state.cursor + 1);
+      else if (ev.key === "ArrowUp") move(state.cursor - 1);
+      else if (ev.key === "PageDown") move(state.cursor + LIST_ROWS);
+      else if (ev.key === "PageUp") move(Math.max(0, state.cursor - LIST_ROWS));
+      else if (ev.key === "Home") move(0);
+      else if (ev.key === "End") move(last);
+      else if (ev.key === " " && state.cursor >= 0) {
         ev.preventDefault();
         toggleRow(state.cursor);
       } else if (ev.key === "Enter") {
         ev.preventDefault();
-        const menuRow = ev.target?.closest?.("[data-filter-act]");
-        if (menuRow) act(menuRow.dataset.filterAct);
-        else confirm();
-      } else if (ev.key === "Tab") {
-        // The panel is a menu: Tab leaves it for the sheet, as in the header menu.
+        confirm();
+      }
+    }
+
+    function onPanelKeydown(ev) {
+      if (!state) return;
+      const target = ev.target;
+      if (ev.key === "Escape") {
         ev.preventDefault();
         close(true);
+      } else if (target?.id === "sheet-filter-list") {
+        onListKey(ev);
+      } else if (target?.id === "sheet-filter-search") {
+        if (ev.key === "ArrowDown") {
+          ev.preventDefault();
+          focusList(0);
+        } else if (ev.key === "ArrowUp") {
+          ev.preventDefault();
+          menuRows().at(-1)?.focus();
+        } else if (ev.key === "Enter") {
+          ev.preventDefault();
+          confirm();
+        }
+      } else if (target?.dataset?.filterAct && target.classList.contains("md-item")) {
+        const rows = menuRows();
+        const at = rows.indexOf(target);
+        if (ev.key === "ArrowDown") {
+          ev.preventDefault();
+          if (at === rows.length - 1) $("sheet-filter-search")?.focus();
+          else rows[at + 1]?.focus();
+        } else if (ev.key === "ArrowUp") {
+          ev.preventDefault();
+          rows[(at - 1 + rows.length) % rows.length]?.focus();
+        } else if (ev.key === "Enter" || ev.key === " ") {
+          ev.preventDefault();
+          act(target.dataset.filterAct);
+        }
       }
     }
 
@@ -409,6 +447,11 @@
       $("sheet-filter-list")?.addEventListener("scroll", renderRows);
       document.addEventListener("mousedown", (ev) => {
         if (el && !el.hidden && !el.contains(ev.target)) close(false);
+      });
+      // Tab past the last button leaves the panel for the sheet.
+      el?.addEventListener("focusout", (ev) => {
+        const next = ev.relatedTarget;
+        if (state && next && !el.contains(next)) close(false);
       });
       host.addEventListener?.("resize", () => close(false));
       host.addEventListener?.("blur", () => close(false));

@@ -6,9 +6,9 @@
 //
 // 참조 구현: Univer `packages/sheets-filter/src/commands/commands/sheets-filter.command.ts` lines
 // 148-190 (`SmartToggleSheetsFilterCommand`: a single cell takes the region around it, a single
-// row takes the rows below it, a selection is used as it is), 305-330 (`ReCalcSheetsFilterCommand`:
+// row takes the rows below it, a selection is used as it is), 305-322 (`ReCalcSheetsFilterCommand`:
 // re-applying is on request and needs no undo step) and `packages/sheets-filter-ui/src/models/
-// conditions.ts` lines 40-560 (`FilterConditionItems`: how a condition in the dialog maps to the
+// conditions.ts` lines 79-727 (`FilterConditionItems`: how a condition in the dialog maps to the
 // column's `customFilters`, wildcards for contains, starts with and ends with, a single space for
 // "not empty"), Apache-2.0, Copyright 2023-present DreamNum Co., Ltd., commit
 // 5a06a7842c8e13fa0646d0733dc3662cf4b330b9. Modifications: the form is a pair of rows (an
