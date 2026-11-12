@@ -4,7 +4,7 @@
 //! and take the median time and the peak RSS.
 //!
 //! `EASYOFFICE_BENCH_CASE` is one of `save_verify`, `preview_embedded`, `preview_render`,
-//! `thumb_embed`, `pdf_doc`, `pdf_svgs`, `doc_pdf_engine`, `doc_pdf_shell` (a DOCX/ODT/RTF/MD/TXT file as a PDF by the engine's writer, and by HWPX + rhwp layout, PD-167); `EASYOFFICE_BENCH_INPUT` is a document, or a folder of page SVGs for `pdf_svgs`. A name with the
+//! `thumb_embed`, `pdf_doc`, `pdf_inspect` (the PDF editor's open checks and parse), `pdf_card` (the first-page picture of a PDF), `pdf_svgs`, `doc_pdf_engine`, `doc_pdf_shell` (a DOCX/ODT/RTF/MD/TXT file as a PDF by the engine's writer, and by HWPX + rhwp layout, PD-167); `EASYOFFICE_BENCH_INPUT` is a document, or a folder of page SVGs for `pdf_svgs`. A name with the
 //! prefix `ref:` (`ref:save_verify`, `ref:preview`, `ref:pdf`, `ref:pdf_svgs`) runs the path the
 //! reference app takes for the same job with the same rhwp (parse and convert to the editable form,
 //! first-page SVG, `svgs_to_pdf_with_options`), printed as `tool=ref-repro`.
@@ -14,7 +14,10 @@
 //! line shows the last run).
 
 use crate::doc_pdf::hwpx_to_pdf;
+use crate::pdf_edit_budget::Deadline;
+use crate::pdf_edit_inspect::inspect;
 use crate::pdf_export::{verify_exported_pdf, PdfAssembler};
+use crate::pdf_first_page::first_page_png;
 use crate::pdf_font_fallbacks::add_font_fallbacks;
 use crate::pdf_fonts::shared_font_db;
 use crate::preview::extract_thumbnail;
@@ -253,6 +256,20 @@ fn run_case(case: &str, input: &Path) -> Line {
             verify_document_bytes(&extension, &bytes).expect("verified");
             phases.push(("verify", ms(t)));
             (bytes.len(), 0)
+        }
+        "pdf_inspect" | "pdf_card" => {
+            let bytes = Arc::new(std::fs::read(input).expect("read"));
+            let deadline = Deadline::after(std::time::Duration::from_secs(600));
+            let t = Instant::now();
+            if case == "pdf_inspect" {
+                let info = inspect(&bytes, &deadline).expect("inspect");
+                phases.push(("inspect", ms(t)));
+                (bytes.len(), info.pages)
+            } else {
+                let png = first_page_png(&bytes, None, &deadline).expect("card");
+                phases.push(("card", ms(t)));
+                (png.len(), 1)
+            }
         }
         "preview_embedded" => {
             let mut file = std::fs::File::open(input).expect("open");
