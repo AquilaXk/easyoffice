@@ -392,8 +392,12 @@ fn a_render_past_its_deadline_gives_no_picture_and_keeps_its_slot_until_it_ends(
         started.elapsed() < Duration::from_millis(400),
         "the caller did not wait for the worker"
     );
-    // The timed-out file is remembered as having no picture: it is not drawn again.
-    assert!(load_preview_with(&preview, "00000000000000d1", &path, fake_png).is_none());
+    // The shell could not try in time, so the file is not remembered as having no picture.
+    let stamp = FileStamp::of(&fs::metadata(&path).unwrap());
+    assert!(
+        preview.cached("00000000000000d1", &stamp).is_none(),
+        "a timed-out answer is not cached"
+    );
     // The stuck worker still holds the only slot: the next file is not tried and not remembered.
     assert!(load_preview_with(&preview, "00000000000000d2", &other, fake_png).is_none());
     let stamp = FileStamp::of(&fs::metadata(&other).unwrap());
@@ -404,6 +408,38 @@ fn a_render_past_its_deadline_gives_no_picture_and_keeps_its_slot_until_it_ends(
     // When the worker ends, the slot is free again.
     thread::sleep(Duration::from_millis(600));
     assert!(load_preview_with(&preview, "00000000000000d2", &other, fake_png).is_some());
+    // The file that timed out is drawn on the next request.
+    assert!(load_preview_with(&preview, "00000000000000d1", &path, fake_png).is_some());
+}
+
+#[test]
+fn what_a_render_waits_for_first_is_not_counted_against_its_deadline() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = hwp_file(&dir, "late.hwp", b"data");
+    let preview = state(1, 100, 100);
+    let ready = || thread::sleep(Duration::from_millis(400));
+    let found = load_preview_after(&preview, "00000000000000d3", &path, ready, fake_png);
+    assert!(
+        found.is_some(),
+        "the wait for the fonts was not the render's"
+    );
+    // A picture inside the file needs nothing drawn, so nothing is waited for.
+    let bytes = super::tests::zip(&[(
+        "Preview/PrvImage.gif",
+        0,
+        GIF_BYTES.to_vec(),
+        GIF_BYTES.len(),
+    )]);
+    let embedded = hwp_file(&dir, "has.hwpx", &bytes);
+    let unreachable = || panic!("a picture in the file needs no fonts");
+    assert!(load_preview_after(
+        &preview,
+        "00000000000000d4",
+        &embedded,
+        unreachable,
+        fake_png
+    )
+    .is_some());
 }
 
 #[test]

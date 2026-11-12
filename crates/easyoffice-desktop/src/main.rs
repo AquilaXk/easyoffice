@@ -446,6 +446,9 @@ fn main() {
             app.manage(preview::PreviewState::with_font_dirs(
                 pdf_job::pdf_font_dirs(&handle),
             ));
+            if !smoke_mode {
+                preview::warm_fonts(pdf_job::pdf_font_dirs(&handle));
+            }
             if smoke_mode {
                 app.manage(SmokeProbe::start(SMOKE_TIMEOUT));
                 smoke::run_rust_steps(&handle);

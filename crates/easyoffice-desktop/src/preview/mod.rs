@@ -190,10 +190,29 @@ impl PreviewState {
 /// The picture of a recent document: the one inside the file, else its first page.
 pub(crate) fn load_preview(state: &PreviewState, id: &str, path: &Path) -> Option<Arc<Thumbnail>> {
     let font_dirs = Arc::clone(&state.font_dirs);
+    let ready_dirs = Arc::clone(&font_dirs);
     let draw = first_page_step(path);
-    load_preview_with(state, id, path, move |document| {
-        draw(document, &shared_font_db(&font_dirs))
-    })
+    load_preview_after(
+        state,
+        id,
+        path,
+        move || {
+            shared_font_db(&ready_dirs);
+        },
+        move |document| draw(document, &shared_font_db(&font_dirs)),
+    )
+}
+
+/// Builds the shared font database on a background thread, so the first card does not wait for the
+/// font scan. Nothing waits for this thread and a failure is ignored: the first render that needs
+/// the database builds it itself (and `OnceLock` makes a render that comes while it is being built
+/// wait for it).
+pub(crate) fn warm_fonts(font_dirs: Vec<PathBuf>) {
+    let _ = std::thread::Builder::new()
+        .name("eo-font-warm".to_string())
+        .spawn(move || {
+            shared_font_db(&font_dirs);
+        });
 }
 
 /// The first-page step for the kind of file `path` names: the way to draw it from its bytes with a
@@ -217,13 +236,14 @@ fn first_page_step(
     }
 }
 
-/// [`load_preview`] with the first-page step given by the caller (a test hook; the real step runs
-/// on the bounded worker either way). An answer is cached for the file's time and size, a miss
-/// too, except when no render thread was free: that one is the shell's state, not the file's.
-fn load_preview_with(
+/// [`load_preview_with`] that runs `ready` on the calling thread when a page has to be drawn, before
+/// the permit wait and the deadline start: what the render needs and may take long to get (the
+/// font database) is waited for outside the time the render is allowed.
+fn load_preview_after(
     state: &PreviewState,
     id: &str,
     path: &Path,
+    ready: impl FnOnce(),
     render: impl FnOnce(Vec<u8>) -> Result<Vec<u8>, RenderError> + Send + 'static,
 ) -> Option<Arc<Thumbnail>> {
     let meta = std::fs::metadata(path).ok()?;
@@ -235,11 +255,14 @@ fn load_preview_with(
         Err(_) => None,
         Ok(mut file) => match extract_thumbnail(&mut file) {
             Some(embedded) => Some(Arc::new(embedded)),
-            None => match draw_first_page(state, file, path, &meta, render) {
-                Ok(drawn) => Some(Arc::new(drawn)),
-                Err(RenderError::Busy) => return None,
-                Err(_) => None,
-            },
+            None => {
+                ready();
+                match draw_first_page(state, file, path, &meta, render) {
+                    Ok(drawn) => Some(Arc::new(drawn)),
+                    Err(RenderError::Busy | RenderError::TimedOut) => return None,
+                    Err(_) => None,
+                }
+            }
         },
     };
     state.remember(id, stamp, found.clone());
@@ -326,6 +349,21 @@ pub async fn get_recent_preview(
     })
     .await
     .map_err(|err| format!("미리보기를 읽지 못했습니다: {err}"))
+}
+
+/// [`load_preview`] with the first-page step given by the caller (a test hook; the real step runs
+/// on the bounded worker either way). An answer is cached for the file's time and size, a miss
+/// too, except when the shell was not able to try: no render thread was free, or the render ran
+/// past its deadline. Those say something about the shell's load, not the file, so the next request
+/// tries again.
+#[cfg(test)]
+fn load_preview_with(
+    state: &PreviewState,
+    id: &str,
+    path: &Path,
+    render: impl FnOnce(Vec<u8>) -> Result<Vec<u8>, RenderError> + Send + 'static,
+) -> Option<Arc<Thumbnail>> {
+    load_preview_after(state, id, path, || {}, render)
 }
 
 #[cfg(test)]
