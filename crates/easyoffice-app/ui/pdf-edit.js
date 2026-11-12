@@ -11,17 +11,6 @@
 
   const STAMP_BADGE_ID = "pdf-stamp-badge";
   const WATERMARK_LAYER_ID = "pdf-watermark-layer";
-  const BASE64_CHUNK = 0x8000;
-
-  function bytesToBase64(bytes) {
-    const shared = host.__EASYOFFICE_SHEET_UTILS__?.bytesToBase64;
-    if (typeof shared === "function") return shared(bytes, (bin) => host.btoa(bin));
-    const chunks = [];
-    for (let i = 0; i < bytes.length; i += BASE64_CHUNK) {
-      chunks.push(String.fromCharCode.apply(null, bytes.subarray(i, i + BASE64_CHUNK)));
-    }
-    return host.btoa(chunks.join(""));
-  }
 
   function createPdfEdit(deps) {
     const { document, desktopBridge, getPdfRotationDeg } = deps;
@@ -41,7 +30,7 @@
       const bridge = shell();
       if (!bridge) return "";
       try {
-        const state = await bridge.open(fileName, bytesToBase64(bytes));
+        const state = await bridge.open(fileName, host.__EASYOFFICE_SHEET_UTILS__.bytesToBase64(bytes, (bin) => host.btoa(bin)));
         active = true;
         return " · 원본 PDF 편집 사용 (" + state.pages + "쪽 · 그림·글꼴·배치 보존)";
       } catch (err) {

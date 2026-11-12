@@ -114,16 +114,6 @@
     return "eo-hwp-" + Date.now().toString(36) + "-" + sessionCounter.toString(36);
   }
 
-  function bytesToBase64(bytes, btoaFn) {
-    const shared = host.__EASYOFFICE_SHEET_UTILS__?.bytesToBase64;
-    if (typeof shared === "function") return shared(bytes, btoaFn);
-    const chunks = [];
-    for (let i = 0; i < bytes.length; i += 0x8000) {
-      chunks.push(String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000)));
-    }
-    return btoaFn(chunks.join(""));
-  }
-
   function createHwpHost(deps) {
     const { document, getActiveModule } = deps;
     const env = deps.env || host;
@@ -628,7 +618,7 @@
     }
 
     async function exportHwpBase64() {
-      return bytesToBase64(await exportHwp(), (s) => env.btoa(s));
+      return host.__EASYOFFICE_SHEET_UTILS__.bytesToBase64(await exportHwp(), (s) => env.btoa(s));
     }
 
     // Save for the embedded editor: HWP 5.0 bytes from the editor, delivered like every other save

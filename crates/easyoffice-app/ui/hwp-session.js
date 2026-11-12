@@ -26,7 +26,6 @@
   const META_STORE = "meta";
   const TAB_ID_KEY = "easyoffice.hwp.tabId";
   const PREFIX_BYTES = 16;
-  const BASE64_CHUNK = 0x8000;
   const MSG_TEXT_ONLY = "한글 편집기로 열지 못해 텍스트만 불러왔습니다. 서식·표·그림은 유지되지 않으며 이 상태로 저장하면 서식이 사라집니다.";
   const REFUSED = /DRM|지원하지 않는 암호화|암호화된 문서를 열 수 없습니다/;
   const CANCELLED = /취소/;
@@ -60,16 +59,6 @@
 
   function mib(bytes) {
     return (bytes / 1048576).toFixed(1) + " MiB";
-  }
-
-  function bytesToBase64(bytes, btoaFn) {
-    const shared = host.__EASYOFFICE_SHEET_UTILS__?.bytesToBase64;
-    if (typeof shared === "function") return shared(bytes, btoaFn);
-    const chunks = [];
-    for (let i = 0; i < bytes.length; i += BASE64_CHUNK) {
-      chunks.push(String.fromCharCode.apply(null, bytes.subarray(i, i + BASE64_CHUNK)));
-    }
-    return btoaFn(chunks.join(""));
   }
 
   function toHex(bytes, count) {
@@ -558,7 +547,7 @@
         if (gate.failure) return gate.failure;
         const exported = await exportForSave(wanted);
         if (!exported.bytes) return failure(exported.format, exported.error);
-        const base64 = bytesToBase64(exported.bytes, (s) => env.btoa(s));
+        const base64 = host.__EASYOFFICE_SHEET_UTILS__.bytesToBase64(exported.bytes, (s) => env.btoa(s));
         const thumbnailSvg = await readThumbnailSvg();
         const delivery = await gate.deliver(base64, options.baseName, exported.format, thumbnailSvg ? { thumbnailSvg } : undefined);
         if (delivery?.cancelled) return failure(exported.format, "", true);
@@ -647,7 +636,7 @@
         baseName: stem,
         size: bytes.length,
         format: "hwpx",
-        fields: { fileName: stem + ".hwpx", sourceBase64: bytesToBase64(bytes, (s) => env.btoa(s)) },
+        fields: { fileName: stem + ".hwpx", sourceBase64: host.__EASYOFFICE_SHEET_UTILS__.bytesToBase64(bytes, (s) => env.btoa(s)) },
       };
     }
 

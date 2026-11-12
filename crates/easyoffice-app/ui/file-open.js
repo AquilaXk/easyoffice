@@ -24,7 +24,6 @@
     "pptx", "ppt", "ppsx", "odp",
     "pdf", "pages",
   ];
-  const BASE64_CHUNK = 0x8000;
 
   function baseName(raw) {
     return String(raw || "").split(/[\\/]/).pop().trim();
@@ -34,16 +33,6 @@
     const s = String(name || "");
     const dot = s.lastIndexOf(".");
     return dot >= 0 && dot < s.length - 1 ? s.slice(dot + 1).toLowerCase() : "";
-  }
-
-  function bytesToBase64(bytes, btoaFn) {
-    const shared = host.__EASYOFFICE_SHEET_UTILS__?.bytesToBase64;
-    if (typeof shared === "function") return shared(bytes, btoaFn);
-    const chunks = [];
-    for (let i = 0; i < bytes.length; i += BASE64_CHUNK) {
-      chunks.push(String.fromCharCode.apply(null, bytes.subarray(i, i + BASE64_CHUNK)));
-    }
-    return btoaFn(chunks.join(""));
   }
 
   // The converter's format selector value for a file name, or "" when it has none.
@@ -442,7 +431,7 @@
       let res;
       try {
         res = await invokeIpc("convert_document_format", JSON.stringify({
-          action: "decode", fileName: name, sourceBase64: bytesToBase64(data, btoaFn), ...GRID_LIMITS,
+          action: "decode", fileName: name, sourceBase64: host.__EASYOFFICE_SHEET_UTILS__.bytesToBase64(data, btoaFn), ...GRID_LIMITS,
         }));
       } catch (err) {
         if (convBox) convBox.textContent = convText;
@@ -536,7 +525,7 @@
       return {
         baseName: stem,
         size: converterSource.bytes.length,
-        fields: { fileName: converterSource.name, sourceBase64: bytesToBase64(converterSource.bytes, btoaFn) },
+        fields: { fileName: converterSource.name, sourceBase64: host.__EASYOFFICE_SHEET_UTILS__.bytesToBase64(converterSource.bytes, btoaFn) },
       };
     }
 
@@ -633,7 +622,7 @@
 
   host.__EASYOFFICE_CREATE_FILE_OPEN__ = createFileOpen;
   host.__EASYOFFICE_FILE_OPEN_UTILS__ = {
-    MAX_FILE_BYTES, MAX_HWP_BYTES, SUPPORTED_EXTENSIONS, GRID_LIMITS, buildEditorNodes, buildSheetStore, bytesToBase64,
+    MAX_FILE_BYTES, MAX_HWP_BYTES, SUPPORTED_EXTENSIONS, GRID_LIMITS, buildEditorNodes, buildSheetStore,
     converterSourceProblem, converterFormatOption,
   };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

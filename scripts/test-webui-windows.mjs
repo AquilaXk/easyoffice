@@ -726,6 +726,7 @@ test("Ctrl+Q starts the shell's quit queue, and the page menu has no 끝내기 i
 
 test("HWP autosave records are keyed by the window id", async () => {
   const env = { setTimeout, clearTimeout, btoa: (s) => Buffer.from(s, "binary").toString("base64") };
+  loadUiModule(new URL("../crates/easyoffice-app/ui/sheet-utils.js", import.meta.url), env);
   loadUiModule(new URL("../crates/easyoffice-app/ui/hwp-session.js", import.meta.url), env);
   const hwpHost = { onChange() {}, onStatus() {}, getStatus: () => "idle" };
   const mk = (id) => env.__EASYOFFICE_CREATE_HWP_SESSION__({

@@ -7,6 +7,7 @@ import { loadUiModule } from "./test-support/load-ui-module.mjs";
 // IndexedDB are fakes; the bundle round trip runs in headless Chrome (scripts/hwp-roundtrip-cdp.mjs).
 
 const SESSION_JS = new URL("../crates/easyoffice-app/ui/hwp-session.js", import.meta.url);
+const SHEET_UTILS_JS = new URL("../crates/easyoffice-app/ui/sheet-utils.js", import.meta.url);
 const HWP_MAGIC = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
 const ZIP_MAGIC = [0x50, 0x4b, 0x03, 0x04];
 
@@ -102,6 +103,7 @@ function load(options = {}) {
     indexedDB: options.noIndexedDb ? null : fakeIndexedDb(),
     sessionStorage: { getItem: () => "tab-A", setItem: () => {} },
   };
+  loadUiModule(SHEET_UTILS_JS, env);
   loadUiModule(SESSION_JS, env);
   const fake = createFakeHost(options.host);
   const document = createDocument();

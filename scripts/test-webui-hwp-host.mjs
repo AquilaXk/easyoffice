@@ -8,6 +8,7 @@ import { switchModule, studioItem } from "./test-support/modules.mjs";
 // fake editor answers the embed protocol (`rhwp-connect` handshake, `rhwp-request` -> response).
 
 const HOST_JS = new URL("../crates/easyoffice-app/ui/hwp-host.js", import.meta.url);
+const SHEET_UTILS_JS = new URL("../crates/easyoffice-app/ui/sheet-utils.js", import.meta.url);
 
 class FakeElement {
   constructor(tag, registry) {
@@ -116,6 +117,7 @@ function loadHost({ fetchOk = true, studioOptions, activeModule = "HWP", timeout
     addEventListener: (type, fn) => { (listeners.get(type) ?? listeners.set(type, new Set()).get(type)).add(fn); },
     removeEventListener: (type, fn) => { listeners.get(type)?.delete(fn); },
   };
+  loadUiModule(SHEET_UTILS_JS, env);
   loadUiModule(HOST_JS, env);
   let mod = activeModule;
   const states = [];
@@ -229,6 +231,7 @@ test("missing bundle falls back to the text-only editor with a clear message", a
 test("missing fetch (unit environments) also uses the fallback, never throws", async () => {
   const document = createFakeDocument();
   const env = { setTimeout, clearTimeout };
+  loadUiModule(SHEET_UTILS_JS, env);
   loadUiModule(HOST_JS, env);
   const hostApi = env.__EASYOFFICE_CREATE_HWP_HOST__({ document, getActiveModule: () => "HWP" });
   await hostApi.onModuleActivated("HWP");

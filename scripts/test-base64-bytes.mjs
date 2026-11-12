@@ -69,3 +69,12 @@ test("timings: old per-character loop vs shared converter", () => {
   }
   console.table(rows.map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, typeof v === "number" ? `${v.toFixed(1)} ms` : v]))));
 });
+
+test("the chunked Base64 conversion lives only in sheet-utils.js", async () => {
+  const { readdirSync, readFileSync } = await import("node:fs");
+  const dir = new URL("../crates/easyoffice-app/ui/", import.meta.url);
+  const copies = readdirSync(dir)
+    .filter((name) => name.endsWith(".js"))
+    .filter((name) => /String\.fromCharCode\.apply\(null,[^)]*subarray\(/.test(readFileSync(new URL(name, dir), "utf8")));
+  assert.deepEqual(copies, ["sheet-utils.js"]);
+});
