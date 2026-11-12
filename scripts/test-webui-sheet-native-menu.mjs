@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { readText } from "./test-support/read-text.mjs";
+import { itemTable } from "./test-support/rust-menu-table.mjs";
 
 // The spreadsheet's number-format and row/column/merge items (PD-197) are in the native bar and the command search:
 // a native item clicks the page's own menu item, so it runs the same command path, and the search lists them by label.
@@ -12,8 +13,7 @@ const read = (rel) => readText(fileURLToPath(new URL(rel, REPO)));
 
 function sheetItems() {
   const source = read("crates/easyoffice-desktop/src/native_menu.rs");
-  const start = source.indexOf("pub const ITEMS");
-  const table = source.slice(start, source.indexOf("];", start));
+  const table = itemTable(source);
   return [...table.matchAll(/item\(\s*"([^"]+)",\s*"([^"]+)",\s*None,\s*"(sheet-(?:act|numfmt|paste)):([^"]+)",?\s*\)/g)].map((m) => ({ id: m[1], label: m[2], name: m[3], argument: m[4] }));
 }
 
@@ -25,10 +25,10 @@ const open = async () => {
   return harness;
 };
 
-test("the table holds the 11 number-format items, the 14 row, column, hide, merge, sort and filter items and 골라 붙이기", () => {
+test("the table holds the 11 number-format items, the 23 row, column, hide, merge, sort, filter, freeze, tab color and group items and 골라 붙이기", () => {
   const items = sheetItems();
   assert.equal(items.filter((i) => i.name === "sheet-numfmt").length, 11);
-  assert.equal(items.filter((i) => i.name === "sheet-act").length, 14);
+  assert.equal(items.filter((i) => i.name === "sheet-act").length, 23);
   assert.deepEqual(items.filter((i) => i.name === "sheet-paste").map((i) => [i.id, i.label, i.argument]), [["edit:paste-special", "골라 붙이기…", "special"]]);
 });
 

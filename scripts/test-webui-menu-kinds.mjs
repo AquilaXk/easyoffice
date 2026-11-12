@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { readText } from "./test-support/read-text.mjs";
+import { itemTable } from "./test-support/rust-menu-table.mjs";
 
 const byName = (a, b) => a.localeCompare(b);
 
@@ -162,9 +163,7 @@ function rustLayout() {
 const ITEM_PATTERN = /item\(\s*"([^"]+)",\s*"([^"]+)",\s*(?:None|Some\("[^"]+"\)),\s*"([^"]+)",?\s*\)/g;
 
 function rustItemTable() {
-  const source = read("crates/easyoffice-desktop/src/native_menu.rs");
-  const start = source.indexOf("pub const ITEMS");
-  return source.slice(start, source.indexOf("];", start));
+  return itemTable(read("crates/easyoffice-desktop/src/native_menu.rs"));
 }
 
 function rustItems() {

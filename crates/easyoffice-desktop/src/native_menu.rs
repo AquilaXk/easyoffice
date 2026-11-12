@@ -70,6 +70,13 @@ const fn item(
 }
 
 /// Every custom item of the menu bar, in menu order.
+/// A spreadsheet menu item that runs the page menu item `data-sheet-act="<act>"`.
+macro_rules! sheet_act {
+    ($id:literal, $label:literal, $act:literal) => {
+        item($id, $label, None, concat!("sheet-act:", $act))
+    };
+}
+
 pub const ITEMS: &[MenuItemSpec] = &[
     item("app:about", "EasyOffice 정보", None, "about"),
     item("file:new", "새로 만들기", Some("CmdOrCtrl+N"), "file-new"),
@@ -576,54 +583,41 @@ pub const ITEMS: &[MenuItemSpec] = &[
     ),
     item(
         "table:sheet-freeze",
-        "행·열 틀 고정",
+        "선택 행/열 고정",
         None,
         "studio-cmd:sheet-mod-freeze",
     ),
-    item(
-        "sheet:row-insert-above",
-        "행 위에 삽입",
-        None,
-        "sheet-act:row-insert-above",
-    ),
-    item(
+    sheet_act!("sheet:freeze-first-row", "첫 행 고정", "freeze-first-row"),
+    sheet_act!("sheet:freeze-first-col", "첫 열 고정", "freeze-first-col"),
+    sheet_act!("sheet:freeze-clear", "틀 고정 해제", "freeze-clear"),
+    sheet_act!("sheet:tab-color", "탭 색", "tab-color"),
+    sheet_act!("sheet:group", "그룹 묶기", "group"),
+    sheet_act!("sheet:ungroup", "그룹 풀기", "ungroup"),
+    sheet_act!("sheet:hide-detail", "하위 수준 숨기기", "hide-detail"),
+    sheet_act!("sheet:show-detail", "하위 수준 표시", "show-detail"),
+    sheet_act!("sheet:outline-clear", "윤곽 지우기", "outline-clear"),
+    sheet_act!("sheet:row-insert-above", "행 위에 삽입", "row-insert-above"),
+    sheet_act!(
         "sheet:row-insert-below",
         "행 아래에 삽입",
-        None,
-        "sheet-act:row-insert-below",
+        "row-insert-below"
     ),
-    item(
-        "sheet:col-insert-left",
-        "열 왼쪽에 삽입",
-        None,
-        "sheet-act:col-insert-left",
-    ),
-    item(
+    sheet_act!("sheet:col-insert-left", "열 왼쪽에 삽입", "col-insert-left"),
+    sheet_act!(
         "sheet:col-insert-right",
         "열 오른쪽에 삽입",
-        None,
-        "sheet-act:col-insert-right",
+        "col-insert-right"
     ),
-    item("sheet:row-delete", "행 삭제", None, "sheet-act:row-delete"),
-    item("sheet:col-delete", "열 삭제", None, "sheet-act:col-delete"),
-    item("sheet:hide", "숨기기", None, "sheet-act:hide"),
-    item("sheet:unhide", "숨기기 취소", None, "sheet-act:unhide"),
-    item("sheet:merge", "셀 병합", None, "sheet-act:merge"),
-    item("sheet:unmerge", "병합 해제", None, "sheet-act:unmerge"),
-    item("sheet:sort", "정렬…", None, "sheet-act:sort-dialog"),
-    item("sheet:filter", "필터", None, "sheet-act:filter-toggle"),
-    item(
-        "sheet:filter-reapply",
-        "다시 적용",
-        None,
-        "sheet-act:filter-reapply",
-    ),
-    item(
-        "sheet:filter-clear",
-        "필터 지우기",
-        None,
-        "sheet-act:filter-clear",
-    ),
+    sheet_act!("sheet:row-delete", "행 삭제", "row-delete"),
+    sheet_act!("sheet:col-delete", "열 삭제", "col-delete"),
+    sheet_act!("sheet:hide", "숨기기", "hide"),
+    sheet_act!("sheet:unhide", "숨기기 취소", "unhide"),
+    sheet_act!("sheet:merge", "셀 병합", "merge"),
+    sheet_act!("sheet:unmerge", "병합 해제", "unmerge"),
+    sheet_act!("sheet:sort", "정렬…", "sort-dialog"),
+    sheet_act!("sheet:filter", "필터", "filter-toggle"),
+    sheet_act!("sheet:filter-reapply", "다시 적용", "filter-reapply"),
+    sheet_act!("sheet:filter-clear", "필터 지우기", "filter-clear"),
     item(
         "tool:diagnose",
         "문장 진단 및 요약",

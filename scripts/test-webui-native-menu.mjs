@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { loadUiModule } from "./test-support/load-ui-module.mjs";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { readText } from "./test-support/read-text.mjs";
+import { itemTable } from "./test-support/rust-menu-table.mjs";
 
 // The native menu bar (PD-102, macOS only since PD-121): the Rust table and the page's list name the same ids and
 // actions, the page runs them through the shortcut handlers, and the shell grants the page nothing for it. The page's
@@ -15,8 +16,7 @@ const CHROME_JS = new URL("crates/easyoffice-app/ui/shell-chrome.js", REPO);
 
 function rustItems() {
   const source = read("crates/easyoffice-desktop/src/native_menu.rs");
-  const start = source.indexOf("pub const ITEMS");
-  const table = source.slice(start, source.indexOf("];", start));
+  const table = itemTable(source);
   const items = [...table.matchAll(/item\(\s*"([^"]+)",\s*"([^"]+)",\s*(None|Some\("([^"]+)"\)),\s*"([^"]+)",?\s*\)/g)];
   return items.map((m) => ({ id: m[1], label: m[2], accelerator: m[4] ?? null, action: m[5] }));
 }

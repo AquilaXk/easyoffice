@@ -804,7 +804,10 @@ fn the_spreadsheet_bar_has_the_number_format_and_row_column_items_in_the_page_or
     assert_eq!(
         sheet,
         [
-            "행·열 틀 고정",
+            "첫 행 고정",
+            "첫 열 고정",
+            "선택 행/열 고정",
+            "틀 고정 해제",
             s,
             "행 위에 삽입",
             "행 아래에 삽입",
@@ -818,6 +821,8 @@ fn the_spreadsheet_bar_has_the_number_format_and_row_column_items_in_the_page_or
             s,
             "셀 병합",
             "병합 해제",
+            s,
+            "탭 색",
             s,
             "용지 방향 전환",
             "여백 전환",
