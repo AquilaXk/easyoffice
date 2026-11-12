@@ -3,6 +3,8 @@ use std::collections::HashSet;
 use crate::EasyOfficeError;
 
 const MAX_JSON_NESTING_DEPTH: usize = 32;
+/// Keys an object may hold before duplicate detection switches from a scan to a hash set.
+const LINEAR_KEY_LIMIT: usize = 16;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StrictJsonValue {
@@ -427,7 +429,9 @@ impl<'a> JsonCursor<'a> {
                     self.pos += 1;
                     return Some(StrictJsonValue::Object(entries));
                 }
-                let mut seen_keys: HashSet<String> = HashSet::new();
+                // Small objects (nearly all of them) compare keys directly; a hash set is built
+                // only once an object has `LINEAR_KEY_LIMIT` keys, so wide objects stay linear.
+                let mut seen_keys: Option<HashSet<String>> = None;
                 loop {
                     self.skip_ws();
                     if self.peek_byte()? != b'"' {
@@ -435,7 +439,18 @@ impl<'a> JsonCursor<'a> {
                     }
                     self.pos += 1;
                     let key = self.parse_str()?;
-                    if !seen_keys.insert(key.clone()) {
+                    let duplicate = match seen_keys.as_mut() {
+                        Some(set) => !set.insert(key.clone()),
+                        None => {
+                            let duplicate = entries.iter().any(|(k, _)| *k == key);
+                            if !duplicate && entries.len() + 1 == LINEAR_KEY_LIMIT {
+                                let set = entries.iter().map(|(k, _)| k.clone());
+                                seen_keys = Some(set.chain([key.clone()]).collect());
+                            }
+                            duplicate
+                        }
+                    };
+                    if duplicate {
                         return None;
                     }
                     self.skip_ws();
@@ -590,5 +605,27 @@ mod tests {
         .unwrap();
         let encoded = complex.to_json_string();
         assert_eq!(StrictJsonValue::parse(&encoded).unwrap(), complex);
+    }
+
+    #[test]
+    fn duplicate_keys_are_refused_before_and_after_the_hash_set_switch() {
+        for width in [1usize, 2, 15, 16, 17, 40] {
+            let pairs: Vec<String> = (0..width).map(|i| format!("\"k{i}\":{i}")).collect();
+            let plain = format!("{{{}}}", pairs.join(","));
+            assert_eq!(
+                StrictJsonValue::parse(&plain)
+                    .unwrap()
+                    .as_object()
+                    .unwrap()
+                    .len(),
+                width
+            );
+            for repeated in [0, width / 2, width - 1] {
+                let mut with_duplicate = pairs.clone();
+                with_duplicate.push(format!("\"k{repeated}\":0"));
+                let text = format!("{{{}}}", with_duplicate.join(","));
+                assert!(StrictJsonValue::parse(&text).is_err(), "{text}");
+            }
+        }
     }
 }
