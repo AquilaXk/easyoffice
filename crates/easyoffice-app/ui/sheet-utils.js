@@ -613,6 +613,7 @@
       return { t: "text", v: String(node.nodeValue ?? node.textContent ?? "") };
     }
     if (node.nodeType !== 1) return null;
+    if (node.classList?.contains("doc-page-layer")) return null;
     const tag = String(node.tagName || "div").toLowerCase();
     const attrs = {};
     SAFE_SERIALIZED_ATTRS.forEach((name) => {
@@ -657,7 +658,8 @@
     const data = {};
     if (node.dataset && typeof node.dataset === "object") {
       Object.keys(node.dataset).forEach((k) => {
-        if (node.dataset[k] !== undefined) data[k] = String(node.dataset[k]);
+        // `eoPg` is the page layout's own mark (`doc-pages.js`), made again after a restore.
+        if (k !== "eoPg" && node.dataset[k] !== undefined) data[k] = String(node.dataset[k]);
       });
     }
     const children = [];

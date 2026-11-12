@@ -106,14 +106,6 @@ select:focus-visible,
 }
 .doc-table-toolbar { display: flex; align-items: center; gap: 6px; margin: 12px 0 6px; }
 .doc-inline-table { margin-bottom: 12px; }
-.doc-page-footer {
-  margin-top: 18px;
-  padding-top: 8px;
-  border-top: 1px solid var(--ui-border-light);
-  text-align: center;
-  font-size: 11px;
-  color: var(--ui-text-muted);
-}
 .sheet-surface, .converter-surface { max-width: 100%; min-height: 360px; padding: 18px; }
 .converter-surface { max-width: 880px; margin: 0 auto; }
 .manuscript-notice {

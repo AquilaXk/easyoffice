@@ -412,22 +412,28 @@
       return { chars, words, lineCount };
     }
 
-    function updateStudioPosition(text, chars, estPages, precomputedLines) {
-      const posEl = document.getElementById("status-studio-pos");
-      if (!posEl) return;
-      const editor = document.getElementById("doc-editor");
-      const cols = Number.parseInt(editor?.style?.columnCount || "1", 10) || 1;
-      const lineCount = precomputedLines ?? countTextMetrics(text).lineCount;
-      const colChars = Math.max(1, chars % 60 || Math.min(60, chars));
-      posEl.textContent =
-        "1/" + estPages + " 쪽   " + cols + "단   " + lineCount + "줄   " + colChars + "칸 | 구역: 1 / 1 |";
-    }
+    // Page numbers come from the page layout (`doc-pages.js`); the text figures are the last ones counted.
+    let lastMetrics = { chars: 0, lineCount: 1 };
 
-    function updateDocFilename(estPages) {
+    function renderPageStatus() {
+      const pages = deps.getDocPages?.();
+      const total = pages ? pages.pageCount() : 1;
+      const current = Math.min(total, pages ? pages.currentPage() : 1);
+      const editor = document.getElementById("doc-editor");
+      const posEl = document.getElementById("status-studio-pos");
+      if (posEl) {
+        const cols = Number.parseInt(editor?.style?.columnCount || "1", 10) || 1;
+        const { chars, lineCount } = lastMetrics;
+        const colChars = Math.max(1, chars % 60 || Math.min(60, chars));
+        posEl.textContent = current + "/" + total + " 쪽   " + cols + "단   " + lineCount + "줄   " + colChars + "칸 | 구역: 1 / 1 |";
+      }
+      const zoneEl = document.getElementById("doc-page-zone-indicator");
+      if (zoneEl) zoneEl.textContent = current + " / " + total + " 쪽 · 구역: 1 / 1 · " + insertModeLabel;
       const fileEl = document.getElementById("status-doc-filename");
-      if (!fileEl) return;
-      const activeTabTitle = getWindowBridge?.()?.getDocumentName(getActiveModule());
-      fileEl.textContent = (activeTabTitle || "제목 없음") + " — " + estPages + "페이지";
+      if (fileEl) {
+        const activeTabTitle = getWindowBridge?.()?.getDocumentName(getActiveModule());
+        fileEl.textContent = (activeTabTitle || "제목 없음") + " — " + total + "페이지";
+      }
     }
 
     function computeSmartStats() {
@@ -437,13 +443,8 @@
       const { chars, words, lineCount } = countTextMetrics(text);
       const secs = Math.max(1, Math.ceil((words / 220) * 60));
       statsEl.textContent = "문자: " + chars + " · 단어: " + words + " · 읽기 시간: " + secs + "초";
-      const estPages = Math.max(1, Math.ceil(chars / 1200));
-      const zoneEl = document.getElementById("doc-page-zone-indicator");
-      if (zoneEl) {
-        zoneEl.textContent = "1 / " + estPages + " 쪽 · 구역: 1 / 1 · " + insertModeLabel;
-      }
-      updateStudioPosition(text, chars, estPages, lineCount);
-      updateDocFilename(estPages);
+      lastMetrics = { chars, lineCount };
+      renderPageStatus();
     }
 
     function applySmartDiagnoseDom(res, updateFeedback) {
@@ -907,7 +908,7 @@
     return {
       runPiiScrubAction, resolveSourceScopeKind, buildConversionContent, resolveConverterInput, resolveSaveFileBase, triggerBase64Download, deliverSavedFile,
       describeDeliveryFailure, describeConversionSpec, describePdfHighlight, openToolDialog, saveActiveModuleDocument,
-      computeSmartStats, applySmartDiagnoseDom, runSmartDiagnoseAction, runModuleSecurityAudit,
+      computeSmartStats, renderPageStatus, applySmartDiagnoseDom, runSmartDiagnoseAction, runModuleSecurityAudit,
       fetchSecurityAuditOutcome, applySecurityAuditDom, runSecurityAuditAction, runBenchmarkAction,
       setupStudioChromeControls, runStudioCommand: (cmd) => dispatchStudioIconCmd(cmd, document.getElementById("doc-editor"), null),
     };

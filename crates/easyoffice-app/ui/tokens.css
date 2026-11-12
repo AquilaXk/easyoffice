@@ -119,6 +119,8 @@
   --shadow-xs: var(--shadow-light);
 
   --overlay-bg: rgba(0, 0, 0, 0.2);
+  /* The page edge resolves here, so the document paper (which redeclares the light palette) keeps the theme's edge. */
+  --page-edge: var(--ui-border-strong);
 
   /* 타이포그래피 */
   --font-family-ui: -apple-system, BlinkMacSystemFont, '맑은 고딕', 'Malgun Gothic', 'Segoe UI', sans-serif;

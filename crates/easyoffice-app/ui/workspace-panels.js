@@ -70,10 +70,10 @@
 
   const { serializeDomChildren, restoreDomChildren, releaseDocImageUrls } = host.__EASYOFFICE_SHEET_UTILS__;
 
-  function insertBeforeDocFooter(docEditor, el) {
-    const footer = docEditor.querySelector("footer.doc-page-footer");
-    if (footer && footer.parentElement === docEditor) {
-      footer.before(el);
+  function insertBeforePageLayer(docEditor, el) {
+    const layer = docEditor.querySelector(":scope > footer.doc-page-layer");
+    if (layer) {
+      layer.before(el);
     } else {
       docEditor.appendChild(el);
     }
@@ -837,7 +837,7 @@
       aside.className = "eo-doc-footnote";
       aside.dataset.docFootnote = "true";
       aside.textContent = "각주 " + idx + ") [" + summary + "] 표준 문서 관리 지침 및 근거 조항 참조";
-      insertBeforeDocFooter(docEditor, aside);
+      insertBeforePageLayer(docEditor, aside);
     }
 
     function docEffectMailMerge(docEditor, summary) {
@@ -850,7 +850,7 @@
       box.dataset.docMailmerge = "true";
       box.textContent =
         "[메일 머지 필드 병합 (" + summary + ") · 성명: 이수현 · 기관명: 행정안전부 · 일자: 2026-10-25]";
-      if (!box.parentElement) insertBeforeDocFooter(docEditor, box);
+      if (!box.parentElement) insertBeforePageLayer(docEditor, box);
     }
 
     function docEffectHwpHeader(docEditor, summary) {
@@ -877,7 +877,7 @@
       span.textContent = "[누름틀 입력: {{성명}} / {{기관명}}]";
       rowP.appendChild(span);
       rowP.appendChild(document.createTextNode(" (" + summary + ")"));
-      insertBeforeDocFooter(docEditor, rowP);
+      insertBeforePageLayer(docEditor, rowP);
     }
 
     const DOC_MODULE_EFFECTS = {

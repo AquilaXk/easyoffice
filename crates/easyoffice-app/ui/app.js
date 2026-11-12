@@ -35,7 +35,7 @@
 
   const sheetRowCounts = {};
   let workspaceSession = null;
-  let docRunsUi = null, docLink = null, docToc = null, hwpHost = null, hwpSession = null, windowBridge = null;
+  let docRunsUi = null, docLink = null, docToc = null, docPages = null, hwpHost = null, hwpSession = null, windowBridge = null;
   const icons = host.__EASYOFFICE_ICONS__;
 
   function chainWorkspaceQueue(opFn) {
@@ -121,6 +121,8 @@
     runCommand: (levels) => ribbonHistory.executeTrackedRibbonCommand("doc-mod-toc", { toc: { levels } }),
   });
 
+  docPages = host.__EASYOFFICE_CREATE_DOC_PAGES__({ document, env: host, withUndo: docRunsUi.withUndo, onChange: () => workspacePanels.renderPageStatus() });
+
   sheetController = host.__EASYOFFICE_CREATE_SHEET_CONTROLLER__({
     document, sheetDataStore, sheetRowCounts, sheetStoreHelpers,
     getActiveModule: () => activeModule,
@@ -137,7 +139,7 @@
 
   workspacePanels = host.__EASYOFFICE_CREATE_WORKSPACE_PANELS__({
     document, URL, invokeIpc, docTabStore, sheetDataStore, slideDeckState, localRibbonState,
-    getDocRuns: () => docRunsUi, defaultHwpEditorNodes: DEFAULT_HWP_EDITOR_NODES, createEmptySlideStyleFields,
+    getDocRuns: () => docRunsUi, getDocPages: () => docPages, defaultHwpEditorNodes: DEFAULT_HWP_EDITOR_NODES, createEmptySlideStyleFields,
     parseCellRefParts, isExcludedDocChromeElement, extractEditableDocumentText,
     collectActiveScrubGroups, applyScrubResultsToGroups,
     scrubSheetStoreMap: sheetStoreHelpers.scrubSheetStoreMap, sheetController,
@@ -944,6 +946,7 @@
     docRunsUi.bind();
     docLink.bind();
     docToc.bind();
+    docPages.attach(document.getElementById("doc-editor"));
     setupSheetAndConverterHandlers();
     setupSlideAndPdfHandlers();
     setupSmartAndSecurityHandlers();

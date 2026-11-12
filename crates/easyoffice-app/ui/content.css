@@ -106,7 +106,8 @@
 #doc-editor[data-show-para-marks="true"] p::after { content: " ↵"; color: var(--accent-light); font-size: 0.82em; }
 #doc-editor[data-show-ctrl-marks="true"] h1::after,
 #doc-editor[data-show-ctrl-marks="true"] h2::after { content: " ¶"; color: var(--accent-light); font-size: 0.75em; }
-#doc-editor:not(.manuscript-grid) {
+#doc-editor:not(.manuscript-grid),
+.doc-page-sheet {
   background-image:
     linear-gradient(#d0d0d0, #d0d0d0),
     linear-gradient(#d0d0d0, #d0d0d0),
@@ -318,3 +319,43 @@
 ::highlight(eo-find-current) { background-color: #ff9632; color: #111827; }
 #eo-print-root .eo-print-flow,
 #eo-print-root .eo-print-sheet { color: #111827; border-color: #808080; }
+
+/* Pages of the document editor (doc-pages.js): the editor is one editable flow; the sheets of paper sit behind it
+   in the page layer (gap, shadow and paper follow the reference studio: rhwp-studio page-gap.ts, editor.css), a
+   block that moves to the next page gets a margin, and a paragraph that splits gets a float shape. */
+#doc-editor.eo-paged {
+  position: relative;
+  isolation: isolate;
+  width: var(--pg-w, 794px);
+  max-width: none !important;
+  min-height: var(--pg-doc-h, 1123px);
+  background-color: transparent;
+  filter: none;
+}
+#doc-editor.eo-paged:not(.manuscript-grid) { background-image: none; }
+.doc-page-layer { position: absolute; inset: 0; z-index: -1; margin: 0; padding: 0; border: 0; pointer-events: none; user-select: none; counter-reset: eo-page; }
+.doc-page-sheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: var(--pg-h, 1123px);
+  font-style: normal;
+  background-color: var(--doc-paper);
+  box-shadow: 0 0 0 1px var(--page-edge), 0 1px 4px var(--overlay-bg);
+  counter-increment: eo-page;
+}
+.doc-page-sheet::after {
+  content: "- " counter(eo-page) " -";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 18px;
+  text-align: center;
+  font-size: 10pt;
+  line-height: 1;
+  color: inherit;
+}
+@media screen {
+  #doc-editor [data-eo-pg~="m"] { margin-top: var(--pg-mt, 0px) !important; }
+  #doc-editor [data-eo-pg~="b"]::before { content: ""; float: left; width: 100%; height: var(--pg-fh, 0px); shape-outside: var(--pg-shape, none); }
+}

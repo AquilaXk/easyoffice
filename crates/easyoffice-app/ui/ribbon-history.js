@@ -401,7 +401,7 @@
     const STYLE_FONT_SIZES = ["15px", "18px", "22px", "13.5px"];
     const PAGE_PADDINGS = ["28px 36px", "16px 20px", "36px 52px"];
     const MAX_DOC_COLUMNS = 3;
-    const LANDSCAPE_MAX_WIDTH = "980px";
+    const LANDSCAPE_MAX_WIDTH = host.__EASYOFFICE_DOC_PAGES_CORE__.LANDSCAPE_MAX_WIDTH;
     const endsWithAny = (cmdId, suffixes) => suffixes.some((suffix) => cmdId.endsWith(suffix));
 
     function docEffectHomeStyle({ targetEl }) {

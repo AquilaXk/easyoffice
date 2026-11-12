@@ -38,6 +38,8 @@ const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/doc-runs-ui.js",
   "../crates/easyoffice-app/ui/doc-link.js",
   "../crates/easyoffice-app/ui/doc-toc.js",
+  "../crates/easyoffice-app/ui/doc-pages-core.js",
+  "../crates/easyoffice-app/ui/doc-pages.js",
   "../crates/easyoffice-app/ui/desktop-bridge.js",
   "../crates/easyoffice-app/ui/window-bridge.js",
   "../crates/easyoffice-app/ui/ipc-transport.js",
