@@ -3219,3 +3219,19 @@
 - **Alternatives rejected** 행렬 칸을 값 모델의 enum으로 바꾸는 방식(모든 소비자를 고쳐야 해 Phase 9로 미룸), 함수 이름 표를 이분 탐색·해시로 바꾸는 방식(측정에서 이득이 없음), 참조 엔진의 선형 구간 탐색을 그대로 쓰는 `FREQUENCY`(3배 느림), 반복이 수렴하지 않을 때 마지막 값을 돌려주는 방식(Fail-Closed로 `#NUM!`).
 - **Verified by** `cargo test -p easyoffice-sheet --test sheet_univer_functions_b_fin --test sheet_univer_functions_b_eng --test sheet_univer_functions_b_stat --test sheet_univer_functions_b_text_info`(참조 엔진 단위 시험을 자료와 기대값 그대로 옮긴 779건), `cargo test -p easyoffice-sheet --test sheet_univer_functions_b_limits`(상한, 악의적 입력, 높은 차수 `LINEST`, 배열 결과 경로), `cargo test -p easyoffice-sheet --release --test sheet_univer_functions_b_bench -- --ignored --nocapture --test-threads=1`(측정), `node scripts/check-repo-hygiene.mjs`(수치 203 동기화).
 - **Revisit when** 분포 함수와 호환 이름 묶음(8C), 바이트 폭 텍스트 함수의 QA 결정, 동적 배열(Phase 9), 1904 날짜 체계가 필요할 때.
+
+## PD-202. 문서 표 명령은 캐럿이 있는 표에 작동하고 표 밖에서는 회색으로 둔다
+
+- **Status** Implemented (QA 요청 2026-11-12). `ui/doc-table-grid.js`, `ui/doc-table.js`, `ribbon-history.js`, `workspace-tools.js`, `index.html`, `native_menu.rs`
+- **Context** 표 메뉴의 `줄 추가`·`셀 합치기`·`블록 합계`·`수식 계산`은 `index.html`에 없는 단추를 누르거나 고정 id(`#doc-table-body`)의 표만 다뤄 새로 만든 표와 파일에서 연 표에서 아무 일도 하지 않았습니다.
+- **Decision (`PD-202`)**
+  1. **대상**: 캐럿(또는 선택 끝 두 칸)이 있는 `table`입니다. 표를 HTML 표 모델의 칸 격자(병합 칸이 오른쪽·아래 자리를 차지)로 읽고, 저장 경로(`save-payload.js` `readTableGrid`)와 같은 해석이라 편집 결과가 그대로 `colspan`/`rowspan` 병합으로 저장됩니다.
+  2. **항목과 라벨**: 참조 한글 편집기(`ko.ts` `command.table.*`)의 라벨을 씁니다. `위쪽에 줄 추가하기`, `아래쪽에 줄 추가하기`, `왼쪽에 칸 추가하기`, `오른쪽에 칸 추가하기`, `줄 지우기`, `칸 지우기`, `셀 나누기`, `셀 합치기`, `블록 합계`. 줄·칸을 추가할 때 걸친 병합 칸은 새 칸을 만들지 않고 span만 늘립니다. 줄·칸을 지울 때는 걸친 병합 칸의 span을 줄이고, 지운 줄에서 시작해 아래로 이어지는 칸은 다음 줄로 옮깁니다. 모든 줄이나 칸을 지우면 표를 지웁니다.
+  3. **합치기·나누기**: 선택한 칸 범위를 걸친 칸이 모두 들어가도록 넓혀 왼쪽 위 칸에 합치고 글자는 줄을 바꿔 이어 붙입니다. 나누기는 합친 칸만 원래 칸으로 되돌립니다(참조 앱의 줄·칸 수를 묻는 나누기 대화상자는 두지 않습니다).
+  4. **블록 합계**: 한 줄 블록은 오른쪽 칸에, 그 밖의 블록은 칸마다 합을 블록 아래 줄에 씁니다(표 끝이면 줄·칸을 더함). 칸 하나는 위쪽 숫자 칸(없으면 왼쪽)의 합을 그 칸에 씁니다. 숫자가 없으면 `합할 숫자 없음`입니다. `표 셀 수식 계산`은 캐럿 표의 `=SUM(ABOVE)` 같은 수식을 저장 경로와 같은 계산(`evaluateDocTableFormulas`)으로 값으로 바꾸고, `자동 합계`는 블록 합계와 같습니다.
+  5. **상태와 키**: 표 안에 캐럿이 없으면 표 전용 항목(위 항목, `표 셀 수식 계산`, `이중선·대각선 테두리`)은 메뉴에서 회색입니다. 한 명령이 실행 취소 한 단계입니다. Tab은 다음 칸, Shift+Tab은 앞 칸, 마지막 칸의 Tab은 아래에 새 줄을 만듭니다. `셀 나누기` 항목은 문서 창에만 있고(한글 창의 네이티브 막대는 편집기의 같은 항목을 씀), 네이티브 막대에는 나머지 항목이 같은 순서로 있습니다.
+- **Why** 표 모델이 저장·열기와 같은 격자라 따로 맞출 구조가 없고, 한 모듈의 순수 DOM 연산이라 시험이 쉽습니다.
+- **Trade-offs** 줄·칸 추가는 한 줄·칸씩이고(참조 앱의 개수 대화상자 없음), 칸을 나눌 때 줄·칸 수를 고를 수 없습니다. 테두리·배경(`셀 테두리/배경`)과 `블록 계산식`, 평균·곱은 만들지 않았습니다.
+- **Alternatives rejected** 참조 앱처럼 셀 선택 모드(F5)를 따로 두는 방식(문서 창의 글자 선택이 이미 칸 범위를 정함), 표마다 고정 id를 부여하는 방식.
+- **Verified by** `node --test scripts/test-webui-doc-table-ops.mjs`(줄·칸 추가와 병합 칸 걸침, 합치기·나누기와 저장 병합 목록, 지우기, 블록 합계, 수식 계산, 실행 취소, Tab, 회색 상태). 병합 저장·열기 왕복은 `cargo test -p easyoffice-formats --test table_merge`(DOCX `w:gridSpan`·`w:vMerge`, ODT `number-columns-spanned`·`number-rows-spanned`, HWPX 칸 span).
+- **Revisit when** 줄·칸 개수 대화상자, 테두리·배경 대화상자, 칸 나누기 대화상자가 필요할 때.
