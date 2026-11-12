@@ -9,8 +9,6 @@ import {
   textCopyPlan,
   textCutPlan,
   writeTextHtmlWithPlainFallback,
-  type ClipboardWasm,
-  type CutHandler,
 } from './clipboard-cut.ts';
 
 type CursorProbe = { cursor?: { isInHeaderFooter?: () => boolean; isInFootnote?: () => boolean } };
@@ -47,7 +45,7 @@ export function safeCutCommand(base: CommandDef): CommandDef {
         base.execute(services, params);
         return;
       }
-      const plan = textCutPlan(services.wasm as unknown as ClipboardWasm, handler as unknown as CutHandler, {
+      const plan = textCutPlan(services.wasm, handler, {
         markInternalHtml: (html, text) => prepareRhwpInternalClipboardHtml(handler, html, text),
         writeTextHtml: writeWithFallback,
       });
@@ -75,7 +73,7 @@ export function safeCopyCommand(base: CommandDef): CommandDef {
         base.execute(services, params);
         return;
       }
-      const plan = textCopyPlan(services.wasm as unknown as ClipboardWasm, handler as unknown as CutHandler, {
+      const plan = textCopyPlan(services.wasm, handler, {
         markInternalHtml: (html, text) => prepareRhwpInternalClipboardHtml(handler, html, text),
         writeTextHtml: writeWithFallback,
       });

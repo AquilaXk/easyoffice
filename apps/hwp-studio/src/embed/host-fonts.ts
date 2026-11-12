@@ -34,6 +34,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function isSnapshotShape(value: Record<string, unknown>): value is Record<string, unknown> & HostFontSnapshot {
+  return typeof value.revision === 'string' && Array.isArray(value.faces);
+}
+
 /** The provider the editor installs, the relay that carries its requests to the shell port, and
  *  `reply`, which accepts what the shell answered. */
 export function createShellFontBridge(timeoutMs = FONT_REQUEST_TIMEOUT_MS) {
@@ -71,8 +75,8 @@ export function createShellFontBridge(timeoutMs = FONT_REQUEST_TIMEOUT_MS) {
         signal,
       );
       // `HostFontSource` validates every field of the catalog before it keeps it.
-      if (!isRecord(reply.list)) throw new Error('The shell sent no font list');
-      return reply.list as unknown as HostFontSnapshot;
+      if (!isRecord(reply.list) || !isSnapshotShape(reply.list)) throw new Error('The shell sent no font list');
+      return reply.list;
     },
     async readFace(face, revision, signal): Promise<HostFontData> {
       const reply = await ask(

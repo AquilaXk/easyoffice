@@ -18,7 +18,7 @@ export function macShortcutLabel(label: string): string {
     .replace(/\bShift\+/g, '⇧');
 }
 
-export function applyMacShortcutPresentation(doc: Document): void {
+export function applyMacShortcutPresentation(doc: ParentNode): void {
   doc.querySelectorAll<HTMLElement>(SHORTCUT_TEXT_SELECTOR).forEach((element) => {
     const text = element.textContent;
     if (text) element.textContent = macShortcutLabel(text);

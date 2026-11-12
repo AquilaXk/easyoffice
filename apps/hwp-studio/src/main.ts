@@ -121,7 +121,20 @@ function completeHostSave(fileName?: string): Promise<{ ok: true; wasDirty: bool
 
 // 호스트 통합용 공개 API — 팝업/포크 등 SDK 없이 스튜디오 페이지 안에서 통합하는
 // 호스트를 위해 프로덕션 빌드에도 항상 노출한다 (iframe 호스트는 embed RPC 사용).
-(window as any).rhwpStudio = {
+declare global {
+  interface Window {
+    rhwpStudio: {
+      notifySaved: (fileName?: string) => ReturnType<typeof completeHostSave>;
+      fonts: { setProvider: typeof setHostFontProvider; getState: typeof getHostFontState };
+      automation?: AutomationHost;
+    };
+    __renderBackend?: RendererSessionDiagnostics['effectiveBackend'];
+    __renderBackendFallbackReason?: RendererSessionDiagnostics['fallbackReason'];
+    __rendererSelection?: RendererSessionDiagnostics;
+  }
+}
+
+window.rhwpStudio = {
   notifySaved: (fileName?: string) => completeHostSave(fileName),
   fonts: { setProvider: setHostFontProvider, getState: getHostFontState },
 };
@@ -222,7 +235,7 @@ const automation = new AutomationHost({
   getContext,
   getMenuContainer: () => document.getElementById('menu-bar'),
 });
-(window as any).rhwpStudio.automation = automation;
+window.rhwpStudio.automation = automation;
 
 
 // 모든 내장 커맨드 등록. embed 프로파일에서는 문서 수명주기 커맨드를 등록하지 않는다 —
@@ -558,9 +571,9 @@ function setupEventListeners(): void {
     const diagnostics = payload as RendererSessionDiagnostics;
     renderBackendFallbackReason = diagnostics.fallbackReason;
     if (import.meta.env.DEV) {
-      (window as any).__renderBackend = diagnostics.effectiveBackend;
-      (window as any).__renderBackendFallbackReason = diagnostics.fallbackReason;
-      (window as any).__rendererSelection = diagnostics;
+      window.__renderBackend = diagnostics.effectiveBackend;
+      window.__renderBackendFallbackReason = diagnostics.fallbackReason;
+      window.__rendererSelection = diagnostics;
     }
   });
 
@@ -834,7 +847,7 @@ installEmbedRuntime({
         if (context.recents && panel) {
           renderShellRecents(panel, context.recents);
           if (detectPlatformKind() === 'mac') {
-            applyMacShortcutPresentation(panel as unknown as Document);
+            applyMacShortcutPresentation(panel);
           }
         }
         // "PDF로 내보내기" is shown only when the shell says it can do it (desktop app).
