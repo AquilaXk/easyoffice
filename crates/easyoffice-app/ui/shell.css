@@ -173,6 +173,9 @@
 /* Last of the dialog display rules, so a hidden row, stack or control stays hidden. */
 .tool-dialog [hidden] { display: none; }
 /* In-cell list arrow and menu of a data validation list (sheet-rules-ui.js). */
+/* A selected cell keeps the rule's fill under the selection: the active cell shows it as is (with its outline), the other cells of the range get the range color on top, translucent. */
+.sheet-grid td[data-cf].selected-cell { background-color: var(--cf-bg, var(--ui-surface)); }
+.sheet-grid td[data-cf].in-range:not(.selected-cell) { background-color: var(--cf-bg, var(--ui-accent-bg-light)); box-shadow: inset 0 0 0 100px color-mix(in srgb, var(--ui-accent-bg-light) 50%, transparent); }
 .cf-dropdown-btn { position: fixed; z-index: 30; width: 18px; height: 18px; padding: 0; border: 1px solid var(--color-border-dark); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); cursor: pointer; }
 .cf-dropdown-menu { position: fixed; z-index: 31; min-width: 96px; max-height: 220px; overflow-y: auto; margin: 0; padding: 2px 0; list-style: none; border: 1px solid var(--color-border-dark); background: var(--color-surface-raised); color: var(--color-text); box-shadow: var(--shadow-dropdown); }
 .cf-dropdown-btn[hidden] { display: none; } /* the button's own `display` (icon button) would show it while hidden */

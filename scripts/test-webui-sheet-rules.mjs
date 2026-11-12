@@ -636,3 +636,21 @@ test("the pivot combos have a placeholder option until a range names fields, and
   assert.match(document.getElementById("sheet-pivot-status").textContent, /데이터 범위/);
   assert.equal(document.getElementById("sheet-pivot-dialog").open, true, "nothing was built");
 });
+
+test("the selection lies translucent over a rule's fill instead of hiding it", () => {
+  const css = fs.readFileSync(new URL("../crates/easyoffice-app/ui/shell.css", import.meta.url), "utf8");
+  const body = (selector) => {
+    const at = css.indexOf(selector + " {");
+    assert.ok(at >= 0, selector);
+    return css.slice(at, css.indexOf("}", at));
+  };
+  // The cells of a range keep the rule's fill and add the range color on top, translucent.
+  const range = body(".sheet-grid td[data-cf].in-range:not(.selected-cell)");
+  assert.match(range, /background-color: var\(--cf-bg,/);
+  assert.match(range, /box-shadow: inset 0 0 0 \d+px color-mix\(in srgb, var\(--ui-accent-bg-light\) \d+%, transparent\)/);
+  // The active cell shows the rule's fill, and without one the plain cell surface as before.
+  assert.match(body(".sheet-grid td[data-cf].selected-cell"), /background-color: var\(--cf-bg, var\(--ui-surface\)\)/);
+  // shell.css loads after styles.css, so these win over the plain selection rules at equal specificity.
+  const html = fs.readFileSync(new URL("../crates/easyoffice-app/ui/index.html", import.meta.url), "utf8");
+  assert.ok(html.indexOf("shell.css") > html.indexOf("styles.css"));
+});
