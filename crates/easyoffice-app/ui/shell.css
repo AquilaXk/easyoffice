@@ -177,6 +177,18 @@
 .cf-dropdown-menu { position: fixed; z-index: 31; min-width: 96px; max-height: 220px; overflow-y: auto; margin: 0; padding: 2px 0; list-style: none; border: 1px solid var(--color-border-dark); background: var(--color-surface-raised); color: var(--color-text); box-shadow: var(--shadow-dropdown); }
 .cf-dropdown-menu li { padding: 3px 10px; cursor: pointer; white-space: nowrap; }
 .cf-dropdown-menu li:hover, .cf-dropdown-menu li[aria-selected="true"] { background: var(--color-accent-bg); }
+/* Check mark (the check shape of the cell icons) and the box of a check box cell and of a multiple list item: a 14px box, filled with the accent when checked. */
+:root { --dv-check-mask: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%3E%3Cpath%20d%3D%22M4%2013l2.5-2.5%203.5%203.5%207.5-7.5L20%209%2010%2019z%22%2F%3E%3C%2Fsvg%3E"); }
+/* Check box cell (sheet-rules.js sets data-dv-box): the box is centered in the cell and the value text is hidden while it is the checked or the unchecked value. */
+.sheet-grid td[data-dv-box] { position: relative; }
+.sheet-grid td[data-dv-box].dv-box-hide-value:not(.editing) { color: transparent; }
+.sheet-grid td[data-dv-box]::before { content: ""; position: absolute; left: 50%; top: 50%; width: 14px; height: 14px; box-sizing: border-box; margin: -7px 0 0 -7px; border: 1px solid var(--color-border-dark); border-radius: var(--radius-sm); background: var(--color-surface); cursor: pointer; }
+.sheet-grid td[data-dv-box="on"]::before { border-color: var(--color-primary); background: var(--color-primary); }
+.sheet-grid td[data-dv-box="on"]::after { content: ""; position: absolute; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; background: var(--color-surface); -webkit-mask: var(--dv-check-mask) center / 12px no-repeat; mask: var(--dv-check-mask) center / 12px no-repeat; pointer-events: none; }
+.cf-dropdown-menu[aria-multiselectable="true"] li { position: relative; padding-left: 30px; }
+.cf-dropdown-menu[aria-multiselectable="true"] li::before { content: ""; position: absolute; left: 10px; top: 50%; width: 14px; height: 14px; box-sizing: border-box; margin-top: -7px; border: 1px solid var(--color-border-dark); border-radius: var(--radius-sm); background: var(--color-surface); }
+.cf-dropdown-menu[aria-multiselectable="true"] li[aria-checked="true"]::before { border-color: var(--color-primary); background: var(--color-primary); }
+.cf-dropdown-menu[aria-multiselectable="true"] li[aria-checked="true"]::after { content: ""; position: absolute; left: 10px; top: 50%; width: 14px; height: 14px; margin-top: -7px; background: var(--color-surface); -webkit-mask: var(--dv-check-mask) center / 12px no-repeat; mask: var(--dv-check-mask) center / 12px no-repeat; }
 
 /* HWP printing (hwp-print.js, PD-104): the pages live in a hidden root that only the print output shows. */
 #eo-print-root { display: none; }

@@ -14,7 +14,7 @@
 use crate::functions_date_fin::{civil_from_serial, serial_from_civil};
 use easyoffice_formats::TimePeriod;
 
-/// Excel serial of 1970-01-01.
+/// Spreadsheet serial of 1970-01-01.
 const UNIX_EPOCH_SERIAL: i64 = 25_569;
 const SECONDS_PER_DAY: i64 = 86_400;
 

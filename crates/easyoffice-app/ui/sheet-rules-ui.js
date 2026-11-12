@@ -16,7 +16,7 @@
     ["formula", "수식"],
   ];
   // Rule types that format by style (the rest draw their own colors, bars or icons).
-  const STYLE_TYPES = new Set(["cellIs", "text", "top", "average", "dup", "expr", "blanks", "errors"]);
+  const STYLE_TYPES = new Set(["cellIs", "text", "top", "average", "dup", "expr", "blanks", "errors", "period"]);
   const CMP_LABELS = {
     between: "사이",
     notBetween: "사이 아님",
@@ -36,9 +36,22 @@
     expr: "수식",
     blanks: "빈 셀",
     errors: "오류",
+    period: "날짜",
     scale: "색조",
     bar: "데이터 막대",
     icons: "아이콘 집합",
+  };
+  const PERIOD_LABELS = {
+    yesterday: "어제",
+    today: "오늘",
+    tomorrow: "내일",
+    last7Days: "지난 7일",
+    lastWeek: "지난주",
+    thisWeek: "이번 주",
+    nextWeek: "다음 주",
+    lastMonth: "지난달",
+    thisMonth: "이번 달",
+    nextMonth: "다음 달",
   };
   const COLOR_FIELDS = [
     "sheet-cf-stop0-color",
@@ -49,6 +62,7 @@
     "sheet-cf-bg",
     "sheet-cf-fg",
   ];
+  const LIST_KINDS = new Set(["list", "listMultiple"]);
   const DEFAULT_MESSAGE = "입력한 값이 이 셀에 설정된 제한을 만족하지 않습니다.";
 
   const strip = (text) => String(text ?? "").trim().replace(/^=/, "");
@@ -109,6 +123,7 @@
       else if (rule.t === "text") detail = " " + rule.op + " " + rule.text;
       else if (rule.t === "top") detail = (rule.bottom ? " 하위 " : " 상위 ") + rule.n + (rule.percent ? "%" : "");
       else if (rule.t === "expr") detail = " " + rule.formula;
+      else if (rule.t === "period") detail = " " + (PERIOD_LABELS[rule.period] || rule.period);
       else if (rule.t === "icons") detail = " " + (rules.ICON_SET_LABELS[rule.set] || rule.set);
       return rule.r + " · " + kind + detail;
     }
@@ -185,6 +200,7 @@
     // when the page starts, so the dialog is right however it gets opened.
     function bindCfLayout() {
       for (const [kindId] of valueRows()) fillOptions(kindId, VALUE_KINDS);
+      fillOptions("sheet-cf-period-select", Object.entries(PERIOD_LABELS));
       fillOptions("sheet-cf-icon-set-select", rules.ICON_SET_NAMES.map((n) => [n, rules.ICON_SET_LABELS[n]]));
       $("sheet-cf-type-select")?.addEventListener("change", () => {
         const type = val("sheet-cf-type-select");
@@ -239,6 +255,7 @@
       setVal("sheet-cf-std", "0");
       setSelect("sheet-cf-dup-select", "dup");
       setChecked("sheet-cf-not", false);
+      setSelect("sheet-cf-period-select", "today");
       setVal("sheet-cf-formula", "");
       const stops = [
         ["min", "", "#f8696b"],
@@ -306,6 +323,9 @@
           break;
         case "expr":
           setVal("sheet-cf-formula", rule.formula);
+          break;
+        case "period":
+          setSelect("sheet-cf-period-select", rule.period);
           break;
         case "scale": {
           const stops = rule.stops.length === 2 ? [rule.stops[0], null, rule.stops[1]] : rule.stops;
@@ -401,6 +421,9 @@
         case "expr":
           rule.formula = strip(val("sheet-cf-formula"));
           if (!rule.formula) return { error: "수식을 입력하세요." };
+          break;
+        case "period":
+          rule.period = val("sheet-cf-period-select");
           break;
         case "scale": {
           const stop = (i) => ({
@@ -509,9 +532,12 @@
       const d = rule || { t: "whole", op: "between", a: "", b: "", blank: true, drop: true, alert: "stop", showErr: true };
       setSelect("sheet-dv-type-select", d.t);
       setSelect("sheet-dv-cmp-select", d.op || "between");
-      setVal("sheet-dv-a", d.t === "list" ? "" : d.a);
-      setVal("sheet-dv-b", d.b || "");
-      setVal("sheet-dv-list", d.t === "list" ? d.a : "");
+      const own = LIST_KINDS.has(d.t) || d.t === "checkbox";
+      setVal("sheet-dv-a", own ? "" : d.a);
+      setVal("sheet-dv-b", own ? "" : d.b || "");
+      setVal("sheet-dv-list", LIST_KINDS.has(d.t) ? d.a : "");
+      setVal("sheet-dv-on", d.t === "checkbox" ? d.a : "");
+      setVal("sheet-dv-off", d.t === "checkbox" ? d.b || "" : "");
       setChecked("sheet-dv-blank", d.blank !== false);
       setChecked("sheet-dv-drop", d.drop !== false);
       setSelect("sheet-dv-alert-select", d.alert || "stop");
@@ -543,10 +569,16 @@
         promptTitle: val("sheet-dv-prompt-title"),
         prompt: val("sheet-dv-prompt"),
       };
-      if (t === "list") {
+      if (LIST_KINDS.has(t)) {
         rule.a = val("sheet-dv-list").trim();
         rule.op = "between";
+        rule.b = "";
         if (!rule.a) return { error: "목록 항목을 쉼표로 구분해 입력하거나 =범위를 입력하세요." };
+      } else if (t === "checkbox") {
+        rule.a = val("sheet-dv-on").trim();
+        rule.b = val("sheet-dv-off").trim();
+        rule.op = "between";
+        if (rule.a && rule.a.toLowerCase() === rule.b.toLowerCase()) return { error: "체크한 값과 하지 않은 값이 같음" };
       } else if (!rule.a) {
         return { error: "값을 입력하세요." };
       } else if ((rule.op === "between" || rule.op === "notBetween") && t !== "custom" && !rule.b) {
@@ -653,91 +685,9 @@
       return checkEntry(sheet, ref, text);
     }
 
-    // ---- list arrow ----------------------------------------------------------------------------
-
-    const arrow = { button: null, menu: null, ref: "" };
-
-    function hideArrow() {
-      if (arrow.button) arrow.button.hidden = true;
-      if (arrow.menu) arrow.menu.hidden = true;
-    }
-
-    function ensureArrow() {
-      if (arrow.button) return;
-      const button = document.createElement("button");
-      button.type = "button";
-      button.id = "sheet-dv-dropdown-btn";
-      button.className = "cf-dropdown-btn";
-      button.setAttribute("aria-label", "목록에서 선택");
-      button.setAttribute("aria-haspopup", "listbox");
-      host.__EASYOFFICE_ICONS__?.setIcon(document, button, "chevron-down");
-      button.hidden = true;
-      // Keep the cell selected while the arrow is pressed.
-      button.addEventListener("mousedown", (ev) => ev.preventDefault());
-      button.addEventListener("click", () => toggleMenu());
-      const menu = document.createElement("ul");
-      menu.id = "sheet-dv-dropdown-menu";
-      menu.className = "cf-dropdown-menu";
-      menu.setAttribute("role", "listbox");
-      menu.hidden = true;
-      menu.addEventListener("mousedown", (ev) => ev.preventDefault());
-      menu.addEventListener("click", (ev) => {
-        const li = ev.target.closest?.("li[data-value]");
-        if (!li) return;
-        const ref = arrow.ref;
-        hideArrow();
-        void applyCellEdits([{ ref, value: li.dataset.value, formula: "" }], "목록 선택");
-      });
-      document.body.appendChild(button);
-      document.body.appendChild(menu);
-      arrow.button = button;
-      arrow.menu = menu;
-      document.getElementById("sheet-viewport")?.addEventListener("scroll", hideArrow);
-    }
-
-    function toggleMenu() {
-      const sheet = getActiveSheetName();
-      const rule = rules.validationAt(sheet, arrow.ref);
-      if (!rule || !arrow.menu) return;
-      if (!arrow.menu.hidden) {
-        arrow.menu.hidden = true;
-        return;
-      }
-      arrow.menu.replaceChildren();
-      for (const item of rules.listItems(sheet, rule)) {
-        const li = document.createElement("li");
-        li.setAttribute("role", "option");
-        li.dataset.value = item;
-        li.textContent = item;
-        arrow.menu.appendChild(li);
-      }
-      const box = arrow.button.getBoundingClientRect();
-      arrow.menu.style.left = box.right - 96 + "px";
-      arrow.menu.style.top = box.bottom + 2 + "px";
-      arrow.menu.hidden = false;
-    }
-
-    // Shows the arrow beside the selected cell when it has a list validation.
-    function syncArrow() {
-      const td = document.querySelector("#pane-sheet td.selected-cell");
-      const ref = td?.dataset?.cell;
-      const rule = ref && rules.hasAny() ? rules.validationAt(getActiveSheetName(), ref) : null;
-      if (!rule || rule.t !== "list" || rule.drop === false) {
-        hideArrow();
-        return;
-      }
-      ensureArrow();
-      arrow.ref = ref;
-      const box = td.getBoundingClientRect();
-      arrow.button.style.left = box.right - 20 + "px";
-      arrow.button.style.top = box.top + Math.max(0, (box.height - 18) / 2) + "px";
-      arrow.button.hidden = false;
-      arrow.menu.hidden = true;
-      if (rule.showPrompt && (rule.prompt || rule.promptTitle)) {
-        const fb = document.getElementById("status-command-feedback");
-        if (fb) fb.textContent = [rule.promptTitle, rule.prompt].filter(Boolean).join(": ");
-      }
-    }
+    // The arrow and menu of lists and the check box cells (PD-200).
+    const widgets = host.__EASYOFFICE_CREATE_SHEET_DV_WIDGETS__({ document, rules, getActiveSheetName, applyCellEdits });
+    widgets.bind();
 
     const pivotUi = host.__EASYOFFICE_CREATE_SHEET_PIVOT_UI__(
       {
@@ -768,8 +718,8 @@
       openDataValidationDialog,
       openPivotDialog: pivotUi.openPivotDialog,
       gateEntry,
-      syncArrow,
-      hideArrow,
+      syncArrow: widgets.sync,
+      hideArrow: widgets.hide,
       pivotCells: pivotUi.pivotCells,
     };
   }

@@ -517,6 +517,7 @@ const CF_VISIBLE = {
   blanks: ["대상", ...STYLE_ROWS],
   errors: ["대상", ...STYLE_ROWS],
   expr: ["수식", ...STYLE_ROWS],
+  period: ["기간", ...STYLE_ROWS],
   scale: ["최소", "중간", "최대"],
   bar: ["막대 시작", "막대 끝", "막대 색", "표시"],
   icons: ["아이콘", "아이콘 2", "표시"],
@@ -528,6 +529,8 @@ const DV_VISIBLE = {
   time: ["조건", "값"],
   textLength: ["조건", "값"],
   list: ["목록"],
+  listMultiple: ["목록"],
+  checkbox: ["체크 값"],
   custom: ["값"],
 };
 

@@ -251,6 +251,8 @@
     const boxCache = new WeakMap(); // rule object -> parsed ranges
     const listeners = { changed: null, repaint: null, readCells: null };
     let version = 0;
+    // Some validation is a check box: the grid then asks each cell it paints (see `paintBox`).
+    let hasBoxes = false;
 
     const blank = () => ({ cf: [], dv: [] });
     const isEmpty = (r) => !r || ((r.cf || []).length === 0 && (r.dv || []).length === 0);
@@ -285,6 +287,15 @@
       else fx.delete(sheet);
     }
 
+    // Re-reads whether a check box rule exists; true when any did before or does now, since the
+    // cells then need painting again.
+    function refreshBoxes() {
+      const had = hasBoxes;
+      hasBoxes = false;
+      for (const r of rules.values()) if (r.dv.some((d) => d.t === "checkbox")) hasBoxes = true;
+      return had || hasBoxes;
+    }
+
     // Replaces every rule set (open file, undo/redo). The engine session learns of it on the next
     // evaluation.
     function replaceAll(bySheet) {
@@ -294,16 +305,26 @@
       for (const [sheet, r] of Object.entries(bySheet || {})) {
         if (!isEmpty(r)) rules.set(sheet, { cf: r.cf || [], dv: r.dv || [] });
       }
+      const boxes = refreshBoxes();
       version += 1;
       if (hadAny || hasAny()) listeners.changed?.();
+      if (boxes) listeners.repaint?.();
     }
 
     function set(sheet, next) {
       if (isEmpty(next)) rules.delete(sheet);
       else rules.set(sheet, { cf: next.cf || [], dv: next.dv || [] });
       clearFx(sheet);
+      const boxes = refreshBoxes();
       version += 1;
       listeners.changed?.();
+      if (boxes) listeners.repaint?.();
+    }
+
+    // The serial number of the local date (days since 1899-12-30), the day period rules count from.
+    function todaySerial() {
+      const d = new Date();
+      return Math.round((Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) - Date.UTC(1899, 11, 30)) / 86400000);
     }
 
     // What the session is told: priority is the list order.
@@ -312,6 +333,7 @@
       return JSON.stringify({
         cf: r.cf.map((rule, i) => ({ ...rule, p: i + 1 })),
         dv: r.dv,
+        today: todaySerial(),
       });
     }
 
@@ -359,6 +381,29 @@
     // Paints the rule appearance onto a grid cell. Colours and bars go through custom properties
     // and classes, never through the inline font properties the sheet model reads back.
     function paintTd(td, sheet) {
+      paintFx(td, sheet);
+      paintBox(td, sheet);
+    }
+
+    // A check box cell shows a box, checked when the cell holds the rule's checked value; the
+    // value itself is hidden while it is one of the rule's two (the box says it).
+    function paintBox(td, sheet) {
+      const dv = hasBoxes ? validationAt(sheet, td.dataset.cell) : null;
+      if (!dv || dv.t !== "checkbox") {
+        if (td.dataset.dvBox !== undefined) {
+          delete td.dataset.dvBox;
+          td.classList.remove("dv-box-hide-value");
+        }
+        return;
+      }
+      const on = (dv.a || "TRUE").toLowerCase();
+      const off = (dv.b || "FALSE").toLowerCase();
+      const text = String(td.textContent ?? "").trim().toLowerCase();
+      td.dataset.dvBox = text === on ? "on" : "off";
+      td.classList.toggle("dv-box-hide-value", text === "" || text === on || text === off);
+    }
+
+    function paintFx(td, sheet) {
       const f = fxAt(sheet, td.dataset.cell);
       if (!f) {
         if (td.dataset.cf !== undefined) clearTd(td);
