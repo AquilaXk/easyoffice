@@ -173,7 +173,7 @@
       const rule = ref ? rules.validationAt(getActiveSheetName(), ref) : null;
       if (!rule || rule.t !== "checkbox") return false;
       const [on, off] = boxValues(rule);
-      void applyCellEdits([{ ref, value: nextCheckValue(cellText(td), on, off), formula: "" }], "체크박스");
+      void applyCellEdits([{ ref, value: nextCheckValue(cellText(td), on, off), formula: "" }], "확인란");
       return true;
     }
 

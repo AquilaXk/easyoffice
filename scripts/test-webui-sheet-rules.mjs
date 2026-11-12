@@ -530,7 +530,7 @@ const DV_VISIBLE = {
   textLength: ["조건", "값"],
   list: ["목록"],
   listMultiple: ["목록"],
-  checkbox: ["체크 값"],
+  checkbox: ["선택 값"],
   custom: ["값"],
 };
 

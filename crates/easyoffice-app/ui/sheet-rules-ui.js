@@ -578,7 +578,7 @@
         rule.a = val("sheet-dv-on").trim();
         rule.b = val("sheet-dv-off").trim();
         rule.op = "between";
-        if (rule.a && rule.a.toLowerCase() === rule.b.toLowerCase()) return { error: "체크한 값과 하지 않은 값이 같음" };
+        if (rule.a && rule.a.toLowerCase() === rule.b.toLowerCase()) return { error: "선택한 값과 선택하지 않은 값이 같음" };
       } else if (!rule.a) {
         return { error: "값을 입력하세요." };
       } else if ((rule.op === "between" || rule.op === "notBetween") && t !== "custom" && !rule.b) {
