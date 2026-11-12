@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createWorkspaceHarness } from "./webui-dom-harness.mjs";
+import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
+import { switchModule, studioItem } from "./test-support/modules.mjs";
+import { demoHtml } from "./test-support/demo-fixtures.mjs";
 
 async function layoutApi() {
   const { host } = await createWorkspaceHarness();
@@ -151,4 +153,57 @@ test("runAt finds the hidden run next to a header", async () => {
   assert.equal(layout.runAt(runs, 5), null);
   assert.equal(layout.runAt(runs, 0), null);
   assert.equal(layout.runAt([], 3), null);
+});
+
+// The page with a session engine that answers every structure request with no rewrites.
+async function openWithEngine() {
+  const answers = {
+    open: { session: "s1" },
+    apply: { session: "s1", changed: [], circular: false },
+    structure: { session: "s1", formulas: [], changed: [], circular: false, merges: [], hiddenRows: [], hiddenCols: [], widths: [], rules: {} },
+    close: { closed: true },
+  };
+  const harness = await createWorkspaceHarness({
+    transformHtml: demoHtml,
+    tauriInvoke: async (command, args) => {
+      if (command === "get_workspace_bootstrap") return JSON.stringify({ platform: "macOS", shortcutModifier: "⌘", sheetSessions: true, openTabs: [] });
+      if (command === "evaluate_sheet") return answers[JSON.parse(args.payload).sessionAction] ?? {};
+      return { status: "ok" };
+    },
+  });
+  switchModule(harness.document, "SHEET");
+  await flushAsyncTurns();
+  return harness;
+}
+
+test("the formula bar, name box and aggregate follow the selected cell after structure edits and their undo", async () => {
+  const { document, userClick } = await openWithEngine();
+  const formula = () => document.getElementById("formula-input").value;
+  const agg = () => document.getElementById("status-sheet-agg").textContent;
+  const name = () => document.getElementById("active-cell-ref").textContent;
+  const click = (selector) => userClick(document.querySelector(selector));
+  const act = async (name) => {
+    click(`.md-item[data-sheet-act="${name}"]`);
+    await flushAsyncTurns(20);
+  };
+  const history = async (name) => {
+    userClick(studioItem(document, name));
+    await flushAsyncTurns(20);
+  };
+  document.querySelector('#pane-sheet td[data-cell="C2"]').focus();
+  assert.equal(formula(), "1200");
+  assert.match(agg(), /1,200/);
+
+  await act("row-insert-above");
+  assert.equal(name(), "C2");
+  assert.equal(document.querySelector('#pane-sheet td[data-cell="C2"]').textContent, "");
+  assert.equal(formula(), "");
+  assert.doesNotMatch(agg(), /1,200/);
+
+  await history("studio-undo");
+  assert.equal(formula(), "1200");
+  assert.match(agg(), /1,200/);
+  await history("studio-redo");
+  assert.equal(formula(), "");
+  assert.doesNotMatch(agg(), /1,200/);
 });

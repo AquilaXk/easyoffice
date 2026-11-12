@@ -864,6 +864,7 @@
       selectAxis: (axis, index, extend) => input.selectAxis(axis, index, extend),
       commitIfEditing: () => input.commitIfEditing(),
       focusAnchor: () => input.focusAnchor(),
+      refreshChrome: () => input.refreshChrome(),
       snapshotDomSheetCells,
       replaceLiveSheetDataStore,
       refreshWindowFromModel,

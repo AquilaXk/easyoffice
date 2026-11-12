@@ -33,6 +33,7 @@
       selectAxis,
       commitIfEditing,
       focusAnchor,
+      refreshChrome,
       snapshotDomSheetCells,
       replaceLiveSheetDataStore,
       refreshWindowFromModel,
@@ -136,6 +137,7 @@
         grid.layoutChanged();
         refreshWindowFromModel();
         await recalculateActiveSheetFormulas({ updateFocusedDisplay: true });
+        refreshChrome();
         say(unit + " " + count + "개 " + (op === "insert" ? "삽입" : "삭제"));
         return true;
       });
@@ -155,6 +157,7 @@
         pushRawUndoSnapshot(captureWorkspaceSnapshot(false));
         layoutApi.setHidden(name, axis, first, last, hidden);
         grid.layoutChanged();
+        refreshChrome();
         say((axis === "row" ? "행 " : "열 ") + (hidden ? "숨김" : "숨기기 취소"));
         return true;
       });
@@ -189,6 +192,7 @@
         grid.layoutChanged();
         refreshWindowFromModel();
         await recalculateActiveSheetFormulas({ updateFocusedDisplay: true });
+        refreshChrome();
         say("병합");
         return true;
       });
@@ -207,6 +211,7 @@
         pushRawUndoSnapshot(captureWorkspaceSnapshot(false));
         layoutApi.removeMerges(name, rg.r1, rg.c1, rg.r2, rg.c2);
         grid.layoutChanged();
+        refreshChrome();
         say("병합 해제");
         return true;
       });
