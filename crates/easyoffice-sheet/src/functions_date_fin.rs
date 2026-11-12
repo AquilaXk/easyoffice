@@ -595,6 +595,10 @@ impl SheetEngine {
                 val,
                 EvaluatedCellValue::Text(_)
             ))),
+            "ISNONTEXT" => Ok(EvaluatedCellValue::Boolean(!matches!(
+                val,
+                EvaluatedCellValue::Text(_)
+            ))),
             "ISLOGICAL" => Ok(EvaluatedCellValue::Boolean(matches!(
                 val,
                 EvaluatedCellValue::Boolean(_)

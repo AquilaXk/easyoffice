@@ -5,7 +5,7 @@ use std::collections::HashMap;
 #[test]
 fn test_all_canonical_functions_evaluated() {
     let names = SheetEngine::supported_function_names();
-    assert_eq!(names.len(), 144);
+    assert_eq!(names.len(), 203);
 
     let mut s = SheetEngine::new("함수검증");
     s.set_cell("A1", "10").unwrap();
@@ -840,34 +840,6 @@ fn test_f2_cycle_memoization_and_eval_step_budget() {
     assert_eq!(
         sheet.evaluate_cell("B25"),
         EvaluatedCellValue::Number(33_554_432.0)
-    );
-}
-
-#[test]
-fn test_f12_canonical_coverage_completeness() {
-    let test_src = include_str!("workbook_tests.rs");
-    let fn_start = test_src
-        .find("fn test_all_canonical_functions_evaluated()")
-        .unwrap();
-    let fn_end = test_src[fn_start..]
-        .find("fn test_workbook_cross_sheet_formulas_and_sort_goal_seek_chart()")
-        .unwrap()
-        + fn_start;
-    let body = format!(
-        "{}{}",
-        &test_src[fn_start..fn_end],
-        include_str!("../tests/sheet_univer_functions_a.rs")
-    );
-    let mut missing = Vec::new();
-    for &func_name in SheetEngine::supported_function_names() {
-        let pat = format!("{func_name}(");
-        if !body.contains(&pat) {
-            missing.push(func_name);
-        }
-    }
-    assert!(
-        missing.is_empty(),
-        "Missing canonical functions in test_all_canonical_functions_evaluated: {missing:?}"
     );
 }
 

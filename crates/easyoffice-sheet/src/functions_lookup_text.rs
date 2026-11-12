@@ -237,6 +237,23 @@ fn parse_numbervalue(text: &str, dec_sep: char, grp_sep: char) -> CellResult {
     number_cell(v / 100.0_f64.powi(pct))
 }
 
+/// `encodeURIComponent` with the characters `!~'()*` escaped as well (`ENCODEURL`, PD-201):
+/// only letters, digits, `-`, `_` and `.` stay as they are, every other UTF-8 byte is `%XX`.
+fn percent_encode(text: &str) -> String {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut out = String::with_capacity(text.len());
+    for &byte in text.as_bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.') {
+            out.push(byte as char);
+        } else {
+            out.push('%');
+            out.push(HEX[usize::from(byte >> 4)] as char);
+            out.push(HEX[usize::from(byte & 15)] as char);
+        }
+    }
+    out
+}
+
 impl SheetEngine {
     pub(crate) fn eval_text_func(
         &self,
@@ -266,6 +283,11 @@ impl SheetEngine {
                 Ok(EvaluatedCellValue::Boolean(a == b))
             }
             "REPT" => self.text_rept(args, ctx, depth),
+            "ENCODEURL" => {
+                check_text_arity(args, 1, 1)?;
+                let s = self.text_arg(&args[0], ctx, depth)?;
+                Ok(EvaluatedCellValue::Text(percent_encode(&s)))
+            }
             "VALUE" => {
                 check_text_arity(args, 1, 1)?;
                 let v = self.eval_arg_val(&args[0], ctx, depth)?;

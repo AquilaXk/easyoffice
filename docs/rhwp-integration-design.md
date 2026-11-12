@@ -380,7 +380,7 @@ Tauri CSP는 앱 전체에 하나만 적용된다(경로별로 나눌 수 없음
    - `TEXT_EXTENSIONS`에 `.ts`를 추가해 오버레이 TS도 금지 토큰 검사를 받게 한다.
    - `rhwp.js`(ESM)의 `node --check`는 `vendor/rhwp-core/package.json`의 `"type": "module"`로 해결된다(Node가 가장 가까운 package.json의 type을 따름).
    - 업스트림 문자열을 그대로 복사한 오버라이드 원본에 금지 브랜드 토큰이 있으면 오버라이드에서 문구를 바꾼다.
-4. **문서 정합성**: `README*`, `docs/architecture.md`의 수치 계약(20종 포맷, 144종 함수, 140종 리본, 15종 IPC)은 변하지 않는다. 데스크톱 명령 허용 목록(`DESKTOP_SHELL_PERMISSIONS`)과 `REQUIRED_TRACKED_CONTRACTS`에는 `hwp-host.js`, `config/rhwp-upstream.json`, `scripts/verify-rhwp-upstream.mjs`를 추가한다.
+4. **문서 정합성**: `README*`, `docs/architecture.md`의 수치 계약(20종 포맷, 203종 함수, 140종 리본, 15종 IPC)은 변하지 않는다. 데스크톱 명령 허용 목록(`DESKTOP_SHELL_PERMISSIONS`)과 `REQUIRED_TRACKED_CONTRACTS`에는 `hwp-host.js`, `config/rhwp-upstream.json`, `scripts/verify-rhwp-upstream.mjs`를 추가한다.
 5. **개발자 작업 트리 주의**: rhwp 체크아웃에는 `.mcp.json`(`rhwp mcp-serve` 실행)과 여러 AI 도구 규칙 파일이 있다. 이 저장소에서 AI 도구를 쓰는 개발자는 해당 도구가 서브모듈의 `.mcp.json`이나 규칙 파일을 자동으로 읽지 않는지 확인해야 한다. sparse 체크아웃 목록에서 이 파일들을 빼면 **디스크에도 생기지 않으므로** 권장 목록(§3.2)에서 제외되어 있다.
 
 ---

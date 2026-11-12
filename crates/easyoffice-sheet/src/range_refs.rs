@@ -373,8 +373,8 @@ impl SheetEngine {
                     }
                 }
             } else if let Some(m) = self.matrix_expr(arg, ctx, depth)? {
-                for &x in &m.data {
-                    f(EvaluatedCellValue::Number(x))?;
+                for idx in 0..m.data.len() {
+                    f(m.value_at(idx))?;
                 }
             } else {
                 let v = self.eval_arg_val(arg, ctx, depth)?;
@@ -471,11 +471,7 @@ impl SheetEngine {
             }
             _ => {
                 if let Some(m) = self.matrix_expr(expr, ctx, depth)? {
-                    let vals = m
-                        .data
-                        .iter()
-                        .map(|&x| EvaluatedCellValue::Number(x))
-                        .collect();
+                    let vals = (0..m.data.len()).map(|i| m.value_at(i)).collect();
                     return Ok((m.rows, m.cols, vals, false));
                 }
                 let v = self.eval_arg_val(expr, ctx, depth)?;

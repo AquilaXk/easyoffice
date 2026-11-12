@@ -25,7 +25,7 @@ use crate::{EvalContext, EvaluatedCellValue, Expr, FormulaError, SheetEngine};
 type CellResult = Result<EvaluatedCellValue, FormulaError>;
 
 /// Cells of one operand or result (512 x 512).
-const MAX_MATRIX_CELLS: usize = 262_144;
+pub(crate) const MAX_MATRIX_CELLS: usize = 262_144;
 /// Side length limit of `MDETERM` and `MINVERSE` (the LU decomposition costs $O(n^3)$).
 const MAX_INVERT_DIM: usize = 256;
 /// Multiply-add limit of one `MMULT` (`rows * inner * cols`).
@@ -41,7 +41,13 @@ pub(crate) struct Matrix {
 }
 
 impl Matrix {
-    fn zeros(rows: usize, cols: usize) -> Self {
+    /// Cell `idx` as a value: a number, or the error a result function stored with
+    /// [`crate::functions_trend::error_cell`].
+    pub(crate) fn value_at(&self, idx: usize) -> EvaluatedCellValue {
+        crate::functions_trend::cell_value(self.data[idx])
+    }
+
+    pub(crate) fn zeros(rows: usize, cols: usize) -> Self {
         Self {
             rows,
             cols,
@@ -49,7 +55,7 @@ impl Matrix {
         }
     }
 
-    fn transposed(&self) -> Self {
+    pub(crate) fn transposed(&self) -> Self {
         let mut out = Self::zeros(self.cols, self.rows);
         for r in 0..self.rows {
             for c in 0..self.cols {
@@ -72,6 +78,7 @@ impl Matrix {
 /// Functions whose result is a matrix (see the module note).
 pub(crate) fn is_array_fn(name: &str) -> bool {
     matches!(name, "MMULT" | "MINVERSE" | "MUNIT")
+        || crate::functions_trend::is_trend_array_fn(name)
 }
 
 /// Result of [`lu_decompose`].
@@ -174,10 +181,15 @@ fn determinant(m: &Matrix) -> f64 {
 /// Inverse from the LU factors (permuted identity, forward elimination, back substitution);
 /// `None` when singular.
 fn inverse(m: &Matrix) -> Option<Matrix> {
+    inverse_with(m, false, f64::EPSILON)
+}
+
+/// [`inverse`] with the decomposition's transpose flag and pivot threshold chosen by the caller.
+pub(crate) fn inverse_with(m: &Matrix, transpose: bool, min_pivot: f64) -> Option<Matrix> {
     let n = m.rows;
     let Lu {
         singular, lu, perm, ..
-    } = lu_decompose(m, false, f64::EPSILON);
+    } = lu_decompose(m, transpose, min_pivot);
     if singular {
         return None;
     }
@@ -209,7 +221,7 @@ fn inverse(m: &Matrix) -> Option<Matrix> {
 }
 
 /// `a * b` with the sum of each cell taken in inner-index order.
-fn multiply(a: &Matrix, b: &Matrix) -> Matrix {
+pub(crate) fn multiply(a: &Matrix, b: &Matrix) -> Matrix {
     let mut out = Matrix::zeros(a.rows, b.cols);
     for i in 0..a.rows {
         let out_row = &mut out.data[i * b.cols..(i + 1) * b.cols];
@@ -257,7 +269,7 @@ impl SheetEngine {
             }
             _ => {
                 let m = self.eval_matrix_call(name, args, ctx, depth)?;
-                Ok(EvaluatedCellValue::Number(m.data[0]))
+                Ok(m.value_at(0))
             }
         }
     }
@@ -312,9 +324,7 @@ impl SheetEngine {
         if row < 1 || col < 1 || row as usize > m.rows || col as usize > m.cols {
             return Err(FormulaError::Ref);
         }
-        Ok(EvaluatedCellValue::Number(
-            m.data[(row as usize - 1) * m.cols + (col as usize - 1)],
-        ))
+        Ok(m.value_at((row as usize - 1) * m.cols + (col as usize - 1)))
     }
 
     fn eval_matrix_call(
@@ -350,7 +360,7 @@ impl SheetEngine {
                 }
                 Ok(m)
             }
-            _ => Err(FormulaError::Name),
+            _ => self.eval_trend_matrix(name, args, ctx, depth),
         }
     }
 

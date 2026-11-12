@@ -261,7 +261,11 @@ pub fn format_complex(re: f64, im: f64, suffix: char) -> String {
 }
 
 #[inline]
-fn format_complex_res(re: f64, im: f64, suffix: char) -> Result<EvaluatedCellValue, FormulaError> {
+pub(crate) fn format_complex_res(
+    re: f64,
+    im: f64,
+    suffix: char,
+) -> Result<EvaluatedCellValue, FormulaError> {
     if !re.is_finite() || !im.is_finite() {
         return Err(FormulaError::Num);
     }
@@ -328,7 +332,7 @@ impl SheetEngine {
         Ok(coerce_cell_to_complex(&val)?.unwrap_or((0.0, 0.0, None)))
     }
 
-    fn eval_complex_arg(
+    pub(crate) fn eval_complex_arg(
         &self,
         arg: &Expr,
         ctx: &mut EvalContext<'_>,

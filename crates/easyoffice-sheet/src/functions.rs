@@ -5,8 +5,9 @@ use crate::{EvalContext, EvaluatedCellValue, Expr, FormulaError, SheetEngine};
 
 /// Canonical built-in spreadsheet functions: the 122 core functions of 8 standard categories (Math &
 /// Trig 27, Statistical 22, Logical 10, Lookup & Reference 12, Text 21, Date & Time 10, Financial 11,
-/// Information 9) followed by 22 more (lookup and reference 6, database 12, matrix 4).
-pub const CANONICAL_FUNCTIONS: [&str; 144] = [
+/// Information 9), then 22 more (lookup and reference 6, database 12, matrix 4), then the 59 of bundle B
+/// (PD-201): financial 28, engineering 16, statistics 13, text and information 2.
+pub const CANONICAL_FUNCTIONS: [&str; 203] = [
     "SUM",
     "PRODUCT",
     "SUMPRODUCT",
@@ -151,6 +152,65 @@ pub const CANONICAL_FUNCTIONS: [&str; 144] = [
     "MDETERM",
     "MINVERSE",
     "MUNIT",
+    "ACCRINT",
+    "ACCRINTM",
+    "AMORLINC",
+    "COUPDAYBS",
+    "COUPDAYS",
+    "COUPDAYSNC",
+    "COUPNCD",
+    "COUPNUM",
+    "COUPPCD",
+    "DISC",
+    "DURATION",
+    "ISPMT",
+    "MDURATION",
+    "ODDFPRICE",
+    "ODDFYIELD",
+    "ODDLPRICE",
+    "ODDLYIELD",
+    "PRICE",
+    "PRICEDISC",
+    "PRICEMAT",
+    "RECEIVED",
+    "TBILLEQ",
+    "TBILLPRICE",
+    "TBILLYIELD",
+    "VDB",
+    "YIELD",
+    "YIELDDISC",
+    "YIELDMAT",
+    "BESSELI",
+    "BESSELJ",
+    "BESSELK",
+    "BESSELY",
+    "CONVERT",
+    "IMSINH",
+    "IMCOSH",
+    "IMTAN",
+    "IMTANH",
+    "IMSEC",
+    "IMSECH",
+    "IMCSC",
+    "IMCSCH",
+    "IMCOT",
+    "IMCOTH",
+    "IMLOG",
+    "FREQUENCY",
+    "LINEST",
+    "LOGEST",
+    "TREND",
+    "GROWTH",
+    "PROB",
+    "MODE.MULT",
+    "MAXA",
+    "MINA",
+    "STDEVA",
+    "STDEVPA",
+    "VARA",
+    "VARPA",
+    "ISNONTEXT",
+    "ENCODEURL",
 ];
 
 /// The numeric values among `vals`.
@@ -349,7 +409,7 @@ impl SheetEngine {
             | "CONCAT" | "CONCATENATE" | "TEXTJOIN" | "LEFT" | "RIGHT" | "MID" | "SUBSTITUTE"
             | "REPLACE" | "FIND" | "SEARCH" | "EXACT" | "REPT" | "TEXT" | "FIXED" | "DOLLAR"
             | "CLEAN" | "TEXTBEFORE" | "TEXTAFTER" | "NUMBERVALUE" | "VALUETOTEXT" | "UNICODE"
-            | "UNICHAR" => self.eval_text_func(name, args, ctx, depth),
+            | "UNICHAR" | "ENCODEURL" => self.eval_text_func(name, args, ctx, depth),
             "DATE" | "YEAR" | "MONTH" | "DAY" | "TIME" | "HOUR" | "MINUTE" | "SECOND" | "DAYS"
             | "DAYS360" | "EDATE" | "EOMONTH" | "DATEDIF" | "TODAY" | "NOW" | "WEEKDAY"
             | "DATEVALUE" | "WORKDAY" | "WORKDAY.INTL" | "NETWORKDAYS" | "NETWORKDAYS.INTL"
@@ -368,7 +428,7 @@ impl SheetEngine {
                 self.eval_eng_func(name, args, ctx, depth)
             }
             "ISBLANK" | "ISNUMBER" | "ISTEXT" | "ISLOGICAL" | "ISERR" | "ISERROR" | "ISNA"
-            | "ISEVEN" | "ISODD" | "TYPE" | "ERROR.TYPE" => {
+            | "ISEVEN" | "ISODD" | "TYPE" | "ERROR.TYPE" | "ISNONTEXT" => {
                 self.eval_info_func(name, args, ctx, depth)
             }
             "DELTA" | "GESTEP" | "ERF" | "ERF.PRECISE" | "ERFC" | "ERFC.PRECISE" | "PHI"
@@ -396,6 +456,29 @@ impl SheetEngine {
             "MMULT" | "MDETERM" | "MINVERSE" | "MUNIT" => {
                 self.eval_matrix_func(name, args, ctx, depth)
             }
+            "COUPDAYBS" | "COUPDAYS" | "COUPDAYSNC" | "COUPNCD" | "COUPNUM" | "COUPPCD"
+            | "DURATION" | "MDURATION" => self.eval_coupon_func(name, args, ctx, depth),
+            "PRICE" | "YIELD" | "ACCRINT" | "ACCRINTM" | "DISC" | "PRICEDISC" | "PRICEMAT"
+            | "RECEIVED" | "YIELDDISC" | "YIELDMAT" | "TBILLEQ" | "TBILLPRICE" | "TBILLYIELD" => {
+                self.eval_bond_func(name, args, ctx, depth)
+            }
+            "ODDFPRICE" | "ODDFYIELD" | "ODDLPRICE" | "ODDLYIELD" => {
+                self.eval_odd_func(name, args, ctx, depth)
+            }
+            "VDB" | "AMORLINC" | "ISPMT" => self.eval_depr_func(name, args, ctx, depth),
+            "BESSELI" | "BESSELJ" | "BESSELK" | "BESSELY" => {
+                self.eval_bessel_func(name, args, ctx, depth)
+            }
+            "CONVERT" => self.eval_convert(args, ctx, depth),
+            "LINEST" | "LOGEST" | "TREND" | "GROWTH" | "FREQUENCY" | "MODE.MULT" => {
+                self.eval_matrix_func(name, args, ctx, depth)
+            }
+            "PROB" => self.eval_prob(args, ctx, depth),
+            "MAXA" | "MINA" | "STDEVA" | "STDEVPA" | "VARA" | "VARPA" => {
+                self.eval_stat_a_func(name, args, ctx, depth)
+            }
+            "IMSINH" | "IMCOSH" | "IMTAN" | "IMTANH" | "IMSEC" | "IMSECH" | "IMCSC" | "IMCSCH"
+            | "IMCOT" | "IMCOTH" | "IMLOG" => self.eval_im_trig_func(name, args, ctx, depth),
             _ => Err(FormulaError::Name),
         }
     }

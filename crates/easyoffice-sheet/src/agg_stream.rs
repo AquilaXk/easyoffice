@@ -207,8 +207,8 @@ impl SheetEngine {
                     if crate::functions_matrix::is_array_fn(fn_name) =>
                 {
                     if let Some(m) = self.matrix_expr(arg, ctx, depth)? {
-                        for (idx, &x) in m.data.iter().enumerate() {
-                            fold.fold(&EvaluatedCellValue::Number(x), idx, true)?;
+                        for idx in 0..m.data.len() {
+                            fold.fold(&m.value_at(idx), idx, true)?;
                         }
                     }
                 }
