@@ -3018,6 +3018,33 @@
 - **Verified by** `cargo test -p easyoffice-formats --test sheet_numfmt_roundtrip`, `cargo test -p easyoffice-sheet --test sheet_number_format_codes`, `cargo test -p easyoffice-app`(`sheet_format_ipc`, `structured_sheet_export`, `convert_open`), `node --test scripts/test-webui-sheet-numfmt.mjs`, 측정은 `cargo test --release -p easyoffice-app --test numfmt_bench -- --ignored --nocapture`와 `node scripts/bench-webui.mjs --only numfmt`.
 - **Revisit when** 인쇄·PDF 내보내기에 서식을 적용할 때, XLS가 셀 서식을 읽고 쓸 때, 입력 시 서식 자동 지정이 필요할 때.
 
+## PD-194. 시트 행·열 삽입과 삭제, 숨기기, 셀 병합: 엔진이 수식 참조와 위치에 묶인 모델을 함께 옮긴다
+
+- **Status** Implemented (`crates/easyoffice-sheet/src/axis/`, `recalc/structure.rs`, `rules/axis_shift.rs`; `crates/easyoffice-formats/src/xlsx_layout.rs`, `xlsx_sheet.rs`, `office_codecs.rs`; `crates/easyoffice-app/src/sheet_structure_ipc.rs`, `sheet_layout_json.rs`, `sheet_session.rs`; `ui/sheet-layout.js`, `sheet-structure.js`, `sheet-grid.js`, `sheet-input.js`, `sheet-store.js`, `index.html`)
+- **Context** 시트에 행·열 삽입과 삭제, 숨김, 병합이 엔진과 화면 어디에도 없었습니다. PD-192의 이식 범위에 따라 참조 엔진(Apache-2.0, 기준 커밋 `5a06a784`)의 참조 이동 로직과 병합·숨김 명령 구조를 가져옵니다.
+- **Decision (`PD-194`)**
+  1. **참조 이동 규칙(절대·상대 `$` 구분 없이 같음)**: 삽입은 삽입 지점 이후 셀을 밀고, 범위 안쪽(`시작 < 지점 <= 끝`)이면 범위가 늘어납니다. 삭제는 셀이 지워지면 `#REF!`, 범위가 전부 지워지면 `#REF!`, 일부만 지워지면 줄고, 지워진 칸이 범위 시작이면 시작이 삭제 지점으로 옮겨집니다. 다른 시트가 이 시트를 가리키는 참조도 같게 움직이고, 지워진 참조는 시트 이름까지 `#REF!` 하나로 바뀝니다. 마지막 행·열에서 끝나는 범위(`A:A`, `1:1`, `A5:A1048576`)는 계속 끝까지 가고, 삽입으로 시트 끝 밖으로 나가는 참조는 `#REF!`, 시트 끝 밖으로 밀리는 셀이 있으면 삽입을 거부합니다.
+
+     | 편집(3행 기준) | `A2` | `A3` | `A1:A5` | `A3:A5` | `A1:A3` | `A:A` | `3:3` |
+     |---|---|---|---|---|---|---|---|
+     | 행 삽입 | `A2` | `A4` | `A1:A6` | `A4:A6` | `A1:A4` | `A:A` | `4:4` |
+     | 행 삭제 | `A2` | `#REF!` | `A1:A4` | `A3:A4` | `A1:A2` | `A:A` | `#REF!` |
+
+     열도 같은 규칙입니다(`A:E`에 열 삽입은 `A:F`, 행 범위 `1:1`은 열 편집에 변하지 않음). 문자열 안 글자, 함수 이름(`LOG10(`), 오류 값은 건드리지 않고, 따옴표 시트 이름(`'It''s'!A1`)과 한글 시트 이름을 읽습니다.
+  2. **엔진**: `WorkbookEngine::apply_axis_edit`가 모든 수식 새 글자를 먼저 계산(시간·수식 수 예산 검사)한 뒤에만 시트를 바꾸므로 거부된 편집은 상태를 그대로 둡니다. 옮겨진 수식은 컴파일된 구문 트리를 그대로 들고 가고, 글자가 바뀐 수식만 다시 컴파일합니다. `RecalcSession::apply_axis_edit`는 PD-164 세션의 그래프를 한 번에 다시 만들되 이전 값을 새 위치로 가져와서, 응답에는 값이 달라진 수식 셀만 실립니다.
+  3. **같이 움직이는 것**: 셀·스타일(셀과 함께), 조건부 서식·데이터 유효성의 범위와 피연산자 수식(`rules/axis_shift.rs`, 범위가 모두 사라진 규칙은 지움, 식 규칙은 앵커 행이 지워져도 `$A2` 같은 참조를 이어 감), 병합 범위, 숨김 행·열, 열 너비. 틀 고정은 시트 머리글 한 줄 플래그라 옮길 것이 없고(A1 항목에 실린 플래그는 편집 때 A1로 되돌림), 피벗 결과는 값으로 새 시트에 쓰고 차트는 요약 한 줄이라 저장된 원본 범위가 없습니다.
+  4. **상한(Fail-Closed)**: 한 번에 행 10,000개, 열 256개(삽입·삭제 모두), 수식 글자를 바꾸는 시간 5초, 바뀌는 수식 500,000개(응답에 새 글자가 모두 실림), 숨김 행 100,000개, 병합 100,000개. 넘으면 요청을 거부하고 세션은 그대로입니다(`{"refused":"structure"}`). 세션 한도를 넘는 시트는 세션 없이 이 편집을 하지 않습니다.
+  5. **IPC**: 새 명령 없이 `evaluate_sheet`의 `sessionAction: "structure"`입니다(15종 계약 유지). 요청 `{session, sheet, axis, op, at, count, merges, hiddenRows, hiddenCols, widths, rules}`, 답 `{formulas, changed, circular, removed, merges, hiddenRows, hiddenCols, widths, rules}`. 화면은 이동 규칙을 두 번 구현하지 않고 셀 키만 옮기며(`remapRef`), 수식 글자와 레이아웃·규칙은 엔진 답을 씁니다. 세션이 다시 만들어지면서 규칙을 잃으므로 다음 동기화가 규칙을 다시 보냅니다.
+  6. **숨김·병합 모델과 파일**: `SheetStyling`에 `merges`, `hidden_rows`, `hidden_cols`를 더했습니다(숨김은 정렬된 닫힌 구간). XLSX는 `<row hidden>`, `<col hidden>`(너비와 함께), `<mergeCells>`(`sheetData` 다음, 조건부 서식 앞)를 읽고 씁니다. 저장·열기 JSON은 시트마다 `merges`(`"A1:B2"`), `hiddenRows`, `hiddenCols`(1부터 닫힌 구간)입니다. ODS는 병합·숨김을 쓰지 않습니다(이번 범위 밖).
+  7. **화면**: 시트 메뉴에 `행 위에 삽입`, `행 아래에 삽입`, `열 왼쪽에 삽입`, `열 오른쪽에 삽입`, `행 삭제`, `열 삭제`, `숨기기`, `숨기기 취소`, `셀 병합`, `병합 해제`. 행·열 머리글 클릭은 행·열 전체 선택, 우클릭은 참조 앱 `.context-menu`와 같은 값의 메뉴(`menu-bar.css`)로 해당 축의 삽입·삭제와 `숨기기`·`숨기기 취소`를 띄웁니다(방향키·Home·End·Enter·Esc, 선택된 머리글에서 Shift+F10·메뉴 키, 창 가장자리에서 2px 안쪽으로 보정). 편집 하나가 실행 취소 한 단계입니다. 숨긴 행은 행 높이 0으로 가상 스크롤 위치 계산에서 빼고(`sheet-layout.js`), 숨긴 열은 너비 0입니다. 병합은 앵커 칸에서 `::after`로 병합 크기만큼 칠하고 덮인 칸은 그 아래에 둡니다(앵커 안 클릭은 앵커 선택, 방향키는 병합을 건너뜀). 병합 범위가 든 구간의 정렬은 거부합니다. 병합하면 왼쪽 위 칸의 내용만 남기고 나머지는 비웁니다(참조 엔진은 첫 번째로 값이 있는 칸의 내용을 남김).
+- **재사용 판단 (구현 원칙 3단계)** (1) 행·열 편집과 참조 이동을 담은 허용 라이선스 크레이트는 이 엔진의 셀·수식 모델과 맞지 않아 쓰지 않았습니다(엔진은 무의존, PD-095). (2) 정렬 참조 처리(`sort_refs.rs`)의 스캐너 규칙과 수식 파서의 참조 문법을 맞춰 따라갔지만 정렬은 상대 참조만 다루므로 범위·전체 행·열·다른 시트까지 푸는 스캐너를 새로 두었습니다. 규칙 범위 이동은 `rules/shift.rs`(앵커 기준 상대 이동)와 목적이 달라 별도 파일입니다. (3) 구간 이동 규칙(`handleBaseInsertRange`, `handleBaseRemoveRange`)과 병합·숨김의 편집 규칙을 이식했습니다.
+- **참조 엔진과 다른 곳** 참조 엔진은 토큰 열에서 참조를 다시 쓰고, 이 포트는 수식 글자를 훑습니다(같은 결정을 참조마다 내림). 마지막 행·열 끝 보존, 시트 끝 밖 참조 거부, 한 번에 바꾸는 크기와 시간 상한은 이 저장소의 추가입니다. 병합은 왼쪽 위 칸 내용만 남깁니다.
+- **Measured** (`cargo test -p easyoffice-sheet --release --lib -- --ignored --nocapture axis_edit_bench`, 100,000행·수식 100,002개, 행 1개 삽입, 3회): 편집만(셀 이동, 수식 글자 다시 쓰기, 바뀐 수식 다시 컴파일) 30~50 ms(지점 1행은 모든 수식이 바뀌어 42~50 ms, 5만 행은 절반이 바뀌어 30~33 ms). 세션 호출 전체(편집, 그래프 다시 만들기, 모든 수식 다시 계산, 값 비교)는 88~113 ms로 중간 지점은 목표 100 ms 이하이고 첫 행 삽입은 104~113 ms입니다. 전체 수식을 다시 계산하는 것이 약 60 ms이며 위치 의존 함수(`ROW`, `MATCH(.., A:A, ..)`)의 값이 달라질 수 있어 더러운 집합을 줄이지 않았습니다.
+- **Why** 참조 이동 판정을 한 곳(엔진)에 두면 화면·파일·세션이 같은 규칙을 씁니다. 편집 전체를 계산한 뒤에만 반영하므로 상한에 걸린 편집이 반쯤 적용된 상태가 없습니다.
+- **Trade-offs** 숨긴 행이 있는 구간의 붙여넣기·정렬·집계는 숨김을 무시하고 모든 행을 다룹니다. 문서 안 이동 링크 글자(`HYPERLINK("#Sheet1!A3")`)는 문자열이라 편집에 따라 바뀌지 않습니다. 병합 안 긴 글자는 병합 폭을 넘쳐 보일 수 있습니다(줄바꿈 서식이 없음). 편집이 세션 전체를 다시 만들어 수식이 매우 많은 시트에서 한 편집이 100 ms를 조금 넘습니다. 네이티브 메뉴 막대(macOS)에는 새 항목이 없고 페이지 메뉴 줄에만 있습니다.
+- **Verified by** `cargo test -p easyoffice-sheet --lib axis`(참조 이동 표, 구간 이동을 칸 단위로 검증하는 오라클, 삽입이 수식 값을 바꾸지 않는 무작위 시험, 새 세션과 같은 값을 내는 무작위 편집 열), `-p easyoffice-formats --test sheet_layout_roundtrip --lib xlsx_sheet`, `-p easyoffice-app --lib sheet_structure sheet_layout merged_ranges`, `node --test scripts/test-webui-sheet-structure.mjs`. 실제 화면: 헤드리스 브라우저에서 파일 열기, 우클릭 메뉴, 삽입·실행 취소·삭제·열 삽입·숨기기·병합을 실제 엔진으로 실행했습니다.
+- **Revisit when** ODS 병합·숨김, 숨긴 행을 건너뛰는 복사·집계, 더러운 집합을 줄이는 증분 구조 편집, 피벗·차트가 원본 범위를 저장할 때.
+
 ## PD-195. 수식 함수 묶음 A: 조회·참조 6종, 데이터베이스 12종, 행렬 4종
 
 - **Status** Implemented (`crates/easyoffice-sheet/src/functions_lookup_ref.rs`, `functions_db.rs`, `functions_matrix.rs`; 등록 표 `functions.rs`의 `CANONICAL_FUNCTIONS`; 시험 `tests/sheet_univer_functions_a.rs`, 측정 `tests/sheet_univer_functions_a_bench.rs`)
