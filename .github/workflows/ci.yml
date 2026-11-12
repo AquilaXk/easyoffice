@@ -109,6 +109,33 @@ jobs:
       - name: Run Rust engine self-test
         run: cargo run -p easyoffice-app -- --self-test
 
+  # Static analysis runs in parallel with the OS jobs, after the coverage report exists. A missing
+  # token (fork pull requests) skips the scan; an analysis failure fails the run.
+  sonar:
+    name: sonar
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+    steps:
+      - name: Checkout repository
+        if: env.SONAR_TOKEN != ''
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 0
+
+      - name: Download the JavaScript coverage report
+        if: env.SONAR_TOKEN != ''
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          name: js-coverage-lcov
+          path: coverage
+
+      - name: Run the static analysis scan
+        if: env.SONAR_TOKEN != ''
+        uses: SonarSource/sonarqube-scan-action@e805d875275f728fac1885b413934be6d7c63f65 # v8.4.1
+
   verify:
     name: verify
     runs-on: macos-15
