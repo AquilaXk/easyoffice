@@ -33,7 +33,10 @@ fn accelerators_are_command_based_and_do_not_collide() {
         let key = parts.pop().unwrap();
         assert!(parts.contains(&"CmdOrCtrl"), "{accelerator} uses Cmd");
         assert!(parts.iter().all(|p| MODIFIERS.contains(p)), "{accelerator}");
-        assert!(key.len() == 1, "{accelerator} ends in one key");
+        assert!(
+            key.len() == 1 || key == "Enter",
+            "{accelerator} ends in one key"
+        );
         assert!(
             seen.insert(accelerator),
             "duplicate accelerator {accelerator}"
@@ -307,6 +310,7 @@ fn a_kind_does_not_hold_the_items_of_other_kinds() {
             &[
                 "insert:toc",
                 "insert:toc-update",
+                "page:break",
                 "insert:mailmerge",
                 "insert:footnote",
                 "table:doc-formula",

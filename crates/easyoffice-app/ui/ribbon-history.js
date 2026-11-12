@@ -67,6 +67,7 @@
       getDocRuns,
       getDocLink,
       getDocToc,
+      getDocPages,
       getActiveModule,
       getHwpHost,
       setActiveModule,
@@ -445,6 +446,20 @@
       workspacePanels.renderModuleOutline(getActiveModule());
     }
 
+    // 표 만들기: a new table at the caret (else the end of the document), also in a blank document.
+    function docEffectInsertTable({ docEditor }) {
+      const { firstCell } = host.__EASYOFFICE_DOC_TABLE__.insertTable(docEditor, getDocRuns().currentRange());
+      const range = document.createRange?.();
+      const sel = host.getSelection?.();
+      if (range && sel) {
+        range.setStart(firstCell, 0);
+        range.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+      getWorkspacePanels().computeSmartStats();
+    }
+
     function docEffectInsertNote({ docEditor, cmdId, execRes }) {
       const workspacePanels = getWorkspacePanels();
       const p = document.createElement("p");
@@ -497,7 +512,7 @@
       "-insert-link": docEffectInsertLink,
       "-data-fn-browser": docEffectInsertNote,
       "-review-comment": docEffectInsertNote,
-      "-insert-table": () => getWorkspacePanels().appendDocTableRow(),
+      "-insert-table": docEffectInsertTable,
       "-data-autosum": () => getWorkspacePanels().computeDocTableSummary(),
       "-data-sort": docEffectSort,
     };
@@ -899,6 +914,8 @@
       // The table of contents asks for its levels first and the dialog's 확인 runs the command with them; the update only rebuilds the page's block.
       if (cmdId === "doc-mod-toc" && !options.toc) return Promise.resolve(getDocToc().open());
       if (cmdId === "doc-mod-toc-update") return Promise.resolve(getDocToc().update());
+      // The page break splits the block at the caret in the page, like Ctrl+Enter in the editor.
+      if (cmdId === "doc-mod-page-break") return Promise.resolve(getDocPages().insertPageBreak());
       // The link dialog opens at once, while the selection is still in the editor; the command itself still runs.
       if (cmdId === "document-insert-link") getDocLink().open();
       return enqueueWorkspaceHistoryOp(async () => {

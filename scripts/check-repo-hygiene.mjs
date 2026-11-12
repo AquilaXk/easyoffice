@@ -87,6 +87,7 @@ const REQUIRED_TRACKED_CONTRACTS = [
   "crates/easyoffice-app/ui/doc-runs-ui.js",
   "crates/easyoffice-app/ui/doc-link.js",
   "crates/easyoffice-app/ui/doc-toc.js",
+  "crates/easyoffice-app/ui/doc-table.js",
   "crates/easyoffice-app/ui/doc-pages-core.js",
   "crates/easyoffice-app/ui/doc-pages.js",
   "crates/easyoffice-app/ui/hwp-host.js",

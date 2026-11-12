@@ -92,7 +92,7 @@
     document, invokeIpc, docTabStore, sheetDataStore, sheetRowCounts, slideDeckState,
     localRibbonState, ribbonCatalog, sheetStoreHelpers, extractEditableDocumentText,
     getSheetController: () => sheetController,
-    getWorkspacePanels: () => workspacePanels, getDocRuns: () => docRunsUi, getDocLink: () => docLink, getDocToc: () => docToc,
+    getWorkspacePanels: () => workspacePanels, getDocRuns: () => docRunsUi, getDocLink: () => docLink, getDocToc: () => docToc, getDocPages: () => docPages,
     getActiveModule: () => activeModule, getHwpHost: () => hwpHost,
     getWindowBridge: () => windowBridge,
     setActiveModule: (next) => { activeModule = next; },
@@ -317,7 +317,7 @@
         }
       }
     }
-    if (activeModule === "DOC") items.push({ id: "doc-mod-toc-update", module: "DOC", title: "목차 업데이트", shortcut: "", searchKey: "입력 문서 목차 업데이트 toc" });
+    if (activeModule === "DOC") items.push({ id: "doc-mod-toc-update", module: "DOC", title: "목차 업데이트", shortcut: "", searchKey: "입력 문서 목차 업데이트 toc" }, { id: "doc-mod-page-break", module: "DOC", title: "쪽 나누기", shortcut: fmt("⌘Enter"), searchKey: "쪽 문서 쪽 나누기 page break " + fmt("⌘Enter") });
     if (activeModule === "SHEET") items.push(...host.__EASYOFFICE_NATIVE_MENU_TABLE__.sheetMenuPaletteItems(document));
     items.push({ id: "bench-run", module: activeModule, title: "문서 엔진 성능 진단 실행", shortcut: "", searchKey: "성능 문서 엔진 성능 진단 실행 bench-run" });
     return items;

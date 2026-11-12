@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { makeFixtureFile, pickFile } from "./test-support/fixture-files.mjs";
 import { createRunHarness, p } from "./test-support/doc-run-harness.mjs";
+import { switchModule } from "./test-support/modules.mjs";
 
 // Pages of the document editor: the arithmetic on fake block heights (`doc-pages-core.js`), the module that
 // measures, applies and reports it (`doc-pages.js`, on a fake layout), and the status line it feeds.
@@ -345,4 +346,36 @@ test("a page break mark reaches the save payload, comes back from an opened file
   const marked = Array.from(editor.querySelectorAll("p[data-eo-break]"), (e) => e.textContent);
   assert.deepEqual(marked, ["둘째 쪽"]);
   assert.deepEqual(opened.host.__EASYOFFICE_SAVE_PAYLOAD__.collectDocBlocks(editor), blocks);
+});
+
+test("the 쪽 menu of a document has 쪽 나누기 with Ctrl+Enter, and it runs the page break of the editor; other windows do not show it", async () => {
+  const h = await createWorkspaceHarness();
+  const item = h.document.querySelector('.md-item[data-studio-menu-cmd="doc-mod-page-break"]');
+  assert.equal(item.dataset.kinds, "DOC");
+  assert.equal(item.querySelector(".md-label").textContent, "쪽 나누기");
+  assert.equal(item.querySelector(".md-shortcut").textContent, "Ctrl+Enter");
+  assert.ok(item.closest('[data-menu="page"]'), "it is in the 쪽 menu");
+  let breaks = 0;
+  h.host.__EASYOFFICE_DOC_PAGES__.insertPageBreak = () => {
+    breaks += 1;
+    return true;
+  };
+  switchModule(h.document, "DOC");
+  await flushAsyncTurns(10);
+  h.userClick(item);
+  await flushAsyncTurns(10);
+  assert.equal(breaks, 1);
+  h.userClick(h.document.getElementById("btn-command-palette"));
+  const input = h.document.getElementById("cmd-search-input");
+  input.value = "쪽 나누기";
+  input.dispatchEvent({ type: "input" });
+  const found = [...h.document.querySelectorAll("#cmd-palette-list .cp-item")].map((li) => li.querySelector(".cp-item-label").textContent);
+  assert.deepEqual(found, ["쪽 나누기"]);
+  const sheet = await createWorkspaceHarness({ search: "?module=SHEET&win=w-sheet-pb" });
+  await flushAsyncTurns(10);
+  sheet.userClick(sheet.document.getElementById("btn-command-palette"));
+  const sheetInput = sheet.document.getElementById("cmd-search-input");
+  sheetInput.value = "쪽 나누기";
+  sheetInput.dispatchEvent({ type: "input" });
+  assert.equal(sheet.document.querySelectorAll("#cmd-palette-list .cp-item").length, 0);
 });

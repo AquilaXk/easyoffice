@@ -385,6 +385,7 @@ const PAGE_DOC: MenuSpec = menu(
         S,
         "page:header",
         "page:columns",
+        "page:break",
     ],
 );
 const PAGE_PDF: MenuSpec = menu("쪽", &["tool:pdf-rotate", "tool:pdf-splitmerge"]);

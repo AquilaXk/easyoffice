@@ -313,6 +313,12 @@ pub const ITEMS: &[MenuItemSpec] = &[
         "studio-cmd:layout-margins",
     ),
     item(
+        "page:break",
+        "쪽 나누기",
+        Some("CmdOrCtrl+Enter"),
+        "studio-cmd:doc-mod-page-break",
+    ),
+    item(
         "page:header",
         "머리말/꼬리말",
         None,

@@ -62,6 +62,7 @@
     "insert:footnote": "studio-cmd:mod-footnote",
     "insert:symbol": "studio-cmd:mod-symbol",
     "insert:link": "studio-cmd:insert-link",
+    "page:break": "studio-cmd:doc-mod-page-break",
     "insert:toc": "studio-cmd:doc-mod-toc",
     "insert:toc-update": "studio-cmd:doc-mod-toc-update",
     "insert:mailmerge": "studio-cmd:doc-mod-mailmerge",

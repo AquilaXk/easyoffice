@@ -29,7 +29,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
   ];
   // Module-specific ribbon commands are only enabled in their own module.
   const MODULE_SPECIFIC_COMMANDS = Object.fromEntries([
-    ["doc", "DOC", ["toc", "toc-update", "footnote", "mailmerge", "tableformula"]],
+    ["doc", "DOC", ["toc", "toc-update", "page-break", "footnote", "mailmerge", "tableformula"]],
     ["hwp", "HWP", ["header", "field", "border", "manuscript"]],
     ["sheet", "SHEET", ["pivot", "chart", "condfmt", "freeze"]],
     ["slide", "SLIDE", ["master", "snap", "transition", "presenter"]],

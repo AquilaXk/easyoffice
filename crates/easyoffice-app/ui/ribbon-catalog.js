@@ -350,6 +350,8 @@
     { keys: "Ctrl+V", action: "clip-paste", native: true },
     { keys: "/", action: "palette", bareKey: true },
     { keys: "Insert", action: "insert-mode", bareKey: true, external: true },
+    // The page break is made by the document editor itself (doc-pages.js); the menu item and the palette run the same command.
+    { keys: "Ctrl+Enter", action: "doc-page-break", module: "DOC", external: true },
     // Slide module only. `module` gates the binding to the active module (every other module keeps
     // the browser default, e.g. F5 reload); `bareKey` keeps keys out of text fields; `scope`
     // requires focus inside the given selector. F5 is browser-reserved, so it is only taken over
