@@ -65,6 +65,9 @@ export const LINUX_RPM_DEPENDS = [
  */
 export const LINUX_DESKTOP_TEMPLATE = "./linux/easyoffice.desktop";
 
+/** The license and NOTICE files every package must carry (Apache-2.0 section 4(a) and 4(d)). */
+export const LICENSE_FILES = ["LICENSE", "NOTICE"];
+
 /** The notice file every package must carry (MIT notice condition) and where the config reads it from. */
 export const NOTICES_FILE = "THIRD_PARTY_NOTICES.md";
 const NOTICES_SOURCE = `../../${NOTICES_FILE}`;
@@ -134,6 +137,11 @@ function checkLinuxSettings(bundle) {
   }
   if (bundle.resources?.[NOTICES_SOURCE] !== NOTICES_FILE) {
     problems.push(`bundle.resources must ship '${NOTICES_FILE}' (map '${NOTICES_SOURCE}' to '${NOTICES_FILE}', MIT notice condition)`);
+  }
+  for (const file of LICENSE_FILES) {
+    if (bundle.resources?.[`../../${file}`] !== file) {
+      problems.push(`bundle.resources must ship '${file}' (map '../../${file}' to '${file}', Apache-2.0 redistribution)`);
+    }
   }
   for (const installed of PDF_FONT_FILES) {
     const source = `${PDF_FONT_SOURCE_DIR}${installed.split("/").pop()}`;

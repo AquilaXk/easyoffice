@@ -158,4 +158,4 @@ Inside the WebUI, **File → Open… (`Ctrl+O`)** or dragging a file onto the wo
 
 ## License
 
-Released under the [MIT License](LICENSE).
+Released under the [Apache License 2.0](LICENSE). See [NOTICE](NOTICE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

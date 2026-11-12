@@ -2897,3 +2897,17 @@
 - **Trade-offs** 저장 뒤 확인용 해석은 줄이지 않았습니다. 저장 시간의 18~46%이지만 쓴 파일이 다시 열리는지 보는 검증입니다.
 - **Verified by** `cargo test -p easyoffice-app convert_open`(`decode_answer_is_byte_exact_for_documents_workbooks_and_slides`), `cargo test -p easyoffice-formats --test xml_scan_equivalence`·`--lib strict_json`·`--test rich_decode_roundtrip`(DOCX·XLSX·PPTX·HWPX·ODT의 DOCTYPE 거부), 열린 응답 JSON 11개 입력의 전·후 `cmp`.
 - **Revisit when** 저장 뒤 확인용 해석을 스트리밍 읽기로 바꿀 때(`paragraphCount`·`tableCount` 계약 확인), SVG 파서 크레이트 사본을 둘 때(PD-163).
+
+## PD-187. 라이선스를 v0.1.1부터 Apache-2.0으로 바꾸고 `NOTICE`를 관리함
+
+- **Status** Implemented (QA 결정 2026-11-12). `LICENSE`, `NOTICE`, `Cargo.toml`, `apps/quicklook/rust/Cargo.toml`, `apps/hwp-studio/package.json`, `tauri.conf.json`, README 라이선스 절.
+- **Context** 이 저장소는 MIT였습니다. 특허 사용권과 상표 조항이 필요해 Apache-2.0으로 옮깁니다.
+- **Decision (`PD-187`)**
+  1. v0.1.1부터 배포하는 소스와 설치본은 Apache License 2.0입니다. 이미 배포한 v0.1.0까지는 받은 사람에게 MIT로 남습니다.
+  2. `LICENSE`는 apache.org의 공식 텍스트이고 APPENDIX의 저작권 줄만 `Copyright 2026 AquilaXk`로 채웠습니다.
+  3. 루트 `NOTICE`는 제품명, 저작권 줄, `THIRD_PARTY_NOTICES.md` 참조 한 줄만 둡니다. 가져온 코드의 출처·라이선스는 `NOTICE`에 옮기지 않고 `THIRD_PARTY_NOTICES.md`에만 적습니다. 저작권자나 연도가 바뀌면 `NOTICE`와 `LICENSE` 부록 줄을 함께 고칩니다.
+  4. 모든 설치본이 `LICENSE`와 `NOTICE`를 번들 리소스로 담습니다(Apache-2.0 4(a)·4(d)). `checkDesktopBundleConfig`가 빠지면 막습니다. 패키지 라이선스 식별자는 Cargo 워크스페이스 값을 따릅니다.
+  5. `THIRD_PARTY_NOTICES.md`의 다른 프로젝트 라이선스는 그대로입니다.
+- **재사용 판단 (구현 원칙 3단계)** (1) 공식 라이선스 텍스트를 그대로 썼습니다. (2) 기존 번들 리소스·검증 스크립트에 `LICENSE`·`NOTICE` 항목을 더했습니다. (3) 이식한 코드는 없습니다.
+- **Verified by** `node --test scripts/test-desktop-file-associations.mjs`, `node scripts/check-repo-hygiene.mjs`, `cargo metadata`의 패키지 `license` 값.
+- **Revisit when** 저작권자나 배포 채널이 바뀔 때.

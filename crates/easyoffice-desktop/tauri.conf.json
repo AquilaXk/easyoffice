@@ -32,7 +32,7 @@
     "active": true,
     "targets": ["nsis", "app", "dmg", "deb", "rpm", "appimage"],
     "publisher": "EasyOffice",
-    "copyright": "Copyright (c) EasyOffice contributors. MIT License.",
+    "copyright": "Copyright 2026 AquilaXk. Apache License 2.0.",
     "category": "Productivity",
     "shortDescription": "EasyOffice offline office workspace",
     "longDescription": "EasyOffice is an offline desktop office workspace for documents, HWP, spreadsheets, slides, and PDF.",
@@ -44,6 +44,8 @@
       "icons/icon.ico"
     ],
     "resources": {
+      "../../LICENSE": "LICENSE",
+      "../../NOTICE": "NOTICE",
       "../../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md",
       "../../third_party/rhwp/ttfs/opensource/NotoSansKR-Regular.ttf": "pdf-fonts/NotoSansKR-Regular.ttf",
       "../../third_party/rhwp/ttfs/opensource/NotoSansKR-OFL.txt": "pdf-fonts/NotoSansKR-OFL.txt"

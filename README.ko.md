@@ -158,4 +158,4 @@ WebUI에서는 **파일 → 열기…(`Ctrl+O`)** 또는 작업 영역에 파일
 
 ## 라이선스
 
-[MIT License](LICENSE)에 따라 배포됩니다.
+[Apache License 2.0](LICENSE)에 따라 배포됩니다. [NOTICE](NOTICE)와 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)를 함께 봅니다.

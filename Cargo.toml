@@ -19,7 +19,7 @@ default-members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-license = "MIT"
+license = "Apache-2.0"
 rust-version = "1.85"
 
 # PD-101: the desktop shell turns page SVGs into searchable PDFs with svg2pdf. rhwp pins a vendored

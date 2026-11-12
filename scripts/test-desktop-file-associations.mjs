@@ -6,6 +6,7 @@ import {
   LINUX_DEB_DEPENDS,
   LINUX_DESKTOP_TEMPLATE,
   LINUX_RPM_DEPENDS,
+  LICENSE_FILES,
   NOTICES_FILE,
   PDF_FONT_FILES,
   REQUIRED_ASSOCIATIONS,
@@ -137,4 +138,13 @@ test("the third-party notice file must be shipped as a bundle resource", () => {
   assert.equal(conf.bundle.resources[`../../${NOTICES_FILE}`], NOTICES_FILE);
   delete conf.bundle.resources;
   assert.match(checkDesktopBundleConfig(conf).join("\n"), /bundle\.resources must ship 'THIRD_PARTY_NOTICES\.md'/);
+});
+
+test("the license and NOTICE files must be shipped as bundle resources", () => {
+  for (const file of LICENSE_FILES) {
+    const conf = load();
+    assert.equal(conf.bundle.resources[`../../${file}`], file);
+    delete conf.bundle.resources[`../../${file}`];
+    assert.match(checkDesktopBundleConfig(conf).join("\n"), new RegExp(`bundle\\.resources must ship '${file}'`));
+  }
 });
