@@ -1,4 +1,4 @@
-//! Which menus the native menu bar has for each kind of window (PD-189).
+//! Which menus the native menu bar has for each kind of window (PD-190).
 //!
 //! The page draws one menu row that follows the window's kind (`menu-kinds.js`); the native bar
 //! follows it too: a document, spreadsheet, presentation or PDF window shows only the menus and

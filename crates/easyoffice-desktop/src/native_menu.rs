@@ -9,7 +9,7 @@
 //! focused window only" delivery and the same quit item (`app:quit`, [`QUIT_ID`]), with EasyOffice's
 //! differences:
 //!
-//! * The bar follows the focused window's kind (PD-189): `layout.rs` lists the menus of a
+//! * The bar follows the focused window's kind (PD-190): `layout.rs` lists the menus of a
 //!   document, spreadsheet, presentation, PDF and Hangul editor window, `build.rs` builds one bar per
 //!   kind ([`KindMenus`]) and `menu_state.rs` puts the focused window's bar on screen.
 //! * One static table ([`ITEMS`]) holds every custom item: its id, label, accelerator and the

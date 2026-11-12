@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { createWebUiDom, createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { readText } from "./test-support/read-text.mjs";
 
-// Menu bar (PD-098, step 3a): rhwp-studio markup and behaviour. The menu row follows the window kind (PD-189):
+// Menu bar (PD-098, step 3a): rhwp-studio markup and behaviour. The menu row follows the window kind (PD-190):
 // every ribbon command of a module is reachable from a menu item of its window, except the few that kind has
 // no menu for; those stay in the command palette (Cmd+K), which lists every command of the active module.
 

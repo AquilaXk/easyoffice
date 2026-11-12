@@ -2935,3 +2935,18 @@
 - **Trade-offs** tao가 같은 메서드를 더하는 버전으로 올라가면 `class_addMethod`가 거부해 시작할 때 오류 한 줄이 남고 tao의 처리가 우선합니다. 종료를 미루는 동안 AppKit은 modal 패널 모드로 루프를 돌리지만 tao의 소스와 관찰자는 공통 모드에 등록돼 있어 창·IPC 처리는 이어집니다(실기기 확인 항목).
 - **Verified by** `cargo test -p easyoffice-desktop`: `app_quit`(창 없음은 즉시 종료, 창 있으면 첫 창에 묻고 마지막 창이 닫히면 답함, 취소는 한 번만 "취소"로 답함, 메뉴 끝내기의 취소는 시스템에 아무 빚도 없음, 이미 도는 큐에 합류, 구조 검사로 `install` 호출 확인), `macos_terminate`(델리게이트 클래스에 메서드가 한 번 등록되고 인코딩이 `Q@:@`이며 기존 메서드는 그대로, 같은 메서드가 있으면 거부).
 - **Revisit when** tao가 `applicationShouldTerminate:`를 직접 처리할 때(이 모듈을 지움), Windows·Linux의 세션 종료를 막을 때.
+
+## PD-190. 메뉴 줄을 창 종류별로 구성함 (문서·시트·슬라이드·PDF, 페이지와 macOS 네이티브 막대)
+
+- **Status** Implemented (QA 요청 2026-11-12). `crates/easyoffice-app/ui/index.html`, `menu-kinds.js`, `menu-bar.css`, `workspace-session.js`, `shell-chrome.js`, `crates/easyoffice-desktop/src/native_menu.rs`(`native_menu/layout.rs`, `native_menu/build.rs`), `menu_state.rs`, `smoke_steps.rs`. PD-098의 "한 메뉴 줄을 모든 창이 쓰고 맞지 않는 항목은 회색으로 끔"을 대신합니다.
+- **Context** 시트 창에 "쪽" 메뉴와 문단 전용 항목이, 문서 창에 시트 기능이, PDF 창에 서식 항목이 회색으로 남아 있었습니다.
+- **Decision (`PD-190`)**
+  1. 최상위 메뉴는 창 종류별입니다. 문서(DOCX·DOC·ODT·RTF·MD·TXT·Pages)는 파일·편집·보기·입력·서식·쪽·표·도구·도움말, 시트는 파일·편집·보기·삽입·서식·시트·데이터·도구·도움말, 슬라이드는 파일·편집·보기·삽입·서식·슬라이드·슬라이드 쇼·도구·도움말, PDF는 파일·편집·보기·주석·쪽·도구·도움말입니다. 한글 창은 편집기 메뉴 줄 그대로이고 한글 대체 편집기(페이지 메뉴 줄)는 문서 구성에 한글 전용 항목을 더합니다. 시작 화면과 변환기는 문서 구성을 씁니다.
+  2. 페이지 메뉴 줄은 한 벌의 DOM에서 `data-kinds`로 보일 메뉴·항목을 고릅니다(`menu-kinds.js`, `applyModuleContext`가 호출). 속성이 없으면 모든 종류에 보이고, 구분선은 보이는 두 항목 사이에만 남습니다. 해당 창에 의미 없는 항목은 숨기며 회색으로 남기지 않습니다. 명령 id, 단축키, 명령 검색(Cmd+K), `aria-disabled` 규칙은 그대로입니다.
+  3. 시트: 정렬·데이터 유효성·피벗·조건부 서식은 "데이터", 행·열 틀 고정과 용지 방향·여백은 "시트", 함수 마법사·자동 합계·차트는 "삽입"입니다. 슬라이드 쇼에는 화면 전환 효과와 발표자 도구, PDF는 형광펜·밑줄·검토 메모를 "주석", 회전·분할·병합을 "쪽", 편집 문서 변환을 "도구"에 둡니다.
+  4. 종류 메뉴에 항목이 없는 리본 명령(시트의 다단 설정, 슬라이드의 다단 설정·데이터 4개, PDF의 서식·삽입·쪽 설정·데이터 17개)은 명령 검색에서 그대로 실행합니다.
+  5. macOS 네이티브 막대는 종류마다 한 벌(`KindMenus`)을 만들어 두고, 창이 `report_menu_state`로 알린 `kind`에 따라 포커스된 창의 막대를 `set_menu`로 바꿉니다. 포커스된 창이 없으면 지금 막대를 그대로 둡니다. 보고에 없는 종류는 거부합니다. 막대의 구성은 `native_menu/layout.rs`의 데이터이고 한글 창 막대는 이전 구성 그대로입니다. 편집 메뉴의 되돌리기·다시 실행·오려 두기·복사하기·붙여넣기·모두 선택은 텍스트 필드가 쓰므로 모든 종류에 둡니다.
+  6. Pages처럼 같은 형식으로 저장할 수 없는 문서의 저장은 이미 "다른 이름으로 저장" 경로를 탑니다(`defaultSaveSpecForModule`, `BIDIRECTIONAL_SAVE_EXTS`에 없는 형식은 저장 대화상자). 바꾸지 않았습니다.
+- **재사용 판단 (구현 원칙 3단계)** (1) 메뉴 모양·열림 동작은 rhwp-studio 메뉴 줄 소스를 그대로 따르므로 새 컴포넌트가 없습니다. (2) 기존 메뉴 항목 DOM, `studioCommandApplies`, 네이티브 항목 표(`ITEMS`)를 재사용하고 종류별 보이기와 막대 배치만 더했습니다. (3) 이식한 코드는 없습니다.
+- **Verified by** `node --test scripts/test-webui-menu-kinds.mjs scripts/test-webui-menu-bar.mjs scripts/test-webui-menu-state.mjs scripts/test-webui-native-menu.mjs`, `cargo test -p easyoffice-desktop --bin EasyOffice -- native_menu menu_state`.
+- **Revisit when** 시트에 행·열 추가/삭제 명령이 메뉴 항목으로 생길 때, 시작 화면에 전용 메뉴가 필요해질 때.

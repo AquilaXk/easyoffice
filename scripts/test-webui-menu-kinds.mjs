@@ -6,7 +6,7 @@ import { readText } from "./test-support/read-text.mjs";
 
 const byName = (a, b) => a.localeCompare(b);
 
-// The menu row follows the window kind (PD-189): a document, spreadsheet, presentation or PDF window shows the menus
+// The menu row follows the window kind (PD-190): a document, spreadsheet, presentation or PDF window shows the menus
 // and items that mean something there and no grayed leftovers; the Hangul window's fallback editor keeps the document
 // row plus its own items. The native macOS bar has the same menus per kind (`native_menu/layout.rs`).
 

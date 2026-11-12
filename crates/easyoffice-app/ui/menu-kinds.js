@@ -1,7 +1,7 @@
 (function (host) {
   "use strict";
 
-  // Page menu bar per window kind (PD-189). One menu row holds the menus of every kind; the elements
+  // Page menu bar per window kind (PD-190). One menu row holds the menus of every kind; the elements
   // that belong to some kinds only carry `data-kinds="DOC SHEET"`, and the kind of the window decides
   // which of them are shown. An element without the attribute is in every kind. Separators are not
   // marked: after the items are filtered, a separator is shown only between two visible items.
