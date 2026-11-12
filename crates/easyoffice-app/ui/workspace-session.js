@@ -546,6 +546,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       const commandModule = start ? "START" : embed ? "HWP_EMBED" : mod;
       syncToolbarButtons(mod, commandModule);
       syncToolbarGroupVisibility();
+      host.__EASYOFFICE_MENU_KINDS__.applyMenuKind(document, commandModule);
       for (const item of document.querySelectorAll(".md-item[data-studio-menu-cmd]")) {
         const on = studioCommandApplies(item.dataset.studioMenuCmd, commandModule);
         item.setAttribute("aria-disabled", on ? "false" : "true");

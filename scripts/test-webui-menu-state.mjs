@@ -41,13 +41,23 @@ function tableCommands(page) {
     .map(([id, action]) => [id, action.slice("studio-cmd:".length)]);
 }
 
-test("a window reports its theme and module state to the shell", async () => {
+test("a window reports its menu kind, theme and module state to the shell", async () => {
   const { reports } = await shellPage();
   const last = reports.at(-1);
   assert.ok(last, "the window reported its state at start");
-  assert.deepEqual(Object.keys(last).sort(byName), ["disabled", "theme"]);
+  assert.deepEqual(Object.keys(last).sort(byName), ["disabled", "kind", "theme"]);
   assert.equal(last.theme, "system");
+  assert.equal(last.kind, "DOC");
   assert.ok(Array.isArray(last.disabled));
+});
+
+test("the reported menu kind follows the module of the window", async () => {
+  const { document, reports } = await shellPage();
+  for (const mod of ["SHEET", "SLIDE", "PDF", "HWP", "DOC"]) {
+    await switchModule(document, mod);
+    await flushAsyncTurns(10);
+    assert.equal(reports.at(-1).kind, mod, mod);
+  }
 });
 
 test("Windows and Linux have no native bar, so their windows report nothing", async () => {

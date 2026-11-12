@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 
 use tauri::{AppHandle, Manager, WebviewWindow};
 
-use crate::native_menu::{self, MenuView, ITEMS};
+use crate::native_menu::{self, KindMenus, MenuKind, MenuView, ITEMS};
 use crate::shell_caller::ShellCaller;
 use crate::update_check::UpdateService;
 use crate::windows::is_window_label;
@@ -23,6 +23,7 @@ use crate::windows::is_window_label;
 /// The menu state one window reported.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WindowMenu {
+    kind: MenuKind,
     theme: &'static str,
     disabled_mask: u128,
 }
@@ -30,6 +31,7 @@ pub struct WindowMenu {
 impl Default for WindowMenu {
     fn default() -> Self {
         Self {
+            kind: MenuKind::Doc,
             theme: "system",
             disabled_mask: 0,
         }
@@ -37,8 +39,10 @@ impl Default for WindowMenu {
 }
 
 impl WindowMenu {
-    /// Checks a report: the theme must be a known mode and every id an item of the table.
-    pub fn parse(theme: &str, disabled: Vec<String>) -> Result<Self, String> {
+    /// Checks a report: the kind and the theme must be known and every id an item of the table.
+    pub fn parse(kind: &str, theme: &str, disabled: Vec<String>) -> Result<Self, String> {
+        let kind =
+            MenuKind::parse(kind).ok_or_else(|| "알 수 없는 메뉴 종류입니다.".to_string())?;
         if disabled.len() > ITEMS.len() {
             return Err("메뉴 항목 목록이 너무 깁니다.".to_string());
         }
@@ -54,6 +58,7 @@ impl WindowMenu {
             disabled_mask |= 1u128 << index;
         }
         Ok(Self {
+            kind,
             theme,
             disabled_mask,
         })
@@ -84,19 +89,23 @@ pub fn forget(app: &AppHandle, label: &str) {
     app.state::<MenuStates>().forget(label);
 }
 
-/// Shows the focused window's state on the bar.
+/// Shows the focused window's bar and state. With no focused window the bar on screen stays.
 pub fn refresh(app: &AppHandle) -> Result<(), String> {
-    let Some(menu) = app.menu() else {
+    let Some(kinds) = app.try_state::<KindMenus>() else {
         return Ok(());
     };
     let focused = app
         .webview_windows()
         .into_values()
         .find(|window| window.is_focused().unwrap_or(false));
-    let state = focused
+    let reported = focused
         .as_ref()
-        .map(|window| app.state::<MenuStates>().get(window.label()))
-        .unwrap_or_default();
+        .map(|window| app.state::<MenuStates>().get(window.label()));
+    let state = reported.unwrap_or_default();
+    let kind = reported.map_or_else(|| kinds.shown(), |state| state.kind);
+    let menu = kinds
+        .show(app, kind)
+        .map_err(|err| format!("메뉴 막대를 바꾸지 못했습니다: {err}"))?;
     let update_check = app
         .try_state::<Arc<UpdateService>>()
         .map(|service| service.view())
@@ -121,19 +130,20 @@ pub fn refresh_logged(app: &AppHandle) {
     }
 }
 
-/// A window reports its theme and the items its module cannot use.
+/// A window reports its menu kind, its theme and the items its module cannot use.
 #[tauri::command]
 pub fn report_menu_state(
     _caller: ShellCaller,
     app: AppHandle,
     window: WebviewWindow,
+    kind: String,
     theme: String,
     disabled: Vec<String>,
 ) -> Result<(), crate::IpcError> {
     if !is_window_label(window.label()) {
         return Ok(());
     }
-    let state = WindowMenu::parse(&theme, disabled).map_err(crate::IpcError::new)?;
+    let state = WindowMenu::parse(&kind, &theme, disabled).map_err(crate::IpcError::new)?;
     app.state::<MenuStates>()
         .states()
         .insert(window.label().to_string(), state);
@@ -160,25 +170,34 @@ mod tests {
 
     #[test]
     fn a_report_is_accepted_only_with_a_known_theme_and_known_items() {
-        let ok = WindowMenu::parse("dark", ids(&["table:sort", "edit:undo"])).unwrap();
+        let ok = WindowMenu::parse("SHEET", "dark", ids(&["table:sort", "edit:undo"])).unwrap();
         assert_eq!(ok.theme, "dark");
+        assert_eq!(ok.kind, MenuKind::Sheet);
         assert!(ok.is_disabled("table:sort"));
         assert!(!ok.is_disabled("file:save"));
-        assert!(WindowMenu::parse("purple", Vec::new()).is_err());
-        assert!(WindowMenu::parse("light", ids(&["app:quit"])).is_err());
-        assert!(WindowMenu::parse("light", ids(&["nope"])).is_err());
+        assert!(WindowMenu::parse("DOC", "purple", Vec::new()).is_err());
+        assert!(WindowMenu::parse("DOC", "light", ids(&["app:quit"])).is_err());
+        assert!(WindowMenu::parse("DOC", "light", ids(&["nope"])).is_err());
         let too_many = vec!["table:sort".to_string(); ITEMS.len() + 1];
-        assert!(WindowMenu::parse("light", too_many).is_err());
+        assert!(WindowMenu::parse("DOC", "light", too_many).is_err());
+        for bad in ["", "doc", "START", "HWP_EMBED"] {
+            assert!(
+                WindowMenu::parse(bad, "light", Vec::new()).is_err(),
+                "{bad}"
+            );
+        }
     }
 
     #[test]
-    fn a_window_that_has_not_reported_shows_everything_enabled_with_the_system_theme() {
+    fn a_window_that_has_not_reported_shows_the_document_bar_enabled_with_the_system_theme() {
         let states = MenuStates::default();
         assert_eq!(states.get("doc-1"), WindowMenu::default());
+        assert_eq!(WindowMenu::default().kind, MenuKind::Doc);
         states.states().insert(
             "doc-1".to_string(),
-            WindowMenu::parse("dark", Vec::new()).unwrap(),
+            WindowMenu::parse("PDF", "dark", Vec::new()).unwrap(),
         );
+        assert_eq!(states.get("doc-1").kind, MenuKind::Pdf);
         assert_eq!(states.get("doc-1").theme, "dark");
         states.forget("doc-1");
         assert_eq!(states.get("doc-1").theme, "system");

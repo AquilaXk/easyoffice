@@ -9,6 +9,9 @@
 //! focused window only" delivery and the same quit item (`app:quit`, [`QUIT_ID`]), with EasyOffice's
 //! differences:
 //!
+//! * The bar follows the focused window's kind (PD-189): `layout.rs` lists the menus of a
+//!   document, spreadsheet, presentation, PDF and Hangul editor window, `build.rs` builds one bar per
+//!   kind ([`KindMenus`]) and `menu_state.rs` puts the focused window's bar on screen.
 //! * One static table ([`ITEMS`]) holds every custom item: its id, label, accelerator and the
 //!   page action it runs. The page keeps the matching list (`NATIVE_MENU_ACTIONS` in
 //!   `shell-chrome.js`); a test compares both lists, so they cannot drift apart.
@@ -32,11 +35,16 @@
 //!   state of the bar follows the focused window ([`sync`], fed by `menu_state.rs`).
 //!   The disabled ids come from the page, which owns the module rules (`studioCommandApplies`).
 
-use tauri::menu::{
-    CheckMenuItem, CheckMenuItemBuilder, Menu, MenuItemBuilder, MenuItemKind, PredefinedMenuItem,
-    Submenu, SubmenuBuilder,
-};
-use tauri::{AppHandle, Runtime};
+use std::collections::HashMap;
+use std::sync::Mutex;
+
+use tauri::menu::{CheckMenuItem, CheckMenuItemBuilder, Menu, MenuItemBuilder, MenuItemKind};
+use tauri::{AppHandle, Manager, Runtime, Wry};
+
+mod build;
+mod layout;
+
+pub use layout::MenuKind;
 
 /// One custom menu item.
 pub struct MenuItemSpec {
@@ -582,264 +590,6 @@ pub fn installed_ids() -> impl Iterator<Item = &'static str> {
         .filter(|id| !MACOS_SYSTEM_IDS.contains(id))
 }
 
-const SEPARATOR: &str = "-";
-
-/// One line of a submenu: a table item, a separator or a nested submenu.
-enum Entry<R: Runtime> {
-    Item(&'static str),
-    Separator,
-    Sub(Submenu<R>),
-}
-
-fn entries<R: Runtime>(ids: &[&'static str]) -> Vec<Entry<R>> {
-    ids.iter()
-        .map(|id| {
-            if *id == SEPARATOR {
-                Entry::Separator
-            } else {
-                Entry::Item(id)
-            }
-        })
-        .collect()
-}
-
-fn submenu<R: Runtime>(
-    app: &AppHandle<R>,
-    title: &str,
-    lines: Vec<Entry<R>>,
-) -> tauri::Result<Submenu<R>> {
-    let mut builder = SubmenuBuilder::new(app, title);
-    for line in lines {
-        builder = match line {
-            Entry::Separator => builder.separator(),
-            Entry::Item(QUIT_ID) => builder.item(&quit_item(app)?),
-            Entry::Item(id) if is_check_item(id) => builder.item(&check(app, spec(id))?),
-            Entry::Item(id) => builder.item(&custom(app, spec(id))?),
-            Entry::Sub(sub) => builder.item(&sub),
-        };
-    }
-    builder.build()
-}
-
-fn app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
-    SubmenuBuilder::new(app, "EasyOffice")
-        .item(&custom(app, spec("app:about"))?)
-        .separator()
-        .item(&PredefinedMenuItem::services(app, Some("서비스"))?)
-        .separator()
-        .item(&PredefinedMenuItem::hide(app, Some("EasyOffice 가리기"))?)
-        .item(&PredefinedMenuItem::hide_others(app, Some("기타 가리기"))?)
-        .item(&PredefinedMenuItem::show_all(app, Some("모두 보기"))?)
-        .separator()
-        .item(&quit_item(app)?)
-        .build()
-}
-
-fn file_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
-    let kinds = submenu(
-        app,
-        "새 문서",
-        entries(&[
-            "file:new-doc",
-            "file:new-hwp",
-            "file:new-sheet",
-            "file:new-slide",
-            "file:new-pdf",
-            "file:new-conv",
-        ]),
-    )?;
-    let mut lines = entries(&["file:new"]);
-    lines.push(Entry::Sub(kinds));
-    // 닫기 is the 윈도우 menu's (the only ⌘W) and 끝내기 is in the application menu. The reference
-    // app's order: new documents, a separator, open, recent, save, save as (`menu.rs` 79-96).
-    lines.extend(entries(&[
-        SEPARATOR,
-        "file:open",
-        "file:open-recent",
-        "file:save",
-        "file:save-as",
-        SEPARATOR,
-        "file:export-pdf",
-        "file:print",
-    ]));
-    submenu(app, "파일", lines)
-}
-
-fn edit_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
-    SubmenuBuilder::new(app, "편집")
-        .item(&custom(app, spec("edit:undo"))?)
-        .item(&custom(app, spec("edit:redo"))?)
-        .separator()
-        .item(&custom(app, spec("edit:cut"))?)
-        .item(&custom(app, spec("edit:copy"))?)
-        .item(&PredefinedMenuItem::paste(
-            app,
-            Some(spec("edit:paste").label),
-        )?)
-        .item(&PredefinedMenuItem::select_all(app, Some("모두 선택"))?)
-        .separator()
-        .item(&custom(app, spec("edit:find"))?)
-        .item(&custom(app, spec("edit:replace"))?)
-        .build()
-}
-
-fn view_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
-    let theme = submenu(
-        app,
-        "테마",
-        entries(&["view:theme-system", "view:theme-light", "view:theme-dark"]),
-    )?;
-    let mut lines = entries(&[
-        "view:zoom-in",
-        "view:zoom-out",
-        "view:zoom-100",
-        SEPARATOR,
-        "view:zoom-fit-page",
-        "view:zoom-fit-width",
-        "view:zoom-dialog",
-        SEPARATOR,
-        "view:split",
-        "view:outline",
-        SEPARATOR,
-    ]);
-    lines.push(Entry::Sub(theme));
-    lines.extend(entries(&[
-        "view:theme-toggle",
-        SEPARATOR,
-        "view:toolbar-labels",
-        "view:form-mode",
-        "view:ctrl-marks",
-        "view:para-marks",
-        "view:doc-grid",
-    ]));
-    submenu(app, "보기", lines)
-}
-
-fn insert_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
-    let ids = [
-        "insert:shape",
-        "insert:chart",
-        "insert:footnote",
-        "insert:symbol",
-        "insert:link",
-        "insert:toc",
-        "insert:mailmerge",
-        "insert:field",
-    ];
-    submenu(app, "입력", entries(&ids))
-}
-
-fn format_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
-    let ids = [
-        "format:bold",
-        "format:italic",
-        "format:underline",
-        SEPARATOR,
-        "format:style",
-        "format:justify",
-        "format:para-numbering",
-        "format:para-bullet",
-        "format:indent-in",
-        "format:indent-out",
-    ];
-    submenu(app, "서식", entries(&ids))
-}
-
-fn page_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
-    let ids = [
-        "page:paper",
-        "page:orientation",
-        "page:margins",
-        "page:header",
-        "page:columns",
-        SEPARATOR,
-        "page:hwp-header",
-        "page:manuscript",
-        SEPARATOR,
-        "page:slide-master",
-        "page:slide-snap",
-        "page:slide-transition",
-        "page:slide-presenter",
-    ];
-    submenu(app, "쪽", entries(&ids))
-}
-
-fn table_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
-    let ids = [
-        "table:insert",
-        "table:add-row",
-        SEPARATOR,
-        "table:cell-select",
-        "table:merge",
-        "table:cell-split",
-        SEPARATOR,
-        "table:sum",
-        "table:doc-formula",
-        "table:hwp-border",
-        SEPARATOR,
-        "table:autosum",
-        "table:fn-browser",
-        "table:sort",
-        "table:validation",
-        "table:sheet-pivot",
-        "table:sheet-chart",
-        "table:sheet-condfmt",
-        "table:sheet-freeze",
-    ];
-    submenu(app, "표", entries(&ids))
-}
-
-fn tool_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
-    let ids = [
-        "tool:diagnose",
-        "tool:scrub-pii",
-        "tool:security-audit",
-        "tool:bench-run",
-        SEPARATOR,
-        "tool:review-track",
-        "tool:review-comment",
-        "tool:review-verify",
-        "tool:review-stats",
-        SEPARATOR,
-        "tool:pdf-highlight",
-        "tool:pdf-rotate",
-        "tool:pdf-splitmerge",
-        "tool:pdf-tooffice",
-        SEPARATOR,
-        "tool:palette",
-    ];
-    submenu(app, "도구", entries(&ids))
-}
-
-fn window_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
-    SubmenuBuilder::new(app, "윈도우")
-        .item(&PredefinedMenuItem::minimize(app, Some("최소화"))?)
-        .item(&PredefinedMenuItem::close_window(app, Some("닫기"))?)
-        .build()
-}
-
-/// 도움말: the About item lives in the application menu.
-fn help_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
-    submenu(app, "도움말", entries(&["help:update-check"]))
-}
-
-/// Builds the whole menu bar.
-pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
-    let menu = Menu::new(app)?;
-    menu.append(&app_menu(app)?)?;
-    menu.append(&file_menu(app)?)?;
-    menu.append(&edit_menu(app)?)?;
-    menu.append(&view_menu(app)?)?;
-    menu.append(&insert_menu(app)?)?;
-    menu.append(&format_menu(app)?)?;
-    menu.append(&page_menu(app)?)?;
-    menu.append(&table_menu(app)?)?;
-    menu.append(&tool_menu(app)?)?;
-    menu.append(&window_menu(app)?)?;
-    menu.append(&help_menu(app)?)?;
-    Ok(menu)
-}
-
 /// What the menu bar shows for the focused window.
 pub struct MenuView<'a> {
     /// Theme mode of the window: `system`, `light` or `dark`.
@@ -904,10 +654,62 @@ pub fn sync<R: Runtime>(menu: &Menu<R>, view: &MenuView) -> tauri::Result<()> {
     failed.map_or(Ok(()), Err)
 }
 
-/// Installs the menu bar and routes custom items to the focused window.
+/// The menu bars, one per kind of window, built once. The bar on screen is the one of the window
+/// that has the focus (`menu_state.rs` puts it there).
+pub struct KindMenus {
+    menus: HashMap<MenuKind, Menu<Wry>>,
+    shown: Mutex<MenuKind>,
+}
+
+impl KindMenus {
+    fn new(app: &AppHandle) -> tauri::Result<Self> {
+        let mut menus = HashMap::new();
+        for kind in MenuKind::ALL {
+            menus.insert(kind, build::build(app, kind)?);
+        }
+        Ok(Self {
+            menus,
+            shown: Mutex::new(MenuKind::Doc),
+        })
+    }
+
+    fn menu(&self, kind: MenuKind) -> Menu<Wry> {
+        self.menus[&kind].clone()
+    }
+
+    fn shown_guard(&self) -> std::sync::MutexGuard<'_, MenuKind> {
+        self.shown
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// The kind whose bar is on screen.
+    pub fn shown(&self) -> MenuKind {
+        *self.shown_guard()
+    }
+
+    /// Every bar (the smoke run checks all of them).
+    pub fn all(&self) -> impl Iterator<Item = &Menu<Wry>> {
+        self.menus.values()
+    }
+
+    /// Puts the bar of `kind` on screen unless it is already there, and returns it.
+    pub fn show(&self, app: &AppHandle, kind: MenuKind) -> tauri::Result<Menu<Wry>> {
+        let menu = self.menu(kind);
+        let mut shown = self.shown_guard();
+        if *shown != kind {
+            app.set_menu(menu.clone())?;
+            *shown = kind;
+        }
+        Ok(menu)
+    }
+}
+
+/// Installs the menu bars and routes custom items to the focused window.
 pub fn install(app: &mut tauri::App) -> tauri::Result<()> {
-    let menu = build(app.handle())?;
-    app.set_menu(menu)?;
+    let kinds = KindMenus::new(app.handle())?;
+    app.set_menu(kinds.menu(kinds.shown()))?;
+    app.manage(kinds);
     app.on_menu_event(|app, event| run_item(app, event.id().as_ref()));
     Ok(())
 }
@@ -915,7 +717,6 @@ pub fn install(app: &mut tauri::App) -> tauri::Result<()> {
 /// Runs a custom item in the window that has the focus; with no focused window nothing happens
 /// (a menu click never reaches a window the user is not looking at).
 fn run_item(app: &AppHandle, id: &str) {
-    use tauri::Manager;
     if id == QUIT_ID {
         crate::app_quit::request_app_quit(app);
         return;

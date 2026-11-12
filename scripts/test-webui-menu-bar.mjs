@@ -4,8 +4,9 @@ import { fileURLToPath } from "node:url";
 import { createWebUiDom, createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { readText } from "./test-support/read-text.mjs";
 
-// Menu bar (PD-098, step 3a): rhwp-studio markup and behaviour, and every ribbon command of the
-// catalog (140 ids over the five editing modules) is reachable from a menu item.
+// Menu bar (PD-098, step 3a): rhwp-studio markup and behaviour. The menu row follows the window kind (PD-189):
+// every ribbon command of a module is reachable from a menu item of its window, except the few that kind has
+// no menu for; those stay in the command palette (Cmd+K), which lists every command of the active module.
 
 const UI_DIR = new URL("../crates/easyoffice-app/ui/", import.meta.url);
 const read = (name) => readText(fileURLToPath(new URL(name, UI_DIR)));
@@ -49,8 +50,27 @@ const catalogIdsOf = (catalog, mod) =>
   Object.values(catalog.RIBBON_CATEGORY_TOOLS[mod]).flatMap((tools) => tools.map((t) => t.id));
 const idsOf = (catalog, mod) => catalogIdsOf(catalog, mod).filter((id) => !id.endsWith(RIBBON_COLLAPSE_SUFFIX));
 
+// An item is shown when neither it nor its menu is hidden by the window kind (`menu-kinds.js`).
+const shown = (el) => !el.closest("[hidden]");
 const enabledMenuItems = (document) =>
-  document.querySelectorAll(".md-item[data-studio-menu-cmd]").filter((el) => el.getAttribute("aria-disabled") !== "true");
+  document.querySelectorAll(".md-item[data-studio-menu-cmd]").filter((el) => shown(el) && el.getAttribute("aria-disabled") !== "true");
+
+// The ribbon commands (suffix after the module prefix) a window kind has no menu item for.
+const PALETTE_ONLY = {
+  DOC: [],
+  HWP: [],
+  SHEET: ["layout-columns"],
+  SLIDE: ["layout-columns", "data-autosum", "data-fn-browser", "data-sort", "data-validation"],
+  PDF: [
+    "home-bold", "home-italic", "home-underline", "home-style",
+    "insert-table", "insert-chart", "insert-shape", "insert-link",
+    "layout-paper", "layout-orientation", "layout-columns", "layout-margins",
+    "data-autosum", "data-fn-browser", "data-sort", "data-validation",
+    "review-track",
+  ],
+};
+const suffixOf = (id) => id.replace(/^[a-z]+-/, "");
+const menuIdsOf = (catalog, mod) => idsOf(catalog, mod).filter((id) => !PALETTE_ONLY[mod].includes(suffixOf(id)));
 
 test("the catalog has 140 ribbon commands, five editing modules with 28 each", async () => {
   const { catalog } = await openModule("DOC");
@@ -68,7 +88,7 @@ for (const mod of MODULES) {
     const { document, catalog } = await openModule(mod);
     const reachable = new Set(enabledMenuItems(document).map((el) => catalog.resolveMenuCommand(el.dataset.studioMenuCmd, mod)).filter(Boolean));
     const missing = idsOf(catalog, mod).filter((id) => !reachable.has(id));
-    assert.deepEqual(missing, [], `${mod}: ribbon commands without a menu item`);
+    assert.deepEqual(missing.map(suffixOf), PALETTE_ONLY[mod], `${mod}: ribbon commands without a menu item are the palette-only ones`);
   });
 
   test(`${mod}: clicking the menu items really executes each ribbon command`, async () => {
@@ -86,7 +106,7 @@ for (const mod of MODULES) {
     }
     await flushAsyncTurns(4 * clicked.size);
     // `view-theme` runs the theme toggle itself (the menu item behaves like the ribbon button).
-    const expected = idsOf(catalog, mod).filter((id) => !id.endsWith("-view-theme"));
+    const expected = menuIdsOf(catalog, mod).filter((id) => !id.endsWith("-view-theme"));
     const missing = expected.filter((id) => !executed.includes(id));
     assert.deepEqual(missing, [], `${mod}: menu items that did not run their ribbon command`);
   });
@@ -102,14 +122,23 @@ test("module-specific items are disabled outside their module and common items s
   assert.equal(state("review-stats"), "false");
 });
 
+test("no shown menu item is grayed out in the window it belongs to", async () => {
+  for (const mod of MODULES) {
+    const { document } = await openModule(mod);
+    const grayed = document
+      .querySelectorAll(".md-item[data-studio-menu-cmd]")
+      .filter((el) => shown(el) && el.getAttribute("aria-disabled") === "true")
+      .map((el) => el.dataset.studioMenuCmd);
+    assert.deepEqual(grayed, [], `${mod}: shown items that do not apply`);
+  }
+});
+
 test("the menus follow rhwp-studio: ids, titles, dropdowns, sub-menus and separators", async () => {
   const { document } = await openModule("DOC");
   const bar = document.getElementById("menu-bar");
   assert.ok(bar, "#menu-bar");
-  assert.deepEqual(
-    document.querySelectorAll(".menu-item > .menu-title").map((el) => el.textContent),
-    ["파일", "편집", "보기", "입력", "서식", "쪽", "표", "도구", "도움말"]
-  );
+  const titles = (doc) => doc.querySelectorAll(".menu-item").filter(shown).map((el) => el.querySelector(".menu-title").textContent);
+  assert.deepEqual(titles(document), ["파일", "편집", "보기", "입력", "서식", "쪽", "표", "도구", "도움말"]);
   for (const menu of document.querySelectorAll(".menu-item")) {
     assert.ok(menu.querySelector(".menu-dropdown"), `${menu.dataset.menu} has a dropdown`);
     assert.ok(menu.querySelector(".md-item"), `${menu.dataset.menu} has items`);
@@ -218,7 +247,7 @@ test("menu-bar.css and toolbar.css name rhwp-studio as their source and are in t
 test("menu and toolbar labels name what their command does", async () => {
   const { document } = await openModule("DOC");
   const labelsOf = (cmd) =>
-    document.querySelectorAll(`.md-item[data-studio-menu-cmd="${cmd}"] .md-label`).map((el) => el.textContent.trim());
+    document.querySelectorAll(`.md-item[data-studio-menu-cmd="${cmd}"]`).filter(shown).map((el) => el.querySelector(".md-label").textContent.trim());
   const buttonsOf = (cmd) => document.querySelectorAll(`#icon-toolbar [data-studio-cmd="${cmd}"]`);
   assert.deepEqual(labelsOf("home-style"), ["스타일 적용"]);
   assert.deepEqual(buttonsOf("home-style").map((el) => [el.getAttribute("title"), el.getAttribute("aria-label")]), [["스타일 적용", "스타일 적용"]]);

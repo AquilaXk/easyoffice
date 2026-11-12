@@ -26,6 +26,10 @@
   user-select: none;
 }
 
+.menu-item[hidden] {
+  display: none;
+}
+
 .menu-title {
   display: inline-block;
   padding: 4px 14px;

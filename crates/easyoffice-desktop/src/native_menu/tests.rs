@@ -91,27 +91,77 @@ fn labels_are_korean_menu_texts_without_markup() {
     }
 }
 
+fn menus_of(kind: MenuKind) -> &'static [&'static layout::MenuSpec] {
+    layout::layout(kind)
+}
+
+fn lines_of(kind: MenuKind, title: &str) -> &'static [&'static str] {
+    menus_of(kind)
+        .iter()
+        .find(|menu| menu.title == title)
+        .unwrap_or_else(|| panic!("{kind:?} has no {title} menu"))
+        .lines
+}
+
+fn titles_of(kind: MenuKind) -> Vec<&'static str> {
+    menus_of(kind).iter().map(|menu| menu.title).collect()
+}
+
 #[test]
-fn the_menu_functions_use_exactly_the_ids_of_the_table() {
-    let source = include_str!("../native_menu.rs");
-    let menus =
-        &source[source.find("const SEPARATOR").unwrap()..source.find("#[cfg(test)]").unwrap()];
-    let used: std::collections::BTreeSet<&str> = menus
-        .split('"')
-        .skip(1)
-        .step_by(2)
-        .filter(|text| {
-            text.split_once(':')
-                .is_some_and(|(group, _)| GROUPS.contains(&group))
-        })
+fn the_bars_of_all_kinds_use_exactly_the_ids_of_the_table() {
+    let used: std::collections::BTreeSet<&str> = MenuKind::ALL
+        .into_iter()
+        .flat_map(layout::table_ids)
         .collect();
-    // 닫기 is the 윈도우 menu's system item; every other table item is built by a menu function.
+    // 닫기 is the 윈도우 menu's system item and paste is the system item: both stay in the table
+    // because the page's menu row has them; every other table item is on some kind's bar.
     let table: std::collections::BTreeSet<&str> = ITEMS
         .iter()
         .map(|spec| spec.id)
-        .filter(|id| *id != "file:close")
+        .filter(|id| !MACOS_SYSTEM_IDS.contains(id))
         .collect();
     assert_eq!(used, table);
+}
+
+#[test]
+fn a_bar_holds_each_id_once_and_every_line_is_known() {
+    for kind in MenuKind::ALL {
+        let ids = layout::table_ids(kind);
+        let unique: std::collections::HashSet<&str> = ids.iter().copied().collect();
+        assert_eq!(unique.len(), ids.len(), "{kind:?} repeats an id");
+        for menu in menus_of(kind) {
+            for line in menu.lines {
+                let token = *line == layout::SEPARATOR || line.starts_with('@') || *line == QUIT_ID;
+                assert!(token || item_index(line).is_some(), "{kind:?}: {line}");
+            }
+        }
+    }
+}
+
+#[test]
+fn no_menu_starts_or_ends_with_a_separator_or_repeats_one() {
+    for kind in MenuKind::ALL {
+        for menu in menus_of(kind) {
+            let lines = menu.lines;
+            assert_ne!(
+                lines.first(),
+                Some(&layout::SEPARATOR),
+                "{kind:?} {}",
+                menu.title
+            );
+            assert_ne!(
+                lines.last(),
+                Some(&layout::SEPARATOR),
+                "{kind:?} {}",
+                menu.title
+            );
+            assert!(
+                lines.windows(2).all(|pair| pair != [layout::SEPARATOR; 2]),
+                "{kind:?} {}",
+                menu.title
+            );
+        }
+    }
 }
 
 #[test]
@@ -127,18 +177,248 @@ fn the_page_menu_commands_are_reached_through_the_page_item_actions() {
 }
 
 #[test]
-fn the_table_menu_has_the_reference_cell_items_in_order_and_the_editor_only_ones_say_so() {
-    let source = include_str!("../native_menu.rs");
-    let table =
-        &source[source.find("fn table_menu").unwrap()..source.find("fn tool_menu").unwrap()];
-    let cells = [
-        "\"table:cell-select\"",
-        "\"table:merge\"",
-        "\"table:cell-split\"",
+fn each_kind_has_the_menus_of_its_window_in_order() {
+    let bar = |first: &[&'static str], last: &[&'static str]| {
+        let mut titles = vec!["EasyOffice"];
+        titles.extend_from_slice(first);
+        titles.extend_from_slice(last);
+        titles
+    };
+    let tail = ["윈도우", "도움말"];
+    assert_eq!(
+        titles_of(MenuKind::Doc),
+        bar(
+            &["파일", "편집", "보기", "입력", "서식", "쪽", "표", "도구"],
+            &tail
+        )
+    );
+    assert_eq!(
+        titles_of(MenuKind::Sheet),
+        bar(
+            &[
+                "파일",
+                "편집",
+                "보기",
+                "삽입",
+                "서식",
+                "시트",
+                "데이터",
+                "도구"
+            ],
+            &tail
+        )
+    );
+    assert_eq!(
+        titles_of(MenuKind::Slide),
+        bar(
+            &[
+                "파일",
+                "편집",
+                "보기",
+                "삽입",
+                "서식",
+                "슬라이드",
+                "슬라이드 쇼",
+                "도구"
+            ],
+            &tail
+        )
+    );
+    assert_eq!(
+        titles_of(MenuKind::Pdf),
+        bar(&["파일", "편집", "보기", "주석", "쪽", "도구"], &tail)
+    );
+    assert_eq!(
+        titles_of(MenuKind::Hwp),
+        bar(
+            &["파일", "편집", "보기", "입력", "서식", "쪽", "표", "도구"],
+            &tail
+        )
+    );
+}
+
+#[test]
+fn a_kind_does_not_hold_the_items_of_other_kinds() {
+    let not_in = |kind: MenuKind, forbidden: &[&str]| {
+        let ids = layout::table_ids(kind);
+        for id in forbidden {
+            assert!(!ids.contains(id), "{kind:?} holds {id}");
+        }
+    };
+    let editor_only: Vec<&str> = ITEMS
+        .iter()
+        .filter(|spec| spec.action == "hwp-editor")
+        .map(|spec| spec.id)
+        .collect();
+    let paragraph = [
+        "format:justify",
+        "format:para-numbering",
+        "format:para-bullet",
+        "format:indent-in",
+        "format:indent-out",
+        "page:columns",
+        "page:header",
+        "view:ctrl-marks",
+        "view:para-marks",
+        "view:doc-grid",
     ];
-    let at: Vec<usize> = cells.iter().map(|id| table.find(id).unwrap()).collect();
+    let sheet_only = [
+        "table:sheet-pivot",
+        "table:sheet-chart",
+        "table:sheet-condfmt",
+        "table:sheet-freeze",
+    ];
+    let slide_only = [
+        "page:slide-master",
+        "page:slide-snap",
+        "page:slide-transition",
+        "page:slide-presenter",
+    ];
+    let pdf_only = [
+        "tool:pdf-highlight",
+        "tool:pdf-rotate",
+        "tool:pdf-splitmerge",
+        "tool:pdf-tooffice",
+    ];
+    let hwp_only = [
+        "insert:field",
+        "page:hwp-header",
+        "page:manuscript",
+        "table:hwp-border",
+        "file:export-pdf",
+    ];
+    for kind in [
+        MenuKind::Doc,
+        MenuKind::Sheet,
+        MenuKind::Slide,
+        MenuKind::Pdf,
+    ] {
+        not_in(kind, &editor_only);
+        not_in(kind, &hwp_only);
+    }
+    not_in(MenuKind::Doc, &sheet_only);
+    not_in(MenuKind::Doc, &slide_only);
+    not_in(MenuKind::Doc, &pdf_only);
+    not_in(MenuKind::Doc, &["table:cell-select", "table:cell-split"]);
+    for kind in [MenuKind::Sheet, MenuKind::Slide, MenuKind::Pdf] {
+        not_in(kind, &paragraph);
+        not_in(
+            kind,
+            &[
+                "insert:toc",
+                "insert:mailmerge",
+                "insert:footnote",
+                "table:doc-formula",
+                "table:add-row",
+                "table:merge",
+                "table:sum",
+            ],
+        );
+    }
+    not_in(MenuKind::Sheet, &slide_only);
+    not_in(MenuKind::Sheet, &pdf_only);
+    not_in(MenuKind::Slide, &sheet_only);
+    not_in(MenuKind::Slide, &pdf_only);
+    not_in(MenuKind::Pdf, &sheet_only);
+    not_in(MenuKind::Pdf, &slide_only);
+    // Nothing prints or changes the paper in a PDF window, and a PDF has no formatting menu.
+    not_in(
+        MenuKind::Pdf,
+        &[
+            "file:print",
+            "page:paper",
+            "page:orientation",
+            "page:margins",
+        ],
+    );
+    for kind in [MenuKind::Sheet, MenuKind::Slide] {
+        assert!(!titles_of(kind).contains(&"쪽"), "{kind:?}");
+    }
+    for kind in [MenuKind::Sheet, MenuKind::Slide, MenuKind::Pdf] {
+        assert!(
+            !titles_of(kind).contains(&"표") && !titles_of(kind).contains(&"입력"),
+            "{kind:?}"
+        );
+    }
+    assert!(!titles_of(MenuKind::Pdf).contains(&"서식"));
+}
+
+#[test]
+fn the_spreadsheet_keeps_sort_filter_style_data_tools_in_data_and_the_frame_in_sheet() {
+    let data = lines_of(MenuKind::Sheet, "데이터");
+    for id in [
+        "table:sort",
+        "table:validation",
+        "table:sheet-pivot",
+        "table:sheet-condfmt",
+    ] {
+        assert!(data.contains(&id), "{id}");
+    }
+    assert!(lines_of(MenuKind::Sheet, "시트").contains(&"table:sheet-freeze"));
+    let insert = lines_of(MenuKind::Sheet, "삽입");
+    assert!(insert.contains(&"table:fn-browser") && insert.contains(&"table:autosum"));
+    let pdf_annotations = lines_of(MenuKind::Pdf, "주석");
+    assert!(pdf_annotations.contains(&"tool:pdf-highlight"));
+    let pdf_pages = lines_of(MenuKind::Pdf, "쪽");
+    assert_eq!(pdf_pages, ["tool:pdf-rotate", "tool:pdf-splitmerge"]);
+    let show = lines_of(MenuKind::Slide, "슬라이드 쇼");
+    assert_eq!(show, ["page:slide-transition", "page:slide-presenter"]);
+}
+
+#[test]
+fn every_kind_keeps_the_save_items_the_standard_edit_group_and_the_command_search() {
+    for kind in MenuKind::ALL {
+        let ids = layout::table_ids(kind);
+        for id in [
+            "file:new",
+            "file:open",
+            "file:open-recent",
+            "file:save",
+            "file:save-as",
+            "edit:undo",
+            "edit:redo",
+            "edit:cut",
+            "edit:copy",
+            "tool:palette",
+            "help:update-check",
+            "view:zoom-in",
+            "view:theme-toggle",
+        ] {
+            assert!(ids.contains(&id), "{kind:?} lacks {id}");
+        }
+        assert!(lines_of(kind, "편집").contains(&layout::PASTE), "{kind:?}");
+        assert!(
+            lines_of(kind, "편집").contains(&layout::SELECT_ALL),
+            "{kind:?}"
+        );
+        assert_eq!(menus_of(kind)[0].lines.last(), Some(&QUIT_ID), "{kind:?}");
+    }
+}
+
+#[test]
+fn the_page_kind_names_are_the_rust_kinds() {
+    for (name, kind) in [
+        ("DOC", MenuKind::Doc),
+        ("HWP", MenuKind::Hwp),
+        ("SHEET", MenuKind::Sheet),
+        ("SLIDE", MenuKind::Slide),
+        ("PDF", MenuKind::Pdf),
+    ] {
+        assert_eq!(MenuKind::parse(name), Some(kind));
+        assert!(MenuKind::ALL.contains(&kind));
+    }
+    assert_eq!(MenuKind::ALL.len(), 5);
+    for bad in ["", "doc", "START", "CONV", "HWP_EMBED"] {
+        assert_eq!(MenuKind::parse(bad), None, "{bad}");
+    }
+}
+
+#[test]
+fn the_hangul_window_keeps_the_full_bar_with_the_reference_cell_items_in_order() {
+    let table = lines_of(MenuKind::Hwp, "표");
+    let at = |id: &str| table.iter().position(|line| *line == id).unwrap();
     assert!(
-        at.windows(2).all(|pair| pair[0] < pair[1]),
+        at("table:cell-select") < at("table:merge") && at("table:merge") < at("table:cell-split"),
         "select, merge, split"
     );
     let editor_only: Vec<&str> = ITEMS
@@ -156,6 +436,10 @@ fn the_table_menu_has_the_reference_cell_items_in_order_and_the_editor_only_ones
             "table:cell-split",
         ]
     );
+    let hwp_ids = layout::table_ids(MenuKind::Hwp);
+    for id in &editor_only {
+        assert!(hwp_ids.contains(id), "{id}");
+    }
     assert_eq!(
         spec("table:cell-select").accelerator,
         Some("CmdOrCtrl+Alt+T")
@@ -236,10 +520,10 @@ fn quit_runs_in_rust_with_the_reference_id_and_accelerator_and_is_not_a_table_it
 
 /// The reference app's file menu ends in a separator, `Export PDF...` (⌘E) and `Print...` (⌘P)
 /// (`menu.rs` 27-32, 88-89). Both are shell commands of the Hangul editor window: the page
-/// actions are the ones its keyboard shortcuts and its own 파일 menu already run, and the page
-/// grays them out in every other window (`shell-chrome.js`, `EMBED_ONLY_ACTIONS`).
+/// actions are the ones its keyboard shortcuts and its own 파일 menu already run. Only that
+/// window's bar has the export; the other windows' bars have no item that is grayed out there.
 #[test]
-fn the_file_menu_ends_with_pdf_export_and_print_with_the_reference_keys() {
+fn the_hangul_file_menu_ends_with_pdf_export_and_print_with_the_reference_keys() {
     let export = spec("file:export-pdf");
     assert_eq!(
         (export.label, export.accelerator, export.action),
@@ -250,70 +534,48 @@ fn the_file_menu_ends_with_pdf_export_and_print_with_the_reference_keys() {
         (print.label, print.accelerator, print.action),
         ("인쇄…", Some("CmdOrCtrl+P"), "print")
     );
-    let source = include_str!("../native_menu.rs");
-    let production = source.split("#[cfg(test)]").next().unwrap();
-    let start = production.find("fn file_menu").unwrap();
-    let file = &production[start..start + production[start..].find("fn edit_menu").unwrap()];
-    let at = |needle: &str| file.find(needle).unwrap();
-    assert!(
-        at("\"file:save-as\"") < at("SEPARATOR,\n        \"file:export-pdf\"")
-            && at("\"file:export-pdf\"") < at("\"file:print\""),
+    let file = lines_of(MenuKind::Hwp, "파일");
+    assert_eq!(
+        file[file.len() - 4..],
+        ["file:save-as", "-", "file:export-pdf", "file:print"],
         "save as, a separator, export, print"
     );
-    assert!(file
-        .trim_end()
-        .ends_with("submenu(app, \"파일\", lines)\n}"));
 }
 
 /// The reference app's file menu is new documents, a separator, open, recent, save, save as, a
 /// separator, export, print; its view menu is zoom in, zoom out, actual size, a separator, fit
-/// page, fit width (`menu.rs` 79-114). The lines before the first item and after the last one are ours.
+/// page, fit width (`menu.rs` 79-114). The lines before the first item and after the last one are
+/// ours. Every kind's bar keeps that head.
 #[test]
 fn the_file_and_view_menus_keep_the_reference_order_and_separators() {
-    let source = include_str!("../native_menu.rs");
-    let production = source.split("#[cfg(test)]").next().unwrap();
-    let section = |from: &str, to: &str| {
-        let start = production.find(from).unwrap();
-        &production[start..start + production[start..].find(to).unwrap()]
-    };
-    let ids_in = |text: &str| -> Vec<String> {
-        text.split('"')
-            .skip(1)
-            .step_by(2)
-            .filter(|piece| piece.contains(':') || *piece == "-")
-            .map(str::to_string)
-            .collect()
-    };
-    let file = section("fn file_menu", "fn edit_menu");
-    let lines = file.split("lines.push(Entry::Sub(kinds));").nth(1).unwrap();
-    let lines = lines.replace("SEPARATOR", "\"-\"");
-    assert_eq!(
-        ids_in(&lines),
-        [
-            "-",
-            "file:open",
-            "file:open-recent",
-            "file:save",
-            "file:save-as",
-            "-",
-            "file:export-pdf",
-            "file:print"
-        ]
-    );
-    let view =
-        section("fn view_menu", "lines.push(Entry::Sub(theme))").replace("SEPARATOR", "\"-\"");
-    let view_ids = ids_in(view.split("let mut lines").nth(1).unwrap());
-    assert_eq!(
-        view_ids[..6],
-        [
-            "view:zoom-in",
-            "view:zoom-out",
-            "view:zoom-100",
-            "-",
-            "view:zoom-fit-page",
-            "view:zoom-fit-width"
-        ]
-    );
+    for kind in MenuKind::ALL {
+        let file = lines_of(kind, "파일");
+        assert_eq!(
+            file[..7],
+            [
+                "file:new",
+                layout::NEW_DOCS,
+                "-",
+                "file:open",
+                "file:open-recent",
+                "file:save",
+                "file:save-as"
+            ],
+            "{kind:?}"
+        );
+        assert_eq!(
+            lines_of(kind, "보기")[..6],
+            [
+                "view:zoom-in",
+                "view:zoom-out",
+                "view:zoom-100",
+                "-",
+                "view:zoom-fit-page",
+                "view:zoom-fit-width"
+            ],
+            "{kind:?}"
+        );
+    }
 }
 
 /// `run_item` hands the quit item to the queue (it once skipped macOS, where the id then fell
@@ -329,47 +591,52 @@ fn run_item_sends_the_quit_item_to_the_queue() {
     assert!(!quit.contains("cfg"), "no condition is skipped");
 }
 
-/// The macOS layout (source check, the menu itself needs a running app): the application menu
-/// ends in the custom quit item, not the system one that would end the process at once; the
-/// system items carry Korean labels; ⌘W belongs to the 윈도우 menu's 닫기 alone.
+/// The macOS layout: the application menu ends in the custom quit item, not the system one that
+/// would end the process at once; the system items carry Korean labels; ⌘W belongs to the 윈도우
+/// menu's 닫기 alone (the builder is checked as source, the menu itself needs a running app).
 #[test]
 fn the_macos_menus_have_the_custom_quit_korean_system_labels_and_one_cmd_w() {
-    let source = include_str!("../native_menu.rs");
-    let production = source.split("#[cfg(test)]").next().unwrap();
-    let section = |from: &str, to: &str| {
-        let start = production.find(from).unwrap();
-        &production[start..start + production[start..].find(to).unwrap()]
-    };
-    let app = section("fn app_menu", "fn file_menu");
-    assert!(app.contains(".item(&quit_item(app)?)"));
-    assert!(!app.contains(".quit()") && !app.contains("PredefinedMenuItem::quit"));
-    let file = section("fn file_menu", "fn edit_menu");
-    assert!(!file.contains("file:close") && !file.contains("QUIT_ID"));
-    let window = section("fn window_menu", "fn help_menu");
-    assert!(window.contains("PredefinedMenuItem::close_window(app, Some(\"닫기\"))"));
-    let edit = section("fn edit_menu", "fn view_menu");
-    assert!(edit.contains("PredefinedMenuItem::paste") && edit.contains("select_all"));
-    for item in ["undo", "redo", "cut", "copy"] {
-        assert!(
-            !edit.contains(&format!(".{item}()")),
-            "{item} is the table's item"
-        );
-    }
+    let build = include_str!("build.rs");
+    assert!(build.contains("QUIT_ID => builder.item(&quit_item(app)?)"));
+    assert!(!build.contains(".quit()") && !build.contains("PredefinedMenuItem::quit"));
+    assert!(build.contains("PredefinedMenuItem::close_window(app, Some(\"닫기\"))"));
     // No system item is built without its Korean text (the system language would show).
-    for menu in [app, window, edit] {
-        for call in menu.split("PredefinedMenuItem::").skip(1) {
-            let args = &call[..call.find(")?").unwrap()];
-            assert!(args.contains("Some("), "{args}");
-        }
-        for bare in [
-            ".services()",
-            ".hide()",
-            ".hide_others()",
-            ".show_all()",
-            ".minimize()",
-            ".select_all()",
-        ] {
-            assert!(!menu.contains(bare), "{bare}");
+    for call in build
+        .split("PredefinedMenuItem::")
+        .skip(1)
+        .filter(|c| !c.starts_with("{"))
+    {
+        let args = &call[..call.find(")?").unwrap()];
+        assert!(args.contains("Some("), "{args}");
+    }
+    for bare in [
+        ".services()",
+        ".hide()",
+        ".hide_others()",
+        ".show_all()",
+        ".minimize()",
+        ".select_all()",
+    ] {
+        assert!(!build.contains(bare), "{bare}");
+    }
+    for kind in MenuKind::ALL {
+        let bar = menus_of(kind);
+        assert_eq!(bar[0].title, "EasyOffice");
+        assert_eq!(bar[0].lines.last(), Some(&QUIT_ID), "{kind:?}");
+        assert_eq!(
+            lines_of(kind, "윈도우"),
+            [layout::MINIMIZE, layout::CLOSE_WINDOW]
+        );
+        let ids = layout::table_ids(kind);
+        assert!(
+            !ids.contains(&"file:close"),
+            "{kind:?}: 닫기 is the 윈도우 menu's"
+        );
+        for undo_redo_cut_copy in ["edit:undo", "edit:redo", "edit:cut", "edit:copy"] {
+            assert!(
+                ids.contains(&undo_redo_cut_copy),
+                "{kind:?}: the table's item, not a system one"
+            );
         }
     }
 }

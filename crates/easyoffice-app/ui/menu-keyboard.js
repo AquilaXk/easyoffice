@@ -29,7 +29,7 @@
 
   function createMenuKeyboard({ document }) {
     let activeOpenMenu = null;
-    const menuList = () => Array.from(document.querySelectorAll(MENU_SELECTOR));
+    const menuList = () => Array.from(document.querySelectorAll(MENU_SELECTOR)).filter((menu) => !menu.hidden);
     const titleOf = (menu) => menu.querySelector(TITLE_SELECTOR);
     const openMenu = () => {
       if (activeOpenMenu && activeOpenMenu.classList.contains("open")) return activeOpenMenu;

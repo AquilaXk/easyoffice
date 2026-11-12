@@ -306,8 +306,10 @@ test("macOS binds the reference keys to the four edit items and ⌘Q to the cust
   assert.match(menu, /pub const QUIT_ID: &str = "app:quit";/);
   assert.match(menu, /const QUIT_ACCELERATOR: &str = "CmdOrCtrl\+Q";/);
   assert.match(menu, /"EasyOffice 끝내기"/);
-  const appMenu = menu.slice(menu.indexOf("fn app_menu"), menu.indexOf("fn file_menu"));
-  assert.ok(appMenu.includes(".item(&quit_item(app)?)") && !appMenu.includes(".quit()"), "no system quit item");
+  const build = read("crates/easyoffice-desktop/src/native_menu/build.rs");
+  assert.ok(build.includes("QUIT_ID => builder.item(&quit_item(app)?)") && !build.includes(".quit()"), "no system quit item");
+  const layout = read("crates/easyoffice-desktop/src/native_menu/layout.rs");
+  assert.match(layout, /const APP: MenuSpec = menu\(\s*"EasyOffice",[^;]*QUIT_ID,\s*\],\s*\);/, "the application menu ends in the custom quit item");
   const chrome = read("crates/easyoffice-app/ui/shell-chrome.js");
   assert.ok(!chrome.includes("app:quit"), "the page cannot quit the app");
 });

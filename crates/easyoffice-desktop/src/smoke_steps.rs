@@ -400,21 +400,27 @@ fn check_menu(installed: &InstalledMenu) -> Result<(), String> {
     }
 }
 
-/// The installed menu bar holds every custom item of the table, the check items and 끝내기.
+/// The installed menu bars (one per kind of window) hold every custom item of the table, the check
+/// items and 끝내기.
 #[cfg(target_os = "macos")]
 pub fn menu_step(app: &tauri::AppHandle) -> Result<String, String> {
-    let menu = app.menu().ok_or("앱 메뉴가 설치되지 않았습니다.")?;
+    use tauri::Manager;
+    let kinds = app
+        .try_state::<crate::native_menu::KindMenus>()
+        .ok_or("앱 메뉴가 설치되지 않았습니다.")?;
     let mut installed = InstalledMenu {
         ids: Vec::new(),
         checks: Vec::new(),
     };
-    crate::native_menu::for_each_item(&menu, &mut |item| {
-        installed.ids.push(item.id().as_ref().to_string());
-        if item.as_check_menuitem().is_some() {
-            installed.checks.push(item.id().as_ref().to_string());
-        }
-    })
-    .map_err(|err| format!("메뉴 항목을 읽지 못했습니다: {err}"))?;
+    for menu in kinds.all() {
+        crate::native_menu::for_each_item(menu, &mut |item| {
+            installed.ids.push(item.id().as_ref().to_string());
+            if item.as_check_menuitem().is_some() {
+                installed.checks.push(item.id().as_ref().to_string());
+            }
+        })
+        .map_err(|err| format!("메뉴 항목을 읽지 못했습니다: {err}"))?;
+    }
     check_menu(&installed)?;
     Ok(format!(
         "{} custom items, {} check items",

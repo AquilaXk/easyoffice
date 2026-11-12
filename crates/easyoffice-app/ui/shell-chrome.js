@@ -225,8 +225,9 @@
     // ---- native menu state ---------------------------------------------------------------------
 
     // The native menu bar (macOS only, PD-121) is shared by all windows, so each window tells the shell
-    // what the bar should show while it has the focus (`menu_state.rs`): its theme mode and the items its
-    // module cannot use (the page's own rule, `studioCommandApplies`, applied to the table above).
+    // what the bar should show while it has the focus (`menu_state.rs`): its menu kind (which menus the bar
+    // has, `menu-kinds.js`), its theme mode and the items its module cannot use (the page's own rule,
+    // `studioCommandApplies`, applied to the table above).
     let menuContext = null;
     let lastMenuState = "";
 
@@ -256,7 +257,8 @@
       const bridge = deps.desktopBridge || host.__EASYOFFICE_DESKTOP_BRIDGE__;
       if (commandModule !== undefined) menuContext = { commandModule };
       if (!menuContext || !bridge?.isAvailable() || !deps.hasNativeMenu()) return;
-      const state = { theme: themeApi().getMode(), disabled: disabledMenuIds(menuContext.commandModule) };
+      const active = menuContext.commandModule;
+      const state = { theme: themeApi().getMode(), disabled: disabledMenuIds(active), kind: host.__EASYOFFICE_MENU_KINDS__.menuKindOf(active) };
       const key = JSON.stringify(state);
       if (key === lastMenuState) return;
       lastMenuState = key;

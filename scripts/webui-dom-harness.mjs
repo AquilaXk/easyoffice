@@ -40,6 +40,7 @@ const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/window-bridge.js",
   "../crates/easyoffice-app/ui/ipc-transport.js",
   "../crates/easyoffice-app/ui/menu-keyboard.js",
+  "../crates/easyoffice-app/ui/menu-kinds.js",
   "../crates/easyoffice-app/ui/custom-select.js",
   "../crates/easyoffice-app/ui/color-picker.js",
   "../crates/easyoffice-app/ui/workspace-scrub.js",

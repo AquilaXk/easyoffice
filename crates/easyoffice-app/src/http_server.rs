@@ -28,6 +28,7 @@ const ICONS_JS: &str = include_str!("../ui/icons.js");
 const WINDOW_BRIDGE_JS: &str = include_str!("../ui/window-bridge.js");
 const IPC_TRANSPORT_JS: &str = include_str!("../ui/ipc-transport.js");
 const MENU_KEYBOARD_JS: &str = include_str!("../ui/menu-keyboard.js");
+const MENU_KINDS_JS: &str = include_str!("../ui/menu-kinds.js");
 const SHEET_UTILS_JS: &str = include_str!("../ui/sheet-utils.js");
 const PII_DOM_SCRUBBER_JS: &str = include_str!("../ui/pii-dom-scrubber.js");
 const SHEET_STORE_JS: &str = include_str!("../ui/sheet-store.js");
@@ -509,6 +510,11 @@ fn handle_http_connection(stream: &mut TcpStream, port: u16, ipc_handler: &IpcDi
             "200 OK",
             "application/javascript; charset=utf-8",
             Cow::Borrowed(MENU_KEYBOARD_JS),
+        ),
+        ("GET", "/menu-kinds.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            Cow::Borrowed(MENU_KINDS_JS),
         ),
         ("GET", "/sheet-utils.js") => (
             "200 OK",
