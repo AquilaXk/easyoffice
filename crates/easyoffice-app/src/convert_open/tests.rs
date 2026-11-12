@@ -726,7 +726,7 @@ fn decode_answer_is_byte_exact_for_documents_workbooks_and_slides() {
         ..CellStyle::default()
     };
     let mut styling = SheetStyling::default();
-    styling.cells.insert((0, 0), bold.clone());
+    styling.cells.insert((0, 0), bold);
     styling.cells.insert((1, 1), sized);
     styling.cells.insert((2, 0), bold);
     styling.cells.insert((0, 5), CellStyle::default());

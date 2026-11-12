@@ -395,7 +395,7 @@ fn decode_response(
     match &decoded.content {
         DecodedContent::Document(doc) => {
             out.push_str("\"blocks\":[");
-            write_list(&mut out, &doc.blocks, |out, b| write_block(out, b));
+            write_list(&mut out, &doc.blocks, write_block);
         }
         DecodedContent::Workbook(sheets) => {
             out.push_str("\"sheets\":[");
