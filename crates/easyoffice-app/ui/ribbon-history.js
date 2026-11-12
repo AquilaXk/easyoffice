@@ -139,10 +139,6 @@
       }
       const sheetColumnWidths =
         typeof sheetController.getColumnWidths === "function" ? sheetController.getColumnWidths() : {};
-      const sheetFrozen = {};
-      for (const sh of Object.keys(sheetDataStore)) {
-        if (sheetDataStore[sh]?.A1?.style?.frozenPanes) sheetFrozen[sh] = true;
-      }
       return {
         isRibbon: Boolean(isRibbon),
         activeModule: getActiveModule(),
@@ -160,7 +156,6 @@
         sheetColumnWidths,
         sheetRules: typeof sheetController.getSheetRules === "function" ? sheetController.getSheetRules() : {},
         sheetLayout: host.__EASYOFFICE_SHEET_LAYOUT__.getAll(),
-        sheetFrozen,
         slides: structuredClone(slideDeckState),
         ribbonState: structuredClone(localRibbonState),
         tabTitles: readTabTitles(),
@@ -691,8 +686,7 @@
           sheetController.openConditionalFormatDialog();
           break;
         case "sheet-mod-freeze":
-          sheetController.toggleSheetFreezePanes(!document.querySelector("#pane-sheet thead.frozen-header"));
-          setSheetSummary(execRes);
+          void sheetController.runSheetStructure("freeze-selection");
           break;
         default:
           setSheetSummary(execRes);
@@ -908,7 +902,7 @@
     }
 
     // 대화상자를 여는 명령은 상태 줄을 바꾸지 않는다.
-    const DIALOG_COMMANDS = new Set(["sheet-mod-pivot", "sheet-mod-condfmt", "pdf-mod-highlight", "doc-mod-toc"]);
+    const DIALOG_COMMANDS = new Set(["sheet-mod-pivot", "sheet-mod-condfmt", "sheet-mod-freeze", "pdf-mod-highlight", "doc-mod-toc"]);
 
     function executeTrackedRibbonCommand(cmdId, options = {}) {
       // The highlight command asks for its phrase, kind and color first; the dialog's 확인 runs it again with them.

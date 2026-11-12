@@ -108,7 +108,7 @@
       { id: "sheet-mod-pivot", title: "피벗 테이블 요약", shortcut: "⌥⌘P" },
       { id: "sheet-mod-chart", title: "차트 시각화", shortcut: "⌥F1" },
       { id: "sheet-mod-condfmt", title: "조건부 서식 규칙", shortcut: "⌃⌘F" },
-      { id: "sheet-mod-freeze", title: "행·열 틀 고정", shortcut: "⌃⌘L" },
+      { id: "sheet-mod-freeze", title: "선택 행/열 고정", shortcut: "⌃⌘L" },
     ],
     SLIDE: [
       { id: "slide-mod-master", title: "마스터 레이아웃", shortcut: "⇧⌘M" },

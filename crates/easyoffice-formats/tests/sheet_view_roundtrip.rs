@@ -23,7 +23,9 @@ fn sample() -> SheetStyling {
     }
 }
 
-fn sheets() -> Vec<(String, Vec<(u32, u32, String)>)> {
+type Sheets = Vec<(String, Vec<(u32, u32, String)>)>;
+
+fn sheets() -> Sheets {
     vec![("Sheet1".to_string(), vec![(0, 0, "1".to_string())])]
 }
 

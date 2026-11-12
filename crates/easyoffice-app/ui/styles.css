@@ -467,12 +467,6 @@ select:focus-visible,
   color: var(--accent-strong);
   font-weight: 600;
 }
-.sheet-table thead.frozen-header th {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  border-bottom: 2px solid var(--accent-strong);
-}
 .slide-stage[data-presenter-mode="true"] { outline: 2px solid var(--accent-strong); outline-offset: 2px; }
 .slide-chart-obj,
 .slide-shape-obj {

@@ -8,6 +8,9 @@
   // The auto filter (PD-198) is `{ range: { r1, c1, r2, c2 }, columns, hidden }`: `columns` are the
   // engine's column conditions as sent and received, `hidden` the rows the filter hides, kept apart
   // from `hiddenRows` (the user's). The grid asks for the union through a per-sheet row index.
+  // The view (PD-208): `freeze` `{ rows, cols }` (counts), `tabColor` `"rrggbb"` and the outline
+  // (`sheet-outline.js` owns its rules): level runs `[first, last, level]` and the folded runs
+  // `foldedRows`, `foldedCols`, which are hidden like `hiddenRows` but belong to the groups.
 
   const MAX_MERGES = 100000;
   const BLOCK = 64; // merge lookup buckets, in rows
@@ -18,7 +21,7 @@
   const listeners = [];
 
   function blank() {
-    return { merges: [], hiddenRows: [], hiddenCols: [], filter: null, index: null, rows: null };
+    return { merges: [], hiddenRows: [], hiddenCols: [], filter: null, freeze: null, tabColor: null, outline: null, index: null, rows: null };
   }
 
   function entry(name) {
@@ -28,7 +31,13 @@
   function isEmpty(layout) {
     return (
       !layout ||
-      (layout.merges.length === 0 && layout.hiddenRows.length === 0 && layout.hiddenCols.length === 0 && !layout.filter)
+      (layout.merges.length === 0 &&
+        layout.hiddenRows.length === 0 &&
+        layout.hiddenCols.length === 0 &&
+        !layout.filter &&
+        !layout.freeze &&
+        !layout.tabColor &&
+        !layout.outline)
     );
   }
 
@@ -194,7 +203,8 @@
   // (the filter can hide tens of thousands of separate runs, so a scan per row is not an option).
   function rowIndex(layout) {
     if (layout.rows) return layout.rows;
-    const runs = unionRuns(layout.hiddenRows, layout.filter ? layout.filter.hidden : []);
+    const folded = layout.outline?.foldedRows || [];
+    const runs = unionRuns(unionRuns(layout.hiddenRows, layout.filter ? layout.filter.hidden : []), folded);
     const n = runs.length;
     const starts = new Int32Array(n);
     const ends = new Int32Array(n);
@@ -252,7 +262,10 @@
     const k = runsStartingBefore(ix, r, false);
     return k > 0 && ix.ends[k - 1] >= r;
   }
-  const colHidden = (name, c) => Boolean(bySheet[name]) && runContains(bySheet[name].hiddenCols, c);
+  // Columns the user hid and the ones a folded group hid.
+  const hiddenColRuns = (name) => unionRuns(bySheet[name]?.hiddenCols || [], bySheet[name]?.outline?.foldedCols || []);
+  const colHidden = (name, c) =>
+    Boolean(bySheet[name]) && (runContains(bySheet[name].hiddenCols, c) || runContains(bySheet[name].outline?.foldedCols || [], c));
 
   // ---- JSON form (the page's save payload and the engine's `structure` answer) ---------------------
   function toJson(layout) {
@@ -263,6 +276,9 @@
     if (layout.hiddenRows.length) out.hiddenRows = layout.hiddenRows.map((r) => [r[0], r[1]]);
     if (layout.hiddenCols.length) out.hiddenCols = layout.hiddenCols.map((r) => [r[0], r[1]]);
     if (layout.filter) out.filter = filterToJson(layout.filter);
+    if (layout.freeze) out.freeze = { rows: layout.freeze.rows, cols: layout.freeze.cols };
+    if (layout.tabColor) out.tabColor = layout.tabColor;
+    if (layout.outline) out.outline = structuredClone(layout.outline);
     return out;
   }
 
@@ -306,6 +322,11 @@
     layout.hiddenRows = runs(json?.hiddenRows);
     layout.hiddenCols = runs(json?.hiddenCols);
     layout.filter = json?.filter ? filterFromJson(json.filter) : null;
+    const rows = Number(json?.freeze?.rows) || 0;
+    const cols = Number(json?.freeze?.cols) || 0;
+    layout.freeze = rows > 0 || cols > 0 ? { rows, cols } : null;
+    layout.tabColor = /^[0-9a-f]{6}$/i.test(json?.tabColor || "") ? json.tabColor.toLowerCase() : null;
+    layout.outline = json?.outline && Object.keys(json.outline).length > 0 ? structuredClone(json.outline) : null;
     return layout;
   }
 
@@ -347,6 +368,23 @@
     touch();
   }
 
+  // ---- the view: frozen panes, tab colour and groups (PD-208) -------------------------------------
+  const freezeOf = (name) => bySheet[name]?.freeze || null;
+  const tabColorOf = (name) => bySheet[name]?.tabColor || null;
+  const outlineOf = (name) => bySheet[name]?.outline || null;
+
+  function setView(name, key, value) {
+    const layout = entry(name);
+    layout[key] = value;
+    layout.rows = null;
+    if (isEmpty(layout)) delete bySheet[name];
+    touch();
+  }
+
+  const setFreeze = (name, freeze) => setView(name, "freeze", freeze && (freeze.rows > 0 || freeze.cols > 0) ? { rows: freeze.rows, cols: freeze.cols } : null);
+  const setTabColor = (name, color) => setView(name, "tabColor", color || null);
+  const setOutline = (name, outline) => setView(name, "outline", outline && Object.keys(outline).length > 0 ? outline : null);
+
   // ---- how a row or column edit moves a position (the engine moves the formulas) -----------------
   // `edit` is `{ axis: "row"|"col", op: "insert"|"delete", at, count }`, `at` 1-based.
   function mapIndex(edit, i) {
@@ -373,6 +411,8 @@
     isEmpty,
     runContains,
     runAt,
+    addRun,
+    removeRun,
     hiddenBefore,
     hiddenTotal,
     visibleToIndex,
@@ -389,6 +429,13 @@
     setFilter,
     filterToJson,
     colHidden,
+    hiddenColRuns,
+    freezeOf,
+    setFreeze,
+    tabColorOf,
+    setTabColor,
+    outlineOf,
+    setOutline,
     getAll,
     replaceAll,
     setSheet,

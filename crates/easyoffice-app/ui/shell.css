@@ -283,3 +283,40 @@
 #sheet-filter-dialog .custom-select-trigger { grid-template-columns: minmax(0, 1fr) 15px; padding: 0 0 0 4px; }
 #sheet-filter-dialog .custom-select-value { padding-right: 4px; }
 #sheet-filter-dialog .dialog-text-input { flex: 1; min-width: 0; }
+
+/* Frozen panes (PD-208): sheet-freeze.js sets the sticky offsets; a pinned cell paints its own background over what scrolls under it (a selection, rule or merge paints over it as usual). */
+.sheet-grid td.frozen-row, .sheet-grid td.frozen-col { position: sticky; z-index: 2; }
+:where(.sheet-grid td.frozen-row, .sheet-grid td.frozen-col) { background-color: var(--ui-surface); }
+.sheet-grid td.frozen-row.frozen-col, .sheet-grid tbody th.frozen-row { z-index: 3; }
+.sheet-grid thead th.frozen-col { z-index: 4; }
+.sheet-grid .frozen-edge-row { box-shadow: inset 0 -1px 0 var(--ui-border-strong); }
+.sheet-grid .frozen-edge-col { box-shadow: inset -1px 0 0 var(--ui-border-strong); }
+.sheet-grid .frozen-edge-row.frozen-edge-col { box-shadow: inset -1px -1px 0 var(--ui-border-strong); }
+/* Outline (PD-208): sheet-outline-ui.js draws a lane per level beside the row numbers and above the column letters; the frame leaves them no room until a group exists. */
+.sheet-frame { flex: 1 1 auto; min-height: 220px; min-width: 0; display: grid; grid-template-columns: var(--outline-w, 0px) minmax(0, 1fr); grid-template-rows: var(--outline-h, 0px) minmax(0, 1fr); background: var(--ui-bg-light); }
+.sheet-frame > .sheet-viewport { grid-area: 2 / 2; min-height: 0; }
+.sheet-outline { position: relative; overflow: hidden; background: var(--ui-bg-light); user-select: none; }
+.sheet-outline[hidden] { display: none; }
+.sheet-outline-rows { grid-area: 2 / 1; }
+.sheet-outline-cols { grid-area: 1 / 2; }
+.sheet-outline .outline-plane { position: absolute; overflow: hidden; }
+.sheet-outline-rows .outline-plane { left: 0; right: 0; top: 26px; bottom: 0; }
+.sheet-outline-cols .outline-plane { top: 0; bottom: 0; left: 56px; right: 0; }
+.outline-bar { position: absolute; background: var(--ui-text-muted); }
+.sheet-outline-rows .outline-bar { width: 1px; }
+.sheet-outline-cols .outline-bar { height: 1px; }
+.outline-toggle { position: absolute; box-sizing: border-box; width: 11px; height: 11px; padding: 0; border: 1px solid var(--ui-text-muted); border-radius: 2px; background: var(--ui-surface); color: var(--ui-text); }
+.outline-toggle::before, .outline-toggle.folded::after { content: ""; position: absolute; background: currentColor; }
+.outline-toggle::before { left: 2px; right: 2px; top: 4px; height: 1px; }
+.outline-toggle.folded::after { top: 2px; bottom: 2px; left: 4px; width: 1px; }
+.outline-levels { position: absolute; display: flex; }
+.outline-levels-row { top: 0; left: 0; height: 26px; align-items: flex-end; }
+.outline-levels-col { left: 0; top: 0; width: 56px; flex-direction: column; align-items: flex-end; }
+.outline-level { box-sizing: border-box; width: 14px; height: 14px; padding: 0; border: 1px solid var(--ui-border-strong); background: var(--ui-surface); color: var(--ui-text); font-size: 10px; line-height: 12px; text-align: center; }
+.outline-level:hover, .outline-toggle:hover { background: var(--ui-hover); }
+.outline-toggle:focus-visible, .outline-level:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; z-index: 1; }
+/* Sheet tab colour (PD-208, sheet-tab-color.js): a line under the name; the name keeps the theme's text colour in both themes. */
+.sheet-tab-btn[data-tab-color] { box-shadow: inset 0 -3px 0 var(--tab-color); }
+.sheet-tab-color-host { position: fixed; z-index: 1; left: 0; top: 0; pointer-events: none; }
+.sheet-tab-color-host > button { opacity: 0; }
+.sheet-tab-btn { --tab-color: transparent; }

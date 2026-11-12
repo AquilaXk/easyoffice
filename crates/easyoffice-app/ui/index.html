@@ -221,7 +221,10 @@
           <div class="menu-item" data-menu="sheet" data-kinds="SHEET">
             <button type="button" class="studio-menu-item menu-title" role="menuitem" aria-haspopup="menu" aria-expanded="false" data-menu-cat="layout">시트</button>
             <div class="menu-dropdown" role="menu">
-              <div class="md-item" data-studio-menu-cmd="sheet-mod-freeze" role="menuitem" tabindex="-1"><span class="md-label">행·열 틀 고정</span></div>
+              <div class="md-item" data-sheet-act="freeze-first-row" role="menuitem" tabindex="-1"><span class="md-label">첫 행 고정</span></div>
+              <div class="md-item" data-sheet-act="freeze-first-col" role="menuitem" tabindex="-1"><span class="md-label">첫 열 고정</span></div>
+              <div class="md-item" data-studio-menu-cmd="sheet-mod-freeze" role="menuitem" tabindex="-1"><span class="md-label">선택 행/열 고정</span></div>
+              <div class="md-item" data-sheet-act="freeze-clear" role="menuitem" tabindex="-1"><span class="md-label">틀 고정 해제</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-sheet-act="row-insert-above" role="menuitem" tabindex="-1"><span class="md-label">행 위에 삽입</span></div>
               <div class="md-item" data-sheet-act="row-insert-below" role="menuitem" tabindex="-1"><span class="md-label">행 아래에 삽입</span></div>
@@ -235,6 +238,8 @@
               <div class="md-sep"></div>
               <div class="md-item" data-sheet-act="merge" role="menuitem" tabindex="-1"><span class="md-label">셀 병합</span></div>
               <div class="md-item" data-sheet-act="unmerge" role="menuitem" tabindex="-1"><span class="md-label">병합 해제</span></div>
+              <div class="md-sep"></div>
+              <div class="md-item" data-sheet-act="tab-color" role="menuitem" tabindex="-1"><span class="md-label">탭 색</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-studio-menu-cmd="layout-orientation" role="menuitem" tabindex="-1"><span class="md-label">용지 방향 전환</span></div>
               <div class="md-item" data-studio-menu-cmd="layout-margins" role="menuitem" tabindex="-1"><span class="md-label">여백 전환</span></div>
@@ -292,6 +297,12 @@
               <div class="md-item" data-sheet-act="filter-toggle" role="menuitemcheckbox" aria-checked="false" tabindex="-1"><span class="md-label">필터</span></div>
               <div class="md-item" data-sheet-act="filter-reapply" role="menuitem" tabindex="-1"><span class="md-label">다시 적용</span></div>
               <div class="md-item" data-sheet-act="filter-clear" role="menuitem" tabindex="-1"><span class="md-label">필터 지우기</span></div>
+              <div class="md-sep"></div>
+              <div class="md-item" data-sheet-act="group" role="menuitem" tabindex="-1"><span class="md-label">그룹 묶기</span></div>
+              <div class="md-item" data-sheet-act="ungroup" role="menuitem" tabindex="-1"><span class="md-label">그룹 풀기</span></div>
+              <div class="md-item" data-sheet-act="hide-detail" role="menuitem" tabindex="-1"><span class="md-label">하위 수준 숨기기</span></div>
+              <div class="md-item" data-sheet-act="show-detail" role="menuitem" tabindex="-1"><span class="md-label">하위 수준 표시</span></div>
+              <div class="md-item" data-sheet-act="outline-clear" role="menuitem" tabindex="-1"><span class="md-label">윤곽 지우기</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-studio-menu-cmd="sheet-mod-pivot" role="menuitem" tabindex="-1"><span class="md-label">피벗 테이블 요약</span></div>
               <div class="md-item" data-studio-menu-cmd="sheet-mod-condfmt" role="menuitem" tabindex="-1"><span class="md-label">조건부 서식 규칙</span></div>
@@ -540,6 +551,9 @@
               <span id="sheet-eval-result" class="formula-result"></span>
             </div>
             <div class="editor-surface sheet-surface">
+              <div id="sheet-frame" class="sheet-frame">
+              <div id="sheet-outline-cols" class="sheet-outline sheet-outline-cols" aria-label="열 그룹" hidden></div>
+              <div id="sheet-outline-rows" class="sheet-outline sheet-outline-rows" aria-label="행 그룹" hidden></div>
               <div id="sheet-viewport" class="sheet-viewport" tabindex="-1">
               <table id="sheet-grid" class="sheet-table sheet-grid" aria-label="스프레드시트 그리드">
                 <thead>
@@ -690,6 +704,7 @@
                   </tr>
                 </tbody>
               </table>
+              </div>
               </div>
             </div>
             <div id="sheet-tab-bar" class="sheet-tab-bar" role="tablist" aria-label="시트 탭 전환">
@@ -1365,7 +1380,14 @@
       <div class="md-sep"></div>
       <div class="md-item" data-sheet-act="hide" role="menuitem" tabindex="-1"><span class="md-label">숨기기</span></div>
       <div class="md-item" data-sheet-act="unhide" role="menuitem" tabindex="-1"><span class="md-label">숨기기 취소</span></div>
+      <div class="md-sep"></div>
+      <div class="md-item" data-sheet-act="group" role="menuitem" tabindex="-1"><span class="md-label">그룹 묶기</span></div>
+      <div class="md-item" data-sheet-act="ungroup" role="menuitem" tabindex="-1"><span class="md-label">그룹 풀기</span></div>
     </div>
+    <div id="sheet-tab-menu" class="context-menu" role="menu" aria-label="시트 탭 메뉴" hidden>
+      <div class="md-item" data-tab-act="color" role="menuitem" tabindex="-1"><span class="md-label">탭 색</span></div>
+    </div>
+    <div id="sheet-tab-color-host" class="sb-color-host sheet-tab-color-host"><button class="dialog-swatch" type="button" data-color-toggle aria-haspopup="true" aria-expanded="false" title="탭 색" aria-label="탭 색" tabindex="-1"></button><input id="sheet-tab-color" type="color" value="#3366cc" aria-label="탭 색" /><div id="sheet-tab-color-palette" class="sb-hl-palette" hidden></div></div>
 
     <div id="slide-context-menu" class="slide-context-menu" role="menu" aria-label="슬라이드 메뉴" hidden>
       <button type="button" role="menuitem" data-slide-action="new">새 슬라이드</button>
@@ -1422,9 +1444,11 @@
     <script src="./workspace-tools.js"></script>
     <script src="./workspace-panels.js"></script>
     <script src="./sheet-layout.js"></script>
+    <script src="./sheet-outline.js"></script>
     <script src="./sheet-refs.js"></script>
     <script src="./sheet-look.js"></script>
     <script src="./sheet-row-fit.js"></script>
+    <script src="./sheet-freeze.js"></script>
     <script src="./sheet-grid.js"></script>
     <script src="./sheet-paste-core.js"></script>
     <script src="./sheet-fill-core.js"></script>
@@ -1445,6 +1469,9 @@
     <script src="./sheet-filter.js"></script>
     <script src="./sheet-filter-ui.js"></script>
     <script src="./sheet-sort-ui.js"></script>
+    <script src="./sheet-view-ui.js"></script>
+    <script src="./sheet-outline-ui.js"></script>
+    <script src="./sheet-tab-color.js"></script>
     <script src="./sheet-structure.js"></script>
     <script src="./sheet-cell-write.js"></script>
     <script src="./sheet-controller.js"></script>

@@ -446,7 +446,7 @@ impl RibbonCommandRouter {
                             ("mod-pivot", "피벗 테이블 요약", "Alt+Cmd+P"),
                             ("mod-chart", "차트 시각화", "Alt+F1"),
                             ("mod-condfmt", "조건부 서식 규칙", "Ctrl+Cmd+F"),
-                            ("mod-freeze", "행·열 틀 고정", "Ctrl+Cmd+L"),
+                            ("mod-freeze", "선택 행/열 고정", "Ctrl+Cmd+L"),
                         ],
                         OfficeModuleKind::Slide => [
                             ("mod-master", "마스터 레이아웃", "Shift+Cmd+M"),

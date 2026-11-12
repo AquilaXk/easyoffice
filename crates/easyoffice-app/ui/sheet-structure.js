@@ -38,7 +38,6 @@
       replaceLiveSheetDataStore,
       refreshWindowFromModel,
       recalculateActiveSheetFormulas,
-      applyFrozenFlag,
       getExtent,
       sortRange,
       enqueueWorkspaceHistoryOp,
@@ -63,6 +62,11 @@
       ...deps,
       kit: host.__EASYOFFICE_CREATE_SHEET_DIALOG_KIT__(document),
     });
+
+    // Frozen panes, groups and the tab colour (PD-208).
+    const view = host.__EASYOFFICE_CREATE_SHEET_VIEW__(deps);
+    const tabColor = host.__EASYOFFICE_CREATE_SHEET_TAB_COLOR__({ document, view, getActiveSheetName });
+    const outlineUi = host.__EASYOFFICE_CREATE_SHEET_OUTLINE_UI__({ document, grid, view, getActiveSheetName });
 
     function say(text) {
       const fb = document.getElementById("status-command-feedback");
@@ -92,6 +96,7 @@
         hiddenRows: json.hiddenRows || [],
         hiddenCols: json.hiddenCols || [],
         filter: json.filter || null,
+        outline: json.outline,
         widths: pairsOf(grid.getAllWidths()[name]),
         rules,
       };
@@ -103,14 +108,11 @@
       const nextSheets = {};
       for (const sheet of Object.keys(sheetDataStore)) nextSheets[sheet] = sheetDataStore[sheet];
       const old = sheetDataStore[name] || {};
-      const frozen = Boolean(old.A1?.style?.frozenPanes);
-      if (frozen) applyFrozenFlag(old, false);
       const moved = {};
       for (const ref of Object.keys(old)) {
         const to = layoutApi.remapRef(edit, ref);
         if (to !== null) moved[to] = old[ref];
       }
-      if (frozen) applyFrozenFlag(moved, true);
       nextSheets[name] = moved;
       for (const f of Array.isArray(answer.formulas) ? answer.formulas : []) {
         const entry = nextSheets[f.sheet]?.[f.cell];
@@ -122,7 +124,9 @@
         rowCounts[name] = edit.op === "insert" ? current + edit.count : Math.max(12, current - edit.count);
       }
       replaceLiveSheetDataStore(nextSheets, rowCounts);
-      layoutApi.setSheet(name, answer);
+      // The answer moves what sits at a position; the frozen counts and the tab colour stay as they are.
+      const kept = layoutApi.get(name);
+      layoutApi.setSheet(name, { ...answer, freeze: kept?.freeze, tabColor: kept?.tabColor });
       const widths = {};
       for (const [col, px] of Array.isArray(answer.widths) ? answer.widths : []) widths[col] = px;
       grid.replaceAllWidths({ ...grid.getAllWidths(), [name]: widths });
@@ -279,6 +283,8 @@
       },
       merge,
       unmerge,
+      ...view.actions,
+      "tab-color": () => Promise.resolve(tabColor.openFor()),
       "sort-dialog": () => Promise.resolve(sortUi.open()),
       "filter-toggle": () => filter.run("filter-toggle"),
       "filter-reapply": () => filter.run("filter-reapply"),
@@ -390,6 +396,8 @@
     function bind() {
       filterUi.bind();
       sortUi.bind();
+      tabColor.bind();
+      outlineUi.bind();
       const viewport = document.getElementById("sheet-viewport");
       viewport?.addEventListener("dblclick", onDblClick);
       viewport?.addEventListener("contextmenu", onContextMenu);

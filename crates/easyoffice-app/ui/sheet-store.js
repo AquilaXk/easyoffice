@@ -29,8 +29,7 @@
       (bold ? 1 : 0) |
       (italic ? 2 : 0) |
       (underline ? 4 : 0) |
-      (strike ? 8 : 0) |
-      (s.frozenPanes ? 32 : 0)
+      (strike ? 8 : 0)
     );
   }
 

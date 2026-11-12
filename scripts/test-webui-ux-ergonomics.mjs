@@ -130,7 +130,8 @@ test("DOC and HWP module-specific ribbon tools build real DOM structures and dir
 });
 
 test("SHEET supports keyboard arrow/Tab/Delete cell navigation, inline editing key pass-through, sort baseline/blank-row preservation, rule dialogs, freeze, and autosum actions", async () => {
-  const { document, sandbox, userClick } = await createWorkspaceHarness();
+  const { document, sandbox, userClick, host } = await createWorkspaceHarness();
+  const frozen = (name) => host.__EASYOFFICE_SHEET_LAYOUT__.freezeOf(name);
   await openDemoWorkbook(document);
   switchModule(document, "SHEET");
   await flushAsyncTurns();
@@ -214,14 +215,15 @@ test("SHEET supports keyboard arrow/Tab/Delete cell navigation, inline editing k
   await flushAsyncTurns();
   assert.equal(document.getElementById("sheet-cf-dialog").open, true);
 
+  // The freeze command pins the rows above and the columns left of the selected cell (B2 here).
+  document.querySelector('#pane-sheet td[data-cell="B2"]').focus();
   userClick(commandItem(document, "sheet-mod-freeze"));
   await flushAsyncTurns();
-  const sheetThead = document.querySelector("#pane-sheet table thead");
-  assert.equal(sheetThead.classList.contains("frozen-header"), true);
+  assert.deepEqual(frozen("Sheet1"), { rows: 1, cols: 1 });
 
   sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
   await flushAsyncTurns();
-  assert.equal(sheetThead.classList.contains("frozen-header"), false);
+  assert.equal(frozen("Sheet1"), null);
   sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
   await flushAsyncTurns();
 
@@ -229,11 +231,11 @@ test("SHEET supports keyboard arrow/Tab/Delete cell navigation, inline editing k
   await flushAsyncTurns();
   sandbox.dispatchWindowKeydown({ key: "y", ctrlKey: true });
   await flushAsyncTurns();
-  assert.equal(sheetThead.classList.contains("frozen-header"), true);
+  assert.deepEqual(frozen("Sheet1"), { rows: 1, cols: 1 });
 
   userClick(document.querySelector('#sheet-tab-bar .sheet-tab-btn[data-sheet-tab="Sheet2"]'));
   await flushAsyncTurns();
-  assert.equal(sheetThead.classList.contains("frozen-header"), false);
+  assert.equal(frozen("Sheet2"), null);
 
   await flushAsyncTurns();
   userClick(commandItem(document, "sheet-data-sort"));
@@ -246,7 +248,7 @@ test("SHEET supports keyboard arrow/Tab/Delete cell navigation, inline editing k
 
   userClick(document.querySelector('#sheet-tab-bar .sheet-tab-btn[data-sheet-tab="Sheet1"]'));
   await flushAsyncTurns();
-  assert.equal(sheetThead.classList.contains("frozen-header"), true);
+  assert.deepEqual(frozen("Sheet1"), { rows: 1, cols: 1 }, "each sheet keeps its own panes");
 });
 
 test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node PII scrub, presenter mode, and PDF badges work end-to-end", async () => {

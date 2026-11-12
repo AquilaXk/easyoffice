@@ -438,6 +438,26 @@ const WEBUI_ASSET_MARKERS: &[(&str, &str)] = &[
         "__EASYOFFICE_CREATE_SHEET_FILTER_UI__",
     ),
     (
+        include_str!("../ui/sheet-outline.js"),
+        "__EASYOFFICE_SHEET_OUTLINE__",
+    ),
+    (
+        include_str!("../ui/sheet-freeze.js"),
+        "__EASYOFFICE_CREATE_SHEET_FREEZE__",
+    ),
+    (
+        include_str!("../ui/sheet-view-ui.js"),
+        "__EASYOFFICE_CREATE_SHEET_VIEW__",
+    ),
+    (
+        include_str!("../ui/sheet-outline-ui.js"),
+        "__EASYOFFICE_CREATE_SHEET_OUTLINE_UI__",
+    ),
+    (
+        include_str!("../ui/sheet-tab-color.js"),
+        "__EASYOFFICE_CREATE_SHEET_TAB_COLOR__",
+    ),
+    (
         include_str!("../ui/sheet-structure.js"),
         "__EASYOFFICE_CREATE_SHEET_STRUCTURE__",
     ),

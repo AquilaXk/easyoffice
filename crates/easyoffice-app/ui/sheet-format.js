@@ -14,7 +14,7 @@
   const DIRECT_AREA_CELLS = 4096;
   // Alignment, wrapping and borders (PD-207) are keys of the same style object.
   const look = host.__EASYOFFICE_SHEET_LOOK__;
-  const STYLE_KEYS = ["fontWeight", "fontStyle", "textDecoration", "fontSize", "frozenPanes", "numFmt", ...look.LOOK_KEYS];
+  const STYLE_KEYS = ["fontWeight", "fontStyle", "textDecoration", "fontSize", "numFmt", ...look.LOOK_KEYS];
   const COMMANDS = {
     "sheet-home-bold": "bold",
     "sheet-home-italic": "italic",
@@ -129,7 +129,6 @@
 
   function internStyle(style) {
     if (style.wrap) look.markWrap();
-    if (style.frozenPanes) return style;
     const key = `${style.fontWeight}|${style.fontStyle}|${style.textDecoration}|${style.fontSize}|${style.numFmt || ""}|${look.lookKey(style)}`;
     let shared = internedStyles.get(key);
     if (!shared) {

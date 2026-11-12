@@ -274,6 +274,10 @@
 
   // Cell entries keep the decoded `style` (bold/italic/underline/strike/size) so a file's formatting
   // shows after opening and is written again by the next save; styled blank cells are kept too.
+  // The position-bound parts of a sheet in an open answer: merges, hidden rows and columns, the filter
+  // (PD-194, PD-198) and the view (PD-208).
+  const LAYOUT_KEYS = ["merges", "hiddenRows", "hiddenCols", "filter", "freeze", "tabColor", "outline"];
+
   function buildSheetStore(sheets) {
     const codec = host.__EASYOFFICE_SHEET_STYLE_CODEC__;
     const gridUtils = host.__EASYOFFICE_SHEET_GRID_UTILS__;
@@ -306,13 +310,8 @@
       const widths = columnWidthMap(sheet.columns);
       if (Object.keys(widths).length > 0) columnWidths[sheet.name] = widths;
       if ((sheet.rules?.cf || []).length > 0 || (sheet.rules?.dv || []).length > 0) rulesBySheet[sheet.name] = sheet.rules;
-      if (sheet.merges?.length || sheet.hiddenRows?.length || sheet.hiddenCols?.length || sheet.filter) {
-        layoutBySheet[sheet.name] = {
-          merges: sheet.merges,
-          hiddenRows: sheet.hiddenRows,
-          hiddenCols: sheet.hiddenCols,
-          filter: sheet.filter,
-        };
+      if (LAYOUT_KEYS.some((key) => sheet[key]?.length || (sheet[key] && !Array.isArray(sheet[key])))) {
+        layoutBySheet[sheet.name] = Object.fromEntries(LAYOUT_KEYS.map((key) => [key, sheet[key]]));
       }
     });
     return { store, rowCounts, columnWidths, rulesBySheet, layoutBySheet };

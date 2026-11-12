@@ -189,6 +189,18 @@
       measure: (text, width, font) => measureWrapped(sampleTd(), text, width, font),
       packRef,
     });
+    // Frozen rows and columns stay in the window whatever the scroll (PD-208).
+    const freeze = host.__EASYOFFICE_CREATE_SHEET_FREEZE__?.({
+      layoutApi,
+      getSheetName,
+      rowTop: (r) => rowTop(r),
+      colLeft: (c) => colLeft(c),
+      headH: HEAD_H,
+      rowHeadW: ROW_HEAD_W,
+      maxRows: MAX_ROWS,
+      maxCols: MAX_COLS,
+    });
+    const frozenCounts = () => (freeze ? freeze.counts() : { rows: 0, cols: 0 });
     const sampleTd = () => {
       seedDomMaps();
       return tdByPacked.values().next().value || null;
@@ -217,7 +229,7 @@
       widthCacheSheet = name;
       widthCacheVersion = stamp;
       const w = { ...widths() };
-      for (const [a, b] of layoutOf()?.hiddenCols || []) {
+      for (const [a, b] of layoutApi ? layoutApi.hiddenColRuns(name) : []) {
         for (let c = a; c <= Math.min(b, MAX_COLS); c += 1) w[c] = 0;
       }
       const keys = Object.keys(w);
@@ -343,17 +355,23 @@
       widthCacheSheet = null;
     }
 
+    const frozenHeight = (n) => (n > 0 ? freeze.height(n) : 0);
+    const frozenWidth = (n) => (n > 0 ? freeze.width(n) : 0);
+
     function computeView() {
       const vp = viewportEl();
       if (hasLayout(vp)) {
-        const first = rowAtY(vp.scrollTop);
+        const { rows: fr, cols: fc } = frozenCounts();
+        const first = rowAtY(vp.scrollTop + frozenHeight(fr));
         const top = visibleIndexOf(first);
         const visible = Math.ceil((vp.clientHeight - HEAD_H) / ROW_H) + 1;
         return {
           layout: true,
-          r0: Math.max(1, rowAtVisible(Math.max(0, top - OVERSCAN_ROWS))),
+          fr,
+          fc,
+          r0: Math.max(fr + 1, rowAtVisible(Math.max(0, top - OVERSCAN_ROWS))),
           r1: Math.min(MAX_ROWS, rowAtVisible(top + visible + OVERSCAN_ROWS)),
-          c0: Math.max(1, colAtX(vp.scrollLeft) - OVERSCAN_COLS),
+          c0: Math.max(fc + 1, colAtX(vp.scrollLeft + frozenWidth(fc)) - OVERSCAN_COLS),
           c1: Math.min(MAX_COLS, colAtX(vp.scrollLeft + vp.clientWidth) + OVERSCAN_COLS),
         };
       }
@@ -421,6 +439,12 @@
       return th;
     }
 
+    function frozenHead(c) {
+      const th = createHeaderCell(c);
+      colHeadByCol.set(c, th);
+      return th;
+    }
+
     function spacerHead(width) {
       const th = document.createElement("th");
       th.className = "sheet-spacer-head";
@@ -439,7 +463,9 @@
       const corner = headRow.children[0];
       const list = [];
       if (corner) list.push(corner);
-      const left = colLeft(v.c0);
+      const fc = v.layout ? v.fc : 0;
+      for (let c = 1; c <= fc; c += 1) list.push(frozenHead(c));
+      const left = colLeft(v.c0) - colLeft(fc + 1);
       if (v.layout && left > 0) list.push(spacerHead(left));
       for (let c = v.c0; c <= v.c1; c += 1) {
         const th = createHeaderCell(c);
@@ -464,15 +490,18 @@
         }
       }
       const list = [children[0]];
-      if (v.layout && v.c0 > 1) list.push(spacerCell());
-      for (let c = v.c0; c <= v.c1; c += 1) {
+      const fc = v.layout ? v.fc : 0;
+      const place = (c) => {
         const ref = refOf(r, c);
         const td = old.get(ref) || createTd(ref, r, c);
         td._row = r;
         td._col = c;
         tdByPacked.set(rowBase + c, td);
         list.push(td);
-      }
+      };
+      for (let c = 1; c <= fc; c += 1) place(c);
+      if (v.layout && v.c0 > fc + 1) list.push(spacerCell());
+      for (let c = v.c0; c <= v.c1; c += 1) place(c);
       if (v.layout && v.c1 < MAX_COLS) list.push(spacerCell());
       tr.replaceChildren(...list);
     }
@@ -506,18 +535,20 @@
       }
       if (!spacerTop) spacerTop = makeSpacerRow("sheet-spacer-top");
       if (!spacerBottom) spacerBottom = makeSpacerRow("sheet-spacer-bottom");
-      const first = tbody.children[0];
-      if (first !== spacerTop) {
+      // The frozen rows come before the top spacer.
+      const kids = [...tbody.children];
+      const others = kids.filter((tr) => tr !== spacerTop);
+      const first = others.find((tr) => rowOf(tr) > v.fr);
+      if (kids.indexOf(spacerTop) !== (first ? others.indexOf(first) : others.length)) {
         spacerTop.remove();
         if (first) first.before(spacerTop);
         else tbody.appendChild(spacerTop);
       }
-      const kids = tbody.children;
-      if (kids[kids.length - 1] !== spacerBottom) {
+      if (tbody.children[tbody.children.length - 1] !== spacerBottom) {
         spacerBottom.remove();
         tbody.appendChild(spacerBottom);
       }
-      spacerTop.children[0].style.height = rowTop(v.r0) + "px";
+      spacerTop.children[0].style.height = rowTop(v.r0) - frozenHeight(v.fr) + "px";
       spacerBottom.children[0].style.height = rowsHeightFrom(v.r1 + 1) + "px";
     }
 
@@ -549,7 +580,7 @@
       for (const tr of Array.from(tbody.children)) {
         if (tr.className && String(tr.className).includes("sheet-spacer")) continue;
         const r = rowOf(tr);
-        if (r < next.r0 || r > next.r1 || r === 0 || rowIsHidden(r)) {
+        if ((r < next.r0 && !(next.layout && r <= next.fr)) || r > next.r1 || r === 0 || rowIsHidden(r)) {
           if (r > 0) {
             rowHeadByRow.delete(r);
             const rowBase = r * PACK_STRIDE;
@@ -572,15 +603,19 @@
     }
 
     function insertMissingRows(tbody, existing, next) {
-      let minExisting = Number.POSITIVE_INFINITY;
-      for (const k of existing.keys()) {
-        if (k < minExisting) minExisting = k;
-      }
-      const firstTr = minExisting < Number.POSITIVE_INFINITY ? existing.get(minExisting) : null;
-      for (let r = next.r0; r <= next.r1; r += 1) {
+      // Each new row goes before the next row that is already there, else at the end.
+      const later = [...existing.keys()].sort((a, b) => a - b);
+      let at = 0;
+      const wanted = [];
+      for (let r = 1; next.layout && r <= next.fr; r += 1) wanted.push(r);
+      for (let r = next.r0; r <= next.r1; r += 1) wanted.push(r);
+      for (const r of wanted) {
+        while (at < later.length && later[at] < r) at += 1;
         if (existing.has(r) || rowIsHidden(r)) continue;
         const tr = buildRow(r, next);
-        if (firstTr && r < minExisting) firstTr.before(tr);
+        // A frozen row with no frozen row after it goes before the top spacer.
+        if (next.layout && r <= next.fr && (at >= later.length || later[at] > next.fr) && spacerTop?.parentElement === tbody) spacerTop.before(tr);
+        else if (at < later.length) existing.get(later[at]).before(tr);
         else if (spacerBottom && spacerBottom.parentElement === tbody) spacerBottom.before(tr);
         else tbody.appendChild(tr);
       }
@@ -614,8 +649,8 @@
       const next = computeView();
       const prev = view;
       const sameCols =
-        Boolean(prev) && prev.c0 === next.c0 && prev.c1 === next.c1 && prev.layout === next.layout;
-      const sameRows = Boolean(prev) && prev.r0 === next.r0 && prev.r1 === next.r1;
+        Boolean(prev) && prev.c0 === next.c0 && prev.c1 === next.c1 && prev.layout === next.layout && prev.fc === next.fc;
+      const sameRows = Boolean(prev) && prev.r0 === next.r0 && prev.r1 === next.r1 && prev.fr === next.fr;
       if (!force && sameCols && sameRows) return false;
       if (willDropFocus(next, sameCols) && hooks.beforeStructuralChange) hooks.beforeStructuralChange();
       view = next;
@@ -628,6 +663,7 @@
       applyRowHeights(tbody);
       syncTableWidth(table, next);
       applyLayoutClasses();
+      freeze?.paint(headRow, Array.from(tbody.children, (tr) => [rowOf(tr), tr]), next);
       if (hooks.afterRender) hooks.afterRender();
       prefetchNumFmt(next);
       return true;
@@ -835,17 +871,17 @@
     function ensureVisible(row, col) {
       const vp = viewportEl();
       if (hasLayout(vp)) {
+        // A frozen row or column is always in view; the others scroll clear of the frozen ones.
+        const { rows: fr, cols: fc } = frozenCounts();
         const viewH = vp.clientHeight - HEAD_H;
         const top = rowTop(row);
         const bottom = top + (rowFit ? rowFit.heightOf(row) : ROW_H);
-        if (top < vp.scrollTop) vp.scrollTop = top;
-        else if (bottom > vp.scrollTop + viewH) vp.scrollTop = bottom - viewH;
+        if (row > fr && top < vp.scrollTop + frozenHeight(fr)) vp.scrollTop = top - frozenHeight(fr);
+        else if (row > fr && bottom > vp.scrollTop + viewH) vp.scrollTop = bottom - viewH;
         const left = colLeft(col);
         const viewW = vp.clientWidth - ROW_HEAD_W;
-        if (left < vp.scrollLeft) vp.scrollLeft = left;
-        else if (left + colWidth(col) > vp.scrollLeft + viewW) {
-          vp.scrollLeft = left + colWidth(col) - viewW;
-        }
+        if (col > fc && left < vp.scrollLeft + frozenWidth(fc)) vp.scrollLeft = left - frozenWidth(fc);
+        else if (col > fc && left + colWidth(col) > vp.scrollLeft + viewW) vp.scrollLeft = left + colWidth(col) - viewW;
       }
       return renderWindow(false);
     }

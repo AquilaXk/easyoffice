@@ -4,8 +4,7 @@
   // Writes a batch of cell changes (paste, paste special, fill, clear, cut) as ONE undoable
   // operation. An edit is `{ ref, value, formula }` plus an optional `style`: absent keeps the
   // cell's style, null removes it, an object replaces it. `widths` ({ column: px }) are applied in
-  // the same undo step. The frozen-panes flag lives on the A1 style and survives a style write.
-  const EMPTY_STYLE = { fontWeight: "", fontStyle: "", textDecoration: "", fontSize: "" };
+  // the same undo step.
 
   function createSheetCellWriter(deps) {
     const {
@@ -26,11 +25,7 @@
     } = deps;
 
     function styleOf(edit, prev) {
-      let style = "style" in edit ? edit.style : prev?.style;
-      if (edit.ref === "A1" && prev?.style?.frozenPanes && !style?.frozenPanes) {
-        style = { ...EMPTY_STYLE, ...style, frozenPanes: true };
-      }
-      return style;
+      return "style" in edit ? edit.style : prev?.style;
     }
 
     function writeEdit(map, edit, sheet) {

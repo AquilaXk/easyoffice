@@ -193,13 +193,6 @@
       grid.refreshCells();
     }
 
-    function frozenPanesActive() {
-      return Boolean(
-        document.querySelector("#pane-sheet thead.frozen-header") ||
-          document.querySelector("#pane-sheet table")?.dataset?.frozenPanes === "true"
-      );
-    }
-
     function syncTdIntoMap(map, td) {
       const ref = td.dataset.cell;
       const textVal = grid.readTdValue(td);
@@ -241,37 +234,12 @@
       }
     }
 
-    // The frozen-panes flag lives on the A1 entry (it is a per-sheet setting, A1 may be unrendered).
-    function applyFrozenFlag(map, frozen) {
-      const a1 = map.A1;
-      if (frozen) {
-        const entry = a1 || { value: "", formula: "" };
-        entry.style = {
-          fontWeight: "",
-          fontStyle: "",
-          textDecoration: "",
-          fontSize: "",
-          ...entry.style,
-          frozenPanes: true,
-        };
-        map.A1 = entry;
-      } else if (a1?.style?.frozenPanes) {
-        delete a1.style.frozenPanes;
-        const s = a1.style;
-        if (!(s.fontWeight || s.fontStyle || s.textDecoration || s.fontSize || s.numFmt || lookApi?.hasLook(s))) {
-          delete a1.style;
-        }
-        if (!hasCellContent(a1) && !a1.style) delete map.A1;
-      }
-    }
-
     // Merges the materialized window into the sheet model (cells outside the window are
     // already authoritative in the model) and returns the model map.
     function snapshotDomSheetCells() {
       const curSheet = getActiveSheetName();
       const map = sheetDataStore[curSheet] || {};
       document.querySelectorAll("#pane-sheet td[data-cell]").forEach((td) => syncTdIntoMap(map, td));
-      applyFrozenFlag(map, frozenPanesActive());
       return map;
     }
 
@@ -382,9 +350,6 @@
         sheetDataStore.Sheet1 = snapshotDomSheetCells();
       }
       extentCache[sheetName] = scanExtent(sheetName);
-      const targetSnap = sheetDataStore[sheetName] || {};
-      const targetFrozen = Boolean(targetSnap.A1?.style?.frozenPanes);
-      toggleSheetFreezePanes(targetFrozen, true);
       grid.renderWindow(true);
       refreshWindowFromModel();
     }
@@ -862,7 +827,6 @@
       replaceLiveSheetDataStore,
       refreshWindowFromModel,
       recalculateActiveSheetFormulas,
-      applyFrozenFlag,
       getExtent: () => getSheetExtent(getActiveSheetName()),
       sortRange: (target) => ops.sortActiveSheetRange(target),
       enqueueWorkspaceHistoryOp,
@@ -894,24 +858,6 @@
     sheetRules.on("changed", () => void recalculateActiveSheetFormulas().catch(() => {}));
     sheetRules.on("repaint", () => grid.repaintFx());
     sheetRules.on("readCells", (sheet, ref) => String(sheetDataStore[sheet]?.[ref]?.value ?? ""));
-
-    function toggleSheetFreezePanes(enabled, skipSave = false) {
-      const thead = document.querySelector("#pane-sheet table thead");
-      const table = document.querySelector("#pane-sheet table");
-      if (thead) {
-        thead.classList.toggle("frozen-header", Boolean(enabled));
-      }
-      if (table) {
-        if (enabled) {
-          table.dataset.frozenPanes = "true";
-        } else {
-          delete table.dataset.frozenPanes;
-        }
-      }
-      if (!skipSave) {
-        saveActiveSheetCellsToWorkbook();
-      }
-    }
 
     async function performSwitchSheetTabAsync(targetSheetName) {
       await flushFocusedSheetCellBeforeSwitch();
@@ -981,7 +927,6 @@
       replaceColumnWidths: grid.replaceAllWidths,
       formatSheetRange: format.formatRange,
       syncSheetFormatToolbar: format.syncToolbar,
-      toggleSheetFreezePanes,
       performSwitchSheetTabAsync,
       switchSheetTab,
     };

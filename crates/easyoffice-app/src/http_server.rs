@@ -50,6 +50,20 @@ const SHEET_LAYOUT_JS: &str = include_str!("../ui/sheet-layout.js");
 const SHEET_FILTER_JS: &str = include_str!("../ui/sheet-filter.js");
 const SHEET_FILTER_UI_JS: &str = include_str!("../ui/sheet-filter-ui.js");
 const SHEET_STRUCTURE_JS: &str = include_str!("../ui/sheet-structure.js");
+/// The scripts of the sheet's view (PD-208) by request path.
+const SHEET_VIEW_SCRIPTS: [(&str, &str); 5] = [
+    ("/sheet-outline.js", include_str!("../ui/sheet-outline.js")),
+    ("/sheet-freeze.js", include_str!("../ui/sheet-freeze.js")),
+    ("/sheet-view-ui.js", include_str!("../ui/sheet-view-ui.js")),
+    (
+        "/sheet-outline-ui.js",
+        include_str!("../ui/sheet-outline-ui.js"),
+    ),
+    (
+        "/sheet-tab-color.js",
+        include_str!("../ui/sheet-tab-color.js"),
+    ),
+];
 const SHEET_FORMAT_JS: &str = include_str!("../ui/sheet-format.js");
 const SHEET_CONTROLLER_JS: &str = include_str!("../ui/sheet-controller.js");
 const RIBBON_HISTORY_JS: &str = include_str!("../ui/ribbon-history.js");
@@ -502,6 +516,7 @@ fn handle_http_connection(stream: &mut TcpStream, port: u16, ipc_handler: &IpcDi
 
     // Document windows are addressed with launch parameters (`/?module=DOC&win=...`); routing ignores them.
     let route = path.split('?').next().unwrap_or("/");
+    let view_script = SHEET_VIEW_SCRIPTS.iter().find(|(path, _)| *path == route);
     let (status, content_type, response_body) = match (method, route) {
         ("GET", "/" | "/index.html") => (
             "200 OK",
@@ -693,6 +708,11 @@ fn handle_http_connection(stream: &mut TcpStream, port: u16, ipc_handler: &IpcDi
             "200 OK",
             "application/javascript; charset=utf-8",
             Cow::Borrowed(SHEET_STRUCTURE_JS),
+        ),
+        ("GET", _) if view_script.is_some() => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            Cow::Borrowed(view_script.map_or("", |(_, js)| js)),
         ),
         ("GET", "/sheet-format.js") => (
             "200 OK",
