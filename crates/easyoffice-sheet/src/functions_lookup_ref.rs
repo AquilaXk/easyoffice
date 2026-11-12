@@ -16,7 +16,7 @@
 //! (type-aware, linear fallback on unsorted data), a relative R1C1 `ADDRESS` is counted from the
 //! formula cell as the file format defines it, the row and column are checked against the sheet size,
 //! `HYPERLINK` keeps the type of its friendly name and accepts only the link targets of the document
-//! editor (`http`, `https`, `mailto`), and a multi-cell reference gives its first cell (cells hold one
+//! editor (`http`, `https`, `mailto`) or a `#` jump inside the workbook, and a multi-cell reference gives its first cell (cells hold one
 //! value).
 
 use crate::functions_lookup::{
@@ -24,7 +24,8 @@ use crate::functions_lookup::{
 };
 use crate::parser::needs_sheet_quoting;
 use crate::{
-    EvalContext, EvaluatedCellValue, Expr, FormulaError, PackedCellCoordinate, SheetEngine,
+    CellRange, EvalContext, EvaluatedCellValue, Expr, FormulaError, PackedCellCoordinate,
+    SheetEngine,
 };
 use easyoffice_formats::rich_document::safe_link_target;
 
@@ -42,6 +43,59 @@ impl Line {
     fn at(start: (usize, usize), step: (usize, usize), i: usize) -> (usize, usize) {
         (start.0 + step.0 * i, start.1 + step.1 * i)
     }
+}
+
+/// Longest in-document link target (the same limit as external targets, PD-192).
+const MAX_INTERNAL_LINK_CHARS: usize = 2_048;
+
+/// A defined name: starts with a letter or `_`, then letters, digits, `_` and `.`.
+fn is_defined_name(s: &str) -> bool {
+    let mut chars = s.chars();
+    chars.next().is_some_and(|c| c.is_alphabetic() || c == '_')
+        && chars.all(|c| c.is_alphanumeric() || c == '_' || c == '.')
+}
+
+/// The sheet of `Sheet!ref` or `'Sheet name'!ref` and what follows the `!`.
+fn split_sheet_prefix(s: &str) -> Option<(&str, &str)> {
+    let Some(quoted) = s.strip_prefix('\'') else {
+        return s
+            .split_once('!')
+            .filter(|(sheet, _)| crate::parser::is_valid_unquoted_sheet_ident(sheet));
+    };
+    let mut i = 0;
+    let bytes = quoted.as_bytes();
+    while i < bytes.len() {
+        if bytes[i] == b'\'' {
+            if bytes.get(i + 1) == Some(&b'\'') {
+                i += 2;
+                continue;
+            }
+            return (i > 0 && bytes.get(i + 1) == Some(&b'!'))
+                .then(|| (&quoted[..i], &quoted[i + 2..]));
+        }
+        i += 1;
+    }
+    None
+}
+
+/// `#Sheet!A1`, `#'Sheet name'!A1:B2`, `#Name`: a jump inside the workbook. Only the shape is
+/// checked (a sheet or name that does not exist is the reader's concern, as for any link).
+fn is_internal_link_target(target: &str) -> bool {
+    let Some(rest) = target.strip_prefix('#') else {
+        return false;
+    };
+    let control = |c: char| c < ' ' || ('\u{7f}'..='\u{9f}').contains(&c);
+    if target.chars().count() > MAX_INTERNAL_LINK_CHARS || target.chars().any(control) {
+        return false;
+    }
+    let reference = match split_sheet_prefix(rest) {
+        Some((_, reference)) => reference,
+        None if rest.contains('!') => return false,
+        None => rest,
+    };
+    CellRange::parse(reference).is_ok()
+        || PackedCellCoordinate::parse_a1(reference).is_ok()
+        || is_defined_name(reference)
 }
 
 /// An `ADDRESS` row or column: a whole number in `1..=max`.
@@ -197,7 +251,8 @@ impl SheetEngine {
     }
 
     /// `HYPERLINK(target, [name])`: the friendly name (the target text without one). The cell holds
-    /// no link, so the target only has to be one the editors would open (PD-192).
+    /// no link, so the target only has to be one the editors would open (PD-192) or a jump inside
+    /// the workbook (`#Sheet!A1`, `#Name`, PD-195).
     fn lookup_hyperlink(
         &self,
         args: &[Expr],
@@ -210,7 +265,7 @@ impl SheetEngine {
             Some(arg) if !matches!(arg, Expr::Missing) => Some(self.eval_arg_val(arg, ctx, depth)?),
             _ => None,
         };
-        if safe_link_target(&target).is_none() {
+        if safe_link_target(&target).is_none() && !is_internal_link_target(&target) {
             return Err(FormulaError::Value);
         }
         Ok(match name {

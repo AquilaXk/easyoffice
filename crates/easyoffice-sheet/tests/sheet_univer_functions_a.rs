@@ -164,6 +164,67 @@ fn hyperlink_returns_the_name_for_allowed_targets_only() {
 }
 
 #[test]
+fn hyperlink_accepts_jumps_inside_the_workbook() {
+    let s = SheetEngine::new("S");
+    for target in [
+        "#시트!A1",
+        "#Sheet1!B2:C3",
+        "#'시트 이름'!A1:B2",
+        "#'It''s'!A1",
+        "#정의된이름",
+        "#Sales_2024.total",
+        "#A1",
+        "#Data!Totals",
+    ] {
+        assert_eq!(
+            eval(&s, &format!("=HYPERLINK(\"{target}\",\"go\")")),
+            text("go"),
+            "{target}"
+        );
+    }
+    assert_eq!(eval(&s, "=HYPERLINK(\"#Sheet1!A1\")"), text("#Sheet1!A1"));
+    for target in [
+        "#",
+        "#!A1",
+        "#Sheet1!",
+        "#Sheet1!A1 B2",
+        "#'시트!A1",
+        "#'시트'A1",
+        "#Sheet 1!A1",
+        "#1abc",
+        "#bad name",
+        "#Sheet1!!A1",
+        "#Sheet1!A1:",
+        "Sheet1!A1",
+        "A1",
+    ] {
+        assert_eq!(
+            eval(&s, &format!("=HYPERLINK(\"{target}\",\"go\")")),
+            err(E::Value),
+            "{target}"
+        );
+    }
+    // control characters and over-long targets
+    assert_eq!(
+        eval(&s, "=HYPERLINK(\"#Sheet1!A\"&CHAR(10)&\"1\",\"go\")"),
+        err(E::Value)
+    );
+    assert_eq!(
+        eval(&s, "=HYPERLINK(\"#'a\"&CHAR(9)&\"b'!A1\",\"go\")"),
+        err(E::Value)
+    );
+    let long = format!("=HYPERLINK(\"#{}\",\"go\")", "n".repeat(2_048));
+    assert_eq!(eval(&s, &long), err(E::Value));
+    let fits = format!("=HYPERLINK(\"#{}\",\"go\")", "n".repeat(2_047));
+    assert_eq!(eval(&s, &fits), text("go"));
+    // outside links keep the document editor's schemes
+    assert_eq!(
+        eval(&s, "=HYPERLINK(\"ftp://example.com\",\"x\")"),
+        err(E::Value)
+    );
+}
+
+#[test]
 fn isformula_and_formulatext_read_the_cell_source() {
     let mut s = SheetEngine::new("S");
     fill(
