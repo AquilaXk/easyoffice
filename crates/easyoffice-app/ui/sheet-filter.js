@@ -105,7 +105,8 @@
   // The two form rows of a column's custom criteria.
   function formsFromCriteria(criteria) {
     const rows = (criteria?.conditions || []).map(toForm);
-    return { and: criteria?.and === true, rows: [rows[0] || { op: "none", text: "" }, rows[1] || { op: "none", text: "" }] };
+    // A new condition (or a single one) joins with AND, as a spreadsheet's dialog starts.
+    return { and: criteria?.conditions?.length === 2 ? criteria.and === true : true, rows: [rows[0] || { op: "none", text: "" }, rows[1] || { op: "none", text: "" }] };
   }
 
   // ---- the range a filter is created for --------------------------------------------------------
@@ -292,12 +293,13 @@
       return true;
     }
 
-    // One undoable change of the filter of the active sheet.
-    function change(work) {
+    // One undoable change of the filter of the active sheet; `cells` when the change moves cells (a
+    // sort), else the undo step leaves the cells out.
+    function change(work, cells = false) {
       return enqueueWorkspaceHistoryOp(async () => {
         await drainInFlightSheetWork();
         const name = syncCells();
-        const before = captureWorkspaceSnapshot(false);
+        const before = captureWorkspaceSnapshot(false, !cells);
         const done = await work(name);
         if (done) pushRawUndoSnapshot(before);
         return done;
@@ -424,7 +426,7 @@
         say(descending ? "내림차순 정렬" : "오름차순 정렬");
         changed();
         return true;
-      });
+      }, true);
     }
 
     function run(action) {

@@ -118,6 +118,11 @@ fn the_filter_follows_the_edit_and_a_deleted_condition_column_asks_for_a_reapply
         "{kept}"
     );
     assert_eq!(field(&delete, "filterReapply").to_json_string(), "true");
+    // A sheet without a filter sends `null` and gets no filter field back.
+    let none = call(&format!(
+        r#"{{"sessionAction":"structure","session":"{id}","sheet":"S","axis":"row","op":"insert","at":1,"count":1,"filter":null}}"#
+    ));
+    assert!(StrictJsonValue::get_field(none.as_object().unwrap(), "filter").is_none());
     let gone = call(&format!(
         r#"{{"sessionAction":"structure","session":"{id}","sheet":"S","axis":"row","op":"delete","at":3,"count":1,"filter":{filter}}}"#
     ));

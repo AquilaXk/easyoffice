@@ -123,7 +123,9 @@
       if (getWindowBridge) getWindowBridge().applyTitles(titles);
     }
 
-    function captureWorkspaceSnapshot(isRibbon = false) {
+    // `layoutOnly` leaves the cells out: a change that touches no cell (the auto filter's) does not
+    // pay for copying them, and its undo keeps the cells as they are then.
+    function captureWorkspaceSnapshot(isRibbon = false, layoutOnly = false) {
       const sheetController = getSheetController();
       const workspacePanels = getWorkspacePanels();
       workspacePanels.saveActiveDocTabState();
@@ -150,7 +152,8 @@
         viewState: workspacePanels.captureWorkspaceViewState(),
         theme: host.__EASYOFFICE_THEME__.getMode(),
         docTabs: structuredClone(docTabStore),
-        sheets: cloneSheets(sheetDataStore),
+        layoutOnly,
+        sheets: layoutOnly ? undefined : cloneSheets(sheetDataStore),
         sheetRowCounts: structuredClone(sheetRowCounts),
         sheetColumnWidths,
         sheetRules: typeof sheetController.getSheetRules === "function" ? sheetController.getSheetRules() : {},
@@ -352,7 +355,7 @@
         }
         historyMutationEpoch += 1;
         const targetSnap = sourceStack.at(-1);
-        const currentSnap = captureWorkspaceSnapshot(Boolean(targetSnap.isRibbon));
+        const currentSnap = captureWorkspaceSnapshot(Boolean(targetSnap.isRibbon), targetSnap.layoutOnly === true);
         currentSnap.ribbonModule = targetSnap.ribbonModule;
         let evaluatedSheets = null;
         if (

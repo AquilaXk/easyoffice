@@ -588,13 +588,16 @@
       table.style.width = ROW_HEAD_W + inner + "px";
     }
 
+    // A hidden row has no `tr`: an auto filter can hide nearly every row, so a window of visible rows spans thousands.
+    const rowIsHidden = (r) => Boolean(layoutApi) && layoutApi.rowHidden(getSheetName(), r);
+
     // Drops rows outside the window and refreshes the survivors; returns them keyed by row number.
     function reconcileExistingRows(tbody, next, sameCols) {
       const existing = new Map();
       for (const tr of Array.from(tbody.children)) {
         if (tr.className && String(tr.className).includes("sheet-spacer")) continue;
         const r = rowOf(tr);
-        if (r < next.r0 || r > next.r1 || r === 0) {
+        if (r < next.r0 || r > next.r1 || r === 0 || rowIsHidden(r)) {
           if (r > 0) {
             rowHeadByRow.delete(r);
             const rowBase = r * PACK_STRIDE;
@@ -623,7 +626,7 @@
       }
       const firstTr = minExisting < Number.POSITIVE_INFINITY ? existing.get(minExisting) : null;
       for (let r = next.r0; r <= next.r1; r += 1) {
-        if (existing.has(r)) continue;
+        if (existing.has(r) || rowIsHidden(r)) continue;
         const tr = buildRow(r, next);
         if (firstTr && r < minExisting) firstTr.before(tr);
         else if (spacerBottom && spacerBottom.parentElement === tbody) spacerBottom.before(tr);
@@ -639,7 +642,7 @@
       if (!display?.active() || !v.layout) return;
       const scan = (from, to) => {
         for (let r = Math.max(1, from); r <= Math.min(MAX_ROWS, to); r += 1) {
-          for (let c = v.c0; c <= v.c1; c += 1) {
+          for (let c = v.c0; c <= v.c1 && !rowIsHidden(r); c += 1) {
             const entry = getEntry(refOf(r, c));
             const code = entry?.style?.numFmt;
             if (code) display.shown(code, String(entry.value ?? ""));
@@ -714,7 +717,7 @@
         const r = td._row;
         const c = td._col;
         td.classList.toggle("sheet-hidden", !empty && layoutApi.colHidden(name, c));
-        // The header row of an auto filter carries its drop-down button; a column with a condition shows it on.
+        // The header row of an auto filter carries the drop-down button, on for a column with a condition.
         const head = filter !== null && r === filter.range.r1 && c >= filter.range.c1 && c <= filter.range.c2;
         td.classList.toggle("filter-head", head);
         td.classList.toggle("filter-on", head && filterCols.has(c));

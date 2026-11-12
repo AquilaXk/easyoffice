@@ -114,7 +114,8 @@ fn moved_layout_json(
         };
         let _ = write!(out, ",\"hiddenCols\":{}", runs_json(&moved));
     }
-    if let Some(v) = field("filter") {
+    // `null` is the page saying the sheet has no filter.
+    if let Some(v) = field("filter").filter(|v| !matches!(v, StrictJsonValue::Null)) {
         let shifted = shift_filter(&parse_filter(v)?, edit);
         match &shifted.filter {
             Some(moved) => {

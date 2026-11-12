@@ -259,7 +259,11 @@ const act = (d, name) => d.querySelector(`.md-item[data-sheet-act="${name}"]`);
 const key = (el, k, extra = {}) => el.dispatchEvent({ type: "keydown", key: k, target: el, ...extra });
 const undo = (d) => d.querySelector('.md-item[data-studio-menu-cmd="studio-undo"]');
 const feedback = (d) => d.getElementById("status-command-feedback").textContent;
-const hiddenRows = (d) => [...d.querySelectorAll("#pane-sheet tbody tr")].filter((tr) => tr.classList.contains("sheet-hidden")).map((tr) => Number(tr.children[0].dataset.row));
+// The rows of the sheet that have no row in the document: a hidden row is not drawn at all.
+const hiddenRows = (d, last = 7) => {
+  const drawn = new Set([...d.querySelectorAll("#pane-sheet tbody tr")].map((tr) => Number(tr.dataset.row)));
+  return Array.from({ length: last }, (_, i) => i + 1).filter((r) => !drawn.has(r));
+};
 
 async function click(h, el) {
   h.userClick(el);
@@ -530,11 +534,45 @@ test("sorting from the panel sorts the data rows below the header and applies th
   assert.deepEqual(layout.filterOf("표").hidden, [[3, 3], [5, 5], [7, 7]], "영업 only: rows 2, 4 and 6 stay");
   await openPanel(h, "B");
   await click(h, d.querySelector('[data-filter-act="sort-desc"]'));
+  assert.equal(feedback(d), "내림차순 정렬");
+  assert.equal(h.requests.at(-1).op, "apply", "the filter was judged again after the sort");
+  assert.deepEqual(layout.filterOf("표").hidden, [[3, 3], [5, 5], [7, 7]], "영업 is now on rows 2, 4 and 6");
+  assert.deepEqual([2, 4, 6].map((r) => cell(d, "B" + r).textContent), ["50", "30", "10"], "the visible rows are sorted");
+  // With the filter cleared every row is drawn: the rows moved whole and the header stayed.
+  await click(h, act(d, "filter-clear"));
   const column = (c) => [2, 3, 4, 5, 6, 7].map((r) => cell(d, c + r).textContent);
   assert.deepEqual(column("B"), ["50", "40", "30", "20", "10", ""]);
   assert.deepEqual(column("A"), ["영업", "기획", "영업", "개발", "영업", "개발"], "the rows moved whole");
   assert.equal(cell(d, "A1").textContent, "부서", "the header row stays");
-  assert.equal(feedback(d), "내림차순 정렬");
-  assert.equal(h.requests.at(-1).op, "apply", "the filter was judged again after the sort");
-  assert.deepEqual(layout.filterOf("표").hidden, [[3, 3], [5, 5], [7, 7]], "영업 is now on rows 2, 4 and 6");
+});
+
+test("undo steps of a filter change keep the cells as they are and a sort step puts the rows back", async () => {
+  const h = await createHarness();
+  const d = h.document;
+  const layout = h.host.__EASYOFFICE_SHEET_LAYOUT__;
+  cell(d, "A2").focus();
+  await click(h, act(d, "filter-toggle"));
+  await openPanel(h, "B");
+  await click(h, d.querySelector('[data-filter-act="sort-desc"]'));
+  const column = (c) => [2, 3, 4, 5, 6, 7].map((r) => cell(d, c + r).textContent);
+  assert.deepEqual(column("B"), ["50", "40", "30", "20", "10", ""]);
+  await openPanel(h, "A");
+  await click(h, shownRows(d)[1]);
+  await click(h, d.getElementById("btn-sheet-filter-ok"));
+  assert.equal(layout.filterOf("표").columns.length, 1);
+  await click(h, undo(d));
+  assert.deepEqual(layout.filterOf("표").columns, []);
+  assert.deepEqual(column("B"), ["50", "40", "30", "20", "10", ""], "the sort stays");
+  await click(h, undo(d));
+  assert.deepEqual(column("B"), ["10", "20", "30", "40", "50", ""], "the sort is undone");
+  assert.notEqual(layout.filterOf("표"), null, "the filter is still on");
+  await click(h, undo(d));
+  assert.equal(layout.filterOf("표"), null);
+  // Redo walks forward again.
+  const redo = d.querySelector('.md-item[data-studio-menu-cmd="studio-redo"]');
+  await click(h, redo);
+  await click(h, redo);
+  assert.deepEqual(column("B"), ["50", "40", "30", "20", "10", ""]);
+  await click(h, redo);
+  assert.equal(layout.filterOf("표").columns.length, 1);
 });
