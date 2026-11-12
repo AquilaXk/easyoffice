@@ -814,7 +814,7 @@ fn paste_special_follows_the_system_paste_in_the_spreadsheet_edit_menu_only() {
     let paste = lines.iter().position(|id| *id == layout::PASTE).unwrap();
     assert_eq!(lines[paste + 1], "edit:paste-special");
     let item = spec("edit:paste-special");
-    assert_eq!(item.label, "선택하여 붙여넣기…");
+    assert_eq!(item.label, "골라 붙이기…");
     assert_eq!(
         action_for("edit:paste-special"),
         Some("sheet-paste:special")

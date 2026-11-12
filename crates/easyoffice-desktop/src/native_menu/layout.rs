@@ -188,7 +188,7 @@ const EDIT_FULL: MenuSpec = menu(
         "edit:replace",
     ],
 );
-/// The spreadsheet's edit menu: the standard group with 선택하여 붙여넣기 after the system paste.
+/// The spreadsheet's edit menu: the standard group with 골라 붙이기 after the system paste.
 const EDIT_SHEET: MenuSpec = menu(
     "편집",
     &[

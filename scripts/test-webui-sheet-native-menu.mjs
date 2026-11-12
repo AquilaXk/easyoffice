@@ -25,11 +25,11 @@ const open = async () => {
   return harness;
 };
 
-test("the table holds the 11 number-format items, the 14 row, column, hide, merge, sort and filter items and 선택하여 붙여넣기", () => {
+test("the table holds the 11 number-format items, the 14 row, column, hide, merge, sort and filter items and 골라 붙이기", () => {
   const items = sheetItems();
   assert.equal(items.filter((i) => i.name === "sheet-numfmt").length, 11);
   assert.equal(items.filter((i) => i.name === "sheet-act").length, 14);
-  assert.deepEqual(items.filter((i) => i.name === "sheet-paste").map((i) => [i.id, i.label, i.argument]), [["edit:paste-special", "선택하여 붙여넣기…", "special"]]);
+  assert.deepEqual(items.filter((i) => i.name === "sheet-paste").map((i) => [i.id, i.label, i.argument]), [["edit:paste-special", "골라 붙이기…", "special"]]);
 });
 
 test("each native item clicks the page's menu item that carries its label", async () => {

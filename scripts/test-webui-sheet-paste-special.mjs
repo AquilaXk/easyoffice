@@ -6,7 +6,7 @@ import { switchModule, studioItem } from "./test-support/modules.mjs";
 import { readText } from "./test-support/read-text.mjs";
 import { fileURLToPath } from "node:url";
 
-// 선택하여 붙여넣기 (PD-206): the menu item, the dialog, the modes, 행/열 바꿈, and the paste that is
+// 골라 붙이기 (PD-206): the menu item, the dialog, the modes, 행/열 바꿈, and the paste that is
 // refused.
 
 const cell = (d, ref) => d.querySelector(`#pane-sheet td[data-cell="${ref}"]`);
@@ -70,11 +70,11 @@ async function special(h, mode, { transpose = false } = {}) {
   await flushAsyncTurns(15);
 }
 
-test("the edit menu of a sheet window has 선택하여 붙여넣기… after 붙이기, other windows do not", async () => {
+test("the edit menu of a sheet window has 골라 붙이기… after 붙이기, other windows do not", async () => {
   const { document } = await open();
   const items = [...document.querySelectorAll('.md-item[data-sheet-paste="special"]')];
   assert.equal(items.length, 1);
-  assert.equal(items[0].querySelector(".md-label").textContent, "선택하여 붙여넣기…");
+  assert.equal(items[0].querySelector(".md-label").textContent, "골라 붙이기…");
   assert.equal(items[0].querySelector(".md-shortcut").textContent, "Ctrl+Alt+V");
   assert.equal(items[0].dataset.kinds, "SHEET");
   const paste = document.querySelector('.md-item[data-studio-menu-cmd="clip-paste"]');
@@ -89,10 +89,10 @@ test("the dialog is the shared tool dialog: combo, checkbox, focus on 확인", a
   const dlg = dialog(document);
   assert.equal(dlg.open, true);
   assert.ok(dlg.classList.contains("tool-dialog"));
-  assert.equal(dlg.querySelector(".dialog-title span").textContent, "선택하여 붙여넣기");
+  assert.equal(dlg.querySelector(".dialog-title span").textContent, "골라 붙이기");
   const options = [...dlg.querySelectorAll("#sheet-paste-kind-select option")].map((o) => [o.value, o.textContent]);
   assert.deepEqual(options, [["all", "모두"], ["values", "값"], ["formats", "서식"], ["formulas", "수식"], ["widths", "열 너비"]]);
-  assert.equal(dlg.querySelector('label[for="sheet-paste-kind-select"]').textContent, "붙여넣기");
+  assert.equal(dlg.querySelector('label[for="sheet-paste-kind-select"]').textContent, "붙이기");
   assert.equal(dlg.querySelector("#sheet-paste-transpose").parentElement.textContent, "행/열 바꿈");
   assert.equal(dlg.querySelector("#sheet-paste-transpose").checked, false);
   assert.equal(document.activeElement, dlg.querySelector(".dialog-btn-primary"), "the focus starts on 확인");
@@ -113,10 +113,10 @@ test("Ctrl+Alt+V, the native bar item and the command search open the same dialo
   dialog(document).close();
   h.userClick(document.getElementById("btn-command-palette"));
   const input = document.getElementById("cmd-search-input");
-  input.value = "선택하여 붙여넣기";
+  input.value = "골라 붙이기";
   input.dispatchEvent({ type: "input" });
   const [found] = [...document.querySelectorAll("#cmd-palette-list .cp-item")];
-  assert.equal(found.querySelector(".cp-item-label").textContent, "선택하여 붙여넣기…");
+  assert.equal(found.querySelector(".cp-item-label").textContent, "골라 붙이기…");
   assert.equal(found.querySelector(".cp-item-shortcut").textContent, "Ctrl+Alt+V");
   found.click();
   assert.equal(dialog(document).open, true, "the command search");
@@ -153,7 +153,7 @@ test("값 pastes the shown value of a formula, 수식 the formula, 서식 only t
   assert.deepEqual(text(document, ["A4", "B4", "C4"]), ["10", "20", "30"]);
   assert.equal(cell(document, "C4").dataset.formula ?? "", "", "no formula");
   assert.equal(cell(document, "A4").style.fontWeight, "", "no format");
-  assert.equal(feedback(document), "선택하여 붙여넣기: 3칸");
+  assert.equal(feedback(document), "골라 붙이기: 3칸");
   h.userClick(studioItem(document, "studio-undo"));
   await flushAsyncTurns(15);
   assert.deepEqual(text(document, ["A4", "B4", "C4"]), ["", "", ""], "one undo step");
@@ -187,7 +187,7 @@ test("열 너비 pastes the widths of the copied columns and one undo step takes
   await select(document, "D1");
   await special(h, "widths");
   assert.deepEqual([width("D"), width("E")], ["150px", "60px"]);
-  assert.equal(feedback(document), "선택하여 붙여넣기: 2열");
+  assert.equal(feedback(document), "골라 붙이기: 2열");
   assert.deepEqual(text(document, ["D1", "E1"]), ["", ""], "no content");
   h.userClick(studioItem(document, "studio-undo"));
   await flushAsyncTurns(15);
@@ -210,7 +210,7 @@ test("행/열 바꿈 turns rows and columns over; a formula moves by the distanc
   assert.equal(cell(document, "A10").dataset.formula, "=A8+A9", "=A1+B1 of C1 (now A10): A1 and B1 followed their cells");
   assert.equal(cell(document, "B9").dataset.formula, "=A8*2", "=A1*2 of B2 (now B9)");
   assert.equal(cell(document, "A8").style.fontWeight, "600");
-  assert.equal(feedback(document), "선택하여 붙여넣기: 6칸");
+  assert.equal(feedback(document), "골라 붙이기: 6칸");
 });
 
 test("text from outside brings content only: 서식 and 열 너비 have nothing to paste", async () => {

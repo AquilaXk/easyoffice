@@ -118,7 +118,7 @@ pub const ITEMS: &[MenuItemSpec] = &[
     item("edit:paste", "붙이기", None, "studio-cmd:clip-paste"),
     item(
         "edit:paste-special",
-        "선택하여 붙여넣기…",
+        "골라 붙이기…",
         None,
         "sheet-paste:special",
     ),

@@ -238,7 +238,7 @@
         return Promise.resolve(null);
       }
       const extra = plan.clipped > 0 ? " (시트 범위를 벗어난 " + plan.clipped + "칸 제외)" : "";
-      const label = mode === "all" && !transpose ? "붙여넣기" : "선택하여 붙여넣기";
+      const label = mode === "all" && !transpose ? "붙여넣기" : "골라 붙이기";
       return api.applyCellEdits(plan.edits, label + extra, plan.widths);
     }
 

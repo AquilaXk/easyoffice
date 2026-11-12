@@ -1,7 +1,7 @@
 (function (host) {
   "use strict";
 
-  // The 선택하여 붙여넣기 dialog of the sheet window (PD-206): the part of the copied cells to
+  // The 골라 붙이기 dialog of the sheet window (PD-206): the part of the copied cells to
   // paste (모두, 값, 서식, 수식, 열 너비) and 행/열 바꿈. The menu items carry
   // `data-sheet-paste="special"`; Ctrl/Cmd+Alt+V opens the same dialog.
   function createSheetPasteUi(deps) {
