@@ -3,6 +3,7 @@
 //
 //   node scripts/bench-webui.mjs --app <easyoffice-app> --chrome <browser> [--ui <ui dir>] [--only sheet,doc,slide,common]
 //        [--rows 100000 --cols 20] [--paras 10000] [--slides 300] [--json out.json]
+//   --only numfmt: a 5,000 x 20 sheet whose cells all carry a number format (bench-webui-numfmt.mjs).
 //
 // Each row is one user action: wall time, then the browser's own counters for it (script, layout and style
 // recalculation time, layout and recalc counts), DOM nodes and JS heap afterwards. `ui` overrides the served
@@ -111,6 +112,7 @@ async function main() {
     };
     const ctx = { fresh, frames, probeReset, probeRead, record, measure: measureStep, sleep, invokeEngine, files: { sheetFile, docFile, slideFile }, args: { ROWS, COLS, PARAS, SLIDES } };
     if (ONLY.has("sheet")) await (await import("./bench-webui-sheet.mjs")).run(ctx);
+    if (ONLY.has("numfmt")) await (await import("./bench-webui-numfmt.mjs")).run(ctx);
     if (ONLY.has("doc")) await (await import("./bench-webui-doc.mjs")).run(ctx);
     if (ONLY.has("slide")) await (await import("./bench-webui-doc.mjs")).runSlides(ctx);
     if (ONLY.has("common")) await (await import("./bench-webui-common.mjs")).run(ctx);
