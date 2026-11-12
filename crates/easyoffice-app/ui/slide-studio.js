@@ -38,8 +38,13 @@
     return btn ? Number(btn.dataset.slideIdx) : -1;
   }
 
+  // Writes a thumbnail's text and state; a thumbnail whose slide, position and state are unchanged is left alone.
   function fillThumb(btn, slide, idx, isActive) {
     const label = slideLabel(slide);
+    const snippet = slideSnippet(slide);
+    const key = idx + (isActive ? "\u0001" : "\u0000") + label + "\u0000" + snippet;
+    if (btn.thumbKey === key) return;
+    btn.thumbKey = key;
     btn.className = "slide-thumb" + (isActive ? " active" : "");
     btn.dataset.slideIdx = String(idx);
     btn.setAttribute("title", idx + 1 + ". " + label);
@@ -49,7 +54,7 @@
     const titleEl = btn.querySelector(".slide-thumb-title");
     titleEl.textContent = label;
     titleEl.classList.toggle("is-empty", label === EMPTY_TITLE_LABEL);
-    btn.querySelector(".slide-thumb-snippet").textContent = slideSnippet(slide);
+    btn.querySelector(".slide-thumb-snippet").textContent = snippet;
     btn.querySelector(".slide-thumb-num").textContent = String(idx + 1);
   }
 
@@ -187,18 +192,21 @@
       return btn;
     }
 
+    // The buttons of a list with the deck's length are reused: only the ones that changed are written.
     function renderThumbs(activeIdx) {
       const list = byId("slide-thumb-list");
       if (!list) return;
-      list.replaceChildren(...deck.map((s, i) => buildThumb(s, i, i === activeIdx)));
+      const items = list.children;
+      if (items.length !== deck.length) {
+        list.replaceChildren(...deck.map((s, i) => buildThumb(s, i, i === activeIdx)));
+        return;
+      }
+      for (let i = 0; i < items.length; i += 1) fillThumb(items[i], deck[i], i, i === activeIdx);
     }
 
     function refreshThumbText() {
       thumbTimer = null;
-      const list = byId("slide-thumb-list");
-      const items = list ? Array.from(list.querySelectorAll(".slide-thumb")) : [];
-      if (items.length !== deck.length) return renderThumbs(getActiveSlideIndex());
-      items.forEach((btn, i) => fillThumb(btn, deck[i], i, i === getActiveSlideIndex()));
+      renderThumbs(getActiveSlideIndex());
     }
 
     function scheduleThumbRefresh() {
