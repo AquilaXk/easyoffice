@@ -246,3 +246,14 @@ fn a_page_that_declares_entities_is_refused_and_a_picture_that_does_is_left_out(
     }
     assert!(started.elapsed().as_secs() < 10, "{:?}", started.elapsed());
 }
+
+#[test]
+fn an_untyped_data_picture_is_left_out_of_the_card_and_the_page_is_drawn() {
+    use crate::hostile_svg::{
+        page_with_href, picture_that_looks_like_a_raster_header, untyped_data_urls,
+    };
+    for href in untyped_data_urls(&picture_that_looks_like_a_raster_header()) {
+        let png = render_png(&page_with_href(&href), &fonts()).expect("the page is drawn");
+        assert_eq!(pixel(&png, 1, 1), [255, 255, 255, 255], "{href:.60}");
+    }
+}

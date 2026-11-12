@@ -22,6 +22,21 @@ pub const MAX_EXPORT_IMAGE_PIXELS: u64 = 64_000_000;
 /// Largest sum of the pictures one exported page keeps, in pixels (four of the largest).
 pub const MAX_EXPORT_PAGE_PIXELS: u64 = 4 * MAX_EXPORT_IMAGE_PIXELS;
 
+/// Whether a data-URL media type names a raster picture the decoders read. It is the only kind a
+/// resolver hands to usvg's default one: that resolver reads `text/plain` (and so `data:,`) as a
+/// picture of any format, an SVG included, parsed with entity declarations allowed.
+pub fn is_raster_mime(mime: &str) -> bool {
+    [
+        "image/png",
+        "image/jpeg",
+        "image/jpg",
+        "image/gif",
+        "image/webp",
+    ]
+    .iter()
+    .any(|known| mime.eq_ignore_ascii_case(known))
+}
+
 /// What one drawn page may still decode.
 #[derive(Debug)]
 pub struct RasterBudget {

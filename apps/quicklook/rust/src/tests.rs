@@ -465,6 +465,38 @@ fn an_svg_that_declares_entities_is_refused_as_a_page_and_left_out_as_a_picture(
 }
 
 #[test]
+fn only_raster_and_svg_types_reach_the_picture_readers() {
+    // A picture a header reader takes for Aseprite whose text is an SVG with an entity declaration:
+    // usvg's resolver would parse it for `text/plain`, `data:,` and the like.
+    let mut trap = b"<?p ".to_vec();
+    trap.extend_from_slice("\u{0940}".as_bytes());
+    trap.extend_from_slice(b" \t\t\t\t?>");
+    trap.extend_from_slice(
+        br#"<!DOCTYPE svg [<!ENTITY w "20">]><svg xmlns="http://www.w3.org/2000/svg" width="&w;" height="8"><rect width="8" height="8"/></svg>"#,
+    );
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&trap);
+    let percent: String = trap.iter().map(|b| format!("%{b:02X}")).collect();
+    let pictures = |href: &str| {
+        let page = render::parse_svg(&svg(&format!(
+            r#"<image width="8" height="8" href="{href}"/>"#
+        )))
+        .expect("the page is kept");
+        pictures_in(page.tree.root())
+    };
+    for href in [
+        format!("data:text/plain;base64,{b64}"),
+        format!("data:TEXT/PLAIN;base64,{b64}"),
+        format!("data:;base64,{b64}"),
+        format!("data:application/octet-stream;base64,{b64}"),
+        format!("data:,{percent}"),
+        format!("data:text/plain,{percent}"),
+    ] {
+        assert_eq!(pictures(&href), 0, "{href:.60}");
+    }
+    assert_eq!(pictures(&format!("data:Image/SVG+xml;base64,{b64}")), 0);
+}
+
+#[test]
 fn a_path_href_is_never_read() {
     let dir = std::env::temp_dir().join(format!("eo-ql-href-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();

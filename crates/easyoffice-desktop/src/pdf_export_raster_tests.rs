@@ -169,3 +169,45 @@ fn a_page_that_declares_entities_is_refused_before_it_is_parsed() {
     assert!(refused.contains("1쪽"), "{refused}");
     assert!(started.elapsed().as_secs() < 5);
 }
+
+#[test]
+fn only_raster_and_svg_types_reach_the_picture_readers() {
+    use crate::hostile_svg::{
+        page_with_href, picture_that_looks_like_a_raster_header, square, untyped_data_urls,
+    };
+    // The picture passes the header reader, so only its type keeps it out of usvg's default
+    // resolver, which would parse it as an SVG with its entity declarations.
+    let trap = picture_that_looks_like_a_raster_header();
+    assert!(
+        RasterBudget::for_export().admit(&trap),
+        "the header reader takes it"
+    );
+    for payload in [trap.as_slice(), square().as_bytes()] {
+        for href in untyped_data_urls(payload) {
+            assert_eq!(kept_pictures(&page_with_href(&href)), 0, "{href:.60}");
+        }
+    }
+    let svg_href = |mime: &str, payload: &[u8]| {
+        format!("data:{mime};base64,{}", base64_codec::encode(payload))
+    };
+    // The SVG type is matched whatever its case; a declaration still keeps the picture out.
+    assert_eq!(
+        kept_pictures(&page_with_href(&svg_href(
+            "IMAGE/SVG+XML",
+            square().as_bytes()
+        ))),
+        1
+    );
+    assert_eq!(
+        kept_pictures(&page_with_href(&svg_href("Image/Svg+Xml", &trap))),
+        0
+    );
+    // A raster type of any case still goes on to the decoders.
+    let png = base64_codec::encode(&png(8, 8));
+    for mime in ["image/png", "IMAGE/PNG"] {
+        assert_eq!(
+            kept_pictures(&page_with_href(&format!("data:{mime};base64,{png}"))),
+            1
+        );
+    }
+}

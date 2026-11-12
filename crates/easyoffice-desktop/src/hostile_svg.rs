@@ -42,3 +42,37 @@ pub(crate) fn page_with_picture(picture: &[u8]) -> String {
         base64_codec::encode(picture)
     )
 }
+
+/// An SVG that a header reader takes for an Aseprite picture (`<?p `, then `E0 A5`, which is also
+/// the UTF-8 of one letter) and whose entity declaration sets the page width: with a default
+/// resolver that reads `text/plain` as any picture, the entity is expanded (`width="&w;"`).
+pub(crate) fn picture_that_looks_like_a_raster_header() -> Vec<u8> {
+    let mut bytes = b"<?p ".to_vec();
+    bytes.extend_from_slice("\u{0940}".as_bytes());
+    bytes.extend_from_slice(b" \t\t\t\t?>");
+    bytes.extend_from_slice(
+        br#"<!DOCTYPE svg [<!ENTITY w "20">]><svg xmlns="http://www.w3.org/2000/svg" width="&w;" height="8"><rect width="8" height="8"/></svg>"#,
+    );
+    bytes
+}
+
+/// A page that draws the picture `href` (a whole data URL).
+pub(crate) fn page_with_href(href: &str) -> String {
+    format!(r#"{SVG_OPEN}<image width="8" height="8" xlink:href="{href}"/></svg>"#)
+}
+
+/// Data URLs that carry `payload` under every spelling that names no raster type: `text/plain`
+/// with and without parameters, no type at all, the type in capitals, and percent-encoded text.
+pub(crate) fn untyped_data_urls(payload: &[u8]) -> Vec<String> {
+    let b64 = base64_codec::encode(payload);
+    let percent: String = payload.iter().map(|b| format!("%{b:02X}")).collect();
+    vec![
+        format!("data:text/plain;base64,{b64}"),
+        format!("data:TEXT/PLAIN;base64,{b64}"),
+        format!("data:text/plain;charset=utf-8;base64,{b64}"),
+        format!("data:;base64,{b64}"),
+        format!("data:application/octet-stream;base64,{b64}"),
+        format!("data:,{percent}"),
+        format!("data:text/plain,{percent}"),
+    ]
+}

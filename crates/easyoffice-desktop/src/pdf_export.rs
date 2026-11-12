@@ -19,6 +19,7 @@
 //! is converted (`pdf_synthetic.rs`), and the finished file's text maps name the standard
 //! character for private-use codes of Hangul documents (`pdf_tounicode.rs`), PD-131.
 
+use crate::raster_budget::is_raster_mime;
 use crate::raster_budget::RasterBudget;
 use easyoffice_formats::checked_svg_text;
 use pdf_writer::{Chunk, Content, Finish, Name, Pdf, Rect, Ref, TextStr};
@@ -137,19 +138,23 @@ impl Drop for NestedLevel {
 fn image_href_resolver(budget: Arc<RasterBudget>) -> usvg::ImageHrefResolver<'static> {
     let default_data = usvg::ImageHrefResolver::default_data_resolver();
     usvg::ImageHrefResolver {
-        resolve_data: Box::new(move |mime, data, options| match mime {
-            "image/svg+xml" => {
+        resolve_data: Box::new(move |mime, data, options| {
+            if mime.eq_ignore_ascii_case("image/svg+xml") {
                 let _level = NestedLevel::enter()?;
                 let text = checked_svg_text(&data, MAX_NESTED_SVG_BYTES).ok()?;
-                usvg::Tree::from_str(&text, options)
+                return usvg::Tree::from_str(&text, options)
                     .ok()
-                    .map(usvg::ImageKind::SVG)
+                    .map(usvg::ImageKind::SVG);
             }
-            // The decoders allocate by the size in the picture's header, so a page SVG (untrusted)
-            // is kept from making a picture or a page cost more than a fixed number of pixels. A
-            // refused picture is left out and the page is kept (PD-145).
-            _ if !budget.admit(&data) => None,
-            _ => default_data(mime, data, options),
+            // Only a raster type goes on to usvg's resolver (it reads `text/plain` as a picture of
+            // any format, an SVG with entity declarations included). The decoders allocate by the
+            // size in the picture's header, so a page SVG (untrusted) is kept from making a
+            // picture or a page cost more than a fixed number of pixels. A refused picture is left
+            // out and the page is kept (PD-145).
+            if !is_raster_mime(mime) || !budget.admit(&data) {
+                return None;
+            }
+            default_data(&mime.to_ascii_lowercase(), data, options)
         }),
         // A page SVG is untrusted text: a path or `file:` href must never make the export read a
         // file (usvg's default would). The editor embeds every picture as a data URL.

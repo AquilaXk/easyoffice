@@ -57,8 +57,9 @@ fn gzip_payload_start(data: &[u8]) -> Result<usize, EasyOfficeError> {
 }
 
 /// The text of an SVG picture, inflated when it is gzip, at most `max_bytes` long. Refuses data
-/// that is not UTF-8, that has a document type or entity declaration, or that is larger than the
-/// budget (before inflating it, for the compressed bytes; while inflating, for the result).
+/// that is not UTF-8, that has a document type or entity declaration, or whose text (the inflated
+/// text for gzip) is longer than the budget: inflation stops at `max_bytes`, the compressed size
+/// is not limited here.
 pub fn checked_svg_text(data: &[u8], max_bytes: usize) -> Result<Cow<'_, str>, EasyOfficeError> {
     let plain: Cow<[u8]> = if data.starts_with(&GZIP_MAGIC) {
         let start = gzip_payload_start(data)?;
