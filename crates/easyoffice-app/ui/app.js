@@ -686,8 +686,6 @@
 
   function setupSmartAndSecurityHandlers() {
     const editor = document.getElementById("doc-editor");
-    const imeBadge =
-      document.getElementById("ime-badge") || document.getElementById("ime-indicator");
     let docTypingSnapshotEpoch = -1;
     function ensureDocTypingSnapshot() {
       if (activeModule !== "DOC" && activeModule !== "HWP") return;
@@ -717,11 +715,9 @@
       });
       editor.addEventListener("compositionstart", () => {
         isImeComposing = true;
-        if (imeBadge) imeBadge.textContent = "IME: 조합 중(한글)";
       });
       editor.addEventListener("compositionend", () => {
         isImeComposing = false;
-        if (imeBadge) imeBadge.textContent = "IME: 완료";
         workspacePanels.computeSmartStats();
       });
       editor.addEventListener("beforeinput", () => {

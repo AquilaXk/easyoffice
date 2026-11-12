@@ -19,7 +19,7 @@ test("disconnected host refuses IPC fail-closed without mutating DOC, SHEET, or 
 
   assert.equal(sandbox.__EASYOFFICE_CREATE_OFFLINE_RPC__, undefined);
   assert.match(
-    document.getElementById("status-engine").textContent,
+    document.getElementById("status-command-feedback").textContent,
     /연결할 수 없습니다\. 앱을 다시 시작해 주세요\./
   );
 

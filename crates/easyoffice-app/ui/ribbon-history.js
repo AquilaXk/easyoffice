@@ -80,11 +80,7 @@
       getWindowBridge,
     } = deps;
 
-    const {
-      MODULE_LABELS,
-      MODULE_SPECS,
-      syncLocalRibbonStateFromBackend,
-    } = ribbonCatalog;
+    const { syncLocalRibbonStateFromBackend } = ribbonCatalog;
 
     const {
       sheetMapHasAnyFormula,
@@ -172,11 +168,6 @@
       localRibbonState.activeModule = mod;
       const shell = document.getElementById("app") || document.querySelector(".app-shell");
       if (shell) shell.dataset.module = mod;
-
-      const statusMod = document.getElementById("status-module");
-      const statusSpec = document.getElementById("status-format-spec");
-      if (statusMod) statusMod.textContent = "모듈: " + (MODULE_LABELS[mod] || mod);
-      if (statusSpec) statusSpec.textContent = "포맷: " + (MODULE_SPECS[mod] || "");
 
       const hwpNotice = document.getElementById("hwp-manuscript-preview");
       const docEditorEl = document.getElementById("doc-editor");

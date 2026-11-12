@@ -759,12 +759,10 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       });
     }
 
-    // Platform pill, palette hint and quick-access tooltips; returns the active modifier glyph.
+    // Palette hint and quick-access tooltips; returns the active modifier glyph.
     function applyPlatformChrome(info) {
       const modifier = info?.shortcutModifier || "⌘";
-      const pill = document.getElementById("platform-pill");
       const hint = document.getElementById("shortcut-hint");
-      if (pill) pill.textContent = (info?.platform || "Desktop") + " · " + modifier;
       if (hint) hint.textContent = modifier === "⌘" ? "⌘K" : modifier + "+K";
       normalizeMenuShortcuts(modifier);
       installChromeGuards();

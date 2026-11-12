@@ -32,11 +32,10 @@ select:focus-visible,
 .eo-bootstrap-error { display: flex; align-items: center; gap: 10px; flex-shrink: 0; padding: 6px 12px; font-size: 12px; background: var(--ui-danger-soft); color: var(--ui-danger); }
 .tb-btn:disabled { opacity: 0.4; cursor: default; }
 .tb-btn:disabled:hover { background: transparent; outline: none; color: inherit; }
-.platform-pill { font-size: 11px; padding: 2px 6px; color: var(--ui-text-muted); white-space: nowrap; }
 .topbar-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .action-btn, .secondary-btn { padding: 5px 10px; font-size: 12px; color: var(--ui-text); background: transparent; white-space: nowrap; flex-shrink: 0; }
 .action-btn:hover, .secondary-btn:hover { background: var(--ui-hover); }
-.ctx-badge, .matrix-badge, .ime-badge { font-size: 11px; color: var(--ui-text-muted); }
+.ctx-badge, .matrix-badge { font-size: 11px; color: var(--ui-text-muted); }
 .ctx-badge { color: var(--accent-strong); font-weight: 600; }
 .outline-list { list-style: none; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--ui-border-light); }
 .outline-item { padding: 5px 6px; font-size: 12px; color: var(--ui-text-muted); cursor: pointer; }

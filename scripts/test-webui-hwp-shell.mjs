@@ -265,15 +265,14 @@ test("status bar keeps page, position, input mode, file name, message and zoom o
     assert.ok(bar.querySelector(`#${id}`), `${id} stays`);
   }
   for (const id of ["platform-pill", "status-module", "status-format-spec", "ime-badge", "status-engine"]) {
-    assert.equal(bar.querySelector(`#${id}`), null, `${id} left the status bar`);
-    assert.ok(document.getElementById("about-dialog").querySelector(`#${id}`), `${id} moved to the About dialog`);
+    assert.equal(document.getElementById(id), null, `${id} is shown nowhere, the About dialog has no diagnostics line`);
   }
   assert.doesNotMatch(bar.textContent, /로컬 서버|모듈:|포맷:|IME|엔진:/);
   assert.ok(document.querySelector('[data-about-open]'), "Help menu opens the About dialog");
   // The items that must stay readable at 1024px never shrink; the file name and message give way first.
   for (const sel of [".statusbar-zoom-group", ".statusbar-pos-metrics, .statusbar-mode-btn, .eo-style-sep"]) assert.match(rule(sel), /flex-shrink:\s*0/);
   assert.match(rule(".statusbar-doc-path"), /min-width:\s*0/);
-  assert.doesNotMatch(ALL_CSS, /#status-engine|#status-format-spec|\.platform-pill \{ display: none/);
+  assert.doesNotMatch(ALL_CSS, /#status-engine|#status-format-spec|\.platform-pill|\.about-diagnostics/);
 });
 
 // ---- start window icons ------------------------------------------------------------------------

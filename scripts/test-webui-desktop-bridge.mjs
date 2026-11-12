@@ -78,7 +78,6 @@ test("desktop shell routes every engine request through ipc_dispatch with string
   assert.equal(typeof exec.args.payload, "string");
   assert.ok(calls.every((c) => c.command === "ipc_dispatch" || c.command === "report_menu_state"));
   assert.equal(fetchCalls.length, 0);
-  assert.equal(document.getElementById("status-engine").textContent, "연결됨");
   assert.doesNotMatch(document.getElementById("status-bar").textContent, /로컬 서버/, "the desktop app never shows the local-server text");
 });
 
@@ -326,7 +325,6 @@ test("without the shell the --serve preview keeps the HTTP transport and Blob do
     },
   });
   assert.ok(fetched.some((f) => f.url === "/api/ipc" && f.command === "get_workspace_bootstrap"));
-  assert.equal(document.getElementById("status-engine").textContent, "연결됨");
   userClick(studioItem(document, "studio-save"));
   await flushAsyncTurns(12);
   assert.equal(downloads.length, 1);
@@ -347,7 +345,6 @@ test("a shell object without an invoke function is ignored", async () => {
     },
   });
   assert.ok(fetched.includes("get_workspace_bootstrap"));
-  assert.equal(document.getElementById("status-engine").textContent, "연결됨");
 });
 
 test("every shell command carries the window's command token as a header", async () => {

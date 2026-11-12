@@ -30,11 +30,6 @@
   }
 
   function createIpcTransport({ document, desktopBridge }) {
-    function setEngineStatus(text) {
-      const engineEl = document.getElementById("status-engine");
-      if (engineEl) engineEl.textContent = text;
-    }
-
     function reportFailure(command, msg) {
       const feedback = document.getElementById("status-command-feedback");
       if (feedback) feedback.textContent = REJECTED_PREFIX + msg;
@@ -57,7 +52,6 @@
           body: JSON.stringify({ command, payload: String(payload ?? "") }),
         });
       } catch {
-        setEngineStatus("연결 오류");
         reportFailure(command, DISCONNECTED_MESSAGE);
         throw connectionError(DISCONNECTED_MESSAGE);
       }
@@ -70,12 +64,10 @@
       return await resp.json();
     }
 
-    // Runs one transport and keeps the status label and the failure display in step.
-    async function viaTransport(command, run, statusText) {
+    // Runs one transport and shows its failure.
+    async function viaTransport(command, run) {
       try {
-        const res = await run();
-        setEngineStatus(statusText);
-        return res;
+        return await run();
       } catch (err) {
         const msg = err?.message || String(err);
         reportFailure(command, msg);
@@ -88,17 +80,14 @@
         return viaTransport(command, async () => {
           const raw = await host.__EASYOFFICE_TEST_IPC__(command, payload);
           return typeof raw === "string" ? JSON.parse(raw) : raw;
-        }, "연결됨");
+        });
       }
       if (desktopBridge.isAvailable()) {
-        return viaTransport(command, () => desktopBridge.invokeIpc(command, payload), "연결됨");
+        return viaTransport(command, () => desktopBridge.invokeIpc(command, payload));
       }
       if (isHttpAvailable()) {
-        const res = await invokeHttp(command, payload);
-        setEngineStatus("연결됨");
-        return res;
+        return invokeHttp(command, payload);
       }
-      setEngineStatus("연결 안 됨 · " + DISCONNECTED_MESSAGE);
       reportFailure(command, DISCONNECTED_MESSAGE);
       throw connectionError(DISCONNECTED_MESSAGE);
     }

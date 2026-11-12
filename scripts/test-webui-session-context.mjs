@@ -472,7 +472,7 @@ test("bootstrap IPC failure shows an error with retry and never claims macOS on 
   assert.ok(banner, "bootstrap error banner must exist");
   assert.equal(banner.hidden, false);
   assert.match(document.getElementById("bootstrap-error-text").textContent, /서버 연결 거부/);
-  assert.doesNotMatch(document.getElementById("platform-pill").textContent, /macOS|⌘/);
+  assert.doesNotMatch(document.getElementById("shortcut-hint").textContent, /⌘/);
   assert.equal(sandbox.__EASYOFFICE_RIBBON_CATALOG__ !== undefined, true);
 
   failBootstrap = false;
@@ -482,7 +482,7 @@ test("bootstrap IPC failure shows an error with retry and never claims macOS on 
   assert.equal(document.title, "보고서.docx — EasyOffice".replace("보고서.docx", document.defaultView.__EASYOFFICE_WINDOW_BRIDGE__.instance.getDocumentName("DOC")));
   assert.equal(document.defaultView.__EASYOFFICE_WINDOW_BRIDGE__.instance.getDocumentName("DOC"), "보고서.docx");
   assert.ok(commandItem(document, "document-home-bold"), "menu item for the catalog command is present after retry");
-  assert.equal(document.getElementById("platform-pill").textContent, "Windows · Ctrl");
+  assert.equal(document.getElementById("shortcut-hint").textContent, "Ctrl+K");
 });
 
 test("mod-symbol without selection appends inside a trailing .eo-run in DOC, and also inserts in SHEET and SLIDE", async () => {
