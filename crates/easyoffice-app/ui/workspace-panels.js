@@ -160,33 +160,35 @@
       syncDocStyleBarFromTarget(el);
     }
 
-    function saveDocTabStateForModule(mod) {
-      if (mod !== "DOC" && mod !== "HWP") return;
-      const editor = document.getElementById("doc-editor");
-      if (!editor) return;
-      docTabStore[mod] = {
-        editorNodes: serializeDomChildren(editor),
-        layoutStyle: captureDocLayoutStyle(editor),
-      };
+    const captureEditorTab = (editor) => ({ editorNodes: serializeDomChildren(editor), layoutStyle: captureDocLayoutStyle(editor) });
+
+    // Typing only marks the copy stale; the next read of `docTabStore[mod]` serializes the editor once, not per keystroke.
+    const staleDocTabs = new Set();
+    for (const mod of ["DOC", "HWP"]) {
+      let stored = docTabStore[mod];
+      Object.defineProperty(docTabStore, mod, {
+        enumerable: true, configurable: true,
+        get() {
+          const editor = staleDocTabs.delete(mod) && document.getElementById("doc-editor");
+          if (editor) stored = captureEditorTab(editor);
+          return stored;
+        },
+        set(next) { staleDocTabs.delete(mod); stored = next; },
+      });
     }
 
-    function saveActiveDocTabState() {
-      saveDocTabStateForModule(getActiveModule());
+    function saveDocTabStateForModule(mod) {
+      const editor = (mod === "DOC" || mod === "HWP") && document.getElementById("doc-editor");
+      if (editor) docTabStore[mod] = captureEditorTab(editor);
     }
+    const saveActiveDocTabState = () => saveDocTabStateForModule(getActiveModule());
+    const markActiveDocTabStale = () => { if (["DOC", "HWP"].includes(getActiveModule())) staleDocTabs.add(getActiveModule()); };
 
     function ensureDefaultDocTabStore() {
       const editor = document.getElementById("doc-editor");
-      if (!docTabStore.DOC && editor) {
-        docTabStore.DOC = {
-          editorNodes: serializeDomChildren(editor),
-          layoutStyle: captureDocLayoutStyle(editor),
-        };
-      }
+      if (!docTabStore.DOC && editor) docTabStore.DOC = captureEditorTab(editor);
       if (!docTabStore.HWP) {
-        docTabStore.HWP = {
-          editorNodes: structuredClone(defaultHwpEditorNodes || []),
-          layoutStyle: captureDocLayoutStyle(null),
-        };
+        docTabStore.HWP = { editorNodes: structuredClone(defaultHwpEditorNodes || []), layoutStyle: captureDocLayoutStyle(null) };
       }
     }
 
@@ -966,6 +968,7 @@
       syncDocStyleBarFromTarget,
       saveDocTabStateForModule,
       saveActiveDocTabState,
+      markActiveDocTabStale,
       ensureDefaultDocTabStore,
       restoreDocTabState,
       findEditableDocBlock,
