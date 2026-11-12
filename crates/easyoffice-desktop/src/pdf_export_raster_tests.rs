@@ -102,3 +102,70 @@ fn export_with_pictures_is_deterministic() {
     let pages = [page_with(&[png(64, 64), png_header(100_000, 100_000)])];
     assert_eq!(export(&pages).0, export(&pages).0);
 }
+
+// --- SVG pictures and pages that declare entities --------------------------------------------
+
+fn images_in(group: &usvg::Group) -> usize {
+    group
+        .children()
+        .iter()
+        .map(|node| match node {
+            usvg::Node::Group(inner) => images_in(inner),
+            usvg::Node::Image(_) => 1,
+            _ => 0,
+        })
+        .sum()
+}
+
+fn kept_pictures(page: &str) -> usize {
+    let options = parse_options(&Arc::new(Database::new()));
+    images_in(usvg::Tree::from_str(page, &options).expect("page").root())
+}
+
+#[test]
+fn a_nested_svg_that_declares_entities_is_dropped_and_the_page_survives() {
+    use crate::hostile_svg::{entity_bomb, gzip, page_with_picture, square};
+    let started = std::time::Instant::now();
+    // Controls: a plain and a gzip picture are read.
+    assert_eq!(kept_pictures(&page_with_picture(square().as_bytes())), 1);
+    assert_eq!(
+        kept_pictures(&page_with_picture(&gzip(square().as_bytes()))),
+        1
+    );
+    let bomb = entity_bomb(6);
+    for picture in [
+        bomb.clone().into_bytes(),
+        gzip(bomb.as_bytes()),
+        // A declaration that is not shaped like the usual bomb is refused as well.
+        format!("<!DOCTYPE svg>{}", square()).into_bytes(),
+        format!("<!  doctype svg>{}", square()).into_bytes(),
+    ] {
+        assert_eq!(kept_pictures(&page_with_picture(&picture)), 0);
+    }
+    let (pdf, _) = export(&[page_with_picture(bomb.as_bytes())]);
+    assert!(verify_exported_pdf(&pdf, 1, false).is_ok());
+    assert!(started.elapsed().as_secs() < 5, "{:?}", started.elapsed());
+}
+
+#[test]
+fn a_gzip_picture_that_inflates_past_the_bound_is_dropped() {
+    use crate::hostile_svg::{gzip, page_with_picture};
+    let big = format!("<svg>{}</svg>", " ".repeat(MAX_NESTED_SVG_BYTES + 1));
+    let packed = gzip(big.as_bytes());
+    assert!(
+        packed.len() < MAX_NESTED_SVG_BYTES / 100,
+        "{}",
+        packed.len()
+    );
+    assert_eq!(kept_pictures(&page_with_picture(&packed)), 0);
+}
+
+#[test]
+fn a_page_that_declares_entities_is_refused_before_it_is_parsed() {
+    use crate::hostile_svg::entity_bomb;
+    let started = std::time::Instant::now();
+    let mut assembler = PdfAssembler::new(&Arc::new(Database::new()), true);
+    let refused = assembler.add_pages(&[entity_bomb(6)]).unwrap_err();
+    assert!(refused.contains("1쪽"), "{refused}");
+    assert!(started.elapsed().as_secs() < 5);
+}

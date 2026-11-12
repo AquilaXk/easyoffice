@@ -73,6 +73,8 @@ pub fn parse_svg(svg: &str) -> Result<Page, i32> {
     if svg.len() > MAX_PAGE_SVG_BYTES {
         return Err(STATUS_TOO_LARGE);
     }
+    // usvg expands entity declarations without a bound, and no page the editor draws has one.
+    easyoffice_formats::XmlSanitizer::validate_safe_xml(svg).map_err(|_| STATUS_RENDER_FAILED)?;
     let svg = fonts::fallbacks::add_font_fallbacks(svg);
     let mut options = usvg::Options {
         fontdb: fonts::shared(),

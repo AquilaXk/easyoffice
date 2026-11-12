@@ -12,7 +12,7 @@ use crate::pdf_font_fallbacks::add_font_fallbacks;
 use crate::raster_budget::RasterBudget;
 use crate::save_verify::verify_document_bytes;
 use easyoffice_formats::{
-    embed_thumbnail, DocumentFormat, MAX_EMBED_DOCUMENT_BYTES, MAX_THUMBNAIL_SIDE_PX,
+    embed_thumbnail, DocumentFormat, XmlSanitizer, MAX_EMBED_DOCUMENT_BYTES, MAX_THUMBNAIL_SIDE_PX,
 };
 use std::sync::Arc;
 use usvg::fontdb::Database;
@@ -35,8 +35,11 @@ pub fn render_png_sized(svg: &str, fonts: &Arc<Database>, side: u32) -> Result<V
         return Err("쪽 SVG가 미리보기 한도를 넘습니다.".to_string());
     }
     let svg = add_font_fallbacks(svg);
-    let tree = usvg::Tree::from_data(
-        svg.as_bytes(),
+    // The SVG parser expands entity declarations without a bound: such a page is refused.
+    XmlSanitizer::validate_safe_xml(&svg)
+        .map_err(|err| format!("쪽 SVG를 읽지 못했습니다: {err}"))?;
+    let tree = usvg::Tree::from_str(
+        &svg,
         &pdf_export::bitmap_parse_options(fonts, RasterBudget::for_page()),
     )
     .map_err(|err| format!("쪽 SVG를 읽지 못했습니다: {err}"))?;

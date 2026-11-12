@@ -399,10 +399,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "easyoffice-formats"
+version = "0.1.0"
+
+[[package]]
 name = "easyoffice-quicklook-ffi"
 version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
+ "easyoffice-formats",
  "imagesize",
  "pdf-writer",
  "resvg",

@@ -3,6 +3,8 @@
 //! header is read first and a picture over the limits is left out (the same limits as the
 //! thumbnails of the desktop shell, whose module is included here: one source of truth).
 
+use easyoffice_formats::checked_svg_text;
+use std::borrow::Cow;
 use std::sync::Arc;
 
 #[path = "../../../../crates/easyoffice-desktop/src/raster_budget.rs"]
@@ -11,14 +13,26 @@ mod budget;
 
 pub use budget::RasterBudget;
 
+/// Largest SVG picture inside a page once inflated (bytes).
+const MAX_NESTED_SVG_BYTES: usize = 16 * 1_048_576;
+
 /// usvg's image resolver, which reads data URLs only, with every raster picture checked against
-/// `budget` first. A path or `file:` href is never read.
+/// `budget` first. A path or `file:` href is never read. An SVG picture goes through
+/// [`checked_svg_text`] first (usvg expands entity declarations and inflates gzip without a bound);
+/// one it refuses is left out.
 pub fn bounded_image_resolver(budget: RasterBudget) -> usvg::ImageHrefResolver<'static> {
     let budget = Arc::new(budget);
     let default_data = usvg::ImageHrefResolver::default_data_resolver();
     usvg::ImageHrefResolver {
         resolve_data: Box::new(move |mime, data, options| {
-            if mime != "image/svg+xml" && !budget.admit(&data) {
+            if mime == "image/svg+xml" {
+                let plain = match checked_svg_text(&data, MAX_NESTED_SVG_BYTES).ok()? {
+                    Cow::Borrowed(_) => data,
+                    Cow::Owned(text) => Arc::new(text.into_bytes()),
+                };
+                return default_data(mime, plain, options);
+            }
+            if !budget.admit(&data) {
                 return None;
             }
             default_data(mime, data, options)

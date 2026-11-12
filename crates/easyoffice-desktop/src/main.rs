@@ -657,6 +657,8 @@ mod tests {
 mod path_leak_tests;
 
 #[cfg(test)]
+mod hostile_svg;
+#[cfg(test)]
 mod pdf_edit_fixtures;
 #[cfg(test)]
 mod pdf_edit_hostile_tests;

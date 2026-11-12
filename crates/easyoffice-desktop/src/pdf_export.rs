@@ -20,6 +20,7 @@
 //! character for private-use codes of Hangul documents (`pdf_tounicode.rs`), PD-131.
 
 use crate::raster_budget::RasterBudget;
+use easyoffice_formats::checked_svg_text;
 use pdf_writer::{Chunk, Content, Finish, Name, Pdf, Rect, Ref, TextStr};
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -48,6 +49,10 @@ pub(crate) const MSG_CONVERT_PANICKED: &str =
 /// WMF/EMF pictures are one level (an SVG that holds a bitmap); the bound keeps a hostile chain of
 /// nested data URLs from recursing without end.
 const MAX_NESTED_SVG_DEPTH: u32 = 4;
+/// Largest nested SVG picture once inflated (bytes). The text a data URL holds is read by the SVG
+/// parser, which expands entity declarations without a bound and inflates gzip without one, so
+/// [`checked_svg_text`] reads every nested picture first; one it refuses is dropped.
+const MAX_NESTED_SVG_BYTES: usize = 16 * 1_048_576;
 /// SVG user units are CSS pixels (96 per inch); PDF user units are points (72 per inch).
 const PX_TO_PT: f32 = 72.0 / 96.0;
 /// Name of the page's form XObject.
@@ -135,7 +140,8 @@ fn image_href_resolver(budget: Arc<RasterBudget>) -> usvg::ImageHrefResolver<'st
         resolve_data: Box::new(move |mime, data, options| match mime {
             "image/svg+xml" => {
                 let _level = NestedLevel::enter()?;
-                usvg::Tree::from_data(&data, options)
+                let text = checked_svg_text(&data, MAX_NESTED_SVG_BYTES).ok()?;
+                usvg::Tree::from_str(&text, options)
                     .ok()
                     .map(usvg::ImageKind::SVG)
             }

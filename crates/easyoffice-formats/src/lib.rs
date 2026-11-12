@@ -63,6 +63,7 @@ mod rtf_escape;
 pub mod rtf_xml_helpers;
 mod sheet_styling;
 pub mod strict_json;
+mod svg_guard;
 mod text_decode;
 pub mod text_pdf_codecs;
 pub mod utf16_swar;
@@ -105,6 +106,7 @@ pub use rtf_xml_helpers::{
 };
 pub use sheet_styling::*;
 pub use strict_json::StrictJsonValue;
+pub use svg_guard::checked_svg_text;
 pub use text_pdf_codecs::*;
 pub use utf16_swar::{
     decode_utf16le_swar, decode_utf16le_vec_baseline, encode_utf16le_scalar_baseline,

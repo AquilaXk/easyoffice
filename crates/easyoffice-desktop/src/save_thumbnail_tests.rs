@@ -224,3 +224,25 @@ fn thumbnails_are_measured() {
         }
     }
 }
+
+#[test]
+fn a_page_that_declares_entities_is_refused_and_a_picture_that_does_is_left_out() {
+    use crate::hostile_svg::{entity_bomb, gzip, page_with_picture, square};
+    let started = Instant::now();
+    assert!(render_png(&entity_bomb(6), &fonts()).is_err());
+    assert!(render_png(&format!("<!DOCTYPE svg>{}", square()), &fonts()).is_err());
+    for picture in [entity_bomb(6).into_bytes(), gzip(entity_bomb(6).as_bytes())] {
+        let png = render_png(&page_with_picture(&picture), &fonts()).expect("the page is drawn");
+        assert_eq!(
+            pixel(&png, 1, 1),
+            [255, 255, 255, 255],
+            "the picture is not drawn"
+        );
+    }
+    // Controls: the same pictures without a declaration are drawn (the square is black).
+    for picture in [square().into_bytes(), gzip(square().as_bytes())] {
+        let png = render_png(&page_with_picture(&picture), &fonts()).expect("png");
+        assert_ne!(pixel(&png, 1, 1), [255, 255, 255, 255]);
+    }
+    assert!(started.elapsed().as_secs() < 10, "{:?}", started.elapsed());
+}

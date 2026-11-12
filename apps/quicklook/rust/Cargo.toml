@@ -24,6 +24,9 @@ resvg = { version = "0.45", default-features = false, features = ["text"] }
 tiny-skia = { version = "0.11", default-features = false, features = ["std", "png-format"] }
 svg2pdf = { version = "0.13", default-features = false, features = ["text"] }
 pdf-writer = "0.12"
+# The check every SVG passes before usvg reads it (document type declarations, bounded gzip). The
+# crate has no dependencies of its own.
+easyoffice-formats = { path = "../../../crates/easyoffice-formats" }
 # Picture sizes from the header before a picture is decoded (PD-145); the version usvg itself uses.
 imagesize = "0.13"
 

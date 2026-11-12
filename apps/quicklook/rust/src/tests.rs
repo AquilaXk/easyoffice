@@ -394,6 +394,76 @@ fn a_page_svg_over_the_limit_is_refused() {
     assert_eq!(render::parse_svg(&big).err(), Some(STATUS_TOO_LARGE));
 }
 
+/// An SVG whose text is `&e{levels};`, each entity ten of the one below.
+fn entity_bomb(levels: usize) -> String {
+    let mut declarations = String::from(r#"<!ENTITY e0 "AAAA">"#);
+    for level in 1..=levels {
+        declarations.push_str(&format!(
+            r#"<!ENTITY e{level} "{}">"#,
+            format!("&e{};", level - 1).repeat(10)
+        ));
+    }
+    format!(
+        r#"<?xml version="1.0"?><!DOCTYPE svg [{declarations}]><svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><text x="0" y="8">&e{levels};</text></svg>"#
+    )
+}
+
+/// A gzip file of stored (uncompressed) deflate blocks, without a CRC trailer (the reader of the
+/// check does not need one): enough for a test, with no compression dependency.
+fn gzip(bytes: &[u8]) -> Vec<u8> {
+    let mut out = vec![0x1F, 0x8B, 8, 0, 0, 0, 0, 0, 0, 3];
+    let mut chunks = bytes.chunks(65_535).peekable();
+    while let Some(chunk) = chunks.next() {
+        out.push(u8::from(chunks.peek().is_none()));
+        out.extend_from_slice(&(chunk.len() as u16).to_le_bytes());
+        out.extend_from_slice(&(!(chunk.len() as u16)).to_le_bytes());
+        out.extend_from_slice(chunk);
+    }
+    out
+}
+
+fn pictures_in(group: &usvg::Group) -> usize {
+    group
+        .children()
+        .iter()
+        .map(|node| match node {
+            usvg::Node::Group(inner) => pictures_in(inner),
+            usvg::Node::Image(_) => 1,
+            _ => 0,
+        })
+        .sum()
+}
+
+fn page_with_svg_picture(picture: &[u8]) -> String {
+    svg(&format!(
+        r#"<image width="8" height="8" href="data:image/svg+xml;base64,{}"/>"#,
+        base64::engine::general_purpose::STANDARD.encode(picture)
+    ))
+}
+
+#[test]
+fn an_svg_that_declares_entities_is_refused_as_a_page_and_left_out_as_a_picture() {
+    let started = Instant::now();
+    let square = r#"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8"/></svg>"#;
+    let pictures = |picture: &[u8]| {
+        let page = render::parse_svg(&page_with_svg_picture(picture)).expect("the page is kept");
+        pictures_in(page.tree.root())
+    };
+    // Controls: plain and gzip pictures are read.
+    assert_eq!(pictures(square.as_bytes()), 1);
+    assert_eq!(pictures(&gzip(square.as_bytes())), 1);
+    let bomb = entity_bomb(6);
+    assert_eq!(pictures(bomb.as_bytes()), 0);
+    assert_eq!(pictures(&gzip(bomb.as_bytes())), 0);
+    assert_eq!(pictures(format!("<!doctype svg>{square}").as_bytes()), 0);
+    assert_eq!(render::parse_svg(&bomb).err(), Some(STATUS_RENDER_FAILED));
+    assert_eq!(
+        render::parse_svg(&format!("<!DOCTYPE svg>{square}")).err(),
+        Some(STATUS_RENDER_FAILED)
+    );
+    assert!(started.elapsed().as_secs() < 10, "{:?}", started.elapsed());
+}
+
 #[test]
 fn a_path_href_is_never_read() {
     let dir = std::env::temp_dir().join(format!("eo-ql-href-{}", std::process::id()));

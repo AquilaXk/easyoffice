@@ -492,6 +492,9 @@ fn has_style_sheet(xml: &roxmltree::Document) -> bool {
 /// by. Only the page as it is, or with the edits the decisions call for, is parsed in full, so a
 /// page costs one full parse and a small one.
 pub fn parse_page(svg: &str, options: &usvg::Options<'_>) -> Result<(usvg::Tree, Report), String> {
+    // The page comes from the page script: a declaration would make the parser expand entities
+    // without a bound, and no page the editor draws has one.
+    easyoffice_formats::XmlSanitizer::validate_safe_xml(svg).map_err(|e| e.to_string())?;
     let parse = |source: &str| usvg::Tree::from_str(source, options).map_err(|e| e.to_string());
     let mut report = Report::default();
     if !asks_for_emphasis(svg) {
