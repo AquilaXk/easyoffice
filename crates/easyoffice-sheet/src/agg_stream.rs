@@ -204,6 +204,15 @@ impl SheetEngine {
                     fold.fold(&v, 0, true)?;
                 }
                 Expr::FuncCall { name: fn_name, .. }
+                    if crate::functions_matrix::is_array_fn(fn_name) =>
+                {
+                    if let Some(m) = self.matrix_expr(arg, ctx, depth)? {
+                        for (idx, &x) in m.data.iter().enumerate() {
+                            fold.fold(&EvaluatedCellValue::Number(x), idx, true)?;
+                        }
+                    }
+                }
+                Expr::FuncCall { name: fn_name, .. }
                     if matches!(fn_name.as_str(), "INDIRECT" | "OFFSET" | "TRANSPOSE") =>
                 {
                     fold = self.agg_reference_func(fold, arg, ctx, depth)?;

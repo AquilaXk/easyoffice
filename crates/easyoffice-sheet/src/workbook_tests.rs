@@ -3,9 +3,9 @@ use crate::{CellRange, EvaluatedCellValue, FormulaError, PackedCellCoordinate, S
 use std::collections::HashMap;
 
 #[test]
-fn test_all_122_canonical_functions_evaluated() {
+fn test_all_canonical_functions_evaluated() {
     let names = SheetEngine::supported_function_names();
-    assert_eq!(names.len(), 122);
+    assert_eq!(names.len(), 144);
 
     let mut s = SheetEngine::new("함수검증");
     s.set_cell("A1", "10").unwrap();
@@ -844,16 +844,20 @@ fn test_f2_cycle_memoization_and_eval_step_budget() {
 }
 
 #[test]
-fn test_f12_canonical_122_coverage_completeness() {
+fn test_f12_canonical_coverage_completeness() {
     let test_src = include_str!("workbook_tests.rs");
     let fn_start = test_src
-        .find("fn test_all_122_canonical_functions_evaluated()")
+        .find("fn test_all_canonical_functions_evaluated()")
         .unwrap();
     let fn_end = test_src[fn_start..]
         .find("fn test_workbook_cross_sheet_formulas_and_sort_goal_seek_chart()")
         .unwrap()
         + fn_start;
-    let body = &test_src[fn_start..fn_end];
+    let body = format!(
+        "{}{}",
+        &test_src[fn_start..fn_end],
+        include_str!("../tests/sheet_univer_functions_a.rs")
+    );
     let mut missing = Vec::new();
     for &func_name in SheetEngine::supported_function_names() {
         let pat = format!("{func_name}(");
@@ -863,7 +867,7 @@ fn test_f12_canonical_122_coverage_completeness() {
     }
     assert!(
         missing.is_empty(),
-        "Missing canonical functions in test_all_122_canonical_functions_evaluated: {missing:?}"
+        "Missing canonical functions in test_all_canonical_functions_evaluated: {missing:?}"
     );
 }
 

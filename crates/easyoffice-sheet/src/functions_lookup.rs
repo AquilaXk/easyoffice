@@ -6,7 +6,7 @@ use crate::{
 type CellResult = Result<EvaluatedCellValue, FormulaError>;
 
 /// Lookup values only compete for approximate matches when they share a type.
-fn same_value_type(a: &EvaluatedCellValue, b: &EvaluatedCellValue) -> bool {
+pub(crate) fn same_value_type(a: &EvaluatedCellValue, b: &EvaluatedCellValue) -> bool {
     matches!(
         (a, b),
         (EvaluatedCellValue::Number(_), EvaluatedCellValue::Number(_))
@@ -18,7 +18,11 @@ fn same_value_type(a: &EvaluatedCellValue, b: &EvaluatedCellValue) -> bool {
     )
 }
 
-fn check_lookup_arity(args: &[Expr], min: usize, max: usize) -> Result<(), FormulaError> {
+pub(crate) fn check_lookup_arity(
+    args: &[Expr],
+    min: usize,
+    max: usize,
+) -> Result<(), FormulaError> {
     if args.len() < min || args.len() > max {
         Err(FormulaError::Value)
     } else {
@@ -63,7 +67,7 @@ impl TableGeometry {
 }
 
 /// Keeps the greatest key that is `<=` the lookup value (sorted approximate match).
-fn update_best_floor(
+pub(crate) fn update_best_floor(
     best: &mut Option<(u32, EvaluatedCellValue)>,
     off: u32,
     key: EvaluatedCellValue,
@@ -88,7 +92,7 @@ fn update_best_floor(
 ///
 /// Falls back (`Ok(Err(()))`) to linear scan if any probed element has a different type (including
 /// empty or error cells) or violates monotonicity.
-fn sorted_approx_binary_search(
+pub(crate) fn sorted_approx_binary_search(
     len: usize,
     ascending: bool,
     lookup: &EvaluatedCellValue,
@@ -324,7 +328,7 @@ impl MatchState {
 }
 
 /// Applies INDEX's single-row / single-column shortcuts to the requested position.
-fn effective_index(
+pub(crate) fn effective_index(
     arg_count: usize,
     (row_num, col_num): (isize, isize),
     (rows, cols): (usize, usize),
@@ -624,6 +628,9 @@ impl SheetEngine {
 
     fn lookup_index(&self, args: &[Expr], ctx: &mut EvalContext<'_>, depth: usize) -> CellResult {
         check_lookup_arity(args, 2, 3)?;
+        if let Some(matrix) = self.matrix_expr(&args[0], ctx, depth)? {
+            return self.index_matrix(&matrix, args, ctx, depth);
+        }
         let Some((sheet_opt, range, transposed)) =
             self.extract_range_and_sheet_ctx(&args[0], ctx, depth)?
         else {

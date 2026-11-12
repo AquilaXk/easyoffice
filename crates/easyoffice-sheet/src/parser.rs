@@ -135,7 +135,7 @@ pub(crate) fn is_valid_unquoted_sheet_ident(raw_sheet: &str) -> bool {
     chars.all(|c| c.is_alphanumeric() || c == '_' || c == '$')
 }
 
-fn needs_sheet_quoting(raw_sheet: &str) -> bool {
+pub(crate) fn needs_sheet_quoting(raw_sheet: &str) -> bool {
     !is_valid_unquoted_sheet_ident(raw_sheet)
         || raw_sheet.contains('$')
         || raw_sheet.eq_ignore_ascii_case("TRUE")

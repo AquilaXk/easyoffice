@@ -3,10 +3,10 @@ pub(crate) mod range_refs;
 
 use crate::{EvalContext, EvaluatedCellValue, Expr, FormulaError, SheetEngine};
 
-/// Canonical 122 built-in spreadsheet functions across 8 standard categories:
-/// Math & Trig (27), Statistical (22), Logical (10), Lookup & Reference (12),
-/// Text (21), Date & Time (10), Financial (11), and Information (9).
-pub const CANONICAL_122_FUNCTIONS: [&str; 122] = [
+/// Canonical built-in spreadsheet functions: the 122 core functions of 8 standard categories (Math &
+/// Trig 27, Statistical 22, Logical 10, Lookup & Reference 12, Text 21, Date & Time 10, Financial 11,
+/// Information 9) followed by 22 more (lookup and reference 6, database 12, matrix 4).
+pub const CANONICAL_FUNCTIONS: [&str; 144] = [
     "SUM",
     "PRODUCT",
     "SUMPRODUCT",
@@ -129,6 +129,28 @@ pub const CANONICAL_122_FUNCTIONS: [&str; 122] = [
     "ISNA",
     "ISEVEN",
     "ISODD",
+    "LOOKUP",
+    "HYPERLINK",
+    "ISFORMULA",
+    "FORMULATEXT",
+    "ADDRESS",
+    "AREAS",
+    "DAVERAGE",
+    "DCOUNT",
+    "DCOUNTA",
+    "DGET",
+    "DMAX",
+    "DMIN",
+    "DPRODUCT",
+    "DSTDEV",
+    "DSTDEVP",
+    "DSUM",
+    "DVAR",
+    "DVARP",
+    "MMULT",
+    "MDETERM",
+    "MINVERSE",
+    "MUNIT",
 ];
 
 /// The numeric values among `vals`.
@@ -229,9 +251,9 @@ fn stat_skew_p(nums: &[f64]) -> Result<EvaluatedCellValue, FormulaError> {
 }
 
 impl SheetEngine {
-    /// Returns the slice of all 122 canonical built-in spreadsheet function names.
+    /// Returns the slice of all canonical built-in spreadsheet function names.
     pub fn supported_function_names() -> &'static [&'static str] {
-        &CANONICAL_122_FUNCTIONS
+        &CANONICAL_FUNCTIONS
     }
 
     pub(crate) fn eval_func_ctx(
@@ -363,6 +385,16 @@ impl SheetEngine {
             | "BINOM.DIST" | "BINOMDIST" | "BINOM.INV" | "CRITBINOM" | "NORM.DIST" | "NORMDIST"
             | "NORM.INV" | "NORMINV" | "NORM.S.INV" | "NORMSINV" => {
                 self.eval_dist_func(name, args, ctx, depth)
+            }
+            "LOOKUP" | "HYPERLINK" | "ISFORMULA" | "FORMULATEXT" | "ADDRESS" | "AREAS" => {
+                self.eval_lookup_ref_func(name, args, ctx, depth)
+            }
+            "DAVERAGE" | "DCOUNT" | "DCOUNTA" | "DGET" | "DMAX" | "DMIN" | "DPRODUCT"
+            | "DSTDEV" | "DSTDEVP" | "DSUM" | "DVAR" | "DVARP" => {
+                self.eval_db_func(name, args, ctx, depth)
+            }
+            "MMULT" | "MDETERM" | "MINVERSE" | "MUNIT" => {
+                self.eval_matrix_func(name, args, ctx, depth)
             }
             _ => Err(FormulaError::Name),
         }

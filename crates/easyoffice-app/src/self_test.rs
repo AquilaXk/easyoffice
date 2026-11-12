@@ -160,9 +160,9 @@ fn check_sheet_and_formats() -> Result<(), EasyOfficeError> {
             "피벗 총계 계산 불일치".to_string(),
         ));
     }
-    if SheetEngine::supported_function_names().len() != 122 {
+    if SheetEngine::supported_function_names().len() != 144 {
         return Err(EasyOfficeError::FormulaError(format!(
-            "지원 수식 함수 수가 122종이 아닙니다: {}",
+            "지원 수식 함수 수가 144종이 아닙니다: {}",
             SheetEngine::supported_function_names().len()
         )));
     }
@@ -513,7 +513,7 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
     }
 
     Ok(format!(
-        "EasyOffice Rust Cross-Platform Self-Test PASSED (platform={}, formats=20, functions=122, ribbon_commands=140, ipc_commands=15, {})",
+        "EasyOffice Rust Cross-Platform Self-Test PASSED (platform={}, formats=20, functions=144, ribbon_commands=140, ipc_commands=15, {})",
         DesktopPlatform::current().os_label(),
         bench_report.summary_line()
     ))

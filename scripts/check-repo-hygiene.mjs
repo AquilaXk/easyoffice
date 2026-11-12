@@ -638,8 +638,8 @@ if (
   const readOnlyCount = Number((formatsLib.match(/EXPERIMENTAL_WRITE:\s*\[DocumentFormat;\s*(\d+)\]/) || [])[1] || 0);
   const formatCount = variantCount - readOnlyCount;
 
-  const rustFnMatch = readSourceLf(rustSheetFunctionsPath).match(/CANONICAL_122_FUNCTIONS:\s*\[&str;\s*122\]\s*=\s*\[([\s\S]*?)\];/);
-  const functionCount = rustFnMatch ? (rustFnMatch[1].match(/"[A-Z0-9]+"/g) || []).length : 0;
+  const rustFnMatch = readSourceLf(rustSheetFunctionsPath).match(/CANONICAL_FUNCTIONS:\s*\[&str;\s*(\d+)\]\s*=\s*\[([\s\S]*?)\];/);
+  const functionCount = rustFnMatch ? (rustFnMatch[2].match(/"[A-Z0-9]+"/g) || []).length : 0;
 
   const ribbonCatalogJs = readSourceLf(ribbonCatalogJsPath);
   const commonSpecCount = (ribbonCatalogJs.match(/\{\s*suffix:\s*"/g) || []).length;
@@ -657,8 +657,8 @@ if (
   if (formatCount !== 20) {
     errors.push(`Expected 20 read/write DocumentFormat variants in crates/easyoffice-formats/src/lib.rs, found ${formatCount}`);
   }
-  if (functionCount !== 122) {
-    errors.push(`Expected 122 built-in functions in crates/easyoffice-sheet/src/functions.rs, found ${functionCount}`);
+  if (functionCount !== 144) {
+    errors.push(`Expected 144 built-in functions in crates/easyoffice-sheet/src/functions.rs, found ${functionCount}`);
   }
   if (ribbonCommandCount !== 140) {
     errors.push(`Expected 140 ribbon commands in ribbon-catalog.js, found ${ribbonCommandCount}`);
