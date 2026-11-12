@@ -303,6 +303,7 @@ fn a_kind_does_not_hold_the_items_of_other_kinds() {
     not_in(MenuKind::Doc, &slide_only);
     not_in(MenuKind::Doc, &pdf_only);
     not_in(MenuKind::Doc, &["table:cell-select", "table:cell-split"]);
+    not_in(MenuKind::Hwp, &["table:split"]);
     for kind in [MenuKind::Sheet, MenuKind::Slide, MenuKind::Pdf] {
         not_in(kind, &paragraph);
         not_in(
@@ -314,7 +315,13 @@ fn a_kind_does_not_hold_the_items_of_other_kinds() {
                 "insert:mailmerge",
                 "insert:footnote",
                 "table:doc-formula",
+                "table:row-above",
                 "table:add-row",
+                "table:col-left",
+                "table:col-right",
+                "table:row-delete",
+                "table:col-delete",
+                "table:split",
                 "table:merge",
                 "table:sum",
             ],
@@ -681,7 +688,7 @@ fn the_check_items_are_the_three_themes_and_the_update_switch_of_the_table() {
 fn exactly_the_current_theme_is_checked_and_the_update_switch_follows_the_app() {
     let view = |theme, update_check| MenuView {
         theme,
-        disabled_mask: 0,
+        disabled_mask: ItemMask::default(),
         update_check,
     };
     for mode in ["system", "light", "dark"] {
@@ -795,5 +802,5 @@ fn the_sheet_items_run_the_page_menu_items_through_a_quoted_static_id() {
         let script = dispatch_script(id).unwrap();
         assert_eq!(script, format!("{SCRIPT_PREFIX}\"{id}\");"));
     }
-    assert!(ITEMS.len() <= u128::BITS as usize);
+    assert!(ITEMS.len() <= ItemMask::CAPACITY);
 }

@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 
 use tauri::{AppHandle, Manager, WebviewWindow};
 
-use crate::native_menu::{self, KindMenus, MenuKind, MenuView, ITEMS};
+use crate::native_menu::{self, ItemMask, KindMenus, MenuKind, MenuView, ITEMS};
 use crate::shell_caller::ShellCaller;
 use crate::update_check::UpdateService;
 use crate::windows::is_window_label;
@@ -25,7 +25,7 @@ use crate::windows::is_window_label;
 pub struct WindowMenu {
     kind: MenuKind,
     theme: &'static str,
-    disabled_mask: u128,
+    disabled_mask: ItemMask,
 }
 
 impl Default for WindowMenu {
@@ -33,7 +33,7 @@ impl Default for WindowMenu {
         Self {
             kind: MenuKind::Doc,
             theme: "system",
-            disabled_mask: 0,
+            disabled_mask: ItemMask::default(),
         }
     }
 }
@@ -50,12 +50,12 @@ impl WindowMenu {
             .into_iter()
             .find(|mode| *mode == theme)
             .ok_or_else(|| "알 수 없는 테마입니다.".to_string())?;
-        let mut disabled_mask = 0u128;
+        let mut disabled_mask = ItemMask::default();
         for id in &disabled {
             let Some(index) = native_menu::item_index(id.as_str()) else {
                 return Err(format!("알 수 없는 메뉴 항목입니다: {id}"));
             };
-            disabled_mask |= 1u128 << index;
+            disabled_mask.insert(index);
         }
         Ok(Self {
             kind,
@@ -156,7 +156,7 @@ mod tests {
 
     impl WindowMenu {
         pub fn is_enabled(&self, index: usize) -> bool {
-            (self.disabled_mask & (1u128 << index)) == 0
+            !self.disabled_mask.contains(index)
         }
 
         pub fn is_disabled(&self, id: &str) -> bool {

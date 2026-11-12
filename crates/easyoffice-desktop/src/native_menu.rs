@@ -368,10 +368,40 @@ pub const ITEMS: &[MenuItemSpec] = &[
     ),
     item("table:insert", "표 만들기", None, "studio-cmd:insert-table"),
     item(
+        "table:row-above",
+        "위쪽에 줄 추가하기",
+        None,
+        "studio-cmd:table-row-above",
+    ),
+    item(
         "table:add-row",
         "아래쪽에 줄 추가하기",
         None,
         "studio-cmd:table-add-row",
+    ),
+    item(
+        "table:col-left",
+        "왼쪽에 칸 추가하기",
+        None,
+        "studio-cmd:table-col-left",
+    ),
+    item(
+        "table:col-right",
+        "오른쪽에 칸 추가하기",
+        None,
+        "studio-cmd:table-col-right",
+    ),
+    item(
+        "table:row-delete",
+        "줄 지우기",
+        None,
+        "studio-cmd:table-row-delete",
+    ),
+    item(
+        "table:col-delete",
+        "칸 지우기",
+        None,
+        "studio-cmd:table-col-delete",
     ),
     item(
         "table:cell-select",
@@ -381,6 +411,7 @@ pub const ITEMS: &[MenuItemSpec] = &[
     ),
     item("table:merge", "셀 합치기", None, "studio-cmd:table-merge"),
     item("table:cell-split", "셀 나누기", None, "hwp-editor"),
+    item("table:split", "셀 나누기", None, "studio-cmd:table-split"),
     item("table:sum", "블록 합계", None, "studio-cmd:table-sum"),
     item(
         "table:doc-formula",
@@ -628,7 +659,24 @@ fn is_check_item(id: &str) -> bool {
 const MAX_ID_LEN: usize = 32;
 const SCRIPT_PREFIX: &str = "window.__EASYOFFICE_NATIVE_MENU__&&window.__EASYOFFICE_NATIVE_MENU__(";
 
-const _: () = assert!(ITEMS.len() <= u128::BITS as usize);
+const _: () = assert!(ITEMS.len() <= ItemMask::CAPACITY);
+
+/// A set of indexes of [`ITEMS`] (the items a window cannot use).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ItemMask([u128; 2]);
+
+impl ItemMask {
+    /// How many indexes the set can hold.
+    pub const CAPACITY: usize = 2 * u128::BITS as usize;
+
+    pub fn insert(&mut self, index: usize) {
+        self.0[index / u128::BITS as usize] |= 1u128 << (index % u128::BITS as usize);
+    }
+
+    pub fn contains(&self, index: usize) -> bool {
+        (self.0[index / u128::BITS as usize] & (1u128 << (index % u128::BITS as usize))) != 0
+    }
+}
 
 /// Index of a menu id in [`ITEMS`], if the id is one of ours.
 pub fn item_index(id: &str) -> Option<usize> {
@@ -695,8 +743,8 @@ pub fn installed_ids() -> impl Iterator<Item = &'static str> {
 pub struct MenuView<'a> {
     /// Theme mode of the window: `system`, `light` or `dark`.
     pub theme: &'a str,
-    /// Bit `i` is set when `ITEMS[i]` cannot be used in the window's module.
-    pub disabled_mask: u128,
+    /// Holds `i` when `ITEMS[i]` cannot be used in the window's module.
+    pub disabled_mask: ItemMask,
     /// The update-check switch: `None` when the app does not check at all (it is then disabled).
     pub update_check: Option<bool>,
 }
@@ -708,8 +756,7 @@ fn check_state(id: &str, view: &MenuView) -> Option<(bool, bool)> {
     }
     let theme = theme_item_id(view.theme);
     is_check_item(id).then(|| {
-        let enabled =
-            item_index(id).is_none_or(|index| (view.disabled_mask & (1u128 << index)) == 0);
+        let enabled = item_index(id).is_none_or(|index| !view.disabled_mask.contains(index));
         (theme == Some(id), enabled)
     })
 }
@@ -745,7 +792,7 @@ pub fn sync<R: Runtime>(menu: &Menu<R>, view: &MenuView) -> tauri::Result<()> {
                     check.set_checked(checked).and(check.set_enabled(enabled))
                 }),
             MenuItemKind::MenuItem(plain) => match item_index(id) {
-                Some(index) => plain.set_enabled((view.disabled_mask & (1u128 << index)) == 0),
+                Some(index) => plain.set_enabled(!view.disabled_mask.contains(index)),
                 None => Ok(()),
             },
             _ => Ok(()),
