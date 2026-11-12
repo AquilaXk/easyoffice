@@ -1,7 +1,8 @@
 //! Quit on every OS (the page's 끝내기 item and Ctrl+Q through [`quit_app`], and on macOS also the
-//! native 끝내기 item (Cmd+Q), the Dock's 종료 and a system shutdown, which arrive as
-//! `RunEvent::ExitRequested`): every window goes through its own close confirmation, one after the
-//! other, and the app ends when the last one is gone.
+//! native 끝내기 item (Cmd+Q) as `RunEvent::ExitRequested` and the Dock's 종료, AppleScript `quit`
+//! and a system shutdown or logout as `applicationShouldTerminate:`, `macos_terminate.rs`): every
+//! window goes through its own close confirmation, one after the other, and the app ends when the
+//! last one is gone.
 //!
 //! Adapted from the reference app `apps/desktop/src-tauri/src/app_quit.rs` (MIT, Copyright (c)
 //! 2025-2026 Edward Kim; see THIRD_PARTY_NOTICES.md): the same queue of window labels (the focused
@@ -14,6 +15,11 @@
 //! application menu has a custom quit item and `ExitRequested` (no exit code) is prevented and sent
 //! to the same queue (`app_quit.rs:62-153`, `lib.rs:133`). The updater's restart (`update_install.rs`)
 //! does not go through here: it refuses to start while a window has unsaved changes.
+//!
+//! A macOS `terminate:` raises no `ExitRequested` and destroys no window with the event loop in use
+//! (PD-189). The queue then answers the system later: [`request_terminate`] returns "later", the
+//! queue is marked as answering a terminate, and its end replies "terminate" (the last window is
+//! gone) or "cancel" (the user cancelled or a save failed) to `NSApplication`.
 
 use std::collections::VecDeque;
 use std::sync::Mutex;
@@ -29,12 +35,25 @@ use crate::windows::{PromptState, CLOSE_ACK_TIMEOUT};
 struct Queue {
     pending: VecDeque<String>,
     progressed: Option<Instant>,
+    /// The system asked to terminate (macOS) and waits for this queue's answer.
+    terminating: bool,
 }
 
 /// The windows still to be closed by a running quit.
 #[derive(Default)]
 pub struct AppQuit {
     queue: Mutex<Queue>,
+}
+
+/// What a macOS `applicationShouldTerminate:` answers at once.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub enum Terminate {
+    /// No window is open: the system may end the app.
+    Now,
+    /// The queue runs; the system gets its answer when the queue ends. Holds the window to ask
+    /// first (`None` when a running quit already waits on one).
+    Later(Option<String>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,8 +109,30 @@ impl AppQuit {
         queue.pending.front().cloned()
     }
 
-    pub fn cancel(&self) {
-        self.queue().pending.clear();
+    /// The system's terminate over `labels`: ends at once without windows, else the queue answers.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    fn begin_terminate(
+        &self,
+        labels: Vec<String>,
+        prompt: impl Fn(&str) -> PromptState,
+    ) -> Terminate {
+        if labels.is_empty() {
+            return Terminate::Now;
+        }
+        self.queue().terminating = true;
+        Terminate::Later(self.begin(labels, prompt))
+    }
+
+    /// True once per terminate the queue still owes an answer to.
+    fn take_terminating(&self) -> bool {
+        std::mem::take(&mut self.queue().terminating)
+    }
+
+    /// Stops the quit; true when a system terminate waits for the answer "cancel".
+    fn cancel(&self) -> bool {
+        let mut queue = self.queue();
+        queue.pending.clear();
+        std::mem::take(&mut queue.terminating)
     }
 
     fn advance_after_close(&self, closed: &str) -> Advance {
@@ -140,6 +181,28 @@ pub fn request_app_quit(app: &AppHandle) {
     }
 }
 
+/// The system's terminate (`applicationShouldTerminate:`, macOS): the same queue, answered when it
+/// ends. `Now` when no window is open; otherwise the system waits (`NSTerminateLater`) while every
+/// window confirms its own close, and [`window_destroyed`] or [`cancel_quit`] replies.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn request_terminate(app: &AppHandle) -> Terminate {
+    let decision = app
+        .state::<AppQuit>()
+        .begin_terminate(open_labels(app, None), |label| close_prompt(app, label));
+    if let Terminate::Later(Some(first)) = &decision {
+        // Not inside the system's call: a window that closes at once would answer the system
+        // ("terminate" or "cancel") before this call has returned "later", and AppKit would wait
+        // for a reply it already got. A task from another thread runs on the main thread only
+        // after the call is over.
+        let (app, first) = (app.clone(), first.clone());
+        tauri::async_runtime::spawn(async move {
+            let handle = app.clone();
+            let _ = handle.run_on_main_thread(move || ask(&app, &first));
+        });
+    }
+    decision
+}
+
 /// The page's 끝내기 item and Ctrl+Q (Windows and Linux have no native menu; macOS uses its own quit
 /// item and the same queue). Takes no argument: what is asked and closed is decided here.
 #[tauri::command]
@@ -178,6 +241,7 @@ pub fn window_destroyed(app: &AppHandle, label: &str) {
                 close_prompt(app, next)
             }) {
                 Some(first) => ask(app, &first),
+                None if quit.take_terminating() => reply_to_terminate(app, true),
                 None => app.exit(0),
             }
         }
@@ -193,9 +257,24 @@ fn ask(app: &AppHandle, label: &str) {
         .is_some_and(|window| crate::window_commands::raise_and_close(&window));
     if !closed {
         // The window could not be asked: stop instead of leaving a quit that never ends.
-        app.state::<AppQuit>().cancel();
+        cancel_quit(app);
     }
 }
+
+/// Stops a running quit (the user cancelled a prompt, a save failed, a window could not be asked);
+/// a system terminate waiting on it is answered "cancel" (a shutdown or logout stops too).
+pub fn cancel_quit(app: &AppHandle) {
+    if app.state::<AppQuit>().cancel() {
+        reply_to_terminate(app, false);
+    }
+}
+
+#[cfg(target_os = "macos")]
+use crate::macos_terminate::reply_to_terminate;
+
+/// Only macOS has a system terminate to answer.
+#[cfg(not(target_os = "macos"))]
+fn reply_to_terminate(_app: &AppHandle, _terminate: bool) {}
 
 #[cfg(test)]
 mod tests {
@@ -344,6 +423,67 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_terminate_without_windows_ends_at_once() {
+        let quit = AppQuit::default();
+        assert_eq!(
+            quit.begin_terminate(Vec::new(), |_| PromptState::None),
+            Terminate::Now
+        );
+        assert!(!quit.take_terminating(), "nothing is owed to the system");
+    }
+
+    #[test]
+    fn a_terminate_with_windows_asks_the_first_and_is_answered_when_the_last_is_gone() {
+        let quit = AppQuit::default();
+        assert_eq!(
+            quit.begin_terminate(labels(&["main", "doc-2"]), |_| PromptState::None),
+            Terminate::Later(Some("main".to_string()))
+        );
+        // Every window confirms its own close in turn (a clean one closes, a dirty one prompts).
+        assert_eq!(
+            quit.advance_after_close("main"),
+            Advance::Next("doc-2".to_string())
+        );
+        assert_eq!(quit.advance_after_close("doc-2"), Advance::Complete);
+        assert!(quit.take_terminating(), "the system is owed its answer");
+        assert!(!quit.take_terminating(), "answered once");
+    }
+
+    #[test]
+    fn a_cancelled_prompt_answers_the_terminate_with_cancel_once() {
+        let quit = AppQuit::default();
+        quit.begin_terminate(labels(&["main", "doc-2"]), |_| PromptState::None);
+        assert!(quit.cancel(), "the system gets 'cancel'");
+        assert_eq!(quit.advance_after_close("main"), Advance::Idle);
+        assert!(!quit.cancel(), "a second cancel owes nothing");
+        assert!(!quit.take_terminating());
+    }
+
+    #[test]
+    fn a_menu_quit_cancel_owes_the_system_nothing() {
+        let quit = AppQuit::default();
+        quit.begin(labels(&["main"]), |_| PromptState::Asked);
+        assert!(!quit.cancel());
+    }
+
+    #[test]
+    fn a_terminate_during_a_running_quit_waits_on_it_and_asks_nobody_again() {
+        let quit = AppQuit::default();
+        quit.begin(labels(&["main", "doc-2"]), |_| PromptState::Asked);
+        assert_eq!(
+            quit.begin_terminate(labels(&["main", "doc-2"]), |_| PromptState::Confirmed),
+            Terminate::Later(None),
+            "main shows its prompt: the running quit decides"
+        );
+        assert_eq!(
+            quit.advance_after_close("main"),
+            Advance::Next("doc-2".to_string())
+        );
+        assert_eq!(quit.advance_after_close("doc-2"), Advance::Complete);
+        assert!(quit.take_terminating());
+    }
+
     fn confirmed(only: &str) -> impl Fn(&str) -> PromptState + '_ {
         move |label| {
             if label == only {
@@ -396,5 +536,7 @@ mod tests {
         assert!(handler.contains("ExitRequested"));
         assert!(handler.contains("api.prevent_exit()"));
         assert!(handler.contains("app_quit::request_app_quit(app)"));
+        // The terminate path (Dock, AppleScript, shutdown) is hooked before the loop runs.
+        assert!(main.contains("macos_terminate::install(app.handle())"));
     }
 }

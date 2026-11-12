@@ -88,7 +88,7 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Securit
 # macOS recent items (PD-099): already in the dependency graph through tauri, here with only the
 # two features the shell calls.
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSDocumentController"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSApplication", "NSDocumentController"] }
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSURL", "NSArray", "NSDictionary", "NSString", "NSUserDefaults"] }
 objc2 = "0.6"
 

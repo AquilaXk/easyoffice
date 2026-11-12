@@ -57,6 +57,9 @@ mod window_commands;
 mod window_state;
 mod windows;
 
+// The Dock's 종료, AppleScript `quit` and a shutdown reach the quit queue through this hook (PD-189).
+#[cfg(target_os = "macos")]
+mod macos_terminate;
 // The reference app installs a native menu bar only on macOS; on Windows and Linux the page draws
 // the menu row (PD-121). The macOS bar and the state it shows live in these two modules; the other
 // OSes have no bar to keep in step.
@@ -380,7 +383,7 @@ fn main() {
             window_commands::handle_second_instance(app, argv);
         }));
     }
-    builder
+    let app = builder
         .plugin(tauri_plugin_dialog::init())
         // Used from Rust only (update_install.rs): none of its JS commands is granted to a window.
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -453,8 +456,14 @@ fn main() {
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("EasyOffice desktop shell failed to start")
-        .run(handle_run_event);
+        .expect("EasyOffice desktop shell failed to start");
+    // The Dock's 종료, AppleScript `quit` and a shutdown go through the quit queue (PD-189). A failure
+    // is loud: the app still runs, but a terminate would skip the save prompts.
+    #[cfg(target_os = "macos")]
+    if let Err(err) = macos_terminate::install(app.handle()) {
+        eprintln!("{err}");
+    }
+    app.run(handle_run_event);
 }
 
 /// Application-level events. On macOS a Finder "open" (double click, drag onto the Dock icon,
@@ -468,9 +477,9 @@ fn handle_run_event(app: &AppHandle, event: tauri::RunEvent) {
         // Cmd+Q is the application menu's own quit item (`native_menu.rs`; Windows and Linux reach the
         // queue from the page, `app_quit::quit_app`). It takes the queue: one window at a time, a
         // cancelled save prompt stops the quit (`app_quit.rs`). An exit with a code (the queue's own
-        // `app.exit(0)`) and the end after the last window closed pass. The Dock's 종료 and a
-        // system shutdown do not arrive here with the tao in use: its delegate has no
-        // `applicationShouldTerminate:`, so `terminate:` reaches only `RunEvent::Exit` below.
+        // `app.exit(0)`) and the end after the last window closed pass. The Dock's 종료, AppleScript
+        // `quit` and a system shutdown do not arrive here (the tao delegate has no
+        // `applicationShouldTerminate:`): `macos_terminate.rs` adds it and sends them to the same queue.
         #[cfg(target_os = "macos")]
         tauri::RunEvent::ExitRequested {
             code: None, api, ..
@@ -480,8 +489,8 @@ fn handle_run_event(app: &AppHandle, event: tauri::RunEvent) {
                 app_quit::request_app_quit(app);
             }
         }
-        // Every end of the event loop passes here, also a macOS `terminate:` (AppleScript quit, Dock,
-        // shutdown) that destroys no window, so the remembered geometry is written once more.
+        // Every end of the event loop passes here, also a macOS `terminate:` that finds no window open
+        // (so none is destroyed), so the remembered geometry is written once more.
         tauri::RunEvent::Exit => {
             if let Some(windows) = app.try_state::<AppWindows>() {
                 windows.persist_geometry();

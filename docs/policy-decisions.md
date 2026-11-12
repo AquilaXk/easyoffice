@@ -2922,3 +2922,16 @@
   3. README는 한국어 한 벌(소개, 할 수 있는 일, 다운로드, 설치 유의사항, 개발하기, Credits)로 줄이고 `README.ko.md`를 없앱니다. 구조·빌드·포맷 표·플랫폼별 동작은 `docs/DEVELOPMENT.md`로 옮겼고, 위생 가드의 문서 동기화 대상도 이 문서로 바꿨습니다.
 - **Verified by** `node --test scripts/test-about-notice.mjs scripts/test-webui-hwp-shell.mjs scripts/test-release-assets.mjs`, `node scripts/check-repo-hygiene.mjs`.
 - **Revisit when** 번들 구성 요소가 바뀔 때(표와 `THIRD_PARTY_NOTICES.md`를 함께 고침), 영문 README가 필요해질 때.
+
+## PD-189. macOS의 Dock 종료·AppleScript `quit`·시스템 종료도 끝내기 큐를 거침
+
+- **Status** Implemented (QA 요청 2026-11-12). `crates/easyoffice-desktop/src/macos_terminate.rs`, `app_quit.rs`, `main.rs`. PD-119 (2)의 "Dock의 종료·시스템 종료는 `ExitRequested`로 큐에 간다"를 바로잡고, PD-177 (8)의 큐 규칙을 그대로 씁니다.
+- **Context** 사용 중인 tao 0.37.2의 앱 델리게이트에는 `applicationWillTerminate:`만 있고 `applicationShouldTerminate:`가 없습니다. 그래서 `terminate:`(Dock의 종료, AppleScript `quit`, 시스템 종료·로그아웃)는 `ExitRequested`도 창 `Destroyed`도 없이 `RunEvent::Exit`만 내고 끝났고, 저장하지 않은 문서를 잃을 수 있었습니다. `ExitRequested`는 마지막 창이 `Destroyed`될 때와 `app.exit`에서만 나옵니다(tauri-runtime-wry `lib.rs:4262`, `:4302`). ⌘Q는 앱 메뉴의 자체 항목이라 큐를 거쳤습니다.
+- **Decision (`PD-189`)**
+  1. **방법 검토**: (1) 최신 tao 0.37.2·tauri 2.12.5·tauri-runtime-wry 2.12.3에 `applicationShouldTerminate:` 처리나 훅이 없어 버전을 올려도 닫히지 않습니다. (2) 이미 쓰는 `objc2`(0.6)로 tao가 등록한 델리게이트 클래스에 `class_addMethod`로 `applicationShouldTerminate:`를 더합니다. 클래스에 같은 메서드가 이미 있으면 덮지 않고 오류를 stderr에 냅니다. 더한 뒤 같은 델리게이트를 `setDelegate:`로 다시 지정해 AppKit이 메서드 목록을 새로 읽게 합니다(`build()` 뒤, 이벤트 루프가 돌기 전). unsafe는 이 모듈의 네 블록(델리게이트 읽기, 다시 지정, `Imp` 변환, `class_addMethod`)에만 있고 각각 SAFETY 주석이 있습니다. (3) 델리게이트를 통째로 바꾸는 방법은 tao가 `NSApp.delegate`의 보조 상태를 읽으므로 쓰지 않습니다.
+  2. **동작**: 열린 창이 없으면 `NSTerminateNow`를 돌려 바로 끝납니다. 있으면 큐를 시작하고 `NSTerminateLater`를 돌려 종료를 미룹니다. 큐가 끝나면(마지막 창이 닫힘) `replyToApplicationShouldTerminate:YES`로 끝내고, 사용자가 취소하거나 저장이 실패하거나 창에 물을 수 없으면(`cancel_quit`) `NO`로 답해 종료가 취소됩니다(시스템 종료라면 macOS 규칙대로 종료 취소). 큐가 이미 돌고 있을 때 온 `terminate:`는 그 큐의 끝에 답하며 아무에게도 다시 묻지 않습니다. 첫 창에 묻는 일은 `NSTerminateLater`를 돌려준 뒤 다른 스레드가 보낸 메인 스레드 작업으로 하므로, 곧바로 닫히는 창이 시스템에 "끝"이나 "취소"를 먼저 답하는 일이 없습니다.
+  3. **Windows·Linux 확인(고치지 않음)**: Windows의 tao는 `WM_QUERYENDSESSION`을 처리하지 않고(`event_loop.rs:2338`) `WM_ENDSESSION`에서 `loop_destroyed()` 뒤 `process::exit(0)`을 호출하므로 같은 손실 경로가 있습니다. 고치려면 창 프로시저를 가로채 `ShutdownBlockReasonCreate`로 종료를 막고 큐를 돌려야 하며, 이 환경에서 컴파일·시험할 수 없어 남깁니다. Linux는 세션 종료가 `SIGTERM`으로 오고 셸에 신호 처리기가 없어 같은 경로입니다. 둘 다 `TODO.md`에 적었습니다.
+- **Why** 한 번의 종료 요청이 경로에 따라 저장 확인을 건너뛰면 데이터 손실입니다. 큐는 PD-119·PD-177에서 정리된 하나의 경로라 새 경로도 거기에 합류시킵니다.
+- **Trade-offs** tao가 같은 메서드를 더하는 버전으로 올라가면 `class_addMethod`가 거부해 시작할 때 오류 한 줄이 남고 tao의 처리가 우선합니다. 종료를 미루는 동안 AppKit은 modal 패널 모드로 루프를 돌리지만 tao의 소스와 관찰자는 공통 모드에 등록돼 있어 창·IPC 처리는 이어집니다(실기기 확인 항목).
+- **Verified by** `cargo test -p easyoffice-desktop`: `app_quit`(창 없음은 즉시 종료, 창 있으면 첫 창에 묻고 마지막 창이 닫히면 답함, 취소는 한 번만 "취소"로 답함, 메뉴 끝내기의 취소는 시스템에 아무 빚도 없음, 이미 도는 큐에 합류, 구조 검사로 `install` 호출 확인), `macos_terminate`(델리게이트 클래스에 메서드가 한 번 등록되고 인코딩이 `Q@:@`이며 기존 메서드는 그대로, 같은 메서드가 있으면 거부).
+- **Revisit when** tao가 `applicationShouldTerminate:`를 직접 처리할 때(이 모듈을 지움), Windows·Linux의 세션 종료를 막을 때.

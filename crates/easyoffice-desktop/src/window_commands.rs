@@ -839,7 +839,7 @@ pub fn report_window_state(
 #[tauri::command]
 pub fn end_close_prompt(_caller: ShellCaller, app: AppHandle, window: WebviewWindow) {
     locked(&app.state::<AppWindows>().registry).end_close_prompt(window.label());
-    app.state::<crate::app_quit::AppQuit>().cancel();
+    crate::app_quit::cancel_quit(&app);
 }
 
 /// The page confirms that its save prompt is on screen. Until then a second close request is
