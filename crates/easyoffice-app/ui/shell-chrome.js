@@ -38,6 +38,7 @@
     "edit:cut": "studio-cmd:clip-cut",
     "edit:copy": "studio-cmd:clip-copy",
     "edit:paste": "studio-cmd:clip-paste",
+    "edit:paste-special": "sheet-paste:special",
     "edit:find": "find",
     "edit:replace": "replace",
     "view:zoom-in": "studio-cmd:zoom-in",
@@ -210,6 +211,7 @@
       "studio-cmd": (cmd) => click(`.md-item[data-studio-menu-cmd="${cmd}"]`),
       "sheet-act": (act) => click(`.md-item[data-sheet-act="${act}"]`),
       "sheet-numfmt": (action) => click(`.md-item[data-sheet-numfmt="${action}"]`),
+      "sheet-paste": (action) => click(`.md-item[data-sheet-paste="${action}"]`),
       "window-new": (kind) => click(`[data-window-new="${kind.toUpperCase()}"]`),
       theme: (mode) => click(`[data-theme-mode-choice="${mode}"]`),
       "update-check": () => click("[data-update-check-toggle]"),
@@ -219,9 +221,10 @@
   // The spreadsheet's own menu items (number formats, rows and columns, merging) have no ribbon command, so the
   // command search lists them from the page's menu items: the label is the menu's, running one clicks it.
   function sheetMenuPaletteItems(document) {
-    return Array.from(document.querySelectorAll(".md-item[data-sheet-act], .md-item[data-sheet-numfmt]"), (el) => {
+    return Array.from(document.querySelectorAll(".md-item[data-sheet-act], .md-item[data-sheet-numfmt], .md-item[data-sheet-paste]"), (el) => {
       const title = el.querySelector(".md-label").textContent;
-      return { id: `sheet-menu:${el.dataset.sheetAct || el.dataset.sheetNumfmt}`, module: "SHEET", title, shortcut: "", searchKey: `서식 시트 ${title}`, run: () => el.click() };
+      const shortcut = el.querySelector(".md-shortcut")?.textContent || "";
+      return { id: `sheet-menu:${el.dataset.sheetAct || el.dataset.sheetNumfmt || el.dataset.sheetPaste}`, module: "SHEET", title, shortcut, searchKey: `서식 시트 ${title}`, run: () => el.click() };
     });
   }
 

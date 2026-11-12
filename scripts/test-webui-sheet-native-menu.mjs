@@ -14,10 +14,10 @@ function sheetItems() {
   const source = read("crates/easyoffice-desktop/src/native_menu.rs");
   const start = source.indexOf("pub const ITEMS");
   const table = source.slice(start, source.indexOf("];", start));
-  return [...table.matchAll(/item\(\s*"([^"]+)",\s*"([^"]+)",\s*None,\s*"(sheet-(?:act|numfmt)):([^"]+)",?\s*\)/g)].map((m) => ({ id: m[1], label: m[2], name: m[3], argument: m[4] }));
+  return [...table.matchAll(/item\(\s*"([^"]+)",\s*"([^"]+)",\s*None,\s*"(sheet-(?:act|numfmt|paste)):([^"]+)",?\s*\)/g)].map((m) => ({ id: m[1], label: m[2], name: m[3], argument: m[4] }));
 }
 
-const selectorOf = ({ name, argument }) => `.md-item[data-${name === "sheet-act" ? "sheet-act" : "sheet-numfmt"}="${argument}"]`;
+const selectorOf = ({ name, argument }) => `.md-item[data-${name}="${argument}"]`;
 
 const open = async () => {
   const harness = await createWorkspaceHarness({ search: "?module=SHEET&win=w-sheet-native" });
@@ -25,10 +25,11 @@ const open = async () => {
   return harness;
 };
 
-test("the table holds the 11 number-format items and the 14 row, column, hide, merge, sort and filter items", () => {
+test("the table holds the 11 number-format items, the 14 row, column, hide, merge, sort and filter items and 선택하여 붙여넣기", () => {
   const items = sheetItems();
   assert.equal(items.filter((i) => i.name === "sheet-numfmt").length, 11);
   assert.equal(items.filter((i) => i.name === "sheet-act").length, 14);
+  assert.deepEqual(items.filter((i) => i.name === "sheet-paste").map((i) => [i.id, i.label, i.argument]), [["edit:paste-special", "선택하여 붙여넣기…", "special"]]);
 });
 
 test("each native item clicks the page's menu item that carries its label", async () => {

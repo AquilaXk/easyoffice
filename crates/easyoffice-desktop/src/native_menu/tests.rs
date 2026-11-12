@@ -807,3 +807,26 @@ fn the_sheet_items_run_the_page_menu_items_through_a_quoted_static_id() {
     }
     assert!(ITEMS.len() <= ItemMask::CAPACITY);
 }
+
+#[test]
+fn paste_special_follows_the_system_paste_in_the_spreadsheet_edit_menu_only() {
+    let lines = lines_of(MenuKind::Sheet, "편집");
+    let paste = lines.iter().position(|id| *id == layout::PASTE).unwrap();
+    assert_eq!(lines[paste + 1], "edit:paste-special");
+    let item = spec("edit:paste-special");
+    assert_eq!(item.label, "선택하여 붙여넣기…");
+    assert_eq!(
+        action_for("edit:paste-special"),
+        Some("sheet-paste:special")
+    );
+    assert_eq!(
+        dispatch_script("edit:paste-special").unwrap(),
+        format!("{SCRIPT_PREFIX}\"edit:paste-special\");")
+    );
+    for kind in [MenuKind::Doc, MenuKind::Hwp, MenuKind::Slide, MenuKind::Pdf] {
+        assert!(
+            !lines_of(kind, "편집").contains(&"edit:paste-special"),
+            "{kind:?}"
+        );
+    }
+}

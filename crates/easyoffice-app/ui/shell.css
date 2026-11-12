@@ -148,12 +148,13 @@
 #sheet-pivot-dialog { width: min(420px, calc(100vw - 32px)); }
 #sheet-dv-alert-dialog { width: min(360px, calc(100vw - 32px)); }
 #sheet-numfmt-dialog { width: min(420px, calc(100vw - 32px)); }
+#sheet-paste-dialog { width: min(360px, calc(100vw - 32px)); overflow: visible; } /* the open list of five choices reaches below the short dialog */
 /* One label column (the find dialog's 70px, right-aligned: `find-dialog.css` 36-38), and every value control fills the rest of the row like the reference's `.formula-input` and `.formula-select` (`dialogs.css` 1049-1052, `flex: 1`); the decimal field keeps `.dialog-input`'s 72px. */
-#sheet-numfmt-dialog .dialog-label { width: 70px; min-width: 70px; flex-shrink: 0; }
-#sheet-numfmt-dialog .dialog-text-input, #sheet-numfmt-dialog .custom-select.dialog-select, #sheet-numfmt-dialog .sheet-numfmt-sample { flex: 1; min-width: 0; width: auto; }
+#sheet-numfmt-dialog .dialog-label, #sheet-paste-dialog .dialog-label { width: 70px; min-width: 70px; flex-shrink: 0; }
+#sheet-numfmt-dialog .dialog-text-input, #sheet-numfmt-dialog .custom-select.dialog-select, #sheet-paste-dialog .custom-select.dialog-select, #sheet-numfmt-dialog .sheet-numfmt-sample { flex: 1; min-width: 0; width: auto; }
 /* A combo box here has the field's inner padding (`.dialog-select`, `dialogs.css` 154-164: 0 4px) and the arrow cell of `custom-select.css`; its text takes the width it needs, so nothing is cut. */
-#sheet-numfmt-dialog .custom-select-trigger { grid-template-columns: minmax(0, 1fr) 15px; padding: 0 0 0 4px; }
-#sheet-numfmt-dialog .custom-select-value { padding-right: 4px; }
+#sheet-numfmt-dialog .custom-select-trigger, #sheet-paste-dialog .custom-select-trigger { grid-template-columns: minmax(0, 1fr) 15px; padding: 0 0 0 4px; }
+#sheet-numfmt-dialog .custom-select-value, #sheet-paste-dialog .custom-select-value { padding-right: 4px; }
 /* The sample line is a field-sized output on the surface color, so a negative color keeps 4.5:1 on it in both themes. */
 .sheet-numfmt-sample { box-sizing: border-box; height: 22px; padding: 0 4px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); font-size: var(--font-size-sm); line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sheet-numfmt-sample.nf-colored { color: var(--nf-color, inherit); }

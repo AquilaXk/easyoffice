@@ -656,7 +656,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       const where = await getSheetController().runSheetClipboardCommand(cmd);
       const verb = { "clip-cut": "오려 두기", "clip-copy": "복사", "clip-paste": "붙여넣기" }[cmd];
       if (where) setFeedback("선택 범위 " + verb + " 완료" + (where === "internal" ? " (앱 내부 클립보드)" : ""));
-      else if (cmd === "clip-paste") setFeedback("붙일 클립보드 내용이 없습니다");
+      else if (cmd === "clip-paste" && where === false) setFeedback("붙일 클립보드 내용이 없습니다");
     }
 
     async function runDocClipboardPaste(range, withDocStyleUndo) {

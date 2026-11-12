@@ -188,6 +188,23 @@ const EDIT_FULL: MenuSpec = menu(
         "edit:replace",
     ],
 );
+/// The spreadsheet's edit menu: the standard group with 선택하여 붙여넣기 after the system paste.
+const EDIT_SHEET: MenuSpec = menu(
+    "편집",
+    &[
+        "edit:undo",
+        "edit:redo",
+        S,
+        "edit:cut",
+        "edit:copy",
+        PASTE,
+        "edit:paste-special",
+        SELECT_ALL,
+        S,
+        "edit:find",
+        "edit:replace",
+    ],
+);
 const EDIT_NO_FIND: MenuSpec = menu(
     "편집",
     &[
@@ -578,7 +595,7 @@ const HWP: [&MenuSpec; 11] = [
 const SHEET: [&MenuSpec; 11] = [
     &APP,
     &FILE_PAGE_SETUP,
-    &EDIT_FULL,
+    &EDIT_SHEET,
     &VIEW_PLAIN,
     &INSERT_SHEET,
     &FORMAT_SHEET,

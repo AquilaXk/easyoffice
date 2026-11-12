@@ -116,6 +116,12 @@ pub const ITEMS: &[MenuItemSpec] = &[
     item("edit:cut", "오려 두기", None, "studio-cmd:clip-cut"),
     item("edit:copy", "복사하기", None, "studio-cmd:clip-copy"),
     item("edit:paste", "붙이기", None, "studio-cmd:clip-paste"),
+    item(
+        "edit:paste-special",
+        "선택하여 붙여넣기…",
+        None,
+        "sheet-paste:special",
+    ),
     item("edit:find", "찾기", Some("CmdOrCtrl+F"), "find"),
     item("edit:replace", "찾아 바꾸기", None, "replace"),
     item(

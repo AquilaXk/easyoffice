@@ -299,40 +299,23 @@
       return edits;
     }
 
-    // Applies a batch of cell writes (paste, clear, cut) as ONE undoable operation.
-    function applyCellEdits(edits, label) {
-      if (edits.length === 0) return Promise.resolve(false);
-      return enqueueWorkspaceHistoryOp(async () => {
-        await drainInFlightSheetWork();
-        const curSheet = getActiveSheetName();
-        const map = snapshotDomSheetCells();
-        sheetDataStore[curSheet] = map;
-        pushRawUndoSnapshot(captureWorkspaceSnapshot(false));
-        edits.forEach((e) => {
-          const style = map[e.ref]?.style;
-          if (e.value === "" && e.formula === "" && !style) {
-            delete map[e.ref];
-            return;
-          }
-          map[e.ref] = style
-            ? { value: e.value, formula: e.formula, style }
-            : { value: e.value, formula: e.formula };
-          const packed = gridUtils.packRef(e.ref);
-          if (packed > 0) {
-            const col = packed & 32767;
-            const row = (packed - col) / 32768;
-            bumpExtent(curSheet, row, col);
-          }
-        });
-        grid.renderWindow(false);
-        refreshWindowFromModel();
-        await recalculateActiveSheetFormulas({ updateFocusedDisplay: true });
-        input.refreshChrome();
-        const fb = document.getElementById("status-command-feedback");
-        if (fb) fb.textContent = (label || "셀 편집") + ": " + edits.length + "칸";
-        return true;
-      });
-    }
+    // Batches of cell writes (paste, fill, clear, cut) are ONE undoable operation each.
+    const { applyCellEdits } = host.__EASYOFFICE_CREATE_SHEET_CELL_WRITER__({
+      document,
+      grid,
+      gridUtils,
+      sheetDataStore,
+      getActiveSheetName,
+      enqueueWorkspaceHistoryOp,
+      drainInFlightSheetWork,
+      snapshotDomSheetCells,
+      pushRawUndoSnapshot,
+      captureWorkspaceSnapshot,
+      bumpExtent,
+      refreshWindowFromModel,
+      recalculateActiveSheetFormulas,
+      refreshChrome: () => input.refreshChrome(),
+    });
 
     function refreshWindowFromModel() {
       grid.refreshCells().forEach((td) => {

@@ -67,12 +67,25 @@
     let delegatesBound = false;
     let drag = null;
     let resize = null;
+    const feedback = (text) => {
+      const el = document.getElementById("status-command-feedback");
+      if (el) el.textContent = text;
+    };
     const clip = host.__EASYOFFICE_CREATE_SHEET_CLIPBOARD__({
       grid,
       isFormulaStr,
       getEntry: (ref) => api.getEntry(ref),
-      applyCellEdits: (edits, label) => api.applyCellEdits(edits, label),
+      getSheetName: () => api.getSheetName(),
+      feedback,
+      applyCellEdits: (edits, label, widths) => api.applyCellEdits(edits, label, widths),
       clearExisting: (range) => api.clearExisting(range),
+    });
+    const pasteUi = host.__EASYOFFICE_CREATE_SHEET_PASTE_UI__({
+      document,
+      clip,
+      getRange: () => getRange(),
+      commitIfEditing: () => commitIfEditing(),
+      kit: host.__EASYOFFICE_CREATE_SHEET_DIALOG_KIT__(document),
     });
 
     const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -516,6 +529,11 @@
 
     // Keys that act on the selection (select all, clear, type-to-edit) while no cell is being edited.
     function handleIdleKey(ev, mod, td) {
+      if (mod && ev.altKey && (ev.code === "KeyV" || ev.key.toLowerCase() === "v")) {
+        ev.preventDefault();
+        pasteUi.open();
+        return;
+      }
       if (mod && ev.key.toLowerCase() === "a") {
         ev.preventDefault();
         selectAll();
