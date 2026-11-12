@@ -39,6 +39,9 @@
       refreshWindowFromModel,
       recalculateActiveSheetFormulas,
       applyFrozenFlag,
+      gridUtils,
+      getExtent,
+      sortRange,
       enqueueWorkspaceHistoryOp,
       drainInFlightSheetWork,
       pushRawUndoSnapshot,
@@ -46,6 +49,16 @@
     } = deps;
     const rulesApi = host.__EASYOFFICE_SHEET_RULES__;
     const menu = () => document.getElementById("sheet-header-menu");
+    // The auto filter (PD-198) shares this module's menu wiring and undo steps.
+    const filter = host.__EASYOFFICE_CREATE_SHEET_FILTER__({ ...deps, sheetDataStore, sheetStoreHelpers });
+    const filterUi = host.__EASYOFFICE_CREATE_SHEET_FILTER_UI__({
+      document,
+      filter,
+      kit: host.__EASYOFFICE_CREATE_SHEET_DIALOG_KIT__(document),
+      getSelection,
+      focusAnchor,
+      getActiveSheetName,
+    });
 
     function say(text) {
       const fb = document.getElementById("status-command-feedback");
@@ -74,6 +87,7 @@
         merges: json.merges || [],
         hiddenRows: json.hiddenRows || [],
         hiddenCols: json.hiddenCols || [],
+        filter: json.filter || null,
         widths: pairsOf(grid.getAllWidths()[name]),
         rules,
       };
@@ -138,6 +152,8 @@
         refreshWindowFromModel();
         await recalculateActiveSheetFormulas({ updateFocusedDisplay: true });
         refreshChrome();
+        // A deleted column took its condition along: the rows it hid are judged again by the rest.
+        if (result.answer.filterReapply === true) await filter.reapplyAfterEdit();
         say(unit + " " + count + "개 " + (op === "insert" ? "삽입" : "삭제"));
         return true;
       });
@@ -259,6 +275,9 @@
       },
       merge,
       unmerge,
+      "filter-toggle": () => filter.run("filter-toggle"),
+      "filter-reapply": () => filter.run("filter-reapply"),
+      "filter-clear": () => filter.run("filter-clear"),
     };
 
     function run(action) {
@@ -364,6 +383,7 @@
     }
 
     function bind() {
+      filterUi.bind();
       const viewport = document.getElementById("sheet-viewport");
       viewport?.addEventListener("dblclick", onDblClick);
       viewport?.addEventListener("contextmenu", onContextMenu);
@@ -388,7 +408,7 @@
       }
     }
 
-    return { run, bind, closeMenu };
+    return { run, bind, closeMenu, refreshFilterMenu: filterUi.refreshMenu };
   }
 
   host.__EASYOFFICE_CREATE_SHEET_STRUCTURE__ = createSheetStructure;

@@ -870,6 +870,9 @@
       refreshWindowFromModel,
       recalculateActiveSheetFormulas,
       applyFrozenFlag,
+      gridUtils,
+      getExtent: () => getSheetExtent(getActiveSheetName()),
+      sortRange: (target) => ops.sortActiveSheetRange(target),
       enqueueWorkspaceHistoryOp,
       drainInFlightSheetWork,
       pushRawUndoSnapshot,
@@ -945,6 +948,7 @@
       }
       const fb = document.getElementById("status-command-feedback");
       if (fb) fb.textContent = "시트 탭 전환: " + targetSheetName;
+      structure.refreshFilterMenu();
     }
 
     function switchSheetTab(targetSheetName) {

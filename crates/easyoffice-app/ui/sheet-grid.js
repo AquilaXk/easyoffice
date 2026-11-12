@@ -283,7 +283,6 @@
     let widthCacheVersion = -1;
     let layoutApplied = false;
     const layoutOf = () => layoutApi?.get(getSheetName()) || null;
-    const hiddenRowRuns = () => layoutOf()?.hiddenRows || [];
 
     const viewportEl = () => document.getElementById("sheet-viewport");
     const tbodyEl = () => document.querySelector("#pane-sheet tbody");
@@ -330,17 +329,17 @@
 
     // Top edge of `row` and the height of the rows between `first` and `last`, hidden rows counting 0.
     function rowTop(row) {
-      return (row - 1 - (layoutApi ? layoutApi.hiddenBefore(hiddenRowRuns(), row) : 0)) * ROW_H;
+      return (row - 1 - (layoutApi ? layoutApi.rowsHiddenBefore(getSheetName(), row) : 0)) * ROW_H;
     }
 
     function visibleRowsFrom(row) {
-      const runs = hiddenRowRuns();
-      const hiddenAfter = layoutApi ? layoutApi.hiddenTotal(runs) - layoutApi.hiddenBefore(runs, row) : 0;
+      const name = getSheetName();
+      const hiddenAfter = layoutApi ? layoutApi.rowsHiddenTotal(name) - layoutApi.rowsHiddenBefore(name, row) : 0;
       return Math.max(0, MAX_ROWS - row + 1 - hiddenAfter);
     }
 
     function rowAtVisible(v) {
-      return layoutApi ? layoutApi.visibleToIndex(hiddenRowRuns(), v) : v + 1;
+      return layoutApi ? layoutApi.rowAtVisible(getSheetName(), v) : v + 1;
     }
 
     function colLeft(c) {
@@ -699,10 +698,12 @@
       if (tbody) {
         for (const tr of tbody.children) {
           const r = rowOf(tr);
-          if (r > 0) tr.classList.toggle("sheet-hidden", !empty && layoutApi.runContains(runs, r));
+          if (r > 0) tr.classList.toggle("sheet-hidden", !empty && layoutApi.rowHidden(name, r));
         }
       }
       const colRuns = layout?.hiddenCols || [];
+      const filter = layout?.filter || null;
+      const filterCols = filter ? new Set(filter.columns.map((x) => x.col)) : null;
       for (const [c, th] of colHeadByCol) {
         th.classList.toggle("sheet-hidden", !empty && layoutApi.colHidden(name, c));
         markHiddenEdge(th, "col", empty ? null : layoutApi.runAt(colRuns, c - 1));
@@ -713,13 +714,17 @@
         const r = td._row;
         const c = td._col;
         td.classList.toggle("sheet-hidden", !empty && layoutApi.colHidden(name, c));
+        // The header row of an auto filter carries its drop-down button; a column with a condition shows it on.
+        const head = filter !== null && r === filter.range.r1 && c >= filter.range.c1 && c <= filter.range.c2;
+        td.classList.toggle("filter-head", head);
+        td.classList.toggle("filter-on", head && filterCols.has(c));
         const m = empty ? null : layoutApi.mergeAt(name, r, c);
         const anchor = Boolean(m) && m.r1 === r && m.c1 === c;
         td.classList.toggle("merge-anchor", anchor);
         td.classList.toggle("merge-cover", Boolean(m) && !anchor);
         if (anchor) {
           td.style.setProperty("--mw", colLeft(m.c2 + 1) - colLeft(m.c1) + "px");
-          const hidden = layoutApi.hiddenBefore(runs, m.r2 + 1) - layoutApi.hiddenBefore(runs, m.r1);
+          const hidden = layoutApi.rowsHiddenBefore(name, m.r2 + 1) - layoutApi.rowsHiddenBefore(name, m.r1);
           td.style.setProperty("--mh", (m.r2 - m.r1 + 1 - hidden) * ROW_H + "px");
         } else if (td.style.getPropertyValue("--mw")) {
           td.style.removeProperty("--mw");

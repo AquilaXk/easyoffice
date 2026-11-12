@@ -301,8 +301,13 @@
       const widths = columnWidthMap(sheet.columns);
       if (Object.keys(widths).length > 0) columnWidths[sheet.name] = widths;
       if ((sheet.rules?.cf || []).length > 0 || (sheet.rules?.dv || []).length > 0) rulesBySheet[sheet.name] = sheet.rules;
-      if (sheet.merges?.length || sheet.hiddenRows?.length || sheet.hiddenCols?.length) {
-        layoutBySheet[sheet.name] = { merges: sheet.merges, hiddenRows: sheet.hiddenRows, hiddenCols: sheet.hiddenCols };
+      if (sheet.merges?.length || sheet.hiddenRows?.length || sheet.hiddenCols?.length || sheet.filter) {
+        layoutBySheet[sheet.name] = {
+          merges: sheet.merges,
+          hiddenRows: sheet.hiddenRows,
+          hiddenCols: sheet.hiddenCols,
+          filter: sheet.filter,
+        };
       }
     });
     return { store, rowCounts, columnWidths, rulesBySheet, layoutBySheet };

@@ -95,10 +95,10 @@
 .tool-dialog .dialog-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .tool-dialog .dialog-row:last-child { margin-bottom: 0; }
 .tool-dialog .dialog-label { min-width: 40px; text-align: right; font-size: var(--font-size-sm); color: var(--color-text); }
-.tool-dialog .dialog-input, .tool-dialog .dialog-text-input { height: 22px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); caret-color: var(--caret-color); color-scheme: inherit; padding: 0 4px; font-size: var(--font-size-sm); outline: none; box-sizing: border-box; }
+.tool-dialog .dialog-input, .tool-dialog .dialog-text-input, .sheet-filter-panel .dialog-text-input { height: 22px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); caret-color: var(--caret-color); color-scheme: inherit; padding: 0 4px; font-size: var(--font-size-sm); outline: none; box-sizing: border-box; }
 .tool-dialog .dialog-input { width: 72px; text-align: right; }
 .tool-dialog .dialog-text-input { width: 120px; }
-.tool-dialog .dialog-input:focus, .tool-dialog .dialog-text-input:focus { border-color: var(--color-focus-border); box-shadow: 0 0 0 2px var(--ui-focus-soft); }
+.tool-dialog .dialog-input:focus, .tool-dialog .dialog-text-input:focus, .sheet-filter-panel .dialog-text-input:focus { border-color: var(--color-focus-border); box-shadow: 0 0 0 2px var(--ui-focus-soft); }
 /* Combo boxes in dialogs size to their content, like the reference's `.dialog-select` (no width, `custom-select.css`: inline-flex, the trigger fills the root). */
 .tool-dialog .custom-select.dialog-select { height: 22px; padding: 0; font-size: var(--font-size-sm); border: 0; background: transparent; outline: none; }
 .tool-dialog .dialog-checkbox { font-size: var(--font-size-sm); display: flex; align-items: center; gap: 4px; cursor: pointer; }
@@ -203,3 +203,17 @@
   #eo-print-root .slide-lower-zone { overflow: hidden; }
   #eo-print-root :is(.slide-title-zone h2, .slide-lower-zone p):empty::before { content: none; }
 }
+/* Auto filter (PD-198): the panel is a `.context-menu` (menu-bar.css) with a search field, a virtual list and the dialog buttons. */
+.sheet-filter-panel { width: 240px; padding: 4px 0 8px; }
+.sheet-filter-panel .md-item[data-filter-act] { padding-left: 16px; }
+.sheet-filter-search { padding: 2px 8px 6px; }
+.sheet-filter-panel .dialog-text-input { width: 100%; }
+.sheet-filter-list { position: relative; margin: 0 8px; overflow-y: auto; box-sizing: border-box; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); font-size: var(--font-size-sm); outline: none; }
+.sheet-filter-list:focus-visible { border-color: var(--color-focus-border); box-shadow: 0 0 0 2px var(--ui-focus-soft); }
+.sheet-filter-rows { position: relative; }
+.sheet-filter-row { position: absolute; left: 0; right: 0; box-sizing: border-box; height: 22px; padding: 0 8px; gap: 6px; font-size: var(--font-size-sm); line-height: 22px; }
+.sheet-filter-row input[type="checkbox"] { margin: 0; accent-color: var(--color-primary); }
+.sheet-filter-row[aria-disabled="true"] { color: var(--color-text-disabled); cursor: default; }
+.sheet-filter-foot { display: flex; align-items: center; gap: 8px; padding: 8px 8px 0; }
+.sheet-filter-count { margin-right: auto; color: var(--color-text-muted); font-size: var(--font-size-sm); font-variant-numeric: tabular-nums; }
+#sheet-filter-dialog .dialog-label { width: 40px; min-width: 40px; flex-shrink: 0; }

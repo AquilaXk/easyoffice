@@ -243,6 +243,10 @@
               <div class="md-item" data-studio-menu-cmd="data-sort" role="menuitem" tabindex="-1"><span class="md-label">오름차순·내림차순 정렬</span></div>
               <div class="md-item" data-studio-menu-cmd="data-validation" role="menuitem" tabindex="-1"><span class="md-label">데이터 유효성 검사</span></div>
               <div class="md-sep"></div>
+              <div class="md-item" data-sheet-act="filter-toggle" role="menuitemcheckbox" aria-checked="false" tabindex="-1"><span class="md-label">필터</span></div>
+              <div class="md-item" data-sheet-act="filter-reapply" role="menuitem" tabindex="-1"><span class="md-label">다시 적용</span></div>
+              <div class="md-item" data-sheet-act="filter-clear" role="menuitem" tabindex="-1"><span class="md-label">필터 지우기</span></div>
+              <div class="md-sep"></div>
               <div class="md-item" data-studio-menu-cmd="sheet-mod-pivot" role="menuitem" tabindex="-1"><span class="md-label">피벗 테이블 요약</span></div>
               <div class="md-item" data-studio-menu-cmd="sheet-mod-condfmt" role="menuitem" tabindex="-1"><span class="md-label">조건부 서식 규칙</span></div>
             </div>
@@ -1093,6 +1097,22 @@
       </div>
     </dialog>
 
+    <dialog id="sheet-filter-dialog" class="tool-dialog sheet-rule-dialog" aria-labelledby="sheet-filter-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="sheet-filter-dialog-title">사용자 지정 필터</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><label class="dialog-label" for="sheet-filter-op1">조건</label><select id="sheet-filter-op1" class="sb-combo dialog-select"><option value="none">없음</option><option value="equals">같음</option><option value="notEquals">같지 않음</option><option value="greaterThan">큼</option><option value="greaterThanOrEqual">크거나 같음</option><option value="lessThan">작음</option><option value="lessThanOrEqual">작거나 같음</option><option value="contains">포함</option><option value="notContains">포함하지 않음</option><option value="startsWith">시작</option><option value="endsWith">끝</option><option value="empty">비어 있음</option><option value="notEmpty">비어 있지 않음</option></select><input id="sheet-filter-text1" type="text" class="dialog-text-input" maxlength="255" autocomplete="off" spellcheck="false" aria-label="값" /></div>
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-filter-and" type="radio" name="sheet-filter-join" checked /> 그리고</label><label class="dialog-checkbox"><input id="sheet-filter-or" type="radio" name="sheet-filter-join" /> 또는</label></div>
+          <div class="dialog-row"><label class="dialog-label" for="sheet-filter-op2">조건</label><select id="sheet-filter-op2" class="sb-combo dialog-select"><option value="none">없음</option><option value="equals">같음</option><option value="notEquals">같지 않음</option><option value="greaterThan">큼</option><option value="greaterThanOrEqual">크거나 같음</option><option value="lessThan">작음</option><option value="lessThanOrEqual">작거나 같음</option><option value="contains">포함</option><option value="notContains">포함하지 않음</option><option value="startsWith">시작</option><option value="endsWith">끝</option><option value="empty">비어 있음</option><option value="notEmpty">비어 있지 않음</option></select><input id="sheet-filter-text2" type="text" class="dialog-text-input" maxlength="255" autocomplete="off" spellcheck="false" aria-label="값" /></div>
+          <p id="sheet-filter-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-sheet-filter-apply" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
     <dialog id="pii-dialog" class="tool-dialog" aria-labelledby="pii-dialog-title">
       <div class="dialog-wrap">
         <div class="dialog-title"><span id="pii-dialog-title">개인정보 스캔/마스킹</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
@@ -1203,6 +1223,17 @@
 
     <output id="shell-toast" class="shell-toast" aria-live="polite" hidden></output>
 
+    <div id="sheet-filter-panel" class="context-menu sheet-filter-panel" role="dialog" aria-label="필터" hidden>
+      <div class="md-item" data-filter-act="sort-asc" role="menuitem" tabindex="-1"><span class="md-label">오름차순 정렬</span></div>
+      <div class="md-item" data-filter-act="sort-desc" role="menuitem" tabindex="-1"><span class="md-label">내림차순 정렬</span></div>
+      <div class="md-sep"></div>
+      <div class="md-item" data-filter-act="custom" role="menuitem" tabindex="-1"><span class="md-label">조건 필터…</span></div>
+      <div class="md-item" data-filter-act="clear-column" role="menuitem" tabindex="-1"><span class="md-label">열 필터 지우기</span></div>
+      <div class="md-sep"></div>
+      <div class="sheet-filter-search"><input id="sheet-filter-search" type="text" class="dialog-text-input" placeholder="검색" maxlength="255" autocomplete="off" spellcheck="false" aria-label="검색" /></div>
+      <div id="sheet-filter-list" class="sheet-filter-list" role="listbox" aria-label="값 목록" aria-multiselectable="true" tabindex="0"><div id="sheet-filter-rows" class="sheet-filter-rows"></div></div>
+      <div class="sheet-filter-foot"><span id="sheet-filter-count" class="sheet-filter-count" role="status"></span><button id="btn-sheet-filter-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button><button type="button" class="dialog-btn" data-filter-act="cancel">취소</button></div>
+    </div>
     <div id="sheet-header-menu" class="context-menu" role="menu" aria-label="머리글 메뉴" hidden>
       <div class="md-item" data-sheet-act="row-insert-above" data-axis="row" role="menuitem" tabindex="-1"><span class="md-label">행 위에 삽입</span></div>
       <div class="md-item" data-sheet-act="row-insert-below" data-axis="row" role="menuitem" tabindex="-1"><span class="md-label">행 아래에 삽입</span></div>
@@ -1275,6 +1306,8 @@
     <script src="./sheet-rules-ui.js"></script>
     <script src="./sheet-format.js"></script>
     <script src="./sheet-numfmt-ui.js"></script>
+    <script src="./sheet-filter.js"></script>
+    <script src="./sheet-filter-ui.js"></script>
     <script src="./sheet-structure.js"></script>
     <script src="./sheet-controller.js"></script>
     <script src="./ribbon-history.js"></script>

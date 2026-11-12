@@ -131,17 +131,20 @@
       return dir * cmp;
     }
 
-    function sortActiveSheetRange() {
+    // `target` `{ range: { r1, r2, c1, c2, keyCol }, direction: 1 | -1 }` sorts that block in that
+    // direction (the auto filter's sort); without it the selection or data range is sorted and a
+    // sorted one is reversed. Resolves to whether rows were sorted.
+    function sortActiveSheetRange(target) {
       const curSheet = getActiveSheetName();
       const map = snapshotDomSheetCells();
       sheetDataStore[curSheet] = map;
-      const range = sortRange(map, usedExtent(map));
-      if (range.r2 <= range.r1) return Promise.resolve();
+      const range = target?.range ?? sortRange(map, usedExtent(map));
+      if (range.r2 <= range.r1) return Promise.resolve(false);
       // A merged range cannot be sorted: its rows are not interchangeable.
       if (host.__EASYOFFICE_SHEET_LAYOUT__?.mergesIn(curSheet, range.r1, range.c1, range.r2, range.c2).length > 0) {
         const fb = document.getElementById("status-command-feedback");
         if (fb) fb.textContent = "병합된 셀이 있어 정렬할 수 없음";
-        return Promise.resolve();
+        return Promise.resolve(false);
       }
       const populatedRows = [];
       const blankRows = [];
@@ -156,11 +159,11 @@
         const row = { origRow: r, key: sortKeyOf(map[gridUtils.refOf(r, range.keyCol)]), cells };
         (isBlankRow ? blankRows : populatedRows).push(row);
       }
-      if (populatedRows.length < 2) return Promise.resolve();
+      if (populatedRows.length < 2) return Promise.resolve(false);
       const isAscending = populatedRows.every(
         (row, i) => i === 0 || compareSortKeys(populatedRows[i - 1].key, row.key, 1) <= 0
       );
-      const dir = isAscending ? -1 : 1;
+      const dir = target?.direction ?? (isAscending ? -1 : 1);
       populatedRows.sort((a, b) => compareSortKeys(a.key, b.key, dir));
       [...populatedRows, ...blankRows].forEach((item, idx) => {
         const targetRow = range.r1 + idx;
@@ -182,7 +185,7 @@
       saveActiveSheetCellsToWorkbook();
       refreshFocusedSheetCellPendingSnapshot();
       updateSheetSelectionAndAggregates(getActiveSheetCellRef() || "A1");
-      return recalculateActiveSheetFormulas({ updateFocusedDisplay: true });
+      return Promise.resolve(recalculateActiveSheetFormulas({ updateFocusedDisplay: true })).then(() => true);
     }
 
     function applySheetChartSummary(execRes) {

@@ -489,6 +489,8 @@
     }
 
     function onKeydown(ev) {
+      // Alt+Down opens the drop-down of an auto filter header (sheet-filter-ui.js): it moves nothing.
+      if (ev.altKey && ev.key === "ArrowDown" && !ev.ctrlKey && !ev.metaKey) return;
       const td = gridTdOf(ev.target) || tdAt(sel.ar, sel.ac);
       if (handleCompositionKey(ev, td)) return;
       const st = td ? stateOf(td) : null;

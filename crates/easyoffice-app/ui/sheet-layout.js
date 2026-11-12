@@ -5,6 +5,9 @@
   // Rows and columns are 1-based. A run is `[first, last]`; the runs of one axis are sorted and
   // disjoint. A merge is `{ r1, c1, r2, c2 }` (the anchor is its top-left cell). The engine moves
   // them with the cells (`structure` session action), so this module only stores and looks up.
+  // The auto filter (PD-198) is `{ range: { r1, c1, r2, c2 }, columns, hidden }`: `columns` are the
+  // engine's column conditions as sent and received, `hidden` the rows the filter hides, kept apart
+  // from `hiddenRows` (the user's). The grid asks for the union through a per-sheet row index.
 
   const MAX_MERGES = 100000;
   const BLOCK = 64; // merge lookup buckets, in rows
@@ -15,7 +18,7 @@
   const listeners = [];
 
   function blank() {
-    return { merges: [], hiddenRows: [], hiddenCols: [], index: null };
+    return { merges: [], hiddenRows: [], hiddenCols: [], filter: null, index: null, rows: null };
   }
 
   function entry(name) {
@@ -23,7 +26,10 @@
   }
 
   function isEmpty(layout) {
-    return !layout || (layout.merges.length === 0 && layout.hiddenRows.length === 0 && layout.hiddenCols.length === 0);
+    return (
+      !layout ||
+      (layout.merges.length === 0 && layout.hiddenRows.length === 0 && layout.hiddenCols.length === 0 && !layout.filter)
+    );
   }
 
   function touch() {
@@ -163,10 +169,89 @@
     const layout = entry(name);
     const key = axis === "row" ? "hiddenRows" : "hiddenCols";
     layout[key] = hidden ? addRun(layout[key], a, b) : removeRun(layout[key], a, b);
+    layout.rows = null;
     touch();
   }
 
-  const rowHidden = (name, r) => Boolean(bySheet[name]) && runContains(bySheet[name].hiddenRows, r);
+  // ---- the rows the user or the filter hides ------------------------------------------------------
+  // Sorted union of two sorted run lists.
+  function unionRuns(a, b) {
+    if (b.length === 0) return a;
+    if (a.length === 0) return b;
+    const out = [];
+    let i = 0;
+    let j = 0;
+    while (i < a.length || j < b.length) {
+      const next = j >= b.length || (i < a.length && a[i][0] <= b[j][0]) ? a[i++] : b[j++];
+      const last = out[out.length - 1];
+      if (last && next[0] <= last[1] + 1) last[1] = Math.max(last[1], next[1]);
+      else out.push([next[0], next[1]]);
+    }
+    return out;
+  }
+
+  // Typed arrays over the union of the two kinds of hidden rows: every lookup is a binary search
+  // (the filter can hide tens of thousands of separate runs, so a scan per row is not an option).
+  function rowIndex(layout) {
+    if (layout.rows) return layout.rows;
+    const runs = unionRuns(layout.hiddenRows, layout.filter ? layout.filter.hidden : []);
+    const n = runs.length;
+    const starts = new Int32Array(n);
+    const ends = new Int32Array(n);
+    const before = new Int32Array(n + 1);
+    for (let k = 0; k < n; k += 1) {
+      starts[k] = runs[k][0];
+      ends[k] = runs[k][1];
+      before[k + 1] = before[k] + (runs[k][1] - runs[k][0] + 1);
+    }
+    layout.rows = { n, starts, ends, before };
+    return layout.rows;
+  }
+
+  // Number of runs whose first row is below `i` (`strict`) or at most `i`.
+  function runsStartingBefore(ix, i, strict) {
+    let lo = 0;
+    let hi = ix.n;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (strict ? ix.starts[mid] < i : ix.starts[mid] <= i) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  }
+
+  const NO_ROWS = { n: 0, starts: new Int32Array(0), ends: new Int32Array(0), before: new Int32Array(1) };
+  const rowsOf = (name) => (bySheet[name] ? rowIndex(bySheet[name]) : NO_ROWS);
+
+  // Rows hidden above row `i`.
+  function rowsHiddenBefore(name, i) {
+    const ix = rowsOf(name);
+    const k = runsStartingBefore(ix, i, true);
+    if (k === 0) return 0;
+    const cut = ix.ends[k - 1] >= i ? ix.ends[k - 1] - i + 1 : 0;
+    return ix.before[k] - cut;
+  }
+
+  const rowsHiddenTotal = (name) => rowsOf(name).before[rowsOf(name).n];
+
+  // The row at 0-based visible position `v`.
+  function rowAtVisible(name, v) {
+    const ix = rowsOf(name);
+    let lo = 0;
+    let hi = ix.n;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (ix.starts[mid] - 1 - ix.before[mid] <= v) lo = mid + 1;
+      else hi = mid;
+    }
+    return v + 1 + ix.before[lo];
+  }
+
+  function rowHidden(name, r) {
+    const ix = rowsOf(name);
+    const k = runsStartingBefore(ix, r, false);
+    return k > 0 && ix.ends[k - 1] >= r;
+  }
   const colHidden = (name, c) => Boolean(bySheet[name]) && runContains(bySheet[name].hiddenCols, c);
 
   // ---- JSON form (the page's save payload and the engine's `structure` answer) ---------------------
@@ -177,7 +262,30 @@
     }
     if (layout.hiddenRows.length) out.hiddenRows = layout.hiddenRows.map((r) => [r[0], r[1]]);
     if (layout.hiddenCols.length) out.hiddenCols = layout.hiddenCols.map((r) => [r[0], r[1]]);
+    if (layout.filter) out.filter = filterToJson(layout.filter);
     return out;
+  }
+
+  function filterToJson(f) {
+    const out = {
+      range: refOf(f.range.r1, f.range.c1) + ":" + refOf(f.range.r2, f.range.c2),
+      columns: structuredClone(f.columns),
+    };
+    if (f.hidden.length) out.hidden = f.hidden.map((r) => [r[0], r[1]]);
+    return out;
+  }
+
+  function filterFromJson(json) {
+    const parse = host.__EASYOFFICE_SHEET_GRID_UTILS__.parseRef;
+    const [a, b] = String(json?.range ?? "").split(":");
+    const p = parse(a);
+    const q = parse(b ?? "");
+    if (!p || !q) return null;
+    return {
+      range: { r1: p.row, c1: p.col, r2: q.row, c2: q.col },
+      columns: Array.isArray(json.columns) ? structuredClone(json.columns) : [],
+      hidden: Array.isArray(json.hidden) ? json.hidden.map((r) => [r[0], r[1]]) : [],
+    };
   }
 
   function refOf(r, c) {
@@ -197,6 +305,7 @@
       (Array.isArray(list) ? list : []).filter((p) => Array.isArray(p) && p[0] >= 1 && p[1] >= p[0]).map((p) => [p[0], p[1]]);
     layout.hiddenRows = runs(json?.hiddenRows);
     layout.hiddenCols = runs(json?.hiddenCols);
+    layout.filter = json?.filter ? filterFromJson(json.filter) : null;
     return layout;
   }
 
@@ -223,6 +332,18 @@
     const layout = fromJson(json);
     if (isEmpty(layout)) delete bySheet[name];
     else bySheet[name] = layout;
+    touch();
+  }
+
+  // ---- the auto filter ---------------------------------------------------------------------------
+  const filterOf = (name) => bySheet[name]?.filter || null;
+
+  // Sets (or with null removes) the sheet's filter.
+  function setFilter(name, filter) {
+    const layout = entry(name);
+    layout.filter = filter;
+    layout.rows = null;
+    if (isEmpty(layout)) delete bySheet[name];
     touch();
   }
 
@@ -261,6 +382,12 @@
     removeMerges,
     setHidden,
     rowHidden,
+    rowsHiddenBefore,
+    rowsHiddenTotal,
+    rowAtVisible,
+    filterOf,
+    setFilter,
+    filterToJson,
     colHidden,
     getAll,
     replaceAll,
