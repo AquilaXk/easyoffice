@@ -144,10 +144,7 @@ mod tests {
             assert_eq!(shift_filter(&f, &e).filter, None, "{e:?}");
         }
         // A deletion above that reaches into the range leaves the part that survives.
-        assert_eq!(
-            shift_filter(&f, &edit(Axis::Row, EditKind::Delete, 1, 2)).reapply,
-            false
-        );
+        assert!(!shift_filter(&f, &edit(Axis::Row, EditKind::Delete, 1, 2)).reapply);
     }
 
     #[test]

@@ -51,13 +51,15 @@ pub fn subtract_runs(a: &[(u32, u32)], b: &[(u32, u32)]) -> Vec<(u32, u32)> {
 mod tests {
     use super::*;
 
+    type Runs<'a> = &'a [(u32, u32)];
+
     fn rows(runs: &[(u32, u32)]) -> Vec<u32> {
         runs.iter().flat_map(|&(s, e)| s..=e).collect()
     }
 
     #[test]
     fn intersection_and_difference_agree_with_row_sets() {
-        let cases: [(&[(u32, u32)], &[(u32, u32)]); 5] = [
+        let cases: [(Runs, Runs); 5] = [
             (&[(1, 5), (8, 12), (20, 20)], &[(3, 9), (12, 25)]),
             (&[(0, 100)], &[(10, 20), (30, 40), (100, 100)]),
             (&[(5, 6)], &[]),

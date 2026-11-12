@@ -181,7 +181,6 @@
       sheetDataStore,
       sheetStoreHelpers,
       grid,
-      gridUtils,
       getActiveSheetName,
       getRange,
       getSelection,
@@ -196,6 +195,7 @@
       sortRange,
     } = deps;
     const layoutApi = host.__EASYOFFICE_SHEET_LAYOUT__;
+    const gridUtils = host.__EASYOFFICE_SHEET_GRID_UTILS__;
     const normalize = (raw) => host.__EASYOFFICE_SHEET_UTILS__.normalizeFormattedNumericCell(raw);
     const listeners = [];
 

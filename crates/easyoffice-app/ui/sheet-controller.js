@@ -870,7 +870,6 @@
       refreshWindowFromModel,
       recalculateActiveSheetFormulas,
       applyFrozenFlag,
-      gridUtils,
       getExtent: () => getSheetExtent(getActiveSheetName()),
       sortRange: (target) => ops.sortActiveSheetRange(target),
       enqueueWorkspaceHistoryOp,

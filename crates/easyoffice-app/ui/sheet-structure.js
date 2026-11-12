@@ -39,7 +39,6 @@
       refreshWindowFromModel,
       recalculateActiveSheetFormulas,
       applyFrozenFlag,
-      gridUtils,
       getExtent,
       sortRange,
       enqueueWorkspaceHistoryOp,
