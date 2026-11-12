@@ -189,14 +189,50 @@
     return Number(raw) || 0;
   }
 
+  // Width of `text` in the cell's font, from one shared canvas; -1 when the page cannot measure.
+  let measurer;
+  function textWidth(td, text) {
+    if (measurer === undefined) {
+      try {
+        measurer = td.ownerDocument.createElement("canvas").getContext("2d") || null;
+      } catch {
+        measurer = null;
+      }
+    }
+    if (!measurer) return -1;
+    if (!measurer.eoFamily) {
+      const cs = host.getComputedStyle?.(td);
+      if (!cs?.fontFamily) return -1;
+      measurer.eoFamily = cs.fontFamily;
+      measurer.eoSize = cs.fontSize;
+    }
+    measurer.font = `${td.style.fontStyle || "normal"} ${td.style.fontWeight || "400"} ${td.style.fontSize || measurer.eoSize} ${measurer.eoFamily}`;
+    return measurer.measureText(text).width;
+  }
+
+  // Width of a column in px (set by the grid that owns the page's sheet).
+  let columnWidthOf = null;
+
+  // A formatted number wider than its cell shows as hash marks (padding 6px each side, 1px border).
+  function fitToCell(td, text) {
+    const room = td._col > 0 && columnWidthOf ? columnWidthOf(td._col) - 13 : NaN;
+    if (!(room > 0)) return text;
+    const fit = host.__EASYOFFICE_SHEET_NUMFMT__?.fitNumber;
+    return fit ? fit(text, room, (t) => textWidth(td, t)) : text;
+  }
+
   // Shows `value` with the cell's number format (`td._nf`, PD-193) or else the General format; the
   // raw value is remembered for editing and saving. The section color of a format rides on a custom
-  // property, so it never lands in the inline font properties the sheet model reads back.
+  // property, so it never lands in the inline font properties the sheet model reads back; the
+  // common red is the theme's negative color.
+  const SECTION_RED = "#ff0000";
+
   function setDisplayValue(td, value) {
     const raw = String(value ?? "");
     const nf = td._nf;
     const formatted = nf ? host.__EASYOFFICE_SHEET_NUMFMT_DISPLAY__?.shown(nf, raw) : null;
-    const shown = formatted ? formatted.t : formatGeneral(raw);
+    let shown = formatted ? formatted.t : formatGeneral(raw);
+    if (formatted && nf !== "@" && isNumericText(raw)) shown = fitToCell(td, shown);
     if (td.textContent !== shown) td.textContent = shown;
     if (shown === raw) {
       if (td.dataset.raw !== undefined) {
@@ -212,8 +248,10 @@
     const color = formatted?.c || "";
     if (color || td._nfColor) {
       td._nfColor = color;
-      td.style.setProperty("--nf-color", color);
-      td.classList.toggle("nf-colored", color !== "");
+      const red = color === SECTION_RED;
+      td.style.setProperty("--nf-color", red ? "" : color);
+      td.classList.toggle("nf-colored", color !== "" && !red);
+      td.classList.toggle("nf-red", red);
     }
   }
 
@@ -733,6 +771,14 @@
       }
     }
 
+    // A column of another width shows its formatted numbers in full or as hash marks again.
+    function repaintNumFmtColumn(c) {
+      seedDomMaps();
+      for (const td of tdByPacked.values()) {
+        if (td._col === c && td._nf && td.dataset.editMode === undefined) setDisplayValue(td, readTdValue(td));
+      }
+    }
+
     // Repaints only the rule appearance (conditional formatting) of the materialized cells, so
     // a cell being edited keeps its text.
     function repaintFx() {
@@ -759,8 +805,11 @@
     }
 
     // Applies a new column width to the live header cell and the table width.
+    columnWidthOf = colWidth;
+
     function applyColWidth(c, px) {
       const w = setColWidth(c, px);
+      repaintNumFmtColumn(c);
       const th = colHeadByCol.get(c) || document.querySelector('#pane-sheet th[data-col="' + colName(c) + '"]');
       if (th) th.style.width = w + "px";
       const table = tableEl();

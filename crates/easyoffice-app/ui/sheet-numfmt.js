@@ -147,10 +147,10 @@
 
   // Negative number styles of formatdetail.ts (NUMBERFORMAT, CURRENCYFORMAT): how a negative value reads.
   const NEGATIVES = Object.freeze([
-    { id: "minus", label: "-1234" },
-    { id: "red-minus", label: "-1234 (빨강)" },
-    { id: "paren", label: "(1234)" },
-    { id: "red-paren", label: "(1234) (빨강)" },
+    { id: "minus", label: "-1,234.00" },
+    { id: "red-minus", label: "-1,234.00 (빨강)" },
+    { id: "paren", label: "(1,234.00)" },
+    { id: "red-paren", label: "(1,234.00) (빨강)" },
   ]);
 
   // `body` is the digits part (`#,##0.00`, `"₩"#,##0`); `negative` is a NEGATIVES id.
@@ -216,6 +216,14 @@
     return /[0#]/.test(plain) ? "number" : "custom";
   }
 
+  // A number wider than its cell shows as hash marks, as spreadsheets do: `measure(text)` is the text's
+  // width and `width` the room in the cell; the marks fill the room (at least one).
+  function fitNumber(text, width, measure) {
+    if (measure(text) <= width) return text;
+    const mark = measure("#");
+    return "#".repeat(Math.max(1, mark > 0 ? Math.floor(width / mark) : 1));
+  }
+
   // The code is something the sheet can hold: within the length and count bounds.
   const codeWithinBounds = (code) => new TextEncoder().encode(String(code)).length <= MAX_CODE_BYTES && !/[\u0000-\u001f]/.test(code);
 
@@ -244,5 +252,6 @@
     buildCode,
     patternKind,
     codeWithinBounds,
+    fitNumber,
   });
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

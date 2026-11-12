@@ -42,6 +42,13 @@ test("adding and removing a decimal place follows the reference commands", () =>
   assert.deepEqual(plan([{ code: "yyyy-mm-dd", raw: "45000" }, { code: "@", raw: "1" }], 1), [undefined, undefined], "dates and text keep their code");
 });
 
+test("a number wider than its cell shows as hash marks that fill the cell", () => {
+  const measure = (text) => text.length * 7;
+  assert.equal(N.fitNumber("1,234.00", 70, measure), "1,234.00");
+  assert.equal(N.fitNumber("(₩10,003.00)", 70, measure), "##########");
+  assert.equal(N.fitNumber("12345", 3, measure), "#", "at least one mark");
+});
+
 test("a code is sorted into the dialog categories", () => {
   const kind = (code) => N.patternKind(code);
   assert.deepEqual(
@@ -169,10 +176,11 @@ test("a section color of the code reaches the cell", async () => {
   const positive = cell(h.document, "A3");
   const negative = cell(h.document, "A4");
   assert.equal(positive.textContent, "3");
-  assert.equal(positive.classList.contains("nf-colored"), false);
+  assert.equal(positive.classList.contains("nf-red"), false);
   assert.equal(negative.textContent, "-1,235");
-  assert.equal(negative.classList.contains("nf-colored"), true);
-  assert.equal(negative.style["--nf-color"], "#ff0000");
+  assert.equal(negative.classList.contains("nf-red"), true, "a [Red] section takes the theme's negative color");
+  assert.equal(negative.classList.contains("nf-colored"), false);
+  assert.equal(negative.style["--nf-color"], "", "no color of its own is written for red");
   assert.equal(negative.style.color, "", "the color is not an inline font property the model would read back");
 });
 

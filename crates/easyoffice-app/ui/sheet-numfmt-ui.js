@@ -135,8 +135,10 @@
       const out = $("sheet-numfmt-sample");
       if (!out) return;
       out.textContent = shown ? shown.t : host.__EASYOFFICE_SHEET_GRID_UTILS__.formatGeneral(raw);
-      out.style.setProperty("--nf-color", shown?.c || "");
-      out.classList.toggle("nf-colored", Boolean(shown?.c));
+      const red = shown?.c === "#ff0000";
+      out.style.setProperty("--nf-color", red ? "" : shown?.c || "");
+      out.classList.toggle("nf-colored", Boolean(shown?.c) && !red);
+      out.classList.toggle("nf-red", red);
       note("sheet-numfmt-status", D.isBad(code) ? "서식 코드를 해석할 수 없음" : "");
     }
 
@@ -210,12 +212,6 @@
       $("sheet-numfmt-list-select")?.addEventListener("change", rebuild);
       $("sheet-numfmt-code")?.addEventListener("input", onCodeInput);
       $("btn-sheet-numfmt-apply")?.addEventListener("click", () => void applyDialog());
-      $("sheet-numfmt-dialog")?.addEventListener("keydown", (ev) => {
-        if (ev.key === "Enter" && ev.target?.tagName === "INPUT" && ev.target.type !== "checkbox") {
-          ev.preventDefault?.();
-          void applyDialog();
-        }
-      });
     }
 
     function openNumfmtDialog() {
