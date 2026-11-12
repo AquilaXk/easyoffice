@@ -261,7 +261,7 @@ test("menu and toolbar labels name what their command does", async () => {
   assert.deepEqual(buttonsOf("mod-footnote").map((el) => el.getAttribute("title")), ["각주"]);
   assert.equal(buttonsOf("insert-chart").length, 0, "no picture button for the chart command");
   assert.deepEqual(labelsOf("insert-chart"), ["차트 개체"]);
-  assert.deepEqual(labelsOf("palette"), ["명령 검색", "환경 설정 및 커맨드 검색"]);
+  assert.deepEqual(labelsOf("palette"), ["명령 검색", "환경 설정 및 명령 검색"]);
   assert.deepEqual(labelsOf("find"), ["찾기"]);
   assert.deepEqual(labelsOf("replace"), ["찾아 바꾸기"]);
   assert.deepEqual(labelsOf("print"), ["인쇄…"]);
