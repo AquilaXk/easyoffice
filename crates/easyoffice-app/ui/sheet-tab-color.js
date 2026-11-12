@@ -1,7 +1,7 @@
 (function (host) {
   "use strict";
 
-  // The colour of a sheet tab (PD-208): the "탭 색" command of the tab's right-click menu and of the
+  // The right-click menu of a sheet tab (PD-208): "시트 추가" (the page's add button) and the "탭 색" command and of the
   // sheet menu, which opens the shell's palette at the tab, and the coloured line under every
   // tab that has one. The colour is part of the layout store, so undo, save and open carry it.
 
@@ -118,6 +118,11 @@
       const el = menu();
       el?.addEventListener("keydown", onMenuKeydown);
       el?.addEventListener("contextmenu", (ev) => ev.preventDefault());
+      // The one tab command the page already has besides the colour: the add button at the end of the strip.
+      el?.querySelector('[data-tab-act="add"]')?.addEventListener("click", () => {
+        closeMenu();
+        $("btn-add-sheet-tab")?.click();
+      });
       el?.querySelector('[data-tab-act="color"]')?.addEventListener("click", () => {
         closeMenu();
         openPalette(menuSheet);

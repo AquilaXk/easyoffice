@@ -198,7 +198,8 @@ test("the tab colour is picked from the palette at the tab, shown as a line, and
   tab.dispatchEvent({ type: "contextmenu", target: tab, clientX: 40, clientY: 700 });
   const menu = document.getElementById("sheet-tab-menu");
   assert.equal(menu.hidden, false);
-  assert.equal(menu.querySelector(".md-label").textContent, "탭 색");
+  // The tab commands the page has: add a sheet, a rule, then the colour.
+  assert.deepEqual([...menu.children].map((el) => el.className.includes("md-sep") ? "-" : el.querySelector(".md-label").textContent), ["시트 추가", "-", "탭 색"]);
   userClick(menu.querySelector('[data-tab-act="color"]'));
   await flushAsyncTurns(20);
   assert.equal(menu.hidden, true);
@@ -233,4 +234,17 @@ test("sorting keeps the groups and the folded rows where they are, and the folde
   await act("show-detail");
   const after = ["A2", "A3", "A4"].map((ref) => document.querySelector(`#pane-sheet td[data-cell="${ref}"]`)?.textContent);
   assert.deepEqual(after.slice(1), cells.slice(1), "the folded rows 3 and 4 keep their cells");
+});
+
+test("the tab menu adds a sheet through the page's add button and closes", async () => {
+  const { document, userClick } = await open();
+  const tabs = () => document.querySelectorAll("#sheet-tab-bar .sheet-tab-btn[data-sheet-tab]").length;
+  const before = tabs();
+  const tab = document.querySelector('#sheet-tab-bar .sheet-tab-btn[data-sheet-tab="Sheet1"]');
+  tab.dispatchEvent({ type: "contextmenu", target: tab, clientX: 40, clientY: 700 });
+  userClick(document.querySelector('#sheet-tab-menu [data-tab-act="add"]'));
+  await flushAsyncTurns(20);
+  assert.equal(document.getElementById("sheet-tab-menu").hidden, true);
+  assert.equal(tabs(), before + 1);
+  assert.equal(document.querySelector("#sheet-tab-bar .sheet-tab-btn.active").dataset.sheetTab, "Sheet" + (before + 1));
 });
