@@ -1,5 +1,5 @@
-//! The wide byte search and the `!`-first XXE scan give the same answers as the byte-at-a-time
-//! references they replaced.
+//! The wide byte search and the `!`/`?`-first XXE scan give the same answers as byte-at-a-time
+//! references.
 
 use easyoffice_formats::XmlSanitizer;
 
@@ -41,19 +41,41 @@ fn find_byte_swar_matches_a_plain_search_on_every_start_and_length() {
 }
 
 #[test]
-fn xxe_scan_matches_the_scalar_baseline() {
-    const PIECES: [&str; 12] = [
-        "<", "!", "<!", "ENTITY", "DOCTYPE", "entity", " ", "\n", "a", "<a>", "!--", "]]>",
+fn xxe_scan_matches_the_byte_reference() {
+    const PIECES: [&str; 20] = [
+        "<",
+        "!",
+        "<!",
+        "ENTITY",
+        "DOCTYPE",
+        "entity",
+        " ",
+        "\n",
+        "a",
+        "<a>",
+        "!--",
+        "]]>",
+        "<?",
+        "?>",
+        "?",
+        "-->",
+        "--",
+        "<!--",
+        "<![CDATA[",
+        "[",
     ];
     let mut rng = XorShift(0x2545_F491_4F6C_DD1D);
-    for _ in 0..40_000 {
+    for _ in 0..200_000 {
         let mut xml = String::new();
-        for _ in 0..(rng.next() % 14) {
+        for _ in 0..(rng.next() % 16) {
             xml.push_str(PIECES[(rng.next() as usize) % PIECES.len()]);
         }
-        let fast = XmlSanitizer::validate_safe_xml(&xml).is_err();
-        let reference = XmlSanitizer::validate_safe_xml_scalar_baseline(&xml).is_err();
-        assert_eq!(fast, reference, "{xml:?}");
+        let fast = XmlSanitizer::validate_safe_xml(&xml);
+        assert_eq!(
+            fast,
+            XmlSanitizer::validate_safe_xml_scalar_baseline(&xml),
+            "{xml:?}"
+        );
     }
     let padded = format!("{}<!DOCTYPE x>{}", "x".repeat(300), "y".repeat(100));
     assert!(XmlSanitizer::validate_safe_xml(&padded).is_err());

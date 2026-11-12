@@ -67,6 +67,7 @@ mod text_decode;
 pub mod text_pdf_codecs;
 pub mod utf16_swar;
 mod xls_sheet_names;
+mod xml_decl_scan;
 mod xml_stream;
 pub mod zip_codec;
 mod zip_path_tracker;
@@ -744,61 +745,6 @@ impl XmlSanitizer {
             m_ctrl &= !(zb(0x09) | zb(0x0A) | zb(0x0D));
         }
         ((z(0x26) | z(0x3C) | z(0x3E) | z(0x22) | z(0x27) | z(0xEF)) & HI) | m_ctrl
-    }
-
-    pub fn validate_safe_xml(xml: &str) -> Result<(), EasyOfficeError> {
-        let bytes = xml.as_bytes();
-        if bytes.len() < 8 {
-            return Ok(());
-        }
-        // `<!ENTITY` and `<!DOCTYPE` both contain `!`, which markup text rarely does, so the scan
-        // looks for `!` (a `<` is in nearly every tag) and then checks the byte before it.
-        let mut cursor = 1usize;
-        while let Some(bang) = Self::find_byte_swar(bytes, cursor, b'!') {
-            cursor = bang + 1;
-            let lt_idx = bang - 1;
-            if bytes[lt_idx] != b'<' {
-                continue;
-            }
-            if lt_idx + 8 > bytes.len() {
-                break;
-            }
-            let mut kw = bang + 1;
-            while kw < bytes.len() && bytes[kw].is_ascii_whitespace() {
-                kw += 1;
-            }
-            if kw + 6 <= bytes.len() && bytes[kw..kw + 6].eq_ignore_ascii_case(b"ENTITY") {
-                return Err(EasyOfficeError::XxeOrExternalEntityDetected);
-            }
-            if kw + 7 <= bytes.len() && bytes[kw..kw + 7].eq_ignore_ascii_case(b"DOCTYPE") {
-                return Err(EasyOfficeError::XxeOrExternalEntityDetected);
-            }
-        }
-        Ok(())
-    }
-
-    pub fn validate_safe_xml_scalar_baseline(xml: &str) -> Result<(), EasyOfficeError> {
-        let bytes = xml.as_bytes();
-        if bytes.len() < 8 {
-            return Ok(());
-        }
-        let mut idx = 0;
-        while idx + 8 <= bytes.len() {
-            if bytes[idx] == b'<' && bytes[idx + 1] == b'!' {
-                let mut kw = idx + 2;
-                while kw < bytes.len() && bytes[kw].is_ascii_whitespace() {
-                    kw += 1;
-                }
-                if kw + 6 <= bytes.len() && bytes[kw..kw + 6].eq_ignore_ascii_case(b"ENTITY") {
-                    return Err(EasyOfficeError::XxeOrExternalEntityDetected);
-                }
-                if kw + 7 <= bytes.len() && bytes[kw..kw + 7].eq_ignore_ascii_case(b"DOCTYPE") {
-                    return Err(EasyOfficeError::XxeOrExternalEntityDetected);
-                }
-            }
-            idx += 1;
-        }
-        Ok(())
     }
 
     #[inline]

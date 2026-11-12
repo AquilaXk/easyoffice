@@ -319,12 +319,6 @@ impl EasyOfficeIpcRouter {
         if pdf.pages.is_empty() {
             return Err(Self::empty_audit_error());
         }
-        for page in &pdf.pages {
-            XmlSanitizer::validate_safe_xml(&page.body_text)?;
-        }
-        if let Some(ref wm) = pdf.watermark_text {
-            XmlSanitizer::validate_safe_xml(wm)?;
-        }
         Ok(pdf.pages.len())
     }
 
@@ -334,12 +328,11 @@ impl EasyOfficeIpcRouter {
                 "텍스트 컨테이너에 허용되지 않는 NUL 바이트가 포함되어 있습니다.".to_string(),
             ));
         }
-        let text = std::str::from_utf8(bytes).map_err(|_| {
+        std::str::from_utf8(bytes).map_err(|_| {
             EasyOfficeError::CorruptedContainer(
                 "유효하지 않은 UTF-8 텍스트 컨테이너입니다.".to_string(),
             )
         })?;
-        XmlSanitizer::validate_safe_xml(text)?;
         if fmt == DocumentFormat::Rtf {
             let _ = RtfCodec::decode(bytes)?;
         }
