@@ -2983,3 +2983,22 @@
 - **Alternatives rejected** `tel:`·`ftp:` 허용(참조 앱에 대응 UI 없음), 스킴 없는 주소에 `https://`를 붙이는 보정(입력과 다른 주소를 몰래 저장), 위험한 주소를 지우고 나머지만 저장(저장 요청은 거부).
 - **Verified by** `node --test scripts/test-webui-find-core.mjs scripts/test-webui-find-replace.mjs scripts/test-webui-doc-link.mjs`, `cargo test -p easyoffice-formats --test rich_links`, `cargo test -p easyoffice-formats --lib link_command`, `cargo test -p easyoffice-app a_run_link`.
 - **Revisit when** 여러 문단에 걸친 링크, 표 칸 안의 링크, 링크 열기 동작(Ctrl+클릭)이 필요할 때.
+
+## PD-195. 수식 함수 묶음 A: 조회·참조 6종, 데이터베이스 12종, 행렬 4종
+
+- **Status** Implemented (`crates/easyoffice-sheet/src/functions_lookup_ref.rs`, `functions_db.rs`, `functions_matrix.rs`; 등록 표 `functions.rs`의 `CANONICAL_FUNCTIONS`; 시험 `tests/sheet_univer_functions_a.rs`, 측정 `tests/sheet_univer_functions_a_bench.rs`)
+- **Context** PD-192의 이식 범위에 따라 참조 수식 엔진(Apache-2.0, 기준 커밋 `5a06a784`)의 함수 22종을 가져옵니다. 등록 표와 구현 분기를 기계적으로 대조한 결과 22종 모두 없었습니다(참조 엔진의 함수 이름 501개 중 247개가 아직 없고, 나머지 묶음은 뒤 단계에서 가져옵니다).
+- **Decision (`PD-195`)**
+  1. **함수 22종**: `LOOKUP`, `HYPERLINK`, `ISFORMULA`, `FORMULATEXT`, `ADDRESS`, `AREAS`, `DAVERAGE`, `DCOUNT`, `DCOUNTA`, `DGET`, `DMAX`, `DMIN`, `DPRODUCT`, `DSTDEV`, `DSTDEVP`, `DSUM`, `DVAR`, `DVARP`, `MMULT`, `MDETERM`, `MINVERSE`, `MUNIT`. 등록 표는 122종에서 144종이 되고 상수 이름은 개수 없이 `CANONICAL_FUNCTIONS`입니다. 위생 가드, 자체 검사, 문서의 수치 계약이 144를 가리킵니다.
+  2. **배열 결과**: 셀은 값 하나만 가집니다. 기존 배열 경로는 `TRANSPOSE`의 가상 범위와 `SUMPRODUCT` 내부 격자뿐이고 배열을 돌려주는 경로는 없습니다. 행렬 함수는 셀 자리에서 왼쪽 위 값을 돌려주고, `INDEX`·`SUM` 계열 집계·통계 함수 인자·`SUMPRODUCT`·다른 행렬 함수의 인자로 들어가면 전체 행렬로 풀립니다(`matrix_expr`). 셀에 펼쳐 쓰기는 동적 배열(Phase 9)에서 합니다.
+  3. **데이터베이스 함수**: 조건 범위 해석은 `functions_db.rs` 한 곳입니다. 조건 칸은 한 번 `COUNTIF` 일치기(`CompiledCriteria`)로 컴파일하고, 같은 행의 칸은 AND, 행끼리는 OR이며 빈 칸은 건너뜁니다. 머리글이 데이터베이스 필드가 아닌 조건 열은 글자·0 조건이면 모든 레코드를 거르고 다른 숫자(`TRUE`는 1)는 무시합니다(계산 조건 `TRUE`/`FALSE` 처리). 레코드는 한 행씩 읽어 조건 열과 필드 열만 건드립니다. `DGET`은 일치 0건 `#VALUE!`, 2건 이상 `#NUM!`, `DMAX`·`DMIN`·`DPRODUCT`는 숫자 0건이면 0, `DAVERAGE`·`DSTDEV*`·`DVAR*`는 `#DIV/0!`입니다.
+  4. **상한(Fail-Closed, 넘으면 `#VALUE!`)**: 조건 범위 4,096칸, 데이터베이스는 평가 단계 예산(`MAX_EVAL_STEPS`)이 끊습니다(레코드마다 읽기 1회인 전체 시트 범위는 통과하고, 조건 행 2,000개 같은 곱은 거부). 행렬 피연산자 262,144칸(512×512), `MDETERM`·`MINVERSE`는 n≤256($O(n^3)$), `MMULT`는 곱셈-덧셈 64,000,000회, `MUNIT`은 n≤512. 재귀는 없고 행렬 함수 중첩만 구문 깊이(64)가 제한합니다.
+  5. **`HYPERLINK`**: 셀은 링크를 담지 않으므로 이름(없으면 대상 글자)을 값으로 돌려줍니다. 대상은 PD-192의 허용 목록(`http`·`https`·`mailto`, `safe_link_target`을 그대로 씀)만 받고 그 밖은 `#VALUE!`입니다.
+  6. **참조 엔진과 결과가 다른 곳**: `ADDRESS`의 상대 R1C1(`R[2]C[3]`)은 수식 셀 기준 차이로 셉니다(참조 엔진은 시트 원점 기준). `ADDRESS`는 행·열을 시트 크기(1~1,048,576, 1~16,384)로 검사하고 `a1` 인자가 글자면 `#VALUE!`입니다(참조 엔진은 R1C1로 처리). `HYPERLINK`는 숫자 이름을 숫자로 두고 허용 목록 밖 대상을 오류로 돌려줍니다(참조 엔진은 글자 반환, 대상 무검사). `LOOKUP`은 정렬되지 않은 키에서 같은 값 중 마지막을 고르는 결정적 선형 보정을 씁니다(참조 엔진은 이분 탐색 결과가 불정). 행렬 모양이 맞지 않을 때 참조 엔진은 칸을 읽기 전에 `#VALUE!`를 내지만 여기는 피연산자를 읽은 뒤에 검사해 오류 칸이 있으면 그 오류가 먼저 나옵니다.
+  7. **측정 (release, 이 환경)**: `DSUM` 100,000 레코드·조건 2칸 약 10 ms(`DSTDEV` 6 ms, 조건 행 4개 16 ms). `MMULT` 200×200 수식 전체 3.7 ms(셀 읽기 80,000칸 포함, 왼쪽 위 한 칸만 쓰면 1.7 ms), 곱 커널만 약 2 ms이고 참조 방식(행 벡터와 열 방향 읽기) 포팅은 5.5 ms입니다(`i-k-j` 평면 배열 곱, 칸별 덧셈 순서는 같음). `MDETERM` 200×200 2.6 ms, `MINVERSE` 200×200 3.3 ms. 함수 이름 → 구현 찾기는 `match` 문자열 분기(길이 비교 뒤 비교)로 이름의 위치에 따른 차이가 셀당 50 ns 안쪽(전체 셀 평가 70~150 ns, 아무 분기에도 걸리지 않는 10자 이름 80 ns)이라 표를 바꾸지 않았습니다. 구문 분석 때 함수 번호를 정하는 방식은 파서 소관이라 Phase 9에서 다룹니다.
+- **재사용 판단 (구현 원칙 3단계)** (1) 행렬·데이터베이스 함수를 담은 허용 라이선스 크레이트는 이 엔진의 셀·오류·조건 모델과 맞지 않아 쓰지 않았습니다. (2) 이미 있는 헬퍼를 재사용했습니다(`COUNTIF` 조건 일치기, `VLOOKUP`의 근사 이분 탐색과 선형 보정, 스트리밍 범위 읽기, 시트 이름 인용 규칙, 링크 허용 목록). (3) 세 묶음의 로직(LU 분해와 역행렬, 조건 범위 규칙, 함수별 오류 규칙)을 이식했습니다.
+- **Why** 같은 일치기를 데이터베이스 조건에 쓰면 `COUNTIF`와 조건 문법이 같고 레코드마다 조건을 다시 해석하지 않습니다. 행렬 함수를 인자 풀기로만 연결하면 파서와 값 모델을 건드리지 않고 `INDEX(MINVERSE(...),r,c)` 같은 실사용 모양이 동작합니다.
+- **Trade-offs** 행렬 함수를 `SUM` 계열 밖의 함수(`COUNTIF` 등 범위 모양만 받는 함수)에 넘기면 왼쪽 위 한 칸만 봅니다. `MDETERM`은 참조 엔진을 따라 피벗이 `1e-11` 이하이면 0이라 모든 원소가 아주 작은 행렬은 0이 됩니다. `HYPERLINK("#시트!A1")` 같은 내부 링크와 경로 링크는 `#VALUE!`입니다.
+- **Alternatives rejected** 행렬 결과를 값 모델에 넣는 방식(모든 소비자를 고쳐야 해 Phase 9로 미룸), 허용 목록 밖 대상을 이름만 돌려주고 통과시키는 방식(링크가 열리는 경로가 생길 때 다시 막아야 함).
+- **Verified by** `cargo test -p easyoffice-sheet --test sheet_univer_functions_a`(참조 엔진 단위 시험의 같은 자료·같은 기대값 이식, 상한과 악의적 입력 포함), `cargo test -p easyoffice-sheet --release --test sheet_univer_functions_a_bench -- --ignored --nocapture --test-threads=1`(측정), `node scripts/check-repo-hygiene.mjs`(수치 문서 144 동기화).
+- **Revisit when** 동적 배열(Phase 9), 링크를 담는 값 모델, 내부 `#` 링크가 필요할 때.
