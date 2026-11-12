@@ -2949,7 +2949,7 @@
   6. Pages처럼 같은 형식으로 저장할 수 없는 문서의 저장은 이미 "다른 이름으로 저장" 경로를 탑니다(`defaultSaveSpecForModule`, `BIDIRECTIONAL_SAVE_EXTS`에 없는 형식은 저장 대화상자). 바꾸지 않았습니다.
 - **재사용 판단 (구현 원칙 3단계)** (1) 메뉴 모양·열림 동작은 rhwp-studio 메뉴 줄 소스를 그대로 따르므로 새 컴포넌트가 없습니다. (2) 기존 메뉴 항목 DOM, `studioCommandApplies`, 네이티브 항목 표(`ITEMS`)를 재사용하고 종류별 보이기와 막대 배치만 더했습니다. (3) 이식한 코드는 없습니다.
 - **Verified by** `node --test scripts/test-webui-menu-kinds.mjs scripts/test-webui-menu-bar.mjs scripts/test-webui-menu-state.mjs scripts/test-webui-native-menu.mjs`, `cargo test -p easyoffice-desktop --bin EasyOffice -- native_menu menu_state`.
-- **Revisit when** 시트에 행·열 추가/삭제 명령이 메뉴 항목으로 생길 때, 시작 화면에 전용 메뉴가 필요해질 때.
+- **Revisit when** 시작 화면에 전용 메뉴가 필요해질 때. 시트의 행·열 편집과 숫자 서식 항목은 PD-197이 네이티브 막대에 더했습니다.
 
 ## PD-191. Windows 로그오프·시스템 종료와 Linux `SIGTERM`·`SIGHUP`도 끝내기 큐를 거침
 
@@ -3063,3 +3063,16 @@
 - **Alternatives rejected** 행렬 결과를 값 모델에 넣는 방식(모든 소비자를 고쳐야 해 Phase 9로 미룸), 허용 목록 밖 대상을 이름만 돌려주고 통과시키는 방식(링크가 열리는 경로가 생길 때 다시 막아야 함).
 - **Verified by** `cargo test -p easyoffice-sheet --test sheet_univer_functions_a`(참조 엔진 단위 시험의 같은 자료·같은 기대값 이식, 상한과 악의적 입력 포함), `cargo test -p easyoffice-sheet --release --test sheet_univer_functions_a_bench -- --ignored --nocapture --test-threads=1`(측정), `node scripts/check-repo-hygiene.mjs`(수치 문서 144 동기화).
 - **Revisit when** 동적 배열(Phase 9), 링크를 담는 값 모델, 경로 링크가 필요할 때.
+
+## PD-197. 시트 서식·시트 메뉴 항목을 macOS 네이티브 막대와 명령 검색에 올림
+
+- **Status** Implemented (QA 요청 2026-11-12). `crates/easyoffice-desktop/src/native_menu.rs`(`native_menu/layout.rs`, `native_menu/build.rs`), `crates/easyoffice-app/ui/shell-chrome.js`, `app.js`. PD-190의 시트 구성을 보완합니다.
+- **Context** PD-193(숫자 서식)과 PD-194(행·열 편집)의 메뉴 항목은 페이지 메뉴에만 있어 네이티브 막대와 명령 검색(Cmd+K)에서 찾을 수 없었습니다.
+- **Decision (`PD-197`)**
+  1. 시트 창 네이티브 막대의 서식은 진하게·기울임·밑줄, 스타일 적용, 표시 형식(하위 메뉴: 일반·숫자·통화·회계·백분율·날짜·시간·텍스트, 구분선, 소수 자릿수 늘리기·줄이기), 셀 서식…입니다. 시트는 행·열 틀 고정, 행 위에·아래에 삽입, 열 왼쪽에·오른쪽에 삽입, 행·열 삭제, 숨기기·숨기기 취소, 셀 병합·병합 해제, 용지 방향·여백이고 구분선 위치도 페이지와 같습니다. 슬라이드 창의 서식은 그대로입니다.
+  2. 항목 표(`ITEMS`)에 21개를 더했고(`format:numfmt-*`, `format:cell-format`, `sheet:*`) 동작 이름은 `sheet-numfmt:<동작>`, `sheet-act:<동작>`입니다. 페이지는 같은 이름의 메뉴 항목(`data-sheet-numfmt`, `data-sheet-act`)을 눌러 페이지 메뉴와 같은 명령 경로를 탑니다. 항목 수는 128개 이하(`disabled_mask` 비트 수)로 제한하며 지금 118개입니다.
+  3. 페이지 메뉴가 이 항목들을 회색으로 만드는 규칙이 없으므로(시트 창에서는 항상 켜짐, 열·행 머리글이 없을 때의 처리는 각 명령이 함) 네이티브도 `disabled` 보고에 넣지 않습니다.
+  4. 명령 검색은 시트 창에서 페이지 메뉴 항목을 읽어 같은 라벨로 목록에 올리고, 고르면 그 항목을 누릅니다. 이 명령들은 리본 카탈로그에 없고 넣지 않습니다. 카탈로그에 넣으면 140종 계약·자체 검사 수치·문서 수치와 리본 단축키 표가 함께 바뀌는데, 이 항목들은 리본 버튼이 아니라 메뉴 전용이라 이득이 없습니다.
+- **재사용 판단 (구현 원칙 3단계)** (1) 새 컴포넌트가 필요 없습니다. (2) 기존 항목 표, 하위 메뉴 빌더, `pageMenuActions`의 클릭 전달, 명령 검색 목록을 재사용했습니다. (3) 이식한 코드는 없습니다.
+- **Verified by** `node --test scripts/test-webui-menu-kinds.mjs scripts/test-webui-sheet-native-menu.mjs scripts/test-webui-native-menu.mjs`, `cargo test -p easyoffice-desktop --bin EasyOffice -- native_menu menu_state`.
+- **Revisit when** 시트 메뉴 항목에 선택 영역 조건 회색 처리가 생길 때.

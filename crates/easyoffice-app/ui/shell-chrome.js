@@ -74,6 +74,17 @@
     "format:para-bullet": "studio-cmd:para-bullet",
     "format:indent-in": "studio-cmd:indent-in",
     "format:indent-out": "studio-cmd:indent-out",
+    "format:numfmt-general": "sheet-numfmt:general",
+    "format:numfmt-number": "sheet-numfmt:number",
+    "format:numfmt-currency": "sheet-numfmt:currency",
+    "format:numfmt-accounting": "sheet-numfmt:accounting",
+    "format:numfmt-percent": "sheet-numfmt:percent",
+    "format:numfmt-date": "sheet-numfmt:date",
+    "format:numfmt-time": "sheet-numfmt:time",
+    "format:numfmt-text": "sheet-numfmt:text",
+    "format:numfmt-decimal-up": "sheet-numfmt:decimal-up",
+    "format:numfmt-decimal-down": "sheet-numfmt:decimal-down",
+    "format:cell-format": "sheet-numfmt:dialog",
     "page:paper": "studio-cmd:layout-paper",
     "page:orientation": "studio-cmd:layout-orientation",
     "page:margins": "studio-cmd:layout-margins",
@@ -101,6 +112,16 @@
     "table:sheet-chart": "studio-cmd:sheet-mod-chart",
     "table:sheet-condfmt": "studio-cmd:sheet-mod-condfmt",
     "table:sheet-freeze": "studio-cmd:sheet-mod-freeze",
+    "sheet:row-insert-above": "sheet-act:row-insert-above",
+    "sheet:row-insert-below": "sheet-act:row-insert-below",
+    "sheet:col-insert-left": "sheet-act:col-insert-left",
+    "sheet:col-insert-right": "sheet-act:col-insert-right",
+    "sheet:row-delete": "sheet-act:row-delete",
+    "sheet:col-delete": "sheet-act:col-delete",
+    "sheet:hide": "sheet-act:hide",
+    "sheet:unhide": "sheet-act:unhide",
+    "sheet:merge": "sheet-act:merge",
+    "sheet:unmerge": "sheet-act:unmerge",
     "tool:diagnose": "studio-cmd:smart-diagnose",
     "tool:scrub-pii": "studio-cmd:scrub-pii",
     "tool:security-audit": "studio-cmd:security-audit",
@@ -175,10 +196,21 @@
     const click = (selector) => document.querySelector(selector)?.click();
     return {
       "studio-cmd": (cmd) => click(`.md-item[data-studio-menu-cmd="${cmd}"]`),
+      "sheet-act": (act) => click(`.md-item[data-sheet-act="${act}"]`),
+      "sheet-numfmt": (action) => click(`.md-item[data-sheet-numfmt="${action}"]`),
       "window-new": (kind) => click(`[data-window-new="${kind.toUpperCase()}"]`),
       theme: (mode) => click(`[data-theme-mode-choice="${mode}"]`),
       "update-check": () => click("[data-update-check-toggle]"),
     };
+  }
+
+  // The spreadsheet's own menu items (number formats, rows and columns, merging) have no ribbon command, so the
+  // command search lists them from the page's menu items: the label is the menu's, running one clicks it.
+  function sheetMenuPaletteItems(document) {
+    return Array.from(document.querySelectorAll(".md-item[data-sheet-act], .md-item[data-sheet-numfmt]"), (el) => {
+      const title = el.querySelector(".md-label").textContent;
+      return { id: `sheet-menu:${el.dataset.sheetAct || el.dataset.sheetNumfmt}`, module: "SHEET", title, shortcut: "", searchKey: `서식 시트 ${title}`, run: () => el.click() };
+    });
   }
 
   // Runs the page action of a menu id; false for an unknown id or an action the page does not have.
@@ -481,5 +513,5 @@
   }
 
   host.__EASYOFFICE_CREATE_SHELL_CHROME__ = createShellChrome;
-  host.__EASYOFFICE_NATIVE_MENU_TABLE__ = { NATIVE_MENU_ACTIONS, PARSED_NATIVE_MENU_ACTIONS, EMBED_EDITOR_COMMANDS, EMBED_ONLY_ACTIONS, EMBED_ONLY_SET, START_DISABLED_SET, TEXT_FIELD_EDIT_COMMANDS, runNativeMenuAction, pageMenuActions };
+  host.__EASYOFFICE_NATIVE_MENU_TABLE__ = { NATIVE_MENU_ACTIONS, PARSED_NATIVE_MENU_ACTIONS, EMBED_EDITOR_COMMANDS, EMBED_ONLY_ACTIONS, EMBED_ONLY_SET, START_DISABLED_SET, TEXT_FIELD_EDIT_COMMANDS, runNativeMenuAction, pageMenuActions, sheetMenuPaletteItems };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

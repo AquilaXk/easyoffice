@@ -7,18 +7,20 @@ use tauri::{AppHandle, Runtime};
 
 use super::layout::{
     self, MenuKind, MenuSpec, CLOSE_WINDOW, HIDE, HIDE_OTHERS, MINIMIZE, NEW_DOCS, NEW_DOC_IDS,
-    PASTE, SELECT_ALL, SEPARATOR, SERVICES, SHOW_ALL, THEME, THEME_IDS,
+    NUMFMT, NUMFMT_LINES, PASTE, SELECT_ALL, SEPARATOR, SERVICES, SHOW_ALL, THEME, THEME_IDS,
 };
 use super::{check, custom, is_check_item, quit_item, spec, QUIT_ID};
 
 fn nested<R: Runtime>(
     app: &AppHandle<R>,
     title: &str,
-    ids: &[&'static str],
+    lines: &[&'static str],
 ) -> tauri::Result<Submenu<R>> {
     let mut builder = SubmenuBuilder::new(app, title);
-    for id in ids {
-        builder = if is_check_item(id) {
+    for id in lines {
+        builder = if *id == SEPARATOR {
+            builder.separator()
+        } else if is_check_item(id) {
             builder.item(&check(app, spec(id))?)
         } else {
             builder.item(&custom(app, spec(id))?)
@@ -34,6 +36,7 @@ fn submenu<R: Runtime>(app: &AppHandle<R>, menu: &MenuSpec) -> tauri::Result<Sub
             SEPARATOR => builder.separator(),
             NEW_DOCS => builder.item(&nested(app, "새 문서", &NEW_DOC_IDS)?),
             THEME => builder.item(&nested(app, "테마", &THEME_IDS)?),
+            NUMFMT => builder.item(&nested(app, "표시 형식", &NUMFMT_LINES)?),
             // Paste and select all are system items: paste reaches the page's paste handler and
             // the text fields. Every system item carries its Korean text (the system language
             // would show otherwise).

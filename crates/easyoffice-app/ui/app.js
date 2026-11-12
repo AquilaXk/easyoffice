@@ -265,7 +265,9 @@
     if (!item) return;
     const modal = document.getElementById("cmd-palette-modal");
     if (modal && typeof modal.close === "function") modal.close();
-    if (item.id === "bench-run") {
+    if (item.run) {
+      item.run();
+    } else if (item.id === "bench-run") {
       workspacePanels.runStudioCommand("bench-run");
     } else if (item.id === "studio-save") {
       void saveWorkspaceDocument().catch(() => {});
@@ -308,6 +310,7 @@
         }
       }
     }
+    if (activeModule === "SHEET") items.push(...host.__EASYOFFICE_NATIVE_MENU_TABLE__.sheetMenuPaletteItems(document));
     items.push({ id: "bench-run", module: activeModule, title: "문서 엔진 성능 진단 실행", shortcut: "", searchKey: "성능 문서 엔진 성능 진단 실행 bench-run" });
     return items;
   }

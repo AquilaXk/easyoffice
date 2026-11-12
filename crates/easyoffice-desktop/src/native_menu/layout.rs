@@ -56,6 +56,8 @@ pub const SEPARATOR: &str = "-";
 pub const NEW_DOCS: &str = "@new-docs";
 /// The 테마 submenu (the three theme check items).
 pub const THEME: &str = "@theme";
+/// The 표시 형식 submenu of the spreadsheet's 서식 menu ([`NUMFMT_LINES`]).
+pub const NUMFMT: &str = "@numfmt";
 pub const PASTE: &str = "@paste";
 pub const SELECT_ALL: &str = "@select-all";
 pub const SERVICES: &str = "@services";
@@ -73,6 +75,20 @@ pub const NEW_DOC_IDS: [&str; 6] = [
     "file:new-slide",
     "file:new-pdf",
     "file:new-conv",
+];
+/// The lines of the 표시 형식 submenu.
+pub const NUMFMT_LINES: [&str; 11] = [
+    "format:numfmt-general",
+    "format:numfmt-number",
+    "format:numfmt-currency",
+    "format:numfmt-accounting",
+    "format:numfmt-percent",
+    "format:numfmt-date",
+    "format:numfmt-time",
+    "format:numfmt-text",
+    SEPARATOR,
+    "format:numfmt-decimal-up",
+    "format:numfmt-decimal-down",
 ];
 /// The items of the 테마 submenu.
 pub const THEME_IDS: [&str; 3] = ["view:theme-system", "view:theme-light", "view:theme-dark"];
@@ -327,6 +343,20 @@ const FORMAT_CELL: MenuSpec = menu(
     ],
 );
 
+const FORMAT_SHEET: MenuSpec = menu(
+    "서식",
+    &[
+        "format:bold",
+        "format:italic",
+        "format:underline",
+        S,
+        "format:style",
+        S,
+        NUMFMT,
+        "format:cell-format",
+    ],
+);
+
 const PAGE_HWP: MenuSpec = menu(
     "쪽",
     &[
@@ -359,7 +389,25 @@ const PAGE_DOC: MenuSpec = menu(
 const PAGE_PDF: MenuSpec = menu("쪽", &["tool:pdf-rotate", "tool:pdf-splitmerge"]);
 const SHEET_SHEET: MenuSpec = menu(
     "시트",
-    &["table:sheet-freeze", S, "page:orientation", "page:margins"],
+    &[
+        "table:sheet-freeze",
+        S,
+        "sheet:row-insert-above",
+        "sheet:row-insert-below",
+        "sheet:col-insert-left",
+        "sheet:col-insert-right",
+        "sheet:row-delete",
+        "sheet:col-delete",
+        S,
+        "sheet:hide",
+        "sheet:unhide",
+        S,
+        "sheet:merge",
+        "sheet:unmerge",
+        S,
+        "page:orientation",
+        "page:margins",
+    ],
 );
 const SLIDE_SLIDE: MenuSpec = menu(
     "슬라이드",
@@ -513,7 +561,7 @@ const SHEET: [&MenuSpec; 11] = [
     &EDIT_FULL,
     &VIEW_PLAIN,
     &INSERT_SHEET,
-    &FORMAT_CELL,
+    &FORMAT_SHEET,
     &SHEET_SHEET,
     &DATA_SHEET,
     &TOOL_OFFICE,
@@ -566,6 +614,7 @@ pub fn table_ids(kind: MenuKind) -> Vec<&'static str> {
             match *line {
                 NEW_DOCS => ids.extend(NEW_DOC_IDS),
                 THEME => ids.extend(THEME_IDS),
+                NUMFMT => ids.extend(NUMFMT_LINES.iter().filter(|line| **line != SEPARATOR)),
                 QUIT_ID => {}
                 line if line == SEPARATOR || line.starts_with('@') => {}
                 id => ids.push(id),

@@ -141,7 +141,7 @@ test("keyboard navigation between menus skips the menus of other kinds", async (
 
 // ---- the native bar has the same menus per kind ---------------------------------------------------
 
-const TOKENS = { S: "-", NEW_DOCS: "@new-docs", THEME: "@theme", PASTE: "@paste", SELECT_ALL: "@select-all", SERVICES: "@services", HIDE: "@hide", HIDE_OTHERS: "@hide-others", SHOW_ALL: "@show-all", MINIMIZE: "@minimize", CLOSE_WINDOW: "@close-window", QUIT_ID: "app:quit" };
+const TOKENS = { S: "-", NEW_DOCS: "@new-docs", THEME: "@theme", NUMFMT: "@numfmt", PASTE: "@paste", SELECT_ALL: "@select-all", SERVICES: "@services", HIDE: "@hide", HIDE_OTHERS: "@hide-others", SHOW_ALL: "@show-all", MINIMIZE: "@minimize", CLOSE_WINDOW: "@close-window", QUIT_ID: "app:quit" };
 
 function rustLayout() {
   const src = read("crates/easyoffice-desktop/src/native_menu/layout.rs");
@@ -159,11 +159,28 @@ function rustLayout() {
   return kinds;
 }
 
-function rustItems() {
+const ITEM_PATTERN = /item\(\s*"([^"]+)",\s*"([^"]+)",\s*(?:None|Some\("[^"]+"\)),\s*"([^"]+)",?\s*\)/g;
+
+function rustItemTable() {
   const source = read("crates/easyoffice-desktop/src/native_menu.rs");
   const start = source.indexOf("pub const ITEMS");
-  const table = source.slice(start, source.indexOf("];", start));
-  return new Map([...table.matchAll(/item\(\s*"([^"]+)",\s*"([^"]+)",\s*(?:None|Some\("[^"]+"\)),\s*"([^"]+)",?\s*\)/g)].map((m) => [m[1], m[3]]));
+  return source.slice(start, source.indexOf("];", start));
+}
+
+function rustItems() {
+  return new Map([...rustItemTable().matchAll(ITEM_PATTERN)].map((m) => [m[1], m[3]]));
+}
+
+function rustLabels() {
+  return new Map([...rustItemTable().matchAll(ITEM_PATTERN)].map((m) => [m[1], m[2]]));
+}
+
+function numfmtLines() {
+  const src = read("crates/easyoffice-desktop/src/native_menu/layout.rs");
+  const body = src.match(/pub const NUMFMT_LINES: \[&str; (\d+)\] = \[([\s\S]*?)\];/);
+  const lines = body[2].split(",").map((t) => t.trim()).filter(Boolean).map((t) => (t === "SEPARATOR" ? "-" : t.slice(1, -1)));
+  assert.equal(lines.length, Number(body[1]));
+  return lines;
 }
 
 // The page commands of the standard edit group stay on every native bar (text fields need them) and are not compared.
@@ -209,4 +226,37 @@ test("the page reports the menu kind to the shell with its menu state", () => {
   assert.match(kinds, /const KINDS = Object\.freeze\(\["DOC", "HWP", "SHEET", "SLIDE", "PDF"\]\)/);
   const rust = read("crates/easyoffice-desktop/src/native_menu/layout.rs");
   for (const kind of KINDS) assert.ok(rust.includes(`"${kind}" => Some(`), kind);
+});
+
+// The rows of a menu as the page shows them and as the native bar lists them: a label per item, "-" for a separator and
+// "label > ..." for a submenu.
+const pageRows = (container) =>
+  container.children
+    .filter((el) => !el.hidden)
+    .map((el) => {
+      if (el.classList.contains("md-sep")) return "-";
+      const label = el.querySelector(":scope > .md-label").textContent;
+      const panel = el.querySelector(":scope > .md-sub-panel");
+      return panel ? `${label} > ${pageRows(panel).join(" | ")}` : label;
+    });
+
+function nativeRows(menu) {
+  const labels = rustLabels();
+  return menu.lines.map((line) => {
+    if (line === "@numfmt") return `표시 형식 > ${numfmtLines().map((id) => labels.get(id) ?? id).join(" | ")}`;
+    return labels.get(line) ?? line;
+  });
+}
+
+test("the spreadsheet's native 서식 and 시트 menus list the page's items in the page's order with its separators", async () => {
+  const { document } = await open("SHEET");
+  await flushAsyncTurns(10);
+  const native = rustLayout().SHEET;
+  for (const title of ["서식", "시트"]) {
+    const pageMenu = shownMenus(document).find((m) => m.querySelector(".menu-title").textContent === title);
+    const rows = pageRows(pageMenu.querySelector(":scope > .menu-dropdown"));
+    const expected = nativeRows(native.find((menu) => menu.title === title));
+    assert.ok(rows.length >= 8, `${title} rows were read`);
+    assert.deepEqual(expected, rows, title);
+  }
 });

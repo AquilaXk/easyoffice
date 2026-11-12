@@ -2,7 +2,7 @@ use super::*;
 
 const MODIFIERS: &[&str] = &["CmdOrCtrl", "Alt", "Shift"];
 const GROUPS: &[&str] = &[
-    "app", "file", "edit", "view", "insert", "format", "page", "table", "tool", "help",
+    "app", "file", "edit", "view", "insert", "format", "page", "sheet", "table", "tool", "help",
 ];
 
 #[test]
@@ -684,4 +684,95 @@ fn exactly_the_current_theme_is_checked_and_the_update_switch_follows_the_app() 
         "an app that does not check offers no switch"
     );
     assert_eq!(check_state("file:save", &view("dark", None)), None);
+}
+
+#[test]
+fn the_spreadsheet_bar_has_the_number_format_and_row_column_items_in_the_page_order() {
+    let s = layout::SEPARATOR;
+    assert_eq!(
+        lines_of(MenuKind::Sheet, "서식"),
+        [
+            "format:bold",
+            "format:italic",
+            "format:underline",
+            s,
+            "format:style",
+            s,
+            layout::NUMFMT,
+            "format:cell-format",
+        ]
+    );
+    let labels: Vec<&str> = layout::NUMFMT_LINES
+        .iter()
+        .map(|id| if *id == s { s } else { spec(id).label })
+        .collect();
+    assert_eq!(
+        labels,
+        [
+            "일반",
+            "숫자",
+            "통화",
+            "회계",
+            "백분율",
+            "날짜",
+            "시간",
+            "텍스트",
+            s,
+            "소수 자릿수 늘리기",
+            "소수 자릿수 줄이기",
+        ]
+    );
+    let sheet: Vec<&str> = lines_of(MenuKind::Sheet, "시트")
+        .iter()
+        .map(|id| if *id == s { s } else { spec(id).label })
+        .collect();
+    assert_eq!(
+        sheet,
+        [
+            "행·열 틀 고정",
+            s,
+            "행 위에 삽입",
+            "행 아래에 삽입",
+            "열 왼쪽에 삽입",
+            "열 오른쪽에 삽입",
+            "행 삭제",
+            "열 삭제",
+            s,
+            "숨기기",
+            "숨기기 취소",
+            s,
+            "셀 병합",
+            "병합 해제",
+            s,
+            "용지 방향 전환",
+            "여백 전환",
+        ]
+    );
+    for kind in [MenuKind::Doc, MenuKind::Hwp, MenuKind::Slide, MenuKind::Pdf] {
+        let ids = layout::table_ids(kind);
+        assert!(
+            ids.iter()
+                .all(|id| !id.starts_with("sheet:") && !id.starts_with("format:numfmt-")),
+            "{kind:?}"
+        );
+    }
+}
+
+#[test]
+fn the_sheet_items_run_the_page_menu_items_through_a_quoted_static_id() {
+    for id in [
+        "format:numfmt-decimal-down",
+        "format:cell-format",
+        "sheet:row-insert-above",
+        "sheet:unmerge",
+    ] {
+        let action = action_for(id).unwrap();
+        assert!(
+            action.starts_with("sheet-numfmt:") || action.starts_with("sheet-act:"),
+            "{id}"
+        );
+        let script = dispatch_script(id).unwrap();
+        assert_eq!(script, format!("{SCRIPT_PREFIX}\"{id}\");"));
+    }
+    assert!(ITEMS.len() <= u128::BITS as usize);
 }
