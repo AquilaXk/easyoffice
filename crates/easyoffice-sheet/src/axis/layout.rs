@@ -1,12 +1,14 @@
 //! The layout of a sheet that is tied to positions (merged ranges, hidden rows and columns,
 //! custom column widths, the ranges of rules) follows the same edit as the cells.
 //!
-//! 참조 구현: the span rule is Univer's (`axis/mod.rs` header); how merges, row visibility and
-//! widths follow an edit is modelled on `packages/sheets/src/commands/commands/insert-row-col.command.ts`
-//! and `remove-row-col.command.ts` (Apache-2.0, Copyright 2023-present DreamNum Co., Ltd.): rows
-//! inserted inside a merge widen it, deleted rows narrow it, a merge that loses all its cells or
-//! is left with one cell is dropped, inserted rows and columns are visible and have the default
-//! width.
+//! 참조 구현: the span rule is Univer's (`axis/mod.rs` header). How merges, row visibility and widths
+//! follow an edit is modelled on `packages/sheets/src/controllers/merge-cell.controller.ts`
+//! lines 529-590 (`_handleInsertRowCommand`: an insertion strictly inside a merge widens it, one
+//! before it shifts it) and 723-790 (`_handleRemoveRowCommand`: a deletion narrows the merges it
+//! overlaps, a merge left with one cell is dropped), and `packages/sheets/src/commands/commands/insert-row-col.command.ts`
+//! lines 120-140 (inserted rows are visible: `hd: BooleanNumber.FALSE`), Apache-2.0, Copyright
+//! 2023-present DreamNum Co., Ltd., commit 5a06a7842c8e13fa0646d0733dc3662cf4b330b9. A merge that
+//! loses all its cells disappears; inserted rows and columns have the default width.
 
 use super::{Axis, AxisEdit};
 use easyoffice_formats::CellBox;

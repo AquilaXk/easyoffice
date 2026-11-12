@@ -1,12 +1,13 @@
 //! Hidden rows and columns and merged ranges of a worksheet (`hidden` on `row` and `col`,
 //! `mergeCells`), kept beside the cell values and styles in [`SheetStyling`].
 //!
-//! 참조 구현: Univer `packages/sheets/src/commands/commands/set-row-col-visible.command.ts`
-//! (`SetRowHiddenCommand`, `SetColHiddenCommand`: visibility is a property of the whole row or
-//! column) and `add-worksheet-merge.command.ts` (a merged range is a rectangle, an existing merge
-//! it overlaps is replaced), Apache-2.0, Copyright 2023-present DreamNum Co., Ltd., commit
-//! 5a06a7842c8e13fa0646d0733dc3662cf4b330b9. The file format side (`<row hidden>`, `<col hidden>`,
-//! `<mergeCells>`) follows ECMA-376 18.3.1; the reference stores no file format.
+//! 참조 구현: Univer `packages/sheets/src/commands/commands/set-row-visible.command.ts` and
+//! `set-col-visible.command.ts` (`SetSpecificRowsVisibleCommand`, `SetSpecificColsVisibleCommand`:
+//! visibility is a property of whole rows and columns, kept as ranges) and
+//! `add-worksheet-merge.command.ts` lines 117-145 and 177-260 (merging keeps one cell's content
+//! and removes the merges it overlaps), Apache-2.0, Copyright 2023-present DreamNum Co., Ltd.,
+//! commit 5a06a7842c8e13fa0646d0733dc3662cf4b330b9. The file format side (`<row hidden>`,
+//! `<col hidden>`, `<mergeCells>`) follows ECMA-376 18.3.1; the reference stores no file format.
 
 use crate::sheet_styling::xlsx_styles::{cols_xml, px_to_xlsx_width};
 use crate::{CellBox, SheetStyling};

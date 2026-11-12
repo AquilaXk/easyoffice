@@ -1,11 +1,11 @@
 //! Rules follow a row or column edit: the ranges they cover move, shrink, grow or vanish like
 //! merged ranges do, and the formulas in their operands follow like any formula.
 //!
-//! 참조 구현: Univer `packages/sheets/src/services/ref-range/util.ts` (span rule, see the header
-//! of `axis/mod.rs`) and `packages/sheets-conditional-formatting` / `packages/sheets-data-validation`
-//! range handling on `insert-row-col` / `remove-row-col` (Apache-2.0, Copyright 2023-present
-//! DreamNum Co., Ltd., commit 5a06a7842c8e13fa0646d0733dc3662cf4b330b9): a rule whose ranges all
-//! disappear is removed, the others keep the surviving parts.
+//! 참조 구현: the span rule is Univer's (`packages/sheets/src/services/ref-range/util.ts`, see the
+//! header of `axis/mod.rs`; Apache-2.0, Copyright 2023-present DreamNum Co., Ltd., commit
+//! 5a06a7842c8e13fa0646d0733dc3662cf4b330b9). Applying it to the ranges of a rule, removing a rule
+//! whose ranges all disappear and keeping the references of a first-row formula alive are this
+//! repository's own.
 
 use crate::axis::{rewrite_formula_refs, shift_boxes, Axis, AxisEdit, EditKind};
 use easyoffice_formats::{CfKind, CfRule, CfValue, DataValidation, DvKind, SheetRules, ValueKind};
