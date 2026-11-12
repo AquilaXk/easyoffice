@@ -8,10 +8,15 @@
 //! one that was at `order[n]` (0-based, stable, blank keys last in both directions; the rules are
 //! in `easyoffice_sheet::sort_keys`). Which rows may move (hidden and filtered rows stay) and how
 //! the cells follow is the page's business.
+//!
+//! With `formulas: [[row, "=A2"], ...]` (`row` is the index of the row the formula sits in) the
+//! page also sends `sheet`, `range: {r1, r2}` (the sorted rows, 1-based), `rows` (the 1-based sheet
+//! row of every row index) and gets `formulas` back: every formula as it reads after its row moved
+//! (the rule of PD-181: relative row references into the sorted rows follow, the rest stays).
 
 use crate::EasyOfficeIpcRouter;
 use easyoffice_formats::{EasyOfficeError, StrictJsonValue};
-use easyoffice_sheet::{sort_order, SortColumn, MAX_SORT_KEYS};
+use easyoffice_sheet::{sort_order, sorted_formula, SortColumn, MAX_SORT_KEYS};
 use std::fmt::Write;
 
 /// Cells (rows times keys) one request may carry.
@@ -83,9 +88,92 @@ impl EasyOfficeIpcRouter {
             }
             let _ = write!(out, "{row}");
         }
-        out.push_str("]}");
+        out.push(']');
+        if let Some(formulas) = StrictJsonValue::get_field(entries, "formulas") {
+            out.push_str(",\"formulas\":[");
+            push_formulas(&mut out, entries, formulas, &order)?;
+            out.push(']');
+        }
+        out.push('}');
         Ok(out)
     }
+}
+
+/// Rows a request may name (1-based sheet rows).
+const MAX_SHEET_ROW: u64 = 1_048_576;
+
+fn row_field(obj: &[(String, StrictJsonValue)], name: &str) -> Result<u32, EasyOfficeError> {
+    StrictJsonValue::get_field(obj, name)
+        .and_then(StrictJsonValue::as_u64)
+        .filter(|r| (1..=MAX_SHEET_ROW).contains(r))
+        .map(|r| r as u32 - 1)
+        .ok_or_else(|| invalid(name))
+}
+
+/// Writes the quoted formulas of the request after their rows moved, comma separated.
+fn push_formulas(
+    out: &mut String,
+    entries: &[(String, StrictJsonValue)],
+    formulas: &StrictJsonValue,
+    order: &[u32],
+) -> Result<(), EasyOfficeError> {
+    let items = formulas.as_array().ok_or_else(|| invalid("formulas"))?;
+    let sheet = EasyOfficeIpcRouter::optional_json_str(entries, "sheet")?.unwrap_or("");
+    let range = StrictJsonValue::get_field(entries, "range")
+        .and_then(StrictJsonValue::as_object)
+        .ok_or_else(|| invalid("range"))?;
+    let (first, last) = (row_field(range, "r1")?, row_field(range, "r2")?);
+    let rows = StrictJsonValue::get_field(entries, "rows")
+        .and_then(StrictJsonValue::as_array)
+        .filter(|r| r.len() == order.len())
+        .ok_or_else(|| invalid("rows"))?;
+    let sheet_rows = rows
+        .iter()
+        .map(|r| {
+            r.as_u64()
+                .filter(|r| (1..=MAX_SHEET_ROW).contains(r))
+                .map(|r| r as u32 - 1)
+                .ok_or_else(|| invalid("rows"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    // Where each row index goes.
+    let mut place = vec![0usize; order.len()];
+    for (at, &row) in order.iter().enumerate() {
+        place[row as usize] = at;
+    }
+    for (i, item) in items.iter().enumerate() {
+        let pair = item
+            .as_array()
+            .filter(|p| p.len() == 2)
+            .ok_or_else(|| invalid("formulas"))?;
+        let row = pair[0]
+            .as_u64()
+            .and_then(|r| usize::try_from(r).ok())
+            .filter(|&r| r < order.len())
+            .ok_or_else(|| invalid("formulas"))?;
+        let text = pair[1].as_str().ok_or_else(|| invalid("formulas"))?;
+        if i > 0 {
+            out.push(',');
+        }
+        push_text(
+            out,
+            &sorted_formula(
+                text,
+                sheet,
+                first,
+                last,
+                sheet_rows[row],
+                sheet_rows[place[row]],
+            ),
+        );
+    }
+    Ok(())
+}
+
+fn push_text(out: &mut String, text: &str) {
+    out.push('"');
+    EasyOfficeIpcRouter::escape_json_into(out, text);
+    out.push('"');
 }
 
 #[cfg(test)]
@@ -141,6 +229,37 @@ mod tests {
         ] {
             assert!(call(&body).is_err(), "{body}");
         }
+    }
+
+    #[test]
+    fn formulas_come_back_as_they_read_after_their_rows_moved() {
+        // Rows 2..4 of the sheet sorted by their key: row 4 goes first, rows 2 and 3 follow.
+        let json = call(
+            r#"{"sessionAction":"sort","sheet":"S","range":{"r1":2,"r2":4},"rows":[2,3,4],
+            "keys":[{"asc":true,"values":[5,9,1]}],
+            "formulas":[[0,"=A2*2+A1+$A$2"],[2,"=SUM(A3:A4)"],[1,"text"]]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            json,
+            r#"{"order":[2,0,1],"formulas":["=A3*2+A1+$A$2","=SUM(A1:A2)","text"]}"#
+        );
+    }
+
+    #[test]
+    fn hidden_rows_in_between_give_the_distance_the_row_travels() {
+        // Rows 2 and 5 may move (3 and 4 are hidden): the formula of row 2 moves to row 5.
+        let json = call(
+            r#"{"sessionAction":"sort","sheet":"S","range":{"r1":2,"r2":6},"rows":[2,5],
+            "keys":[{"asc":false,"values":[1,2]}],"formulas":[[0,"=A2+1"]]}"#,
+        )
+        .unwrap();
+        assert_eq!(json, r#"{"order":[1,0],"formulas":["=A5+1"]}"#);
+        let bad = call(
+            r#"{"sessionAction":"sort","range":{"r1":2,"r2":6},"rows":[2],
+            "keys":[{"asc":true,"values":[1,2]}],"formulas":[[0,"=A2"]]}"#,
+        );
+        assert!(bad.is_err());
     }
 
     #[test]

@@ -13,6 +13,24 @@ pub struct SortKey {
     pub ascending: bool,
 }
 
+/// The formula `raw` of the sheet `own_sheet` as it reads after its row moved from `orig_row` to
+/// `target_row` in a sort of the rows `first..=last` (0-indexed): relative row references into the
+/// sorted rows follow the move, the rest stays (PD-181).
+pub fn sorted_formula(
+    raw: &str,
+    own_sheet: &str,
+    first: u32,
+    last: u32,
+    orig_row: u32,
+    target_row: u32,
+) -> String {
+    adjust_formula_row_refs(
+        raw,
+        own_sheet,
+        SortedRows::new(first, last, orig_row, target_row),
+    )
+}
+
 impl SortKey {
     pub const fn asc(col: u32) -> Self {
         Self {

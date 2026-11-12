@@ -1,4 +1,4 @@
-use crate::{PackedCellCoordinate, SheetEngine, SortKey};
+use crate::{EvaluatedCellValue, PackedCellCoordinate, SheetEngine, SortKey};
 
 fn raw(s: &SheetEngine, a1: &str) -> Option<String> {
     s.cells
@@ -101,4 +101,30 @@ fn sort_refuses_bad_keys() {
     assert!(s.sort_rows(0, 0, &too_many, false).is_err());
     let max = vec![SortKey::asc(0); 64];
     assert!(s.sort_rows(0, 0, &max, false).is_ok());
+}
+
+#[test]
+fn sort_keeps_absolute_row_references_and_moves_relative_ones() {
+    let mut sort_sheet = SheetEngine::new("SortRel");
+    sort_sheet.set_cell("A1", "10").unwrap();
+    sort_sheet.set_cell("B1", "=A1*2").unwrap();
+    sort_sheet.set_cell("C1", "=$A$1*2").unwrap();
+    sort_sheet.set_cell("A2", "30").unwrap();
+    sort_sheet.set_cell("B2", "=A2*2").unwrap();
+    sort_sheet.set_cell("C2", "=$A$1*2").unwrap();
+    let desc = [SortKey::desc(0)];
+    sort_sheet.sort_rows(0, 1, &desc, false).unwrap();
+    assert_eq!(raw(&sort_sheet, "A1").as_deref(), Some("30"));
+    assert_eq!(raw(&sort_sheet, "B1").as_deref(), Some("=A1*2"));
+    assert_eq!(raw(&sort_sheet, "C1").as_deref(), Some("=$A$1*2"));
+    assert_eq!(
+        sort_sheet.evaluate_cell("B1"),
+        EvaluatedCellValue::Number(60.0)
+    );
+    assert_eq!(raw(&sort_sheet, "A2").as_deref(), Some("10"));
+    assert_eq!(raw(&sort_sheet, "B2").as_deref(), Some("=A2*2"));
+    assert_eq!(
+        sort_sheet.evaluate_cell("B2"),
+        EvaluatedCellValue::Number(20.0)
+    );
 }

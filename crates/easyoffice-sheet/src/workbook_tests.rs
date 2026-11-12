@@ -1,7 +1,6 @@
 use super::{ChartSeriesBuilder, ChartType, WorkbookEngine};
-use crate::{
-    CellRange, EvaluatedCellValue, FormulaError, PackedCellCoordinate, SheetEngine, SortKey,
-};
+use crate::SortKey;
+use crate::{CellRange, EvaluatedCellValue, FormulaError, PackedCellCoordinate, SheetEngine};
 use std::collections::HashMap;
 
 #[test]
@@ -297,9 +296,8 @@ fn test_workbook_cross_sheet_formulas_and_sort_goal_seek_chart() {
     sheet.set_cell("B2", "가").unwrap();
     sheet.set_cell("A3", "20").unwrap();
     sheet.set_cell("B3", "다").unwrap();
-    sheet
-        .sort_rows(0, 2, &[SortKey::asc(0), SortKey::asc(1)], false)
-        .unwrap();
+    let keys = [SortKey::asc(0), SortKey::asc(1)];
+    sheet.sort_rows(0, 2, &keys, false).unwrap();
     assert_eq!(sheet.evaluate_cell("A1"), EvaluatedCellValue::Number(10.0));
     assert_eq!(sheet.evaluate_cell("A3"), EvaluatedCellValue::Number(30.0));
 
@@ -711,35 +709,6 @@ fn test_adversarial_sheet_remediations() {
     assert_eq!(
         s.evaluate_formula_str("=AVERAGE(10, TRUE)"),
         EvaluatedCellValue::Number(5.5)
-    );
-
-    let mut sort_sheet = SheetEngine::new("SortRel");
-    sort_sheet.set_cell("A1", "10").unwrap();
-    sort_sheet.set_cell("B1", "=A1*2").unwrap();
-    sort_sheet.set_cell("C1", "=$A$1*2").unwrap();
-    sort_sheet.set_cell("A2", "30").unwrap();
-    sort_sheet.set_cell("B2", "=A2*2").unwrap();
-    sort_sheet.set_cell("C2", "=$A$1*2").unwrap();
-    sort_sheet
-        .sort_rows(0, 1, &[SortKey::desc(0)], false)
-        .unwrap();
-    let raw_at = |s: &SheetEngine, r: &str| -> Option<String> {
-        s.raw_cells()
-            .get(&PackedCellCoordinate::parse_a1(r).unwrap())
-            .cloned()
-    };
-    assert_eq!(raw_at(&sort_sheet, "A1").as_deref(), Some("30"));
-    assert_eq!(raw_at(&sort_sheet, "B1").as_deref(), Some("=A1*2"));
-    assert_eq!(raw_at(&sort_sheet, "C1").as_deref(), Some("=$A$1*2"));
-    assert_eq!(
-        sort_sheet.evaluate_cell("B1"),
-        EvaluatedCellValue::Number(60.0)
-    );
-    assert_eq!(raw_at(&sort_sheet, "A2").as_deref(), Some("10"));
-    assert_eq!(raw_at(&sort_sheet, "B2").as_deref(), Some("=A2*2"));
-    assert_eq!(
-        sort_sheet.evaluate_cell("B2"),
-        EvaluatedCellValue::Number(20.0)
     );
 }
 

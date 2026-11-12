@@ -62,7 +62,7 @@ pub use rules::{
     decode_visuals, encode_visuals, shift_rules, validate_input, Bar, CellVisual, Icon,
     PackedVisuals, RuleRuntime, Verdict,
 };
-pub use sheet_sort::SortKey;
+pub use sheet_sort::{sorted_formula, SortKey};
 pub use sort_keys::{sort_order, SortColumn, MAX_SORT_KEYS};
 pub use types::*;
 pub use workbook::*;
