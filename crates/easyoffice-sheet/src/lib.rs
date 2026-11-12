@@ -54,8 +54,8 @@ pub mod types;
 pub mod workbook;
 
 pub use axis::{
-    shift_boxes, shift_filter, shift_runs, shift_widths, Axis, AxisBudget, AxisEdit,
-    AxisEditReport, EditKind, FilterShift,
+    shift_boxes, shift_filter, shift_levels, shift_outline, shift_runs, shift_widths, Axis,
+    AxisBudget, AxisEdit, AxisEditReport, EditKind, FilterShift,
 };
 pub use coercion::*;
 pub use functions::*;

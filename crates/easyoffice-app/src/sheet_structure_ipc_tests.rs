@@ -128,3 +128,44 @@ fn the_filter_follows_the_edit_and_a_deleted_condition_column_asks_for_a_reapply
     ));
     assert_eq!(field(&gone, "filter").to_json_string(), "null");
 }
+
+#[test]
+fn the_groups_follow_the_edit_and_a_bad_outline_changes_nothing() {
+    let id = open_with(&[("S!A1", "1")]);
+    let outline = r#"{"rows":[[3,3,1],[4,5,2],[6,6,1]],"foldedRows":[[4,5]],"cols":[[2,3,1]]}"#;
+    let inside = call(&format!(
+        r#"{{"sessionAction":"structure","session":"{id}","sheet":"S","axis":"row","op":"insert","at":5,"count":2,"outline":{outline}}}"#
+    ));
+    // Two rows inserted between rows 4 and 5, both level 2 (the smaller of 2 and 2).
+    assert_eq!(
+        field(&inside, "outline").to_json_string(),
+        r#"{"rows":[[3,3,1],[4,7,2],[8,8,1]],"cols":[[2,3,1]],"foldedRows":[[4,7]]}"#
+    );
+    let delete = call(&format!(
+        r#"{{"sessionAction":"structure","session":"{id}","sheet":"S","axis":"row","op":"delete","at":3,"count":4,"outline":{outline}}}"#
+    ));
+    assert_eq!(
+        field(&delete, "outline").to_json_string(),
+        r#"{"cols":[[2,3,1]]}"#
+    );
+    let cols = call(&format!(
+        r#"{{"sessionAction":"structure","session":"{id}","sheet":"S","axis":"col","op":"insert","at":1,"count":1,"outline":{outline}}}"#
+    ));
+    assert_eq!(
+        field(&cols, "outline").to_json_string(),
+        r#"{"rows":[[3,3,1],[4,5,2],[6,6,1]],"cols":[[3,4,1]],"foldedRows":[[4,5]]}"#
+    );
+    for bad in [
+        r#"{"rows":[[1,3,9]]}"#,
+        r#"{"rows":[[3,4,1]],"foldedRows":[[1,9]]}"#,
+        r#"{"rows":[[1,3,1],[2,5,1]]}"#,
+    ] {
+        let body = format!(
+            r#"{{"sessionAction":"structure","session":"{id}","sheet":"S","axis":"row","op":"insert","at":1,"count":1,"outline":{bad}}}"#
+        );
+        assert!(
+            EasyOfficeIpcRouter::dispatch("evaluate_sheet", &body).is_err(),
+            "{bad}"
+        );
+    }
+}

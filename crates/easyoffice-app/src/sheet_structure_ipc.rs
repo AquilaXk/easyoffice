@@ -6,13 +6,13 @@
 //! bound parts of the page's model, which the engine moves with the cells so the page keeps no
 //! second copy of the rule: `merges`, `hiddenRows`, `hiddenCols` (see `sheet_layout_json`),
 //! `widths` `[[column, px], ...]` of the edited sheet, `filter` (see `sheet_filter_json`) and `rules`
-//! `{sheet: {cf, dv}}` of every sheet.
+//! `{sheet: {cf, dv}}` of every sheet, and the row and column groups `outline` (`sheet_view_json`).
 //!
 //! Answer: the session's `formulas` (`[{sheet, cell, value}]`, the text of every formula the edit
 //! rewrote, by new position), the `changed` values, `circular`, and the moved `merges`,
 //! `hiddenRows`, `hiddenCols`, `filter` (`null` when the edit removed it; `filterReapply: true` when
 //! it dropped a column's condition, so the page evaluates the others again), `widths` and the
-//! `rules` that changed. `{"refused":"structure"}`
+//! `outline` and `rules` that changed. `{"refused":"structure"}`
 //! means the edit changes too many formulas and nothing changed; `{"expired":true}` and
 //! `{"refused":"limit"}` are as for `apply`.
 
@@ -22,13 +22,14 @@ use crate::sheet_layout_json::{
 };
 use crate::sheet_rules_json::{parse_rules, rules_json};
 use crate::sheet_session::{session_id, write_changed, Applied, EXPIRED, REFUSED};
+use crate::sheet_view_json::{outline_json, parse_outline};
 use crate::EasyOfficeIpcRouter;
 use easyoffice_formats::{
     CellBox, EasyOfficeError, SheetRules, StrictJsonValue, MAX_COLUMN_PX, MIN_COLUMN_PX,
 };
 use easyoffice_sheet::{
-    shift_boxes, shift_filter, shift_rules, shift_runs, shift_widths, Axis, AxisEdit,
-    AxisEditReport, EditKind, RecalcOutcome, RecalcSession,
+    shift_boxes, shift_filter, shift_outline, shift_rules, shift_runs, shift_widths, Axis,
+    AxisEdit, AxisEditReport, EditKind, RecalcOutcome, RecalcSession,
 };
 use std::collections::BTreeMap;
 use std::fmt::Write;
@@ -113,6 +114,10 @@ fn moved_layout_json(
             cols
         };
         let _ = write!(out, ",\"hiddenCols\":{}", runs_json(&moved));
+    }
+    if let Some(v) = field("outline") {
+        let moved = shift_outline(&parse_outline(v)?, edit);
+        let _ = write!(out, ",\"outline\":{}", outline_json(&moved));
     }
     // `null` is the page saying the sheet has no filter.
     if let Some(v) = field("filter").filter(|v| !matches!(v, StrictJsonValue::Null)) {

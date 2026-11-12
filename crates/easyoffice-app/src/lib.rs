@@ -49,6 +49,7 @@ mod sheet_sort_ipc;
 mod sheet_structure_ipc;
 #[cfg(test)]
 mod sheet_structure_ipc_tests;
+mod sheet_view_json;
 pub mod smart_tools;
 
 pub use benchmark::*;

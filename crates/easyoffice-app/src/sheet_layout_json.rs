@@ -1,4 +1,4 @@
-//! JSON form of a sheet's merged ranges, hidden rows and hidden columns, shared by the open
+//! JSON form of a sheet's merged ranges, hidden rows and hidden columns (and, from `sheet_view_json`, its view), shared by the open
 //! answer, the save request and the row/column edit of a sheet session.
 //!
 //! `merges`: `["A1:B2", ...]`; `hiddenRows`, `hiddenCols`: `[[first, last], ...]`, 1-based and
@@ -120,6 +120,7 @@ pub(crate) fn parse_layout(
     if let Some(v) = StrictJsonValue::get_field(obj, "filter") {
         styling.filter = Some(crate::sheet_filter_json::parse_filter(v)?);
     }
+    crate::sheet_view_json::parse_view(obj, styling)?;
     Ok(())
 }
 
@@ -171,6 +172,7 @@ pub(crate) fn write_layout_split(
             crate::sheet_filter_json::filter_json(filter)
         );
     }
+    crate::sheet_view_json::write_view(out, styling);
 }
 
 #[cfg(test)]
