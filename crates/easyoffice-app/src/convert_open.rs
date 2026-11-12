@@ -107,6 +107,9 @@ fn write_paragraph(out: &mut String, p: &RichParagraph) {
     if p.heading_level > 0 {
         let _ = write!(out, ",\"heading\":{}", p.heading_level);
     }
+    if let Some(number) = p.bookmark {
+        let _ = write!(out, ",\"bookmark\":{number}");
+    }
     match p.toc {
         Some(RichToc::Title) => out.push_str(",\"toc\":0"),
         Some(RichToc::Entry(level)) => {
@@ -639,3 +642,5 @@ impl EasyOfficeIpcRouter {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod toc_tests;

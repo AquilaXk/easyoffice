@@ -93,7 +93,7 @@ pub use pdf_writer::PdfWriteOptions;
 pub use rich_document::{
     evaluate_table_formulas, normalize_hex_color, safe_link_target, RichAlignment, RichBlock,
     RichDocument, RichListKind, RichListNumber, RichNumberEnclosure, RichNumberFormat,
-    RichParagraph, RichRun, RichScript, RichToc, MAX_TOC_LEVEL,
+    RichParagraph, RichRun, RichScript, RichToc, MAX_TOC_LEVEL, TOC_BOOKMARK_PREFIX,
 };
 pub use rich_image::{
     RichImage, IMAGE_PLACEHOLDER_TEXT, MAX_ALT_TEXT_BYTES, MAX_IMAGES_PER_DOCUMENT,

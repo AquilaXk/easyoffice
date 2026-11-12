@@ -116,14 +116,29 @@ pub struct RichRun {
 /// Longest hyperlink address a document keeps, in characters.
 pub const MAX_LINK_CHARS: usize = 2048;
 
+/// Prefix of a table-of-contents bookmark name (`_Toc` and a number, as word processors write them).
+pub const TOC_BOOKMARK_PREFIX: &str = "_Toc";
+
+/// The number of a table-of-contents bookmark name (`_Toc12` is 12): digits only, no leading zero, within
+/// `u32`, so the number gives the same name back.
+pub fn toc_bookmark_number(name: &str) -> Option<u32> {
+    let digits = name.strip_prefix(TOC_BOOKMARK_PREFIX)?;
+    let number = digits.parse::<u32>().ok().filter(|n| *n > 0)?;
+    (number.to_string() == digits).then_some(number)
+}
+
 /// The hyperlink address when it is a plain web or mail target (`http`, `https`, `mailto`), else `None`
 /// (fail-closed: `javascript:`, `file:`, `data:` and every other scheme are refused, as are whitespace,
-/// control characters and addresses over [`MAX_LINK_CHARS`]). The editor's `doc-link.js` applies the same rule.
+/// control characters and addresses over [`MAX_LINK_CHARS`]) apart from the in-document `#_Toc<number>` bookmark target. The editor's `doc-link.js` applies the same rule.
 pub fn safe_link_target(raw: &str) -> Option<&str> {
     let url = raw.trim();
     let unsafe_char = |c: char| c <= ' ' || ('\u{7f}'..='\u{9f}').contains(&c);
     if url.is_empty() || url.chars().count() > MAX_LINK_CHARS || url.chars().any(unsafe_char) {
         return None;
+    }
+    if let Some(name) = url.strip_prefix('#') {
+        // The one in-document target: a table-of-contents bookmark (`#_Toc12`).
+        return toc_bookmark_number(name).map(|_| url);
     }
     let (scheme, rest) = url.split_once(':')?;
     let has_target = match scheme.to_ascii_lowercase().as_str() {
@@ -221,6 +236,9 @@ pub struct RichParagraph {
     /// Set on the paragraphs of a generated table of contents; the writers wrap consecutive ones in the
     /// format's table-of-contents container and the readers recover the role from the style name.
     pub toc: Option<RichToc>,
+    /// Number of the table-of-contents bookmark (`_Toc<number>`) that marks this heading; the entries of a
+    /// table of contents link to it as `#_Toc<number>`.
+    pub bookmark: Option<u32>,
 }
 
 impl RichParagraph {

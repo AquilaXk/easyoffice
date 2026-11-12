@@ -5,7 +5,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 
 use crate::office_codecs::{checked_part, checked_zip_xml_entries};
-use crate::rich_document::{normalize_hex_color, safe_link_target, RichToc};
+use crate::rich_document::{normalize_hex_color, safe_link_target, toc_bookmark_number, RichToc};
 use crate::rich_image::{safe_package_path, ImageBudget};
 use crate::rich_table::{TableAssembler, MAX_PADDED_COLUMNS};
 use crate::rich_xml::{push_linked_run, toc_role_from_name, CharFmt};
@@ -261,6 +261,8 @@ struct Para {
     style: StyleProps,
     outline: u8,
     toc: Option<RichToc>,
+    /// Number of a `_Toc` bookmark that starts in the paragraph.
+    bookmark: Option<u32>,
     base: CharFmt,
     images: Vec<RichImage>,
 }
@@ -363,6 +365,12 @@ impl<'a> OdtWalker<'a> {
                 self.link = attr(attrs, "xlink:href")
                     .and_then(|href| safe_link_target(&href).map(str::to_string));
             }
+            "text:bookmark-start" | "text:bookmark" => {
+                let number = attr(attrs, "text:name").and_then(|n| toc_bookmark_number(&n));
+                if let Some(top) = self.paras.last_mut() {
+                    top.bookmark = top.bookmark.or(number);
+                }
+            }
             "text:tab" => self.push_inline("\t"),
             "text:line-break" => self.push_inline("\n"),
             "text:s" => {
@@ -441,6 +449,7 @@ impl<'a> OdtWalker<'a> {
             style,
             outline,
             toc,
+            bookmark: None,
             base,
             images: Vec::new(),
         });
@@ -590,6 +599,7 @@ impl<'a> OdtWalker<'a> {
                 first_line_indent_twips: p.style.first_line_twips,
                 line_spacing_percent: p.style.line_percent,
                 toc: p.toc,
+                bookmark: p.bookmark,
             }));
         }
         if self.tbl_depth == 0 {

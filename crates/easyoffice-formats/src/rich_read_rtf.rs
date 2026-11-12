@@ -312,6 +312,7 @@ impl Reader {
                 first_line_indent_twips: para.first_line,
                 line_spacing_percent,
                 toc: None,
+                bookmark: None,
             }));
         }
     }

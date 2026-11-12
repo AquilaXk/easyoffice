@@ -7,7 +7,9 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 
 use crate::office_codecs::{checked_part, checked_zip_xml_entries};
-use crate::rich_document::{highlight_name_to_hex, normalize_hex_color, RichToc};
+use crate::rich_document::{
+    highlight_name_to_hex, normalize_hex_color, toc_bookmark_number, RichToc,
+};
 use crate::rich_read_images::{drawing_picture, load_docx_hyperlinks, DocxMedia, DrawingOutcome};
 use crate::rich_read_numbering::{read_numbering, Numbering, LIST_LEVELS};
 use crate::rich_table::TableAssembler;
@@ -51,6 +53,8 @@ struct ParaState {
     left_indent: Option<u32>,
     first_line: Option<i32>,
     line_percent: Option<u16>,
+    /// Number of a `_Toc` bookmark that starts in the paragraph.
+    bookmark: Option<u32>,
 }
 
 const MAX_STYLE_INHERIT_DEPTH: usize = 16;
@@ -213,6 +217,7 @@ impl Resolver<'_> {
             first_line_indent_twips: p.first_line,
             line_spacing_percent: p.line_percent,
             toc,
+            bookmark: p.bookmark,
         }
     }
 }
@@ -241,6 +246,11 @@ const DRAWING_ELEMENT: &str = "w:drawing";
 const DOCX_SINGLE_LINE_240THS: i64 = 240;
 const SINGLE_LINE_PERCENT: u16 = 100;
 const UNSUPPORTED_OBJECT_NOTE: &str = "그림·도형·OLE 개체는 가져오지 않았습니다.";
+
+/// The in-document link (`#_Toc12`) to a table-of-contents bookmark name.
+fn toc_bookmark_link(name: &str) -> Option<String> {
+    toc_bookmark_number(name).map(|_| format!("#{name}"))
+}
 
 /// Applies a run-property element (`w:b`, `w:sz`, ...) to `fmt`.
 fn apply_run_property(fmt: &mut CharFmt, name: &str, attrs: &Attrs<'_>) {
@@ -378,7 +388,15 @@ impl DocxWalker {
             }
             "w:p" => self.paras.push(ParaState::default()),
             "w:hyperlink" => {
-                self.link = attr(attrs, "r:id").and_then(|id| self.links.get(id.as_ref()).cloned());
+                self.link = attr(attrs, "r:id")
+                    .and_then(|id| self.links.get(id.as_ref()).cloned())
+                    .or_else(|| attr(attrs, "w:anchor").and_then(|a| toc_bookmark_link(&a)));
+            }
+            "w:bookmarkStart" => {
+                let number = attr(attrs, "w:name").and_then(|n| toc_bookmark_number(&n));
+                if let Some(top) = self.paras.last_mut() {
+                    top.bookmark = top.bookmark.or(number);
+                }
             }
             "w:pPr" => self.in_ppr = true,
             "w:r" => {

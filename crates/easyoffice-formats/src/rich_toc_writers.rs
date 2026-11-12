@@ -10,12 +10,73 @@ const TOC_INDENT_TWIPS: u32 = 220;
 
 const DOCX_TOC_OPEN: &str = "<w:sdt><w:sdtPr><w:docPartObj><w:docPartGallery w:val=\"Table of Contents\"/><w:docPartUnique/></w:docPartObj></w:sdtPr><w:sdtContent>";
 const DOCX_TOC_CLOSE: &str = "</w:sdtContent></w:sdt>";
-const ODT_TOC_OPEN: &str =
-    "<text:table-of-content text:name=\"Table of Contents1\"><text:index-body>";
 const ODT_TOC_CLOSE: &str = "</text:index-body></text:table-of-content>";
+const DOCX_FIELD_END: &str = "<w:r><w:fldChar w:fldCharType=\"end\"/></w:r>";
 
 pub(crate) fn is_toc_block(block: &RichBlock) -> bool {
     matches!(block, RichBlock::Paragraph(p) if p.toc.is_some())
+}
+
+/// The `TOC \\o "1-N" \\h` field a word processor can update: it begins in the first entry paragraph and ends
+/// in the last one, with the entries as its result.
+fn docx_field_begin(levels: u8) -> String {
+    format!(
+        "<w:r><w:fldChar w:fldCharType=\"begin\"/></w:r><w:r><w:instrText xml:space=\"preserve\"> TOC \\o \"1-{levels}\" \\h </w:instrText></w:r><w:r><w:fldChar w:fldCharType=\"separate\"/></w:r>"
+    )
+}
+
+fn is_entry(block: Option<&RichBlock>) -> bool {
+    matches!(block, Some(RichBlock::Paragraph(p)) if matches!(p.toc, Some(RichToc::Entry(_))))
+}
+
+/// Field markup to put before and after the runs of the paragraph at `index` (`(begin, end)`, both empty
+/// unless it is the first or the last entry of a block).
+pub(crate) fn docx_field_edges(blocks: &[RichBlock], index: usize) -> (String, &'static str) {
+    if !is_entry(blocks.get(index)) {
+        return (String::new(), "");
+    }
+    let first = index == 0 || !is_entry(blocks.get(index - 1));
+    let last = !is_entry(blocks.get(index + 1));
+    (
+        if first {
+            docx_field_begin(entry_levels_from(blocks, index))
+        } else {
+            String::new()
+        },
+        if last { DOCX_FIELD_END } else { "" },
+    )
+}
+
+/// Deepest entry level of the entries that run on from `index` (at least 1).
+pub(crate) fn entry_levels_from(blocks: &[RichBlock], index: usize) -> u8 {
+    blocks[index..]
+        .iter()
+        .take_while(|b| is_toc_block(b))
+        .filter_map(|b| match b {
+            RichBlock::Paragraph(p) => match p.toc {
+                Some(RichToc::Entry(level)) => Some(level),
+                _ => None,
+            },
+            _ => None,
+        })
+        .max()
+        .unwrap_or(1)
+}
+
+/// `text:table-of-content` opening with the source an ODT editor rebuilds the block from: one entry
+/// template per level (a link around the heading text).
+fn odt_toc_open(levels: u8) -> String {
+    let mut xml = format!(
+        "<text:table-of-content text:name=\"Table of Contents1\"><text:table-of-content-source text:outline-level=\"{levels}\">"
+    );
+    for level in 1..=levels {
+        xml.push_str(&format!(
+            "<text:table-of-content-entry-template text:outline-level=\"{level}\" text:style-name=\"{}\"><text:index-entry-link-start/><text:index-entry-text/><text:index-entry-link-end/></text:table-of-content-entry-template>",
+            odt_toc_style_name(RichToc::Entry(level))
+        ));
+    }
+    xml.push_str("</text:table-of-content-source><text:index-body>");
+    xml
 }
 
 pub(crate) fn docx_toc_style_id(role: RichToc) -> String {
@@ -69,20 +130,20 @@ pub(crate) fn odt_toc_styles_xml() -> String {
 /// Opens and closes the TOC container as consecutive TOC paragraphs start and stop.
 pub(crate) struct TocScope {
     open: bool,
-    open_xml: &'static str,
+    open_xml: fn(u8) -> String,
     close_xml: &'static str,
 }
 
 impl TocScope {
     pub(crate) fn docx() -> Self {
-        Self::new(DOCX_TOC_OPEN, DOCX_TOC_CLOSE)
+        Self::new(|_| DOCX_TOC_OPEN.to_string(), DOCX_TOC_CLOSE)
     }
 
     pub(crate) fn odt() -> Self {
-        Self::new(ODT_TOC_OPEN, ODT_TOC_CLOSE)
+        Self::new(odt_toc_open, ODT_TOC_CLOSE)
     }
 
-    fn new(open_xml: &'static str, close_xml: &'static str) -> Self {
+    fn new(open_xml: fn(u8) -> String, close_xml: &'static str) -> Self {
         Self {
             open: false,
             open_xml,
@@ -90,15 +151,17 @@ impl TocScope {
         }
     }
 
-    /// Call before each block with whether it is a TOC paragraph, and once after the last block with `false`.
-    pub(crate) fn enter(&mut self, out: &mut String, in_toc: bool) {
-        if in_toc != self.open {
-            out.push_str(if in_toc {
-                self.open_xml
-            } else {
-                self.close_xml
-            });
-            self.open = in_toc;
+    /// Call before each block (`index` into `blocks`), and once after the last block with `index` past the end.
+    pub(crate) fn enter(&mut self, out: &mut String, blocks: &[RichBlock], index: usize) {
+        let in_toc = blocks.get(index).is_some_and(is_toc_block);
+        if in_toc == self.open {
+            return;
         }
+        if in_toc {
+            out.push_str(&(self.open_xml)(entry_levels_from(blocks, index)));
+        } else {
+            out.push_str(self.close_xml);
+        }
+        self.open = in_toc;
     }
 }

@@ -4,7 +4,7 @@ use easyoffice_formats::{
     ZipSecurityPolicy,
 };
 
-fn request(action: Option<&str>, file: &str, bytes: &[u8], extra: &str) -> String {
+pub(super) fn request(action: Option<&str>, file: &str, bytes: &[u8], extra: &str) -> String {
     let action = action.map_or(String::new(), |a| format!("\"action\":\"{a}\","));
     format!(
         "{{{action}\"fileName\":\"{file}\",\"sourceBase64\":\"{}\"{extra}}}",
@@ -37,7 +37,7 @@ fn docx_bytes() -> Vec<u8> {
     UniversalFormatConverter::encode_rich(&doc, DocumentFormat::Docx, None).unwrap()
 }
 
-fn json_field<'a>(json: &'a str, key: &str) -> &'a str {
+pub(super) fn json_field<'a>(json: &'a str, key: &str) -> &'a str {
     let start = json.find(&format!("\"{key}\":\"")).unwrap() + key.len() + 4;
     &json[start..start + json[start..].find('"').unwrap()]
 }
@@ -100,28 +100,6 @@ fn invalid_run_properties_are_rejected_and_old_payloads_still_work() {
     }
     let old = "{\"targetFormat\":\"docx\",\"blocks\":[{\"type\":\"paragraph\",\"runs\":[{\"text\":\"x\",\"bold\":true}]}]}";
     assert!(EasyOfficeIpcRouter::dispatch("convert_document_format", old).is_ok());
-}
-
-#[test]
-fn a_table_of_contents_survives_odt_save_and_reopen_and_a_bad_level_rejects_the_save() {
-    let payload = concat!(
-        "{\"targetFormat\":\"odt\",\"blocks\":[",
-        "{\"type\":\"paragraph\",\"toc\":0,\"runs\":[{\"text\":\"목차\"}]},",
-        "{\"type\":\"paragraph\",\"toc\":2,\"runs\":[{\"text\":\"세부\"}]},",
-        "{\"type\":\"paragraph\",\"heading\":2,\"runs\":[{\"text\":\"세부\"}]}]}"
-    );
-    let saved = EasyOfficeIpcRouter::dispatch("convert_document_format", payload).unwrap();
-    let bytes = EasyOfficeIpcRouter::decode_base64(json_field(&saved, "convertedBase64")).unwrap();
-    let json = EasyOfficeIpcRouter::dispatch(
-        "convert_document_format",
-        &request(Some("decode"), "목차.odt", &bytes, ""),
-    )
-    .unwrap();
-    assert!(json.contains("\"toc\":0"), "{json}");
-    assert!(json.contains("\"toc\":2"), "{json}");
-    assert!(json.contains("\"heading\":2"), "{json}");
-    let bad = payload.replace("\"toc\":2", "\"toc\":10");
-    assert!(EasyOfficeIpcRouter::dispatch("convert_document_format", &bad).is_err());
 }
 
 #[test]

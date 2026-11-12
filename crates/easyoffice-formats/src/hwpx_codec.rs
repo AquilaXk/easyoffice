@@ -17,7 +17,7 @@ use crate::office_codecs::{checked_part, checked_zip_xml_entries};
 use crate::rich_document::{RichAlignment, RichBlock, RichDocument};
 use crate::rich_image::{check_document_images, RichImage};
 use crate::rich_image_writers::{hwpx_picture_run, MediaParts};
-use crate::rich_link_writers::{hwpx_link_begin, hwpx_link_end, link_groups};
+use crate::rich_link_writers::{external_link_groups, hwpx_link_begin, hwpx_link_end};
 use crate::rich_table::{CellSpan, SpanMap};
 use crate::rtf_xml_helpers::{
     extract_attr, extract_attr_from_fragment, extract_tag_bodies,
@@ -314,7 +314,7 @@ impl HwpxCodec {
                 0
             };
             sec.open_paragraph_with(para_pr, style);
-            let groups = link_groups(&p.runs);
+            let groups = external_link_groups(&p.runs);
             if groups.is_empty() {
                 let char_pr = intern(&mut char_shapes, &mut char_map, base);
                 sec.run(char_pr, "");

@@ -7,9 +7,23 @@ use crate::{RichRun, XmlSanitizer};
 
 /// Consecutive non-empty runs split into groups that share one safe link (`None` for plain text).
 pub(crate) fn link_groups(runs: &[RichRun]) -> Vec<(Option<&str>, Vec<&RichRun>)> {
+    groups_by(runs, safe_link_target)
+}
+
+/// [`link_groups`] for a format without bookmarks (HWPX): an in-document `#_Toc` target is plain text.
+pub(crate) fn external_link_groups(runs: &[RichRun]) -> Vec<(Option<&str>, Vec<&RichRun>)> {
+    groups_by(runs, |raw| {
+        safe_link_target(raw).filter(|url| !url.starts_with('#'))
+    })
+}
+
+fn groups_by<'a>(
+    runs: &'a [RichRun],
+    accept: impl Fn(&'a str) -> Option<&'a str>,
+) -> Vec<(Option<&'a str>, Vec<&'a RichRun>)> {
     let mut groups: Vec<(Option<&str>, Vec<&RichRun>)> = Vec::new();
     for run in runs.iter().filter(|r| !r.text.is_empty()) {
-        let link = run.link.as_deref().and_then(safe_link_target);
+        let link = run.link.as_deref().and_then(&accept);
         match groups.last_mut() {
             Some((last, members)) if *last == link => members.push(run),
             _ => groups.push((link, vec![run])),

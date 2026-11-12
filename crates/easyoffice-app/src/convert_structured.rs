@@ -92,7 +92,7 @@ fn opt_size_half_pt(obj: &JsonObject) -> Result<Option<u16>, EasyOfficeError> {
         .transpose()
 }
 
-/// Hyperlink address of a run: an `http`, `https` or `mailto` target (`safe_link_target`); anything else
+/// Hyperlink address of a run: an `http`, `https` or `mailto` target or a `#_Toc<number>` bookmark (`safe_link_target`); anything else
 /// rejects the save instead of being written.
 fn opt_link(obj: &JsonObject) -> Result<Option<String>, EasyOfficeError> {
     match opt_str(obj, "link")?.filter(|l| !l.is_empty()) {
@@ -245,6 +245,15 @@ fn parse_paragraph(
                 .ok_or_else(|| invalid("구조화 저장: 'toc'는 0~9 정수여야 합니다."))?,
         ),
     };
+    let bookmark = match field(obj, "bookmark") {
+        None => None,
+        Some(v) => Some(
+            v.as_u64()
+                .and_then(|n| u32::try_from(n).ok())
+                .filter(|n| *n > 0)
+                .ok_or_else(|| invalid("구조화 저장: 'bookmark'는 1 이상의 정수여야 합니다."))?,
+        ),
+    };
     let list = match opt_str(obj, "list")? {
         None | Some("") => None,
         Some("bullet") => Some(RichListKind::Bullet),
@@ -270,6 +279,7 @@ fn parse_paragraph(
         line_spacing_percent: opt_bounded(obj, "lineSpacingPercent", 1, MAX_LINE_SPACING_PERCENT)?
             .map(|v| v as u16),
         toc,
+        bookmark,
     })
 }
 

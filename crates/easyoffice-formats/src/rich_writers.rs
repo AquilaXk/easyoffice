@@ -9,7 +9,9 @@ use crate::pdf_writer::{
     text_entries, PdfImagePage, PdfPageEntry, PdfWriteOptions, PDF_IMAGE_MARGIN_PT,
     PDF_PAGE_HEIGHT_PT, PDF_PAGE_WIDTH_PT,
 };
-use crate::rich_document::{RichAlignment, RichBlock, RichDocument, RichListKind, RichParagraph};
+use crate::rich_document::{
+    RichAlignment, RichBlock, RichDocument, RichListKind, RichParagraph, TOC_BOOKMARK_PREFIX,
+};
 use crate::rich_image::{check_document_images, fit_within};
 use crate::rich_image_writers::{
     docx_content_type_defaults, docx_image_paragraph, docx_image_relationship, emu_to_points,
@@ -28,8 +30,8 @@ use crate::rich_run_writers::{
 };
 use crate::rich_table_writers::{push_docx_table, push_odt_table};
 use crate::rich_toc_writers::{
-    docx_toc_style_id, docx_toc_styles_xml, is_toc_block, odt_toc_style_name, odt_toc_styles_xml,
-    TocScope,
+    docx_field_edges, docx_toc_style_id, docx_toc_styles_xml, is_toc_block, odt_toc_style_name,
+    odt_toc_styles_xml, TocScope,
 };
 use crate::{
     CommonMarkCodec, EasyOfficeError, MarkdownBlock, OdfCodec, PdfDocumentModel, PdfPageModel,
@@ -142,6 +144,7 @@ fn push_docx_paragraph(
     p: &RichParagraph,
     run: Option<usize>,
     links: &mut DocxLinks,
+    field: &(String, &str),
 ) {
     out.push_str("<w:p>");
     let style = if let Some(role) = p.toc {
@@ -175,12 +178,22 @@ fn push_docx_paragraph(
         }
         out.push_str("</w:pPr>");
     }
+    out.push_str(&field.0);
+    if let Some(number) = p.bookmark {
+        out.push_str(&format!(
+            "<w:bookmarkStart w:id=\"{number}\" w:name=\"{TOC_BOOKMARK_PREFIX}{number}\"/>"
+        ));
+    }
     for (link, group) in link_groups(&p.runs) {
-        if let Some(url) = link {
-            out.push_str(&format!(
+        match link.map(|url| url.strip_prefix('#').ok_or(url)) {
+            Some(Ok(anchor)) => out.push_str(&format!(
+                "<w:hyperlink w:anchor=\"{anchor}\" w:history=\"1\">"
+            )),
+            Some(Err(url)) => out.push_str(&format!(
                 "<w:hyperlink r:id=\"{}\" w:history=\"1\">",
                 links.rel_id(url)
-            ));
+            )),
+            None => {}
         }
         for run in group {
             let properties = docx_run_properties(run);
@@ -197,6 +210,10 @@ fn push_docx_paragraph(
             out.push_str("</w:hyperlink>");
         }
     }
+    if let Some(number) = p.bookmark {
+        out.push_str(&format!("<w:bookmarkEnd w:id=\"{number}\"/>"));
+    }
+    out.push_str(field.1);
     out.push_str("</w:p>");
 }
 
@@ -254,10 +271,16 @@ pub(crate) fn pack_docx_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeEr
     let mut links = DocxLinks::default();
     let mut toc_scope = TocScope::docx();
     for (index, block) in doc.blocks.iter().enumerate() {
-        toc_scope.enter(&mut body, is_toc_block(block));
+        toc_scope.enter(&mut body, &doc.blocks, index);
         match block {
             RichBlock::Paragraph(p) => {
-                push_docx_paragraph(&mut body, p, lists.block_run[index], &mut links);
+                push_docx_paragraph(
+                    &mut body,
+                    p,
+                    lists.block_run[index],
+                    &mut links,
+                    &docx_field_edges(&doc.blocks, index),
+                );
             }
             RichBlock::Image(img) => {
                 let picture = media.add(DOCX_MEDIA_DIR, img);
@@ -275,7 +298,7 @@ pub(crate) fn pack_docx_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeEr
             }
         }
     }
-    toc_scope.enter(&mut body, false);
+    toc_scope.enter(&mut body, &doc.blocks, doc.blocks.len());
     body.push_str("<w:sectPr><w:pgSz w:w=\"11906\" w:h=\"16838\"/></w:sectPr>");
     body.push_str("</w:body></w:document>");
 
@@ -412,6 +435,11 @@ fn push_odt_paragraph(
     } else {
         body.push_str(&format!("<text:p{style_attr}>"));
     }
+    if let Some(number) = p.bookmark {
+        body.push_str(&format!(
+            "<text:bookmark-start text:name=\"{TOC_BOOKMARK_PREFIX}{number}\"/>"
+        ));
+    }
     for (link, group) in link_groups(&p.runs) {
         if let Some(url) = link {
             body.push_str(&format!(
@@ -433,6 +461,11 @@ fn push_odt_paragraph(
         if link.is_some() {
             body.push_str("</text:a>");
         }
+    }
+    if let Some(number) = p.bookmark {
+        body.push_str(&format!(
+            "<text:bookmark-end text:name=\"{TOC_BOOKMARK_PREFIX}{number}\"/>"
+        ));
     }
     body.push_str(if level > 0 { "</text:h>" } else { "</text:p>" });
 }
@@ -508,7 +541,7 @@ pub(crate) fn pack_odt_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeErr
     let mut open_lists = OdtListWriter::default();
     let mut toc_scope = TocScope::odt();
     for (index, block) in doc.blocks.iter().enumerate() {
-        toc_scope.enter(&mut body, is_toc_block(block));
+        toc_scope.enter(&mut body, &doc.blocks, index);
         match (block, lists.block_run[index]) {
             (RichBlock::Paragraph(p), Some(run)) => {
                 open_lists.enter(&mut body, &lists, run, level_of(p));
@@ -529,7 +562,7 @@ pub(crate) fn pack_odt_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeErr
         }
     }
     open_lists.leave(&mut body);
-    toc_scope.enter(&mut body, false);
+    toc_scope.enter(&mut body, &doc.blocks, doc.blocks.len());
 
     let mut styles = String::from("<office:automatic-styles>");
     if doc.blocks.iter().any(is_toc_block) {
