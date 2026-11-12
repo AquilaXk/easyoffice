@@ -79,14 +79,12 @@ test("rows and columns turn over; each formula moves by the distance of its own 
   assert.deepEqual(paste.transposed(wide), [[wide.cells[0][0]], [wide.cells[0][1]], [wide.cells[0][2]]]);
 });
 
-test("a turned-over paste tells the formula where each cell of the copied block goes", () => {
-  let mapCell;
-  plan(BLOCK, "all", { transpose: true, shiftFormula: (f, dr, dc, map) => ((mapCell = map), f) });
-  assert.deepEqual([mapCell(2, 1), mapCell(2, 2), mapCell(3, 1), mapCell(3, 2)], [[5, 5], [6, 5], [5, 6], [6, 6]]);
-  assert.equal(mapCell(9, 1), null, "a cell outside the block");
-  assert.equal(mapCell(2, 3), null);
+test("a turned-over paste tells the formula which cell it came from and went to", () => {
+  const seen = [];
+  plan(BLOCK, "all", { transpose: true, shiftFormula: (f, dr, dc, turn) => (seen.push(turn), f) });
+  assert.deepEqual(seen, [{ fromRow: 2, fromCol: 2, toRow: 6, toCol: 5 }], "the formula at row 2, column 2 lands at E6 (the block is pasted at E5)");
   let straight = "unset";
-  plan(BLOCK, "all", { shiftFormula: (f, dr, dc, map) => ((straight = map), f) });
+  plan(BLOCK, "all", { shiftFormula: (f, dr, dc, turn) => ((straight = turn), f) });
   assert.equal(straight, undefined, "a plain paste moves references by the distance only");
 });
 

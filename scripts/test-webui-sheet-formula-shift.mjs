@@ -61,3 +61,18 @@ test("references pushed outside the grid become #REF!", async () => {
   assert.equal(shift("=A1", 0, -1), "=#REF!");
   assert.equal(shift("=$A$1+A1", -1, -1), "=$A$1+#REF!");
 });
+
+test("a turned-over paste swaps the offsets of references that are relative in row and column, and leaves the rest as written", async () => {
+  const shift = await shifter();
+  const turn = { fromRow: 1, fromCol: 3, toRow: 10, toCol: 1 };
+  assert.equal(shift("=A1+B1", 9, -2, turn), "=A8+A9", "offsets (0,-2) and (0,-1) become (-2,0) and (-1,0) from A10");
+  assert.equal(shift("=C1", 9, -2, turn), "=A10", "a reference to the formula's own cell stays on it");
+  assert.equal(shift("=SUM(A1:B2)", 9, -2, turn), "=SUM(A8:B9)", "both ends of a relative range swap");
+  assert.equal(shift("=Sheet2!A1", 9, -2, turn), "=Sheet2!A8");
+  assert.equal(shift("=$A1+A$1+$A$1", 9, -2, turn), "=$A1+A$1+$A$1", "a $ part keeps the reference as written");
+  assert.equal(shift("=SUM($A1:B2)", 9, -2, turn), "=SUM($A1:B2)", "a range turns only when both ends are fully relative");
+  assert.equal(shift("=SUM(A:A)+SUM(1:1)", 9, -2, turn), "=SUM(A:A)+SUM(1:1)", "a whole row or column stays");
+  assert.equal(shift("=Z99", 9, -2, turn), "=CU33", "a reference outside the block turns the same way: offset (98,23) becomes (23,98)");
+  assert.equal(shift('="A1"&LOG10(A1)', 9, -2, turn), '="A1"&LOG10(A8)');
+  assert.equal(shift("=A1", 0, -2, { fromRow: 1, fromCol: 3, toRow: 1, toCol: 1 }), "=#REF!", "a swapped offset past the grid edge");
+});

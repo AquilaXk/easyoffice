@@ -9,11 +9,14 @@
 //       (the special paste hooks: value writes the cell values, format writes the styles, column
 //        width writes the widths of the pasted columns and cycles when the target is wider)
 //   packages/sheets-ui/src/services/clipboard/clipboard.service.ts :894-896
-//       (the transpose step sits between the copied matrix and the paste; the reference leaves it
-//        unwritten, so the turn-over here is this repository's own)
+//       (the transpose step sits between the copied matrix and the paste; this reference leaves it
+//        unwritten, so the turn-over follows the behaviour of another office engine: behaviour
+//        only, no code is taken from it)
 // Differences: the cell model holds no borders, so there is no "all but border" mode; a column
-// width paste does not cycle; a relative reference into the copied block follows its cell when rows
-// and columns are turned over, every other reference moves by the distance of its formula's cell; a paste that cuts through a merged range is refused (the reference
+// width paste does not cycle; when rows and columns are turned over a formula's references follow
+// the rule of the reference office engine: a cell whose row and column are both relative (and a
+// range whose ends both are) swaps its row and column offsets from the formula, any other
+// reference stays as written; a paste that cuts through a merged range is refused (the reference
 // refuses it too, `sheets-ui.clipboard.paste.overlappingMergedCells`).
 (function (host) {
   "use strict";
@@ -37,17 +40,6 @@
     return cells;
   }
 
-  // Where a cell of the copied block goes when rows and columns are turned over, or null for a cell
-  // outside the block.
-  function turnedCell(snap, target) {
-    const index = new Map(snap.rows.map((row, i) => [row, i]));
-    return (row, col) => {
-      const i = index.get(row);
-      const j = col - snap.c1;
-      return i === undefined || j < 0 || j >= snap.cols ? null : [target.r1 + j, target.c1 + i];
-    };
-  }
-
   // The writes of pasting `snap` at `target` ({ r1, c1, r2, c2 }): `{ edits, widths, clipped }`.
   // `getEntry(ref)` reads the target cell (the format mode keeps its content); `shiftFormula` moves
   // the relative references of a formula; `isFormulaStr` tells a typed formula from text.
@@ -61,7 +53,6 @@
     const rowsN = spread ? target.r2 - target.r1 + 1 : outRows;
     const colsN = spread ? target.c2 - target.c1 + 1 : outCols;
     const result = { edits: [], widths: null, clipped: 0 };
-    const mapCell = transpose && !spread && copied ? turnedCell(snap, target) : undefined;
     if (mode === "widths") {
       result.widths = copied ? widthsOf(snap, target, grid) : null;
       return result;
@@ -81,7 +72,8 @@
         if (copied && edit.formula) {
           const srcRow = snap.rows[transpose ? sj : si];
           const srcCol = snap.c1 + (transpose ? si : sj);
-          edit.formula = shiftFormula(edit.formula, row - srcRow, col - srcCol, mapCell);
+          const turn = transpose ? { fromRow: srcRow, fromCol: srcCol, toRow: row, toCol: col } : undefined;
+          edit.formula = shiftFormula(edit.formula, row - srcRow, col - srcCol, turn);
         }
         if (mode === "formats") {
           const now = getEntry(ref);

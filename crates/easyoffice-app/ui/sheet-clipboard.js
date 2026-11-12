@@ -24,6 +24,7 @@
     "gu"
   );
   const REF_END_RE = /^(\$?)([A-Za-z]*)(\$?)(\d*)$/;
+  const CELL_END_RE = /^([A-Za-z]+)(\d+)$/;
 
   function entryRaw(entry) {
     if (!entry) return "";
@@ -138,35 +139,50 @@
       return { text, rows, c1: range.c1, cols, cells, widths };
     }
 
-    // Moves one end of a reference; null when it leaves the grid. `mapCell(row, col)` (a paste that
-    // turns rows and columns over) answers where a cell of the copied block goes: a relative cell
-    // reference into the block follows its cell there.
-    function shiftRefEnd(end, dRow, dCol, mapCell) {
+    // Moves one end of a reference; null when it leaves the grid.
+    function shiftRefEnd(end, dRow, dCol) {
       const [, first, letters, second, digits] = REF_END_RE.exec(end);
       const colAbs = letters ? first : "";
       const rowAbs = letters ? second : first;
-      const moved = letters && digits && mapCell ? mapCell(Number(digits), grid.colIndex(letters.toUpperCase())) : null;
       let out = "";
       if (letters) {
-        const col = moved && !colAbs ? moved[1] : grid.colIndex(letters.toUpperCase()) + (colAbs || moved ? 0 : dCol);
+        const col = grid.colIndex(letters.toUpperCase()) + (colAbs ? 0 : dCol);
         if (col < 1 || col > grid.MAX_COLS) return null;
         out += colAbs + grid.colName(col);
       }
       if (digits) {
-        const row = moved && !rowAbs ? moved[0] : Number(digits) + (rowAbs || moved ? 0 : dRow);
+        const row = Number(digits) + (rowAbs ? 0 : dRow);
         if (row < 1 || row > grid.MAX_ROWS) return null;
         out += rowAbs + row;
       }
       return out;
     }
 
+    // A turned-over paste (rows and columns swapped) swaps the row and column offsets of a
+    // reference from its formula: a cell whose row and column are both relative moves to the swapped
+    // offset from the formula's new cell; a range follows only when both ends are such cells. Every
+    // other reference (a `$` part, a whole row or column) stays as written. `turn` is
+    // `{ fromRow, fromCol, toRow, toCol }`, the formula's cell before and after.
+    function turnRefEnd(end, turn) {
+      const [, letters, digits] = CELL_END_RE.exec(end);
+      const row = turn.toRow + (grid.colIndex(letters.toUpperCase()) - turn.fromCol);
+      const col = turn.toCol + (Number(digits) - turn.fromRow);
+      return row < 1 || row > grid.MAX_ROWS || col < 1 || col > grid.MAX_COLS ? null : grid.colName(col) + row;
+    }
+
     // Standard copy semantics: relative parts of every reference (other sheets included, both
     // ends of a range) move by the offset, `$` parts stay, and a reference pushed off the grid
     // becomes `#REF!`. String literals are never touched.
-    function shiftFormula(formula, dRow, dCol, mapCell) {
+    function shiftFormula(formula, dRow, dCol, turn) {
       return formula.replace(TOKEN_RE, (token, sheet, ref) => {
         if (ref === undefined) return token;
-        const ends = ref.split(":").map((end) => shiftRefEnd(end, dRow, dCol, mapCell));
+        if (turn) {
+          const parts = ref.split(":");
+          if (!parts.every((end) => CELL_END_RE.test(end))) return token;
+          const turned = parts.map((end) => turnRefEnd(end, turn));
+          return (sheet || "") + (turned.includes(null) ? "#REF!" : turned.join(":"));
+        }
+        const ends = ref.split(":").map((end) => shiftRefEnd(end, dRow, dCol));
         return (sheet || "") + (ends.includes(null) ? "#REF!" : ends.join(":"));
       });
     }
