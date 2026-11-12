@@ -649,6 +649,8 @@ impl EasyOfficeIpcRouter {
 }
 
 #[cfg(test)]
+mod page_break_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod toc_tests;
