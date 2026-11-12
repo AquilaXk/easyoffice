@@ -332,6 +332,11 @@ test("a value condition hides rows apart from the user's, shows on the header an
   assert.deepEqual(hiddenRows(d), [3, 5, 7]);
   assert.ok(cell(d, "A1").classList.contains("filter-on"));
   assert.equal(feedback(d), "필터: 6행 중 3행 표시");
+  // Row numbers of the filtered range show in the accent color; the header row's own number does not.
+  const rowHead = (r) => d.querySelector(`#pane-sheet tbody tr[data-row="${r}"] th`);
+  assert.ok(rowHead(2).classList.contains("filter-row") && rowHead(4).classList.contains("filter-row"));
+  assert.equal(rowHead(1).classList.contains("filter-row"), false);
+  assert.equal(d.getElementById("sheet-filter-dialog-title").textContent, d.querySelector('[data-filter-act="custom"] .md-label').textContent.replace("…", ""), "the dialog is named like its menu row");
   const apply = h.requests.filter((r) => r.op === "apply").at(-1);
   assert.deepEqual(apply.filter.columns, [{ col: 1, values: ["영업"] }]);
   assert.equal(apply.data.length, 1, "only the column that has a condition is sent");

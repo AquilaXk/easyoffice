@@ -10,7 +10,7 @@
   const ROW_H = 22; // the height of a field in a dialog (`.dialog-input`)
   const LIST_ROWS = 10;
   const BUFFER_ROWS = 3;
-  const HIT_PX = 22; // the button at the right of a header cell
+  const HIT_PX = 22; // the corner of a header cell that opens the panel (its button is 18px)
   const MENU_MARGIN = 2; // rhwp-studio's context menu keeps 2px from the window edge
   const SEARCH_DELAY_MS = 120;
 

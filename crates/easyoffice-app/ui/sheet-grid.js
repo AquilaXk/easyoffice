@@ -697,13 +697,6 @@
       layoutApplied = !empty;
       const name = getSheetName();
       const runs = layout?.hiddenRows || [];
-      const tbody = tbodyEl();
-      if (tbody) {
-        for (const tr of tbody.children) {
-          const r = rowOf(tr);
-          if (r > 0) tr.classList.toggle("sheet-hidden", !empty && layoutApi.rowHidden(name, r));
-        }
-      }
       const colRuns = layout?.hiddenCols || [];
       const filter = layout?.filter || null;
       const filterCols = filter ? new Set(filter.columns.map((x) => x.col)) : null;
@@ -711,7 +704,12 @@
         th.classList.toggle("sheet-hidden", !empty && layoutApi.colHidden(name, c));
         markHiddenEdge(th, "col", empty ? null : layoutApi.runAt(colRuns, c - 1));
       }
-      for (const [r, th] of rowHeadByRow) markHiddenEdge(th, "row", empty ? null : layoutApi.runAt(runs, r - 1));
+      // A row number turns to the accent color while a filter has hidden rows (the rows below its header).
+      const skipped = filter !== null && filter.hidden.length > 0;
+      for (const [r, th] of rowHeadByRow) {
+        markHiddenEdge(th, "row", empty ? null : layoutApi.runAt(runs, r - 1));
+        th.classList.toggle("filter-row", skipped && r > filter.range.r1 && r <= filter.range.r2);
+      }
       seedDomMaps();
       for (const td of tdByPacked.values()) {
         const r = td._row;
