@@ -1,3 +1,7 @@
+// Reference implementation (whole-cell comparison): Univer (Apache-2.0, Copyright 2023-present DreamNum
+// Co., Ltd.), commit 5a06a7842c8e13fa0646d0733dc3662cf4b330b9, `packages/sheets-find-replace/src/controllers/
+// sheet-find-replace.controller.ts` 1147-1157 (`matchCellData`). See THIRD_PARTY_NOTICES.md. The whole-cell
+// test is an anchored pattern here, so one matcher serves both modes and the index reuse keeps working.
 (function (host) {
   "use strict";
 
@@ -19,11 +23,13 @@
   }
 
   // `{ ok: true, re, key }` or `{ ok: false, error }`. An empty query is not an error: it matches nothing.
-  function buildMatcher({ query, matchCase = false }) {
+  // `wholeCell` keeps only a block whose entire text is the query (a sheet cell, `matchesTheWholeCell`).
+  function buildMatcher({ query, matchCase = false, wholeCell = false }) {
     const text = String(query ?? "").normalize("NFC");
     if (text === "") return { ok: true, empty: true, key: "" };
     if (text.length > MAX_QUERY_CHARS) return { ok: false, error: MSG_TOO_LONG };
-    return { ok: true, re: new RegExp(escapeRegExp(text), matchCase ? "gu" : "giu"), key: (matchCase ? "C" : "c") + text };
+    const source = wholeCell ? "^" + escapeRegExp(text) + "$" : escapeRegExp(text);
+    return { ok: true, re: new RegExp(source, matchCase ? "gu" : "giu"), key: (matchCase ? "C" : "c") + (wholeCell ? "W" : "p") + text };
   }
 
   // Matches of `text` as `{ start, end }`. `limit` caps how many are returned.

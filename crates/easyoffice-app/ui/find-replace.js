@@ -32,7 +32,8 @@
     const ui = () => (elements ??= {
       dialog: byId(DIALOG_ID), title: byId("find-dialog-title"), query: byId("find-query"),
       replacement: byId("find-replacement"), replaceRow: byId("find-replace-row"), count: byId("find-count"), status: byId("find-status"),
-      caseBox: byId("find-opt-case"),
+      caseBox: byId("find-opt-case"), sheetOptions: byId("find-sheet-options"),
+      wholeBox: byId("find-opt-whole"), formulaBox: byId("find-opt-formula"), workbookBox: byId("find-opt-workbook"),
       replaceButtons: byId("find-replace-buttons"),
     });
 
@@ -72,9 +73,15 @@
       return result.complete ? String(result.total) : result.total + "+";
     }
 
+    // The sheet-only options (whole cell, formula, all sheets); the document source has none.
+    function sheetOptions() {
+      const { wholeBox, formulaBox, workbookBox } = ui();
+      return source?.kind === "sheet" ? { wholeCell: wholeBox.checked, formula: formulaBox.checked, workbook: workbookBox.checked } : {};
+    }
+
     function readMatcher() {
       const { query, caseBox } = ui();
-      return buildMatcher({ query: query.value, matchCase: caseBox.checked });
+      return buildMatcher({ query: query.value, matchCase: caseBox.checked, wholeCell: sheetOptions().wholeCell });
     }
 
     // Matches around `n` for the on-screen highlight.
@@ -92,7 +99,7 @@
         return;
       }
       origin = { id: current.id, offset: current.start };
-      source.show(nearMatches(n), current);
+      source.show(nearMatches(n), current, sheetOptions());
       showStatus("", n + 1 + " / " + totalLabel(result));
     }
 
@@ -106,7 +113,7 @@
         showStatus(matcher.error);
         return null;
       }
-      source.sync(index);
+      source.sync(index, sheetOptions());
       return index.search(matcher);
     }
 
@@ -144,7 +151,7 @@
       if (!current) return step(true);
       const value = ui().replacement.value;
       const { id, start, end } = current;
-      const outcome = await source.replace([{ id, edits: [{ start, end, value }] }]);
+      const outcome = await source.replace([{ id, edits: [{ start, end, value }] }], sheetOptions());
       origin = { id, offset: start + value.length };
       current = null;
       const next = refresh();
@@ -163,7 +170,7 @@
         if (found.length > 0) plan.push({ id, edits: found.map((m) => ({ start: m.start, end: m.end, value: replacement })) });
       }
       if (plan.length === 0) return showStatus(MSG_NO_MATCH);
-      const outcome = await source.replace(plan);
+      const outcome = await source.replace(plan, sheetOptions());
       current = null;
       origin = null;
       const after = refresh();
@@ -179,11 +186,12 @@
     }
 
     function applyMode(mode) {
-      const { title, replaceRow, replaceButtons } = ui();
+      const { title, replaceRow, replaceButtons, sheetOptions: optionsRow } = ui();
       const replacing = mode === "replace";
       title.textContent = replacing ? "찾아 바꾸기" : "찾기";
       replaceRow.hidden = !replacing;
       replaceButtons.hidden = !replacing;
+      optionsRow.hidden = source?.kind !== "sheet";
     }
 
     function ensureSource(moduleCode) {
@@ -216,7 +224,7 @@
       const picked = moduleCode === "DOC" ? selectedQuery() : "";
       if (picked) els.query.value = picked;
       if (!els.dialog.open) {
-        origin = source.anchor();
+        origin = source.anchor(sheetOptions());
         els.dialog.show();
         document.addEventListener("keydown", onKeyCapture, true);
       }
@@ -241,7 +249,7 @@
       els.query.addEventListener("input", rerun);
       els.query.addEventListener("compositionstart", () => { composing = true; });
       els.query.addEventListener("compositionend", () => { composing = false; search(); });
-      els.caseBox.addEventListener("change", search);
+      for (const box of [els.caseBox, els.wholeBox, els.formulaBox, els.workbookBox]) box.addEventListener("change", search);
       byId("btn-find-next").addEventListener("click", () => step(true));
       byId("btn-find-prev").addEventListener("click", () => step(false));
       byId("btn-find-replace").addEventListener("click", () => void replaceCurrent().catch((err) => showStatus(err.message)));

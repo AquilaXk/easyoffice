@@ -116,3 +116,14 @@ test("budgets: the match cap and the time budget stop a search instead of runnin
   assert.equal(partial.complete, false);
   assert.ok(partial.total < 3, "blocks past the budget stay stale for the next call");
 });
+
+test("whole-cell matching keeps only a block whose entire text is the query (case option still applies)", () => {
+  const whole = (query, matchCase = false) => core.buildMatcher({ query, matchCase, wholeCell: true });
+  assert.equal(core.matchesOf("사과", whole("사과")).length, 1);
+  assert.equal(core.matchesOf("사과 파이", whole("사과")).length, 0);
+  assert.equal(core.matchesOf("Apple", whole("apple")).length, 1, "case-insensitive by default");
+  assert.equal(core.matchesOf("Apple", whole("apple", true)).length, 0);
+  assert.equal(core.matchesOf("a.c", whole("a.c")).length, 1, "the query stays literal text");
+  assert.equal(core.matchesOf("abc", whole("a.c")).length, 0);
+  assert.notEqual(whole("x").key, core.buildMatcher({ query: "x" }).key, "the option changes the index key");
+});

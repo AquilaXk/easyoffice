@@ -183,6 +183,68 @@ test("the sheet module finds cell text, replaces values (not formula results), a
   assert.match(count(h), /수식 셀 1개는 건너뜀/);
 });
 
+async function openSheet(sheets) {
+  const h = await createWorkspaceHarness();
+  switchModule(h.document, "SHEET");
+  await flushAsyncTurns();
+  await pickFile(h.document, makeFixtureFile("찾기.xlsx", { sheets }));
+  await flushAsyncTurns(12);
+  return h;
+}
+const checkbox = (h, id, checked = true) => {
+  const box = $(h.document, id);
+  box.checked = checked;
+  box.dispatchEvent({ type: "change", target: box });
+};
+
+test("the sheet options row shows only for sheets; whole cell narrows the count; the document dialog has none", async () => {
+  const h = await openSheet([{ name: "Sheet1", cells: [{ ref: "A1", raw: "사과" }, { ref: "A2", raw: "사과 파이" }] }]);
+  ctrl(h, "f");
+  assert.equal($(h.document, "find-sheet-options").hidden, false);
+  type(h, "find-query", "사과");
+  assert.equal(count(h), "1 / 2");
+  checkbox(h, "find-opt-whole");
+  assert.equal(count(h), "1 / 1", "only the cell that is exactly the query");
+  const doc = await openDoc();
+  ctrl(doc, "f");
+  assert.equal($(doc.document, "find-sheet-options").hidden, true);
+});
+
+test("formula search matches and replaces the formula text; a value search skips the formula cell", async () => {
+  const h = await openSheet([{ name: "Sheet1", cells: [{ ref: "A1", raw: "5" }, { ref: "B1", raw: "=A1*2" }, { ref: "C1", raw: "SUM" }] }]);
+  const cellText = (ref) => h.document.querySelector(`#pane-sheet td[data-cell="${ref}"]`)?.textContent;
+  ctrl(h, "F2");
+  type(h, "find-query", "A1");
+  assert.match(count(h), /일치하는 항목이 없습니다/, "the result 10 does not contain A1");
+  checkbox(h, "find-opt-formula");
+  assert.equal(count(h), "1 / 1");
+  type(h, "find-replacement", "A2");
+  $(h.document, "btn-find-replace-all").click();
+  await flushAsyncTurns(14);
+  assert.equal(h.document.querySelector('#pane-sheet td[data-cell="B1"]')?.dataset.formula, "=A2*2");
+  assert.equal(cellText("A1"), "5");
+});
+
+test("the all-sheets scope finds cells on other sheets and replaces them in one undo step", async () => {
+  const h = await openSheet([
+    { name: "Sheet1", cells: [{ ref: "A1", raw: "사과" }] },
+    { name: "Sheet2", cells: [{ ref: "B2", raw: "사과즙" }] },
+  ]);
+  ctrl(h, "F2");
+  type(h, "find-query", "사과");
+  assert.equal(count(h), "1 / 1", "the active sheet only");
+  checkbox(h, "find-opt-workbook");
+  assert.equal(count(h), "1 / 2");
+  type(h, "find-replacement", "배");
+  $(h.document, "btn-find-replace-all").click();
+  await flushAsyncTurns(14);
+  assert.equal(h.document.querySelector('#pane-sheet td[data-cell="A1"]')?.textContent, "배");
+  checkbox(h, "find-opt-workbook", false);
+  checkbox(h, "find-opt-workbook");
+  type(h, "find-query", "배즙");
+  assert.equal(count(h), "1 / 1", "the other sheet's cell was replaced");
+});
+
 // The harness has no cascade, so this one resolves `display` from shell.css with a small specificity
 // count: an element with `hidden` must lose to no rule that sets another display.
 function specificity(selector) {
@@ -201,7 +263,7 @@ test("the find dialog's hidden elements stay hidden under the stylesheet's displ
     .filter((r) => r.display);
   const h = await createWorkspaceHarness();
   const { document } = h;
-  for (const id of ["find-replace-row", "find-replace-buttons", "find-count"]) {
+  for (const id of ["find-replace-row", "find-replace-buttons", "find-count", "find-sheet-options"]) {
     const el = document.getElementById(id);
     assert.equal(el.hidden, true, id + " starts hidden");
     const hits = rules.filter((r) => r.selector.split(",").some((sel) => matchesSelectorList(el, sel.trim(), null)));
