@@ -186,3 +186,86 @@ mod cell_display {
         assert_eq!(shown("0.00", ""), None);
     }
 }
+
+/// The codes the sheet window's menu and dialog offer (`ui/sheet-numfmt.js`): every one must be
+/// something the engine renders, with the text a user expects.
+mod window_codes {
+    use easyoffice_sheet::format_cell_value;
+
+    fn shown(code: &str, raw: &str) -> String {
+        format_cell_value(code, raw)
+            .unwrap_or_else(|| panic!("{code} shows nothing for {raw}"))
+            .text
+    }
+
+    #[test]
+    fn presets_render() {
+        let cases = [
+            ("0", "1234.5", "1235"),
+            ("0.00%", "0.256", "25.60%"),
+            ("0.00E+00", "12345", "1.23E+04"),
+            (
+                "\"₩\" #,##0.00_);[Red](\"₩\"#,##0.00)",
+                "1234.5",
+                "₩ 1,234.50 ",
+            ),
+            (
+                "\"₩\" #,##0.00_);[Red](\"₩\"#,##0.00)",
+                "-1234.5",
+                "(₩1,234.50)",
+            ),
+            ("#,##0.00;[Red]#,##0.00", "-1234.5", "1,234.50"),
+            (
+                "\"₩\"#,##0.00_);[Red](\"₩\"#,##0.00)",
+                "1234.5",
+                "₩1,234.50 ",
+            ),
+            ("\"₩\"#,##0;[Red]\"₩\"#,##0", "-1234.4", "₩1,234"),
+            ("yyyy-mm-dd;@", "11175.562847222222", "1930-08-05"),
+            ("am/pm h\":\"mm\":\"ss", "11175.562847222222", "pm 1:30:30"),
+            (
+                "yyyy-m-d am/pm h:mm",
+                "11175.562847222222",
+                "1930-8-5 pm 1:30",
+            ),
+            ("[h]:mm:ss", "1.5", "36:00:00"),
+        ];
+        for (code, raw, want) in cases {
+            assert_eq!(shown(code, raw), want, "{code}");
+        }
+    }
+
+    #[test]
+    fn dialog_lists_render() {
+        let date = "11175.562847222222";
+        let dates = [
+            ("yyyy-MM-dd", "1930-08-05"),
+            ("yyyy. mm. dd.", "1930. 08. 05."),
+            ("yyyy\"년\" m\"월\" d\"일\"", "1930년 8월 5일"),
+            ("mm-dd", "08-05"),
+            ("m\"월\" d\"일\"", "8월 5일"),
+            ("h:mm:ss", "13:30:30"),
+            ("h:mm", "13:30"),
+            ("AM/PM hh:mm", "PM 01:30"),
+            ("AM/PM h:mm", "PM 1:30"),
+            ("AM/PM h:mm:ss", "PM 1:30:30"),
+            ("mm-dd AM/PM hh:mm", "08-05 PM 01:30"),
+        ];
+        for (code, want) in dates {
+            assert_eq!(shown(code, date), want, "{code}");
+        }
+        for code in [
+            "# ?/?",
+            "# ??/??",
+            "# ???/???",
+            "?/2",
+            "?/4",
+            "?/8",
+            "?/16",
+            "?/10",
+            "?/100",
+        ] {
+            assert!(!shown(code, "0.7").is_empty(), "{code}");
+        }
+    }
+}
