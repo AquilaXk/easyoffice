@@ -236,7 +236,7 @@ function pushCombinator(tokens, ch) {
   }
 }
 
-function tokenizeComplexSelector(sel, scopeEl) {
+function tokenizeComplexSelector(sel) {
   const tokens = [];
   const tail = scanTopLevel(sel.trim(), isCombinatorChar, (ch, buf) => {
     pushSelectorToken(tokens, buf);
@@ -244,7 +244,7 @@ function tokenizeComplexSelector(sel, scopeEl) {
   });
   pushSelectorToken(tokens, tail);
   if (tokens.at(-1)?.type === "comb") tokens.pop();
-  return { scopeEl, tokens };
+  return tokens;
 }
 
 function matchesToken(el, tok, scopeEl) {
@@ -268,17 +268,23 @@ function matchChainAt(el, idx, tokens, scopeEl) {
   return false;
 }
 
-function matchesParsedChain(el, parsed) {
-  const { scopeEl, tokens } = parsed;
-  if (tokens.length === 0) return false;
-  return matchChainAt(el, tokens.length - 1, tokens, scopeEl);
-}
+// A selector list is parsed once per distinct text: the DOM walks of the suites match the same few
+// selectors against every element, so parsing per element dominated the harness setup time.
+const parsedSelectorLists = new Map();
 
-export function matchesSelectorList(el, selectorList, scopeEl) {
+function parseSelectorList(selectorList) {
+  let chains = parsedSelectorLists.get(selectorList);
+  if (chains) return chains;
   const parts = [];
   const collect = (buf) => {
     if (buf.trim()) parts.push(buf.trim());
   };
   collect(scanTopLevel(selectorList, (ch) => ch === ",", (_ch, buf) => collect(buf)));
-  return parts.some((p) => matchesParsedChain(el, tokenizeComplexSelector(p, scopeEl)));
+  chains = parts.map(tokenizeComplexSelector).filter((tokens) => tokens.length > 0);
+  parsedSelectorLists.set(selectorList, chains);
+  return chains;
+}
+
+export function matchesSelectorList(el, selectorList, scopeEl) {
+  return parseSelectorList(selectorList).some((tokens) => matchChainAt(el, tokens.length - 1, tokens, scopeEl));
 }
