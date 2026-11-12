@@ -1,3 +1,4 @@
+use crate::sort_refs::{adjust_formula_row_refs, SortedRows};
 use crate::{
     CellRange, EvalContext, EvaluatedCellValue, FormulaError, PackedCellCoordinate,
     PivotAggregation, PivotTableSummary, SheetEngine,
@@ -326,7 +327,11 @@ impl SheetEngine {
         for (offset, entry) in rows_data.into_iter().enumerate() {
             let target_r = start_row + offset as u32;
             for (col, raw) in entry.cells {
-                let adjusted = adjust_formula_row_refs(&raw, entry.orig_row, target_r);
+                let adjusted = adjust_formula_row_refs(
+                    &raw,
+                    &self.name,
+                    SortedRows::new(start_row, end_row, entry.orig_row, target_r),
+                );
                 let coord = PackedCellCoordinate::new(target_r, col)?;
                 self.cells.insert(coord, adjusted);
             }
@@ -646,127 +651,6 @@ fn pivot_numeric_value(val: &EvaluatedCellValue, aggregation: PivotAggregation) 
         && !matches!(val, EvaluatedCellValue::Empty)
         && !val.to_display_string().is_empty();
     counts_non_empty.then_some(1.0)
-}
-
-/// Longest column-letter run (exclusive upper bound) that can form an A1 column reference.
-const MAX_COL_LETTERS_EXCLUSIVE: usize = 4;
-
-#[inline]
-fn is_ident_byte(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_'
-}
-
-/// Consumes an optional `$` at `cur`; returns the new index and whether one was present.
-#[inline]
-fn take_dollar(bytes: &[u8], cur: usize) -> (usize, bool) {
-    if bytes.get(cur) == Some(&b'$') {
-        (cur + 1, true)
-    } else {
-        (cur, false)
-    }
-}
-
-/// Length of an unquoted sheet-name prefix (`Q1!`, `Sheet2!`) starting at `i`, `!` included, so the
-/// name's digits are never read as a row. Non-ASCII bytes belong to the name.
-fn sheet_prefix_len(bytes: &[u8], i: usize) -> Option<usize> {
-    let run = bytes[i..]
-        .iter()
-        .take_while(|&&b| is_ident_byte(b) || b == b'.' || !b.is_ascii())
-        .count();
-    (run > 0 && bytes.get(i + run) == Some(&b'!')).then_some(run + 1)
-}
-
-/// Rewrites an A1-style reference starting at `i` into `out`, shifting relative rows by `delta`.
-/// Returns the index after the reference, or `None` when `i` does not start a reference.
-fn rewrite_cell_ref(raw: &str, i: usize, delta: i64, out: &mut String) -> Option<usize> {
-    let bytes = raw.as_bytes();
-    let len = bytes.len();
-    let (col_start, has_col_dollar) = take_dollar(bytes, i);
-    let mut cur = col_start;
-    while cur < len
-        && bytes[cur].is_ascii_alphabetic()
-        && (cur - col_start) < MAX_COL_LETTERS_EXCLUSIVE
-    {
-        cur += 1;
-    }
-    let col_len = cur - col_start;
-    if !(1..=3).contains(&col_len) {
-        return None;
-    }
-    let (row_start, has_row_dollar) = take_dollar(bytes, cur);
-    if !bytes
-        .get(row_start)
-        .is_some_and(|b| b.is_ascii_digit() && *b != b'0')
-    {
-        return None;
-    }
-    cur = row_start;
-    while cur < len && bytes[cur].is_ascii_digit() {
-        cur += 1;
-    }
-    if bytes
-        .get(cur)
-        .is_some_and(|&b| is_ident_byte(b) || b == b'(')
-    {
-        return None;
-    }
-    if has_col_dollar {
-        out.push('$');
-    }
-    out.push_str(&raw[col_start..col_start + col_len]);
-    if has_row_dollar {
-        out.push('$');
-        out.push_str(&raw[row_start..cur]);
-    } else if let Ok(r_1based) = raw[row_start..cur].parse::<i64>() {
-        let new_r = (r_1based + delta).clamp(1, PackedCellCoordinate::MAX_ROWS as i64);
-        out.push_str(&new_r.to_string());
-    } else {
-        out.push_str(&raw[row_start..cur]);
-    }
-    Some(cur)
-}
-
-fn adjust_formula_row_refs(raw: &str, orig_row: u32, target_row: u32) -> String {
-    if orig_row == target_row || !raw.trim_start().starts_with('=') {
-        return raw.to_string();
-    }
-    let delta = (target_row as i64) - (orig_row as i64);
-    let bytes = raw.as_bytes();
-    let len = bytes.len();
-    let mut out = String::with_capacity(len + 8);
-    let mut i = 0usize;
-    let mut in_double_quotes = false;
-    let mut in_single_quotes = false;
-
-    while i < len {
-        let b = bytes[i];
-        if b == b'"' && !in_single_quotes {
-            in_double_quotes = !in_double_quotes;
-        } else if b == b'\'' && !in_double_quotes {
-            in_single_quotes = !in_single_quotes;
-        } else if !in_double_quotes && !in_single_quotes {
-            let prev_is_ident = i > 0 && (is_ident_byte(bytes[i - 1]) || bytes[i - 1] == b'.');
-            if let Some(prefix) = (!prev_is_ident)
-                .then(|| sheet_prefix_len(bytes, i))
-                .flatten()
-            {
-                out.push_str(&raw[i..i + prefix]);
-                i += prefix;
-                continue;
-            }
-            if let Some(next) = (!prev_is_ident)
-                .then(|| rewrite_cell_ref(raw, i, delta, &mut out))
-                .flatten()
-            {
-                i = next;
-                continue;
-            }
-        }
-        let ch = raw[i..].chars().next().unwrap();
-        out.push(ch);
-        i += ch.len_utf8();
-    }
-    out
 }
 
 fn restore_cell(sheet: &mut SheetEngine, coord: PackedCellCoordinate, orig: Option<String>) {

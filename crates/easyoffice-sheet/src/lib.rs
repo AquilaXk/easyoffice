@@ -19,6 +19,7 @@ mod memo;
 mod parser;
 mod recalc;
 mod rules;
+mod sort_refs;
 mod special;
 mod text_format;
 pub mod types;
