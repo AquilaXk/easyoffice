@@ -297,8 +297,9 @@
     }
 
     // Replaces every rule set (open file, undo/redo). The engine session learns of it on the next
-    // evaluation.
-    function replaceAll(bySheet) {
+    // evaluation. `quiet` leaves the evaluation to `notify`, which the caller runs once the cells
+    // of the page are in place (an evaluation reads the cells of the page).
+    function replaceAll(bySheet, quiet = false) {
       const hadAny = hasAny();
       rules.clear();
       clearFx();
@@ -307,8 +308,15 @@
       }
       const boxes = refreshBoxes();
       version += 1;
+      if (quiet) return;
       if (hadAny || hasAny()) listeners.changed?.();
       if (boxes) listeners.repaint?.();
+    }
+
+    // The evaluation and painting a quiet `replaceAll` put off.
+    function notify() {
+      if (hasAny()) listeners.changed?.();
+      listeners.repaint?.();
     }
 
     function set(sheet, next) {
@@ -473,6 +481,7 @@
       hasAny,
       set,
       replaceAll,
+      notify,
       payloadFor,
       applyPacked,
       clearFx,

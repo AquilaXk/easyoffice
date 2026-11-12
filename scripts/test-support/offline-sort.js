@@ -1,7 +1,7 @@
 (function (host) {
   "use strict";
 
-  // Stand-in for the engine's `sort` session action (PD-200) in the page tests: stable, numbers
+  // Stand-in for the engine's `sort` session action (PD-202) in the page tests: stable, numbers
   // before text, blanks last, `a` before `A` when asked, and the formulas of moved rows rewritten
   // for the simple `A2` references the tests use (a `$` column is kept; absolute rows are not modeled).
   function offlineSort(body) {

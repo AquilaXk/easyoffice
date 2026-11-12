@@ -1,7 +1,7 @@
 (function (host) {
   "use strict";
 
-  // In-cell widgets of the data validation kinds (PD-200): the arrow and menu of a list or a
+  // In-cell widgets of the data validation kinds (PD-203): the arrow and menu of a list or a
   // multiple list beside the selected cell, and the check box of a check box cell (a click on the
   // box, or Space on the selected cell, writes the other value). The values written are the rule's
   // own, so they pass its check. The drawing of the box is CSS on `td[data-dv-box]` (sheet-rules.js

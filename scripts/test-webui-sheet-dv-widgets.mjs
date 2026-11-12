@@ -6,7 +6,7 @@ import { loadUiModule } from "./test-support/load-ui-module.mjs";
 import { makeFixtureFile, pickFile } from "./test-support/fixture-files.mjs";
 import { switchModule } from "./test-support/modules.mjs";
 
-// The check box cell and the multiple list (PD-200): the values a click writes, how the cells
+// The check box cell and the multiple list (PD-203): the values a click writes, how the cells
 // paint, the arrow menu with chosen items, and the dates the rules count from.
 
 const UI = (name) => fileURLToPath(new URL("../crates/easyoffice-app/ui/" + name, import.meta.url));
@@ -107,7 +107,14 @@ test("clicking the box or pressing Space writes the other value", async () => {
   viewport(d).dispatchEvent({ type: "keydown", key: " ", target: cell(d, "B5"), bubbles: true });
   await flushAsyncTurns(14);
   assert.equal(text(d, "B5"), "TRUE");
-  // Each write is its own step on the page's history (checked on the real page).
+  // Each write is its own undo step, and the undo puts the cell back even while rules exist (the
+  // restore used to evaluate the rules on the cells of before and keep the new value).
+  const undo = d.querySelector('.md-item[data-studio-menu-cmd="studio-undo"]');
+  for (const [ref, want] of [["B5", ""], ["B3", "FALSE"], ["B2", "TRUE"]]) {
+    h.userClick(undo);
+    await flushAsyncTurns(14);
+    assert.equal(text(d, ref), want, ref);
+  }
 });
 
 test("custom values: the box is checked on the checked value only", async () => {

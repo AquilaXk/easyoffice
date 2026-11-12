@@ -685,7 +685,7 @@
       return checkEntry(sheet, ref, text);
     }
 
-    // The arrow and menu of lists and the check box cells (PD-200).
+    // The arrow and menu of lists and the check box cells (PD-203).
     const widgets = host.__EASYOFFICE_CREATE_SHEET_DV_WIDGETS__({ document, rules, getActiveSheetName, applyCellEdits });
     widgets.bind();
 

@@ -578,7 +578,7 @@ impl EasyOfficeIpcRouter {
     ///   hide, or the distinct values of a column (no session needed, see `sheet_filter_ipc`,
     ///   PD-198).
     /// - `sort` `{keys:[{asc, values}], caseSensitive?}` -> `{order}`, the stable row order of the
-    ///   keys (no session needed, see `sheet_sort_ipc`, PD-200).
+    ///   keys (no session needed, see `sheet_sort_ipc`, PD-202).
     /// - `close` `{session}` -> `{closed}`.
     pub(crate) fn handle_sheet_session_action(
         action: &str,

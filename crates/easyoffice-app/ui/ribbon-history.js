@@ -295,7 +295,7 @@
       if (snap.sheetColumnWidths && typeof sheetController.replaceColumnWidths === "function") {
         sheetController.replaceColumnWidths(structuredClone(snap.sheetColumnWidths));
       }
-      if (snap.sheetRules) host.__EASYOFFICE_SHEET_RULES__.replaceAll(structuredClone(snap.sheetRules));
+      if (snap.sheetRules) host.__EASYOFFICE_SHEET_RULES__.replaceAll(structuredClone(snap.sheetRules), true);
       if (snap.sheetLayout) host.__EASYOFFICE_SHEET_LAYOUT__.replaceAll(structuredClone(snap.sheetLayout));
       if (Array.isArray(snap.slides)) {
         slideDeckState.splice(0, slideDeckState.length, ...structuredClone(snap.slides));
@@ -333,6 +333,8 @@
         syncSheetTabBar(snap.activeSheetName);
         sheetController.restoreDomSheetCells(snap.activeSheetName);
         sheetController.updateSheetSelectionAndAggregates(snap.activeSheetCellRef || "A1");
+        // The rules are evaluated on the restored cells, not on the page's cells of before.
+        if (snap.sheetRules) host.__EASYOFFICE_SHEET_RULES__.notify();
       }
       if (typeof snap.activeSlideIndex === "number" && slideDeckState.length > 0) {
         workspacePanels.renderSlideDeck(Math.min(snap.activeSlideIndex, slideDeckState.length - 1));

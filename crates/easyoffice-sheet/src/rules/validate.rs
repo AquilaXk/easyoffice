@@ -4,6 +4,13 @@
 //! boolean for `TRUE`/`FALSE`, text otherwise. A formula entry is not judged (the rule applies to
 //! typed values, as in the file formats' reference behaviour), and clearing a cell is always
 //! allowed.
+//!
+//! Reference implementation: the check box and multiple list rules (`DvKind::Checkbox`,
+//! `DvKind::ListMultiple`) port `CheckboxValidator.isValidType` and `ListValidator.isValidType`
+//! (`packages/sheets-data-validation/src/validators/checkbox-validator.ts`, `list-validator.ts`,
+//! commit 5a06a7842c8e13fa0646d0733dc3662cf4b330b9), Apache-2.0, Copyright 2023-present DreamNum
+//! Co., Ltd. See `THIRD_PARTY_NOTICES.md`. The values compare without case, and the check box
+//! defaults are `TRUE` and `FALSE`.
 
 use super::data::{Cells, SheetCells};
 use crate::coercion::{is_valid_decimal_syntax, parse_iso_date_serial, parse_strict_number};
