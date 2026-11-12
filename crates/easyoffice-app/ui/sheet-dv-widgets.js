@@ -50,6 +50,16 @@
     const selectedTd = () => document.querySelector("#pane-sheet td.selected-cell");
     const cellText = (td) => String(td?.textContent ?? "").trim();
 
+    // One cell write as an undo step. The edit's own status text ("목록 선택: 1칸") says nothing a
+    // click on a box or a pick in a menu has not shown, and it would stay on the status bar, so it is cleared.
+    function writeCell(ref, value, label) {
+      return Promise.resolve(applyCellEdits([{ ref, value, formula: "" }], label)).then((done) => {
+        const fb = document.getElementById("status-command-feedback");
+        if (fb) fb.textContent = "";
+        return done;
+      });
+    }
+
     function hide() {
       if (arrow.button) arrow.button.hidden = true;
       if (arrow.menu) arrow.menu.hidden = true;
@@ -74,7 +84,7 @@
       const multiple = rule.t === "listMultiple";
       const value = multiple ? toggledText(rules.listItems(sheet, rule), cellText(selectedTd()), item) : item;
       if (!multiple) hide();
-      void Promise.resolve(applyCellEdits([{ ref: arrow.ref, value, formula: "" }], multiple ? "다중 선택" : "목록 선택")).then(() => {
+      void writeCell(arrow.ref, value, multiple ? "다중 선택" : "목록 선택").then(() => {
         if (multiple && arrow.menu && !arrow.menu.hidden) fillMenu(rule, sheet);
       });
     }
@@ -173,7 +183,7 @@
       const rule = ref ? rules.validationAt(getActiveSheetName(), ref) : null;
       if (!rule || rule.t !== "checkbox") return false;
       const [on, off] = boxValues(rule);
-      void applyCellEdits([{ ref, value: nextCheckValue(cellText(td), on, off), formula: "" }], "확인란");
+      void writeCell(ref, nextCheckValue(cellText(td), on, off), "확인란");
       return true;
     }
 

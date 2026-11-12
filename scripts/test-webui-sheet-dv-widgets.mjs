@@ -96,6 +96,7 @@ test("clicking the box or pressing Space writes the other value", async () => {
   await click(h, cell(d, "B2"), 50, 12);
   assert.equal(text(d, "B2"), "FALSE");
   assert.equal(cell(d, "B2").dataset.dvBox, "off");
+  assert.equal(d.getElementById("status-command-feedback").textContent, "", "no status text stays after a click on the box");
   await click(h, cell(d, "B3"), 50, 12);
   assert.equal(text(d, "B3"), "TRUE");
   assert.equal(cell(d, "B3").dataset.dvBox, "on");
@@ -146,6 +147,7 @@ test("a multiple list shows its arrow, marks the chosen items and toggles them i
   h.userClick(rows()[0]);
   await flushAsyncTurns(14);
   assert.equal(text(d, "C2"), "가,나");
+  assert.equal(d.getElementById("status-command-feedback").textContent, "", "no status text stays after a pick");
   assert.equal(menu.hidden, false, "the menu stays open for more choices");
   assert.deepEqual(rows().map((li) => li.getAttribute("aria-checked")), ["true", "true", "false"]);
   h.userClick(rows()[1]);
