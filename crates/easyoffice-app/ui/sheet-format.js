@@ -10,6 +10,8 @@
   // Selections larger than this refresh the toolbar state after a short delay while navigating.
   const EAGER_STATE_CELLS = 20000;
   const STATE_DELAY_MS = 120;
+  // Ranges up to this many cells are read by address (see computeRangeMasks).
+  const DIRECT_AREA_CELLS = 4096;
   const STYLE_KEYS = ["fontWeight", "fontStyle", "textDecoration", "fontSize", "frozenPanes"];
   const COMMANDS = {
     "sheet-home-bold": "bold",
@@ -162,8 +164,9 @@
       const area = (rg.r2 - rg.r1 + 1) * (rg.c2 - rg.c1 + 1);
       let orMask = 0;
       let andMask = 15;
-      const keys = Object.keys(map);
-      if (keys.length < area) {
+      // A small range is read by address: listing the sheet's keys only to count them costs more than the range.
+      const keys = area <= DIRECT_AREA_CELLS ? null : Object.keys(map);
+      if (keys !== null && keys.length < area) {
         let visited = 0;
         for (let i = 0; i < keys.length; i += 1) {
           const ref = keys[i];

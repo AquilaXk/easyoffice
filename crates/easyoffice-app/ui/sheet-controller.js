@@ -467,9 +467,7 @@
           }
           if (getActiveSheetName() === target.sheet) {
             updatedActiveSheet = true;
-            const td =
-              grid.getTdByRef(target.cell) ||
-              document.querySelector('#pane-sheet td[data-cell="' + target.cell + '"]');
+            const td = grid.getTdByRef(target.cell);
             const focusSt = td ? sheetCellFocusState.get(td) : null;
             if (!td || !isFormulaStr(td.dataset.formula || "")) return;
             if (!forceFocusedDisplay && (focusSt?.userEdited || focusSt?.snapshotPushed)) return;

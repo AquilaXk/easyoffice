@@ -3,6 +3,9 @@
 
   const { normalizeFormattedNumericCell } = host.__EASYOFFICE_SHEET_UTILS__;
 
+  // Ranges up to this many cells are read by address; larger ones pick the cheaper of address and entry walks.
+  const DIRECT_AREA_CELLS = 4096;
+
   function isEditing(st) {
     return Boolean(st && (st.mode || st.userEdited));
   }
@@ -105,10 +108,13 @@
         if (n !== null) nums.push(n);
       };
       const area = (range.r2 - range.r1 + 1) * (range.c2 - range.c1 + 1);
+      // Counting the entries copies every key of the sheet: a small range is read cell by cell without it.
       const mapSize =
-        typeof api.getEntryCount === "function"
-          ? api.getEntryCount()
-          : (api.activeSheetMap?.size ?? 20000);
+        area <= DIRECT_AREA_CELLS
+          ? area
+          : typeof api.getEntryCount === "function"
+            ? api.getEntryCount()
+            : (api.activeSheetMap?.size ?? 20000);
       if (area <= mapSize) {
         for (let r = range.r1; r <= range.r2; r += 1) {
           for (let c = range.c1; c <= range.c2; c += 1) push(grid.refOf(r, c));

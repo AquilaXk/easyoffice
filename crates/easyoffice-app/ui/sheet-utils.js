@@ -113,8 +113,12 @@
   const CURRENCY_NUMERIC_RE = /^([+-]?)\s*[₩$€£¥]\s*([+-]?\d{1,3}(?:,\d{3})*(?:\.\d+)?|[+-]?\d+(?:\.\d+)?)$/;
   const PERCENT_NUMERIC_RE = /^([+-]?\d{1,3}(?:,\d{3})*(?:\.\d+)?|[+-]?\d+(?:\.\d+)?)\s*%$/;
 
+  // Every pattern below needs a comma, a percent sign or a currency symbol; plain text and plain numbers skip them.
+  const FORMAT_MARK_RE = /[,%₩$€£¥]/;
+
   function normalizeFormattedNumericCell(raw) {
     const trimmed = String(raw || "").trim();
+    if (!FORMAT_MARK_RE.test(trimmed)) return trimmed;
     if (GROUPED_NUMERIC_RE.test(trimmed)) {
       return trimmed.replaceAll(",", "");
     }
