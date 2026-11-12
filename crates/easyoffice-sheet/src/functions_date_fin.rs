@@ -1,5 +1,5 @@
 //! Date, time, and cell-inspection functions, including `WORKDAY.INTL` and `NETWORKDAYS.INTL`
-//! backed by a 7-bit `u8` weekend bitmask (`FormulaJS`, MIT License, Copyright (c) Sutoiku, Inc.).
+//! backed by a 7-bit `u8` weekend bitmask (reference implementation: MIT License, Copyright (c) Sutoiku, Inc.; see `THIRD_PARTY_NOTICES.md`).
 
 use crate::{EvalContext, EvaluatedCellValue, Expr, FormulaError, SheetEngine};
 
@@ -36,7 +36,7 @@ fn is_workday_with_mask(serial: i64, weekend_mask: u8) -> bool {
     ((weekend_mask >> weekday_mon0) & 1) == 0
 }
 
-/// Compiles an Excel weekend code (`1..=7`, `11..=17`) or 7-character `"0000011"` string
+/// Compiles a spreadsheet weekend code (`1..=7`, `11..=17`) or 7-character `"0000011"` string
 /// (Monday..Sunday) into a 7-bit `u8` bitmask where bit `weekday_mon0` is `1` for weekend days.
 fn compile_weekend_mask(val: &EvaluatedCellValue) -> Result<u8, FormulaError> {
     match val {

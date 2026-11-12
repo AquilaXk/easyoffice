@@ -4,7 +4,7 @@
 //! Writer layout: `fonts` holds the default font (index 0) plus one font per distinct style;
 //! `cellXfs` holds the default format (index 0) plus one format per distinct font, so format `N`
 //! uses font `N`. Elements follow the ECMA-376 `CT_Stylesheet` sequence (`fonts`, `fills`,
-//! `borders`, `cellStyleXfs`, `cellXfs`, `cellStyles`); Excel rejects any other order.
+//! `borders`, `cellStyleXfs`, `cellXfs`, `cellStyles`); spreadsheet programs reject any other order.
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -16,7 +16,7 @@ use crate::sheet_styling::{
     format_centipt, CellStyle, SheetStyling, StyleKey, MAX_COLUMN_PX, MIN_COLUMN_PX,
 };
 
-/// Width of the widest digit of the default font (Calibri 11) in CSS pixels. Excel's column width
+/// Width of the widest digit of the default font (Calibri 11) in CSS pixels. The spreadsheet column width
 /// unit is the number of such digits; the stored width includes the 5 px cell padding:
 /// `width = trunc(256 * px / MDW) / 256`, hence `px = round(width * MDW)`.
 pub(crate) const MAX_DIGIT_WIDTH_PX: f64 = 7.0;

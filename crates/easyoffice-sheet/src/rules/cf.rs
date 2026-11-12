@@ -389,7 +389,7 @@ fn compare_text(cmp: Cmp, v: &str, a: &str, b: &str) -> bool {
 }
 
 fn cell_is(cmp: Cmp, a: &Operand, b: &Operand, value: &EvaluatedCellValue) -> bool {
-    // A value that is not a number sorts above every number (Excel), which the original encodes
+    // A value that is not a number sorts above every number (as spreadsheet programs do), which the original encodes
     // as "true for these operators".
     let above_numbers = || {
         matches!(

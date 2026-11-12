@@ -685,7 +685,7 @@ impl SheetEngine {
 
     /// Paired-array statistical and linear regression functions (`CORREL`, `PEARSON`,
     /// `COVARIANCE.P`, `COVARIANCE.S`, `SLOPE`, `INTERCEPT`, `RSQ`, `FORECAST`, `FORECAST.LINEAR`;
-    /// reference implementation: `FormulaJS`, MIT License, Copyright (c) Sutoiku, Inc.).
+    /// reference implementation: MIT License, Copyright (c) Sutoiku, Inc.; see `THIRD_PARTY_NOTICES.md`).
     pub(crate) fn eval_stat_regression(
         &self,
         name: &str,

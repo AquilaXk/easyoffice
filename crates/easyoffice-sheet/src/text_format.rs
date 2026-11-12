@@ -1,4 +1,4 @@
-//! Excel-compatible number format codes for the `TEXT` worksheet function and cell display.
+//! Spreadsheet-compatible number format codes for the `TEXT` worksheet function and cell display.
 //!
 //! Supports literal text (quoted, backslash-escaped and bare characters such as `원`, `₩`, `$`),
 //! `0`/`#`/`?` digit placeholders with zero padding, thousands grouping and `,` scaling, `%`,
@@ -39,7 +39,7 @@ const LCID_MASK: u32 = 0xFFFF;
 const MAX_COLOR_INDEX: u32 = 56;
 const MAX_DBNUM: u32 = 4;
 
-/// Excel's 56-color palette addressed by `[Color1]`..`[Color56]` (0xRRGGBB).
+/// The spreadsheet 56-color palette addressed by `[Color1]`..`[Color56]` (0xRRGGBB).
 const PALETTE: [u32; 56] = [
     0x000000, 0xFFFFFF, 0xFF0000, 0x00FF00, 0x0000FF, 0xFFFF00, 0xFF00FF, 0x00FFFF, 0x800000,
     0x008000, 0x000080, 0x808000, 0x800080, 0x008080, 0xC0C0C0, 0x808080, 0x9999FF, 0x993366,
@@ -435,7 +435,7 @@ impl CompiledFormat {
         }
     }
 
-    /// `(section index, show the absolute value)` for `num`. Conditions follow SheetJS SSF:
+    /// `(section index, show the absolute value)` for `num`. Conditions follow the reference format-code implementation (see the file header):
     /// the first matching explicit condition wins, otherwise the default positive / negative /
     /// zero split applies.
     fn pick_numeric(&self, num: f64) -> (usize, bool) {
@@ -564,7 +564,7 @@ pub fn compiled_format(fmt: &str) -> Rc<CompiledFormat> {
     })
 }
 
-/// Formats `num` with an Excel number format code. Invalid date serials fall back to
+/// Formats `num` with a spreadsheet number format code. Invalid date serials fall back to
 /// `General` so callers that need a plain string never fail.
 pub fn format_text_pattern(num: f64, fmt_str: &str) -> String {
     format_number_with_code(num, fmt_str).unwrap_or_else(|_| format_general_number(num))
@@ -575,7 +575,7 @@ pub fn format_text_value_with_code(text: &str, fmt_str: &str) -> String {
     compiled_format(fmt_str).render_text(text).text
 }
 
-/// Formats `num` with an Excel number format code, returning `#VALUE!` for date/time codes
+/// Formats `num` with a spreadsheet number format code, returning `#VALUE!` for date/time codes
 /// applied to serials outside `0..=2958465.99999`.
 pub fn format_number_with_code(num: f64, fmt_str: &str) -> Result<String, FormulaError> {
     format_number_styled(num, fmt_str).map(|f| f.text)

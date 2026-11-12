@@ -4,7 +4,7 @@
 //! Library choice (the three steps of the implementation rule): (1) `hayro-syntax` reads the files
 //! and `hayro-write` copies a page together with every object it uses (fonts, pictures, shadings,
 //! colour spaces, forms) into a new file; both are MIT OR Apache-2.0 and maintained. (2) Nothing
-//! already in the shell reads a PDF back into objects; `pdf-writer` writes the pages around the
+//! already in the shell reads a PDF back into objects; the PDF writer crate writes the pages around the
 //! copies. (3) Nothing had to be ported: the one thing the library does not offer, changing a copied
 //! page's `/Rotate`, is solved by writing the page ourselves.
 //!

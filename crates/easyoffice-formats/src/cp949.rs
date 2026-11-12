@@ -313,7 +313,7 @@ mod tests {
 
     /// FNV-1a over `(lead, trail, codepoint-or-0)` for every `0x81..=0xFE` x `0x41..=0xFE` pair.
     /// The expected digest and the 17,048 assigned cells were produced by the reference decoder
-    /// (encoding_rs 0.8.44 EUC-KR, WHATWG index) so the whole mapping is pinned without a dependency.
+    /// (its EUC-KR output over the WHATWG index; source in `THIRD_PARTY_NOTICES.md`) so the whole mapping is pinned without a dependency.
     #[test]
     fn full_pair_space_matches_reference_index() {
         let mut fnv: u64 = 0xcbf2_9ce4_8422_2325;

@@ -74,7 +74,7 @@ struct DocxStyle {
 }
 
 /// styleId -> style metadata (`w:name`, `w:basedOn`, `w:outlineLvl`).
-/// Adapted from reference implementations `mammoth.js` (BSD-2-Clause) and `docx-rs` (MIT).
+/// Adapted from BSD-2-Clause and MIT reference implementations (see `THIRD_PARTY_NOTICES.md`).
 fn read_styles(xml: &str) -> Result<HashMap<String, DocxStyle>, EasyOfficeError> {
     let mut out: HashMap<String, DocxStyle> = HashMap::new();
     let mut current: Option<String> = None;

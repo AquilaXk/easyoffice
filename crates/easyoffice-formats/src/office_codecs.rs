@@ -270,7 +270,7 @@ fn build_sheet_xml(
 impl OoxmlCodec {
     pub const MAX_XLSX_ROWS: u32 = 1_048_576;
     pub const MAX_XLSX_COLS: u32 = 16_384;
-    /// Worksheets one workbook may list. Excel limits them by memory only; the bound keeps a
+    /// Worksheets one workbook may list. Spreadsheet programs limit them by memory only; the bound keeps a
     /// workbook part that lists millions of them from becoming millions of scans (PD-175).
     pub const MAX_XLSX_SHEETS: usize = 1_024;
 

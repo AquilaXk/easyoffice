@@ -673,7 +673,7 @@ pub(super) fn stream_contains_forbidden_b64_comment(stream_bytes: &[u8]) -> bool
 
 /// Applies PDF `/DecodeParms` `/Predictor` (`2` TIFF horizontal differencing and `10..=15` PNG
 /// row filters None=0, Sub=1, Up=2, Average=3, Paeth=4).
-/// Adapted from reference implementations `lopdf` (MIT) and `pypdf` (BSD-3-Clause) with
+/// Adapted from MIT and BSD-3-Clause reference implementations (see `THIRD_PARTY_NOTICES.md`) with
 /// fail-closed bounds checking (`1..=65536` columns).
 pub(super) fn apply_flate_decode_parms_at(
     mut data: Vec<u8>,

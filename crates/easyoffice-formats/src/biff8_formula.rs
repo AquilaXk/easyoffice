@@ -1,7 +1,7 @@
 //! BIFF8 formula tokens (`rgce`, MS-XLS 2.5.198) for the `.xls` writer and reader (PD-178).
 //!
 //! A FORMULA record holds the expression as a postfix token string, not as text. This module
-//! converts between the text of a formula and the tokens of a small set every Excel reads:
+//! converts between the text of a formula and the tokens of a small set every spreadsheet program reads:
 //! numbers, strings, booleans, cell and range references (`$` flags kept), the operators
 //! `+ - * / ^ & = <> < <= > >=`, unary `+`/`-`, parentheses, and a table of common functions.
 //! Anything else (sheet references, names, percent, error literals, other functions) is refused
@@ -270,7 +270,7 @@ impl Parser {
         Ok(())
     }
 
-    /// Excel binds a unary sign tighter than `^`, so `-2^2` is `(-2)^2`.
+    /// Spreadsheet programs bind a unary sign tighter than `^`, so `-2^2` is `(-2)^2`.
     fn unary(&mut self, depth: usize) -> Result<(), String> {
         if depth > MAX_DEPTH {
             return Err("식의 중첩이 너무 깊습니다".to_string());

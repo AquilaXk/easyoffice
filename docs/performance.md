@@ -47,7 +47,7 @@ node scripts/bench-profile.mjs --suite desktop --case pdf_doc --input <hwp> --re
 
 참조 앱은 GUI 앱이라 실행하지 않았다. 대신 그 Rust 쪽이 하는 일을 헤드리스로 다시 돌렸다. 두 가지 방식을 썼고, 두 값은 서로 맞아 떨어졌다(표의 `ref`와 `ref-repro`).
 
-1. **참조 앱 사본에서 직접 빌드(`ref`)**: 사본의 문서 어댑터 크레이트와 `third_party/rhwp`(사본에서는 비어 있어 우리 고정 체크아웃을 연결, 같은 커밋)에 경로로 의존하는 일회용 하네스를 만들었다. 글꼴 대체 표(`pdf_font_fallbacks.rs`)와 Quick Look PDF 조립(`pdf.rs`)은 사본의 원본 파일을 그대로 포함했고, 문서 열기(`editable_core_from_bytes`: 파싱 후 `convert_to_editable_native`)와 `atomic_write`는 사본 코드를 옮겨 적었다. 참조 앱의 Quick Look은 `native-skia`(Skia 바이너리를 내려받아 링크)로 빌드했다. 이 하네스는 참조 앱 이름이 들어가 있어 저장소에 넣지 않았다. 같은 `BENCH ...` 한 줄을 찍는 바이너리를 `--ref-bin`/`--ref-skia-bin`으로 넘기면 `bench-run.mjs`가 그대로 쓴다.
+1. **참조 앱 사본에서 직접 빌드(`ref`)**: 사본의 문서 어댑터 크레이트와 `third_party/rhwp`(사본에서는 비어 있어 우리 고정 체크아웃을 연결, 같은 커밋)에 경로로 의존하는 일회용 하네스를 만들었다. 글꼴 대체 표(`pdf_font_fallbacks.rs`)와 Quick Look PDF 조립(`pdf.rs`)은 사본의 원본 파일을 그대로 포함했고, 문서 열기(`editable_core_from_bytes`: 파싱 후 `convert_to_editable_native`)와 `atomic_write`는 사본 코드를 옮겨 적었다. 참조 앱의 Quick Look은 `native-skia`(그래픽 라이브러리 바이너리를 내려받아 링크)로 빌드했다. 이 하네스는 참조 앱 이름이 들어가 있어 저장소에 넣지 않았다. 같은 `BENCH ...` 한 줄을 찍는 바이너리를 `--ref-bin`/`--ref-skia-bin`으로 넘기면 `bench-run.mjs`가 그대로 쓴다.
 2. **저장소 안 재현(`ref-repro`)**: `perf_bench.rs`의 `ref:` 케이스가 같은 rhwp 호출 순서(`from_bytes` → `convert_to_editable_native` → `render_page_svg_native` → `svgs_to_pdf_with_options`)를 돌린다. 글꼴 대체는 우리 `add_font_fallbacks`를 쓴다.
 
 ### 비교의 한계
@@ -110,7 +110,7 @@ node scripts/bench-profile.mjs --suite desktop --case pdf_doc --input <hwp> --re
 
 저장할 때 미리보기 그림을 넣는 단계(`thumb_embed`, 파싱 + 첫 쪽 SVG + PNG + 삽입 + 검증)는 위와 거의 같다(24~671 ms, 쪽이 많은 표 문서는 파싱이 대부분). 참조 앱에는 같은 기능이 없다.
 
-### 2.4 Quick Look (우리: SVG를 usvg·resvg·svg2pdf로, 참조 앱: Skia로 PNG)
+### 2.4 Quick Look (우리: SVG를 SVG 파서 크레이트·SVG 래스터 크레이트·svg2pdf로, 참조 앱: 2D 그래픽 라이브러리로 PNG)
 
 단일 스레드 경로라 부하 영향이 작다(2차 값). 참조 앱의 PDF는 쪽마다 PNG(최대 2048 px)를 만들어 이미지 PDF로 묶고, 우리는 쪽 SVG를 벡터로 변환한다(글자는 윤곽선).
 
@@ -151,7 +151,7 @@ node scripts/bench-profile.mjs --suite desktop --case pdf_doc --input <hwp> --re
 | number-bullet | 230 (1277) | 150 | 70 (152) | 50 (154) |
 
 - 77쪽 문서(kps-ai) 시간(wall)은 9600 → 1493 ms, 크기는 32.7 → 4.0 MB(참조 앱 7.4 MB보다 작다). 윤곽선 대신 글꼴 서브셋이 크기와 시간을 가장 크게 줄였고(2번), 면 매핑이 그 앞의 큰 몫(1번), deflate 수준 1은 추가로 CPU 약 20%를 줄였다(PDF 크기는 약 3% 늘어남, 3번).
-- 첫 쪽 PNG(CPU ms, 적용 전 → 후): KTX 380 → 130, form-002 220 → 90, number-bullet 140 → 50, kps-ai 110 → 140(잡음 범위), biz_plan 20 → 40. 글꼴 DB를 만드는 `fonts` 단계가 약 10 ms에서 약 20 ms로 늘어 작은 문서(shift-return, blank2010, biz_plan)는 오히려 10~15 ms 더 걸린다. 면 파일을 미리 모두 매핑하는 비용이다. 쓰인 면만 지연 매핑하면 줄일 수 있으나 `fontdb`가 면 단위 지연 매핑을 주지 않아 구현하지 않았다.
+- 첫 쪽 PNG(CPU ms, 적용 전 → 후): KTX 380 → 130, form-002 220 → 90, number-bullet 140 → 50, kps-ai 110 → 140(잡음 범위), biz_plan 20 → 40. 글꼴 DB를 만드는 `fonts` 단계가 약 10 ms에서 약 20 ms로 늘어 작은 문서(shift-return, blank2010, biz_plan)는 오히려 10~15 ms 더 걸린다. 면 파일을 미리 모두 매핑하는 비용이다. 쓰인 면만 지연 매핑하면 줄일 수 있으나 글꼴 DB 크레이트가 면 단위 지연 매핑을 주지 않아 구현하지 않았다.
 - PNG 바이트 수는 전 입력에서 적용 전과 같다(9494, 5685, 19092, 163263, 24652, 122923, 135972, 102901 B). 글꼴과 그리기 경로가 같아 픽셀이 같다는 정황이며, 바이트 비교는 아니다.
 - 최대 RSS: 3번까지만 적용했을 때 PDF가 biz_plan 31 → 215 MB, number-bullet 23 → 205 MB, kps-ai 172 → 398 MB로 늘었다. 원인은 면 매핑이 아니라 `vendor/svg2pdf`의 `fill_fonts`가 쓰인 면의 글꼴 파일 전체(`Vec::from(data)`, 시스템 한국어 글꼴 `AppleSDGothicNeo.ttc`는 55 MB)를 복사하던 것이다(면 매핑만 적용한 측정은 number-bullet 27 MB로 정상). PD-163의 `fill_fonts` 패치(DB가 매핑해 둔 면이면 복사 없이 공유)가 이를 없앤다.
 
@@ -195,11 +195,11 @@ node scripts/bench-profile.mjs --suite desktop --case pdf_doc --input <hwp> --re
 
 | # | 경로 | 함수:줄 | 비율 | 설명 |
 |---:|---|---|---|---|
-| 1 | PDF 내보내기 | `fontdb::Database::query`(fontdb 0.23.0 `src/lib.rs:661`), `usvg::text::FontResolver::default_font_selector`(usvg 0.45.1 `src/text/mod.rs:85`). 호출은 `pdf_synthetic.rs:494`(`parse_page`) | 77쪽: 포함 20.0%(자기 14.7%), 115쪽 표 문서: 포함 28.6%(자기 26.5%), 미리보기 KTX: 포함 14.8% | 글자 요소마다 모든 글꼴 면(수백 개)을 걸러 가며 찾는다. 같은 (글꼴 목록, 굵기, 모양) 질의가 쪽마다 반복된다 |
-| 2 | PDF 내보내기 | 글자 한 개마다 `ttf_parser::Face::parse`(`with_face_data` 클로저 안: `outline`, `colr`, `raster`, `svg`, `shape_text_with_font`) | 합성 300쪽: 포함 30.0%(`parse_tables` 16.9%), `outline` 26.0%, `colr` 16.5% | usvg 글자→경로 변환이 글자마다 글꼴 표를 다시 파싱한다. 면 데이터는 이미 매핑돼 있으나 파싱 결과는 재사용하지 않는다 |
+| 1 | PDF 내보내기 | `fontdb::Database::query`(글꼴 DB 크레이트 0.23.0 `src/lib.rs:661`), `usvg::text::FontResolver::default_font_selector`(SVG 파서 크레이트 0.45.1 `src/text/mod.rs:85`). 호출은 `pdf_synthetic.rs:494`(`parse_page`) | 77쪽: 포함 20.0%(자기 14.7%), 115쪽 표 문서: 포함 28.6%(자기 26.5%), 미리보기 KTX: 포함 14.8% | 글자 요소마다 모든 글꼴 면(수백 개)을 걸러 가며 찾는다. 같은 (글꼴 목록, 굵기, 모양) 질의가 쪽마다 반복된다 |
+| 2 | PDF 내보내기 | 글자 한 개마다 `ttf_parser::Face::parse`(`with_face_data` 클로저 안: `outline`, `colr`, `raster`, `svg`, `shape_text_with_font`) | 합성 300쪽: 포함 30.0%(`parse_tables` 16.9%), `outline` 26.0%, `colr` 16.5% | SVG 파서 크레이트 글자→경로 변환이 글자마다 글꼴 표를 다시 파싱한다. 면 데이터는 이미 매핑돼 있으나 파싱 결과는 재사용하지 않는다 |
 | 3 | PDF 내보내기 | `svg2pdf::render::text::fill_fonts`(`vendor/svg2pdf/src/render/text.rs:525`, 복사는 551줄 `Arc::new(Vec::from(data))`), `Context::new` | 합성: `_platform_memmove` 자기 21.2%, `fill_fonts` 포함 12.4%, `Context::new` 11.8%. 77쪽: 10.9% / 13.1% | 쪽마다 쓰인 글꼴 파일 전체를 복사하고 다시 파싱한다. 최대 RSS(425~778 MB)의 한 원인으로 보이나 RSS 분해는 안 했다 |
 | 4 | PDF·Quick Look | `miniz_oxide::deflate::compress_to_vec_zlib`(수준 6, `vendor/svg2pdf/src/util/helper.rs:184`) | PDF 합성 12.6%, 77쪽 13.0%, 115쪽 7.3%. Quick Look PDF(77쪽) 자기 40.4%, 포함 42.4% | 쪽 콘텐츠 스트림 압축이 CPU를 많이 쓴다. Quick Look은 글자를 윤곽선으로 내보내 스트림이 크다 |
-| 5 | PDF 내보내기 | `roxmltree` 파싱(`tokenizer::parse_element`, `parse_content`)과 `pdf_synthetic::asks_for_emphasis`(`pdf_synthetic.rs:256`) | 77쪽: roxmltree 포함 27.0%(usvg의 파싱 포함). `asks_for_emphasis` 자기 1.8~2.5% | 굵게·기울임이 있는 쪽은 쪽 SVG를 usvg 앞에서 한 번 더 파싱한다. 강조 여부는 단어 네 개를 따로 훑어 찾는다 |
+| 5 | PDF 내보내기 | XML 트리 파서 크레이트 파싱(`tokenizer::parse_element`, `parse_content`)과 `pdf_synthetic::asks_for_emphasis`(`pdf_synthetic.rs:256`) | 77쪽: XML 트리 파서 크레이트 포함 27.0%(SVG 파서 크레이트의 파싱 포함). `asks_for_emphasis` 자기 1.8~2.5% | 굵게·기울임이 있는 쪽은 쪽 SVG를 SVG 파서 크레이트 앞에서 한 번 더 파싱한다. 강조 여부는 단어 네 개를 따로 훑어 찾는다 |
 | 6 | Quick Look 첫 쪽 PNG·PDF | `fonts.rs:29`의 `build()`가 면을 매핑하지 않음 → `with_face_data`가 매번 `open`·`mmap`·`munmap` | `ql_png` KTX: munmap 47.5% + open 12.9% + mmap 2.3% = 약 63%. `ql_pdf` 77쪽: 20.5% + 11.9% + 3.0% = 약 35% | 셸은 이미 `shared_font_db`에서 면을 한 번 매핑한다(PD-114). Quick Look 크레이트만 빠져 있다 |
 | 7 | Quick Look 미리보기 PDF | `render.rs:126` `embed_text: false`(`pdf_of`는 119줄) | 77쪽 출력 32.7 MB(64쪽), 참조 앱은 7.4 MB, 시간 6.9 초 대 2.4 초 | 글자를 전부 윤곽선 경로로 내보내서 PDF가 크고 느리다. 병목 4와 함께 본다 |
 | 8 | HWP 열기·쪽 나누기(rhwp) | `rhwp::renderer::layout::LayoutEngine::advance_row_cut_inner`(`third_party/rhwp/src/renderer/layout/table_layout.rs:16821`), `DocumentCore::from_bytes_inner` | 115쪽 표 문서의 PDF 프로파일에서 자기 7.4%, 포함 9.4%. 열기만 560~580 ms(참조 앱과 같음) | 상위 rhwp 코드다. 참조 앱과 같은 비용이라 격차는 없지만, 큰 표 문서에서 열기·미리보기·Quick Look의 하한이다 |
@@ -224,7 +224,7 @@ node scripts/bench-profile.mjs --suite desktop --case pdf_doc --input <hwp> --re
 
 - **병목 1(질의 메모, `pdf_font_select.rs`)**: 표가 많아 글자 요소가 많은 문서(issue1949, kps-ai)에서 CPU 약 25% 감소. 요청 종류가 적은 합성 문서에서는 질의가 원래 작아 변화가 작다.
 - **병목 3(글꼴 공유, `vendor/svg2pdf`)**: 최대 RSS가 54~89% 줄었다. 쪽마다, 스레드 4개마다 글꼴 파일(Noto Sans KR 등) 전체를 복사하던 것이 RSS의 대부분이었다. 2.1절의 참조 앱 RSS와 견주면 모든 입력에서 우리가 작아졌다(shift-return 19 vs 35, biz_plan 48 vs 207, form-002 92 vs 247, kps-ai 182 vs 385, issue1949 201 vs 214, KTX 137 vs 310, 합성 71 vs 97 MB).
-- **병목 2(쪽마다 `Face::parse`)는 못 줄였다**: 이 호출은 usvg 안(`text::flatten`의 `with_face_data` 클로저)이라 공개 API로 면 파싱 결과를 넘길 수 없다. 합성 300쪽을 다시 `sample`로 보니 `usvg::text::flatten` 포함 66%, 그 안의 `ttf_parser::Face::parse` 포함 약 22%(`parse_tables` 약 11%)다. 줄이려면 usvg 사본을 패치해 면 파싱을 쪽 사이에 공유해야 한다. 상위 갱신 부담이 커서 이번에는 하지 않았다(결정 필요).
+- **병목 2(쪽마다 `Face::parse`)는 못 줄였다**: 이 호출은 SVG 파서 크레이트 안(`text::flatten`의 `with_face_data` 클로저)이라 공개 API로 면 파싱 결과를 넘길 수 없다. 합성 300쪽을 다시 `sample`로 보니 `usvg::text::flatten` 포함 66%, 그 안의 `ttf_parser::Face::parse` 포함 약 22%(`parse_tables` 약 11%)다. 줄이려면 SVG 파서 크레이트 사본을 패치해 면 파싱을 쪽 사이에 공유해야 한다. 상위 갱신 부담이 커서 이번에는 하지 않았다(결정 필요).
 - **병목 4(압축 수준)는 바꾸지 않았다**. 수준별 CPU(ms)와 출력 크기(바이트), 5회 중앙값, 수준 6이 현재 값이다.
 
 | 입력 | 수준 1 | 수준 2 | 수준 3 | 수준 4 | 수준 6 |

@@ -6,7 +6,7 @@ use crate::coercion::format_general_number;
 
 /// Largest denominator width (in placeholders) a fraction code may request.
 const MAX_FRACTION_DEN_DIGITS: usize = 5;
-/// Convergence threshold of the continued-fraction search (SheetJS SSF `frac`).
+/// Convergence threshold of the continued-fraction search (reference format-code `frac`).
 const FRACTION_EPS: f64 = 0.000_000_05;
 /// Iteration bound of the continued-fraction search (each step grows the denominator).
 const MAX_FRACTION_STEPS: usize = 64;
@@ -421,7 +421,7 @@ impl FracPlan {
 }
 
 /// Best rational approximation `(numerator, denominator)` of `x >= 0` with denominator at most
-/// `max_den`: continued-fraction convergents (SheetJS SSF `frac`), plus the closest
+/// `max_den`: continued-fraction convergents (reference format-code `frac`), plus the closest
 /// semiconvergent when the next convergent would exceed the bound.
 fn best_fraction(x: f64, max_den: u32) -> (u64, u64) {
     let max_den = u64::from(max_den);

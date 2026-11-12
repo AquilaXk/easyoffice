@@ -27,7 +27,7 @@ pub const MAX_STYLED_CELLS: usize = 500_000;
 /// Smallest and largest column width (CSS px) the editor and the writers accept.
 pub const MIN_COLUMN_PX: u32 = 8;
 pub const MAX_COLUMN_PX: u32 = 2_000;
-/// Excel limits a font size to 1..=409 pt.
+/// Spreadsheet programs limit a font size to 1..=409 pt.
 pub const MIN_SIZE_PT: f64 = 1.0;
 pub const MAX_SIZE_PT: f64 = 409.0;
 

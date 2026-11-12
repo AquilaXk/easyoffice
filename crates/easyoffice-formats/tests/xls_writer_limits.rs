@@ -1,4 +1,4 @@
-//! `.xls` writer limits: sheet names Excel accepts, records that fit their 16-bit length, and
+//! `.xls` writer limits: sheet names spreadsheet programs accept, records that fit their 16-bit length, and
 //! text that merely starts with `=` stored as text rather than as a formula record.
 
 use easyoffice_formats::{

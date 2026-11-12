@@ -22,7 +22,7 @@ pub const MAX_RULES_PER_SHEET: usize = 256;
 pub const MAX_RANGES_PER_RULE: usize = 32;
 /// Characters of one operand, formula, message or list item.
 pub const MAX_RULE_TEXT_CHARS: usize = 1_024;
-/// Thresholds of a colour scale or icon set (Excel allows 2 or 3 and up to 5).
+/// Thresholds of a colour scale or icon set (spreadsheet programs allow 2 or 3 and up to 5).
 pub const MAX_RULE_STOPS: usize = 5;
 
 /// Zero-based inclusive cell rectangle.

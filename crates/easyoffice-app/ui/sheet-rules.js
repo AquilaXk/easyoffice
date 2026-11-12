@@ -232,7 +232,7 @@
     return out;
   }
 
-  // Bar geometry (Univer data bar): positive bars grow right of the axis, negative ones left.
+  // Bar geometry (reference conditional-format engine data bar): positive bars grow right of the axis, negative ones left.
   function barBackground(bar) {
     const start = bar.start;
     const mag = Math.abs(bar.pct) / 100;
