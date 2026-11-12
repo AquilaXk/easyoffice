@@ -352,9 +352,12 @@ test("combo boxes in dialogs have no fixed or stretched width anywhere, so they 
   const { readFileSync, readdirSync } = await import("node:fs");
   const dir = new URL("../crates/easyoffice-app/ui/", import.meta.url);
   const offenders = [];
+  // Dialogs whose rows hold one column of equal-width fields (QA 2026-11-12): the cell format dialog stretches its combo boxes like the reference's `.formula-select` (`flex: 1`).
+  const EQUAL_WIDTH_DIALOGS = ["#sheet-numfmt-dialog"];
   for (const name of readdirSync(dir).filter((n) => n.endsWith(".css"))) {
     const css = readFileSync(new URL(name, dir), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
     for (const [, selector, body] of css.matchAll(/([^{}]*dialog-select[^{}]*)\{([^}]*)\}/g)) {
+      if (EQUAL_WIDTH_DIALOGS.some((id) => selector.trim().startsWith(id))) continue;
       if (/(^|;)\s*(width|min-width|max-width|flex(-grow|-basis)?)\s*:/.test(body)) offenders.push(name + ": " + selector.trim());
     }
   }
