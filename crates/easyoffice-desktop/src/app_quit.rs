@@ -186,21 +186,33 @@ pub fn request_app_quit(app: &AppHandle) {
 /// window confirms its own close, and [`window_destroyed`] or [`cancel_quit`] replies.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn request_terminate(app: &AppHandle) -> Terminate {
-    let decision = app
-        .state::<AppQuit>()
-        .begin_terminate(open_labels(app, None), |label| close_prompt(app, label));
+    // Called by AppKit: a panic here would unwind through its frames, so a terminate that comes
+    // before `setup` has managed the queue ends at once instead of reading missing state.
+    let Some(quit) = app.try_state::<AppQuit>() else {
+        return Terminate::Now;
+    };
+    let decision = quit.begin_terminate(open_labels(app, None), |label| close_prompt(app, label));
     if let Terminate::Later(Some(first)) = &decision {
         // Not inside the system's call: a window that closes at once would answer the system
-        // ("terminate" or "cancel") before this call has returned "later", and AppKit would wait
-        // for a reply it already got. A task from another thread runs on the main thread only
-        // after the call is over.
-        let (app, first) = (app.clone(), first.clone());
-        tauri::async_runtime::spawn(async move {
-            let handle = app.clone();
-            let _ = handle.run_on_main_thread(move || ask(&app, &first));
-        });
+        // before this call has returned "later" (see [`defer_to_main`]).
+        let first = first.clone();
+        defer_to_main(app, move |app| ask(app, &first));
     }
     decision
+}
+
+/// Runs `task` on the main thread after the current call stack has unwound: from another thread,
+/// so the task is queued to the event loop instead of running inline. The system's terminate
+/// replies need it twice. The call that returns "later" must be over before any reply, or AppKit
+/// would wait for an answer it already got; and the reply that ends the app must not run inside
+/// the window event that triggered it (the event loop is not re-entered).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn defer_to_main(app: &AppHandle, task: impl FnOnce(&AppHandle) + Send + 'static) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let handle = app.clone();
+        let _ = handle.run_on_main_thread(move || task(&app));
+    });
 }
 
 /// The page's 끝내기 item and Ctrl+Q (Windows and Linux have no native menu; macOS uses its own quit
@@ -421,6 +433,28 @@ mod tests {
             quit.advance_after_close("main"),
             Advance::Next("doc-2".to_string())
         );
+    }
+
+    /// The terminate path is called by AppKit and must not unwind into it, and its replies never
+    /// run inside the event that triggered them.
+    #[test]
+    fn the_terminate_path_reads_missing_state_softly_and_replies_deferred() {
+        let queue = include_str!("app_quit.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap();
+        let request = &queue[queue.find("pub fn request_terminate").unwrap()..];
+        let request = &request[..request.find("\n}\n").unwrap()];
+        assert!(request.contains("try_state::<AppQuit>()"));
+        assert!(request.contains("defer_to_main("));
+        assert!(!request.contains("run_on_main_thread"));
+        let terminate = include_str!("macos_terminate.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap();
+        let reply = &terminate[terminate.find("pub fn reply_to_terminate").unwrap()..];
+        assert!(reply.contains("defer_to_main("));
+        assert!(!reply.contains("run_on_main_thread"));
     }
 
     #[test]

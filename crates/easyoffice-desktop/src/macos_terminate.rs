@@ -96,9 +96,10 @@ extern "C-unwind" fn should_terminate(
 }
 
 /// The queue's answer to a terminate that returned `NSTerminateLater`: true ends the app, false
-/// keeps it running (a shutdown or logout is cancelled too).
+/// keeps it running (a shutdown or logout is cancelled too). Always deferred, whichever event
+/// ended the queue.
 pub fn reply_to_terminate(app: &AppHandle, terminate: bool) {
-    let _ = app.run_on_main_thread(move || {
+    app_quit::defer_to_main(app, move |_| {
         if let Some(mtm) = MainThreadMarker::new() {
             NSApplication::sharedApplication(mtm).replyToApplicationShouldTerminate(terminate);
         }
