@@ -17,6 +17,7 @@
 //! then applied to cell values one at a time.
 
 use super::data::{Cells, RangeData};
+use super::period::period_days;
 use super::{Bar, Icon};
 use crate::{EvaluatedCellValue, FormulaError};
 use easyoffice_formats::{CfKind, CfRule, CfValue, Cmp, TextOp, ValueKind, ICON_SETS};
@@ -73,7 +74,10 @@ pub(crate) fn locality(kind: &CfKind) -> Locality {
                 Locality::Sheet
             }
         }
-        CfKind::Text { .. } | CfKind::Blanks { .. } | CfKind::Errors { .. } => Locality::Cell,
+        CfKind::Text { .. }
+        | CfKind::Blanks { .. }
+        | CfKind::Errors { .. }
+        | CfKind::TimePeriod(_) => Locality::Cell,
         CfKind::Top { .. } | CfKind::Average { .. } | CfKind::Duplicates { .. } => Locality::Range,
         CfKind::Expression(_) => Locality::Sheet,
         CfKind::ColorScale(stops) => graded(&stops.iter().map(|(v, _)| v).collect::<Vec<_>>()),
@@ -143,6 +147,8 @@ pub(crate) enum Plan {
     },
     Blanks(bool),
     Errors(bool),
+    /// First and last serial day of a period.
+    Period(i64, i64),
     Rank {
         cut: f64,
         bottom: bool,
@@ -266,7 +272,12 @@ fn bar_plan(
 }
 
 /// Builds the plan of a rule over `data`.
-pub(crate) fn make_plan(rule: &CfRule, data: &RangeData, cells: &mut dyn Cells) -> Option<Plan> {
+pub(crate) fn make_plan(
+    rule: &CfRule,
+    data: &RangeData,
+    cells: &mut dyn Cells,
+    today: i64,
+) -> Option<Plan> {
     Some(match &rule.kind {
         CfKind::CellIs { cmp, a, b } => Plan::CellIs {
             cmp: *cmp,
@@ -279,6 +290,10 @@ pub(crate) fn make_plan(rule: &CfRule, data: &RangeData, cells: &mut dyn Cells) 
         },
         CfKind::Blanks { not } => Plan::Blanks(*not),
         CfKind::Errors { not } => Plan::Errors(*not),
+        CfKind::TimePeriod(period) => {
+            let (first, last) = period_days(*period, today);
+            Plan::Period(first, last)
+        }
         CfKind::Top { n, percent, bottom } => Plan::Rank {
             cut: rank_cut(*n, *percent, *bottom, data)?,
             bottom: *bottom,
@@ -539,6 +554,14 @@ pub(crate) fn apply_plan(plan: &Plan, value: &EvaluatedCellValue) -> Option<Hit>
         }
         Plan::Errors(not) => {
             (matches!(value, EvaluatedCellValue::Error(_)) != *not).then_some(Hit::Style)
+        }
+        Plan::Period(first, last) => {
+            // Only numbers are dates; the time of day does not matter.
+            let EvaluatedCellValue::Number(v) = value else {
+                return None;
+            };
+            let day = v.floor();
+            (day >= *first as f64 && day <= *last as f64).then_some(Hit::Style)
         }
         Plan::Rank { cut, bottom } => {
             let EvaluatedCellValue::Number(v) = value else {

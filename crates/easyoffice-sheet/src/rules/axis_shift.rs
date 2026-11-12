@@ -69,8 +69,11 @@ fn shift_dv(rule: &mut DataValidation, own_is_target: bool, f: &Follow<'_>) {
     if own_is_target {
         rule.ranges = shift_boxes(&rule.ranges, f.edit, false);
     }
-    // A list is either its items (`a,b,c`) or `=range`; items are not references.
-    if rule.kind == DvKind::List && !rule.a.starts_with('=') {
+    // A list is either its items (`a,b,c`) or `=range`; items, and a check box's two values, are
+    // not references.
+    let literal =
+        rule.kind == DvKind::Checkbox || (rule.kind.is_list() && !rule.a.starts_with('='));
+    if literal {
         return;
     }
     f.text(&mut rule.a, false);

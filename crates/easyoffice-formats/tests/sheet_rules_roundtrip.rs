@@ -2,7 +2,7 @@
 
 use easyoffice_formats::{
     CellBox, CfKind, CfRule, CfStyle, CfValue, Cmp, DataValidation, DvAlert, DvKind, OdfCodec,
-    OoxmlCodec, SheetRules, SheetStyling, TextOp, ValueKind, FLAG_BOLD, FLAG_ITALIC,
+    OoxmlCodec, SheetRules, SheetStyling, TextOp, TimePeriod, ValueKind, FLAG_BOLD, FLAG_ITALIC,
 };
 
 fn boxes(text: &str) -> Vec<CellBox> {
@@ -154,6 +154,7 @@ fn sample_rules() -> SheetRules {
         ],
         dv: vec![dv, list, by_ref, custom, len],
         unsupported: Vec::new(),
+        today: None,
     }
 }
 
@@ -204,7 +205,7 @@ fn xlsx_reader_names_rules_it_cannot_hold() {
         if e.path == "xl/worksheets/sheet1.xml" {
             let xml = String::from_utf8(e.data.clone()).unwrap().replace(
                 "</worksheet>",
-                "<conditionalFormatting sqref=\"B1\"><cfRule type=\"timePeriod\" timePeriod=\"today\" priority=\"2\"/></conditionalFormatting><dataValidations count=\"1\"><dataValidation sqref=\"C1\"/></dataValidations></worksheet>",
+                "<conditionalFormatting sqref=\"B1\"><cfRule type=\"timePeriod\" timePeriod=\"decade\" priority=\"2\"/></conditionalFormatting><dataValidations count=\"1\"><dataValidation sqref=\"C1\"/></dataValidations></worksheet>",
             );
             e.data = xml.into_bytes();
         }
@@ -380,4 +381,150 @@ fn ods_is_untouched_by_empty_rules() {
         easyoffice_formats::read_sheet_styling(&bytes, easyoffice_formats::DocumentFormat::Ods)
             .unwrap();
     assert!(back[0].1.rules.is_empty());
+}
+
+fn written_sheet_xml(rules: SheetRules) -> (String, Vec<u8>) {
+    let sheets = vec![("Sheet1".to_string(), vec![(0, 0, "1".to_string())])];
+    let bytes = OoxmlCodec::pack_xlsx_multi_styled(&sheets, &[], &[styling(rules)]).unwrap();
+    let entries = easyoffice_formats::ZipArchiveCodec::unpack(
+        &bytes,
+        &easyoffice_formats::ZipSecurityPolicy::default(),
+    )
+    .unwrap();
+    let xml = entries
+        .iter()
+        .find(|e| e.path == "xl/worksheets/sheet1.xml")
+        .map(|e| String::from_utf8(e.data.clone()).unwrap())
+        .unwrap();
+    (xml, bytes)
+}
+
+#[test]
+fn xlsx_period_rules_round_trip_with_the_period_and_its_formula() {
+    let cf: Vec<CfRule> = TimePeriod::NAMES
+        .iter()
+        .enumerate()
+        .map(|(i, (period, _))| rule("D2:D30", i as u32 + 1, CfKind::TimePeriod(*period)))
+        .collect();
+    let rules = SheetRules {
+        cf,
+        ..SheetRules::default()
+    };
+    let (xml, bytes) = written_sheet_xml(rules.clone());
+    for (_, name) in TimePeriod::NAMES {
+        assert!(
+            xml.contains(&format!("type=\"timePeriod\" timePeriod=\"{name}\"")),
+            "{name}"
+        );
+    }
+    assert!(xml.contains("<formula>FLOOR(D2,1)=TODAY()</formula>"));
+    assert!(xml.contains("<formula>AND(MONTH(D2)=MONTH(EDATE(TODAY(),0-1)),YEAR(D2)=YEAR(EDATE(TODAY(),0-1)))</formula>"));
+    let (_, back) = OoxmlCodec::unpack_xlsx_with_styling(&bytes).unwrap();
+    assert_eq!(back[0].1.rules.cf, rules.cf);
+    assert!(back[0].1.rules.unsupported.is_empty());
+}
+
+#[test]
+fn xlsx_writes_a_check_box_and_a_multiple_list_as_lists_and_reads_them_back() {
+    let mut check = DataValidation::new(boxes("B2:B9"), DvKind::Checkbox);
+    check.a = "완료".into();
+    check.b = "미완료".into();
+    let plain = DataValidation::new(boxes("C2:C9"), DvKind::Checkbox);
+    let mut multi = DataValidation::new(boxes("D2:D9"), DvKind::ListMultiple);
+    multi.a = "사과,배,감".into();
+    let mut single = DataValidation::new(boxes("E2:E9"), DvKind::List);
+    single.a = "가,나".into();
+    let rules = SheetRules {
+        dv: vec![check, plain, multi, single],
+        ..SheetRules::default()
+    };
+    let (xml, bytes) = written_sheet_xml(rules.clone());
+    // Other programs see lists of the values, and the kind extension sits last in the sheet.
+    assert!(xml.contains("<formula1>&quot;완료,미완료&quot;</formula1>"));
+    assert!(xml.contains("<formula1>&quot;TRUE,FALSE&quot;</formula1>"));
+    assert!(xml.contains("<formula1>&quot;사과,배,감&quot;</formula1>"));
+    assert_eq!(xml.matches("type=\"list\"").count(), 4);
+    assert!(xml.ends_with("</ext></extLst></worksheet>"));
+    let (_, back) = OoxmlCodec::unpack_xlsx_with_styling(&bytes).unwrap();
+    let got = &back[0].1.rules;
+    assert_eq!(got.dv[0].kind, DvKind::Checkbox);
+    assert_eq!(
+        (got.dv[0].a.as_str(), got.dv[0].b.as_str()),
+        ("완료", "미완료")
+    );
+    assert_eq!(got.dv[1].kind, DvKind::Checkbox);
+    // The default values come back written out.
+    assert_eq!(
+        (got.dv[1].a.as_str(), got.dv[1].b.as_str()),
+        ("TRUE", "FALSE")
+    );
+    assert_eq!(got.dv[2].kind, DvKind::ListMultiple);
+    assert_eq!(got.dv[2].a, "사과,배,감");
+    assert_eq!(got.dv[3].kind, DvKind::List);
+    assert!(got.unsupported.is_empty());
+}
+
+#[test]
+fn xlsx_does_not_read_a_kind_the_format_does_not_have() {
+    let rules = SheetRules {
+        dv: vec![DataValidation::new(boxes("A1"), DvKind::List)],
+        ..SheetRules::default()
+    };
+    let (_, bytes) = written_sheet_xml(rules);
+    let mut entries = easyoffice_formats::ZipArchiveCodec::unpack(
+        &bytes,
+        &easyoffice_formats::ZipSecurityPolicy::default(),
+    )
+    .unwrap();
+    for e in &mut entries {
+        if e.path == "xl/worksheets/sheet1.xml" {
+            let xml = String::from_utf8(e.data.clone()).unwrap();
+            e.data = xml
+                .replace("type=\"list\"", "type=\"checkbox\"")
+                .into_bytes();
+        }
+    }
+    let repacked = easyoffice_formats::ZipArchiveCodec::pack_compressed(
+        &entries
+            .into_iter()
+            .map(|e| (e.path, e.data))
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
+    let (_, back) = OoxmlCodec::unpack_xlsx_with_styling(&repacked).unwrap();
+    assert!(back[0].1.rules.dv.is_empty());
+    assert_eq!(
+        back[0].1.rules.unsupported,
+        vec!["데이터 유효성 checkbox".to_string()]
+    );
+}
+
+#[test]
+fn ods_writes_period_rules_as_formula_rules_and_check_boxes_as_lists() {
+    let rules = SheetRules {
+        cf: vec![rule("D2:D30", 1, CfKind::TimePeriod(TimePeriod::Last7Days))],
+        dv: vec![{
+            let mut c = DataValidation::new(boxes("B2:B3"), DvKind::Checkbox);
+            c.a = "예".into();
+            c.b = "아니오".into();
+            c
+        }],
+        ..SheetRules::default()
+    };
+    let sheets = vec![(
+        "Sheet1".to_string(),
+        vec![(1, 1, "예".to_string()), (2, 1, "".to_string())],
+    )];
+    let bytes = OdfCodec::pack_ods_multi_styled(&sheets, &[styling(rules)]).unwrap();
+    let back =
+        easyoffice_formats::read_sheet_styling(&bytes, easyoffice_formats::DocumentFormat::Ods)
+            .unwrap();
+    let got = &back[0].1.rules;
+    assert!(
+        matches!(&got.cf[0].kind, CfKind::Expression(f) if f.contains("TODAY()") && f.contains("D2")),
+        "{:?}",
+        got.cf
+    );
+    assert_eq!(got.dv[0].kind, DvKind::List);
+    assert_eq!(got.dv[0].a, "예,아니오");
 }

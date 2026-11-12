@@ -2,8 +2,8 @@ use super::*;
 use crate::recalc::{CellChange, RecalcSession};
 use crate::{PackedCellCoordinate, WorkbookEngine};
 use easyoffice_formats::{
-    parse_sqref, CfStyle, CfValue, Cmp, DataValidation, DvAlert, DvKind, TextOp, ValueKind,
-    FLAG_BOLD,
+    parse_sqref, CfStyle, CfValue, Cmp, DataValidation, DvAlert, DvKind, TextOp, TimePeriod,
+    ValueKind, FLAG_BOLD,
 };
 use std::collections::HashMap;
 
@@ -674,6 +674,47 @@ fn text_length_date_time_and_custom() {
 }
 
 #[test]
+fn a_check_box_takes_only_its_two_values() {
+    let plain = [dv(DvKind::Checkbox, Cmp::Between, "", "")];
+    assert!(check(&plain, "B2", "TRUE"));
+    assert!(check(&plain, "B2", "false"));
+    assert!(check(&plain, "B2", ""), "clearing the cell is allowed");
+    assert!(!check(&plain, "B2", "1"));
+    assert!(!check(&plain, "B2", "예"));
+    let named = [dv(DvKind::Checkbox, Cmp::Between, "완료", "미완료")];
+    assert!(check(&named, "B2", "완료"));
+    assert!(check(&named, "B2", " 미완료 "));
+    assert!(!check(&named, "B2", "TRUE"));
+    let numbers = [dv(DvKind::Checkbox, Cmp::Between, "1", "0")];
+    assert!(check(&numbers, "B2", "1") && check(&numbers, "B2", "0"));
+    assert!(!check(&numbers, "B2", "2"));
+}
+
+#[test]
+fn a_multiple_list_takes_any_chosen_items_of_the_list() {
+    let literal = [dv(
+        DvKind::ListMultiple,
+        Cmp::Between,
+        "red, green ,blue",
+        "",
+    )];
+    assert!(check(&literal, "B2", "red"));
+    assert!(check(&literal, "B2", "red,blue"));
+    assert!(check(&literal, "B2", "blue, green ,red"));
+    assert!(!check(&literal, "B2", "red,pink"));
+    assert!(!check(&literal, "B2", "RED"));
+    assert!(check(&literal, "B2", ",red,"), "empty parts are ignored");
+    let range = [dv(
+        DvKind::ListMultiple,
+        Cmp::Between,
+        "=Sheet1!$D$1:$D$2",
+        "",
+    )];
+    assert!(check(&range, "B2", "red,green"));
+    assert!(!check(&range, "B2", "red,blue"));
+}
+
+#[test]
 fn custom_validation_restores_the_cell_it_tried() {
     let mut wb = workbook(&[("B2", "keep")]);
     let rule = [dv(DvKind::Custom, Cmp::Between, "B2>1", "")];
@@ -718,4 +759,118 @@ fn rules_that_match_too_many_cells_are_dropped() {
     assert!(tight.evaluate(&mut cells).is_empty());
     assert!(tight.is_over_budget());
     assert!(tight.update(&mut cells, &[coord("A1")], true).is_empty());
+}
+
+// ---- period rules ------------------------------------------------------------------------------
+
+fn serial(y: i64, m: i64, d: i64) -> f64 {
+    crate::functions_date_fin::serial_from_civil(y, m, d) as f64
+}
+
+/// Rows 1..=n of column A hold the given serial numbers (a fraction is a time of day).
+fn dated(values: &[f64]) -> WorkbookEngine {
+    let cells: Vec<(String, String)> = values
+        .iter()
+        .enumerate()
+        .map(|(i, v)| (format!("A{}", i + 1), v.to_string()))
+        .collect();
+    let refs: Vec<(&str, &str)> = cells
+        .iter()
+        .map(|(a, b)| (a.as_str(), b.as_str()))
+        .collect();
+    workbook(&refs)
+}
+
+fn period_hits(wb: &WorkbookEngine, period: TimePeriod, today: f64) -> Vec<String> {
+    let mut r = rules(vec![rule("A1:A12", 1, CfKind::TimePeriod(period))]);
+    r.today = Some(today as i64);
+    let map: HashMap<String, CellVisual> = wb
+        .evaluate_rules("Sheet1", r)
+        .into_iter()
+        .map(|v| (v.coord.to_a1(), v))
+        .collect();
+    marked(&map)
+}
+
+#[test]
+fn period_rules_match_the_days_counted_from_the_given_today() {
+    // Thursday 2026-11-12. Rows: 11-05, 11-06, 11-07, 11-08 (Sun), 11-11, 11-12 at noon, 11-13,
+    // 11-14 (Sat), 11-15 (Sun), 10-31, 12-01, then text.
+    let today = serial(2026, 11, 12);
+    let days = [
+        serial(2026, 11, 5),
+        serial(2026, 11, 6),
+        serial(2026, 11, 7),
+        serial(2026, 11, 8),
+        serial(2026, 11, 11),
+        today + 0.5,
+        serial(2026, 11, 13),
+        serial(2026, 11, 14),
+        serial(2026, 11, 15),
+        serial(2026, 10, 31),
+        serial(2026, 12, 1),
+    ];
+    let mut cells: Vec<(String, String)> = days
+        .iter()
+        .enumerate()
+        .map(|(i, v)| (format!("A{}", i + 1), v.to_string()))
+        .collect();
+    cells.push(("A12".into(), "후일".into()));
+    let refs: Vec<(&str, &str)> = cells
+        .iter()
+        .map(|(a, b)| (a.as_str(), b.as_str()))
+        .collect();
+    let wb = workbook(&refs);
+    let hit = |p| period_hits(&wb, p, today);
+    assert_eq!(
+        hit(TimePeriod::Today),
+        ["A6"],
+        "the time of day does not matter"
+    );
+    assert_eq!(hit(TimePeriod::Yesterday), ["A5"]);
+    assert_eq!(hit(TimePeriod::Tomorrow), ["A7"]);
+    assert_eq!(hit(TimePeriod::Last7Days), ["A2", "A3", "A4", "A5", "A6"]);
+    assert_eq!(hit(TimePeriod::ThisWeek), ["A4", "A5", "A6", "A7", "A8"]);
+    assert_eq!(hit(TimePeriod::LastWeek), ["A1", "A2", "A3"]);
+    assert_eq!(hit(TimePeriod::NextWeek), ["A9"]);
+    assert_eq!(
+        hit(TimePeriod::ThisMonth),
+        ["A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8", "A9"]
+    );
+    assert_eq!(hit(TimePeriod::LastMonth), ["A10"]);
+    assert_eq!(hit(TimePeriod::NextMonth), ["A11"]);
+}
+
+#[test]
+fn period_rules_follow_a_new_today_and_ignore_blanks_and_text() {
+    let wb = dated(&[serial(2026, 11, 12)]);
+    assert_eq!(
+        period_hits(&wb, TimePeriod::Today, serial(2026, 11, 12)),
+        ["A1"]
+    );
+    assert!(period_hits(&wb, TimePeriod::Today, serial(2026, 11, 13)).is_empty());
+    assert_eq!(
+        period_hits(&wb, TimePeriod::Yesterday, serial(2026, 11, 13)),
+        ["A1"]
+    );
+    // A session re-judges only the edited cell: the day stays the one the rules were set with.
+    let mut session = RecalcSession::new(workbook(&[("A1", "1")])).unwrap();
+    let mut r = rules(vec![rule(
+        "A1:A3",
+        1,
+        CfKind::TimePeriod(TimePeriod::Today),
+    )]);
+    r.today = Some(serial(2026, 11, 12) as i64);
+    assert!(session.set_rules("Sheet1", r).unwrap().is_empty());
+    let edits = [CellChange {
+        sheet: "Sheet1".into(),
+        coord: coord("A2"),
+        raw: serial(2026, 11, 12).to_string(),
+    }];
+    session.apply(&edits).unwrap();
+    let outcome = session.recalculate();
+    let changed = session.rule_updates(&edits, &outcome).changed;
+    assert_eq!(changed.len(), 1);
+    assert_eq!(changed[0].1[0].coord, coord("A2"));
+    assert!(!changed[0].1[0].is_none());
 }

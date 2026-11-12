@@ -239,7 +239,7 @@ fn unsupported_rules_in_a_file_become_open_warnings() {
                 .unwrap()
                 .replace(
                     "</worksheet>",
-                    "<conditionalFormatting sqref=\"A1\"><cfRule type=\"timePeriod\" timePeriod=\"today\" priority=\"1\"/></conditionalFormatting></worksheet>",
+                    "<conditionalFormatting sqref=\"A1\"><cfRule type=\"timePeriod\" timePeriod=\"decade\" priority=\"1\"/></conditionalFormatting></worksheet>",
                 )
                 .into_bytes();
         }
@@ -363,4 +363,95 @@ fn rules_bench() {
       {"r":"A1:J10000","p":5,"t":"icons","set":"3TrafficLights1","th":[{"k":"num","v":"0"},{"k":"num","v":"333"},{"k":"num","v":"667"}]}
     ]}"##;
     bench_rules("5 rules (own-cell only)", local, 10_000);
+}
+
+const KIND_RULES: &str = r##"{"today":46338,
+ "cf":[{"r":"A1:A5","p":1,"t":"period","period":"today","bg":"#FFC7CE"}],
+ "dv":[{"r":"B1:B3","t":"checkbox","a":"완료","b":"미완료"},
+       {"r":"C1:C3","t":"listMultiple","a":"가,나,다"}]}"##;
+
+#[test]
+fn a_session_counts_period_rules_from_the_day_the_page_sends() {
+    // 46338 is 2026-11-12; 46337 is the day before.
+    let id = open();
+    session_call(&format!(
+        "{{\"sessionAction\":\"apply\",\"session\":\"{id}\",\"changes\":[{}]}}",
+        [
+            cell("A1", "46338"),
+            cell("A2", "46337"),
+            cell("A3", "46338.75"),
+            cell("A4", "text")
+        ]
+        .join(",")
+    ));
+    let painted = session_call(&format!(
+        "{{\"sessionAction\":\"rules\",\"session\":\"{id}\",\"sheet\":\"S\",\"rules\":{KIND_RULES}}}"
+    ));
+    let cells: Vec<String> = unpack(&painted).iter().map(a1).collect();
+    assert_eq!(cells, ["A1", "A3"]);
+    // Another day moves the match; a bad day is refused.
+    let next_day = KIND_RULES.replace("46338", "46339");
+    let painted = session_call(&format!(
+        "{{\"sessionAction\":\"rules\",\"session\":\"{id}\",\"sheet\":\"S\",\"rules\":{next_day}}}"
+    ));
+    assert!(painted.contains("\"w\":\"\""), "{painted}");
+    let bad = KIND_RULES.replace("46338", "0");
+    assert!(EasyOfficeIpcRouter::dispatch(
+        "evaluate_sheet",
+        &format!(
+            "{{\"sessionAction\":\"rules\",\"session\":\"{id}\",\"sheet\":\"S\",\"rules\":{bad}}}"
+        )
+    )
+    .is_err());
+}
+
+#[test]
+fn check_boxes_and_multiple_lists_are_judged_in_the_session() {
+    let id = open();
+    session_call(&format!(
+        "{{\"sessionAction\":\"rules\",\"session\":\"{id}\",\"sheet\":\"S\",\"rules\":{KIND_RULES}}}"
+    ));
+    let ok = |cell: &str, value: &str| {
+        session_call(&format!(
+            "{{\"sessionAction\":\"validate\",\"session\":\"{id}\",\"sheet\":\"S\",\"cell\":\"{cell}\",\"value\":\"{value}\"}}"
+        )) == "{\"ok\":true}"
+    };
+    assert!(ok("B1", "완료") && ok("B2", "미완료"));
+    assert!(!ok("B1", "TRUE"));
+    assert!(ok("C1", "가,다") && ok("C2", "나"));
+    assert!(!ok("C1", "가,라"));
+}
+
+#[test]
+fn check_boxes_and_multiple_lists_survive_xlsx_save_and_reopen() {
+    let sheets = format!(
+        "\"sheets\":[{{\"name\":\"S\",\"cells\":[{{\"ref\":\"A1\",\"raw\":\"5\"}}],\"rules\":{KIND_RULES}}}]"
+    );
+    let saved = dispatch(
+        "convert_document_format",
+        &format!("{{\"targetFormat\":\"xlsx\",\"title\":\"r\",{sheets}}}"),
+    );
+    let bytes = EasyOfficeIpcRouter::decode_base64(json_field(&saved, "convertedBase64")).unwrap();
+    let opened = dispatch(
+        "convert_document_format",
+        &format!(
+            "{{\"action\":\"decode\",\"fileName\":\"r.xlsx\",\"sourceBase64\":\"{}\"}}",
+            EasyOfficeIpcRouter::encode_base64(&bytes)
+        ),
+    );
+    let start = opened.find("\"rules\":").unwrap() + 8;
+    let rules_json = &opened[start..];
+    let parsed = StrictJsonValue::parse(&rules_json[..balanced_end(rules_json)]).unwrap();
+    let got = crate::sheet_rules_json::parse_rules(&parsed).unwrap();
+    assert_eq!(got.dv.len(), 2);
+    assert_eq!(got.dv[0].kind, easyoffice_formats::DvKind::Checkbox);
+    assert_eq!(
+        (got.dv[0].a.as_str(), got.dv[0].b.as_str()),
+        ("완료", "미완료")
+    );
+    assert_eq!(got.dv[1].kind, easyoffice_formats::DvKind::ListMultiple);
+    assert_eq!(
+        got.cf[0].kind,
+        easyoffice_formats::CfKind::TimePeriod(easyoffice_formats::TimePeriod::Today)
+    );
 }

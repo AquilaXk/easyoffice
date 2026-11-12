@@ -10,7 +10,7 @@ use easyoffice_formats::base64_codec;
 use easyoffice_formats::{
     format_sqref, icon_set_index, parse_sqref, CfKind, CfRule, CfStyle, CfValue, Cmp,
     DataValidation, DvAlert, DvKind, EasyOfficeError, SheetRules, StrictJsonValue, TextOp,
-    ValueKind, ICON_SETS, MAX_RULES_PER_SHEET, MAX_RULE_STOPS, MAX_RULE_TEXT_CHARS,
+    TimePeriod, ValueKind, ICON_SETS, MAX_RULES_PER_SHEET, MAX_RULE_STOPS, MAX_RULE_TEXT_CHARS,
 };
 use easyoffice_sheet::{encode_visuals, CellVisual};
 use std::fmt::Write;
@@ -127,6 +127,9 @@ fn kind(f: &Fields) -> Result<CfKind, EasyOfficeError> {
         "dup" => CfKind::Duplicates {
             unique: flag(f, "unique", false),
         },
+        "period" => CfKind::TimePeriod(
+            TimePeriod::from_name(text(f, "period")?).ok_or_else(|| bad("period"))?,
+        ),
         "expr" => CfKind::Expression(text(f, "formula")?.to_string()),
         "scale" => {
             let mut stops = Vec::new();
@@ -220,7 +223,20 @@ pub(crate) fn parse_rules(v: &StrictJsonValue) -> Result<SheetRules, EasyOfficeE
         cf: cf.iter().map(cf_rule).collect::<Result<_, _>>()?,
         dv: dv.iter().map(validation).collect::<Result<_, _>>()?,
         unsupported: Vec::new(),
+        today: today(f)?,
     })
+}
+
+/// The `today` of the page (a spreadsheet serial, 1 to 2,958,465), if it sent one.
+fn today(f: &Fields) -> Result<Option<i64>, EasyOfficeError> {
+    match StrictJsonValue::get_field(f, "today") {
+        None | Some(StrictJsonValue::Null) => Ok(None),
+        Some(v) => v
+            .as_u64()
+            .filter(|d| (1..=2_958_465).contains(d))
+            .map(|d| Some(d as i64))
+            .ok_or_else(|| bad("today")),
+    }
 }
 
 fn q(out: &mut String, s: &str) {
@@ -297,6 +313,10 @@ fn kind_json(out: &mut String, kind: &CfKind) {
         CfKind::Duplicates { unique } => {
             out.push_str(",\"t\":\"dup\"");
             boolean(out, "unique", *unique);
+        }
+        CfKind::TimePeriod(period) => {
+            out.push_str(",\"t\":\"period\"");
+            field(out, "period", period.name());
         }
         CfKind::Expression(f) => {
             out.push_str(",\"t\":\"expr\"");

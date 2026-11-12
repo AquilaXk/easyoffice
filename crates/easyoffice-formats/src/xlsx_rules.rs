@@ -3,7 +3,7 @@
 //!
 //! Element order inside `<worksheet>` follows ECMA-376 `CT_Worksheet`: `sheetData`, then
 //! `conditionalFormatting`, then `dataValidations`. Rules whose type the model cannot hold
-//! (`timePeriod`, extended icon sets, extended validations) are named in
+//! (extended icon sets, extended validations) are named in
 //! [`SheetRules::unsupported`] by the reader; theme and indexed colours are not resolved.
 
 use std::collections::HashMap;
@@ -14,8 +14,8 @@ use crate::rtf_xml_helpers::{
 };
 use crate::sheet_styling::sheet_rules::{
     format_sqref, icon_set_index, parse_sqref, CellBox, CfKind, CfRule, CfStyle, CfValue, Cmp,
-    DataValidation, DvAlert, DvKind, SheetRules, TextOp, ValueKind, FLAG_BOLD, FLAG_ITALIC,
-    FLAG_STRIKE, FLAG_UNDERLINE, ICON_SETS, MAX_RULES_PER_SHEET, MAX_RULE_STOPS,
+    DataValidation, DvAlert, DvKind, SheetRules, TextOp, TimePeriod, ValueKind, FLAG_BOLD,
+    FLAG_ITALIC, FLAG_STRIKE, FLAG_UNDERLINE, ICON_SETS, MAX_RULES_PER_SHEET, MAX_RULE_STOPS,
     MAX_RULE_TEXT_CHARS,
 };
 use crate::XmlSanitizer;
@@ -177,6 +177,34 @@ fn text_formula(op: TextOp, anchor: &str, text: &str) -> String {
     }
 }
 
+/// The formula spreadsheet programs write for a period rule on the cell `a`; they judge by
+/// `timePeriod` and keep the formula for readers that do not.
+pub(crate) fn period_formula(period: TimePeriod, a: &str) -> String {
+    let month = |step: &str| {
+        format!(
+            "AND(MONTH({a})=MONTH(EDATE(TODAY(),{step})),YEAR({a})=YEAR(EDATE(TODAY(),{step})))"
+        )
+    };
+    match period {
+        TimePeriod::Today => format!("FLOOR({a},1)=TODAY()"),
+        TimePeriod::Yesterday => format!("FLOOR({a},1)=TODAY()-1"),
+        TimePeriod::Tomorrow => format!("FLOOR({a},1)=TODAY()+1"),
+        TimePeriod::Last7Days => format!("AND(TODAY()-FLOOR({a},1)<=6,FLOOR({a},1)<=TODAY())"),
+        TimePeriod::ThisMonth => format!("AND(MONTH({a})=MONTH(TODAY()),YEAR({a})=YEAR(TODAY()))"),
+        TimePeriod::LastMonth => month("0-1"),
+        TimePeriod::NextMonth => month("0+1"),
+        TimePeriod::ThisWeek => format!(
+            "AND(TODAY()-ROUNDDOWN({a},0)<=WEEKDAY(TODAY())-1,ROUNDDOWN({a},0)-TODAY()<=7-WEEKDAY(TODAY()))"
+        ),
+        TimePeriod::LastWeek => format!(
+            "AND(TODAY()-ROUNDDOWN({a},0)>=(WEEKDAY(TODAY())),TODAY()-ROUNDDOWN({a},0)<(WEEKDAY(TODAY())+7))"
+        ),
+        TimePeriod::NextWeek => format!(
+            "AND(ROUNDDOWN({a},0)-TODAY()>(7-WEEKDAY(TODAY())),ROUNDDOWN({a},0)-TODAY()<(15-WEEKDAY(TODAY())))"
+        ),
+    }
+}
+
 fn rule_xml(rule: &CfRule, priority: usize, dxf: &DxfTable) -> String {
     // The top-left cell of the first range: the cell the generated formulas are written for.
     let anchor = rule.ranges.first().map_or_else(
@@ -196,6 +224,14 @@ fn rule_xml(rule: &CfRule, priority: usize, dxf: &DxfTable) -> String {
             if cmp.takes_two() {
                 let _ = write!(body, "<formula>{}</formula>", XmlSanitizer::escape(b));
             }
+        }
+        CfKind::TimePeriod(period) => {
+            let _ = write!(head, "type=\"timePeriod\" timePeriod=\"{}\"", period.name());
+            let _ = write!(
+                body,
+                "<formula>{}</formula>",
+                XmlSanitizer::escape(&period_formula(*period, &anchor))
+            );
         }
         CfKind::Text { op, text } => {
             let (ty, operator) = match op {
@@ -336,18 +372,18 @@ fn truncated(text: &str, max: usize) -> String {
 }
 
 fn validation_xml(dv: &DataValidation) -> String {
-    let mut attrs = format!("type=\"{}\"", dv.kind.name());
+    let mut attrs = format!("type=\"{}\"", dv.kind.file_kind().name());
     if dv.alert != DvAlert::Stop {
         let _ = write!(attrs, " errorStyle=\"{}\"", dv.alert.name());
     }
-    if dv.cmp != Cmp::Between && dv.kind != DvKind::List && dv.kind != DvKind::Custom {
+    if dv.cmp != Cmp::Between && !dv.kind.is_list() && dv.kind != DvKind::Custom {
         let _ = write!(attrs, " operator=\"{}\"", dv.cmp.name());
     }
     if dv.allow_blank {
         attrs.push_str(" allowBlank=\"1\"");
     }
     // `showDropDown="1"` HIDES the in-cell arrow.
-    if dv.kind == DvKind::List && !dv.show_dropdown {
+    if dv.kind.file_kind() == DvKind::List && !dv.show_dropdown {
         attrs.push_str(" showDropDown=\"1\"");
     }
     if dv.show_prompt {
@@ -368,15 +404,56 @@ fn validation_xml(dv: &DataValidation) -> String {
     }
     let _ = write!(attrs, " sqref=\"{}\"", format_sqref(&dv.ranges));
     let first = match (dv.kind, dv.a.strip_prefix('=')) {
-        (DvKind::List, Some(reference)) => reference.to_string(),
-        (DvKind::List, None) => format!("\"{}\"", dv.a.replace('"', "\"\"")),
+        (DvKind::Checkbox, _) => {
+            let (on, off) = dv.checkbox_values();
+            format!("\"{}\"", format!("{on},{off}").replace('"', "\"\""))
+        }
+        (kind, Some(reference)) if kind.is_list() => reference.to_string(),
+        (kind, None) if kind.is_list() => format!("\"{}\"", dv.a.replace('"', "\"\"")),
         _ => dv.a.clone(),
     };
     let mut body = format!("<formula1>{}</formula1>", XmlSanitizer::escape(&first));
-    if dv.cmp.takes_two() && !matches!(dv.kind, DvKind::List | DvKind::Custom) {
+    if dv.cmp.takes_two()
+        && !dv.kind.is_list()
+        && !matches!(dv.kind, DvKind::Custom | DvKind::Checkbox)
+    {
         let _ = write!(body, "<formula2>{}</formula2>", XmlSanitizer::escape(&dv.b));
     }
     format!("<dataValidation {attrs}>{body}</dataValidation>")
+}
+
+/// Namespace and extension id of the part that tells the check box and the multiple list from a
+/// plain list: the file formats have no such validation, so it is written as the list of its
+/// values and this extension (ignored by other programs) names the rules that are more.
+const KIND_NS: &str = "urn:easyoffice:sheet-rules";
+const KIND_EXT_URI: &str = "{4D0B5E1C-7A52-4C77-9F0A-2E6B1D93A8C4}";
+
+fn kind_ext_xml(dvs: &[&DataValidation]) -> String {
+    let marks: String = dvs
+        .iter()
+        .filter(|dv| matches!(dv.kind, DvKind::Checkbox | DvKind::ListMultiple))
+        .map(|dv| {
+            let (on, off) = dv.checkbox_values();
+            let values = if dv.kind == DvKind::Checkbox {
+                format!(
+                    " on=\"{}\" off=\"{}\"",
+                    truncated(on, 255),
+                    truncated(off, 255)
+                )
+            } else {
+                String::new()
+            };
+            format!(
+                "<eo:dv sqref=\"{}\" kind=\"{}\"{values}/>",
+                format_sqref(&dv.ranges),
+                dv.kind.name()
+            )
+        })
+        .collect();
+    if marks.is_empty() {
+        return String::new();
+    }
+    format!("<extLst><ext uri=\"{KIND_EXT_URI}\" xmlns:eo=\"{KIND_NS}\">{marks}</ext></extLst>")
 }
 
 /// `<conditionalFormatting>` blocks and `<dataValidations>` of one sheet (empty when none).
@@ -395,12 +472,9 @@ pub(crate) fn rules_xml(rules: &SheetRules, dxf: &DxfTable) -> String {
             rule_xml(rule, i + 1, dxf)
         );
     }
-    let validations: Vec<String> = rules
-        .dv
-        .iter()
-        .filter(|dv| !dv.ranges.is_empty())
-        .map(validation_xml)
-        .collect();
+    let written: Vec<&DataValidation> =
+        rules.dv.iter().filter(|dv| !dv.ranges.is_empty()).collect();
+    let validations: Vec<String> = written.iter().map(|dv| validation_xml(dv)).collect();
     if !validations.is_empty() {
         let _ = write!(
             out,
@@ -408,6 +482,7 @@ pub(crate) fn rules_xml(rules: &SheetRules, dxf: &DxfTable) -> String {
             validations.len(),
             validations.concat()
         );
+        out.push_str(&kind_ext_xml(&written));
     }
     out
 }
@@ -462,6 +537,10 @@ fn parse_kind(attrs: &str, body: &str) -> Result<CfKind, String> {
                 text: bounded(attr(attrs, "text").unwrap_or_default()),
             }
         }
+        "timePeriod" => match attr(attrs, "timePeriod").and_then(|p| TimePeriod::from_name(&p)) {
+            Some(period) => CfKind::TimePeriod(period),
+            None => return unsupported("timePeriod"),
+        },
         "containsBlanks" => CfKind::Blanks { not: false },
         "notContainsBlanks" => CfKind::Blanks { not: true },
         "containsErrors" => CfKind::Errors { not: false },
@@ -581,13 +660,45 @@ fn first_formula(body: &str, tag: &str) -> String {
         .unwrap_or_default()
 }
 
+/// Turns the lists the kind extension names back into check boxes and multiple lists.
+fn restore_kinds(sheet_xml: &str, rules: &mut SheetRules) {
+    if !sheet_xml.contains(KIND_NS) {
+        return;
+    }
+    for (attrs, _) in extract_tags_or_self_closing_with_attrs(sheet_xml, "eo:dv") {
+        let (Some(sqref), Some(kind)) = (
+            attr(attrs, "sqref"),
+            attr(attrs, "kind").and_then(|k| DvKind::from_name(&k)),
+        ) else {
+            continue;
+        };
+        let boxes = parse_sqref(&sqref);
+        let Some(dv) = rules
+            .dv
+            .iter_mut()
+            .find(|dv| dv.kind == DvKind::List && dv.ranges == boxes)
+        else {
+            continue;
+        };
+        match kind {
+            DvKind::Checkbox => {
+                dv.kind = kind;
+                dv.a = bounded(attr(attrs, "on").unwrap_or_default());
+                dv.b = bounded(attr(attrs, "off").unwrap_or_default());
+            }
+            DvKind::ListMultiple => dv.kind = kind,
+            _ => {}
+        }
+    }
+}
+
 fn parse_validations(sheet_xml: &str, rules: &mut SheetRules) {
     for (attrs, body) in extract_tags_or_self_closing_with_attrs(sheet_xml, "dataValidation") {
         if rules.len() >= MAX_RULES_PER_SHEET {
             return;
         }
         let ty = attr(attrs, "type").unwrap_or_default();
-        let Some(kind) = DvKind::from_name(&ty) else {
+        let Some(kind) = DvKind::from_name(&ty).filter(|k| k.file_kind() == *k) else {
             rules.unsupported.push(format!(
                 "데이터 유효성 {}",
                 if ty.is_empty() { "none" } else { &ty }
@@ -603,7 +714,7 @@ fn parse_validations(sheet_xml: &str, rules: &mut SheetRules) {
             .and_then(|o| Cmp::from_name(&o))
             .unwrap_or(Cmp::Between);
         let f1 = first_formula(body, "formula1");
-        dv.a = if kind == DvKind::List {
+        dv.a = if kind.is_list() {
             match f1.strip_prefix('"').and_then(|s| s.strip_suffix('"')) {
                 Some(items) => items.replace("\"\"", "\""),
                 None => format!("={f1}"),
@@ -625,6 +736,7 @@ fn parse_validations(sheet_xml: &str, rules: &mut SheetRules) {
         dv.prompt = bounded(attr(attrs, "prompt").unwrap_or_default());
         rules.dv.push(dv);
     }
+    restore_kinds(sheet_xml, rules);
     for _ in 0..sheet_xml.matches("<x14:dataValidation ").count() {
         rules.unsupported.push("데이터 유효성 확장".to_string());
     }

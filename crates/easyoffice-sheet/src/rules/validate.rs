@@ -171,6 +171,20 @@ fn judge(dv: &DataValidation, cells: &mut dyn Cells, input: &str) -> bool {
                 }
             })
         }
+        DvKind::Checkbox => {
+            let (on, off) = dv.checkbox_values();
+            let entered = input.trim();
+            [on, off].iter().any(|v| v.eq_ignore_ascii_case(entered))
+        }
+        DvKind::ListMultiple => {
+            // Every chosen item (comma separated) must be an item of the list.
+            let items = list_items(dv, cells);
+            input
+                .split(',')
+                .map(str::trim)
+                .filter(|chosen| !chosen.is_empty())
+                .all(|chosen| items.iter().any(|item| item == chosen))
+        }
         DvKind::Custom => {
             let r = cells.eval_formula(dv.a.trim().trim_start_matches('='));
             match r {

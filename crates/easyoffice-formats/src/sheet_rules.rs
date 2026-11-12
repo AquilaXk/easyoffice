@@ -274,6 +274,50 @@ pub enum TextOp {
     Ends,
 }
 
+/// Periods of a "dates occurring" rule (OOXML `ST_TimePeriod`), counted from today.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimePeriod {
+    Yesterday,
+    Today,
+    Tomorrow,
+    Last7Days,
+    LastWeek,
+    ThisWeek,
+    NextWeek,
+    LastMonth,
+    ThisMonth,
+    NextMonth,
+}
+
+impl TimePeriod {
+    pub const NAMES: [(TimePeriod, &'static str); 10] = [
+        (TimePeriod::Yesterday, "yesterday"),
+        (TimePeriod::Today, "today"),
+        (TimePeriod::Tomorrow, "tomorrow"),
+        (TimePeriod::Last7Days, "last7Days"),
+        (TimePeriod::LastWeek, "lastWeek"),
+        (TimePeriod::ThisWeek, "thisWeek"),
+        (TimePeriod::NextWeek, "nextWeek"),
+        (TimePeriod::LastMonth, "lastMonth"),
+        (TimePeriod::ThisMonth, "thisMonth"),
+        (TimePeriod::NextMonth, "nextMonth"),
+    ];
+
+    pub fn name(self) -> &'static str {
+        Self::NAMES
+            .iter()
+            .find(|(p, _)| *p == self)
+            .map_or("today", |(_, n)| n)
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::NAMES
+            .iter()
+            .find(|(_, n)| *n == name)
+            .map(|(p, _)| *p)
+    }
+}
+
 /// Icon sets in OOXML order. An icon set with `n` icons is drawn lowest first.
 pub const ICON_SETS: [(&str, u8); 20] = [
     ("3Arrows", 3),
@@ -340,6 +384,8 @@ pub enum CfKind {
     Duplicates {
         unique: bool,
     },
+    /// Dates that fall in a period counted from today.
+    TimePeriod(TimePeriod),
     /// A formula written for the top-left cell of the first range.
     Expression(String),
     /// Two or three `(threshold, colour)` stops, lowest first.
@@ -381,10 +427,14 @@ pub enum DvKind {
     Time,
     TextLength,
     Custom,
+    /// A cell that holds one of two values (`a` checked, `b` unchecked) and shows a check box.
+    Checkbox,
+    /// A list whose cell holds several items, comma separated.
+    ListMultiple,
 }
 
 impl DvKind {
-    const NAMES: [(DvKind, &'static str); 7] = [
+    const NAMES: [(DvKind, &'static str); 9] = [
         (DvKind::Whole, "whole"),
         (DvKind::Decimal, "decimal"),
         (DvKind::List, "list"),
@@ -392,7 +442,23 @@ impl DvKind {
         (DvKind::Time, "time"),
         (DvKind::TextLength, "textLength"),
         (DvKind::Custom, "custom"),
+        (DvKind::Checkbox, "checkbox"),
+        (DvKind::ListMultiple, "listMultiple"),
     ];
+
+    /// Lists the file formats know (OOXML `type="list"`), plain or picking several items.
+    pub const fn is_list(self) -> bool {
+        matches!(self, DvKind::List | DvKind::ListMultiple)
+    }
+
+    /// The kind as a spreadsheet file stores it: the check box and the multiple list have no
+    /// type of their own there and are written as the list of their values.
+    pub const fn file_kind(self) -> DvKind {
+        match self {
+            DvKind::Checkbox | DvKind::ListMultiple => DvKind::List,
+            other => other,
+        }
+    }
 
     pub fn name(self) -> &'static str {
         Self::NAMES
@@ -440,7 +506,8 @@ pub struct DataValidation {
     pub ranges: Vec<CellBox>,
     pub kind: DvKind,
     pub cmp: Cmp,
-    /// First operand. For `List`: `a,b,c` items, or `=Sheet1!$A$1:$A$9` (leading `=`) for a range.
+    /// First operand. For lists: `a,b,c` items, or `=Sheet1!$A$1:$A$9` (leading `=`) for a range.
+    /// For `Checkbox`: the checked value (empty: `TRUE`), and `b` the unchecked one (empty: `FALSE`).
     pub a: String,
     pub b: String,
     pub allow_blank: bool,
@@ -455,6 +522,14 @@ pub struct DataValidation {
 }
 
 impl DataValidation {
+    /// The checked and unchecked values of a check box rule (`TRUE` and `FALSE` when left empty).
+    pub fn checkbox_values(&self) -> (&str, &str) {
+        (
+            if self.a.is_empty() { "TRUE" } else { &self.a },
+            if self.b.is_empty() { "FALSE" } else { &self.b },
+        )
+    }
+
     pub fn new(ranges: Vec<CellBox>, kind: DvKind) -> Self {
         Self {
             ranges,
@@ -482,6 +557,9 @@ pub struct SheetRules {
     pub dv: Vec<DataValidation>,
     /// Rules in the file that the model cannot hold (kind names, one entry per rule).
     pub unsupported: Vec<String>,
+    /// The day (spreadsheet serial) "today" means to period rules; the page sends its local date.
+    /// Not stored in files; `None` counts from today in UTC.
+    pub today: Option<i64>,
 }
 
 impl SheetRules {

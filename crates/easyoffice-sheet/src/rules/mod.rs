@@ -11,6 +11,7 @@ mod axis_shift;
 mod cf;
 pub(crate) mod data;
 mod pack;
+mod period;
 mod shift;
 mod validate;
 
@@ -92,6 +93,8 @@ pub const MAX_RULE_HITS: usize = 4_000_000;
 
 pub struct RuleRuntime {
     rules: Vec<CfRule>,
+    /// The serial of the day period rules count from.
+    today: i64,
     states: Vec<RuleState>,
     emitted: CellMap<CellVisual>,
     stats: StatsCache,
@@ -133,6 +136,7 @@ impl RuleRuntime {
     }
 
     pub fn with_max_hits(rules: SheetRules, max_hits: usize) -> Self {
+        let today = rules.today.unwrap_or_else(period::utc_today);
         let mut cf = rules.cf;
         cf.sort_by_key(|r| r.priority);
         let states = cf
@@ -146,6 +150,7 @@ impl RuleRuntime {
             .collect();
         Self {
             rules: cf,
+            today,
             states,
             emitted: CellMap::default(),
             stats: StatsCache::default(),
@@ -208,7 +213,7 @@ impl RuleRuntime {
                     hits.insert(*coord, Hit::Style);
                 }
             }
-        } else if let Some(plan) = make_plan(rule, &data, cells) {
+        } else if let Some(plan) = make_plan(rule, &data, cells, self.today) {
             for (coord, value) in &data.cells {
                 if let Some(hit) = apply_plan(&plan, value) {
                     hits.insert(*coord, hit);

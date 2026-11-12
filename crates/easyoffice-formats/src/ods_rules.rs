@@ -14,6 +14,7 @@ use crate::sheet_styling::sheet_rules::{
     ValueKind, FLAG_BOLD, FLAG_ITALIC, FLAG_STRIKE, FLAG_UNDERLINE, ICON_SETS,
 };
 use crate::sheet_styling::SheetStyling;
+use crate::xlsx_rules::period_formula;
 use crate::{OdfCodec, XmlSanitizer};
 
 /// Empty cells per sheet written only to carry a validation.
@@ -125,6 +126,11 @@ fn condition_value(kind: &CfKind, anchor: &str) -> Option<String> {
         .to_string(),
         CfKind::Duplicates { unique } => (if *unique { "unique" } else { "duplicate" }).to_string(),
         CfKind::Expression(f) => format!("formula-is({})", OdfCodec::to_open_formula_syntax(f)),
+        // No period rule in ODF: written as the formula rule that judges the same days.
+        CfKind::TimePeriod(period) => format!(
+            "formula-is({})",
+            OdfCodec::to_open_formula_syntax(&period_formula(*period, anchor))
+        ),
         _ => return None,
     })
 }
@@ -421,7 +427,12 @@ fn validation_condition(dv: &DataValidation) -> String {
                 format!("of:cell-content-text-length(){op}{}", operand(&dv.a))
             }
         },
-        DvKind::List => match dv.a.strip_prefix('=') {
+        DvKind::Checkbox => {
+            let (on, off) = dv.checkbox_values();
+            let quoted = |t: &str| format!("\"{}\"", t.replace('"', "\"\""));
+            format!("of:cell-content-is-in-list({};{})", quoted(on), quoted(off))
+        }
+        DvKind::List | DvKind::ListMultiple => match dv.a.strip_prefix('=') {
             Some(reference) => format!("of:cell-content-is-in-list([{}])", range_to_ods(reference)),
             None => {
                 let items: Vec<String> =
