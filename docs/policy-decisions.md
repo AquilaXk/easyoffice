@@ -2964,3 +2964,22 @@
 - **Trade-offs** 저장 안 된 창이 없을 때는 큐를 거치지 않고 바로 끝냅니다(창을 하나씩 닫는 PD-189의 macOS 경로보다 빠르고, 지울 것이 없습니다). Windows는 이 개발 환경에서 타깃이 없어 실제로 실행하지 못했고, 시스템 종료 화면의 동작은 실기기 확인 항목입니다.
 - **Verified by** `cargo test -p easyoffice-desktop`: `app_quit`(저장 안 된 창이 없으면 큐 없이 즉시 종료, 있으면 PD-189 큐와 같은 순서·한 번의 응답·취소, 두 OS 훅이 `request_session_end`로만 들어가며 두 번째 큐가 없음), `linux_signal`(신호 → 파이프 → 읽기, 두 번째 설치 거부, 해제하면 기본 동작 복원, `main.rs`는 Linux에서만 설치), `session_end_windows`(이유 문자열 UTF-16, 차단 슬롯의 선점·이동·해제, 훅 연결과 unsafe 블록의 SAFETY 주석 구조 검사). Windows 코드는 `windows-sys`만 남기고 나머지를 대체한 임시 크레이트에서 `--cfg windows`로 `cargo clippy -D warnings`를 통과했고, 실제 컴파일은 push 뒤 CI Windows 작업이 합니다.
 - **Revisit when** tao가 `WM_QUERYENDSESSION`을 직접 처리할 때(하위 클래스를 지움), Windows·Linux 실기기 확인에서 동작이 다를 때.
+
+## PD-192. 오픈소스 오피스 엔진 이식 범위: 시트 찾기 옵션과 문서 하이퍼링크
+
+- **Status** Implemented (`ui/find-core.js`, `find-sheet.js`, `find-replace.js`, `doc-link.js`, `doc-runs.js`, `save-payload.js`, `file-open.js`, `index.html`; `easyoffice-formats`의 `rich_document.rs`, `rich_link_writers.rs`, DOCX·ODT·HWPX 읽기·쓰기; `convert_structured.rs`, `convert_open.rs`)
+- **Context** 참조할 오픈소스 오피스 엔진(Apache-2.0, 기준 커밋 `5a06a784`)의 시트·문서 로직을 선별해 가져옵니다. QA 지시는 구조·소스는 최대한 따르고 모양(색·간격·대화상자)은 참조 앱과 rhwp-studio를 그대로 따르며 설명 문구는 쓰지 않는 것입니다.
+- **Decision (`PD-192`)**
+  1. **가져오는 범위**: 시트와 문서의 로직, 데이터 모델, 명령 구조(추가·수정·삭제 명령의 분리). 이번에 옮긴 것은 시트 찾기의 셀 일치 판정·찾는 대상(값/수식)·범위(시트/통합 문서)와 문서 링크의 추가·수정·삭제 명령입니다.
+  2. **가져오지 않는 것**: 슬라이드(그 엔진의 오픈소스판에 없음), React UI·색·아이콘, 캔버스 렌더링 엔진, 피벗·인쇄·가져오기/내보내기 같은 유료 기능, 네트워크 함수. 화면은 `tokens.css`와 `tool-dialog` 틀이 유일한 기준입니다(PD-098).
+  3. **고지**: 가져온 파일은 머리에 "참조 구현" 주석(라이선스, 저작권, 원본 경로·줄)을 두고 `THIRD_PARTY_NOTICES.md`에 항목을 더합니다. 문서 본문에는 프로젝트 이름 대신 역할 표현을 씁니다.
+  4. **시트 찾기 옵션**(PD-169의 "옵션은 `대소문자 구분` 하나"를 시트 창에 한해 넓힘): `전체 셀 일치`, `수식 검색`, `모든 시트`를 시트 창의 찾기 대화상자에만 두고, 문서 창은 그대로입니다. 전체 셀 일치는 같은 일치기에 앵커를 붙인 패턴이라 색인 재사용이 유지됩니다(`find-core.js`). 수식 검색은 수식 셀의 수식 글자를 찾고 바꿉니다. 값 검색에서 수식 셀은 이전처럼 결과를 찾기만 하고 바꾸지 않습니다. 모든 시트는 셀 id를 `시트!참조`로 하고, 다른 시트의 일치로 이동하면 그 시트 탭으로 전환합니다. 바꾸기는 모든 시트 포함 한 번의 평가·커밋·실행 취소 한 단계입니다. 상한(256자, 100,000건, 1.5초)은 그대로입니다.
+  5. **문서 링크**: 링크는 실행(run) 모델의 `RichRun.link`이고 편집기에서는 `<a data-eo-link href>`가 실행을 감쌉니다. 대화상자(`#doc-link-dialog`, `tool-dialog` 틀)는 `주소`, `표시할 글자`, `확인`, `취소`, 링크가 있을 때 `링크 제거`뿐입니다. 한 문단 안의 선택만 링크로 만들고, 다른 링크와 겹치면 거부합니다.
+  6. **주소 허용 목록(Fail-Closed)**: `http`, `https`, `mailto`만, 최대 2,048자, 공백·제어 문자 없음, `http(s)`는 호스트 필요, `mailto`는 받는 사람 필요(`doc-link.js`의 `normalizeUrl`과 Rust `safe_link_target`이 같은 규칙). `javascript:`·`file:`·`data:`와 그 밖의 스킴은 저장 요청을 거부하고(`convert_structured.rs`), 파일에서 읽을 때는 링크 없는 글자로 읽고, 쓰기는 링크 없는 글자로 씁니다.
+  7. **저장 형식**: DOCX는 `w:hyperlink` + 문서 관계 파일의 외부 관계(`TargetMode="External"`, 같은 주소는 한 관계), ODT는 `text:a`, HWPX는 `hp:fieldBegin type="HYPERLINK"`의 `Command` 매개변수(참조 편집기의 HWPX 직렬화와 같은 방식)와 `hp:fieldEnd`입니다. 읽기는 세 형식 모두 같은 `RichRun.link`로 돌려줍니다. HWPX 읽기는 `Command`의 일반 주소, `HYPERLINK "주소"`, `주소;1;0;0;`(콜론 이스케이프) 세 모양을 받습니다. Pages 쓰기는 링크를 계속 잃고 `pages_write_loss`에 셉니다. RTF·Markdown 쓰기는 링크를 쓰지 않습니다.
+- **재사용 판단 (구현 원칙 3단계)** (1) 허용 라이선스의 유지되는 라이브러리를 그대로 쓰기에는 두 엔진 모두 자체 문서 모델·React에 묶여 있어 맞지 않았습니다. (2) 이미 쓰는 의존성(XML 스트림 리더, `push_run` 합치기, `tool-dialog`, `doc-runs.js`의 실행 모델)을 재사용했습니다. (3) 찾기 판정(`hitCell`, `matchCellData`)과 링크 명령 세 개의 로직을 우리 구조에 맞게 이식했습니다.
+- **Why** 링크를 실행 모델 위에 두면 서식이 링크 안에서 그대로 유지되고, 저장·열기 경로가 이미 실행 단위라 새 모델이 필요 없습니다. 주소 규칙을 한 곳(JS 한 벌, Rust 한 벌)에 두고 읽기·쓰기·저장 요청이 모두 같은 규칙을 거칩니다.
+- **Trade-offs** 여러 문단에 걸친 선택은 링크로 만들 수 없습니다. 표 칸은 글자만 저장하므로 칸 안에는 링크가 없습니다. HWPX 링크는 실제 워드프로세서가 저장한 파일 표본이 없어 참조 편집기의 직렬화와 알려진 `Command` 모양에 맞췄습니다(검증 필요).
+- **Alternatives rejected** `tel:`·`ftp:` 허용(참조 앱에 대응 UI 없음), 스킴 없는 주소에 `https://`를 붙이는 보정(입력과 다른 주소를 몰래 저장), 위험한 주소를 지우고 나머지만 저장(저장 요청은 거부).
+- **Verified by** `node --test scripts/test-webui-find-core.mjs scripts/test-webui-find-replace.mjs scripts/test-webui-doc-link.mjs`, `cargo test -p easyoffice-formats --test rich_links`, `cargo test -p easyoffice-formats --lib link_command`, `cargo test -p easyoffice-app a_run_link`.
+- **Revisit when** 여러 문단에 걸친 링크, 표 칸 안의 링크, 링크 열기 동작(Ctrl+클릭)이 필요할 때.
