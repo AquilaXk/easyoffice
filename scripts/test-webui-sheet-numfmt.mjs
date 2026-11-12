@@ -299,3 +299,22 @@ test("the display cache never asks for a value that is already on its way", asyn
   assert.ok(filled >= 1);
   assert.equal(requests.length, 2, "an answered value is served from the cache");
 });
+
+test("a failing engine answer leaves the cells General and is not asked again", async () => {
+  const env = { __EASYOFFICE_SHEET_UTILS__: { normalizeFormattedNumericCell: (raw) => String(raw).trim() } };
+  const D = loadUiModule(UI("sheet-numfmt-display.js"), env).__EASYOFFICE_SHEET_NUMFMT_DISPLAY__;
+  let asked = 0;
+  let filled = 0;
+  D.attach({
+    call: async () => {
+      asked += 1;
+      throw new Error("[요청 거부] 알 수 없는 시트");
+    },
+    onFilled: () => { filled += 1; },
+  });
+  assert.equal(D.shown("0.00", "5"), null);
+  await D.preview("0.00", ["5"]);
+  assert.equal(D.shown("0.00", "5"), null, "General display after the failure");
+  assert.equal(asked, 1);
+  assert.ok(filled >= 1, "the page is told so it stops waiting");
+});
