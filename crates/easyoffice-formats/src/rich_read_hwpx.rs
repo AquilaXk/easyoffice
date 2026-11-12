@@ -348,6 +348,7 @@ fn finish_paragraph(header: &Header, p: ParaState) -> RichParagraph {
         left_indent_twips,
         first_line_indent_twips,
         line_spacing_percent,
+        toc: None,
     }
 }
 

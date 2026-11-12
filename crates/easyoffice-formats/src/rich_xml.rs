@@ -1,6 +1,7 @@
 //! Shared character format and run helpers of the DOCX, HWPX, and ODT readers. The XML event
 //! reader lives in [`crate::xml_stream`].
 
+use crate::rich_document::{RichToc, MAX_TOC_LEVEL};
 use crate::{RichRun, RichScript};
 
 /// Boolean OOXML-style toggle value: absent or anything but `0`/`false`/`off`/`none` is true.
@@ -94,6 +95,28 @@ pub(crate) fn push_linked_run(
         highlight: fmt.highlight.clone(),
         script: fmt.script,
     });
+}
+
+/// Table-of-contents role from a style name or id: `TOC 2`, `TOC2`, `toc 2`, `Contents_20_2`, `Contents 2`
+/// (entry level 1–9) and `TOC Heading`, `Contents_20_Heading` (the block title).
+pub(crate) fn toc_role_from_name(name: &str) -> Option<RichToc> {
+    let s = name.trim();
+    let rest = ["toc", "contents"].iter().find_map(|p| {
+        s.get(..p.len())
+            .filter(|h| h.eq_ignore_ascii_case(p))
+            .map(|_| &s[p.len()..])
+    })?;
+    let tail = rest
+        .trim_start_matches(|c: char| c.is_whitespace() || c == '_')
+        .trim_start_matches("20")
+        .trim_matches(|c: char| c.is_whitespace() || c == '_');
+    if tail.eq_ignore_ascii_case("heading") {
+        return Some(RichToc::Title);
+    }
+    tail.parse::<u8>()
+        .ok()
+        .filter(|n| (1..=MAX_TOC_LEVEL).contains(n))
+        .map(RichToc::Entry)
 }
 
 /// Heading level from a style name such as `heading 2`, `Heading2`, `제목 3`, `개요 1`, `Title`.

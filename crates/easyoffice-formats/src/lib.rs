@@ -57,6 +57,7 @@ mod rich_rtf_writer;
 mod rich_run_writers;
 mod rich_table;
 mod rich_table_writers;
+mod rich_toc_writers;
 mod rich_writers;
 mod rich_xml;
 mod rtf_escape;
@@ -92,7 +93,7 @@ pub use pdf_writer::PdfWriteOptions;
 pub use rich_document::{
     evaluate_table_formulas, normalize_hex_color, safe_link_target, RichAlignment, RichBlock,
     RichDocument, RichListKind, RichListNumber, RichNumberEnclosure, RichNumberFormat,
-    RichParagraph, RichRun, RichScript,
+    RichParagraph, RichRun, RichScript, RichToc, MAX_TOC_LEVEL,
 };
 pub use rich_image::{
     RichImage, IMAGE_PLACEHOLDER_TEXT, MAX_ALT_TEXT_BYTES, MAX_IMAGES_PER_DOCUMENT,

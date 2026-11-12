@@ -7,11 +7,13 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 
 use crate::office_codecs::{checked_part, checked_zip_xml_entries};
-use crate::rich_document::{highlight_name_to_hex, normalize_hex_color};
+use crate::rich_document::{highlight_name_to_hex, normalize_hex_color, RichToc};
 use crate::rich_read_images::{drawing_picture, load_docx_hyperlinks, DocxMedia, DrawingOutcome};
 use crate::rich_read_numbering::{read_numbering, Numbering, LIST_LEVELS};
 use crate::rich_table::TableAssembler;
-use crate::rich_xml::{heading_level_from_name, push_linked_run, toggle_on, CharFmt};
+use crate::rich_xml::{
+    heading_level_from_name, push_linked_run, toc_role_from_name, toggle_on, CharFmt,
+};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
     EasyOfficeError, RichAlignment, RichBlock, RichDocument, RichImage, RichListKind,
@@ -162,12 +164,23 @@ impl Resolver<'_> {
         (heading, list_from_style)
     }
 
+    /// The table-of-contents role of the paragraph style (its id or its name).
+    fn toc_role(&self, style_id: &str) -> Option<RichToc> {
+        toc_role_from_name(style_id).or_else(|| {
+            let name = self.styles.get(style_id)?.name.as_deref()?;
+            toc_role_from_name(name)
+        })
+    }
+
     fn finish(&self, p: ParaState) -> RichParagraph {
+        let toc = p.style_id.as_deref().and_then(|id| self.toc_role(id));
         let (mut heading, style_list) = p
             .style_id
             .as_deref()
             .map_or((0, None), |id| self.resolve_style_chain(id));
-        if heading == 0 {
+        if toc.is_some() {
+            heading = 0;
+        } else if heading == 0 {
             if let Some(level) = p.outline.filter(|l| *l < 9) {
                 heading = (level + 1).min(6);
             }
@@ -199,6 +212,7 @@ impl Resolver<'_> {
             left_indent_twips: p.left_indent,
             first_line_indent_twips: p.first_line,
             line_spacing_percent: p.line_percent,
+            toc,
         }
     }
 }

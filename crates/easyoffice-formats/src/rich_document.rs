@@ -188,6 +188,17 @@ impl RichRun {
     }
 }
 
+/// Role of a paragraph inside a table-of-contents block (DOCX `w:sdt` "Table of Contents", ODT
+/// `text:table-of-content`): the block's title line or an entry at a heading level (1–[`MAX_TOC_LEVEL`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RichToc {
+    Title,
+    Entry(u8),
+}
+
+/// Deepest entry level of a table-of-contents block (the word-processor styles `TOC 1`–`TOC 9`).
+pub const MAX_TOC_LEVEL: u8 = 9;
+
 /// A paragraph: runs plus paragraph properties. `heading_level` 0 is body text, 1–6 headings.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RichParagraph {
@@ -207,6 +218,9 @@ pub struct RichParagraph {
     pub first_line_indent_twips: Option<i32>,
     /// Line height as a percentage of single spacing (200 = double); `None` inherits.
     pub line_spacing_percent: Option<u16>,
+    /// Set on the paragraphs of a generated table of contents; the writers wrap consecutive ones in the
+    /// format's table-of-contents container and the readers recover the role from the style name.
+    pub toc: Option<RichToc>,
 }
 
 impl RichParagraph {

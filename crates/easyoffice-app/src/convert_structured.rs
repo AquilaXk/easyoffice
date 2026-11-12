@@ -19,8 +19,9 @@ use easyoffice_formats::{
     base64_codec, code_within_bounds, evaluate_table_formulas, normalize_hex_color,
     safe_link_target, CellMerge, CellStyle, EasyOfficeError, NumFmtTable, OdsUnpacked, OoxmlCodec,
     PdfWriteOptions, RichAlignment, RichBlock, RichDocument, RichImage, RichListKind,
-    RichParagraph, RichRun, RichScript, RichTable, SheetStyling, StrictJsonValue, MAX_COLUMN_PX,
-    MAX_IMAGE_BYTES, MAX_NUM_FMTS, MAX_SIZE_PT, MIN_COLUMN_PX, MIN_SIZE_PT,
+    RichParagraph, RichRun, RichScript, RichTable, RichToc, SheetStyling, StrictJsonValue,
+    MAX_COLUMN_PX, MAX_IMAGE_BYTES, MAX_NUM_FMTS, MAX_SIZE_PT, MAX_TOC_LEVEL, MIN_COLUMN_PX,
+    MIN_SIZE_PT,
 };
 use easyoffice_sheet::{PackedCellCoordinate, WorkbookEngine};
 
@@ -229,6 +230,21 @@ fn parse_paragraph(
             .ok_or_else(|| invalid("구조화 저장: 'heading'은 0~6 정수여야 합니다."))?
             as u8,
     };
+    let toc = match field(obj, "toc") {
+        None => None,
+        Some(v) => Some(
+            v.as_u64()
+                .filter(|n| *n <= u64::from(MAX_TOC_LEVEL))
+                .map(|n| {
+                    if n == 0 {
+                        RichToc::Title
+                    } else {
+                        RichToc::Entry(n as u8)
+                    }
+                })
+                .ok_or_else(|| invalid("구조화 저장: 'toc'는 0~9 정수여야 합니다."))?,
+        ),
+    };
     let list = match opt_str(obj, "list")? {
         None | Some("") => None,
         Some("bullet") => Some(RichListKind::Bullet),
@@ -253,6 +269,7 @@ fn parse_paragraph(
         .map(|v| v as i32),
         line_spacing_percent: opt_bounded(obj, "lineSpacingPercent", 1, MAX_LINE_SPACING_PERCENT)?
             .map(|v| v as u16),
+        toc,
     })
 }
 

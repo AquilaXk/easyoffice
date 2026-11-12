@@ -12,8 +12,8 @@
 use easyoffice_formats::{
     base64_codec, evaluate_table_formulas, resolve_code, CellMerge, CellStyle, DecodedContent,
     DecodedDocument, DocumentFormat, EasyOfficeError, OdsUnpacked, PdfWriteOptions, RichAlignment,
-    RichBlock, RichImage, RichListKind, RichParagraph, RichScript, SheetStyling, StrictJsonValue,
-    UniversalFormatConverter, CUSTOM_BASE,
+    RichBlock, RichImage, RichListKind, RichParagraph, RichScript, RichToc, SheetStyling,
+    StrictJsonValue, UniversalFormatConverter, CUSTOM_BASE,
 };
 use easyoffice_sheet::PackedCellCoordinate;
 use std::collections::HashSet;
@@ -106,6 +106,13 @@ fn write_paragraph(out: &mut String, p: &RichParagraph) {
     }
     if p.heading_level > 0 {
         let _ = write!(out, ",\"heading\":{}", p.heading_level);
+    }
+    match p.toc {
+        Some(RichToc::Title) => out.push_str(",\"toc\":0"),
+        Some(RichToc::Entry(level)) => {
+            let _ = write!(out, ",\"toc\":{level}");
+        }
+        None => {}
     }
     if let Some(l) = p.list {
         let token = match l {

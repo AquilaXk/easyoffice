@@ -5,10 +5,10 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 
 use crate::office_codecs::{checked_part, checked_zip_xml_entries};
-use crate::rich_document::{normalize_hex_color, safe_link_target};
+use crate::rich_document::{normalize_hex_color, safe_link_target, RichToc};
 use crate::rich_image::{safe_package_path, ImageBudget};
 use crate::rich_table::{TableAssembler, MAX_PADDED_COLUMNS};
-use crate::rich_xml::{push_linked_run, CharFmt};
+use crate::rich_xml::{push_linked_run, toc_role_from_name, CharFmt};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
     EasyOfficeError, OdfCodec, RichAlignment, RichBlock, RichDocument, RichImage, RichListKind,
@@ -260,6 +260,7 @@ struct Para {
     runs: Vec<RichRun>,
     style: StyleProps,
     outline: u8,
+    toc: Option<RichToc>,
     base: CharFmt,
     images: Vec<RichImage>,
 }
@@ -412,11 +413,13 @@ impl<'a> OdtWalker<'a> {
     }
 
     fn start_paragraph(&mut self, name: &str, attrs: &Attrs<'_>) {
-        let style = attr(attrs, "text:style-name")
+        let style_name = attr(attrs, "text:style-name");
+        let style = style_name
             .as_deref()
             .and_then(|n| self.styles.get(n))
             .cloned()
             .unwrap_or_default();
+        let toc = style_name.as_deref().and_then(toc_role_from_name);
         let outline = if name == "text:h" {
             attr(attrs, "text:outline-level")
                 .as_deref()
@@ -437,6 +440,7 @@ impl<'a> OdtWalker<'a> {
             runs: Vec::new(),
             style,
             outline,
+            toc,
             base,
             images: Vec::new(),
         });
@@ -564,7 +568,7 @@ impl<'a> OdtWalker<'a> {
         if self.tbl_depth > 0 {
             self.cell_paras.push(text);
         } else if !text.trim().is_empty() {
-            let list = if p.outline > 0 {
+            let list = if p.outline > 0 || p.toc.is_some() {
                 None
             } else if let Some(kind) = self.list_stack.last() {
                 Some(*kind)
@@ -585,6 +589,7 @@ impl<'a> OdtWalker<'a> {
                 left_indent_twips: p.style.left_twips,
                 first_line_indent_twips: p.style.first_line_twips,
                 line_spacing_percent: p.style.line_percent,
+                toc: p.toc,
             }));
         }
         if self.tbl_depth == 0 {

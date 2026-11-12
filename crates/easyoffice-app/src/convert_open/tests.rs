@@ -103,6 +103,28 @@ fn invalid_run_properties_are_rejected_and_old_payloads_still_work() {
 }
 
 #[test]
+fn a_table_of_contents_survives_odt_save_and_reopen_and_a_bad_level_rejects_the_save() {
+    let payload = concat!(
+        "{\"targetFormat\":\"odt\",\"blocks\":[",
+        "{\"type\":\"paragraph\",\"toc\":0,\"runs\":[{\"text\":\"목차\"}]},",
+        "{\"type\":\"paragraph\",\"toc\":2,\"runs\":[{\"text\":\"세부\"}]},",
+        "{\"type\":\"paragraph\",\"heading\":2,\"runs\":[{\"text\":\"세부\"}]}]}"
+    );
+    let saved = EasyOfficeIpcRouter::dispatch("convert_document_format", payload).unwrap();
+    let bytes = EasyOfficeIpcRouter::decode_base64(json_field(&saved, "convertedBase64")).unwrap();
+    let json = EasyOfficeIpcRouter::dispatch(
+        "convert_document_format",
+        &request(Some("decode"), "목차.odt", &bytes, ""),
+    )
+    .unwrap();
+    assert!(json.contains("\"toc\":0"), "{json}");
+    assert!(json.contains("\"toc\":2"), "{json}");
+    assert!(json.contains("\"heading\":2"), "{json}");
+    let bad = payload.replace("\"toc\":2", "\"toc\":10");
+    assert!(EasyOfficeIpcRouter::dispatch("convert_document_format", &bad).is_err());
+}
+
+#[test]
 fn a_run_link_survives_docx_save_and_reopen_and_unsafe_addresses_reject_the_save() {
     let payload = concat!(
         "{\"targetFormat\":\"docx\",\"blocks\":[{\"type\":\"paragraph\",\"runs\":[",

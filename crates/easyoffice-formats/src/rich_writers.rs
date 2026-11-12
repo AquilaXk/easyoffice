@@ -27,6 +27,10 @@ use crate::rich_run_writers::{
     odt_text_style_xml, OdtTextKey,
 };
 use crate::rich_table_writers::{push_docx_table, push_odt_table};
+use crate::rich_toc_writers::{
+    docx_toc_style_id, docx_toc_styles_xml, is_toc_block, odt_toc_style_name, odt_toc_styles_xml,
+    TocScope,
+};
 use crate::{
     CommonMarkCodec, EasyOfficeError, MarkdownBlock, OdfCodec, PdfDocumentModel, PdfPageModel,
     PdfSerializer, XmlSanitizer, ZipArchiveCodec,
@@ -50,7 +54,7 @@ const DOCX_NUMBERING_CONTENT_TYPE: &str =
     "application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml";
 const DOCX_NUMBERING_REL_ID: &str = "rIdNumbering";
 
-fn docx_styles_xml() -> String {
+fn docx_styles_xml(has_toc: bool) -> String {
     let mut xml = String::from(concat!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>",
         "<w:styles xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">",
@@ -79,6 +83,9 @@ fn docx_styles_xml() -> String {
         ));
     }
     xml.push_str(DOCX_LINK_STYLE_XML);
+    if has_toc {
+        xml.push_str(&docx_toc_styles_xml());
+    }
     xml.push_str("<w:style w:type=\"table\" w:default=\"1\" w:styleId=\"TableNormal\"><w:name w:val=\"Normal Table\"/><w:tblPr><w:tblInd w:w=\"0\" w:type=\"dxa\"/><w:tblCellMar><w:left w:w=\"108\" w:type=\"dxa\"/><w:right w:w=\"108\" w:type=\"dxa\"/></w:tblCellMar></w:tblPr></w:style>");
     xml.push_str("</w:styles>");
     xml
@@ -137,7 +144,9 @@ fn push_docx_paragraph(
     links: &mut DocxLinks,
 ) {
     out.push_str("<w:p>");
-    let style = if (1..=6).contains(&p.heading_level) {
+    let style = if let Some(role) = p.toc {
+        Some(docx_toc_style_id(role))
+    } else if (1..=6).contains(&p.heading_level) {
         Some(format!("Heading{}", p.heading_level))
     } else {
         list_kind_of(p).map(|kind| match kind {
@@ -230,7 +239,7 @@ pub(crate) fn pack_docx_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeEr
         "</Relationships>"
     );
     let core_xml = crate::ooxml_shared_parts::core_properties_xml(&doc.display_title());
-    let styles = docx_styles_xml();
+    let styles = docx_styles_xml(doc.blocks.iter().any(is_toc_block));
     let lists = plan_lists(&doc.blocks);
 
     let mut body = String::with_capacity(1024);
@@ -243,7 +252,9 @@ pub(crate) fn pack_docx_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeEr
     let mut media = MediaParts::new();
     let mut image_rels = String::new();
     let mut links = DocxLinks::default();
+    let mut toc_scope = TocScope::docx();
     for (index, block) in doc.blocks.iter().enumerate() {
+        toc_scope.enter(&mut body, is_toc_block(block));
         match block {
             RichBlock::Paragraph(p) => {
                 push_docx_paragraph(&mut body, p, lists.block_run[index], &mut links);
@@ -264,6 +275,7 @@ pub(crate) fn pack_docx_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeEr
             }
         }
     }
+    toc_scope.enter(&mut body, false);
     body.push_str("<w:sectPr><w:pgSz w:w=\"11906\" w:h=\"16838\"/></w:sectPr>");
     body.push_str("</w:body></w:document>");
 
@@ -386,7 +398,9 @@ fn push_odt_paragraph(
         first_line_twips: p.first_line_indent_twips,
         line_percent: p.line_spacing_percent,
     };
-    let style_attr = if key == OdtParaKey::default() {
+    let style_attr = if let Some(role) = p.toc {
+        format!(" text:style-name=\"{}\"", odt_toc_style_name(role))
+    } else if key == OdtParaKey::default() {
         String::new()
     } else {
         format!(" text:style-name=\"P{}\"", para_styles.intern(&key))
@@ -492,7 +506,9 @@ pub(crate) fn pack_odt_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeErr
     let mut body = String::with_capacity(1024);
     let lists = plan_lists(&doc.blocks);
     let mut open_lists = OdtListWriter::default();
+    let mut toc_scope = TocScope::odt();
     for (index, block) in doc.blocks.iter().enumerate() {
+        toc_scope.enter(&mut body, is_toc_block(block));
         match (block, lists.block_run[index]) {
             (RichBlock::Paragraph(p), Some(run)) => {
                 open_lists.enter(&mut body, &lists, run, level_of(p));
@@ -513,8 +529,12 @@ pub(crate) fn pack_odt_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeErr
         }
     }
     open_lists.leave(&mut body);
+    toc_scope.enter(&mut body, false);
 
     let mut styles = String::from("<office:automatic-styles>");
+    if doc.blocks.iter().any(is_toc_block) {
+        styles.push_str(&odt_toc_styles_xml());
+    }
     for (idx, key) in para_styles.keys.iter().enumerate() {
         styles.push_str(&odt_para_style_xml(idx + 1, key));
     }

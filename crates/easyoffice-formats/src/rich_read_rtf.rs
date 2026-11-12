@@ -311,6 +311,7 @@ impl Reader {
                 left_indent_twips,
                 first_line_indent_twips: para.first_line,
                 line_spacing_percent,
+                toc: None,
             }));
         }
     }
