@@ -27,6 +27,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use tauri::{AppHandle, State, WebviewWindow};
 use usvg::fontdb::{Database, Language, Source, Stretch, Style};
@@ -216,16 +217,25 @@ fn style_name(weight: u16, slant: &str) -> String {
 
 /// What a window has been told and served.
 struct Session {
+    /// Which life of the window this is; a read that outlives its session cannot settle in the
+    /// next session that reuses the label.
+    epoch: u64,
     revision: String,
     /// Files whose bytes this window already received (not charged twice).
     served: HashSet<u32>,
     bytes: u64,
 }
 
+/// Bytes of a font file that a read has reserved against its window's session.
+struct Reservation {
+    epoch: u64,
+}
+
 /// The catalog (built once for the process) and the list each window holds.
 pub struct SystemFonts {
     catalog: OnceLock<Arc<Catalog>>,
     sessions: Mutex<HashMap<String, Session>>,
+    next_epoch: AtomicU64,
     /// Most distinct font bytes one window is served.
     budget: u64,
 }
@@ -241,6 +251,7 @@ impl SystemFonts {
         Self {
             catalog: OnceLock::new(),
             sessions: Mutex::new(HashMap::new()),
+            next_epoch: AtomicU64::new(0),
             budget,
         }
     }
@@ -259,6 +270,7 @@ impl SystemFonts {
         self.lock()
             .entry(label.to_string())
             .or_insert_with(|| Session {
+                epoch: self.next_epoch.fetch_add(1, Ordering::Relaxed),
                 revision: String::new(),
                 served: HashSet::new(),
                 bytes: 0,
@@ -287,9 +299,9 @@ impl SystemFonts {
         if size == 0 || size > MAX_FONT_BYTES {
             return Err(MSG_TOO_LARGE.to_string());
         }
-        let charged = self.charge(label, revision, file, size)?;
+        let reservation = self.charge(label, revision, file, size)?;
         let result = read_font(&mut handle);
-        self.settle(label, revision, file, size, charged, result.is_ok());
+        self.settle(label, reservation, file, size, result.is_ok());
         result
     }
 
@@ -310,36 +322,56 @@ impl SystemFonts {
             .ok_or_else(|| MSG_NO_LIST.to_string())
     }
 
-    /// Reserves `size` bytes of the window's budget unless the file was served already. Returns
-    /// whether something was reserved.
-    fn charge(&self, label: &str, revision: &str, file: u32, size: u64) -> Result<bool, String> {
+    /// Reserves `size` bytes of the window's budget unless the file was served already.
+    fn charge(
+        &self,
+        label: &str,
+        revision: &str,
+        file: u32,
+        size: u64,
+    ) -> Result<Option<Reservation>, String> {
         let mut sessions = self.lock();
         let session = sessions
             .get_mut(label)
             .filter(|session| session.revision == revision)
             .ok_or_else(|| MSG_NO_LIST.to_string())?;
         if session.served.contains(&file) {
-            return Ok(false);
+            return Ok(None);
         }
         if session.bytes.saturating_add(size) > self.budget {
             return Err(MSG_BUDGET.to_string());
         }
         session.bytes += size;
-        Ok(true)
+        Ok(Some(Reservation {
+            epoch: session.epoch,
+        }))
     }
 
     /// Ends a read: a failed one gives its reservation back; a good one marks the file served (and
-    /// gives back a reservation that a parallel read of the same file made too).
-    fn settle(&self, label: &str, revision: &str, file: u32, size: u64, charged: bool, ok: bool) {
+    /// gives back a reservation that a parallel read of the same file made too). A new list made
+    /// while the file was read changes the window's revision, not its session: file numbers belong
+    /// to the process's one catalog, so the settlement still applies. Only a session that ended
+    /// (the window closed) has nothing left to settle.
+    fn settle(
+        &self,
+        label: &str,
+        reservation: Option<Reservation>,
+        file: u32,
+        size: u64,
+        ok: bool,
+    ) {
+        let Some(reservation) = reservation else {
+            return;
+        };
         let mut sessions = self.lock();
         let Some(session) = sessions
             .get_mut(label)
-            .filter(|session| session.revision == revision)
+            .filter(|session| session.epoch == reservation.epoch)
         else {
             return;
         };
         let first = ok && session.served.insert(file);
-        if charged && !first {
+        if !first {
             session.bytes = session.bytes.saturating_sub(size);
         }
     }

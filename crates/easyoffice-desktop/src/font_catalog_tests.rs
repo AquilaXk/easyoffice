@@ -247,6 +247,62 @@ fn a_refused_read_gives_its_budget_back() {
     assert!(fonts.read("main", &revision, 1).is_ok());
 }
 
+/// A window asks for a new list while one of its reads is in flight (the page reloads). The read
+/// held a reservation made under the old revision; it must still be given back when the read
+/// fails and must still count as served when it succeeds.
+#[test]
+fn a_new_list_during_a_read_neither_leaks_nor_double_charges() {
+    let dir = tempfile::tempdir().unwrap();
+    let files: Vec<PathBuf> = (0..2)
+        .map(|i| file_with(dir.path(), &format!("f{i}.ttf"), b"OTTO", 100))
+        .collect();
+    let fonts = SystemFonts::with_budget(250);
+    let old = listed(&fonts, "main", files);
+    let bytes_of = |fonts: &SystemFonts| fonts.lock().get("main").unwrap().bytes;
+
+    let failing = fonts.charge("main", &old, 0, 100).unwrap();
+    assert!(failing.is_some());
+    let new = fonts.list("main", || unreachable!()).unwrap().revision;
+    fonts.settle("main", failing, 0, 100, false);
+    assert_eq!(bytes_of(&fonts), 0, "a failed read gives its bytes back");
+
+    let good = fonts.charge("main", &new, 0, 100).unwrap();
+    fonts.list("main", || unreachable!()).unwrap();
+    fonts.settle("main", good, 0, 100, true);
+    assert_eq!(bytes_of(&fonts), 100);
+    assert!(fonts.lock().get("main").unwrap().served.contains(&0));
+
+    let latest = fonts.list("main", || unreachable!()).unwrap().revision;
+    assert!(
+        fonts.charge("main", &latest, 0, 100).unwrap().is_none(),
+        "served once"
+    );
+    assert!(fonts.read("main", &latest, 1).is_ok());
+    assert_eq!(
+        bytes_of(&fonts),
+        200,
+        "100 + 100, file 0 was not charged twice"
+    );
+}
+
+/// A read that ends after its window closed and a new window took the same label settles nothing
+/// in the new session.
+#[test]
+fn a_read_that_outlives_its_window_does_not_touch_the_next_window_of_the_same_label() {
+    let dir = tempfile::tempdir().unwrap();
+    let files = vec![file_with(dir.path(), "f0.ttf", b"OTTO", 100)];
+    let fonts = SystemFonts::with_budget(250);
+    let revision = listed(&fonts, "main", files);
+    let stale = fonts.charge("main", &revision, 0, 100).unwrap();
+    fonts.forget("main");
+    let next = fonts.list("main", || unreachable!()).unwrap().revision;
+    let fresh = fonts.charge("main", &next, 0, 100).unwrap();
+    assert!(fresh.is_some());
+    fonts.settle("main", stale, 0, 100, false);
+    let sessions = fonts.lock();
+    assert_eq!(sessions.get("main").unwrap().bytes, 100);
+}
+
 #[test]
 fn a_file_that_vanished_is_refused_without_naming_it() {
     let dir = tempfile::tempdir().unwrap();
