@@ -67,6 +67,7 @@
     }
 
     const gridUtils = host.__EASYOFFICE_SHEET_GRID_UTILS__;
+    const lookApi = host.__EASYOFFICE_SHEET_LOOK__;
 
     function inferMaxRowFromSheetMap(sheetObj) {
       let maxRow = DEFAULT_SHEET_ROW_COUNT;
@@ -154,11 +155,13 @@
 
     let refocusAfterRender = false;
     let rulesUi = null;
+    let lookOps = null;
     // `input` is created right below; the grid only calls these hooks after both exist.
     const grid = host.__EASYOFFICE_CREATE_SHEET_GRID__({
       document,
       getSheetName: () => getActiveSheetName(),
       getEntry: entryAt,
+      getMap: () => sheetDataStore[getActiveSheetName()],
       getExtent: () => getSheetExtent(getActiveSheetName()),
       getCursor: () => {
         const s = input.getSelection();
@@ -215,7 +218,8 @@
       const textDecoration = td.style.textDecoration || "";
       const fontSize = td.style.fontSize || "";
       const numFmt = td._nf || "";
-      const hasStyle = Boolean(fontWeight || fontStyle || textDecoration || fontSize || numFmt);
+      const look = td._st;
+      const hasStyle = Boolean(fontWeight || fontStyle || textDecoration || fontSize || numFmt || lookApi?.hasLook(look));
       if (value === "" && formula === "" && !hasStyle) {
         delete map[ref];
         return;
@@ -224,6 +228,7 @@
       if (hasStyle) {
         cellEntry.style = { fontWeight, fontStyle, textDecoration, fontSize };
         if (numFmt) cellEntry.style.numFmt = numFmt;
+        for (const key of lookApi?.hasLook(look) ? lookApi.LOOK_KEYS : []) if (look[key]) cellEntry.style[key] = look[key];
       }
       map[ref] = cellEntry;
       if (value !== "" || formula !== "") {
@@ -253,7 +258,7 @@
       } else if (a1?.style?.frozenPanes) {
         delete a1.style.frozenPanes;
         const s = a1.style;
-        if (!(s.fontWeight || s.fontStyle || s.textDecoration || s.fontSize || s.numFmt)) {
+        if (!(s.fontWeight || s.fontStyle || s.textDecoration || s.fontSize || s.numFmt || lookApi?.hasLook(s))) {
           delete a1.style;
         }
         if (!hasCellContent(a1) && !a1.style) delete map.A1;
@@ -758,6 +763,7 @@
       getActiveSheetCellRef,
       onSelectionChanged: () => {
         format.scheduleToolbarSync();
+        lookOps?.sync();
         rulesUi?.syncArrow();
       },
       onFormatKey: (kind) => void format.formatRange(kind).catch(() => {}),
@@ -825,10 +831,14 @@
       captureWorkspaceSnapshot,
     });
 
-    host.__EASYOFFICE_CREATE_SHEET_NUMFMT_UI__?.({
+    lookOps = host.__EASYOFFICE_CREATE_SHEET_LOOK__({
       document,
       format,
-      kit: host.__EASYOFFICE_CREATE_SHEET_DIALOG_KIT__(document),
+      gridUtils,
+      sheetDataStore,
+      getActiveSheetName,
+      getActiveModule,
+      getRange: () => input.getRange(),
     });
     host.__EASYOFFICE_SHEET_NUMFMT_DISPLAY__?.attach({
       call: sheetStoreHelpers.callSheetAction,

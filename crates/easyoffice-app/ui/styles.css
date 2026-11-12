@@ -507,7 +507,7 @@ select:focus-visible,
 #pane-sheet .sheet-surface { flex: 1 1 auto; min-height: 0; max-width: none; margin: 0; padding: 0 12px 10px; display: flex; flex-direction: column; border-width: 0; }
 .sheet-viewport { flex: 1 1 auto; min-height: 220px; overflow: auto; position: relative; background: var(--ui-surface); border-width: 1px; border-style: solid; border-color: var(--ui-border-light); outline: none; }
 .sheet-table.sheet-grid { width: auto; table-layout: fixed; border-collapse: separate; border-spacing: 0; }
-.sheet-grid th, .sheet-grid td { box-sizing: border-box; height: 24px; padding: 0 6px; border-width: 0 1px 1px 0; line-height: 23px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.sheet-grid th, .sheet-grid td { box-sizing: border-box; height: 24px; padding: 0 6px; border-width: 0 1px 1px 0; line-height: 23px; vertical-align: bottom; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .sheet-grid thead th { position: sticky; top: 0; z-index: 3; height: 26px; line-height: 25px; user-select: none; }
 .sheet-grid tbody th { position: sticky; left: 0; z-index: 2; width: 56px; user-select: none; }
 .sheet-grid thead th.sheet-corner { left: 0; z-index: 5; width: 56px; }

@@ -12,7 +12,9 @@
   const STATE_DELAY_MS = 120;
   // Ranges up to this many cells are read by address (see computeRangeMasks).
   const DIRECT_AREA_CELLS = 4096;
-  const STYLE_KEYS = ["fontWeight", "fontStyle", "textDecoration", "fontSize", "frozenPanes", "numFmt"];
+  // Alignment, wrapping and borders (PD-207) are keys of the same style object.
+  const look = host.__EASYOFFICE_SHEET_LOOK__;
+  const STYLE_KEYS = ["fontWeight", "fontStyle", "textDecoration", "fontSize", "frozenPanes", "numFmt", ...look.LOOK_KEYS];
   const COMMANDS = {
     "sheet-home-bold": "bold",
     "sheet-home-italic": "italic",
@@ -78,6 +80,11 @@
       const nf = internNf(style.numFmt);
       if (nf > 0) out.nf = nf;
     }
+    if (look.H_ALIGNS.includes(style.textAlign)) out.ha = style.textAlign;
+    if (look.V_ALIGNS.includes(style.verticalAlign)) out.va = style.verticalAlign;
+    if (style.wrap) out.wrap = true;
+    const border = look.freezeBorder(style.border);
+    if (border) out.bd = { ...border };
     const mask = entryMask({ style });
     if (mask & 1) out.bold = true;
     if (mask & 2) out.italic = true;
@@ -102,6 +109,11 @@
     if (Number.isFinite(payload.sizePt) && payload.sizePt > 0) {
       style.fontSize = Math.round((payload.sizePt / PT_PER_PX) * 100) / 100 + "px";
     }
+    if (look.H_ALIGNS.includes(payload.ha)) style.textAlign = payload.ha;
+    if (payload.va === "top" || payload.va === "middle") style.verticalAlign = payload.va;
+    if (payload.wrap === true) style.wrap = true;
+    const border = look.freezeBorder(payload.bd);
+    if (border) style.border = border;
     return Object.values(style).some(Boolean) ? internStyle(style) : null;
   }
 
@@ -117,7 +129,7 @@
 
   function internStyle(style) {
     if (style.frozenPanes) return style;
-    const key = `${style.fontWeight}|${style.fontStyle}|${style.textDecoration}|${style.fontSize}|${style.numFmt || ""}`;
+    const key = `${style.fontWeight}|${style.fontStyle}|${style.textDecoration}|${style.fontSize}|${style.numFmt || ""}|${look.lookKey(style)}`;
     let shared = internedStyles.get(key);
     if (!shared) {
       shared = Object.freeze(style);
@@ -310,6 +322,25 @@
       });
     }
 
+    // One undoable operation over the styles of the selection (PD-207): `edit({ map, rg, patch })` writes
+    // through `patch(ref, mutate)` and answers the number of cells it changed (or a refusal note).
+    function editStyles(label, edit) {
+      return enqueueWorkspaceHistoryOp(async () => {
+        await drainInFlightSheetWork();
+        pushRawUndoSnapshot(captureWorkspaceSnapshot(false));
+        const curSheet = getActiveSheetName();
+        const map = snapshotDomSheetCells();
+        sheetDataStore[curSheet] = map;
+        const result = edit({ map, rg: effectiveRange(), patch: (ref, mutate) => patchCell(map, ref, mutate) });
+        refreshWindowFromModel();
+        saveActiveSheetCellsToWorkbook();
+        refreshFocusedSheetCellPendingSnapshot?.();
+        const fb = document.getElementById("status-command-feedback");
+        if (fb) fb.textContent = typeof result === "string" ? result : label + ": " + result + "칸";
+        return result;
+      });
+    }
+
     // The anchor cell of the selection with its number format code and stored value.
     function anchorCell() {
       const sel = getSelection();
@@ -365,7 +396,7 @@
         }, STATE_DELAY_MS) ?? null;
     }
 
-    return { applyCommand, formatRange, formatNumbers, anchorCell, syncToolbar, scheduleToolbarSync, rangeFlagState: (kind) => rangeFlagState(sheetDataStore[getActiveSheetName()] || {}, getRange(), kind) };
+    return { applyCommand, formatRange, formatNumbers, editStyles, effectiveRange, anchorCell, syncToolbar, scheduleToolbarSync, rangeFlagState: (kind) => rangeFlagState(sheetDataStore[getActiveSheetName()] || {}, getRange(), kind) };
   }
 
   host.__EASYOFFICE_CREATE_SHEET_FORMAT__ = createSheetFormat;

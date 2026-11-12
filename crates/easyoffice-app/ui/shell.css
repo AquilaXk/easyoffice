@@ -147,7 +147,7 @@
 #sheet-dv-dialog { width: min(480px, calc(100vw - 32px)); }
 #sheet-pivot-dialog { width: min(420px, calc(100vw - 32px)); }
 #sheet-dv-alert-dialog { width: min(360px, calc(100vw - 32px)); }
-#sheet-numfmt-dialog { width: min(420px, calc(100vw - 32px)); }
+#sheet-numfmt-dialog { width: min(440px, calc(100vw - 32px)); }
 #sheet-paste-dialog { width: min(360px, calc(100vw - 32px)); overflow: visible; } /* the open list of five choices reaches below the short dialog */
 /* One label column (the find dialog's 70px, right-aligned: `find-dialog.css` 36-38), and every value control fills the rest of the row like the reference's `.formula-input` and `.formula-select` (`dialogs.css` 1049-1052, `flex: 1`); the decimal field keeps `.dialog-input`'s 72px. */
 #sheet-numfmt-dialog .dialog-label, #sheet-paste-dialog .dialog-label { width: 70px; min-width: 70px; flex-shrink: 0; }
@@ -159,6 +159,31 @@
 .sheet-numfmt-sample { box-sizing: border-box; height: 22px; padding: 0 4px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); font-size: var(--font-size-sm); line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sheet-numfmt-sample.nf-colored { color: var(--nf-color, inherit); }
 .sheet-numfmt-sample.nf-red { color: var(--ui-danger); }
+/* Cell format dialog tabs and panes (PD-207), after the reference editor's tab strip and border dialog (`dialogs.css` 530-570, `table-cell-props.css` 111-190). */
+#sheet-numfmt-dialog .dialog-tabs { display: flex; gap: 0; padding: 0 12px; border-bottom: 1px solid var(--ui-border-strong); background: var(--color-bg); }
+#sheet-numfmt-dialog .dialog-tab { position: relative; margin-bottom: -1px; padding: 5px 14px; border: 1px solid transparent; border-bottom: none; background: transparent; color: var(--color-text-muted); font-size: var(--font-size-sm); cursor: pointer; }
+#sheet-numfmt-dialog .dialog-tab:hover { background: var(--color-accent-bg); color: var(--color-text); }
+#sheet-numfmt-dialog .dialog-tab.active { background: var(--color-surface-raised); color: var(--color-text); border-color: var(--ui-border-strong); border-bottom: 1px solid var(--color-surface-raised); font-weight: bold; }
+#sheet-numfmt-dialog [data-fmt-pane][hidden] { display: none; }
+#sheet-numfmt-dialog [data-fmt-pane="align"] .custom-select.dialog-select, #sheet-numfmt-dialog [data-fmt-pane="align"] .dialog-select { flex: 1; min-width: 0; width: auto; }
+.tool-dialog .dialog-btn-group { display: flex; gap: 0; }
+.tool-dialog .dialog-btn-group button { min-width: 36px; height: 26px; padding: 0 6px; border: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-text); font-size: var(--font-size-sm); cursor: pointer; }
+.tool-dialog .dialog-btn-group button:not(:first-child) { border-left: none; }
+.tool-dialog .dialog-btn-group button:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+.tool-dialog .dialog-btn-group button:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+.tool-dialog .dialog-btn-group button:hover { background: var(--color-accent-bg); }
+.sheet-line-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 2px; padding: 4px; border: 1px solid var(--color-border); background: var(--color-surface); }
+.sheet-line-item { height: 18px; padding: 2px 4px; display: flex; align-items: center; border: 1px solid transparent; background: transparent; color: var(--color-text-secondary); cursor: pointer; }
+.sheet-line-item:hover { border-color: var(--accent-hover); background: var(--color-accent-bg-light); }
+.sheet-line-item.active { border-color: var(--color-primary); background: var(--color-accent-bg); }
+.sheet-line-item svg { width: 100%; height: 10px; }
+.sheet-border-preview { width: 120px; height: 72px; flex: none; border: 1px solid var(--ui-border-subtle); background: var(--doc-paper); }
+.sheet-border-preview .sheet-border-guide { fill: none; stroke: var(--ui-border-light); stroke-width: 1; stroke-dasharray: 2 2; }
+.sheet-border-positions { display: grid; grid-template-columns: repeat(2, auto); gap: 2px; margin-left: 8px; }
+.sheet-border-positions button { height: 22px; padding: 0 6px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); font-size: var(--font-size-sm); cursor: pointer; }
+.sheet-border-positions button:hover { background: var(--color-accent-bg); }
+.sheet-border-positions button[aria-pressed="true"] { background: var(--color-primary); border-color: var(--accent-light); color: var(--ui-text-on-accent); }
+.tool-dialog .dialog-btn-group button:focus-visible, .sheet-line-item:focus-visible, .sheet-border-positions button:focus-visible, #sheet-numfmt-dialog .dialog-tab:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: -2px; }
 #sheet-dv-alert-dialog .dialog-body { padding: 16px 20px; line-height: 1.6; white-space: pre-line; }
 /* A text field that holds a range, formula or message fills its row, as the reference's `.formula-input` (dialogs.css:1046) and find field (find-dialog.css:42-47). */
 .sheet-rule-dialog .dialog-text-input { flex: 1; min-width: 0; }

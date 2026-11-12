@@ -4,8 +4,7 @@
   // Virtualized spreadsheet grid. The model lives in `sheetDataStore`; this module only
   // materializes the cells around the viewport (plus a small overscan) as real table rows.
   // Logical addressing covers the full 1,048,576 x 16,384 sheet while the DOM stays small.
-  const MAX_ROWS = 1048576;
-  const MAX_COLS = 16384;
+  const { MAX_ROWS, MAX_COLS } = host.__EASYOFFICE_SHEET_REFS__;
   const ROW_H = 24;
   const HEAD_H = 26;
   const ROW_HEAD_W = 56;
@@ -20,123 +19,7 @@
   const DEFAULT_COLS = 8;
   const MIN_ROWS = 12;
 
-  const COL_NAMES = new Array(257);
-  COL_NAMES[0] = "";
-  for (let i = 1; i <= 256; i += 1) {
-    let n = i;
-    let out = "";
-    while (n > 0) {
-      const rem = (n - 1) % 26;
-      out = String.fromCodePoint(65 + rem) + out;
-      n = Math.floor((n - 1) / 26);
-    }
-    COL_NAMES[i] = out;
-  }
-
-  function colName(idx) {
-    if (idx >= 1 && idx <= 256) return COL_NAMES[idx];
-    let n = idx;
-    let out = "";
-    while (n > 0) {
-      const rem = (n - 1) % 26;
-      out = String.fromCodePoint(65 + rem) + out;
-      n = Math.floor((n - 1) / 26);
-    }
-    return out;
-  }
-
-  function colIndex(letters) {
-    let n = 0;
-    for (let i = 0; i < letters.length; i += 1) {
-      n = n * 26 + (letters.charCodeAt(i) - 64);
-    }
-    return n;
-  }
-
-  const PACK_STRIDE = 32768;
-
-  function packCoord(row, col) {
-    return row * PACK_STRIDE + col;
-  }
-
-  function packRef(ref) {
-    if (typeof ref !== "string") return 0;
-    const len = ref.length;
-    if (len < 2 || len > 12) return 0;
-    let i = 0;
-    while (i < len && ref.charCodeAt(i) <= 32) i += 1;
-    let end = len;
-    while (end > i && ref.charCodeAt(end - 1) <= 32) end -= 1;
-    if (i < end && ref.charCodeAt(i) === 36) i += 1;
-    let col = 0;
-    let colLen = 0;
-    while (i < end) {
-      const ch = ref.charCodeAt(i);
-      const upper = ch >= 97 && ch <= 122 ? ch - 32 : ch;
-      if (upper < 65 || upper > 90) break;
-      col = col * 26 + (upper - 64);
-      colLen += 1;
-      if (colLen > 3) return 0;
-      i += 1;
-    }
-    if (colLen === 0 || col < 1 || col > MAX_COLS) return 0;
-    if (i < end && ref.charCodeAt(i) === 36) i += 1;
-    if (i >= end) return 0;
-    const firstDigit = ref.charCodeAt(i);
-    if (firstDigit < 49 || firstDigit > 57) return 0;
-    let row = 0;
-    let rowLen = 0;
-    while (i < end) {
-      const ch = ref.charCodeAt(i);
-      if (ch < 48 || ch > 57) return 0;
-      row = row * 10 + (ch - 48);
-      rowLen += 1;
-      if (rowLen > 7) return 0;
-      i += 1;
-    }
-    if (row < 1 || row > MAX_ROWS) return 0;
-    return row * PACK_STRIDE + col;
-  }
-
-  function parseRef(ref) {
-    if (typeof ref !== "string") return null;
-    const len = ref.length;
-    if (len < 2 || len > 12) return null;
-    let i = 0;
-    while (i < len && ref.charCodeAt(i) <= 32) i += 1;
-    let end = len;
-    while (end > i && ref.charCodeAt(end - 1) <= 32) end -= 1;
-    let col = 0;
-    let colLen = 0;
-    while (i < end) {
-      const ch = ref.charCodeAt(i);
-      const upper = ch >= 97 && ch <= 122 ? ch - 32 : ch;
-      if (upper < 65 || upper > 90) break;
-      col = col * 26 + (upper - 64);
-      colLen += 1;
-      if (colLen > 3) return null;
-      i += 1;
-    }
-    if (colLen === 0 || col < 1 || col > MAX_COLS || i >= end) return null;
-    const firstDigit = ref.charCodeAt(i);
-    if (firstDigit < 49 || firstDigit > 57) return null;
-    let row = 0;
-    let rowLen = 0;
-    while (i < end) {
-      const ch = ref.charCodeAt(i);
-      if (ch < 48 || ch > 57) return null;
-      row = row * 10 + (ch - 48);
-      rowLen += 1;
-      if (rowLen > 7) return null;
-      i += 1;
-    }
-    if (row < 1 || row > MAX_ROWS) return null;
-    return { row, col };
-  }
-
-  function refOf(row, col) {
-    return colName(col) + row;
-  }
+  const { PACK_STRIDE, colName, colIndex, packCoord, packRef, parseRef, refOf } = host.__EASYOFFICE_SHEET_REFS__;
 
   const { normalizeFormattedNumericCell } = host.__EASYOFFICE_SHEET_UTILS__;
   // Rows beyond each edge of the window whose formatted text is fetched ahead of a scroll.
@@ -210,6 +93,14 @@
     return measurer.measureText(text).width;
   }
 
+  // Lines `text` takes in `width` px of `font`; null when the page cannot measure (yet).
+  function measureWrapped(td, text, width, font) {
+    if (td && !measurer?.eoFamily) textWidth(td, "");
+    if (!measurer?.eoFamily) return null;
+    measurer.font = font + " " + measurer.eoFamily;
+    return host.__EASYOFFICE_SHEET_LINE_COUNT__(text, width, (t) => measurer.measureText(t).width);
+  }
+
   // Width of a column in px (set by the grid that owns the page's sheet).
   let columnWidthOf = null;
 
@@ -262,7 +153,7 @@
   }
 
   function createSheetGrid(deps) {
-    const { document, getSheetName, getEntry, getExtent, getCursor, hooks } = deps;
+    const { document, getSheetName, getEntry, getExtent, getCursor, hooks, getMap } = deps;
     const widthsBySheet = Object.create(null);
     const fallback = { firstRow: 1, cols: DEFAULT_COLS };
     const tdByPacked = new Map();
@@ -283,6 +174,24 @@
     let widthCacheVersion = -1;
     let layoutApplied = false;
     const layoutOf = () => layoutApi?.get(getSheetName()) || null;
+    // Rows follow the height of their wrapped cells (PD-207); `null` where the page cannot measure text.
+    const rowFit = host.__EASYOFFICE_CREATE_ROW_FIT__?.({
+      rowH: ROW_H,
+      getSheetName,
+      getMap: getMap || (() => null),
+      columnWidth: (c) => colWidth(c),
+      isRowHidden: (r) => rowIsHidden(r),
+      isMerged: (r, c) => Boolean(layoutApi?.mergeAt(getSheetName(), r, c)),
+      measure: (text, width, font) => measureWrapped(sampleTd(), text, width, font),
+      packRef,
+    });
+    const sampleTd = () => {
+      seedDomMaps();
+      return tdByPacked.values().next().value || null;
+    };
+    // The look of a cell as the page paints it: neighbours decide the shared edges.
+    const lookApi = host.__EASYOFFICE_SHEET_LOOK__;
+    const borderAt = (r, c) => (r < 1 || c < 1 ? undefined : getEntry(refOf(r, c))?.style?.border);
 
     const viewportEl = () => document.getElementById("sheet-viewport");
     const tbodyEl = () => document.querySelector("#pane-sheet tbody");
@@ -329,13 +238,44 @@
 
     // Top edge of `row` and the height of the rows between `first` and `last`, hidden rows counting 0.
     function rowTop(row) {
-      return (row - 1 - (layoutApi ? layoutApi.rowsHiddenBefore(getSheetName(), row) : 0)) * ROW_H;
+      const hidden = layoutApi ? layoutApi.rowsHiddenBefore(getSheetName(), row) : 0;
+      return (row - 1 - hidden) * ROW_H + (rowFit ? rowFit.extraBefore(row) : 0);
     }
 
-    function visibleRowsFrom(row) {
+    // Height of the visible rows from `row` to the last one, with the taller rows counted at their height.
+    function rowsHeightFrom(row) {
       const name = getSheetName();
       const hiddenAfter = layoutApi ? layoutApi.rowsHiddenTotal(name) - layoutApi.rowsHiddenBefore(name, row) : 0;
-      return Math.max(0, MAX_ROWS - row + 1 - hiddenAfter);
+      const extra = rowFit ? rowFit.extraTotal() - rowFit.extraBefore(row) : 0;
+      return Math.max(0, MAX_ROWS - row + 1 - hiddenAfter) * ROW_H + extra;
+    }
+
+    // The row whose band holds the vertical offset `y` of the scrolled content.
+    function rowAtY(y) {
+      const guess = rowAtVisible(Math.max(0, Math.floor(y / ROW_H)));
+      if (!rowFit || !rowFit.any()) return guess;
+      let lo = 1;
+      let hi = guess;
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        if (rowTop(mid) <= y) lo = mid;
+        else hi = mid - 1;
+      }
+      return lo;
+    }
+
+    const visibleIndexOf = (row) => row - 1 - (layoutApi ? layoutApi.rowsHiddenBefore(getSheetName(), row) : 0);
+
+    // Sets the height of every materialized row to its fitted height (a plain row keeps the stylesheet's).
+    function applyRowHeights(tbody) {
+      if (!rowFit) return;
+      for (const tr of tbody.children) {
+        const r = rowOf(tr);
+        if (r === 0) continue;
+        const h = rowFit.heightOf(r);
+        const want = h > ROW_H ? h + "px" : "";
+        if (tr.style.height !== want) tr.style.height = want;
+      }
     }
 
     function rowAtVisible(v) {
@@ -400,7 +340,8 @@
     function computeView() {
       const vp = viewportEl();
       if (hasLayout(vp)) {
-        const top = Math.floor(vp.scrollTop / ROW_H);
+        const first = rowAtY(vp.scrollTop);
+        const top = visibleIndexOf(first);
         const visible = Math.ceil((vp.clientHeight - HEAD_H) / ROW_H) + 1;
         return {
           layout: true,
@@ -439,6 +380,11 @@
       td.style.fontStyle = st?.fontStyle || "";
       td.style.textDecoration = st?.textDecoration || "";
       td.style.fontSize = st?.fontSize || "";
+      td._st = st;
+      if (lookApi) {
+        const m = layoutApi?.mergeAt(getSheetName(), td._row, td._col);
+        lookApi.paintTd(td, st, td._row, td._col, borderAt, m && m.r1 === td._row && m.c1 === td._col ? m : null);
+      }
       host.__EASYOFFICE_SHEET_RULES__?.paintTd(td, getSheetName());
     }
 
@@ -566,7 +512,7 @@
         tbody.appendChild(spacerBottom);
       }
       spacerTop.children[0].style.height = rowTop(v.r0) + "px";
-      spacerBottom.children[0].style.height = visibleRowsFrom(v.r1 + 1) * ROW_H + "px";
+      spacerBottom.children[0].style.height = rowsHeightFrom(v.r1 + 1) + "px";
     }
 
     function activeGridTd() {
@@ -673,6 +619,7 @@
       const existing = reconcileExistingRows(tbody, next, sameCols);
       syncSpacers(tbody, next);
       insertMissingRows(tbody, existing, next);
+      applyRowHeights(tbody);
       syncTableWidth(table, next);
       applyLayoutClasses();
       if (hooks.afterRender) hooks.afterRender();
@@ -725,8 +672,7 @@
         td.classList.toggle("merge-cover", Boolean(m) && !anchor);
         if (anchor) {
           td.style.setProperty("--mw", colLeft(m.c2 + 1) - colLeft(m.c1) + "px");
-          const hidden = layoutApi.rowsHiddenBefore(name, m.r2 + 1) - layoutApi.rowsHiddenBefore(name, m.r1);
-          td.style.setProperty("--mh", (m.r2 - m.r1 + 1 - hidden) * ROW_H + "px");
+          td.style.setProperty("--mh", rowTop(m.r2 + 1) - rowTop(m.r1) + "px");
         } else if (td.style.getPropertyValue("--mw")) {
           td.style.removeProperty("--mw");
           td.style.removeProperty("--mh");
@@ -737,6 +683,7 @@
     // The layout changed (hide, unhide, merge, edit): redraw with the new row and column geometry.
     function layoutChanged() {
       widthCacheSheet = null;
+      rowFit?.sync();
       return renderWindow(true);
     }
 
@@ -850,6 +797,7 @@
         tds.push(td);
       }
       applyLayoutClasses();
+      if (rowFit?.sync()) renderWindow(true);
       return tds;
     }
 
@@ -883,8 +831,9 @@
       if (hasLayout(vp)) {
         const viewH = vp.clientHeight - HEAD_H;
         const top = rowTop(row);
+        const bottom = top + (rowFit ? rowFit.heightOf(row) : ROW_H);
         if (top < vp.scrollTop) vp.scrollTop = top;
-        else if (top + ROW_H > vp.scrollTop + viewH) vp.scrollTop = top + ROW_H - viewH;
+        else if (bottom > vp.scrollTop + viewH) vp.scrollTop = bottom - viewH;
         const left = colLeft(col);
         const viewW = vp.clientWidth - ROW_HEAD_W;
         if (left < vp.scrollLeft) vp.scrollLeft = left;
@@ -903,6 +852,7 @@
       repaintNumFmtColumn(c);
       const th = colHeadByCol.get(c) || document.querySelector('#pane-sheet th[data-col="' + colName(c) + '"]');
       if (th) th.style.width = w + "px";
+      if (rowFit?.sync()) renderWindow(true);
       const table = tableEl();
       if (table && view) syncTableWidth(table, view);
       return w;

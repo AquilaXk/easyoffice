@@ -37,7 +37,8 @@
   function cellStyleChanged(sa, sb) {
     if (sa === sb) return false;
     if (styleFlagsMask(sa) !== styleFlagsMask(sb)) return true;
-    return (sa?.sizePt || 0) !== (sb?.sizePt || 0) || (sa?.fontSize || "") !== (sb?.fontSize || "");
+    const look = host.__EASYOFFICE_SHEET_LOOK__;
+    return (sa?.sizePt || 0) !== (sb?.sizePt || 0) || (sa?.fontSize || "") !== (sb?.fontSize || "") || (look ? look.lookKey(sa) !== look.lookKey(sb) : false);
   }
 
   function sheetCellDataChanged(sheetsA, sheetsB, includeStyle = true) {

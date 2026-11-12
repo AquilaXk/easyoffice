@@ -164,6 +164,40 @@
                   <button type="button" class="md-item" role="menuitem" data-sheet-numfmt="decimal-down" tabindex="-1"><span class="md-label">소수 자릿수 줄이기</span></button>
                 </div>
               </div>
+              <div class="md-sub" data-kinds="SHEET" role="menuitem" aria-haspopup="menu" tabindex="-1">
+                <span class="md-label">맞춤</span><span class="md-arrow md-caret" data-icon="chevron-right"></span>
+                <div class="md-sub-panel menu-dropdown md-submenu" role="menu" aria-label="맞춤">
+                  <button type="button" class="md-item" role="menuitemcheckbox" aria-checked="false" data-sheet-look="align-left" tabindex="-1"><span class="md-label">왼쪽 정렬</span></button>
+                  <button type="button" class="md-item" role="menuitemcheckbox" aria-checked="false" data-sheet-look="align-center" tabindex="-1"><span class="md-label">가운데 정렬</span></button>
+                  <button type="button" class="md-item" role="menuitemcheckbox" aria-checked="false" data-sheet-look="align-right" tabindex="-1"><span class="md-label">오른쪽 정렬</span></button>
+                  <div class="md-sep"></div>
+                  <button type="button" class="md-item" role="menuitemcheckbox" aria-checked="false" data-sheet-look="valign-top" tabindex="-1"><span class="md-label">위쪽 맞춤</span></button>
+                  <button type="button" class="md-item" role="menuitemcheckbox" aria-checked="false" data-sheet-look="valign-middle" tabindex="-1"><span class="md-label">가운데 맞춤</span></button>
+                  <button type="button" class="md-item" role="menuitemcheckbox" aria-checked="false" data-sheet-look="valign-bottom" tabindex="-1"><span class="md-label">아래쪽 맞춤</span></button>
+                </div>
+              </div>
+              <div class="md-item" data-kinds="SHEET" data-sheet-look="wrap" role="menuitemcheckbox" aria-checked="false" tabindex="-1"><span class="md-label">줄 바꿈</span></div>
+              <div class="md-sub" data-kinds="SHEET" role="menuitem" aria-haspopup="menu" tabindex="-1">
+                <span class="md-label">테두리</span><span class="md-arrow md-caret" data-icon="chevron-right"></span>
+                <div class="md-sub-panel menu-dropdown md-submenu" role="menu" aria-label="테두리">
+                  <button type="button" class="md-item" role="menuitem" data-sheet-look="border-all" data-palette-title="테두리 모두" tabindex="-1"><span class="md-label">모두</span></button>
+                  <button type="button" class="md-item" role="menuitem" data-sheet-look="border-outer" data-palette-title="테두리 바깥쪽" tabindex="-1"><span class="md-label">바깥쪽</span></button>
+                  <button type="button" class="md-item" role="menuitem" data-sheet-look="border-inner" data-palette-title="테두리 안쪽" tabindex="-1"><span class="md-label">안쪽</span></button>
+                  <button type="button" class="md-item" role="menuitem" data-sheet-look="border-top" data-palette-title="테두리 위쪽" tabindex="-1"><span class="md-label">위쪽</span></button>
+                  <button type="button" class="md-item" role="menuitem" data-sheet-look="border-bottom" data-palette-title="테두리 아래쪽" tabindex="-1"><span class="md-label">아래쪽</span></button>
+                  <button type="button" class="md-item" role="menuitem" data-sheet-look="border-left" data-palette-title="테두리 왼쪽" tabindex="-1"><span class="md-label">왼쪽</span></button>
+                  <button type="button" class="md-item" role="menuitem" data-sheet-look="border-right" data-palette-title="테두리 오른쪽" tabindex="-1"><span class="md-label">오른쪽</span></button>
+                  <button type="button" class="md-item" role="menuitem" data-sheet-look="border-none" data-palette-title="테두리 없음" tabindex="-1"><span class="md-label">없음</span></button>
+                  <div class="md-sep"></div>
+                  <button type="button" class="md-item" role="menuitemradio" aria-checked="false" data-sheet-look="line-thin" data-palette-title="테두리 가는 실선" tabindex="-1"><span class="md-label">가는 실선</span></button>
+                  <button type="button" class="md-item" role="menuitemradio" aria-checked="false" data-sheet-look="line-thick" data-palette-title="테두리 굵은 실선" tabindex="-1"><span class="md-label">굵은 실선</span></button>
+                  <button type="button" class="md-item" role="menuitemradio" aria-checked="false" data-sheet-look="line-dashed" data-palette-title="테두리 파선" tabindex="-1"><span class="md-label">파선</span></button>
+                  <button type="button" class="md-item" role="menuitemradio" aria-checked="false" data-sheet-look="line-dotted" data-palette-title="테두리 점선" tabindex="-1"><span class="md-label">점선</span></button>
+                  <button type="button" class="md-item" role="menuitemradio" aria-checked="false" data-sheet-look="line-double" data-palette-title="테두리 이중 실선" tabindex="-1"><span class="md-label">이중 실선</span></button>
+                  <div class="md-sep"></div>
+                  <button type="button" class="md-item" role="menuitem" data-sheet-look="dialog-border" tabindex="-1"><span class="md-label">테두리 색…</span></button>
+                </div>
+              </div>
               <div class="md-item" data-kinds="SHEET" data-sheet-numfmt="dialog" role="menuitem" tabindex="-1"><span class="md-label">셀 서식…</span></div>
             </div>
           </div>
@@ -357,6 +391,17 @@
           <button type="button" class="tb-btn" data-sheet-numfmt="percent" data-icon="percent" title="백분율 서식" aria-label="백분율 서식"></button>
           <button type="button" class="tb-btn" data-sheet-numfmt="decimal-down" data-icon="decimal-decrease" title="소수 자릿수 줄이기" aria-label="소수 자릿수 줄이기"></button>
           <button type="button" class="tb-btn" data-sheet-numfmt="decimal-up" data-icon="decimal-increase" title="소수 자릿수 늘리기" aria-label="소수 자릿수 늘리기"></button>
+        </div>
+        <span class="tb-sep" data-kinds="SHEET" aria-hidden="true"></span>
+        <div class="tb-group" data-kinds="SHEET">
+          <button type="button" class="tb-btn" data-sheet-look="align-left" data-icon="align-left" title="왼쪽 정렬" aria-label="왼쪽 정렬" aria-pressed="false"></button>
+          <button type="button" class="tb-btn" data-sheet-look="align-center" data-icon="align-center" title="가운데 정렬" aria-label="가운데 정렬" aria-pressed="false"></button>
+          <button type="button" class="tb-btn" data-sheet-look="align-right" data-icon="align-right" title="오른쪽 정렬" aria-label="오른쪽 정렬" aria-pressed="false"></button>
+          <button type="button" class="tb-btn" data-sheet-look="valign-top" data-icon="valign-top" title="위쪽 맞춤" aria-label="위쪽 맞춤" aria-pressed="false"></button>
+          <button type="button" class="tb-btn" data-sheet-look="valign-middle" data-icon="valign-middle" title="가운데 맞춤" aria-label="가운데 맞춤" aria-pressed="false"></button>
+          <button type="button" class="tb-btn" data-sheet-look="valign-bottom" data-icon="valign-bottom" title="아래쪽 맞춤" aria-label="아래쪽 맞춤" aria-pressed="false"></button>
+          <button type="button" class="tb-btn" data-sheet-look="wrap" data-icon="wrap-text" title="줄 바꿈" aria-label="줄 바꿈" aria-pressed="false"></button>
+          <button type="button" class="tb-btn" data-sheet-look="dialog-border" data-icon="border-all" title="테두리" aria-label="테두리"></button>
         </div>
       </div>
 
@@ -1123,7 +1168,12 @@
     <dialog id="sheet-numfmt-dialog" class="tool-dialog sheet-rule-dialog" aria-labelledby="sheet-numfmt-dialog-title">
       <div class="dialog-wrap">
         <div class="dialog-title"><span id="sheet-numfmt-dialog-title">셀 서식</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
-        <div class="dialog-body">
+        <div class="dialog-tabs" role="tablist" aria-label="셀 서식">
+          <button type="button" class="dialog-tab active" role="tab" id="sheet-fmt-tab-numfmt" aria-selected="true" aria-controls="sheet-fmt-pane-numfmt" data-fmt-tab="numfmt">표시 형식</button>
+          <button type="button" class="dialog-tab" role="tab" id="sheet-fmt-tab-align" aria-selected="false" aria-controls="sheet-fmt-pane-align" tabindex="-1" data-fmt-tab="align">맞춤</button>
+          <button type="button" class="dialog-tab" role="tab" id="sheet-fmt-tab-border" aria-selected="false" aria-controls="sheet-fmt-pane-border" tabindex="-1" data-fmt-tab="border">테두리</button>
+        </div>
+        <div class="dialog-body" id="sheet-fmt-pane-numfmt" role="tabpanel" aria-labelledby="sheet-fmt-tab-numfmt" data-fmt-pane="numfmt">
           <div class="dialog-row"><label class="dialog-label" for="sheet-numfmt-kind-select">분류</label><select id="sheet-numfmt-kind-select" class="sb-combo dialog-select"></select></div>
           <div class="dialog-row" data-numfmt-field="decimals" hidden><label class="dialog-label" for="sheet-numfmt-decimals">소수 자릿수</label><input id="sheet-numfmt-decimals" type="number" min="0" max="30" step="1" class="dialog-input" /></div>
           <div class="dialog-row" data-numfmt-field="thousands" hidden><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-numfmt-thousands" type="checkbox" /> 천 단위 구분</label></div>
@@ -1133,6 +1183,17 @@
           <div class="dialog-row"><label class="dialog-label" for="sheet-numfmt-code">서식 코드</label><input id="sheet-numfmt-code" type="text" class="dialog-text-input" maxlength="255" autocomplete="off" spellcheck="false" /></div>
           <div class="dialog-row"><span class="dialog-label">표본</span><output id="sheet-numfmt-sample" class="sheet-numfmt-sample"></output></div>
           <p id="sheet-numfmt-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-body" id="sheet-fmt-pane-align" role="tabpanel" aria-labelledby="sheet-fmt-tab-align" data-fmt-pane="align" hidden>
+          <div class="dialog-row"><label class="dialog-label" for="sheet-align-h-select">가로</label><select id="sheet-align-h-select" class="sb-combo dialog-select"></select></div>
+          <div class="dialog-row"><label class="dialog-label" for="sheet-align-v-select">세로</label><select id="sheet-align-v-select" class="sb-combo dialog-select"></select></div>
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-align-wrap" type="checkbox" /> 텍스트 줄 바꿈</label></div>
+        </div>
+        <div class="dialog-body" id="sheet-fmt-pane-border" role="tabpanel" aria-labelledby="sheet-fmt-tab-border" data-fmt-pane="border" hidden>
+          <div class="dialog-row"><span class="dialog-label">선 종류</span><div class="sheet-line-grid" role="radiogroup" aria-label="선 종류"><button type="button" class="sheet-line-item" role="radio" aria-checked="false" data-border-line="thin" title="가는 실선" aria-label="가는 실선"></button><button type="button" class="sheet-line-item" role="radio" aria-checked="false" data-border-line="thick" title="굵은 실선" aria-label="굵은 실선"></button><button type="button" class="sheet-line-item" role="radio" aria-checked="false" data-border-line="dashed" title="파선" aria-label="파선"></button><button type="button" class="sheet-line-item" role="radio" aria-checked="false" data-border-line="dotted" title="점선" aria-label="점선"></button><button type="button" class="sheet-line-item" role="radio" aria-checked="false" data-border-line="double" title="이중 실선" aria-label="이중 실선"></button></div></div>
+          <div class="dialog-row"><span class="dialog-label">색</span><div id="sheet-border-color-host" class="sb-color-host dialog-color-host"><button class="dialog-swatch" type="button" data-color-toggle aria-haspopup="true" aria-expanded="false" title="테두리 색" aria-label="테두리 색"><span class="dialog-swatch-chip" aria-hidden="true"></span><span aria-hidden="true">▾</span></button><input id="sheet-border-color" type="color" value="#000000" aria-label="테두리 색" /><div id="sheet-border-color-palette" class="sb-hl-palette" hidden></div></div></div>
+          <div class="dialog-row"><span class="dialog-label">미리 보기</span><div class="dialog-btn-group" role="group" aria-label="미리 보기"><button type="button" data-border-preset="none">없음</button><button type="button" data-border-preset="outer">바깥쪽</button><button type="button" data-border-preset="inner">안쪽</button><button type="button" data-border-preset="all">모두</button></div></div>
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><svg id="sheet-border-preview" class="sheet-border-preview" viewBox="0 0 120 72" role="img" aria-label="테두리 미리 보기"></svg><div class="sheet-border-positions" role="group" aria-label="테두리 위치"><button type="button" aria-pressed="false" data-border-pos="t">위쪽</button><button type="button" aria-pressed="false" data-border-pos="b">아래쪽</button><button type="button" aria-pressed="false" data-border-pos="l">왼쪽</button><button type="button" aria-pressed="false" data-border-pos="r">오른쪽</button><button type="button" aria-pressed="false" data-border-pos="h">가로 중심선</button><button type="button" aria-pressed="false" data-border-pos="v">세로 중심선</button></div></div>
         </div>
         <div class="dialog-footer">
           <button id="btn-sheet-numfmt-apply" type="button" class="dialog-btn dialog-btn-primary">확인</button>
@@ -1361,6 +1422,9 @@
     <script src="./workspace-tools.js"></script>
     <script src="./workspace-panels.js"></script>
     <script src="./sheet-layout.js"></script>
+    <script src="./sheet-refs.js"></script>
+    <script src="./sheet-look.js"></script>
+    <script src="./sheet-row-fit.js"></script>
     <script src="./sheet-grid.js"></script>
     <script src="./sheet-paste-core.js"></script>
     <script src="./sheet-fill-core.js"></script>
@@ -1376,6 +1440,8 @@
     <script src="./sheet-rules-ui.js"></script>
     <script src="./sheet-format.js"></script>
     <script src="./sheet-numfmt-ui.js"></script>
+    <script src="./sheet-look-ops.js"></script>
+    <script src="./sheet-look-ui.js"></script>
     <script src="./sheet-filter.js"></script>
     <script src="./sheet-filter-ui.js"></script>
     <script src="./sheet-sort-ui.js"></script>

@@ -35,7 +35,7 @@
   const SAMPLE_NUMBER = "-1234.5678";
 
   function createSheetNumfmtUi(deps) {
-    const { document, format, kit } = deps;
+    const { document, format, kit, look } = deps;
     const N = host.__EASYOFFICE_SHEET_NUMFMT__;
     const D = host.__EASYOFFICE_SHEET_NUMFMT_DISPLAY__;
     const { $, val, checked, setVal, setChecked, setSelect, openDialog, closeDialog, fillOptions, note } = kit;
@@ -214,29 +214,36 @@
       $("btn-sheet-numfmt-apply")?.addEventListener("click", () => void applyDialog());
     }
 
-    function openNumfmtDialog() {
+    // `pane` is the tab shown first: `numfmt`, `align` or `border` (PD-207).
+    function openNumfmtDialog(pane = "numfmt") {
       ensureControls();
       anchor = format.anchorCell();
       loadFields(anchor.code);
       note("sheet-numfmt-status", "");
       void refreshSample();
+      look?.open(pane);
       openDialog("sheet-numfmt-dialog");
-      $("sheet-numfmt-code")?.focus?.();
+      if (pane === "numfmt") $("sheet-numfmt-code")?.focus?.();
     }
 
     async function applyDialog() {
       const code = N.isDefaultFormat(val("sheet-numfmt-code")) ? "" : val("sheet-numfmt-code");
-      if (code && N.codeWithinBounds(code)) await D.preview(code, ["0"]);
-      if (code && (!N.codeWithinBounds(code) || D.isBad(code))) {
-        sampleToken += 1;
-        note("sheet-numfmt-status", "서식 코드가 한도를 넘음");
-        return;
+      // Another pane changed and the code did not: only that pane is written.
+      const lookOnly = Boolean(look?.dirty()) && code === (N.isDefaultFormat(anchor.code) ? "" : anchor.code);
+      if (!lookOnly) {
+        if (code && N.codeWithinBounds(code)) await D.preview(code, ["0"]);
+        if (code && (!N.codeWithinBounds(code) || D.isBad(code))) {
+          sampleToken += 1;
+          note("sheet-numfmt-status", "서식 코드가 한도를 넘음");
+          return;
+        }
+        const result = await format.formatNumbers((cells) => cells.map(() => code), "셀 서식");
+        if (result?.refused) {
+          note("sheet-numfmt-status", "서식 코드는 시트마다 " + N.MAX_CODES + "개까지");
+          return;
+        }
       }
-      const result = await format.formatNumbers((cells) => cells.map(() => code), "셀 서식");
-      if (result?.refused) {
-        note("sheet-numfmt-status", "서식 코드는 시트마다 " + N.MAX_CODES + "개까지");
-        return;
-      }
+      if (look?.dirty()) await look.apply();
       closeDialog("sheet-numfmt-dialog");
     }
 
