@@ -144,14 +144,14 @@ test("the dialog shows its levels and one button row, and has no explanatory sen
   assert.ok(texts.every((t) => t.length <= 6 && !/[.。]$/.test(t)), texts.join("|"));
 });
 
-test("the save payload gives the block's paragraphs their role, and a file with them opens as a block again", async () => {
+test("the save payload gives the block its roles, the headings their bookmarks and the entries links to them; a file with them opens as a block again that still goes to the headings", async () => {
   const h = await createRunHarness([heading(1, "개요"), heading(2, "배경"), p("본문")]);
   toc(h).applyToc(h.editor, 3);
   const blocks = h.host.__EASYOFFICE_SAVE_PAYLOAD__.collectDocBlocks(h.editor);
-  assert.deepEqual(blocks.map((b) => [b.runs.map((r) => r.text).join(""), b.toc, b.heading]), [
-    ["목차", 0, undefined], ["개요", 1, undefined], ["배경", 2, undefined], ["개요", undefined, 1], ["배경", undefined, 2], ["본문", undefined, undefined],
+  assert.deepEqual(blocks.map((b) => [b.runs.map((r) => r.text).join(""), b.toc, b.heading, b.bookmark, b.runs[0].link]), [
+    ["목차", 0, undefined, undefined, undefined], ["개요", 1, undefined, undefined, "#_Toc1"], ["배경", 2, undefined, undefined, "#_Toc2"],
+    ["개요", undefined, 1, 1, undefined], ["배경", undefined, 2, 2, undefined], ["본문", undefined, undefined, undefined, undefined],
   ]);
-  assert.ok(blocks.slice(0, 3).every((b) => b.runs.every((r) => r.link === undefined)), "an entry's link is not a stored link");
 
   const opened = await createWorkspaceHarness();
   await flushAsyncTurns(10);
@@ -161,11 +161,35 @@ test("the save payload gives the block's paragraphs their role, and a file with 
   assert.ok(nav);
   assert.equal(nav.getAttribute("contenteditable"), "false");
   assert.deepEqual(Array.from(nav.querySelectorAll("p[data-eo-toc]"), (e) => [Number(e.dataset.eoToc), e.textContent]), [[0, "목차"], [1, "개요"], [2, "배경"]]);
+  assert.deepEqual(Array.from(nav.querySelectorAll("a"), (a) => a.getAttribute("href")), ["#eo-h-1", "#eo-h-2"]);
+  assert.deepEqual(Array.from(editor.querySelectorAll("h1, h2"), (el) => el.id), ["eo-h-1", "eo-h-2"]);
   assert.equal(editor.querySelectorAll("nav.eo-doc-toc").length, 1);
+  const api = opened.host.__EASYOFFICE_DOC_TOC__;
+  const entry = nav.querySelectorAll("p[data-eo-toc]")[2];
+  assert.equal(api.headingFor(editor, entry), editor.querySelector("h2"), "the entry goes to the heading by its bookmark");
   const again = opened.host.__EASYOFFICE_SAVE_PAYLOAD__.collectDocBlocks(editor);
   assert.deepEqual(again, blocks, "saving the opened file gives the same blocks");
-  const res = opened.host.__EASYOFFICE_DOC_TOC__.updateToc(editor);
+  const res = api.updateToc(editor);
   assert.equal(res.changed, true);
   assert.equal(editor.querySelectorAll("nav.eo-doc-toc").length, 1, "update replaces the block that was opened");
   assert.equal(res.toc.dataset.tocLevels, "2", "a file keeps no setting: the deepest entry gives the levels");
+});
+
+test("a bookmark number past the engine's range, a foreign link and a heading without a bookmark are not sent", async () => {
+  const h = await createRunHarness([heading(1, "개요")]);
+  toc(h).applyToc(h.editor, 3);
+  const head = h.editor.querySelector("h1");
+  head.setAttribute("id", "eo-h-4294967296");
+  const entry = navOf(h).querySelectorAll("p")[1];
+  entry.querySelector("a").setAttribute("href", "#eo-h-4294967296");
+  let blocks = h.host.__EASYOFFICE_SAVE_PAYLOAD__.collectDocBlocks(h.editor);
+  assert.equal(blocks[1].runs[0].link, undefined);
+  assert.equal(blocks[2].bookmark, undefined);
+  head.setAttribute("id", "eo-h-0");
+  entry.querySelector("a").setAttribute("href", "https://example.com/");
+  blocks = h.host.__EASYOFFICE_SAVE_PAYLOAD__.collectDocBlocks(h.editor);
+  assert.equal(blocks[1].runs[0].link, undefined, "an entry only links to a bookmark");
+  assert.equal(blocks[2].bookmark, undefined);
+  head.setAttribute("id", "eo-h-4294967295");
+  assert.equal(h.host.__EASYOFFICE_SAVE_PAYLOAD__.collectDocBlocks(h.editor)[2].bookmark, 4294967295);
 });

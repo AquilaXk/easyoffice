@@ -41,9 +41,22 @@
     return CSS_ALIGN[String(css || "").trim().toLowerCase()] || null;
   }
 
+  // The in-document bookmark of a table-of-contents block (`doc-toc.js`): heading `eo-h-N` is bookmark `_TocN`, an
+  // entry's `#eo-h-N` link is `#_TocN` (the engine's `toc_bookmark_number`: 1 to 4294967295, no leading zero).
+  const MAX_BOOKMARK = 4294967295;
+  const HEADING_ID_RE = /^eo-h-([1-9]\d{0,9})$/;
+  const bookmarkNumber = (id) => {
+    const n = Number(HEADING_ID_RE.exec(String(id || ""))?.[1]);
+    return n >= 1 && n <= MAX_BOOKMARK ? n : undefined;
+  };
+
   // The stored address of an editor link (`doc-link.js`); a link whose address the policy refuses saves as plain text.
   function linkTarget(el) {
     const links = host.__EASYOFFICE_DOC_LINK__;
+    if (el.parentElement?.dataset?.eoToc !== undefined) {
+      const number = bookmarkNumber(String(el.getAttribute("href") || "").slice(1));
+      return number === undefined ? undefined : "#_Toc" + number;
+    }
     return links && el.dataset?.eoLink ? links.normalizeUrl(el.getAttribute("href")) ?? undefined : undefined;
   }
 
@@ -319,6 +332,7 @@
         if (cur.ctx.align) block.align = cur.ctx.align;
         if (cur.ctx.heading) block.heading = cur.ctx.heading;
         if (cur.ctx.toc !== undefined) block.toc = cur.ctx.toc;
+        if (cur.ctx.bookmark !== undefined) block.bookmark = cur.ctx.bookmark;
         if (cur.ctx.list) block.list = cur.ctx.list;
         blocks.push(block);
       }
@@ -380,6 +394,7 @@
         align: normalizeAlign(node.style?.textAlign) || ctx.align,
         heading: headingMatch ? Number(headingMatch[1]) : ctx.heading,
         toc: tocRole(node) ?? ctx.toc,
+        bookmark: headingMatch ? bookmarkNumber(node.id) : undefined,
         list: nextList,
         layout: LAYOUT_TAGS.has(tag) ? paragraphLayout(node, baseLineHeight) : ctx.layout,
       };

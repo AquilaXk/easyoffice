@@ -198,9 +198,12 @@
   }
 
   // One entry or title paragraph of a table-of-contents block; entries are links to their headings (`doc-toc.js`).
+  const TOC_TARGET_RE = /^#_Toc([1-9]\d{0,9})$/;
+
   function tocParagraphSpec(block) {
     const inline = runSpecs(block.runs);
-    const p = elSpec("p", block.toc === 0 ? inline : [elSpec("a", inline, {}, { href: "#" })]);
+    const target = TOC_TARGET_RE.exec(block.runs?.find((r) => TOC_TARGET_RE.test(r.link))?.link ?? "")?.[1];
+    const p = elSpec("p", block.toc === 0 ? inline : [elSpec("a", inline, {}, { href: target ? "#eo-h-" + target : "#" })]);
     p.data.eoToc = String(block.toc);
     return p;
   }
@@ -235,7 +238,9 @@
       const heading = Number(block.heading) || 0;
       if (heading >= 1 && heading <= 6) {
         openList = null;
-        nodes.push(applyParagraphLayout(elSpec("h" + heading, inline, style), block));
+        const h = applyParagraphLayout(elSpec("h" + heading, inline, style), block);
+        if (Number.isInteger(block.bookmark) && block.bookmark > 0) h.attrs.id = "eo-h-" + block.bookmark;
+        nodes.push(h);
       } else if (block.list === "bullet" || block.list === "ordered") {
         const tag = block.list === "ordered" ? "ol" : "ul";
         if (openList?.tag !== tag) {
