@@ -164,10 +164,13 @@ fn push_docx_paragraph(
         RichAlignment::Justify => "both",
     });
     let layout = docx_paragraph_layout(p);
-    if style.is_some() || jc.is_some() || !layout.is_empty() {
+    if style.is_some() || jc.is_some() || !layout.is_empty() || p.page_break_before {
         out.push_str("<w:pPr>");
         if let Some(s) = style {
             out.push_str(&format!("<w:pStyle w:val=\"{s}\"/>"));
+        }
+        if p.page_break_before {
+            out.push_str("<w:pageBreakBefore/>");
         }
         if let Some(run) = run {
             out.push_str(&docx_num_pr(run, p));
@@ -387,6 +390,7 @@ struct OdtParaKey {
     left_twips: Option<u32>,
     first_line_twips: Option<i32>,
     line_percent: Option<u16>,
+    page_break: bool,
 }
 
 pub(crate) fn push_odt_text(out: &mut String, text: &str) {
@@ -420,6 +424,7 @@ fn push_odt_paragraph(
         left_twips: p.left_indent_twips,
         first_line_twips: p.first_line_indent_twips,
         line_percent: p.line_spacing_percent,
+        page_break: p.page_break_before,
     };
     let style_attr = if let Some(role) = p.toc {
         format!(" text:style-name=\"{}\"", odt_toc_style_name(role))
@@ -490,6 +495,7 @@ fn odt_para_style_xml(number: usize, key: &OdtParaKey) -> String {
         left_twips,
         first_line_twips,
         line_percent,
+        page_break,
     } = key;
     let mut styles = format!(
         "<style:style style:name=\"P{number}\" style:family=\"paragraph\"><style:paragraph-properties"
@@ -517,6 +523,9 @@ fn odt_para_style_xml(number: usize, key: &OdtParaKey) -> String {
     }
     if let Some(percent) = line_percent {
         styles.push_str(&format!(" fo:line-height=\"{percent}%\""));
+    }
+    if *page_break {
+        styles.push_str(" fo:break-before=\"page\"");
     }
     styles.push_str("/>");
     if *level > 0 {

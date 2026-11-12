@@ -280,6 +280,7 @@ fn parse_paragraph(
             .map(|v| v as u16),
         toc,
         bookmark,
+        page_break_before: opt_bool(obj, "pageBreakBefore")?,
     })
 }
 

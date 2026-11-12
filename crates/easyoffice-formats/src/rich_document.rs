@@ -239,6 +239,9 @@ pub struct RichParagraph {
     /// Number of the table-of-contents bookmark (`_Toc<number>`) that marks this heading; the entries of a
     /// table of contents link to it as `#_Toc<number>`.
     pub bookmark: Option<u32>,
+    /// The paragraph starts a new page (DOCX `w:pageBreakBefore`, ODT `fo:break-before="page"`). A page break
+    /// between two paragraphs of a file reads as this flag on the one after it.
+    pub page_break_before: bool,
 }
 
 impl RichParagraph {

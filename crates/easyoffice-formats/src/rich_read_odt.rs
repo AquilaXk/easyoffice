@@ -43,6 +43,7 @@ struct StyleProps {
     left_twips: Option<u32>,
     first_line_twips: Option<i32>,
     line_percent: Option<u16>,
+    page_break_before: bool,
 }
 
 /// A CSS/ODF length (`36pt`, `0.5in`, `1.27cm`, `12.7mm`, `48px`) in EMU.
@@ -150,6 +151,7 @@ fn apply_paragraph_properties(p: &mut StyleProps, attrs: &Attrs<'_>) {
     p.line_percent = attr(attrs, "fo:line-height")
         .as_deref()
         .and_then(line_height_percent);
+    p.page_break_before = attr(attrs, "fo:break-before").as_deref() == Some("page");
 }
 
 fn read_styles_into(
@@ -250,6 +252,7 @@ fn resolve_style_parents(styles: &mut HashMap<String, StyleProps>) {
             if props.line_percent.is_none() {
                 props.line_percent = p.line_percent;
             }
+            props.page_break_before |= p.page_break_before;
             props.fmt = merge_span_fmt(p.fmt.clone(), props.fmt.clone());
             cur_parent = p.parent.as_deref();
         }
@@ -299,6 +302,8 @@ struct OdtWalker<'a> {
     budget: ImageBudget,
     /// Address of the open `text:a`, when it is a safe link.
     link: Option<String>,
+    /// The last paragraph that held no text asked for a page break; the next one carries it.
+    pending_page_break: bool,
 }
 
 /// Merges a span's character format into the enclosing format.
@@ -342,6 +347,7 @@ impl<'a> OdtWalker<'a> {
             in_automatic_styles: false,
             budget: ImageBudget::default(),
             link: None,
+            pending_page_break: false,
         }
     }
 
@@ -576,7 +582,9 @@ impl<'a> OdtWalker<'a> {
         let images = p.images;
         if self.tbl_depth > 0 {
             self.cell_paras.push(text);
-        } else if !text.trim().is_empty() {
+        } else if text.trim().is_empty() {
+            self.pending_page_break |= p.style.page_break_before;
+        } else {
             let list = if p.outline > 0 || p.toc.is_some() {
                 None
             } else if let Some(kind) = self.list_stack.last() {
@@ -600,6 +608,8 @@ impl<'a> OdtWalker<'a> {
                 line_spacing_percent: p.style.line_percent,
                 toc: p.toc,
                 bookmark: p.bookmark,
+                page_break_before: p.style.page_break_before
+                    | std::mem::take(&mut self.pending_page_break),
             }));
         }
         if self.tbl_depth == 0 {

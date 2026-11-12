@@ -55,6 +55,10 @@ struct ParaState {
     line_percent: Option<u16>,
     /// Number of a `_Toc` bookmark that starts in the paragraph.
     bookmark: Option<u32>,
+    /// `w:pageBreakBefore`, or a page break before any text of the paragraph.
+    page_break_before: bool,
+    /// A page break after text of the paragraph: the next paragraph starts the page.
+    page_break_after: bool,
 }
 
 const MAX_STYLE_INHERIT_DEPTH: usize = 16;
@@ -218,6 +222,7 @@ impl Resolver<'_> {
             line_spacing_percent: p.line_percent,
             toc,
             bookmark: p.bookmark,
+            page_break_before: p.page_break_before,
         }
     }
 }
@@ -335,6 +340,8 @@ struct DocxWalker {
     /// Relationship id -> address of the document's hyperlinks, and the one of the open `w:hyperlink`.
     links: HashMap<String, String>,
     link: Option<String>,
+    /// A page break was read that the next paragraph has to carry (a paragraph that held only the break is not kept).
+    pending_page_break: bool,
 }
 
 impl DocxWalker {
@@ -417,6 +424,7 @@ impl DocxWalker {
             "w:numId" => top.num_id = val.map(str::to_string),
             "w:ilvl" => top.ilvl = val.and_then(|v| v.trim().parse().ok()),
             "w:outlineLvl" => top.outline = val.and_then(|v| v.parse().ok()),
+            "w:pageBreakBefore" => top.page_break_before = toggle_on(val),
             _ => {}
         }
     }
@@ -424,12 +432,26 @@ impl DocxWalker {
     fn apply_inline_break(&mut self, name: &str, attrs: &Attrs<'_>) {
         match name {
             "w:tab" | "w:ptab" => self.cur_text.push('\t'),
-            "w:br" if !matches!(attr(attrs, "w:type").as_deref(), Some("page" | "column")) => {
-                self.cur_text.push('\n');
+            "w:br" if attr(attrs, "w:type").as_deref() == Some("page") => self.note_page_break(),
+            "w:br" if attr(attrs, "w:type").as_deref() != Some("column") => {
+                self.cur_text.push('\n')
             }
             "w:cr" => self.cur_text.push('\n'),
             "w:noBreakHyphen" => self.cur_text.push('-'),
             _ => {}
+        }
+    }
+
+    /// A `w:br w:type="page"`: text after it starts the page, so a break before any text belongs to this paragraph
+    /// and one after text to the next.
+    fn note_page_break(&mut self) {
+        let before_text = self.cur_text.trim().is_empty();
+        if let Some(top) = self.paras.last_mut() {
+            if before_text && top.runs.iter().all(|r| r.text.trim().is_empty()) {
+                top.page_break_before = true;
+            } else {
+                top.page_break_after = true;
+            }
         }
     }
 
@@ -534,9 +556,16 @@ impl DocxWalker {
         if self.tbl_depth > 0 {
             self.cell_paras.push(plain(&p));
         } else {
+            let carried = p.page_break_before;
+            let after = p.page_break_after;
+            let mut kept = false;
             if p.runs.iter().any(|r| !r.text.trim().is_empty()) {
-                self.blocks.push(RichBlock::Paragraph(resolver.finish(p)));
+                let mut paragraph = resolver.finish(p);
+                paragraph.page_break_before |= std::mem::take(&mut self.pending_page_break);
+                self.blocks.push(RichBlock::Paragraph(paragraph));
+                kept = true;
             }
+            self.pending_page_break |= (carried && !kept) || after;
             self.blocks.extend(images.into_iter().map(RichBlock::Image));
         }
     }

@@ -350,6 +350,7 @@ fn finish_paragraph(header: &Header, p: ParaState) -> RichParagraph {
         line_spacing_percent,
         toc: None,
         bookmark: None,
+        page_break_before: false,
     }
 }
 

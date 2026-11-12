@@ -110,6 +110,9 @@ fn write_paragraph(out: &mut String, p: &RichParagraph) {
     if let Some(number) = p.bookmark {
         let _ = write!(out, ",\"bookmark\":{number}");
     }
+    if p.page_break_before {
+        out.push_str(",\"pageBreakBefore\":true");
+    }
     match p.toc {
         Some(RichToc::Title) => out.push_str(",\"toc\":0"),
         Some(RichToc::Entry(level)) => {
