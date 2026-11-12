@@ -137,7 +137,7 @@ test("the dialog shows its levels and one button row, and has no explanatory sen
   const dialog = byId(h, "doc-toc-dialog");
   assert.equal(dialog.className, "tool-dialog");
   assert.equal(dialog.querySelector(".dialog-title span").textContent, "목차");
-  assert.equal(dialog.querySelector(".dialog-label").textContent, "표시 수준");
+  assert.equal(dialog.querySelector(".dialog-label").textContent, "포함할 개요");
   assert.deepEqual(Array.from(dialog.querySelectorAll(".dialog-footer button"), (b) => b.textContent), ["확인", "취소"]);
   assert.ok(dialog.querySelector("#btn-doc-toc-apply").className.includes("dialog-btn-primary"));
   const texts = [...dialog.querySelectorAll(".dialog-title span, .dialog-label, option, .dialog-footer button")].map((el) => el.textContent.trim());

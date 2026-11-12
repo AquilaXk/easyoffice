@@ -130,7 +130,7 @@
 #doc-link-dialog .dialog-label { min-width: 64px; }
 #doc-link-dialog .dialog-text-input { flex: 1; min-width: 0; }
 /* Table of contents dialog (doc-toc.js): the status line has the find dialog's metrics. */
-#doc-toc-dialog { width: min(360px, calc(100vw - 32px)); }
+#doc-toc-dialog { width: min(360px, calc(100vw - 32px)); overflow: visible; } /* the open level list reaches below the short dialog */
 #doc-toc-dialog .dialog-label { min-width: 64px; }
 /* The level list has the field's inner padding (`dialogs.css` 154-164) and the arrow cell; its width follows the text, and all three choices are the same length. The status line takes no room while it is empty. */
 #doc-toc-dialog .custom-select-trigger { grid-template-columns: minmax(0, 1fr) 15px; padding: 0 0 0 4px; }
