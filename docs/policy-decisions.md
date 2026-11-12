@@ -2853,3 +2853,18 @@
 - **Alternatives rejected** 읽은 수준을 문단 스타일 규칙보다 우선(스타일로 종류를 정하던 문서의 결과가 바뀜), `w:ilvl` 범위 밖에서 문서를 거부(유효하지 않은 한 문단 때문에 열기가 실패함).
 - **Verified by** `cargo test -p easyoffice-formats --test docx_list_levels`(작성기가 쓴 0~3수준·8수준의 글머리표와 `a)`·`(I)`·`가.`·`i.`가 같은 값으로 돌아옴, 외부 모양 정의·`lvlOverride`, 범위 밖·음수·숫자 아닌 `ilvl`, 정의 없음, 9,000개 `w:num` 거부), 단위 시험 `rich_read_numbering`, `--test list_definitions`·`rich_decode_roundtrip`.
 - **Revisit when** 스타일 안 `numPr`을 쓰는 문서를 열 때, 시작 번호(`w:start`)를 모델에 넣을 때.
+
+## PD-184. DOCX·ODT·HWPX 쓰기는 같은 바이트의 그림을 패키지에 한 번만 넣고 참조를 공유함
+
+- **Status** Implemented (`crates/easyoffice-formats/src/rich_image_writers.rs`, `src/bytes_hash.rs`, `src/rich_writers.rs`, `src/hwpx_codec.rs`, `tests/shared_picture_parts.rs`). 읽기는 이미 같은 그림 파일을 한 번만 검증하고 바이트를 공유합니다(`tests/rich_shared_pictures.rs`). 이 항목은 쓰기 쪽입니다.
+- **Context** 쓰기는 그림 참조마다 새 파일(`image1.png`, `image2.png`, …)을 패키지에 넣었습니다. 같은 로고를 쪽마다 넣은 문서는 로고 수만큼 커졌습니다.
+- **Decision (`PD-184`)**
+  1. **공유**: 그림을 넣을 때 바이트의 `(길이, 64비트 해시)`로 이미 넣은 파일을 찾고, 해시가 맞으면 **바이트를 비교해** 같을 때만 그 파일을 씁니다. 해시만 맞고 바이트가 다르면 새 파일입니다(해시 충돌은 공유하지 않음). 참조는 파일 번호와 별개로 센 순번(`ordinal`)을 갖습니다.
+  2. **형식별 참조**: DOCX는 관계 한 개(`rIdN`, 처음 쓸 때만 `Relationship` 추가)를 여러 `w:blip`이 가리키고 `wp:docPr/@id`는 참조마다 유일합니다. ODT는 `draw:image/@xlink:href` 한 경로를 여러 `draw:frame`이 가리키고 `draw:name`은 참조마다 유일합니다. HWPX는 `opf:item` 한 개를 여러 `hc:img/@binaryItemIDRef`가 가리키고 `hp:pic/@id`·`instid`는 참조마다 유일합니다. 대체 텍스트는 참조마다 따로 씁니다.
+  3. **해시**: 입력은 문서 안의 그림(그림당 32MiB, 문서당 256개·128MiB, `rich_image.rs` 상한)입니다. 해시는 프로세스마다 무작위 시드를 섞어(`RandomState`) 일부러 충돌하는 입력으로 바이트 비교를 늘릴 수 없게 합니다. 시드가 고정이면 일부러 만든 충돌로 바이트 비교 횟수를 늘릴 수 있습니다.
+- **재사용 판단 (구현 원칙 3단계)** (1) 엔진은 외부 의존성 0이라 해시 크레이트를 쓰지 않습니다. (2) 표준 라이브러리 `DefaultHasher`(SipHash-1-3)는 쓸 수 있지만 측정에서 5.3GiB/s라 직접 만든 4갈래 워드 해시(22GiB/s)보다 4배 느립니다. 그림이 최대 128MiB인 경로에서는 해시가 쓰기 시간에 드는 몫이라 직접 만들었습니다. (3) 이식한 코드는 없습니다(32바이트씩 네 갈래로 곱셈·회전을 겹치게 하는 일반 기법).
+- **측정(릴리스 빌드, 이 Mac)** 문서: 400x300 PNG(360,418바이트) 40번 + 다른 그림 2번 + 같은 바이트로 따로 만든 사본 1번(참조 43개, 파일 2개). 저장 크기 전→후: DOCX 15,026,719→484,414바이트, ODT 15,024,086→482,109, HWPX 15,028,862→486,712(약 31분의 1). 쓰기 시간(9회 중 최소): DOCX 2.96→1.00ms, ODT 2.61→0.95ms, HWPX 2.53→1.04ms. 해시 128MiB: 22GiB/s(`DefaultHasher` 5.3GiB/s).
+- **Trade-offs** (a) 문서의 그림이 서로 다르면 해시 계산(그림 바이트당 약 0.05ns)과 처음 보는 파일에 한 번 바이트 복사가 듭니다(전에도 복사했음). (b) 한 파일을 여러 참조가 가리키므로 파일 하나를 바꾸는 편집기는 모든 참조에 영향을 줍니다. 쓰기 전용이라 이 앱에는 해당이 없습니다. (c) 다른 포맷의 쓰기(Pages·DOC·PPT·PDF)는 이 경로를 쓰지 않아 바뀌지 않았습니다.
+- **Alternatives rejected** 해시만으로 같은 그림 판정(충돌 때 다른 그림이 바뀜), 포인터 동일성(`Arc`)만 비교(따로 만든 같은 바이트를 놓침), 시드 없는 고정 해시(위), 문서 모델에서 그림을 미리 합치기(읽기 쪽이 이미 공유하며 모델 호환을 깨뜨림).
+- **Verified by** `cargo test -p easyoffice-formats --test shared_picture_parts`(DOCX·ODT·HWPX 각각 파일 3개, 참조 43개가 3개 값만 가리킴, 그림·프레임·`instid` id 유일, 다시 읽은 43개 그림의 바이트가 원본과 같음), 단위 시험 `rich_image_writers`(같은 바이트 공유, 강제로 심은 해시 충돌에서 다른 바이트는 새 파일)·`bytes_hash`(모든 한 비트 뒤집기·길이·시드가 해시를 바꿈), `--test rich_shared_pictures`·`rich_images`·`rich_media_readback`(읽기 회귀).
+- **Revisit when** Pages·PDF 쓰기에도 같은 그림이 반복될 때, 그림 제한(256개·128MiB)을 늘릴 때.

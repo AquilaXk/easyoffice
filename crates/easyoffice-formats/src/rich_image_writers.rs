@@ -2,6 +2,9 @@
 //! `draw:frame` pictures and HWPX `hp:pic`. Each fragment references the media part by name; the
 //! caller stores the bytes unchanged (so a part is byte-identical to the model's picture).
 
+use std::collections::HashMap;
+
+use crate::bytes_hash::{hash_bytes, random_seed};
 use crate::rich_image::{RichImage, EMU_PER_POINT};
 use crate::{RichImageFormat, XmlSanitizer};
 
@@ -14,20 +17,67 @@ pub(crate) const DOCX_IMAGE_REL_TYPE: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
 pub(crate) const NS_HWPX_CORE: &str = "http://www.owpml.org/owpml/2011/core";
 
-/// Media parts collected while writing a document, numbered from 1 in block order.
-#[derive(Default)]
+/// Media parts collected while writing a document, numbered from 1 in block order. A picture
+/// used again (same bytes) shares its part, so the package stores it once.
 pub(crate) struct MediaParts {
     parts: Vec<(String, Vec<u8>, RichImageFormat)>,
+    /// Part indexes by `(length, keyed hash)` of the bytes.
+    by_hash: HashMap<(usize, u64), Vec<usize>>,
+    seed: u64,
+    references: usize,
+}
+
+/// What one picture reference points to.
+pub(crate) struct MediaRef {
+    /// 1-based count of references so far: unique per picture reference, for drawing ids and names.
+    pub(crate) ordinal: usize,
+    /// 1-based number of the part holding the bytes (shared by every reference to them).
+    pub(crate) part: usize,
+    pub(crate) path: String,
+    /// Whether this reference created the part.
+    pub(crate) first_use: bool,
 }
 
 impl MediaParts {
-    /// Registers `img` under `dir` and returns its 1-based number and part path.
-    pub(crate) fn add(&mut self, dir: &str, img: &RichImage) -> (usize, String) {
-        let number = self.parts.len() + 1;
-        let path = format!("{dir}/image{number}.{}", img.format().extension());
+    pub(crate) fn new() -> Self {
+        Self {
+            parts: Vec::new(),
+            by_hash: HashMap::new(),
+            seed: random_seed(),
+            references: 0,
+        }
+    }
+
+    /// Registers `img` under `dir`: its bytes become a new part unless a part holds the same bytes
+    /// (a hash match is confirmed by comparing the bytes).
+    pub(crate) fn add(&mut self, dir: &str, img: &RichImage) -> MediaRef {
+        self.references += 1;
+        let ordinal = self.references;
+        let bytes = img.bytes();
+        let key = (bytes.len(), hash_bytes(bytes, self.seed));
+        let known = self
+            .by_hash
+            .get(&key)
+            .and_then(|candidates| candidates.iter().find(|&&at| self.parts[at].1 == bytes));
+        if let Some(&at) = known {
+            return MediaRef {
+                ordinal,
+                part: at + 1,
+                path: self.parts[at].0.clone(),
+                first_use: false,
+            };
+        }
+        let part = self.parts.len() + 1;
+        let path = format!("{dir}/image{part}.{}", img.format().extension());
+        self.by_hash.entry(key).or_default().push(part - 1);
         self.parts
-            .push((path.clone(), img.bytes().to_vec(), img.format()));
-        (number, path)
+            .push((path.clone(), bytes.to_vec(), img.format()));
+        MediaRef {
+            ordinal,
+            part,
+            path,
+            first_use: true,
+        }
     }
 
     pub(crate) fn has_format(&self, format: RichImageFormat) -> bool {
@@ -71,7 +121,7 @@ pub(crate) fn docx_image_relationship(rel_id: &str, target: &str) -> String {
     )
 }
 
-/// A DOCX paragraph holding one inline picture (`number` doubles as the drawing id).
+/// A DOCX paragraph holding one inline picture (`number`, the reference ordinal, is the drawing id).
 pub(crate) fn docx_image_paragraph(img: &RichImage, number: usize, rel_id: &str) -> String {
     let (cx, cy) = img.display_emu();
     let alt = XmlSanitizer::escape(img.alt());
@@ -178,4 +228,65 @@ pub(crate) fn hwpx_picture_run(img: &RichImage, number: usize, item_id: &str) ->
 /// Points for a display size, used by page-based writers.
 pub(crate) fn emu_to_points(emu: u64) -> u64 {
     (emu / EMU_PER_POINT).max(1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::IeeeCrc32;
+
+    fn chunk(kind: &[u8; 4], data: &[u8]) -> Vec<u8> {
+        let mut out = (data.len() as u32).to_be_bytes().to_vec();
+        out.extend_from_slice(kind);
+        out.extend_from_slice(data);
+        let crc = IeeeCrc32::update(IeeeCrc32::checksum(kind), data);
+        out.extend_from_slice(&crc.to_be_bytes());
+        out
+    }
+
+    /// A structurally valid PNG whose bytes depend on `width` and `fill` but not its length.
+    fn png(width: u32, fill: u8) -> RichImage {
+        let mut ihdr = width.to_be_bytes().to_vec();
+        ihdr.extend_from_slice(&1u32.to_be_bytes());
+        ihdr.extend_from_slice(&[8, 0, 0, 0, 0]);
+        let mut bytes = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+        bytes.extend(chunk(b"IHDR", &ihdr));
+        bytes.extend(chunk(b"IDAT", &[fill; 16]));
+        bytes.extend(chunk(b"IEND", &[]));
+        RichImage::new(bytes, "").unwrap()
+    }
+
+    #[test]
+    fn equal_bytes_share_a_part_and_every_reference_gets_its_own_ordinal() {
+        let mut media = MediaParts::new();
+        let a = png(2, 1);
+        let first = media.add("m", &a);
+        let again = media.add("m", &png(2, 1));
+        let other = media.add("m", &png(2, 9));
+        assert!(first.first_use && !again.first_use && other.first_use);
+        assert_eq!((first.part, again.part, other.part), (1, 1, 2));
+        assert_eq!(first.path, again.path);
+        assert_eq!((first.ordinal, again.ordinal, other.ordinal), (1, 2, 3));
+        assert_eq!(media.listing().len(), 2);
+        assert_eq!(media.into_entries().len(), 2);
+    }
+
+    #[test]
+    fn a_hash_match_with_different_bytes_is_not_shared() {
+        let mut media = MediaParts::new();
+        let (a, b) = (png(2, 1), png(3, 1));
+        assert_eq!(a.bytes().len(), b.bytes().len());
+        media.add("m", &a);
+        // Plant the first part under the key of the second picture: a forced hash collision.
+        let key = (b.bytes().len(), hash_bytes(b.bytes(), media.seed));
+        media.by_hash.entry(key).or_default().push(0);
+        let second = media.add("m", &b);
+        assert!(second.first_use);
+        assert_eq!(second.part, 2);
+        assert_eq!(media.listing().len(), 2);
+        // The planted candidate stays and the real one is found next time.
+        let third = media.add("m", &b);
+        assert!(!third.first_use);
+        assert_eq!(third.part, 2);
+    }
 }

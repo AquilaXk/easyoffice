@@ -218,17 +218,19 @@ pub(crate) fn pack_docx_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeEr
     );
     body.push_str(DOCX_PICTURE_NAMESPACES);
     body.push_str("><w:body>");
-    let mut media = MediaParts::default();
+    let mut media = MediaParts::new();
     let mut image_rels = String::new();
     for (index, block) in doc.blocks.iter().enumerate() {
         match block {
             RichBlock::Paragraph(p) => push_docx_paragraph(&mut body, p, lists.block_run[index]),
             RichBlock::Image(img) => {
-                let (number, path) = media.add(DOCX_MEDIA_DIR, img);
-                let rel_id = format!("rId{}", number + DOCX_FIRST_IMAGE_REL - 1);
-                let target = path.strip_prefix("word/").unwrap_or(&path);
-                image_rels.push_str(&docx_image_relationship(&rel_id, target));
-                body.push_str(&docx_image_paragraph(img, number, &rel_id));
+                let picture = media.add(DOCX_MEDIA_DIR, img);
+                let rel_id = format!("rId{}", picture.part + DOCX_FIRST_IMAGE_REL - 1);
+                if picture.first_use {
+                    let target = picture.path.strip_prefix("word/").unwrap_or(&picture.path);
+                    image_rels.push_str(&docx_image_relationship(&rel_id, target));
+                }
+                body.push_str(&docx_image_paragraph(img, picture.ordinal, &rel_id));
             }
             RichBlock::Table(table) => {
                 push_docx_table(&mut body, table);
@@ -446,7 +448,7 @@ const ODT_MEDIA_DIR: &str = "Pictures";
 
 pub(crate) fn pack_odt_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeError> {
     check_document_images(doc)?;
-    let mut media = MediaParts::default();
+    let mut media = MediaParts::new();
     let mut para_styles: StyleTable<OdtParaKey> = StyleTable::new();
     let mut text_styles: StyleTable<OdtTextKey> = StyleTable::new();
     let mut body = String::with_capacity(1024);
@@ -467,8 +469,8 @@ pub(crate) fn pack_odt_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeErr
             }
             RichBlock::Table(table) => push_odt_table(&mut body, table),
             RichBlock::Image(img) => {
-                let (number, path) = media.add(ODT_MEDIA_DIR, img);
-                body.push_str(&odt_image_paragraph(img, number, &path));
+                let picture = media.add(ODT_MEDIA_DIR, img);
+                body.push_str(&odt_image_paragraph(img, picture.ordinal, &picture.path));
             }
         }
     }

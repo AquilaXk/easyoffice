@@ -3,6 +3,7 @@ use std::fmt;
 pub mod base64_codec;
 mod biff8_formula;
 pub mod biff8_xls_codec;
+mod bytes_hash;
 mod cell_numbers;
 mod code_pages;
 pub mod converter;

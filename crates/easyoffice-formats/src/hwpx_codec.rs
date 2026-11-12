@@ -109,10 +109,11 @@ impl SectionWriter {
         }
     }
 
-    fn picture_paragraph(&mut self, img: &RichImage, number: usize) {
+    /// `ordinal` numbers this reference (the picture id); `part` is the manifest item of the bytes.
+    fn picture_paragraph(&mut self, img: &RichImage, ordinal: usize, part: usize) {
         self.open_paragraph();
         self.xml
-            .push_str(&hwpx_picture_run(img, number, &format!("image{number}")));
+            .push_str(&hwpx_picture_run(img, ordinal, &format!("image{part}")));
         self.xml.push_str("</hp:p>");
     }
 
@@ -204,7 +205,7 @@ impl HwpxCodec {
         for tbl in &payload.tables {
             sec.table_paragraph(tbl, None);
         }
-        Self::pack_package(payload, header_xml(), sec.finish(), MediaParts::default())
+        Self::pack_package(payload, header_xml(), sec.finish(), MediaParts::new())
     }
 
     /// Writes a [`RichDocument`] in block order: each distinct run format becomes a `charPr`,
@@ -238,7 +239,7 @@ impl HwpxCodec {
             idx
         }
         check_document_images(doc)?;
-        let mut media = MediaParts::default();
+        let mut media = MediaParts::new();
         let mut sec = SectionWriter::new();
         for block in &doc.blocks {
             let p = match block {
@@ -248,8 +249,8 @@ impl HwpxCodec {
                     continue;
                 }
                 RichBlock::Image(img) => {
-                    let (number, _) = media.add(HWPX_MEDIA_DIR, img);
-                    sec.picture_paragraph(img, number);
+                    let picture = media.add(HWPX_MEDIA_DIR, img);
+                    sec.picture_paragraph(img, picture.ordinal, picture.part);
                     continue;
                 }
             };
