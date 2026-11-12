@@ -2881,3 +2881,19 @@
 - **Alternatives rejected** 평문 이름 목록(목록 자체가 규칙 위반), 파일 전체 예외(머리 주석 밖의 새 이름을 놓침).
 - **Verified by** `node --test scripts/test-oss-names.mjs`, `node scripts/check-repo-hygiene.mjs`.
 - **Revisit when** 새 오픈소스 의존성이 문서에 오를 때(해시 추가), 코드 주석의 의존 크레이트 이름도 막기로 할 때.
+
+## PD-186. 엔진 열기·저장 응답 최적화: 응답 JSON 단일 버퍼, 안전 XML 검사의 `!` 탐색, 검사한 XML 부분 재사용, 엄격 JSON 중복 키 검사
+
+- **Status** Implemented (QA 요청 2026-11-12: 성능 개선 효과가 큰 부분에 모두 적용). 측정과 수치는 `docs/performance.md` 4.6절.
+- **Context** 1~10 MiB 입력의 열기·저장을 릴리스 빌드로 다시 재 보니 열기 시간의 33~47%가 응답 JSON 조립(문단·셀마다 문자열 생성, `join`, 워크북 복제)이었고, DOCX 읽기의 44%가 같은 XML 엔트리를 두 번 훑는 안전 검사와 두 번 하는 UTF-8 검사였습니다. 엄격 JSON 파서는 객체마다 해시 집합을 만들었습니다.
+- **재사용 판단 (구현 원칙 3단계)** (1) 같은 일을 하는 허용 라이선스 크레이트는 엔진 무의존 원칙(PD-053, PD-095)으로 쓰지 않았습니다. (2) 이미 쓰는 의존성에 해당 기능이 없습니다. (3) 이식한 코드는 없고 기존 SWAR 탐색(`find_byte_swar`)을 넓혔습니다.
+- **Decision (`PD-186`)**
+  1. 열기 응답(`decode_response`)은 한 `String`에 직접 쓰고 같은 바이트를 만듭니다. 클리핑은 워크북을 복제하지 않고 범위 밖 셀을 세고 건너뜁니다.
+  2. `XmlSanitizer::validate_safe_xml`은 `<!ENTITY`·`<!DOCTYPE` 거부 조건을 그대로 두고 `!`를 넓게(워드 4개) 찾습니다. `find_byte_swar`는 64바이트 안에 못 찾을 때만 넓게 봅니다.
+  3. 컨테이너의 XML 엔트리는 `checked_zip_xml_entries`가 UTF-8과 DOCTYPE·엔티티 검사를 한 번 하고, DOCX·ODT·HWPX 읽기는 그 결과의 텍스트를 씁니다. 검사 범위(모든 `.xml`·`.rels`·`.hpf` 엔트리, 실패하면 컨테이너 전체 거부)와 오류는 이전과 같습니다.
+  4. `StrictJsonValue::parse`는 객체의 중복 키를 16개까지 직접 비교하고 넘으면 해시 집합을 씁니다(상한이 없는 입력에서도 선형).
+  예산·상한(압축 해제 비율, 항목 수, 페이로드 크기, JSON 깊이)은 바꾸지 않았습니다.
+- **Why** 사용자가 파일을 열고 저장할 때마다 드는 비용이고, 결과가 같음을 바이트·의미 단위로 보일 수 있는 변경입니다.
+- **Trade-offs** 저장 뒤 확인용 해석은 줄이지 않았습니다. 저장 시간의 18~46%이지만 쓴 파일이 다시 열리는지 보는 검증입니다.
+- **Verified by** `cargo test -p easyoffice-app convert_open`(`decode_answer_is_byte_exact_for_documents_workbooks_and_slides`), `cargo test -p easyoffice-formats --test xml_scan_equivalence`·`--lib strict_json`·`--test rich_decode_roundtrip`(DOCX·XLSX·PPTX·HWPX·ODT의 DOCTYPE 거부), 열린 응답 JSON 11개 입력의 전·후 `cmp`.
+- **Revisit when** 저장 뒤 확인용 해석을 스트리밍 읽기로 바꿀 때(`paragraphCount`·`tableCount` 계약 확인), SVG 파서 크레이트 사본을 둘 때(PD-163).
