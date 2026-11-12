@@ -320,7 +320,7 @@ test("the status line shows the current and total page from the page layout", as
   const pos = h.document.getElementById("status-studio-pos").textContent;
   assert.match(pos, /^3\/7 쪽/);
   assert.match(h.document.getElementById("doc-page-zone-indicator").textContent, /^3 \/ 7 쪽/);
-  assert.match(h.document.getElementById("status-doc-filename").textContent, /7페이지$/);
+  assert.match(h.document.getElementById("status-doc-filename").textContent, /7쪽$/);
 });
 
 test("the editor has no fixed footer page number any more", async () => {

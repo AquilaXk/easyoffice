@@ -432,7 +432,7 @@
       const fileEl = document.getElementById("status-doc-filename");
       if (fileEl) {
         const activeTabTitle = getWindowBridge?.()?.getDocumentName(getActiveModule());
-        fileEl.textContent = (activeTabTitle || "제목 없음") + " — " + total + "페이지";
+        fileEl.textContent = (activeTabTitle || "제목 없음") + " — " + total + "쪽";
       }
     }
 
