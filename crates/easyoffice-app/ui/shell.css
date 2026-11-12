@@ -136,7 +136,8 @@
 #doc-toc-dialog .custom-select-trigger { grid-template-columns: minmax(0, 1fr) 15px; padding: 0 0 0 4px; }
 #doc-toc-dialog .custom-select-value { padding-right: 4px; }
 #doc-toc-dialog .dialog-status-row:has(> :empty) { display: none; }
-#doc-toc-dialog .dialog-body:has(.dialog-status:empty) .dialog-row { margin-bottom: 0; }
+#doc-toc-dialog .dialog-body:has(.dialog-status:empty) .dialog-row:nth-last-of-type(2) { margin-bottom: 0; }
+#doc-toc-dialog .dialog-checkbox { margin-left: 72px; }
 .dialog-status-row { min-height: 18px; line-height: 18px; text-align: right; }
 .dialog-status { color: var(--color-text-secondary); font-size: var(--font-size-sm); }
 /* After every display rule above, so `hidden` wins at equal specificity. */

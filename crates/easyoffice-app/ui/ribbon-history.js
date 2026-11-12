@@ -440,7 +440,7 @@
     // The dialog's levels travel with the command (`options.toc`); the block is made in the page like the other editor effects.
     function docEffectToc({ options }) {
       const workspacePanels = getWorkspacePanels();
-      getDocToc().applyLevels(options.toc.levels);
+      getDocToc().applyOptions(options.toc);
       workspacePanels.computeSmartStats();
       workspacePanels.renderModuleOutline(getActiveModule());
     }

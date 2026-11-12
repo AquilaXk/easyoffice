@@ -193,3 +193,132 @@ test("a bookmark number past the engine's range, a foreign link and a heading wi
   head.setAttribute("id", "eo-h-4294967295");
   assert.equal(h.host.__EASYOFFICE_SAVE_PAYLOAD__.collectDocBlocks(h.editor)[2].bookmark, 4294967295);
 });
+
+// A page layout that puts four lines on a page: a block is one line, the table of contents is one line per entry.
+// It counts its passes so a test can see the numbers were measured again after the block was in place.
+function fakePages(h, { active = true, linesPerPage = 4 } = {}) {
+  const api = {
+    passes: 0,
+    isActive: () => active,
+    layoutNow() {
+      api.passes += 1;
+    },
+    pageCount: () => (active ? 99 : 0),
+    headingPages() {
+      let line = 0;
+      const out = [];
+      for (const el of h.editor.childNodes) {
+        if (el.tagName === "NAV") line += el.querySelectorAll("p").length;
+        else {
+          if (/^H[1-6]$/.test(el.tagName)) out.push({ el, level: Number(el.tagName[1]), page: Math.floor(line / linesPerPage) + 1 });
+          line += 1;
+        }
+      }
+      return out;
+    },
+  };
+  h.host.__EASYOFFICE_DOC_PAGES__ = api;
+  return api;
+}
+const pageNumbers = (h) => entries(h).slice(1).map((e) => e.dataset.eoTocPage);
+const sixHeadings = () => [heading(1, "가"), p("a"), heading(2, "나"), p("b"), heading(1, "다"), p("c"), heading(3, "라"), p("d")];
+
+test("with page numbers each entry shows the page its heading is on once the block is in place, measured until the numbers settle", async () => {
+  const h = await createRunHarness(sixHeadings());
+  const api = fakePages(h);
+  toc(h).applyToc(h.editor, 3, null, { pages: true, dots: true });
+  // The block (title + 4 entries) opens the document, so every heading is 5 lines further down than without it.
+  const expected = api.headingPages().map((x) => String(x.page));
+  assert.deepEqual(pageNumbers(h), expected);
+  assert.deepEqual(expected, ["2", "2", "3", "3"]);
+  assert.ok(api.passes >= 2, "measured before and after the block went in");
+  assert.ok(entries(h).slice(1).every((e) => e.dataset.eoTocDots === "true"));
+  assert.equal(navOf(h).dataset.tocPages, "true");
+  assert.equal(entries(h)[0].dataset.eoTocPage, undefined, "the title has no number");
+});
+
+test("a block without page numbers, without a layout or with the layout off has none, and no error", async () => {
+  const off = await createRunHarness(sixHeadings());
+  fakePages(off);
+  assert.equal(toc(off).applyToc(off.editor, 3, null, { pages: false }).changed, true);
+  assert.deepEqual(pageNumbers(off), [undefined, undefined, undefined, undefined]);
+  const none = await createRunHarness(sixHeadings());
+  delete none.host.__EASYOFFICE_DOC_PAGES__;
+  assert.equal(toc(none).applyToc(none.editor, 3, null, { pages: true }).changed, true);
+  assert.deepEqual(pageNumbers(none), [undefined, undefined, undefined, undefined]);
+  const inactive = await createRunHarness(sixHeadings());
+  fakePages(inactive, { active: false });
+  assert.equal(toc(inactive).applyToc(inactive.editor, 3, null, { pages: true }).changed, true);
+  assert.deepEqual(pageNumbers(inactive), [undefined, undefined, undefined, undefined]);
+});
+
+test("updating measures the pages again with the block's own settings, and a stable layout changes nothing", async () => {
+  const h = await createRunHarness(sixHeadings());
+  fakePages(h);
+  toc(h).applyToc(h.editor, 3, null, { pages: true, dots: false });
+  const before = pageNumbers(h);
+  toc(h).updateToc(h.editor);
+  assert.deepEqual(pageNumbers(h), before, "idempotent");
+  assert.ok(entries(h).slice(1).every((e) => e.dataset.eoTocDots === "false"), "the fill stays blank");
+  for (let i = 0; i < 4; i += 1) h.editor.insertBefore(Object.assign(h.document.createElement("p"), { textContent: "더" }), h.editor.childNodes[1]);
+  toc(h).updateToc(h.editor);
+  assert.notDeepEqual(pageNumbers(h), before, "the pages moved");
+  assert.deepEqual(pageNumbers(h), fakePages(h) && h.host.__EASYOFFICE_DOC_PAGES__.headingPages().map((x) => String(x.page)));
+});
+
+test("the dialog has 쪽 번호 넣기 (on) and 채울 모양 (점선, off while the numbers are off) and passes them to the command", async () => {
+  const h = await createWorkspaceHarness();
+  switchModule(h.document, "DOC");
+  await flushAsyncTurns(10);
+  const editor = byId(h, "doc-editor");
+  editor.replaceChildren();
+  for (const [level, text] of [[1, "개요"], [2, "배경"]]) editor.appendChild(Object.assign(h.document.createElement("h" + level), { textContent: text }));
+  const api = fakePages({ editor, host: h.host });
+  h.userClick(commandItem(h.document, "doc-mod-toc"));
+  await flushAsyncTurns(10);
+  const dialog = byId(h, "doc-toc-dialog");
+  assert.equal(byId(h, "doc-toc-pages").checked, true);
+  assert.equal(byId(h, "doc-toc-fill").value, "dot");
+  assert.deepEqual(Array.from(byId(h, "doc-toc-fill").querySelectorAll("option"), (o) => o.textContent), ["점선", "없음"]);
+  assert.deepEqual(Array.from(dialog.querySelectorAll(".dialog-label, .dialog-checkbox"), (el) => el.textContent.trim()), ["포함할 개요", "쪽 번호 넣기", "채울 모양"]);
+  byId(h, "doc-toc-pages").checked = false;
+  byId(h, "doc-toc-pages").dispatchEvent({ type: "change", target: byId(h, "doc-toc-pages") });
+  assert.equal(byId(h, "doc-toc-fill").disabled, true);
+  byId(h, "doc-toc-pages").checked = true;
+  byId(h, "doc-toc-pages").dispatchEvent({ type: "change", target: byId(h, "doc-toc-pages") });
+  assert.equal(byId(h, "doc-toc-fill").disabled, false);
+  byId(h, "doc-toc-fill").value = "none";
+  byId(h, "btn-doc-toc-apply").click();
+  await flushAsyncTurns(10);
+  assert.ok(api.passes >= 1);
+  const nav = editor.querySelector("nav.eo-doc-toc");
+  assert.deepEqual(Array.from(nav.querySelectorAll("p[data-eo-toc-page]"), (e) => e.dataset.eoTocDots), ["false", "false"]);
+  // Open again: the dialog shows what the block has.
+  h.userClick(commandItem(h.document, "doc-mod-toc"));
+  await flushAsyncTurns(10);
+  assert.equal(byId(h, "doc-toc-pages").checked, true);
+  assert.equal(byId(h, "doc-toc-fill").value, "none");
+});
+
+test("the save payload carries each entry's page and fill, and a file with them opens with the numbers and keeps them on update", async () => {
+  const h = await createRunHarness(sixHeadings());
+  fakePages(h);
+  toc(h).applyToc(h.editor, 2, null, { pages: true, dots: true });
+  const blocks = h.host.__EASYOFFICE_SAVE_PAYLOAD__.collectDocBlocks(h.editor);
+  const entryBlocks = blocks.filter((b) => b.toc > 0);
+  assert.deepEqual(entryBlocks.map((b) => [b.runs[0].text, b.tocPage, b.tocDots]), [["가", 2, true], ["나", 2, true], ["다", 3, true]]);
+  assert.equal(blocks[0].tocPage, undefined, "the title has no page");
+  assert.equal(blocks.at(-1).tocPage, undefined);
+
+  const opened = await createWorkspaceHarness();
+  await flushAsyncTurns(10);
+  await pickFile(opened.document, makeFixtureFile("목차.docx", { blocks }));
+  const editor = byId(opened, "doc-editor");
+  const shown = Array.from(editor.querySelectorAll("nav.eo-doc-toc p[data-eo-toc-page]"), (e) => [e.textContent, e.dataset.eoTocPage, e.dataset.eoTocDots]);
+  assert.deepEqual(shown, [["가", "2", "true"], ["나", "2", "true"], ["다", "3", "true"]]);
+  assert.deepEqual(opened.host.__EASYOFFICE_SAVE_PAYLOAD__.collectDocBlocks(editor), blocks);
+  fakePages({ editor, host: opened.host });
+  const res = opened.host.__EASYOFFICE_DOC_TOC__.updateToc(editor);
+  assert.equal(res.toc.dataset.tocPages, "true", "a file keeps no setting: the numbers it shows decide");
+  assert.ok(Array.from(res.toc.querySelectorAll("p[data-eo-toc-page]")).length >= 3);
+});

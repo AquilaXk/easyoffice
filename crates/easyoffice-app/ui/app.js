@@ -118,7 +118,7 @@
 
   docToc = host.__EASYOFFICE_CREATE_DOC_TOC__({
     document, env: host, getRange: () => docRunsUi.currentRange(), withUndo: docRunsUi.withUndo, setFeedback: (text) => setStatusFeedback(text),
-    runCommand: (levels) => ribbonHistory.executeTrackedRibbonCommand("doc-mod-toc", { toc: { levels } }),
+    runCommand: (toc) => ribbonHistory.executeTrackedRibbonCommand("doc-mod-toc", { toc }),
   });
 
   docPages = host.__EASYOFFICE_CREATE_DOC_PAGES__({ document, env: host, withUndo: docRunsUi.withUndo, onChange: () => workspacePanels.renderPageStatus() });

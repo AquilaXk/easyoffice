@@ -333,6 +333,7 @@
         if (cur.ctx.heading) block.heading = cur.ctx.heading;
         if (cur.ctx.toc !== undefined) block.toc = cur.ctx.toc;
         if (cur.ctx.bookmark !== undefined) block.bookmark = cur.ctx.bookmark;
+        if (cur.ctx.tocPage !== undefined) Object.assign(block, { tocPage: cur.ctx.tocPage, tocDots: cur.ctx.tocDots });
         if (cur.ctx.pageBreak) block.pageBreakBefore = true;
         if (cur.ctx.list) block.list = cur.ctx.list;
         blocks.push(block);
@@ -386,6 +387,13 @@
     return node.dataset?.eoToc !== undefined && Number.isInteger(role) ? role : undefined;
   }
 
+  // The page number a table-of-contents entry shows (`doc-toc.js`), within the engine's seven digits.
+  const MAX_TOC_PAGE = 9999999;
+  function tocPage(node) {
+    const page = Number(node.dataset?.eoTocPage);
+    return tocRole(node) > 0 && Number.isInteger(page) && page >= 1 && page <= MAX_TOC_PAGE ? page : undefined;
+  }
+
   function blockContext(node, tag, ctx) {
       const headingMatch = HEADING_TAG_RE.exec(tag);
       const listParent = tag === "LI" ? node.parentElement : null;
@@ -396,6 +404,8 @@
         heading: headingMatch ? Number(headingMatch[1]) : ctx.heading,
         toc: tocRole(node) ?? ctx.toc,
         bookmark: headingMatch ? bookmarkNumber(node.id) : undefined,
+        tocPage: tocPage(node),
+        tocDots: node.dataset?.eoTocDots === "true",
         pageBreak: node.dataset?.eoBreak === "page",
         list: nextList,
         layout: LAYOUT_TAGS.has(tag) ? paragraphLayout(node, baseLineHeight) : ctx.layout,

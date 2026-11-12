@@ -74,11 +74,52 @@
     return p;
   }
 
-  function buildToc(document, headings, title, levels) {
+  const MAX_PAGE_PASSES = 3;
+
+  // The page of every heading from the page layout of the editor (`doc-pages.js`), measured now; `null` when the
+  // layout is off (the manuscript grid) or has no pages, so an entry then shows no number.
+  function pageMap() {
+    const api = host.__EASYOFFICE_DOC_PAGES__;
+    if (!api?.isActive?.()) return null;
+    api.layoutNow();
+    return api.pageCount() < 1 ? null : new Map(api.headingPages().map((h) => [h.el, h.page]));
+  }
+
+  function setEntryPage(p, page, dots) {
+    if (page === undefined) {
+      delete p.dataset.eoTocPage;
+      delete p.dataset.eoTocDots;
+      return;
+    }
+    p.dataset.eoTocPage = String(page);
+    p.dataset.eoTocDots = String(dots);
+  }
+
+  // The block itself can push headings to a later page, so the numbers are measured again with the block in
+  // place until they stop changing (at most MAX_PAGE_PASSES times).
+  function settlePages(toc, headings, dots) {
+    const entries = Array.from(toc.querySelectorAll("p[data-eo-toc]")).slice(1);
+    for (let pass = 0; pass < MAX_PAGE_PASSES; pass += 1) {
+      const pages = pageMap();
+      if (!pages) return;
+      let changed = false;
+      headings.forEach((h, i) => {
+        const page = pages.get(h.el);
+        if (page === (entries[i].dataset.eoTocPage === undefined ? undefined : Number(entries[i].dataset.eoTocPage))) return;
+        setEntryPage(entries[i], page, dots);
+        changed = true;
+      });
+      if (!changed) return;
+    }
+  }
+
+  function buildToc(document, headings, title, levels, options) {
     const nav = document.createElement("nav");
     nav.className = TOC_CLASS;
     nav.dataset.docToc = "true";
     nav.dataset.tocLevels = String(levels);
+    nav.dataset.tocPages = String(options.pages);
+    nav.dataset.tocDots = String(options.dots);
     nav.setAttribute("contenteditable", "false");
     const titleP = tocParagraph(document, TITLE_ROLE);
     titleP.textContent = title;
@@ -89,6 +130,7 @@
       a.setAttribute("href", "#" + h.id);
       a.textContent = h.text;
       p.appendChild(a);
+      if (options.pages) setEntryPage(p, options.pageMap?.get(h.el), options.dots);
       nav.appendChild(p);
     }
     return nav;
@@ -108,6 +150,15 @@
     return normalizeLevels(deepest);
   }
 
+  // The page options of a block: the ones it was made with, else what its entries show (a file opened from
+  // disk keeps no setting).
+  function optionsOf(nav) {
+    const shown = nav.querySelector("p[data-eo-toc-page]");
+    const pages = nav.dataset.tocPages === undefined ? Boolean(shown) : nav.dataset.tocPages === "true";
+    const dots = nav.dataset.tocDots === undefined ? shown?.dataset.eoTocDots !== "false" : nav.dataset.tocDots === "true";
+    return { pages, dots };
+  }
+
   // The block child of `root` that holds the range, or the first child.
   function insertionPoint(root, range) {
     let node = range?.startContainer ?? null;
@@ -117,26 +168,31 @@
 
   // Builds the block for headings 1..`levels` and puts it in place of the existing block, else before the
   // block the caret is in. `{ changed, count, toc }`, or `{ changed: false, error }`.
-  function applyToc(root, levels, range = null) {
+  function applyToc(root, levels, range = null, pageOptions = {}) {
+    const options = { pages: pageOptions.pages === true, dots: pageOptions.dots !== false };
     const shown = normalizeLevels(levels);
     const collected = collectHeadings(root, shown);
     if (collected.error) return { changed: false, error: collected.error };
     const old = existingToc(root);
     assignHeadingIds(root, collected.headings);
-    const toc = buildToc(root.ownerDocument, collected.headings, old ? titleOf(old) : DEFAULT_TITLE, shown);
+    const toc = buildToc(root.ownerDocument, collected.headings, old ? titleOf(old) : DEFAULT_TITLE, shown, {
+      ...options,
+      pageMap: options.pages ? pageMap() : null,
+    });
     if (old) {
       old.parentNode.insertBefore(toc, old);
       old.remove();
     } else {
       root.insertBefore(toc, insertionPoint(root, range));
     }
+    if (options.pages) settlePages(toc, collected.headings, options.dots);
     return { changed: true, count: collected.headings.length, toc };
   }
 
   // Rebuilds the block that is in the document with its own levels.
   function updateToc(root) {
     const old = existingToc(root);
-    return old ? applyToc(root, levelsOf(old)) : { changed: false, error: MSG_NO_TOC };
+    return old ? applyToc(root, levelsOf(old), null, optionsOf(old)) : { changed: false, error: MSG_NO_TOC };
   }
 
   // The heading an entry points at: by the link's id, else (an entry read from a file) the heading of the
@@ -159,7 +215,16 @@
   function createDocToc(deps) {
     const { document, getRange, withUndo, setFeedback, runCommand } = deps;
     const byId = (id) => document.getElementById(id);
-    const ui = () => ({ dialog: byId("doc-toc-dialog"), levels: byId("doc-toc-levels"), status: byId("doc-toc-status"), apply: byId("btn-doc-toc-apply") });
+    const ui = () => ({
+      dialog: byId("doc-toc-dialog"), levels: byId("doc-toc-levels"), pages: byId("doc-toc-pages"), fill: byId("doc-toc-fill"),
+      status: byId("doc-toc-status"), apply: byId("btn-doc-toc-apply"),
+    });
+
+    // 채울 모양 only means something while the page numbers are on.
+    const syncFill = () => {
+      const els = ui();
+      els.fill.disabled = !els.pages.checked;
+    };
 
     function open() {
       const root = byId("doc-editor");
@@ -169,7 +234,11 @@
       }
       const els = ui();
       const old = existingToc(root);
+      const shown = old ? optionsOf(old) : { pages: true, dots: true };
       els.levels.value = String(old ? levelsOf(old) : DEFAULT_LEVELS);
+      els.pages.checked = shown.pages;
+      els.fill.value = shown.dots ? "dot" : "none";
+      syncFill();
       els.status.textContent = "";
       els.dialog.showModal();
       els.levels.focus();
@@ -187,13 +256,13 @@
         return;
       }
       els.dialog.close();
-      void runCommand(levels).catch(() => {});
+      void runCommand({ levels, pages: els.pages.checked, dots: els.fill.value === "dot" }).catch(() => {});
     }
 
     // The command's effect (inside its undo step): the block is made at the caret, the result is on the status line.
-    function applyLevels(levels) {
+    function applyOptions({ levels, pages, dots }) {
       const root = byId("doc-editor");
-      const result = applyToc(root, levels, getRange());
+      const result = applyToc(root, levels, getRange(), { pages, dots });
       setFeedback?.(result.error || DEFAULT_TITLE + " " + result.count + "항목");
       root.focus?.();
       return result;
@@ -227,6 +296,7 @@
       const els = ui();
       if (!els.dialog) return;
       els.apply.addEventListener("click", apply);
+      els.pages.addEventListener("change", syncFill);
       byId("doc-editor")?.addEventListener("click", (ev) => {
         const entry = ev.target.closest?.(TOC_SELECTOR) ? ev.target.closest("p[data-eo-toc]") : null;
         if (!entry || Number(entry.dataset.eoToc) === TITLE_ROLE) return;
@@ -235,7 +305,7 @@
       });
     }
 
-    return { bind, open, update, applyLevels, goTo };
+    return { bind, open, update, applyOptions, goTo };
   }
 
   host.__EASYOFFICE_DOC_TOC__ = { DISPLAY_LEVELS, DEFAULT_LEVELS, MAX_HEADINGS, MAX_TITLE_CHARS, collectHeadings, applyToc, updateToc, headingFor };

@@ -308,6 +308,11 @@
 #doc-editor .eo-doc-toc a:hover { text-decoration: underline; }
 #doc-editor .eo-doc-toc a:focus-visible { outline: 2px solid #0563c1; outline-offset: 2px; }
 @media screen { #doc-editor[data-show-ctrl-marks="true"] .eo-doc-toc { box-shadow: -6px 0 0 -4px rgba(5, 99, 193, 0.25); } }
+/* Page numbers (doc-toc.js): the entry's link takes the row, a dotted fill ends it, and the number is the paragraph's last box. The same rules serve the printed copy, which has no #doc-editor; the control-mark ↵ above must not replace the number. */
+.eo-doc-toc p[data-eo-toc-page] { display: flex; align-items: baseline; }
+.eo-doc-toc p[data-eo-toc-page] a { display: flex; align-items: baseline; flex: 1 1 auto; min-width: 0; }
+.eo-doc-toc p[data-eo-toc-page][data-eo-toc-dots="true"] a::after { content: ""; flex: 1 1 auto; margin: 0 0.3em; border-bottom: 1px dotted currentColor; }
+#doc-editor .eo-doc-toc p[data-eo-toc-page]::after, .eo-doc-toc p[data-eo-toc-page]::after { content: attr(data-eo-toc-page); flex: none; color: inherit; font-size: inherit; }
 #doc-editor .eo-doc-toc p[data-eo-toc="2"] { padding-left: 1.2em; }
 #doc-editor .eo-doc-toc p[data-eo-toc="3"] { padding-left: 2.4em; }
 #doc-editor .eo-doc-toc p[data-eo-toc="4"] { padding-left: 3.6em; }

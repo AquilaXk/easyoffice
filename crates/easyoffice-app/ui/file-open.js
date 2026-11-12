@@ -206,6 +206,10 @@
     const target = TOC_TARGET_RE.exec(block.runs?.find((r) => TOC_TARGET_RE.test(r.link))?.link ?? "")?.[1];
     const p = elSpec("p", block.toc === 0 ? inline : [elSpec("a", inline, {}, { href: target ? "#eo-h-" + target : "#" })]);
     p.data.eoToc = String(block.toc);
+    if (Number.isInteger(block.tocPage) && block.tocPage > 0) {
+      p.data.eoTocPage = String(block.tocPage);
+      p.data.eoTocDots = String(block.tocDots === true);
+    }
     return p;
   }
 
