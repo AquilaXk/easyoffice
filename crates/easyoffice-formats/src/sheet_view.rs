@@ -1,7 +1,7 @@
 //! What a worksheet remembers about how it is shown: the frozen rows and columns, the colour of its
 //! tab and the outline (row and column groups) with the groups the user folded (PD-208).
 //!
-//! 참조 구현: Univer `packages/core/src/sheets/typedef.ts` lines 450-475 (`IFreeze`: `xSplit` and
+//! 참조 구현: Univer `packages/core/src/sheets/typedef.ts` lines 450-468 (`IFreeze`: `xSplit` and
 //! `ySplit` count the frozen columns and rows) and `packages/sheets/src/commands/commands/set-frozen.command.ts`
 //! lines 44-58 (the counts are non-negative integers below the sheet size), `set-tab-color.command.ts`
 //! (the tab colour is one value per sheet that undo restores) and `packages/core/src/types/enum/group-control-toggle-position.ts`

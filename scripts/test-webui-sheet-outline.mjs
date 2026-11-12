@@ -7,7 +7,12 @@ import { loadUiModule } from "./test-support/load-ui-module.mjs";
 // level buttons, which groups a fold command acts on, and the view in the layout store.
 
 const UI = (name) => fileURLToPath(new URL("../crates/easyoffice-app/ui/" + name, import.meta.url));
-const env = { __EASYOFFICE_SHEET_GRID_UTILS__: { refOf: (r, c) => "A" + r + c, parseRef: () => null } };
+const parseRef = (text) => {
+  const m = /^([A-Z]+)(\d+)$/.exec(String(text));
+  return m ? { col: [...m[1]].reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0), row: Number(m[2]) } : null;
+};
+const refOf = (r, c) => String.fromCharCode(64 + c) + r;
+const env = { __EASYOFFICE_SHEET_GRID_UTILS__: { refOf, parseRef } };
 loadUiModule(UI("sheet-layout.js"), env);
 loadUiModule(UI("sheet-outline.js"), env);
 const O = env.__EASYOFFICE_SHEET_OUTLINE__;
@@ -99,4 +104,18 @@ test("the layout keeps folded rows apart from hidden ones and in the undo form",
   assert.equal(L.rowHidden("S", 6), true);
   L.replaceAll({ S: { freeze: { rows: -1, cols: 0 }, tabColor: "red" } });
   assert.equal(L.get("S"), null, "a bad view is dropped");
+});
+
+test("folding never shows the rows a filter or the user hid, and unfolding gives back only the group's rows", () => {
+  L.replaceAll({ S: { hiddenRows: [[9, 9]], filter: { range: "A1:B20", columns: [], hidden: [[10, 12]] } } });
+  const folded = O.fold({ rows: [[8, 14, 1]] }, "row", 15, 15, true).outline;
+  L.setOutline("S", folded);
+  assert.deepEqual([7, 8, 9, 10, 12, 14, 15].map((r) => L.rowHidden("S", r)), [false, true, true, true, true, true, false]);
+  const shown = O.fold(folded, "row", 15, 15, false).outline;
+  L.setOutline("S", shown);
+  // The user's row 9 and the filter's rows 10-12 are still hidden; the other rows of the group are back.
+  assert.deepEqual([7, 8, 9, 10, 12, 13, 14, 15].map((r) => L.rowHidden("S", r)), [false, false, true, true, true, false, false, false]);
+  assert.equal(L.rowsHiddenTotal("S"), 4);
+  assert.deepEqual(L.get("S").hiddenRows, [[9, 9]]);
+  assert.deepEqual(L.get("S").filter.hidden, [[10, 12]]);
 });

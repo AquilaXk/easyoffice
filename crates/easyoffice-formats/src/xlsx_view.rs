@@ -1,8 +1,8 @@
 //! The parts of a worksheet that describe how it is shown (`sheetPr`, `sheetViews`, `sheetFormatPr`)
 //! and the group levels of its rows (`row@outlineLevel`, `row@collapsed`) (PD-208).
 //!
-//! 참조 구현: IronCalc `xlsx/src/import/worksheets.rs` lines 312-335 (`load_sheet_color`, `tabColor`
-//! with `rgb` or `theme` and `tint`), 828-900 (`load_sheet_view`: the `pane` of a frozen sheet,
+//! 참조 구현: IronCalc `xlsx/src/import/worksheets.rs` lines 317-335 (`load_sheet_color`, `tabColor`
+//! with `rgb` or `theme` and `tint`), 800-905 (`load_sheet_view`, `get_split`: the `pane` of a frozen sheet,
 //! `xSplit` and `ySplit` read as numbers because some writers store `6.0`) and
 //! `xlsx/src/export/worksheets.rs` lines 660-725 (`pane` with `topLeftCell`, `activePane` and one
 //! `selection` per pane), Apache-2.0 or MIT, Copyright (c) IronCalc contributors, commit

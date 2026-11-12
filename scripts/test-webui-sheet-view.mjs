@@ -217,3 +217,20 @@ test("the tab colour is picked from the palette at the tab, shown as a line, and
   await history("studio-redo");
   assert.equal(tab.dataset.tabColor, color);
 });
+
+test("sorting keeps the groups and the folded rows where they are, and the folded rows stay in place", async () => {
+  const { document, act, selectRows, layout, userClick } = await open();
+  const cells = ["A2", "A3", "A4"].map((ref) => document.querySelector(`#pane-sheet td[data-cell="${ref}"]`).textContent);
+  selectRows(3, 4);
+  await act("group");
+  await act("hide-detail");
+  const before = JSON.stringify(layout().outlineOf("Sheet1"));
+  assert.equal(layout().rowHidden("Sheet1", 3) && layout().rowHidden("Sheet1", 4), true);
+  userClick(studioItem(document, "sheet-data-sort"));
+  await flushAsyncTurns(20);
+  assert.equal(JSON.stringify(layout().outlineOf("Sheet1")), before);
+  assert.deepEqual(layout().get("Sheet1").hiddenRows, []);
+  await act("show-detail");
+  const after = ["A2", "A3", "A4"].map((ref) => document.querySelector(`#pane-sheet td[data-cell="${ref}"]`)?.textContent);
+  assert.deepEqual(after.slice(1), cells.slice(1), "the folded rows 3 and 4 keep their cells");
+});
