@@ -13,9 +13,8 @@ import { confirmSaveBeforeReplacingDocument } from '@/command/commands/file';
 import { forgetConvertedHmlSaveHandle } from '@/command/save-target';
 import { syncClipMenu, syncTextMarkMenu } from '@/command/commands/view';
 import { loadWebFonts } from '@/core/font-loader';
-import { analyzeDocumentFonts } from '@/core/document-font-status';
 import { setDocumentFontSubstitutions } from '@/core/font-substitution';
-import { getLocalFontState, loadStoredLocalFonts } from '@/core/local-fonts';
+import { loadStoredLocalFonts } from '@/core/local-fonts';
 import { userSettings } from '@/core/user-settings';
 import { resolveZoomFitZoom, type ZoomFitMode } from '@/view/zoom-fit';
 import { CENTER_ZOOM_ANCHOR } from '@/view/zoom-anchor';
@@ -143,7 +142,6 @@ export function createOpenPipeline(deps: OpenPipelineDeps): OpenPipeline {
     try {
       setDocumentFontSubstitutions(docInfo.fontSubstitutions);
       viewState.lastAppliedLocalFontGeneration = null;
-      console.log('[initDoc] 1. 폰트 로딩 시작');
       await updateLoadProgress(55, '폰트 준비 중...');
       if (docInfo.fontsUsed?.length) {
         await loadWebFonts(docInfo.fontsUsed, (loaded, total) => {
@@ -151,7 +149,6 @@ export function createOpenPipeline(deps: OpenPipelineDeps): OpenPipeline {
           msg.textContent = `파일 로딩 ${fontPercent}% - 폰트 로딩 중... (${loaded}/${total})`;
         }, extensionViewerSettings);
       }
-      console.log('[initDoc] 2. 폰트 로딩 완료');
       // 저장 snapshot은 권한 prompt 없이 읽을 수 있다. Canvas2D 첫 paint의 family 해소가
       // 이미 승인된 exact local face를 놓치지 않도록 문서 view보다 먼저 준비한다.
       await loadStoredLocalFonts();
@@ -159,21 +156,16 @@ export function createOpenPipeline(deps: OpenPipelineDeps): OpenPipeline {
       viewState.totalSections = docInfo.sectionCount ?? 1;
       sbSection().textContent = t('ui.sbSection.text', { p1: 1, p2: viewState.totalSections });
       applySavedTextMarkSettings();
-      console.log('[initDoc] 3. inputHandler deactivate');
       getInputHandler()?.deactivate();
-      console.log('[initDoc] 4. canvasView loadDocument');
       await updateLoadProgress(82, '페이지 렌더 준비 중...');
       const savedZoomFitMode = userSettings.getViewSettings().zoomFitMode;
       await getCanvasView()?.loadDocument();
       // 쪽 크기를 알 수 있는 첫 시점이다 — 저장된 맞춤은 이 문서의 쪽으로 다시 계산한다.
       applySavedZoomFitMode(savedZoomFitMode);
-      console.log('[initDoc] 5. toolbar setEnabled');
       await updateLoadProgress(90, '도구 모음 준비 중...');
       getToolbar()?.setEnabled(true);
-      console.log('[initDoc] 6. toolbar initFontDropdown + initStyleDropdown');
       getToolbar()?.initFontDropdown(docInfo.fontsUsed);
       getToolbar()?.initStyleDropdown();
-      console.log('[initDoc] 7. 사전 검증 및 로컬 글꼴 확인');
       await updateLoadProgress(94, '문서 검증 및 글꼴 확인 중...');
 
       // #177: HWPX 비표준 lineseg 감지 (진단 로그).
@@ -181,12 +173,7 @@ export function createOpenPipeline(deps: OpenPipelineDeps): OpenPipeline {
       // 글자가 대량으로 겹치므로, 모달을 띄우지 않고 항상 '그대로 보기'로 연다.
       // reflow 근본 수정 후 모달/자동 보정 재도입을 검토한다.
       try {
-        if (wasm.getSourceFormat() === 'hwpx') {
-          const report = wasm.getValidationWarnings();
-          if (report.count > 0) {
-            console.log(`[validation] ${report.count} warnings — 그대로 보기`, report.summary);
-          }
-        } else if (wasm.getSourceFormat() === 'hml') {
+        if (wasm.getSourceFormat() === 'hml') {
           const metadata = wasm.getHmlOpenMetadata();
           if (metadata) showHmlImportWarning(metadata);
         }
@@ -194,17 +181,11 @@ export function createOpenPipeline(deps: OpenPipelineDeps): OpenPipeline {
         console.warn('[validation] 감지 실패 (치명적이지 않음):', e);
       }
 
-      if (!options.suppressDialogs) {
-        await promptLocalFontsIfNeeded(docInfo, displayName);
-      }
-
       // 로컬 글꼴 감지 결과가 뷰를 갱신한 뒤에 캐럿을 연결해야 입력 포커스가 재설정과 경합하지 않는다.
-      console.log('[initDoc] 8. inputHandler activateWithCaretPosition');
       await updateLoadProgress(96, '편집 상태 초기화 중...');
       getInputHandler()?.activateWithCaretPosition();
       // 최종 단계 뒤에는 비동기 작업이 없으므로 100% progress paint를 기다리지 않는다.
       msg.textContent = displayName;
-      console.log('[initDoc] 9. 완료');
 
       // #2527: 자동 보정을 하지 않으므로 로드 직후 문서는 항상 clean.
       documentState.markClean('document-initialized');
@@ -213,25 +194,6 @@ export function createOpenPipeline(deps: OpenPipelineDeps): OpenPipeline {
       if (window.innerWidth < 768) alert(`초기화 오류: ${error}`);
     }
   }
-
-  async function promptLocalFontsIfNeeded(docInfo: DocumentInfo, displayName: string): Promise<void> {
-    if (!docInfo.fontsUsed?.length) return;
-
-    // 문서를 열 때마다 로컬 글꼴 감지 안내 모달을 띄우면 열람 흐름이 끊긴다. 저장된 감지 결과가
-    // 있으면 그대로 재사용하고, 없으면 대체 글꼴로 조용히 표시한다. 수동 감지는 옵션 대화상자의
-    // '로컬 글꼴 감지하기'로 계속 실행할 수 있다.
-    try {
-      if (!getLocalFontState().loaded) await loadStoredLocalFonts();
-      const report = analyzeDocumentFonts(docInfo.fontsUsed);
-      if (!report.shouldPromptLocalAccess) return;
-      console.log(
-        `[local-fonts] 감지 안내 모달 생략 — 대체 글꼴로 표시 (확인 필요 ${report.summary.needsLocalCheck}개, 문서 ${displayName})`,
-      );
-    } catch (error) {
-      console.warn('[local-fonts] 저장된 감지 결과 로드 실패 (치명적이지 않음):', error);
-    }
-  }
-
 
   /**
    * 문서 열기가 실패하면 빈 쪽 상태로 남는다. WASM이 아직 이전 문서를 쥐고 있으면 그 뷰를

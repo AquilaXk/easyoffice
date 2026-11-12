@@ -245,9 +245,6 @@ function detectOSFonts(fontNames: readonly string[]): void {
   } finally {
     batch?.probe.remove();
   }
-  if (detectedOSFonts.size > 0) {
-    console.log(`[FontLoader] OS 폰트 감지: ${Array.from(detectedOSFonts).join(', ')}`);
-  }
 }
 
 /** 감지된 OS 폰트 목록 (외부 참조용) */
@@ -305,10 +302,6 @@ export async function loadWebFonts(
     ...targetNames.flatMap(name => projectedSubstituteTargets(name).map(target => target.face)),
   ];
   detectOSFonts(detectionNames);
-  const systemFontNames = [...new Set(targetNames.filter(isDetectedOSFont))];
-  if (systemFontNames.length > 0) {
-    console.debug(`[FontLoader][debug] 시스템 글꼴 사용: ${systemFontNames.join(', ')}`);
-  }
 
   // 1) 문서에서 요청한 글꼴과 초기 필수 글꼴만 대상으로 삼는다.
   // 시스템 글꼴이 감지되면 CSS 규칙도 추가하지 않아 원격 face가 이를 덮어쓰지 않는다.
@@ -316,11 +309,6 @@ export async function loadWebFonts(
   const requestedEntries = selectableFontList(options).filter(entry => (
     targetSet.has(normalizeFontFamily(entry.name)) && !isDetectedOSFont(entry.name)
   ));
-  if (requestedEntries.length > 0) {
-    console.debug(
-      `[FontLoader][debug] CDN 후보: ${requestedEntries.map(entry => entry.name).join(', ')}`,
-    );
-  }
   registerFontFaces(requestedEntries, options);
 
   // 2) 같은 파일을 쓰더라도 새 별칭은 FontFace에 별도로 등록한다.
@@ -337,7 +325,6 @@ export async function loadWebFonts(
   if (uniqueToLoad.length === 0) return;
 
   const total = uniqueToLoad.length;
-  console.log(`[FontLoader] 웹폰트 로드 시작: ${total}개 파일 (이미 요청함: ${loadedFiles.size}개)`);
 
   let loaded = 0;
   let failed = 0;
@@ -348,7 +335,6 @@ export async function loadWebFonts(
     await Promise.all(batch.map(async (f) => {
       const entries = entriesByFile.get(f.file) ?? [f];
       const fontNames = entries.map(entry => entry.name).join(', ');
-      console.debug(`[FontLoader][debug] CDN 로드 시작: ${fontNames} <- ${f.file}`);
       try {
         for (const entry of entries) {
           const fmt = entry.format ?? 'woff2';
@@ -362,10 +348,9 @@ export async function loadWebFonts(
         }
         loadedFiles.add(f.file);
         loaded++;
-        console.debug(`[FontLoader][debug] CDN 로드 성공: ${fontNames} <- ${f.file}`);
       } catch (error) {
         failed++;
-        console.debug(`[FontLoader][debug] CDN 로드 실패: ${fontNames} <- ${f.file}`, error);
+        console.warn(`[FontLoader] CDN 로드 실패: ${fontNames} <- ${f.file}`, error);
       }
       onProgress?.(loaded + failed, total);
     }));
@@ -373,6 +358,4 @@ export async function loadWebFonts(
       await new Promise(r => setTimeout(r, 0));
     }
   }
-
-  console.log(`[FontLoader] 폰트 로드 완료: ${loaded}개 성공, ${failed}개 실패 (총 ${loadedFiles.size}개 파일 요청)`);
 }
