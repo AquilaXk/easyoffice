@@ -3096,3 +3096,22 @@
 - **Verified by** `node --test scripts/test-webui-menu-kinds.mjs scripts/test-webui-sheet-native-menu.mjs scripts/test-webui-native-menu.mjs`, `cargo test -p easyoffice-desktop --bin EasyOffice -- native_menu menu_state`.
 - **Revisit when** 시트 메뉴 항목에 선택 영역 조건 회색 처리가 생길 때.
 
+
+## PD-199. 문서 목차: 수준별 계층, 이동 링크, 목차 업데이트, DOCX·ODT 목차 블록
+
+- **Status** Implemented (QA 요청 2026-11-12). `ui/doc-toc.js`, `workspace-panels.js`, `ribbon-history.js`, `save-payload.js`, `file-open.js`, `index.html`; `easyoffice-formats`의 `rich_document.rs`(`RichToc`), `rich_toc_writers.rs`, DOCX·ODT 읽기·쓰기; `convert_structured.rs`, `convert_open.rs`; 네이티브 막대 `native_menu.rs`. PD-192의 이식 범위를 문서 목차로 넓힙니다.
+- **Context** 목차는 편집기의 제목 글자만 모아 번호 목록으로 만들었고 쪽 번호·이동·갱신·저장이 없었습니다. 참조할 오픈소스 오피스 엔진(PD-192)의 목차 명령 로직을 가져옵니다. 참조 앱에는 목차 화면이 없어 대화상자는 `tool-dialog` 틀(`dialogs.css`)을 그대로 씁니다.
+- **Decision (`PD-199`)**
+  1. **목차 블록**: `<nav class="eo-doc-toc">` 안에 제목 문단(`data-eo-toc="0"`)과 항목 문단(`data-eo-toc="1~6"`, 제목 수준)을 둡니다. 항목은 제목으로 가는 `<a href="#eo-h-N">`입니다. 블록은 편집 불가(`contenteditable="false"`)이며 고치려면 다시 만듭니다. 항목은 건너뛴 수준도 자기 수준 그대로 두고(1→3이면 1, 3) 들여쓰기만 수준에 따라 늘어납니다.
+  2. **대화상자**: 입력 메뉴의 "자동 목차 생성"이 대화상자(`표시 수준` 1~3, 기본 3, `확인`, `취소`)를 엽니다. 제목이 없으면 대화상자에 `제목 없음`을 보이고 문서는 그대로입니다. `확인`은 리본 명령(`doc-mod-toc`)을 수준과 함께 실행해 실행 취소 한 단계가 됩니다. 새 블록은 캐럿이 있는 블록 앞에, 이미 블록이 있으면 그 자리에 놓습니다(제목 글자는 유지).
+  3. **목차 업데이트**: 입력 메뉴 항목 `목차 업데이트`(`doc-mod-toc-update`)가 문서 안 블록을 같은 수준으로 다시 만듭니다. 두 번 실행해도 결과가 같고 블록이 늘지 않습니다. 블록이 없으면 `목차 없음`. 수준은 만든 값을 블록이 들고 있고, 파일에서 연 블록은 가장 깊은 항목 수준을 씁니다. 이 항목은 리본 카탈로그(140종)에 넣지 않고 명령 검색에만 올립니다(PD-197 방식).
+  4. **이동**: 항목을 누르면 제목으로 스크롤하고 캐럿을 제목 앞에 둡니다. 제목은 링크의 id로 찾고, 파일에서 연 항목은 id가 없어 같은 수준·글자의 제목을 같은 순번으로 찾습니다. 문서 링크(PD-192)의 저장 주소는 http·https·mailto뿐이라 이동 링크는 저장하지 않습니다.
+  5. **상한(Fail-Closed)**: 제목 5,000개(`MAX_HEADINGS`), 제목 한 줄 500자(`MAX_TITLE_CHARS`). 넘으면 `제목 수 초과`·`제목 길이 초과`를 알리고 블록을 바꾸지 않습니다.
+  6. **저장 형식**: 모델은 `RichParagraph.toc`(`Title` 또는 `Entry(1~9)`)이고 저장 요청·열기 JSON은 `toc` 정수(0은 제목, 1~9는 항목 수준, 10 이상은 요청 거부)입니다. DOCX는 연속한 목차 문단을 `w:sdt`(`docPartGallery` "Table of Contents")로 감싸고 문단 스타일 `TOCHeading`·`TOC1~9`를 씁니다. ODT는 `text:table-of-content`/`text:index-body`로 감싸고 `Contents_20_Heading`·`Contents_20_1~9`를 씁니다. 읽기는 감싸는 요소와 상관없이 스타일 id·이름(`toc N`, `TOC N`, `Contents N`, `TOC Heading`)으로 역할을 알아냅니다. 목차 문단이 없는 문서는 컨테이너도 스타일도 쓰지 않습니다. 쪽 번호 필드(`PAGEREF`)와 `TOC \\o` 필드 지시문은 쓰지 않습니다(레이아웃 엔진이 쪽 계산만 하고 쪽 번호가 없음). HWPX·RTF·Markdown·Pages는 목차 문단을 일반 문단으로 씁니다.
+  7. **네이티브 막대·명령 검색**: `insert:toc-update`("목차 업데이트")를 문서 창의 입력 메뉴 `자동 목차 생성` 다음에 더했고 명령 검색은 문서 창에서 같은 라벨로 올립니다.
+- **재사용 판단 (구현 원칙 3단계)** (1) 목차 로직을 가진 허용 라이선스 라이브러리는 자체 문서 모델·React에 묶여 그대로 쓸 수 없었습니다. (2) `tool-dialog`, 링크 대화상자의 구조(`createDocLink`), 리본 명령 파이프라인(실행 취소), 열기·저장 블록 JSON, DOCX·ODT 문단 스타일 기계를 재사용했습니다. (3) 제목 수집, 수준 범위, 수준별 항목, 제목 글자 유지, 제자리 교체(멱등) 로직을 이식했습니다.
+- **Why** 저장을 스타일 이름 한 곳(`rich_xml.rs`의 `toc_role_from_name`)에 두면 다른 워드프로세서가 만든 목차 문단도 같은 역할로 읽힙니다. 컨테이너와 스타일은 목차가 있을 때만 쓰므로 목차 없는 문서의 출력은 그대로입니다.
+- **Trade-offs** 저장한 블록은 쪽 번호와 이동 링크가 없는 글자 목록이고 갱신 지시문(`TOC` 필드)도 없어 다른 프로그램에서 "필드 업데이트"는 되지 않습니다. 파일에서 연 블록은 표시 수준 설정을 잃고 가장 깊은 항목 수준으로 추정합니다.
+- **Alternatives rejected** 제목이 상한을 넘을 때 잘라서 넣기(입력과 다른 글자를 몰래 저장), 쪽 번호를 추정해 넣기(쪽 계산이 단일 쪽뿐), 항목마다 문서 안 링크를 저장하려고 링크 주소 허용 목록(PD-192)을 넓히기(책갈피 모델 없이는 `#` 주소만 늘어남).
+- **Verified by** `node --test scripts/test-webui-doc-toc.mjs scripts/test-webui-menu-bar.mjs`, `cargo test -p easyoffice-formats --test rich_toc`, `cargo test -p easyoffice-app --lib a_table_of_contents`, `cargo test -p easyoffice-desktop --bin EasyOffice -- native_menu`.
+- **Revisit when** 레이아웃 엔진이 쪽 번호를 계산하거나, 책갈피·문서 안 링크 모델이 생길 때(항목 링크와 `PAGEREF` 저장).
