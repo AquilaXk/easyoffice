@@ -557,11 +557,12 @@ test("sorting from the panel sorts the data rows below the header and applies th
   assert.equal(h.requests.at(-1).op, "apply", "the filter was judged again after the sort");
   assert.deepEqual(layout.filterOf("표").hidden, [[3, 3], [5, 5], [7, 7]], "영업 is now on rows 2, 4 and 6");
   assert.deepEqual([2, 4, 6].map((r) => cell(d, "B" + r).textContent), ["50", "30", "10"], "the visible rows are sorted");
-  // With the filter cleared every row is drawn: the rows moved whole and the header stayed.
+  // With the filter cleared every row is drawn: the visible rows moved whole, the hidden rows
+  // (3, 5 and 7) kept their place and the header stayed.
   await click(h, act(d, "filter-clear"));
   const column = (c) => [2, 3, 4, 5, 6, 7].map((r) => cell(d, c + r).textContent);
-  assert.deepEqual(column("B"), ["50", "40", "30", "20", "10", ""]);
-  assert.deepEqual(column("A"), ["영업", "기획", "영업", "개발", "영업", "개발"], "the rows moved whole");
+  assert.deepEqual(column("B"), ["50", "20", "30", "40", "10", ""]);
+  assert.deepEqual(column("A"), ["영업", "개발", "영업", "기획", "영업", "개발"], "the visible rows moved whole");
   assert.equal(cell(d, "A1").textContent, "부서", "the header row stays");
 });
 

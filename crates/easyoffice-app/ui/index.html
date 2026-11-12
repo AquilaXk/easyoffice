@@ -251,6 +251,7 @@
             <button type="button" class="studio-menu-item menu-title" role="menuitem" aria-haspopup="menu" aria-expanded="false" data-menu-cat="formulasAndData">데이터</button>
             <div class="menu-dropdown" role="menu">
               <div class="md-item" data-studio-menu-cmd="data-sort" role="menuitem" tabindex="-1"><span class="md-label">오름차순·내림차순 정렬</span></div>
+              <div class="md-item" data-sheet-act="sort-dialog" role="menuitem" tabindex="-1"><span class="md-label">정렬…</span></div>
               <div class="md-item" data-studio-menu-cmd="data-validation" role="menuitem" tabindex="-1"><span class="md-label">데이터 유효성 검사</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-sheet-act="filter-toggle" role="menuitemcheckbox" aria-checked="false" tabindex="-1"><span class="md-label">필터</span></div>
@@ -1130,6 +1131,22 @@
       </div>
     </dialog>
 
+    <dialog id="sheet-sort-dialog" class="tool-dialog sheet-rule-dialog" aria-labelledby="sheet-sort-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="sheet-sort-dialog-title">정렬</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-sort-header" type="checkbox" /> 머리글 행 있음</label><label class="dialog-checkbox"><input id="sheet-sort-case" type="checkbox" /> 대소문자 구분</label></div>
+          <div id="sheet-sort-keys" class="sheet-sort-keys"></div>
+          <p id="sheet-sort-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-sheet-sort-apply" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button id="btn-sheet-sort-add" type="button" class="dialog-btn">기준 추가</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
     <dialog id="pii-dialog" class="tool-dialog" aria-labelledby="pii-dialog-title">
       <div class="dialog-wrap">
         <div class="dialog-title"><span id="pii-dialog-title">개인정보 스캔/마스킹</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
@@ -1321,6 +1338,7 @@
     <script src="./sheet-grid.js"></script>
     <script src="./sheet-clipboard.js"></script>
     <script src="./sheet-input.js"></script>
+    <script src="./sheet-sort.js"></script>
     <script src="./sheet-ops.js"></script>
     <script src="./sheet-dialog-kit.js"></script>
     <script src="./sheet-pivot-ui.js"></script>
@@ -1329,6 +1347,7 @@
     <script src="./sheet-numfmt-ui.js"></script>
     <script src="./sheet-filter.js"></script>
     <script src="./sheet-filter-ui.js"></script>
+    <script src="./sheet-sort-ui.js"></script>
     <script src="./sheet-structure.js"></script>
     <script src="./sheet-controller.js"></script>
     <script src="./ribbon-history.js"></script>

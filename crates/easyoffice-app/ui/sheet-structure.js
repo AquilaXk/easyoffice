@@ -59,6 +59,11 @@
       getActiveSheetName,
     });
 
+    const sortUi = host.__EASYOFFICE_CREATE_SHEET_SORT_UI__({
+      ...deps,
+      kit: host.__EASYOFFICE_CREATE_SHEET_DIALOG_KIT__(document),
+    });
+
     function say(text) {
       const fb = document.getElementById("status-command-feedback");
       if (fb) fb.textContent = text;
@@ -274,6 +279,7 @@
       },
       merge,
       unmerge,
+      "sort-dialog": () => Promise.resolve(sortUi.open()),
       "filter-toggle": () => filter.run("filter-toggle"),
       "filter-reapply": () => filter.run("filter-reapply"),
       "filter-clear": () => filter.run("filter-clear"),
@@ -383,6 +389,7 @@
 
     function bind() {
       filterUi.bind();
+      sortUi.bind();
       const viewport = document.getElementById("sheet-viewport");
       viewport?.addEventListener("dblclick", onDblClick);
       viewport?.addEventListener("contextmenu", onContextMenu);

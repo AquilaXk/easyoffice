@@ -482,6 +482,7 @@ const DATA_SHEET: MenuSpec = menu(
     "데이터",
     &[
         "table:sort",
+        "sheet:sort",
         "table:validation",
         S,
         "sheet:filter",

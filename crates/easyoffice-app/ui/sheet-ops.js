@@ -1,15 +1,10 @@
 (function (host) {
   "use strict";
 
-  // Row/column-oriented sheet commands (sort, chart summary)
+  // Row/column-oriented sheet commands (sort range choice, chart summary)
   // operating on the sheet model so they work for rows that are not currently materialized.
-  const { normalizeFormattedNumericCell } = host.__EASYOFFICE_SHEET_UTILS__;
 
-  function numberOf(entry) {
-    const text = normalizeFormattedNumericCell(entry?.value);
-    const n = Number(text);
-    return text !== "" && Number.isFinite(n) ? n : null;
-  }
+  const { numberOf } = host.__EASYOFFICE_SHEET_SORT_CORE__;
 
   // Packs (row << 8) | colCharCode for single-letter columns A..Z (0 when invalid).
   function packSingleColRef(ref) {
@@ -70,9 +65,15 @@
       updateSheetSelectionAndAggregates,
       recalculateActiveSheetFormulas,
       getRange,
-      shiftFormula,
+      call,
       hasCellContent,
     } = api;
+    const sorter = host.__EASYOFFICE_CREATE_SHEET_SORT__({
+      gridUtils,
+      call,
+      layoutApi: host.__EASYOFFICE_SHEET_LAYOUT__,
+      cloneStyle: cloneStyleWithoutFreeze,
+    });
 
     // Highest row/column that holds content (0 when the sheet is empty).
     function usedExtent(map) {
@@ -115,77 +116,39 @@
       return { r1: 2, r2, c1: 1, c2: used.maxCol, keyCol };
     }
 
-    function sortKeyOf(entry) {
-      const text = String(entry?.value ?? "").trim();
-      return { empty: text === "", num: numberOf(entry), text };
-    }
-
-    // Numbers before text, text by locale order; blank keys always last.
-    function compareSortKeys(a, b, dir) {
-      if (a.empty || b.empty) return Number(a.empty) - Number(b.empty);
-      let cmp;
-      if (a.num !== null && b.num !== null) cmp = a.num - b.num;
-      else if (a.num !== null) cmp = -1;
-      else if (b.num !== null) cmp = 1;
-      else cmp = a.text.localeCompare(b.text, "ko");
-      return dir * cmp;
-    }
-
-    // `target` `{ range: { r1, r2, c1, c2, keyCol }, direction: 1 | -1 }` sorts that block in that
-    // direction (the auto filter's sort); without it the selection or data range is sorted and a
-    // sorted one is reversed. Resolves to whether rows were sorted.
-    function sortActiveSheetRange(target) {
+    // `target` is `{ range: { r1, r2, c1, c2, keyCol }, direction: 1 | -1 }` (the auto filter's
+    // sort of one column), or `{ range, keys: [{ col, asc }], hasHeader, caseSensitive }` (the sort
+    // dialog). Without a target the selection or data range is sorted by its key column, and one
+    // that is already ascending is reversed. Resolves to whether rows changed place.
+    async function sortActiveSheetRange(target) {
       const curSheet = getActiveSheetName();
       const map = snapshotDomSheetCells();
       sheetDataStore[curSheet] = map;
       const range = target?.range ?? sortRange(map, usedExtent(map));
-      if (range.r2 <= range.r1) return Promise.resolve(false);
-      // A merged range cannot be sorted: its rows are not interchangeable.
-      if (host.__EASYOFFICE_SHEET_LAYOUT__?.mergesIn(curSheet, range.r1, range.c1, range.r2, range.c2).length > 0) {
+      if (range.r2 <= range.r1) return false;
+      const spec = {
+        range,
+        keys: target?.keys ?? [{ col: range.keyCol, asc: (target?.direction ?? 1) === 1 }],
+        hasHeader: Boolean(target?.hasHeader),
+        caseSensitive: Boolean(target?.caseSensitive),
+      };
+      let result = await sorter.run(curSheet, map, spec);
+      if (result.ok && result.moved === 0 && !target) {
+        spec.keys = [{ col: range.keyCol, asc: false }];
+        result = await sorter.run(curSheet, map, spec);
+      }
+      if (!result.ok) {
         const fb = document.getElementById("status-command-feedback");
-        if (fb) fb.textContent = "병합된 셀이 있어 정렬할 수 없음";
-        return Promise.resolve(false);
+        if (fb) fb.textContent = host.__EASYOFFICE_SHEET_SORT_CORE__.FAILURES[result.why];
+        return false;
       }
-      const populatedRows = [];
-      const blankRows = [];
-      for (let r = range.r1; r <= range.r2; r += 1) {
-        const cells = [];
-        let isBlankRow = true;
-        for (let c = range.c1; c <= range.c2; c += 1) {
-          const entry = map[gridUtils.refOf(r, c)];
-          if (hasCellContent(entry)) isBlankRow = false;
-          cells.push(entry);
-        }
-        const row = { origRow: r, key: sortKeyOf(map[gridUtils.refOf(r, range.keyCol)]), cells };
-        (isBlankRow ? blankRows : populatedRows).push(row);
-      }
-      if (populatedRows.length < 2) return Promise.resolve(false);
-      const isAscending = populatedRows.every(
-        (row, i) => i === 0 || compareSortKeys(populatedRows[i - 1].key, row.key, 1) <= 0
-      );
-      const dir = target?.direction ?? (isAscending ? -1 : 1);
-      populatedRows.sort((a, b) => compareSortKeys(a.key, b.key, dir));
-      [...populatedRows, ...blankRows].forEach((item, idx) => {
-        const targetRow = range.r1 + idx;
-        const dRow = targetRow - item.origRow;
-        item.cells.forEach((src, offset) => {
-          const ref = gridUtils.refOf(targetRow, range.c1 + offset);
-          if (!src) {
-            delete map[ref];
-            return;
-          }
-          const moved = { value: src.value, formula: "" };
-          if (src.formula) moved.formula = dRow === 0 ? src.formula : shiftFormula(src.formula, dRow, 0);
-          const style = cloneStyleWithoutFreeze(src.style);
-          if (style) moved.style = style;
-          map[ref] = moved;
-        });
-      });
+      if (result.moved === 0) return false;
       refreshWindowFromModel();
       saveActiveSheetCellsToWorkbook();
       refreshFocusedSheetCellPendingSnapshot();
       updateSheetSelectionAndAggregates(getActiveSheetCellRef() || "A1");
-      return Promise.resolve(recalculateActiveSheetFormulas({ updateFocusedDisplay: true })).then(() => true);
+      await recalculateActiveSheetFormulas({ updateFocusedDisplay: true });
+      return true;
     }
 
     function applySheetChartSummary(execRes) {

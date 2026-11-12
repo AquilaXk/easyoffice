@@ -19,6 +19,7 @@ const PROD_PRE_SCRIPTS = [
 const TEST_SUPPORT_MODULES = [
   "./test-support/offline-formula-ast.js",
   "./test-support/offline-formula-eval.js",
+  "./test-support/offline-sort.js",
   "./test-support/offline-rpc.js",
 ].map((relPath) => ({
   relPath,
@@ -62,6 +63,7 @@ const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/sheet-grid.js",
   "../crates/easyoffice-app/ui/sheet-clipboard.js",
   "../crates/easyoffice-app/ui/sheet-input.js",
+  "../crates/easyoffice-app/ui/sheet-sort.js",
   "../crates/easyoffice-app/ui/sheet-ops.js",
   "../crates/easyoffice-app/ui/sheet-dialog-kit.js",
   "../crates/easyoffice-app/ui/sheet-pivot-ui.js",
@@ -70,6 +72,7 @@ const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/sheet-numfmt-ui.js",
   "../crates/easyoffice-app/ui/sheet-filter.js",
   "../crates/easyoffice-app/ui/sheet-filter-ui.js",
+  "../crates/easyoffice-app/ui/sheet-sort-ui.js",
   "../crates/easyoffice-app/ui/sheet-structure.js",
   "../crates/easyoffice-app/ui/sheet-controller.js",
   "../crates/easyoffice-app/ui/ribbon-history.js",

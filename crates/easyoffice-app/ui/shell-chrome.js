@@ -130,6 +130,7 @@
     "sheet:unhide": "sheet-act:unhide",
     "sheet:merge": "sheet-act:merge",
     "sheet:unmerge": "sheet-act:unmerge",
+    "sheet:sort": "sheet-act:sort-dialog",
     "sheet:filter": "sheet-act:filter-toggle",
     "sheet:filter-reapply": "sheet-act:filter-reapply",
     "sheet:filter-clear": "sheet-act:filter-clear",

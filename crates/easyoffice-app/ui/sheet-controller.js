@@ -819,7 +819,7 @@
       updateSheetSelectionAndAggregates,
       recalculateActiveSheetFormulas,
       getRange: () => input.getRange(),
-      shiftFormula: input.shiftFormula,
+      call: sheetStoreHelpers.callSheetAction,
       hasCellContent,
     });
 

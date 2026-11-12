@@ -503,6 +503,7 @@ pub const ITEMS: &[MenuItemSpec] = &[
     item("sheet:unhide", "숨기기 취소", None, "sheet-act:unhide"),
     item("sheet:merge", "셀 병합", None, "sheet-act:merge"),
     item("sheet:unmerge", "병합 해제", None, "sheet-act:unmerge"),
+    item("sheet:sort", "정렬…", None, "sheet-act:sort-dialog"),
     item("sheet:filter", "필터", None, "sheet-act:filter-toggle"),
     item(
         "sheet:filter-reapply",

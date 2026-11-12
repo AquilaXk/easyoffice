@@ -369,6 +369,9 @@ fn the_spreadsheet_keeps_sort_filter_style_data_tools_in_data_and_the_frame_in_s
     // The auto filter items sit between the sort and validation group and the pivot group, as
     // on the page.
     let at = |id: &str| data.iter().position(|line| *line == id).unwrap();
+    // The sort dialog follows the quick sort, as on the page.
+    assert!(at("table:sort") + 1 == at("sheet:sort"));
+    assert_eq!(action_for("sheet:sort"), Some("sheet-act:sort-dialog"));
     assert!(at("table:validation") < at("sheet:filter"));
     assert!(at("sheet:filter") + 1 == at("sheet:filter-reapply"));
     assert!(at("sheet:filter-reapply") + 1 == at("sheet:filter-clear"));

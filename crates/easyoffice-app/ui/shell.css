@@ -220,6 +220,13 @@
 .sheet-filter-row[aria-disabled="true"] { color: var(--color-text-disabled); cursor: default; }
 .sheet-filter-foot { display: flex; align-items: center; gap: 8px; padding: 8px 8px 0; }
 .sheet-filter-count { margin-right: auto; color: var(--color-text-muted); font-size: var(--font-size-sm); font-variant-numeric: tabular-nums; }
+/* Sort dialog (sheet-sort-ui.js): the cell format dialog's label column and combo box rules; the column list takes the room and the direction list its text. */
+#sheet-sort-dialog { width: min(480px, calc(100vw - 32px)); overflow: visible; } /* an open list reaches below the short dialog */
+#sheet-sort-dialog .dialog-label { width: 70px; min-width: 70px; flex-shrink: 0; }
+#sheet-sort-dialog .custom-select.dialog-select { flex: 1; min-width: 0; width: auto; }
+#sheet-sort-dialog .custom-select-trigger { grid-template-columns: minmax(0, 1fr) 15px; padding: 0 0 0 4px; }
+#sheet-sort-dialog .custom-select-value { padding-right: 4px; }
+#sheet-sort-dialog .dialog-btn { flex-shrink: 0; }
 #sheet-filter-dialog { width: min(420px, calc(100vw - 32px)); }
 #sheet-filter-dialog .dialog-label { width: 40px; min-width: 40px; flex-shrink: 0; }
 /* The operator combo sizes to its text like the reference's `.dialog-select`, with the cell format dialog's inner padding and arrow cell. */

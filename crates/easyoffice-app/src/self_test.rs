@@ -414,6 +414,14 @@ const WEBUI_ASSET_MARKERS: &[(&str, &str)] = &[
         "__EASYOFFICE_CREATE_SHEET_INPUT__",
     ),
     (
+        include_str!("../ui/sheet-sort.js"),
+        "__EASYOFFICE_CREATE_SHEET_SORT__",
+    ),
+    (
+        include_str!("../ui/sheet-sort-ui.js"),
+        "__EASYOFFICE_CREATE_SHEET_SORT_UI__",
+    ),
+    (
         include_str!("../ui/sheet-ops.js"),
         "__EASYOFFICE_CREATE_SHEET_OPS__",
     ),

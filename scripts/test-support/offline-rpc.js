@@ -600,6 +600,7 @@
     function evaluateLocalSheetRpc(payload) {
       const doc = parseRequiredRpcJsonObject(payload);
       if (doc.sessionAction === "format") return offlineFormatCells(doc);
+      if (doc.sessionAction === "sort") return host.__EASYOFFICE_OFFLINE_SORT__(doc);
       const defaultSheet = resolveDefaultSheetFromDocJs(doc);
       const explicitAnchor = resolveOptionalAnchorCell(doc);
       const anchorCell = explicitAnchor || "A1";
