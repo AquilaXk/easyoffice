@@ -3236,11 +3236,11 @@
 - **Verified by** `node --test scripts/test-webui-doc-table-ops.mjs`(줄·칸 추가와 병합 칸 걸침, 합치기·나누기와 저장 병합 목록, 지우기, 블록 합계, 수식 계산, 실행 취소, Tab, 회색 상태). 병합 저장·열기 왕복은 `cargo test -p easyoffice-formats --test table_merge`(DOCX `w:gridSpan`·`w:vMerge`, ODT `number-columns-spanned`·`number-rows-spanned`, HWPX 칸 span).
 - **Revisit when** 줄·칸 개수 대화상자, 테두리·배경 대화상자, 칸 나누기 대화상자가 필요할 때.
 
-## PD-202. 시트 정렬: 키 최대 64개, 엔진 한 곳의 비교기, 숨긴 행은 제자리, 같은 크기 병합만, 정렬 대화상자
+## PD-203. 시트 정렬: 키 최대 64개, 엔진 한 곳의 비교기, 숨긴 행은 제자리, 같은 크기 병합만, 정렬 대화상자
 
 - **Status** Implemented (QA 요청 2026-11-12). `crates/easyoffice-sheet`의 `sort_keys.rs`·`sheet_sort.rs`·`sort_refs.rs`, `crates/easyoffice-app`의 `sheet_sort_ipc.rs`·`sheet_session.rs`, `ui/sheet-sort.js`·`sheet-sort-ui.js`·`sheet-ops.js`·`sheet-structure.js`·`index.html`·`shell.css`, `crates/easyoffice-desktop`의 `native_menu.rs`(`native_menu/layout.rs`). PD-181의 참조 규칙, PD-192의 이식 범위, PD-198의 필터 숨김 행 위에 만듭니다.
 - **Context** 정렬은 키가 주·보조 두 개였고 비교기가 엔진(`SheetEngine::sort_rows`)과 화면(`sheet-ops.js`)에 따로 있었습니다. 화면 경로가 실제 정렬이었고, 숨긴 행·병합·머리글 행·대소문자를 다루지 못했으며 옮겨진 수식의 모든 상대 참조를 밀었습니다(PD-181과 달랐습니다). 참조 엔진(Apache-2.0, 기준 커밋 `5a06a784`)의 정렬 패키지 규칙을 가져옵니다.
-- **Decision (`PD-202`)**
+- **Decision (`PD-203`)**
   1. **비교**: 키는 최대 64개(`MAX_SORT_KEYS`)이고 열마다 방향이 있습니다. 앞 키가 같을 때만 다음 키를 봅니다. 빈 칸(빈 글자 포함)은 방향과 관계없이 항상 끝입니다. 숫자는 글자보다 앞이고(내림차순은 반대) 글자는 소문자로 바꾸고 `-`와 `'`를 뺀 글자 순서로 비교합니다(코드 포인트 순서, 한글은 음절 순서). 불리언·오류는 보이는 글자로 봅니다. 모든 키가 같은 행은 원래 순서를 지킵니다(안정 정렬). `대소문자 구분`을 켜면 같은 글자는 소문자가 대문자보다 앞입니다(`a`, `A`, `b`, `B`).
   2. **엔진 한 곳**: 비교기는 `sort_keys.rs`뿐입니다. 페이지는 `evaluate_sheet`의 `sessionAction:"sort"`(15종 유지)로 옮길 수 있는 행의 키 열(`null`·숫자·글자)과 옮겨질 수식을 보내고 순서(`order`)와 고친 수식을 받습니다. `SheetEngine::sort_rows`도 같은 비교기를 씁니다. 키 글자는 행마다 한 번 접고(소문자, 기호 제외) 한 덩어리 버퍼에 두며, 비교마다 다시 접지 않습니다.
   3. **움직이는 행**: 사용자가 숨긴 행과 필터가 숨긴 행(PD-198)은 제자리에 두고 보이는 행끼리 자리를 바꿉니다(참조 엔진의 규칙). 이전에는 필터 상태에서도 모든 행이 움직였습니다. `머리글 행 있음`이면 범위의 첫 행을 뺍니다. 처음 열 때의 값은 첫 행에 숫자가 없고 아래 행이 숫자인 열이 있거나, 첫 행이 모두 굵고 아래 행이 아닌 열이 있을 때 켭니다. 글자만 있는 범위는 끕니다.
@@ -3265,18 +3265,18 @@
 - **Verified by** `cargo test -p easyoffice-sheet --lib sort`(비교 규칙, 안정성, 대소문자, 다중 키, 수식 이동, 상한), `cargo test -p easyoffice-app --lib sheet_sort_ipc`(요청·답, 수식 거리, 적대 요청), `node --test scripts/test-webui-sheet-sort.mjs scripts/test-webui-sheet-filter.mjs scripts/test-webui-sheet-rows-sort.mjs scripts/test-webui-sheet-native-menu.mjs`, `cargo test -p easyoffice-desktop --bin EasyOffice -- native_menu`. 실제 화면: 헤드리스 Chrome과 실제 엔진에서 두 테마 전·후 캡처, 키 3개 정렬과 실행 취소.
 - **Revisit when** 기준 순서 바꾸기·색 정렬이 필요할 때, 로케일 정렬이 필요할 때, 병합이 섞인 범위를 정렬해야 할 때.
 
-## PD-203. 데이터 유효성 확인란·다중 선택 목록, 셀 안 목록 메뉴, 조건부 서식 날짜 기간 규칙
+## PD-204. 데이터 유효성 확인란·다중 선택 목록, 셀 안 목록 메뉴, 조건부 서식 날짜 기간 규칙
 
 - **Status** Implemented (QA 요청 2026-11-12). `crates/easyoffice-formats`의 `sheet_rules.rs`(`DvKind::Checkbox`·`ListMultiple`, `CfKind::TimePeriod`)·`xlsx_rules.rs`·`ods_rules.rs`, `crates/easyoffice-sheet`의 `rules/validate.rs`·`rules/period.rs`·`rules/cf.rs`·`rules/axis_shift.rs`, `crates/easyoffice-app`의 `sheet_rules_json.rs`, `ui/sheet-dv-widgets.js`·`sheet-rules.js`·`sheet-rules-ui.js`·`ribbon-history.js`·`index.html`·`shell.css`. PD-171의 규칙 모델과 PD-192의 이식 범위 위에 만듭니다.
 - **Context** 유효성은 정수·소수·목록·날짜·시간·텍스트 길이·사용자 수식뿐이었고, 목록의 셀 안 단추는 선택한 칸 옆에 하나 있었습니다. 조건부 서식에는 날짜 기간 규칙이 없었습니다. 참조 엔진(기준 커밋 `5a06a784`)의 확인란·다중 선택 목록 검증기와 시간 기간 규칙을 가져옵니다.
-- **Decision (`PD-203`)**
+- **Decision (`PD-204`)**
   1. **확인란**: 칸은 선택 값(`a`)과 선택 안 한 값(`b`) 둘 중 하나만 받습니다(빈 입력은 지우기라 허용). 값을 비워 두면 `TRUE`·`FALSE`입니다(참조 엔진은 1·0). 값 비교는 대소문자를 가리지 않고, 두 값이 같으면 대화상자가 거부합니다. 칸은 값 글자 대신 14px 상자를 가운데에 그리며(선택 값이면 강조색으로 채우고 체크 표시 모양), 값이 두 값 중 하나(또는 빈 칸)일 때만 글자를 숨깁니다. 상자를 누르거나 선택한 칸에서 Space를 누르면 반대 값을 쓰며 실행 취소 한 단계입니다.
   2. **다중 선택 목록**: 칸은 쉼표로 나눈 항목들을 담고 모든 항목이 목록에 있어야 합니다(빈 조각은 무시, 대소문자 구분). 목록은 항목 글자(`a,b,c`)나 `=범위`입니다. 화살표 메뉴는 항목마다 상자를 두고 고른 항목에 표시하며, 고를 때마다 칸을 목록 순서로 다시 쓰고 메뉴를 열어 둡니다.
   3. **셀 안 목록 단추**: 선택한 칸 옆의 18px 단추와 메뉴는 그대로 두고 고쳤습니다. 단추가 숨김일 때도 `display: flex` 때문에 보이던 결함(`hidden`을 덮음)을 고쳤고, 메뉴 글자는 메뉴 항목 크기(12px)로 맞췄습니다. 현재 값을 강조하고, 키보드는 Alt+아래 화살표로 열기, 위·아래 화살표로 이동, Enter로 고르기, Esc로 닫기입니다.
   4. **파일 형식**: XLSX 데이터 유효성 형식(ECMA-376 `type`)에는 확인란과 다중 선택이 없습니다. 둘 다 `type="list"`와 값 목록(`"선택 값,선택 안 한 값"` 또는 항목들)으로 쓰고, 워크시트 끝 `extLst`의 비공개 확장(`urn:easyoffice:sheet-rules`, `eo:dv sqref kind on off`)이 두 종류를 알려 줍니다. 다른 프로그램은 이 확장을 무시하고 목록으로 봅니다. 이 확장이 없으면 일반 목록으로 읽고, 표준에 없는 `type="checkbox"`는 지원하지 않는 규칙으로 셉니다. ODS는 목록 조건(`cell-content-is-in-list`)으로 쓰고 종류는 잃습니다.
   5. **날짜 기간 규칙**: 어제·오늘·내일·지난 7일·지난주·이번 주·다음 주·지난달·이번 달·다음 달(`CfKind::TimePeriod`). 숫자 셀의 정수 부분(시각은 무시)이 기간의 날짜 안에 있으면 맞습니다. 주는 일요일부터 토요일, 지난 7일은 오늘 포함 7일입니다. "오늘"은 쪽이 보내는 로컬 날짜 일련번호(`today`, 규칙 요청마다)이고 보내지 않으면 UTC 날짜입니다(시험에서는 주입). XLSX는 `cfRule type="timePeriod" timePeriod="…"`로 읽고 쓰며 다른 프로그램이 쓰는 수식(`FLOOR(셀,1)=TODAY()` 등)도 함께 씁니다. ODS는 같은 날짜를 판정하는 수식 규칙으로 쓰고 읽으면 수식 규칙입니다.
   6. **실행 취소 결함 수정**: 규칙이 있는 시트에서 실행 취소가 규칙을 되돌릴 때 규칙 변경 알림이 페이지의 옛 셀로 다시 계산해 되돌린 값을 덮어, 셀 값 변경(목록 고르기 등)이 취소되지 않았습니다. 규칙은 조용히 바꾸고 셀 복원 뒤 한 번 알립니다(`replaceAll(..., true)`, `notify()`).
-  7. **화면**: 유효성 대화상자의 `허용`에 `다중 선택 목록`·`확인란`가 있고 확인란은 `선택 값` 한 줄(선택한 값, 선택하지 않은 값)을, 다중 선택 목록은 `목록` 줄을 보입니다. 조건부 서식 대화상자의 `규칙`에 `날짜`가 있고 `기간` 콤보(10종)를 보입니다. 두 대화상자의 콤보는 셀 서식 대화상자의 안쪽 여백과 화살표 칸을 그대로 써서 글자와 화살표가 겹치지 않습니다. 새 색은 없고(`--color-primary`, `--color-border-dark`, `--color-surface`) 설명 문구도 없습니다.
+  7. **화면**: 유효성 대화상자의 `허용`에 `다중 선택 목록`·`확인란`가 있고 확인란은 `선택 값`·`해제 값` 두 줄(칸 안에 기본값 `TRUE`·`FALSE`가 자리 표시 글자로 보임)을, 다중 선택 목록은 `목록` 줄을 보입니다. `목록 화살표 표시`는 목록과 다중 선택 목록에서만 보입니다. 조건부 서식 대화상자의 `규칙`에 `날짜`가 있고 `기간` 콤보(10종)를 보입니다. 두 대화상자의 콤보는 셀 서식 대화상자의 안쪽 여백과 화살표 칸을 그대로 써서 글자와 화살표가 겹치지 않습니다. 새 색은 없고(`--color-primary`, `--color-border-dark`, `--color-surface`) 설명 문구도 없습니다.
 - **재사용 판단 (구현 원칙 3단계)** (1) 유효성·기간 규칙을 주는 유지되는 크레이트는 없었습니다. (2) 규칙 모델·JSON·XLSX·ODS 읽기·쓰기(PD-171), 목록 항목 읽기(`list_items`), 날짜 일련번호 함수(`civil_from_serial`), 셀 안 목록 단추를 재사용했습니다. (3) 확인란·다중 목록 검증과 열 가지 기간의 날짜 범위를 이식했습니다(`THIRD_PARTY_NOTICES.md`).
 - **참조 엔진과 다른 곳** 선택 값 기본이 `TRUE`·`FALSE`입니다. 값을 대소문자 무시로 비교합니다. 기간은 밀리초 시각이 아니라 날짜 일련번호로 판정하고 주 시작은 일요일로 고정합니다. XLSX 확장과 ODS 변환은 이 저장소의 것입니다.
 - **Trade-offs** 확인란·다중 선택 목록의 종류는 XLSX 확장이 있는 파일(이 앱이 저장한 파일)에서만 돌아오고 다른 프로그램이 다시 저장하면 일반 목록이 됩니다. ODS는 저장하면 종류를 잃습니다. 자정을 넘겨 열어 둔 문서는 규칙을 다시 보낼 때(규칙 편집, 시트 전환)까지 어제 날짜로 판정합니다. 확인란 칸은 글자를 숨기므로 값이 두 값 밖이면 글자와 빈 상자가 함께 보입니다.

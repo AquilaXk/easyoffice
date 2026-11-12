@@ -6,7 +6,7 @@ import { loadUiModule } from "./test-support/load-ui-module.mjs";
 import { makeFixtureFile, pickFile } from "./test-support/fixture-files.mjs";
 import { switchModule } from "./test-support/modules.mjs";
 
-// The check box cell and the multiple list (PD-203): the values a click writes, how the cells
+// The check box cell and the multiple list (PD-204): the values a click writes, how the cells
 // paint, the arrow menu with chosen items, and the dates the rules count from.
 
 const UI = (name) => fileURLToPath(new URL("../crates/easyoffice-app/ui/" + name, import.meta.url));

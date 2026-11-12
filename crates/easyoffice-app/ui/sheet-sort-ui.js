@@ -1,7 +1,7 @@
 (function (host) {
   "use strict";
 
-  // The sort dialog (PD-202): the range, one row per sort key (column and direction), the header
+  // The sort dialog (PD-203): the range, one row per sort key (column and direction), the header
   // row and case options. The sort itself is `sheet-sort.js` (through `sortRange` of the sheet
   // operations); this file reads and fills the static markup of `#sheet-sort-dialog`.
 

@@ -578,7 +578,7 @@
         rule.a = val("sheet-dv-on").trim();
         rule.b = val("sheet-dv-off").trim();
         rule.op = "between";
-        if (rule.a && rule.a.toLowerCase() === rule.b.toLowerCase()) return { error: "선택한 값과 선택하지 않은 값이 같음" };
+        if (rule.a && rule.a.toLowerCase() === rule.b.toLowerCase()) return { error: "선택 값과 해제 값이 같음" };
       } else if (!rule.a) {
         return { error: "값을 입력하세요." };
       } else if ((rule.op === "between" || rule.op === "notBetween") && t !== "custom" && !rule.b) {
@@ -685,7 +685,7 @@
       return checkEntry(sheet, ref, text);
     }
 
-    // The arrow and menu of lists and the check box cells (PD-203).
+    // The arrow and menu of lists and the check box cells (PD-204).
     const widgets = host.__EASYOFFICE_CREATE_SHEET_DV_WIDGETS__({ document, rules, getActiveSheetName, applyCellEdits });
     widgets.bind();
 

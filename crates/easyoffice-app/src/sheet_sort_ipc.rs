@@ -1,4 +1,4 @@
-//! Row sort request (PD-202): `evaluate_sheet` with `sessionAction:"sort"`. The command set stays
+//! Row sort request (PD-203): `evaluate_sheet` with `sessionAction:"sort"`. The command set stays
 //! at 15.
 //!
 //! The page sends the key columns of the rows it may move: `keys: [{asc, values: [..]}]`, one

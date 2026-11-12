@@ -528,9 +528,9 @@ const DV_VISIBLE = {
   date: ["조건", "값"],
   time: ["조건", "값"],
   textLength: ["조건", "값"],
-  list: ["목록"],
-  listMultiple: ["목록"],
-  checkbox: ["선택 값"],
+  list: ["목록", "목록 화살표 표시"],
+  listMultiple: ["목록", "목록 화살표 표시"],
+  checkbox: ["선택 값", "해제 값"],
   custom: ["값"],
 };
 
@@ -538,7 +538,7 @@ function shownKinds(document, dialogId) {
   const out = [];
   for (const el of document.getElementById(dialogId).querySelectorAll("[data-cf-kinds]")) {
     if (el.hidden) continue;
-    out.push(el.querySelector?.(".dialog-label")?.textContent || el.id);
+    out.push(el.querySelector?.(".dialog-label")?.textContent || el.textContent.trim() || el.id);
   }
   return out;
 }

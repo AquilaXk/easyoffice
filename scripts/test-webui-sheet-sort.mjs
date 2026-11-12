@@ -8,7 +8,7 @@ import { makeFixtureFile, pickFile } from "./test-support/fixture-files.mjs";
 import { switchModule } from "./test-support/modules.mjs";
 import { fakeSortEngine } from "./test-support/fake-sort-engine.mjs";
 
-// The sheet sort (PD-202): which merges a sort accepts, which rows may move, how the keys go to
+// The sheet sort (PD-203): which merges a sort accepts, which rows may move, how the keys go to
 // the engine, how the cells follow the answer, the header guess and the dialog with its undo step.
 
 const UI = (name) => fileURLToPath(new URL("../crates/easyoffice-app/ui/" + name, import.meta.url));

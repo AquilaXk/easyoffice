@@ -1,7 +1,7 @@
 (function (host) {
   "use strict";
 
-  // Sheet sort (PD-202). The page picks the rows that may move and sends the key columns to the
+  // Sheet sort (PD-203). The page picks the rows that may move and sends the key columns to the
   // engine (`sessionAction: "sort"`), which answers the stable row order and the rewritten
   // formulas; the page then moves the cells. The rules follow the reference sheet sort package
   // (`packages/sheets-sort`, Apache-2.0, see THIRD_PARTY_NOTICES.md): rows hidden by the user or by
