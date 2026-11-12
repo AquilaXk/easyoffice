@@ -355,6 +355,22 @@ fn the_spreadsheet_keeps_sort_filter_style_data_tools_in_data_and_the_frame_in_s
     ] {
         assert!(data.contains(&id), "{id}");
     }
+    // The auto filter items sit between the sort and validation group and the pivot group, as
+    // on the page.
+    let at = |id: &str| data.iter().position(|line| *line == id).unwrap();
+    assert!(at("table:validation") < at("sheet:filter"));
+    assert!(at("sheet:filter") + 1 == at("sheet:filter-reapply"));
+    assert!(at("sheet:filter-reapply") + 1 == at("sheet:filter-clear"));
+    assert!(at("sheet:filter-clear") < at("table:sheet-pivot"));
+    for id in ["sheet:filter", "sheet:filter-reapply", "sheet:filter-clear"] {
+        assert!(
+            action_for(id).unwrap().starts_with("sheet-act:filter-"),
+            "{id}"
+        );
+        for kind in [MenuKind::Doc, MenuKind::Hwp, MenuKind::Slide, MenuKind::Pdf] {
+            assert!(!layout::table_ids(kind).contains(&id), "{kind:?} {id}");
+        }
+    }
     assert!(lines_of(MenuKind::Sheet, "시트").contains(&"table:sheet-freeze"));
     let insert = lines_of(MenuKind::Sheet, "삽입");
     assert!(insert.contains(&"table:fn-browser") && insert.contains(&"table:autosum"));

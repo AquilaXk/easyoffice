@@ -25,10 +25,10 @@ const open = async () => {
   return harness;
 };
 
-test("the table holds the 11 number-format items and the 10 row, column, hide and merge items", () => {
+test("the table holds the 11 number-format items and the 13 row, column, hide, merge and filter items", () => {
   const items = sheetItems();
   assert.equal(items.filter((i) => i.name === "sheet-numfmt").length, 11);
-  assert.equal(items.filter((i) => i.name === "sheet-act").length, 10);
+  assert.equal(items.filter((i) => i.name === "sheet-act").length, 13);
 });
 
 test("each native item clicks the page's menu item that carries its label", async () => {

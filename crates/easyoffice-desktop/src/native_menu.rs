@@ -466,6 +466,19 @@ pub const ITEMS: &[MenuItemSpec] = &[
     item("sheet:unhide", "숨기기 취소", None, "sheet-act:unhide"),
     item("sheet:merge", "셀 병합", None, "sheet-act:merge"),
     item("sheet:unmerge", "병합 해제", None, "sheet-act:unmerge"),
+    item("sheet:filter", "필터", None, "sheet-act:filter-toggle"),
+    item(
+        "sheet:filter-reapply",
+        "다시 적용",
+        None,
+        "sheet-act:filter-reapply",
+    ),
+    item(
+        "sheet:filter-clear",
+        "필터 지우기",
+        None,
+        "sheet-act:filter-clear",
+    ),
     item(
         "tool:diagnose",
         "문장 진단 및 요약",
