@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
-import { switchModule, studioItem, commandItem } from "./test-support/modules.mjs";
+import { switchModule, studioItem, commandItem, putCaretInFirstTable } from "./test-support/modules.mjs";
+import { createSelection } from "./test-support/doc-run-harness.mjs";
 import { addDemoTable, demoHtml, openDemoDeck, typeDemoSheet2 } from "./test-support/demo-fixtures.mjs";
 
 function makeF2AnchoredOfflineRpc(sandbox) {
@@ -276,7 +277,8 @@ test("focus-retaining ribbon and theme clicks refresh focused cell pendingSnapsh
 });
 
 test("DOC vs HWP and Slide 1 vs Slide 2 layout commands derive state from target DOM SSOT independently", async () => {
-  const { document, userClick } = await createWorkspaceHarness();
+  const selection = createSelection();
+  const { document, userClick } = await createWorkspaceHarness({ selection });
   const docEditor = document.getElementById("doc-editor");
 
   await flushAsyncTurns();
@@ -322,6 +324,7 @@ test("DOC vs HWP and Slide 1 vs Slide 2 layout commands derive state from target
 
   await flushAsyncTurns();
   const hwpTable = docEditor.querySelector("#doc-table");
+  putCaretInFirstTable(document, selection);
   userClick(commandItem(document, "hwp-mod-border"));
   await flushAsyncTurns();
   assert.equal(hwpTable.style.borderStyle, "double");

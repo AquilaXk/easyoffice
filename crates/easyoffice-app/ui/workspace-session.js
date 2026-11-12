@@ -568,6 +568,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
         const on = studioCommandApplies(item.dataset.studioMenuCmd, commandModule);
         item.setAttribute("aria-disabled", on ? "false" : "true");
       }
+      deps.onMenuItemsApplied?.();
       if (typeof deps.onMenuContext === "function") deps.onMenuContext(commandModule);
       const agg = document.getElementById("status-sheet-agg");
       if (agg) agg.hidden = mod !== "SHEET";

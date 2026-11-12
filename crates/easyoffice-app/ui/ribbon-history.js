@@ -67,6 +67,7 @@
       getDocRuns,
       getDocLink,
       getDocToc,
+      getDocTable,
       getDocPages,
       getActiveModule,
       getHwpHost,
@@ -425,8 +426,10 @@
       docEditor.style.padding = cyclePreset(PAGE_PADDINGS, docEditor.style.padding);
     }
 
+    // 이중선 테두리: the table the caret is in.
     function docEffectBorder({ docEditor }) {
-      const tableEl = docEditor.querySelector("#doc-table") || document.getElementById("doc-table");
+      const range = getDocRuns().currentRange();
+      const tableEl = range ? host.__EASYOFFICE_DOC_TABLE_GRID__.tableAt(docEditor, range.startContainer) : null;
       if (!tableEl) return;
       tableEl.style.borderStyle = tableEl.style.borderStyle !== "double" ? "double" : "";
     }
@@ -498,7 +501,7 @@
       "doc-mod-mailmerge": docEffectModuleSpecific,
       "hwp-mod-header": docEffectModuleSpecific,
       "hwp-mod-field": docEffectModuleSpecific,
-      "doc-mod-tableformula": () => getWorkspacePanels().computeDocTableSummary(),
+      "doc-mod-tableformula": () => getDocTable().recalculate(),
     };
     const DOC_SUFFIX_EFFECTS = {
       "-home-style": docEffectHomeStyle,
@@ -513,7 +516,7 @@
       "-data-fn-browser": docEffectInsertNote,
       "-review-comment": docEffectInsertNote,
       "-insert-table": docEffectInsertTable,
-      "-data-autosum": () => getWorkspacePanels().computeDocTableSummary(),
+      "-data-autosum": () => getDocTable().autoSum(),
       "-data-sort": docEffectSort,
     };
 

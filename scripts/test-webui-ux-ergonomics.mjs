@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
-import { switchModule, commandItem } from "./test-support/modules.mjs";
+import { switchModule, commandItem, putCaretInFirstTable } from "./test-support/modules.mjs";
 import { addDemoHeading, demoHtml, openDemoDeck, openDemoWorkbook } from "./test-support/demo-fixtures.mjs";
 
 test("design tokens, ARIA tab roles, zoom controls, split compare pane, and format filters stay synchronized", async () => {
@@ -513,6 +513,7 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   await flushAsyncTurns();
   const docTableBody = document.getElementById("doc-table-body");
   const initialRowCount = docTableBody.querySelectorAll("tr").length;
+  putCaretInFirstTable(document, docSelection);
   userClick(document.querySelector('[data-studio-menu-cmd="table-add-row"]'));
   await flushAsyncTurns();
   assert.equal(docTableBody.querySelectorAll("tr").length, initialRowCount + 1);

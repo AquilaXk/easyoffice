@@ -91,7 +91,7 @@ test("the presentation has 슬라이드 and 슬라이드 쇼 menus and the PDF h
 test("the document window keeps its menus and the Hangul window's fallback editor adds its own items", async () => {
   const doc = await open("DOC");
   await flushAsyncTurns(10);
-  assert.deepEqual(commandsOf(doc.document, "표"), ["insert-table", "table-add-row", "table-merge", "table-sum", "doc-mod-tableformula", "data-autosum", "data-fn-browser", "data-sort", "data-validation"]);
+  assert.deepEqual(commandsOf(doc.document, "표"), ["insert-table", "table-row-above", "table-add-row", "table-col-left", "table-col-right", "table-row-delete", "table-col-delete", "table-split", "table-merge", "table-sum", "doc-mod-tableformula", "data-autosum", "data-fn-browser", "data-sort", "data-validation"]);
   const hwp = await open("HWP");
   await flushAsyncTurns(10);
   assert.ok(commandsOf(hwp.document, "입력").includes("hwp-mod-field"));

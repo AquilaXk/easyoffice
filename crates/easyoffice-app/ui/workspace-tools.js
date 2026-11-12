@@ -10,7 +10,6 @@
     palette: "btn-command-palette",
     "zoom-in": "btn-zoom-in", "zoom-out": "btn-zoom-out", "zoom-fit-page": "btn-zoom-fit-page", "zoom-fit-width": "btn-zoom-fit-width",
     "ctrl-marks": "btn-toggle-ctrl-marks", "para-marks": "btn-toggle-para-marks", "doc-grid": "btn-toggle-doc-grid",
-    "table-add-row": "btn-doc-add-row", "table-merge": "btn-doc-merge-toggle", "table-sum": "btn-doc-eval-table",
     "smart-diagnose": "btn-smart-diagnose", "scrub-pii": "btn-scrub-pii", "security-audit": "btn-run-security-audit", "view-theme": "btn-theme-toggle",
   };
   // Menu command -> tool dialog (PD-098 step 3b); the action buttons keep their ids.
@@ -81,6 +80,7 @@
       runStudioClipboardCommand,
       insertTextAtSelection,
       getDocRuns,
+      getDocTable,
       getWindowBridge,
       getFileOpen,
       getPdfRotationDeg,
@@ -709,6 +709,7 @@
       if (TOOL_DIALOGS[cmd]) openToolDialog(TOOL_DIALOGS[cmd]);
       const direct = STUDIO_DIRECT_ACTIONS[cmd];
       if (direct) return void studioActions[direct]?.();
+      if (getDocTable().handles(cmd)) return void getDocTable().run(cmd);
       const redirectId = STUDIO_QUICK_REDIRECT[cmd];
       if (redirectId) return void document.getElementById(redirectId)?.click();
       if (TOOL_DIALOGS[cmd]) return;

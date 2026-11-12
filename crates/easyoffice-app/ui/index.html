@@ -226,8 +226,17 @@
             <button type="button" class="studio-menu-item menu-title" role="menuitem" aria-haspopup="menu" aria-expanded="false" data-menu-cat="formulasAndData">표</button>
             <div class="menu-dropdown" role="menu">
               <div class="md-item" data-studio-menu-cmd="insert-table" role="menuitem" tabindex="-1"><span class="md-label">표 만들기</span></div>
+              <div class="md-sep"></div>
+              <div class="md-item" data-studio-menu-cmd="table-row-above" role="menuitem" tabindex="-1"><span class="md-label">위쪽에 줄 추가하기</span></div>
               <div class="md-item" data-studio-menu-cmd="table-add-row" role="menuitem" tabindex="-1"><span class="md-label">아래쪽에 줄 추가하기</span></div>
+              <div class="md-item" data-studio-menu-cmd="table-col-left" role="menuitem" tabindex="-1"><span class="md-label">왼쪽에 칸 추가하기</span></div>
+              <div class="md-item" data-studio-menu-cmd="table-col-right" role="menuitem" tabindex="-1"><span class="md-label">오른쪽에 칸 추가하기</span></div>
+              <div class="md-item" data-studio-menu-cmd="table-row-delete" role="menuitem" tabindex="-1"><span class="md-label">줄 지우기</span></div>
+              <div class="md-item" data-studio-menu-cmd="table-col-delete" role="menuitem" tabindex="-1"><span class="md-label">칸 지우기</span></div>
+              <div class="md-sep"></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="table-split" role="menuitem" tabindex="-1"><span class="md-label">셀 나누기</span></div>
               <div class="md-item" data-studio-menu-cmd="table-merge" role="menuitem" tabindex="-1"><span class="md-label">셀 합치기</span></div>
+              <div class="md-sep"></div>
               <div class="md-item" data-studio-menu-cmd="table-sum" role="menuitem" tabindex="-1"><span class="md-label">블록 합계</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="doc-mod-tableformula" role="menuitem" tabindex="-1"><span class="md-label">표 셀 수식 계산</span></div>
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="hwp-mod-border" role="menuitem" tabindex="-1"><span class="md-label">이중선·대각선 테두리</span></div>
@@ -1288,6 +1297,7 @@
     <script src="./doc-runs-ui.js"></script>
     <script src="./doc-link.js"></script>
     <script src="./doc-toc.js"></script>
+    <script src="./doc-table-grid.js"></script>
     <script src="./doc-table.js"></script>
     <script src="./doc-pages-core.js"></script>
     <script src="./doc-pages.js"></script>

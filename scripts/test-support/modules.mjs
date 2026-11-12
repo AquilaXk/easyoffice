@@ -44,3 +44,18 @@ export function commandItem(document, commandId) {
   const items = document.querySelectorAll(".md-item[data-studio-menu-cmd]");
   return items.find((el) => catalog.resolveMenuCommand(el.dataset.studioMenuCmd, mod) === commandId) || null;
 }
+
+/** Puts the caret in the first cell of the first table of the document editor (the table menu's items need one), making a table when there is none. */
+export function putCaretInFirstTable(document, selection) {
+  const editor = document.getElementById("doc-editor");
+  if (!editor.querySelector("td, th")) {
+    const table = document.createElement("table");
+    const body = table.appendChild(document.createElement("tbody"));
+    body.appendChild(document.createElement("tr")).appendChild(document.createElement("td"));
+    editor.appendChild(table);
+  }
+  const cell = editor.querySelector("td, th");
+  selection.addRange({ startContainer: cell, startOffset: 0, endContainer: cell, endOffset: 0, collapsed: true });
+  document.querySelector('.menu-item[data-menu="table"]').dispatchEvent({ type: "mouseenter" });
+  return cell;
+}

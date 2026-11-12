@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { createWebUiDom, createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { readText } from "./test-support/read-text.mjs";
+import { createSelection } from "./test-support/doc-run-harness.mjs";
+import { putCaretInFirstTable } from "./test-support/modules.mjs";
 
 // Menu bar (PD-098, step 3a): rhwp-studio markup and behaviour. The menu row follows the window kind (PD-190):
 // every ribbon command of a module is reachable from a menu item of its window, except the few that kind has
@@ -24,7 +26,9 @@ async function openModule(mod) {
     localRibbonState: cat.createDefaultRibbonState(),
   });
   const executed = [];
+  const selection = createSelection();
   const harness = await createWorkspaceHarness({
+    selection,
     search: `?module=${mod}&win=w-menu-${mod}`,
     testIpc: async (command, payload) => {
       if (command === "execute_ribbon_command") {
@@ -38,6 +42,8 @@ async function openModule(mod) {
     },
   });
   await flushAsyncTurns(20);
+  // The table menu's items work on the table the caret is in.
+  if (mod === "DOC" || mod === "HWP") putCaretInFirstTable(harness.document, selection);
   return { ...harness, executed, catalog: harness.sandbox.__EASYOFFICE_RIBBON_CATALOG__ };
 }
 

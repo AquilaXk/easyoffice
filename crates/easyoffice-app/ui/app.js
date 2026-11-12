@@ -35,7 +35,7 @@
 
   const sheetRowCounts = {};
   let workspaceSession = null;
-  let docRunsUi = null, docLink = null, docToc = null, docPages = null, hwpHost = null, hwpSession = null, windowBridge = null;
+  let docRunsUi = null, docLink = null, docToc = null, docTable = null, docPages = null, hwpHost = null, hwpSession = null, windowBridge = null;
   const icons = host.__EASYOFFICE_ICONS__;
 
   function chainWorkspaceQueue(opFn) {
@@ -92,7 +92,7 @@
     document, invokeIpc, docTabStore, sheetDataStore, sheetRowCounts, slideDeckState,
     localRibbonState, ribbonCatalog, sheetStoreHelpers, extractEditableDocumentText,
     getSheetController: () => sheetController,
-    getWorkspacePanels: () => workspacePanels, getDocRuns: () => docRunsUi, getDocLink: () => docLink, getDocToc: () => docToc, getDocPages: () => docPages,
+    getWorkspacePanels: () => workspacePanels, getDocRuns: () => docRunsUi, getDocLink: () => docLink, getDocToc: () => docToc, getDocTable: () => docTable, getDocPages: () => docPages,
     getActiveModule: () => activeModule, getHwpHost: () => hwpHost,
     getWindowBridge: () => windowBridge,
     setActiveModule: (next) => { activeModule = next; },
@@ -120,7 +120,7 @@
     document, env: host, getRange: () => docRunsUi.currentRange(), withUndo: docRunsUi.withUndo, setFeedback: (text) => setStatusFeedback(text),
     runCommand: (toc) => ribbonHistory.executeTrackedRibbonCommand("doc-mod-toc", { toc }),
   });
-
+  docTable = host.__EASYOFFICE_CREATE_DOC_TABLE__({ document, env: host, getRange: () => docRunsUi.currentRange(), withUndo: docRunsUi.withUndo, setFeedback: (text) => setStatusFeedback(text) });
   docPages = host.__EASYOFFICE_CREATE_DOC_PAGES__({ document, env: host, withUndo: docRunsUi.withUndo, onChange: () => workspacePanels.renderPageStatus() });
 
   sheetController = host.__EASYOFFICE_CREATE_SHEET_CONTROLLER__({
@@ -139,7 +139,7 @@
 
   workspacePanels = host.__EASYOFFICE_CREATE_WORKSPACE_PANELS__({
     document, URL, invokeIpc, docTabStore, sheetDataStore, slideDeckState, localRibbonState,
-    getDocRuns: () => docRunsUi, getDocPages: () => docPages, defaultHwpEditorNodes: DEFAULT_HWP_EDITOR_NODES, createEmptySlideStyleFields,
+    getDocRuns: () => docRunsUi, getDocTable: () => docTable, getDocPages: () => docPages, defaultHwpEditorNodes: DEFAULT_HWP_EDITOR_NODES, createEmptySlideStyleFields,
     parseCellRefParts, isExcludedDocChromeElement, extractEditableDocumentText,
     collectActiveScrubGroups, applyScrubResultsToGroups,
     scrubSheetStoreMap: sheetStoreHelpers.scrubSheetStoreMap, sheetController,
@@ -170,7 +170,7 @@
     getDocumentId: () => windowBridge.launch.windowId,
     onDirtyChange: (unsaved) => windowBridge.setDirty(unsaved),
     isDesktopShell: () => desktopBridge.isAvailable(),
-    onMenuContext: (commandModule) => shellChrome.pushMenuState(commandModule),
+    onMenuContext: (commandModule) => shellChrome.pushMenuState(commandModule), onMenuItemsApplied: () => docTable.syncMenu(),
   });
 
   slideStudio = host.__EASYOFFICE_CREATE_SLIDE_STUDIO__({
@@ -945,7 +945,7 @@
     setupDocTableAndSheetTabHandlers();
     docRunsUi.bind();
     docLink.bind();
-    docToc.bind();
+    docToc.bind(); docTable.bind();
     docPages.attach(document.getElementById("doc-editor"));
     setupSheetAndConverterHandlers();
     setupSlideAndPdfHandlers();
