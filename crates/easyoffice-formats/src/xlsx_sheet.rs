@@ -14,9 +14,11 @@ use std::collections::HashMap;
 
 use crate::decode_budget::DecodeBudget;
 use crate::rtf_xml_helpers::{format_col_letters, parse_a1_zero_based};
+use crate::sheet_styling::sheet_view::{Outline, MAX_OUTLINE_ROWS};
 use crate::sheet_styling::xlsx_filter::FilterScan;
 use crate::sheet_styling::xlsx_layout::{add_run, has_room, parse_merge};
 use crate::sheet_styling::xlsx_styles::xlsx_width_to_px;
+use crate::sheet_styling::xlsx_view::{level_attr, push_level, ThemeTab, ViewScan, LAST_COL};
 use crate::sheet_styling::{CellStyle, SheetStyling, MAX_STYLED_CELLS};
 use crate::xml_stream::{unescape_cow, Attrs, XmlEvent, XmlReader};
 use crate::{EasyOfficeError, OoxmlCodec};
@@ -101,6 +103,8 @@ pub(crate) fn read_shared_strings(xml: &str) -> Result<SharedStrings, EasyOffice
 pub(crate) struct WorksheetScan {
     pub(crate) cells: Vec<(u32, u32, String)>,
     pub(crate) styling: SheetStyling,
+    /// A tab colour that names a theme slot; the workbook's theme turns it into RGB.
+    pub(crate) tab_theme: Option<ThemeTab>,
 }
 
 /// Which part of a `c` element the text events belong to.
@@ -203,6 +207,11 @@ struct SheetScanner<'s> {
     row: u32,
     next_row: u32,
     next_col: u32,
+    /// Rows and columns put in groups so far, and the rows and columns that carry `collapsed`.
+    outline_rows: u64,
+    outline_cols: u64,
+    marks_rows: Vec<u32>,
+    marks_cols: Vec<u32>,
 }
 
 impl<'s> SheetScanner<'s> {
@@ -224,7 +233,26 @@ impl<'s> SheetScanner<'s> {
         if self.want_styling && has_room(&self.styling) && attrs_flag(attrs, "hidden") {
             add_run(&mut self.styling.hidden_rows, self.row, self.row);
         }
+        if self.want_styling {
+            self.record_row_group(attrs);
+        }
         Ok(())
+    }
+
+    /// The group level and the `collapsed` mark of the open `row`.
+    fn record_row_group(&mut self, attrs: &Attrs<'_>) {
+        let at = (self.row, self.row);
+        let rows = &mut self.styling.outline.rows;
+        push_level(
+            rows,
+            &mut self.outline_rows,
+            MAX_OUTLINE_ROWS,
+            at,
+            level_attr(attrs),
+        );
+        if attrs_flag(attrs, "collapsed") && (self.marks_rows.len() as u64) < MAX_OUTLINE_ROWS {
+            self.marks_rows.push(self.row);
+        }
     }
 
     /// Opens a `c` element; only a cell with content is read, styling also covers empty ones.
@@ -275,6 +303,36 @@ impl<'s> SheetScanner<'s> {
         }))
     }
 
+    /// Takes the view of the sheet and tells the rows and columns a folded group hid from the ones
+    /// the user hid.
+    fn finish_view(&mut self, view: &ViewScan) {
+        if !self.want_styling {
+            return;
+        }
+        let styling = &mut self.styling;
+        styling.freeze = view.freeze;
+        styling.tab_color = view.tab_rgb;
+        let outline = &mut styling.outline;
+        if outline.is_empty() {
+            return;
+        }
+        (outline.summary_above, outline.summary_left) = (view.summary_above, view.summary_left);
+        self.marks_rows.sort_unstable();
+        self.marks_cols.sort_unstable();
+        outline.collapsed_rows = Outline::split_collapsed(
+            &outline.rows,
+            &mut styling.hidden_rows,
+            &self.marks_rows,
+            outline.summary_above,
+        );
+        outline.collapsed_cols = Outline::split_collapsed(
+            &outline.cols,
+            &mut styling.hidden_cols,
+            &self.marks_cols,
+            outline.summary_left,
+        );
+    }
+
     fn record_style(&mut self, style: Option<&str>, at: (u32, u32)) {
         if self.styling.cells.len() >= MAX_STYLED_CELLS {
             return;
@@ -318,12 +376,22 @@ impl<'s> SheetScanner<'s> {
         let (Some(min), Some(max)) = (parse(min), parse(max)) else {
             return;
         };
-        if min >= 1 && max >= min && attrs_flag(attrs, "hidden") {
-            add_run(
-                &mut self.styling.hidden_cols,
-                min - 1,
-                max.min(OoxmlCodec::MAX_XLSX_COLS) - 1,
+        if min >= 1 && max >= min {
+            let span = (min - 1, (max - 1).min(LAST_COL));
+            if attrs_flag(attrs, "hidden") {
+                add_run(&mut self.styling.hidden_cols, span.0, span.1);
+            }
+            let cols = &mut self.styling.outline.cols;
+            push_level(
+                cols,
+                &mut self.outline_cols,
+                u64::from(LAST_COL) + 1,
+                span,
+                level_attr(attrs),
             );
+            if attrs_flag(attrs, "collapsed") {
+                self.marks_cols.extend(span.0..=span.1);
+            }
         }
         if matches!(custom.as_deref(), None | Some("0" | "false")) {
             return;
@@ -502,13 +570,19 @@ pub(crate) fn scan_worksheet(
         row: 0,
         next_row: 0,
         next_col: 0,
+        outline_rows: 0,
+        outline_cols: 0,
+        marks_rows: Vec::new(),
+        marks_cols: Vec::new(),
     };
     let mut reader = XmlReader::unbounded(sheet_xml);
     let mut cell: Option<CellState<'_>> = None;
     let mut filter = FilterScan::new();
+    let mut view = ViewScan::default();
     while let Some(event) = reader.next_event()? {
         if want_styling {
             filter.feed(&event);
+            view.feed(&event);
         }
         match event {
             XmlEvent::Start {
@@ -544,9 +618,11 @@ pub(crate) fn scan_worksheet(
         }
     }
     scanner.styling.filter = filter.finish();
+    scanner.finish_view(&view);
     Ok(WorksheetScan {
         cells: scanner.cells,
         styling: scanner.styling,
+        tab_theme: view.tab_theme,
     })
 }
 

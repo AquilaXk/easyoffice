@@ -22,6 +22,8 @@ pub(crate) mod sheet_look;
 pub(crate) mod sheet_numfmt;
 #[path = "sheet_rules.rs"]
 pub(crate) mod sheet_rules;
+#[path = "sheet_view.rs"]
+pub(crate) mod sheet_view;
 #[path = "xlsx_filter.rs"]
 pub(crate) mod xlsx_filter;
 #[path = "xlsx_layout.rs"]
@@ -30,6 +32,8 @@ pub(crate) mod xlsx_layout;
 pub(crate) mod xlsx_sheet;
 #[path = "xlsx_styles.rs"]
 pub(crate) mod xlsx_styles;
+#[path = "xlsx_view.rs"]
+pub(crate) mod xlsx_view;
 
 pub use sheet_filter::*;
 pub use sheet_look::{
@@ -37,7 +41,8 @@ pub use sheet_look::{
 };
 pub use sheet_numfmt::*;
 pub use sheet_rules::*;
-pub use xlsx_layout::{normalize_runs, run_total, MAX_HIDDEN_ROWS, MAX_MERGES};
+pub use sheet_view::*;
+pub use xlsx_layout::{intersect_runs, normalize_runs, run_total, MAX_HIDDEN_ROWS, MAX_MERGES};
 
 use crate::{DocumentFormat, EasyOfficeError, OdfCodec, OoxmlCodec};
 
@@ -242,6 +247,12 @@ pub struct SheetStyling {
     pub hidden_cols: Vec<(u32, u32)>,
     /// The auto filter (PD-198). The rows it hides are `filter.hidden`, apart from `hidden_rows`.
     pub filter: Option<SheetFilter>,
+    /// Frozen rows and columns (PD-208).
+    pub freeze: Option<Freeze>,
+    /// Colour of the sheet's tab as `0xRRGGBB` (PD-208).
+    pub tab_color: Option<u32>,
+    /// Row and column groups and the groups the user folded (PD-208).
+    pub outline: Outline,
 }
 
 impl SheetStyling {
@@ -253,11 +264,24 @@ impl SheetStyling {
             && self.hidden_rows.is_empty()
             && self.hidden_cols.is_empty()
             && self.filter.is_none()
+            && self.freeze.is_none()
+            && self.tab_color.is_none()
+            && self.outline.is_empty()
     }
 
-    /// Whether the user or the filter hides `row`.
+    /// Whether the frozen pane, the tab colour and the groups are within the bounds of a sheet that
+    /// has `max_row` rows and `max_col` columns.
+    pub fn view_within_bounds(&self, max_row: u32, max_col: u32) -> bool {
+        self.freeze
+            .is_none_or(|f| Freeze::new(f.rows, f.cols).is_some())
+            && self.tab_color.is_none_or(|rgb| rgb <= 0xFF_FFFF)
+            && self.outline.within_bounds(max_row, max_col)
+    }
+
+    /// Whether the user, a folded group or the filter hides `row`.
     pub fn row_hidden(&self, row: u32) -> bool {
         xlsx_layout::run_contains(&self.hidden_rows, row)
+            || xlsx_layout::run_contains(&self.outline.collapsed_rows, row)
             || self.filter.as_ref().is_some_and(|f| f.hides(row))
     }
 }

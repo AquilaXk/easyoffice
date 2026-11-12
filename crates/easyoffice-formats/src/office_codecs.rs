@@ -4,10 +4,14 @@ pub use crate::rtf_xml_helpers::*;
 use crate::sheet_styling::sheet_rules::xlsx_rules::{
     parse_dxf_styles, parse_worksheet_rules, rules_xml,
 };
+use crate::sheet_styling::sheet_view::{level_at, Outline};
 use crate::sheet_styling::xlsx_filter::autofilter_xml;
 use crate::sheet_styling::xlsx_layout::{layout_cols_xml, merge_cells_xml};
 use crate::sheet_styling::xlsx_sheet::{read_shared_strings, scan_worksheet, SharedStrings};
 use crate::sheet_styling::xlsx_styles::{parse_cell_xf_styles, XfStyles, XlsxStyleTable};
+use crate::sheet_styling::xlsx_view::{
+    apply_tint, sheet_format_pr_xml, sheet_pr_xml, sheet_views_xml, theme_palette, DEFAULT_THEME,
+};
 use crate::sheet_styling::{IdMemo, SheetStyling};
 use crate::{EasyOfficeError, XmlSanitizer, ZipArchiveCodec, ZipSecurityPolicy};
 use std::sync::Arc;
@@ -226,13 +230,32 @@ fn group_cells_by_row<'a>(
             }
         }
         let filtered = st.filter.iter().flat_map(|f| f.hidden.iter());
-        for &(start, end) in st.hidden_rows.iter().chain(filtered) {
+        let hidden = st.hidden_rows.iter().chain(&st.outline.collapsed_rows);
+        for &(start, end) in hidden.chain(filtered) {
             for row in start..=end {
                 rows_map.entry(row).or_default();
             }
         }
+        for &(start, end, _) in &st.outline.rows {
+            for row in start..=end {
+                rows_map.entry(row).or_default();
+            }
+        }
+        for row in summary_rows(st) {
+            rows_map.entry(row).or_default();
+        }
     }
     rows_map
+}
+
+/// The rows that carry `collapsed`: the summary of every group folded as a whole.
+fn summary_rows(styling: &SheetStyling) -> Vec<u32> {
+    let outline = &styling.outline;
+    Outline::summary_marks(
+        &outline.rows,
+        &outline.collapsed_rows,
+        outline.summary_above,
+    )
 }
 
 fn build_sheet_xml(
@@ -250,8 +273,12 @@ fn build_sheet_xml(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?><worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">",
     );
     if let Some(st) = styling {
-        sheet_xml.push_str(&layout_cols_xml(&st.columns, &st.hidden_cols));
+        sheet_xml.push_str(&sheet_pr_xml(st));
+        sheet_xml.push_str(&sheet_views_xml(st.freeze));
+        sheet_xml.push_str(&sheet_format_pr_xml(st));
+        sheet_xml.push_str(&layout_cols_xml(st));
     }
+    let marks = styling.map(summary_rows).unwrap_or_default();
     sheet_xml.push_str("<sheetData>");
     let mut col_buf = [0u8; 4];
     let mut ids = IdMemo::new();
@@ -261,9 +288,19 @@ fn build_sheet_xml(
         let hidden = styling.is_some_and(|st| st.row_hidden(row));
         let _ = write!(
             sheet_xml,
-            "<row r=\"{row_num}\"{}>",
+            "<row r=\"{row_num}\"{}",
             if hidden { " hidden=\"1\"" } else { "" }
         );
+        if let Some(st) = styling {
+            let level = level_at(&st.outline.rows, row);
+            if level > 0 {
+                let _ = write!(sheet_xml, " outlineLevel=\"{level}\"");
+            }
+            if marks.binary_search(&row).is_ok() {
+                sheet_xml.push_str(" collapsed=\"1\"");
+            }
+        }
+        sheet_xml.push('>');
         for (col, raw) in row_cells {
             let col_ref = write_col_letters(&mut col_buf, col as usize);
             let xf = styling.map_or(0, |st| {
@@ -560,6 +597,11 @@ impl OoxmlCodec {
                     "XLSX 병합·숨김 범위가 허용 범위를 초과했습니다.".to_string(),
                 ));
             }
+            if !styling.view_within_bounds(Self::MAX_XLSX_ROWS, Self::MAX_XLSX_COLS) {
+                return Err(EasyOfficeError::ResourceBudgetExceeded(
+                    "XLSX 틀 고정·탭 색·그룹 값이 허용 범위를 초과했습니다.".to_string(),
+                ));
+            }
             if let Some((row, col)) = cell.or(column) {
                 return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
                     "XLSX 서식 좌표({row}, {col})가 ECMA-376 허용 범위({}x{})를 초과했습니다.",
@@ -691,6 +733,12 @@ impl OoxmlCodec {
         } else {
             Vec::new()
         };
+        let theme = with_styling.then(|| {
+            entry_by_path
+                .get("xl/theme/theme1.xml")
+                .and_then(|d| std::str::from_utf8(d).ok())
+                .map_or(DEFAULT_THEME, theme_palette)
+        });
         let mut stylings = Vec::new();
         let mut parsed_sheets = Vec::with_capacity(sheet_specs.len());
         let mut scanned_parts = std::collections::HashSet::new();
@@ -734,6 +782,10 @@ impl OoxmlCodec {
                 // The count belongs to the workbook; one sheet carries it.
                 styling.num_fmts_rejected = if idx == 0 { xf_styles.rejected } else { 0 };
                 styling.rules = parse_worksheet_rules(sheet_xml, &dxf_styles);
+                if let (None, Some(tab), Some(theme)) = (styling.tab_color, scan.tab_theme, &theme)
+                {
+                    styling.tab_color = Some(apply_tint(theme[tab.index], tab.tint));
+                }
                 stylings.push((sheet_name.clone(), styling));
             }
             parsed_sheets.push((sheet_name, scan.cells));
