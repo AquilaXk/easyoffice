@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 
+use crate::code_pages::CodePage;
 use crate::rich_document::normalize_hex_color;
 use crate::rich_rtf_table::{merges_from_marks, CellMarks, HMark, VMark};
 use crate::rich_table::RichTable;
@@ -53,13 +54,8 @@ const NFC_BULLET: i32 = 23;
 const NFC_NONE: i32 = 255;
 /// Code page of the `\'hh` bytes when no `\ansicpgN` says (the engine's Korean default).
 const DEFAULT_CODE_PAGE: u32 = 949;
-/// Windows-1252 characters of 0x80..=0x9F (the rest of the code page is Latin-1).
-const WINDOWS_1252_HIGH: [char; 32] = [
-    '\u{20AC}', '\u{81}', '\u{201A}', '\u{0192}', '\u{201E}', '\u{2026}', '\u{2020}', '\u{2021}',
-    '\u{02C6}', '\u{2030}', '\u{0160}', '\u{2039}', '\u{0152}', '\u{8D}', '\u{017D}', '\u{8F}',
-    '\u{90}', '\u{2018}', '\u{2019}', '\u{201C}', '\u{201D}', '\u{2022}', '\u{2013}', '\u{2014}',
-    '\u{02DC}', '\u{2122}', '\u{0161}', '\u{203A}', '\u{0153}', '\u{9D}', '\u{017E}', '\u{0178}',
-];
+/// `\ansicpgN` is written in the first control words; the raw-byte sniff looks this far.
+const ANSICPG_SNIFF_BYTES: usize = 512;
 
 /// Character state of one RTF group (resolved against the tables when text is emitted).
 #[derive(Clone, Default)]
@@ -116,9 +112,14 @@ struct Reader {
     row_marks: Vec<CellMarks>,
     merges_dropped: usize,
     high_surrogate: Option<u16>,
-    /// `\ansicpgN`: the code page of `\'hh` bytes.
+    /// `\ansicpgN`: the code page of `\'hh` bytes in fonts that name no charset of their own.
     code_page: u32,
-    unsupported_code_page: bool,
+    /// `\fcharsetN` of each font of the font table.
+    font_charsets: HashMap<i32, u8>,
+    /// The first code page number met that has no table (reported once).
+    unsupported_code_page: Option<u32>,
+    /// `\'hh` bytes that no table cell maps (shown as U+FFFD).
+    undecodable_bytes: usize,
     /// `\lsN` -> `\listid` -> number format of the first level.
     list_first_nfc: HashMap<i32, i32>,
     ls_list: HashMap<i32, i32>,
@@ -169,7 +170,9 @@ impl Reader {
             merges_dropped: 0,
             high_surrogate: None,
             code_page: DEFAULT_CODE_PAGE,
-            unsupported_code_page: false,
+            font_charsets: HashMap::new(),
+            unsupported_code_page: None,
+            undecodable_bytes: 0,
             list_first_nfc: HashMap::new(),
             ls_list: HashMap::new(),
             open_list: OpenList::default(),
@@ -400,9 +403,17 @@ impl Reader {
         }
         match self.top().dest {
             Dest::FontTbl => {
-                if word == "f" {
-                    self.font_idx = param.unwrap_or(0);
-                    self.font_name.clear();
+                match word {
+                    "f" => {
+                        self.font_idx = param.unwrap_or(0);
+                        self.font_name.clear();
+                    }
+                    "fcharset" => {
+                        if let Some(charset) = param.and_then(|n| u8::try_from(n).ok()) {
+                            self.font_charsets.insert(self.font_idx, charset);
+                        }
+                    }
+                    _ => {}
                 }
                 return;
             }
@@ -574,24 +585,55 @@ impl Reader {
         }
     }
 
-    /// The character of a `\'hh` byte that is not half of a CP949 pair. Windows-1252 and the
-    /// ASCII range decode; any other code page is reported once and its high bytes become U+FFFD
-    /// (the engine has no table for them, and a guess would show wrong letters).
-    fn single_byte_char(&mut self, byte: u8) -> char {
-        if byte < 0x80 {
-            return char::from(byte);
+    /// The code page of the `\'hh` bytes now: the charset of the current font (`\fcharsetN`,
+    /// the font being defined inside the font table) when it names one, else `\ansicpgN`. The
+    /// error is the code page number that has no table.
+    fn active_code_page(&self) -> Result<CodePage, u32> {
+        let top = &self.stack[self.stack.len() - 1];
+        let font = match top.dest {
+            Dest::FontTbl => self.font_idx,
+            _ => top.chars.font.unwrap_or(self.default_font),
+        };
+        self.font_charsets
+            .get(&font)
+            .and_then(|charset| CodePage::from_rtf_charset(*charset))
+            .map_or_else(
+                || CodePage::from_number(self.code_page).ok_or(self.code_page),
+                Ok,
+            )
+    }
+
+    /// Decodes the `\'hh` byte `lead` (the `\'hh` text is at the start of `rest`) and the `\'hh`
+    /// right after it when the code page's characters have two bytes. Returns the character and
+    /// the bytes of `rest` used. A code page without a table is reported once and its high bytes
+    /// become U+FFFD (a guess would show wrong letters), as does a byte no table cell maps.
+    fn code_page_char(&mut self, lead: u8, rest: &str) -> (char, usize) {
+        const ESCAPE_LEN: usize = 3;
+        if lead < 0x80 {
+            return (char::from(lead), ESCAPE_LEN);
         }
-        match self.code_page {
-            1252 => match byte {
-                0x80..=0x9F => WINDOWS_1252_HIGH[usize::from(byte - 0x80)],
-                _ => char::from(byte),
-            },
-            DEFAULT_CODE_PAGE => char::from(byte),
-            _ => {
-                self.unsupported_code_page = true;
-                '\u{FFFD}'
+        let page = match self.active_code_page() {
+            Ok(page) => page,
+            Err(number) => {
+                self.unsupported_code_page.get_or_insert(number);
+                return ('\u{FFFD}', ESCAPE_LEN);
+            }
+        };
+        if page.is_lead(lead) {
+            let pair = rest
+                .get(ESCAPE_LEN..ESCAPE_LEN + 4)
+                .and_then(|s| s.strip_prefix("\\'"))
+                .and_then(hex_byte)
+                .and_then(|trail| page.decode_pair(lead, trail));
+            if let Some(ch) = pair {
+                return (ch, ESCAPE_LEN + 4);
             }
         }
+        let ch = page.decode_single(lead).unwrap_or_else(|| {
+            self.undecodable_bytes += 1;
+            '\u{FFFD}'
+        });
+        (ch, ESCAPE_LEN)
     }
 
     fn escape_symbol(&mut self, rest: &str) -> usize {
@@ -606,25 +648,14 @@ impl Reader {
             '*' => self.top().dest = Dest::Skip,
             '\n' | '\r' => self.body_word("par", None),
             '\'' => {
-                let hex = rest
+                let lead = rest
                     .get(1..3)
                     .filter(|_| escape_len(rest) == 3)
-                    .and_then(|h| u8::from_str_radix(h, 16).ok());
-                if let Some(b1) = hex {
-                    if self.code_page == DEFAULT_CODE_PAGE {
-                        if let Some(b2) = rest
-                            .get(3..7)
-                            .and_then(|s| s.strip_prefix("\\'"))
-                            .and_then(|h| u8::from_str_radix(h, 16).ok())
-                        {
-                            if let Some(ch) = crate::cp949::decode_cp949_pair(b1, b2) {
-                                self.emit(ch.encode_utf8(&mut buf));
-                                return 7;
-                            }
-                        }
-                    }
-                    let ch = self.single_byte_char(b1);
+                    .and_then(hex_byte);
+                if let Some(lead) = lead {
+                    let (ch, used) = self.code_page_char(lead, rest);
                     self.emit(ch.encode_utf8(&mut buf));
+                    return used;
                 }
             }
             _ => {}
@@ -722,6 +753,34 @@ impl Reader {
     }
 }
 
+/// The byte of two hexadecimal digits (`from_str_radix` alone would take a sign).
+fn hex_byte(digits: &str) -> Option<u8> {
+    let bytes = digits.as_bytes();
+    (bytes.len() == 2 && bytes.iter().all(u8::is_ascii_hexdigit))
+        .then(|| u8::from_str_radix(digits, 16).ok())
+        .flatten()
+}
+
+/// The `\ansicpgN` number near the start of raw RTF bytes.
+fn sniff_ansicpg(bytes: &[u8]) -> Option<u32> {
+    const KEY: &[u8] = b"\\ansicpg";
+    let head = &bytes[..bytes.len().min(ANSICPG_SNIFF_BYTES)];
+    let at = head.windows(KEY.len()).position(|w| w == KEY)? + KEY.len();
+    let mut digits = head[at..].iter().take_while(|b| b.is_ascii_digit());
+    digits.try_fold(0u32, |n, b| {
+        n.checked_mul(10)?.checked_add(u32::from(b - b'0'))
+    })
+}
+
+/// Text of RTF bytes that are not UTF-8: raw 8-bit bytes are in the code page `\ansicpgN` names
+/// when the engine has its table, else in CP949 with a Latin-1 fallback.
+fn decode_raw_bytes(bytes: &[u8]) -> String {
+    match sniff_ansicpg(bytes).and_then(CodePage::from_number) {
+        Some(page) if page != CodePage::Uhc => page.decode_bytes_lossy(bytes),
+        _ => crate::cp949::decode_cp949_or_latin1_bytes(bytes),
+    }
+}
+
 /// Bytes of the control symbol after a backslash: `\'hh` is three, any other symbol its character.
 fn escape_len(after: &str) -> usize {
     match after.as_bytes() {
@@ -755,7 +814,7 @@ fn group_len(rest: &str) -> usize {
 pub(crate) fn read_rtf(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), EasyOfficeError> {
     let text_cow = match std::str::from_utf8(bytes) {
         Ok(s) => std::borrow::Cow::Borrowed(s),
-        Err(_) => std::borrow::Cow::Owned(crate::cp949::decode_cp949_or_latin1_bytes(bytes)),
+        Err(_) => std::borrow::Cow::Owned(decode_raw_bytes(bytes)),
     };
     let mut reader = Reader::new();
     reader.run(text_cow.as_ref())?;
@@ -767,10 +826,15 @@ pub(crate) fn read_rtf(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Easy
         reader.title.trim().to_string()
     };
     let mut warnings = vec!["표 셀 서식·그림·머리말은 가져오지 않았습니다.".to_string()];
-    if reader.unsupported_code_page {
+    if let Some(number) = reader.unsupported_code_page {
         warnings.push(format!(
-            "코드 페이지 {}의 글자는 변환표가 없어 가져오지 못했습니다(\u{FFFD}로 표시).",
-            reader.code_page
+            "코드 페이지 {number}의 글자는 변환표가 없어 가져오지 못했습니다(\u{FFFD}로 표시)."
+        ));
+    }
+    if reader.undecodable_bytes > 0 {
+        warnings.push(format!(
+            "코드 페이지에 없는 바이트 {}개를 \u{FFFD}로 표시했습니다.",
+            reader.undecodable_bytes
         ));
     }
     if reader.merges_dropped > 0 {

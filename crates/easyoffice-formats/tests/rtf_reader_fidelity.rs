@@ -77,12 +77,9 @@ fn code_page_bytes_are_decoded_with_ansicpg() {
 
 #[test]
 fn an_unsupported_code_page_is_reported_not_guessed() {
-    let (paras, warnings) = read("{\\rtf1\\ansi\\ansicpg932 a\\'82\\'a0b}");
+    // 1361 (Johab) has no table.
+    let (paras, warnings) = read("{\\rtf1\\ansi\\ansicpg1361 a\\'82\\'a0b}");
     let shown = text(&paras[0]);
-    assert!(shown.starts_with('a') && shown.ends_with('b'), "{shown}");
-    assert!(
-        !shown.contains('\u{3042}'),
-        "not decoded as a guess: {shown}"
-    );
-    assert!(warnings.iter().any(|w| w.contains("932")), "{warnings:?}");
+    assert_eq!(shown, "a\u{FFFD}\u{FFFD}b");
+    assert!(warnings.iter().any(|w| w.contains("1361")), "{warnings:?}");
 }

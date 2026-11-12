@@ -9117,7 +9117,9 @@ SOFTWARE.
 ### encoding_rs (EUC-KR decoder and index, (Apache-2.0 OR MIT) AND BSD-3-Clause)
 
 Source: https://github.com/hsivonen/encoding_rs (v0.8.44, `src/euc_kr.rs` and the `index-euc-kr` data in `src/data.rs`; code `Apache-2.0 OR MIT`, Copyright Mozilla Foundation, table data BSD-3-Clause from the WHATWG Encoding Standard).
-`crates/easyoffice-formats/src/cp949.rs` follows the structure of its EUC-KR decoder (lead and trail byte ranges, a sorted Hangul offset table with an exact-complement UHC lookup) as independent safe Rust, and `crates/easyoffice-formats/src/cp949_tables.rs` holds the symbol (rows 0xA1..=0xAC) and Hanja (rows 0xCA..=0xFD) cells of the same `index-euc-kr` table, flattened to two `u16` arrays. The crate itself is not linked into the engine crates (PD-053, PD-095). The table data notice:
+`crates/easyoffice-formats/src/cp949.rs` follows the structure of its EUC-KR decoder (lead and trail byte ranges, a sorted Hangul offset table with an exact-complement UHC lookup) as independent safe Rust, and `crates/easyoffice-formats/src/cp949_tables.rs` holds the symbol (rows 0xA1..=0xAC) and Hanja (rows 0xCA..=0xFD) cells of the same `index-euc-kr` table, flattened to two `u16` arrays. The crate itself is not linked into the engine crates (PD-053, PD-095).
+
+`crates/easyoffice-formats/src/code_pages.rs` reads four tables in `crates/easyoffice-formats/src/code_page_data/` (`sbcs.bin`, `sjis.bin`, `gbk.bin`, `big5.bin`): for the single-byte code pages 874 and 1250..=1258 (the `index-windows-*` tables) and, for every lead and trail byte pair of Shift_JIS, GBK and Big5 (the `index-jis0208`, `index-gb18030` and `index-big5` tables), the character that v0.8.44 of the crate returns, written as little-endian `u16` (cells that are unassigned or lie beyond U+FFFF are 0). No code of the crate is copied or linked into the engine crates (PD-053, PD-095); the lookup is independent safe Rust. The table data notice:
 
 ```
 Copyright © WHATWG (Apple, Google, Mozilla, Microsoft).
