@@ -1,4 +1,4 @@
-//! Structure and round-trip checks for the `.doc` / `.ppt` writers (#112).
+//! Structure and round-trip checks for the `.doc` / `.ppt` writers.
 
 use easyoffice_formats::{
     LegacyDocPayload, LegacyOle2Codec, LegacyPptPayload, LegacyPptSlide, Ole2ContainerCodec,

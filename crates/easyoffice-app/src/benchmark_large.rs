@@ -1,4 +1,4 @@
-//! Large-workload suites and the release performance gate (#135). The suites interleave A/B
+//! Large-workload suites and the release performance gate. The suites interleave A/B
 //! rounds (flipping the order each round to cancel cache and clock bias); the gate only enforces
 //! ratios in release builds, and with loose floors so shared CI runners do not flake.
 

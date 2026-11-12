@@ -446,7 +446,7 @@ impl UniversalFormatConverter {
 
     /// Converts between formats. A document source converted to a document target goes through
     /// the rich model, so block order (tables between their paragraphs) and character formatting
-    /// survive (#167); everything else (sheets, slides, or a document into a sheet or deck) uses
+    /// survive; everything else (sheets, slides, or a document into a sheet or deck) uses
     /// the flat model as before.
     pub fn convert(
         bytes: &[u8],

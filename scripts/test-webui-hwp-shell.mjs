@@ -5,7 +5,7 @@ import { loadUiModule } from "./test-support/load-ui-module.mjs";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { readText } from "./test-support/read-text.mjs";
 
-// One window, one menu row, one theme, one status bar (#158): the HWP window hides the shell's menu
+// One window, one menu row, one theme, one status bar: the HWP window hides the shell's menu
 // row and status bar, the editor's 파일 menu is a whitelist of shell commands forwarded over the embed
 // port, the shell theme reaches the editor, and the status bar keeps only what a reader needs.
 

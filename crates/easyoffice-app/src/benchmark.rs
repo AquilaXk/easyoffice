@@ -42,7 +42,7 @@ pub struct EngineBenchmarkReport {
     pub iterations: usize,
     pub all_equivalent: bool,
     pub suites: Vec<BenchmarkSuiteResult>,
-    /// Real-workload cases (#124); empty until `run_real_path_benchmarks` results are attached.
+    /// Real-workload cases; empty until `run_real_path_benchmarks` results are attached.
     pub real_paths: Vec<RealPathResult>,
 }
 

@@ -417,7 +417,7 @@ test("the editor accepts the desktop shell's parent origin on every platform (PD
 
 // ---- print page rules -------------------------------------------------------------------------
 
-test("print styles carry an @page size rule and a page box per page (#173)", async () => {
+test("print styles carry an @page size rule and a page box per page", async () => {
   const { buildPrintPageRules, createPrintPage } = await import("../apps/hwp-studio/src/command/print-pages.ts");
   const A4_PORTRAIT_PX = { width: 793.7, height: 1122.5 };
   const B5_LANDSCAPE_PX = { width: 944.882, height: 665.197 };

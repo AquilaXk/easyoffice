@@ -259,7 +259,7 @@ test("offline AST parser and evaluator enforce lazy IF/IFERROR, strict A1 bounds
   assert.equal(strictCoordAndBudgetRes.targetValues[2], "#REF!");
   assert.equal(strictCoordAndBudgetRes.targetValues[3], "#REF!");
   assert.equal(strictCoordAndBudgetRes.targetValues[4], "777");
-  // Wide in-bounds ranges are valid references; aggregates stream populated cells only (#107).
+  // Wide in-bounds ranges are valid references; aggregates stream populated cells only.
   assert.equal(strictCoordAndBudgetRes.targetValues[5], "0");
   assert.equal(strictCoordAndBudgetRes.targetValues[6], "#REF!");
 

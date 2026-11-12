@@ -1,4 +1,4 @@
-//! `.ppt` (MS-PPT, PowerPoint 97-2003) stream writer (#112).
+//! `.ppt` (MS-PPT, PowerPoint 97-2003) stream writer.
 //!
 //! The document container, environment and main master come from a blank-presentation template
 //! (see `assets/legacy/` and `THIRD_PARTY_NOTICES.md`). The writer adds one slide container per

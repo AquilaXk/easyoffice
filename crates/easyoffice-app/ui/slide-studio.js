@@ -4,8 +4,8 @@
   // Slide studio: deck management (add / duplicate / delete / reorder with undo), live thumbnail
   // list, deck aspect ratio, and the slideshow (full screen with in-window fallback, navigation,
   // black/white screen, presenter view). Every mutation goes through the workspace undo snapshot
-  // and autosave activity hook; the slide model itself stays in `slideDeckState` so save (#104),
-  // open (#111) and autosave keep reading one source of truth.
+  // and autosave activity hook; the slide model itself stays in `slideDeckState` so save,
+  // open and autosave keep reading one source of truth.
   const ASPECTS = new Set(["16:9", "4:3", "A4"]);
   const THUMB_REFRESH_MS = 150;
   const EMPTY_TITLE_LABEL = "(제목 없음)";

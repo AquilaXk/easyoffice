@@ -1,5 +1,5 @@
 //! Behavioural characterization for the slot-indexed memo, 2-bit DFS state, formula column index
-//! and cached recalculation plan (#135). The same assertions hold on the pre-optimization engine,
+//! and cached recalculation plan. The same assertions hold on the pre-optimization engine,
 //! so they pin "semantics identical" rather than the new internals.
 
 use easyoffice_sheet::{

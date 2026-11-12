@@ -1,7 +1,7 @@
 (function (host) {
   "use strict";
 
-  // Shell chrome around the embedded HWP editor (#158). While the editor owns a window it brings its
+  // Shell chrome around the embedded HWP editor. While the editor owns a window it brings its
   // own menu row, theme and status line, so the shell keeps out of the way: the editor's 파일 menu
   // forwards seven whitelisted shell commands (see hwp-host.js), the shell theme (light, dark or system)
   // is pushed into the editor, and shell notices become toasts because the shell status bar is hidden

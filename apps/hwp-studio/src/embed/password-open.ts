@@ -6,7 +6,7 @@ import { showHwpPasswordDialog } from '@/ui/hwp-password-dialog';
 
 /**
  * 사용자가 암호 입력 대화상자에서 취소한 경우다. 일반 파싱 실패와 달리 오류 토스트나
- * 최근 문서·자동저장 변경을 만들지 않는다 (#3474).
+ * 최근 문서·자동저장 변경을 만들지 않는다.
  */
 export class DocumentOpenCancelledError extends Error {
   constructor() {

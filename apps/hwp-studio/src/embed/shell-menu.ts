@@ -1,4 +1,4 @@
-// EasyOffice extension: the editor's 파일 menu is made of shell commands (#158). The shell owns
+// EasyOffice extension: the editor's 파일 menu is made of shell commands. The shell owns
 // documents and windows (new, open, recent, save, save as, print, close), so the editor only forwards the
 // command name over the embed port; the shell re-checks it against its own whitelist. The shell also
 // pushes its theme and a recent-documents list (opaque id + display name, never a path) into the

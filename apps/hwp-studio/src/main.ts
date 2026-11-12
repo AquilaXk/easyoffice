@@ -104,7 +104,7 @@ const iconToolbarScroller = initIconToolbarScroller(document.getElementById('ico
 initStyleToolbarOverflow(document.getElementById('style-bar'));
 
 /**
- * 호스트 저장 완료 통지 (#2660).
+ * 호스트 저장 완료 통지.
  *
  * 호스트가 내보내기 바이트의 영속화(업로드/핸드오프)를 마친 뒤 호출한다.
  * draft 삭제 "완료"까지 await하므로, resolve 이후 팝업을 닫아도 IndexedDB
@@ -147,7 +147,7 @@ const extensionViewerSettings = { disableExternalWebFonts: true } as const;
 // ─── UI chrome 프로파일
 
 
-// ─── UI chrome 프로파일 (#4564) ─────────────────────────────
+// ─── UI chrome 프로파일 ─────────────────────────────
 // 문서 수명주기(열기/저장)를 호스트가 소유하는 임베드 구성용 opt-in 스위치.
 // 파라미터가 없거나 미지원 값이면 full — 기존 표면 그대로다.
 // EasyOffice: this build is embed-only. The host (parent window) owns open/save/new.
@@ -484,7 +484,7 @@ async function initialize(): Promise<void> {
   }
 }
 
-/** 마지막 모달 종료 뒤 활성 편집기의 키보드 진입점을 textarea로 되돌린다 (#3414). */
+/** 마지막 모달 종료 뒤 활성 편집기의 키보드 진입점을 textarea로 되돌린다. */
 function setupModalFocusRestore(): void {
   document.addEventListener(MODAL_DIALOG_CLOSED_EVENT, () => {
     if (inputHandler?.isActive()) inputHandler.focus();
@@ -505,7 +505,7 @@ function setupEventListeners(): void {
         pageInfo = wasm.getPageInfo(pageIdx);
       } catch { /* 무시 */ }
     }
-    // 현재 쪽은 문서가 매기는 쪽번호를 쓴다 — 한글과 같은 규칙이다 (#5749).
+    // 현재 쪽은 문서가 매기는 쪽번호를 쓴다 — 한글과 같은 규칙이다.
     sbPage().textContent = formatPageIndicator({
       pageIndex: pageIdx,
       totalPages: _total as number,

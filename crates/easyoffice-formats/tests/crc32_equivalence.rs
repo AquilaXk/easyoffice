@@ -1,4 +1,4 @@
-//! CRC-32 equivalence fuzzing (#135): every implementation (slicing-by-16, byte-wise baseline,
+//! CRC-32 equivalence fuzzing: every implementation (slicing-by-16, byte-wise baseline,
 //! runtime-detected hardware path, incremental update) must equal the bitwise reference for
 //! random lengths and alignments, driven by a deterministic PRNG.
 

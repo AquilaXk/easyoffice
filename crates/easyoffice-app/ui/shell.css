@@ -31,7 +31,7 @@
 /* The embedded HWP editor brings its own complete toolbar: no second EasyOffice toolbar above it. */
 .app-shell[data-hwp-embed="true"] #icon-toolbar,
 .app-shell[data-hwp-embed="true"] #doc-style-bar,
-/* One window, one menu row, one theme, one status bar (#158): the embedded editor brings its own
+/* One window, one menu row, one theme, one status bar: the embedded editor brings its own
    menu row (its 파일 menu forwards shell commands), follows the shell theme and has its own status
    line, so the shell's menu row, zoom group and status bar give way. Shell notices become toasts. */
 .app-shell[data-hwp-embed="true"] #menu-bar,

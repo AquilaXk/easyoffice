@@ -521,7 +521,7 @@ const DESKTOP_SHELL_PERMISSIONS = new Set(
 );
 
 // Desktop shell guard (PD-074): embedded assets only, the WebUI CSP plus the shell IPC origin,
-// file associations limited to formats the window model opens (#133), and capabilities limited to the
+// file associations limited to formats the window model opens, and capabilities limited to the
 // app commands (no core/shell/fs/http/dialog permissions reach the WebView).
 // Extensions `WindowKind::for_extension` opens (crates/easyoffice-desktop/src/windows.rs).
 const DESKTOP_OPENABLE_EXTENSIONS = [
@@ -554,7 +554,7 @@ if (fs.existsSync(desktopConfigFull)) {
     for (const assoc of Array.isArray(conf.bundle?.fileAssociations) ? conf.bundle.fileAssociations : []) {
       for (const ext of Array.isArray(assoc?.ext) ? assoc.ext : []) {
         if (!openable.has(String(ext).toLowerCase())) {
-          errors.push(`${DESKTOP_SHELL_CONFIG} registers a file association for '.${ext}', which the desktop window model cannot open (#133)`);
+          errors.push(`${DESKTOP_SHELL_CONFIG} registers a file association for '.${ext}', which the desktop window model cannot open`);
         }
       }
     }

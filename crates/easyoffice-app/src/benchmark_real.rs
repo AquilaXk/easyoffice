@@ -1,4 +1,4 @@
-//! Real-workload benchmarks (#124): they time the production conversion, pack/unpack and
+//! Real-workload benchmarks: they time the production conversion, pack/unpack and
 //! recalculation paths (including DEFLATE compression) instead of small synthetic inputs, and
 //! report both elapsed time and output size.
 

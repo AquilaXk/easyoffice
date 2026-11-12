@@ -153,7 +153,7 @@ export function createOpenPipeline(deps: OpenPipelineDeps): OpenPipeline {
       }
       console.log('[initDoc] 2. 폰트 로딩 완료');
       // 저장 snapshot은 권한 prompt 없이 읽을 수 있다. Canvas2D 첫 paint의 family 해소가
-      // 이미 승인된 exact local face를 놓치지 않도록 문서 view보다 먼저 준비한다 (#4739).
+      // 이미 승인된 exact local face를 놓치지 않도록 문서 view보다 먼저 준비한다.
       await loadStoredLocalFonts();
       await updateLoadProgress(75, '문서 상태 적용 중...');
       viewState.totalSections = docInfo.sectionCount ?? 1;
@@ -184,7 +184,7 @@ export function createOpenPipeline(deps: OpenPipelineDeps): OpenPipeline {
         if (wasm.getSourceFormat() === 'hwpx') {
           const report = wasm.getValidationWarnings();
           if (report.count > 0) {
-            console.log(`[validation] ${report.count} warnings — 그대로 보기 (#2527)`, report.summary);
+            console.log(`[validation] ${report.count} warnings — 그대로 보기`, report.summary);
           }
         } else if (wasm.getSourceFormat() === 'hml') {
           const metadata = wasm.getHmlOpenMetadata();
@@ -379,7 +379,7 @@ export function createOpenPipeline(deps: OpenPipelineDeps): OpenPipeline {
 
 
   /**
-   * 파일 로드 실패 시 사용자에게 에러를 명확히 알린다 (#265).
+   * 파일 로드 실패 시 사용자에게 에러를 명확히 알린다.
    *
    * 상태 표시줄은 22px 한 줄로 긴 에러 메시지가 ellipsis 로 잘리므로,
    * 우상단 토스트 (긴 메시지 줄바꿈 지원 · 사용자 닫기 · action 링크) 를

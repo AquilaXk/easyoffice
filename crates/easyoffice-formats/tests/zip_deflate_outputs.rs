@@ -1,5 +1,5 @@
 //! ZIP-based writers must emit DEFLATE entries (except the ones that must stay stored) and the
-//! compressed containers must round-trip through the repo decoders (#124).
+//! compressed containers must round-trip through the repo decoders.
 
 use easyoffice_formats::{
     DocumentFormat, UniversalDocumentModel, UniversalFormatConverter, ZipArchiveCodec,

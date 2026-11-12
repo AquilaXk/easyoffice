@@ -1034,7 +1034,7 @@ test("failed undo-redo and formula-bar IPC keep stacks intact, offline sheet ide
   assert.equal(runData(hB).eoItalic, "true");
 });
 
-test("ribbon IPC sends a per-window session id and the undo target module (#106)", async () => {
+test("ribbon IPC sends a per-window session id and the undo target module", async () => {
   const probe = await createWorkspaceHarness();
   const cat = probe.sandbox.__EASYOFFICE_RIBBON_CATALOG__;
   const sharedBackend = probe.sandbox.__EASYOFFICE_CREATE_OFFLINE_RPC__({

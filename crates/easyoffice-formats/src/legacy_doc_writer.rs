@@ -1,4 +1,4 @@
-//! `.doc` (MS-DOC, Word 97-2003) stream writer (#112).
+//! `.doc` (MS-DOC, Word 97-2003) stream writer.
 //!
 //! The FIB, style sheet, fonts and document properties come from a small blank-document template
 //! (see `assets/legacy/` and `THIRD_PARTY_NOTICES.md`). The writer places the text as UTF-16LE at a

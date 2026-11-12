@@ -1,7 +1,7 @@
 //! Structural validity checks for every container written by `UniversalFormatConverter::encode`.
 //!
 //! Each test unpacks the produced bytes and asserts that the parts and elements required by the
-//! governing specification are present and that non-schema attributes are absent (#105).
+//! governing specification are present and that non-schema attributes are absent.
 
 use easyoffice_formats::{
     CsvCodec, DocumentFormat, OoxmlCodec, OutputCompatibility, PdfDocumentModel, PdfPageModel,

@@ -1,5 +1,5 @@
 //! `UniversalFormatConverter::convert` keeps block order (tables between their paragraphs) and the
-//! paragraph/cell text when a document is converted to another document format (#167), and still
+//! paragraph/cell text when a document is converted to another document format, and still
 //! produces sheet content when a document is converted into a workbook.
 
 use easyoffice_formats::{

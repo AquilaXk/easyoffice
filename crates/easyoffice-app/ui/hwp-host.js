@@ -47,7 +47,7 @@
   const MSG_LOADING = "한글 편집기를 불러오는 중입니다…";
   const MSG_FAILED = "한글 편집기에 연결하지 못했습니다.";
   const SHORTCUT_REASON = "shell_shortcut";
-  // The editor's 파일 menu forwards shell commands by name only (#158); the shell re-checks each one
+  // The editor's 파일 menu forwards shell commands by name only; the shell re-checks each one
   // here before anything runs, so a compromised frame can only ask for these actions.
   const SHELL_COMMAND_REASON = "shell_command";
   const SHELL_COMMANDS = Object.freeze(["new", "open", "recent", "recent-dialog", "save", "save-as", "export-pdf", "print", "close", "about"]);
