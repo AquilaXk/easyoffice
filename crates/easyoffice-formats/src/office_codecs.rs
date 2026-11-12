@@ -702,9 +702,12 @@ impl OoxmlCodec {
     }
 }
 
-pub(crate) fn validate_zip_xml_entries(
+/// The XML entries of a package as `(path, text)`, each UTF-8 checked and scanned for DOCTYPE and
+/// entity declarations once. A reader that takes its parts from here does not check them again.
+pub(crate) fn checked_zip_xml_entries(
     entries: &[crate::ZipArchiveEntry],
-) -> Result<(), EasyOfficeError> {
+) -> Result<Vec<(&str, &str)>, EasyOfficeError> {
+    let mut parts = Vec::new();
     for entry in entries {
         if entry.path.ends_with('/') {
             continue;
@@ -715,9 +718,21 @@ pub(crate) fn validate_zip_xml_entries(
                 EasyOfficeError::InvalidUtf8(format!("ZIP XML 엔트리 UTF-8 오류: {}", entry.path))
             })?;
             XmlSanitizer::validate_safe_xml(xml)?;
+            parts.push((entry.path.as_str(), xml));
         }
     }
-    Ok(())
+    Ok(parts)
+}
+
+pub(crate) fn validate_zip_xml_entries(
+    entries: &[crate::ZipArchiveEntry],
+) -> Result<(), EasyOfficeError> {
+    checked_zip_xml_entries(entries).map(drop)
+}
+
+/// The text of `path` among `parts` from [`checked_zip_xml_entries`].
+pub(crate) fn checked_part<'a>(parts: &[(&str, &'a str)], path: &str) -> Option<&'a str> {
+    parts.iter().find(|(p, _)| *p == path).map(|(_, xml)| *xml)
 }
 
 #[cfg(test)]

@@ -4,7 +4,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 
-use crate::office_codecs::validate_zip_xml_entries;
+use crate::office_codecs::{checked_part, checked_zip_xml_entries};
 use crate::rich_document::normalize_hex_color;
 use crate::rich_image::{safe_package_path, ImageBudget};
 use crate::rich_table::{TableAssembler, MAX_PADDED_COLUMNS};
@@ -594,7 +594,8 @@ impl<'a> OdtWalker<'a> {
 /// Decodes `content.xml` (and `styles.xml`) of an ODT package.
 pub(crate) fn read_odt(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), EasyOfficeError> {
     let entries = ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default())?;
-    validate_zip_xml_entries(&entries)?;
+    // Every XML entry (styles.xml and content.xml included) is checked once, here.
+    let parts = checked_zip_xml_entries(&entries)?;
     let entry_by_path: HashMap<&str, &ZipArchiveEntry> =
         entries.iter().map(|e| (e.path.as_str(), e)).collect();
     if let Some(&m) = entry_by_path.get("mimetype") {
@@ -605,22 +606,16 @@ pub(crate) fn read_odt(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Easy
             });
         }
     }
-    let content = entry_by_path.get("content.xml").copied().ok_or_else(|| {
+    let xml = checked_part(&parts, "content.xml").ok_or_else(|| {
         EasyOfficeError::CorruptedContainer(
             "ODF 필수 엔트리 'content.xml'이 누락되었습니다.".to_string(),
         )
     })?;
     let mut styles: HashMap<String, StyleProps> = HashMap::new();
     let mut list_styles: HashMap<String, RichListKind> = HashMap::new();
-    if let Some(&styles_entry) = entry_by_path.get("styles.xml") {
-        let s_xml = std::str::from_utf8(&styles_entry.data)
-            .map_err(|_| EasyOfficeError::InvalidUtf8("ODF styles.xml UTF-8 오류".to_string()))?;
-        XmlSanitizer::validate_safe_xml(s_xml)?;
+    if let Some(s_xml) = checked_part(&parts, "styles.xml") {
         read_styles_into(s_xml, &mut styles, &mut list_styles)?;
     }
-    let xml = std::str::from_utf8(&content.data)
-        .map_err(|_| EasyOfficeError::InvalidUtf8("ODF content.xml UTF-8 오류".to_string()))?;
-    XmlSanitizer::validate_safe_xml(xml)?;
     read_styles_into(xml, &mut styles, &mut list_styles)?;
     resolve_style_parents(&mut styles);
 

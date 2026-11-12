@@ -16,8 +16,7 @@ use crate::rich_xml::{heading_level_from_name, push_run, CharFmt};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
     EasyOfficeError, HwpxCodec, RichAlignment, RichBlock, RichDocument, RichImage, RichListKind,
-    RichParagraph, RichRun, RichScript, XmlSanitizer, ZipArchiveCodec, ZipArchiveEntry,
-    ZipSecurityPolicy,
+    RichParagraph, RichRun, RichScript, ZipArchiveCodec, ZipArchiveEntry, ZipSecurityPolicy,
 };
 
 /// EMU per HWPUNIT (1/7200 inch).
@@ -730,7 +729,6 @@ pub(crate) fn read_hwpx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Eas
         let xml = std::str::from_utf8(&entry.data).map_err(|_| {
             EasyOfficeError::InvalidUtf8("Contents/section.xml UTF-8 오류".to_string())
         })?;
-        XmlSanitizer::validate_safe_xml(xml)?;
         read_section(
             xml,
             &header,

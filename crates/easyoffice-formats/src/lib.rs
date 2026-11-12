@@ -667,16 +667,45 @@ impl XmlSanitizer {
         (v.wrapping_sub(0x0101_0101_0101_0101) & !v & 0x8080_8080_8080_8080) != 0
     }
 
+    /// First index `>= start` of `target`. Short gaps are scanned a word at a time; after
+    /// 64 bytes without a hit the target is rare, so four words are checked per
+    /// step (one branch for 32 bytes).
     #[inline]
     pub fn find_byte_swar(bytes: &[u8], start: usize, target: u8) -> Option<usize> {
         const LO: u64 = 0x0101_0101_0101_0101;
         const HI: u64 = 0x8080_8080_8080_8080;
+        const SPARSE_AFTER: usize = 64;
+        const WIDE: usize = 32;
         let splat = (target as u64).wrapping_mul(LO);
+        let hits = |word: &[u8]| {
+            let diff = u64::from_le_bytes(word.try_into().unwrap()) ^ splat;
+            diff.wrapping_sub(LO) & !diff & HI
+        };
         let mut idx = start;
+        let dense_end = bytes.len().min(start.saturating_add(SPARSE_AFTER));
+        while idx + 8 <= dense_end {
+            let mask = hits(&bytes[idx..idx + 8]);
+            if mask != 0 {
+                return Some(idx + ((mask.trailing_zeros() >> 3) as usize));
+            }
+            idx += 8;
+        }
+        while idx + WIDE <= bytes.len() {
+            let block = &bytes[idx..idx + WIDE];
+            let masks = [
+                hits(&block[..8]),
+                hits(&block[8..16]),
+                hits(&block[16..24]),
+                hits(&block[24..]),
+            ];
+            if masks[0] | masks[1] | masks[2] | masks[3] != 0 {
+                let lane = masks.iter().position(|&m| m != 0).unwrap_or(0);
+                return Some(idx + lane * 8 + ((masks[lane].trailing_zeros() >> 3) as usize));
+            }
+            idx += WIDE;
+        }
         while idx + 8 <= bytes.len() {
-            let word = u64::from_le_bytes(bytes[idx..idx + 8].try_into().unwrap());
-            let diff = word ^ splat;
-            let mask = diff.wrapping_sub(LO) & !diff & HI;
+            let mask = hits(&bytes[idx..idx + 8]);
             if mask != 0 {
                 return Some(idx + ((mask.trailing_zeros() >> 3) as usize));
             }
@@ -721,24 +750,28 @@ impl XmlSanitizer {
         if bytes.len() < 8 {
             return Ok(());
         }
-        let mut cursor = 0usize;
-        while let Some(lt_idx) = Self::find_byte_swar(bytes, cursor, b'<') {
+        // `<!ENTITY` and `<!DOCTYPE` both contain `!`, which markup text rarely does, so the scan
+        // looks for `!` (a `<` is in nearly every tag) and then checks the byte before it.
+        let mut cursor = 1usize;
+        while let Some(bang) = Self::find_byte_swar(bytes, cursor, b'!') {
+            cursor = bang + 1;
+            let lt_idx = bang - 1;
+            if bytes[lt_idx] != b'<' {
+                continue;
+            }
             if lt_idx + 8 > bytes.len() {
                 break;
             }
-            if bytes[lt_idx + 1] == b'!' {
-                let mut kw = lt_idx + 2;
-                while kw < bytes.len() && bytes[kw].is_ascii_whitespace() {
-                    kw += 1;
-                }
-                if kw + 6 <= bytes.len() && bytes[kw..kw + 6].eq_ignore_ascii_case(b"ENTITY") {
-                    return Err(EasyOfficeError::XxeOrExternalEntityDetected);
-                }
-                if kw + 7 <= bytes.len() && bytes[kw..kw + 7].eq_ignore_ascii_case(b"DOCTYPE") {
-                    return Err(EasyOfficeError::XxeOrExternalEntityDetected);
-                }
+            let mut kw = bang + 1;
+            while kw < bytes.len() && bytes[kw].is_ascii_whitespace() {
+                kw += 1;
             }
-            cursor = lt_idx + 1;
+            if kw + 6 <= bytes.len() && bytes[kw..kw + 6].eq_ignore_ascii_case(b"ENTITY") {
+                return Err(EasyOfficeError::XxeOrExternalEntityDetected);
+            }
+            if kw + 7 <= bytes.len() && bytes[kw..kw + 7].eq_ignore_ascii_case(b"DOCTYPE") {
+                return Err(EasyOfficeError::XxeOrExternalEntityDetected);
+            }
         }
         Ok(())
     }

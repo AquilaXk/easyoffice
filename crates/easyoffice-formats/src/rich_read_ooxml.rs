@@ -6,7 +6,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 
-use crate::office_codecs::validate_zip_xml_entries;
+use crate::office_codecs::{checked_part, checked_zip_xml_entries};
 use crate::rich_document::{highlight_name_to_hex, normalize_hex_color};
 use crate::rich_read_images::{drawing_picture, DocxMedia, DrawingOutcome};
 use crate::rich_read_numbering::{read_numbering, Numbering, LIST_LEVELS};
@@ -15,7 +15,7 @@ use crate::rich_xml::{heading_level_from_name, push_run, toggle_on, CharFmt};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
     EasyOfficeError, RichAlignment, RichBlock, RichDocument, RichImage, RichListKind,
-    RichParagraph, RichScript, XmlSanitizer, ZipArchiveCodec, ZipArchiveEntry, ZipSecurityPolicy,
+    RichParagraph, RichScript, XmlSanitizer, ZipArchiveCodec, ZipSecurityPolicy,
     MAX_IMAGES_PER_DOCUMENT, MAX_TOTAL_IMAGE_BYTES,
 };
 
@@ -49,19 +49,6 @@ struct ParaState {
     left_indent: Option<u32>,
     first_line: Option<i32>,
     line_percent: Option<u16>,
-}
-
-fn entry_xml<'a>(
-    entries: &'a [ZipArchiveEntry],
-    path: &str,
-) -> Result<Option<&'a str>, EasyOfficeError> {
-    let Some(entry) = entries.iter().find(|e| e.path == path) else {
-        return Ok(None);
-    };
-    let xml = std::str::from_utf8(&entry.data)
-        .map_err(|_| EasyOfficeError::InvalidUtf8(format!("{path} UTF-8 오류")))?;
-    XmlSanitizer::validate_safe_xml(xml)?;
-    Ok(Some(xml))
 }
 
 const MAX_STYLE_INHERIT_DEPTH: usize = 16;
@@ -514,21 +501,21 @@ impl DocxWalker {
 /// Decodes `word/document.xml` (plus styles and numbering) of a DOCX package.
 pub(crate) fn read_docx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), EasyOfficeError> {
     let entries = ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default())?;
-    validate_zip_xml_entries(&entries)?;
-    let doc_xml = entry_xml(&entries, "word/document.xml")?.ok_or_else(|| {
+    let parts = checked_zip_xml_entries(&entries)?;
+    let doc_xml = checked_part(&parts, "word/document.xml").ok_or_else(|| {
         EasyOfficeError::CorruptedContainer(
             "DOCX 필수 엔트리 'word/document.xml'이 누락되었습니다.".to_string(),
         )
     })?;
-    let styles = match entry_xml(&entries, "word/styles.xml")? {
+    let styles = match checked_part(&parts, "word/styles.xml") {
         Some(xml) => read_styles(xml)?,
         None => HashMap::new(),
     };
-    let numbering = match entry_xml(&entries, "word/numbering.xml")? {
+    let numbering = match checked_part(&parts, "word/numbering.xml") {
         Some(xml) => read_numbering(xml)?,
         None => Numbering::default(),
     };
-    let title = entry_xml(&entries, "docProps/core.xml")?
+    let title = checked_part(&parts, "docProps/core.xml")
         .and_then(|xml| {
             crate::rtf_xml_helpers::extract_tag_bodies(xml, "dc:title")
                 .into_iter()
