@@ -211,7 +211,7 @@ fn cells_outside_grid(
 }
 
 /// The number format codes a sheet's cells use, in first-use order, with a constant-time lookup
-/// from a cell's format id to its 1-based entry (PD-191). Built-in ids resolve to their code, so
+/// from a cell's format id to its 1-based entry (PD-193). Built-in ids resolve to their code, so
 /// the page never needs the id table.
 struct NumFmtIndex<'a> {
     codes: Vec<&'a str>,

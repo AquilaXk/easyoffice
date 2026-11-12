@@ -8,7 +8,7 @@ use crate::sheet_styling::ods_grid::{read_ods_sheets, read_ods_sheets_with_styli
 use crate::sheet_styling::ods_numfmt::{EO_NS, NUMBER_NS};
 use crate::sheet_styling::ods_styles::{parse_ods_styling, table_columns_xml, OdsStyleTable};
 use crate::sheet_styling::sheet_rules::ods_rules::{OdsRuleTable, CALCEXT_NS};
-use crate::sheet_styling::SheetStyling;
+use crate::sheet_styling::{IdMemo, SheetStyling};
 use crate::{ContainerFamily, EasyOfficeError, XmlSanitizer, ZipArchiveCodec, ZipSecurityPolicy};
 
 /// Unpacked ODF text document (`(title, paragraphs, tables)`).
@@ -456,6 +456,7 @@ impl OdfCodec {
             content.push_str(&rules.table.conditional_xml(sheet_name, &st.rules));
         }
         let mut expected_row: u32 = 0;
+        let mut ids = IdMemo::new();
         for (row, row_cells) in grid {
             if row > expected_row {
                 push_empty_rows(content, row - expected_row);
@@ -469,7 +470,7 @@ impl OdfCodec {
                 let style_attr = styling
                     .and_then(|st| {
                         let style = st.cells.get(&(row, col))?;
-                        style_table.cell_style_name(style, st)
+                        style_table.cell_style_name(style, st, &mut ids)
                     })
                     .map_or(String::new(), |name| {
                         format!(" table:style-name=\"{name}\"")

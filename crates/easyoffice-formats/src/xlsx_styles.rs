@@ -1,7 +1,7 @@
 //! SpreadsheetML cell styles and column widths (PD-089): `xl/styles.xml` writer and reader, the
 //! `<cols>` element, and the per-cell `s` attribute.
 //!
-//! Writer layout: `numFmts` holds the custom number format codes (ids from 164, PD-191); `fonts`
+//! Writer layout: `numFmts` holds the custom number format codes (ids from 164, PD-193); `fonts`
 //! holds the default font (index 0) plus one font per distinct font look; `cellXfs` holds the
 //! default format (index 0) plus one format per distinct style (font look and number format).
 //! Elements follow the ECMA-376 `CT_Stylesheet` sequence (`numFmts`, `fonts`, `fills`, `borders`,
@@ -14,7 +14,7 @@ use crate::rtf_xml_helpers::{
 };
 use crate::sheet_styling::sheet_rules::xlsx_rules::DxfTable;
 use crate::sheet_styling::{
-    format_centipt, resolve_code, CellStyle, NumFmtTable, SheetStyling, StyleKey, CUSTOM_BASE,
+    format_centipt, CellStyle, IdMemo, NumFmtTable, SheetStyling, StyleKey, CUSTOM_BASE,
     MAX_COLUMN_PX, MIN_COLUMN_PX,
 };
 use crate::XmlSanitizer;
@@ -52,11 +52,6 @@ pub(crate) struct XlsxStyleTable {
     pub(crate) dxf: DxfTable,
 }
 
-/// The workbook-wide number format id of a cell style, or 0 when it has none.
-fn workbook_num_fmt(style: &CellStyle, custom: &[String], lookup: impl FnOnce(&str) -> u16) -> u16 {
-    resolve_code(style.num_fmt, custom).map_or(0, lookup)
-}
-
 impl XlsxStyleTable {
     pub(crate) fn build(stylings: &[SheetStyling]) -> Self {
         let mut table = Self {
@@ -72,9 +67,9 @@ impl XlsxStyleTable {
             ),
         };
         for styling in stylings {
+            let mut ids = IdMemo::new();
             for style in styling.cells.values().filter(|s| !s.is_plain()) {
-                let id =
-                    workbook_num_fmt(style, &styling.num_fmts, |code| table.num_fmts.intern(code));
+                let id = ids.get(style.num_fmt, styling, |code| table.num_fmts.intern(code));
                 let key = style.key().with_num_fmt(id);
                 if key == StyleKey::default() || table.index.contains_key(&key) {
                     continue;
@@ -91,12 +86,18 @@ impl XlsxStyleTable {
         table
     }
 
-    /// `cellXfs` index of `style` of `styling`; 0 (the default format) for plain styles.
-    pub(crate) fn xf_index(&self, style: &CellStyle, styling: &SheetStyling) -> usize {
+    /// `cellXfs` index of `style` of `styling`; 0 (the default format) for plain styles. `ids` is
+    /// one memo per sheet.
+    pub(crate) fn xf_index(
+        &self,
+        style: &CellStyle,
+        styling: &SheetStyling,
+        ids: &mut IdMemo,
+    ) -> usize {
         if style.is_plain() {
             return 0;
         }
-        let id = workbook_num_fmt(style, &styling.num_fmts, |code| {
+        let id = ids.get(style.num_fmt, styling, |code| {
             self.num_fmts.lookup(code).unwrap_or(0)
         });
         self.index
@@ -253,7 +254,7 @@ fn parse_font(body: &str) -> CellStyle {
 }
 
 /// What `xl/styles.xml` says about cell formats: the style of every `cellXfs` entry and the
-/// workbook's custom number format codes (PD-191).
+/// workbook's custom number format codes (PD-193).
 #[derive(Default)]
 pub(crate) struct XfStyles {
     pub(crate) styles: Vec<CellStyle>,

@@ -11,8 +11,8 @@ use crate::sheet_styling::ods_grid::{repeat_value, walk_ods, OdsCell, OdsSink};
 use crate::sheet_styling::ods_numfmt::{data_style_xml, read_data_styles};
 use crate::sheet_styling::sheet_rules::ods_rules_read::{OdsRuleReader, ValidationSink};
 use crate::sheet_styling::{
-    format_centipt, resolve_code, CellStyle, NumFmtTable, SheetStyling, StyleKey, MAX_COLUMN_PX,
-    MAX_STYLED_CELLS, MIN_COLUMN_PX,
+    format_centipt, resolve_code, CellStyle, IdMemo, NumFmtTable, SheetStyling, StyleKey,
+    MAX_COLUMN_PX, MAX_STYLED_CELLS, MIN_COLUMN_PX,
 };
 use crate::xml_stream::{unescape_cow, Attrs};
 use crate::{EasyOfficeError, OdfCodec, XmlSanitizer};
@@ -30,15 +30,10 @@ pub(crate) struct OdsStyleTable {
     cell_index: HashMap<StyleKey, usize>,
     widths: Vec<u32>,
     width_index: HashMap<u32, usize>,
-    /// Custom number format codes of the whole workbook (PD-191); `eonf<id>` data styles.
+    /// Custom number format codes of the whole workbook (PD-193); `eonf<id>` data styles.
     num_fmts: NumFmtTable,
     /// Workbook-wide number format ids in first-use order, each written as one data style.
     data_ids: Vec<u16>,
-}
-
-/// The workbook-wide number format id of a cell style, or 0 when it has none.
-fn workbook_num_fmt(style: &CellStyle, custom: &[String], id_of: impl FnOnce(&str) -> u16) -> u16 {
-    resolve_code(style.num_fmt, custom).map_or(0, id_of)
 }
 
 impl OdsStyleTable {
@@ -52,20 +47,18 @@ impl OdsStyleTable {
             data_ids: Vec::new(),
         };
         for styling in stylings {
+            let mut ids = IdMemo::new();
             for style in styling.cells.values().filter(|s| !s.is_plain()) {
-                let id =
-                    workbook_num_fmt(style, &styling.num_fmts, |code| table.num_fmts.intern(code));
+                let id = ids.get(style.num_fmt, styling, |code| table.num_fmts.intern(code));
                 let key = style.key().with_num_fmt(id);
-                if key == StyleKey::default() {
+                if key == StyleKey::default() || table.cell_index.contains_key(&key) {
                     continue;
                 }
                 if id != 0 && !table.data_ids.contains(&id) {
                     table.data_ids.push(id);
                 }
-                table.cell_index.entry(key).or_insert_with(|| {
-                    table.cells.push(key);
-                    table.cells.len()
-                });
+                table.cells.push(key);
+                table.cell_index.insert(key, table.cells.len());
             }
             for &px in styling.columns.values() {
                 table.width_index.entry(px).or_insert_with(|| {
@@ -81,11 +74,12 @@ impl OdsStyleTable {
         &self,
         style: &CellStyle,
         styling: &SheetStyling,
+        ids: &mut IdMemo,
     ) -> Option<String> {
         if style.is_plain() {
             return None;
         }
-        let id = workbook_num_fmt(style, &styling.num_fmts, |code| {
+        let id = ids.get(style.num_fmt, styling, |code| {
             self.num_fmts.lookup(code).unwrap_or(0)
         });
         self.cell_index
@@ -220,7 +214,7 @@ pub(crate) struct AutomaticStyles {
     pub(crate) cells: HashMap<String, CellStyle>,
     pub(crate) columns: HashMap<String, u32>,
     /// Custom number format codes the cell styles refer to, and how many codes were replaced
-    /// with General (PD-191).
+    /// with General (PD-193).
     pub(crate) num_fmts: Arc<Vec<String>>,
     pub(crate) num_fmts_rejected: u32,
 }

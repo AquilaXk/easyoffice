@@ -8,7 +8,7 @@
 //!   "merges":[{"row","col","rowSpan","colSpan"}]}` items (`merges` is optional, PD-130);
 //! - `sheets`: `[{"name","cells":[{"ref":"A1","raw":"=SUM(A1:A2)","style":{"bold":true,"sizePt":11.25,"nf":1}}],`n//!   "columns":[{"index":1,"widthPx":120}],"numFmts":["0.00"]}]` for every workbook sheet (`style`, `columns`
 //!   and `numFmts` are optional, PD-089; `index` is the 1-based column number; `nf` is the 1-based entry
-//!   of `numFmts`, PD-191);
+//!   of `numFmts`, PD-193);
 //! - `slides`: `[{"title","bullets":[...],"notes"}]`.
 //!
 //! Every string is literal content; nothing in it is parsed as markup.

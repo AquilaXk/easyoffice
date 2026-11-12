@@ -1,4 +1,4 @@
-//! Cell number format codes of a sheet (PD-191).
+//! Cell number format codes of a sheet (PD-193).
 //!
 //! A cell carries a 16-bit format id, not a string: `0` is General, `1..164` is a built-in id of
 //! ECMA-376 18.8.30, `164 + n` is entry `n` of the sheet's custom code table
@@ -6,10 +6,10 @@
 //! sheet of 100 000 formatted cells holds a handful of strings. XLSX `numFmts`/`numFmtId` and ODS
 //! `number:*-style` read and write through this table.
 //!
-//! The built-in table follows ECMA-376 18.8.30 (the same list the reference format-code library
-//! carries as `table` in SheetJS SSF `format.js`, Apache-2.0, Copyright (C) 2012-present SheetJS
-//! LLC). Ids that name a locale-dependent code (14, 27..36, 50..58) are read with the Korean
-//! default of the editor and never written, so a file opened elsewhere keeps its meaning.
+//! Reference implementation: the built-in table follows ECMA-376 18.8.30, the same list the
+//! reference format-code library carries (Apache-2.0, see `THIRD_PARTY_NOTICES.md`). Ids that
+//! name a locale-dependent code (14, 27..36, 50..58) are read with the Korean default of the
+//! editor and never written, so a file opened elsewhere keeps its meaning.
 //!
 //! Untrusted input is bounded: a code is at most [`MAX_NUM_FMT_CODE_BYTES`] bytes with at most
 //! [`MAX_FORMAT_SECTIONS`] sections and no control characters, and a sheet holds at most
@@ -132,6 +132,40 @@ pub fn resolve_code(num_fmt: u16, custom: &[String]) -> Option<&str> {
             .map(String::as_str);
     }
     builtin_code(num_fmt)
+}
+
+/// Workbook-wide format ids of one sheet's cell format ids, resolved once per distinct id: a
+/// writer that numbers the codes of a whole workbook asks for every styled cell, and a hash of the
+/// code text per cell would be the cost of the format.
+pub(crate) struct IdMemo(Vec<u16>);
+
+const UNSET: u16 = u16::MAX;
+
+impl IdMemo {
+    pub(crate) const fn new() -> Self {
+        Self(Vec::new())
+    }
+
+    /// The id for the cell id `num_fmt` of `styling`; `id_of` maps a code to its workbook-wide id
+    /// and runs once per distinct cell id.
+    pub(crate) fn get(
+        &mut self,
+        num_fmt: u16,
+        styling: &crate::SheetStyling,
+        id_of: impl FnOnce(&str) -> u16,
+    ) -> u16 {
+        if num_fmt == 0 {
+            return 0;
+        }
+        let at = usize::from(num_fmt);
+        if self.0.len() <= at {
+            self.0.resize(at + 1, UNSET);
+        }
+        if self.0[at] == UNSET {
+            self.0[at] = resolve_code(num_fmt, &styling.num_fmts).map_or(0, id_of);
+        }
+        self.0[at]
+    }
 }
 
 /// Builds the custom code table of a sheet or workbook while ids are assigned.

@@ -1,5 +1,5 @@
 //! OpenDocument number styles (`number:number-style`, `-percentage-`, `-date-`, `-time-`,
-//! `-text-style`) as spreadsheet format codes (PD-191).
+//! `-text-style`) as spreadsheet format codes (PD-193).
 //!
 //! The writer turns the positive section of a code into the ODF element structure other
 //! programs show, and keeps the full code in the `eo:format-code` attribute so a reopen here

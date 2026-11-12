@@ -44,7 +44,7 @@ pub const STYLE_STRIKE: u8 = 1 << 3;
 const NUM_FMT_SHIFT: u32 = 8;
 
 /// Formatting of one cell: the flags, font size and number format the sheet editor can set
-/// (PD-084, PD-191).
+/// (PD-084, PD-193).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct CellStyle {
     pub bold: bool,
@@ -152,10 +152,10 @@ pub struct SheetStyling {
     pub columns: BTreeMap<u32, u32>,
     /// Conditional formatting and data validation (PD-171).
     pub rules: SheetRules,
-    /// Custom number format codes: the cell id `CUSTOM_BASE + n` names entry `n` (PD-191). A
+    /// Custom number format codes: the cell id `CUSTOM_BASE + n` names entry `n` (PD-193). A
     /// workbook's sheets share one table.
     pub num_fmts: Arc<Vec<String>>,
-    /// Number formats a reader replaced with General because they broke a bound (PD-191).
+    /// Number formats a reader replaced with General because they broke a bound (PD-193).
     pub num_fmts_rejected: u32,
 }
 

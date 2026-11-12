@@ -596,7 +596,7 @@ pub fn format_number_styled(num: f64, fmt_str: &str) -> Result<FormattedText, Fo
     compiled_format(fmt_str).render_number(num)
 }
 
-/// Display of a cell's stored value `raw` under the cell format `code` (PD-191): a number goes
+/// Display of a cell's stored value `raw` under the cell format `code` (PD-193): a number goes
 /// through the number sections, text through the text section. `None` when the cell keeps its
 /// General display: the value is text and the code has no text section, or a date/time code
 /// cannot show the number.

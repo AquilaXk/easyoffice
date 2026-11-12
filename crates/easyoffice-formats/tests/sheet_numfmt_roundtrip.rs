@@ -1,4 +1,4 @@
-//! Cell number formats survive XLSX/ODS save -> reopen (PD-191).
+//! Cell number formats survive XLSX/ODS save -> reopen (PD-193).
 
 use std::sync::Arc;
 

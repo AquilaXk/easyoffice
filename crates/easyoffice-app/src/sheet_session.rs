@@ -501,7 +501,7 @@ impl EasyOfficeIpcRouter {
     /// - `pivot` `{sheet, cells, range, row, col?, value, agg}` -> the grouped values (no
     ///   session needed, see `sheet_pivot_ipc`).
     /// - `format` `{items:[{code, values}]}` -> the text of each formatted cell (no session
-    ///   needed, see `sheet_format_ipc`, PD-191).
+    ///   needed, see `sheet_format_ipc`, PD-193).
     /// - `close` `{session}` -> `{closed}`.
     pub(crate) fn handle_sheet_session_action(
         action: &str,

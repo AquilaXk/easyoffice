@@ -6,7 +6,7 @@ use crate::sheet_styling::sheet_rules::xlsx_rules::{
 };
 use crate::sheet_styling::xlsx_sheet::{read_shared_strings, scan_worksheet, SharedStrings};
 use crate::sheet_styling::xlsx_styles::{cols_xml, parse_cell_xf_styles, XfStyles, XlsxStyleTable};
-use crate::sheet_styling::SheetStyling;
+use crate::sheet_styling::{IdMemo, SheetStyling};
 use crate::{EasyOfficeError, XmlSanitizer, ZipArchiveCodec, ZipSecurityPolicy};
 use std::sync::Arc;
 
@@ -246,6 +246,7 @@ fn build_sheet_xml(
     }
     sheet_xml.push_str("<sheetData>");
     let mut col_buf = [0u8; 4];
+    let mut ids = IdMemo::new();
     for (row, mut row_cells) in rows_map {
         row_cells.sort_by_key(|(col, _)| *col);
         let row_num = row.saturating_add(1);
@@ -255,7 +256,7 @@ fn build_sheet_xml(
             let xf = styling.map_or(0, |st| {
                 st.cells
                     .get(&(row, col))
-                    .map_or(0, |style| style_table.xf_index(style, st))
+                    .map_or(0, |style| style_table.xf_index(style, st, &mut ids))
             });
             let cached = cache.and_then(|c| c.get(&(row, col)));
             push_cell_xml(&mut sheet_xml, col_ref, row_num, xf, raw, cached, sst_map);
