@@ -17,6 +17,7 @@ use crate::office_codecs::{checked_part, checked_zip_xml_entries};
 use crate::rich_document::{RichAlignment, RichBlock, RichDocument};
 use crate::rich_image::{check_document_images, RichImage};
 use crate::rich_image_writers::{hwpx_picture_run, MediaParts};
+use crate::rich_link_writers::{hwpx_link_begin, hwpx_link_end, link_groups};
 use crate::rich_table::{CellSpan, SpanMap};
 use crate::rtf_xml_helpers::{
     extract_attr, extract_attr_from_fragment, extract_tag_bodies,
@@ -241,6 +242,7 @@ impl HwpxCodec {
         check_document_images(doc)?;
         let mut media = MediaParts::new();
         let mut sec = SectionWriter::new();
+        let mut next_field_id = 0u32;
         for block in &doc.blocks {
             let p = match block {
                 RichBlock::Paragraph(p) => p,
@@ -312,35 +314,45 @@ impl HwpxCodec {
                 0
             };
             sec.open_paragraph_with(para_pr, style);
-            let runs: Vec<_> = p.runs.iter().filter(|r| !r.text.is_empty()).collect();
-            if runs.is_empty() {
+            let groups = link_groups(&p.runs);
+            if groups.is_empty() {
                 let char_pr = intern(&mut char_shapes, &mut char_map, base);
                 sec.run(char_pr, "");
             }
-            for run in runs {
-                let font = run.font.as_ref().map_or(0, |f| {
-                    if let Some(&idx) = font_map.get(f) {
-                        idx
-                    } else {
-                        fonts.push(f.clone());
-                        let idx = fonts.len();
-                        font_map.insert(f.clone(), idx);
-                        idx
-                    }
+            for (link, group) in groups {
+                let field_id = link.map(|url| {
+                    next_field_id += 1;
+                    sec.xml.push_str(&hwpx_link_begin(next_field_id, url));
+                    next_field_id
                 });
-                let shape = HwpxCharShape {
-                    bold: base.bold || run.bold,
-                    italic: run.italic,
-                    underline: run.underline,
-                    strike: run.strike,
-                    height: run.size_half_pt.map_or(base.height, |s| u32::from(s) * 50),
-                    font,
-                    text_color: run.color.as_deref().and_then(hex_rgb),
-                    shade_color: run.highlight.as_deref().and_then(hex_rgb),
-                    script: run.script,
-                };
-                let char_pr = intern(&mut char_shapes, &mut char_map, shape);
-                sec.run(char_pr, &run.text);
+                for run in group {
+                    let font = run.font.as_ref().map_or(0, |f| {
+                        if let Some(&idx) = font_map.get(f) {
+                            idx
+                        } else {
+                            fonts.push(f.clone());
+                            let idx = fonts.len();
+                            font_map.insert(f.clone(), idx);
+                            idx
+                        }
+                    });
+                    let shape = HwpxCharShape {
+                        bold: base.bold || run.bold,
+                        italic: run.italic,
+                        underline: run.underline,
+                        strike: run.strike,
+                        height: run.size_half_pt.map_or(base.height, |s| u32::from(s) * 50),
+                        font,
+                        text_color: run.color.as_deref().and_then(hex_rgb),
+                        shade_color: run.highlight.as_deref().and_then(hex_rgb),
+                        script: run.script,
+                    };
+                    let char_pr = intern(&mut char_shapes, &mut char_map, shape);
+                    sec.run(char_pr, &run.text);
+                }
+                if let Some(id) = field_id {
+                    sec.xml.push_str(&hwpx_link_end(id));
+                }
             }
             sec.xml.push_str("</hp:p>");
         }

@@ -15,6 +15,9 @@ use crate::rich_image_writers::{
     docx_content_type_defaults, docx_image_paragraph, docx_image_relationship, emu_to_points,
     odt_image_paragraph, MediaParts, DOCX_PICTURE_NAMESPACES, ODT_PICTURE_NAMESPACES,
 };
+use crate::rich_link_writers::{
+    docx_linked_run_properties, link_groups, DocxLinks, DOCX_LINK_STYLE_XML,
+};
 use crate::rich_list_writers::{
     docx_num_pr, docx_numbering_xml, level_of, list_kind_of, odt_list_styles_xml, plan_lists,
     OdtListWriter,
@@ -75,6 +78,7 @@ fn docx_styles_xml() -> String {
             "<w:style w:type=\"paragraph\" w:styleId=\"{id}\"><w:name w:val=\"{name}\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:contextualSpacing/></w:pPr></w:style>"
         ));
     }
+    xml.push_str(DOCX_LINK_STYLE_XML);
     xml.push_str("<w:style w:type=\"table\" w:default=\"1\" w:styleId=\"TableNormal\"><w:name w:val=\"Normal Table\"/><w:tblPr><w:tblInd w:w=\"0\" w:type=\"dxa\"/><w:tblCellMar><w:left w:w=\"108\" w:type=\"dxa\"/><w:right w:w=\"108\" w:type=\"dxa\"/></w:tblCellMar></w:tblPr></w:style>");
     xml.push_str("</w:styles>");
     xml
@@ -126,7 +130,12 @@ fn docx_paragraph_layout(p: &RichParagraph) -> String {
 }
 
 /// `run` is the list (see `rich_list_writers`) a list paragraph belongs to.
-fn push_docx_paragraph(out: &mut String, p: &RichParagraph, run: Option<usize>) {
+fn push_docx_paragraph(
+    out: &mut String,
+    p: &RichParagraph,
+    run: Option<usize>,
+    links: &mut DocxLinks,
+) {
     out.push_str("<w:p>");
     let style = if (1..=6).contains(&p.heading_level) {
         Some(format!("Heading{}", p.heading_level))
@@ -157,14 +166,27 @@ fn push_docx_paragraph(out: &mut String, p: &RichParagraph, run: Option<usize>) 
         }
         out.push_str("</w:pPr>");
     }
-    for run in &p.runs {
-        if run.text.is_empty() {
-            continue;
+    for (link, group) in link_groups(&p.runs) {
+        if let Some(url) = link {
+            out.push_str(&format!(
+                "<w:hyperlink r:id=\"{}\" w:history=\"1\">",
+                links.rel_id(url)
+            ));
         }
-        out.push_str("<w:r>");
-        out.push_str(&docx_run_properties(run));
-        push_docx_text(out, &run.text);
-        out.push_str("</w:r>");
+        for run in group {
+            let properties = docx_run_properties(run);
+            out.push_str("<w:r>");
+            out.push_str(&if link.is_some() {
+                docx_linked_run_properties(&properties)
+            } else {
+                properties
+            });
+            push_docx_text(out, &run.text);
+            out.push_str("</w:r>");
+        }
+        if link.is_some() {
+            out.push_str("</w:hyperlink>");
+        }
     }
     out.push_str("</w:p>");
 }
@@ -220,9 +242,12 @@ pub(crate) fn pack_docx_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeEr
     body.push_str("><w:body>");
     let mut media = MediaParts::new();
     let mut image_rels = String::new();
+    let mut links = DocxLinks::default();
     for (index, block) in doc.blocks.iter().enumerate() {
         match block {
-            RichBlock::Paragraph(p) => push_docx_paragraph(&mut body, p, lists.block_run[index]),
+            RichBlock::Paragraph(p) => {
+                push_docx_paragraph(&mut body, p, lists.block_run[index], &mut links);
+            }
             RichBlock::Image(img) => {
                 let picture = media.add(DOCX_MEDIA_DIR, img);
                 let rel_id = format!("rId{}", picture.part + DOCX_FIRST_IMAGE_REL - 1);
@@ -257,9 +282,11 @@ pub(crate) fn pack_docx_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeEr
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
             "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">",
             "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>",
-            "{}{}</Relationships>"
+            "{}{}{}</Relationships>"
         ),
-        numbering_rel, image_rels
+        numbering_rel,
+        image_rels,
+        links.relationships()
     );
 
     for xml in [&body, &core_xml, &styles, &doc_rels]
@@ -371,15 +398,26 @@ fn push_odt_paragraph(
     } else {
         body.push_str(&format!("<text:p{style_attr}>"));
     }
-    for run in &p.runs {
-        let key = odt_text_key(run);
-        if odt_text_key_is_plain(&key) {
-            push_odt_text(body, &run.text);
-        } else {
-            let t = text_styles.intern(&key);
-            body.push_str(&format!("<text:span text:style-name=\"T{t}\">"));
-            push_odt_text(body, &run.text);
-            body.push_str("</text:span>");
+    for (link, group) in link_groups(&p.runs) {
+        if let Some(url) = link {
+            body.push_str(&format!(
+                "<text:a xlink:type=\"simple\" xlink:href=\"{}\">",
+                XmlSanitizer::escape(url)
+            ));
+        }
+        for run in group {
+            let key = odt_text_key(run);
+            if odt_text_key_is_plain(&key) {
+                push_odt_text(body, &run.text);
+            } else {
+                let t = text_styles.intern(&key);
+                body.push_str(&format!("<text:span text:style-name=\"T{t}\">"));
+                push_odt_text(body, &run.text);
+                body.push_str("</text:span>");
+            }
+        }
+        if link.is_some() {
+            body.push_str("</text:a>");
         }
     }
     body.push_str(if level > 0 { "</text:h>" } else { "</text:p>" });

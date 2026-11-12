@@ -40,6 +40,7 @@ pub mod rich_document;
 mod rich_image;
 mod rich_image_probe;
 mod rich_image_writers;
+mod rich_link_writers;
 mod rich_list_writers;
 mod rich_read_hwpx;
 mod rich_read_images;
@@ -87,9 +88,9 @@ pub use pages_write::{pages_write_loss, PagesWriteLoss};
 pub use pdf_highlight::{PdfHighlight, PdfHighlightKind, MAX_HIGHLIGHT_ANNOTATIONS};
 pub use pdf_writer::PdfWriteOptions;
 pub use rich_document::{
-    evaluate_table_formulas, normalize_hex_color, RichAlignment, RichBlock, RichDocument,
-    RichListKind, RichListNumber, RichNumberEnclosure, RichNumberFormat, RichParagraph, RichRun,
-    RichScript,
+    evaluate_table_formulas, normalize_hex_color, safe_link_target, RichAlignment, RichBlock,
+    RichDocument, RichListKind, RichListNumber, RichNumberEnclosure, RichNumberFormat,
+    RichParagraph, RichRun, RichScript,
 };
 pub use rich_image::{
     RichImage, IMAGE_PLACEHOLDER_TEXT, MAX_ALT_TEXT_BYTES, MAX_IMAGES_PER_DOCUMENT,

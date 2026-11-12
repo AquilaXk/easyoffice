@@ -3,7 +3,7 @@
 //! Instead of the legacy line markup in `body` (`[[TABLE_ROW]]`, `[[SLIDE]]`, …), the WebUI sends
 //! one of:
 //! - `blocks`: ordered `{"type":"paragraph","runs":[{"text","bold","italic","underline","strike",
-//!   "sizeHalfPt","font","color","highlight"}],
+//!   "sizeHalfPt","font","color","highlight","link"}],
 //!   "align","heading","list"}` and `{"type":"table","rows":[[{"text","value"}]],
 //!   "merges":[{"row","col","rowSpan","colSpan"}]}` items (`merges` is optional, PD-130);
 //! - `sheets`: `[{"name","cells":[{"ref":"A1","raw":"=SUM(A1:A2)","style":{"bold":true,"sizePt":11.25}}],`n//!   "columns":[{"index":1,"widthPx":120}]}]` for every workbook sheet (`style` and `columns` are optional,`n//!   PD-089; `index` is the 1-based column number);
@@ -14,8 +14,8 @@
 use std::collections::BTreeMap;
 
 use easyoffice_formats::{
-    base64_codec, evaluate_table_formulas, normalize_hex_color, CellMerge, CellStyle,
-    EasyOfficeError, OdsUnpacked, OoxmlCodec, PdfWriteOptions, RichAlignment, RichBlock,
+    base64_codec, evaluate_table_formulas, normalize_hex_color, safe_link_target, CellMerge,
+    CellStyle, EasyOfficeError, OdsUnpacked, OoxmlCodec, PdfWriteOptions, RichAlignment, RichBlock,
     RichDocument, RichImage, RichListKind, RichParagraph, RichRun, RichScript, RichTable,
     SheetStyling, StrictJsonValue, MAX_COLUMN_PX, MAX_IMAGE_BYTES, MAX_SIZE_PT, MIN_COLUMN_PX,
     MIN_SIZE_PT,
@@ -87,6 +87,17 @@ fn opt_size_half_pt(obj: &JsonObject) -> Result<Option<u16>, EasyOfficeError> {
                 .ok_or_else(|| invalid("구조화 저장: 'sizeHalfPt'는 2~1638 정수여야 합니다."))
         })
         .transpose()
+}
+
+/// Hyperlink address of a run: an `http`, `https` or `mailto` target (`safe_link_target`); anything else
+/// rejects the save instead of being written.
+fn opt_link(obj: &JsonObject) -> Result<Option<String>, EasyOfficeError> {
+    match opt_str(obj, "link")?.filter(|l| !l.is_empty()) {
+        None => Ok(None),
+        Some(raw) => safe_link_target(raw)
+            .map(|url| Some(url.to_string()))
+            .ok_or_else(|| invalid("구조화 저장: 허용되지 않는 링크 주소입니다.")),
+    }
 }
 
 /// Font family name: 1-64 characters without control characters.
@@ -187,7 +198,7 @@ fn parse_paragraph(
                 .as_str()
                 .ok_or_else(|| invalid("구조화 저장: run 'text'는 문자열이어야 합니다."))?;
             runs.push(RichRun {
-                link: None,
+                link: opt_link(run)?,
                 text: text.to_string(),
                 bold: opt_bool(run, "bold")?,
                 italic: opt_bool(run, "italic")?,

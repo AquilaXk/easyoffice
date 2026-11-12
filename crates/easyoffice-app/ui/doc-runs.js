@@ -648,6 +648,25 @@
     return { changed, containers: Array.from(touched), range: rangeFromOffsets(root, scope, startOff, endOff, extra) };
   }
 
+  // The text nodes of `range` with the text split at both ends, so every selected character sits in its
+  // own nodes, and the one container they share. Null for an empty range or one over several containers.
+  function isolateRangeText(root, range, extraExclude) {
+    if (!range || !root.contains(range.startContainer) || !root.contains(range.endContainer)) return null;
+    const [rawStart, rawEnd] = orderPoints(
+      root,
+      toPoint(range.startContainer, range.startOffset),
+      toPoint(range.endContainer, range.endOffset)
+    );
+    const scope = containerOf(commonScope(root, rawStart.node, rawEnd.node), root);
+    const startOff = textOffsetOf(root, rawStart.node, rawStart.offset, extraExclude, scope);
+    const endOff = textOffsetOf(root, rawEnd.node, rawEnd.offset, extraExclude, scope);
+    if (startOff === endOff) return null;
+    const { start, end } = splitBoundaries(rawStart, rawEnd);
+    const texts = selectedTextNodes(root, start, end, extraExclude);
+    const containers = new Set(texts.map((t) => containerOf(t, root)));
+    return containers.size === 1 ? { texts, container: [...containers][0] } : null;
+  }
+
   // ---------------------------------------------------------------- querying
 
   function foldValue(values) {
@@ -807,7 +826,7 @@
   host.__EASYOFFICE_DOC_RUNS__ = {
     RUN_CLASS, PROPS, BOOL_PROPS, BOOL_PROP_SET, VALUE_PROPS, DATA_KEY, MIXED, DEFAULT_HALF_PT, MIN_HALF_PT, MAX_HALF_PT,
     normalizeColor, normalizeFont, normalizeProp, normalizePatch, ptToHalfPt, halfPtToCss,
-    isRunElement, readRunFormat, readLegacyFormat, fromModelRun, buildRunSpec, formatOfText, applyFormat, queryFormat, wordRangeAt,
+    isRunElement, readRunFormat, readLegacyFormat, fromModelRun, buildRunSpec, formatOfText, applyFormat, isolateRangeText, queryFormat, wordRangeAt,
     insertFormattedText, blocksInRange, blockOf, containerOf, collectTextNodes, textOffsetOf,
     pointAtTextOffset, normalizeContainer, comparePoints, cssSizeToHalfPt,
   };

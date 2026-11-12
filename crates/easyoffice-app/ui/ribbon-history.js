@@ -65,6 +65,7 @@
       getSheetController,
       getWorkspacePanels,
       getDocRuns,
+      getDocLink,
       getActiveModule,
       getHwpHost,
       setActiveModule,
@@ -439,6 +440,11 @@
       workspacePanels.renderModuleOutline(getActiveModule());
     }
 
+    // A document edits links in the link dialog; the embedded HWP surface keeps the note.
+    function docEffectInsertLink(args) {
+      if (!args.cmdId.startsWith("document-")) docEffectInsertNote(args);
+    }
+
     function docEffectSort({ execRes }) {
       const tbody = document.getElementById("doc-table-body");
       if (!tbody) return;
@@ -474,7 +480,7 @@
       "-layout-paper": docEffectPaper,
       "-insert-chart": docEffectInsertNote,
       "-insert-shape": docEffectInsertNote,
-      "-insert-link": docEffectInsertNote,
+      "-insert-link": docEffectInsertLink,
       "-data-fn-browser": docEffectInsertNote,
       "-review-comment": docEffectInsertNote,
       "-insert-table": () => getWorkspacePanels().appendDocTableRow(),
@@ -876,6 +882,8 @@
         getWorkspacePanels().openPdfHighlightDialog();
         return Promise.resolve(null);
       }
+      // The link dialog opens at once, while the selection is still in the editor; the command itself still runs.
+      if (cmdId === "document-insert-link") getDocLink().open();
       return enqueueWorkspaceHistoryOp(async () => {
         const sheetController = getSheetController();
         await sheetController.commitPendingFocusedSheetCell(true);

@@ -62,17 +62,27 @@ impl CharFmt {
 
 /// Appends `text` as a run, merging it into the previous run when the format is identical.
 pub(crate) fn push_run(runs: &mut Vec<RichRun>, text: &str, fmt: &CharFmt) {
+    push_linked_run(runs, text, fmt, None);
+}
+
+/// [`push_run`] for text inside a hyperlink: runs merge only when they share the same link.
+pub(crate) fn push_linked_run(
+    runs: &mut Vec<RichRun>,
+    text: &str,
+    fmt: &CharFmt,
+    link: Option<&str>,
+) {
     if text.is_empty() {
         return;
     }
     if let Some(last) = runs.last_mut() {
-        if fmt.matches_run(last) {
+        if fmt.matches_run(last) && last.link.as_deref() == link {
             last.text.push_str(text);
             return;
         }
     }
     runs.push(RichRun {
-        link: None,
+        link: link.map(str::to_string),
         text: text.to_string(),
         bold: fmt.bold,
         italic: fmt.italic,

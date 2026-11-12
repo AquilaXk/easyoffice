@@ -41,6 +41,12 @@
     return CSS_ALIGN[String(css || "").trim().toLowerCase()] || null;
   }
 
+  // The stored address of an editor link (`doc-link.js`); a link whose address the policy refuses saves as plain text.
+  function linkTarget(el) {
+    const links = host.__EASYOFFICE_DOC_LINK__;
+    return links && el.dataset?.eoLink ? links.normalizeUrl(el.getAttribute("href")) ?? undefined : undefined;
+  }
+
   function styleFormat(el, fmt) {
     const tag = (el.tagName || "").toUpperCase();
     const st = el.style || {};
@@ -52,6 +58,7 @@
       underline: fmt.underline || tag === "U" || tag === "INS" || deco.includes("underline"),
       strike: fmt.strike || tag === "S" || tag === "STRIKE" || tag === "DEL" || deco.includes("line-through"),
       script: SCRIPT_TAGS[tag] || fmt.script,
+      link: tag === "A" ? linkTarget(el) : fmt.link,
     };
     return mergeRunValues(el, fmt, next);
   }
@@ -236,7 +243,8 @@
         a.sizeHalfPt === b.size &&
         a.font === b.font &&
         a.color === b.color &&
-        a.highlight === b.highlight
+        a.highlight === b.highlight &&
+        a.link === b.link
     );
   }
 
@@ -326,6 +334,7 @@
       }
       const run = { text };
       if (fmt.script) run.script = fmt.script;
+      if (fmt.link) run.link = fmt.link;
       BOOL_KEYS.forEach((k) => {
         if (fmt[k]) run[k] = true;
       });

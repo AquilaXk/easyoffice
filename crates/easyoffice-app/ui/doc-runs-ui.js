@@ -705,6 +705,7 @@
     return {
       bind, applyPatch, toggle, setSize, bumpSize, setFont, setColor, toggleColor, getState, syncToolbar,
       shiftIndent, setBlockIndent, setAlign, setLineSpacing, showLineSpacing, toggleList, setStyle, syncRuler, resolveRulerScale, handleBeforeInput, handleSelectionChange,
+      currentRange, withUndo,
       getPending: () => pending,
       getLastRange: () => lastRange,
       setLastRange: (r) => { lastRange = r ? plainRange(r) : null; },

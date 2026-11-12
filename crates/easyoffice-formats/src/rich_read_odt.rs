@@ -5,10 +5,10 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 
 use crate::office_codecs::{checked_part, checked_zip_xml_entries};
-use crate::rich_document::normalize_hex_color;
+use crate::rich_document::{normalize_hex_color, safe_link_target};
 use crate::rich_image::{safe_package_path, ImageBudget};
 use crate::rich_table::{TableAssembler, MAX_PADDED_COLUMNS};
-use crate::rich_xml::{push_run, CharFmt};
+use crate::rich_xml::{push_linked_run, CharFmt};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
     EasyOfficeError, OdfCodec, RichAlignment, RichBlock, RichDocument, RichImage, RichListKind,
@@ -294,6 +294,8 @@ struct OdtWalker<'a> {
     dropped_merges: usize,
     in_automatic_styles: bool,
     budget: ImageBudget,
+    /// Address of the open `text:a`, when it is a safe link.
+    link: Option<String>,
 }
 
 /// Merges a span's character format into the enclosing format.
@@ -336,6 +338,7 @@ impl<'a> OdtWalker<'a> {
             dropped_merges: 0,
             in_automatic_styles: false,
             budget: ImageBudget::default(),
+            link: None,
         }
     }
 
@@ -355,6 +358,10 @@ impl<'a> OdtWalker<'a> {
             }
             "text:p" | "text:h" if !self.in_automatic_styles => self.start_paragraph(name, attrs),
             "text:span" if !self.paras.is_empty() => self.start_span(attrs),
+            "text:a" => {
+                self.link = attr(attrs, "xlink:href")
+                    .and_then(|href| safe_link_target(&href).map(str::to_string));
+            }
             "text:tab" => self.push_inline("\t"),
             "text:line-break" => self.push_inline("\n"),
             "text:s" => {
@@ -446,7 +453,7 @@ impl<'a> OdtWalker<'a> {
     }
 
     fn push_inline(&mut self, text: &str) {
-        push_inline(&mut self.paras, &self.span_fmts, text);
+        push_inline(&mut self.paras, &self.span_fmts, self.link.as_deref(), text);
     }
 
     fn warn_once(&mut self, note: &str) {
@@ -502,6 +509,7 @@ impl<'a> OdtWalker<'a> {
             "office:automatic-styles" | "office:font-face-decls" => {
                 self.in_automatic_styles = false
             }
+            "text:a" => self.link = None,
             "text:span" if !self.paras.is_empty() => {
                 if self.span_fmts.len() > 1 {
                     self.span_fmts.pop();
@@ -721,12 +729,13 @@ fn read_frame(events: &[XmlEvent<'_>]) -> Option<Frame> {
     })
 }
 
-fn push_inline(paras: &mut [Para], span_fmts: &[CharFmt], text: &str) {
+fn push_inline(paras: &mut [Para], span_fmts: &[CharFmt], link: Option<&str>, text: &str) {
     if let Some(p) = paras.last_mut() {
-        push_run(
+        push_linked_run(
             &mut p.runs,
             text,
             &span_fmts.last().cloned().unwrap_or_default(),
+            link,
         );
     }
 }

@@ -73,6 +73,10 @@ fn write_paragraph(out: &mut String, p: &RichParagraph) {
         if let Some(size) = r.size_half_pt {
             let _ = write!(out, ",\"sizeHalfPt\":{size}");
         }
+        if let Some(link) = &r.link {
+            out.push_str(",\"link\":");
+            push_json_str(out, link);
+        }
         match r.script {
             RichScript::Normal => {}
             RichScript::Superscript => out.push_str(",\"script\":\"superscript\""),

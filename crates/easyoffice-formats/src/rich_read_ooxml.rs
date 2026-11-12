@@ -8,10 +8,10 @@ use std::collections::HashMap;
 
 use crate::office_codecs::{checked_part, checked_zip_xml_entries};
 use crate::rich_document::{highlight_name_to_hex, normalize_hex_color};
-use crate::rich_read_images::{drawing_picture, DocxMedia, DrawingOutcome};
+use crate::rich_read_images::{drawing_picture, load_docx_hyperlinks, DocxMedia, DrawingOutcome};
 use crate::rich_read_numbering::{read_numbering, Numbering, LIST_LEVELS};
 use crate::rich_table::TableAssembler;
-use crate::rich_xml::{heading_level_from_name, push_run, toggle_on, CharFmt};
+use crate::rich_xml::{heading_level_from_name, push_linked_run, toggle_on, CharFmt};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
     EasyOfficeError, RichAlignment, RichBlock, RichDocument, RichImage, RichListKind,
@@ -308,6 +308,9 @@ struct DocxWalker {
     dropped_merges: usize,
     image_count: usize,
     image_bytes: usize,
+    /// Relationship id -> address of the document's hyperlinks, and the one of the open `w:hyperlink`.
+    links: HashMap<String, String>,
+    link: Option<String>,
 }
 
 impl DocxWalker {
@@ -360,6 +363,9 @@ impl DocxWalker {
                 };
             }
             "w:p" => self.paras.push(ParaState::default()),
+            "w:hyperlink" => {
+                self.link = attr(attrs, "r:id").and_then(|id| self.links.get(id.as_ref()).cloned());
+            }
             "w:pPr" => self.in_ppr = true,
             "w:r" => {
                 self.in_run = true;
@@ -408,13 +414,19 @@ impl DocxWalker {
             "w:pPr" => self.in_ppr = false,
             "w:r" => {
                 if let Some(top) = self.paras.last_mut() {
-                    push_run(&mut top.runs, &self.cur_text, &self.fmt);
+                    push_linked_run(
+                        &mut top.runs,
+                        &self.cur_text,
+                        &self.fmt,
+                        self.link.as_deref(),
+                    );
                 }
                 self.cur_text.clear();
                 self.in_run = false;
                 self.in_rpr = false;
                 self.in_t = false;
             }
+            "w:hyperlink" => self.link = None,
             "w:p" => self.finish_paragraph(resolver),
             "w:tc" if self.tbl_depth == 1 => {
                 while self.cell_paras.last().is_some_and(String::is_empty) {
@@ -529,7 +541,10 @@ pub(crate) fn read_docx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Eas
         numbering: &numbering,
     };
     let media = DocxMedia::load(&entries)?;
-    let mut walker = DocxWalker::default();
+    let mut walker = DocxWalker {
+        links: load_docx_hyperlinks(&entries)?,
+        ..DocxWalker::default()
+    };
     let mut reader = XmlReader::new(doc_xml);
     while let Some(event) = reader.next_event()? {
         match event {

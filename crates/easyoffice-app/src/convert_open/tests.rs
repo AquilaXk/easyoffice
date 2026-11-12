@@ -103,6 +103,39 @@ fn invalid_run_properties_are_rejected_and_old_payloads_still_work() {
 }
 
 #[test]
+fn a_run_link_survives_docx_save_and_reopen_and_unsafe_addresses_reject_the_save() {
+    let payload = concat!(
+        "{\"targetFormat\":\"docx\",\"blocks\":[{\"type\":\"paragraph\",\"runs\":[",
+        "{\"text\":\"앞 \"},{\"text\":\"링크\",\"link\":\"https://example.com/a?b=1\"}]}]}"
+    );
+    let saved = EasyOfficeIpcRouter::dispatch("convert_document_format", payload).unwrap();
+    let bytes = EasyOfficeIpcRouter::decode_base64(json_field(&saved, "convertedBase64")).unwrap();
+    let json = EasyOfficeIpcRouter::dispatch(
+        "convert_document_format",
+        &request(Some("decode"), "링크.docx", &bytes, ""),
+    )
+    .unwrap();
+    assert!(
+        json.contains("{\"text\":\"링크\",\"link\":\"https://example.com/a?b=1\"}"),
+        "{json}"
+    );
+    for bad in [
+        "javascript:alert(1)",
+        "file:///etc/passwd",
+        "data:text/html,x",
+        "https://",
+    ] {
+        let payload = format!(
+            "{{\"targetFormat\":\"docx\",\"blocks\":[{{\"type\":\"paragraph\",\"runs\":[{{\"text\":\"x\",\"link\":\"{bad}\"}}]}}]}}"
+        );
+        assert!(
+            EasyOfficeIpcRouter::dispatch("convert_document_format", &payload).is_err(),
+            "{bad}"
+        );
+    }
+}
+
+#[test]
 fn decode_action_returns_structured_blocks_module_and_format() {
     let json = EasyOfficeIpcRouter::dispatch(
         "convert_document_format",

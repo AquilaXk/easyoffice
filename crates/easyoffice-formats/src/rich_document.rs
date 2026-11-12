@@ -108,8 +108,32 @@ pub struct RichRun {
     pub highlight: Option<String>,
     /// Superscript / subscript position.
     pub script: RichScript,
-    /// Hyperlink target the run belongs to (read from Pages; the writers do not emit links yet).
+    /// Hyperlink target the run belongs to (a [`safe_link_target`] address). The DOCX, ODT and HWPX writers
+    /// emit it; the Pages writer drops it (counted by `pages_write_loss`).
     pub link: Option<String>,
+}
+
+/// Longest hyperlink address a document keeps, in characters.
+pub const MAX_LINK_CHARS: usize = 2048;
+
+/// The hyperlink address when it is a plain web or mail target (`http`, `https`, `mailto`), else `None`
+/// (fail-closed: `javascript:`, `file:`, `data:` and every other scheme are refused, as are whitespace,
+/// control characters and addresses over [`MAX_LINK_CHARS`]). The editor's `doc-link.js` applies the same rule.
+pub fn safe_link_target(raw: &str) -> Option<&str> {
+    let url = raw.trim();
+    let unsafe_char = |c: char| c <= ' ' || ('\u{7f}'..='\u{9f}').contains(&c);
+    if url.is_empty() || url.chars().count() > MAX_LINK_CHARS || url.chars().any(unsafe_char) {
+        return None;
+    }
+    let (scheme, rest) = url.split_once(':')?;
+    let has_target = match scheme.to_ascii_lowercase().as_str() {
+        "http" | "https" => rest
+            .strip_prefix("//")
+            .is_some_and(|r| !r.is_empty() && !r.starts_with(['/', '?', '#'])),
+        "mailto" => !rest.is_empty() && !rest.starts_with('?'),
+        _ => false,
+    };
+    has_target.then_some(url)
 }
 
 /// Normalizes `#rrggbb`/`RRGGBB` to upper-case `RRGGBB`; anything else (including `auto`) is

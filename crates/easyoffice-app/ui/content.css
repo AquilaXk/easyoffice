@@ -296,6 +296,9 @@
   background-size: calc(100% / 20) 28px;
 }
 
+/* Hyperlinks of the document editor (doc-link.js): fixed colours like the page itself. */
+#doc-editor a[data-eo-link] { color: #0563c1; text-decoration: underline; }
+
 /* Find matches (find-replace.js) and printed document / sheet text: fixed colours like the page itself. */
 ::highlight(eo-find-match) { background-color: #ffe38a; color: #111827; }
 ::highlight(eo-find-current) { background-color: #ff9632; color: #111827; }

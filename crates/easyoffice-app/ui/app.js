@@ -35,7 +35,7 @@
 
   const sheetRowCounts = {};
   let workspaceSession = null;
-  let docRunsUi = null, hwpHost = null, hwpSession = null, windowBridge = null;
+  let docRunsUi = null, docLink = null, hwpHost = null, hwpSession = null, windowBridge = null;
   const icons = host.__EASYOFFICE_ICONS__;
 
   function chainWorkspaceQueue(opFn) {
@@ -92,7 +92,7 @@
     document, invokeIpc, docTabStore, sheetDataStore, sheetRowCounts, slideDeckState,
     localRibbonState, ribbonCatalog, sheetStoreHelpers, extractEditableDocumentText,
     getSheetController: () => sheetController,
-    getWorkspacePanels: () => workspacePanels, getDocRuns: () => docRunsUi,
+    getWorkspacePanels: () => workspacePanels, getDocRuns: () => docRunsUi, getDocLink: () => docLink,
     getActiveModule: () => activeModule, getHwpHost: () => hwpHost,
     getWindowBridge: () => windowBridge,
     setActiveModule: (next) => { activeModule = next; },
@@ -111,6 +111,9 @@
     document, getActiveModule: () => activeModule, saveDocState: () => workspacePanels.saveActiveDocTabState(),
     captureWorkspaceSnapshot: ribbonHistory.captureWorkspaceSnapshot,
     commitDeferredUndoSnapshot: ribbonHistory.commitDeferredUndoSnapshot,
+  });
+  docLink = host.__EASYOFFICE_CREATE_DOC_LINK__({
+    document, env: host, getRange: () => docRunsUi.currentRange(), withUndo: docRunsUi.withUndo, setFeedback: (text) => setStatusFeedback(text),
   });
 
   sheetController = host.__EASYOFFICE_CREATE_SHEET_CONTROLLER__({
@@ -930,6 +933,7 @@
     setupPanelAndThemeActions();
     setupDocTableAndSheetTabHandlers();
     docRunsUi.bind();
+    docLink.bind();
     setupSheetAndConverterHandlers();
     setupSlideAndPdfHandlers();
     setupSmartAndSecurityHandlers();

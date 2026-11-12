@@ -857,6 +857,22 @@
       </div>
     </dialog>
 
+    <dialog id="doc-link-dialog" class="tool-dialog" aria-labelledby="doc-link-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="doc-link-dialog-title">하이퍼링크</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><label class="dialog-label" for="doc-link-address">주소</label><input id="doc-link-address" class="dialog-text-input" type="text" maxlength="2048" autocomplete="off" spellcheck="false" /></div>
+          <div class="dialog-row"><label class="dialog-label" for="doc-link-label">표시할 글자</label><input id="doc-link-label" class="dialog-text-input" type="text" autocomplete="off" spellcheck="false" /></div>
+          <div class="dialog-status-row"><span id="doc-link-status" class="dialog-status" role="status" aria-live="polite"></span></div>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-doc-link-remove" type="button" class="dialog-btn" hidden>링크 제거</button>
+          <button id="btn-doc-link-apply" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
     <dialog id="smart-dialog" class="tool-dialog" aria-labelledby="smart-dialog-title">
       <div class="dialog-wrap">
         <div class="dialog-title"><span id="smart-dialog-title">문장 진단 및 요약</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
@@ -1137,6 +1153,7 @@
     <script src="./ribbon-catalog.js"></script>
     <script src="./doc-runs.js"></script>
     <script src="./doc-runs-ui.js"></script>
+    <script src="./doc-link.js"></script>
     <script src="./save-payload.js"></script>
     <script src="./desktop-bridge.js"></script>
     <script src="./home-screen.js"></script>

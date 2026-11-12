@@ -7,12 +7,44 @@ use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
+use crate::rich_document::safe_link_target;
 use crate::xml_stream::{attr, XmlEvent, XmlReader};
 use crate::{EasyOfficeError, RichImage, XmlSanitizer, ZipArchiveEntry};
 
 const DOCUMENT_RELS_PATH: &str = "word/_rels/document.xml.rels";
 const WORD_DIR: &str = "word/";
 const IMAGE_REL_SUFFIX: &str = "/image";
+const HYPERLINK_REL_SUFFIX: &str = "/hyperlink";
+
+/// Relationship id -> address of the external hyperlinks of `word/document.xml`. An address that
+/// is not a [`safe_link_target`] is left out, so its text reads as plain text.
+pub(crate) fn load_docx_hyperlinks(
+    entries: &[ZipArchiveEntry],
+) -> Result<HashMap<String, String>, EasyOfficeError> {
+    let mut links = HashMap::new();
+    let Some(rels) = entries.iter().find(|e| e.path == DOCUMENT_RELS_PATH) else {
+        return Ok(links);
+    };
+    let xml = std::str::from_utf8(&rels.data)
+        .map_err(|_| EasyOfficeError::InvalidUtf8(format!("{DOCUMENT_RELS_PATH} UTF-8 오류")))?;
+    XmlSanitizer::validate_safe_xml(xml)?;
+    for event in XmlReader::new(xml) {
+        let XmlEvent::Start { name, attrs } = event? else {
+            continue;
+        };
+        let is_link = attr(&attrs, "Type").is_some_and(|t| t.ends_with(HYPERLINK_REL_SUFFIX));
+        if name != "Relationship" || !is_link {
+            continue;
+        }
+        let (Some(id), Some(target)) = (attr(&attrs, "Id"), attr(&attrs, "Target")) else {
+            continue;
+        };
+        if let Some(url) = safe_link_target(&target) {
+            links.insert(id.to_string(), url.to_string());
+        }
+    }
+    Ok(links)
+}
 
 /// Result of reading one `w:drawing`.
 pub(crate) enum DrawingOutcome {

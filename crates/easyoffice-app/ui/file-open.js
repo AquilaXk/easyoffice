@@ -140,7 +140,9 @@
           });
         }
         const scriptTag = SCRIPT_TAGS[run.script];
-        out.push(scriptTag ? elSpec(scriptTag, [spec]) : spec);
+        const styled = scriptTag ? elSpec(scriptTag, [spec]) : spec;
+        const href = host.__EASYOFFICE_DOC_LINK__?.normalizeUrl(run.link);
+        out.push(href ? { ...elSpec("a", [styled], {}, { href }), data: { eoLink: "1" } } : styled);
       });
     });
     return out;
