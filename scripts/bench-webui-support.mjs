@@ -23,7 +23,7 @@ export function startUiServer({ enginePort, port, ui = UI_DIR, inputs }) {
       req.on("end", () => {
         const body = Buffer.concat(chunks);
         const up = http.request(
-          { host: "127.0.0.1", port: enginePort, path: "/api/ipc", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": body.length, Origin: `http://127.0.0.1:${enginePort}` } },
+          { host: "127.0.0.1", port: enginePort, path: "/api/ipc", method: "POST", headers: { "Content-Type": "application/json", "X-EasyOffice-Ipc": "1", "Content-Length": body.length, Origin: `http://127.0.0.1:${enginePort}` } },
           (r) => { res.writeHead(r.statusCode, r.headers); r.pipe(res); },
         );
         up.on("error", () => { if (res.headersSent) res.destroy(); else { res.writeHead(502); res.end(); } });

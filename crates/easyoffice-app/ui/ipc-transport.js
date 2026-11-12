@@ -48,7 +48,9 @@
       try {
         resp = await host.fetch("/api/ipc", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          // Marks the request as the page's own: a script on another origin cannot add this header
+          // without a CORS preflight, which the local server never answers.
+          headers: { "Content-Type": "application/json", "X-EasyOffice-Ipc": "1" },
           body: JSON.stringify({ command, payload: String(payload ?? "") }),
         });
       } catch {

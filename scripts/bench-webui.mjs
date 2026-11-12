@@ -89,7 +89,7 @@ async function main() {
   fs.mkdirSync(cache, { recursive: true });
   const server = await startUiServer({ enginePort: ENGINE_PORT, port: ENGINE_PORT + 1, ui: UI, inputs: cache });
   const invokeEngine = async (cmd, payload) => {
-    const r = await fetch(`http://127.0.0.1:${ENGINE_PORT}/api/ipc`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ command: cmd, payload }) });
+    const r = await fetch(`http://127.0.0.1:${ENGINE_PORT}/api/ipc`, { method: "POST", headers: { "Content-Type": "application/json", "X-EasyOffice-Ipc": "1" }, body: JSON.stringify({ command: cmd, payload }) });
     return r.json();
   };
   const cached = async (name, make) => {

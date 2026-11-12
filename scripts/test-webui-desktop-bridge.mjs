@@ -319,12 +319,14 @@ test("without the shell the --serve preview keeps the HTTP transport and Blob do
   const { document, userClick, downloads } = await createWebUiDom({
     httpFetch: async (url, init) => {
       const { command, payload } = JSON.parse(init.body);
-      fetched.push({ url, command });
+      fetched.push({ url, command, marker: init.headers["X-EasyOffice-Ipc"] });
       const body = await offline[command](payload);
       return { ok: true, status: 200, json: async () => structuredClone(body) };
     },
   });
   assert.ok(fetched.some((f) => f.url === "/api/ipc" && f.command === "get_workspace_bootstrap"));
+  // The local server refuses an IPC post without the page's marker header.
+  assert.ok(fetched.length > 0 && fetched.every((f) => f.marker === "1"));
   userClick(studioItem(document, "studio-save"));
   await flushAsyncTurns(12);
   assert.equal(downloads.length, 1);

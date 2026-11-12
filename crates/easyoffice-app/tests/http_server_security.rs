@@ -37,7 +37,7 @@ fn test_http_ipc_rejects_unpaired_surrogate_with_400_and_csp() {
 
     let body = br#"{"command":"scrub_pii","payload":"\ud83d"}"#;
     let req = format!(
-        "POST /api/ipc HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        "POST /api/ipc HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\nX-EasyOffice-Ipc: 1\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         body.len()
     );
     let mut raw = req.into_bytes();
@@ -78,7 +78,7 @@ fn test_http_panic_recovery_releases_all_32_slots_and_serves_subsequent_get() {
     let panic_body = br#"{"command":"simulate_panic","payload":""}"#;
     for i in 0..MAX_CONCURRENT_HTTP_THREADS {
         let req = format!(
-            "POST /api/ipc HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            "POST /api/ipc HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\nX-EasyOffice-Ipc: 1\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
             panic_body.len()
         );
         let mut raw = req.into_bytes();
@@ -307,7 +307,10 @@ fn test_bundle_files_are_binary_exact_with_mime_and_iframe_csp() {
     assert!(head.starts_with("HTTP/1.1 200 OK\r\n"), "{head}");
     assert!(head.contains("Content-Type: text/html; charset=utf-8\r\n"));
     assert!(head.contains("Access-Control-Allow-Origin: *\r\n"));
-    assert!(head.contains("Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' data: blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'self'\r\n"));
+    assert!(head.contains(&format!(
+        "Content-Security-Policy: {}\r\n",
+        editor_csp(port)
+    )));
     assert_eq!(body, std::fs::read(bundle.join("index.html")).unwrap());
 
     let wasm = std::fs::read_dir(bundle.join("assets"))
@@ -356,6 +359,166 @@ fn test_main_page_loads_the_hwp_host_script() {
     let (head, body) = split_response(&get(port, "/hwp-host.js"));
     assert!(head.starts_with("HTTP/1.1 200 OK\r\n"));
     assert!(String::from_utf8_lossy(&body).contains("__EASYOFFICE_CREATE_HWP_HOST__"));
+    stop.store(true, Ordering::Release);
+    handle.join().unwrap();
+}
+
+/// The editor document's policy as the page at `http://127.0.0.1:{port}` must receive it.
+fn editor_csp(port: u16) -> String {
+    easyoffice_app::hwp_bundle::studio_csp_for_origin(&format!("http://127.0.0.1:{port}")).unwrap()
+}
+
+fn get_with_host(port: u16, path: &str, host: &str) -> String {
+    let raw = format!("GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n");
+    send_raw_http_request(port, raw.as_bytes(), Duration::from_secs(5))
+}
+
+#[test]
+fn test_editor_csp_names_the_page_origin_not_self() {
+    // WebKit does not match 'self' in the opaque-origin editor frame; the policy of every
+    // /hwp-studio response (found or not) spells out the origin the page was opened from.
+    let (port, stop, handle) = start_server();
+    let own = get_with_host(port, "/hwp-studio/nope.js", &format!("127.0.0.1:{port}"));
+    assert!(
+        own.contains(&format!(
+            "Content-Security-Policy: {}\r\n",
+            editor_csp(port)
+        )),
+        "{own}"
+    );
+    assert!(!own.contains("'self'"), "{own}");
+    let by_name = get_with_host(port, "/hwp-studio/nope.js", &format!("localhost:{port}"));
+    assert!(
+        by_name.contains(&format!(
+            "default-src http://localhost:{port}; script-src http://localhost:{port} 'wasm-unsafe-eval'"
+        )),
+        "{by_name}"
+    );
+    let ipv6 = get_with_host(port, "/hwp-studio/nope.js", &format!("[::1]:{port}"));
+    assert!(
+        ipv6.contains(&format!("default-src http://[::1]:{port};")),
+        "{ipv6}"
+    );
+    // Without a port the origin is not the server's: fall back to the one that is.
+    let bare = get_with_host(port, "/hwp-studio/nope.js", "localhost");
+    assert!(
+        bare.contains(&format!(
+            "Content-Security-Policy: {}\r\n",
+            editor_csp(port)
+        )),
+        "{bare}"
+    );
+    // The main page keeps the plain policy.
+    let main = get_with_host(port, "/", &format!("127.0.0.1:{port}"));
+    assert!(
+        main.contains("Content-Security-Policy: default-src 'self'\r\n"),
+        "{main}"
+    );
+    stop.store(true, Ordering::Release);
+    handle.join().unwrap();
+}
+
+fn post_ipc(port: u16, extra_headers: &str, body: &str) -> String {
+    let raw = format!(
+        "POST /api/ipc HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{extra_headers}Connection: close\r\n\r\n{body}"
+    );
+    send_raw_http_request(port, raw.as_bytes(), Duration::from_secs(5))
+}
+
+const BOOTSTRAP: &str = r#"{"command":"get_workspace_bootstrap","payload":""}"#;
+
+fn assert_status(resp: &str, status: &str) {
+    assert!(
+        resp.starts_with(&format!("HTTP/1.1 {status}\r\n")),
+        "wanted {status}: {}",
+        &resp[..resp.len().min(300)]
+    );
+    assert!(
+        resp.contains("Content-Security-Policy: default-src 'self'\r\n"),
+        "{resp}"
+    );
+}
+
+#[test]
+fn test_ipc_needs_the_page_marker_header_with_or_without_an_origin() {
+    let (port, stop, handle) = start_server();
+    let len = format!("Content-Length: {}\r\n", BOOTSTRAP.len());
+    let origin = format!("Origin: http://127.0.0.1:{port}\r\n");
+    // Plain HTTP clients send no Origin; a cross-site form post sends a foreign one.
+    assert_status(&post_ipc(port, &len, BOOTSTRAP), "403 Forbidden");
+    assert_status(
+        &post_ipc(port, &format!("{origin}{len}"), BOOTSTRAP),
+        "403 Forbidden",
+    );
+    assert_status(
+        &post_ipc(
+            port,
+            &format!("Origin: http://evil.example\r\nX-EasyOffice-Ipc: 1\r\n{len}"),
+            BOOTSTRAP,
+        ),
+        "403 Forbidden",
+    );
+    // A marker with another value is no marker.
+    for value in ["0", "", "true", "11"] {
+        let headers = format!("X-EasyOffice-Ipc: {value}\r\n{len}");
+        assert_status(&post_ipc(port, &headers, BOOTSTRAP), "403 Forbidden");
+    }
+    for headers in [
+        format!("X-EasyOffice-Ipc: 1\r\n{len}"),
+        format!("{origin}x-easyoffice-ipc: 1\r\n{len}"),
+        format!("{origin}X-EASYOFFICE-IPC:   1  \r\n{len}"),
+    ] {
+        assert_status(&post_ipc(port, &headers, BOOTSTRAP), "200 OK");
+    }
+    // The launch parameters after `?` do not turn the endpoint into another route.
+    let raw = format!(
+        "POST /api/ipc?x=1 HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{len}Connection: close\r\n\r\n{BOOTSTRAP}"
+    );
+    assert_status(
+        &send_raw_http_request(port, raw.as_bytes(), Duration::from_secs(5)),
+        "403 Forbidden",
+    );
+    stop.store(true, Ordering::Release);
+    handle.join().unwrap();
+}
+
+#[test]
+fn test_content_length_must_be_one_plain_number() {
+    let (port, stop, handle) = start_server();
+    let n = BOOTSTRAP.len();
+    let marker = "X-EasyOffice-Ipc: 1\r\n";
+    let send = |lengths: &str| post_ipc(port, &format!("{marker}{lengths}"), BOOTSTRAP);
+    assert_status(&send(&format!("Content-Length: {n}\r\n")), "200 OK");
+    // A repeated header is refused whether the values differ (the smaller one would cut the body
+    // and leave the rest to be read as the next message) or agree.
+    assert_status(
+        &send(&format!("Content-Length: 2\r\nContent-Length: {n}\r\n")),
+        "400 Bad Request",
+    );
+    assert_status(
+        &send(&format!("Content-Length: {n}\r\nContent-Length: 2\r\n")),
+        "400 Bad Request",
+    );
+    assert_status(
+        &send(&format!("Content-Length: {n}\r\ncontent-length: {n}\r\n")),
+        "400 Bad Request",
+    );
+    // Anything but digits is a framing error, not "too large".
+    for bad in ["+5", "-1", "5, 5", "0x10", "1e3", "", " ", "5 6", "٥"] {
+        assert_status(
+            &send(&format!("Content-Length: {bad}\r\n")),
+            "400 Bad Request",
+        );
+    }
+    // Only a well-formed length above the limit is a 413 (a digit string past `usize` as well).
+    assert_status(
+        &send("Content-Length: 99999999999\r\n"),
+        "413 Payload Too Large",
+    );
+    assert_status(
+        &send(&format!("Content-Length: {}\r\n", "9".repeat(40))),
+        "413 Payload Too Large",
+    );
     stop.store(true, Ordering::Release);
     handle.join().unwrap();
 }

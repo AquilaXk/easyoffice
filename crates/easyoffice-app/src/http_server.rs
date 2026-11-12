@@ -209,6 +209,15 @@ fn write_http_413(stream: &mut TcpStream) {
     );
 }
 
+fn write_http_400_framing(stream: &mut TcpStream) {
+    write_http_response(
+        stream,
+        "400 Bad Request",
+        "application/json; charset=utf-8",
+        "{\"status\":\"bad_request\",\"message\":\"Content-Length 헤더가 올바르지 않습니다.\"}",
+    );
+}
+
 fn apply_remaining_read_timeout(stream: &TcpStream, deadline: Instant) -> bool {
     let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
         return false;
@@ -220,9 +229,25 @@ fn apply_remaining_read_timeout(stream: &TcpStream, deadline: Instant) -> bool {
     stream.set_read_timeout(Some(step_timeout)).is_ok()
 }
 
+/// CSP of the editor document. It names the origin the page was opened from instead of `'self'`:
+/// the editor frame has an opaque origin and WebKit does not match `'self'` there, so it would
+/// block the frame's scripts before any request (see `hwp_bundle::studio_csp_for_origin`). The
+/// origin comes from the `Host` header, which `forbidden_header_message` already limited to
+/// loopback names; without a usable one the page is taken to be at `127.0.0.1`.
+fn studio_csp_for_host(host: Option<&str>, port: u16) -> String {
+    let origin = host
+        .map(str::trim)
+        .filter(|host| is_allowed_host(host, port) && host.ends_with(&format!(":{port}")))
+        .map_or_else(
+            || format!("http://127.0.0.1:{port}"),
+            |host| format!("http://{host}"),
+        );
+    hwp_bundle::studio_csp_for_origin(&origin).unwrap_or_else(|| hwp_bundle::STUDIO_CSP.to_string())
+}
+
 /// Serves one file of the hwp-studio bundle (binary body, exact MIME type, iframe CSP). Anything
 /// that is not a plain file path inside the bundle, or a bundle that is not present, is a 404.
-fn write_bundle_file(stream: &mut TcpStream, request_path: &str) {
+fn write_bundle_file(stream: &mut TcpStream, request_path: &str, csp: &str) {
     let path_only = request_path.split(['?', '#']).next().unwrap_or("");
     let file =
         hwp_bundle::sanitize_relative_path(path_only).and_then(|rel| hwp_bundle::lookup(&rel));
@@ -231,7 +256,7 @@ fn write_bundle_file(stream: &mut TcpStream, request_path: &str) {
             stream,
             "200 OK",
             file.content_type,
-            hwp_bundle::STUDIO_CSP,
+            csp,
             hwp_bundle::STUDIO_CORS_HEADER,
             &file.bytes,
         ),
@@ -239,7 +264,7 @@ fn write_bundle_file(stream: &mut TcpStream, request_path: &str) {
             stream,
             "404 Not Found",
             "application/json; charset=utf-8",
-            hwp_bundle::STUDIO_CSP,
+            csp,
             hwp_bundle::STUDIO_CORS_HEADER,
             b"{\"status\":\"not_found\"}",
         ),
@@ -325,14 +350,33 @@ struct RequestHeaders {
     content_length: usize,
     host: Option<String>,
     origin: Option<String>,
+    /// The page's IPC client sent [`IPC_REQUEST_HEADER`].
+    ipc_marker: bool,
 }
 
-/// Parses the header lines; `None` when `Content-Length` is invalid or above `body_limit`.
+/// Why the header block was refused.
+enum HeaderError {
+    /// `Content-Length` above the body limit: 413.
+    TooLarge,
+    /// A `Content-Length` that is not plain digits or appears more than once: the message framing
+    /// is unreliable (RFC 9112 6.3), 400.
+    BadFraming,
+}
+
+/// Header of a `POST /api/ipc` request that only the page's own IPC client sends. A script on
+/// another origin cannot add a custom header without a CORS preflight, which this server never
+/// answers, so a request without it (an Origin-less one from a plain HTTP client included) is
+/// refused.
+const IPC_REQUEST_HEADER: &str = "x-easyoffice-ipc";
+
+/// Parses the header lines. A repeated `Content-Length` is refused even when the values agree: the
+/// one to trust would be a guess.
 fn parse_request_headers<'a>(
     lines: impl Iterator<Item = &'a str>,
     body_limit: usize,
-) -> Option<RequestHeaders> {
+) -> Result<RequestHeaders, HeaderError> {
     let mut headers = RequestHeaders::default();
+    let mut length_seen = false;
     for line in lines {
         let Some((k, v)) = line.split_once(':') else {
             continue;
@@ -340,23 +384,32 @@ fn parse_request_headers<'a>(
         let key = k.trim();
         let value = v.trim();
         if key.eq_ignore_ascii_case("content-length") {
+            if length_seen || value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit()) {
+                return Err(HeaderError::BadFraming);
+            }
+            length_seen = true;
             headers.content_length = value
                 .parse::<usize>()
                 .ok()
-                .filter(|&len| len <= body_limit)?;
+                .filter(|&len| len <= body_limit)
+                .ok_or(HeaderError::TooLarge)?;
         } else if key.eq_ignore_ascii_case("host") {
             headers.host = Some(value.to_string());
         } else if key.eq_ignore_ascii_case("origin") {
             headers.origin = Some(value.to_string());
+        } else if key.eq_ignore_ascii_case(IPC_REQUEST_HEADER) {
+            headers.ipc_marker = value == "1";
         }
     }
-    Some(headers)
+    Ok(headers)
 }
 
-/// Rejection message for a disallowed `Host` (any method) or `Origin` (POST only) header.
+/// Rejection message for a disallowed `Host` (any method) or `Origin` (POST only) header, or an IPC
+/// request that lacks the page's marker header.
 fn forbidden_header_message(
     headers: &RequestHeaders,
     method: &str,
+    path: &str,
     port: u16,
 ) -> Option<&'static str> {
     if headers
@@ -371,8 +424,16 @@ fn forbidden_header_message(
             .origin
             .as_deref()
             .is_some_and(|origin| !is_allowed_origin(origin, port));
-    bad_origin
-        .then_some("{\"status\":\"forbidden\",\"message\":\"허용되지 않은 Origin 헤더입니다.\"}")
+    if bad_origin {
+        return Some("{\"status\":\"forbidden\",\"message\":\"허용되지 않은 Origin 헤더입니다.\"}");
+    }
+    (method == "POST" && is_ipc_path(path) && !headers.ipc_marker)
+        .then_some("{\"status\":\"forbidden\",\"message\":\"IPC 요청 헤더가 없습니다.\"}")
+}
+
+/// Whether `path` addresses the IPC endpoint (launch parameters after `?` do not matter).
+fn is_ipc_path(path: &str) -> bool {
+    path.split('?').next() == Some("/api/ipc")
 }
 
 fn handle_http_connection(stream: &mut TcpStream, port: u16, ipc_handler: &IpcDispatchFn) {
@@ -394,16 +455,18 @@ fn handle_http_connection(stream: &mut TcpStream, port: u16, ipc_handler: &IpcDi
     let mut parts = req_line.split_whitespace();
     let method = parts.next().unwrap_or("GET");
     let path = parts.next().unwrap_or("/");
-    let body_limit = if method == "POST" && path == "/api/ipc" {
+    let body_limit = if method == "POST" && is_ipc_path(path) {
         MAX_IPC_HTTP_BODY_BYTES
     } else {
         MAX_HTTP_BODY_BYTES
     };
 
-    let Some(headers) = parse_request_headers(lines, body_limit) else {
-        return write_http_413(stream);
+    let headers = match parse_request_headers(lines, body_limit) {
+        Ok(headers) => headers,
+        Err(HeaderError::TooLarge) => return write_http_413(stream),
+        Err(HeaderError::BadFraming) => return write_http_400_framing(stream),
     };
-    if let Some(message) = forbidden_header_message(&headers, method, port) {
+    if let Some(message) = forbidden_header_message(&headers, method, path, port) {
         return write_http_response(
             stream,
             "403 Forbidden",
@@ -425,7 +488,11 @@ fn handle_http_connection(stream: &mut TcpStream, port: u16, ipc_handler: &IpcDi
     let body_slice = &buf[header_end..header_end + content_length];
 
     if method == "GET" && path.starts_with(hwp_bundle::BUNDLE_URL_PREFIX) {
-        write_bundle_file(stream, path);
+        write_bundle_file(
+            stream,
+            path,
+            &studio_csp_for_host(headers.host.as_deref(), port),
+        );
         return;
     }
 

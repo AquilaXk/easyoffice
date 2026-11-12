@@ -39,7 +39,7 @@ pub fn studio_csp_for_origin(origin: &str) -> Option<String> {
     let authority_ok = !authority.is_empty()
         && authority
             .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':'));
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']'));
     (scheme_ok && authority_ok).then(|| STUDIO_CSP.replace("'self'", origin))
 }
 
@@ -272,6 +272,7 @@ mod tests {
             STUDIO_CSP.replace("'self'", "http://tauri.localhost")
         );
         assert!(studio_csp_for_origin("http://127.0.0.1:8080").is_some());
+        assert!(studio_csp_for_origin("http://[::1]:8080").is_some());
         for bad in [
             "",
             "localhost",

@@ -45,7 +45,7 @@ fn send_raw_http_request(port: u16, raw_request: &[u8], timeout: Duration) -> St
 
 fn ipc_post(port: u16, body: &[u8]) -> Vec<u8> {
     let mut raw = format!(
-        "POST /api/ipc HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        "POST /api/ipc HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\nX-EasyOffice-Ipc: 1\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         body.len()
     )
     .into_bytes();
@@ -101,7 +101,7 @@ fn test_large_workbook_recalc_over_http_and_bounded_413() {
     assert!(resp.contains("\"Sheet1!B4000\":\"8002000\""));
 
     let oversized_ipc = format!(
-        "POST /api/ipc HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        "POST /api/ipc HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\nX-EasyOffice-Ipc: 1\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         MAX_IPC_HTTP_BODY_BYTES + 1
     );
     let resp_413 = send_raw_http_request(port, oversized_ipc.as_bytes(), Duration::from_secs(5));
