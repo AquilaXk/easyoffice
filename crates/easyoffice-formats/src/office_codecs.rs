@@ -4,7 +4,8 @@ pub use crate::rtf_xml_helpers::*;
 use crate::sheet_styling::sheet_rules::xlsx_rules::{
     parse_dxf_styles, parse_worksheet_rules, rules_xml,
 };
-use crate::sheet_styling::xlsx_layout::{layout_cols_xml, merge_cells_xml, run_contains};
+use crate::sheet_styling::xlsx_filter::autofilter_xml;
+use crate::sheet_styling::xlsx_layout::{layout_cols_xml, merge_cells_xml};
 use crate::sheet_styling::xlsx_sheet::{read_shared_strings, scan_worksheet, SharedStrings};
 use crate::sheet_styling::xlsx_styles::{parse_cell_xf_styles, XfStyles, XlsxStyleTable};
 use crate::sheet_styling::{IdMemo, SheetStyling};
@@ -224,7 +225,8 @@ fn group_cells_by_row<'a>(
                 rows_map.entry(row).or_default().push((col, blank));
             }
         }
-        for &(start, end) in &st.hidden_rows {
+        let filtered = st.filter.iter().flat_map(|f| f.hidden.iter());
+        for &(start, end) in st.hidden_rows.iter().chain(filtered) {
             for row in start..=end {
                 rows_map.entry(row).or_default();
             }
@@ -256,7 +258,7 @@ fn build_sheet_xml(
     for (row, mut row_cells) in rows_map {
         row_cells.sort_by_key(|(col, _)| *col);
         let row_num = row.saturating_add(1);
-        let hidden = styling.is_some_and(|st| run_contains(&st.hidden_rows, row));
+        let hidden = styling.is_some_and(|st| st.row_hidden(row));
         let _ = write!(
             sheet_xml,
             "<row r=\"{row_num}\"{}>",
@@ -276,6 +278,9 @@ fn build_sheet_xml(
     }
     sheet_xml.push_str("</sheetData>");
     if let Some(st) = styling {
+        if let Some(filter) = &st.filter {
+            sheet_xml.push_str(&autofilter_xml(filter));
+        }
         sheet_xml.push_str(&merge_cells_xml(&st.merges));
         sheet_xml.push_str(&rules_xml(&st.rules, &style_table.dxf));
     }
@@ -544,7 +549,13 @@ impl OoxmlCodec {
                     .iter()
                     .any(|c| c.1 >= Self::MAX_XLSX_COLS)
                 || styling.merges.len() > crate::MAX_MERGES
-                || crate::run_total(&styling.hidden_rows) > crate::MAX_HIDDEN_ROWS;
+                || crate::run_total(&styling.hidden_rows) > crate::MAX_HIDDEN_ROWS
+                || styling.filter.as_ref().is_some_and(|f| {
+                    !f.within_bounds()
+                        || f.range.row1 >= Self::MAX_XLSX_ROWS
+                        || f.range.col1 >= Self::MAX_XLSX_COLS
+                        || f.hidden.iter().any(|r| r.1 >= f.range.row1)
+                });
             if layout {
                 return Err(EasyOfficeError::ResourceBudgetExceeded(
                     "XLSX 병합·숨김 범위가 허용 범위를 초과했습니다.".to_string(),

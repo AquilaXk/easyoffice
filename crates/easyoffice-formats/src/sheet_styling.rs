@@ -14,10 +14,14 @@ pub(crate) mod ods_grid;
 pub(crate) mod ods_numfmt;
 #[path = "ods_styles.rs"]
 pub(crate) mod ods_styles;
+#[path = "sheet_filter.rs"]
+pub(crate) mod sheet_filter;
 #[path = "sheet_numfmt.rs"]
 pub(crate) mod sheet_numfmt;
 #[path = "sheet_rules.rs"]
 pub(crate) mod sheet_rules;
+#[path = "xlsx_filter.rs"]
+pub(crate) mod xlsx_filter;
 #[path = "xlsx_layout.rs"]
 pub(crate) mod xlsx_layout;
 #[path = "xlsx_sheet.rs"]
@@ -25,6 +29,7 @@ pub(crate) mod xlsx_sheet;
 #[path = "xlsx_styles.rs"]
 pub(crate) mod xlsx_styles;
 
+pub use sheet_filter::*;
 pub use sheet_numfmt::*;
 pub use sheet_rules::*;
 pub use xlsx_layout::{normalize_runs, run_total, MAX_HIDDEN_ROWS, MAX_MERGES};
@@ -165,6 +170,8 @@ pub struct SheetStyling {
     /// Hidden rows and columns as sorted, disjoint, zero-based inclusive runs.
     pub hidden_rows: Vec<(u32, u32)>,
     pub hidden_cols: Vec<(u32, u32)>,
+    /// The auto filter (PD-198). The rows it hides are `filter.hidden`, apart from `hidden_rows`.
+    pub filter: Option<SheetFilter>,
 }
 
 impl SheetStyling {
@@ -175,6 +182,13 @@ impl SheetStyling {
             && self.merges.is_empty()
             && self.hidden_rows.is_empty()
             && self.hidden_cols.is_empty()
+            && self.filter.is_none()
+    }
+
+    /// Whether the user or the filter hides `row`.
+    pub fn row_hidden(&self, row: u32) -> bool {
+        xlsx_layout::run_contains(&self.hidden_rows, row)
+            || self.filter.as_ref().is_some_and(|f| f.hides(row))
     }
 }
 

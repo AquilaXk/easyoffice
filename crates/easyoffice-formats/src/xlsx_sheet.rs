@@ -14,6 +14,7 @@ use std::collections::HashMap;
 
 use crate::decode_budget::DecodeBudget;
 use crate::rtf_xml_helpers::{format_col_letters, parse_a1_zero_based};
+use crate::sheet_styling::xlsx_filter::FilterScan;
 use crate::sheet_styling::xlsx_layout::{add_run, has_room, parse_merge};
 use crate::sheet_styling::xlsx_styles::xlsx_width_to_px;
 use crate::sheet_styling::{CellStyle, SheetStyling, MAX_STYLED_CELLS};
@@ -504,7 +505,11 @@ pub(crate) fn scan_worksheet(
     };
     let mut reader = XmlReader::unbounded(sheet_xml);
     let mut cell: Option<CellState<'_>> = None;
+    let mut filter = FilterScan::new();
     while let Some(event) = reader.next_event()? {
+        if want_styling {
+            filter.feed(&event);
+        }
         match event {
             XmlEvent::Start {
                 name: "c",
@@ -538,6 +543,7 @@ pub(crate) fn scan_worksheet(
             }
         }
     }
+    scanner.styling.filter = filter.finish();
     Ok(WorksheetScan {
         cells: scanner.cells,
         styling: scanner.styling,
