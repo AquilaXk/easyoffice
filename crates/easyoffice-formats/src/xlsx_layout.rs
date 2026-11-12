@@ -36,17 +36,22 @@ pub(crate) fn add_run(runs: &mut Vec<(u32, u32)>, start: u32, end: u32) {
         }
         Some(_) => {
             runs.push((start, end));
-            runs.sort_unstable();
-            let mut merged: Vec<(u32, u32)> = Vec::with_capacity(runs.len());
-            for &(s, e) in runs.iter() {
-                match merged.last_mut() {
-                    Some(last) if s <= last.1.saturating_add(1) => last.1 = last.1.max(e),
-                    _ => merged.push((s, e)),
-                }
-            }
-            *runs = merged;
+            normalize_runs(runs);
         }
     }
+}
+
+/// Sorts `runs` and joins overlapping or touching ones.
+pub fn normalize_runs(runs: &mut Vec<(u32, u32)>) {
+    runs.sort_unstable();
+    let mut merged: Vec<(u32, u32)> = Vec::with_capacity(runs.len());
+    for &(s, e) in runs.iter() {
+        match merged.last_mut() {
+            Some(last) if s <= last.1.saturating_add(1) => last.1 = last.1.max(e),
+            _ => merged.push((s, e)),
+        }
+    }
+    *runs = merged;
 }
 
 /// Whether `index` lies in `runs`.

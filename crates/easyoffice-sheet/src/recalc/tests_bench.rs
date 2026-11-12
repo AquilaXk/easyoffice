@@ -140,7 +140,7 @@ fn graph_memory_bench() {
 #[test]
 #[ignore = "measurement harness"]
 fn axis_edit_bench() {
-    use crate::axis::{Axis, AxisEdit, EditKind};
+    use crate::axis::{Axis, AxisBudget, AxisEdit, EditKind};
     use std::time::Duration;
     let rows = 100_000u32;
     let build_sheet = || {
@@ -167,7 +167,7 @@ fn axis_edit_bench() {
         let mut wb = build_sheet();
         let t = Instant::now();
         let report = wb
-            .apply_axis_edit("Sheet1", edit, Duration::from_secs(30))
+            .apply_axis_edit("Sheet1", edit, AxisBudget::within(Duration::from_secs(30)))
             .unwrap();
         let engine_ms = t.elapsed().as_secs_f64() * 1e3;
 
@@ -175,7 +175,7 @@ fn axis_edit_bench() {
         session.recalculate();
         let t = Instant::now();
         let (_, outcome) = session
-            .apply_axis_edit("Sheet1", edit, Duration::from_secs(30))
+            .apply_axis_edit("Sheet1", edit, AxisBudget::within(Duration::from_secs(30)))
             .unwrap();
         let session_ms = t.elapsed().as_secs_f64() * 1e3;
         println!(

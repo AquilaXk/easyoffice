@@ -17,7 +17,8 @@ use crate::sheet_rules_json::{parse_rules, visuals_json};
 use crate::EasyOfficeIpcRouter;
 use easyoffice_formats::{DvAlert, EasyOfficeError, SheetRules, StrictJsonValue};
 use easyoffice_sheet::{
-    Budget, CellChange, PackedCellCoordinate, RecalcError, RecalcSession, Verdict, WorkbookEngine,
+    AxisBudget, AxisEdit, Budget, CellChange, ChangedCell, PackedCellCoordinate, RecalcError,
+    RecalcSession, Verdict, WorkbookEngine,
 };
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
@@ -103,6 +104,28 @@ struct Inner {
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// `[{"sheet","cell","value"}, ...]` for the formula cells of `changed`.
+pub(crate) fn write_changed(out: &mut String, session: &RecalcSession, changed: &[ChangedCell]) {
+    out.push('[');
+    for (i, c) in changed.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        out.push_str("{\"sheet\":\"");
+        out.push_str(&EasyOfficeIpcRouter::escape_json_str(
+            session.sheet_name(c.sheet).unwrap_or_default(),
+        ));
+        out.push_str("\",\"cell\":\"");
+        out.push_str(&c.coord.to_a1());
+        out.push_str("\",\"value\":\"");
+        out.push_str(&EasyOfficeIpcRouter::escape_json_str(
+            &c.value.to_display_string(),
+        ));
+        out.push_str("\"}");
+    }
+    out.push(']');
 }
 
 impl Registry {
@@ -305,25 +328,10 @@ impl Registry {
             let mut out = String::with_capacity(64 + outcome.changed.len() * 40);
             out.push_str("{\"session\":\"");
             out.push_str(id);
-            out.push_str("\",\"changed\":[");
-            for (i, c) in outcome.changed.iter().enumerate() {
-                if i > 0 {
-                    out.push(',');
-                }
-                out.push_str("{\"sheet\":\"");
-                out.push_str(&EasyOfficeIpcRouter::escape_json_str(
-                    session.sheet_name(c.sheet).unwrap_or_default(),
-                ));
-                out.push_str("\",\"cell\":\"");
-                out.push_str(&c.coord.to_a1());
-                out.push_str("\",\"value\":\"");
-                out.push_str(&EasyOfficeIpcRouter::escape_json_str(
-                    &c.value.to_display_string(),
-                ));
-                out.push_str("\"}");
-            }
+            out.push_str("\",\"changed\":");
+            write_changed(&mut out, &session, &outcome.changed);
             out.push_str(&format!(
-                "],\"circular\":{},\"recomputed\":{}",
+                ",\"circular\":{},\"recomputed\":{}",
                 outcome.circular, outcome.recomputed
             ));
             let rule_updates = session.rule_updates(changes, &outcome);
@@ -364,6 +372,45 @@ impl Registry {
         } else {
             format!("{{\"session\":\"{id}\",\"staged\":{}}}", changes.len())
         };
+        let after = session.footprint();
+        drop(session);
+        if let Some(entry) = lock(&self.inner).sessions.get_mut(id) {
+            entry.cells = after.cells;
+            entry.bytes = after.total_bytes();
+        }
+        Ok(Applied::Done(json))
+    }
+
+    /// Inserts or deletes rows or columns of `sheet` in the session (see `sheet_structure_ipc`).
+    /// The answer lists the formula texts the edit rewrote and the values that changed.
+    pub(crate) fn structure(
+        &self,
+        id: &str,
+        owner: &str,
+        sheet: &str,
+        edit: AxisEdit,
+        now: Instant,
+    ) -> Result<Applied, EasyOfficeError> {
+        let Some(handle) = self.checkout(id, owner, now) else {
+            return Ok(Applied::Expired);
+        };
+        let Ok(mut session) = handle.lock() else {
+            lock(&self.inner).sessions.remove(id);
+            return Ok(Applied::Expired);
+        };
+        let (report, outcome) = match session.apply_axis_edit(sheet, edit, AxisBudget::default()) {
+            Ok(done) => done,
+            Err(RecalcError::Invalid(EasyOfficeError::ResourceBudgetExceeded(_))) => {
+                return Ok(Applied::Done(REFUSED_STRUCTURE.to_string()));
+            }
+            Err(RecalcError::Invalid(err)) => return Err(err),
+            Err(RecalcError::OverBudget) => {
+                drop(session);
+                lock(&self.inner).sessions.remove(id);
+                return Ok(Applied::Refused);
+            }
+        };
+        let json = crate::sheet_structure_ipc::session_answer(id, &session, &report, &outcome);
         let after = session.footprint();
         drop(session);
         if let Some(entry) = lock(&self.inner).sessions.get_mut(id) {
@@ -430,7 +477,7 @@ fn fresh_id(counter: u64) -> String {
     format!("ss{hi:016x}{lo:016x}")
 }
 
-fn registry() -> &'static Registry {
+pub(crate) fn registry() -> &'static Registry {
     static REGISTRY: OnceLock<Registry> = OnceLock::new();
     REGISTRY.get_or_init(|| Registry::new(LIMITS))
 }
@@ -440,11 +487,13 @@ pub fn close_sheet_sessions_of(owner: &str) -> usize {
     registry().close_owner(owner)
 }
 
-const EXPIRED: &str = "{\"expired\":true}";
-const REFUSED: &str = "{\"refused\":\"limit\"}";
+pub(crate) const EXPIRED: &str = "{\"expired\":true}";
+pub(crate) const REFUSED: &str = "{\"refused\":\"limit\"}";
 const REFUSED_RULES: &str = "{\"refused\":\"rules\"}";
+/// The edit changes too many formulas (or takes too long); the session is unchanged.
+const REFUSED_STRUCTURE: &str = "{\"refused\":\"structure\"}";
 
-fn session_id(entries: &[(String, StrictJsonValue)]) -> Result<&str, EasyOfficeError> {
+pub(crate) fn session_id(entries: &[(String, StrictJsonValue)]) -> Result<&str, EasyOfficeError> {
     EasyOfficeIpcRouter::optional_json_str(entries, "session")?
         .filter(|id| !id.is_empty())
         .ok_or_else(|| {
@@ -497,6 +546,8 @@ impl EasyOfficeIpcRouter {
     /// - `rules` `{session, sheet, rules:{cf,dv}}` -> `{cf}`: the packed appearance of every
     ///   formatted cell of the sheet. Later `apply` answers carry `cf` for the cells whose
     ///   appearance changed (PD-171).
+    /// - `structure` `{session, sheet, axis, op, at, count, ...}` -> the rewritten formulas and the
+    ///   moved layout and rules (see `sheet_structure_ipc`).
     /// - `validate` `{session, sheet, cell, value}` -> `{ok}` or the rule's alert.
     /// - `pivot` `{sheet, cells, range, row, col?, value, agg}` -> the grouped values (no
     ///   session needed, see `sheet_pivot_ipc`).
@@ -512,6 +563,7 @@ impl EasyOfficeIpcRouter {
             "open" => Self::sheet_session_open(entries, owner),
             "apply" => Self::sheet_session_apply(entries, owner),
             "rules" => Self::sheet_session_rules(entries, owner),
+            "structure" => Self::sheet_session_structure(entries, owner),
             "validate" => Self::sheet_session_validate(entries, owner),
             "pivot" => Self::sheet_pivot(entries),
             "format" => Self::sheet_format(entries),

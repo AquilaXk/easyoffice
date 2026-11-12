@@ -569,6 +569,7 @@ fn parse_sheets(
         if let Some(v) = field(obj, "rules") {
             styling.rules = crate::sheet_rules_json::parse_rules(v)?;
         }
+        crate::sheet_layout_json::parse_layout(obj, &mut styling)?;
         sheets.push((
             name,
             cells.into_iter().map(|((r, c), raw)| (r, c, raw)).collect(),

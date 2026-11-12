@@ -6,29 +6,24 @@
 //! outcome lists only the formula cells whose value differs from what the page already shows.
 
 use super::{RecalcError, RecalcOutcome, RecalcSession};
-use crate::axis::{AxisEdit, AxisEditReport};
+use crate::axis::{AxisBudget, AxisEdit, AxisEditReport};
 use crate::{MemoTable, WorkbookEngine};
-use std::time::Duration;
-
-/// Longest a row or column edit may spend rewriting formula references.
-pub const AXIS_EDIT_TIME_BUDGET: Duration = Duration::from_secs(5);
-
 impl RecalcSession {
     /// Applies `edit` to `sheet`. Fails without changing the session when the edit is refused
-    /// (unknown sheet, a cell would leave the sheet, too many formulas for `time_budget`).
+    /// (unknown sheet, a cell would leave the sheet, too many formulas for `budget`).
     /// A rebuilt graph that outgrows the session's budget makes the session unusable and answers
     /// [`RecalcError::OverBudget`].
     pub fn apply_axis_edit(
         &mut self,
         sheet: &str,
         edit: AxisEdit,
-        time_budget: Duration,
+        budget: AxisBudget,
     ) -> Result<(AxisEditReport, RecalcOutcome), RecalcError> {
         if self.over_budget {
             return Err(RecalcError::OverBudget);
         }
         let target = self.sheet_index(sheet)?;
-        let report = self.wb.apply_axis_edit(sheet, edit, time_budget)?;
+        let report = self.wb.apply_axis_edit(sheet, edit, budget)?;
         let wb = std::mem::replace(&mut self.wb, WorkbookEngine::new());
         let old_memo = std::mem::replace(&mut self.memo, MemoTable::new(1));
         let mut next = match RecalcSession::with_budget(wb, self.budget) {

@@ -2,7 +2,7 @@
 //! from the edited workbook.
 
 use super::*;
-use crate::axis::{Axis, AxisEdit, AxisEditReport, EditKind};
+use crate::axis::{Axis, AxisBudget, AxisEdit, AxisEditReport, EditKind};
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -60,7 +60,7 @@ fn fresh_values(s: &RecalcSession) -> HashMap<(String, String), String> {
 
 fn edit_ok(s: &mut RecalcSession, sheet: &str, e: AxisEdit) -> (AxisEditReport, RecalcOutcome) {
     let out = s
-        .apply_axis_edit(sheet, e, Duration::from_secs(30))
+        .apply_axis_edit(sheet, e, AxisBudget::within(Duration::from_secs(30)))
         .unwrap();
     assert_eq!(values(s), fresh_values(s), "{e:?}");
     out
@@ -143,7 +143,7 @@ fn a_refused_edit_changes_nothing() {
     let err = s.apply_axis_edit(
         "S",
         row_edit(EditKind::Insert, 1, 1),
-        Duration::from_secs(5),
+        AxisBudget::within(Duration::from_secs(5)),
     );
     assert!(err.is_err());
     assert_eq!(raw(&s, "S", "A1048576").as_deref(), Some("9"));
@@ -152,7 +152,7 @@ fn a_refused_edit_changes_nothing() {
         .apply_axis_edit(
             "Nope",
             row_edit(EditKind::Insert, 1, 1),
-            Duration::from_secs(5)
+            AxisBudget::within(Duration::from_secs(5))
         )
         .is_err());
 
@@ -162,7 +162,11 @@ fn a_refused_edit_changes_nothing() {
             .unwrap();
     }
     many.recalculate();
-    let err = many.apply_axis_edit("S", row_edit(EditKind::Insert, 1, 1), Duration::ZERO);
+    let err = many.apply_axis_edit(
+        "S",
+        row_edit(EditKind::Insert, 1, 1),
+        AxisBudget::within(Duration::ZERO),
+    );
     assert!(matches!(err, Err(RecalcError::Invalid(_))));
     assert_eq!(raw(&many, "S", "A1").as_deref(), Some("=B1"));
 }
@@ -255,7 +259,7 @@ fn insertions_never_change_what_a_formula_shows() {
             let axis = if rnd(3) == 0 { Axis::Col } else { Axis::Row };
             let sheet = ["S", "T"][rnd(2) as usize];
             let e = AxisEdit::new(axis, EditKind::Insert, rnd(8), rnd(3) + 1).unwrap();
-            s.apply_axis_edit(sheet, e, Duration::from_secs(30))
+            s.apply_axis_edit(sheet, e, AxisBudget::within(Duration::from_secs(30)))
                 .unwrap();
             let after = values(&s);
             assert_eq!(before.len(), after.len());

@@ -21,7 +21,7 @@ mod apply;
 mod formula;
 mod layout;
 
-pub use apply::AxisEditReport;
+pub use apply::{AxisBudget, AxisEditReport};
 pub use formula::rewrite_formula_refs;
 pub use layout::{shift_boxes, shift_runs, shift_widths};
 

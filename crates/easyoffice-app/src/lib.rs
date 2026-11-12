@@ -36,11 +36,15 @@ pub mod self_test;
 mod sheet_format_ipc;
 #[cfg(test)]
 mod sheet_ipc_tests;
+mod sheet_layout_json;
 mod sheet_pivot_ipc;
 #[cfg(test)]
 mod sheet_rules_ipc_tests;
 mod sheet_rules_json;
 mod sheet_session;
+mod sheet_structure_ipc;
+#[cfg(test)]
+mod sheet_structure_ipc_tests;
 pub mod smart_tools;
 
 pub use benchmark::*;

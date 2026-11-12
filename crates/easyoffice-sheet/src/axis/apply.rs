@@ -13,6 +13,32 @@ use std::time::{Duration, Instant};
 /// Formulas scanned between two looks at the clock.
 const CLOCK_STRIDE: usize = 1_024;
 
+/// Limits of one edit: the time the formula rewrite may take and the most formulas it may change
+/// (the page receives every changed formula text).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AxisBudget {
+    pub time: Duration,
+    pub max_rewrites: usize,
+}
+
+impl Default for AxisBudget {
+    fn default() -> Self {
+        Self {
+            time: Duration::from_secs(5),
+            max_rewrites: 500_000,
+        }
+    }
+}
+
+impl AxisBudget {
+    pub const fn within(time: Duration) -> Self {
+        Self {
+            time,
+            max_rewrites: 500_000,
+        }
+    }
+}
+
 /// What an applied edit did to the workbook.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AxisEditReport {
@@ -53,12 +79,13 @@ impl SheetEngine {
 impl WorkbookEngine {
     /// Inserts or deletes rows or columns of `sheet`. Formulas that point at the sheet follow the
     /// move (see [`rewrite_formula_refs`]). Fails, changing nothing, when the sheet is unknown,
-    /// an insertion would push a cell off the sheet, or the rewrite outruns `budget`.
+    /// an insertion would push a cell off the sheet, or the rewrite outruns `budget` (time or the
+    /// number of formulas it changes).
     pub fn apply_axis_edit(
         &mut self,
         sheet: &str,
         edit: AxisEdit,
-        budget: Duration,
+        budget: AxisBudget,
     ) -> Result<AxisEditReport, EasyOfficeError> {
         let target = self.find_sheet_index(sheet).ok_or_else(|| {
             EasyOfficeError::InvalidArgument(format!("시트를 찾을 수 없습니다: {sheet}"))
@@ -81,7 +108,7 @@ impl WorkbookEngine {
                     continue;
                 }
                 scanned += 1;
-                if scanned % CLOCK_STRIDE == 0 && started.elapsed() > budget {
+                if scanned % CLOCK_STRIDE == 0 && started.elapsed() > budget.time {
                     return Err(EasyOfficeError::ResourceBudgetExceeded(
                         "수식이 너무 많아 제한 시간 안에 참조를 옮기지 못했습니다.".to_string(),
                     ));
@@ -89,6 +116,12 @@ impl WorkbookEngine {
                 if let Some(new) =
                     rewrite_formula_refs(raw, &engine.name, &target_name, &edit, false)
                 {
+                    if rewrites.len() >= budget.max_rewrites {
+                        return Err(EasyOfficeError::ResourceBudgetExceeded(
+                            "바뀌는 수식이 너무 많아 행·열을 삽입하거나 삭제할 수 없습니다."
+                                .to_string(),
+                        ));
+                    }
                     rewrites.push((si, coord, new));
                 }
             }

@@ -27,7 +27,7 @@ pub(crate) mod xlsx_styles;
 
 pub use sheet_numfmt::*;
 pub use sheet_rules::*;
-pub use xlsx_layout::{run_total, MAX_HIDDEN_ROWS, MAX_MERGES};
+pub use xlsx_layout::{normalize_runs, run_total, MAX_HIDDEN_ROWS, MAX_MERGES};
 
 use crate::{DocumentFormat, EasyOfficeError, OdfCodec, OoxmlCodec};
 
