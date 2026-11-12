@@ -944,6 +944,7 @@
       MAX_COLS,
       ROW_H,
       ROW_HEAD_W,
+      HEAD_H, rowTop,
       DEFAULT_COL_W,
       colName,
       colIndex,

@@ -557,6 +557,9 @@ select:focus-visible,
 .sheet-grid td.merge-anchor.in-range::after { background: var(--ui-accent-bg-light); }
 .sheet-grid td.merge-anchor.selected-cell { outline: none; }
 .sheet-grid td.merge-anchor.selected-cell::after { outline: 2px solid var(--accent-strong); outline-offset: -2px; background: var(--ui-surface); }
+/* Fill handle (sheet-fill-ui.js): the reference editor's object handle (8px square, `table-object-renderer.ts:80`; `table-selection.css:56-61` fill and paper-colour edge: a 6px box and a 1px outline) at the corner of the selection, and the outline of the cells a drag would fill. */
+.sheet-viewport .sheet-fill-handle { position: absolute; z-index: 4; width: 6px; height: 6px; background: var(--table-selection-stroke); outline: 1px solid var(--doc-paper); cursor: crosshair; }
+.sheet-viewport .sheet-fill-preview { position: absolute; z-index: 3; outline: 2px dashed var(--table-selection-stroke); outline-offset: -2px; pointer-events: none; }
 #pane-hwp:not([hidden]) { display: flex; flex-direction: column; position: relative; height: 100%; min-height: 0; overflow: hidden; }
 /* Drop highlight while a file is dragged over the window; the reference editor's value (`editor.css` 83-87). */
 .editor-pane.drag-over { background: var(--ui-selected); outline: 3px dashed var(--focus-ring); outline-offset: -3px; }

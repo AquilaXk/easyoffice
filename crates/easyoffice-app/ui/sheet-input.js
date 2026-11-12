@@ -87,6 +87,19 @@
       commitIfEditing: () => commitIfEditing(),
       kit: host.__EASYOFFICE_CREATE_SHEET_DIALOG_KIT__(document),
     });
+    const fill = host.__EASYOFFICE_CREATE_SHEET_FILL_UI__({
+      document,
+      grid,
+      getRange: () => getRange(),
+      getAxis: () => sel.axis,
+      getEntry: (ref) => api.getEntry(ref),
+      getSheetName: () => api.getSheetName(),
+      applyCellEdits: (edits, label) => api.applyCellEdits(edits, label),
+      setRange: (rg) => setRange(rg),
+      commitIfEditing: () => commitIfEditing(),
+      shiftFormula: clip.shiftFormula,
+      feedback,
+    });
 
     const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
     const viewport = () => document.getElementById("sheet-viewport");
@@ -156,6 +169,7 @@
       const rg = getRange();
       if (typeof grid.paintSelectionRange === "function") {
         grid.paintSelectionRange({ r1: rg.r1, r2: rg.r2, c1: rg.c1, c2: rg.c2, ar: sel.ar, ac: sel.ac });
+        fill.sync();
         return;
       }
       const multi = rg.r1 !== rg.r2 || rg.c1 !== rg.c2;
@@ -263,6 +277,15 @@
       grid.ensureVisible(r, c);
       focusAnchor();
       refreshChrome();
+    }
+
+    // Selects a range (the cells of a fill) with its first cell as the anchor.
+    function setRange(rg) {
+      sel.axis = null;
+      sel.ar = rg.r1;
+      sel.ac = rg.c1;
+      sel.cr = rg.r2;
+      sel.cc = rg.c2;
     }
 
     // Selects whole rows or columns (a click on a header; `extend` grows the selection to `index`).
@@ -642,13 +665,17 @@
         grid.applyColWidth(resize.col, resize.startW + (ev.clientX - resize.startX));
         return;
       }
-      if (drag) autoScroll(ev);
+      if (drag || fill.isDragging()) autoScroll(ev);
     }
 
     function onMouseOver(ev) {
-      if (!drag || resize) return;
+      if ((!drag && !fill.isDragging()) || resize) return;
       const td = gridTdOf(ev.target);
       const p = td ? grid.parseRef(td.dataset.cell) : null;
+      if (fill.isDragging()) {
+        if (p) fill.over(p.row, p.col);
+        return;
+      }
       if (p && (p.row !== sel.cr || p.col !== sel.cc)) {
         sel.cr = p.row;
         sel.cc = p.col;
