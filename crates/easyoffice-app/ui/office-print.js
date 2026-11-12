@@ -17,6 +17,7 @@
   const PORTRAIT_MM = { width: 210, height: 297 };
   const LANDSCAPE_MM = { width: 297, height: 210 };
   const DOC_MARGIN_MM = 20;
+  const PX_PER_INCH = 96;
   const SHEET_MARGIN_MM = 10;
   const WIDE_SHEET_COLUMNS = 8;
   // A sheet range past this many cells is refused instead of building the table (fail-closed).
@@ -42,8 +43,21 @@
     const printWindow = deps.print || (() => (bridge?.isAvailable() ? bridge.windowCommand("printWebview") : env.print()));
     let printed = null;
 
-    function addPageRule(rules, size, marginMm) {
-      rules.sheet.insertRule("@page { size: " + size.width + "mm " + size.height + "mm; margin: " + marginMm + "mm; }", rules.sheet.cssRules.length);
+    function addPageRule(rules, size, margin) {
+      rules.sheet.insertRule("@page { size: " + size.width + "mm " + size.height + "mm; margin: " + margin + "; }", rules.sheet.cssRules.length);
+    }
+
+    // The paper and margins the screen draws its pages with (`doc-pages-core.js`), so the browser breaks the same lines
+    // onto the same pages; A4 with 20 mm margins when the window gives no padding.
+    function documentPage(editor) {
+      const cs = env.getComputedStyle?.(editor);
+      const pads = ["paddingTop", "paddingRight", "paddingBottom", "paddingLeft"].map((key) => Number.parseFloat(cs?.[key]));
+      const pages = host.__EASYOFFICE_DOC_PAGES_CORE__;
+      if (!pages || !pads.every(Number.isFinite)) return { size: PORTRAIT_MM, margin: DOC_MARGIN_MM + "mm" };
+      const [top, right, bottom, left] = pads;
+      const geo = pages.pageGeometry({ ...pages.paperOf(editor), padding: { top, right, bottom, left } });
+      const mm = (px) => Math.round((px * 25.4 * 100) / PX_PER_INCH) / 100;
+      return { size: { width: mm(geo.width), height: mm(geo.height) }, margin: pads.map((px) => mm(px) + "mm").join(" ") };
     }
 
     // ---- document ---------------------------------------------------------------------------
@@ -52,13 +66,23 @@
     function cloneEditorContent(editor) {
       const flow = document.createElement("div");
       flow.className = FLOW_CLASS;
-      for (const child of editor.childNodes) flow.appendChild(child.cloneNode(true));
+      for (const child of editor.childNodes) {
+        if (!child.classList?.contains("doc-page-layer")) flow.appendChild(child.cloneNode(true));
+      }
       for (const el of flow.querySelectorAll("[id], [contenteditable]")) {
         el.removeAttribute("id");
         el.removeAttribute("contenteditable");
       }
       for (const el of flow.querySelectorAll("script, .doc-table-toolbar")) el.remove();
       return flow;
+    }
+
+    // The editor's line height is a factor of each block's own font size (a heading's lines are taller than the body's), but
+    // the computed value is in px; the factor keeps the flow's headings the height the screen gives them.
+    function lineHeightFactor(lineHeight, fontSize) {
+      const lh = Number.parseFloat(lineHeight);
+      const fs = Number.parseFloat(fontSize);
+      return String(lineHeight).endsWith("px") && lh > 0 && fs > 0 ? String(Math.round((lh / fs) * 10000) / 10000) : lineHeight;
     }
 
     // The editor's text face carries over to the flow through the stylesheet (no style attribute).
@@ -69,14 +93,15 @@
       const style = rules.sheet.cssRules[rules.sheet.cssRules.length - 1].style;
       for (const prop of ["font-family", "font-size", "line-height", "text-align"]) {
         const value = computed.getPropertyValue(prop);
-        if (value) style.setProperty(prop, value);
+        if (value) style.setProperty(prop, prop === "line-height" ? lineHeightFactor(value, computed.getPropertyValue("font-size")) : value);
       }
     }
 
     function buildDocument(rules) {
       const editor = document.getElementById("doc-editor");
       if (!editor) throw new Error(MSG_UNSUPPORTED);
-      addPageRule(rules, PORTRAIT_MM, DOC_MARGIN_MM);
+      const page = documentPage(editor);
+      addPageRule(rules, page.size, page.margin);
       addTypeface(rules, editor);
       return [cloneEditorContent(editor)];
     }
@@ -133,7 +158,7 @@
         td.className = cellClasses(entry, text);
       }
       table.appendChild(body);
-      addPageRule(rules, cols > WIDE_SHEET_COLUMNS ? LANDSCAPE_MM : PORTRAIT_MM, SHEET_MARGIN_MM);
+      addPageRule(rules, cols > WIDE_SHEET_COLUMNS ? LANDSCAPE_MM : PORTRAIT_MM, SHEET_MARGIN_MM + "mm");
       return [table];
     }
 

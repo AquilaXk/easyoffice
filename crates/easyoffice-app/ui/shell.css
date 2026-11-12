@@ -191,6 +191,9 @@
   #eo-print-root svg { display: block; width: 100%; height: 100%; }
   /* Document, sheet and slide printing (office-print.js). */
   #eo-print-root .eo-print-flow { background: var(--doc-paper); }
+  #eo-print-root [data-eo-break="page"] { break-before: page; }
+  #eo-print-root .eo-print-flow :is(h1, h2, h3, h4, h5, h6) { break-after: avoid; }
+  #eo-print-root .eo-print-flow table { break-inside: avoid; }
   #eo-print-root .eo-print-sheet { border-collapse: collapse; font-size: 10pt; }
   #eo-print-root .eo-print-sheet tr { break-inside: avoid; }
   #eo-print-root .eo-print-sheet td { min-width: 16mm; padding: 1mm 2mm; border: 0.2mm solid; }
