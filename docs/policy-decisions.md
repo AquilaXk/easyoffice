@@ -2911,3 +2911,14 @@
 - **재사용 판단 (구현 원칙 3단계)** (1) 공식 라이선스 텍스트를 그대로 썼습니다. (2) 기존 번들 리소스·검증 스크립트에 `LICENSE`·`NOTICE` 항목을 더했습니다. (3) 이식한 코드는 없습니다.
 - **Verified by** `node --test scripts/test-desktop-file-associations.mjs`, `node scripts/check-repo-hygiene.mjs`, `cargo metadata`의 패키지 `license` 값.
 - **Revisit when** 저작권자나 배포 채널이 바뀔 때.
+
+## PD-188. 제품 정보는 제품명·버전·고지·라이선스 표만 두고, README는 한국어 한 벌로 줄임
+
+- **Status** Implemented (QA 요청 2026-11-12). `crates/easyoffice-app/ui/index.html`, `README.md`, `docs/DEVELOPMENT.md`. PD-093 (4)의 "진단 항목은 제품 정보로 옮김"과 PD-122의 "진단 알약은 그대로 둠"을 대신합니다.
+- **Context** 제품 정보 창 아래에 플랫폼·모듈·포맷·IME·연결 상태 줄이 보였습니다. 참조 앱의 제품 정보는 제품명, 버전, 고지, 라이선스 표만 두고, 표는 WASM 번들 크레이트에 한정돼 앱이 실제로 번들하는 구성 요소와 달랐습니다.
+- **Decision (`PD-188`)**
+  1. 진단 줄(`#platform-pill`, `#status-module`, `#status-format-spec`, `#ime-badge`, `#status-engine`)과 이 요소에만 쓰던 갱신 코드·스타일을 지웁니다. 연결 실패는 명령 상태 줄(`#status-command-feedback`)과 거부된 호출로만 알립니다.
+  2. 라이선스 표는 셸·편집기·PDF·래스터 구성 요소와 글꼴 16행으로 줄이고, 아래에 `전체 목록: THIRD_PARTY_NOTICES.md` 라벨 한 줄을 둡니다. 표의 모든 행은 `THIRD_PARTY_NOTICES.md`에 이름과 라이선스가 함께 있는 줄이 있어야 하고(`scripts/test-about-notice.mjs`), 셸 프레임워크 절을 그 파일에 더했습니다.
+  3. README는 한국어 한 벌(소개, 할 수 있는 일, 다운로드, 설치 유의사항, 개발하기, Credits)로 줄이고 `README.ko.md`를 없앱니다. 구조·빌드·포맷 표·플랫폼별 동작은 `docs/DEVELOPMENT.md`로 옮겼고, 위생 가드의 문서 동기화 대상도 이 문서로 바꿨습니다.
+- **Verified by** `node --test scripts/test-about-notice.mjs scripts/test-webui-hwp-shell.mjs scripts/test-release-assets.mjs`, `node scripts/check-repo-hygiene.mjs`.
+- **Revisit when** 번들 구성 요소가 바뀔 때(표와 `THIRD_PARTY_NOTICES.md`를 함께 고침), 영문 README가 필요해질 때.

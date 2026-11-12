@@ -1,26 +1,6 @@
-# EasyOffice
+# 개발 문서
 
-[English](README.md) | [한국어](README.ko.md)
-
-EasyOffice (`v0.1.0`)는 Rust 엔진과 오프라인 WebUI를 하나의 Tauri v2 데스크톱 셸에 담은 **100% 독립 실행형(Standalone)·서버리스(Serverless)·오프라인 지원 macOS·Windows·Linux 올인원 오피스 스위트**입니다. 참조 앱의 rhwp-studio 크롬을 기준으로 한 라이트·다크 테마 위에서 **워드 문서(Document)**, **스프레드시트(Sheet)**, **프레젠테이션(Slide)**, **한글 문서(HWP / HWPX)**, **PDF 스튜디오(PDF Studio)**를 하나의 워크스페이스에서 통합 제공하며, 비트 수준 컨테이너 코덱과 결정론적 수식 연산, 온디바이스 스마트 문서 보조 도구, Fail-Closed 보안 가드를 내장합니다.
-
----
-
-## 내려받기
-
-모든 릴리스는 버전이 들어가지 않는 같은 자산 이름을 쓰므로, 아래 링크는 항상 가장 최근에 공개된 릴리스를 가리킵니다. `SHA256SUMS.txt`에는 모든 자산의 SHA-256 체크섬이 들어 있습니다.
-
-- [macOS 유니버설 (.dmg)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-macos-universal.dmg)
-- [Windows x64 (설치 프로그램)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-windows-x64-setup.exe)
-- [Linux x64 (AppImage, 설치 없이 실행)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-linux-x64.AppImage)
-- [Linux x64 (.deb, Ubuntu·Debian 계열)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-linux-x64.deb)
-- [Linux x64 (.rpm, Fedora·openSUSE 계열)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-linux-x64.rpm)
-- [Linux arm64 (.deb, Ubuntu·Debian 계열)](https://github.com/AquilaXk/easyoffice/releases/latest/download/EasyOffice-linux-arm64.deb)
-- [SHA256SUMS.txt](https://github.com/AquilaXk/easyoffice/releases/latest/download/SHA256SUMS.txt)
-
-단축키는 [docs/keyboard-shortcuts.md](docs/keyboard-shortcuts.md)에 정리했습니다.
-
-전체 릴리스는 [GitHub Releases](https://github.com/AquilaXk/easyoffice/releases)에서 볼 수 있습니다.
+사용자 안내(내려받기, 설치 유의사항)는 [README](../README.md)에 있습니다. 이 문서는 구조, 개발 환경, 빌드·검증 명령, 플랫폼별 동작을 모읍니다. 단축키는 [keyboard-shortcuts.md](keyboard-shortcuts.md)에 정리했습니다.
 
 ---
 
@@ -99,9 +79,9 @@ node scripts/checkout-rhwp.mjs && node scripts/build-hwp-studio.mjs
 cargo run -p easyoffice-desktop
 ```
 
-### 릴리스 실행 안내
+---
 
-플랫폼별 안내, 첫 실행, 업데이트는 아래에 이어집니다.
+## 릴리스 패키지와 플랫폼별 빌드
 
 **업데이트.** 설치된 앱은 하루 1회 이하로 새 릴리스를 확인합니다(도움말 메뉴에서 끌 수 있습니다). 새 버전이 있으면 카드에 **설치하고 다시 시작**이 나타나며, 앱이 릴리스에서 패키지를 내려받아 앱에 들어 있는 공개 키로 서명을 확인한 뒤 설치하고 다시 시작합니다. 저장하지 않은 변경 사항이 있는 창이 있으면 설치하지 않고, 서명이 맞지 않는 패키지는 설치하지 않습니다. `.deb`·`.rpm` 업데이트는 관리자 권한을 요청하며, 업데이터가 다루지 못하는 설치 형태는 릴리스 페이지에서 직접 받습니다(카드에 버튼이 있습니다). 릴리스에는 패키지마다 `.sig` 파일과 업데이터가 읽는 `latest.json`도 들어 있습니다.
 
@@ -109,17 +89,7 @@ cargo run -p easyoffice-desktop
 
 macOS 릴리스는 유니버설 디스크 이미지 `EasyOffice-macos-universal.dmg`(Apple silicon·Intel, macOS 11 이상)로 배포됩니다. 이미지를 열어 **EasyOffice**를 `/Applications`로 끌어다 놓습니다. 앱은 Windows와 같은 Tauri v2 데스크톱 셸(WKWebView)로, WebUI가 내장되어 있고 모든 명령이 Rust 엔진에서 프로세스 안에서 실행되며 네트워크 연결이 필요 없습니다. 표준 메뉴 막대와 Command 단축키(⌘C/⌘V/⌘X/⌘A/⌘Z/⌘S/⌘O/⌘W/⌘Q)가 동작하고, Finder의 "다음으로 열기"와 더블 클릭은 파일을 새 창에서 엽니다. ⌘Q로 종료하면 각 창의 저장 / 저장 안 함 / 취소 확인을 거칩니다.
 
-이 배포본은 Apple Developer ID로 **서명·공증되어 있지 않으므로** 처음 실행할 때 macOS Gatekeeper가 막습니다("개발자를 확인할 수 없기 때문에 열 수 없습니다"). 한 번만 허용하면 됩니다.
-
-1. Finder에서 `/Applications`의 **EasyOffice**를 우클릭(또는 Control-클릭)하여 **열기**를 선택하고, 대화상자에서 다시 **열기**를 누릅니다.
-2. 또는 한 번 열기를 시도한 뒤 **시스템 설정 > 개인정보 보호 및 보안**의 보안 항목에서 EasyOffice의 **그래도 열기**를 누릅니다(macOS 15는 우클릭 > 열기 대신 이 경로가 필요합니다).
-3. 앱이 손상되었다고 표시되거나 실행되지 않으면(내려받을 때 붙은 격리 속성 때문) 격리 속성을 한 번 제거합니다.
-
-```bash
-xattr -dr com.apple.quarantine /Applications/EasyOffice.app
-```
-
-이후에는 평소처럼 열립니다. 서명은 준비만 되어 있고 꺼져 있습니다. macOS CI·릴리스 작업에 `APPLE_SIGNING_IDENTITY` 저장소 시크릿(과 공증 변수)을 추가하면 됩니다(PD-094). macOS에서 `.dmg`를 소스로 빌드하려면 다음과 같이 합니다.
+서명은 준비만 되어 있고 꺼져 있습니다. macOS CI·릴리스 작업에 `APPLE_SIGNING_IDENTITY` 저장소 시크릿(과 공증 변수)을 추가하면 됩니다(PD-094). macOS에서 `.dmg`를 소스로 빌드하려면 다음과 같이 합니다.
 
 ```bash
 cd crates/easyoffice-desktop
@@ -129,8 +99,6 @@ npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --bundles app,dmg   # ta
 #### Windows
 
 Windows 릴리스는 설치 프로그램 `EasyOffice-windows-x64-setup.exe`(NSIS, 사용자 단위 설치, 관리자 권한 불필요)로 배포됩니다. 설치한 뒤 시작 메뉴에서 **EasyOffice**를 실행합니다. `EasyOffice.exe`는 Windows 내장 WebView2 런타임 위의 데스크톱 창(Tauri v2 셸, `crates/easyoffice-desktop`)으로, WebUI가 실행 파일에 포함되어 있고 모든 명령을 프로세스 안에서 Rust 엔진으로 바로 처리합니다. 로컬 HTTP 서버, 브라우저, 네트워크 연결을 쓰지 않습니다. 저장하면 Windows 기본 저장 대화상자가 열립니다. 제거는 설정 > 앱 또는 시작 메뉴 폴더의 제거 프로그램으로 합니다. WebView2는 Windows 11과 최신 Windows 10에 기본 포함되어 있으며, 없을 때만 설치 프로그램이 런타임 부트스트래퍼를 내려받습니다. 설치 프로그램은 주요 문서 형식(HWP, HWPX, DOCX, ODT, XLSX, ODS, PPTX, ODP, PDF)을 연결하므로 더블클릭하면 실행 중인 앱의 새 창에서 파일이 열립니다(단일 인스턴스). TXT, MD, CSV 같은 일반 텍스트 형식은 연결하지 않습니다. 저장은 임시 파일을 거쳐 이름을 바꾸는 방식으로 열었던 파일에 되쓰고, 그 사이 디스크에서 파일이 바뀌었으면 덮어쓰기 전에 묻습니다.
-
-설치 프로그램은 **코드 서명이 되어 있지 않아** `EasyOffice-windows-x64-setup.exe`를 처음 실행할 때 Windows SmartScreen이 "Windows의 PC 보호" 창을 띄울 수 있습니다. **추가 정보**를 누른 뒤 **실행**을 선택하세요. 브라우저가 다운로드를 막으면 다운로드 목록에서 먼저 **유지**를 선택합니다. 의심스러우면 `SHA256SUMS.txt`와 비교합니다(`Get-FileHash .\EasyOffice-windows-x64-setup.exe`).
 
 소스에서 설치 프로그램을 빌드하려면 Windows에서 MSVC Rust 툴체인 1.93+, Visual Studio Build Tools, Node.js가 필요합니다.
 
@@ -148,14 +116,12 @@ cd crates/easyoffice-desktop
 npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --bundles appimage,deb,rpm   # target/release/bundle/{appimage,deb,rpm}/
 ```
 
+---
+
+## 실행과 문서 열기
+
 **개발자 전용 로컬 서버(`--serve`).** `--serve`는 일반 사용자에게 배포하지 않으며 어떤 릴리스 자산에도 포함되지 않습니다. 개발과 자동 검증(헤드리스 브라우저 UI 검증, CI 스모크)에만 쓰며, 설치형 앱은 네트워크 포트를 열지 않습니다. 소스 저장소에서 `cargo run -p easyoffice-app -- --self-test`로 엔진 무결성을 검증하거나 `cargo run -p easyoffice-app -- --serve 8787`로 `http://127.0.0.1:8787/` 루프백 WebUI를 열 수 있습니다. 전체 옵션은 `--help`로 확인합니다. 포트 없이 `--serve`를 실행하면 8787을 사용하고, 사용 중이면 8788~8800으로 대체합니다. 포트를 명시하면(`--serve 18787`) 해당 포트만 사용하며 쓸 수 없으면 실패합니다. 잘못된 포트, 알 수 없는 옵션, 파일 경로는 0이 아닌 종료 코드로 끝납니다. Host·Origin 검사, 연결 수·시간 제한, CSP는 개발 중 안전을 위해 그대로 유지합니다(PD-086).
 
 **문서마다 개별 창.** 설치형 앱은 문서 하나를 창 하나로 엽니다. 인수 없이 실행하면 새 문서(DOCX·한글·XLSX·PPTX·PDF·변환기)·파일 열기·최근 문서가 있는 시작 창이 뜨고, **파일 → 새 문서**·**열기…(`Ctrl+O`)**·끌어 놓기는 새 창에서 문서를 엽니다(이미 열린 파일은 그 창을 앞으로 가져옵니다). 창 제목은 `파일 이름 — EasyOffice`이며 저장하지 않은 변경이 있으면 `●`가 붙고, 닫을 때 저장 / 저장 안 함 / 취소를 묻습니다. 마지막 창을 닫으면 앱이 종료됩니다. 파일 경로는 Rust 쪽에만 있고 WebView에는 파일 이름과 바이트만 전달됩니다(PD-088). 개발 전용 `--serve`는 같은 모델을 브라우저 창(`window.open`)으로 흉내 냅니다.
 
 WebUI에서는 **파일 → 열기…(`Ctrl+O`)** 또는 작업 영역에 파일을 끌어 놓아 DOCX/DOC/ODT/RTF/MD/TXT, HWP/HWPX/HWT/HWTX, XLSX/XLS/ODS/CSV/TSV, PPTX/PPT/PPSX/ODP, PDF, Apple Pages(`.pages`, 읽기 전용) 파일(최대 10 MiB)을 해당 모듈에서 열 수 있습니다. 탭 제목은 파일 이름이 되고 열기는 하나의 실행 취소 단위이며, 편집기 모델이 담지 못하는 항목(그림·도형·머리말·셀 서식)은 열기 후 알려 줍니다. 글자 서식(크기·글꼴·글자 색·형광펜·굵게·기울임·밑줄·취소선)은 선택한 글자에만 적용되며 DOCX·HWPX·ODT·RTF 저장·열기에서 유지됩니다. 변환기 패널에서는 편집기 텍스트 대신 선택한 원본 파일의 실제 바이트를 변환할 수도 있습니다.
-
----
-
-## 라이선스
-
-[Apache License 2.0](LICENSE)에 따라 배포됩니다. [NOTICE](NOTICE)와 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)를 함께 봅니다.

@@ -172,12 +172,10 @@ test("checksums refuse a release with a missing or unexpected file", () => {
   );
 });
 
-test("both READMEs link every asset through releases/latest/download", () => {
-  for (const readme of ["README.md", "README.ko.md"]) {
-    const text = read(readme);
-    for (const name of allAssetNames()) {
-      assert.ok(text.includes(`${DOWNLOAD_BASE_URL}/${name}`), `${readme} must link ${name}`);
-    }
+test("the README links every asset through releases/latest/download", () => {
+  const text = read("README.md");
+  for (const name of allAssetNames()) {
+    assert.ok(text.includes(`${DOWNLOAD_BASE_URL}/${name}`), `README.md must link ${name}`);
   }
 });
 

@@ -25,7 +25,7 @@ const ROOT = process.cwd();
 
 const REQUIRED_TRACKED_CONTRACTS = [
   "README.md",
-  "README.ko.md",
+  "docs/DEVELOPMENT.md",
   "SECURITY.md",
   "LICENSE",
   "Cargo.toml",
@@ -680,7 +680,7 @@ if (
   }
   const DOC_SYNC_TARGETS = [
     "README.md",
-    "README.ko.md",
+    "docs/DEVELOPMENT.md",
     "docs/architecture.md",
     "docs/product-spec.md",
     "docs/policy-decisions.md",

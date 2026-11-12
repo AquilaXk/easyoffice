@@ -14,7 +14,6 @@
 - [ ] Windows·Linux: 모든 창에 페이지 메뉴 줄(한글 창은 편집기 메뉴 줄), Ctrl+Q(한글 창 포함)의 순차 종료
 
 ## 배포
-- [ ] README 스크린샷 추가
 - [ ] 정식 릴리스 전: macOS Developer ID 서명·공증(QA 보류, PD-143)
 
 ## PDF·미리보기
