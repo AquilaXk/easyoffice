@@ -127,12 +127,64 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     return hashFingerprint(JSON.stringify(canonicalizeContent(parts, "")));
   }
 
+  // FNV-1a step over `text`, continuing from `h`.
+  function fnvStep(h, text) {
+    for (let i = 0; i < text.length; i += 1) {
+      h ^= text.charCodeAt(i);
+      h = Math.imul(h, 0x01000193);
+    }
+    return h;
+  }
+
+  const isBlankText = (v) => v === undefined || v === null || v === "" || v === false;
+
+  // The digest part of one cell (0 for a cell that canonicalizeContent drops as empty). The plain
+  // shape `{ value, formula, style? }` is hashed in place; anything else goes through the canonical form.
+  function cellDigest(ref, entry, seed) {
+    if (!entry || typeof entry !== "object") return 0;
+    const { value, formula, style } = entry;
+    const plain = Object.keys(entry).length <= 3 && (value === undefined || typeof value === "string") &&
+      (formula === undefined || typeof formula === "string") && (style === undefined || (style && typeof style === "object"));
+    let h = fnvStep(seed, ref);
+    if (plain) {
+      const styleText = style ? JSON.stringify(canonicalizeContent(style, "style") ?? null) : "null";
+      if (isBlankText(value) && isBlankText(formula) && styleText === "null") return 0;
+      h = fnvStep(fnvStep(fnvStep(h, "\u0000" + (value ?? "")), "\u0001" + (formula ?? "")), "\u0002" + styleText);
+    } else {
+      const canonical = canonicalizeContent(entry, ref);
+      if (canonical === undefined) return 0;
+      h = fnvStep(h, "\u0003" + JSON.stringify(canonical));
+    }
+    return h >>> 0;
+  }
+
+  // Order-independent digest of a sheet store: sums of one hash per non-empty cell (a plain sum and a
+  // sum of a scrambled copy), so a 100,000-row workbook needs neither a sort of its keys nor a canonical copy of itself.
+  function sheetStoreDigest(sheets) {
+    let lo = 0;
+    let hi = 0;
+    for (const name of Object.keys(sheets || {})) {
+      const map = sheets[name];
+      if (!map || typeof map !== "object") continue;
+      const nameHash = fnvStep(0x811c9dc5, name + "\u0004");
+      for (const ref in map) {
+        const h = cellDigest(ref, map[ref], nameHash);
+        lo = (lo + h) >>> 0;
+        hi = (hi + (Math.imul(h ^ (h >>> 16), 0x85ebca6b) ^ (h >>> 13))) >>> 0;
+      }
+    }
+    return lo.toString(36) + "." + hi.toString(36);
+  }
+
   // Fingerprint of one module's document only (file open asks before replacing edited content).
   function moduleFingerprint(snap, mod) {
+    if (mod === "SHEET") {
+      const rest = [snap.sheetRowCounts, snap.sheetColumnWidths, snap.sheetRules, snap.sheetFrozen];
+      return hashFingerprint(JSON.stringify(canonicalizeContent(rest, ""))) + "-" + sheetStoreDigest(snap.sheets);
+    }
     const parts = {
       DOC: [snap.docTabs?.DOC],
       HWP: [snap.docTabs?.HWP],
-      SHEET: [snap.sheets, snap.sheetRowCounts, snap.sheetColumnWidths, snap.sheetRules, snap.sheetFrozen],
       SLIDE: [snap.slides],
       PDF: [snap.pdfStudio, snap.pdfRotationDeg],
     }[mod] || [];
@@ -203,8 +255,16 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     }
   }
 
-  function countSheetCells(sheets) {
-    return Object.keys(sheets || {}).reduce((n, name) => n + Object.keys(sheets[name] || {}).length, 0);
+  // True when the workbook holds more than `limit` cells; stops counting at the first one past it.
+  function exceedsSheetCells(sheets, limit) {
+    let n = 0;
+    for (const name of Object.keys(sheets || {})) {
+      for (const _ref in sheets[name]) {
+        n += 1;
+        if (n > limit) return true;
+      }
+    }
+    return false;
   }
 
   function editableRootFor(node) {
@@ -307,8 +367,9 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       return ae.id === "formula-input" || Boolean(ae.dataset?.editMode);
     }
 
-    function skipAutosaveForLargeWorkbook(snap) {
-      if (countSheetCells(snap.sheets) <= AUTOSAVE_MAX_SHEET_CELLS) return false;
+    // A workbook past the limit is not captured at all: copying it only to count it stalls every autosave tick.
+    function skipAutosaveForLargeWorkbook(sheets) {
+      if (!exceedsSheetCells(sheets, AUTOSAVE_MAX_SHEET_CELLS)) return false;
       pendingActivity = false;
       dirty = true;
       try {
@@ -322,8 +383,9 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     }
 
     function captureAndPersist() {
+      if (deps.getSheetStore && skipAutosaveForLargeWorkbook(deps.getSheetStore())) return;
       const snap = captureWorkspaceSnapshot(false);
-      if (skipAutosaveForLargeWorkbook(snap)) return;
+      if (skipAutosaveForLargeWorkbook(snap.sheets)) return;
       const hash = contentFingerprint(snap);
       if (baselineHash === null) baselineHash = hash;
       pendingActivity = false;

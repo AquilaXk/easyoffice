@@ -156,7 +156,7 @@
     restoreWorkspaceSnapshot: ribbonHistory.restoreWorkspaceSnapshot,
     runExclusive: chainWorkspaceQueue,
     getWorkspacePanels: () => workspacePanels,
-    getSheetController: () => sheetController,
+    getSheetController: () => sheetController, getSheetStore: () => sheetDataStore,
     getDocumentId: () => windowBridge.launch.windowId,
     onDirtyChange: (unsaved) => windowBridge.setDirty(unsaved),
     isDesktopShell: () => desktopBridge.isAvailable(),
@@ -730,7 +730,7 @@
       editor.addEventListener("input", () => {
         if (activeModule === "DOC" || activeModule === "HWP") {
           ensureDocTypingSnapshot();
-          workspacePanels.saveActiveDocTabState();
+          workspacePanels.markActiveDocTabStale();
         }
         if (!isImeComposing) workspacePanels.computeSmartStats();
       });
