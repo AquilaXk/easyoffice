@@ -178,6 +178,7 @@
   const LINE_HEIGHT_RATIO = 1.35;
   const WRAP_PAD_V = 3;
 
+  // Print draws the edge as a real border in its own color.
   function edgeCss(edge) {
     const e = parseEdge(edge);
     if (!e) return null;
@@ -185,13 +186,41 @@
     return { style, width: width + "px", color: "#" + e.color };
   }
 
-  // Sets or clears the three border properties of one side of `td` from an edge text.
+  // The screen draws an edge so that it never moves the cell's content: a shared edge sits in the grid
+  // line (a 1px border, the width the grid line already has), a thick or double line adds the rest of its
+  // width as an inset shadow, and the first row's top and the first column's left edge are shadows too
+  // (dashed and dotted lines there need a border). A black edge is the automatic color: it follows the
+  // theme's text color, the file keeps `000000`.
+  const AUTO_COLOR = "var(--color-text)";
+  const GAP_COLOR = "var(--ui-surface)";
+  const SHADOW_DIR = { t: [0, 1], r: [-1, 0], b: [0, -1], l: [1, 0] };
+  const shadow = (side, px, color) => {
+    const [dx, dy] = SHADOW_DIR[side];
+    return "inset " + dx * px + "px " + dy * px + "px 0 0 " + color;
+  };
+
+  function screenEdge(side, edge, slot) {
+    const e = parseEdge(edge);
+    if (!e) return null;
+    const color = e.color === DEFAULT_COLOR ? AUTO_COLOR : "#" + e.color;
+    const dashed = e.line === "dashed" || e.line === "dotted";
+    if (slot) {
+      const shadows = e.line === "thick" ? [shadow(side, 1, color)] : e.line === "double" ? [shadow(side, 1, GAP_COLOR), shadow(side, 2, color)] : [];
+      return { border: { style: dashed ? e.line : "solid", color }, shadows };
+    }
+    if (dashed) return { border: { style: e.line, color }, shadows: [] };
+    const bands = e.line === "thick" ? [shadow(side, 2, color)] : e.line === "double" ? [shadow(side, 1, color), shadow(side, 2, GAP_COLOR), shadow(side, 3, color)] : [shadow(side, 1, color)];
+    return { border: null, shadows: bands };
+  }
+
+  // Sets or clears the border of one side of `td`; the shadows of the side are returned.
   function paintSide(td, side, edge) {
-    const css = edgeCss(edge);
+    const css = screenEdge(side, edge, side === "r" || side === "b");
     const name = "border" + SIDE_CSS[side];
-    td.style[name + "Style"] = css ? css.style : "";
-    td.style[name + "Width"] = css ? css.width : "";
-    td.style[name + "Color"] = css ? css.color : "";
+    td.style[name + "Style"] = css?.border ? css.border.style : "";
+    td.style[name + "Width"] = css?.border ? "1px" : "";
+    td.style[name + "Color"] = css?.border ? css.border.color : "";
+    return css ? css.shadows : [];
   }
 
   // The edge each side of the cell at (row, col) takes: the right and bottom edges are drawn in the
@@ -222,7 +251,10 @@
     const s = td.style;
     s.textAlign = st?.textAlign || "";
     s.verticalAlign = st?.verticalAlign || "";
-    for (const side of SIDES) paintSide(td, side, edges[side]);
+    const shadows = SIDES.flatMap((side) => paintSide(td, side, edges[side]));
+    if (shadows.length > 0) s.setProperty("--lk-shadow", shadows.join(", "));
+    else s.removeProperty("--lk-shadow");
+    td.classList.toggle("lk-shadow", shadows.length > 0);
     if (st?.wrap) {
       s.whiteSpace = "pre-wrap";
       s.overflowWrap = "anywhere";

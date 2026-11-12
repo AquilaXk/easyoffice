@@ -189,14 +189,31 @@ test("borders: a range's outer edge is drawn once per shared slot and 없음 rem
   await selectRange(h.document, "A1", [["ArrowRight", 1], ["ArrowDown", 1]]);
   await click(h, look(h.document, "line-double"));
   await click(h, look(h.document, "border-outer"));
-  assert.equal(cell(h.document, "A1").style.borderTopStyle, "double", "the first row draws its own top");
-  assert.equal(cell(h.document, "A1").style.borderLeftStyle, "double");
-  assert.equal(cell(h.document, "B2").style.borderRightStyle, "double");
-  assert.equal(cell(h.document, "B2").style.borderBottomStyle, "double");
+  const shadow = (ref) => cell(h.document, ref).style.getPropertyValue("--lk-shadow");
+  assert.match(shadow("A1"), /inset 0px 1px 0 0 var\(--color-text\).*inset 0px 3px 0 0 var\(--color-text\)/, "the first row's top is a three band shadow");
+  assert.match(shadow("A1"), /inset 1px 0px 0 0/, "and its left edge too");
+  assert.equal(cell(h.document, "A1").style.borderTopStyle, "", "no border, so nothing moves");
+  assert.equal(cell(h.document, "B2").style.borderRightStyle, "solid", "a shared edge sits in the grid line");
+  assert.match(shadow("B2"), /inset -2px 0px 0 0/, "the rest of a double line is a shadow");
+  assert.equal(cell(h.document, "B2").style.borderBottomWidth, "1px");
   assert.equal(cell(h.document, "A1").style.borderRightStyle, "", "no inner edge");
   await click(h, look(h.document, "border-none"));
-  assert.equal(cell(h.document, "A1").style.borderTopStyle, "");
+  assert.equal(cell(h.document, "A1").style.getPropertyValue("--lk-shadow"), "");
   assert.equal(cell(h.document, "B2").style.borderBottomStyle, "");
+});
+
+test("a line's width never changes the cell's border box or padding, and black is the automatic color", async () => {
+  const h = await createHarness();
+  const model = { sheets: [{ name: "표", cells: ["thin", "thick", "dashed", "dotted", "double"].map((line, i) => ({ ref: "B" + (i + 3), raw: "글", style: { bd: { r: line + ":000000", b: line + ":d93025", l: line + ":000000" } } })) }] };
+  await openModel(h, model);
+  const lines = ["thin", "thick", "dashed", "dotted", "double"];
+  const boxes = lines.map((_, i) => {
+    const st = cell(h.document, "B" + (i + 3)).style;
+    return [st.borderRightWidth, st.borderBottomWidth, st.borderLeftWidth, st.paddingTop, st.paddingBottom, st.paddingLeft, st.paddingRight].join("|");
+  });
+  assert.equal(new Set(boxes).size, 1, boxes.join(" / "));
+  assert.equal(cell(h.document, "B4").style.borderRightColor, "var(--color-text)", "000000 follows the theme's text color");
+  assert.equal(cell(h.document, "B4").style.borderBottomColor, "#d93025");
 });
 
 test("a border on the ring's facing side shows in the cell before the range", async () => {
@@ -206,8 +223,9 @@ test("a border on the ring's facing side shows in the cell before the range", as
   await flushAsyncTurns(2);
   await click(h, look(h.document, "line-thick"));
   await click(h, look(h.document, "border-top"));
-  assert.equal(cell(h.document, "B1").style.borderBottomWidth, "2px", "B1's bottom slot draws B2's top");
+  assert.equal(cell(h.document, "B1").style.borderBottomWidth, "1px", "B1's bottom slot draws B2's top; the extra width is a shadow");
   assert.equal(cell(h.document, "B1").style.borderBottomStyle, "solid");
+  assert.match(cell(h.document, "B1").style.getPropertyValue("--lk-shadow"), /inset 0px -1px 0 0/);
 });
 
 test("the save payload carries the look and a reopened sheet shows it", async () => {
@@ -229,7 +247,7 @@ test("the save payload carries the look and a reopened sheet shows it", async ()
   const reopened = await createHarness();
   await openModel(reopened, { sheets: [{ name: "표", cells: sheet.cells }] });
   assert.equal(cell(reopened.document, "A1").style.textAlign, "right");
-  assert.equal(cell(reopened.document, "A1").style.borderTopStyle, "solid");
+  assert.match(cell(reopened.document, "A1").style.getPropertyValue("--lk-shadow"), /inset 0px 1px 0 0/);
   assert.equal(cell(reopened.document, "A1").style.whiteSpace, "pre-wrap");
 });
 
