@@ -11,6 +11,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { prohibitedPatternsIn } from "./prohibited-terms.mjs";
+import { ossNameHits } from "./oss-names.mjs";
 import { execFileSync } from "node:child_process";
 import { readConfig, resolveGitExecutable, verifyUpstream } from "./verify-rhwp-upstream.mjs";
 import { verifyOverrides } from "./hwp-studio-overrides.mjs";
@@ -383,6 +384,9 @@ for (const file of files) {
   const content = fs.readFileSync(file, "utf8");
   for (const regex of prohibitedPatternsIn(rel, content)) {
     errors.push(`Prohibited external brand or local-only reference detected in ${rel} (pattern: ${regex.source})`);
+  }
+  for (const { line, hash } of ossNameHits(rel, content)) {
+    errors.push(`Open-source project name detected in ${rel}:${line} (digest ${hash}); describe the source by role and point to THIRD_PARTY_NOTICES.md`);
   }
 
   if (isSortRuleScoped(rel)) {
