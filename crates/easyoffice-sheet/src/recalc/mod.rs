@@ -68,14 +68,18 @@ pub struct Footprint {
     pub graph_bytes: usize,
     /// Estimated heap bytes of the compiled formulas (their syntax trees).
     pub ast_bytes: usize,
+    /// Estimated heap bytes of the conditional formatting and validation rules (matched cells and
+    /// cached range values).
+    pub rule_bytes: usize,
 }
 
 impl Footprint {
-    /// Text, graph and syntax trees: the figure a memory cap compares against.
+    /// Text, graph, syntax trees and rules: the figure a memory cap compares against.
     pub fn total_bytes(&self) -> usize {
         self.raw_bytes
             .saturating_add(self.graph_bytes)
             .saturating_add(self.ast_bytes)
+            .saturating_add(self.rule_bytes)
     }
 }
 
@@ -246,6 +250,11 @@ impl RecalcSession {
             ast_bytes: self
                 .formula_bytes
                 .saturating_mul(AST_BYTES_PER_FORMULA_BYTE),
+            rule_bytes: self
+                .rules
+                .values()
+                .map(crate::rules::RuleRuntime::heap_bytes_estimate)
+                .sum(),
         }
     }
 

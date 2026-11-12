@@ -407,6 +407,60 @@ fn visuals_pack_and_unpack() {
     assert_eq!(packed.words.len(), 3 + 3 + 2);
 }
 
+// ---- memory held by the rules ------------------------------------------------------------------
+
+#[test]
+fn the_footprint_counts_what_the_rules_hold() {
+    let mut wb = WorkbookEngine::new();
+    wb.add_sheet("Sheet1");
+    for row in 1..=2_000u32 {
+        wb.set_cell("Sheet1", &format!("A{row}"), row.to_string())
+            .unwrap();
+    }
+    let mut session = RecalcSession::new(wb).unwrap();
+    session.recalculate();
+    let bare = session.footprint();
+    assert_eq!(bare.rule_bytes, 0);
+
+    let visuals = session
+        .set_rules(
+            "Sheet1",
+            rules(vec![rule("A1:A2000", 1, cell_is(Cmp::Greater, "0", ""))]),
+        )
+        .unwrap();
+    assert_eq!(visuals.len(), 2_000);
+    let ruled = session.footprint();
+    // Every matched cell sits in the rule's hit map and in the merged appearance map.
+    let per_cell = std::mem::size_of::<(PackedCellCoordinate, CellVisual)>();
+    assert!(ruled.rule_bytes >= 2_000 * per_cell, "{}", ruled.rule_bytes);
+    assert_eq!(ruled.total_bytes(), bare.total_bytes() + ruled.rule_bytes);
+    assert_eq!((ruled.raw_bytes, ruled.cells), (bare.raw_bytes, bare.cells));
+
+    // A rule that reads range statistics also pins the cached values of its range.
+    session
+        .set_rules(
+            "Sheet1",
+            rules(vec![rule(
+                "A1:A2000",
+                1,
+                CfKind::Top {
+                    n: 5,
+                    percent: false,
+                    bottom: false,
+                },
+            )]),
+        )
+        .unwrap();
+    assert!(session.footprint().rule_bytes > 2_000 * 16);
+
+    session.set_rules("Sheet1", SheetRules::default()).unwrap();
+    assert_eq!(
+        session.footprint().rule_bytes,
+        0,
+        "replaced rules free their memory"
+    );
+}
+
 // ---- incremental update equals full evaluation -------------------------------------------------
 
 struct Rng(u64);

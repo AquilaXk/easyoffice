@@ -367,6 +367,154 @@ fn total_cell_pressure_evicts_older_sessions_first() {
     assert!(gone(reg.apply(&a, "", &put("1", 1), true, sec(t, 4))));
 }
 
+/// One rule that paints every cell of `range` whose number is above zero.
+fn paint_positive(range: &str) -> SheetRules {
+    use easyoffice_formats::{parse_sqref, CfKind, CfRule, CfStyle, Cmp};
+    SheetRules {
+        cf: vec![CfRule {
+            ranges: parse_sqref(range),
+            priority: 1,
+            stop_if_true: false,
+            kind: CfKind::CellIs {
+                cmp: Cmp::Greater,
+                a: "0".into(),
+                b: String::new(),
+            },
+            style: CfStyle {
+                bg: Some(0xFFC7CE),
+                fg: None,
+                flags: 0,
+            },
+        }],
+        ..SheetRules::default()
+    }
+}
+
+fn held_bytes(reg: &Registry, id: &str) -> usize {
+    lock(&reg.inner).sessions[id].bytes
+}
+
+fn roomy() -> Limits {
+    Limits {
+        max_sessions: 4,
+        max_sheets: 3,
+        max_sheet_name_bytes: 8,
+        max_session_cells: 10_000,
+        max_session_edges: 10_000,
+        max_session_bytes: 1 << 20,
+        max_total_cells: 20_000,
+        max_total_bytes: 8 << 20,
+        max_changes: 2_000,
+        idle_ttl: Duration::from_secs(60),
+    }
+}
+
+/// A session of `n` numbers in column A of sheet `S`.
+fn numbers(reg: &Registry, n: u32, now: Instant) -> String {
+    let id = reg.open(&["S".to_string()], "", now).unwrap();
+    assert!(alive(reg.apply(&id, "", &put("1", n), true, now)));
+    id
+}
+
+#[test]
+fn rules_count_against_the_session_and_total_memory() {
+    let reg = Registry::new(roomy());
+    let t = Instant::now();
+    let id = numbers(&reg, 1_000, t);
+    let bare = held_bytes(&reg, &id);
+    assert!(alive(reg.set_rules(
+        &id,
+        "",
+        "S",
+        paint_positive("A1:A1000"),
+        t
+    )));
+    let ruled = held_bytes(&reg, &id);
+    assert!(ruled > bare + 1_000 * 16, "{bare} -> {ruled}");
+    assert!(alive(reg.set_rules(&id, "", "S", SheetRules::default(), t)));
+    assert_eq!(
+        held_bytes(&reg, &id),
+        bare,
+        "replaced rules are counted out"
+    );
+}
+
+#[test]
+fn rules_past_the_session_budget_are_refused_and_the_session_lives() {
+    let probe = Registry::new(roomy());
+    let t = Instant::now();
+    let id = numbers(&probe, 1_000, t);
+    let bare = held_bytes(&probe, &id);
+    assert!(alive(probe.set_rules(
+        &id,
+        "",
+        "S",
+        paint_positive("A1:A1000"),
+        t
+    )));
+    let ruled = held_bytes(&probe, &id);
+
+    let reg = Registry::new(Limits {
+        max_session_bytes: bare + (ruled - bare) / 2,
+        ..roomy()
+    });
+    let id = numbers(&reg, 1_000, t);
+    assert!(matches!(
+        reg.set_rules(&id, "", "S", paint_positive("A1:A1000"), t),
+        Err(EasyOfficeError::ResourceBudgetExceeded(_))
+    ));
+    assert_eq!(
+        held_bytes(&reg, &id),
+        bare,
+        "the refused rules hold nothing"
+    );
+    assert!(
+        alive(reg.apply(&id, "", &put("2", 1), true, t)),
+        "the session is still open"
+    );
+    assert!(alive(reg.set_rules(
+        &id,
+        "",
+        "S",
+        paint_positive("A1:A10"),
+        t
+    )));
+}
+
+#[test]
+fn rules_count_in_the_all_session_total_and_evict_older_sessions() {
+    let probe = Registry::new(roomy());
+    let t = Instant::now();
+    let id = numbers(&probe, 1_000, t);
+    assert!(alive(probe.set_rules(
+        &id,
+        "",
+        "S",
+        paint_positive("A1:A1000"),
+        t
+    )));
+    let ruled = held_bytes(&probe, &id);
+
+    let reg = Registry::new(Limits {
+        max_total_bytes: ruled + ruled / 2,
+        ..roomy()
+    });
+    let a = numbers(&reg, 1_000, t);
+    let b = numbers(&reg, 1_000, sec(t, 1));
+    assert!(alive(reg.set_rules(
+        &a,
+        "",
+        "S",
+        paint_positive("A1:A1000"),
+        sec(t, 2)
+    )));
+    assert!(
+        alive(reg.set_rules(&b, "", "S", paint_positive("A1:A1000"), sec(t, 3))),
+        "two ruled sessions are over the total, so the older one goes"
+    );
+    assert!(gone(reg.apply(&a, "", &put("1", 1), true, sec(t, 4))));
+}
+
 #[test]
 fn a_poisoned_session_is_dropped_and_reported_as_expired() {
     let reg = Registry::new(limits());

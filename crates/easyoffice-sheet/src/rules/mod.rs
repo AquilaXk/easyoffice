@@ -155,6 +155,21 @@ impl RuleRuntime {
         }
     }
 
+    /// Estimated heap bytes of the matched cells of every rule, the merged appearance and the
+    /// cached range values (string payloads of cached values are not counted). Map slots are
+    /// counted at their capacity, one control byte each, like the graph estimate counts its own.
+    pub fn heap_bytes_estimate(&self) -> usize {
+        fn map_bytes<V>(map: &CellMap<V>) -> usize {
+            map.capacity() * (std::mem::size_of::<(PackedCellCoordinate, V)>() + 1)
+        }
+        self.states
+            .iter()
+            .map(|state| map_bytes(&state.hits))
+            .sum::<usize>()
+            + map_bytes(&self.emitted)
+            + self.stats.heap_bytes_estimate()
+    }
+
     /// True once the rules matched more cells than the budget allows.
     pub fn is_over_budget(&self) -> bool {
         self.over_budget

@@ -6,7 +6,7 @@
 //! changed and receives only the formula cells whose value changed (PD-164).
 //!
 //! The registry is bounded: a session count, sheets per session, cells, memory (raw text plus the
-//! dependency graph and compiled formulas, per session and over all sessions) and an idle
+//! dependency graph, compiled formulas and rules, per session and over all sessions) and an idle
 //! lifetime. When a session is gone (idle expiry, eviction by a newer session, its window closed,
 //! a poisoned lock) the commands answer `{"expired":true}` instead of an error, and the page
 //! reopens a session and resends its cells. A session that outgrows its graph budget is dropped
@@ -17,8 +17,8 @@ use crate::sheet_rules_json::{parse_rules, visuals_json};
 use crate::EasyOfficeIpcRouter;
 use easyoffice_formats::{DvAlert, EasyOfficeError, SheetRules, StrictJsonValue};
 use easyoffice_sheet::{
-    AxisBudget, AxisEdit, Budget, CellChange, ChangedCell, PackedCellCoordinate, RecalcError,
-    RecalcSession, Verdict, WorkbookEngine,
+    AxisBudget, AxisEdit, Budget, CellChange, ChangedCell, Footprint, PackedCellCoordinate,
+    RecalcError, RecalcSession, Verdict, WorkbookEngine,
 };
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
@@ -228,7 +228,26 @@ impl Registry {
             lock(&self.inner).sessions.remove(id);
             return Ok(Applied::Expired);
         };
-        let visuals = session.set_rules(sheet, rules)?;
+        let outcome = session.set_rules(sheet, rules);
+        // The rules were replaced, so the session holds different memory now, whatever the outcome.
+        let mut after = session.footprint();
+        let fits = outcome.is_err()
+            || (after.total_bytes() <= self.limits.max_session_bytes
+                && self.reserve_total(id, after.total_bytes(), after.cells));
+        if !fits {
+            // Only the rules are refused (like rules that match too many cells): the sheet keeps
+            // its cells and loses its rules, and the session stays usable.
+            session.set_rules(sheet, SheetRules::default())?;
+            after = session.footprint();
+        }
+        drop(session);
+        self.record_footprint(id, after);
+        if !fits {
+            return Err(EasyOfficeError::ResourceBudgetExceeded(
+                "시트 규칙이 세션 메모리 한도를 넘었습니다.".to_string(),
+            ));
+        }
+        let visuals = outcome?;
         let json = format!(
             "{{\"session\":\"{id}\",\"sheet\":\"{}\",\"cf\":{}}}",
             EasyOfficeIpcRouter::escape_json_str(sheet),
@@ -374,11 +393,16 @@ impl Registry {
         };
         let after = session.footprint();
         drop(session);
+        self.record_footprint(id, after);
+        Ok(Applied::Done(json))
+    }
+
+    /// Counts what the session holds after a call against the all-session totals.
+    fn record_footprint(&self, id: &str, after: Footprint) {
         if let Some(entry) = lock(&self.inner).sessions.get_mut(id) {
             entry.cells = after.cells;
             entry.bytes = after.total_bytes();
         }
-        Ok(Applied::Done(json))
     }
 
     /// Inserts or deletes rows or columns of `sheet` in the session (see `sheet_structure_ipc`).
@@ -413,10 +437,7 @@ impl Registry {
         let json = crate::sheet_structure_ipc::session_answer(id, &session, &report, &outcome);
         let after = session.footprint();
         drop(session);
-        if let Some(entry) = lock(&self.inner).sessions.get_mut(id) {
-            entry.cells = after.cells;
-            entry.bytes = after.total_bytes();
-        }
+        self.record_footprint(id, after);
         Ok(Applied::Done(json))
     }
 

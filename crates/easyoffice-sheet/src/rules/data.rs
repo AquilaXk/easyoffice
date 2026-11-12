@@ -116,6 +116,15 @@ impl RangeData {
         data
     }
 
+    fn heap_bytes_estimate(&self) -> usize {
+        self.cells.capacity() * std::mem::size_of::<(PackedCellCoordinate, EvaluatedCellValue)>()
+            + self.numbers.capacity() * std::mem::size_of::<(PackedCellCoordinate, f64)>()
+            + self
+                .sorted
+                .get()
+                .map_or(0, |sorted| sorted.capacity() * std::mem::size_of::<f64>())
+    }
+
     pub fn count(&self) -> usize {
         self.numbers.len()
     }
@@ -187,6 +196,13 @@ impl StatsCache {
         self.cached_cells += data.cells.len();
         self.entries.insert(key, data.clone());
         data
+    }
+
+    pub fn heap_bytes_estimate(&self) -> usize {
+        self.entries
+            .values()
+            .map(|data| data.heap_bytes_estimate())
+            .sum()
     }
 
     /// Forgets every entry that covers one of the changed cells.
