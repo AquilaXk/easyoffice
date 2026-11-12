@@ -175,6 +175,8 @@
 /* In-cell list arrow and menu of a data validation list (sheet-rules-ui.js). */
 .cf-dropdown-btn { position: fixed; z-index: 30; width: 18px; height: 18px; padding: 0; border: 1px solid var(--color-border-dark); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); cursor: pointer; }
 .cf-dropdown-menu { position: fixed; z-index: 31; min-width: 96px; max-height: 220px; overflow-y: auto; margin: 0; padding: 2px 0; list-style: none; border: 1px solid var(--color-border-dark); background: var(--color-surface-raised); color: var(--color-text); box-shadow: var(--shadow-dropdown); }
+.cf-dropdown-btn[hidden] { display: none; } /* the button's own `display` (icon button) would show it while hidden */
+.cf-dropdown-menu { font-size: var(--font-size-base); } /* the menu items' size, as `.md-item` */
 .cf-dropdown-menu li { padding: 3px 10px; cursor: pointer; white-space: nowrap; }
 .cf-dropdown-menu li:hover, .cf-dropdown-menu li[aria-selected="true"] { background: var(--color-accent-bg); }
 /* Check mark (the check shape of the cell icons) and the box of a check box cell and of a multiple list item: a 14px box, filled with the accent when checked. */
@@ -242,6 +244,9 @@
 #sheet-filter-dialog { width: min(420px, calc(100vw - 32px)); }
 #sheet-filter-dialog .dialog-label { width: 40px; min-width: 40px; flex-shrink: 0; }
 /* The operator combo sizes to its text like the reference's `.dialog-select`, with the cell format dialog's inner padding and arrow cell. */
+/* The rule and validation dialogs take the same inner padding and arrow cell, so a longer choice (a multiple list, a date period) is never cut by the arrow. */
+#sheet-cf-dialog .custom-select-trigger, #sheet-dv-dialog .custom-select-trigger { grid-template-columns: minmax(0, 1fr) 15px; padding: 0 0 0 4px; }
+#sheet-cf-dialog .custom-select-value, #sheet-dv-dialog .custom-select-value { padding-right: 4px; }
 #sheet-filter-dialog .custom-select-trigger { grid-template-columns: minmax(0, 1fr) 15px; padding: 0 0 0 4px; }
 #sheet-filter-dialog .custom-select-value { padding-right: 4px; }
 #sheet-filter-dialog .dialog-text-input { flex: 1; min-width: 0; }

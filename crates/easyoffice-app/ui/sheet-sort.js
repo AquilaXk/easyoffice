@@ -92,77 +92,85 @@
     return text > 0 && boldHead > 0 && boldBody === 0;
   }
 
-  // The moves of the units: `order[p]` is the unit index whose rows go to the place of unit `p`.
-  // Returns `[{ from, to }]` row offsets (first rows) for the units that change place.
-  function movesOf(order, rows) {
-    const moves = [];
-    for (let p = 0; p < order.length; p += 1) if (order[p] !== p) moves.push({ from: rows[order[p]], to: rows[p] });
-    return moves;
+  // How many units the answer moves.
+  function countMoved(order) {
+    let moved = 0;
+    for (let p = 0; p < order.length; p += 1) if (order[p] !== p) moved += 1;
+    return moved;
   }
 
-  host.__EASYOFFICE_SHEET_SORT_CORE__ = { MAX_KEYS, FAILURES, numberOf, unitOf, unitRows, keyValue, detectHeader, movesOf };
+  host.__EASYOFFICE_SHEET_SORT_CORE__ = { MAX_KEYS, FAILURES, numberOf, unitOf, unitRows, keyValue, detectHeader, countMoved };
 
   function createSheetSort(deps) {
     const { gridUtils, call, layoutApi, cloneStyle } = deps;
     const { refOf } = gridUtils;
 
+    // The cells of every unit once: `grid[u][k * width + (c - c1)]` is the entry of row `rows[u] + k`
+    // and column `c` (undefined when empty). One lookup per cell serves the keys, the formula list
+    // and the move, and no entry is copied: each entry moves once, so the move reuses the object.
+    function gather(map, range, rows, h) {
+      const width = range.c2 - range.c1 + 1;
+      const letters = Array.from({ length: width }, (_, i) => refOf(1, range.c1 + i).slice(0, -1));
+      const grid = new Array(rows.length);
+      for (let u = 0; u < rows.length; u += 1) {
+        const cells = new Array(h * width);
+        for (let k = 0; k < h; k += 1) {
+          const row = String(rows[u] + k);
+          for (let i = 0; i < width; i += 1) cells[k * width + i] = map[letters[i] + row];
+        }
+        grid[u] = cells;
+      }
+      return { grid, letters, width };
+    }
+
     // The key columns of the units: the value of the anchor cell of each unit (a key column inside
     // a merge reads the merge's own cell).
-    function keyColumns(map, spec, rows, w) {
+    function keyColumns(grid, spec, w, h, width) {
       return spec.keys.map((key) => {
         const anchor = w > 1 ? spec.range.c1 + Math.floor((key.col - spec.range.c1) / w) * w : key.col;
-        return { asc: key.asc, values: rows.map((r) => keyValue(map[refOf(r, anchor)], numberOf)) };
+        const at = anchor - spec.range.c1;
+        const values = new Array(grid.length);
+        for (let u = 0; u < grid.length; u += 1) values[u] = keyValue(grid[u][at], numberOf);
+        return { asc: key.asc, values };
       });
     }
 
-    // The formula cells of the units and the request lists that go with them.
-    function formulaCells(map, spec, rows, h) {
-      const cells = [];
+    // The formula cells of the units: `[unit, formula]` for the request and the place of each.
+    function formulaCells(grid) {
+      const places = [];
       const texts = [];
-      for (let u = 0; u < rows.length; u += 1) {
-        for (let k = 0; k < h; k += 1) {
-          for (let c = spec.range.c1; c <= spec.range.c2; c += 1) {
-            const entry = map[refOf(rows[u] + k, c)];
-            if (!entry?.formula || cells.length >= MAX_FORMULA_CELLS) continue;
-            cells.push([u, k, c]);
-            texts.push([u, entry.formula]);
-          }
+      for (let u = 0; u < grid.length; u += 1) {
+        const cells = grid[u];
+        for (let i = 0; i < cells.length; i += 1) {
+          if (!cells[i]?.formula || places.length >= MAX_FORMULA_CELLS) continue;
+          places.push([u, i]);
+          texts.push([u, cells[i].formula]);
         }
       }
-      return { cells, texts };
+      return { places, texts };
     }
 
-    // Moves the cells of the units to their new places in `map`; `formulas` are the rewritten
-    // formula texts of `cells` after the move.
-    function apply(map, spec, rows, h, order, cells, formulas) {
-      const before = new Map();
-      for (let u = 0; u < rows.length; u += 1) {
-        if (order[u] === u) continue;
-        for (let k = 0; k < h; k += 1) {
-          for (let c = spec.range.c1; c <= spec.range.c2; c += 1) {
-            const ref = refOf(rows[u] + k, c);
-            before.set(ref, map[ref]);
-          }
-        }
-      }
-      const rewritten = new Map();
-      cells.forEach(([u, k, c], i) => rewritten.set(refOf(rows[u] + k, c), formulas[i]));
+    // Moves the entries of the units to their new places in `map`; `formulas` are the rewritten
+    // formula texts of `places`, as they read after the move.
+    function apply(map, rows, h, order, grid, letters, width, places, formulas) {
+      places.forEach(([u, i], j) => {
+        grid[u][i].formula = formulas[j];
+      });
       for (let p = 0; p < order.length; p += 1) {
         if (order[p] === p) continue;
+        const cells = grid[order[p]];
         for (let k = 0; k < h; k += 1) {
-          for (let c = spec.range.c1; c <= spec.range.c2; c += 1) {
-            const source = refOf(rows[order[p]] + k, c);
-            const target = refOf(rows[p] + k, c);
-            const src = before.get(source);
-            if (!src) {
+          const row = String(rows[p] + k);
+          for (let i = 0; i < width; i += 1) {
+            const entry = cells[k * width + i];
+            const target = letters[i] + row;
+            if (!entry) {
               delete map[target];
               continue;
             }
-            const moved = { value: src.value, formula: "" };
-            if (src.formula) moved.formula = rewritten.get(source) ?? src.formula;
-            const style = cloneStyle(src.style);
-            if (style) moved.style = style;
-            map[target] = moved;
+            // The freeze flag belongs to the cell A1, not to the content that moves.
+            if (entry.style?.frozenPanes) entry.style = cloneStyle(entry.style);
+            map[target] = entry;
           }
         }
       }
@@ -181,13 +189,14 @@
       if (rows.length < 2) return { ok: true, moved: 0 };
       if (rows.length * spec.keys.length > MAX_REQUEST_CELLS) return { ok: false, why: "large" };
       const framed = { ...spec, range };
-      const { cells, texts } = formulaCells(map, framed, rows, unit.h);
+      const { grid, letters, width } = gather(map, range, rows, unit.h);
+      const { places, texts } = formulaCells(grid);
       let answer;
       try {
         answer = await call({
           sessionAction: "sort",
           caseSensitive: Boolean(spec.caseSensitive),
-          keys: keyColumns(map, framed, rows, unit.w),
+          keys: keyColumns(grid, framed, unit.w, unit.h, width),
           sheet: name,
           range: { r1: range.r1, r2: range.r2 },
           rows,
@@ -199,11 +208,11 @@
       }
       const order = answer?.order;
       const formulas = answer?.formulas;
-      if (!Array.isArray(order) || order.length !== rows.length || !Array.isArray(formulas) || formulas.length !== cells.length) {
+      if (!Array.isArray(order) || order.length !== rows.length || !Array.isArray(formulas) || formulas.length !== places.length) {
         return { ok: false, why: "engine" };
       }
-      apply(map, framed, rows, unit.h, order, cells, formulas);
-      return { ok: true, moved: movesOf(order, rows).length };
+      apply(map, rows, unit.h, order, grid, letters, width, places, formulas);
+      return { ok: true, moved: countMoved(order) };
     }
 
     return { run };
