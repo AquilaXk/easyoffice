@@ -7,6 +7,7 @@
 //! list), and the whole rule for formula operands, which may read any cell. The result is the list
 //! of cells whose merged appearance differs from the one last reported.
 
+mod axis_shift;
 mod cf;
 pub(crate) mod data;
 mod pack;
@@ -19,6 +20,7 @@ use data::{prepare_formulas, StatsCache, BLANK_SCAN_CELLS};
 pub(crate) use data::{Cells, SheetCells};
 use easyoffice_formats::{CellBox, CfKind, CfRule, SheetRules};
 
+pub use axis_shift::shift_rules;
 pub use pack::{decode_visuals, encode_visuals, PackedVisuals};
 pub use validate::{validate_input, Verdict};
 

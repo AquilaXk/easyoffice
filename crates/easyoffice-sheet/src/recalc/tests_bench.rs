@@ -132,3 +132,57 @@ fn graph_memory_bench() {
         start.elapsed().as_secs_f64() * 1e3
     );
 }
+
+/// Row insertion on a sheet of 100,000 rows and 100,000 formulas (`cargo test -p easyoffice-sheet
+/// --release --lib -- --ignored --nocapture axis_edit_bench`): the edit alone (cells move,
+/// formula text and compiled formulas follow) and the whole session call (graph rebuilt, every
+/// formula recalculated, changed values listed).
+#[test]
+#[ignore = "measurement harness"]
+fn axis_edit_bench() {
+    use crate::axis::{Axis, AxisEdit, EditKind};
+    use std::time::Duration;
+    let rows = 100_000u32;
+    let build_sheet = || {
+        let mut wb = WorkbookEngine::new();
+        wb.add_sheet("Sheet1");
+        wb.add_sheet("Other");
+        for r in 1..=rows {
+            wb.set_cell("Sheet1", &format!("A{r}"), r.to_string())
+                .unwrap();
+            wb.set_cell("Sheet1", &format!("B{r}"), format!("=A{r}*2"))
+                .unwrap();
+        }
+        wb.set_cell("Sheet1", "D1", format!("=SUM(B1:B{rows})"))
+            .unwrap();
+        wb.set_cell("Other", "A1", format!("=Sheet1!A{rows}+SUM(Sheet1!A:A)"))
+            .unwrap();
+        wb
+    };
+    for (label, at_row) in [
+        ("row 1 (every formula moves)", 1u32),
+        ("row 50,000", 50_000),
+    ] {
+        let edit = AxisEdit::new(Axis::Row, EditKind::Insert, at_row - 1, 1).unwrap();
+        let mut wb = build_sheet();
+        let t = Instant::now();
+        let report = wb
+            .apply_axis_edit("Sheet1", edit, Duration::from_secs(30))
+            .unwrap();
+        let engine_ms = t.elapsed().as_secs_f64() * 1e3;
+
+        let mut session = RecalcSession::new(build_sheet()).unwrap();
+        session.recalculate();
+        let t = Instant::now();
+        let (_, outcome) = session
+            .apply_axis_edit("Sheet1", edit, Duration::from_secs(30))
+            .unwrap();
+        let session_ms = t.elapsed().as_secs_f64() * 1e3;
+        println!(
+            "insert 1 row at {label}: formulas={} rewritten={} | edit alone {engine_ms:.1} ms | session call (edit + graph rebuild + recalc) {session_ms:.1} ms, changed values {}",
+            rows + 2,
+            report.rewritten.len(),
+            outcome.changed.len()
+        );
+    }
+}

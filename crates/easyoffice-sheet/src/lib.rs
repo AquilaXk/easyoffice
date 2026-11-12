@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 mod agg_stream;
+pub mod axis;
 pub mod coercion;
 mod criteria;
 mod dag;
@@ -28,6 +29,7 @@ mod text_format;
 pub mod types;
 pub mod workbook;
 
+pub use axis::{Axis, AxisEdit, AxisEditReport, EditKind};
 pub use coercion::*;
 pub use functions::*;
 pub use functions_complex::{format_complex, parse_complex};
@@ -35,11 +37,11 @@ pub use memo::{CellMap, CoordHasher, FastMap, MemoTable};
 pub use parser::{compile_formula_expr, BinaryOp, Expr};
 pub use recalc::{
     Budget, CellChange, ChangedCell, Footprint, RecalcError, RecalcOutcome, RecalcSession,
-    RuleUpdates,
+    RuleUpdates, AXIS_EDIT_TIME_BUDGET,
 };
 pub use rules::{
-    decode_visuals, encode_visuals, validate_input, Bar, CellVisual, Icon, PackedVisuals,
-    RuleRuntime, Verdict,
+    decode_visuals, encode_visuals, shift_rules, validate_input, Bar, CellVisual, Icon,
+    PackedVisuals, RuleRuntime, Verdict,
 };
 pub use types::*;
 pub use workbook::*;

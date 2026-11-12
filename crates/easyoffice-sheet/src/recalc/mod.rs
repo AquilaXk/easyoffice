@@ -16,9 +16,13 @@ mod graph;
 mod id_set;
 mod interval;
 mod rule_session;
+mod structure;
 pub use rule_session::RuleUpdates;
+pub use structure::AXIS_EDIT_TIME_BUDGET;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_axis;
 #[cfg(test)]
 mod tests_bench;
 

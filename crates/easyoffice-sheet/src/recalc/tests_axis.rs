@@ -1,0 +1,277 @@
+//! Row and column edits inside a session: the values after an edit equal a fresh session built
+//! from the edited workbook.
+
+use super::*;
+use crate::axis::{Axis, AxisEdit, AxisEditReport, EditKind};
+use std::collections::HashMap;
+use std::time::Duration;
+
+fn at(a1: &str) -> PackedCellCoordinate {
+    PackedCellCoordinate::parse_a1(a1).unwrap()
+}
+
+fn session(sheets: &[&str], cells: &[(&str, &str, &str)]) -> RecalcSession {
+    let mut wb = WorkbookEngine::new();
+    for name in sheets {
+        wb.add_sheet(*name);
+    }
+    for &(sheet, a1, raw) in cells {
+        wb.set_cell(sheet, a1, raw).unwrap();
+    }
+    let mut s = RecalcSession::new(wb).unwrap();
+    s.recalculate();
+    s
+}
+
+fn row_edit(kind: EditKind, row1: u32, count: u32) -> AxisEdit {
+    AxisEdit::new(Axis::Row, kind, row1 - 1, count).unwrap()
+}
+
+fn raw(s: &RecalcSession, sheet: &str, a1: &str) -> Option<String> {
+    s.workbook()
+        .sheet(sheet)
+        .unwrap()
+        .raw_cells()
+        .get(&at(a1))
+        .cloned()
+}
+
+fn values(s: &RecalcSession) -> HashMap<(String, String), String> {
+    let mut out = HashMap::new();
+    for sheet in s.workbook().sheets() {
+        for (&coord, text) in sheet.raw_cells() {
+            if text.starts_with('=') {
+                out.insert(
+                    (sheet.name.clone(), coord.to_a1()),
+                    s.cell_value(&sheet.name, coord).to_display_string(),
+                );
+            }
+        }
+    }
+    out
+}
+
+/// A fresh session over the same cells: the oracle.
+fn fresh_values(s: &RecalcSession) -> HashMap<(String, String), String> {
+    let mut fresh = RecalcSession::new(s.workbook().clone()).unwrap();
+    fresh.recalculate();
+    values(&fresh)
+}
+
+fn edit_ok(s: &mut RecalcSession, sheet: &str, e: AxisEdit) -> (AxisEditReport, RecalcOutcome) {
+    let out = s
+        .apply_axis_edit(sheet, e, Duration::from_secs(30))
+        .unwrap();
+    assert_eq!(values(s), fresh_values(s), "{e:?}");
+    out
+}
+
+#[test]
+fn inserting_a_row_moves_cells_rewrites_formulas_and_keeps_values() {
+    let mut s = session(
+        &["S", "T"],
+        &[
+            ("S", "A1", "1"),
+            ("S", "A2", "2"),
+            ("S", "A3", "3"),
+            ("S", "B1", "=SUM(A1:A3)"),
+            ("S", "B3", "=A3*10"),
+            ("T", "A1", "=S!A3+SUM(S!A1:A3)"),
+        ],
+    );
+    let (report, out) = edit_ok(&mut s, "S", row_edit(EditKind::Insert, 2, 1));
+    assert_eq!(raw(&s, "S", "A2"), None);
+    assert_eq!(raw(&s, "S", "A3").as_deref(), Some("2"));
+    assert_eq!(raw(&s, "S", "A4").as_deref(), Some("3"));
+    assert_eq!(raw(&s, "S", "B1").as_deref(), Some("=SUM(A1:A4)"));
+    assert_eq!(raw(&s, "S", "B4").as_deref(), Some("=A4*10"));
+    assert_eq!(raw(&s, "T", "A1").as_deref(), Some("=S!A4+SUM(S!A1:A4)"));
+    assert_eq!(report.rewritten.len(), 3);
+    // Nothing a formula shows changed, so nothing is reported.
+    assert!(out.changed.is_empty(), "{:?}", out.changed);
+    assert_eq!(s.cell_value("S", at("B1")), EvaluatedCellValue::Number(6.0));
+}
+
+#[test]
+fn deleting_rows_turns_lost_references_into_ref_errors() {
+    let mut s = session(
+        &["S"],
+        &[
+            ("S", "A1", "1"),
+            ("S", "A2", "2"),
+            ("S", "A3", "3"),
+            ("S", "A4", "4"),
+            ("S", "B1", "=A2*2"),
+            ("S", "B4", "=SUM(A1:A4)+A3"),
+        ],
+    );
+    let (report, out) = edit_ok(&mut s, "S", row_edit(EditKind::Delete, 2, 2));
+    assert_eq!(report.removed_cells, 2);
+    assert_eq!(raw(&s, "S", "B1").as_deref(), Some("=#REF!*2"));
+    assert_eq!(raw(&s, "S", "B2").as_deref(), Some("=SUM(A1:A2)+#REF!"));
+    assert_eq!(raw(&s, "S", "A2").as_deref(), Some("4"));
+    assert!(out
+        .changed
+        .iter()
+        .any(|c| c.coord == at("B1") && c.value == EvaluatedCellValue::Error(FormulaError::Ref)));
+}
+
+#[test]
+fn column_edits_move_columns_and_whole_column_references() {
+    let mut s = session(
+        &["S"],
+        &[
+            ("S", "A1", "1"),
+            ("S", "B1", "2"),
+            ("S", "C1", "=SUM(A:B)"),
+            ("S", "D1", "=B1+C1"),
+        ],
+    );
+    let ins = AxisEdit::new(Axis::Col, EditKind::Insert, 1, 2).unwrap();
+    edit_ok(&mut s, "S", ins);
+    assert_eq!(raw(&s, "S", "E1").as_deref(), Some("=SUM(A:D)"));
+    assert_eq!(raw(&s, "S", "F1").as_deref(), Some("=D1+E1"));
+    let del = AxisEdit::new(Axis::Col, EditKind::Delete, 0, 1).unwrap();
+    edit_ok(&mut s, "S", del);
+    assert_eq!(raw(&s, "S", "D1").as_deref(), Some("=SUM(A:C)"));
+}
+
+#[test]
+fn a_refused_edit_changes_nothing() {
+    let mut s = session(&["S"], &[("S", "A1048576", "9"), ("S", "B1", "=A1048576")]);
+    let before = values(&s);
+    let err = s.apply_axis_edit(
+        "S",
+        row_edit(EditKind::Insert, 1, 1),
+        Duration::from_secs(5),
+    );
+    assert!(err.is_err());
+    assert_eq!(raw(&s, "S", "A1048576").as_deref(), Some("9"));
+    assert_eq!(values(&s), before);
+    assert!(s
+        .apply_axis_edit(
+            "Nope",
+            row_edit(EditKind::Insert, 1, 1),
+            Duration::from_secs(5)
+        )
+        .is_err());
+
+    let mut many = session(&["S"], &[]);
+    for r in 1..=2_500 {
+        many.set_cell("S", at(&format!("A{r}")), &format!("=B{r}"))
+            .unwrap();
+    }
+    many.recalculate();
+    let err = many.apply_axis_edit("S", row_edit(EditKind::Insert, 1, 1), Duration::ZERO);
+    assert!(matches!(err, Err(RecalcError::Invalid(_))));
+    assert_eq!(raw(&many, "S", "A1").as_deref(), Some("=B1"));
+}
+
+#[test]
+fn random_edit_sequences_match_a_fresh_session() {
+    for seed in 1..=12u64 {
+        let mut state = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
+        let mut rnd = |n: u32| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state % u64::from(n)) as u32
+        };
+        let mut cells: Vec<(String, String, String)> = Vec::new();
+        for r in 1..=12u32 {
+            for (c, sheet) in [("A", "S"), ("A", "T")] {
+                cells.push((sheet.into(), format!("{c}{r}"), (rnd(50) + 1).to_string()));
+            }
+            let other = ["S", "T"][rnd(2) as usize];
+            let (r1, r2) = (rnd(12) + 1, rnd(12) + 1);
+            let formula = match rnd(5) {
+                0 => format!("=A{r1}+A{r2}"),
+                1 => format!("=SUM(A{}:A{})", r1.min(r2), r1.max(r2)),
+                2 => format!("=SUM({other}!A{}:A{})", r1.min(r2), r1.max(r2)),
+                3 => format!("=MATCH(A{r1},A:A,0)+ROW()"),
+                _ => format!("={other}!A{r1}*2+$A${r2}"),
+            };
+            cells.push(("S".into(), format!("B{r}"), formula));
+            cells.push(("T".into(), format!("B{r}"), format!("=S!B{r1}+COUNT(A:B)")));
+        }
+        let borrowed: Vec<(&str, &str, &str)> = cells
+            .iter()
+            .map(|(a, b, c)| (a.as_str(), b.as_str(), c.as_str()))
+            .collect();
+        let mut s = session(&["S", "T"], &borrowed);
+        for _ in 0..8 {
+            let kind = if rnd(2) == 0 {
+                EditKind::Insert
+            } else {
+                EditKind::Delete
+            };
+            let axis = if rnd(3) == 0 { Axis::Col } else { Axis::Row };
+            let sheet = ["S", "T"][rnd(2) as usize];
+            let e = AxisEdit::new(axis, kind, rnd(8), rnd(3) + 1).unwrap();
+            edit_ok(&mut s, sheet, e);
+        }
+    }
+}
+
+#[test]
+fn insertions_never_change_what_a_formula_shows() {
+    // Oracle independent of the rewriter: every formula still computes the value it had, at the
+    // position the edit moved it to.
+    for seed in 1..=20u64 {
+        let mut state = seed.wrapping_mul(0xD6E8_FEB8_6659_FD93) | 1;
+        let mut rnd = |n: u32| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state % u64::from(n)) as u32
+        };
+        let mut cells: Vec<(String, String, String)> = Vec::new();
+        for r in 1..=10u32 {
+            for sheet in ["S", "T"] {
+                cells.push((sheet.into(), format!("A{r}"), (rnd(40) + 1).to_string()));
+                cells.push((sheet.into(), format!("B{r}"), (rnd(40) + 1).to_string()));
+            }
+            let other = ["S", "T"][rnd(2) as usize];
+            let (r1, r2) = (rnd(10) + 1, rnd(10) + 1);
+            let (lo, hi) = (r1.min(r2), r1.max(r2));
+            let formula = match rnd(6) {
+                0 => format!("=A{r1}+B{r2}"),
+                1 => format!("=SUM(A{lo}:B{hi})"),
+                2 => format!("=SUM({other}!A{lo}:A{hi})*2"),
+                3 => "=SUM(A:A)+COUNT(B:B)".to_string(),
+                4 => format!("=SUM({lo}:{hi})"),
+                _ => format!("={other}!B{r1}*2+$A${r2}"),
+            };
+            cells.push(("S".into(), format!("C{r}"), formula.clone()));
+            cells.push(("T".into(), format!("C{r}"), formula.replace("S!", "T!")));
+        }
+        let borrowed: Vec<(&str, &str, &str)> = cells
+            .iter()
+            .map(|(a, b, c)| (a.as_str(), b.as_str(), c.as_str()))
+            .collect();
+        let mut s = session(&["S", "T"], &borrowed);
+        for _ in 0..6 {
+            let before = values(&s);
+            let axis = if rnd(3) == 0 { Axis::Col } else { Axis::Row };
+            let sheet = ["S", "T"][rnd(2) as usize];
+            let e = AxisEdit::new(axis, EditKind::Insert, rnd(8), rnd(3) + 1).unwrap();
+            s.apply_axis_edit(sheet, e, Duration::from_secs(30))
+                .unwrap();
+            let after = values(&s);
+            assert_eq!(before.len(), after.len());
+            for ((name, a1), want) in &before {
+                let coord = at(a1);
+                let moved = if name == sheet {
+                    e.map_coord(coord).unwrap()
+                } else {
+                    coord
+                };
+                assert_eq!(
+                    &after[&(name.clone(), moved.to_a1())],
+                    want,
+                    "{name}!{a1} under {e:?}"
+                );
+            }
+        }
+    }
+}
