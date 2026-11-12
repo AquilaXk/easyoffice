@@ -20,17 +20,32 @@ test("the About dialog carries the required notice sentence exactly once, in a n
 
 const licenseTokens = (text) => new Set(text.split(/[\s()/]+/).filter((t) => t && t !== "OR" && t !== "AND"));
 
-test("every license row of the About dialog is a crate of the WebAssembly notice table with the same license", () => {
+const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const sortedTokens = (text) => [...licenseTokens(text)].sort((a, b) => a.localeCompare(b));
+
+test("every license row of the About dialog is backed by a line of THIRD_PARTY_NOTICES.md that names it and its license", () => {
   const notices = read("THIRD_PARTY_NOTICES.md");
-  const table = new Map([...notices.matchAll(/^\| ([\w-]+) \| [\d.]+ \| (.+?) \|$/gm)].map((m) => [m[1], m[2]]));
+  const wasmTable = new Map([...notices.matchAll(/^\| ([\w-]+) \| [\d.]+ \| (.+?) \|$/gm)].map((m) => [m[1], m[2]]));
+  const lines = notices.split("\n");
   const rows = [...index.matchAll(/<tr><td>([^<]+)<\/td><td>([^<]+)<\/td><\/tr>/g)];
   assert.ok(rows.length >= 10, "the license table is present");
   for (const [, names, license] of rows) {
     for (const name of names.split(" / ")) {
-      assert.ok(table.has(name), `${name} is listed in THIRD_PARTY_NOTICES.md`);
-      assert.deepEqual([...licenseTokens(table.get(name))].sort((a, b) => a.localeCompare(b)), [...licenseTokens(license)].sort((a, b) => a.localeCompare(b)), name);
+      if (wasmTable.has(name)) {
+        assert.deepEqual(sortedTokens(wasmTable.get(name)), sortedTokens(license), name);
+        continue;
+      }
+      const named = new RegExp(`(?<![\\w-])${escapeRegExp(name)}(?![\\w-])`);
+      const backed = lines.some((line) => named.test(line) && [...licenseTokens(license)].every((token) => line.includes(token)));
+      assert.ok(backed, `${name} (${license}) has a line in THIRD_PARTY_NOTICES.md with its name and license`);
     }
   }
+});
+
+test("the About dialog points to THIRD_PARTY_NOTICES.md as a label and carries no diagnostics line", () => {
+  assert.match(index, /<div class="about-license-note">전체 목록: THIRD_PARTY_NOTICES\.md<\/div>/);
+  const about = index.slice(index.indexOf('<dialog id="about-dialog"'), index.indexOf("</dialog>", index.indexOf('<dialog id="about-dialog"')));
+  assert.doesNotMatch(about, /about-diagnostics|platform-pill|status-module|status-format-spec|ime-badge|status-engine/);
 });
 
 test("the exception is the exact sentence in the About page only", () => {
