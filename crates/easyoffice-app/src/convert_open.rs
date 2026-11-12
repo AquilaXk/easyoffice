@@ -10,10 +10,10 @@
 //! ceilings, path-traversal checks, and XXE/DTD rejection apply to every path.
 
 use easyoffice_formats::{
-    base64_codec, evaluate_table_formulas, CellMerge, CellStyle, DecodedContent, DecodedDocument,
-    DocumentFormat, EasyOfficeError, OdsUnpacked, PdfWriteOptions, RichAlignment, RichBlock,
-    RichImage, RichListKind, RichParagraph, RichScript, SheetStyling, StrictJsonValue,
-    UniversalFormatConverter,
+    base64_codec, evaluate_table_formulas, resolve_code, CellMerge, CellStyle, DecodedContent,
+    DecodedDocument, DocumentFormat, EasyOfficeError, OdsUnpacked, PdfWriteOptions, RichAlignment,
+    RichBlock, RichImage, RichListKind, RichParagraph, RichScript, SheetStyling, StrictJsonValue,
+    UniversalFormatConverter, CUSTOM_BASE,
 };
 use easyoffice_sheet::PackedCellCoordinate;
 use std::collections::HashSet;
@@ -210,8 +210,54 @@ fn cells_outside_grid(
         .count()
 }
 
-/// `{"bold":true,"sizePt":11.25}`: only the set flags and the explicit size.
-fn write_style(out: &mut String, style: &CellStyle) {
+/// The number format codes a sheet's cells use, in first-use order, with a constant-time lookup
+/// from a cell's format id to its 1-based entry (PD-191). Built-in ids resolve to their code, so
+/// the page never needs the id table.
+struct NumFmtIndex<'a> {
+    codes: Vec<&'a str>,
+    entry_of: Vec<u16>,
+}
+
+impl<'a> NumFmtIndex<'a> {
+    fn build(styling: Option<&'a SheetStyling>) -> Self {
+        let mut index = Self {
+            codes: Vec::new(),
+            entry_of: Vec::new(),
+        };
+        let Some(styling) = styling else {
+            return index;
+        };
+        let slots = usize::from(CUSTOM_BASE) + styling.num_fmts.len();
+        for style in styling.cells.values() {
+            let id = usize::from(style.num_fmt);
+            if id == 0 || id >= slots {
+                continue;
+            }
+            if index.entry_of.is_empty() {
+                index.entry_of = vec![0; slots];
+            }
+            if index.entry_of[id] != 0 {
+                continue;
+            }
+            if let Some(code) = resolve_code(style.num_fmt, &styling.num_fmts) {
+                index.codes.push(code);
+                index.entry_of[id] = index.codes.len() as u16;
+            }
+        }
+        index
+    }
+
+    fn entry(&self, num_fmt: u16) -> Option<u16> {
+        self.entry_of
+            .get(usize::from(num_fmt))
+            .copied()
+            .filter(|&e| e != 0)
+    }
+}
+
+/// `{"bold":true,"sizePt":11.25,"nf":2}`: only the set flags, the explicit size and the format
+/// entry.
+fn write_style(out: &mut String, style: &CellStyle, num_fmts: &NumFmtIndex<'_>) {
     out.push('{');
     let mut first = true;
     for (on, key) in [
@@ -232,7 +278,14 @@ fn write_style(out: &mut String, style: &CellStyle) {
         if !first {
             out.push(',');
         }
+        first = false;
         let _ = write!(out, "\"sizePt\":{size}");
+    }
+    if let Some(entry) = num_fmts.entry(style.num_fmt) {
+        if !first {
+            out.push(',');
+        }
+        let _ = write!(out, "\"nf\":{entry}");
     }
     out.push('}');
 }
@@ -248,6 +301,7 @@ fn write_sheet_cells(
     out: &mut String,
     cells: &[(u32, u32, String)],
     styling: Option<&SheetStyling>,
+    num_fmts: &NumFmtIndex<'_>,
     max_rows: Option<u32>,
     max_cols: Option<u32>,
 ) {
@@ -276,7 +330,7 @@ fn write_sheet_cells(
         push_json_str(out, raw);
         if let Some(style) = style {
             out.push_str(",\"style\":");
-            write_style(out, style);
+            write_style(out, style, num_fmts);
         }
         out.push('}');
     }
@@ -297,7 +351,7 @@ fn write_sheet_cells(
         out.push_str("{\"ref\":\"");
         coord.write_a1(out);
         out.push_str("\",\"raw\":\"\",\"style\":");
-        write_style(out, style);
+        write_style(out, style, num_fmts);
         out.push('}');
     }
 }
@@ -331,10 +385,16 @@ fn write_sheet(
     out.push_str("{\"name\":");
     push_json_str(out, name);
     out.push_str(",\"cells\":[");
-    write_sheet_cells(out, cells, styling, max_rows, max_cols);
+    let num_fmts = NumFmtIndex::build(styling);
+    write_sheet_cells(out, cells, styling, &num_fmts, max_rows, max_cols);
     out.push_str("],\"columns\":[");
     write_columns(out, styling, max_cols);
     out.push(']');
+    if !num_fmts.codes.is_empty() {
+        out.push_str(",\"numFmts\":[");
+        write_list(out, &num_fmts.codes, |out, code| push_json_str(out, code));
+        out.push(']');
+    }
     if let Some(st) = styling.filter(|st| !st.rules.is_empty()) {
         out.push_str(",\"rules\":");
         out.push_str(&rules_json(&st.rules));
@@ -376,6 +436,12 @@ fn decode_response(
                 warnings.extend(st.rules.unsupported.iter().map(|rule| {
                     format!("{name} 시트의 {rule} 규칙은 지원하지 않아 가져오지 않았습니다.")
                 }));
+                if st.num_fmts_rejected > 0 {
+                    warnings.push(format!(
+                        "서식 코드 {}개는 한도를 넘거나 알 수 없어 일반 서식으로 가져왔습니다.",
+                        st.num_fmts_rejected
+                    ));
+                }
             }
             ("workbook", sheets.len())
         }

@@ -278,3 +278,58 @@ fn xls_save_renames_sheets_to_the_excel_rules_and_says_so() {
     let (json, _) = convert(&payload("xls", SHEETS));
     assert!(!json.contains("이름을 바꿨습니다"), "{json}");
 }
+
+mod number_formats {
+    use super::*;
+    use easyoffice_formats::{read_sheet_styling, resolve_code, DocumentFormat};
+
+    fn save(sheet: &str, dst: &str) -> Result<Vec<u8>, String> {
+        let payload = payload(dst, &format!(r#""sheets":[{sheet}]"#));
+        let json = EasyOfficeIpcRouter::dispatch("convert_document_format", &payload)
+            .map_err(|e| e.to_string())?;
+        Ok(EasyOfficeIpcRouter::decode_base64(json_str_field(&json, "convertedBase64")).unwrap())
+    }
+
+    const SHEET: &str = r##"{"name":"서식","numFmts":["0.00","\"₩\"#,##0_);[Red](\"₩\"#,##0)"],
+        "cells":[{"ref":"A1","raw":"3.14159","style":{"nf":1}},
+                 {"ref":"B1","raw":"-1500","style":{"bold":true,"nf":2}},
+                 {"ref":"C1","raw":"7"}]}"##;
+
+    #[test]
+    fn nf_entries_become_formats_in_xlsx_and_ods() {
+        for (dst, format) in [("xlsx", DocumentFormat::Xlsx), ("ods", DocumentFormat::Ods)] {
+            let bytes = save(SHEET, dst).unwrap();
+            let styling = &read_sheet_styling(&bytes, format).unwrap()[0].1;
+            let code = |at| {
+                let style = styling.cells.get(&at)?;
+                resolve_code(style.num_fmt, &styling.num_fmts)
+            };
+            assert_eq!(code((0, 0)), Some("0.00"), "{dst}");
+            assert_eq!(
+                code((0, 1)),
+                Some("\"₩\"#,##0_);[Red](\"₩\"#,##0)"),
+                "{dst}"
+            );
+            assert!(styling.cells[&(0, 1)].bold);
+            assert!(!styling.cells.contains_key(&(0, 2)));
+        }
+    }
+
+    #[test]
+    fn a_bad_numfmts_payload_is_refused() {
+        let out_of_range =
+            r#"{"name":"a","numFmts":["0"],"cells":[{"ref":"A1","raw":"1","style":{"nf":2}}]}"#;
+        assert!(save(out_of_range, "xlsx").unwrap_err().contains("nf"));
+        let long = "0".repeat(300);
+        let too_long = format!(r#"{{"name":"a","numFmts":["{long}"],"cells":[]}}"#);
+        assert!(save(&too_long, "xlsx").is_err());
+        let sections = r#"{"name":"a","numFmts":["0;0;0;0;0"],"cells":[]}"#;
+        assert!(save(sections, "xlsx").is_err());
+        let many: Vec<String> = (0..513).map(|n| format!("\"0.0\\\"{n}\\\"\"")).collect();
+        let too_many = format!(
+            r#"{{"name":"a","numFmts":[{}],"cells":[]}}"#,
+            many.join(",")
+        );
+        assert!(save(&too_many, "xlsx").is_err());
+    }
+}

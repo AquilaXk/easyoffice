@@ -873,3 +873,61 @@ fn decode_answer_is_byte_exact_for_documents_workbooks_and_slides() {
         "{json}"
     );
 }
+
+/// The `decode` answer lists the format codes a sheet uses once and points at them by entry; a
+/// code the reader replaced with General is announced.
+#[test]
+fn decode_answer_names_number_formats_by_entry() {
+    use std::sync::Arc;
+
+    let styled = |num_fmt| CellStyle {
+        num_fmt,
+        ..CellStyle::default()
+    };
+    let mut styling = SheetStyling::default();
+    // 2 is the built-in "0.00", 164 the sheet's first custom code, 400 points nowhere.
+    styling.cells.insert((0, 0), styled(2));
+    styling.cells.insert((1, 0), styled(164));
+    styling.cells.insert((2, 0), styled(2));
+    styling.cells.insert((3, 0), styled(400));
+    styling.num_fmts = Arc::new(vec!["\"₩\"#,##0".to_string()]);
+    styling.num_fmts_rejected = 2;
+    let decoded = DecodedDocument {
+        format: DocumentFormat::Xlsx,
+        title: "t".to_string(),
+        content: DecodedContent::Workbook(vec![(
+            "S".to_string(),
+            vec![(0, 0, "3.14159".to_string()), (1, 0, "1500".to_string())],
+        )]),
+        warnings: Vec::new(),
+    };
+    let json = decode_response(
+        &decoded,
+        &[("S".to_string(), styling)],
+        "a.xlsx",
+        10,
+        None,
+        None,
+    )
+    .unwrap();
+    assert!(
+        json.contains(r#"{"ref":"A1","raw":"3.14159","style":{"nf":1}}"#),
+        "{json}"
+    );
+    assert!(
+        json.contains(r#"{"ref":"A2","raw":"1500","style":{"nf":2}}"#),
+        "{json}"
+    );
+    assert!(
+        json.contains(r#"{"ref":"A3","raw":"","style":{"nf":1}}"#),
+        "{json}"
+    );
+    assert!(
+        json.contains(r##""numFmts":["0.00","\"₩\"#,##0"]"##),
+        "{json}"
+    );
+    assert!(
+        json.contains("서식 코드 2개는 한도를 넘거나 알 수 없어 일반 서식으로 가져왔습니다."),
+        "{json}"
+    );
+}

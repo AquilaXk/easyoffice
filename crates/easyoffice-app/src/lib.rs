@@ -33,6 +33,7 @@ pub mod ribbon;
 mod ribbon_session;
 mod security_ipc;
 pub mod self_test;
+mod sheet_format_ipc;
 #[cfg(test)]
 mod sheet_ipc_tests;
 mod sheet_pivot_ipc;

@@ -6,7 +6,9 @@
 //!   "sizeHalfPt","font","color","highlight","link"}],
 //!   "align","heading","list"}` and `{"type":"table","rows":[[{"text","value"}]],
 //!   "merges":[{"row","col","rowSpan","colSpan"}]}` items (`merges` is optional, PD-130);
-//! - `sheets`: `[{"name","cells":[{"ref":"A1","raw":"=SUM(A1:A2)","style":{"bold":true,"sizePt":11.25}}],`n//!   "columns":[{"index":1,"widthPx":120}]}]` for every workbook sheet (`style` and `columns` are optional,`n//!   PD-089; `index` is the 1-based column number);
+//! - `sheets`: `[{"name","cells":[{"ref":"A1","raw":"=SUM(A1:A2)","style":{"bold":true,"sizePt":11.25,"nf":1}}],`n//!   "columns":[{"index":1,"widthPx":120}],"numFmts":["0.00"]}]` for every workbook sheet (`style`, `columns`
+//!   and `numFmts` are optional, PD-089; `index` is the 1-based column number; `nf` is the 1-based entry
+//!   of `numFmts`, PD-191);
 //! - `slides`: `[{"title","bullets":[...],"notes"}]`.
 //!
 //! Every string is literal content; nothing in it is parsed as markup.
@@ -14,11 +16,11 @@
 use std::collections::BTreeMap;
 
 use easyoffice_formats::{
-    base64_codec, evaluate_table_formulas, normalize_hex_color, safe_link_target, CellMerge,
-    CellStyle, EasyOfficeError, OdsUnpacked, OoxmlCodec, PdfWriteOptions, RichAlignment, RichBlock,
-    RichDocument, RichImage, RichListKind, RichParagraph, RichRun, RichScript, RichTable,
-    SheetStyling, StrictJsonValue, MAX_COLUMN_PX, MAX_IMAGE_BYTES, MAX_SIZE_PT, MIN_COLUMN_PX,
-    MIN_SIZE_PT,
+    base64_codec, code_within_bounds, evaluate_table_formulas, normalize_hex_color,
+    safe_link_target, CellMerge, CellStyle, EasyOfficeError, NumFmtTable, OdsUnpacked, OoxmlCodec,
+    PdfWriteOptions, RichAlignment, RichBlock, RichDocument, RichImage, RichListKind,
+    RichParagraph, RichRun, RichScript, RichTable, SheetStyling, StrictJsonValue, MAX_COLUMN_PX,
+    MAX_IMAGE_BYTES, MAX_NUM_FMTS, MAX_SIZE_PT, MIN_COLUMN_PX, MIN_SIZE_PT,
 };
 use easyoffice_sheet::{PackedCellCoordinate, WorkbookEngine};
 
@@ -416,8 +418,9 @@ fn opt_number(obj: &JsonObject, key: &str) -> Result<Option<f64>, EasyOfficeErro
 }
 
 /// Cell format of the sheet editor (PD-084/PD-089): `{"bold","italic","underline","strike",
-/// "sizePt"}`; `sizePt` is 1 to 409 points and is stored with two decimals.
-fn parse_cell_style(obj: &JsonObject) -> Result<CellStyle, EasyOfficeError> {
+/// "sizePt","nf"}`; `sizePt` is 1 to 409 points and is stored with two decimals; `nf` is the
+/// 1-based entry of the sheet's `numFmts` (`num_fmt_ids` holds the format id of each entry).
+fn parse_cell_style(obj: &JsonObject, num_fmt_ids: &[u16]) -> Result<CellStyle, EasyOfficeError> {
     let size_pt = opt_number(obj, "sizePt")?
         .map(|pt| {
             if (MIN_SIZE_PT..=MAX_SIZE_PT).contains(&pt) {
@@ -429,13 +432,49 @@ fn parse_cell_style(obj: &JsonObject) -> Result<CellStyle, EasyOfficeError> {
             }
         })
         .transpose()?;
+    let num_fmt = match field(obj, "nf") {
+        None => 0,
+        Some(v) => v
+            .as_u64()
+            .and_then(|n| usize::try_from(n).ok())
+            .filter(|&n| n <= num_fmt_ids.len())
+            .map_or_else(
+                || {
+                    Err(invalid(
+                        "구조화 저장: 'nf'가 'numFmts' 범위를 벗어났습니다.",
+                    ))
+                },
+                |n| Ok(n.checked_sub(1).map_or(0, |at| num_fmt_ids[at])),
+            )?,
+    };
     Ok(CellStyle {
         bold: opt_bool(obj, "bold")?,
         italic: opt_bool(obj, "italic")?,
         underline: opt_bool(obj, "underline")?,
         strike: opt_bool(obj, "strike")?,
         size_pt,
+        num_fmt,
     })
+}
+
+/// `numFmts`: the sheet's format codes (at most `MAX_NUM_FMTS`, each within the code bounds).
+/// Returns the table and the format id of each entry.
+fn parse_num_fmts(items: &[StrictJsonValue]) -> Result<(NumFmtTable, Vec<u16>), EasyOfficeError> {
+    if items.len() > MAX_NUM_FMTS {
+        return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+            "서식 코드 수가 한도({MAX_NUM_FMTS})를 초과했습니다."
+        )));
+    }
+    let mut table = NumFmtTable::default();
+    let mut ids = Vec::with_capacity(items.len());
+    for item in items {
+        let code = item
+            .as_str()
+            .filter(|code| code_within_bounds(code))
+            .ok_or_else(|| invalid("구조화 저장: 서식 코드는 한도 안의 문자열이어야 합니다."))?;
+        ids.push(table.intern(code));
+    }
+    Ok((table, ids))
 }
 
 /// `columns`: `[{"index": 1-based column, "widthPx": 8..=2000}]`, at most one entry per column
@@ -499,6 +538,11 @@ fn parse_sheets(
         }
         let mut cells: BTreeMap<(u32, u32), String> = BTreeMap::new();
         let mut styling = SheetStyling::default();
+        let (num_fmts, num_fmt_ids) = match field(obj, "numFmts") {
+            Some(v) => parse_num_fmts(as_array(v, "numFmts")?)?,
+            None => (NumFmtTable::default(), Vec::new()),
+        };
+        styling.num_fmts = num_fmts.finish().0;
         if let Some(v) = field(obj, "cells") {
             for cell_v in as_array(v, "cells")? {
                 budget.take(1)?;
@@ -508,7 +552,7 @@ fn parse_sheets(
                     .map_err(|_| invalid(format!("구조화 저장: 잘못된 셀 주소 '{a1}'")))?;
                 let key = (coord.row(), coord.col());
                 if let Some(style_v) = field(cell, "style") {
-                    let style = parse_cell_style(as_object(style_v, "style")?)?;
+                    let style = parse_cell_style(as_object(style_v, "style")?, &num_fmt_ids)?;
                     if !style.is_plain() {
                         styling.cells.insert(key, style);
                     }

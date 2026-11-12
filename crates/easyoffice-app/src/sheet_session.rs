@@ -500,6 +500,8 @@ impl EasyOfficeIpcRouter {
     /// - `validate` `{session, sheet, cell, value}` -> `{ok}` or the rule's alert.
     /// - `pivot` `{sheet, cells, range, row, col?, value, agg}` -> the grouped values (no
     ///   session needed, see `sheet_pivot_ipc`).
+    /// - `format` `{items:[{code, values}]}` -> the text of each formatted cell (no session
+    ///   needed, see `sheet_format_ipc`, PD-191).
     /// - `close` `{session}` -> `{closed}`.
     pub(crate) fn handle_sheet_session_action(
         action: &str,
@@ -512,6 +514,7 @@ impl EasyOfficeIpcRouter {
             "rules" => Self::sheet_session_rules(entries, owner),
             "validate" => Self::sheet_session_validate(entries, owner),
             "pivot" => Self::sheet_pivot(entries),
+            "format" => Self::sheet_format(entries),
             "close" => {
                 let closed = registry().close(session_id(entries)?, owner);
                 Ok(format!("{{\"closed\":{closed}}}"))
