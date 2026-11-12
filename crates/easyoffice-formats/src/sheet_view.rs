@@ -86,7 +86,7 @@ fn plain_runs(runs: &[LevelRun]) -> Vec<(u32, u32)> {
 }
 
 /// Maximal stretches of consecutive indexes whose level is at least `k`.
-fn segments(runs: &[LevelRun], k: u8) -> Vec<(u32, u32)> {
+pub(crate) fn segments(runs: &[LevelRun], k: u8) -> Vec<(u32, u32)> {
     let mut out: Vec<(u32, u32)> = Vec::new();
     for &(s, e, _) in runs.iter().filter(|r| r.2 >= k) {
         match out.last_mut() {
@@ -104,6 +104,32 @@ fn summary_of(first: u32, last: u32, above: bool) -> Option<u32> {
     } else {
         last.checked_add(1)
     }
+}
+
+/// Adds `index` with `level` to the sorted runs a scan is building. A row that is out of order, a
+/// level over the bound and a list over `max_total` rows are dropped.
+pub(crate) fn push_level(
+    runs: &mut Vec<LevelRun>,
+    total: &mut u64,
+    max_total: u64,
+    (first, last): (u32, u32),
+    level: u8,
+) {
+    let count = u64::from(last - first) + 1;
+    if level == 0 || level > MAX_OUTLINE_LEVEL || *total + count > max_total {
+        return;
+    }
+    match runs.last_mut() {
+        Some(prev) if first <= prev.1 => return,
+        Some(prev) if prev.1 + 1 == first && prev.2 == level => prev.1 = last,
+        _ => {
+            if runs.len() >= MAX_OUTLINE_RUNS {
+                return;
+            }
+            runs.push((first, last, level));
+        }
+    }
+    *total += count;
 }
 
 fn runs_within(runs: &[LevelRun], limit: u32) -> bool {
@@ -272,5 +298,22 @@ mod tests {
             ..Outline::default()
         };
         assert!(!past.within_bounds(100, 10));
+    }
+
+    #[test]
+    fn levels_are_collected_in_order_and_bounded() {
+        let (mut runs, mut total) = (Vec::new(), 0);
+        push_level(&mut runs, &mut total, 10, (1, 1), 1);
+        push_level(&mut runs, &mut total, 10, (2, 3), 1);
+        push_level(&mut runs, &mut total, 10, (4, 4), 2);
+        push_level(&mut runs, &mut total, 10, (3, 3), 1);
+        push_level(&mut runs, &mut total, 10, (9, 9), 8);
+        push_level(&mut runs, &mut total, 10, (9, 9), 0);
+        assert_eq!(runs, vec![(1, 3, 1), (4, 4, 2)]);
+        assert_eq!(total, 4);
+        push_level(&mut runs, &mut total, 5, (10, 10), 1);
+        assert_eq!((runs.len(), total), (3, 5));
+        push_level(&mut runs, &mut total, 5, (11, 12), 1);
+        assert_eq!((runs.len(), total), (3, 5));
     }
 }

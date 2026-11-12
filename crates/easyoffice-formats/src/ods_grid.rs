@@ -47,6 +47,10 @@ impl<A: OdsSink, B: OdsSink> OdsSink for (A, B) {
         self.0.column(attrs);
         self.1.column(attrs);
     }
+    fn group(&mut self, columns: bool, display: bool, open: bool) {
+        self.0.group(columns, display, open);
+        self.1.group(columns, display, open);
+    }
     fn row(&mut self, repeat: u32, cells: &[OdsCell<'_>]) -> Result<(), EasyOfficeError> {
         self.0.row(repeat, cells)?;
         self.1.row(repeat, cells)
@@ -62,6 +66,9 @@ pub(crate) trait OdsSink {
     fn table(&mut self, attrs: &Attrs<'_>);
     /// A `table:table-column` before the first row of the table.
     fn column(&mut self, _attrs: &Attrs<'_>) {}
+    /// A `table:table-row-group` (or, with `columns`, `table:table-column-group`) opens or closes;
+    /// `display` is false for a folded one.
+    fn group(&mut self, _columns: bool, _display: bool, _open: bool) {}
     fn row(&mut self, repeat: u32, cells: &[OdsCell<'_>]) -> Result<(), EasyOfficeError>;
     fn table_end(&mut self);
 }
@@ -281,6 +288,21 @@ pub(crate) fn walk_ods<S: OdsSink>(
                 }
             }
             _ if table_nesting == 0 => {}
+            XmlEvent::Start {
+                name: name @ ("table:table-row-group" | "table:table-column-group"),
+                ref attrs,
+            } if row_repeat.is_none() => {
+                let shown = attrs
+                    .iter_raw()
+                    .find(|(n, _)| *n == "table:display")
+                    .is_none_or(|(_, v)| v != "false");
+                sink.group(name == "table:table-column-group", shown, true);
+            }
+            XmlEvent::End(name @ ("table:table-row-group" | "table:table-column-group"))
+                if row_repeat.is_none() =>
+            {
+                sink.group(name == "table:table-column-group", true, false);
+            }
             XmlEvent::Start {
                 name: "table:table-column",
                 ref attrs,

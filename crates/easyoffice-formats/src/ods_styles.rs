@@ -9,8 +9,10 @@ use crate::rtf_xml_helpers::{
 };
 use crate::sheet_styling::ods_grid::{repeat_value, walk_ods, OdsCell, OdsSink};
 use crate::sheet_styling::ods_numfmt::{data_style_xml, read_data_styles};
+use crate::sheet_styling::ods_view::{tab_colors, GroupWriter};
 use crate::sheet_styling::sheet_look::{ods_border_edge, ods_border_value};
 use crate::sheet_styling::sheet_rules::ods_rules_read::{OdsRuleReader, ValidationSink};
+use crate::sheet_styling::sheet_view::{push_level, Outline, MAX_OUTLINE_LEVEL, MAX_OUTLINE_ROWS};
 use crate::sheet_styling::{
     format_centipt, resolve_code, BorderLine, CellBorders, CellStyle, HAlign, IdMemo, NumFmtTable,
     SheetStyling, StyleKey, VAlign, MAX_COLUMN_PX, MAX_STYLED_CELLS, MIN_COLUMN_PX,
@@ -216,28 +218,51 @@ fn parse_cell_look(body: &str, style: &mut CellStyle) {
     };
 }
 
-/// `<table:table-column>` elements for the custom widths (empty string when there are none);
-/// columns without a width are filled with unstyled repeated columns.
-pub(crate) fn table_columns_xml(columns: &BTreeMap<u32, u32>, table: &OdsStyleTable) -> String {
+/// `<table:table-column>` elements for the custom widths and the column groups (empty string when
+/// there are none); columns without a width are filled with unstyled repeated columns.
+pub(crate) fn table_columns_xml(styling: &SheetStyling, table: &OdsStyleTable) -> String {
+    let outline = &styling.outline;
+    let mut cuts: std::collections::BTreeSet<u32> = std::collections::BTreeSet::new();
+    for &col in styling.columns.keys() {
+        cuts.extend([col, col + 1]);
+    }
+    for &(first, last, _) in &outline.cols {
+        cuts.extend([first, last + 1]);
+    }
+    let mut groups = GroupWriter::new(
+        "table:table-column-group",
+        &outline.cols,
+        &outline.collapsed_cols,
+    );
+    // Stretches of equal width and level, from the cuts.
+    let mut stretches: Vec<(u32, u32, Option<u32>, u8)> = Vec::new();
+    let cuts: Vec<u32> = cuts.into_iter().collect();
+    for pair in cuts.windows(2) {
+        let (from, to) = (pair[0], pair[1]);
+        let (px, level) = (styling.columns.get(&from).copied(), groups.level(from));
+        if px.is_none() && level == 0 {
+            continue;
+        }
+        match stretches.last_mut() {
+            Some(last) if last.1 == from && last.2 == px && last.3 == level => last.1 = to,
+            _ => stretches.push((from, to, px, level)),
+        }
+    }
     let mut xml = String::new();
     let mut next = 0u32;
-    let mut runs: Vec<(u32, u32, u32)> = Vec::new();
-    for (&col, &px) in columns {
-        match runs.last_mut() {
-            Some((_, end, w)) if *w == px && *end + 1 == col => *end = col,
-            _ => runs.push((col, col, px)),
+    for (from, to, px, _) in stretches {
+        if from > next {
+            groups.close_all(&mut xml);
+            xml.push_str(&repeated_column(None, from - next));
         }
-    }
-    for (start, end, px) in runs {
-        if start > next {
-            xml.push_str(&repeated_column(None, start - next));
-        }
+        groups.move_to(&mut xml, from);
         xml.push_str(&repeated_column(
-            table.column_style_name(px).as_deref(),
-            end - start + 1,
+            px.and_then(|px| table.column_style_name(px)).as_deref(),
+            to - from,
         ));
-        next = end + 1;
+        next = to;
     }
+    groups.close_all(&mut xml);
     xml
 }
 
@@ -289,6 +314,8 @@ fn parse_text_properties(attrs: &str) -> CellStyle {
 pub(crate) struct AutomaticStyles {
     pub(crate) cells: HashMap<String, CellStyle>,
     pub(crate) columns: HashMap<String, u32>,
+    /// Tab colours of the table styles (PD-208).
+    pub(crate) tab_colors: HashMap<String, u32>,
     /// Custom number format codes the cell styles refer to, and how many codes were replaced
     /// with General (PD-193).
     pub(crate) num_fmts: Arc<Vec<String>>,
@@ -299,6 +326,7 @@ pub(crate) fn parse_automatic_styles(content_xml: &str) -> AutomaticStyles {
     let mut styles = AutomaticStyles {
         cells: HashMap::new(),
         columns: HashMap::new(),
+        tab_colors: HashMap::new(),
         num_fmts: Arc::default(),
         num_fmts_rejected: 0,
     };
@@ -308,6 +336,7 @@ pub(crate) fn parse_automatic_styles(content_xml: &str) -> AutomaticStyles {
     else {
         return styles;
     };
+    styles.tab_colors = tab_colors(auto);
     let data_codes = read_data_styles(auto);
     let mut num_fmts = NumFmtTable::default();
     for (attrs, body) in extract_tags_with_attrs(auto, "style:style") {
@@ -359,6 +388,11 @@ pub(crate) struct StyleSink<'s> {
     name: String,
     row: u32,
     column: u32,
+    /// The tab colour, the groups and the open groups (folded or not) of the table being read.
+    tab_color: Option<u32>,
+    outline: Outline,
+    open_groups: [Vec<bool>; 2],
+    grouped: [u64; 2],
 }
 
 impl<'s> StyleSink<'s> {
@@ -371,6 +405,47 @@ impl<'s> StyleSink<'s> {
             name: String::new(),
             row: 0,
             column: 0,
+            tab_color: None,
+            outline: Outline::default(),
+            open_groups: [Vec::new(), Vec::new()],
+            grouped: [0, 0],
+        }
+    }
+
+    /// The group level and folded state of the rows (`axis` 0) or columns (1) `first..=last`.
+    fn record_group(&mut self, axis: usize, first: u32, last: u32) {
+        let depth = self.open_groups[axis].len();
+        if depth == 0 || depth > usize::from(MAX_OUTLINE_LEVEL) {
+            return;
+        }
+        let (levels, collapsed, limit) = match axis {
+            0 => (
+                &mut self.outline.rows,
+                &mut self.outline.collapsed_rows,
+                MAX_OUTLINE_ROWS,
+            ),
+            _ => (
+                &mut self.outline.cols,
+                &mut self.outline.collapsed_cols,
+                u64::from(OdfCodec::MAX_COLS) + 1,
+            ),
+        };
+        let last = last.min(if axis == 0 {
+            OdfCodec::MAX_ROWS
+        } else {
+            OdfCodec::MAX_COLS
+        });
+        let before = self.grouped[axis];
+        push_level(
+            levels,
+            &mut self.grouped[axis],
+            limit,
+            (first, last),
+            depth as u8,
+        );
+        // A run the bounds refused is not in a group, so it cannot be folded either.
+        if self.grouped[axis] > before && self.open_groups[axis].last() == Some(&true) {
+            crate::sheet_styling::xlsx_layout::add_run(collapsed, first, last);
         }
     }
 
@@ -389,12 +464,30 @@ impl OdsSink for StyleSink<'_> {
         self.cells = BTreeMap::new();
         self.row = 0;
         self.column = 0;
+        self.tab_color = attrs
+            .get("table:style-name")
+            .and_then(|n| self.styles.tab_colors.get(&*n).copied());
+        self.outline = Outline::default();
+        self.open_groups = [Vec::new(), Vec::new()];
+        self.grouped = [0, 0];
+    }
+
+    fn group(&mut self, columns: bool, display: bool, open: bool) {
+        let stack = &mut self.open_groups[usize::from(columns)];
+        if !open {
+            stack.pop();
+        } else if stack.len() < 64 {
+            // A group inside a folded one is folded too.
+            let folded = !display || stack.last() == Some(&true);
+            stack.push(folded);
+        }
     }
 
     fn column(&mut self, attrs: &Attrs<'_>) {
         let repeat = attrs
             .get("table:number-columns-repeated")
             .map_or(1, |v| repeat_value(&v));
+        self.record_group(1, self.column, self.column.saturating_add(repeat - 1));
         let px = attrs
             .get("table:style-name")
             .and_then(|n| self.styles.columns.get(&*n).copied());
@@ -415,6 +508,7 @@ impl OdsSink for StyleSink<'_> {
     }
 
     fn row(&mut self, repeat: u32, cells: &[OdsCell<'_>]) -> Result<(), EasyOfficeError> {
+        self.record_group(0, self.row, self.row.saturating_add(repeat - 1));
         let mut col = 0u32;
         for cell in cells {
             let style = cell
@@ -455,6 +549,8 @@ impl OdsSink for StyleSink<'_> {
             } else {
                 0
             },
+            tab_color: self.tab_color.take(),
+            outline: std::mem::take(&mut self.outline),
             ..SheetStyling::default()
         };
         self.tables.push((std::mem::take(&mut self.name), styling));

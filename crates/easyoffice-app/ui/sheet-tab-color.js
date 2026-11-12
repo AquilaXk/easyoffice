@@ -8,7 +8,7 @@
   const layoutApi = host.__EASYOFFICE_SHEET_LAYOUT__;
   const MENU_MARGIN = 2;
 
-  function createSheetTabColor({ document, view, getActiveSheetName }) {
+  function createSheetTabColor({ document, view, getActiveSheetName, onTabsChanged }) {
     const $ = (id) => document.getElementById(id);
     const tabs = () => Array.from(document.querySelectorAll("#sheet-tab-bar .sheet-tab-btn[data-sheet-tab]"));
     const tabOf = (name) => tabs().find((t) => t.dataset.sheetTab === name) || null;
@@ -128,7 +128,14 @@
       host.addEventListener?.("resize", closeMenu);
       host.addEventListener?.("blur", closeMenu);
       layoutApi.onChange(paint);
-      if (bar && typeof host.MutationObserver === "function") new host.MutationObserver(paint).observe(bar, { childList: true });
+      // Tabs come and go with a file, and the active one changes with a switch or an open.
+      if (bar && typeof host.MutationObserver === "function") {
+        const watch = new host.MutationObserver(() => {
+          paint();
+          onTabsChanged?.();
+        });
+        watch.observe(bar, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
+      }
       paint();
     }
 

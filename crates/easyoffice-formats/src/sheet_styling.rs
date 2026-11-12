@@ -14,6 +14,8 @@ pub(crate) mod ods_grid;
 pub(crate) mod ods_numfmt;
 #[path = "ods_styles.rs"]
 pub(crate) mod ods_styles;
+#[path = "ods_view.rs"]
+pub(crate) mod ods_view;
 #[path = "sheet_filter.rs"]
 pub(crate) mod sheet_filter;
 #[path = "sheet_look.rs"]

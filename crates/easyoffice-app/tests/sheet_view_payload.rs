@@ -1,4 +1,4 @@
-//! The frozen pane, tab colour and groups of a sheet payload reach the XLSX file, come back to the
+//! The frozen pane, tab colour and groups of a sheet payload reach the XLSX and ODS files, come back to the
 //! page as the same keys, and a bad value refuses the whole save (PD-208).
 
 use easyoffice_app::EasyOfficeIpcRouter;
@@ -31,22 +31,33 @@ fn open(dst: &str, bytes: &[u8]) -> String {
 const VIEW: &str = r#","freeze":{"rows":2,"cols":1},"tabColor":"3366cc","outline":{"rows":[[3,4,1],[5,6,2],[7,9,1]],"cols":[[2,3,1]],"foldedRows":[[5,6]],"foldedCols":[[2,3]],"summaryAbove":true}"#;
 
 #[test]
-fn view_keys_reach_the_xlsx_file_and_come_back_as_the_same_keys() {
-    let bytes = save("xlsx", VIEW).unwrap();
-    let styling = read_sheet_styling(&bytes, DocumentFormat::Xlsx)
-        .unwrap()
-        .remove(0)
-        .1;
-    assert_eq!(styling.freeze, Freeze::new(2, 1));
-    assert_eq!(styling.tab_color, Some(0x3366CC));
-    assert_eq!(styling.outline.collapsed_rows, vec![(4, 5)]);
-    assert_eq!(styling.outline.collapsed_cols, vec![(1, 2)]);
-    assert!(styling.hidden_rows.is_empty() && styling.hidden_cols.is_empty());
-    let opened = open("xlsx", &bytes);
-    assert!(opened.contains(VIEW), "{opened}");
-    // A sheet without a view says nothing about it.
-    let plain = open("xlsx", &save("xlsx", "").unwrap());
-    assert!(!plain.contains("freeze") && !plain.contains("tabColor") && !plain.contains("outline"));
+fn view_keys_reach_both_files_and_come_back_as_the_same_keys() {
+    for (dst, format) in [("xlsx", DocumentFormat::Xlsx), ("ods", DocumentFormat::Ods)] {
+        let bytes = save(dst, VIEW).unwrap();
+        let styling = read_sheet_styling(&bytes, format).unwrap().remove(0).1;
+        assert_eq!(styling.freeze, Freeze::new(2, 1), "{dst}");
+        assert_eq!(styling.tab_color, Some(0x3366CC), "{dst}");
+        assert_eq!(styling.outline.collapsed_rows, vec![(4, 5)], "{dst}");
+        assert_eq!(styling.outline.collapsed_cols, vec![(1, 2)], "{dst}");
+        assert!(
+            styling.hidden_rows.is_empty() && styling.hidden_cols.is_empty(),
+            "{dst}"
+        );
+        let opened = open(dst, &bytes);
+        // A summary above the group is an XLSX setting; ODS keeps the groups and their folds.
+        let want = if dst == "xlsx" {
+            VIEW.to_string()
+        } else {
+            VIEW.replace(r#","summaryAbove":true"#, "")
+        };
+        assert!(opened.contains(&want), "{dst}: {opened}");
+        // A sheet without a view says nothing about it.
+        let plain = open(dst, &save(dst, "").unwrap());
+        assert!(
+            !plain.contains("freeze") && !plain.contains("tabColor") && !plain.contains("outline"),
+            "{dst}"
+        );
+    }
 }
 
 #[test]

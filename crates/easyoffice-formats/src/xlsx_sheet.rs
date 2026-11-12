@@ -14,11 +14,11 @@ use std::collections::HashMap;
 
 use crate::decode_budget::DecodeBudget;
 use crate::rtf_xml_helpers::{format_col_letters, parse_a1_zero_based};
-use crate::sheet_styling::sheet_view::{Outline, MAX_OUTLINE_ROWS};
+use crate::sheet_styling::sheet_view::{push_level, Outline, MAX_OUTLINE_ROWS};
 use crate::sheet_styling::xlsx_filter::FilterScan;
 use crate::sheet_styling::xlsx_layout::{add_run, has_room, parse_merge};
 use crate::sheet_styling::xlsx_styles::xlsx_width_to_px;
-use crate::sheet_styling::xlsx_view::{level_attr, push_level, ThemeTab, ViewScan, LAST_COL};
+use crate::sheet_styling::xlsx_view::{level_attr, ThemeTab, ViewScan, LAST_COL};
 use crate::sheet_styling::{CellStyle, SheetStyling, MAX_STYLED_CELLS};
 use crate::xml_stream::{unescape_cow, Attrs, XmlEvent, XmlReader};
 use crate::{EasyOfficeError, OoxmlCodec};

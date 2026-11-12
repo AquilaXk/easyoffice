@@ -7,6 +7,9 @@ use crate::rtf_xml_helpers::{
 use crate::sheet_styling::ods_grid::{read_ods_sheets, read_ods_sheets_with_styling};
 use crate::sheet_styling::ods_numfmt::{EO_NS, NUMBER_NS};
 use crate::sheet_styling::ods_styles::{parse_ods_styling, table_columns_xml, OdsStyleTable};
+use crate::sheet_styling::ods_view::{
+    read_freezes, settings_xml, GroupWriter, TabStyles, TABLEOOO_NS,
+};
 use crate::sheet_styling::sheet_rules::ods_rules::{OdsRuleTable, CALCEXT_NS};
 use crate::sheet_styling::{IdMemo, SheetStyling};
 use crate::{ContainerFamily, EasyOfficeError, XmlSanitizer, ZipArchiveCodec, ZipSecurityPolicy};
@@ -321,17 +324,18 @@ impl OdfCodec {
         Self::validate_ods_bounds(sheets, stylings)?;
         let style_table = OdsStyleTable::build(stylings);
         let rule_table = OdsRuleTable::build(stylings);
+        let tab_styles = TabStyles::build(stylings);
 
-        let manifest = Self::build_manifest(Self::MIMETYPE_ODS);
         let mut content = String::from(
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?><office:document-content xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" xmlns:style=\"urn:oasis:names:tc:opendocument:xmlns:style:1.0\" xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\" office:version=\"1.2\"",
         );
         content.push_str(&format!(
-            " xmlns:number=\"{NUMBER_NS}\" xmlns:eo=\"{EO_NS}\" xmlns:calcext=\"{CALCEXT_NS}\">"
+            " xmlns:number=\"{NUMBER_NS}\" xmlns:eo=\"{EO_NS}\" xmlns:calcext=\"{CALCEXT_NS}\" xmlns:tableooo=\"{TABLEOOO_NS}\">"
         ));
         content.push_str(&Self::automatic_styles_with_rules(
             &style_table,
             &rule_table,
+            &tab_styles,
         ));
         content.push_str("<office:body><office:spreadsheet>");
 
@@ -355,27 +359,41 @@ impl OdfCodec {
                 cells,
                 caches.get(sheet_idx),
                 stylings.get(sheet_idx),
-                (&style_table, &rules),
+                (&style_table, &rules, &tab_styles),
             );
         }
 
         content.push_str("</office:spreadsheet></office:body></office:document-content>");
         XmlSanitizer::validate_safe_xml(&content)?;
 
-        ZipArchiveCodec::pack_compressed(&[
+        let settings = settings_xml(&names, stylings);
+        let media = [("settings.xml".to_string(), "text/xml")];
+        let manifest = Self::build_manifest_with_media(
+            Self::MIMETYPE_ODS,
+            if settings.is_some() { &media } else { &[] },
+        );
+        let mut parts = vec![
             (
                 "mimetype".to_string(),
                 Self::MIMETYPE_ODS.as_bytes().to_vec(),
             ),
             ("META-INF/manifest.xml".to_string(), manifest.into_bytes()),
             ("content.xml".to_string(), content.into_bytes()),
-        ])
+        ];
+        if let Some(settings) = settings {
+            parts.push(("settings.xml".to_string(), settings.into_bytes()));
+        }
+        ZipArchiveCodec::pack_compressed(&parts)
     }
 
     /// The automatic styles of the cells, columns and conditional formatting rules.
-    fn automatic_styles_with_rules(styles: &OdsStyleTable, rules: &OdsRuleTable) -> String {
+    fn automatic_styles_with_rules(
+        styles: &OdsStyleTable,
+        rules: &OdsRuleTable,
+        tabs: &TabStyles,
+    ) -> String {
         let base = styles.automatic_styles_xml();
-        let extra = rules.styles_xml();
+        let extra = rules.styles_xml() + &tabs.xml();
         if extra.is_empty() {
             base
         } else if base.is_empty() {
@@ -411,6 +429,11 @@ impl OdfCodec {
                 .cells
                 .keys()
                 .any(|&(r, c)| r > Self::MAX_ROWS || c > Self::MAX_COLS);
+            if !styling.view_within_bounds(Self::MAX_ROWS + 1, Self::MAX_COLS + 1) {
+                return Err(ods_budget_error(
+                    "ODS 틀 고정·탭 색·그룹 값이 허용 범위를 초과했습니다.",
+                ));
+            }
             if bad_cell || styling.columns.keys().any(|&c| c > Self::MAX_COLS) {
                 return Err(ods_budget_error(
                     "ODS 서식 좌표가 허용 범위를 초과했습니다.",
@@ -427,7 +450,7 @@ impl OdfCodec {
         cells: &[(u32, u32, String)],
         cache: Option<&crate::XlsxFormulaCache>,
         styling: Option<&SheetStyling>,
-        (style_table, rules): (&OdsStyleTable, &RuleContext<'_>),
+        (style_table, rules, tab_styles): (&OdsStyleTable, &RuleContext<'_>, &TabStyles),
     ) {
         let blank = String::new();
         let mut grid: std::collections::BTreeMap<u32, std::collections::BTreeMap<u32, &String>> =
@@ -446,21 +469,42 @@ impl OdfCodec {
             for (row, col) in rules.table.blank_cells(&st.rules) {
                 grid.entry(row).or_default().entry(col).or_insert(&blank);
             }
+            // The rows of a group are written, empty ones too, so the group has its extent.
+            for &(first, last, _) in &st.outline.rows {
+                for row in first..=last {
+                    grid.entry(row).or_default();
+                }
+            }
         }
+        let tab_style = styling
+            .and_then(|st| st.tab_color)
+            .and_then(|color| tab_styles.name(color))
+            .map_or(String::new(), |name| {
+                format!(" table:style-name=\"{name}\"")
+            });
         content.push_str(&format!(
-            "<table:table table:name=\"{}\">",
+            "<table:table table:name=\"{}\"{tab_style}>",
             XmlSanitizer::escape(sheet_name)
         ));
         if let Some(st) = styling {
-            content.push_str(&table_columns_xml(&st.columns, style_table));
+            content.push_str(&table_columns_xml(st, style_table));
             content.push_str(&rules.table.conditional_xml(sheet_name, &st.rules));
         }
         let mut expected_row: u32 = 0;
         let mut ids = IdMemo::new();
+        let no_levels = crate::Outline::default();
+        let outline = styling.map_or(&no_levels, |st| &st.outline);
+        let mut groups = GroupWriter::new(
+            "table:table-row-group",
+            &outline.rows,
+            &outline.collapsed_rows,
+        );
         for (row, row_cells) in grid {
             if row > expected_row {
+                groups.close_all(content);
                 push_empty_rows(content, row - expected_row);
             }
+            groups.move_to(content, row);
             content.push_str("<table:table-row>");
             let mut expected_col: u32 = 0;
             for (col, raw) in row_cells {
@@ -483,6 +527,7 @@ impl OdfCodec {
             content.push_str("</table:table-row>");
             expected_row = row.saturating_add(1);
         }
+        groups.close_all(content);
         content.push_str("</table:table>");
     }
 
@@ -551,8 +596,10 @@ impl OdfCodec {
     pub fn unpack_ods_styling(
         bytes: &[u8],
     ) -> Result<Vec<(String, SheetStyling)>, EasyOfficeError> {
-        let (content_xml, _) = Self::extract_content_and_meta_xml(bytes, Self::MIMETYPE_ODS)?;
-        parse_ods_styling(&content_xml)
+        let (content_xml, _, settings) = Self::extract_parts(bytes, Self::MIMETYPE_ODS)?;
+        let mut stylings = parse_ods_styling(&content_xml)?;
+        Self::apply_freezes(&mut stylings, settings.as_deref());
+        Ok(stylings)
     }
 
     pub fn unpack_ods_multi(bytes: &[u8]) -> Result<OdsMultiUnpacked, EasyOfficeError> {
@@ -564,8 +611,10 @@ impl OdfCodec {
     pub fn unpack_ods_with_styling(
         bytes: &[u8],
     ) -> Result<(OdsMultiUnpacked, Vec<(String, SheetStyling)>), EasyOfficeError> {
-        let (content_xml, _) = Self::extract_content_and_meta_xml(bytes, Self::MIMETYPE_ODS)?;
-        read_ods_sheets_with_styling(&content_xml)
+        let (content_xml, _, settings) = Self::extract_parts(bytes, Self::MIMETYPE_ODS)?;
+        let (sheets, mut stylings) = read_ods_sheets_with_styling(&content_xml)?;
+        Self::apply_freezes(&mut stylings, settings.as_deref());
+        Ok((sheets, stylings))
     }
 
     pub fn pack_odp(
@@ -737,6 +786,14 @@ impl OdfCodec {
         bytes: &[u8],
         expected_mime: &str,
     ) -> Result<(String, Option<String>), EasyOfficeError> {
+        Self::extract_parts(bytes, expected_mime).map(|(content, meta, _)| (content, meta))
+    }
+
+    /// `content.xml`, `meta.xml` and `settings.xml` (when the file has them) of an ODF package.
+    fn extract_parts(
+        bytes: &[u8],
+        expected_mime: &str,
+    ) -> Result<(String, Option<String>, Option<String>), EasyOfficeError> {
         let entries = ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default())?;
         validate_zip_xml_entries(&entries)?;
         if let Some(mime_entry) = entries.iter().find(|e| e.path == "mimetype") {
@@ -771,7 +828,27 @@ impl OdfCodec {
             None
         };
 
-        Ok((xml.to_string(), meta_xml))
+        let settings_xml = match entries.iter().find(|e| e.path == "settings.xml") {
+            Some(entry) => {
+                let text = std::str::from_utf8(&entry.data).map_err(|_| {
+                    EasyOfficeError::InvalidUtf8("ODF settings.xml UTF-8 오류".to_string())
+                })?;
+                XmlSanitizer::validate_safe_xml(text)?;
+                Some(text.to_string())
+            }
+            None => None,
+        };
+
+        Ok((xml.to_string(), meta_xml, settings_xml))
+    }
+
+    /// Gives each table the frozen pane `settings.xml` names for its sheet.
+    fn apply_freezes(stylings: &mut [(String, SheetStyling)], settings: Option<&str>) {
+        let Some(settings) = settings else { return };
+        let mut freezes = read_freezes(settings);
+        for (name, styling) in stylings {
+            styling.freeze = freezes.remove(name.as_str());
+        }
     }
 }
 

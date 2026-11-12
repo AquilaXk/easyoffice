@@ -886,7 +886,7 @@
       }
       const fb = document.getElementById("status-command-feedback");
       if (fb) fb.textContent = "시트 탭 전환: " + targetSheetName;
-      structure.refreshFilterMenu();
+      structure.refreshSheetChrome();
     }
 
     function switchSheetTab(targetSheetName) {

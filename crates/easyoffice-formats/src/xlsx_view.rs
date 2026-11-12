@@ -14,7 +14,7 @@
 //! are not read. Every value is checked against the bounds of [`crate::sheet_view`] and a value over
 //! them is ignored, not clamped.
 
-use crate::sheet_styling::sheet_view::{Freeze, LevelRun, MAX_OUTLINE_LEVEL};
+use crate::sheet_styling::sheet_view::{Freeze, MAX_OUTLINE_LEVEL};
 use crate::sheet_styling::SheetStyling;
 use crate::xml_stream::{unescape_cow, Attrs, XmlEvent};
 use crate::OoxmlCodec;
@@ -299,32 +299,6 @@ pub(crate) fn sheet_format_pr_xml(styling: &SheetStyling) -> String {
     xml
 }
 
-/// Adds `index` with `level` to the sorted runs a scan is building. A row that is out of order, a
-/// level over the bound and a list over `max_total` rows are dropped.
-pub(crate) fn push_level(
-    runs: &mut Vec<LevelRun>,
-    total: &mut u64,
-    max_total: u64,
-    (first, last): (u32, u32),
-    level: u8,
-) {
-    let count = u64::from(last - first) + 1;
-    if level == 0 || level > MAX_OUTLINE_LEVEL || *total + count > max_total {
-        return;
-    }
-    match runs.last_mut() {
-        Some(prev) if first <= prev.1 => return,
-        Some(prev) if prev.1 + 1 == first && prev.2 == level => prev.1 = last,
-        _ => {
-            if runs.len() >= crate::sheet_styling::sheet_view::MAX_OUTLINE_RUNS {
-                return;
-            }
-            runs.push((first, last, level));
-        }
-    }
-    *total += count;
-}
-
 /// `outlineLevel` of a `row` or `col` element: 0 when it is absent, not a number or over the bound.
 pub(crate) fn level_attr(attrs: &Attrs<'_>) -> u8 {
     attrs
@@ -442,22 +416,5 @@ mod tests {
         assert!(cols.contains(
             r#"<pane xSplit="27" topLeftCell="AB1" activePane="topRight" state="frozen"/>"#
         ));
-    }
-
-    #[test]
-    fn levels_are_collected_in_order_and_bounded() {
-        let (mut runs, mut total) = (Vec::new(), 0);
-        push_level(&mut runs, &mut total, 10, (1, 1), 1);
-        push_level(&mut runs, &mut total, 10, (2, 3), 1);
-        push_level(&mut runs, &mut total, 10, (4, 4), 2);
-        push_level(&mut runs, &mut total, 10, (3, 3), 1);
-        push_level(&mut runs, &mut total, 10, (9, 9), 8);
-        push_level(&mut runs, &mut total, 10, (9, 9), 0);
-        assert_eq!(runs, vec![(1, 3, 1), (4, 4, 2)]);
-        assert_eq!(total, 4);
-        push_level(&mut runs, &mut total, 5, (10, 10), 1);
-        assert_eq!((runs.len(), total), (3, 5));
-        push_level(&mut runs, &mut total, 5, (11, 12), 1);
-        assert_eq!((runs.len(), total), (3, 5));
     }
 }

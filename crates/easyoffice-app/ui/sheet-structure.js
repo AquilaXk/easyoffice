@@ -65,7 +65,7 @@
 
     // Frozen panes, groups and the tab colour (PD-208).
     const view = host.__EASYOFFICE_CREATE_SHEET_VIEW__(deps);
-    const tabColor = host.__EASYOFFICE_CREATE_SHEET_TAB_COLOR__({ document, view, getActiveSheetName });
+    const tabColor = host.__EASYOFFICE_CREATE_SHEET_TAB_COLOR__({ document, view, getActiveSheetName, onTabsChanged: () => outlineUi.render() });
     const outlineUi = host.__EASYOFFICE_CREATE_SHEET_OUTLINE_UI__({ document, grid, view, getActiveSheetName });
 
     function say(text) {
@@ -422,7 +422,14 @@
       }
     }
 
-    return { run, bind, closeMenu, refreshFilterMenu: filterUi.refreshMenu };
+    // What follows the active sheet: the filter menu's check, the outline bars and the tab colours.
+    function refreshSheetChrome() {
+      filterUi.refreshMenu();
+      outlineUi.render();
+      tabColor.paint();
+    }
+
+    return { run, bind, closeMenu, refreshSheetChrome };
   }
 
   host.__EASYOFFICE_CREATE_SHEET_STRUCTURE__ = createSheetStructure;

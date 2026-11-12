@@ -2,7 +2,7 @@
 //! hostile file cannot widen them (PD-208).
 
 use easyoffice_formats::{
-    Freeze, OoxmlCodec, Outline, SheetStyling, ZipArchiveCodec, ZipSecurityPolicy,
+    Freeze, OdfCodec, OoxmlCodec, Outline, SheetStyling, ZipArchiveCodec, ZipSecurityPolicy,
 };
 
 fn sample() -> SheetStyling {
@@ -219,4 +219,162 @@ fn values_over_the_bounds_are_refused_on_write() {
     color.tab_color = Some(0x1_000000);
     assert!(write(color).is_err());
     assert!(write(sample()).is_ok());
+}
+
+// ---- ODS -------------------------------------------------------------------------------------------
+
+fn pack_ods(styling: SheetStyling) -> Vec<u8> {
+    OdfCodec::pack_ods_multi_styled(&sheets(), &[styling]).unwrap()
+}
+
+fn read_ods(bytes: &[u8]) -> SheetStyling {
+    OdfCodec::unpack_ods_with_styling(bytes)
+        .unwrap()
+        .1
+        .remove(0)
+        .1
+}
+
+fn ods_content(bytes: &[u8]) -> String {
+    part(bytes, "content.xml")
+}
+
+#[test]
+fn the_view_and_the_groups_come_back_from_an_ods_file() {
+    let styling = sample();
+    let bytes = pack_ods(styling.clone());
+    let back = read_ods(&bytes);
+    assert_eq!(back.freeze, styling.freeze);
+    assert_eq!(back.tab_color, styling.tab_color);
+    assert_eq!(back.outline, styling.outline);
+    let xml = ods_content(&bytes);
+    assert!(xml.contains("tableooo:tab-color=\"#3366cc\""), "{xml}");
+    assert!(xml.contains("<table:table table:name=\"Sheet1\" table:style-name=\"ta1\">"));
+    // The inner group of rows 5-6 and the group of rows 20-24 are folded, the outer one is not.
+    assert!(
+        xml.contains("<table:table-row-group table:display=\"true\">"),
+        "{xml}"
+    );
+    assert_eq!(
+        xml.matches("<table:table-row-group table:display=\"false\">")
+            .count(),
+        2
+    );
+    assert!(xml.contains("<table:table-column-group table:display=\"false\">"));
+    let settings = part(&bytes, "settings.xml");
+    assert!(
+        settings.contains("HorizontalSplitMode\" config:type=\"short\">2<"),
+        "{settings}"
+    );
+    assert!(part(&bytes, "META-INF/manifest.xml").contains("settings.xml"));
+}
+
+#[test]
+fn an_ods_file_without_a_view_has_no_settings_part_and_reads_none() {
+    let bytes = pack_ods(SheetStyling::default());
+    let entries = ZipArchiveCodec::unpack(&bytes, &ZipSecurityPolicy::default()).unwrap();
+    assert!(entries.iter().all(|e| e.path != "settings.xml"));
+    let back = read_ods(&bytes);
+    assert!(back.freeze.is_none() && back.tab_color.is_none() && back.outline.is_empty());
+}
+
+/// Namespace of the table extension attributes, in two parts (see `ods_view.rs`).
+const TABLEOOO: &str = concat!("http://open", "office.org/2009/table");
+
+/// `content.xml` of an ODS file replaced by `table_xml` inside one table.
+fn ods_with_table(table_attrs: &str, table_xml: &str, styles: &str) -> Vec<u8> {
+    let bytes = pack_ods(SheetStyling::default());
+    let entries = ZipArchiveCodec::unpack(&bytes, &ZipSecurityPolicy::default()).unwrap();
+    let content = format!(
+        "<?xml version=\"1.0\"?><office:document-content xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" xmlns:style=\"urn:oasis:names:tc:opendocument:xmlns:style:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" xmlns:tableooo=\"{TABLEOOO}\"><office:automatic-styles>{styles}</office:automatic-styles><office:body><office:spreadsheet><table:table table:name=\"S\" {table_attrs}>{table_xml}</table:table></office:spreadsheet></office:body></office:document-content>"
+    );
+    let parts: Vec<(String, Vec<u8>)> = entries
+        .into_iter()
+        .map(|e| {
+            let data = if e.path == "content.xml" {
+                content.clone().into_bytes()
+            } else {
+                e.data
+            };
+            (e.path, data)
+        })
+        .collect();
+    ZipArchiveCodec::pack(&parts).unwrap()
+}
+
+#[test]
+fn hostile_ods_groups_colours_and_splits_are_bounded() {
+    // Nested to depth 9: only the first seven levels count.
+    let mut deep = String::new();
+    for _ in 0..9 {
+        deep.push_str("<table:table-row-group>");
+    }
+    deep.push_str("<table:table-row/>");
+    for _ in 0..9 {
+        deep.push_str("</table:table-row-group>");
+    }
+    let back = read_ods(&ods_with_table("", &deep, ""));
+    assert!(back.outline.rows.is_empty(), "{:?}", back.outline);
+    // A group of a million repeated rows is over the bound and is not read.
+    let big = "<table:table-row-group table:display=\"false\"><table:table-row table:number-rows-repeated=\"1000000\"/></table:table-row-group>";
+    let back = read_ods(&ods_with_table("", big, ""));
+    assert!(back.outline.rows.is_empty() && back.outline.collapsed_rows.is_empty());
+    // A folded group is folded; a group inside a folded one is folded too.
+    let nested = "<table:table-row-group table:display=\"false\"><table:table-row/><table:table-row-group><table:table-row/></table:table-row-group></table:table-row-group>";
+    let back = read_ods(&ods_with_table("", nested, ""));
+    assert_eq!(back.outline.rows, vec![(0, 0, 1), (1, 1, 2)]);
+    assert_eq!(back.outline.collapsed_rows, vec![(0, 1)]);
+    // A bad colour and a table style that is no colour are ignored.
+    let style = "<style:style style:name=\"ta1\" style:family=\"table\"><style:table-properties tableooo:tab-color=\"#12\"/></style:style>";
+    let back = read_ods(&ods_with_table(
+        "table:style-name=\"ta1\"",
+        "<table:table-row/>",
+        style,
+    ));
+    assert_eq!(back.tab_color, None);
+    let good = style.replace("#12", "#00AaFf");
+    let back = read_ods(&ods_with_table(
+        "table:style-name=\"ta1\"",
+        "<table:table-row/>",
+        &good,
+    ));
+    assert_eq!(back.tab_color, Some(0x00AAFF));
+    // Columns in a group.
+    let cols = "<table:table-column-group table:display=\"false\"><table:table-column table:number-columns-repeated=\"2\"/></table:table-column-group><table:table-row/>";
+    let back = read_ods(&ods_with_table("", cols, ""));
+    assert_eq!(back.outline.cols, vec![(0, 1, 1)]);
+    assert_eq!(back.outline.collapsed_cols, vec![(0, 1)]);
+}
+
+#[test]
+fn hostile_ods_splits_leave_nothing_frozen_and_a_bad_pane_is_refused_on_write() {
+    let bytes = pack_ods(SheetStyling::default());
+    let entries = ZipArchiveCodec::unpack(&bytes, &ZipSecurityPolicy::default()).unwrap();
+    let settings = |rows: &str, mode: &str| {
+        format!(
+            "<office:document-settings xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:config=\"urn:oasis:names:tc:opendocument:xmlns:config:1.0\"><office:settings><config:config-item-set config:name=\"ooo:view-settings\"><config:config-item-map-indexed config:name=\"Views\"><config:config-item-map-entry><config:config-item-map-named config:name=\"Tables\"><config:config-item-map-entry config:name=\"Sheet1\"><config:config-item config:name=\"VerticalSplitMode\" config:type=\"short\">{mode}</config:config-item><config:config-item config:name=\"VerticalSplitPosition\" config:type=\"int\">{rows}</config:config-item></config:config-item-map-entry></config:config-item-map-named></config:config-item-map-entry></config:config-item-map-indexed></config:config-item-set></office:settings></office:document-settings>"
+        )
+    };
+    let with = |text: String| {
+        let mut parts: Vec<(String, Vec<u8>)> = entries
+            .iter()
+            .map(|e| (e.path.clone(), e.data.clone()))
+            .collect();
+        parts.push(("settings.xml".into(), text.into_bytes()));
+        read_ods(&ZipArchiveCodec::pack(&parts).unwrap())
+    };
+    assert_eq!(with(settings("3", "2")).freeze, Freeze::new(3, 0));
+    for (rows, mode) in [
+        ("3", "1"),
+        ("1001", "2"),
+        ("-4", "2"),
+        ("99999999999", "2"),
+        ("x", "2"),
+    ] {
+        assert_eq!(with(settings(rows, mode)).freeze, None, "{rows} {mode}");
+    }
+    let mut bad = sample();
+    bad.outline.rows = vec![(0, 3, 9)];
+    bad.outline.collapsed_rows.clear();
+    assert!(OdfCodec::pack_ods_multi_styled(&sheets(), &[bad]).is_err());
 }
