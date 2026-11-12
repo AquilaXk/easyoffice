@@ -44,6 +44,15 @@
     return false;
   }
 
+  // The run that holds `i`, or null.
+  function runAt(runs, i) {
+    for (const run of runs) {
+      if (run[0] > i) return null;
+      if (run[1] >= i) return run;
+    }
+    return null;
+  }
+
   // Number of hidden indexes below `i`.
   function hiddenBefore(runs, i) {
     let n = 0;
@@ -242,6 +251,7 @@
     onChange: (fn) => listeners.push(fn),
     isEmpty,
     runContains,
+    runAt,
     hiddenBefore,
     hiddenTotal,
     visibleToIndex,

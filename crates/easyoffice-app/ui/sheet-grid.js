@@ -678,6 +678,14 @@
       return true;
     }
 
+    // The header right after a hidden run carries a thick edge on that side and the run's bounds
+    // (`data-hidden-run="first-last"`), which a double click on the edge shows again.
+    function markHiddenEdge(th, axis, run) {
+      th.classList.toggle("hidden-edge-" + axis, Boolean(run));
+      if (run) th.dataset.hiddenRun = run[0] + "-" + run[1];
+      else if (th.dataset.hiddenRun) delete th.dataset.hiddenRun;
+    }
+
     // Hidden rows and columns get `sheet-hidden`; a merged range paints from its anchor cell
     // (`merge-anchor` with its size in `--mw`/`--mh`) over the cells it covers (`merge-cover`).
     function applyLayoutClasses() {
@@ -694,7 +702,12 @@
           if (r > 0) tr.classList.toggle("sheet-hidden", !empty && layoutApi.runContains(runs, r));
         }
       }
-      for (const [c, th] of colHeadByCol) th.classList.toggle("sheet-hidden", !empty && layoutApi.colHidden(name, c));
+      const colRuns = layout?.hiddenCols || [];
+      for (const [c, th] of colHeadByCol) {
+        th.classList.toggle("sheet-hidden", !empty && layoutApi.colHidden(name, c));
+        markHiddenEdge(th, "col", empty ? null : layoutApi.runAt(colRuns, c - 1));
+      }
+      for (const [r, th] of rowHeadByRow) markHiddenEdge(th, "row", empty ? null : layoutApi.runAt(runs, r - 1));
       seedDomMaps();
       for (const td of tdByPacked.values()) {
         const r = td._row;

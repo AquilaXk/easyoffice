@@ -142,3 +142,13 @@ test("a refused or failing edit reports why and changes nothing", async () => {
   store.enableSheetSessions(false);
   assert.equal((await store.editAxis({ S: {} }, { sheet: "S", axis: "row", op: "insert", at: 1, count: 1 })).ok, false);
 });
+
+test("runAt finds the hidden run next to a header", async () => {
+  const layout = await layoutApi();
+  const runs = [[3, 4], [10, 12]];
+  assert.deepEqual(layout.runAt(runs, 4), [3, 4]);
+  assert.deepEqual(layout.runAt(runs, 11), [10, 12]);
+  assert.equal(layout.runAt(runs, 5), null);
+  assert.equal(layout.runAt(runs, 0), null);
+  assert.equal(layout.runAt([], 3), null);
+});

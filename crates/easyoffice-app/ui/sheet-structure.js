@@ -9,6 +9,7 @@
   const MAX_ROWS_PER_EDIT = 10000;
   const MAX_COLS_PER_EDIT = 256;
   const MAX_HIDDEN_ROWS = 100000;
+  const EDGE_HIT_PX = 6; // the thick edge of a header after a hidden run
   const MENU_MARGIN = 2; // rhwp-studio's context menu keeps 2px from the window edge
   const layoutApi = host.__EASYOFFICE_SHEET_LAYOUT__;
 
@@ -244,7 +245,12 @@
       unhide: () => {
         const axis = getSelection().axis === "col" ? "col" : "row";
         const [first, last] = span(axis);
-        return setHidden(axis, first, last, false);
+        // A hidden run right before or after the selection is part of it.
+        const layout = layoutApi.get(getActiveSheetName());
+        const runs = (axis === "row" ? layout?.hiddenRows : layout?.hiddenCols) || [];
+        const before = layoutApi.runAt(runs, first - 1);
+        const after = layoutApi.runAt(runs, last + 1);
+        return setHidden(axis, before ? before[0] : first, after ? after[1] : last, false);
       },
       merge,
       unmerge,
@@ -339,8 +345,22 @@
       }
     }
 
+    // A double click on the thick edge of a header after a hidden run shows that run again.
+    function onDblClick(ev) {
+      const th = ev.target?.closest?.("#pane-sheet th[data-hidden-run]");
+      if (!th) return;
+      const box = th.getBoundingClientRect();
+      const axis = th.dataset.col ? "col" : "row";
+      const offset = axis === "col" ? ev.clientX - box.left : ev.clientY - box.top;
+      if (offset > EDGE_HIT_PX) return;
+      ev.preventDefault();
+      const [first, last] = th.dataset.hiddenRun.split("-").map(Number);
+      void setHidden(axis, first, last, false);
+    }
+
     function bind() {
       const viewport = document.getElementById("sheet-viewport");
+      viewport?.addEventListener("dblclick", onDblClick);
       viewport?.addEventListener("contextmenu", onContextMenu);
       viewport?.addEventListener("keydown", onKeydown);
       viewport?.addEventListener("scroll", () => closeMenu(false));

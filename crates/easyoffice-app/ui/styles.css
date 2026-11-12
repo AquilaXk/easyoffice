@@ -551,6 +551,8 @@ select:focus-visible,
 #icon-toolbar [hidden] { display: none; }
 .sheet-grid th.active-axis { background-color: var(--ui-hover); background-image: linear-gradient(var(--ui-accent-bg-light), var(--ui-accent-bg-light)); }
 .sheet-grid .sheet-hidden { display: none; }
+.sheet-grid th.hidden-edge-row { box-shadow: inset 0 3px 0 var(--accent-strong); }
+.sheet-grid th.hidden-edge-col { box-shadow: inset 3px 0 0 var(--accent-strong); }
 .sheet-grid td.merge-anchor { --mw: 96px; --mh: 24px; position: relative; z-index: 1; overflow: visible; text-overflow: clip; }
 .sheet-grid td.merge-anchor::after { content: ""; position: absolute; z-index: -1; left: 0; top: 0; width: calc(var(--mw) - 1px); height: calc(var(--mh) - 1px); background: var(--ui-surface); border: 0 solid var(--ui-border-light); border-width: 0 1px 1px 0; }
 .sheet-grid td.merge-anchor.in-range::after { background: var(--ui-accent-bg-light); }

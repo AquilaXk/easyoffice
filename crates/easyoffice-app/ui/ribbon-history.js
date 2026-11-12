@@ -344,7 +344,7 @@
         const destStack = isUndo ? workspaceRedoStack : workspaceUndoStack;
         const emptyMsg = isUndo ? "실행 취소할 작업이 없습니다" : "다시 실행할 작업이 없습니다";
         const ipcCmd = isUndo ? "undo_ribbon_command" : "redo_ribbon_command";
-        const donePrefix = isUndo ? "실행 취소 완료 (" : "다시 실행 완료 (";
+        const doneMsg = isUndo ? "실행 취소" : "다시 실행";
         if (sourceStack.length === 0) {
           if (fb) fb.textContent = emptyMsg;
           return;
@@ -378,7 +378,7 @@
           ? { ...targetSnap, sheets: evaluatedSheets }
           : targetSnap;
         await restoreWorkspaceSnapshot(snapToRestore, backendSyncRes);
-        if (fb) fb.textContent = donePrefix + getActiveModule() + ")";
+        if (fb) fb.textContent = doneMsg;
       });
     }
 
