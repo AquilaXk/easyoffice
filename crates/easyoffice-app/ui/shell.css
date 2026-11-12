@@ -132,6 +132,11 @@
 /* Table of contents dialog (doc-toc.js): the status line has the find dialog's metrics. */
 #doc-toc-dialog { width: min(360px, calc(100vw - 32px)); }
 #doc-toc-dialog .dialog-label { min-width: 64px; }
+/* The level list has the field's inner padding (`dialogs.css` 154-164) and the arrow cell; its width follows the text, and all three choices are the same length. The status line takes no room while it is empty. */
+#doc-toc-dialog .custom-select-trigger { grid-template-columns: minmax(0, 1fr) 15px; padding: 0 0 0 4px; }
+#doc-toc-dialog .custom-select-value { padding-right: 4px; }
+#doc-toc-dialog .dialog-status-row:has(> :empty) { display: none; }
+#doc-toc-dialog .dialog-body:has(.dialog-status:empty) .dialog-row { margin-bottom: 0; }
 .dialog-status-row { min-height: 18px; line-height: 18px; text-align: right; }
 .dialog-status { color: var(--color-text-secondary); font-size: var(--font-size-sm); }
 /* After every display rule above, so `hidden` wins at equal specificity. */
