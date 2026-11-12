@@ -26,6 +26,8 @@ pub mod http_server;
 pub mod hwp_bundle;
 #[cfg(test)]
 mod perf_bench;
+#[cfg(test)]
+mod perf_bench_sheet;
 mod pii_identifiers;
 pub mod ribbon;
 mod ribbon_session;

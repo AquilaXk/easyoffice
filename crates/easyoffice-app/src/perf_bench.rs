@@ -6,9 +6,14 @@
 //! process N times under `/usr/bin/time -l`. `EASYOFFICE_BENCH_REPEAT` repeats the timed part in one
 //! process (for a sampling profiler; the line shows the last run).
 //!
+//! `EASYOFFICE_BENCH_SCALE` (default 1) multiplies the paragraph and sheet row counts of the
+//! generated inputs, to reach megabyte-sized files. `EASYOFFICE_BENCH_DUMP` (a file path) keeps
+//! the answer of an `open`, to compare two builds byte for byte.
+//!
 //! `EASYOFFICE_BENCH_CASE`: `open`, `save` (input: a file made by `bench_generate_inputs`),
 //! `encode` (input: an extension; one `encode_structured` of the generated content),
-//! `recalc` (input: the row count), `layout` (input: the call count).
+//! `recalc` (input: the row count), `sheet` (input: the row count, see `perf_bench_sheet`),
+//! `layout` (input: the call count).
 
 use crate::benchmark_large::build_recalc_sheet;
 use crate::convert_structured::{encode_structured, StructuredContent};
@@ -47,6 +52,13 @@ const SHEET_ROWS: u32 = 1_000;
 const SHEET_COLS: u32 = 104;
 const SLIDES: usize = 300;
 
+fn scale() -> usize {
+    std::env::var("EASYOFFICE_BENCH_SCALE")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(1)
+}
+
 struct XorShift(u32);
 
 impl XorShift {
@@ -71,8 +83,9 @@ fn sentence(rng: &mut XorShift, index: usize) -> String {
 /// small table with a merged cell after every [`TABLE_EVERY`]th.
 fn large_document() -> RichDocument {
     let mut rng = XorShift(0x2545_F491);
-    let mut blocks = Vec::with_capacity(PARAGRAPHS + PARAGRAPHS / TABLE_EVERY);
-    for index in 0..PARAGRAPHS {
+    let paragraphs = PARAGRAPHS * scale();
+    let mut blocks = Vec::with_capacity(paragraphs + paragraphs / TABLE_EVERY);
+    for index in 0..paragraphs {
         let mut runs = vec![RichRun::plain(sentence(&mut rng, index))];
         if index % 3 == 0 {
             runs.push(RichRun {
@@ -115,8 +128,9 @@ fn large_document() -> RichDocument {
 
 /// [`SHEET_ROWS`] x [`SHEET_COLS`] cells; every fourth column is a formula over the two before it.
 fn large_workbook() -> StructuredContent {
-    let mut cells = Vec::with_capacity((SHEET_ROWS * SHEET_COLS) as usize);
-    for row in 0..SHEET_ROWS {
+    let rows = SHEET_ROWS * scale() as u32;
+    let mut cells = Vec::with_capacity((rows * SHEET_COLS) as usize);
+    for row in 0..rows {
         for col in 0..SHEET_COLS {
             let text = if col % 4 == 3 {
                 let (a, b) = (col_label(col - 2), col_label(col - 1));
@@ -265,6 +279,9 @@ fn run(case: &str, input: &str) -> String {
             let decoded =
                 EasyOfficeIpcRouter::dispatch("convert_document_format", &request).expect("open");
             phases.push(("open", ms(t)));
+            if let Ok(dump) = std::env::var("EASYOFFICE_BENCH_DUMP") {
+                std::fs::write(dump, &decoded).expect("dump");
+            }
             if case == "open" {
                 (name, decoded.len())
             } else {
@@ -302,6 +319,11 @@ fn run(case: &str, input: &str) -> String {
             let results = black_box(&sheet).recalculate_all();
             phases.push(("recalc", ms(t)));
             (format!("recalc-{rows}"), results.len())
+        }
+        "sheet" => {
+            let rows: u32 = input.parse().expect("rows");
+            let out_bytes = crate::perf_bench_sheet::run(rows, &mut phases);
+            (format!("sheet-{rows}"), out_bytes)
         }
         "layout" => {
             let calls: usize = input.parse().expect("calls");
