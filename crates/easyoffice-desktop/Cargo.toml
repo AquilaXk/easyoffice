@@ -80,10 +80,12 @@ futures-util = { version = "0.3", default-features = false }
 
 # PD-170: the PDF worker process is measured and limited per OS (resident memory on macOS, an address
 # space limit on Linux, a job object on Windows); both crates are already in the graph through tauri.
+# PD-191: the same crates serve the session end: `libc` the SIGTERM pipe on Linux, `windows-sys` the
+# window subclass and the shutdown block on Windows.
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_ProcessStatus", "Win32_System_Threading"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_ProcessStatus", "Win32_System_Shutdown", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 # macOS recent items (PD-099): already in the dependency graph through tauri, here with only the
 # two features the shell calls.

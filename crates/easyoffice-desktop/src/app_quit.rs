@@ -20,6 +20,11 @@
 //! (PD-189). The queue then answers the system later: [`request_terminate`] returns "later", the
 //! queue is marked as answering a terminate, and its end replies "terminate" (the last window is
 //! gone) or "cancel" (the user cancelled or a save failed) to `NSApplication`.
+//!
+//! The end of a Windows session (`WM_QUERYENDSESSION`, `session_end_windows.rs`) and a Linux
+//! `SIGTERM`/`SIGHUP` (`linux_signal.rs`) take the same route through [`request_session_end`] (PD-191):
+//! nothing unsaved ends the app at once, otherwise the queue runs and its end replies the same way
+//! ([`reply_to_terminate`]: the app exits, or the Windows shutdown block is lifted on a cancel).
 
 use std::collections::VecDeque;
 use std::sync::Mutex;
@@ -45,9 +50,9 @@ pub struct AppQuit {
     queue: Mutex<Queue>,
 }
 
-/// What a macOS `applicationShouldTerminate:` answers at once.
+/// What a system terminate (macOS `applicationShouldTerminate:`, the end of a Windows or Linux
+/// session) answers at once.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub enum Terminate {
     /// No window is open: the system may end the app.
     Now,
@@ -110,7 +115,6 @@ impl AppQuit {
     }
 
     /// The system's terminate over `labels`: ends at once without windows, else the queue answers.
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     fn begin_terminate(
         &self,
         labels: Vec<String>,
@@ -121,6 +125,21 @@ impl AppQuit {
         }
         self.queue().terminating = true;
         Terminate::Later(self.begin(labels, prompt))
+    }
+
+    /// The end of an OS session (Windows logoff or shutdown, Linux `SIGTERM`): nothing to save ends
+    /// at once, otherwise the same queue as a macOS terminate asks every window.
+    fn begin_session_end(
+        &self,
+        unsaved: bool,
+        labels: Vec<String>,
+        prompt: impl Fn(&str) -> PromptState,
+    ) -> Terminate {
+        if unsaved {
+            self.begin_terminate(labels, prompt)
+        } else {
+            Terminate::Now
+        }
     }
 
     /// True once per terminate the queue still owes an answer to.
@@ -184,14 +203,37 @@ pub fn request_app_quit(app: &AppHandle) {
 /// The system's terminate (`applicationShouldTerminate:`, macOS): the same queue, answered when it
 /// ends. `Now` when no window is open; otherwise the system waits (`NSTerminateLater`) while every
 /// window confirms its own close, and [`window_destroyed`] or [`cancel_quit`] replies.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[cfg(target_os = "macos")]
 pub fn request_terminate(app: &AppHandle) -> Terminate {
+    terminate_decision(app, false)
+}
+
+/// The end of a Windows session or a Linux `SIGTERM` (PD-191), on the main thread: the app ends at
+/// once when no window has unsaved changes, otherwise the queue asks every window and its end
+/// replies ([`reply_to_terminate`]).
+///
+/// Built on every OS so that a development machine type-checks it; macOS never calls it.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub fn request_session_end(app: &AppHandle) {
+    if terminate_decision(app, true) == Terminate::Now {
+        reply_to_terminate(app, true);
+    }
+}
+
+/// `only_unsaved`: windows without unsaved changes do not start a queue (session end).
+fn terminate_decision(app: &AppHandle, only_unsaved: bool) -> Terminate {
     // Called by AppKit: a panic here would unwind through its frames, so a terminate that comes
     // before `setup` has managed the queue ends at once instead of reading missing state.
     let Some(quit) = app.try_state::<AppQuit>() else {
         return Terminate::Now;
     };
-    let decision = quit.begin_terminate(open_labels(app, None), |label| close_prompt(app, label));
+    let unsaved = !only_unsaved
+        || app
+            .state::<crate::window_commands::AppWindows>()
+            .has_unsaved_documents();
+    let decision = quit.begin_session_end(unsaved, open_labels(app, None), |label| {
+        close_prompt(app, label)
+    });
     if let Terminate::Later(Some(first)) = &decision {
         // Not inside the system's call: a window that closes at once would answer the system
         // before this call has returned "later" (see [`defer_to_main`]).
@@ -205,8 +247,8 @@ pub fn request_terminate(app: &AppHandle) -> Terminate {
 /// so the task is queued to the event loop instead of running inline. The system's terminate
 /// replies need it twice. The call that returns "later" must be over before any reply, or AppKit
 /// would wait for an answer it already got; and the reply that ends the app must not run inside
-/// the window event that triggered it (the event loop is not re-entered).
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+/// the window event that triggered it (the event loop is not re-entered). The Windows and Linux
+/// session end starts its queue this way too: from a window procedure or a signal-reading thread.
 pub fn defer_to_main(app: &AppHandle, task: impl FnOnce(&AppHandle) + Send + 'static) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -244,6 +286,9 @@ fn open_labels(app: &AppHandle, except: Option<&str>) -> Vec<String> {
 /// A window is gone: ask the next one, or end the app after the last. A window opened while the
 /// quit was running is asked too (the queue is built again before the app ends).
 pub fn window_destroyed(app: &AppHandle, label: &str) {
+    // The shutdown block hangs on a window handle: it moves on before its window is gone.
+    #[cfg(windows)]
+    crate::session_end_windows::rehome_block(app, label);
     match app.state::<AppQuit>().advance_after_close(label) {
         Advance::Idle | Advance::Waiting => {}
         Advance::Next(next) => ask(app, &next),
@@ -284,9 +329,16 @@ pub fn cancel_quit(app: &AppHandle) {
 #[cfg(target_os = "macos")]
 use crate::macos_terminate::reply_to_terminate;
 
-/// Only macOS has a system terminate to answer.
+/// The queue's answer to a session end: true exits, false ends only the Windows shutdown block (a
+/// logoff or shutdown stays cancelled, the app keeps running).
 #[cfg(not(target_os = "macos"))]
-fn reply_to_terminate(_app: &AppHandle, _terminate: bool) {}
+fn reply_to_terminate(app: &AppHandle, terminate: bool) {
+    #[cfg(windows)]
+    crate::session_end_windows::release_block();
+    if terminate {
+        app.exit(0);
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -443,7 +495,7 @@ mod tests {
             .split("#[cfg(test)]")
             .next()
             .unwrap();
-        let request = &queue[queue.find("pub fn request_terminate").unwrap()..];
+        let request = &queue[queue.find("fn terminate_decision").unwrap()..];
         let request = &request[..request.find("\n}\n").unwrap()];
         assert!(request.contains("try_state::<AppQuit>()"));
         assert!(request.contains("defer_to_main("));
@@ -482,6 +534,61 @@ mod tests {
         assert_eq!(quit.advance_after_close("doc-2"), Advance::Complete);
         assert!(quit.take_terminating(), "the system is owed its answer");
         assert!(!quit.take_terminating(), "answered once");
+    }
+
+    #[test]
+    fn a_session_end_with_nothing_unsaved_ends_at_once_and_starts_no_queue() {
+        let quit = AppQuit::default();
+        assert_eq!(
+            quit.begin_session_end(false, labels(&["main", "doc-2"]), |_| PromptState::None),
+            Terminate::Now
+        );
+        assert!(!quit.take_terminating());
+        assert_eq!(quit.advance_after_close("main"), Advance::Idle);
+    }
+
+    /// Windows and Linux reuse the macOS terminate queue: the same order, the same one answer at the
+    /// end, the same "cancel" that owes the system an answer once.
+    #[test]
+    fn a_session_end_over_unsaved_windows_runs_the_terminate_queue() {
+        let quit = AppQuit::default();
+        assert_eq!(
+            quit.begin_session_end(true, labels(&["main", "doc-2"]), |_| PromptState::None),
+            Terminate::Later(Some("main".to_string()))
+        );
+        assert_eq!(
+            quit.advance_after_close("main"),
+            Advance::Next("doc-2".to_string())
+        );
+        assert_eq!(quit.advance_after_close("doc-2"), Advance::Complete);
+        assert!(quit.take_terminating(), "answered once at the end");
+
+        quit.begin_session_end(true, labels(&["main"]), |_| PromptState::None);
+        assert!(quit.cancel(), "a cancelled prompt answers 'cancel'");
+        assert!(!quit.cancel());
+    }
+
+    /// Each OS hook enters the queue only through `request_session_end`, which starts it from the
+    /// event loop (never inside a window procedure or a signal-reading thread).
+    #[test]
+    fn the_session_end_entry_is_the_one_shared_route() {
+        let queue = include_str!("app_quit.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap();
+        let entry = &queue[queue.find("pub fn request_session_end").unwrap()..];
+        let entry = &entry[..entry.find("\n}\n").unwrap()];
+        assert!(entry.contains("terminate_decision(app, true)"));
+        assert!(entry.contains("reply_to_terminate(app, true)"));
+        for hook in [
+            include_str!("session_end_windows.rs"),
+            include_str!("linux_signal.rs"),
+        ] {
+            let hook = hook.split("#[cfg(test)]").next().unwrap();
+            assert!(hook.contains("defer_to_main("));
+            assert!(hook.contains("app_quit::request_session_end"));
+            assert!(!hook.contains("begin_terminate"), "no second queue");
+        }
     }
 
     #[test]

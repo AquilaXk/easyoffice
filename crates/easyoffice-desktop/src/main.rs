@@ -14,6 +14,8 @@ mod font_catalog;
 // Linux webview runtime fixes (PD-125); other OSes compile it only for its decision-logic tests.
 #[cfg(any(target_os = "linux", test))]
 mod linux_runtime;
+#[cfg(unix)]
+mod linux_signal;
 mod macos_language;
 mod open_feedback;
 mod os_recent;
@@ -46,6 +48,7 @@ mod save_error;
 mod save_file;
 mod save_thumbnail;
 mod save_verify;
+mod session_end_windows;
 mod shell_caller;
 mod smoke;
 mod smoke_steps;
@@ -461,6 +464,12 @@ fn main() {
     // is loud: the app still runs, but a terminate would skip the save prompts.
     #[cfg(target_os = "macos")]
     if let Err(err) = macos_terminate::install(app.handle()) {
+        eprintln!("{err}");
+    }
+    // A logout or shutdown arrives as SIGTERM or SIGHUP and goes through the same queue (PD-191).
+    // Windows hooks every window as it is built (`session_end_windows::attach`).
+    #[cfg(target_os = "linux")]
+    if let Err(err) = linux_signal::install(app.handle()) {
         eprintln!("{err}");
     }
     app.run(handle_run_event);

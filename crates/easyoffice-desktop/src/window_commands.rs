@@ -258,6 +258,8 @@ fn build_window(
         "새 창을 만들지 못했습니다.".to_string()
     })?;
     attach_handlers(app, &window);
+    #[cfg(windows)]
+    crate::session_end_windows::attach(&window);
     Ok(window)
 }
 
