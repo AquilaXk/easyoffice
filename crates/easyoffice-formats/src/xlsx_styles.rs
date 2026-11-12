@@ -1,10 +1,11 @@
 //! SpreadsheetML cell styles and column widths (PD-089): `xl/styles.xml` writer and reader, the
 //! `<cols>` element, and the per-cell `s` attribute.
 //!
-//! Writer layout: `fonts` holds the default font (index 0) plus one font per distinct style;
-//! `cellXfs` holds the default format (index 0) plus one format per distinct font, so format `N`
-//! uses font `N`. Elements follow the ECMA-376 `CT_Stylesheet` sequence (`fonts`, `fills`,
-//! `borders`, `cellStyleXfs`, `cellXfs`, `cellStyles`); spreadsheet programs reject any other order.
+//! Writer layout: `numFmts` holds the custom number format codes (ids from 164, PD-191); `fonts`
+//! holds the default font (index 0) plus one font per distinct font look; `cellXfs` holds the
+//! default format (index 0) plus one format per distinct style (font look and number format).
+//! Elements follow the ECMA-376 `CT_Stylesheet` sequence (`numFmts`, `fonts`, `fills`, `borders`,
+//! `cellStyleXfs`, `cellXfs`, `cellStyles`); spreadsheet programs reject any other order.
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -13,8 +14,11 @@ use crate::rtf_xml_helpers::{
 };
 use crate::sheet_styling::sheet_rules::xlsx_rules::DxfTable;
 use crate::sheet_styling::{
-    format_centipt, CellStyle, SheetStyling, StyleKey, MAX_COLUMN_PX, MIN_COLUMN_PX,
+    format_centipt, resolve_code, CellStyle, NumFmtTable, SheetStyling, StyleKey, CUSTOM_BASE,
+    MAX_COLUMN_PX, MIN_COLUMN_PX,
 };
+use crate::XmlSanitizer;
+use std::sync::Arc;
 
 /// Width of the widest digit of the default font (Calibri 11) in CSS pixels. The spreadsheet column width
 /// unit is the number of such digits; the stored width includes the 5 px cell padding:
@@ -36,17 +40,31 @@ pub(crate) fn xlsx_width_to_px(width: f64) -> u32 {
 
 /// Deduplicated styles of a whole workbook, in first-use order.
 pub(crate) struct XlsxStyleTable {
+    /// Distinct font looks (flags and size), font id `n + 1`.
+    fonts: Vec<StyleKey>,
+    font_index: HashMap<StyleKey, usize>,
+    /// Distinct styles with workbook-wide number format ids, `cellXfs` index `n + 1`.
     styles: Vec<StyleKey>,
     index: HashMap<StyleKey, usize>,
+    /// Custom number format codes of the whole workbook.
+    num_fmts: NumFmtTable,
     /// Differential formats of the conditional formatting rules (PD-171).
     pub(crate) dxf: DxfTable,
+}
+
+/// The workbook-wide number format id of a cell style, or 0 when it has none.
+fn workbook_num_fmt(style: &CellStyle, custom: &[String], lookup: impl FnOnce(&str) -> u16) -> u16 {
+    resolve_code(style.num_fmt, custom).map_or(0, lookup)
 }
 
 impl XlsxStyleTable {
     pub(crate) fn build(stylings: &[SheetStyling]) -> Self {
         let mut table = Self {
+            fonts: Vec::new(),
+            font_index: HashMap::new(),
             styles: Vec::new(),
             index: HashMap::new(),
+            num_fmts: NumFmtTable::default(),
             dxf: DxfTable::build(
                 stylings
                     .iter()
@@ -55,22 +73,36 @@ impl XlsxStyleTable {
         };
         for styling in stylings {
             for style in styling.cells.values().filter(|s| !s.is_plain()) {
-                let key = style.key();
-                table.index.entry(key).or_insert_with(|| {
-                    table.styles.push(key);
-                    table.styles.len()
-                });
+                let id =
+                    workbook_num_fmt(style, &styling.num_fmts, |code| table.num_fmts.intern(code));
+                let key = style.key().with_num_fmt(id);
+                if key == StyleKey::default() || table.index.contains_key(&key) {
+                    continue;
+                }
+                table.styles.push(key);
+                table.index.insert(key, table.styles.len());
+                let font = key.font_part();
+                if font != StyleKey::default() && !table.font_index.contains_key(&font) {
+                    table.fonts.push(font);
+                    table.font_index.insert(font, table.fonts.len());
+                }
             }
         }
         table
     }
 
-    /// `cellXfs` index of `style`; 0 (the default format) for plain styles.
-    pub(crate) fn xf_index(&self, style: &CellStyle) -> usize {
+    /// `cellXfs` index of `style` of `styling`; 0 (the default format) for plain styles.
+    pub(crate) fn xf_index(&self, style: &CellStyle, styling: &SheetStyling) -> usize {
         if style.is_plain() {
             return 0;
         }
-        self.index.get(&style.key()).copied().unwrap_or(0)
+        let id = workbook_num_fmt(style, &styling.num_fmts, |code| {
+            self.num_fmts.lookup(code).unwrap_or(0)
+        });
+        self.index
+            .get(&style.key().with_num_fmt(id))
+            .copied()
+            .unwrap_or(0)
     }
 
     fn font_xml(key: Option<StyleKey>) -> String {
@@ -97,15 +129,48 @@ impl XlsxStyleTable {
         out
     }
 
+    fn num_fmts_xml(&self) -> String {
+        let codes = self.num_fmts.codes();
+        if codes.is_empty() {
+            return String::new();
+        }
+        let mut xml = format!("<numFmts count=\"{}\">", codes.len());
+        for (n, code) in codes.iter().enumerate() {
+            xml.push_str(&format!(
+                "<numFmt numFmtId=\"{}\" formatCode=\"{}\"/>",
+                usize::from(CUSTOM_BASE) + n,
+                XmlSanitizer::escape(code)
+            ));
+        }
+        xml.push_str("</numFmts>");
+        xml
+    }
+
+    fn xf_xml(&self, key: StyleKey) -> String {
+        let font_id = self.font_index.get(&key.font_part()).copied().unwrap_or(0);
+        let num_fmt = key.num_fmt();
+        let mut xf = format!(
+            "<xf numFmtId=\"{num_fmt}\" fontId=\"{font_id}\" fillId=\"0\" borderId=\"0\" xfId=\"0\""
+        );
+        if num_fmt != 0 {
+            xf.push_str(" applyNumberFormat=\"1\"");
+        }
+        if font_id != 0 {
+            xf.push_str(" applyFont=\"1\"");
+        }
+        xf.push_str("/>");
+        xf
+    }
+
     pub(crate) fn to_xml(&self) -> String {
-        let count = self.styles.len() + 1;
         let mut xml = String::from(concat!(
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
             "<styleSheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">"
         ));
-        xml.push_str(&format!("<fonts count=\"{count}\">"));
+        xml.push_str(&self.num_fmts_xml());
+        xml.push_str(&format!("<fonts count=\"{}\">", self.fonts.len() + 1));
         xml.push_str(&Self::font_xml(None));
-        for key in &self.styles {
+        for key in &self.fonts {
             xml.push_str(&Self::font_xml(Some(*key)));
         }
         xml.push_str("</fonts>");
@@ -114,12 +179,10 @@ impl XlsxStyleTable {
             "<borders count=\"1\"><border><left/><right/><top/><bottom/><diagonal/></border></borders>",
             "<cellStyleXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/></cellStyleXfs>",
         ));
-        xml.push_str(&format!("<cellXfs count=\"{count}\">"));
+        xml.push_str(&format!("<cellXfs count=\"{}\">", self.styles.len() + 1));
         xml.push_str("<xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\"/>");
-        for font_id in 1..count {
-            xml.push_str(&format!(
-                "<xf numFmtId=\"0\" fontId=\"{font_id}\" fillId=\"0\" borderId=\"0\" xfId=\"0\" applyFont=\"1\"/>"
-            ));
+        for &key in &self.styles {
+            xml.push_str(&self.xf_xml(key));
         }
         xml.push_str("</cellXfs>");
         xml.push_str(
@@ -185,14 +248,57 @@ fn parse_font(body: &str) -> CellStyle {
         underline,
         strike: flag("strike"),
         size_pt,
+        num_fmt: 0,
     }
 }
 
-/// Style of every `cellXfs` entry, resolved against `fonts`. A font size equal to the default
-/// font's (font 0) reads as "no explicit size".
-pub(crate) fn parse_cell_xf_styles(styles_xml: &str) -> Vec<CellStyle> {
+/// What `xl/styles.xml` says about cell formats: the style of every `cellXfs` entry and the
+/// workbook's custom number format codes (PD-191).
+#[derive(Default)]
+pub(crate) struct XfStyles {
+    pub(crate) styles: Vec<CellStyle>,
+    pub(crate) num_fmts: Arc<Vec<String>>,
+    pub(crate) rejected: u32,
+}
+
+/// `numFmtId` -> `formatCode` of the `numFmts` element.
+fn read_num_fmt_codes(styles_xml: &str) -> HashMap<u32, String> {
+    let Some(body) = extract_tag_bodies(styles_xml, "numFmts").into_iter().next() else {
+        return HashMap::new();
+    };
+    extract_tags_or_self_closing_with_attrs(body, "numFmt")
+        .into_iter()
+        .filter_map(|(attrs, _)| {
+            let id = extract_attr_from_fragment(attrs, "numFmtId")?
+                .parse()
+                .ok()?;
+            let code = extract_attr_from_fragment(attrs, "formatCode")?;
+            Some((id, XmlSanitizer::unescape(code)))
+        })
+        .collect()
+}
+
+/// The model id of one `numFmtId`: a defined custom code wins over a built-in id, an id nothing
+/// defines is General (and counted when it was not 0).
+fn model_num_fmt(id: u32, codes: &HashMap<u32, String>, table: &mut NumFmtTable) -> u16 {
+    if let Some(code) = codes.get(&id) {
+        return table.intern(code);
+    }
+    match u16::try_from(id) {
+        Ok(0) => 0,
+        Ok(id) if id < CUSTOM_BASE && crate::sheet_styling::is_known_builtin(id) => id,
+        _ => {
+            table.reject();
+            0
+        }
+    }
+}
+
+/// Style of every `cellXfs` entry, resolved against `fonts` and `numFmts`. A font size equal to
+/// the default font's (font 0) reads as "no explicit size".
+pub(crate) fn parse_cell_xf_styles(styles_xml: &str) -> XfStyles {
     let Some(fonts_xml) = extract_tag_bodies(styles_xml, "fonts").into_iter().next() else {
-        return Vec::new();
+        return XfStyles::default();
     };
     let fonts: Vec<CellStyle> = extract_tag_bodies(fonts_xml, "font")
         .into_iter()
@@ -203,14 +309,17 @@ pub(crate) fn parse_cell_xf_styles(styles_xml: &str) -> Vec<CellStyle> {
         .and_then(|f| f.size_pt)
         .unwrap_or(DEFAULT_SIZE_PT);
     let Some(xfs_xml) = extract_tag_bodies(styles_xml, "cellXfs").into_iter().next() else {
-        return Vec::new();
+        return XfStyles::default();
     };
-    extract_tags_or_self_closing_with_attrs(xfs_xml, "xf")
+    let codes = read_num_fmt_codes(styles_xml);
+    let mut table = NumFmtTable::default();
+    let styles = extract_tags_or_self_closing_with_attrs(xfs_xml, "xf")
         .into_iter()
         .map(|(attrs, _)| {
-            let font_id = extract_attr_from_fragment(attrs, "fontId")
-                .and_then(|v| v.parse::<usize>().ok())
-                .unwrap_or(0);
+            let number = |name: &str| {
+                extract_attr_from_fragment(attrs, name).and_then(|v| v.parse::<u32>().ok())
+            };
+            let font_id = number("fontId").unwrap_or(0) as usize;
             let mut style = fonts.get(font_id).copied().unwrap_or_default();
             if style
                 .size_pt
@@ -218,9 +327,16 @@ pub(crate) fn parse_cell_xf_styles(styles_xml: &str) -> Vec<CellStyle> {
             {
                 style.size_pt = None;
             }
+            style.num_fmt = model_num_fmt(number("numFmtId").unwrap_or(0), &codes, &mut table);
             style
         })
-        .collect()
+        .collect();
+    let (num_fmts, rejected) = table.finish();
+    XfStyles {
+        styles,
+        num_fmts,
+        rejected,
+    }
 }
 
 #[cfg(test)]

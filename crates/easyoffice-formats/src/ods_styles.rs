@@ -8,13 +8,15 @@ use crate::rtf_xml_helpers::{
     extract_tags_with_attrs,
 };
 use crate::sheet_styling::ods_grid::{repeat_value, walk_ods, OdsCell, OdsSink};
+use crate::sheet_styling::ods_numfmt::{data_style_xml, read_data_styles};
 use crate::sheet_styling::sheet_rules::ods_rules_read::{OdsRuleReader, ValidationSink};
 use crate::sheet_styling::{
-    format_centipt, CellStyle, SheetStyling, StyleKey, MAX_COLUMN_PX, MAX_STYLED_CELLS,
-    MIN_COLUMN_PX,
+    format_centipt, resolve_code, CellStyle, NumFmtTable, SheetStyling, StyleKey, MAX_COLUMN_PX,
+    MAX_STYLED_CELLS, MIN_COLUMN_PX,
 };
 use crate::xml_stream::{unescape_cow, Attrs};
 use crate::{EasyOfficeError, OdfCodec, XmlSanitizer};
+use std::sync::Arc;
 
 const PX_PER_INCH: f64 = 96.0;
 const CM_PER_INCH: f64 = 2.54;
@@ -28,6 +30,15 @@ pub(crate) struct OdsStyleTable {
     cell_index: HashMap<StyleKey, usize>,
     widths: Vec<u32>,
     width_index: HashMap<u32, usize>,
+    /// Custom number format codes of the whole workbook (PD-191); `eonf<id>` data styles.
+    num_fmts: NumFmtTable,
+    /// Workbook-wide number format ids in first-use order, each written as one data style.
+    data_ids: Vec<u16>,
+}
+
+/// The workbook-wide number format id of a cell style, or 0 when it has none.
+fn workbook_num_fmt(style: &CellStyle, custom: &[String], id_of: impl FnOnce(&str) -> u16) -> u16 {
+    resolve_code(style.num_fmt, custom).map_or(0, id_of)
 }
 
 impl OdsStyleTable {
@@ -37,10 +48,20 @@ impl OdsStyleTable {
             cell_index: HashMap::new(),
             widths: Vec::new(),
             width_index: HashMap::new(),
+            num_fmts: NumFmtTable::default(),
+            data_ids: Vec::new(),
         };
         for styling in stylings {
             for style in styling.cells.values().filter(|s| !s.is_plain()) {
-                let key = style.key();
+                let id =
+                    workbook_num_fmt(style, &styling.num_fmts, |code| table.num_fmts.intern(code));
+                let key = style.key().with_num_fmt(id);
+                if key == StyleKey::default() {
+                    continue;
+                }
+                if id != 0 && !table.data_ids.contains(&id) {
+                    table.data_ids.push(id);
+                }
                 table.cell_index.entry(key).or_insert_with(|| {
                     table.cells.push(key);
                     table.cells.len()
@@ -56,11 +77,20 @@ impl OdsStyleTable {
         table
     }
 
-    pub(crate) fn cell_style_name(&self, style: &CellStyle) -> Option<String> {
+    pub(crate) fn cell_style_name(
+        &self,
+        style: &CellStyle,
+        styling: &SheetStyling,
+    ) -> Option<String> {
         if style.is_plain() {
             return None;
         }
-        self.cell_index.get(&style.key()).map(|i| format!("ce{i}"))
+        let id = workbook_num_fmt(style, &styling.num_fmts, |code| {
+            self.num_fmts.lookup(code).unwrap_or(0)
+        });
+        self.cell_index
+            .get(&style.key().with_num_fmt(id))
+            .map(|i| format!("ce{i}"))
     }
 
     pub(crate) fn column_style_name(&self, px: u32) -> Option<String> {
@@ -73,6 +103,11 @@ impl OdsStyleTable {
             return String::new();
         }
         let mut xml = String::from("<office:automatic-styles>");
+        for &id in &self.data_ids {
+            if let Some(code) = resolve_code(id, self.num_fmts.codes()) {
+                xml.push_str(&data_style_xml(&format!("eonf{id}"), code));
+            }
+        }
         for (i, &px) in self.widths.iter().enumerate() {
             xml.push_str(&format!(
                 "<style:style style:name=\"co{}\" style:family=\"table-column\"><style:table-column-properties style:column-width=\"{:.4}in\"/></style:style>",
@@ -97,8 +132,12 @@ impl OdsStyleTable {
             if let Some(centi) = k.size_centipt() {
                 props.push_str(&format!(" fo:font-size=\"{}pt\"", format_centipt(centi)));
             }
+            let data = match k.num_fmt() {
+                0 => String::new(),
+                id => format!(" style:data-style-name=\"eonf{id}\""),
+            };
             xml.push_str(&format!(
-                "<style:style style:name=\"ce{}\" style:family=\"table-cell\"><style:text-properties{props}/></style:style>",
+                "<style:style style:name=\"ce{}\" style:family=\"table-cell\"{data}><style:text-properties{props}/></style:style>",
                 i + 1
             ));
         }
@@ -172,6 +211,7 @@ fn parse_text_properties(attrs: &str) -> CellStyle {
             .and_then(length_to_px)
             .map(|px| (px / PX_PER_INCH * PT_PER_INCH * 100.0).round() / 100.0)
             .filter(|pt| *pt >= 1.0),
+        num_fmt: 0,
     }
 }
 
@@ -179,12 +219,18 @@ fn parse_text_properties(attrs: &str) -> CellStyle {
 pub(crate) struct AutomaticStyles {
     pub(crate) cells: HashMap<String, CellStyle>,
     pub(crate) columns: HashMap<String, u32>,
+    /// Custom number format codes the cell styles refer to, and how many codes were replaced
+    /// with General (PD-191).
+    pub(crate) num_fmts: Arc<Vec<String>>,
+    pub(crate) num_fmts_rejected: u32,
 }
 
 pub(crate) fn parse_automatic_styles(content_xml: &str) -> AutomaticStyles {
     let mut styles = AutomaticStyles {
         cells: HashMap::new(),
         columns: HashMap::new(),
+        num_fmts: Arc::default(),
+        num_fmts_rejected: 0,
     };
     let Some((_, auto)) = extract_tags_with_attrs(content_xml, "office:automatic-styles")
         .into_iter()
@@ -192,6 +238,8 @@ pub(crate) fn parse_automatic_styles(content_xml: &str) -> AutomaticStyles {
     else {
         return styles;
     };
+    let data_codes = read_data_styles(auto);
+    let mut num_fmts = NumFmtTable::default();
     for (attrs, body) in extract_tags_with_attrs(auto, "style:style") {
         let (Some(name), Some(family)) = (
             extract_attr_from_fragment(attrs, "style:name"),
@@ -201,13 +249,18 @@ pub(crate) fn parse_automatic_styles(content_xml: &str) -> AutomaticStyles {
         };
         let name = XmlSanitizer::unescape(name);
         if family == "table-cell" {
-            if let Some((props, _)) =
-                extract_tags_or_self_closing_with_attrs(body, "style:text-properties")
-                    .into_iter()
-                    .next()
-            {
-                styles.cells.insert(name, parse_text_properties(props));
+            let mut style = extract_tags_or_self_closing_with_attrs(body, "style:text-properties")
+                .into_iter()
+                .next()
+                .map_or_else(CellStyle::default, |(props, _)| {
+                    parse_text_properties(props)
+                });
+            let code = extract_attr_from_fragment(attrs, "style:data-style-name")
+                .and_then(|data| data_codes.get(&*XmlSanitizer::unescape(data)));
+            if let Some(code) = code {
+                style.num_fmt = num_fmts.intern(code);
             }
+            styles.cells.insert(name, style);
         } else if family == "table-column" {
             let px = extract_tags_or_self_closing_with_attrs(body, "style:table-column-properties")
                 .into_iter()
@@ -222,6 +275,7 @@ pub(crate) fn parse_automatic_styles(content_xml: &str) -> AutomaticStyles {
             }
         }
     }
+    (styles.num_fmts, styles.num_fmts_rejected) = num_fmts.finish();
     styles
 }
 
@@ -323,6 +377,13 @@ impl OdsSink for StyleSink<'_> {
         let styling = SheetStyling {
             cells: std::mem::take(&mut self.cells),
             columns: std::mem::take(&mut self.columns),
+            num_fmts: Arc::clone(&self.styles.num_fmts),
+            // The count belongs to the workbook; the first table carries it.
+            num_fmts_rejected: if self.tables.is_empty() {
+                self.styles.num_fmts_rejected
+            } else {
+                0
+            },
             ..SheetStyling::default()
         };
         self.tables.push((std::mem::take(&mut self.name), styling));

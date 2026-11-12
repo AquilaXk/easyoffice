@@ -5,6 +5,7 @@ use crate::rtf_xml_helpers::{
     strip_tag_blocks, to_open_formula_syntax_impl,
 };
 use crate::sheet_styling::ods_grid::{read_ods_sheets, read_ods_sheets_with_styling};
+use crate::sheet_styling::ods_numfmt::{EO_NS, NUMBER_NS};
 use crate::sheet_styling::ods_styles::{parse_ods_styling, table_columns_xml, OdsStyleTable};
 use crate::sheet_styling::sheet_rules::ods_rules::{OdsRuleTable, CALCEXT_NS};
 use crate::sheet_styling::SheetStyling;
@@ -325,7 +326,9 @@ impl OdfCodec {
         let mut content = String::from(
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?><office:document-content xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" xmlns:style=\"urn:oasis:names:tc:opendocument:xmlns:style:1.0\" xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\" office:version=\"1.2\"",
         );
-        content.push_str(&format!(" xmlns:calcext=\"{CALCEXT_NS}\">"));
+        content.push_str(&format!(
+            " xmlns:number=\"{NUMBER_NS}\" xmlns:eo=\"{EO_NS}\" xmlns:calcext=\"{CALCEXT_NS}\">"
+        ));
         content.push_str(&Self::automatic_styles_with_rules(
             &style_table,
             &rule_table,
@@ -464,8 +467,10 @@ impl OdfCodec {
                     push_empty_cells(content, col - expected_col);
                 }
                 let style_attr = styling
-                    .and_then(|st| st.cells.get(&(row, col)))
-                    .and_then(|style| style_table.cell_style_name(style))
+                    .and_then(|st| {
+                        let style = st.cells.get(&(row, col))?;
+                        style_table.cell_style_name(style, st)
+                    })
                     .map_or(String::new(), |name| {
                         format!(" table:style-name=\"{name}\"")
                     })

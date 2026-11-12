@@ -5,9 +5,10 @@ use crate::sheet_styling::sheet_rules::xlsx_rules::{
     parse_dxf_styles, parse_worksheet_rules, rules_xml,
 };
 use crate::sheet_styling::xlsx_sheet::{read_shared_strings, scan_worksheet, SharedStrings};
-use crate::sheet_styling::xlsx_styles::{cols_xml, parse_cell_xf_styles, XlsxStyleTable};
+use crate::sheet_styling::xlsx_styles::{cols_xml, parse_cell_xf_styles, XfStyles, XlsxStyleTable};
 use crate::sheet_styling::SheetStyling;
 use crate::{EasyOfficeError, XmlSanitizer, ZipArchiveCodec, ZipSecurityPolicy};
+use std::sync::Arc;
 
 /// Payload for OOXML WordprocessingML (`.docx`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -251,9 +252,11 @@ fn build_sheet_xml(
         let _ = write!(sheet_xml, "<row r=\"{row_num}\">");
         for (col, raw) in row_cells {
             let col_ref = write_col_letters(&mut col_buf, col as usize);
-            let xf = styling
-                .and_then(|st| st.cells.get(&(row, col)))
-                .map_or(0, |style| style_table.xf_index(style));
+            let xf = styling.map_or(0, |st| {
+                st.cells
+                    .get(&(row, col))
+                    .map_or(0, |style| style_table.xf_index(style, st))
+            });
             let cached = cache.and_then(|c| c.get(&(row, col)));
             push_cell_xml(&mut sheet_xml, col_ref, row_num, xf, raw, cached, sst_map);
         }
@@ -635,7 +638,7 @@ impl OoxmlCodec {
                 .map(parse_cell_xf_styles)
                 .unwrap_or_default()
         } else {
-            Vec::new()
+            XfStyles::default()
         };
         let dxf_styles = if with_styling {
             entry_by_path
@@ -679,12 +682,15 @@ impl OoxmlCodec {
             let scan = scan_worksheet(
                 sheet_xml,
                 &shared_strings,
-                &xf_styles,
+                &xf_styles.styles,
                 with_styling,
                 &mut budget,
             )?;
             if with_styling {
                 let mut styling = scan.styling;
+                styling.num_fmts = Arc::clone(&xf_styles.num_fmts);
+                // The count belongs to the workbook; one sheet carries it.
+                styling.num_fmts_rejected = if idx == 0 { xf_styles.rejected } else { 0 };
                 styling.rules = parse_worksheet_rules(sheet_xml, &dxf_styles);
                 stylings.push((sheet_name.clone(), styling));
             }

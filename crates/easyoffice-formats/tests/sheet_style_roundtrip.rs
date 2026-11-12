@@ -75,6 +75,7 @@ fn combined_flags_and_blank_styled_cells_round_trip() {
         underline: true,
         strike: true,
         size_pt: Some(9.0),
+        ..CellStyle::default()
     };
     for format in BOTH {
         let st = styled(vec![((0, 0), all), ((3, 1), flag("bold"))], vec![]);
@@ -208,6 +209,7 @@ fn styles_xml_follows_the_ecma376_element_order() {
         underline: true,
         strike: true,
         size_pt: Some(12.5),
+        ..CellStyle::default()
     };
     let xml = part(
         &pack(
