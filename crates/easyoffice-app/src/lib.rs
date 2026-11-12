@@ -803,11 +803,17 @@ impl EasyOfficeIpcRouter {
     }
 
     pub fn escape_json_str(s: &str) -> String {
+        let mut out = String::with_capacity(s.len());
+        Self::escape_json_into(&mut out, s);
+        out
+    }
+
+    /// Appends `s` with the JSON string escapes applied.
+    pub fn escape_json_into(out: &mut String, s: &str) {
         use std::fmt::Write;
         const LO: u64 = 0x0101_0101_0101_0101;
         const HI: u64 = 0x8080_8080_8080_8080;
         let bytes = s.as_bytes();
-        let mut out = String::with_capacity(s.len());
         let mut last = 0usize;
         let mut i = 0usize;
         while i + 8 <= bytes.len() {
@@ -872,7 +878,6 @@ impl EasyOfficeIpcRouter {
         if last < s.len() {
             out.push_str(&s[last..]);
         }
-        out
     }
 
     pub(crate) fn decode_hex(hex: &str) -> Result<Vec<u8>, EasyOfficeError> {

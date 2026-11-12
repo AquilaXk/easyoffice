@@ -156,6 +156,13 @@ impl PackedCellCoordinate {
     }
 
     pub fn to_a1(self) -> String {
+        let mut out = String::with_capacity(12);
+        self.write_a1(&mut out);
+        out
+    }
+
+    /// Appends the A1 reference (`B7`) to `out`.
+    pub fn write_a1(self, out: &mut String) {
         use std::fmt::Write;
         let mut idx = self.col() + 1;
         let mut buf = [0u8; 8];
@@ -166,11 +173,8 @@ impl PackedCellCoordinate {
             buf[pos] = b'A' + rem;
             idx = (idx - 1) / 26;
         }
-        let col_str = std::str::from_utf8(&buf[pos..]).unwrap_or("");
-        let mut out = String::with_capacity(col_str.len() + 8);
-        out.push_str(col_str);
+        out.push_str(std::str::from_utf8(&buf[pos..]).unwrap_or(""));
         let _ = write!(out, "{}", self.row() + 1);
-        out
     }
 }
 

@@ -45,17 +45,21 @@ fn limit(entries: &JsonEntries, key: &str) -> Result<Option<u32>, EasyOfficeErro
     }
 }
 
-fn json_str(s: &str) -> String {
-    format!("\"{}\"", EasyOfficeIpcRouter::escape_json_str(s))
+/// Appends `s` as a JSON string literal.
+fn push_json_str(out: &mut String, s: &str) {
+    out.push('"');
+    EasyOfficeIpcRouter::escape_json_into(out, s);
+    out.push('"');
 }
 
-fn paragraph_json(p: &RichParagraph) -> String {
-    let mut out = String::from("{\"type\":\"paragraph\",\"runs\":[");
+fn write_paragraph(out: &mut String, p: &RichParagraph) {
+    out.push_str("{\"type\":\"paragraph\",\"runs\":[");
     for (idx, r) in p.runs.iter().enumerate() {
         if idx > 0 {
             out.push(',');
         }
-        let _ = write!(out, "{{\"text\":{}", json_str(&r.text));
+        out.push_str("{\"text\":");
+        push_json_str(out, &r.text);
         for (on, key) in [
             (r.bold, "bold"),
             (r.italic, "italic"),
@@ -80,7 +84,8 @@ fn paragraph_json(p: &RichParagraph) -> String {
             (&r.highlight, "highlight"),
         ] {
             if let Some(v) = value {
-                let _ = write!(out, ",\"{key}\":{}", json_str(v));
+                let _ = write!(out, ",\"{key}\":");
+                push_json_str(out, v);
             }
         }
         out.push('}');
@@ -115,29 +120,29 @@ fn paragraph_json(p: &RichParagraph) -> String {
         let _ = write!(out, ",\"lineSpacingPercent\":{v}");
     }
     out.push('}');
-    out
 }
 
 /// Picture block of the editor model: the encoded bytes travel as base64 and come back unchanged.
-fn image_json(img: &RichImage) -> String {
+fn write_image(out: &mut String, img: &RichImage) {
     let (width_emu, height_emu) = img.display_emu();
-    format!(
-        "{{\"type\":\"image\",\"format\":\"{}\",\"base64\":\"{}\",\"widthPx\":{},\"heightPx\":{},\"widthEmu\":{width_emu},\"heightEmu\":{height_emu},\"alt\":{}}}",
+    let _ = write!(
+        out,
+        "{{\"type\":\"image\",\"format\":\"{}\",\"base64\":\"{}\",\"widthPx\":{},\"heightPx\":{},\"widthEmu\":{width_emu},\"heightEmu\":{height_emu},\"alt\":",
         img.format().extension(),
         base64_codec::encode(img.bytes()),
         img.width_px(),
         img.height_px(),
-        json_str(img.alt())
-    )
+    );
+    push_json_str(out, img.alt());
+    out.push('}');
 }
 
 /// `,"merges":[{"row":0,"col":0,"rowSpan":1,"colSpan":2}]` for a table with merged regions (PD-130),
 /// nothing otherwise. Covered cells stay in `rows` as empty text.
-fn merges_json(merges: &[CellMerge]) -> String {
+fn write_merges(out: &mut String, merges: &[CellMerge]) {
     if merges.is_empty() {
-        return String::new();
+        return;
     }
-    let mut out = String::with_capacity(12 + merges.len() * 44);
     out.push_str(",\"merges\":[");
     for (idx, m) in merges.iter().enumerate() {
         if idx > 0 {
@@ -150,15 +155,13 @@ fn merges_json(merges: &[CellMerge]) -> String {
         );
     }
     out.push(']');
-    out
 }
 
-fn block_json(b: &RichBlock) -> String {
+fn write_block(out: &mut String, b: &RichBlock) {
     match b {
-        RichBlock::Paragraph(p) => paragraph_json(p),
-        RichBlock::Image(img) => image_json(img),
+        RichBlock::Paragraph(p) => write_paragraph(out, p),
+        RichBlock::Image(img) => write_image(out, img),
         RichBlock::Table(table) => {
-            let mut out = String::with_capacity(32 + table.rows.len() * 32);
             out.push_str("{\"type\":\"table\",\"rows\":[");
             for (r_idx, row) in table.rows.iter().enumerate() {
                 if r_idx > 0 {
@@ -169,33 +172,42 @@ fn block_json(b: &RichBlock) -> String {
                     if c_idx > 0 {
                         out.push(',');
                     }
-                    let _ = write!(out, "{{\"text\":{}}}", json_str(cell));
+                    out.push_str("{\"text\":");
+                    push_json_str(out, cell);
+                    out.push('}');
                 }
                 out.push(']');
             }
             out.push(']');
-            out.push_str(&merges_json(&table.merges));
+            write_merges(out, &table.merges);
             out.push('}');
-            out
         }
     }
 }
 
-/// Keeps cells inside `max_rows` x `max_cols`; returns the number of dropped cells.
-fn clip_sheets(sheets: &mut [OdsUnpacked], max_rows: Option<u32>, max_cols: Option<u32>) -> usize {
-    let mut dropped = 0usize;
-    for (_, cells) in sheets {
-        let before = cells.len();
-        cells
-            .retain(|(r, c, _)| max_rows.is_none_or(|m| *r < m) && max_cols.is_none_or(|m| *c < m));
-        dropped += before - cells.len();
+/// Whether a cell at (`row`, `col`) lies inside the editor grid.
+fn in_grid(row: u32, col: u32, max_rows: Option<u32>, max_cols: Option<u32>) -> bool {
+    max_rows.is_none_or(|m| row < m) && max_cols.is_none_or(|m| col < m)
+}
+
+/// Number of cells outside the editor grid.
+fn cells_outside_grid(
+    sheets: &[OdsUnpacked],
+    max_rows: Option<u32>,
+    max_cols: Option<u32>,
+) -> usize {
+    if max_rows.is_none() && max_cols.is_none() {
+        return 0;
     }
-    dropped
+    sheets
+        .iter()
+        .flat_map(|(_, cells)| cells)
+        .filter(|(r, c, _)| !in_grid(*r, *c, max_rows, max_cols))
+        .count()
 }
 
 /// `{"bold":true,"sizePt":11.25}`: only the set flags and the explicit size.
-fn style_json(style: &CellStyle) -> String {
-    let mut out = String::with_capacity(48);
+fn write_style(out: &mut String, style: &CellStyle) {
     out.push('{');
     let mut first = true;
     for (on, key) in [
@@ -219,7 +231,6 @@ fn style_json(style: &CellStyle) -> String {
         let _ = write!(out, "\"sizePt\":{size}");
     }
     out.push('}');
-    out
 }
 
 #[inline]
@@ -227,57 +238,114 @@ const fn pack_row_col(r: u32, c: u32) -> u64 {
     ((r as u64) << 32) | (c as u64)
 }
 
-/// Cells of one sheet as JSON: valued cells first, then styled cells without a value.
-fn sheet_cells_json(cells: &[(u32, u32, String)], styling: Option<&SheetStyling>) -> Vec<String> {
-    let style_of = |r: u32, c: u32| styling.and_then(|s| s.cells.get(&(r, c)));
-    let mut valued: HashSet<u64> = HashSet::with_capacity(cells.len());
-    let mut out: Vec<String> = Vec::with_capacity(cells.len());
+/// Cells of one sheet inside the grid as a JSON array body: valued cells first, then styled
+/// cells without a value.
+fn write_sheet_cells(
+    out: &mut String,
+    cells: &[(u32, u32, String)],
+    styling: Option<&SheetStyling>,
+    max_rows: Option<u32>,
+    max_cols: Option<u32>,
+) {
+    let styles = styling.filter(|s| !s.cells.is_empty());
+    // Only a styled cell can reappear as "styled without a value", so only those are remembered.
+    let mut valued: HashSet<u64> = HashSet::new();
+    let mut first = true;
     for (r, c, raw) in cells {
-        valued.insert(pack_row_col(*r, *c));
-        if let Ok(coord) = PackedCellCoordinate::new(*r, *c) {
-            let a1 = coord.to_a1();
-            let mut item = String::with_capacity(32 + raw.len());
-            let _ = write!(item, "{{\"ref\":\"{a1}\",\"raw\":{}", json_str(raw));
-            if let Some(s) = style_of(*r, *c) {
-                let _ = write!(item, ",\"style\":{}", style_json(s));
-            }
-            item.push('}');
-            out.push(item);
+        if !in_grid(*r, *c, max_rows, max_cols) {
+            continue;
         }
-    }
-    if let Some(st) = styling {
-        for (&(r, c), style) in &st.cells {
-            if valued.contains(&pack_row_col(r, c)) {
-                continue;
-            }
-            if let Ok(coord) = PackedCellCoordinate::new(r, c) {
-                out.push(format!(
-                    "{{\"ref\":\"{}\",\"raw\":\"\",\"style\":{}}}",
-                    coord.to_a1(),
-                    style_json(style)
-                ));
-            }
+        let style = styles.and_then(|s| s.cells.get(&(*r, *c)));
+        if style.is_some() {
+            valued.insert(pack_row_col(*r, *c));
         }
+        let Ok(coord) = PackedCellCoordinate::new(*r, *c) else {
+            continue;
+        };
+        if !first {
+            out.push(',');
+        }
+        first = false;
+        out.push_str("{\"ref\":\"");
+        coord.write_a1(out);
+        out.push_str("\",\"raw\":");
+        push_json_str(out, raw);
+        if let Some(style) = style {
+            out.push_str(",\"style\":");
+            write_style(out, style);
+        }
+        out.push('}');
     }
-    out
+    let Some(styles) = styles else {
+        return;
+    };
+    for (&(r, c), style) in &styles.cells {
+        if !in_grid(r, c, max_rows, max_cols) || valued.contains(&pack_row_col(r, c)) {
+            continue;
+        }
+        let Ok(coord) = PackedCellCoordinate::new(r, c) else {
+            continue;
+        };
+        if !first {
+            out.push(',');
+        }
+        first = false;
+        out.push_str("{\"ref\":\"");
+        coord.write_a1(out);
+        out.push_str("\",\"raw\":\"\",\"style\":");
+        write_style(out, style);
+        out.push('}');
+    }
 }
 
-/// Custom column widths as JSON (1-based `index`).
-fn columns_json(styling: Option<&SheetStyling>) -> String {
+/// Custom column widths inside the grid as a JSON array body (1-based `index`).
+fn write_columns(out: &mut String, styling: Option<&SheetStyling>, max_cols: Option<u32>) {
     let Some(s) = styling else {
-        return String::new();
+        return;
     };
-    if s.columns.is_empty() {
-        return String::new();
+    let mut first = true;
+    for (c, px) in &s.columns {
+        if max_cols.is_some_and(|m| *c >= m) {
+            continue;
+        }
+        if !first {
+            out.push(',');
+        }
+        first = false;
+        let _ = write!(out, "{{\"index\":{},\"widthPx\":{px}}}", c + 1);
     }
-    let mut out = String::with_capacity(s.columns.len() * 28);
-    for (idx, (c, px)) in s.columns.iter().enumerate() {
+}
+
+fn write_sheet(
+    out: &mut String,
+    name: &str,
+    cells: &[(u32, u32, String)],
+    styling: Option<&SheetStyling>,
+    max_rows: Option<u32>,
+    max_cols: Option<u32>,
+) {
+    out.push_str("{\"name\":");
+    push_json_str(out, name);
+    out.push_str(",\"cells\":[");
+    write_sheet_cells(out, cells, styling, max_rows, max_cols);
+    out.push_str("],\"columns\":[");
+    write_columns(out, styling, max_cols);
+    out.push(']');
+    if let Some(st) = styling.filter(|st| !st.rules.is_empty()) {
+        out.push_str(",\"rules\":");
+        out.push_str(&rules_json(&st.rules));
+    }
+    out.push('}');
+}
+
+/// Appends `items` separated by commas, each written by `write`.
+fn write_list<T>(out: &mut String, items: &[T], mut write: impl FnMut(&mut String, &T)) {
+    for (idx, item) in items.iter().enumerate() {
         if idx > 0 {
             out.push(',');
         }
-        let _ = write!(out, "{{\"index\":{},\"widthPx\":{px}}}", c + 1);
+        write(out, item);
     }
-    out
 }
 
 fn decode_response(
@@ -289,18 +357,10 @@ fn decode_response(
     max_cols: Option<u32>,
 ) -> Result<String, EasyOfficeError> {
     let mut warnings = decoded.warnings.clone();
-    let (kind, payload, count) = match &decoded.content {
-        DecodedContent::Document(doc) => {
-            let blocks: Vec<String> = doc.blocks.iter().map(block_json).collect();
-            (
-                "document",
-                format!("\"blocks\":[{}]", blocks.join(",")),
-                doc.blocks.len(),
-            )
-        }
+    let (kind, count) = match &decoded.content {
+        DecodedContent::Document(doc) => ("document", doc.blocks.len()),
         DecodedContent::Workbook(sheets) => {
-            let mut sheets = sheets.clone();
-            let dropped = clip_sheets(&mut sheets, max_rows, max_cols);
+            let dropped = cells_outside_grid(sheets, max_rows, max_cols);
             if dropped > 0 {
                 warnings.push(format!(
                     "편집기 격자(최대 {}행 × {}열) 밖의 셀 {dropped}개는 가져오지 않았습니다.",
@@ -308,81 +368,74 @@ fn decode_response(
                     max_cols.map_or("무제한".to_string(), |m| m.to_string()),
                 ));
             }
-            let count = sheets.len();
             for (name, st) in styling {
                 warnings.extend(st.rules.unsupported.iter().map(|rule| {
                     format!("{name} 시트의 {rule} 규칙은 지원하지 않아 가져오지 않았습니다.")
                 }));
             }
-            let items: Vec<String> = sheets
-                .iter()
-                .map(|(name, cells)| {
-                    let mut sheet_styling = styling_of(styling, name).cloned();
-                    if let Some(st) = sheet_styling.as_mut() {
-                        st.cells.retain(|(r, c), _| {
-                            max_rows.is_none_or(|m| *r < m) && max_cols.is_none_or(|m| *c < m)
-                        });
-                        st.columns.retain(|c, _| max_cols.is_none_or(|m| *c < m));
-                    }
-                    let cells = sheet_cells_json(cells, sheet_styling.as_ref());
-                    let rules = sheet_styling
-                        .as_ref()
-                        .filter(|st| !st.rules.is_empty())
-                        .map_or(String::new(), |st| {
-                            format!(",\"rules\":{}", rules_json(&st.rules))
-                        });
-                    format!(
-                        "{{\"name\":{},\"cells\":[{}],\"columns\":[{}]{rules}}}",
-                        json_str(name),
-                        cells.join(","),
-                        columns_json(sheet_styling.as_ref())
-                    )
-                })
-                .collect();
-            (
-                "workbook",
-                format!("\"sheets\":[{}]", items.join(",")),
-                count,
-            )
+            ("workbook", sheets.len())
         }
-        DecodedContent::Slides(slides) => {
-            let items: Vec<String> = slides
-                .iter()
-                .map(|(title, bullets, notes)| {
-                    let bullets: Vec<String> = bullets.iter().map(|b| json_str(b)).collect();
-                    format!(
-                        "{{\"title\":{},\"bullets\":[{}],\"notes\":{}}}",
-                        json_str(title),
-                        bullets.join(","),
-                        json_str(notes)
-                    )
-                })
-                .collect();
-            (
-                "slides",
-                format!("\"slides\":[{}]", items.join(",")),
-                slides.len(),
-            )
-        }
+        DecodedContent::Slides(slides) => ("slides", slides.len()),
     };
-    let warnings_json: Vec<String> = warnings.iter().map(|w| json_str(w)).collect();
-    Ok(format!(
-        concat!(
-            "{{\"status\":\"OK\",\"action\":\"decode\",\"fileName\":{},\"format\":\"{}\",",
-            "\"module\":\"{}\",\"kind\":\"{}\",\"title\":{},\"sourceBytes\":{},",
-            "\"specification\":{},\"itemCount\":{},\"warnings\":[{}],{}}}"
-        ),
-        json_str(file_name),
+    let mut out = String::with_capacity(estimated_len(&decoded.content));
+    out.push_str("{\"status\":\"OK\",\"action\":\"decode\",\"fileName\":");
+    push_json_str(&mut out, file_name);
+    let _ = write!(
+        out,
+        ",\"format\":\"{}\",\"module\":\"{}\",\"kind\":\"{kind}\",\"title\":",
         decoded.format.extension(),
         decoded.format.editor_module(),
-        kind,
-        json_str(&decoded.title),
-        source_bytes,
-        json_str(decoded.format.standard_specification()),
-        count,
-        warnings_json.join(","),
-        payload
-    ))
+    );
+    push_json_str(&mut out, &decoded.title);
+    let _ = write!(out, ",\"sourceBytes\":{source_bytes},\"specification\":");
+    push_json_str(&mut out, decoded.format.standard_specification());
+    let _ = write!(out, ",\"itemCount\":{count},\"warnings\":[");
+    write_list(&mut out, &warnings, |out, w| push_json_str(out, w));
+    out.push_str("],");
+    match &decoded.content {
+        DecodedContent::Document(doc) => {
+            out.push_str("\"blocks\":[");
+            write_list(&mut out, &doc.blocks, |out, b| write_block(out, b));
+        }
+        DecodedContent::Workbook(sheets) => {
+            out.push_str("\"sheets\":[");
+            write_list(&mut out, sheets, |out, (name, cells)| {
+                let sheet_styling = styling_of(styling, name);
+                write_sheet(out, name, cells, sheet_styling, max_rows, max_cols);
+            });
+        }
+        DecodedContent::Slides(slides) => {
+            out.push_str("\"slides\":[");
+            write_list(&mut out, slides, |out, (title, bullets, notes)| {
+                out.push_str("{\"title\":");
+                push_json_str(out, title);
+                out.push_str(",\"bullets\":[");
+                write_list(out, bullets, |out, b| push_json_str(out, b));
+                out.push_str("],\"notes\":");
+                push_json_str(out, notes);
+                out.push('}');
+            });
+        }
+    }
+    out.push_str("]}");
+    Ok(out)
+}
+
+/// A starting capacity for the answer: sheets average about 35 bytes of JSON per cell, documents
+/// about 600 bytes per block, so the buffer rarely grows more than once.
+fn estimated_len(content: &DecodedContent) -> usize {
+    const BYTES_PER_CELL: usize = 35;
+    const BYTES_PER_BLOCK: usize = 600;
+    const FIXED: usize = 1024;
+    FIXED
+        + match content {
+            DecodedContent::Document(doc) => doc.blocks.len() * BYTES_PER_BLOCK,
+            DecodedContent::Workbook(sheets) => sheets
+                .iter()
+                .map(|(_, cells)| cells.len() * BYTES_PER_CELL)
+                .sum(),
+            DecodedContent::Slides(slides) => slides.len() * BYTES_PER_BLOCK,
+        }
 }
 
 fn styling_of<'a>(styling: &'a [(String, SheetStyling)], name: &str) -> Option<&'a SheetStyling> {

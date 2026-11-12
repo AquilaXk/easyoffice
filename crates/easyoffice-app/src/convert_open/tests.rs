@@ -703,3 +703,140 @@ fn editor_json_rejects_damaged_oversized_and_malformed_pictures() {
         assert!(EasyOfficeIpcRouter::dispatch("convert_document_format", &payload).is_err());
     }
 }
+
+/// The whole `decode` answer of a workbook, document and slide set, byte for byte: escapes,
+/// styled cells without a value, clipping to the grid, the warnings of what was dropped.
+#[test]
+fn decode_answer_is_byte_exact_for_documents_workbooks_and_slides() {
+    use easyoffice_formats::{CellStyle, RichTable};
+
+    let decoded = |content| DecodedDocument {
+        format: DocumentFormat::Xlsx,
+        title: "제목 \"1\"".to_string(),
+        content,
+        warnings: vec!["앞 경고".to_string()],
+    };
+    let bold = CellStyle {
+        bold: true,
+        ..CellStyle::default()
+    };
+    let sized = CellStyle {
+        italic: true,
+        size_pt: Some(11.25),
+        ..CellStyle::default()
+    };
+    let mut styling = SheetStyling::default();
+    styling.cells.insert((0, 0), bold.clone());
+    styling.cells.insert((1, 1), sized);
+    styling.cells.insert((2, 0), bold);
+    styling.cells.insert((0, 5), CellStyle::default());
+    styling.columns.insert(0, 150);
+    styling.columns.insert(4, 60);
+    styling.rules.unsupported.push("timePeriod".to_string());
+    let sheets = vec![
+        (
+            "시트\n1".to_string(),
+            vec![
+                (0, 0, "a\"b".to_string()),
+                (0, 1, "=A1".to_string()),
+                (1, 1, "탭\t".to_string()),
+                (3, 0, "아래".to_string()),
+                (0, 6, "오른쪽".to_string()),
+            ],
+        ),
+        ("빈".to_string(), Vec::new()),
+    ];
+    let styles = vec![("시트\n1".to_string(), styling)];
+    let json = decode_response(
+        &decoded(DecodedContent::Workbook(sheets.clone())),
+        &styles,
+        "a.xlsx",
+        1234,
+        Some(3),
+        Some(5),
+    )
+    .unwrap();
+    let spec = DocumentFormat::Xlsx.standard_specification();
+    assert_eq!(
+        json,
+        format!(
+            concat!(
+                "{{\"status\":\"OK\",\"action\":\"decode\",\"fileName\":\"a.xlsx\",\"format\":\"xlsx\",",
+                "\"module\":\"SHEET\",\"kind\":\"workbook\",\"title\":\"제목 \\\"1\\\"\",\"sourceBytes\":1234,",
+                "\"specification\":\"{spec}\",\"itemCount\":2,",
+                "\"warnings\":[\"앞 경고\",\"편집기 격자(최대 3행 × 5열) 밖의 셀 2개는 가져오지 않았습니다.\",",
+                "\"시트\\n1 시트의 timePeriod 규칙은 지원하지 않아 가져오지 않았습니다.\"],",
+                "\"sheets\":[{{\"name\":\"시트\\n1\",\"cells\":[",
+                "{{\"ref\":\"A1\",\"raw\":\"a\\\"b\",\"style\":{{\"bold\":true}}}},",
+                "{{\"ref\":\"B1\",\"raw\":\"=A1\"}},",
+                "{{\"ref\":\"B2\",\"raw\":\"탭\\t\",\"style\":{{\"italic\":true,\"sizePt\":11.25}}}},",
+                "{{\"ref\":\"A3\",\"raw\":\"\",\"style\":{{\"bold\":true}}}}",
+                "],\"columns\":[{{\"index\":1,\"widthPx\":150}},{{\"index\":5,\"widthPx\":60}}]}},",
+                "{{\"name\":\"빈\",\"cells\":[],\"columns\":[]}}]}}"
+            ),
+            spec = spec
+        )
+    );
+
+    let table = RichTable::with_merges(
+        vec![vec!["가".to_string(), "나".to_string()]],
+        vec![easyoffice_formats::CellMerge {
+            row: 0,
+            col: 0,
+            row_span: 1,
+            col_span: 2,
+        }],
+    )
+    .0;
+    let document = RichDocument {
+        title: "t".to_string(),
+        blocks: vec![
+            RichBlock::Paragraph(RichParagraph {
+                runs: vec![RichRun::plain("본문\\")],
+                heading_level: 2,
+                ..RichParagraph::default()
+            }),
+            RichBlock::Table(table),
+        ],
+        official_agency: None,
+    };
+    let json = decode_response(
+        &decoded(DecodedContent::Document(document)),
+        &[],
+        "",
+        7,
+        None,
+        None,
+    )
+    .unwrap();
+    assert!(
+        json.ends_with(concat!(
+            "\"itemCount\":2,\"warnings\":[\"앞 경고\"],\"blocks\":[",
+            "{\"type\":\"paragraph\",\"runs\":[{\"text\":\"본문\\\\\"}],\"heading\":2},",
+            "{\"type\":\"table\",\"rows\":[[{\"text\":\"가\"},{\"text\":\"나\"}]],",
+            "\"merges\":[{\"row\":0,\"col\":0,\"rowSpan\":1,\"colSpan\":2}]}]}"
+        )),
+        "{json}"
+    );
+
+    let json = decode_response(
+        &decoded(DecodedContent::Slides(vec![(
+            "제목".to_string(),
+            vec!["하나".to_string(), "둘\"".to_string()],
+            "메모".to_string(),
+        )])),
+        &[],
+        "s.pptx",
+        9,
+        None,
+        None,
+    )
+    .unwrap();
+    assert!(
+        json.ends_with(concat!(
+            "\"itemCount\":1,\"warnings\":[\"앞 경고\"],\"slides\":[",
+            "{\"title\":\"제목\",\"bullets\":[\"하나\",\"둘\\\"\"],\"notes\":\"메모\"}]}"
+        )),
+        "{json}"
+    );
+}
