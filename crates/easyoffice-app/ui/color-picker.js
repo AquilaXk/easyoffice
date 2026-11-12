@@ -26,6 +26,9 @@
     ["#0066cc", "#0000cc", "#6600cc", "#cc00cc", "#cc0066", "#999999", "#000000"],
   ];
 
+  const VIEWPORT_MARGIN = 4;
+  const POPUP_GAP = 2;
+
   const ACTIVE_POPUP = new WeakMap();
   const OBSERVED_DOCS = new WeakSet();
 
@@ -115,10 +118,37 @@
     }, true);
   }
 
+  // Fixed position under the button, flipped above it when the panel would pass the bottom edge and
+  // clamped to the window sides. Reference: rhwp-studio `ui/toolbar.ts:505-510` (popup placed from
+  // the button's `getBoundingClientRect`) and `:808-810` (clamped to `window.innerWidth/innerHeight`).
+  function placePanel(anchor, size, viewport) {
+    const below = anchor.bottom + POPUP_GAP;
+    const flipped = below + size.height > viewport.height ? anchor.top - POPUP_GAP - size.height : below;
+    const maxLeft = viewport.width - size.width - VIEWPORT_MARGIN;
+    return {
+      left: Math.max(VIEWPORT_MARGIN, Math.min(anchor.left, maxLeft)),
+      top: Math.max(VIEWPORT_MARGIN, flipped),
+    };
+  }
+
+  // A `popover` panel sits in the top layer, so a dialog's overflow cannot clip it.
+  function showPanel(button, panel) {
+    panel.showPopover?.();
+    const size = panel.getBoundingClientRect();
+    const pos = placePanel(button.getBoundingClientRect(), size, { width: host.innerWidth, height: host.innerHeight });
+    panel.style.left = `${pos.left}px`;
+    panel.style.top = `${pos.top}px`;
+  }
+
   function createPopup(document, hostEl, button, panel) {
     observePopups(document);
+    panel.setAttribute("popover", "manual");
+    let shown = false;
     const setOpen = (open) => {
+      if (shown && !open) panel.hidePopover?.();
       panel.hidden = !open;
+      shown = open;
+      if (open) showPanel(button, panel);
       hostEl.classList.toggle("open", open);
       button.setAttribute("aria-expanded", String(open));
     };
@@ -186,5 +216,5 @@
     return { open: popup.open, close: popup.close };
   }
 
-  host.__EASYOFFICE_COLOR_PICKER__ = { setupColorPicker, RECENT_KEY, RECENT_LIMIT };
+  host.__EASYOFFICE_COLOR_PICKER__ = { setupColorPicker, RECENT_KEY, RECENT_LIMIT, placePanel };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

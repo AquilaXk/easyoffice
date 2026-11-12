@@ -464,6 +464,15 @@ input.sb-ls-select {
   box-shadow: var(--shadow-light);
 }
 
+/* Top-layer popover placed by color-picker.js (fixed, flipped at the window edge). */
+.eo-color-palette {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  overflow: visible;
+  color: var(--color-text);
+}
+
 .eo-color-palette:not([hidden]) {
   display: block;
 }

@@ -153,3 +153,35 @@ test("color-picker.js names the reference app as its source and is in the notice
   assert.match(source, /MIT/);
   assert.ok(readText(fileURLToPath(new URL("../THIRD_PARTY_NOTICES.md", import.meta.url))).includes("ui/color-picker.js"));
 });
+
+test("placePanel: below the button, flipped above at the bottom edge, clamped to the window sides", async () => {
+  const { host } = await openDoc();
+  const { placePanel } = host.__EASYOFFICE_COLOR_PICKER__;
+  const size = { width: 140, height: 200 };
+  const viewport = { width: 800, height: 600 };
+  assert.deepEqual(placePanel({ left: 100, top: 50, bottom: 72 }, size, viewport), { left: 100, top: 74 });
+  assert.deepEqual(placePanel({ left: 100, top: 500, bottom: 522 }, size, viewport), { left: 100, top: 298 }, "flips above");
+  assert.deepEqual(placePanel({ left: 760, top: 50, bottom: 72 }, size, viewport), { left: 656, top: 74 }, "right edge");
+  assert.deepEqual(placePanel({ left: -20, top: 2, bottom: 10 }, size, { width: 800, height: 100 }), { left: 4, top: 4 });
+});
+
+test("a dialog colour palette is a top-layer popover placed inside the window, not clipped by the dialog", async () => {
+  const { document, userClick, host } = await openDoc();
+  const { toggle, panel } = parts(document, "textcolor");
+  assert.equal(panel.getAttribute("popover"), "manual");
+  const shown = [];
+  panel.showPopover = () => shown.push("show");
+  panel.hidePopover = () => shown.push("hide");
+  host.innerWidth = 800;
+  host.innerHeight = 600;
+  toggle.getBoundingClientRect = () => ({ left: 300, top: 560, bottom: 582, right: 330 });
+  panel.getBoundingClientRect = () => ({ width: 160, height: 220 });
+  userClick(toggle);
+  assert.deepEqual(shown, ["show"]);
+  assert.equal(panel.style.left, "300px");
+  assert.equal(panel.style.top, "338px", "flipped above the button: the palette ends before the button");
+  userClick(toggle);
+  assert.deepEqual(shown, ["show", "hide"]);
+  const css = read("toolbar.css");
+  assert.match(css, /\.eo-color-palette\s*\{[^}]*position:\s*fixed/);
+});
