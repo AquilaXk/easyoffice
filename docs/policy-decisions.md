@@ -2984,6 +2984,39 @@
 - **Verified by** `node --test scripts/test-webui-find-core.mjs scripts/test-webui-find-replace.mjs scripts/test-webui-doc-link.mjs`, `cargo test -p easyoffice-formats --test rich_links`, `cargo test -p easyoffice-formats --lib link_command`, `cargo test -p easyoffice-app a_run_link`.
 - **Revisit when** 여러 문단에 걸친 링크, 표 칸 안의 링크, 링크 열기 동작(Ctrl+클릭)이 필요할 때.
 
+## PD-193. 시트 셀 숫자 서식: 서식 id·코드 표, 엔진 표시, 서식 메뉴와 셀 서식 대화상자
+
+- **Status** Implemented (QA 요청 2026-11-12). `easyoffice-formats`의 `sheet_numfmt.rs`·`ods_numfmt.rs`·`xlsx_styles.rs`·`ods_styles.rs`, `easyoffice-sheet`의 `text_format.rs`(`format_cell_value`), `easyoffice-app`의 `sheet_format_ipc.rs`·`convert_open.rs`·`convert_structured.rs`, `ui/sheet-numfmt.js`·`sheet-numfmt-display.js`·`sheet-numfmt-ui.js`·`sheet-format.js`·`sheet-grid.js`.
+- **Context** 셀 서식은 굵게·기울임·밑줄·취소선·크기뿐이었고 XLSX는 `numFmtId="0"` 고정이었습니다. 서식 엔진(`text_format`)은 TEXT 함수에만 연결돼 있었습니다. 참조할 오픈소스 오피스 엔진(PD-192)의 숫자 서식 로직을 가져오되 화면은 참조 앱·rhwp-studio 틀을 따르고 설명 문구는 쓰지 않습니다.
+- **Decision (`PD-193`)**
+  1. **모델**: `CellStyle.num_fmt`는 16비트 id입니다. `0` 일반, `1..164` ECMA-376 내장 id, `164 + n`은 시트의 `SheetStyling.num_fmts[n]`(사용자 코드 표). 같은 코드는 한 항목을 공유하고, 한 통합 문서의 시트는 표를 `Arc`로 같이 씁니다. 셀은 문자열을 들지 않고 `StyleKey`의 8~23비트에 id가 들어갑니다.
+  2. **파일**: XLSX는 `numFmts`(`styleSheet`의 첫 요소)와 `xf`의 `numFmtId`를 읽고 씁니다. 코드가 내장과 같으면 내장 id로 쓰고, 로케일 따라 뜻이 달라지는 id(14, 27~36, 50~58)는 읽기만 하고(한국어 기본) 쓸 때는 사용자 코드로 씁니다. ODS는 `number:number-style`·`percentage`·`date`·`time`·`text-style`로 쓰고 전체 코드를 `eo:format-code`에 함께 둡니다(재열기는 그 속성 우선, 다른 프로그램 파일은 요소에서 코드를 복원). 분수·`[h]` 경과 시간·천 단위 축소 코드는 요소로 못 나타내 숫자 스타일 + 속성으로만 남깁니다. XLS는 현재 셀 서식을 전혀 읽고 쓰지 않으므로(PD-089) 숫자 서식도 다루지 않습니다.
+  3. **표시**: 셀 값 표시는 `text_format`을 그대로 씁니다(`format_cell_value`: 숫자는 숫자 구역, 글자는 글자 구역, `@`만 있는 코드는 입력한 글자 그대로). 페이지는 `evaluate_sheet`의 `sessionAction:"format"`(명령 수는 15개 그대로)에 코드별 값 목록을 보내 `{t,c}`(글자·구역 색)를 받고, (코드, 저장 값)별로 캐시합니다. 응답 전의 셀은 일반 표시로 그려지고 응답이 오면 다시 그립니다. 창 밖 위·아래 60행의 서식 셀은 미리 물어 스크롤 중 깜빡임을 없앱니다. 서식 코드는 한 번만 컴파일(엔진 캐시)되고 셀마다 다시 파싱하지 않습니다. 렌더 창의 셀만 계산합니다.
+  4. **저장·열기 payload**: 저장 `sheets[].numFmts`(코드 목록)와 셀 `style.nf`(1부터), 열기 응답도 같은 모양입니다. 사용 중인 코드만 목록에 들어가고 내장 id도 코드 문자열로 풀어 보내므로 페이지에 id 표가 없습니다.
+  5. **상한**: 코드 255바이트, 구역 4개, 제어 문자 없음, 시트당 사용자 코드 512개. 파일을 열 때 넘는 코드와 정의 없는 내장 id는 일반 서식으로 읽고 개수를 경고로 알립니다. 저장 payload와 대화상자는 넘는 코드를 거부합니다. `format` 요청은 코드 256개·값 5만 개·값 한 개 512바이트까지이고 코드가 한도를 넘으면 `{bad:true}`로 답해 일반 표시로 남깁니다. 
+  6. **화면**: 서식 메뉴(시트 창)에 `표시 형식` 하위 메뉴(일반·숫자·통화·회계·백분율·날짜·시간·텍스트, 소수 자릿수 늘리기·줄이기)와 `셀 서식…`, 도구줄(시트 창)에 통화·백분율·소수 자릿수 줄이기·늘리기 단추를 둡니다. 프리셋 순서·코드, 소수 자릿수 규칙, 통화 기호, 한국어 날짜·시간 목록은 참조 엔진의 것입니다. 대화상자(`tool-dialog` 틀)는 분류, 분류별 칸(소수 자릿수·천 단위·통화 기호·음수·형식 목록), 서식 코드, 표본, 확인·취소만 있고 상태 줄(`sheet-numfmt-status`)은 오류만 보입니다. 서식 적용은 실행 취소 한 단계입니다.
+  7. **편집**: 칸을 편집하면 저장 값(원문)이 보이고, 확정 전까지 서식 표시는 보이지 않습니다. 서식은 셀 값을 바꾸지 않습니다.
+- **재사용 판단 (구현 원칙 3단계)** (1) 서식 코드를 해석하는 라이브러리는 엔진이 무의존이라 쓰지 않았습니다. (2) 이미 있는 `text_format`(TEXT 함수용)을 표시 경로로 재사용했습니다. (3) 소수 자릿수 편집·프리셋·통화 형식·날짜 목록만 참조 엔진에서 이식했습니다(`THIRD_PARTY_NOTICES.md`). 내장 id 표는 ECMA-376 표를 따랐습니다.
+- **Why** id + 공유 표는 10만 칸이 같은 서식을 가질 때 문자열을 하나만 두고, 표시는 엔진 한 곳이 맡아 TEXT 함수와 셀 표시가 같은 결과를 냅니다. 한도 초과를 읽을 때는 일반 표시로 대체하고(데이터는 그대로) 쓸 때는 거부해 사용자 서식이 조용히 사라지지 않게 했습니다.
+- **측정** 릴리스 빌드, 10만 칸(5,000행 x 20열, 코드 3개), 중앙값. 전은 이 변경 전 main(서식 payload는 무시됨).
+  | 항목 | 전 | 후 |
+  |---|---|---|
+  | 엔진 저장(서식 없음) | 66.8 ms | 68.5 ms |
+  | 엔진 저장(10만 칸 서식) | 74.0 ms(서식 무시) | 92 ms |
+  | 엔진 열기(서식 없음) | 17.6 ms | 17.7 ms |
+  | 엔진 열기(10만 칸 서식) | 17.6 ms(서식 무시) | 33 ms |
+  | 표시 계산 2,000칸 / 5만 값 | - | 0.6 ms / 14.5 ms |
+  | 페이지 열기+첫 그리기 | 179 ms | 240 ms |
+  | 스크롤 30걸음(바쁜 시간) | 115 ms | 190 ms |
+  | 스크롤 한 걸음 벽시계 | 16 ms | 16 ms |
+  | 전체 칸에 프리셋 적용 | - | 400 ms(스크립트 40 ms) |
+  | 소수 자릿수 늘리기(10만 칸) | - | 480 ms |
+  서식 저장 id를 시트마다 한 번만 통합 id로 바꾸는 메모(`IdMemo`)로 저장 103 ms를 92 ms로 줄였고, 같은 서식의 스타일 객체를 공유(동결)하고 상태 해시를 객체별로 한 번만 계산해 페이지 열기 315 ms를 240 ms로, 힙 60 MB를 38 MB로 줄였습니다. 응답 중인 값을 다시 묻지 않게 해 스크롤 중 요청을 30걸음에 120회에서 25회로 줄였습니다.
+- **Trade-offs** 서식 셀의 첫 그리기는 엔진 응답을 기다립니다(앞 60행·뒤 60행 선요청으로 스크롤은 대부분 가립니다). 서식이 있는 칸 10만 개는 열기·저장에 각각 약 15~25 ms가 더 듭니다(굵게 등 다른 칸 서식과 같은 경로). 인쇄·PDF 내보내기·다른 형식 변환은 아직 일반 표시입니다. 입력 때 서식을 자동으로 붙이는 동작(예: `12%` 입력)은 하지 않습니다.
+- **Alternatives rejected** 페이지에 JS 서식기를 따로 두기(같은 코드를 두 구현이 해석), 셀마다 코드 문자열 보관(10만 칸에서 메모리·저장 비용), 한도를 넘는 코드를 읽을 때 거부(파일 전체가 안 열림).
+- **Verified by** `cargo test -p easyoffice-formats --test sheet_numfmt_roundtrip`, `cargo test -p easyoffice-sheet --test sheet_number_format_codes`, `cargo test -p easyoffice-app`(`sheet_format_ipc`, `structured_sheet_export`, `convert_open`), `node --test scripts/test-webui-sheet-numfmt.mjs`, 측정은 `cargo test --release -p easyoffice-app --test numfmt_bench -- --ignored --nocapture`와 `node scripts/bench-webui.mjs --only numfmt`.
+- **Revisit when** 인쇄·PDF 내보내기에 서식을 적용할 때, XLS가 셀 서식을 읽고 쓸 때, 입력 시 서식 자동 지정이 필요할 때.
+
 ## PD-195. 수식 함수 묶음 A: 조회·참조 6종, 데이터베이스 12종, 행렬 4종
 
 - **Status** Implemented (`crates/easyoffice-sheet/src/functions_lookup_ref.rs`, `functions_db.rs`, `functions_matrix.rs`; 등록 표 `functions.rs`의 `CANONICAL_FUNCTIONS`; 시험 `tests/sheet_univer_functions_a.rs`, 측정 `tests/sheet_univer_functions_a_bench.rs`)
