@@ -202,6 +202,12 @@ pub const ITEMS: &[MenuItemSpec] = &[
         "studio-cmd:doc-mod-toc",
     ),
     item(
+        "insert:toc-update",
+        "목차 업데이트",
+        None,
+        "studio-cmd:doc-mod-toc-update",
+    ),
+    item(
         "insert:mailmerge",
         "메일 머지 치환",
         None,

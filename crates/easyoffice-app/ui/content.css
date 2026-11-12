@@ -299,6 +299,19 @@
 /* Hyperlinks of the document editor (doc-link.js): fixed colours like the page itself. */
 #doc-editor a[data-eo-link] { color: #0563c1; text-decoration: underline; }
 
+/* Table of contents of the document editor (doc-toc.js): fixed colours like the page itself; entries indent by heading level. */
+#doc-editor .eo-doc-toc { margin: 10px 0; padding: 10px 12px; background: #f3f4f6; border-left: 3px solid #0563c1; color: #111827; font-size: 13px; }
+#doc-editor .eo-doc-toc p { margin: 2px 0; }
+#doc-editor .eo-doc-toc p[data-eo-toc="0"] { margin-bottom: 6px; font-weight: 600; }
+#doc-editor .eo-doc-toc a { color: inherit; text-decoration: none; cursor: pointer; }
+#doc-editor .eo-doc-toc a:hover { text-decoration: underline; }
+#doc-editor .eo-doc-toc a:focus-visible { outline: 2px solid #0563c1; outline-offset: 2px; }
+#doc-editor .eo-doc-toc p[data-eo-toc="2"] { padding-left: 1.2em; }
+#doc-editor .eo-doc-toc p[data-eo-toc="3"] { padding-left: 2.4em; }
+#doc-editor .eo-doc-toc p[data-eo-toc="4"] { padding-left: 3.6em; }
+#doc-editor .eo-doc-toc p[data-eo-toc="5"] { padding-left: 4.8em; }
+#doc-editor .eo-doc-toc p[data-eo-toc="6"] { padding-left: 6em; }
+
 /* Find matches (find-replace.js) and printed document / sheet text: fixed colours like the page itself. */
 ::highlight(eo-find-match) { background-color: #ffe38a; color: #111827; }
 ::highlight(eo-find-current) { background-color: #ff9632; color: #111827; }

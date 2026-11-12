@@ -35,7 +35,7 @@
 
   const sheetRowCounts = {};
   let workspaceSession = null;
-  let docRunsUi = null, docLink = null, hwpHost = null, hwpSession = null, windowBridge = null;
+  let docRunsUi = null, docLink = null, docToc = null, hwpHost = null, hwpSession = null, windowBridge = null;
   const icons = host.__EASYOFFICE_ICONS__;
 
   function chainWorkspaceQueue(opFn) {
@@ -92,7 +92,7 @@
     document, invokeIpc, docTabStore, sheetDataStore, sheetRowCounts, slideDeckState,
     localRibbonState, ribbonCatalog, sheetStoreHelpers, extractEditableDocumentText,
     getSheetController: () => sheetController,
-    getWorkspacePanels: () => workspacePanels, getDocRuns: () => docRunsUi, getDocLink: () => docLink,
+    getWorkspacePanels: () => workspacePanels, getDocRuns: () => docRunsUi, getDocLink: () => docLink, getDocToc: () => docToc,
     getActiveModule: () => activeModule, getHwpHost: () => hwpHost,
     getWindowBridge: () => windowBridge,
     setActiveModule: (next) => { activeModule = next; },
@@ -114,6 +114,11 @@
   });
   docLink = host.__EASYOFFICE_CREATE_DOC_LINK__({
     document, env: host, getRange: () => docRunsUi.currentRange(), withUndo: docRunsUi.withUndo, setFeedback: (text) => setStatusFeedback(text),
+  });
+
+  docToc = host.__EASYOFFICE_CREATE_DOC_TOC__({
+    document, env: host, getRange: () => docRunsUi.currentRange(), withUndo: docRunsUi.withUndo, setFeedback: (text) => setStatusFeedback(text),
+    runCommand: (levels) => ribbonHistory.executeTrackedRibbonCommand("doc-mod-toc", { toc: { levels } }),
   });
 
   sheetController = host.__EASYOFFICE_CREATE_SHEET_CONTROLLER__({
@@ -310,6 +315,7 @@
         }
       }
     }
+    if (activeModule === "DOC") items.push({ id: "doc-mod-toc-update", module: "DOC", title: "목차 업데이트", shortcut: "", searchKey: "입력 문서 목차 업데이트 toc" });
     if (activeModule === "SHEET") items.push(...host.__EASYOFFICE_NATIVE_MENU_TABLE__.sheetMenuPaletteItems(document));
     items.push({ id: "bench-run", module: activeModule, title: "문서 엔진 성능 진단 실행", shortcut: "", searchKey: "성능 문서 엔진 성능 진단 실행 bench-run" });
     return items;
@@ -937,6 +943,7 @@
     setupDocTableAndSheetTabHandlers();
     docRunsUi.bind();
     docLink.bind();
+    docToc.bind();
     setupSheetAndConverterHandlers();
     setupSlideAndPdfHandlers();
     setupSmartAndSecurityHandlers();

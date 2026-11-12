@@ -288,6 +288,7 @@ const INSERT_DOC: MenuSpec = menu(
         "insert:link",
         S,
         "insert:toc",
+        "insert:toc-update",
         "insert:mailmerge",
     ],
 );

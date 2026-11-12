@@ -318,6 +318,7 @@
         Object.assign(block, cur.ctx.layout);
         if (cur.ctx.align) block.align = cur.ctx.align;
         if (cur.ctx.heading) block.heading = cur.ctx.heading;
+        if (cur.ctx.toc !== undefined) block.toc = cur.ctx.toc;
         if (cur.ctx.list) block.list = cur.ctx.list;
         blocks.push(block);
       }
@@ -364,7 +365,13 @@
       if (tbl.rows.length > 0) blocks.push(tbl);
     }
 
-    function blockContext(node, tag, ctx) {
+    // The table-of-contents role of a block (`doc-toc.js`): 0 is the title, 1-6 an entry level.
+  function tocRole(node) {
+    const role = Number(node.dataset?.eoToc);
+    return node.dataset?.eoToc !== undefined && Number.isInteger(role) ? role : undefined;
+  }
+
+  function blockContext(node, tag, ctx) {
       const headingMatch = HEADING_TAG_RE.exec(tag);
       const listParent = tag === "LI" ? node.parentElement : null;
       let nextList = ctx.list;
@@ -372,6 +379,7 @@
       return {
         align: normalizeAlign(node.style?.textAlign) || ctx.align,
         heading: headingMatch ? Number(headingMatch[1]) : ctx.heading,
+        toc: tocRole(node) ?? ctx.toc,
         list: nextList,
         layout: LAYOUT_TAGS.has(tag) ? paragraphLayout(node, baseLineHeight) : ctx.layout,
       };

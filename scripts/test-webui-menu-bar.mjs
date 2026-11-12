@@ -104,6 +104,12 @@ for (const mod of MODULES) {
       document.getElementById("pdf-highlight-text").value = "문구";
       document.getElementById("btn-pdf-highlight-apply").click();
     }
+    // The table of contents asks for its levels first; the dialog's 확인 runs it (a document without headings keeps the dialog open).
+    if (mod === "DOC") {
+      const editor = document.getElementById("doc-editor");
+      editor.insertBefore(Object.assign(document.createElement("h1"), { textContent: "개요" }), editor.firstChild);
+      document.getElementById("btn-doc-toc-apply").click();
+    }
     await flushAsyncTurns(4 * clicked.size);
     // `view-theme` runs the theme toggle itself (the menu item behaves like the ribbon button).
     const expected = menuIdsOf(catalog, mod).filter((id) => !id.endsWith("-view-theme"));

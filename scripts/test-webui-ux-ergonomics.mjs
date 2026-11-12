@@ -60,9 +60,12 @@ test("DOC and HWP module-specific ribbon tools build real DOM structures and dir
 
   userClick(commandItem(document, "doc-mod-toc"));
   await flushAsyncTurns();
+  assert.equal(document.getElementById("doc-toc-dialog").open, true, "the command asks for the levels first");
+  document.getElementById("btn-doc-toc-apply").click();
+  await flushAsyncTurns();
   const tocNav = docEditor.querySelector(".eo-doc-toc");
   assert.ok(tocNav);
-  assert.ok(tocNav.querySelectorAll("li").length >= 3);
+  assert.ok(tocNav.querySelectorAll("p[data-eo-toc]").length >= 3, "the title and the entries of the demo headings");
 
   userClick(commandItem(document, "doc-mod-footnote"));
   await flushAsyncTurns();

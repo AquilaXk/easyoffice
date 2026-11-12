@@ -63,6 +63,7 @@
     "insert:symbol": "studio-cmd:mod-symbol",
     "insert:link": "studio-cmd:insert-link",
     "insert:toc": "studio-cmd:doc-mod-toc",
+    "insert:toc-update": "studio-cmd:doc-mod-toc-update",
     "insert:mailmerge": "studio-cmd:doc-mod-mailmerge",
     "insert:field": "studio-cmd:hwp-mod-field",
     "format:bold": "studio-cmd:home-bold",

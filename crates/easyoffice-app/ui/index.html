@@ -107,6 +107,7 @@
               <div class="md-item" data-studio-menu-cmd="insert-link" role="menuitem" tabindex="-1"><span class="md-label">하이퍼링크</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="doc-mod-toc" role="menuitem" tabindex="-1"><span class="md-label">자동 목차 생성</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="doc-mod-toc-update" role="menuitem" tabindex="-1"><span class="md-label">목차 업데이트</span></div>
               <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="doc-mod-mailmerge" role="menuitem" tabindex="-1"><span class="md-label">메일 머지 치환</span></div>
               <div class="md-item" data-kinds="HWP" data-studio-menu-cmd="hwp-mod-field" role="menuitem" tabindex="-1"><span class="md-label">누름틀 필드 삽입</span></div>
             </div>
@@ -910,6 +911,27 @@
       </div>
     </dialog>
 
+    <dialog id="doc-toc-dialog" class="tool-dialog" aria-labelledby="doc-toc-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="doc-toc-dialog-title">목차</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row">
+            <label class="dialog-label" for="doc-toc-levels">표시 수준</label>
+            <select id="doc-toc-levels" class="sb-combo dialog-select">
+              <option value="1">1수준</option>
+              <option value="2">2수준</option>
+              <option value="3" selected>3수준</option>
+            </select>
+          </div>
+          <div class="dialog-status-row"><span id="doc-toc-status" class="dialog-status" role="status" aria-live="polite"></span></div>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-doc-toc-apply" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
     <dialog id="smart-dialog" class="tool-dialog" aria-labelledby="smart-dialog-title">
       <div class="dialog-wrap">
         <div class="dialog-title"><span id="smart-dialog-title">문장 진단 및 요약</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
@@ -1226,6 +1248,7 @@
     <script src="./doc-runs.js"></script>
     <script src="./doc-runs-ui.js"></script>
     <script src="./doc-link.js"></script>
+    <script src="./doc-toc.js"></script>
     <script src="./save-payload.js"></script>
     <script src="./desktop-bridge.js"></script>
     <script src="./home-screen.js"></script>

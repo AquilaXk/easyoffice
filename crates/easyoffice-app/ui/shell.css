@@ -129,6 +129,9 @@
 #doc-link-dialog { width: min(420px, calc(100vw - 32px)); }
 #doc-link-dialog .dialog-label { min-width: 64px; }
 #doc-link-dialog .dialog-text-input { flex: 1; min-width: 0; }
+/* Table of contents dialog (doc-toc.js): the status line has the find dialog's metrics. */
+#doc-toc-dialog { width: min(360px, calc(100vw - 32px)); }
+#doc-toc-dialog .dialog-label { min-width: 64px; }
 .dialog-status-row { min-height: 18px; line-height: 18px; text-align: right; }
 .dialog-status { color: var(--color-text-secondary); font-size: var(--font-size-sm); }
 /* After every display rule above, so `hidden` wins at equal specificity. */

@@ -831,25 +831,6 @@
       return true;
     }
 
-    function docEffectToc(docEditor, summary) {
-      const headings = Array.from(docEditor.querySelectorAll("h1, h2, h3"))
-        .map((h) => (h.textContent || "").trim())
-        .filter(Boolean);
-      const nav = docEditor.querySelector(".eo-doc-toc") || document.createElement("nav");
-      nav.className = "eo-doc-toc";
-      nav.dataset.docToc = "true";
-      const titleP = document.createElement("p");
-      titleP.textContent = "[자동 목차 생성 (" + summary + ")]";
-      const ol = document.createElement("ol");
-      for (const hText of headings.length > 0 ? headings : ["1. 문서 개요"]) {
-        const li = document.createElement("li");
-        li.textContent = hText;
-        ol.appendChild(li);
-      }
-      nav.replaceChildren(titleP, ol);
-      if (!nav.parentElement) insertBeforeDocFooter(docEditor, nav);
-    }
-
     function docEffectFootnote(docEditor, summary) {
       const idx = docEditor.querySelectorAll(".eo-doc-footnote").length + 1;
       const aside = document.createElement("aside");
@@ -900,7 +881,6 @@
     }
 
     const DOC_MODULE_EFFECTS = {
-      "doc-mod-toc": docEffectToc,
       "doc-mod-footnote": docEffectFootnote,
       "doc-mod-mailmerge": docEffectMailMerge,
       "hwp-mod-header": docEffectHwpHeader,

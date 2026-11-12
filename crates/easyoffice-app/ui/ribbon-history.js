@@ -66,6 +66,7 @@
       getWorkspacePanels,
       getDocRuns,
       getDocLink,
+      getDocToc,
       getActiveModule,
       getHwpHost,
       setActiveModule,
@@ -433,6 +434,14 @@
       workspacePanels.renderModuleOutline(getActiveModule());
     }
 
+    // The dialog's levels travel with the command (`options.toc`); the block is made in the page like the other editor effects.
+    function docEffectToc({ options }) {
+      const workspacePanels = getWorkspacePanels();
+      getDocToc().applyLevels(options.toc.levels);
+      workspacePanels.computeSmartStats();
+      workspacePanels.renderModuleOutline(getActiveModule());
+    }
+
     function docEffectInsertNote({ docEditor, cmdId, execRes }) {
       const workspacePanels = getWorkspacePanels();
       const p = document.createElement("p");
@@ -466,7 +475,7 @@
 
     const DOC_EXACT_EFFECTS = {
       "hwp-mod-border": docEffectBorder,
-      "doc-mod-toc": docEffectModuleSpecific,
+      "doc-mod-toc": docEffectToc,
       "doc-mod-footnote": docEffectModuleSpecific,
       "doc-mod-mailmerge": docEffectModuleSpecific,
       "hwp-mod-header": docEffectModuleSpecific,
@@ -499,7 +508,7 @@
       return DOC_EXACT_EFFECTS[cmdId] || DOC_SUFFIX_EFFECTS[commandSuffixOf(cmdId)] || null;
     }
 
-    function applyDocEditorRibbonEffect(docEditor, cmdId, execRes) {
+    function applyDocEditorRibbonEffect(docEditor, cmdId, execRes, options) {
       if (!docEditor) return false;
       const targetEl = getWorkspacePanels().getFocusedDocBlock(docEditor);
       const runProp = DOC_RUN_COMMANDS.find(([suffix]) => cmdId.endsWith(suffix));
@@ -510,7 +519,7 @@
       }
       const runEffect = docEditorEffectFor(cmdId);
       if (!runEffect) return false;
-      runEffect({ docEditor, targetEl, cmdId, execRes });
+      runEffect({ docEditor, targetEl, cmdId, execRes, options });
       return true;
     }
 
@@ -608,19 +617,19 @@
     }
 
     // Document pane commands; true when the doc editor handled the command.
-    function applyDocumentPaneEffect(cmdId, execRes) {
+    function applyDocumentPaneEffect(cmdId, execRes, options) {
       const curMod = getActiveModule();
       const docEditor = document.getElementById("doc-editor");
       const workspacePanels = getWorkspacePanels();
       const isConvDocCommand = cmdId.startsWith("document-") || cmdId.startsWith("doc-mod-");
       if (curMod === "CONV" && isConvDocCommand) {
         workspacePanels.restoreDocTabState("DOC");
-        if (applyDocEditorRibbonEffect(docEditor, cmdId, execRes)) {
+        if (applyDocEditorRibbonEffect(docEditor, cmdId, execRes, options)) {
           workspacePanels.saveDocTabStateForModule("DOC");
           return true;
         }
       }
-      if ((curMod === "DOC" || curMod === "HWP") && applyDocEditorRibbonEffect(docEditor, cmdId, execRes)) {
+      if ((curMod === "DOC" || curMod === "HWP") && applyDocEditorRibbonEffect(docEditor, cmdId, execRes, options)) {
         workspacePanels.saveActiveDocTabState();
         return true;
       }
@@ -839,7 +848,7 @@
         viewEffect(cmdId, execRes, preparedEffect);
         return;
       }
-      if (applyDocumentPaneEffect(cmdId, execRes)) return;
+      if (applyDocumentPaneEffect(cmdId, execRes, options)) return;
       if (cmdId.startsWith("sheet-")) {
         applySheetRibbonEffect(cmdId, execRes, preparedEffect);
         return;
@@ -876,7 +885,7 @@
     }
 
     // 대화상자를 여는 명령은 상태 줄을 바꾸지 않는다.
-    const DIALOG_COMMANDS = new Set(["sheet-mod-pivot", "sheet-mod-condfmt", "pdf-mod-highlight"]);
+    const DIALOG_COMMANDS = new Set(["sheet-mod-pivot", "sheet-mod-condfmt", "pdf-mod-highlight", "doc-mod-toc"]);
 
     function executeTrackedRibbonCommand(cmdId, options = {}) {
       // The highlight command asks for its phrase, kind and color first; the dialog's 확인 runs it again with them.
@@ -884,6 +893,9 @@
         getWorkspacePanels().openPdfHighlightDialog();
         return Promise.resolve(null);
       }
+      // The table of contents asks for its levels first and the dialog's 확인 runs the command with them; the update only rebuilds the page's block.
+      if (cmdId === "doc-mod-toc" && !options.toc) return Promise.resolve(getDocToc().open());
+      if (cmdId === "doc-mod-toc-update") return Promise.resolve(getDocToc().update());
       // The link dialog opens at once, while the selection is still in the editor; the command itself still runs.
       if (cmdId === "document-insert-link") getDocLink().open();
       return enqueueWorkspaceHistoryOp(async () => {

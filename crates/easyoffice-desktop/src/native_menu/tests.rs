@@ -306,6 +306,7 @@ fn a_kind_does_not_hold_the_items_of_other_kinds() {
             kind,
             &[
                 "insert:toc",
+                "insert:toc-update",
                 "insert:mailmerge",
                 "insert:footnote",
                 "table:doc-formula",

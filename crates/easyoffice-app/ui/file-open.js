@@ -197,10 +197,29 @@
     return elSpec("table", [elSpec("tbody", trs)], {}, { class: "doc-inline-table" });
   }
 
+  // One entry or title paragraph of a table-of-contents block; entries are links to their headings (`doc-toc.js`).
+  function tocParagraphSpec(block) {
+    const inline = runSpecs(block.runs);
+    const p = elSpec("p", block.toc === 0 ? inline : [elSpec("a", inline, {}, { href: "#" })]);
+    p.data.eoToc = String(block.toc);
+    return p;
+  }
+
   function buildEditorNodes(blocks) {
     const nodes = [];
     let openList = null;
+    let openToc = null;
     (blocks || []).forEach((block) => {
+      if (block.type === "paragraph" && Number.isInteger(block.toc)) {
+        if (!openToc) {
+          openToc = elSpec("nav", [], {}, { class: "eo-doc-toc", "data-doc-toc": "true", contenteditable: "false" });
+          nodes.push(openToc);
+        }
+        openList = null;
+        openToc.children.push(tocParagraphSpec(block));
+        return;
+      }
+      openToc = null;
       if (block.type === "table") {
         openList = null;
         nodes.push(tableSpec(block));
