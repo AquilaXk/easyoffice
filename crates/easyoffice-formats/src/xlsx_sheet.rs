@@ -14,6 +14,7 @@ use std::collections::HashMap;
 
 use crate::decode_budget::DecodeBudget;
 use crate::rtf_xml_helpers::{format_col_letters, parse_a1_zero_based};
+use crate::sheet_styling::xlsx_layout::{add_run, has_room, parse_merge};
 use crate::sheet_styling::xlsx_styles::xlsx_width_to_px;
 use crate::sheet_styling::{CellStyle, SheetStyling, MAX_STYLED_CELLS};
 use crate::xml_stream::{unescape_cow, Attrs, XmlEvent, XmlReader};
@@ -178,6 +179,13 @@ fn cell_position(
     }
 }
 
+/// Whether the boolean attribute `name` (`1`, `true`) is set.
+fn attrs_flag(attrs: &Attrs<'_>, name: &str) -> bool {
+    attrs
+        .iter_raw()
+        .any(|(n, v)| plain_name(n) == name && matches!(&*unescape_cow(v), "1" | "true"))
+}
+
 /// What the decoded-budget error names when a cell's copy of a string or formula is refused.
 const CELL_BUDGET_WHAT: &str = "XLSX 셀 텍스트";
 
@@ -212,6 +220,9 @@ impl<'s> SheetScanner<'s> {
         }
         self.next_row = self.row + 1;
         self.next_col = 0;
+        if self.want_styling && has_room(&self.styling) && attrs_flag(attrs, "hidden") {
+            add_run(&mut self.styling.hidden_rows, self.row, self.row);
+        }
         Ok(())
     }
 
@@ -277,6 +288,18 @@ impl<'s> SheetScanner<'s> {
         self.styling.cells.insert(at, *style);
     }
 
+    /// A `mergeCell` becomes a merged range.
+    fn record_merge(&mut self, attrs: &Attrs<'_>) {
+        if !has_room(&self.styling) {
+            return;
+        }
+        let merge = attrs
+            .iter_raw()
+            .find(|(name, _)| plain_name(name) == "ref")
+            .and_then(|(_, value)| parse_merge(&unescape_cow(value)));
+        self.styling.merges.extend(merge);
+    }
+
     /// A `col` element with a custom width becomes a column width in CSS pixels.
     fn record_column(&mut self, attrs: &Attrs<'_>) {
         let (mut custom, mut min, mut max, mut width) = (None, None, None, None);
@@ -290,13 +313,20 @@ impl<'s> SheetScanner<'s> {
             };
             slot.get_or_insert_with(|| unescape_cow(value));
         }
-        if matches!(custom.as_deref(), None | Some("0" | "false")) {
-            return;
-        }
         let parse = |v: Option<Cow<'_, str>>| v?.parse::<u32>().ok();
         let (Some(min), Some(max)) = (parse(min), parse(max)) else {
             return;
         };
+        if min >= 1 && max >= min && attrs_flag(attrs, "hidden") {
+            add_run(
+                &mut self.styling.hidden_cols,
+                min - 1,
+                max.min(OoxmlCodec::MAX_XLSX_COLS) - 1,
+            );
+        }
+        if matches!(custom.as_deref(), None | Some("0" | "false")) {
+            return;
+        }
         let Some(width) = width.and_then(|w| w.parse::<f64>().ok()) else {
             return;
         };
@@ -492,6 +522,10 @@ pub(crate) fn scan_worksheet(
             } if want_styling => {
                 scanner.record_column(attrs);
             }
+            XmlEvent::Start {
+                name: "mergeCell",
+                ref attrs,
+            } if want_styling => scanner.record_merge(attrs),
             XmlEvent::End("c") => {
                 if let Some(done) = cell.take() {
                     scanner.finish_cell(done)?;

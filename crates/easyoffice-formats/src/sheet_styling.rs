@@ -18,6 +18,8 @@ pub(crate) mod ods_styles;
 pub(crate) mod sheet_numfmt;
 #[path = "sheet_rules.rs"]
 pub(crate) mod sheet_rules;
+#[path = "xlsx_layout.rs"]
+pub(crate) mod xlsx_layout;
 #[path = "xlsx_sheet.rs"]
 pub(crate) mod xlsx_sheet;
 #[path = "xlsx_styles.rs"]
@@ -25,6 +27,7 @@ pub(crate) mod xlsx_styles;
 
 pub use sheet_numfmt::*;
 pub use sheet_rules::*;
+pub use xlsx_layout::{run_total, MAX_HIDDEN_ROWS, MAX_MERGES};
 
 use crate::{DocumentFormat, EasyOfficeError, OdfCodec, OoxmlCodec};
 
@@ -157,11 +160,21 @@ pub struct SheetStyling {
     pub num_fmts: Arc<Vec<String>>,
     /// Number formats a reader replaced with General because they broke a bound (PD-193).
     pub num_fmts_rejected: u32,
+    /// Merged ranges (each more than one cell).
+    pub merges: Vec<CellBox>,
+    /// Hidden rows and columns as sorted, disjoint, zero-based inclusive runs.
+    pub hidden_rows: Vec<(u32, u32)>,
+    pub hidden_cols: Vec<(u32, u32)>,
 }
 
 impl SheetStyling {
     pub fn is_empty(&self) -> bool {
-        self.cells.is_empty() && self.columns.is_empty() && self.rules.is_empty()
+        self.cells.is_empty()
+            && self.columns.is_empty()
+            && self.rules.is_empty()
+            && self.merges.is_empty()
+            && self.hidden_rows.is_empty()
+            && self.hidden_cols.is_empty()
     }
 }
 

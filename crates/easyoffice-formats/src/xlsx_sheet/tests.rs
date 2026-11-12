@@ -441,3 +441,17 @@ fn measure_one_pass_against_the_substring_scanner() {
         xml.len()
     );
 }
+
+#[test]
+fn hidden_rows_and_columns_and_merges_are_read() {
+    let xml = r#"<worksheet><cols><col min="2" max="3" width="9" hidden="true"/><col min="5" max="5" width="12" customWidth="1"/></cols><sheetData><row r="1"><c r="A1"><v>1</v></c></row><row r="2" hidden="1"><c r="A2"><v>2</v></c></row><row r="3" hidden="0"/><row r="4" hidden="1"/></sheetData><mergeCells count="3"><mergeCell ref="A1:C1"/><mergeCell ref="B5"/><mergeCell ref="x"/></mergeCells></worksheet>"#;
+    let table = SharedStrings::from_strings(&[]);
+    let scan = scan_worksheet(xml, &table, &[], true, &mut DecodeBudget::new()).unwrap();
+    assert_eq!(scan.styling.hidden_rows, vec![(1, 1), (3, 3)]);
+    assert_eq!(scan.styling.hidden_cols, vec![(1, 2)]);
+    assert_eq!(scan.styling.merges.len(), 1);
+    assert_eq!(scan.styling.merges[0].to_a1(), "A1:C1");
+    assert_eq!(scan.styling.columns.len(), 1);
+    let none = scan_worksheet(xml, &table, &[], false, &mut DecodeBudget::new()).unwrap();
+    assert!(none.styling.is_empty());
+}

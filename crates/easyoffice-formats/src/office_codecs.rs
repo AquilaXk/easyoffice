@@ -4,8 +4,9 @@ pub use crate::rtf_xml_helpers::*;
 use crate::sheet_styling::sheet_rules::xlsx_rules::{
     parse_dxf_styles, parse_worksheet_rules, rules_xml,
 };
+use crate::sheet_styling::xlsx_layout::{layout_cols_xml, merge_cells_xml, run_contains};
 use crate::sheet_styling::xlsx_sheet::{read_shared_strings, scan_worksheet, SharedStrings};
-use crate::sheet_styling::xlsx_styles::{cols_xml, parse_cell_xf_styles, XfStyles, XlsxStyleTable};
+use crate::sheet_styling::xlsx_styles::{parse_cell_xf_styles, XfStyles, XlsxStyleTable};
 use crate::sheet_styling::{IdMemo, SheetStyling};
 use crate::{EasyOfficeError, XmlSanitizer, ZipArchiveCodec, ZipSecurityPolicy};
 use std::sync::Arc;
@@ -223,6 +224,11 @@ fn group_cells_by_row<'a>(
                 rows_map.entry(row).or_default().push((col, blank));
             }
         }
+        for &(start, end) in &st.hidden_rows {
+            for row in start..=end {
+                rows_map.entry(row).or_default();
+            }
+        }
     }
     rows_map
 }
@@ -242,7 +248,7 @@ fn build_sheet_xml(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?><worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">",
     );
     if let Some(st) = styling {
-        sheet_xml.push_str(&cols_xml(&st.columns));
+        sheet_xml.push_str(&layout_cols_xml(&st.columns, &st.hidden_cols));
     }
     sheet_xml.push_str("<sheetData>");
     let mut col_buf = [0u8; 4];
@@ -250,7 +256,12 @@ fn build_sheet_xml(
     for (row, mut row_cells) in rows_map {
         row_cells.sort_by_key(|(col, _)| *col);
         let row_num = row.saturating_add(1);
-        let _ = write!(sheet_xml, "<row r=\"{row_num}\">");
+        let hidden = styling.is_some_and(|st| run_contains(&st.hidden_rows, row));
+        let _ = write!(
+            sheet_xml,
+            "<row r=\"{row_num}\"{}>",
+            if hidden { " hidden=\"1\"" } else { "" }
+        );
         for (col, raw) in row_cells {
             let col_ref = write_col_letters(&mut col_buf, col as usize);
             let xf = styling.map_or(0, |st| {
@@ -265,6 +276,7 @@ fn build_sheet_xml(
     }
     sheet_xml.push_str("</sheetData>");
     if let Some(st) = styling {
+        sheet_xml.push_str(&merge_cells_xml(&st.merges));
         sheet_xml.push_str(&rules_xml(&st.rules, &style_table.dxf));
     }
     sheet_xml.push_str("</worksheet>");
@@ -519,6 +531,25 @@ impl OoxmlCodec {
                 .keys()
                 .find(|&&c| c >= Self::MAX_XLSX_COLS)
                 .map(|&c| (0, c));
+            let layout = styling
+                .merges
+                .iter()
+                .any(|m| m.row1 >= Self::MAX_XLSX_ROWS || m.col1 >= Self::MAX_XLSX_COLS)
+                || styling
+                    .hidden_rows
+                    .iter()
+                    .any(|r| r.1 >= Self::MAX_XLSX_ROWS)
+                || styling
+                    .hidden_cols
+                    .iter()
+                    .any(|c| c.1 >= Self::MAX_XLSX_COLS)
+                || styling.merges.len() > crate::MAX_MERGES
+                || crate::run_total(&styling.hidden_rows) > crate::MAX_HIDDEN_ROWS;
+            if layout {
+                return Err(EasyOfficeError::ResourceBudgetExceeded(
+                    "XLSX 병합·숨김 범위가 허용 범위를 초과했습니다.".to_string(),
+                ));
+            }
             if let Some((row, col)) = cell.or(column) {
                 return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
                     "XLSX 서식 좌표({row}, {col})가 ECMA-376 허용 범위({}x{})를 초과했습니다.",
