@@ -26,6 +26,7 @@ use easyoffice_formats::{
 use easyoffice_sheet::{PackedCellCoordinate, WorkbookEngine};
 
 use crate::convert_structured_doc::parse_pdf_options;
+use crate::sheet_look_json::parse_look;
 
 /// Largest indent (twips, 1/20 pt) a paragraph may carry: 200 inches.
 const MAX_INDENT_TWIPS: i64 = 288_000;
@@ -461,7 +462,7 @@ fn opt_number(obj: &JsonObject, key: &str) -> Result<Option<f64>, EasyOfficeErro
 }
 
 /// Cell format of the sheet editor (PD-084/PD-089): `{"bold","italic","underline","strike",
-/// "sizePt","nf"}`; `sizePt` is 1 to 409 points and is stored with two decimals; `nf` is the
+/// "sizePt","nf"}` and the look keys of `sheet_look_json` (`ha`, `va`, `wrap`, `bd`, PD-207); `sizePt` is 1 to 409 points and is stored with two decimals; `nf` is the
 /// 1-based entry of the sheet's `numFmts` (`num_fmt_ids` holds the format id of each entry).
 fn parse_cell_style(obj: &JsonObject, num_fmt_ids: &[u16]) -> Result<CellStyle, EasyOfficeError> {
     let size_pt = opt_number(obj, "sizePt")?
@@ -490,14 +491,17 @@ fn parse_cell_style(obj: &JsonObject, num_fmt_ids: &[u16]) -> Result<CellStyle, 
                 |n| Ok(n.checked_sub(1).map_or(0, |at| num_fmt_ids[at])),
             )?,
     };
-    Ok(CellStyle {
+    let mut style = CellStyle {
         bold: opt_bool(obj, "bold")?,
         italic: opt_bool(obj, "italic")?,
         underline: opt_bool(obj, "underline")?,
         strike: opt_bool(obj, "strike")?,
         size_pt,
         num_fmt,
-    })
+        ..CellStyle::default()
+    };
+    parse_look(obj, &mut style)?;
+    Ok(style)
 }
 
 /// `numFmts`: the sheet's format codes (at most `MAX_NUM_FMTS`, each within the code bounds).

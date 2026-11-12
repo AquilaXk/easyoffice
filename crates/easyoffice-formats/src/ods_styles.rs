@@ -9,10 +9,11 @@ use crate::rtf_xml_helpers::{
 };
 use crate::sheet_styling::ods_grid::{repeat_value, walk_ods, OdsCell, OdsSink};
 use crate::sheet_styling::ods_numfmt::{data_style_xml, read_data_styles};
+use crate::sheet_styling::sheet_look::{ods_border_edge, ods_border_value};
 use crate::sheet_styling::sheet_rules::ods_rules_read::{OdsRuleReader, ValidationSink};
 use crate::sheet_styling::{
-    format_centipt, resolve_code, CellStyle, IdMemo, NumFmtTable, SheetStyling, StyleKey,
-    MAX_COLUMN_PX, MAX_STYLED_CELLS, MIN_COLUMN_PX,
+    format_centipt, resolve_code, BorderLine, CellBorders, CellStyle, HAlign, IdMemo, NumFmtTable,
+    SheetStyling, StyleKey, VAlign, MAX_COLUMN_PX, MAX_STYLED_CELLS, MIN_COLUMN_PX,
 };
 use crate::xml_stream::{unescape_cow, Attrs};
 use crate::{EasyOfficeError, OdfCodec, XmlSanitizer};
@@ -131,13 +132,88 @@ impl OdsStyleTable {
                 id => format!(" style:data-style-name=\"eonf{id}\""),
             };
             xml.push_str(&format!(
-                "<style:style style:name=\"ce{}\" style:family=\"table-cell\"{data}><style:text-properties{props}/></style:style>",
-                i + 1
+                "<style:style style:name=\"ce{}\" style:family=\"table-cell\"{data}>{}<style:text-properties{props}/></style:style>",
+                i + 1,
+                cell_look_xml(k)
             ));
         }
         xml.push_str("</office:automatic-styles>");
         xml
     }
+}
+
+/// The cell and paragraph properties of a style's vertical alignment, wrapping, borders and
+/// horizontal alignment (PD-207); empty when it has none.
+fn cell_look_xml(k: StyleKey) -> String {
+    let mut cell = String::new();
+    if let Some(v) = k.v_align().ods() {
+        cell.push_str(&format!(" style:vertical-align=\"{v}\""));
+    }
+    if k.wrap() {
+        cell.push_str(" fo:wrap-option=\"wrap\"");
+    }
+    let b = k.borders();
+    for (side, edge) in [
+        ("top", b.top),
+        ("right", b.right),
+        ("bottom", b.bottom),
+        ("left", b.left),
+    ] {
+        if edge.is_none() {
+            continue;
+        }
+        cell.push_str(&format!(" fo:border-{side}=\"{}\"", ods_border_value(edge)));
+        if edge.line() == BorderLine::Double {
+            cell.push_str(&format!(
+                " style:border-line-width-{side}=\"0.5pt 0.5pt 0.5pt\""
+            ));
+        }
+    }
+    let mut xml = String::new();
+    if !cell.is_empty() {
+        xml.push_str(&format!("<style:table-cell-properties{cell}/>"));
+    }
+    if let Some(h) = k.h_align().ods() {
+        xml.push_str(&format!(
+            "<style:paragraph-properties fo:text-align=\"{h}\"/>"
+        ));
+    }
+    xml
+}
+
+/// Alignment, wrapping and borders out of the cell and paragraph properties of a style body.
+fn parse_cell_look(body: &str, style: &mut CellStyle) {
+    if let Some((attrs, _)) =
+        extract_tags_or_self_closing_with_attrs(body, "style:paragraph-properties")
+            .into_iter()
+            .next()
+    {
+        style.h_align = extract_attr_from_fragment(attrs, "fo:text-align")
+            .map_or(HAlign::General, HAlign::from_ods);
+    }
+    let Some((attrs, _)) =
+        extract_tags_or_self_closing_with_attrs(body, "style:table-cell-properties")
+            .into_iter()
+            .next()
+    else {
+        return;
+    };
+    let get = |name: &str| extract_attr_from_fragment(attrs, name);
+    style.v_align = get("style:vertical-align").map_or(VAlign::Bottom, VAlign::from_ods);
+    style.wrap = get("fo:wrap-option") == Some("wrap");
+    let all = get("fo:border").map(ods_border_edge);
+    let edge = |side: &str| {
+        get(&format!("fo:border-{side}"))
+            .map(ods_border_edge)
+            .or(all)
+            .unwrap_or_default()
+    };
+    style.borders = CellBorders {
+        top: edge("top"),
+        right: edge("right"),
+        bottom: edge("bottom"),
+        left: edge("left"),
+    };
 }
 
 /// `<table:table-column>` elements for the custom widths (empty string when there are none);
@@ -205,7 +281,7 @@ fn parse_text_properties(attrs: &str) -> CellStyle {
             .and_then(length_to_px)
             .map(|px| (px / PX_PER_INCH * PT_PER_INCH * 100.0).round() / 100.0)
             .filter(|pt| *pt >= 1.0),
-        num_fmt: 0,
+        ..CellStyle::default()
     }
 }
 
@@ -249,6 +325,7 @@ pub(crate) fn parse_automatic_styles(content_xml: &str) -> AutomaticStyles {
                 .map_or_else(CellStyle::default, |(props, _)| {
                     parse_text_properties(props)
                 });
+            parse_cell_look(body, &mut style);
             let code = extract_attr_from_fragment(attrs, "style:data-style-name")
                 .and_then(|data| data_codes.get(&*XmlSanitizer::unescape(data)));
             if let Some(code) = code {

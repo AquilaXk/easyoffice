@@ -16,6 +16,8 @@ pub(crate) mod ods_numfmt;
 pub(crate) mod ods_styles;
 #[path = "sheet_filter.rs"]
 pub(crate) mod sheet_filter;
+#[path = "sheet_look.rs"]
+pub(crate) mod sheet_look;
 #[path = "sheet_numfmt.rs"]
 pub(crate) mod sheet_numfmt;
 #[path = "sheet_rules.rs"]
@@ -30,6 +32,9 @@ pub(crate) mod xlsx_sheet;
 pub(crate) mod xlsx_styles;
 
 pub use sheet_filter::*;
+pub use sheet_look::{
+    parse_hex_rgb, BorderEdge, BorderLine, CellBorders, HAlign, VAlign, BORDER_DEFAULT_RGB,
+};
 pub use sheet_numfmt::*;
 pub use sheet_rules::*;
 pub use xlsx_layout::{normalize_runs, run_total, MAX_HIDDEN_ROWS, MAX_MERGES};
@@ -50,9 +55,14 @@ pub const STYLE_ITALIC: u8 = 1 << 1;
 pub const STYLE_UNDERLINE: u8 = 1 << 2;
 pub const STYLE_STRIKE: u8 = 1 << 3;
 const NUM_FMT_SHIFT: u32 = 8;
+const FLAGS_MASK: u64 = 0x0F;
+const H_ALIGN_SHIFT: u32 = 4;
+const V_ALIGN_SHIFT: u32 = 6;
+const WRAP_BIT: u64 = 1 << 24;
+const SIZE_SHIFT: u32 = 40;
 
-/// Formatting of one cell: the flags, font size and number format the sheet editor can set
-/// (PD-084, PD-193).
+/// Formatting of one cell: the flags, font size, number format, alignment, wrapping and borders
+/// the sheet editor can set (PD-084, PD-193, PD-207).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct CellStyle {
     pub bold: bool,
@@ -64,18 +74,55 @@ pub struct CellStyle {
     /// Number format id: `0` General, a built-in id, or `CUSTOM_BASE + n` into the sheet's
     /// `num_fmts` (see [`sheet_numfmt`]).
     pub num_fmt: u16,
+    pub h_align: HAlign,
+    pub v_align: VAlign,
+    /// Long text breaks into lines inside the cell.
+    pub wrap: bool,
+    pub borders: CellBorders,
 }
 
-/// Packed 64-bit style identity
-/// (`(centipt_or_zero as u64) << 40 | u64::from(num_fmt) << 8 | u64::from(flags)`) for $O(1)$ word
-/// comparison and hashing; the size is compared in hundredths of a point.
+/// Style identity for $O(1)$ word comparison and hashing: one packed 64-bit word
+/// (`size_centipt << 40 | wrap << 24 | num_fmt << 8 | v_align << 6 | h_align << 4 | flags`, the
+/// size compared in hundredths of a point) and the four border words.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub(crate) struct StyleKey(pub(crate) u64);
+pub(crate) struct StyleKey {
+    bits: u64,
+    borders: CellBorders,
+}
 
 impl StyleKey {
     #[inline]
     pub(crate) const fn flags(self) -> u8 {
-        (self.0 & 0xFF) as u8
+        (self.bits & FLAGS_MASK) as u8
+    }
+
+    #[inline]
+    pub(crate) const fn h_align(self) -> HAlign {
+        match (self.bits >> H_ALIGN_SHIFT) & 3 {
+            1 => HAlign::Left,
+            2 => HAlign::Center,
+            3 => HAlign::Right,
+            _ => HAlign::General,
+        }
+    }
+
+    #[inline]
+    pub(crate) const fn v_align(self) -> VAlign {
+        match (self.bits >> V_ALIGN_SHIFT) & 3 {
+            1 => VAlign::Top,
+            2 => VAlign::Center,
+            _ => VAlign::Bottom,
+        }
+    }
+
+    #[inline]
+    pub(crate) const fn wrap(self) -> bool {
+        self.bits & WRAP_BIT != 0
+    }
+
+    #[inline]
+    pub(crate) const fn borders(self) -> CellBorders {
+        self.borders
     }
 
     #[inline]
@@ -100,24 +147,35 @@ impl StyleKey {
 
     #[inline]
     pub(crate) const fn num_fmt(self) -> u16 {
-        ((self.0 >> NUM_FMT_SHIFT) & 0xFFFF) as u16
+        ((self.bits >> NUM_FMT_SHIFT) & 0xFFFF) as u16
     }
 
     /// The key with the number format id replaced (workbook-wide ids differ from a sheet's).
     #[inline]
     pub(crate) const fn with_num_fmt(self, id: u16) -> Self {
-        Self((self.0 & !(0xFFFF << NUM_FMT_SHIFT)) | ((id as u64) << NUM_FMT_SHIFT))
+        Self {
+            bits: (self.bits & !(0xFFFF << NUM_FMT_SHIFT)) | ((id as u64) << NUM_FMT_SHIFT),
+            borders: self.borders,
+        }
     }
 
-    /// The key without its number format: what the font element of a style depends on.
+    /// The key reduced to what the font element of a style depends on: the flags and the size.
     #[inline]
     pub(crate) const fn font_part(self) -> Self {
-        self.with_num_fmt(0)
+        Self {
+            bits: self.bits & (FLAGS_MASK | (!0u64 << SIZE_SHIFT)),
+            borders: CellBorders {
+                top: BorderEdge::NONE,
+                right: BorderEdge::NONE,
+                bottom: BorderEdge::NONE,
+                left: BorderEdge::NONE,
+            },
+        }
     }
 
     #[inline]
     pub(crate) const fn size_centipt(self) -> Option<u32> {
-        let centi = (self.0 >> 40) as u32;
+        let centi = (self.bits >> SIZE_SHIFT) as u32;
         if centi == 0 {
             None
         } else {
@@ -138,7 +196,13 @@ impl CellStyle {
     /// A style that changes nothing relative to the default cell.
     #[inline]
     pub fn is_plain(&self) -> bool {
-        self.flags() == 0 && self.size_pt.is_none() && self.num_fmt == 0
+        self.flags() == 0
+            && self.size_pt.is_none()
+            && self.num_fmt == 0
+            && self.h_align == HAlign::General
+            && self.v_align == VAlign::Bottom
+            && !self.wrap
+            && self.borders.is_none()
     }
 
     #[inline]
@@ -146,9 +210,15 @@ impl CellStyle {
         let centi = self
             .size_pt
             .map_or(0u64, |s| ((s * 100.0).round() as u32) as u64);
-        StyleKey(
-            (centi << 40) | (u64::from(self.num_fmt) << NUM_FMT_SHIFT) | u64::from(self.flags()),
-        )
+        StyleKey {
+            bits: (centi << SIZE_SHIFT)
+                | (u64::from(self.wrap) * WRAP_BIT)
+                | (u64::from(self.num_fmt) << NUM_FMT_SHIFT)
+                | ((self.v_align as u64) << V_ALIGN_SHIFT)
+                | ((self.h_align as u64) << H_ALIGN_SHIFT)
+                | u64::from(self.flags()),
+            borders: self.borders,
+        }
     }
 }
 

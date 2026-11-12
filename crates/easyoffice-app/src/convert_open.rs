@@ -22,6 +22,7 @@ use std::fmt::Write;
 use crate::convert_hwp::ShellWriters;
 use crate::convert_structured::{encode_source_target, StructuredContent};
 use crate::convert_structured_doc::parse_pdf_options;
+use crate::sheet_look_json::write_look;
 use crate::sheet_rules_json::rules_json;
 use crate::EasyOfficeIpcRouter;
 
@@ -301,8 +302,11 @@ fn write_style(out: &mut String, style: &CellStyle, num_fmts: &NumFmtIndex<'_>) 
         if !first {
             out.push(',');
         }
+        first = false;
         let _ = write!(out, "\"nf\":{entry}");
     }
+    let mut wrote = !first;
+    write_look(out, style, &mut wrote);
     out.push('}');
 }
 

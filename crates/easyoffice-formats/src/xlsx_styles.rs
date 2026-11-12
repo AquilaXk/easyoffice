@@ -3,7 +3,9 @@
 //!
 //! Writer layout: `numFmts` holds the custom number format codes (ids from 164, PD-193); `fonts`
 //! holds the default font (index 0) plus one font per distinct font look; `cellXfs` holds the
-//! default format (index 0) plus one format per distinct style (font look and number format).
+//! default format (index 0) plus one format per distinct style (font look, number format,
+//! alignment and borders); `borders` holds the empty border (index 0) plus one entry per distinct
+//! set of edges (PD-207).
 //! Elements follow the ECMA-376 `CT_Stylesheet` sequence (`numFmts`, `fonts`, `fills`, `borders`,
 //! `cellStyleXfs`, `cellXfs`, `cellStyles`); spreadsheet programs reject any other order.
 
@@ -12,10 +14,11 @@ use std::collections::{BTreeMap, HashMap};
 use crate::rtf_xml_helpers::{
     extract_attr_from_fragment, extract_tag_bodies, extract_tags_or_self_closing_with_attrs,
 };
+use crate::sheet_styling::sheet_look::{xlsx_color_rgb, BorderEdge, BorderLine, CellBorders};
 use crate::sheet_styling::sheet_rules::xlsx_rules::DxfTable;
 use crate::sheet_styling::{
-    format_centipt, CellStyle, IdMemo, NumFmtTable, SheetStyling, StyleKey, CUSTOM_BASE,
-    MAX_COLUMN_PX, MIN_COLUMN_PX,
+    format_centipt, CellStyle, HAlign, IdMemo, NumFmtTable, SheetStyling, StyleKey, VAlign,
+    CUSTOM_BASE, MAX_COLUMN_PX, MIN_COLUMN_PX,
 };
 use crate::XmlSanitizer;
 use std::sync::Arc;
@@ -25,6 +28,8 @@ use std::sync::Arc;
 /// `width = trunc(256 * px / MDW) / 256`, hence `px = round(width * MDW)`.
 pub(crate) const MAX_DIGIT_WIDTH_PX: f64 = 7.0;
 const DEFAULT_SIZE_PT: f64 = 11.0;
+/// Border definitions a reader keeps; a stylesheet with more reads the rest as no border.
+pub(crate) const MAX_BORDER_DEFS: usize = 65_536;
 
 /// Converts a column width in CSS pixels to the SpreadsheetML `width` attribute value.
 pub(crate) fn px_to_xlsx_width(px: u32) -> f64 {
@@ -46,6 +51,9 @@ pub(crate) struct XlsxStyleTable {
     /// Distinct styles with workbook-wide number format ids, `cellXfs` index `n + 1`.
     styles: Vec<StyleKey>,
     index: HashMap<StyleKey, usize>,
+    /// Distinct non-empty border sets, border id `n + 1`.
+    borders: Vec<CellBorders>,
+    border_index: HashMap<CellBorders, usize>,
     /// Custom number format codes of the whole workbook.
     num_fmts: NumFmtTable,
     /// Differential formats of the conditional formatting rules (PD-171).
@@ -59,6 +67,8 @@ impl XlsxStyleTable {
             font_index: HashMap::new(),
             styles: Vec::new(),
             index: HashMap::new(),
+            borders: Vec::new(),
+            border_index: HashMap::new(),
             num_fmts: NumFmtTable::default(),
             dxf: DxfTable::build(
                 stylings
@@ -76,6 +86,11 @@ impl XlsxStyleTable {
                 }
                 table.styles.push(key);
                 table.index.insert(key, table.styles.len());
+                let borders = key.borders();
+                if !borders.is_none() && !table.border_index.contains_key(&borders) {
+                    table.borders.push(borders);
+                    table.border_index.insert(borders, table.borders.len());
+                }
                 let font = key.font_part();
                 if font != StyleKey::default() && !table.font_index.contains_key(&font) {
                     table.fonts.push(font);
@@ -147,11 +162,50 @@ impl XlsxStyleTable {
         xml
     }
 
+    fn border_xml(borders: CellBorders) -> String {
+        let mut out = String::from("<border>");
+        for (tag, edge) in [
+            ("left", borders.left),
+            ("right", borders.right),
+            ("top", borders.top),
+            ("bottom", borders.bottom),
+        ] {
+            match edge.line().xlsx() {
+                Some(style) => out.push_str(&format!(
+                    "<{tag} style=\"{style}\"><color rgb=\"FF{:06X}\"/></{tag}>",
+                    edge.rgb()
+                )),
+                None => out.push_str(&format!("<{tag}/>")),
+            }
+        }
+        out.push_str("<diagonal/></border>");
+        out
+    }
+
+    fn alignment_xml(key: StyleKey) -> String {
+        let mut out = String::new();
+        if let Some(h) = key.h_align().xlsx() {
+            out.push_str(&format!(" horizontal=\"{h}\""));
+        }
+        if let Some(v) = key.v_align().xlsx() {
+            out.push_str(&format!(" vertical=\"{v}\""));
+        }
+        if key.wrap() {
+            out.push_str(" wrapText=\"1\"");
+        }
+        if out.is_empty() {
+            out
+        } else {
+            format!("<alignment{out}/>")
+        }
+    }
+
     fn xf_xml(&self, key: StyleKey) -> String {
         let font_id = self.font_index.get(&key.font_part()).copied().unwrap_or(0);
+        let border_id = self.border_index.get(&key.borders()).copied().unwrap_or(0);
         let num_fmt = key.num_fmt();
         let mut xf = format!(
-            "<xf numFmtId=\"{num_fmt}\" fontId=\"{font_id}\" fillId=\"0\" borderId=\"0\" xfId=\"0\""
+            "<xf numFmtId=\"{num_fmt}\" fontId=\"{font_id}\" fillId=\"0\" borderId=\"{border_id}\" xfId=\"0\""
         );
         if num_fmt != 0 {
             xf.push_str(" applyNumberFormat=\"1\"");
@@ -159,7 +213,15 @@ impl XlsxStyleTable {
         if font_id != 0 {
             xf.push_str(" applyFont=\"1\"");
         }
-        xf.push_str("/>");
+        if border_id != 0 {
+            xf.push_str(" applyBorder=\"1\"");
+        }
+        let alignment = Self::alignment_xml(key);
+        if alignment.is_empty() {
+            xf.push_str("/>");
+        } else {
+            xf.push_str(&format!(" applyAlignment=\"1\">{alignment}</xf>"));
+        }
         xf
     }
 
@@ -175,11 +237,16 @@ impl XlsxStyleTable {
             xml.push_str(&Self::font_xml(Some(*key)));
         }
         xml.push_str("</fonts>");
-        xml.push_str(concat!(
-            "<fills count=\"1\"><fill><patternFill patternType=\"none\"/></fill></fills>",
-            "<borders count=\"1\"><border><left/><right/><top/><bottom/><diagonal/></border></borders>",
+        xml.push_str("<fills count=\"1\"><fill><patternFill patternType=\"none\"/></fill></fills>");
+        xml.push_str(&format!("<borders count=\"{}\">", self.borders.len() + 1));
+        xml.push_str(&Self::border_xml(CellBorders::default()));
+        for &borders in &self.borders {
+            xml.push_str(&Self::border_xml(borders));
+        }
+        xml.push_str("</borders>");
+        xml.push_str(
             "<cellStyleXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/></cellStyleXfs>",
-        ));
+        );
         xml.push_str(&format!("<cellXfs count=\"{}\">", self.styles.len() + 1));
         xml.push_str("<xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\"/>");
         for &key in &self.styles {
@@ -249,8 +316,41 @@ fn parse_font(body: &str) -> CellStyle {
         underline,
         strike: flag("strike"),
         size_pt,
-        num_fmt: 0,
+        ..CellStyle::default()
     }
+}
+
+/// One edge of a `border` element: the style word and the color of the side `tag`.
+fn parse_border_edge(body: &str, tag: &str) -> BorderEdge {
+    let Some((attrs, inner)) = extract_tags_or_self_closing_with_attrs(body, tag)
+        .into_iter()
+        .next()
+    else {
+        return BorderEdge::NONE;
+    };
+    let line =
+        extract_attr_from_fragment(attrs, "style").map_or(BorderLine::None, BorderLine::from_xlsx);
+    let rgb = extract_tags_or_self_closing_with_attrs(inner, "color")
+        .first()
+        .map_or(0, |(color, _)| xlsx_color_rgb(color));
+    BorderEdge::new(line, rgb)
+}
+
+/// The edge sets of the `borders` element, in file order (at most [`MAX_BORDER_DEFS`]).
+fn parse_borders(styles_xml: &str) -> Vec<CellBorders> {
+    let Some(body) = extract_tag_bodies(styles_xml, "borders").into_iter().next() else {
+        return Vec::new();
+    };
+    extract_tags_or_self_closing_with_attrs(body, "border")
+        .into_iter()
+        .take(MAX_BORDER_DEFS)
+        .map(|(_, border)| CellBorders {
+            top: parse_border_edge(border, "top"),
+            right: parse_border_edge(border, "right"),
+            bottom: parse_border_edge(border, "bottom"),
+            left: parse_border_edge(border, "left"),
+        })
+        .collect()
 }
 
 /// What `xl/styles.xml` says about cell formats: the style of every `cellXfs` entry and the
@@ -313,10 +413,11 @@ pub(crate) fn parse_cell_xf_styles(styles_xml: &str) -> XfStyles {
         return XfStyles::default();
     };
     let codes = read_num_fmt_codes(styles_xml);
+    let borders = parse_borders(styles_xml);
     let mut table = NumFmtTable::default();
     let styles = extract_tags_or_self_closing_with_attrs(xfs_xml, "xf")
         .into_iter()
-        .map(|(attrs, _)| {
+        .map(|(attrs, body)| {
             let number = |name: &str| {
                 extract_attr_from_fragment(attrs, name).and_then(|v| v.parse::<u32>().ok())
             };
@@ -329,6 +430,17 @@ pub(crate) fn parse_cell_xf_styles(styles_xml: &str) -> XfStyles {
                 style.size_pt = None;
             }
             style.num_fmt = model_num_fmt(number("numFmtId").unwrap_or(0), &codes, &mut table);
+            let border_id = number("borderId").unwrap_or(0) as usize;
+            style.borders = borders.get(border_id).copied().unwrap_or_default();
+            if let Some((look, _)) = extract_tags_or_self_closing_with_attrs(body, "alignment")
+                .into_iter()
+                .next()
+            {
+                let word = |name| extract_attr_from_fragment(look, name).unwrap_or("");
+                style.h_align = HAlign::from_xlsx(word("horizontal"));
+                style.v_align = VAlign::from_xlsx(word("vertical"));
+                style.wrap = truthy(look, "wrapText", false);
+            }
             style
         })
         .collect();
