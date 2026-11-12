@@ -1,6 +1,7 @@
 //! DOCX reader producing a [`RichDocument`]: runs (bold/italic/underline/strike), alignment,
-//! heading levels (style names and outline levels), list kinds (list styles and `numPr` through
-//! `numbering.xml`), and tables at their position in the body.
+//! heading levels (style names and outline levels), lists (list styles and `numPr` through
+//! `numbering.xml`: kind, nesting level and number format), and tables at their position in the
+//! body.
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -8,6 +9,7 @@ use std::collections::HashMap;
 use crate::office_codecs::validate_zip_xml_entries;
 use crate::rich_document::{highlight_name_to_hex, normalize_hex_color};
 use crate::rich_read_images::{drawing_picture, DocxMedia, DrawingOutcome};
+use crate::rich_read_numbering::{read_numbering, Numbering, LIST_LEVELS};
 use crate::rich_table::TableAssembler;
 use crate::rich_xml::{heading_level_from_name, push_run, toggle_on, CharFmt};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
@@ -40,6 +42,8 @@ struct ParaState {
     style_id: Option<String>,
     jc: Option<String>,
     num_id: Option<String>,
+    /// `w:numPr/w:ilvl`, 0 when absent or unreadable.
+    ilvl: Option<usize>,
     outline: Option<u8>,
     images: Vec<RichImage>,
     left_indent: Option<u32>,
@@ -120,54 +124,6 @@ fn read_styles(xml: &str) -> Result<HashMap<String, DocxStyle>, EasyOfficeError>
     Ok(out)
 }
 
-/// numId -> list kind, resolved through the first level of the abstract numbering definition.
-fn read_numbering(xml: &str) -> Result<HashMap<String, RichListKind>, EasyOfficeError> {
-    let mut abstract_fmt: HashMap<String, String> = HashMap::new();
-    let mut num_to_abstract: HashMap<String, String> = HashMap::new();
-    let mut cur_abstract: Option<String> = None;
-    let mut cur_num: Option<String> = None;
-    let mut first_level = false;
-    for ev in XmlReader::new(xml) {
-        match ev? {
-            XmlEvent::Start { name, attrs } => match name {
-                "w:abstractNum" => {
-                    cur_abstract = attr(&attrs, "w:abstractNumId").map(Cow::into_owned);
-                    first_level = true;
-                }
-                "w:lvl" if first_level => {}
-                "w:numFmt" if first_level => {
-                    if let (Some(id), Some(val)) = (cur_abstract.as_ref(), attr(&attrs, "w:val")) {
-                        abstract_fmt
-                            .entry(id.clone())
-                            .or_insert_with(|| val.to_string());
-                        first_level = false;
-                    }
-                }
-                "w:num" => cur_num = attr(&attrs, "w:numId").map(Cow::into_owned),
-                "w:abstractNumId" if cur_num.is_some() => {
-                    if let (Some(n), Some(a)) = (cur_num.as_ref(), attr(&attrs, "w:val")) {
-                        num_to_abstract.insert(n.clone(), a.to_string());
-                    }
-                }
-                _ => {}
-            },
-            XmlEvent::End("w:num") => cur_num = None,
-            XmlEvent::End("w:abstractNum") => cur_abstract = None,
-            _ => {}
-        }
-    }
-    Ok(num_to_abstract
-        .into_iter()
-        .map(|(num, abs)| {
-            let kind = match abstract_fmt.get(&abs).map(String::as_str) {
-                Some("bullet" | "none") | None => RichListKind::Bullet,
-                Some(_) => RichListKind::Ordered,
-            };
-            (num, kind)
-        })
-        .collect())
-}
-
 fn alignment(jc: Option<&str>) -> Option<RichAlignment> {
     jc.and_then(RichAlignment::parse)
 }
@@ -179,7 +135,7 @@ fn starts_with_ignore_ascii_case(s: &str, prefix: &str) -> bool {
 
 struct Resolver<'a> {
     styles: &'a HashMap<String, DocxStyle>,
-    numbering: &'a HashMap<String, RichListKind>,
+    numbering: &'a Numbering,
 }
 
 impl Resolver<'_> {
@@ -229,21 +185,26 @@ impl Resolver<'_> {
                 heading = (level + 1).min(6);
             }
         }
-        let list = if heading > 0 {
-            None
-        } else if style_list.is_some() {
-            style_list
-        } else {
-            p.num_id.as_deref().filter(|id| *id != "0").map(|id| {
-                self.numbering
-                    .get(id)
-                    .copied()
-                    .unwrap_or(RichListKind::Bullet)
-            })
+        let level = p.ilvl.unwrap_or(0).min(LIST_LEVELS - 1);
+        let numbered = p
+            .num_id
+            .as_deref()
+            .filter(|id| *id != "0")
+            .map(|id| self.numbering.level(id, level));
+        // A list style names the kind (as before); the number format is the level's own when
+        // the numbering agrees on the kind.
+        let (list, list_number) = match (heading, style_list, numbered) {
+            (1.., ..) => (None, None),
+            (_, Some(kind), def) => (
+                Some(kind),
+                def.filter(|d| d.kind == kind).and_then(|d| d.number),
+            ),
+            (_, None, Some(def)) => (Some(def.kind), def.number),
+            (_, None, None) => (None, None),
         };
         RichParagraph {
-            list_level: 0,
-            list_number: None,
+            list_level: if list.is_some() { level as u8 } else { 0 },
+            list_number,
             alignment: alignment(p.jc.as_deref()),
             runs: p.runs,
             heading_level: heading,
@@ -429,6 +390,7 @@ impl DocxWalker {
             "w:pStyle" => top.style_id = val.map(str::to_string),
             "w:jc" => top.jc = val.map(str::to_string),
             "w:numId" => top.num_id = val.map(str::to_string),
+            "w:ilvl" => top.ilvl = val.and_then(|v| v.trim().parse().ok()),
             "w:outlineLvl" => top.outline = val.and_then(|v| v.parse().ok()),
             _ => {}
         }
@@ -564,7 +526,7 @@ pub(crate) fn read_docx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Eas
     };
     let numbering = match entry_xml(&entries, "word/numbering.xml")? {
         Some(xml) => read_numbering(xml)?,
-        None => HashMap::new(),
+        None => Numbering::default(),
     };
     let title = entry_xml(&entries, "docProps/core.xml")?
         .and_then(|xml| {
@@ -646,7 +608,7 @@ mod tests {
             </w:style>
         </w:styles>"#;
         let styles = read_styles(styles_xml).expect("styles parse");
-        let numbering = HashMap::new();
+        let numbering = Numbering::default();
         let resolver = Resolver {
             styles: &styles,
             numbering: &numbering,

@@ -42,6 +42,7 @@ mod rich_image_writers;
 mod rich_list_writers;
 mod rich_read_hwpx;
 mod rich_read_images;
+mod rich_read_numbering;
 mod rich_read_odt;
 mod rich_read_ooxml;
 mod rich_read_pages;

@@ -2837,3 +2837,19 @@
 - **Alternatives rejected** `encoding_rs` 링크(엔진 무의존 원칙), 표를 Rust 배열로 생성(줄 수 상한과 약 40만 자 소스), 페이지를 추정해 읽기(잘못된 글자가 조용히 보임), 지원 페이지를 932·936·950 중 일부로 줄이기(표 크기 112KB가 상한을 둘 이유가 되지 않음).
 - **Verified by** `cargo test -p easyoffice-formats --test rtf_code_pages`(932·936·950·949 짝, 반각 가타카나, 트레일 범위의 ASCII, 874·1250~1258 글자, `\fcharset`이 문서 페이지를 덮는 경우, 글꼴 이름 디코드, 미할당·짝 없는 바이트, 표 없는 페이지, 원시 8비트, 적대적 `\ansicpg`·`\fcharset` 값, 20만 쌍 선형 시간), `--test rtf_reader_fidelity`, 단위 시험 `code_pages`(표 크기·칸 수·표본 글자). 표 전수 대조: 임시 하니스가 932·936·950의 모든 리드·트레일 조합과 단일 바이트 페이지 전체를 encoding_rs의 결과와 비교해 51,701개가 일치했습니다(저장소에는 외부 크레이트 시험을 넣지 않음).
 - **Revisit when** 437·850·Mac·Johab RTF가 필요할 때, 윈도우 950의 기호 차이가 문제가 될 때, 표 크기가 번들 크기에 부담이 될 때.
+
+## PD-183. DOCX 읽기는 `w:numPr`의 수준과 `numbering.xml` 수준별 정의로 목록 수준·종류·번호 형식을 옮김
+
+- **Status** Implemented (`crates/easyoffice-formats/src/rich_read_numbering.rs`, `src/rich_read_ooxml.rs`, `tests/docx_list_levels.rs`). PD-178 3항(DOCX 목록 쓰기)의 읽기 짝입니다.
+- **Context** DOCX 작성기는 `w:ilvl`과 수준별 `w:numFmt`·`w:lvlText`를 쓰는데 읽기는 `w:numId`만 보고 첫 수준의 형식 하나로 종류를 정했습니다. 그래서 쓴 파일을 다시 열면 모든 목록 문단이 0수준이 되고 번호 형식(`a)`, `(I)`, `가.`)이 사라졌으며, 번호 아래 글머리표 수준도 번호로 읽혔습니다.
+- **Decision (`PD-183`)**
+  1. **수준**: 문단의 `w:numPr/w:ilvl`을 `list_level`로 읽습니다. 없거나 읽을 수 없는 값(음수·숫자 아님·`u32` 밖)은 0이고, 8(ECMA-376 17.9.3의 마지막 수준)보다 크면 8입니다.
+  2. **종류와 형식**: `w:num`은 `w:abstractNumId`를 거쳐 수준 0~8의 정의로 풀립니다. `w:numFmt`가 `bullet`·`none`이면 글머리표이고 그 밖은 번호 목록입니다. 번호 형식은 `decimal`·`lowerLetter`·`upperLetter`·`lowerRoman`·`upperRoman`·`ganada`를 모델의 형식으로, 그 밖의 값은 `decimal`로 읽습니다. 구분 문자는 `w:lvlText`가 `(…)`면 `Parentheses`, `…)`면 `RightParenthesis`, 그 밖은 `Dot`입니다. 보통의 `1.`은 `list_number: None`입니다(쓰기와 같은 규칙).
+  3. **덮어쓰기**: `w:num/w:lvlOverride/w:lvl`이 있으면 그 수준의 정의를 바꿉니다(`w:startOverride`만 있는 덮어쓰기는 시작 번호라 모델에 없어 무시).
+  4. **대체 규칙**: 정의에 없는 수준은 정의의 첫 수준을, 모르는 `numId`는 글머리표를 씁니다(이전 동작). `numId` 0은 목록이 아닙니다. 문단 스타일 이름(`List Bullet`·`List Number`)이 종류를 정하는 이전 규칙은 그대로이고, 번호 형식은 번호 정의의 종류가 같을 때만 따릅니다. 제목 문단은 목록이 아닙니다.
+  5. **상한**: `numbering.xml`의 `w:abstractNum`과 `w:num`은 각각 8,192개까지이고 넘으면 `ResourceBudgetExceeded`로 거부합니다(문서는 보통 수십 개). 수준 배열은 9칸 고정이라 `w:lvl`이 아무리 많아도 메모리가 늘지 않으며, `w:ilvl`이 범위 밖인 `w:lvl`은 버립니다. 입력 XML은 기존 `validate_safe_xml`과 압축 예산을 그대로 거칩니다.
+- **재사용 판단 (구현 원칙 3단계)** (1) 엔진은 외부 의존성 0이라 DOCX 크레이트를 쓰지 않습니다. (2) 이미 있는 `XmlReader`·`attr`와 모델의 `RichListNumber`를 재사용했고 이식한 코드는 없습니다. (3) 명세(ECMA-376 17.9)만 따랐습니다.
+- **Trade-offs** (a) 스타일에 정의된 `numPr`(`w:style/w:pPr/w:numPr`)와 `w:numStyleLink`·`w:styleLink`는 따라가지 않습니다(문단의 직접 `numPr`만). (b) `w:start`·`w:lvlJc`·들여쓰기는 모델에 없어 읽지 않습니다.
+- **Alternatives rejected** 읽은 수준을 문단 스타일 규칙보다 우선(스타일로 종류를 정하던 문서의 결과가 바뀜), `w:ilvl` 범위 밖에서 문서를 거부(유효하지 않은 한 문단 때문에 열기가 실패함).
+- **Verified by** `cargo test -p easyoffice-formats --test docx_list_levels`(작성기가 쓴 0~3수준·8수준의 글머리표와 `a)`·`(I)`·`가.`·`i.`가 같은 값으로 돌아옴, 외부 모양 정의·`lvlOverride`, 범위 밖·음수·숫자 아닌 `ilvl`, 정의 없음, 9,000개 `w:num` 거부), 단위 시험 `rich_read_numbering`, `--test list_definitions`·`rich_decode_roundtrip`.
+- **Revisit when** 스타일 안 `numPr`을 쓰는 문서를 열 때, 시작 번호(`w:start`)를 모델에 넣을 때.
