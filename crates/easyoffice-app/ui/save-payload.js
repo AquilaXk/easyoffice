@@ -458,7 +458,7 @@
 
   // Every sheet in tab order (then any stored sheet without a tab); keys are the formula-visible
   // sheet names. `raw` is the formula when present, otherwise the typed value.
-  function buildSheetsPayload(sheetKeys, sheetDataStore, columnWidths, rulesBySheet) {
+  function buildSheetsPayload(sheetKeys, sheetDataStore, columnWidths, rulesBySheet, layoutBySheet) {
     const ordered = [];
     const seen = new Set();
     [...sheetKeys, ...Object.keys(sheetDataStore || {})].forEach((key) => {
@@ -484,6 +484,8 @@
       if (numFmts.codes.length > 0) sheet.numFmts = numFmts.codes;
       const rules = rulesBySheet?.[name];
       if (rules && ((rules.cf || []).length > 0 || (rules.dv || []).length > 0)) sheet.rules = rules;
+      // Merged ranges and hidden rows and columns (PD-194): `merges`, `hiddenRows`, `hiddenCols`.
+      Object.assign(sheet, layoutBySheet?.[name]);
       return sheet;
     });
   }

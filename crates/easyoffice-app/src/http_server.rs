@@ -44,6 +44,8 @@ const SHEET_GRID_JS: &str = include_str!("../ui/sheet-grid.js");
 const SHEET_CLIPBOARD_JS: &str = include_str!("../ui/sheet-clipboard.js");
 const SHEET_INPUT_JS: &str = include_str!("../ui/sheet-input.js");
 const SHEET_OPS_JS: &str = include_str!("../ui/sheet-ops.js");
+const SHEET_LAYOUT_JS: &str = include_str!("../ui/sheet-layout.js");
+const SHEET_STRUCTURE_JS: &str = include_str!("../ui/sheet-structure.js");
 const SHEET_FORMAT_JS: &str = include_str!("../ui/sheet-format.js");
 const SHEET_CONTROLLER_JS: &str = include_str!("../ui/sheet-controller.js");
 const RIBBON_HISTORY_JS: &str = include_str!("../ui/ribbon-history.js");
@@ -590,6 +592,16 @@ fn handle_http_connection(stream: &mut TcpStream, port: u16, ipc_handler: &IpcDi
             "200 OK",
             "application/javascript; charset=utf-8",
             Cow::Borrowed(SHEET_OPS_JS),
+        ),
+        ("GET", "/sheet-layout.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            Cow::Borrowed(SHEET_LAYOUT_JS),
+        ),
+        ("GET", "/sheet-structure.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            Cow::Borrowed(SHEET_STRUCTURE_JS),
         ),
         ("GET", "/sheet-format.js") => (
             "200 OK",

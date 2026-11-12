@@ -418,6 +418,14 @@ const WEBUI_ASSET_MARKERS: &[(&str, &str)] = &[
         "__EASYOFFICE_CREATE_SHEET_OPS__",
     ),
     (
+        include_str!("../ui/sheet-layout.js"),
+        "__EASYOFFICE_SHEET_LAYOUT__",
+    ),
+    (
+        include_str!("../ui/sheet-structure.js"),
+        "__EASYOFFICE_CREATE_SHEET_STRUCTURE__",
+    ),
+    (
         include_str!("../ui/sheet-format.js"),
         "__EASYOFFICE_CREATE_SHEET_FORMAT__",
     ),

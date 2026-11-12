@@ -278,6 +278,12 @@
     let view = null;
     let spacerTop = null;
     let spacerBottom = null;
+    // Hidden rows and columns and merged ranges of the active sheet (PD-194).
+    const layoutApi = host.__EASYOFFICE_SHEET_LAYOUT__;
+    let widthCacheVersion = -1;
+    let layoutApplied = false;
+    const layoutOf = () => layoutApi?.get(getSheetName()) || null;
+    const hiddenRowRuns = () => layoutOf()?.hiddenRows || [];
 
     const viewportEl = () => document.getElementById("sheet-viewport");
     const tbodyEl = () => document.querySelector("#pane-sheet tbody");
@@ -292,9 +298,14 @@
 
     function ensureWidthCache() {
       const name = getSheetName();
-      if (widthCacheSheet === name) return;
+      const stamp = layoutApi ? layoutApi.version() : 0;
+      if (widthCacheSheet === name && widthCacheVersion === stamp) return;
       widthCacheSheet = name;
-      const w = widths();
+      widthCacheVersion = stamp;
+      const w = { ...widths() };
+      for (const [a, b] of layoutOf()?.hiddenCols || []) {
+        for (let c = a; c <= Math.min(b, MAX_COLS); c += 1) w[c] = 0;
+      }
       const keys = Object.keys(w);
       if (keys.length === 0) {
         widthCacheCols = [];
@@ -313,7 +324,23 @@
     }
 
     function colWidth(c) {
+      if (layoutApi?.colHidden(getSheetName(), c)) return 0;
       return widths()[c] || DEFAULT_COL_W;
+    }
+
+    // Top edge of `row` and the height of the rows between `first` and `last`, hidden rows counting 0.
+    function rowTop(row) {
+      return (row - 1 - (layoutApi ? layoutApi.hiddenBefore(hiddenRowRuns(), row) : 0)) * ROW_H;
+    }
+
+    function visibleRowsFrom(row) {
+      const runs = hiddenRowRuns();
+      const hiddenAfter = layoutApi ? layoutApi.hiddenTotal(runs) - layoutApi.hiddenBefore(runs, row) : 0;
+      return Math.max(0, MAX_ROWS - row + 1 - hiddenAfter);
+    }
+
+    function rowAtVisible(v) {
+      return layoutApi ? layoutApi.visibleToIndex(hiddenRowRuns(), v) : v + 1;
     }
 
     function colLeft(c) {
@@ -374,12 +401,12 @@
     function computeView() {
       const vp = viewportEl();
       if (hasLayout(vp)) {
-        const top = Math.floor(vp.scrollTop / ROW_H) + 1;
+        const top = Math.floor(vp.scrollTop / ROW_H);
         const visible = Math.ceil((vp.clientHeight - HEAD_H) / ROW_H) + 1;
         return {
           layout: true,
-          r0: Math.max(1, top - OVERSCAN_ROWS),
-          r1: Math.min(MAX_ROWS, top + visible + OVERSCAN_ROWS),
+          r0: Math.max(1, rowAtVisible(Math.max(0, top - OVERSCAN_ROWS))),
+          r1: Math.min(MAX_ROWS, rowAtVisible(top + visible + OVERSCAN_ROWS)),
           c0: Math.max(1, colAtX(vp.scrollLeft) - OVERSCAN_COLS),
           c1: Math.min(MAX_COLS, colAtX(vp.scrollLeft + vp.clientWidth) + OVERSCAN_COLS),
         };
@@ -539,8 +566,8 @@
         spacerBottom.remove();
         tbody.appendChild(spacerBottom);
       }
-      spacerTop.children[0].style.height = (v.r0 - 1) * ROW_H + "px";
-      spacerBottom.children[0].style.height = (MAX_ROWS - v.r1) * ROW_H + "px";
+      spacerTop.children[0].style.height = rowTop(v.r0) + "px";
+      spacerBottom.children[0].style.height = visibleRowsFrom(v.r1 + 1) * ROW_H + "px";
     }
 
     function activeGridTd() {
@@ -645,9 +672,53 @@
       syncSpacers(tbody, next);
       insertMissingRows(tbody, existing, next);
       syncTableWidth(table, next);
+      applyLayoutClasses();
       if (hooks.afterRender) hooks.afterRender();
       prefetchNumFmt(next);
       return true;
+    }
+
+    // Hidden rows and columns get `sheet-hidden`; a merged range paints from its anchor cell
+    // (`merge-anchor` with its size in `--mw`/`--mh`) over the cells it covers (`merge-cover`).
+    function applyLayoutClasses() {
+      const layout = layoutOf();
+      const empty = !layout || layoutApi.isEmpty(layout);
+      if (empty && !layoutApplied) return;
+      layoutApplied = !empty;
+      const name = getSheetName();
+      const runs = layout?.hiddenRows || [];
+      const tbody = tbodyEl();
+      if (tbody) {
+        for (const tr of tbody.children) {
+          const r = rowOf(tr);
+          if (r > 0) tr.classList.toggle("sheet-hidden", !empty && layoutApi.runContains(runs, r));
+        }
+      }
+      for (const [c, th] of colHeadByCol) th.classList.toggle("sheet-hidden", !empty && layoutApi.colHidden(name, c));
+      seedDomMaps();
+      for (const td of tdByPacked.values()) {
+        const r = td._row;
+        const c = td._col;
+        td.classList.toggle("sheet-hidden", !empty && layoutApi.colHidden(name, c));
+        const m = empty ? null : layoutApi.mergeAt(name, r, c);
+        const anchor = Boolean(m) && m.r1 === r && m.c1 === c;
+        td.classList.toggle("merge-anchor", anchor);
+        td.classList.toggle("merge-cover", Boolean(m) && !anchor);
+        if (anchor) {
+          td.style.setProperty("--mw", colLeft(m.c2 + 1) - colLeft(m.c1) + "px");
+          const hidden = layoutApi.hiddenBefore(runs, m.r2 + 1) - layoutApi.hiddenBefore(runs, m.r1);
+          td.style.setProperty("--mh", (m.r2 - m.r1 + 1 - hidden) * ROW_H + "px");
+        } else if (td.style.getPropertyValue("--mw")) {
+          td.style.removeProperty("--mw");
+          td.style.removeProperty("--mh");
+        }
+      }
+    }
+
+    // The layout changed (hide, unhide, merge, edit): redraw with the new row and column geometry.
+    function layoutChanged() {
+      widthCacheSheet = null;
+      return renderWindow(true);
     }
 
     function seedDomMaps() {
@@ -759,6 +830,7 @@
         paintTd(td, getEntry(td.dataset.cell));
         tds.push(td);
       }
+      applyLayoutClasses();
       return tds;
     }
 
@@ -791,7 +863,7 @@
       const vp = viewportEl();
       if (hasLayout(vp)) {
         const viewH = vp.clientHeight - HEAD_H;
-        const top = (row - 1) * ROW_H;
+        const top = rowTop(row);
         if (top < vp.scrollTop) vp.scrollTop = top;
         else if (top + ROW_H > vp.scrollTop + viewH) vp.scrollTop = top + ROW_H - viewH;
         const left = colLeft(col);
@@ -864,6 +936,11 @@
       colLeft,
       colAtX,
       applyColWidth,
+      layoutChanged,
+      rowAtVisible,
+      mergeAt: (r, c) => layoutApi?.mergeAt(getSheetName(), r, c) || null,
+      rowHidden: (r) => Boolean(layoutApi?.rowHidden(getSheetName(), r)),
+      colHidden: (c) => Boolean(layoutApi?.colHidden(getSheetName(), c)),
       getAllWidths,
       replaceAllWidths,
       repaintFx,

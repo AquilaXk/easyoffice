@@ -246,3 +246,22 @@
 .md-recent {
   font-size: var(--font-size-base);
 }
+
+/* Right-click menu (rhwp-studio `src/styles/dialogs.css` `.context-menu`, same values): the panel
+ * at the pointer; its rows are the `.md-item` rows above. `overflow-y` only matters in a window
+ * shorter than the menu. */
+.context-menu {
+  position: fixed;
+  min-width: 200px;
+  background: var(--color-surface);
+  border: 1px solid var(--ui-border);
+  box-shadow: var(--shadow-dropdown);
+  z-index: 20000;
+  padding: 4px 0;
+  font-size: var(--font-size-base);
+  overflow-y: auto;
+}
+
+.context-menu[hidden] {
+  display: none;
+}

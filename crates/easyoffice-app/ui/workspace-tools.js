@@ -127,7 +127,7 @@
         const keys = Array.from(document.querySelectorAll(".sheet-tab-btn[data-sheet-tab]")).map(
           (b) => b.dataset.sheetTab
         );
-        return { sheets: savePayload.buildSheetsPayload(keys, sheetDataStore, sheetController.getColumnWidths(), sheetController.getSheetRules()) };
+        return { sheets: savePayload.buildSheetsPayload(keys, sheetDataStore, sheetController.getColumnWidths(), sheetController.getSheetRules(), host.__EASYOFFICE_SHEET_LAYOUT__.getAll()) };
       }
       if (scope === "SLIDE") {
         if (getActiveModule() === "SLIDE" && typeof syncActiveSlideDomStylesToDeck === "function") {

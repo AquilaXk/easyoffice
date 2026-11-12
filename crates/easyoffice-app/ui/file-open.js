@@ -252,6 +252,7 @@
     const rowCounts = {};
     const columnWidths = {};
     const rulesBySheet = {};
+    const layoutBySheet = {};
     (sheets || []).forEach((sheet) => {
       const map = {};
       let maxRow = 0;
@@ -276,8 +277,11 @@
       const widths = columnWidthMap(sheet.columns);
       if (Object.keys(widths).length > 0) columnWidths[sheet.name] = widths;
       if ((sheet.rules?.cf || []).length > 0 || (sheet.rules?.dv || []).length > 0) rulesBySheet[sheet.name] = sheet.rules;
+      if (sheet.merges?.length || sheet.hiddenRows?.length || sheet.hiddenCols?.length) {
+        layoutBySheet[sheet.name] = { merges: sheet.merges, hiddenRows: sheet.hiddenRows, hiddenCols: sheet.hiddenCols };
+      }
     });
-    return { store, rowCounts, columnWidths, rulesBySheet };
+    return { store, rowCounts, columnWidths, rulesBySheet, layoutBySheet };
   }
 
   function hasFiles(ev) {
@@ -356,7 +360,9 @@
         };
       } else if (mod === "SHEET") {
         const sheets = Array.isArray(res.sheets) && res.sheets.length > 0 ? res.sheets : [{ name: "Sheet1", cells: [] }];
-        const { store, rowCounts, columnWidths, rulesBySheet } = buildSheetStore(sheets);
+        const { store, rowCounts, columnWidths, rulesBySheet, layoutBySheet } = buildSheetStore(sheets);
+        host.__EASYOFFICE_SHEET_LAYOUT__.replaceAll(layoutBySheet);
+        next.sheetLayout = layoutBySheet;
         const first = sheets[0].name;
         // The rules go in first, so the evaluation below learns them with the cells.
         if (typeof replaceSheetRules === "function") replaceSheetRules(rulesBySheet);

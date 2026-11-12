@@ -351,6 +351,84 @@
       });
     }
 
+    // Moves the mirror of the session after an `structure` answer: the cells and values of the
+    // edited sheet change position and the rewritten formulas replace their text.
+    function moveMirror(request, answer) {
+      const edit = { axis: request.axis, op: request.op, at: request.at, count: request.count };
+      const layoutApi = host.__EASYOFFICE_SHEET_LAYOUT__;
+      const mirror = session.raw.get(request.sheet);
+      if (mirror) {
+        const moved = new Map();
+        for (const [ref, known] of mirror) {
+          const to = layoutApi.remapRef(edit, ref);
+          if (to !== null) moved.set(to, known);
+        }
+        session.raw.set(request.sheet, moved);
+      }
+      const prefix = request.sheet + "!";
+      const values = [];
+      for (const [key, value] of session.values) {
+        if (key.startsWith(prefix)) values.push([key, value]);
+      }
+      for (const [key] of values) session.values.delete(key);
+      for (const [key, value] of values) {
+        const to = layoutApi.remapRef(edit, key.slice(prefix.length));
+        if (to !== null) session.values.set(prefix + to, value);
+      }
+      for (const f of Array.isArray(answer.formulas) ? answer.formulas : []) {
+        let map = session.raw.get(f.sheet);
+        if (!map) {
+          map = new Map();
+          session.raw.set(f.sheet, map);
+        }
+        map.set(f.cell, { raw: f.value, gen: session.gen });
+      }
+      for (const c of Array.isArray(answer.changed) ? answer.changed : []) {
+        session.values.set(c.sheet + "!" + c.cell, c.value);
+      }
+      // The engine rebuilt its session without rules; the next sync sends them again.
+      session.rules = new Map();
+    }
+
+    // Inserts or deletes rows or columns in the engine session (PD-194): `request` is `{ sheet, axis,
+    // op, at, count }` plus the layout, widths and rules that move with the cells. The answer is
+    // `{ ok: true, answer }` or `{ ok: false, reason }` (`limit`: the sheet is over the session
+    // limits, `structure`: the edit rewrites too many formulas, `error`).
+    function editAxis(sheetsMap, request) {
+      return runSessionExclusive(async () => {
+        const names = Object.keys(sheetsMap || {});
+        if (!session.enabled) return { ok: false, reason: "error" };
+        if (session.refusedKey !== null && session.refusedKey === sheetSetKey(names)) {
+          return { ok: false, reason: "limit" };
+        }
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          try {
+            await syncSessionOnce(sheetsMap);
+            const answer = await sessionCall({ ...request, sessionAction: "structure", session: session.id });
+            if (answer?.refused === "structure") return { ok: false, reason: "structure" };
+            if (answer?.refused) {
+              resetSession();
+              session.refusedKey = sheetSetKey(names);
+              return { ok: false, reason: "limit" };
+            }
+            if (!answer || answer.expired === true) throw new Error("시트 세션이 만료되었습니다.");
+            moveMirror(request, answer);
+            return { ok: true, answer };
+          } catch (err) {
+            if (err?.refused === true) {
+              resetSession();
+              session.refusedKey = sheetSetKey(names);
+              return { ok: false, reason: "limit" };
+            }
+            const expired = typeof err?.message === "string" && err.message.includes("만료");
+            if (!expired || attempt === 1) return { ok: false, reason: "error", message: String(err?.message || err) };
+            dropSession();
+          }
+        }
+        return { ok: false, reason: "error" };
+      });
+    }
+
     // One retry after a reset covers an expired or evicted session. `null` sends the caller to the
     // stateless command: after two failures, and at once for a sheet set the engine refused for
     // size (the engine already dropped that session, so reopening it would only repeat the load).
@@ -634,6 +712,7 @@
       computeEvaluatedSheetStore,
       evaluateLiveFormulaTargets,
       validateEntry,
+      editAxis,
       callSheetAction: sessionCall,
       enableSheetSessions,
       scrubSheetStoreMap,

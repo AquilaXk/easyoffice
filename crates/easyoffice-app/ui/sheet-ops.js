@@ -137,6 +137,12 @@
       sheetDataStore[curSheet] = map;
       const range = sortRange(map, usedExtent(map));
       if (range.r2 <= range.r1) return Promise.resolve();
+      // A merged range cannot be sorted: its rows are not interchangeable.
+      if (host.__EASYOFFICE_SHEET_LAYOUT__?.mergesIn(curSheet, range.r1, range.c1, range.r2, range.c2).length > 0) {
+        const fb = document.getElementById("status-command-feedback");
+        if (fb) fb.textContent = "병합된 셀이 있어 정렬할 수 없음";
+        return Promise.resolve();
+      }
       const populatedRows = [];
       const blankRows = [];
       for (let r = range.r1; r <= range.r2; r += 1) {

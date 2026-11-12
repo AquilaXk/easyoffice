@@ -851,6 +851,31 @@
       call: sheetStoreHelpers.callSheetAction,
       onFilled: () => grid.repaintNumFmt(),
     });
+    const structure = host.__EASYOFFICE_CREATE_SHEET_STRUCTURE__({
+      document,
+      sheetDataStore,
+      sheetRowCounts,
+      sheetStoreHelpers,
+      grid,
+      getActiveSheetName,
+      getSheetRowCount,
+      getRange: () => input.getRange(),
+      getSelection: () => input.getSelection(),
+      selectAxis: (axis, index, extend) => input.selectAxis(axis, index, extend),
+      commitIfEditing: () => input.commitIfEditing(),
+      focusAnchor: () => input.focusAnchor(),
+      snapshotDomSheetCells,
+      replaceLiveSheetDataStore,
+      refreshWindowFromModel,
+      recalculateActiveSheetFormulas,
+      applyFrozenFlag,
+      enqueueWorkspaceHistoryOp,
+      drainInFlightSheetWork,
+      pushRawUndoSnapshot,
+      captureWorkspaceSnapshot,
+    });
+    structure.bind();
+
     const sheetRules = host.__EASYOFFICE_SHEET_RULES__;
     rulesUi = host.__EASYOFFICE_CREATE_SHEET_RULES_UI__({
       document,
@@ -947,6 +972,7 @@
       commitPendingFocusedSheetCell,
       bindSheetCellEvents,
       runSheetClipboardCommand,
+      runSheetStructure: structure.run,
       sortActiveSheetRange: ops.sortActiveSheetRange,
       applySheetChartSummary: ops.applySheetChartSummary,
       applySheetFormatCommand: format.applyCommand,

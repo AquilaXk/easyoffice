@@ -550,6 +550,12 @@ select:focus-visible,
 .sheet-grid td.sheet-spacer-x, .sheet-grid th.sheet-spacer-head { padding: 0; }
 #icon-toolbar [hidden] { display: none; }
 .sheet-grid th.active-axis { background-color: var(--ui-hover); background-image: linear-gradient(var(--ui-accent-bg-light), var(--ui-accent-bg-light)); }
+.sheet-grid .sheet-hidden { display: none; }
+.sheet-grid td.merge-anchor { --mw: 96px; --mh: 24px; position: relative; z-index: 1; overflow: visible; text-overflow: clip; }
+.sheet-grid td.merge-anchor::after { content: ""; position: absolute; z-index: -1; left: 0; top: 0; width: calc(var(--mw) - 1px); height: calc(var(--mh) - 1px); background: var(--ui-surface); border: 0 solid var(--ui-border-light); border-width: 0 1px 1px 0; }
+.sheet-grid td.merge-anchor.in-range::after { background: var(--ui-accent-bg-light); }
+.sheet-grid td.merge-anchor.selected-cell { outline: none; }
+.sheet-grid td.merge-anchor.selected-cell::after { outline: 2px solid var(--accent-strong); outline-offset: -2px; background: var(--ui-surface); }
 #pane-hwp:not([hidden]) { display: flex; flex-direction: column; position: relative; height: 100%; min-height: 0; overflow: hidden; }
 /* Drop highlight while a file is dragged over the window; the reference editor's value (`editor.css` 83-87). */
 .editor-pane.drag-over { background: var(--ui-selected); outline: 3px dashed var(--focus-ring); outline-offset: -3px; }

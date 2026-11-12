@@ -153,6 +153,7 @@
         sheetRowCounts: structuredClone(sheetRowCounts),
         sheetColumnWidths,
         sheetRules: typeof sheetController.getSheetRules === "function" ? sheetController.getSheetRules() : {},
+        sheetLayout: host.__EASYOFFICE_SHEET_LAYOUT__.getAll(),
         sheetFrozen,
         slides: structuredClone(slideDeckState),
         ribbonState: structuredClone(localRibbonState),
@@ -289,6 +290,7 @@
         sheetController.replaceColumnWidths(structuredClone(snap.sheetColumnWidths));
       }
       if (snap.sheetRules) host.__EASYOFFICE_SHEET_RULES__.replaceAll(structuredClone(snap.sheetRules));
+      if (snap.sheetLayout) host.__EASYOFFICE_SHEET_LAYOUT__.replaceAll(structuredClone(snap.sheetLayout));
       if (Array.isArray(snap.slides)) {
         slideDeckState.splice(0, slideDeckState.length, ...structuredClone(snap.slides));
       }

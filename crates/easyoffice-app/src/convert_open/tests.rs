@@ -931,3 +931,32 @@ fn decode_answer_names_number_formats_by_entry() {
         "{json}"
     );
 }
+
+#[test]
+fn merged_ranges_and_hidden_rows_and_columns_reach_the_page() {
+    let mut styling = SheetStyling::default();
+    styling
+        .merges
+        .push(easyoffice_formats::CellBox::parse("A1:B2").unwrap());
+    styling.hidden_rows = vec![(2, 3)];
+    styling.hidden_cols = vec![(1, 1)];
+    let document = DecodedDocument {
+        format: DocumentFormat::Xlsx,
+        title: "t".to_string(),
+        content: DecodedContent::Workbook(vec![("S".to_string(), vec![(0, 0, "x".to_string())])]),
+        warnings: Vec::new(),
+    };
+    let json = decode_response(
+        &document,
+        &[("S".to_string(), styling)],
+        "a.xlsx",
+        10,
+        None,
+        None,
+    )
+    .unwrap();
+    assert!(
+        json.contains("\"merges\":[\"A1:B2\"],\"hiddenRows\":[[3,4]],\"hiddenCols\":[[2,2]]}"),
+        "{json}"
+    );
+}

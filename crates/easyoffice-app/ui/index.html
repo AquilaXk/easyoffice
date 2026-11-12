@@ -186,6 +186,19 @@
             <div class="menu-dropdown" role="menu">
               <div class="md-item" data-studio-menu-cmd="sheet-mod-freeze" role="menuitem" tabindex="-1"><span class="md-label">행·열 틀 고정</span></div>
               <div class="md-sep"></div>
+              <div class="md-item" data-sheet-act="row-insert-above" role="menuitem" tabindex="-1"><span class="md-label">행 위에 삽입</span></div>
+              <div class="md-item" data-sheet-act="row-insert-below" role="menuitem" tabindex="-1"><span class="md-label">행 아래에 삽입</span></div>
+              <div class="md-item" data-sheet-act="col-insert-left" role="menuitem" tabindex="-1"><span class="md-label">열 왼쪽에 삽입</span></div>
+              <div class="md-item" data-sheet-act="col-insert-right" role="menuitem" tabindex="-1"><span class="md-label">열 오른쪽에 삽입</span></div>
+              <div class="md-item" data-sheet-act="row-delete" role="menuitem" tabindex="-1"><span class="md-label">행 삭제</span></div>
+              <div class="md-item" data-sheet-act="col-delete" role="menuitem" tabindex="-1"><span class="md-label">열 삭제</span></div>
+              <div class="md-sep"></div>
+              <div class="md-item" data-sheet-act="hide" role="menuitem" tabindex="-1"><span class="md-label">숨기기</span></div>
+              <div class="md-item" data-sheet-act="unhide" role="menuitem" tabindex="-1"><span class="md-label">숨기기 취소</span></div>
+              <div class="md-sep"></div>
+              <div class="md-item" data-sheet-act="merge" role="menuitem" tabindex="-1"><span class="md-label">셀 병합</span></div>
+              <div class="md-item" data-sheet-act="unmerge" role="menuitem" tabindex="-1"><span class="md-label">병합 해제</span></div>
+              <div class="md-sep"></div>
               <div class="md-item" data-studio-menu-cmd="layout-orientation" role="menuitem" tabindex="-1"><span class="md-label">용지 방향 전환</span></div>
               <div class="md-item" data-studio-menu-cmd="layout-margins" role="menuitem" tabindex="-1"><span class="md-label">여백 전환</span></div>
             </div>
@@ -1168,6 +1181,18 @@
 
     <output id="shell-toast" class="shell-toast" aria-live="polite" hidden></output>
 
+    <div id="sheet-header-menu" class="context-menu" role="menu" aria-label="머리글 메뉴" hidden>
+      <div class="md-item" data-sheet-act="row-insert-above" data-axis="row" role="menuitem" tabindex="-1"><span class="md-label">행 위에 삽입</span></div>
+      <div class="md-item" data-sheet-act="row-insert-below" data-axis="row" role="menuitem" tabindex="-1"><span class="md-label">행 아래에 삽입</span></div>
+      <div class="md-item" data-sheet-act="row-delete" data-axis="row" role="menuitem" tabindex="-1"><span class="md-label">행 삭제</span></div>
+      <div class="md-item" data-sheet-act="col-insert-left" data-axis="col" role="menuitem" tabindex="-1"><span class="md-label">열 왼쪽에 삽입</span></div>
+      <div class="md-item" data-sheet-act="col-insert-right" data-axis="col" role="menuitem" tabindex="-1"><span class="md-label">열 오른쪽에 삽입</span></div>
+      <div class="md-item" data-sheet-act="col-delete" data-axis="col" role="menuitem" tabindex="-1"><span class="md-label">열 삭제</span></div>
+      <div class="md-sep"></div>
+      <div class="md-item" data-sheet-act="hide" role="menuitem" tabindex="-1"><span class="md-label">숨기기</span></div>
+      <div class="md-item" data-sheet-act="unhide" role="menuitem" tabindex="-1"><span class="md-label">숨기기 취소</span></div>
+    </div>
+
     <div id="slide-context-menu" class="slide-context-menu" role="menu" aria-label="슬라이드 메뉴" hidden>
       <button type="button" role="menuitem" data-slide-action="new">새 슬라이드</button>
       <button type="button" role="menuitem" data-slide-action="duplicate">복제</button>
@@ -1217,6 +1242,7 @@
     <script src="./find-replace.js"></script>
     <script src="./workspace-tools.js"></script>
     <script src="./workspace-panels.js"></script>
+    <script src="./sheet-layout.js"></script>
     <script src="./sheet-grid.js"></script>
     <script src="./sheet-clipboard.js"></script>
     <script src="./sheet-input.js"></script>
@@ -1226,6 +1252,7 @@
     <script src="./sheet-rules-ui.js"></script>
     <script src="./sheet-format.js"></script>
     <script src="./sheet-numfmt-ui.js"></script>
+    <script src="./sheet-structure.js"></script>
     <script src="./sheet-controller.js"></script>
     <script src="./ribbon-history.js"></script>
     <script src="./workspace-session.js"></script>

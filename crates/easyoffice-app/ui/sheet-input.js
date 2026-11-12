@@ -61,7 +61,8 @@
 
   function createSheetInput(api) {
     const { document, grid, sheetCellFocusState, isFormulaStr } = api;
-    const sel = { ar: 1, ac: 1, cr: 1, cc: 1 };
+    // `axis`: "row" or "col" while a whole row or column header is selected, else null.
+    const sel = { ar: 1, ac: 1, cr: 1, cc: 1, axis: null };
     const bound = new WeakSet();
     let delegatesBound = false;
     let drag = null;
@@ -204,6 +205,7 @@
     function updateSelection(cellRef) {
       const p = grid.parseRef(cellRef) || { row: 1, col: 1 };
       if (p.row !== sel.ar || p.col !== sel.ac) {
+        sel.axis = null;
         sel.ar = sel.cr = p.row;
         sel.ac = sel.cc = p.col;
         grid.ensureVisible(p.row, p.col);
@@ -228,9 +230,16 @@
     }
 
     function select(row, col, extend) {
-      const r = clamp(row, 1, grid.MAX_ROWS);
-      const c = clamp(col, 1, grid.MAX_COLS);
+      let r = clamp(row, 1, grid.MAX_ROWS);
+      let c = clamp(col, 1, grid.MAX_COLS);
       commitIfEditing();
+      // A click or a move that lands inside a merged range selects its anchor cell.
+      const merged = extend ? null : grid.mergeAt?.(r, c);
+      if (merged) {
+        r = merged.r1;
+        c = merged.c1;
+      }
+      sel.axis = null;
       if (extend) {
         sel.cr = r;
         sel.cc = c;
@@ -243,7 +252,28 @@
       refreshChrome();
     }
 
+    // Selects whole rows or columns (a click on a header; `extend` grows the selection to `index`).
+    function selectAxis(axis, index, extend) {
+      commitIfEditing();
+      const last = axis === "col" ? grid.MAX_COLS : grid.MAX_ROWS;
+      const at = clamp(index, 1, last);
+      if (axis === "col") {
+        if (!(extend && sel.axis === "col")) sel.ac = at;
+        sel.cc = at;
+        sel.ar = 1;
+        sel.cr = grid.MAX_ROWS;
+      } else {
+        if (!(extend && sel.axis === "row")) sel.ar = at;
+        sel.cr = at;
+        sel.ac = 1;
+        sel.cc = grid.MAX_COLS;
+      }
+      sel.axis = axis;
+      refreshChrome();
+    }
+
     function selectAll() {
+      sel.axis = null;
       const ext = api.getExtent();
       sel.ar = 1;
       sel.ac = 1;
@@ -298,9 +328,19 @@
         select(t.r, t.c, extend);
         return;
       }
-      const baseR = extend ? sel.cr : sel.ar;
-      const baseC = extend ? sel.cc : sel.ac;
-      select(baseR + dr, baseC + dc, extend);
+      let baseR = extend ? sel.cr : sel.ar;
+      let baseC = extend ? sel.cc : sel.ac;
+      // Leave a merged range past its far edge, and step over hidden rows and columns.
+      const merged = grid.mergeAt?.(baseR, baseC);
+      if (merged) {
+        if (dr > 0) baseR = merged.r2;
+        if (dc > 0) baseC = merged.c2;
+      }
+      let nr = baseR + dr;
+      let nc = baseC + dc;
+      while (dr && inGridBounds(nr, nc) && grid.rowHidden?.(nr)) nr += dr;
+      while (dc && inGridBounds(nr, nc) && grid.colHidden?.(nc)) nc += dc;
+      select(nr, nc, extend);
     }
 
     // ---- edit modes ------------------------------------------------------------------------
@@ -546,6 +586,13 @@
         resize = { col, startX: ev.clientX, startW: grid.colWidth(col) };
         return;
       }
+      const head = ev.target?.closest?.("#pane-sheet th[data-col], #pane-sheet th[data-row]");
+      if (head) {
+        ev.preventDefault();
+        if (head.dataset.col) selectAxis("col", grid.colIndex(head.dataset.col), Boolean(ev.shiftKey));
+        else selectAxis("row", Number(head.dataset.row), Boolean(ev.shiftKey));
+        return;
+      }
       const td = gridTdOf(ev.target);
       if (!td) return;
       const st = stateOf(td);
@@ -668,6 +715,7 @@
       commitIfEditing,
       endEdit,
       getRange,
+      selectAxis,
       runClipboardCommand,
       shiftFormula: clip.shiftFormula,
       getSelection: () => ({ ...sel }),
