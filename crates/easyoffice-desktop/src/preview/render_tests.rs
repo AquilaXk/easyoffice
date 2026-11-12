@@ -3,10 +3,11 @@
 //! where it is about the picture (the rhwp samples need `node scripts/checkout-rhwp.mjs`).
 
 use super::bounded::{self, Gate, RenderError};
+use super::card_tests::fonts;
 use super::*;
-use crate::pdf_fonts::shared_font_db;
 use std::io::Cursor;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 use std::thread;
 use std::time::Instant;
 
@@ -52,6 +53,38 @@ fn hwp_file(dir: &tempfile::TempDir, name: &str, bytes: &[u8]) -> PathBuf {
     path
 }
 
+/// A state for drawing for real. The production deadline (10 s) and permit wait (2 s) bound a
+/// shell that has the machine to itself; a debug build on a loaded runner draws the same page in
+/// a multiple of the time. A test about the picture gives the render ample time, a test about the
+/// limits sets its own with [`state`].
+pub(super) fn patient_state() -> PreviewState {
+    state(2, 120_000, 60_000)
+}
+
+/// The picture of `path` drawn by the real step with the bundled fonts, the way the page asks. When
+/// there is none, the panic says why: the render's own error, or that it never answered.
+pub(super) fn drawn(state: &PreviewState, id: &str, path: &Path) -> Arc<Thumbnail> {
+    type Outcome = Option<(Result<(), RenderError>, Duration)>;
+    let outcome: Arc<Mutex<Outcome>> = Arc::default();
+    let record = Arc::clone(&outcome);
+    let draw = first_page_step(path);
+    let found = load_preview_with(state, id, path, move |document| {
+        let started = Instant::now();
+        let drawn = draw(document, &fonts());
+        *record.lock().unwrap() =
+            Some((drawn.as_ref().map(drop).map_err(|e| *e), started.elapsed()));
+        drawn
+    });
+    found.unwrap_or_else(|| {
+        let why = match *outcome.lock().unwrap() {
+            None => "the render never started or did not answer (Busy or TimedOut)".to_string(),
+            Some((Err(error), took)) => format!("the render failed with {error:?} after {took:?}"),
+            Some((Ok(()), took)) => format!("the render took {took:?} but its picture was refused"),
+        };
+        panic!("no picture for {}: {why}", path.display())
+    })
+}
+
 fn fake_png(_: Vec<u8>) -> Result<Vec<u8>, RenderError> {
     Ok(PNG_1X1.to_vec())
 }
@@ -94,11 +127,9 @@ fn without_picture(name: &str, dir: &tempfile::TempDir) -> PathBuf {
 
 #[test]
 fn a_hangul_file_without_a_picture_gets_its_first_page_drawn() {
-    let _ = shared_font_db(&[]);
     let dir = tempfile::tempdir().unwrap();
     let path = without_picture("biz_plan.hwp", &dir);
-    let found =
-        load_preview(&PreviewState::new(), "0000000000000001", &path).expect("a drawn page");
+    let found = drawn(&patient_state(), "0000000000000001", &path);
     assert_eq!(found.mime, "image/png");
     let (width, height) = png_size(&found.bytes);
     assert_eq!(width.max(height), render::CARD_SIDE_PX);
@@ -112,11 +143,9 @@ fn a_hangul_file_without_a_picture_gets_its_first_page_drawn() {
 
 #[test]
 fn a_hwpx_file_is_drawn_too() {
-    let _ = shared_font_db(&[]);
     let dir = tempfile::tempdir().unwrap();
     let path = without_picture("form-002.hwpx", &dir);
-    let found =
-        load_preview(&PreviewState::new(), "0000000000000002", &path).expect("a drawn page");
+    let found = drawn(&patient_state(), "0000000000000002", &path);
     let (width, height) = png_size(&found.bytes);
     assert_eq!(width.max(height), render::CARD_SIDE_PX);
 }
@@ -167,10 +196,16 @@ fn damaged_and_hostile_hangul_files_give_no_picture_and_no_panic() {
     for (n, (name, bytes)) in cases.into_iter().enumerate() {
         let path = hwp_file(&dir, name, &bytes);
         let started = Instant::now();
-        let found = load_preview(&PreviewState::new(), &format!("{n:016x}"), &path);
+        let draw = first_page_step(&path);
+        let found = load_preview_with(
+            &PreviewState::new(),
+            &format!("{n:016x}"),
+            &path,
+            move |document| draw(document, &fonts()),
+        );
         assert!(found.is_none(), "{name}");
         assert!(
-            started.elapsed() < Duration::from_secs(10),
+            started.elapsed() < RENDER_DEADLINE + Duration::from_secs(5),
             "{name} took too long"
         );
     }
@@ -302,7 +337,7 @@ fn the_file_is_read_on_the_worker_and_only_when_a_permit_is_free() {
 
 #[test]
 fn the_renderer_refuses_empty_and_oversized_input_itself() {
-    let fonts = shared_font_db(&[]);
+    let fonts = fonts();
     assert_eq!(
         render::first_page_png(&[], &fonts),
         Err(RenderError::TooLarge)

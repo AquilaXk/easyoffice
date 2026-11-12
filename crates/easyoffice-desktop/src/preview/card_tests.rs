@@ -4,6 +4,7 @@
 use super::bounded::RenderError;
 use super::card::{self, Align, Block, Content};
 use super::card_source::{self, card_png, content_of};
+use super::render_tests::{drawn, patient_state};
 use super::source::{whole_lines, Source, TEXT_PREFIX_BYTES};
 use super::tests::zip;
 use super::*;
@@ -28,7 +29,7 @@ const KOREAN: &str = "분기 실적 보고서 첫 문단입니다. 매출은 전
 /// fonts are left out on purpose: a runner without a Korean font would draw no text at all, and a
 /// developer machine with one would draw it, so a test about ink would pass or fail by machine. It
 /// is not the process-wide `shared_font_db`, whose first caller decides what it holds.
-fn fonts() -> Arc<usvg::fontdb::Database> {
+pub(super) fn fonts() -> Arc<usvg::fontdb::Database> {
     static FONTS: std::sync::OnceLock<Arc<usvg::fontdb::Database>> = std::sync::OnceLock::new();
     Arc::clone(FONTS.get_or_init(|| {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(BUNDLED_FONT_DIR);
@@ -563,12 +564,11 @@ fn a_text_file_over_the_window_limit_is_not_drawn_but_one_within_is_read_in_part
 #[test]
 fn recent_files_of_every_card_kind_get_a_picture_from_the_command_path() {
     let dir = tempfile::tempdir().unwrap();
-    let state = PreviewState::new();
+    let state = patient_state();
     for (n, (extension, bytes)) in samples().into_iter().enumerate() {
         let path = dir.path().join(format!("recent.{extension}"));
         fs::write(&path, bytes).unwrap();
-        let found = load_preview(&state, &format!("{n:016x}"), &path)
-            .unwrap_or_else(|| panic!("{extension} has a card"));
+        let found = drawn(&state, &format!("{n:016x}"), &path);
         assert_eq!(
             (found.mime, png_size(&found.bytes)),
             ("image/png", (480, 360)),

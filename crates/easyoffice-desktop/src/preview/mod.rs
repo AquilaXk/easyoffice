@@ -35,6 +35,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 use tauri::{AppHandle, Manager};
+use usvg::fontdb::Database;
 
 /// Largest picture the shell accepts from inside a file (compressed and uncompressed alike).
 pub const MAX_THUMBNAIL_BYTES: usize = 256 * 1024;
@@ -189,20 +190,31 @@ impl PreviewState {
 /// The picture of a recent document: the one inside the file, else its first page.
 pub(crate) fn load_preview(state: &PreviewState, id: &str, path: &Path) -> Option<Arc<Thumbnail>> {
     let font_dirs = Arc::clone(&state.font_dirs);
+    let draw = first_page_step(path);
+    load_preview_with(state, id, path, move |document| {
+        draw(document, &shared_font_db(&font_dirs))
+    })
+}
+
+/// The first-page step for the kind of file `path` names: the way to draw it from its bytes with a
+/// font database. Split from [`load_preview`] so a test can draw for real with its own fonts.
+fn first_page_step(
+    path: &Path,
+) -> impl FnOnce(Vec<u8>, &Arc<Database>) -> Result<Vec<u8>, RenderError> + Send + 'static {
     let source = Source::of(path);
     let extension = path
         .extension()
         .and_then(|extension| extension.to_str())
         .unwrap_or_default()
         .to_ascii_lowercase();
-    load_preview_with(state, id, path, move |document| match source {
-        Some(Source::Hangul) => render::first_page_png(&document, &shared_font_db(&font_dirs)),
-        Some(Source::Pdf) => pdf_page::first_page_png(document, &shared_font_db(&font_dirs)),
+    move |document, fonts| match source {
+        Some(Source::Hangul) => render::first_page_png(&document, fonts),
+        Some(Source::Pdf) => pdf_page::first_page_png(document, fonts),
         Some(Source::Document | Source::Text) => {
-            card_source::card_png(&document, &extension, &shared_font_db(&font_dirs))
+            card_source::card_png(&document, &extension, fonts)
         }
         None => Err(RenderError::Unreadable),
-    })
+    }
 }
 
 /// [`load_preview`] with the first-page step given by the caller (a test hook; the real step runs
