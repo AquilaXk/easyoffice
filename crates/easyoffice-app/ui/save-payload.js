@@ -333,6 +333,7 @@
         if (cur.ctx.heading) block.heading = cur.ctx.heading;
         if (cur.ctx.toc !== undefined) block.toc = cur.ctx.toc;
         if (cur.ctx.bookmark !== undefined) block.bookmark = cur.ctx.bookmark;
+        if (cur.ctx.pageBreak) block.pageBreakBefore = true;
         if (cur.ctx.list) block.list = cur.ctx.list;
         blocks.push(block);
       }
@@ -395,6 +396,7 @@
         heading: headingMatch ? Number(headingMatch[1]) : ctx.heading,
         toc: tocRole(node) ?? ctx.toc,
         bookmark: headingMatch ? bookmarkNumber(node.id) : undefined,
+        pageBreak: node.dataset?.eoBreak === "page",
         list: nextList,
         layout: LAYOUT_TAGS.has(tag) ? paragraphLayout(node, baseLineHeight) : ctx.layout,
       };

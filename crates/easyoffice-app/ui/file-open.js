@@ -99,6 +99,7 @@
       spec.style.lineHeight = String(spacing / 100);
       spec.data.eoLineSpacing = String(spacing);
     }
+    if (block.pageBreakBefore === true) spec.data.eoBreak = "page";
     return spec;
   }
 
