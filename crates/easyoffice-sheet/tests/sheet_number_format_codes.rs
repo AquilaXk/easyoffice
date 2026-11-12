@@ -146,3 +146,43 @@ fn section_edges() {
         Err(FormulaError::Value)
     );
 }
+
+mod cell_display {
+    use easyoffice_sheet::format_cell_value;
+
+    fn shown(code: &str, raw: &str) -> Option<String> {
+        format_cell_value(code, raw).map(|f| f.text)
+    }
+
+    #[test]
+    fn numbers_use_the_number_sections() {
+        assert_eq!(shown("#,##0.00", "1234.5").as_deref(), Some("1,234.50"));
+        assert_eq!(shown("0.0%", "0.256").as_deref(), Some("25.6%"));
+        assert_eq!(shown("yyyy-mm-dd", "45000").as_deref(), Some("2023-03-15"));
+        assert_eq!(shown("\"₩\"#,##0", " 1500 ").as_deref(), Some("₩1,500"));
+        assert_eq!(shown("0.00E+00", "12345").as_deref(), Some("1.23E+04"));
+        assert_eq!(shown("# ?/?", "0.75").as_deref(), Some(" 3/4"));
+    }
+
+    #[test]
+    fn negative_sections_carry_their_color() {
+        let f = format_cell_value("#,##0;[Red]-#,##0", "-5").unwrap();
+        assert_eq!(f.text, "-5");
+        assert_eq!(f.color.map(|c| c.hex()).as_deref(), Some("#ff0000"));
+    }
+
+    #[test]
+    fn text_keeps_its_display_unless_the_code_has_a_text_section() {
+        assert_eq!(shown("0.00", "abc"), None);
+        assert_eq!(shown("0.00;;;\"[\"@\"]\"", "abc").as_deref(), Some("[abc]"));
+        // The text format shows a number-looking value exactly as typed.
+        assert_eq!(shown("@", "00123").as_deref(), Some("00123"));
+    }
+
+    #[test]
+    fn values_the_code_cannot_show_fall_back_to_general() {
+        assert_eq!(shown("yyyy-mm-dd", "-3"), None);
+        assert_eq!(shown("0.00", "inf"), None);
+        assert_eq!(shown("0.00", ""), None);
+    }
+}

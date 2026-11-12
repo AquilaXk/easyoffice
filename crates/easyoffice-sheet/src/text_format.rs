@@ -520,6 +520,16 @@ impl CompiledFormat {
         Ok(out)
     }
 
+    /// Whether the code is the text format alone (`@`): every value shows as typed.
+    pub fn is_text_only(&self) -> bool {
+        self.sections.len() == 1 && self.text_idx == Some(0)
+    }
+
+    /// Whether the code has a section for text values.
+    pub fn has_text_section(&self) -> bool {
+        self.text_idx.is_some()
+    }
+
     /// Applies the text section (`@`) to a text value; without one the text is unchanged.
     pub fn render_text(&self, text: &str) -> FormattedText {
         let Some(section) = self.text_idx.map(|i| &self.sections[i]) else {
@@ -584,4 +594,21 @@ pub fn format_number_with_code(num: f64, fmt_str: &str) -> Result<String, Formul
 /// Like [`format_number_with_code`] but also reports the section color and `*x` fill request.
 pub fn format_number_styled(num: f64, fmt_str: &str) -> Result<FormattedText, FormulaError> {
     compiled_format(fmt_str).render_number(num)
+}
+
+/// Display of a cell's stored value `raw` under the cell format `code` (PD-191): a number goes
+/// through the number sections, text through the text section. `None` when the cell keeps its
+/// General display: the value is text and the code has no text section, or a date/time code
+/// cannot show the number.
+pub fn format_cell_value(code: &str, raw: &str) -> Option<FormattedText> {
+    let compiled = compiled_format(code);
+    if compiled.is_text_only() {
+        return Some(compiled.render_text(raw));
+    }
+    match raw.trim().parse::<f64>() {
+        Ok(num) if num.is_finite() => compiled.render_number(num).ok(),
+        _ => compiled
+            .has_text_section()
+            .then(|| compiled.render_text(raw)),
+    }
 }
