@@ -11,7 +11,7 @@ DOCX, XLSX, PPTX, PDF 같은 오피스 형식과 HWP/HWPX를 한 작업 공간�
 현재 EasyOffice는 다음 흐름을 지원합니다.
 
 * 문서 편집: DOCX, DOC, ODT, RTF, MD, TXT
-* 스프레드시트 편집: XLSX, XLS, ODS, CSV, TSV, 내장 함수 203종, 피벗·차트·조건부 서식
+* 스프레드시트 편집: XLSX, XLS, ODS, CSV, TSV, 내장 함수 262종, 피벗·차트·조건부 서식
 * 프레젠테이션 편집: PPTX, PPT, PPSX, ODP, 발표자 보기
 * PDF 스튜디오: 주석, 쪽 분할·병합·재배치·회전
 * HWP/HWPX 열기·편집, 저장 전 검증, 자동 저장

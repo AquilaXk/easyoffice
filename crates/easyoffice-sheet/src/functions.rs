@@ -6,8 +6,9 @@ use crate::{EvalContext, EvaluatedCellValue, Expr, FormulaError, SheetEngine};
 /// Canonical built-in spreadsheet functions: the 122 core functions of 8 standard categories (Math &
 /// Trig 27, Statistical 22, Logical 10, Lookup & Reference 12, Text 21, Date & Time 10, Financial 11,
 /// Information 9), then 22 more (lookup and reference 6, database 12, matrix 4), then the 59 of bundle B
-/// (PD-201): financial 28, engineering 16, statistics 13, text and information 2.
-pub const CANONICAL_FUNCTIONS: [&str; 203] = [
+/// (PD-201): financial 28, engineering 16, statistics 13, text and information 2, then the 59 of bundle C
+/// (PD-205): math 17, byte text 9, statistics 19, legacy names 14.
+pub const CANONICAL_FUNCTIONS: [&str; 262] = [
     "SUM",
     "PRODUCT",
     "SUMPRODUCT",
@@ -211,6 +212,65 @@ pub const CANONICAL_FUNCTIONS: [&str; 203] = [
     "VARPA",
     "ISNONTEXT",
     "ENCODEURL",
+    "ACOSH",
+    "ASINH",
+    "ATANH",
+    "ACOT",
+    "ACOTH",
+    "COT",
+    "COTH",
+    "CSC",
+    "CSCH",
+    "SEC",
+    "SECH",
+    "CEILING.MATH",
+    "CEILING.PRECISE",
+    "FLOOR.MATH",
+    "FLOOR.PRECISE",
+    "ROUNDBANK",
+    "AGGREGATE",
+    "LENB",
+    "LEFTB",
+    "MIDB",
+    "RIGHTB",
+    "FINDB",
+    "SEARCHB",
+    "REPLACEB",
+    "ASC",
+    "DBCS",
+    "F.DIST",
+    "F.DIST.RT",
+    "F.INV",
+    "F.INV.RT",
+    "EXPON.DIST",
+    "WEIBULL.DIST",
+    "LOGNORM.DIST",
+    "LOGNORM.INV",
+    "POISSON.DIST",
+    "NEGBINOM.DIST",
+    "HYPGEOM.DIST",
+    "BINOM.DIST.RANGE",
+    "CONFIDENCE.NORM",
+    "CONFIDENCE.T",
+    "CHISQ.TEST",
+    "F.TEST",
+    "T.TEST",
+    "AVERAGE.WEIGHTED",
+    "MARGINOFERROR",
+    "FDIST",
+    "FINV",
+    "EXPONDIST",
+    "WEIBULL",
+    "LOGNORMDIST",
+    "LOGINV",
+    "POISSON",
+    "NEGBINOMDIST",
+    "HYPGEOMDIST",
+    "CONFIDENCE",
+    "CHITEST",
+    "FTEST",
+    "TTEST",
+    "COVAR",
 ];
 
 /// The numeric values among `vals`.
@@ -443,9 +503,12 @@ impl SheetEngine {
             | "CHIINV" | "BETA.DIST" | "BETA.INV" | "BETADIST" | "BETAINV" | "GAMMA.DIST"
             | "GAMMADIST" | "GAMMA.INV" | "GAMMAINV" | "GAMMALN" | "GAMMALN.PRECISE" | "GAMMA"
             | "BINOM.DIST" | "BINOMDIST" | "BINOM.INV" | "CRITBINOM" | "NORM.DIST" | "NORMDIST"
-            | "NORM.INV" | "NORMINV" | "NORM.S.INV" | "NORMSINV" => {
-                self.eval_dist_func(name, args, ctx, depth)
-            }
+            | "NORM.INV" | "NORMINV" | "NORM.S.INV" | "NORMSINV" | "F.DIST" | "F.DIST.RT"
+            | "F.INV" | "F.INV.RT" | "FDIST" | "FINV" | "EXPON.DIST" | "EXPONDIST"
+            | "WEIBULL.DIST" | "WEIBULL" | "LOGNORM.DIST" | "LOGNORM.INV" | "LOGNORMDIST"
+            | "LOGINV" | "POISSON.DIST" | "POISSON" | "NEGBINOM.DIST" | "NEGBINOMDIST"
+            | "HYPGEOM.DIST" | "HYPGEOMDIST" | "BINOM.DIST.RANGE" | "CONFIDENCE.NORM"
+            | "CONFIDENCE" | "CONFIDENCE.T" => self.eval_dist_func(name, args, ctx, depth),
             "LOOKUP" | "HYPERLINK" | "ISFORMULA" | "FORMULATEXT" | "ADDRESS" | "AREAS" => {
                 self.eval_lookup_ref_func(name, args, ctx, depth)
             }
@@ -479,6 +542,17 @@ impl SheetEngine {
             }
             "IMSINH" | "IMCOSH" | "IMTAN" | "IMTANH" | "IMSEC" | "IMSECH" | "IMCSC" | "IMCSCH"
             | "IMCOT" | "IMCOTH" | "IMLOG" => self.eval_im_trig_func(name, args, ctx, depth),
+            "ACOSH" | "ASINH" | "ATANH" | "ACOT" | "ACOTH" | "COT" | "COTH" | "CSC" | "CSCH"
+            | "SEC" | "SECH" | "CEILING.MATH" | "CEILING.PRECISE" | "FLOOR.MATH"
+            | "FLOOR.PRECISE" | "ROUNDBANK" => self.eval_math_trig_func(name, args, ctx, depth),
+            "AGGREGATE" => self.eval_aggregate(args, ctx, depth),
+            "LENB" | "LEFTB" | "MIDB" | "RIGHTB" | "FINDB" | "SEARCHB" | "REPLACEB" | "ASC"
+            | "DBCS" => self.eval_text_bytes_func(name, args, ctx, depth),
+            "CHISQ.TEST" | "CHITEST" | "F.TEST" | "FTEST" | "T.TEST" | "TTEST"
+            | "AVERAGE.WEIGHTED" | "MARGINOFERROR" => {
+                self.eval_stat_tests_func(name, args, ctx, depth)
+            }
+            "COVAR" => self.eval_stat_regression("COVARIANCE.P", args, ctx, depth),
             _ => Err(FormulaError::Name),
         }
     }
@@ -796,170 +870,5 @@ impl SheetEngine {
         Ok(EvaluatedCellValue::Number(
             v_lo + (pos - lo as f64) * (v_hi - v_lo),
         ))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::{EvaluatedCellValue, FormulaError, SheetEngine};
-
-    #[test]
-    fn statistical_math_text_and_date_reference_upgrades() {
-        let mut e = SheetEngine::new("Sheet1");
-        for (idx, v) in [2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0].iter().enumerate() {
-            e.set_cell(&format!("A{}", idx + 1), v.to_string()).unwrap();
-        }
-        assert_eq!(
-            e.evaluate_formula_str("=AVEDEV(A1:A8)"),
-            EvaluatedCellValue::Number(1.5)
-        );
-        assert_eq!(
-            e.evaluate_formula_str("=DEVSQ(A1:A8)"),
-            EvaluatedCellValue::Number(32.0)
-        );
-        assert_eq!(
-            e.evaluate_formula_str("=ROUND(GEOMEAN(A1:A8),4)"),
-            EvaluatedCellValue::Number(4.6032)
-        );
-        assert_eq!(
-            e.evaluate_formula_str("=ROUND(HARMEAN(A1:A8),4)"),
-            EvaluatedCellValue::Number(4.2018)
-        );
-        assert_eq!(
-            e.evaluate_formula_str("=TRIMMEAN(A1:A8,0.25)"),
-            EvaluatedCellValue::Number(4.833333333333333)
-        );
-        assert_eq!(
-            e.evaluate_formula_str("=ROUND(SKEW(A1:A8),4)"),
-            EvaluatedCellValue::Number(0.8185)
-        );
-        assert_eq!(
-            e.evaluate_formula_str("=ROUND(KURT(A1:A8),4)"),
-            EvaluatedCellValue::Number(0.9406)
-        );
-        assert_eq!(
-            e.evaluate_formula_str("=PERCENTILE.EXC(A1:A8,0.5)"),
-            EvaluatedCellValue::Number(4.5)
-        );
-        assert_eq!(
-            e.evaluate_formula_str("=QUARTILE.EXC(A1:A8,2)"),
-            EvaluatedCellValue::Number(4.5)
-        );
-        assert_eq!(
-            e.evaluate_formula_str("=RANK.EQ(4,A1:A8)"),
-            EvaluatedCellValue::Number(5.0)
-        );
-        assert_eq!(
-            e.evaluate_formula_str("=RANK.AVG(4,A1:A8)"),
-            EvaluatedCellValue::Number(6.0)
-        );
-
-        assert_eq!(
-            e.evaluate_formula_str("=SUMSQ(3,4)"),
-            EvaluatedCellValue::Number(25.0)
-        );
-        assert_eq!(
-            e.evaluate_formula_str("=GCD(24,36)"),
-            EvaluatedCellValue::Number(12.0)
-        );
-        assert_eq!(
-            e.evaluate_formula_str("=LCM(4,6)"),
-            EvaluatedCellValue::Number(12.0)
-        );
-        assert_eq!(
-            e.evaluate_formula_str("=COMBIN(5,2)"),
-            EvaluatedCellValue::Number(10.0)
-        );
-        assert_eq!(
-            e.evaluate_formula_str("=PERMUT(5,2)"),
-            EvaluatedCellValue::Number(20.0)
-        );
-        assert_eq!(
-            e.evaluate_formula_str("=EVEN(3)"),
-            EvaluatedCellValue::Number(4.0)
-        );
-        assert_eq!(
-            e.evaluate_formula_str("=ODD(-2)"),
-            EvaluatedCellValue::Number(-3.0)
-        );
-        assert_eq!(
-            e.evaluate_formula_str("=FACTDOUBLE(6)"),
-            EvaluatedCellValue::Number(48.0)
-        );
-        assert_eq!(
-            e.evaluate_formula_str("=DEGREES(RADIANS(180))"),
-            EvaluatedCellValue::Number(180.0)
-        );
-        assert_eq!(
-            e.evaluate_formula_str("=BASE(255,16,4)"),
-            EvaluatedCellValue::Text("00FF".into())
-        );
-        assert_eq!(
-            e.evaluate_formula_str("=DECIMAL(\"FF\",16)"),
-            EvaluatedCellValue::Number(255.0)
-        );
-        assert_eq!(
-            e.evaluate_formula_str("=ROMAN(1999)"),
-            EvaluatedCellValue::Text("MCMXCIX".into())
-        );
-        assert_eq!(
-            e.evaluate_formula_str("=ARABIC(\"MCMXCIX\")"),
-            EvaluatedCellValue::Number(1999.0)
-        );
-        assert_eq!(
-            e.evaluate_formula_str(
-                "=DEGREES(ATAN2(1,1)-ASIN(0)-ACOS(1)-ATAN(0)-SINH(0)-COSH(0)+1)"
-            ),
-            EvaluatedCellValue::Number(45.0)
-        );
-        assert_eq!(
-            e.evaluate_formula_str("=ROUND(SQRTPI(1)+TANH(0),4)"),
-            EvaluatedCellValue::Number(1.7725)
-        );
-
-        assert_eq!(
-            e.evaluate_formula_str("=TEXTBEFORE(\"a-b-c\",\"-\",2)"),
-            EvaluatedCellValue::Text("a-b".into())
-        );
-        assert_eq!(
-            e.evaluate_formula_str("=TEXTAFTER(\"a-b-c\",\"-\",-1)"),
-            EvaluatedCellValue::Text("c".into())
-        );
-        assert_eq!(
-            e.evaluate_formula_str("=NUMBERVALUE(\"1.234,5%\", \",\", \".\")"),
-            EvaluatedCellValue::Number(12.345)
-        );
-        assert_eq!(
-            e.evaluate_formula_str("=VALUETOTEXT(\"hi\",1)"),
-            EvaluatedCellValue::Text("\"hi\"".into())
-        );
-        assert_eq!(
-            e.evaluate_formula_str("=UNICODE(UNICHAR(9731))"),
-            EvaluatedCellValue::Number(9731.0)
-        );
-        assert_eq!(
-            e.evaluate_formula_str("=ERROR.TYPE(NA())"),
-            EvaluatedCellValue::Number(7.0)
-        );
-        assert_eq!(
-            e.evaluate_formula_str("=TIMEVALUE(\"06:00 PM\")"),
-            EvaluatedCellValue::Number(0.75)
-        );
-        assert_eq!(
-            e.evaluate_formula_str("=WEEKNUM(DATE(2024,1,7),1)"),
-            EvaluatedCellValue::Number(2.0)
-        );
-        assert_eq!(
-            e.evaluate_formula_str("=ISOWEEKNUM(DATE(2024,1,4))"),
-            EvaluatedCellValue::Number(1.0)
-        );
-        assert_eq!(
-            e.evaluate_formula_str("=YEARFRAC(DATE(2024,1,1),DATE(2024,7,1),0)"),
-            EvaluatedCellValue::Number(0.5)
-        );
-        assert_eq!(
-            e.evaluate_formula_str("=ERROR.TYPE(123)"),
-            EvaluatedCellValue::Error(FormulaError::Na)
-        );
     }
 }

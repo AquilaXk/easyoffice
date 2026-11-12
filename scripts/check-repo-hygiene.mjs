@@ -674,8 +674,8 @@ if (
   if (formatCount !== 20) {
     errors.push(`Expected 20 read/write DocumentFormat variants in crates/easyoffice-formats/src/lib.rs, found ${formatCount}`);
   }
-  if (functionCount !== 203) {
-    errors.push(`Expected 203 built-in functions in crates/easyoffice-sheet/src/functions.rs, found ${functionCount}`);
+  if (functionCount !== 262) {
+    errors.push(`Expected 262 built-in functions in crates/easyoffice-sheet/src/functions.rs, found ${functionCount}`);
   }
   if (ribbonCommandCount !== 140) {
     errors.push(`Expected 140 ribbon commands in ribbon-catalog.js, found ${ribbonCommandCount}`);

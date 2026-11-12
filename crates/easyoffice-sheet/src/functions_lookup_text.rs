@@ -17,7 +17,7 @@ fn check_text_arity(args: &[Expr], min: usize, max: usize) -> Result<(), Formula
 }
 
 /// Wraps `out` as a text value, failing when it exceeds the cell text limit.
-fn bounded_text(out: String) -> CellResult {
+pub(crate) fn bounded_text(out: String) -> CellResult {
     if out.chars().count() > SheetEngine::MAX_CELL_TEXT_CHARS {
         return Err(FormulaError::Value);
     }
@@ -109,7 +109,7 @@ fn substitute_text(text: &str, old: &str, new: &str, target: Option<usize>) -> C
 }
 
 /// SEARCH: case-insensitive wildcard search; `start` is 1-based.
-fn search_wildcard(needle: &str, hay: &str, start: isize) -> CellResult {
+pub(crate) fn search_wildcard(needle: &str, hay: &str, start: isize) -> CellResult {
     if start < 1 {
         return Err(FormulaError::Value);
     }
@@ -137,7 +137,7 @@ fn search_wildcard(needle: &str, hay: &str, start: isize) -> CellResult {
 }
 
 /// FIND: case-sensitive literal search; `start` is 1-based.
-fn find_literal(needle: &str, hay: &str, start: isize) -> CellResult {
+pub(crate) fn find_literal(needle: &str, hay: &str, start: isize) -> CellResult {
     if start < 1 {
         return Err(FormulaError::Value);
     }
@@ -328,7 +328,7 @@ impl SheetEngine {
     }
 
     /// Evaluates `arg` and renders it as display text.
-    fn text_arg(
+    pub(crate) fn text_arg(
         &self,
         arg: &Expr,
         ctx: &mut EvalContext<'_>,

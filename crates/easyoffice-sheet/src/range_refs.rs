@@ -416,7 +416,7 @@ fn broadcast_item(vals: &[EvaluatedCellValue], idx: usize) -> &EvaluatedCellValu
 }
 
 impl SheetEngine {
-    fn eval_expr_2d_grid(
+    pub(crate) fn eval_expr_2d_grid(
         &self,
         expr: &Expr,
         ctx: &mut EvalContext<'_>,

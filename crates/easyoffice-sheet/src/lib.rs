@@ -4,6 +4,7 @@ use std::sync::OnceLock;
 
 mod agg_stream;
 pub mod axis;
+mod byte_width;
 pub mod coercion;
 mod criteria;
 mod dag;
@@ -11,6 +12,7 @@ pub mod filter;
 #[cfg(test)]
 mod function_coverage_tests;
 pub mod functions;
+mod functions_aggregate;
 mod functions_bessel;
 mod functions_bond;
 pub mod functions_complex;
@@ -20,6 +22,7 @@ mod functions_date_fin;
 mod functions_db;
 mod functions_depr;
 mod functions_dist;
+mod functions_dist_more;
 mod functions_eng;
 mod functions_fin;
 mod functions_fin_args;
@@ -28,11 +31,16 @@ mod functions_lookup;
 mod functions_lookup_ref;
 mod functions_lookup_text;
 mod functions_math;
+mod functions_math_trig;
 mod functions_matrix;
 mod functions_odd;
 mod functions_regression;
 mod functions_stat_a;
+mod functions_stat_tests;
+mod functions_text_bytes;
 mod functions_trend;
+#[cfg(test)]
+mod functions_unit_tests;
 mod memo;
 mod parser;
 mod recalc;
@@ -939,7 +947,9 @@ impl SheetEngine {
 pub(crate) fn expr_contains_subtotal(expr: &Expr) -> bool {
     match expr {
         Expr::FuncCall { name, args } => {
-            name.eq_ignore_ascii_case("SUBTOTAL") || args.iter().any(expr_contains_subtotal)
+            name.eq_ignore_ascii_case("SUBTOTAL")
+                || name.eq_ignore_ascii_case("AGGREGATE")
+                || args.iter().any(expr_contains_subtotal)
         }
         Expr::UnaryPlus(inner) | Expr::UnaryMinus(inner) | Expr::PostfixPercent(inner) => {
             expr_contains_subtotal(inner)

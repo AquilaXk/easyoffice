@@ -946,7 +946,7 @@ fn matrix_functions_feed_dependent_cells() {
 #[test]
 fn the_registry_lists_every_function_and_each_one_is_implemented() {
     let names = SheetEngine::supported_function_names();
-    assert_eq!(names.len(), 144 + 59);
+    assert_eq!(names.len(), 144 + 59 + 59);
     for name in names {
         // a registered name never evaluates to #NAME?
         let got = eval(&SheetEngine::new("S"), &format!("={name}()"));

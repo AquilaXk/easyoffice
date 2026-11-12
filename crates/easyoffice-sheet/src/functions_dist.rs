@@ -9,7 +9,7 @@ use crate::special::{
 use crate::{EvalContext, EvaluatedCellValue, Expr, FormulaError, SheetEngine};
 use std::f64::consts::PI;
 
-type Num = Result<f64, FormulaError>;
+pub(crate) type Num = Result<f64, FormulaError>;
 
 /// Largest degrees-of-freedom / trial count accepted (beyond it the CDFs lose all precision).
 const MAX_COUNT: f64 = 1e10;
@@ -30,27 +30,27 @@ fn dist_spec(name: &str) -> Option<(usize, usize, Option<usize>)> {
             (3, 3, None)
         }
         "GAMMALN" | "GAMMALN.PRECISE" | "GAMMA" | "NORM.S.INV" | "NORMSINV" => (1, 1, None),
-        _ => return None,
+        _ => return crate::functions_dist_more::spec(name),
     })
 }
 
 /// The `i`-th argument, or `default` when absent or skipped.
-fn opt(a: &[f64], i: usize, default: f64) -> f64 {
+pub(crate) fn opt(a: &[f64], i: usize, default: f64) -> f64 {
     a.get(i).copied().filter(|v| !v.is_nan()).unwrap_or(default)
 }
 
-fn need(ok: bool) -> Result<(), FormulaError> {
+pub(crate) fn need(ok: bool) -> Result<(), FormulaError> {
     ok.then_some(()).ok_or(FormulaError::Num)
 }
 
 /// Degrees of freedom truncated to an integer in `1..=MAX_COUNT`.
-fn degrees(v: f64) -> Num {
+pub(crate) fn degrees(v: f64) -> Num {
     let df = v.trunc();
     need((1.0..=MAX_COUNT).contains(&df))?;
     Ok(df)
 }
 
-fn t_cdf(x: f64, df: f64) -> f64 {
+pub(crate) fn t_cdf(x: f64, df: f64) -> f64 {
     if x == 0.0 {
         return 0.5;
     }
@@ -251,7 +251,7 @@ fn gamma_family(name: &str, a: &[f64]) -> Num {
     }
 }
 
-fn ln_choose(n: f64, k: f64) -> f64 {
+pub(crate) fn ln_choose(n: f64, k: f64) -> f64 {
     ln_gamma(n + 1.0) - ln_gamma(k + 1.0) - ln_gamma(n - k + 1.0)
 }
 
@@ -318,6 +318,9 @@ fn norm_family(name: &str, a: &[f64]) -> Num {
 /// (`TRUE`/`FALSE` as `1.0`/`0.0`).
 pub(crate) fn dist_value(name: &str, a: &[f64]) -> Num {
     let value = match name {
+        n if crate::functions_dist_more::spec(n).is_some() => {
+            crate::functions_dist_more::value(n, a)
+        }
         n if n.starts_with("T.") || n == "TDIST" || n == "TINV" => t_family(n, a),
         n if n.starts_with("CHI") => chisq_family(n, a),
         n if n.starts_with("BETA") => beta_family(n, a),
@@ -342,7 +345,14 @@ impl SheetEngine {
         }
         let mut values = Vec::with_capacity(args.len());
         for (i, arg) in args.iter().enumerate() {
-            let v = if matches!(arg, Expr::Missing) && i >= min {
+            let v = if i >= min
+                && (matches!(arg, Expr::Missing)
+                    || name == "BINOM.DIST.RANGE"
+                        && matches!(
+                            self.eval_arg_val(arg, ctx, depth)?,
+                            EvaluatedCellValue::Empty
+                        ))
+            {
                 f64::NAN
             } else if Some(i) == bool_at {
                 let flag = self.eval_arg_val(arg, ctx, depth)?;
