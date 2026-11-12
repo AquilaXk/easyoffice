@@ -3,7 +3,7 @@
 //! `w:sdt` with `docPartGallery` "Table of Contents", ODT `text:table-of-content`). The readers
 //! recover the role from the style name alone, so a file from another word processor reads the same.
 
-use crate::rich_document::{RichBlock, RichToc, MAX_TOC_LEVEL};
+use crate::rich_document::{RichBlock, RichParagraph, RichToc, MAX_TOC_LEVEL};
 
 /// Indent added per entry level, in twips (about 0.4 cm).
 const TOC_INDENT_TWIPS: u32 = 220;
@@ -19,9 +19,11 @@ pub(crate) fn is_toc_block(block: &RichBlock) -> bool {
 
 /// The `TOC \\o "1-N" \\h` field a word processor can update: it begins in the first entry paragraph and ends
 /// in the last one, with the entries as its result.
-fn docx_field_begin(levels: u8) -> String {
+fn docx_field_begin(shape: &TocShape) -> String {
+    let levels = shape.levels;
+    let no_pages = if shape.dots.is_none() { " \\n" } else { "" };
     format!(
-        "<w:r><w:fldChar w:fldCharType=\"begin\"/></w:r><w:r><w:instrText xml:space=\"preserve\"> TOC \\o \"1-{levels}\" \\h </w:instrText></w:r><w:r><w:fldChar w:fldCharType=\"separate\"/></w:r>"
+        "<w:r><w:fldChar w:fldCharType=\"begin\"/></w:r><w:r><w:instrText xml:space=\"preserve\"> TOC \\o \"1-{levels}\" \\h{no_pages} </w:instrText></w:r><w:r><w:fldChar w:fldCharType=\"separate\"/></w:r>"
     )
 }
 
@@ -39,7 +41,7 @@ pub(crate) fn docx_field_edges(blocks: &[RichBlock], index: usize) -> (String, &
     let last = !is_entry(blocks.get(index + 1));
     (
         if first {
-            docx_field_begin(entry_levels_from(blocks, index))
+            docx_field_begin(&shape_from(blocks, index))
         } else {
             String::new()
         },
@@ -47,31 +49,103 @@ pub(crate) fn docx_field_edges(blocks: &[RichBlock], index: usize) -> (String, &
     )
 }
 
-/// Deepest entry level of the entries that run on from `index` (at least 1).
-pub(crate) fn entry_levels_from(blocks: &[RichBlock], index: usize) -> u8 {
-    blocks[index..]
+/// What a table-of-contents block needs to say about itself: the deepest entry level (at least 1) and, when
+/// its entries show page numbers, whether their tab is filled with dots.
+pub(crate) struct TocShape {
+    levels: u8,
+    dots: Option<bool>,
+}
+
+/// The shape of the block whose paragraphs run on from `index`.
+pub(crate) fn shape_from(blocks: &[RichBlock], index: usize) -> TocShape {
+    let mut shape = TocShape {
+        levels: 1,
+        dots: None,
+    };
+    for block in blocks[index..].iter().take_while(|b| is_toc_block(b)) {
+        if let RichBlock::Paragraph(p) = block {
+            if let Some(RichToc::Entry(level)) = p.toc {
+                shape.levels = shape.levels.max(level);
+                if p.toc_page.is_some() && shape.dots.is_none() {
+                    shape.dots = Some(p.toc_dots);
+                }
+            }
+        }
+    }
+    shape
+}
+
+/// Position of the right tab stop that holds the page numbers: the text width of an A4 page with the
+/// default 2 cm margins (twips for DOCX, centimetres for ODT).
+const DOCX_TAB_POS_TWIPS: u32 = 9026;
+const ODT_TAB_POS_CM: &str = "17cm";
+
+/// `w:tabs` of an entry that shows a page number (it goes between the numbering and the spacing of `w:pPr`).
+pub(crate) fn docx_toc_tabs(p: &RichParagraph) -> String {
+    match (p.toc, p.toc_page) {
+        (Some(RichToc::Entry(_)), Some(_)) => format!(
+            "<w:tabs><w:tab w:val=\"right\" w:leader=\"{}\" w:pos=\"{DOCX_TAB_POS_TWIPS}\"/></w:tabs>",
+            if p.toc_dots { "dot" } else { "none" }
+        ),
+        _ => String::new(),
+    }
+}
+
+/// The right tab and the page number after an entry's runs: a `PAGEREF` field (result: the number) when the
+/// entry links to a `_Toc` bookmark, else the bare number.
+pub(crate) fn docx_toc_page(p: &RichParagraph) -> String {
+    let Some(page) = p.toc_page.filter(|_| p.toc.is_some()) else {
+        return String::new();
+    };
+    let result = format!("<w:r><w:t>{page}</w:t></w:r>");
+    let target = p
+        .runs
         .iter()
-        .take_while(|b| is_toc_block(b))
-        .filter_map(|b| match b {
-            RichBlock::Paragraph(p) => match p.toc {
-                Some(RichToc::Entry(level)) => Some(level),
-                _ => None,
-            },
-            _ => None,
-        })
-        .max()
-        .unwrap_or(1)
+        .find_map(|r| r.link.as_deref()?.strip_prefix('#'));
+    let page_xml = match target {
+        Some(name) => format!(
+            "<w:r><w:fldChar w:fldCharType=\"begin\"/></w:r><w:r><w:instrText xml:space=\"preserve\"> PAGEREF {name} \\h </w:instrText></w:r><w:r><w:fldChar w:fldCharType=\"separate\"/></w:r>{result}{DOCX_FIELD_END}"
+        ),
+        None => result,
+    };
+    format!("<w:r><w:tab/></w:r>{page_xml}")
+}
+
+/// The tab and page number of an ODT entry.
+pub(crate) fn odt_toc_page(p: &RichParagraph) -> String {
+    match p.toc_page.filter(|_| p.toc.is_some()) {
+        Some(page) => format!("<text:tab/>{page}"),
+        None => String::new(),
+    }
+}
+
+/// The style of an ODT TOC paragraph: an entry with a page number and a blank tab fill has the `Plain` variant.
+pub(crate) fn odt_toc_paragraph_style(role: RichToc, p: &RichParagraph) -> String {
+    let name = odt_toc_style_name(role);
+    if matches!(role, RichToc::Entry(_)) && p.toc_page.is_some() && !p.toc_dots {
+        format!("{name}_20_Plain")
+    } else {
+        name
+    }
 }
 
 /// `text:table-of-content` opening with the source an ODT editor rebuilds the block from: one entry
 /// template per level (a link around the heading text).
-fn odt_toc_open(levels: u8) -> String {
+fn odt_toc_open(shape: &TocShape) -> String {
+    let levels = shape.levels;
+    let page = match shape.dots {
+        Some(dots) => format!(
+            "<text:index-entry-tab-stop style:type=\"right\" style:leader-char=\"{}\"/><text:index-entry-page-number/>",
+            if dots { "." } else { " " }
+        ),
+        None => String::new(),
+    };
     let mut xml = format!(
         "<text:table-of-content text:name=\"Table of Contents1\"><text:table-of-content-source text:outline-level=\"{levels}\">"
     );
     for level in 1..=levels {
         xml.push_str(&format!(
-            "<text:table-of-content-entry-template text:outline-level=\"{level}\" text:style-name=\"{}\"><text:index-entry-link-start/><text:index-entry-text/><text:index-entry-link-end/></text:table-of-content-entry-template>",
+            "<text:table-of-content-entry-template text:outline-level=\"{level}\" text:style-name=\"{}\"><text:index-entry-link-start/><text:index-entry-text/>{page}<text:index-entry-link-end/></text:table-of-content-entry-template>",
             odt_toc_style_name(RichToc::Entry(level))
         ));
     }
@@ -118,11 +192,16 @@ pub(crate) fn odt_toc_styles_xml() -> String {
         odt_toc_style_name(RichToc::Title)
     );
     for level in entry_levels() {
-        xml.push_str(&format!(
-            "<style:style style:name=\"{}\" style:family=\"paragraph\"><style:paragraph-properties fo:margin-left=\"{}pt\"/></style:style>",
-            odt_toc_style_name(RichToc::Entry(level)),
-            u32::from(level - 1) * TOC_INDENT_TWIPS / 20
-        ));
+        let indent = u32::from(level - 1) * TOC_INDENT_TWIPS / 20;
+        for (suffix, leader) in [
+            ("", "style:leader-style=\"dotted\" style:leader-text=\".\""),
+            ("_20_Plain", "style:leader-style=\"none\""),
+        ] {
+            xml.push_str(&format!(
+                "<style:style style:name=\"{}{suffix}\" style:family=\"paragraph\"><style:paragraph-properties fo:margin-left=\"{indent}pt\"><style:tab-stops><style:tab-stop style:position=\"{ODT_TAB_POS_CM}\" style:type=\"right\" {leader}/></style:tab-stops></style:paragraph-properties></style:style>",
+                odt_toc_style_name(RichToc::Entry(level))
+            ));
+        }
     }
     xml
 }
@@ -130,7 +209,7 @@ pub(crate) fn odt_toc_styles_xml() -> String {
 /// Opens and closes the TOC container as consecutive TOC paragraphs start and stop.
 pub(crate) struct TocScope {
     open: bool,
-    open_xml: fn(u8) -> String,
+    open_xml: fn(&TocShape) -> String,
     close_xml: &'static str,
 }
 
@@ -143,7 +222,7 @@ impl TocScope {
         Self::new(odt_toc_open, ODT_TOC_CLOSE)
     }
 
-    fn new(open_xml: fn(u8) -> String, close_xml: &'static str) -> Self {
+    fn new(open_xml: fn(&TocShape) -> String, close_xml: &'static str) -> Self {
         Self {
             open: false,
             open_xml,
@@ -158,7 +237,7 @@ impl TocScope {
             return;
         }
         if in_toc {
-            out.push_str(&(self.open_xml)(entry_levels_from(blocks, index)));
+            out.push_str(&(self.open_xml)(&shape_from(blocks, index)));
         } else {
             out.push_str(self.close_xml);
         }

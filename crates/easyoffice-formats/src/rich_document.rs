@@ -211,6 +211,9 @@ pub enum RichToc {
     Entry(u8),
 }
 
+/// Largest page number of a table-of-contents entry (seven digits).
+pub const MAX_TOC_PAGE: u32 = 9_999_999;
+
 /// Deepest entry level of a table-of-contents block (the word-processor styles `TOC 1`–`TOC 9`).
 pub const MAX_TOC_LEVEL: u8 = 9;
 
@@ -242,6 +245,11 @@ pub struct RichParagraph {
     /// The paragraph starts a new page (DOCX `w:pageBreakBefore`, ODT `fo:break-before="page"`). A page break
     /// between two paragraphs of a file reads as this flag on the one after it.
     pub page_break_before: bool,
+    /// Page number of a table-of-contents entry (at most [`MAX_TOC_PAGE`]); the writers put it after a right tab
+    /// (DOCX `PAGEREF` field, ODT `text:index-entry-page-number`) and the readers split it off the entry text.
+    pub toc_page: Option<u32>,
+    /// Whether the tab before the page number is filled with dots (else it is blank).
+    pub toc_dots: bool,
 }
 
 impl RichParagraph {

@@ -1,7 +1,7 @@
 //! Shared character format and run helpers of the DOCX, HWPX, and ODT readers. The XML event
 //! reader lives in [`crate::xml_stream`].
 
-use crate::rich_document::{RichToc, MAX_TOC_LEVEL};
+use crate::rich_document::{RichToc, MAX_TOC_LEVEL, MAX_TOC_PAGE};
 use crate::{RichRun, RichScript};
 
 /// Boolean OOXML-style toggle value: absent or anything but `0`/`false`/`off`/`none` is true.
@@ -106,10 +106,10 @@ pub(crate) fn toc_role_from_name(name: &str) -> Option<RichToc> {
             .filter(|h| h.eq_ignore_ascii_case(p))
             .map(|_| &s[p.len()..])
     })?;
+    // `Contents_20_2` is "Contents 2" with ODF's `_20_` for the space; a trailing word (`Plain`) is a variant.
     let tail = rest
-        .trim_start_matches(|c: char| c.is_whitespace() || c == '_')
-        .trim_start_matches("20")
-        .trim_matches(|c: char| c.is_whitespace() || c == '_');
+        .split(|c: char| c.is_whitespace() || c == '_')
+        .find(|t| !t.is_empty() && *t != "20")?;
     if tail.eq_ignore_ascii_case("heading") {
         return Some(RichToc::Title);
     }
@@ -117,6 +117,32 @@ pub(crate) fn toc_role_from_name(name: &str) -> Option<RichToc> {
         .ok()
         .filter(|n| (1..=MAX_TOC_LEVEL).contains(n))
         .map(RichToc::Entry)
+}
+
+/// Splits a trailing `<tab><digits>` (the page number of a table-of-contents entry, 1 to 7 digits) off the
+/// runs and returns the number.
+pub(crate) fn take_toc_page(runs: &mut Vec<RichRun>) -> Option<u32> {
+    let text: String = runs.iter().map(|r| r.text.as_str()).collect();
+    let tab = text.rfind('\t')?;
+    let digits = &text[tab + 1..];
+    let page = digits
+        .parse::<u32>()
+        .ok()
+        .filter(|n| (1..=MAX_TOC_PAGE).contains(n) && digits.bytes().all(|b| b.is_ascii_digit()))?;
+    let mut drop = text[tab..].chars().count();
+    while drop > 0 {
+        let last = runs.last_mut()?;
+        let len = last.text.chars().count();
+        if len <= drop {
+            drop -= len;
+            runs.pop();
+        } else {
+            let keep: String = last.text.chars().take(len - drop).collect();
+            last.text = keep;
+            drop = 0;
+        }
+    }
+    Some(page)
 }
 
 /// Heading level from a style name such as `heading 2`, `Heading2`, `제목 3`, `개요 1`, `Title`.

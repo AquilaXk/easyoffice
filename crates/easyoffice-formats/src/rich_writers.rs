@@ -30,8 +30,8 @@ use crate::rich_run_writers::{
 };
 use crate::rich_table_writers::{push_docx_table, push_odt_table};
 use crate::rich_toc_writers::{
-    docx_field_edges, docx_toc_style_id, docx_toc_styles_xml, is_toc_block, odt_toc_style_name,
-    odt_toc_styles_xml, TocScope,
+    docx_field_edges, docx_toc_page, docx_toc_style_id, docx_toc_styles_xml, docx_toc_tabs,
+    is_toc_block, odt_toc_page, odt_toc_paragraph_style, odt_toc_styles_xml, TocScope,
 };
 use crate::{
     CommonMarkCodec, EasyOfficeError, MarkdownBlock, OdfCodec, PdfDocumentModel, PdfPageModel,
@@ -164,7 +164,13 @@ fn push_docx_paragraph(
         RichAlignment::Justify => "both",
     });
     let layout = docx_paragraph_layout(p);
-    if style.is_some() || jc.is_some() || !layout.is_empty() || p.page_break_before {
+    let tabs = docx_toc_tabs(p);
+    if style.is_some()
+        || jc.is_some()
+        || !layout.is_empty()
+        || !tabs.is_empty()
+        || p.page_break_before
+    {
         out.push_str("<w:pPr>");
         if let Some(s) = style {
             out.push_str(&format!("<w:pStyle w:val=\"{s}\"/>"));
@@ -175,6 +181,7 @@ fn push_docx_paragraph(
         if let Some(run) = run {
             out.push_str(&docx_num_pr(run, p));
         }
+        out.push_str(&tabs);
         out.push_str(&layout);
         if let Some(j) = jc {
             out.push_str(&format!("<w:jc w:val=\"{j}\"/>"));
@@ -213,6 +220,7 @@ fn push_docx_paragraph(
             out.push_str("</w:hyperlink>");
         }
     }
+    out.push_str(&docx_toc_page(p));
     if let Some(number) = p.bookmark {
         out.push_str(&format!("<w:bookmarkEnd w:id=\"{number}\"/>"));
     }
@@ -427,7 +435,7 @@ fn push_odt_paragraph(
         page_break: p.page_break_before,
     };
     let style_attr = if let Some(role) = p.toc {
-        format!(" text:style-name=\"{}\"", odt_toc_style_name(role))
+        format!(" text:style-name=\"{}\"", odt_toc_paragraph_style(role, p))
     } else if key == OdtParaKey::default() {
         String::new()
     } else {
@@ -467,6 +475,7 @@ fn push_odt_paragraph(
             body.push_str("</text:a>");
         }
     }
+    body.push_str(&odt_toc_page(p));
     if let Some(number) = p.bookmark {
         body.push_str(&format!(
             "<text:bookmark-end text:name=\"{TOC_BOOKMARK_PREFIX}{number}\"/>"

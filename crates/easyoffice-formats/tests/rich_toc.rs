@@ -255,3 +255,151 @@ fn only_a_canonical_toc_bookmark_is_an_in_document_target() {
         );
     }
 }
+
+fn with_pages(dots: bool) -> RichDocument {
+    let mut doc = with_targets();
+    for (block, page) in doc.blocks.iter_mut().skip(1).take(2).zip([3, 12]) {
+        if let RichBlock::Paragraph(p) = block {
+            p.toc_page = Some(page);
+            p.toc_dots = dots;
+        }
+    }
+    doc
+}
+
+/// `(text, toc page, dots, link)` of the TOC entries read back.
+fn pages_back(bytes: &[u8], name: &str) -> Vec<(String, Option<u32>, bool, Option<String>)> {
+    let DecodedContent::Document(doc) = UniversalFormatConverter::decode_rich(bytes, Some(name))
+        .unwrap()
+        .content
+    else {
+        panic!("document expected");
+    };
+    doc.blocks
+        .iter()
+        .filter_map(|b| match b {
+            RichBlock::Paragraph(p) if matches!(p.toc, Some(RichToc::Entry(_))) => Some((
+                p.plain_text(),
+                p.toc_page,
+                p.toc_dots,
+                p.runs.first().and_then(|r| r.link.clone()),
+            )),
+            _ => None,
+        })
+        .collect()
+}
+
+fn expected_pages(dots: bool) -> Vec<(String, Option<u32>, bool, Option<String>)> {
+    vec![
+        (
+            "개요".to_string(),
+            Some(3),
+            dots,
+            Some("#_Toc1".to_string()),
+        ),
+        (
+            "세부".to_string(),
+            Some(12),
+            dots,
+            Some("#_Toc2".to_string()),
+        ),
+    ]
+}
+
+#[test]
+fn docx_writes_a_right_tab_and_a_pageref_field_per_entry_and_reads_the_page_back() {
+    for dots in [true, false] {
+        let bytes =
+            UniversalFormatConverter::encode_rich(&with_pages(dots), DocumentFormat::Docx, None)
+                .unwrap();
+        let xml = part(&bytes, "word/document.xml");
+        let leader = if dots { "dot" } else { "none" };
+        assert_eq!(
+            xml.matches(&format!(
+                "<w:tab w:val=\"right\" w:leader=\"{leader}\" w:pos=\"9026\"/>"
+            ))
+            .count(),
+            2
+        );
+        assert!(xml.contains("PAGEREF _Toc2 \\h"));
+        assert!(xml.contains("<w:t>12</w:t>"));
+        assert!(
+            xml.contains("TOC \\o \"1-3\" \\h </w:instrText>"),
+            "pages shown: no \\n switch"
+        );
+        assert_eq!(
+            xml.matches("w:fldCharType=\"begin\"").count(),
+            3,
+            "TOC and two PAGEREF"
+        );
+        assert_eq!(
+            pages_back(&bytes, "a.docx"),
+            expected_pages(dots),
+            "{leader}"
+        );
+    }
+    let bytes =
+        UniversalFormatConverter::encode_rich(&with_targets(), DocumentFormat::Docx, None).unwrap();
+    let xml = part(&bytes, "word/document.xml");
+    assert!(
+        xml.contains("\\h \\n </w:instrText>"),
+        "no pages: the TOC field omits them"
+    );
+    assert!(!xml.contains("PAGEREF") && !xml.contains("<w:tabs>"));
+}
+
+#[test]
+fn odt_writes_the_tab_stop_template_and_the_entry_page_and_reads_them_back() {
+    for dots in [true, false] {
+        let bytes =
+            UniversalFormatConverter::encode_rich(&with_pages(dots), DocumentFormat::Odt, None)
+                .unwrap();
+        let xml = part(&bytes, "content.xml");
+        let fill = if dots { "." } else { " " };
+        assert!(xml.contains(&format!(
+            "<text:index-entry-tab-stop style:type=\"right\" style:leader-char=\"{fill}\"/><text:index-entry-page-number/>"
+        )));
+        assert!(xml.contains("<text:tab/>12"));
+        assert_eq!(
+            xml.contains("<text:p text:style-name=\"Contents_20_1_20_Plain\">"),
+            !dots
+        );
+        assert_eq!(pages_back(&bytes, "a.odt"), expected_pages(dots));
+    }
+    let bytes =
+        UniversalFormatConverter::encode_rich(&with_targets(), DocumentFormat::Odt, None).unwrap();
+    assert!(!part(&bytes, "content.xml").contains("index-entry-page-number"));
+}
+
+#[test]
+fn a_number_after_a_tab_in_a_body_paragraph_stays_text() {
+    let doc = RichDocument {
+        blocks: vec![
+            para("표\t3", 0, None),
+            para("개요\t3", 0, Some(RichToc::Entry(1))),
+        ],
+        ..RichDocument::default()
+    };
+    let bytes = UniversalFormatConverter::encode_rich(&doc, DocumentFormat::Docx, None).unwrap();
+    let DecodedContent::Document(back) =
+        UniversalFormatConverter::decode_rich(&bytes, Some("a.docx"))
+            .unwrap()
+            .content
+    else {
+        panic!("document expected");
+    };
+    let RichBlock::Paragraph(body) = &back.blocks[0] else {
+        panic!()
+    };
+    let RichBlock::Paragraph(entry) = &back.blocks[1] else {
+        panic!()
+    };
+    assert_eq!(
+        (body.plain_text(), body.toc_page),
+        ("표\t3".to_string(), None)
+    );
+    assert_eq!(
+        (entry.plain_text(), entry.toc_page),
+        ("개요".to_string(), Some(3))
+    );
+}

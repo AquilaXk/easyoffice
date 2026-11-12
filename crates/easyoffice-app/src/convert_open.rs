@@ -107,6 +107,9 @@ fn write_paragraph(out: &mut String, p: &RichParagraph) {
     if p.heading_level > 0 {
         let _ = write!(out, ",\"heading\":{}", p.heading_level);
     }
+    if let Some(page) = p.toc_page {
+        let _ = write!(out, ",\"tocPage\":{page},\"tocDots\":{}", p.toc_dots);
+    }
     if let Some(number) = p.bookmark {
         let _ = write!(out, ",\"bookmark\":{number}");
     }

@@ -8,7 +8,7 @@ use crate::office_codecs::{checked_part, checked_zip_xml_entries};
 use crate::rich_document::{normalize_hex_color, safe_link_target, toc_bookmark_number, RichToc};
 use crate::rich_image::{safe_package_path, ImageBudget};
 use crate::rich_table::{TableAssembler, MAX_PADDED_COLUMNS};
-use crate::rich_xml::{push_linked_run, toc_role_from_name, CharFmt};
+use crate::rich_xml::{push_linked_run, take_toc_page, toc_role_from_name, CharFmt};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
     EasyOfficeError, OdfCodec, RichAlignment, RichBlock, RichDocument, RichImage, RichListKind,
@@ -266,6 +266,8 @@ struct Para {
     toc: Option<RichToc>,
     /// Number of a `_Toc` bookmark that starts in the paragraph.
     bookmark: Option<u32>,
+    /// The entry style is not the `Plain` (blank tab fill) variant.
+    toc_dots: bool,
     base: CharFmt,
     images: Vec<RichImage>,
 }
@@ -456,6 +458,9 @@ impl<'a> OdtWalker<'a> {
             outline,
             toc,
             bookmark: None,
+            toc_dots: !style_name
+                .as_deref()
+                .is_some_and(|n| n.to_ascii_lowercase().contains("plain")),
             base,
             images: Vec::new(),
         });
@@ -575,8 +580,12 @@ impl<'a> OdtWalker<'a> {
     }
 
     fn finish_paragraph(&mut self) {
-        let Some(p) = self.paras.pop() else {
+        let Some(mut p) = self.paras.pop() else {
             return;
+        };
+        let toc_page = match p.toc {
+            Some(RichToc::Entry(_)) => take_toc_page(&mut p.runs),
+            _ => None,
         };
         let text: String = p.runs.iter().map(|r| r.text.as_str()).collect();
         let images = p.images;
@@ -608,6 +617,8 @@ impl<'a> OdtWalker<'a> {
                 line_spacing_percent: p.style.line_percent,
                 toc: p.toc,
                 bookmark: p.bookmark,
+                toc_page,
+                toc_dots: toc_page.is_some() && p.toc_dots,
                 page_break_before: p.style.page_break_before
                     | std::mem::take(&mut self.pending_page_break),
             }));

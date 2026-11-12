@@ -20,8 +20,8 @@ use easyoffice_formats::{
     safe_link_target, CellMerge, CellStyle, EasyOfficeError, NumFmtTable, OdsUnpacked, OoxmlCodec,
     PdfWriteOptions, RichAlignment, RichBlock, RichDocument, RichImage, RichListKind,
     RichParagraph, RichRun, RichScript, RichTable, RichToc, SheetStyling, StrictJsonValue,
-    MAX_COLUMN_PX, MAX_IMAGE_BYTES, MAX_NUM_FMTS, MAX_SIZE_PT, MAX_TOC_LEVEL, MIN_COLUMN_PX,
-    MIN_SIZE_PT,
+    MAX_COLUMN_PX, MAX_IMAGE_BYTES, MAX_NUM_FMTS, MAX_SIZE_PT, MAX_TOC_LEVEL, MAX_TOC_PAGE,
+    MIN_COLUMN_PX, MIN_SIZE_PT,
 };
 use easyoffice_sheet::{PackedCellCoordinate, WorkbookEngine};
 
@@ -254,6 +254,19 @@ fn parse_paragraph(
                 .ok_or_else(|| invalid("구조화 저장: 'bookmark'는 1 이상의 정수여야 합니다."))?,
         ),
     };
+    let toc_page = match field(obj, "tocPage") {
+        None => None,
+        Some(v) => Some(
+            v.as_u64()
+                .and_then(|n| u32::try_from(n).ok())
+                .filter(|n| (1..=MAX_TOC_PAGE).contains(n))
+                .filter(|_| matches!(toc, Some(RichToc::Entry(_))))
+                .ok_or_else(|| {
+                    invalid("구조화 저장: 'tocPage'는 목차 항목의 1~9999999 정수여야 합니다.")
+                })?,
+        ),
+    };
+    let toc_dots = opt_bool(obj, "tocDots")?;
     let list = match opt_str(obj, "list")? {
         None | Some("") => None,
         Some("bullet") => Some(RichListKind::Bullet),
@@ -280,6 +293,8 @@ fn parse_paragraph(
             .map(|v| v as u16),
         toc,
         bookmark,
+        toc_page,
+        toc_dots,
         page_break_before: opt_bool(obj, "pageBreakBefore")?,
     })
 }

@@ -14,7 +14,7 @@ use crate::rich_read_images::{drawing_picture, load_docx_hyperlinks, DocxMedia, 
 use crate::rich_read_numbering::{read_numbering, Numbering, LIST_LEVELS};
 use crate::rich_table::TableAssembler;
 use crate::rich_xml::{
-    heading_level_from_name, push_linked_run, toc_role_from_name, toggle_on, CharFmt,
+    heading_level_from_name, push_linked_run, take_toc_page, toc_role_from_name, toggle_on, CharFmt,
 };
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
@@ -55,6 +55,8 @@ struct ParaState {
     line_percent: Option<u16>,
     /// Number of a `_Toc` bookmark that starts in the paragraph.
     bookmark: Option<u32>,
+    /// `w:leader` of the paragraph's right tab stop (a TOC entry's page number).
+    tab_leader: Option<String>,
     /// `w:pageBreakBefore`, or a page break before any text of the paragraph.
     page_break_before: bool,
     /// A page break after text of the paragraph: the next paragraph starts the page.
@@ -180,7 +182,7 @@ impl Resolver<'_> {
         })
     }
 
-    fn finish(&self, p: ParaState) -> RichParagraph {
+    fn finish(&self, mut p: ParaState) -> RichParagraph {
         let toc = p.style_id.as_deref().and_then(|id| self.toc_role(id));
         let (mut heading, style_list) = p
             .style_id
@@ -210,6 +212,10 @@ impl Resolver<'_> {
             (_, None, Some(def)) => (Some(def.kind), def.number),
             (_, None, None) => (None, None),
         };
+        let toc_page = match toc {
+            Some(RichToc::Entry(_)) => take_toc_page(&mut p.runs),
+            _ => None,
+        };
         RichParagraph {
             list_level: if list.is_some() { level as u8 } else { 0 },
             list_number,
@@ -222,6 +228,8 @@ impl Resolver<'_> {
             line_spacing_percent: p.line_percent,
             toc,
             bookmark: p.bookmark,
+            toc_page,
+            toc_dots: toc_page.is_some() && p.tab_leader.as_deref().is_none_or(|l| l == "dot"),
             page_break_before: p.page_break_before,
         }
     }
@@ -406,6 +414,14 @@ impl DocxWalker {
                 }
             }
             "w:pPr" => self.in_ppr = true,
+            "w:tab" if self.in_ppr => {
+                if let Some(top) = self.paras.last_mut() {
+                    top.tab_leader = top
+                        .tab_leader
+                        .take()
+                        .or_else(|| attr(attrs, "w:leader").map(Cow::into_owned));
+                }
+            }
             "w:r" => {
                 self.in_run = true;
                 self.fmt = CharFmt::default();

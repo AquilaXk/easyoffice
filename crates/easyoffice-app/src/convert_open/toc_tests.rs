@@ -54,3 +54,36 @@ fn a_toc_bookmark_and_its_links_survive_docx_save_and_reopen_and_bad_ones_reject
         );
     }
 }
+
+#[test]
+fn a_toc_page_and_its_fill_survive_docx_save_and_reopen_and_bad_pages_reject_the_save() {
+    let payload = concat!(
+        "{\"targetFormat\":\"docx\",\"blocks\":[",
+        "{\"type\":\"paragraph\",\"toc\":1,\"tocPage\":4,\"tocDots\":true,\"runs\":[{\"text\":\"개요\",\"link\":\"#_Toc7\"}]},",
+        "{\"type\":\"paragraph\",\"heading\":1,\"bookmark\":7,\"runs\":[{\"text\":\"개요\"}]}]}"
+    );
+    let saved = EasyOfficeIpcRouter::dispatch("convert_document_format", payload).unwrap();
+    let bytes = EasyOfficeIpcRouter::decode_base64(json_field(&saved, "convertedBase64")).unwrap();
+    let json = EasyOfficeIpcRouter::dispatch(
+        "convert_document_format",
+        &request(Some("decode"), "목차.docx", &bytes, ""),
+    )
+    .unwrap();
+    assert!(json.contains("\"tocPage\":4,\"tocDots\":true"), "{json}");
+    assert!(
+        json.contains("\"text\":\"개요\",\"link\":\"#_Toc7\""),
+        "{json}"
+    );
+    for (from, to) in [
+        ("\"tocPage\":4", "\"tocPage\":0"),
+        ("\"tocPage\":4", "\"tocPage\":10000000"),
+        ("\"toc\":1,\"tocPage\":4", "\"toc\":0,\"tocPage\":4"),
+        ("\"tocDots\":true", "\"tocDots\":1"),
+    ] {
+        let bad = payload.replacen(from, to, 1);
+        assert!(
+            EasyOfficeIpcRouter::dispatch("convert_document_format", &bad).is_err(),
+            "{to}"
+        );
+    }
+}

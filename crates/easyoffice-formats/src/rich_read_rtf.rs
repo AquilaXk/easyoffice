@@ -313,6 +313,8 @@ impl Reader {
                 line_spacing_percent,
                 toc: None,
                 bookmark: None,
+                toc_page: None,
+                toc_dots: false,
                 page_break_before: false,
             }));
         }
