@@ -94,6 +94,27 @@ test("sheet: the used range becomes a gridded table, wide ranges print landscape
   assert.ok(t.pageRules().includes("@page { size: 297mm 210mm; margin: 10mm; }"), "ten columns print landscape");
 });
 
+test("sheet: alignment, wrapping and borders print, and a bordered empty cell is part of the range", async () => {
+  const t = await setup("SHEET");
+  const style = { ha: "center", va: "top", wrap: true, bd: { t: "double:ff0000", b: "thin:000000" } };
+  await pickFile(
+    t.h.document,
+    makeFixtureFile("서식.xlsx", { sheets: [{ name: "Sheet1", cells: [{ ref: "B2", raw: "가", style }, { ref: "C2", raw: "", style: { bd: { l: "dashed:00ff00" } } }] }] })
+  );
+  await flushAsyncTurns(8);
+  await t.print();
+  const tds = t.printed[0].querySelectorAll("td");
+  assert.equal(tds.length, 2, "the range is B2:C2 although C2 holds no text");
+  assert.equal(tds[0].style.textAlign, "center");
+  assert.equal(tds[0].style.verticalAlign, "top");
+  assert.equal(tds[0].style.whiteSpace, "pre-wrap");
+  assert.equal(tds[0].style.borderTopStyle, "double");
+  assert.equal(tds[0].style.borderTopColor, "#ff0000");
+  assert.equal(tds[0].style.borderBottomStyle, "solid");
+  assert.equal(tds[1].style.borderLeftStyle, "dashed");
+  assert.equal(tds[1].style.borderTopStyle, "", "an edge nobody set keeps the table's");
+});
+
 test("sheet: an empty sheet and a range past the cell cap are refused with a message", async () => {
   const t = await setup("SHEET");
   await pickFile(t.h.document, makeFixtureFile("빈.xlsx", { sheets: [{ name: "Sheet1", cells: [] }] }));

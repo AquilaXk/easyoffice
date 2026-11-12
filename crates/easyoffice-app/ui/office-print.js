@@ -115,7 +115,7 @@
         const entry = map[ref];
         const packed = entry ? gridUtils.packRef(ref) : 0;
         const text = entry && entry.value != null ? String(entry.value) : "";
-        if (packed <= 0 || text === "") continue;
+        if (packed <= 0 || (text === "" && !entry?.style?.border)) continue;
         const col = packed & COLUMN_BITS;
         const row = (packed - col) / ROW_STRIDE;
         cells.push({ row, col, text, entry });
@@ -156,6 +156,7 @@
         const td = tds[(row - range.r1) * cols + (col - range.c1)];
         td.textContent = gridUtils.formatGeneral(text);
         td.className = cellClasses(entry, text);
+        host.__EASYOFFICE_SHEET_LOOK__?.printStyle(td, entry.style);
       }
       table.appendChild(body);
       addPageRule(rules, cols > WIDE_SHEET_COLUMNS ? LANDSCAPE_MM : PORTRAIT_MM, SHEET_MARGIN_MM + "mm");
