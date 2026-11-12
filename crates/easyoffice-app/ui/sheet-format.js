@@ -128,6 +128,7 @@
   const internedStyles = new Map();
 
   function internStyle(style) {
+    if (style.wrap) look.markWrap();
     if (style.frozenPanes) return style;
     const key = `${style.fontWeight}|${style.fontStyle}|${style.textDecoration}|${style.fontSize}|${style.numFmt || ""}|${look.lookKey(style)}`;
     let shared = internedStyles.get(key);

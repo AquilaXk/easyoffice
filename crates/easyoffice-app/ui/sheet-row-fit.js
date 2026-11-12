@@ -13,9 +13,13 @@
   const BASE_FONT_PX = 13;
   const CACHE_LIMIT = 50000;
   const MIN_CELL_PX = 12; // a column narrower than this holds no text
+  // A scrolled box stops growing near 33 million px: the grid's rows plus the extra height of the wrapped
+  // rows stay under this, and the rows past the budget keep the plain height (fail closed).
+  const MAX_TOTAL_PX = 30000000;
 
   function createRowFit(deps) {
-    const { rowH, getSheetName, getMap, columnWidth, isRowHidden, isMerged, measure, packRef } = deps;
+    const { rowH, maxRows, getSheetName, getMap, columnWidth, isRowHidden, isMerged, measure, packRef } = deps;
+    const extraBudget = MAX_TOTAL_PX - maxRows * rowH;
     const look = host.__EASYOFFICE_SHEET_LOOK__;
     const lineCache = new Map();
     const bySheet = Object.create(null);
@@ -73,12 +77,19 @@
           if (h > rowH && h > (heights.get(row) || 0)) heights.set(row, h);
         }
       }
-      const rows = [...heights.keys()].sort((a, b) => a - b);
-      const extra = new Array(rows.length);
+      const all = [...heights.keys()].sort((a, b) => a - b);
+      const rows = [];
+      const extra = [];
       let acc = 0;
-      for (let i = 0; i < rows.length; i += 1) {
-        acc += heights.get(rows[i]) - rowH;
-        extra[i] = acc;
+      for (const row of all) {
+        const next = acc + heights.get(row) - rowH;
+        if (next > extraBudget) {
+          heights.delete(row);
+          continue;
+        }
+        acc = next;
+        rows.push(row);
+        extra.push(acc);
       }
       const sig = rows.map((r) => r + ":" + heights.get(r)).join(",");
       const changed = sig !== state.sig;

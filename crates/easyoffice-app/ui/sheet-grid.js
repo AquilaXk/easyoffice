@@ -54,7 +54,10 @@
         const e = src[ref];
         if (!e) return;
         const copy = { ...e };
-        if (e.style) copy.style = Object.isFrozen(e.style) ? e.style : { ...e.style };
+        if (e.style) {
+          copy.style = Object.isFrozen(e.style) ? e.style : { ...e.style };
+          if (e.style.wrap) host.__EASYOFFICE_SHEET_LOOK__?.markWrap();
+        }
         dst[ref] = copy;
       });
       out[name] = dst;
@@ -177,6 +180,7 @@
     // Rows follow the height of their wrapped cells (PD-207); `null` where the page cannot measure text.
     const rowFit = host.__EASYOFFICE_CREATE_ROW_FIT__?.({
       rowH: ROW_H,
+      maxRows: MAX_ROWS,
       getSheetName,
       getMap: getMap || (() => null),
       columnWidth: (c) => colWidth(c),
@@ -189,6 +193,8 @@
       seedDomMaps();
       return tdByPacked.values().next().value || null;
     };
+    // Row heights are looked up only once a wrapped cell exists, or one has been fitted before (it may be gone now).
+    const wrapRowsPossible = () => Boolean(rowFit) && (lookApi.wrapSeen() || rowFit.any());
     // The look of a cell as the page paints it: neighbours decide the shared edges.
     const lookApi = host.__EASYOFFICE_SHEET_LOOK__;
     const borderAt = (r, c) => (r < 1 || c < 1 ? undefined : getEntry(refOf(r, c))?.style?.border);
@@ -683,7 +689,7 @@
     // The layout changed (hide, unhide, merge, edit): redraw with the new row and column geometry.
     function layoutChanged() {
       widthCacheSheet = null;
-      rowFit?.sync();
+      if (wrapRowsPossible()) rowFit.sync();
       return renderWindow(true);
     }
 
@@ -797,7 +803,7 @@
         tds.push(td);
       }
       applyLayoutClasses();
-      if (rowFit?.sync()) renderWindow(true);
+      if (wrapRowsPossible() && rowFit.sync()) renderWindow(true);
       return tds;
     }
 
@@ -852,7 +858,7 @@
       repaintNumFmtColumn(c);
       const th = colHeadByCol.get(c) || document.querySelector('#pane-sheet th[data-col="' + colName(c) + '"]');
       if (th) th.style.width = w + "px";
-      if (rowFit?.sync()) renderWindow(true);
+      if (wrapRowsPossible() && rowFit.sync()) renderWindow(true);
       const table = tableEl();
       if (table && view) syncTableWidth(table, view);
       return w;

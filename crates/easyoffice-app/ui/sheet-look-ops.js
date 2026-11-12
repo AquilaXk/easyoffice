@@ -21,42 +21,37 @@
     const look = host.__EASYOFFICE_SHEET_LOOK__;
     const pen = { line: "thin", color: look.DEFAULT_COLOR };
 
-    // The value `read(entry)` has in every cell of the selection, "" when none has one, "mixed" otherwise.
-    function commonValue(read, rg) {
-      const map = sheetDataStore[getActiveSheetName()] || {};
-      const area = (rg.r2 - rg.r1 + 1) * (rg.c2 - rg.c1 + 1);
-      let seen;
-      let count = 0;
-      const take = (value) => {
-        count += 1;
-        seen = seen === undefined ? value : seen === value ? seen : "mixed";
-      };
-      if (area <= STATE_SCAN_CELLS) {
-        for (let r = rg.r1; r <= rg.r2 && seen !== "mixed"; r += 1) {
-          for (let c = rg.c1; c <= rg.c2; c += 1) take(read(map[gridUtils.refOf(r, c)]));
-        }
-        return seen ?? "";
-      }
-      for (const ref of Object.keys(map)) {
-        const packed = gridUtils.packRef(ref);
-        const col = packed & 32767;
-        const row = (packed - col) / 32768;
-        if (packed > 0 && row >= rg.r1 && row <= rg.r2 && col >= rg.c1 && col <= rg.c2) take(read(map[ref]));
-      }
-      if (count < area) take("");
-      return seen ?? "";
-    }
-
+    // For each key of `readers`: the value `read(entry)` has in every cell of the selection, "" when none has
+    // one, "mixed" otherwise. One pass over the cells.
     const readers = {
       textAlign: (e) => e?.style?.textAlign || "",
       verticalAlign: (e) => e?.style?.verticalAlign || "",
       wrap: (e) => (e?.style?.wrap ? "1" : ""),
     };
+    const KEYS = Object.keys(readers);
+
+    function states(rg) {
+      const map = sheetDataStore[getActiveSheetName()] || {};
+      const area = (rg.r2 - rg.r1 + 1) * (rg.c2 - rg.c1 + 1);
+      const seen = {};
+      const take = (entry) => {
+        for (const key of KEYS) {
+          const value = readers[key](entry);
+          seen[key] = !(key in seen) ? value : seen[key] === value ? value : "mixed";
+        }
+      };
+      // A range past the limit is not scanned (the whole sheet is 17 billion cells): it counts as mixed.
+      if (area > STATE_SCAN_CELLS) return { textAlign: "mixed", verticalAlign: "mixed", wrap: "mixed" };
+      for (let r = rg.r1; r <= rg.r2; r += 1) {
+        for (let c = rg.c1; c <= rg.c2; c += 1) take(map[gridUtils.refOf(r, c)]);
+      }
+      return { textAlign: seen.textAlign ?? "", verticalAlign: seen.verticalAlign ?? "", wrap: seen.wrap ?? "" };
+    }
 
     // Sets `key` of every cell of the selection to `value`; the same value again clears it.
     function setKey(label, key, value) {
       const rg = format.effectiveRange();
-      const toggled = commonValue(readers[key], rg) === (value === true ? "1" : value) ? "" : value;
+      const toggled = states(rg)[key] === (value === true ? "1" : value) ? "" : value;
       return format.editStyles(label, ({ rg: range, patch }) => {
         let n = 0;
         for (let r = range.r1; r <= range.r2; r += 1) {
@@ -163,12 +158,7 @@
     // Pressed and checked states of the buttons and menu items that carry `data-sheet-look`.
     function sync() {
       if (getActiveModule() !== "SHEET") return;
-      const rg = getRange();
-      const state = {
-        textAlign: commonValue(readers.textAlign, rg),
-        verticalAlign: commonValue(readers.verticalAlign, rg),
-        wrap: commonValue(readers.wrap, rg),
-      };
+      const state = states(getRange());
       for (const el of document.querySelectorAll("[data-sheet-look]")) {
         const action = el.dataset.sheetLook;
         let on = null;
@@ -194,7 +184,7 @@
     }
 
     bind();
-    return { run, setLook, applyBorders, borderState, setColor, setLine, sync, pen, commonValue, readers };
+    return { run, setLook, applyBorders, borderState, setColor, setLine, sync, pen, states };
   }
 
   host.__EASYOFFICE_CREATE_SHEET_LOOK_OPS__ = createSheetLookOps;

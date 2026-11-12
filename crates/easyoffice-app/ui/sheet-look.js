@@ -24,7 +24,6 @@
   const V_ALIGNS = ["top", "middle"];
   const LINES = ["thin", "thick", "dashed", "dotted", "double"];
   const SIDES = ["t", "r", "b", "l"];
-  const FACING = { t: "b", r: "l", b: "t", l: "r" };
   const DEFAULT_COLOR = "000000";
   // CSS of a line kind: [style, width in px].
   const LINE_CSS = { thin: ["solid", 1], thick: ["solid", 2], dashed: ["dashed", 1], dotted: ["dotted", 1], double: ["double", 3] };
@@ -72,6 +71,13 @@
 
   // The same text for every style with this look: the part of `internStyle`'s key that is new.
   const lookKey = (st) => (st ? (st.textAlign || "") + "|" + (st.verticalAlign || "") + "|" + (st.wrap ? 1 : 0) + "|" + borderKey(st.border) : "|||0|");
+
+  // Whether a wrapped cell was ever made in this page: a sheet is scanned for wrapped rows only then (every
+  // wrapped style comes from `internStyle`, a clone of the model, or a file open, and each of them notes it).
+  let wrapSeen = false;
+  const markWrap = () => {
+    wrapSeen = true;
+  };
 
   const hasLook = (st) => Boolean(st) && Boolean(st.textAlign || st.verticalAlign || st.wrap || st.border);
 
@@ -259,7 +265,6 @@
     V_ALIGNS,
     LINES,
     SIDES,
-    FACING,
     DEFAULT_COLOR,
     LOOK_KEYS,
     LINE_HEIGHT_RATIO,
@@ -271,6 +276,8 @@
     borderKey,
     lookKey,
     hasLook,
+    markWrap,
+    wrapSeen: () => wrapSeen,
     withSide,
     planBorders,
     resolveEdges,

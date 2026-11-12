@@ -27,7 +27,7 @@
   function createSheetLookUi(deps) {
     const { document, kit, ops, getRange } = deps;
     const look = host.__EASYOFFICE_SHEET_LOOK__;
-    const { $, val, checked, setVal, setChecked, setSelect, fillOptions, fireChange } = kit;
+    const { $, val, checked, setVal, setChecked, fillOptions, fireChange } = kit;
     let ready = false;
     let loaded = { h: "", v: "bottom", wrap: "" };
     let initial = {};
@@ -140,9 +140,7 @@
     }
 
     function loadAlign(rg) {
-      const h = ops.commonValue(ops.readers.textAlign, rg);
-      const v = ops.commonValue(ops.readers.verticalAlign, rg);
-      const wrap = ops.commonValue(ops.readers.wrap, rg);
+      const { textAlign: h, verticalAlign: v, wrap } = ops.states(rg);
       loaded = { h, v: v === "" ? "bottom" : v, wrap };
       setOptions("sheet-align-h-select", h === "mixed" ? [...MIXED, ...H_OPTIONS] : H_OPTIONS, h);
       setOptions("sheet-align-v-select", v === "mixed" ? [...MIXED, ...V_OPTIONS] : V_OPTIONS, loaded.v);

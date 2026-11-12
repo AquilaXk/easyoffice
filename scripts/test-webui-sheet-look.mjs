@@ -365,10 +365,11 @@ test("lines are counted by words, by characters in a wide word and by explicit b
   assert.equal(RF.__EASYOFFICE_SHEET_LINE_COUNT__("", 100, w), 1);
 });
 
-function fit(map, measure = (text, width) => Math.ceil((text.length * 10) / width), widthOf = () => 113) {
+function fit(map, measure = (text, width) => Math.ceil((text.length * 10) / width), widthOf = () => 113, maxRows = MAX) {
   const refs = loadUiModule(UI("sheet-refs.js"), {}).__EASYOFFICE_SHEET_REFS__;
   return RF.__EASYOFFICE_CREATE_ROW_FIT__({
     rowH: 24,
+    maxRows,
     getSheetName: () => "S",
     getMap: () => map,
     columnWidth: widthOf,
@@ -407,6 +408,18 @@ test("a tall row is capped and a column too narrow for text adds nothing", () =>
   const narrow = fit(map, undefined, () => 20);
   assert.equal(narrow.sync(), false);
   assert.equal(narrow.any(), false);
+});
+
+test("the extra height of all rows stays inside the scroll box budget", () => {
+  // 1,048,576 rows of 24 px leave 4.83 million px: 545 px rows run out after about 9,300 of them.
+  const map = {};
+  for (let r = 1; r <= 20000; r += 1) map["A" + r] = { value: "x".repeat(100000), style: { wrap: true } };
+  const f = fit(map);
+  f.sync();
+  assert.ok(f.extraTotal() <= 30000000 - MAX * 24, String(f.extraTotal()));
+  assert.ok(f.extraTotal() > 4000000, "the budget is used");
+  assert.equal(f.heightOf(1), 545);
+  assert.equal(f.heightOf(20000), 24, "a row past the budget keeps the plain height");
 });
 
 test("measuring is remembered per font, width and text", () => {
