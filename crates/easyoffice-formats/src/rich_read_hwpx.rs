@@ -5,10 +5,12 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 
+use crate::hwpx_codec::section_xml;
 use crate::hwpx_parts::{
     DEFAULT_CHAR_HEIGHT, DEFAULT_FONT_FACE, DEFAULT_LINE_PERCENT, HWPUNIT_PER_TWIP,
     LIST_LEFT_MARGIN,
 };
+use crate::office_codecs::checked_zip_xml_entries;
 use crate::rich_document::normalize_hex_color;
 use crate::rich_image::{safe_package_path, ImageBudget};
 use crate::rich_table::{table_from_placed, PlacedCell};
@@ -701,8 +703,9 @@ fn push_text(runs: &mut [RunState], text: &str) {
 /// Decodes every `Contents/section*.xml` of a HWPX/HWTX package in order.
 pub(crate) fn read_hwpx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), EasyOfficeError> {
     let entries = ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default())?;
+    let parts = checked_zip_xml_entries(&entries)?;
     let (header_xml, title, _is_template, official_agency, _approval_lines) =
-        HwpxCodec::extract_header_and_metadata(&entries)?;
+        HwpxCodec::extract_header_and_metadata(&parts)?;
     let header = read_header(header_xml)?;
     let mut sections: Vec<(usize, &crate::ZipArchiveEntry)> = entries
         .iter()
@@ -726,9 +729,7 @@ pub(crate) fn read_hwpx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Eas
     let media = HwpxMedia::load(&entries)?;
     let mut walker = SectionWalker::default();
     for (_, entry) in sections {
-        let xml = std::str::from_utf8(&entry.data).map_err(|_| {
-            EasyOfficeError::InvalidUtf8("Contents/section.xml UTF-8 오류".to_string())
-        })?;
+        let xml = section_xml(&parts, &entry.path)?;
         read_section(
             xml,
             &header,

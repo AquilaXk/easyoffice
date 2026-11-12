@@ -337,19 +337,12 @@ impl OoxmlCodec {
 
     pub fn unpack_docx(bytes: &[u8]) -> Result<OoxmlDocxPayload, EasyOfficeError> {
         let entries = ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default())?;
-        validate_zip_xml_entries(&entries)?;
-        let doc_entry = entries
-            .iter()
-            .find(|e| e.path == "word/document.xml")
-            .ok_or_else(|| {
-                EasyOfficeError::CorruptedContainer(
-                    "DOCX 필수 엔트리 'word/document.xml'이 누락되었습니다.".to_string(),
-                )
-            })?;
-        let xml = std::str::from_utf8(&doc_entry.data).map_err(|_| {
-            EasyOfficeError::InvalidUtf8("word/document.xml UTF-8 오류".to_string())
+        let parts = checked_zip_xml_entries(&entries)?;
+        let xml = checked_part(&parts, "word/document.xml").ok_or_else(|| {
+            EasyOfficeError::CorruptedContainer(
+                "DOCX 필수 엔트리 'word/document.xml'이 누락되었습니다.".to_string(),
+            )
         })?;
-        XmlSanitizer::validate_safe_xml(xml)?;
 
         let core_title = entries
             .iter()

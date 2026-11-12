@@ -13,7 +13,7 @@ use crate::hwpx_parts::{
     DEFAULT_LINE_PERCENT, HEADING_BULLET, HEADING_NONE, HEADING_NUMBER, HWPUNIT_PER_TWIP,
     LIST_LEFT_MARGIN, NS_PARAGRAPH, NS_SECTION, SETTINGS_XML, TEXT_WIDTH, VERSION_XML,
 };
-use crate::office_codecs::validate_zip_xml_entries;
+use crate::office_codecs::{checked_part, checked_zip_xml_entries};
 use crate::rich_document::{RichAlignment, RichBlock, RichDocument};
 use crate::rich_image::{check_document_images, RichImage};
 use crate::rich_image_writers::{hwpx_picture_run, MediaParts};
@@ -433,28 +433,15 @@ impl HwpxCodec {
 
     /// Validates XML entries, extracts `Contents/header.xml`, and parses package metadata.
     #[allow(clippy::type_complexity)]
-    pub(crate) fn extract_header_and_metadata(
-        entries: &[crate::ZipArchiveEntry],
-    ) -> Result<(&str, String, bool, Option<String>, Vec<String>), EasyOfficeError> {
-        validate_zip_xml_entries(entries)?;
-        let header_entry = entries
-            .iter()
-            .find(|e| e.path == "Contents/header.xml")
-            .ok_or_else(|| {
-                EasyOfficeError::CorruptedContainer(
-                    "HWPX 필수 엔트리 'Contents/header.xml'이 누락되었습니다.".to_string(),
-                )
-            })?;
-        let header_xml = std::str::from_utf8(&header_entry.data).map_err(|_| {
-            EasyOfficeError::InvalidUtf8("Contents/header.xml UTF-8 오류".to_string())
+    pub(crate) fn extract_header_and_metadata<'a>(
+        parts: &[(&str, &'a str)],
+    ) -> Result<(&'a str, String, bool, Option<String>, Vec<String>), EasyOfficeError> {
+        let header_xml = checked_part(parts, "Contents/header.xml").ok_or_else(|| {
+            EasyOfficeError::CorruptedContainer(
+                "HWPX 필수 엔트리 'Contents/header.xml'이 누락되었습니다.".to_string(),
+            )
         })?;
-        XmlSanitizer::validate_safe_xml(header_xml)?;
-
-        let hpf_xml = entries
-            .iter()
-            .find(|e| e.path == "Contents/content.hpf")
-            .and_then(|e| std::str::from_utf8(&e.data).ok())
-            .unwrap_or_default();
+        let hpf_xml = checked_part(parts, "Contents/content.hpf").unwrap_or_default();
         let hpf_title = extract_tag_bodies(hpf_xml, "opf:title")
             .into_iter()
             .next()
@@ -497,8 +484,9 @@ impl HwpxCodec {
 
     pub fn unpack(bytes: &[u8]) -> Result<HwpxPayload, EasyOfficeError> {
         let entries = ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default())?;
+        let parts = checked_zip_xml_entries(&entries)?;
         let (_header_xml, title, is_template, official_agency, approval_lines) =
-            Self::extract_header_and_metadata(&entries)?;
+            Self::extract_header_and_metadata(&parts)?;
 
         let mut sec_entries: Vec<(usize, &crate::ZipArchiveEntry)> = entries
             .iter()
@@ -523,10 +511,7 @@ impl HwpxCodec {
         let mut paragraphs = Vec::new();
 
         for (_, sec_entry) in sec_entries {
-            let sec_xml = std::str::from_utf8(&sec_entry.data).map_err(|_| {
-                EasyOfficeError::InvalidUtf8("Contents/section.xml UTF-8 오류".to_string())
-            })?;
-            XmlSanitizer::validate_safe_xml(sec_xml)?;
+            let sec_xml = section_xml(&parts, &sec_entry.path)?;
 
             for tbl_body in extract_tag_bodies(sec_xml, "hp:tbl") {
                 tables.push(extract_hwpx_table_rows(tbl_body)?);
@@ -560,6 +545,18 @@ impl HwpxCodec {
             tables,
         })
     }
+}
+
+/// A `Contents/section*.xml` part of a package whose XML entries were checked as a whole.
+pub(crate) fn section_xml<'a>(
+    parts: &[(&str, &'a str)],
+    path: &str,
+) -> Result<&'a str, EasyOfficeError> {
+    checked_part(parts, path).ok_or_else(|| {
+        EasyOfficeError::CorruptedContainer(format!(
+            "HWPX 구역 엔트리 '{path}'를 읽을 수 없습니다."
+        ))
+    })
 }
 
 /// A paragraph that only anchors a table or carries section/column properties has no text.
