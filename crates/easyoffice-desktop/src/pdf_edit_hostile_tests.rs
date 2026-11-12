@@ -315,17 +315,26 @@ fn many_streams_that_are_each_small_but_together_too_large_are_refused() {
 
 #[test]
 fn a_file_of_nothing_but_tiny_streams_is_scanned_in_linear_time() {
-    let mut file = one_page_with_content("", b"BT ET");
-    file.truncate(file.len() - b"trailer\n<< /Root 1 0 R >>\n%%EOF\n".len());
-    file.extend_from_slice(&b"<< /Filter /FlateDecode >>\nstream\nx\nendstream\n".repeat(60_000));
-    file.extend_from_slice(b"trailer\n<< /Root 1 0 R >>\n%%EOF\n");
-    let started = Instant::now();
-    // The reader may or may not accept the damaged objects; the scan itself must not be the slow part.
-    let _ = inspect_bytes(file, Limits::DEFAULT);
-    assert!(
-        started.elapsed() < Duration::from_secs(10),
-        "{:?}",
+    // Linear means ten times the streams costs about ten times the time. The ratio does not depend on
+    // how fast the runner is (a fixed wall-clock bound failed twice on a shared debug runner).
+    fn scan(streams: usize) -> Duration {
+        let mut file = one_page_with_content("", b"BT ET");
+        file.truncate(file.len() - b"trailer\n<< /Root 1 0 R >>\n%%EOF\n".len());
+        file.extend_from_slice(
+            &b"<< /Filter /FlateDecode >>\nstream\nx\nendstream\n".repeat(streams),
+        );
+        file.extend_from_slice(b"trailer\n<< /Root 1 0 R >>\n%%EOF\n");
+        let started = Instant::now();
+        // The reader may or may not accept the damaged objects; the scan itself must not be the slow part.
+        let _ = inspect_bytes(file, Limits::DEFAULT);
         started.elapsed()
+    }
+    let small = scan(6_000).max(Duration::from_millis(1));
+    let large = scan(60_000);
+    // A quadratic scan would be about 100 times slower; 30 leaves room for timer noise.
+    assert!(
+        large < small * 30,
+        "6000 streams {small:?}, 60000 streams {large:?}"
     );
 }
 
