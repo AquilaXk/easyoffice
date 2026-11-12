@@ -88,6 +88,27 @@
     "format:numfmt-decimal-up": "sheet-numfmt:decimal-up",
     "format:numfmt-decimal-down": "sheet-numfmt:decimal-down",
     "format:cell-format": "sheet-numfmt:dialog",
+    "format:align-left": "sheet-look:align-left",
+    "format:align-center": "sheet-look:align-center",
+    "format:align-right": "sheet-look:align-right",
+    "format:valign-top": "sheet-look:valign-top",
+    "format:valign-middle": "sheet-look:valign-middle",
+    "format:valign-bottom": "sheet-look:valign-bottom",
+    "format:wrap": "sheet-look:wrap",
+    "format:border-all": "sheet-look:border-all",
+    "format:border-outer": "sheet-look:border-outer",
+    "format:border-inner": "sheet-look:border-inner",
+    "format:border-top": "sheet-look:border-top",
+    "format:border-bottom": "sheet-look:border-bottom",
+    "format:border-left": "sheet-look:border-left",
+    "format:border-right": "sheet-look:border-right",
+    "format:border-none": "sheet-look:border-none",
+    "format:border-line-thin": "sheet-look:line-thin",
+    "format:border-line-thick": "sheet-look:line-thick",
+    "format:border-line-dashed": "sheet-look:line-dashed",
+    "format:border-line-dotted": "sheet-look:line-dotted",
+    "format:border-line-double": "sheet-look:line-double",
+    "format:border-color": "sheet-look:dialog-border",
     "page:paper": "studio-cmd:layout-paper",
     "page:orientation": "studio-cmd:layout-orientation",
     "page:margins": "studio-cmd:layout-margins",
@@ -212,6 +233,7 @@
       "sheet-act": (act) => click(`.md-item[data-sheet-act="${act}"]`),
       "sheet-numfmt": (action) => click(`.md-item[data-sheet-numfmt="${action}"]`),
       "sheet-paste": (action) => click(`.md-item[data-sheet-paste="${action}"]`),
+      "sheet-look": (action) => click(`.md-item[data-sheet-look="${action}"]`),
       "window-new": (kind) => click(`[data-window-new="${kind.toUpperCase()}"]`),
       theme: (mode) => click(`[data-theme-mode-choice="${mode}"]`),
       "update-check": () => click("[data-update-check-toggle]"),
@@ -221,10 +243,10 @@
   // The spreadsheet's own menu items (number formats, rows and columns, merging) have no ribbon command, so the
   // command search lists them from the page's menu items: the label is the menu's, running one clicks it.
   function sheetMenuPaletteItems(document) {
-    return Array.from(document.querySelectorAll(".md-item[data-sheet-act], .md-item[data-sheet-numfmt], .md-item[data-sheet-paste]"), (el) => {
-      const title = el.querySelector(".md-label").textContent;
+    return Array.from(document.querySelectorAll(".md-item[data-sheet-act], .md-item[data-sheet-numfmt], .md-item[data-sheet-paste], .md-item[data-sheet-look]"), (el) => {
+      const title = el.dataset.paletteTitle || el.querySelector(".md-label").textContent;
       const shortcut = el.querySelector(".md-shortcut")?.textContent || "";
-      return { id: `sheet-menu:${el.dataset.sheetAct || el.dataset.sheetNumfmt || el.dataset.sheetPaste}`, module: "SHEET", title, shortcut, searchKey: `서식 시트 ${title}`, run: () => el.click() };
+      return { id: `sheet-menu:${el.dataset.sheetAct || el.dataset.sheetNumfmt || el.dataset.sheetPaste || el.dataset.sheetLook}`, module: "SHEET", title, shortcut, searchKey: `서식 시트 ${title}`, run: () => el.click() };
     });
   }
 

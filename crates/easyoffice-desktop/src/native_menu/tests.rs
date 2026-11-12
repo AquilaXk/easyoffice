@@ -730,6 +730,9 @@ fn the_spreadsheet_bar_has_the_number_format_and_row_column_items_in_the_page_or
             "format:style",
             s,
             layout::NUMFMT,
+            layout::ALIGN,
+            "format:wrap",
+            layout::BORDER,
             "format:cell-format",
         ]
     );
@@ -751,6 +754,47 @@ fn the_spreadsheet_bar_has_the_number_format_and_row_column_items_in_the_page_or
             s,
             "소수 자릿수 늘리기",
             "소수 자릿수 줄이기",
+        ]
+    );
+    let align: Vec<&str> = layout::ALIGN_LINES
+        .iter()
+        .map(|id| if *id == s { s } else { spec(id).label })
+        .collect();
+    assert_eq!(
+        align,
+        [
+            "왼쪽 정렬",
+            "가운데 정렬",
+            "오른쪽 정렬",
+            s,
+            "위쪽 맞춤",
+            "가운데 맞춤",
+            "아래쪽 맞춤",
+        ]
+    );
+    let border: Vec<&str> = layout::BORDER_LINES
+        .iter()
+        .map(|id| if *id == s { s } else { spec(id).label })
+        .collect();
+    assert_eq!(
+        border,
+        [
+            "모두",
+            "바깥쪽",
+            "안쪽",
+            "위쪽",
+            "아래쪽",
+            "왼쪽",
+            "오른쪽",
+            "없음",
+            s,
+            "가는 실선",
+            "굵은 실선",
+            "파선",
+            "점선",
+            "이중 실선",
+            s,
+            "테두리 색…",
         ]
     );
     let sheet: Vec<&str> = lines_of(MenuKind::Sheet, "시트")
@@ -782,8 +826,12 @@ fn the_spreadsheet_bar_has_the_number_format_and_row_column_items_in_the_page_or
     for kind in [MenuKind::Doc, MenuKind::Hwp, MenuKind::Slide, MenuKind::Pdf] {
         let ids = layout::table_ids(kind);
         assert!(
-            ids.iter()
-                .all(|id| !id.starts_with("sheet:") && !id.starts_with("format:numfmt-")),
+            ids.iter().all(|id| !id.starts_with("sheet:")
+                && !id.starts_with("format:numfmt-")
+                && !id.starts_with("format:align-")
+                && !id.starts_with("format:valign-")
+                && !id.starts_with("format:border-")
+                && *id != "format:wrap"),
             "{kind:?}"
         );
     }
@@ -794,12 +842,16 @@ fn the_sheet_items_run_the_page_menu_items_through_a_quoted_static_id() {
     for id in [
         "format:numfmt-decimal-down",
         "format:cell-format",
+        "format:align-left",
+        "format:border-line-double",
         "sheet:row-insert-above",
         "sheet:unmerge",
     ] {
         let action = action_for(id).unwrap();
         assert!(
-            action.starts_with("sheet-numfmt:") || action.starts_with("sheet-act:"),
+            action.starts_with("sheet-numfmt:")
+                || action.starts_with("sheet-act:")
+                || action.starts_with("sheet-look:"),
             "{id}"
         );
         let script = dispatch_script(id).unwrap();

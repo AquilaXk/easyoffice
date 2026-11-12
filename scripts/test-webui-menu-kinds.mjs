@@ -141,7 +141,7 @@ test("keyboard navigation between menus skips the menus of other kinds", async (
 
 // ---- the native bar has the same menus per kind ---------------------------------------------------
 
-const TOKENS = { S: "-", NEW_DOCS: "@new-docs", THEME: "@theme", NUMFMT: "@numfmt", PASTE: "@paste", SELECT_ALL: "@select-all", SERVICES: "@services", HIDE: "@hide", HIDE_OTHERS: "@hide-others", SHOW_ALL: "@show-all", MINIMIZE: "@minimize", CLOSE_WINDOW: "@close-window", QUIT_ID: "app:quit" };
+const TOKENS = { S: "-", NEW_DOCS: "@new-docs", THEME: "@theme", NUMFMT: "@numfmt", ALIGN: "@align", BORDER: "@border", PASTE: "@paste", SELECT_ALL: "@select-all", SERVICES: "@services", HIDE: "@hide", HIDE_OTHERS: "@hide-others", SHOW_ALL: "@show-all", MINIMIZE: "@minimize", CLOSE_WINDOW: "@close-window", QUIT_ID: "app:quit" };
 
 function rustLayout() {
   const src = read("crates/easyoffice-desktop/src/native_menu/layout.rs");
@@ -175,9 +175,9 @@ function rustLabels() {
   return new Map([...rustItemTable().matchAll(ITEM_PATTERN)].map((m) => [m[1], m[2]]));
 }
 
-function numfmtLines() {
+function submenuLines(name = "NUMFMT") {
   const src = read("crates/easyoffice-desktop/src/native_menu/layout.rs");
-  const body = src.match(/pub const NUMFMT_LINES: \[&str; (\d+)\] = \[([\s\S]*?)\];/);
+  const body = src.match(new RegExp(`pub const ${name}_LINES: \\[&str; (\\d+)\\] = \\[([\\s\\S]*?)\\];`));
   const lines = body[2].split(",").map((t) => t.trim()).filter(Boolean).map((t) => (t === "SEPARATOR" ? "-" : t.slice(1, -1)));
   assert.equal(lines.length, Number(body[1]));
   return lines;
@@ -243,7 +243,8 @@ const pageRows = (container) =>
 function nativeRows(menu) {
   const labels = rustLabels();
   return menu.lines.map((line) => {
-    if (line === "@numfmt") return `표시 형식 > ${numfmtLines().map((id) => labels.get(id) ?? id).join(" | ")}`;
+    const submenu = { "@numfmt": ["표시 형식", "NUMFMT"], "@align": ["맞춤", "ALIGN"], "@border": ["테두리", "BORDER"] }[line];
+    if (submenu) return `${submenu[0]} > ${submenuLines(submenu[1]).map((id) => labels.get(id) ?? id).join(" | ")}`;
     return labels.get(line) ?? line;
   });
 }

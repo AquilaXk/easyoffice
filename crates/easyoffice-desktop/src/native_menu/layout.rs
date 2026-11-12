@@ -58,6 +58,10 @@ pub const NEW_DOCS: &str = "@new-docs";
 pub const THEME: &str = "@theme";
 /// The 표시 형식 submenu of the spreadsheet's 서식 menu ([`NUMFMT_LINES`]).
 pub const NUMFMT: &str = "@numfmt";
+/// The 맞춤 submenu of the spreadsheet's 서식 menu ([`ALIGN_LINES`]).
+pub const ALIGN: &str = "@align";
+/// The 테두리 submenu of the spreadsheet's 서식 menu ([`BORDER_LINES`]).
+pub const BORDER: &str = "@border";
 pub const PASTE: &str = "@paste";
 pub const SELECT_ALL: &str = "@select-all";
 pub const SERVICES: &str = "@services";
@@ -89,6 +93,35 @@ pub const NUMFMT_LINES: [&str; 11] = [
     SEPARATOR,
     "format:numfmt-decimal-up",
     "format:numfmt-decimal-down",
+];
+/// The lines of the 맞춤 submenu.
+pub const ALIGN_LINES: [&str; 7] = [
+    "format:align-left",
+    "format:align-center",
+    "format:align-right",
+    SEPARATOR,
+    "format:valign-top",
+    "format:valign-middle",
+    "format:valign-bottom",
+];
+/// The lines of the 테두리 submenu.
+pub const BORDER_LINES: [&str; 16] = [
+    "format:border-all",
+    "format:border-outer",
+    "format:border-inner",
+    "format:border-top",
+    "format:border-bottom",
+    "format:border-left",
+    "format:border-right",
+    "format:border-none",
+    SEPARATOR,
+    "format:border-line-thin",
+    "format:border-line-thick",
+    "format:border-line-dashed",
+    "format:border-line-dotted",
+    "format:border-line-double",
+    SEPARATOR,
+    "format:border-color",
 ];
 /// The items of the 테마 submenu.
 pub const THEME_IDS: [&str; 3] = ["view:theme-system", "view:theme-light", "view:theme-dark"];
@@ -371,6 +404,9 @@ const FORMAT_SHEET: MenuSpec = menu(
         "format:style",
         S,
         NUMFMT,
+        ALIGN,
+        "format:wrap",
+        BORDER,
         "format:cell-format",
     ],
 );
@@ -652,6 +688,8 @@ pub fn table_ids(kind: MenuKind) -> Vec<&'static str> {
                 NEW_DOCS => ids.extend(NEW_DOC_IDS),
                 THEME => ids.extend(THEME_IDS),
                 NUMFMT => ids.extend(NUMFMT_LINES.iter().filter(|line| **line != SEPARATOR)),
+                ALIGN => ids.extend(ALIGN_LINES.iter().filter(|line| **line != SEPARATOR)),
+                BORDER => ids.extend(BORDER_LINES.iter().filter(|line| **line != SEPARATOR)),
                 QUIT_ID => {}
                 line if line == SEPARATOR || line.starts_with('@') => {}
                 id => ids.push(id),
