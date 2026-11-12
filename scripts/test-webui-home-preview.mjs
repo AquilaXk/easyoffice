@@ -8,6 +8,7 @@ import { readText } from "./test-support/read-text.mjs";
 // a canvas on the card. Any failure keeps the
 // skeleton. The DOM is a small fake; the shell and the decoder are functions.
 
+const SHEET_UTILS_JS = new URL("../crates/easyoffice-app/ui/sheet-utils.js", import.meta.url);
 const HOME_JS = new URL("../crates/easyoffice-app/ui/home-screen.js", import.meta.url);
 const UI = (name) => readText(new URL(`../crates/easyoffice-app/ui/${name}`, import.meta.url));
 const PNG_B64 = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]).toString("base64");
@@ -65,6 +66,7 @@ function setup({ loadPreview, bitmap = () => ({ width: 8, height: 6, close() { t
     createImageBitmap: noDecoder ? undefined : async (blob) => { const made = bitmap(blob); return made; },
   };
   if (noDecoder) delete env.createImageBitmap;
+  loadUiModule(SHEET_UTILS_JS, env);
   loadUiModule(HOME_JS, env);
   const home = env.__EASYOFFICE_CREATE_HOME_SCREEN__({ document, env, onOpenRecent() {}, loadPreview });
   const settle = (turns) => (turns === 0 ? Promise.resolve() : new Promise((r) => setImmediate(r)).then(() => settle(turns - 1)));

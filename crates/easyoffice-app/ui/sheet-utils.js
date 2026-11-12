@@ -754,11 +754,14 @@
 
   const BASE64_CHUNK = 0x8000;
 
-  function base64ToBytes(base64) {
-    if (host.atob === globalThis.atob && typeof Uint8Array.fromBase64 === "function") {
+  // `atobFn` lets a caller with its own environment decode; the native `fromBase64` is used only
+  // when the decoder is the webview's own `atob`.
+  function base64ToBytes(base64, atobFn) {
+    const dec = atobFn || host.atob;
+    if (dec === globalThis.atob && typeof Uint8Array.fromBase64 === "function") {
       return Uint8Array.fromBase64(String(base64 || ""));
     }
-    const bin = host.atob(base64);
+    const bin = dec(base64);
     const len = bin.length;
     const out = new Uint8Array(len);
     let i = 0;

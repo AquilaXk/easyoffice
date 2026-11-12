@@ -198,11 +198,7 @@
     function triggerBase64Download(base64Data, baseFilename, ext) {
       if (!base64Data) return false;
       try {
-        const base64ToBytes = host.__EASYOFFICE_SHEET_UTILS__?.base64ToBytes;
-        const bytes =
-          typeof base64ToBytes === "function"
-            ? base64ToBytes(base64Data)
-            : Uint8Array.from(host.atob(base64Data), (c) => c.codePointAt(0));
+        const bytes = host.__EASYOFFICE_SHEET_UTILS__.base64ToBytes(base64Data);
         const blob = new Blob([bytes], { type: "application/octet-stream" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");

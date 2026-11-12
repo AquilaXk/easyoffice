@@ -47,10 +47,7 @@
     if (!view || !PREVIEW_MIMES.has(view.mime) || typeof view.base64 !== "string") return null;
     if (view.base64.length === 0 || view.base64.length > PREVIEW_MAX_BASE64_CHARS) return null;
     try {
-      const raw = env.atob(view.base64);
-      const bytes = new Uint8Array(raw.length);
-      for (let i = 0; i < raw.length; i += 1) bytes[i] = raw.codePointAt(i);
-      return bytes;
+      return host.__EASYOFFICE_SHEET_UTILS__.base64ToBytes(view.base64, env.atob);
     } catch {
       return null;
     }

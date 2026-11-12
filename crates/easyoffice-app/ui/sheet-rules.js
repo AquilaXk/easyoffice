@@ -192,9 +192,7 @@
   function decodePacked(packed) {
     const out = [];
     if (!packed || typeof packed.w !== "string") return out;
-    const text = host.atob ? host.atob(packed.w) : globalThis.atob(packed.w);
-    const bytes = new Uint8Array(text.length);
-    for (let i = 0; i < text.length; i += 1) bytes[i] = text.charCodeAt(i);
+    const bytes = host.__EASYOFFICE_SHEET_UTILS__.base64ToBytes(packed.w, host.atob);
     const view = new DataView(bytes.buffer);
     const words = Math.floor(bytes.length / 4);
     const pal = Array.isArray(packed.pal) ? packed.pal : [];
