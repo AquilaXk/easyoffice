@@ -58,11 +58,27 @@ jobs:
           node scripts/verify-rhwp-core.mjs
           node scripts/verify-fonts.mjs
 
-      - name: Run rhwp upstream and hwp-studio guard tests
-        run: node --test scripts/test-rhwp-upstream.mjs scripts/test-update-rhwp.mjs scripts/test-hwp-studio.mjs scripts/test-commit-messages.mjs scripts/test-sort-comparator-rule.mjs scripts/test-release-serve-rule.mjs scripts/test-desktop-file-associations.mjs scripts/test-release-assets.mjs scripts/test-verify-linux-bundles.mjs scripts/test-retry-on-download-failure.mjs scripts/test-rust-toolchain-pin.mjs
+      # Every scripts/test-*.mjs suite (guards, hwp-studio and the WebUI behavioral and security suites) runs
+      # once; the lcov report covers the WebUI scripts, the editor overlay sources and the guard scripts.
+      - name: Run Node test suites with coverage
+        run: |
+          mkdir -p coverage
+          node --test --experimental-test-coverage \
+            --test-coverage-include="crates/easyoffice-app/ui/*.js" \
+            --test-coverage-include="apps/hwp-studio/src/**/*.ts" \
+            --test-coverage-include="scripts/*.mjs" \
+            --test-coverage-exclude="scripts/test-*.mjs" \
+            --test-reporter=spec --test-reporter-destination=stdout \
+            --test-reporter=lcov --test-reporter-destination=coverage/js.lcov \
+            "scripts/test-*.mjs"
 
-      - name: Run WebUI behavioral and security regression suite
-        run: node --test "scripts/test-webui-*.mjs"
+      - name: Upload the JavaScript coverage report
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: js-coverage-lcov
+          path: coverage/js.lcov
+          retention-days: 7
+          if-no-files-found: error
 
       # Cargo reads the manifest of every workspace dependency, and the desktop shell (excluded from
       # the builds below) depends on this checkout (PD-142). It is not compiled in this job.
@@ -434,7 +450,12 @@ jobs:
             }
           }
 
+      # Same switch as MACOS_SMOKE: set the repository variable WINDOWS_SMOKE=off to skip the GUI smoke test
+      # and the editor harness if a runner image stops providing a desktop session.
       - name: Smoke test desktop shell window (embedded WebUI, IPC round trip and HWP editor round trip)
+        id: windows-smoke
+        if: vars.WINDOWS_SMOKE != 'off'
+        timeout-minutes: 4
         shell: pwsh
         run: |
           # The release binary has no console; redirected output files carry the per-step
@@ -446,7 +467,9 @@ jobs:
             Stop-Process -Id $proc.Id -Force
           }
           foreach ($log in @("smoke-stdout.txt", "smoke-stderr.txt")) {
+            Write-Output "::group::$log"
             Get-Content -Path $log -ErrorAction SilentlyContinue
+            Write-Output "::endgroup::"
           }
           if (-not $finished) {
             throw "Desktop shell smoke test timed out"
@@ -455,7 +478,20 @@ jobs:
             throw "Desktop shell smoke test failed with exit code $($proc.ExitCode)"
           }
 
+      - name: Upload the desktop shell smoke logs on failure
+        if: failure() && steps.windows-smoke.outcome == 'failure'
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: easyoffice-windows-smoke-logs
+          path: |
+            smoke-stdout.txt
+            smoke-stderr.txt
+          retention-days: 7
+          if-no-files-found: warn
+
       - name: Run the standalone hwp-studio harness (blank document, partial font size, export, reload)
+        if: vars.WINDOWS_SMOKE != 'off'
+        timeout-minutes: 6
         run: node scripts/hwp-studio-harness.mjs
 
       - name: Record the hwp-studio bundle size
