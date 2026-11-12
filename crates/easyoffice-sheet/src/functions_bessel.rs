@@ -447,7 +447,7 @@ impl SheetEngine {
     ) -> Result<EvaluatedCellValue, FormulaError> {
         let a = self.fin_args(args, (2, 2), ArgRule::BlankNa, ctx, depth)?;
         let (x, order) = (a.num(0)?, a.num(1)?.floor());
-        if order < 0.0 || order > MAX_BESSEL_ORDER {
+        if !(0.0..=MAX_BESSEL_ORDER).contains(&order) {
             return Err(FormulaError::Num);
         }
         let n = order as i64;
