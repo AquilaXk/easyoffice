@@ -5,8 +5,8 @@
 //! inclusive. Input over a limit is refused, not trimmed.
 
 use easyoffice_formats::{
-    normalize_runs, run_total, CellBox, EasyOfficeError, SheetStyling, StrictJsonValue,
-    MAX_HIDDEN_ROWS, MAX_MERGES,
+    normalize_runs, run_total, CellBox, EasyOfficeError, SheetFilter, SheetStyling,
+    StrictJsonValue, MAX_HIDDEN_ROWS, MAX_MERGES,
 };
 use std::fmt::Write;
 
@@ -42,8 +42,23 @@ pub(crate) fn parse_runs(
     last_index: u32,
     what: &str,
 ) -> Result<Vec<(u32, u32)>, EasyOfficeError> {
+    parse_runs_limited(
+        v,
+        last_index,
+        what,
+        MAX_HIDDEN_ROWS.max(u64::from(LAST_COL) + 1),
+    )
+}
+
+/// [`parse_runs`] with at most `max_total` rows or columns over all runs.
+pub(crate) fn parse_runs_limited(
+    v: &StrictJsonValue,
+    last_index: u32,
+    what: &str,
+    max_total: u64,
+) -> Result<Vec<(u32, u32)>, EasyOfficeError> {
     let items = v.as_array().ok_or_else(|| bad(what))?;
-    if items.len() > MAX_HIDDEN_ROWS as usize {
+    if items.len() > max_total as usize {
         return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
             "숨김 구간 수가 한도({MAX_HIDDEN_ROWS})를 초과했습니다."
         )));
@@ -66,9 +81,9 @@ pub(crate) fn parse_runs(
         }
     }
     normalize_runs(&mut runs);
-    if run_total(&runs) > MAX_HIDDEN_ROWS.max(u64::from(LAST_COL) + 1) {
+    if run_total(&runs) > max_total {
         return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
-            "숨김 행·열 수가 한도({MAX_HIDDEN_ROWS})를 초과했습니다."
+            "숨김 행·열 수가 한도({max_total})를 초과했습니다."
         )));
     }
     Ok(runs)
@@ -102,6 +117,9 @@ pub(crate) fn parse_layout(
     if let Some(v) = StrictJsonValue::get_field(obj, "hiddenCols") {
         styling.hidden_cols = parse_hidden_cols(v)?;
     }
+    if let Some(v) = StrictJsonValue::get_field(obj, "filter") {
+        styling.filter = Some(crate::sheet_filter_json::parse_filter(v)?);
+    }
     Ok(())
 }
 
@@ -125,16 +143,33 @@ pub(crate) fn runs_json(runs: &[(u32, u32)]) -> String {
     out
 }
 
-/// `,"merges":..,"hiddenRows":..,"hiddenCols":..` for the parts that are not empty.
+/// `,"merges":..,"hiddenRows":..,"hiddenCols":..,"filter":..` for the parts that are not empty.
 pub(crate) fn write_layout(out: &mut String, styling: &SheetStyling) {
+    write_layout_split(out, styling, &styling.hidden_rows, styling.filter.as_ref());
+}
+
+/// [`write_layout`] with the hidden rows and the filter a caller has already told apart.
+pub(crate) fn write_layout_split(
+    out: &mut String,
+    styling: &SheetStyling,
+    hidden_rows: &[(u32, u32)],
+    filter: Option<&SheetFilter>,
+) {
     if !styling.merges.is_empty() {
         let _ = write!(out, ",\"merges\":{}", merges_json(&styling.merges));
     }
-    if !styling.hidden_rows.is_empty() {
-        let _ = write!(out, ",\"hiddenRows\":{}", runs_json(&styling.hidden_rows));
+    if !hidden_rows.is_empty() {
+        let _ = write!(out, ",\"hiddenRows\":{}", runs_json(hidden_rows));
     }
     if !styling.hidden_cols.is_empty() {
         let _ = write!(out, ",\"hiddenCols\":{}", runs_json(&styling.hidden_cols));
+    }
+    if let Some(filter) = filter {
+        let _ = write!(
+            out,
+            ",\"filter\":{}",
+            crate::sheet_filter_json::filter_json(filter)
+        );
     }
 }
 

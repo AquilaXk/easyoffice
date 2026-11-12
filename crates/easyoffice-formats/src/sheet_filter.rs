@@ -117,6 +117,10 @@ impl SheetFilter {
             && r.row1 - r.row0 < MAX_FILTER_ROWS
             && self.columns.len() <= MAX_FILTER_COLUMNS
             && self
+                .hidden
+                .iter()
+                .all(|&(first, last)| first > r.row0 && last <= r.row1)
+            && self
                 .columns
                 .windows(2)
                 .all(|pair| pair[0].col < pair[1].col)

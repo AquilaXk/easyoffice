@@ -5,15 +5,18 @@
 //! 1-based row or column the insertion goes before, or the first one deleted) plus the position
 //! bound parts of the page's model, which the engine moves with the cells so the page keeps no
 //! second copy of the rule: `merges`, `hiddenRows`, `hiddenCols` (see `sheet_layout_json`),
-//! `widths` `[[column, px], ...]` of the edited sheet and `rules` `{sheet: {cf, dv}}` of every
-//! sheet.
+//! `widths` `[[column, px], ...]` of the edited sheet, `filter` (see `sheet_filter_json`) and `rules`
+//! `{sheet: {cf, dv}}` of every sheet.
 //!
 //! Answer: the session's `formulas` (`[{sheet, cell, value}]`, the text of every formula the edit
 //! rewrote, by new position), the `changed` values, `circular`, and the moved `merges`,
-//! `hiddenRows`, `hiddenCols`, `widths` and the `rules` that changed. `{"refused":"structure"}`
+//! `hiddenRows`, `hiddenCols`, `filter` (`null` when the edit removed it; `filterReapply: true` when
+//! it dropped a column's condition, so the page evaluates the others again), `widths` and the
+//! `rules` that changed. `{"refused":"structure"}`
 //! means the edit changes too many formulas and nothing changed; `{"expired":true}` and
 //! `{"refused":"limit"}` are as for `apply`.
 
+use crate::sheet_filter_json::{filter_json, parse_filter};
 use crate::sheet_layout_json::{
     merges_json, parse_hidden_cols, parse_hidden_rows, parse_merges, runs_json,
 };
@@ -24,8 +27,8 @@ use easyoffice_formats::{
     CellBox, EasyOfficeError, SheetRules, StrictJsonValue, MAX_COLUMN_PX, MIN_COLUMN_PX,
 };
 use easyoffice_sheet::{
-    shift_boxes, shift_rules, shift_runs, shift_widths, Axis, AxisEdit, AxisEditReport, EditKind,
-    RecalcOutcome, RecalcSession,
+    shift_boxes, shift_filter, shift_rules, shift_runs, shift_widths, Axis, AxisEdit,
+    AxisEditReport, EditKind, RecalcOutcome, RecalcSession,
 };
 use std::collections::BTreeMap;
 use std::fmt::Write;
@@ -110,6 +113,18 @@ fn moved_layout_json(
             cols
         };
         let _ = write!(out, ",\"hiddenCols\":{}", runs_json(&moved));
+    }
+    if let Some(v) = field("filter") {
+        let shifted = shift_filter(&parse_filter(v)?, edit);
+        match &shifted.filter {
+            Some(moved) => {
+                let _ = write!(out, ",\"filter\":{}", filter_json(moved));
+            }
+            None => out.push_str(",\"filter\":null"),
+        }
+        if shifted.reapply {
+            out.push_str(",\"filterReapply\":true");
+        }
     }
     if let Some(v) = field("widths") {
         let moved = shift_widths(&parse_widths(v)?, edit);

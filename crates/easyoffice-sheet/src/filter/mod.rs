@@ -179,16 +179,21 @@ fn sort_items(items: &mut [ValueItem]) {
 /// Splits the hidden rows a file carries into the filter's and the user's: a hidden row below the
 /// header that the conditions also hide belongs to the filter, every other hidden row stays the
 /// user's. Rows the conditions would hide that the file shows stay shown (the file is the cache a
-/// filter is only re-applied from on request).
+/// filter is only re-applied from on request). `assume` marks the data rows whose cells the
+/// caller could not read (a formula whose value is not known): the filter is taken to hide them
+/// when the file does.
 pub fn split_hidden_rows(
     filter: &mut SheetFilter,
     hidden_rows: &mut Vec<(u32, u32)>,
     columns: &[ColumnText<'_>],
+    assume: &RowBits,
 ) -> Result<(), EasyOfficeError> {
     if !filter.has_criteria() {
         return Ok(());
     }
-    let computed = hidden_runs(filter, columns)?;
+    let mut bits = hidden_bits(filter, columns, None)?;
+    bits.union_with(assume);
+    let computed = bits.runs(filter.range.row0 + 1);
     filter.hidden = intersect_runs(&computed, hidden_rows);
     *hidden_rows = subtract_runs(hidden_rows, &filter.hidden);
     Ok(())

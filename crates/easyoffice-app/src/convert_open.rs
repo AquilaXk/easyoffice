@@ -410,7 +410,12 @@ fn write_sheet(
         out.push_str(&rules_json(&st.rules));
     }
     if let Some(st) = styling {
-        crate::sheet_layout_json::write_layout(out, st);
+        match crate::sheet_filter_ipc::split_for_open(cells, st) {
+            Some((filter, hidden)) => {
+                crate::sheet_layout_json::write_layout_split(out, st, &hidden, Some(&filter));
+            }
+            None => crate::sheet_layout_json::write_layout(out, st),
+        }
     }
     out.push('}');
 }

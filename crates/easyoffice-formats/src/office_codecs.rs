@@ -554,7 +554,6 @@ impl OoxmlCodec {
                     !f.within_bounds()
                         || f.range.row1 >= Self::MAX_XLSX_ROWS
                         || f.range.col1 >= Self::MAX_XLSX_COLS
-                        || f.hidden.iter().any(|r| r.1 >= f.range.row1)
                 });
             if layout {
                 return Err(EasyOfficeError::ResourceBudgetExceeded(

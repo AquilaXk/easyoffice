@@ -97,3 +97,29 @@ fn bad_requests_and_missing_sessions_are_refused() {
     let res = call("{\"sessionAction\":\"structure\",\"session\":\"ssnone\",\"sheet\":\"S\",\"axis\":\"row\",\"op\":\"insert\",\"at\":1,\"count\":1}");
     assert_eq!(res.to_json_string(), "{\"expired\":true}");
 }
+
+#[test]
+fn the_filter_follows_the_edit_and_a_deleted_condition_column_asks_for_a_reapply() {
+    let id = open_with(&[("S!A1", "1")]);
+    let filter = r#"{"range":"B3:E12","columns":[{"col":2,"values":["x"]},{"col":4,"conditions":[{"text":"y*"}]}],"hidden":[[5,6],[10,10]]}"#;
+    let insert = call(&format!(
+        r#"{{"sessionAction":"structure","session":"{id}","sheet":"S","axis":"row","op":"insert","at":1,"count":2,"filter":{filter}}}"#
+    ));
+    let moved = field(&insert, "filter").to_json_string();
+    assert!(moved.starts_with(r#"{"range":"B5:E14","#), "{moved}");
+    assert!(moved.ends_with(r#""hidden":[[7,8],[12,12]]}"#), "{moved}");
+    assert!(StrictJsonValue::get_field(insert.as_object().unwrap(), "filterReapply").is_none());
+    let delete = call(&format!(
+        r#"{{"sessionAction":"structure","session":"{id}","sheet":"S","axis":"col","op":"delete","at":2,"count":1,"filter":{filter}}}"#
+    ));
+    let kept = field(&delete, "filter").to_json_string();
+    assert!(
+        kept.starts_with(r#"{"range":"B3:D12","columns":[{"col":3,"#),
+        "{kept}"
+    );
+    assert_eq!(field(&delete, "filterReapply").to_json_string(), "true");
+    let gone = call(&format!(
+        r#"{{"sessionAction":"structure","session":"{id}","sheet":"S","axis":"row","op":"delete","at":3,"count":1,"filter":{filter}}}"#
+    ));
+    assert_eq!(field(&gone, "filter").to_json_string(), "null");
+}

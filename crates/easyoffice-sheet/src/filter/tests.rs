@@ -275,6 +275,7 @@ fn a_file_s_hidden_rows_split_into_the_filter_s_and_the_user_s() {
             col: 0,
             texts: &dept,
         }],
+        &RowBits::new(4),
     )
     .unwrap();
     assert_eq!(filter.hidden, vec![(2, 2), (4, 4)]);
@@ -289,13 +290,31 @@ fn a_file_s_hidden_rows_split_into_the_filter_s_and_the_user_s() {
             col: 0,
             texts: &dept,
         }],
+        &RowBits::new(4),
     )
     .unwrap();
     assert_eq!(shown.hidden, vec![(2, 2)]);
     assert!(hidden.is_empty());
+    // A row whose cell could not be read is the filter's when the file hides it.
+    let mut unread = filter_over(4, filter.columns.clone());
+    let mut hidden = vec![(3, 3), (5, 5)];
+    let mut assume = RowBits::new(4);
+    assume.set(2);
+    split_hidden_rows(
+        &mut unread,
+        &mut hidden,
+        &[ColumnText {
+            col: 0,
+            texts: &dept,
+        }],
+        &assume,
+    )
+    .unwrap();
+    assert_eq!(unread.hidden, vec![(3, 3)]);
+    assert_eq!(hidden, vec![(5, 5)]);
     // A filter without conditions leaves everything to the user.
     let mut plain = filter_over(4, Vec::new());
     let mut hidden = vec![(2, 3)];
-    split_hidden_rows(&mut plain, &mut hidden, &[]).unwrap();
+    split_hidden_rows(&mut plain, &mut hidden, &[], &RowBits::new(4)).unwrap();
     assert!(plain.hidden.is_empty() && hidden == vec![(2, 3)]);
 }
