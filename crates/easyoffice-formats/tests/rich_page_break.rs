@@ -171,3 +171,57 @@ fn odt_reads_break_before_from_automatic_and_inherited_styles() {
         "{got:?}"
     );
 }
+
+/// A heading that carries a table-of-contents bookmark and starts a page keeps both through a save.
+fn bookmarked_page_start() -> RichDocument {
+    let heading = |text: &str, bookmark: u32, page_break_before: bool| {
+        RichBlock::Paragraph(RichParagraph {
+            runs: vec![RichRun::plain(text)],
+            heading_level: 1,
+            bookmark: Some(bookmark),
+            page_break_before,
+            ..RichParagraph::default()
+        })
+    };
+    RichDocument {
+        title: "쪽".to_string(),
+        blocks: vec![
+            heading("개요", 1, false),
+            para("본문", false),
+            heading("결론", 2, true),
+        ],
+        official_agency: None,
+    }
+}
+
+#[test]
+fn a_toc_bookmark_and_a_page_break_on_the_same_heading_survive_docx_and_odt() {
+    for (format, name) in [
+        (DocumentFormat::Docx, "a.docx"),
+        (DocumentFormat::Odt, "a.odt"),
+    ] {
+        let bytes =
+            UniversalFormatConverter::encode_rich(&bookmarked_page_start(), format, None).unwrap();
+        let DecodedContent::Document(doc) =
+            UniversalFormatConverter::decode_rich(&bytes, Some(name))
+                .unwrap()
+                .content
+        else {
+            panic!("document expected");
+        };
+        let got: Vec<(String, Option<u32>, bool)> = doc
+            .blocks
+            .iter()
+            .map(|b| match b {
+                RichBlock::Paragraph(p) => (p.plain_text(), p.bookmark, p.page_break_before),
+                _ => panic!("paragraph expected"),
+            })
+            .collect();
+        let want = vec![
+            ("개요".to_string(), Some(1), false),
+            ("본문".to_string(), None, false),
+            ("결론".to_string(), Some(2), true),
+        ];
+        assert_eq!(got, want, "{name}");
+    }
+}
