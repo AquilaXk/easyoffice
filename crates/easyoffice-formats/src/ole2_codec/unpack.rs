@@ -118,6 +118,23 @@ impl<'a> Ole2Reader<'a> {
         Ok(())
     }
 
+    /// Stream size of the directory entry at byte `base`. A 512-byte-sector (version 3) file defines
+    /// only the low 32 bits; the rest is whatever an older writer left there (MS-CFB 2.6.3, 2.6.4).
+    /// Version 4 uses all 64, and a size this platform cannot address is refused, not truncated.
+    fn entry_size(&self, base: usize) -> Result<usize, EasyOfficeError> {
+        let raw = read_u64_le(&self.dir_bytes, base + ENTRY_SIZE_OFFSET)?;
+        let size = if self.sector_size == Ole2SecurityGuard::SECTOR_SIZE {
+            raw & u64::from(u32::MAX)
+        } else {
+            raw
+        };
+        usize::try_from(size).map_err(|_| {
+            EasyOfficeError::CorruptedContainer(
+                "OLE2 스트림 크기가 이 플랫폼의 주소 범위를 넘습니다.".to_string(),
+            )
+        })
+    }
+
     fn has_root(&self) -> bool {
         self.entry_count > 0
             && self.dir_bytes[ENTRY_TYPE_OFFSET] == Ole2ContainerCodec::OBJ_TYPE_ROOT
@@ -146,7 +163,7 @@ impl<'a> Ole2Reader<'a> {
 
     fn load_mini_structures(&mut self, first_minifat_sector: u32) -> Result<(), EasyOfficeError> {
         let root_start = read_u32_le(&self.dir_bytes, ENTRY_START_OFFSET)?;
-        let root_size = read_u64_le(&self.dir_bytes, ENTRY_SIZE_OFFSET)? as usize;
+        let root_size = self.entry_size(0)?;
         if root_size == 0 || !is_live_id(root_start) || !is_live_id(first_minifat_sector) {
             return Ok(());
         }
@@ -205,7 +222,7 @@ impl<'a> Ole2Reader<'a> {
     ) -> Result<Ole2StreamEntry, EasyOfficeError> {
         let base = idx * Ole2ContainerCodec::DIR_ENTRY_SIZE;
         let start_sector = read_u32_le(&self.dir_bytes, base + ENTRY_START_OFFSET)?;
-        let stream_size = read_u64_le(&self.dir_bytes, base + ENTRY_SIZE_OFFSET)? as usize;
+        let stream_size = self.entry_size(base)?;
         if stream_size > self.bytes.len() {
             return Err(EasyOfficeError::CorruptedContainer(format!(
                 "OLE2 스트림('{full_name}') 크기가 컨테이너 크기를 초과합니다."
