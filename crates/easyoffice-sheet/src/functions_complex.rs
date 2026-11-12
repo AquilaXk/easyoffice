@@ -299,6 +299,18 @@ fn coerce_cell_to_complex(
     }
 }
 
+/// A blank is 0, finite numbers pass (negative zero as zero), numeric text is parsed.
+fn strict_num_value(val: EvaluatedCellValue) -> Result<f64, FormulaError> {
+    match val {
+        EvaluatedCellValue::Boolean(_) => Err(FormulaError::Value),
+        EvaluatedCellValue::Empty => Ok(0.0),
+        EvaluatedCellValue::Number(n) if n.is_finite() => Ok(if n == 0.0 { 0.0 } else { n }),
+        EvaluatedCellValue::Number(_) => Err(FormulaError::Num),
+        EvaluatedCellValue::Text(s) => parse_value_text(&s).ok_or(FormulaError::Value),
+        EvaluatedCellValue::Error(e) => Err(e),
+    }
+}
+
 impl SheetEngine {
     pub(crate) fn eval_strict_num_arg(
         &self,
@@ -306,19 +318,24 @@ impl SheetEngine {
         ctx: &mut EvalContext<'_>,
         depth: usize,
     ) -> Result<f64, FormulaError> {
-        let val = self.eval_arg_val(arg, ctx, depth)?;
-        match val {
+        match self.eval_arg_val(arg, ctx, depth)? {
             EvaluatedCellValue::Boolean(_) => Err(FormulaError::Value),
-            EvaluatedCellValue::Empty => Ok(0.0),
-            EvaluatedCellValue::Number(n) => {
-                if n.is_finite() {
-                    Ok(if n == 0.0 { 0.0 } else { n })
-                } else {
-                    Err(FormulaError::Num)
-                }
-            }
-            EvaluatedCellValue::Text(s) => parse_value_text(&s).ok_or(FormulaError::Value),
-            EvaluatedCellValue::Error(e) => Err(e),
+            other => strict_num_value(other),
+        }
+    }
+
+    /// The number argument of a distribution or statistics function: like
+    /// [`Self::eval_strict_num_arg`], but a logical value is 1 or 0 (PD-205). Logical values inside
+    /// a range that an aggregate reads are skipped by the aggregate, not by this reader.
+    pub(crate) fn eval_stat_num_arg(
+        &self,
+        arg: &Expr,
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<f64, FormulaError> {
+        match self.eval_arg_val(arg, ctx, depth)? {
+            EvaluatedCellValue::Boolean(b) => Ok(f64::from(u8::from(b))),
+            other => strict_num_value(other),
         }
     }
 
@@ -399,17 +416,17 @@ impl SheetEngine {
             }
             "PHI" => {
                 check_arity(args, 1, 1)?;
-                let x = self.eval_strict_num_arg(&args[0], ctx, depth)?;
+                let x = self.eval_stat_num_arg(&args[0], ctx, depth)?;
                 finite_num(std_normal_pdf(x))
             }
             "GAUSS" => {
                 check_arity(args, 1, 1)?;
-                let z = self.eval_strict_num_arg(&args[0], ctx, depth)?;
+                let z = self.eval_stat_num_arg(&args[0], ctx, depth)?;
                 finite_num(0.5 * erf_cody(z * std::f64::consts::FRAC_1_SQRT_2))
             }
             "NORM.S.DIST" => {
                 check_arity(args, 1, 2)?;
-                let z = self.eval_strict_num_arg(&args[0], ctx, depth)?;
+                let z = self.eval_stat_num_arg(&args[0], ctx, depth)?;
                 let cumulative = match args.get(1) {
                     None | Some(Expr::Missing) => true,
                     Some(a) => self
@@ -425,7 +442,7 @@ impl SheetEngine {
             }
             "NORMSDIST" => {
                 check_arity(args, 1, 1)?;
-                let z = self.eval_strict_num_arg(&args[0], ctx, depth)?;
+                let z = self.eval_stat_num_arg(&args[0], ctx, depth)?;
                 finite_num(std_normal_cdf(z))
             }
             "Z.TEST" | "ZTEST" => self.eval_z_test(args, ctx, depth),
@@ -577,10 +594,10 @@ impl SheetEngine {
             }
             Ok(())
         })?;
-        let x = self.eval_strict_num_arg(&args[1], ctx, depth)?;
+        let x = self.eval_stat_num_arg(&args[1], ctx, depth)?;
         let sigma_opt = match args.get(2) {
             None | Some(Expr::Missing) => None,
-            Some(a) => Some(self.eval_strict_num_arg(a, ctx, depth)?),
+            Some(a) => Some(self.eval_stat_num_arg(a, ctx, depth)?),
         };
         if count == 0 {
             return Err(FormulaError::Na);

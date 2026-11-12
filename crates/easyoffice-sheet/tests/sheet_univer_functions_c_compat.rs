@@ -82,12 +82,11 @@ const FDIST: &[Case] = &[
         formula: "=FDIST(\"test\",6,4)",
         expect: Exp::Err(E::Value),
     },
-    // DIFFERS (logical): reference Exp::Num(0.5248). a logical value in a numeric argument is #VALUE!, like the other distribution functions (the reference reads TRUE as 1)
     Case {
         id: "fdist#4",
         cells: &[],
         formula: "=FDIST(TRUE,6,4)",
-        expect: Exp::Err(E::Value),
+        expect: Exp::Num(0.5248),
     },
     Case {
         id: "fdist#5",
@@ -164,7 +163,6 @@ const FDIST: &[Case] = &[
         formula: "=FDIST(C1,6,4)",
         expect: Exp::Num(0.439669136986),
     },
-    // DIFFERS (logical): reference Exp::Num(0.5248). a logical value in a numeric argument is #VALUE!, like the other distribution functions (the reference reads TRUE as 1)
     Case {
         id: "fdist#12",
         cells: &[
@@ -180,9 +178,8 @@ const FDIST: &[Case] = &[
             ("E2", "-3"),
         ],
         formula: "=FDIST(D1,6,4)",
-        expect: Exp::Err(E::Value),
+        expect: Exp::Num(0.5248),
     },
-    // DIFFERS (logical): reference Exp::Num(1.0). a logical value in a numeric argument is #VALUE!, like the other distribution functions (the reference reads TRUE as 1)
     Case {
         id: "fdist#13",
         cells: &[
@@ -198,7 +195,7 @@ const FDIST: &[Case] = &[
             ("E2", "-3"),
         ],
         formula: "=FDIST(E1,6,4)",
-        expect: Exp::Err(E::Value),
+        expect: Exp::Num(1.0),
     },
     Case {
         id: "fdist#14",
@@ -353,12 +350,11 @@ const FINV: &[Case] = &[
         formula: "=FINV(\"test\",6,4)",
         expect: Exp::Err(E::Value),
     },
-    // DIFFERS (logical): reference Exp::Num(0.0). a logical value in a numeric argument is #VALUE!, like the other distribution functions (the reference reads TRUE as 1)
     Case {
         id: "finv#4",
         cells: &[],
         formula: "=FINV(TRUE,6,4)",
-        expect: Exp::Err(E::Value),
+        expect: Exp::Num(0.0),
     },
     Case {
         id: "finv#5",
@@ -435,7 +431,6 @@ const FINV: &[Case] = &[
         formula: "=FINV(C1,6,4)",
         expect: Exp::Err(E::Num),
     },
-    // DIFFERS (logical): reference Exp::Num(0.0). a logical value in a numeric argument is #VALUE!, like the other distribution functions (the reference reads TRUE as 1)
     Case {
         id: "finv#12",
         cells: &[
@@ -451,9 +446,8 @@ const FINV: &[Case] = &[
             ("E2", "-3"),
         ],
         formula: "=FINV(D1,6,4)",
-        expect: Exp::Err(E::Value),
+        expect: Exp::Num(0.0),
     },
-    // DIFFERS (logical): reference Exp::Err(E::Num). a logical value in a numeric argument is #VALUE!, like the other distribution functions (the reference reads TRUE as 1)
     Case {
         id: "finv#13",
         cells: &[
@@ -469,7 +463,7 @@ const FINV: &[Case] = &[
             ("E2", "-3"),
         ],
         formula: "=FINV(E1,6,4)",
-        expect: Exp::Err(E::Value),
+        expect: Exp::Err(E::Num),
     },
     Case {
         id: "finv#14",
@@ -630,12 +624,11 @@ const EXPONDIST: &[Case] = &[
         formula: "=EXPONDIST(\"test\",1,TRUE)",
         expect: Exp::Err(E::Value),
     },
-    // DIFFERS (logical): reference Exp::Num(0.632120558829). a logical value in a numeric argument is #VALUE!, like the other distribution functions (the reference reads TRUE as 1)
     Case {
         id: "expondist#5",
         cells: &[],
         formula: "=EXPONDIST(TRUE,1,TRUE)",
-        expect: Exp::Err(E::Value),
+        expect: Exp::Num(0.632120558829),
     },
     Case {
         id: "expondist#6",
@@ -712,7 +705,6 @@ const EXPONDIST: &[Case] = &[
         formula: "=EXPONDIST(C1,1,TRUE)",
         expect: Exp::Num(0.707707422319),
     },
-    // DIFFERS (logical): reference Exp::Num(0.632120558829). a logical value in a numeric argument is #VALUE!, like the other distribution functions (the reference reads TRUE as 1)
     Case {
         id: "expondist#13",
         cells: &[
@@ -728,9 +720,8 @@ const EXPONDIST: &[Case] = &[
             ("E2", "-3"),
         ],
         formula: "=EXPONDIST(D1,1,TRUE)",
-        expect: Exp::Err(E::Value),
+        expect: Exp::Num(0.632120558829),
     },
-    // DIFFERS (logical): reference Exp::Num(0.0). a logical value in a numeric argument is #VALUE!, like the other distribution functions (the reference reads TRUE as 1)
     Case {
         id: "expondist#14",
         cells: &[
@@ -746,7 +737,7 @@ const EXPONDIST: &[Case] = &[
             ("E2", "-3"),
         ],
         formula: "=EXPONDIST(E1,1,TRUE)",
-        expect: Exp::Err(E::Value),
+        expect: Exp::Num(0.0),
     },
     Case {
         id: "expondist#15",
@@ -963,12 +954,11 @@ const WEIBULL: &[Case] = &[
         formula: "=WEIBULL(\"test\",8,2,TRUE)",
         expect: Exp::Err(E::Value),
     },
-    // DIFFERS (logical): reference Exp::Num(0.00389863052988). a logical value in a numeric argument is #VALUE!, like the other distribution functions (the reference reads TRUE as 1)
     Case {
         id: "weibull#14",
         cells: &[],
         formula: "=WEIBULL(TRUE,8,2,TRUE)",
-        expect: Exp::Err(E::Value),
+        expect: Exp::Num(0.00389863052988),
     },
     Case {
         id: "weibull#15",
@@ -1054,7 +1044,6 @@ const WEIBULL: &[Case] = &[
         formula: "=WEIBULL(C1,8,2,TRUE)",
         expect: Exp::Num(0.0202565134628),
     },
-    // DIFFERS (logical): reference Exp::Num(0.00389863052988). a logical value in a numeric argument is #VALUE!, like the other distribution functions (the reference reads TRUE as 1)
     Case {
         id: "weibull#23",
         cells: &[
@@ -1071,9 +1060,8 @@ const WEIBULL: &[Case] = &[
             ("F2", "=#NAME?"),
         ],
         formula: "=WEIBULL(D1,8,2,TRUE)",
-        expect: Exp::Err(E::Value),
+        expect: Exp::Num(0.00389863052988),
     },
-    // DIFFERS (logical): reference Exp::Num(0.0). a logical value in a numeric argument is #VALUE!, like the other distribution functions (the reference reads TRUE as 1)
     Case {
         id: "weibull#24",
         cells: &[
@@ -1090,7 +1078,7 @@ const WEIBULL: &[Case] = &[
             ("F2", "=#NAME?"),
         ],
         formula: "=WEIBULL(E1,8,2,TRUE)",
-        expect: Exp::Err(E::Value),
+        expect: Exp::Num(0.0),
     },
     Case {
         id: "weibull#25",
@@ -1258,12 +1246,11 @@ const POISSON: &[Case] = &[
         formula: "=POISSON(\"test\",5,TRUE)",
         expect: Exp::Err(E::Value),
     },
-    // DIFFERS (logical): reference Exp::Num(0.0404276819945). a logical value in a numeric argument is #VALUE!, like the other distribution functions (the reference reads TRUE as 1)
     Case {
         id: "poisson#5",
         cells: &[],
         formula: "=POISSON(TRUE,5,TRUE)",
-        expect: Exp::Err(E::Value),
+        expect: Exp::Num(0.0404276819945),
     },
     Case {
         id: "poisson#6",
@@ -1343,7 +1330,6 @@ const POISSON: &[Case] = &[
         formula: "=POISSON(C1,5,TRUE)",
         expect: Exp::Num(0.0404276819945),
     },
-    // DIFFERS (logical): reference Exp::Num(0.0404276819945). a logical value in a numeric argument is #VALUE!, like the other distribution functions (the reference reads TRUE as 1)
     Case {
         id: "poisson#13",
         cells: &[
@@ -1360,9 +1346,8 @@ const POISSON: &[Case] = &[
             ("F2", "=#NAME?"),
         ],
         formula: "=POISSON(D1,5,TRUE)",
-        expect: Exp::Err(E::Value),
+        expect: Exp::Num(0.0404276819945),
     },
-    // DIFFERS (logical): reference Exp::Num(0.00673794699909). a logical value in a numeric argument is #VALUE!, like the other distribution functions (the reference reads TRUE as 1)
     Case {
         id: "poisson#14",
         cells: &[
@@ -1379,7 +1364,7 @@ const POISSON: &[Case] = &[
             ("F2", "=#NAME?"),
         ],
         formula: "=POISSON(E1,5,TRUE)",
-        expect: Exp::Err(E::Value),
+        expect: Exp::Num(0.00673794699909),
     },
     Case {
         id: "poisson#15",
@@ -1559,12 +1544,11 @@ const LOGINV: &[Case] = &[
         formula: "=LOGINV(\"test\",6,4)",
         expect: Exp::Err(E::Value),
     },
-    // DIFFERS (logical): reference Exp::Err(E::Num). a logical value in a numeric argument is #VALUE!, like the other distribution functions (the reference reads TRUE as 1)
     Case {
         id: "loginv#3",
         cells: &[],
         formula: "=LOGINV(TRUE,6,4)",
-        expect: Exp::Err(E::Value),
+        expect: Exp::Err(E::Num),
     },
     Case {
         id: "loginv#4",
@@ -1644,7 +1628,6 @@ const LOGINV: &[Case] = &[
         formula: "=LOGINV(C1,6,4)",
         expect: Exp::Err(E::Num),
     },
-    // DIFFERS (logical): reference Exp::Err(E::Num). a logical value in a numeric argument is #VALUE!, like the other distribution functions (the reference reads TRUE as 1)
     Case {
         id: "loginv#11",
         cells: &[
@@ -1661,9 +1644,8 @@ const LOGINV: &[Case] = &[
             ("F2", "=#NAME?"),
         ],
         formula: "=LOGINV(D1,6,4)",
-        expect: Exp::Err(E::Value),
+        expect: Exp::Err(E::Num),
     },
-    // DIFFERS (logical): reference Exp::Err(E::Num). a logical value in a numeric argument is #VALUE!, like the other distribution functions (the reference reads TRUE as 1)
     Case {
         id: "loginv#12",
         cells: &[
@@ -1680,7 +1662,7 @@ const LOGINV: &[Case] = &[
             ("F2", "=#NAME?"),
         ],
         formula: "=LOGINV(E1,6,4)",
-        expect: Exp::Err(E::Value),
+        expect: Exp::Err(E::Num),
     },
     Case {
         id: "loginv#13",
@@ -1860,12 +1842,11 @@ const CONFIDENCE: &[Case] = &[
         formula: "=CONFIDENCE(\"test\",2.5,50)",
         expect: Exp::Err(E::Value),
     },
-    // DIFFERS (logical): reference Exp::Err(E::Num). a logical value in a numeric argument is #VALUE!, like the other distribution functions (the reference reads TRUE as 1)
     Case {
         id: "confidence#6",
         cells: &[],
         formula: "=CONFIDENCE(TRUE,2.5,50)",
-        expect: Exp::Err(E::Value),
+        expect: Exp::Err(E::Num),
     },
     Case {
         id: "confidence#7",
@@ -1942,7 +1923,6 @@ const CONFIDENCE: &[Case] = &[
         formula: "=CONFIDENCE(C1,2.5,50)",
         expect: Exp::Err(E::Num),
     },
-    // DIFFERS (logical): reference Exp::Err(E::Num). a logical value in a numeric argument is #VALUE!, like the other distribution functions (the reference reads TRUE as 1)
     Case {
         id: "confidence#14",
         cells: &[
@@ -1958,9 +1938,8 @@ const CONFIDENCE: &[Case] = &[
             ("E2", "-3"),
         ],
         formula: "=CONFIDENCE(D1,2.5,50)",
-        expect: Exp::Err(E::Value),
+        expect: Exp::Err(E::Num),
     },
-    // DIFFERS (logical): reference Exp::Err(E::Num). a logical value in a numeric argument is #VALUE!, like the other distribution functions (the reference reads TRUE as 1)
     Case {
         id: "confidence#15",
         cells: &[
@@ -1976,7 +1955,7 @@ const CONFIDENCE: &[Case] = &[
             ("E2", "-3"),
         ],
         formula: "=CONFIDENCE(E1,2.5,50)",
-        expect: Exp::Err(E::Value),
+        expect: Exp::Err(E::Num),
     },
     Case {
         id: "confidence#16",
@@ -2836,12 +2815,11 @@ const HYPGEOMDIST: &[Case] = &[
         formula: "=HYPGEOMDIST(5,4,8,20)",
         expect: Exp::Err(E::Num),
     },
-    // DIFFERS (logical): reference Exp::Num(0.363261093911). a logical value in a numeric argument is #VALUE!, like the other distribution functions (the reference reads TRUE as 1)
     Case {
         id: "hypgeomdist#4",
         cells: &[],
         formula: "=HYPGEOMDIST(TRUE,4,8,20)",
-        expect: Exp::Err(E::Value),
+        expect: Exp::Num(0.363261093911),
     },
     Case {
         id: "hypgeomdist#5",
@@ -2873,12 +2851,11 @@ const HYPGEOMDIST: &[Case] = &[
         formula: "=HYPGEOMDIST(1,22,8,20)",
         expect: Exp::Err(E::Num),
     },
-    // DIFFERS (logical): reference Exp::Num(0.4). a logical value in a numeric argument is #VALUE!, like the other distribution functions (the reference reads TRUE as 1)
     Case {
         id: "hypgeomdist#10",
         cells: &[],
         formula: "=HYPGEOMDIST(1,TRUE,8,20)",
-        expect: Exp::Err(E::Value),
+        expect: Exp::Num(0.4),
     },
     Case {
         id: "hypgeomdist#11",
@@ -2910,12 +2887,11 @@ const HYPGEOMDIST: &[Case] = &[
         formula: "=HYPGEOMDIST(1,4,21,20)",
         expect: Exp::Err(E::Num),
     },
-    // DIFFERS (logical): reference Exp::Num(0.2). a logical value in a numeric argument is #VALUE!, like the other distribution functions (the reference reads TRUE as 1)
     Case {
         id: "hypgeomdist#16",
         cells: &[],
         formula: "=HYPGEOMDIST(1,4,TRUE,20)",
-        expect: Exp::Err(E::Value),
+        expect: Exp::Num(0.2),
     },
     Case {
         id: "hypgeomdist#17",
@@ -2941,12 +2917,11 @@ const HYPGEOMDIST: &[Case] = &[
         formula: "=HYPGEOMDIST(1,4,8,-20)",
         expect: Exp::Err(E::Num),
     },
-    // DIFFERS (logical): reference Exp::Err(E::Num). a logical value in a numeric argument is #VALUE!, like the other distribution functions (the reference reads TRUE as 1)
     Case {
         id: "hypgeomdist#21",
         cells: &[],
         formula: "=HYPGEOMDIST(1,4,8,TRUE)",
-        expect: Exp::Err(E::Value),
+        expect: Exp::Err(E::Num),
     },
     Case {
         id: "hypgeomdist#22",
@@ -3020,7 +2995,6 @@ const HYPGEOMDIST: &[Case] = &[
         formula: "=HYPGEOMDIST(C1,4,8,20)",
         expect: Exp::Num(0.363261093911),
     },
-    // DIFFERS (logical): reference Exp::Num(0.363261093911). a logical value in a numeric argument is #VALUE!, like the other distribution functions (the reference reads TRUE as 1)
     Case {
         id: "hypgeomdist#28",
         cells: &[
@@ -3037,9 +3011,8 @@ const HYPGEOMDIST: &[Case] = &[
             ("F2", "=#NAME?"),
         ],
         formula: "=HYPGEOMDIST(D1,4,8,20)",
-        expect: Exp::Err(E::Value),
+        expect: Exp::Num(0.363261093911),
     },
-    // DIFFERS (logical): reference Exp::Num(0.102167182663). a logical value in a numeric argument is #VALUE!, like the other distribution functions (the reference reads TRUE as 1)
     Case {
         id: "hypgeomdist#29",
         cells: &[
@@ -3056,7 +3029,7 @@ const HYPGEOMDIST: &[Case] = &[
             ("F2", "=#NAME?"),
         ],
         formula: "=HYPGEOMDIST(E1,4,8,20)",
-        expect: Exp::Err(E::Value),
+        expect: Exp::Num(0.102167182663),
     },
     Case {
         id: "hypgeomdist#30",
@@ -3218,12 +3191,11 @@ const LOGNORMDIST: &[Case] = &[
         formula: "=LOGNORMDIST(\"test\",6,4)",
         expect: Exp::Err(E::Value),
     },
-    // DIFFERS (logical): reference Exp::Num(0.0668072012689). a logical value in a numeric argument is #VALUE!, like the other distribution functions (the reference reads TRUE as 1)
     Case {
         id: "lognormdist#3",
         cells: &[],
         formula: "=LOGNORMDIST(TRUE,6,4)",
-        expect: Exp::Err(E::Value),
+        expect: Exp::Num(0.0668072012689),
     },
     Case {
         id: "lognormdist#4",
@@ -3303,7 +3275,6 @@ const LOGNORMDIST: &[Case] = &[
         formula: "=LOGNORMDIST(C1,6,4)",
         expect: Exp::Num(0.0737740679843),
     },
-    // DIFFERS (logical): reference Exp::Num(0.0668072012689). a logical value in a numeric argument is #VALUE!, like the other distribution functions (the reference reads TRUE as 1)
     Case {
         id: "lognormdist#11",
         cells: &[
@@ -3320,9 +3291,8 @@ const LOGNORMDIST: &[Case] = &[
             ("F2", "=#NAME?"),
         ],
         formula: "=LOGNORMDIST(D1,6,4)",
-        expect: Exp::Err(E::Value),
+        expect: Exp::Num(0.0668072012689),
     },
-    // DIFFERS (logical): reference Exp::Err(E::Num). a logical value in a numeric argument is #VALUE!, like the other distribution functions (the reference reads TRUE as 1)
     Case {
         id: "lognormdist#12",
         cells: &[
@@ -3339,7 +3309,7 @@ const LOGNORMDIST: &[Case] = &[
             ("F2", "=#NAME?"),
         ],
         formula: "=LOGNORMDIST(E1,6,4)",
-        expect: Exp::Err(E::Value),
+        expect: Exp::Err(E::Num),
     },
     Case {
         id: "lognormdist#13",
@@ -3513,12 +3483,11 @@ const NEGBINOMDIST: &[Case] = &[
         formula: "=NEGBINOMDIST(\"test\",10,0.5)",
         expect: Exp::Err(E::Value),
     },
-    // DIFFERS (logical): reference Exp::Num(0.0048828125). a logical value in a numeric argument is #VALUE!, like the other distribution functions (the reference reads TRUE as 1)
     Case {
         id: "negbinomdist#6",
         cells: &[],
         formula: "=NEGBINOMDIST(TRUE,10,0.5)",
-        expect: Exp::Err(E::Value),
+        expect: Exp::Num(0.0048828125),
     },
     Case {
         id: "negbinomdist#7",
@@ -3598,7 +3567,6 @@ const NEGBINOMDIST: &[Case] = &[
         formula: "=NEGBINOMDIST(C1,10,0.5)",
         expect: Exp::Num(0.0048828125),
     },
-    // DIFFERS (logical): reference Exp::Num(0.0048828125). a logical value in a numeric argument is #VALUE!, like the other distribution functions (the reference reads TRUE as 1)
     Case {
         id: "negbinomdist#14",
         cells: &[
@@ -3615,9 +3583,8 @@ const NEGBINOMDIST: &[Case] = &[
             ("F2", "=#NAME?"),
         ],
         formula: "=NEGBINOMDIST(D1,10,0.5)",
-        expect: Exp::Err(E::Value),
+        expect: Exp::Num(0.0048828125),
     },
-    // DIFFERS (logical): reference Exp::Num(0.0009765625). a logical value in a numeric argument is #VALUE!, like the other distribution functions (the reference reads TRUE as 1)
     Case {
         id: "negbinomdist#15",
         cells: &[
@@ -3634,7 +3601,7 @@ const NEGBINOMDIST: &[Case] = &[
             ("F2", "=#NAME?"),
         ],
         formula: "=NEGBINOMDIST(E1,10,0.5)",
-        expect: Exp::Err(E::Value),
+        expect: Exp::Num(0.0009765625),
     },
     Case {
         id: "negbinomdist#16",

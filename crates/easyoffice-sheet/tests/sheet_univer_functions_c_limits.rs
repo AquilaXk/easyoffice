@@ -452,3 +452,47 @@ fn trig_and_rounding_edges() {
         assert_eq!(eval(&s, formula), V::Error(want), "{formula}");
     }
 }
+
+#[test]
+fn a_logical_argument_of_a_distribution_or_statistics_function_is_one_or_zero() {
+    let mut s = SheetEngine::new("S");
+    for (addr, raw) in [
+        ("A1", "=TRUE"),
+        ("A2", "=FALSE"),
+        ("B1", "1"),
+        ("B2", "2"),
+        ("B3", "=TRUE"),
+        ("B4", "4"),
+    ] {
+        s.set_cell(addr, raw).unwrap();
+    }
+    for (logical, number) in [
+        // a written logical value, a cell holding one and a logical expression
+        ("=NORM.DIST(TRUE,0,1,TRUE)", "=NORM.DIST(1,0,1,TRUE)"),
+        ("=NORM.DIST(A1,0,1,TRUE)", "=NORM.DIST(1,0,1,TRUE)"),
+        ("=NORM.DIST(A2,0,1,FALSE)", "=NORM.DIST(0,0,1,FALSE)"),
+        ("=NORM.DIST(2>1,0,1,TRUE)", "=NORM.DIST(1,0,1,TRUE)"),
+        ("=T.DIST(TRUE,5,TRUE)", "=T.DIST(1,5,TRUE)"),
+        (
+            "=BINOM.DIST(TRUE,5,0.5,FALSE)",
+            "=BINOM.DIST(1,5,0.5,FALSE)",
+        ),
+        ("=POISSON.DIST(A1,5,TRUE)", "=POISSON.DIST(1,5,TRUE)"),
+        ("=F.DIST.RT(TRUE,6,4)", "=F.DIST.RT(1,6,4)"),
+        ("=PHI(TRUE)", "=PHI(1)"),
+        ("=GAUSS(A2)", "=GAUSS(0)"),
+        ("=NORM.S.DIST(TRUE,TRUE)", "=NORM.S.DIST(1,TRUE)"),
+        ("=Z.TEST(B1:B4,2,TRUE)", "=Z.TEST(B1:B4,2,1)"),
+    ] {
+        assert_eq!(eval(&s, logical), eval(&s, number), "{logical}");
+        assert!(matches!(eval(&s, logical), V::Number(_)), "{logical}");
+    }
+    // a logical value inside a range is skipped by the aggregate (here the sample is 1, 2, 4)
+    assert_eq!(
+        eval(&s, "=MARGINOFERROR(B1:B4,0.9)"),
+        eval(&s, "=CONFIDENCE.T(0.1,STDEV.S(1,2,4),3)")
+    );
+    // the engineering functions keep their strict reading
+    assert_eq!(eval(&s, "=ERF(TRUE)"), V::Error(E::Value));
+    assert_eq!(eval(&s, "=DELTA(TRUE)"), V::Error(E::Value));
+}

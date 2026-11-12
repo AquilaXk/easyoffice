@@ -358,7 +358,7 @@ impl SheetEngine {
                 let flag = self.eval_arg_val(arg, ctx, depth)?;
                 f64::from(flag.as_bool().ok_or(FormulaError::Value)?)
             } else {
-                self.eval_strict_num_arg(arg, ctx, depth)?
+                self.eval_stat_num_arg(arg, ctx, depth)?
             };
             values.push(v);
         }
