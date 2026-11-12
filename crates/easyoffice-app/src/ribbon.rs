@@ -552,12 +552,7 @@ impl RibbonCommandRouter {
 
         apply_command_effect(trimmed, state);
 
-        let cat_title = state.ribbon_style.category_titles()[matched.category_index];
-        let badge = state.active_contextual_tool().badge_title();
-        Ok(format!(
-            "[{}] {} ({}) 실행 완료 — 컨텍스트: {}",
-            cat_title, matched.title, matched.id, badge
-        ))
+        Ok(matched.title.to_string())
     }
 }
 
@@ -605,6 +600,17 @@ mod tests {
 
         let redone = undo_stack.redo(restored).unwrap();
         assert_eq!(redone.executed_count, 140);
+    }
+
+    #[test]
+    fn execute_command_summary_is_the_title_only() {
+        for cmd in RibbonCommandRouter::all_commands() {
+            let mut state = RibbonWorkspaceState::default();
+            let summary = RibbonCommandRouter::execute_command(&cmd.id, &mut state).unwrap();
+            assert_eq!(summary, cmd.title, "{}", cmd.id);
+            assert!(!summary.contains(&cmd.id));
+            assert!(!summary.contains('[') && !summary.contains("컨텍스트"));
+        }
     }
 
     #[test]

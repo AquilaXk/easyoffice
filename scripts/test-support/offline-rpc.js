@@ -683,7 +683,7 @@
       }
       return ribbonStateResponse(slot, {
         commandId: cmdId,
-        summary: "명령 실행 완료 (" + cmdId + ")",
+        summary: "명령 실행",
         contextualBadge: contextualToolBadges[mod] || "표·개체 도구",
       });
     }

@@ -756,7 +756,7 @@ test("JSON-only real-backend IPC syncs state, toggles per-cell inline styles ind
         }
         return JSON.stringify({
           commandId: cmdId,
-          summary: "명령 실행 완료 (" + cmdId + ")",
+          summary: "명령 실행",
           ...rustState,
           canUndo: true,
           canRedo: false,

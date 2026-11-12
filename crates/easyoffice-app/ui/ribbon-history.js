@@ -658,7 +658,6 @@
           break;
         case "sheet-mod-condfmt":
           sheetController.openConditionalFormatDialog();
-          setSheetSummary(execRes);
           break;
         case "sheet-mod-freeze":
           sheetController.toggleSheetFreezePanes(!document.querySelector("#pane-sheet thead.frozen-header"));
@@ -877,6 +876,9 @@
       return true;
     }
 
+    // 대화상자를 여는 명령은 상태 줄을 바꾸지 않는다.
+    const DIALOG_COMMANDS = new Set(["sheet-mod-pivot", "sheet-mod-condfmt", "pdf-mod-highlight"]);
+
     function executeTrackedRibbonCommand(cmdId, options = {}) {
       // The highlight command asks for its phrase, kind and color first; the dialog's 확인 runs it again with them.
       if (cmdId === "pdf-mod-highlight" && !options.highlight) {
@@ -908,7 +910,7 @@
         commitDeferredUndoSnapshot(preSnapshot);
         sheetController.refreshFocusedSheetCellPendingSnapshot();
         const fb = document.getElementById("status-command-feedback");
-        if (fb && execRes && !options.skipFeedback) {
+        if (fb && execRes && !options.skipFeedback && !DIALOG_COMMANDS.has(cmdId)) {
           const fallbackMsg = options.fallbackTitle ? "명령 실행: " + options.fallbackTitle : "";
           fb.textContent = execRes.summary || fallbackMsg;
         }

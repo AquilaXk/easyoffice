@@ -2,6 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { readText } from "./test-support/read-text.mjs";
+import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
+import { switchModule, commandItem } from "./test-support/modules.mjs";
+import { openDemoWorkbook } from "./test-support/demo-fixtures.mjs";
 
 // QA rule (PD-176, docs/design-system.md): the screen carries function labels and status or error
 // messages, never sentences that explain or instruct. These guards keep such lines from coming back.
@@ -42,4 +45,27 @@ test("empty panes carry no instruction line", () => {
   assert.doesNotMatch(INDEX_HTML, /placeholder="[^"]*(?:하세요|합니다)"/);
   const styles = UI("styles.css");
   assert.doesNotMatch(styles, /content:\s*"[^"]*(?:하세요|합니다)"/);
+});
+
+const INTERNAL_STATUS = /sheet-|\[|컨텍스트/;
+
+test("a ribbon command never puts its id, tab or context on the status lines", async () => {
+  const { document, userClick } = await createWorkspaceHarness();
+  switchModule(document, "SHEET");
+  await openDemoWorkbook(document);
+  const feedback = document.getElementById("status-command-feedback");
+  const evalResult = document.getElementById("sheet-eval-result");
+  const before = feedback.textContent;
+  for (const cmd of ["sheet-mod-condfmt", "sheet-mod-pivot"]) {
+    userClick(commandItem(document, cmd));
+    await flushAsyncTurns();
+    assert.equal(feedback.textContent, before, `${cmd} opens a dialog and leaves the status line alone`);
+    assert.equal(evalResult.textContent, "", `${cmd} leaves the formula result empty`);
+  }
+  for (const cmd of ["sheet-mod-freeze", "sheet-data-sort"]) {
+    userClick(commandItem(document, cmd));
+    await flushAsyncTurns();
+    assert.doesNotMatch(feedback.textContent, INTERNAL_STATUS, cmd);
+    assert.doesNotMatch(evalResult.textContent, INTERNAL_STATUS, cmd);
+  }
 });

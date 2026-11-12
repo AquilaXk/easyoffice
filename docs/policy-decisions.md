@@ -2795,3 +2795,17 @@
 - **Alternatives rejected** `hayro-svg`(위), 스레드 + 마감만으로 PDF 읽기(PD-170이 메모리를 막지 못한다고 실측), 페이지에서 스켈레톤을 다른 모양으로 바꾸기(참조 앱과 같은 페이지 유지가 요구사항), 카드용 별도 워커 바이너리(번들·서명 규모, 기존 워커 재사용으로 해결), 쪽 전체를 그린 뒤 줄이기(큰 쪽의 픽스맵이 선언 크기에 비례).
 - **Verified by** `cargo test -p easyoffice-desktop --test pdf_preview`(실제 워커 프로세스: 카드 크기 480×360·내용이 있는 쪽과 빈 쪽 구분·첫 쪽만·회전, 선언 크기 1e9·가로세로 극단·0·비수치, 빈·텍스트·잘린·쪽 없음·너무 좁은·암호화 파일 거부, 10MiB 초과 거부, 압축 폭탄 사전 거부, 스스로를 그리는 폼이 마감 안에 끝남, 147MB로 풀리는 그림 한 장이 그려지거나 메모리·시간 한도에서 끝나고 64MiB 한도에서는 확실히 kill, 5,000쪽×100,000 항목 공유 리소스 폭탄, 바이트를 깨도 패닉 없음, 워커가 없어도 문장, 번들 글꼴이 있을 때만 비임베드 한글이 그려지고 가짜 글꼴 파일은 무해), `cargo test -p easyoffice-desktop preview`(Pages 이름 순위·큰 그림 건너뛰기·`preview-micro` 무시, 형식별 내용(문단·수식 값·첫 슬라이드)과 PNG, 빈 문서는 흰 카드, 모든 형식의 깨진 파일 4종, ZIP 선언 크기 거부·한도·읽을 수 없는 디렉터리, 120MiB 압축 폭탄 거부, 적대적 문자열 이스케이프·XML 유효성, SVG 크기 상한, 먼 셀·큰 통합 문서, 텍스트 앞부분 읽기, 형식별 파일 크기 한도 경계, PDF 훅·1MiB 초과 PNG 버림), `cargo test -p easyoffice-desktop --release measure_cards -- --ignored --nocapture`·`--test pdf_preview dump_for_a_look`(측정). 페이지는 바꾸지 않아 `node --test scripts/test-webui-home-preview.mjs`는 그대로입니다. 시험 중 PDF 글꼴을 빼면 비임베드 한글이 비는 것과 쪽 위쪽만 그리는 것을 그림으로 확인했습니다.
 - **Revisit when** 실기기에서 PDF 카드가 느리거나 워커 시작이 눈에 띌 때(워커 풀), 가로로 긴 쪽의 모양이 어색할 때, 카드에 서식(굵게·색·열 너비)이 필요할 때, 스캔 PDF가 많아 PNG 1MiB 한도에 걸릴 때(크기를 낮춰 다시 그리기), `hayro`가 비임베드 CJK 글꼴을 직접 해결하게 될 때(셸이 글꼴을 보내지 않아도 됨).
+
+## PD-180. 리본 명령 응답의 표시 문장은 명령 제목만 쓰고, 대화상자를 여는 명령은 상태 줄을 바꾸지 않으며, 색 팔레트는 최상위 레이어에 띄움
+
+- **Status** Implemented (`crates/easyoffice-app/src/ribbon.rs`, `ui/ribbon-history.js`, `ui/color-picker.js`, `ui/toolbar.css`, `scripts/test-webui-no-explanations.mjs`, `scripts/test-webui-color-picker.mjs`)
+- **Context** 시트 표 메뉴의 "조건부 서식 규칙"이 `[모듈 전용] 조건부 서식 규칙 (sheet-mod-condfmt) 실행 완료 — 컨텍스트: 수식·피벗 분석`을 수식 줄 결과와 상태 줄에 그대로 보였습니다. 같은 팔레트를 대화상자에서 열면 `<dialog>`의 overflow에 잘려 아래 행과 "다른 색..."이 안 보였습니다.
+- **Decision (`PD-180`)**
+  1. `execute_ribbon_command` 응답의 `summary`는 명령 제목만 담습니다. 명령 id는 `commandId` 필드, 모듈은 `activeModule`, 컨텍스트 도구는 `contextualBadge` 필드가 이미 따로 실어 나릅니다.
+  2. 대화상자를 여는 명령(`sheet-mod-condfmt`, `sheet-mod-pivot`, `pdf-mod-highlight`)은 상태 줄과 수식 줄 결과를 건드리지 않습니다.
+  3. 색 팔레트는 `popover="manual"` 최상위 레이어에 `position: fixed`로 띄우고, 버튼 아래에 놓되 창 아래 끝을 넘으면 위로 뒤집고 좌우는 창 안으로 맞춥니다(참조 앱 rhwp-studio `ui/toolbar.ts:505-510`, `:808-810`의 버튼 rect 기준 배치와 창 경계 보정).
+- **Why** 내부 id·탭·컨텍스트는 화면 문장이 아니고(PD-176 4항), 참조 앱은 대화상자 명령에 상태 문장을 남기지 않습니다.
+- **Trade-offs** `summary`를 문서 메모로 쓰던 모의 효과(`[제목]` 한 줄)는 제목만 보입니다.
+- **Alternatives rejected** 팔레트를 `body`로 옮기기(모달 `<dialog>`의 최상위 레이어 아래로 가려짐), 대화상자 `overflow: visible`(대화상자 스크롤 깨짐).
+- **Verified by** `cargo test -p easyoffice-app ribbon`, `node --test scripts/test-webui-no-explanations.mjs scripts/test-webui-color-picker.mjs`.
+- **Revisit when** 팔레트가 `popover`를 지원하지 않는 웹뷰에서 열릴 때.
