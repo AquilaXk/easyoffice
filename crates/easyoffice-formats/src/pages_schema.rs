@@ -1,7 +1,7 @@
 //! The ONLY place that knows Pages object type IDs and protobuf field numbers.
 //!
 //! These numbers are our own constants for the wire format observed in documents and described by
-//! public format documentation; no Apple `.proto` file or third-party schema text is copied.
+//! public format documentation; no vendor `.proto` file or third-party schema text is copied.
 //! Every constant is either confirmed against a document ("확인") or carries the marker
 //! `// 검증 필요` (unconfirmed). To correct the mapping, edit only this file.
 //!

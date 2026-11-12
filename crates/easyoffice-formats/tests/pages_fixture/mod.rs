@@ -1,6 +1,6 @@
 //! Self-authored synthetic Pages packages: protobuf writer, Snappy encoders, IWA framing and a
 //! document builder that follows the schema recorded in `pages_schema.rs`. No third-party or
-//! Apple-authored bytes are used.
+//! vendor-authored bytes are used.
 #![allow(dead_code)]
 
 use easyoffice_formats::ZipArchiveCodec;

@@ -138,7 +138,7 @@ impl ContainerFamily {
             Self::ZipOoxml => "ZIP-OOXML (ECMA-376)",
             Self::ZipOdf => "ZIP-ODF (ISO/IEC 26300)",
             Self::ZipHwpx => "ZIP-HWPX (KS X 6101 OWPML)",
-            Self::ZipIwork => "ZIP-IWA (Apple iWork)",
+            Self::ZipIwork => "ZIP-IWA (iWork)",
             Self::Ole2Cfbf => "OLE2-CFBF",
             Self::PdfIso32000 => "PDF (ISO 32000)",
             Self::PlainTextUtf8 => "UTF-8 Plain Text",
@@ -171,7 +171,7 @@ pub enum DocumentFormat {
     Ppsx,
     Odp,
     Pdf,
-    /// Apple Pages (read; written experimentally, body text and basic formats only).
+    /// Pages (read; written experimentally, body text and basic formats only).
     Pages,
 }
 
@@ -258,7 +258,7 @@ impl DocumentFormat {
             Self::Hwp | Self::Hwt => "HWP 5.0 Binary (OLE2 CFBF)",
             Self::Hwpx | Self::Hwtx => "HWPX (KS X 6101 OWPML)",
             Self::Pdf => "PDF (ISO 32000)",
-            Self::Pages => "Apple Pages (IWA, 쓰기는 실험적)",
+            Self::Pages => "Pages (IWA, 쓰기는 실험적)",
             Self::Odt => "ODF (ISO/IEC 26300) Text",
             Self::Ods => "ODF (ISO/IEC 26300) Spreadsheet",
             Self::Odp => "ODF (ISO/IEC 26300) Presentation",

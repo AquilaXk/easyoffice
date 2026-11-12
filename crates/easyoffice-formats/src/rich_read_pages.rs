@@ -1,6 +1,6 @@
 //! Pages reader producing a [`RichDocument`]: body text storage -> paragraphs and runs (character
 //! styles, paragraph styles, list styles) with tables placed at their attachment positions.
-//! Everything that depends on Apple's object schema lives in [`crate::pages_schema`]; table
+//! Everything that depends on the format's object schema lives in [`crate::pages_schema`]; table
 //! cells are decoded by [`crate::pages_table`].
 //!
 //! Pictures (PNG/JPEG) are imported as image blocks (other picture data is reported, not
