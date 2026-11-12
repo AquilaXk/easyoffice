@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { loadUiModule } from "./test-support/load-ui-module.mjs";
@@ -132,15 +133,21 @@ test("custom values: the box is checked on the checked value only", async () => 
 test("a multiple list shows its arrow, marks the chosen items and toggles them in the cell", async () => {
   const h = await createHarness([{ r: "C2:C4", t: "listMultiple", a: "가,나,다" }]);
   const d = h.document;
+  cell(d, "C2").getBoundingClientRect = () => ({ left: 0, right: 100, top: 0, bottom: 24, width: 100, height: 24 });
   cell(d, "C2").focus();
   await flushAsyncTurns(6);
   const button = d.getElementById("sheet-dv-dropdown-btn");
   assert.ok(button && button.hidden === false, "the arrow beside the selected cell");
-  cell(d, "C2").getBoundingClientRect = () => ({ left: 0, right: 100, top: 0, bottom: 24 });
   button.getBoundingClientRect = () => ({ left: 80, right: 98, top: 3, bottom: 21 });
   h.userClick(button);
   const menu = d.getElementById("sheet-dv-dropdown-menu");
   assert.equal(menu.hidden, false);
+  assert.equal(button.textContent, "▾", "the combo arrow's letter, no icon");
+  assert.equal(button.getAttribute("aria-expanded"), "true", "the open menu gives the arrow its open look");
+  // The arrow cell is 15px wide, as tall as the cell inside its bottom border, at the cell's right end.
+  assert.equal(button.style.height, "23px");
+  assert.equal(button.style.left, "84px");
+  assert.equal(button.style.top, "0px");
   assert.equal(menu.getAttribute("aria-multiselectable"), "true");
   const rows = () => [...menu.querySelectorAll("li")];
   assert.deepEqual(rows().map((li) => [li.textContent, li.getAttribute("aria-checked")]), [["가", "false"], ["나", "true"], ["다", "false"]]);
@@ -191,4 +198,22 @@ test("the rules the page sends carry the local date as a serial number", async (
   const want = Math.round((Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) - Date.UTC(1899, 11, 30)) / 86400000);
   assert.equal(sent.today, want);
   assert.ok(sent.today > 46000 && sent.today < 60000);
+});
+
+test("the list arrow takes the combo box arrow cell's look", () => {
+  const css = fs.readFileSync(UI("shell.css"), "utf8");
+  const rule = (selector) => {
+    const at = css.indexOf(selector + " {");
+    assert.ok(at >= 0, selector);
+    return css.slice(at, css.indexOf("}", at));
+  };
+  const arrow = rule(".cf-dropdown-btn");
+  for (const part of [/width: 15px/, /border: 0/, /border-left: 1px solid var\(--color-border-light\)/, /color: var\(--color-text-muted\)/, /font-size: 8px/]) assert.match(arrow, part);
+  assert.match(rule(".cf-dropdown-btn:hover, .cf-dropdown-btn[aria-expanded=\"true\"]"), /background: var\(--color-hover-bg\)/);
+  // The reference: the combo's own arrow cell.
+  const reference = fs.readFileSync(UI("toolbar.css"), "utf8");
+  const cell = reference.slice(reference.indexOf(".custom-select-arrow {"), reference.indexOf("}", reference.indexOf(".custom-select-arrow {")));
+  assert.match(cell, /border-left: 1px solid var\(--color-border-light\)/);
+  assert.match(cell, /color: var\(--color-text-muted\)/);
+  assert.match(cell, /font-size: 8px/);
 });

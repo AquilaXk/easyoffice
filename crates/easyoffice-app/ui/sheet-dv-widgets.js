@@ -14,6 +14,7 @@
 
   const BOX_HIT_PX = 10; // half the clickable box, around the cell's center
   const MENU_WIDTH_PX = 96;
+const ARROW_WIDTH_PX = 15; // the combo box arrow cell
 
   // The items chosen in the text of a multiple list cell.
   const chosenOf = (text) =>
@@ -60,9 +61,15 @@
       });
     }
 
+    // The menu's shown state, also on the arrow (`aria-expanded` gives it the open look).
+    function setOpen(open) {
+      if (arrow.menu) arrow.menu.hidden = !open;
+      arrow.button?.setAttribute("aria-expanded", open ? "true" : "false");
+    }
+
     function hide() {
       if (arrow.button) arrow.button.hidden = true;
-      if (arrow.menu) arrow.menu.hidden = true;
+      setOpen(false);
       arrow.index = -1;
     }
 
@@ -97,7 +104,8 @@
       button.className = "cf-dropdown-btn";
       button.setAttribute("aria-label", "목록에서 선택");
       button.setAttribute("aria-haspopup", "listbox");
-      host.__EASYOFFICE_ICONS__?.setIcon(document, button, "chevron-down");
+      button.textContent = "▾";
+      button.setAttribute("aria-expanded", "false");
       button.hidden = true;
       // Keep the cell selected while the arrow is pressed.
       button.addEventListener("mousedown", (ev) => ev.preventDefault());
@@ -143,14 +151,14 @@
       const rule = rules.validationAt(sheet, arrow.ref);
       if (!rule || !arrow.menu) return;
       if (!arrow.menu.hidden) {
-        arrow.menu.hidden = true;
+        setOpen(false);
         return;
       }
       fillMenu(rule, sheet);
       const box = arrow.button.getBoundingClientRect();
       arrow.menu.style.left = box.right - MENU_WIDTH_PX + "px";
-      arrow.menu.style.top = box.bottom + 2 + "px";
-      arrow.menu.hidden = false;
+      arrow.menu.style.top = box.bottom + 1 + "px";
+      setOpen(true);
     }
 
     // Shows the arrow beside the selected cell when it has a list or multiple list validation.
@@ -167,10 +175,12 @@
       const keepOpen = arrow.ref === ref && !arrow.menu.hidden && rule.t === "listMultiple";
       arrow.ref = ref;
       const box = td.getBoundingClientRect();
-      arrow.button.style.left = box.right - 20 + "px";
-      arrow.button.style.top = box.top + Math.max(0, (box.height - 18) / 2) + "px";
+      // The arrow cell fills the cell's height inside its right and bottom borders.
+      arrow.button.style.left = box.right - ARROW_WIDTH_PX - 1 + "px";
+      arrow.button.style.top = box.top + "px";
+      arrow.button.style.height = box.height - 1 + "px";
       arrow.button.hidden = false;
-      arrow.menu.hidden = !keepOpen;
+      setOpen(keepOpen);
       if (rule.showPrompt && (rule.prompt || rule.promptTitle)) {
         const fb = document.getElementById("status-command-feedback");
         if (fb) fb.textContent = [rule.promptTitle, rule.prompt].filter(Boolean).join(": ");
@@ -216,7 +226,7 @@
       const step = { ArrowDown: 1, ArrowUp: -1 }[ev.key];
       if (step) highlight(arrow.index + step);
       else if (ev.key === "Enter" && menuItems()[arrow.index]) pick(menuItems()[arrow.index].dataset.value);
-      else if (ev.key === "Escape") arrow.menu.hidden = true;
+      else if (ev.key === "Escape") setOpen(false);
       else return;
       ev.preventDefault();
       ev.stopPropagation?.();
