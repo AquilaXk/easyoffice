@@ -37,6 +37,8 @@ mod memo;
 mod parser;
 mod recalc;
 mod rules;
+mod sheet_sort;
+mod sort_keys;
 mod sort_refs;
 mod special;
 mod text_format;
@@ -60,6 +62,8 @@ pub use rules::{
     decode_visuals, encode_visuals, shift_rules, validate_input, Bar, CellVisual, Icon,
     PackedVisuals, RuleRuntime, Verdict,
 };
+pub use sheet_sort::SortKey;
+pub use sort_keys::{sort_order, SortColumn, MAX_SORT_KEYS};
 pub use types::*;
 pub use workbook::*;
 

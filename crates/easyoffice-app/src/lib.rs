@@ -44,6 +44,7 @@ mod sheet_pivot_ipc;
 mod sheet_rules_ipc_tests;
 mod sheet_rules_json;
 mod sheet_session;
+mod sheet_sort_ipc;
 mod sheet_structure_ipc;
 #[cfg(test)]
 mod sheet_structure_ipc_tests;

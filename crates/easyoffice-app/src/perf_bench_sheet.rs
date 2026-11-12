@@ -7,7 +7,7 @@
 //! `SUM` over the whole formula column in the last row.
 
 use crate::EasyOfficeIpcRouter;
-use easyoffice_sheet::WorkbookEngine;
+use easyoffice_sheet::{SortKey, WorkbookEngine};
 use std::time::Instant;
 
 const CHUNK_CHANGES: usize = 20_000;
@@ -136,7 +136,7 @@ pub(crate) fn run(rows: u32, phases: &mut Vec<(&'static str, f64)>) -> usize {
     let sheet = engine.sheet_mut("S").expect("sheet");
     let t = Instant::now();
     sheet
-        .sort_rows(0, rows - 1, 2, true, Some(3), false)
+        .sort_rows(0, rows - 1, &[SortKey::asc(2), SortKey::desc(3)], false)
         .expect("sort");
     phases.push(("sort", ms(t)));
     out_bytes

@@ -577,6 +577,8 @@ impl EasyOfficeIpcRouter {
     /// - `filter` `{op: "apply"|"values", filter, data, col?, query?}` -> the rows the conditions
     ///   hide, or the distinct values of a column (no session needed, see `sheet_filter_ipc`,
     ///   PD-198).
+    /// - `sort` `{keys:[{asc, values}], caseSensitive?}` -> `{order}`, the stable row order of the
+    ///   keys (no session needed, see `sheet_sort_ipc`, PD-200).
     /// - `close` `{session}` -> `{closed}`.
     pub(crate) fn handle_sheet_session_action(
         action: &str,
@@ -592,6 +594,7 @@ impl EasyOfficeIpcRouter {
             "pivot" => Self::sheet_pivot(entries),
             "format" => Self::sheet_format(entries),
             "filter" => Self::sheet_filter(entries),
+            "sort" => Self::sheet_sort(entries),
             "close" => {
                 let closed = registry().close(session_id(entries)?, owner);
                 Ok(format!("{{\"closed\":{closed}}}"))

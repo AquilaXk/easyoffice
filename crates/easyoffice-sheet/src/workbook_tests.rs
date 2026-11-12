@@ -1,5 +1,7 @@
 use super::{ChartSeriesBuilder, ChartType, WorkbookEngine};
-use crate::{CellRange, EvaluatedCellValue, FormulaError, PackedCellCoordinate, SheetEngine};
+use crate::{
+    CellRange, EvaluatedCellValue, FormulaError, PackedCellCoordinate, SheetEngine, SortKey,
+};
 use std::collections::HashMap;
 
 #[test]
@@ -295,7 +297,9 @@ fn test_workbook_cross_sheet_formulas_and_sort_goal_seek_chart() {
     sheet.set_cell("B2", "가").unwrap();
     sheet.set_cell("A3", "20").unwrap();
     sheet.set_cell("B3", "다").unwrap();
-    sheet.sort_rows(0, 2, 0, true, Some(1), true).unwrap();
+    sheet
+        .sort_rows(0, 2, &[SortKey::asc(0), SortKey::asc(1)], false)
+        .unwrap();
     assert_eq!(sheet.evaluate_cell("A1"), EvaluatedCellValue::Number(10.0));
     assert_eq!(sheet.evaluate_cell("A3"), EvaluatedCellValue::Number(30.0));
 
@@ -716,7 +720,9 @@ fn test_adversarial_sheet_remediations() {
     sort_sheet.set_cell("A2", "30").unwrap();
     sort_sheet.set_cell("B2", "=A2*2").unwrap();
     sort_sheet.set_cell("C2", "=$A$1*2").unwrap();
-    sort_sheet.sort_rows(0, 1, 0, false, None, true).unwrap();
+    sort_sheet
+        .sort_rows(0, 1, &[SortKey::desc(0)], false)
+        .unwrap();
     let raw_at = |s: &SheetEngine, r: &str| -> Option<String> {
         s.raw_cells()
             .get(&PackedCellCoordinate::parse_a1(r).unwrap())

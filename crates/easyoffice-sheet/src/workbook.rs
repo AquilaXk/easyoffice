@@ -1,10 +1,8 @@
-use crate::sort_refs::{adjust_formula_row_refs, SortedRows};
 use crate::{
     CellRange, EvalContext, EvaluatedCellValue, FormulaError, PackedCellCoordinate,
     PivotAggregation, PivotTableSummary, SheetEngine,
 };
 use easyoffice_formats::EasyOfficeError;
-use std::cmp::Ordering;
 use std::collections::HashMap;
 
 /// Multi-sheet workbook engine supporting cross-sheet references (`=Sheet2!A1`, `=SUM(Sheet2!A1:A3)`)
@@ -237,110 +235,6 @@ pub struct WorkbookBatchEvaluation {
 }
 
 impl SheetEngine {
-    /// Sorts all populated columns in `start_row..=end_row` (0-indexed) by `primary_col`
-    /// and optional `secondary_col`.
-    pub fn sort_rows(
-        &mut self,
-        start_row: u32,
-        end_row: u32,
-        primary_col: u32,
-        primary_asc: bool,
-        secondary_col: Option<u32>,
-        secondary_asc: bool,
-    ) -> Result<(), EasyOfficeError> {
-        if start_row > end_row {
-            return Err(EasyOfficeError::InvalidArgument(
-                "정렬 시작 행이 끝 행보다 클 수 없습니다.".to_string(),
-            ));
-        }
-        if end_row >= PackedCellCoordinate::MAX_ROWS
-            || primary_col >= PackedCellCoordinate::MAX_COLS
-        {
-            return Err(EasyOfficeError::InvalidArgument(
-                "정렬 행 또는 열 인덱스가 허용 범위를 초과했습니다.".to_string(),
-            ));
-        }
-        if let Some(sc) = secondary_col {
-            if sc >= PackedCellCoordinate::MAX_COLS {
-                return Err(EasyOfficeError::InvalidArgument(
-                    "보조 정렬 열 인덱스가 허용 범위를 초과했습니다.".to_string(),
-                ));
-            }
-        }
-
-        #[derive(Clone)]
-        struct RowEntry {
-            orig_row: u32,
-            primary_val: EvaluatedCellValue,
-            secondary_val: Option<EvaluatedCellValue>,
-            cells: Vec<(u32, String)>,
-        }
-
-        let row_span = (end_row - start_row + 1) as usize;
-        let mut ctx = EvalContext::standalone_id(self.resolved_sheet_id());
-        let mut row_map: HashMap<u32, Vec<(u32, String)>> = HashMap::with_capacity(row_span);
-        for (&coord, raw) in &self.cells {
-            let r = coord.row();
-            if (start_row..=end_row).contains(&r) {
-                row_map
-                    .entry(r)
-                    .or_default()
-                    .push((coord.col(), raw.clone()));
-            }
-        }
-
-        let mut rows_data: Vec<RowEntry> = Vec::with_capacity(row_span);
-        for r in start_row..=end_row {
-            let p_coord = PackedCellCoordinate::new(r, primary_col)?;
-            let primary_val = self.eval_coord_ctx(p_coord, &mut ctx, 0);
-            let secondary_val = if let Some(sc) = secondary_col {
-                let s_coord = PackedCellCoordinate::new(r, sc)?;
-                Some(self.eval_coord_ctx(s_coord, &mut ctx, 0))
-            } else {
-                None
-            };
-            let mut row_cells = row_map.remove(&r).unwrap_or_default();
-            row_cells.sort_unstable_by_key(|(c, _)| *c);
-            rows_data.push(RowEntry {
-                orig_row: r,
-                primary_val,
-                secondary_val,
-                cells: row_cells,
-            });
-        }
-
-        rows_data.sort_by(|a, b| {
-            let cmp_p = compare_cell_values(&a.primary_val, &b.primary_val, primary_asc);
-            if cmp_p != Ordering::Equal {
-                return cmp_p;
-            }
-            if let (Some(sa), Some(sb)) = (&a.secondary_val, &b.secondary_val) {
-                compare_cell_values(sa, sb, secondary_asc)
-            } else {
-                Ordering::Equal
-            }
-        });
-
-        self.cells
-            .retain(|coord, _| coord.row() < start_row || coord.row() > end_row);
-
-        for (offset, entry) in rows_data.into_iter().enumerate() {
-            let target_r = start_row + offset as u32;
-            for (col, raw) in entry.cells {
-                let adjusted = adjust_formula_row_refs(
-                    &raw,
-                    &self.name,
-                    SortedRows::new(start_row, end_row, entry.orig_row, target_r),
-                );
-                let coord = PackedCellCoordinate::new(target_r, col)?;
-                self.cells.insert(coord, adjusted);
-            }
-        }
-        self.rebuild_compiled_asts();
-
-        Ok(())
-    }
-
     pub fn formatted_cell(&self, a1: &str) -> String {
         let Ok(coord) = PackedCellCoordinate::parse_a1(a1) else {
             return "#REF!".to_string();
@@ -663,28 +557,6 @@ fn restore_cell(sheet: &mut SheetEngine, coord: PackedCellCoordinate, orig: Opti
         }
     }
     sheet.rebuild_compiled_asts();
-}
-
-fn compare_cell_values(a: &EvaluatedCellValue, b: &EvaluatedCellValue, asc: bool) -> Ordering {
-    match (a, b) {
-        (EvaluatedCellValue::Empty, EvaluatedCellValue::Empty) => Ordering::Equal,
-        (EvaluatedCellValue::Empty, _) => Ordering::Greater,
-        (_, EvaluatedCellValue::Empty) => Ordering::Less,
-        _ => {
-            let ord = if let (Some(na), Some(nb)) = (a.as_number(), b.as_number()) {
-                na.partial_cmp(&nb).unwrap_or(Ordering::Equal)
-            } else {
-                a.to_display_string()
-                    .to_lowercase()
-                    .cmp(&b.to_display_string().to_lowercase())
-            };
-            if asc {
-                ord
-            } else {
-                ord.reverse()
-            }
-        }
-    }
 }
 
 /// Supported chart visualization types.
