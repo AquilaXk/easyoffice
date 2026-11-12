@@ -11,6 +11,7 @@ import type { Plugin } from 'vite';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { verifyOverrides, readManifest } from '../../scripts/hwp-studio-overrides.mjs';
+import { applyKoOverrides, readKoOverrides } from '../../scripts/hwp-studio-ko-overrides.mjs';
 
 const here = import.meta.dirname;
 const repoRoot = resolve(here, '../..');
@@ -80,6 +81,19 @@ function neutralizeExternalFontUrls(): Plugin {
   };
 }
 
+/** Rewrites single values of the upstream ko catalog (config/rhwp-studio-ko-overrides.json). */
+function koLocaleOverrides(): Plugin {
+  const overrides = readKoOverrides(repoRoot);
+  return {
+    name: 'easyoffice-ko-locale-overrides',
+    enforce: 'pre',
+    transform(code, id) {
+      if (!normalizePath(id.split('?')[0]).endsWith('/i18n/locales/ko.ts')) return null;
+      return { code: applyKoOverrides(code, overrides), map: null };
+    },
+  };
+}
+
 /** Emits the non-bundled static files: init scripts, print surface and the shipped fonts. */
 function easyOfficeStaticAssets(): Plugin {
   const emit = (ctx: { emitFile: (file: { type: 'asset'; fileName: string; source: Buffer }) => string }, fileName: string, file: string) => {
@@ -115,7 +129,7 @@ export default defineConfig({
   publicDir: false,
   // Keep Vite's cache out of the read-only upstream checkout.
   cacheDir: resolve(here, 'node_modules/.vite'),
-  plugins: [easyOfficeOverrides(), neutralizeExternalFontUrls(), easyOfficeStaticAssets()],
+  plugins: [easyOfficeOverrides(), neutralizeExternalFontUrls(), koLocaleOverrides(), easyOfficeStaticAssets()],
   define: {
     __APP_VERSION__: JSON.stringify(upstreamConfig.version),
     __RHWP_DISABLE_EXTERNAL_WEBFONTS__: JSON.stringify(true),
