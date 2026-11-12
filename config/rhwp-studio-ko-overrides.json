@@ -1,3 +1,5 @@
 {
+  "command.format.toggleBullet.registryLabel": "글머리표 켜기/끄기",
+  "command.format.toggleNumbering.registryLabel": "문단 번호 켜기/끄기",
   "dialog.commandPalette.input.placeholder": "명령 검색..."
 }
