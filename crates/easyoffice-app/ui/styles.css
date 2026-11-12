@@ -529,6 +529,8 @@ select:focus-visible,
 .sheet-grid td.editing { caret-color: auto; cursor: text; user-select: text; text-overflow: clip; text-align: left; }
 /* Conditional formatting (PD-171): sheet-rules.js sets the custom properties and classes. */
 .sheet-grid td[data-cf]:not(.selected-cell):not(.in-range) { background-color: var(--cf-bg, transparent); }
+/* Section color of a number format (`[Red]`), set by sheet-grid.js; a conditional format colour wins. */
+.sheet-grid td.nf-colored { color: var(--nf-color, inherit); }
 .sheet-grid td[data-cf] { color: var(--cf-fg, inherit); background-image: var(--cf-bar, none); }
 .sheet-grid td.cf-bold { font-weight: 700; }
 .sheet-grid td.cf-italic { font-style: italic; }

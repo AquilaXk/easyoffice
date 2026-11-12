@@ -36,7 +36,7 @@
     const kind = menuKindOf(commandModule);
     const bar = document.querySelector(".studio-menubar");
     if (!bar) return kind;
-    for (const el of bar.querySelectorAll("[data-kinds]")) {
+    for (const el of [...bar.querySelectorAll("[data-kinds]"), ...document.querySelectorAll("#icon-toolbar [data-kinds]")]) {
       el.hidden = !el.dataset.kinds.split(" ").includes(kind);
     }
     for (const menu of bar.querySelectorAll(":scope > .menu-item")) {

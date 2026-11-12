@@ -214,7 +214,8 @@
       const fontStyle = td.style.fontStyle || "";
       const textDecoration = td.style.textDecoration || "";
       const fontSize = td.style.fontSize || "";
-      const hasStyle = Boolean(fontWeight || fontStyle || textDecoration || fontSize);
+      const numFmt = td._nf || "";
+      const hasStyle = Boolean(fontWeight || fontStyle || textDecoration || fontSize || numFmt);
       if (value === "" && formula === "" && !hasStyle) {
         delete map[ref];
         return;
@@ -222,6 +223,7 @@
       const cellEntry = { value, formula };
       if (hasStyle) {
         cellEntry.style = { fontWeight, fontStyle, textDecoration, fontSize };
+        if (numFmt) cellEntry.style.numFmt = numFmt;
       }
       map[ref] = cellEntry;
       if (value !== "" || formula !== "") {
@@ -251,7 +253,7 @@
       } else if (a1?.style?.frozenPanes) {
         delete a1.style.frozenPanes;
         const s = a1.style;
-        if (!(s.fontWeight || s.fontStyle || s.textDecoration || s.fontSize)) {
+        if (!(s.fontWeight || s.fontStyle || s.textDecoration || s.fontSize || s.numFmt)) {
           delete a1.style;
         }
         if (!hasCellContent(a1) && !a1.style) delete map.A1;
@@ -840,6 +842,15 @@
       captureWorkspaceSnapshot,
     });
 
+    host.__EASYOFFICE_CREATE_SHEET_NUMFMT_UI__?.({
+      document,
+      format,
+      kit: host.__EASYOFFICE_CREATE_SHEET_DIALOG_KIT__(document),
+    });
+    host.__EASYOFFICE_SHEET_NUMFMT_DISPLAY__?.attach({
+      call: sheetStoreHelpers.callSheetAction,
+      onFilled: () => grid.repaintNumFmt(),
+    });
     const sheetRules = host.__EASYOFFICE_SHEET_RULES__;
     rulesUi = host.__EASYOFFICE_CREATE_SHEET_RULES_UI__({
       document,

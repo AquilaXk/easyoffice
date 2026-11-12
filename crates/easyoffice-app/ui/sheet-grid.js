@@ -139,6 +139,8 @@
   }
 
   const { normalizeFormattedNumericCell } = host.__EASYOFFICE_SHEET_UTILS__;
+  // Rows beyond each edge of the window whose formatted text is fetched ahead of a scroll.
+  const NUMFMT_PREFETCH_ROWS = 60;
   const NUMERIC_RE = /^-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
 
   function isNumericText(text) {
@@ -158,7 +160,8 @@
   }
 
   // Copies a workbook model (sheet -> cell -> {value, formula, style}) ~4x faster than a JSON
-  // round-trip, which matters for undo snapshots of sheets with tens of thousands of cells.
+  // round-trip, which matters for undo snapshots of sheets with tens of thousands of cells. A frozen
+  // (shared) style object is kept as it is.
   function cloneSheetStore(store) {
     const out = {};
     Object.keys(store || {}).forEach((name) => {
@@ -168,7 +171,7 @@
         const e = src[ref];
         if (!e) return;
         const copy = { ...e };
-        if (e.style) copy.style = { ...e.style };
+        if (e.style) copy.style = Object.isFrozen(e.style) ? e.style : { ...e.style };
         dst[ref] = copy;
       });
       out[name] = dst;
@@ -186,18 +189,32 @@
     return Number(raw) || 0;
   }
 
+  // Shows `value` with the cell's number format (`td._nf`, PD-193) or else the General format; the
+  // raw value is remembered for editing and saving. The section color of a format rides on a custom
+  // property, so it never lands in the inline font properties the sheet model reads back.
   function setDisplayValue(td, value) {
     const raw = String(value ?? "");
-    const shown = formatGeneral(raw);
-    td.textContent = shown;
+    const nf = td._nf;
+    const formatted = nf ? host.__EASYOFFICE_SHEET_NUMFMT_DISPLAY__?.shown(nf, raw) : null;
+    const shown = formatted ? formatted.t : formatGeneral(raw);
+    if (td.textContent !== shown) td.textContent = shown;
     if (shown === raw) {
-      delete td.dataset.raw;
-      delete td.dataset.display;
+      if (td.dataset.raw !== undefined) {
+        delete td.dataset.raw;
+        delete td.dataset.display;
+      }
     } else {
-      td.dataset.raw = raw;
-      td.dataset.display = shown;
+      // An unchanged attribute is not written again: a write restyles the cell.
+      if (td.dataset.raw !== raw) td.dataset.raw = raw;
+      if (td.dataset.display !== shown) td.dataset.display = shown;
     }
-    td.classList.toggle("num", isNumericText(raw));
+    td.classList.toggle("num", nf !== "@" && isNumericText(raw));
+    const color = formatted?.c || "";
+    if (color || td._nfColor) {
+      td._nfColor = color;
+      td.style.setProperty("--nf-color", color);
+      td.classList.toggle("nf-colored", color !== "");
+    }
   }
 
   function readTdValue(td) {
@@ -349,6 +366,7 @@
     function paintTd(td, entry) {
       const value = entry?.value ?? "";
       const formula = entry?.formula || "";
+      td._nf = entry?.style?.numFmt || "";
       setDisplayValue(td, value);
       if (formula) td.dataset.formula = formula;
       else delete td.dataset.formula;
@@ -549,6 +567,25 @@
       }
     }
 
+    // Asks for the display text of formatted cells just beyond the window (PD-193), so the rows a
+    // scroll brings in are drawn with their format at once instead of being repainted when the
+    // answer arrives. Only a sheet that has drawn a formatted cell pays the scan.
+    function prefetchNumFmt(v) {
+      const display = host.__EASYOFFICE_SHEET_NUMFMT_DISPLAY__;
+      if (!display?.active() || !v.layout) return;
+      const scan = (from, to) => {
+        for (let r = Math.max(1, from); r <= Math.min(MAX_ROWS, to); r += 1) {
+          for (let c = v.c0; c <= v.c1; c += 1) {
+            const entry = getEntry(refOf(r, c));
+            const code = entry?.style?.numFmt;
+            if (code) display.shown(code, String(entry.value ?? ""));
+          }
+        }
+      };
+      scan(v.r0 - NUMFMT_PREFETCH_ROWS, v.r0 - 1);
+      scan(v.r1 + 1, v.r1 + NUMFMT_PREFETCH_ROWS);
+    }
+
     // Brings the DOM window in line with the viewport. Returns true when rows/cells changed.
     function renderWindow(force) {
       const tbody = tbodyEl();
@@ -571,6 +608,7 @@
       insertMissingRows(tbody, existing, next);
       syncTableWidth(table, next);
       if (hooks.afterRender) hooks.afterRender();
+      prefetchNumFmt(next);
       return true;
     }
 
@@ -686,6 +724,15 @@
       return tds;
     }
 
+    // Shows the answers of the engine for formatted cells that were drawn before they arrived; a
+    // cell being edited keeps its text.
+    function repaintNumFmt() {
+      seedDomMaps();
+      for (const td of tdByPacked.values()) {
+        if (td._nf && td.dataset.editMode === undefined) setDisplayValue(td, readTdValue(td));
+      }
+    }
+
     // Repaints only the rule appearance (conditional formatting) of the materialized cells, so
     // a cell being edited keeps its text.
     function repaintFx() {
@@ -771,6 +818,7 @@
       getAllWidths,
       replaceAllWidths,
       repaintFx,
+      repaintNumFmt,
       renderWindow,
       refreshCells,
       ensureVisible,

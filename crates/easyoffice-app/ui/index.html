@@ -146,6 +146,23 @@
               <div class="md-item" data-kinds="DOC HWP" data-studio-menu-cmd="para-bullet" role="menuitem" tabindex="-1"><span class="md-label">글머리표 모양</span></div>
               <div class="md-item" data-kinds="DOC HWP" data-studio-menu-cmd="indent-in" role="menuitem" tabindex="-1"><span class="md-label">한 수준 증가</span></div>
               <div class="md-item" data-kinds="DOC HWP" data-studio-menu-cmd="indent-out" role="menuitem" tabindex="-1"><span class="md-label">한 수준 감소</span></div>
+              <div class="md-sub" data-kinds="SHEET" role="menuitem" aria-haspopup="menu" tabindex="-1">
+                <span class="md-label">표시 형식</span><span class="md-arrow md-caret" data-icon="chevron-right"></span>
+                <div class="md-sub-panel menu-dropdown md-submenu" role="menu" aria-label="표시 형식">
+                  <button type="button" class="md-item" role="menuitem" data-sheet-numfmt="general" tabindex="-1"><span class="md-label">일반</span></button>
+                  <button type="button" class="md-item" role="menuitem" data-sheet-numfmt="number" tabindex="-1"><span class="md-label">숫자</span></button>
+                  <button type="button" class="md-item" role="menuitem" data-sheet-numfmt="currency" tabindex="-1"><span class="md-label">통화</span></button>
+                  <button type="button" class="md-item" role="menuitem" data-sheet-numfmt="accounting" tabindex="-1"><span class="md-label">회계</span></button>
+                  <button type="button" class="md-item" role="menuitem" data-sheet-numfmt="percent" tabindex="-1"><span class="md-label">백분율</span></button>
+                  <button type="button" class="md-item" role="menuitem" data-sheet-numfmt="date" tabindex="-1"><span class="md-label">날짜</span></button>
+                  <button type="button" class="md-item" role="menuitem" data-sheet-numfmt="time" tabindex="-1"><span class="md-label">시간</span></button>
+                  <button type="button" class="md-item" role="menuitem" data-sheet-numfmt="text" tabindex="-1"><span class="md-label">텍스트</span></button>
+                  <div class="md-sep"></div>
+                  <button type="button" class="md-item" role="menuitem" data-sheet-numfmt="decimal-up" tabindex="-1"><span class="md-label">소수 자릿수 늘리기</span></button>
+                  <button type="button" class="md-item" role="menuitem" data-sheet-numfmt="decimal-down" tabindex="-1"><span class="md-label">소수 자릿수 줄이기</span></button>
+                </div>
+              </div>
+              <div class="md-item" data-kinds="SHEET" data-sheet-numfmt="dialog" role="menuitem" tabindex="-1"><span class="md-label">셀 서식…</span></div>
             </div>
           </div>
           <div class="menu-item" data-menu="page" data-kinds="DOC HWP PDF">
@@ -303,6 +320,13 @@
           <button type="button" class="tb-btn" data-studio-cmd="mod-header" data-icon="header" title="머리말/꼬리말" aria-label="머리말/꼬리말"></button>
           <button type="button" class="tb-btn" data-studio-cmd="mod-footnote" data-icon="footnote" title="각주" aria-label="각주"></button>
           <button type="button" class="tb-btn" data-studio-cmd="palette" data-icon="find" title="명령 검색 (Ctrl+K)" aria-label="명령 검색"></button>
+        </div>
+        <span class="tb-sep" data-kinds="SHEET" aria-hidden="true"></span>
+        <div class="tb-group" data-kinds="SHEET">
+          <button type="button" class="tb-btn" data-sheet-numfmt="currency" data-icon="won" title="통화 서식" aria-label="통화 서식"></button>
+          <button type="button" class="tb-btn" data-sheet-numfmt="percent" data-icon="percent" title="백분율 서식" aria-label="백분율 서식"></button>
+          <button type="button" class="tb-btn" data-sheet-numfmt="decimal-down" data-icon="decimal-decrease" title="소수 자릿수 줄이기" aria-label="소수 자릿수 줄이기"></button>
+          <button type="button" class="tb-btn" data-sheet-numfmt="decimal-up" data-icon="decimal-increase" title="소수 자릿수 늘리기" aria-label="소수 자릿수 늘리기"></button>
         </div>
       </div>
 
@@ -1013,6 +1037,27 @@
       </div>
     </dialog>
 
+    <dialog id="sheet-numfmt-dialog" class="tool-dialog sheet-rule-dialog" aria-labelledby="sheet-numfmt-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="sheet-numfmt-dialog-title">셀 서식</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><label class="dialog-label" for="sheet-numfmt-kind-select">분류</label><select id="sheet-numfmt-kind-select" class="sb-combo dialog-select"></select></div>
+          <div class="dialog-row" data-numfmt-field="decimals" hidden><label class="dialog-label" for="sheet-numfmt-decimals">소수 자릿수</label><input id="sheet-numfmt-decimals" type="number" min="0" max="30" step="1" class="dialog-text-input" /></div>
+          <div class="dialog-row" data-numfmt-field="thousands" hidden><label class="dialog-checkbox"><input id="sheet-numfmt-thousands" type="checkbox" /> 천 단위 구분</label></div>
+          <div class="dialog-row" data-numfmt-field="symbol" hidden><label class="dialog-label" for="sheet-numfmt-symbol-select">통화 기호</label><select id="sheet-numfmt-symbol-select" class="sb-combo dialog-select"></select></div>
+          <div class="dialog-row" data-numfmt-field="negative" hidden><label class="dialog-label" for="sheet-numfmt-negative-select">음수</label><select id="sheet-numfmt-negative-select" class="sb-combo dialog-select"></select></div>
+          <div class="dialog-row" data-numfmt-field="list" hidden><label class="dialog-label" for="sheet-numfmt-list-select">형식</label><select id="sheet-numfmt-list-select" class="sb-combo dialog-select"></select></div>
+          <div class="dialog-row"><label class="dialog-label" for="sheet-numfmt-code">서식 코드</label><input id="sheet-numfmt-code" type="text" class="dialog-text-input" maxlength="255" autocomplete="off" spellcheck="false" /></div>
+          <div class="dialog-row"><span class="dialog-label">표본</span><output id="sheet-numfmt-sample" class="sheet-numfmt-sample"></output></div>
+          <p id="sheet-numfmt-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-sheet-numfmt-apply" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
     <dialog id="pii-dialog" class="tool-dialog" aria-labelledby="pii-dialog-title">
       <div class="dialog-wrap">
         <div class="dialog-title"><span id="pii-dialog-title">개인정보 스캔/마스킹</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
@@ -1147,6 +1192,8 @@
     <script src="./custom-select.js"></script>
     <script src="./color-picker.js"></script>
     <script src="./sheet-utils.js"></script>
+    <script src="./sheet-numfmt.js"></script>
+    <script src="./sheet-numfmt-display.js"></script>
     <script src="./pii-dom-scrubber.js"></script>
     <script src="./sheet-rules.js"></script>
     <script src="./sheet-store.js"></script>
@@ -1178,6 +1225,7 @@
     <script src="./sheet-pivot-ui.js"></script>
     <script src="./sheet-rules-ui.js"></script>
     <script src="./sheet-format.js"></script>
+    <script src="./sheet-numfmt-ui.js"></script>
     <script src="./sheet-controller.js"></script>
     <script src="./ribbon-history.js"></script>
     <script src="./workspace-session.js"></script>

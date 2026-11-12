@@ -569,8 +569,37 @@
       return { sheet: res.sheetName, formula: res.expr, value: res.value, circular: res.circular };
     }
 
+    // Stand-in for the engine's `format` action (sheet_format_ipc.rs): the few codes the tests use,
+    // `0`, `0.00`, `0.0%` and the like, a won sign with grouping, and a red negative section.
+    function offlineFormatCells(doc) {
+      const group = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+      const digits = /^0(?:\.(0+))?(%)?$/;
+      const render = (code, n) => {
+        const m = digits.exec(code);
+        if (m) return [(m[2] ? n * 100 : n).toFixed(m[1] ? m[1].length : 0) + (m[2] ? "%" : ""), ""];
+        if (code === '"₩"#,##0') return ["₩" + group(Math.round(n)), ""];
+        if (code === "#,##0;[Red]-#,##0") return [group(Math.round(n)), n < 0 ? "#ff0000" : ""];
+        return null;
+      };
+      return {
+        items: doc.items.map(({ code, values }) => {
+          if (code.length > 255) return { bad: true };
+          const t = [];
+          const c = {};
+          values.forEach((text, i) => {
+            const n = Number(text);
+            const out = text === "" || !Number.isFinite(n) ? null : render(code, n);
+            if (out?.[1]) c[i] = out[1];
+            t.push(out ? out[0] : null);
+          });
+          return { t, c };
+        }),
+      };
+    }
+
     function evaluateLocalSheetRpc(payload) {
       const doc = parseRequiredRpcJsonObject(payload);
+      if (doc.sessionAction === "format") return offlineFormatCells(doc);
       const defaultSheet = resolveDefaultSheetFromDocJs(doc);
       const explicitAnchor = resolveOptionalAnchorCell(doc);
       const anchorCell = explicitAnchor || "A1";

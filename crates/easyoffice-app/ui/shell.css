@@ -138,6 +138,10 @@
 #sheet-dv-dialog { width: min(480px, calc(100vw - 32px)); }
 #sheet-pivot-dialog { width: min(420px, calc(100vw - 32px)); }
 #sheet-dv-alert-dialog { width: min(360px, calc(100vw - 32px)); }
+#sheet-numfmt-dialog { width: min(420px, calc(100vw - 32px)); }
+/* The sample line of the cell format dialog shows the code's section color. */
+.sheet-numfmt-sample { flex: 1; min-width: 0; padding: 2px 6px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); font-size: var(--font-size-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sheet-numfmt-sample.nf-colored { color: var(--nf-color, inherit); }
 #sheet-dv-alert-dialog .dialog-body { padding: 16px 20px; line-height: 1.6; white-space: pre-line; }
 /* A text field that holds a range, formula or message fills its row, as the reference's `.formula-input` (dialogs.css:1046) and find field (find-dialog.css:42-47). */
 .sheet-rule-dialog .dialog-text-input { flex: 1; min-width: 0; }

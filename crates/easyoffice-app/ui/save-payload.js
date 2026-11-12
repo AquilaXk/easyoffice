@@ -438,6 +438,24 @@
       .map((text) => ({ type: "paragraph", runs: [{ text }] }));
   }
 
+  // The number format codes of one sheet's payload: `intern(code)` is the code's 1-based entry, or 0
+  // when the code is over the bounds or the list is full (the cell then saves without a format).
+  function internNumFmts() {
+    const numfmt = host.__EASYOFFICE_SHEET_NUMFMT__;
+    const codes = [];
+    const entries = new Map();
+    const intern = (code) => {
+      let at = entries.get(code);
+      if (at === undefined) {
+        const ok = (!numfmt || numfmt.codeWithinBounds(code)) && codes.length < (numfmt?.MAX_CODES ?? 512);
+        at = ok ? codes.push(code) : 0;
+        entries.set(code, at);
+      }
+      return at;
+    };
+    return { codes, intern };
+  }
+
   // Every sheet in tab order (then any stored sheet without a tab); keys are the formula-visible
   // sheet names. `raw` is the formula when present, otherwise the typed value.
   function buildSheetsPayload(sheetKeys, sheetDataStore, columnWidths, rulesBySheet) {
@@ -452,16 +470,18 @@
     return ordered.map((name) => {
       const store = sheetDataStore?.[name] || {};
       const codec = host.__EASYOFFICE_SHEET_STYLE_CODEC__;
+      const numFmts = internNumFmts();
       const cells = [];
       for (const ref of Object.keys(store)) {
         const entry = store[ref];
         const raw = String(entry?.formula || entry?.value || "");
-        const style = codec ? codec.styleToPayload(entry?.style) : null;
+        const style = codec ? codec.styleToPayload(entry?.style, numFmts.intern) : null;
         if (!raw && !style) continue;
         cells.push(style ? { ref, raw, style } : { ref, raw });
       }
       const columns = buildColumnsPayload(columnWidths?.[name]);
       const sheet = columns.length > 0 ? { name, cells, columns } : { name, cells };
+      if (numFmts.codes.length > 0) sheet.numFmts = numFmts.codes;
       const rules = rulesBySheet?.[name];
       if (rules && ((rules.cf || []).length > 0 || (rules.dv || []).length > 0)) sheet.rules = rules;
       return sheet;

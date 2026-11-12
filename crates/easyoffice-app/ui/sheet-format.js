@@ -12,7 +12,7 @@
   const STATE_DELAY_MS = 120;
   // Ranges up to this many cells are read by address (see computeRangeMasks).
   const DIRECT_AREA_CELLS = 4096;
-  const STYLE_KEYS = ["fontWeight", "fontStyle", "textDecoration", "fontSize", "frozenPanes"];
+  const STYLE_KEYS = ["fontWeight", "fontStyle", "textDecoration", "fontSize", "frozenPanes", "numFmt"];
   const COMMANDS = {
     "sheet-home-bold": "bold",
     "sheet-home-italic": "italic",
@@ -63,16 +63,21 @@
   }
 
   // Editor style <-> save payload `style` (PD-089). The editor keeps CSS strings in the model
-  // (`fontWeight`, `fontStyle`, `textDecoration`, `fontSize` in px); the payload carries flags and
-  // `sizePt` (1 px = 0.75 pt).
+  // (`fontWeight`, `fontStyle`, `textDecoration`, `fontSize` in px) and the number format code
+  // (`numFmt`, PD-193); the payload carries flags, `sizePt` (1 px = 0.75 pt) and `nf`, the 1-based
+  // entry of the sheet's `numFmts` list (`internNf` adds a code to it, `codes` is that list).
   const PT_PER_PX = 0.75;
   const FLAG_KINDS = ["bold", "italic", "underline", "strike"];
   const MIN_SIZE_PT = 1;
   const MAX_SIZE_PT = 409;
 
-  function styleToPayload(style) {
+  function styleToPayload(style, internNf) {
     if (!style) return null;
     const out = {};
+    if (style.numFmt && internNf) {
+      const nf = internNf(style.numFmt);
+      if (nf > 0) out.nf = nf;
+    }
     const mask = entryMask({ style });
     if (mask & 1) out.bold = true;
     if (mask & 2) out.italic = true;
@@ -86,16 +91,18 @@
     return Object.keys(out).length > 0 ? out : null;
   }
 
-  function styleFromPayload(payload) {
+  function styleFromPayload(payload, codes) {
     if (!payload || typeof payload !== "object") return null;
+    const code = Number.isInteger(payload.nf) && Array.isArray(codes) ? codes[payload.nf - 1] : "";
     const style = { fontWeight: "", fontStyle: "", textDecoration: "", fontSize: "" };
+    if (typeof code === "string" && code !== "") style.numFmt = code;
     FLAG_KINDS.forEach((kind) => {
       if (payload[kind] === true) writeFlag(style, kind, true);
     });
     if (Number.isFinite(payload.sizePt) && payload.sizePt > 0) {
       style.fontSize = Math.round((payload.sizePt / PT_PER_PX) * 100) / 100 + "px";
     }
-    return Object.values(style).some(Boolean) ? style : null;
+    return Object.values(style).some(Boolean) ? internStyle(style) : null;
   }
 
   function isEmptyEntry(entry) {
@@ -104,12 +111,27 @@
     return !entry.value && !entry.formula && !styled;
   }
 
+  // A range written with one format holds one frozen style object per distinct look instead of one
+  // per cell; code that changes a cell's style writes a new object (never edits one in place).
+  const internedStyles = new Map();
+
+  function internStyle(style) {
+    if (style.frozenPanes) return style;
+    const key = `${style.fontWeight}|${style.fontStyle}|${style.textDecoration}|${style.fontSize}|${style.numFmt || ""}`;
+    let shared = internedStyles.get(key);
+    if (!shared) {
+      shared = Object.freeze(style);
+      internedStyles.set(key, shared);
+    }
+    return shared;
+  }
+
   function patchCell(map, ref, mutate) {
     const entry = map[ref] || { value: "", formula: "" };
     const style = { fontWeight: "", fontStyle: "", textDecoration: "", fontSize: "", ...entry.style };
     mutate(style);
-    entry.style = style;
     if (STYLE_KEYS.some((k) => style[k])) {
+      entry.style = internStyle(style);
       map[ref] = entry;
       return;
     }
@@ -141,6 +163,7 @@
       pushRawUndoSnapshot,
       captureWorkspaceSnapshot,
     } = api;
+    const numfmt = host.__EASYOFFICE_SHEET_NUMFMT__;
     let stateTimer = null;
 
     // The selected range, clamped to the used extent when it is too large to materialize.
@@ -236,6 +259,65 @@
       return (rg.r2 - rg.r1 + 1) * (rg.c2 - rg.c1 + 1);
     }
 
+    // Number format of every cell of the selection (PD-193): `resolve(cells)` gets
+    // `[{ ref, code, raw }]` and answers one new code per cell (undefined keeps it). Returns
+    // `{ count }` or `{ refused }` when the sheet would hold more codes than it may.
+    function applyNumFmtToModel(resolve) {
+      const curSheet = getActiveSheetName();
+      const map = snapshotDomSheetCells();
+      sheetDataStore[curSheet] = map;
+      const rg = effectiveRange();
+      const cells = [];
+      forEachRef(rg, (ref) => {
+        const e = map[ref];
+        cells.push({ ref, code: e?.style?.numFmt || "", raw: e ? String(e.value ?? "") : "" });
+      });
+      const next = resolve(cells);
+      const codes = new Set();
+      Object.keys(map).forEach((ref) => map[ref]?.style?.numFmt && codes.add(map[ref].style.numFmt));
+      let known = codes.size;
+      for (const code of next) {
+        if (code && !codes.has(code)) {
+          if (!numfmt.codeWithinBounds(code) || known >= numfmt.MAX_CODES) return { refused: true };
+          codes.add(code);
+          known += 1;
+        }
+      }
+      let count = 0;
+      cells.forEach((cell, at) => {
+        const code = next[at];
+        if (code === undefined || code === cell.code) return;
+        patchCell(map, cell.ref, (st) => {
+          st.numFmt = code;
+        });
+        count += 1;
+      });
+      refreshWindowFromModel();
+      saveActiveSheetCellsToWorkbook();
+      return { count };
+    }
+
+    // One undoable operation: `resolve` as in applyNumFmtToModel.
+    function formatNumbers(resolve, label) {
+      return enqueueWorkspaceHistoryOp(async () => {
+        await drainInFlightSheetWork();
+        pushRawUndoSnapshot(captureWorkspaceSnapshot(false));
+        const result = applyNumFmtToModel(resolve);
+        refreshFocusedSheetCellPendingSnapshot?.();
+        const fb = document.getElementById("status-command-feedback");
+        if (fb) fb.textContent = result.refused ? "서식 코드를 더 늘릴 수 없음" : (label || "표시 형식") + ": " + result.count + "칸";
+        return result;
+      });
+    }
+
+    // The anchor cell of the selection with its number format code and stored value.
+    function anchorCell() {
+      const sel = getSelection();
+      const ref = gridUtils.refOf(sel.ar, sel.ac);
+      const e = sheetDataStore[getActiveSheetName()]?.[ref];
+      return { ref, code: e?.style?.numFmt || "", raw: e ? String(e.value ?? "") : "" };
+    }
+
     // Ribbon / shortcut entry: runs inside the tracked ribbon op (one undo step). True when handled.
     function applyCommand(cmdId) {
       const kind = COMMANDS[cmdId];
@@ -283,7 +365,7 @@
         }, STATE_DELAY_MS) ?? null;
     }
 
-    return { applyCommand, formatRange, syncToolbar, scheduleToolbarSync, rangeFlagState: (kind) => rangeFlagState(sheetDataStore[getActiveSheetName()] || {}, getRange(), kind) };
+    return { applyCommand, formatRange, formatNumbers, anchorCell, syncToolbar, scheduleToolbarSync, rangeFlagState: (kind) => rangeFlagState(sheetDataStore[getActiveSheetName()] || {}, getRange(), kind) };
   }
 
   host.__EASYOFFICE_CREATE_SHEET_FORMAT__ = createSheetFormat;

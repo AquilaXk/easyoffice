@@ -10,6 +10,9 @@
   const circle = (cx, cy, r) =>
     "M" + (cx - r) + " " + cy + "a" + r + " " + r + " 0 1 0 " + 2 * r + " 0a" + r + " " + r + " 0 1 0 " + -2 * r + " 0";
 
+  // A narrow digit zero whose left edge is at `x`.
+  const zeroGlyph = (x) => "M" + x + " 15.500a2 2 0 0 1 4 0v2a2 2 0 0 1-4 0z";
+
   const ICONS = Object.freeze({
     save: ["M5 4h11l3 3v13H5z", "M8 4v5h7V4", "M8 20v-6h8v6"],
     undo: ["M9 14L4 9l5-5", "M4 9h10a6 6 0 0 1 0 12h-3"],
@@ -53,6 +56,10 @@
     "zoom-out": [circle(10.5, 10.5, 6.5), "M15.5 15.5L21 21", "M8 10.5h5"],
     "fit-width": ["M4 12h16", "M8 8l-4 4 4 4", "M16 8l4 4-4 4"],
     "fit-page": ["M5 4h14v16H5z", "M9 9h6v6H9z"],
+    won: ["M4 6l3.5 12L12 8l4.5 10L20 6", "M3 10h18", "M3 14h18"],
+    percent: ["M19 5L5 19", circle(7.5, 7.5, 2.5), circle(16.5, 16.5, 2.5)],
+    "decimal-increase": ["M20 6H9", "M12 3L9 6l3 3", circle(5.500, 18.500, 0.500), zeroGlyph(8), zeroGlyph(15)],
+    "decimal-decrease": ["M9 6h11", "M17 3l3 3-3 3", circle(5.500, 18.500, 0.500), zeroGlyph(10)],
     plus: ["M12 5v14", "M5 12h14"],
     minus: ["M5 12h14"],
     close: ["M6 6l12 12", "M18 6L6 18"],

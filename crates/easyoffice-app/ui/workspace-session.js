@@ -138,6 +138,22 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
 
   const isBlankText = (v) => v === undefined || v === null || v === "" || v === false;
 
+  // The hash of a style's canonical text. A frozen style object is shared by many cells and never
+  // edited, so its hash is made once; the value is the same for an equal style that is not frozen.
+  const NULL_STYLE_HASH = fnvStep(0x811c9dc5, "null") >>> 0;
+  const frozenStyleHash = new WeakMap();
+  const styleHashOf = (style) => fnvStep(0x811c9dc5, JSON.stringify(canonicalizeContent(style, "style") ?? null)) >>> 0;
+  function styleDigest(style) {
+    if (!style) return NULL_STYLE_HASH;
+    if (!Object.isFrozen(style)) return styleHashOf(style);
+    let hash = frozenStyleHash.get(style);
+    if (hash === undefined) {
+      hash = styleHashOf(style);
+      frozenStyleHash.set(style, hash);
+    }
+    return hash;
+  }
+
   // The digest part of one cell (0 for a cell that canonicalizeContent drops as empty). The plain
   // shape `{ value, formula, style? }` is hashed in place; anything else goes through the canonical form.
   function cellDigest(ref, entry, seed) {
@@ -147,9 +163,10 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       (formula === undefined || typeof formula === "string") && (style === undefined || (style && typeof style === "object"));
     let h = fnvStep(seed, ref);
     if (plain) {
-      const styleText = style ? JSON.stringify(canonicalizeContent(style, "style") ?? null) : "null";
-      if (isBlankText(value) && isBlankText(formula) && styleText === "null") return 0;
-      h = fnvStep(fnvStep(fnvStep(h, "\u0000" + (value ?? "")), "\u0001" + (formula ?? "")), "\u0002" + styleText);
+      const styleHash = styleDigest(style);
+      if (isBlankText(value) && isBlankText(formula) && styleHash === NULL_STYLE_HASH) return 0;
+      h = fnvStep(fnvStep(h, "\u0000" + (value ?? "")), "\u0001" + (formula ?? ""));
+      h = Math.imul(h ^ styleHash, 0x01000193);
     } else {
       const canonical = canonicalizeContent(entry, ref);
       if (canonical === undefined) return 0;

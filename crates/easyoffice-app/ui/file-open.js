@@ -257,7 +257,7 @@
       let maxRow = 0;
       (sheet.cells || []).forEach((cell) => {
         const raw = String(cell.raw ?? "");
-        const style = codec ? codec.styleFromPayload(cell.style) : null;
+        const style = codec ? codec.styleFromPayload(cell.style, sheet.numFmts) : null;
         if (!raw && !style) return;
         const entry = raw.startsWith("=") ? { value: "", formula: raw } : { value: raw, formula: "" };
         if (style) entry.style = style;
