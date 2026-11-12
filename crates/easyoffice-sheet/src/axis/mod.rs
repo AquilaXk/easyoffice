@@ -18,10 +18,12 @@
 //! operator list, selection handling and mutation objects are not used.
 
 mod apply;
+mod filter;
 mod formula;
 mod layout;
 
 pub use apply::{AxisBudget, AxisEditReport};
+pub use filter::{shift_filter, FilterShift};
 pub use formula::rewrite_formula_refs;
 pub use layout::{shift_boxes, shift_runs, shift_widths};
 

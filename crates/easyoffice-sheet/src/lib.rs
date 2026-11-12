@@ -7,6 +7,7 @@ pub mod axis;
 pub mod coercion;
 mod criteria;
 mod dag;
+pub mod filter;
 pub mod functions;
 pub mod functions_complex;
 mod functions_date_fin;
@@ -30,7 +31,8 @@ pub mod types;
 pub mod workbook;
 
 pub use axis::{
-    shift_boxes, shift_runs, shift_widths, Axis, AxisBudget, AxisEdit, AxisEditReport, EditKind,
+    shift_boxes, shift_filter, shift_runs, shift_widths, Axis, AxisBudget, AxisEdit,
+    AxisEditReport, EditKind, FilterShift,
 };
 pub use coercion::*;
 pub use functions::*;
