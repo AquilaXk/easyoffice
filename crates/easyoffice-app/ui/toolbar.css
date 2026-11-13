@@ -129,11 +129,12 @@
   flex-shrink: 0;
 }
 
-/* Text icon of a button that has no sprite cell (the reference's `.tb-icon-text`). */
+/* The reference's `.tb-icon-text`: a character as the icon of a button that has no sprite cell (numbering, bullet, level, rotation). */
 .tb-icon-text {
   display: block;
   width: 18px;
   height: 18px;
+  font-family: Arial, sans-serif; /* the reference draws these in its buttons' own default font (buttons do not inherit one there) */
   font-size: var(--font-size-xl);
   line-height: 18px;
   text-align: center;
@@ -174,7 +175,7 @@
 /* Sprite cells: calc(-40px * column) calc(-40px * row). The cut, copy, paste, grid, char-shape, table,
    shape, symbols, hyperlink, header, footnote and find cells are the reference toolbar's own; the others
    are the cells of the same sprite that mean the same as the command (numbers, text alignment, vertical
-   alignment, wrapping, cell borders, lists, indent, slides, stamp). */
+   alignment, wrapping, cell borders, justify, slides, stamp). */
 .icon-cut { background-position: calc(-40px * 2) calc(-40px * 1); }
 .icon-copy { background-position: calc(-40px * 3) calc(-40px * 1); }
 .icon-paste { background-position: calc(-40px * 4) calc(-40px * 1); }
@@ -188,10 +189,6 @@
 .icon-footnote { background-position: calc(-40px * 4) calc(-40px * 4); }
 .icon-find { background-position: calc(-40px * 15) calc(-40px * 1); }
 .icon-align-justify { background-position: calc(-40px * 3) calc(-40px * 9); }
-.icon-numbering { background-position: calc(-40px * 8) calc(-40px * 8); }
-.icon-bullet { background-position: calc(-40px * 9) calc(-40px * 8); }
-.icon-outdent { background-position: calc(-40px * 4) calc(-40px * 9); }
-.icon-indent { background-position: calc(-40px * 5) calc(-40px * 9); }
 .icon-add { background-position: calc(-40px * 24) calc(-40px * 2); }
 .icon-remove { background-position: calc(-40px * 25) calc(-40px * 2); }
 .icon-arrow-up { background-position: calc(-40px * 1) calc(-40px * 7); }
