@@ -12,6 +12,16 @@ const SECRET = "비밀-pw-9";
 // The digest the offline engine of the harness makes (a stand-in with the shape of the real one): the page keeps it, never the password.
 const isDigest = (pwd) => pwd?.kind === "both" && /^OFFLINE-\d+-\d+$/.test(pwd.hash) && !JSON.stringify(pwd).includes(SECRET);
 
+const BLOCKED = "변경하려는 셀 또는 차트가 보호된 시트에 있습니다. 변경하려면 시트의 보호를 해제하세요. 암호를 입력해야 할 수도 있습니다.";
+// A refused edit opens the message window with the whole warning; it is closed for the next one.
+function blocked(t) {
+  const dialog = t.byId("sheet-protect-alert-dialog");
+  assert.equal(dialog.open, true, "the message window is open");
+  assert.equal(t.byId("sheet-protect-alert-message").textContent, BLOCKED);
+  assert.equal(dialog.querySelectorAll(".dialog-footer button").length, 1, "one 확인 button");
+  dialog.close();
+}
+
 // `engine`: a page whose engine answers the session actions (row and column edits), over the sample table written into the page.
 async function open({ engine = false } = {}) {
   const requests = [];
@@ -92,7 +102,7 @@ test("시트 보호 opens with the usual actions locked and the password fields 
   assert.equal(t.byId("sheet-protect-password").disabled, false);
 });
 
-test("설정 without a password protects the sheet as one undo step, and the menu item then lifts it", async () => {
+test("설정 without a password protects the sheet, and the menu item then lifts it", async () => {
   const t = await open();
   await protectWithoutPassword(t);
   assert.equal(t.byId("sheet-protect-dialog").open, false);
@@ -105,9 +115,7 @@ test("설정 without a password protects the sheet as one undo step, and the men
   await t.act("sheet-protect");
   assert.equal(t.layout.protectOf("Sheet1"), null, "no password: the same item lifts it at once");
   await t.undo();
-  assert.equal(t.layout.protectOf("Sheet1").on, true);
-  await t.undo();
-  assert.equal(t.layout.protectOf("Sheet1"), null);
+  assert.equal(t.layout.protectOf("Sheet1"), null, "lifting it cannot be undone either");
 });
 
 test("the password must be typed twice alike and is kept only as the digest the engine made", async () => {
@@ -143,7 +151,7 @@ test("the password must be typed twice alike and is kept only as the digest the 
   assert.equal(t.byId("sheet-password-input").getAttribute("type"), "password");
   t.byId("sheet-password-input").value = "틀린 암호";
   await t.click("btn-sheet-password-apply");
-  assert.equal(t.byId("sheet-password-status").textContent, "암호가 올바르지 않습니다.");
+  assert.equal(t.byId("sheet-password-status").textContent, "암호가 일치하지 않습니다. 다시 입력하세요.");
   assert.equal(t.layout.protectOf("Sheet1").on, true);
   t.byId("sheet-password-input").value = SECRET;
   await t.click("btn-sheet-password-apply");
@@ -159,7 +167,7 @@ test("a protected sheet refuses typing into a locked cell, and says why", async 
   b3.focus();
   t.key(b3, "F2");
   assert.equal(b3.dataset.editMode, undefined, "F2 does not start an edit");
-  assert.equal(t.status(), "보호된 시트의 셀을 변경할 수 없음");
+  blocked(t);
   assert.equal(b3.getAttribute("contenteditable"), "false");
   t.key(b3, "Delete");
   await flushAsyncTurns(20);
@@ -199,7 +207,7 @@ test("the allowed actions decide which edits go through", async () => {
   for (const flag of ["formatCells", "insertRows", "deleteColumns", "sort", "autoFilter", "pivotTables"]) {
     assert.equal(guard.allows("Sheet1", flag), false, flag);
     assert.equal(guard.guardAction("Sheet1", flag), false, flag);
-    assert.equal(t.status(), "보호된 시트의 셀을 변경할 수 없음");
+    blocked(t);
   }
   t.layout.setProtect("Sheet1", { on: true, deny: deny.filter((f) => f !== "insertRows" && f !== "sort") });
   assert.equal(guard.allows("Sheet1", "insertRows"), true);
@@ -217,7 +225,7 @@ test("the structure commands of the sheet refuse an edit the sheet locks, before
   t.layout.setProtect("Sheet1", { on: true, deny });
   t.cell("C2").focus();
   await t.act("row-delete");
-  assert.equal(t.status(), "보호된 시트의 셀을 변경할 수 없음");
+  blocked(t);
   await t.act("col-insert-left");
   assert.equal(t.requests.filter((r) => r.sessionAction === "structure").length, 0, "nothing reached the engine");
   await t.act("row-insert-above");
@@ -250,7 +258,8 @@ test("a workbook whose structure is protected refuses sheet commands and its pas
   }
   assert.equal(t.document.querySelectorAll("#sheet-tab-bar .sheet-tab-btn[data-sheet-tab]").length, 2, "no sheet was added or removed");
   await t.undo();
-  assert.equal(t.guard.getWorkbook(), null, "one undo step");
+  assert.equal(t.guard.getWorkbook().structure, true, "protecting the workbook cannot be undone");
+  t.guard.setWorkbook(null);
   await t.act("workbook-protect");
   await t.click("btn-sheet-wb-protect-apply");
   assert.equal(t.byId("sheet-wb-protect-status").textContent, "암호를 입력");
@@ -312,7 +321,7 @@ test("범위 편집 허용 lists the ranges of an unprotected sheet and a range 
   assert.equal(t.layout.protectOf("Sheet1").ranges.length, 1, "protecting keeps the ranges");
   await t.act("range-allow");
   assert.equal(t.byId("sheet-ranges-dialog").open, false, "a protected sheet keeps its ranges as they are");
-  assert.equal(t.status(), "보호된 시트의 셀을 변경할 수 없음");
+  blocked(t);
 });
 
 test("a range with a password is opened by it, once, and only for this window", async () => {
@@ -345,7 +354,6 @@ test("a range with a password is opened by it, once, and only for this window", 
 });
 
 // ---- every edit entry point on a protected sheet --------------------------------------------------------------------
-const BLOCKED = "보호된 시트의 셀을 변경할 수 없음";
 
 async function protectedSheet(allowed) {
   const t = await open();
@@ -385,7 +393,7 @@ test("typing, F2 and a double click start no edit in a locked cell, and typing g
   t.key(b3, "9");
   assert.equal(cellText(t, "B3"), before[1], "typing into a locked cell changes nothing");
   assert.equal(b3.dataset.editMode, undefined, "and starts no edit");
-  assert.equal(t.status(), BLOCKED);
+  blocked(t);
   b3.dispatchEvent({ type: "dblclick", target: b3, bubbles: true });
   assert.equal(t.cell("B3").dataset.editMode, undefined);
   const b4 = t.cell("B4");
@@ -413,7 +421,7 @@ test("paste, cut, fill and the formula bar leave a locked cell as it is, and cop
     await flushAsyncTurns(15);
     assert.deepEqual(snapshot(t), before, type);
   }
-  assert.equal(t.status(), BLOCKED);
+  blocked(t);
   // The fill handle.
   t.cell("B2").dispatchEvent({ type: "mousedown", target: t.cell("B2"), button: 0, bubbles: true });
   t.cell("B2").dispatchEvent({ type: "mouseup", target: t.cell("B2"), bubbles: true });
@@ -430,7 +438,7 @@ test("paste, cut, fill and the formula bar leave a locked cell as it is, and cop
   t.byId("btn-eval-formula").click();
   await flushAsyncTurns(15);
   assert.deepEqual(snapshot(t), before, "formula bar");
-  assert.equal(t.status(), BLOCKED);
+  blocked(t);
 });
 
 test("format commands, sorting, the filter, conditional formatting and the pivot are refused until the sheet allows them", async () => {
@@ -439,7 +447,7 @@ test("format commands, sorting, the filter, conditional formatting and the pivot
   for (const act of [() => t.userClick(commandItem(t.document, "sheet-home-bold")), () => t.userClick(t.document.querySelector('[data-sheet-look="align-center"]'))]) {
     act();
     await flushAsyncTurns(15);
-    assert.equal(t.status(), BLOCKED);
+    blocked(t);
     assert.equal(t.cell("B2").style.fontWeight || "", "");
     assert.equal(t.cell("B2").style.textAlign || "", "");
   }
@@ -453,7 +461,7 @@ test("format commands, sorting, the filter, conditional formatting and the pivot
   assert.equal(t.byId("sheet-cf-dialog")?.open ?? false, false, "the conditional formatting dialog stays closed or its changes are refused");
   await t.act("filter-toggle");
   assert.equal(t.layout.filterOf("Sheet1"), null, "no filter on a protected sheet");
-  assert.equal(t.status(), BLOCKED);
+  blocked(t);
   // 셀 서식 allowed: bold goes through.
   t.layout.setProtect("Sheet1", { on: true, deny: t.guard.FLAG_NAMES.filter((f) => !["selectLockedCells", "selectUnlockedCells", "formatCells"].includes(f)) });
   t.cell("B2").focus();
@@ -480,7 +488,7 @@ test("an undo or a redo does not change a locked cell of a sheet that stays prot
   t.guard.forgetUnlocked();
   await t.undo();
   assert.equal(cellText(t, "B2"), "5", "the undo is refused: B2 is locked");
-  assert.equal(t.status(), BLOCKED);
+  blocked(t);
   t.layout.setProtect("Sheet1", null);
   await t.undo();
   assert.equal(cellText(t, "B2"), "1150", "on a sheet that is not protected it goes through");
@@ -522,4 +530,178 @@ test("a hidden formula shows no formula in the formula bar of a protected sheet 
   await t.act("sheet-protect");
   t.cell("F2").focus();
   assert.equal(t.byId("formula-input").value, "=SUM(B2:E2)");
+});
+
+// ---- the protection is not undone, and the record of steps ends where it changes -----------------------------------------
+test("protecting, lifting and the ranges end the record of undo steps, and no undo or redo changes a protection or its password", async () => {
+  const t = await open();
+  // An edit while the sheet is not protected is an undo step.
+  const b3 = t.cell("B3");
+  b3.focus();
+  typeText(t, "5");
+  t.key(b3, "Enter");
+  await flushAsyncTurns(15);
+  assert.equal(cellText(t, "B3"), "5");
+  t.check("sheet-protect-use-password", false);
+  await t.act("sheet-protect");
+  t.check("sheet-protect-use-password", true);
+  t.byId("sheet-protect-password").value = SECRET;
+  t.byId("sheet-protect-confirm").value = SECRET;
+  await t.click("btn-sheet-protect-apply");
+  const protect = t.layout.protectOf("Sheet1");
+  assert.equal(isDigest(protect.pwd), true);
+  // The record is empty: undo and redo change neither the locked cell nor the protection nor the password.
+  for (const history of ["studio-undo", "studio-redo", "studio-undo"]) {
+    t.userClick(studioItem(t.document, history));
+    await flushAsyncTurns(20);
+    assert.deepEqual(t.layout.protectOf("Sheet1"), protect, history);
+    assert.equal(cellText(t, "B3"), "5", history);
+  }
+  // The workbook and the ranges end the record in the same way.
+  await t.act("workbook-protect");
+  t.byId("sheet-wb-protect-password").value = SECRET;
+  t.byId("sheet-wb-protect-confirm").value = SECRET;
+  await t.click("btn-sheet-wb-protect-apply");
+  const book = t.guard.getWorkbook();
+  t.userClick(studioItem(t.document, "studio-undo"));
+  await flushAsyncTurns(20);
+  assert.deepEqual(t.guard.getWorkbook(), book);
+  assert.deepEqual(t.layout.protectOf("Sheet1"), protect);
+});
+
+test("a step recorded before still cannot change the protection: a restore keeps the protection and the password of the sheets it meets", async () => {
+  const t = await open();
+  const deny = t.guard.FLAG_NAMES.filter((f) => !t.guard.DEFAULT_ALLOWED.includes(f));
+  const pwd = { kind: "both", alg: "SHA-512", hash: "OFFLINE-1-1", salt: "S", spin: 1, key: "K" };
+  t.layout.setProtect("Sheet1", { on: true, deny, pwd });
+  const old = { sheetLayout: {}, sheetOrder: ["Sheet1", "Sheet2"], sheets: { Sheet1: { B3: { value: "1", formula: "" } } } };
+  const kept = t.guard.keepProtection(old, ["Sheet1", "Sheet2"]);
+  assert.deepEqual(kept.Sheet1.protect, t.layout.protectOf("Sheet1"), "a snapshot of a state without it gets the protection back");
+  assert.equal(kept.Sheet2, undefined);
+  // A sheet the snapshot brings back keeps the snapshot's own.
+  const back = t.guard.keepProtection({ sheetLayout: { Gone: { protect: { on: true, deny: [] } } }, sheetOrder: ["Gone"] }, ["Sheet1"]);
+  assert.equal(back.Gone.protect.on, true);
+  // A restore that would change a locked cell is refused.
+  const store = { Sheet1: { B3: { value: "9", formula: "" } } };
+  assert.equal(t.guard.restoreWouldChange({ sheets: { Sheet1: { B3: { value: "1", formula: "" } } } }, store), true);
+  assert.equal(t.guard.restoreWouldChange({ sheets: { Sheet1: { B3: { value: "9", formula: "" } } } }, store), false);
+  assert.equal(t.guard.restoreWouldChange({ sheets: undefined }, store), false, "a snapshot of the layout alone changes no cell");
+});
+
+test("a refused edit opens the message window once, with the whole warning and one button", async () => {
+  const t = await open();
+  await protectWithoutPassword(t);
+  const b3 = t.cell("B3");
+  b3.focus();
+  t.key(b3, "F2");
+  const dialog = t.byId("sheet-protect-alert-dialog");
+  assert.equal(dialog.open, true);
+  assert.equal(t.byId("sheet-protect-alert-message").textContent, BLOCKED);
+  let opens = 0;
+  const show = dialog.showModal;
+  dialog.showModal = () => {
+    opens += 1;
+    return show.call(dialog);
+  };
+  t.key(b3, "F2");
+  t.key(b3, "x");
+  assert.equal(opens, 0, "typing on does not open it again while it is open");
+  dialog.close();
+  t.key(b3, "F2");
+  assert.equal(opens, 1);
+});
+
+// ---- hidden formulas ----------------------------------------------------------------------------------------------
+async function setCellFlags(t, ref, { locked, hidden }) {
+  t.cell(ref).focus();
+  t.userClick(t.document.querySelector('[data-sheet-numfmt="dialog"]'));
+  await flushAsyncTurns(20);
+  t.document.querySelector('#sheet-numfmt-dialog [data-fmt-tab="protect"]').click();
+  if (locked !== undefined) t.check("sheet-protect-cell-locked", locked);
+  if (hidden !== undefined) t.check("sheet-protect-cell-hidden", hidden);
+  await t.click("btn-sheet-numfmt-apply");
+}
+
+test("a hidden formula does not leave through a fill, a search or the edit of an unlocked cell", async () => {
+  const t = await open();
+  await setCellFlags(t, "F2", { hidden: true });
+  await setCellFlags(t, "G2", { locked: false });
+  await protectWithoutPassword(t);
+  // Fill: F2 (hidden) dragged onto the unlocked G2 copies the value.
+  t.cell("F2").dispatchEvent({ type: "mousedown", target: t.cell("F2"), button: 0, bubbles: true });
+  t.cell("F2").dispatchEvent({ type: "mouseup", target: t.cell("F2"), bubbles: true });
+  const handle = t.document.querySelector("#sheet-viewport .sheet-fill-handle");
+  handle?.dispatchEvent({ type: "mousedown", target: handle, button: 0, bubbles: true });
+  t.cell("G2").dispatchEvent({ type: "mouseover", target: t.cell("G2"), bubbles: true });
+  t.cell("G2").dispatchEvent({ type: "mouseup", target: t.cell("G2"), bubbles: true });
+  await flushAsyncTurns(15);
+  assert.equal(t.cell("G2").dataset.formula ?? "", "", "no formula in G2");
+  assert.equal(cellText(t, "G2"), "4950", "the value is filled");
+  // Search: a search by formula does not match a hidden one.
+  const blocks = [];
+  const source = t.host.__EASYOFFICE_CREATE_SHEET_FIND_SOURCE__({
+    sheetDataStore: { Sheet1: { F2: { value: "4950", formula: "=SUM(B2:E2)", style: { hideFormula: true } }, F3: { value: "4100", formula: "=SUM(B3:E3)" } } },
+    getActiveSheetName: () => "Sheet1",
+    sheetController: { snapshotDomSheetCells: () => ({ F2: { value: "4950", formula: "=SUM(B2:E2)", style: { hideFormula: true } }, F3: { value: "4100", formula: "=SUM(B3:E3)" } }) },
+    gridUtils: t.host.__EASYOFFICE_SHEET_GRID_UTILS__,
+    isFormulaStr: (v) => String(v).startsWith("="),
+  });
+  source.sync({ setBlocks: (list) => blocks.push(...list) }, { formula: true });
+  assert.deepEqual(blocks.map((b) => [b.id, b.text]), [["F2", "4950"], ["F3", "=SUM(B3:E3)"]], "a hidden formula is searched as its value");
+});
+
+test("editing an unlocked cell with a hidden formula shows its value, and leaving it as it is keeps the formula", async () => {
+  const t = await open();
+  await setCellFlags(t, "F2", { locked: false, hidden: true });
+  await protectWithoutPassword(t);
+  const f2 = t.cell("F2");
+  assert.equal(f2.getAttribute("contenteditable"), "true");
+  f2.focus();
+  t.key(f2, "F2");
+  assert.equal(t.cell("F2").textContent, "4950", "the formula is not unfolded");
+  t.key(t.cell("F2"), "Enter");
+  await flushAsyncTurns(15);
+  t.cell("F2").focus();
+  assert.equal(t.cell("F2").dataset.formula, "=SUM(B2:E2)", "the formula is still there");
+  assert.equal(t.byId("formula-input").value, "4950");
+});
+
+// ---- a save that drops a password ------------------------------------------------------------------------------------
+test("which formats keep which password", async () => {
+  const t = await open();
+  const set = (pwd, ranges = []) => t.layout.setProtect("Sheet1", { on: true, deny: [], pwd, ranges });
+  const agile = { kind: "agile", alg: "SHA-512", hash: "h", salt: "s", spin: 1 };
+  const odf = { kind: "odf", key: "k" };
+  const both = { kind: "both", alg: "SHA-512", hash: "h", salt: "s", spin: 1, key: "k" };
+  assert.equal(t.guard.lostPassword("xlsx"), false, "no password");
+  set(undefined);
+  assert.equal(t.guard.lostPassword("xls"), false, "protection without a password drops nothing");
+  const lost = (pwd, ext) => (set(pwd), t.guard.lostPassword(ext));
+  assert.deepEqual(["xlsx", "ods", "xls", "csv"].map((ext) => lost(agile, ext)), [false, true, true, true]);
+  assert.deepEqual(["xlsx", "ods", "xls", "csv"].map((ext) => lost(odf, ext)), [true, false, true, true]);
+  assert.deepEqual(["xlsx", "ods", "xls", "csv"].map((ext) => lost(both, ext)), [false, false, true, true]);
+  assert.equal(lost({ kind: "legacy", hash: "83AF" }, "xlsx"), false);
+  assert.equal(lost({ kind: "legacy", hash: "83AF" }, "ods"), true);
+  set(undefined, [{ name: "r", sqref: ["A1"], pwd: odf }]);
+  assert.equal(t.guard.lostPassword("xlsx"), true, "a range's password counts");
+  t.layout.setProtect("Sheet1", null);
+  t.guard.setWorkbook({ structure: true, pwd: agile });
+  assert.equal(t.guard.lostPassword("ods"), true, "so does the workbook's");
+});
+
+test("a save that drops a password asks first, and declining writes nothing", async () => {
+  const t = await open();
+  t.layout.setProtect("Sheet1", { on: true, deny: [], pwd: { kind: "odf", key: "k" } });
+  const asked = [];
+  t.host.confirm = (text) => (asked.push(text), false);
+  t.userClick(studioItem(t.document, "studio-save"));
+  await flushAsyncTurns(30);
+  assert.deepEqual(asked, ["저장한 파일에는 암호가 적용되지 않습니다. 암호 없이 저장하시겠습니까?"]);
+  assert.match(t.status(), /문서 저장 취소 \(XLSX\)/);
+  // A password the format holds is saved without a question.
+  t.layout.setProtect("Sheet1", { on: true, deny: [], pwd: { kind: "both", alg: "SHA-512", hash: "h", salt: "s", spin: 1, key: "k" } });
+  asked.length = 0;
+  t.userClick(studioItem(t.document, "studio-save"));
+  await flushAsyncTurns(30);
+  assert.deepEqual(asked, []);
 });

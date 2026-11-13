@@ -348,6 +348,12 @@
       } else {
         content = buildConversionContent(curMod);
       }
+      // A password the target format cannot hold is dropped only after the user agrees (PD-216).
+      const protect = host.__EASYOFFICE_SHEET_PROTECT__;
+      if (!isConv && curMod === "SHEET" && protect.lostPassword(dstExt) && !(await host.__EASYOFFICE_DESKTOP_BRIDGE__.confirm("password-free-save-sheet"))) {
+        setStatusFeedback("문서 저장 취소 (" + dstExt.toUpperCase() + "): 암호 없이 저장하지 않았습니다");
+        return false;
+      }
       const converted = await convertForSave(srcExt, dstExt, title, content);
       let failure = converted.failure;
       const deliver = spec.inPlace ? deliverInPlace : deliverSavedFile;

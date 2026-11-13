@@ -6,14 +6,13 @@
   // (암호, 암호 확인) and 워크시트에서 허용할 내용; the dialog that asks the password again is 암호; 통합 문서 보호 with 암호,
   // 암호 확인 and 암호 없이 보호, and 통합 문서 보호 해제; 설정 and 확인 are the buttons). The same menu item protects and
   // lifts the protection. A password is typed once into a password field, goes to the engine (`protectHash`,
-  // `protectVerify`) and only the digest it answers is kept: in the layout store, the undo snapshots and the file. Each
-  // change is one undo step.
+  // `protectVerify`) and only the digest it answers is kept: in the layout store, the undo snapshots and the file. A change cannot be undone.
 
   const MESSAGES = {
     empty: "암호를 입력",
     mismatch: "새 암호와 암호 확인이 일치하지 않습니다.",
     long: "암호는 255자까지",
-    wrong: "암호가 올바르지 않습니다.",
+    wrong: "암호가 일치하지 않습니다. 다시 입력하세요.",
     failed: "암호를 확인하지 못함",
   };
   const MAX_PASSWORD = 255;
@@ -23,7 +22,7 @@
   const T_BOOK_OFF = "통합 문서 보호 해제";
 
   function createSheetProtectUi(deps) {
-    const { document, grid, getActiveSheetName, sheetStoreHelpers, commitIfEditing, enqueueWorkspaceHistoryOp, drainInFlightSheetWork, pushRawUndoSnapshot, captureWorkspaceSnapshot, refreshChrome } = deps;
+    const { document, grid, getActiveSheetName, sheetStoreHelpers, commitIfEditing, enqueueWorkspaceHistoryOp, drainInFlightSheetWork, refreshChrome } = deps;
     const kit = host.__EASYOFFICE_CREATE_SHEET_DIALOG_KIT__(document);
     const layoutApi = host.__EASYOFFICE_SHEET_LAYOUT__;
     const guard = host.__EASYOFFICE_SHEET_PROTECT__;
@@ -51,17 +50,17 @@
       return guard.UNSUPPORTED[res?.unsupported] || MESSAGES.failed;
     }
 
-    // One undo step over the layout store and the workbook protection: `change(name)` returns the status text, or
-    // null to leave everything as it is.
+    // A change of the protection: `change(name)` returns the status text, or null to leave everything as it is. It
+    // cannot be undone, and it ends the record of undo steps (the spreadsheet programs do the same), so no earlier
+    // step brings back an edit of a cell the protection locks or the state of a password.
     function step(change) {
       return enqueueWorkspaceHistoryOp(async () => {
         await drainInFlightSheetWork();
         commitIfEditing();
         const name = getActiveSheetName();
-        const before = captureWorkspaceSnapshot(false, true);
         const text = change(name);
         if (text === null) return false;
-        pushRawUndoSnapshot(before);
+        host.__EASYOFFICE_WORKSPACE_HISTORY__.clear();
         grid.layoutChanged();
         // The cells already on the page take the lock of the new state (their rows are kept by a redraw).
         grid.refreshCells();

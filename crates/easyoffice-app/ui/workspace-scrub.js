@@ -139,7 +139,7 @@
       // The masking rewrites cells of every sheet, so a protected sheet has to be unprotected first (PD-216).
       const guard = host.__EASYOFFICE_SHEET_PROTECT__;
       if (guard && Object.keys(sheetDataStore).some((name) => guard.isOn(name))) {
-        guard.say(guard.BLOCKED);
+        guard.alertBlocked();
         return 0;
       }
       sheetDataStore[curSheet] = sheetController.snapshotDomSheetCells();

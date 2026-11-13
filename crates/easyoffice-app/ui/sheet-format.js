@@ -370,7 +370,7 @@
       const kind = COMMANDS[cmdId];
       if (!kind) return false;
       // The ribbon sets its own status line after the effect, so the refusal is said again once that is done.
-      if (formatBlocked(false)) host.setTimeout?.(() => host.__EASYOFFICE_SHEET_PROTECT__.say(host.__EASYOFFICE_SHEET_PROTECT__.BLOCKED), 0);
+      if (formatBlocked(false)) host.setTimeout?.(() => host.__EASYOFFICE_SHEET_PROTECT__.alertBlocked(), 0);
       else applyToModel(kind);
       return true;
     }

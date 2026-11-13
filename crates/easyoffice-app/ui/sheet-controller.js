@@ -534,7 +534,7 @@
       const sheet = getActiveSheetName();
       const at = gridUtils.parseRef(getActiveSheetCellRef() || "A1");
       if (!guard || !at || guard.cellEditable(sheet, at.row, at.col, sheetDataStore[sheet]?.[getActiveSheetCellRef()]?.style)) return false;
-      guard.say(guard.BLOCKED);
+      guard.alertBlocked();
       updateSheetSelectionAndAggregates(getActiveSheetCellRef() || "A1");
       return true;
     }

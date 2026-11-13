@@ -94,7 +94,7 @@
       grid,
       getRange: () => getRange(),
       getAxis: () => sel.axis,
-      getEntry: (ref) => api.getEntry(ref),
+      getEntry: (ref) => visibleEntryOf(ref),
       getSheetName: () => api.getSheetName(),
       applyCellEdits: (edits, label) => api.applyCellEdits(edits, label),
       setRange: (rg) => setRange(rg),
@@ -102,6 +102,13 @@
       shiftFormula: clip.shiftFormula,
       feedback,
     });
+
+    // The entry of a cell as a fill may read it: a formula a protected sheet hides is a value (PD-216).
+    function visibleEntryOf(ref) {
+      const entry = api.getEntry(ref);
+      const at = protectApi && entry?.formula ? grid.parseRef(ref) : null;
+      return at ? protectApi.visibleEntry(api.getSheetName(), at.row, at.col, entry) : entry;
+    }
 
     const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
     const viewport = () => document.getElementById("sheet-viewport");
@@ -440,7 +447,7 @@
         protectApi.askRangeUnlock(api.getSheetName(), range.name);
         return true;
       }
-      protectApi.say(protectApi.BLOCKED);
+      protectApi.alertBlocked();
       return true;
     }
 
@@ -457,7 +464,9 @@
         formula: td.dataset.formula || "",
       };
       markEditing(td, st, mode);
-      const raw = td.dataset.formula || grid.readTdValue(td);
+      // A formula a protected sheet hides is not unfolded into the cell: the edit shows the value (PD-216).
+      const hidden = protectApi?.formulaHidden(api.getSheetName(), td._row, td._col, td._st);
+      const raw = (!hidden && td.dataset.formula) || grid.readTdValue(td);
       delete td.dataset.raw;
       delete td.dataset.display;
       if (replace) {

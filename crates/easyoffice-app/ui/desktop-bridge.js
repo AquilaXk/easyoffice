@@ -61,6 +61,7 @@
   // works. A test keeps it identical to the Rust wording.
   const CONFIRM_BROWSER_TEXT = Object.freeze({
     "password-free-save": "저장한 HWP 파일에는 암호가 적용되지 않습니다. 암호 없이 저장하시겠습니까?",
+    "password-free-save-sheet": "저장한 파일에는 암호가 적용되지 않습니다. 암호 없이 저장하시겠습니까?",
     "replace-unsaved-hwp": "저장하지 않은 한글 문서 편집 내용이 있습니다.\n다른 문서를 열면 현재 내용이 사라집니다. 계속할까요?",
     "hwpx-fallback-hwp": "HWPX로 저장하기 전 검증에 실패했습니다.\nHWP 형식으로 대신 저장할까요?",
     "restore-hwp-autosave": "이전 세션의 저장하지 않은 한글 문서의 자동 저장본이 있습니다. 복원할까요?\n복원하지 않으면 자동 저장본은 남겨 두고 다음에 다시 묻습니다.",

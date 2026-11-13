@@ -139,7 +139,8 @@
       }
       if (!result.ok) {
         const fb = document.getElementById("status-command-feedback");
-        if (fb) fb.textContent = host.__EASYOFFICE_SHEET_SORT_CORE__.FAILURES[result.why];
+        if (result.why === "protected") host.__EASYOFFICE_SHEET_PROTECT__.alertBlocked();
+        else if (fb) fb.textContent = host.__EASYOFFICE_SHEET_SORT_CORE__.FAILURES[result.why];
         return false;
       }
       if (result.moved === 0) return false;

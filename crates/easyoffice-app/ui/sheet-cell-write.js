@@ -44,7 +44,7 @@
       for (const edit of edits) {
         const at = gridUtils.parseRef(edit.ref);
         if (at && !guard.cellEditable(sheet, at.row, at.col, map[edit.ref]?.style)) {
-          guard.say(guard.BLOCKED);
+          guard.alertBlocked();
           return false;
         }
       }

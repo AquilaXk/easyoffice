@@ -161,6 +161,9 @@
 #sheet-protect-dialog .dialog-label, #sheet-wb-protect-dialog .dialog-label, #sheet-password-dialog .dialog-label, #sheet-range-edit-dialog .dialog-label { width: 70px; min-width: 70px; flex-shrink: 0; }
 #sheet-protect-dialog, #sheet-wb-protect-dialog, #sheet-password-dialog, #sheet-range-edit-dialog { width: min(360px, calc(100vw - 32px)); }
 #sheet-ranges-dialog { width: min(440px, calc(100vw - 32px)); }
+/* The message of a refused edit is the confirmation dialog's frame with one button (the same 360px and padded body as the validation alert). */
+#sheet-protect-alert-dialog { width: min(360px, calc(100vw - 32px)); }
+#sheet-protect-alert-dialog .dialog-body { padding: 16px 20px; line-height: 1.6; }
 #sheet-protect-dialog .sheet-protect-heading { width: auto; min-width: 0; text-align: left; }
 #sheet-protect-dialog .dialog-text-input, #sheet-wb-protect-dialog .dialog-text-input, #sheet-password-dialog .dialog-text-input, #sheet-range-edit-dialog .dialog-text-input { flex: 1; min-width: 0; }
 #sheet-ranges-dialog .sheet-names-head, #sheet-ranges-dialog .sheet-names-list li { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); }

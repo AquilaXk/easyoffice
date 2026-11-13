@@ -16,7 +16,6 @@
   const FAILURES = {
     limit: "시트가 커서 실행할 수 없음",
     structure: "바뀌는 수식이 너무 많음",
-    protected: "보호된 시트의 셀을 변경할 수 없음",
     error: "실행하지 못함",
   };
   // The protection flag a row or column edit needs (PD-216).
@@ -167,7 +166,7 @@
         const index = p && (axis === "row" ? p.row : p.col);
         const entry = map[ref];
         if (index >= at && index < at + count && (entry.value || entry.formula) && !protectApi.cellEditable(name, p.row, p.col, entry.style)) {
-          protectApi.say(protectApi.BLOCKED);
+          protectApi.alertBlocked();
           return false;
         }
       }
@@ -191,7 +190,8 @@
         const edit = { axis, op, at, count };
         const result = await sheetStoreHelpers.editAxis(sheetDataStore, { sheet: name, ...edit, ...layoutRequest(name) });
         if (!result.ok) {
-          say(result.message || FAILURES[result.reason] || FAILURES.error);
+          if (result.reason === "protected") protectApi.alertBlocked();
+          else say(result.message || FAILURES[result.reason] || FAILURES.error);
           return false;
         }
         pushRawUndoSnapshot(before);

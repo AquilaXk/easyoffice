@@ -23,6 +23,8 @@ use crate::IpcError;
 pub enum ConfirmKind {
     /// Saving a document that was opened with a password writes a copy without it.
     PasswordFreeSave,
+    /// Saving a spreadsheet whose protection has a password into a format that cannot hold it (PD-216).
+    PasswordFreeSaveSheet,
     /// A Hangul document with unsaved edits would be replaced by the file being opened.
     ReplaceUnsavedHwp,
     /// The HWPX copy failed its check; offer an HWP copy instead.
@@ -48,6 +50,12 @@ impl ConfirmKind {
             Self::PasswordFreeSave => ConfirmSpec {
                 title: "암호 없이 저장",
                 message: "저장한 HWP 파일에는 암호가 적용되지 않습니다. 암호 없이 저장하시겠습니까?",
+                accept: "암호 없이 저장",
+                cancel: CANCEL,
+            },
+            Self::PasswordFreeSaveSheet => ConfirmSpec {
+                title: "암호 없이 저장",
+                message: "저장한 파일에는 암호가 적용되지 않습니다. 암호 없이 저장하시겠습니까?",
                 accept: "암호 없이 저장",
                 cancel: CANCEL,
             },
@@ -177,8 +185,9 @@ pub async fn confirm_close(
 mod tests {
     use super::*;
 
-    const ALL: [ConfirmKind; 5] = [
+    const ALL: [ConfirmKind; 6] = [
         ConfirmKind::PasswordFreeSave,
+        ConfirmKind::PasswordFreeSaveSheet,
         ConfirmKind::ReplaceUnsavedHwp,
         ConfirmKind::HwpxFallbackHwp,
         ConfirmKind::RestoreHwpAutosave,
@@ -194,6 +203,10 @@ mod tests {
         assert_eq!(
             parse("password-free-save").unwrap(),
             ConfirmKind::PasswordFreeSave
+        );
+        assert_eq!(
+            parse("password-free-save-sheet").unwrap(),
+            ConfirmKind::PasswordFreeSaveSheet
         );
         assert_eq!(
             parse("replace-unsaved-hwp").unwrap(),
@@ -254,6 +267,16 @@ mod tests {
         assert_eq!(
             (password.accept, password.cancel),
             ("암호 없이 저장", "취소")
+        );
+        // The spreadsheet's prompt is the same wording without the format name.
+        let sheet = ConfirmKind::PasswordFreeSaveSheet.spec();
+        assert_eq!(
+            sheet.message,
+            "저장한 파일에는 암호가 적용되지 않습니다. 암호 없이 저장하시겠습니까?"
+        );
+        assert_eq!(
+            (sheet.title, sheet.accept, sheet.cancel),
+            (password.title, password.accept, password.cancel)
         );
     }
 

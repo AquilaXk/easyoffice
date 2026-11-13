@@ -154,7 +154,6 @@
         sheetRules: typeof sheetController.getSheetRules === "function" ? sheetController.getSheetRules() : {},
         sheetLayout: host.__EASYOFFICE_SHEET_LAYOUT__.getAll(),
         definedNames: host.__EASYOFFICE_SHEET_NAMES__.getAll(),
-        workbookProtect: host.__EASYOFFICE_SHEET_PROTECT__.getWorkbook(),
         sheetOrder: host.__EASYOFFICE_SHEET_TAB_STRIP__.reconcile(Object.keys(sheetDataStore)),
         slides: structuredClone(slideDeckState),
         ribbonState: structuredClone(localRibbonState),
@@ -241,6 +240,7 @@
     }
 
     function restoreSnapshotStores(snap, sheetController) {
+      const currentSheets = Object.keys(sheetDataStore);
       if (snap.docTabs) {
         docTabStore.DOC = snap.docTabs.DOC ? structuredClone(snap.docTabs.DOC) : null;
         docTabStore.HWP = snap.docTabs.HWP ? structuredClone(snap.docTabs.HWP) : null;
@@ -253,10 +253,10 @@
         sheetController.replaceColumnWidths(structuredClone(snap.sheetColumnWidths));
       }
       if (snap.sheetRules) host.__EASYOFFICE_SHEET_RULES__.replaceAll(structuredClone(snap.sheetRules), true);
-      if (snap.sheetLayout) host.__EASYOFFICE_SHEET_LAYOUT__.replaceAll(structuredClone(snap.sheetLayout));
+      // A restore never changes a protection or its password: the sheets that exist keep the ones they have (PD-216).
+      if (snap.sheetLayout) host.__EASYOFFICE_SHEET_LAYOUT__.replaceAll(host.__EASYOFFICE_SHEET_PROTECT__.keepProtection(snap, currentSheets));
       // A change of the names re-evaluates the page's formulas; the restore does that itself.
       if (snap.definedNames) host.__EASYOFFICE_SHEET_NAMES__.replaceAll(structuredClone(snap.definedNames), true);
-      if ("workbookProtect" in snap) host.__EASYOFFICE_SHEET_PROTECT__.setWorkbook(snap.workbookProtect);
       if (Array.isArray(snap.sheetOrder)) host.__EASYOFFICE_SHEET_TAB_STRIP__.replaceOrder(snap.sheetOrder);
       if (Array.isArray(snap.slides)) {
         slideDeckState.splice(0, slideDeckState.length, ...structuredClone(snap.slides));
@@ -304,27 +304,13 @@
       sheetController.refreshFocusedSheetCellPendingSnapshot();
     }
 
-    // Whether restoring `snap` would change a locked cell of a sheet that is protected now and stays protected: an
-    // undo or a redo does not get past the protection (PD-216). Formula cells compare by their text, because their
-    // value follows the cells they read.
-    function protectedCellsWouldChange(snap) {
-      const guard = host.__EASYOFFICE_SHEET_PROTECT__;
-      if (!snap.sheets || !guard) return false;
-      const gridUtils = host.__EASYOFFICE_SHEET_GRID_UTILS__;
-      sheetDataStore[getActiveSheetName()] = getSheetController().snapshotDomSheetCells();
-      const raw = (e) => e?.formula || e?.value || "";
-      for (const name of Object.keys(sheetDataStore)) {
-        if (!guard.isOn(name) || snap.sheetLayout?.[name]?.protect?.on !== true) continue;
-        const now = sheetDataStore[name] || {};
-        const then = snap.sheets[name] || {};
-        for (const ref of new Set([...Object.keys(now), ...Object.keys(then)])) {
-          if (raw(now[ref]) === raw(then[ref])) continue;
-          const at = gridUtils.parseRef(ref);
-          if (at && !guard.cellEditable(name, at.row, at.col, now[ref]?.style)) return true;
-        }
-      }
-      return false;
+    // Protecting or lifting a protection cannot be undone: the record of steps ends there (PD-216).
+    function clearWorkspaceHistory() {
+      historyMutationEpoch += 1;
+      workspaceUndoStack.length = 0;
+      workspaceRedoStack.length = 0;
     }
+    host.__EASYOFFICE_WORKSPACE_HISTORY__ = { clear: clearWorkspaceHistory };
 
     function performWorkspaceHistoryStep(isUndo) {
       return enqueueWorkspaceHistoryOp(async () => {
@@ -340,8 +326,9 @@
           if (fb) fb.textContent = emptyMsg;
           return;
         }
-        if (protectedCellsWouldChange(sourceStack.at(-1))) {
-          if (fb) fb.textContent = host.__EASYOFFICE_SHEET_PROTECT__.BLOCKED;
+        sheetDataStore[getActiveSheetName()] = sheetController.snapshotDomSheetCells();
+        if (host.__EASYOFFICE_SHEET_PROTECT__.restoreWouldChange(sourceStack.at(-1), sheetDataStore)) {
+          host.__EASYOFFICE_SHEET_PROTECT__.alertBlocked();
           return;
         }
         historyMutationEpoch += 1;

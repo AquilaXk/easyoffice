@@ -442,7 +442,7 @@ test("the browser texts equal the shell's wording and the command is granted lik
   }
   const { sandbox } = await createWebUiDom({});
   const browser = sandbox.__EASYOFFICE_DESKTOP_BRIDGE__.CONFIRM_BROWSER_TEXT;
-  assert.equal(Object.keys(fromRust).length, 5);
+  assert.equal(Object.keys(fromRust).length, 6);
   assert.deepEqual({ ...browser }, fromRust);
   const caps = JSON.parse(readText(new URL("../crates/easyoffice-desktop/capabilities/main-window.json", import.meta.url)));
   assert.ok(caps.permissions.includes("allow-confirm-dialog"));

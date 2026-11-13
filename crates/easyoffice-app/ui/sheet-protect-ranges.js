@@ -7,7 +7,7 @@
   // password asks it in the 범위 잠금 해제 dialog when it is edited). The ranges can be set only while the sheet is not
   // protected. A range without a password may be edited by anyone; with one, whoever types it, until the window closes
   // or the file is opened again. The ranges are the `ranges` of the sheet's `protect` JSON (`sheet_protect_json.rs`);
-  // each change is one undo step (`sheet-protect-ui.js`).
+  // each change ends the record of undo steps (`sheet-protect-ui.js`).
 
   const MAX_RANGES = 1000;
   const MAX_TITLE = 255;

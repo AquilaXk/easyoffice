@@ -34,8 +34,9 @@
   const FLAG_NAMES = FLAGS.map(([name]) => name);
   // A sheet protected from the dialog allows selecting cells and nothing else.
   const DEFAULT_ALLOWED = ["selectLockedCells", "selectUnlockedCells"];
-  // What the status line says when an edit of a protected sheet is refused (the help's warning that a protected sheet takes no input, cut to the 28 characters of the status line); it answers every blocked edit.
-  const BLOCKED = "보호된 시트의 셀을 변경할 수 없음";
+  // The message of the window an edit of a protected sheet opens: the spreadsheet programs' warning, whole. A window that is
+  // open already is not opened again.
+  const BLOCKED = "변경하려는 셀 또는 차트가 보호된 시트에 있습니다. 변경하려면 시트의 보호를 해제하세요. 암호를 입력해야 할 수도 있습니다.";
   const WORKBOOK_BLOCKED = "통합 문서 보호";
   // Ranges up to this many cells are tested cell by cell.
   const EACH_CELL_LIMIT = 40000;
@@ -154,24 +155,38 @@
     if (fb) fb.textContent = text;
   }
 
-  // True when the sheet allows `flag`; else the status line says so.
+  // Opens the message window of a refused edit (a single 확인 button, the confirmation dialog's frame); nothing while it is open.
+  function alertBlocked() {
+    const doc = host.document;
+    const dialog = doc?.getElementById?.("sheet-protect-alert-dialog");
+    if (!dialog) return say(BLOCKED);
+    if (dialog.open) return undefined;
+    const message = doc.getElementById("sheet-protect-alert-message");
+    if (message) message.textContent = BLOCKED;
+    if (typeof dialog.showModal === "function") dialog.showModal();
+    else dialog.setAttribute("open", "");
+    doc.getElementById("btn-sheet-protect-alert-ok")?.focus?.();
+    return undefined;
+  }
+
+  // True when the sheet allows `flag`; else the message window says so.
   function guardAction(sheet, flag) {
     if (allows(sheet, flag)) return true;
-    say(BLOCKED);
+    alertBlocked();
     return false;
   }
 
   // True when every cell of `rg` may be changed.
   function guardCells(sheet, rg, styleAt) {
     if (rangeEditable(sheet, rg, styleAt)) return true;
-    say(BLOCKED);
+    alertBlocked();
     return false;
   }
 
   // True when the sheet is not protected (a change of the protection or of a cell's lock needs that).
   function guardUnprotected(sheet) {
     if (!isOn(sheet)) return true;
-    say(BLOCKED);
+    alertBlocked();
     return false;
   }
 
@@ -203,7 +218,64 @@
     time: "암호 확인이 오래 걸립니다",
   };
 
+  // The entry without its formula when the protected sheet hides it: what a fill, a copy or a search may see.
+  function visibleEntry(sheet, row, col, entry) {
+    return entry?.formula && formulaHidden(sheet, row, col, entry.style) ? { ...entry, formula: "" } : entry;
+  }
+
+  // ---- what an undo, a redo and a save may do to the protection ----------------------------------------------
+  // The layout of `snap` with the protection of every sheet in `currentNames` and in `snap` as it is now.
+  function keepProtection(snap, currentNames) {
+    const out = structuredClone(snap.sheetLayout);
+    const known = new Set(snap.sheetOrder || Object.keys(snap.sheets || {}));
+    const now = layout().getAll();
+    for (const name of currentNames.filter((n) => known.has(n))) {
+      const entry = { ...(out[name] || {}) };
+      if (now[name]?.protect) entry.protect = structuredClone(now[name].protect);
+      else delete entry.protect;
+      if (Object.keys(entry).length > 0) out[name] = entry;
+      else delete out[name];
+    }
+    return out;
+  }
+
+  // Whether restoring `snap` would change a locked cell of a sheet that is protected now. Formula cells compare by
+  // their text, because their value follows the cells they read.
+  function restoreWouldChange(snap, store) {
+    if (!snap.sheets) return false;
+    const raw = (e) => e?.formula || e?.value || "";
+    for (const name of Object.keys(store)) {
+      if (!isOn(name) || !snap.sheets[name]) continue;
+      const now = store[name] || {};
+      const then = snap.sheets[name];
+      for (const ref of new Set([...Object.keys(now), ...Object.keys(then)])) {
+        if (raw(now[ref]) === raw(then[ref])) continue;
+        const at = refs().parseRef(ref);
+        if (at && !cellEditable(name, at.row, at.col, now[ref]?.style)) return true;
+      }
+    }
+    return false;
+  }
+
+  // Whether a save into `ext` drops a password: a digest only the other file format holds, or no protection at all.
+  const HOLDS = { xlsx: ["agile", "both", "legacy"], ods: ["odf", "both"] };
+  function lostPassword(ext) {
+    const keep = HOLDS[String(ext).toLowerCase()];
+    const found = [];
+    for (const json of Object.values(layout().getAll())) {
+      if (json.protect?.pwd) found.push(json.protect.pwd);
+      for (const range of json.protect?.ranges || []) if (range.pwd) found.push(range.pwd);
+    }
+    if (workbook?.pwd) found.push(workbook.pwd);
+    return found.some((pwd) => !keep || !keep.includes(pwd.kind));
+  }
+
   host.__EASYOFFICE_SHEET_PROTECT__ = {
+    visibleEntry,
+    keepProtection,
+    restoreWouldChange,
+    lostPassword,
+    alertBlocked,
     FLAGS,
     FLAG_NAMES,
     DEFAULT_ALLOWED,

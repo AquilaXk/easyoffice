@@ -40,7 +40,10 @@
       for (const ref of Object.keys(map)) {
         const entry = map[ref];
         const packed = entry ? gridUtils.packRef(ref) : 0;
-        const text = packed > 0 ? cellText(entry, options.formula) : "";
+        // A formula a protected sheet hides is not searched (PD-216).
+        const col = packed & 32767;
+        const seen = packed > 0 ? host.__EASYOFFICE_SHEET_PROTECT__.visibleEntry(sheet, (packed - col) / 32768, col, entry) : entry;
+        const text = packed > 0 ? cellText(seen, options.formula) : "";
         if (text !== "") cells.push({ packed, id: cellId(sheet, ref, options.workbook), text });
       }
       return cells.sort((a, b) => a.packed - b.packed);
