@@ -22,7 +22,7 @@
   const listeners = [];
 
   function blank() {
-    return { merges: [], hiddenRows: [], hiddenCols: [], filter: null, freeze: null, tabColor: null, hidden: false, outline: null, index: null, rows: null };
+    return { merges: [], hiddenRows: [], hiddenCols: [], filter: null, freeze: null, tabColor: null, hidden: false, outline: null, page: null, index: null, rows: null };
   }
 
   function entry(name) {
@@ -39,7 +39,8 @@
         !layout.freeze &&
         !layout.tabColor &&
         !layout.hidden &&
-        !layout.outline)
+        !layout.outline &&
+        !layout.page)
     );
   }
 
@@ -282,6 +283,7 @@
     if (layout.tabColor) out.tabColor = layout.tabColor;
     if (layout.hidden) out.hidden = true;
     if (layout.outline) out.outline = structuredClone(layout.outline);
+    if (layout.page) out.page = structuredClone(layout.page);
     return out;
   }
 
@@ -331,6 +333,7 @@
     layout.tabColor = /^[0-9a-f]{6}$/i.test(json?.tabColor || "") ? json.tabColor.toLowerCase() : null;
     layout.hidden = json?.hidden === true;
     layout.outline = json?.outline && Object.keys(json.outline).length > 0 ? structuredClone(json.outline) : null;
+    layout.page = json?.page && Object.keys(json.page).length > 0 ? structuredClone(json.page) : null;
     return layout;
   }
 
@@ -388,6 +391,9 @@
 
   const setFreeze = (name, freeze) => setView(name, "freeze", freeze && (freeze.rows > 0 || freeze.cols > 0) ? { rows: freeze.rows, cols: freeze.cols } : null);
   const setHiddenSheet = (name, hidden) => setView(name, "hidden", hidden === true);
+  // The page setup of the sheet (`sheet-page.js`): the engine's `page` JSON, null for the default.
+  const pageOf = (name) => bySheet[name]?.page || null;
+  const setPage = (name, page) => setView(name, "page", page && Object.keys(page).length > 0 ? structuredClone(page) : null);
   const setOutline = (name, outline) => setView(name, "outline", outline && Object.keys(outline).length > 0 ? outline : null);
 
   // ---- how a row or column edit moves a position (the engine moves the formulas) -----------------
@@ -442,6 +448,8 @@
     setHiddenSheet,
     outlineOf,
     setOutline,
+    pageOf,
+    setPage,
     getAll,
     replaceAll,
     setSheet,

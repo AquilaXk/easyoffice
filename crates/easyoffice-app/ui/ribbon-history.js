@@ -866,6 +866,7 @@
     }
 
     // 대화상자를 여는 명령은 상태 줄을 바꾸지 않는다.
+    const SHEET_PAGE_COMMANDS = new Set(["sheet-layout-paper", "sheet-layout-orientation", "sheet-layout-margins"]);
     const DIALOG_COMMANDS = new Set(["sheet-mod-pivot", "sheet-mod-condfmt", "sheet-mod-freeze", "pdf-mod-highlight", "doc-mod-toc"]);
 
     function executeTrackedRibbonCommand(cmdId, options = {}) {
@@ -877,6 +878,8 @@
       // The table of contents asks for its levels first and the dialog's 확인 runs the command with them; the update only rebuilds the page's block.
       if (cmdId === "doc-mod-toc" && !options.toc) return Promise.resolve(getDocToc().open());
       if (cmdId === "doc-mod-toc-update") return Promise.resolve(getDocToc().update());
+      // The sheet's paper, orientation and margin commands are the page setup dialog (`sheet-page.js`).
+      if (SHEET_PAGE_COMMANDS.has(cmdId)) return Promise.resolve(getSheetController().runSheetStructure("page-setup"));
       // The page break splits the block at the caret in the page, like Ctrl+Enter in the editor.
       if (cmdId === "doc-mod-page-break") return Promise.resolve(getDocPages().insertPageBreak());
       // The link dialog opens at once, while the selection is still in the editor; the command itself still runs.

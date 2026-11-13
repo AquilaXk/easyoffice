@@ -831,9 +831,6 @@ fn the_spreadsheet_bar_has_the_number_format_and_row_column_items_in_the_page_or
             "시트 오른쪽으로 이동",
             "시트 숨기기",
             "시트 숨기기 취소…",
-            s,
-            "용지 방향 전환",
-            "여백 전환",
         ]
     );
     for kind in [MenuKind::Doc, MenuKind::Hwp, MenuKind::Slide, MenuKind::Pdf] {

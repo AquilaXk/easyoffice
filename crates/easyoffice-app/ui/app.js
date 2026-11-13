@@ -314,6 +314,8 @@
       const koBadge = MODULE_SHORT_BADGES[mod] || mod;
       for (const cat of Object.keys(cats)) {
         for (const c of cats[cat]) {
+          // The sheet's page setup is one menu item and one command search entry (`sheetMenuPaletteItems`).
+          if (mod === "SHEET" && /^sheet-layout-(paper|orientation|margins)$/.test(c.id)) continue;
           const dispShortcut = fmt(ribbonCatalog.resolveRibbonShortcutLabel(c.id, c.shortcut));
           const title = mod === activeModule ? c.title : koBadge + " · " + c.title;
           items.push({ id: c.id, module: mod, title, shortcut: dispShortcut, searchKey: (koBadge + " " + c.title + " " + dispShortcut + " " + c.id + " " + mod).toLowerCase() });

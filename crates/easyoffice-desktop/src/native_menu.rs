@@ -594,6 +594,13 @@ pub const ITEMS: &[MenuItemSpec] = &[
     sa!("sheet:tab-right", "시트 오른쪽으로 이동", "tab-right"),
     sa!("sheet:tab-hide", "시트 숨기기", "tab-hide"),
     sa!("sheet:tab-unhide", "시트 숨기기 취소…", "tab-unhide"),
+    sa!("sheet:page-setup", "쪽 설정…", "page-setup"),
+    sa!("sheet:print-area-set", "인쇄 영역 설정", "print-area-set"),
+    sa!(
+        "sheet:print-area-clear",
+        "인쇄 영역 해제",
+        "print-area-clear"
+    ),
     sa!("sheet:group", "그룹 묶기", "group"),
     sa!("sheet:ungroup", "그룹 풀기", "ungroup"),
     sa!("sheet:hide-detail", "하위 수준 숨기기", "hide-detail"),

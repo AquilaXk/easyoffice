@@ -65,7 +65,7 @@ const enabledMenuItems = (document) =>
 const PALETTE_ONLY = {
   DOC: [],
   HWP: [],
-  SHEET: ["layout-columns"],
+  SHEET: ["layout-paper", "layout-orientation", "layout-columns", "layout-margins"],
   SLIDE: ["layout-columns", "data-autosum", "data-fn-browser", "data-sort", "data-validation"],
   PDF: [
     "home-bold", "home-italic", "home-underline", "home-style",

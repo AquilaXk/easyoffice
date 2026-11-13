@@ -256,9 +256,13 @@
   #eo-print-root [data-eo-break="page"] { break-before: page; }
   #eo-print-root .eo-print-flow :is(h1, h2, h3, h4, h5, h6) { break-after: avoid; }
   #eo-print-root .eo-print-flow table { break-inside: avoid; }
-  #eo-print-root .eo-print-sheet { border-collapse: collapse; font-size: 10pt; }
+  /* The pages of a sheet (sheet-page-print.js): the cells of one page at the grid's sizes, scaled; grid lines only when the page setup asks. */
+  #eo-print-root .eo-print-sheet-page { display: flex; box-sizing: border-box; }
+  #eo-print-root .eo-print-sheet-box { flex: none; overflow: hidden; }
+  #eo-print-root .eo-print-sheet { border-collapse: collapse; table-layout: fixed; font-size: 10pt; }
   #eo-print-root .eo-print-sheet tr { break-inside: avoid; }
-  #eo-print-root .eo-print-sheet td { min-width: 16mm; padding: 1mm 2mm; border: 0.2mm solid; }
+  #eo-print-root .eo-print-sheet td { padding: 0 2mm; overflow: hidden; white-space: nowrap; line-height: 1.25; box-sizing: border-box; border: 0.2mm solid transparent; }
+  #eo-print-root .eo-print-grid td { border-color: currentcolor; }
   #eo-print-root .eo-print-num { text-align: right; }
   #eo-print-root .eo-print-b { font-weight: 700; }
   #eo-print-root .eo-print-i { font-style: italic; }
@@ -358,3 +362,7 @@
 .icon-radio-text { font-size: var(--font-size-xs); color: var(--color-text); }
 #doc-page-setup-dialog { width: min(440px, calc(100vw - 32px)); overflow: visible; }
 #doc-page-setup-dialog .dialog-body .dialog-row .dialog-label { min-width: 40px; }
+#sheet-page-dialog { width: min(440px, calc(100vw - 32px)); overflow: visible; }
+#sheet-page-dialog .dialog-body { max-height: calc(100vh - 220px); overflow-y: auto; }
+#sheet-page-dialog .dialog-text-input { flex: 1; min-width: 0; width: auto; }
+#sheet-page-dialog .dialog-row .dialog-label { min-width: 40px; }

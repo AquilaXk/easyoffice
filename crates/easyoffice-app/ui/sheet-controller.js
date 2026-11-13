@@ -926,6 +926,11 @@
       openPivotDialog: () => rulesUi.openPivotDialog(),
       getSheetRules: () => sheetRules.getAll(),
       getColumnWidths: grid.getAllWidths,
+      // The sizes the grid shows and the page setup of the active sheet, for printing (`sheet-page-print.js`).
+      printGeometry: () => ({
+        page: host.__EASYOFFICE_SHEET_LAYOUT__.pageOf(getActiveSheetName()),
+        colWidth: grid.colWidth, colHidden: grid.colHidden, rowHidden: grid.rowHidden, rowTop: grid.rowTop,
+      }),
       replaceColumnWidths: grid.replaceAllWidths,
       formatSheetRange: format.formatRange,
       syncSheetFormatToolbar: format.syncToolbar,

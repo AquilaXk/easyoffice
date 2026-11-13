@@ -191,6 +191,24 @@ const FILE_PAGE_SETUP: MenuSpec = menu(
         "file:print",
     ],
 );
+/// The spreadsheet's 파일 menu: the page setup and the print area sit before 인쇄.
+const FILE_SHEET: MenuSpec = menu(
+    "파일",
+    &[
+        "file:new",
+        NEW_DOCS,
+        S,
+        "file:open",
+        "file:open-recent",
+        "file:save",
+        "file:save-as",
+        S,
+        "sheet:page-setup",
+        "sheet:print-area-set",
+        "sheet:print-area-clear",
+        "file:print",
+    ],
+);
 const FILE_PDF: MenuSpec = menu(
     "파일",
     &[
@@ -473,9 +491,6 @@ const SHEET_SHEET: MenuSpec = menu(
         "sheet:tab-right",
         "sheet:tab-hide",
         "sheet:tab-unhide",
-        S,
-        "page:orientation",
-        "page:margins",
     ],
 );
 const SLIDE_SLIDE: MenuSpec = menu(
@@ -650,7 +665,7 @@ const HWP: [&MenuSpec; 11] = [
 ];
 const SHEET: [&MenuSpec; 11] = [
     &APP,
-    &FILE_PAGE_SETUP,
+    &FILE_SHEET,
     &EDIT_SHEET,
     &VIEW_PLAIN,
     &INSERT_SHEET,

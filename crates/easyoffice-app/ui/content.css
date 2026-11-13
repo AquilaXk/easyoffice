@@ -326,6 +326,7 @@
 ::highlight(eo-find-current) { background-color: #ff9632; color: #111827; }
 #eo-print-root .eo-print-flow,
 #eo-print-root .eo-print-sheet { color: #111827; border-color: #808080; }
+#eo-print-root .eo-print-sheet td.eo-print-head { text-align: center; color: #555555; background: #eeeeee; border-color: #808080; }
 
 /* Pages of the document editor (doc-pages.js): the editor is one editable flow; the sheets of paper sit behind it
    in the page layer (gap, shadow and paper follow the reference studio: rhwp-studio page-gap.ts, editor.css), a

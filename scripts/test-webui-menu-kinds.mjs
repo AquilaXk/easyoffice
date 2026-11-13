@@ -74,7 +74,7 @@ test("the spreadsheet puts sorting, validation, pivot and conditional formats in
   const { document } = await open("SHEET");
   await flushAsyncTurns(10);
   assert.deepEqual(commandsOf(document, "데이터"), ["data-sort", "data-validation", "sheet-mod-pivot", "sheet-mod-condfmt"]);
-  assert.deepEqual(commandsOf(document, "시트"), ["sheet-mod-freeze", "layout-orientation", "layout-margins"]);
+  assert.deepEqual(commandsOf(document, "시트"), ["sheet-mod-freeze"]);
   assert.deepEqual(commandsOf(document, "삽입").slice(-2), ["data-fn-browser", "data-autosum"]);
 });
 

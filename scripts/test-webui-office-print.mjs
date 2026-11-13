@@ -68,7 +68,7 @@ test("the print root and its page rules are removed on afterprint, and when the 
   assert.match(failing.feedback(), /프린터 없음/);
 });
 
-test("sheet: the used range becomes a gridded table, wide ranges print landscape", async () => {
+test("sheet: the used range becomes a table on A4 pages, wide ranges print landscape", async () => {
   const t = await setup("SHEET");
   await pickFile(
     t.h.document,
@@ -82,7 +82,8 @@ test("sheet: the used range becomes a gridded table, wide ranges print landscape
   assert.deepEqual(rows[0].querySelectorAll("td").map((td) => td.textContent), ["이름", "값", ""]);
   assert.deepEqual(rows[2].querySelectorAll("td").map((td) => td.textContent), ["", "", "끝"]);
   assert.match(rows[1].querySelectorAll("td")[1].className, /eo-print-num/, "numbers align right");
-  assert.ok(t.pageRules().includes("@page { size: 210mm 297mm; margin: 10mm; }"));
+  assert.ok(t.pageRules().includes("@page { size: 210mm 297mm; margin: 0; }"));
+  assert.equal(root.querySelector(".eo-print-sheet-page").style.padding, "10mm 10mm 10mm 10mm", "the page keeps the margins of a sheet without a setup");
   t.h.sandbox.dispatchWindowEvent("afterprint");
 
   await pickFile(
@@ -91,7 +92,7 @@ test("sheet: the used range becomes a gridded table, wide ranges print landscape
   );
   await flushAsyncTurns(12);
   await t.print();
-  assert.ok(t.pageRules().includes("@page { size: 297mm 210mm; margin: 10mm; }"), "ten columns print landscape");
+  assert.ok(t.pageRules().includes("@page { size: 297mm 210mm; margin: 0; }"), "ten columns print landscape");
 });
 
 test("sheet: alignment, wrapping and borders print, and a bordered empty cell is part of the range", async () => {

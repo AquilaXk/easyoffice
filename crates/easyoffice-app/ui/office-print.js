@@ -14,15 +14,10 @@
 
   const { ROOT_ID, PAGE_CLASS, createPageRules } = host.__EASYOFFICE_HWP_PRINT_INTERNALS__;
   const FLOW_CLASS = "eo-print-flow";
-  const SHEET_CLASS = "eo-print-sheet";
   const PORTRAIT_MM = { width: 210, height: 297 };
-  const LANDSCAPE_MM = { width: 297, height: 210 };
   const DOC_MARGIN_MM = 20;
   const PX_PER_INCH = 96;
-  const SHEET_MARGIN_MM = 10;
   const WIDE_SHEET_COLUMNS = 8;
-  // A sheet range past this many cells is refused instead of building the table (fail-closed).
-  const MAX_PRINT_CELLS = 200000;
   const SLIDE_PAPER_MM = { "16:9": [297, 167], "4:3": [280, 210], A4: [297, 210] };
   const DEFAULT_ASPECT = "16:9";
   const COLUMN_BITS = 32767;
@@ -30,7 +25,6 @@
   const AFTERPRINT_FALLBACK_MS = 5 * 60 * 1000;
   const MSG_UNSUPPORTED = "이 모듈은 인쇄를 지원하지 않습니다.";
   const MSG_EMPTY = "인쇄할 내용이 없습니다.";
-  const MSG_TOO_BIG = "인쇄 범위가 너무 커서 한 번에 인쇄할 수 없습니다.";
   const MSG_OPENING = "인쇄 대화상자를 여는 중…";
   const STYLE_CLASSES = [["bold", "eo-print-b"], ["italic", "eo-print-i"], ["underline", "eo-print-u"], ["strike", "eo-print-s"]];
   const TITLE_STYLE_PROPS = ["fontWeight", "fontStyle", "textDecoration", "color", "fontSize"];
@@ -151,34 +145,31 @@
       return names.join(" ");
     }
 
+    // The page setup of the sheet (`sheet-page.js`) gives the paper, margins, scale, print area and repeated rows and columns;
+    // a sheet without one prints its used range on A4, turned when it is wide (`sheet-page-print.js`).
     function buildSheet(rules) {
-      const { range, cells } = usedRange(sheetController.snapshotDomSheetCells());
-      if (!range) throw new Error(MSG_EMPTY);
-      const rows = range.r2 - range.r1 + 1;
-      const cols = range.c2 - range.c1 + 1;
-      if (rows * cols > MAX_PRINT_CELLS) throw new Error(MSG_TOO_BIG);
-      const table = document.createElement("table");
-      table.className = SHEET_CLASS;
-      const body = document.createElement("tbody");
-      const tds = [];
-      for (let r = 0; r < rows; r += 1) {
-        const tr = document.createElement("tr");
-        for (let c = 0; c < cols; c += 1) {
-          const td = document.createElement("td");
-          tds.push(td);
-          tr.appendChild(td);
-        }
-        body.appendChild(tr);
-      }
-      for (const { row, col, text, entry } of cells) {
-        const td = tds[(row - range.r1) * cols + (col - range.c1)];
+      const map = sheetController.snapshotDomSheetCells();
+      const { range } = usedRange(map);
+      const geometry = sheetController.printGeometry();
+      const core = host.__EASYOFFICE_SHEET_PAGE_CORE__;
+      const areas = core.areaBoxes(geometry.page);
+      if (areas.length === 0 && !range) throw new Error(MSG_EMPTY);
+      const boxes = areas.length > 0 ? areas : [{ r1: range.r1, c1: range.c1, r2: range.r2, c2: range.c2 }];
+      const wide = range !== null && range.c2 - range.c1 + 1 > WIDE_SHEET_COLUMNS;
+      const page = geometry.page ?? (wide ? { landscape: true } : null);
+      const cellAt = (row, col) => {
+        const entry = map[gridUtils.refOf(row, col)];
+        const text = entry && entry.value != null ? String(entry.value) : "";
+        return entry && (text !== "" || entry.style) ? { text, entry } : null;
+      };
+      const renderCell = ({ text, entry }, td) => {
         td.textContent = gridUtils.formatGeneral(text);
         td.className = cellClasses(entry, text);
         host.__EASYOFFICE_SHEET_LOOK__?.printStyle(td, entry.style);
-      }
-      table.appendChild(body);
-      addPageRule(rules, cols > WIDE_SHEET_COLUMNS ? LANDSCAPE_MM : PORTRAIT_MM, SHEET_MARGIN_MM + "mm");
-      return [table];
+      };
+      return host.__EASYOFFICE_SHEET_PAGE_PRINT__.buildPages({
+        document, boxes, geometry, page, core, cellAt, rules, pageClass: PAGE_CLASS, renderCell: (td, cell) => renderCell(cell, td),
+      });
     }
 
     // ---- slides -----------------------------------------------------------------------------
