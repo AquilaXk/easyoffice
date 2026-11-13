@@ -11,8 +11,8 @@
 //! action, a table protected without that element allows selecting cells only.
 //!
 //! Modifications: ODS has no flags for formatting, sorting, hyperlinks, objects or scenarios, so they read as
-//! locked and are not written. A digest that is not an ODS key (the agile or legacy digest of an XLSX file)
-//! cannot be written: the table is written protected without a password, which is stated in PD-216. A key
+//! locked and are not written. A digest that is not an ODS key (the agile or legacy digest of an XLSX file read
+//! from disk; a password set in the editor also carries the key) cannot be written: the table is written protected without a password, which is stated in PD-216. A key
 //! with an algorithm this program does not run is kept and never opens.
 
 use std::fmt::Write;
@@ -72,7 +72,7 @@ fn read_key(tag: &str) -> Result<Credential, EasyOfficeError> {
 }
 
 fn write_key(xml: &mut String, credential: &Credential) {
-    if let Credential::Odf(odf) = credential {
+    if let Some(odf) = credential.odf_part() {
         let _ = write!(
             xml,
             " table:protection-key=\"{}\"",

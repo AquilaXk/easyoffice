@@ -2,7 +2,7 @@
 //! or compares a password. It sends the typed text once, over the local command channel, and keeps only the
 //! digest the answer carries.
 //!
-//! `protectHash` `{password, kind: "agile"|"odf"}` -> `{pwd: credential}` (`sheet_protect_json`), or
+//! `protectHash` `{password, kind: "agile"|"odf"|"both"}` -> `{pwd: credential}` (`sheet_protect_json`), or
 //! `{problem: "empty"|"long"}`. `protectVerify` `{pwd: credential|null, password}` -> `{ok: true|false}`, or
 //! `{unsupported: "algorithm"|"spin"|"encoding"|"long"|"time"}` for a digest this program does not check
 //! (an unknown algorithm, a `spinCount` over the bound, text that is not base64). The answers never carry
@@ -28,9 +28,10 @@ impl EasyOfficeIpcRouter {
         let credential = match Self::optional_json_str(entries, "kind")? {
             Some("agile") => Credential::new_agile(password),
             Some("odf") => Credential::new_odf(password),
+            Some("both") => Credential::new_both(password),
             _ => {
                 return Err(EasyOfficeError::InvalidArgument(
-                    "JSON 'kind'는 agile 또는 odf여야 합니다.".to_string(),
+                    "JSON 'kind'는 agile, odf, both 중 하나여야 합니다.".to_string(),
                 ))
             }
         };
@@ -78,7 +79,7 @@ mod tests {
 
     #[test]
     fn a_password_is_hashed_and_checked_and_never_echoed() {
-        for kind in ["agile", "odf"] {
+        for kind in ["agile", "odf", "both"] {
             let secret = "s3cret-비밀";
             let hashed = call(
                 "protectHash",

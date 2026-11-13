@@ -9,7 +9,9 @@
 //! bool, "pwd": credential, "revisions": [[name, value], ...]}`.
 //!
 //! A credential is the digest, never the password: `{"kind":"agile","alg","hash","salt","spin"}`,
-//! `{"kind":"legacy","hash":"83AF"}` or `{"kind":"odf","key","alg"}`. Text over a bound, a `spin` that is
+//! `{"kind":"legacy","hash":"83AF"}`, `{"kind":"odf","key","alg"}` or `{"kind":"both", ...the agile fields,
+//! "key", "keyAlg"}` for a password just set in the editor (an XLSX file keeps the first digest and an ODS
+//! file the second). Text over a bound, a `spin` that is
 //! not a 32-bit number, an unknown flag or kind is refused, not trimmed. A digest of an unknown algorithm
 //! or with a `spin` over the check bound is accepted: it is kept and written back, and no password opens it.
 
@@ -57,8 +59,8 @@ fn parse_credential(v: Option<&StrictJsonValue>) -> Result<Credential, EasyOffic
         return Ok(Credential::None);
     };
     let obj = v.as_object().ok_or_else(|| bad("pwd"))?;
-    let credential = match text(obj, "kind")?.as_deref() {
-        Some("agile") => Credential::Agile(AgileHash {
+    let agile = |obj: Obj<'_>| -> Result<AgileHash, EasyOfficeError> {
+        Ok(AgileHash {
             algorithm: text(obj, "alg")?.ok_or_else(|| bad("alg"))?,
             hash: text(obj, "hash")?.ok_or_else(|| bad("hash"))?,
             salt: text(obj, "salt")?.ok_or_else(|| bad("salt"))?,
@@ -66,7 +68,17 @@ fn parse_credential(v: Option<&StrictJsonValue>) -> Result<Credential, EasyOffic
                 .and_then(StrictJsonValue::as_u64)
                 .and_then(|n| u32::try_from(n).ok())
                 .ok_or_else(|| bad("spin"))?,
-        }),
+        })
+    };
+    let credential = match text(obj, "kind")?.as_deref() {
+        Some("agile") => Credential::Agile(agile(obj)?),
+        Some("both") => Credential::Both(
+            Box::new(agile(obj)?),
+            OdfKey {
+                key: text(obj, "key")?.ok_or_else(|| bad("key"))?,
+                algorithm: text(obj, "keyAlg")?,
+            },
+        ),
         Some("legacy") => {
             let hash = text(obj, "hash")?.ok_or_else(|| bad("hash"))?;
             Credential::Legacy(u16::from_str_radix(&hash, 16).map_err(|_| bad("hash"))?)
@@ -89,6 +101,17 @@ pub(crate) fn credential_field(obj: Obj<'_>) -> Result<Credential, EasyOfficeErr
     parse_credential(field(obj, "pwd"))
 }
 
+/// `{"kind":..,"alg":..,"hash":..,"salt":..,"spin":..` without the closing brace.
+fn push_agile(out: &mut String, kind: &str, a: &AgileHash) {
+    let _ = write!(out, "{{\"kind\":\"{kind}\",\"alg\":\"");
+    EasyOfficeIpcRouter::escape_json_into(out, &a.algorithm);
+    out.push_str("\",\"hash\":\"");
+    EasyOfficeIpcRouter::escape_json_into(out, &a.hash);
+    out.push_str("\",\"salt\":\"");
+    EasyOfficeIpcRouter::escape_json_into(out, &a.salt);
+    let _ = write!(out, "\",\"spin\":{}", a.spin);
+}
+
 pub(crate) fn credential_json(credential: &Credential) -> Option<String> {
     let mut out = String::new();
     match credential {
@@ -97,13 +120,20 @@ pub(crate) fn credential_json(credential: &Credential) -> Option<String> {
             let _ = write!(out, "{{\"kind\":\"legacy\",\"hash\":\"{hash:04X}\"}}");
         }
         Credential::Agile(a) => {
-            out.push_str("{\"kind\":\"agile\",\"alg\":\"");
-            EasyOfficeIpcRouter::escape_json_into(&mut out, &a.algorithm);
-            out.push_str("\",\"hash\":\"");
-            EasyOfficeIpcRouter::escape_json_into(&mut out, &a.hash);
-            out.push_str("\",\"salt\":\"");
-            EasyOfficeIpcRouter::escape_json_into(&mut out, &a.salt);
-            let _ = write!(out, "\",\"spin\":{}}}", a.spin);
+            push_agile(&mut out, "agile", a);
+            out.push('}');
+        }
+        Credential::Both(a, o) => {
+            push_agile(&mut out, "both", a);
+            out.push_str(",\"key\":\"");
+            EasyOfficeIpcRouter::escape_json_into(&mut out, &o.key);
+            out.push('"');
+            if let Some(alg) = &o.algorithm {
+                out.push_str(",\"keyAlg\":\"");
+                EasyOfficeIpcRouter::escape_json_into(&mut out, alg);
+                out.push('"');
+            }
+            out.push('}');
         }
         Credential::Odf(o) => {
             out.push_str("{\"kind\":\"odf\",\"key\":\"");

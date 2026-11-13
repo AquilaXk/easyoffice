@@ -107,6 +107,9 @@ fn write_credential(xml: &mut String, credential: &Credential, names: &Credentia
         Credential::Legacy(hash) => {
             let _ = write!(xml, " {}=\"{hash:04X}\"", names.legacy);
         }
+        Credential::Both(a, _) => {
+            write_credential(xml, &Credential::Agile((**a).clone()), names);
+        }
         Credential::Agile(a) => {
             let _ = write!(
                 xml,

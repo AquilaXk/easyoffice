@@ -151,6 +151,9 @@ pub enum Credential {
     Legacy(u16),
     Agile(AgileHash),
     Odf(OdfKey),
+    /// The digests of a password the editor just set: the agile one an XLSX file stores and the key an ODS file
+    /// stores. Either file keeps its own and the password opens both (a file read back holds one of them).
+    Both(Box<AgileHash>, OdfKey),
 }
 
 fn utf16le(password: &str) -> Vec<u8> {
@@ -208,6 +211,32 @@ impl Credential {
         matches!(self, Self::None)
     }
 
+    /// The agile digest and the ODS key of `password` (see [`Credential::Both`]); `None` when the password is
+    /// empty or longer than [`MAX_PASSWORD_UNITS`].
+    pub fn new_both(password: &str) -> Option<Self> {
+        match (Self::new_agile(password)?, Self::new_odf(password)?) {
+            (Self::Agile(agile), Self::Odf(odf)) => Some(Self::Both(Box::new(agile), odf)),
+            _ => None,
+        }
+    }
+
+    /// The part of this credential an XLSX file can store.
+    pub fn agile_part(&self) -> Option<&AgileHash> {
+        match self {
+            Self::Agile(a) => Some(a),
+            Self::Both(a, _) => Some(a),
+            _ => None,
+        }
+    }
+
+    /// The part of this credential an ODS file can store.
+    pub fn odf_part(&self) -> Option<&OdfKey> {
+        match self {
+            Self::Odf(o) | Self::Both(_, o) => Some(o),
+            _ => None,
+        }
+    }
+
     /// A new agile digest (SHA-512, a random salt, [`DEFAULT_SPIN_COUNT`] rounds) of `password`; `None` when
     /// the password is empty or longer than [`MAX_PASSWORD_UNITS`].
     pub fn new_agile(password: &str) -> Option<Self> {
@@ -253,19 +282,11 @@ impl Credential {
             Self::None => PasswordCheck::Accepted,
             Self::Legacy(hash) => accepted_if(legacy_hash(password) == *hash),
             Self::Agile(agile) => agile.verify(password),
-            Self::Odf(odf) => {
-                let Some(key) = base64_codec::decode(&odf.key) else {
-                    return PasswordCheck::Unsupported(Unsupported::Encoding);
-                };
-                let Some(candidates) = odf_candidates(odf.algorithm.as_deref(), password) else {
-                    return PasswordCheck::Unsupported(Unsupported::Algorithm);
-                };
-                // Every candidate is compared, so the answer does not depend on which one matches.
-                let hits = candidates
-                    .iter()
-                    .fold(false, |hit, c| constant_time_eq(c, &key) | hit);
-                accepted_if(hits)
-            }
+            Self::Odf(odf) => odf.verify(password),
+            Self::Both(agile, odf) => match agile.verify(password) {
+                PasswordCheck::Accepted => PasswordCheck::Accepted,
+                _ => odf.verify(password),
+            },
         }
     }
 }
@@ -275,6 +296,22 @@ fn accepted_if(matches: bool) -> PasswordCheck {
         PasswordCheck::Accepted
     } else {
         PasswordCheck::Rejected
+    }
+}
+
+impl OdfKey {
+    fn verify(&self, password: &str) -> PasswordCheck {
+        let Some(key) = base64_codec::decode(&self.key) else {
+            return PasswordCheck::Unsupported(Unsupported::Encoding);
+        };
+        let Some(candidates) = odf_candidates(self.algorithm.as_deref(), password) else {
+            return PasswordCheck::Unsupported(Unsupported::Algorithm);
+        };
+        // Every candidate is compared, so the answer does not depend on which one matches.
+        let hits = candidates
+            .iter()
+            .fold(false, |hit, c| constant_time_eq(c, &key) | hit);
+        accepted_if(hits)
     }
 }
 
@@ -400,6 +437,10 @@ pub fn credential_within_bounds(credential: &Credential) -> bool {
         Credential::None | Credential::Legacy(_) => true,
         Credential::Agile(a) => fits(&a.algorithm) && fits(&a.hash) && fits(&a.salt),
         Credential::Odf(o) => fits(&o.key) && o.algorithm.as_deref().is_none_or(fits),
+        Credential::Both(a, o) => {
+            credential_within_bounds(&Credential::Agile((**a).clone()))
+                && credential_within_bounds(&Credential::Odf(o.clone()))
+        }
     }
 }
 
@@ -540,6 +581,15 @@ mod tests {
             Credential::None.verify(&huge),
             PasswordCheck::Unsupported(Unsupported::TooLong)
         );
+    }
+
+    #[test]
+    fn both_digests_open_with_the_same_password() {
+        let both = Credential::new_both("공통-pw").unwrap();
+        assert_eq!(both.verify("공통-pw"), PasswordCheck::Accepted);
+        assert_eq!(both.verify("공통"), PasswordCheck::Rejected);
+        assert!(both.agile_part().is_some() && both.odf_part().is_some());
+        assert!(Credential::new_both("").is_none());
     }
 
     #[test]

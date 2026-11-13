@@ -48,6 +48,9 @@ fn protection_reaches_the_file_and_comes_back_as_the_same_keys() {
     for (dst, kind, format) in [
         ("xlsx", "agile", DocumentFormat::Xlsx),
         ("ods", "odf", DocumentFormat::Ods),
+        // A password just set carries both digests and either file keeps its own.
+        ("xlsx", "both", DocumentFormat::Xlsx),
+        ("ods", "both", DocumentFormat::Ods),
     ] {
         let secret = "비밀-pw-1";
         let pwd = hash(secret, kind);
