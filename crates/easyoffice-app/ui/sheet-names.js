@@ -95,7 +95,16 @@
   }
 
   const hasAny = () => list.length > 0;
-  const payload = () => JSON.stringify(list);
+  // The list as JSON, made once per change of the list (every evaluation compares it with what the session holds).
+  let payloadText = "";
+  let payloadVersion = -1;
+  function payload() {
+    if (payloadVersion !== version) {
+      payloadText = JSON.stringify(list);
+      payloadVersion = version;
+    }
+    return payloadText;
+  }
   const getVersion = () => version;
 
   function indexOfName(name, scope) {
@@ -117,14 +126,29 @@
       .slice(0, NAME_BOX_LIMIT);
   }
 
+  // The ranges the visible names refer to, by sheet and corners: one pass per change of the list, so the name box
+  // answers a selection with one lookup however many names there are.
+  let rangeIndex = null;
+  let rangeIndexVersion = -1;
+
+  function rangesByCorners() {
+    if (rangeIndex && rangeIndexVersion === version) return rangeIndex;
+    rangeIndex = new Map();
+    rangeIndexVersion = version;
+    for (const def of list) {
+      if (def.hidden) continue;
+      const at = parseRange(def.refersTo);
+      if (!at || (def.scope && !sameScope(def.scope, at.sheet))) continue;
+      const key = fold(at.sheet) + "|" + at.r1 + "," + at.c1 + "," + at.r2 + "," + at.c2;
+      if (!rangeIndex.has(key)) rangeIndex.set(key, def.name);
+    }
+    return rangeIndex;
+  }
+
   // The name of the definition that refers to exactly the range `rg` of `sheet`, for the name box to show it.
   function nameOfRange(sheet, rg) {
-    const found = list.find((def) => {
-      if (def.hidden) return false;
-      const at = parseRange(def.refersTo);
-      return at && sameScope(at.sheet, sheet) && at.r1 === rg.r1 && at.c1 === rg.c1 && at.r2 === rg.r2 && at.c2 === rg.c2 && (!def.scope || sameScope(def.scope, sheet));
-    });
-    return found ? found.name : "";
+    if (list.length === 0) return "";
+    return rangesByCorners().get(fold(sheet) + "|" + rg.r1 + "," + rg.c1 + "," + rg.r2 + "," + rg.c2) ?? "";
   }
 
   // `A1`, `$B$2` or `A1:C9` as a range, null when the text is not an address; whole rows (`3:5`) and columns (`B:D`)

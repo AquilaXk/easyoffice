@@ -188,3 +188,46 @@ fn a_hostile_ods_list_is_cut_at_the_limit_and_counted() {
     assert_eq!(read.len(), MAX_NAMES);
     assert_eq!(rejected, 20);
 }
+
+/// Measurement harness, not run by default:
+/// `cargo test -p easyoffice-formats --release --test sheet_names_roundtrip -- --ignored --nocapture names_io_bench`
+#[test]
+#[ignore = "measurement harness"]
+fn names_io_bench() {
+    use std::time::Instant;
+    let names: Vec<DefinedName> = (0..MAX_NAMES)
+        .map(|i| {
+            def(
+                &format!("name_{i}"),
+                None,
+                &format!("Sheet1!$A${}:$B${}", i + 1, i + 2),
+            )
+        })
+        .collect();
+    let cells: Vec<(u32, u32, String)> = (0..20_000u32).map(|r| (r, 0, r.to_string())).collect();
+    let sheets: Vec<Sheet> = vec![("Sheet1".to_string(), cells)];
+    let styled = vec![SheetStyling {
+        defined_names: names,
+        ..SheetStyling::default()
+    }];
+    let plain = vec![SheetStyling::default()];
+    for (label, st) in [("without names", &plain), ("10,000 names", &styled)] {
+        let t = Instant::now();
+        let x = OoxmlCodec::pack_xlsx_multi_styled(&sheets, &[], st).unwrap();
+        let write_x = t.elapsed().as_secs_f64() * 1e3;
+        let t = Instant::now();
+        let read = OoxmlCodec::unpack_xlsx_with_styling(&x).unwrap();
+        let read_x = t.elapsed().as_secs_f64() * 1e3;
+        let t = Instant::now();
+        let o = OdfCodec::pack_ods_multi_styled(&sheets, st).unwrap();
+        let write_o = t.elapsed().as_secs_f64() * 1e3;
+        let t = Instant::now();
+        let read_o = OdfCodec::unpack_ods_with_styling(&o).unwrap();
+        let read_ods = t.elapsed().as_secs_f64() * 1e3;
+        println!(
+            "{label}: xlsx write {write_x:.1} read {read_x:.1} ({} names) | ods write {write_o:.1} read {read_ods:.1} ({} names)",
+            read.1[0].1.defined_names.len(),
+            read_o.1[0].1.defined_names.len()
+        );
+    }
+}

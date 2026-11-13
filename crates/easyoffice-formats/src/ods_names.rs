@@ -11,6 +11,7 @@
 //! Modifications: the comment of a name is kept as the foreign attribute `eo:comment`. A range that spans
 //! sheets or is not one plain rectangle is written and read as a formula.
 
+use std::collections::HashSet;
 use std::fmt::Write;
 
 use crate::rtf_xml_helpers::{extract_attr_from_fragment, extract_balanced_elements};
@@ -200,7 +201,13 @@ fn range_from_ods(address: &str) -> Option<String> {
 }
 
 /// The names of one `table:named-expressions` element.
-fn read_block(inner: &str, scope: Option<&str>, out: &mut Vec<DefinedName>, rejected: &mut u32) {
+fn read_block(
+    inner: &str,
+    scope: Option<&str>,
+    out: &mut Vec<DefinedName>,
+    seen: &mut HashSet<(String, Option<String>)>,
+    rejected: &mut u32,
+) {
     let items = extract_balanced_elements(inner, "table:named-range")
         .into_iter()
         .map(|(attrs, _)| (attrs, true))
@@ -234,10 +241,7 @@ fn read_block(inner: &str, scope: Option<&str>, out: &mut Vec<DefinedName>, reje
             && comment.chars().count() <= MAX_NAME_COMMENT_CHARS
             && defined_name_problem(&name).is_none()
             && out.len() < MAX_NAMES
-            && !out.iter().any(|d| {
-                fold_name(&d.name) == fold_name(&name)
-                    && d.scope.as_deref().map(str::to_lowercase) == scope.map(str::to_lowercase)
-            });
+            && seen.insert((fold_name(&name), scope.map(str::to_lowercase)));
         let Some(refers_to) = refers_to.filter(|_| usable) else {
             *rejected = rejected.saturating_add(1);
             continue;
@@ -258,6 +262,7 @@ pub(crate) fn read_names(content: &str, stylings: &mut [(String, SheetStyling)])
         return;
     }
     let mut names = Vec::new();
+    let mut seen = HashSet::new();
     let mut rejected = 0u32;
     for (attrs, inner) in extract_balanced_elements(content, "table:table") {
         let Some(table) =
@@ -269,7 +274,13 @@ pub(crate) fn read_names(content: &str, stylings: &mut [(String, SheetStyling)])
             continue;
         };
         for (_, block) in extract_balanced_elements(inner, "table:named-expressions") {
-            read_block(block, Some(&sheet.clone()), &mut names, &mut rejected);
+            read_block(
+                block,
+                Some(&sheet.clone()),
+                &mut names,
+                &mut seen,
+                &mut rejected,
+            );
         }
     }
     // The workbook's names follow the last table (ODF 1.2 puts them after the tables).
@@ -277,7 +288,7 @@ pub(crate) fn read_names(content: &str, stylings: &mut [(String, SheetStyling)])
         .rfind("</table:table>")
         .map_or(content, |at| &content[at..]);
     for (_, block) in extract_balanced_elements(tail, "table:named-expressions") {
-        read_block(block, None, &mut names, &mut rejected);
+        read_block(block, None, &mut names, &mut seen, &mut rejected);
     }
     if let Some((_, first)) = stylings.first_mut() {
         first.defined_names = names;
