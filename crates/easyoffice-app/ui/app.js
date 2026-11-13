@@ -318,6 +318,11 @@
       }
     }
     if (activeModule === "DOC") items.push({ id: "doc-mod-toc-update", module: "DOC", title: "목차 업데이트", shortcut: "", searchKey: "입력 문서 목차 업데이트 toc" }, { id: "doc-mod-page-break", module: "DOC", title: "쪽 나누기", shortcut: fmt("⌘Enter"), searchKey: "쪽 문서 쪽 나누기 page break " + fmt("⌘Enter") });
+    if (activeModule === "DOC" || activeModule === "HWP") {
+      for (const [cmd, title, english] of [["mod-header", "머리말", "header"], ["mod-footer", "꼬리말", "footer"]]) {
+        items.push({ id: "studio-cmd:" + cmd, module: activeModule, title, shortcut: "", searchKey: "쪽 " + title + " " + english, run: () => document.querySelector(`.md-item[data-studio-menu-cmd="${cmd}"]`)?.click() });
+      }
+    }
     if (activeModule === "SHEET") items.push(...host.__EASYOFFICE_NATIVE_MENU_TABLE__.sheetMenuPaletteItems(document));
     items.push({ id: "bench-run", module: activeModule, title: "문서 엔진 성능 진단 실행", shortcut: "", searchKey: "성능 문서 엔진 성능 진단 실행 bench-run" });
     return items;

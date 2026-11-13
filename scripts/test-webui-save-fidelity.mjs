@@ -226,3 +226,18 @@ test("DOC save keeps multiple ASIDE footnotes as separate paragraph blocks and f
   assert.equal(blocks[0].lineSpacingPercent, 200, "paragraph without own lineHeight inherits editor lineHeight");
 });
 
+
+test("DOC save keeps the header and footer blocks as the first and last paragraph blocks", async () => {
+  const { document, userClick, converts } = await createSaveHarness();
+  const editor = document.getElementById("doc-editor");
+  editor.innerHTML =
+    '<header class="eo-hwp-header" data-hwp-header="true"><p>문서 머리말 (표준 양식)</p></header>' +
+    "<p>본문 문단</p>" +
+    '<aside class="eo-hwp-footer" data-hwp-footer="true"><p>문서 꼬리말 (표준 양식)</p></aside>';
+
+  userClick(studioItem(document, "studio-save"));
+  await flushAsyncTurns(10);
+
+  assert.equal(converts.length, 1);
+  assert.deepEqual(converts[0].blocks.map((block) => block.runs[0].text), ["문서 머리말 (표준 양식)", "본문 문단", "문서 꼬리말 (표준 양식)"]);
+});

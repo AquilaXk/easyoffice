@@ -21,7 +21,8 @@
   // `target`: the ribbon command a module runs for it (`hwp` tells which module); none means the page inserts it itself.
   const INSERT_MOD_DISPATCH = {
     "mod-symbol": { label: "문자표 기호 삽입 완료" },
-    "mod-header": { hwp: true, target: "hwp-mod-header", label: "머리말 · 꼬리말 적용 완료" },
+    "mod-header": { hwp: true, target: "hwp-mod-header", label: "머리말 적용 완료" },
+    "mod-footer": { label: "꼬리말 적용 완료" },
     "mod-footnote": { hwp: false, target: "doc-mod-footnote", label: "각주 · 미주 삽입 완료" },
   };
 
@@ -619,9 +620,25 @@
       hdr.className = "eo-hwp-header";
       hdr.dataset.hwpHeader = "true";
       const p = document.createElement("p");
-      p.textContent = "문서 머리말 · 꼬리말 (표준 양식)";
+      p.textContent = "문서 머리말 (표준 양식)";
       hdr.replaceChildren(p);
       if (!hdr.parentElement && editor) editor.prepend(hdr);
+      computeSmartStats();
+    }
+
+    // The footer block closes the document like the header block opens it: a block of the body (saved as a paragraph), before the page layer.
+    function upsertDocFooterBlock(editor) {
+      const ftr = editor?.querySelector(".eo-hwp-footer") || document.createElement("aside");
+      ftr.className = "eo-hwp-footer";
+      ftr.dataset.hwpFooter = "true";
+      const p = document.createElement("p");
+      p.textContent = "문서 꼬리말 (표준 양식)";
+      ftr.replaceChildren(p);
+      if (!ftr.parentElement && editor) {
+        const layer = editor.querySelector(":scope > footer.doc-page-layer");
+        if (layer) layer.before(ftr);
+        else editor.appendChild(ftr);
+      }
       computeSmartStats();
     }
 
@@ -648,6 +665,8 @@
         computeSmartStats();
       } else if (cmd === "mod-header") {
         upsertDocHeaderBlock(editor);
+      } else if (cmd === "mod-footer") {
+        upsertDocFooterBlock(editor);
       } else if (cmd === "mod-footnote") {
         appendDocFootnoteBlock(editor);
       }

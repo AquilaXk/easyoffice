@@ -261,6 +261,7 @@ fn a_kind_does_not_hold_the_items_of_other_kinds() {
         "format:indent-out",
         "page:columns",
         "page:header",
+        "page:footer",
         "view:ctrl-marks",
         "view:para-marks",
         "view:doc-grid",

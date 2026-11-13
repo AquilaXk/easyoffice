@@ -113,6 +113,7 @@
     "page:orientation": "studio-cmd:layout-orientation",
     "page:margins": "studio-cmd:layout-margins",
     "page:header": "studio-cmd:mod-header",
+    "page:footer": "studio-cmd:mod-footer",
     "page:columns": "studio-cmd:layout-columns",
     "page:hwp-header": "studio-cmd:hwp-mod-header",
     "page:manuscript": "studio-cmd:hwp-mod-manuscript",

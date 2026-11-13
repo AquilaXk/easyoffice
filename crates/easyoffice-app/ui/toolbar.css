@@ -174,7 +174,7 @@
 }
 
 /* Sprite cells: calc(-40px * column) calc(-40px * row). The cut, copy, paste, grid, char-shape, table,
-   shape, symbols, hyperlink, header, footnote and find cells are the reference toolbar's own; the others
+   shape, symbols, hyperlink, header, footer, footnote and find cells are the reference toolbar's own; the others
    are the cells of the same sprite that mean the same as the command (numbers, text alignment, vertical
    alignment, wrapping, cell borders, justify, slides, stamp). */
 .icon-cut { background-position: calc(-40px * 2) calc(-40px * 1); }
@@ -187,6 +187,7 @@
 .icon-symbols { background-position: calc(-40px * 4) calc(-40px * 3); }
 .icon-hyperlink { background-position: calc(-40px * 5) calc(-40px * 3); }
 .icon-header { background-position: calc(-40px * 1) calc(-40px * 4); }
+.icon-footer { background-position: calc(-40px * 2) calc(-40px * 4); }
 .icon-footnote { background-position: calc(-40px * 4) calc(-40px * 4); }
 .icon-find { background-position: calc(-40px * 15) calc(-40px * 1); }
 .icon-align-justify { background-position: calc(-40px * 3) calc(-40px * 9); }

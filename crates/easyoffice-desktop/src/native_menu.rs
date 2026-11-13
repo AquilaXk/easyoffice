@@ -432,12 +432,8 @@ pub const ITEMS: &[MenuItemSpec] = &[
         Some("CmdOrCtrl+Enter"),
         "studio-cmd:doc-mod-page-break",
     ),
-    item(
-        "page:header",
-        "머리말/꼬리말",
-        None,
-        "studio-cmd:mod-header",
-    ),
+    item("page:header", "머리말", None, "studio-cmd:mod-header"),
+    item("page:footer", "꼬리말", None, "studio-cmd:mod-footer"),
     item(
         "page:columns",
         "다단 설정",
