@@ -1,6 +1,8 @@
 use crate::decode_budget::DecodeBudget;
 pub use crate::odf_hwpx_codecs::*;
 pub use crate::rtf_xml_helpers::*;
+use crate::sheet_styling::sheet_links::xlsx_links::{links_xml, read_links, sheet_relationships};
+use crate::sheet_styling::sheet_links::LinkAllowance;
 use crate::sheet_styling::sheet_rules::xlsx_rules::{
     parse_dxf_styles, parse_worksheet_rules, rules_xml,
 };
@@ -312,6 +314,7 @@ fn build_sheet_xml(
     styling: Option<&SheetStyling>,
     style_table: &XlsxStyleTable,
     sst_map: &SharedStringMap<'_>,
+    links_xml: &str,
 ) -> String {
     use std::fmt::Write;
     let blank = String::new();
@@ -399,6 +402,7 @@ fn build_sheet_xml(
         }
         sheet_xml.push_str(&merge_cells_xml(&st.merges));
         sheet_xml.push_str(&rules_xml(&st.rules, &style_table.dxf));
+        sheet_xml.push_str(links_xml);
         sheet_xml.push_str(&crate::sheet_styling::xlsx_page::page_tail_xml(&st.page));
     }
     sheet_xml.push_str("</worksheet>");
@@ -624,18 +628,29 @@ impl OoxmlCodec {
             ));
         }
         for (i, (_, cells)) in active_sheets.iter().enumerate() {
+            let (links, link_rels) = stylings
+                .get(i)
+                .map_or((String::new(), None), |st| links_xml(&st.links));
             let sheet_xml = build_sheet_xml(
                 cells,
                 caches.get(i),
                 stylings.get(i),
                 &style_table,
                 &sst_map,
+                &links,
             );
             XmlSanitizer::validate_safe_xml(&sheet_xml)?;
             entries.push((
                 format!("xl/worksheets/sheet{}.xml", i + 1),
                 sheet_xml.into_bytes(),
             ));
+            if let Some(rels) = link_rels {
+                XmlSanitizer::validate_safe_xml(&rels)?;
+                entries.push((
+                    format!("xl/worksheets/_rels/sheet{}.xml.rels", i + 1),
+                    rels.into_bytes(),
+                ));
+            }
         }
 
         ZipArchiveCodec::pack_compressed(&entries)
@@ -675,6 +690,11 @@ impl OoxmlCodec {
                 .keys()
                 .copied()
                 .find(|&(r, c)| r >= Self::MAX_XLSX_ROWS || c >= Self::MAX_XLSX_COLS);
+            let link = styling
+                .links
+                .keys()
+                .copied()
+                .find(|&(r, c)| r >= Self::MAX_XLSX_ROWS || c >= Self::MAX_XLSX_COLS);
             let column = styling
                 .columns
                 .keys()
@@ -709,7 +729,7 @@ impl OoxmlCodec {
                     "XLSX 틀 고정·탭 색·그룹·쪽 설정 값이 허용 범위를 초과했습니다.".to_string(),
                 ));
             }
-            if let Some((row, col)) = cell.or(column) {
+            if let Some((row, col)) = cell.or(column).or(link) {
                 return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
                     "XLSX 서식 좌표({row}, {col})가 ECMA-376 허용 범위({}x{})를 초과했습니다.",
                     Self::MAX_XLSX_ROWS,
@@ -864,6 +884,7 @@ impl OoxmlCodec {
         let mut parsed_sheets = Vec::with_capacity(sheet_specs.len());
         let mut scanned_parts = std::collections::HashSet::new();
         let mut budget = DecodeBudget::new();
+        let mut link_allowance = LinkAllowance::default();
         for (idx, (sheet_name, target_path, hidden)) in sheet_specs.into_iter().enumerate() {
             let part = entry_by_path
                 .get_key_value(target_path.as_str())
@@ -904,6 +925,9 @@ impl OoxmlCodec {
                 // The count belongs to the workbook; one sheet carries it.
                 styling.num_fmts_rejected = if idx == 0 { xf_styles.rejected } else { 0 };
                 styling.rules = parse_worksheet_rules(sheet_xml, &dxf_styles);
+                let relationships = sheet_relationships(&entry_by_path, part_path);
+                let links = read_links(sheet_xml, &relationships, &mut link_allowance);
+                (styling.links, styling.links_rejected) = (links.links, links.rejected);
                 if let (None, Some(tab), Some(theme)) = (styling.tab_color, scan.tab_theme, &theme)
                 {
                     styling.tab_color = Some(apply_tint(theme[tab.index], tab.tint));
@@ -964,32 +988,5 @@ pub(crate) fn checked_part<'a>(parts: &[(&str, &'a str)], path: &str) -> Option<
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn parse(
-        cell_xml: &str,
-        shared: &[String],
-    ) -> Result<Vec<(u32, u32, String)>, EasyOfficeError> {
-        let sheet = format!("<sheetData><row r=\"1\">{cell_xml}</row></sheetData>");
-        let table = SharedStrings::from_strings(shared);
-        scan_worksheet(&sheet, &table, &[], false, &mut DecodeBudget::new()).map(|scan| scan.cells)
-    }
-
-    #[test]
-    fn shared_string_index_resolves_and_corrupt_index_fails_closed() {
-        let shared = vec!["가".to_string(), "나".to_string()];
-        let ok = parse(r#"<c r="A1" t="s"><v>1</v></c>"#, &shared).unwrap();
-        assert_eq!(ok, vec![(0, 0, "나".to_string())]);
-        for bad in ["abc", "", "-1", "2", "99999999999999999999"] {
-            let xml = format!(r#"<c r="A1" t="s"><v>{bad}</v></c>"#);
-            assert!(
-                matches!(
-                    parse(&xml, &shared),
-                    Err(EasyOfficeError::CorruptedContainer(_))
-                ),
-                "index {bad:?} must not fall back to another string"
-            );
-        }
-    }
-}
+#[path = "office_codecs/tests.rs"]
+mod tests;

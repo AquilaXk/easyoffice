@@ -10,6 +10,8 @@ use crate::rtf_xml_helpers::{
 use crate::sheet_styling::ods_grid::{repeat_value, walk_ods, OdsCell, OdsSink};
 use crate::sheet_styling::ods_numfmt::{data_style_xml, read_data_styles};
 use crate::sheet_styling::ods_view::{table_props, GroupWriter, TableProps};
+use crate::sheet_styling::sheet_links::ods_links::href_to_target;
+use crate::sheet_styling::sheet_links::{LinkAllowance, LinkCollector};
 use crate::sheet_styling::sheet_look::{ods_border_edge, ods_border_value};
 use crate::sheet_styling::sheet_rules::ods_rules_read::{OdsRuleReader, ValidationSink};
 use crate::sheet_styling::sheet_view::{push_level, Outline, MAX_OUTLINE_LEVEL, MAX_OUTLINE_ROWS};
@@ -481,6 +483,9 @@ pub(crate) struct StyleSink<'s> {
     outline: Outline,
     open_groups: [Vec<bool>; 2],
     grouped: [u64; 2],
+    /// The links of the table being read and what the document may still hold (PD-218).
+    links: LinkCollector,
+    link_allowance: LinkAllowance,
 }
 
 impl<'s> StyleSink<'s> {
@@ -499,6 +504,8 @@ impl<'s> StyleSink<'s> {
             outline: Outline::default(),
             open_groups: [Vec::new(), Vec::new()],
             grouped: [0, 0],
+            links: LinkCollector::default(),
+            link_allowance: LinkAllowance::default(),
         }
     }
 
@@ -539,6 +546,24 @@ impl<'s> StyleSink<'s> {
         }
     }
 
+    /// Keeps the link of the cells `col..col + col_repeat` of the rows `self.row..self.row + repeat`; a
+    /// repeated band is not individual linking, so only bounded blocks are kept (as for styles).
+    fn record_link(&mut self, col: u32, repeat: u32, col_repeat: u32, href: &str, title: &str) {
+        let target = href_to_target(href);
+        let in_grid = u64::from(self.row) + u64::from(repeat) <= u64::from(OdfCodec::MAX_ROWS) + 1
+            && u64::from(col) + u64::from(col_repeat) <= u64::from(OdfCodec::MAX_COLS) + 1;
+        if !in_grid || u64::from(repeat) * u64::from(col_repeat) > 1024 {
+            self.links.rejected = self.links.rejected.saturating_add(1);
+            return;
+        }
+        for row in self.row..self.row + repeat {
+            for c in col..col + col_repeat {
+                self.links
+                    .add(&mut self.link_allowance, (row, c), &target, title);
+            }
+        }
+    }
+
     pub(crate) fn into_tables(self) -> Vec<(String, SheetStyling)> {
         self.tables
     }
@@ -564,6 +589,7 @@ impl OdsSink for StyleSink<'_> {
         self.outline = Outline::default();
         self.open_groups = [Vec::new(), Vec::new()];
         self.grouped = [0, 0];
+        self.links = LinkCollector::default();
     }
 
     fn group(&mut self, columns: bool, display: bool, open: bool) {
@@ -637,6 +663,9 @@ impl OdsSink for StyleSink<'_> {
                     }
                 }
             }
+            if let Some((href, title)) = &cell.link {
+                self.record_link(col, repeat, cell.col_repeat, href, title);
+            }
             col = col.saturating_add(cell.col_repeat);
         }
         self.row = self.row.saturating_add(repeat);
@@ -660,6 +689,8 @@ impl OdsSink for StyleSink<'_> {
             outline: std::mem::take(&mut self.outline),
             ..SheetStyling::default()
         };
+        let links = std::mem::take(&mut self.links);
+        (styling.links, styling.links_rejected) = (links.links, links.rejected);
         styling.normalize_locks();
         self.tables.push((std::mem::take(&mut self.name), styling));
     }

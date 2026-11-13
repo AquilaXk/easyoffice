@@ -336,7 +336,7 @@ impl OdfCodec {
         let tab_styles = TabStyles::build(stylings);
 
         let mut content = String::from(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><office:document-content xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" xmlns:style=\"urn:oasis:names:tc:opendocument:xmlns:style:1.0\" xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\" office:version=\"1.2\"",
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><office:document-content xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" xmlns:style=\"urn:oasis:names:tc:opendocument:xmlns:style:1.0\" xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" office:version=\"1.2\"",
         );
         content.push_str(&format!(
             " xmlns:number=\"{NUMBER_NS}\" xmlns:eo=\"{EO_NS}\" xmlns:loext=\"{LOEXT_NS}\" xmlns:calcext=\"{CALCEXT_NS}\" xmlns:tableooo=\"{TABLEOOO_NS}\">"
@@ -592,7 +592,13 @@ impl OdfCodec {
                         XmlSanitizer::escape(raw)
                     ));
                 } else {
+                    let at = content.len();
                     Self::push_ods_cell(content, (row, col), raw, cached, &style_attr);
+                    if let Some(link) = styling.and_then(|st| st.links.get(&(row, col))) {
+                        crate::sheet_styling::sheet_links::ods_links::wrap_first_paragraph(
+                            content, at, link,
+                        );
+                    }
                 }
                 expected_col = col.saturating_add(1);
             }

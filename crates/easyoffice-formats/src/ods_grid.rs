@@ -38,6 +38,8 @@ pub(crate) struct OdsCell<'a> {
     /// `table:number-matrix-rows-spanned` and `-columns-spanned` of an array formula: the cells
     /// its results fill (PD-217).
     pub(crate) matrix: (Option<u32>, Option<u32>),
+    /// The `xlink:href` and `office:title` of the first `text:a` of the cell (PD-218).
+    pub(crate) link: Option<(Cow<'a, str>, Cow<'a, str>)>,
 }
 
 /// Passes the grid to two sinks, the first one's error ends the walk.
@@ -117,6 +119,7 @@ impl<'a> CellBuilder<'a> {
             style: None,
             validation: None,
             matrix: (None, None),
+            link: None,
         };
         let mut fields = CellFields::default();
         for (name, value) in attrs.iter_raw() {
@@ -184,7 +187,7 @@ impl<'a> CellBuilder<'a> {
         self.depth == 0
     }
 
-    fn start(&mut self, name: &str, attrs: &Attrs<'_>, empty_start: bool) {
+    fn start(&mut self, name: &str, attrs: &Attrs<'a>, empty_start: bool) {
         match name {
             "text:p" => {
                 if self.paragraph_depth == 0 {
@@ -211,6 +214,17 @@ impl<'a> CellBuilder<'a> {
                 self.fields
                     .paragraphs
                     .extend(std::iter::repeat_n(' ', count));
+            }
+            "text:a" if self.cell.link.is_none() => {
+                let (mut href, mut title) = (None, Cow::Borrowed(""));
+                for (name, value) in attrs.iter_raw() {
+                    match name {
+                        "xlink:href" => href = Some(unescape_cow(value)),
+                        "office:title" => title = unescape_cow(value),
+                        _ => {}
+                    }
+                }
+                self.cell.link = href.map(|href| (href, title));
             }
             "text:tab" => self.fields.paragraphs.push('\t'),
             "text:line-break" => self.fields.paragraphs.push('\n'),

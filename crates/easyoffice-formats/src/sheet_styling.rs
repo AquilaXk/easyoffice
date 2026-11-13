@@ -24,6 +24,8 @@ pub(crate) mod ods_styles;
 pub(crate) mod ods_view;
 #[path = "sheet_filter.rs"]
 pub(crate) mod sheet_filter;
+#[path = "sheet_links.rs"]
+pub(crate) mod sheet_links;
 #[path = "sheet_look.rs"]
 pub(crate) mod sheet_look;
 #[path = "sheet_names.rs"]
@@ -62,6 +64,7 @@ pub(crate) mod xlsx_styles;
 pub(crate) mod xlsx_view;
 
 pub use sheet_filter::*;
+pub use sheet_links::*;
 pub use sheet_look::{
     parse_hex_rgb, BorderEdge, BorderLine, CellBorders, HAlign, VAlign, BORDER_DEFAULT_RGB,
 };
@@ -334,6 +337,10 @@ pub struct SheetStyling {
     pub workbook_protect: Option<WorkbookProtection>,
     /// The arrays that spill, by anchor (PD-217).
     pub spills: Vec<SpillRef>,
+    /// The hyperlinks of the cells (PD-218).
+    pub links: SheetLinks,
+    /// Links a reader turned away: an address the policy refuses or a bound (PD-218).
+    pub links_rejected: u32,
 }
 
 impl SheetStyling {
@@ -365,6 +372,7 @@ impl SheetStyling {
             && self.unlocked_cols.is_empty()
             && self.workbook_protect.is_none()
             && self.spills.is_empty()
+            && self.links.is_empty()
     }
 
     /// Whether the frozen pane, the tab colour, the groups and the page setup are within the bounds of a sheet that
