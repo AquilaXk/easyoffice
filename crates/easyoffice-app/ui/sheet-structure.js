@@ -68,6 +68,11 @@
     const tabColor = host.__EASYOFFICE_CREATE_SHEET_TAB_COLOR__({ document, view, getActiveSheetName, onTabsChanged: () => outlineUi.render() });
     const outlineUi = host.__EASYOFFICE_CREATE_SHEET_OUTLINE_UI__({ document, grid, view, getActiveSheetName });
 
+    // Sheet tabs (PD-209): insert, delete, rename, copy, move, hide and show again.
+    const tabUi = host.__EASYOFFICE_CREATE_SHEET_TAB_UI__({ document, kit: host.__EASYOFFICE_CREATE_SHEET_DIALOG_KIT__(document), getTabs: () => tabs, say });
+    const tabs = host.__EASYOFFICE_CREATE_SHEET_TABS__({ ...deps, ui: tabUi });
+    const tabMenu = host.__EASYOFFICE_CREATE_SHEET_TAB_MENU__({ document, getTabs: () => tabs, tabColor, ui: tabUi });
+
     function say(text) {
       const fb = document.getElementById("status-command-feedback");
       if (fb) fb.textContent = text;
@@ -126,7 +131,7 @@
       replaceLiveSheetDataStore(nextSheets, rowCounts);
       // The answer moves what sits at a position; the frozen counts and the tab colour stay as they are.
       const kept = layoutApi.get(name);
-      layoutApi.setSheet(name, { ...answer, freeze: kept?.freeze, tabColor: kept?.tabColor });
+      layoutApi.setSheet(name, { ...answer, freeze: kept?.freeze, tabColor: kept?.tabColor, hidden: kept?.hidden });
       const widths = {};
       for (const [col, px] of Array.isArray(answer.widths) ? answer.widths : []) widths[col] = px;
       grid.replaceAllWidths({ ...grid.getAllWidths(), [name]: widths });
@@ -285,6 +290,8 @@
       unmerge,
       ...view.actions,
       "tab-color": () => Promise.resolve(tabColor.openFor()),
+      "tab-add": () => tabs.insert(null),
+      ...tabs.actions,
       "sort-dialog": () => Promise.resolve(sortUi.open()),
       "filter-toggle": () => filter.run("filter-toggle"),
       "filter-reapply": () => filter.run("filter-reapply"),
@@ -397,6 +404,8 @@
       filterUi.bind();
       sortUi.bind();
       tabColor.bind();
+      tabUi.bind();
+      tabMenu.bind();
       outlineUi.bind();
       const viewport = document.getElementById("sheet-viewport");
       viewport?.addEventListener("dblclick", onDblClick);

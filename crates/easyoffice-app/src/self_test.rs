@@ -458,6 +458,26 @@ const WEBUI_ASSET_MARKERS: &[(&str, &str)] = &[
         "__EASYOFFICE_CREATE_SHEET_TAB_COLOR__",
     ),
     (
+        include_str!("../ui/sheet-tab-names.js"),
+        "__EASYOFFICE_SHEET_TAB_NAMES__",
+    ),
+    (
+        include_str!("../ui/sheet-tab-strip.js"),
+        "__EASYOFFICE_SHEET_TAB_STRIP__",
+    ),
+    (
+        include_str!("../ui/sheet-tabs.js"),
+        "__EASYOFFICE_CREATE_SHEET_TABS__",
+    ),
+    (
+        include_str!("../ui/sheet-tab-ui.js"),
+        "__EASYOFFICE_CREATE_SHEET_TAB_UI__",
+    ),
+    (
+        include_str!("../ui/sheet-tab-menu.js"),
+        "__EASYOFFICE_CREATE_SHEET_TAB_MENU__",
+    ),
+    (
         include_str!("../ui/sheet-structure.js"),
         "__EASYOFFICE_CREATE_SHEET_STRUCTURE__",
     ),

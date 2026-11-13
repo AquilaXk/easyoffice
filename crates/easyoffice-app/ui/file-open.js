@@ -276,7 +276,7 @@
   // shows after opening and is written again by the next save; styled blank cells are kept too.
   // The position-bound parts of a sheet in an open answer: merges, hidden rows and columns, the filter
   // (PD-194, PD-198) and the view (PD-208).
-  const LAYOUT_KEYS = ["merges", "hiddenRows", "hiddenCols", "filter", "freeze", "tabColor", "outline"];
+  const LAYOUT_KEYS = ["merges", "hiddenRows", "hiddenCols", "filter", "freeze", "tabColor", "hidden", "outline"];
 
   function buildSheetStore(sheets) {
     const codec = host.__EASYOFFICE_SHEET_STYLE_CODEC__;
@@ -396,7 +396,11 @@
         const { store, rowCounts, columnWidths, rulesBySheet, layoutBySheet } = buildSheetStore(sheets);
         host.__EASYOFFICE_SHEET_LAYOUT__.replaceAll(layoutBySheet);
         next.sheetLayout = layoutBySheet;
-        const first = sheets[0].name;
+        // The tabs follow the file's order; the book opens on its first sheet that is shown.
+        const order = sheets.map((sheet) => sheet.name);
+        host.__EASYOFFICE_SHEET_TAB_STRIP__.replaceOrder(order);
+        next.sheetOrder = order;
+        const first = order.find((name) => layoutBySheet[name]?.hidden !== true) ?? order[0];
         // The rules go in first, so the evaluation below learns them with the cells.
         if (typeof replaceSheetRules === "function") replaceSheetRules(rulesBySheet);
         next.sheetRules = rulesBySheet;
@@ -423,14 +427,10 @@
       next.tabTitles = { ...next.tabTitles, [mod]: name };
     }
 
-    // A file replaces the whole workbook: its tabs stay, and the sample formula result goes away.
-    function pruneSheetTabs(names) {
+    // A file replaces the whole workbook: the sample formula result goes away.
+    function clearSheetEvalResult() {
       const result = document.getElementById("sheet-eval-result");
       if (result) result.textContent = "";
-      const keep = new Set(names);
-      document.querySelectorAll("#sheet-tab-bar .sheet-tab-btn[data-sheet-tab]").forEach((btn) => {
-        if (!keep.has(btn.dataset.sheetTab)) btn.remove();
-      });
     }
 
     const ITEM_UNIT_BY_KIND = new Map([
@@ -492,7 +492,7 @@
         await applyDecoded(next, res, name);
         pushRawUndoSnapshot(pre);
         await restoreWorkspaceSnapshot(next, null);
-        if (res.module === "SHEET") pruneSheetTabs(Object.keys(next.sheets));
+        if (res.module === "SHEET") clearSheetEvalResult();
         baselines[res.module] = fingerprint(captureWorkspaceSnapshot(false), res.module);
         return { ok: true };
       }).catch((err) => ({ error: err?.message || String(err) }));

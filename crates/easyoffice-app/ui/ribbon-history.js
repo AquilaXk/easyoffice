@@ -156,6 +156,7 @@
         sheetColumnWidths,
         sheetRules: typeof sheetController.getSheetRules === "function" ? sheetController.getSheetRules() : {},
         sheetLayout: host.__EASYOFFICE_SHEET_LAYOUT__.getAll(),
+        sheetOrder: host.__EASYOFFICE_SHEET_TAB_STRIP__.reconcile(Object.keys(sheetDataStore)),
         slides: structuredClone(slideDeckState),
         ribbonState: structuredClone(localRibbonState),
         tabTitles: readTabTitles(),
@@ -235,47 +236,9 @@
       }
     }
 
-    function createSheetTabButton(shKey) {
-      const newTab = document.createElement("button");
-      newTab.className = "sheet-tab-btn";
-      newTab.setAttribute("role", "tab");
-      newTab.dataset.sheetTab = shKey;
-      const numMatch = /^Sheet(\d+)$/.exec(shKey);
-      newTab.textContent = numMatch ? "시트 " + numMatch[1] : shKey;
-      return newTab;
-    }
-
-    // Drops tabs for sheets that no longer exist, adds missing ones and marks the active tab.
+    // Draws the tabs again: sheets that are gone lose theirs, new ones get one, hidden ones none.
     function syncSheetTabBar(activeSheetName) {
-      const sheetTabBar = document.getElementById("sheet-tab-bar");
-      if (!sheetTabBar) return;
-      const addSheetBtn = document.getElementById("btn-add-sheet-tab");
-      const knownKeys = new Set([...Object.keys(sheetDataStore), activeSheetName]);
-      const renderedKeys = new Set();
-      const survivingBtns = [];
-      for (const btn of sheetTabBar.querySelectorAll(".sheet-tab-btn[data-sheet-tab]")) {
-        const key = btn.dataset.sheetTab;
-        if (!knownKeys.has(key)) {
-          btn.remove();
-        } else {
-          renderedKeys.add(key);
-          survivingBtns.push(btn);
-        }
-      }
-      for (const shKey of Object.keys(sheetDataStore)) {
-        if (!renderedKeys.has(shKey) && addSheetBtn) {
-          const newBtn = createSheetTabButton(shKey);
-          addSheetBtn.before(newBtn);
-          survivingBtns.push(newBtn);
-        }
-      }
-      for (let i = 0; i < survivingBtns.length; i += 1) {
-        const btn = survivingBtns[i];
-        const isAct = btn.dataset.sheetTab === activeSheetName;
-        btn.classList.toggle("active", isAct);
-        btn.setAttribute("role", "tab");
-        btn.setAttribute("aria-selected", isAct ? "true" : "false");
-      }
+      host.__EASYOFFICE_SHEET_TAB_STRIP__.render({ document, keys: Object.keys(sheetDataStore), active: activeSheetName });
     }
 
     function restoreSnapshotStores(snap, sheetController) {
@@ -292,6 +255,7 @@
       }
       if (snap.sheetRules) host.__EASYOFFICE_SHEET_RULES__.replaceAll(structuredClone(snap.sheetRules), true);
       if (snap.sheetLayout) host.__EASYOFFICE_SHEET_LAYOUT__.replaceAll(structuredClone(snap.sheetLayout));
+      if (Array.isArray(snap.sheetOrder)) host.__EASYOFFICE_SHEET_TAB_STRIP__.replaceOrder(snap.sheetOrder);
       if (Array.isArray(snap.slides)) {
         slideDeckState.splice(0, slideDeckState.length, ...structuredClone(snap.slides));
       }

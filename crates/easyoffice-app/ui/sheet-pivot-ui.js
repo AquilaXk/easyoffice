@@ -161,12 +161,10 @@
     }
 
     function uniqueSheetKey() {
-      const taken = new Set(
-        [...document.querySelectorAll("#sheet-tab-bar .sheet-tab-btn[data-sheet-tab]")].map((b) => b.dataset.sheetTab)
-      );
-      for (const key of Object.keys(sheetDataStore)) taken.add(key);
+      const names = host.__EASYOFFICE_SHEET_TAB_NAMES__;
+      const taken = Object.keys(sheetDataStore);
       let n = 1;
-      while (taken.has("피벗" + n)) n += 1;
+      while (names.isTaken("피벗" + n, taken)) n += 1;
       return "피벗" + n;
     }
 
@@ -215,15 +213,10 @@
         await flushFocusedSheetCellBeforeSwitch();
         pushRawUndoSnapshot(captureWorkspaceSnapshot(false));
         const key = uniqueSheetKey();
-        const tab = document.createElement("button");
-        tab.className = "sheet-tab-btn";
-        tab.setAttribute("role", "tab");
-        tab.dataset.sheetTab = key;
-        tab.textContent = key;
-        document.getElementById("btn-add-sheet-tab")?.before(tab);
         const built = pivotCells(result, labels);
         sheetDataStore[key] = built.cells;
         sheetRowCounts[key] = Math.max(12, built.rows);
+        host.__EASYOFFICE_SHEET_TAB_STRIP__.render({ document, keys: Object.keys(sheetDataStore), active: getActiveSheetName() });
         await performSwitchSheetTabAsync(key);
         return true;
       });

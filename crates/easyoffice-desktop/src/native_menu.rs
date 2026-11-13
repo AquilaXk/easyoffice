@@ -32,8 +32,8 @@
 //!   application menu, handled in Rust by `app_quit.rs`, so it is not in the table and has no page
 //!   action; the Dock's 종료 reaches the same queue through `RunEvent::ExitRequested` (`main.rs`).
 //! * The theme choices and the update-check switch are check items; the 'enabled' and 'checked'
-//!   state of the bar follows the focused window ([`sync`], fed by `menu_state.rs`).
-//!   The disabled ids come from the page, which owns the module rules (`studioCommandApplies`).
+//!   state of the bar follows the focused window ([`sync`], fed by `menu_state.rs`); the disabled
+//!   ids come from the page, which owns the module rules (`studioCommandApplies`).
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -69,14 +69,14 @@ const fn item(
     }
 }
 
-/// Every custom item of the menu bar, in menu order.
 /// A spreadsheet menu item that runs the page menu item `data-sheet-act="<act>"`.
-macro_rules! sheet_act {
+macro_rules! sa {
     ($id:literal, $label:literal, $act:literal) => {
         item($id, $label, None, concat!("sheet-act:", $act))
     };
 }
 
+/// Every custom item of the menu bar, in menu order.
 pub const ITEMS: &[MenuItemSpec] = &[
     item("app:about", "EasyOffice 정보", None, "about"),
     item("file:new", "새로 만들기", Some("CmdOrCtrl+N"), "file-new"),
@@ -587,37 +587,45 @@ pub const ITEMS: &[MenuItemSpec] = &[
         None,
         "studio-cmd:sheet-mod-freeze",
     ),
-    sheet_act!("sheet:freeze-first-row", "첫 행 고정", "freeze-first-row"),
-    sheet_act!("sheet:freeze-first-col", "첫 열 고정", "freeze-first-col"),
-    sheet_act!("sheet:freeze-clear", "틀 고정 해제", "freeze-clear"),
-    sheet_act!("sheet:tab-color", "탭 색", "tab-color"),
-    sheet_act!("sheet:group", "그룹 묶기", "group"),
-    sheet_act!("sheet:ungroup", "그룹 풀기", "ungroup"),
-    sheet_act!("sheet:hide-detail", "하위 수준 숨기기", "hide-detail"),
-    sheet_act!("sheet:show-detail", "하위 수준 표시", "show-detail"),
-    sheet_act!("sheet:outline-clear", "윤곽 지우기", "outline-clear"),
-    sheet_act!("sheet:row-insert-above", "행 위에 삽입", "row-insert-above"),
-    sheet_act!(
+    sa!("sheet:freeze-first-row", "첫 행 고정", "freeze-first-row"),
+    sa!("sheet:freeze-first-col", "첫 열 고정", "freeze-first-col"),
+    sa!("sheet:freeze-clear", "틀 고정 해제", "freeze-clear"),
+    sa!("sheet:tab-insert", "시트 삽입", "tab-insert"),
+    sa!("sheet:tab-delete", "시트 삭제", "tab-delete"),
+    sa!("sheet:tab-rename", "시트 이름 바꾸기", "tab-rename"),
+    sa!("sheet:tab-copy", "시트 복사", "tab-copy"),
+    sa!("sheet:tab-left", "시트 왼쪽으로 이동", "tab-left"),
+    sa!("sheet:tab-right", "시트 오른쪽으로 이동", "tab-right"),
+    sa!("sheet:tab-hide", "시트 숨기기", "tab-hide"),
+    sa!("sheet:tab-unhide", "시트 숨기기 취소…", "tab-unhide"),
+    sa!("sheet:tab-color", "탭 색", "tab-color"),
+    sa!("sheet:group", "그룹 묶기", "group"),
+    sa!("sheet:ungroup", "그룹 풀기", "ungroup"),
+    sa!("sheet:hide-detail", "하위 수준 숨기기", "hide-detail"),
+    sa!("sheet:show-detail", "하위 수준 표시", "show-detail"),
+    sa!("sheet:outline-clear", "윤곽 지우기", "outline-clear"),
+    sa!("sheet:row-insert-above", "행 위에 삽입", "row-insert-above"),
+    sa!(
         "sheet:row-insert-below",
         "행 아래에 삽입",
         "row-insert-below"
     ),
-    sheet_act!("sheet:col-insert-left", "열 왼쪽에 삽입", "col-insert-left"),
-    sheet_act!(
+    sa!("sheet:col-insert-left", "열 왼쪽에 삽입", "col-insert-left"),
+    sa!(
         "sheet:col-insert-right",
         "열 오른쪽에 삽입",
         "col-insert-right"
     ),
-    sheet_act!("sheet:row-delete", "행 삭제", "row-delete"),
-    sheet_act!("sheet:col-delete", "열 삭제", "col-delete"),
-    sheet_act!("sheet:hide", "숨기기", "hide"),
-    sheet_act!("sheet:unhide", "숨기기 취소", "unhide"),
-    sheet_act!("sheet:merge", "셀 병합", "merge"),
-    sheet_act!("sheet:unmerge", "병합 해제", "unmerge"),
-    sheet_act!("sheet:sort", "정렬…", "sort-dialog"),
-    sheet_act!("sheet:filter", "필터", "filter-toggle"),
-    sheet_act!("sheet:filter-reapply", "다시 적용", "filter-reapply"),
-    sheet_act!("sheet:filter-clear", "필터 지우기", "filter-clear"),
+    sa!("sheet:row-delete", "행 삭제", "row-delete"),
+    sa!("sheet:col-delete", "열 삭제", "col-delete"),
+    sa!("sheet:hide", "숨기기", "hide"),
+    sa!("sheet:unhide", "숨기기 취소", "unhide"),
+    sa!("sheet:merge", "셀 병합", "merge"),
+    sa!("sheet:unmerge", "병합 해제", "unmerge"),
+    sa!("sheet:sort", "정렬…", "sort-dialog"),
+    sa!("sheet:filter", "필터", "filter-toggle"),
+    sa!("sheet:filter-reapply", "다시 적용", "filter-reapply"),
+    sa!("sheet:filter-clear", "필터 지우기", "filter-clear"),
     item(
         "tool:diagnose",
         "문장 진단 및 요약",

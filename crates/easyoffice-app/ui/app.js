@@ -132,7 +132,7 @@
     setActiveSheetCellRef: (next) => { activeSheetCellRef = next; },
     enqueueWorkspaceHistoryOp,
     captureWorkspaceSnapshot: ribbonHistory.captureWorkspaceSnapshot,
-    pushRawUndoSnapshot: ribbonHistory.pushRawUndoSnapshot,
+    pushRawUndoSnapshot: ribbonHistory.pushRawUndoSnapshot, restoreWorkspaceSnapshot: ribbonHistory.restoreWorkspaceSnapshot,
     commitDeferredUndoSnapshot: ribbonHistory.commitDeferredUndoSnapshot,
     onSheetSwitchedOutline: () => workspacePanels.renderModuleOutline("SHEET"),
   });
@@ -543,25 +543,8 @@
         void sheetController.switchSheetTab(targetSheet).catch(() => {});
       });
     }
-    if (addSheetBtn && sheetTabBar) {
-      addSheetBtn.addEventListener("click", () => {
-        const runAddSheet = () =>
-          enqueueWorkspaceHistoryOp(async () => {
-            await sheetController.flushFocusedSheetCellBeforeSwitch();
-            ribbonHistory.pushUndoSnapshot(false);
-            const count =
-              sheetTabBar.querySelectorAll(".sheet-tab-btn[data-sheet-tab]").length + 1;
-            const sheetKey = "Sheet" + count;
-            const newTab = document.createElement("button");
-            newTab.className = "sheet-tab-btn";
-            newTab.dataset.sheetTab = sheetKey;
-            newTab.textContent = "시트 " + count;
-            addSheetBtn.before(newTab);
-            await sheetController.performSwitchSheetTabAsync(sheetKey);
-          });
-        void runAddSheet().catch(() => {});
-      });
-    }
+    // The add button puts a new sheet after the last one (the tab menu's insert puts it before a tab).
+    addSheetBtn?.addEventListener("click", () => void sheetController.runSheetStructure("tab-add").catch(() => {}));
   }
 
   // A failure the transport has not shown yet (everything but the engine request itself).

@@ -25,6 +25,7 @@
       enqueueWorkspaceHistoryOp,
       captureWorkspaceSnapshot,
       pushRawUndoSnapshot,
+      restoreWorkspaceSnapshot,
       commitDeferredUndoSnapshot,
       onSheetSwitchedOutline,
     } = deps;
@@ -833,6 +834,7 @@
       drainInFlightSheetWork,
       pushRawUndoSnapshot,
       captureWorkspaceSnapshot,
+      restoreWorkspaceSnapshot,
     });
     structure.bind();
 

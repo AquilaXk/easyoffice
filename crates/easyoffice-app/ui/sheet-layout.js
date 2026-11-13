@@ -8,6 +8,7 @@
   // The auto filter (PD-198) is `{ range: { r1, c1, r2, c2 }, columns, hidden }`: `columns` are the
   // engine's column conditions as sent and received, `hidden` the rows the filter hides, kept apart
   // from `hiddenRows` (the user's). The grid asks for the union through a per-sheet row index.
+  // The sheet is hidden (PD-209): `hidden` is true for a sheet without a tab.
   // The view (PD-208): `freeze` `{ rows, cols }` (counts), `tabColor` `"rrggbb"` and the outline
   // (`sheet-outline.js` owns its rules): level runs `[first, last, level]` and the folded runs
   // `foldedRows`, `foldedCols`, which are hidden like `hiddenRows` but belong to the groups.
@@ -21,7 +22,7 @@
   const listeners = [];
 
   function blank() {
-    return { merges: [], hiddenRows: [], hiddenCols: [], filter: null, freeze: null, tabColor: null, outline: null, index: null, rows: null };
+    return { merges: [], hiddenRows: [], hiddenCols: [], filter: null, freeze: null, tabColor: null, hidden: false, outline: null, index: null, rows: null };
   }
 
   function entry(name) {
@@ -37,6 +38,7 @@
         !layout.filter &&
         !layout.freeze &&
         !layout.tabColor &&
+        !layout.hidden &&
         !layout.outline)
     );
   }
@@ -278,6 +280,7 @@
     if (layout.filter) out.filter = filterToJson(layout.filter);
     if (layout.freeze) out.freeze = { rows: layout.freeze.rows, cols: layout.freeze.cols };
     if (layout.tabColor) out.tabColor = layout.tabColor;
+    if (layout.hidden) out.hidden = true;
     if (layout.outline) out.outline = structuredClone(layout.outline);
     return out;
   }
@@ -326,6 +329,7 @@
     const cols = Number(json?.freeze?.cols) || 0;
     layout.freeze = rows > 0 || cols > 0 ? { rows, cols } : null;
     layout.tabColor = /^[0-9a-f]{6}$/i.test(json?.tabColor || "") ? json.tabColor.toLowerCase() : null;
+    layout.hidden = json?.hidden === true;
     layout.outline = json?.outline && Object.keys(json.outline).length > 0 ? structuredClone(json.outline) : null;
     return layout;
   }
@@ -372,6 +376,7 @@
   const freezeOf = (name) => bySheet[name]?.freeze || null;
   const tabColorOf = (name) => bySheet[name]?.tabColor || null;
   const outlineOf = (name) => bySheet[name]?.outline || null;
+  const hiddenOf = (name) => bySheet[name]?.hidden === true;
 
   function setView(name, key, value) {
     const layout = entry(name);
@@ -383,6 +388,7 @@
 
   const setFreeze = (name, freeze) => setView(name, "freeze", freeze && (freeze.rows > 0 || freeze.cols > 0) ? { rows: freeze.rows, cols: freeze.cols } : null);
   const setTabColor = (name, color) => setView(name, "tabColor", color || null);
+  const setHiddenSheet = (name, hidden) => setView(name, "hidden", hidden === true);
   const setOutline = (name, outline) => setView(name, "outline", outline && Object.keys(outline).length > 0 ? outline : null);
 
   // ---- how a row or column edit moves a position (the engine moves the formulas) -----------------
@@ -434,6 +440,8 @@
     setFreeze,
     tabColorOf,
     setTabColor,
+    hiddenOf,
+    setHiddenSheet,
     outlineOf,
     setOutline,
     getAll,

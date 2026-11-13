@@ -390,11 +390,11 @@
       session.rules = new Map();
     }
 
-    // Inserts or deletes rows or columns in the engine session (PD-194): `request` is `{ sheet, axis,
-    // op, at, count }` plus the layout, widths and rules that move with the cells. The answer is
-    // `{ ok: true, answer }` or `{ ok: false, reason }` (`limit`: the sheet is over the session
-    // limits, `structure`: the edit rewrites too many formulas, `error`).
-    function editAxis(sheetsMap, request) {
+    // Sends `request` as the session action `action` after the session holds `sheetsMap`; `done` folds
+    // the answer into the page's mirror of the session. The result is `{ ok: true, answer }` or
+    // `{ ok: false, reason }` (`limit`: the sheets are over the session limits, `structure`: the
+    // change rewrites too many formulas, `error` with the engine's `message`).
+    function runOnSession(sheetsMap, request, action, done) {
       return runSessionExclusive(async () => {
         const names = Object.keys(sheetsMap || {});
         if (!session.enabled) return { ok: false, reason: "error" };
@@ -404,7 +404,7 @@
         for (let attempt = 0; attempt < 2; attempt += 1) {
           try {
             await syncSessionOnce(sheetsMap);
-            const answer = await sessionCall({ ...request, sessionAction: "structure", session: session.id });
+            const answer = await sessionCall({ ...request, sessionAction: action, session: session.id });
             if (answer?.refused === "structure") return { ok: false, reason: "structure" };
             if (answer?.refused) {
               resetSession();
@@ -412,7 +412,7 @@
               return { ok: false, reason: "limit" };
             }
             if (!answer || answer.expired === true) throw new Error("시트 세션이 만료되었습니다.");
-            moveMirror(request, answer);
+            done(request, answer);
             return { ok: true, answer };
           } catch (err) {
             if (err?.refused === true) {
@@ -428,6 +428,15 @@
         return { ok: false, reason: "error" };
       });
     }
+
+    // Inserts or deletes rows or columns in the engine session (PD-194): `request` is `{ sheet, axis,
+    // op, at, count }` plus the layout, widths and rules that move with the cells.
+    const editAxis = (sheetsMap, request) => runOnSession(sheetsMap, request, "structure", moveMirror);
+
+    // The formulas and rules that name a sheet the page renames or deletes (PD-209): `request` is
+    // `{ op: "rename"|"delete", sheet, newName, rules }`. The session keeps its old sheets; the
+    // page's sheet set changes, so the page lets go of it and the next sync opens a new one.
+    const rewriteSheetRefs = (sheetsMap, request) => runOnSession(sheetsMap, request, "sheetRefs", dropSession);
 
     // One retry after a reset covers an expired or evicted session. `null` sends the caller to the
     // stateless command: after two failures, and at once for a sheet set the engine refused for
@@ -713,6 +722,7 @@
       evaluateLiveFormulaTargets,
       validateEntry,
       editAxis,
+      rewriteSheetRefs,
       callSheetAction: sessionCall,
       enableSheetSessions,
       scrubSheetStoreMap,

@@ -124,9 +124,7 @@
       }
       if (scope === "SHEET") {
         sheetDataStore[getActiveSheetName()] = sheetController.snapshotDomSheetCells();
-        const keys = Array.from(document.querySelectorAll(".sheet-tab-btn[data-sheet-tab]")).map(
-          (b) => b.dataset.sheetTab
-        );
+        const keys = host.__EASYOFFICE_SHEET_TAB_STRIP__.reconcile(Object.keys(sheetDataStore));
         return { sheets: savePayload.buildSheetsPayload(keys, sheetDataStore, sheetController.getColumnWidths(), sheetController.getSheetRules(), host.__EASYOFFICE_SHEET_LAYOUT__.getAll()) };
       }
       if (scope === "SLIDE") {

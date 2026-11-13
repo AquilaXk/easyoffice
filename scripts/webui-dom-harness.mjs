@@ -60,6 +60,8 @@ const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/sheet-numfmt.js",
   "../crates/easyoffice-app/ui/sheet-numfmt-display.js",
   "../crates/easyoffice-app/ui/sheet-layout.js",
+  "../crates/easyoffice-app/ui/sheet-tab-names.js",
+  "../crates/easyoffice-app/ui/sheet-tab-strip.js",
   "../crates/easyoffice-app/ui/sheet-outline.js",
   "../crates/easyoffice-app/ui/sheet-refs.js",
   "../crates/easyoffice-app/ui/sheet-look.js",
@@ -88,6 +90,9 @@ const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/sheet-view-ui.js",
   "../crates/easyoffice-app/ui/sheet-outline-ui.js",
   "../crates/easyoffice-app/ui/sheet-tab-color.js",
+  "../crates/easyoffice-app/ui/sheet-tabs.js",
+  "../crates/easyoffice-app/ui/sheet-tab-ui.js",
+  "../crates/easyoffice-app/ui/sheet-tab-menu.js",
   "../crates/easyoffice-app/ui/sheet-structure.js",
   "../crates/easyoffice-app/ui/sheet-cell-write.js",
   "../crates/easyoffice-app/ui/sheet-controller.js",
@@ -323,6 +328,7 @@ function dispatchFrom(start, eventObj) {
     const fns = cur._listeners.get(eventObj.type) || [];
     for (const fn of fns) {
       fn.call(cur, eventObj);
+      if (eventObj.immediateStopped) break;
     }
     if (eventObj.type === "focus" || eventObj.type === "blur" || eventObj.propagationStopped) break;
   }
@@ -610,6 +616,10 @@ class MiniElement extends MiniNode {
     this._listeners.get(type).push(fn);
   }
 
+  removeEventListener(type, fn) {
+    this._listeners.set(type, (this._listeners.get(type) || []).filter((f) => f !== fn));
+  }
+
   dispatchEvent(ev) {
     const eventObj = {
       type: ev.type,
@@ -634,6 +644,10 @@ class MiniElement extends MiniNode {
       },
       stopPropagation() {
         this.propagationStopped = true;
+      },
+      stopImmediatePropagation() {
+        this.propagationStopped = true;
+        this.immediateStopped = true;
       },
     };
     dispatchFrom(this, eventObj);

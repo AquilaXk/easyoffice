@@ -320,3 +320,12 @@
 .sheet-tab-color-host { position: fixed; z-index: 1; left: 0; top: 0; pointer-events: none; }
 .sheet-tab-color-host > button { opacity: 0; }
 .sheet-tab-btn { --tab-color: transparent; }
+/* Sheet tabs (PD-209, sheet-tab-ui.js): the name typed in the tab's place, a tab dragged to another place, and the two dialogs. The dialog values are rhwp-studio's confirm dialog (360px, body padding 16px 20px, line height 1.6). */
+.sheet-tab-btn { transition: transform 0.12s ease; }
+.sheet-tab-btn.dragging { position: relative; z-index: 2; transition: none; background: var(--ui-surface); border-color: var(--ui-border-strong); box-shadow: var(--shadow-dropdown); }
+.sheet-tab-edit { flex: 0 0 auto; box-sizing: border-box; height: 22px; padding: 0 12px; font: inherit; font-size: 12px; color: var(--color-text); background: var(--color-surface); border: 1px solid var(--color-focus-border); border-top: 0; border-radius: 0 0 var(--radius-md) var(--radius-md); outline: none; box-shadow: 0 0 0 2px var(--ui-focus-soft); caret-color: var(--caret-color); }
+.sheet-tab-edit[aria-invalid="true"] { border-color: var(--ui-danger-strong); box-shadow: 0 0 0 2px var(--ui-danger-soft); }
+.sheet-tab-dialog { width: min(360px, calc(100vw - 32px)); }
+#sheet-tab-delete-message { margin: 0; padding: 4px 8px; line-height: 1.6; white-space: pre-line; overflow-wrap: anywhere; }
+.sheet-tab-hidden-list { max-height: 180px; margin: 0; }
+.sheet-tab-hidden-list li:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: -2px; }
