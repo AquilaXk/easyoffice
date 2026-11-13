@@ -227,17 +227,35 @@ test("DOC save keeps multiple ASIDE footnotes as separate paragraph blocks and f
 });
 
 
-test("DOC save keeps the header and footer blocks as the first and last paragraph blocks", async () => {
+test("DOC save keeps a header and footer block of an older document as the first and last body paragraph", async () => {
   const { document, userClick, converts } = await createSaveHarness();
   const editor = document.getElementById("doc-editor");
   editor.innerHTML =
-    '<header class="eo-hwp-header" data-hwp-header="true"><p>문서 머리말 (표준 양식)</p></header>' +
+    '<header><p>문서 머리말 (표준 양식)</p></header>' +
     "<p>본문 문단</p>" +
-    '<aside class="eo-hwp-footer" data-hwp-footer="true"><p>문서 꼬리말 (표준 양식)</p></aside>';
+    '<aside><p>문서 꼬리말 (표준 양식)</p></aside>';
 
   userClick(studioItem(document, "studio-save"));
   await flushAsyncTurns(10);
 
   assert.equal(converts.length, 1);
   assert.deepEqual(converts[0].blocks.map((block) => block.runs[0].text), ["문서 머리말 (표준 양식)", "본문 문단", "문서 꼬리말 (표준 양식)"]);
+  assert.equal("header" in converts[0] || "footer" in converts[0], false, "no page frame came from them");
+});
+
+test("DOC save sends the header and footer sections as their own fields, a page-number field as a field run", async () => {
+  const { document, userClick, converts } = await createSaveHarness();
+  const editor = document.getElementById("doc-editor");
+  editor.innerHTML =
+    '<p>본문 문단</p>' +
+    '<section class="eo-page-frame" data-eo-hf="header"><p style="text-align: center;"><strong>제목 머리</strong></p></section>' +
+    '<section class="eo-page-frame" data-eo-hf="footer"><p>쪽 <span class="eo-page-field" data-eo-field="page"></span></p></section>';
+
+  userClick(studioItem(document, "studio-save"));
+  await flushAsyncTurns(10);
+
+  assert.equal(converts.length, 1);
+  assert.deepEqual(converts[0].blocks.map((block) => block.runs[0].text), ["본문 문단"]);
+  assert.deepEqual(converts[0].header, [{ type: "paragraph", runs: [{ text: "제목 머리", bold: true }], align: "center" }]);
+  assert.deepEqual(converts[0].footer, [{ type: "paragraph", runs: [{ text: "쪽 " }, { text: "", field: "page" }] }]);
 });

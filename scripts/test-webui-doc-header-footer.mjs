@@ -129,7 +129,6 @@ test("a document opened with a header and footer shows them as sections and no o
   assert.equal(frame.has("header"), true);
   assert.equal(frame.has("footer"), false);
   assert.equal(editor.querySelector(".eo-hwp-header"), null);
-  assert.equal(editor.querySelector(".eo-hwp-footer"), null);
 });
 
 test("the footer command is a document command: the other windows have neither the button nor an enabled menu item", async () => {

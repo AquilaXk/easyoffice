@@ -440,8 +440,7 @@ select:focus-visible,
 }
 .eo-doc-footnote,
 .eo-doc-mailmerge,
-.eo-hwp-header,
-.eo-hwp-footer {
+.eo-hwp-header {
   margin: 10px 0;
   padding: 10px 12px;
   background: var(--ui-hover);

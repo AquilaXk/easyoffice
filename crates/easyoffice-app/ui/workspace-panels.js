@@ -721,7 +721,6 @@
 
     const STUDIO_CONTAINER_CLASSES = [
       "eo-hwp-header",
-      "eo-hwp-footer",
       "eo-doc-toc",
       "eo-doc-footnote",
       "eo-process-flow",
