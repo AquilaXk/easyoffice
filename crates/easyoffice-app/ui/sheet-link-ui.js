@@ -1,13 +1,12 @@
 // The hyperlink dialog of the sheet window and what a click on a link cell does (PD-218).
 //
-// The dialog is the reference editor's hyperlink dialog (`rhwp-studio/src/ui/hyperlink-dialog.ts`: 표시할 문자열,
-// 연결 대상 with its tabs, 넣기 / 고치기) with the spreadsheet help's targets: 웹 주소 and 현재 문서 (한셀 도움말
-// 입력 > 하이퍼링크: 연결 대상 현재 문서 · 웹 주소 · 전자 우편 주소, 넣기), whose 시트 and 셀 참조 follow the spreadsheet
-// help's 이 문서에 배치 (셀 참조, 정의된 이름). A mail address goes in the 웹 주소 field, as in the document editor.
-// A link cell opens on a click (한셀: one click of the left button; the spreadsheet help: holding the button down selects
-// the cell instead), a cell that is part of a larger selection or clicked with a modifier only selects. Applying and
-// removing are one undo step each and go through the cell writer, so the protection of the sheet decides (the flag
-// 하이퍼링크 삽입 and the lock of the cell).
+// The dialog is the reference editor's hyperlink dialog (표시할 문자열, 연결 대상 with its tabs, 넣기 / 고치기) with the
+// targets of the Korean spreadsheet help: 웹 주소 and 현재 문서 (입력 > 하이퍼링크: 연결 대상 현재 문서 · 웹 주소 ·
+// 전자 우편 주소, 넣기), whose 시트 and 셀 참조 follow the help's 이 문서에 배치 (셀 참조, 정의된 이름). A mail address goes
+// in the 웹 주소 field, as in the document editor. A link cell opens on a click (the help: one click of the left button
+// follows the link, holding the button down selects the cell instead); a cell that is part of a larger selection or
+// clicked with a modifier only selects. Applying and removing are one undo step each and go through the cell writer, so
+// the protection of the sheet decides (the flag 하이퍼링크 삽입 and the lock of the cell). Ctrl+K stays the command search.
 (function (host) {
   "use strict";
 

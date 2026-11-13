@@ -7,9 +7,9 @@
 //   packages/sheets-hyper-link/src/types/interfaces/i-hyper-link.ts :17-47 (a link: `payload`, `tooltip`, cell),
 //   packages/sheets-hyper-link/src/services/parser.service.ts :50-91 (`#`-prefixed targets are jumps inside
 //       the workbook, any other target is an address),
-//   packages/sheets-hyper-link/src/controllers/set-range.controller.ts :31-67, :72-100 (a write to the cell or
+//   packages/sheets-hyper-link/src/controllers/set-range.controller.ts :43-139 (a write to the cell or
 //       a clear removes its link),
-//   packages/sheets-hyper-link-ui/src/controllers/auto-fill.controller.ts :122-150 (a fill copies the link in the
+//   packages/sheets-hyper-link-ui/src/controllers/auto-fill.controller.ts :103-136, :145-153 (a fill copies the link in the
 //       copy and series modes), copy-paste.controller.ts :157-166 (the special pastes leave links alone).
 // Differences: Univer keeps the links in a model apart from the cells and moves them with its reference-range
 // service; here the link rides on the cell entry, and only the in-workbook target text is rewritten by the
