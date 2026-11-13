@@ -222,7 +222,12 @@ pub(crate) fn apply_tint(rgb: u32, tint: f64) -> u32 {
 /// `<sheetPr>`: the tab colour and the side of the group summaries (empty when both are default).
 pub(crate) fn sheet_pr_xml(styling: &SheetStyling) -> String {
     let outline = &styling.outline;
-    if styling.tab_color.is_none() && !outline.summary_above && !outline.summary_left {
+    let fit = crate::sheet_styling::xlsx_page::fit_to_page_xml(&styling.page);
+    if styling.tab_color.is_none()
+        && !outline.summary_above
+        && !outline.summary_left
+        && fit.is_empty()
+    {
         return String::new();
     }
     let mut xml = String::from("<sheetPr>");
@@ -237,6 +242,7 @@ pub(crate) fn sheet_pr_xml(styling: &SheetStyling) -> String {
             u8::from(!outline.summary_left)
         );
     }
+    xml.push_str(fit);
     xml.push_str("</sheetPr>");
     xml
 }

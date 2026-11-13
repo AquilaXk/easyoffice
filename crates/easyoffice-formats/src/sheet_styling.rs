@@ -22,6 +22,8 @@ pub(crate) mod sheet_filter;
 pub(crate) mod sheet_look;
 #[path = "sheet_numfmt.rs"]
 pub(crate) mod sheet_numfmt;
+#[path = "sheet_page.rs"]
+pub(crate) mod sheet_page;
 #[path = "sheet_rules.rs"]
 pub(crate) mod sheet_rules;
 #[path = "sheet_view.rs"]
@@ -30,6 +32,8 @@ pub(crate) mod sheet_view;
 pub(crate) mod xlsx_filter;
 #[path = "xlsx_layout.rs"]
 pub(crate) mod xlsx_layout;
+#[path = "xlsx_page.rs"]
+pub(crate) mod xlsx_page;
 #[path = "xlsx_sheet.rs"]
 pub(crate) mod xlsx_sheet;
 #[path = "xlsx_styles.rs"]
@@ -42,6 +46,7 @@ pub use sheet_look::{
     parse_hex_rgb, BorderEdge, BorderLine, CellBorders, HAlign, VAlign, BORDER_DEFAULT_RGB,
 };
 pub use sheet_numfmt::*;
+pub use sheet_page::*;
 pub use sheet_rules::*;
 pub use sheet_view::*;
 pub use xlsx_layout::{intersect_runs, normalize_runs, run_total, MAX_HIDDEN_ROWS, MAX_MERGES};
@@ -257,6 +262,8 @@ pub struct SheetStyling {
     pub hidden: bool,
     /// Row and column groups and the groups the user folded (PD-208).
     pub outline: Outline,
+    /// Paper, margins, scale, print area and repeated rows and columns for printing (PD-213).
+    pub page: SheetPage,
 }
 
 impl SheetStyling {
@@ -281,6 +288,7 @@ impl SheetStyling {
             && self.tab_color.is_none()
             && !self.hidden
             && self.outline.is_empty()
+            && self.page.is_default()
     }
 
     /// Whether the frozen pane, the tab colour and the groups are within the bounds of a sheet that

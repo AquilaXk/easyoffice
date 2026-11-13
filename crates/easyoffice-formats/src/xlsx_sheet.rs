@@ -17,6 +17,7 @@ use crate::rtf_xml_helpers::{format_col_letters, parse_a1_zero_based};
 use crate::sheet_styling::sheet_view::{push_level, Outline, MAX_OUTLINE_ROWS};
 use crate::sheet_styling::xlsx_filter::FilterScan;
 use crate::sheet_styling::xlsx_layout::{add_run, has_room, parse_merge};
+use crate::sheet_styling::xlsx_page::PageScan;
 use crate::sheet_styling::xlsx_styles::xlsx_width_to_px;
 use crate::sheet_styling::xlsx_view::{level_attr, ThemeTab, ViewScan, LAST_COL};
 use crate::sheet_styling::{CellStyle, SheetStyling, MAX_STYLED_CELLS};
@@ -579,10 +580,12 @@ pub(crate) fn scan_worksheet(
     let mut cell: Option<CellState<'_>> = None;
     let mut filter = FilterScan::new();
     let mut view = ViewScan::default();
+    let mut page = PageScan::default();
     while let Some(event) = reader.next_event()? {
         if want_styling {
             filter.feed(&event);
             view.feed(&event);
+            page.feed(&event);
         }
         match event {
             XmlEvent::Start {
@@ -618,6 +621,7 @@ pub(crate) fn scan_worksheet(
         }
     }
     scanner.styling.filter = filter.finish();
+    scanner.styling.page = page.finish();
     scanner.finish_view(&view);
     Ok(WorksheetScan {
         cells: scanner.cells,

@@ -98,7 +98,11 @@ fn hidden_sheets(sheet_count: usize, stylings: &[SheetStyling]) -> Vec<bool> {
 /// `xl/workbook.xml` and `xl/_rels/workbook.xml.rels` contents. A hidden sheet is written as
 /// `state="hidden"`, and the book opens on the first sheet that is shown (ECMA-376 18.2.19
 /// `sheet@state`, 18.2.1 `bookViews`).
-fn build_workbook_parts(active_sheets: &[OdsUnpacked], hidden: &[bool]) -> (String, String) {
+fn build_workbook_parts(
+    active_sheets: &[OdsUnpacked],
+    hidden: &[bool],
+    stylings: &[SheetStyling],
+) -> (String, String) {
     let first_shown = hidden.iter().position(|&h| !h).unwrap_or(0);
     let mut workbook_xml = String::from(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?><workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">",
@@ -128,7 +132,22 @@ fn build_workbook_parts(active_sheets: &[OdsUnpacked], hidden: &[bool]) -> (Stri
             "<Relationship Id=\"rId{num}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet{num}.xml\"/>"
         ));
     }
-    workbook_xml.push_str("</sheets><calcPr calcId=\"191029\" fullCalcOnLoad=\"1\"/></workbook>");
+    workbook_xml.push_str("</sheets>");
+    let names: Vec<String> = active_sheets
+        .iter()
+        .enumerate()
+        .map(|(i, (name, _))| {
+            if name.is_empty() {
+                format!("Sheet{}", i + 1)
+            } else {
+                name.clone()
+            }
+        })
+        .collect();
+    workbook_xml.push_str(&crate::sheet_styling::xlsx_page::print_names_xml(
+        &names, stylings,
+    ));
+    workbook_xml.push_str("<calcPr calcId=\"191029\" fullCalcOnLoad=\"1\"/></workbook>");
     let styles_rid = active_sheets.len() + 1;
     let sst_rid = active_sheets.len() + 2;
     wb_rels_xml.push_str(&format!(
@@ -342,6 +361,7 @@ fn build_sheet_xml(
         }
         sheet_xml.push_str(&merge_cells_xml(&st.merges));
         sheet_xml.push_str(&rules_xml(&st.rules, &style_table.dxf));
+        sheet_xml.push_str(&crate::sheet_styling::xlsx_page::page_tail_xml(&st.page));
     }
     sheet_xml.push_str("</worksheet>");
     sheet_xml
@@ -512,7 +532,7 @@ impl OoxmlCodec {
         Self::validate_xlsx_bounds(active_sheets, stylings)?;
         let style_table = XlsxStyleTable::build(stylings);
         let hidden = hidden_sheets(active_sheets.len(), stylings);
-        let (workbook_xml, wb_rels_xml) = build_workbook_parts(active_sheets, &hidden);
+        let (workbook_xml, wb_rels_xml) = build_workbook_parts(active_sheets, &hidden, stylings);
         let styles_xml = style_table.to_xml();
         let (shared_strings, sst_map, total_str_count) = collect_shared_strings(active_sheets);
         let sst_xml = build_shared_strings_xml(&shared_strings, total_str_count);
@@ -776,6 +796,7 @@ impl OoxmlCodec {
                 .map_or(DEFAULT_THEME, theme_palette)
         });
         let mut stylings = Vec::new();
+        let workbook_names: Vec<String> = sheet_specs.iter().map(|spec| spec.0.clone()).collect();
         let mut parsed_sheets = Vec::with_capacity(sheet_specs.len());
         let mut scanned_parts = std::collections::HashSet::new();
         let mut budget = DecodeBudget::new();
@@ -828,6 +849,13 @@ impl OoxmlCodec {
             parsed_sheets.push((sheet_name, scan.cells));
         }
 
+        if with_styling {
+            crate::sheet_styling::xlsx_page::apply_print_names(
+                wb_xml,
+                &workbook_names,
+                &mut stylings,
+            );
+        }
         Ok((parsed_sheets, stylings))
     }
 }
