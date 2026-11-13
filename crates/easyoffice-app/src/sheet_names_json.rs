@@ -8,8 +8,8 @@
 
 use crate::EasyOfficeIpcRouter;
 use easyoffice_formats::{
-    DefinedName, EasyOfficeError, StrictJsonValue, MAX_NAMES, MAX_NAME_CHARS,
-    MAX_NAME_COMMENT_CHARS, MAX_REFERS_TO_CHARS,
+    defined_name_problem, fold_name, DefinedName, EasyOfficeError, StrictJsonValue, MAX_NAMES,
+    MAX_NAME_CHARS, MAX_NAME_COMMENT_CHARS, MAX_REFERS_TO_CHARS,
 };
 use easyoffice_sheet::NameIssue;
 use std::fmt::Write;
@@ -48,7 +48,8 @@ pub(crate) fn parse_name(v: &StrictJsonValue) -> Result<DefinedName, EasyOfficeE
     })
 }
 
-/// The list of names (`null` or absent is an empty list).
+/// The list of names a session is given (`null` or absent is an empty list). A name that breaks the rules is kept and
+/// reported by the engine (`nameIssues`).
 pub(crate) fn parse_names(v: &StrictJsonValue) -> Result<Vec<DefinedName>, EasyOfficeError> {
     if matches!(v, StrictJsonValue::Null) {
         return Ok(Vec::new());
@@ -60,6 +61,32 @@ pub(crate) fn parse_names(v: &StrictJsonValue) -> Result<Vec<DefinedName>, EasyO
         )));
     }
     items.iter().map(parse_name).collect()
+}
+
+/// A list of new names to be judged by the engine (`nameCheck`): the rules are the engine's to apply.
+pub(crate) fn parse_candidates(v: &StrictJsonValue) -> Result<Vec<DefinedName>, EasyOfficeError> {
+    parse_names(v)
+}
+
+/// The names of a save: every name must follow the rules of a name and no two may be the same (the same name
+/// without regard to case, in the same scope), or the save is refused.
+pub(crate) fn parse_names_for_save(
+    v: &StrictJsonValue,
+) -> Result<Vec<DefinedName>, EasyOfficeError> {
+    let names = parse_names(v)?;
+    let mut seen = std::collections::HashSet::with_capacity(names.len());
+    for def in &names {
+        if defined_name_problem(&def.name).is_some() {
+            return Err(bad(&format!("이름 규칙에 맞지 않음: {}", def.name)));
+        }
+        if !seen.insert((
+            fold_name(&def.name),
+            def.scope.as_deref().map(str::to_lowercase),
+        )) {
+            return Err(bad(&format!("이름이 겹침: {}", def.name)));
+        }
+    }
+    Ok(names)
 }
 
 /// The `names` field of a request, empty when it has none.

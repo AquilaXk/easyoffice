@@ -74,6 +74,10 @@ fn a_bad_list_refuses_the_save() {
         r#"[1]"#,
         r#"[{"name":5}]"#,
         r#"[{"name":"a","refersTo":["x"]}]"#,
+        r#"[{"name":"A1","refersTo":"1"}]"#,
+        r#"[{"name":"_xlnm.Print_Area","refersTo":"Sheet1!$A$1"}]"#,
+        r#"[{"name":"two words","refersTo":"1"}]"#,
+        r#"[{"name":"Dup_","refersTo":"1"},{"name":"DUP_","refersTo":"2"}]"#,
     ] {
         for dst in ["xlsx", "ods"] {
             assert!(

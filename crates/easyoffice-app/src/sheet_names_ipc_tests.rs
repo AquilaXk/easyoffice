@@ -228,6 +228,10 @@ fn the_name_check_names_the_first_rule_a_new_name_breaks() {
         "{\"problem\":\"name\",\"detail\":\"cellAddress\"}"
     );
     assert_eq!(
+        check("{\"name\":\"_xlnm.Print_Area\",\"refersTo\":\"1\"}", ""),
+        "{\"problem\":\"name\",\"detail\":\"builtIn\"}"
+    );
+    assert_eq!(
         check("{\"name\":\"two words\",\"refersTo\":\"1\"}", ""),
         "{\"problem\":\"name\",\"detail\":\"badChar\"}"
     );

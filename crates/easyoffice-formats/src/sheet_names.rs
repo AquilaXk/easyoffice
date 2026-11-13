@@ -49,6 +49,8 @@ pub enum NameProblem {
     RowColumnAddress,
     /// `TRUE` or `FALSE`.
     Boolean,
+    /// A name the format keeps for itself (`_xlnm.Print_Area` and the other built-in names).
+    BuiltIn,
 }
 
 /// The first rule `name` breaks. Whether another name or a sheet already has the name is for the caller.
@@ -56,6 +58,9 @@ pub fn defined_name_problem(name: &str) -> Option<NameProblem> {
     let Some(first) = name.chars().next() else {
         return Some(NameProblem::Empty);
     };
+    if name.len() >= 6 && name.is_char_boundary(6) && name[..6].eq_ignore_ascii_case("_xlnm.") {
+        return Some(NameProblem::BuiltIn);
+    }
     if name.chars().count() > MAX_NAME_CHARS {
         return Some(NameProblem::TooLong);
     }
@@ -155,6 +160,8 @@ mod tests {
             ("R2C", NameProblem::RowColumnAddress),
             ("true", NameProblem::Boolean),
             ("False", NameProblem::Boolean),
+            ("_xlnm.Print_Area", NameProblem::BuiltIn),
+            ("_XLNM._FilterDatabase", NameProblem::BuiltIn),
         ];
         for (name, problem) in cases {
             assert_eq!(defined_name_problem(name), Some(problem), "{name:?}");

@@ -45,7 +45,10 @@ pub(crate) fn read_defined_names(
         let scope = match local {
             None => None,
             Some(Ok(i)) if i < sheet_names.len() => Some(i),
-            Some(_) => continue,
+            Some(_) => {
+                rejected = rejected.saturating_add(1);
+                continue;
+            }
         };
         let refers_to = XmlSanitizer::unescape(inner);
         let comment = extract_attr_from_fragment(attrs, "comment")
@@ -186,7 +189,10 @@ mod tests {
         let (read, rejected) = read_defined_names(xml, &sheets());
         let names: Vec<&str> = read.iter().map(|d| d.name.as_str()).collect();
         assert_eq!(names, ["Good", "Union", "Empty"]);
-        assert_eq!(rejected, 3);
+        assert_eq!(
+            rejected, 4,
+            "a repeated name, two that break the rules and a scope that is no sheet"
+        );
         assert_eq!(read[1].refers_to, "Sheet1!$A$1,Sheet1!$C$1");
     }
 

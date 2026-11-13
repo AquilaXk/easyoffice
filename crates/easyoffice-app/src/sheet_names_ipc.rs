@@ -34,6 +34,7 @@ fn detail(problem: NameProblem) -> &'static str {
         NameProblem::CellAddress => "cellAddress",
         NameProblem::RowColumnAddress => "rowColumnAddress",
         NameProblem::Boolean => "boolean",
+        NameProblem::BuiltIn => "builtIn",
     }
 }
 
@@ -172,7 +173,7 @@ impl EasyOfficeIpcRouter {
         entries: &Entries,
         list: &StrictJsonValue,
     ) -> Result<String, EasyOfficeError> {
-        let candidates = crate::sheet_names_json::parse_names(list)?;
+        let candidates = crate::sheet_names_json::parse_candidates(list)?;
         let wb = Self::name_check_workbook(entries)?;
         let mut out = String::from("{\"problems\":[");
         for (i, issue) in wb.check_names(&candidates).into_iter().enumerate() {
