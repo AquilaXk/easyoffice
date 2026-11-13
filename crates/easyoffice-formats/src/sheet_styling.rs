@@ -10,6 +10,8 @@ use std::sync::Arc;
 // XLSX and ODS style tables live beside this module's model; they are internal to the crate.
 #[path = "ods_grid.rs"]
 pub(crate) mod ods_grid;
+#[path = "ods_names.rs"]
+pub(crate) mod ods_names;
 #[path = "ods_numfmt.rs"]
 pub(crate) mod ods_numfmt;
 #[path = "ods_page.rs"]
@@ -36,6 +38,8 @@ pub(crate) mod sheet_view;
 pub(crate) mod xlsx_filter;
 #[path = "xlsx_layout.rs"]
 pub(crate) mod xlsx_layout;
+#[path = "xlsx_names.rs"]
+pub(crate) mod xlsx_names;
 #[path = "xlsx_page.rs"]
 pub(crate) mod xlsx_page;
 #[path = "xlsx_sheet.rs"]

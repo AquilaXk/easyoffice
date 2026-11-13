@@ -5,6 +5,7 @@ use crate::rtf_xml_helpers::{
     strip_tag_blocks, to_open_formula_syntax_impl,
 };
 use crate::sheet_styling::ods_grid::{read_ods_sheets, read_ods_sheets_with_styling};
+use crate::sheet_styling::ods_names::LOEXT_NS;
 use crate::sheet_styling::ods_numfmt::{EO_NS, NUMBER_NS};
 use crate::sheet_styling::ods_page::title_end;
 use crate::sheet_styling::ods_styles::{parse_ods_styling, table_columns_xml, OdsStyleTable};
@@ -338,7 +339,7 @@ impl OdfCodec {
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?><office:document-content xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" xmlns:style=\"urn:oasis:names:tc:opendocument:xmlns:style:1.0\" xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\" office:version=\"1.2\"",
         );
         content.push_str(&format!(
-            " xmlns:number=\"{NUMBER_NS}\" xmlns:eo=\"{EO_NS}\" xmlns:calcext=\"{CALCEXT_NS}\" xmlns:tableooo=\"{TABLEOOO_NS}\">"
+            " xmlns:number=\"{NUMBER_NS}\" xmlns:eo=\"{EO_NS}\" xmlns:loext=\"{LOEXT_NS}\" xmlns:calcext=\"{CALCEXT_NS}\" xmlns:tableooo=\"{TABLEOOO_NS}\">"
         ));
         content.push_str(&Self::automatic_styles_with_rules(
             &style_table,
@@ -371,6 +372,13 @@ impl OdfCodec {
             );
         }
 
+        if let Some(first) = stylings.first() {
+            content.push_str(&crate::sheet_styling::ods_names::names_xml(
+                &first.defined_names,
+                None,
+                names[0],
+            ));
+        }
         content.push_str("</office:spreadsheet></office:body></office:document-content>");
         XmlSanitizer::validate_safe_xml(&content)?;
 
@@ -558,6 +566,13 @@ impl OdfCodec {
             }
         }
         groups.close_all(content);
+        if let Some(first) = rules.stylings.first() {
+            content.push_str(&crate::sheet_styling::ods_names::names_xml(
+                &first.defined_names,
+                Some(sheet_name),
+                sheet_name,
+            ));
+        }
         content.push_str("</table:table>");
     }
 
@@ -630,6 +645,7 @@ impl OdfCodec {
         let mut stylings = parse_ods_styling(&content_xml)?;
         Self::apply_freezes(&mut stylings, settings.as_deref());
         crate::sheet_styling::ods_page::read_pages(&content_xml, styles.as_deref(), &mut stylings);
+        crate::sheet_styling::ods_names::read_names(&content_xml, &mut stylings);
         Self::show_one_sheet(&mut stylings);
         Ok(stylings)
     }
@@ -647,6 +663,7 @@ impl OdfCodec {
         let (sheets, mut stylings) = read_ods_sheets_with_styling(&content_xml)?;
         Self::apply_freezes(&mut stylings, settings.as_deref());
         crate::sheet_styling::ods_page::read_pages(&content_xml, styles.as_deref(), &mut stylings);
+        crate::sheet_styling::ods_names::read_names(&content_xml, &mut stylings);
         Self::show_one_sheet(&mut stylings);
         Ok((sheets, stylings))
     }

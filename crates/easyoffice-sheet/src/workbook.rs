@@ -62,6 +62,34 @@ impl WorkbookEngine {
         defs.len() - kept
     }
 
+    /// The first problem `candidate` has as a new or changed definition (`replacing` is the name and
+    /// scope of the definition it replaces, if any), judged with the names the workbook has.
+    pub fn check_name(
+        &self,
+        candidate: &DefinedName,
+        replacing: Option<(&str, Option<&str>)>,
+    ) -> Option<crate::NameIssue> {
+        let same = |def: &DefinedName, (name, scope): (&str, Option<&str>)| {
+            easyoffice_formats::fold_name(&def.name) == easyoffice_formats::fold_name(name)
+                && def.scope.as_deref().map(str::to_lowercase) == scope.map(str::to_lowercase)
+        };
+        let mut defs: Vec<DefinedName> = self
+            .names()
+            .iter()
+            .filter(|d| !replacing.is_some_and(|r| same(d, r)))
+            .cloned()
+            .collect();
+        defs.push(candidate.clone());
+        let at = defs.len() - 1;
+        let sheet_names: Vec<&str> = self.sheets.iter().map(|s| s.name.as_str()).collect();
+        let built = NameTable::build(&defs, &sheet_names, true);
+        built
+            .issues
+            .iter()
+            .find(|&&(i, _)| i == at)
+            .map(|&(_, issue)| issue)
+    }
+
     pub(crate) fn plan_names(
         &self,
         defs: &[DefinedName],
@@ -71,7 +99,7 @@ impl WorkbookEngine {
         if strict {
             crate::names::validate_names(defs, &sheet_names)?;
         }
-        let built = NameTable::build(defs, &sheet_names);
+        let built = NameTable::build(defs, &sheet_names, strict);
         let table = Arc::new(built.table);
         let changed = self.names.changed_keys(&table);
         let mut affected = Vec::new();

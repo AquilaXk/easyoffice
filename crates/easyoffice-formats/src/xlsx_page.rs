@@ -186,8 +186,9 @@ fn absolute(b: &CellBox) -> String {
     }
 }
 
-/// `<definedNames>` for the print areas and repeated rows and columns of the sheets, empty without any.
-pub(crate) fn print_names_xml(sheet_names: &[String], stylings: &[SheetStyling]) -> String {
+/// The `<definedName>` elements for the print areas and repeated rows and columns of the sheets (the caller
+/// wraps them in `<definedNames>`).
+pub(crate) fn print_names_inner(sheet_names: &[String], stylings: &[SheetStyling]) -> String {
     let mut names = String::new();
     for (index, styling) in stylings.iter().enumerate().take(sheet_names.len()) {
         let page = &styling.page;
@@ -211,11 +212,7 @@ pub(crate) fn print_names_xml(sheet_names: &[String], stylings: &[SheetStyling])
             push_name(&mut names, PRINT_TITLES, index, &titles.join(","));
         }
     }
-    if names.is_empty() {
-        names
-    } else {
-        format!("<definedNames>{names}</definedNames>")
-    }
+    names
 }
 
 fn push_name(out: &mut String, name: &str, local_sheet: usize, formula: &str) {

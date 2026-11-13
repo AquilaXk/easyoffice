@@ -191,15 +191,17 @@ impl NameTable {
 
     /// Builds the table of `defs` for a workbook with `sheets`. Every definition with a problem is
     /// listed in `issues`; those with a bad name, a duplicate or an unknown scope are left out of
-    /// the table, the others stay in it reading as errors.
-    pub(crate) fn build(defs: &[DefinedName], sheets: &[&str]) -> Built {
+    /// the table, the others stay in it reading as errors. `strict` also refuses a name that is
+    /// a function's or a sheet's (a name entered by a user); a file may have one, and a formula tells
+    /// it from the function by its parenthesis.
+    pub(crate) fn build(defs: &[DefinedName], sheets: &[&str], strict: bool) -> Built {
         let mut issues: Vec<(usize, NameIssue)> = Vec::new();
         let mut parsed: Vec<Option<Parsed>> = Vec::with_capacity(defs.len());
         let mut by_name: HashMap<String, Vec<usize>> = HashMap::with_capacity(defs.len());
         let first_sheet = sheets.first().copied();
         for (i, def) in defs.iter().enumerate() {
             let folded = fold_name(&def.name);
-            let mut issue = Self::check_header(def, sheets);
+            let mut issue = Self::check_header(def, sheets, strict);
             if issue.is_none()
                 && by_name.get(&folded).is_some_and(|ids| {
                     ids.iter()
@@ -260,11 +262,11 @@ impl NameTable {
         Built { table, issues }
     }
 
-    fn check_header(def: &DefinedName, sheets: &[&str]) -> Option<NameIssue> {
+    fn check_header(def: &DefinedName, sheets: &[&str], strict: bool) -> Option<NameIssue> {
         if defined_name_problem(&def.name).is_some() {
             return Some(NameIssue::BadName);
         }
-        if is_function(&def.name) || sheets.iter().any(|s| same_sheet(s, &def.name)) {
+        if strict && (is_function(&def.name) || sheets.iter().any(|s| same_sheet(s, &def.name))) {
             return Some(NameIssue::Reserved);
         }
         if let Some(scope) = def.scope.as_deref() {
@@ -510,7 +512,7 @@ pub fn validate_names(defs: &[DefinedName], sheets: &[&str]) -> Result<(), EasyO
             "이름은 최대 {MAX_NAMES}개까지 정의할 수 있습니다."
         )));
     }
-    match NameTable::build(defs, sheets).issues.first() {
+    match NameTable::build(defs, sheets, true).issues.first() {
         None => Ok(()),
         Some(&(i, issue)) => Err(EasyOfficeError::InvalidArgument(format!(
             "이름 정의가 올바르지 않습니다({}번째 {:?}): {}",

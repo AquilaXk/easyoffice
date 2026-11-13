@@ -132,7 +132,7 @@ fn definitions_that_lead_back_to_themselves_are_refused_or_read_as_errors() {
             "{cell}"
         );
     }
-    let built = crate::names::NameTable::build(&cyclic, &["Sheet1"]);
+    let built = crate::names::NameTable::build(&cyclic, &["Sheet1"], false);
     assert!(built
         .issues
         .iter()
@@ -225,6 +225,32 @@ fn names_are_checked_like_the_spreadsheet_programs_check_them() {
     assert!(wb.set_names(&many).is_err());
     assert_eq!(wb.set_names_lenient(&many), 1);
     assert_eq!(wb.names().len(), MAX_NAMES);
+    // A file may name a thing like a function or a sheet; only a typed name is refused for it.
+    wb.set_names_lenient(&[def("Sum", None, "1"), def("Data", None, "2")]);
+    wb.set_cell("Sheet1", "H1", "=SUM(1,2)+Sum+Data").unwrap();
+    assert_eq!(value(&wb, "Sheet1", "H1"), V::Number(6.0));
+    assert_eq!(
+        wb.check_name(&def("SUM", None, "1"), None),
+        Some(NameIssue::Reserved)
+    );
+    assert_eq!(
+        wb.check_name(&def("Sum", None, "5"), Some(("sum", None))),
+        Some(NameIssue::Reserved)
+    );
+    assert_eq!(
+        wb.check_name(&def("Fresh", None, "Sheet1!$A$1"), None),
+        None
+    );
+    wb.set_names_lenient(&[def("Dup_x", None, "1")]);
+    assert_eq!(
+        wb.check_name(&def("DUP_X", None, "5"), None),
+        Some(NameIssue::Duplicate)
+    );
+    assert_eq!(
+        wb.check_name(&def("DUP_X", None, "5"), Some(("dup_x", None))),
+        None
+    );
+    assert_eq!(wb.check_name(&def("DUP_X", Some("Data"), "5"), None), None);
 }
 
 #[test]

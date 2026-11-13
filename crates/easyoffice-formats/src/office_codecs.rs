@@ -144,7 +144,7 @@ fn build_workbook_parts(
             }
         })
         .collect();
-    workbook_xml.push_str(&crate::sheet_styling::xlsx_page::print_names_xml(
+    workbook_xml.push_str(&crate::sheet_styling::xlsx_names::defined_names_xml(
         &names, stylings,
     ));
     workbook_xml.push_str("<calcPr calcId=\"191029\" fullCalcOnLoad=\"1\"/></workbook>");
@@ -855,6 +855,10 @@ impl OoxmlCodec {
                 &workbook_names,
                 &mut stylings,
             );
+            if let Some((_, first)) = stylings.first_mut() {
+                (first.defined_names, first.names_rejected) =
+                    crate::sheet_styling::xlsx_names::read_defined_names(wb_xml, &workbook_names);
+            }
         }
         Ok((parsed_sheets, stylings))
     }
