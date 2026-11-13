@@ -303,6 +303,8 @@
 #doc-editor a[data-eo-link] { color: #0563c1; text-decoration: underline; }
 /* A cell with a hyperlink of the sheet window (sheet-link.js) takes the same colour and underline; `:where` keeps it below the number format and conditional formatting colours. */
 :where(.sheet-grid) td[data-link] { color: #0563c1; text-decoration: underline; }
+/* The dark theme uses the link token of the reference editor's dark theme (`--ui-link`, tokens.css): the light blue reads on the dark cell. */
+:where(:root[data-theme-effective="dark"] .sheet-grid) td[data-link] { color: var(--ui-link); }
 
 /* Table of contents of the document editor (doc-toc.js): body text with an indent per heading level, no fill or border, so it prints like the rest of the page. The title is bold at body size, below the headings. With the control-mark display on (as the reference shows field marks only then, `user-settings.ts` showControlCodes) a faint screen-only line marks the block; print and PDF never carry it. */
 #doc-editor .eo-doc-toc { margin: 0 0 1em; color: inherit; font-size: inherit; }

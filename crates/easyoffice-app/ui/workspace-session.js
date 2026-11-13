@@ -591,6 +591,14 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       if (typeof deps.onMenuContext === "function") deps.onMenuContext(commandModule);
       const agg = document.getElementById("status-sheet-agg");
       if (agg) agg.hidden = mod !== "SHEET";
+      // Ctrl+K is the sheet's two-key shortcut, so the search button shows the key that opens it there.
+      const hint = document.getElementById("shortcut-hint");
+      if (hint) {
+        hint.dataset.eoKey ||= hint.textContent;
+        hint.textContent = mod === "SHEET" && !start ? "/" : hint.dataset.eoKey;
+        const button = document.getElementById("btn-command-palette");
+        button?.setAttribute("title", "명령 팔레트 (" + hint.textContent + ")");
+      }
       const docStatus = document.querySelector(".statusbar-left-group");
       if (docStatus) docStatus.hidden = !isDoc;
     }
@@ -756,7 +764,33 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       return getActiveModule() === "START" || document.getElementById("app")?.dataset.windowKind === "start";
     }
 
+    // In the sheet window Ctrl+K starts the two-key shortcut of the reference editor (Ctrl+K, then H: the hyperlink dialog,
+    // `rhwp-studio/src/engine/input-handler-keyboard.ts` `chordMapK`, `_pendingChordK`): the next key ends the chord and any
+    // other key than H goes on as usual. The command search is then reached by `/` and its button (PD-218).
+    let chordK = false;
+    const MODIFIER_KEYS = new Set(["Control", "Meta", "Shift", "Alt"]);
+    const isChordH = (e) => ["h", "H", "ㅗ"].includes(e.key) || e.code === "KeyH";
+
+    function handleChordK(e, actions) {
+      if (chordK) {
+        if (MODIFIER_KEYS.has(e.key)) return false;
+        chordK = false;
+        if (isChordH(e) && !e.altKey) {
+          e.preventDefault();
+          actions.ribbon("insert-link");
+          return true;
+        }
+      }
+      if (getActiveModule() === "SHEET" && !isStartWindow() && shortcutComboFromEvent(e) === "Ctrl+K") {
+        e.preventDefault();
+        chordK = true;
+        return true;
+      }
+      return false;
+    }
+
     function handleShortcutKeydown(e, actions) {
+      if (handleChordK(e, actions)) return true;
       const combo = shortcutComboFromEvent(e);
       const binding = bindingFor(combo);
       if (!binding) return false;
@@ -801,7 +835,10 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     function applyPlatformChrome(info) {
       const modifier = info?.shortcutModifier || "⌘";
       const hint = document.getElementById("shortcut-hint");
-      if (hint) hint.textContent = modifier === "⌘" ? "⌘K" : modifier + "+K";
+      if (hint) {
+        hint.dataset.eoKey = modifier === "⌘" ? "⌘K" : modifier + "+K";
+        hint.textContent = getActiveModule() === "SHEET" && !isStartWindow() ? "/" : hint.dataset.eoKey;
+      }
       normalizeMenuShortcuts(modifier);
       installChromeGuards();
       return modifier;

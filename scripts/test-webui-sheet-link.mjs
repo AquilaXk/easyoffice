@@ -165,7 +165,7 @@ test("the 현재 문서 tab links a range of a sheet or a defined name and refus
   assert.equal(t.byId("sheet-link-ref").value, "B2:C3");
 });
 
-test("the 삽입 menu item 하이퍼링크 제거 and the command search entries remove and open the link", async () => {
+test("the 삽입 menu item 하이퍼링크 제거 removes the link and keeps the text", async () => {
   const t = await open();
   const labels = [...t.document.querySelectorAll('.md-item[data-sheet-act="link-remove"] .md-label')].map((el) => el.textContent);
   assert.deepEqual(labels, ["하이퍼링크 제거"]);
@@ -224,7 +224,7 @@ test("a click on an in-workbook link selects its target, on its sheet", async ()
   assert.equal(t.byId("active-cell-ref").textContent, "B2");
 });
 
-test("the link goes with its cell: sort keeps it on the text, a write or a clear removes it, a fill and a paste copy it", async () => {
+test("a link stays through typed text, the message of a delete is the value only, and the payload carries every link", async () => {
   const t = await open();
   const linkCell = async (ref, url) => {
     await t.select(ref);
@@ -234,32 +234,22 @@ test("the link goes with its cell: sort keeps it on the text, a write or a clear
   };
   await linkCell("A2", "https://example.com/one");
   await linkCell("A3", "https://example.com/two");
-  // typing over a link cell removes the link
-  const a4 = t.cell("A4");
-  a4.focus();
-  a4.textContent = "새 글자";
-  a4.dispatchEvent({ type: "input", target: a4 });
-  a4.blur();
+  const a3 = t.cell("A3");
+  a3.focus();
+  a3.textContent = "고친 글자";
+  a3.dispatchEvent({ type: "input", target: a3 });
+  a3.blur();
   await flushAsyncTurns(8);
-  assert.equal(a4.dataset.link, undefined);
-  await linkCell("A4", "https://example.com/three");
-  const typed = t.cell("A4");
-  typed.focus();
-  typed.textContent = "고친 글자";
-  typed.dispatchEvent({ type: "input", target: typed });
-  typed.blur();
-  await flushAsyncTurns(8);
-  assert.equal(t.cell("A4").dataset.link, undefined, "a write removes the link");
-  // the payload carries the links of the cells that still show something
+  assert.equal(t.cell("A3").textContent, "고친 글자");
+  assert.equal(t.cell("A3").dataset.link, "external", "typing keeps the link");
   const payload = await t.save();
-  const links = payload.sheets[0].links;
-  assert.deepEqual(links, [
+  assert.deepEqual(payload.sheets[0].links, [
     { ref: "A2", target: "https://example.com/one" },
     { ref: "A3", target: "https://example.com/two" },
   ]);
 });
 
-test("a file's links come back on its cells, cells without text lose theirs, an unsafe address is never shown", async () => {
+test("a file's links come back on its cells, a link on an empty cell stays, an unsafe address is never shown", async () => {
   const t = await open();
   await pickFile(t.document, makeFixtureFile("링크.xlsx", {
     sheets: [{
@@ -279,9 +269,9 @@ test("a file's links come back on its cells, cells without text lose theirs, an 
   assert.equal(t.cell("A2").dataset.link, "internal");
   assert.equal(t.cell("A2").getAttribute("title"), "Sheet2!B2");
   assert.equal(t.cell("A3").dataset.link, undefined);
-  assert.equal(t.cell("B9").dataset.link, undefined);
+  assert.equal(t.cell("B9").dataset.link, "external", "a cell with no text keeps its link");
   const payload = await t.save();
-  assert.deepEqual(payload.sheets[0].links, [{ ref: "A1", target: URL_A, tip: "열기" }, { ref: "A2", target: "#Sheet2!B2" }]);
+  assert.deepEqual(payload.sheets[0].links, [{ ref: "A1", target: URL_A, tip: "열기" }, { ref: "A2", target: "#Sheet2!B2" }, { ref: "B9", target: "https://example.com/empty" }]);
 });
 
 // ---- cross-feature --------------------------------------------------------------------------------------
@@ -310,7 +300,7 @@ test("sorting moves a link with its cell's text", async () => {
   assert.equal(t.cell("A4").getAttribute("title"), "https://example.com/da");
 });
 
-test("fill and paste bring the link along in the copy modes; the special pastes of values and formulas do not", async () => {
+test("fill and paste bring the link along (or none) in the copy modes; the special pastes of values, formulas and formats leave the cell's own", async () => {
   const t = await open();
   const link = Object.freeze({ target: URL_A });
   const fill = t.host.__EASYOFFICE_SHEET_FILL_CORE__;
@@ -325,9 +315,9 @@ test("fill and paste bring the link along in the copy modes; the special pastes 
   const now = { value: "원래", formula: "", link: { target: "#Sheet1!A1" } };
   const edits = (mode) => core.planPaste({ ...base, mode, getEntry: () => now }).edits[0];
   assert.deepEqual(edits("all").link, link);
-  assert.equal(edits("values").link, undefined, "a pasted value leaves the cell without a link");
-  assert.equal(edits("formulas").link, undefined);
-  assert.deepEqual(edits("formats").link, now.link, "a pasted format keeps the link the cell has");
+  for (const mode of ["values", "formulas", "formats"]) assert.equal("link" in edits(mode), false, mode + " leaves the link of the cell");
+  const none = { ...base, snap: { ...snap, cells: [[{ value: "가", formula: "" }]] }, mode: "all", getEntry: () => now };
+  assert.equal(core.planPaste(none).edits[0].link, null, "a pasted cell without a link removes the cell's");
 });
 
 test("copying a link cell and pasting it elsewhere makes the second cell a link; cut moves it", async () => {
@@ -357,7 +347,7 @@ test("copying a link cell and pasting it elsewhere makes the second cell a link;
   assert.equal(t.cell("A2").dataset.link, undefined);
 });
 
-test("clearing a link cell removes the link and its undo brings it back", async () => {
+test("Delete empties a link cell and leaves the link; typing then makes it a link with text again; undo brings the text back", async () => {
   const t = await open();
   await t.select("B3");
   await t.openDialog();
@@ -367,10 +357,11 @@ test("clearing a link cell removes the link and its undo brings it back", async 
   t.cell("B3").dispatchEvent({ type: "keydown", key: "Delete", target: t.cell("B3") });
   await flushAsyncTurns(20);
   assert.equal(t.cell("B3").textContent, "");
-  assert.equal(t.cell("B3").dataset.link, undefined);
+  assert.equal(t.cell("B3").dataset.link, "external", "Delete clears the value only");
+  assert.deepEqual((await t.save()).sheets[0].links, [{ ref: "B3", target: URL_A }]);
   await t.undo();
-  assert.equal(t.cell("B3").dataset.link, "external");
   assert.equal(t.cell("B3").textContent, "920");
+  assert.equal(t.cell("B3").dataset.link, "external");
 });
 
 test("the dirty state follows a link change: the fingerprint of the sheet differs with and without the link", async () => {
@@ -424,19 +415,19 @@ test("a protected sheet needs 하이퍼링크 삽입 and an unlocked cell to tak
   assert.equal(alertOpen(), true);
 });
 
-test("a hostile file's links: unsafe addresses never show, a link on an empty cell is dropped, the count is bounded", async () => {
+test("a hostile file's links: unsafe addresses and odd cell names are turned away, the count is bounded", async () => {
   const t = await open();
   const links = Array.from({ length: 70000 }, (_, i) => ({ ref: "A" + (i + 1), target: "https://example.com/" + i }));
-  links.unshift({ ref: "A1", target: "javascript:alert(1)" }, { ref: "A1", target: "file:///etc/passwd" }, { ref: "A1", target: "data:text/html,x" });
-  const cells = Array.from({ length: 70000 }, (_, i) => ({ ref: "A" + (i + 1), raw: "r" + i }));
+  links.unshift(
+    { ref: "A1", target: "javascript:alert(1)" }, { ref: "A1", target: "file:///etc/passwd" }, { ref: "A1", target: "data:text/html,x" },
+    { ref: "__proto__", target: "https://example.com/p" }, { ref: "constructor", target: "https://example.com/p" }, { ref: "A0", target: "https://example.com/p" },
+  );
   const map = {};
   t.host.__EASYOFFICE_SHEET_LINK__.attach(map, links);
-  assert.deepEqual(map, {});
-  for (const c of cells) map[c.ref] = { value: c.raw, formula: "" };
-  t.host.__EASYOFFICE_SHEET_LINK__.attach(map, links);
-  const kept = Object.values(map).filter((e) => e.link).length;
-  assert.equal(kept, 65530, "at most the bound of one sheet");
+  assert.equal(Object.keys(map).length, 65530, "at most the bound of one sheet");
   assert.equal(map.A1.link.target, "https://example.com/0", "the unsafe addresses of that cell were turned away first");
+  assert.equal(Object.getPrototypeOf(map), Object.prototype);
+  assert.equal(Object.prototype.link, undefined);
 });
 
 test("a link to a defined name selects what the name refers to, on its sheet; a name that is gone says so", async () => {
@@ -488,4 +479,44 @@ test("a cell an array filled takes no link", async () => {
   assert.equal(document.getElementById("status-command-feedback").textContent, "채운 칸에는 넣을 수 없음");
   assert.equal(document.getElementById("sheet-link-dialog").open, false);
   assert.deepEqual(saysOf, []);
+});
+
+test("in the sheet window Ctrl+K starts the two-key shortcut of the reference editor: H opens the hyperlink dialog, any other key ends it, the search stays on / and its button", async () => {
+  const t = await open();
+  const { sandbox, document } = t;
+  const dialog = t.byId("sheet-link-dialog");
+  const palette = t.byId("cmd-palette-modal");
+  await t.select("A2");
+  const first = sandbox.dispatchWindowKeydown({ key: "k", ctrlKey: true });
+  assert.equal(first.defaultPrevented, true);
+  assert.equal(palette.open, false, "Ctrl+K no longer opens the search in the sheet window");
+  sandbox.dispatchWindowKeydown({ key: "Control" });
+  const second = sandbox.dispatchWindowKeydown({ key: "h" });
+  assert.equal(second.defaultPrevented, true);
+  await flushAsyncTurns(20);
+  assert.equal(dialog.open, true);
+  dialog.close();
+  // a key that is not H ends the chord and does its own work
+  sandbox.dispatchWindowKeydown({ key: "k", ctrlKey: true });
+  sandbox.dispatchWindowKeydown({ key: "x" });
+  sandbox.dispatchWindowKeydown({ key: "h" });
+  await flushAsyncTurns(10);
+  assert.equal(dialog.open, false);
+  // the Korean layout's key for H and the Meta key of macOS
+  sandbox.dispatchWindowKeydown({ key: "k", metaKey: true });
+  sandbox.dispatchWindowKeydown({ key: "ㅗ" });
+  await flushAsyncTurns(20);
+  assert.equal(dialog.open, true);
+  dialog.close();
+  assert.equal(document.getElementById("shortcut-hint").textContent, "/");
+  assert.match(t.byId("btn-command-palette").getAttribute("title"), /\(\/\)/);
+  document.activeElement?.blur?.();
+  sandbox.dispatchWindowKeydown({ key: "/" });
+  assert.equal(palette.open, true);
+  palette.close();
+  switchModule(document, "DOC");
+  await flushAsyncTurns(8);
+  sandbox.dispatchWindowKeydown({ key: "k", ctrlKey: true });
+  assert.equal(palette.open, true, "the other windows keep Ctrl+K for the search");
+  assert.notEqual(document.getElementById("shortcut-hint").textContent, "/");
 });
