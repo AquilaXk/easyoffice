@@ -76,17 +76,25 @@
   overflow-y: hidden;
 }
 
-#icon-toolbar .tb-group {
+#slide-toolbar {
+  height: 56px;
+  padding: 2px 8px;
+}
+
+#icon-toolbar .tb-group,
+#slide-toolbar .tb-group {
   align-items: stretch;
   gap: 0;
 }
 
-#icon-toolbar .tb-sep {
+#icon-toolbar .tb-sep,
+#slide-toolbar .tb-sep {
   width: 1px;
   height: auto;
 }
 
-#icon-toolbar .tb-btn {
+#icon-toolbar .tb-btn,
+#slide-toolbar .tb-btn {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -168,6 +176,13 @@
 .icon-bullet { background-position: calc(-40px * 9) calc(-40px * 8); }
 .icon-outdent { background-position: calc(-40px * 4) calc(-40px * 9); }
 .icon-indent { background-position: calc(-40px * 5) calc(-40px * 9); }
+.icon-add { background-position: calc(-40px * 24) calc(-40px * 2); }
+.icon-remove { background-position: calc(-40px * 25) calc(-40px * 2); }
+.icon-arrow-up { background-position: calc(-40px * 1) calc(-40px * 7); }
+.icon-arrow-down { background-position: calc(-40px * 2) calc(-40px * 7); }
+.icon-slide-show { background-position: calc(-40px * 8) calc(-40px * 2); }
+.icon-slide-show-current { background-position: calc(-40px * 9) calc(-40px * 2); }
+.icon-pointer { background-position: calc(-40px * 5) calc(-40px * 1); }
 .icon-currency { background-position: calc(-40px * 0) calc(-40px * 12); }
 .icon-decimal-increase { background-position: calc(-40px * 1) calc(-40px * 12); }
 .icon-decimal-decrease { background-position: calc(-40px * 2) calc(-40px * 12); }

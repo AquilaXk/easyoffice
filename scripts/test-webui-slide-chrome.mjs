@@ -22,7 +22,7 @@ async function openSlide() {
   return harness;
 }
 
-test("the slide toolbar is an rhwp toolbar: icon groups with accessible names, no text buttons", async () => {
+test("the slide toolbar is an rhwp toolbar: icon-above-label buttons with accessible names", async () => {
   const { document } = await openSlide();
   const bar = document.getElementById("slide-toolbar");
   assert.equal(bar.getAttribute("role"), "toolbar");
@@ -32,8 +32,9 @@ test("the slide toolbar is an rhwp toolbar: icon groups with accessible names, n
     const btn = document.getElementById(id);
     assert.ok(btn.classList.contains("tb-btn"), `${id} is a .tb-btn`);
     assert.ok(btn.getAttribute("aria-label"), `${id} has an accessible name`);
-    assert.ok(btn.querySelector("svg"), `${id} shows an icon`);
-    assert.equal(btn.textContent.trim(), "", `${id} has no text`);
+    assert.ok(btn.querySelector(".tb-sprite"), `${id} shows a cell of the reference sprite`);
+    assert.ok(btn.querySelector(".tb-label")?.textContent.trim(), `${id} has its label under the icon`);
+    assert.equal(btn.querySelector("svg"), null, `${id} draws no icon of its own`);
   }
   assert.equal(bar.querySelector(".secondary-btn"), null);
 });

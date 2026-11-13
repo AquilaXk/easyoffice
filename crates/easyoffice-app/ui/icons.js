@@ -12,12 +12,6 @@
 
   const ICONS = Object.freeze({
     "rotate-cw": ["M20 5v5h-5", "M20 10a8 8 0 1 0 1 4"],
-    play: ["M7 4l13 8-13 8z"],
-    "arrow-down": ["M12 5v14", "M6 13l6 6 6-6"],
-    "arrow-up": ["M12 19V5", "M6 11l6-6 6 6"],
-    "play-current": ["M8 5l11 7-11 7z", "M4 5v14"],
-    laser: ["M12 3v4", "M12 17v4", "M3 12h4", "M17 12h4", circle(12, 12, 2)],
-    trash: ["M4 7h16", "M9 7V4h6v3", "M6 7l1 13h10l1-13", "M10 11v6", "M14 11v6"],
     save: ["M5 4h11l3 3v13H5z", "M8 4v5h7V4", "M8 20v-6h8v6"],
     undo: ["M9 14L4 9l5-5", "M4 9h10a6 6 0 0 1 0 12h-3"],
     redo: ["M15 14l5-5-5-5", "M20 9H10a6 6 0 0 0 0 12h3"],
