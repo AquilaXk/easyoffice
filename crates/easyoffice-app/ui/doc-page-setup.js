@@ -29,6 +29,11 @@
   // The two papers the page layout knew before a setup existed (`doc-pages-core.js` `PAPER_PX`), in twips.
   const PAPER_TWIPS = { A4: [11906, 16838], Letter: [12240, 15840] };
   const KEYS = ["width", "height", "left", "right", "top", "bottom", "header", "footer"];
+  // The binding (제본) follows the eight values when it is not the default: its gutter in twips and its kind (0 한쪽, 1 맞쪽,
+  // 2 위로, the engine's `RichBindingKind`). A page bound at the top takes its gutter from the height, the others from the width.
+  const BINDING_KEYS = ["gutter", "binding"];
+  const BINDING_KINDS = ["single", "duplex", "top"];
+  const TOP_BINDING = 2;
   // The new-document margins of a page without a setup: the editor's own padding (48px 56px).
   const DEFAULT_SIDE = { top: 720, bottom: 720, left: 840, right: 840, header: 720, footer: 720 };
   // The margin sets 여백 전환 goes through, in order: the reference editor's new-document margins, then narrow and wide ones
@@ -57,19 +62,25 @@
   // `data-eo-page` as a setup, or null when it is absent or malformed.
   function parse(text) {
     const parts = String(text ?? "").split(",").map(Number);
-    if (parts.length !== KEYS.length || !parts.every((v) => Number.isInteger(v) && v >= 0 && v <= MAX_TWIPS)) return null;
-    return Object.fromEntries(KEYS.map((key, i) => [key, parts[i]]));
+    if (parts.length !== KEYS.length && parts.length !== KEYS.length + BINDING_KEYS.length) return null;
+    if (!parts.every((v, i) => Number.isInteger(v) && v >= 0 && v <= (i === KEYS.length + 1 ? TOP_BINDING : MAX_TWIPS))) return null;
+    return Object.fromEntries([...KEYS, ...BINDING_KEYS].map((key, i) => [key, parts[i] ?? 0]));
   }
 
-  const encode = (setup) => KEYS.map((key) => setup[key]).join(",");
+  const encode = (setup) => {
+    const bound = (setup.gutter ?? 0) > 0 || (setup.binding ?? 0) > 0;
+    return [...KEYS, ...(bound ? BINDING_KEYS : [])].map((key) => setup[key] ?? 0).join(",");
+  };
 
   // The setup is usable: every value within the engine's bounds, the header and footer distances inside their
   // margins, and a body of at least 10 mm in both directions. Returns the reason or null.
   function violation(setup) {
-    if (!KEYS.every((key) => Number.isInteger(setup[key]) && setup[key] >= 0 && setup[key] <= MAX_TWIPS)) return MSG_TOO_BIG;
+    if (![...KEYS, "gutter"].every((key) => Number.isInteger(setup[key] ?? 0) && (setup[key] ?? 0) >= 0 && (setup[key] ?? 0) <= MAX_TWIPS)) return MSG_TOO_BIG;
     const mm = (twips) => (twips / TWIPS_PER_MM).toFixed(1);
-    const width = setup.width - setup.left - setup.right;
-    const height = setup.height - setup.top - setup.bottom;
+    const atTop = setup.binding === TOP_BINDING;
+    const gutter = setup.gutter ?? 0;
+    const width = setup.width - setup.left - setup.right - (atTop ? 0 : gutter);
+    const height = setup.height - setup.top - setup.bottom - (atTop ? gutter : 0);
     if (width < MIN_BODY_TWIPS) {
       return "좌우 여백이 너무 커서 본문이 남지 않습니다 (본문 너비 " + mm(width) + "mm, 최소 " + MIN_BODY_MM + "mm). 왼쪽·오른쪽 여백을 줄여주세요.";
     }
@@ -91,6 +102,7 @@
       header: twipsToMm(Math.max(0, setup.top - setup.header)),
       bottom: twipsToMm(Math.max(0, setup.bottom - setup.footer)),
       footer: twipsToMm(setup.footer),
+      gutter: twipsToMm(setup.gutter ?? 0),
     };
   }
 
@@ -113,6 +125,8 @@
       bottom: footer + footerArea,
       header,
       footer,
+      gutter: twips("gutter", original?.gutter ?? 0),
+      binding: Number(fields.binding) || 0,
     };
   }
 
@@ -121,7 +135,9 @@
     const paper = pageSetup?.paper;
     const margins = pageSetup?.margins;
     if (!paper && !margins) return null;
-    const setup = { width: 11906, height: 16838, ...DEFAULT_SIDE, ...(paper ?? {}), ...(margins ?? {}) };
+    const kind = BINDING_KINDS.indexOf(pageSetup?.binding?.kind);
+    const binding = { gutter: Number(pageSetup?.binding?.gutter) || 0, binding: Math.max(0, kind) };
+    const setup = { width: 11906, height: 16838, ...DEFAULT_SIDE, ...(paper ?? {}), ...(margins ?? {}), ...binding };
     return violation(setup) === null && setup.header <= setup.top && setup.footer <= setup.bottom ? setup : null;
   }
 
@@ -132,7 +148,8 @@
     if (!setup) return { eoPage: "", padding: "", maxWidth: "", paperSize: "" };
     return {
       eoPage: encode(setup),
-      padding: [setup.top, setup.right, setup.bottom, setup.left].map((v) => px(v) + "px").join(" "),
+      // The gutter is margin on the bound side (a facing-pages binding is drawn as the odd page's).
+      padding: (setup.binding === TOP_BINDING ? [setup.top + (setup.gutter ?? 0), setup.right, setup.bottom, setup.left] : [setup.top, setup.right, setup.bottom, setup.left + (setup.gutter ?? 0)]).map((v) => px(v) + "px").join(" "),
       maxWidth: "",
       paperSize: "",
     };
@@ -142,12 +159,14 @@
   function payloadOf(text) {
     const setup = parse(text);
     if (!setup || violation(setup) !== null || setup.header > setup.top || setup.footer > setup.bottom) return {};
-    return {
+    const out = {
       pageSetup: {
         paper: { width: setup.width, height: setup.height },
         margins: { top: setup.top, bottom: setup.bottom, header: setup.header, footer: setup.footer, left: setup.left, right: setup.right },
       },
     };
+    if (setup.gutter > 0 || setup.binding > 0) out.pageSetup.binding = { kind: BINDING_KINDS[setup.binding], gutter: setup.gutter };
+    return out;
   }
 
   function applyToEditor(editor, setup) {
@@ -165,7 +184,7 @@
     const env = deps.env || host;
     const kit = host.__EASYOFFICE_CREATE_SHEET_DIALOG_KIT__(document);
     const byId = (id) => document.getElementById(id);
-    const FIELD_IDS = { width: "doc-ps-width", height: "doc-ps-height", left: "doc-ps-left", right: "doc-ps-right", top: "doc-ps-top", bottom: "doc-ps-bottom", header: "doc-ps-header", footer: "doc-ps-footer" };
+    const FIELD_IDS = { gutter: "doc-ps-gutter", width: "doc-ps-width", height: "doc-ps-height", left: "doc-ps-left", right: "doc-ps-right", top: "doc-ps-top", bottom: "doc-ps-bottom", header: "doc-ps-header", footer: "doc-ps-footer" };
     let original = null;
 
     // The setup the document has now: its own, else what the page layout shows (the paper, the padding and the
@@ -193,7 +212,9 @@
     }
 
     function readFields() {
-      return Object.fromEntries(Object.entries(FIELD_IDS).map(([key, id]) => [key, Number.parseFloat(kit.val(id)) || 0]));
+      const fields = Object.fromEntries(Object.entries(FIELD_IDS).map(([key, id]) => [key, Number.parseFloat(kit.val(id)) || 0]));
+      fields.binding = BINDING_IDS.findIndex((id) => kit.checked(id));
+      return fields;
     }
 
     function writeFields(fields) {
@@ -201,6 +222,11 @@
     }
 
     const landscape = () => kit.checked("doc-ps-landscape");
+    const BINDING_IDS = ["doc-ps-single", "doc-ps-duplex", "doc-ps-top-binding"];
+
+    function markBinding() {
+      for (const id of BINDING_IDS) byId(id)?.closest(".icon-radio-card")?.classList.toggle("selected", kit.checked(id));
+    }
 
     function markOrientation() {
       for (const id of ["doc-ps-portrait", "doc-ps-landscape"]) byId(id)?.closest(".icon-radio-card")?.classList.toggle("selected", kit.checked(id));
@@ -242,6 +268,8 @@
       writeFields(toFields(setup));
       kit.setChecked(setup.width > setup.height ? "doc-ps-landscape" : "doc-ps-portrait", true);
       markOrientation();
+      kit.setChecked(BINDING_IDS[setup.binding ?? 0], true);
+      markBinding();
       syncPaper();
     }
 
@@ -326,6 +354,7 @@
       byId("btn-doc-ps-apply")?.addEventListener("click", apply);
       byId("doc-ps-paper")?.addEventListener("change", onPaperChange);
       for (const id of ["doc-ps-portrait", "doc-ps-landscape"]) byId(id)?.addEventListener("change", onOrientChange);
+      for (const id of BINDING_IDS) byId(id)?.addEventListener("change", markBinding);
       // A field cannot go below zero or past the engine's bound (the reference clamps the minimum on `change`).
       const max = round1(MAX_TWIPS / TWIPS_PER_MM);
       for (const id of Object.values(FIELD_IDS)) {

@@ -8,7 +8,8 @@
 use std::fmt::Write;
 
 use easyoffice_formats::{
-    EasyOfficeError, RichPageFrame, RichPageMargins, RichPaper, MAX_PAGE_MARGIN_TWIPS,
+    EasyOfficeError, RichBinding, RichBindingKind, RichPageFrame, RichPageMargins, RichPaper,
+    MAX_PAGE_MARGIN_TWIPS,
 };
 
 use crate::convert_structured::{field, invalid, opt_bounded, JsonObject};
@@ -18,6 +19,7 @@ pub(crate) fn write_page_setup(out: &mut String, frame: &RichPageFrame) {
     if frame.margins.is_none() && frame.paper.is_none() {
         return;
     }
+    let binding = frame.binding;
     out.push_str("\"pageSetup\":{");
     let mut sep = "";
     if let Some(p) = frame.paper {
@@ -33,6 +35,19 @@ pub(crate) fn write_page_setup(out: &mut String, frame: &RichPageFrame) {
             out,
             "{sep}\"margins\":{{\"top\":{},\"bottom\":{},\"header\":{},\"footer\":{},\"left\":{},\"right\":{}}}",
             m.top, m.bottom, m.header, m.footer, m.left, m.right
+        );
+        sep = ",";
+    }
+    if binding != RichBinding::default() {
+        let kind = match binding.kind {
+            RichBindingKind::Single => "single",
+            RichBindingKind::Duplex => "duplex",
+            RichBindingKind::Top => "top",
+        };
+        let _ = write!(
+            out,
+            "{sep}\"binding\":{{\"kind\":\"{kind}\",\"gutter\":{}}}",
+            binding.gutter
         );
     }
     out.push_str("},");
@@ -78,12 +93,12 @@ fn parse_margins(obj: &JsonObject) -> Result<RichPageMargins, EasyOfficeError> {
     Ok(margins)
 }
 
+pub(crate) type ParsedSetup = (Option<RichPageMargins>, Option<RichPaper>, RichBinding);
+
 /// The `"pageSetup"` of a document payload as the margins and paper of its page frame.
-pub(crate) fn parse_page_setup(
-    entries: &JsonObject,
-) -> Result<(Option<RichPageMargins>, Option<RichPaper>), EasyOfficeError> {
+pub(crate) fn parse_page_setup(entries: &JsonObject) -> Result<ParsedSetup, EasyOfficeError> {
     let Some(value) = field(entries, "pageSetup") else {
-        return Ok((None, None));
+        return Ok((None, None, RichBinding::default()));
     };
     let setup = object(value, "pageSetup")?;
     let paper = field(setup, "paper")
@@ -92,10 +107,30 @@ pub(crate) fn parse_page_setup(
     let margins = field(setup, "margins")
         .map(|v| object(v, "pageSetup.margins").and_then(parse_margins))
         .transpose()?;
+    let binding = field(setup, "binding")
+        .map(|v| object(v, "pageSetup.binding").and_then(parse_binding))
+        .transpose()?
+        .unwrap_or_default();
     if let (Some(p), Some(m)) = (paper, margins) {
-        if !p.holds(&m) {
+        if !p.holds_bound(&m, binding) {
             return Err(invalid("구조화 저장: 여백이 커서 본문이 남지 않습니다."));
         }
     }
-    Ok((margins, paper))
+    Ok((margins, paper, binding))
+}
+
+fn parse_binding(obj: &JsonObject) -> Result<RichBinding, EasyOfficeError> {
+    let kind = match crate::convert_structured::opt_str(obj, "kind")? {
+        Some("single") | None => RichBindingKind::Single,
+        Some("duplex") => RichBindingKind::Duplex,
+        Some("top") => RichBindingKind::Top,
+        Some(_) => {
+            return Err(invalid(
+                "구조화 저장: 'pageSetup.binding.kind'가 올바르지 않습니다.",
+            ))
+        }
+    };
+    let gutter =
+        opt_bounded(obj, "gutter", 0, i64::from(MAX_PAGE_MARGIN_TWIPS))?.unwrap_or(0) as u32;
+    Ok(RichBinding { kind, gutter })
 }

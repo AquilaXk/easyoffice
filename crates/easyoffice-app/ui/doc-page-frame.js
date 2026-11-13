@@ -37,7 +37,7 @@
   // `data-eo-page` as `{ top, bottom, header, footer }` in twips, or null when it is absent or malformed.
   function parseMargins(text) {
     const parts = String(text ?? "").split(",").map((v) => Number(v));
-    if (parts.length !== 8 || !parts.every((v) => Number.isInteger(v) && v >= 0)) return null;
+    if ((parts.length !== 8 && parts.length !== 10) || !parts.every((v) => Number.isInteger(v) && v >= 0)) return null;
     return Object.fromEntries(Object.entries(PAGE_MARGIN_AT).map(([key, at]) => [key, parts[at]]));
   }
 

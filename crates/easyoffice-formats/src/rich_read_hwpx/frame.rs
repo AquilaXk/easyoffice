@@ -9,7 +9,7 @@ use crate::hwpx_parts::HWPUNIT_PER_TWIP;
 use crate::rich_document::{frame_paragraph, MAX_PAGE_FRAME_PARAGRAPHS};
 use crate::rich_page_frame::margins_from_hwpx;
 use crate::xml_stream::{attr, XmlEvent};
-use crate::{RichBlock, RichField, RichPaper, RichRun};
+use crate::{RichBinding, RichBindingKind, RichBlock, RichField, RichPaper, RichRun};
 
 /// Header and footer controls that are not kept.
 #[derive(Default)]
@@ -38,6 +38,7 @@ impl SectionWalker {
             return;
         }
         let (mut paper, mut landscape) = (None, false);
+        let mut kind = RichBindingKind::Single;
         for event in events {
             let XmlEvent::Start { name, attrs } = event else {
                 continue;
@@ -46,6 +47,11 @@ impl SectionWalker {
             if *name == "hp:pagePr" {
                 landscape =
                     attr(attrs, "landscape").is_some_and(|v| v.eq_ignore_ascii_case("NARROWLY"));
+                kind = match attr(attrs, "gutterType").as_deref() {
+                    Some("LEFT_RIGHT") => RichBindingKind::Duplex,
+                    Some("TOP_BOTTOM") => RichBindingKind::Top,
+                    _ => RichBindingKind::Single,
+                };
                 if let (Some(width), Some(height)) = (value("width"), value("height")) {
                     paper = Some((to_twips(width), to_twips(height)));
                 }
@@ -77,9 +83,14 @@ impl SectionWalker {
                         }
                     }
                 });
-                if paper.is_none_or(|p| p.holds(&margins)) {
+                let binding = RichBinding {
+                    kind,
+                    gutter: to_twips(value("gutter").unwrap_or(0)),
+                };
+                if paper.is_none_or(|p| p.holds_bound(&margins, binding)) {
                     self.margins = Some(margins);
                     self.paper = paper;
+                    self.binding = binding;
                 }
             }
             return;

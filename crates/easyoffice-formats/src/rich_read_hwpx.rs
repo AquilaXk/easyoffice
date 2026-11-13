@@ -19,9 +19,9 @@ use crate::rich_table::{table_from_placed, PlacedCell};
 use crate::rich_xml::{heading_level_from_name, push_linked_run, CharFmt};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
-    EasyOfficeError, HwpxCodec, RichAlignment, RichBlock, RichDocument, RichImage, RichListKind,
-    RichPageFrame, RichPageMargins, RichPaper, RichParagraph, RichRun, RichScript, ZipArchiveCodec,
-    ZipArchiveEntry, ZipSecurityPolicy,
+    EasyOfficeError, HwpxCodec, RichAlignment, RichBinding, RichBlock, RichDocument, RichImage,
+    RichListKind, RichPageFrame, RichPageMargins, RichPaper, RichParagraph, RichRun, RichScript,
+    ZipArchiveCodec, ZipArchiveEntry, ZipSecurityPolicy,
 };
 
 /// EMU per HWPUNIT (1/7200 inch).
@@ -426,6 +426,7 @@ struct SectionWalker {
     /// Page setup of the first section that gives one.
     margins: Option<RichPageMargins>,
     paper: Option<RichPaper>,
+    binding: RichBinding,
     left_out: frame::FrameLeftOut,
 }
 
@@ -829,6 +830,7 @@ fn finish_frame(walker: &mut SectionWalker) -> RichPageFrame {
     let mut frame = std::mem::take(&mut walker.frame);
     frame.margins = walker.margins;
     frame.paper = walker.paper;
+    frame.binding = walker.binding;
     frame
 }
 

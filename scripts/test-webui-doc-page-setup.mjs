@@ -136,11 +136,11 @@ test("the page layout draws the paper of the setup and the header follows its ma
 test("fields left as shown keep their exact twips, an edited field changes alone, and the engine's distances come back from the dialog's", async () => {
   const { core } = await openDoc("w-ps-exact");
   const original = { width: 11906, height: 16838, left: 1001, right: 999, top: 1984, bottom: 1700, header: 1134, footer: 850 };
-  assert.deepEqual(core.fromFields(core.toFields(original), original), original, "pressing 확인 on an untouched dialog changes nothing");
+  assert.deepEqual(core.fromFields(core.toFields(original), original), { ...original, gutter: 0, binding: 0 }, "pressing 확인 on an untouched dialog changes nothing");
   const edited = core.fromFields({ ...core.toFields(original), left: 20 }, original);
   assert.equal(edited.left, core.mmToTwips(20));
-  assert.deepEqual({ ...edited, left: original.left }, original);
-  assert.deepEqual(core.toFields(original), { width: 210, height: 297, left: 17.7, right: 17.6, top: 20, header: 15, bottom: 15, footer: 15 });
+  assert.deepEqual({ ...edited, left: original.left }, { ...original, gutter: 0, binding: 0 });
+  assert.deepEqual(core.toFields(original), { width: 210, height: 297, left: 17.7, right: 17.6, top: 20, header: 15, bottom: 15, footer: 15, gutter: 0 });
 });
 
 test("용지 방향 전환 turns the page and 여백 전환 goes through the margin sets, each as one undo step", async () => {
@@ -173,4 +173,43 @@ test("a turn that leaves no body is refused and the page stays as it was", async
   h.userClick(studioItem(h.document, "layout-orientation"));
   await flushAsyncTurns(4);
   assert.deepEqual([h.core.parse(h.editor.dataset.eoPage).width, h.core.parse(h.editor.dataset.eoPage).height], [3000, 16838]);
+});
+
+test("the binding is a gutter and a kind: it travels in data-eo-page, takes room from the width or (at the top) the height, and reaches the payload", async () => {
+  const h = await openDoc("w-ps-binding");
+  const { core } = h;
+  const base = { width: 11906, height: 16838, left: 1701, right: 1701, top: 1985, bottom: 1590, header: 1134, footer: 680 };
+  assert.equal(core.encode({ ...base, gutter: 0, binding: 0 }), "11906,16838,1701,1701,1985,1590,1134,680", "an unbound page keeps the eight values");
+  assert.equal(core.encode({ ...base, gutter: 567, binding: 1 }), "11906,16838,1701,1701,1985,1590,1134,680,567,1");
+  assert.deepEqual(core.parse("11906,16838,1701,1701,1985,1590,1134,680,567,1"), { ...base, gutter: 567, binding: 1 });
+  assert.equal(core.parse("11906,16838,1701,1701,1985,1590,1134,680,567,3"), null, "a kind past 위로 is not one");
+  assert.equal(core.parse("1,2,3,4,5,6,7,8,9"), null);
+  assert.equal(core.violation({ ...base, gutter: 9000, binding: 0 })?.startsWith("좌우 여백이 너무 커서"), true);
+  assert.equal(core.violation({ ...base, gutter: 9000, binding: 2 }), null, "a gutter at the top takes height");
+  assert.equal(core.violation({ ...base, gutter: 15000, binding: 2 })?.startsWith("위아래 여백"), true);
+  assert.equal(core.layoutFields({ ...base, gutter: 300, binding: 0 }).padding, "132.33px 113.4px 106px 128.4px".replace("113.4px 106px 128.4px", "113.4px 106px 133.4px"));
+  assert.match(core.layoutFields({ ...base, gutter: 300, binding: 2 }).padding, /^152\.33px /);
+  assert.deepEqual(core.payloadOf(core.encode({ ...base, gutter: 567, binding: 1 })).pageSetup.binding, { kind: "duplex", gutter: 567 });
+  assert.equal("binding" in core.payloadOf(core.encode({ ...base, gutter: 0, binding: 0 })).pageSetup, false);
+  const decoded = core.fromDecoded({ paper: { width: 11906, height: 16838 }, margins: { top: 1985, bottom: 1590, header: 1134, footer: 680, left: 1701, right: 1701 }, binding: { kind: "top", gutter: 283 } });
+  assert.deepEqual([decoded.gutter, decoded.binding], [283, 2]);
+});
+
+test("the dialog has the 제본 cards and field: 맞쪽 and a gutter are applied as one undo step", async () => {
+  const h = await openDoc("w-ps-binding-dialog");
+  h.userClick(studioItem(h.document, "layout-paper"));
+  await flushAsyncTurns();
+  assert.equal(h.field("single").checked, true);
+  assert.equal(h.field("gutter").value, "0.0");
+  h.field("single").checked = false;
+  h.field("duplex").checked = true;
+  h.fire(h.field("duplex"));
+  h.type("gutter", 10);
+  h.document.getElementById("btn-doc-ps-apply").click();
+  await flushAsyncTurns(4);
+  const setup = h.core.parse(h.editor.dataset.eoPage);
+  assert.deepEqual([setup.binding, h.core.twipsToMm(setup.gutter)], [1, 10]);
+  h.userClick(studioItem(h.document, "studio-undo"));
+  await flushAsyncTurns(4);
+  assert.equal(h.editor.dataset.eoPage ?? "", "");
 });

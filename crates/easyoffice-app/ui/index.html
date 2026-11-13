@@ -1054,6 +1054,14 @@
                 <label class="icon-radio-card"><input class="icon-radio-input" type="radio" name="doc-ps-orient" value="landscape" id="doc-ps-landscape" /><span class="icon-radio-icon"><svg xmlns="http://www.w3.org/2000/svg" class="orient-icon orient-icon-landscape" width="40" height="28" viewBox="0 0 40 28" aria-hidden="true" focusable="false"><rect x="1" y="1" width="38" height="26" rx="2" fill="#fff" stroke="#748bc9" stroke-width="1.5" /><line x1="7" y1="7" x2="33" y2="7" stroke="#aab" stroke-width="1.2" /><line x1="7" y1="11" x2="33" y2="11" stroke="#aab" stroke-width="1.2" /><line x1="7" y1="15" x2="29" y2="15" stroke="#aab" stroke-width="1.2" /><line x1="7" y1="19" x2="23" y2="19" stroke="#c5cce0" stroke-width="1.1" /></svg></span><span class="icon-radio-text">가로</span></label>
               </div>
             </div>
+          <div class="dialog-section">
+            <div class="dialog-section-title">제본</div>
+            <div class="dialog-icon-radio-group">
+              <label class="icon-radio-card"><input class="icon-radio-input" type="radio" name="doc-ps-binding" value="0" id="doc-ps-single" /><span class="icon-radio-icon"><svg width="24" height="32" viewBox="0 0 24 32" aria-hidden="true" focusable="false"><rect x="1" y="1" width="22" height="30" rx="1.5" fill="#fff" stroke="#748bc9" stroke-width="1.2" /><line x1="5" y1="7" x2="19" y2="7" stroke="#bbc" stroke-width="1" /><line x1="5" y1="10" x2="19" y2="10" stroke="#bbc" stroke-width="1" /><line x1="5" y1="13" x2="15" y2="13" stroke="#bbc" stroke-width="1" /></svg></span><span class="icon-radio-text">한쪽</span></label>
+              <label class="icon-radio-card"><input class="icon-radio-input" type="radio" name="doc-ps-binding" value="1" id="doc-ps-duplex" /><span class="icon-radio-icon"><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true" focusable="false"><rect x="1" y="1" width="13" height="30" rx="1.5" fill="#fff" stroke="#748bc9" stroke-width="1.2" /><rect x="18" y="1" width="13" height="30" rx="1.5" fill="#fff" stroke="#748bc9" stroke-width="1.2" /><line x1="14" y1="4" x2="14" y2="28" stroke="#335095" stroke-width="1.5" stroke-dasharray="2,2" /></svg></span><span class="icon-radio-text">맞쪽</span></label>
+              <label class="icon-radio-card"><input class="icon-radio-input" type="radio" name="doc-ps-binding" value="2" id="doc-ps-top-binding" /><span class="icon-radio-icon"><svg width="24" height="32" viewBox="0 0 24 32" aria-hidden="true" focusable="false"><rect x="1" y="1" width="22" height="13" rx="1.5" fill="#fff" stroke="#748bc9" stroke-width="1.2" /><rect x="1" y="18" width="22" height="13" rx="1.5" fill="#fff" stroke="#748bc9" stroke-width="1.2" /><line x1="4" y1="15" x2="20" y2="15" stroke="#335095" stroke-width="1.5" stroke-dasharray="2,2" /></svg></span><span class="icon-radio-text">위로</span></label>
+            </div>
+          </div>
           </div>
           <div class="dialog-section">
             <div class="dialog-section-title">용지 여백</div>
@@ -1064,6 +1072,7 @@
               <label class="dialog-label" for="doc-ps-right">오른쪽</label><input id="doc-ps-right" class="dialog-input" type="number" step="0.1" min="0" /><span class="dialog-unit">mm</span>
               <label class="dialog-label" for="doc-ps-header">머리말</label><input id="doc-ps-header" class="dialog-input" type="number" step="0.1" min="0" /><span class="dialog-unit">mm</span>
               <label class="dialog-label" for="doc-ps-footer">꼬리말</label><input id="doc-ps-footer" class="dialog-input" type="number" step="0.1" min="0" /><span class="dialog-unit">mm</span>
+              <label class="dialog-label" for="doc-ps-gutter">제본</label><input id="doc-ps-gutter" class="dialog-input" type="number" step="0.1" min="0" /><span class="dialog-unit">mm</span>
             </div>
           </div>
           <div class="dialog-status-row"><span id="doc-ps-status" class="dialog-status" role="status" aria-live="polite"></span></div>

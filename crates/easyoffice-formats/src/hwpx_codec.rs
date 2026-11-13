@@ -15,8 +15,8 @@ use crate::hwpx_parts::{
 };
 use crate::office_codecs::{checked_part, checked_zip_xml_entries};
 use crate::rich_document::{
-    frame_paragraph, RichAlignment, RichBlock, RichDocument, RichField, RichPageMargins, RichPaper,
-    RichParagraph,
+    frame_paragraph, RichAlignment, RichBinding, RichBlock, RichDocument, RichField,
+    RichPageMargins, RichPaper, RichParagraph,
 };
 use crate::rich_image::{check_document_images, RichImage};
 use crate::rich_image_writers::{hwpx_picture_run, MediaParts};
@@ -237,6 +237,7 @@ struct SectionWriter {
     /// Page margins and paper of the section (`hp:pagePr`); the defaults when `None`.
     margins: Option<RichPageMargins>,
     paper: Option<RichPaper>,
+    binding: RichBinding,
 }
 
 impl SectionWriter {
@@ -251,6 +252,7 @@ impl SectionWriter {
             frame_controls: String::new(),
             margins: None,
             paper: None,
+            binding: RichBinding::default(),
         }
     }
 
@@ -264,6 +266,7 @@ impl SectionWriter {
             frame_controls: String::new(),
             margins: None,
             paper: None,
+            binding: RichBinding::default(),
         }
     }
 
@@ -293,6 +296,7 @@ impl SectionWriter {
             self.xml.push_str(&section_properties_xml(
                 self.margins.as_ref(),
                 self.paper.as_ref(),
+                self.binding,
             ));
             self.xml.push_str(&self.frame_controls);
             self.xml.push_str("</hp:run>");
@@ -336,7 +340,8 @@ impl SectionWriter {
     fn table_paragraph(&mut self, rows: &[Vec<String>], spans: Option<&SpanMap>) {
         let row_cnt = rows.len();
         let col_cnt = rows.iter().map(Vec::len).max().unwrap_or(0).max(1);
-        let cell_w = text_width(self.margins.as_ref(), self.paper.as_ref()) / col_cnt as u32;
+        let cell_w =
+            text_width(self.margins.as_ref(), self.paper.as_ref(), self.binding) / col_cnt as u32;
         let tbl_id = self.next_table_id;
         self.next_table_id += 1;
         self.open_paragraph();
@@ -422,6 +427,7 @@ impl HwpxCodec {
         shapes.file_text = doc.display_title();
         sec.margins = doc.page_frame.margins;
         sec.paper = doc.page_frame.paper;
+        sec.binding = doc.page_frame.binding;
         for (header, paragraphs) in [
             (true, &doc.page_frame.header),
             (false, &doc.page_frame.footer),

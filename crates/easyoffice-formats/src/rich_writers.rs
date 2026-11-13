@@ -26,8 +26,9 @@ use crate::rich_list_writers::{
     OdtListWriter,
 };
 use crate::rich_page_frame::{
-    docx_field_run, docx_frame_part, docx_frame_refs, docx_page_margins, docx_paper, odt_field,
-    odt_master_page, odt_styles_xml, DOCX_FOOTER_PART, DOCX_HEADER_PART,
+    docx_field_run, docx_frame_part, docx_frame_refs, docx_page_margins, docx_paper, docx_settings,
+    odt_field, odt_master_page, odt_styles_xml, DOCX_FOOTER_PART, DOCX_HEADER_PART,
+    DOCX_SETTINGS_PART,
 };
 use crate::rich_run_writers::{
     docx_run_properties, odt_font_face_decls, odt_text_key, odt_text_key_is_plain,
@@ -292,12 +293,17 @@ pub(crate) fn pack_docx_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeEr
     toc_scope.enter(&mut body, &doc.blocks, doc.blocks.len());
     let header_part = docx_frame_part(&doc.page_frame.header, true);
     let footer_part = docx_frame_part(&doc.page_frame.footer, false);
-    let frame = docx_frame_refs(header_part.is_some(), footer_part.is_some());
+    let mut frame = docx_frame_refs(header_part.is_some(), footer_part.is_some());
+    let settings = docx_settings(doc.page_frame.binding);
+    if let Some((_, rel, content_type)) = &settings {
+        frame.relationships.push_str(rel);
+        frame.content_types.push_str(content_type);
+    }
     body.push_str(&format!(
         "<w:sectPr>{}{}{}</w:sectPr>",
         frame.section,
         docx_paper(doc.page_frame.paper.as_ref()),
-        docx_page_margins(doc.page_frame.margins.as_ref())
+        docx_page_margins(doc.page_frame.margins.as_ref(), doc.page_frame.binding)
     ));
     body.push_str("</w:body></w:document>");
 
@@ -349,6 +355,10 @@ pub(crate) fn pack_docx_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeEr
     ];
     if let Some(numbering) = numbering {
         entries.push(("word/numbering.xml".to_string(), numbering.into_bytes()));
+    }
+    if let Some((xml, _, _)) = settings {
+        XmlSanitizer::validate_safe_xml(&xml)?;
+        entries.push((DOCX_SETTINGS_PART.to_string(), xml.into_bytes()));
     }
     for (part, xml) in [
         (DOCX_HEADER_PART, header_part),
@@ -659,6 +669,7 @@ pub(crate) fn pack_odt_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeErr
             footer_xml.as_deref(),
             page.margins.as_ref(),
             page.paper.as_ref(),
+            page.binding,
         );
         let styles_xml = odt_styles_xml(&font_decls, &run_styles, &layout, &master);
         XmlSanitizer::validate_safe_xml(&styles_xml)?;

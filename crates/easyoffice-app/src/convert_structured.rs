@@ -221,12 +221,13 @@ fn parse_page_frame(
             })
             .collect()
     };
-    let (margins, paper) = parse_page_setup(entries)?;
+    let (margins, paper, binding) = parse_page_setup(entries)?;
     Ok(RichPageFrame {
         header: parse("header")?,
         footer: parse("footer")?,
         margins,
         paper,
+        binding,
     })
 }
 

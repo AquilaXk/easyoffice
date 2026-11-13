@@ -7,8 +7,8 @@ use super::{length_twips, OdtWalker, StyleProps};
 use crate::rich_document::{frame_paragraph, MAX_PAGE_FRAME_PARAGRAPHS};
 use crate::xml_stream::{attr, XmlEvent, XmlReader};
 use crate::{
-    EasyOfficeError, RichBlock, RichListKind, RichPageFrame, RichPageMargins, RichPaper,
-    RichParagraph,
+    EasyOfficeError, RichBinding, RichBindingKind, RichBlock, RichListKind, RichPageFrame,
+    RichPageMargins, RichPaper, RichParagraph,
 };
 
 /// Margins and header/footer heights of one `style:page-layout`, in twips.
@@ -20,6 +20,7 @@ struct OdtLayout {
     margin_right: Option<i32>,
     page_width: Option<i32>,
     page_height: Option<i32>,
+    mirrored: bool,
     header_height: i32,
     footer_height: i32,
 }
@@ -58,6 +59,8 @@ fn read_odt_layouts(xml: &str) -> Result<HashMap<String, OdtLayout>, EasyOfficeE
                     layout.margin_right = length("fo:margin-right");
                     layout.page_width = length("fo:page-width");
                     layout.page_height = length("fo:page-height");
+                    layout.mirrored =
+                        attr(&attrs, "style:page-usage").as_deref() == Some("mirrored");
                 }
             }
             XmlEvent::Start {
@@ -241,6 +244,12 @@ pub(super) fn read_page_frame(
     if let Some(layout) = layout_name.and_then(|n| layouts.get(&n).copied()) {
         (frame.margins, frame.paper) =
             odt_setup(layout, !frame.header.is_empty(), !frame.footer.is_empty());
+        if frame.margins.is_some() && layout.mirrored {
+            frame.binding = RichBinding {
+                kind: RichBindingKind::Duplex,
+                gutter: 0,
+            };
+        }
     }
     Ok(frame)
 }

@@ -361,6 +361,7 @@
 .orient-icon-landscape { width: 40px; height: 28px; }
 .icon-radio-text { font-size: var(--font-size-xs); color: var(--color-text); }
 #doc-page-setup-dialog { width: min(440px, calc(100vw - 32px)); overflow: visible; }
+#doc-page-setup-dialog .dialog-status-row:has(> :empty) { display: none; }
 #doc-page-setup-dialog .dialog-body .dialog-row .dialog-label { min-width: 40px; }
 #sheet-page-dialog { width: min(440px, calc(100vw - 32px)); overflow: visible; }
 #sheet-page-dialog .dialog-body { max-height: calc(100vh - 220px); overflow-y: auto; }

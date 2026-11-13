@@ -147,6 +147,23 @@ pub struct RichPaper {
     pub height: u32,
 }
 
+/// Where the pages are bound: one-sided (`Single`), facing pages (`Duplex`, the gutter alternates sides) or at the top.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RichBindingKind {
+    #[default]
+    Single,
+    Duplex,
+    Top,
+}
+
+/// The binding of the pages: its kind and the gutter in twips, added to the margin on the bound side (the reference
+/// editor's page setup `제본`, `rhwp-studio/src/ui/page-setup-dialog.ts`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct RichBinding {
+    pub kind: RichBindingKind,
+    pub gutter: u32,
+}
+
 /// Largest page margin or paper side a document keeps, in twips (22 inches).
 pub const MAX_PAGE_MARGIN_TWIPS: u32 = 31_680;
 /// Least room the margins leave for the text on a page, in twips (10 mm, the limit of the reference editor's
@@ -192,13 +209,32 @@ impl RichPaper {
     /// [`MIN_PAGE_BODY_TWIPS`] of text width and height. The reference editor refuses a setup whose body
     /// would vanish.
     pub fn holds(&self, margins: &RichPageMargins) -> bool {
+        self.holds_bound(margins, RichBinding::default())
+    }
+
+    /// [`Self::holds`] with the gutter, which takes room from the width (as the reference editor's body-size check
+    /// counts it) and from the height of a page bound at the top.
+    pub fn holds_bound(&self, margins: &RichPageMargins, binding: RichBinding) -> bool {
         let room = |side: u32, a: u32, b: u32| {
             side <= MAX_PAGE_MARGIN_TWIPS
                 && side.saturating_sub(a).saturating_sub(b) >= MIN_PAGE_BODY_TWIPS
         };
-        margins.within_bounds()
-            && room(self.width, margins.left, margins.right)
-            && room(self.height, margins.top, margins.bottom)
+        let (side_gutter, top_gutter) = match binding.kind {
+            RichBindingKind::Top => (0, binding.gutter),
+            _ => (binding.gutter, 0),
+        };
+        binding.gutter <= MAX_PAGE_MARGIN_TWIPS
+            && margins.within_bounds()
+            && room(
+                self.width,
+                margins.left.saturating_add(side_gutter),
+                margins.right,
+            )
+            && room(
+                self.height,
+                margins.top.saturating_add(top_gutter),
+                margins.bottom,
+            )
     }
 }
 
@@ -218,6 +254,8 @@ pub struct RichPageFrame {
     pub margins: Option<RichPageMargins>,
     /// The paper of the first section; `None` as above (A4 is written).
     pub paper: Option<RichPaper>,
+    /// The binding of the first section (one-sided with no gutter when the file gives none).
+    pub binding: RichBinding,
 }
 
 impl RichPageFrame {

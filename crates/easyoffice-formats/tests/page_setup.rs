@@ -3,9 +3,9 @@
 //! no room for the text.
 
 use easyoffice_formats::{
-    DecodedContent, DocumentFormat, RichBlock, RichDocument, RichPageFrame, RichPageMargins,
-    RichPaper, RichParagraph, RichRun, UniversalFormatConverter, ZipArchiveCodec,
-    ZipSecurityPolicy, MAX_PAGE_MARGIN_TWIPS,
+    DecodedContent, DocumentFormat, RichBinding, RichBindingKind, RichBlock, RichDocument,
+    RichPageFrame, RichPageMargins, RichPaper, RichParagraph, RichRun, UniversalFormatConverter,
+    ZipArchiveCodec, ZipSecurityPolicy, MAX_PAGE_MARGIN_TWIPS,
 };
 
 const FORMATS: [(DocumentFormat, &str); 3] = [
@@ -36,6 +36,7 @@ fn doc(paper: Option<RichPaper>, margins: Option<RichPageMargins>) -> RichDocume
             footer: Vec::new(),
             margins,
             paper,
+            binding: Default::default(),
         },
     }
 }
@@ -307,4 +308,135 @@ fn rich_paper_holds_checks_the_text_room_on_both_axes() {
         height: 16_838
     }
     .holds(&MARGINS));
+}
+
+// ---- binding (제본)
+
+fn bound(kind: RichBindingKind, gutter: u32) -> RichDocument {
+    let mut d = doc(Some(RichPaper::A4), Some(MARGINS));
+    d.page_frame.binding = RichBinding { kind, gutter };
+    d
+}
+
+#[test]
+fn the_binding_round_trips_where_the_format_has_one() {
+    for (kind, gutter) in [
+        (RichBindingKind::Single, 340),
+        (RichBindingKind::Duplex, 567),
+        (RichBindingKind::Top, 283),
+    ] {
+        let source = bound(kind, gutter);
+        for (format, name) in [
+            (DocumentFormat::Docx, "b.docx"),
+            (DocumentFormat::Hwpx, "b.hwpx"),
+        ] {
+            let back = round_trip(&source, format, name);
+            assert_eq!(
+                back.page_frame.binding,
+                RichBinding { kind, gutter },
+                "{name} {kind:?}"
+            );
+        }
+        // An ODT keeps facing pages (the mirrored page usage) and has no gutter or top binding.
+        let odt = round_trip(&source, DocumentFormat::Odt, "b.odt");
+        let expected = if kind == RichBindingKind::Duplex {
+            RichBindingKind::Duplex
+        } else {
+            RichBindingKind::Single
+        };
+        assert_eq!(
+            odt.page_frame.binding,
+            RichBinding {
+                kind: expected,
+                gutter: 0
+            },
+            "odt {kind:?}"
+        );
+    }
+}
+
+#[test]
+fn the_binding_is_spelled_as_each_format_spells_it() {
+    let docx = UniversalFormatConverter::encode_rich(
+        &bound(RichBindingKind::Duplex, 567),
+        DocumentFormat::Docx,
+        None,
+    )
+    .unwrap();
+    assert!(part(&docx, "word/document.xml").contains("w:gutter=\"567\""));
+    assert!(part(&docx, "word/settings.xml").contains("<w:mirrorMargins/>"));
+    let top = UniversalFormatConverter::encode_rich(
+        &bound(RichBindingKind::Top, 283),
+        DocumentFormat::Docx,
+        None,
+    )
+    .unwrap();
+    assert!(part(&top, "word/settings.xml").contains("<w:gutterAtTop/>"));
+    let hwpx = UniversalFormatConverter::encode_rich(
+        &bound(RichBindingKind::Top, 283),
+        DocumentFormat::Hwpx,
+        None,
+    )
+    .unwrap();
+    let section = part(&hwpx, "Contents/section0.xml");
+    assert!(
+        section.contains("gutterType=\"TOP_BOTTOM\"") && section.contains("gutter=\"1415\""),
+        "{section}"
+    );
+    let odt = UniversalFormatConverter::encode_rich(
+        &bound(RichBindingKind::Duplex, 0),
+        DocumentFormat::Odt,
+        None,
+    )
+    .unwrap();
+    assert!(part(&odt, "styles.xml").contains("style:page-usage=\"mirrored\""));
+    let single = UniversalFormatConverter::encode_rich(
+        &bound(RichBindingKind::Single, 0),
+        DocumentFormat::Docx,
+        None,
+    )
+    .unwrap();
+    assert!(
+        ZipArchiveCodec::unpack(&single, &ZipSecurityPolicy::default())
+            .unwrap()
+            .iter()
+            .all(|e| e.path != "word/settings.xml")
+    );
+}
+
+#[test]
+fn a_gutter_that_takes_the_body_away_is_dropped_and_one_over_the_bound_is_zero() {
+    assert!(!RichPaper::A4.holds_bound(
+        &MARGINS,
+        RichBinding {
+            kind: RichBindingKind::Single,
+            gutter: 9000
+        }
+    ));
+    assert!(
+        RichPaper::A4.holds_bound(
+            &MARGINS,
+            RichBinding {
+                kind: RichBindingKind::Top,
+                gutter: 9000
+            }
+        ),
+        "a top binding takes height, not width"
+    );
+    assert!(!RichPaper::A4.holds_bound(
+        &MARGINS,
+        RichBinding {
+            kind: RichBindingKind::Single,
+            gutter: MAX_PAGE_MARGIN_TWIPS + 1
+        }
+    ));
+    let big = docx_with(&format!("<w:pgSz w:w=\"11906\" w:h=\"16838\"/><w:pgMar w:top=\"1440\" w:right=\"1440\" w:bottom=\"1440\" w:left=\"1440\" w:header=\"720\" w:footer=\"720\" w:gutter=\"9000\"/>"));
+    let back = decode(&big, "g.docx");
+    assert_eq!(
+        (back.page_frame.margins, back.page_frame.paper),
+        (None, None),
+        "no body is left"
+    );
+    let bad = docx_with("<w:pgSz w:w=\"11906\" w:h=\"16838\"/><w:pgMar w:top=\"1440\" w:right=\"1440\" w:bottom=\"1440\" w:left=\"1440\" w:header=\"720\" w:footer=\"720\" w:gutter=\"x\"/>");
+    assert_eq!(decode(&bad, "g.docx").page_frame.binding.gutter, 0);
 }

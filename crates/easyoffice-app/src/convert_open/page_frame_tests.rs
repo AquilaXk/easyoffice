@@ -202,3 +202,43 @@ fn a_page_setup_without_a_header_or_footer_survives_the_saves() {
         assert!(!json.contains("\"header\":["), "{format}: {json}");
     }
 }
+
+#[test]
+fn the_binding_survives_the_saves_and_a_bad_one_rejects_the_save() {
+    let setup = |binding: &str| {
+        format!(
+            "\"pageSetup\":{{\"paper\":{{\"width\":11906,\"height\":16838}},\"margins\":{{\"top\":1985,\"bottom\":1590,\"header\":1134,\"footer\":680,\"left\":1700,\"right\":1500}},\"binding\":{binding}}},\"x\":1"
+        )
+    };
+    for (format, name) in [("docx", "제본.docx"), ("hwpx", "제본.hwpx")] {
+        let saved = EasyOfficeIpcRouter::dispatch(
+            "convert_document_format",
+            &payload(format, &setup("{\"kind\":\"duplex\",\"gutter\":567}")),
+        )
+        .unwrap();
+        let bytes =
+            EasyOfficeIpcRouter::decode_base64(json_field(&saved, "convertedBase64")).unwrap();
+        let json = EasyOfficeIpcRouter::dispatch(
+            "convert_document_format",
+            &request(Some("decode"), name, &bytes, ""),
+        )
+        .unwrap();
+        assert!(
+            json.contains("\"binding\":{\"kind\":\"duplex\",\"gutter\":567}"),
+            "{format}: {json}"
+        );
+    }
+    for bad in [
+        "{\"kind\":\"spiral\",\"gutter\":1}",
+        "{\"kind\":\"duplex\",\"gutter\":-1}",
+        "{\"kind\":\"duplex\",\"gutter\":31681}",
+        "{\"kind\":\"single\",\"gutter\":9000}",
+        "[1]",
+    ] {
+        assert!(
+            EasyOfficeIpcRouter::dispatch("convert_document_format", &payload("docx", &setup(bad)))
+                .is_err(),
+            "{bad}"
+        );
+    }
+}

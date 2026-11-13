@@ -5,7 +5,7 @@
 //! style (`style id="0"`) plus optional heading styles; every paragraph and run in
 //! `section0.xml` refers to these IDs.
 
-use crate::{RichPageMargins, RichPaper, RichScript, XmlSanitizer};
+use crate::{RichBinding, RichBindingKind, RichPageMargins, RichPaper, RichScript, XmlSanitizer};
 
 pub(crate) const NS_HEAD: &str = "http://www.owpml.org/owpml/2011/head";
 pub(crate) const NS_CORE: &str = "http://www.owpml.org/owpml/2011/core";
@@ -332,11 +332,33 @@ fn page_box(
     (width, height, landscape, left, right)
 }
 
+/// `gutterType` of `hp:pagePr` for a binding (`rhwp` `src/parser/hwpx/section.rs`: one-sided, facing pages, top).
+pub(crate) fn gutter_type(kind: RichBindingKind) -> &'static str {
+    match kind {
+        RichBindingKind::Single => "LEFT_ONLY",
+        RichBindingKind::Duplex => "LEFT_RIGHT",
+        RichBindingKind::Top => "TOP_BOTTOM",
+    }
+}
+
 /// Usable text width of the page in HWPUNIT (the width of a table that spans the page).
-pub(crate) fn text_width(margins: Option<&RichPageMargins>, paper: Option<&RichPaper>) -> u32 {
+pub(crate) fn text_width(
+    margins: Option<&RichPageMargins>,
+    paper: Option<&RichPaper>,
+    binding: RichBinding,
+) -> u32 {
     let (width, height, landscape, left, right) = page_box(margins, paper);
     let shown = if landscape { height } else { width };
-    shown.saturating_sub(left).saturating_sub(right).max(1)
+    let gutter = if binding.kind == RichBindingKind::Top {
+        0
+    } else {
+        binding.gutter * HWPUNIT_PER_TWIP
+    };
+    shown
+        .saturating_sub(left)
+        .saturating_sub(right)
+        .saturating_sub(gutter)
+        .max(1)
 }
 
 /// Section properties (`hp:secPr`) plus the column control; must sit in the first run of the
@@ -344,6 +366,7 @@ pub(crate) fn text_width(margins: Option<&RichPageMargins>, paper: Option<&RichP
 pub(crate) fn section_properties_xml(
     margins: Option<&RichPageMargins>,
     paper: Option<&RichPaper>,
+    binding: RichBinding,
 ) -> String {
     let (header, footer, top, bottom) = margins.map_or(
         (4252, 4252, 5668, 4252),
@@ -351,20 +374,24 @@ pub(crate) fn section_properties_xml(
     );
     let (width, height, landscape, left, right) = page_box(margins, paper);
     let orientation = if landscape { "NARROWLY" } else { "WIDELY" };
+    let gutter = binding.gutter * HWPUNIT_PER_TWIP;
+    let gutter_type = gutter_type(binding.kind);
     format!(
         concat!(
             "<hp:secPr id=\"\" textDirection=\"HORIZONTAL\" spaceColumns=\"1134\" tabStop=\"8000\" tabStopVal=\"4000\" tabStopUnit=\"HWPUNIT\" outlineShapeIDRef=\"0\" memoShapeIDRef=\"0\" textVerticalWidthHead=\"0\" masterPageCnt=\"0\">",
             "<hp:grid lineGrid=\"0\" charGrid=\"0\" wonggojiFormat=\"0\"/>",
             "<hp:startNum pageStartsOn=\"BOTH\" page=\"0\" pic=\"0\" tbl=\"0\" equation=\"0\"/>",
             "<hp:visibility hideFirstHeader=\"0\" hideFirstFooter=\"0\" hideFirstMasterPage=\"0\" border=\"SHOW_ALL\" fill=\"SHOW_ALL\" hideFirstPageNum=\"0\" hideFirstEmptyLine=\"0\" showLineNumber=\"0\"/>",
-            "<hp:pagePr landscape=\"{orientation}\" width=\"{width}\" height=\"{height}\" gutterType=\"LEFT_ONLY\">",
-            "<hp:margin header=\"{header}\" footer=\"{footer}\" gutter=\"0\" left=\"{left}\" right=\"{right}\" top=\"{top}\" bottom=\"{bottom}\"/>",
+            "<hp:pagePr landscape=\"{orientation}\" width=\"{width}\" height=\"{height}\" gutterType=\"{gutter_type}\">",
+            "<hp:margin header=\"{header}\" footer=\"{footer}\" gutter=\"{gutter}\" left=\"{left}\" right=\"{right}\" top=\"{top}\" bottom=\"{bottom}\"/>",
             "</hp:pagePr></hp:secPr>",
             "<hp:ctrl><hp:colPr id=\"\" type=\"NEWSPAPER\" layout=\"LEFT\" colCount=\"1\" sameSz=\"1\" sameGap=\"0\"/></hp:ctrl>"
         ),
         orientation = orientation,
         width = width,
         height = height,
+        gutter_type = gutter_type,
+        gutter = gutter,
         header = header,
         footer = footer,
         left = left,

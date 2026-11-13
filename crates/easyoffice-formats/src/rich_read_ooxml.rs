@@ -16,7 +16,9 @@ use crate::rich_read_images::{
     drawing_picture, load_docx_frame_targets, load_docx_hyperlinks, DocxMedia, DrawingOutcome,
 };
 use crate::rich_read_numbering::{read_numbering, Numbering, LIST_LEVELS};
-use crate::rich_read_page_setup::{fitting_setup, page_margins, page_paper};
+use crate::rich_read_page_setup::{
+    binding_of, fitting_setup, page_gutter, page_margins, page_paper,
+};
 use crate::rich_table::TableAssembler;
 use crate::rich_xml::{
     heading_level_from_name, push_linked_run, take_toc_page, toc_role_from_name, toggle_on, CharFmt,
@@ -379,6 +381,8 @@ struct DocxWalker {
     section_margins: Option<RichPageMargins>,
     section_paper: Option<RichPaper>,
     first_margins: Option<RichPageMargins>,
+    section_gutter: u32,
+    first_gutter: u32,
     first_paper: Option<RichPaper>,
 }
 
@@ -479,7 +483,10 @@ impl DocxWalker {
                 self.section_margins = None;
                 self.section_paper = None;
             }
-            "w:pgMar" => self.section_margins = page_margins(attrs),
+            "w:pgMar" => {
+                self.section_margins = page_margins(attrs);
+                self.section_gutter = page_gutter(attrs);
+            }
             "w:pgSz" => self.section_paper = page_paper(attrs),
             "w:headerReference" | "w:footerReference" => {
                 if let Some(rel_id) = attr(attrs, "r:id") {
@@ -590,6 +597,9 @@ impl DocxWalker {
             "w:instrText" => self.in_instruction = false,
             "w:fldSimple" => self.simple_field = None,
             "w:sectPr" => {
+                if self.first_margins.is_none() && self.section_margins.is_some() {
+                    self.first_gutter = self.section_gutter;
+                }
                 self.first_margins = self.first_margins.or(self.section_margins);
                 self.first_paper = self.first_paper.or(self.section_paper);
             }
@@ -753,6 +763,22 @@ fn even_and_odd_headers(settings: Option<&str>) -> Result<bool, EasyOfficeError>
     Ok(false)
 }
 
+/// Whether `word/settings.xml` mirrors the margins of facing pages and puts the gutter at the top.
+fn binding_flags(settings: Option<&str>) -> Result<(bool, bool), EasyOfficeError> {
+    let (mut mirror, mut top) = (false, false);
+    for event in XmlReader::new(settings.unwrap_or_default()) {
+        if let XmlEvent::Start { name, attrs } = event? {
+            let on = toggle_on(attr(&attrs, "w:val").as_deref());
+            match name {
+                "w:mirrorMargins" => mirror = on,
+                "w:gutterAtTop" => top = on,
+                _ => {}
+            }
+        }
+    }
+    Ok((mirror, top))
+}
+
 /// The paragraphs of one header or footer part.
 fn read_frame_part(
     xml: &str,
@@ -885,8 +911,13 @@ pub(crate) fn read_docx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Eas
         &walker.frame_refs,
         walker.title_pg,
     )?;
+    let (mirror, at_top) = binding_flags(checked_part(&parts, "word/settings.xml"))?;
+    let binding = binding_of(walker.first_gutter, mirror, at_top);
     (page_frame.margins, page_frame.paper) =
-        fitting_setup(walker.first_margins, walker.first_paper);
+        fitting_setup(walker.first_margins, walker.first_paper, binding);
+    if page_frame.margins.is_some() {
+        page_frame.binding = binding;
+    }
     let mut warnings = walker.warnings;
     for note in frame_warnings {
         if !warnings.contains(&note) {

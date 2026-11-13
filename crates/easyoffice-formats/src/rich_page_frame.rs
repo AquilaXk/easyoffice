@@ -3,7 +3,9 @@
 //! the HWPX `hp:header`/`hp:footer` controls of the first paragraph. The readers live next to each
 //! format's body reader; this module holds what the writers and the readers share.
 
-use crate::rich_document::{RichField, RichPageMargins, RichPaper, RichParagraph};
+use crate::rich_document::{
+    RichBinding, RichBindingKind, RichField, RichPageMargins, RichPaper, RichParagraph,
+};
 use crate::rich_run_writers::docx_run_properties;
 
 pub(crate) const DOCX_HEADER_PART: &str = "word/header1.xml";
@@ -62,13 +64,38 @@ pub(crate) fn docx_paper(paper: Option<&RichPaper>) -> String {
 }
 
 /// `w:pgMar` for the section properties; empty without margins (the reader's own default applies).
-pub(crate) fn docx_page_margins(margins: Option<&RichPageMargins>) -> String {
+pub(crate) fn docx_page_margins(margins: Option<&RichPageMargins>, binding: RichBinding) -> String {
     margins.map_or_else(String::new, |m| {
         format!(
-            "<w:pgMar w:top=\"{}\" w:right=\"{}\" w:bottom=\"{}\" w:left=\"{}\" w:header=\"{}\" w:footer=\"{}\" w:gutter=\"0\"/>",
-            m.top, m.right, m.bottom, m.left, m.header, m.footer
+            "<w:pgMar w:top=\"{}\" w:right=\"{}\" w:bottom=\"{}\" w:left=\"{}\" w:header=\"{}\" w:footer=\"{}\" w:gutter=\"{}\"/>",
+            m.top, m.right, m.bottom, m.left, m.header, m.footer, binding.gutter
         )
     })
+}
+
+pub(crate) const DOCX_SETTINGS_PART: &str = "word/settings.xml";
+pub(crate) const DOCX_SETTINGS_REL_ID: &str = "rIdSettings1";
+const DOCX_SETTINGS_CONTENT_TYPE: &str =
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml";
+
+/// `word/settings.xml` for a binding that needs it (`w:mirrorMargins` for facing pages, `w:gutterAtTop`), with the
+/// relationship and the content-type override that name it; `None` for one-sided pages.
+pub(crate) fn docx_settings(binding: RichBinding) -> Option<(String, String, String)> {
+    let flag = match binding.kind {
+        RichBindingKind::Single => return None,
+        RichBindingKind::Duplex => "<w:mirrorMargins/>",
+        RichBindingKind::Top => "<w:gutterAtTop/>",
+    };
+    let xml = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><w:settings xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">{flag}</w:settings>"
+    );
+    let rel = format!(
+        "<Relationship Id=\"{DOCX_SETTINGS_REL_ID}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings\" Target=\"settings.xml\"/>"
+    );
+    let content_type = format!(
+        "<Override PartName=\"/{DOCX_SETTINGS_PART}\" ContentType=\"{DOCX_SETTINGS_CONTENT_TYPE}\"/>"
+    );
+    Some((xml, rel, content_type))
 }
 
 fn docx_frame_paragraph(p: &RichParagraph) -> String {
@@ -201,6 +228,7 @@ pub(crate) fn odt_master_page(
     footer: Option<&str>,
     margins: Option<&RichPageMargins>,
     paper: Option<&RichPaper>,
+    binding: RichBinding,
 ) -> (String, String) {
     let m = margins.copied().unwrap_or(RichPageMargins {
         top: 1191,
@@ -224,11 +252,17 @@ pub(crate) fn odt_master_page(
         Some(_) => (m.footer, m.bottom.saturating_sub(m.footer)),
         None => (m.bottom, 0),
     };
+    // ODF 1.2 has no gutter and no top binding; facing pages are the mirrored page usage.
+    let usage = if binding.kind == RichBindingKind::Duplex {
+        " style:page-usage=\"mirrored\""
+    } else {
+        ""
+    };
     let layout = format!(
         concat!(
             "<style:page-layout style:name=\"pm1\"><style:page-layout-properties fo:page-width=\"{}\" ",
             "fo:page-height=\"{}\" style:print-orientation=\"{}\" fo:margin-top=\"{}\" ",
-            "fo:margin-bottom=\"{}\" fo:margin-left=\"{}\" fo:margin-right=\"{}\"/>",
+            "fo:margin-bottom=\"{}\" fo:margin-left=\"{}\" fo:margin-right=\"{}\"{}/>",
             "<style:header-style><style:header-footer-properties fo:min-height=\"{}\" fo:margin-bottom=\"0pt\"/></style:header-style>",
             "<style:footer-style><style:header-footer-properties fo:min-height=\"{}\" fo:margin-top=\"0pt\"/></style:footer-style>",
             "</style:page-layout>"
@@ -240,6 +274,7 @@ pub(crate) fn odt_master_page(
         odt_pt(margin_bottom),
         odt_pt(m.left),
         odt_pt(m.right),
+        usage,
         odt_pt(header_height),
         odt_pt(footer_height)
     );
