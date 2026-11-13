@@ -2,6 +2,7 @@
 //! that use a changed name, moves them in the dependency graph and marks them dirty, so the next
 //! [`recalculate`](RecalcSession::recalculate) computes them and what reads them.
 
+use super::graph::Ref;
 use super::{collect_refs, is_formula, RecalcError, RecalcSession};
 use crate::NameIssue;
 use easyoffice_formats::{DefinedName, EasyOfficeError, MAX_NAMES};
@@ -46,6 +47,10 @@ impl RecalcSession {
         let plan = self.wb.plan_names(defs, strict)?;
         let issues = plan.issues.clone();
         let affected = plan.affected.clone();
+        // All the formulas that change leave and enter the graph together, so a cell they all read (the
+        // one a name stands for) is rewritten once, not once per formula.
+        let mut pairs: Vec<(Ref, u32)> = Vec::new();
+        let mut leaving: Vec<u32> = Vec::new();
         for &(sheet, coord) in &affected {
             let sheet = sheet as u16;
             let engine = &self.wb.sheets()[usize::from(sheet)];
@@ -54,14 +59,21 @@ impl RecalcSession {
             };
             if let Some(Ok(ast)) = engine.compiled_asts.get(&coord) {
                 collect_refs(&self.wb, sheet, ast, &mut self.refs);
-                self.graph.unregister(vertex, &self.refs);
+                pairs.extend(self.refs.iter().map(|&r| (r, vertex)));
             }
+            leaving.push(vertex);
+        }
+        self.graph.unregister_batch(&mut pairs);
+        for vertex in leaving {
+            let (sheet, coord) = self.graph.site(vertex);
             self.graph.remove_vertex(vertex);
             self.dirty.remove(vertex);
             self.cyclic.remove(vertex);
+            let engine = &self.wb.sheets()[usize::from(sheet)];
             self.memo.remove_at(engine.resolved_sheet_id(), coord);
         }
         self.wb.commit_names(plan);
+        pairs.clear();
         for &(sheet, coord) in &affected {
             let sheet = sheet as u16;
             let engine = &self.wb.sheets()[usize::from(sheet)];
@@ -69,13 +81,14 @@ impl RecalcSession {
                 if is_formula(Some(entry)) {
                     let vertex = self.graph.add_vertex(sheet, coord);
                     let volatile = collect_refs(&self.wb, sheet, ast, &mut self.refs);
-                    self.graph.register(vertex, &self.refs);
+                    pairs.extend(self.refs.iter().map(|&r| (r, vertex)));
                     self.graph.set_volatile(vertex, volatile);
                     self.dirty.insert(vertex);
                 }
             }
             self.edited.push((sheet, coord));
         }
+        self.graph.register_batch(&mut pairs);
         if self.exceeds_budget() {
             self.over_budget = true;
             return Err(RecalcError::OverBudget);

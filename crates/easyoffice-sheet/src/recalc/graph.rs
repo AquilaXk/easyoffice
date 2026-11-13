@@ -162,6 +162,41 @@ impl Dependents {
         }
     }
 
+    /// Removes the ids of `ids` (ascending); how many were present. One pass over the set.
+    fn remove_sorted(&mut self, ids: &[u32]) -> usize {
+        let before = self.0.len();
+        let mut next = 0;
+        self.0.retain(|&v| {
+            while next < ids.len() && ids[next] < v {
+                next += 1;
+            }
+            next >= ids.len() || ids[next] != v
+        });
+        before - self.0.len()
+    }
+
+    /// Adds the ids of `ids` (ascending); how many were new. One merge of two sorted runs.
+    fn insert_sorted(&mut self, ids: &[u32]) -> usize {
+        let before = self.0.len();
+        let mut merged = Vec::with_capacity(before + ids.len());
+        let (mut a, mut b) = (self.0.iter().peekable(), ids.iter().peekable());
+        loop {
+            let next = match (a.peek(), b.peek()) {
+                (Some(&&x), Some(&&y)) if x == y => {
+                    b.next();
+                    a.next().copied()
+                }
+                (Some(&&x), Some(&&y)) if x < y => a.next().copied(),
+                (Some(_), Some(_)) | (None, Some(_)) => b.next().copied(),
+                (Some(_), None) => a.next().copied(),
+                (None, None) => break,
+            };
+            merged.extend(next);
+        }
+        self.0 = merged;
+        self.0.len() - before
+    }
+
     fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
@@ -444,6 +479,66 @@ impl DepGraph {
                     c0,
                     c1,
                 } => self.ranges.add(sheet, (r0, r1, c0, c1), vertex),
+            }
+        }
+    }
+
+    /// [`register`](Self::register) for many formulas at once: `pairs` are (reference, formula). A cell read
+    /// by thousands of the formulas gets them in one merge instead of one shifted insert each.
+    pub(crate) fn register_batch(&mut self, pairs: &mut [(Ref, u32)]) {
+        pairs.sort_unstable();
+        let mut ids: Vec<u32> = Vec::new();
+        for group in pairs.chunk_by(|a, b| a.0 == b.0) {
+            match group[0].0 {
+                Ref::Cell { sheet, coord } => {
+                    ids.clear();
+                    ids.extend(group.iter().map(|&(_, v)| v));
+                    let deps = self.cell_deps.entry(cell_key(sheet, coord)).or_default();
+                    self.cell_edges += deps.insert_sorted(&ids);
+                }
+                Ref::Rect {
+                    sheet,
+                    r0,
+                    r1,
+                    c0,
+                    c1,
+                } => {
+                    for &(_, v) in group {
+                        self.ranges.add(sheet, (r0, r1, c0, c1), v);
+                    }
+                }
+            }
+        }
+    }
+
+    /// [`unregister`](Self::unregister) for many formulas at once (see [`register_batch`](Self::register_batch)).
+    pub(crate) fn unregister_batch(&mut self, pairs: &mut [(Ref, u32)]) {
+        pairs.sort_unstable();
+        let mut ids: Vec<u32> = Vec::new();
+        for group in pairs.chunk_by(|a, b| a.0 == b.0) {
+            match group[0].0 {
+                Ref::Cell { sheet, coord } => {
+                    let key = cell_key(sheet, coord);
+                    ids.clear();
+                    ids.extend(group.iter().map(|&(_, v)| v));
+                    if let Some(deps) = self.cell_deps.get_mut(&key) {
+                        self.cell_edges -= deps.remove_sorted(&ids);
+                        if deps.is_empty() {
+                            self.cell_deps.remove(&key);
+                        }
+                    }
+                }
+                Ref::Rect {
+                    sheet,
+                    r0,
+                    r1,
+                    c0,
+                    c1,
+                } => {
+                    for &(_, v) in group {
+                        self.ranges.remove(sheet, (r0, r1, c0, c1), v);
+                    }
+                }
             }
         }
     }
