@@ -67,17 +67,8 @@ pub(crate) fn target_to_href(target: &str) -> String {
     }
 }
 
-/// Wraps the text of the first paragraph written since `from` in a `text:a` for `link`. A cell without a
-/// paragraph has no text to link and stays as it is.
-pub(crate) fn wrap_first_paragraph(content: &mut String, from: usize, link: &CellLink) {
-    const OPEN: &str = "<text:p>";
-    const CLOSE: &str = "</text:p>";
-    let Some(open) = content[from..].find(OPEN).map(|at| from + at + OPEN.len()) else {
-        return;
-    };
-    let Some(close) = content[open..].find(CLOSE).map(|at| open + at) else {
-        return;
-    };
+/// The `text:a` start tag of `link`.
+fn anchor_open(link: &CellLink) -> String {
     let mut anchor = format!(
         "<text:a xlink:type=\"simple\" xlink:href=\"{}\"",
         XmlSanitizer::escape(&target_to_href(&link.target))
@@ -89,8 +80,32 @@ pub(crate) fn wrap_first_paragraph(content: &mut String, from: usize, link: &Cel
         ));
     }
     anchor.push('>');
-    content.insert_str(close, "</text:a>");
-    content.insert_str(open, &anchor);
+    anchor
+}
+
+/// Wraps the text of the first paragraph written since `from` in a `text:a` for `link`. A cell without a
+/// paragraph (an empty cell, a formula without a value) gets one that holds an empty `text:a`, so the link
+/// is written and read back all the same.
+pub(crate) fn wrap_first_paragraph(content: &mut String, from: usize, link: &CellLink) {
+    const OPEN: &str = "<text:p>";
+    const CLOSE: &str = "</text:p>";
+    let anchor = anchor_open(link);
+    if let Some(open) = content[from..].find(OPEN).map(|at| from + at + OPEN.len()) {
+        if let Some(close) = content[open..].find(CLOSE).map(|at| open + at) {
+            content.insert_str(close, "</text:a>");
+            content.insert_str(open, &anchor);
+            return;
+        }
+    }
+    let paragraph = format!("<text:p>{anchor}</text:a></text:p>");
+    if content.ends_with("/>") {
+        content.truncate(content.len() - 2);
+        content.push('>');
+        content.push_str(&paragraph);
+        content.push_str("</table:table-cell>");
+    } else if let Some(end) = content.rfind("</table:table-cell>") {
+        content.insert_str(end, &paragraph);
+    }
 }
 
 #[cfg(test)]
@@ -129,8 +144,18 @@ mod tests {
             xml,
             "<x/><table:table-cell><text:p><text:a xlink:type=\"simple\" xlink:href=\"https://example.com/?a=1&amp;b=2\" office:title=\"팁 &quot;하나&quot;\">글자</text:a></text:p></table:table-cell>"
         );
-        let mut empty = String::from("<table:table-cell/>");
+        let mut empty = String::from("<table:table-cell table:style-name=\"a\"/>");
         wrap_first_paragraph(&mut empty, 0, &link);
-        assert_eq!(empty, "<table:table-cell/>");
+        assert!(
+            empty.starts_with("<table:table-cell table:style-name=\"a\"><text:p><text:a ")
+                && empty.ends_with("</text:a></text:p></table:table-cell>")
+        );
+        let mut formula =
+            String::from("<table:table-cell table:formula=\"of:=A1\"></table:table-cell>");
+        wrap_first_paragraph(&mut formula, 0, &link);
+        assert!(
+            formula.contains("<text:p><text:a ")
+                && formula.ends_with("</text:p></table:table-cell>")
+        );
     }
 }

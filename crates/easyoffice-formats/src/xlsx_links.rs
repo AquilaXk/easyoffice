@@ -33,6 +33,7 @@ const REL_NAMESPACE: &str = "http://schemas.openxmlformats.org/officeDocument/20
 pub(crate) fn hyperlink_relationships(rels_xml: &str) -> HashMap<String, String> {
     let mut out = HashMap::new();
     let mut reader = XmlReader::unbounded(rels_xml);
+    let mut count = 0usize;
     while let Ok(Some(event)) = reader.next_event() {
         let XmlEvent::Start {
             name: "Relationship",
@@ -41,6 +42,10 @@ pub(crate) fn hyperlink_relationships(rels_xml: &str) -> HashMap<String, String>
         else {
             continue;
         };
+        count += 1;
+        if count > 2 * MAX_LINKS_PER_SHEET {
+            break;
+        }
         let (mut is_link, mut id, mut target) = (false, None, None);
         for (name, value) in attrs.iter_raw() {
             match name {
@@ -93,6 +98,8 @@ pub(crate) fn read_links(
     };
     let mut reader = XmlReader::unbounded(block);
     let mut seen = 0usize;
+    // Once a bound is reached the rest of the elements are only counted.
+    let mut full = false;
     while let Ok(Some(event)) = reader.next_event() {
         let XmlEvent::Start {
             name: "hyperlink",
@@ -105,6 +112,10 @@ pub(crate) fn read_links(
         if seen > 2 * MAX_LINKS_PER_SHEET {
             got.rejected = got.rejected.saturating_add(1);
             break;
+        }
+        if full {
+            got.rejected = got.rejected.saturating_add(1);
+            continue;
         }
         let (mut area, mut id, mut location, mut tip) = (None, None, None, None);
         for (name, value) in attrs.iter_raw() {
@@ -128,7 +139,9 @@ pub(crate) fn read_links(
         };
         let tip = tip.unwrap_or_default();
         match target {
-            Some(target) => got.add_area(allowance, area, &target, &tip),
+            Some(target) => {
+                full = !got.add_area(allowance, area, &target, &tip);
+            }
             None => got.rejected = got.rejected.saturating_add(1),
         }
     }
@@ -297,5 +310,20 @@ mod tests {
         let mut links = SheetLinks::new();
         links.insert((0, 0), CellLink::new("#Total", "").unwrap());
         assert!(links_xml(&links).1.is_none());
+    }
+
+    #[test]
+    fn a_relationships_part_with_a_million_entries_is_read_to_a_bound() {
+        let mut rels = String::from("<Relationships>");
+        for i in 0..2 * MAX_LINKS_PER_SHEET + 5_000 {
+            rels.push_str(&format!(
+                "<Relationship Id=\"r{i}\" Type=\"{HYPERLINK_RELATIONSHIP}\" Target=\"https://a.b/{i}\"/>"
+            ));
+        }
+        rels.push_str("</Relationships>");
+        assert_eq!(
+            hyperlink_relationships(&rels).len(),
+            2 * MAX_LINKS_PER_SHEET
+        );
     }
 }

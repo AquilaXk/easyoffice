@@ -36,6 +36,9 @@ pub const MAX_LOCATION_CHARS: usize = 255;
 pub const MAX_LINK_TIP_CHARS: usize = 255;
 /// Cells one `ref` range may give its link to; a larger range links its first cell only.
 pub const MAX_LINK_AREA_CELLS: u64 = 10_000;
+/// Cells a document's readers may visit to place links, all sheets together (the size of one sheet). A range
+/// is charged its area before it is walked, so many ranges over the same cells cannot repeat the walk.
+pub const MAX_LINK_SCAN_CELLS: u64 = 1_048_576;
 /// Bytes of addresses and screen tips a document may hold in all its sheets.
 pub const MAX_LINK_BYTES_PER_DOCUMENT: usize = 16 * 1024 * 1024;
 
@@ -95,16 +98,34 @@ impl CellLink {
     }
 }
 
-/// What the readers of a document share: the allowance of bytes and the count of links refused.
+/// What the readers of a document share: the allowance of bytes and of cells to visit.
 #[derive(Debug)]
 pub(crate) struct LinkAllowance {
     bytes_left: usize,
+    cells_left: u64,
+    /// Cells the walks have visited (a test reads it).
+    walked: u64,
 }
 
 impl Default for LinkAllowance {
     fn default() -> Self {
         Self {
             bytes_left: MAX_LINK_BYTES_PER_DOCUMENT,
+            cells_left: MAX_LINK_SCAN_CELLS,
+            walked: 0,
+        }
+    }
+}
+
+impl LinkAllowance {
+    /// Takes `cells` out of the allowance of cells to visit; false when it is used up.
+    fn visit(&mut self, cells: u64) -> bool {
+        match self.cells_left.checked_sub(cells) {
+            Some(left) => {
+                self.cells_left = left;
+                true
+            }
+            None => false,
         }
     }
 }
@@ -117,8 +138,9 @@ pub(crate) struct LinkCollector {
 }
 
 impl LinkCollector {
-    /// Keeps the link of `(row, col)` when the policy and the bounds allow it; the first link of a cell
-    /// wins. Returns false once a bound is reached, so a caller that loops over cells stops there.
+    /// Keeps the link of one cell when the policy and the bounds allow it; the first link of a cell wins.
+    /// Returns false once a bound is reached, so a caller that loops over cells stops there.
+    #[cfg(test)]
     pub(crate) fn add(
         &mut self,
         allowance: &mut LinkAllowance,
@@ -126,55 +148,64 @@ impl LinkCollector {
         target: &str,
         tip: &str,
     ) -> bool {
-        match CellLink::new(target, tip) {
-            Some(link) => self.insert(allowance, at, link),
-            None => {
-                self.rejected = self.rejected.saturating_add(1);
-                true
-            }
-        }
+        self.add_area(
+            allowance,
+            CellBox {
+                row0: at.0,
+                col0: at.1,
+                row1: at.0,
+                col1: at.1,
+            },
+            target,
+            tip,
+        )
     }
 
-    /// [`Self::add`] for a link the policy has passed.
-    fn insert(&mut self, allowance: &mut LinkAllowance, at: (u32, u32), link: CellLink) -> bool {
-        if self.links.contains_key(&at) {
-            return true;
-        }
-        let cost = link.bytes();
-        if self.links.len() >= MAX_LINKS_PER_SHEET || cost > allowance.bytes_left {
-            self.rejected = self.rejected.saturating_add(1);
-            return false;
-        }
-        allowance.bytes_left -= cost;
-        self.links.insert(at, link);
-        true
-    }
-
-    /// Keeps the link for every cell of `area`, as far as the bounds allow; an area over
-    /// [`MAX_LINK_AREA_CELLS`] links its first cell only.
+    /// Keeps the link for every cell of `area`, as far as the bounds allow. The policy is applied once and the
+    /// area is charged to the document's allowance of cells to visit before it is walked; an area over
+    /// [`MAX_LINK_AREA_CELLS`] or over what is left of the allowance links its first cell only, and the walk
+    /// stops at the first cell that already has a link. Returns false once a bound is reached.
     pub(crate) fn add_area(
         &mut self,
         allowance: &mut LinkAllowance,
         area: CellBox,
         target: &str,
         tip: &str,
-    ) {
+    ) -> bool {
         let Some(link) = CellLink::new(target, tip) else {
             self.rejected = self.rejected.saturating_add(1);
-            return;
+            return true;
         };
-        if area.area() > MAX_LINK_AREA_CELLS {
+        let mut cells = area.area();
+        if cells > MAX_LINK_AREA_CELLS || cells > allowance.cells_left {
             self.rejected = self.rejected.saturating_add(1);
-            self.insert(allowance, (area.row0, area.col0), link);
-            return;
+            cells = 1;
         }
-        for row in area.row0..=area.row1 {
-            for col in area.col0..=area.col1 {
-                if !self.insert(allowance, (row, col), link.clone()) {
-                    return;
+        if !allowance.visit(cells) {
+            self.rejected = self.rejected.saturating_add(1);
+            return false;
+        }
+        let (row1, col1) = if cells == 1 {
+            (area.row0, area.col0)
+        } else {
+            (area.row1, area.col1)
+        };
+        for row in area.row0..=row1 {
+            for col in area.col0..=col1 {
+                allowance.walked += 1;
+                if self.links.contains_key(&(row, col)) {
+                    return true;
                 }
+                let cost = link.bytes();
+                if self.links.len() >= MAX_LINKS_PER_SHEET || cost > allowance.bytes_left {
+                    self.rejected = self.rejected.saturating_add(1);
+                    return false;
+                }
+                allowance.bytes_left -= cost;
+                self.links.insert((row, col), link.clone());
             }
         }
+        true
     }
 }
 
@@ -249,6 +280,54 @@ mod tests {
     }
 
     #[test]
+    fn the_same_range_a_hundred_thousand_times_walks_it_once() {
+        let mut allowance = LinkAllowance::default();
+        let mut got = LinkCollector::default();
+        let block = CellBox::parse("A1:CV100").unwrap();
+        for _ in 0..131_060 {
+            got.add_area(&mut allowance, block, "https://a.b", "");
+        }
+        assert_eq!(got.links.len(), 10_000);
+        // The first walk covers the block; every other one stops at its first cell, which has a link, and once the
+        // document's allowance of cells is charged the rest are turned away without a walk.
+        assert!(
+            allowance.walked >= 10_000 && allowance.walked <= 10_000 + 131_059,
+            "walked {}",
+            allowance.walked
+        );
+        assert!(allowance.walked < 20_000, "walked {}", allowance.walked);
+        assert_eq!(allowance.cells_left, 0);
+    }
+
+    #[test]
+    fn many_different_ranges_and_many_sheets_share_one_budget_of_cells() {
+        let mut allowance = LinkAllowance::default();
+        let mut sheets = Vec::new();
+        for sheet in 0..8 {
+            let mut got = LinkCollector::default();
+            for i in 0..400u32 {
+                // 400 disjoint blocks of 10,000 cells per sheet, 8 sheets: 32 million cells asked for.
+                let row0 = (i % 100) * 100 + 1_000 * sheet;
+                let col0 = (i / 100) * 100;
+                let block = CellBox {
+                    row0,
+                    col0,
+                    row1: row0 + 99,
+                    col1: col0 + 99,
+                };
+                got.add_area(&mut allowance, block, "https://a.b", "");
+            }
+            sheets.push(got);
+        }
+        assert!(
+            allowance.walked <= MAX_LINK_SCAN_CELLS + 8 * 400,
+            "walked {}",
+            allowance.walked
+        );
+        assert!(sheets.iter().map(|g| g.rejected).sum::<u32>() > 0);
+    }
+
+    #[test]
     fn the_collector_stops_at_the_bounds() {
         let mut allowance = LinkAllowance::default();
         let mut got = LinkCollector::default();
@@ -269,7 +348,10 @@ mod tests {
         }
         assert_eq!(got.links.len(), MAX_LINKS_PER_SHEET);
 
-        let mut small = LinkAllowance { bytes_left: 300 };
+        let mut small = LinkAllowance {
+            bytes_left: 300,
+            ..LinkAllowance::default()
+        };
         let mut got = LinkCollector::default();
         for row in 0..100 {
             got.add(&mut small, (row, 0), "https://example.com/a", "");

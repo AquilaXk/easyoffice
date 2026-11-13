@@ -162,3 +162,56 @@ fn ods_unsafe_and_banded_links_are_turned_away() {
     assert!(back[0].1.links.is_empty());
     assert!(back[0].1.links_rejected >= 4);
 }
+
+#[test]
+fn ods_keeps_links_on_empty_cells_and_formula_cells_without_a_value() {
+    let sheets: Vec<OdsUnpacked> = vec![(
+        "Sheet1".to_string(),
+        vec![(0, 0, "=1+1".to_string()), (2, 0, "글자".to_string())],
+    )];
+    let mut links = SheetLinks::new();
+    links.insert(
+        (0, 0),
+        CellLink::new("https://example.com/formula", "").unwrap(),
+    );
+    links.insert(
+        (1, 0),
+        CellLink::new("https://example.com/empty", "").unwrap(),
+    );
+    links.insert((2, 0), CellLink::new("#Sheet1!A1", "").unwrap());
+    let styling = vec![SheetStyling {
+        links: links.clone(),
+        ..SheetStyling::default()
+    }];
+    let bytes = OdfCodec::pack_ods_multi_styled(&sheets, &styling).unwrap();
+    let (_, back) = OdfCodec::unpack_ods_with_styling(&bytes).unwrap();
+    assert_eq!(back[0].1.links, links);
+}
+
+#[test]
+fn a_hostile_sheet_of_repeated_ranges_reads_and_ties_the_walk_to_the_cells() {
+    let bytes = OoxmlCodec::pack_xlsx_multi_styled(&sheets(), &[], &[]).unwrap();
+    let mut entries = ZipArchiveCodec::unpack(&bytes, &ZipSecurityPolicy::default()).unwrap();
+    let mut block = String::from("<hyperlinks>");
+    for _ in 0..131_060 {
+        block.push_str("<hyperlink ref=\"A1:CV100\" location=\"Sheet1!B1\"/>");
+    }
+    block.push_str("</hyperlinks>");
+    for e in &mut entries {
+        if e.path.starts_with("xl/worksheets/sheet") && e.path.ends_with(".xml") {
+            let text = String::from_utf8(e.data.clone()).unwrap();
+            e.data = text
+                .replace("</worksheet>", &format!("{block}</worksheet>"))
+                .into_bytes();
+        }
+    }
+    let hostile = ZipArchiveCodec::pack_compressed(&entries).unwrap();
+    let back = OoxmlCodec::unpack_xlsx_styling(&hostile).unwrap();
+    assert_eq!(back[0].1.links.len(), 10_000);
+    assert!(
+        back[0].1.links_rejected > 100_000,
+        "the repeats are counted, not walked"
+    );
+    // The allowance of cells to visit belongs to the document: the first sheet used it, so the second one places none.
+    assert_eq!(back[1].1.links.len(), 0);
+}

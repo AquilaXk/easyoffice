@@ -20,7 +20,7 @@ use crate::sheet_styling::{
     SheetStyling, StyleKey, VAlign, MAX_COLUMN_PX, MAX_STYLED_CELLS, MIN_COLUMN_PX,
 };
 use crate::xml_stream::{unescape_cow, Attrs};
-use crate::{EasyOfficeError, OdfCodec, XmlSanitizer};
+use crate::{CellBox, EasyOfficeError, OdfCodec, XmlSanitizer};
 use std::sync::Arc;
 
 const PX_PER_INCH: f64 = 96.0;
@@ -556,12 +556,14 @@ impl<'s> StyleSink<'s> {
             self.links.rejected = self.links.rejected.saturating_add(1);
             return;
         }
-        for row in self.row..self.row + repeat {
-            for c in col..col + col_repeat {
-                self.links
-                    .add(&mut self.link_allowance, (row, c), &target, title);
-            }
-        }
+        let block = CellBox {
+            row0: self.row,
+            col0: col,
+            row1: self.row + repeat - 1,
+            col1: col + col_repeat - 1,
+        };
+        self.links
+            .add_area(&mut self.link_allowance, block, &target, title);
     }
 
     pub(crate) fn into_tables(self) -> Vec<(String, SheetStyling)> {

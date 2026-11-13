@@ -497,6 +497,10 @@ impl OdfCodec {
             for (row, col) in rules.table.blank_cells(&st.rules) {
                 grid.entry(row).or_default().entry(col).or_insert(&blank);
             }
+            // Cells that only carry a hyperlink (an empty `text:a` holds it).
+            for &(row, col) in st.links.keys() {
+                grid.entry(row).or_default().entry(col).or_insert(&blank);
+            }
             // The repeated rows are written, empty ones too, so the wrapper has its extent.
             for row in 0..title_end(st.page.title_rows).unwrap_or(0) {
                 grid.entry(row).or_default();
