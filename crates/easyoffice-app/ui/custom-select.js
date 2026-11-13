@@ -147,7 +147,10 @@
     arrow.setAttribute("aria-hidden", "true");
     const menu = el(document, "div", "custom-select-menu");
     menu.setAttribute("role", "listbox");
+    const sizer = el(document, "span", "custom-select-sizer");
+    sizer.setAttribute("aria-hidden", "true");
     trigger.appendChild(value);
+    trigger.appendChild(sizer);
     trigger.appendChild(arrow);
     select.before(root);
     root.appendChild(trigger);
@@ -213,6 +216,13 @@
       rowByValue.clear();
       selectedRow = null;
       appendMenuRows(document, menu, select, commit, options, optionByValue, rowByValue);
+      sizer.replaceChildren(
+        ...options.map((option) => {
+          const choice = el(document, "span");
+          choice.textContent = (option.textContent || "").trim();
+          return choice;
+        }),
+      );
       for (const row of rowByValue.values()) {
         row.classList.remove("selected");
         row.setAttribute("aria-selected", "false");

@@ -389,6 +389,11 @@ input.sb-ls-select {
   white-space: nowrap;
 }
 
+/* The choices laid in one cell with the text, so a dialog's combo box is as wide as its longest choice (shell.css). */
+.custom-select-sizer {
+  display: none;
+}
+
 .custom-select-arrow {
   display: inline-flex;
   align-items: center;
