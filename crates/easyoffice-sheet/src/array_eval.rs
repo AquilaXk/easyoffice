@@ -217,6 +217,14 @@ impl SheetEngine {
         depth: usize,
     ) -> ValResult {
         let anchor = self.eval_sheet_coord(sheet_opt, coord, ctx, depth);
+        let target_id = self
+            .resolve_sheet_ref(sheet_opt, ctx)
+            .map(SheetEngine::resolved_sheet_id);
+        if let Some(grid) =
+            target_id.and_then(|id| ctx.fresh.get(&crate::PackedWorkbookCoord::new(id, coord).0))
+        {
+            return Ok(Val::Grid(Arc::clone(grid)));
+        }
         let Some((is_array, area)) = self
             .resolve_sheet_ref(sheet_opt, ctx)
             .map(|t| (t.array_formulas.contains(&coord), t.spill_area(coord)))

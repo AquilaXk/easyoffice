@@ -197,6 +197,8 @@
         // The step knows the edit, so that its undo is compared where the edit moved the cells (PD-216).
         pushRawUndoSnapshot({ ...before, structureEdit: { sheet: name, ...edit } });
         applyAnswer(name, edit, result.answer);
+        // The rebuilt session placed every array again: the cells they fill are taken from it (PD-217).
+        if (Array.isArray(result.answer.spillAreas)) host.__EASYOFFICE_SHEET_SPILL__?.replaceAll(sheetDataStore, result.answer.spillAreas);
         grid.layoutChanged();
         refreshWindowFromModel();
         await recalculateActiveSheetFormulas({ updateFocusedDisplay: true });

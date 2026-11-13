@@ -7,7 +7,8 @@
 use crate::EasyOfficeIpcRouter;
 use easyoffice_formats::EasyOfficeError;
 use easyoffice_sheet::{
-    EvaluatedCellValue, WorkbookBatchEvaluation, WorkbookEngine, WorkbookEvalTarget, MAX_EVAL_TIME,
+    EvaluatedCellValue, SpillArea, WorkbookBatchEvaluation, WorkbookEngine, WorkbookEvalTarget,
+    MAX_EVAL_TIME,
 };
 use std::time::Duration;
 
@@ -106,15 +107,11 @@ pub(crate) fn answer(requests: &[(&str, &str)], batch: &WorkbookBatchEvaluation)
     )
 }
 
-/// `,"spills":[{"sheet","cell","rows","cols","blocked","values"}, ...]`: the arrays that spill with the
-/// values of their area, row by row (PD-217); nothing for a workbook without one.
-fn spills_field(batch: &WorkbookBatchEvaluation) -> String {
-    if batch.spills.is_empty() {
-        return String::new();
-    }
+/// `[{"sheet","cell","rows","cols","blocked","values"}, ...]`: the arrays that spill with the values of their
+/// area, row by row (PD-217).
+pub(crate) fn spill_areas_json(areas: &[SpillArea]) -> String {
     let esc = EasyOfficeIpcRouter::escape_json_str;
-    let areas: Vec<String> = batch
-        .spills
+    let items: Vec<String> = areas
         .iter()
         .map(|a| {
             let values: Vec<String> = a
@@ -133,28 +130,41 @@ fn spills_field(batch: &WorkbookBatchEvaluation) -> String {
             )
         })
         .collect();
-    format!(",\"spills\":[{}]", areas.join(","))
+    format!("[{}]", items.join(","))
+}
+
+/// `,"spills":[...]` of a stateless answer; nothing for a workbook without an array.
+fn spills_field(batch: &WorkbookBatchEvaluation) -> String {
+    if batch.spills.is_empty() {
+        return String::new();
+    }
+    format!(",\"spills\":{}", spill_areas_json(&batch.spills))
 }
 
 /// Evaluates `targets` for a file. With `complete` the save is refused when the pass did not reach
 /// every target; without it an unreached target is `None` and its formula is written with no value.
+/// The values come with the arrays that spill (PD-217): the cells they fill belong in a file as values.
 pub(crate) fn evaluate_for_file(
     wb: &WorkbookEngine,
     targets: &[WorkbookEvalTarget<'_>],
     complete: bool,
-) -> Result<Vec<Option<EvaluatedCellValue>>, EasyOfficeError> {
+) -> Result<(Vec<Option<EvaluatedCellValue>>, Vec<SpillArea>), EasyOfficeError> {
     let batch = wb.evaluate_targets_within(targets, save_eval_time());
     if complete && batch.timed_out {
         return Err(refused());
     }
     let WorkbookBatchEvaluation {
-        values, unreached, ..
+        values,
+        unreached,
+        spills,
+        ..
     } = batch;
-    Ok(values
+    let values = values
         .into_iter()
         .enumerate()
         .map(|(i, v)| (!unreached.get(i).copied().unwrap_or(false)).then_some(v))
-        .collect())
+        .collect();
+    Ok((values, spills))
 }
 
 pub(crate) fn refused() -> EasyOfficeError {

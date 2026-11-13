@@ -260,3 +260,66 @@ fn a_request_without_a_session_settles_arrays_too() {
     };
     assert_eq!((at("C1"), at("C2")), ("1".to_string(), "3".to_string()));
 }
+
+#[test]
+fn a_column_insert_moves_the_formula_and_the_array_follows() {
+    use easyoffice_sheet::{Axis, AxisBudget, AxisEdit, EditKind};
+    let mut m = new_empty_model();
+    for (i, v) in ["30", "10", "20", "10"].iter().enumerate() {
+        m._set(&format!("A{}", i + 1), v);
+    }
+    m._set("C1", "=SORT(UNIQUE(A1:A4))");
+    m._set("E1", "=SUM(C1#)");
+    m.evaluate();
+    assert_eq!(
+        spilled(&m, &["C1", "C2", "C3", "E1"]),
+        ["10", "20", "30", "60"]
+    );
+    let edit = AxisEdit::new(Axis::Col, EditKind::Insert, 2, 1).unwrap();
+    let budget = AxisBudget::default();
+    let (_, outcome) = m.session().apply_axis_edit("Sheet1", edit, budget).unwrap();
+    assert!(outcome.spills.iter().any(|s| s.rows == 3));
+    assert_eq!(
+        spilled(&m, &["C1", "D1", "D2", "D3", "F1"]),
+        ["", "10", "20", "30", "60"]
+    );
+    let edit = AxisEdit::new(Axis::Row, EditKind::Insert, 1, 1).unwrap();
+    m.session()
+        .apply_axis_edit("Sheet1", edit, AxisBudget::default())
+        .unwrap();
+    // the inserted row is a blank inside the range the formula reads: it sorts last and shows as 0
+    assert_eq!(
+        spilled(&m, &["D1", "D2", "D3", "D4", "D5"]),
+        ["10", "20", "30", "0", ""]
+    );
+}
+
+#[test]
+fn a_long_chain_of_arrays_reading_each_others_areas_settles() {
+    let mut m = new_empty_model();
+    m._set("A1", "=SEQUENCE(3)");
+    for i in 1..=150u32 {
+        let (from, to) = (cell_col(i), cell_col(i + 1));
+        m._set(&format!("{to}1"), &format!("=SORT({from}1#, 1, -1)"));
+    }
+    m.evaluate();
+    assert!(!m.last.as_ref().unwrap().circular);
+    // every sort is descending: the first one turns 1,2,3 over, the others keep it
+    let last = cell_col(151);
+    assert_eq!(
+        spilled(&m, &[&format!("{last}1"), &format!("{last}3")]),
+        ["3", "1"]
+    );
+    // the arrays were placed in one pass and settled by the next: far fewer calculations than a pass per link
+    assert!(m.last.as_ref().unwrap().recomputed < 1000);
+}
+
+fn cell_col(n: u32) -> String {
+    let mut n = n;
+    let mut s = String::new();
+    while n > 0 {
+        s.insert(0, (b'A' + ((n - 1) % 26) as u8) as char);
+        n = (n - 1) / 26;
+    }
+    s
+}

@@ -187,6 +187,10 @@ impl SheetEngine {
                 }
             }
         }
+        ctx.fresh.insert(
+            PackedWorkbookCoord::new(sheet_id, anchor).0,
+            Arc::clone(&grid),
+        );
         ctx.pending.push(Pending {
             sheet_id,
             anchor,
@@ -394,6 +398,14 @@ pub(crate) fn release_anchor(
 }
 
 impl SheetEngine {
+    /// Forgets every area of the sheet (the cells they filled stop being cells).
+    pub(crate) fn clear_spills(&mut self) {
+        if !self.spill.is_empty() {
+            self.spill = SpillTable::default();
+            self.drop_indexes();
+        }
+    }
+
     /// Calculates a formula with the array evaluator and returns the value of its cell: the first
     /// value of the array, placed when the pass places arrays (`anchor` is the formula's cell, `None`
     /// for a formula that is not in a cell).

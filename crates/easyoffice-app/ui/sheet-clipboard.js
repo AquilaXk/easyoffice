@@ -130,7 +130,14 @@
           const e = api.getEntry(grid.refOf(r, c));
           // A protected sheet copies the value, not the formula, of a cell whose format hides it (PD-216).
           const hidden = e?.formula && host.__EASYOFFICE_SHEET_PROTECT__?.formulaHidden(sheetName(), r, c, e.style);
-          line.push(e && (e.value || e.formula || e.style) ? { value: e.value || "", formula: hidden ? "" : e.formula || "", style: e.style } : null);
+          const cell = e && (e.value || e.formula || e.style) ? { value: e.value || "", formula: hidden ? "" : e.formula || "", style: e.style } : null;
+          // A cell an array filled whose formula is copied too comes back with the formula (PD-217): pasting the formula
+          // recreates it, pasting values still writes it.
+          const source = e?.spillOf ? host.__EASYOFFICE_SHEET_SPILL__?.parseRef(e.spillOf) : null;
+          if (cell && source && source.row >= range.r1 && source.row <= range.r2 && source.col >= range.c1 && source.col <= range.c2) {
+            cell.spillChild = true;
+          }
+          line.push(cell);
         }
         cells.push(line);
       }

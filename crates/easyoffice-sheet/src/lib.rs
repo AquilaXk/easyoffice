@@ -125,6 +125,8 @@ pub(crate) struct EvalContext<'a> {
     pub(crate) pending: Vec<spill::Pending>,
     /// Cells the pass has given to anchors, by sheet and cell, to the anchor.
     pub(crate) claims: FastMap<u64, PackedCellCoordinate>,
+    /// The arrays this pass placed, by sheet and anchor: a `A1#` read in the same pass takes the array itself.
+    pub(crate) fresh: FastMap<u64, Arc<array::Grid>>,
 }
 
 impl<'a> EvalContext<'a> {
@@ -143,6 +145,7 @@ impl<'a> EvalContext<'a> {
             spill_budget: None,
             pending: Vec::new(),
             claims: FastMap::default(),
+            fresh: FastMap::default(),
         }
     }
 
@@ -161,6 +164,7 @@ impl<'a> EvalContext<'a> {
             spill_budget: None,
             pending: Vec::new(),
             claims: FastMap::default(),
+            fresh: FastMap::default(),
         }
     }
 

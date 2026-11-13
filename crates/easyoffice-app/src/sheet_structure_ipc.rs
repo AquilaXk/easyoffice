@@ -247,7 +247,9 @@ pub(crate) fn session_answer(
         outcome.circular, report.removed_cells
     );
     out.push_str(&crate::sheet_session::timed_out_field(outcome));
-    out.push_str(&crate::sheet_session::spills_field(session, outcome));
+    // The rebuilt session placed every array again: the page takes the whole picture.
+    out.push_str(",\"spillAreas\":");
+    out.push_str(&crate::eval_limit::spill_areas_json(&session.spill_areas()));
     if report.names_changed {
         out.push_str(&EasyOfficeIpcRouter::names_answer_field(
             session.workbook().names(),

@@ -25,7 +25,11 @@ impl RecalcSession {
         }
         let target = self.sheet_index(sheet)?;
         let report = self.wb.apply_axis_edit(sheet, edit, budget)?;
-        let wb = std::mem::replace(&mut self.wb, WorkbookEngine::new());
+        let mut wb = std::mem::replace(&mut self.wb, WorkbookEngine::new());
+        // The areas arrays filled are at the old positions; the rebuilt session places them again.
+        for sheet in wb.sheets_mut() {
+            sheet.clear_spills();
+        }
         let old_memo = std::mem::replace(&mut self.memo, MemoTable::new(1));
         let mut next = match RecalcSession::with_budget(wb, self.budget) {
             Ok(next) => next,

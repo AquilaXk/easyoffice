@@ -57,6 +57,7 @@ impl SheetEngine {
         let cells = std::mem::take(&mut self.cells);
         let mut asts = std::mem::take(&mut self.compiled_asts);
         let mut subtotals = std::mem::take(&mut self.subtotal_coords);
+        let mut arrays = std::mem::take(&mut self.array_formulas);
         let mut name_uses = std::mem::take(&mut self.name_uses);
         self.dense_numbers.clear();
         self.invalidate_caches();
@@ -76,6 +77,9 @@ impl SheetEngine {
             }
             if subtotals.remove(&coord) {
                 self.subtotal_coords.insert(moved);
+            }
+            if arrays.remove(&coord) {
+                self.array_formulas.insert(moved);
             }
             if let Some(uses) = name_uses.remove(&coord) {
                 self.name_uses.insert(moved, uses);

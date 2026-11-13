@@ -91,6 +91,8 @@
   // covers. Null when the mode has nothing to write for the block.
   function writeOf(from, mode, copied, isFormulaStr) {
     if (!copied && (mode === "formats" || mode === "widths")) return null;
+    // A result of a copied array formula is not pasted next to it (PD-217); a values paste writes it.
+    if (from?.spillChild && (mode === "all" || mode === "formulas")) return null;
     const value = String(from?.value ?? "");
     const formula = from?.formula || (!copied && mode !== "values" && isFormulaStr(value) ? value : "");
     const text = formula ? "" : value;

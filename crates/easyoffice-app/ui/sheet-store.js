@@ -440,6 +440,8 @@
         session.values.set(c.sheet + "!" + c.cell, c.value);
       }
       takeSpills(sheetsMap, answer);
+      // The rebuilt session placed every array again: the page takes the whole picture (PD-217).
+      if (spillApi && Array.isArray(answer.spillAreas)) spillApi.replaceAll(sheetsMap, answer.spillAreas);
       // The engine moved the names with the cells: the page takes its list.
       if (namesApi && Array.isArray(answer.names)) {
         namesApi.replaceAll(answer.names, true);
