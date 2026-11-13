@@ -215,9 +215,15 @@ pub(crate) fn session_answer(
     write_changed(&mut out, session, &outcome.changed);
     let _ = write!(
         out,
-        ",\"circular\":{},\"removed\":{}}}",
+        ",\"circular\":{},\"removed\":{}",
         outcome.circular, report.removed_cells
     );
+    if report.names_changed {
+        out.push_str(&EasyOfficeIpcRouter::names_answer_field(
+            session.workbook().names(),
+        ));
+    }
+    out.push('}');
     out
 }
 

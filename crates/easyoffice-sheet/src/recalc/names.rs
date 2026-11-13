@@ -3,7 +3,8 @@
 //! [`recalculate`](RecalcSession::recalculate) computes them and what reads them.
 
 use super::{collect_refs, is_formula, RecalcError, RecalcSession};
-use easyoffice_formats::DefinedName;
+use crate::NameIssue;
+use easyoffice_formats::{DefinedName, EasyOfficeError, MAX_NAMES};
 
 /// Heap bytes of one syntax node, for what the expanded names add to a session (a node holds an
 /// operator, boxed children or a short string; measured on the benchmark of PD-214 and rounded up).
@@ -14,10 +15,36 @@ impl RecalcSession {
     /// Fails, changing nothing, when a name is not valid. The dependency graph outgrowing the
     /// session's budget makes the session unusable ([`RecalcError::OverBudget`]).
     pub fn set_names(&mut self, defs: &[DefinedName]) -> Result<(), RecalcError> {
+        self.apply_names(defs, true).map(drop)
+    }
+
+    /// [`set_names`](Self::set_names) for the list a page holds, which may keep names it got from a
+    /// file: a name that cannot be used is left out or reads as an error, and the answer lists the
+    /// definitions with a problem (position and kind). Fails, changing nothing, past
+    /// [`MAX_NAMES`](easyoffice_formats::MAX_NAMES) names.
+    pub fn set_names_lenient(
+        &mut self,
+        defs: &[DefinedName],
+    ) -> Result<Vec<(usize, NameIssue)>, RecalcError> {
+        if defs.len() > MAX_NAMES {
+            return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+                "이름은 최대 {MAX_NAMES}개까지 정의할 수 있습니다."
+            ))
+            .into());
+        }
+        self.apply_names(defs, false)
+    }
+
+    fn apply_names(
+        &mut self,
+        defs: &[DefinedName],
+        strict: bool,
+    ) -> Result<Vec<(usize, NameIssue)>, RecalcError> {
         if self.over_budget {
             return Err(RecalcError::OverBudget);
         }
-        let plan = self.wb.plan_names(defs, true)?;
+        let plan = self.wb.plan_names(defs, strict)?;
+        let issues = plan.issues.clone();
         let affected = plan.affected.clone();
         for &(sheet, coord) in &affected {
             let sheet = sheet as u16;
@@ -53,7 +80,7 @@ impl RecalcSession {
             self.over_budget = true;
             return Err(RecalcError::OverBudget);
         }
-        Ok(())
+        Ok(issues)
     }
 
     /// Estimated heap bytes of what the defined names add: their definitions and the syntax nodes the

@@ -183,8 +183,14 @@ pub(crate) fn parse_structured_content(
         return Ok(Some((content, warnings)));
     }
     if let Some(v) = field(entries, "sheets") {
-        return parse_sheets(as_array(v, "sheets")?, &mut budget)
-            .map(|(sheets, styling)| Some((StructuredContent::Workbook(sheets, styling), vec![])));
+        let (sheets, mut stylings) = parse_sheets(as_array(v, "sheets")?, &mut budget)?;
+        if let (Some(names), Some(first)) = (field(entries, "names"), stylings.first_mut()) {
+            first.defined_names = crate::sheet_names_json::parse_names(names)?;
+        }
+        return Ok(Some((
+            StructuredContent::Workbook(sheets, stylings),
+            vec![],
+        )));
     }
     if let Some(v) = field(entries, "slides") {
         return parse_slides(as_array(v, "slides")?, &mut budget)

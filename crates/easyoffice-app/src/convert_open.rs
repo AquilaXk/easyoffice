@@ -471,6 +471,12 @@ fn decode_response(
                 warnings.extend(st.rules.unsupported.iter().map(|rule| {
                     format!("{name} 시트의 {rule} 규칙은 지원하지 않아 가져오지 않았습니다.")
                 }));
+                if st.names_rejected > 0 {
+                    warnings.push(format!(
+                        "이름 {}개는 한도를 넘거나 올바르지 않아 가져오지 않았습니다.",
+                        st.names_rejected
+                    ));
+                }
                 if st.num_fmts_rejected > 0 {
                     warnings.push(format!(
                         "서식 코드 {}개는 한도를 넘거나 알 수 없어 일반 서식으로 가져왔습니다.",
@@ -518,6 +524,13 @@ fn decode_response(
                 let sheet_styling = styling_of(styling, name);
                 write_sheet(out, name, cells, sheet_styling, max_rows, max_cols);
             });
+            out.push_str("],\"names\":");
+            let names = styling
+                .first()
+                .map_or(&[][..], |(_, st)| &st.defined_names[..]);
+            out.push_str(&crate::sheet_names_json::names_json(names));
+            out.push('}');
+            return Ok(out);
         }
         DecodedContent::Slides(slides) => {
             out.push_str("\"slides\":[");

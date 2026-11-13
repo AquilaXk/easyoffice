@@ -22,7 +22,7 @@ use easyoffice_formats::{
 };
 use easyoffice_sheet::{
     AxisBudget, AxisEdit, Budget, CellChange, ChangedCell, Footprint, PackedCellCoordinate,
-    RecalcError, RecalcSession, Verdict, WorkbookEngine,
+    RecalcError, RecalcOutcome, RecalcSession, Verdict, WorkbookEngine,
 };
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
@@ -132,6 +132,58 @@ pub(crate) fn write_changed(out: &mut String, session: &RecalcSession, changed: 
     out.push(']');
 }
 
+/// The answer to an `apply` that recalculated: the changed formula cells, `circular`, the cells whose
+/// conditional formatting changed and the sheets that lost their rules.
+pub(crate) fn recalc_answer(
+    id: &str,
+    session: &mut RecalcSession,
+    changes: &[CellChange],
+    outcome: &RecalcOutcome,
+) -> String {
+    let mut out = String::with_capacity(64 + outcome.changed.len() * 40);
+    out.push_str("{\"session\":\"");
+    out.push_str(id);
+    out.push_str("\",\"changed\":");
+    write_changed(&mut out, session, &outcome.changed);
+    out.push_str(&format!(
+        ",\"circular\":{},\"recomputed\":{}",
+        outcome.circular, outcome.recomputed
+    ));
+    let rule_updates = session.rule_updates(changes, outcome);
+    if !rule_updates.changed.is_empty() {
+        out.push_str(",\"cf\":[");
+        for (i, (sheet, visuals)) in rule_updates.changed.iter().enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            let packed = visuals_json(visuals);
+            out.push_str(&format!(
+                "{{\"sheet\":\"{}\",{}",
+                EasyOfficeIpcRouter::escape_json_str(
+                    session.sheet_name(*sheet).unwrap_or_default()
+                ),
+                &packed[1..]
+            ));
+        }
+        out.push(']');
+    }
+    if !rule_updates.dropped.is_empty() {
+        let names: Vec<String> = rule_updates
+            .dropped
+            .iter()
+            .map(|&i| {
+                format!(
+                    "\"{}\"",
+                    EasyOfficeIpcRouter::escape_json_str(session.sheet_name(i).unwrap_or_default())
+                )
+            })
+            .collect();
+        out.push_str(&format!(",\"cfDropped\":[{}]", names.join(",")));
+    }
+    out.push('}');
+    out
+}
+
 impl Registry {
     pub(crate) fn new(limits: Limits) -> Self {
         Self {
@@ -207,7 +259,12 @@ impl Registry {
     }
 
     /// The session `id` if `owner` opened it (marking it used); `None` otherwise.
-    fn checkout(&self, id: &str, owner: &str, now: Instant) -> Option<Arc<Mutex<RecalcSession>>> {
+    pub(crate) fn checkout(
+        &self,
+        id: &str,
+        owner: &str,
+        now: Instant,
+    ) -> Option<Arc<Mutex<RecalcSession>>> {
         let mut inner = lock(&self.inner);
         self.drop_idle(&mut inner, now);
         let entry = inner.sessions.get_mut(id).filter(|e| e.owner == owner)?;
@@ -348,50 +405,7 @@ impl Registry {
         }
         let json = if recalc {
             let outcome = session.recalculate();
-            let mut out = String::with_capacity(64 + outcome.changed.len() * 40);
-            out.push_str("{\"session\":\"");
-            out.push_str(id);
-            out.push_str("\",\"changed\":");
-            write_changed(&mut out, &session, &outcome.changed);
-            out.push_str(&format!(
-                ",\"circular\":{},\"recomputed\":{}",
-                outcome.circular, outcome.recomputed
-            ));
-            let rule_updates = session.rule_updates(changes, &outcome);
-            if !rule_updates.changed.is_empty() {
-                out.push_str(",\"cf\":[");
-                for (i, (sheet, visuals)) in rule_updates.changed.iter().enumerate() {
-                    if i > 0 {
-                        out.push(',');
-                    }
-                    let packed = visuals_json(visuals);
-                    out.push_str(&format!(
-                        "{{\"sheet\":\"{}\",{}",
-                        EasyOfficeIpcRouter::escape_json_str(
-                            session.sheet_name(*sheet).unwrap_or_default()
-                        ),
-                        &packed[1..]
-                    ));
-                }
-                out.push(']');
-            }
-            if !rule_updates.dropped.is_empty() {
-                let names: Vec<String> = rule_updates
-                    .dropped
-                    .iter()
-                    .map(|&i| {
-                        format!(
-                            "\"{}\"",
-                            EasyOfficeIpcRouter::escape_json_str(
-                                session.sheet_name(i).unwrap_or_default()
-                            )
-                        )
-                    })
-                    .collect();
-                out.push_str(&format!(",\"cfDropped\":[{}]", names.join(",")));
-            }
-            out.push('}');
-            out
+            recalc_answer(id, &mut session, changes, &outcome)
         } else {
             format!("{{\"session\":\"{id}\",\"staged\":{}}}", changes.len())
         };
@@ -401,8 +415,20 @@ impl Registry {
         Ok(Applied::Done(json))
     }
 
+    /// Forgets session `id` (it is expired for its page from now on).
+    pub(crate) fn forget(&self, id: &str) {
+        lock(&self.inner).sessions.remove(id);
+    }
+
+    /// Whether a session holding `after` is within the per-session and all-session bounds (older sessions are
+    /// evicted to make room).
+    pub(crate) fn fits(&self, id: &str, after: Footprint) -> bool {
+        after.total_bytes() <= self.limits.max_session_bytes
+            && self.reserve_total(id, after.total_bytes(), after.cells)
+    }
+
     /// Counts what the session holds after a call against the all-session totals.
-    fn record_footprint(&self, id: &str, after: Footprint) {
+    pub(crate) fn record_footprint(&self, id: &str, after: Footprint) {
         if let Some(entry) = lock(&self.inner).sessions.get_mut(id) {
             entry.cells = after.cells;
             entry.bytes = after.total_bytes();
@@ -493,7 +519,13 @@ impl Registry {
             EasyOfficeIpcRouter::escape_json_into(&mut out, text);
             out.push_str("\"}");
         }
-        out.push_str("]}");
+        out.push(']');
+        if let Some(followed) =
+            easyoffice_sheet::follow_sheet_change_names(session.workbook().names(), op.change())
+        {
+            out.push_str(&EasyOfficeIpcRouter::names_answer_field(&followed));
+        }
+        out.push('}');
         Ok(Applied::Done(out))
     }
 
@@ -673,6 +705,8 @@ impl EasyOfficeIpcRouter {
     ///   appearance changed (PD-171).
     /// - `structure` `{session, sheet, axis, op, at, count, ...}` -> the rewritten formulas and the
     ///   moved layout and rules (see `sheet_structure_ipc`).
+    /// - `names` `{session, names}` -> the defined names of the session and the formulas that changed,
+    ///   `nameCheck` `{sheets, names, candidate, replace?}` -> `{problem}` (see `sheet_names_ipc`, PD-214).
     /// - `validate` `{session, sheet, cell, value}` -> `{ok}` or the rule's alert.
     /// - `pivot` `{sheet, cells, range, row, col?, value, agg}` -> the grouped values (no
     ///   session needed, see `sheet_pivot_ipc`).
@@ -694,6 +728,8 @@ impl EasyOfficeIpcRouter {
             "apply" => Self::sheet_session_apply(entries, owner),
             "rules" => Self::sheet_session_rules(entries, owner),
             "structure" => Self::sheet_session_structure(entries, owner),
+            "names" => Self::sheet_session_names(entries, owner),
+            "nameCheck" => Self::sheet_name_check(entries),
             "sheetRefs" => Self::sheet_session_sheet_refs(entries, owner),
             "validate" => Self::sheet_session_validate(entries, owner),
             "pivot" => Self::sheet_pivot(entries),

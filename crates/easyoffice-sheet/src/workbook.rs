@@ -20,6 +20,8 @@ pub struct WorkbookEngine {
 pub(crate) struct NamesPlan {
     table: Arc<NameTable>,
     pub(crate) affected: Vec<(usize, PackedCellCoordinate)>,
+    /// The problems of the definitions, by position in the list given.
+    pub(crate) issues: Vec<(usize, crate::NameIssue)>,
 }
 
 impl WorkbookEngine {
@@ -115,7 +117,11 @@ impl WorkbookEngine {
             }
             affected.sort_unstable();
         }
-        Ok(NamesPlan { table, affected })
+        Ok(NamesPlan {
+            table,
+            affected,
+            issues: built.issues,
+        })
     }
 
     pub(crate) fn commit_names(&mut self, plan: NamesPlan) {
