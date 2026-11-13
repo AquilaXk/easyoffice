@@ -159,7 +159,7 @@ test("a protected sheet refuses typing into a locked cell, and says why", async 
   b3.focus();
   t.key(b3, "F2");
   assert.equal(b3.dataset.editMode, undefined, "F2 does not start an edit");
-  assert.equal(t.status(), "변경하려는 셀 또는 차트가 보호된 시트에 있습니다.");
+  assert.equal(t.status(), "보호된 시트의 셀을 변경할 수 없음");
   assert.equal(b3.getAttribute("contenteditable"), "false");
   t.key(b3, "Delete");
   await flushAsyncTurns(20);
@@ -199,7 +199,7 @@ test("the allowed actions decide which edits go through", async () => {
   for (const flag of ["formatCells", "insertRows", "deleteColumns", "sort", "autoFilter", "pivotTables"]) {
     assert.equal(guard.allows("Sheet1", flag), false, flag);
     assert.equal(guard.guardAction("Sheet1", flag), false, flag);
-    assert.equal(t.status(), "변경하려는 셀 또는 차트가 보호된 시트에 있습니다.");
+    assert.equal(t.status(), "보호된 시트의 셀을 변경할 수 없음");
   }
   t.layout.setProtect("Sheet1", { on: true, deny: deny.filter((f) => f !== "insertRows" && f !== "sort") });
   assert.equal(guard.allows("Sheet1", "insertRows"), true);
@@ -217,7 +217,7 @@ test("the structure commands of the sheet refuse an edit the sheet locks, before
   t.layout.setProtect("Sheet1", { on: true, deny });
   t.cell("C2").focus();
   await t.act("row-delete");
-  assert.equal(t.status(), "변경하려는 셀 또는 차트가 보호된 시트에 있습니다.");
+  assert.equal(t.status(), "보호된 시트의 셀을 변경할 수 없음");
   await t.act("col-insert-left");
   assert.equal(t.requests.filter((r) => r.sessionAction === "structure").length, 0, "nothing reached the engine");
   await t.act("row-insert-above");
@@ -312,7 +312,7 @@ test("범위 편집 허용 lists the ranges of an unprotected sheet and a range 
   assert.equal(t.layout.protectOf("Sheet1").ranges.length, 1, "protecting keeps the ranges");
   await t.act("range-allow");
   assert.equal(t.byId("sheet-ranges-dialog").open, false, "a protected sheet keeps its ranges as they are");
-  assert.equal(t.status(), "변경하려는 셀 또는 차트가 보호된 시트에 있습니다.");
+  assert.equal(t.status(), "보호된 시트의 셀을 변경할 수 없음");
 });
 
 test("a range with a password is opened by it, once, and only for this window", async () => {
@@ -345,7 +345,7 @@ test("a range with a password is opened by it, once, and only for this window", 
 });
 
 // ---- every edit entry point on a protected sheet --------------------------------------------------------------------
-const BLOCKED = "변경하려는 셀 또는 차트가 보호된 시트에 있습니다.";
+const BLOCKED = "보호된 시트의 셀을 변경할 수 없음";
 
 async function protectedSheet(allowed) {
   const t = await open();

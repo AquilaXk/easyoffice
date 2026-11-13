@@ -16,7 +16,7 @@
   const FAILURES = {
     limit: "시트가 커서 실행할 수 없음",
     structure: "바뀌는 수식이 너무 많음",
-    protected: "변경하려는 셀 또는 차트가 보호된 시트에 있습니다.",
+    protected: "보호된 시트의 셀을 변경할 수 없음",
     error: "실행하지 못함",
   };
   // The protection flag a row or column edit needs (PD-216).

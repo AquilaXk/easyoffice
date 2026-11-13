@@ -408,7 +408,12 @@
       // A locked cell of a protected sheet cannot be typed into (PD-216).
       const guard = host.__EASYOFFICE_SHEET_PROTECT__;
       const editable = !guard || guard.cellEditable(getSheetName(), td._row, td._col, st);
-      if ((td.getAttribute("contenteditable") === "true") !== editable) td.setAttribute("contenteditable", editable ? "true" : "false");
+      // A cell that cannot be typed into still takes the keyboard focus, so the arrows and the copy keys keep working on it.
+      if ((td.getAttribute("contenteditable") === "true") !== editable) {
+        td.setAttribute("contenteditable", editable ? "true" : "false");
+        if (editable) td.removeAttribute("tabindex");
+        else td.setAttribute("tabindex", "-1");
+      }
       if (lookApi) {
         const m = layoutApi?.mergeAt(getSheetName(), td._row, td._col);
         lookApi.paintTd(td, st, td._row, td._col, borderAt, m && m.r1 === td._row && m.c1 === td._col ? m : null);

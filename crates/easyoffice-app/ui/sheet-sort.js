@@ -19,7 +19,7 @@
     mergeSize: "크기가 다른 병합 셀이 있어 정렬할 수 없음",
     large: "정렬 범위가 너무 큼",
     engine: "정렬하지 못함",
-    protected: "변경하려는 셀 또는 차트가 보호된 시트에 있습니다.",
+    protected: "보호된 시트의 셀을 변경할 수 없음",
   };
 
   // The merges of `range` as one unit size, or the reason they cannot be sorted. `merges` are

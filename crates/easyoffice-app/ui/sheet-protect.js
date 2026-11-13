@@ -34,8 +34,8 @@
   const FLAG_NAMES = FLAGS.map(([name]) => name);
   // A sheet protected from the dialog allows selecting cells and nothing else.
   const DEFAULT_ALLOWED = ["selectLockedCells", "selectUnlockedCells"];
-  // The text the spreadsheet programs show when a cell of a protected sheet is changed; the same text answers every blocked edit.
-  const BLOCKED = "변경하려는 셀 또는 차트가 보호된 시트에 있습니다.";
+  // What the status line says when an edit of a protected sheet is refused (the help's warning that a protected sheet takes no input, cut to the 28 characters of the status line); it answers every blocked edit.
+  const BLOCKED = "보호된 시트의 셀을 변경할 수 없음";
   const WORKBOOK_BLOCKED = "통합 문서 보호";
   // Ranges up to this many cells are tested cell by cell.
   const EACH_CELL_LIMIT = 40000;

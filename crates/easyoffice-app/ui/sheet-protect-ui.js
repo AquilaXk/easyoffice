@@ -116,7 +116,6 @@
       syncPasswordFields("sheet-protect");
       kit.note("sheet-protect-status", "");
       kit.openDialog("sheet-protect-dialog");
-      byId("sheet-protect-use-password")?.focus?.();
       return true;
     }
 
