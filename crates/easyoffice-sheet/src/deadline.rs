@@ -91,12 +91,13 @@ impl EvalContext<'_> {
 }
 
 impl SheetEngine {
-    /// [`recalculate_all`](Self::recalculate_all) that gives up after `limit` (none: never) and
-    /// answers `None` when it did. A partial dependency order is not kept for the next call.
+    /// [`recalculate_all`](Self::recalculate_all) that stops after `limit` (none: never). The cells
+    /// the pass did not reach are left out of the map, and the flag says so. A partial dependency
+    /// order is not kept for the next call.
     pub fn recalculate_all_within(
         &self,
         limit: Option<Duration>,
-    ) -> Option<HashMap<PackedCellCoordinate, EvaluatedCellValue>> {
+    ) -> (HashMap<PackedCellCoordinate, EvaluatedCellValue>, bool) {
         let mut ctx = EvalContext::standalone_id(self.resolved_sheet_id());
         if let Some(limit) = limit {
             ctx = ctx.with_time_limit(limit);
@@ -119,10 +120,32 @@ impl SheetEngine {
         };
         for &coord in &plan.coords {
             ctx.reset_steps();
-            let val = self.eval_coord_ctx(coord, &mut ctx, 0);
-            results.insert(coord, val);
+            let value = if ctx.expired() {
+                None
+            } else {
+                // A value computed while the deadline passed may rest on an aborted cell.
+                Some(self.eval_coord_ctx(coord, &mut ctx, 0)).filter(|_| !ctx.expired())
+            };
+            if let Some(value) = value.or_else(|| self.settled_value(coord, &ctx)) {
+                results.insert(coord, value);
+            }
         }
-        (!ctx.expired()).then_some(results)
+        (results, ctx.expired())
+    }
+
+    /// The value of `coord` once the deadline has passed: a formula cell the pass finished keeps its
+    /// value, a cell that holds a plain value reads as itself, anything else has none.
+    pub(crate) fn settled_value(
+        &self,
+        coord: PackedCellCoordinate,
+        ctx: &EvalContext<'_>,
+    ) -> Option<EvaluatedCellValue> {
+        let sid = self.resolved_sheet_id();
+        if crate::dag::is_formula(self.compiled_asts.get(&coord)) {
+            return ctx.memo.get_at(sid, coord).cloned();
+        }
+        let mut calm = EvalContext::standalone_id(sid);
+        Some(self.eval_coord_ctx(coord, &mut calm, 0))
     }
 }
 
@@ -135,8 +158,8 @@ impl WorkbookEngine {
     }
 
     /// [`evaluate_targets`](Self::evaluate_targets) that stops after `limit`. A target the pass did
-    /// not reach is `#VALUE!` and `timed_out` is set; a target reached before the deadline has its
-    /// real value.
+    /// not reach has no value (`unreached`, its entry in `values` is empty) and `timed_out` is set; a
+    /// target reached before the deadline has its real value.
     pub fn evaluate_targets_within(
         &self,
         targets: &[WorkbookEvalTarget<'_>],
@@ -167,20 +190,28 @@ impl WorkbookEngine {
             }
         }
         let mut values = Vec::with_capacity(targets.len());
-        for target in targets {
+        let mut unreached = Vec::new();
+        for (i, target) in targets.iter().enumerate() {
             let value = if ctx.expired() {
                 None
             } else {
                 Some(self.evaluate_target(target, &mut ctx))
             };
             // A value computed while the deadline passed may rest on an aborted cell: read it again.
-            let value = value.filter(|_| !ctx.expired());
-            values.push(value.unwrap_or_else(|| self.settled_target(target, &ctx)));
+            let value = value
+                .filter(|_| !ctx.expired())
+                .or_else(|| self.settled_target(target, &ctx));
+            if value.is_none() {
+                unreached.resize(targets.len(), false);
+                unreached[i] = true;
+            }
+            values.push(value.unwrap_or(EvaluatedCellValue::Empty));
         }
         WorkbookBatchEvaluation {
             values,
             circular: ctx.circular,
             timed_out: ctx.expired(),
+            unreached,
         }
     }
 
@@ -210,32 +241,23 @@ impl WorkbookEngine {
         }
     }
 
-    /// The value of `target` once the deadline has passed: a formula cell the pass finished keeps
-    /// its value, a cell that holds a plain value reads as itself, and anything that still needed a
-    /// calculation is `#VALUE!`.
+    /// The value of `target` once the deadline has passed (see `settled_value`); an expression
+    /// target has none.
     fn settled_target(
         &self,
         target: &WorkbookEvalTarget<'_>,
         ctx: &EvalContext<'_>,
-    ) -> EvaluatedCellValue {
+    ) -> Option<EvaluatedCellValue> {
         let Some(sheet) = self.sheet(target.sheet) else {
-            return EvaluatedCellValue::Error(FormulaError::Ref);
+            return Some(EvaluatedCellValue::Error(FormulaError::Ref));
         };
         let expr = target.expr.trim();
-        let cell = PackedCellCoordinate::parse_a1(expr)
-            .ok()
-            .filter(|_| crate::parser::strip_open_formula_prefix(expr).is_none());
-        match cell {
-            Some(coord) if crate::dag::is_formula(sheet.compiled_asts.get(&coord)) => ctx
-                .memo
-                .get_at(sheet.resolved_sheet_id(), coord)
-                .cloned()
-                .unwrap_or(EvaluatedCellValue::Error(FormulaError::Value)),
-            Some(coord) => {
-                let mut calm = EvalContext::with_workbook(self, sheet.resolved_sheet_id());
-                sheet.eval_coord_ctx(coord, &mut calm, 0)
-            }
-            None => EvaluatedCellValue::Error(FormulaError::Value),
+        if crate::parser::strip_open_formula_prefix(expr).is_some() {
+            return None;
+        }
+        match PackedCellCoordinate::parse_a1(expr) {
+            Ok(coord) => sheet.settled_value(coord, ctx),
+            Err(_) => Some(EvaluatedCellValue::Error(FormulaError::Ref)),
         }
     }
 }

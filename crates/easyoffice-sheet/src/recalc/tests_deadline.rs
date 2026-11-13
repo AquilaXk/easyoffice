@@ -122,16 +122,11 @@ fn a_recalculation_that_would_take_long_stops_at_the_deadline() {
         "{}",
         out.recomputed
     );
-    let unfinished = out
-        .changed
-        .iter()
-        .filter(|c| c.value == EvaluatedCellValue::Error(FormulaError::Value))
-        .count();
-    assert_eq!(unfinished + out.recomputed, MANY as usize);
+    assert_eq!(out.pending + out.recomputed, MANY as usize);
     assert_eq!(
         out.changed.len(),
-        MANY as usize,
-        "every cell is reported once"
+        out.recomputed,
+        "a cut-off cell is not reported: the caller keeps what it shows"
     );
 }
 
@@ -143,14 +138,10 @@ fn the_cells_a_stopped_recalculation_finished_hold_their_real_value() {
     let mut session = session_with(wb, one * 8);
     let out = session.recalculate();
     assert!(out.timed_out);
+    assert!(!out.changed.is_empty());
     for c in &out.changed {
-        let shown = c.value.to_display_string();
-        assert!(shown == full || shown == "#VALUE!", "{shown}");
+        assert_eq!(c.value.to_display_string(), full);
     }
-    assert!(out
-        .changed
-        .iter()
-        .any(|c| c.value.to_display_string() == full));
 }
 
 #[test]
@@ -162,15 +153,13 @@ fn the_next_call_carries_on_and_ends_with_the_full_values() {
     let mut session = session_with(wb, Duration::ZERO);
     let first = session.recalculate();
     assert!(first.timed_out);
-    assert_eq!(first.recomputed, 0);
-    assert!(first
-        .changed
-        .iter()
-        .all(|c| c.value == EvaluatedCellValue::Error(FormulaError::Value)));
+    assert_eq!((first.recomputed, first.pending), (0, heavy as usize + 1));
+    assert!(first.changed.is_empty(), "nothing is shown as an error");
     session.budget.max_time = MAX_EVAL_TIME;
     let second = session.recalculate();
     assert!(!second.timed_out);
     assert_eq!(second.recomputed, heavy as usize + 1, "all that was left");
+    assert_eq!(second.changed.len(), heavy as usize + 1);
     let shown: Vec<String> = (1..=heavy)
         .map(|r| value(&session, &format!("AB{r}")))
         .collect();
@@ -237,17 +226,23 @@ fn a_cell_cut_off_in_the_middle_never_keeps_a_value_it_made_up() {
 }
 
 #[test]
-fn rules_read_the_cut_off_cells_as_errors_and_follow_when_they_are_computed() {
-    use crate::rules::CellVisual;
-    use easyoffice_formats::{parse_sqref, CfKind, CfRule, CfStyle, SheetRules};
-    let mut session = session_with(heavy_workbook(6), Duration::ZERO);
+fn rules_read_the_cut_off_cells_as_the_page_shows_them_and_follow_when_they_are_computed() {
+    use easyoffice_formats::{parse_sqref, CfKind, CfRule, CfStyle, Cmp, SheetRules};
+    let mut session = session_with(heavy_workbook(6), MAX_EVAL_TIME);
+    assert!(!session.recalculate().timed_out);
+    session.set_cell("Sheet1", at("A1"), "1000000000").unwrap();
+    session.budget.max_time = Duration::ZERO;
     assert!(session.recalculate().timed_out);
     let rules = SheetRules {
         cf: vec![CfRule {
             ranges: parse_sqref("AB1:AB6"),
             priority: 1,
             stop_if_true: false,
-            kind: CfKind::Errors { not: false },
+            kind: CfKind::CellIs {
+                cmp: Cmp::Greater,
+                a: "10000000000".to_string(),
+                b: String::new(),
+            },
             style: CfStyle {
                 bg: Some(0xFF_C7_CE),
                 fg: None,
@@ -257,27 +252,19 @@ fn rules_read_the_cut_off_cells_as_errors_and_follow_when_they_are_computed() {
         ..SheetRules::default()
     };
     let visuals = session.set_rules("Sheet1", rules).unwrap();
-    assert_eq!(
-        visuals.len(),
-        6,
-        "a cell that shows #VALUE! is formatted as an error"
-    );
-    let sid = session.wb.sheets()[0].resolved_sheet_id();
     assert!(
-        !session.memo.contains_at(sid, at("AB1")),
-        "the rule did not calculate the cell"
+        visuals.is_empty(),
+        "the shown values are the old, small ones"
     );
     session.budget.max_time = MAX_EVAL_TIME;
     let out = session.recalculate();
     assert!(!out.timed_out);
     let updates = session.rule_updates(&[], &out);
-    let cleared: usize = updates.changed.iter().map(|(_, v)| v.len()).sum();
-    assert_eq!(cleared, 6);
-    assert!(updates
-        .changed
-        .iter()
-        .flat_map(|(_, v)| v)
-        .all(CellVisual::is_none));
+    let marked: usize = updates.changed.iter().map(|(_, v)| v.len()).sum();
+    assert_eq!(
+        marked, 6,
+        "the rule follows once the cells have their new values"
+    );
 }
 
 #[test]
@@ -341,6 +328,7 @@ fn a_chain_of_names_that_doubles_the_reads_stops_at_the_deadline() {
     assert!(out.timed_out);
     assert!(start.elapsed() < one * 100);
     assert!(out.recomputed < MANY as usize);
+    assert!(out.changed.len() == out.recomputed);
 }
 
 #[test]
@@ -366,15 +354,19 @@ fn the_stateless_pass_stops_and_keeps_what_it_finished() {
         "1",
         "a plain cell reads as itself"
     );
-    let done = batch.values[1..]
-        .iter()
-        .filter(|v| v.to_display_string() != "#VALUE!")
+    assert!(!batch.is_unreached(0));
+    let done = (1..=MANY as usize)
+        .filter(|&i| !batch.is_unreached(i))
         .count();
     assert!(done > 0 && done < MANY as usize, "{done}");
+    assert!(batch.values[1..]
+        .iter()
+        .enumerate()
+        .all(|(i, v)| batch.is_unreached(i + 1) || v.to_display_string() != "#VALUE!"));
 }
 
 #[test]
-fn a_formula_target_after_the_deadline_is_an_error_and_a_plain_cell_is_not() {
+fn a_target_after_the_deadline_has_no_value_unless_it_is_a_plain_cell() {
     let wb = heavy_workbook(2);
     let targets = [
         WorkbookEvalTarget {
@@ -396,22 +388,63 @@ fn a_formula_target_after_the_deadline_is_an_error_and_a_plain_cell_is_not() {
     let batch = wb.evaluate_targets_within(&targets, Duration::ZERO);
     assert!(batch.timed_out);
     let shown: Vec<String> = batch.values.iter().map(|v| v.to_display_string()).collect();
-    assert_eq!(shown, ["#VALUE!", "3", "#VALUE!"]);
+    assert_eq!(shown, ["", "3", ""]);
+    assert_eq!(
+        (0..3).map(|i| batch.is_unreached(i)).collect::<Vec<_>>(),
+        [true, false, true]
+    );
 }
 
 #[test]
-fn a_stopped_full_recalculation_is_refused_and_leaves_no_plan_behind() {
+fn a_stopped_full_recalculation_leaves_out_what_it_did_not_reach_and_no_plan_behind() {
     let mut sheet = SheetEngine::new("S");
     sheet.set_cell("A1", "2").unwrap();
     sheet.set_cell("B1", "=A1*3").unwrap();
     sheet.set_cell("C1", "=B1+1").unwrap();
-    assert!(sheet.recalculate_all_within(Some(Duration::ZERO)).is_none());
+    let (cut, timed_out) = sheet.recalculate_all_within(Some(Duration::ZERO));
+    assert!(timed_out);
+    assert_eq!(cut.get(&at("A1")), Some(&EvaluatedCellValue::Number(2.0)));
+    assert!(!cut.contains_key(&at("B1")) && !cut.contains_key(&at("C1")));
     let all = sheet.recalculate_all();
     assert_eq!(all[&at("C1")], EvaluatedCellValue::Number(7.0));
-    assert_eq!(
-        sheet.recalculate_all_within(Some(MAX_EVAL_TIME)).unwrap()[&at("B1")],
-        EvaluatedCellValue::Number(6.0)
-    );
+    let (whole, timed_out) = sheet.recalculate_all_within(Some(MAX_EVAL_TIME));
+    assert!(!timed_out);
+    assert_eq!(whole[&at("B1")], EvaluatedCellValue::Number(6.0));
+}
+
+#[test]
+fn a_cut_off_formula_keeps_the_value_it_had_and_is_reported_when_it_changes() {
+    let wb = heavy_workbook(5);
+    let mut session = session_with(wb, MAX_EVAL_TIME);
+    assert!(!session.recalculate().timed_out);
+    let before = value(&session, "AB1");
+    session.set_cell("Sheet1", at("A1"), "100000").unwrap();
+    session.budget.max_time = Duration::ZERO;
+    let cut = session.recalculate();
+    assert!(cut.timed_out);
+    assert_eq!((cut.changed.len(), cut.pending), (0, 5));
+    assert_eq!(value(&session, "AB1"), before, "the shown value stays");
+    session.budget.max_time = MAX_EVAL_TIME;
+    let done = session.recalculate();
+    assert!(!done.timed_out);
+    assert_eq!(done.changed.len(), 5, "reported once it has its new value");
+    assert_ne!(value(&session, "AB1"), before);
+}
+
+#[test]
+fn a_circular_workbook_still_finishes_in_several_short_passes() {
+    let one = one_cell();
+    let mut wb = guarded_workbook(60);
+    wb.set_cell("Sheet1", "E1", "=F1+1").unwrap();
+    wb.set_cell("Sheet1", "F1", "=E1+1").unwrap();
+    let mut session = session_with(wb, one * 2);
+    let mut passes = 0;
+    while session.recalculate().timed_out {
+        passes += 1;
+        assert!(passes < 500, "no progress");
+    }
+    assert!(passes > 0);
+    assert!(session.recalculate().circular);
 }
 
 #[test]
@@ -504,6 +537,14 @@ fn deadline_repro_bench() {
         "session, {in_session} repro cells: {:.0} ms, recomputed {}, timed out {timed}",
         t.elapsed().as_secs_f64() * 1e3,
         out.recomputed
+    );
+    let mut passes = 1;
+    while session.recalculate().timed_out {
+        passes += 1;
+    }
+    println!(
+        "  carried on until nothing was pending: {passes} passes, {:.0} ms in all",
+        t.elapsed().as_secs_f64() * 1e3
     );
     let mut wb = heavy_workbook_of(0, REPRO_TERMS, REPRO_ROWS);
     wb.set_names(&doubling_names(10, REPRO_ROWS)).unwrap();

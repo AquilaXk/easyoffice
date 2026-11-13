@@ -395,7 +395,7 @@ impl SheetEngine {
     /// The dependency order is computed once and cached until the next edit, so repeated
     /// recalculations of an unchanged sheet only evaluate formulas (no graph walk).
     pub fn recalculate_all(&self) -> HashMap<PackedCellCoordinate, EvaluatedCellValue> {
-        self.recalculate_all_within(None).unwrap_or_default()
+        self.recalculate_all_within(None).0
     }
 
     pub fn evaluate_formula_str(&self, formula: &str) -> EvaluatedCellValue {

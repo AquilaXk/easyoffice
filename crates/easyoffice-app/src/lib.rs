@@ -4,9 +4,7 @@ use easyoffice_layout::{
     DesktopPlatform, DocumentPageLayout, OfficeModuleKind, PageOrientation, PdfStudioLayout,
     RibbonLayoutStyle, SlideDeckTheme, SlideStageLayout,
 };
-use easyoffice_sheet::{
-    EvaluatedCellValue, PackedCellCoordinate, WorkbookEngine, WorkbookEvalTarget,
-};
+use easyoffice_sheet::{PackedCellCoordinate, WorkbookEngine};
 
 pub mod benchmark;
 mod benchmark_baselines;
@@ -375,40 +373,8 @@ impl EasyOfficeIpcRouter {
                     }
                     requests.push((sh, expr));
                 }
-                let eval_targets: Vec<WorkbookEvalTarget<'_>> = requests
-                    .iter()
-                    .map(|&(sheet, expr)| WorkbookEvalTarget {
-                        sheet,
-                        expr,
-                        anchor: anchor_coord,
-                    })
-                    .collect();
-                let batch = eval_limit::evaluate(&wb, &eval_targets);
-                let mut values_entries = Vec::with_capacity(requests.len());
-                let mut target_values_entries = Vec::with_capacity(requests.len());
-                for (&(sh, expr), val) in requests.iter().zip(&batch.values) {
-                    let escaped_display = Self::escape_json_str(&val.to_display_string());
-                    values_entries.push(format!(
-                        "\"{}!{}\":\"{}\"",
-                        Self::escape_json_str(sh),
-                        Self::escape_json_str(expr),
-                        escaped_display
-                    ));
-                    target_values_entries.push(format!("\"{escaped_display}\""));
-                }
-                let first_expr = requests[0].1;
-                let first_eval = &batch.values[0];
-                return Ok(eval_limit::with_timed_out(
-                    format!(
-                        "{{\"query\":\"{}\",\"value\":\"{}\",\"values\":{{{}}},\"targetValues\":[{}],\"circular\":{}}}",
-                        Self::escape_json_str(first_expr),
-                        Self::escape_json_str(&first_eval.to_display_string()),
-                        values_entries.join(","),
-                        target_values_entries.join(","),
-                        batch.circular
-                    ),
-                    batch.timed_out,
-                ));
+                let batch = eval_limit::evaluate(&wb, &requests, anchor_coord);
+                return Ok(eval_limit::answer(&requests, &batch));
             }
         }
         let default_cell_label = anchor_coord
@@ -422,42 +388,9 @@ impl EasyOfficeIpcRouter {
             Some(s) => s,
             None => default_cell_label.as_str(),
         };
-        let (evaluated, circular, timed_out) =
-            Self::evaluate_single_target(&wb, default_sh, anchor_coord, expr);
-        let display_val = evaluated.to_display_string();
-        let escaped_display = Self::escape_json_str(&display_val);
-        Ok(eval_limit::with_timed_out(
-            format!(
-                "{{\"query\":\"{0}\",\"value\":\"{1}\",\"values\":{{\"{2}!{0}\":\"{1}\"}},\"targetValues\":[\"{1}\"],\"circular\":{3}}}",
-                Self::escape_json_str(expr),
-                escaped_display,
-                Self::escape_json_str(default_sh),
-                circular
-            ),
-            timed_out,
-        ))
-    }
-
-    fn evaluate_single_target(
-        wb: &WorkbookEngine,
-        sheet: &str,
-        anchor: Option<PackedCellCoordinate>,
-        expr: &str,
-    ) -> (EvaluatedCellValue, bool, bool) {
-        let batch = eval_limit::evaluate(
-            wb,
-            &[WorkbookEvalTarget {
-                sheet,
-                expr,
-                anchor,
-            }],
-        );
-        let value = batch
-            .values
-            .into_iter()
-            .next()
-            .unwrap_or(EvaluatedCellValue::Empty);
-        (value, batch.circular, batch.timed_out)
+        let requests = [(default_sh, expr)];
+        let batch = eval_limit::evaluate(&wb, &requests, anchor_coord);
+        Ok(eval_limit::answer(&requests, &batch))
     }
 
     fn handle_compute_layout(payload: &str) -> Result<String, EasyOfficeError> {
@@ -761,17 +694,24 @@ impl EasyOfficeIpcRouter {
             .filter(|s| !s.is_empty())
             .unwrap_or(default_cell_label.as_str());
         let wb = Self::build_workbook_from_json_entries(&entries, active_sheet)?;
-        let (val, circular, timed_out) =
-            Self::evaluate_single_target(&wb, active_sheet, anchor_coord, expr);
+        let requests = [(active_sheet, expr)];
+        let batch = eval_limit::evaluate(&wb, &requests, anchor_coord);
+        let value = if batch.is_unreached(0) {
+            "null".to_string()
+        } else {
+            format!(
+                "\"{}\"",
+                Self::escape_json_str(&batch.values[0].to_display_string())
+            )
+        };
         Ok(eval_limit::with_timed_out(
             format!(
-                "{{\"sheet\":\"{}\",\"formula\":\"{}\",\"value\":\"{}\",\"circular\":{}}}",
+                "{{\"sheet\":\"{}\",\"formula\":\"{}\",\"value\":{value},\"circular\":{}}}",
                 Self::escape_json_str(active_sheet),
                 Self::escape_json_str(expr),
-                Self::escape_json_str(&val.to_display_string()),
-                circular
+                batch.circular
             ),
-            timed_out,
+            batch.timed_out,
         ))
     }
 

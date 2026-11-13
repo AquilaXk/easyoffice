@@ -418,8 +418,17 @@ pub struct WorkbookEvalTarget<'a> {
 pub struct WorkbookBatchEvaluation {
     pub values: Vec<EvaluatedCellValue>,
     pub circular: bool,
-    /// The deadline passed: the targets the pass had not reached are `#VALUE!` (see `deadline`).
+    /// The deadline passed: the targets the pass had not reached have no value (see `deadline`).
     pub timed_out: bool,
+    /// Per target, whether the pass did not reach it (empty when every target has its value).
+    pub unreached: Vec<bool>,
+}
+
+impl WorkbookBatchEvaluation {
+    /// The pass did not reach target `i`: its entry in `values` is empty, not a result.
+    pub fn is_unreached(&self, i: usize) -> bool {
+        self.unreached.get(i).copied().unwrap_or(false)
+    }
 }
 
 impl SheetEngine {

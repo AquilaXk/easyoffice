@@ -608,10 +608,12 @@ impl OdfCodec {
                         XmlSanitizer::escape(text)
                     ));
                 }
+                // No cached result (an error, or a formula not calculated in time): the cell holds the
+                // formula alone, as ODF allows (`office:value-type` and the value are optional), and the
+                // reader calculates it.
                 _ => {
                     content.push_str(&format!(
-                        "<table:table-cell row=\"{row}\" col=\"{col}\"{style_attr} table:formula=\"of:={escaped_formula}\" office:value-type=\"string\"><text:p>{}</text:p></table:table-cell>",
-                        XmlSanitizer::escape(raw)
+                        "<table:table-cell row=\"{row}\" col=\"{col}\"{style_attr} table:formula=\"of:={escaped_formula}\"/>"
                     ));
                 }
             }

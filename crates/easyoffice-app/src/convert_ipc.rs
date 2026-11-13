@@ -12,14 +12,13 @@ use crate::EasyOfficeIpcRouter;
 
 /// Evaluates every formula cell XLSX output will contain with the sheet engine, so the written
 /// workbook carries real cached values (`<v>`) instead of placeholders. Error results are left
-/// uncached; the workbook's `fullCalcOnLoad` makes consumers recompute them.
-pub(crate) fn compute_xlsx_formula_cache(
-    model: &UniversalDocumentModel,
-) -> Result<XlsxFormulaCache, EasyOfficeError> {
+/// uncached; the workbook's `fullCalcOnLoad` makes consumers recompute them. So are the formulas a
+/// slow workbook did not get to in time (`MAX_SAVE_EVAL_TIME`).
+pub(crate) fn compute_xlsx_formula_cache(model: &UniversalDocumentModel) -> XlsxFormulaCache {
     let mut cache = XlsxFormulaCache::new();
     let cells = model.effective_sheet_cells();
     if !cells.iter().any(|(_, _, raw)| raw.starts_with('=')) {
-        return Ok(cache);
+        return cache;
     }
     let sheet_name = if model.title.trim().is_empty() {
         "문서"
@@ -32,9 +31,10 @@ pub(crate) fn compute_xlsx_formula_cache(
             let _ = engine.set_cell(&coord.to_a1(), raw.clone());
         }
     }
-    let results = engine
-        .recalculate_all_within(Some(crate::eval_limit::eval_time()))
-        .ok_or_else(crate::eval_limit::refused)?;
+    // A formula the pass did not reach in time is written with no cached value: the file's own
+    // recalculation on open (`fullCalcOnLoad`, the always-calculate flag of an XLS formula, the
+    // missing value of an ODS cell) supplies it.
+    let (results, _) = engine.recalculate_all_within(Some(crate::eval_limit::save_eval_time()));
     for (row, col, raw) in &cells {
         if !raw.starts_with('=') {
             continue;
@@ -50,7 +50,7 @@ pub(crate) fn compute_xlsx_formula_cache(
         };
         cache.insert((*row, *col), cached);
     }
-    Ok(cache)
+    cache
 }
 
 /// Collects the line-oriented legacy markup into model parts.
@@ -282,7 +282,7 @@ impl EasyOfficeIpcRouter {
                 DocumentFormat::Xls,
             ];
             let formula_cache = if cached.contains(&size_fmt) || cached.contains(&dst_fmt) {
-                Some(compute_xlsx_formula_cache(&model)?)
+                Some(compute_xlsx_formula_cache(&model))
             } else {
                 None
             };

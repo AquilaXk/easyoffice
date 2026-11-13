@@ -7,9 +7,7 @@
 
 use super::{CellChange, RecalcOutcome, RecalcSession};
 use crate::rules::{CellVisual, RuleRuntime, SheetCells, Verdict};
-use crate::{
-    validate_input, EvalContext, EvaluatedCellValue, FormulaError, MemoTable, PackedCellCoordinate,
-};
+use crate::{validate_input, EvalContext, EvaluatedCellValue, MemoTable, PackedCellCoordinate};
 use easyoffice_formats::{EasyOfficeError, SheetRules};
 
 /// What an edit batch changed in the conditional formatting of the sheets.
@@ -35,14 +33,12 @@ impl RecalcSession {
         let memo = std::mem::replace(&mut self.memo, MemoTable::new(primary_id));
         let mut ctx = EvalContext::with_workbook(&self.wb, primary_id);
         ctx.memo = memo;
-        // A formula the last recalculation did not reach reads as `#VALUE!`, as the page shows it:
-        // a rule never calculates it (that would repeat the work the deadline cut off).
-        self.dirty.for_each(|v| {
-            let (sheet, coord) = self.graph.site(v);
-            let sid = self.wb.sheets()[usize::from(sheet)].resolved_sheet_id();
-            let value = EvaluatedCellValue::Error(FormulaError::Value);
-            ctx.memo.insert_at(sid, coord, value);
-        });
+        // A formula the last recalculation did not reach reads as the value the page shows (empty
+        // for a new one): a rule never calculates it, which would repeat the work the deadline cut off.
+        let blank = self.dirty_without_value();
+        for &(sid, coord) in &blank {
+            ctx.memo.insert_at(sid, coord, EvaluatedCellValue::Empty);
+        }
         let out = {
             let mut cells = SheetCells {
                 sheet: &self.wb.sheets()[sheet],
@@ -51,18 +47,30 @@ impl RecalcSession {
             f(&mut cells)
         };
         self.memo = ctx.memo;
-        self.forget_dirty_values();
+        self.forget(&blank);
         out
     }
 
-    /// Drops the memoized value of every dirty formula: a cell without a value is what the next
-    /// recalculation reports in full, so nothing that read it may leave one behind.
-    fn forget_dirty_values(&mut self) {
+    /// The dirty formulas that hold no value (the memo keeps the last value of one the deadline cut
+    /// off), with their sheet id.
+    fn dirty_without_value(&self) -> Vec<(u16, PackedCellCoordinate)> {
+        let mut blank = Vec::new();
         self.dirty.for_each(|v| {
             let (sheet, coord) = self.graph.site(v);
             let sid = self.wb.sheets()[usize::from(sheet)].resolved_sheet_id();
-            self.memo.remove_at(sid, coord);
+            if !self.memo.contains_at(sid, coord) {
+                blank.push((sid, coord));
+            }
         });
+        blank
+    }
+
+    /// Takes back what a rule left in the memo for formulas that have no value yet: the next
+    /// recalculation reports them in full.
+    fn forget(&mut self, blank: &[(u16, PackedCellCoordinate)]) {
+        for &(sid, coord) in blank {
+            self.memo.remove_at(sid, coord);
+        }
     }
 
     /// Replaces the rules of `sheet` and returns the appearance of every formatted cell. Rules
@@ -144,10 +152,11 @@ impl RecalcSession {
             .sheets()
             .first()
             .map_or(1, |s| s.resolved_sheet_id());
+        let blank = self.dirty_without_value();
         let memo = std::mem::replace(&mut self.memo, MemoTable::new(primary_id));
         let (verdict, memo) = validate_input(&mut self.wb, idx, &rules, coord, input, memo);
         self.memo = memo;
-        self.forget_dirty_values();
+        self.forget(&blank);
         Ok(verdict)
     }
 }

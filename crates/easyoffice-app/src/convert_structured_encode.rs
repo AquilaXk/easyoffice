@@ -71,7 +71,7 @@ fn computed_sheets(sheets: &[OdsUnpacked]) -> Result<(Vec<OdsUnpacked>, usize), 
             anchor: None,
         })
         .collect();
-    let mut eval_iter = evaluate_for_file(&wb, &targets)?.into_iter();
+    let mut eval_iter = evaluate_for_file(&wb, &targets, true)?.into_iter();
 
     let mut computed = Vec::with_capacity(sheets.len());
     for (name, cells) in sheets {
@@ -86,6 +86,7 @@ fn computed_sheets(sheets: &[OdsUnpacked]) -> Result<(Vec<OdsUnpacked>, usize), 
             }
             let value = eval_iter
                 .next()
+                .flatten()
                 .unwrap_or(EvaluatedCellValue::Empty)
                 .to_display_string();
             values.push((*row, *col, value));
@@ -197,7 +198,9 @@ fn evaluate_workbook(
     sheets: &[OdsUnpacked],
     with_grids: bool,
 ) -> Result<(Vec<XlsxFormulaCache>, Vec<ValueGrid>), EasyOfficeError> {
-    let mut values = evaluate_formulas(sheets)?;
+    // The caches of XLSX and ODS may lack the formulas a slow workbook did not get to; displayed
+    // values may not.
+    let mut values = evaluate_formulas(sheets, with_grids)?;
     let mut caches = Vec::with_capacity(sheets.len());
     let mut grids = Vec::new();
     let mut grid_cells = 0usize;
@@ -214,17 +217,19 @@ fn evaluate_workbook(
 /// The displayed text of every cell of every sheet at its own position (the PDF of a sheet draws the cells where the
 /// sheet has them, so a print area and repeated rows address real rows).
 fn evaluate_displays(sheets: &[OdsUnpacked]) -> Result<Vec<DisplayCells>, EasyOfficeError> {
-    let mut values = evaluate_formulas(sheets)?;
+    let mut values = evaluate_formulas(sheets, true)?;
     Ok(sheets
         .iter()
         .map(|(_, cells)| sheet_values(cells, &mut values, true).1)
         .collect())
 }
 
-/// The value of each formula cell across all sheets in sheet and cell order.
+/// The value of each formula cell across all sheets in sheet and cell order (`None` for one the
+/// time limit cut off, which only a `complete`-less caller gets: the others are refused).
 fn evaluate_formulas(
     sheets: &[OdsUnpacked],
-) -> Result<std::vec::IntoIter<EvaluatedCellValue>, EasyOfficeError> {
+    complete: bool,
+) -> Result<std::vec::IntoIter<Option<EvaluatedCellValue>>, EasyOfficeError> {
     let wb = workbook_engine(sheets);
     let a1_addrs: Vec<(&str, String)> = sheets
         .iter()
@@ -247,14 +252,14 @@ fn evaluate_formulas(
             anchor: None,
         })
         .collect();
-    Ok(evaluate_for_file(&wb, &targets)?.into_iter())
+    Ok(evaluate_for_file(&wb, &targets, complete)?.into_iter())
 }
 
 /// One sheet's formula cache and (when `with_grids`) displayed cells, taking the value of each
 /// formula cell from `values` in cell order.
 fn sheet_values(
     cells: &[(u32, u32, String)],
-    values: &mut impl Iterator<Item = EvaluatedCellValue>,
+    values: &mut impl Iterator<Item = Option<EvaluatedCellValue>>,
     with_grids: bool,
 ) -> (XlsxFormulaCache, DisplayCells) {
     let mut cache = XlsxFormulaCache::new();
@@ -264,11 +269,11 @@ fn sheet_values(
             if PackedCellCoordinate::new(*row, *col).is_err() {
                 continue;
             };
-            let value = values.next().unwrap_or(EvaluatedCellValue::Empty);
-            if let Some(c) = cached_value(&value) {
+            let value = values.next().flatten();
+            if let Some(c) = value.as_ref().and_then(cached_value) {
                 cache.insert((*row, *col), c);
             }
-            value.to_display_string()
+            value.map_or_else(String::new, |v| v.to_display_string())
         } else {
             raw.clone()
         };
@@ -430,8 +435,7 @@ pub(crate) fn encode_structured(
                 warnings.extend(pages_write_loss(&doc).warnings());
             }
             let cache = matches!(format, DocumentFormat::Xlsx | DocumentFormat::Ods)
-                .then(|| compute_xlsx_formula_cache(&doc.to_universal_model()))
-                .transpose()?;
+                .then(|| compute_xlsx_formula_cache(&doc.to_universal_model()));
             UniversalFormatConverter::encode_rich(&doc, format, cache.as_ref())
         }
         StructuredContent::Workbook(sheets, stylings) => match format {

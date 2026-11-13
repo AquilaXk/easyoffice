@@ -51,7 +51,7 @@ pub struct Budget {
     /// [`Footprint::total_bytes`]: text, graph and syntax trees together.
     pub max_bytes: usize,
     /// The longest one [`RecalcSession::recalculate`] runs; the formulas it has not reached are
-    /// `#VALUE!` and stay dirty (see `deadline`).
+    /// not reported and stay dirty (see `deadline`).
     pub max_time: Duration,
 }
 
@@ -153,9 +153,11 @@ pub struct RecalcOutcome {
     pub circular: bool,
     /// Formula cells that were evaluated (the dirty set).
     pub recomputed: usize,
-    /// The deadline ([`Budget::max_time`]) passed: the formulas the pass had not reached are in
-    /// `changed` as `#VALUE!` and stay dirty for the next call.
+    /// The deadline ([`Budget::max_time`]) passed: the formulas the pass had not reached are not in
+    /// `changed` (the caller keeps the value it shows) and stay dirty for the next call.
     pub timed_out: bool,
+    /// Formulas the deadline left dirty (0 unless `timed_out`).
+    pub pending: usize,
 }
 
 pub struct RecalcSession {
@@ -170,6 +172,9 @@ pub struct RecalcSession {
     edited: Vec<(u16, PackedCellCoordinate)>,
     /// A dynamic (run-time) circular reference was met in the last pass.
     dynamic_circular: bool,
+    /// The last pass ran out of time: the next one only finishes the dirty formulas (it neither
+    /// dirties the volatile ones nor recomputes a circular workbook whole, or it could never finish).
+    resuming: bool,
     rng_state: u64,
     /// Total bytes of raw cell text held by the workbook.
     raw_bytes: usize,
@@ -213,6 +218,7 @@ impl RecalcSession {
             cyclic: IdSet::default(),
             edited: Vec::new(),
             dynamic_circular: false,
+            resuming: false,
             rng_state: EvalContext::standalone_id(primary_id).rng_state,
             raw_bytes: 0,
             formula_bytes: 0,
@@ -395,7 +401,9 @@ impl RecalcSession {
     /// reports the formula cells whose value changed.
     pub fn recalculate(&mut self) -> RecalcOutcome {
         let dirty = &mut self.dirty;
-        if self.cyclic.is_empty() && !self.dynamic_circular {
+        if self.resuming {
+            // Only what the last pass left dirty (and what edits since touched).
+        } else if self.cyclic.is_empty() && !self.dynamic_circular {
             self.graph.for_each_volatile(|v| {
                 dirty.insert(v);
             });
@@ -449,7 +457,8 @@ impl RecalcSession {
         }
 
         let mut changed = Vec::new();
-        // Formulas the deadline cut off: no value was stored for them, so they stay dirty.
+        // Formulas the deadline cut off stay dirty and keep the value the caller last saw (none for
+        // a formula that is new), so they are neither reported nor shown as errors.
         let mut unfinished = Vec::new();
         for (&(_, v), old) in order.iter().zip(before) {
             let (sheet, coord) = self.graph.site(v);
@@ -458,7 +467,13 @@ impl RecalcSession {
                 Some(value) => value.clone(),
                 None if ctx.expired() => {
                     unfinished.push(v);
-                    EvaluatedCellValue::Error(FormulaError::Value)
+                    if let Some(old) = old {
+                        if matches!(old, EvaluatedCellValue::Error(FormulaError::Cycle)) {
+                            self.cyclic.insert(v);
+                        }
+                        ctx.memo.insert_at(sid, coord, old);
+                    }
+                    continue;
                 }
                 None => EvaluatedCellValue::Empty,
             };
@@ -477,7 +492,7 @@ impl RecalcSession {
         // have a constant value; report it so the caller never has to guess.
         self.edited.sort_unstable();
         self.edited.dedup();
-        let timed_out = ctx.expired();
+        let timed_out = ctx.expired() && !unfinished.is_empty();
         // These cells hold constants, so they are read with a fresh clock.
         let mut ctx = ctx.without_deadline();
         for &(sheet, coord) in &self.edited {
@@ -503,10 +518,12 @@ impl RecalcSession {
         for &v in &unfinished {
             self.dirty.insert(v);
         }
+        self.resuming = !unfinished.is_empty();
         RecalcOutcome {
             changed,
             circular: !self.cyclic.is_empty() || self.dynamic_circular,
             recomputed: order.len() - unfinished.len(),
+            pending: unfinished.len(),
             timed_out,
         }
     }

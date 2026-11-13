@@ -52,8 +52,8 @@ pub(crate) struct Limits {
     pub max_changes: usize,
     /// A session unused this long is dropped.
     pub idle_ttl: Duration,
-    /// The longest one recalculation runs; the formulas it does not reach show `#VALUE!` and are
-    /// computed by the next one (PD-215).
+    /// The longest one recalculation runs; the formulas it does not reach keep the value the page
+    /// shows and are computed by the next one (PD-215).
     pub max_recalc: Duration,
 }
 
@@ -137,12 +137,13 @@ pub(crate) fn write_changed(out: &mut String, session: &RecalcSession, changed: 
     out.push(']');
 }
 
-/// `,"timedOut":true` when the recalculation ran out of time (its unfinished formulas are `#VALUE!` in `changed`).
-pub(crate) fn timed_out_field(outcome: &RecalcOutcome) -> &'static str {
+/// `,"timedOut":true,"pending":n` when the recalculation ran out of time: `pending` formulas keep the
+/// value the page shows and are computed by the next `apply` (the page sends one without changes).
+pub(crate) fn timed_out_field(outcome: &RecalcOutcome) -> String {
     if outcome.timed_out {
-        ",\"timedOut\":true"
+        format!(",\"timedOut\":true,\"pending\":{}", outcome.pending)
     } else {
-        ""
+        String::new()
     }
 }
 
@@ -163,7 +164,7 @@ pub(crate) fn recalc_answer(
         ",\"circular\":{},\"recomputed\":{}",
         outcome.circular, outcome.recomputed
     ));
-    out.push_str(timed_out_field(outcome));
+    out.push_str(&timed_out_field(outcome));
     let rule_updates = session.rule_updates(changes, outcome);
     if !rule_updates.changed.is_empty() {
         out.push_str(",\"cf\":[");
