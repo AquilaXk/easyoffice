@@ -362,6 +362,17 @@ fn the_grid_keeps_to_its_window_and_a_far_cell_costs_nothing() {
     assert_eq!(card_source::grid(&big)[0][0], "=1+1");
 }
 
+#[test]
+fn a_grid_whose_formulas_run_out_of_time_shows_the_formula_text() {
+    let cells = vec![(
+        "S".to_string(),
+        vec![(0, 0, "=1+1".to_string()), (0, 1, "3".to_string())],
+    )];
+    assert_eq!(card_source::grid(&cells)[0][0], "2");
+    let rows = card_source::grid_within(&cells, std::time::Duration::ZERO);
+    assert_eq!((rows[0][0].as_str(), rows[0][1].as_str()), ("=1+1", "3"));
+}
+
 // --- pictures ------------------------------------------------------------------------------
 
 #[test]

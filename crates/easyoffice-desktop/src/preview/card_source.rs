@@ -14,10 +14,11 @@ use easyoffice_formats::{
     UniversalFormatConverter,
 };
 use easyoffice_sheet::{
-    EvaluatedCellValue, PackedCellCoordinate, WorkbookEngine, WorkbookEvalTarget,
+    EvaluatedCellValue, PackedCellCoordinate, WorkbookEngine, WorkbookEvalTarget, MAX_EVAL_TIME,
 };
 use std::io::Cursor;
 use std::sync::Arc;
+use std::time::Duration;
 use usvg::fontdb::Database;
 
 /// Most cells of a whole workbook for which the formulas of the grid are evaluated. A larger one
@@ -112,6 +113,12 @@ fn block(block: &RichBlock) -> Option<Block> {
 /// The cells of the first [`GRID_ROWS`] rows and [`GRID_COLUMNS`] columns of the first sheet, as
 /// shown: a formula is replaced by its value.
 pub(super) fn grid(sheets: &[OdsUnpacked]) -> Vec<Vec<String>> {
+    grid_within(sheets, MAX_EVAL_TIME)
+}
+
+/// [`grid`] with `limit` as the time the formulas may take: a card whose formulas do not finish
+/// shows the formula text.
+pub(super) fn grid_within(sheets: &[OdsUnpacked], limit: Duration) -> Vec<Vec<String>> {
     let Some((name, cells)) = sheets.first() else {
         return Vec::new();
     };
@@ -132,7 +139,7 @@ pub(super) fn grid(sheets: &[OdsUnpacked]) -> Vec<Vec<String>> {
         rows[row][column] = raw.clone();
     }
     if !formulas.is_empty() {
-        evaluate_into(&mut rows, sheets, name, &formulas);
+        evaluate_into(&mut rows, sheets, name, &formulas, limit);
     }
     rows
 }
@@ -142,6 +149,7 @@ fn evaluate_into(
     sheets: &[OdsUnpacked],
     name: &str,
     formulas: &[(usize, usize, String)],
+    limit: Duration,
 ) {
     if sheets.iter().map(|(_, cells)| cells.len()).sum::<usize>() > MAX_FORMULA_WORKBOOK_CELLS {
         return;
@@ -163,8 +171,12 @@ fn evaluate_into(
             anchor: None,
         })
         .collect();
-    let values = workbook.evaluate_targets(&targets).values;
-    for ((row, column, _), value) in formulas.iter().zip(values) {
+    let batch = workbook.evaluate_targets_within(&targets, limit);
+    if batch.timed_out {
+        // The values are not all there: the card keeps the formula text, as for a larger workbook.
+        return;
+    }
+    for ((row, column, _), value) in formulas.iter().zip(batch.values) {
         rows[*row][*column] = match value {
             EvaluatedCellValue::Empty => String::new(),
             shown => shown.to_display_string(),

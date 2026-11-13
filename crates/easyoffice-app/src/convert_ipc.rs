@@ -13,11 +13,13 @@ use crate::EasyOfficeIpcRouter;
 /// Evaluates every formula cell XLSX output will contain with the sheet engine, so the written
 /// workbook carries real cached values (`<v>`) instead of placeholders. Error results are left
 /// uncached; the workbook's `fullCalcOnLoad` makes consumers recompute them.
-pub(crate) fn compute_xlsx_formula_cache(model: &UniversalDocumentModel) -> XlsxFormulaCache {
+pub(crate) fn compute_xlsx_formula_cache(
+    model: &UniversalDocumentModel,
+) -> Result<XlsxFormulaCache, EasyOfficeError> {
     let mut cache = XlsxFormulaCache::new();
     let cells = model.effective_sheet_cells();
     if !cells.iter().any(|(_, _, raw)| raw.starts_with('=')) {
-        return cache;
+        return Ok(cache);
     }
     let sheet_name = if model.title.trim().is_empty() {
         "문서"
@@ -30,7 +32,9 @@ pub(crate) fn compute_xlsx_formula_cache(model: &UniversalDocumentModel) -> Xlsx
             let _ = engine.set_cell(&coord.to_a1(), raw.clone());
         }
     }
-    let results = engine.recalculate_all();
+    let results = engine
+        .recalculate_all_within(Some(crate::eval_limit::eval_time()))
+        .ok_or_else(crate::eval_limit::refused)?;
     for (row, col, raw) in &cells {
         if !raw.starts_with('=') {
             continue;
@@ -46,7 +50,7 @@ pub(crate) fn compute_xlsx_formula_cache(model: &UniversalDocumentModel) -> Xlsx
         };
         cache.insert((*row, *col), cached);
     }
-    cache
+    Ok(cache)
 }
 
 /// Collects the line-oriented legacy markup into model parts.
@@ -278,7 +282,7 @@ impl EasyOfficeIpcRouter {
                 DocumentFormat::Xls,
             ];
             let formula_cache = if cached.contains(&size_fmt) || cached.contains(&dst_fmt) {
-                Some(compute_xlsx_formula_cache(&model))
+                Some(compute_xlsx_formula_cache(&model)?)
             } else {
                 None
             };

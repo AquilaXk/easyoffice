@@ -15,6 +15,7 @@ use crate::convert_hwp::{write_hwp, ShellWriters};
 use crate::convert_ipc::compute_xlsx_formula_cache;
 use crate::convert_structured::StructuredContent;
 use crate::convert_structured_doc::{is_document_format, slides_to_document};
+use crate::eval_limit::evaluate_for_file;
 
 /// Upper bound on cells of the value grids rendered when a workbook is saved to a document format.
 const MAX_GRID_CELLS: usize = CsvCodec::MAX_GRID_CELLS;
@@ -49,7 +50,7 @@ fn workbook_engine(sheets: &[OdsUnpacked]) -> WorkbookEngine {
 /// Every sheet with each formula replaced by the value it displays, for the formats that hold
 /// values only (a BIFF8 formula needs a compiled token stream, and CSV has no formulas). Also
 /// returns how many formulas were replaced.
-fn computed_sheets(sheets: &[OdsUnpacked]) -> (Vec<OdsUnpacked>, usize) {
+fn computed_sheets(sheets: &[OdsUnpacked]) -> Result<(Vec<OdsUnpacked>, usize), EasyOfficeError> {
     let wb = workbook_engine(sheets);
     let mut a1_pairs: Vec<(&str, String)> = Vec::new();
     for (name, cells) in sheets {
@@ -70,7 +71,7 @@ fn computed_sheets(sheets: &[OdsUnpacked]) -> (Vec<OdsUnpacked>, usize) {
             anchor: None,
         })
         .collect();
-    let mut eval_iter = wb.evaluate_targets(&targets).values.into_iter();
+    let mut eval_iter = evaluate_for_file(&wb, &targets)?.into_iter();
 
     let mut computed = Vec::with_capacity(sheets.len());
     for (name, cells) in sheets {
@@ -91,7 +92,7 @@ fn computed_sheets(sheets: &[OdsUnpacked]) -> (Vec<OdsUnpacked>, usize) {
         }
         computed.push((name.clone(), values));
     }
-    (computed, formulas)
+    Ok((computed, formulas))
 }
 
 /// Longest list of sheet names a warning spells out.
@@ -103,7 +104,7 @@ fn encode_xls(
     title: &str,
     warnings: &mut Vec<String>,
 ) -> Result<Vec<u8>, EasyOfficeError> {
-    let (computed, formulas) = computed_sheets(sheets);
+    let (computed, formulas) = computed_sheets(sheets)?;
     if formulas > 0 {
         warnings.push(format!(
             "수식 {formulas}개는 계산된 값으로 저장했습니다. XLS 파일에는 수식이 아니라 값이 들어갑니다."
@@ -151,7 +152,7 @@ fn encode_delimited(
     warnings: &mut Vec<String>,
 ) -> Result<Vec<u8>, EasyOfficeError> {
     let label = format.extension().to_uppercase();
-    let (computed, _) = computed_sheets(sheets);
+    let (computed, _) = computed_sheets(sheets)?;
     let mut computed = computed.into_iter();
     let (first_name, mut cells) = computed.next().unwrap_or_default();
     let left_out: Vec<String> = computed.map(|(name, _)| name).collect();
@@ -196,7 +197,7 @@ fn evaluate_workbook(
     sheets: &[OdsUnpacked],
     with_grids: bool,
 ) -> Result<(Vec<XlsxFormulaCache>, Vec<ValueGrid>), EasyOfficeError> {
-    let mut values = evaluate_formulas(sheets);
+    let mut values = evaluate_formulas(sheets)?;
     let mut caches = Vec::with_capacity(sheets.len());
     let mut grids = Vec::new();
     let mut grid_cells = 0usize;
@@ -212,16 +213,18 @@ fn evaluate_workbook(
 
 /// The displayed text of every cell of every sheet at its own position (the PDF of a sheet draws the cells where the
 /// sheet has them, so a print area and repeated rows address real rows).
-fn evaluate_displays(sheets: &[OdsUnpacked]) -> Vec<Vec<(u32, u32, String)>> {
-    let mut values = evaluate_formulas(sheets);
-    sheets
+fn evaluate_displays(sheets: &[OdsUnpacked]) -> Result<Vec<DisplayCells>, EasyOfficeError> {
+    let mut values = evaluate_formulas(sheets)?;
+    Ok(sheets
         .iter()
         .map(|(_, cells)| sheet_values(cells, &mut values, true).1)
-        .collect()
+        .collect())
 }
 
 /// The value of each formula cell across all sheets in sheet and cell order.
-fn evaluate_formulas(sheets: &[OdsUnpacked]) -> std::vec::IntoIter<EvaluatedCellValue> {
+fn evaluate_formulas(
+    sheets: &[OdsUnpacked],
+) -> Result<std::vec::IntoIter<EvaluatedCellValue>, EasyOfficeError> {
     let wb = workbook_engine(sheets);
     let a1_addrs: Vec<(&str, String)> = sheets
         .iter()
@@ -244,7 +247,7 @@ fn evaluate_formulas(sheets: &[OdsUnpacked]) -> std::vec::IntoIter<EvaluatedCell
             anchor: None,
         })
         .collect();
-    wb.evaluate_targets(&targets).values.into_iter()
+    Ok(evaluate_for_file(&wb, &targets)?.into_iter())
 }
 
 /// One sheet's formula cache and (when `with_grids`) displayed cells, taking the value of each
@@ -427,7 +430,8 @@ pub(crate) fn encode_structured(
                 warnings.extend(pages_write_loss(&doc).warnings());
             }
             let cache = matches!(format, DocumentFormat::Xlsx | DocumentFormat::Ods)
-                .then(|| compute_xlsx_formula_cache(&doc.to_universal_model()));
+                .then(|| compute_xlsx_formula_cache(&doc.to_universal_model()))
+                .transpose()?;
             UniversalFormatConverter::encode_rich(&doc, format, cache.as_ref())
         }
         StructuredContent::Workbook(sheets, stylings) => match format {
@@ -440,7 +444,7 @@ pub(crate) fn encode_structured(
                 OdfCodec::pack_ods_multi_styled_with_cache(sheets, &caches, stylings)
             }
             DocumentFormat::Pdf => {
-                let displays = evaluate_displays(sheets);
+                let displays = evaluate_displays(sheets)?;
                 let named: Vec<OdsUnpacked> = sheets
                     .iter()
                     .map(|(name, _)| name.clone())

@@ -21,6 +21,9 @@ mod convert_structured_doc;
 mod convert_structured_encode;
 #[cfg(test)]
 mod editor_merge_tests;
+mod eval_limit;
+#[cfg(test)]
+mod eval_limit_tests;
 pub mod ffi;
 pub mod http_server;
 pub mod hwp_bundle;
@@ -380,7 +383,7 @@ impl EasyOfficeIpcRouter {
                         anchor: anchor_coord,
                     })
                     .collect();
-                let batch = wb.evaluate_targets(&eval_targets);
+                let batch = eval_limit::evaluate(&wb, &eval_targets);
                 let mut values_entries = Vec::with_capacity(requests.len());
                 let mut target_values_entries = Vec::with_capacity(requests.len());
                 for (&(sh, expr), val) in requests.iter().zip(&batch.values) {
@@ -395,13 +398,16 @@ impl EasyOfficeIpcRouter {
                 }
                 let first_expr = requests[0].1;
                 let first_eval = &batch.values[0];
-                return Ok(format!(
-                    "{{\"query\":\"{}\",\"value\":\"{}\",\"values\":{{{}}},\"targetValues\":[{}],\"circular\":{}}}",
-                    Self::escape_json_str(first_expr),
-                    Self::escape_json_str(&first_eval.to_display_string()),
-                    values_entries.join(","),
-                    target_values_entries.join(","),
-                    batch.circular
+                return Ok(eval_limit::with_timed_out(
+                    format!(
+                        "{{\"query\":\"{}\",\"value\":\"{}\",\"values\":{{{}}},\"targetValues\":[{}],\"circular\":{}}}",
+                        Self::escape_json_str(first_expr),
+                        Self::escape_json_str(&first_eval.to_display_string()),
+                        values_entries.join(","),
+                        target_values_entries.join(","),
+                        batch.circular
+                    ),
+                    batch.timed_out,
                 ));
             }
         }
@@ -416,16 +422,19 @@ impl EasyOfficeIpcRouter {
             Some(s) => s,
             None => default_cell_label.as_str(),
         };
-        let (evaluated, circular) =
+        let (evaluated, circular, timed_out) =
             Self::evaluate_single_target(&wb, default_sh, anchor_coord, expr);
         let display_val = evaluated.to_display_string();
         let escaped_display = Self::escape_json_str(&display_val);
-        Ok(format!(
-            "{{\"query\":\"{0}\",\"value\":\"{1}\",\"values\":{{\"{2}!{0}\":\"{1}\"}},\"targetValues\":[\"{1}\"],\"circular\":{3}}}",
-            Self::escape_json_str(expr),
-            escaped_display,
-            Self::escape_json_str(default_sh),
-            circular
+        Ok(eval_limit::with_timed_out(
+            format!(
+                "{{\"query\":\"{0}\",\"value\":\"{1}\",\"values\":{{\"{2}!{0}\":\"{1}\"}},\"targetValues\":[\"{1}\"],\"circular\":{3}}}",
+                Self::escape_json_str(expr),
+                escaped_display,
+                Self::escape_json_str(default_sh),
+                circular
+            ),
+            timed_out,
         ))
     }
 
@@ -434,19 +443,21 @@ impl EasyOfficeIpcRouter {
         sheet: &str,
         anchor: Option<PackedCellCoordinate>,
         expr: &str,
-    ) -> (EvaluatedCellValue, bool) {
-        let batch = wb.evaluate_targets(&[WorkbookEvalTarget {
-            sheet,
-            expr,
-            anchor,
-        }]);
-        let circular = batch.circular;
+    ) -> (EvaluatedCellValue, bool, bool) {
+        let batch = eval_limit::evaluate(
+            wb,
+            &[WorkbookEvalTarget {
+                sheet,
+                expr,
+                anchor,
+            }],
+        );
         let value = batch
             .values
             .into_iter()
             .next()
             .unwrap_or(EvaluatedCellValue::Empty);
-        (value, circular)
+        (value, batch.circular, batch.timed_out)
     }
 
     fn handle_compute_layout(payload: &str) -> Result<String, EasyOfficeError> {
@@ -750,13 +761,17 @@ impl EasyOfficeIpcRouter {
             .filter(|s| !s.is_empty())
             .unwrap_or(default_cell_label.as_str());
         let wb = Self::build_workbook_from_json_entries(&entries, active_sheet)?;
-        let (val, circular) = Self::evaluate_single_target(&wb, active_sheet, anchor_coord, expr);
-        Ok(format!(
-            "{{\"sheet\":\"{}\",\"formula\":\"{}\",\"value\":\"{}\",\"circular\":{}}}",
-            Self::escape_json_str(active_sheet),
-            Self::escape_json_str(expr),
-            Self::escape_json_str(&val.to_display_string()),
-            circular
+        let (val, circular, timed_out) =
+            Self::evaluate_single_target(&wb, active_sheet, anchor_coord, expr);
+        Ok(eval_limit::with_timed_out(
+            format!(
+                "{{\"sheet\":\"{}\",\"formula\":\"{}\",\"value\":\"{}\",\"circular\":{}}}",
+                Self::escape_json_str(active_sheet),
+                Self::escape_json_str(expr),
+                Self::escape_json_str(&val.to_display_string()),
+                circular
+            ),
+            timed_out,
         ))
     }
 
