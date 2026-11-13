@@ -4,6 +4,16 @@ import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs
 import { switchModule, commandItem } from "./test-support/modules.mjs";
 import { demoHtml, typeDemoSheet2 } from "./test-support/demo-fixtures.mjs";
 
+// 용지 방향 전환 turns the page and 여백 전환 goes to the narrow set (PD-213); 편집 용지 opens its dialog and changes nothing by itself.
+function assertTurnedNarrowPage(document, docEditor) {
+  const core = document.defaultView.__EASYOFFICE_DOC_PAGE_SETUP_CORE__;
+  const setup = core.parse(docEditor.dataset.eoPage);
+  assert.ok(setup, "the page has a setup");
+  assert.equal(setup.width > setup.height, true, "the page is turned");
+  assert.equal(setup.top, 1134, "the narrow margin set");
+  assert.equal(docEditor.style.padding, core.layoutFields(setup).padding);
+}
+
 function makeStandaloneOfflineRpc(sandbox) {
   return sandbox.__EASYOFFICE_CREATE_OFFLINE_RPC__({
     getActiveModule: () => "SHEET",
@@ -592,9 +602,7 @@ test("workspace snapshot SSOT restores per-sheet row counts, doc layout styles, 
   await flushAsyncTurns();
 
   assert.equal(docEditor.style.columnCount, "2");
-  assert.equal(docEditor.style.maxWidth, "980px");
-  assert.equal(docEditor.style.padding, "16px 20px");
-  assert.equal(docEditor.dataset.paperSize, "Letter");
+  assertTurnedNarrowPage(document, docEditor);
 
   for (let i = 0; i < 4; i += 1) {
     sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
@@ -603,16 +611,14 @@ test("workspace snapshot SSOT restores per-sheet row counts, doc layout styles, 
   assert.equal(docEditor.style.columnCount, "");
   assert.equal(docEditor.style.maxWidth, "");
   assert.equal(docEditor.style.padding, "");
-  assert.equal(docEditor.dataset.paperSize, undefined);
+  assert.equal(docEditor.dataset.eoPage, undefined);
 
   for (let i = 0; i < 4; i += 1) {
     sandbox.dispatchWindowKeydown({ key: "y", ctrlKey: true });
     await flushAsyncTurns();
   }
   assert.equal(docEditor.style.columnCount, "2");
-  assert.equal(docEditor.style.maxWidth, "980px");
-  assert.equal(docEditor.style.padding, "16px 20px");
-  assert.equal(docEditor.dataset.paperSize, "Letter");
+  assertTurnedNarrowPage(document, docEditor);
 
   switchModule(document, "SHEET");
   await flushAsyncTurns();

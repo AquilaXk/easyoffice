@@ -247,6 +247,12 @@
   #eo-print-root svg { display: block; width: 100%; height: 100%; }
   /* Document, sheet and slide printing (office-print.js). */
   #eo-print-root .eo-print-flow { background: var(--doc-paper); }
+  /* The pages of a document (doc-page-print.js): a window on the screen's layout, the header, footer and page number on it. */
+  #eo-print-root .eo-print-doc-page { position: relative; }
+  #eo-print-root .eo-print-body { position: absolute; overflow: hidden; }
+  #eo-print-root .eo-print-unit { position: absolute; left: 0; right: 0; }
+  #eo-print-root .eo-print-pageno { position: absolute; left: 0; right: 0; bottom: 18px; text-align: center; font-size: 10pt; line-height: 1; }
+  #eo-print-root [data-eo-pg~="b"]::before { content: ""; float: left; width: 100%; height: var(--pg-fh, 0px); shape-outside: var(--pg-shape, none); }
   #eo-print-root [data-eo-break="page"] { break-before: page; }
   #eo-print-root .eo-print-flow :is(h1, h2, h3, h4, h5, h6) { break-after: avoid; }
   #eo-print-root .eo-print-flow table { break-inside: avoid; }
@@ -332,3 +338,23 @@
 #sheet-tab-delete-message { margin: 0; padding: 4px 8px; line-height: 1.6; white-space: pre-line; overflow-wrap: anywhere; }
 .sheet-tab-hidden-list { max-height: 180px; margin: 0; }
 .sheet-tab-hidden-list li:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: -2px; }
+
+/* Page setup dialog (doc-page-setup.js): the reference's edit-paper dialog, `dialogs.css` 95-109, 171-174, 355-431 (MIT, see THIRD_PARTY_NOTICES.md), same values. */
+.dialog-section { border: 1px solid var(--color-border-lighter); background: var(--color-surface); border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 10px; }
+.dialog-section-title { font-weight: bold; color: var(--color-primary-dark); font-size: var(--font-size-sm); margin-bottom: 8px; }
+.dialog-unit { font-size: var(--font-size-xs); color: var(--color-text-hint); }
+.page-setup-sections { display: flex; gap: 10px; }
+.page-setup-sections > .dialog-section { flex: 1; margin-bottom: 0; }
+.margin-grid { display: grid; grid-template-columns: 40px 72px auto 40px 72px auto; gap: 6px 6px; align-items: center; }
+.dialog-icon-radio-group { display: flex; gap: 6px; flex-wrap: wrap; }
+.icon-radio-card { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 8px; border: 1.5px solid var(--ui-border-subtle); border-radius: 3px; cursor: pointer; background: var(--color-surface); min-width: 52px; }
+.icon-radio-card:hover { border-color: var(--accent-hover); background: var(--color-accent-bg-light); }
+.icon-radio-card.selected { border-color: var(--color-primary); background: var(--color-accent-bg); }
+.icon-radio-input { display: none; }
+.icon-radio-icon { display: flex; align-items: center; justify-content: center; height: 38px; }
+.icon-radio-icon svg { display: block; flex: 0 0 auto; }
+.orient-icon-portrait { width: 28px; height: 36px; }
+.orient-icon-landscape { width: 40px; height: 28px; }
+.icon-radio-text { font-size: var(--font-size-xs); color: var(--color-text); }
+#doc-page-setup-dialog { width: min(440px, calc(100vw - 32px)); overflow: visible; }
+#doc-page-setup-dialog .dialog-body .dialog-row .dialog-label { min-width: 40px; }

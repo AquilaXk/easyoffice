@@ -273,17 +273,11 @@
     return nodes;
   }
 
-  // `data-eo-margins` ("top,bottom,header,footer" in twips) of a decoded `pageMargins`, or nothing.
-  function pageMarginsData(margins) {
-    const values = ["top", "bottom", "header", "footer"].map((name) => margins?.[name]);
-    return values.every((v) => Number.isInteger(v) && v >= 0) ? { eoMargins: values.join(",") } : {};
-  }
-
   // The header and footer of a decoded document as the editor's sections (`doc-page-frame.js`), after the body.
   function pageFrameNodes(res) {
     return ["header", "footer"]
       .filter((kind) => Array.isArray(res[kind]) && res[kind].length > 0)
-      .map((kind) => ({ ...elSpec("section", buildEditorNodes(res[kind]), {}, { class: "eo-page-frame" }), data: { eoHf: kind, ...pageMarginsData(res.pageMargins) } }));
+      .map((kind) => ({ ...elSpec("section", buildEditorNodes(res[kind]), {}, { class: "eo-page-frame" }), data: { eoHf: kind } }));
   }
 
   // `{ [1-based column]: px }` from a decoded sheet's `columns` (PD-089); invalid entries are skipped.
@@ -414,7 +408,8 @@
         next.docTabs = next.docTabs || {};
         next.docTabs[mod] = {
           editorNodes: [...buildEditorNodes(res.blocks), ...pageFrameNodes(res)],
-          layoutStyle: next.docTabs[mod]?.layoutStyle || { showParaMarks: "true" },
+          // The page setup is the file's own (`doc-page-setup.js`): a file without one does not take the last document's.
+          layoutStyle: { ...(next.docTabs[mod]?.layoutStyle || { showParaMarks: "true" }), ...host.__EASYOFFICE_DOC_PAGE_SETUP_CORE__.layoutFields(host.__EASYOFFICE_DOC_PAGE_SETUP_CORE__.fromDecoded(res.pageSetup)) },
         };
       } else if (mod === "SHEET") {
         const sheets = Array.isArray(res.sheets) && res.sheets.length > 0 ? res.sheets : [{ name: "Sheet1", cells: [] }];

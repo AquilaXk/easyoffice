@@ -24,7 +24,7 @@
   const SPLIT_DISPLAYS = new Set(["block", "list-item", "flow-root"]);
   const MAX_VERIFY_ROUNDS = 3;
   const VERIFY_TOLERANCE_PX = 0.5;
-  const WATCHED_ATTRS = ["style", "class", "data-eo-break", "hidden", "data-paper-size"];
+  const WATCHED_ATTRS = ["style", "class", "data-eo-break", "hidden", "data-paper-size", "data-eo-page"];
   const DEFAULT_LINE_FACTOR = 1.2;
 
   function createDocPages(deps) {
@@ -469,6 +469,13 @@
       return out;
     }
 
+    // What printing needs of the last pass: the page geometry and, per unit, the top (px from the editor's top edge) and
+    // the pages it spans (`doc-page-print.js` draws each page as a window on the same layout the screen shows).
+    function printPlan() {
+      if (!result || !geo) return null;
+      return { geo, pageCount: lastCount, units: units.map((el, i) => ({ el, top: result.top[i], page: result.page[i], endPage: result.endPage[i] })) };
+    }
+
     function blockPages() {
       return result ? units.map((el, i) => ({ el, page: result.page[i] + 1, endPage: result.endPage[i] + 1 })) : [];
     }
@@ -587,7 +594,7 @@
       attach, detach, layoutNow, schedule,
       pageCount: () => lastCount,
       currentPage: () => lastCurrent,
-      pageOf, headingPages, blockPages, insertPageBreak,
+      pageOf, headingPages, blockPages, printPlan, insertPageBreak,
       geometry: () => geo,
       isActive: () => active,
       onChange(fn) {

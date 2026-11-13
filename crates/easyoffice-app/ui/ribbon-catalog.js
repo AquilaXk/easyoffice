@@ -66,7 +66,7 @@
       { suffix: "insert-link", title: "책갈피·링크", shortcut: "⌘K" },
     ],
     layout: [
-      { suffix: "layout-paper", title: "용지 규격 (A4/Letter)", shortcut: "⇧⌘P" },
+      { suffix: "layout-paper", title: "편집 용지", shortcut: "⇧⌘P" },
       { suffix: "layout-orientation", title: "용지 방향 전환", shortcut: "⌥⌘O" },
       { suffix: "layout-columns", title: "다단 설정", shortcut: "⌥⌘M" },
       { suffix: "layout-margins", title: "여백 프리셋", shortcut: "⌥⌘G" },

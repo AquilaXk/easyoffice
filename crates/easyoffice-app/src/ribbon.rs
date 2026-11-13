@@ -418,7 +418,7 @@ impl RibbonCommandRouter {
                         ("insert-link", "책갈피·링크", "Cmd+K"),
                     ],
                     "layout" => [
-                        ("layout-paper", "용지 규격 (A4/Letter)", "Shift+Cmd+P"),
+                        ("layout-paper", "편집 용지", "Shift+Cmd+P"),
                         ("layout-orientation", "용지 방향 전환", "Alt+Cmd+O"),
                         ("layout-columns", "다단 설정", "Alt+Cmd+M"),
                         ("layout-margins", "여백 프리셋", "Alt+Cmd+G"),

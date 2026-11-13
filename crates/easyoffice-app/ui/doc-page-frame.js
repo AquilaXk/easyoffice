@@ -11,16 +11,17 @@
 
   const KINDS = ["header", "footer"];
   const FIELDS = { page: "쪽 번호", pages: "총 쪽수", filename: "파일 이름" };
-  // The page setup that places them, in twips, as the section's `data-eo-margins` ("top,bottom,header,footer"):
-  // top and bottom are the distances from the page edge to the body, header and footer those to the header
-  // and footer (the engine's `RichPageMargins`). Without one the reference editor's new-document setup applies
+  // The page setup that places them, in twips, as the editor's `data-eo-page` (`doc-page-setup.js`: "width,height,left,
+  // right,top,bottom,header,footer"): top and bottom are the distances from the page edge to the body, header and
+  // footer those to the header and footer (the engine's `RichPageMargins`). Without one the reference editor's new-document setup applies
   // (`rhwp` `src/model/page.rs:36-51`: header area 15 mm below a 20 mm margin, body at 35 mm; footer area 15 mm
   // above a 15 mm margin, body ending 30 mm from the bottom).
   const DEFAULT_MARGINS = { top: 1984, bottom: 1700, header: 1134, footer: 850 };
   const PX_PER_TWIP = 1 / 15;
   // Space kept between a header or footer that grew past its area and the body.
   const GROWN_GAP_PX = 6;
-  const MARGIN_KEYS = ["top", "bottom", "header", "footer"];
+  // Position of each margin in `data-eo-page`.
+  const PAGE_MARGIN_AT = { top: 4, bottom: 5, header: 6, footer: 7 };
   const LABELS = { header: "머리말", footer: "꼬리말" };
   const APPLY_LABEL = "양쪽";
   const SECTION_CLASS = "eo-page-frame";
@@ -33,11 +34,11 @@
 
   const lastParagraph = (section) => Array.from(section.children).at(-1) ?? section;
 
-  // `data-eo-margins` as `{ top, bottom, header, footer }` in twips, or null when it is absent or malformed.
+  // `data-eo-page` as `{ top, bottom, header, footer }` in twips, or null when it is absent or malformed.
   function parseMargins(text) {
     const parts = String(text ?? "").split(",").map((v) => Number(v));
-    if (parts.length !== MARGIN_KEYS.length || !parts.every((v) => Number.isInteger(v) && v >= 0)) return null;
-    return Object.fromEntries(MARGIN_KEYS.map((key, i) => [key, parts[i]]));
+    if (parts.length !== 8 || !parts.every((v) => Number.isInteger(v) && v >= 0)) return null;
+    return Object.fromEntries(Object.entries(PAGE_MARGIN_AT).map(([key, at]) => [key, parts[at]]));
   }
 
   function hasContent(section) {
@@ -60,21 +61,13 @@
     const scrollOf = () => editor?.closest?.(".doc-scroll-container") ?? document.querySelector(".doc-scroll-container");
     const toolbar = () => document.getElementById("icon-toolbar");
 
-    // The page setup of the document: the one a section carries, else the default.
-    function marginsOf() {
-      for (const kind of KINDS) {
-        const found = parseMargins(sectionOf(kind)?.dataset.eoMargins);
-        if (found) return found;
-      }
-      return null;
-    }
+    // The page setup of the document: the editor's own, else the default.
+    const marginsOf = () => parseMargins(editor?.dataset.eoPage);
 
     function create(kind) {
       const section = document.createElement("section");
       section.className = SECTION_CLASS;
       section.dataset.eoHf = kind;
-      const margins = KINDS.map((k) => sectionOf(k)?.dataset.eoMargins).find(Boolean);
-      if (margins) section.dataset.eoMargins = margins;
       const p = document.createElement("p");
       p.appendChild(document.createElement("br"));
       section.appendChild(p);
@@ -102,6 +95,19 @@
 
     const fileName = () => String(deps.getFileName?.() ?? "");
 
+    // The header or footer of page `pageNumber` of `total` for printing: the copy a sheet shows, with its fields as text.
+    function printCopy(kind, pageNumber, total) {
+      const section = sectionOf(kind);
+      if (!hasContent(section)) return null;
+      const copy = copyOf(section);
+      for (const field of copy.querySelectorAll("." + FIELD_CLASS)) {
+        const text = field.dataset.eoField === "pages" ? total : field.dataset.eoField === "filename" ? fileName() : pageNumber;
+        field.parentNode.insertBefore(document.createTextNode(String(text)), field);
+        field.parentNode.removeChild(field);
+      }
+      return copy;
+    }
+
     // Draws the header and footer on every sheet of the page layer; the sheet of page 1 shows the live section
     // instead of a copy while that one is edited. Only a changed content, name, setup, sheet count or edit state
     // redraws, and then the areas are measured (a header that grew moves the body, `applyGeometry`).
@@ -110,7 +116,7 @@
       if (!layer) return;
       const sections = KINDS.map((kind) => sectionOf(kind)).map((s) => (hasContent(s) || s === sectionOf(editing) ? s : null));
       const sheets = layer.children.length;
-      const key = [sections.map((s) => (s ? s.innerHTML : "")).join("\u0001"), editing, sheets, fileName(), sections.map((s) => s?.dataset.eoMargins).join()].join("|");
+      const key = [sections.map((s) => (s ? s.innerHTML : "")).join("\u0001"), editing, sheets, fileName(), editor.dataset.eoPage].join("|");
       [["data-hf-header", sections[0]], ["data-hf-footer", sections[1]]].forEach(([name, section]) => {
         if (!section) layer.removeAttribute(name);
         else if (!layer.hasAttribute(name)) layer.setAttribute(name, "");
@@ -362,9 +368,11 @@
     }
 
     const api = {
-      attach, detach, open, endEdit, removeEditing, insertField, paint, sync,
+      attach, detach, open, endEdit, removeEditing, insertField, paint, sync, printCopy,
       isEditing: () => editing,
       has: (kind) => hasContent(sectionOf(kind)),
+      // The distances that place the header and footer now: the page setup's, else the default while there is one.
+      margins: () => marginsOf() ?? (KINDS.some((kind) => hasContent(sectionOf(kind))) ? { ...DEFAULT_MARGINS } : null),
     };
     host.__EASYOFFICE_DOC_PAGE_FRAME__ = api;
     return api;

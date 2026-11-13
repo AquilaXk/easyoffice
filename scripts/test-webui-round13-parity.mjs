@@ -5,6 +5,16 @@ import { switchModule, studioItem, commandItem, putCaretInFirstTable } from "./t
 import { createSelection } from "./test-support/doc-run-harness.mjs";
 import { addDemoTable, demoHtml, openDemoDeck, typeDemoSheet2 } from "./test-support/demo-fixtures.mjs";
 
+// 용지 방향 전환 turns the page and 여백 전환 goes to the narrow set (PD-213); 편집 용지 opens its dialog and changes nothing by itself.
+function assertTurnedNarrowPage(document, docEditor) {
+  const core = document.defaultView.__EASYOFFICE_DOC_PAGE_SETUP_CORE__;
+  const setup = core.parse(docEditor.dataset.eoPage);
+  assert.ok(setup, "the page has a setup");
+  assert.equal(setup.width > setup.height, true, "the page is turned");
+  assert.equal(setup.top, 1134, "the narrow margin set");
+  assert.equal(docEditor.style.padding, core.layoutFields(setup).padding);
+}
+
 function makeF2AnchoredOfflineRpc(sandbox) {
   return sandbox.__EASYOFFICE_CREATE_OFFLINE_RPC__({
     getActiveModule: () => "SHEET",
@@ -292,10 +302,8 @@ test("DOC vs HWP and Slide 1 vs Slide 2 layout commands derive state from target
   userClick(commandItem(document, "document-layout-paper"));
   await flushAsyncTurns();
 
-  assert.equal(docEditor.style.maxWidth, "980px");
+  assertTurnedNarrowPage(document, docEditor);
   assert.equal(docEditor.style.columnCount, "2");
-  assert.equal(docEditor.style.padding, "16px 20px");
-  assert.equal(docEditor.dataset.paperSize, "Letter");
 
   switchModule(document, "HWP");
   await flushAsyncTurns();
@@ -304,7 +312,7 @@ test("DOC vs HWP and Slide 1 vs Slide 2 layout commands derive state from target
   assert.equal(docEditor.style.maxWidth, "");
   assert.equal(docEditor.style.columnCount, "");
   assert.equal(docEditor.style.padding, "");
-  assert.equal(docEditor.dataset.paperSize, undefined);
+  assert.equal(docEditor.dataset.eoPage, undefined);
   assert.equal(docEditor.classList.contains("manuscript-grid"), false);
   assert.equal(document.getElementById("hwp-manuscript-preview").hidden, true);
 
@@ -317,10 +325,8 @@ test("DOC vs HWP and Slide 1 vs Slide 2 layout commands derive state from target
   userClick(commandItem(document, "hwp-layout-paper"));
   await flushAsyncTurns();
 
-  assert.equal(docEditor.style.maxWidth, "980px");
+  assertTurnedNarrowPage(document, docEditor);
   assert.equal(docEditor.style.columnCount, "2");
-  assert.equal(docEditor.style.padding, "16px 20px");
-  assert.equal(docEditor.dataset.paperSize, "Letter");
 
   await flushAsyncTurns();
   const hwpTable = docEditor.querySelector("#doc-table");

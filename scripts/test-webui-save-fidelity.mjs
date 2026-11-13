@@ -246,9 +246,10 @@ test("DOC save keeps a header and footer block of an older document as the first
 test("DOC save sends the header and footer sections as their own fields, a page-number field as a field run", async () => {
   const { document, userClick, converts } = await createSaveHarness();
   const editor = document.getElementById("doc-editor");
+  editor.dataset.eoPage = "16838,11906,1700,1500,1985,1590,1134,680";
   editor.innerHTML =
     '<p>본문 문단</p>' +
-    '<section class="eo-page-frame" data-eo-hf="header" data-eo-margins="1985,1590,1134,680"><p style="text-align: center;"><strong>제목 머리</strong></p></section>' +
+    '<section class="eo-page-frame" data-eo-hf="header"><p style="text-align: center;"><strong>제목 머리</strong></p></section>' +
     '<section class="eo-page-frame" data-eo-hf="footer"><p>쪽 <span class="eo-page-field" data-eo-field="page"></span>/<span class="eo-page-field" data-eo-field="pages"></span> <span class="eo-page-field" data-eo-field="filename"></span></p></section>';
 
   userClick(studioItem(document, "studio-save"));
@@ -260,5 +261,9 @@ test("DOC save sends the header and footer sections as their own fields, a page-
   assert.deepEqual(converts[0].footer, [
     { type: "paragraph", runs: [{ text: "쪽 " }, { text: "", field: "page" }, { text: "/" }, { text: "", field: "pages" }, { text: " " }, { text: "", field: "filename" }] },
   ]);
-  assert.deepEqual(converts[0].pageMargins, { top: 1985, bottom: 1590, header: 1134, footer: 680 });
+  assert.deepEqual(converts[0].pageSetup, {
+    paper: { width: 16838, height: 11906 },
+    margins: { top: 1985, bottom: 1590, header: 1134, footer: 680, left: 1700, right: 1500 },
+  });
+  assert.equal("pageMargins" in converts[0], false);
 });

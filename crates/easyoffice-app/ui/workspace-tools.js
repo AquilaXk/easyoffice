@@ -116,7 +116,7 @@
         const tempDiv = document.createElement("div");
         restoreDomChildren(tempDiv, saved?.editorNodes || [], document);
         const options = { baseAlign: saved?.layoutStyle?.textAlign, baseLineHeight: saved?.layoutStyle?.lineHeight };
-        return { blocks: savePayload.collectDocBlocks(tempDiv, options), ...savePayload.collectPageFrame(tempDiv, options) };
+        return { blocks: savePayload.collectDocBlocks(tempDiv, options), ...savePayload.collectPageFrame(tempDiv, options), ...host.__EASYOFFICE_DOC_PAGE_SETUP_CORE__.payloadOf(saved?.layoutStyle?.eoPage) };
       }
       if (scope === "SHEET") {
         sheetDataStore[getActiveSheetName()] = sheetController.snapshotDomSheetCells();

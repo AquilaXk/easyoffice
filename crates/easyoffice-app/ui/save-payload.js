@@ -48,8 +48,6 @@
   const MAX_FRAME_PARAGRAPHS = 64; // the engine's MAX_PAGE_FRAME_PARAGRAPHS
   // The editor's field marks (`data-eo-field`) as the payload's run `field` values.
   const FIELD_KEYS = { page: "page", pages: "pages", filename: "filename" };
-  const MARGIN_NAMES = ["top", "bottom", "header", "footer"];
-  const MAX_MARGIN_TWIPS = 31680; // the engine's MAX_PAGE_MARGIN_TWIPS
   const MAX_BOOKMARK = 4294967295;
   const HEADING_ID_RE = /^eo-h-([1-9]\d{0,9})$/;
   const bookmarkNumber = (id) => {
@@ -497,13 +495,7 @@
       if ((kind !== "header" && kind !== "footer") || Object.hasOwn(frame, kind)) continue;
       const blocks = collectDocBlocks(section, options).filter((b) => b.type === "paragraph").slice(0, MAX_FRAME_PARAGRAPHS);
       if (blocks.some((b) => b.runs.length > 0)) frame[kind] = blocks;
-      const margins = String(section.dataset.eoMargins ?? "").split(",").map(Number);
-      if (!Object.hasOwn(frame, "pageMargins") && margins.length === MARGIN_NAMES.length && margins.every((v) => Number.isInteger(v) && v >= 0 && v <= MAX_MARGIN_TWIPS)) {
-        frame.pageMargins = Object.fromEntries(MARGIN_NAMES.map((name, i) => [name, margins[i]]));
-      }
     }
-    // The page setup only travels with a header or footer.
-    if (!("header" in frame) && !("footer" in frame)) delete frame.pageMargins;
     return frame;
   }
 

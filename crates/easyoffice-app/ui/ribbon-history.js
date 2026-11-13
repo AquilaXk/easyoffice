@@ -42,10 +42,6 @@
     firstP.style.backgroundColor = nextOn ? "rgba(92, 107, 192, 0.14)" : "";
   }
 
-  function docEffectPaper({ docEditor }) {
-    docEditor.dataset.paperSize = docEditor.dataset.paperSize === "Letter" ? "A4" : "Letter";
-  }
-
   function viewEffectTheme() {
     host.__EASYOFFICE_THEME__.toggle();
   }
@@ -67,6 +63,7 @@
       getDocRuns,
       getDocLink,
       getDocToc,
+      getDocPageSetup,
       getDocTable,
       getDocPages,
       getActiveModule,
@@ -362,9 +359,7 @@
     }
 
     const STYLE_FONT_SIZES = ["15px", "18px", "22px", "13.5px"];
-    const PAGE_PADDINGS = ["28px 36px", "16px 20px", "36px 52px"];
     const MAX_DOC_COLUMNS = 3;
-    const LANDSCAPE_MAX_WIDTH = host.__EASYOFFICE_DOC_PAGES_CORE__.LANDSCAPE_MAX_WIDTH;
     const endsWithAny = (cmdId, suffixes) => suffixes.some((suffix) => cmdId.endsWith(suffix));
 
     function docEffectHomeStyle({ targetEl }) {
@@ -378,13 +373,18 @@
       docEditor.style.columnCount = cols > 1 ? String(cols) : "";
     }
 
-    function docEffectOrientation({ docEditor }) {
-      const landscape = docEditor.style.maxWidth !== LANDSCAPE_MAX_WIDTH;
-      docEditor.style.maxWidth = landscape ? LANDSCAPE_MAX_WIDTH : "";
+    // 편집 용지 opens the page setup dialog, 용지 방향 전환 turns the page and 여백 전환 goes to the next margin preset
+    // (`doc-page-setup.js`).
+    function docEffectPaper() {
+      getDocPageSetup().open();
     }
 
-    function docEffectMargins({ docEditor }) {
-      docEditor.style.padding = cyclePreset(PAGE_PADDINGS, docEditor.style.padding);
+    function docEffectOrientation() {
+      getDocPageSetup().turn();
+    }
+
+    function docEffectMargins() {
+      getDocPageSetup().nextMargins();
     }
 
     // 이중선 테두리: the table the caret is in.

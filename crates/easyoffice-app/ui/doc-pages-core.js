@@ -23,10 +23,10 @@
   const MIN_LINES = 2;
   const MAX_BANDS = 4096;
 
-  function pageGeometry({ paper, landscape, padding, gap = PAGE_GAP_PX }) {
+  function pageGeometry({ paper, landscape, size, padding, gap = PAGE_GAP_PX }) {
     const [w, h] = PAPER_PX[paper] || PAPER_PX[DEFAULT_PAPER];
-    const width = landscape ? h : w;
-    const height = landscape ? w : h;
+    const width = size ? size[0] : landscape ? h : w;
+    const height = size ? size[1] : landscape ? w : h;
     const pad = { top: 0, right: 0, bottom: 0, left: 0, ...padding };
     return {
       width, height, gap, pitch: height + gap,
@@ -39,7 +39,13 @@
 
   // The landscape command marks the editor with this max-width (`ribbon-history.js`); the paper is `data-paper-size`.
   const LANDSCAPE_MAX_WIDTH = "980px";
-  const paperOf = (editor) => ({ paper: editor.dataset.paperSize, landscape: editor.style.maxWidth === LANDSCAPE_MAX_WIDTH });
+  // A page setup (`data-eo-page`, `doc-page-setup.js`: width, height in twips first) gives the paper in px itself.
+  const PX_PER_TWIP = 1 / 15;
+  function setupSize(text) {
+    const [width, height] = String(text ?? "").split(",").map(Number);
+    return width > 0 && height > 0 ? [Math.round(width * PX_PER_TWIP * 100) / 100, Math.round(height * PX_PER_TWIP * 100) / 100] : null;
+  }
+  const paperOf = (editor) => ({ paper: editor.dataset.paperSize, landscape: editor.style.maxWidth === LANDSCAPE_MAX_WIDTH, size: setupSize(editor.dataset.eoPage) });
 
   // Where the lines of a block that starts at `y0` (page `k0`) fall. Returns `{ bands, h }` (bands null when it
   // fits) or null when the first lines would be orphaned and the block should move whole.

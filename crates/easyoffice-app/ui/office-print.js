@@ -7,7 +7,8 @@
   // printed (the shell's `print_webview` command in the desktop app, `window.print()` in a browser)
   // and the root is removed on `afterprint`. The root and its static rules are the ones the Hangul
   // print uses (`#eo-print-root`, `shell.css`); the page rules go through a constructed stylesheet.
-  //   - document: the editor's content flows over A4 pages (the browser breaks the pages)
+  //   - document: the pages the screen shows, each with its header, footer and page number (`doc-page-print.js`); an
+  //     editor without a page layout flows over its paper (the browser breaks the pages)
   //   - sheet: the used range as a gridded table, landscape when it is wide
   //   - slide: one slide per page, in the deck's aspect ratio
 
@@ -97,9 +98,26 @@
       }
     }
 
+    // The page layout is brought up to date (twice: the header and footer's room, which the first pass sets, moves the body
+    // on the second), then the pages are drawn from it.
+    function buildLaidOutPages(editor, rules) {
+      const layout = host.__EASYOFFICE_DOC_PAGES__;
+      if (!layout?.isActive?.()) return null;
+      layout.layoutNow();
+      layout.layoutNow();
+      return host.__EASYOFFICE_DOC_PAGE_PRINT__.buildPages({
+        document, editor, plan: layout.printPlan(), frame: host.__EASYOFFICE_DOC_PAGE_FRAME__, rules, pageClass: PAGE_CLASS,
+      });
+    }
+
     function buildDocument(rules) {
       const editor = document.getElementById("doc-editor");
       if (!editor) throw new Error(MSG_UNSUPPORTED);
+      const pages = buildLaidOutPages(editor, rules);
+      if (pages) {
+        addTypeface(rules, editor);
+        return pages;
+      }
       const page = documentPage(editor);
       addPageRule(rules, page.size, page.margin);
       addTypeface(rules, editor);

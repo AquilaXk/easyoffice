@@ -35,7 +35,7 @@
 
   const sheetRowCounts = {};
   let workspaceSession = null;
-  let docRunsUi = null, docLink = null, docToc = null, docTable = null, docPages = null, docPageFrame = null, hwpHost = null, hwpSession = null, windowBridge = null;
+  let docRunsUi = null, docLink = null, docToc = null, docTable = null, docPages = null, docPageFrame = null, docPageSetup = null, hwpHost = null, hwpSession = null, windowBridge = null;
   const icons = host.__EASYOFFICE_ICONS__;
 
   function chainWorkspaceQueue(opFn) {
@@ -92,7 +92,7 @@
     document, invokeIpc, docTabStore, sheetDataStore, sheetRowCounts, slideDeckState,
     localRibbonState, ribbonCatalog, sheetStoreHelpers, extractEditableDocumentText,
     getSheetController: () => sheetController,
-    getWorkspacePanels: () => workspacePanels, getDocRuns: () => docRunsUi, getDocLink: () => docLink, getDocToc: () => docToc, getDocTable: () => docTable, getDocPages: () => docPages,
+    getWorkspacePanels: () => workspacePanels, getDocRuns: () => docRunsUi, getDocLink: () => docLink, getDocToc: () => docToc, getDocTable: () => docTable, getDocPages: () => docPages, getDocPageSetup: () => docPageSetup,
     getActiveModule: () => activeModule, getHwpHost: () => hwpHost,
     getWindowBridge: () => windowBridge,
     setActiveModule: (next) => { activeModule = next; },
@@ -123,6 +123,8 @@
   docTable = host.__EASYOFFICE_CREATE_DOC_TABLE__({ document, env: host, getRange: () => docRunsUi.currentRange(), withUndo: docRunsUi.withUndo, setFeedback: (text) => setStatusFeedback(text) });
   docPages = host.__EASYOFFICE_CREATE_DOC_PAGES__({ document, env: host, withUndo: docRunsUi.withUndo, onChange: () => workspacePanels.renderPageStatus() });
   docPageFrame = host.__EASYOFFICE_CREATE_DOC_PAGE_FRAME__({ document, env: host, withUndo: docRunsUi.withUndo, setFeedback: (text) => setStatusFeedback(text), getFileName: () => windowBridge?.getDocumentName(activeModule) });
+
+  docPageSetup = host.__EASYOFFICE_CREATE_DOC_PAGE_SETUP__({ document, env: host, withUndo: docRunsUi.withUndo, setFeedback: (text) => setStatusFeedback(text), getFrameMargins: () => docPageFrame.margins() });
 
   sheetController = host.__EASYOFFICE_CREATE_SHEET_CONTROLLER__({
     document, sheetDataStore, sheetRowCounts, sheetStoreHelpers,
@@ -935,7 +937,7 @@
     setupDocTableAndSheetTabHandlers();
     docRunsUi.bind();
     docLink.bind();
-    docToc.bind(); docTable.bind();
+    docToc.bind(); docTable.bind(); docPageSetup.bind();
     docPages.attach(document.getElementById("doc-editor"));
     docPageFrame.attach(document.getElementById("doc-editor"), docPages);
     setupSheetAndConverterHandlers();

@@ -19,6 +19,7 @@
         lineHeight: "",
         textAlign: "",
         paperSize: "",
+        eoPage: "",
         styleRole: "",
         showCtrlMarks: "",
         showParaMarks: "true",
@@ -35,6 +36,7 @@
       lineHeight: editor.style.lineHeight || "",
       textAlign: editor.style.textAlign || "",
       paperSize: editor.dataset.paperSize || "",
+      eoPage: editor.dataset.eoPage || "",
       styleRole: editor.dataset.styleRole || "",
       showCtrlMarks: editor.dataset.showCtrlMarks || "",
       showParaMarks: editor.dataset.showParaMarks || "",
@@ -55,6 +57,7 @@
     editor.style.textAlign = ls.textAlign || "";
     [
       "paperSize",
+      "eoPage",
       "styleRole",
       "showCtrlMarks",
       "showParaMarks",

@@ -162,11 +162,10 @@ test("the page setup places the areas and sets how far the body keeps away; with
   assert.equal(get("--hf-band-h"), "56.67px");
   assert.equal(get("--pg-hf-top"), "132.27px");
   assert.equal(get("--pg-hf-bottom"), "", "no footer, no footer room");
-  header.dataset.eoMargins = "2000,1800,1000,700";
+  editor.dataset.eoPage = "11906,16838,1701,1701,2000,1800,1000,700";
   const footer = document.createElement("section");
   footer.className = "eo-page-frame";
   footer.dataset.eoHf = "footer";
-  footer.dataset.eoMargins = "2000,1800,1000,700";
   footer.innerHTML = "<p>꼬리</p>";
   editor.insertBefore(footer, layer);
   frame.paint();
