@@ -6,16 +6,21 @@
 //! Both directions scan the text; neither parses it, and quoted text and quoted sheet names pass
 //! untouched.
 
-/// Functions a file spells `_xlfn._xlws.NAME`.
-const WORKSHEET_ONLY: [&str; 2] = ["FILTER", "SORT"];
+/// Functions a file spells `_xlfn._xlws.NAME` ([MS-XLSX] 2.2.2 `worksheet-only-function-list`).
+const WORKSHEET_ONLY: [&str; 3] = ["FILTER", "PY", "SORT"];
 
 /// Functions a file spells `_xlfn.NAME`: every function added after the first release of the file
-/// format, as [MS-XLSX] 2.2.2.1 lists the "future functions" a formula names with that prefix (the
-/// statistical and distribution names with a dot, the 2013 text and logic functions, the dynamic
-/// array family). Sorted, upper case; a function the engine does not have is listed too, so a formula
-/// that names it is spelled the way the file format wants. Functions of this engine with no entry
+/// format. The names are the "future functions" of [MS-XLSX] 2.2.2 (the statistical and
+/// distribution names with a dot, the 2013 and later text and logic functions, the dynamic array
+/// family) plus the ones that rule leaves out or lists outside its prefix group but that files
+/// carry with the prefix (`IFS`, `SWITCH`, `TEXTJOIN`, `CONCAT`, `MAXIFS`, `MINIFS`, `XMATCH`,
+/// `IMAGE`, the forecast family, `ANCHORARRAY`, `SINGLE`, `ARRAYTOTEXT`, `VALUETOTEXT`).
+/// `tests/fixtures/xlsx_future_functions.txt` holds the list; a test checks this table against it.
+/// `NETWORKDAYS.INTL`, `WORKDAY.INTL`, `ECMA.CEILING` and `ISO.CEILING` are written plain. Sorted,
+/// upper case; a function the engine does not have is listed too, so a formula that names it is
+/// spelled the way the file format wants. Functions of this engine with no entry
 /// (`AVERAGE.WEIGHTED`, `MARGINOFERROR`) are its own and are written as they are.
-const FUTURE: [&str; 154] = [
+const FUTURE: [&str; 160] = [
     "ACOT",
     "ACOTH",
     "AGGREGATE",
@@ -48,6 +53,7 @@ const FUTURE: [&str; 154] = [
     "CONCAT",
     "CONFIDENCE.NORM",
     "CONFIDENCE.T",
+    "COPILOT",
     "COT",
     "COTH",
     "COVARIANCE.P",
@@ -66,6 +72,7 @@ const FUTURE: [&str; 154] = [
     "F.INV",
     "F.INV.RT",
     "F.TEST",
+    "FIELDVALUE",
     "FILTERXML",
     "FLOOR.MATH",
     "FLOOR.PRECISE",
@@ -84,6 +91,7 @@ const FUTURE: [&str; 154] = [
     "HYPGEOM.DIST",
     "IFNA",
     "IFS",
+    "IMAGE",
     "IMCOSH",
     "IMCOT",
     "IMCSC",
@@ -99,6 +107,7 @@ const FUTURE: [&str; 154] = [
     "LET",
     "LOGNORM.DIST",
     "LOGNORM.INV",
+    "LONGTEXT",
     "MAKEARRAY",
     "MAP",
     "MAXIFS",
@@ -107,7 +116,6 @@ const FUTURE: [&str; 154] = [
     "MODE.SNGL",
     "MUNIT",
     "NEGBINOM.DIST",
-    "NETWORKDAYS.INTL",
     "NORM.DIST",
     "NORM.INV",
     "NORM.S.DIST",
@@ -121,6 +129,10 @@ const FUTURE: [&str; 154] = [
     "PERMUTATIONA",
     "PHI",
     "POISSON.DIST",
+    "PQSOURCE",
+    "PYTHON_STR",
+    "PYTHON_TYPE",
+    "PYTHON_TYPENAME",
     "QUARTILE.EXC",
     "QUARTILE.INC",
     "QUERYSTRING",
@@ -163,7 +175,6 @@ const FUTURE: [&str; 154] = [
     "VSTACK",
     "WEBSERVICE",
     "WEIBULL.DIST",
-    "WORKDAY.INTL",
     "WRAPCOLS",
     "WRAPROWS",
     "XLOOKUP",
@@ -476,6 +487,44 @@ mod tests {
         assert_eq!(to_file_formula("SUM(A1:A3)"), "SUM(A1:A3)");
     }
 
+    /// The names of one `[section]` of the list the tables are checked against.
+    fn listed(section: &str) -> Vec<&'static str> {
+        include_str!("../tests/fixtures/xlsx_future_functions.txt")
+            .lines()
+            .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+            .scan("", |current, line| {
+                if let Some(name) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
+                    *current = name;
+                    return Some(None);
+                }
+                Some((*current == section).then_some(line.trim()))
+            })
+            .flatten()
+            .collect()
+    }
+
+    #[test]
+    fn the_tables_hold_exactly_the_listed_names() {
+        let mut future = [listed("spec"), listed("observed")].concat();
+        future.sort_unstable();
+        assert_eq!(future.len(), 160, "a name repeats between the sections");
+        assert_eq!(FUTURE.to_vec(), future);
+        let mut worksheet = listed("worksheet");
+        worksheet.sort_unstable();
+        assert_eq!(WORKSHEET_ONLY.to_vec(), worksheet);
+        // the three kinds of spelling never overlap
+        for name in listed("plain") {
+            assert!(
+                !FUTURE.contains(&name) && !WORKSHEET_ONLY.contains(&name),
+                "{name}"
+            );
+            let page = format!("{name}(A1, 2)");
+            assert_eq!(to_file_formula(&page), page);
+            assert_eq!(from_file_formula(&page), page);
+        }
+        assert!(FUTURE.iter().all(|n| !WORKSHEET_ONLY.contains(n)));
+    }
+
     #[test]
     fn the_table_of_future_functions_is_sorted_and_every_name_round_trips() {
         assert!(
@@ -485,6 +534,7 @@ mod tests {
         for name in FUTURE
             .iter()
             .filter(|n| !matches!(**n, "ANCHORARRAY" | "LAMBDA" | "LET"))
+            .chain(WORKSHEET_ONLY.iter())
         {
             let page = format!("{name}(A1, 2)");
             let file = to_file_formula(&page);
