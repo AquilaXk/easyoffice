@@ -454,10 +454,6 @@ const WEBUI_ASSET_MARKERS: &[(&str, &str)] = &[
         "__EASYOFFICE_CREATE_SHEET_OUTLINE_UI__",
     ),
     (
-        include_str!("../ui/sheet-tab-color.js"),
-        "__EASYOFFICE_CREATE_SHEET_TAB_COLOR__",
-    ),
-    (
         include_str!("../ui/sheet-tab-names.js"),
         "__EASYOFFICE_SHEET_TAB_NAMES__",
     ),

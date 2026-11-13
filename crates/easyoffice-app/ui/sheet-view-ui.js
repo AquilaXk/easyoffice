@@ -143,15 +143,7 @@
       "outline-clear": clearOutline,
     };
 
-    // The tab colour of sheet `name` (`rgb` is `rrggbb`, "" for none), which need not be the active one.
-    const setTabColor = (name, rgb) =>
-      step(() => {
-        if ((layoutApi.tabColorOf(name) || "") === rgb) return null;
-        layoutApi.setTabColor(name, rgb || null);
-        return rgb ? "탭 색 지정" : "탭 색 없음";
-      });
-
-    return { actions: ACTIONS, toggleGroup, showLevel, setTabColor };
+    return { actions: ACTIONS, toggleGroup, showLevel };
   }
 
   host.__EASYOFFICE_CREATE_SHEET_VIEW__ = createSheetView;

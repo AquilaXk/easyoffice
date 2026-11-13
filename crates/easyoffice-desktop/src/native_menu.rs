@@ -598,7 +598,6 @@ pub const ITEMS: &[MenuItemSpec] = &[
     sa!("sheet:tab-right", "시트 오른쪽으로 이동", "tab-right"),
     sa!("sheet:tab-hide", "시트 숨기기", "tab-hide"),
     sa!("sheet:tab-unhide", "시트 숨기기 취소…", "tab-unhide"),
-    sa!("sheet:tab-color", "탭 색", "tab-color"),
     sa!("sheet:group", "그룹 묶기", "group"),
     sa!("sheet:ungroup", "그룹 풀기", "ungroup"),
     sa!("sheet:hide-detail", "하위 수준 숨기기", "hide-detail"),

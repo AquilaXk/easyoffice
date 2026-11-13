@@ -77,7 +77,6 @@ const REQUIRED_TRACKED_CONTRACTS = [
   "crates/easyoffice-app/ui/sheet-sort-ui.js",
   "crates/easyoffice-app/ui/sheet-view-ui.js",
   "crates/easyoffice-app/ui/sheet-outline-ui.js",
-  "crates/easyoffice-app/ui/sheet-tab-color.js",
   "crates/easyoffice-app/ui/sheet-tab-names.js",
   "crates/easyoffice-app/ui/sheet-tab-strip.js",
   "crates/easyoffice-app/ui/sheet-tabs.js",

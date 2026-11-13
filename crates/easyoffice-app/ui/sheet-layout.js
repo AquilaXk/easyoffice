@@ -387,7 +387,6 @@
   }
 
   const setFreeze = (name, freeze) => setView(name, "freeze", freeze && (freeze.rows > 0 || freeze.cols > 0) ? { rows: freeze.rows, cols: freeze.cols } : null);
-  const setTabColor = (name, color) => setView(name, "tabColor", color || null);
   const setHiddenSheet = (name, hidden) => setView(name, "hidden", hidden === true);
   const setOutline = (name, outline) => setView(name, "outline", outline && Object.keys(outline).length > 0 ? outline : null);
 
@@ -439,7 +438,6 @@
     freezeOf,
     setFreeze,
     tabColorOf,
-    setTabColor,
     hiddenOf,
     setHiddenSheet,
     outlineOf,

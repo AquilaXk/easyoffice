@@ -2,13 +2,13 @@
   "use strict";
 
   // The right-click menu of a sheet tab (PD-208, PD-209): the commands of `sheet-tabs.js` on the
-  // tab that was pressed, and "탭 색". Shift+F10 and the menu key open it at the focused tab. A
+  // tab that was pressed. Shift+F10 and the menu key open it at the focused tab. A
   // command that cannot run now (the last shown sheet cannot go, the first one cannot move left) is
   // greyed out and skipped by the arrow keys.
 
   const MENU_MARGIN = 2;
 
-  function createSheetTabMenu({ document, getTabs, tabColor, ui }) {
+  function createSheetTabMenu({ document, getTabs, ui }) {
     const $ = (id) => document.getElementById(id);
     const menu = () => $("sheet-tab-menu");
     const tabOf = (name) => Array.from(document.querySelectorAll("#sheet-tab-bar .sheet-tab-btn[data-sheet-tab]")).find((t) => t.dataset.sheetTab === name) || null;
@@ -25,7 +25,6 @@
       "move-right": (tabs, sheet) => tabs.move(sheet, 1),
       hide: (tabs, sheet) => tabs.hide(sheet),
       unhide: (tabs) => tabs.unhide(),
-      color: (tabs, sheet) => tabColor.openFor(sheet),
     };
 
     // The states of `tabs.can` that grey an item out.

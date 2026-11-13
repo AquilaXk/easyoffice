@@ -63,15 +63,14 @@
       kit: host.__EASYOFFICE_CREATE_SHEET_DIALOG_KIT__(document),
     });
 
-    // Frozen panes, groups and the tab colour (PD-208).
+    // Frozen panes and groups (PD-208).
     const view = host.__EASYOFFICE_CREATE_SHEET_VIEW__(deps);
-    const tabColor = host.__EASYOFFICE_CREATE_SHEET_TAB_COLOR__({ document, view, getActiveSheetName, onTabsChanged: () => outlineUi.render() });
     const outlineUi = host.__EASYOFFICE_CREATE_SHEET_OUTLINE_UI__({ document, grid, view, getActiveSheetName });
 
     // Sheet tabs (PD-209): insert, delete, rename, copy, move, hide and show again.
     const tabUi = host.__EASYOFFICE_CREATE_SHEET_TAB_UI__({ document, kit: host.__EASYOFFICE_CREATE_SHEET_DIALOG_KIT__(document), getTabs: () => tabs, say });
     const tabs = host.__EASYOFFICE_CREATE_SHEET_TABS__({ ...deps, ui: tabUi });
-    const tabMenu = host.__EASYOFFICE_CREATE_SHEET_TAB_MENU__({ document, getTabs: () => tabs, tabColor, ui: tabUi });
+    const tabMenu = host.__EASYOFFICE_CREATE_SHEET_TAB_MENU__({ document, getTabs: () => tabs, ui: tabUi });
 
     function say(text) {
       const fb = document.getElementById("status-command-feedback");
@@ -289,7 +288,6 @@
       merge,
       unmerge,
       ...view.actions,
-      "tab-color": () => Promise.resolve(tabColor.openFor()),
       "tab-add": () => tabs.insert(null),
       ...tabs.actions,
       "sort-dialog": () => Promise.resolve(sortUi.open()),
@@ -403,7 +401,6 @@
     function bind() {
       filterUi.bind();
       sortUi.bind();
-      tabColor.bind();
       tabUi.bind();
       tabMenu.bind();
       outlineUi.bind();
@@ -431,11 +428,10 @@
       }
     }
 
-    // What follows the active sheet: the filter menu's check, the outline bars and the tab colours.
+    // What follows the active sheet: the filter menu's check, and the outline bars.
     function refreshSheetChrome() {
       filterUi.refreshMenu();
       outlineUi.render();
-      tabColor.paint();
     }
 
     return { run, bind, closeMenu, refreshSheetChrome };

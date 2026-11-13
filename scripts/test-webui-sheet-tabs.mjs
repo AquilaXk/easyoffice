@@ -601,11 +601,11 @@ test("the menu is greyed per tab and its keys skip what cannot run", async () =>
   assert.equal(focused(), "insert");
   const press = (key) => h.menu().dispatchEvent({ type: "keydown", key, target: h.document.activeElement });
   press("End");
-  assert.equal(focused(), "color");
+  assert.equal(focused(), "hide", "unhide is greyed and skipped");
   press("ArrowUp");
-  assert.equal(focused(), "hide");
+  assert.equal(focused(), "move-right");
   press("ArrowUp");
-  assert.equal(focused(), "move-right", "move-left is skipped");
+  assert.equal(focused(), "copy", "move-left is skipped");
   press("Escape");
   assert.equal(h.menu().hidden, true);
 });

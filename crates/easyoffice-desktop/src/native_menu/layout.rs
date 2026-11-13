@@ -471,7 +471,6 @@ const SHEET_SHEET: MenuSpec = menu(
         "sheet:tab-right",
         "sheet:tab-hide",
         "sheet:tab-unhide",
-        "sheet:tab-color",
         S,
         "page:orientation",
         "page:margins",

@@ -163,7 +163,6 @@
     "sheet:tab-right": "sheet-act:tab-right",
     "sheet:tab-hide": "sheet-act:tab-hide",
     "sheet:tab-unhide": "sheet-act:tab-unhide",
-    "sheet:tab-color": "sheet-act:tab-color",
     "sheet:group": "sheet-act:group",
     "sheet:ungroup": "sheet-act:ungroup",
     "sheet:hide-detail": "sheet-act:hide-detail",
