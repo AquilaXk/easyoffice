@@ -543,6 +543,9 @@ impl OdfCodec {
             &outline.collapsed_rows,
         );
         let header_end = styling.and_then(|st| title_end(st.page.title_rows));
+        let matrices: std::collections::HashMap<(u32, u32), crate::SpillRef> = styling
+            .map(|st| st.spills.iter().map(|r| ((r.row, r.col), *r)).collect())
+            .unwrap_or_default();
         for (row, row_cells) in grid {
             if row > expected_row {
                 groups.close_all(content);
@@ -569,6 +572,15 @@ impl OdfCodec {
                     })
                     + &rules.table.cell_attr(rules.sheet, rules.stylings, row, col);
                 let cached = cache.and_then(|c| c.get(&(row, col)));
+                // An array that spills is a matrix formula over its area (the cells after the first
+                // are written as the values the formula gave).
+                let style_attr = match matrices.get(&(row, col)) {
+                    Some(area) if raw.starts_with('=') => format!(
+                        "{style_attr} table:number-matrix-columns-spanned=\"{}\" table:number-matrix-rows-spanned=\"{}\"",
+                        area.cols, area.rows
+                    ),
+                    _ => style_attr,
+                };
                 Self::push_ods_cell(content, (row, col), raw, cached, &style_attr);
                 expected_col = col.saturating_add(1);
             }

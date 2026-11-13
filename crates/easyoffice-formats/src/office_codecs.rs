@@ -83,6 +83,29 @@ fn build_content_types(sheet_count: usize) -> String {
     content_types
 }
 
+/// The part that marks the array formulas of a sheet as dynamic: cell metadata type 1 of `XLDAPR`
+/// (`cm="1"` on the anchor) with the dynamic array properties (`fDynamic`).
+const DYNAMIC_ARRAY_METADATA: &str = concat!(
+    "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>",
+    "<metadata xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" ",
+    "xmlns:xda=\"http://schemas.microsoft.com/office/spreadsheetml/2017/dynamicarray\">",
+    "<metadataTypes count=\"1\"><metadataType name=\"XLDAPR\" minSupportedVersion=\"120000\" copy=\"1\" ",
+    "pasteAll=\"1\" pasteValues=\"1\" merge=\"1\" splitFirst=\"1\" rowColShift=\"1\" clearFormats=\"1\" ",
+    "clearComments=\"1\" assign=\"1\" coerce=\"1\" cellMeta=\"1\"/></metadataTypes>",
+    "<futureMetadata name=\"XLDAPR\" count=\"1\"><bk><extLst><ext uri=\"{bdbb8cdc-fa1e-496e-a857-3c3f30c029c3}\">",
+    "<xda:dynamicArrayProperties fDynamic=\"1\" fCollapsed=\"0\"/></ext></extLst></bk></futureMetadata>",
+    "<cellMetadata count=\"1\"><bk><rc t=\"1\" v=\"0\"/></bk></cellMetadata>",
+    "</metadata>"
+);
+const DYNAMIC_ARRAY_OVERRIDE: &str = concat!(
+    "<Override PartName=\"/xl/metadata.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml\"/>",
+    "</Types>"
+);
+const DYNAMIC_ARRAY_RELATIONSHIP: &str = concat!(
+    "<Relationship Id=\"rIdMeta\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata\" Target=\"metadata.xml\"/>",
+    "</Relationships>"
+);
+
 /// Which sheets `stylings` hides. A workbook shows at least one sheet, so when every sheet is
 /// hidden the first one is shown; the page never sends that, a file made by another program might.
 fn hidden_sheets(sheet_count: usize, stylings: &[SheetStyling]) -> Vec<bool> {
@@ -215,6 +238,7 @@ fn push_cell_xml(
     raw: &str,
     cached: Option<&XlsxCachedValue>,
     sst_map: &SharedStringMap<'_>,
+    spill: Option<&crate::SpillRef>,
 ) {
     use std::fmt::Write;
     let _ = write!(sheet_xml, "<c r=\"{col_ref}{row_num}\"");
@@ -224,23 +248,31 @@ fn push_cell_xml(
     if raw.is_empty() {
         sheet_xml.push_str("/>");
     } else if let Some(formula) = raw.strip_prefix('=') {
-        let f = XmlSanitizer::escape(formula);
+        let body = XmlSanitizer::escape(&crate::to_file_formula(formula));
+        // An array that spills is an array formula over its area, flagged dynamic (`cm`).
+        let (cm, f) = match spill {
+            Some(area) => (
+                " cm=\"1\"",
+                format!("<f t=\"array\" ref=\"{}\">{body}</f>", area.a1()),
+            ),
+            None => ("", format!("<f>{body}</f>")),
+        };
         match cached {
             Some(XlsxCachedValue::Number(n)) if n.is_finite() => {
-                let _ = write!(sheet_xml, "><f>{f}</f><v>{n}</v></c>");
+                let _ = write!(sheet_xml, "{cm}>{f}<v>{n}</v></c>");
             }
             Some(XlsxCachedValue::Text(text)) => {
                 let _ = write!(
                     sheet_xml,
-                    " t=\"str\"><f>{f}</f><v>{}</v></c>",
+                    " t=\"str\"{cm}>{f}<v>{}</v></c>",
                     XmlSanitizer::escape(text)
                 );
             }
             Some(XlsxCachedValue::Boolean(b)) => {
-                let _ = write!(sheet_xml, " t=\"b\"><f>{f}</f><v>{}</v></c>", u8::from(*b));
+                let _ = write!(sheet_xml, " t=\"b\"{cm}>{f}<v>{}</v></c>", u8::from(*b));
             }
             _ => {
-                let _ = write!(sheet_xml, "><f>{f}</f></c>");
+                let _ = write!(sheet_xml, "{cm}>{f}</c>");
             }
         }
     } else if crate::cell_numbers::numeric_cell_value(raw).is_some() {
@@ -332,6 +364,9 @@ fn build_sheet_xml(
     sheet_xml.push_str("<sheetData>");
     let mut col_buf = [0u8; 4];
     let mut ids = IdMemo::new();
+    let spill_anchors: std::collections::HashMap<(u32, u32), crate::SpillRef> = styling
+        .map(|st| st.spills.iter().map(|r| ((r.row, r.col), *r)).collect())
+        .unwrap_or_default();
     for (row, mut row_cells) in rows_map {
         row_cells.sort_by_key(|(col, _)| *col);
         let row_num = row.saturating_add(1);
@@ -366,7 +401,17 @@ fn build_sheet_xml(
                 None => 0,
             });
             let cached = cache.and_then(|c| c.get(&(row, col)));
-            push_cell_xml(&mut sheet_xml, col_ref, row_num, xf, raw, cached, sst_map);
+            let spill = spill_anchors.get(&(row, col));
+            push_cell_xml(
+                &mut sheet_xml,
+                col_ref,
+                row_num,
+                xf,
+                raw,
+                cached,
+                sst_map,
+                spill,
+            );
         }
         sheet_xml.push_str("</row>");
     }
@@ -562,10 +607,20 @@ impl OoxmlCodec {
         XmlSanitizer::validate_safe_xml(&wb_rels_xml)?;
         XmlSanitizer::validate_safe_xml(&sst_xml)?;
 
+        let has_spills = stylings.iter().any(|s| !s.spills.is_empty());
+        let (content_types, wb_rels_xml) = if has_spills {
+            (
+                build_content_types(active_sheets.len())
+                    .replace("</Types>", DYNAMIC_ARRAY_OVERRIDE),
+                wb_rels_xml.replace("</Relationships>", DYNAMIC_ARRAY_RELATIONSHIP),
+            )
+        } else {
+            (build_content_types(active_sheets.len()), wb_rels_xml)
+        };
         let mut entries = vec![
             (
                 "[Content_Types].xml".to_string(),
-                build_content_types(active_sheets.len()).into_bytes(),
+                content_types.into_bytes(),
             ),
             ("xl/workbook.xml".to_string(), workbook_xml.into_bytes()),
             (
@@ -580,6 +635,12 @@ impl OoxmlCodec {
             ("xl/sharedStrings.xml".to_string(), sst_xml.into_bytes()),
         ];
 
+        if has_spills {
+            entries.push((
+                "xl/metadata.xml".to_string(),
+                DYNAMIC_ARRAY_METADATA.as_bytes().to_vec(),
+            ));
+        }
         for (i, (_, cells)) in active_sheets.iter().enumerate() {
             let sheet_xml = build_sheet_xml(
                 cells,

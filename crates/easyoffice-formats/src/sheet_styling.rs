@@ -36,10 +36,14 @@ pub(crate) mod sheet_page;
 pub(crate) mod sheet_protect;
 #[path = "sheet_rules.rs"]
 pub(crate) mod sheet_rules;
+#[path = "sheet_spill.rs"]
+pub(crate) mod sheet_spill;
 #[path = "sheet_view.rs"]
 pub(crate) mod sheet_view;
 #[path = "xlsx_filter.rs"]
 pub(crate) mod xlsx_filter;
+#[path = "xlsx_formula_text.rs"]
+pub(crate) mod xlsx_formula_text;
 #[path = "xlsx_layout.rs"]
 pub(crate) mod xlsx_layout;
 #[path = "xlsx_names.rs"]
@@ -64,7 +68,9 @@ pub use sheet_numfmt::*;
 pub use sheet_page::*;
 pub use sheet_protect::*;
 pub use sheet_rules::*;
+pub use sheet_spill::*;
 pub use sheet_view::*;
+pub use xlsx_formula_text::{from_file_formula, to_file_formula};
 pub use xlsx_layout::{intersect_runs, normalize_runs, run_total, MAX_HIDDEN_ROWS, MAX_MERGES};
 
 use crate::{DocumentFormat, EasyOfficeError, OdfCodec, OoxmlCodec};
@@ -324,6 +330,8 @@ pub struct SheetStyling {
     pub unlocked_cols: Vec<(u32, u32)>,
     /// The protection of the workbook structure (PD-216), carried by the first sheet like the names.
     pub workbook_protect: Option<WorkbookProtection>,
+    /// The arrays that spill, by anchor (PD-217).
+    pub spills: Vec<SpillRef>,
 }
 
 impl SheetStyling {
@@ -354,6 +362,7 @@ impl SheetStyling {
             && self.unlocked_rows.is_empty()
             && self.unlocked_cols.is_empty()
             && self.workbook_protect.is_none()
+            && self.spills.is_empty()
     }
 
     /// Whether the frozen pane, the tab colour, the groups and the page setup are within the bounds of a sheet that

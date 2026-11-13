@@ -35,6 +35,9 @@ pub(crate) struct OdsCell<'a> {
     pub(crate) style: Option<&'a str>,
     /// `table:content-validation-name`, as written.
     pub(crate) validation: Option<&'a str>,
+    /// `table:number-matrix-rows-spanned` and `-columns-spanned` of an array formula: the cells
+    /// its results fill (PD-217).
+    pub(crate) matrix: (Option<u32>, Option<u32>),
 }
 
 /// Passes the grid to two sinks, the first one's error ends the walk.
@@ -113,6 +116,7 @@ impl<'a> CellBuilder<'a> {
             text: None,
             style: None,
             validation: None,
+            matrix: (None, None),
         };
         let mut fields = CellFields::default();
         for (name, value) in attrs.iter_raw() {
@@ -121,6 +125,8 @@ impl<'a> CellBuilder<'a> {
                 ("row", _) if cell.explicit_row.is_none() => cell.explicit_row = value.parse().ok(),
                 ("col", _) if cell.explicit_col.is_none() => cell.explicit_col = value.parse().ok(),
                 ("table:style-name", _) if cell.style.is_none() => cell.style = Some(value),
+                ("table:number-matrix-rows-spanned", _) => cell.matrix.0 = value.parse().ok(),
+                ("table:number-matrix-columns-spanned", _) => cell.matrix.1 = value.parse().ok(),
                 ("table:content-validation-name", _) if cell.validation.is_none() => {
                     cell.validation = Some(value);
                 }
@@ -364,6 +370,11 @@ struct TextSink {
     total_cells: usize,
     /// Decoded bytes of the cell texts copied into `cells`, over all tables of the document.
     budget: DecodeBudget,
+    /// Arrays that spill (array formulas over more than one cell), read when the styling is wanted:
+    /// the current table's, then one list per table read.
+    want_spills: bool,
+    spills: Vec<crate::SpillRef>,
+    table_spills: Vec<Vec<crate::SpillRef>>,
 }
 
 impl TextSink {
@@ -401,6 +412,16 @@ impl TextSink {
                         ));
                     }
                     self.budget.charge_cell(text.len(), "ODS 셀 텍스트")?;
+                    if let (true, (Some(rows), Some(cols)), true) =
+                        (self.want_spills, cell.matrix, text.starts_with('='))
+                    {
+                        self.spills.push(crate::SpillRef {
+                            row: r,
+                            col: c,
+                            rows,
+                            cols,
+                        });
+                    }
                     self.cells.push((r, c, text.clone()));
                 }
             }
@@ -460,12 +481,31 @@ impl OdsSink for TextSink {
 
     fn table_end(&mut self) {
         let name = std::mem::take(&mut self.name);
-        self.sheets.push((name, std::mem::take(&mut self.cells)));
+        let mut cells = std::mem::take(&mut self.cells);
+        let spills = crate::normalize_spills(
+            &std::mem::take(&mut self.spills),
+            OdfCodec::MAX_ROWS + 1,
+            OdfCodec::MAX_COLS + 1,
+        );
+        if !spills.is_empty() {
+            let covered: std::collections::HashSet<(u32, u32)> = spills
+                .iter()
+                .flat_map(|r| {
+                    (0..r.rows)
+                        .flat_map(move |dr| (0..r.cols).map(move |dc| (dr, dc)))
+                        .filter(|&(dr, dc)| dr + dc > 0)
+                        .map(move |(dr, dc)| (r.row + dr, r.col + dc))
+                })
+                .collect();
+            cells.retain(|(row, col, _)| !covered.contains(&(*row, *col)));
+        }
+        self.table_spills.push(spills);
+        self.sheets.push((name, cells));
     }
 }
 
 impl TextSink {
-    fn new() -> Self {
+    fn new(want_spills: bool) -> Self {
         Self {
             sheets: Vec::new(),
             name: String::new(),
@@ -473,6 +513,9 @@ impl TextSink {
             current_row: 0,
             total_cells: 0,
             budget: DecodeBudget::new(),
+            want_spills,
+            spills: Vec::new(),
+            table_spills: Vec::new(),
         }
     }
 
@@ -487,7 +530,7 @@ impl TextSink {
 
 /// Reads every table of `content_xml`.
 pub(crate) fn read_ods_sheets(content_xml: &str) -> Result<OdsMultiUnpacked, EasyOfficeError> {
-    let mut sink = TextSink::new();
+    let mut sink = TextSink::new(false);
     walk_ods(content_xml, true, &mut sink)?;
     Ok(sink.into_sheets())
 }
@@ -498,15 +541,17 @@ pub(crate) fn read_ods_sheets_with_styling(
 ) -> Result<(OdsMultiUnpacked, Vec<(String, SheetStyling)>), EasyOfficeError> {
     let styles = parse_automatic_styles(content_xml);
     let mut sinks = (
-        TextSink::new(),
+        TextSink::new(true),
         (StyleSink::new(&styles), ValidationSink::default()),
     );
     walk_ods(content_xml, true, &mut sinks)?;
-    let (text, (style, validation)) = sinks;
-    Ok((
-        text.into_sheets(),
-        with_rules(content_xml, style.into_tables(), validation),
-    ))
+    let (mut text, (style, validation)) = sinks;
+    let table_spills = std::mem::take(&mut text.table_spills);
+    let mut tables = with_rules(content_xml, style.into_tables(), validation);
+    for ((_, styling), spills) in tables.iter_mut().zip(table_spills) {
+        styling.spills = spills;
+    }
+    Ok((text.into_sheets(), tables))
 }
 
 #[cfg(test)]

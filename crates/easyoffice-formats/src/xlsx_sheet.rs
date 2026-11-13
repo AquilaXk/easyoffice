@@ -123,6 +123,8 @@ struct Formula<'a> {
     shared: bool,
     index: Option<u32>,
     body: Cow<'a, str>,
+    /// The `ref` of an array formula (`t="array"`): the cells its results fill.
+    array_ref: Option<Cow<'a, str>>,
 }
 
 /// Fields of the `c` element being read.
@@ -441,18 +443,21 @@ impl<'s> SheetScanner<'s> {
     fn feed<'a>(&self, cell: &mut CellState<'a>, event: XmlEvent<'a>, empty_start: bool) {
         match event {
             XmlEvent::Start { name: "f", attrs } if cell.formula.is_none() => {
-                let (mut kind, mut index) = (None, None);
+                let (mut kind, mut index, mut array_ref) = (None, None, None);
                 for (name, value) in attrs.iter_raw() {
                     match plain_name(name) {
                         "t" => kind.get_or_insert_with(|| unescape_cow(value)),
                         "si" => index.get_or_insert_with(|| unescape_cow(value)),
+                        "ref" => array_ref.get_or_insert_with(|| unescape_cow(value)),
                         _ => continue,
                     };
                 }
+                let is_array = kind.as_deref() == Some("array");
                 cell.formula = Some(Formula {
                     shared: kind.as_deref() == Some("shared"),
                     index: index.and_then(|s| s.parse::<u32>().ok()),
                     body: Cow::Borrowed(""),
+                    array_ref: array_ref.filter(|_| is_array),
                 });
                 cell.capture = Capture::Formula;
             }
@@ -501,7 +506,7 @@ impl<'s> SheetScanner<'s> {
             }
             self.budget
                 .charge_cell(formula.body.len() + 1, CELL_BUDGET_WHAT)?;
-            return Ok(Some(with_equals(&formula.body)));
+            return Ok(Some(with_equals(&crate::from_file_formula(&formula.body))));
         }
         if !formula.shared {
             return Ok(None);
@@ -556,10 +561,63 @@ impl<'s> SheetScanner<'s> {
 
     fn finish_cell(&mut self, cell: CellState<'_>) -> Result<(), EasyOfficeError> {
         let (row, col) = cell.pos;
+        if let Some(reference) = cell.formula.as_ref().and_then(|f| f.array_ref.as_deref()) {
+            self.record_spill(row, col, reference);
+        }
         if let Some(text) = self.cell_text(cell)? {
             self.cells.push((row, col, text));
         }
         Ok(())
+    }
+
+    /// Forgets the cached results of the arrays: the engine calculates them.
+    fn drop_spilled_cells(&mut self) {
+        self.styling.spills = crate::normalize_spills(
+            &self.styling.spills,
+            OoxmlCodec::MAX_XLSX_ROWS,
+            OoxmlCodec::MAX_XLSX_COLS,
+        );
+        if self.styling.spills.is_empty() {
+            return;
+        }
+        let mut covered: std::collections::HashSet<(u32, u32)> = std::collections::HashSet::new();
+        for r in &self.styling.spills {
+            for dr in 0..r.rows {
+                for dc in 0..r.cols {
+                    if dr + dc > 0 {
+                        covered.insert((r.row + dr, r.col + dc));
+                    }
+                }
+            }
+        }
+        self.cells
+            .retain(|(row, col, _)| !covered.contains(&(*row, *col)));
+    }
+
+    /// An array formula over more than one cell is an array that spills: the cells after its first
+    /// hold the results the file cached.
+    fn record_spill(&mut self, row: u32, col: u32, reference: &str) {
+        if !self.want_styling {
+            return;
+        }
+        let Some(area) = crate::sheet_styling::xlsx_layout::parse_merge(reference) else {
+            return;
+        };
+        if (area.row0, area.col0) != (row, col) {
+            return;
+        }
+        let (Some(rows), Some(cols)) = (
+            (area.row1 - area.row0).checked_add(1),
+            (area.col1 - area.col0).checked_add(1),
+        ) else {
+            return;
+        };
+        self.styling.spills.push(crate::SpillRef {
+            row,
+            col,
+            rows,
+            cols,
+        });
     }
 
     fn shared_string(&self, raw: &str) -> Result<&'s str, EasyOfficeError> {
@@ -652,6 +710,7 @@ pub(crate) fn scan_worksheet(
     scanner.styling.protect = protect.finish()?;
     scanner.styling.normalize_locks();
     scanner.finish_view(&view);
+    scanner.drop_spilled_cells();
     Ok(WorksheetScan {
         cells: scanner.cells,
         styling: scanner.styling,
