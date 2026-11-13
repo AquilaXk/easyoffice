@@ -381,7 +381,7 @@ impl WorkbookEngine {
         };
         let mut ctx = EvalContext::with_workbook(self, sheet.resolved_sheet_id());
         sheet.pre_evaluate_dag_iterative(std::slice::from_ref(&coord), &mut ctx);
-        ctx.steps = 0;
+        ctx.reset_steps();
         sheet.eval_coord_ctx(coord, &mut ctx, 0)
     }
 
@@ -402,66 +402,6 @@ impl WorkbookEngine {
         ctx.current_coord = anchor;
         sheet.eval_raw_string_ctx(formula, &mut ctx, 0)
     }
-
-    /// Evaluates many targets (cell addresses or `=` formulas) in one shared memoized pass, so
-    /// formula cells referenced by several targets are computed once, and reports whether any
-    /// circular reference was encountered.
-    pub fn evaluate_targets(&self, targets: &[WorkbookEvalTarget<'_>]) -> WorkbookBatchEvaluation {
-        let primary_id = targets
-            .first()
-            .and_then(|t| self.sheet(t.sheet))
-            .map_or(0, SheetEngine::resolved_sheet_id);
-        let mut ctx = EvalContext::with_workbook(self, primary_id);
-
-        if targets.len() > 1 {
-            let mut roots_by_sheet: Vec<Vec<PackedCellCoordinate>> =
-                vec![Vec::new(); self.sheets.len()];
-            for target in targets {
-                if let Some(idx) = self.find_sheet_index(target.sheet) {
-                    let expr = target.expr.trim();
-                    if crate::parser::strip_open_formula_prefix(expr).is_none() {
-                        if let Ok(coord) = PackedCellCoordinate::parse_a1(expr) {
-                            roots_by_sheet[idx].push(coord);
-                        }
-                    }
-                }
-            }
-            for (idx, roots) in roots_by_sheet.into_iter().enumerate() {
-                if !roots.is_empty() {
-                    self.sheets[idx].pre_evaluate_dag_iterative(&roots, &mut ctx);
-                }
-            }
-        }
-
-        let mut values = Vec::with_capacity(targets.len());
-        for target in targets {
-            let Some(sheet) = self.sheet(target.sheet) else {
-                values.push(EvaluatedCellValue::Error(FormulaError::Ref));
-                continue;
-            };
-            ctx.steps = 0;
-            let expr = target.expr.trim();
-            let val = if crate::parser::strip_open_formula_prefix(expr).is_some() {
-                ctx.current_coord = target.anchor;
-                let v = sheet.eval_raw_string_ctx(expr, &mut ctx, 0);
-                ctx.current_coord = None;
-                v
-            } else if let Ok(coord) = PackedCellCoordinate::parse_a1(expr) {
-                if !ctx.memo.contains_at(sheet.resolved_sheet_id(), coord) {
-                    sheet.pre_evaluate_dag_iterative(std::slice::from_ref(&coord), &mut ctx);
-                }
-                ctx.steps = 0;
-                sheet.eval_coord_ctx(coord, &mut ctx, 0)
-            } else {
-                EvaluatedCellValue::Error(FormulaError::Ref)
-            };
-            values.push(val);
-        }
-        WorkbookBatchEvaluation {
-            values,
-            circular: ctx.circular,
-        }
-    }
 }
 
 /// One `evaluate_targets` request: a cell address or `=` formula evaluated on `sheet`,
@@ -478,6 +418,8 @@ pub struct WorkbookEvalTarget<'a> {
 pub struct WorkbookBatchEvaluation {
     pub values: Vec<EvaluatedCellValue>,
     pub circular: bool,
+    /// The deadline passed: the targets the pass had not reached are `#VALUE!` (see `deadline`).
+    pub timed_out: bool,
 }
 
 impl SheetEngine {

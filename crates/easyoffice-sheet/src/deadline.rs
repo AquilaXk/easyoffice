@@ -1,0 +1,241 @@
+//! Wall-clock deadline of an evaluation pass (PD-215).
+//!
+//! One cell stops at [`MAX_EVAL_STEPS`](crate::MAX_EVAL_STEPS), but a workbook of many such cells has
+//! no bound of its own. An [`EvalContext`] can carry a deadline. The evaluator already counts a
+//! step for every cell and expression node; each time that count reaches a multiple of
+//! [`POLL_STEPS`] the clock is read (never once per cell), and starting a root cell counts
+//! [`ROOT_TICKS`] on a second counter that is read the same way, so a pass of cheap cells reads the
+//! clock too. When the deadline has passed the context is *expired*: the step counter is set to its
+//! maximum, so the checks every evaluation already makes end the pass with `#VALUE!` without an
+//! extra branch on the hot path, and no value computed while expired is stored in the memo (it may
+//! rest on an aborted cell). Values stored before the deadline are complete and stay.
+
+use crate::{EvalContext, EvaluatedCellValue, FormulaError, SheetEngine, WorkbookEngine};
+use crate::{PackedCellCoordinate, WorkbookBatchEvaluation, WorkbookEvalTarget};
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
+
+/// The longest a recalculation or evaluation pass runs before it stops and leaves the cells it has
+/// not reached as `#VALUE!` (the time a row or column edit may spend rewriting formulas, `AxisBudget`).
+pub const MAX_EVAL_TIME: Duration = Duration::from_secs(5);
+
+/// Steps between two clock reads (a power of two; a clock read costs as much as a few cells).
+const POLL_STEPS: usize = 1024;
+/// The mask of [`POLL_STEPS`] the evaluator tests the step counter with.
+pub(crate) const POLL_STEPS_MASK: usize = POLL_STEPS - 1;
+/// What starting a root cell counts on the tick counter, so a pass of cells that take few steps
+/// each reads the clock about every 16 cells.
+const ROOT_TICKS: u32 = 64;
+
+/// The deadline and the tick counter of one evaluation pass.
+#[derive(Debug, Default)]
+pub(crate) struct Clock {
+    deadline: Option<Instant>,
+    ticks: u32,
+    expired: bool,
+}
+
+impl EvalContext<'_> {
+    /// Sets the deadline `limit` from now (a limit too large for the clock means none, a zero limit
+    /// is already past).
+    pub(crate) fn with_time_limit(mut self, limit: Duration) -> Self {
+        self.clock.deadline = Instant::now().checked_add(limit);
+        if limit.is_zero() {
+            self.expire();
+        }
+        self
+    }
+
+    fn expire(&mut self) {
+        self.clock.expired = true;
+        self.steps = usize::MAX;
+    }
+
+    /// The same context with no deadline and a fresh step budget (for cells that hold constants).
+    pub(crate) fn without_deadline(mut self) -> Self {
+        self.clock = Clock::default();
+        self.steps = 0;
+        self
+    }
+
+    /// The deadline has passed: nothing computed from now on is valid.
+    #[inline]
+    pub(crate) fn expired(&self) -> bool {
+        self.clock.expired
+    }
+
+    /// Counts `n` root ticks and reads the clock when a multiple of [`POLL_STEPS`] is crossed.
+    #[inline]
+    fn tick(&mut self, n: u32) {
+        let before = self.clock.ticks;
+        self.clock.ticks = before.wrapping_add(n);
+        if (before ^ self.clock.ticks) as usize >= POLL_STEPS {
+            self.poll_deadline();
+        }
+    }
+
+    /// Reads the clock and expires the context when the deadline has passed.
+    #[cold]
+    pub(crate) fn poll_deadline(&mut self) {
+        if self.clock.deadline.is_some_and(|d| Instant::now() >= d) {
+            self.expire();
+        }
+    }
+
+    /// Starts a root cell: a fresh step budget unless the deadline has passed.
+    #[inline]
+    pub(crate) fn reset_steps(&mut self) {
+        self.tick(ROOT_TICKS);
+        self.steps = if self.clock.expired { usize::MAX } else { 0 };
+    }
+}
+
+impl SheetEngine {
+    /// [`recalculate_all`](Self::recalculate_all) that gives up after `limit` (none: never) and
+    /// answers `None` when it did. A partial dependency order is not kept for the next call.
+    pub fn recalculate_all_within(
+        &self,
+        limit: Option<Duration>,
+    ) -> Option<HashMap<PackedCellCoordinate, EvaluatedCellValue>> {
+        let mut ctx = EvalContext::standalone_id(self.resolved_sheet_id());
+        if let Some(limit) = limit {
+            ctx = ctx.with_time_limit(limit);
+        }
+        let mut results = HashMap::with_capacity(self.cells.len());
+        let built;
+        let plan = match self.plan.get().filter(|p| p.matches(self)) {
+            Some(plan) => {
+                plan.replay(self, &mut ctx);
+                plan
+            }
+            None => {
+                built = crate::dag::RecalcPlan::build(self, &mut ctx);
+                if !ctx.expired() {
+                    // Another thread may have stored a plan first; either one is valid.
+                    let _ = self.plan.set(built.clone());
+                }
+                &built
+            }
+        };
+        for &coord in &plan.coords {
+            ctx.reset_steps();
+            let val = self.eval_coord_ctx(coord, &mut ctx, 0);
+            results.insert(coord, val);
+        }
+        (!ctx.expired()).then_some(results)
+    }
+}
+
+impl WorkbookEngine {
+    /// Evaluates many targets (cell addresses or `=` formulas) in one shared memoized pass, so
+    /// formula cells referenced by several targets are computed once, and reports whether any
+    /// circular reference was encountered. The pass stops after [`MAX_EVAL_TIME`].
+    pub fn evaluate_targets(&self, targets: &[WorkbookEvalTarget<'_>]) -> WorkbookBatchEvaluation {
+        self.evaluate_targets_within(targets, MAX_EVAL_TIME)
+    }
+
+    /// [`evaluate_targets`](Self::evaluate_targets) that stops after `limit`. A target the pass did
+    /// not reach is `#VALUE!` and `timed_out` is set; a target reached before the deadline has its
+    /// real value.
+    pub fn evaluate_targets_within(
+        &self,
+        targets: &[WorkbookEvalTarget<'_>],
+        limit: Duration,
+    ) -> WorkbookBatchEvaluation {
+        let primary_id = targets
+            .first()
+            .and_then(|t| self.sheet(t.sheet))
+            .map_or(0, SheetEngine::resolved_sheet_id);
+        let mut ctx = EvalContext::with_workbook(self, primary_id).with_time_limit(limit);
+        if targets.len() > 1 {
+            let mut roots_by_sheet: Vec<Vec<PackedCellCoordinate>> =
+                vec![Vec::new(); self.sheets().len()];
+            for target in targets {
+                if let Some(idx) = self.find_sheet_index(target.sheet) {
+                    let expr = target.expr.trim();
+                    if crate::parser::strip_open_formula_prefix(expr).is_none() {
+                        if let Ok(coord) = PackedCellCoordinate::parse_a1(expr) {
+                            roots_by_sheet[idx].push(coord);
+                        }
+                    }
+                }
+            }
+            for (idx, roots) in roots_by_sheet.into_iter().enumerate() {
+                if !roots.is_empty() {
+                    self.sheets()[idx].pre_evaluate_dag_iterative(&roots, &mut ctx);
+                }
+            }
+        }
+        let mut values = Vec::with_capacity(targets.len());
+        for target in targets {
+            let value = if ctx.expired() {
+                None
+            } else {
+                Some(self.evaluate_target(target, &mut ctx))
+            };
+            // A value computed while the deadline passed may rest on an aborted cell: read it again.
+            let value = value.filter(|_| !ctx.expired());
+            values.push(value.unwrap_or_else(|| self.settled_target(target, &ctx)));
+        }
+        WorkbookBatchEvaluation {
+            values,
+            circular: ctx.circular,
+            timed_out: ctx.expired(),
+        }
+    }
+
+    fn evaluate_target(
+        &self,
+        target: &WorkbookEvalTarget<'_>,
+        ctx: &mut EvalContext<'_>,
+    ) -> EvaluatedCellValue {
+        let Some(sheet) = self.sheet(target.sheet) else {
+            return EvaluatedCellValue::Error(FormulaError::Ref);
+        };
+        ctx.reset_steps();
+        let expr = target.expr.trim();
+        if crate::parser::strip_open_formula_prefix(expr).is_some() {
+            ctx.current_coord = target.anchor;
+            let value = sheet.eval_raw_string_ctx(expr, ctx, 0);
+            ctx.current_coord = None;
+            value
+        } else if let Ok(coord) = PackedCellCoordinate::parse_a1(expr) {
+            if !ctx.memo.contains_at(sheet.resolved_sheet_id(), coord) {
+                sheet.pre_evaluate_dag_iterative(std::slice::from_ref(&coord), ctx);
+            }
+            ctx.reset_steps();
+            sheet.eval_coord_ctx(coord, ctx, 0)
+        } else {
+            EvaluatedCellValue::Error(FormulaError::Ref)
+        }
+    }
+
+    /// The value of `target` once the deadline has passed: a formula cell the pass finished keeps
+    /// its value, a cell that holds a plain value reads as itself, and anything that still needed a
+    /// calculation is `#VALUE!`.
+    fn settled_target(
+        &self,
+        target: &WorkbookEvalTarget<'_>,
+        ctx: &EvalContext<'_>,
+    ) -> EvaluatedCellValue {
+        let Some(sheet) = self.sheet(target.sheet) else {
+            return EvaluatedCellValue::Error(FormulaError::Ref);
+        };
+        let expr = target.expr.trim();
+        let cell = PackedCellCoordinate::parse_a1(expr)
+            .ok()
+            .filter(|_| crate::parser::strip_open_formula_prefix(expr).is_none());
+        match cell {
+            Some(coord) if crate::dag::is_formula(sheet.compiled_asts.get(&coord)) => ctx
+                .memo
+                .get_at(sheet.resolved_sheet_id(), coord)
+                .cloned()
+                .unwrap_or(EvaluatedCellValue::Error(FormulaError::Value)),
+            Some(coord) => {
+                let mut calm = EvalContext::with_workbook(self, sheet.resolved_sheet_id());
+                sheet.eval_coord_ctx(coord, &mut calm, 0)
+            }
+            None => EvaluatedCellValue::Error(FormulaError::Value),
+        }
+    }
+}

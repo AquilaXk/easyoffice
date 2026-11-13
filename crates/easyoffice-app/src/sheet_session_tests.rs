@@ -200,6 +200,7 @@ fn limits() -> Limits {
         max_total_bytes: 100,
         max_changes: 4,
         idle_ttl: Duration::from_secs(60),
+        max_recalc: MAX_EVAL_TIME,
     }
 }
 
@@ -406,6 +407,7 @@ fn roomy() -> Limits {
         max_total_bytes: 8 << 20,
         max_changes: 2_000,
         idle_ttl: Duration::from_secs(60),
+        max_recalc: MAX_EVAL_TIME,
     }
 }
 

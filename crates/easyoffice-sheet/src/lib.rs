@@ -9,6 +9,7 @@ pub mod coercion;
 mod compile;
 mod criteria;
 mod dag;
+mod deadline;
 pub mod filter;
 #[cfg(test)]
 mod function_coverage_tests;
@@ -63,6 +64,7 @@ pub use axis::{
     AxisEditReport, EditKind, FilterShift, SheetChange,
 };
 pub use coercion::*;
+pub use deadline::MAX_EVAL_TIME;
 pub use functions::*;
 pub use functions_complex::{format_complex, parse_complex};
 pub use memo::{CellMap, CoordHasher, FastMap, MemoTable};
@@ -99,6 +101,7 @@ pub(crate) struct EvalContext<'a> {
     pub(crate) steps: usize,
     pub(crate) rng_state: u64,
     pub(crate) circular: bool,
+    pub(crate) clock: deadline::Clock,
 }
 
 impl<'a> EvalContext<'a> {
@@ -111,6 +114,7 @@ impl<'a> EvalContext<'a> {
             steps: 0,
             rng_state: 0x5DEE_CE66_D1A4_F87B,
             circular: false,
+            clock: deadline::Clock::default(),
         }
     }
 
@@ -123,6 +127,7 @@ impl<'a> EvalContext<'a> {
             steps: 0,
             rng_state: 0x5DEE_CE66_D1A4_F87B,
             circular: false,
+            clock: deadline::Clock::default(),
         }
     }
 
@@ -380,7 +385,7 @@ impl SheetEngine {
         };
         let mut ctx = EvalContext::standalone_id(self.resolved_sheet_id());
         self.pre_evaluate_dag_iterative(std::slice::from_ref(&coord), &mut ctx);
-        ctx.steps = 0;
+        ctx.reset_steps();
         self.eval_coord_ctx(coord, &mut ctx, 0)
     }
 
@@ -390,27 +395,7 @@ impl SheetEngine {
     /// The dependency order is computed once and cached until the next edit, so repeated
     /// recalculations of an unchanged sheet only evaluate formulas (no graph walk).
     pub fn recalculate_all(&self) -> HashMap<PackedCellCoordinate, EvaluatedCellValue> {
-        let mut ctx = EvalContext::standalone_id(self.resolved_sheet_id());
-        let mut results = HashMap::with_capacity(self.cells.len());
-        let built;
-        let plan = match self.plan.get().filter(|p| p.matches(self)) {
-            Some(plan) => {
-                plan.replay(self, &mut ctx);
-                plan
-            }
-            None => {
-                built = dag::RecalcPlan::build(self, &mut ctx);
-                // Another thread may have stored a plan first; either one is valid.
-                let _ = self.plan.set(built.clone());
-                &built
-            }
-        };
-        for &coord in &plan.coords {
-            ctx.steps = 0;
-            let val = self.eval_coord_ctx(coord, &mut ctx, 0);
-            results.insert(coord, val);
-        }
-        results
+        self.recalculate_all_within(None).unwrap_or_default()
     }
 
     pub fn evaluate_formula_str(&self, formula: &str) -> EvaluatedCellValue {
@@ -526,6 +511,9 @@ impl SheetEngine {
         depth: usize,
     ) -> CellEval {
         ctx.steps = ctx.steps.saturating_add(1);
+        if ctx.steps & deadline::POLL_STEPS_MASK == 0 {
+            ctx.poll_deadline();
+        }
         if ctx.steps > Self::MAX_EVAL_STEPS {
             return CellEval::Owned(EvaluatedCellValue::Error(FormulaError::Value));
         }
@@ -579,6 +567,11 @@ impl SheetEngine {
         ctx.current_coord = Some(coord);
         let mut result = self.eval_expr_ctx(expr, ctx, depth + 1);
         ctx.current_coord = prev_coord;
+        if ctx.expired() {
+            // The deadline passed inside this cell: its value may rest on an aborted cell.
+            ctx.memo.visit_remove(sid, coord);
+            return CellEval::Owned(EvaluatedCellValue::Error(FormulaError::Value));
+        }
         result = crate::coercion::sanitize_evaluated_value(result);
         if let EvaluatedCellValue::Text(ref s) = result {
             if s.len() > Self::MAX_CELL_TEXT_CHARS && s.chars().count() > Self::MAX_CELL_TEXT_CHARS
@@ -644,6 +637,9 @@ impl SheetEngine {
         depth: usize,
     ) -> EvaluatedCellValue {
         ctx.steps = ctx.steps.saturating_add(1);
+        if ctx.steps & deadline::POLL_STEPS_MASK == 0 {
+            ctx.poll_deadline();
+        }
         if ctx.steps > Self::MAX_EVAL_STEPS {
             return EvaluatedCellValue::Error(FormulaError::Value);
         }

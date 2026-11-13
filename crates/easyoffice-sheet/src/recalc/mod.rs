@@ -26,15 +26,19 @@ mod tests_axis;
 #[cfg(test)]
 mod tests_bench;
 #[cfg(test)]
+mod tests_deadline;
+#[cfg(test)]
 mod tests_names;
 
 use crate::dag::is_formula;
+use crate::MAX_EVAL_TIME;
 use crate::{
     EvalContext, EvaluatedCellValue, FormulaError, MemoTable, PackedCellCoordinate, WorkbookEngine,
 };
 use easyoffice_formats::EasyOfficeError;
 use graph::{cell_key, collect_refs, CellKey, DepGraph, Ref};
 use id_set::IdSet;
+use std::time::Duration;
 
 /// Bounds on what the dependency graph may hold. A sheet can register far more edges than it has
 /// cells (every formula can read thousands of cells), so the graph is metered, not just the text.
@@ -46,6 +50,9 @@ pub struct Budget {
     pub max_graph_bytes: usize,
     /// [`Footprint::total_bytes`]: text, graph and syntax trees together.
     pub max_bytes: usize,
+    /// The longest one [`RecalcSession::recalculate`] runs; the formulas it has not reached are
+    /// `#VALUE!` and stay dirty (see `deadline`).
+    pub max_time: Duration,
 }
 
 impl Default for Budget {
@@ -54,6 +61,7 @@ impl Default for Budget {
             max_edges: 8_000_000,
             max_graph_bytes: 256 << 20,
             max_bytes: 512 << 20,
+            max_time: MAX_EVAL_TIME,
         }
     }
 }
@@ -145,6 +153,9 @@ pub struct RecalcOutcome {
     pub circular: bool,
     /// Formula cells that were evaluated (the dirty set).
     pub recomputed: usize,
+    /// The deadline ([`Budget::max_time`]) passed: the formulas the pass had not reached are in
+    /// `changed` as `#VALUE!` and stay dirty for the next call.
+    pub timed_out: bool,
 }
 
 pub struct RecalcSession {
@@ -419,7 +430,8 @@ impl RecalcSession {
             .collect();
 
         let primary_id = sheets.first().map_or(1, |s| s.resolved_sheet_id());
-        let mut ctx = EvalContext::with_workbook(&self.wb, primary_id);
+        let mut ctx =
+            EvalContext::with_workbook(&self.wb, primary_id).with_time_limit(self.budget.max_time);
         ctx.memo = std::mem::replace(&mut self.memo, MemoTable::new(primary_id));
         ctx.rng_state = self.rng_state;
         let mut roots: Vec<PackedCellCoordinate> = Vec::new();
@@ -437,14 +449,19 @@ impl RecalcSession {
         }
 
         let mut changed = Vec::new();
+        // Formulas the deadline cut off: no value was stored for them, so they stay dirty.
+        let mut unfinished = Vec::new();
         for (&(_, v), old) in order.iter().zip(before) {
             let (sheet, coord) = self.graph.site(v);
             let sid = sheets[usize::from(sheet)].resolved_sheet_id();
-            let value = ctx
-                .memo
-                .get_at(sid, coord)
-                .cloned()
-                .unwrap_or(EvaluatedCellValue::Empty);
+            let value = match ctx.memo.get_at(sid, coord) {
+                Some(value) => value.clone(),
+                None if ctx.expired() => {
+                    unfinished.push(v);
+                    EvaluatedCellValue::Error(FormulaError::Value)
+                }
+                None => EvaluatedCellValue::Empty,
+            };
             if matches!(value, EvaluatedCellValue::Error(FormulaError::Cycle)) {
                 self.cyclic.insert(v);
             }
@@ -460,6 +477,9 @@ impl RecalcSession {
         // have a constant value; report it so the caller never has to guess.
         self.edited.sort_unstable();
         self.edited.dedup();
+        let timed_out = ctx.expired();
+        // These cells hold constants, so they are read with a fresh clock.
+        let mut ctx = ctx.without_deadline();
         for &(sheet, coord) in &self.edited {
             let engine = &sheets[usize::from(sheet)];
             let is_formula_text = engine
@@ -467,7 +487,7 @@ impl RecalcSession {
                 .get(&coord)
                 .is_some_and(|raw| crate::parser::strip_formula_prefix(raw.trim()).is_some());
             if is_formula_text && self.graph.vertex_at(sheet, coord).is_none() {
-                ctx.steps = 0;
+                ctx.reset_steps();
                 changed.push(ChangedCell {
                     sheet: usize::from(sheet),
                     coord,
@@ -480,10 +500,14 @@ impl RecalcSession {
         self.memo = ctx.memo;
         self.edited.clear();
         self.dirty.clear();
+        for &v in &unfinished {
+            self.dirty.insert(v);
+        }
         RecalcOutcome {
             changed,
             circular: !self.cyclic.is_empty() || self.dynamic_circular,
-            recomputed: order.len(),
+            recomputed: order.len() - unfinished.len(),
+            timed_out,
         }
     }
 

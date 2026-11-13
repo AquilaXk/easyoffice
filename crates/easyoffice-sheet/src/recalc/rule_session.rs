@@ -7,7 +7,9 @@
 
 use super::{CellChange, RecalcOutcome, RecalcSession};
 use crate::rules::{CellVisual, RuleRuntime, SheetCells, Verdict};
-use crate::{validate_input, EvalContext, MemoTable, PackedCellCoordinate};
+use crate::{
+    validate_input, EvalContext, EvaluatedCellValue, FormulaError, MemoTable, PackedCellCoordinate,
+};
 use easyoffice_formats::{EasyOfficeError, SheetRules};
 
 /// What an edit batch changed in the conditional formatting of the sheets.
@@ -33,6 +35,14 @@ impl RecalcSession {
         let memo = std::mem::replace(&mut self.memo, MemoTable::new(primary_id));
         let mut ctx = EvalContext::with_workbook(&self.wb, primary_id);
         ctx.memo = memo;
+        // A formula the last recalculation did not reach reads as `#VALUE!`, as the page shows it:
+        // a rule never calculates it (that would repeat the work the deadline cut off).
+        self.dirty.for_each(|v| {
+            let (sheet, coord) = self.graph.site(v);
+            let sid = self.wb.sheets()[usize::from(sheet)].resolved_sheet_id();
+            let value = EvaluatedCellValue::Error(FormulaError::Value);
+            ctx.memo.insert_at(sid, coord, value);
+        });
         let out = {
             let mut cells = SheetCells {
                 sheet: &self.wb.sheets()[sheet],
@@ -41,7 +51,18 @@ impl RecalcSession {
             f(&mut cells)
         };
         self.memo = ctx.memo;
+        self.forget_dirty_values();
         out
+    }
+
+    /// Drops the memoized value of every dirty formula: a cell without a value is what the next
+    /// recalculation reports in full, so nothing that read it may leave one behind.
+    fn forget_dirty_values(&mut self) {
+        self.dirty.for_each(|v| {
+            let (sheet, coord) = self.graph.site(v);
+            let sid = self.wb.sheets()[usize::from(sheet)].resolved_sheet_id();
+            self.memo.remove_at(sid, coord);
+        });
     }
 
     /// Replaces the rules of `sheet` and returns the appearance of every formatted cell. Rules
@@ -126,6 +147,7 @@ impl RecalcSession {
         let memo = std::mem::replace(&mut self.memo, MemoTable::new(primary_id));
         let (verdict, memo) = validate_input(&mut self.wb, idx, &rules, coord, input, memo);
         self.memo = memo;
+        self.forget_dirty_values();
         Ok(verdict)
     }
 }

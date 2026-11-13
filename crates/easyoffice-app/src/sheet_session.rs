@@ -22,7 +22,7 @@ use easyoffice_formats::{
 };
 use easyoffice_sheet::{
     AxisBudget, AxisEdit, Budget, CellChange, ChangedCell, Footprint, PackedCellCoordinate,
-    RecalcError, RecalcOutcome, RecalcSession, Verdict, WorkbookEngine,
+    RecalcError, RecalcOutcome, RecalcSession, Verdict, WorkbookEngine, MAX_EVAL_TIME,
 };
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
@@ -52,6 +52,9 @@ pub(crate) struct Limits {
     pub max_changes: usize,
     /// A session unused this long is dropped.
     pub idle_ttl: Duration,
+    /// The longest one recalculation runs; the formulas it does not reach show `#VALUE!` and are
+    /// computed by the next one (PD-215).
+    pub max_recalc: Duration,
 }
 
 pub(crate) const LIMITS: Limits = Limits {
@@ -65,6 +68,7 @@ pub(crate) const LIMITS: Limits = Limits {
     max_total_bytes: 1 << 30,
     max_changes: 250_000,
     idle_ttl: Duration::from_secs(30 * 60),
+    max_recalc: MAX_EVAL_TIME,
 };
 
 impl Limits {
@@ -73,6 +77,7 @@ impl Limits {
             max_edges: self.max_session_edges,
             max_graph_bytes: self.max_session_bytes,
             max_bytes: self.max_session_bytes,
+            max_time: self.max_recalc,
         }
     }
 }
@@ -132,6 +137,15 @@ pub(crate) fn write_changed(out: &mut String, session: &RecalcSession, changed: 
     out.push(']');
 }
 
+/// `,"timedOut":true` when the recalculation ran out of time (its unfinished formulas are `#VALUE!` in `changed`).
+pub(crate) fn timed_out_field(outcome: &RecalcOutcome) -> &'static str {
+    if outcome.timed_out {
+        ",\"timedOut\":true"
+    } else {
+        ""
+    }
+}
+
 /// The answer to an `apply` that recalculated: the changed formula cells, `circular`, the cells whose
 /// conditional formatting changed and the sheets that lost their rules.
 pub(crate) fn recalc_answer(
@@ -149,6 +163,7 @@ pub(crate) fn recalc_answer(
         ",\"circular\":{},\"recomputed\":{}",
         outcome.circular, outcome.recomputed
     ));
+    out.push_str(timed_out_field(outcome));
     let rule_updates = session.rule_updates(changes, outcome);
     if !rule_updates.changed.is_empty() {
         out.push_str(",\"cf\":[");

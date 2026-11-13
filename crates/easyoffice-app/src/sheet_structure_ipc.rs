@@ -218,6 +218,7 @@ pub(crate) fn session_answer(
         ",\"circular\":{},\"removed\":{}",
         outcome.circular, report.removed_cells
     );
+    out.push_str(crate::sheet_session::timed_out_field(outcome));
     if report.names_changed {
         out.push_str(&EasyOfficeIpcRouter::names_answer_field(
             session.workbook().names(),

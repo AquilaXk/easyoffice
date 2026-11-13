@@ -261,8 +261,11 @@ impl RecalcPlan {
                 .insert_at(sid, owner, EvaluatedCellValue::Error(FormulaError::Cycle));
         }
         for &coord in &self.order {
+            if ctx.expired() {
+                break;
+            }
             if !ctx.memo.contains_at(sid, coord) {
-                ctx.steps = 0;
+                ctx.reset_steps();
                 sheet.with_coord_value(coord, ctx, 0, |_| ());
             }
         }
@@ -480,6 +483,9 @@ impl SheetEngine {
             }
         }
         while let Some((slot, coord, expanded)) = stack.pop() {
+            if ctx.expired() {
+                break;
+            }
             let sheet = scan.sheets.get(slot);
             let sid = sheet.resolved_sheet_id();
             if expanded {
@@ -488,7 +494,7 @@ impl SheetEngine {
                     r.order.push(coord);
                 }
                 if !ctx.memo.contains_at(sid, coord) {
-                    ctx.steps = 0;
+                    ctx.reset_steps();
                     sheet.with_coord_value(coord, ctx, 0, |_| ());
                 }
                 continue;

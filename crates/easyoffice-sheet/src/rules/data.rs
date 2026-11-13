@@ -32,7 +32,7 @@ pub(crate) struct SheetCells<'a, 'c> {
 
 impl Cells for SheetCells<'_, '_> {
     fn value(&mut self, coord: PackedCellCoordinate) -> EvaluatedCellValue {
-        self.ctx.steps = 0;
+        self.ctx.reset_steps();
         self.sheet.eval_coord_ctx(coord, self.ctx, 0)
     }
 
@@ -43,7 +43,7 @@ impl Cells for SheetCells<'_, '_> {
     }
 
     fn eval_formula(&mut self, formula: &str) -> EvaluatedCellValue {
-        self.ctx.steps = 0;
+        self.ctx.reset_steps();
         self.sheet
             .eval_raw_string_ctx(&format!("={formula}"), self.ctx, 0)
     }

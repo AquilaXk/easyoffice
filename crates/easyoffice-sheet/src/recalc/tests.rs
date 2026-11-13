@@ -449,6 +449,7 @@ fn a_graph_over_budget_is_refused_and_stays_refused() {
         max_edges: 100,
         max_graph_bytes: usize::MAX,
         max_bytes: usize::MAX,
+        ..Budget::default()
     };
     let mut wb = WorkbookEngine::new();
     wb.add_sheet("S");
@@ -486,6 +487,7 @@ fn a_graph_over_budget_is_refused_and_stays_refused() {
         max_edges: usize::MAX,
         max_graph_bytes: usize::MAX,
         max_bytes: 5_000,
+        ..Budget::default()
     };
     let mut wb = WorkbookEngine::new();
     wb.add_sheet("S");
@@ -503,6 +505,7 @@ fn a_graph_over_budget_is_refused_and_stays_refused() {
         max_edges: usize::MAX,
         max_graph_bytes: 1_000,
         max_bytes: usize::MAX,
+        ..Budget::default()
     };
     let mut wb = WorkbookEngine::new();
     wb.add_sheet("S");
