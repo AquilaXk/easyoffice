@@ -35,15 +35,13 @@
 //!   state of the bar follows the focused window ([`sync`], fed by `menu_state.rs`); the disabled
 //!   ids come from the page, which owns the module rules (`studioCommandApplies`).
 
-use std::collections::HashMap;
-use std::sync::Mutex;
+use std::{collections::HashMap, sync::Mutex};
 
 use tauri::menu::{CheckMenuItem, CheckMenuItemBuilder, Menu, MenuItemBuilder, MenuItemKind};
 use tauri::{AppHandle, Manager, Runtime, Wry};
 
 mod build;
 mod layout;
-
 pub use layout::MenuKind;
 
 /// One custom menu item.
@@ -594,6 +592,8 @@ pub const ITEMS: &[MenuItemSpec] = &[
     sa!("sheet:tab-right", "시트 오른쪽으로 이동", "tab-right"),
     sa!("sheet:tab-hide", "시트 숨기기", "tab-hide"),
     sa!("sheet:tab-unhide", "시트 숨기기 취소…", "tab-unhide"),
+    sa!("sheet:name-define", "이름 정의…", "name-define"),
+    sa!("sheet:name-manage", "이름 관리…", "name-manage"),
     sa!("sheet:page-setup", "쪽 설정…", "page-setup"),
     sa!("sheet:print-area-set", "인쇄 영역 설정", "print-area-set"),
     sa!(

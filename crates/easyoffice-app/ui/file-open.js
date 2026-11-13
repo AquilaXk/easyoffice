@@ -421,9 +421,11 @@
         host.__EASYOFFICE_SHEET_TAB_STRIP__.replaceOrder(order);
         next.sheetOrder = order;
         const first = order.find((name) => layoutBySheet[name]?.hidden !== true) ?? order[0];
-        // The rules go in first, so the evaluation below learns them with the cells.
+        // The rules and the defined names go in first, so the evaluation below learns them with the cells.
         if (typeof replaceSheetRules === "function") replaceSheetRules(rulesBySheet);
         next.sheetRules = rulesBySheet;
+        host.__EASYOFFICE_SHEET_NAMES__.replaceAll(res.names, true);
+        next.definedNames = host.__EASYOFFICE_SHEET_NAMES__.getAll();
         const evaluated = await computeEvaluatedSheetStore(store, first, null);
         next.sheets = evaluated.sheets;
         next.sheetRowCounts = rowCounts;

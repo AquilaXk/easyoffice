@@ -558,6 +558,8 @@ const TABLE_DOC: MenuSpec = menu(
         "table:validation",
     ],
 );
+/// The spreadsheet's 수식 menu: the defined names (수식 > 이름 > 이름 정의, 이름 관리 of the spreadsheet help).
+const FORMULA_SHEET: MenuSpec = menu("수식", &["sheet:name-define", "sheet:name-manage"]);
 const DATA_SHEET: MenuSpec = menu(
     "데이터",
     &[
@@ -661,7 +663,7 @@ const HWP: [&MenuSpec; 11] = [
     &WINDOW,
     &HELP,
 ];
-const SHEET: [&MenuSpec; 11] = [
+const SHEET: [&MenuSpec; 12] = [
     &APP,
     &FILE_SHEET,
     &EDIT_SHEET,
@@ -669,6 +671,7 @@ const SHEET: [&MenuSpec; 11] = [
     &INSERT_SHEET,
     &FORMAT_SHEET,
     &SHEET_SHEET,
+    &FORMULA_SHEET,
     &DATA_SHEET,
     &TOOL_OFFICE,
     &WINDOW,

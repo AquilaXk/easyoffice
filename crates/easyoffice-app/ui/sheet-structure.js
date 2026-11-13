@@ -69,6 +69,9 @@
     // Page setup and print area (PD-213).
     const pageUi = host.__EASYOFFICE_CREATE_SHEET_PAGE__(deps);
 
+    // The name box and the defined names dialogs (PD-214).
+    const namesUi = host.__EASYOFFICE_CREATE_SHEET_NAMES_UI__({ ...deps, kit: host.__EASYOFFICE_CREATE_SHEET_DIALOG_KIT__(document) });
+
     // Sheet tabs (PD-209): insert, delete, rename, copy, move, hide and show again.
     const tabUi = host.__EASYOFFICE_CREATE_SHEET_TAB_UI__({ document, kit: host.__EASYOFFICE_CREATE_SHEET_DIALOG_KIT__(document), getTabs: () => tabs, say });
     const tabs = host.__EASYOFFICE_CREATE_SHEET_TABS__({ ...deps, ui: tabUi });
@@ -292,6 +295,7 @@
       unmerge,
       ...view.actions,
       ...pageUi.actions,
+      ...namesUi.actions,
       "tab-add": () => tabs.insert(null),
       ...tabs.actions,
       "sort-dialog": () => Promise.resolve(sortUi.open()),
@@ -409,6 +413,7 @@
       tabMenu.bind();
       outlineUi.bind();
       pageUi.bind();
+      namesUi.bind();
       const viewport = document.getElementById("sheet-viewport");
       viewport?.addEventListener("dblclick", onDblClick);
       viewport?.addEventListener("contextmenu", onContextMenu);

@@ -7,6 +7,10 @@
   const quoteFormulaSheetName = astApi.quoteFormulaSheetName;
   // Conditional formatting / validation rules (PD-171); absent in pages that do not load them.
   const rulesApi = host.__EASYOFFICE_SHEET_RULES__;
+  // The defined names of the workbook (PD-214); absent in pages that do not load them.
+  const namesApi = host.__EASYOFFICE_SHEET_NAMES__;
+  // The `names` field of a stateless request: only when there are names to send.
+  const namesField = () => (namesApi?.hasAny() ? { names: namesApi.getAll() } : {});
 
   function cloneStore(sheets) {
     const fast = host.__EASYOFFICE_SHEET_GRID_UTILS__?.cloneSheetStore;
@@ -159,6 +163,8 @@
       values: new Map(),
       // Rule payload the session holds per sheet (see `syncRules`).
       rules: new Map(),
+      // The names payload the session holds (see `syncNames`), null before the first one is sent.
+      names: null,
       gen: 0,
     };
     let sessionChain = Promise.resolve();
@@ -174,6 +180,7 @@
       session.raw = new Map();
       session.values = new Map();
       session.rules = new Map();
+      session.names = null;
     }
 
     // Forgets the session and tells the engine to release it (an unknown id is harmless there).
@@ -260,6 +267,7 @@
       if (session.id === null || session.sheetKey !== sheetKey) {
         await openSession(names, sheetKey);
       }
+      await syncNames();
       const { changes, formulaTargets } = diffAgainstMirror(sheetsMap, names);
       let at = 0;
       let last = null;
@@ -291,6 +299,24 @@
       }
       await syncRules(names);
       return { formulaTargets, circular: last.circular === true };
+    }
+
+    // Sends the whole list of defined names when it differs from what the session holds, before the cells, so the
+    // formulas that use a name are compiled once. The answer lists the formulas whose value changed.
+    async function syncNames() {
+      if (!namesApi) return;
+      const payload = namesApi.payload();
+      if (payload === session.names || (session.names === null && !namesApi.hasAny())) return;
+      const res = await sessionCall({ sessionAction: "names", session: session.id, names: JSON.parse(payload) });
+      if (res?.refused) {
+        const refusal = new Error("시트가 세션 상한을 넘었습니다.");
+        refusal.refused = true;
+        throw refusal;
+      }
+      if (!res || res.expired === true) throw new Error("시트 세션이 만료되었습니다.");
+      for (const c of Array.isArray(res.changed) ? res.changed : []) session.values.set(c.sheet + "!" + c.cell, c.value);
+      takeRuleChanges(res);
+      session.names = payload;
     }
 
     // Rules exist on the page, or the session still holds rules the page has since cleared.
@@ -386,6 +412,11 @@
       for (const c of Array.isArray(answer.changed) ? answer.changed : []) {
         session.values.set(c.sheet + "!" + c.cell, c.value);
       }
+      // The engine moved the names with the cells: the page takes its list.
+      if (namesApi && Array.isArray(answer.names)) {
+        namesApi.replaceAll(answer.names, true);
+        session.names = namesApi.payload();
+      }
       // The engine rebuilt its session without rules; the next sync sends them again.
       session.rules = new Map();
     }
@@ -475,6 +506,7 @@
           sheets: Object.keys(sheets),
           targets: [{ sheet, cell }],
           cells,
+          ...namesField(),
         })
       );
       return readExtraValue(rpcRes, sheets, extraTarget, 1);
@@ -564,6 +596,7 @@
         sheets: Object.keys(sheets),
         targets: targetSpecs,
         cells,
+        ...namesField(),
       });
       const rpcRes = await invokeIpc("evaluate_sheet", rpcPayload);
       const targetValues = Array.isArray(rpcRes?.targetValues) ? rpcRes.targetValues : null;
@@ -614,6 +647,7 @@
         sheets: Object.keys(sheetsMap),
         targets: formulaTargets.map(({ sheet, cell }) => ({ sheet, cell })),
         cells,
+        ...namesField(),
       });
       const rpcRes = await invokeIpc("evaluate_sheet", rpcPayload);
       const targetValues = Array.isArray(rpcRes?.targetValues) ? rpcRes.targetValues : null;

@@ -3,10 +3,10 @@
 //! `office:spreadsheet` for a name of the workbook and as a child of the `table:table` for a name of that
 //! sheet (OASIS ODF 1.2 9.4.11 to 9.4.14). The model is `sheet_names.rs`.
 //!
-//! 동작 참고: LibreOffice `sc/source/filter/xml/xmlexprt.cxx` (`WriteNamedRange`) and `xmlnexpi.cxx` (MPL-2.0,
-//! behaviour only, no code copied): a range goes out as `table:cell-range-address` in the `$Sheet.$A$1:.$B$2`
-//! spelling and a formula as `table:expression`, both with `table:base-cell-address`; a hidden formula is
-//! `loext:hidden`, a hidden range a `hidden` token of `table:range-usable-as`.
+//! 동작 참고: the behaviour of a widely used open-source office suite (MPL-2.0; behaviour only, no code is
+//! copied): a range goes out as `table:cell-range-address` in the `$Sheet.$A$1:.$B$2` spelling and a formula as
+//! `table:expression`, both with `table:base-cell-address`; a hidden formula is `loext:hidden`, a hidden range a
+//! `hidden` token of `table:range-usable-as`.
 //!
 //! Modifications: the comment of a name is kept as the foreign attribute `eo:comment`. A range that spans
 //! sheets or is not one plain rectangle is written and read as a formula.

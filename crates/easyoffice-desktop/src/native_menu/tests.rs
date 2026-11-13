@@ -205,6 +205,7 @@ fn each_kind_has_the_menus_of_its_window_in_order() {
                 "삽입",
                 "서식",
                 "시트",
+                "수식",
                 "데이터",
                 "도구"
             ],

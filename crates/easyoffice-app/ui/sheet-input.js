@@ -207,7 +207,10 @@
       paintSelection();
       const activeTd = tdAt(sel.ar, sel.ac);
       const badge = document.getElementById("active-cell-ref");
-      if (badge) badge.textContent = ref;
+      // The name box (PD-214) shows the name of a definition that refers to exactly the selection, else the address.
+      if (badge && document.activeElement !== badge) {
+        badge.textContent = host.__EASYOFFICE_SHEET_NAMES__?.nameOfRange(api.getSheetName(), getRange()) || ref;
+      }
       const formulaInput = document.getElementById("formula-input");
       if (formulaInput && document.activeElement !== formulaInput) {
         if (activeTd) {
@@ -286,6 +289,19 @@
       sel.ac = rg.c1;
       sel.cr = rg.r2;
       sel.cc = rg.c2;
+    }
+
+    // Selects a range from outside the grid (the name box): the first cell is the anchor and the range is shown.
+    function selectRange(rg) {
+      commitIfEditing();
+      const r1 = clamp(rg.r1, 1, grid.MAX_ROWS);
+      const c1 = clamp(rg.c1, 1, grid.MAX_COLS);
+      setRange({ r1, c1, r2: clamp(rg.r2, r1, grid.MAX_ROWS), c2: clamp(rg.c2, c1, grid.MAX_COLS) });
+      const whole = rg.c1 === 1 && rg.c2 >= grid.MAX_COLS ? "row" : rg.r1 === 1 && rg.r2 >= grid.MAX_ROWS ? "col" : null;
+      sel.axis = whole;
+      grid.ensureVisible(r1, c1);
+      focusAnchor();
+      refreshChrome();
     }
 
     // Selects whole rows or columns (a click on a header; `extend` grows the selection to `index`).
@@ -763,6 +779,7 @@
       endEdit,
       getRange,
       selectAxis,
+      selectRange,
       runClipboardCommand,
       shiftFormula: clip.shiftFormula,
       getSelection: () => ({ ...sel }),

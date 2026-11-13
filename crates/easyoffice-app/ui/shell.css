@@ -205,6 +205,12 @@
 .tool-dialog .dialog-list:empty::before { content: "규칙 없음"; display: block; padding: 4px 8px; color: var(--color-text-muted); }
 .tool-dialog .dialog-list li { padding: 3px 8px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tool-dialog .dialog-list li[aria-selected="true"] { background: var(--color-accent-bg); font-weight: 700; }
+/* The name list of the 이름 관리 dialog: the list cell of the rules dialog, three columns (PD-214). */
+.tool-dialog .sheet-names-head, .tool-dialog .sheet-names-list li { display: grid; grid-template-columns: 9em 7em minmax(0, 1fr); gap: 8px; }
+.tool-dialog .sheet-names-head { padding: 3px 8px; border: 1px solid var(--color-border); border-bottom: 0; background: var(--color-surface); color: var(--color-text-muted); font-size: var(--font-size-sm); }
+.tool-dialog .sheet-names-list { max-height: 200px; }
+.tool-dialog .sheet-names-list:empty::before { content: "이름 없음"; }
+.tool-dialog .sheet-names-list li > span { overflow: hidden; text-overflow: ellipsis; }
 /* Last of the dialog display rules, so a hidden row, stack or control stays hidden. */
 .tool-dialog [hidden] { display: none; }
 /* In-cell list arrow and menu of a data validation list (sheet-rules-ui.js). */
@@ -361,3 +367,16 @@
 #sheet-page-dialog .dialog-text-input { flex: 1; min-width: 0; width: auto; }
 #sheet-page-dialog .dialog-row .dialog-label { min-width: 40px; }
 #sheet-page-dialog [data-sp-pane="sheet"] .dialog-label { min-width: 64px; }
+
+/* The name box in the formula bar: the address field with the combo's arrow cell and the in-cell list's menu (PD-214). */
+.sheet-name-box { position: relative; display: inline-flex; align-items: stretch; height: 22px; border: 1px solid var(--color-border-input); background: var(--ui-surface); }
+.sheet-name-box .cell-ref { display: inline-flex; align-items: center; justify-content: flex-start; min-width: 64px; max-width: 160px; padding: 0 6px; overflow: hidden; white-space: nowrap; font-size: 12px; color: var(--ui-text); outline: none; text-align: left; }
+.sheet-name-box:focus-within { border-color: var(--color-primary-hover); }
+.sheet-name-arrow { display: inline-flex; align-items: center; justify-content: center; width: 15px; padding: 0; border: 0; border-left: 1px solid var(--color-border-light); border-radius: 0; background: var(--color-surface); color: var(--color-text-muted); font: inherit; font-size: 8px; line-height: 1; cursor: default; }
+.sheet-name-arrow:hover, .sheet-name-box .cell-ref[aria-expanded="true"] + .sheet-name-arrow { background: var(--color-hover-bg); }
+.sheet-name-box-list { position: absolute; top: 100%; left: 0; z-index: 31; min-width: 240px; max-height: 220px; overflow-y: auto; margin: 0; padding: 2px 0; list-style: none; border: 1px solid var(--color-border-dark); background: var(--color-surface-raised); color: var(--color-text); box-shadow: var(--shadow-dropdown); font-size: var(--font-size-base); }
+.sheet-name-box-list[hidden] { display: none; }
+.sheet-name-box-list li { display: flex; gap: 12px; padding: 3px 10px; cursor: pointer; white-space: nowrap; }
+.sheet-name-box-list li > span:last-child { margin-left: auto; overflow: hidden; text-overflow: ellipsis; color: var(--color-text-muted); }
+.sheet-name-box-list li:hover { background: var(--color-accent-bg); }
+.sheet-name-box-list li[data-manage] { border-top: 1px solid var(--color-border-light); }

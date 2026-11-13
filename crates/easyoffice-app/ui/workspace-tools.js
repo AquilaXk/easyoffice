@@ -121,7 +121,7 @@
       if (scope === "SHEET") {
         sheetDataStore[getActiveSheetName()] = sheetController.snapshotDomSheetCells();
         const keys = host.__EASYOFFICE_SHEET_TAB_STRIP__.reconcile(Object.keys(sheetDataStore));
-        return { sheets: savePayload.buildSheetsPayload(keys, sheetDataStore, sheetController.getColumnWidths(), sheetController.getSheetRules(), host.__EASYOFFICE_SHEET_LAYOUT__.getAll()) };
+        return { sheets: savePayload.buildSheetsPayload(keys, sheetDataStore, sheetController.getColumnWidths(), sheetController.getSheetRules(), host.__EASYOFFICE_SHEET_LAYOUT__.getAll()), names: host.__EASYOFFICE_SHEET_NAMES__.getAll() };
       }
       if (scope === "SLIDE") {
         if (getActiveModule() === "SLIDE" && typeof syncActiveSlideDomStylesToDeck === "function") {

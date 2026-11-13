@@ -139,7 +139,7 @@
     // `{ ok, answer }`; a workbook with no formula and no rule has nothing to rewrite, so it needs no
     // engine. A failure says why in the status text.
     async function rewriteRefs(request) {
-      if (!sheetStoreHelpers.sheetMapHasAnyFormula(sheetDataStore) && !rulesApi?.hasAny()) {
+      if (!sheetStoreHelpers.sheetMapHasAnyFormula(sheetDataStore) && !rulesApi?.hasAny() && !host.__EASYOFFICE_SHEET_NAMES__?.hasAny()) {
         return { ok: true, answer: { formulas: [], rules: {} } };
       }
       const result = await sheetStoreHelpers.rewriteSheetRefs(sheetDataStore, { ...request, rules: rulesRequest() });
@@ -160,6 +160,8 @@
         next.sheets[f.sheet][f.cell] = { ...entry, formula: f.value };
       }
       if (answer.rules && Object.keys(answer.rules).length > 0) next.sheetRules = { ...next.sheetRules, ...answer.rules };
+      // The names that pointed at the sheet follow it, a deleted sheet's own names go (PD-214).
+      if (Array.isArray(answer.names)) next.definedNames = answer.names;
     }
 
     // ---- the commands -----------------------------------------------------------------------------

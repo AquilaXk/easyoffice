@@ -153,6 +153,7 @@
         sheetColumnWidths,
         sheetRules: typeof sheetController.getSheetRules === "function" ? sheetController.getSheetRules() : {},
         sheetLayout: host.__EASYOFFICE_SHEET_LAYOUT__.getAll(),
+        definedNames: host.__EASYOFFICE_SHEET_NAMES__.getAll(),
         sheetOrder: host.__EASYOFFICE_SHEET_TAB_STRIP__.reconcile(Object.keys(sheetDataStore)),
         slides: structuredClone(slideDeckState),
         ribbonState: structuredClone(localRibbonState),
@@ -252,6 +253,8 @@
       }
       if (snap.sheetRules) host.__EASYOFFICE_SHEET_RULES__.replaceAll(structuredClone(snap.sheetRules), true);
       if (snap.sheetLayout) host.__EASYOFFICE_SHEET_LAYOUT__.replaceAll(structuredClone(snap.sheetLayout));
+      // A change of the names re-evaluates the page's formulas; the restore does that itself.
+      if (snap.definedNames) host.__EASYOFFICE_SHEET_NAMES__.replaceAll(structuredClone(snap.definedNames), true);
       if (Array.isArray(snap.sheetOrder)) host.__EASYOFFICE_SHEET_TAB_STRIP__.replaceOrder(snap.sheetOrder);
       if (Array.isArray(snap.slides)) {
         slideDeckState.splice(0, slideDeckState.length, ...structuredClone(snap.slides));

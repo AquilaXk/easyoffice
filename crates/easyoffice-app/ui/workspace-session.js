@@ -123,7 +123,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
 
   function contentFingerprint(snap) {
     const parts = [
-      snap.docTabs, snap.sheets, snap.sheetRowCounts, snap.sheetColumnWidths, snap.sheetRules, snap.sheetLayout,
+      snap.docTabs, snap.sheets, snap.sheetRowCounts, snap.sheetColumnWidths, snap.sheetRules, snap.sheetLayout, snap.definedNames,
       snap.sheetFrozen, snap.sheetOrder, snap.slides, snap.pdfStudio, snap.pdfRotationDeg,
     ];
     return hashFingerprint(JSON.stringify(canonicalizeContent(parts, "")));
@@ -198,7 +198,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
   // Fingerprint of one module's document only (file open asks before replacing edited content).
   function moduleFingerprint(snap, mod) {
     if (mod === "SHEET") {
-      const rest = [snap.sheetRowCounts, snap.sheetColumnWidths, snap.sheetRules, snap.sheetLayout, snap.sheetFrozen, snap.sheetOrder];
+      const rest = [snap.sheetRowCounts, snap.sheetColumnWidths, snap.sheetRules, snap.sheetLayout, snap.definedNames, snap.sheetFrozen, snap.sheetOrder];
       return hashFingerprint(JSON.stringify(canonicalizeContent(rest, ""))) + "-" + sheetStoreDigest(snap.sheets);
     }
     const parts = {

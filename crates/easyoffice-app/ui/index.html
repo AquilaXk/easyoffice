@@ -295,6 +295,13 @@
               <div class="md-item" data-studio-menu-cmd="data-validation" role="menuitem" tabindex="-1"><span class="md-label">데이터 유효성 검사</span></div>
             </div>
           </div>
+          <div class="menu-item" data-menu="formula" data-kinds="SHEET">
+            <button type="button" class="studio-menu-item menu-title" role="menuitem" aria-haspopup="menu" aria-expanded="false" data-menu-cat="formulasAndData">수식</button>
+            <div class="menu-dropdown" role="menu">
+              <div class="md-item" data-sheet-act="name-define" role="menuitem" tabindex="-1"><span class="md-label">이름 정의…</span></div>
+              <div class="md-item" data-sheet-act="name-manage" role="menuitem" tabindex="-1"><span class="md-label">이름 관리…</span></div>
+            </div>
+          </div>
           <div class="menu-item" data-menu="data" data-kinds="SHEET">
             <button type="button" class="studio-menu-item menu-title" role="menuitem" aria-haspopup="menu" aria-expanded="false" data-menu-cat="formulasAndData">데이터</button>
             <div class="menu-dropdown" role="menu">
@@ -555,7 +562,11 @@
           <div id="pane-sheet" class="editor-pane" hidden>
             <div id="sheet-formula-bar" class="formula-bar eo-doc-style-bar" role="toolbar" aria-label="수식 입력줄 도구줄">
               <div class="sb-field-grid sb-formula-field">
-                <span class="cell-ref sb-size-unit" id="active-cell-ref">A1</span>
+                <span class="sheet-name-box">
+                  <span class="cell-ref sb-size-unit" id="active-cell-ref" contenteditable="plaintext-only" spellcheck="false" role="combobox" aria-label="이름 상자" aria-haspopup="listbox" aria-expanded="false" aria-controls="sheet-name-box-list">A1</span>
+                  <button type="button" id="btn-name-box-list" class="sheet-name-arrow" aria-label="이름 목록" tabindex="-1">&#9662;</button>
+                  <ul id="sheet-name-box-list" class="sheet-name-box-list" role="listbox" aria-label="이름 목록" hidden></ul>
+                </span>
                 <input
                   id="formula-input"
                   class="sb-select sb-formula-input"
@@ -1390,6 +1401,40 @@
       </div>
     </dialog>
 
+    <dialog id="sheet-names-dialog" class="tool-dialog sheet-rule-dialog" aria-labelledby="sheet-names-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="sheet-names-dialog-title">이름 관리</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="sheet-names-head" aria-hidden="true"><span>이름</span><span>범위</span><span>참조 영역</span></div>
+          <ul id="sheet-names-list" class="dialog-list sheet-names-list" role="listbox" aria-label="이름 목록"></ul>
+          <p id="sheet-names-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-sheet-names-new" type="button" class="dialog-btn dialog-btn-primary">새로 만들기</button>
+          <button id="btn-sheet-names-edit" type="button" class="dialog-btn">편집</button>
+          <button id="btn-sheet-names-delete" type="button" class="dialog-btn">삭제</button>
+          <button type="button" class="dialog-btn" data-dialog-close>닫기</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="sheet-name-edit-dialog" class="tool-dialog sheet-rule-dialog" aria-labelledby="sheet-name-edit-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="sheet-name-edit-dialog-title">이름 정의</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><label class="dialog-label" for="sheet-name-edit-name">이름</label><input id="sheet-name-edit-name" type="text" class="dialog-text-input" maxlength="255" autocomplete="off" spellcheck="false" /></div>
+          <div class="dialog-row"><label class="dialog-label" for="sheet-name-edit-scope">범위</label><select id="sheet-name-edit-scope" class="sb-combo dialog-select"></select></div>
+          <div class="dialog-row"><label class="dialog-label" for="sheet-name-edit-comment">설명</label><input id="sheet-name-edit-comment" type="text" class="dialog-text-input" maxlength="255" autocomplete="off" /></div>
+          <div class="dialog-row"><label class="dialog-label" for="sheet-name-edit-refers">참조 영역</label><input id="sheet-name-edit-refers" type="text" class="dialog-text-input" maxlength="8192" autocomplete="off" spellcheck="false" /></div>
+          <p id="sheet-name-edit-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-sheet-name-edit-apply" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
     <dialog id="sheet-sort-dialog" class="tool-dialog sheet-rule-dialog" aria-labelledby="sheet-sort-dialog-title">
       <div class="dialog-wrap">
         <div class="dialog-title"><span id="sheet-sort-dialog-title">정렬</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
@@ -1582,6 +1627,7 @@
     <script src="./sheet-numfmt-display.js"></script>
     <script src="./pii-dom-scrubber.js"></script>
     <script src="./sheet-rules.js"></script>
+    <script src="./sheet-names.js"></script>
     <script src="./sheet-store.js"></script>
     <script src="./ribbon-catalog.js"></script>
     <script src="./doc-runs.js"></script>
@@ -1642,6 +1688,7 @@
     <script src="./sheet-view-ui.js"></script>
     <script src="./sheet-page.js"></script>
     <script src="./sheet-page-print.js"></script>
+    <script src="./sheet-names-ui.js"></script>
     <script src="./sheet-outline-ui.js"></script>
     <script src="./sheet-tabs.js"></script>
     <script src="./sheet-tab-ui.js"></script>
