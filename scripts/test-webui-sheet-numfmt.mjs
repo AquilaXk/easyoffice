@@ -326,3 +326,19 @@ test("a failing engine answer leaves the cells General and is not asked again", 
   assert.equal(asked, 1);
   assert.ok(filled >= 1, "the page is told so it stops waiting");
 });
+
+test("opening the cell format dialog fills every field with the cell's current format", async () => {
+  const h = await createHarness();
+  await openModel(h);
+  cell(h.document, "A1").focus();
+  await flushAsyncTurns(2);
+  await click(h, action(h.document, "dialog"));
+  const $ = (id) => h.document.getElementById(id);
+  assert.equal($("sheet-numfmt-dialog").open, true);
+  assert.equal($("sheet-numfmt-kind-select").value, "general");
+  assert.ok($("sheet-numfmt-kind-select").querySelectorAll("option").length > 5, "the category list is filled");
+  assert.equal($("sheet-numfmt-decimals").value, "2");
+  assert.notEqual($("sheet-numfmt-symbol-select").value, "");
+  assert.notEqual($("sheet-numfmt-negative-select").value, "");
+  assert.equal($("sheet-align-v-select").value, "bottom");
+});
