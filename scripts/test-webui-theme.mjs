@@ -166,8 +166,8 @@ test("paper surfaces (page, slide stage, PDF card) keep the light palette in the
 test("every light colour token and alias the chrome rules read is fixed on paper", () => {
   const palette = paperPalette();
   const missing = [...lightTokens().keys()].filter((name) => PAPER_COLOUR_TOKEN.test(name) && !palette.has(name));
-  // `--doc-workspace` is the area around the paper, `--doc-shadow` is already a paper token.
-  assert.deepEqual(missing.filter((name) => name !== "--doc-workspace"), []);
+  // `--doc-workspace` is the area around the paper, `--doc-shadow` is already a paper token; the sprite token is a file, not a colour.
+  assert.deepEqual(missing.filter((name) => name !== "--doc-workspace" && name !== "--ui-icon-sprite-url"), []);
 });
 
 test("controls on the PDF card are tinted by paper tokens, not by the dark chrome", () => {

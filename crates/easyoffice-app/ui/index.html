@@ -364,6 +364,29 @@
       </div>
 
       <div id="icon-toolbar" class="eo-icon-toolbar" role="toolbar" aria-label="표준 도구 상자">
+        <div class="tb-group" data-kinds="SHEET">
+          <button type="button" class="tb-btn" data-studio-cmd="clip-cut" title="오려두기 (Ctrl+X)" aria-label="오려두기"><span class="tb-sprite icon-cut"></span><span class="tb-label">오려<br/>두기</span></button>
+          <button type="button" class="tb-btn" data-studio-cmd="clip-copy" title="복사하기 (Ctrl+C)" aria-label="복사하기"><span class="tb-sprite icon-copy"></span><span class="tb-label">복사<br/>하기</span></button>
+          <button type="button" class="tb-btn tb-paste" data-studio-cmd="clip-paste" title="붙이기 (Ctrl+V)" aria-label="붙이기"><span class="tb-sprite icon-paste"></span><span class="tb-label">붙이기</span></button>
+        </div>
+        <span class="tb-sep" data-kinds="SHEET" aria-hidden="true"></span>
+        <div class="tb-group" data-kinds="SHEET">
+          <button type="button" class="tb-btn" data-studio-cmd="home-style" title="스타일 적용" aria-label="스타일 적용"><span class="tb-sprite icon-char-shape"></span><span class="tb-label">스타일</span></button>
+        </div>
+        <span class="tb-sep" data-kinds="SHEET" aria-hidden="true"></span>
+        <div class="tb-group" data-kinds="SHEET">
+          <button type="button" class="tb-btn" data-studio-cmd="insert-table" title="표 만들기" aria-label="표 만들기"><span class="tb-sprite icon-table"></span><span class="tb-label">표</span></button>
+          <button type="button" class="tb-btn" data-studio-cmd="insert-shape" title="도형 삽입" aria-label="도형 삽입"><span class="tb-sprite icon-shape"></span><span class="tb-label">도형</span></button>
+        </div>
+        <span class="tb-sep" data-kinds="SHEET" aria-hidden="true"></span>
+        <div class="tb-group" data-kinds="SHEET">
+          <button type="button" class="tb-btn" data-studio-cmd="mod-symbol" title="문자표" aria-label="문자표"><span class="tb-sprite icon-symbols"></span><span class="tb-label">문자표</span></button>
+          <button type="button" class="tb-btn" data-studio-cmd="insert-link" title="하이퍼링크" aria-label="하이퍼링크"><span class="tb-sprite icon-hyperlink"></span><span class="tb-label">하이퍼<br/>링크</span></button>
+        </div>
+        <span class="tb-sep" data-kinds="SHEET" aria-hidden="true"></span>
+        <div class="tb-group" data-kinds="SHEET">
+          <button type="button" class="tb-btn" data-studio-cmd="palette" title="명령 검색 (Ctrl+K)" aria-label="명령 검색"><span class="tb-sprite icon-find"></span><span class="tb-label">명령<br/>검색</span></button>
+        </div>
         <div class="tb-group">
           <button type="button" class="tb-btn" data-studio-cmd="clip-cut" data-icon="cut" title="오려두기 (Ctrl+X)" aria-label="오려두기"></button>
           <button type="button" class="tb-btn" data-studio-cmd="clip-copy" data-icon="copy" title="복사하기 (Ctrl+C)" aria-label="복사하기"></button>
@@ -405,21 +428,21 @@
         </div>
         <span class="tb-sep" data-kinds="SHEET" aria-hidden="true"></span>
         <div class="tb-group" data-kinds="SHEET">
-          <button type="button" class="tb-btn" data-sheet-numfmt="currency" data-icon="won" title="통화 서식" aria-label="통화 서식"></button>
-          <button type="button" class="tb-btn" data-sheet-numfmt="percent" data-icon="percent" title="백분율 서식" aria-label="백분율 서식"></button>
-          <button type="button" class="tb-btn" data-sheet-numfmt="decimal-down" data-icon="decimal-decrease" title="소수 자릿수 줄이기" aria-label="소수 자릿수 줄이기"></button>
-          <button type="button" class="tb-btn" data-sheet-numfmt="decimal-up" data-icon="decimal-increase" title="소수 자릿수 늘리기" aria-label="소수 자릿수 늘리기"></button>
+          <button type="button" class="tb-btn" data-sheet-numfmt="currency" title="통화 서식" aria-label="통화 서식"><span class="tb-sprite icon-currency"></span><span class="tb-label">통화</span></button>
+          <button type="button" class="tb-btn" data-sheet-numfmt="percent" title="백분율 서식" aria-label="백분율 서식"><span class="tb-sprite icon-percent"></span><span class="tb-label">백분율</span></button>
+          <button type="button" class="tb-btn" data-sheet-numfmt="decimal-down" title="소수 자릿수 줄이기" aria-label="소수 자릿수 줄이기"><span class="tb-sprite icon-decimal-decrease"></span><span class="tb-label">자릿수<br/>줄임</span></button>
+          <button type="button" class="tb-btn" data-sheet-numfmt="decimal-up" title="소수 자릿수 늘리기" aria-label="소수 자릿수 늘리기"><span class="tb-sprite icon-decimal-increase"></span><span class="tb-label">자릿수<br/>늘림</span></button>
         </div>
         <span class="tb-sep" data-kinds="SHEET" aria-hidden="true"></span>
         <div class="tb-group" data-kinds="SHEET">
-          <button type="button" class="tb-btn" data-sheet-look="align-left" data-icon="align-left" title="왼쪽 정렬" aria-label="왼쪽 정렬" aria-pressed="false"></button>
-          <button type="button" class="tb-btn" data-sheet-look="align-center" data-icon="align-center" title="가운데 정렬" aria-label="가운데 정렬" aria-pressed="false"></button>
-          <button type="button" class="tb-btn" data-sheet-look="align-right" data-icon="align-right" title="오른쪽 정렬" aria-label="오른쪽 정렬" aria-pressed="false"></button>
-          <button type="button" class="tb-btn" data-sheet-look="valign-top" data-icon="valign-top" title="위쪽 맞춤" aria-label="위쪽 맞춤" aria-pressed="false"></button>
-          <button type="button" class="tb-btn" data-sheet-look="valign-middle" data-icon="valign-middle" title="가운데 맞춤" aria-label="가운데 맞춤" aria-pressed="false"></button>
-          <button type="button" class="tb-btn" data-sheet-look="valign-bottom" data-icon="valign-bottom" title="아래쪽 맞춤" aria-label="아래쪽 맞춤" aria-pressed="false"></button>
-          <button type="button" class="tb-btn" data-sheet-look="wrap" data-icon="wrap-text" title="줄 바꿈" aria-label="줄 바꿈" aria-pressed="false"></button>
-          <button type="button" class="tb-btn" data-sheet-look="dialog-border" data-icon="border-all" title="테두리" aria-label="테두리"></button>
+          <button type="button" class="tb-btn" data-sheet-look="align-left" title="왼쪽 정렬" aria-label="왼쪽 정렬" aria-pressed="false"><span class="tb-sprite icon-align-left"></span><span class="tb-label">왼쪽<br/>정렬</span></button>
+          <button type="button" class="tb-btn" data-sheet-look="align-center" title="가운데 정렬" aria-label="가운데 정렬" aria-pressed="false"><span class="tb-sprite icon-align-center"></span><span class="tb-label">가운데<br/>정렬</span></button>
+          <button type="button" class="tb-btn" data-sheet-look="align-right" title="오른쪽 정렬" aria-label="오른쪽 정렬" aria-pressed="false"><span class="tb-sprite icon-align-right"></span><span class="tb-label">오른쪽<br/>정렬</span></button>
+          <button type="button" class="tb-btn" data-sheet-look="valign-top" title="위쪽 맞춤" aria-label="위쪽 맞춤" aria-pressed="false"><span class="tb-sprite icon-valign-top"></span><span class="tb-label">위쪽<br/>맞춤</span></button>
+          <button type="button" class="tb-btn" data-sheet-look="valign-middle" title="가운데 맞춤" aria-label="가운데 맞춤" aria-pressed="false"><span class="tb-sprite icon-valign-middle"></span><span class="tb-label">가운데<br/>맞춤</span></button>
+          <button type="button" class="tb-btn" data-sheet-look="valign-bottom" title="아래쪽 맞춤" aria-label="아래쪽 맞춤" aria-pressed="false"><span class="tb-sprite icon-valign-bottom"></span><span class="tb-label">아래쪽<br/>맞춤</span></button>
+          <button type="button" class="tb-btn" data-sheet-look="wrap" title="줄 바꿈" aria-label="줄 바꿈" aria-pressed="false"><span class="tb-sprite icon-wrap"></span><span class="tb-label">줄<br/>바꿈</span></button>
+          <button type="button" class="tb-btn" data-sheet-look="dialog-border" title="테두리" aria-label="테두리"><span class="tb-sprite icon-border-all"></span><span class="tb-label">테두리</span></button>
         </div>
       </div>
 

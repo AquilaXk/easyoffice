@@ -60,6 +60,85 @@
   white-space: nowrap;
 }
 
+/* Sheet window toolbar in the reference toolbar format (`toolbar.css` #icon-toolbar, .tb-group, .tb-sep,
+   .tb-btn, .tb-sprite, .tb-label, .tb-paste): a tall button with the icon above its label, 44px wide at
+   least, on the reference's icon sprite (the editor bundle's `icon_small_ko.svg`, 40px cells, drawn at
+   18px). The buttons of the other windows keep the compact icon-only form (they are not changed here),
+   so the sheet window shows its own copies, which carry `data-kinds="SHEET"`. */
+.app-shell[data-module="SHEET"] #icon-toolbar {
+  align-items: stretch;
+  height: 56px;
+  min-height: 56px;
+  padding: 2px 8px;
+  gap: 0;
+  overflow-y: hidden;
+}
+
+.app-shell[data-module="SHEET"] #icon-toolbar .tb-group {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+}
+
+.app-shell[data-module="SHEET"] #icon-toolbar > :not([data-kinds]) {
+  display: none; /* after the group rule above: same specificity */
+}
+
+.app-shell[data-module="SHEET"] #icon-toolbar .tb-sep {
+  width: 1px;
+  height: auto;
+}
+
+.app-shell[data-module="SHEET"] #icon-toolbar .tb-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  min-width: 44px;
+  height: auto;
+  padding: 2px 4px;
+  font-size: var(--font-size-base);
+}
+
+.app-shell[data-module="SHEET"] #icon-toolbar .tb-paste {
+  min-width: 50px;
+}
+
+.tb-sprite {
+  display: block;
+  width: 18px;
+  height: 18px;
+  background-image: var(--ui-icon-sprite-url);
+  background-repeat: no-repeat;
+  flex-shrink: 0;
+}
+
+/* Sprite cells: calc(-40px * column) calc(-40px * row). The first nine are the reference toolbar's own. */
+.icon-cut { background-position: calc(-40px * 2) calc(-40px * 1); }
+.icon-copy { background-position: calc(-40px * 3) calc(-40px * 1); }
+.icon-paste { background-position: calc(-40px * 4) calc(-40px * 1); }
+.icon-char-shape { background-position: calc(-40px * 12) calc(-40px * 8); }
+.icon-table { background-position: calc(-40px * 2) calc(-40px * 3); }
+.icon-shape { background-position: calc(-40px * 0) calc(-40px * 3); }
+.icon-symbols { background-position: calc(-40px * 4) calc(-40px * 3); }
+.icon-hyperlink { background-position: calc(-40px * 5) calc(-40px * 3); }
+.icon-find { background-position: calc(-40px * 15) calc(-40px * 1); }
+/* Cells of the same sprite for the sheet commands: numbers (currency, percent, decimals), text alignment, vertical alignment, wrapping, cell borders. */
+.icon-currency { background-position: calc(-40px * 0) calc(-40px * 12); }
+.icon-decimal-increase { background-position: calc(-40px * 1) calc(-40px * 12); }
+.icon-decimal-decrease { background-position: calc(-40px * 2) calc(-40px * 12); }
+.icon-percent { background-position: calc(-40px * 3) calc(-40px * 12); }
+.icon-align-left { background-position: calc(-40px * 0) calc(-40px * 9); }
+.icon-align-center { background-position: calc(-40px * 1) calc(-40px * 9); }
+.icon-align-right { background-position: calc(-40px * 2) calc(-40px * 9); }
+.icon-valign-top { background-position: calc(-40px * 0) calc(-40px * 15); }
+.icon-valign-middle { background-position: calc(-40px * 1) calc(-40px * 15); }
+.icon-valign-bottom { background-position: calc(-40px * 2) calc(-40px * 15); }
+.icon-wrap { background-position: calc(-40px * 0) calc(-40px * 7); }
+.icon-border-all { background-position: calc(-40px * 4) calc(-40px * 16); }
+
+
 #doc-style-bar,
 #sheet-formula-bar,
 #slide-toolbar,

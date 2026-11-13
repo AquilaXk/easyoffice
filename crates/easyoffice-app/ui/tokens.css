@@ -2,7 +2,8 @@
  *
  * Adapted from rhwp-studio `src/styles/base.css` (MIT, Copyright (c) 2025-2026 Edward Kim; see
  * THIRD_PARTY_NOTICES.md). The values are unchanged; only the icon-sprite filter token is left out
- * because EasyOffice draws its icons with `ui/icons.js`. Light is the default, dark applies under
+ * because EasyOffice draws its icons with `ui/icons.js`. The sprite tokens point at the editor bundle's
+ * own sprite files (`/hwp-studio/images/`), which the sheet window's toolbar draws its icons from. Light is the default, dark applies under
  * `:root[data-theme-effective="dark"]` (set by `ui/theme.js`). Every colour in `styles.css` and
  * `shell.css` comes from these tokens; fixed document colours live in `content.css`. */
 /* ─── 디자인 토큰 ───────────────────────────────────── */
@@ -62,6 +63,7 @@
   --table-selection-stroke: #337ab7;
   --table-selection-marker-single: #74777c;
   --table-selection-marker-range: #ef754b;
+  --ui-icon-sprite-url: url(/hwp-studio/images/icon_small_ko.svg);
 
   /* 눈금자 */
   --ruler-bg: #d0d0d0;
@@ -216,6 +218,7 @@
   --table-selection-stroke: #8bb8ff;
   --table-selection-marker-single: #aeb4bd;
   --table-selection-marker-range: #ff8a65;
+  --ui-icon-sprite-url: url(/hwp-studio/images/icon_small_ko_dark.svg);
 
   --ruler-bg: #2d333b;
   --ruler-body: var(--ui-surface-raised);

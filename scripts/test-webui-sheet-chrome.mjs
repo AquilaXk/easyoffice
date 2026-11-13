@@ -51,3 +51,21 @@ test("sheet, formula bar and tab rules use design tokens only (no literal colour
   const selection = rulesFor(read("styles.css"), [".sheet-grid td.selected-cell"]).map((r) => r.body).join(" ");
   assert.ok(selection.includes("var(--table-selection-stroke)"), "selection uses the table selection stroke token");
 });
+
+test("the sheet toolbar is the reference toolbar format: the icon above a label, on the reference sprite", async () => {
+  const { document } = await createWorkspaceHarness({ search: "?module=SHEET&win=w-sheet-toolbar" });
+  const buttons = [...document.querySelectorAll('#icon-toolbar [data-kinds="SHEET"] .tb-btn')];
+  assert.equal(buttons.length, 21);
+  const css = read("toolbar.css");
+  for (const button of buttons) {
+    const sprite = button.querySelector(".tb-sprite");
+    assert.ok(sprite && button.querySelector(".tb-label")?.textContent.trim(), button.getAttribute("title"));
+    assert.ok(button.getAttribute("aria-label"), "the name stays on the button");
+    const icon = sprite.className.split(" ").find((name) => name.startsWith("icon-"));
+    assert.ok(css.includes(`.${icon} { background-position:`), `${icon} has its cell of the sprite`);
+  }
+  const rule = rulesFor(css, ['.app-shell[data-module="SHEET"] #icon-toolbar .tb-btn']).map((r) => r.body).join(" ");
+  assert.ok(rule.includes("flex-direction: column") && rule.includes("min-width: 44px") && rule.includes("padding: 2px 4px"));
+  assert.match(css, /\.tb-sprite \{[^}]*width: 18px;[^}]*height: 18px;[^}]*var\(--ui-icon-sprite-url\)/);
+  assert.ok(read("tokens.css").includes("--ui-icon-sprite-url: url(/hwp-studio/images/icon_small_ko_dark.svg)"));
+});
