@@ -51,7 +51,14 @@ impl OdsStyleTable {
         };
         for styling in stylings {
             let mut ids = IdMemo::new();
-            for style in styling.cells.values().filter(|s| !s.is_plain()) {
+            let unlocked = (!styling.unlocked_cols.is_empty()).then(unlocked_style);
+            for style in styling
+                .cells
+                .values()
+                .copied()
+                .chain(unlocked)
+                .filter(|s| !s.is_plain())
+            {
                 let id = ids.get(style.num_fmt, styling, |code| table.num_fmts.intern(code));
                 let key = style.key().with_num_fmt(id);
                 if key == StyleKey::default() || table.cell_index.contains_key(&key) {
@@ -87,6 +94,13 @@ impl OdsStyleTable {
         });
         self.cell_index
             .get(&style.key().with_num_fmt(id))
+            .map(|i| format!("ce{i}"))
+    }
+
+    /// The name of the cell style of an unlocked column (PD-216).
+    pub(crate) fn unlocked_name(&self) -> Option<String> {
+        self.cell_index
+            .get(&unlocked_style().key())
             .map(|i| format!("ce{i}"))
     }
 
@@ -144,10 +158,45 @@ impl OdsStyleTable {
     }
 }
 
+/// The format of an unlocked column: the default look with the lock off (PD-216).
+fn unlocked_style() -> CellStyle {
+    CellStyle {
+        unlocked: true,
+        ..CellStyle::default()
+    }
+}
+
+/// `style:cell-protect` of a style: `none` for an unlocked cell, `protected` for one kept locked inside an
+/// unlocked column, and the formula-hidden token for a hidden formula (ODF 1.2 20.211); the default is
+/// `protected`, so a plain locked cell says nothing.
+fn cell_protect(k: StyleKey) -> Option<&'static str> {
+    match (k.unlocked(), k.force_locked(), k.formula_hidden()) {
+        (true, _, false) => Some("none"),
+        (true, _, true) => Some("formula-hidden"),
+        (false, true, false) => Some("protected"),
+        (false, _, true) => Some("protected formula-hidden"),
+        (false, false, false) => None,
+    }
+}
+
+/// The lock state a `style:cell-protect` value says (the attribute absent is `protected`).
+fn parse_cell_protect(value: &str, style: &mut CellStyle) {
+    let tokens: Vec<&str> = value.split_whitespace().collect();
+    let has = |t: &str| tokens.contains(&t);
+    let hidden_all = has("hidden-and-protected");
+    style.formula_hidden = has("formula-hidden") || hidden_all;
+    let locked = has("protected") || hidden_all;
+    style.unlocked = !locked;
+    style.force_locked = locked;
+}
+
 /// The cell and paragraph properties of a style's vertical alignment, wrapping, borders and
 /// horizontal alignment (PD-207); empty when it has none.
 fn cell_look_xml(k: StyleKey) -> String {
     let mut cell = String::new();
+    if let Some(protect) = cell_protect(k) {
+        cell.push_str(&format!(" style:cell-protect=\"{protect}\""));
+    }
     if let Some(v) = k.v_align().ods() {
         cell.push_str(&format!(" style:vertical-align=\"{v}\""));
     }
@@ -201,6 +250,9 @@ fn parse_cell_look(body: &str, style: &mut CellStyle) {
         return;
     };
     let get = |name: &str| extract_attr_from_fragment(attrs, name);
+    if let Some(value) = get("style:cell-protect") {
+        parse_cell_protect(value, style);
+    }
     style.v_align = get("style:vertical-align").map_or(VAlign::Bottom, VAlign::from_ods);
     style.wrap = get("fo:wrap-option") == Some("wrap");
     let all = get("fo:border").map(ods_border_edge);
@@ -226,6 +278,9 @@ pub(crate) fn table_columns_xml(styling: &SheetStyling, table: &OdsStyleTable) -
     for &col in styling.columns.keys() {
         cuts.extend([col, col + 1]);
     }
+    for &(first, last) in &styling.unlocked_cols {
+        cuts.extend([first, last + 1]);
+    }
     for &(first, last, _) in &outline.cols {
         cuts.extend([first, last + 1]);
     }
@@ -239,12 +294,15 @@ pub(crate) fn table_columns_xml(styling: &SheetStyling, table: &OdsStyleTable) -
         &outline.collapsed_cols,
     );
     // Stretches of equal width and level, from the cuts.
-    let mut stretches: Vec<(u32, u32, Option<u32>, u8)> = Vec::new();
+    let mut stretches: Vec<(u32, u32, Option<u32>, u8, bool)> = Vec::new();
     let cuts: Vec<u32> = cuts.into_iter().collect();
     for pair in cuts.windows(2) {
         let (from, to) = (pair[0], pair[1]);
         let (px, level) = (styling.columns.get(&from).copied(), groups.level(from));
-        if px.is_none() && level == 0 && header_end.is_none_or(|end| from >= end) {
+        let unlocked =
+            crate::sheet_styling::xlsx_layout::run_contains(&styling.unlocked_cols, from)
+                && table.unlocked_name().is_some();
+        if px.is_none() && level == 0 && !unlocked && header_end.is_none_or(|end| from >= end) {
             continue;
         }
         match stretches.last_mut() {
@@ -252,19 +310,21 @@ pub(crate) fn table_columns_xml(styling: &SheetStyling, table: &OdsStyleTable) -
                 if last.1 == from
                     && last.2 == px
                     && last.3 == level
+                    && last.4 == unlocked
                     && header_end != Some(from) =>
             {
                 last.1 = to
             }
-            _ => stretches.push((from, to, px, level)),
+            _ => stretches.push((from, to, px, level, unlocked)),
         }
     }
     let mut xml = String::new();
     let mut next = 0u32;
-    for (from, to, px, _) in stretches {
+    let unlocked_name = table.unlocked_name();
+    for (from, to, px, _, unlocked) in stretches {
         if from > next {
             groups.close_all(&mut xml);
-            xml.push_str(&repeated_column(None, from - next));
+            xml.push_str(&repeated_column(None, None, from - next));
         }
         if from == 0 && header_end.is_some() {
             xml.push_str("<table:table-header-columns>");
@@ -272,6 +332,7 @@ pub(crate) fn table_columns_xml(styling: &SheetStyling, table: &OdsStyleTable) -
         groups.move_to(&mut xml, from);
         xml.push_str(&repeated_column(
             px.and_then(|px| table.column_style_name(px)).as_deref(),
+            unlocked_name.as_deref().filter(|_| unlocked),
             to - from,
         ));
         next = to;
@@ -284,10 +345,16 @@ pub(crate) fn table_columns_xml(styling: &SheetStyling, table: &OdsStyleTable) -
     xml
 }
 
-fn repeated_column(style: Option<&str>, count: u32) -> String {
-    let style = style.map_or(String::new(), |s| {
+fn repeated_column(style: Option<&str>, default_cell: Option<&str>, count: u32) -> String {
+    let mut style = style.map_or(String::new(), |s| {
         format!(" table:style-name=\"{}\"", XmlSanitizer::escape(s))
     });
+    if let Some(cell_style) = default_cell {
+        style.push_str(&format!(
+            " table:default-cell-style-name=\"{}\"",
+            XmlSanitizer::escape(cell_style)
+        ));
+    }
     let repeat = if count > 1 {
         format!(" table:number-columns-repeated=\"{count}\"")
     } else {
@@ -402,6 +469,8 @@ pub(crate) struct StyleSink<'s> {
     styles: &'s AutomaticStyles,
     tables: Vec<(String, SheetStyling)>,
     columns: BTreeMap<u32, u32>,
+    /// Columns whose default cell style is unlocked (PD-216).
+    unlocked_cols: Vec<(u32, u32)>,
     cells: BTreeMap<(u32, u32), CellStyle>,
     name: String,
     row: u32,
@@ -420,6 +489,7 @@ impl<'s> StyleSink<'s> {
             styles,
             tables: Vec::new(),
             columns: BTreeMap::new(),
+            unlocked_cols: Vec::new(),
             cells: BTreeMap::new(),
             name: String::new(),
             row: 0,
@@ -481,6 +551,7 @@ impl OdsSink for StyleSink<'_> {
             .map(|n| n.into_owned())
             .unwrap_or_else(|| format!("Sheet{}", self.tables.len() + 1));
         self.columns = BTreeMap::new();
+        self.unlocked_cols = Vec::new();
         self.cells = BTreeMap::new();
         self.row = 0;
         self.column = 0;
@@ -511,6 +582,17 @@ impl OdsSink for StyleSink<'_> {
             .get("table:number-columns-repeated")
             .map_or(1, |v| repeat_value(&v));
         self.record_group(1, self.column, self.column.saturating_add(repeat - 1));
+        let unlocked = attrs
+            .get("table:default-cell-style-name")
+            .and_then(|n| self.styles.cells.get(&*n))
+            .is_some_and(|style| style.unlocked);
+        if unlocked {
+            let last = self
+                .column
+                .saturating_add(repeat - 1)
+                .min(OdfCodec::MAX_COLS);
+            crate::sheet_styling::xlsx_layout::add_run(&mut self.unlocked_cols, self.column, last);
+        }
         let px = attrs
             .get("table:style-name")
             .and_then(|n| self.styles.columns.get(&*n).copied());
@@ -562,9 +644,10 @@ impl OdsSink for StyleSink<'_> {
     }
 
     fn table_end(&mut self) {
-        let styling = SheetStyling {
+        let mut styling = SheetStyling {
             cells: std::mem::take(&mut self.cells),
             columns: std::mem::take(&mut self.columns),
+            unlocked_cols: std::mem::take(&mut self.unlocked_cols),
             num_fmts: Arc::clone(&self.styles.num_fmts),
             // The count belongs to the workbook; the first table carries it.
             num_fmts_rejected: if self.tables.is_empty() {
@@ -577,6 +660,7 @@ impl OdsSink for StyleSink<'_> {
             outline: std::mem::take(&mut self.outline),
             ..SheetStyling::default()
         };
+        styling.normalize_locks();
         self.tables.push((std::mem::take(&mut self.name), styling));
     }
 }

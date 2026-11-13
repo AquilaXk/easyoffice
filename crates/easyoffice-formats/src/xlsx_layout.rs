@@ -115,13 +115,15 @@ struct ColAttrs {
     hidden: bool,
     level: u8,
     collapsed: bool,
+    unlocked: bool,
 }
 
 /// `<cols>` with the custom widths, the hidden and folded columns and the group levels (empty when
-/// there is nothing to say).
-pub(crate) fn layout_cols_xml(styling: &SheetStyling) -> String {
+/// there is nothing to say). `unlocked_xf` is the `cellXfs` index of the format of an unlocked column.
+pub(crate) fn layout_cols_xml(styling: &SheetStyling, unlocked_xf: usize) -> String {
     let outline = &styling.outline;
-    if styling.hidden_cols.is_empty() && outline.cols.is_empty() {
+    if styling.hidden_cols.is_empty() && outline.cols.is_empty() && styling.unlocked_cols.is_empty()
+    {
         return cols_xml(&styling.columns);
     }
     // One entry per column that has a width, is hidden or is grouped, merged into runs of equal entries.
@@ -144,6 +146,11 @@ pub(crate) fn layout_cols_xml(styling: &SheetStyling) -> String {
     for &(start, end, level) in &outline.cols {
         for col in start..=end {
             by_col.entry(col).or_default().level = level;
+        }
+    }
+    for &(start, end) in &styling.unlocked_cols {
+        for col in start..=end {
+            by_col.entry(col).or_default().unlocked = true;
         }
     }
     let marks =
@@ -182,6 +189,9 @@ pub(crate) fn layout_cols_xml(styling: &SheetStyling) -> String {
         }
         if attrs.collapsed {
             xml.push_str(" collapsed=\"1\"");
+        }
+        if attrs.unlocked && unlocked_xf > 0 {
+            let _ = write!(xml, " style=\"{unlocked_xf}\"");
         }
         xml.push_str("/>");
     }
@@ -269,7 +279,7 @@ mod tests {
             hidden_cols: vec![(1, 2)],
             ..SheetStyling::default()
         };
-        let xml = layout_cols_xml(&styling);
+        let xml = layout_cols_xml(&styling, 0);
         assert!(xml.contains(r#"<col min="1" max="1""#));
         assert!(
             xml.contains(r#"min="2" max="2" width="8.43" hidden="1"/>"#),
@@ -279,7 +289,7 @@ mod tests {
             xml.contains(r#"min="3" max="3""#) && xml.contains(r#"hidden="1" customWidth="1""#)
         );
         styling.hidden_cols.clear();
-        assert_eq!(layout_cols_xml(&styling), cols_xml(&styling.columns));
+        assert_eq!(layout_cols_xml(&styling, 0), cols_xml(&styling.columns));
     }
 
     #[test]
@@ -292,7 +302,7 @@ mod tests {
             },
             ..SheetStyling::default()
         };
-        let xml = layout_cols_xml(&styling);
+        let xml = layout_cols_xml(&styling, 0);
         assert!(
             xml.contains(r#"<col min="2" max="3" width="8.43" hidden="1" outlineLevel="1"/>"#),
             "{xml}"

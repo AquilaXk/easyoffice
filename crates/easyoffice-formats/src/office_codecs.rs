@@ -107,6 +107,10 @@ fn build_workbook_parts(
     let mut workbook_xml = String::from(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?><workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">",
     );
+    if let Some(protect) = stylings.first().and_then(|st| st.workbook_protect.as_ref()) {
+        workbook_xml
+            .push_str(&crate::sheet_styling::xlsx_protect::workbook_protection_xml(protect));
+    }
     if first_shown > 0 {
         workbook_xml.push_str(&format!(
             "<bookViews><workbookView activeTab=\"{first_shown}\"/></bookViews>"
@@ -285,6 +289,11 @@ fn group_cells_by_row<'a>(
         for row in summary_rows(st) {
             rows_map.entry(row).or_default();
         }
+        for &(start, end) in &st.unlocked_rows {
+            for row in start..=end {
+                rows_map.entry(row).or_default();
+            }
+        }
     }
     rows_map
 }
@@ -317,7 +326,7 @@ fn build_sheet_xml(
         sheet_xml.push_str(&sheet_pr_xml(st));
         sheet_xml.push_str(&sheet_views_xml(st.freeze));
         sheet_xml.push_str(&sheet_format_pr_xml(st));
-        sheet_xml.push_str(&layout_cols_xml(st));
+        sheet_xml.push_str(&layout_cols_xml(st, style_table.unlocked_xf()));
     }
     let marks = styling.map(summary_rows).unwrap_or_default();
     sheet_xml.push_str("<sheetData>");
@@ -340,14 +349,21 @@ fn build_sheet_xml(
             if marks.binary_search(&row).is_ok() {
                 sheet_xml.push_str(" collapsed=\"1\"");
             }
+            if crate::sheet_styling::xlsx_layout::run_contains(&st.unlocked_rows, row) {
+                let _ = write!(
+                    sheet_xml,
+                    " s=\"{}\" customFormat=\"1\"",
+                    style_table.unlocked_xf()
+                );
+            }
         }
         sheet_xml.push('>');
         for (col, raw) in row_cells {
             let col_ref = write_col_letters(&mut col_buf, col as usize);
-            let xf = styling.map_or(0, |st| {
-                st.cells
-                    .get(&(row, col))
-                    .map_or(0, |style| style_table.xf_index(style, st, &mut ids))
+            let xf = styling.map_or(0, |st| match st.cells.get(&(row, col)) {
+                Some(style) => style_table.xf_index(style, st, &mut ids),
+                None if st.cell_unlocked(row, col) => style_table.unlocked_xf(),
+                None => 0,
             });
             let cached = cache.and_then(|c| c.get(&(row, col)));
             push_cell_xml(&mut sheet_xml, col_ref, row_num, xf, raw, cached, sst_map);
@@ -356,6 +372,11 @@ fn build_sheet_xml(
     }
     sheet_xml.push_str("</sheetData>");
     if let Some(st) = styling {
+        if let Some(protect) = &st.protect {
+            sheet_xml.push_str(&crate::sheet_styling::xlsx_protect::sheet_protection_xml(
+                protect,
+            ));
+        }
         if let Some(filter) = &st.filter {
             sheet_xml.push_str(&autofilter_xml(filter));
         }
@@ -858,6 +879,8 @@ impl OoxmlCodec {
             if let Some((_, first)) = stylings.first_mut() {
                 (first.defined_names, first.names_rejected) =
                     crate::sheet_styling::xlsx_names::read_defined_names(wb_xml, &workbook_names);
+                first.workbook_protect =
+                    crate::sheet_styling::xlsx_protect::read_workbook_protection(wb_xml)?;
             }
         }
         Ok((parsed_sheets, stylings))

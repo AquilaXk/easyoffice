@@ -43,6 +43,14 @@ pub(crate) fn xlsx_width_to_px(width: f64) -> u32 {
         .clamp(f64::from(MIN_COLUMN_PX), f64::from(MAX_COLUMN_PX)) as u32
 }
 
+/// The format of an unlocked row or column: the default look with the lock off (PD-216).
+fn unlocked_style() -> CellStyle {
+    CellStyle {
+        unlocked: true,
+        ..CellStyle::default()
+    }
+}
+
 /// Deduplicated styles of a whole workbook, in first-use order.
 pub(crate) struct XlsxStyleTable {
     /// Distinct font looks (flags and size), font id `n + 1`.
@@ -78,7 +86,15 @@ impl XlsxStyleTable {
         };
         for styling in stylings {
             let mut ids = IdMemo::new();
-            for style in styling.cells.values().filter(|s| !s.is_plain()) {
+            let unlocked = (!styling.unlocked_rows.is_empty() || !styling.unlocked_cols.is_empty())
+                .then(unlocked_style);
+            for style in styling
+                .cells
+                .values()
+                .copied()
+                .chain(unlocked)
+                .filter(|s| !s.is_plain())
+            {
                 let id = ids.get(style.num_fmt, styling, |code| table.num_fmts.intern(code));
                 let key = style.key().with_num_fmt(id);
                 if key == StyleKey::default() || table.index.contains_key(&key) {
@@ -99,6 +115,14 @@ impl XlsxStyleTable {
             }
         }
         table
+    }
+
+    /// `cellXfs` index of the format of an unlocked row or column (0 when the table has none).
+    pub(crate) fn unlocked_xf(&self) -> usize {
+        self.index
+            .get(&unlocked_style().key())
+            .copied()
+            .unwrap_or(0)
     }
 
     /// `cellXfs` index of `style` of `styling`; 0 (the default format) for plain styles. `ids` is
@@ -217,12 +241,38 @@ impl XlsxStyleTable {
             xf.push_str(" applyBorder=\"1\"");
         }
         let alignment = Self::alignment_xml(key);
-        if alignment.is_empty() {
+        let protection = Self::protection_xml(key);
+        if alignment.is_empty() && protection.is_empty() {
             xf.push_str("/>");
-        } else {
-            xf.push_str(&format!(" applyAlignment=\"1\">{alignment}</xf>"));
+            return xf;
         }
+        if !alignment.is_empty() {
+            xf.push_str(" applyAlignment=\"1\"");
+        }
+        if !protection.is_empty() {
+            xf.push_str(" applyProtection=\"1\"");
+        }
+        xf.push_str(&format!(">{alignment}{protection}</xf>"));
         xf
+    }
+
+    /// `<protection>` of a format: `locked="0"` for an unlocked cell, `locked="1"` for one kept locked inside
+    /// an unlocked row or column, `hidden="1"` for a hidden formula (ECMA-376 18.8.33).
+    fn protection_xml(key: StyleKey) -> String {
+        let mut out = String::new();
+        if key.unlocked() {
+            out.push_str(" locked=\"0\"");
+        } else if key.force_locked() {
+            out.push_str(" locked=\"1\"");
+        }
+        if key.formula_hidden() {
+            out.push_str(" hidden=\"1\"");
+        }
+        if out.is_empty() {
+            out
+        } else {
+            format!("<protection{out}/>")
+        }
     }
 
     pub(crate) fn to_xml(&self) -> String {
@@ -440,6 +490,15 @@ pub(crate) fn parse_cell_xf_styles(styles_xml: &str) -> XfStyles {
                 style.h_align = HAlign::from_xlsx(word("horizontal"));
                 style.v_align = VAlign::from_xlsx(word("vertical"));
                 style.wrap = truthy(look, "wrapText", false);
+            }
+            if let Some((lock, _)) = extract_tags_or_self_closing_with_attrs(body, "protection")
+                .into_iter()
+                .next()
+            {
+                let locked = truthy(lock, "locked", true);
+                style.unlocked = !locked;
+                style.force_locked = locked && extract_attr_from_fragment(lock, "locked").is_some();
+                style.formula_hidden = truthy(lock, "hidden", false);
             }
             style
         })

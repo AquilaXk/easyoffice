@@ -18,9 +18,10 @@ use crate::sheet_styling::sheet_view::{push_level, Outline, MAX_OUTLINE_ROWS};
 use crate::sheet_styling::xlsx_filter::FilterScan;
 use crate::sheet_styling::xlsx_layout::{add_run, has_room, parse_merge};
 use crate::sheet_styling::xlsx_page::PageScan;
+use crate::sheet_styling::xlsx_protect::ProtectScan;
 use crate::sheet_styling::xlsx_styles::xlsx_width_to_px;
 use crate::sheet_styling::xlsx_view::{level_attr, ThemeTab, ViewScan, LAST_COL};
-use crate::sheet_styling::{CellStyle, SheetStyling, MAX_STYLED_CELLS};
+use crate::sheet_styling::{run_total, CellStyle, SheetStyling, MAX_HIDDEN_ROWS, MAX_STYLED_CELLS};
 use crate::xml_stream::{unescape_cow, Attrs, XmlEvent, XmlReader};
 use crate::{EasyOfficeError, OoxmlCodec};
 
@@ -236,8 +237,29 @@ impl<'s> SheetScanner<'s> {
         }
         if self.want_styling {
             self.record_row_group(attrs);
+            self.record_row_lock(attrs);
         }
         Ok(())
+    }
+
+    /// The format of the open `row` (`s` with `customFormat`) unlocks it (PD-216).
+    fn record_row_lock(&mut self, attrs: &Attrs<'_>) {
+        if attrs_flag(attrs, "customFormat")
+            && self.xf_unlocked(attrs, "s")
+            && run_total(&self.styling.unlocked_rows) < MAX_HIDDEN_ROWS + MAX_OUTLINE_ROWS
+        {
+            add_run(&mut self.styling.unlocked_rows, self.row, self.row);
+        }
+    }
+
+    /// Whether the cell format `attr` of an element names says unlocked.
+    fn xf_unlocked(&self, attrs: &Attrs<'_>, attr: &str) -> bool {
+        attrs
+            .iter_raw()
+            .find(|(name, _)| plain_name(name) == attr)
+            .and_then(|(_, value)| unescape_cow(value).parse::<usize>().ok())
+            .and_then(|i| self.xf_styles.get(i))
+            .is_some_and(|style| style.unlocked)
     }
 
     /// The group level and the `collapsed` mark of the open `row`.
@@ -379,6 +401,9 @@ impl<'s> SheetScanner<'s> {
         };
         if min >= 1 && max >= min {
             let span = (min - 1, (max - 1).min(LAST_COL));
+            if self.xf_unlocked(attrs, "style") {
+                add_run(&mut self.styling.unlocked_cols, span.0, span.1);
+            }
             if attrs_flag(attrs, "hidden") {
                 add_run(&mut self.styling.hidden_cols, span.0, span.1);
             }
@@ -581,11 +606,13 @@ pub(crate) fn scan_worksheet(
     let mut filter = FilterScan::new();
     let mut view = ViewScan::default();
     let mut page = PageScan::default();
+    let mut protect = ProtectScan::default();
     while let Some(event) = reader.next_event()? {
         if want_styling {
             filter.feed(&event);
             view.feed(&event);
             page.feed(&event);
+            protect.feed(&event);
         }
         match event {
             XmlEvent::Start {
@@ -622,6 +649,8 @@ pub(crate) fn scan_worksheet(
     }
     scanner.styling.filter = filter.finish();
     scanner.styling.page = page.finish();
+    scanner.styling.protect = protect.finish()?;
+    scanner.styling.normalize_locks();
     scanner.finish_view(&view);
     Ok(WorksheetScan {
         cells: scanner.cells,

@@ -346,7 +346,11 @@ impl OdfCodec {
             &rule_table,
             &tab_styles,
         ));
-        content.push_str("<office:body><office:spreadsheet>");
+        content.push_str("<office:body><office:spreadsheet");
+        if let Some(protect) = stylings.first().and_then(|st| st.workbook_protect.as_ref()) {
+            content.push_str(&crate::sheet_styling::ods_protect::body_attrs(protect));
+        }
+        content.push('>');
 
         let default_sheet = vec![("Sheet1".to_string(), Vec::new())];
         let active_sheets = if sheets.is_empty() {
@@ -512,10 +516,19 @@ impl OdfCodec {
         let print_ranges = styling.map_or(String::new(), |st| {
             crate::sheet_styling::ods_page::print_ranges_attr(sheet_name, &st.page)
         });
+        let protect_attrs = styling.and_then(|st| st.protect.as_ref()).map_or(
+            String::new(),
+            crate::sheet_styling::ods_protect::table_attrs,
+        );
         content.push_str(&format!(
-            "<table:table table:name=\"{}\"{tab_style}{print_ranges}>",
+            "<table:table table:name=\"{}\"{tab_style}{print_ranges}{protect_attrs}>",
             XmlSanitizer::escape(sheet_name)
         ));
+        if let Some(protect) = styling.and_then(|st| st.protect.as_ref()) {
+            content.push_str(&crate::sheet_styling::ods_protect::table_protection_xml(
+                protect,
+            ));
+        }
         if let Some(st) = styling {
             content.push_str(&table_columns_xml(st, style_table));
             content.push_str(&rules.table.conditional_xml(sheet_name, &st.rules));
@@ -546,9 +559,10 @@ impl OdfCodec {
                     push_empty_cells(content, col - expected_col);
                 }
                 let style_attr = styling
-                    .and_then(|st| {
-                        let style = st.cells.get(&(row, col))?;
-                        style_table.cell_style_name(style, st, &mut ids)
+                    .and_then(|st| match st.cells.get(&(row, col)) {
+                        Some(style) => style_table.cell_style_name(style, st, &mut ids),
+                        None if st.cell_unlocked(row, col) => style_table.unlocked_name(),
+                        None => None,
                     })
                     .map_or(String::new(), |name| {
                         format!(" table:style-name=\"{name}\"")
@@ -648,6 +662,7 @@ impl OdfCodec {
         Self::apply_freezes(&mut stylings, settings.as_deref());
         crate::sheet_styling::ods_page::read_pages(&content_xml, styles.as_deref(), &mut stylings);
         crate::sheet_styling::ods_names::read_names(&content_xml, &mut stylings);
+        crate::sheet_styling::ods_protect::read_protection(&content_xml, &mut stylings)?;
         Self::show_one_sheet(&mut stylings);
         Ok(stylings)
     }
@@ -666,6 +681,7 @@ impl OdfCodec {
         Self::apply_freezes(&mut stylings, settings.as_deref());
         crate::sheet_styling::ods_page::read_pages(&content_xml, styles.as_deref(), &mut stylings);
         crate::sheet_styling::ods_names::read_names(&content_xml, &mut stylings);
+        crate::sheet_styling::ods_protect::read_protection(&content_xml, &mut stylings)?;
         Self::show_one_sheet(&mut stylings);
         Ok((sheets, stylings))
     }

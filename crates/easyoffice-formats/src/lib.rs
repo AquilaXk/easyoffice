@@ -65,6 +65,7 @@ mod rich_writers;
 mod rich_xml;
 mod rtf_escape;
 pub mod rtf_xml_helpers;
+mod sha_digest;
 mod sheet_styling;
 pub mod strict_json;
 mod svg_guard;

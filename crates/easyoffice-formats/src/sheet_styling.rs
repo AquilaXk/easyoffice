@@ -16,6 +16,8 @@ pub(crate) mod ods_names;
 pub(crate) mod ods_numfmt;
 #[path = "ods_page.rs"]
 pub(crate) mod ods_page;
+#[path = "ods_protect.rs"]
+pub(crate) mod ods_protect;
 #[path = "ods_styles.rs"]
 pub(crate) mod ods_styles;
 #[path = "ods_view.rs"]
@@ -30,6 +32,8 @@ pub(crate) mod sheet_names;
 pub(crate) mod sheet_numfmt;
 #[path = "sheet_page.rs"]
 pub(crate) mod sheet_page;
+#[path = "sheet_protect.rs"]
+pub(crate) mod sheet_protect;
 #[path = "sheet_rules.rs"]
 pub(crate) mod sheet_rules;
 #[path = "sheet_view.rs"]
@@ -42,6 +46,8 @@ pub(crate) mod xlsx_layout;
 pub(crate) mod xlsx_names;
 #[path = "xlsx_page.rs"]
 pub(crate) mod xlsx_page;
+#[path = "xlsx_protect.rs"]
+pub(crate) mod xlsx_protect;
 #[path = "xlsx_sheet.rs"]
 pub(crate) mod xlsx_sheet;
 #[path = "xlsx_styles.rs"]
@@ -56,6 +62,7 @@ pub use sheet_look::{
 pub use sheet_names::*;
 pub use sheet_numfmt::*;
 pub use sheet_page::*;
+pub use sheet_protect::*;
 pub use sheet_rules::*;
 pub use sheet_view::*;
 pub use xlsx_layout::{intersect_runs, normalize_runs, run_total, MAX_HIDDEN_ROWS, MAX_MERGES};
@@ -80,6 +87,9 @@ const FLAGS_MASK: u64 = 0x0F;
 const H_ALIGN_SHIFT: u32 = 4;
 const V_ALIGN_SHIFT: u32 = 6;
 const WRAP_BIT: u64 = 1 << 24;
+const UNLOCKED_BIT: u64 = 1 << 25;
+const FORMULA_HIDDEN_BIT: u64 = 1 << 26;
+const FORCE_LOCKED_BIT: u64 = 1 << 27;
 const SIZE_SHIFT: u32 = 40;
 
 /// Formatting of one cell: the flags, font size, number format, alignment, wrapping and borders
@@ -100,10 +110,17 @@ pub struct CellStyle {
     /// Long text breaks into lines inside the cell.
     pub wrap: bool,
     pub borders: CellBorders,
+    /// The cell may be changed on a protected sheet (cells are locked by default, PD-216).
+    pub unlocked: bool,
+    /// The cell is locked inside an unlocked row or column (a locked cell with no format otherwise carries
+    /// none, which would read as the row's or column's lock).
+    pub force_locked: bool,
+    /// A protected sheet does not show the formula of the cell in the formula bar (PD-216).
+    pub formula_hidden: bool,
 }
 
 /// Style identity for $O(1)$ word comparison and hashing: one packed 64-bit word
-/// (`size_centipt << 40 | wrap << 24 | num_fmt << 8 | v_align << 6 | h_align << 4 | flags`, the
+/// (`size_centipt << 40 | locked << 27 | hidden << 26 | unlocked << 25 | wrap << 24 | num_fmt << 8 | v_align << 6 | h_align << 4 | flags`, the
 /// size compared in hundredths of a point) and the four border words.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub(crate) struct StyleKey {
@@ -144,6 +161,21 @@ impl StyleKey {
     #[inline]
     pub(crate) const fn borders(self) -> CellBorders {
         self.borders
+    }
+
+    #[inline]
+    pub(crate) const fn unlocked(self) -> bool {
+        self.bits & UNLOCKED_BIT != 0
+    }
+
+    #[inline]
+    pub(crate) const fn force_locked(self) -> bool {
+        self.bits & FORCE_LOCKED_BIT != 0
+    }
+
+    #[inline]
+    pub(crate) const fn formula_hidden(self) -> bool {
+        self.bits & FORMULA_HIDDEN_BIT != 0
     }
 
     #[inline]
@@ -224,6 +256,9 @@ impl CellStyle {
             && self.v_align == VAlign::Bottom
             && !self.wrap
             && self.borders.is_none()
+            && !self.unlocked
+            && !self.force_locked
+            && !self.formula_hidden
     }
 
     #[inline]
@@ -233,6 +268,9 @@ impl CellStyle {
             .map_or(0u64, |s| ((s * 100.0).round() as u32) as u64);
         StyleKey {
             bits: (centi << SIZE_SHIFT)
+                | (u64::from(self.force_locked) * FORCE_LOCKED_BIT)
+                | (u64::from(self.formula_hidden) * FORMULA_HIDDEN_BIT)
+                | (u64::from(self.unlocked) * UNLOCKED_BIT)
                 | (u64::from(self.wrap) * WRAP_BIT)
                 | (u64::from(self.num_fmt) << NUM_FMT_SHIFT)
                 | ((self.v_align as u64) << V_ALIGN_SHIFT)
@@ -278,6 +316,14 @@ pub struct SheetStyling {
     pub defined_names: Vec<DefinedName>,
     /// Names a reader left out because the workbook had more than [`MAX_NAMES`] (PD-214).
     pub names_rejected: u32,
+    /// The protection of the sheet (PD-216); `None` for a sheet that has none.
+    pub protect: Option<SheetProtection>,
+    /// Rows and columns whose own format is unlocked, as sorted, disjoint, zero-based inclusive runs: a
+    /// cell of them with no format of its own is unlocked (PD-216).
+    pub unlocked_rows: Vec<(u32, u32)>,
+    pub unlocked_cols: Vec<(u32, u32)>,
+    /// The protection of the workbook structure (PD-216), carried by the first sheet like the names.
+    pub workbook_protect: Option<WorkbookProtection>,
 }
 
 impl SheetStyling {
@@ -304,6 +350,10 @@ impl SheetStyling {
             && self.outline.is_empty()
             && self.page.is_default()
             && self.defined_names.is_empty()
+            && self.protect.is_none()
+            && self.unlocked_rows.is_empty()
+            && self.unlocked_cols.is_empty()
+            && self.workbook_protect.is_none()
     }
 
     /// Whether the frozen pane, the tab colour, the groups and the page setup are within the bounds of a sheet that
@@ -314,6 +364,43 @@ impl SheetStyling {
             && self.tab_color.is_none_or(|rgb| rgb <= 0xFF_FFFF)
             && self.outline.within_bounds(max_row, max_col)
             && self.page.within_bounds(max_row, max_col)
+            && self
+                .protect
+                .as_ref()
+                .is_none_or(SheetProtection::within_bounds)
+            && self
+                .workbook_protect
+                .as_ref()
+                .is_none_or(WorkbookProtection::within_bounds)
+            && self.unlocked_rows.last().is_none_or(|r| r.1 < max_row)
+            && self.unlocked_cols.last().is_none_or(|c| c.1 < max_col)
+            && run_total(&self.unlocked_rows) <= MAX_HIDDEN_ROWS
+    }
+
+    /// Drops the "kept locked" mark of cells that no unlocked row or column covers: they are locked anyway and
+    /// a file writes the mark on every cell format that names `locked="1"` (PD-216).
+    pub(crate) fn normalize_locks(&mut self) {
+        let (rows, cols) = (&self.unlocked_rows, &self.unlocked_cols);
+        for (&(row, col), style) in &mut self.cells {
+            let covered =
+                xlsx_layout::run_contains(rows, row) || xlsx_layout::run_contains(cols, col);
+            if style.force_locked && !covered {
+                style.force_locked = false;
+            }
+        }
+        self.cells.retain(|_, style| !style.is_plain());
+    }
+
+    /// Whether the cell at `(row, col)` may be changed on a protected sheet: its own format says unlocked,
+    /// or it has none and its row or column is unlocked (PD-216).
+    pub fn cell_unlocked(&self, row: u32, col: u32) -> bool {
+        match self.cells.get(&(row, col)) {
+            Some(style) => style.unlocked,
+            None => {
+                xlsx_layout::run_contains(&self.unlocked_rows, row)
+                    || xlsx_layout::run_contains(&self.unlocked_cols, col)
+            }
+        }
     }
 
     /// Whether the user, a folded group or the filter hides `row`.
