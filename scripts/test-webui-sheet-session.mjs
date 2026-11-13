@@ -35,6 +35,12 @@ function createFakeEngine(options = {}) {
         }
       }
       if (body.recalc === false) return { session: body.session, staged: body.changes.length };
+      if (options.timeouts?.length) {
+        // The engine ran out of time: the formulas it did not reach are neither reported nor errors.
+        const pending = options.timeouts.shift();
+        const done = cells.pending.splice(0, Math.max(0, cells.pending.length - pending));
+        return { session: body.session, changed: done, circular: false, recomputed: done.length, timedOut: true, pending };
+      }
       const changed = cells.pending.splice(0);
       return { session: body.session, changed, circular: false, recomputed: changed.length };
     }
@@ -260,4 +266,44 @@ test("a workbook the engine refuses for size is evaluated without a session unti
   sheets.Sheet2 = { A1: entry("1") };
   await store.evaluateLiveFormulaTargets(sheets, "Sheet1");
   assert.equal(engine.only("sheet_session_open").length, 2, "a new sheet set tries a session again");
+});
+
+test("an answer that ran out of time leaves the unreached cells at the value shown and the page asks again", async () => {
+  const engine = createFakeEngine({ timeouts: [2, 1] });
+  const store = await createStore(engine);
+  const sheets = baseStore();
+  sheets.Sheet1.D1 = entry("", "=B1*2");
+  sheets.Sheet1.E1 = entry("", "=B1*3");
+  const status = { textContent: "" };
+  const first = await store.evaluateLiveFormulaTargets(sheets, "Sheet1");
+  assert.equal(first.rpcRes.timedOut, true);
+  assert.equal(first.rpcRes.pending, 2);
+  assert.equal(first.targetValues.filter((v) => v === undefined || v === null).length, 2, "no error value is shown for them");
+  assert.ok(first.targetValues.every((v) => v !== "#VALUE!"));
+  assert.equal(store.followCalculation(first.rpcRes, status), true);
+  assert.equal(status.textContent, "계산");
+  const second = await store.evaluateLiveFormulaTargets(sheets, "Sheet1");
+  assert.equal(engine.only("sheet_session_apply")[1].body.changes.length, 0, "the next request sends no cells");
+  assert.equal(second.rpcRes.pending, 1);
+  assert.equal(store.followCalculation(second.rpcRes, status), true);
+  const last = await store.evaluateLiveFormulaTargets(sheets, "Sheet1");
+  assert.notEqual(last.rpcRes.timedOut, true);
+  assert.equal(store.followCalculation(last.rpcRes, status), false);
+  assert.equal(status.textContent, "", "the status clears when nothing is pending");
+  assert.deepEqual(last.targetValues, ["v:=A1+1", "v:=B1*2", "v:=B1*3"]);
+});
+
+test("asking again stops when two passes in a row leave as many pending, and other status text is kept", async () => {
+  const engine = createFakeEngine();
+  const store = await createStore(engine);
+  const status = { textContent: "" };
+  const stuck = { timedOut: true, pending: 3 };
+  assert.equal(store.followCalculation(stuck, status), true);
+  assert.equal(store.followCalculation(stuck, status), true, "one pass without progress is allowed");
+  assert.equal(store.followCalculation(stuck, status), false);
+  assert.equal(status.textContent, "계산");
+  assert.equal(store.followCalculation({ timedOut: true }, status), false, "no pending count: nothing to continue");
+  status.textContent = "순환 참조 경고";
+  assert.equal(store.followCalculation({ timedOut: false }, status), false);
+  assert.equal(status.textContent, "순환 참조 경고");
 });

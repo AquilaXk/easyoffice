@@ -298,7 +298,12 @@
         session.values.set(c.sheet + "!" + c.cell, c.value);
       }
       await syncRules(names);
-      return { formulaTargets, circular: last.circular === true };
+      return {
+        formulaTargets,
+        circular: last.circular === true,
+        timedOut: last.timedOut === true,
+        pending: last.pending,
+      };
     }
 
     // Sends the whole list of defined names when it differs from what the session holds, before the cells, so the
@@ -634,7 +639,7 @@
         const viaSession = await syncSession(sheetsMap);
         if (viaSession) {
           return {
-            rpcRes: { circular: viaSession.circular },
+            rpcRes: { circular: viaSession.circular, timedOut: viaSession.timedOut, pending: viaSession.pending },
             formulaTargets: viaSession.formulaTargets,
             targetValues: viaSession.formulaTargets.map((t) => sessionValue(t.key)),
             batchValues: null,
@@ -749,7 +754,31 @@
       return { nextSheets, totalMasked };
     }
 
+    // The engine stops a recalculation after a few seconds and keeps the cells it did not reach at the
+    // value shown (`timedOut`, `pending` of them). The status bar says "계산" (the spreadsheet status for
+    // formulas not yet calculated) and the page asks again until none is left, a macrotask apart so
+    // keys and clicks are served in between. Returns whether to ask again: not when a pass leaves as
+    // many pending as the one before twice in a row, and not for an answer without `pending` (no
+    // session, nothing to continue).
+    const CALCULATING_LABEL = "계산";
+    const calcProgress = { pending: Infinity, stalled: 0 };
+    function followCalculation(rpcRes, feedback) {
+      if (rpcRes?.timedOut !== true) {
+        calcProgress.pending = Infinity;
+        calcProgress.stalled = 0;
+        if (feedback && feedback.textContent === CALCULATING_LABEL) feedback.textContent = "";
+        return false;
+      }
+      if (feedback) feedback.textContent = CALCULATING_LABEL;
+      const pending = Number(rpcRes.pending);
+      if (!Number.isFinite(pending)) return false;
+      calcProgress.stalled = pending < calcProgress.pending ? 0 : calcProgress.stalled + 1;
+      calcProgress.pending = pending;
+      return calcProgress.stalled < 2;
+    }
+
     return {
+      followCalculation,
       quoteFormulaSheetName,
       isFormulaStr,
       sheetMapHasAnyFormula,

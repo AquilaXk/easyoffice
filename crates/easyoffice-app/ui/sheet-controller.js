@@ -35,6 +35,7 @@
       extractEvaluatedTargetValue,
       computeEvaluatedSheetStore,
       evaluateLiveFormulaTargets,
+      followCalculation,
     } = sheetStoreHelpers;
 
     const sheetCellFocusState = new WeakMap();
@@ -441,6 +442,13 @@
           updateSheetSelectionAndAggregates(getActiveSheetCellRef() || "A1");
         }
         announceCircularReference(rpcRes?.circular);
+        // Unreached cells keep their shown value; ask again until the engine has them all.
+        if (
+          followCalculation(rpcRes, document.getElementById("status-command-feedback")) &&
+          typeof host.setTimeout === "function"
+        ) {
+          host.setTimeout(() => void recalculateActiveSheetFormulas(), 0);
+        }
         refreshFocusedSheetCellPendingSnapshot();
       };
       return trackSheetAsyncWork(run());
