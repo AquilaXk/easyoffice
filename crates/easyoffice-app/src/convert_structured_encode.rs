@@ -196,6 +196,32 @@ fn evaluate_workbook(
     sheets: &[OdsUnpacked],
     with_grids: bool,
 ) -> Result<(Vec<XlsxFormulaCache>, Vec<ValueGrid>), EasyOfficeError> {
+    let mut values = evaluate_formulas(sheets);
+    let mut caches = Vec::with_capacity(sheets.len());
+    let mut grids = Vec::new();
+    let mut grid_cells = 0usize;
+    for (_, cells) in sheets {
+        let (cache, displays) = sheet_values(cells, &mut values, with_grids);
+        caches.push(cache);
+        if with_grids {
+            grids.push(rectangular_grid(&displays, &mut grid_cells)?);
+        }
+    }
+    Ok((caches, grids))
+}
+
+/// The displayed text of every cell of every sheet at its own position (the PDF of a sheet draws the cells where the
+/// sheet has them, so a print area and repeated rows address real rows).
+fn evaluate_displays(sheets: &[OdsUnpacked]) -> Vec<Vec<(u32, u32, String)>> {
+    let mut values = evaluate_formulas(sheets);
+    sheets
+        .iter()
+        .map(|(_, cells)| sheet_values(cells, &mut values, true).1)
+        .collect()
+}
+
+/// The value of each formula cell across all sheets in sheet and cell order.
+fn evaluate_formulas(sheets: &[OdsUnpacked]) -> std::vec::IntoIter<EvaluatedCellValue> {
     let wb = workbook_engine(sheets);
     let a1_addrs: Vec<(&str, String)> = sheets
         .iter()
@@ -218,18 +244,7 @@ fn evaluate_workbook(
             anchor: None,
         })
         .collect();
-    let mut values = wb.evaluate_targets(&targets).values.into_iter();
-    let mut caches = Vec::with_capacity(sheets.len());
-    let mut grids = Vec::new();
-    let mut grid_cells = 0usize;
-    for (_, cells) in sheets {
-        let (cache, displays) = sheet_values(cells, &mut values, with_grids);
-        caches.push(cache);
-        if with_grids {
-            grids.push(rectangular_grid(&displays, &mut grid_cells)?);
-        }
-    }
-    Ok((caches, grids))
+    wb.evaluate_targets(&targets).values.into_iter()
 }
 
 /// One sheet's formula cache and (when `with_grids`) displayed cells, taking the value of each
@@ -423,6 +438,15 @@ pub(crate) fn encode_structured(
             DocumentFormat::Ods => {
                 let (caches, _) = evaluate_workbook(sheets, false)?;
                 OdfCodec::pack_ods_multi_styled_with_cache(sheets, &caches, stylings)
+            }
+            DocumentFormat::Pdf => {
+                let displays = evaluate_displays(sheets);
+                let named: Vec<OdsUnpacked> = sheets
+                    .iter()
+                    .map(|(name, _)| name.clone())
+                    .zip(displays)
+                    .collect();
+                easyoffice_formats::encode_sheet_pdf(title, &named, stylings)
             }
             DocumentFormat::Xls => encode_xls(sheets, title, warnings),
             DocumentFormat::Csv | DocumentFormat::Tsv => {

@@ -929,6 +929,7 @@ fn pdf_entries(
         match entry {
             PdfPageEntry::Text(page, _) => page.page_number = idx + 1,
             PdfPageEntry::Image(page) => page.page_number = idx + 1,
+            PdfPageEntry::Laid(page) => page.page_number = idx + 1,
         }
     }
     entries
@@ -958,6 +959,16 @@ pub(crate) fn serialize_pdf_rich(
             return (bytes, pass.map(|p| p.warnings()).unwrap_or_default());
         }
         pass = highlight.map(HighlightPass::new);
+    }
+    // A header, a footer or a page setup of the document is laid out on pages of its own size.
+    if highlight.is_none() && stamp.is_none() && crate::pdf_laid::needs_laid_pages(doc) {
+        let entries = crate::pdf_laid::laid_document_pages(doc, options.rotation_degrees);
+        let bytes = PdfSerializer::serialize_entries(
+            &doc.display_title(),
+            options.watermark.as_deref(),
+            &entries,
+        );
+        return (bytes, Vec::new());
     }
     let page = PdfPageModel {
         page_number: 1,

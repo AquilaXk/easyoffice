@@ -42,7 +42,7 @@ pub(crate) fn pdf_text_string(text: &str) -> String {
     }
 }
 
-fn tj_operand(text: &str) -> (&'static str, String) {
+pub(crate) fn tj_operand(text: &str) -> (&'static str, String) {
     if text.is_ascii() {
         ("/F1", format!("({})", escape_pdf_text(text)))
     } else {
@@ -224,6 +224,7 @@ impl PdfWriteOptions {
                     page.rotation_degrees = i32::from(self.rotation_degrees)
                 }
                 PdfPageEntry::Image(page) => page.rotation_degrees = self.rotation_degrees,
+                PdfPageEntry::Laid(page) => page.rotation_degrees = self.rotation_degrees,
             }
         }
     }
@@ -238,10 +239,20 @@ pub(crate) struct PdfImagePage {
     pub height_pt: u64,
 }
 
-/// One output page: text lines or a picture.
+/// A page of its own size whose content stream is already placed (`pdf_laid.rs`).
+pub(crate) struct PdfLaidPage {
+    pub page_number: usize,
+    pub rotation_degrees: u16,
+    pub width_pt: f64,
+    pub height_pt: f64,
+    pub content: String,
+}
+
+/// One output page: text lines, a picture or a laid-out page.
 pub(crate) enum PdfPageEntry {
     Text(PdfPageModel, Vec<PageAnnotation>),
     Image(PdfImagePage),
+    Laid(PdfLaidPage),
 }
 
 /// Object numbers of one page: page, content stream, and optional image / soft mask.
@@ -390,7 +401,25 @@ fn write_page(
     fonts: &str,
     watermark: Option<&str>,
 ) {
+    let mut media = format!("0 0 {PDF_PAGE_WIDTH_PT} {PDF_PAGE_HEIGHT_PT}");
     let (page_number, rotation, xobjects, body) = match (entry, plan.image_obj) {
+        (PdfPageEntry::Laid(page), _) => {
+            media = format!("0 0 {:.2} {:.2}", page.width_pt, page.height_pt);
+            let mut content = page.content.clone();
+            if let Some(wm) = watermark {
+                let (font_tag, operand) = tj_operand(&format!("[WM] {wm}"));
+                content.push_str(&format!(
+                    "\nBT {font_tag} 10 Tf 36 {:.2} Td {operand} Tj ET",
+                    page.height_pt - 30.0
+                ));
+            }
+            (
+                page.page_number,
+                i32::from(page.rotation_degrees),
+                String::new(),
+                content,
+            )
+        }
         (PdfPageEntry::Text(page, _), _) => (
             page.page_number,
             page.rotation_degrees,
@@ -418,7 +447,7 @@ fn write_page(
     w.object(
         plan.page_obj,
         &format!(
-            "<< /Type /Page /Parent 2 0 R /PageNumber {page_number} /Rotate {rotation} /MediaBox [0 0 {PDF_PAGE_WIDTH_PT} {PDF_PAGE_HEIGHT_PT}] /Resources << {fonts}{xobjects} >> /Contents {} 0 R{annots} >>",
+            "<< /Type /Page /Parent 2 0 R /PageNumber {page_number} /Rotate {rotation} /MediaBox [{media}] /Resources << {fonts}{xobjects} >> /Contents {} 0 R{annots} >>",
             plan.content_obj
         ),
     );

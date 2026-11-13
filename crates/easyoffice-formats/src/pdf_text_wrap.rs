@@ -41,7 +41,7 @@ fn cid_units(c: char) -> u32 {
 
 /// Width of `text` as the writer will show it (one font for the whole string), in thousandths of
 /// the font size. Trailing spaces are not counted: they hang past the right edge.
-fn text_units(text: &str) -> u32 {
+pub(crate) fn text_units(text: &str) -> u32 {
     let text = text.trim_end_matches(' ');
     if text.is_ascii() {
         text.chars().map(latin_units).sum()

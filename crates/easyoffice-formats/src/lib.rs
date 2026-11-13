@@ -33,6 +33,7 @@ mod pages_table;
 mod pages_write;
 mod pdf_highlight;
 mod pdf_image;
+mod pdf_laid;
 mod pdf_stream_parser;
 mod pdf_text_wrap;
 mod pdf_writer;
@@ -847,4 +848,15 @@ impl XmlSanitizer {
     pub fn unescape(text: &str) -> String {
         unescape_xml_single_pass(text)
     }
+}
+
+/// The PDF of a workbook as the page setups of its sheets print it (the engine's own PDF, PD-213): `sheets` are the
+/// displayed cells of each sheet by zero-based row and column, `stylings` the sheets' page setups, column widths and hidden
+/// rows and columns. Fails when the print areas make more cells or pages than a print may.
+pub fn encode_sheet_pdf(
+    title: &str,
+    sheets: &[crate::OdsUnpacked],
+    stylings: &[SheetStyling],
+) -> Result<Vec<u8>, EasyOfficeError> {
+    pdf_laid::encode_sheet_pdf(title, sheets, stylings)
 }
