@@ -334,3 +334,87 @@ fn sorting_keeps_the_formulas_that_use_names_right() {
     assert_eq!(value(&wb, "Sheet1", "F1"), V::Number(2.0));
     assert_eq!(value(&wb, "Sheet1", "F3"), V::Number(6.0));
 }
+
+fn doubling(top: usize) -> Vec<DefinedName> {
+    let mut defs = vec![def("nm_0", None, "Sheet1!$A$1")];
+    for k in 1..=top {
+        defs.push(def(
+            &format!("nm_{k}"),
+            None,
+            &format!("nm_{}+nm_{}", k - 1, k - 1),
+        ));
+    }
+    defs
+}
+
+#[test]
+fn thousands_of_formulas_that_use_a_doubling_chain_share_one_tree_each() {
+    let mut wb = book();
+    wb.set_names_lenient(&doubling(11));
+    assert!(wb.names().len() == 12);
+    for i in 0..9_988u32 {
+        wb.set_cell("Sheet1", &format!("X{}", i + 1), "=nm_11")
+            .unwrap();
+    }
+    let (in_formulas, in_table) = wb.name_nodes();
+    // A formula holds the pointer to the shared tree, not a copy of its 4,095 nodes; the table holds each
+    // definition's top layer.
+    assert!(in_formulas <= 9_988, "{in_formulas}");
+    assert!(in_table <= 12 * 3 + 1, "{in_table}");
+    assert_eq!(value(&wb, "Sheet1", "X1"), V::Number(20_480.0));
+    assert_eq!(value(&wb, "Sheet1", "X9988"), V::Number(20_480.0));
+    // One more doubling is past the bound of a definition.
+    wb.set_names_lenient(&doubling(12));
+    wb.set_cell("Sheet1", "Y1", "=nm_12").unwrap();
+    assert_eq!(value(&wb, "Sheet1", "Y1"), V::Error(FormulaError::Value));
+    assert!(wb.set_names(&doubling(12)).is_err());
+}
+
+#[test]
+fn the_formulas_of_a_workbook_that_copy_a_definition_stop_at_the_bound() {
+    let mut wb = book();
+    wb.set_names(&[def("Big", None, &vec!["A1"; 500].join("+"))])
+        .unwrap();
+    let copies = crate::names::MAX_WORKBOOK_NAME_NODES / 999 + 50;
+    for i in 0..copies {
+        wb.set_cell("Sheet1", &format!("X{}", i + 1), "=SUM(Big)")
+            .unwrap();
+    }
+    let (in_formulas, _) = wb.name_nodes();
+    assert!(
+        in_formulas <= crate::names::MAX_WORKBOOK_NAME_NODES,
+        "{in_formulas}"
+    );
+    assert_eq!(value(&wb, "Sheet1", "X1"), V::Number(5_000.0));
+    assert_eq!(
+        value(&wb, "Sheet1", &format!("X{copies}")),
+        V::Error(FormulaError::Value)
+    );
+    // A cell that is overwritten gives its nodes back.
+    wb.set_cell("Sheet1", "X1", "1").unwrap();
+    let (after, _) = wb.name_nodes();
+    assert_eq!(after, in_formulas - 1_000);
+    let clone = wb.clone();
+    wb.set_cell("Sheet1", "X2", "1").unwrap();
+    assert_eq!(
+        clone.name_nodes().0,
+        after,
+        "a copy of the workbook counts for itself"
+    );
+}
+
+#[test]
+fn the_definitions_of_a_workbook_stop_at_the_table_bound() {
+    let defs: Vec<DefinedName> = (0..500)
+        .map(|i| def(&format!("big_{i}"), None, &vec!["A1"; 1_300].join("+")))
+        .collect();
+    let mut wb = book();
+    assert!(wb.set_names(&defs).is_err());
+    wb.set_names_lenient(&defs);
+    let (_, table) = wb.name_nodes();
+    assert!(table <= crate::names::MAX_TABLE_NODES, "{table}");
+    wb.set_cell("Sheet1", "X1", "=big_0").unwrap();
+    wb.set_cell("Sheet1", "X2", "=big_499").unwrap();
+    assert_eq!(value(&wb, "Sheet1", "X1"), V::Number(13_000.0));
+    assert_eq!(value(&wb, "Sheet1", "X2"), V::Error(FormulaError::Value));
+}

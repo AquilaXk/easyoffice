@@ -161,11 +161,36 @@ fn the_budget_counts_what_the_names_expand_to() {
     let mut wb = WorkbookEngine::new();
     wb.add_sheet("Sheet1");
     for i in 1..=200 {
-        wb.set_cell("Sheet1", &format!("B{i}"), "=Wide").unwrap();
+        wb.set_cell("Sheet1", &format!("B{i}"), "=SUM(Wide)")
+            .unwrap();
     }
     let mut s = RecalcSession::new(wb).unwrap();
     let before = s.footprint().ast_bytes;
     let wide = vec!["Sheet1!$A$1"; 100].join("+");
     s.set_names(&[def("Wide", &wide)]).unwrap();
-    assert!(s.footprint().ast_bytes > before + 200 * 100 * 32);
+    // A function's argument gets its own copy of the definition's top layer: 199 nodes and the call in each of 200 formulas.
+    let (cells, table) = s.workbook().name_nodes();
+    assert_eq!((cells, table), (200 * 200, 199));
+    assert!(s.footprint().ast_bytes >= before + 200 * 200 * 64);
+}
+
+#[test]
+fn a_session_counts_the_names_of_the_workbook_it_is_built_from() {
+    let mut wb = WorkbookEngine::new();
+    wb.add_sheet("Sheet1");
+    wb.set_names(&[def("Wide", &vec!["Sheet1!$A$1"; 100].join("+"))])
+        .unwrap();
+    for i in 1..=50 {
+        wb.set_cell("Sheet1", &format!("B{i}"), "=SUM(Wide)")
+            .unwrap();
+    }
+    let tight = Budget {
+        max_bytes: 50 * 200 * 64,
+        ..Budget::default()
+    };
+    assert!(matches!(
+        RecalcSession::with_budget(wb.clone(), tight),
+        Err(RecalcError::OverBudget)
+    ));
+    assert!(RecalcSession::with_budget(wb, Budget::default()).is_ok());
 }

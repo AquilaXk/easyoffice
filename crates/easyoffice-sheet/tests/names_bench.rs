@@ -98,3 +98,55 @@ fn names_bench() {
         Some(&changed),
     );
 }
+
+/// The doubling chain of the review: `nm_0 = Sheet1!$A$1`, `nm_k = nm_{k-1}+nm_{k-1}` and `x_i = nm_11` in 9,988
+/// formulas, then 5,000 formulas in a session. Run the test binary under `/usr/bin/time -l` for the memory.
+#[test]
+#[ignore = "measurement harness"]
+fn names_blowup_bench() {
+    let mut defs = vec![def("nm_0", "Sheet1!$A$1")];
+    for k in 1..=11 {
+        defs.push(def(
+            &format!("nm_{k}"),
+            &format!("nm_{}+nm_{}", k - 1, k - 1),
+        ));
+    }
+    let mut wb = WorkbookEngine::new();
+    wb.add_sheet("Sheet1");
+    wb.set_cell("Sheet1", "A1", "1").unwrap();
+    let started = Instant::now();
+    wb.set_names_lenient(&defs);
+    for i in 0..9_988u32 {
+        wb.set_cell("Sheet1", &format!("X{}", i + 1), "=nm_11")
+            .unwrap();
+    }
+    let (in_formulas, in_table) = wb.name_nodes();
+    println!(
+        "lenient: {:.1} ms, nodes in formulas {in_formulas}, in table {in_table}",
+        ms(started)
+    );
+    let started = Instant::now();
+    let strict = wb.set_names(&defs);
+    println!(
+        "strict set_names: {:.1} ms ({})",
+        ms(started),
+        strict.is_ok()
+    );
+    let mut wb = WorkbookEngine::new();
+    wb.add_sheet("Sheet1");
+    wb.set_cell("Sheet1", "A1", "1").unwrap();
+    wb.set_names(&defs).unwrap();
+    for i in 0..5_000u32 {
+        wb.set_cell("Sheet1", &format!("B{}", i + 1), "=nm_11")
+            .unwrap();
+    }
+    let started = Instant::now();
+    let mut session = RecalcSession::new(wb).unwrap();
+    let first = session.recalculate();
+    println!(
+        "session over 5,000 formulas: {:.1} ms, recomputed {}, footprint {} bytes",
+        ms(started),
+        first.recomputed,
+        session.footprint().total_bytes()
+    );
+}

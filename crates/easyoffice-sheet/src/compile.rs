@@ -7,6 +7,7 @@ use crate::{Expr, FormulaError, PackedCellCoordinate, SheetEngine};
 #[derive(Debug, Clone)]
 pub(crate) struct NameUse {
     pub(crate) keys: Box<[crate::names::NameKey]>,
+    /// Nodes the formula holds in memory because of its names (counted against the workbook's bound).
     pub(crate) nodes: u32,
 }
 
@@ -14,6 +15,21 @@ pub(crate) struct NameUse {
 pub(crate) struct Compiled {
     pub(crate) entry: Option<Result<Expr, FormulaError>>,
     pub(crate) uses: Option<NameUse>,
+}
+
+/// A compiled formula that uses names: `nodes` is what it holds in memory because of them.
+fn names_used(
+    keys: Vec<crate::names::NameKey>,
+    nodes: usize,
+    entry: Result<Expr, FormulaError>,
+) -> Compiled {
+    Compiled {
+        entry: Some(entry),
+        uses: Some(NameUse {
+            keys: keys.into_boxed_slice(),
+            nodes: u32::try_from(nodes).unwrap_or(u32::MAX),
+        }),
+    }
 }
 
 impl SheetEngine {
@@ -65,22 +81,16 @@ impl SheetEngine {
             };
         }
         let mut keys = Vec::new();
-        match self.names.expand(&mut expr, &self.name, &mut keys) {
-            Ok(nodes) => Compiled {
-                entry: Some(Ok(expr)),
-                uses: Some(NameUse {
-                    keys: keys.into_boxed_slice(),
-                    nodes: u32::try_from(nodes).unwrap_or(u32::MAX),
-                }),
-            },
-            Err(e) => Compiled {
-                entry: Some(Err(e)),
-                uses: Some(NameUse {
-                    keys: keys.into_boxed_slice(),
-                    nodes: 0,
-                }),
-            },
+        let held = match self.names.expand(&mut expr, &self.name, &mut keys) {
+            Ok((_, held)) => held,
+            Err(e) => return names_used(keys, 0, Err(e)),
+        };
+        // The workbook's bound: past it a formula that uses a name reads `#VALUE!` (fail closed).
+        let in_use = self.name_budget.load(std::sync::atomic::Ordering::Relaxed);
+        if in_use.saturating_add(held) > crate::names::MAX_WORKBOOK_NAME_NODES {
+            return names_used(keys, 0, Err(FormulaError::Value));
         }
+        names_used(keys, held, Ok(expr))
     }
 
     /// Compiles the text of the cell at `coord` again (a defined name it uses changed).
@@ -93,11 +103,12 @@ impl SheetEngine {
 
     /// Records (or forgets) the names the formula at `coord` uses.
     pub(crate) fn set_name_uses(&mut self, coord: PackedCellCoordinate, uses: Option<NameUse>) {
+        use std::sync::atomic::Ordering::Relaxed;
         if let Some(old) = self.name_uses.remove(&coord) {
-            self.name_nodes -= old.nodes as usize;
+            self.name_budget.fetch_sub(old.nodes as usize, Relaxed);
         }
         if let Some(uses) = uses {
-            self.name_nodes += uses.nodes as usize;
+            self.name_budget.fetch_add(uses.nodes as usize, Relaxed);
             self.name_uses.insert(coord, uses);
         }
     }

@@ -1,4 +1,5 @@
 use crate::{CellRange, FormulaError, PackedCellCoordinate};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Token {
@@ -49,6 +50,10 @@ pub enum Expr {
         scope: Option<String>,
         name: String,
     },
+    /// An expanded definition of a defined name that many formulas use, shared instead of copied (PD-214). It stands
+    /// only where a value is read (an operand, a whole formula): a function's arguments get their own copy of the
+    /// top layer, so the functions that look at the shape of an argument see references and calls as written.
+    Shared(Arc<SharedExpr>),
     UnaryPlus(Box<Expr>),
     UnaryMinus(Box<Expr>),
     PostfixPercent(Box<Expr>),
@@ -61,6 +66,25 @@ pub enum Expr {
         name: String,
         args: Vec<Expr>,
     },
+}
+
+/// A syntax tree that formulas share, with the number of nodes it stands for.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SharedExpr {
+    pub expr: Expr,
+    /// Nodes of the tree with every shared tree inside it counted in full (what evaluating it takes).
+    pub nodes: usize,
+}
+
+impl Expr {
+    /// The expression itself, looking through [`Expr::Shared`].
+    pub fn peeled(&self) -> &Expr {
+        let mut cur = self;
+        while let Expr::Shared(shared) = cur {
+            cur = &shared.expr;
+        }
+        cur
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -905,7 +929,7 @@ pub(crate) fn parse_formula(expr_src: &str) -> Result<(Expr, bool), FormulaError
 pub fn compile_formula_expr(expr_src: &str) -> Result<Expr, FormulaError> {
     let (mut expr, saw_name) = parse_formula(expr_src)?;
     if saw_name {
-        crate::names::walk_mut(&mut expr, |node| {
+        crate::names::walk_mut(&mut expr, |node, _| {
             if matches!(node, Expr::Name { .. }) {
                 *node = Expr::ErrorLiteral(FormulaError::Name);
             }

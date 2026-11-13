@@ -7,10 +7,6 @@ use super::{collect_refs, is_formula, RecalcError, RecalcSession};
 use crate::NameIssue;
 use easyoffice_formats::{DefinedName, EasyOfficeError, MAX_NAMES};
 
-/// Heap bytes of one syntax node, for what the expanded names add to a session (a node holds an
-/// operator, boxed children or a short string; measured on the benchmark of PD-214 and rounded up).
-const NODE_BYTES: usize = 64;
-
 impl RecalcSession {
     /// Replaces the defined names (see [`WorkbookEngine::set_names`](crate::WorkbookEngine::set_names)).
     /// Fails, changing nothing, when a name is not valid. The dependency graph outgrowing the
@@ -73,6 +69,7 @@ impl RecalcSession {
             self.memo.remove_at(engine.resolved_sheet_id(), coord);
         }
         self.wb.commit_names(plan);
+        self.name_bytes = self.wb.name_bytes();
         pairs.clear();
         for &(sheet, coord) in &affected {
             let sheet = sheet as u16;
@@ -96,14 +93,9 @@ impl RecalcSession {
         Ok(issues)
     }
 
-    /// Estimated heap bytes of what the defined names add: their definitions and the syntax nodes the
-    /// formulas that use a name hold after the names are expanded.
+    /// Estimated heap bytes of what the defined names add: their definitions, the trees they expand to and the
+    /// nodes the formulas that use a name hold.
     pub(super) fn name_ast_bytes(&self) -> usize {
-        let nodes: usize = self.wb.sheets().iter().map(|s| s.name_nodes).sum();
-        nodes.saturating_mul(NODE_BYTES).saturating_add(
-            self.wb
-                .name_text_bytes()
-                .saturating_mul(super::AST_BYTES_PER_FORMULA_BYTE),
-        )
+        self.name_bytes
     }
 }

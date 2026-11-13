@@ -169,6 +169,8 @@ pub struct RecalcSession {
     over_budget: bool,
     refs: Vec<Ref>,
     queue: Vec<u32>,
+    /// Estimated heap bytes of the defined names and of what they add to the formulas (see `names`).
+    name_bytes: usize,
     /// Rules per sheet index (see `rule_session`).
     rules: std::collections::HashMap<u16, crate::rules::RuleRuntime>,
 }
@@ -208,6 +210,8 @@ impl RecalcSession {
             refs: Vec::new(),
             queue: Vec::new(),
             rules: std::collections::HashMap::new(),
+            // The workbook is put in place after the loop, so its names are counted from the argument.
+            name_bytes: workbook.name_bytes(),
             wb: WorkbookEngine::new(),
         };
         for idx in 0..workbook.sheet_count() {
@@ -356,6 +360,7 @@ impl RecalcSession {
             self.memo.remove_at(engine.resolved_sheet_id(), coord);
         }
         self.wb.sheets_mut()[usize::from(sheet)].set_cell_coord(coord, raw);
+        self.name_bytes = self.wb.name_bytes();
         let engine = &self.wb.sheets()[usize::from(sheet)];
         if let Some(entry) = engine.compiled_asts.get(&coord) {
             if let (true, Ok(ast)) = (is_formula(Some(entry)), entry) {

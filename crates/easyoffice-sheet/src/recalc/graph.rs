@@ -84,6 +84,8 @@ pub(crate) fn collect_refs(
     out.clear();
     let mut volatile = false;
     let mut stack: Vec<&Expr> = vec![ast];
+    let mut seen_shared: std::collections::HashSet<*const crate::SharedExpr> =
+        std::collections::HashSet::new();
     let resolve = |name: &str| {
         wb.find_sheet_index(name)
             .and_then(|idx| u16::try_from(idx).ok())
@@ -106,6 +108,13 @@ pub(crate) fn collect_refs(
             Expr::SheetRange { sheet, range } => {
                 if let Some(idx) = resolve(sheet) {
                     out.push(Ref::rect(idx, *range));
+                }
+            }
+            Expr::Shared(shared) => {
+                // A shared tree is read once per formula however often it appears inside itself.
+                let at = std::sync::Arc::as_ptr(shared);
+                if seen_shared.insert(at) {
+                    stack.push(&shared.expr);
                 }
             }
             Expr::UnaryPlus(inner) | Expr::UnaryMinus(inner) | Expr::PostfixPercent(inner) => {

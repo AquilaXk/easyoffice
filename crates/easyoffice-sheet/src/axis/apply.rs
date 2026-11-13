@@ -58,13 +58,16 @@ impl SheetEngine {
         let mut asts = std::mem::take(&mut self.compiled_asts);
         let mut subtotals = std::mem::take(&mut self.subtotal_coords);
         let mut name_uses = std::mem::take(&mut self.name_uses);
-        self.name_nodes = 0;
         self.dense_numbers.clear();
         self.invalidate_caches();
         let mut removed = 0;
         for (coord, raw) in cells {
             let Some(moved) = edit.map_coord(coord) else {
                 removed += 1;
+                if let Some(uses) = name_uses.remove(&coord) {
+                    self.name_budget
+                        .fetch_sub(uses.nodes as usize, std::sync::atomic::Ordering::Relaxed);
+                }
                 continue;
             };
             if let Some(ast) = asts.remove(&coord) {
@@ -75,7 +78,6 @@ impl SheetEngine {
                 self.subtotal_coords.insert(moved);
             }
             if let Some(uses) = name_uses.remove(&coord) {
-                self.name_nodes += uses.nodes as usize;
                 self.name_uses.insert(moved, uses);
             }
             self.cells.insert(moved, raw);

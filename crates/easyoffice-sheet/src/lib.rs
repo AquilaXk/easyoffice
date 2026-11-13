@@ -67,7 +67,7 @@ pub use functions::*;
 pub use functions_complex::{format_complex, parse_complex};
 pub use memo::{CellMap, CoordHasher, FastMap, MemoTable};
 pub use names::{validate_names, NameIssue, NameTable};
-pub use parser::{compile_formula_expr, BinaryOp, Expr};
+pub use parser::{compile_formula_expr, BinaryOp, Expr, SharedExpr};
 pub use recalc::{
     Budget, CellChange, ChangedCell, Footprint, RecalcError, RecalcOutcome, RecalcSession,
     RuleUpdates,
@@ -157,8 +157,9 @@ pub struct SheetEngine {
     /// The formulas that use a defined name, with the names (hashes) they use, so a change of a
     /// definition compiles only those again.
     pub(crate) name_uses: CellMap<compile::NameUse>,
-    /// Syntax nodes the formulas in `name_uses` hold after their names are expanded.
-    pub(crate) name_nodes: usize,
+    /// Nodes the formulas of the whole workbook hold because they use names (shared by its sheets, see
+    /// `names::MAX_WORKBOOK_NAME_NODES`).
+    pub(crate) name_budget: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl SheetEngine {
@@ -189,7 +190,7 @@ impl SheetEngine {
             cell_index: OnceLock::new(),
             names: Arc::default(),
             name_uses: CellMap::default(),
-            name_nodes: 0,
+            name_budget: Arc::default(),
         }
     }
 
@@ -346,8 +347,11 @@ impl SheetEngine {
         self.compiled_asts.clear();
         self.subtotal_coords.clear();
         self.dense_numbers.clear();
+        for old in self.name_uses.values() {
+            self.name_budget
+                .fetch_sub(old.nodes as usize, std::sync::atomic::Ordering::Relaxed);
+        }
         self.name_uses.clear();
-        self.name_nodes = 0;
         let compiled: Vec<(PackedCellCoordinate, compile::Compiled)> = self
             .cells
             .iter()
@@ -661,6 +665,7 @@ impl SheetEngine {
             Expr::Boolean(b) => EvaluatedCellValue::Boolean(*b),
             Expr::ErrorLiteral(e) => EvaluatedCellValue::Error(*e),
             Expr::Name { .. } => EvaluatedCellValue::Error(FormulaError::Name),
+            Expr::Shared(shared) => self.eval_expr_ctx(&shared.expr, ctx, depth),
             Expr::Cell(coord) => self.eval_coord_ctx(*coord, ctx, depth),
             Expr::SheetCell { sheet, coord } => {
                 self.eval_sheet_coord(Some(sheet), *coord, ctx, depth)
@@ -955,6 +960,7 @@ pub(crate) fn expr_contains_subtotal(expr: &Expr) -> bool {
             expr_contains_subtotal(inner)
         }
         Expr::Binary { lhs, rhs, .. } => expr_contains_subtotal(lhs) || expr_contains_subtotal(rhs),
+        Expr::Shared(shared) => expr_contains_subtotal(&shared.expr),
         _ => false,
     }
 }

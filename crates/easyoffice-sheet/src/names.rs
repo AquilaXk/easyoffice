@@ -18,12 +18,14 @@
 //! `#NAME?`; one too deep or too large reads `#VALUE!`; an unknown name reads `#NAME?`.
 
 use crate::parser::parse_formula;
+use crate::SharedExpr;
 use crate::{Expr, FormulaError};
 use easyoffice_formats::{
     defined_name_problem, fold_name, DefinedName, EasyOfficeError, MAX_NAMES,
     MAX_NAME_COMMENT_CHARS, MAX_REFERS_TO_CHARS,
 };
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 /// Names chained through each other (`a = b + 1`, `b = c + 1`, ...).
 pub const MAX_NAME_DEPTH: usize = 64;
@@ -31,6 +33,11 @@ pub const MAX_NAME_DEPTH: usize = 64;
 pub const MAX_NAME_NODES: usize = 4_096;
 /// Syntax nodes of one formula after its names are expanded (a formula may have 8,192 tokens).
 pub const MAX_FORMULA_NODES: usize = 8_192;
+/// Nodes the definitions of a workbook hold in memory, parsed and expanded (a tree a formula shares is counted once).
+pub const MAX_TABLE_NODES: usize = 1_048_576;
+/// Nodes the formulas of a workbook hold in memory because they use names: the copies of a definition's top layer
+/// and the pointers to the shared trees. A formula past it reads `#VALUE!`.
+pub const MAX_WORKBOOK_NAME_NODES: usize = 2_097_152;
 
 /// Hash of a folded name: what a formula remembers about the names it uses (collisions only make
 /// a formula compile again when it did not have to).
@@ -51,8 +58,15 @@ fn same_sheet(a: &str, b: &str) -> bool {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Resolved {
     scope: Option<Box<str>>,
-    expr: Result<Expr, FormulaError>,
-    nodes: usize,
+    expr: Result<Arc<SharedExpr>, FormulaError>,
+    /// Nodes the tree holds in memory (a shared tree inside it counts one).
+    phys: usize,
+}
+
+/// An expanded definition while the table is built.
+struct Done {
+    tree: Arc<SharedExpr>,
+    phys: usize,
 }
 
 /// Why a definition is not usable as written.
@@ -81,6 +95,8 @@ pub enum NameIssue {
 pub struct NameTable {
     defs: Vec<DefinedName>,
     index: HashMap<Box<str>, Vec<Resolved>>,
+    /// Nodes the expanded definitions hold in memory.
+    phys_total: usize,
 }
 
 /// What [`NameTable::build`] found next to the table.
@@ -108,29 +124,30 @@ fn is_function(name: &str) -> bool {
         .contains(name.to_ascii_uppercase().as_str())
 }
 
-/// Visits every node under `root`, parents first, without recursion; `visit` answers whether to go
-/// down into the node's children (it may have replaced the node).
-pub(crate) fn walk_mut(root: &mut Expr, mut visit: impl FnMut(&mut Expr) -> bool) {
-    let mut stack: Vec<&mut Expr> = vec![root];
-    while let Some(expr) = stack.pop() {
-        if !visit(&mut *expr) {
+/// Visits every node under `root`, parents first, without recursion; `visit` gets the node and whether it is
+/// an argument of a function call, and answers whether to go down into the node's children (it may have
+/// replaced the node). A shared tree is not entered.
+pub(crate) fn walk_mut(root: &mut Expr, mut visit: impl FnMut(&mut Expr, bool) -> bool) {
+    let mut stack: Vec<(&mut Expr, bool)> = vec![(root, false)];
+    while let Some((expr, in_arg)) = stack.pop() {
+        if !visit(&mut *expr, in_arg) {
             continue;
         }
         match expr {
             Expr::UnaryPlus(inner) | Expr::UnaryMinus(inner) | Expr::PostfixPercent(inner) => {
-                stack.push(&mut **inner);
+                stack.push((&mut **inner, false));
             }
             Expr::Binary { lhs, rhs, .. } => {
-                stack.push(&mut **lhs);
-                stack.push(&mut **rhs);
+                stack.push((&mut **lhs, false));
+                stack.push((&mut **rhs, false));
             }
-            Expr::FuncCall { args, .. } => stack.extend(args.iter_mut()),
+            Expr::FuncCall { args, .. } => stack.extend(args.iter_mut().map(|a| (a, true))),
             _ => {}
         }
     }
 }
 
-/// Visits every node under `root` without changing it.
+/// Visits every node under `root` without changing it. A shared tree is visited as one node.
 pub(crate) fn walk(root: &Expr, mut visit: impl FnMut(&Expr)) {
     let mut stack: Vec<&Expr> = vec![root];
     while let Some(expr) = stack.pop() {
@@ -149,10 +166,90 @@ pub(crate) fn walk(root: &Expr, mut visit: impl FnMut(&Expr)) {
     }
 }
 
-pub(crate) fn node_count(root: &Expr) -> usize {
-    let mut n = 0;
+/// Nodes `root` stands for, every shared tree counted in full: what evaluating it takes.
+pub(crate) fn logical_count(root: &Expr) -> usize {
+    let mut n = 0usize;
+    walk(root, |node| {
+        n = n.saturating_add(match node {
+            Expr::Shared(shared) => shared.nodes,
+            _ => 1,
+        });
+    });
+    n
+}
+
+/// Nodes `root` holds in memory: a shared tree counts one.
+pub(crate) fn physical_count(root: &Expr) -> usize {
+    let mut n = 0usize;
     walk(root, |_| n += 1);
     n
+}
+
+/// A tree that is a reference or a constant: small enough to copy where a name stands, and what the functions that
+/// look at the shape of an argument have to see.
+fn is_leaf(expr: &Expr) -> bool {
+    matches!(
+        expr,
+        Expr::Cell(_)
+            | Expr::Range(_)
+            | Expr::SheetCell { .. }
+            | Expr::SheetRange { .. }
+            | Expr::Number(_)
+            | Expr::Boolean(_)
+            | Expr::ErrorLiteral(_)
+            | Expr::Missing
+    )
+}
+
+/// What a name is replaced by.
+enum Repl<'a> {
+    Tree(&'a Arc<SharedExpr>, usize),
+    Error(FormulaError),
+}
+
+/// Replaces the names in `expr` by the trees they stand for and returns the nodes the result stands for and holds.
+/// A reference or constant, or any tree where a function reads an argument, is copied (its inner shared trees are
+/// not); a tree in an operand or a whole formula is shared. The size is checked before each replacement, so an
+/// exponential chain stops at `max_nodes` instead of growing. `Err` past the bound.
+fn replace_names<'a>(
+    expr: &mut Expr,
+    max_nodes: usize,
+    mut resolve: impl FnMut(Option<&str>, &str) -> Repl<'a>,
+) -> Result<(usize, usize), FormulaError> {
+    let mut logical = logical_count(expr);
+    let mut physical = physical_count(expr);
+    let mut too_large = false;
+    walk_mut(expr, |node, in_arg| {
+        if too_large {
+            return false;
+        }
+        let Expr::Name { scope, name } = node else {
+            return true;
+        };
+        let replacement = match resolve(scope.as_deref(), name) {
+            Repl::Error(e) => Expr::ErrorLiteral(e),
+            Repl::Tree(tree, phys) => {
+                logical = logical.saturating_add(tree.nodes - 1);
+                if logical > max_nodes {
+                    too_large = true;
+                    return false;
+                }
+                if in_arg || is_leaf(&tree.expr) {
+                    physical = physical.saturating_add(phys - 1);
+                    tree.expr.clone()
+                } else {
+                    Expr::Shared(Arc::clone(tree))
+                }
+            }
+        };
+        *node = replacement;
+        false
+    });
+    if too_large {
+        Err(FormulaError::Value)
+    } else {
+        Ok((logical, physical))
+    }
 }
 
 /// `refers_to` without a leading `=` and surrounding blanks.
@@ -194,8 +291,13 @@ impl NameTable {
         &self,
         folded: &str,
         sheet: &str,
-    ) -> Option<&Result<Expr, FormulaError>> {
+    ) -> Option<&Result<Arc<SharedExpr>, FormulaError>> {
         self.lookup(folded, sheet).map(|r| &r.expr)
+    }
+
+    /// Nodes the expanded definitions hold in memory.
+    pub(crate) fn physical_nodes(&self) -> usize {
+        self.phys_total
     }
 
     /// Builds the table of `defs` for a workbook with `sheets`. Every definition with a problem is
@@ -208,6 +310,7 @@ impl NameTable {
         let mut parsed: Vec<Option<Parsed>> = Vec::with_capacity(defs.len());
         let mut by_name: HashMap<String, Vec<usize>> = HashMap::with_capacity(defs.len());
         let first_sheet = sheets.first().copied();
+        let mut parsed_nodes = 0usize;
         for (i, def) in defs.iter().enumerate() {
             let folded = fold_name(&def.name);
             let mut issue = Self::check_header(def, sheets, strict);
@@ -235,6 +338,13 @@ impl NameTable {
             if expr.is_err() {
                 issue = issue.or(Some(NameIssue::BadFormula));
             }
+            if let Ok(e) = &expr {
+                parsed_nodes = parsed_nodes.saturating_add(physical_count(e));
+                if parsed_nodes > MAX_TABLE_NODES {
+                    expr = Err(FormulaError::Value);
+                    issue = Some(NameIssue::TooLarge);
+                }
+            }
             if let Some(issue) = issue {
                 issues.push((i, issue));
             }
@@ -250,20 +360,26 @@ impl NameTable {
         let mut table = NameTable {
             defs: defs.to_vec(),
             index: HashMap::new(),
+            phys_total: 0,
         };
-        let resolved = expand_all(&mut parsed, &by_name, defs, &mut issues);
+        let mut resolved = expand_all(&mut parsed, &by_name, defs, &mut issues);
         for (i, entry) in parsed.into_iter().enumerate() {
-            let (Some(entry), Some(resolved)) = (entry, resolved[i].clone()) else {
+            let (Some(entry), Some(done)) = (entry, resolved[i].take()) else {
                 continue;
             };
+            let (expr, phys) = match done {
+                Ok(done) => (Ok(done.tree), done.phys),
+                Err(e) => (Err(e), 1),
+            };
+            table.phys_total += phys;
             table
                 .index
                 .entry(entry.folded.into_boxed_str())
                 .or_default()
                 .push(Resolved {
                     scope: defs[i].scope.as_deref().map(Box::from),
-                    nodes: resolved.as_ref().map_or(1, node_count),
-                    expr: resolved,
+                    expr,
+                    phys,
                 });
         }
         issues.sort_by_key(|&(i, _)| i);
@@ -308,21 +424,17 @@ impl NameTable {
         changed
     }
 
-    /// Replaces the names in `expr` (a formula on `sheet`) by their definitions. Records the key of
-    /// every name met in `uses`. `Err` when the expansion would exceed [`MAX_FORMULA_NODES`].
+    /// Replaces the names in `expr` (a formula on `sheet`) by their definitions (see [`replace_names`]). Records the
+    /// key of every name met in `uses`. Returns the nodes the formula stands for and the nodes it holds; `Err` when
+    /// it would stand for more than [`MAX_FORMULA_NODES`].
     pub(crate) fn expand(
         &self,
         expr: &mut Expr,
         sheet: &str,
         uses: &mut Vec<NameKey>,
-    ) -> Result<usize, FormulaError> {
-        let mut total = node_count(expr);
-        let mut too_large = false;
+    ) -> Result<(usize, usize), FormulaError> {
         let mut folded = String::new();
-        walk_mut(expr, |node| {
-            let Expr::Name { scope, name } = node else {
-                return !too_large;
-            };
+        let sizes = replace_names(expr, MAX_FORMULA_NODES, |scope, name| {
             folded.clear();
             if name.is_ascii() {
                 folded.push_str(&name.to_ascii_lowercase());
@@ -330,30 +442,17 @@ impl NameTable {
                 folded.push_str(&name.to_lowercase());
             }
             uses.push(name_key(&folded));
-            let target = scope.as_deref().unwrap_or(sheet);
-            let replacement = match self.lookup(&folded, target) {
+            match self.lookup(&folded, scope.unwrap_or(sheet)) {
                 Some(entry) => match &entry.expr {
-                    Ok(e) => {
-                        total += entry.nodes - 1;
-                        if total > MAX_FORMULA_NODES {
-                            too_large = true;
-                            return false;
-                        }
-                        e.clone()
-                    }
-                    Err(e) => Expr::ErrorLiteral(*e),
+                    Ok(tree) => Repl::Tree(tree, entry.phys),
+                    Err(e) => Repl::Error(*e),
                 },
-                None => Expr::ErrorLiteral(FormulaError::Name),
-            };
-            *node = replacement;
-            false
+                None => Repl::Error(FormulaError::Name),
+            }
         });
-        if too_large {
-            return Err(FormulaError::Value);
-        }
         uses.sort_unstable();
         uses.dedup();
-        Ok(total)
+        sizes
     }
 }
 
@@ -371,7 +470,7 @@ fn parse_names_expr(refers_to: &str) -> Result<Expr, FormulaError> {
 
 /// A reference without a sheet in a definition points at the sheet the definition belongs to.
 fn qualify_references(expr: &mut Expr, owner: &str) {
-    walk_mut(expr, |node| {
+    walk_mut(expr, |node, _| {
         match node {
             Expr::Cell(coord) => {
                 *node = Expr::SheetCell {
@@ -398,7 +497,7 @@ fn expand_all(
     by_name: &HashMap<String, Vec<usize>>,
     defs: &[DefinedName],
     issues: &mut Vec<(usize, NameIssue)>,
-) -> Vec<Option<Result<Expr, FormulaError>>> {
+) -> Vec<Option<Result<Done, FormulaError>>> {
     let n = parsed.len();
     let pick = |folded: &str, scope: Option<&str>| -> Option<usize> {
         let ids = by_name.get(folded)?;
@@ -436,7 +535,8 @@ fn expand_all(
         }
         entry.deps = deps;
     }
-    let mut out: Vec<Option<Result<Expr, FormulaError>>> = vec![None; n];
+    let mut out: Vec<Option<Result<Done, FormulaError>>> = (0..n).map(|_| None).collect();
+    let mut table_nodes = 0usize;
     let mut depth = vec![0usize; n];
     let mut ready: Vec<usize> = (0..n)
         .filter(|&i| parsed[i].is_some() && pending[i] == 0)
@@ -450,10 +550,27 @@ fn expand_all(
             Ok(_) if level > MAX_NAME_DEPTH => {
                 (Err(FormulaError::Value), Some(NameIssue::TooLarge))
             }
-            Ok(mut expr) => match substitute(&mut expr, defs[i].scope.as_deref(), &pick, &out) {
-                Ok(()) => (Ok(expr), None),
-                Err(e) => (Err(e), Some(NameIssue::TooLarge)),
-            },
+            Ok(mut expr) => {
+                let scope = defs[i].scope.as_deref();
+                let sizes = replace_names(&mut expr, MAX_NAME_NODES, |q, name| {
+                    match pick(&fold_name(name), q.or(scope)).and_then(|j| out[j].as_ref()) {
+                        Some(Ok(done)) => Repl::Tree(&done.tree, done.phys),
+                        Some(Err(e)) => Repl::Error(*e),
+                        None => Repl::Error(FormulaError::Name),
+                    }
+                });
+                match sizes {
+                    Ok((logical, phys)) if table_nodes.saturating_add(phys) <= MAX_TABLE_NODES => {
+                        table_nodes += phys;
+                        let tree = Arc::new(SharedExpr {
+                            expr,
+                            nodes: logical,
+                        });
+                        (Ok(Done { tree, phys }), None)
+                    }
+                    Ok(_) | Err(_) => (Err(FormulaError::Value), Some(NameIssue::TooLarge)),
+                }
+            }
         };
         if let Some(issue) = issue {
             issues.push((i, issue));
@@ -475,43 +592,14 @@ fn expand_all(
     out
 }
 
-/// Replaces the names of a definition by the expanded definitions they stand for; the size is
-/// checked before each copy so an exponential chain stops at [`MAX_NAME_NODES`].
-fn substitute(
-    expr: &mut Expr,
-    scope: Option<&str>,
-    pick: &impl Fn(&str, Option<&str>) -> Option<usize>,
-    done: &[Option<Result<Expr, FormulaError>>],
-) -> Result<(), FormulaError> {
-    let mut total = node_count(expr);
-    let mut too_large = false;
-    walk_mut(expr, |node| {
-        let Expr::Name { scope: q, name } = node else {
-            return !too_large;
-        };
-        let replacement = match pick(&fold_name(name), q.as_deref().or(scope)) {
-            Some(j) => match done[j].as_ref() {
-                Some(Ok(e)) => {
-                    total += node_count(e) - 1;
-                    if total > MAX_NAME_NODES {
-                        too_large = true;
-                        return false;
-                    }
-                    e.clone()
-                }
-                Some(Err(e)) => Expr::ErrorLiteral(*e),
-                None => Expr::ErrorLiteral(FormulaError::Name),
-            },
-            None => Expr::ErrorLiteral(FormulaError::Name),
-        };
-        *node = replacement;
-        false
-    });
-    if too_large {
-        Err(FormulaError::Value)
-    } else {
-        Ok(())
-    }
+/// The error a request to change the names answers for the definition at `index` with `issue`.
+pub(crate) fn issue_error(defs: &[DefinedName], index: usize, issue: NameIssue) -> EasyOfficeError {
+    EasyOfficeError::InvalidArgument(format!(
+        "이름 정의가 올바르지 않습니다({}번째 {:?}): {}",
+        index + 1,
+        issue,
+        defs[index].name
+    ))
 }
 
 /// Checks `defs` the way a request to change the names is checked: the first problem is an error.
@@ -523,11 +611,6 @@ pub fn validate_names(defs: &[DefinedName], sheets: &[&str]) -> Result<(), EasyO
     }
     match NameTable::build(defs, sheets, true).issues.first() {
         None => Ok(()),
-        Some(&(i, issue)) => Err(EasyOfficeError::InvalidArgument(format!(
-            "이름 정의가 올바르지 않습니다({}번째 {:?}): {}",
-            i + 1,
-            issue,
-            defs[i].name
-        ))),
+        Some(&(i, issue)) => Err(issue_error(defs, i, issue)),
     }
 }

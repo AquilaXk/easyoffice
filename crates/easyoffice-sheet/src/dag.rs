@@ -378,6 +378,8 @@ struct DepScanner<'x> {
     wb: Option<&'x WorkbookEngine>,
     sheets: SheetTable<'x>,
     expr_stack: Vec<&'x Expr>,
+    /// Shared trees (see [`Expr::Shared`]) already scanned for the formula at hand.
+    seen_shared: std::collections::HashSet<*const crate::SharedExpr>,
     scratch: Vec<PackedCellCoordinate>,
 }
 
@@ -386,6 +388,7 @@ impl<'x> DepScanner<'x> {
     fn scan_dependencies(&mut self, walk: &mut DepWalk<'_>, ast: &'x Expr, site: ScanSite<'x>) {
         let ScanSite { sheet, slot, sid } = site;
         self.expr_stack.clear();
+        self.seen_shared.clear();
         self.expr_stack.push(ast);
         while let Some(ex) = self.expr_stack.pop() {
             match ex {
@@ -411,6 +414,11 @@ impl<'x> DepScanner<'x> {
                         let dep_sheet = self.sheets.get(ds);
                         let dep_sid = dep_sheet.resolved_sheet_id();
                         walk.range(dep_sheet, ds, dep_sid, *range, &mut self.scratch);
+                    }
+                }
+                Expr::Shared(shared) => {
+                    if self.seen_shared.insert(std::sync::Arc::as_ptr(shared)) {
+                        self.expr_stack.push(&shared.expr);
                     }
                 }
                 Expr::UnaryPlus(inner) | Expr::UnaryMinus(inner) | Expr::PostfixPercent(inner) => {
@@ -460,6 +468,7 @@ impl SheetEngine {
                 names: FastMap::default(),
             },
             expr_stack: Vec::new(),
+            seen_shared: std::collections::HashSet::new(),
             scratch: Vec::new(),
         };
         let mut state = DfsState::new(self_sid);

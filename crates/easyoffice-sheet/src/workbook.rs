@@ -5,14 +5,33 @@ use crate::{
 };
 use easyoffice_formats::{DefinedName, EasyOfficeError, MAX_NAMES};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 /// Multi-sheet workbook engine supporting cross-sheet references (`=Sheet2!A1`, `=SUM(Sheet2!A1:A3)`)
 /// and cross-sheet cycle detection.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct WorkbookEngine {
     sheets: Vec<SheetEngine>,
     names: Arc<NameTable>,
+    /// Nodes the formulas that use names hold, over all sheets (see `names::MAX_WORKBOOK_NAME_NODES`).
+    name_budget: Arc<AtomicUsize>,
+}
+
+impl Clone for WorkbookEngine {
+    /// The copy counts its own formulas: its sheets get a counter of their own.
+    fn clone(&self) -> Self {
+        let mut sheets = self.sheets.clone();
+        let budget = Arc::new(AtomicUsize::new(self.name_budget.load(Ordering::Relaxed)));
+        for sheet in &mut sheets {
+            sheet.name_budget = Arc::clone(&budget);
+        }
+        Self {
+            sheets,
+            names: Arc::clone(&self.names),
+            name_budget: budget,
+        }
+    }
 }
 
 /// Cells of a range a name's value shows in the 이름 관리 list.
@@ -29,10 +48,7 @@ pub(crate) struct NamesPlan {
 
 impl WorkbookEngine {
     pub fn new() -> Self {
-        Self {
-            sheets: Vec::new(),
-            names: Arc::default(),
-        }
+        Self::default()
     }
 
     /// The defined names, in the order they were set (PD-214).
@@ -40,9 +56,25 @@ impl WorkbookEngine {
         self.names.definitions()
     }
 
-    /// Bytes of text the defined names hold.
-    pub(crate) fn name_text_bytes(&self) -> usize {
-        self.names.text_bytes()
+    /// Estimated heap bytes the defined names cost: their definitions, the trees they expand to and the nodes the
+    /// formulas that use them hold (64 bytes a node, 24 per byte of text).
+    pub(crate) fn name_bytes(&self) -> usize {
+        const NODE_BYTES: usize = 64;
+        let nodes = self
+            .names
+            .physical_nodes()
+            .saturating_add(self.name_budget.load(Ordering::Relaxed));
+        nodes
+            .saturating_mul(NODE_BYTES)
+            .saturating_add(self.names.text_bytes().saturating_mul(24))
+    }
+
+    /// Nodes the formulas that use names hold, over all sheets, and nodes the expanded definitions hold.
+    pub fn name_nodes(&self) -> (usize, usize) {
+        (
+            self.name_budget.load(Ordering::Relaxed),
+            self.names.physical_nodes(),
+        )
     }
 
     /// Replaces the defined names. Fails, changing nothing, when one is not valid: a name that breaks
@@ -125,10 +157,10 @@ impl WorkbookEngine {
             return String::new();
         };
         let folded = easyoffice_formats::fold_name(&def.name);
-        if let Some(Ok(crate::Expr::SheetRange { sheet: at, range })) =
-            self.names.resolved_expr(&folded, sheet)
-        {
-            return self.range_text(at, range);
+        if let Some(Ok(tree)) = self.names.resolved_expr(&folded, sheet) {
+            if let crate::Expr::SheetRange { sheet: at, range } = &tree.expr {
+                return self.range_text(at, range);
+            }
         }
         self.evaluate_formula_on_sheet(sheet, &format!("={}", def.name))
             .to_display_string()
@@ -181,10 +213,15 @@ impl WorkbookEngine {
         strict: bool,
     ) -> Result<NamesPlan, EasyOfficeError> {
         let sheet_names: Vec<&str> = self.sheets.iter().map(|s| s.name.as_str()).collect();
-        if strict {
-            crate::names::validate_names(defs, &sheet_names)?;
+        if strict && defs.len() > MAX_NAMES {
+            return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+                "이름은 최대 {MAX_NAMES}개까지 정의할 수 있습니다."
+            )));
         }
         let built = NameTable::build(defs, &sheet_names, strict);
+        if let (true, Some(&(i, issue))) = (strict, built.issues.first()) {
+            return Err(crate::names::issue_error(defs, i, issue));
+        }
         let table = Arc::new(built.table);
         let changed = self.names.changed_keys(&table);
         let mut affected = Vec::new();
@@ -288,6 +325,7 @@ impl WorkbookEngine {
         }
         engine.has_workbook_assigned_id = true;
         engine.names = Arc::clone(&self.names);
+        engine.name_budget = Arc::clone(&self.name_budget);
         self.sheets.push(engine);
         if !self.names.is_empty() {
             // A name may be scoped to the sheet that is new, or be the new sheet's name.

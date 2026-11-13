@@ -422,6 +422,7 @@ impl SheetEngine {
         ctx: &mut EvalContext<'_>,
         depth: usize,
     ) -> Result<(usize, usize, Vec<EvaluatedCellValue>, bool), FormulaError> {
+        let expr = expr.peeled();
         if let Some(spec) = self.extract_streaming_range_ctx(expr, ctx, depth)? {
             let (_, _, _, rows, cols, _) = spec;
             if rows.saturating_mul(cols) > Self::MAX_EVAL_STEPS {
