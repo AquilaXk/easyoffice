@@ -108,7 +108,12 @@ pub(crate) struct CellIndex {
 
 impl CellIndex {
     pub(crate) fn build(sheet: &SheetEngine) -> Self {
-        let mut sorted_coords: Vec<PackedCellCoordinate> = sheet.cells.keys().copied().collect();
+        let mut sorted_coords: Vec<PackedCellCoordinate> = sheet
+            .cells
+            .keys()
+            .chain(sheet.spill.filled())
+            .copied()
+            .collect();
         sorted_coords.sort_unstable();
         let mut by_col: HashMap<u32, Vec<u32>> = HashMap::new();
         for &coord in &sorted_coords {
@@ -411,6 +416,28 @@ impl<'x> DepScanner<'x> {
                         }
                     }
                 }
+                Expr::SpillRef { sheet: None, coord } => {
+                    if is_formula(sheet.compiled_asts.get(coord)) {
+                        walk.visit(slot, sid, *coord);
+                    }
+                }
+                Expr::SpillRef {
+                    sheet: Some(name),
+                    coord,
+                } => {
+                    if let Some(ds) = self.sheets.resolve(self.root, self.wb, name) {
+                        let dep_sheet = self.sheets.get(ds);
+                        if is_formula(dep_sheet.compiled_asts.get(coord)) {
+                            walk.visit(ds, dep_sheet.resolved_sheet_id(), *coord);
+                        }
+                    }
+                }
+                Expr::Call { callee, args } => {
+                    for a in args.iter().rev() {
+                        self.expr_stack.push(a);
+                    }
+                    self.expr_stack.push(callee);
+                }
                 Expr::Range(range) => walk.range(sheet, slot, sid, *range, &mut self.scratch),
                 Expr::SheetRange { sheet: name, range } => {
                     if let Some(ds) = self.sheets.resolve(self.root, self.wb, name) {
@@ -441,6 +468,8 @@ impl<'x> DepScanner<'x> {
                 | Expr::Boolean(_)
                 | Expr::ErrorLiteral(_)
                 | Expr::Name { .. }
+                | Expr::Array(_)
+                | Expr::Var(_)
                 | Expr::Missing => {}
             }
         }

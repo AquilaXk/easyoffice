@@ -32,7 +32,15 @@ pub(crate) fn cell_key(sheet: u16, coord: PackedCellCoordinate) -> CellKey {
 const NARROW_MAX_WIDTH: u32 = 16;
 /// Functions whose result changes without any referenced cell changing, or whose references are
 /// computed at run time. Their cells are recomputed on every pass.
-const VOLATILE_FUNCTIONS: [&str; 6] = ["RAND", "RANDBETWEEN", "NOW", "TODAY", "OFFSET", "INDIRECT"];
+const VOLATILE_FUNCTIONS: [&str; 7] = [
+    "RAND",
+    "RANDBETWEEN",
+    "RANDARRAY",
+    "NOW",
+    "TODAY",
+    "OFFSET",
+    "INDIRECT",
+];
 
 /// One reference a formula reads: a cell, or a rectangle (`r0 <= r1`, `c0 <= c1`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -104,6 +112,22 @@ pub(crate) fn collect_refs(
                     });
                 }
             }
+            Expr::SpillRef { sheet, coord } => {
+                let target = match sheet {
+                    None => Some(own_sheet),
+                    Some(name) => resolve(name),
+                };
+                if let Some(idx) = target {
+                    out.push(Ref::Cell {
+                        sheet: idx,
+                        coord: *coord,
+                    });
+                }
+            }
+            Expr::Call { callee, args } => {
+                stack.push(callee);
+                stack.extend(args.iter());
+            }
             Expr::Range(range) => out.push(Ref::rect(own_sheet, *range)),
             Expr::SheetRange { sheet, range } => {
                 if let Some(idx) = resolve(sheet) {
@@ -133,6 +157,8 @@ pub(crate) fn collect_refs(
             | Expr::Boolean(_)
             | Expr::ErrorLiteral(_)
             | Expr::Name { .. }
+            | Expr::Array(_)
+            | Expr::Var(_)
             | Expr::Missing => {}
         }
     }

@@ -3,6 +3,9 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, OnceLock};
 
 mod agg_stream;
+mod array;
+mod array_class;
+mod array_eval;
 pub mod axis;
 mod byte_width;
 pub mod coercion;
@@ -15,6 +18,7 @@ pub mod filter;
 mod function_coverage_tests;
 pub mod functions;
 mod functions_aggregate;
+mod functions_array_gen;
 mod functions_bessel;
 mod functions_bond;
 pub mod functions_complex;
@@ -29,6 +33,7 @@ mod functions_eng;
 mod functions_fin;
 mod functions_fin_args;
 mod functions_imtrig;
+mod functions_lambda;
 mod functions_lookup;
 mod functions_lookup_ref;
 mod functions_lookup_text;
@@ -37,23 +42,28 @@ mod functions_math_trig;
 mod functions_matrix;
 mod functions_odd;
 mod functions_regression;
+mod functions_spill;
 mod functions_stat_a;
 mod functions_stat_tests;
 mod functions_text_bytes;
 mod functions_trend;
 #[cfg(test)]
 mod functions_unit_tests;
+mod lexer;
 mod memo;
 pub mod names;
 #[cfg(test)]
 mod names_tests;
+mod operators;
 mod parser;
+mod parser_array;
 mod recalc;
 mod rules;
 mod sheet_sort;
 mod sort_keys;
 mod sort_refs;
 mod special;
+mod spill;
 mod text_format;
 pub mod types;
 pub mod workbook;
@@ -80,6 +90,7 @@ pub use rules::{
 };
 pub use sheet_sort::{sorted_formula, SortKey};
 pub use sort_keys::{sort_order, SortColumn, MAX_SORT_KEYS};
+pub use spill::{SpillInfo, MAX_SPILL_CELLS, MAX_SPILL_ROUNDS};
 pub use types::*;
 pub use workbook::*;
 
@@ -102,6 +113,18 @@ pub(crate) struct EvalContext<'a> {
     pub(crate) rng_state: u64,
     pub(crate) circular: bool,
     pub(crate) clock: deadline::Clock,
+    /// Arrays that stand for temporary ranges while a function of the scalar engine runs on them
+    /// (see `array_eval`).
+    pub(crate) temp: Vec<Arc<array::Grid>>,
+    /// Calls of `LAMBDA` values in progress.
+    pub(crate) lambda_depth: usize,
+    /// Cells anchors may still fill; `None` when areas are not placed (a calculation outside a
+    /// session): an array then shows its first value only.
+    pub(crate) spill_budget: Option<usize>,
+    /// What the pass decided for the anchors it calculated (see `spill`).
+    pub(crate) pending: Vec<spill::Pending>,
+    /// Cells the pass has given to anchors, by sheet and cell, to the anchor.
+    pub(crate) claims: FastMap<u64, PackedCellCoordinate>,
 }
 
 impl<'a> EvalContext<'a> {
@@ -115,6 +138,11 @@ impl<'a> EvalContext<'a> {
             rng_state: 0x5DEE_CE66_D1A4_F87B,
             circular: false,
             clock: deadline::Clock::default(),
+            temp: Vec::new(),
+            lambda_depth: 0,
+            spill_budget: None,
+            pending: Vec::new(),
+            claims: FastMap::default(),
         }
     }
 
@@ -128,6 +156,27 @@ impl<'a> EvalContext<'a> {
             rng_state: 0x5DEE_CE66_D1A4_F87B,
             circular: false,
             clock: deadline::Clock::default(),
+            temp: Vec::new(),
+            lambda_depth: 0,
+            spill_budget: None,
+            pending: Vec::new(),
+            claims: FastMap::default(),
+        }
+    }
+
+    /// The value at `coord` of temporary array number `index`.
+    pub(crate) fn temp_cell(
+        &self,
+        index: usize,
+        coord: PackedCellCoordinate,
+    ) -> EvaluatedCellValue {
+        match self.temp.get(index) {
+            Some(grid)
+                if (coord.row() as usize) < grid.rows && (coord.col() as usize) < grid.cols =>
+            {
+                grid.get(coord.row() as usize, coord.col() as usize).clone()
+            }
+            _ => EvaluatedCellValue::Empty,
         }
     }
 
@@ -150,6 +199,10 @@ pub struct SheetEngine {
     pub(crate) cells: CellMap<String>,
     pub(crate) compiled_asts: CellMap<Result<Expr, FormulaError>>,
     pub(crate) subtotal_coords: HashSet<PackedCellCoordinate>,
+    /// Formulas the array evaluator calculates (see `array_class::needs_array`).
+    pub(crate) array_formulas: HashSet<PackedCellCoordinate>,
+    /// The areas anchors fill in this sheet (PD-217).
+    pub(crate) spill: spill::SpillTable,
     pub(crate) dense_numbers: Vec<f64>,
     /// Cached dependency order of the last full recalculation; dropped on every edit.
     pub(crate) plan: OnceLock<dag::RecalcPlan>,
@@ -189,6 +242,8 @@ impl SheetEngine {
             cells: CellMap::default(),
             compiled_asts: CellMap::default(),
             subtotal_coords: HashSet::new(),
+            array_formulas: HashSet::new(),
+            spill: spill::SpillTable::default(),
             dense_numbers: Vec::new(),
             plan: OnceLock::new(),
             formula_index: OnceLock::new(),
@@ -307,17 +362,32 @@ impl SheetEngine {
         self.cell_index = OnceLock::new();
     }
 
+    /// Records whether the formula compiled for `coord` is one the array evaluator calculates.
+    fn mark_array_formula(
+        &mut self,
+        coord: PackedCellCoordinate,
+        entry: Option<&Result<Expr, FormulaError>>,
+    ) {
+        if matches!(entry, Some(Ok(expr)) if array_class::needs_array(expr)) {
+            self.array_formulas.insert(coord);
+        } else {
+            self.array_formulas.remove(&coord);
+        }
+    }
+
     fn store_cell(&mut self, coord: PackedCellCoordinate, val: String) {
         if val.is_empty() {
             self.cells.remove(&coord);
             self.compiled_asts.remove(&coord);
             self.subtotal_coords.remove(&coord);
+            self.array_formulas.remove(&coord);
             self.set_name_uses(coord, None);
             self.update_dense_number(coord, None);
         } else {
             let compile::Compiled { entry, uses } = self.compile_cell_entry(&val);
             self.set_name_uses(coord, uses);
             self.update_dense_number(coord, entry.as_ref());
+            self.mark_array_formula(coord, entry.as_ref());
             if let Some(comp) = entry {
                 if matches!(comp, Ok(ref expr) if expr_contains_subtotal(expr)) {
                     self.subtotal_coords.insert(coord);
@@ -341,6 +411,7 @@ impl SheetEngine {
         self.update_dense_number(coord, Some(&comp));
         self.compiled_asts.insert(coord, comp);
         self.subtotal_coords.remove(&coord);
+        self.array_formulas.remove(&coord);
         self.cells.insert(coord, format!("{num}"));
     }
 
@@ -351,6 +422,7 @@ impl SheetEngine {
         }
         self.compiled_asts.clear();
         self.subtotal_coords.clear();
+        self.array_formulas.clear();
         self.dense_numbers.clear();
         for old in self.name_uses.values() {
             self.name_budget
@@ -365,6 +437,7 @@ impl SheetEngine {
         for (coord, compile::Compiled { entry, uses }) in compiled {
             self.set_name_uses(coord, uses);
             self.update_dense_number(coord, entry.as_ref());
+            self.mark_array_formula(coord, entry.as_ref());
             if let Some(comp) = entry {
                 if matches!(comp, Ok(ref expr) if expr_contains_subtotal(expr)) {
                     self.subtotal_coords.insert(coord);
@@ -414,6 +487,9 @@ impl SheetEngine {
         match sheet_opt {
             None => self.eval_coord_ctx(coord, ctx, depth),
             Some(target_name) => {
+                if let Some(index) = array::virtual_sheet_index(target_name) {
+                    return ctx.temp_cell(index, coord);
+                }
                 if WorkbookEngine::is_same_sheet_identity(target_name, &self.name) {
                     return self.eval_coord_ctx(coord, ctx, depth);
                 }
@@ -483,6 +559,9 @@ impl SheetEngine {
         depth: usize,
         f: impl FnOnce(&EvaluatedCellValue) -> R,
     ) -> R {
+        if let Some(index) = sheet_opt.and_then(array::virtual_sheet_index) {
+            return f(&ctx.temp_cell(index, coord));
+        }
         let target = match sheet_opt {
             None => Some(self),
             Some(name) if WorkbookEngine::is_same_sheet_identity(name, &self.name) => Some(self),
@@ -565,7 +644,12 @@ impl SheetEngine {
 
         let prev_coord = ctx.current_coord;
         ctx.current_coord = Some(coord);
-        let mut result = self.eval_expr_ctx(expr, ctx, depth + 1);
+        let mut result = if !self.array_formulas.is_empty() && self.array_formulas.contains(&coord)
+        {
+            self.eval_array_formula(expr, Some(coord), ctx, depth + 1)
+        } else {
+            self.eval_expr_ctx(expr, ctx, depth + 1)
+        };
         ctx.current_coord = prev_coord;
         if ctx.expired() {
             // The deadline passed inside this cell: its value may rest on an aborted cell.
@@ -603,6 +687,9 @@ impl SheetEngine {
                 return EvaluatedCellValue::Empty;
             }
             match self.compile_formula(expr_src).entry {
+                Some(Ok(expr)) if array_class::needs_array(&expr) => {
+                    self.eval_array_formula(&expr, None, ctx, depth)
+                }
                 Some(Ok(expr)) => self.eval_expr_ctx(&expr, ctx, depth),
                 Some(Err(e)) => EvaluatedCellValue::Error(e),
                 None => EvaluatedCellValue::Empty,
@@ -660,7 +747,17 @@ impl SheetEngine {
             }
             Expr::Boolean(b) => EvaluatedCellValue::Boolean(*b),
             Expr::ErrorLiteral(e) => EvaluatedCellValue::Error(*e),
-            Expr::Name { .. } => EvaluatedCellValue::Error(FormulaError::Name),
+            Expr::Name { .. } | Expr::Var(_) | Expr::Call { .. } => {
+                EvaluatedCellValue::Error(FormulaError::Name)
+            }
+            Expr::Array(lit) => lit
+                .data
+                .first()
+                .cloned()
+                .unwrap_or(EvaluatedCellValue::Empty),
+            Expr::SpillRef { sheet, coord } => {
+                self.eval_sheet_coord(sheet.as_deref(), *coord, ctx, depth)
+            }
             Expr::Shared(shared) => self.eval_expr_ctx(&shared.expr, ctx, depth),
             Expr::Cell(coord) => self.eval_coord_ctx(*coord, ctx, depth),
             Expr::SheetCell { sheet, coord } => {
@@ -792,112 +889,6 @@ impl SheetEngine {
                 Err(e) => EvaluatedCellValue::Error(e),
             },
             _ => self.eval_func_ctx(name, args, ctx, depth),
-        }
-    }
-
-    pub(crate) fn apply_binary_op(
-        op: BinaryOp,
-        l_val: EvaluatedCellValue,
-        r_val: EvaluatedCellValue,
-    ) -> EvaluatedCellValue {
-        match op {
-            BinaryOp::Concat => {
-                let ls = l_val.to_display_string();
-                let rs = r_val.to_display_string();
-                if ls.len().saturating_add(rs.len()) > Self::MAX_CELL_TEXT_CHARS
-                    && ls.chars().count().saturating_add(rs.chars().count())
-                        > Self::MAX_CELL_TEXT_CHARS
-                {
-                    EvaluatedCellValue::Error(FormulaError::Value)
-                } else {
-                    EvaluatedCellValue::Text(format!("{ls}{rs}"))
-                }
-            }
-            BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Pow => {
-                let ln = match l_val {
-                    EvaluatedCellValue::Empty => 0.0,
-                    _ => match l_val.as_number() {
-                        Some(v) => v,
-                        None => return EvaluatedCellValue::Error(FormulaError::Value),
-                    },
-                };
-                let rn = match r_val {
-                    EvaluatedCellValue::Empty => 0.0,
-                    _ => match r_val.as_number() {
-                        Some(v) => v,
-                        None => return EvaluatedCellValue::Error(FormulaError::Value),
-                    },
-                };
-                let res = match op {
-                    BinaryOp::Add => ln + rn,
-                    BinaryOp::Sub => ln - rn,
-                    BinaryOp::Mul => ln * rn,
-                    BinaryOp::Div => {
-                        if rn == 0.0 {
-                            return EvaluatedCellValue::Error(FormulaError::DivByZero);
-                        }
-                        ln / rn
-                    }
-                    BinaryOp::Pow => ln.powf(rn),
-                    _ => unreachable!(),
-                };
-                if res.is_finite() {
-                    EvaluatedCellValue::Number(res)
-                } else {
-                    EvaluatedCellValue::Error(FormulaError::Num)
-                }
-            }
-            BinaryOp::Eq
-            | BinaryOp::Ne
-            | BinaryOp::Lt
-            | BinaryOp::Le
-            | BinaryOp::Gt
-            | BinaryOp::Ge => {
-                let Some(ordering) = Self::compare_excel_values(&l_val, &r_val) else {
-                    return EvaluatedCellValue::Error(FormulaError::Value);
-                };
-                let flag = match op {
-                    BinaryOp::Eq => ordering.is_eq(),
-                    BinaryOp::Ne => ordering.is_ne(),
-                    BinaryOp::Lt => ordering.is_lt(),
-                    BinaryOp::Le => ordering.is_le(),
-                    BinaryOp::Gt => ordering.is_gt(),
-                    BinaryOp::Ge => ordering.is_ge(),
-                    _ => unreachable!(),
-                };
-                EvaluatedCellValue::Boolean(flag)
-            }
-        }
-    }
-
-    pub(crate) fn compare_excel_values(
-        l_val: &EvaluatedCellValue,
-        r_val: &EvaluatedCellValue,
-    ) -> Option<std::cmp::Ordering> {
-        use EvaluatedCellValue as V;
-        match (l_val, r_val) {
-            (V::Error(_), _) | (_, V::Error(_)) => None,
-            (V::Empty, V::Empty) => Some(std::cmp::Ordering::Equal),
-            (V::Empty, V::Number(b)) => 0.0f64.partial_cmp(b),
-            (V::Number(a), V::Empty) => a.partial_cmp(&0.0),
-            (V::Empty, V::Text(b)) => Some("".cmp(b.as_str())),
-            (V::Text(a), V::Empty) => Some(a.as_str().cmp("")),
-            (V::Empty, V::Boolean(b)) => Some(false.cmp(b)),
-            (V::Boolean(a), V::Empty) => Some(a.cmp(&false)),
-            (V::Number(a), V::Number(b)) => a.partial_cmp(b),
-            (V::Text(a), V::Text(b)) if a.is_ascii() && b.is_ascii() => Some(
-                a.bytes()
-                    .map(|c| c.to_ascii_lowercase())
-                    .cmp(b.bytes().map(|c| c.to_ascii_lowercase())),
-            ),
-            (V::Text(a), V::Text(b)) => Some(
-                a.chars()
-                    .flat_map(char::to_lowercase)
-                    .cmp(b.chars().flat_map(char::to_lowercase)),
-            ),
-            (V::Boolean(a), V::Boolean(b)) => Some(a.cmp(b)),
-            (V::Number(_), _) | (V::Text(_), V::Boolean(_)) => Some(std::cmp::Ordering::Less),
-            (_, V::Number(_)) | (V::Boolean(_), V::Text(_)) => Some(std::cmp::Ordering::Greater),
         }
     }
 

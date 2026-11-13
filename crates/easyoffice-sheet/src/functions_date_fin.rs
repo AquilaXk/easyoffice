@@ -648,6 +648,8 @@ impl SheetEngine {
                     FormulaError::Name => 5.0,
                     FormulaError::Num | FormulaError::Cycle => 6.0,
                     FormulaError::Na => 7.0,
+                    FormulaError::Spill => 9.0,
+                    FormulaError::Calc => 14.0,
                 }),
                 _ => Err(FormulaError::Na),
             },

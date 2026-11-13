@@ -112,7 +112,7 @@ struct Parsed {
     deps: Vec<usize>,
 }
 
-fn is_function(name: &str) -> bool {
+pub(crate) fn is_function(name: &str) -> bool {
     static FUNCTIONS: std::sync::OnceLock<HashSet<&'static str>> = std::sync::OnceLock::new();
     FUNCTIONS
         .get_or_init(|| {
@@ -142,6 +142,10 @@ pub(crate) fn walk_mut(root: &mut Expr, mut visit: impl FnMut(&mut Expr, bool) -
                 stack.push((&mut **rhs, false));
             }
             Expr::FuncCall { args, .. } => stack.extend(args.iter_mut().map(|a| (a, true))),
+            Expr::Call { callee, args } => {
+                stack.extend(args.iter_mut().map(|a| (a, true)));
+                stack.push((&mut **callee, false));
+            }
             _ => {}
         }
     }
@@ -161,6 +165,10 @@ pub(crate) fn walk(root: &Expr, mut visit: impl FnMut(&Expr)) {
                 stack.push(rhs);
             }
             Expr::FuncCall { args, .. } => stack.extend(args.iter()),
+            Expr::Call { callee, args } => {
+                stack.push(callee);
+                stack.extend(args.iter());
+            }
             _ => {}
         }
     }
@@ -434,6 +442,22 @@ impl NameTable {
         uses: &mut Vec<NameKey>,
     ) -> Result<(usize, usize), FormulaError> {
         let mut folded = String::new();
+        // `Square(3)` where `Square` is a defined name: a call of the value the name stands for.
+        walk_mut(expr, |node, _| {
+            if let Expr::FuncCall { name, args } = node {
+                if !is_function(name) && self.lookup(&fold_name(name), sheet).is_some() {
+                    let callee = Expr::Name {
+                        scope: None,
+                        name: std::mem::take(name),
+                    };
+                    *node = Expr::Call {
+                        callee: Box::new(callee),
+                        args: std::mem::take(args),
+                    };
+                }
+            }
+            true
+        });
         let sizes = replace_names(expr, MAX_FORMULA_NODES, |scope, name| {
             folded.clear();
             if name.is_ascii() {

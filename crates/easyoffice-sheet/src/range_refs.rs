@@ -104,6 +104,7 @@ impl SheetEngine {
     pub(crate) fn has_sheet_in_ctx(&self, sheet: &str, ctx: &EvalContext<'_>) -> bool {
         WorkbookEngine::is_same_sheet_identity(sheet, &self.name)
             || ctx.workbook.and_then(|wb| wb.sheet(sheet)).is_some()
+            || crate::array::virtual_sheet_index(sheet).is_some_and(|i| i < ctx.temp.len())
     }
 
     /// Attaches an optional (already parsed) sheet name to `range`, validating it exists.

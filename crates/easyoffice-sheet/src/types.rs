@@ -307,6 +307,12 @@ pub enum FormulaError {
     Name,
     Na,
     Num,
+    /// A dynamic array result that cannot be placed: something blocks its cells, it reaches past the
+    /// sheet edge, or it is too large (PD-217).
+    Spill,
+    /// An array result that cannot be calculated: an empty array (`FILTER` without a match), a call
+    /// that returns an array where one value is needed.
+    Calc,
 }
 
 impl FormulaError {
@@ -319,6 +325,8 @@ impl FormulaError {
             Self::Name => "#NAME?",
             Self::Na => "#N/A",
             Self::Num => "#NUM!",
+            Self::Spill => "#SPILL!",
+            Self::Calc => "#CALC!",
         }
     }
 
@@ -331,6 +339,8 @@ impl FormulaError {
             "#N/A" => Some(Self::Na),
             "#NUM!" => Some(Self::Num),
             "#CYCLE!" => Some(Self::Cycle),
+            "#SPILL!" => Some(Self::Spill),
+            "#CALC!" => Some(Self::Calc),
             _ => None,
         }
     }

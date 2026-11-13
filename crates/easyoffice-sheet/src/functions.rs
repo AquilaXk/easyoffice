@@ -7,8 +7,10 @@ use crate::{EvalContext, EvaluatedCellValue, Expr, FormulaError, SheetEngine};
 /// Trig 27, Statistical 22, Logical 10, Lookup & Reference 12, Text 21, Date & Time 10, Financial 11,
 /// Information 9), then 22 more (lookup and reference 6, database 12, matrix 4), then the 59 of bundle B
 /// (PD-201): financial 28, engineering 16, statistics 13, text and information 2, then the 59 of bundle C
-/// (PD-205): math 17, byte text 9, statistics 19, legacy names 14.
-pub const CANONICAL_FUNCTIONS: [&str; 262] = [
+/// (PD-205): math 17, byte text 9, statistics 19, legacy names 14, then the 14 of the dynamic arrays
+/// (PD-217): array 6 (`FILTER`, `SORT`, `SORTBY`, `UNIQUE`, `SEQUENCE`, `RANDARRAY`), `LET` and `LAMBDA`,
+/// and the six that call a lambda (`MAP`, `REDUCE`, `SCAN`, `BYROW`, `BYCOL`, `MAKEARRAY`).
+pub const CANONICAL_FUNCTIONS: [&str; 276] = [
     "SUM",
     "PRODUCT",
     "SUMPRODUCT",
@@ -271,6 +273,20 @@ pub const CANONICAL_FUNCTIONS: [&str; 262] = [
     "FTEST",
     "TTEST",
     "COVAR",
+    "FILTER",
+    "SORT",
+    "SORTBY",
+    "UNIQUE",
+    "SEQUENCE",
+    "RANDARRAY",
+    "LET",
+    "LAMBDA",
+    "MAP",
+    "REDUCE",
+    "SCAN",
+    "BYROW",
+    "BYCOL",
+    "MAKEARRAY",
 ];
 
 /// The numeric values among `vals`.

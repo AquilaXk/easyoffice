@@ -31,10 +31,10 @@ mod tests_deadline;
 mod tests_names;
 
 use crate::dag::is_formula;
-use crate::MAX_EVAL_TIME;
 use crate::{
     EvalContext, EvaluatedCellValue, FormulaError, MemoTable, PackedCellCoordinate, WorkbookEngine,
 };
+use crate::{SpillInfo, MAX_EVAL_TIME};
 use easyoffice_formats::EasyOfficeError;
 use graph::{cell_key, collect_refs, CellKey, DepGraph, Ref};
 use id_set::IdSet;
@@ -82,6 +82,8 @@ pub struct Footprint {
     /// Estimated heap bytes of the conditional formatting and validation rules (matched cells and
     /// cached range values).
     pub rule_bytes: usize,
+    /// Estimated heap bytes of the cells that arrays fill (PD-217).
+    pub spill_bytes: usize,
 }
 
 impl Footprint {
@@ -91,6 +93,7 @@ impl Footprint {
             .saturating_add(self.graph_bytes)
             .saturating_add(self.ast_bytes)
             .saturating_add(self.rule_bytes)
+            .saturating_add(self.spill_bytes)
     }
 }
 
@@ -158,6 +161,59 @@ pub struct RecalcOutcome {
     pub timed_out: bool,
     /// Formulas the deadline left dirty (0 unless `timed_out`).
     pub pending: usize,
+    /// The anchors of arrays whose area changed in this recalculation (PD-217). The cells they
+    /// fill are in `changed` with their values.
+    pub spills: Vec<SpillInfo>,
+}
+
+/// The value each cell had before the recalculation, once per cell.
+#[derive(Default)]
+struct Firsts {
+    list: Vec<((u16, PackedCellCoordinate), Option<EvaluatedCellValue>)>,
+    /// Built when a cell can come twice (a second pass, a cell an anchor filled).
+    index: Option<std::collections::HashSet<(u16, PackedCellCoordinate)>>,
+}
+
+impl Firsts {
+    fn index(&mut self) -> &mut std::collections::HashSet<(u16, PackedCellCoordinate)> {
+        let list = &self.list;
+        self.index
+            .get_or_insert_with(|| list.iter().map(|(k, _)| *k).collect())
+    }
+
+    fn note(&mut self, key: (u16, PackedCellCoordinate), old: Option<EvaluatedCellValue>) {
+        if self.index().insert(key) {
+            self.list.push((key, old));
+        }
+    }
+
+    /// The cells of one pass: unique inside the pass, so a pass after the first checks them.
+    fn extend(&mut self, pass: Vec<((u16, PackedCellCoordinate), Option<EvaluatedCellValue>)>) {
+        if self.list.is_empty() && self.index.is_none() {
+            self.list = pass;
+        } else {
+            for (key, old) in pass {
+                self.note(key, old);
+            }
+        }
+    }
+
+    /// In sheet, then row-major order.
+    fn into_sorted(mut self) -> Vec<((u16, PackedCellCoordinate), Option<EvaluatedCellValue>)> {
+        self.list
+            .sort_unstable_by_key(|&((sheet, coord), _)| cell_key(sheet, coord));
+        self.list
+    }
+}
+
+/// One pass of [`RecalcSession::recalculate`].
+struct Round {
+    /// The formula cells the pass computed, with the value each had before.
+    before: Vec<((u16, PackedCellCoordinate), Option<EvaluatedCellValue>)>,
+    order_len: usize,
+    unfinished: Vec<u32>,
+    pending: Vec<crate::spill::Pending>,
+    timed_out: bool,
 }
 
 pub struct RecalcSession {
@@ -189,6 +245,11 @@ pub struct RecalcSession {
     name_bytes: usize,
     /// Rules per sheet index (see `rule_session`).
     rules: std::collections::HashMap<u16, crate::rules::RuleRuntime>,
+    /// What staged edits already changed about areas (an anchor that went away): reported by the next
+    /// recalculation.
+    released: crate::spill::Published,
+    /// A dynamic circular reference was met in the pass in progress.
+    dynamic_circular_pass: bool,
 }
 
 impl RecalcSession {
@@ -227,6 +288,8 @@ impl RecalcSession {
             refs: Vec::new(),
             queue: Vec::new(),
             rules: std::collections::HashMap::new(),
+            released: crate::spill::Published::default(),
+            dynamic_circular_pass: false,
             // The workbook is put in place after the loop, so its names are counted from the argument.
             name_bytes: workbook.name_bytes(),
             wb: WorkbookEngine::new(),
@@ -282,6 +345,13 @@ impl RecalcSession {
                 .values()
                 .map(crate::rules::RuleRuntime::heap_bytes_estimate)
                 .sum(),
+            spill_bytes: self
+                .wb
+                .sheets()
+                .iter()
+                .map(|s| s.spill.filled_count())
+                .sum::<usize>()
+                .saturating_mul(crate::spill::SPILL_CELL_BYTES),
         }
     }
 
@@ -376,6 +446,20 @@ impl RecalcSession {
             self.cyclic.remove(vertex);
             self.memo.remove_at(engine.resolved_sheet_id(), coord);
         }
+        if self.wb.sheets()[usize::from(sheet)]
+            .spill
+            .area_entry(coord)
+            .is_some()
+        {
+            // The formula that filled an area is replaced: the area goes with it.
+            crate::spill::release_anchor(
+                &mut self.wb.sheets_mut()[usize::from(sheet)],
+                sheet,
+                &mut self.memo,
+                coord,
+                &mut self.released,
+            );
+        }
         self.wb.sheets_mut()[usize::from(sheet)].set_cell_coord(coord, raw);
         self.name_bytes = self.wb.name_bytes();
         let engine = &self.wb.sheets()[usize::from(sheet)];
@@ -399,6 +483,11 @@ impl RecalcSession {
 
     /// Recomputes every formula that depends on a staged edit (and every volatile formula) and
     /// reports the formula cells whose value changed.
+    ///
+    /// Arrays that formulas calculate fill cells nobody wrote (PD-217). A pass decides where they
+    /// go; the sheets change after it, and what the change touched (a filled cell, an anchor)
+    /// is recalculated by the next pass, until a pass touches nothing. The cells filled are
+    /// reported in `changed` like formula cells.
     pub fn recalculate(&mut self) -> RecalcOutcome {
         let dirty = &mut self.dirty;
         if self.resuming {
@@ -415,70 +504,121 @@ impl RecalcSession {
                 dirty.insert(v);
             });
         }
-        self.graph
-            .expand_dirty(&self.edited, &mut self.dirty, &mut self.queue);
-
-        // Canonical order: sheet, then row-major, the order the full path hands its targets in.
-        let mut order: Vec<(CellKey, u32)> = Vec::with_capacity(self.dirty.len());
-        self.dirty.for_each(|v| {
-            let (sheet, coord) = self.graph.site(v);
-            order.push((cell_key(sheet, coord), v));
-        });
-        order.sort_unstable();
-
-        let sheets = self.wb.sheets();
-        let before: Vec<Option<EvaluatedCellValue>> = order
-            .iter()
-            .map(|&(_, v)| {
-                let (sheet, coord) = self.graph.site(v);
-                self.cyclic.remove(v);
-                self.memo
-                    .remove_at(sheets[usize::from(sheet)].resolved_sheet_id(), coord)
-            })
-            .collect();
-
-        let primary_id = sheets.first().map_or(1, |s| s.resolved_sheet_id());
-        let mut ctx =
-            EvalContext::with_workbook(&self.wb, primary_id).with_time_limit(self.budget.max_time);
-        ctx.memo = std::mem::replace(&mut self.memo, MemoTable::new(primary_id));
-        ctx.rng_state = self.rng_state;
-        let mut roots: Vec<PackedCellCoordinate> = Vec::new();
-        let mut start = 0;
-        while start < order.len() {
-            let sheet = self.graph.site(order[start].1).0;
-            roots.clear();
-            let mut end = start;
-            while end < order.len() && self.graph.site(order[end].1).0 == sheet {
-                roots.push(self.graph.site(order[end].1).1);
-                end += 1;
+        let edited_all = std::mem::take(&mut self.edited);
+        let mut seeds = edited_all.clone();
+        let mut firsts = Firsts::default();
+        for (sheet, coord, old) in std::mem::take(&mut self.released.before) {
+            firsts.note((sheet, coord), old);
+        }
+        seeds.append(&mut self.released.touched);
+        let mut infos: Vec<SpillInfo> = std::mem::take(&mut self.released.infos);
+        let mut freed: Vec<(u16, PackedCellCoordinate)> = std::mem::take(&mut self.released.freed);
+        let mut unfinished: Vec<u32>;
+        let mut computed = 0usize;
+        let mut timed_out = false;
+        let mut unsettled = false;
+        let mut round = 0usize;
+        let mut first_round = true;
+        loop {
+            self.mark_spill_dirty(&seeds, &freed, first_round.then_some(&edited_all[..]));
+            self.graph
+                .expand_dirty(&seeds, &mut self.dirty, &mut self.queue);
+            let result = self.run_round();
+            firsts.extend(result.before);
+            computed += result.order_len - result.unfinished.len();
+            unfinished = result.unfinished;
+            timed_out |= result.timed_out;
+            let published = crate::spill::publish(&mut self.wb, &mut self.memo, result.pending);
+            for (sheet, coord, old) in published.before {
+                firsts.note((sheet, coord), old);
             }
-            sheets[usize::from(sheet)].pre_evaluate_dag(&roots, &mut ctx, None);
-            start = end;
+            infos.extend(published.infos);
+            seeds = published.touched;
+            freed = published.freed;
+            first_round = false;
+            round += 1;
+            if !unfinished.is_empty() || seeds.is_empty() {
+                break;
+            }
+            if round >= crate::spill::MAX_SPILL_ROUNDS {
+                unsettled = true;
+                break;
+            }
+        }
+
+        if unsettled {
+            // Arrays that keep moving what each other reads are a circular reference: they show the
+            // circular-reference error and give their cells up; what reads them is calculated once more.
+            let rings: Vec<(u16, PackedCellCoordinate)> = seeds
+                .iter()
+                .copied()
+                .filter(|&(sheet, coord)| {
+                    self.wb.sheets()[usize::from(sheet)]
+                        .spill
+                        .area_entry(coord)
+                        .is_some()
+                })
+                .collect();
+            let mut out = crate::spill::Published::default();
+            let mut poisoned = Vec::new();
+            for &(sheet, anchor) in &rings {
+                let sid = self.wb.sheets()[usize::from(sheet)].resolved_sheet_id();
+                crate::spill::release_anchor(
+                    &mut self.wb.sheets_mut()[usize::from(sheet)],
+                    sheet,
+                    &mut self.memo,
+                    anchor,
+                    &mut out,
+                );
+                self.memo
+                    .insert_at(sid, anchor, EvaluatedCellValue::Error(FormulaError::Cycle));
+                if let Some(v) = self.graph.vertex_at(sheet, anchor) {
+                    self.cyclic.insert(v);
+                    poisoned.push(v);
+                }
+            }
+            for (sheet, coord, old) in out.before {
+                firsts.note((sheet, coord), old);
+            }
+            infos.extend(out.infos);
+            let mut readers = out.touched;
+            readers.extend(rings.iter().copied());
+            self.graph
+                .expand_dirty(&readers, &mut self.dirty, &mut self.queue);
+            for &v in &poisoned {
+                self.dirty.remove(v);
+            }
+            let result = self.run_round();
+            firsts.extend(result.before);
+            computed += result.order_len - result.unfinished.len();
+            unfinished = result.unfinished;
+            let published = crate::spill::publish(&mut self.wb, &mut self.memo, result.pending);
+            for (sheet, coord, old) in published.before {
+                firsts.note((sheet, coord), old);
+            }
+            infos.extend(published.infos);
         }
 
         let mut changed = Vec::new();
+        let sheets = self.wb.sheets();
         // Formulas the deadline cut off stay dirty and keep the value the caller last saw (none for
         // a formula that is new), so they are neither reported nor shown as errors.
-        let mut unfinished = Vec::new();
-        for (&(_, v), old) in order.iter().zip(before) {
-            let (sheet, coord) = self.graph.site(v);
+        let unfinished_sites: std::collections::HashSet<(u16, PackedCellCoordinate)> =
+            unfinished.iter().map(|&v| self.graph.site(v)).collect();
+        for ((sheet, coord), old) in firsts.into_sorted() {
+            if unfinished_sites.contains(&(sheet, coord)) {
+                continue;
+            }
             let sid = sheets[usize::from(sheet)].resolved_sheet_id();
-            let value = match ctx.memo.get_at(sid, coord) {
-                Some(value) => value.clone(),
-                None if ctx.expired() => {
-                    unfinished.push(v);
-                    if let Some(old) = old {
-                        if matches!(old, EvaluatedCellValue::Error(FormulaError::Cycle)) {
-                            self.cyclic.insert(v);
-                        }
-                        ctx.memo.insert_at(sid, coord, old);
-                    }
-                    continue;
-                }
-                None => EvaluatedCellValue::Empty,
-            };
+            let held = self.memo.get_at(sid, coord);
+            if held.is_none() && old.is_none() && self.graph.vertex_at(sheet, coord).is_none() {
+                continue;
+            }
+            let value = held.cloned().unwrap_or(EvaluatedCellValue::Empty);
             if matches!(value, EvaluatedCellValue::Error(FormulaError::Cycle)) {
-                self.cyclic.insert(v);
+                if let Some(v) = self.graph.vertex_at(sheet, coord) {
+                    self.cyclic.insert(v);
+                }
             }
             if old.as_ref() != Some(&value) {
                 changed.push(ChangedCell {
@@ -490,12 +630,18 @@ impl RecalcSession {
         }
         // Edited cells that hold formula text but are not vertices (`=5`, `=TRUE`, a parse error)
         // have a constant value; report it so the caller never has to guess.
-        self.edited.sort_unstable();
-        self.edited.dedup();
-        let timed_out = ctx.expired() && !unfinished.is_empty();
+        let mut edited_all = edited_all;
+        edited_all.sort_unstable();
+        edited_all.dedup();
         // These cells hold constants, so they are read with a fresh clock.
-        let mut ctx = ctx.without_deadline();
-        for &(sheet, coord) in &self.edited {
+        let mut ctx = EvalContext::with_workbook(
+            &self.wb,
+            sheets.first().map_or(1, |s| s.resolved_sheet_id()),
+        )
+        .without_deadline();
+        ctx.memo = std::mem::replace(&mut self.memo, MemoTable::new(1));
+        ctx.rng_state = self.rng_state;
+        for &(sheet, coord) in &edited_all {
             let engine = &sheets[usize::from(sheet)];
             let is_formula_text = engine
                 .cells
@@ -510,21 +656,172 @@ impl RecalcSession {
                 });
             }
         }
-        self.dynamic_circular = ctx.circular;
+        self.dynamic_circular = self.dynamic_circular_pass || ctx.circular;
         self.rng_state = ctx.rng_state;
         self.memo = ctx.memo;
-        self.edited.clear();
         self.dirty.clear();
         for &v in &unfinished {
             self.dirty.insert(v);
         }
         self.resuming = !unfinished.is_empty();
+        let mut seen_anchor = std::collections::HashSet::new();
+        let mut spills: Vec<SpillInfo> = Vec::new();
+        for info in infos.into_iter().rev() {
+            if seen_anchor.insert((info.sheet, info.anchor)) {
+                spills.push(info);
+            }
+        }
+        spills.reverse();
         RecalcOutcome {
             changed,
-            circular: !self.cyclic.is_empty() || self.dynamic_circular,
-            recomputed: order.len() - unfinished.len(),
+            circular: !self.cyclic.is_empty() || self.dynamic_circular || unsettled,
+            recomputed: computed,
             pending: unfinished.len(),
+            timed_out: timed_out && !unfinished.is_empty(),
+            spills,
+        }
+    }
+
+    /// Evaluates the dirty formulas once: the formulas in canonical order, with the pre-pass of the
+    /// full path. What a pass decided about arrays is returned, not yet applied.
+    fn run_round(&mut self) -> Round {
+        // Canonical order: sheet, then row-major, the order the full path hands its targets in.
+        let mut order: Vec<(CellKey, u32)> = Vec::with_capacity(self.dirty.len());
+        self.dirty.for_each(|v| {
+            let (sheet, coord) = self.graph.site(v);
+            order.push((cell_key(sheet, coord), v));
+        });
+        order.sort_unstable();
+
+        let sheets = self.wb.sheets();
+        let mut before: Vec<((u16, PackedCellCoordinate), Option<EvaluatedCellValue>)> =
+            Vec::with_capacity(order.len());
+        let olds: Vec<Option<EvaluatedCellValue>> = order
+            .iter()
+            .map(|&(_, v)| {
+                let (sheet, coord) = self.graph.site(v);
+                self.cyclic.remove(v);
+                self.memo
+                    .remove_at(sheets[usize::from(sheet)].resolved_sheet_id(), coord)
+            })
+            .collect();
+        for (&(_, v), old) in order.iter().zip(&olds) {
+            before.push((self.graph.site(v), old.clone()));
+        }
+
+        let primary_id = sheets.first().map_or(1, |s| s.resolved_sheet_id());
+        let mut ctx =
+            EvalContext::with_workbook(&self.wb, primary_id).with_time_limit(self.budget.max_time);
+        ctx.memo = std::mem::replace(&mut self.memo, MemoTable::new(primary_id));
+        ctx.rng_state = self.rng_state;
+        ctx.spill_budget = Some(
+            crate::spill::MAX_SPILL_CELLS
+                .saturating_sub(sheets.iter().map(|s| s.spill.filled_count()).sum::<usize>()),
+        );
+        let mut roots: Vec<PackedCellCoordinate> = Vec::new();
+        let mut start = 0;
+        while start < order.len() {
+            let sheet = self.graph.site(order[start].1).0;
+            roots.clear();
+            let mut end = start;
+            while end < order.len() && self.graph.site(order[end].1).0 == sheet {
+                roots.push(self.graph.site(order[end].1).1);
+                end += 1;
+            }
+            sheets[usize::from(sheet)].pre_evaluate_dag(&roots, &mut ctx, None);
+            start = end;
+        }
+
+        let mut unfinished = Vec::new();
+        for (&(_, v), old) in order.iter().zip(olds) {
+            let (sheet, coord) = self.graph.site(v);
+            let sid = sheets[usize::from(sheet)].resolved_sheet_id();
+            if ctx.memo.get_at(sid, coord).is_some() {
+                continue;
+            }
+            if ctx.expired() {
+                unfinished.push(v);
+                if let Some(old) = old {
+                    if matches!(old, EvaluatedCellValue::Error(FormulaError::Cycle)) {
+                        self.cyclic.insert(v);
+                    }
+                    ctx.memo.insert_at(sid, coord, old);
+                }
+            }
+        }
+        // A placement decided for an anchor the deadline cut off rests on aborted cells.
+        let pending = if ctx.expired() {
+            Vec::new()
+        } else {
+            std::mem::take(&mut ctx.pending)
+        };
+        self.dynamic_circular_pass = ctx.circular;
+        self.rng_state = ctx.rng_state;
+        let timed_out = ctx.expired();
+        self.memo = ctx.memo;
+        self.dirty.clear();
+        for &v in &unfinished {
+            self.dirty.insert(v);
+        }
+        Round {
+            before,
+            order_len: order.len(),
+            unfinished,
+            pending,
             timed_out,
+        }
+    }
+
+    /// Dirties the anchors a change of the cells `seeds` and `edited` concerns: the anchor whose area a
+    /// cell was written into, and an anchor that could not be placed when a cell its area needs went.
+    fn mark_spill_dirty(
+        &mut self,
+        seeds: &[(u16, PackedCellCoordinate)],
+        freed: &[(u16, PackedCellCoordinate)],
+        edited: Option<&[(u16, PackedCellCoordinate)]>,
+    ) {
+        let sheets = self.wb.sheets();
+        if sheets.iter().all(|s| s.spill.is_empty()) {
+            return;
+        }
+        let touched = edited
+            .unwrap_or(&[])
+            .iter()
+            .chain(freed.iter())
+            .chain(seeds.iter());
+        for &(sheet, coord) in edited.unwrap_or(&[]) {
+            if let Some(anchor) = sheets[usize::from(sheet)].spill.owner_of(coord) {
+                if let Some(v) = self.graph.vertex_at(sheet, anchor) {
+                    self.dirty.insert(v);
+                }
+            }
+        }
+        let cells: Vec<(u16, PackedCellCoordinate)> = touched.copied().collect();
+        for (idx, sheet) in sheets.iter().enumerate() {
+            let blocked: Vec<_> = sheet.spill.blocked().collect();
+            if blocked.is_empty() {
+                continue;
+            }
+            let mine: Vec<PackedCellCoordinate> = cells
+                .iter()
+                .filter(|(s, _)| usize::from(*s) == idx)
+                .map(|&(_, c)| c)
+                .collect();
+            let everything = blocked.len().saturating_mul(mine.len()) > 4_000_000;
+            for (anchor, area) in blocked {
+                let hit = everything
+                    || mine.iter().any(|c| {
+                        c.row() >= anchor.row()
+                            && c.col() >= anchor.col()
+                            && c.row() - anchor.row() < area.rows
+                            && c.col() - anchor.col() < area.cols
+                    });
+                if hit {
+                    if let Some(v) = self.graph.vertex_at(idx as u16, anchor) {
+                        self.dirty.insert(v);
+                    }
+                }
+            }
         }
     }
 
