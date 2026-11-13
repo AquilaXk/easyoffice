@@ -39,6 +39,12 @@ test("the slide toolbar is an rhwp toolbar: icon-above-label buttons with access
   assert.equal(bar.querySelector(".secondary-btn"), null);
 });
 
+test("the slide window's icon toolbar lists only the commands that work on a slide", async () => {
+  const { document } = await openSlide();
+  const shown = document.querySelectorAll("#icon-toolbar .tb-btn").filter((btn) => !btn.hidden && !btn.closest("[hidden]"));
+  assert.deepEqual(shown.map((btn) => btn.dataset.studioCmd), ["clip-copy", "home-style", "insert-table", "insert-shape", "mod-symbol", "insert-link", "palette"]);
+});
+
 test("aspect and transition selects are custom selects over the native state holders", async () => {
   const { document, userClick } = await openSlide();
   for (const [id, label] of [["slide-aspect-select", "16:9"], ["slide-transition-select", "페이드"]]) {

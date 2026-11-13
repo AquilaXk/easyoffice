@@ -34,6 +34,12 @@ test("the PDF toolbar is an rhwp toolbar: icon-above-label buttons, sb-* fields,
   }
 });
 
+test("the PDF window's icon toolbar lists only the commands that work on a PDF", async () => {
+  const { document } = await createWorkspaceHarness({ search: "?module=PDF&win=w-pdf-toolbar-commands" });
+  const shown = document.querySelectorAll("#icon-toolbar .tb-btn").filter((btn) => !btn.hidden && !btn.closest("[hidden]"));
+  assert.deepEqual(shown.map((btn) => btn.dataset.studioCmd), ["palette"]);
+});
+
 // Format selects are the reference app combo boxes: the native select stays as the hidden state holder.
 function assertCombo(document, id) {
   const select = document.getElementById(id);

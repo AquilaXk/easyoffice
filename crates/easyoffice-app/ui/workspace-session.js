@@ -47,6 +47,8 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     // Every ribbon command exists for the five editing modules, so its menu item is enabled in all
     // of them (PD-098: the menu bar reaches every command the ribbon has).
     ...Object.fromEntries(RIBBON_SUFFIX_COMMANDS.map((cmd) => [cmd, RIBBON_MODULES])),
+    // A PDF page has no style, table, shape or link to apply: there these four only answer with a status line.
+    ...Object.fromEntries(["home-style", "insert-table", "insert-shape", "insert-link"].map((cmd) => [cmd, EDIT_MODULES])),
     ...MODULE_SPECIFIC_COMMANDS,
   };
   const TOOLBAR_ID_COMMANDS = {
@@ -537,14 +539,13 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     }
 
     function syncToolbarButtons(mod, commandModule) {
-      // The SHEET home toolbar lists spreadsheet commands only: document-only tools are hidden.
-      const hideInapplicable = mod === "SHEET";
+      // A window's toolbar lists the commands that work in it: the others are hidden.
       for (const btn of document.querySelectorAll("#icon-toolbar button")) {
         const cmd = btn.dataset.studioCmd || TOOLBAR_ID_COMMANDS[btn.id];
         if (!cmd) continue;
         const on = studioCommandApplies(cmd, commandModule);
         btn.disabled = !on;
-        btn.hidden = hideInapplicable && !on;
+        btn.hidden = !on;
         btn.setAttribute("aria-disabled", on ? "false" : "true");
       }
     }
