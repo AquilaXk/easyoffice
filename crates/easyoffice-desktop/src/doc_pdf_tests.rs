@@ -284,3 +284,88 @@ fn a_native_hangul_source_is_drawn_from_its_own_bytes() {
     verify_exported_pdf(&hwp, 1, true).expect("one page");
     assert_searchable(&hwp, "초안");
 }
+
+/// First `/MediaBox` of the PDF as `(width, height)` in points.
+fn first_media_box(pdf: &[u8]) -> (f64, f64) {
+    let text = String::from_utf8_lossy(pdf);
+    let at = text.find("/MediaBox").expect("a media box");
+    let numbers: Vec<f64> = text[at..]
+        .split(['[', ']'])
+        .nth(1)
+        .expect("a box")
+        .split_whitespace()
+        .filter_map(|n| n.parse().ok())
+        .collect();
+    (numbers[2] - numbers[0], numbers[3] - numbers[1])
+}
+
+fn framed_document(landscape: bool) -> RichDocument {
+    use easyoffice_formats::{RichField, RichPageFrame, RichPageMargins, RichPaper};
+    let field = |field| RichRun {
+        field: Some(field),
+        ..RichRun::default()
+    };
+    let mut doc = document(120);
+    doc.page_frame = RichPageFrame {
+        header: vec![RichParagraph {
+            runs: vec![RichRun::plain("쪽머리글 Header")],
+            alignment: Some(RichAlignment::Center),
+            ..RichParagraph::default()
+        }],
+        footer: vec![RichParagraph {
+            runs: vec![
+                RichRun::plain("- "),
+                field(RichField::PageNumber),
+                RichRun::plain(" / "),
+                field(RichField::TotalPages),
+                RichRun::plain(" -"),
+            ],
+            alignment: Some(RichAlignment::Center),
+            ..RichParagraph::default()
+        }],
+        margins: Some(RichPageMargins {
+            top: 1984,
+            bottom: 1700,
+            header: 1134,
+            footer: 850,
+            left: 1701,
+            right: 1701,
+        }),
+        paper: Some(if landscape {
+            RichPaper {
+                width: 16_838,
+                height: 11_906,
+            }
+        } else {
+            RichPaper::A4
+        }),
+    };
+    doc
+}
+
+/// The header and footer of the page and the page numbers come out of the layout on every page, and the paper
+/// of the page setup is the page's size (PD-213).
+#[test]
+fn the_header_footer_and_the_page_setup_of_a_document_are_in_its_pdf() {
+    let Some(fonts) = fonts() else { return };
+    for landscape in [false, true] {
+        let pdf = hwpx_to_pdf(
+            &hwpx(&framed_document(landscape)),
+            &PdfWriteOptions::default(),
+            &fonts,
+        )
+        .expect("pdf");
+        let pages = page_count(&pdf);
+        assert!(pages >= 3, "{pages} pages");
+        verify_exported_pdf(&pdf, pages, true).expect("every page is in the tree");
+        assert_searchable(&pdf, "쪽머리글 Header");
+        let (width, height) = first_media_box(&pdf);
+        assert_eq!(width > height, landscape, "{width} x {height}");
+        // A4 in points (595 x 842), within a point.
+        let (short, long) = (width.min(height), width.max(height));
+        assert!(
+            (short - 595.0).abs() < 2.0 && (long - 842.0).abs() < 2.0,
+            "{short} x {long}"
+        );
+    }
+}
