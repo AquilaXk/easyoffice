@@ -64,7 +64,7 @@ const enabledMenuItems = (document) =>
 // The ribbon commands (suffix after the module prefix) a window kind has no menu item for.
 const PALETTE_ONLY = {
   DOC: [],
-  HWP: [],
+  HWP: ["layout-orientation", "layout-margins"],
   SHEET: ["layout-paper", "layout-orientation", "layout-columns", "layout-margins"],
   SLIDE: ["layout-columns", "data-autosum", "data-fn-browser", "data-sort", "data-validation"],
   PDF: [

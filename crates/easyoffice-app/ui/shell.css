@@ -366,3 +366,4 @@
 #sheet-page-dialog .dialog-body { max-height: calc(100vh - 220px); overflow-y: auto; }
 #sheet-page-dialog .dialog-text-input { flex: 1; min-width: 0; width: auto; }
 #sheet-page-dialog .dialog-row .dialog-label { min-width: 40px; }
+#sheet-page-dialog [data-sp-pane="sheet"] .dialog-label { min-width: 64px; }

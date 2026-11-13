@@ -1,13 +1,13 @@
 (function (host) {
   "use strict";
 
-  // The page setup of the sheet window (PD-213): the 쪽 설정 dialog (paper, orientation, margins, scale and centring on
-  // the 용지 tab; print area, repeated rows and columns, grid lines and headings on the 시트 tab) and the print area
-  // commands. The tabs and the paper, orientation and margin controls are the reference dialog frame of the edit-paper
-  // dialog (`doc-page-setup.js`); the items follow the page setup of the Korean spreadsheet help (용지, 시트 and 머리글/
-  // 바닥글 tabs, 확대/축소 비율, 쪽 맞춤, 인쇄 영역, 반복할 행/열, 눈금선, 행/열 머리글) except 머리글/바닥글, which the
-  // engine has no model for. The setup is the engine's `page` JSON (`sheet_page_json.rs`): margins in thousandths of an
-  // inch, rows and columns 1-based. Each change is one undo step over the layout store (`sheet-view-ui.js`).
+  // The page setup of the sheet window (PD-213): the 쪽 설정 dialog and the print area commands. The tab and item names are
+  // those of the Korean spreadsheet help (쪽 설정: 쪽 / 여백 / 시트): 쪽 (용지 방향, 용지 크기, 배율 with 확대/축소
+  // 배율 and 자동 맞춤 by 용지 너비 and 용지 높이), 여백 (위쪽, 아래쪽, 왼쪽, 오른쪽, 머리글, 꼬리말, 쪽 가운데에 배치), 시트 (인쇄
+  // 영역, 인쇄 제목 with 반복할 행 and 반복할 열, 행/열 머리글, 눈금 선); the 머리글/바닥글 tab, 쪽 순서 and the other print
+  // options have no model in the engine. The orientation cards and the margin grid are the reference editor's edit-paper
+  // dialog frame (`doc-page-setup.js`). The setup is the engine's `page` JSON (`sheet_page_json.rs`): margins in thousandths
+  // of an inch, rows and columns 1-based. Each change is one undo step over the layout store (`sheet-view-ui.js`).
 
   const MM_PER_MIL = 0.0254;
   const MAX_PERCENT = 400;

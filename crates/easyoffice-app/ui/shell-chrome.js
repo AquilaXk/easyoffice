@@ -223,6 +223,9 @@
     "view:zoom-dialog": "view:zoom-dialog",
     "view:toolbar-labels": "view:toolbar-labels",
     "view:form-mode": "view:form-mode",
+    // The reference editor's edit-paper command (`rhwp-studio/src/command/commands/page.ts:221`, F7): it has no
+    // orientation or margin-preset command, so the Hangul window has the one item.
+    "page:paper": "page:setup",
     "page:header": "page:header-create",
     "page:footer": "page:footer-create",
     "table:cell-select": "table:cell-selection-enter",

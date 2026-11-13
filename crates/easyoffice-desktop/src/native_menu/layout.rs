@@ -433,8 +433,6 @@ const PAGE_HWP: MenuSpec = menu(
     "쪽",
     &[
         "page:paper",
-        "page:orientation",
-        "page:margins",
         "page:header",
         "page:footer",
         "page:columns",

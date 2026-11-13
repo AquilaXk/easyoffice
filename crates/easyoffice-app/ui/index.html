@@ -208,8 +208,8 @@
             <button type="button" class="studio-menu-item menu-title" role="menuitem" aria-haspopup="menu" aria-expanded="false" data-menu-cat="layout">쪽</button>
             <div class="menu-dropdown" role="menu">
               <div class="md-item" data-kinds="DOC HWP" data-studio-menu-cmd="layout-paper" role="menuitem" tabindex="-1"><span class="md-label">편집 용지</span></div>
-              <div class="md-item" data-kinds="DOC HWP" data-studio-menu-cmd="layout-orientation" role="menuitem" tabindex="-1"><span class="md-label">용지 방향 전환</span></div>
-              <div class="md-item" data-kinds="DOC HWP" data-studio-menu-cmd="layout-margins" role="menuitem" tabindex="-1"><span class="md-label">여백 전환</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="layout-orientation" role="menuitem" tabindex="-1"><span class="md-label">용지 방향 전환</span></div>
+              <div class="md-item" data-kinds="DOC" data-studio-menu-cmd="layout-margins" role="menuitem" tabindex="-1"><span class="md-label">여백 전환</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-kinds="DOC HWP" data-studio-menu-cmd="mod-header" role="menuitem" tabindex="-1"><span class="md-label">머리말</span></div>
               <div class="md-item" data-kinds="DOC HWP" data-studio-menu-cmd="mod-footer" role="menuitem" tabindex="-1"><span class="md-label">꼬리말</span></div>
@@ -1079,13 +1079,14 @@
       <div class="dialog-wrap">
         <div class="dialog-title"><span id="sheet-page-dialog-title">쪽 설정</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
         <div class="dialog-tabs" role="tablist" aria-label="쪽 설정">
-          <button type="button" class="dialog-tab active" role="tab" id="sp-tab-paper" aria-selected="true" aria-controls="sp-pane-paper" data-sp-tab="paper">용지</button>
+          <button type="button" class="dialog-tab active" role="tab" id="sp-tab-paper" aria-selected="true" aria-controls="sp-pane-paper" data-sp-tab="paper">쪽</button>
+          <button type="button" class="dialog-tab" role="tab" id="sp-tab-margin" aria-selected="false" aria-controls="sp-pane-margin" tabindex="-1" data-sp-tab="margin">여백</button>
           <button type="button" class="dialog-tab" role="tab" id="sp-tab-sheet" aria-selected="false" aria-controls="sp-pane-sheet" tabindex="-1" data-sp-tab="sheet">시트</button>
         </div>
         <div class="dialog-body" id="sp-pane-paper" role="tabpanel" aria-labelledby="sp-tab-paper" data-sp-pane="paper">
           <div class="dialog-section">
-            <div class="dialog-section-title">용지 종류</div>
-            <div class="dialog-row"><select id="sp-paper" class="sb-combo dialog-select" aria-label="용지 종류"><option value="9">A4</option><option value="8">A3</option><option value="12">B4</option><option value="13">B5</option><option value="1">Letter</option><option value="5">Legal</option><option value="0">사용자 정의</option></select></div>
+            <div class="dialog-section-title">용지 크기</div>
+            <div class="dialog-row"><select id="sp-paper" class="sb-combo dialog-select" aria-label="용지 크기"><option value="9">A4</option><option value="8">A3</option><option value="12">B4</option><option value="13">B5</option><option value="1">Letter</option><option value="5">Legal</option><option value="0">사용자 정의</option></select></div>
           </div>
           <div class="dialog-section">
             <div class="dialog-section-title">용지 방향</div>
@@ -1095,23 +1096,25 @@
             </div>
           </div>
           <div class="dialog-section">
-            <div class="dialog-section-title">용지 여백</div>
+            <div class="dialog-section-title">배율</div>
+            <div class="dialog-row"><label class="dialog-checkbox"><input id="sp-scale-percent" type="radio" name="sp-scale" value="percent" /> 확대/축소 배율</label><input id="sp-percent" class="dialog-input" type="number" step="1" min="10" max="400" aria-label="확대/축소 배율" /><span class="dialog-unit">%</span></div>
+            <div class="dialog-row"><label class="dialog-checkbox"><input id="sp-scale-fit" type="radio" name="sp-scale" value="fit" /> 자동 맞춤</label><label class="dialog-label" for="sp-fit-width">용지 너비</label><input id="sp-fit-width" class="dialog-input" type="number" step="1" min="0" max="1000" /><span class="dialog-unit">쪽</span><label class="dialog-label" for="sp-fit-height">용지 높이</label><input id="sp-fit-height" class="dialog-input" type="number" step="1" min="0" max="1000" /><span class="dialog-unit">쪽</span></div>
+          </div>
+        </div>
+        <div class="dialog-body" id="sp-pane-margin" role="tabpanel" aria-labelledby="sp-tab-margin" data-sp-pane="margin" hidden>
+          <div class="dialog-section">
+            <div class="dialog-section-title">여백</div>
             <div class="margin-grid">
               <label class="dialog-label" for="sp-top">위쪽</label><input id="sp-top" class="dialog-input" type="number" step="0.1" min="0" /><span class="dialog-unit">mm</span>
               <label class="dialog-label" for="sp-bottom">아래쪽</label><input id="sp-bottom" class="dialog-input" type="number" step="0.1" min="0" /><span class="dialog-unit">mm</span>
               <label class="dialog-label" for="sp-left">왼쪽</label><input id="sp-left" class="dialog-input" type="number" step="0.1" min="0" /><span class="dialog-unit">mm</span>
               <label class="dialog-label" for="sp-right">오른쪽</label><input id="sp-right" class="dialog-input" type="number" step="0.1" min="0" /><span class="dialog-unit">mm</span>
-              <label class="dialog-label" for="sp-header">머리말</label><input id="sp-header" class="dialog-input" type="number" step="0.1" min="0" /><span class="dialog-unit">mm</span>
+              <label class="dialog-label" for="sp-header">머리글</label><input id="sp-header" class="dialog-input" type="number" step="0.1" min="0" /><span class="dialog-unit">mm</span>
               <label class="dialog-label" for="sp-footer">꼬리말</label><input id="sp-footer" class="dialog-input" type="number" step="0.1" min="0" /><span class="dialog-unit">mm</span>
             </div>
           </div>
           <div class="dialog-section">
-            <div class="dialog-section-title">배율</div>
-            <div class="dialog-row"><label class="dialog-checkbox"><input id="sp-scale-percent" type="radio" name="sp-scale" value="percent" /> 확대/축소 비율</label><input id="sp-percent" class="dialog-input" type="number" step="1" min="10" max="400" aria-label="확대/축소 비율" /><span class="dialog-unit">%</span></div>
-            <div class="dialog-row"><label class="dialog-checkbox"><input id="sp-scale-fit" type="radio" name="sp-scale" value="fit" /> 쪽 맞춤</label><label class="dialog-label" for="sp-fit-width">너비</label><input id="sp-fit-width" class="dialog-input" type="number" step="1" min="0" max="1000" /><span class="dialog-unit">쪽</span><label class="dialog-label" for="sp-fit-height">높이</label><input id="sp-fit-height" class="dialog-input" type="number" step="1" min="0" max="1000" /><span class="dialog-unit">쪽</span></div>
-          </div>
-          <div class="dialog-section">
-            <div class="dialog-section-title">가운데 맞춤</div>
+            <div class="dialog-section-title">쪽 가운데에 배치</div>
             <div class="dialog-row"><label class="dialog-checkbox"><input id="sp-center-h" type="checkbox" /> 가로</label><label class="dialog-checkbox"><input id="sp-center-v" type="checkbox" /> 세로</label></div>
           </div>
         </div>
@@ -1121,13 +1124,13 @@
             <div class="dialog-row"><label class="dialog-label" for="sp-print-area">영역</label><input id="sp-print-area" class="dialog-text-input" type="text" maxlength="1024" autocomplete="off" spellcheck="false" /></div>
           </div>
           <div class="dialog-section">
-            <div class="dialog-section-title">반복할 행과 열</div>
-            <div class="dialog-row"><label class="dialog-label" for="sp-title-rows">행</label><input id="sp-title-rows" class="dialog-text-input" type="text" maxlength="32" autocomplete="off" spellcheck="false" /></div>
-            <div class="dialog-row"><label class="dialog-label" for="sp-title-cols">열</label><input id="sp-title-cols" class="dialog-text-input" type="text" maxlength="32" autocomplete="off" spellcheck="false" /></div>
+            <div class="dialog-section-title">인쇄 제목</div>
+            <div class="dialog-row"><label class="dialog-label" for="sp-title-rows">반복할 행</label><input id="sp-title-rows" class="dialog-text-input" type="text" maxlength="32" autocomplete="off" spellcheck="false" /></div>
+            <div class="dialog-row"><label class="dialog-label" for="sp-title-cols">반복할 열</label><input id="sp-title-cols" class="dialog-text-input" type="text" maxlength="32" autocomplete="off" spellcheck="false" /></div>
           </div>
           <div class="dialog-section">
             <div class="dialog-section-title">인쇄</div>
-            <div class="dialog-row"><label class="dialog-checkbox"><input id="sp-grid" type="checkbox" /> 눈금선</label><label class="dialog-checkbox"><input id="sp-headings" type="checkbox" /> 행/열 머리글</label></div>
+            <div class="dialog-row"><label class="dialog-checkbox"><input id="sp-grid" type="checkbox" /> 눈금 선</label><label class="dialog-checkbox"><input id="sp-headings" type="checkbox" /> 행/열 머리글</label></div>
           </div>
         </div>
         <div class="dialog-status-row"><span id="sp-status" class="dialog-status" role="status" aria-live="polite"></span></div>

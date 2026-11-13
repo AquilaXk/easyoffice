@@ -878,6 +878,10 @@
       // The table of contents asks for its levels first and the dialog's 확인 runs the command with them; the update only rebuilds the page's block.
       if (cmdId === "doc-mod-toc" && !options.toc) return Promise.resolve(getDocToc().open());
       if (cmdId === "doc-mod-toc-update") return Promise.resolve(getDocToc().update());
+      // The Hangul window's edit-paper item is the embedded editor's own command (`page:setup`, F7).
+      if (cmdId === "hwp-layout-paper" && getHwpHost?.()?.isEmbedActive()) {
+        return Promise.resolve(getHwpHost().call("automation.execute", { id: "page:setup", allowDialog: true }).catch(() => {}));
+      }
       // The sheet's paper, orientation and margin commands are the page setup dialog (`sheet-page.js`).
       if (SHEET_PAGE_COMMANDS.has(cmdId)) return Promise.resolve(getSheetController().runSheetStructure("page-setup"));
       // The page break splits the block at the caret in the page, like Ctrl+Enter in the editor.
