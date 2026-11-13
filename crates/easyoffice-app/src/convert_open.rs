@@ -524,11 +524,14 @@ fn decode_response(
                 let sheet_styling = styling_of(styling, name);
                 write_sheet(out, name, cells, sheet_styling, max_rows, max_cols);
             });
-            out.push_str("],\"names\":");
+            out.push(']');
             let names = styling
                 .first()
                 .map_or(&[][..], |(_, st)| &st.defined_names[..]);
-            out.push_str(&crate::sheet_names_json::names_json(names));
+            if !names.is_empty() {
+                out.push_str(",\"names\":");
+                out.push_str(&crate::sheet_names_json::names_json(names));
+            }
             out.push('}');
             return Ok(out);
         }

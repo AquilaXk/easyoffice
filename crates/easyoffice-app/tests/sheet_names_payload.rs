@@ -52,7 +52,10 @@ fn the_names_reach_the_file_and_come_back_as_the_same_list() {
         let opened = open(dst, &bytes);
         assert!(same_list(&opened), "{dst}: {opened}");
         let plain = open(dst, &save(dst, "[]").unwrap());
-        assert!(plain.contains("\"names\":[]"), "{dst}: {plain}");
+        assert!(
+            !plain.contains("\"names\""),
+            "{dst}: a workbook without names says nothing: {plain}"
+        );
     }
 }
 
