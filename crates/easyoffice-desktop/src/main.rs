@@ -18,6 +18,7 @@ mod linux_runtime;
 mod linux_signal;
 mod macos_language;
 mod open_feedback;
+mod open_link;
 mod os_recent;
 mod pdf_edit_budget;
 mod pdf_edit_build;
@@ -405,6 +406,7 @@ fn main() {
             update_check::get_update_notice,
             update_check::set_update_check,
             update_check::open_release_page,
+            open_link::open_link,
             update_install::install_update,
             window_commands::open_document_window,
             window_commands::open_file_in_new_window,
@@ -596,7 +598,7 @@ mod tests {
         );
         assert_eq!(value["windows"], serde_json::json!(["main", "doc-*"]));
         assert_eq!(value["local"], serde_json::json!(true));
-        assert_eq!(app_commands::APP_COMMANDS.len(), 32);
+        assert_eq!(app_commands::APP_COMMANDS.len(), 33);
     }
 
     #[test]

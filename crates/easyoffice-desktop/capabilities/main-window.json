@@ -19,6 +19,7 @@
     "allow-get-update-notice",
     "allow-set-update-check",
     "allow-open-release-page",
+    "allow-open-link",
     "allow-install-update",
     "allow-open-document-window",
     "allow-open-file-in-new-window",

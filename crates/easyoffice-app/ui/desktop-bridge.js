@@ -34,6 +34,7 @@
     open: "open_release_page",
     install: "install_update",
   });
+  const OPEN_LINK_COMMAND = "open_link";
   // Window commands (PD-088). None of them takes or returns a file system path: the Rust side owns
   // the native dialogs, file reads and the path registry; the page only sees names, kinds and bytes.
   const WINDOW_COMMANDS = Object.freeze({
@@ -209,6 +210,9 @@
   const setUpdateCheck = (enabled) => callShell(UPDATE_COMMANDS.set, { enabled: Boolean(enabled) });
   const openReleasePage = () => callShell(UPDATE_COMMANDS.open, {});
   const installUpdate = () => callShell(UPDATE_COMMANDS.install, {});
+  // Opens the web or mail address of a sheet link (PD-218) in the system's program. The shell applies the address policy
+  // again, so it is the one command that takes an address from the page and refuses anything but `http`, `https` and `mailto`.
+  const openLink = (url) => callShell(OPEN_LINK_COMMAND, { url: String(url) });
 
   // Resolves whether the user accepted the named confirmation. Never true without an answer: a
   // refused call rejects, an unknown kind or a missing browser dialog answers no.
@@ -227,5 +231,5 @@
     return callShell(command, args || {});
   }
 
-  host.__EASYOFFICE_DESKTOP_BRIDGE__ = { isAvailable, invokeIpc, saveFile, pdfExport, pdfEdit, systemFonts, getUpdateNotice, setUpdateCheck, openReleasePage, installUpdate, describeShellError, windowCommand, confirm, CONFIRM_BROWSER_TEXT, WINDOW_COMMANDS };
+  host.__EASYOFFICE_DESKTOP_BRIDGE__ = { isAvailable, invokeIpc, saveFile, pdfExport, pdfEdit, systemFonts, getUpdateNotice, setUpdateCheck, openReleasePage, installUpdate, openLink, describeShellError, windowCommand, confirm, CONFIRM_BROWSER_TEXT, WINDOW_COMMANDS };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

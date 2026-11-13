@@ -42,6 +42,7 @@ async function createShellHarness({ engineOverrides = {}, saveFile, confirm } = 
         }
       }
       if (command === "confirm_dialog" && confirm) return confirm(args);
+      if (command === "open_link") return null;
       if (command === "save_document_file") {
         if (!saveFile) throw shellError("save not configured");
         return saveFile(args);
@@ -486,4 +487,15 @@ test("the close prompt wording lives in the shell only: the page holds no text f
   assert.ok(!bridge.includes("변경 내용을 저장할까요"), "the document name and wording come from the shell");
   const rust = readText(new URL("../crates/easyoffice-desktop/src/confirm_dialog.rs", import.meta.url));
   assert.ok(rust.includes('"변경 내용을 저장할까요?"') || rust.includes("의 변경 내용을 저장할까요?"));
+});
+
+test("the bridge opens a sheet link through the shell's open_link command with the window token and the address only", async () => {
+  const { sandbox, calls } = await createShellHarness();
+  await sandbox.__EASYOFFICE_DESKTOP_BRIDGE__.openLink("https://example.com/a?b=1");
+  const call = calls.find((c) => c.command === "open_link");
+  assert.deepEqual(call.args, { url: "https://example.com/a?b=1" });
+  requireShellToken(call.options);
+  const caps = JSON.parse(readText(new URL("../crates/easyoffice-desktop/capabilities/main-window.json", import.meta.url)));
+  assert.ok(caps.permissions.includes("allow-open-link"));
+  assert.ok(readText(new URL("../crates/easyoffice-desktop/src/app_commands.rs", import.meta.url)).includes('"open_link"'));
 });

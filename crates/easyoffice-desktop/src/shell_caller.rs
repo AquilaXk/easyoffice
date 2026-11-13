@@ -171,6 +171,7 @@ mod tests {
             include_str!("pdf_job.rs"),
             include_str!("pdf_edit_job.rs"),
             include_str!("font_catalog.rs"),
+            include_str!("open_link.rs"),
         ];
         let mut checked = 0;
         for source in sources {
