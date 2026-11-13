@@ -6,9 +6,10 @@
 //! `style:print`, `style:scale-to`, `style:scale-to-X`, `style:scale-to-Y`) and 9.1.1 `table:print-ranges`. The
 //! model is `sheet_page.rs`.
 //!
-//! Modifications: ODS keeps the four page margins (the distances of the header and footer belong to a header
-//! style that exists only with a header, so they read back as the usual 0.3 inch), and the rows and columns
-//! repeated on every page (`table:table-header-rows`) are not written or read.
+//! Modifications: the distances of the header and footer (which an ODF page layout holds only for a header that
+//! exists) are kept as the foreign attributes `eo:header-distance` and `eo:footer-distance` of the layout. The
+//! rows and columns repeated on every page (`table:table-header-rows`, `table:table-header-columns`) are read
+//! wherever they are and written when they start at the first row or column.
 
 use std::collections::HashMap;
 use std::fmt::Write;
@@ -16,8 +17,9 @@ use std::fmt::Write;
 use crate::rtf_xml_helpers::{extract_attr_from_fragment, extract_balanced_elements};
 use crate::sheet_page::{
     PageMargins, PageScale, SheetPage, MAX_FIT_PAGES, MAX_MARGIN_MILS, MAX_PRINT_RANGES,
-    PAPER_CHOICES,
+    MAX_TITLE_COLS, MAX_TITLE_ROWS, PAPER_CHOICES,
 };
+use crate::sheet_styling::ods_numfmt::EO_NS;
 use crate::{CellBox, SheetStyling, XmlSanitizer};
 
 const MM_PER_INCH: f64 = 25.4;
@@ -98,12 +100,14 @@ pub(crate) fn styles_xml(layouts: &[SheetPage]) -> Option<String> {
         let (w, h) = if page.landscape { (h, w) } else { (w, h) };
         let m = page.margins.unwrap_or(PageMargins::NORMAL);
         let mut props = format!(
-            "fo:page-width=\"{w}mm\" fo:page-height=\"{h}mm\" style:print-orientation=\"{}\" fo:margin-top=\"{}mm\" fo:margin-bottom=\"{}mm\" fo:margin-left=\"{}mm\" fo:margin-right=\"{}mm\"",
+            "fo:page-width=\"{w}mm\" fo:page-height=\"{h}mm\" style:print-orientation=\"{}\" fo:margin-top=\"{}mm\" fo:margin-bottom=\"{}mm\" fo:margin-left=\"{}mm\" fo:margin-right=\"{}mm\" eo:header-distance=\"{}mm\" eo:footer-distance=\"{}mm\"",
             if page.landscape { "landscape" } else { "portrait" },
             mm(m.top),
             mm(m.bottom),
             mm(m.left),
-            mm(m.right)
+            mm(m.right),
+            mm(m.header),
+            mm(m.footer)
         );
         let centering = match (page.center_horizontal, page.center_vertical) {
             (true, true) => "both",
@@ -147,11 +151,11 @@ pub(crate) fn styles_xml(layouts: &[SheetPage]) -> Option<String> {
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?><office:document-styles ",
             "xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" ",
             "xmlns:style=\"urn:oasis:names:tc:opendocument:xmlns:style:1.0\" ",
-            "xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\" office:version=\"1.2\">",
+            "xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\" xmlns:eo=\"{}\" office:version=\"1.2\">",
             "<office:automatic-styles>{}</office:automatic-styles><office:master-styles>{}</office:master-styles>",
             "</office:document-styles>"
         ),
-        automatic, masters
+        EO_NS, automatic, masters
     ))
 }
 
@@ -276,7 +280,8 @@ fn layout_from(props: &str) -> SheetPage {
             right,
             top,
             bottom,
-            ..PageMargins::NORMAL
+            header: side("eo:header-distance").unwrap_or(PageMargins::NORMAL.header),
+            footer: side("eo:footer-distance").unwrap_or(PageMargins::NORMAL.footer),
         })
         .filter(|m| *m != PageMargins::NORMAL);
     }
@@ -315,6 +320,47 @@ fn layout_properties(inner: &str) -> Option<&str> {
     let at = inner.find("<style:page-layout-properties")?;
     let end = inner[at..].find('>')?;
     Some(&inner[at..at + end + 1])
+}
+
+/// Rows (`table:table-row`) or columns (`table:table-column`) in `fragment`, counting each element's repeat.
+fn count_lines(fragment: &str, tag: &str, repeat: &str) -> u64 {
+    let mut total = 0u64;
+    let mut rest = fragment;
+    while let Some(at) = rest.find(tag) {
+        let after = &rest[at + tag.len()..];
+        let Some(end) = after.find('>') else { break };
+        let head = &after[..end];
+        // `table:table-row-group` and `table:table-rows` are not rows.
+        if head.is_empty() || head.starts_with([' ', '/', '\n', '\t']) {
+            total += extract_attr_from_fragment(head, repeat)
+                .and_then(|v| v.trim().parse::<u64>().ok())
+                .unwrap_or(1)
+                .max(1);
+        }
+        rest = &after[end..];
+    }
+    total
+}
+
+/// The rows or columns a table repeats on every page (`table:table-header-rows` or `table:table-header-columns`) as a
+/// zero-based inclusive run; `None` without one or over `max` lines.
+fn header_run(inner: &str, wrapper: &str, tag: &str, repeat: &str, max: u32) -> Option<(u32, u32)> {
+    let open = format!("<{wrapper}>");
+    let at = inner.find(&open)?;
+    let body_start = at + open.len();
+    let body_end = body_start + inner[body_start..].find(&format!("</{wrapper}>"))?;
+    let before = count_lines(&inner[..at], tag, repeat);
+    let within = count_lines(&inner[body_start..body_end], tag, repeat);
+    if within == 0 || within > u64::from(max) || before > u64::from(u32::MAX) / 2 {
+        return None;
+    }
+    Some((before as u32, (before + within - 1) as u32))
+}
+
+/// The wrappers that write `title` lines at the start of a table (`None` for a run that starts later).
+pub(crate) fn title_end(run: Option<(u32, u32)>) -> Option<u32> {
+    run.filter(|(first, _)| *first == 0)
+        .map(|(_, last)| last + 1)
 }
 
 /// Gives each sheet its page layout (through its table style's master page) and its print ranges. `styles` is
@@ -364,7 +410,7 @@ pub(crate) fn read_pages(
             ))
         })
         .collect();
-    for (attrs, _) in extract_balanced_elements(content, "table:table") {
+    for (attrs, inner) in extract_balanced_elements(content, "table:table") {
         let Some(name) =
             extract_attr_from_fragment(attrs, "table:name").map(XmlSanitizer::unescape)
         else {
@@ -380,6 +426,20 @@ pub(crate) fn read_pages(
         if let Some(layout) = layout {
             styling.page = layout.clone();
         }
+        styling.page.title_rows = header_run(
+            inner,
+            "table:table-header-rows",
+            "<table:table-row",
+            "table:number-rows-repeated",
+            MAX_TITLE_ROWS,
+        );
+        styling.page.title_cols = header_run(
+            inner,
+            "table:table-header-columns",
+            "<table:table-column",
+            "table:number-columns-repeated",
+            MAX_TITLE_COLS,
+        );
         if let Some(ranges) = extract_attr_from_fragment(attrs, "table:print-ranges") {
             let boxes = parse_print_ranges(&XmlSanitizer::unescape(ranges));
             if boxes.len() <= MAX_PRINT_RANGES {

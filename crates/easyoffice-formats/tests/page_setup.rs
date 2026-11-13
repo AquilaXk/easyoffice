@@ -430,7 +430,7 @@ fn a_gutter_that_takes_the_body_away_is_dropped_and_one_over_the_bound_is_zero()
             gutter: MAX_PAGE_MARGIN_TWIPS + 1
         }
     ));
-    let big = docx_with(&format!("<w:pgSz w:w=\"11906\" w:h=\"16838\"/><w:pgMar w:top=\"1440\" w:right=\"1440\" w:bottom=\"1440\" w:left=\"1440\" w:header=\"720\" w:footer=\"720\" w:gutter=\"9000\"/>"));
+    let big = docx_with("<w:pgSz w:w=\"11906\" w:h=\"16838\"/><w:pgMar w:top=\"1440\" w:right=\"1440\" w:bottom=\"1440\" w:left=\"1440\" w:header=\"720\" w:footer=\"720\" w:gutter=\"9000\"/>");
     let back = decode(&big, "g.docx");
     assert_eq!(
         (back.page_frame.margins, back.page_frame.paper),

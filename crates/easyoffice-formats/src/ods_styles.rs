@@ -229,6 +229,10 @@ pub(crate) fn table_columns_xml(styling: &SheetStyling, table: &OdsStyleTable) -
     for &(first, last, _) in &outline.cols {
         cuts.extend([first, last + 1]);
     }
+    let header_end = crate::sheet_styling::ods_page::title_end(styling.page.title_cols);
+    if let Some(end) = header_end {
+        cuts.extend([0, end]);
+    }
     let mut groups = GroupWriter::new(
         "table:table-column-group",
         &outline.cols,
@@ -240,11 +244,18 @@ pub(crate) fn table_columns_xml(styling: &SheetStyling, table: &OdsStyleTable) -
     for pair in cuts.windows(2) {
         let (from, to) = (pair[0], pair[1]);
         let (px, level) = (styling.columns.get(&from).copied(), groups.level(from));
-        if px.is_none() && level == 0 {
+        if px.is_none() && level == 0 && header_end.is_none_or(|end| from >= end) {
             continue;
         }
         match stretches.last_mut() {
-            Some(last) if last.1 == from && last.2 == px && last.3 == level => last.1 = to,
+            Some(last)
+                if last.1 == from
+                    && last.2 == px
+                    && last.3 == level
+                    && header_end != Some(from) =>
+            {
+                last.1 = to
+            }
             _ => stretches.push((from, to, px, level)),
         }
     }
@@ -255,12 +266,19 @@ pub(crate) fn table_columns_xml(styling: &SheetStyling, table: &OdsStyleTable) -
             groups.close_all(&mut xml);
             xml.push_str(&repeated_column(None, from - next));
         }
+        if from == 0 && header_end.is_some() {
+            xml.push_str("<table:table-header-columns>");
+        }
         groups.move_to(&mut xml, from);
         xml.push_str(&repeated_column(
             px.and_then(|px| table.column_style_name(px)).as_deref(),
             to - from,
         ));
         next = to;
+        if header_end == Some(to) {
+            groups.close_all(&mut xml);
+            xml.push_str("</table:table-header-columns>");
+        }
     }
     groups.close_all(&mut xml);
     xml

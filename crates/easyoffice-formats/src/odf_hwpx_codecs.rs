@@ -6,6 +6,7 @@ use crate::rtf_xml_helpers::{
 };
 use crate::sheet_styling::ods_grid::{read_ods_sheets, read_ods_sheets_with_styling};
 use crate::sheet_styling::ods_numfmt::{EO_NS, NUMBER_NS};
+use crate::sheet_styling::ods_page::title_end;
 use crate::sheet_styling::ods_styles::{parse_ods_styling, table_columns_xml, OdsStyleTable};
 use crate::sheet_styling::ods_view::{
     read_freezes, settings_xml, GroupWriter, TabStyles, TABLEOOO_NS,
@@ -484,6 +485,10 @@ impl OdfCodec {
             for (row, col) in rules.table.blank_cells(&st.rules) {
                 grid.entry(row).or_default().entry(col).or_insert(&blank);
             }
+            // The repeated rows are written, empty ones too, so the wrapper has its extent.
+            for row in 0..title_end(st.page.title_rows).unwrap_or(0) {
+                grid.entry(row).or_default();
+            }
             // The rows of a group are written, empty ones too, so the group has its extent.
             for &(first, last, _) in &st.outline.rows {
                 for row in first..=last {
@@ -516,10 +521,14 @@ impl OdfCodec {
             &outline.rows,
             &outline.collapsed_rows,
         );
+        let header_end = styling.and_then(|st| title_end(st.page.title_rows));
         for (row, row_cells) in grid {
             if row > expected_row {
                 groups.close_all(content);
                 push_empty_rows(content, row - expected_row);
+            }
+            if row == 0 && header_end.is_some() {
+                content.push_str("<table:table-header-rows>");
             }
             groups.move_to(content, row);
             content.push_str("<table:table-row>");
@@ -543,6 +552,10 @@ impl OdfCodec {
             }
             content.push_str("</table:table-row>");
             expected_row = row.saturating_add(1);
+            if header_end == Some(row + 1) {
+                groups.close_all(content);
+                content.push_str("</table:table-header-rows>");
+            }
         }
         groups.close_all(content);
         content.push_str("</table:table>");

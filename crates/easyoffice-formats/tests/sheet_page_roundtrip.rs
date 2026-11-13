@@ -270,17 +270,9 @@ fn read_ods(bytes: &[u8]) -> Vec<SheetPage> {
         .collect()
 }
 
-/// What an ODS keeps of a page: no header and footer distances, no repeated rows and columns.
+/// What an ODS keeps of a page: all of it, the repeated lines when they start at the first row and column.
 fn ods_kept(page: &SheetPage) -> SheetPage {
-    let mut kept = page.clone();
-    kept.title_rows = None;
-    kept.title_cols = None;
-    kept.margins = kept.margins.map(|m| PageMargins {
-        header: PageMargins::NORMAL.header,
-        footer: PageMargins::NORMAL.footer,
-        ..m
-    });
-    kept
+    page.clone()
 }
 
 #[test]
@@ -382,5 +374,88 @@ fn hostile_ods_values_are_left_out() {
             .len(),
         1,
         "a range of another sheet reads by its cells, junk is dropped"
+    );
+}
+
+#[test]
+fn repeated_rows_and_columns_and_the_header_distances_round_trip_in_ods() {
+    let page = SheetPage {
+        paper: Some(9),
+        margins: Some(PageMargins {
+            left: 500,
+            right: 600,
+            top: 800,
+            bottom: 900,
+            header: 250,
+            footer: 350,
+        }),
+        title_rows: Some((0, 2)),
+        title_cols: Some((0, 1)),
+        ..SheetPage::default()
+    };
+    let bytes = pack_ods(&["Sheet1"], vec![page.clone()]);
+    let content = part(&bytes, "content.xml");
+    assert!(
+        content.contains("<table:table-header-rows>")
+            && content.contains("<table:table-header-columns>"),
+        "{content}"
+    );
+    assert!(part(&bytes, "styles.xml").contains("eo:header-distance=\"6.35mm\""));
+    assert_eq!(read_ods(&bytes), vec![page.clone()]);
+    assert_eq!(
+        read_ods(&pack_ods(&["Sheet1"], read_ods(&bytes))),
+        vec![page]
+    );
+}
+
+#[test]
+fn repeated_lines_that_start_later_are_read_from_a_file_and_over_the_bounds_are_not() {
+    let bytes = pack_ods(
+        &["Sheet1"],
+        vec![SheetPage {
+            landscape: true,
+            ..SheetPage::default()
+        }],
+    );
+    let content = part(&bytes, "content.xml");
+    let with = |rows: &str, cols: &str| {
+        content.replace("</table:table>", &format!("{rows}{cols}</table:table>"))
+    };
+    // rows 4-5 (after three plain rows with a repeat count), columns 3-4
+    let foreign = with(
+        "<table:table-row table:number-rows-repeated=\"3\"/><table:table-header-rows><table:table-row/><table:table-row/></table:table-header-rows>",
+        "",
+    );
+    let page = read_ods(&replace_part(&bytes, "content.xml", &foreign)).remove(0);
+    assert_eq!(
+        page.title_rows,
+        Some((4, 5)),
+        "after the sheet's first row and three more"
+    );
+    let huge = with("<table:table-header-rows><table:table-row table:number-rows-repeated=\"5000\"/></table:table-header-rows>", "");
+    assert_eq!(
+        read_ods(&replace_part(&bytes, "content.xml", &huge))
+            .remove(0)
+            .title_rows,
+        None,
+        "5000 repeated rows are refused"
+    );
+    let wide = with("", "<table:table-header-columns><table:table-column table:number-columns-repeated=\"65\"/></table:table-header-columns>");
+    assert_eq!(
+        read_ods(&replace_part(&bytes, "content.xml", &wide))
+            .remove(0)
+            .title_cols,
+        None
+    );
+    let groups = with(
+        "<table:table-row-group><table:table-row/></table:table-row-group>",
+        "",
+    );
+    assert_eq!(
+        read_ods(&replace_part(&bytes, "content.xml", &groups))
+            .remove(0)
+            .title_rows,
+        None,
+        "a row group is not a header"
     );
 }

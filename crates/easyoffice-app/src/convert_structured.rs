@@ -43,6 +43,8 @@ const MAX_COLUMN_ENTRIES: usize = 16_384;
 
 pub(crate) type SlideTriple = (String, Vec<String>, String);
 
+// One value per save request; boxing the document would only add a hop for the common variant.
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum StructuredContent {
     /// A document and the page settings a PDF target writes with it.
     Document(RichDocument, PdfWriteOptions),

@@ -42,25 +42,13 @@ fn the_page_setup_reaches_the_file_and_comes_back_as_the_same_key() {
         assert_eq!(page.paper, Some(8), "{dst}");
         assert_eq!(page.scale, PageScale::Percent(85), "{dst}");
         assert_eq!(page.print_area.len(), 2, "{dst}");
-        // An ODS keeps neither the header and footer distances nor the repeated rows and columns.
-        let want = if dst == "xlsx" {
-            PAGE.to_string()
-        } else {
-            PAGE.replace(r#","titleRows":[1,2],"titleCols":[1,1]"#, "")
-                .replace(
-                    r#""header":250,"footer":350"#,
-                    r#""header":300,"footer":300"#,
-                )
-        };
-        if dst == "xlsx" {
-            assert_eq!(
-                (page.title_rows, page.title_cols),
-                (Some((0, 1)), Some((0, 0))),
-                "{dst}"
-            );
-        }
+        assert_eq!(
+            (page.title_rows, page.title_cols),
+            (Some((0, 1)), Some((0, 0))),
+            "{dst}"
+        );
         let opened = open(dst, &bytes);
-        assert!(opened.contains(&want[1..]), "{dst}: {opened}");
+        assert!(opened.contains(&PAGE[1..]), "{dst}: {opened}");
         let plain = open(dst, &save(dst, "").unwrap());
         assert!(
             !plain.contains("\"page\""),
