@@ -43,8 +43,9 @@ test("sheet, formula bar and tab rules use design tokens only (no literal colour
   const rules = ["styles.css", "toolbar.css", "shell.css"].flatMap((name) => rulesFor(read(name), needles));
   assert.ok(rules.length >= 10, "the sheet rules were found");
   for (const { selector, body } of rules) assert.equal(hasColorLiteral(body), false, `${selector} has a literal colour`);
-  const tabRule = rulesFor(read("styles.css"), [".sheet-tab-bar"]).map((r) => r.body).join(" ");
-  assert.ok(tabRule.includes("var(--ui-bg-light)") && tabRule.includes("var(--ui-border-strong)"), "tab bar takes the status-bar surface");
+  const tabRules = rulesFor(read("shell.css"), [".sheet-tab-bar", ".sheet-tab-btn"]).map((r) => r.body).join(" ");
+  assert.ok(tabRules.includes("var(--color-bg)") && tabRules.includes("var(--ui-border-strong)") && tabRules.includes("var(--color-surface-raised)"), "tabs take the reference dialog tab values");
+  assert.equal(/border-radius/.test(tabRules), false, "tabs are square");
   const header = rulesFor(read("styles.css"), [".sheet-table th, .doc-inline-table th"]).map((r) => r.body).join(" ");
   assert.ok(header.includes("var(--ui-bg-light)"), "grid headers use the toolbar background token");
   const selection = rulesFor(read("styles.css"), [".sheet-grid td.selected-cell"]).map((r) => r.body).join(" ");

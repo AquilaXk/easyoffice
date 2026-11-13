@@ -95,10 +95,10 @@
 .tool-dialog .dialog-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .tool-dialog .dialog-row:last-child { margin-bottom: 0; }
 .tool-dialog .dialog-label { min-width: 40px; text-align: right; font-size: var(--font-size-sm); color: var(--color-text); }
-.tool-dialog .dialog-input, .tool-dialog .dialog-text-input, .sheet-filter-panel .dialog-text-input { height: 22px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); caret-color: var(--caret-color); color-scheme: inherit; padding: 0 4px; font-size: var(--font-size-sm); outline: none; box-sizing: border-box; }
+.tool-dialog .dialog-input, .tool-dialog .dialog-text-input, .sheet-filter-panel .dialog-text-input, .sheet-tab-edit { height: 22px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); caret-color: var(--caret-color); color-scheme: inherit; padding: 0 4px; font-size: var(--font-size-sm); outline: none; box-sizing: border-box; }
 .tool-dialog .dialog-input { width: 72px; text-align: right; }
 .tool-dialog .dialog-text-input { width: 120px; }
-.tool-dialog .dialog-input:focus, .tool-dialog .dialog-text-input:focus, .sheet-filter-panel .dialog-text-input:focus { border-color: var(--color-focus-border); box-shadow: 0 0 0 2px var(--ui-focus-soft); }
+.tool-dialog .dialog-input:focus, .tool-dialog .dialog-text-input:focus, .sheet-filter-panel .dialog-text-input:focus, .sheet-tab-edit:focus { border-color: var(--color-focus-border); box-shadow: 0 0 0 2px var(--ui-focus-soft); }
 /* Combo boxes in dialogs size to their content, like the reference's `.dialog-select` (no width, `custom-select.css`: inline-flex, the trigger fills the root). */
 .tool-dialog .custom-select.dialog-select { height: 22px; padding: 0; font-size: var(--font-size-sm); border: 0; background: transparent; outline: none; }
 .tool-dialog .dialog-checkbox { font-size: var(--font-size-sm); display: flex; align-items: center; gap: 4px; cursor: pointer; }
@@ -160,10 +160,13 @@
 .sheet-numfmt-sample.nf-colored { color: var(--nf-color, inherit); }
 .sheet-numfmt-sample.nf-red { color: var(--ui-danger); }
 /* Cell format dialog tabs and panes (PD-207), after the reference editor's tab strip and border dialog (`dialogs.css` 530-570, `table-cell-props.css` 111-190). */
-#sheet-numfmt-dialog .dialog-tabs { display: flex; gap: 0; padding: 0 12px; border-bottom: 1px solid var(--ui-border-strong); background: var(--color-bg); }
-#sheet-numfmt-dialog .dialog-tab { position: relative; margin-bottom: -1px; padding: 5px 14px; border: 1px solid transparent; border-bottom: none; background: transparent; color: var(--color-text-muted); font-size: var(--font-size-sm); cursor: pointer; }
-#sheet-numfmt-dialog .dialog-tab:hover { background: var(--color-accent-bg); color: var(--color-text); }
-#sheet-numfmt-dialog .dialog-tab.active { background: var(--color-surface-raised); color: var(--color-text); border-color: var(--ui-border-strong); border-bottom: 1px solid var(--color-surface-raised); font-weight: bold; }
+/* Tabs: the reference editor's dialog tabs (`dialogs.css` .dialog-tabs/.dialog-tab), also the sheet tab strip (no radius, active tab on the raised surface). The strip's line is an inset shadow so its scroll box does not clip the active tab over it. */
+.dialog-tabs { display: flex; gap: 0; padding: 0 12px; border-bottom: 1px solid var(--ui-border-strong); background: var(--color-bg); }
+.dialog-tab, .sheet-tab-btn { position: relative; margin-bottom: -1px; padding: 5px 14px; border: 1px solid transparent; border-bottom: none; background: transparent; color: var(--color-text-muted); font-size: var(--font-size-sm); cursor: pointer; }
+.dialog-tab:hover, .sheet-tab-btn:hover { background: var(--color-accent-bg); color: var(--color-text); }
+.dialog-tab.active, .sheet-tab-btn.active { background: var(--color-surface-raised); color: var(--color-text); border-color: var(--ui-border-strong); border-bottom: 1px solid var(--color-surface-raised); font-weight: bold; }
+.sheet-tab-bar { display: flex; gap: 0; flex: 0 0 auto; padding: 0 12px; background: var(--color-bg); box-shadow: inset 0 -1px 0 var(--ui-border-strong); overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
+.sheet-tab-btn { flex: 0 0 auto; max-width: 220px; margin-bottom: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #sheet-numfmt-dialog [data-fmt-pane][hidden] { display: none; }
 #sheet-numfmt-dialog [data-fmt-pane="align"] .custom-select.dialog-select, #sheet-numfmt-dialog [data-fmt-pane="align"] .dialog-select { flex: 1; min-width: 0; width: auto; }
 .tool-dialog .dialog-btn-group { display: flex; gap: 0; }
@@ -183,7 +186,7 @@
 .sheet-border-positions button { height: 22px; padding: 0 6px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); font-size: var(--font-size-sm); cursor: pointer; }
 .sheet-border-positions button:hover { background: var(--color-accent-bg); }
 .sheet-border-positions button[aria-pressed="true"] { background: var(--color-primary); border-color: var(--accent-light); color: var(--ui-text-on-accent); }
-.tool-dialog .dialog-btn-group button:focus-visible, .sheet-line-item:focus-visible, .sheet-border-positions button:focus-visible, #sheet-numfmt-dialog .dialog-tab:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: -2px; }
+.tool-dialog .dialog-btn-group button:focus-visible, .sheet-line-item:focus-visible, .sheet-border-positions button:focus-visible, .dialog-tab:focus-visible, .sheet-tab-btn:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: -2px; }
 #sheet-dv-alert-dialog .dialog-body { padding: 16px 20px; line-height: 1.6; white-space: pre-line; }
 /* A text field that holds a range, formula or message fills its row, as the reference's `.formula-input` (dialogs.css:1046) and find field (find-dialog.css:42-47). */
 .sheet-rule-dialog .dialog-text-input { flex: 1; min-width: 0; }
@@ -322,8 +325,8 @@
 .sheet-tab-btn { --tab-color: transparent; }
 /* Sheet tabs (PD-209, sheet-tab-ui.js): the name typed in the tab's place, a tab dragged to another place, and the two dialogs. The dialog values are rhwp-studio's confirm dialog (360px, body padding 16px 20px, line height 1.6). */
 .sheet-tab-btn { transition: transform 0.12s ease; }
-.sheet-tab-btn.dragging { position: relative; z-index: 2; transition: none; background: var(--ui-surface); border-color: var(--ui-border-strong); box-shadow: var(--shadow-dropdown); }
-.sheet-tab-edit { flex: 0 0 auto; box-sizing: border-box; height: 22px; padding: 0 12px; font: inherit; font-size: 12px; color: var(--color-text); background: var(--color-surface); border: 1px solid var(--color-focus-border); border-top: 0; border-radius: 0 0 var(--radius-md) var(--radius-md); outline: none; box-shadow: 0 0 0 2px var(--ui-focus-soft); caret-color: var(--caret-color); }
+.sheet-tab-btn.dragging { z-index: 2; transition: none; background: var(--color-surface-raised); border-color: var(--ui-border-strong); box-shadow: var(--shadow-dropdown); }
+.sheet-tab-edit { flex: 0 0 auto; }
 .sheet-tab-edit[aria-invalid="true"] { border-color: var(--ui-danger-strong); box-shadow: 0 0 0 2px var(--ui-danger-soft); }
 .sheet-tab-dialog { width: min(360px, calc(100vw - 32px)); }
 #sheet-tab-delete-message { margin: 0; padding: 4px 8px; line-height: 1.6; white-space: pre-line; overflow-wrap: anywhere; }
