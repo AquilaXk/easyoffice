@@ -3,7 +3,7 @@
 
   // The name box and the 이름 관리 and 이름 정의 dialogs of the sheet window (PD-214). The labels are those of the
   // Korean spreadsheet help (수식 > 이름 > 이름 정의 / 이름 관리: 이름, 범위, 설명, 참조 영역; the list shows the
-  // name, its scope and what it refers to; 새로 만들기, 편집, 삭제, 닫기). The name box is the cell address field of the
+  // name, its scope and what it refers to; 이름 추가, 이름 편집, 이름 삭제, 닫기; the 수식 menu opens 이름 정의). The name box is the cell address field of the
   // formula bar: a name typed there selects what it refers to, an address selects that range, and a new valid name
   // names the selection; its list opens with the arrow and ends with the 이름 관리 entry. Each change of the list is
   // one undo step (`captureWorkspaceSnapshot` carries the names).
@@ -344,7 +344,8 @@
     }
 
     // The dialog for a new name (prefilled with the selection) or for `def` (the manager's pick).
-    function openEdit(def) {
+    // `fromManager` titles a new name 이름 추가 (the 이름 관리 button); from the 수식 menu it is 이름 정의.
+    function openEdit(def, fromManager) {
       commitIfEditing();
       state.editing = def ? { name: def.name, scope: def.scope ?? null, hidden: def.hidden === true } : null;
       kit.setVal("sheet-name-edit-name", def?.name ?? "");
@@ -352,7 +353,7 @@
       kit.setVal("sheet-name-edit-comment", def?.comment ?? "");
       kit.setVal("sheet-name-edit-refers", def?.refersTo ?? names.refersToOf(getActiveSheetName(), getRange()));
       kit.note("sheet-name-edit-status", "");
-      byId("sheet-name-edit-dialog-title").textContent = def ? "이름 편집" : "이름 정의";
+      byId("sheet-name-edit-dialog-title").textContent = def ? "이름 편집" : fromManager ? "이름 추가" : "이름 정의";
       kit.openDialog("sheet-name-edit-dialog");
       byId("sheet-name-edit-name")?.focus?.();
       return true;
@@ -455,7 +456,7 @@
         const li = ev.target.closest?.("li");
         if (li) openEdit(manageable()[Number(li.dataset.index)]?.def);
       });
-      byId("btn-sheet-names-new")?.addEventListener("click", () => openEdit(null));
+      byId("btn-sheet-names-new")?.addEventListener("click", () => openEdit(null, true));
       byId("btn-sheet-names-edit")?.addEventListener("click", () => {
         const picked = manageable()[state.picked];
         if (picked) openEdit(picked.def);

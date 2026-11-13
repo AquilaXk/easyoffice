@@ -388,3 +388,24 @@ test("선택 영역에서 이름 만들기 names the rows or columns by their la
   assert.equal(t.document.getElementById("sheet-name-create-status").textContent, "만들 이름이 없음");
   assert.deepEqual(t.names.getAll(), []);
 });
+
+test("the buttons and titles are the spreadsheet help's: 이름 추가, 이름 편집, 이름 삭제, 닫기; 이름 정의 from the menu", async () => {
+  const t = await open();
+  t.names.replaceAll([{ name: "A_", refersTo: "Sheet1!$A$1" }], true);
+  await t.act("name-manage");
+  const dialog = t.document.getElementById("sheet-names-dialog");
+  assert.deepEqual([...dialog.querySelectorAll(".dialog-footer .dialog-btn")].map((b) => b.textContent), ["이름 추가", "이름 편집", "이름 삭제", "닫기"]);
+  const title = () => t.document.getElementById("sheet-name-edit-dialog-title").textContent;
+  t.document.getElementById("btn-sheet-names-new").click();
+  await flushAsyncTurns(10);
+  assert.equal(title(), "이름 추가");
+  t.document.getElementById("sheet-name-edit-dialog").close();
+  t.userClick(t.document.querySelector('#sheet-names-list li[data-index="0"]'));
+  t.document.getElementById("btn-sheet-names-edit").click();
+  await flushAsyncTurns(10);
+  assert.equal(title(), "이름 편집");
+  t.document.getElementById("sheet-name-edit-dialog").close();
+  await t.act("name-define");
+  assert.equal(title(), "이름 정의");
+  assert.equal(t.document.getElementById("btn-sheet-name-edit-apply").textContent, "확인");
+});
