@@ -27,34 +27,63 @@ pub(crate) const CONFIG_NS: &str = "urn:oasis:names:tc:opendocument:xmlns:config
 /// Mode value of a split that is a frozen pane (1 is a movable split).
 const FIXED_SPLIT: i64 = 2;
 
-/// The `ta<N>` table styles of a workbook, one per distinct tab colour in first-use order.
+/// What a table style says about its sheet: the tab colour and whether the sheet is hidden
+/// (`table:display="false"`, ODF 1.2 19.680).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct TableProps {
+    pub(crate) color: Option<u32>,
+    pub(crate) hidden: bool,
+}
+
+impl TableProps {
+    fn of(styling: &SheetStyling) -> Self {
+        Self {
+            color: styling.tab_color,
+            hidden: styling.hidden,
+        }
+    }
+}
+
+/// The `ta<N>` table styles of a workbook, one per distinct tab colour and hidden state in
+/// first-use order.
 pub(crate) struct TabStyles {
-    colors: Vec<u32>,
+    props: Vec<TableProps>,
 }
 
 impl TabStyles {
     pub(crate) fn build(stylings: &[SheetStyling]) -> Self {
-        let mut colors: Vec<u32> = Vec::new();
-        for color in stylings.iter().filter_map(|s| s.tab_color) {
-            if !colors.contains(&color) {
-                colors.push(color);
+        let mut props: Vec<TableProps> = Vec::new();
+        for p in stylings.iter().map(TableProps::of) {
+            if p != TableProps::default() && !props.contains(&p) {
+                props.push(p);
             }
         }
-        Self { colors }
+        Self { props }
     }
 
-    pub(crate) fn name(&self, color: u32) -> Option<String> {
-        let at = self.colors.iter().position(|&c| c == color)?;
+    pub(crate) fn name(&self, styling: &SheetStyling) -> Option<String> {
+        let at = self
+            .props
+            .iter()
+            .position(|&p| p == TableProps::of(styling))?;
         Some(format!("ta{}", at + 1))
     }
 
     /// The style elements, for inside `office:automatic-styles`.
     pub(crate) fn xml(&self) -> String {
         let mut xml = String::new();
-        for (i, color) in self.colors.iter().enumerate() {
+        for (i, p) in self.props.iter().enumerate() {
+            let display = if p.hidden {
+                " table:display=\"false\""
+            } else {
+                ""
+            };
+            let color = p.color.map_or(String::new(), |c| {
+                format!(" tableooo:tab-color=\"#{c:06x}\"")
+            });
             let _ = write!(
                 xml,
-                "<style:style style:name=\"ta{}\" style:family=\"table\"><style:table-properties tableooo:tab-color=\"#{color:06x}\"/></style:style>",
+                "<style:style style:name=\"ta{}\" style:family=\"table\"><style:table-properties{display}{color}/></style:style>",
                 i + 1
             );
         }
@@ -62,8 +91,8 @@ impl TabStyles {
     }
 }
 
-/// The tab colour of each `table` style of `automatic_styles`, by style name.
-pub(crate) fn tab_colors(automatic_styles: &str) -> HashMap<String, u32> {
+/// The tab colour and hidden state of each `table` style of `automatic_styles`, by style name.
+pub(crate) fn table_props(automatic_styles: &str) -> HashMap<String, TableProps> {
     let mut out = HashMap::new();
     for (attrs, body) in
         crate::rtf_xml_helpers::extract_tags_with_attrs(automatic_styles, "style:style")
@@ -74,9 +103,13 @@ pub(crate) fn tab_colors(automatic_styles: &str) -> HashMap<String, u32> {
         let color = extract_attr_from_fragment(body, "tableooo:tab-color")
             .and_then(|c| c.strip_prefix('#'))
             .and_then(crate::parse_hex_rgb);
-        if let (Some(name), Some(color)) = (extract_attr_from_fragment(attrs, "style:name"), color)
-        {
-            out.insert(XmlSanitizer::unescape(name), color);
+        let hidden = extract_attr_from_fragment(body, "table:display") == Some("false");
+        let props = TableProps { color, hidden };
+        if let (Some(name), true) = (
+            extract_attr_from_fragment(attrs, "style:name"),
+            props != TableProps::default(),
+        ) {
+            out.insert(XmlSanitizer::unescape(name), props);
         }
     }
     out
@@ -253,20 +286,51 @@ mod tests {
     }
 
     #[test]
-    fn a_tab_colour_is_read_from_its_table_style() {
-        let styles = TabStyles::build(&[SheetStyling {
+    fn a_tab_colour_and_hidden_state_are_read_from_their_table_style() {
+        let blue = SheetStyling {
             tab_color: Some(0x3366CC),
             ..SheetStyling::default()
-        }]);
-        assert_eq!(styles.name(0x3366CC).as_deref(), Some("ta1"));
-        assert_eq!(styles.name(0x111111), None);
-        let colors = tab_colors(&format!(
+        };
+        let hidden = SheetStyling {
+            hidden: true,
+            ..SheetStyling::default()
+        };
+        let both = SheetStyling {
+            hidden: true,
+            ..blue.clone()
+        };
+        let styles = TabStyles::build(&[blue.clone(), hidden.clone(), both.clone(), blue.clone()]);
+        assert_eq!(styles.name(&blue).as_deref(), Some("ta1"));
+        assert_eq!(styles.name(&hidden).as_deref(), Some("ta2"));
+        assert_eq!(styles.name(&both).as_deref(), Some("ta3"));
+        assert_eq!(styles.name(&SheetStyling::default()), None);
+        let read = table_props(&format!(
             "<office:automatic-styles>{}</office:automatic-styles>",
             styles.xml()
         ));
-        assert_eq!(colors.get("ta1"), Some(&0x3366CC));
+        assert_eq!(
+            read.get("ta1"),
+            Some(&TableProps {
+                color: Some(0x3366CC),
+                hidden: false
+            })
+        );
+        assert_eq!(
+            read.get("ta2"),
+            Some(&TableProps {
+                color: None,
+                hidden: true
+            })
+        );
+        assert_eq!(
+            read.get("ta3"),
+            Some(&TableProps {
+                color: Some(0x3366CC),
+                hidden: true
+            })
+        );
         let bad = r##"<style:style style:name="x" style:family="table"><style:table-properties tableooo:tab-color="red"/></style:style>"##;
-        assert!(tab_colors(bad).is_empty());
+        assert!(table_props(bad).is_empty());
     }
 
     #[test]

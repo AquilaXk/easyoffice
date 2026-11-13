@@ -11,7 +11,7 @@ use crate::sheet_styling::ods_view::{
     read_freezes, settings_xml, GroupWriter, TabStyles, TABLEOOO_NS,
 };
 use crate::sheet_styling::sheet_rules::ods_rules::{OdsRuleTable, CALCEXT_NS};
-use crate::sheet_styling::{IdMemo, SheetStyling};
+use crate::sheet_styling::{hides_every_sheet, IdMemo, SheetStyling};
 use crate::{ContainerFamily, EasyOfficeError, XmlSanitizer, ZipArchiveCodec, ZipSecurityPolicy};
 
 /// Unpacked ODF text document (`(title, paragraphs, tables)`).
@@ -322,6 +322,13 @@ impl OdfCodec {
         stylings: &[SheetStyling],
     ) -> Result<Vec<u8>, EasyOfficeError> {
         Self::validate_ods_bounds(sheets, stylings)?;
+        let shown;
+        let stylings = if hides_every_sheet(stylings, sheets.len()) {
+            shown = SheetStyling::with_first_shown(stylings);
+            &shown[..]
+        } else {
+            stylings
+        };
         let style_table = OdsStyleTable::build(stylings);
         let rule_table = OdsRuleTable::build(stylings);
         let tab_styles = TabStyles::build(stylings);
@@ -477,8 +484,7 @@ impl OdfCodec {
             }
         }
         let tab_style = styling
-            .and_then(|st| st.tab_color)
-            .and_then(|color| tab_styles.name(color))
+            .and_then(|st| tab_styles.name(st))
             .map_or(String::new(), |name| {
                 format!(" table:style-name=\"{name}\"")
             });
@@ -599,6 +605,7 @@ impl OdfCodec {
         let (content_xml, _, settings) = Self::extract_parts(bytes, Self::MIMETYPE_ODS)?;
         let mut stylings = parse_ods_styling(&content_xml)?;
         Self::apply_freezes(&mut stylings, settings.as_deref());
+        Self::show_one_sheet(&mut stylings);
         Ok(stylings)
     }
 
@@ -614,6 +621,7 @@ impl OdfCodec {
         let (content_xml, _, settings) = Self::extract_parts(bytes, Self::MIMETYPE_ODS)?;
         let (sheets, mut stylings) = read_ods_sheets_with_styling(&content_xml)?;
         Self::apply_freezes(&mut stylings, settings.as_deref());
+        Self::show_one_sheet(&mut stylings);
         Ok((sheets, stylings))
     }
 
@@ -840,6 +848,13 @@ impl OdfCodec {
         };
 
         Ok((xml.to_string(), meta_xml, settings_xml))
+    }
+
+    /// A workbook shows at least one sheet: a file that hides them all opens on its first.
+    fn show_one_sheet(stylings: &mut [(String, SheetStyling)]) {
+        if !stylings.is_empty() && stylings.iter().all(|(_, s)| s.hidden) {
+            stylings[0].1.hidden = false;
+        }
     }
 
     /// Gives each table the frozen pane `settings.xml` names for its sheet.

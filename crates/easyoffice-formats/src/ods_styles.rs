@@ -9,7 +9,7 @@ use crate::rtf_xml_helpers::{
 };
 use crate::sheet_styling::ods_grid::{repeat_value, walk_ods, OdsCell, OdsSink};
 use crate::sheet_styling::ods_numfmt::{data_style_xml, read_data_styles};
-use crate::sheet_styling::ods_view::{tab_colors, GroupWriter};
+use crate::sheet_styling::ods_view::{table_props, GroupWriter, TableProps};
 use crate::sheet_styling::sheet_look::{ods_border_edge, ods_border_value};
 use crate::sheet_styling::sheet_rules::ods_rules_read::{OdsRuleReader, ValidationSink};
 use crate::sheet_styling::sheet_view::{push_level, Outline, MAX_OUTLINE_LEVEL, MAX_OUTLINE_ROWS};
@@ -314,8 +314,8 @@ fn parse_text_properties(attrs: &str) -> CellStyle {
 pub(crate) struct AutomaticStyles {
     pub(crate) cells: HashMap<String, CellStyle>,
     pub(crate) columns: HashMap<String, u32>,
-    /// Tab colours of the table styles (PD-208).
-    pub(crate) tab_colors: HashMap<String, u32>,
+    /// Tab colours and hidden states of the table styles (PD-208, PD-209).
+    pub(crate) table_props: HashMap<String, TableProps>,
     /// Custom number format codes the cell styles refer to, and how many codes were replaced
     /// with General (PD-193).
     pub(crate) num_fmts: Arc<Vec<String>>,
@@ -326,7 +326,7 @@ pub(crate) fn parse_automatic_styles(content_xml: &str) -> AutomaticStyles {
     let mut styles = AutomaticStyles {
         cells: HashMap::new(),
         columns: HashMap::new(),
-        tab_colors: HashMap::new(),
+        table_props: HashMap::new(),
         num_fmts: Arc::default(),
         num_fmts_rejected: 0,
     };
@@ -336,7 +336,7 @@ pub(crate) fn parse_automatic_styles(content_xml: &str) -> AutomaticStyles {
     else {
         return styles;
     };
-    styles.tab_colors = tab_colors(auto);
+    styles.table_props = table_props(auto);
     let data_codes = read_data_styles(auto);
     let mut num_fmts = NumFmtTable::default();
     for (attrs, body) in extract_tags_with_attrs(auto, "style:style") {
@@ -390,6 +390,7 @@ pub(crate) struct StyleSink<'s> {
     column: u32,
     /// The tab colour, the groups and the open groups (folded or not) of the table being read.
     tab_color: Option<u32>,
+    hidden: bool,
     outline: Outline,
     open_groups: [Vec<bool>; 2],
     grouped: [u64; 2],
@@ -406,6 +407,7 @@ impl<'s> StyleSink<'s> {
             row: 0,
             column: 0,
             tab_color: None,
+            hidden: false,
             outline: Outline::default(),
             open_groups: [Vec::new(), Vec::new()],
             grouped: [0, 0],
@@ -464,9 +466,12 @@ impl OdsSink for StyleSink<'_> {
         self.cells = BTreeMap::new();
         self.row = 0;
         self.column = 0;
-        self.tab_color = attrs
+        let props = attrs
             .get("table:style-name")
-            .and_then(|n| self.styles.tab_colors.get(&*n).copied());
+            .and_then(|n| self.styles.table_props.get(&*n).copied())
+            .unwrap_or_default();
+        self.tab_color = props.color;
+        self.hidden = props.hidden;
         self.outline = Outline::default();
         self.open_groups = [Vec::new(), Vec::new()];
         self.grouped = [0, 0];
@@ -550,6 +555,7 @@ impl OdsSink for StyleSink<'_> {
                 0
             },
             tab_color: self.tab_color.take(),
+            hidden: std::mem::take(&mut self.hidden),
             outline: std::mem::take(&mut self.outline),
             ..SheetStyling::default()
         };

@@ -253,11 +253,22 @@ pub struct SheetStyling {
     pub freeze: Option<Freeze>,
     /// Colour of the sheet's tab as `0xRRGGBB` (PD-208).
     pub tab_color: Option<u32>,
+    /// The sheet is hidden: it has no tab until the user shows it again (PD-209).
+    pub hidden: bool,
     /// Row and column groups and the groups the user folded (PD-208).
     pub outline: Outline,
 }
 
 impl SheetStyling {
+    /// `stylings` with the first sheet shown (see [`hides_every_sheet`]).
+    pub(crate) fn with_first_shown(stylings: &[SheetStyling]) -> Vec<SheetStyling> {
+        let mut shown = stylings.to_vec();
+        if let Some(first) = shown.first_mut() {
+            first.hidden = false;
+        }
+        shown
+    }
+
     pub fn is_empty(&self) -> bool {
         self.cells.is_empty()
             && self.columns.is_empty()
@@ -268,6 +279,7 @@ impl SheetStyling {
             && self.filter.is_none()
             && self.freeze.is_none()
             && self.tab_color.is_none()
+            && !self.hidden
             && self.outline.is_empty()
     }
 
@@ -286,6 +298,13 @@ impl SheetStyling {
             || xlsx_layout::run_contains(&self.outline.collapsed_rows, row)
             || self.filter.as_ref().is_some_and(|f| f.hides(row))
     }
+}
+
+/// Whether `stylings` hide every one of the `count` sheets of a workbook. A workbook shows at
+/// least one sheet, so a writer shows the first one and a reader does the same (PD-209); the page
+/// never sends or keeps such a state, a file made by another program might have it.
+pub(crate) fn hides_every_sheet(stylings: &[SheetStyling], count: usize) -> bool {
+    count > 0 && stylings.len() >= count && stylings[..count].iter().all(|s| s.hidden)
 }
 
 /// Formats a size in hundredths of a point without trailing zeros (`1125` -> `11.25`).

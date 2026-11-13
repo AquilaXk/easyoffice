@@ -2,6 +2,7 @@
 //! answer, the save request and the row/column edit of a sheet session (PD-208).
 //!
 //! `freeze`: `{"rows": n, "cols": n}`, the counts of frozen rows and columns. `tabColor`: `rrggbb`.
+//! `hidden`: `true` for a sheet without a tab (PD-209).
 //! `outline`: `{"rows": [[first, last, level], ...], "cols": [...], "foldedRows": [[first, last], ...],
 //! "foldedCols": [...], "summaryAbove": bool, "summaryLeft": bool}`, 1-based and inclusive; a level
 //! is 1 to 7 and a folded run lies inside a group. Input over a limit is refused, not trimmed.
@@ -121,7 +122,7 @@ pub(crate) fn parse_outline(v: &StrictJsonValue) -> Result<Outline, EasyOfficeEr
     Ok(outline)
 }
 
-/// Reads `freeze`, `tabColor` and `outline` of a sheet object into `styling`.
+/// Reads `freeze`, `tabColor`, `hidden` and `outline` of a sheet object into `styling`.
 pub(crate) fn parse_view(
     obj: &[(String, StrictJsonValue)],
     styling: &mut SheetStyling,
@@ -135,6 +136,9 @@ pub(crate) fn parse_view(
                 .and_then(parse_hex_rgb)
                 .ok_or_else(|| bad("tabColor"))?,
         );
+    }
+    if let Some(v) = StrictJsonValue::get_field(obj, "hidden") {
+        styling.hidden = v.as_bool().ok_or_else(|| bad("hidden"))?;
     }
     if let Some(v) = StrictJsonValue::get_field(obj, "outline") {
         styling.outline = parse_outline(v)?;
@@ -184,7 +188,7 @@ pub(crate) fn outline_json(outline: &Outline) -> String {
     out
 }
 
-/// `,"freeze":..,"tabColor":..,"outline":..` for the parts that are set.
+/// `,"freeze":..,"tabColor":..,"hidden":true,"outline":..` for the parts that are set.
 pub(crate) fn write_view(out: &mut String, styling: &SheetStyling) {
     if let Some(f) = styling.freeze {
         let _ = write!(
@@ -195,6 +199,9 @@ pub(crate) fn write_view(out: &mut String, styling: &SheetStyling) {
     }
     if let Some(rgb) = styling.tab_color {
         let _ = write!(out, ",\"tabColor\":\"{rgb:06x}\"");
+    }
+    if styling.hidden {
+        out.push_str(",\"hidden\":true");
     }
     if !styling.outline.is_empty() {
         let _ = write!(out, ",\"outline\":{}", outline_json(&styling.outline));
@@ -216,14 +223,15 @@ mod tests {
 
     #[test]
     fn the_view_round_trips_through_json() {
-        let text = r#"{"freeze":{"rows":2,"cols":1},"tabColor":"3366cc","outline":{"rows":[[3,4,1],[5,6,2],[7,9,1]],"cols":[[2,3,1]],"foldedRows":[[5,6]],"summaryAbove":true}}"#;
+        let text = r#"{"freeze":{"rows":2,"cols":1},"tabColor":"3366cc","hidden":true,"outline":{"rows":[[3,4,1],[5,6,2],[7,9,1]],"cols":[[2,3,1]],"foldedRows":[[5,6]],"summaryAbove":true}}"#;
         let styling = read(text).unwrap();
         assert_eq!(styling.freeze, Freeze::new(2, 1));
         assert_eq!(styling.tab_color, Some(0x3366CC));
+        assert!(styling.hidden);
         assert_eq!(styling.outline.rows, vec![(2, 3, 1), (4, 5, 2), (6, 8, 1)]);
         let mut out = String::new();
         write_view(&mut out, &styling);
-        let want = r#","freeze":{"rows":2,"cols":1},"tabColor":"3366cc","outline":{"rows":[[3,4,1],[5,6,2],[7,9,1]],"cols":[[2,3,1]],"foldedRows":[[5,6]],"summaryAbove":true}"#;
+        let want = r#","freeze":{"rows":2,"cols":1},"tabColor":"3366cc","hidden":true,"outline":{"rows":[[3,4,1],[5,6,2],[7,9,1]],"cols":[[2,3,1]],"foldedRows":[[5,6]],"summaryAbove":true}"#;
         assert_eq!(out, want);
         assert_eq!(read(&format!("{{{}}}", &out[1..])).unwrap(), styling);
     }
@@ -241,6 +249,9 @@ mod tests {
             r##"{"tabColor":"#3366cc"}"##,
             r#"{"tabColor":"33"}"#,
             r#"{"tabColor":7}"#,
+            r#"{"hidden":"yes"}"#,
+            r#"{"hidden":1}"#,
+            r#"{"hidden":null}"#,
             r#"{"outline":{"rows":[[1,3,8]]}}"#,
             r#"{"outline":{"rows":[[1,3,0]]}}"#,
             r#"{"outline":{"rows":[[0,3,1]]}}"#,
