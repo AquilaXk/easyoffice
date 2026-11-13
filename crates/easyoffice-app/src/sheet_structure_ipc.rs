@@ -13,7 +13,9 @@
 //! `hiddenRows`, `hiddenCols`, `filter` (`null` when the edit removed it; `filterReapply: true` when
 //! it dropped a column's condition, so the page evaluates the others again), `widths` and the
 //! `outline` and `rules` that changed. `{"refused":"structure"}`
-//! means the edit changes too many formulas and nothing changed; `{"expired":true}` and
+//! means the edit changes too many formulas and nothing changed; `{"refused":"protected"}` means the
+//! request's `protect` (the sheet's protection, `sheet_protect_json`) locks that edit (PD-216), and the
+//! allowed ranges and `unlockedRows`, `unlockedCols` of the request move with the cells; `{"expired":true}` and
 //! `{"refused":"limit"}` are as for `apply`.
 
 use crate::sheet_filter_json::{filter_json, parse_filter};
@@ -21,12 +23,14 @@ use crate::sheet_layout_json::{
     merges_json, parse_hidden_cols, parse_hidden_rows, parse_merges, runs_json,
 };
 use crate::sheet_page_json::moved_page_json;
+use crate::sheet_protect_json::{moved_protect_json, moved_runs_json, parse_protection};
 use crate::sheet_rules_json::{parse_rules, rules_json};
 use crate::sheet_session::{session_id, write_changed, Applied, EXPIRED, REFUSED};
 use crate::sheet_view_json::{outline_json, parse_outline};
 use crate::EasyOfficeIpcRouter;
 use easyoffice_formats::{
-    CellBox, EasyOfficeError, SheetRules, StrictJsonValue, MAX_COLUMN_PX, MIN_COLUMN_PX,
+    CellBox, EasyOfficeError, SheetRules, StrictJsonValue, DELETE_COLUMNS, DELETE_ROWS,
+    INSERT_COLUMNS, INSERT_ROWS, MAX_COLUMN_PX, MIN_COLUMN_PX,
 };
 use easyoffice_sheet::{
     shift_boxes, shift_filter, shift_outline, shift_rules, shift_runs, shift_widths, Axis,
@@ -61,6 +65,19 @@ fn parse_edit(entries: &Entries) -> Result<AxisEdit, EasyOfficeError> {
     };
     let at = number("at")?.checked_sub(1).ok_or_else(|| invalid("at"))?;
     AxisEdit::new(axis, kind, at, number("count")?)
+}
+
+/// The answer for an edit the sheet's protection locks.
+const REFUSED_PROTECTED: &str = "{\"refused\":\"protected\"}";
+
+/// The protection flag an edit needs (PD-216).
+fn edit_flag(edit: &AxisEdit) -> u16 {
+    match (edit.kind, edit.axis) {
+        (EditKind::Insert, Axis::Row) => INSERT_ROWS,
+        (EditKind::Insert, Axis::Col) => INSERT_COLUMNS,
+        (EditKind::Delete, Axis::Row) => DELETE_ROWS,
+        (EditKind::Delete, Axis::Col) => DELETE_COLUMNS,
+    }
 }
 
 /// `[[column, px], ...]`, 1-based columns.
@@ -118,6 +135,17 @@ fn moved_layout_json(
     }
     if let Some(v) = field("page") {
         let _ = write!(out, ",\"page\":{}", moved_page_json(v, edit)?);
+    }
+    if let Some(v) = field("protect").filter(|v| !matches!(v, StrictJsonValue::Null)) {
+        let _ = write!(out, ",\"protect\":{}", moved_protect_json(v, edit)?);
+    }
+    if let Some(v) = field("unlockedRows") {
+        let moved = moved_runs_json(v, edit, Axis::Row, "unlockedRows")?;
+        let _ = write!(out, ",\"unlockedRows\":{moved}");
+    }
+    if let Some(v) = field("unlockedCols") {
+        let moved = moved_runs_json(v, edit, Axis::Col, "unlockedCols")?;
+        let _ = write!(out, ",\"unlockedCols\":{moved}");
     }
     if let Some(v) = field("outline") {
         let moved = shift_outline(&parse_outline(v)?, edit);
@@ -238,6 +266,13 @@ impl EasyOfficeIpcRouter {
             .filter(|s| !s.is_empty())
             .ok_or_else(|| invalid("sheet"))?;
         let edit = parse_edit(entries)?;
+        if let Some(v) = StrictJsonValue::get_field(entries, "protect")
+            .filter(|v| !matches!(v, StrictJsonValue::Null))
+        {
+            if !parse_protection(v)?.allows(edit_flag(&edit)) {
+                return Ok(REFUSED_PROTECTED.to_string());
+            }
+        }
         // The page's own parts move first, so a bad request fails before the session changes.
         let mut moved = String::new();
         moved_layout_json(entries, &edit, &mut moved)?;

@@ -532,6 +532,13 @@ fn decode_response(
                 out.push_str(",\"names\":");
                 out.push_str(&crate::sheet_names_json::names_json(names));
             }
+            if let Some(book) = styling
+                .first()
+                .and_then(|(_, st)| st.workbook_protect.as_ref())
+            {
+                out.push_str(",\"workbookProtect\":");
+                out.push_str(&crate::sheet_protect_json::workbook_protect_json(book));
+            }
             out.push('}');
             return Ok(out);
         }

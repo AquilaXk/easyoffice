@@ -48,6 +48,8 @@ mod sheet_names_ipc_tests;
 mod sheet_names_json;
 mod sheet_page_json;
 mod sheet_pivot_ipc;
+mod sheet_protect_ipc;
+mod sheet_protect_json;
 mod sheet_refs_ipc;
 #[cfg(test)]
 mod sheet_refs_ipc_tests;

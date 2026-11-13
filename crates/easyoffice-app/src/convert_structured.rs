@@ -187,6 +187,10 @@ pub(crate) fn parse_structured_content(
         if let (Some(names), Some(first)) = (field(entries, "names"), stylings.first_mut()) {
             first.defined_names = crate::sheet_names_json::parse_names_for_save(names)?;
         }
+        if let (Some(book), Some(first)) = (field(entries, "workbookProtect"), stylings.first_mut())
+        {
+            first.workbook_protect = crate::sheet_protect_json::parse_workbook_protect(book)?;
+        }
         return Ok(Some((
             StructuredContent::Workbook(sheets, stylings),
             vec![],

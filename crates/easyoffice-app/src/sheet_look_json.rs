@@ -1,6 +1,9 @@
 //! Alignment, wrapping and borders of a cell in the save payload and the open payload (PD-207):
 //! `{"ha":"center","va":"top","wrap":true,"bd":{"t":"thin:112233","r":"double:000000"}}`.
 //!
+//! `unlocked`, `locked` and `hideFormula` are the protection flags of the cell (PD-216): unlocked, kept locked
+//! inside an unlocked row or column, and a formula the protected sheet does not show.
+//!
 //! `ha` is `left|center|right`, `va` is `top|middle|bottom`, `bd` maps the sides `t`, `r`, `b`, `l`
 //! to `<line>:<rrggbb>` with a line of `thin|thick|dashed|dotted|double`. A value outside these is
 //! an error: the payload is rejected as a whole and nothing is written.
@@ -74,6 +77,22 @@ pub(crate) fn parse_look(obj: &JsonObject, style: &mut CellStyle) -> Result<(), 
     if let Some(v) = field(obj, "bd") {
         style.borders = parse_borders(v)?;
     }
+    for (key, slot) in [
+        ("unlocked", &mut style.unlocked),
+        ("locked", &mut style.force_locked),
+        ("hideFormula", &mut style.formula_hidden),
+    ] {
+        if let Some(v) = field(obj, key) {
+            *slot = v
+                .as_bool()
+                .ok_or_else(|| invalid(format!("구조화 저장: '{key}'는 true/false여야 합니다.")))?;
+        }
+    }
+    if style.unlocked && style.force_locked {
+        return Err(invalid(
+            "구조화 저장: 'unlocked'와 'locked'는 함께 쓸 수 없습니다.",
+        ));
+    }
     Ok(())
 }
 
@@ -97,6 +116,16 @@ pub(crate) fn write_look(out: &mut String, style: &CellStyle, wrote: &mut bool) 
     if style.wrap {
         key(out, "wrap");
         out.push_str("true");
+    }
+    for (on, name) in [
+        (style.unlocked, "unlocked"),
+        (style.force_locked, "locked"),
+        (style.formula_hidden, "hideFormula"),
+    ] {
+        if on {
+            key(out, name);
+            out.push_str("true");
+        }
     }
     if !style.borders.is_none() {
         key(out, "bd");

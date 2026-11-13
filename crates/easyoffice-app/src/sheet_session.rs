@@ -733,6 +733,8 @@ impl EasyOfficeIpcRouter {
     ///   PD-198).
     /// - `sort` `{keys:[{asc, values}], caseSensitive?}` -> `{order}`, the stable row order of the
     ///   keys (no session needed, see `sheet_sort_ipc`, PD-203).
+    /// - `protectHash` `{password, kind}` -> `{pwd}` and `protectVerify` `{pwd, password}` -> `{ok}` (no
+    ///   session needed, see `sheet_protect_ipc`, PD-216).
     /// - `close` `{session}` -> `{closed}`.
     pub(crate) fn handle_sheet_session_action(
         action: &str,
@@ -753,6 +755,8 @@ impl EasyOfficeIpcRouter {
             "format" => Self::sheet_format(entries),
             "filter" => Self::sheet_filter(entries),
             "sort" => Self::sheet_sort(entries),
+            "protectHash" => Self::sheet_protect_hash(entries),
+            "protectVerify" => Self::sheet_protect_verify(entries),
             "close" => {
                 let closed = registry().close(session_id(entries)?, owner);
                 Ok(format!("{{\"closed\":{closed}}}"))

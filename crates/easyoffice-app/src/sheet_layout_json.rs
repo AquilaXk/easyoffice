@@ -122,6 +122,7 @@ pub(crate) fn parse_layout(
     }
     crate::sheet_view_json::parse_view(obj, styling)?;
     crate::sheet_page_json::parse_page(obj, styling)?;
+    crate::sheet_protect_json::parse_sheet_protect(obj, styling)?;
     Ok(())
 }
 
@@ -175,6 +176,7 @@ pub(crate) fn write_layout_split(
     }
     crate::sheet_view_json::write_view(out, styling);
     crate::sheet_page_json::write_page(out, styling);
+    crate::sheet_protect_json::write_sheet_protect(out, styling);
 }
 
 #[cfg(test)]
