@@ -163,7 +163,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
   function cellDigest(ref, entry, seed) {
     if (!entry || typeof entry !== "object") return 0;
     const { value, formula, style } = entry;
-    const plain = Object.keys(entry).length <= 3 && (value === undefined || typeof value === "string") &&
+    const plain = Object.keys(entry).length <= 3 && entry.link === undefined && (value === undefined || typeof value === "string") &&
       (formula === undefined || typeof formula === "string") && (style === undefined || (style && typeof style === "object"));
     let h = fnvStep(seed, ref);
     if (plain) {

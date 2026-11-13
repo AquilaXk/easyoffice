@@ -673,6 +673,9 @@
         case "sheet-mod-condfmt":
           sheetController.openConditionalFormatDialog();
           break;
+        case "sheet-insert-link":
+          sheetController.openHyperlinkDialog();
+          break;
         case "sheet-mod-freeze":
           void sheetController.runSheetStructure("freeze-selection");
           break;
@@ -891,7 +894,7 @@
 
     // 대화상자를 여는 명령은 상태 줄을 바꾸지 않는다.
     const SHEET_PAGE_COMMANDS = new Set(["sheet-layout-paper", "sheet-layout-orientation", "sheet-layout-margins"]);
-    const DIALOG_COMMANDS = new Set(["sheet-mod-pivot", "sheet-mod-condfmt", "sheet-mod-freeze", "pdf-mod-highlight", "doc-mod-toc"]);
+    const DIALOG_COMMANDS = new Set(["sheet-mod-pivot", "sheet-mod-condfmt", "sheet-insert-link", "sheet-mod-freeze", "pdf-mod-highlight", "doc-mod-toc"]);
 
     function executeTrackedRibbonCommand(cmdId, options = {}) {
       // The highlight command asks for its phrase, kind and color first; the dialog's 확인 runs it again with them.

@@ -233,6 +233,10 @@
         cellEntry.spillRows = prevEntry.spillRows;
         cellEntry.spillCols = prevEntry.spillCols;
       }
+      // A hyperlink (PD-218) stays while the cell's text is the one it was made for; a write removes it.
+      if (prevEntry?.link && (prevEntry.formula || "") === formula && (formula !== "" || prevEntry.value === value)) {
+        cellEntry.link = prevEntry.link;
+      }
       map[ref] = cellEntry;
       if (value !== "" || formula !== "") {
         const packed = gridUtils.packRef(ref);
@@ -846,6 +850,8 @@
       onFilled: () => grid.repaintNumFmt(),
     });
     const structure = host.__EASYOFFICE_CREATE_SHEET_STRUCTURE__({
+      gridUtils,
+      applyCellEdits,
       document,
       sheetDataStore,
       sheetRowCounts,
@@ -961,6 +967,7 @@
       applySheetFormatCommand: format.applyCommand,
       openConditionalFormatDialog: () => rulesUi.openConditionalFormatDialog(),
       openDataValidationDialog: () => rulesUi.openDataValidationDialog(),
+      openHyperlinkDialog: structure.openHyperlink,
       openPivotDialog: () => rulesUi.openPivotDialog(),
       getSheetRules: () => sheetRules.getAll(),
       getColumnWidths: grid.getAllWidths,

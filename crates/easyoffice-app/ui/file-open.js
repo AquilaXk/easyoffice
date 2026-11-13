@@ -324,6 +324,7 @@
           if (m) maxRow = Math.max(maxRow, Number(m[1]));
         }
       });
+      host.__EASYOFFICE_SHEET_LINK__?.attach(map, sheet.links);
       store[sheet.name] = map;
       rowCounts[sheet.name] = Math.max(12, maxRow);
       const widths = columnWidthMap(sheet.columns);

@@ -33,6 +33,7 @@ const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/pii-dom-scrubber.js",
   "../crates/easyoffice-app/ui/sheet-rules.js",
   "../crates/easyoffice-app/ui/sheet-names.js",
+  "../crates/easyoffice-app/ui/sheet-link.js",
   "../crates/easyoffice-app/ui/sheet-spill.js",
   "../crates/easyoffice-app/ui/sheet-store.js",
   "../crates/easyoffice-app/ui/ribbon-catalog.js",
@@ -97,6 +98,7 @@ const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/sheet-page.js",
   "../crates/easyoffice-app/ui/sheet-page-print.js",
   "../crates/easyoffice-app/ui/sheet-names-ui.js",
+  "../crates/easyoffice-app/ui/sheet-link-ui.js",
   "../crates/easyoffice-app/ui/sheet-protect-ui.js",
   "../crates/easyoffice-app/ui/sheet-protect-ranges.js",
   "../crates/easyoffice-app/ui/sheet-outline-ui.js",
@@ -648,6 +650,7 @@ class MiniElement extends MiniNode {
       data: ev.data ?? null,
       clientX: ev.clientX ?? 0,
       clientY: ev.clientY ?? 0,
+      timeStamp: ev.timeStamp ?? 0,
       defaultPrevented: false,
       preventDefault() {
         this.defaultPrevented = true;

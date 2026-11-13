@@ -48,6 +48,7 @@
       captureWorkspaceSnapshot,
     } = deps;
     const rulesApi = host.__EASYOFFICE_SHEET_RULES__;
+    const linkApi = host.__EASYOFFICE_SHEET_LINK__;
     const protectApi = host.__EASYOFFICE_SHEET_PROTECT__;
     const menu = () => document.getElementById("sheet-header-menu");
     // The auto filter (PD-198) shares this module's menu wiring and undo steps.
@@ -74,6 +75,9 @@
 
     // The name box and the defined names dialogs (PD-214).
     const namesUi = host.__EASYOFFICE_CREATE_SHEET_NAMES_UI__({ ...deps, kit: host.__EASYOFFICE_CREATE_SHEET_DIALOG_KIT__(document) });
+
+    // The hyperlink dialog and the click on a link cell (PD-218).
+    const linkUi = host.__EASYOFFICE_CREATE_SHEET_LINK_UI__(deps);
 
     // Sheet and workbook protection and the ranges a protected sheet allows (PD-216).
     const protectUi = host.__EASYOFFICE_CREATE_SHEET_PROTECT_UI__(deps);
@@ -119,13 +123,15 @@
         unlockedCols: json.unlockedCols || [],
         widths: pairsOf(grid.getAllWidths()[name]),
         rules,
+        // The in-workbook targets of the cell links move with the cells (PD-218).
+        ...linkApi?.requestField(sheetDataStore),
       };
     }
 
     // The answer applied to the model: cells move, rewritten formulas replace their text, the layout,
     // widths and rules of the engine replace the page's.
     function applyAnswer(name, edit, answer) {
-      const nextSheets = {};
+      let nextSheets = {};
       for (const sheet of Object.keys(sheetDataStore)) nextSheets[sheet] = sheetDataStore[sheet];
       const old = sheetDataStore[name] || {};
       const moved = {};
@@ -138,6 +144,7 @@
         const entry = nextSheets[f.sheet]?.[f.cell];
         if (entry) entry.formula = f.value;
       }
+      if (linkApi && answer.linkTargets) nextSheets = linkApi.retarget(nextSheets, answer.linkTargets);
       const rowCounts = { ...sheetRowCounts };
       if (edit.axis === "row") {
         const current = getSheetRowCount(name);
@@ -334,6 +341,7 @@
       ...namesUi.actions,
       ...protectUi.actions,
       ...rangesUi.actions,
+      ...linkUi.actions,
       "tab-add": () => tabs.insert(null),
       ...tabs.actions,
       "sort-dialog": () => Promise.resolve(sortUi.open()),
@@ -454,6 +462,7 @@
       namesUi.bind();
       protectUi.bind();
       rangesUi.bind();
+      linkUi.bind();
       const viewport = document.getElementById("sheet-viewport");
       viewport?.addEventListener("dblclick", onDblClick);
       viewport?.addEventListener("contextmenu", onContextMenu);
@@ -485,7 +494,7 @@
       outlineUi.render();
     }
 
-    return { run, bind, closeMenu, refreshSheetChrome };
+    return { run, bind, closeMenu, refreshSheetChrome, openHyperlink: () => linkUi.open() };
   }
 
   host.__EASYOFFICE_CREATE_SHEET_STRUCTURE__ = createSheetStructure;

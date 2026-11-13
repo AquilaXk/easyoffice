@@ -553,6 +553,8 @@
       // The arrays that spill (PD-217): the cells they filled are in `cells` as values.
       const spillAreas = host.__EASYOFFICE_SHEET_SPILL__?.areasOf(store) || [];
       if (spillAreas.length > 0) sheet.spills = spillAreas;
+      const links = host.__EASYOFFICE_SHEET_LINK__?.payloadOf(store) ?? [];
+      if (links.length > 0) sheet.links = links;
       const rules = rulesBySheet?.[name];
       if (rules && ((rules.cf || []).length > 0 || (rules.dv || []).length > 0)) sheet.rules = rules;
       // Merged ranges and hidden rows and columns (PD-194): `merges`, `hiddenRows`, `hiddenCols`.

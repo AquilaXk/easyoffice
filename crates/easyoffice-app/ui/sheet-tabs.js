@@ -144,10 +144,12 @@
     // `{ ok, answer }`; a workbook with no formula and no rule has nothing to rewrite, so it needs no
     // engine. A failure says why in the status text.
     async function rewriteRefs(request) {
-      if (!sheetStoreHelpers.sheetMapHasAnyFormula(sheetDataStore) && !rulesApi?.hasAny() && !host.__EASYOFFICE_SHEET_NAMES__?.hasAny()) {
+      const linkApi = host.__EASYOFFICE_SHEET_LINK__;
+      const linkField = linkApi?.requestField(sheetDataStore) ?? {};
+      if (!sheetStoreHelpers.sheetMapHasAnyFormula(sheetDataStore) && !rulesApi?.hasAny() && !host.__EASYOFFICE_SHEET_NAMES__?.hasAny() && !linkField.linkTargets) {
         return { ok: true, answer: { formulas: [], rules: {} } };
       }
-      const result = await sheetStoreHelpers.rewriteSheetRefs(sheetDataStore, { ...request, rules: rulesRequest() });
+      const result = await sheetStoreHelpers.rewriteSheetRefs(sheetDataStore, { ...request, rules: rulesRequest(), ...linkField });
       if (!result.ok) say(result.message || FAILURES[result.reason] || FAILURES.error);
       return result;
     }
@@ -165,6 +167,8 @@
         next.sheets[f.sheet][f.cell] = { ...entry, formula: f.value };
       }
       if (answer.rules && Object.keys(answer.rules).length > 0) next.sheetRules = { ...next.sheetRules, ...answer.rules };
+      // The in-workbook targets of the cell links follow the sheet (PD-218).
+      if (answer.linkTargets) next.sheets = host.__EASYOFFICE_SHEET_LINK__.retarget(next.sheets, answer.linkTargets);
       // The names that pointed at the sheet follow it, a deleted sheet's own names go (PD-214).
       if (Array.isArray(answer.names)) next.definedNames = answer.names;
     }

@@ -63,6 +63,7 @@
     "insert:footnote": "studio-cmd:mod-footnote",
     "insert:symbol": "studio-cmd:mod-symbol",
     "insert:link": "studio-cmd:insert-link",
+    "sheet:link-remove": "sheet-act:link-remove",
     "page:break": "studio-cmd:doc-mod-page-break",
     "insert:toc": "studio-cmd:doc-mod-toc",
     "insert:toc-update": "studio-cmd:doc-mod-toc-update",

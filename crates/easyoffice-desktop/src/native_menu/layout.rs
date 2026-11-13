@@ -369,6 +369,7 @@ const INSERT_SHEET: MenuSpec = menu(
         "table:sheet-chart",
         "insert:symbol",
         "insert:link",
+        "sheet:link-remove",
         S,
         "table:fn-browser",
         "table:autosum",

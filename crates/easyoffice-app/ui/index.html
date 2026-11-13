@@ -125,6 +125,7 @@
               <div class="md-item" data-kinds="SHEET" data-studio-menu-cmd="sheet-mod-chart" role="menuitem" tabindex="-1"><span class="md-label">차트 시각화</span></div>
               <div class="md-item" data-studio-menu-cmd="mod-symbol" role="menuitem" tabindex="-1"><span class="md-label">문자표</span></div>
               <div class="md-item" data-studio-menu-cmd="insert-link" role="menuitem" tabindex="-1"><span class="md-label">하이퍼링크</span></div>
+              <div class="md-item" data-kinds="SHEET" data-sheet-act="link-remove" role="menuitem" tabindex="-1"><span class="md-label">하이퍼링크 제거</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-kinds="SHEET" data-studio-menu-cmd="data-fn-browser" role="menuitem" tabindex="-1"><span class="md-label">함수 마법사</span></div>
               <div class="md-item" data-kinds="SHEET" data-studio-menu-cmd="data-autosum" role="menuitem" tabindex="-1"><span class="md-label">자동 합계 (SUM)</span></div>
@@ -1019,6 +1020,33 @@
       </div>
     </dialog>
 
+    <dialog id="sheet-link-dialog" class="tool-dialog" aria-labelledby="sheet-link-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="sheet-link-dialog-title">하이퍼링크</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><label class="dialog-label" for="sheet-link-text">표시할 문자열</label><input id="sheet-link-text" class="dialog-text-input" type="text" autocomplete="off" spellcheck="false" /></div>
+          <div class="dialog-section-title">연결 대상</div>
+          <div class="dialog-tabs" role="tablist" aria-label="연결 대상">
+            <button type="button" class="dialog-tab active" role="tab" id="sheet-link-tab-web" aria-selected="true" aria-controls="sheet-link-pane-web">웹 주소</button>
+            <button type="button" class="dialog-tab" role="tab" id="sheet-link-tab-doc" aria-selected="false" aria-controls="sheet-link-pane-doc" tabindex="-1">현재 문서</button>
+          </div>
+          <div class="dialog-section" id="sheet-link-pane-web" role="tabpanel" aria-labelledby="sheet-link-tab-web">
+            <div class="dialog-row"><label class="dialog-label" for="sheet-link-address">웹 주소</label><input id="sheet-link-address" class="dialog-text-input" type="text" maxlength="2048" autocomplete="off" spellcheck="false" placeholder="https://example.com" /></div>
+          </div>
+          <div class="dialog-section" id="sheet-link-pane-doc" role="tabpanel" aria-labelledby="sheet-link-tab-doc" hidden>
+            <div class="dialog-row"><label class="dialog-label" for="sheet-link-sheet">시트</label><select id="sheet-link-sheet" class="sb-combo dialog-select"></select></div>
+            <div class="dialog-row"><label class="dialog-label" for="sheet-link-ref">셀 참조</label><input id="sheet-link-ref" class="dialog-text-input" type="text" maxlength="255" autocomplete="off" spellcheck="false" placeholder="A1" /></div>
+          </div>
+          <div class="dialog-status-row"><span id="sheet-link-status" class="dialog-status" role="status" aria-live="polite"></span></div>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-sheet-link-remove" type="button" class="dialog-btn" hidden>링크 제거</button>
+          <button id="btn-sheet-link-apply" type="button" class="dialog-btn dialog-btn-primary">넣기</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
     <dialog id="doc-toc-dialog" class="tool-dialog" aria-labelledby="doc-toc-dialog-title">
       <div class="dialog-wrap">
         <div class="dialog-title"><span id="doc-toc-dialog-title">목차</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
@@ -1771,6 +1799,7 @@
     <script src="./pii-dom-scrubber.js"></script>
     <script src="./sheet-rules.js"></script>
     <script src="./sheet-names.js"></script>
+    <script src="./sheet-link.js"></script>
     <script src="./sheet-spill.js"></script>
     <script src="./sheet-store.js"></script>
     <script src="./ribbon-catalog.js"></script>
@@ -1834,6 +1863,7 @@
     <script src="./sheet-page.js"></script>
     <script src="./sheet-page-print.js"></script>
     <script src="./sheet-names-ui.js"></script>
+    <script src="./sheet-link-ui.js"></script>
     <script src="./sheet-protect-ui.js"></script>
     <script src="./sheet-protect-ranges.js"></script>
     <script src="./sheet-outline-ui.js"></script>

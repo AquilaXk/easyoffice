@@ -316,9 +316,12 @@
         for (const c of cats[cat]) {
           // The sheet's page setup is one menu item and one command search entry (`sheetMenuPaletteItems`).
           if (mod === "SHEET" && /^sheet-layout-(paper|orientation|margins)$/.test(c.id)) continue;
-          const dispShortcut = fmt(ribbonCatalog.resolveRibbonShortcutLabel(c.id, c.shortcut));
-          const title = mod === activeModule ? c.title : koBadge + " · " + c.title;
-          items.push({ id: c.id, module: mod, title, shortcut: dispShortcut, searchKey: (koBadge + " " + c.title + " " + dispShortcut + " " + c.id + " " + mod).toLowerCase() });
+          // In the sheet the link command is the hyperlink dialog (PD-218), not the document editor's link and bookmark; Ctrl+K is the command search there.
+          const sheetLink = c.id === "sheet-insert-link";
+          const dispShortcut = sheetLink ? "" : fmt(ribbonCatalog.resolveRibbonShortcutLabel(c.id, c.shortcut));
+          const label = sheetLink ? "하이퍼링크" : c.title;
+          const title = mod === activeModule ? label : koBadge + " · " + label;
+          items.push({ id: c.id, module: mod, title, shortcut: dispShortcut, searchKey: (koBadge + " " + label + " " + dispShortcut + " " + c.id + " " + mod).toLowerCase() });
         }
       }
     }

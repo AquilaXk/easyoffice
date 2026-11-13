@@ -272,6 +272,8 @@
         const col = vertical ? fromCol : reverse ? s.c1 - away : s.c2 + away;
         const from = sources[line][step.src];
         const edit = { ref: refOf(row, col), value: "", formula: "", style: plainStyle(from?.style) };
+        // The copy and series fills bring the hyperlink along (PD-218).
+        if (from?.link) edit.link = from.link;
         if (from?.formula) edit.formula = shiftFormula(from.formula, row - fromRow, col - fromCol);
         else edit.value = step.value ?? String(from?.value ?? "");
         edits.push(edit);

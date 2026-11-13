@@ -593,6 +593,7 @@ pub const ITEMS: &[MenuItemSpec] = &[
     sa!("sheet:tab-right", "시트 오른쪽으로 이동", "tab-right"),
     sa!("sheet:tab-hide", "시트 숨기기", "tab-hide"),
     sa!("sheet:tab-unhide", "시트 숨기기 취소…", "tab-unhide"),
+    sa!("sheet:link-remove", "하이퍼링크 제거", "link-remove"),
     sa!("sheet:name-define", "이름 정의…", "name-define"),
     sa!("sheet:name-manage", "이름 관리…", "name-manage"),
     sa!("sheet:protect", "시트 보호", "sheet-protect"),

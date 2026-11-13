@@ -3,7 +3,8 @@
 
   // Writes a batch of cell changes (paste, paste special, fill, clear, cut) as ONE undoable
   // operation. An edit is `{ ref, value, formula }` plus an optional `style`: absent keeps the
-  // cell's style, null removes it, an object replaces it. `widths` ({ column: px }) are applied in
+  // cell's style, null removes it, an object replaces it; an optional `link` (PD-218) is the cell's hyperlink,
+  // and an edit without one leaves the cell without. `widths` ({ column: px }) are applied in
   // the same undo step.
 
   function createSheetCellWriter(deps) {
@@ -62,9 +63,12 @@
         delete map[edit.ref];
         return;
       }
-      map[edit.ref] = style
+      const entry = style
         ? { value: edit.value, formula: edit.formula, style }
         : { value: edit.value, formula: edit.formula };
+      // A write removes the cell's hyperlink (PD-218) unless the edit brings one: a paste, a fill or the link dialog.
+      if (edit.link) entry.link = edit.link;
+      map[edit.ref] = entry;
       const packed = gridUtils.packRef(edit.ref);
       if (packed > 0) {
         const col = packed & 32767;

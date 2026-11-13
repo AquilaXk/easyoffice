@@ -392,6 +392,21 @@
       };
     }
 
+    // A cell with a hyperlink (PD-218) shows as a link and says where it goes: the screen tip, else the address.
+    function paintLink(td, link) {
+      td._link = link || null;
+      if (!link) {
+        if (td.dataset.link) {
+          delete td.dataset.link;
+          td.removeAttribute("title");
+        }
+        return;
+      }
+      const internal = link.target.startsWith("#");
+      td.dataset.link = internal ? "internal" : "external";
+      td.setAttribute("title", link.tip || (internal ? link.target.slice(1) : link.target));
+    }
+
     function paintTd(td, entry) {
       const value = entry?.value ?? "";
       const formula = entry?.formula || "";
@@ -401,6 +416,7 @@
       else delete td.dataset.formula;
       // A cell an array filled (PD-217) keeps the address of the formula that made it.
       if (entry?.spillOf) td.dataset.spillOf = entry.spillOf; else delete td.dataset.spillOf;
+      paintLink(td, entry?.link);
       const st = entry?.style;
       td.style.fontWeight = st?.fontWeight || "";
       td.style.fontStyle = st?.fontStyle || "";

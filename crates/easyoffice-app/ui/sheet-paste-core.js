@@ -32,7 +32,7 @@
 
   // The block copied from the sheet: `rows` are the copied source rows (the rows a filter hides
   // are left out), `cols` the number of columns from `c1`, `cells[i][j]` a `{ value, formula,
-  // style }` copy or null for an empty cell, `widths[j]` the pixel width of source column j.
+  // style, link }` copy or null for an empty cell, `widths[j]` the pixel width of source column j.
   // A block read from the clipboard text has `rows: null`: nothing to measure a reference move by.
   function transposed(snap) {
     const cells = [];
@@ -79,6 +79,7 @@
           const now = getEntry(ref);
           edit.value = now?.value ?? "";
           edit.formula = now?.formula ?? "";
+          if (now?.link) edit.link = now.link;
         }
         edit.ref = ref;
         result.edits.push(edit);
@@ -99,7 +100,10 @@
     if (mode === "values") return { value, formula: "" };
     if (mode === "formats") return { value: "", formula: "", style: plainStyle(from?.style) };
     if (mode === "formulas" || !copied) return { value: text, formula };
-    return { value: text, formula, style: plainStyle(from?.style) };
+    const all = { value: text, formula, style: plainStyle(from?.style) };
+    // A plain paste brings the hyperlink (PD-218); the special pastes of values and formulas leave the cell without one.
+    if (from?.link) all.link = from.link;
+    return all;
   }
 
   // Column widths of the pasted columns by column; a source column at the default width resets the
