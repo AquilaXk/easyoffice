@@ -34,10 +34,13 @@ test("the PDF toolbar is an rhwp toolbar: icon-above-label buttons, sb-* fields,
   }
 });
 
-test("the PDF window's icon toolbar lists only the commands that work on a PDF", async () => {
+test("the PDF window has no icon toolbar row: no command of it works on a PDF but the search, which the menu bar has", async () => {
   const { document } = await createWorkspaceHarness({ search: "?module=PDF&win=w-pdf-toolbar-commands" });
-  const shown = document.querySelectorAll("#icon-toolbar .tb-btn").filter((btn) => !btn.hidden && !btn.closest("[hidden]"));
-  assert.deepEqual(shown.map((btn) => btn.dataset.studioCmd), ["palette"]);
+  const toolbar = document.getElementById("icon-toolbar");
+  assert.equal(toolbar.hidden, true);
+  const shown = toolbar.querySelectorAll(".tb-btn").filter((btn) => !btn.hidden && !btn.closest("[hidden]") && btn !== toolbar);
+  assert.deepEqual(shown, [], "no button is on screen");
+  assert.ok(document.getElementById("btn-command-palette"), "the search stays in the menu bar");
 });
 
 // Format selects are the reference app combo boxes: the native select stays as the hidden state holder.

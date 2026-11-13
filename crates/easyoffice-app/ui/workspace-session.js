@@ -538,6 +538,15 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       });
     }
 
+    // A window whose toolbar has no button but the command search (the PDF window) shows no toolbar row: the search is in the menu bar.
+    function syncToolbarRowVisibility() {
+      const bar = document.getElementById("icon-toolbar");
+      if (!bar) return;
+      bar.hidden = false;
+      const shown = Array.from(bar.querySelectorAll(".tb-btn")).filter((btn) => !btn.hidden && !btn.closest("[hidden]"));
+      bar.hidden = shown.every((btn) => btn.dataset.studioCmd === "palette");
+    }
+
     function syncToolbarButtons(mod, commandModule) {
       // A window's toolbar lists the commands that work in it: the others are hidden.
       for (const btn of document.querySelectorAll("#icon-toolbar button")) {
@@ -565,6 +574,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       syncToolbarButtons(mod, commandModule);
       syncToolbarGroupVisibility();
       host.__EASYOFFICE_MENU_KINDS__.applyMenuKind(document, commandModule);
+      syncToolbarRowVisibility();
       for (const item of document.querySelectorAll(".md-item[data-studio-menu-cmd]")) {
         const on = studioCommandApplies(item.dataset.studioMenuCmd, commandModule);
         item.setAttribute("aria-disabled", on ? "false" : "true");

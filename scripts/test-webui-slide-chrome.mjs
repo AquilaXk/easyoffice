@@ -41,6 +41,7 @@ test("the slide toolbar is an rhwp toolbar: icon-above-label buttons with access
 
 test("the slide window's icon toolbar lists only the commands that work on a slide", async () => {
   const { document } = await openSlide();
+  assert.equal(document.getElementById("icon-toolbar").hidden, false);
   const shown = document.querySelectorAll("#icon-toolbar .tb-btn").filter((btn) => !btn.hidden && !btn.closest("[hidden]"));
   assert.deepEqual(shown.map((btn) => btn.dataset.studioCmd), ["clip-copy", "home-style", "insert-table", "insert-shape", "mod-symbol", "insert-link", "palette"]);
 });

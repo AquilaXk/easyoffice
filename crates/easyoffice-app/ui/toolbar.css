@@ -110,6 +110,7 @@
   font-size: var(--font-size-base);
 }
 
+#icon-toolbar[hidden],
 #icon-toolbar .tb-btn[hidden],
 #icon-toolbar .tb-group[hidden],
 #icon-toolbar .tb-sep[hidden] {
