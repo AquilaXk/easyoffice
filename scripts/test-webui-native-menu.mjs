@@ -66,6 +66,9 @@ const EXPECTED_EDITOR_COMMANDS = {
   "view:zoom-dialog": "view:zoom-dialog",
   "view:toolbar-labels": "view:toolbar-labels",
   "view:form-mode": "view:form-mode",
+  // 머리말 and 꼬리말 are the editor's own commands (the page frame of the document window is a different editor).
+  "page:header": "page:header-create",
+  "page:footer": "page:footer-create",
   "table:cell-select": "table:cell-selection-enter",
   "table:merge": "table:cell-merge",
   "table:cell-split": "table:cell-split",

@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 
 export const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const UI_DIR = path.join(REPO, "crates/easyoffice-app/ui");
-const MIME = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml" };
+const MIME = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".wasm": "application/wasm", ".json": "application/json", ".png": "image/png", ".woff2": "font/woff2", ".ttf": "font/ttf" };
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -42,7 +42,8 @@ export function startUiServer({ enginePort, port, ui = UI_DIR, inputs }) {
     const name = pathname === "/" ? "index.html" : pathname.slice(1);
     const file = path.resolve(ui, name);
     if (!file.startsWith(ui + path.sep) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) { res.writeHead(404); res.end(); return; }
-    res.writeHead(200, { "Content-Type": MIME[path.extname(file)] || "application/octet-stream", "Cache-Control": "no-store" });
+    // The editor bundle runs in a sandboxed frame without a same-origin grant, so its scripts and wasm need CORS.
+    res.writeHead(200, { "Content-Type": MIME[path.extname(file)] || "application/octet-stream", "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" });
     fs.createReadStream(file).pipe(res);
   });
   return new Promise((resolve) => server.listen(port, "127.0.0.1", () => resolve(server)));

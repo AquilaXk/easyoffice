@@ -220,6 +220,8 @@
     "view:zoom-dialog": "view:zoom-dialog",
     "view:toolbar-labels": "view:toolbar-labels",
     "view:form-mode": "view:form-mode",
+    "page:header": "page:header-create",
+    "page:footer": "page:footer-create",
     "table:cell-select": "table:cell-selection-enter",
     "table:merge": "table:cell-merge",
     "table:cell-split": "table:cell-split",
