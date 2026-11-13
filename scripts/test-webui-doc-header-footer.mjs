@@ -197,3 +197,22 @@ test("the total-pages and file-name buttons insert their fields, which save as t
   const shown = [...document.querySelectorAll("#icon-toolbar .tb-headerfooter-group .tb-label")].map((el) => el.textContent);
   for (const label of labels) assert.ok(shown.includes(label), label);
 });
+
+test("every sheet's footer copy holds exactly the section's fields, one element per field, from page 1 to the last", async () => {
+  const { document, editor, host } = await openDoc("w-hf-copies");
+  const frame = host.__EASYOFFICE_DOC_PAGE_FRAME__;
+  const layer = document.createElement("footer");
+  layer.className = "doc-page-layer";
+  for (let i = 0; i < 4; i += 1) layer.appendChild(Object.assign(document.createElement("i"), { className: "doc-page-sheet" }));
+  editor.appendChild(layer);
+  const footer = Object.assign(document.createElement("section"), { className: "eo-page-frame" });
+  footer.dataset.eoHf = "footer";
+  footer.innerHTML = '<p>- <span class="eo-page-field" data-eo-field="page"></span> -</p>';
+  editor.insertBefore(footer, layer);
+  const fieldCounts = () => [...layer.querySelectorAll(".doc-page-sheet")].map((sheet) => sheet.querySelectorAll('.doc-page-hf[data-hf="footer"] .eo-page-field').length);
+  frame.paint();
+  assert.deepEqual(fieldCounts(), [1, 1, 1, 1]);
+  footer.querySelector("p").appendChild(Object.assign(document.createElement("span"), { className: "eo-page-field" }));
+  frame.paint();
+  assert.deepEqual(fieldCounts(), [2, 2, 2, 2], "a field added to the section appears once more on every sheet, not by page");
+});
