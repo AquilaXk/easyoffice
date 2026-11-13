@@ -98,44 +98,33 @@ pub fn sheet_name_problem(name: &str) -> Option<SheetNameProblem> {
 mod tests {
     use super::*;
 
+    /// The names and the problem each has, shared with the page's checker (`sheet-tab-names.js`).
     #[test]
     fn each_rule_names_its_problem() {
-        let long = "가".repeat(32);
-        let edge_units = "😀".repeat(16);
-        let cases: &[(&str, Option<SheetNameProblem>)] = &[
-            ("매출", None),
-            ("Sheet 1", None),
-            (
-                "가나다라마바사아자차카타파하가나다라마바사아자차카타파하가나다",
-                None,
-            ),
-            ("", Some(SheetNameProblem::Empty)),
-            ("   ", Some(SheetNameProblem::Empty)),
-            (long.as_str(), Some(SheetNameProblem::TooLong)),
-            (edge_units.as_str(), Some(SheetNameProblem::TooLong)),
-            ("a/b", Some(SheetNameProblem::ForbiddenChar('/'))),
-            ("a\\b", Some(SheetNameProblem::ForbiddenChar('\\'))),
-            ("a?", Some(SheetNameProblem::ForbiddenChar('?'))),
-            ("*a", Some(SheetNameProblem::ForbiddenChar('*'))),
-            ("[a]", Some(SheetNameProblem::ForbiddenChar('['))),
-            ("a:b", Some(SheetNameProblem::ForbiddenChar(':'))),
-            ("a\u{0}b", Some(SheetNameProblem::ForbiddenChar('\u{0}'))),
-            ("a\tb", Some(SheetNameProblem::ForbiddenChar('\t'))),
-            ("'a", Some(SheetNameProblem::EdgeApostrophe)),
-            ("a'", Some(SheetNameProblem::EdgeApostrophe)),
-            ("a'b", None),
-            ("History", Some(SheetNameProblem::Reserved)),
-            ("hIsToRy", Some(SheetNameProblem::Reserved)),
-        ];
-        for (name, want) in cases {
-            assert_eq!(sheet_name_problem(name), *want, "{name:?}");
+        let fixture =
+            crate::StrictJsonValue::parse(include_str!("../../../fixtures/sheet-name-rules.json"))
+                .unwrap();
+        let cases = fixture.as_array().unwrap();
+        assert!(cases.len() >= 20);
+        for case in cases {
+            let case = case.as_object().unwrap();
+            let name = crate::StrictJsonValue::get_str(case, "name").unwrap();
+            let want = crate::StrictJsonValue::get_field(case, "problem")
+                .and_then(crate::StrictJsonValue::as_str)
+                .map(|code| match code {
+                    "empty" => SheetNameProblem::Empty,
+                    "too-long" => SheetNameProblem::TooLong,
+                    "apostrophe" => SheetNameProblem::EdgeApostrophe,
+                    "reserved" => SheetNameProblem::Reserved,
+                    "forbidden" => SheetNameProblem::ForbiddenChar(
+                        name.chars()
+                            .find(|c| FORBIDDEN.contains(c) || c.is_control())
+                            .unwrap(),
+                    ),
+                    other => panic!("unknown problem {other}"),
+                });
+            assert_eq!(sheet_name_problem(name), want, "{name:?}");
         }
-        // 31 units exactly is fine, 32 is not (a surrogate pair counts two).
-        assert_eq!(sheet_name_problem(&"a".repeat(31)), None);
-        assert_eq!(
-            sheet_name_problem(&format!("{}😀", "a".repeat(30))),
-            Some(SheetNameProblem::TooLong)
-        );
     }
 
     #[test]
