@@ -104,6 +104,22 @@ pub(crate) fn needs_laid_pages(doc: &RichDocument) -> bool {
     !f.is_empty() || f.margins.is_some() || f.paper.is_some()
 }
 
+/// The document's PDF laid out on its own paper when it has a header, a footer or a page setup (the caller has ruled out a
+/// highlight and a stamp, which the plain text pages carry).
+pub(crate) fn laid_document_pdf(
+    doc: &RichDocument,
+    options: &crate::PdfWriteOptions,
+) -> Option<Vec<u8>> {
+    needs_laid_pages(doc).then(|| {
+        let entries = laid_document_pages(doc, options.rotation_degrees);
+        crate::PdfSerializer::serialize_entries(
+            &doc.display_title(),
+            options.watermark.as_deref(),
+            &entries,
+        )
+    })
+}
+
 /// The pages of a document on its own paper and margins with its header, footer and page numbers.
 pub(crate) fn laid_document_pages(doc: &RichDocument, rotation_degrees: u16) -> Vec<PdfPageEntry> {
     let frame = &doc.page_frame;

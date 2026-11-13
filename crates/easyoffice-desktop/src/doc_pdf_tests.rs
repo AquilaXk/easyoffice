@@ -370,3 +370,64 @@ fn the_header_footer_and_the_page_setup_of_a_document_are_in_its_pdf() {
         );
     }
 }
+
+/// The text of an SVG page: the content of its `<text>` elements in order, tags left out.
+fn svg_text(svg: &str) -> String {
+    let mut out = String::new();
+    let mut rest = svg;
+    while let Some(open) = rest.find("<text") {
+        let after = &rest[open..];
+        let Some(start) = after.find('>') else { break };
+        let Some(end) = after.find("</text>") else {
+            break;
+        };
+        if start < end {
+            out.push_str(&after[start + 1..end]);
+        }
+        rest = &after[end + "</text>".len()..];
+    }
+    out
+}
+
+/// The page-number and page-count fields of the footer are drawn as the number of each page and the count of all of
+/// them, and the file-name field as the document's title: the pages the PDF is made of say so (PD-213).
+#[test]
+fn the_page_number_and_page_count_fields_are_drawn_on_every_page() {
+    use easyoffice_formats::{RichField, RichPageFrame};
+    let mut doc = framed_document(false);
+    doc.page_frame = RichPageFrame {
+        footer: vec![RichParagraph {
+            runs: vec![
+                RichRun::plain("["),
+                RichRun {
+                    field: Some(RichField::PageNumber),
+                    ..RichRun::default()
+                },
+                RichRun::plain("/"),
+                RichRun {
+                    field: Some(RichField::TotalPages),
+                    ..RichRun::default()
+                },
+                RichRun::plain("]"),
+            ],
+            ..RichParagraph::default()
+        }],
+        ..doc.page_frame
+    };
+    let core = DocumentCore::from_bytes(&hwpx(&doc)).expect("layout");
+    let total = core.page_count() as usize;
+    assert!(total >= 3, "{total} pages");
+    for page in 0..total {
+        let svg = core.render_page_svg_native(page as u32).expect("page");
+        let text: String = svg_text(&svg)
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .collect();
+        assert!(
+            text.contains(&format!("[{}/{}]", page + 1, total)),
+            "page {} footer in {:?}",
+            page + 1,
+            text.chars().rev().take(40).collect::<String>()
+        );
+    }
+}

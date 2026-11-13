@@ -356,10 +356,8 @@ pub(crate) fn pack_docx_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeEr
     if let Some(numbering) = numbering {
         entries.push(("word/numbering.xml".to_string(), numbering.into_bytes()));
     }
-    if let Some((xml, _, _)) = settings {
-        XmlSanitizer::validate_safe_xml(&xml)?;
-        entries.push((DOCX_SETTINGS_PART.to_string(), xml.into_bytes()));
-    }
+    // The settings part holds two fixed flags, so it needs no scan.
+    entries.extend(settings.map(|(xml, _, _)| (DOCX_SETTINGS_PART.to_string(), xml.into_bytes())));
     for (part, xml) in [
         (DOCX_HEADER_PART, header_part),
         (DOCX_FOOTER_PART, footer_part),
@@ -960,15 +958,10 @@ pub(crate) fn serialize_pdf_rich(
         }
         pass = highlight.map(HighlightPass::new);
     }
-    // A header, a footer or a page setup of the document is laid out on pages of its own size.
-    if highlight.is_none() && stamp.is_none() && crate::pdf_laid::needs_laid_pages(doc) {
-        let entries = crate::pdf_laid::laid_document_pages(doc, options.rotation_degrees);
-        let bytes = PdfSerializer::serialize_entries(
-            &doc.display_title(),
-            options.watermark.as_deref(),
-            &entries,
-        );
-        return (bytes, Vec::new());
+    if highlight.is_none() && stamp.is_none() {
+        if let Some(bytes) = crate::pdf_laid::laid_document_pdf(doc, options) {
+            return (bytes, Vec::new());
+        }
     }
     let page = PdfPageModel {
         page_number: 1,
