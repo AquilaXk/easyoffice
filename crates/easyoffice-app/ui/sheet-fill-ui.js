@@ -8,9 +8,9 @@
   // series, Alt (Option) copies.
   const HANDLE_CLASS = "sheet-fill-handle";
   const PREVIEW_CLASS = "sheet-fill-preview";
-  // Side of the handle box in px; its 1px outline makes the 8px square of the reference editor's
-  // object handles (`table-object-renderer.ts:80`).
-  const HANDLE_SIZE = 6;
+  // Side of the handle box in px: the 8px square of the reference editor's object handles
+  // (`table-object-renderer.ts:80`), its 1px paper edge inside the box.
+  const HANDLE_SIZE = 8;
 
   function createSheetFillUi(deps) {
     const { document, grid, getRange, getAxis, getEntry, getSheetName, applyCellEdits, setRange, commitIfEditing, shiftFormula, feedback } = deps;

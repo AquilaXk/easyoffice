@@ -5,8 +5,8 @@
   // numbers (rows) and above the column letters (columns), and the level buttons 1 to n+1 in the
   // corner of each. The bars follow the scroll, so only the groups in view are drawn.
 
-  const UNIT = 14; // one level lane, and one level button
-  const BUTTON = 11; // the box of a group's button, in the lane
+  const UNIT = 24; // one level lane, and one level button: the status bar icon button (24px)
+  const BUTTON = 24; // the box of a group's button, in the lane
   const layoutApi = host.__EASYOFFICE_SHEET_LAYOUT__;
   const outlineApi = host.__EASYOFFICE_SHEET_OUTLINE__;
 
@@ -40,6 +40,7 @@
       b.title = text;
       b.setAttribute("aria-label", LABELS[axis] + " " + group.first + "~" + group.last + " " + text);
       b.setAttribute("aria-expanded", String(!folded));
+      host.__EASYOFFICE_ICONS__?.setIcon(document, b, folded ? "plus" : "minus");
       const lane = (group.level - 1) * UNIT + (UNIT - BUTTON) / 2;
       if (axis === "row") {
         b.style.left = lane + "px";
@@ -161,6 +162,11 @@
       host.addEventListener?.("resize", renderAll);
       const RO = host.ResizeObserver;
       if (typeof RO === "function" && viewport()) new RO(renderAll).observe(viewport());
+      // Tabs come and go with a file, and the active one changes with a switch or an open: the groups are those of the active sheet.
+      const bar = $("sheet-tab-bar");
+      if (bar && typeof host.MutationObserver === "function") {
+        new host.MutationObserver(renderAll).observe(bar, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
+      }
     }
 
     return { bind, render: renderAll };

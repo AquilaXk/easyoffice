@@ -52,10 +52,12 @@
 .statusbar-pos-metrics, .statusbar-mode-btn, .eo-style-sep { flex-shrink: 0; white-space: nowrap; }
 .statusbar-diag-group > span { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #status-command-feedback { flex: 0 1 auto; min-width: 0; max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
-.statusbar-zoom-btn, .statusbar-mode-btn { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 18px; padding: 0 5px; font-size: 11px; font-weight: 600; color: var(--ui-text-secondary); border-radius: 3px; }
-.statusbar-zoom-btn:hover, .statusbar-mode-btn:hover { background: var(--ui-hover); color: var(--ui-text); }
-.statusbar-zoom-btn:hover { outline: 1px solid var(--ui-border-strong); }
-.statusbar-zoom-btn .eo-icon { width: 13px; height: 13px; }
+.statusbar-mode-btn { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 18px; padding: 0 5px; font-size: 11px; font-weight: 600; color: var(--ui-text-secondary); border-radius: 3px; }
+.statusbar-mode-btn:hover { background: var(--ui-hover); color: var(--ui-text); }
+/* The zoom buttons are the reference status bar's icon button (`status-bar.css` .stb-icon-btn: 24x24, no radius, a transparent 1px border; hover: the hover fill and the strong border; 18px icon). */
+.statusbar-zoom-btn { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; width: 24px; height: 24px; padding: 0; border: 1px solid transparent; border-radius: 0; background: transparent; color: var(--color-text-secondary); }
+.statusbar-zoom-btn:hover { background: var(--ui-hover); border-color: var(--ui-border-strong); }
+.statusbar-zoom-btn .eo-icon { width: 18px; height: 18px; stroke-width: 1.5; }
 #status-studio-pos, #status-zoom-label { cursor: pointer; border-radius: var(--radius-xs); padding: 1px 6px; }
 #status-studio-pos:hover, #status-zoom-label:hover { background: var(--ui-hover); color: var(--color-text); }
 #status-zoom-label { min-width: 38px; text-align: center; }
@@ -166,7 +168,10 @@
 .dialog-tab:hover, .sheet-tab-btn:hover { background: var(--color-accent-bg); color: var(--color-text); }
 .dialog-tab.active, .sheet-tab-btn.active { background: var(--color-surface-raised); color: var(--color-text); border-color: var(--ui-border-strong); border-bottom: 1px solid var(--color-surface-raised); font-weight: bold; }
 .sheet-tab-bar { display: flex; gap: 0; flex: 0 0 auto; padding: 0 12px; background: var(--color-bg); box-shadow: inset 0 -1px 0 var(--ui-border-strong); overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
-.sheet-tab-btn { flex: 0 0 auto; max-width: 220px; margin-bottom: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The reference tab is a button that keeps the browser's button font (its dialogs do not inherit); the shell's `button { font: inherit }` is rolled back for the tab only. */
+.sheet-tab-btn { font-family: revert; line-height: normal; flex: 0 0 auto; max-width: 220px; margin-bottom: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The tab strip sits inside the dialog body's 12px edge, as in the reference dialogs. */
+#sheet-numfmt-dialog .dialog-tabs { margin: 12px 12px 0; }
 #sheet-numfmt-dialog [data-fmt-pane][hidden] { display: none; }
 #sheet-numfmt-dialog [data-fmt-pane="align"] .custom-select.dialog-select, #sheet-numfmt-dialog [data-fmt-pane="align"] .dialog-select { flex: 1; min-width: 0; width: auto; }
 .tool-dialog .dialog-btn-group { display: flex; gap: 0; }
@@ -195,7 +200,7 @@
 .tool-dialog .dialog-swatch-chip { width: 22px; height: 12px; border: 1px solid var(--color-border-dark); background: var(--dialog-swatch, var(--color-surface)); }
 .tool-dialog .dialog-color-host .sb-hl-palette { z-index: 300; }
 .tool-dialog .dialog-stack { display: flex; flex-direction: column; }
-.tool-dialog .dialog-list { list-style: none; margin: 0 0 6px; padding: 0; max-height: 120px; overflow-y: auto; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); font-size: var(--font-size-sm); }
+.tool-dialog .dialog-list { list-style: none; margin: 0 0 6px; padding: 0; max-height: 120px; overflow-y: auto; border: 1px solid var(--color-border); background: var(--color-surface); font-size: var(--font-size-sm); }
 .tool-dialog .dialog-list:empty::before { content: "규칙 없음"; display: block; padding: 4px 8px; color: var(--color-text-muted); }
 .tool-dialog .dialog-list li { padding: 3px 8px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tool-dialog .dialog-list li[aria-selected="true"] { background: var(--color-accent-bg); font-weight: 700; }
@@ -204,7 +209,7 @@
 /* In-cell list arrow and menu of a data validation list (sheet-rules-ui.js). */
 /* A selected cell keeps the rule's fill under the selection: the active cell shows it as is (with its outline), the other cells of the range get the range color on top, translucent. */
 .sheet-grid td[data-cf].selected-cell { background-color: var(--cf-bg, var(--ui-surface)); }
-.sheet-grid td[data-cf].in-range:not(.selected-cell) { background-color: var(--cf-bg, var(--ui-accent-bg-light)); box-shadow: inset 0 0 0 100px color-mix(in srgb, var(--ui-accent-bg-light) 50%, transparent), var(--lk-shadow, 0 0 0 0 transparent); }
+.sheet-grid td[data-cf].in-range:not(.selected-cell) { background-color: var(--cf-bg, var(--table-selection-fill)); box-shadow: inset 0 0 0 100px var(--table-selection-fill), var(--lk-shadow, 0 0 0 0 transparent); }
 /* Thick and double cell edges and the outer edges of the first row and column (sheet-look.js) are inset shadows, so a line's width never moves the cell's text. */
 .sheet-grid td.lk-shadow { box-shadow: var(--lk-shadow, 0 0 0 0 transparent); }
 /* The arrow of a list cell is the combo box's arrow cell (`toolbar.css` `.custom-select-arrow`): no box, a 1px left divider, the `▾` letter at 8px in the muted color, 15px wide and as tall as the cell, at the cell's right end. Hover and the open menu take the combo's hover fill. */
@@ -262,7 +267,7 @@
 .sheet-filter-panel .md-item[data-filter-act] { padding-left: 16px; }
 .sheet-filter-search { padding: 2px 8px 6px; }
 .sheet-filter-panel .dialog-text-input { width: 100%; }
-.sheet-filter-list { position: relative; margin: 0 8px; overflow-y: auto; box-sizing: border-box; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); font-size: var(--font-size-sm); outline: none; }
+.sheet-filter-list { position: relative; margin: 0 8px; overflow-y: auto; box-sizing: border-box; border: 1px solid var(--color-border); background: var(--color-surface); font-size: var(--font-size-sm); outline: none; }
 .sheet-filter-list:focus-visible { border-color: var(--color-focus-border); box-shadow: 0 0 0 2px var(--ui-focus-soft); }
 .sheet-filter-rows { position: relative; }
 .sheet-filter-row { position: absolute; left: 0; right: 0; box-sizing: border-box; height: 22px; padding: 0 8px; gap: 6px; font-size: var(--font-size-sm); line-height: 22px; }
@@ -292,9 +297,10 @@
 :where(.sheet-grid td.frozen-row, .sheet-grid td.frozen-col) { background-color: var(--ui-surface); }
 .sheet-grid td.frozen-row.frozen-col, .sheet-grid tbody th.frozen-row { z-index: 3; }
 .sheet-grid thead th.frozen-col { z-index: 4; }
-.sheet-grid .frozen-edge-row { box-shadow: inset 0 -1px 0 var(--ui-border-strong); }
-.sheet-grid .frozen-edge-col { box-shadow: inset -1px 0 0 var(--ui-border-strong); }
-.sheet-grid .frozen-edge-row.frozen-edge-col { box-shadow: inset -1px -1px 0 var(--ui-border-strong); }
+/* The frozen edge is the status bar divider (`status-bar.css` .stb-divider: a 1px strong line and a 1px paper-colour line). */
+.sheet-grid .frozen-edge-row { box-shadow: inset 0 -1px 0 var(--doc-paper), inset 0 -2px 0 var(--ui-border-strong); }
+.sheet-grid .frozen-edge-col { box-shadow: inset -1px 0 0 var(--doc-paper), inset -2px 0 0 var(--ui-border-strong); }
+.sheet-grid .frozen-edge-row.frozen-edge-col { box-shadow: inset -1px -1px 0 var(--doc-paper), inset -2px -2px 0 var(--ui-border-strong); }
 /* Outline (PD-208): sheet-outline-ui.js draws a lane per level beside the row numbers and above the column letters; the frame leaves them no room until a group exists. */
 .sheet-frame { flex: 1 1 auto; min-height: 220px; min-width: 0; display: grid; grid-template-columns: var(--outline-w, 0px) minmax(0, 1fr); grid-template-rows: var(--outline-h, 0px) minmax(0, 1fr); background: var(--ui-bg-light); }
 .sheet-frame > .sheet-viewport { grid-area: 2 / 2; min-height: 0; }
@@ -305,24 +311,18 @@
 .sheet-outline .outline-plane { position: absolute; overflow: hidden; }
 .sheet-outline-rows .outline-plane { left: 0; right: 0; top: 26px; bottom: 0; }
 .sheet-outline-cols .outline-plane { top: 0; bottom: 0; left: 56px; right: 0; }
-.outline-bar { position: absolute; background: var(--ui-text-muted); }
-.sheet-outline-rows .outline-bar { width: 1px; }
-.sheet-outline-cols .outline-bar { height: 1px; }
-.outline-toggle { position: absolute; box-sizing: border-box; width: 11px; height: 11px; padding: 0; border: 1px solid var(--ui-text-muted); border-radius: 2px; background: var(--ui-surface); color: var(--ui-text); }
-.outline-toggle::before, .outline-toggle.folded::after { content: ""; position: absolute; background: currentColor; }
-.outline-toggle::before { left: 2px; right: 2px; top: 4px; height: 1px; }
-.outline-toggle.folded::after { top: 2px; bottom: 2px; left: 4px; width: 1px; }
+/* Outline buttons are the status bar icon button (`status-bar.css` .stb-icon-btn: 24x24, no radius, a transparent 1px border, the hover fill and strong border); the bar is its divider (.stb-divider). */
+.outline-bar { position: absolute; box-sizing: border-box; border: 0 solid var(--ui-border-strong); }
+.sheet-outline-rows .outline-bar { width: 2px; margin-left: -1px; border-left-width: 1px; border-right: 1px solid var(--doc-paper); }
+.sheet-outline-cols .outline-bar { height: 2px; margin-top: -1px; border-top-width: 1px; border-bottom: 1px solid var(--doc-paper); }
+.outline-toggle, .outline-level { position: absolute; box-sizing: border-box; width: 24px; height: 24px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border: 1px solid transparent; border-radius: 0; background: transparent; color: var(--color-text-secondary); font-size: var(--font-size-sm); cursor: pointer; }
+.outline-toggle .eo-icon { width: 18px; height: 18px; stroke-width: 1.5; }
 .outline-levels { position: absolute; display: flex; }
 .outline-levels-row { top: 0; left: 0; height: 26px; align-items: flex-end; }
 .outline-levels-col { left: 0; top: 0; width: 56px; flex-direction: column; align-items: flex-end; }
-.outline-level { box-sizing: border-box; width: 14px; height: 14px; padding: 0; border: 1px solid var(--ui-border-strong); background: var(--ui-surface); color: var(--ui-text); font-size: 10px; line-height: 12px; text-align: center; }
-.outline-level:hover, .outline-toggle:hover { background: var(--ui-hover); }
+.outline-level { position: static; }
+.outline-level:hover, .outline-toggle:hover { background: var(--ui-hover); border-color: var(--ui-border-strong); }
 .outline-toggle:focus-visible, .outline-level:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; z-index: 1; }
-/* Sheet tab colour (PD-208, sheet-tab-color.js): a line under the name; the name keeps the theme's text colour in both themes. */
-.sheet-tab-btn[data-tab-color] { box-shadow: inset 0 -3px 0 var(--tab-color); }
-.sheet-tab-color-host { position: fixed; z-index: 1; left: 0; top: 0; pointer-events: none; }
-.sheet-tab-color-host > button { opacity: 0; }
-.sheet-tab-btn { --tab-color: transparent; }
 /* Sheet tabs (PD-209, sheet-tab-ui.js): the name typed in the tab's place, a tab dragged to another place, and the two dialogs. The dialog values are rhwp-studio's confirm dialog (360px, body padding 16px 20px, line height 1.6). */
 .sheet-tab-btn { transition: transform 0.12s ease; }
 .sheet-tab-btn.dragging { z-index: 2; transition: none; background: var(--color-surface-raised); border-color: var(--ui-border-strong); box-shadow: var(--shadow-dropdown); }

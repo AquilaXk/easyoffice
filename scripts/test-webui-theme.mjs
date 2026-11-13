@@ -186,7 +186,7 @@ test("one focus ring for buttons, inputs and the page: 1px inside the control (r
 
 test("toolbar button hover changes the surface and border only, never the glyph colour", () => {
   const css = read("toolbar.css");
-  const rule = css.slice(css.indexOf(".tb-btn:hover,"), css.indexOf("}", css.indexOf(".tb-btn:hover,")));
+  const rule = css.slice(css.indexOf(".tb-btn:hover {"), css.indexOf("}", css.indexOf(".tb-btn:hover {")));
   assert.match(rule, /background: var\(--ui-hover-strong\)/);
   assert.doesNotMatch(rule, /color:\s*var\(--color-primary-dark\)/);
 });

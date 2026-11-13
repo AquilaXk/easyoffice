@@ -49,5 +49,5 @@ test("sheet, formula bar and tab rules use design tokens only (no literal colour
   const header = rulesFor(read("styles.css"), [".sheet-table th, .doc-inline-table th"]).map((r) => r.body).join(" ");
   assert.ok(header.includes("var(--ui-bg-light)"), "grid headers use the toolbar background token");
   const selection = rulesFor(read("styles.css"), [".sheet-grid td.selected-cell"]).map((r) => r.body).join(" ");
-  assert.ok(selection.includes("var(--accent-strong)"), "selection uses the accent token");
+  assert.ok(selection.includes("var(--table-selection-stroke)"), "selection uses the table selection stroke token");
 });

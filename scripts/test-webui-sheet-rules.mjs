@@ -647,7 +647,7 @@ test("the selection lies translucent over a rule's fill instead of hiding it", (
   // The cells of a range keep the rule's fill and add the range color on top, translucent.
   const range = body(".sheet-grid td[data-cf].in-range:not(.selected-cell)");
   assert.match(range, /background-color: var\(--cf-bg,/);
-  assert.match(range, /box-shadow: inset 0 0 0 \d+px color-mix\(in srgb, var\(--ui-accent-bg-light\) \d+%, transparent\)/);
+  assert.match(range, /box-shadow: inset 0 0 0 \d+px var\(--table-selection-fill\)/);
   // The active cell shows the rule's fill, and without one the plain cell surface as before.
   assert.match(body(".sheet-grid td[data-cf].selected-cell"), /background-color: var\(--cf-bg, var\(--ui-surface\)\)/);
   // shell.css loads after styles.css, so these win over the plain selection rules at equal specificity.

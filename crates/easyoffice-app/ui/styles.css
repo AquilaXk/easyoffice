@@ -124,8 +124,8 @@ select:focus-visible,
   border-bottom: 1px solid var(--ui-border-light);
   flex-wrap: wrap;
 }
-.cell-ref { font-weight: 700; font-size: 12px; min-width: 32px; text-align: center; padding: 2px 6px; color: var(--accent-strong); }
-.formula-result { font-size: 12px; font-weight: 600; color: var(--accent-strong); }
+.cell-ref { min-width: 32px; text-align: center; padding: 2px 6px; }
+.formula-result { font-size: 11px; color: var(--ui-text-secondary); }
 .sheet-table, .doc-inline-table { width: 100%; border-collapse: collapse; background: var(--ui-surface); }
 .sheet-table th, .sheet-table td, .doc-inline-table th, .doc-inline-table td {
   border: 1px solid var(--ui-border-light);
@@ -475,7 +475,7 @@ select:focus-visible,
   font-weight: 600;
 }
 .statusbar-zoom-group { display: inline-flex; align-items: center; gap: 4px; }
-.statusbar-zoom-btn, .statusbar-mode-btn { padding: 1px 6px; font-size: 11px; font-weight: 700; color: var(--ui-text); background: var(--ui-hover); }
+.statusbar-mode-btn { padding: 1px 6px; font-size: 11px; font-weight: 700; color: var(--ui-text); background: var(--ui-hover); }
 .stb-zoom-slider { width: 76px; height: 14px; accent-color: var(--accent-strong); }
 .canvas-stage.eo-drop-active { outline: 3px dashed var(--accent-strong); outline-offset: -6px; }
 .conv-source-row { gap: 8px; flex-wrap: wrap; }
@@ -489,14 +489,16 @@ select:focus-visible,
 .sheet-viewport { flex: 1 1 auto; min-height: 220px; overflow: auto; position: relative; background: var(--ui-surface); border-width: 1px; border-style: solid; border-color: var(--ui-border-light); outline: none; }
 .sheet-table.sheet-grid { width: auto; table-layout: fixed; border-collapse: separate; border-spacing: 0; }
 .sheet-grid th, .sheet-grid td { box-sizing: border-box; height: 24px; padding: 0 6px; border-width: 0 1px 1px 0; line-height: 23px; vertical-align: bottom; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* Axis headers: the ruler band of the editor window (`editor.css` #h-ruler, #v-ruler: `--ruler-bg`, `--ruler-text`). */
+.sheet-grid th { background-color: var(--ruler-bg); color: var(--ruler-text); }
 .sheet-grid thead th { position: sticky; top: 0; z-index: 3; height: 26px; line-height: 25px; user-select: none; }
 .sheet-grid tbody th { position: sticky; left: 0; z-index: 2; width: 56px; user-select: none; }
 .sheet-grid thead th.sheet-corner { left: 0; z-index: 5; width: 56px; }
 .sheet-grid td { caret-color: transparent; cursor: cell; user-select: none; }
 .sheet-grid td:focus { outline: none; }
 .sheet-grid td.num { text-align: right; font-variant-numeric: tabular-nums; }
-.sheet-grid td.in-range { background: var(--ui-accent-bg-light); }
-.sheet-grid td.selected-cell { outline: 2px solid var(--accent-strong); outline-offset: -2px; background: var(--ui-surface); }
+.sheet-grid td.in-range { background: var(--table-selection-fill); }
+.sheet-grid td.selected-cell { outline: 2px solid var(--table-selection-stroke); outline-offset: -2px; background: var(--ui-surface); }
 .sheet-grid td.in-range.selected-cell { background: var(--ui-surface); }
 .sheet-grid td.editing { caret-color: auto; cursor: text; user-select: text; text-overflow: clip; text-align: left; }
 /* Conditional formatting (PD-171): sheet-rules.js sets the custom properties and classes. */
@@ -521,26 +523,26 @@ select:focus-visible,
 .sheet-grid tr.sheet-spacer td, .sheet-grid td.sheet-spacer-y { padding: 0; border-width: 0; line-height: 0; }
 .sheet-grid td.sheet-spacer-x, .sheet-grid th.sheet-spacer-head { padding: 0; }
 #icon-toolbar [hidden] { display: none; }
-.sheet-grid th.active-axis { background-color: var(--ui-hover); background-image: linear-gradient(var(--ui-accent-bg-light), var(--ui-accent-bg-light)); }
+.sheet-grid th.active-axis { background-image: linear-gradient(var(--table-selection-fill), var(--table-selection-fill)); color: var(--ruler-text); }
 .sheet-grid .sheet-hidden { display: none; }
 .sheet-grid th.hidden-edge-row { box-shadow: inset 0 3px 0 var(--accent-strong); }
 .sheet-grid th.hidden-edge-col { box-shadow: inset 3px 0 0 var(--accent-strong); }
 /* Auto filter (PD-198): the header cells of the range carry the drop-down button; the press is read in sheet-filter-ui.js. */
-.sheet-grid td.filter-head { position: relative; padding-right: 26px; }
-/* 18px: the arrow cell of a combo box (`custom-select-arrow`, 15px) plus its 1px frame and room to press; the whole corner of the cell is the target. */
-.sheet-grid td.filter-head::after { content: "\25BE"; position: absolute; right: 3px; bottom: 2px; width: 18px; height: 18px; box-sizing: border-box; border: 1px solid var(--ui-border); border-radius: var(--radius-sm); background: var(--ui-surface); color: var(--ui-text); font-size: 14px; line-height: 16px; text-align: center; cursor: pointer; }
+.sheet-grid td.filter-head { position: relative; padding-right: 21px; }
+/* The arrow cell of a combo box (`toolbar.css` `.custom-select-arrow`, like a list cell's arrow in shell.css): 15px wide, as tall as the cell, a 1px left divider, the `▾` letter at 8px in the muted color, at the cell's right end. */
+.sheet-grid td.filter-head::after { content: "\25BE"; position: absolute; right: 0; top: 0; bottom: 0; width: 15px; box-sizing: border-box; border-left: 1px solid var(--color-border-light); background: var(--color-surface); color: var(--color-text-muted); font-size: 8px; line-height: 23px; text-align: center; cursor: default; }
 /* A column with a condition is a filled button, whether or not its cell is selected. */
-.sheet-grid td.filter-head.filter-on::after { content: "\25BC"; font-size: 9px; border-color: var(--accent-strong); background: var(--accent-strong); color: var(--ui-surface); }
+.sheet-grid td.filter-head.filter-on::after { content: "\25BC"; background: var(--color-active-bg); color: var(--color-text); }
 /* Row numbers of a filtered range take the accent color, not a fill (a fill reads as a row selection). */
-.sheet-grid th.filter-row { color: var(--accent-strong); font-weight: 700; }
+.sheet-grid th.filter-row { color: var(--ruler-marker); }
 .sheet-grid td.merge-anchor { --mw: 96px; --mh: 24px; position: relative; z-index: 1; overflow: visible; text-overflow: clip; }
 .sheet-grid td.merge-anchor::after { content: ""; position: absolute; z-index: -1; left: 0; top: 0; width: calc(var(--mw) - 1px); height: calc(var(--mh) - 1px); background: var(--ui-surface); border: 0 solid var(--ui-border-light); border-width: 0 1px 1px 0; }
-.sheet-grid td.merge-anchor.in-range::after { background: var(--ui-accent-bg-light); }
+.sheet-grid td.merge-anchor.in-range::after { background: var(--ui-surface) linear-gradient(var(--table-selection-fill), var(--table-selection-fill)); }
 .sheet-grid td.merge-anchor.selected-cell { outline: none; }
-.sheet-grid td.merge-anchor.selected-cell::after { outline: 2px solid var(--accent-strong); outline-offset: -2px; background: var(--ui-surface); }
-/* Fill handle (sheet-fill-ui.js): the reference editor's object handle (8px square, `table-object-renderer.ts:80`; `table-selection.css:56-61` paper-colour edge: a 6px box and a 1px outline) in the colour of the selection outline (`--accent-strong`), and the outline of the cells a drag would fill. */
-.sheet-viewport .sheet-fill-handle { position: absolute; z-index: 4; width: 6px; height: 6px; background: var(--accent-strong); outline: 1px solid var(--doc-paper); cursor: crosshair; }
-.sheet-viewport .sheet-fill-preview { position: absolute; z-index: 3; outline: 2px dashed var(--accent-strong); outline-offset: -2px; pointer-events: none; }
+.sheet-grid td.merge-anchor.selected-cell::after { outline: 2px solid var(--table-selection-stroke); outline-offset: -2px; background: var(--ui-surface); }
+/* Fill handle (sheet-fill-ui.js): the reference editor's table object handle (`table-selection.css` .table-object-handle: the selection stroke colour, a 1px paper-colour edge; 8px, `table-object-renderer.ts:80`), and the outline of the cells a drag would fill (`.table-object-border`: 2px, the selection stroke). */
+.sheet-viewport .sheet-fill-handle { position: absolute; z-index: 4; box-sizing: border-box; width: 8px; height: 8px; background: var(--table-selection-stroke); border: 1px solid var(--doc-paper); cursor: crosshair; }
+.sheet-viewport .sheet-fill-preview { position: absolute; z-index: 3; outline: 2px dashed var(--table-selection-stroke); outline-offset: -2px; pointer-events: none; }
 #pane-hwp:not([hidden]) { display: flex; flex-direction: column; position: relative; height: 100%; min-height: 0; overflow: hidden; }
 /* Drop highlight while a file is dragged over the window; the reference editor's value (`editor.css` 83-87). */
 .editor-pane.drag-over { background: var(--ui-selected); outline: 3px dashed var(--focus-ring); outline-offset: -3px; }

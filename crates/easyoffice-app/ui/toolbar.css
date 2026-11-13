@@ -35,11 +35,16 @@
   color: var(--color-text);
 }
 
-.tb-btn:hover,
-.tb-btn.active,
-.tb-btn[aria-pressed="true"] {
+.tb-btn:hover {
   background: var(--ui-hover-strong);
   border-color: var(--ui-border-light);
+}
+
+/* Pressed toggle: the style bar button's `.active` (`style-bar.css` .sb-btn.active). */
+.tb-btn.active,
+.tb-btn[aria-pressed="true"] {
+  background: var(--ui-active);
+  border-color: var(--ui-border-strong);
 }
 
 .tb-btn:active:not(:disabled) {

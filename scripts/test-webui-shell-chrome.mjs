@@ -577,7 +577,7 @@ test("reference app CSS parity (disabled menu shortcuts/arrows, style-bar sep, z
   const glyphActiveRule = cssRule('.eo-glyph-btn.active, .eo-glyph-btn[aria-pressed="true"]', SHELL_CSS);
   assert.ok(hasDecl(glyphActiveRule, "background", "var(--ui-active)") && hasDecl(glyphActiveRule, "color", "var(--accent-ink)") && hasDecl(glyphActiveRule, "outline", "1px solid var(--ui-border-strong)"));
   const zoomBtnHover = cssRule(".statusbar-zoom-btn:hover", SHELL_CSS);
-  assert.ok(hasDecl(zoomBtnHover, "outline", "1px solid var(--ui-border-strong)"));
+  assert.ok(hasDecl(zoomBtnHover, "background", "var(--ui-hover)") && hasDecl(zoomBtnHover, "border-color", "var(--ui-border-strong)"));
   const pageRulerRule = cssRule(".page-ruler", CSS);
   assert.ok(hasDecl(pageRulerRule, "background", "var(--ruler-bg)") && hasDecl(pageRulerRule, "color", "var(--ruler-text)"));
   const rulerTrackRule = cssRule(".ruler-track", CSS);
