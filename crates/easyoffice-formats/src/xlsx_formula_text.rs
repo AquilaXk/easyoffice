@@ -176,7 +176,7 @@ fn spill_operators(tokens: Vec<Tok>) -> Vec<Tok> {
         if is_call {
             if let Some(close) = tokens[i + 2..].iter().position(|t| *t == Tok::Punct(')')) {
                 let inner = &tokens[i + 2..i + 2 + close];
-                if !inner.iter().any(|t| *t == Tok::Punct('(')) {
+                if !inner.contains(&Tok::Punct('(')) {
                     out.extend(inner.iter().cloned());
                     out.push(Tok::Punct('#'));
                     i += close + 3;

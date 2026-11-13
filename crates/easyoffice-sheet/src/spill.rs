@@ -27,6 +27,9 @@ pub const MAX_SPILL_CELLS: usize = 2_097_152;
 /// Estimated heap bytes per filled cell: the owner entry and the memoized value.
 pub(crate) const SPILL_CELL_BYTES: usize = 96;
 
+/// An area this large rebuilds the sheet's cell index instead of patching it per cell.
+const BULK_CELLS: usize = 256;
+
 /// Rounds of "publish, then recalculate what the publishing touched" before the areas are taken
 /// as circular (a ring of formulas that each fill the cell another one reads).
 pub const MAX_SPILL_ROUNDS: usize = 64;
@@ -282,6 +285,11 @@ fn publish_one(
 ) {
     let anchor = p.anchor;
     let old = sheet.spill.areas.get(&anchor).copied();
+    // Many cells at once: the populated-cell index is rebuilt in one sorted pass instead of patched cell by cell.
+    let cells = |a: Option<Area>| a.map_or(0, |a| a.rows as usize * a.cols as usize);
+    if cells(old).max(cells(Some(p.area))) > BULK_CELLS {
+        sheet.drop_indexes();
+    }
     let new_extent = if p.area.blocked {
         (1, 1)
     } else {
@@ -367,6 +375,9 @@ pub(crate) fn release_anchor(
     let Some(old) = sheet.spill.areas.remove(&anchor) else {
         return;
     };
+    if old.rows as usize * old.cols as usize > BULK_CELLS {
+        sheet.drop_indexes();
+    }
     let sid = sheet.resolved_sheet_id();
     if !old.blocked {
         for dr in 0..old.rows {

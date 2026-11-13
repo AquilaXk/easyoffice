@@ -752,12 +752,19 @@ impl RecalcSession {
                 }
             }
         }
-        // A placement decided for an anchor the deadline cut off rests on aborted cells.
-        let pending = if ctx.expired() {
-            Vec::new()
-        } else {
-            std::mem::take(&mut ctx.pending)
-        };
+        // A placement decided for an anchor the deadline cut off rests on aborted cells; the anchors the
+        // pass finished keep theirs (they are not calculated again).
+        let mut pending = std::mem::take(&mut ctx.pending);
+        if ctx.expired() {
+            let cut: std::collections::HashSet<(u16, PackedCellCoordinate)> =
+                unfinished.iter().map(|&v| self.graph.site(v)).collect();
+            pending.retain(|p| {
+                !sheets
+                    .iter()
+                    .position(|s| s.resolved_sheet_id() == p.sheet_id)
+                    .is_some_and(|idx| cut.contains(&(idx as u16, p.anchor)))
+            });
+        }
         self.dynamic_circular_pass = ctx.circular;
         self.rng_state = ctx.rng_state;
         let timed_out = ctx.expired();

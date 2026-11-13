@@ -399,9 +399,8 @@
       setDisplayValue(td, value);
       if (formula) td.dataset.formula = formula;
       else delete td.dataset.formula;
-      // A cell an array filled (PD-217) is a result: it keeps the address of the formula that made it.
-      if (entry?.spillOf) td.dataset.spillOf = entry.spillOf;
-      else if (td.dataset.spillOf !== undefined) delete td.dataset.spillOf;
+      // A cell an array filled (PD-217) keeps the address of the formula that made it.
+      if (entry?.spillOf) td.dataset.spillOf = entry.spillOf; else delete td.dataset.spillOf;
       const st = entry?.style;
       td.style.fontWeight = st?.fontWeight || "";
       td.style.fontStyle = st?.fontStyle || "";
@@ -423,10 +422,6 @@
       }
       host.__EASYOFFICE_SHEET_RULES__?.paintTd(td, getSheetName());
     }
-
-    // Shows `value` with the General format; the raw value is remembered for editing/saving.
-
-    // Raw value of a cell: the unformatted number when the display was rounded.
 
     function createTd(ref, r, c) {
       const td = document.createElement("td");

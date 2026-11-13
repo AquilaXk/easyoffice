@@ -50,6 +50,8 @@ pub(crate) mod xlsx_layout;
 pub(crate) mod xlsx_names;
 #[path = "xlsx_page.rs"]
 pub(crate) mod xlsx_page;
+#[path = "xlsx_parts.rs"]
+pub(crate) mod xlsx_parts;
 #[path = "xlsx_protect.rs"]
 pub(crate) mod xlsx_protect;
 #[path = "xlsx_sheet.rs"]

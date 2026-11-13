@@ -235,6 +235,9 @@ fn encode_delimited(
     UniversalFormatConverter::encode(&model, format)
 }
 
+/// The formula caches, the displayed grids (when asked for) and the arrays that spill of a workbook.
+type Evaluated = (Vec<XlsxFormulaCache>, Vec<ValueGrid>, Vec<SpillArea>);
+
 /// Evaluates every formula cell across all sheets (cross-sheet references resolve) and returns
 /// one formula cache per sheet plus, when `with_grids`, the displayed-value grid of each sheet.
 /// One evaluation covers all sheets, so a formula that sheets after it read is computed once.
@@ -242,7 +245,7 @@ fn evaluate_workbook(
     sheets: &[OdsUnpacked],
     stylings: &[SheetStyling],
     with_grids: bool,
-) -> Result<(Vec<XlsxFormulaCache>, Vec<ValueGrid>, Vec<SpillArea>), EasyOfficeError> {
+) -> Result<Evaluated, EasyOfficeError> {
     // The caches of XLSX and ODS may lack the formulas a slow workbook did not get to; displayed
     // values may not.
     let (mut values, spills) = evaluate_formulas(sheets, stylings, with_grids)?;

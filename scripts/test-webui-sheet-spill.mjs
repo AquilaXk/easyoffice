@@ -105,7 +105,7 @@ test("the session sends no result, and folds the areas of its answer into the mo
   store.enableSheetSessions(true);
   const sheets = { Sheet1: { A1: entry("5"), B1: entry("", "=SEQUENCE(A1)") } };
   const live = await store.evaluateLiveFormulaTargets(sheets, "Sheet1");
-  assert.deepEqual(sent.sort(), ["A1=5", "B1==SEQUENCE(A1)"]);
+  assert.deepEqual(sent.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)), ["A1=5", "B1==SEQUENCE(A1)"]);
   assert.equal(live.spillsChanged, true);
   assert.deepEqual(
     ["B2", "B3"].map((r) => sheets.Sheet1[r]),

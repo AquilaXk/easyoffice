@@ -62,50 +62,6 @@ const XLSX_ROOT_RELS: &str = concat!(
 
 type SharedStringMap<'a> = std::collections::HashMap<&'a str, usize>;
 
-fn build_content_types(sheet_count: usize) -> String {
-    let mut content_types = String::from(concat!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
-        "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">",
-        "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>",
-        "<Default Extension=\"xml\" ContentType=\"application/xml\"/>",
-        "<Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/>",
-    ));
-    for idx in 1..=sheet_count {
-        content_types.push_str(&format!(
-            "<Override PartName=\"/xl/worksheets/sheet{idx}.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>"
-        ));
-    }
-    content_types.push_str(concat!(
-        "<Override PartName=\"/xl/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml\"/>",
-        "<Override PartName=\"/xl/sharedStrings.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml\"/>",
-        "</Types>"
-    ));
-    content_types
-}
-
-/// The part that marks the array formulas of a sheet as dynamic: cell metadata type 1 of `XLDAPR`
-/// (`cm="1"` on the anchor) with the dynamic array properties (`fDynamic`).
-const DYNAMIC_ARRAY_METADATA: &str = concat!(
-    "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>",
-    "<metadata xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" ",
-    "xmlns:xda=\"http://schemas.microsoft.com/office/spreadsheetml/2017/dynamicarray\">",
-    "<metadataTypes count=\"1\"><metadataType name=\"XLDAPR\" minSupportedVersion=\"120000\" copy=\"1\" ",
-    "pasteAll=\"1\" pasteValues=\"1\" merge=\"1\" splitFirst=\"1\" rowColShift=\"1\" clearFormats=\"1\" ",
-    "clearComments=\"1\" assign=\"1\" coerce=\"1\" cellMeta=\"1\"/></metadataTypes>",
-    "<futureMetadata name=\"XLDAPR\" count=\"1\"><bk><extLst><ext uri=\"{bdbb8cdc-fa1e-496e-a857-3c3f30c029c3}\">",
-    "<xda:dynamicArrayProperties fDynamic=\"1\" fCollapsed=\"0\"/></ext></extLst></bk></futureMetadata>",
-    "<cellMetadata count=\"1\"><bk><rc t=\"1\" v=\"0\"/></bk></cellMetadata>",
-    "</metadata>"
-);
-const DYNAMIC_ARRAY_OVERRIDE: &str = concat!(
-    "<Override PartName=\"/xl/metadata.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml\"/>",
-    "</Types>"
-);
-const DYNAMIC_ARRAY_RELATIONSHIP: &str = concat!(
-    "<Relationship Id=\"rIdMeta\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata\" Target=\"metadata.xml\"/>",
-    "</Relationships>"
-);
-
 /// Which sheets `stylings` hides. A workbook shows at least one sheet, so when every sheet is
 /// hidden the first one is shown; the page never sends that, a file made by another program might.
 fn hidden_sheets(sheet_count: usize, stylings: &[SheetStyling]) -> Vec<bool> {
@@ -230,17 +186,24 @@ fn build_shared_strings_xml(shared_strings: &[&str], total_str_count: usize) -> 
 }
 
 /// Appends the XML of one cell (`raw` is the stored text: formula, number, string or blank).
+/// What one cell holds when it is written: its stored text, the value its formula gave, and the area
+/// of the array it spills (PD-217).
+struct CellContent<'a> {
+    raw: &'a str,
+    cached: Option<&'a XlsxCachedValue>,
+    spill: Option<&'a crate::SpillRef>,
+}
+
 fn push_cell_xml(
     sheet_xml: &mut String,
     col_ref: &str,
     row_num: u32,
     xf: usize,
-    raw: &str,
-    cached: Option<&XlsxCachedValue>,
+    content: CellContent<'_>,
     sst_map: &SharedStringMap<'_>,
-    spill: Option<&crate::SpillRef>,
 ) {
     use std::fmt::Write;
+    let CellContent { raw, cached, spill } = content;
     let _ = write!(sheet_xml, "<c r=\"{col_ref}{row_num}\"");
     if xf > 0 {
         let _ = write!(sheet_xml, " s=\"{xf}\"");
@@ -401,16 +364,17 @@ fn build_sheet_xml(
                 None => 0,
             });
             let cached = cache.and_then(|c| c.get(&(row, col)));
-            let spill = spill_anchors.get(&(row, col));
             push_cell_xml(
                 &mut sheet_xml,
                 col_ref,
                 row_num,
                 xf,
-                raw,
-                cached,
+                CellContent {
+                    raw,
+                    cached,
+                    spill: spill_anchors.get(&(row, col)),
+                },
                 sst_map,
-                spill,
             );
         }
         sheet_xml.push_str("</row>");
@@ -610,12 +574,20 @@ impl OoxmlCodec {
         let has_spills = stylings.iter().any(|s| !s.spills.is_empty());
         let (content_types, wb_rels_xml) = if has_spills {
             (
-                build_content_types(active_sheets.len())
-                    .replace("</Types>", DYNAMIC_ARRAY_OVERRIDE),
-                wb_rels_xml.replace("</Relationships>", DYNAMIC_ARRAY_RELATIONSHIP),
+                crate::sheet_styling::xlsx_parts::build_content_types(active_sheets.len()).replace(
+                    "</Types>",
+                    crate::sheet_styling::xlsx_parts::DYNAMIC_ARRAY_OVERRIDE,
+                ),
+                wb_rels_xml.replace(
+                    "</Relationships>",
+                    crate::sheet_styling::xlsx_parts::DYNAMIC_ARRAY_RELATIONSHIP,
+                ),
             )
         } else {
-            (build_content_types(active_sheets.len()), wb_rels_xml)
+            (
+                crate::sheet_styling::xlsx_parts::build_content_types(active_sheets.len()),
+                wb_rels_xml,
+            )
         };
         let mut entries = vec![
             (
@@ -638,7 +610,9 @@ impl OoxmlCodec {
         if has_spills {
             entries.push((
                 "xl/metadata.xml".to_string(),
-                DYNAMIC_ARRAY_METADATA.as_bytes().to_vec(),
+                crate::sheet_styling::xlsx_parts::DYNAMIC_ARRAY_METADATA
+                    .as_bytes()
+                    .to_vec(),
             ));
         }
         for (i, (_, cells)) in active_sheets.iter().enumerate() {
