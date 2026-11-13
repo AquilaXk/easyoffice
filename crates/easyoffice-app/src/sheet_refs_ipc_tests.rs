@@ -185,3 +185,26 @@ fn a_session_of_many_sheets_renames_within_its_limits() {
     );
     assert!(EasyOfficeIpcRouter::dispatch("evaluate_sheet", &body).is_err());
 }
+
+#[test]
+fn a_rename_and_a_deletion_answer_the_link_targets_that_name_the_sheet() {
+    let id = open_with(&["S", "T"], &[("S!A1", "1")]);
+    let targets =
+        r##""linkTargets":{"T":["#S!B5","#'S'!A1:A3","#T!B5","#Total","https://a.b/S!A1"]}"##;
+    let rename = call(&refs(
+        &id,
+        &format!("\"op\":\"rename\",\"sheet\":\"S\",\"newName\":\"매출 합계\",{targets}"),
+    ));
+    assert_eq!(
+        field(&rename, "linkTargets").to_json_string(),
+        r##"{"T":[["#S!B5","#'매출 합계'!B5"],["#'S'!A1:A3","#'매출 합계'!A1:A3"]]}"##
+    );
+    let delete = call(&refs(
+        &id,
+        &format!("\"op\":\"delete\",\"sheet\":\"S\",{targets}"),
+    ));
+    assert_eq!(
+        field(&delete, "linkTargets").to_json_string(),
+        r###"{"T":[["#S!B5","##REF!"],["#'S'!A1:A3","##REF!"]]}"###
+    );
+}

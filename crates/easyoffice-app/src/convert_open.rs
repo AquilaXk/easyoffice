@@ -427,6 +427,12 @@ fn write_sheet(
         out.push_str(",\"rules\":");
         out.push_str(&rules_json(&st.rules));
     }
+    if let Some(st) = styling.filter(|st| !st.links.is_empty()) {
+        out.push_str(",\"links\":");
+        out.push_str(&crate::sheet_links_json::links_json(
+            &st.links, max_rows, max_cols,
+        ));
+    }
     if let Some(st) = styling {
         match crate::sheet_filter_ipc::split_for_open(cells, st) {
             Some((filter, hidden)) => {
@@ -476,6 +482,12 @@ fn decode_response(
                     warnings.push(format!(
                         "이름 {}개는 한도를 넘거나 올바르지 않아 가져오지 않았습니다.",
                         st.names_rejected
+                    ));
+                }
+                if st.links_rejected > 0 {
+                    warnings.push(format!(
+                        "{name} 시트의 하이퍼링크 {}개는 허용하지 않는 주소이거나 한도를 넘어 가져오지 않았습니다.",
+                        st.links_rejected
                     ));
                 }
                 if st.num_fmts_rejected > 0 {

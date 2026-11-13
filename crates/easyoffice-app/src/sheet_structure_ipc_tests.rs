@@ -169,3 +169,37 @@ fn the_groups_follow_the_edit_and_a_bad_outline_changes_nothing() {
         );
     }
 }
+
+#[test]
+fn a_row_edit_answers_the_in_workbook_link_targets_it_moves() {
+    let id = open_with(&[("S!A1", "1")]);
+    let res = call(&format!(
+        r##"{{"sessionAction":"structure","session":"{id}","sheet":"S","axis":"row","op":"insert","at":2,"count":3,"linkTargets":{{"T":["#S!B5","#S!B1","#T!B5","https://a.b/","#Total"],"S":["#B7","#S!A1:A9"]}}}}"##
+    ));
+    assert_eq!(
+        field(&res, "linkTargets").to_json_string(),
+        r##"{"T":[["#S!B5","#S!B8"]],"S":[["#B7","#B10"],["#S!A1:A9","#S!A1:A12"]]}"##
+    );
+    let plain = call(&format!(
+        r#"{{"sessionAction":"structure","session":"{id}","sheet":"S","axis":"row","op":"insert","at":2,"count":1}}"#
+    ));
+    assert!(StrictJsonValue::get_field(plain.as_object().unwrap(), "linkTargets").is_none());
+}
+
+#[test]
+fn hostile_link_targets_are_refused_before_the_session_changes() {
+    let id = open_with(&[("S!A1", "1")]);
+    for bad in [
+        r#""linkTargets":[1]"#,
+        r#""linkTargets":{"S":"x"}"#,
+        r#""linkTargets":{"S":[1]}"#,
+    ] {
+        let body = format!(
+            r#"{{"sessionAction":"structure","session":"{id}","sheet":"S","axis":"row","op":"insert","at":1,"count":1,{bad}}}"#
+        );
+        assert!(
+            EasyOfficeIpcRouter::dispatch("evaluate_sheet", &body).is_err(),
+            "{bad}"
+        );
+    }
+}

@@ -2,16 +2,17 @@
 //! rewrites (PD-209).
 //!
 //! Request: `{session, op: "rename"|"delete", sheet, newName, rules}` (`newName` for a rename) and
-//! the rules `{sheet: {cf, dv}}` of every sheet, whose operand formulas may name the sheet too.
+//! the rules `{sheet: {cf, dv}}` of every sheet, whose operand formulas may name the sheet too, and
+//! `linkTargets` `{sheet: ["#Old!B5", ...]}`, the in-workbook targets of the cell links (`sheet_links_json`).
 //! The engine checks the name (`sheet_name_problem`, no other sheet has it) and that a deletion
 //! leaves a sheet. It does not change the session: the page applies the answer and its sheet set
 //! changes, so it opens a new session.
 //!
 //! Answer: `formulas` (`[{sheet, cell, value}]`, the new text of every formula that named the
 //! sheet, the sheet under the name it has before the change) and `rules` (the rules whose operand
-//! formulas changed, by sheet name before the change). `{"refused":"structure"}` means the change
-//! rewrites too many formulas and nothing changed; `{"expired":true}` and `{"refused":"limit"}`
-//! are as for `apply`.
+//! formulas changed, by sheet name before the change) and `linkTargets` (`{sheet: [[old, new], ...]}`,
+//! the targets the change rewrote). `{"refused":"structure"}` means the change rewrites too many
+//! formulas and nothing changed; `{"expired":true}` and `{"refused":"limit"}` are as for `apply`.
 
 use crate::sheet_rules_json::{parse_rules, rules_json};
 use crate::sheet_session::{session_id, Applied, EXPIRED, REFUSED};
@@ -110,6 +111,7 @@ impl EasyOfficeIpcRouter {
         // The page's rules are read first, so a bad request fails before the session is asked.
         let mut rules = String::new();
         followed_rules_json(entries, &op, &mut rules)?;
+        crate::sheet_links_json::followed_link_targets_json(entries, op.change(), &mut rules)?;
         match crate::sheet_session::registry().sheet_refs(id, owner, &op, Instant::now())? {
             Applied::Done(mut json) => {
                 if !json.contains("\"refused\"") {

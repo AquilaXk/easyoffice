@@ -12,7 +12,9 @@
 //! rewrote, by new position), the `changed` values, `circular`, and the moved `merges`,
 //! `hiddenRows`, `hiddenCols`, `filter` (`null` when the edit removed it; `filterReapply: true` when
 //! it dropped a column's condition, so the page evaluates the others again), `widths` and the
-//! `outline` and `rules` that changed. `{"refused":"structure"}`
+//! `outline` and `rules` that changed. A request's `linkTargets` `{sheet: ["#Sheet1!B5", ...]}` (the
+//! in-workbook targets of the links of each sheet) answers `linkTargets` `{sheet: [[old, new], ...]}`
+//! (`sheet_links_json`). `{"refused":"structure"}`
 //! means the edit changes too many formulas and nothing changed; `{"refused":"protected"}` means the
 //! request's `protect` (the sheet's protection, `sheet_protect_json`) locks that edit (PD-216), and the
 //! allowed ranges and `unlockedRows`, `unlockedCols` of the request move with the cells; `{"expired":true}` and
@@ -280,6 +282,7 @@ impl EasyOfficeIpcRouter {
         let mut moved = String::new();
         moved_layout_json(entries, &edit, &mut moved)?;
         moved_rules_json(entries, sheet, &edit, &mut moved)?;
+        crate::sheet_links_json::moved_link_targets_json(entries, sheet, &edit, &mut moved)?;
         match crate::sheet_session::registry().structure(id, owner, sheet, edit, Instant::now())? {
             Applied::Done(mut json) => {
                 if !json.contains("\"refused\"") {
