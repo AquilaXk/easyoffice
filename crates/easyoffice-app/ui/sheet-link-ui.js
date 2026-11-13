@@ -6,7 +6,7 @@
 // in the 웹 주소 field, as in the document editor. A link cell opens on a click (the help: one click of the left button
 // follows the link, holding the button down selects the cell instead); a cell that is part of a larger selection or
 // clicked with a modifier only selects. Applying and removing are one undo step each and go through the cell writer, so
-// the protection of the sheet decides (the flag 하이퍼링크 삽입 and the lock of the cell). Ctrl+K stays the command search.
+// the protection of the sheet decides (the flag 하이퍼링크 삽입 and the lock of the cell). Ctrl+K, H opens the dialog (`workspace-session.js`).
 (function (host) {
   "use strict";
 
@@ -257,7 +257,7 @@
         say(MESSAGES.nothing);
         return false;
       }
-      const done = await applyCellEdits([{ ref, value: entry.value || "", formula: entry.formula || "" }], "하이퍼링크 제거");
+      const done = await applyCellEdits([{ ref, value: entry.value || "", formula: entry.formula || "", link: null }], "하이퍼링크 제거");
       focusAnchor();
       return done;
     }

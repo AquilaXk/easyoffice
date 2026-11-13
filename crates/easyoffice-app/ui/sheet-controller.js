@@ -219,7 +219,7 @@
       const numFmt = td._nf || "";
       const look = td._st;
       const hasStyle = Boolean(fontWeight || fontStyle || textDecoration || fontSize || numFmt || lookApi?.hasLook(look));
-      if (value === "" && formula === "" && !hasStyle) {
+      if (value === "" && formula === "" && !hasStyle && !prevEntry?.link) {
         delete map[ref];
         return;
       }
@@ -233,10 +233,8 @@
         cellEntry.spillRows = prevEntry.spillRows;
         cellEntry.spillCols = prevEntry.spillCols;
       }
-      // A hyperlink (PD-218) stays while the cell's text is the one it was made for; a write removes it.
-      if (prevEntry?.link && (prevEntry.formula || "") === formula && (formula !== "" || prevEntry.value === value)) {
-        cellEntry.link = prevEntry.link;
-      }
+      // A hyperlink (PD-218) stays through any text the cell is given, even none.
+      if (prevEntry?.link) cellEntry.link = prevEntry.link;
       map[ref] = cellEntry;
       if (value !== "" || formula !== "") {
         const packed = gridUtils.packRef(ref);
@@ -279,10 +277,10 @@
       }
     }
 
-    function clearExisting(range) {
+    function clearExisting(range, dropLinks = false) {
       snapshotDomSheetCells();
       const edits = [];
-      cellRefOfRange(range, (ref) => edits.push({ ref, value: "", formula: "" }));
+      cellRefOfRange(range, (ref) => edits.push(dropLinks ? { ref, value: "", formula: "", link: null } : { ref, value: "", formula: "" }));
       return edits;
     }
 

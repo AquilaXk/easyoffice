@@ -7,11 +7,11 @@
 //   packages/sheets-hyper-link/src/types/interfaces/i-hyper-link.ts :17-47 (a link: `payload`, `tooltip`, cell),
 //   packages/sheets-hyper-link/src/services/parser.service.ts :50-91 (`#`-prefixed targets are jumps inside
 //       the workbook, any other target is an address),
-//   packages/sheets-hyper-link/src/controllers/set-range.controller.ts :43-139 (a write to the cell or
-//       a clear removes its link),
 //   packages/sheets-hyper-link-ui/src/controllers/auto-fill.controller.ts :103-136, :145-153 (a fill copies the link in the
 //       copy and series modes), copy-paste.controller.ts :157-166 (the special pastes leave links alone).
-// Differences: Univer keeps the links in a model apart from the cells and moves them with its reference-range
+// Differences: Univer removes the link when the cell is written or cleared (`set-range.controller.ts :43-139`); here a
+// link stays through any text the cell is given, as in the spreadsheet programs, and goes with a cut, a paste or fill of
+// cells, or the removal command. Univer keeps the links in a model apart from the cells and moves them with its reference-range
 // service; here the link rides on the cell entry, and only the in-workbook target text is rewritten by the
 // engine (`linkTargets` of the row and column edit and the sheet rename answers). A target names its sheet
 // (Univer names it by id). See THIRD_PARTY_NOTICES.md.
@@ -22,6 +22,8 @@
   const MAX_LOCATION_CHARS = 255;
   const MAX_LINKS_PER_SHEET = 65530;
   // The control characters of a screen tip, except the line break.
+  // A cell address of a file: letters then a row (the key of an entry; anything else could be `__proto__`).
+  const CELL_REF_RE = /^[A-Z]{1,3}[1-9][0-9]{0,6}$/;
   const TIP_CONTROL_RE = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/g;
 
   const quoteSheet = (sheet) => host.__EASYOFFICE_SHEET_UTILS__.quoteFormulaSheetName(sheet);
@@ -77,25 +79,24 @@
     td.setAttribute("title", link.tip || (internal ? locationOf(link.target) : link.target));
   }
 
-  // The links of a sheet map for a save: `[{ ref, target, tip? }]`, the cells that show something only.
+  // The links of a sheet map for a save: `[{ ref, target, tip? }]`.
   function payloadOf(map) {
     const out = [];
     for (const ref of Object.keys(map || {})) {
       const entry = map[ref];
-      if (!entry?.link || !(entry.value || entry.formula)) continue;
+      if (!entry?.link) continue;
       out.push(entry.link.tip ? { ref, target: entry.link.target, tip: entry.link.tip } : { ref, target: entry.link.target });
     }
     return out;
   }
 
-  // Puts the links of a file on the entries of `map` (a link of a cell with nothing in it is dropped).
+  // Puts the links of a file on the entries of `map`; a link of a cell with nothing in it makes an empty entry.
   function attach(map, links) {
     let count = 0;
     for (const item of Array.isArray(links) ? links : []) {
-      const entry = map[item?.ref];
-      const link = entry && (entry.value || entry.formula) ? make(item.target, item.tip) : null;
+      const link = CELL_REF_RE.test(item?.ref) ? make(item.target, item.tip) : null;
       if (!link || count >= MAX_LINKS_PER_SHEET) continue;
-      entry.link = link;
+      (map[item.ref] ||= { value: "", formula: "" }).link = link;
       count += 1;
     }
   }

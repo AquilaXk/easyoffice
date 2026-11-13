@@ -127,7 +127,7 @@ test("a source cell brings its format; the frozen-panes flag does not travel; an
   const result = fillColumn([cellOf("1", { style: bold }), cellOf("", { style: frozen }), undefined], "down", 3, "copy");
   assert.equal(result.edits[0].style, bold);
   assert.deepEqual(result.edits[1].style, { fontWeight: "600", fontStyle: "", textDecoration: "", fontSize: "" });
-  assert.deepEqual(result.edits[2], { ref: "C15", value: "", formula: "", style: null });
+  assert.deepEqual(result.edits[2], { ref: "C15", value: "", formula: "", style: null, link: null }, "a filled cell brings its source's link, or none");
 });
 
 test("a fill past the limits is refused and writes nothing; odd numbers never turn into Infinity or NaN", () => {

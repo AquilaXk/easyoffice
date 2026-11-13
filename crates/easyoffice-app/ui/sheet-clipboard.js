@@ -197,20 +197,22 @@
       });
     }
 
-    function clearEdits(range) {
+    // Delete clears the value and leaves the cell's hyperlink (as the spreadsheet programs do); a cut moves the link
+    // with the cell, so its source loses it (`dropLinks`, PD-218).
+    function clearEdits(range, dropLinks) {
       const edits = [];
       for (let r = range.r1; r <= range.r2; r += 1) {
         for (let c = range.c1; c <= range.c2; c += 1) {
-          edits.push({ ref: grid.refOf(r, c), value: "", formula: "" });
+          edits.push(dropLinks ? { ref: grid.refOf(r, c), value: "", formula: "", link: null } : { ref: grid.refOf(r, c), value: "", formula: "" });
         }
       }
       return edits;
     }
 
-    function clearRange(range) {
+    function clearRange(range, dropLinks = false) {
       const area = (range.r2 - range.r1 + 1) * (range.c2 - range.c1 + 1);
-      if (area > 200000) return api.applyCellEdits(api.clearExisting(range), "범위 지우기");
-      return api.applyCellEdits(clearEdits(range), "범위 지우기");
+      if (area > 200000) return api.applyCellEdits(api.clearExisting(range, dropLinks), "범위 지우기");
+      return api.applyCellEdits(clearEdits(range, dropLinks), "범위 지우기");
     }
 
     // Clipboard text as a block without a source: a quoted field keeps tabs and line breaks.
@@ -284,7 +286,7 @@
       if (!data || typeof data.setData !== "function") return false;
       data.setData("text/plain", snap.text);
       ev.preventDefault();
-      if (cut) void clearRange(range).catch(() => {});
+      if (cut) void clearRange(range, true).catch(() => {});
       return true;
     }
 
@@ -315,7 +317,7 @@
       const snap = snapshotOf(range);
       remember(snap);
       const toSystem = await writeSystem(snap.text);
-      if (cmd === "clip-cut") await clearRange(range);
+      if (cmd === "clip-cut") await clearRange(range, true);
       return toSystem ? "system" : "internal";
     }
 

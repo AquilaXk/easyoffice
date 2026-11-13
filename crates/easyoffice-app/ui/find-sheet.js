@@ -91,8 +91,6 @@
         entry.formula = "";
         entry.value = next;
       }
-      // A replaced text is a write: the cell's hyperlink goes (PD-218).
-      delete entry.link;
       return true;
     }
 
