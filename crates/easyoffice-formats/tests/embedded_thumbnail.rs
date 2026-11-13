@@ -26,6 +26,7 @@ fn model() -> UniversalDocumentModel {
 
 fn rich() -> RichDocument {
     RichDocument {
+        page_frame: Default::default(),
         title: "미리보기".to_string(),
         blocks: vec![RichBlock::Paragraph(RichParagraph {
             runs: vec![RichRun::plain("본문 한 줄")],

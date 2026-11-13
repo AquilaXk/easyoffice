@@ -18,6 +18,7 @@ const EM: f64 = 12.0;
 
 fn doc(lines: &[&str]) -> RichDocument {
     RichDocument {
+        page_frame: Default::default(),
         title: "형광펜".to_string(),
         blocks: lines
             .iter()

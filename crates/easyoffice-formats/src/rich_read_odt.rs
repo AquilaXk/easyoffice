@@ -5,15 +5,18 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 
 use crate::office_codecs::{checked_part, checked_zip_xml_entries};
-use crate::rich_document::{normalize_hex_color, safe_link_target, toc_bookmark_number, RichToc};
+use crate::rich_document::{
+    frame_paragraph, normalize_hex_color, safe_link_target, toc_bookmark_number, RichToc,
+    MAX_PAGE_FRAME_PARAGRAPHS,
+};
 use crate::rich_image::{safe_package_path, ImageBudget};
 use crate::rich_table::{TableAssembler, MAX_PADDED_COLUMNS};
 use crate::rich_xml::{push_linked_run, take_toc_page, toc_role_from_name, CharFmt};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
-    EasyOfficeError, OdfCodec, RichAlignment, RichBlock, RichDocument, RichImage, RichListKind,
-    RichParagraph, RichRun, RichScript, XmlSanitizer, ZipArchiveCodec, ZipArchiveEntry,
-    ZipSecurityPolicy,
+    EasyOfficeError, OdfCodec, RichAlignment, RichBlock, RichDocument, RichField, RichImage,
+    RichListKind, RichPageFrame, RichParagraph, RichRun, RichScript, XmlSanitizer, ZipArchiveCodec,
+    ZipArchiveEntry, ZipSecurityPolicy,
 };
 
 const EMU_PER_INCH: f64 = 914_400.0;
@@ -306,6 +309,9 @@ struct OdtWalker<'a> {
     link: Option<String>,
     /// The last paragraph that held no text asked for a page break; the next one carries it.
     pending_page_break: bool,
+    /// Header and footer text: a page-number field is kept as a field run.
+    frame_mode: bool,
+    in_page_number: bool,
 }
 
 /// Merges a span's character format into the enclosing format.
@@ -350,6 +356,8 @@ impl<'a> OdtWalker<'a> {
             budget: ImageBudget::default(),
             link: None,
             pending_page_break: false,
+            frame_mode: false,
+            in_page_number: false,
         }
     }
 
@@ -378,6 +386,10 @@ impl<'a> OdtWalker<'a> {
                 if let Some(top) = self.paras.last_mut() {
                     top.bookmark = top.bookmark.or(number);
                 }
+            }
+            "text:page-number" if self.frame_mode => {
+                self.in_page_number = true;
+                self.push_field_run();
             }
             "text:tab" => self.push_inline("\t"),
             "text:line-break" => self.push_inline("\n"),
@@ -476,7 +488,29 @@ impl<'a> OdtWalker<'a> {
         self.span_fmts.push(merge_span_fmt(cur, add));
     }
 
+    fn push_field_run(&mut self) {
+        let fmt = self.span_fmts.last().cloned().unwrap_or_default();
+        if let Some(top) = self.paras.last_mut() {
+            top.runs.push(RichRun {
+                bold: fmt.bold,
+                italic: fmt.italic,
+                underline: fmt.underline,
+                strike: fmt.strike,
+                size_half_pt: fmt.size_half_pt,
+                font: fmt.font,
+                color: fmt.color,
+                highlight: fmt.highlight,
+                script: fmt.script,
+                field: Some(RichField::PageNumber),
+                ..RichRun::default()
+            });
+        }
+    }
+
     fn push_inline(&mut self, text: &str) {
+        if self.in_page_number {
+            return;
+        }
         push_inline(&mut self.paras, &self.span_fmts, self.link.as_deref(), text);
     }
 
@@ -534,6 +568,7 @@ impl<'a> OdtWalker<'a> {
                 self.in_automatic_styles = false
             }
             "text:a" => self.link = None,
+            "text:page-number" => self.in_page_number = false,
             "text:span" if !self.paras.is_empty() => {
                 if self.span_fmts.len() > 1 {
                     self.span_fmts.pop();
@@ -591,7 +626,7 @@ impl<'a> OdtWalker<'a> {
         let images = p.images;
         if self.tbl_depth > 0 {
             self.cell_paras.push(text);
-        } else if text.trim().is_empty() {
+        } else if text.trim().is_empty() && !p.runs.iter().any(|r| r.field.is_some()) {
             self.pending_page_break |= p.style.page_break_before;
         } else {
             let list = if p.outline > 0 || p.toc.is_some() {
@@ -689,6 +724,10 @@ pub(crate) fn read_odt(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Easy
         dropped_merges,
         ..
     } = walker;
+    let page_frame = match checked_part(&parts, "styles.xml") {
+        Some(s_xml) => read_page_frame(s_xml, &styles, &list_styles, &mut warnings)?,
+        None => RichPageFrame::default(),
+    };
     if dropped_merges > 0 {
         warnings.push(format!(
             "표의 병합 {dropped_merges}곳은 범위를 벗어나거나 겹쳐 가져오지 않았습니다."
@@ -707,12 +746,106 @@ pub(crate) fn read_odt(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Easy
     }
     Ok((
         RichDocument {
+            page_frame,
             title,
             blocks,
             official_agency: None,
         },
         warnings,
     ))
+}
+
+/// The header and footer of the first master page in `styles.xml`; the left and first-page variants of
+/// the master page are not read.
+fn read_page_frame(
+    xml: &str,
+    styles: &HashMap<String, StyleProps>,
+    list_styles: &HashMap<String, RichListKind>,
+    warnings: &mut Vec<String>,
+) -> Result<RichPageFrame, EasyOfficeError> {
+    let mut frame = RichPageFrame::default();
+    let mut reader = XmlReader::new(xml);
+    let (mut masters, mut variants) = (0usize, false);
+    let mut open: Option<(bool, OdtWalker<'_>)> = None;
+    while let Some(event) = reader.next_event()? {
+        match event {
+            XmlEvent::Start {
+                name: "style:master-page",
+                ..
+            } => masters += 1,
+            XmlEvent::Start {
+                name:
+                    "style:header-left" | "style:footer-left" | "style:header-first"
+                    | "style:footer-first",
+                ..
+            } => {
+                variants |= masters == 1;
+                reader.skip_subtree()?;
+            }
+            XmlEvent::Start {
+                name: name @ ("style:header" | "style:footer"),
+                ..
+            } if masters == 1 && open.is_none() => {
+                let mut walker = OdtWalker::new(styles, list_styles);
+                walker.frame_mode = true;
+                open = Some((name == "style:header", walker));
+            }
+            XmlEvent::Start { name, ref attrs } => {
+                if let Some((_, walker)) = open.as_mut() {
+                    if walker.on_start(name, attrs) {
+                        reader.skip_subtree()?;
+                    }
+                }
+            }
+            XmlEvent::Text(text) => {
+                if let Some((_, walker)) = open.as_mut() {
+                    walker.push_inline(&text);
+                }
+            }
+            XmlEvent::End(name @ ("style:header" | "style:footer")) if open.is_some() => {
+                let Some((header, mut walker)) = open.take() else {
+                    continue;
+                };
+                warnings.append(&mut walker.warnings);
+                let mut paragraphs: Vec<RichParagraph> = walker
+                    .blocks
+                    .iter()
+                    .filter_map(|b| match b {
+                        RichBlock::Paragraph(p) => Some(frame_paragraph(p)),
+                        _ => None,
+                    })
+                    .collect();
+                if walker
+                    .blocks
+                    .iter()
+                    .any(|b| !matches!(b, RichBlock::Paragraph(_)))
+                {
+                    warnings.push("머리말·꼬리말의 표·그림은 가져오지 않았습니다.".to_string());
+                }
+                if paragraphs.len() > MAX_PAGE_FRAME_PARAGRAPHS {
+                    paragraphs.truncate(MAX_PAGE_FRAME_PARAGRAPHS);
+                    warnings.push(format!(
+                        "머리말·꼬리말은 문단 {MAX_PAGE_FRAME_PARAGRAPHS}개까지만 가져왔습니다."
+                    ));
+                }
+                debug_assert_eq!(name == "style:header", header);
+                if header {
+                    frame.header = paragraphs;
+                } else {
+                    frame.footer = paragraphs;
+                }
+            }
+            XmlEvent::End(name) => {
+                if let Some((_, walker)) = open.as_mut() {
+                    walker.on_end(name);
+                }
+            }
+        }
+    }
+    if variants {
+        warnings.push("첫 쪽·왼쪽 쪽 머리말·꼬리말은 가져오지 않았습니다.".to_string());
+    }
+    Ok(frame)
 }
 
 /// Fields of one `draw:frame` holding a `draw:image`.

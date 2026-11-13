@@ -34,6 +34,7 @@ fn sample_table() -> RichTable {
 
 fn doc_of(table: RichTable) -> RichDocument {
     RichDocument {
+        page_frame: Default::default(),
         title: "병합".into(),
         blocks: vec![RichBlock::Table(table)],
         official_agency: None,

@@ -14,10 +14,13 @@ use crate::hwpx_parts::{
     LIST_LEFT_MARGIN, NS_PARAGRAPH, NS_SECTION, SETTINGS_XML, TEXT_WIDTH, VERSION_XML,
 };
 use crate::office_codecs::{checked_part, checked_zip_xml_entries};
-use crate::rich_document::{RichAlignment, RichBlock, RichDocument};
+use crate::rich_document::{
+    frame_paragraph, RichAlignment, RichBlock, RichDocument, RichParagraph,
+};
 use crate::rich_image::{check_document_images, RichImage};
 use crate::rich_image_writers::{hwpx_picture_run, MediaParts};
 use crate::rich_link_writers::{external_link_groups, hwpx_link_begin, hwpx_link_end};
+use crate::rich_page_frame::{hwpx_frame_control, HWPX_PAGE_NUMBER_CONTROL};
 use crate::rich_table::{CellSpan, SpanMap};
 use crate::rtf_xml_helpers::{
     extract_attr, extract_attr_from_fragment, extract_tag_bodies,
@@ -60,6 +63,163 @@ pub struct HwpxPayload {
     pub tables: Vec<Vec<Vec<String>>>,
 }
 
+/// The shape tables of `header.xml` (fonts, character and paragraph shapes, styles) and the paragraph
+/// writer that fills them.
+struct ShapeTables {
+    char_shapes: Vec<HwpxCharShape>,
+    char_map: std::collections::HashMap<HwpxCharShape, usize>,
+    para_shapes: Vec<HwpxParaShape>,
+    para_map: std::collections::HashMap<HwpxParaShape, usize>,
+    styles: Vec<HwpxStyle>,
+    style_map: std::collections::HashMap<u8, usize>,
+    fonts: Vec<String>,
+    font_map: std::collections::HashMap<String, usize>,
+    next_field_id: u32,
+}
+
+fn hex_rgb(hex: &str) -> Option<u32> {
+    u32::from_str_radix(hex, 16).ok()
+}
+
+/// Index of `item` in `table`, added when it is new.
+fn intern<T: Eq + std::hash::Hash + Copy>(
+    table: &mut Vec<T>,
+    map: &mut std::collections::HashMap<T, usize>,
+    item: T,
+) -> usize {
+    if let Some(&idx) = map.get(&item) {
+        return idx;
+    }
+    let idx = table.len();
+    table.push(item);
+    map.insert(item, idx);
+    idx
+}
+
+impl ShapeTables {
+    fn new() -> Self {
+        Self {
+            char_shapes: vec![HwpxCharShape::default()],
+            char_map: std::collections::HashMap::from([(HwpxCharShape::default(), 0)]),
+            para_shapes: vec![HwpxParaShape::default()],
+            para_map: std::collections::HashMap::from([(HwpxParaShape::default(), 0)]),
+            styles: Vec::new(),
+            style_map: std::collections::HashMap::new(),
+            fonts: Vec::new(),
+            font_map: std::collections::HashMap::new(),
+            next_field_id: 0,
+        }
+    }
+
+    /// Index (1-based, 0 is the default face) of a font name.
+    fn font_index(&mut self, name: &str) -> usize {
+        if let Some(&idx) = self.font_map.get(name) {
+            return idx;
+        }
+        self.fonts.push(name.to_string());
+        let idx = self.fonts.len();
+        self.font_map.insert(name.to_string(), idx);
+        idx
+    }
+
+    fn write_paragraph(&mut self, sec: &mut SectionWriter, p: &RichParagraph) {
+        let level = if (1..=6).contains(&p.heading_level) {
+            p.heading_level
+        } else {
+            0
+        };
+        let para = HwpxParaShape {
+            align: match p.alignment {
+                None => None,
+                Some(RichAlignment::Left) => Some("LEFT"),
+                Some(RichAlignment::Center) => Some("CENTER"),
+                Some(RichAlignment::Right) => Some("RIGHT"),
+                Some(RichAlignment::Justify) => Some("JUSTIFY"),
+            },
+            heading_type: match p.list {
+                Some(crate::RichListKind::Bullet) => HEADING_BULLET,
+                Some(crate::RichListKind::Ordered) => HEADING_NUMBER,
+                None => HEADING_NONE,
+            },
+            left_margin: p
+                .left_indent_twips
+                .map(|t| t.saturating_mul(HWPUNIT_PER_TWIP))
+                .unwrap_or(if p.list.is_some() {
+                    LIST_LEFT_MARGIN
+                } else {
+                    0
+                }),
+            intent: p
+                .first_line_indent_twips
+                .map_or(0, |t| t.saturating_mul(HWPUNIT_PER_TWIP as i32)),
+            line_percent: p
+                .line_spacing_percent
+                .map_or(DEFAULT_LINE_PERCENT, u32::from),
+        };
+        let para_pr = intern(&mut self.para_shapes, &mut self.para_map, para);
+        let base = HwpxCharShape {
+            bold: level > 0,
+            height: [1600, 1400, 1300, 1200, 1100, 1000]
+                .get(usize::from(level).wrapping_sub(1))
+                .copied()
+                .unwrap_or(DEFAULT_CHAR_HEIGHT),
+            ..HwpxCharShape::default()
+        };
+        let style = if level > 0 {
+            let char_pr = intern(&mut self.char_shapes, &mut self.char_map, base);
+            let idx = *self.style_map.entry(level).or_insert_with(|| {
+                self.styles.push(HwpxStyle {
+                    name: format!("개요 {level}"),
+                    eng_name: format!("Outline {level}"),
+                    para_pr,
+                    char_pr,
+                });
+                self.styles.len() - 1
+            });
+            idx + 1
+        } else {
+            0
+        };
+        sec.open_paragraph_with(para_pr, style);
+        let groups = external_link_groups(&p.runs);
+        if groups.is_empty() {
+            let char_pr = intern(&mut self.char_shapes, &mut self.char_map, base);
+            sec.run(char_pr, "");
+        }
+        for (link, group) in groups {
+            let field_id = link.map(|url| {
+                self.next_field_id += 1;
+                sec.xml.push_str(&hwpx_link_begin(self.next_field_id, url));
+                self.next_field_id
+            });
+            for run in group {
+                let font = run.font.as_ref().map_or(0, |f| self.font_index(f));
+                let shape = HwpxCharShape {
+                    bold: base.bold || run.bold,
+                    italic: run.italic,
+                    underline: run.underline,
+                    strike: run.strike,
+                    height: run.size_half_pt.map_or(base.height, |s| u32::from(s) * 50),
+                    font,
+                    text_color: run.color.as_deref().and_then(hex_rgb),
+                    shade_color: run.highlight.as_deref().and_then(hex_rgb),
+                    script: run.script,
+                };
+                let char_pr = intern(&mut self.char_shapes, &mut self.char_map, shape);
+                if run.field.is_some() {
+                    sec.field_run(char_pr);
+                } else {
+                    sec.run(char_pr, &run.text);
+                }
+            }
+            if let Some(id) = field_id {
+                sec.xml.push_str(&hwpx_link_end(id));
+            }
+        }
+        sec.xml.push_str("</hp:p>");
+    }
+}
+
 pub struct HwpxCodec;
 
 /// Incrementing paragraph-ID writer for `section0.xml`.
@@ -68,6 +228,8 @@ struct SectionWriter {
     next_para_id: u32,
     next_table_id: u32,
     sec_pr_pending: bool,
+    /// `hp:ctrl` header and footer of the page, written into the run that holds the section properties.
+    frame_controls: String,
 }
 
 impl SectionWriter {
@@ -79,6 +241,18 @@ impl SectionWriter {
             next_para_id: 0,
             next_table_id: 1,
             sec_pr_pending: true,
+            frame_controls: String::new(),
+        }
+    }
+
+    /// Paragraphs written apart from the section (a header or footer), numbered from `first_para_id`.
+    fn fragment(first_para_id: u32) -> Self {
+        Self {
+            xml: String::new(),
+            next_para_id: first_para_id,
+            next_table_id: 1,
+            sec_pr_pending: false,
+            frame_controls: String::new(),
         }
     }
 
@@ -106,6 +280,7 @@ impl SectionWriter {
             self.sec_pr_pending = false;
             self.xml.push_str("<hp:run charPrIDRef=\"0\">");
             self.xml.push_str(&section_properties_xml());
+            self.xml.push_str(&self.frame_controls);
             self.xml.push_str("</hp:run>");
         }
     }
@@ -129,6 +304,13 @@ impl SectionWriter {
             .push_str(&format!("<hp:run charPrIDRef=\"{char_pr}\"><hp:t>"));
         self.xml.push_str(&XmlSanitizer::escape(text));
         self.xml.push_str("</hp:t></hp:run>");
+    }
+
+    /// A run holding a page-number field.
+    fn field_run(&mut self, char_pr: usize) {
+        self.xml.push_str(&format!(
+            "<hp:run charPrIDRef=\"{char_pr}\">{HWPX_PAGE_NUMBER_CONTROL}<hp:t/></hp:run>"
+        ));
     }
 
     fn table_paragraph(&mut self, rows: &[Vec<String>], spans: Option<&SpanMap>) {
@@ -210,153 +392,49 @@ impl HwpxCodec {
     }
 
     /// Writes a [`RichDocument`] in block order: each distinct run format becomes a `charPr`,
-    /// each distinct alignment/indent a `paraPr`, and heading levels use "개요 N" styles.
+    /// each distinct alignment/indent a `paraPr`, and heading levels use "개요 N" styles. The header and
+    /// footer are controls of the first paragraph.
     pub fn pack_rich(doc: &RichDocument, is_template: bool) -> Result<Vec<u8>, EasyOfficeError> {
-        let mut char_shapes = vec![HwpxCharShape::default()];
-        let mut char_map: std::collections::HashMap<HwpxCharShape, usize> =
-            std::collections::HashMap::from([(HwpxCharShape::default(), 0)]);
-        let mut para_shapes = vec![HwpxParaShape::default()];
-        let mut para_map: std::collections::HashMap<HwpxParaShape, usize> =
-            std::collections::HashMap::from([(HwpxParaShape::default(), 0)]);
-        let mut styles: Vec<HwpxStyle> = Vec::new();
-        let mut style_map: std::collections::HashMap<u8, usize> = std::collections::HashMap::new();
-        let mut fonts: Vec<String> = Vec::new();
-        let mut font_map: std::collections::HashMap<String, usize> =
-            std::collections::HashMap::new();
-        fn hex_rgb(hex: &str) -> Option<u32> {
-            u32::from_str_radix(hex, 16).ok()
-        }
-        fn intern<T: Eq + std::hash::Hash + Copy>(
-            table: &mut Vec<T>,
-            map: &mut std::collections::HashMap<T, usize>,
-            item: T,
-        ) -> usize {
-            if let Some(&idx) = map.get(&item) {
-                return idx;
-            }
-            let idx = table.len();
-            table.push(item);
-            map.insert(item, idx);
-            idx
-        }
         check_document_images(doc)?;
         let mut media = MediaParts::new();
         let mut sec = SectionWriter::new();
-        let mut next_field_id = 0u32;
+        let mut shapes = ShapeTables::new();
+        for (header, paragraphs) in [
+            (true, &doc.page_frame.header),
+            (false, &doc.page_frame.footer),
+        ] {
+            if paragraphs.is_empty() {
+                continue;
+            }
+            let mut fragment = SectionWriter::fragment(sec.next_para_id);
+            for p in paragraphs {
+                shapes.write_paragraph(&mut fragment, &frame_paragraph(p));
+            }
+            sec.next_para_id = fragment.next_para_id;
+            sec.frame_controls.push_str(&hwpx_frame_control(
+                header,
+                u32::from(!header) + 1,
+                &fragment.xml,
+            ));
+        }
         for block in &doc.blocks {
-            let p = match block {
-                RichBlock::Paragraph(p) => p,
+            match block {
+                RichBlock::Paragraph(p) => shapes.write_paragraph(&mut sec, p),
                 RichBlock::Table(table) => {
                     sec.table_paragraph(&table.rows, table.span_map().as_ref());
-                    continue;
                 }
                 RichBlock::Image(img) => {
                     let picture = media.add(HWPX_MEDIA_DIR, img);
                     sec.picture_paragraph(img, picture.ordinal, picture.part);
-                    continue;
-                }
-            };
-            let level = if (1..=6).contains(&p.heading_level) {
-                p.heading_level
-            } else {
-                0
-            };
-            let para = HwpxParaShape {
-                align: match p.alignment {
-                    None => None,
-                    Some(RichAlignment::Left) => Some("LEFT"),
-                    Some(RichAlignment::Center) => Some("CENTER"),
-                    Some(RichAlignment::Right) => Some("RIGHT"),
-                    Some(RichAlignment::Justify) => Some("JUSTIFY"),
-                },
-                heading_type: match p.list {
-                    Some(crate::RichListKind::Bullet) => HEADING_BULLET,
-                    Some(crate::RichListKind::Ordered) => HEADING_NUMBER,
-                    None => HEADING_NONE,
-                },
-                left_margin: p
-                    .left_indent_twips
-                    .map(|t| t.saturating_mul(HWPUNIT_PER_TWIP))
-                    .unwrap_or(if p.list.is_some() {
-                        LIST_LEFT_MARGIN
-                    } else {
-                        0
-                    }),
-                intent: p
-                    .first_line_indent_twips
-                    .map_or(0, |t| t.saturating_mul(HWPUNIT_PER_TWIP as i32)),
-                line_percent: p
-                    .line_spacing_percent
-                    .map_or(DEFAULT_LINE_PERCENT, u32::from),
-            };
-            let para_pr = intern(&mut para_shapes, &mut para_map, para);
-            let base = HwpxCharShape {
-                bold: level > 0,
-                height: [1600, 1400, 1300, 1200, 1100, 1000]
-                    .get(usize::from(level).wrapping_sub(1))
-                    .copied()
-                    .unwrap_or(DEFAULT_CHAR_HEIGHT),
-                ..HwpxCharShape::default()
-            };
-            let style = if level > 0 {
-                let char_pr = intern(&mut char_shapes, &mut char_map, base);
-                let idx = *style_map.entry(level).or_insert_with(|| {
-                    styles.push(HwpxStyle {
-                        name: format!("개요 {level}"),
-                        eng_name: format!("Outline {level}"),
-                        para_pr,
-                        char_pr,
-                    });
-                    styles.len() - 1
-                });
-                idx + 1
-            } else {
-                0
-            };
-            sec.open_paragraph_with(para_pr, style);
-            let groups = external_link_groups(&p.runs);
-            if groups.is_empty() {
-                let char_pr = intern(&mut char_shapes, &mut char_map, base);
-                sec.run(char_pr, "");
-            }
-            for (link, group) in groups {
-                let field_id = link.map(|url| {
-                    next_field_id += 1;
-                    sec.xml.push_str(&hwpx_link_begin(next_field_id, url));
-                    next_field_id
-                });
-                for run in group {
-                    let font = run.font.as_ref().map_or(0, |f| {
-                        if let Some(&idx) = font_map.get(f) {
-                            idx
-                        } else {
-                            fonts.push(f.clone());
-                            let idx = fonts.len();
-                            font_map.insert(f.clone(), idx);
-                            idx
-                        }
-                    });
-                    let shape = HwpxCharShape {
-                        bold: base.bold || run.bold,
-                        italic: run.italic,
-                        underline: run.underline,
-                        strike: run.strike,
-                        height: run.size_half_pt.map_or(base.height, |s| u32::from(s) * 50),
-                        font,
-                        text_color: run.color.as_deref().and_then(hex_rgb),
-                        shade_color: run.highlight.as_deref().and_then(hex_rgb),
-                        script: run.script,
-                    };
-                    let char_pr = intern(&mut char_shapes, &mut char_map, shape);
-                    sec.run(char_pr, &run.text);
-                }
-                if let Some(id) = field_id {
-                    sec.xml.push_str(&hwpx_link_end(id));
                 }
             }
-            sec.xml.push_str("</hp:p>");
         }
-        let header = header_xml_with(&char_shapes, &para_shapes, &styles, &fonts);
+        let header = header_xml_with(
+            &shapes.char_shapes,
+            &shapes.para_shapes,
+            &shapes.styles,
+            &shapes.fonts,
+        );
         let meta = HwpxPayload {
             title: doc.display_title(),
             is_template,

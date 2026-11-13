@@ -17,6 +17,7 @@ fn para(text: &str, page_break_before: bool) -> RichBlock {
 
 fn sample() -> RichDocument {
     RichDocument {
+        page_frame: Default::default(),
         title: "쪽".to_string(),
         blocks: vec![
             para("첫 쪽", false),
@@ -184,6 +185,7 @@ fn bookmarked_page_start() -> RichDocument {
         })
     };
     RichDocument {
+        page_frame: Default::default(),
         title: "쪽".to_string(),
         blocks: vec![
             heading("개요", 1, false),

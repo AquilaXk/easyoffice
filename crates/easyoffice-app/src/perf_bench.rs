@@ -120,6 +120,7 @@ fn large_document() -> RichDocument {
         }
     }
     RichDocument {
+        page_frame: Default::default(),
         title: "대용량 보고서".to_string(),
         blocks,
         official_agency: None,

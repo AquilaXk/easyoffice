@@ -42,6 +42,7 @@ mod rich_image_probe;
 mod rich_image_writers;
 mod rich_link_writers;
 mod rich_list_writers;
+mod rich_page_frame;
 mod rich_read_hwpx;
 mod rich_read_images;
 mod rich_read_numbering;
@@ -91,9 +92,10 @@ pub use pages_write::{pages_write_loss, PagesWriteLoss};
 pub use pdf_highlight::{PdfHighlight, PdfHighlightKind, MAX_HIGHLIGHT_ANNOTATIONS};
 pub use pdf_writer::PdfWriteOptions;
 pub use rich_document::{
-    evaluate_table_formulas, normalize_hex_color, safe_link_target, RichAlignment, RichBlock,
-    RichDocument, RichListKind, RichListNumber, RichNumberEnclosure, RichNumberFormat,
-    RichParagraph, RichRun, RichScript, RichToc, MAX_TOC_LEVEL, MAX_TOC_PAGE, TOC_BOOKMARK_PREFIX,
+    evaluate_table_formulas, frame_paragraph, normalize_hex_color, safe_link_target, RichAlignment,
+    RichBlock, RichDocument, RichField, RichListKind, RichListNumber, RichNumberEnclosure,
+    RichNumberFormat, RichPageFrame, RichParagraph, RichRun, RichScript, RichToc,
+    MAX_PAGE_FRAME_PARAGRAPHS, MAX_TOC_LEVEL, MAX_TOC_PAGE, TOC_BOOKMARK_PREFIX,
 };
 pub use rich_image::{
     RichImage, IMAGE_PLACEHOLDER_TEXT, MAX_ALT_TEXT_BYTES, MAX_IMAGES_PER_DOCUMENT,

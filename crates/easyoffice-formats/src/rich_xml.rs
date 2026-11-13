@@ -77,12 +77,13 @@ pub(crate) fn push_linked_run(
         return;
     }
     if let Some(last) = runs.last_mut() {
-        if fmt.matches_run(last) && last.link.as_deref() == link {
+        if last.field.is_none() && fmt.matches_run(last) && last.link.as_deref() == link {
             last.text.push_str(text);
             return;
         }
     }
     runs.push(RichRun {
+        field: None,
         link: link.map(str::to_string),
         text: text.to_string(),
         bold: fmt.bold,

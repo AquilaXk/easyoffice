@@ -212,6 +212,7 @@ mod tests {
 
     fn pages_bytes() -> Vec<u8> {
         let doc = easyoffice_formats::RichDocument {
+            page_frame: Default::default(),
             title: "t".to_string(),
             blocks: vec![easyoffice_formats::RichBlock::Paragraph(
                 easyoffice_formats::RichParagraph {

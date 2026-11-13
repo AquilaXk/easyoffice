@@ -17,6 +17,7 @@ fn item(kind: RichListKind, text: &str) -> RichBlock {
 
 fn header_of(blocks: Vec<RichBlock>) -> String {
     let doc = RichDocument {
+        page_frame: Default::default(),
         title: "목록".into(),
         blocks,
         official_agency: None,

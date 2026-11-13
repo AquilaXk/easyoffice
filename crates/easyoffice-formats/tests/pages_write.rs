@@ -30,6 +30,7 @@ fn para(runs: Vec<RichRun>) -> RichParagraph {
 
 fn doc(blocks: Vec<RichBlock>) -> RichDocument {
     RichDocument {
+        page_frame: Default::default(),
         title: "쓰기".to_string(),
         blocks,
         official_agency: None,

@@ -31,6 +31,7 @@ fn custom_highlight(text: &str) -> RichRun {
 
 fn sample() -> RichDocument {
     RichDocument {
+        page_frame: Default::default(),
         title: "런 서식".to_string(),
         blocks: vec![
             RichBlock::Paragraph(RichParagraph {
@@ -130,6 +131,7 @@ fn rtf_roundtrip_keeps_size_font_color_highlight_per_run() {
 #[test]
 fn rtf_plain_text_and_tables_still_decode_after_the_run_reader() {
     let doc = RichDocument {
+        page_frame: Default::default(),
         title: "표".to_string(),
         blocks: vec![
             RichBlock::Paragraph(RichParagraph {
@@ -153,6 +155,7 @@ fn rtf_plain_text_and_tables_still_decode_after_the_run_reader() {
 #[test]
 fn heading_runs_keep_only_explicit_size_overrides() {
     let doc = RichDocument {
+        page_frame: Default::default(),
         title: "제목".to_string(),
         blocks: vec![RichBlock::Paragraph(RichParagraph {
             runs: vec![

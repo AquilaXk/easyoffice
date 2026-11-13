@@ -115,6 +115,7 @@ fn flat_document(
             .map(|rows| RichBlock::Table(rows.into())),
     );
     RichDocument {
+        page_frame: Default::default(),
         title,
         blocks,
         official_agency: None,
@@ -216,6 +217,7 @@ impl UniversalFormatConverter {
                     read_plain_text(&text)?
                 };
                 DecodedContent::Document(RichDocument {
+                    page_frame: Default::default(),
                     title: String::new(),
                     blocks,
                     official_agency: None,

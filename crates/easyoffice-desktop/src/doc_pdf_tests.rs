@@ -82,6 +82,7 @@ fn document(extra_paragraphs: usize) -> RichDocument {
     ];
     blocks.extend((0..extra_paragraphs).map(|n| paragraph(&format!("{n}번째 줄 filler text"))));
     RichDocument {
+        page_frame: Default::default(),
         title: "보고서".into(),
         blocks,
         official_agency: None,
@@ -155,6 +156,7 @@ fn list_items_get_their_bullet_and_number() {
         })
     };
     let doc = RichDocument {
+        page_frame: Default::default(),
         title: "목록".into(),
         blocks: vec![
             item(RichListKind::Ordered, "가나"),

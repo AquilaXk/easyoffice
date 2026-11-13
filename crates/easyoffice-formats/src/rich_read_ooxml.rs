@@ -7,10 +7,14 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 
 use crate::office_codecs::{checked_part, checked_zip_xml_entries};
+use crate::rich_document::{frame_paragraph, MAX_PAGE_FRAME_PARAGRAPHS};
 use crate::rich_document::{
     highlight_name_to_hex, normalize_hex_color, toc_bookmark_number, RichToc,
 };
-use crate::rich_read_images::{drawing_picture, load_docx_hyperlinks, DocxMedia, DrawingOutcome};
+use crate::rich_page_frame::is_page_instruction;
+use crate::rich_read_images::{
+    drawing_picture, load_docx_frame_targets, load_docx_hyperlinks, DocxMedia, DrawingOutcome,
+};
 use crate::rich_read_numbering::{read_numbering, Numbering, LIST_LEVELS};
 use crate::rich_table::TableAssembler;
 use crate::rich_xml::{
@@ -18,9 +22,9 @@ use crate::rich_xml::{
 };
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
-    EasyOfficeError, RichAlignment, RichBlock, RichDocument, RichImage, RichListKind,
-    RichParagraph, RichScript, XmlSanitizer, ZipArchiveCodec, ZipSecurityPolicy,
-    MAX_IMAGES_PER_DOCUMENT, MAX_TOTAL_IMAGE_BYTES,
+    EasyOfficeError, RichAlignment, RichBlock, RichDocument, RichField, RichImage, RichListKind,
+    RichPageFrame, RichParagraph, RichRun, RichScript, XmlSanitizer, ZipArchiveCodec,
+    ZipSecurityPolicy, MAX_IMAGES_PER_DOCUMENT, MAX_TOTAL_IMAGE_BYTES,
 };
 
 /// `w:vMerge` state of a table cell.
@@ -239,6 +243,14 @@ fn plain(p: &ParaState) -> String {
     p.runs.iter().map(|r| r.text.as_str()).collect()
 }
 
+/// A `w:headerReference` or `w:footerReference` of a section.
+struct FrameRef {
+    header: bool,
+    /// `default`, `first` or `even`.
+    kind: String,
+    rel_id: String,
+}
+
 /// Elements whose whole subtree is ignored (revisions, fallbacks, deleted text).
 const SKIPPED_ELEMENTS: [&str; 11] = [
     "mc:Fallback",
@@ -350,12 +362,32 @@ struct DocxWalker {
     link: Option<String>,
     /// A page break was read that the next paragraph has to carry (a paragraph that held only the break is not kept).
     pending_page_break: bool,
+    /// Header and footer parts keep page fields as field runs.
+    frame_mode: bool,
+    frame_refs: Vec<FrameRef>,
+    /// A section shows its own first-page header and footer (`w:titlePg`).
+    title_pg: bool,
+    /// Instruction text of the open complex field (`w:fldChar` begin to separate) and whether its text is open.
+    field_instruction: Option<String>,
+    in_instruction: bool,
+    /// The result of a page field is open: its text is the field's, not the paragraph's.
+    field_result: bool,
+    /// Runs of an open `w:fldSimple` page field: 0 none, 1 open, 2 its field run is written.
+    simple_page: u8,
 }
 
 impl DocxWalker {
     /// Handles an element start; returns true when the whole subtree must be skipped.
     fn on_start(&mut self, name: &str, attrs: &Attrs<'_>) -> bool {
+        if self.frame_mode && name == "w:instrText" {
+            self.in_instruction = true;
+            return false;
+        }
         if SKIPPED_ELEMENTS.contains(&name) {
+            return true;
+        }
+        if self.frame_mode && name == DRAWING_ELEMENT {
+            self.warn_once("머리말·꼬리말의 그림·도형은 가져오지 않았습니다.".to_string());
             return true;
         }
         if UNSUPPORTED_OBJECT_ELEMENTS.contains(&name) {
@@ -365,6 +397,7 @@ impl DocxWalker {
             return true;
         }
         self.track_structure(name, attrs);
+        self.track_frame(name, attrs);
         if let Some(top) = self.paras.last_mut() {
             if self.in_ppr {
                 Self::apply_para_property(top, name, attr(attrs, "w:val").as_deref());
@@ -433,6 +466,63 @@ impl DocxWalker {
         }
     }
 
+    /// Section header/footer references (body parts) and page fields (header/footer parts).
+    fn track_frame(&mut self, name: &str, attrs: &Attrs<'_>) {
+        match name {
+            "w:headerReference" | "w:footerReference" => {
+                if let Some(rel_id) = attr(attrs, "r:id") {
+                    self.frame_refs.push(FrameRef {
+                        header: name == "w:headerReference",
+                        kind: attr(attrs, "w:type").map_or("default".to_string(), Cow::into_owned),
+                        rel_id: rel_id.into_owned(),
+                    });
+                }
+            }
+            "w:titlePg" => self.title_pg |= toggle_on(attr(attrs, "w:val").as_deref()),
+            "w:fldSimple" if self.frame_mode => {
+                let page = attr(attrs, "w:instr").is_some_and(|i| is_page_instruction(&i));
+                self.simple_page = u8::from(page);
+            }
+            "w:fldChar" if self.frame_mode => match attr(attrs, "w:fldCharType").as_deref() {
+                Some("begin") => self.field_instruction = Some(String::new()),
+                Some("separate") => {
+                    let page = self
+                        .field_instruction
+                        .take()
+                        .is_some_and(|i| is_page_instruction(&i));
+                    if page {
+                        self.field_result = true;
+                        self.push_field_run();
+                    }
+                }
+                Some("end") => {
+                    self.field_instruction = None;
+                    self.field_result = false;
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+
+    fn push_field_run(&mut self) {
+        if let Some(top) = self.paras.last_mut() {
+            top.runs.push(RichRun {
+                bold: self.fmt.bold,
+                italic: self.fmt.italic,
+                underline: self.fmt.underline,
+                strike: self.fmt.strike,
+                size_half_pt: self.fmt.size_half_pt,
+                font: self.fmt.font.clone(),
+                color: self.fmt.color.clone(),
+                highlight: self.fmt.highlight.clone(),
+                script: self.fmt.script,
+                field: Some(RichField::PageNumber),
+                ..RichRun::default()
+            });
+        }
+    }
+
     fn apply_para_property(top: &mut ParaState, name: &str, val: Option<&str>) {
         match name {
             "w:pStyle" => top.style_id = val.map(str::to_string),
@@ -474,22 +564,33 @@ impl DocxWalker {
     fn on_text(&mut self, text: &str) {
         if self.in_t {
             self.cur_text.push_str(text);
+        } else if self.in_instruction {
+            if let Some(instruction) = self.field_instruction.as_mut() {
+                instruction.push_str(text);
+            }
         }
     }
 
     fn on_end(&mut self, name: &str, resolver: &Resolver<'_>) {
         match name {
             "w:t" => self.in_t = false,
+            "w:instrText" => self.in_instruction = false,
+            "w:fldSimple" => self.simple_page = 0,
             "w:rPr" => self.in_rpr = false,
             "w:pPr" => self.in_ppr = false,
             "w:r" => {
-                if let Some(top) = self.paras.last_mut() {
-                    push_linked_run(
-                        &mut top.runs,
-                        &self.cur_text,
-                        &self.fmt,
-                        self.link.as_deref(),
-                    );
+                if self.simple_page == 1 {
+                    self.push_field_run();
+                    self.simple_page = 2;
+                } else if self.simple_page == 0 && !self.field_result {
+                    if let Some(top) = self.paras.last_mut() {
+                        push_linked_run(
+                            &mut top.runs,
+                            &self.cur_text,
+                            &self.fmt,
+                            self.link.as_deref(),
+                        );
+                    }
                 }
                 self.cur_text.clear();
                 self.in_run = false;
@@ -575,7 +676,10 @@ impl DocxWalker {
             let carried = p.page_break_before;
             let after = p.page_break_after;
             let mut kept = false;
-            if p.runs.iter().any(|r| !r.text.trim().is_empty()) {
+            if p.runs
+                .iter()
+                .any(|r| r.field.is_some() || !r.text.trim().is_empty())
+            {
                 let mut paragraph = resolver.finish(p);
                 paragraph.page_break_before |= std::mem::take(&mut self.pending_page_break);
                 self.blocks.push(RichBlock::Paragraph(paragraph));
@@ -585,6 +689,137 @@ impl DocxWalker {
             self.blocks.extend(images.into_iter().map(RichBlock::Image));
         }
     }
+}
+
+/// Runs the events of one WordprocessingML part (the body or a header/footer) through `walker`.
+fn walk_part(
+    xml: &str,
+    walker: &mut DocxWalker,
+    resolver: &Resolver<'_>,
+    media: &DocxMedia<'_>,
+) -> Result<(), EasyOfficeError> {
+    let mut reader = XmlReader::new(xml);
+    while let Some(event) = reader.next_event()? {
+        match event {
+            XmlEvent::Start { name, .. } if name == DRAWING_ELEMENT && !walker.frame_mode => {
+                let drawing = reader.collect_subtree(event)?;
+                walker.on_drawing(&drawing, media)?;
+            }
+            XmlEvent::Start { name, ref attrs } => {
+                if walker.on_start(name, attrs) {
+                    reader.skip_subtree()?;
+                }
+            }
+            XmlEvent::Text(text) => walker.on_text(&text),
+            XmlEvent::End(name) => walker.on_end(name, resolver),
+        }
+    }
+    Ok(())
+}
+
+/// Whether `word/settings.xml` turns on different headers and footers for odd and even pages.
+fn even_and_odd_headers(settings: Option<&str>) -> Result<bool, EasyOfficeError> {
+    let Some(xml) = settings else {
+        return Ok(false);
+    };
+    for event in XmlReader::new(xml) {
+        if let XmlEvent::Start {
+            name: "w:evenAndOddHeaders",
+            attrs,
+        } = event?
+        {
+            return Ok(toggle_on(attr(&attrs, "w:val").as_deref()));
+        }
+    }
+    Ok(false)
+}
+
+/// The paragraphs of one header or footer part.
+fn read_frame_part(
+    xml: &str,
+    resolver: &Resolver<'_>,
+    media: &DocxMedia<'_>,
+    warnings: &mut Vec<String>,
+) -> Result<Vec<RichParagraph>, EasyOfficeError> {
+    let mut walker = DocxWalker {
+        frame_mode: true,
+        ..DocxWalker::default()
+    };
+    walk_part(xml, &mut walker, resolver, media)?;
+    warnings.append(&mut walker.warnings);
+    let mut paragraphs = Vec::new();
+    for block in walker.blocks {
+        match block {
+            RichBlock::Paragraph(p) => paragraphs.push(frame_paragraph(&p)),
+            RichBlock::Table(_) => {
+                let note = "머리말·꼬리말의 표는 가져오지 않았습니다.".to_string();
+                if !warnings.contains(&note) {
+                    warnings.push(note);
+                }
+            }
+            RichBlock::Image(_) => {}
+        }
+    }
+    if paragraphs.len() > MAX_PAGE_FRAME_PARAGRAPHS {
+        paragraphs.truncate(MAX_PAGE_FRAME_PARAGRAPHS);
+        warnings.push(format!(
+            "머리말·꼬리말은 문단 {MAX_PAGE_FRAME_PARAGRAPHS}개까지만 가져왔습니다."
+        ));
+    }
+    Ok(paragraphs)
+}
+
+/// The header and footer of the page: the default one of the first section that has one. First-page and
+/// odd/even ones, and ones that differ between sections, are reported and not kept.
+fn read_page_frame(
+    entries: &[crate::ZipArchiveEntry],
+    parts: &[(&str, &str)],
+    resolver: &Resolver<'_>,
+    media: &DocxMedia<'_>,
+    refs: &[FrameRef],
+    title_pg: bool,
+) -> Result<(RichPageFrame, Vec<String>), EasyOfficeError> {
+    let mut frame = RichPageFrame::default();
+    let mut warnings = Vec::new();
+    if refs.is_empty() {
+        return Ok((frame, warnings));
+    }
+    let targets = load_docx_frame_targets(entries)?;
+    let even = even_and_odd_headers(checked_part(parts, "word/settings.xml"))?;
+    let (mut other_pages, mut other_sections) = (false, false);
+    for header in [true, false] {
+        let mut chosen: Option<&str> = None;
+        for r in refs.iter().filter(|r| r.header == header) {
+            let Some(part) = targets.get(&r.rel_id) else {
+                continue;
+            };
+            match r.kind.as_str() {
+                "default" => match chosen {
+                    None => chosen = Some(part),
+                    Some(first) => other_sections |= first != part,
+                },
+                "first" => other_pages |= title_pg,
+                "even" => other_pages |= even,
+                _ => {}
+            }
+        }
+        let paragraphs = match chosen.and_then(|part| checked_part(parts, part)) {
+            Some(xml) => read_frame_part(xml, resolver, media, &mut warnings)?,
+            None => Vec::new(),
+        };
+        if header {
+            frame.header = paragraphs;
+        } else {
+            frame.footer = paragraphs;
+        }
+    }
+    if other_pages {
+        warnings.push("첫 쪽·짝수 쪽 머리말·꼬리말은 가져오지 않았습니다.".to_string());
+    }
+    if other_sections {
+        warnings.push("구역마다 다른 머리말·꼬리말은 첫 구역의 것만 가져왔습니다.".to_string());
+    }
+    Ok((frame, warnings))
 }
 
 /// Decodes `word/document.xml` (plus styles and numbering) of a DOCX package.
@@ -622,40 +857,33 @@ pub(crate) fn read_docx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Eas
         links: load_docx_hyperlinks(&entries)?,
         ..DocxWalker::default()
     };
-    let mut reader = XmlReader::new(doc_xml);
-    while let Some(event) = reader.next_event()? {
-        match event {
-            XmlEvent::Start { name, .. } if name == DRAWING_ELEMENT => {
-                let drawing = reader.collect_subtree(event)?;
-                walker.on_drawing(&drawing, &media)?;
-            }
-            XmlEvent::Start { name, ref attrs } => {
-                if walker.on_start(name, attrs) {
-                    reader.skip_subtree()?;
-                }
-            }
-            XmlEvent::Text(text) => walker.on_text(&text),
-            XmlEvent::End(name) => walker.on_end(name, &resolver),
+    walk_part(doc_xml, &mut walker, &resolver, &media)?;
+    let (page_frame, frame_warnings) = read_page_frame(
+        &entries,
+        &parts,
+        &resolver,
+        &media,
+        &walker.frame_refs,
+        walker.title_pg,
+    )?;
+    let mut warnings = walker.warnings;
+    for note in frame_warnings {
+        if !warnings.contains(&note) {
+            warnings.push(note);
         }
     }
-    let mut warnings = walker.warnings;
     if walker.dropped_merges > 0 {
         warnings.push(format!(
             "표의 병합 {}곳은 범위를 벗어나거나 겹쳐 가져오지 않았습니다.",
             walker.dropped_merges
         ));
     }
-    if entries.iter().any(|e| {
-        let p = e.path.as_str();
-        (p.starts_with("word/header") || p.starts_with("word/footer")) && p.ends_with(".xml")
-    }) {
-        warnings.push("머리말·꼬리말은 가져오지 않았습니다.".to_string());
-    }
     Ok((
         RichDocument {
             title,
             blocks: walker.blocks,
             official_agency: None,
+            page_frame,
         },
         warnings,
     ))

@@ -230,6 +230,38 @@ pub(crate) fn emu_to_points(emu: u64) -> u64 {
     (emu / EMU_PER_POINT).max(1)
 }
 
+const DOCX_STYLES_CONTENT_TYPE: &str =
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml";
+const DOCX_NUMBERING_CONTENT_TYPE: &str =
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml";
+
+/// `[Content_Types].xml` of a DOCX package; `frame_types` are the overrides of its header and footer parts.
+pub(crate) fn docx_content_types(media: &MediaParts, numbering: bool, frame_types: &str) -> String {
+    format!(
+        concat!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+            "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">",
+            "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>",
+            "<Default Extension=\"xml\" ContentType=\"application/xml\"/>{}",
+            "<Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/>",
+            "<Override PartName=\"/word/styles.xml\" ContentType=\"{}\"/>",
+            "{}{}",
+            "<Override PartName=\"/docProps/core.xml\" ContentType=\"application/vnd.openxmlformats-package.core-properties+xml\"/>",
+            "</Types>"
+        ),
+        docx_content_type_defaults(media),
+        DOCX_STYLES_CONTENT_TYPE,
+        if numbering {
+            format!(
+                "<Override PartName=\"/word/numbering.xml\" ContentType=\"{DOCX_NUMBERING_CONTENT_TYPE}\"/>"
+            )
+        } else {
+            String::new()
+        },
+        frame_types
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

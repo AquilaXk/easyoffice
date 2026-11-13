@@ -9,12 +9,13 @@ use crate::pdf_writer::{
     text_entries, PdfImagePage, PdfPageEntry, PdfWriteOptions, PDF_IMAGE_MARGIN_PT,
     PDF_PAGE_HEIGHT_PT, PDF_PAGE_WIDTH_PT,
 };
+use crate::rich_document::frame_paragraph;
 use crate::rich_document::{
     RichAlignment, RichBlock, RichDocument, RichListKind, RichParagraph, TOC_BOOKMARK_PREFIX,
 };
 use crate::rich_image::{check_document_images, fit_within};
 use crate::rich_image_writers::{
-    docx_content_type_defaults, docx_image_paragraph, docx_image_relationship, emu_to_points,
+    docx_content_types, docx_image_paragraph, docx_image_relationship, emu_to_points,
     odt_image_paragraph, MediaParts, DOCX_PICTURE_NAMESPACES, ODT_PICTURE_NAMESPACES,
 };
 use crate::rich_link_writers::{
@@ -23,6 +24,10 @@ use crate::rich_link_writers::{
 use crate::rich_list_writers::{
     docx_num_pr, docx_numbering_xml, level_of, list_kind_of, odt_list_styles_xml, plan_lists,
     OdtListWriter,
+};
+use crate::rich_page_frame::{
+    docx_field_run, docx_frame_part, docx_frame_refs, odt_master_page, odt_page_number,
+    odt_styles_xml, DOCX_FOOTER_PART, DOCX_HEADER_PART,
 };
 use crate::rich_run_writers::{
     docx_run_properties, odt_font_face_decls, odt_text_key, odt_text_key_is_plain,
@@ -50,10 +55,6 @@ pub(crate) fn heading_half_points(level: u8) -> u32 {
 
 // ---------------------------------------------------------------- DOCX
 
-const DOCX_STYLES_CONTENT_TYPE: &str =
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml";
-const DOCX_NUMBERING_CONTENT_TYPE: &str =
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml";
 const DOCX_NUMBERING_REL_ID: &str = "rIdNumbering";
 
 fn docx_styles_xml(has_toc: bool) -> String {
@@ -113,7 +114,7 @@ pub(crate) fn push_docx_text(out: &mut String, text: &str) {
 
 /// WordprocessingML `w:spacing` (line height, 240 = single) and `w:ind` for a paragraph, in
 /// schema order; empty when the paragraph inherits both.
-fn docx_paragraph_layout(p: &RichParagraph) -> String {
+pub(crate) fn docx_paragraph_layout(p: &RichParagraph) -> String {
     let mut xml = String::new();
     if let Some(percent) = p.line_spacing_percent {
         let line = u32::from(percent) * DOCX_SINGLE_LINE_240THS / 100;
@@ -207,6 +208,10 @@ fn push_docx_paragraph(
         }
         for run in group {
             let properties = docx_run_properties(run);
+            if let Some(field) = run.field {
+                out.push_str(&docx_field_run(field, &properties));
+                continue;
+            }
             out.push_str("<w:r>");
             out.push_str(&if link.is_some() {
                 docx_linked_run_properties(&properties)
@@ -231,31 +236,6 @@ fn push_docx_paragraph(
 /// Relationship id offset of the first picture (`rId1` is the style sheet).
 const DOCX_FIRST_IMAGE_REL: usize = 2;
 const DOCX_MEDIA_DIR: &str = "word/media";
-
-fn docx_content_types(media: &MediaParts, numbering: bool) -> String {
-    format!(
-        concat!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
-            "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">",
-            "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>",
-            "<Default Extension=\"xml\" ContentType=\"application/xml\"/>{}",
-            "<Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/>",
-            "<Override PartName=\"/word/styles.xml\" ContentType=\"{}\"/>",
-            "{}",
-            "<Override PartName=\"/docProps/core.xml\" ContentType=\"application/vnd.openxmlformats-package.core-properties+xml\"/>",
-            "</Types>"
-        ),
-        docx_content_type_defaults(media),
-        DOCX_STYLES_CONTENT_TYPE,
-        if numbering {
-            format!(
-                "<Override PartName=\"/word/numbering.xml\" ContentType=\"{DOCX_NUMBERING_CONTENT_TYPE}\"/>"
-            )
-        } else {
-            String::new()
-        }
-    )
-}
 
 pub(crate) fn pack_docx_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeError> {
     check_document_images(doc)?;
@@ -310,12 +290,18 @@ pub(crate) fn pack_docx_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeEr
         }
     }
     toc_scope.enter(&mut body, &doc.blocks, doc.blocks.len());
-    body.push_str("<w:sectPr><w:pgSz w:w=\"11906\" w:h=\"16838\"/></w:sectPr>");
+    let header_part = docx_frame_part(&doc.page_frame.header, true);
+    let footer_part = docx_frame_part(&doc.page_frame.footer, false);
+    let frame = docx_frame_refs(header_part.is_some(), footer_part.is_some());
+    body.push_str(&format!(
+        "<w:sectPr>{}<w:pgSz w:w=\"11906\" w:h=\"16838\"/></w:sectPr>",
+        frame.section
+    ));
     body.push_str("</w:body></w:document>");
 
     let has_lists = !lists.runs.is_empty();
     let numbering = has_lists.then(|| docx_numbering_xml(&lists));
-    let content_types = docx_content_types(&media, has_lists);
+    let content_types = docx_content_types(&media, has_lists, &frame.content_types);
     let numbering_rel = if has_lists {
         format!(
             "<Relationship Id=\"{DOCX_NUMBERING_REL_ID}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering\" Target=\"numbering.xml\"/>"
@@ -328,16 +314,19 @@ pub(crate) fn pack_docx_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeEr
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
             "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">",
             "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>",
-            "{}{}{}</Relationships>"
+            "{}{}{}{}</Relationships>"
         ),
         numbering_rel,
         image_rels,
-        links.relationships()
+        links.relationships(),
+        frame.relationships
     );
 
     for xml in [&body, &core_xml, &styles, &doc_rels]
         .into_iter()
         .chain(numbering.as_ref())
+        .chain(header_part.as_ref())
+        .chain(footer_part.as_ref())
     {
         XmlSanitizer::validate_safe_xml(xml)?;
     }
@@ -358,6 +347,14 @@ pub(crate) fn pack_docx_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeEr
     ];
     if let Some(numbering) = numbering {
         entries.push(("word/numbering.xml".to_string(), numbering.into_bytes()));
+    }
+    for (part, xml) in [
+        (DOCX_HEADER_PART, header_part),
+        (DOCX_FOOTER_PART, footer_part),
+    ] {
+        if let Some(xml) = xml {
+            entries.push((part.to_string(), xml.into_bytes()));
+        }
     }
     entries.extend(media.into_entries());
     ZipArchiveCodec::pack_compressed(&entries)
@@ -462,7 +459,10 @@ fn push_odt_paragraph(
         }
         for run in group {
             let key = odt_text_key(run);
-            if odt_text_key_is_plain(&key) {
+            if run.field.is_some() {
+                let style = (!odt_text_key_is_plain(&key)).then(|| text_styles.intern(&key));
+                body.push_str(&odt_page_number(style));
+            } else if odt_text_key_is_plain(&key) {
                 push_odt_text(body, &run.text);
             } else {
                 let t = text_styles.intern(&key);
@@ -558,6 +558,23 @@ pub(crate) fn pack_odt_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeErr
     let lists = plan_lists(&doc.blocks);
     let mut open_lists = OdtListWriter::default();
     let mut toc_scope = TocScope::odt();
+    // The header and footer go first so their styles are in the tables the body shares; styles.xml
+    // and content.xml both write the whole set.
+    let [header_xml, footer_xml] =
+        [&doc.page_frame.header, &doc.page_frame.footer].map(|paragraphs| {
+            (!paragraphs.is_empty()).then(|| {
+                let mut xml = String::new();
+                for p in paragraphs {
+                    push_odt_paragraph(
+                        &mut xml,
+                        &frame_paragraph(p),
+                        &mut para_styles,
+                        &mut text_styles,
+                    );
+                }
+                xml
+            })
+        });
     for (index, block) in doc.blocks.iter().enumerate() {
         toc_scope.enter(&mut body, &doc.blocks, index);
         match (block, lists.block_run[index]) {
@@ -582,19 +599,22 @@ pub(crate) fn pack_odt_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeErr
     open_lists.leave(&mut body);
     toc_scope.enter(&mut body, &doc.blocks, doc.blocks.len());
 
+    let mut run_styles = String::new();
+    for (idx, key) in para_styles.keys.iter().enumerate() {
+        run_styles.push_str(&odt_para_style_xml(idx + 1, key));
+    }
+    for (idx, key) in text_styles.keys.iter().enumerate() {
+        run_styles.push_str(&odt_text_style_xml(idx + 1, key));
+    }
     let mut styles = String::from("<office:automatic-styles>");
     if doc.blocks.iter().any(is_toc_block) {
         styles.push_str(&odt_toc_styles_xml());
     }
-    for (idx, key) in para_styles.keys.iter().enumerate() {
-        styles.push_str(&odt_para_style_xml(idx + 1, key));
-    }
-    for (idx, key) in text_styles.keys.iter().enumerate() {
-        styles.push_str(&odt_text_style_xml(idx + 1, key));
-    }
+    styles.push_str(&run_styles);
     styles.push_str(&odt_list_styles_xml(&lists));
     styles.push_str("</office:automatic-styles>");
-    let styles = format!("{}{styles}", odt_font_face_decls(&text_styles.keys));
+    let font_decls = odt_font_face_decls(&text_styles.keys);
+    let styles = format!("{font_decls}{styles}");
 
     let content = format!(
         concat!(
@@ -613,7 +633,12 @@ pub(crate) fn pack_odt_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeErr
         body
     );
     XmlSanitizer::validate_safe_xml(&content)?;
-    let manifest = OdfCodec::build_manifest_with_media(OdfCodec::MIMETYPE_ODT, &media.listing());
+    let has_frame = header_xml.is_some() || footer_xml.is_some();
+    let mut listing = media.listing();
+    if has_frame {
+        listing.insert(0, ("styles.xml".to_string(), "text/xml"));
+    }
+    let manifest = OdfCodec::build_manifest_with_media(OdfCodec::MIMETYPE_ODT, &listing);
     let mut entries = vec![
         (
             "mimetype".to_string(),
@@ -622,6 +647,12 @@ pub(crate) fn pack_odt_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeErr
         ("META-INF/manifest.xml".to_string(), manifest.into_bytes()),
         ("content.xml".to_string(), content.into_bytes()),
     ];
+    if has_frame {
+        let (layout, master) = odt_master_page(header_xml.as_deref(), footer_xml.as_deref());
+        let styles_xml = odt_styles_xml(&font_decls, &run_styles, &layout, &master);
+        XmlSanitizer::validate_safe_xml(&styles_xml)?;
+        entries.push(("styles.xml".to_string(), styles_xml.into_bytes()));
+    }
     entries.extend(media.into_entries());
     ZipArchiveCodec::pack_compressed(&entries)
 }

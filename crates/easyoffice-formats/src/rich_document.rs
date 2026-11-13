@@ -111,6 +111,52 @@ pub struct RichRun {
     /// Hyperlink target the run belongs to (a [`safe_link_target`] address). The DOCX, ODT and HWPX writers
     /// emit it; the Pages writer drops it (counted by `pages_write_loss`).
     pub link: Option<String>,
+    /// A field that the page fills in; `text` is empty. Only header and footer paragraphs carry one.
+    pub field: Option<RichField>,
+}
+
+/// A value the page fills in at each page it is drawn on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RichField {
+    /// The number of the page (DOCX `PAGE`, ODT `text:page-number`, HWPX `autoNum` of type `PAGE`).
+    PageNumber,
+}
+
+/// Most paragraphs of one header or footer; a file with more keeps the first ones.
+pub const MAX_PAGE_FRAME_PARAGRAPHS: usize = 64;
+
+/// The header and footer drawn on every page: formatted paragraphs (runs, alignment, indents and line
+/// spacing; headings, lists, links and tables are not kept). Files with different first-page or
+/// odd/even frames keep the default one.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RichPageFrame {
+    pub header: Vec<RichParagraph>,
+    pub footer: Vec<RichParagraph>,
+}
+
+impl RichPageFrame {
+    pub fn is_empty(&self) -> bool {
+        self.header.is_empty() && self.footer.is_empty()
+    }
+}
+
+/// The paragraph as a header or footer keeps it: runs without links, alignment, indents and line spacing.
+pub fn frame_paragraph(p: &RichParagraph) -> RichParagraph {
+    RichParagraph {
+        runs: p
+            .runs
+            .iter()
+            .map(|r| RichRun {
+                link: None,
+                ..r.clone()
+            })
+            .collect(),
+        alignment: p.alignment,
+        left_indent_twips: p.left_indent_twips,
+        first_line_indent_twips: p.first_line_indent_twips,
+        line_spacing_percent: p.line_spacing_percent,
+        ..RichParagraph::default()
+    }
 }
 
 /// Longest hyperlink address a document keeps, in characters.
@@ -275,6 +321,8 @@ pub struct RichDocument {
     pub title: String,
     pub blocks: Vec<RichBlock>,
     pub official_agency: Option<String>,
+    /// Header and footer of every page.
+    pub page_frame: RichPageFrame,
 }
 
 impl RichDocument {
@@ -480,6 +528,7 @@ mod tests {
     #[test]
     fn flattening_keeps_block_text_and_tables() {
         let doc = RichDocument {
+            page_frame: Default::default(),
             title: "t".into(),
             blocks: vec![
                 RichBlock::Paragraph(RichParagraph {

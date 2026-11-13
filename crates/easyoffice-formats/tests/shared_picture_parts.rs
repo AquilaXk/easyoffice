@@ -36,6 +36,7 @@ fn document() -> (RichDocument, Vec<Vec<u8>>) {
     }
     let expected = images.iter().map(|i| i.bytes().to_vec()).collect();
     let doc = RichDocument {
+        page_frame: Default::default(),
         title: "공유 그림".into(),
         blocks,
         official_agency: None,

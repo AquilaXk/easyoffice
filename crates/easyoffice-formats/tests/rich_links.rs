@@ -18,6 +18,7 @@ fn run(text: &str, link: Option<&str>, bold: bool) -> RichRun {
 
 fn doc(runs: Vec<RichRun>) -> RichDocument {
     RichDocument {
+        page_frame: Default::default(),
         title: "링크".to_string(),
         blocks: vec![RichBlock::Paragraph(RichParagraph {
             runs,

@@ -20,6 +20,7 @@ fn run(text: &str, script: RichScript) -> RichRun {
 
 fn sample(png: &[u8], jpeg: &[u8]) -> RichDocument {
     RichDocument {
+        page_frame: Default::default(),
         title: "읽기".to_string(),
         blocks: vec![
             RichBlock::Paragraph(RichParagraph {
@@ -209,6 +210,7 @@ fn hwpx_rejects_external_escaping_damaged_and_missing_pictures_with_warnings() {
 fn readers_fail_closed_when_a_package_holds_too_many_pictures() {
     let img = RichImage::new(make_png(2, 2, 2, 3), "").unwrap();
     let doc = RichDocument {
+        page_frame: Default::default(),
         title: "많은 그림".to_string(),
         blocks: vec![RichBlock::Image(img.clone()); MAX_IMAGES_PER_DOCUMENT],
         official_agency: None,

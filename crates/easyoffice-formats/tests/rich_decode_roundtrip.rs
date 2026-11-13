@@ -112,6 +112,7 @@ fn document_of(decoded: &DecodedDocument) -> RichDocument {
 /// decode -> model -> encode -> decode must reproduce the first decode.
 fn assert_document_roundtrip(format: DocumentFormat, name: &str, blocks: Vec<RichBlock>) {
     let doc = RichDocument {
+        page_frame: Default::default(),
         title: "라운드트립".to_string(),
         blocks,
         official_agency: None,

@@ -36,6 +36,7 @@ fn parenthesized_latin() -> RichListNumber {
 /// bullet, ordered (1.) with a nested a) level, a body paragraph, then a second ordered list.
 fn document() -> RichDocument {
     RichDocument {
+        page_frame: Default::default(),
         title: "목록".into(),
         blocks: vec![
             item("점 하나", RichListKind::Bullet, 0, None),
@@ -184,6 +185,7 @@ fn docx_defines_numbering_and_every_list_paragraph_refers_to_it() {
 #[test]
 fn docx_without_lists_has_no_numbering_part() {
     let doc = RichDocument {
+        page_frame: Default::default(),
         title: "본문".into(),
         blocks: vec![body("문단")],
         official_agency: None,

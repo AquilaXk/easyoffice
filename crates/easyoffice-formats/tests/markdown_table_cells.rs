@@ -42,6 +42,7 @@ fn cell_text_with_markdown_characters_survives_a_markdown_round_trip() {
         "!w", "끝\\",
     ];
     let doc = RichDocument {
+        page_frame: Default::default(),
         title: "표".to_string(),
         blocks: vec![RichBlock::Table(
             vec![

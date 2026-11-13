@@ -19,6 +19,7 @@ fn plain(text: &str) -> RichRun {
 
 fn encode(blocks: Vec<RichBlock>) -> String {
     let doc = RichDocument {
+        page_frame: Default::default(),
         title: "RTF 왕복".to_string(),
         blocks,
         official_agency: None,

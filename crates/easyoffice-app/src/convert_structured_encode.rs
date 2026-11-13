@@ -438,6 +438,7 @@ pub(crate) fn encode_structured(
                     }
                 }
                 let doc = RichDocument {
+                    page_frame: Default::default(),
                     title: title.to_string(),
                     blocks,
                     official_agency: None,

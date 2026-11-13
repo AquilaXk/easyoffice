@@ -21,6 +21,7 @@ fn doc_with(images: Vec<RichImage>) -> RichDocument {
         ..RichParagraph::default()
     }));
     RichDocument {
+        page_frame: Default::default(),
         title: "그림".to_string(),
         blocks,
         official_agency: None,

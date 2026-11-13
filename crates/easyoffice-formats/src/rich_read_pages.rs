@@ -421,6 +421,7 @@ fn styled_run(text: String, c: Option<&Fmt>, p: Option<&Fmt>) -> RichRun {
     let c_known = c_bits & 0x0F;
     let resolved = ((c_bits >> 4) & c_known) | ((p_bits >> 4) & !c_known & (p_bits & 0x0F));
     RichRun {
+        field: None,
         link: None,
         text,
         bold: (resolved & FLAG_BOLD) != 0,
@@ -839,6 +840,7 @@ pub(crate) fn read_pages(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Ea
         .unwrap_or_default();
     Ok((
         RichDocument {
+            page_frame: Default::default(),
             title,
             blocks,
             official_agency: None,

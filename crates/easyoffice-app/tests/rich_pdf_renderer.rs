@@ -42,6 +42,7 @@ impl Recorder {
             .borrow_mut()
             .push((hwpx.to_vec(), options.clone()));
         let doc = RichDocument {
+            page_frame: Default::default(),
             title: "렌더러".into(),
             blocks: vec![RichBlock::Paragraph(RichParagraph {
                 runs: vec![RichRun::plain("rendered by the host")],
@@ -158,6 +159,7 @@ fn a_highlight_request_stays_with_the_engine_writer() {
 fn a_source_file_saved_as_pdf_is_rendered_by_the_host() {
     let docx = UniversalFormatConverter::encode_rich(
         &RichDocument {
+            page_frame: Default::default(),
             title: "파일".into(),
             blocks: vec![RichBlock::Paragraph(RichParagraph {
                 runs: vec![RichRun::plain("원본 문장")],
@@ -181,6 +183,7 @@ fn a_source_file_saved_as_pdf_is_rendered_by_the_host() {
 
 fn source_document() -> RichDocument {
     RichDocument {
+        page_frame: Default::default(),
         title: "파일".into(),
         blocks: vec![RichBlock::Paragraph(RichParagraph {
             runs: vec![RichRun::plain("원본 문장")],

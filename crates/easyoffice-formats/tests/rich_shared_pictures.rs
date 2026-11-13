@@ -29,6 +29,7 @@ fn docx_with_repeated_picture() -> Vec<u8> {
 
 fn docx_with_repeated_picture_of(png: &[u8], references: usize) -> Vec<u8> {
     let single = RichDocument {
+        page_frame: Default::default(),
         title: "한 번".into(),
         blocks: vec![RichBlock::Image(
             RichImage::new(png.to_vec(), "그림").unwrap(),

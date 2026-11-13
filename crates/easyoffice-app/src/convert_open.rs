@@ -12,8 +12,8 @@
 use easyoffice_formats::{
     base64_codec, evaluate_table_formulas, resolve_code, CellMerge, CellStyle, DecodedContent,
     DecodedDocument, DocumentFormat, EasyOfficeError, OdsUnpacked, PdfWriteOptions, RichAlignment,
-    RichBlock, RichImage, RichListKind, RichParagraph, RichScript, RichToc, SheetStyling,
-    StrictJsonValue, UniversalFormatConverter, CUSTOM_BASE,
+    RichBlock, RichField, RichImage, RichListKind, RichParagraph, RichScript, RichToc,
+    SheetStyling, StrictJsonValue, UniversalFormatConverter, CUSTOM_BASE,
 };
 use easyoffice_sheet::PackedCellCoordinate;
 use std::collections::HashSet;
@@ -73,6 +73,9 @@ fn write_paragraph(out: &mut String, p: &RichParagraph) {
         }
         if let Some(size) = r.size_half_pt {
             let _ = write!(out, ",\"sizeHalfPt\":{size}");
+        }
+        if r.field == Some(RichField::PageNumber) {
+            out.push_str(",\"field\":\"page\"");
         }
         if let Some(link) = &r.link {
             out.push_str(",\"link\":");
@@ -494,6 +497,15 @@ fn decode_response(
         DecodedContent::Document(doc) => {
             out.push_str("\"blocks\":[");
             write_list(&mut out, &doc.blocks, write_block);
+            for (key, paragraphs) in [
+                ("header", &doc.page_frame.header),
+                ("footer", &doc.page_frame.footer),
+            ] {
+                if !paragraphs.is_empty() {
+                    let _ = write!(out, "],\"{key}\":[");
+                    write_list(&mut out, paragraphs, write_paragraph);
+                }
+            }
         }
         DecodedContent::Workbook(sheets) => {
             out.push_str("\"sheets\":[");
@@ -657,6 +669,8 @@ impl EasyOfficeIpcRouter {
 
 #[cfg(test)]
 mod page_break_tests;
+#[cfg(test)]
+mod page_frame_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

@@ -15,6 +15,8 @@ const DOCUMENT_RELS_PATH: &str = "word/_rels/document.xml.rels";
 const WORD_DIR: &str = "word/";
 const IMAGE_REL_SUFFIX: &str = "/image";
 const HYPERLINK_REL_SUFFIX: &str = "/hyperlink";
+const HEADER_REL_SUFFIX: &str = "/header";
+const FOOTER_REL_SUFFIX: &str = "/footer";
 
 /// Relationship id -> address of the external hyperlinks of `word/document.xml`. An address that
 /// is not a [`safe_link_target`] is left out, so its text reads as plain text.
@@ -44,6 +46,37 @@ pub(crate) fn load_docx_hyperlinks(
         }
     }
     Ok(links)
+}
+
+/// Relationship id -> part path of the header and footer parts of `word/document.xml`.
+pub(crate) fn load_docx_frame_targets(
+    entries: &[ZipArchiveEntry],
+) -> Result<HashMap<String, String>, EasyOfficeError> {
+    let mut targets = HashMap::new();
+    let Some(rels) = entries.iter().find(|e| e.path == DOCUMENT_RELS_PATH) else {
+        return Ok(targets);
+    };
+    let xml = std::str::from_utf8(&rels.data)
+        .map_err(|_| EasyOfficeError::InvalidUtf8(format!("{DOCUMENT_RELS_PATH} UTF-8 오류")))?;
+    XmlSanitizer::validate_safe_xml(xml)?;
+    for event in XmlReader::new(xml) {
+        let XmlEvent::Start { name, attrs } = event? else {
+            continue;
+        };
+        let is_frame = attr(&attrs, "Type")
+            .is_some_and(|t| t.ends_with(HEADER_REL_SUFFIX) || t.ends_with(FOOTER_REL_SUFFIX));
+        let external = attr(&attrs, "TargetMode").as_deref() == Some("External");
+        if name != "Relationship" || !is_frame || external {
+            continue;
+        }
+        let (Some(id), Some(target)) = (attr(&attrs, "Id"), attr(&attrs, "Target")) else {
+            continue;
+        };
+        if let Some(path) = resolve_target(&target) {
+            targets.insert(id.to_string(), path);
+        }
+    }
+    Ok(targets)
 }
 
 /// Result of reading one `w:drawing`.

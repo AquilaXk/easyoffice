@@ -42,6 +42,7 @@ fn plain_table() -> RichTable {
 
 fn encode(table: RichTable, format: DocumentFormat) -> Vec<u8> {
     let doc = RichDocument {
+        page_frame: Default::default(),
         title: "병합".into(),
         blocks: vec![RichBlock::Table(table)],
         official_agency: None,

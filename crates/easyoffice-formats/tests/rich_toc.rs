@@ -18,6 +18,7 @@ fn para(text: &str, heading_level: u8, toc: Option<RichToc>) -> RichBlock {
 
 fn sample() -> RichDocument {
     RichDocument {
+        page_frame: Default::default(),
         title: "목차".to_string(),
         blocks: vec![
             para("목차", 0, Some(RichToc::Title)),
@@ -121,6 +122,7 @@ fn heading(text: &str, level: u8, bookmark: u32) -> RichBlock {
 
 fn with_targets() -> RichDocument {
     RichDocument {
+        page_frame: Default::default(),
         title: "목차".to_string(),
         blocks: vec![
             para("목차", 0, Some(RichToc::Title)),

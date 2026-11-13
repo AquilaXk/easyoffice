@@ -5,6 +5,8 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 
+mod frame;
+
 use crate::hwpx_codec::section_xml;
 use crate::hwpx_parts::{
     DEFAULT_CHAR_HEIGHT, DEFAULT_FONT_FACE, DEFAULT_LINE_PERCENT, HWPUNIT_PER_TWIP,
@@ -18,7 +20,8 @@ use crate::rich_xml::{heading_level_from_name, push_linked_run, CharFmt};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
     EasyOfficeError, HwpxCodec, RichAlignment, RichBlock, RichDocument, RichImage, RichListKind,
-    RichParagraph, RichRun, RichScript, ZipArchiveCodec, ZipArchiveEntry, ZipSecurityPolicy,
+    RichPageFrame, RichParagraph, RichRun, RichScript, ZipArchiveCodec, ZipArchiveEntry,
+    ZipSecurityPolicy,
 };
 
 /// EMU per HWPUNIT (1/7200 inch).
@@ -336,7 +339,23 @@ fn finish_paragraph(header: &Header, p: ParaState) -> RichParagraph {
             highlight: r.highlight,
             script: r.script,
         };
-        push_linked_run(&mut runs, &r.text, &fmt, r.link.as_deref());
+        if r.field.is_some() {
+            runs.push(RichRun {
+                bold: fmt.bold,
+                italic: fmt.italic,
+                underline: fmt.underline,
+                strike: fmt.strike,
+                size_half_pt: fmt.size_half_pt,
+                font: fmt.font,
+                color: fmt.color,
+                highlight: fmt.highlight,
+                script: fmt.script,
+                field: r.field,
+                ..RichRun::default()
+            });
+        } else {
+            push_linked_run(&mut runs, &r.text, &fmt, r.link.as_deref());
+        }
     }
     RichParagraph {
         list_level: 0,
@@ -401,6 +420,10 @@ struct SectionWalker {
     budget: ImageBudget,
     /// Address of the open hyperlink field (`hp:fieldBegin type="HYPERLINK"` to `hp:fieldEnd`).
     link: Option<String>,
+    /// The header and footer of the page (the first `BOTH` control of each kind) and what was left out.
+    frame: RichPageFrame,
+    frame_found: [bool; 2],
+    left_out: frame::FrameLeftOut,
 }
 
 /// Binary item id -> package entry, from the `opf:item` manifest of `Contents/content.hpf`.
@@ -702,7 +725,10 @@ impl SectionWalker {
 /// The paragraph block (when it has text) and its pictures, in that order.
 fn push_paragraph_blocks(header: &Header, mut p: ParaState, blocks: &mut Vec<RichBlock>) {
     let images = std::mem::take(&mut p.images);
-    if p.runs.iter().any(|r| !r.text.trim().is_empty()) {
+    if p.runs
+        .iter()
+        .any(|r| r.field.is_some() || !r.text.trim().is_empty())
+    {
         blocks.push(RichBlock::Paragraph(finish_paragraph(header, p)));
     }
     blocks.extend(images.into_iter().map(RichBlock::Image));
@@ -727,7 +753,9 @@ fn read_section(
                 name: "hp:ctrl", ..
             } => {
                 let control = reader.collect_subtree(event)?;
-                walker.on_ctrl(&control, header);
+                if !walker.on_frame_control(&control, header) {
+                    walker.on_ctrl(&control, header);
+                }
             }
             XmlEvent::Start { name, ref attrs } => {
                 if SKIPPED_SUBTREES.contains(&name) {
@@ -838,11 +866,34 @@ pub(crate) fn read_hwpx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Eas
             walker.dropped_merges
         ));
     }
+    for (left_out, note) in [
+        (
+            walker.left_out.pages,
+            "홀수·짝수 쪽 머리말·꼬리말은 가져오지 않았습니다.",
+        ),
+        (
+            walker.left_out.sections,
+            "구역마다 다른 머리말·꼬리말은 첫 구역의 것만 가져왔습니다.",
+        ),
+        (
+            walker.left_out.objects,
+            "머리말·꼬리말의 표·그림·도형은 가져오지 않았습니다.",
+        ),
+        (
+            walker.left_out.long,
+            "머리말·꼬리말은 문단 64개까지만 가져왔습니다.",
+        ),
+    ] {
+        if left_out {
+            warnings.push(note.to_string());
+        }
+    }
     if official_agency.is_some() {
         warnings.push("기관명 등 공문서 메타데이터는 저장 시 다시 기록되지 않습니다.".to_string());
     }
     Ok((
         RichDocument {
+            page_frame: std::mem::take(&mut walker.frame),
             title,
             blocks,
             official_agency,

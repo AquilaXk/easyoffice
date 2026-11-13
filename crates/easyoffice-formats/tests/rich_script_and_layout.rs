@@ -16,6 +16,7 @@ fn run(text: &str, script: RichScript) -> RichRun {
 
 fn sample() -> RichDocument {
     RichDocument {
+        page_frame: Default::default(),
         title: "배치".to_string(),
         blocks: vec![
             RichBlock::Paragraph(RichParagraph {

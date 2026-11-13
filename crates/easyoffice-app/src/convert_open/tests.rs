@@ -14,6 +14,7 @@ pub(super) fn request(action: Option<&str>, file: &str, bytes: &[u8], extra: &st
 
 fn docx_bytes() -> Vec<u8> {
     let doc = RichDocument {
+        page_frame: Default::default(),
         title: "t".into(),
         blocks: vec![
             RichBlock::Paragraph(RichParagraph {
@@ -361,6 +362,7 @@ fn convert_uses_the_source_file_bytes_and_ignores_editor_text() {
 #[test]
 fn source_file_convert_evaluates_table_formulas_and_preserves_metadata_title() {
     let doc = RichDocument {
+        page_frame: Default::default(),
         title: "원본 메타 제목".to_string(),
         blocks: vec![RichBlock::Table(
             vec![
@@ -628,6 +630,7 @@ fn blocks_array(json: &str) -> &str {
 
 fn rich_sample(png: &[u8]) -> RichDocument {
     RichDocument {
+        page_frame: Default::default(),
         title: "t".into(),
         blocks: vec![
             RichBlock::Paragraph(RichParagraph {
@@ -822,6 +825,7 @@ fn decode_answer_is_byte_exact_for_documents_workbooks_and_slides() {
     )
     .0;
     let document = RichDocument {
+        page_frame: Default::default(),
         title: "t".to_string(),
         blocks: vec![
             RichBlock::Paragraph(RichParagraph {

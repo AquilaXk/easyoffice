@@ -71,6 +71,7 @@ fn paragraph(text: &str) -> RichBlock {
 
 fn document() -> RichDocument {
     RichDocument {
+        page_frame: Default::default(),
         title: "보고서".to_string(),
         blocks: vec![
             RichBlock::Paragraph(RichParagraph {

@@ -111,6 +111,7 @@ fn written_list_levels_and_number_formats_read_back() {
         ),
     ];
     let original = RichDocument {
+        page_frame: Default::default(),
         title: "목록".into(),
         blocks,
         official_agency: None,

@@ -16,12 +16,13 @@
 use std::collections::BTreeMap;
 
 use easyoffice_formats::{
-    base64_codec, code_within_bounds, evaluate_table_formulas, normalize_hex_color,
-    safe_link_target, CellMerge, CellStyle, EasyOfficeError, NumFmtTable, OdsUnpacked, OoxmlCodec,
-    PdfWriteOptions, RichAlignment, RichBlock, RichDocument, RichImage, RichListKind,
-    RichParagraph, RichRun, RichScript, RichTable, RichToc, SheetStyling, StrictJsonValue,
-    MAX_COLUMN_PX, MAX_IMAGE_BYTES, MAX_NUM_FMTS, MAX_SIZE_PT, MAX_TOC_LEVEL, MAX_TOC_PAGE,
-    MIN_COLUMN_PX, MIN_SIZE_PT,
+    base64_codec, code_within_bounds, evaluate_table_formulas, frame_paragraph,
+    normalize_hex_color, safe_link_target, CellMerge, CellStyle, EasyOfficeError, NumFmtTable,
+    OdsUnpacked, OoxmlCodec, PdfWriteOptions, RichAlignment, RichBlock, RichDocument, RichField,
+    RichImage, RichListKind, RichPageFrame, RichParagraph, RichRun, RichScript, RichTable, RichToc,
+    SheetStyling, StrictJsonValue, MAX_COLUMN_PX, MAX_IMAGE_BYTES, MAX_NUM_FMTS,
+    MAX_PAGE_FRAME_PARAGRAPHS, MAX_SIZE_PT, MAX_TOC_LEVEL, MAX_TOC_PAGE, MIN_COLUMN_PX,
+    MIN_SIZE_PT,
 };
 use easyoffice_sheet::{PackedCellCoordinate, WorkbookEngine};
 
@@ -170,6 +171,7 @@ pub(crate) fn parse_structured_content(
         let mut warnings = Vec::new();
         let blocks = parse_blocks(as_array(v, "blocks")?, &mut budget, &mut warnings)?;
         let doc = RichDocument {
+            page_frame: parse_page_frame(entries, &mut budget)?,
             title: String::new(),
             blocks,
             official_agency: None,
@@ -188,6 +190,51 @@ pub(crate) fn parse_structured_content(
     Ok(None)
 }
 
+/// `"header"` and `"footer"` of a document payload: arrays of paragraph blocks (at most
+/// [`MAX_PAGE_FRAME_PARAGRAPHS`] each); a table or picture there rejects the save.
+fn parse_page_frame(
+    entries: &JsonObject,
+    budget: &mut Budget,
+) -> Result<RichPageFrame, EasyOfficeError> {
+    let mut parse = |key: &str| -> Result<Vec<RichParagraph>, EasyOfficeError> {
+        let Some(value) = field(entries, key) else {
+            return Ok(Vec::new());
+        };
+        let items = as_array(value, key)?;
+        if items.len() > MAX_PAGE_FRAME_PARAGRAPHS {
+            return Err(invalid(format!(
+                "구조화 저장: '{key}'는 문단 {MAX_PAGE_FRAME_PARAGRAPHS}개 이하여야 합니다."
+            )));
+        }
+        items
+            .iter()
+            .map(|item| {
+                budget.take(1)?;
+                let obj = as_object(item, key)?;
+                if opt_str(obj, "type")? != Some("paragraph") {
+                    return Err(invalid(format!(
+                        "구조화 저장: '{key}'에는 문단만 올 수 있습니다."
+                    )));
+                }
+                parse_paragraph(obj, budget).map(|p| frame_paragraph(&p))
+            })
+            .collect()
+    };
+    Ok(RichPageFrame {
+        header: parse("header")?,
+        footer: parse("footer")?,
+    })
+}
+
+/// Run field: `"page"` (the page number) or absent.
+fn opt_run_field(run: &JsonObject) -> Result<Option<RichField>, EasyOfficeError> {
+    match opt_str(run, "field")? {
+        None | Some("") => Ok(None),
+        Some("page") => Ok(Some(RichField::PageNumber)),
+        Some(other) => Err(invalid(format!("구조화 저장: 알 수 없는 필드 '{other}'"))),
+    }
+}
+
 fn parse_paragraph(
     obj: &JsonObject,
     budget: &mut Budget,
@@ -202,6 +249,7 @@ fn parse_paragraph(
                 .as_str()
                 .ok_or_else(|| invalid("구조화 저장: run 'text'는 문자열이어야 합니다."))?;
             runs.push(RichRun {
+                field: opt_run_field(run)?,
                 link: opt_link(run)?,
                 text: text.to_string(),
                 bold: opt_bool(run, "bold")?,
