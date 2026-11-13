@@ -19,6 +19,7 @@
     mergeSize: "크기가 다른 병합 셀이 있어 정렬할 수 없음",
     large: "정렬 범위가 너무 큼",
     engine: "정렬하지 못함",
+    protected: "변경하려는 셀 또는 차트가 보호된 시트에 있습니다.",
   };
 
   // The merges of `range` as one unit size, or the reason they cannot be sorted. `merges` are
@@ -181,6 +182,11 @@
     // `A`. Resolves `{ ok: true, moved }` (`moved`: rows that changed place) or `{ ok: false, why }`
     // with a key of `FAILURES`.
     async function run(name, map, spec) {
+      // A protected sheet sorts only when it allows 정렬 and no cell of the range is locked (PD-216).
+      const guard = host.__EASYOFFICE_SHEET_PROTECT__;
+      if (guard?.isOn(name) && !(guard.allows(name, "sort") && guard.rangeEditable(name, spec.range, (r, c) => map[gridUtils.refOf(r, c)]?.style))) {
+        return { ok: false, why: "protected" };
+      }
       const range = { ...spec.range, r1: spec.range.r1 + (spec.hasHeader ? 1 : 0) };
       if (range.r2 <= range.r1 || spec.keys.length === 0 || spec.keys.length > MAX_KEYS) return { ok: true, moved: 0 };
       const unit = unitOf(layoutApi.mergesIn(name, range.r1, range.c1, range.r2, range.c2), range);

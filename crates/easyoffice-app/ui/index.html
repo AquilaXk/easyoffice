@@ -339,6 +339,10 @@
               <div class="md-sep"></div>
               <div class="md-item" data-kinds="PDF" data-studio-menu-cmd="pdf-mod-tooffice" role="menuitem" tabindex="-1"><span class="md-label">편집 문서 변환</span></div>
               <div class="md-sep"></div>
+              <div class="md-item" data-kinds="SHEET" data-sheet-act="sheet-protect" role="menuitem" tabindex="-1"><span class="md-label">시트 보호</span></div>
+              <div class="md-item" data-kinds="SHEET" data-sheet-act="workbook-protect" role="menuitem" tabindex="-1"><span class="md-label">통합 문서 보호</span></div>
+              <div class="md-item" data-kinds="SHEET" data-sheet-act="range-allow" role="menuitem" tabindex="-1"><span class="md-label">범위 편집 허용</span></div>
+              <div class="md-sep"></div>
               <div class="md-item" data-studio-menu-cmd="palette" role="menuitem" tabindex="-1"><span class="md-label">환경 설정 및 명령 검색</span><span class="md-shortcut">/</span></div>
             </div>
           </div>
@@ -1334,6 +1338,7 @@
           <button type="button" class="dialog-tab active" role="tab" id="sheet-fmt-tab-numfmt" aria-selected="true" aria-controls="sheet-fmt-pane-numfmt" data-fmt-tab="numfmt">표시 형식</button>
           <button type="button" class="dialog-tab" role="tab" id="sheet-fmt-tab-align" aria-selected="false" aria-controls="sheet-fmt-pane-align" tabindex="-1" data-fmt-tab="align">맞춤</button>
           <button type="button" class="dialog-tab" role="tab" id="sheet-fmt-tab-border" aria-selected="false" aria-controls="sheet-fmt-pane-border" tabindex="-1" data-fmt-tab="border">테두리</button>
+          <button type="button" class="dialog-tab" role="tab" id="sheet-fmt-tab-protect" aria-selected="false" aria-controls="sheet-fmt-pane-protect" tabindex="-1" data-fmt-tab="protect">보호</button>
         </div>
         <div class="dialog-body" id="sheet-fmt-pane-numfmt" role="tabpanel" aria-labelledby="sheet-fmt-tab-numfmt" data-fmt-pane="numfmt">
           <div class="dialog-row"><label class="dialog-label" for="sheet-numfmt-kind-select">분류</label><select id="sheet-numfmt-kind-select" class="sb-combo dialog-select"></select></div>
@@ -1356,6 +1361,10 @@
           <div class="dialog-row"><span class="dialog-label">색</span><div id="sheet-border-color-host" class="sb-color-host dialog-color-host"><button class="dialog-swatch" type="button" data-color-toggle aria-haspopup="true" aria-expanded="false" title="테두리 색" aria-label="테두리 색"><span class="dialog-swatch-chip" aria-hidden="true"></span><span aria-hidden="true">▾</span></button><input id="sheet-border-color" type="color" value="#000000" aria-label="테두리 색" /><div id="sheet-border-color-palette" class="sb-hl-palette" hidden></div></div></div>
           <div class="dialog-row"><span class="dialog-label">미리 보기</span><div class="dialog-btn-group" role="group" aria-label="미리 보기"><button type="button" data-border-preset="none">없음</button><button type="button" data-border-preset="outer">바깥쪽</button><button type="button" data-border-preset="inner">안쪽</button><button type="button" data-border-preset="all">모두</button></div></div>
           <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><svg id="sheet-border-preview" class="sheet-border-preview" viewBox="0 0 120 72" role="img" aria-label="테두리 미리 보기"></svg><div class="sheet-border-positions" role="group" aria-label="테두리 위치"><button type="button" aria-pressed="false" data-border-pos="t">위쪽</button><button type="button" aria-pressed="false" data-border-pos="b">아래쪽</button><button type="button" aria-pressed="false" data-border-pos="l">왼쪽</button><button type="button" aria-pressed="false" data-border-pos="r">오른쪽</button><button type="button" aria-pressed="false" data-border-pos="h">가로 중심선</button><button type="button" aria-pressed="false" data-border-pos="v">세로 중심선</button></div></div>
+        </div>
+        <div class="dialog-body" id="sheet-fmt-pane-protect" role="tabpanel" aria-labelledby="sheet-fmt-tab-protect" data-fmt-pane="protect" hidden>
+          <div class="dialog-row"><span class="dialog-label">셀 보호</span><label class="dialog-checkbox"><input id="sheet-protect-cell-locked" type="checkbox" /> 잠금</label></div>
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-protect-cell-hidden" type="checkbox" /> 숨기기</label></div>
         </div>
         <div class="dialog-footer">
           <button id="btn-sheet-numfmt-apply" type="button" class="dialog-btn dialog-btn-primary">확인</button>
@@ -1457,6 +1466,101 @@
         </div>
         <div class="dialog-footer">
           <button id="btn-sheet-name-edit-apply" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="sheet-protect-dialog" class="tool-dialog sheet-rule-dialog" aria-labelledby="sheet-protect-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="sheet-protect-dialog-title">시트 보호</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-protect-use-password" type="checkbox" /> 암호 사용</label></div>
+          <div class="dialog-row"><label class="dialog-label" for="sheet-protect-password">암호</label><input id="sheet-protect-password" type="password" class="dialog-text-input" maxlength="255" autocomplete="new-password" spellcheck="false" disabled /></div>
+          <div class="dialog-row"><label class="dialog-label" for="sheet-protect-confirm">암호 확인</label><input id="sheet-protect-confirm" type="password" class="dialog-text-input" maxlength="255" autocomplete="new-password" spellcheck="false" disabled /></div>
+          <div class="dialog-row"><span class="dialog-label sheet-protect-heading">워크시트에서 허용할 내용</span></div>
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-protect-allow-selectLockedCells" type="checkbox" /> 잠긴 셀 선택</label></div>
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-protect-allow-selectUnlockedCells" type="checkbox" /> 잠기지 않은 셀 선택</label></div>
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-protect-allow-formatCells" type="checkbox" /> 셀 서식</label></div>
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-protect-allow-formatColumns" type="checkbox" /> 열 서식</label></div>
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-protect-allow-formatRows" type="checkbox" /> 행 서식</label></div>
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-protect-allow-insertColumns" type="checkbox" /> 열 삽입</label></div>
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-protect-allow-insertRows" type="checkbox" /> 행 삽입</label></div>
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-protect-allow-insertHyperlinks" type="checkbox" /> 하이퍼링크 삽입</label></div>
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-protect-allow-deleteColumns" type="checkbox" /> 열 삭제</label></div>
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-protect-allow-deleteRows" type="checkbox" /> 행 삭제</label></div>
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-protect-allow-sort" type="checkbox" /> 정렬</label></div>
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-protect-allow-autoFilter" type="checkbox" /> 자동 필터 사용</label></div>
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-protect-allow-pivotTables" type="checkbox" /> 피벗 테이블 보고서 사용</label></div>
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-protect-allow-objects" type="checkbox" /> 개체 편집</label></div>
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-protect-allow-scenarios" type="checkbox" /> 시나리오 편집</label></div>
+          <p id="sheet-protect-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-sheet-protect-apply" type="button" class="dialog-btn dialog-btn-primary">설정</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="sheet-wb-protect-dialog" class="tool-dialog sheet-rule-dialog" aria-labelledby="sheet-wb-protect-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="sheet-wb-protect-dialog-title">통합 문서 보호</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><label class="dialog-label" for="sheet-wb-protect-password">암호</label><input id="sheet-wb-protect-password" type="password" class="dialog-text-input" maxlength="255" autocomplete="new-password" spellcheck="false" /></div>
+          <div class="dialog-row"><label class="dialog-label" for="sheet-wb-protect-confirm">암호 확인</label><input id="sheet-wb-protect-confirm" type="password" class="dialog-text-input" maxlength="255" autocomplete="new-password" spellcheck="false" /></div>
+          <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-wb-protect-none" type="checkbox" /> 암호 없이 보호</label></div>
+          <p id="sheet-wb-protect-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-sheet-wb-protect-apply" type="button" class="dialog-btn dialog-btn-primary">설정</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="sheet-password-dialog" class="tool-dialog sheet-rule-dialog" aria-labelledby="sheet-password-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="sheet-password-dialog-title">암호</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><label class="dialog-label" for="sheet-password-input">암호</label><input id="sheet-password-input" type="password" class="dialog-text-input" maxlength="255" autocomplete="off" spellcheck="false" /></div>
+          <p id="sheet-password-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-sheet-password-apply" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="sheet-ranges-dialog" class="tool-dialog sheet-rule-dialog" aria-labelledby="sheet-ranges-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="sheet-ranges-dialog-title">범위 편집 허용</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="sheet-names-head" aria-hidden="true"><span>제목</span><span>셀 범위</span></div>
+          <ul id="sheet-ranges-list" class="dialog-list sheet-names-list" role="listbox" aria-label="범위 목록"></ul>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-sheet-ranges-new" type="button" class="dialog-btn dialog-btn-primary">새로 만들기</button>
+          <button id="btn-sheet-ranges-edit" type="button" class="dialog-btn">수정</button>
+          <button id="btn-sheet-ranges-delete" type="button" class="dialog-btn">삭제</button>
+          <button type="button" class="dialog-btn" data-dialog-close>닫기</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="sheet-range-edit-dialog" class="tool-dialog sheet-rule-dialog" aria-labelledby="sheet-range-edit-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="sheet-range-edit-dialog-title">범위 편집 허용</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><label class="dialog-label" for="sheet-range-edit-title">제목</label><input id="sheet-range-edit-title" type="text" class="dialog-text-input" maxlength="255" autocomplete="off" spellcheck="false" /></div>
+          <div class="dialog-row"><label class="dialog-label" for="sheet-range-edit-cells">셀 범위</label><input id="sheet-range-edit-cells" type="text" class="dialog-text-input" maxlength="1024" autocomplete="off" spellcheck="false" /></div>
+          <div class="dialog-row"><label class="dialog-label" for="sheet-range-edit-password">범위 암호</label><input id="sheet-range-edit-password" type="password" class="dialog-text-input" maxlength="255" autocomplete="new-password" spellcheck="false" /></div>
+          <div class="dialog-row"><label class="dialog-label" for="sheet-range-edit-confirm">암호 확인</label><input id="sheet-range-edit-confirm" type="password" class="dialog-text-input" maxlength="255" autocomplete="new-password" spellcheck="false" /></div>
+          <p id="sheet-range-edit-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-sheet-range-edit-apply" type="button" class="dialog-btn dialog-btn-primary">확인</button>
           <button type="button" class="dialog-btn" data-dialog-close>취소</button>
         </div>
       </div>
@@ -1685,6 +1789,7 @@
     <script src="./workspace-tools.js"></script>
     <script src="./workspace-panels.js"></script>
     <script src="./sheet-layout.js"></script>
+    <script src="./sheet-protect.js"></script>
     <script src="./sheet-tab-names.js"></script>
     <script src="./sheet-tab-strip.js"></script>
     <script src="./sheet-outline.js"></script>
@@ -1716,6 +1821,8 @@
     <script src="./sheet-page.js"></script>
     <script src="./sheet-page-print.js"></script>
     <script src="./sheet-names-ui.js"></script>
+    <script src="./sheet-protect-ui.js"></script>
+    <script src="./sheet-protect-ranges.js"></script>
     <script src="./sheet-outline-ui.js"></script>
     <script src="./sheet-tabs.js"></script>
     <script src="./sheet-tab-ui.js"></script>

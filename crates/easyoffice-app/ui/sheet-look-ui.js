@@ -1,7 +1,7 @@
 (function (host) {
   "use strict";
 
-  // The 맞춤 and 테두리 panes of the 셀 서식 dialog (PD-207). The dialog is the number format dialog of
+  // The 맞춤, 테두리 and 보호 panes of the 셀 서식 dialog (PD-207, PD-216; the 보호 pane has 잠금 and 숨기기, as in the Korean spreadsheet help). The dialog is the number format dialog of
   // sheet-numfmt-ui.js with tabs; this module fills the other two panes from the selection and writes them
   // back in one undoable step. The border pane follows the reference editor's cell border dialog
   // (`cell-border-bg-dialog.ts`): a grid of line kinds, a color, preset buttons and the positions around a
@@ -35,6 +35,7 @@
     let line = "thin";
     let color = look.DEFAULT_COLOR;
     let borderTouched = false;
+    let loadedLocks = { locked: "1", hidden: "" };
 
     const tabs = () => [...document.querySelectorAll("#sheet-numfmt-dialog [data-fmt-tab]")];
     const panes = () => [...document.querySelectorAll("#sheet-numfmt-dialog [data-fmt-pane]")];
@@ -149,13 +150,39 @@
       setChecked("sheet-align-wrap", wrap === "1");
     }
 
-    // `open(pane)`: loads both panes from the selection and shows `pane`.
+    // The 보호 pane: 잠금 and 숨기기 of the selection. A protected sheet shows them but does not change them.
+    function loadProtect(rg) {
+      loadedLocks = ops.protectStates(rg);
+      const off = host.__EASYOFFICE_SHEET_PROTECT__?.isOn(deps.getActiveSheetName?.() ?? "") === true;
+      for (const [id, state] of [["sheet-protect-cell-locked", loadedLocks.locked], ["sheet-protect-cell-hidden", loadedLocks.hidden]]) {
+        const box = $(id);
+        if (!box) continue;
+        box.indeterminate = state === "mixed";
+        box.checked = state === "1";
+        box.disabled = off;
+      }
+    }
+
+    // `open(pane)`: loads the panes from the selection and shows `pane`.
     function open(pane) {
       ensureControls();
       const rg = getRange();
       loadAlign(rg);
       loadBorder(rg);
+      loadProtect(rg);
       showPane(pane);
+    }
+
+    // The lock values the 보호 pane changed: `{ locked, hideFormula }`, each only when its box moved.
+    function lockValues() {
+      const out = {};
+      const moved = (id, state) => {
+        const box = $(id);
+        return box && !box.disabled && (box.checked !== (state === "1") || (state === "mixed" && !box.indeterminate));
+      };
+      if (moved("sheet-protect-cell-locked", loadedLocks.locked)) out.locked = checked("sheet-protect-cell-locked");
+      if (moved("sheet-protect-cell-hidden", loadedLocks.hidden)) out.hideFormula = checked("sheet-protect-cell-hidden");
+      return out;
     }
 
     function alignValues() {
@@ -181,13 +208,13 @@
 
     // True when the panes have something to write; `apply()` writes it in one step.
     function dirty() {
-      return Object.keys(alignValues()).length > 0 || borderTouched;
+      return Object.keys(alignValues()).length > 0 || borderTouched || Object.keys(lockValues()).length > 0;
     }
 
     function apply() {
       ops.pen.line = line;
       ops.pen.color = color;
-      return ops.setLook(alignValues(), borderTouched ? borderSteps() : null);
+      return ops.setLook(alignValues(), borderTouched ? borderSteps() : null, lockValues());
     }
 
     function lineSvg(name) {
@@ -243,7 +270,7 @@
     const kit = host.__EASYOFFICE_CREATE_SHEET_DIALOG_KIT__(deps.document);
     let numfmtUi = null;
     const ops = host.__EASYOFFICE_CREATE_SHEET_LOOK_OPS__({ ...deps, openDialog: (pane) => numfmtUi?.openNumfmtDialog(pane) });
-    const ui = createSheetLookUi({ document: deps.document, kit, ops, getRange: deps.getRange });
+    const ui = createSheetLookUi({ document: deps.document, kit, ops, getRange: deps.getRange, getActiveSheetName: deps.getActiveSheetName });
     numfmtUi = host.__EASYOFFICE_CREATE_SHEET_NUMFMT_UI__?.({ document: deps.document, format: deps.format, kit, look: ui });
     return ops;
   }

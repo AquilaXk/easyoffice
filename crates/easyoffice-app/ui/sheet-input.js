@@ -61,6 +61,8 @@
 
   function createSheetInput(api) {
     const { document, grid, sheetCellFocusState, isFormulaStr } = api;
+    // Sheet protection (PD-216); absent in pages that do not load it.
+    const protectApi = host.__EASYOFFICE_SHEET_PROTECT__;
     // `axis`: "row" or "col" while a whole row or column header is selected, else null.
     const sel = { ar: 1, ac: 1, cr: 1, cc: 1, axis: null };
     const bound = new WeakSet();
@@ -213,12 +215,14 @@
       }
       const formulaInput = document.getElementById("formula-input");
       if (formulaInput && document.activeElement !== formulaInput) {
+        // A protected sheet does not show the formula of a cell whose format hides it (PD-216).
+        const hidden = protectApi?.formulaHidden(api.getSheetName(), sel.ar, sel.ac, activeTd ? activeTd._st : api.getEntry(ref)?.style);
         if (activeTd) {
           const live = grid.readTdValue(activeTd);
-          formulaInput.value = stateOf(activeTd)?.userEdited ? live : activeTd.dataset.formula || live;
+          formulaInput.value = stateOf(activeTd)?.userEdited ? live : hidden ? live : activeTd.dataset.formula || live;
         } else {
           const entry = api.getEntry(ref);
-          formulaInput.value = entry?.formula || entry?.value || "";
+          formulaInput.value = hidden ? entry?.value || "" : entry?.formula || entry?.value || "";
         }
       }
       const aggEl = document.getElementById("status-sheet-agg");
@@ -259,9 +263,16 @@
       if (td && isEditing(stateOf(td))) api.commitSheetCellEdit(td, false).catch(() => {});
     }
 
+    // Whether a click or a move may land on the cell: a protected sheet can keep locked or unlocked cells from
+    // being selected (PD-216).
+    function selectable(r, c) {
+      return !protectApi || protectApi.canSelect(api.getSheetName(), r, c, api.getEntry(grid.refOf(r, c))?.style);
+    }
+
     function select(row, col, extend) {
       let r = clamp(row, 1, grid.MAX_ROWS);
       let c = clamp(col, 1, grid.MAX_COLS);
+      if (!extend && !selectable(r, c)) return;
       commitIfEditing();
       // A click or a move that lands inside a merged range selects its anchor cell.
       const merged = extend ? null : grid.mergeAt?.(r, c);
@@ -373,6 +384,19 @@
       return jumpAcrossGap(from, dr, dc, jumpLimit(dr, dc, api.getExtent()));
     }
 
+    // The next cell in direction `(dr, dc)` that may be selected: a protected sheet that keeps locked (or unlocked)
+    // cells from being selected is walked over, so Tab and the arrows reach the cells that can be.
+    function stepSelectable(r, c, dr, dc) {
+      if (!protectApi || !protectApi.isOn(api.getSheetName()) || (dr === 0 && dc === 0)) return { r, c };
+      let nr = r;
+      let nc = c;
+      for (let i = 0; i < 4096 && inGridBounds(nr, nc) && !selectable(nr, nc); i += 1) {
+        nr += dr;
+        nc += dc;
+      }
+      return { r: nr, c: nc };
+    }
+
     function moveBy(dr, dc, opts) {
       const { extend, jump } = opts;
       if (jump) {
@@ -392,6 +416,7 @@
       let nc = baseC + dc;
       while (dr && inGridBounds(nr, nc) && grid.rowHidden?.(nr)) nr += dr;
       while (dc && inGridBounds(nr, nc) && grid.colHidden?.(nc)) nc += dc;
+      if (!extend) ({ r: nr, c: nc } = stepSelectable(nr, nc, dr, dc));
       select(nr, nc, extend);
     }
 
@@ -406,7 +431,21 @@
       selObj.addRange(range);
     }
 
+    // A locked cell of a protected sheet is not typed into: the status line says why.
+    function editBlocked(td) {
+      if (!protectApi || protectApi.cellEditable(api.getSheetName(), td._row, td._col, td._st)) return false;
+      // A cell of an allowed range with a password asks it first (범위 잠금 해제).
+      const range = protectApi.lockedRangeAt(api.getSheetName(), td._row, td._col);
+      if (range && protectApi.askRangeUnlock) {
+        protectApi.askRangeUnlock(api.getSheetName(), range.name);
+        return true;
+      }
+      protectApi.say(protectApi.BLOCKED);
+      return true;
+    }
+
     function startEdit(td, mode, replace) {
+      if (editBlocked(td)) return;
       const st = stateOf(td) || api.ensureSheetCellFocusEntry(td, api.getSheetName());
       if (st.mode) {
         markEditing(td, st, mode);
@@ -512,8 +551,10 @@
     function handleEnterTab(ev, editing) {
       ev.preventDefault();
       if (editing) commitIfEditing();
-      if (ev.key === "Enter") select(sel.ar + (ev.shiftKey ? -1 : 1), sel.ac, false);
-      else select(sel.ar, sel.ac + (ev.shiftKey ? -1 : 1), false);
+      const dr = ev.key === "Enter" ? (ev.shiftKey ? -1 : 1) : 0;
+      const dc = ev.key === "Enter" ? 0 : ev.shiftKey ? -1 : 1;
+      const next = stepSelectable(sel.ar + dr, sel.ac + dc, dr, dc);
+      select(next.r, next.c, false);
     }
 
     function handleNavKey(ev, editing) {
@@ -641,6 +682,7 @@
       const handle = ev.target?.closest?.(".col-resizer");
       if (handle) {
         ev.preventDefault();
+        if (protectApi && !protectApi.guardAction(api.getSheetName(), "formatColumns")) return;
         const col = grid.colIndex(handle.dataset.colResizer || "A");
         resize = { col, startX: ev.clientX, startW: grid.colWidth(col) };
         return;

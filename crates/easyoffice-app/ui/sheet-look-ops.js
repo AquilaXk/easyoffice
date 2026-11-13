@@ -14,10 +14,10 @@
   const H_ACTIONS = { "align-left": "left", "align-center": "center", "align-right": "right" };
   const V_ACTIONS = { "valign-top": "top", "valign-middle": "middle", "valign-bottom": "" };
   const BORDER_KINDS = { "border-all": "all", "border-outer": "outer", "border-inner": "inner", "border-top": "top", "border-bottom": "bottom", "border-left": "left", "border-right": "right", "border-none": "none" };
-  const LABELS = { align: "맞춤", wrap: "줄 바꿈", border: "테두리" };
+  const LABELS = { align: "맞춤", wrap: "줄 바꿈", border: "테두리", protect: "셀 보호" };
 
   function createSheetLookOps(deps) {
-    const { document, format, gridUtils, sheetDataStore, getActiveSheetName, getActiveModule, getRange, openDialog } = deps;
+    const { document, format, gridUtils, sheetDataStore, getActiveSheetName, getActiveModule, getRange, getSelection, openDialog } = deps;
     const look = host.__EASYOFFICE_SHEET_LOOK__;
     const pen = { line: "thin", color: look.DEFAULT_COLOR };
 
@@ -66,8 +66,10 @@
       });
     }
 
-    // The selected cells with `values` written by `{ textAlign, verticalAlign, wrap }` in one step (the dialog).
-    function setLook(values, border) {
+    // The selected cells with `values` written by `{ textAlign, verticalAlign, wrap }` in one step (the dialog), and
+    // `locks` `{ locked, hideFormula }` (the 보호 pane, PD-216), which a protected sheet does not let change.
+    function setLook(values, border, locks) {
+      const lock = Object.keys(locks || {}).length > 0;
       return format.editStyles(LABELS.align, (ctx) => {
         let n = 0;
         for (let r = ctx.rg.r1; r <= ctx.rg.r2; r += 1) {
@@ -77,8 +79,81 @@
           }
         }
         const refused = border ? applyBorders(ctx, border) : null;
+        if (lock) n = Math.max(n, applyLocks(ctx, locks));
         return refused || n;
-      });
+      }, lock);
+    }
+
+    // ---- the lock and the hidden formula of the cells (PD-216) ----------------------------------------------
+    const protectApi = host.__EASYOFFICE_SHEET_PROTECT__;
+    const layoutApi = host.__EASYOFFICE_SHEET_LAYOUT__;
+
+    // `"1"` when every cell of the selection is locked, `""` when none is, `"mixed"`; the same for hidden formulas.
+    function protectStates(rg) {
+      const sheet = getActiveSheetName();
+      const map = sheetDataStore[sheet] || {};
+      const axis = getSelection?.().axis;
+      const area = (rg.r2 - rg.r1 + 1) * (rg.c2 - rg.c1 + 1);
+      let locked;
+      let hidden;
+      const seen = (prev, value) => (prev === undefined ? value : prev === value ? value : "mixed");
+      if (area > STATE_SCAN_CELLS) {
+        // A whole row or column is judged by its runs and the cells that carry a flag of their own.
+        const runs = layoutApi.unlockedOf(sheet, axis === "row" ? "row" : "col");
+        const [a, b] = axis === "row" ? [rg.r1, rg.r2] : [rg.c1, rg.c2];
+        const covered = axis ? runs.some((r) => r[0] <= a && r[1] >= b) : false;
+        const explicit = Object.values(map).some((e) => e?.style?.unlocked || e?.style?.locked);
+        return { locked: covered && !explicit ? "" : explicit || !axis ? "mixed" : "1", hidden: "mixed" };
+      }
+      for (let r = rg.r1; r <= rg.r2; r += 1) {
+        for (let c = rg.c1; c <= rg.c2; c += 1) {
+          const st = map[gridUtils.refOf(r, c)]?.style;
+          locked = seen(locked, protectApi.cellUnlocked(sheet, r, c, st) ? "" : "1");
+          hidden = seen(hidden, st?.hideFormula ? "1" : "");
+        }
+      }
+      return { locked: locked ?? "1", hidden: hidden ?? "" };
+    }
+
+    // Writes `locks` (`{ locked, hideFormula }`, each a boolean or absent) into the cells of an `editStyles` step. A
+    // whole row or column also takes the lock as its own, so the cells beyond the used part follow it.
+    function applyLocks({ map, rg, patch }, locks) {
+      const sheet = getActiveSheetName();
+      const axis = getSelection?.().axis;
+      const whole = getRange();
+      let n = 0;
+      if ("locked" in locks && axis) {
+        const kind = axis === "row" ? "row" : "col";
+        const [a, b] = kind === "row" ? [whole.r1, whole.r2] : [whole.c1, whole.c2];
+        const runs = layoutApi.unlockedOf(sheet, kind);
+        layoutApi.setUnlocked(sheet, kind, locks.locked ? layoutApi.removeRun(runs, a, b) : layoutApi.addRun(runs, a, b));
+        // The cells in the range carry no flag of their own now: they follow the row or column.
+        for (const ref of Object.keys(map)) {
+          const at = gridUtils.parseRef(ref);
+          const inside = at && at.row >= rg.r1 && at.row <= rg.r2 && at.col >= rg.c1 && at.col <= rg.c2;
+          if (inside && (map[ref].style?.unlocked || map[ref].style?.locked)) {
+            patch(ref, (st) => {
+              st.unlocked = "";
+              st.locked = "";
+            });
+            n += 1;
+          }
+        }
+      }
+      for (let r = rg.r1; r <= rg.r2; r += 1) {
+        for (let c = rg.c1; c <= rg.c2; c += 1) {
+          patch(gridUtils.refOf(r, c), (st) => {
+            if ("locked" in locks && !axis) {
+              const inRun = protectApi.cellUnlocked(sheet, r, c, { unlocked: false, locked: false });
+              st.unlocked = locks.locked ? "" : true;
+              st.locked = locks.locked && inRun ? true : "";
+            }
+            if ("hideFormula" in locks) st.hideFormula = locks.hideFormula ? true : "";
+          });
+          n += 1;
+        }
+      }
+      return n;
     }
 
     // Applies border steps `[{ kind, edge }]` in order inside an edit; a note when the range is too large.
@@ -184,7 +259,7 @@
     }
 
     bind();
-    return { run, setLook, applyBorders, borderState, setColor, setLine, sync, pen, states };
+    return { run, setLook, applyBorders, borderState, protectStates, setColor, setLine, sync, pen, states };
   }
 
   host.__EASYOFFICE_CREATE_SHEET_LOOK_OPS__ = createSheetLookOps;

@@ -626,6 +626,27 @@ const TOOL_OFFICE: MenuSpec = menu(
         "tool:palette",
     ],
 );
+/// The spreadsheet's 도구 menu: the common items and the protection commands (도구 > 보호 of the spreadsheet help).
+const TOOL_SHEET: MenuSpec = menu(
+    "도구",
+    &[
+        "tool:diagnose",
+        "tool:scrub-pii",
+        "tool:security-audit",
+        "tool:bench-run",
+        S,
+        "tool:review-track",
+        "tool:review-comment",
+        "tool:review-verify",
+        "tool:review-stats",
+        S,
+        "sheet:protect",
+        "sheet:protect-workbook",
+        "sheet:protect-ranges",
+        S,
+        "tool:palette",
+    ],
+);
 const TOOL_PDF: MenuSpec = menu(
     "도구",
     &[
@@ -680,7 +701,7 @@ const SHEET: [&MenuSpec; 12] = [
     &SHEET_SHEET,
     &FORMULA_SHEET,
     &DATA_SHEET,
-    &TOOL_OFFICE,
+    &TOOL_SHEET,
     &WINDOW,
     &HELP,
 ];

@@ -597,8 +597,24 @@
       };
     }
 
+    // The password digests of the sheet protection (PD-216) as a stand-in: the page only keeps what the answer carries
+    // and asks the engine to compare, so the stand-in is a checksum of the password with the shape of the real digest.
+    const offlineDigest = (password) => "OFFLINE-" + [...password].length + "-" + [...password].reduce((sum, ch) => (sum * 31 + ch.codePointAt(0)) % 1000003, 7);
+
+    function offlineProtect(doc) {
+      const password = String(doc.password ?? "");
+      if (doc.sessionAction === "protectHash") {
+        if (password === "") return { problem: "empty" };
+        if ([...password].length > 255) return { problem: "long" };
+        return { pwd: { kind: "both", alg: "SHA-512", hash: offlineDigest(password), salt: "SALT", spin: 100000, key: "KEY", keyAlg: "uri" } };
+      }
+      if ([...password].length > 255) return { unsupported: "long" };
+      return { ok: !doc.pwd || doc.pwd.hash === offlineDigest(password) };
+    }
+
     function evaluateLocalSheetRpc(payload) {
       const doc = parseRequiredRpcJsonObject(payload);
+      if (doc.sessionAction === "protectHash" || doc.sessionAction === "protectVerify") return offlineProtect(doc);
       if (doc.sessionAction === "format") return offlineFormatCells(doc);
       if (doc.sessionAction === "sort") return host.__EASYOFFICE_OFFLINE_SORT__(doc);
       const defaultSheet = resolveDefaultSheetFromDocJs(doc);

@@ -152,6 +152,7 @@
     let editing = null;
 
     function startRename(sheet) {
+      if (host.__EASYOFFICE_SHEET_PROTECT__?.guardStructure() === false) return false;
       const tab = tabOf(sheet);
       if (!tab || editing) return false;
       const input = document.createElement("input");

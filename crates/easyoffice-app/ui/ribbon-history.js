@@ -154,6 +154,7 @@
         sheetRules: typeof sheetController.getSheetRules === "function" ? sheetController.getSheetRules() : {},
         sheetLayout: host.__EASYOFFICE_SHEET_LAYOUT__.getAll(),
         definedNames: host.__EASYOFFICE_SHEET_NAMES__.getAll(),
+        workbookProtect: host.__EASYOFFICE_SHEET_PROTECT__.getWorkbook(),
         sheetOrder: host.__EASYOFFICE_SHEET_TAB_STRIP__.reconcile(Object.keys(sheetDataStore)),
         slides: structuredClone(slideDeckState),
         ribbonState: structuredClone(localRibbonState),
@@ -255,6 +256,7 @@
       if (snap.sheetLayout) host.__EASYOFFICE_SHEET_LAYOUT__.replaceAll(structuredClone(snap.sheetLayout));
       // A change of the names re-evaluates the page's formulas; the restore does that itself.
       if (snap.definedNames) host.__EASYOFFICE_SHEET_NAMES__.replaceAll(structuredClone(snap.definedNames), true);
+      if ("workbookProtect" in snap) host.__EASYOFFICE_SHEET_PROTECT__.setWorkbook(snap.workbookProtect);
       if (Array.isArray(snap.sheetOrder)) host.__EASYOFFICE_SHEET_TAB_STRIP__.replaceOrder(snap.sheetOrder);
       if (Array.isArray(snap.slides)) {
         slideDeckState.splice(0, slideDeckState.length, ...structuredClone(snap.slides));
@@ -302,6 +304,28 @@
       sheetController.refreshFocusedSheetCellPendingSnapshot();
     }
 
+    // Whether restoring `snap` would change a locked cell of a sheet that is protected now and stays protected: an
+    // undo or a redo does not get past the protection (PD-216). Formula cells compare by their text, because their
+    // value follows the cells they read.
+    function protectedCellsWouldChange(snap) {
+      const guard = host.__EASYOFFICE_SHEET_PROTECT__;
+      if (!snap.sheets || !guard) return false;
+      const gridUtils = host.__EASYOFFICE_SHEET_GRID_UTILS__;
+      sheetDataStore[getActiveSheetName()] = getSheetController().snapshotDomSheetCells();
+      const raw = (e) => e?.formula || e?.value || "";
+      for (const name of Object.keys(sheetDataStore)) {
+        if (!guard.isOn(name) || snap.sheetLayout?.[name]?.protect?.on !== true) continue;
+        const now = sheetDataStore[name] || {};
+        const then = snap.sheets[name] || {};
+        for (const ref of new Set([...Object.keys(now), ...Object.keys(then)])) {
+          if (raw(now[ref]) === raw(then[ref])) continue;
+          const at = gridUtils.parseRef(ref);
+          if (at && !guard.cellEditable(name, at.row, at.col, now[ref]?.style)) return true;
+        }
+      }
+      return false;
+    }
+
     function performWorkspaceHistoryStep(isUndo) {
       return enqueueWorkspaceHistoryOp(async () => {
         const sheetController = getSheetController();
@@ -314,6 +338,10 @@
         const doneMsg = isUndo ? "실행 취소" : "다시 실행";
         if (sourceStack.length === 0) {
           if (fb) fb.textContent = emptyMsg;
+          return;
+        }
+        if (protectedCellsWouldChange(sourceStack.at(-1))) {
+          if (fb) fb.textContent = host.__EASYOFFICE_SHEET_PROTECT__.BLOCKED;
           return;
         }
         historyMutationEpoch += 1;

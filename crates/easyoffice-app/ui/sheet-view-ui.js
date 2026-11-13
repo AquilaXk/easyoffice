@@ -82,6 +82,16 @@
       return freezeTo(rg.r1 - 1, rg.c1 - 1);
     }
 
+    // Grouping rows or columns changes how they show, so a protected sheet needs 행 서식 or 열 서식 (PD-216).
+    // True when the sheet refuses (the status line says so).
+    function groupBlocked(axis) {
+      const guard = host.__EASYOFFICE_SHEET_PROTECT__;
+      const name = getActiveSheetName();
+      if (!guard || !guard.isOn(name)) return false;
+      const flags = axis === "col" ? ["formatColumns"] : axis === "row" ? ["formatRows"] : ["formatRows", "formatColumns"];
+      return !flags.every((flag) => guard.guardAction(name, flag));
+    }
+
     // ---- groups -----------------------------------------------------------------------------------
     // The selection's axis: a selected header names it, a range of cells means rows.
     function target() {
@@ -93,6 +103,7 @@
 
     // Applies `edit(outline, target)` (`{ outline }` or `{ error }`) to the active sheet's outline.
     function editOutline(edit, message) {
+      if (groupBlocked(target().axis)) return Promise.resolve(false);
       return step((name) => {
         const t = target();
         const result = edit(layoutApi.outlineOf(name) || {}, t);
@@ -110,7 +121,7 @@
     const hideDetail = () => editOutline((o, t) => outlineApi.fold(o, t.axis, t.first, t.last, true), "하위 수준 숨기기");
     const showDetail = () => editOutline((o, t) => outlineApi.fold(o, t.axis, t.first, t.last, false), "하위 수준 표시");
     const clearOutline = () =>
-      step((name) => {
+      groupBlocked(null) ? Promise.resolve(false) : step((name) => {
         const outline = layoutApi.outlineOf(name);
         if (!outline || !outlineApi.hasGroups(outline)) return null;
         layoutApi.setOutline(name, outlineApi.clear(outline));
@@ -119,6 +130,7 @@
 
     // The outline bar's buttons: one group, or a level button for a whole axis.
     function toggleGroup(axis, g, fold) {
+      if (groupBlocked(axis)) return Promise.resolve(false);
       return step((name) => {
         layoutApi.setOutline(name, outlineApi.setFolded(layoutApi.outlineOf(name) || {}, axis, g, fold));
         return fold ? "하위 수준 숨기기" : "하위 수준 표시";
@@ -126,7 +138,7 @@
     }
 
     const showLevel = (axis, n) =>
-      step((name) => {
+      groupBlocked(axis) ? Promise.resolve(false) : step((name) => {
         layoutApi.setOutline(name, outlineApi.showLevel(layoutApi.outlineOf(name) || {}, axis, n));
         return "수준 " + n;
       });

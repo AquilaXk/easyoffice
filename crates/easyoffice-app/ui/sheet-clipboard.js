@@ -128,7 +128,9 @@
         const line = [];
         for (let c = range.c1; c <= range.c2; c += 1) {
           const e = api.getEntry(grid.refOf(r, c));
-          line.push(e && (e.value || e.formula || e.style) ? { value: e.value || "", formula: e.formula || "", style: e.style } : null);
+          // A protected sheet copies the value, not the formula, of a cell whose format hides it (PD-216).
+          const hidden = e?.formula && host.__EASYOFFICE_SHEET_PROTECT__?.formulaHidden(sheetName(), r, c, e.style);
+          line.push(e && (e.value || e.formula || e.style) ? { value: e.value || "", formula: hidden ? "" : e.formula || "", style: e.style } : null);
         }
         cells.push(line);
       }

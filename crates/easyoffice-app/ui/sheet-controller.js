@@ -187,6 +187,7 @@
 
     function appendSheetRow() {
       const curSheet = getActiveSheetName();
+      if (host.__EASYOFFICE_SHEET_PROTECT__?.guardAction(curSheet, "insertRows") === false) return;
       const map = snapshotDomSheetCells();
       const nextCount = getSheetRowCount(curSheet) + 1;
       sheetRowCounts[curSheet] = nextCount;
@@ -473,6 +474,7 @@
     }
 
     async function prepareFormulaBarEvaluation(options = {}) {
+      if (formulaBarBlocked()) return null;
       const input = document.getElementById("formula-input");
       const out = document.getElementById("sheet-eval-result");
       if (!input || !out) return null;
@@ -523,6 +525,18 @@
         out.textContent = "결과 (" + prep.targetCellRef + "): " + prep.evaluated.extraValue;
         updateSheetSelectionAndAggregates(getActiveSheetCellRef() || prep.targetCellRef);
       }
+    }
+
+    // The formula bar writes its text into the active cell, so a locked cell of a protected sheet refuses it
+    // (PD-216) and the bar shows the cell again.
+    function formulaBarBlocked() {
+      const guard = host.__EASYOFFICE_SHEET_PROTECT__;
+      const sheet = getActiveSheetName();
+      const at = gridUtils.parseRef(getActiveSheetCellRef() || "A1");
+      if (!guard || !at || guard.cellEditable(sheet, at.row, at.col, sheetDataStore[sheet]?.[getActiveSheetCellRef()]?.style)) return false;
+      guard.say(guard.BLOCKED);
+      updateSheetSelectionAndAggregates(getActiveSheetCellRef() || "A1");
+      return true;
     }
 
     function evaluateActiveSheetFormulaBar(recordUndo) {
@@ -813,6 +827,7 @@
       getActiveSheetName,
       getActiveModule,
       getRange: () => input.getRange(),
+      getSelection: () => input.getSelection(),
     });
     host.__EASYOFFICE_SHEET_NUMFMT_DISPLAY__?.attach({
       call: sheetStoreHelpers.callSheetAction,

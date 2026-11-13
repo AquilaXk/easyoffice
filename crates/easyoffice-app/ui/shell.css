@@ -157,6 +157,14 @@
 #sheet-paste-dialog { width: min(360px, calc(100vw - 32px)); overflow: visible; } /* the open list of five choices reaches below the short dialog */
 /* One label column (the find dialog's 70px, right-aligned: `find-dialog.css` 36-38), and every value control fills the rest of the row like the reference's `.formula-input` and `.formula-select` (`dialogs.css` 1049-1052, `flex: 1`); the decimal field keeps `.dialog-input`'s 72px. */
 #sheet-numfmt-dialog .dialog-label, #sheet-paste-dialog .dialog-label { width: 70px; min-width: 70px; flex-shrink: 0; }
+/* The protection dialogs (PD-216) are the same frame at the paste dialog's width and label column; the allowed-actions heading takes its own row, the list of ranges is the names list with two columns. */
+#sheet-protect-dialog .dialog-label, #sheet-wb-protect-dialog .dialog-label, #sheet-password-dialog .dialog-label, #sheet-range-edit-dialog .dialog-label { width: 70px; min-width: 70px; flex-shrink: 0; }
+#sheet-protect-dialog, #sheet-wb-protect-dialog, #sheet-password-dialog, #sheet-range-edit-dialog { width: min(360px, calc(100vw - 32px)); }
+#sheet-ranges-dialog { width: min(440px, calc(100vw - 32px)); }
+#sheet-protect-dialog .sheet-protect-heading { width: auto; min-width: 0; text-align: left; }
+#sheet-protect-dialog .dialog-text-input, #sheet-wb-protect-dialog .dialog-text-input, #sheet-password-dialog .dialog-text-input, #sheet-range-edit-dialog .dialog-text-input { flex: 1; min-width: 0; }
+#sheet-ranges-dialog .sheet-names-head, #sheet-ranges-dialog .sheet-names-list li { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); }
+#sheet-ranges-dialog .sheet-names-list:empty::before { content: "범위 없음"; }
 #sheet-numfmt-dialog .dialog-text-input, #sheet-numfmt-dialog .custom-select.dialog-select, #sheet-paste-dialog .custom-select.dialog-select, #sheet-numfmt-dialog .sheet-numfmt-sample { flex: 1; min-width: 0; width: auto; }
 /* The sample line is a field-sized output on the surface color, so a negative color keeps 4.5:1 on it in both themes. */
 .sheet-numfmt-sample { box-sizing: border-box; height: 22px; padding: 0 4px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); font-size: var(--font-size-sm); line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

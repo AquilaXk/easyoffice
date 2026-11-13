@@ -28,7 +28,9 @@
   // CSS of a line kind: [style, width in px].
   const LINE_CSS = { thin: ["solid", 1], thick: ["solid", 2], dashed: ["dashed", 1], dotted: ["dotted", 1], double: ["double", 3] };
   const SIDE_CSS = { t: "Top", r: "Right", b: "Bottom", l: "Left" };
-  const LOOK_KEYS = ["textAlign", "verticalAlign", "wrap", "border"];
+  // The protection flags of a cell (PD-216) travel as style keys too: `unlocked`, `locked` (kept locked inside an
+  // unlocked row or column) and `hideFormula`, all `true` or absent.
+  const LOOK_KEYS = ["textAlign", "verticalAlign", "wrap", "border", "unlocked", "locked", "hideFormula"];
 
   // `rrggbb` from `#rrggbb`, `rrggbb` or `#rgb` (any case); null for anything else.
   function normalizeColor(text) {
@@ -70,7 +72,8 @@
   const borderKey = (b) => (b ? (b.t || "") + "|" + (b.r || "") + "|" + (b.b || "") + "|" + (b.l || "") : "");
 
   // The same text for every style with this look: the part of `internStyle`'s key that is new.
-  const lookKey = (st) => (st ? (st.textAlign || "") + "|" + (st.verticalAlign || "") + "|" + (st.wrap ? 1 : 0) + "|" + borderKey(st.border) : "|||0|");
+  const protectKey = (st) => (st.unlocked ? "u" : "") + (st.locked ? "l" : "") + (st.hideFormula ? "h" : "");
+  const lookKey = (st) => (st ? (st.textAlign || "") + "|" + (st.verticalAlign || "") + "|" + (st.wrap ? 1 : 0) + "|" + borderKey(st.border) + "|" + protectKey(st) : "|||0||");
 
   // Whether a wrapped cell was ever made in this page: a sheet is scanned for wrapped rows only then (every
   // wrapped style comes from `internStyle`, a clone of the model, or a file open, and each of them notes it).
@@ -79,7 +82,7 @@
     wrapSeen = true;
   };
 
-  const hasLook = (st) => Boolean(st) && Boolean(st.textAlign || st.verticalAlign || st.wrap || st.border);
+  const hasLook = (st) => Boolean(st) && Boolean(st.textAlign || st.verticalAlign || st.wrap || st.border || st.unlocked || st.locked || st.hideFormula);
 
   // `border` with the edge of `side` replaced (`null` removes it); "" when no edge is left.
   function withSide(border, side, edge) {

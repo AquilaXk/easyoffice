@@ -105,6 +105,12 @@
       return SCOPE_BY_FORMAT[token] || "DOC";
     }
 
+    // The `workbookProtect` field of a sheet save: only a workbook whose structure is protected has one (PD-216).
+    function workbookProtectField() {
+      const protect = host.__EASYOFFICE_SHEET_PROTECT__.getWorkbook();
+      return protect ? { workbookProtect: protect } : {};
+    }
+
     // Structured save content (PD-073): `blocks` for DOC/HWP/PDF, every sheet for SHEET, `slides`
     // for SLIDE. Merged into the convert_document_format JSON payload; no line markup.
     function buildConversionContent(sourceFormatOrModule) {
@@ -121,7 +127,7 @@
       if (scope === "SHEET") {
         sheetDataStore[getActiveSheetName()] = sheetController.snapshotDomSheetCells();
         const keys = host.__EASYOFFICE_SHEET_TAB_STRIP__.reconcile(Object.keys(sheetDataStore));
-        return { sheets: savePayload.buildSheetsPayload(keys, sheetDataStore, sheetController.getColumnWidths(), sheetController.getSheetRules(), host.__EASYOFFICE_SHEET_LAYOUT__.getAll()), names: host.__EASYOFFICE_SHEET_NAMES__.getAll() };
+        return { sheets: savePayload.buildSheetsPayload(keys, sheetDataStore, sheetController.getColumnWidths(), sheetController.getSheetRules(), host.__EASYOFFICE_SHEET_LAYOUT__.getAll()), names: host.__EASYOFFICE_SHEET_NAMES__.getAll(), ...workbookProtectField() };
       }
       if (scope === "SLIDE") {
         if (getActiveModule() === "SLIDE" && typeof syncActiveSlideDomStylesToDeck === "function") {

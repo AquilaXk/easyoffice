@@ -109,6 +109,7 @@
     }
 
     function openPivotDialog() {
+      if (host.__EASYOFFICE_SHEET_PROTECT__?.guardAction(getActiveSheetName(), "pivotTables") === false) return;
       ensurePivotControls();
       const r = getRange();
       const multi = r.r1 !== r.r2 || r.c1 !== r.c2;
@@ -211,6 +212,9 @@
       };
       await enqueueWorkspaceHistoryOp(async () => {
         await flushFocusedSheetCellBeforeSwitch();
+        // The report is a new sheet: the workbook's structure must be open, and a protected sheet must allow 피벗 테이블 보고서 사용 (PD-216).
+        const guard = host.__EASYOFFICE_SHEET_PROTECT__;
+        if (guard && !(guard.guardAction(getActiveSheetName(), "pivotTables") && guard.guardStructure())) return false;
         pushRawUndoSnapshot(captureWorkspaceSnapshot(false));
         const key = uniqueSheetKey();
         const built = pivotCells(result, labels);

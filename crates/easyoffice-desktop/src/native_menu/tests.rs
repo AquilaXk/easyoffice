@@ -358,6 +358,28 @@ fn a_kind_does_not_hold_the_items_of_other_kinds() {
 }
 
 #[test]
+fn only_the_spreadsheet_tool_menu_has_the_protection_items_and_they_run_the_page_commands() {
+    let tools = lines_of(MenuKind::Sheet, "도구");
+    for (id, act) in [
+        ("sheet:protect", "sheet-act:sheet-protect"),
+        ("sheet:protect-workbook", "sheet-act:workbook-protect"),
+        ("sheet:protect-ranges", "sheet-act:range-allow"),
+    ] {
+        assert!(tools.contains(&id), "{id}");
+        assert_eq!(action_for(id), Some(act), "{id}");
+        for kind in [MenuKind::Doc, MenuKind::Hwp, MenuKind::Slide, MenuKind::Pdf] {
+            assert!(!layout::table_ids(kind).contains(&id), "{kind:?} {id}");
+        }
+    }
+    // The three sit together between the review items and the command search, as on the page.
+    let at = |id: &str| tools.iter().position(|line| *line == id).unwrap();
+    assert!(at("tool:review-stats") < at("sheet:protect"));
+    assert!(at("sheet:protect") + 1 == at("sheet:protect-workbook"));
+    assert!(at("sheet:protect-workbook") + 1 == at("sheet:protect-ranges"));
+    assert!(at("sheet:protect-ranges") < at("tool:palette"));
+}
+
+#[test]
 fn the_spreadsheet_keeps_sort_filter_style_data_tools_in_data_and_the_frame_in_sheet() {
     let data = lines_of(MenuKind::Sheet, "데이터");
     for id in [

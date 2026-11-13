@@ -62,20 +62,25 @@
     const hiddenSheets = () => allSheets().filter((name) => layoutApi.hiddenOf(name));
 
     // What each command may do now; the menus grey the rest out.
+    // A workbook whose structure is protected (PD-216) allows none of them.
     function can(sheet) {
       const shown = shownSheets();
       const at = shown.indexOf(sheet);
+      const open = !host.__EASYOFFICE_SHEET_PROTECT__?.structureLocked();
       return {
-        insert: allSheets().length < names.MAX_SHEETS,
-        copy: allSheets().length < names.MAX_SHEETS,
-        delete: shown.length > 1 && at >= 0,
-        rename: at >= 0,
-        moveLeft: at > 0,
-        moveRight: at >= 0 && at < shown.length - 1,
-        hide: shown.length > 1 && at >= 0,
-        unhide: hiddenSheets().length > 0,
+        insert: open && allSheets().length < names.MAX_SHEETS,
+        copy: open && allSheets().length < names.MAX_SHEETS,
+        delete: open && shown.length > 1 && at >= 0,
+        rename: open && at >= 0,
+        moveLeft: open && at > 0,
+        moveRight: open && at >= 0 && at < shown.length - 1,
+        hide: open && shown.length > 1 && at >= 0,
+        unhide: open && hiddenSheets().length > 0,
       };
     }
+
+    // The status line says so when the workbook's structure is protected.
+    const structureBlocked = () => host.__EASYOFFICE_SHEET_PROTECT__?.guardStructure() === false;
 
     // ---- one undoable step ------------------------------------------------------------------------
     // `work(next, before)` changes `next`, a copy of the workspace snapshot `before` whose per-sheet
@@ -167,6 +172,7 @@
     // ---- the commands -----------------------------------------------------------------------------
     // A new empty sheet before `before`, or after the last one; it becomes the active sheet.
     function insert(before) {
+      if (structureBlocked()) return Promise.resolve(false);
       if (!can(before).insert) {
         say("시트는 " + names.MAX_SHEETS + "개까지");
         return Promise.resolve(false);
@@ -181,6 +187,7 @@
     }
 
     async function remove(sheet) {
+      if (structureBlocked()) return false;
       if (!can(sheet).delete) {
         say("마지막 시트는 삭제할 수 없음");
         return false;
@@ -206,6 +213,7 @@
       names.labelOf(sheet) === newName || sheet === newName ? "" : names.checkName(newName, allSheets(), sheet);
 
     async function rename(sheet, newName) {
+      if (structureBlocked()) return false;
       const to = String(newName).trim();
       if (to === names.labelOf(sheet) || to === sheet) return true;
       const problem = checkRename(sheet, to);
@@ -234,6 +242,7 @@
     // text: a reference without a sheet name now points into the copy, one with a name still
     // points where it did.
     function copy(sheet) {
+      if (structureBlocked()) return Promise.resolve(false);
       if (!can(sheet).copy) {
         say("시트는 " + names.MAX_SHEETS + "개까지");
         return Promise.resolve(false);
@@ -256,6 +265,7 @@
 
     // `sheet` takes the place of the tab that is now at visible position `target`.
     function moveTo(sheet, target) {
+      if (structureBlocked()) return Promise.resolve(false);
       return change((next) => {
         const shown = shownIn(next);
         const from = shown.indexOf(sheet);
@@ -274,6 +284,7 @@
     };
 
     function hide(sheet) {
+      if (structureBlocked()) return Promise.resolve(false);
       if (!can(sheet).hide) {
         say("모든 시트를 숨길 수 없음");
         return Promise.resolve(false);
@@ -286,6 +297,7 @@
     }
 
     async function unhide() {
+      if (structureBlocked()) return false;
       const picked = await ui.pickHidden(hiddenSheets());
       if (!picked || picked.length === 0) return false;
       return change((next) => {

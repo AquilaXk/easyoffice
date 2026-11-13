@@ -9,6 +9,9 @@
   // engine's column conditions as sent and received, `hidden` the rows the filter hides, kept apart
   // from `hiddenRows` (the user's). The grid asks for the union through a per-sheet row index.
   // The sheet is hidden (PD-209): `hidden` is true for a sheet without a tab.
+  // The protection (PD-216): `protect` is the engine's JSON `{ on, deny: [flag], pwd, ranges }` (the password only as the
+  // digest the engine made), `unlockedRows` and `unlockedCols` are runs of rows and columns whose own format is
+  // unlocked (`sheet-protect.js` reads them).
   // The view (PD-208): `freeze` `{ rows, cols }` (counts), `tabColor` `"rrggbb"` and the outline
   // (`sheet-outline.js` owns its rules): level runs `[first, last, level]` and the folded runs
   // `foldedRows`, `foldedCols`, which are hidden like `hiddenRows` but belong to the groups.
@@ -22,7 +25,7 @@
   const listeners = [];
 
   function blank() {
-    return { merges: [], hiddenRows: [], hiddenCols: [], filter: null, freeze: null, tabColor: null, hidden: false, outline: null, page: null, index: null, rows: null };
+    return { merges: [], hiddenRows: [], hiddenCols: [], filter: null, freeze: null, tabColor: null, hidden: false, outline: null, page: null, protect: null, unlockedRows: [], unlockedCols: [], index: null, rows: null };
   }
 
   function entry(name) {
@@ -40,7 +43,10 @@
         !layout.tabColor &&
         !layout.hidden &&
         !layout.outline &&
-        !layout.page)
+        !layout.page &&
+        !layout.protect &&
+        layout.unlockedRows.length === 0 &&
+        layout.unlockedCols.length === 0)
     );
   }
 
@@ -284,6 +290,9 @@
     if (layout.hidden) out.hidden = true;
     if (layout.outline) out.outline = structuredClone(layout.outline);
     if (layout.page) out.page = structuredClone(layout.page);
+    if (layout.protect) out.protect = structuredClone(layout.protect);
+    if (layout.unlockedRows?.length) out.unlockedRows = layout.unlockedRows.map((r) => [r[0], r[1]]);
+    if (layout.unlockedCols?.length) out.unlockedCols = layout.unlockedCols.map((r) => [r[0], r[1]]);
     return out;
   }
 
@@ -334,6 +343,9 @@
     layout.hidden = json?.hidden === true;
     layout.outline = json?.outline && Object.keys(json.outline).length > 0 ? structuredClone(json.outline) : null;
     layout.page = json?.page && Object.keys(json.page).length > 0 ? structuredClone(json.page) : null;
+    layout.protect = json?.protect && typeof json.protect === "object" ? structuredClone(json.protect) : null;
+    layout.unlockedRows = runs(json?.unlockedRows);
+    layout.unlockedCols = runs(json?.unlockedCols);
     return layout;
   }
 
@@ -394,6 +406,12 @@
   // The page setup of the sheet (`sheet-page.js`): the engine's `page` JSON, null for the default.
   const pageOf = (name) => bySheet[name]?.page || null;
   const setPage = (name, page) => setView(name, "page", page && Object.keys(page).length > 0 ? structuredClone(page) : null);
+  // The protection of the sheet (`sheet-protect.js`): the engine's `protect` JSON, null for none.
+  const protectOf = (name) => bySheet[name]?.protect || null;
+  const setProtect = (name, protect) => setView(name, "protect", protect ? structuredClone(protect) : null);
+  // Rows and columns whose own format is unlocked, as runs.
+  const unlockedOf = (name, axis) => bySheet[name]?.[axis === "row" ? "unlockedRows" : "unlockedCols"] || [];
+  const setUnlocked = (name, axis, runs) => setView(name, axis === "row" ? "unlockedRows" : "unlockedCols", runs.map((r) => [r[0], r[1]]));
   const setOutline = (name, outline) => setView(name, "outline", outline && Object.keys(outline).length > 0 ? outline : null);
 
   // ---- how a row or column edit moves a position (the engine moves the formulas) -----------------
@@ -450,6 +468,10 @@
     setOutline,
     pageOf,
     setPage,
+    protectOf,
+    setProtect,
+    unlockedOf,
+    setUnlocked,
     getAll,
     replaceAll,
     setSheet,

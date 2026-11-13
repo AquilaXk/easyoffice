@@ -101,7 +101,10 @@
       for (const { id, edits } of plan) {
         const { sheet, ref } = splitId(id, options.workbook, active);
         const entry = candidate[sheet]?.[ref];
-        if (entry && editEntry(entry, edits, options.formula)) replaced += edits.length;
+        // A locked cell of a protected sheet is left as it is (PD-216).
+        const at = gridUtils.parseRef(ref);
+        const editable = !at || host.__EASYOFFICE_SHEET_PROTECT__?.cellEditable(sheet, at.row, at.col, entry?.style) !== false;
+        if (entry && editable && editEntry(entry, edits, options.formula)) replaced += edits.length;
         else skipped += edits.length;
       }
       if (replaced === 0) return { replaced, skipped };

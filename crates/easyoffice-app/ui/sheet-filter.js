@@ -319,7 +319,17 @@
       return range;
     }
 
+    // A protected sheet keeps its filter as it is: turning one on or off needs the sheet unprotected, and using an
+    // existing one needs 자동 필터 사용 (PD-216). True when the change is refused (the status line says so).
+    function blocked(create) {
+      const guard = host.__EASYOFFICE_SHEET_PROTECT__;
+      const name = getActiveSheetName();
+      if (!guard || !guard.isOn(name)) return false;
+      return !(create ? guard.guardUnprotected(name) : guard.guardAction(name, "autoFilter"));
+    }
+
     function toggle() {
+      if (blocked(true)) return Promise.resolve(false);
       return change(async (name) => {
         if (filterOf(name)) {
           layoutApi.setFilter(name, null);
@@ -349,6 +359,7 @@
 
     // Sets (or with null removes) the condition of column `col` and applies the filter.
     function setCriteria(col, criteria) {
+      if (blocked(false)) return Promise.resolve(false);
       return change(async (name) => {
         const filter = filterOf(name);
         if (!filter) return false;
@@ -360,6 +371,7 @@
     }
 
     function clearAll() {
+      if (blocked(false)) return Promise.resolve(false);
       return change(async (name) => {
         const filter = filterOf(name);
         if (!filter || (filter.columns.length === 0 && filter.hidden.length === 0)) {
@@ -377,6 +389,7 @@
 
     // Re-applies the conditions to the cells as they are now. No undo step (the reference's rule).
     function reapply() {
+      if (blocked(false)) return Promise.resolve(false);
       return enqueueWorkspaceHistoryOp(async () => {
         await drainInFlightSheetWork();
         const name = syncCells();

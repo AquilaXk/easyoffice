@@ -100,6 +100,8 @@
       return enqueueWorkspaceHistoryOp(async () => {
         await drainInFlightSheetWork();
         const sheet = getActiveSheetName();
+        // Conditional formatting and validation are formats of the cells (PD-216).
+        if (host.__EASYOFFICE_SHEET_PROTECT__?.guardAction(sheet, "formatCells") === false) return false;
         const next = structuredClone(rules.get(sheet));
         mutate(next);
         pushRawUndoSnapshot(captureWorkspaceSnapshot(false));
@@ -502,7 +504,11 @@
       renderCfList();
     }
 
+    // The two dialogs change formats of the cells, so a protected sheet opens neither without 셀 서식 (PD-216).
+    const rulesBlocked = () => host.__EASYOFFICE_SHEET_PROTECT__?.guardAction(getActiveSheetName(), "formatCells") === false;
+
     function openConditionalFormatDialog() {
+      if (rulesBlocked()) return;
       ensureCfControls();
       cf.selected = -1;
       defaultCfForm();
@@ -616,6 +622,7 @@
     }
 
     function openDataValidationDialog() {
+      if (rulesBlocked()) return;
       ensureDvControls();
       const sheet = getActiveSheetName();
       const r = getRange();

@@ -442,6 +442,7 @@
             await syncSessionOnce(sheetsMap);
             const answer = await sessionCall({ ...request, sessionAction: action, session: session.id });
             if (answer?.refused === "structure") return { ok: false, reason: "structure" };
+            if (answer?.refused === "protected") return { ok: false, reason: "protected" };
             if (answer?.refused) {
               resetSession();
               session.refusedKey = sheetSetKey(names);

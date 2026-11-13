@@ -295,7 +295,7 @@
   // shows after opening and is written again by the next save; styled blank cells are kept too.
   // The position-bound parts of a sheet in an open answer: merges, hidden rows and columns, the filter
   // (PD-194, PD-198) and the view (PD-208).
-  const LAYOUT_KEYS = ["merges", "hiddenRows", "hiddenCols", "filter", "freeze", "tabColor", "hidden", "outline", "page"];
+  const LAYOUT_KEYS = ["merges", "hiddenRows", "hiddenCols", "filter", "freeze", "tabColor", "hidden", "outline", "page", "protect", "unlockedRows", "unlockedCols"];
 
   function buildSheetStore(sheets) {
     const codec = host.__EASYOFFICE_SHEET_STYLE_CODEC__;
@@ -426,6 +426,10 @@
         next.sheetRules = rulesBySheet;
         host.__EASYOFFICE_SHEET_NAMES__.replaceAll(res.names, true);
         next.definedNames = host.__EASYOFFICE_SHEET_NAMES__.getAll();
+        // The workbook's protection is the file's own; the ranges a password opened in this window are forgotten (PD-216).
+        host.__EASYOFFICE_SHEET_PROTECT__.setWorkbook(res.workbookProtect ?? null);
+        host.__EASYOFFICE_SHEET_PROTECT__.forgetUnlocked();
+        next.workbookProtect = host.__EASYOFFICE_SHEET_PROTECT__.getWorkbook();
         const evaluated = await computeEvaluatedSheetStore(store, first, null);
         next.sheets = evaluated.sheets;
         next.sheetRowCounts = rowCounts;

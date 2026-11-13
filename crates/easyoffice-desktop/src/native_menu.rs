@@ -595,6 +595,13 @@ pub const ITEMS: &[MenuItemSpec] = &[
     sa!("sheet:tab-unhide", "시트 숨기기 취소…", "tab-unhide"),
     sa!("sheet:name-define", "이름 정의…", "name-define"),
     sa!("sheet:name-manage", "이름 관리…", "name-manage"),
+    sa!("sheet:protect", "시트 보호", "sheet-protect"),
+    sa!(
+        "sheet:protect-workbook",
+        "통합 문서 보호",
+        "workbook-protect"
+    ),
+    sa!("sheet:protect-ranges", "범위 편집 허용", "range-allow"),
     sa! { "sheet:name-create", "선택 영역에서 이름 만들기…", "name-create" },
     sa!("sheet:page-setup", "쪽 설정…", "page-setup"),
     sa!("sheet:print-area-set", "인쇄 영역 설정", "print-area-set"),

@@ -444,7 +444,7 @@ fn hostile_ods_keys_never_open() {
     .is_err());
 }
 
-/// The attributes of three files that a spreadsheet program wrote (the test data of Apache POI, Apache-2.0:
+/// The attributes of three files that a spreadsheet program wrote (the test data of an open-source library, Apache-2.0, see THIRD_PARTY_NOTICES.md:
 /// `workbookProtection-sheet_password-2013.xlsx` with the password `pwd`, `workbookProtection-workbook_password-2013.xlsx`
 /// and `workbookProtection-workbook_password_user_range-2010.xlsx` with `test`): the agile digest and the legacy hash
 /// computed by this program match what the program wrote.

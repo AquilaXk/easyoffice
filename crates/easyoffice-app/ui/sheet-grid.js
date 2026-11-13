@@ -405,6 +405,10 @@
       td.style.textDecoration = st?.textDecoration || "";
       td.style.fontSize = st?.fontSize || "";
       td._st = st;
+      // A locked cell of a protected sheet cannot be typed into (PD-216).
+      const guard = host.__EASYOFFICE_SHEET_PROTECT__;
+      const editable = !guard || guard.cellEditable(getSheetName(), td._row, td._col, st);
+      if ((td.getAttribute("contenteditable") === "true") !== editable) td.setAttribute("contenteditable", editable ? "true" : "false");
       if (lookApi) {
         const m = layoutApi?.mergeAt(getSheetName(), td._row, td._col);
         lookApi.paintTd(td, st, td._row, td._col, borderAt, m && m.r1 === td._row && m.c1 === td._col ? m : null);

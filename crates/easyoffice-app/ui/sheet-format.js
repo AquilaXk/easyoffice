@@ -85,6 +85,9 @@
     if (style.wrap) out.wrap = true;
     const border = look.freezeBorder(style.border);
     if (border) out.bd = { ...border };
+    if (style.unlocked) out.unlocked = true;
+    if (style.locked) out.locked = true;
+    if (style.hideFormula) out.hideFormula = true;
     const mask = entryMask({ style });
     if (mask & 1) out.bold = true;
     if (mask & 2) out.italic = true;
@@ -114,6 +117,9 @@
     if (payload.wrap === true) style.wrap = true;
     const border = look.freezeBorder(payload.bd);
     if (border) style.border = border;
+    if (payload.unlocked === true) style.unlocked = true;
+    else if (payload.locked === true) style.locked = true;
+    if (payload.hideFormula === true) style.hideFormula = true;
     return Object.values(style).some(Boolean) ? internStyle(style) : null;
   }
 
@@ -177,6 +183,14 @@
     } = api;
     const numfmt = host.__EASYOFFICE_SHEET_NUMFMT__;
     let stateTimer = null;
+
+    // A protected sheet refuses a change of format unless it allows 셀 서식; the lock state of a cell changes only on
+    // a sheet that is not protected (PD-216). True when the change is refused (the status line says so).
+    function formatBlocked(lock) {
+      const guard = host.__EASYOFFICE_SHEET_PROTECT__;
+      if (!guard) return false;
+      return !(lock ? guard.guardUnprotected(getActiveSheetName()) : guard.guardAction(getActiveSheetName(), "formatCells"));
+    }
 
     // The selected range, clamped to the used extent when it is too large to materialize.
     function effectiveRange() {
@@ -313,6 +327,7 @@
     function formatNumbers(resolve, label) {
       return enqueueWorkspaceHistoryOp(async () => {
         await drainInFlightSheetWork();
+        if (formatBlocked(false)) return { count: 0 };
         pushRawUndoSnapshot(captureWorkspaceSnapshot(false));
         const result = applyNumFmtToModel(resolve);
         refreshFocusedSheetCellPendingSnapshot?.();
@@ -324,9 +339,10 @@
 
     // One undoable operation over the styles of the selection (PD-207): `edit({ map, rg, patch })` writes
     // through `patch(ref, mutate)` and answers the number of cells it changed (or a refusal note).
-    function editStyles(label, edit) {
+    function editStyles(label, edit, lock = false) {
       return enqueueWorkspaceHistoryOp(async () => {
         await drainInFlightSheetWork();
+        if (formatBlocked(lock)) return 0;
         pushRawUndoSnapshot(captureWorkspaceSnapshot(false));
         const curSheet = getActiveSheetName();
         const map = snapshotDomSheetCells();
@@ -353,7 +369,9 @@
     function applyCommand(cmdId) {
       const kind = COMMANDS[cmdId];
       if (!kind) return false;
-      applyToModel(kind);
+      // The ribbon sets its own status line after the effect, so the refusal is said again once that is done.
+      if (formatBlocked(false)) host.setTimeout?.(() => host.__EASYOFFICE_SHEET_PROTECT__.say(host.__EASYOFFICE_SHEET_PROTECT__.BLOCKED), 0);
+      else applyToModel(kind);
       return true;
     }
 
@@ -361,6 +379,7 @@
     function formatRange(kind, value) {
       return enqueueWorkspaceHistoryOp(async () => {
         await drainInFlightSheetWork();
+        if (formatBlocked(false)) return 0;
         pushRawUndoSnapshot(captureWorkspaceSnapshot(false));
         const count = applyToModel(kind, value);
         refreshFocusedSheetCellPendingSnapshot?.();

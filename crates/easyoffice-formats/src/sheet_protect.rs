@@ -609,9 +609,7 @@ mod tests {
         assert_eq!(sha1_utf16.verify("abc"), PasswordCheck::Accepted);
         let other = Credential::Odf(OdfKey {
             key: "AAAA".to_string(),
-            algorithm: Some(
-                "http://docs.oasis-open.org/office/ns/table/legacy-hash-excel".to_string(),
-            ),
+            algorithm: Some("urn:unknown-digest".to_string()),
         });
         assert_eq!(
             other.verify("abc"),

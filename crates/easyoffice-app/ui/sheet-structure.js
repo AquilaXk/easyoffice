@@ -16,8 +16,11 @@
   const FAILURES = {
     limit: "시트가 커서 실행할 수 없음",
     structure: "바뀌는 수식이 너무 많음",
+    protected: "변경하려는 셀 또는 차트가 보호된 시트에 있습니다.",
     error: "실행하지 못함",
   };
+  // The protection flag a row or column edit needs (PD-216).
+  const EDIT_FLAGS = { "row:insert": "insertRows", "row:delete": "deleteRows", "col:insert": "insertColumns", "col:delete": "deleteColumns" };
 
   function createSheetStructure(deps) {
     const {
@@ -46,6 +49,7 @@
       captureWorkspaceSnapshot,
     } = deps;
     const rulesApi = host.__EASYOFFICE_SHEET_RULES__;
+    const protectApi = host.__EASYOFFICE_SHEET_PROTECT__;
     const menu = () => document.getElementById("sheet-header-menu");
     // The auto filter (PD-198) shares this module's menu wiring and undo steps.
     const filter = host.__EASYOFFICE_CREATE_SHEET_FILTER__({ ...deps, sheetDataStore, sheetStoreHelpers });
@@ -71,6 +75,10 @@
 
     // The name box and the defined names dialogs (PD-214).
     const namesUi = host.__EASYOFFICE_CREATE_SHEET_NAMES_UI__({ ...deps, kit: host.__EASYOFFICE_CREATE_SHEET_DIALOG_KIT__(document) });
+
+    // Sheet and workbook protection and the ranges a protected sheet allows (PD-216).
+    const protectUi = host.__EASYOFFICE_CREATE_SHEET_PROTECT_UI__(deps);
+    const rangesUi = host.__EASYOFFICE_CREATE_SHEET_PROTECT_RANGES__({ ...deps, ui: protectUi });
 
     // Sheet tabs (PD-209): insert, delete, rename, copy, move, hide and show again.
     const tabUi = host.__EASYOFFICE_CREATE_SHEET_TAB_UI__({ document, kit: host.__EASYOFFICE_CREATE_SHEET_DIALOG_KIT__(document), getTabs: () => tabs, say });
@@ -107,6 +115,9 @@
         filter: json.filter || null,
         outline: json.outline,
         page: json.page,
+        protect: json.protect || null,
+        unlockedRows: json.unlockedRows || [],
+        unlockedCols: json.unlockedCols || [],
         widths: pairsOf(grid.getAllWidths()[name]),
         rules,
       };
@@ -145,6 +156,24 @@
       }
     }
 
+    // Whether the sheet's protection lets the rows or columns be inserted or deleted: the flag, and for a
+    // deletion that no locked cell with content goes with them (PD-216).
+    function editAllowed(name, axis, op, at, count) {
+      if (!protectApi.guardAction(name, EDIT_FLAGS[axis + ":" + op])) return false;
+      if (op !== "delete" || !protectApi.isOn(name)) return true;
+      const map = sheetDataStore[name] || {};
+      for (const ref of Object.keys(map)) {
+        const p = grid.parseRef(ref);
+        const index = p && (axis === "row" ? p.row : p.col);
+        const entry = map[ref];
+        if (index >= at && index < at + count && (entry.value || entry.formula) && !protectApi.cellEditable(name, p.row, p.col, entry.style)) {
+          protectApi.say(protectApi.BLOCKED);
+          return false;
+        }
+      }
+      return true;
+    }
+
     function editAxis(axis, op, at, count) {
       const unit = axis === "row" ? "행" : "열";
       const limit = axis === "row" ? MAX_ROWS_PER_EDIT : MAX_COLS_PER_EDIT;
@@ -157,6 +186,7 @@
         commitIfEditing();
         const name = getActiveSheetName();
         sheetDataStore[name] = snapshotDomSheetCells();
+        if (protectApi && !editAllowed(name, axis, op, at, count)) return false;
         const before = captureWorkspaceSnapshot(false);
         const edit = { axis, op, at, count };
         const result = await sheetStoreHelpers.editAxis(sheetDataStore, { sheet: name, ...edit, ...layoutRequest(name) });
@@ -188,6 +218,7 @@
       return enqueueWorkspaceHistoryOp(async () => {
         await drainInFlightSheetWork();
         commitIfEditing();
+        if (protectApi && !protectApi.guardAction(name, axis === "row" ? "formatRows" : "formatColumns")) return false;
         pushRawUndoSnapshot(captureWorkspaceSnapshot(false));
         layoutApi.setHidden(name, axis, first, last, hidden);
         grid.layoutChanged();
@@ -214,6 +245,7 @@
         const name = getActiveSheetName();
         const map = snapshotDomSheetCells();
         sheetDataStore[name] = map;
+        if (protectApi && !(protectApi.guardAction(name, "formatCells") && protectApi.guardCells(name, rg, (r, c) => map[grid.refOf(r, c)]?.style))) return false;
         pushRawUndoSnapshot(captureWorkspaceSnapshot(false));
         const parse = grid.parseRef;
         for (const ref of Object.keys(map)) {
@@ -242,6 +274,7 @@
       return enqueueWorkspaceHistoryOp(async () => {
         await drainInFlightSheetWork();
         commitIfEditing();
+        if (protectApi && !protectApi.guardAction(name, "formatCells")) return false;
         pushRawUndoSnapshot(captureWorkspaceSnapshot(false));
         layoutApi.removeMerges(name, rg.r1, rg.c1, rg.r2, rg.c2);
         grid.layoutChanged();
@@ -296,6 +329,8 @@
       ...view.actions,
       ...pageUi.actions,
       ...namesUi.actions,
+      ...protectUi.actions,
+      ...rangesUi.actions,
       "tab-add": () => tabs.insert(null),
       ...tabs.actions,
       "sort-dialog": () => Promise.resolve(sortUi.open()),
@@ -414,6 +449,8 @@
       outlineUi.bind();
       pageUi.bind();
       namesUi.bind();
+      protectUi.bind();
+      rangesUi.bind();
       const viewport = document.getElementById("sheet-viewport");
       viewport?.addEventListener("dblclick", onDblClick);
       viewport?.addEventListener("contextmenu", onContextMenu);
@@ -440,6 +477,7 @@
 
     // What follows the active sheet: the filter menu's check, and the outline bars.
     function refreshSheetChrome() {
+      protectUi.refreshMenu();
       filterUi.refreshMenu();
       outlineUi.render();
     }
