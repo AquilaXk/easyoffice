@@ -59,7 +59,7 @@ const CHARACTER_ICONS = ["icon-ctrl-mark", "icon-para-mark"];
 test("the toolbars are the reference toolbar format: the icon above a label, on the reference sprite", async () => {
   const { document } = await createWorkspaceHarness({ search: "?module=SHEET&win=w-sheet-toolbar" });
   const buttons = [...document.querySelectorAll(TOOLBAR_BUTTONS)];
-  assert.equal(buttons.length, 19 + 12 + 8 + 2, "document groups, sheet groups, slide row, PDF row");
+  assert.equal(buttons.length, 20 + 12 + 8 + 2, "document groups, sheet groups, slide row, PDF row");
   const css = read("toolbar.css");
   for (const button of buttons) {
     const name = button.getAttribute("title");
