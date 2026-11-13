@@ -15,6 +15,7 @@
 mod graph;
 mod id_set;
 mod interval;
+mod names;
 mod rule_session;
 mod structure;
 pub use rule_session::RuleUpdates;
@@ -24,6 +25,8 @@ mod tests;
 mod tests_axis;
 #[cfg(test)]
 mod tests_bench;
+#[cfg(test)]
+mod tests_names;
 
 use crate::dag::is_formula;
 use crate::{
@@ -252,9 +255,7 @@ impl RecalcSession {
             raw_bytes: self.raw_bytes,
             edges: self.graph.edge_count(),
             graph_bytes: self.graph.heap_bytes_estimate(),
-            ast_bytes: self
-                .formula_bytes
-                .saturating_mul(AST_BYTES_PER_FORMULA_BYTE),
+            ast_bytes: self.ast_bytes(),
             rule_bytes: self
                 .rules
                 .values()
@@ -263,11 +264,16 @@ impl RecalcSession {
         }
     }
 
+    /// Estimated heap bytes of the syntax trees, with what the defined names add.
+    fn ast_bytes(&self) -> usize {
+        self.formula_bytes
+            .saturating_mul(AST_BYTES_PER_FORMULA_BYTE)
+            .saturating_add(self.name_ast_bytes())
+    }
+
     fn exceeds_budget(&self) -> bool {
         let graph_bytes = self.graph.heap_bytes_estimate();
-        let ast_bytes = self
-            .formula_bytes
-            .saturating_mul(AST_BYTES_PER_FORMULA_BYTE);
+        let ast_bytes = self.ast_bytes();
         self.graph.edge_count() > self.budget.max_edges
             || graph_bytes > self.budget.max_graph_bytes
             || self

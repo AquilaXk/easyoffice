@@ -46,6 +46,8 @@ pub struct AxisEditReport {
     pub rewritten: Vec<(usize, PackedCellCoordinate)>,
     /// Cells of the edited sheet that a deletion removed.
     pub removed_cells: usize,
+    /// The defined names' references moved too (read them with `WorkbookEngine::names`).
+    pub names_changed: bool,
 }
 
 impl SheetEngine {
@@ -55,6 +57,8 @@ impl SheetEngine {
         let cells = std::mem::take(&mut self.cells);
         let mut asts = std::mem::take(&mut self.compiled_asts);
         let mut subtotals = std::mem::take(&mut self.subtotal_coords);
+        let mut name_uses = std::mem::take(&mut self.name_uses);
+        self.name_nodes = 0;
         self.dense_numbers.clear();
         self.invalidate_caches();
         let mut removed = 0;
@@ -69,6 +73,10 @@ impl SheetEngine {
             }
             if subtotals.remove(&coord) {
                 self.subtotal_coords.insert(moved);
+            }
+            if let Some(uses) = name_uses.remove(&coord) {
+                self.name_nodes += uses.nodes as usize;
+                self.name_uses.insert(moved, uses);
             }
             self.cells.insert(moved, raw);
         }
@@ -138,9 +146,16 @@ impl WorkbookEngine {
             self.sheets_mut()[si].set_cell_coord(at, new);
             rewritten.push((si, at));
         }
+        let first_sheet = self.sheets()[0].name.clone();
+        let moved_names = super::shift_names(self.names(), &first_sheet, &target_name, &edit);
+        let names_changed = moved_names.is_some();
+        if let Some(defs) = moved_names {
+            self.set_names_lenient(&defs);
+        }
         Ok(AxisEditReport {
             rewritten,
             removed_cells,
+            names_changed,
         })
     }
 }

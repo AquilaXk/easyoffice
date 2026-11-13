@@ -21,6 +21,7 @@ mod apply;
 mod filter;
 mod formula;
 mod layout;
+mod names;
 mod outline;
 mod sheet_ref;
 
@@ -28,6 +29,7 @@ pub use apply::{AxisBudget, AxisEditReport};
 pub use filter::{shift_filter, FilterShift};
 pub use formula::rewrite_formula_refs;
 pub use layout::{shift_boxes, shift_runs, shift_widths};
+pub use names::{follow_sheet_change_names, shift_names};
 pub use outline::{shift_levels, shift_outline};
 pub use sheet_ref::{quote_sheet_name, rewrite_sheet_names, SheetChange};
 

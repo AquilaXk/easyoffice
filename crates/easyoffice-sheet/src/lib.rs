@@ -1,11 +1,12 @@
 use easyoffice_formats::EasyOfficeError;
 use std::collections::{HashMap, HashSet};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 mod agg_stream;
 pub mod axis;
 mod byte_width;
 pub mod coercion;
+mod compile;
 mod criteria;
 mod dag;
 pub mod filter;
@@ -42,6 +43,9 @@ mod functions_trend;
 #[cfg(test)]
 mod functions_unit_tests;
 mod memo;
+pub mod names;
+#[cfg(test)]
+mod names_tests;
 mod parser;
 mod recalc;
 mod rules;
@@ -54,14 +58,15 @@ pub mod types;
 pub mod workbook;
 
 pub use axis::{
-    quote_sheet_name, rewrite_sheet_names, shift_boxes, shift_filter, shift_levels, shift_outline,
-    shift_runs, shift_widths, Axis, AxisBudget, AxisEdit, AxisEditReport, EditKind, FilterShift,
-    SheetChange,
+    follow_sheet_change_names, quote_sheet_name, rewrite_sheet_names, shift_boxes, shift_filter,
+    shift_levels, shift_names, shift_outline, shift_runs, shift_widths, Axis, AxisBudget, AxisEdit,
+    AxisEditReport, EditKind, FilterShift, SheetChange,
 };
 pub use coercion::*;
 pub use functions::*;
 pub use functions_complex::{format_complex, parse_complex};
 pub use memo::{CellMap, CoordHasher, FastMap, MemoTable};
+pub use names::{validate_names, NameIssue, NameTable};
 pub use parser::{compile_formula_expr, BinaryOp, Expr};
 pub use recalc::{
     Budget, CellChange, ChangedCell, Footprint, RecalcError, RecalcOutcome, RecalcSession,
@@ -147,6 +152,13 @@ pub struct SheetEngine {
     pub(crate) formula_index: OnceLock<dag::FormulaIndex>,
     /// Cached per-column index of all populated cells for sparse range queries; dropped on edit.
     pub(crate) cell_index: OnceLock<dag::CellIndex>,
+    /// The workbook's defined names, shared by its sheets (PD-214).
+    pub(crate) names: Arc<NameTable>,
+    /// The formulas that use a defined name, with the names (hashes) they use, so a change of a
+    /// definition compiles only those again.
+    pub(crate) name_uses: CellMap<compile::NameUse>,
+    /// Syntax nodes the formulas in `name_uses` hold after their names are expanded.
+    pub(crate) name_nodes: usize,
 }
 
 impl SheetEngine {
@@ -175,6 +187,9 @@ impl SheetEngine {
             plan: OnceLock::new(),
             formula_index: OnceLock::new(),
             cell_index: OnceLock::new(),
+            names: Arc::default(),
+            name_uses: CellMap::default(),
+            name_nodes: 0,
         }
     }
 
@@ -222,30 +237,6 @@ impl SheetEngine {
             self.sheet_id
         } else {
             compute_sheet_id(&self.name)
-        }
-    }
-
-    fn compile_cell_entry(raw: &str) -> Option<Result<Expr, FormulaError>> {
-        let trimmed = raw.trim();
-        if let Some(formula_body) = crate::parser::strip_formula_prefix(trimmed) {
-            let expr_src = formula_body.trim();
-            if expr_src.is_empty() {
-                None
-            } else {
-                Some(compile_formula_expr(expr_src))
-            }
-        } else if crate::coercion::is_valid_decimal_syntax(trimmed) {
-            if let Some(num) = crate::coercion::parse_strict_number(trimmed) {
-                Some(Ok(Expr::Number(num)))
-            } else {
-                Some(Err(FormulaError::Num))
-            }
-        } else if trimmed.eq_ignore_ascii_case("TRUE") {
-            Some(Ok(Expr::Boolean(true)))
-        } else if trimmed.eq_ignore_ascii_case("FALSE") {
-            Some(Ok(Expr::Boolean(false)))
-        } else {
-            None
         }
     }
 
@@ -315,11 +306,13 @@ impl SheetEngine {
             self.cells.remove(&coord);
             self.compiled_asts.remove(&coord);
             self.subtotal_coords.remove(&coord);
+            self.set_name_uses(coord, None);
             self.update_dense_number(coord, None);
         } else {
-            let compiled = Self::compile_cell_entry(&val);
-            self.update_dense_number(coord, compiled.as_ref());
-            if let Some(comp) = compiled {
+            let compile::Compiled { entry, uses } = self.compile_cell_entry(&val);
+            self.set_name_uses(coord, uses);
+            self.update_dense_number(coord, entry.as_ref());
+            if let Some(comp) = entry {
                 if matches!(comp, Ok(ref expr) if expr_contains_subtotal(expr)) {
                     self.subtotal_coords.insert(coord);
                 } else {
@@ -338,6 +331,7 @@ impl SheetEngine {
     pub(crate) fn set_coord_number(&mut self, coord: PackedCellCoordinate, num: f64) {
         self.invalidate_caches();
         let comp = Ok(Expr::Number(num));
+        self.set_name_uses(coord, None);
         self.update_dense_number(coord, Some(&comp));
         self.compiled_asts.insert(coord, comp);
         self.subtotal_coords.remove(&coord);
@@ -352,14 +346,17 @@ impl SheetEngine {
         self.compiled_asts.clear();
         self.subtotal_coords.clear();
         self.dense_numbers.clear();
-        let coords_and_compiled: Vec<(PackedCellCoordinate, Option<Result<Expr, FormulaError>>)> =
-            self.cells
-                .iter()
-                .map(|(&coord, raw)| (coord, Self::compile_cell_entry(raw)))
-                .collect();
-        for (coord, compiled) in coords_and_compiled {
-            self.update_dense_number(coord, compiled.as_ref());
-            if let Some(comp) = compiled {
+        self.name_uses.clear();
+        self.name_nodes = 0;
+        let compiled: Vec<(PackedCellCoordinate, compile::Compiled)> = self
+            .cells
+            .iter()
+            .map(|(&coord, raw)| (coord, self.compile_cell_entry(raw)))
+            .collect();
+        for (coord, compile::Compiled { entry, uses }) in compiled {
+            self.set_name_uses(coord, uses);
+            self.update_dense_number(coord, entry.as_ref());
+            if let Some(comp) = entry {
                 if matches!(comp, Ok(ref expr) if expr_contains_subtotal(expr)) {
                     self.subtotal_coords.insert(coord);
                 }
@@ -608,9 +605,10 @@ impl SheetEngine {
             if expr_src.is_empty() {
                 return EvaluatedCellValue::Empty;
             }
-            match compile_formula_expr(expr_src) {
-                Ok(expr) => self.eval_expr_ctx(&expr, ctx, depth),
-                Err(e) => EvaluatedCellValue::Error(e),
+            match self.compile_formula(expr_src).entry {
+                Some(Ok(expr)) => self.eval_expr_ctx(&expr, ctx, depth),
+                Some(Err(e)) => EvaluatedCellValue::Error(e),
+                None => EvaluatedCellValue::Empty,
             }
         } else if crate::coercion::is_valid_decimal_syntax(trimmed) {
             if let Some(num) = crate::coercion::parse_strict_number(trimmed) {
@@ -662,6 +660,7 @@ impl SheetEngine {
             }
             Expr::Boolean(b) => EvaluatedCellValue::Boolean(*b),
             Expr::ErrorLiteral(e) => EvaluatedCellValue::Error(*e),
+            Expr::Name { .. } => EvaluatedCellValue::Error(FormulaError::Name),
             Expr::Cell(coord) => self.eval_coord_ctx(*coord, ctx, depth),
             Expr::SheetCell { sheet, coord } => {
                 self.eval_sheet_coord(Some(sheet), *coord, ctx, depth)

@@ -429,6 +429,7 @@ impl<'x> DepScanner<'x> {
                 | Expr::Text(_)
                 | Expr::Boolean(_)
                 | Expr::ErrorLiteral(_)
+                | Expr::Name { .. }
                 | Expr::Missing => {}
             }
         }

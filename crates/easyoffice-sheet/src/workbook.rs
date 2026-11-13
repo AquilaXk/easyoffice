@@ -1,20 +1,103 @@
+use crate::names::NameTable;
 use crate::{
     CellRange, EvalContext, EvaluatedCellValue, FormulaError, PackedCellCoordinate,
     PivotAggregation, PivotTableSummary, SheetEngine,
 };
-use easyoffice_formats::EasyOfficeError;
+use easyoffice_formats::{DefinedName, EasyOfficeError, MAX_NAMES};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Multi-sheet workbook engine supporting cross-sheet references (`=Sheet2!A1`, `=SUM(Sheet2!A1:A3)`)
 /// and cross-sheet cycle detection.
 #[derive(Debug, Clone, Default)]
 pub struct WorkbookEngine {
     sheets: Vec<SheetEngine>,
+    names: Arc<NameTable>,
+}
+
+/// A change of the defined names worked out but not applied: the new table and the formulas
+/// (sheet index, cell) that use a name whose meaning changes and so compile again.
+pub(crate) struct NamesPlan {
+    table: Arc<NameTable>,
+    pub(crate) affected: Vec<(usize, PackedCellCoordinate)>,
 }
 
 impl WorkbookEngine {
     pub fn new() -> Self {
-        Self { sheets: Vec::new() }
+        Self {
+            sheets: Vec::new(),
+            names: Arc::default(),
+        }
+    }
+
+    /// The defined names, in the order they were set (PD-214).
+    pub fn names(&self) -> &[DefinedName] {
+        self.names.definitions()
+    }
+
+    /// Bytes of text the defined names hold.
+    pub(crate) fn name_text_bytes(&self) -> usize {
+        self.names.text_bytes()
+    }
+
+    /// Replaces the defined names. Fails, changing nothing, when one is not valid: a name that breaks
+    /// the syntax, is a function or sheet name, repeats another name of the same scope, a scope that
+    /// is no sheet, a definition that does not read as a formula or leads back to itself, too many
+    /// names or too deep a chain. The formulas that use a changed name are compiled again.
+    pub fn set_names(&mut self, defs: &[DefinedName]) -> Result<(), EasyOfficeError> {
+        let plan = self.plan_names(defs, true)?;
+        self.commit_names(plan);
+        Ok(())
+    }
+
+    /// [`set_names`](Self::set_names) for names read from a file: a definition that is not valid is
+    /// left out (a bad name, a repeated one, an unknown scope) or kept reading as an error, and names
+    /// past [`MAX_NAMES`] are dropped. Returns how many were dropped.
+    pub fn set_names_lenient(&mut self, defs: &[DefinedName]) -> usize {
+        let kept = defs.len().min(MAX_NAMES);
+        let plan = self
+            .plan_names(&defs[..kept], false)
+            .expect("a lenient plan does not fail");
+        self.commit_names(plan);
+        defs.len() - kept
+    }
+
+    pub(crate) fn plan_names(
+        &self,
+        defs: &[DefinedName],
+        strict: bool,
+    ) -> Result<NamesPlan, EasyOfficeError> {
+        let sheet_names: Vec<&str> = self.sheets.iter().map(|s| s.name.as_str()).collect();
+        if strict {
+            crate::names::validate_names(defs, &sheet_names)?;
+        }
+        let built = NameTable::build(defs, &sheet_names);
+        let table = Arc::new(built.table);
+        let changed = self.names.changed_keys(&table);
+        let mut affected = Vec::new();
+        if !changed.is_empty() {
+            for (si, sheet) in self.sheets.iter().enumerate() {
+                affected.extend(
+                    sheet
+                        .name_uses
+                        .iter()
+                        .filter(|(_, u)| u.keys.iter().any(|k| changed.contains(k)))
+                        .map(|(&coord, _)| (si, coord)),
+                );
+            }
+            affected.sort_unstable();
+        }
+        Ok(NamesPlan { table, affected })
+    }
+
+    pub(crate) fn commit_names(&mut self, plan: NamesPlan) {
+        self.names = plan.table;
+        for sheet in &mut self.sheets {
+            sheet.names = Arc::clone(&self.names);
+        }
+        for &(si, coord) in &plan.affected {
+            self.sheets[si].recompile_cell(coord);
+        }
     }
 
     pub fn unquote_formula_sheet_token(s: &str) -> Option<String> {
@@ -87,7 +170,13 @@ impl WorkbookEngine {
             }
         }
         engine.has_workbook_assigned_id = true;
+        engine.names = Arc::clone(&self.names);
         self.sheets.push(engine);
+        if !self.names.is_empty() {
+            // A name may be scoped to the sheet that is new, or be the new sheet's name.
+            let defs = self.names.definitions().to_vec();
+            self.set_names_lenient(&defs);
+        }
         self.sheets.last_mut().unwrap()
     }
 

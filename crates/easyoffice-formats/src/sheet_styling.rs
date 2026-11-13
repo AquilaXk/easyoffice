@@ -22,6 +22,8 @@ pub(crate) mod ods_view;
 pub(crate) mod sheet_filter;
 #[path = "sheet_look.rs"]
 pub(crate) mod sheet_look;
+#[path = "sheet_names.rs"]
+pub(crate) mod sheet_names;
 #[path = "sheet_numfmt.rs"]
 pub(crate) mod sheet_numfmt;
 #[path = "sheet_page.rs"]
@@ -47,6 +49,7 @@ pub use sheet_filter::*;
 pub use sheet_look::{
     parse_hex_rgb, BorderEdge, BorderLine, CellBorders, HAlign, VAlign, BORDER_DEFAULT_RGB,
 };
+pub use sheet_names::*;
 pub use sheet_numfmt::*;
 pub use sheet_page::*;
 pub use sheet_rules::*;
@@ -266,6 +269,11 @@ pub struct SheetStyling {
     pub outline: Outline,
     /// Paper, margins, scale, print area and repeated rows and columns for printing (PD-213).
     pub page: SheetPage,
+    /// The defined names of the workbook (PD-214), carried by the first sheet like the number format
+    /// count; the other sheets keep it empty.
+    pub defined_names: Vec<DefinedName>,
+    /// Names a reader left out because the workbook had more than [`MAX_NAMES`] (PD-214).
+    pub names_rejected: u32,
 }
 
 impl SheetStyling {
@@ -291,6 +299,7 @@ impl SheetStyling {
             && !self.hidden
             && self.outline.is_empty()
             && self.page.is_default()
+            && self.defined_names.is_empty()
     }
 
     /// Whether the frozen pane, the tab colour, the groups and the page setup are within the bounds of a sheet that

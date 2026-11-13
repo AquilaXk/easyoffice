@@ -43,6 +43,12 @@ pub enum Expr {
         sheet: String,
         range: CellRange,
     },
+    /// A defined name (PD-214), optionally written with its sheet (`Sheet1!Rate`). A formula compiled
+    /// in a workbook has these replaced by the definitions; one that is still here reads `#NAME?`.
+    Name {
+        scope: Option<String>,
+        name: String,
+    },
     UnaryPlus(Box<Expr>),
     UnaryMinus(Box<Expr>),
     PostfixPercent(Box<Expr>),
@@ -547,11 +553,17 @@ pub(crate) fn tokenize_formula(raw_src: &str) -> Result<Vec<Token>, FormulaError
 pub(crate) struct Parser {
     pub(crate) tokens: Vec<Token>,
     pub(crate) pos: usize,
+    /// A defined name was read (see [`Expr::Name`]).
+    pub(crate) saw_name: bool,
 }
 
 impl Parser {
     pub(crate) fn new(tokens: Vec<Token>) -> Self {
-        Self { tokens, pos: 0 }
+        Self {
+            tokens,
+            pos: 0,
+            saw_name: false,
+        }
     }
 
     pub(crate) fn peek(&self) -> Option<&Token> {
@@ -781,7 +793,18 @@ impl Parser {
         }
         match PackedCellCoordinate::parse_a1(&name) {
             Ok(sc) => Ok(Expr::Cell(sc)),
-            Err(_) => Ok(Expr::ErrorLiteral(classify_failed_a1_token(&name))),
+            Err(_) => Ok(self.name_or_error(None, name)),
+        }
+    }
+
+    /// A word that is not a cell address: a defined name, or the error its shape says.
+    fn name_or_error(&mut self, scope: Option<String>, name: String) -> Expr {
+        match classify_failed_a1_token(&name) {
+            FormulaError::Name if easyoffice_formats::defined_name_problem(&name).is_none() => {
+                self.saw_name = true;
+                Expr::Name { scope, name }
+            }
+            error => Expr::ErrorLiteral(error),
         }
     }
 
@@ -814,7 +837,10 @@ impl Parser {
         }
         match PackedCellCoordinate::parse_a1(&cell_ident) {
             Ok(coord) => Ok(Expr::SheetCell { sheet: name, coord }),
-            Err(_) => Ok(Expr::ErrorLiteral(FormulaError::Ref)),
+            Err(_) => match self.name_or_error(Some(name), cell_ident) {
+                named @ Expr::Name { .. } => Ok(named),
+                _ => Ok(Expr::ErrorLiteral(FormulaError::Ref)),
+            },
         }
     }
 
@@ -864,12 +890,27 @@ pub(crate) fn normalize_korean_function_aliases(expr: &str) -> std::borrow::Cow<
     }
 }
 
-pub fn compile_formula_expr(expr_src: &str) -> Result<Expr, FormulaError> {
+/// Parses a formula body. The flag says whether it uses defined names (see [`Expr::Name`]).
+pub(crate) fn parse_formula(expr_src: &str) -> Result<(Expr, bool), FormulaError> {
     let tokens = tokenize_formula(expr_src)?;
     let mut parser = Parser::new(tokens);
     let expr = parser.parse_expression(0)?;
     if parser.pos != parser.tokens.len() {
         return Err(FormulaError::Value);
+    }
+    Ok((expr, parser.saw_name))
+}
+
+/// Parses a formula body with no workbook around it: a defined name reads `#NAME?`.
+pub fn compile_formula_expr(expr_src: &str) -> Result<Expr, FormulaError> {
+    let (mut expr, saw_name) = parse_formula(expr_src)?;
+    if saw_name {
+        crate::names::walk_mut(&mut expr, |node| {
+            if matches!(node, Expr::Name { .. }) {
+                *node = Expr::ErrorLiteral(FormulaError::Name);
+            }
+            true
+        });
     }
     Ok(expr)
 }

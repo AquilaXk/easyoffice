@@ -123,6 +123,7 @@ pub(crate) fn collect_refs(
             | Expr::Text(_)
             | Expr::Boolean(_)
             | Expr::ErrorLiteral(_)
+            | Expr::Name { .. }
             | Expr::Missing => {}
         }
     }
