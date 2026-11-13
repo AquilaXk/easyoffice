@@ -137,6 +137,33 @@ pub(crate) fn write_changed(out: &mut String, session: &RecalcSession, changed: 
     out.push(']');
 }
 
+/// `,"spills":[{"sheet","cell","rows","cols","blocked"}, ...]` for the arrays whose area changed in the
+/// recalculation (`rows` is 0 when the formula no longer spills); nothing when none did (PD-217).
+pub(crate) fn spills_field(session: &RecalcSession, outcome: &RecalcOutcome) -> String {
+    if outcome.spills.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from(",\"spills\":[");
+    for (i, spill) in outcome.spills.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        out.push_str("{\"sheet\":\"");
+        out.push_str(&EasyOfficeIpcRouter::escape_json_str(
+            session.sheet_name(spill.sheet).unwrap_or_default(),
+        ));
+        out.push_str(&format!(
+            "\",\"cell\":\"{}\",\"rows\":{},\"cols\":{},\"blocked\":{}}}",
+            spill.anchor.to_a1(),
+            spill.rows,
+            spill.cols,
+            spill.blocked
+        ));
+    }
+    out.push(']');
+    out
+}
+
 /// `,"timedOut":true,"pending":n` when the recalculation ran out of time: `pending` formulas keep the
 /// value the page shows and are computed by the next `apply` (the page sends one without changes).
 pub(crate) fn timed_out_field(outcome: &RecalcOutcome) -> String {
@@ -165,6 +192,7 @@ pub(crate) fn recalc_answer(
         outcome.circular, outcome.recomputed
     ));
     out.push_str(&timed_out_field(outcome));
+    out.push_str(&spills_field(session, outcome));
     let rule_updates = session.rule_updates(changes, outcome);
     if !rule_updates.changed.is_empty() {
         out.push_str(",\"cf\":[");

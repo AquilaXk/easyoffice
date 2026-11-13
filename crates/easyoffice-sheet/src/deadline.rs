@@ -98,6 +98,13 @@ impl SheetEngine {
         &self,
         limit: Option<Duration>,
     ) -> (HashMap<PackedCellCoordinate, EvaluatedCellValue>, bool) {
+        if !self.array_formulas.is_empty() {
+            if let Some(settled) = self.as_workbook().settle(limit.unwrap_or(Duration::MAX)) {
+                let mut values = settled.session.sheet_values(&self.name);
+                values.retain(|&coord, _| !settled.session.is_unreached(&self.name, coord));
+                return (values, settled.outcome.timed_out);
+            }
+        }
         let mut ctx = EvalContext::standalone_id(self.resolved_sheet_id());
         if let Some(limit) = limit {
             ctx = ctx.with_time_limit(limit);
@@ -165,6 +172,11 @@ impl WorkbookEngine {
         targets: &[WorkbookEvalTarget<'_>],
         limit: Duration,
     ) -> WorkbookBatchEvaluation {
+        if self.has_array_formulas() {
+            if let Some(settled) = self.evaluate_targets_settled(targets, limit) {
+                return settled;
+            }
+        }
         let primary_id = targets
             .first()
             .and_then(|t| self.sheet(t.sheet))
@@ -212,7 +224,48 @@ impl WorkbookEngine {
             circular: ctx.circular,
             timed_out: ctx.expired(),
             unreached,
+            spills: Vec::new(),
         }
+    }
+
+    /// The targets of a workbook with array formulas: a session built for the request settles the
+    /// arrays and the formulas that read them, and the targets are read from it.
+    fn evaluate_targets_settled(
+        &self,
+        targets: &[WorkbookEvalTarget<'_>],
+        limit: Duration,
+    ) -> Option<WorkbookBatchEvaluation> {
+        let mut settled = self.settle(limit)?;
+        let mut values = Vec::with_capacity(targets.len());
+        let mut unreached = Vec::new();
+        for (i, target) in targets.iter().enumerate() {
+            let expr = target.expr.trim();
+            let value = if crate::parser::strip_open_formula_prefix(expr).is_some() {
+                Some(
+                    settled
+                        .session
+                        .evaluate_text(target.sheet, expr, target.anchor),
+                )
+            } else {
+                match PackedCellCoordinate::parse_a1(expr) {
+                    Ok(coord) if settled.session.is_unreached(target.sheet, coord) => None,
+                    Ok(coord) => Some(settled.session.cell_value(target.sheet, coord)),
+                    Err(_) => Some(EvaluatedCellValue::Error(FormulaError::Ref)),
+                }
+            };
+            if value.is_none() {
+                unreached.resize(targets.len(), false);
+                unreached[i] = true;
+            }
+            values.push(value.unwrap_or(EvaluatedCellValue::Empty));
+        }
+        Some(WorkbookBatchEvaluation {
+            values,
+            circular: settled.outcome.circular,
+            timed_out: settled.outcome.timed_out,
+            unreached,
+            spills: settled.session.spill_areas(),
+        })
     }
 
     fn evaluate_target(

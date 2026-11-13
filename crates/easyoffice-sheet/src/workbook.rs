@@ -422,6 +422,8 @@ pub struct WorkbookBatchEvaluation {
     pub timed_out: bool,
     /// Per target, whether the pass did not reach it (empty when every target has its value).
     pub unreached: Vec<bool>,
+    /// The arrays of the workbook that spill, with their values (PD-217); empty without array formulas.
+    pub spills: Vec<crate::SpillArea>,
 }
 
 impl WorkbookBatchEvaluation {

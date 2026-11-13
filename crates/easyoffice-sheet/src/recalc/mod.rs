@@ -17,8 +17,11 @@ mod id_set;
 mod interval;
 mod names;
 mod rule_session;
+mod spill_api;
 mod structure;
 pub use rule_session::RuleUpdates;
+
+pub use spill_api::SpillArea;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

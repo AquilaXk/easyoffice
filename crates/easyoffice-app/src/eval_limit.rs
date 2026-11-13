@@ -95,14 +95,45 @@ pub(crate) fn answer(requests: &[(&str, &str)], batch: &WorkbookBatchEvaluation)
     let first = shown(0).map_or("null".to_string(), |v| format!("\"{v}\""));
     with_timed_out(
         format!(
-            "{{\"query\":\"{}\",\"value\":{first},\"values\":{{{}}},\"targetValues\":[{}],\"circular\":{}}}",
+            "{{\"query\":\"{}\",\"value\":{first},\"values\":{{{}}},\"targetValues\":[{}],\"circular\":{}{}}}",
             esc(requests[0].1),
             values.join(","),
             target_values.join(","),
-            batch.circular
+            batch.circular,
+            spills_field(batch)
         ),
         batch.timed_out,
     )
+}
+
+/// `,"spills":[{"sheet","cell","rows","cols","blocked","values"}, ...]`: the arrays that spill with the
+/// values of their area, row by row (PD-217); nothing for a workbook without one.
+fn spills_field(batch: &WorkbookBatchEvaluation) -> String {
+    if batch.spills.is_empty() {
+        return String::new();
+    }
+    let esc = EasyOfficeIpcRouter::escape_json_str;
+    let areas: Vec<String> = batch
+        .spills
+        .iter()
+        .map(|a| {
+            let values: Vec<String> = a
+                .values
+                .iter()
+                .map(|v| format!("\"{}\"", esc(&v.to_display_string())))
+                .collect();
+            format!(
+                "{{\"sheet\":\"{}\",\"cell\":\"{}\",\"rows\":{},\"cols\":{},\"blocked\":{},\"values\":[{}]}}",
+                esc(&a.sheet),
+                a.anchor.to_a1(),
+                a.rows,
+                a.cols,
+                a.blocked,
+                values.join(",")
+            )
+        })
+        .collect();
+    format!(",\"spills\":[{}]", areas.join(","))
 }
 
 /// Evaluates `targets` for a file. With `complete` the save is refused when the pass did not reach

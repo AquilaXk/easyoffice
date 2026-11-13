@@ -247,6 +247,7 @@ pub(crate) fn session_answer(
         outcome.circular, report.removed_cells
     );
     out.push_str(&crate::sheet_session::timed_out_field(outcome));
+    out.push_str(&crate::sheet_session::spills_field(session, outcome));
     if report.names_changed {
         out.push_str(&EasyOfficeIpcRouter::names_answer_field(
             session.workbook().names(),

@@ -27,7 +27,6 @@ impl IdSet {
         self.len == 0
     }
 
-    #[cfg(test)]
     pub(crate) fn contains(&self, id: u32) -> bool {
         let (w, b) = ((id >> 6) as usize, id & 63);
         self.words.get(w).is_some_and(|word| word >> b & 1 == 1)

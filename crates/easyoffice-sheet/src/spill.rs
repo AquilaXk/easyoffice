@@ -81,6 +81,12 @@ impl SpillTable {
             .map(|(&c, &a)| (c, a))
     }
 
+    pub(crate) fn anchors_with_area(
+        &self,
+    ) -> impl Iterator<Item = (PackedCellCoordinate, Area)> + '_ {
+        self.areas.iter().map(|(&c, &a)| (c, a))
+    }
+
     pub(crate) fn area_entry(&self, anchor: PackedCellCoordinate) -> Option<Area> {
         self.areas.get(&anchor).copied()
     }

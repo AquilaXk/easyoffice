@@ -211,3 +211,52 @@ fn a_column_reader_sees_the_filled_cells() {
     m.evaluate();
     assert_eq!(spilled(&m, &["B1", "B2", "B3"]), ["2001000", "1000", "55"]);
 }
+
+#[test]
+fn a_request_without_a_session_settles_arrays_too() {
+    use easyoffice_sheet::{SheetEngine, WorkbookEngine, WorkbookEvalTarget};
+    let mut wb = WorkbookEngine::new();
+    wb.add_sheet("Sheet1");
+    for (cell, v) in [
+        ("A1", "3"),
+        ("A2", "1"),
+        ("A3", "2"),
+        ("C1", "=SORT(A1:A3)"),
+        ("E1", "=SUM(C1#)"),
+        ("E2", "=C3+100"),
+    ] {
+        wb.set_cell("Sheet1", cell, v).unwrap();
+    }
+    let target = |expr| WorkbookEvalTarget {
+        sheet: "Sheet1",
+        expr,
+        anchor: None,
+    };
+    let targets = [
+        target("C1"),
+        target("C2"),
+        target("C3"),
+        target("E1"),
+        target("E2"),
+        target("=TRANSPOSE(A1:A3)"),
+    ];
+    let batch = wb.evaluate_targets(&targets);
+    let shown: Vec<String> = batch.values.iter().map(|v| v.to_display_string()).collect();
+    assert_eq!(shown, ["1", "2", "3", "6", "103", "3"]);
+    assert_eq!(batch.spills.len(), 1);
+    let area = &batch.spills[0];
+    assert_eq!((area.rows, area.cols, area.blocked), (3, 1, false));
+    assert_eq!(area.values.len(), 3);
+
+    // the same through a standalone sheet (what a save calculates)
+    let mut sheet = SheetEngine::new("Sheet1");
+    for (cell, v) in [("A1", "3"), ("A2", "1"), ("C1", "=SORT(A1:A2)")] {
+        sheet.set_cell(cell, v).unwrap();
+    }
+    let (values, timed_out) = sheet.recalculate_all_within(None);
+    assert!(!timed_out);
+    let at = |a1: &str| {
+        values[&easyoffice_sheet::PackedCellCoordinate::parse_a1(a1).unwrap()].to_display_string()
+    };
+    assert_eq!((at("C1"), at("C2")), ("1".to_string(), "3".to_string()));
+}
