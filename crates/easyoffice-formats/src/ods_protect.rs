@@ -88,8 +88,14 @@ fn write_key(xml: &mut String, credential: &Credential) {
     }
 }
 
+/// An attribute that says `true`. `closed` reads a value that is not a boolean as `true` too (an attribute that
+/// protects), `open` reads it as `false` (an action that is allowed).
 fn is_true(tag: &str, name: &str) -> bool {
     extract_attr_from_fragment(tag, name) == Some("true")
+}
+
+fn is_closed(tag: &str, name: &str) -> bool {
+    extract_attr_from_fragment(tag, name).is_some_and(|v| v.trim() != "false")
 }
 
 /// The attributes of `table:table` that protect it (empty for a table that is not protected).
@@ -146,14 +152,14 @@ pub(crate) fn read_protection(
     content_xml: &str,
     stylings: &mut [(String, SheetStyling)],
 ) -> Result<(), EasyOfficeError> {
-    if !content_xml.contains("protected=\"true\"") {
+    if !content_xml.contains("protected=") {
         return Ok(());
     }
     if let (Some(tag), Some((_, first))) = (
         start_tag(content_xml, "office:spreadsheet"),
         stylings.first_mut(),
     ) {
-        if is_true(tag, "table:structure-protected") {
+        if is_closed(tag, "table:structure-protected") {
             first.workbook_protect = Some(WorkbookProtection {
                 lock_structure: true,
                 credential: read_key(tag)?,
@@ -166,7 +172,7 @@ pub(crate) fn read_protection(
         let Some((attrs, inner)) = tables.get(i) else {
             break;
         };
-        if !is_true(attrs, "table:protected") {
+        if !is_closed(attrs, "table:protected") {
             continue;
         }
         let mut deny = ODS_LOCKED & !(SELECT_LOCKED_CELLS | SELECT_UNLOCKED_CELLS);

@@ -16,10 +16,12 @@ use crate::sheet_protect::{
     FLAG_NAMES, MAX_PROTECTED_RANGES, MAX_PROTECT_TEXT_CHARS, MAX_RANGE_AREAS,
 };
 use crate::xml_stream::{Attrs, XmlEvent};
-use crate::{parse_sqref, EasyOfficeError, XmlSanitizer};
+use crate::{CellBox, EasyOfficeError, XmlSanitizer};
 
+/// A boolean attribute of the file. A value that is not a boolean at all reads as `true`: a locked action and a
+/// protected sheet, so a damaged or hostile attribute never opens what the file closed.
 fn truthy(value: &str) -> bool {
-    matches!(value, "1" | "true")
+    !matches!(value.trim(), "0" | "false")
 }
 
 fn too_long() -> EasyOfficeError {
@@ -174,8 +176,13 @@ impl ProtectScan {
         if self.ranges.len() >= MAX_PROTECTED_RANGES {
             return Err(too_long());
         }
-        let mut areas = parse_sqref(&attrs.get("sqref").unwrap_or_default());
-        areas.truncate(MAX_RANGE_AREAS);
+        // At most `MAX_RANGE_AREAS` areas are parsed, however long the list is.
+        let sqref = attrs.get("sqref").unwrap_or_default();
+        let areas: Vec<CellBox> = sqref
+            .split_whitespace()
+            .filter_map(CellBox::parse)
+            .take(MAX_RANGE_AREAS)
+            .collect();
         self.ranges.push(ProtectedRange {
             name: text_of(attrs, "name")?.unwrap_or_default(),
             areas,

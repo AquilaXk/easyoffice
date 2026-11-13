@@ -705,3 +705,322 @@ test("a save that drops a password asks first, and declining writes nothing", as
   await flushAsyncTurns(30);
   assert.deepEqual(asked, []);
 });
+
+// ======================================================================================================================
+// The cross-feature checklist (PD-216): one sheet that mixes locked cells, hidden formulas, an allowed range and unlocked cells.
+//   locked: everything else; hidden formula, locked: F2; hidden formula, unlocked: F3; unlocked: G2, B5 and B10:B12;
+//   an allowed range without a password: A7:B8.
+// ======================================================================================================================
+async function scene(allowed) {
+  const t = await open();
+  await setCellFlags(t, "F2", { hidden: true });
+  await setCellFlags(t, "F3", { locked: false, hidden: true });
+  for (const ref of ["G2", "B5", "B10", "B11", "B12"]) await setCellFlags(t, ref, { locked: false });
+  t.layout.setProtect("Sheet1", { on: false, deny: [], ranges: [{ name: "열린", sqref: ["A7:B8"] }] });
+  await protectWithoutPassword(t, allowed);
+  return t;
+}
+const typeInto = async (t, ref, text) => {
+  const td = t.cell(ref);
+  td.focus();
+  typeText(t, text);
+  t.key(t.cell(ref), "Tab");
+  await flushAsyncTurns(15);
+};
+const closeAlert = (t) => t.byId("sheet-protect-alert-dialog").close();
+const press = (t, ref) => {
+  const td = t.cell(ref);
+  td.dispatchEvent({ type: "mousedown", target: td, button: 0, bubbles: true });
+  td.dispatchEvent({ type: "mouseup", target: td, bubbles: true });
+};
+const redo = async (t) => {
+  t.userClick(studioItem(t.document, "studio-redo"));
+  await flushAsyncTurns(20);
+};
+
+test("checklist: undo and redo chains that mix edits before and after the protection", async () => {
+  const t = await open();
+  await typeInto(t, "B3", "5");
+  await typeInto(t, "A2", "가나");
+  await setCellFlags(t, "B10", { locked: false });
+  await protectWithoutPassword(t);
+  const lockedCells = ["B3", "A2", "C2"];
+  const locked = lockedCells.map((ref) => cellText(t, ref));
+  await typeInto(t, "B10", "7");
+  assert.equal(cellText(t, "B10"), "7", "an unlocked cell takes the edit");
+  await t.undo();
+  assert.equal(cellText(t, "B10"), "", "its undo works");
+  await t.undo();
+  assert.deepEqual(lockedCells.map((ref) => cellText(t, ref)), locked, "the steps before the protection are gone: nothing to undo");
+  await redo(t);
+  assert.equal(cellText(t, "B10"), "7", "its redo works");
+  await redo(t);
+  assert.deepEqual(lockedCells.map((ref) => cellText(t, ref)), locked);
+  assert.equal(t.layout.protectOf("Sheet1").on, true);
+});
+
+test("checklist: the fill handle by drag and by double click for every pair of locked and unlocked source and target", async () => {
+  const t = await scene();
+  const fill = async (from, to, dbl = false) => {
+    press(t, from);
+    const handle = t.document.querySelector("#sheet-viewport .sheet-fill-handle");
+    if (dbl) handle.dispatchEvent({ type: "dblclick", target: handle, button: 0, bubbles: true });
+    else {
+      handle.dispatchEvent({ type: "mousedown", target: handle, button: 0, bubbles: true });
+      t.cell(to).dispatchEvent({ type: "mouseover", target: t.cell(to), bubbles: true });
+      t.cell(to).dispatchEvent({ type: "mouseup", target: t.cell(to), bubbles: true });
+    }
+    await flushAsyncTurns(15);
+  };
+  await typeInto(t, "B10", "x");
+  await fill("B10", "B12");
+  assert.deepEqual(["B10", "B11", "B12"].map((r) => cellText(t, r)), ["x", "x", "x"], "unlocked to unlocked");
+  await fill("B10", "B9");
+  assert.equal(cellText(t, "B9"), "", "a locked cell in the way refuses it all");
+  closeAlert(t);
+  const before = ["B3", "B4"].map((r) => cellText(t, r));
+  await fill("B2", "B4");
+  assert.deepEqual(["B3", "B4"].map((r) => cellText(t, r)), before, "locked to locked");
+  closeAlert(t);
+  await fill("F2", "G2");
+  assert.equal(cellText(t, "G2"), "4950", "a locked hidden formula fills an unlocked cell as its value");
+  assert.equal(t.cell("G2").dataset.formula ?? "", "", "and no formula");
+  const b6 = cellText(t, "B6");
+  await fill("B5", null, true);
+  assert.equal(cellText(t, "B6"), b6, "the double click fills down into locked B6 as little as the drag does");
+});
+
+test("checklist: find and replace by value, by formula and over all sheets leave locked cells and hidden formulas alone", async () => {
+  const t = await scene();
+  t.sandbox.dispatchWindowKeydown({ key: "F2", ctrlKey: true });
+  const find = async (query, replacement, { formula = false, workbook = false } = {}) => {
+    for (const [id, value] of [["find-query", query], ["find-replacement", replacement]]) {
+      t.byId(id).value = value;
+      t.byId(id).dispatchEvent({ type: "input", target: t.byId(id) });
+    }
+    t.check("find-opt-formula", formula);
+    t.check("find-opt-workbook", workbook);
+    await flushAsyncTurns(10);
+    t.byId("btn-find-replace-all").click();
+    await flushAsyncTurns(25);
+  };
+  await find("승인", "반려");
+  assert.deepEqual(["H2", "H3"].map((r) => cellText(t, r)), ["승인", "승인"], "locked cells keep their value");
+  await find("84", "85");
+  assert.equal(cellText(t, "B5"), "850", "the unlocked B5 is replaced");
+  assert.equal(cellText(t, "B3"), "920");
+  await find("SUM", "AVERAGE", { formula: true });
+  assert.equal(t.cell("F2").dataset.formula, "=SUM(B2:E2)", "a hidden locked formula is untouched");
+  assert.equal(t.cell("F3").dataset.formula, "=SUM(B3:E3)", "a hidden unlocked formula is not matched by its text");
+  assert.equal(t.cell("F4").dataset.formula, "=SUM(B4:E4)", "a locked visible formula is untouched");
+  await find("SUM", "AVERAGE", { formula: true, workbook: true });
+  assert.equal(t.cell("F2").dataset.formula, "=SUM(B2:E2)");
+  assert.equal(t.layout.protectOf("Sheet2"), null, "another sheet that is not protected is replaced normally");
+});
+
+test("checklist: copy, cut, paste and 골라 붙이기 by value, format, formula, column width and turned over", async () => {
+  const t = await scene();
+  const copyOf = (ref, moves = []) => {
+    press(t, ref);
+    for (const [k, n] of moves) for (let i = 0; i < n; i += 1) t.key(t.document.activeElement, k, { shiftKey: true });
+    const store = {};
+    t.document.activeElement.dispatchEvent({ type: "copy", target: t.document.activeElement, clipboardData: { setData: (type, v) => (store[type] = v), getData: (type) => store[type] || "" } });
+    return store["text/plain"];
+  };
+  assert.equal(copyOf("F2"), "4950", "the hidden formula goes out as its value");
+  assert.equal(copyOf("F3"), "4100");
+  assert.equal(copyOf("F4"), "=SUM(B4:E4)", "a visible formula is copied");
+  const special = async (mode, transpose = false) => {
+    t.userClick(t.document.querySelector('.md-item[data-sheet-paste="special"]'));
+    t.byId("sheet-paste-kind-select").value = mode;
+    t.byId("sheet-paste-transpose").checked = transpose;
+    t.userClick(t.byId("btn-sheet-paste-apply"));
+    await flushAsyncTurns(15);
+  };
+  copyOf("F2");
+  for (const mode of ["all", "values", "formulas"]) {
+    press(t, "B11");
+    await special(mode);
+    assert.equal(t.cell("B11").dataset.formula ?? "", "", `${mode}: no formula reaches B11`);
+    assert.equal(cellText(t, "B11"), "4950", mode);
+  }
+  press(t, "B12");
+  await special("all", true);
+  assert.equal(t.cell("B12").dataset.formula ?? "", "", "turned over: no formula");
+  const locked = ["B3", "C3"].map((r) => cellText(t, r));
+  for (const mode of ["all", "values", "formats", "formulas", "widths"]) {
+    press(t, "B3");
+    await special(mode);
+    assert.deepEqual(["B3", "C3"].map((r) => cellText(t, r)), locked, mode);
+    closeAlert(t);
+  }
+  copyOf("B2");
+  press(t, "B10");
+  await special("formats");
+  assert.equal(t.guard.cellEditable("Sheet1", 10, 2, t.cell("B10")._st), true, "the format paste kept B10 unlocked");
+  const cut = t.cell("B2");
+  cut.focus();
+  cut.dispatchEvent({ type: "cut", target: cut, clipboardData: { setData() {}, getData: () => "" } });
+  await flushAsyncTurns(15);
+  assert.equal(cellText(t, "B2"), "1150", "cut leaves a locked cell");
+  closeAlert(t);
+});
+
+test("checklist: sorting by the dialog, the ribbon and the filter menu needs 정렬 and no locked cell in the range", async () => {
+  const t = await scene(["selectLockedCells", "selectUnlockedCells", "sort"]);
+  await typeInto(t, "B10", "3");
+  await typeInto(t, "B11", "1");
+  await typeInto(t, "B12", "2");
+  const select = (from, moves) => {
+    press(t, from);
+    for (const [k, n] of moves) for (let i = 0; i < n; i += 1) t.key(t.document.activeElement, k, { shiftKey: true });
+  };
+  const column = (c, rows) => rows.map((r) => cellText(t, c + r));
+  const before = column("B", [2, 3, 4, 5]);
+  select("B2", [["ArrowDown", 3]]);
+  t.userClick(commandItem(t.document, "sheet-data-sort"));
+  await flushAsyncTurns(20);
+  assert.deepEqual(column("B", [2, 3, 4, 5]), before, "the ribbon sort of locked cells is refused");
+  closeAlert(t);
+  select("B10", [["ArrowDown", 2]]);
+  await t.act("sort-dialog");
+  t.userClick(t.byId("btn-sheet-sort-apply"));
+  await flushAsyncTurns(25);
+  assert.deepEqual(column("B", [10, 11, 12]), ["1", "2", "3"], "a range of unlocked cells sorts when 정렬 is allowed");
+  t.layout.setProtect("Sheet1", { ...t.layout.protectOf("Sheet1"), deny: [...t.layout.protectOf("Sheet1").deny, "sort"] });
+  select("B10", [["ArrowDown", 2]]);
+  t.userClick(commandItem(t.document, "sheet-data-sort"));
+  await flushAsyncTurns(20);
+  assert.deepEqual(column("B", [10, 11, 12]), ["1", "2", "3"], "no 정렬: nothing moves (the reverse sort would)");
+  blocked(t);
+});
+
+test("checklist: the auto filter is switched on and off only without protection, and used only with 자동 필터 사용", async () => {
+  const t = await scene(["selectLockedCells", "selectUnlockedCells", "autoFilter"]);
+  await t.act("filter-toggle");
+  assert.equal(t.layout.filterOf("Sheet1"), null, "no filter can be turned on while protected");
+  blocked(t);
+  t.layout.setFilter("Sheet1", { range: { r1: 1, c1: 1, r2: 8, c2: 6 }, columns: [], hidden: [] });
+  await t.act("filter-clear");
+  assert.equal(t.byId("sheet-protect-alert-dialog").open, false, "using an existing one is allowed");
+  t.layout.setProtect("Sheet1", { ...t.layout.protectOf("Sheet1"), deny: [...t.layout.protectOf("Sheet1").deny, "autoFilter"] });
+  await t.act("filter-clear");
+  blocked(t);
+  await t.act("filter-toggle");
+  assert.notEqual(t.layout.filterOf("Sheet1"), null, "it cannot be turned off either");
+  blocked(t);
+});
+
+test("checklist: names and the name box take no cell and cannot select what the sheet keeps from selection", async () => {
+  const t = await scene();
+  t.layout.setProtect("Sheet1", { ...t.layout.protectOf("Sheet1"), deny: [...t.layout.protectOf("Sheet1").deny, "selectLockedCells"] });
+  press(t, "B10");
+  const box = t.byId("active-cell-ref");
+  box.textContent = "B3";
+  box.dispatchEvent({ type: "keydown", key: "Enter", target: box });
+  await flushAsyncTurns(15);
+  assert.notEqual(t.byId("active-cell-ref").textContent, "B3", "the name box does not select a locked cell");
+  box.textContent = "B11";
+  box.dispatchEvent({ type: "keydown", key: "Enter", target: box });
+  await flushAsyncTurns(15);
+  assert.equal(t.byId("active-cell-ref").textContent, "B11", "it selects an unlocked one");
+  await t.act("name-define");
+  assert.equal(t.byId("sheet-name-edit-dialog").open, true, "defining a name is allowed");
+  t.byId("sheet-name-edit-dialog").close();
+  await t.act("name-manage");
+  assert.equal(t.byId("sheet-names-dialog").open, true, "managing names is allowed");
+});
+
+test("checklist: page setup and the print area are allowed on a protected sheet", async () => {
+  const t = await scene();
+  await t.act("page-setup");
+  assert.equal(t.byId("sheet-page-dialog").open, true);
+  t.byId("sheet-page-dialog").close();
+  press(t, "B10");
+  await t.act("print-area-set");
+  assert.deepEqual(t.layout.pageOf("Sheet1")?.printArea, ["B10"]);
+});
+
+test("checklist: conditional formatting and validation open only with 셀 서식", async () => {
+  const t = await scene();
+  t.userClick(commandItem(t.document, "sheet-mod-condfmt"));
+  await flushAsyncTurns(15);
+  blocked(t);
+  t.layout.setProtect("Sheet1", { ...t.layout.protectOf("Sheet1"), deny: t.layout.protectOf("Sheet1").deny.filter((f) => f !== "formatCells") });
+  t.userClick(commandItem(t.document, "sheet-mod-condfmt"));
+  await flushAsyncTurns(15);
+  assert.equal(t.byId("sheet-cf-dialog").open, true);
+});
+
+test("checklist: the command search and the native bar reach the same guarded actions", async () => {
+  const t = await scene();
+  const items = t.host.__EASYOFFICE_NATIVE_MENU_TABLE__.sheetMenuPaletteItems(t.document);
+  const titles = items.map((i) => i.title);
+  for (const title of ["시트 보호 해제", "통합 문서 보호", "범위 편집 허용"]) assert.ok(titles.includes(title), title);
+  press(t, "B2");
+  items.find((i) => i.id === "sheet-menu:row-insert-above").run();
+  await flushAsyncTurns(20);
+  blocked(t);
+  assert.equal(t.document.defaultView.__EASYOFFICE_NATIVE_MENU__("sheet:protect"), true);
+  await flushAsyncTurns(20);
+  assert.equal(t.layout.protectOf("Sheet1").on, false, "the native bar item lifts the protection like the menu item");
+});
+
+test("checklist: row and column insert, delete, hide and group follow their own flags, with and without the engine session", async () => {
+  const t = await open({ engine: true });
+  const base = t.guard.FLAG_NAMES.filter((f) => !t.guard.DEFAULT_ALLOWED.includes(f));
+  const protect = (allow) => t.layout.setProtect("Sheet1", { on: true, deny: base.filter((f) => !allow.includes(f)) });
+  const sent = () => t.requests.filter((r) => r.sessionAction === "structure").length;
+  t.cell("C2").focus();
+  const tries = [
+    ["row-delete", "deleteRows"], ["col-delete", "deleteColumns"], ["hide", "formatRows"], ["row-insert-above", "insertRows"], ["col-insert-left", "insertColumns"],
+  ];
+  for (const [act, flag] of tries) {
+    protect([]);
+    const before = sent();
+    await t.act(act);
+    blocked(t);
+    assert.equal(sent(), before, `${act}: nothing reaches the engine without ${flag}`);
+    protect([flag]);
+    await t.act(act);
+    if (act === "row-delete" || act === "col-delete") {
+      // C2 holds a locked value: the delete is refused even where the flag allows it.
+      assert.equal(sent(), before, `${act}: a locked cell with content refuses the delete`);
+      blocked(t);
+    } else if (act === "hide") {
+      assert.equal(t.layout.rowHidden("Sheet1", 2), true, "hiding runs with 행 서식");
+    } else {
+      assert.equal(sent(), before + 1, `${act}: allowed with ${flag}`);
+    }
+  }
+  // The grouping buttons follow 행 서식 and 열 서식.
+  protect([]);
+  await t.act("group");
+  blocked(t);
+  assert.equal(t.layout.outlineOf("Sheet1"), null);
+  // An empty row far below may be deleted when 행 삭제 is allowed (nothing locked goes with it).
+  protect(["deleteRows"]);
+  const row = t.document.querySelector('#pane-sheet th[data-row="12"]');
+  row.dispatchEvent({ type: "mousedown", button: 0, target: row });
+  const before = sent();
+  await t.act("row-delete");
+  assert.equal(sent(), before + 1, "a row without locked content can be deleted");
+});
+
+test("checklist: with the structure protected every sheet tab command is refused or greyed out, by menu, tab menu and keyboard", async () => {
+  const t = await open();
+  t.guard.setWorkbook({ structure: true, windows: false });
+  for (const act of ["tab-insert", "tab-delete", "tab-rename", "tab-copy", "tab-left", "tab-right", "tab-hide", "tab-unhide", "tab-add"]) {
+    const before = JSON.stringify([...t.document.querySelectorAll("#sheet-tab-bar .sheet-tab-btn[data-sheet-tab]")].map((b) => b.dataset.sheetTab));
+    await t.act(act);
+    assert.equal(JSON.stringify([...t.document.querySelectorAll("#sheet-tab-bar .sheet-tab-btn[data-sheet-tab]")].map((b) => b.dataset.sheetTab)), before, act);
+    assert.equal(t.document.querySelector("#sheet-tab-bar input.sheet-tab-edit"), null, `${act}: no rename field`);
+  }
+  const tab = t.document.querySelector('#sheet-tab-bar .sheet-tab-btn[data-sheet-tab="Sheet2"]');
+  tab.dispatchEvent({ type: "contextmenu", target: tab, bubbles: true, clientX: 10, clientY: 10 });
+  const items = [...t.document.querySelectorAll("#sheet-tab-menu [data-tab-act]")];
+  assert.ok(items.length > 0);
+  assert.deepEqual(items.map((el) => el.getAttribute("aria-disabled")), items.map(() => "true"), "the tab menu is greyed out");
+  tab.dispatchEvent({ type: "dblclick", target: tab, bubbles: true });
+  assert.equal(t.document.querySelector("#sheet-tab-bar input.sheet-tab-edit"), null, "a double click does not start a rename");
+});

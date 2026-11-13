@@ -480,3 +480,95 @@ fn digests_written_by_a_spreadsheet_program_verify() {
     assert_eq!(w.credential.verify("test"), PasswordCheck::Accepted);
     assert_eq!(w.credential.verify("tesu"), PasswordCheck::Rejected);
 }
+
+#[test]
+fn a_hostile_range_list_and_flag_values_never_open_what_the_file_closed() {
+    let base = pack_xlsx(&[SheetStyling::default()]);
+    // 200,000 areas in one `sqref`: parsed up to the bound, quickly.
+    let sqref = "A1 ".repeat(200_000);
+    let started = std::time::Instant::now();
+    let bytes = replace_part(&base, "xl/worksheets/sheet1.xml", |xml| {
+        xml.replace(
+            "</sheetData>",
+            &format!("</sheetData><protectedRanges><protectedRange sqref=\"{sqref}\" name=\"R\"/></protectedRanges>"),
+        )
+    });
+    let read = read_xlsx(&bytes);
+    assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    assert_eq!(
+        read[0].protect.as_ref().unwrap().ranges[0].areas.len(),
+        easyoffice_formats::MAX_RANGE_AREAS
+    );
+    // More protected ranges than the bound fail the open.
+    let many: String = (0..=easyoffice_formats::MAX_PROTECTED_RANGES)
+        .map(|i| format!("<protectedRange sqref=\"A1\" name=\"R{i}\"/>"))
+        .collect();
+    let bytes = replace_part(&base, "xl/worksheets/sheet1.xml", |xml| {
+        xml.replace(
+            "</sheetData>",
+            &format!("</sheetData><protectedRanges>{many}</protectedRanges>"),
+        )
+    });
+    assert!(OoxmlCodec::unpack_xlsx_with_styling(&bytes).is_err());
+    // A value that is not a boolean reads as closed: a protected sheet, a locked action, a locked structure.
+    let bytes = replace_part(&base, "xl/worksheets/sheet1.xml", |xml| {
+        xml.replace(
+            "</sheetData>",
+            "</sheetData><sheetProtection sheet=\"maybe\" formatCells=\"2\" insertRows=\"\" selectLockedCells=\"x\" sort=\"false\"/>",
+        )
+    });
+    let p = read_xlsx(&bytes)[0].protect.clone().unwrap();
+    assert!(p.on);
+    assert!(
+        !p.allows(FORMAT_CELLS)
+            && !p.allows(INSERT_ROWS)
+            && !p.allows(easyoffice_formats::SELECT_LOCKED_CELLS)
+    );
+    assert!(p.allows(SORT), "a value that is a boolean is read as one");
+    let bytes = replace_part(&base, "xl/workbook.xml", |xml| {
+        xml.replace(
+            "<sheets>",
+            "<workbookProtection lockStructure=\"yes\" lockWindows=\"0\"/><sheets>",
+        )
+    });
+    let w = read_xlsx(&bytes)[0].workbook_protect.clone().unwrap();
+    assert!(w.lock_structure && !w.lock_windows);
+}
+
+#[test]
+fn ods_attributes_that_are_not_booleans_protect_and_never_allow() {
+    let base = pack_ods(&[SheetStyling::default()]);
+    let entries = ZipArchiveCodec::unpack(&base, &ZipSecurityPolicy::default()).unwrap();
+    let hostile = |table: &str, body: &str| {
+        let out: Vec<(String, Vec<u8>)> = entries
+            .iter()
+            .map(|e| {
+                if e.path == "content.xml" {
+                    let text = std::str::from_utf8(&e.data).unwrap().replace(
+                        "<table:table table:name=\"Sheet1\"",
+                        &format!("<table:table table:name=\"Sheet1\" {table}"),
+                    );
+                    let text = text.replace(
+                        "<office:spreadsheet>",
+                        &format!("<office:spreadsheet {body}>"),
+                    );
+                    (e.path.clone(), text.into_bytes())
+                } else {
+                    (e.path.clone(), e.data.clone())
+                }
+            })
+            .collect();
+        ZipArchiveCodec::pack_compressed(&out).unwrap()
+    };
+    let read = read_ods(&hostile(
+        "table:protected=\"yes\"",
+        "table:structure-protected=\"1\"",
+    ));
+    assert!(read[0].protect.as_ref().unwrap().on);
+    assert!(read[0].workbook_protect.as_ref().unwrap().lock_structure);
+    let read = read_ods(&hostile(
+        "table:protected=\"false\"",
+        "table:structure-protected=\"false\"",
+    ));
+    assert!(read[0].protect.is_none() && read[0].workbook_protect.is_none());
+}

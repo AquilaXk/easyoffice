@@ -198,3 +198,49 @@ fn the_engine_refuses_a_row_or_column_edit_the_sheet_locks() {
     )
     .unwrap();
 }
+
+fn sheet_with_hidden_formula(dst: &str) -> Result<Vec<u8>, String> {
+    let payload = format!(
+        r#"{{"sourceFormat":"xlsx","targetFormat":"{dst}","title":"t","sheets":[{{"name":"시트","cells":[{{"ref":"A1","raw":"2"}},{{"ref":"B1","raw":"3"}},{{"ref":"C1","raw":"=SUM(A1:B1)","style":{{"hideFormula":true}}}}],"protect":{{"on":true,"deny":["formatCells"]}}}}]}}"#
+    );
+    let json = call("convert_document_format", &payload)?;
+    Ok(EasyOfficeIpcRouter::decode_base64(json_str_field(&json, "convertedBase64")).unwrap())
+}
+
+fn contains(haystack: &[u8], needle: &str) -> bool {
+    let needle = needle.as_bytes();
+    haystack.windows(needle.len()).any(|w| w == needle)
+}
+
+#[test]
+fn a_hidden_formula_does_not_leave_as_text_in_formats_that_hold_values_or_no_protection() {
+    for dst in ["csv", "tsv", "xls", "pdf"] {
+        let bytes = sheet_with_hidden_formula(dst).unwrap();
+        assert!(!bytes.is_empty(), "{dst}");
+        assert!(
+            !contains(&bytes, "SUM("),
+            "{dst}: the formula text is not in the file"
+        );
+        assert!(!contains(&bytes, "SUM"), "{dst}");
+    }
+    let csv = String::from_utf8(sheet_with_hidden_formula("csv").unwrap()).unwrap();
+    assert!(csv.contains('5'), "the value is: {csv}");
+    // The formats that hold protection keep the formula and the flag (the file is the user's own data), and the
+    // formats that do not hold it open without any protection.
+    for (dst, format) in [("xlsx", DocumentFormat::Xlsx), ("ods", DocumentFormat::Ods)] {
+        let bytes = sheet_with_hidden_formula(dst).unwrap();
+        let styling = read_sheet_styling(&bytes, format).unwrap().remove(0).1;
+        assert!(styling.protect.as_ref().is_some_and(|p| p.on), "{dst}");
+        assert!(
+            styling.cells.get(&(0, 2)).is_some_and(|c| c.formula_hidden),
+            "{dst}"
+        );
+    }
+    let xls = sheet_with_hidden_formula("xls").unwrap();
+    assert!(
+        !open("xls", &xls).contains("\"protect\""),
+        "xls has no protection to read back"
+    );
+    let csv_open = open("csv", csv.as_bytes());
+    assert!(!csv_open.contains("\"protect\"") && !csv_open.contains("hideFormula"));
+}

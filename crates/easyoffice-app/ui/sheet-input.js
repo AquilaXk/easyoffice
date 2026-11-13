@@ -311,9 +311,11 @@
 
     // Selects a range from outside the grid (the name box): the first cell is the anchor and the range is shown.
     function selectRange(rg) {
-      commitIfEditing();
       const r1 = clamp(rg.r1, 1, grid.MAX_ROWS);
       const c1 = clamp(rg.c1, 1, grid.MAX_COLS);
+      // The name box does not reach a cell the sheet keeps from selection (PD-216).
+      if (!selectable(r1, c1)) return;
+      commitIfEditing();
       setRange({ r1, c1, r2: clamp(rg.r2, r1, grid.MAX_ROWS), c2: clamp(rg.c2, c1, grid.MAX_COLS) });
       const whole = rg.c1 === 1 && rg.c2 >= grid.MAX_COLS ? "row" : rg.r1 === 1 && rg.r2 >= grid.MAX_ROWS ? "col" : null;
       sel.axis = whole;
