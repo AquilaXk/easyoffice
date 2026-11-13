@@ -3,6 +3,15 @@
 //! lives as a relationship of type `hyperlink` with `TargetMode="External"` (ECMA-376 Part 2, 9.3).
 //! The model is `sheet_links`.
 //!
+//! 참조 구현: IronCalc `xlsx/src/export/worksheets.rs` lines 71-153 (`get_sorted_links`, `split_external_target`,
+//! `get_hyperlinks_section`, `get_worksheet_xml_rels`: links in cell order, one relationship per address
+//! outside the workbook, the fragment of such an address written as the `location` attribute as the
+//! spreadsheet program does) and `xlsx/src/import/worksheets.rs` lines 686-806 (the hyperlink relationships
+//! of a sheet, an address with a `location` read back as `address#location`, a dangling relationship id
+//! skipped); MIT OR Apache-2.0, commit 01b39c1ad26252f7b6c810440e8433a932daee07. See `THIRD_PARTY_NOTICES.md`.
+//! Differences: the reader streams the `hyperlinks` element and stops after a bounded number of elements, every
+//! address goes through the policy of `sheet_links`, and the count of links turned away is reported.
+//!
 //! `<hyperlink ref="B2" r:id="rId1" tooltip="..."/>` links the cells of `ref` to the relationship's
 //! address; `location="Sheet2!A1"` is a jump inside the workbook. A link that has both is the address
 //! with `#location` as its fragment. Every address goes through the policy of `sheet_links`: a file's
@@ -111,6 +120,15 @@ pub(crate) fn read_links(
     got
 }
 
+/// An address outside the workbook and the fragment after its `#`: the file format keeps the fragment in the
+/// `location` attribute of the link, not in the relationship's target.
+fn split_fragment(target: &str) -> (&str, Option<&str>) {
+    match target.split_once('#') {
+        Some((address, fragment)) => (address, Some(fragment)),
+        None => (target, None),
+    }
+}
+
 /// The `hyperlinks` element of a worksheet part and the sheet's relationships part (`None` when no link
 /// leaves the workbook). Both are empty strings and `None` for a sheet without links.
 pub(crate) fn links_xml(links: &SheetLinks) -> (String, Option<String>) {
@@ -133,11 +151,15 @@ pub(crate) fn links_xml(links: &SheetLinks) -> (String, Option<String>) {
             }
             None => {
                 external += 1;
+                let (address, fragment) = split_fragment(&link.target);
                 let _ = write!(xml, " r:id=\"rId{external}\"");
+                if let Some(fragment) = fragment {
+                    let _ = write!(xml, " location=\"{}\"", XmlSanitizer::escape(fragment));
+                }
                 let _ = write!(
                     rels,
                     "<Relationship Id=\"rId{external}\" Type=\"{HYPERLINK_RELATIONSHIP}\" Target=\"{}\" TargetMode=\"External\"/>",
-                    XmlSanitizer::escape(&link.target)
+                    XmlSanitizer::escape(address)
                 );
             }
         }
@@ -230,12 +252,19 @@ mod tests {
         );
         links.insert((1, 27), CellLink::new("#'Sheet 2'!A1:B3", "").unwrap());
         links.insert((2, 0), CellLink::new("mailto:me@example.com", "").unwrap());
+        links.insert(
+            (3, 0),
+            CellLink::new("https://example.com/p#top", "").unwrap(),
+        );
         let (xml, rels) = links_xml(&links);
         let rels = rels.unwrap();
         assert!(
             xml.contains("ref=\"AB2\"") && xml.contains("location=\"&apos;Sheet 2&apos;!A1:B3\"")
         );
-        assert_eq!(rels.matches("TargetMode=\"External\"").count(), 2);
+        assert_eq!(rels.matches("TargetMode=\"External\"").count(), 3);
+        assert!(
+            rels.contains("Target=\"https://example.com/p\"") && xml.contains("location=\"top\"")
+        );
         crate::XmlSanitizer::validate_safe_xml(&xml).unwrap();
         crate::XmlSanitizer::validate_safe_xml(&rels).unwrap();
         let back = read_links(

@@ -4,7 +4,11 @@
 //! 참조 구현: Univer `packages/sheets-hyper-link/src/types/interfaces/i-hyper-link.ts` (a link has a
 //! `payload` address, an optional `tooltip` and the cell it belongs to) and `models/hyper-link.model.ts`
 //! (one link per cell); Apache-2.0, Copyright 2023-present DreamNum Co., Ltd., commit
-//! 5a06a7842c8e13fa0646d0733dc3662cf4b330b9. See `THIRD_PARTY_NOTICES.md`. The address policy is this
+//! 5a06a7842c8e13fa0646d0733dc3662cf4b330b9. IronCalc `base/src/types.rs` lines 172-190 (`Link`: an address
+//! outside the workbook or a location inside it, the displayed text is the cell's own content) and
+//! `xlsx/src/import/worksheets.rs` lines 732-806 (`load_hyperlinks`: a `ref` range, a range of more than
+//! 10,000 cells gives its link to the first cell only); MIT OR Apache-2.0, commit
+//! 01b39c1ad26252f7b6c810440e8433a932daee07. See `THIRD_PARTY_NOTICES.md`. The address policy is this
 //! repository's own and the same as the document editor's (`safe_link_target`): a plain web or mail
 //! address, or a jump inside the workbook (`#Sheet1!A1`, `#Name`); every other scheme is refused.
 //!
@@ -30,6 +34,8 @@ pub const MAX_LINKS_PER_SHEET: usize = 65_530;
 pub const MAX_LOCATION_CHARS: usize = 255;
 /// Characters of a screen tip (the spreadsheet format's own limit).
 pub const MAX_LINK_TIP_CHARS: usize = 255;
+/// Cells one `ref` range may give its link to; a larger range links its first cell only.
+pub const MAX_LINK_AREA_CELLS: u64 = 10_000;
 /// Bytes of addresses and screen tips a document may hold in all its sheets.
 pub const MAX_LINK_BYTES_PER_DOCUMENT: usize = 16 * 1024 * 1024;
 
@@ -137,7 +143,8 @@ impl LinkCollector {
         true
     }
 
-    /// Keeps the link for every cell of `area`, as far as the bounds allow.
+    /// Keeps the link for every cell of `area`, as far as the bounds allow; an area over
+    /// [`MAX_LINK_AREA_CELLS`] links its first cell only.
     pub(crate) fn add_area(
         &mut self,
         allowance: &mut LinkAllowance,
@@ -147,6 +154,11 @@ impl LinkCollector {
     ) {
         if CellLink::new(target, tip).is_none() {
             self.rejected = self.rejected.saturating_add(1);
+            return;
+        }
+        if area.area() > MAX_LINK_AREA_CELLS {
+            self.rejected = self.rejected.saturating_add(1);
+            self.add(allowance, (area.row0, area.col0), target, tip);
             return;
         }
         for row in area.row0..=area.row1 {
@@ -233,10 +245,22 @@ mod tests {
     fn the_collector_stops_at_the_bounds() {
         let mut allowance = LinkAllowance::default();
         let mut got = LinkCollector::default();
-        let whole_sheet = CellBox::parse("A1:Z10000").unwrap();
+        let whole_sheet = CellBox::parse("A1:XFD1048576").unwrap();
         got.add_area(&mut allowance, whole_sheet, "https://a.b", "");
+        assert_eq!(
+            got.links.len(),
+            1,
+            "a range over the area bound links its first cell only"
+        );
+        assert_eq!(got.rejected, 1);
+        let mut got = LinkCollector::default();
+        let block = CellBox::parse("A1:CV100").unwrap();
+        got.add_area(&mut allowance, block, "https://a.b", "");
+        assert_eq!(got.links.len(), 10_000);
+        for row in 100..70_000 {
+            got.add(&mut allowance, (row, 0), "https://a.b", "");
+        }
         assert_eq!(got.links.len(), MAX_LINKS_PER_SHEET);
-        assert!(got.rejected > 0);
 
         let mut small = LinkAllowance { bytes_left: 300 };
         let mut got = LinkCollector::default();
