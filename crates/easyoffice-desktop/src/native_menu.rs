@@ -296,13 +296,13 @@ pub const ITEMS: &[MenuItemSpec] = &[
     item("format:numfmt-text", "텍스트", None, "sheet-numfmt:text"),
     item(
         "format:numfmt-decimal-up",
-        "소수 자릿수 늘리기",
+        "자릿수 늘림",
         None,
         "sheet-numfmt:decimal-up",
     ),
     item(
         "format:numfmt-decimal-down",
-        "소수 자릿수 줄이기",
+        "자릿수 줄임",
         None,
         "sheet-numfmt:decimal-down",
     ),

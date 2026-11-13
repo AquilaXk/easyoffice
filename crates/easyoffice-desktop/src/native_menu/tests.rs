@@ -752,8 +752,8 @@ fn the_spreadsheet_bar_has_the_number_format_and_row_column_items_in_the_page_or
             "시간",
             "텍스트",
             s,
-            "소수 자릿수 늘리기",
-            "소수 자릿수 줄이기",
+            "자릿수 늘림",
+            "자릿수 줄임",
         ]
     );
     let align: Vec<&str> = layout::ALIGN_LINES

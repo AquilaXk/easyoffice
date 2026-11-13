@@ -53,7 +53,7 @@
     }
 
     function changeDecimals(delta) {
-      const label = delta > 0 ? "소수 자릿수 늘리기" : "소수 자릿수 줄이기";
+      const label = delta > 0 ? "자릿수 늘림" : "자릿수 줄임";
       return format.formatNumbers((cells) => N.planDecimalChange(cells, delta), label);
     }
 
