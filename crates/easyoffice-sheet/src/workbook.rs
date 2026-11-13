@@ -62,9 +62,11 @@ impl WorkbookEngine {
         if name.trim().is_empty() {
             return None;
         }
+        // A name that equals a non-blank one up to ASCII case is non-blank too, so the sheets'
+        // own names need no trimming here.
         self.sheets
             .iter()
-            .position(|s| !s.name.trim().is_empty() && s.name.eq_ignore_ascii_case(name))
+            .position(|s| s.name.eq_ignore_ascii_case(name))
     }
 
     pub fn add_sheet(&mut self, name: impl Into<String>) -> &mut SheetEngine {
@@ -697,3 +699,7 @@ mod tests;
 #[cfg(test)]
 #[path = "workbook_sort_tests.rs"]
 mod sort_tests;
+
+#[cfg(test)]
+#[path = "workbook_scale_tests.rs"]
+mod scale_tests;

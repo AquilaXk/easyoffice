@@ -6,7 +6,7 @@
 //! last full recalculation, dropped on every edit), and the per-column formula index that lets
 //! range dependencies skip empty and literal cells.
 
-use crate::memo::DfsState;
+use crate::memo::{DfsState, FastMap};
 use crate::{
     CellRange, EvalContext, EvaluatedCellValue, Expr, FormulaError, MemoTable,
     PackedCellCoordinate, SheetEngine, WorkbookEngine,
@@ -272,8 +272,9 @@ impl RecalcPlan {
 /// Sheets reached by the pass, addressed by a small slot number instead of a cloned name.
 struct SheetTable<'x> {
     slots: Vec<&'x SheetEngine>,
-    /// `(name pointer, name length)` of an AST sheet token -> resolved slot.
-    names: Vec<(usize, usize, Option<u16>)>,
+    /// AST sheet token text -> resolved slot, so a name is looked up in the workbook once per
+    /// spelling instead of once per reference.
+    names: FastMap<&'x str, Option<u16>>,
 }
 
 impl<'x> SheetTable<'x> {
@@ -285,10 +286,9 @@ impl<'x> SheetTable<'x> {
         &mut self,
         root: &'x SheetEngine,
         wb: Option<&'x WorkbookEngine>,
-        name: &str,
+        name: &'x str,
     ) -> Option<u16> {
-        let key = (name.as_ptr() as usize, name.len());
-        if let Some(&(_, _, slot)) = self.names.iter().find(|n| (n.0, n.1) == key) {
+        if let Some(&slot) = self.names.get(name) {
             return slot;
         }
         let target = if WorkbookEngine::is_same_sheet_identity(name, &root.name) {
@@ -307,7 +307,7 @@ impl<'x> SheetTable<'x> {
                 });
             u16::try_from(pos).ok()
         });
-        self.names.push((key.0, key.1, slot));
+        self.names.insert(name, slot);
         slot
     }
 }
@@ -456,7 +456,7 @@ impl SheetEngine {
             wb: ctx.workbook,
             sheets: SheetTable {
                 slots: vec![self],
-                names: Vec::new(),
+                names: FastMap::default(),
             },
             expr_stack: Vec::new(),
             scratch: Vec::new(),
