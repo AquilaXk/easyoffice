@@ -208,7 +208,7 @@
 #sheet-names-dialog { width: min(760px, calc(100vw - 32px)); }
 #sheet-name-edit-dialog .dialog-label { width: 64px; min-width: 64px; flex-shrink: 0; }
 /* The name list of the 이름 관리 dialog: the list cell of the rules dialog, three columns (PD-214). */
-.tool-dialog .sheet-names-head, .tool-dialog .sheet-names-list li { display: grid; grid-template-columns: 7em 9em minmax(0, 1fr) 6em 8em; gap: 8px; }
+.tool-dialog .sheet-names-head, .tool-dialog .sheet-names-list li { display: grid; grid-template-columns: minmax(0, 18fr) minmax(0, 18fr) minmax(0, 30fr) minmax(0, 14fr) minmax(0, 20fr); gap: 8px; }
 .tool-dialog .sheet-names-head { padding: 3px 8px; border: 1px solid var(--color-border); border-bottom: 0; background: var(--color-surface); color: var(--color-text-muted); font-size: var(--font-size-sm); }
 .tool-dialog .sheet-names-list { max-height: 200px; }
 .tool-dialog .sheet-names-list:empty::before { content: "이름 없음"; }
