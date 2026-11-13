@@ -20,7 +20,7 @@ use crate::rich_xml::{heading_level_from_name, push_linked_run, CharFmt};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
     EasyOfficeError, HwpxCodec, RichAlignment, RichBlock, RichDocument, RichImage, RichListKind,
-    RichPageFrame, RichPageMargins, RichParagraph, RichRun, RichScript, ZipArchiveCodec,
+    RichPageFrame, RichPageMargins, RichPaper, RichParagraph, RichRun, RichScript, ZipArchiveCodec,
     ZipArchiveEntry, ZipSecurityPolicy,
 };
 
@@ -423,8 +423,9 @@ struct SectionWalker {
     /// The header and footer of the page (the first `BOTH` control of each kind) and what was left out.
     frame: RichPageFrame,
     frame_found: [bool; 2],
-    /// Page margins of the first section that gives them.
+    /// Page setup of the first section that gives one.
     margins: Option<RichPageMargins>,
+    paper: Option<RichPaper>,
     left_out: frame::FrameLeftOut,
 }
 
@@ -823,12 +824,11 @@ fn strip_link_flags(command: &str) -> String {
     out
 }
 
-/// The page frame read, with the margins of the section when it has a header or footer.
+/// The page frame read, with the page setup of the first section.
 fn finish_frame(walker: &mut SectionWalker) -> RichPageFrame {
     let mut frame = std::mem::take(&mut walker.frame);
-    if !frame.is_empty() {
-        frame.margins = walker.margins;
-    }
+    frame.margins = walker.margins;
+    frame.paper = walker.paper;
     frame
 }
 

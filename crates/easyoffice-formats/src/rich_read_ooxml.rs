@@ -16,6 +16,7 @@ use crate::rich_read_images::{
     drawing_picture, load_docx_frame_targets, load_docx_hyperlinks, DocxMedia, DrawingOutcome,
 };
 use crate::rich_read_numbering::{read_numbering, Numbering, LIST_LEVELS};
+use crate::rich_read_page_setup::{fitting_setup, page_margins, page_paper};
 use crate::rich_table::TableAssembler;
 use crate::rich_xml::{
     heading_level_from_name, push_linked_run, take_toc_page, toc_role_from_name, toggle_on, CharFmt,
@@ -23,7 +24,7 @@ use crate::rich_xml::{
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
     EasyOfficeError, RichAlignment, RichBlock, RichDocument, RichField, RichImage, RichListKind,
-    RichPageFrame, RichPageMargins, RichParagraph, RichRun, RichScript, XmlSanitizer,
+    RichPageFrame, RichPageMargins, RichPaper, RichParagraph, RichRun, RichScript, XmlSanitizer,
     ZipArchiveCodec, ZipSecurityPolicy, MAX_IMAGES_PER_DOCUMENT, MAX_TOTAL_IMAGE_BYTES,
 };
 
@@ -374,26 +375,11 @@ struct DocxWalker {
     simple_field: Option<(RichField, bool)>,
     /// The field of a complex field whose result is open.
     result_field: Option<RichField>,
-    /// `w:pgMar` of the open section, and the margins of the first section with a header or footer reference.
+    /// `w:pgMar` and `w:pgSz` of the open section, and the page setup of the first section that gives margins.
     section_margins: Option<RichPageMargins>,
-    section_has_ref: bool,
-    frame_margins: Option<RichPageMargins>,
-}
-
-/// `w:pgMar` as page margins: all four distances present (a negative top or bottom, an exact margin in
-/// Word, counts by its size) and within the bounds.
-fn page_margins(attrs: &Attrs<'_>) -> Option<RichPageMargins> {
-    let twips = |key: &str| {
-        let v = attr(attrs, key)?.trim().parse::<i64>().ok()?;
-        u32::try_from(v.abs()).ok()
-    };
-    let margins = RichPageMargins {
-        top: twips("w:top")?,
-        bottom: twips("w:bottom")?,
-        header: twips("w:header")?,
-        footer: twips("w:footer")?,
-    };
-    margins.within_bounds().then_some(margins)
+    section_paper: Option<RichPaper>,
+    first_margins: Option<RichPageMargins>,
+    first_paper: Option<RichPaper>,
 }
 
 impl DocxWalker {
@@ -491,11 +477,11 @@ impl DocxWalker {
         match name {
             "w:sectPr" => {
                 self.section_margins = None;
-                self.section_has_ref = false;
+                self.section_paper = None;
             }
             "w:pgMar" => self.section_margins = page_margins(attrs),
+            "w:pgSz" => self.section_paper = page_paper(attrs),
             "w:headerReference" | "w:footerReference" => {
-                self.section_has_ref = true;
                 if let Some(rel_id) = attr(attrs, "r:id") {
                     self.frame_refs.push(FrameRef {
                         header: name == "w:headerReference",
@@ -604,9 +590,8 @@ impl DocxWalker {
             "w:instrText" => self.in_instruction = false,
             "w:fldSimple" => self.simple_field = None,
             "w:sectPr" => {
-                if self.section_has_ref && self.frame_margins.is_none() {
-                    self.frame_margins = self.section_margins;
-                }
+                self.first_margins = self.first_margins.or(self.section_margins);
+                self.first_paper = self.first_paper.or(self.section_paper);
             }
             "w:rPr" => self.in_rpr = false,
             "w:pPr" => self.in_ppr = false,
@@ -812,7 +797,6 @@ fn read_page_frame(
     media: &DocxMedia<'_>,
     refs: &[FrameRef],
     title_pg: bool,
-    margins: Option<RichPageMargins>,
 ) -> Result<(RichPageFrame, Vec<String>), EasyOfficeError> {
     let mut frame = RichPageFrame::default();
     let mut warnings = Vec::new();
@@ -847,9 +831,6 @@ fn read_page_frame(
         } else {
             frame.footer = paragraphs;
         }
-    }
-    if !frame.is_empty() {
-        frame.margins = margins;
     }
     if other_pages {
         warnings.push("첫 쪽·짝수 쪽 머리말·꼬리말은 가져오지 않았습니다.".to_string());
@@ -896,15 +877,16 @@ pub(crate) fn read_docx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Eas
         ..DocxWalker::default()
     };
     walk_part(doc_xml, &mut walker, &resolver, &media)?;
-    let (page_frame, frame_warnings) = read_page_frame(
+    let (mut page_frame, frame_warnings) = read_page_frame(
         &entries,
         &parts,
         &resolver,
         &media,
         &walker.frame_refs,
         walker.title_pg,
-        walker.frame_margins,
     )?;
+    (page_frame.margins, page_frame.paper) =
+        fitting_setup(walker.first_margins, walker.first_paper);
     let mut warnings = walker.warnings;
     for note in frame_warnings {
         if !warnings.contains(&note) {

@@ -7,7 +7,8 @@ use super::{length_twips, OdtWalker, StyleProps};
 use crate::rich_document::{frame_paragraph, MAX_PAGE_FRAME_PARAGRAPHS};
 use crate::xml_stream::{attr, XmlEvent, XmlReader};
 use crate::{
-    EasyOfficeError, RichBlock, RichListKind, RichPageFrame, RichPageMargins, RichParagraph,
+    EasyOfficeError, RichBlock, RichListKind, RichPageFrame, RichPageMargins, RichPaper,
+    RichParagraph,
 };
 
 /// Margins and header/footer heights of one `style:page-layout`, in twips.
@@ -15,6 +16,10 @@ use crate::{
 struct OdtLayout {
     margin_top: Option<i32>,
     margin_bottom: Option<i32>,
+    margin_left: Option<i32>,
+    margin_right: Option<i32>,
+    page_width: Option<i32>,
+    page_height: Option<i32>,
     header_height: i32,
     footer_height: i32,
 }
@@ -46,12 +51,13 @@ fn read_odt_layouts(xml: &str) -> Result<HashMap<String, OdtLayout>, EasyOfficeE
                 attrs,
             } => {
                 if let Some((_, layout)) = open.as_mut() {
-                    layout.margin_top = attr(&attrs, "fo:margin-top")
-                        .as_deref()
-                        .and_then(length_twips);
-                    layout.margin_bottom = attr(&attrs, "fo:margin-bottom")
-                        .as_deref()
-                        .and_then(length_twips);
+                    let length = |key: &str| attr(&attrs, key).as_deref().and_then(length_twips);
+                    layout.margin_top = length("fo:margin-top");
+                    layout.margin_bottom = length("fo:margin-bottom");
+                    layout.margin_left = length("fo:margin-left");
+                    layout.margin_right = length("fo:margin-right");
+                    layout.page_width = length("fo:page-width");
+                    layout.page_height = length("fo:page-height");
                 }
             }
             XmlEvent::Start {
@@ -106,8 +112,33 @@ fn odt_margins(layout: OdtLayout, has_header: bool, has_footer: bool) -> Option<
         } else {
             0
         })?)?,
+        left: twips(layout.margin_left?)?,
+        right: twips(layout.margin_right?)?,
     };
     margins.within_bounds().then_some(margins)
+}
+
+/// The page setup of a master page's layout: the margins, and the paper when the layout gives both sides and the
+/// margins fit on it (a setup that does not fit is dropped whole).
+fn odt_setup(
+    layout: OdtLayout,
+    has_header: bool,
+    has_footer: bool,
+) -> (Option<RichPageMargins>, Option<RichPaper>) {
+    let Some(margins) = odt_margins(layout, has_header, has_footer) else {
+        return (None, None);
+    };
+    let paper = match (layout.page_width, layout.page_height) {
+        (Some(w), Some(h)) => match (u32::try_from(w), u32::try_from(h)) {
+            (Ok(width), Ok(height)) if width > 0 && height > 0 => Some(RichPaper { width, height }),
+            _ => None,
+        },
+        _ => None,
+    };
+    match paper {
+        Some(p) if !p.holds(&margins) => (None, None),
+        _ => (Some(margins), paper),
+    }
 }
 
 /// The header and footer of the first master page in `styles.xml`; the left and first-page variants of
@@ -206,11 +237,10 @@ pub(super) fn read_page_frame(
     if variants {
         warnings.push("첫 쪽·왼쪽 쪽 머리말·꼬리말은 가져오지 않았습니다.".to_string());
     }
-    if !frame.is_empty() {
-        let layouts = read_odt_layouts(xml)?;
-        let layout = layout_name.and_then(|n| layouts.get(&n).copied());
-        frame.margins =
-            layout.and_then(|l| odt_margins(l, !frame.header.is_empty(), !frame.footer.is_empty()));
+    let layouts = read_odt_layouts(xml)?;
+    if let Some(layout) = layout_name.and_then(|n| layouts.get(&n).copied()) {
+        (frame.margins, frame.paper) =
+            odt_setup(layout, !frame.header.is_empty(), !frame.footer.is_empty());
     }
     Ok(frame)
 }

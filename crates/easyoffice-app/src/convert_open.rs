@@ -22,6 +22,7 @@ use std::fmt::Write;
 use crate::convert_hwp::ShellWriters;
 use crate::convert_structured::{encode_source_target, StructuredContent};
 use crate::convert_structured_doc::parse_pdf_options;
+use crate::page_setup_json::write_page_setup;
 use crate::sheet_look_json::write_look;
 use crate::sheet_rules_json::rules_json;
 use crate::EasyOfficeIpcRouter;
@@ -498,17 +499,7 @@ fn decode_response(
     out.push_str("],");
     match &decoded.content {
         DecodedContent::Document(doc) => {
-            if let Some(m) = doc
-                .page_frame
-                .margins
-                .filter(|_| !doc.page_frame.is_empty())
-            {
-                let _ = write!(
-                    out,
-                    "\"pageMargins\":{{\"top\":{},\"bottom\":{},\"header\":{},\"footer\":{}}},",
-                    m.top, m.bottom, m.header, m.footer
-                );
-            }
+            write_page_setup(&mut out, &doc.page_frame);
             out.push_str("\"blocks\":[");
             write_list(&mut out, &doc.blocks, write_block);
             for (key, paragraphs) in [

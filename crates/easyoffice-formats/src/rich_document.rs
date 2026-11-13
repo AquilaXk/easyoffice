@@ -127,37 +127,78 @@ pub enum RichField {
     FileName,
 }
 
-/// Page margins that place the header and footer, in twips, as a word processor's page setup gives them:
-/// `top` and `bottom` are the distances from the page edge to the body (a taller header pushes the body
-/// down), `header` and `footer` the distances from the page edge to the header and footer.
+/// Page margins in twips, as a word processor's page setup gives them: `top` and `bottom` are the distances
+/// from the page edge to the body (a taller header pushes the body down), `header` and `footer` the distances
+/// from the page edge to the header and footer, `left` and `right` the distances to the body at the sides.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RichPageMargins {
     pub top: u32,
     pub bottom: u32,
     pub header: u32,
     pub footer: u32,
+    pub left: u32,
+    pub right: u32,
 }
 
-/// Largest page margin a document keeps, in twips (22 inches).
+/// The paper as it is shown, in twips: a landscape page is wider than it is high.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RichPaper {
+    pub width: u32,
+    pub height: u32,
+}
+
+/// Largest page margin or paper side a document keeps, in twips (22 inches).
 pub const MAX_PAGE_MARGIN_TWIPS: u32 = 31_680;
+/// Least room the margins leave for the text on a page, in twips (10 mm, the limit of the reference editor's
+/// page setup `rhwp-studio/src/core/page-body-limits.ts`).
+pub const MIN_PAGE_BODY_TWIPS: u32 = 567;
 
 impl RichPageMargins {
     /// The new-document page setup of the reference editor (A4: top 20 mm and bottom 15 mm margins, header
-    /// and footer areas of 15 mm; `rhwp` `src/model/page.rs:36-51`, areas at `:238-269`), in this form: the
-    /// header starts 20 mm from the top and the body 35 mm; the footer ends 15 mm from the bottom and the
-    /// body 30 mm.
+    /// and footer areas of 15 mm, side margins of 30 mm; `rhwp` `src/model/page.rs:36-51`, areas at
+    /// `:238-269`), in this form: the header starts 20 mm from the top and the body 35 mm; the footer ends
+    /// 15 mm from the bottom and the body 30 mm.
     pub const HWP_DEFAULT: Self = Self {
         top: 1984,
         bottom: 1700,
         header: 1134,
         footer: 850,
+        left: 1701,
+        right: 1701,
     };
 
     /// Whether every value is within [`MAX_PAGE_MARGIN_TWIPS`].
     pub fn within_bounds(&self) -> bool {
-        [self.top, self.bottom, self.header, self.footer]
-            .iter()
-            .all(|v| *v <= MAX_PAGE_MARGIN_TWIPS)
+        [
+            self.top,
+            self.bottom,
+            self.header,
+            self.footer,
+            self.left,
+            self.right,
+        ]
+        .iter()
+        .all(|v| *v <= MAX_PAGE_MARGIN_TWIPS)
+    }
+}
+
+impl RichPaper {
+    pub const A4: Self = Self {
+        width: 11_906,
+        height: 16_838,
+    };
+
+    /// Whether the sides are within [`MAX_PAGE_MARGIN_TWIPS`] and the `margins` leave at least
+    /// [`MIN_PAGE_BODY_TWIPS`] of text width and height. The reference editor refuses a setup whose body
+    /// would vanish.
+    pub fn holds(&self, margins: &RichPageMargins) -> bool {
+        let room = |side: u32, a: u32, b: u32| {
+            side <= MAX_PAGE_MARGIN_TWIPS
+                && side.saturating_sub(a).saturating_sub(b) >= MIN_PAGE_BODY_TWIPS
+        };
+        margins.within_bounds()
+            && room(self.width, margins.left, margins.right)
+            && room(self.height, margins.top, margins.bottom)
     }
 }
 
@@ -171,9 +212,12 @@ pub const MAX_PAGE_FRAME_PARAGRAPHS: usize = 64;
 pub struct RichPageFrame {
     pub header: Vec<RichParagraph>,
     pub footer: Vec<RichParagraph>,
-    /// Where the page setup of the file puts them; `None` when it gives none (the editor then uses
-    /// [`RichPageMargins::HWP_DEFAULT`]). Only written and read together with a header or footer.
+    /// The page setup of the first section: the distances of the body, header and footer from the page
+    /// edges. `None` when the file gives none or gives one that does not fit its paper (the editor then uses
+    /// its own default, a writer the format's).
     pub margins: Option<RichPageMargins>,
+    /// The paper of the first section; `None` as above (A4 is written).
+    pub paper: Option<RichPaper>,
 }
 
 impl RichPageFrame {

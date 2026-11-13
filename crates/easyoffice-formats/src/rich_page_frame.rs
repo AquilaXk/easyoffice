@@ -3,7 +3,7 @@
 //! the HWPX `hp:header`/`hp:footer` controls of the first paragraph. The readers live next to each
 //! format's body reader; this module holds what the writers and the readers share.
 
-use crate::rich_document::{RichField, RichPageMargins, RichParagraph};
+use crate::rich_document::{RichField, RichPageMargins, RichPaper, RichParagraph};
 use crate::rich_run_writers::docx_run_properties;
 
 pub(crate) const DOCX_HEADER_PART: &str = "word/header1.xml";
@@ -46,12 +46,29 @@ pub(crate) fn docx_field_run(field: RichField, run_properties: &str) -> String {
     )
 }
 
-/// `w:pgMar` for the section properties (side margins 1 inch, as the page size has no side margin of its own).
-pub(crate) fn docx_page_margins(margins: &RichPageMargins) -> String {
+/// `w:pgSz` for the section properties: A4 when the document has no paper of its own, `w:orient` when the page
+/// is wider than high.
+pub(crate) fn docx_paper(paper: Option<&RichPaper>) -> String {
+    let paper = paper.copied().unwrap_or(RichPaper::A4);
+    let orient = if paper.width > paper.height {
+        " w:orient=\"landscape\""
+    } else {
+        ""
+    };
     format!(
-        "<w:pgMar w:top=\"{}\" w:right=\"1440\" w:bottom=\"{}\" w:left=\"1440\" w:header=\"{}\" w:footer=\"{}\" w:gutter=\"0\"/>",
-        margins.top, margins.bottom, margins.header, margins.footer
+        "<w:pgSz w:w=\"{}\" w:h=\"{}\"{orient}/>",
+        paper.width, paper.height
     )
+}
+
+/// `w:pgMar` for the section properties; empty without margins (the reader's own default applies).
+pub(crate) fn docx_page_margins(margins: Option<&RichPageMargins>) -> String {
+    margins.map_or_else(String::new, |m| {
+        format!(
+            "<w:pgMar w:top=\"{}\" w:right=\"{}\" w:bottom=\"{}\" w:left=\"{}\" w:header=\"{}\" w:footer=\"{}\" w:gutter=\"0\"/>",
+            m.top, m.right, m.bottom, m.left, m.header, m.footer
+        )
+    })
 }
 
 fn docx_frame_paragraph(p: &RichParagraph) -> String {
@@ -176,20 +193,29 @@ fn odt_pt(twips: u32) -> String {
     }
 }
 
-/// The page layout and master page that give an ODT its header and footer: `(page layout, master styles)`.
-/// The layout's top margin is the distance to the header, the header's minimum height reaches the body (and
-/// the same for the footer); a part that is absent leaves its margin as the distance to the body.
+/// The page layout and master page that give an ODT its page setup, header and footer: `(page layout, master
+/// styles)`. The layout's top margin is the distance to the header, the header's minimum height reaches the
+/// body (and the same for the footer); a part that is absent leaves its margin as the distance to the body.
 pub(crate) fn odt_master_page(
     header: Option<&str>,
     footer: Option<&str>,
     margins: Option<&RichPageMargins>,
+    paper: Option<&RichPaper>,
 ) -> (String, String) {
     let m = margins.copied().unwrap_or(RichPageMargins {
         top: 1191,
         bottom: 1191,
         header: 709,
         footer: 709,
+        left: 1134,
+        right: 1134,
     });
+    let paper = paper.copied().unwrap_or(RichPaper::A4);
+    let orientation = if paper.width > paper.height {
+        "landscape"
+    } else {
+        "portrait"
+    };
     let (margin_top, header_height) = match header {
         Some(_) => (m.header, m.top.saturating_sub(m.header)),
         None => (m.top, 0),
@@ -200,15 +226,20 @@ pub(crate) fn odt_master_page(
     };
     let layout = format!(
         concat!(
-            "<style:page-layout style:name=\"pm1\"><style:page-layout-properties fo:page-width=\"21cm\" ",
-            "fo:page-height=\"29.7cm\" style:print-orientation=\"portrait\" fo:margin-top=\"{}\" ",
-            "fo:margin-bottom=\"{}\" fo:margin-left=\"2cm\" fo:margin-right=\"2cm\"/>",
+            "<style:page-layout style:name=\"pm1\"><style:page-layout-properties fo:page-width=\"{}\" ",
+            "fo:page-height=\"{}\" style:print-orientation=\"{}\" fo:margin-top=\"{}\" ",
+            "fo:margin-bottom=\"{}\" fo:margin-left=\"{}\" fo:margin-right=\"{}\"/>",
             "<style:header-style><style:header-footer-properties fo:min-height=\"{}\" fo:margin-bottom=\"0pt\"/></style:header-style>",
             "<style:footer-style><style:header-footer-properties fo:min-height=\"{}\" fo:margin-top=\"0pt\"/></style:footer-style>",
             "</style:page-layout>"
         ),
+        odt_pt(paper.width),
+        odt_pt(paper.height),
+        orientation,
         odt_pt(margin_top),
         odt_pt(margin_bottom),
+        odt_pt(m.left),
+        odt_pt(m.right),
         odt_pt(header_height),
         odt_pt(footer_height)
     );
@@ -224,7 +255,7 @@ pub(crate) fn odt_master_page(
     (layout, master)
 }
 
-/// `styles.xml` of an ODT with a header or footer.
+/// `styles.xml` of an ODT with a page setup, a header or a footer.
 pub(crate) fn odt_styles_xml(
     font_decls: &str,
     automatic_styles: &str,
@@ -291,17 +322,18 @@ pub(crate) fn hwpx_margin_values(m: &RichPageMargins) -> (u32, u32, u32, u32) {
     )
 }
 
-/// The inverse of [`hwpx_margin_values`] for the `(header, footer, top, bottom)` of a `hp:margin`.
+/// The inverse of [`hwpx_margin_values`] for the `(header, footer, top, bottom)` of a `hp:margin` and its side
+/// margins `(left, right)`, all in HWPUNIT.
 pub(crate) fn margins_from_hwpx(
-    header: u32,
-    footer: u32,
-    top: u32,
-    bottom: u32,
+    (header, footer, top, bottom): (u32, u32, u32, u32),
+    (left, right): (u32, u32),
 ) -> RichPageMargins {
     RichPageMargins {
         top: top.saturating_add(header) / HWPUNIT_PER_TWIP,
         bottom: bottom.saturating_add(footer) / HWPUNIT_PER_TWIP,
         header: top / HWPUNIT_PER_TWIP,
         footer: footer / HWPUNIT_PER_TWIP,
+        left: left / HWPUNIT_PER_TWIP,
+        right: right / HWPUNIT_PER_TWIP,
     }
 }

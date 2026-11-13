@@ -26,7 +26,7 @@ use crate::rich_list_writers::{
     OdtListWriter,
 };
 use crate::rich_page_frame::{
-    docx_field_run, docx_frame_part, docx_frame_refs, docx_page_margins, odt_field,
+    docx_field_run, docx_frame_part, docx_frame_refs, docx_page_margins, docx_paper, odt_field,
     odt_master_page, odt_styles_xml, DOCX_FOOTER_PART, DOCX_HEADER_PART,
 };
 use crate::rich_run_writers::{
@@ -293,13 +293,11 @@ pub(crate) fn pack_docx_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeEr
     let header_part = docx_frame_part(&doc.page_frame.header, true);
     let footer_part = docx_frame_part(&doc.page_frame.footer, false);
     let frame = docx_frame_refs(header_part.is_some(), footer_part.is_some());
-    let page_margins = match &doc.page_frame.margins {
-        Some(margins) if !doc.page_frame.is_empty() => docx_page_margins(margins),
-        _ => String::new(),
-    };
     body.push_str(&format!(
-        "<w:sectPr>{}<w:pgSz w:w=\"11906\" w:h=\"16838\"/>{page_margins}</w:sectPr>",
-        frame.section
+        "<w:sectPr>{}{}{}</w:sectPr>",
+        frame.section,
+        docx_paper(doc.page_frame.paper.as_ref()),
+        docx_page_margins(doc.page_frame.margins.as_ref())
     ));
     body.push_str("</w:body></w:document>");
 
@@ -637,7 +635,11 @@ pub(crate) fn pack_odt_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeErr
         body
     );
     XmlSanitizer::validate_safe_xml(&content)?;
-    let has_frame = header_xml.is_some() || footer_xml.is_some();
+    let page = &doc.page_frame;
+    let has_frame = header_xml.is_some()
+        || footer_xml.is_some()
+        || page.margins.is_some()
+        || page.paper.is_some();
     let mut listing = media.listing();
     if has_frame {
         listing.insert(0, ("styles.xml".to_string(), "text/xml"));
@@ -655,7 +657,8 @@ pub(crate) fn pack_odt_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeErr
         let (layout, master) = odt_master_page(
             header_xml.as_deref(),
             footer_xml.as_deref(),
-            doc.page_frame.margins.as_ref(),
+            page.margins.as_ref(),
+            page.paper.as_ref(),
         );
         let styles_xml = odt_styles_xml(&font_decls, &run_styles, &layout, &master);
         XmlSanitizer::validate_safe_xml(&styles_xml)?;

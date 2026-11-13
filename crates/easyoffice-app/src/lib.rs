@@ -24,6 +24,7 @@ mod editor_merge_tests;
 pub mod ffi;
 pub mod http_server;
 pub mod hwp_bundle;
+mod page_setup_json;
 #[cfg(test)]
 mod perf_bench;
 #[cfg(test)]

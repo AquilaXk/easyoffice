@@ -8,14 +8,14 @@
 //! Document metadata (template flag, issuing agency, approval lines) lives in OPF `opf:meta`.
 
 use crate::hwpx_parts::{
-    header_xml, header_xml_with, manifest_xml, section_properties_xml, HwpxCharShape,
+    header_xml, header_xml_with, manifest_xml, section_properties_xml, text_width, HwpxCharShape,
     HwpxParaShape, HwpxStyle, CELL_HEIGHT, CONTAINER_XML, DEFAULT_CHAR_HEIGHT,
     DEFAULT_LINE_PERCENT, HEADING_BULLET, HEADING_NONE, HEADING_NUMBER, HWPUNIT_PER_TWIP,
-    LIST_LEFT_MARGIN, NS_PARAGRAPH, NS_SECTION, SETTINGS_XML, TEXT_WIDTH, VERSION_XML,
+    LIST_LEFT_MARGIN, NS_PARAGRAPH, NS_SECTION, SETTINGS_XML, VERSION_XML,
 };
 use crate::office_codecs::{checked_part, checked_zip_xml_entries};
 use crate::rich_document::{
-    frame_paragraph, RichAlignment, RichBlock, RichDocument, RichField, RichPageMargins,
+    frame_paragraph, RichAlignment, RichBlock, RichDocument, RichField, RichPageMargins, RichPaper,
     RichParagraph,
 };
 use crate::rich_image::{check_document_images, RichImage};
@@ -234,8 +234,9 @@ struct SectionWriter {
     sec_pr_pending: bool,
     /// `hp:ctrl` header and footer of the page, written into the run that holds the section properties.
     frame_controls: String,
-    /// Page margins of the section (`hp:pagePr`); the defaults when `None`.
+    /// Page margins and paper of the section (`hp:pagePr`); the defaults when `None`.
     margins: Option<RichPageMargins>,
+    paper: Option<RichPaper>,
 }
 
 impl SectionWriter {
@@ -249,6 +250,7 @@ impl SectionWriter {
             sec_pr_pending: true,
             frame_controls: String::new(),
             margins: None,
+            paper: None,
         }
     }
 
@@ -261,6 +263,7 @@ impl SectionWriter {
             sec_pr_pending: false,
             frame_controls: String::new(),
             margins: None,
+            paper: None,
         }
     }
 
@@ -287,8 +290,10 @@ impl SectionWriter {
         if self.sec_pr_pending {
             self.sec_pr_pending = false;
             self.xml.push_str("<hp:run charPrIDRef=\"0\">");
-            self.xml
-                .push_str(&section_properties_xml(self.margins.as_ref()));
+            self.xml.push_str(&section_properties_xml(
+                self.margins.as_ref(),
+                self.paper.as_ref(),
+            ));
             self.xml.push_str(&self.frame_controls);
             self.xml.push_str("</hp:run>");
         }
@@ -331,7 +336,7 @@ impl SectionWriter {
     fn table_paragraph(&mut self, rows: &[Vec<String>], spans: Option<&SpanMap>) {
         let row_cnt = rows.len();
         let col_cnt = rows.iter().map(Vec::len).max().unwrap_or(0).max(1);
-        let cell_w = TEXT_WIDTH / col_cnt as u32;
+        let cell_w = text_width(self.margins.as_ref(), self.paper.as_ref()) / col_cnt as u32;
         let tbl_id = self.next_table_id;
         self.next_table_id += 1;
         self.open_paragraph();
@@ -415,9 +420,8 @@ impl HwpxCodec {
         let mut sec = SectionWriter::new();
         let mut shapes = ShapeTables::new();
         shapes.file_text = doc.display_title();
-        if !doc.page_frame.is_empty() {
-            sec.margins = doc.page_frame.margins;
-        }
+        sec.margins = doc.page_frame.margins;
+        sec.paper = doc.page_frame.paper;
         for (header, paragraphs) in [
             (true, &doc.page_frame.header),
             (false, &doc.page_frame.footer),

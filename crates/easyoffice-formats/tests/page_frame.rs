@@ -4,8 +4,8 @@
 
 use easyoffice_formats::{
     DecodedContent, DocumentFormat, EasyOfficeError, RichAlignment, RichBlock, RichDocument,
-    RichField, RichPageFrame, RichPageMargins, RichParagraph, RichRun, UniversalFormatConverter,
-    ZipArchiveCodec, ZipSecurityPolicy, MAX_PAGE_FRAME_PARAGRAPHS,
+    RichField, RichPageFrame, RichPageMargins, RichPaper, RichParagraph, RichRun,
+    UniversalFormatConverter, ZipArchiveCodec, ZipSecurityPolicy, MAX_PAGE_FRAME_PARAGRAPHS,
 };
 
 fn para(runs: Vec<RichRun>, alignment: Option<RichAlignment>) -> RichParagraph {
@@ -37,6 +37,8 @@ const MARGINS: RichPageMargins = RichPageMargins {
     bottom: 1590,
     header: 1134,
     footer: 680,
+    left: 1700,
+    right: 1500,
 };
 
 fn sample() -> RichDocument {
@@ -71,6 +73,7 @@ fn sample() -> RichDocument {
                 Some(RichAlignment::Right),
             )],
             margins: Some(MARGINS),
+            paper: Some(RichPaper::A4),
         },
     }
 }
@@ -414,6 +417,7 @@ fn hwpx_even_and_odd_headers_and_second_sections_are_reported() {
             header: vec![para(vec![RichRun::plain("양쪽")], None)],
             footer: Vec::new(),
             margins: None,
+            paper: None,
         },
         blocks: vec![RichBlock::Paragraph(para(
             vec![RichRun::plain("본문")],
@@ -482,7 +486,7 @@ fn the_margins_that_place_the_frame_come_back_from_all_three_formats() {
         UniversalFormatConverter::encode_rich(&sample(), DocumentFormat::Docx, None).unwrap();
     let parts = entries(&docx);
     assert!(part(&parts, "word/document.xml")
-        .contains("w:top=\"1985\" w:right=\"1440\" w:bottom=\"1590\" w:left=\"1440\" w:header=\"1134\" w:footer=\"680\""));
+        .contains("w:top=\"1985\" w:right=\"1500\" w:bottom=\"1590\" w:left=\"1700\" w:header=\"1134\" w:footer=\"680\""));
     let hwpx =
         UniversalFormatConverter::encode_rich(&sample(), DocumentFormat::Hwpx, None).unwrap();
     // The reference editor's top margin is the distance to the header, its header margin the header's height.
@@ -556,7 +560,7 @@ fn page_total_and_file_name_fields_round_trip_in_docx_and_odt_and_the_file_name_
 }
 
 #[test]
-fn margins_that_are_incomplete_or_out_of_bounds_are_dropped_and_never_without_a_frame() {
+fn margins_that_are_incomplete_or_out_of_bounds_are_dropped() {
     let header = format!("<w:hdr {W}><w:p><w:r><w:t>머리</w:t></w:r></w:p></w:hdr>");
     let rel =
         format!("<Relationship Id=\"rId1\" Type=\"{REL_BASE}/header\" Target=\"header1.xml\"/>");
@@ -606,8 +610,12 @@ fn margins_that_are_incomplete_or_out_of_bounds_are_dropped_and_never_without_a_
         "",
     );
     assert_eq!(
-        decode(&bytes, "n.docx").0.page_frame.margins,
-        None,
-        "a document without a frame has none"
+        decode(&bytes, "n.docx")
+            .0
+            .page_frame
+            .margins
+            .map(|m| (m.top, m.left)),
+        Some((1440, 1440)),
+        "the page setup is read without a frame, a side margin the file leaves out is an inch"
     );
 }

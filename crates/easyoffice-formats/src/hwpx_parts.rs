@@ -5,7 +5,7 @@
 //! style (`style id="0"`) plus optional heading styles; every paragraph and run in
 //! `section0.xml` refers to these IDs.
 
-use crate::{RichScript, XmlSanitizer};
+use crate::{RichPageMargins, RichPaper, RichScript, XmlSanitizer};
 
 pub(crate) const NS_HEAD: &str = "http://www.owpml.org/owpml/2011/head";
 pub(crate) const NS_CORE: &str = "http://www.owpml.org/owpml/2011/core";
@@ -14,10 +14,8 @@ pub(crate) const NS_PARAGRAPH: &str = "http://www.owpml.org/owpml/2011/paragraph
 
 /// A4 portrait page in HWPUNIT (1/7200 inch) with 30 mm side margins.
 const PAGE_WIDTH: u32 = 59_528;
-const PAGE_HEIGHT: u32 = 84_186;
+const PAGE_HEIGHT: u32 = 84_188;
 const MARGIN_SIDE: u32 = 8_504;
-/// Usable text width of the page above.
-pub(crate) const TEXT_WIDTH: u32 = PAGE_WIDTH - 2 * MARGIN_SIDE;
 /// Left margin (HWPUNIT) the writer gives list paragraphs; the reader treats it as the list marker.
 pub(crate) const LIST_LEFT_MARGIN: u32 = 2_000;
 /// Single-spacing-relative line spacing written when a paragraph sets none (percent).
@@ -313,29 +311,64 @@ pub(crate) fn header_xml_with(
     xml
 }
 
+/// The page as `hp:pagePr` keeps it: the paper in HWPUNIT stored upright (the reader of the reference editor
+/// swaps the sides when the page is landscape, `rhwp` `src/parser/hwpx/section.rs:450-458`: `NARROWLY` is
+/// landscape, `WIDELY` portrait) and the side margins.
+fn page_box(
+    margins: Option<&RichPageMargins>,
+    paper: Option<&RichPaper>,
+) -> (u32, u32, bool, u32, u32) {
+    let (width, height, landscape) = paper.map_or((PAGE_WIDTH, PAGE_HEIGHT, false), |p| {
+        let (short, long) = (p.width.min(p.height), p.width.max(p.height));
+        (
+            short * HWPUNIT_PER_TWIP,
+            long * HWPUNIT_PER_TWIP,
+            p.width > p.height,
+        )
+    });
+    let (left, right) = margins.map_or((MARGIN_SIDE, MARGIN_SIDE), |m| {
+        (m.left * HWPUNIT_PER_TWIP, m.right * HWPUNIT_PER_TWIP)
+    });
+    (width, height, landscape, left, right)
+}
+
+/// Usable text width of the page in HWPUNIT (the width of a table that spans the page).
+pub(crate) fn text_width(margins: Option<&RichPageMargins>, paper: Option<&RichPaper>) -> u32 {
+    let (width, height, landscape, left, right) = page_box(margins, paper);
+    let shown = if landscape { height } else { width };
+    shown.saturating_sub(left).saturating_sub(right).max(1)
+}
+
 /// Section properties (`hp:secPr`) plus the column control; must sit in the first run of the
 /// first paragraph of each section.
-pub(crate) fn section_properties_xml(margins: Option<&crate::RichPageMargins>) -> String {
+pub(crate) fn section_properties_xml(
+    margins: Option<&RichPageMargins>,
+    paper: Option<&RichPaper>,
+) -> String {
     let (header, footer, top, bottom) = margins.map_or(
         (4252, 4252, 5668, 4252),
         crate::rich_page_frame::hwpx_margin_values,
     );
+    let (width, height, landscape, left, right) = page_box(margins, paper);
+    let orientation = if landscape { "NARROWLY" } else { "WIDELY" };
     format!(
         concat!(
             "<hp:secPr id=\"\" textDirection=\"HORIZONTAL\" spaceColumns=\"1134\" tabStop=\"8000\" tabStopVal=\"4000\" tabStopUnit=\"HWPUNIT\" outlineShapeIDRef=\"0\" memoShapeIDRef=\"0\" textVerticalWidthHead=\"0\" masterPageCnt=\"0\">",
             "<hp:grid lineGrid=\"0\" charGrid=\"0\" wonggojiFormat=\"0\"/>",
             "<hp:startNum pageStartsOn=\"BOTH\" page=\"0\" pic=\"0\" tbl=\"0\" equation=\"0\"/>",
             "<hp:visibility hideFirstHeader=\"0\" hideFirstFooter=\"0\" hideFirstMasterPage=\"0\" border=\"SHOW_ALL\" fill=\"SHOW_ALL\" hideFirstPageNum=\"0\" hideFirstEmptyLine=\"0\" showLineNumber=\"0\"/>",
-            "<hp:pagePr landscape=\"WIDELY\" width=\"{w}\" height=\"{h}\" gutterType=\"LEFT_ONLY\">",
-            "<hp:margin header=\"{header}\" footer=\"{footer}\" gutter=\"0\" left=\"{m}\" right=\"{m}\" top=\"{top}\" bottom=\"{bottom}\"/>",
+            "<hp:pagePr landscape=\"{orientation}\" width=\"{width}\" height=\"{height}\" gutterType=\"LEFT_ONLY\">",
+            "<hp:margin header=\"{header}\" footer=\"{footer}\" gutter=\"0\" left=\"{left}\" right=\"{right}\" top=\"{top}\" bottom=\"{bottom}\"/>",
             "</hp:pagePr></hp:secPr>",
             "<hp:ctrl><hp:colPr id=\"\" type=\"NEWSPAPER\" layout=\"LEFT\" colCount=\"1\" sameSz=\"1\" sameGap=\"0\"/></hp:ctrl>"
         ),
-        w = PAGE_WIDTH,
-        h = PAGE_HEIGHT,
-        m = MARGIN_SIDE,
+        orientation = orientation,
+        width = width,
+        height = height,
         header = header,
         footer = footer,
+        left = left,
+        right = right,
         top = top,
         bottom = bottom
     )

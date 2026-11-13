@@ -5,10 +5,11 @@
 use std::borrow::Cow;
 
 use super::{Header, SectionWalker};
+use crate::hwpx_parts::HWPUNIT_PER_TWIP;
 use crate::rich_document::{frame_paragraph, MAX_PAGE_FRAME_PARAGRAPHS};
 use crate::rich_page_frame::margins_from_hwpx;
 use crate::xml_stream::{attr, XmlEvent};
-use crate::{RichBlock, RichField, RichRun};
+use crate::{RichBlock, RichField, RichPaper, RichRun};
 
 /// Header and footer controls that are not kept.
 #[derive(Default)]
@@ -23,30 +24,63 @@ pub(super) struct FrameLeftOut {
     pub(super) long: bool,
 }
 
+/// HWPUNIT as twips, to the nearest twip (the reference editor's A4 is 59528 by 84188 HWPUNIT).
+fn to_twips(hwpunit: u32) -> u32 {
+    hwpunit.saturating_add(HWPUNIT_PER_TWIP / 2) / HWPUNIT_PER_TWIP
+}
+
 impl SectionWalker {
-    /// The page margins of a section (`hp:secPr > hp:pagePr > hp:margin`, events span `hp:secPr` to its end);
-    /// the first section that gives them wins.
+    /// The page setup of a section (`hp:secPr > hp:pagePr` and its `hp:margin`, events span `hp:secPr` to its
+    /// end); the first section that gives a setup that fits its paper wins. The paper is stored upright and
+    /// swapped when the page is landscape (`NARROWLY`, `rhwp` `src/parser/hwpx/section.rs:450-458`).
     pub(super) fn on_section_properties(&mut self, events: &[XmlEvent<'_>]) {
         if self.margins.is_some() {
             return;
         }
+        let (mut paper, mut landscape) = (None, false);
         for event in events {
-            let XmlEvent::Start {
-                name: "hp:margin",
-                attrs,
-            } = event
-            else {
+            let XmlEvent::Start { name, attrs } = event else {
                 continue;
             };
             let value = |key: &str| attr(attrs, key).and_then(|v| v.trim().parse::<u32>().ok());
-            if let (Some(header), Some(footer), Some(top), Some(bottom)) = (
+            if *name == "hp:pagePr" {
+                landscape =
+                    attr(attrs, "landscape").is_some_and(|v| v.eq_ignore_ascii_case("NARROWLY"));
+                if let (Some(width), Some(height)) = (value("width"), value("height")) {
+                    paper = Some((to_twips(width), to_twips(height)));
+                }
+                continue;
+            }
+            if *name != "hp:margin" {
+                continue;
+            }
+            if let (Some(header), Some(footer), Some(top), Some(bottom), Some(left), Some(right)) = (
                 value("header"),
                 value("footer"),
                 value("top"),
                 value("bottom"),
+                value("left"),
+                value("right"),
             ) {
-                let margins = margins_from_hwpx(header, footer, top, bottom);
-                self.margins = margins.within_bounds().then_some(margins);
+                let margins = margins_from_hwpx((header, footer, top, bottom), (left, right));
+                let paper = paper.map(|(w, h)| {
+                    let (short, long) = (w.min(h), w.max(h));
+                    if landscape {
+                        RichPaper {
+                            width: long,
+                            height: short,
+                        }
+                    } else {
+                        RichPaper {
+                            width: short,
+                            height: long,
+                        }
+                    }
+                });
+                if paper.is_none_or(|p| p.holds(&margins)) {
+                    self.margins = Some(margins);
+                    self.paper = paper;
+                }
             }
             return;
         }
