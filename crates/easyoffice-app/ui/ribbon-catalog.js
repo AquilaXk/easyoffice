@@ -374,7 +374,9 @@
   const MODULE_SPECIFIC_ID = /^(doc|hwp|sheet|slide|pdf)-mod-/;
   const LEGACY_MENU_ALIASES = {
     "mod-footnote": { DOC: "doc-mod-footnote" },
-    "mod-header": { HWP: "hwp-mod-header" },
+    // The page frame commands are studio commands (`doc-page-frame.js`, the Hangul editor's own commands), not ribbon ones.
+    "mod-header": {},
+    "mod-footer": {},
   };
 
   function allRibbonCommandIds() {

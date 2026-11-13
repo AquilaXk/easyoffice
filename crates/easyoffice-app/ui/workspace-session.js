@@ -520,7 +520,8 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     function syncToolbarGroupVisibility() {
       const bar = document.getElementById("icon-toolbar");
       if (!bar) return;
-      const kids = Array.from(bar.children);
+      // The header/footer edit group shows by the edit state alone (`doc-page-frame.js`).
+      const kids = Array.from(bar.children).filter((el) => el.dataset?.hfGroup === undefined);
       const isGroup = (el) => String(el.className).split(/\s+/).includes("tb-group");
       kids.forEach((el) => {
         if (!isGroup(el)) return;

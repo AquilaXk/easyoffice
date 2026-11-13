@@ -34,6 +34,8 @@
     if (SKIP_TAGS.has(tag)) return true;
     if (el.id === "hwp-manuscript-preview") return true;
     if (el.classList?.contains("doc-table-toolbar")) return true;
+    // The header and footer of the page are read apart from the body (`collectPageFrame`).
+    if (el.dataset?.eoHf !== undefined) return true;
     return typeof el.hasAttribute === "function" && el.hasAttribute("hidden");
   }
 
@@ -43,6 +45,7 @@
 
   // The in-document bookmark of a table-of-contents block (`doc-toc.js`): heading `eo-h-N` is bookmark `_TocN`, an
   // entry's `#eo-h-N` link is `#_TocN` (the engine's `toc_bookmark_number`: 1 to 4294967295, no leading zero).
+  const MAX_FRAME_PARAGRAPHS = 64; // the engine's MAX_PAGE_FRAME_PARAGRAPHS
   const MAX_BOOKMARK = 4294967295;
   const HEADING_ID_RE = /^eo-h-([1-9]\d{0,9})$/;
   const bookmarkNumber = (id) => {
@@ -325,7 +328,7 @@
         runs[0].text = runs[0].text.replace(/^ +/, "");
         runs[runs.length - 1].text = runs[runs.length - 1].text.replace(/ +$/, "").replace(/\n$/, "").replace(/ +$/, "");
       }
-      const kept = runs.filter((r) => r.text.length > 0);
+      const kept = runs.filter((r) => r.text.length > 0 || r.field);
       if (kept.length > 0 || cur.blank) {
         const block = { type: "paragraph", runs: kept };
         Object.assign(block, cur.ctx.layout);
@@ -345,13 +348,27 @@
       if (!text) return;
       if (!cur) cur = { ctx, runs: [] };
       const last = cur.runs[cur.runs.length - 1];
-      if (sameFormat(last, fmt)) {
+      if (!last?.field && sameFormat(last, fmt)) {
         last.text += text;
         return;
       }
       const run = { text };
       if (fmt.script) run.script = fmt.script;
       if (fmt.link) run.link = fmt.link;
+      BOOL_KEYS.forEach((k) => {
+        if (fmt[k]) run[k] = true;
+      });
+      VALUE_KEYS.forEach((k) => {
+        if (fmt[k] !== undefined) run[RUN_FIELDS[k]] = fmt[k];
+      });
+      cur.runs.push(run);
+    }
+
+    // A page-number field (`doc-page-frame.js`) is a run of its own with the format around it.
+    function walkField(ctx, fmt) {
+      if (!cur) cur = { ctx, runs: [] };
+      const run = { text: "", field: "page" };
+      if (fmt.script) run.script = fmt.script;
       BOOL_KEYS.forEach((k) => {
         if (fmt[k]) run[k] = true;
       });
@@ -440,6 +457,7 @@
       if (tag === "BR") return walkLineBreak(ctx, fmt);
       if (tag === "TABLE") return walkTable(node);
       if (tag === "IMG" && node.dataset?.eoImageId) return pushImage(node);
+      if (node.dataset?.eoField === "page") return walkField(ctx, fmt);
       const nextFmt = styleFormat(node, fmt);
       const childNodes = node.childNodes;
       if (!BLOCK_TAGS.has(tag)) {
@@ -464,6 +482,19 @@
     }
     flush();
     return blocks;
+  }
+
+  // The header and footer sections of an editor root as paragraph blocks, as the `header` and `footer` fields of
+  // the payload; a section without text or field is left out.
+  function collectPageFrame(root, options = {}) {
+    const frame = {};
+    for (const section of Array.from(root?.children || [])) {
+      const kind = section.dataset?.eoHf;
+      if ((kind !== "header" && kind !== "footer") || Object.hasOwn(frame, kind)) continue;
+      const blocks = collectDocBlocks(section, options).filter((b) => b.type === "paragraph").slice(0, MAX_FRAME_PARAGRAPHS);
+      if (blocks.some((b) => b.runs.length > 0)) frame[kind] = blocks;
+    }
+    return frame;
   }
 
   function plainParagraphBlocks(lines) {
@@ -559,6 +590,7 @@
 
   host.__EASYOFFICE_SAVE_PAYLOAD__ = {
     collectDocBlocks,
+    collectPageFrame,
     plainParagraphBlocks,
     evaluateDocTableFormulas,
     buildSheetsPayload,

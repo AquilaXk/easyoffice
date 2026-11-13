@@ -67,7 +67,7 @@
       const flow = document.createElement("div");
       flow.className = FLOW_CLASS;
       for (const child of editor.childNodes) {
-        if (!child.classList?.contains("doc-page-layer")) flow.appendChild(child.cloneNode(true));
+        if (!child.classList?.contains("doc-page-layer") && child.dataset?.eoHf === undefined) flow.appendChild(child.cloneNode(true));
       }
       for (const el of flow.querySelectorAll("[id], [contenteditable]")) {
         el.removeAttribute("id");

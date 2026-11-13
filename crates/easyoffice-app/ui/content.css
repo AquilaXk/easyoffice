@@ -360,6 +360,89 @@
   line-height: 1;
   color: inherit;
 }
+/* Header and footer of the page (doc-page-frame.js, PD-211). The sections are stored in the editor and drawn on each
+   sheet of the page layer as copies; the page-number field counts the sheets (`eo-page` counter of the layer). While
+   one is edited, the live section sits on page 1 inside the reference editor's edit region: the guide corners of the
+   page margins around the band (`page-margin-guides.ts`, 14px, same colour as the sheet corners), the badge above its
+   top-left corner (`editor.css` .hf-edit-badge) and the dimmed workspace (`#scroll-container.hf-editing`). */
+#doc-editor { --hf-h: calc(var(--pg-pad-t, 48px) - 16px); }
+#doc-editor > section[data-eo-hf] { display: none; }
+.doc-page-hf {
+  position: absolute;
+  left: var(--pg-pad-l, 56px);
+  right: var(--pg-pad-r, 56px);
+  height: var(--hf-h);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  font-style: normal;
+  font-size: 10pt;
+  line-height: 1.4;
+}
+.doc-page-hf[data-hf="header"] { top: calc((var(--pg-pad-t, 48px) - var(--hf-h)) / 2); justify-content: flex-end; }
+.doc-page-hf[data-hf="footer"] { bottom: calc((var(--pg-pad-b, 48px) - var(--hf-h)) / 2); justify-content: flex-start; }
+.doc-page-hf p, #doc-editor > section[data-eo-hf] p { margin: 0; min-height: 1.4em; }
+.eo-page-field::before { content: counter(eo-page); }
+.doc-page-layer[data-hf-footer] .doc-page-sheet::after { display: none; }
+#doc-editor[data-eo-hf-edit="header"] > section[data-eo-hf="header"],
+#doc-editor[data-eo-hf-edit="footer"] > section[data-eo-hf="footer"] {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  left: var(--pg-pad-l, 56px);
+  width: calc(var(--pg-w, 794px) - var(--pg-pad-l, 56px) - var(--pg-pad-r, 56px));
+  height: var(--hf-h);
+  background: var(--doc-paper);
+  font-size: 10pt;
+  line-height: 1.4;
+  outline: none;
+  cursor: text;
+}
+#doc-editor[data-eo-hf-edit="header"] > section[data-eo-hf="header"] { top: calc((var(--pg-pad-t, 48px) - var(--hf-h)) / 2); justify-content: flex-end; }
+#doc-editor[data-eo-hf-edit="footer"] > section[data-eo-hf="footer"] {
+  top: calc(var(--pg-h, 1123px) - (var(--pg-pad-b, 48px) - var(--hf-h)) / 2 - var(--hf-h));
+  justify-content: flex-start;
+}
+#doc-editor[data-eo-hf-edit] > section[data-eo-hf] .eo-page-field::before { content: "1"; }
+#doc-editor[data-eo-hf-edit] > section[data-eo-hf]::before {
+  content: "";
+  position: absolute;
+  inset: -14px;
+  pointer-events: none;
+  background-image:
+    linear-gradient(#d0d0d0, #d0d0d0), linear-gradient(#d0d0d0, #d0d0d0),
+    linear-gradient(#d0d0d0, #d0d0d0), linear-gradient(#d0d0d0, #d0d0d0),
+    linear-gradient(#d0d0d0, #d0d0d0), linear-gradient(#d0d0d0, #d0d0d0),
+    linear-gradient(#d0d0d0, #d0d0d0), linear-gradient(#d0d0d0, #d0d0d0);
+  background-repeat: no-repeat;
+  background-size: 14px 1px, 1px 14px, 14px 1px, 1px 14px, 14px 1px, 1px 14px, 14px 1px, 1px 14px;
+  background-position:
+    0 14px, 14px 0,
+    calc(100% - 14px) 14px, calc(100% - 14px) 0,
+    0 calc(100% - 14px), 14px calc(100% - 14px),
+    calc(100% - 14px) calc(100% - 14px), calc(100% - 14px) calc(100% - 14px);
+}
+#doc-editor[data-eo-hf-edit] > section[data-eo-hf]::after {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 2;
+  transform: translate(4px, calc(-100% - 4px));
+  padding: 1px 4px 2px;
+  background: color-mix(in srgb, var(--doc-paper) 92%, transparent);
+  color: #333333;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  line-height: 1.4;
+  text-shadow: 0 1px 0 var(--doc-paper), 1px 0 0 var(--doc-paper), -1px 0 0 var(--doc-paper);
+  white-space: nowrap;
+}
+#doc-editor[data-eo-hf-edit] > section[data-eo-hf="header"]::after { content: "머리말(양쪽)"; }
+#doc-editor[data-eo-hf-edit] > section[data-eo-hf="footer"]::after { content: "꼬리말(양쪽)"; }
+.doc-scroll-container.hf-editing { background: var(--ui-active); }
+
 @media screen {
   #doc-editor [data-eo-pg~="m"] { margin-top: var(--pg-mt, 0px) !important; }
   #doc-editor [data-eo-pg~="b"]::before { content: ""; float: left; width: 100%; height: var(--pg-fh, 0px); shape-outside: var(--pg-shape, none); }

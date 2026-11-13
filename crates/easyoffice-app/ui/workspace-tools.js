@@ -18,11 +18,10 @@
   const STUDIO_DIRECT_ACTIONS = { "studio-save": "save", "studio-save-as": "saveAs", "studio-undo": "undo", "studio-redo": "redo", "bench-run": "benchmark", find: "find", replace: "replace", print: "print" };
   const EMBED_BLIND_TOOLS = new Set(["scrub-pii", "security-audit"]);
   const SYMBOL_TABLE_CHAR = "※";
+  const PAGE_FRAME_COMMANDS = { "mod-header": "header", "mod-footer": "footer" };
   // `target`: the ribbon command a module runs for it (`hwp` tells which module); none means the page inserts it itself.
   const INSERT_MOD_DISPATCH = {
     "mod-symbol": { label: "문자표 기호 삽입 완료" },
-    "mod-header": { hwp: true, target: "hwp-mod-header", label: "머리말 적용 완료" },
-    "mod-footer": { label: "꼬리말 적용 완료" },
     "mod-footnote": { hwp: false, target: "doc-mod-footnote", label: "각주 · 미주 삽입 완료" },
   };
 
@@ -116,12 +115,8 @@
         const saved = docTabStore[scope];
         const tempDiv = document.createElement("div");
         restoreDomChildren(tempDiv, saved?.editorNodes || [], document);
-        return {
-          blocks: savePayload.collectDocBlocks(tempDiv, {
-            baseAlign: saved?.layoutStyle?.textAlign,
-            baseLineHeight: saved?.layoutStyle?.lineHeight,
-          }),
-        };
+        const options = { baseAlign: saved?.layoutStyle?.textAlign, baseLineHeight: saved?.layoutStyle?.lineHeight };
+        return { blocks: savePayload.collectDocBlocks(tempDiv, options), ...savePayload.collectPageFrame(tempDiv, options) };
       }
       if (scope === "SHEET") {
         sheetDataStore[getActiveSheetName()] = sheetController.snapshotDomSheetCells();
@@ -615,33 +610,6 @@
       return true;
     }
 
-    function upsertDocHeaderBlock(editor) {
-      const hdr = editor?.querySelector(".eo-hwp-header") || document.createElement("header");
-      hdr.className = "eo-hwp-header";
-      hdr.dataset.hwpHeader = "true";
-      const p = document.createElement("p");
-      p.textContent = "문서 머리말 (표준 양식)";
-      hdr.replaceChildren(p);
-      if (!hdr.parentElement && editor) editor.prepend(hdr);
-      computeSmartStats();
-    }
-
-    // The footer block closes the document like the header block opens it: a block of the body (saved as a paragraph), before the page layer.
-    function upsertDocFooterBlock(editor) {
-      const ftr = editor?.querySelector(".eo-hwp-footer") || document.createElement("aside");
-      ftr.className = "eo-hwp-footer";
-      ftr.dataset.hwpFooter = "true";
-      const p = document.createElement("p");
-      p.textContent = "문서 꼬리말 (표준 양식)";
-      ftr.replaceChildren(p);
-      if (!ftr.parentElement && editor) {
-        const layer = editor.querySelector(":scope > footer.doc-page-layer");
-        if (layer) layer.before(ftr);
-        else editor.appendChild(ftr);
-      }
-      computeSmartStats();
-    }
-
     function appendDocFootnoteBlock(editor) {
       const idx = (editor?.querySelectorAll(".eo-doc-footnote").length || 0) + 1;
       const aside = document.createElement("aside");
@@ -663,10 +631,6 @@
         }
         getDocRuns?.()?.refreshToolbarFromSelection?.();
         computeSmartStats();
-      } else if (cmd === "mod-header") {
-        upsertDocHeaderBlock(editor);
-      } else if (cmd === "mod-footer") {
-        upsertDocFooterBlock(editor);
       } else if (cmd === "mod-footnote") {
         appendDocFootnoteBlock(editor);
       }
@@ -696,7 +660,14 @@
       return false;
     }
 
+    // The header and footer commands edit the page frame in place (`doc-page-frame.js`); the Hangul window's
+    // editor has its own commands for them, which the native menu and the command search send to it.
     function execStudioInsertModCmd(cmd, editor, textTarget, fb, onStudioCmd, curMod, isDocMod) {
+      const frameKind = PAGE_FRAME_COMMANDS[cmd];
+      if (frameKind) {
+        if (isDocMod) deps.getDocPageFrame?.().open(frameKind);
+        return true;
+      }
       const spec = INSERT_MOD_DISPATCH[cmd];
       if (!spec) return false;
       if (!isDocMod) {

@@ -35,7 +35,7 @@
 
   const sheetRowCounts = {};
   let workspaceSession = null;
-  let docRunsUi = null, docLink = null, docToc = null, docTable = null, docPages = null, hwpHost = null, hwpSession = null, windowBridge = null;
+  let docRunsUi = null, docLink = null, docToc = null, docTable = null, docPages = null, docPageFrame = null, hwpHost = null, hwpSession = null, windowBridge = null;
   const icons = host.__EASYOFFICE_ICONS__;
 
   function chainWorkspaceQueue(opFn) {
@@ -122,6 +122,7 @@
   });
   docTable = host.__EASYOFFICE_CREATE_DOC_TABLE__({ document, env: host, getRange: () => docRunsUi.currentRange(), withUndo: docRunsUi.withUndo, setFeedback: (text) => setStatusFeedback(text) });
   docPages = host.__EASYOFFICE_CREATE_DOC_PAGES__({ document, env: host, withUndo: docRunsUi.withUndo, onChange: () => workspacePanels.renderPageStatus() });
+  docPageFrame = host.__EASYOFFICE_CREATE_DOC_PAGE_FRAME__({ document, env: host, withUndo: docRunsUi.withUndo, setFeedback: (text) => setStatusFeedback(text) });
 
   sheetController = host.__EASYOFFICE_CREATE_SHEET_CONTROLLER__({
     document, sheetDataStore, sheetRowCounts, sheetStoreHelpers,
@@ -139,7 +140,7 @@
 
   workspacePanels = host.__EASYOFFICE_CREATE_WORKSPACE_PANELS__({
     document, URL, invokeIpc, docTabStore, sheetDataStore, slideDeckState, localRibbonState,
-    getDocRuns: () => docRunsUi, getDocTable: () => docTable, getDocPages: () => docPages, defaultHwpEditorNodes: DEFAULT_HWP_EDITOR_NODES, createEmptySlideStyleFields,
+    getDocRuns: () => docRunsUi, getDocTable: () => docTable, getDocPages: () => docPages, getDocPageFrame: () => docPageFrame, defaultHwpEditorNodes: DEFAULT_HWP_EDITOR_NODES, createEmptySlideStyleFields,
     parseCellRefParts, isExcludedDocChromeElement, extractEditableDocumentText,
     collectActiveScrubGroups, applyScrubResultsToGroups,
     scrubSheetStoreMap: sheetStoreHelpers.scrubSheetStoreMap, sheetController,
@@ -319,8 +320,9 @@
     }
     if (activeModule === "DOC") items.push({ id: "doc-mod-toc-update", module: "DOC", title: "목차 업데이트", shortcut: "", searchKey: "입력 문서 목차 업데이트 toc" }, { id: "doc-mod-page-break", module: "DOC", title: "쪽 나누기", shortcut: fmt("⌘Enter"), searchKey: "쪽 문서 쪽 나누기 page break " + fmt("⌘Enter") });
     if (activeModule === "DOC" || activeModule === "HWP") {
-      for (const [cmd, title, english] of [["mod-header", "머리말", "header"], ["mod-footer", "꼬리말", "footer"]]) {
-        items.push({ id: "studio-cmd:" + cmd, module: activeModule, title, shortcut: "", searchKey: "쪽 " + title + " " + english, run: () => document.querySelector(`.md-item[data-studio-menu-cmd="${cmd}"]`)?.click() });
+      // The native menu's items: the Hangul editor's own commands while it owns the window, the page frame otherwise.
+      for (const [cmd, title, english, menuId] of [["mod-header", "머리말", "header", "page:header"], ["mod-footer", "꼬리말", "footer", "page:footer"]]) {
+        items.push({ id: "studio-cmd:" + cmd, module: activeModule, title, shortcut: "", searchKey: "쪽 " + title + " " + english, run: () => runNativeMenu(menuId) });
       }
     }
     if (activeModule === "SHEET") items.push(...host.__EASYOFFICE_NATIVE_MENU_TABLE__.sheetMenuPaletteItems(document));
@@ -935,6 +937,7 @@
     docLink.bind();
     docToc.bind(); docTable.bind();
     docPages.attach(document.getElementById("doc-editor"));
+    docPageFrame.attach(document.getElementById("doc-editor"), docPages);
     setupSheetAndConverterHandlers();
     setupSlideAndPdfHandlers();
     setupSmartAndSecurityHandlers();

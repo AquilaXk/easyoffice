@@ -687,3 +687,33 @@ input.sb-ls-select {
   min-height: 16px;
   margin-top: 4px;
 }
+
+/* Header and footer edit mode (rhwp-studio `toolbar.css` .tb-hf-label, both rules in their order): the
+   default groups give way to the edit group while a header or footer is edited. */
+.tb-hf-label {
+  align-self: center;
+  margin: 6px 8px;
+  padding: 5px 10px;
+  border: 1px solid color-mix(in srgb, var(--focus-ring) 55%, var(--ui-border));
+  border-radius: var(--radius-md);
+  background: var(--ui-selected);
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.tb-hf-label {
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--accent-strong);
+  white-space: nowrap;
+}
+
+#icon-toolbar[data-hf-editing]:not([data-hf-editing=""]) > .tb-group:not(.tb-headerfooter-group),
+#icon-toolbar[data-hf-editing]:not([data-hf-editing=""]) > .tb-sep {
+  display: none;
+}

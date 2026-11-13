@@ -47,7 +47,8 @@
     // ---- scanning ---------------------------------------------------------------------------
 
     function isSkipped(el) {
-      return SKIPPED_TAGS.has(el.tagName) || el.classList?.contains(SKIPPED_CLASS) === true;
+      // The header and footer sections (`doc-page-frame.js`) are drawn in the margins, not searched.
+      return SKIPPED_TAGS.has(el.tagName) || el.classList?.contains(SKIPPED_CLASS) === true || el.dataset?.eoHf !== undefined;
     }
 
     function collectGroups() {

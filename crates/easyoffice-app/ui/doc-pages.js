@@ -51,11 +51,13 @@
     const dirty = new Set();
     const styleCache = new Map();
     const listeners = new Set(deps.onChange ? [deps.onChange] : []);
+    const sheetListeners = new Set();
     const bound = [];
 
     // ---- units ------------------------------------------------------------------------------
 
-    const isUnitSkipped = (el) => SKIPPED_TAGS.has(el.tagName) || el.hidden;
+    // The header and footer sections (`doc-page-frame.js`) are drawn in the margins, not laid out in the flow.
+    const isUnitSkipped = (el) => SKIPPED_TAGS.has(el.tagName) || el.hidden || el.dataset?.eoHf !== undefined;
     const isFlowContainer = (el) => FLOW_CONTAINERS.has(el.tagName) || el.classList.contains("eo-doc-toc");
 
     // The blocks the pages are cut between: the editor's children, with lists and the table-of-contents block
@@ -104,13 +106,18 @@
       const px = (v) => Number.parseFloat(v) || 0;
       const padding = { top: px(cs.paddingTop), right: px(cs.paddingRight), bottom: px(cs.paddingBottom), left: px(cs.paddingLeft) };
       const next = core.pageGeometry({ ...core.paperOf(editor), padding });
-      const key = [next.width, next.height, next.padTop, next.padBottom].join(",");
+      const key = [next.width, next.height, next.padTop, next.padBottom, next.padLeft, next.padRight].join(",");
       return { next, changed: key !== geoKey, key };
     }
 
     function applyGeometry(next) {
       editor.style.setProperty("--pg-w", next.width + "px");
       editor.style.setProperty("--pg-h", next.height + "px");
+      // The margins the header and footer are drawn in.
+      editor.style.setProperty("--pg-pad-t", next.padTop + "px");
+      editor.style.setProperty("--pg-pad-b", next.padBottom + "px");
+      editor.style.setProperty("--pg-pad-l", next.padLeft + "px");
+      editor.style.setProperty("--pg-pad-r", next.padRight + "px");
     }
 
     // ---- paper layer ------------------------------------------------------------------------
@@ -139,6 +146,7 @@
         host.appendChild(sheet);
       }
       editor.style.setProperty("--pg-doc-h", count * geo.pitch - geo.gap + "px");
+      for (const fn of sheetListeners) fn(host, count);
     }
 
     // ---- measuring --------------------------------------------------------------------------
@@ -568,6 +576,11 @@
       onChange(fn) {
         listeners.add(fn);
         return () => listeners.delete(fn);
+      },
+      // Called after the sheets of the page layer were made or removed.
+      onSheets(fn) {
+        sheetListeners.add(fn);
+        return () => sheetListeners.delete(fn);
       },
     };
     host.__EASYOFFICE_DOC_PAGES__ = api;

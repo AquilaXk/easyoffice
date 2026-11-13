@@ -123,25 +123,36 @@
     return spec;
   }
 
+  // The page-number field of a header or footer (`doc-page-frame.js`): drawn by the page, not text.
+  const fieldSpec = () => ({ ...elSpec("span", [], {}, { class: "eo-page-field", contenteditable: "false" }), data: { eoField: "page" } });
+
+  // `spec` inside the character formatting of a decoded run.
+  function formatSpec(spec, run) {
+    const runs = host.__EASYOFFICE_DOC_RUNS__;
+    const fmt = runs ? runs.fromModelRun(run) : {};
+    if (fmt.size || fmt.font || fmt.color || fmt.highlight) {
+      spec = runs.buildRunSpec(fmt, [spec]);
+    } else {
+      [["strike", "s"], ["underline", "u"], ["italic", "em"], ["bold", "strong"]].forEach(([flag, tag]) => {
+        if (run[flag] === true) spec = elSpec(tag, [spec]);
+      });
+    }
+    const scriptTag = SCRIPT_TAGS[run.script];
+    return scriptTag ? elSpec(scriptTag, [spec]) : spec;
+  }
+
   function runSpecs(runs) {
     const out = [];
     (runs || []).forEach((run) => {
+      if (run.field === "page") {
+        out.push(formatSpec(fieldSpec(), run));
+        return;
+      }
       const lines = String(run.text ?? "").split("\n");
       lines.forEach((line, idx) => {
         if (idx > 0) out.push(elSpec("br"));
         if (!line) return;
-        let spec = textSpec(line);
-        const runs = host.__EASYOFFICE_DOC_RUNS__;
-        const fmt = runs ? runs.fromModelRun(run) : {};
-        if (fmt.size || fmt.font || fmt.color || fmt.highlight) {
-          spec = runs.buildRunSpec(fmt, [spec]);
-        } else {
-          [["strike", "s"], ["underline", "u"], ["italic", "em"], ["bold", "strong"]].forEach(([flag, tag]) => {
-            if (run[flag] === true) spec = elSpec(tag, [spec]);
-          });
-        }
-        const scriptTag = SCRIPT_TAGS[run.script];
-        const styled = scriptTag ? elSpec(scriptTag, [spec]) : spec;
+        const styled = formatSpec(textSpec(line), run);
         const href = host.__EASYOFFICE_DOC_LINK__?.normalizeUrl(run.link);
         out.push(href ? { ...elSpec("a", [styled], {}, { href }), data: { eoLink: "1" } } : styled);
       });
@@ -259,6 +270,13 @@
       }
     });
     return nodes;
+  }
+
+  // The header and footer of a decoded document as the editor's sections (`doc-page-frame.js`), after the body.
+  function pageFrameNodes(res) {
+    return ["header", "footer"]
+      .filter((kind) => Array.isArray(res[kind]) && res[kind].length > 0)
+      .map((kind) => ({ ...elSpec("section", buildEditorNodes(res[kind]), {}, { class: "eo-page-frame" }), data: { eoHf: kind } }));
   }
 
   // `{ [1-based column]: px }` from a decoded sheet's `columns` (PD-089); invalid entries are skipped.
@@ -388,7 +406,7 @@
       if (mod === "DOC" || mod === "HWP") {
         next.docTabs = next.docTabs || {};
         next.docTabs[mod] = {
-          editorNodes: buildEditorNodes(res.blocks),
+          editorNodes: [...buildEditorNodes(res.blocks), ...pageFrameNodes(res)],
           layoutStyle: next.docTabs[mod]?.layoutStyle || { showParaMarks: "true" },
         };
       } else if (mod === "SHEET") {

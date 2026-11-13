@@ -405,6 +405,14 @@
           <button type="button" class="tb-btn" data-studio-cmd="mod-footnote" title="각주" aria-label="각주"><span class="tb-sprite icon-footnote"></span><span class="tb-label">각주</span></button>
           <button type="button" class="tb-btn" data-studio-cmd="palette" title="명령 검색 (Ctrl+K)" aria-label="명령 검색"><span class="tb-sprite icon-find"></span><span class="tb-label">명령<br/>검색</span></button>
         </div>
+        <div class="tb-group tb-headerfooter-group" data-hf-group hidden>
+          <span class="tb-hf-label"></span>
+          <span class="tb-sep" aria-hidden="true"></span>
+          <button type="button" class="tb-btn" data-hf-action="close" title="닫기" aria-label="닫기"><span class="tb-icon-text" aria-hidden="true">✕</span><span class="tb-label">닫기</span></button>
+          <button type="button" class="tb-btn tb-hf-delete" data-hf-action="delete" title="지우기" aria-label="지우기"><span class="tb-icon-text" aria-hidden="true">🗑</span><span class="tb-label">지우기</span></button>
+          <span class="tb-sep" aria-hidden="true"></span>
+          <button type="button" class="tb-btn" data-hf-action="page-number" title="쪽 번호 삽입" aria-label="쪽 번호 삽입"><span class="tb-icon-text" aria-hidden="true">#</span><span class="tb-label">쪽번호</span></button>
+        </div>
         <span class="tb-sep" data-kinds="SHEET" aria-hidden="true"></span>
         <div class="tb-group" data-kinds="SHEET">
           <button type="button" class="tb-btn" data-sheet-numfmt="currency" title="통화 스타일" aria-label="통화 스타일"><span class="tb-sprite icon-currency"></span><span class="tb-label">통화<br/>스타일</span></button>
@@ -1466,6 +1474,7 @@
     <script src="./doc-table.js"></script>
     <script src="./doc-pages-core.js"></script>
     <script src="./doc-pages.js"></script>
+    <script src="./doc-page-frame.js"></script>
     <script src="./save-payload.js"></script>
     <script src="./desktop-bridge.js"></script>
     <script src="./home-screen.js"></script>
