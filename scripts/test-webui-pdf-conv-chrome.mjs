@@ -11,7 +11,7 @@ import { readText } from "./test-support/read-text.mjs";
 const UI_DIR = new URL("../crates/easyoffice-app/ui/", import.meta.url);
 const read = (name) => readText(fileURLToPath(new URL(name, UI_DIR)));
 
-test("the PDF toolbar is an rhwp toolbar: icon button, sb-* fields, tb-btn action, no legacy button classes", async () => {
+test("the PDF toolbar is an rhwp toolbar: icon-above-label buttons, sb-* fields, no legacy button classes", async () => {
   const { document } = await createWorkspaceHarness({ search: "?module=PDF&win=w-pdf-chrome" });
   const bar = document.getElementById("pdf-toolbar");
   assert.equal(bar.getAttribute("role"), "toolbar");
@@ -19,8 +19,11 @@ test("the PDF toolbar is an rhwp toolbar: icon button, sb-* fields, tb-btn actio
   const rotate = document.getElementById("btn-pdf-rotate");
   assert.ok(rotate.classList.contains("tb-btn"));
   assert.ok(rotate.getAttribute("aria-label"));
-  assert.ok(rotate.querySelector("svg"), "the rotate button shows an icon");
-  assert.ok(document.getElementById("btn-pdf-apply").classList.contains("tb-btn"));
+  assert.ok(rotate.querySelector(".tb-icon-text") && rotate.querySelector(".tb-label")?.textContent.trim(), "the rotate button is the reference's text icon over its label");
+  const apply = document.getElementById("btn-pdf-apply");
+  assert.ok(apply.classList.contains("tb-btn"));
+  assert.ok(apply.querySelector(".tb-sprite") && apply.querySelector(".tb-label")?.textContent.trim(), "the apply button is a sprite cell over its label");
+  assert.ok(apply.getAttribute("aria-label"));
   assert.ok(bar.querySelector(".sb-field-grid"));
   for (const id of ["pdf-watermark-input", "pdf-form-applicant", "pdf-form-dept"]) {
     assert.ok(document.getElementById(id).classList.contains("sb-select"), `${id} uses .sb-select`);

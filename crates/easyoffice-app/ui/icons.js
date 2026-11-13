@@ -11,7 +11,6 @@
     "M" + (cx - r) + " " + cy + "a" + r + " " + r + " 0 1 0 " + 2 * r + " 0a" + r + " " + r + " 0 1 0 " + -2 * r + " 0";
 
   const ICONS = Object.freeze({
-    "rotate-cw": ["M20 5v5h-5", "M20 10a8 8 0 1 0 1 4"],
     save: ["M5 4h11l3 3v13H5z", "M8 4v5h7V4", "M8 20v-6h8v6"],
     undo: ["M9 14L4 9l5-5", "M4 9h10a6 6 0 0 1 0 12h-3"],
     redo: ["M15 14l5-5-5-5", "M20 9H10a6 6 0 0 0 0 12h3"],

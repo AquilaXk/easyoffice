@@ -53,13 +53,13 @@ test("sheet, formula bar and tab rules use design tokens only (no literal colour
 });
 
 // The toolbars of the document, sheet, slide and PDF windows are one format: the reference's tall button with the icon above its label.
-const TOOLBAR_BUTTONS = "#icon-toolbar .tb-btn, #slide-toolbar .tb-btn";
+const TOOLBAR_BUTTONS = "#icon-toolbar .tb-btn, #slide-toolbar .tb-btn, #pdf-toolbar .tb-btn";
 const CHARACTER_ICONS = ["icon-ctrl-mark", "icon-para-mark"];
 
 test("the toolbars are the reference toolbar format: the icon above a label, on the reference sprite", async () => {
   const { document } = await createWorkspaceHarness({ search: "?module=SHEET&win=w-sheet-toolbar" });
   const buttons = [...document.querySelectorAll(TOOLBAR_BUTTONS)];
-  assert.equal(buttons.length, 19 + 12 + 8, "document groups, sheet groups, slide row");
+  assert.equal(buttons.length, 19 + 12 + 8 + 2, "document groups, sheet groups, slide row, PDF row");
   const css = read("toolbar.css");
   for (const button of buttons) {
     const name = button.getAttribute("title");

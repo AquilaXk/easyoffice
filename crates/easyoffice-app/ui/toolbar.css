@@ -76,25 +76,29 @@
   overflow-y: hidden;
 }
 
-#slide-toolbar {
+#slide-toolbar,
+#pdf-toolbar {
   height: 56px;
   padding: 2px 8px;
 }
 
 #icon-toolbar .tb-group,
-#slide-toolbar .tb-group {
+#slide-toolbar .tb-group,
+#pdf-toolbar .tb-group {
   align-items: stretch;
   gap: 0;
 }
 
 #icon-toolbar .tb-sep,
-#slide-toolbar .tb-sep {
+#slide-toolbar .tb-sep,
+#pdf-toolbar .tb-sep {
   width: 1px;
   height: auto;
 }
 
 #icon-toolbar .tb-btn,
-#slide-toolbar .tb-btn {
+#slide-toolbar .tb-btn,
+#pdf-toolbar .tb-btn {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -122,6 +126,18 @@
   height: 18px;
   background-image: var(--ui-icon-sprite-url);
   background-repeat: no-repeat;
+  flex-shrink: 0;
+}
+
+/* Text icon of a button that has no sprite cell (the reference's `.tb-icon-text`). */
+.tb-icon-text {
+  display: block;
+  width: 18px;
+  height: 18px;
+  font-size: var(--font-size-xl);
+  line-height: 18px;
+  text-align: center;
+  color: var(--accent-light);
   flex-shrink: 0;
 }
 
@@ -183,6 +199,7 @@
 .icon-slide-show { background-position: calc(-40px * 8) calc(-40px * 2); }
 .icon-slide-show-current { background-position: calc(-40px * 9) calc(-40px * 2); }
 .icon-pointer { background-position: calc(-40px * 5) calc(-40px * 1); }
+.icon-stamp { background-position: calc(-40px * 19) calc(-40px * 1); }
 .icon-currency { background-position: calc(-40px * 0) calc(-40px * 12); }
 .icon-decimal-increase { background-position: calc(-40px * 1) calc(-40px * 12); }
 .icon-decimal-decrease { background-position: calc(-40px * 2) calc(-40px * 12); }
