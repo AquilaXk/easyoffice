@@ -336,7 +336,17 @@ pub(crate) fn normalize_open_formula_body(stripped: &str) -> std::borrow::Cow<'_
             let start_inner = idx + ch.len_utf8();
             if let Some(end_inner) = find_bracket_close(&mut chars) {
                 let inner = &stripped[start_inner..end_inner];
-                out.push_str(&normalize_bracketed_open_formula_ref(inner));
+                // `[x]` in a parameter list of `LAMBDA`: an optional parameter (a reference always has a dot).
+                let before = out.trim_end().chars().next_back();
+                let word = !inner.is_empty()
+                    && inner.chars().all(|c| c.is_alphanumeric() || c == '_')
+                    && !inner.starts_with(|c: char| c.is_ascii_digit());
+                if word && matches!(before, Some('(' | ',')) {
+                    out.push_str("_xlop.");
+                    out.push_str(inner);
+                } else {
+                    out.push_str(&normalize_bracketed_open_formula_ref(inner));
+                }
                 continue;
             }
             out.push('[');

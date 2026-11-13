@@ -432,9 +432,11 @@ impl SheetEngine {
         ctx.temp.truncate(mark);
         let grid = match val {
             Ok(crate::array::Val::Grid(grid)) => grid,
-            Ok(crate::array::Val::Lambda(_) | crate::array::Val::Ref(_)) => {
-                return V::Error(FormulaError::Calc)
-            }
+            Ok(
+                crate::array::Val::Lambda(_)
+                | crate::array::Val::Ref(_)
+                | crate::array::Val::Omitted,
+            ) => return V::Error(FormulaError::Calc),
             Err(e) => return V::Error(e),
         };
         match anchor {

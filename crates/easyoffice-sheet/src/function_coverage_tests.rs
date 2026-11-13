@@ -31,6 +31,9 @@ fn calling_sources() -> String {
         include_str!("../tests/sheet_dynamic_sequence.rs"),
         include_str!("../tests/sheet_dynamic_randarray.rs"),
         include_str!("../tests/sheet_dynamic_functions.rs"),
+        include_str!("../tests/sheet_dynamic_take_drop.rs"),
+        include_str!("../tests/sheet_dynamic_tocol_torow.rs"),
+        include_str!("../tests/sheet_dynamic_isomitted.rs"),
     ]
     .concat()
 }

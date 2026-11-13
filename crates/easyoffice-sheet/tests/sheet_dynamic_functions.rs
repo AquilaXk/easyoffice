@@ -116,3 +116,127 @@ fn array_constants_and_elementwise_operators() {
     assert_eq!(m._get_text("A4"), "21");
     assert_eq!(column(&m, "A5", 3), ["1", "2", "3"]);
 }
+
+fn grid_text(
+    m: &dynamic_support::Model,
+    first: &str,
+    rows: usize,
+    cols: usize,
+) -> Vec<Vec<String>> {
+    let (col, row) = first.split_at(1);
+    let (col, row) = (col.as_bytes()[0], row.parse::<usize>().unwrap());
+    (0..rows)
+        .map(|r| {
+            (0..cols)
+                .map(|c| m._get_text(&format!("{}{}", (col + c as u8) as char, row + r)))
+                .collect()
+        })
+        .collect()
+}
+
+fn filled(values: &[&str]) -> dynamic_support::Model {
+    let mut m = new_empty_model();
+    // A1:C3 = 1..9
+    for (i, v) in values.iter().enumerate() {
+        m._set(
+            &format!("{}{}", (b'A' + (i % 3) as u8) as char, i / 3 + 1),
+            v,
+        );
+    }
+    m
+}
+
+#[test]
+fn choose_rows_and_columns_count_from_either_end() {
+    let mut m = filled(&["1", "2", "3", "4", "5", "6", "7", "8", "9"]);
+    m._set("E1", "=CHOOSEROWS(A1:C3, 3, -3)");
+    m._set("I1", "=CHOOSECOLS(A1:C3, 1, -1)");
+    m._set("K1", "=CHOOSEROWS(A1:C3, 4)");
+    m._set("L1", "=CHOOSECOLS(A1:C3, 0)");
+    m.evaluate();
+    assert_eq!(
+        grid_text(&m, "E1", 2, 3),
+        [["7", "8", "9"], ["1", "2", "3"]]
+    );
+    assert_eq!(
+        grid_text(&m, "I1", 3, 2),
+        [["1", "3"], ["4", "6"], ["7", "9"]]
+    );
+    assert_eq!(m._get_text("K1"), "#VALUE!");
+    assert_eq!(m._get_text("L1"), "#VALUE!");
+}
+
+#[test]
+fn expand_pads_and_refuses_to_shrink() {
+    let mut m = filled(&["1", "2", "3", "4", "5", "6", "7", "8", "9"]);
+    m._set("E1", "=EXPAND(A1:B2, 3, 3, \"x\")");
+    m._set("I1", "=EXPAND(A1:B2, 3)");
+    m._set("L1", "=EXPAND(A1:C3, 2)");
+    m.evaluate();
+    assert_eq!(
+        grid_text(&m, "E1", 3, 3),
+        [["1", "2", "x"], ["4", "5", "x"], ["x", "x", "x"]]
+    );
+    assert_eq!(
+        grid_text(&m, "I1", 3, 2),
+        [["1", "2"], ["4", "5"], ["#N/A", "#N/A"]]
+    );
+    assert_eq!(m._get_text("L1"), "#VALUE!");
+}
+
+#[test]
+fn vstack_and_hstack_pad_the_short_side_with_na() {
+    let mut m = filled(&["1", "2", "3", "4", "5", "6", "7", "8", "9"]);
+    m._set("E1", "=VSTACK(A1:B1, A2:C2)");
+    m._set("I1", "=HSTACK(A1:A2, A1:A3)");
+    m.evaluate();
+    assert_eq!(
+        grid_text(&m, "E1", 2, 3),
+        [["1", "2", "#N/A"], ["4", "5", "6"]]
+    );
+    assert_eq!(
+        grid_text(&m, "I1", 3, 2),
+        [["1", "1"], ["4", "4"], ["#N/A", "7"]]
+    );
+}
+
+#[test]
+fn wraprows_and_wrapcols_cut_a_vector_into_lines() {
+    let mut m = new_empty_model();
+    m._set("E1", "=WRAPROWS(SEQUENCE(1,5), 2)");
+    m._set("I1", "=WRAPCOLS(SEQUENCE(5), 2, 0)");
+    m._set("M1", "=WRAPROWS(A1:B2, 2)");
+    m.evaluate();
+    assert_eq!(
+        grid_text(&m, "E1", 3, 2),
+        [["1", "2"], ["3", "4"], ["5", "#N/A"]]
+    );
+    assert_eq!(
+        grid_text(&m, "I1", 2, 3),
+        [["1", "3", "5"], ["2", "4", "0"]]
+    );
+    assert_eq!(m._get_text("M1"), "#VALUE!");
+}
+
+#[test]
+fn take_and_drop_accept_a_missing_size() {
+    let mut m = filled(&["1", "2", "3", "4", "5", "6", "7", "8", "9"]);
+    m._set("E1", "=TAKE(A1:C3, , -1)");
+    m._set("G1", "=DROP(A1:C3, 1, 1)");
+    m.evaluate();
+    assert_eq!(grid_text(&m, "E1", 3, 1), [["3"], ["6"], ["9"]]);
+    assert_eq!(grid_text(&m, "G1", 2, 2), [["5", "6"], ["8", "9"]]);
+}
+
+#[test]
+fn an_optional_parameter_and_its_xlsx_spelling() {
+    let mut m = new_empty_model();
+    m._set("A1", "=LAMBDA(a, [b], IF(ISOMITTED(b), a/2, a*b))(12)");
+    m._set("A2", "=LAMBDA(a, [b], IF(ISOMITTED(b), a/2, a*b))(12, 3)");
+    m._set("A3", "=LAMBDA(a, [b], a+b)(1, 2, 3)");
+    m.evaluate();
+    assert_eq!(
+        [m._get_text("A1"), m._get_text("A2"), m._get_text("A3")],
+        ["6", "36", "#VALUE!"]
+    );
+}

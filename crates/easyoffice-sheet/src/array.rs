@@ -126,6 +126,8 @@ pub(crate) fn check_cells(rows: usize, cols: usize) -> Result<(), FormulaError> 
 #[derive(Debug)]
 pub(crate) struct Closure {
     pub(crate) params: Vec<String>,
+    /// Parameters from this one on are optional.
+    pub(crate) required: usize,
     pub(crate) body: Expr,
     pub(crate) env: Env,
 }
@@ -138,6 +140,8 @@ pub(crate) enum Val {
     /// A reference a variable holds (`LET(x, A1, ROW(x))`): it stays a reference where the scalar
     /// engine wants one. It lives only in a scope; reading the variable gives the cells' values.
     Ref(Arc<Expr>),
+    /// A `LAMBDA` parameter the call left out (`ISOMITTED`); read as an empty value.
+    Omitted,
 }
 
 impl Val {
@@ -157,7 +161,7 @@ impl Val {
     pub(crate) fn into_grid(self) -> Result<Arc<Grid>, FormulaError> {
         match self {
             Self::Grid(grid) => Ok(grid),
-            Self::Lambda(_) | Self::Ref(_) => Err(FormulaError::Value),
+            Self::Lambda(_) | Self::Ref(_) | Self::Omitted => Err(FormulaError::Value),
         }
     }
 }

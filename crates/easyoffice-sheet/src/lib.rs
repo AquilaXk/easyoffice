@@ -19,6 +19,7 @@ mod function_coverage_tests;
 pub mod functions;
 mod functions_aggregate;
 mod functions_array_gen;
+mod functions_array_shape;
 mod functions_bessel;
 mod functions_bond;
 pub mod functions_complex;

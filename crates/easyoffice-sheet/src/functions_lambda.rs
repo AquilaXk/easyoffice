@@ -21,7 +21,7 @@ fn element(val: Val) -> V {
     match val {
         Val::Grid(g) if g.is_scalar() => g.top_left(),
         Val::Grid(_) => V::Error(FormulaError::Calc),
-        Val::Lambda(_) | Val::Ref(_) => V::Error(FormulaError::Calc),
+        Val::Lambda(_) | Val::Ref(_) | Val::Omitted => V::Error(FormulaError::Calc),
     }
 }
 
@@ -54,13 +54,21 @@ impl SheetEngine {
             return Err(FormulaError::Value);
         };
         let mut names = Vec::with_capacity(params.len());
-        for param in params {
+        let mut required = params.len();
+        for (i, param) in params.iter().enumerate() {
             let Expr::Var(name) = param else {
                 return Err(FormulaError::Value);
             };
-            names.push(name.clone());
+            // A parameter written `[x]` is optional, and so are the ones after it.
+            match name.strip_prefix('?') {
+                Some(plain) => {
+                    required = required.min(i);
+                    names.push(plain.to_string());
+                }
+                None => names.push(name.clone()),
+            }
         }
-        Ok(self.make_closure(names, body, env))
+        Ok(self.make_closure(names, required, body, env))
     }
 
     fn lambda_arg(
@@ -76,7 +84,7 @@ impl SheetEngine {
                 [V::Error(e)] => Err(*e),
                 _ => Err(FormulaError::Value),
             },
-            Val::Ref(_) => Err(FormulaError::Value),
+            Val::Ref(_) | Val::Omitted => Err(FormulaError::Value),
         }
     }
 

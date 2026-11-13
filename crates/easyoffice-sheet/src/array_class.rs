@@ -23,6 +23,18 @@ pub(crate) fn is_spill_fn(name: &str) -> bool {
             | "BYROW"
             | "BYCOL"
             | "MAKEARRAY"
+            | "TAKE"
+            | "DROP"
+            | "TOCOL"
+            | "TOROW"
+            | "VSTACK"
+            | "HSTACK"
+            | "CHOOSEROWS"
+            | "CHOOSECOLS"
+            | "EXPAND"
+            | "WRAPROWS"
+            | "WRAPCOLS"
+            | "ISOMITTED"
     )
 }
 

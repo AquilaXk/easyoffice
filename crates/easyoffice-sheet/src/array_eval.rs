@@ -84,6 +84,7 @@ impl SheetEngine {
                     let reference = Arc::clone(reference);
                     self.eval_val(&reference, &Env::default(), ctx, depth + 1)
                 }
+                Some(Val::Omitted) => Ok(Val::scalar(V::Empty)),
                 Some(val) => Ok(val.clone()),
                 None => Ok(Val::error(FormulaError::Name)),
             },
@@ -283,6 +284,15 @@ impl SheetEngine {
                 Ok(Val::grid(grid.transposed()))
             }
             "XLOOKUP" => self.fn_xlookup_array(args, env, ctx, depth),
+            "TAKE" | "DROP" => self.fn_take_drop(name == "TAKE", args, env, ctx, depth),
+            "TOCOL" | "TOROW" => self.fn_tocol_torow(name == "TOCOL", args, env, ctx, depth),
+            "VSTACK" | "HSTACK" => self.fn_stack(name == "VSTACK", args, env, ctx, depth),
+            "CHOOSEROWS" | "CHOOSECOLS" => {
+                self.fn_choose(name == "CHOOSEROWS", args, env, ctx, depth)
+            }
+            "EXPAND" => self.fn_expand(args, env, ctx, depth),
+            "WRAPROWS" | "WRAPCOLS" => self.fn_wrap(name == "WRAPROWS", args, env, ctx, depth),
+            "ISOMITTED" => self.fn_isomitted(args, env),
             "IF" => self.fn_if_array(args, env, ctx, depth),
             "IFERROR" | "IFNA" => self.fn_iferror_array(name == "IFNA", args, env, ctx, depth),
             "OFFSET" | "ROW" | "COLUMN"
@@ -345,15 +355,16 @@ impl SheetEngine {
         let Val::Lambda(closure) = f else {
             return Ok(Val::error(FormulaError::Value));
         };
-        if args.len() != closure.params.len() {
+        if args.len() < closure.required || args.len() > closure.params.len() {
             return Ok(Val::error(FormulaError::Value));
         }
         if ctx.lambda_depth >= MAX_LAMBDA_DEPTH {
             return Err(FormulaError::Num);
         }
         let mut env = closure.env.clone();
-        for (param, arg) in closure.params.iter().zip(args) {
-            env = env.bind(param, arg);
+        let mut args = args.into_iter();
+        for param in &closure.params {
+            env = env.bind(param, args.next().unwrap_or(Val::Omitted));
         }
         ctx.lambda_depth += 1;
         let result = self.eval_val(&closure.body, &env, ctx, depth + 1);
@@ -361,9 +372,16 @@ impl SheetEngine {
         result
     }
 
-    pub(crate) fn make_closure(&self, params: Vec<String>, body: &Expr, env: &Env) -> Val {
+    pub(crate) fn make_closure(
+        &self,
+        params: Vec<String>,
+        required: usize,
+        body: &Expr,
+        env: &Env,
+    ) -> Val {
         Val::Lambda(Arc::new(Closure {
             params,
+            required,
             body: body.clone(),
             env: env.clone(),
         }))

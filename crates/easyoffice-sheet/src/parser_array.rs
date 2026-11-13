@@ -95,11 +95,21 @@ fn bound(scope: &[String], name: &str) -> bool {
     scope.iter().any(|v| v.eq_ignore_ascii_case(name))
 }
 
+/// The variable an argument declares. A parameter written `[x]` reaches the parser as `_xlop.x`; it is
+/// kept as the variable `?X` so that `LAMBDA` can tell it is optional.
 fn declare(arg: &mut Expr) -> Option<String> {
     match arg {
         Expr::Name { scope: None, name } => {
-            let upper = name.to_ascii_uppercase();
-            *arg = Expr::Var(upper.clone());
+            let (optional, plain) = match name.strip_prefix("_xlop.") {
+                Some(rest) => (true, rest),
+                None => (false, name.as_str()),
+            };
+            let upper = plain.to_ascii_uppercase();
+            *arg = Expr::Var(if optional {
+                format!("?{upper}")
+            } else {
+                upper.clone()
+            });
             Some(upper)
         }
         _ => None,

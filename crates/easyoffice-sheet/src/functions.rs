@@ -9,8 +9,10 @@ use crate::{EvalContext, EvaluatedCellValue, Expr, FormulaError, SheetEngine};
 /// (PD-201): financial 28, engineering 16, statistics 13, text and information 2, then the 59 of bundle C
 /// (PD-205): math 17, byte text 9, statistics 19, legacy names 14, then the 14 of the dynamic arrays
 /// (PD-217): array 6 (`FILTER`, `SORT`, `SORTBY`, `UNIQUE`, `SEQUENCE`, `RANDARRAY`), `LET` and `LAMBDA`,
-/// and the six that call a lambda (`MAP`, `REDUCE`, `SCAN`, `BYROW`, `BYCOL`, `MAKEARRAY`).
-pub const CANONICAL_FUNCTIONS: [&str; 276] = [
+/// and the six that call a lambda (`MAP`, `REDUCE`, `SCAN`, `BYROW`, `BYCOL`, `MAKEARRAY`), then the 12 that cut,
+/// join and reshape arrays (`TAKE`, `DROP`, `TOCOL`, `TOROW`, `VSTACK`, `HSTACK`, `CHOOSEROWS`, `CHOOSECOLS`,
+/// `EXPAND`, `WRAPROWS`, `WRAPCOLS`) and `ISOMITTED`.
+pub const CANONICAL_FUNCTIONS: [&str; 288] = [
     "SUM",
     "PRODUCT",
     "SUMPRODUCT",
@@ -287,6 +289,18 @@ pub const CANONICAL_FUNCTIONS: [&str; 276] = [
     "BYROW",
     "BYCOL",
     "MAKEARRAY",
+    "TAKE",
+    "DROP",
+    "TOCOL",
+    "TOROW",
+    "VSTACK",
+    "HSTACK",
+    "CHOOSEROWS",
+    "CHOOSECOLS",
+    "EXPAND",
+    "WRAPROWS",
+    "WRAPCOLS",
+    "ISOMITTED",
 ];
 
 /// The numeric values among `vals`.

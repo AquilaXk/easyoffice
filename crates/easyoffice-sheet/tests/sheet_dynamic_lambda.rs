@@ -108,7 +108,7 @@ fn let_bound_variable_captured_in_lambda_body() {
 }
 
 #[test]
-#[ignore = "DIFFERS: optional LAMBDA parameters (`[b]`, `ISOMITTED`) are not supported (PD-217)"]
+
 fn optional_parameter_omitted() {
     let mut model = new_empty_model();
     // b is optional; calling with one arg should use default (a/2 = 6).
@@ -118,7 +118,7 @@ fn optional_parameter_omitted() {
 }
 
 #[test]
-#[ignore = "DIFFERS: optional LAMBDA parameters (`[b]`, `ISOMITTED`) are not supported (PD-217)"]
+
 fn optional_parameter_provided() {
     let mut model = new_empty_model();
     model._set("A1", "=LAMBDA(a, [b], IF(ISOMITTED(b), a/2, a*b))(12, 3)");
