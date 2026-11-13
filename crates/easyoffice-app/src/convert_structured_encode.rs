@@ -191,16 +191,39 @@ fn encode_delimited(
 
 /// Evaluates every formula cell across all sheets (cross-sheet references resolve) and returns
 /// one formula cache per sheet plus, when `with_grids`, the displayed-value grid of each sheet.
+/// One evaluation covers all sheets, so a formula that sheets after it read is computed once.
 fn evaluate_workbook(
     sheets: &[OdsUnpacked],
     with_grids: bool,
 ) -> Result<(Vec<XlsxFormulaCache>, Vec<ValueGrid>), EasyOfficeError> {
     let wb = workbook_engine(sheets);
+    let a1_addrs: Vec<(&str, String)> = sheets
+        .iter()
+        .flat_map(|(name, cells)| {
+            cells
+                .iter()
+                .filter(|(_, _, raw)| raw.starts_with('='))
+                .filter_map(move |(r, c, _)| {
+                    PackedCellCoordinate::new(*r, *c)
+                        .ok()
+                        .map(|coord| (name.as_str(), coord.to_a1()))
+                })
+        })
+        .collect();
+    let targets: Vec<WorkbookEvalTarget<'_>> = a1_addrs
+        .iter()
+        .map(|(sheet, a1)| WorkbookEvalTarget {
+            sheet,
+            expr: a1.as_str(),
+            anchor: None,
+        })
+        .collect();
+    let mut values = wb.evaluate_targets(&targets).values.into_iter();
     let mut caches = Vec::with_capacity(sheets.len());
     let mut grids = Vec::new();
     let mut grid_cells = 0usize;
-    for (name, cells) in sheets {
-        let (cache, displays) = evaluate_sheet(&wb, name, cells, with_grids)?;
+    for (_, cells) in sheets {
+        let (cache, displays) = sheet_values(cells, &mut values, with_grids);
         caches.push(cache);
         if with_grids {
             grids.push(rectangular_grid(&displays, &mut grid_cells)?);
@@ -209,32 +232,13 @@ fn evaluate_workbook(
     Ok((caches, grids))
 }
 
-/// Evaluates one sheet: the formula cache and (when `with_grids`) the displayed cells.
-fn evaluate_sheet(
-    wb: &WorkbookEngine,
-    name: &str,
+/// One sheet's formula cache and (when `with_grids`) displayed cells, taking the value of each
+/// formula cell from `values` in cell order.
+fn sheet_values(
     cells: &[(u32, u32, String)],
+    values: &mut impl Iterator<Item = EvaluatedCellValue>,
     with_grids: bool,
-) -> Result<(XlsxFormulaCache, DisplayCells), EasyOfficeError> {
-    let a1_addrs: Vec<String> = cells
-        .iter()
-        .filter(|(_, _, raw)| raw.starts_with('='))
-        .filter_map(|(r, c, _)| {
-            PackedCellCoordinate::new(*r, *c)
-                .ok()
-                .map(|coord| coord.to_a1())
-        })
-        .collect();
-    let targets: Vec<WorkbookEvalTarget<'_>> = a1_addrs
-        .iter()
-        .map(|a1| WorkbookEvalTarget {
-            sheet: name,
-            expr: a1.as_str(),
-            anchor: None,
-        })
-        .collect();
-    let mut eval_iter = wb.evaluate_targets(&targets).values.into_iter();
-
+) -> (XlsxFormulaCache, DisplayCells) {
     let mut cache = XlsxFormulaCache::new();
     let mut displays = Vec::new();
     for (row, col, raw) in cells {
@@ -242,7 +246,7 @@ fn evaluate_sheet(
             if PackedCellCoordinate::new(*row, *col).is_err() {
                 continue;
             };
-            let value = eval_iter.next().unwrap_or(EvaluatedCellValue::Empty);
+            let value = values.next().unwrap_or(EvaluatedCellValue::Empty);
             if let Some(c) = cached_value(&value) {
                 cache.insert((*row, *col), c);
             }
@@ -254,7 +258,7 @@ fn evaluate_sheet(
             displays.push((*row, *col, display));
         }
     }
-    Ok((cache, displays))
+    (cache, displays)
 }
 
 /// The displayed cells as a rectangle over their used range, so every row has the same width and
