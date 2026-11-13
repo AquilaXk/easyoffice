@@ -20,11 +20,9 @@
 use std::collections::HashMap;
 use std::fmt::Write;
 
-use crate::rtf_xml_helpers::{
-    extract_attr_from_fragment, extract_balanced_elements, format_col_letters,
-};
+use crate::rtf_xml_helpers::format_col_letters;
 use crate::sheet_links::{LinkAllowance, LinkCollector, SheetLinks, MAX_LINKS_PER_SHEET};
-use crate::xml_stream::{XmlEvent, XmlReader};
+use crate::xml_stream::{unescape_cow, XmlEvent, XmlReader};
 use crate::{CellBox, XmlSanitizer};
 
 const HYPERLINK_RELATIONSHIP: &str =
@@ -34,15 +32,26 @@ const REL_NAMESPACE: &str = "http://schemas.openxmlformats.org/officeDocument/20
 /// The addresses of the `hyperlink` relationships of a sheet's relationships part, by relationship id.
 pub(crate) fn hyperlink_relationships(rels_xml: &str) -> HashMap<String, String> {
     let mut out = HashMap::new();
-    for (attrs, _) in extract_balanced_elements(rels_xml, "Relationship") {
-        let is_link = extract_attr_from_fragment(attrs, "Type")
-            .is_some_and(|kind| kind == HYPERLINK_RELATIONSHIP);
-        if let (true, Some(id), Some(target)) = (
-            is_link,
-            extract_attr_from_fragment(attrs, "Id"),
-            extract_attr_from_fragment(attrs, "Target"),
-        ) {
-            out.insert(id.to_string(), XmlSanitizer::unescape(target));
+    let mut reader = XmlReader::unbounded(rels_xml);
+    while let Ok(Some(event)) = reader.next_event() {
+        let XmlEvent::Start {
+            name: "Relationship",
+            attrs,
+        } = event
+        else {
+            continue;
+        };
+        let (mut is_link, mut id, mut target) = (false, None, None);
+        for (name, value) in attrs.iter_raw() {
+            match name {
+                "Type" => is_link = value == HYPERLINK_RELATIONSHIP,
+                "Id" => id = Some(unescape_cow(value)),
+                "Target" => target = Some(unescape_cow(value)),
+                _ => {}
+            }
+        }
+        if let (true, Some(id), Some(target)) = (is_link, id, target) {
+            out.insert(id.into_owned(), target.into_owned());
         }
     }
     out
@@ -97,21 +106,27 @@ pub(crate) fn read_links(
             got.rejected = got.rejected.saturating_add(1);
             break;
         }
-        let Some(area) = attrs.get("ref").and_then(|text| CellBox::parse(&text)) else {
+        let (mut area, mut id, mut location, mut tip) = (None, None, None, None);
+        for (name, value) in attrs.iter_raw() {
+            match name {
+                "ref" => area = CellBox::parse(&unescape_cow(value)),
+                "r:id" => id = relationships.get(unescape_cow(value).as_ref()),
+                "location" => location = Some(unescape_cow(value)).filter(|text| !text.is_empty()),
+                "tooltip" => tip = Some(unescape_cow(value)),
+                _ => {}
+            }
+        }
+        let Some(area) = area else {
             got.rejected = got.rejected.saturating_add(1);
             continue;
         };
-        let location = attrs.get("location").filter(|text| !text.is_empty());
-        let address = attrs
-            .get("r:id")
-            .and_then(|id| relationships.get(id.as_ref()));
-        let target = match (address, location) {
+        let target = match (id, location) {
             (Some(base), Some(fragment)) => Some(format!("{base}#{fragment}")),
             (Some(base), None) => Some(base.clone()),
             (None, Some(location)) => Some(format!("#{location}")),
             (None, None) => None,
         };
-        let tip = attrs.get("tooltip").unwrap_or_default();
+        let tip = tip.unwrap_or_default();
         match target {
             Some(target) => got.add_area(allowance, area, &target, &tip),
             None => got.rejected = got.rejected.saturating_add(1),

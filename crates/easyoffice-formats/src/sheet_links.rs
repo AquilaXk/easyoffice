@@ -122,15 +122,22 @@ impl LinkCollector {
     pub(crate) fn add(
         &mut self,
         allowance: &mut LinkAllowance,
-        (row, col): (u32, u32),
+        at: (u32, u32),
         target: &str,
         tip: &str,
     ) -> bool {
-        let Some(link) = CellLink::new(target, tip) else {
-            self.rejected = self.rejected.saturating_add(1);
-            return true;
-        };
-        if self.links.contains_key(&(row, col)) {
+        match CellLink::new(target, tip) {
+            Some(link) => self.insert(allowance, at, link),
+            None => {
+                self.rejected = self.rejected.saturating_add(1);
+                true
+            }
+        }
+    }
+
+    /// [`Self::add`] for a link the policy has passed.
+    fn insert(&mut self, allowance: &mut LinkAllowance, at: (u32, u32), link: CellLink) -> bool {
+        if self.links.contains_key(&at) {
             return true;
         }
         let cost = link.bytes();
@@ -139,7 +146,7 @@ impl LinkCollector {
             return false;
         }
         allowance.bytes_left -= cost;
-        self.links.insert((row, col), link);
+        self.links.insert(at, link);
         true
     }
 
@@ -152,18 +159,18 @@ impl LinkCollector {
         target: &str,
         tip: &str,
     ) {
-        if CellLink::new(target, tip).is_none() {
+        let Some(link) = CellLink::new(target, tip) else {
             self.rejected = self.rejected.saturating_add(1);
             return;
-        }
+        };
         if area.area() > MAX_LINK_AREA_CELLS {
             self.rejected = self.rejected.saturating_add(1);
-            self.add(allowance, (area.row0, area.col0), target, tip);
+            self.insert(allowance, (area.row0, area.col0), link);
             return;
         }
         for row in area.row0..=area.row1 {
             for col in area.col0..=area.col1 {
-                if !self.add(allowance, (row, col), target, tip) {
+                if !self.insert(allowance, (row, col), link.clone()) {
                     return;
                 }
             }
