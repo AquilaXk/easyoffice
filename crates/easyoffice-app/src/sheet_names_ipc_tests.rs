@@ -247,3 +247,49 @@ fn the_name_check_names_the_first_rule_a_new_name_breaks() {
         "{\"problem\":\"scope\"}"
     );
 }
+
+#[test]
+fn the_values_of_the_names_are_a_cell_a_range_in_braces_or_a_result() {
+    let id = open(&[
+        ("Sheet1!A1", "10"),
+        ("Sheet1!A2", "글"),
+        ("Sheet1!B1", "3"),
+        ("Sheet1!B2", "4"),
+    ]);
+    set_names(
+        &id,
+        "[{\"name\":\"One\",\"refersTo\":\"Sheet1!$A$1\"},{\"name\":\"Block\",\"refersTo\":\"Sheet1!$A$1:$B$2\"},{\"name\":\"Calc\",\"refersTo\":\"One*2\"},{\"name\":\"Big\",\"refersTo\":\"Sheet1!$A$1:$A$1000\"},{\"name\":\"Gone\",\"refersTo\":\"#REF!\"}]",
+    );
+    let res = call(&format!(
+        "{{\"sessionAction\":\"nameValues\",\"session\":\"{id}\"}}"
+    ));
+    let values: Vec<String> = field(&res, "values")
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(values[0], "10");
+    assert_eq!(values[1], "{10,3;\"글\",4}");
+    assert_eq!(values[2], "20");
+    assert!(
+        values[3].starts_with("{10;\"글\";") && values[3].ends_with("…}"),
+        "{}",
+        values[3]
+    );
+    assert_eq!(values[4], "#REF!");
+    let gone = call("{\"sessionAction\":\"nameValues\",\"session\":\"nope\"}");
+    assert_eq!(gone.to_json_string(), "{\"expired\":true}");
+}
+
+#[test]
+fn many_candidates_are_judged_together_with_the_names_the_page_holds() {
+    let res = call(concat!(
+        "{\"sessionAction\":\"nameCheck\",\"sheets\":[\"Sheet1\"],\"names\":[{\"name\":\"Taken\",\"refersTo\":\"1\"}],",
+        "\"candidates\":[{\"name\":\"Fresh\",\"refersTo\":\"Sheet1!$A$1\"},{\"name\":\"taken\",\"refersTo\":\"1\"},{\"name\":\"FRESH\",\"refersTo\":\"2\"},{\"name\":\"A1\",\"refersTo\":\"1\"}]}"
+    ));
+    assert_eq!(
+        res.to_json_string(),
+        "{\"problems\":[null,\"duplicate\",\"duplicate\",\"name\"]}"
+    );
+}

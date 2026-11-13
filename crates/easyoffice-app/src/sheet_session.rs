@@ -730,6 +730,7 @@ impl EasyOfficeIpcRouter {
             "structure" => Self::sheet_session_structure(entries, owner),
             "names" => Self::sheet_session_names(entries, owner),
             "nameCheck" => Self::sheet_name_check(entries),
+            "nameValues" => Self::sheet_session_name_values(entries, owner),
             "sheetRefs" => Self::sheet_session_sheet_refs(entries, owner),
             "validate" => Self::sheet_session_validate(entries, owner),
             "pivot" => Self::sheet_pivot(entries),

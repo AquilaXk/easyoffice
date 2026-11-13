@@ -6,10 +6,13 @@
 //!   that cannot be used (`name`, `reserved`, `duplicate`, `scope`, `formula`, `comment`, `cycle`, `size`).
 //!   The page sends the whole list; the engine answers `{"refused":"limit"}` when the names make the
 //!   session outgrow its memory bound.
+//! - `nameValues` `{session}` -> `{values:[text]}`: the value of every name of the session, in the order of the list
+//!   the page sent, as the 이름 관리 list shows it (a cell's value, a range as `{a,b;c,d}`).
 //! - `nameCheck` `{sheets:[names], names:[...], candidate:{...}, replace?:{name, scope?}}` -> `{problem}`
 //!   (`null` when the candidate can be defined): the first rule a new or changed name breaks, judged with
 //!   the names the page holds (no session needed). `problem` also carries `detail` for a name that breaks
-//!   the syntax.
+//!   the syntax. With `candidates` (up to 10,000) instead of `candidate` it answers `{problems:[null|code]}`, one
+//!   per candidate, judged together (the 선택 영역에서 이름 만들기 dialog).
 
 use crate::sheet_names_json::{issue_code, issues_json, names_field, names_json, parse_name};
 use crate::sheet_session::{recalc_answer, session_id, Applied, Registry, EXPIRED, REFUSED};
@@ -78,7 +81,52 @@ impl Registry {
     }
 }
 
+impl Registry {
+    /// The value text of each name of the session (see the module header).
+    pub(crate) fn name_values(
+        &self,
+        id: &str,
+        owner: &str,
+        now: Instant,
+    ) -> Result<Applied, EasyOfficeError> {
+        let Some(handle) = self.checkout(id, owner, now) else {
+            return Ok(Applied::Expired);
+        };
+        let Ok(session) = handle.lock() else {
+            self.forget(id);
+            return Ok(Applied::Expired);
+        };
+        let wb = session.workbook();
+        let mut out = format!("{{\"session\":\"{id}\",\"values\":[");
+        for (i, def) in wb.names().iter().enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            out.push('"');
+            EasyOfficeIpcRouter::escape_json_into(&mut out, &wb.name_value_text(def));
+            out.push('"');
+        }
+        out.push_str("]}");
+        Ok(Applied::Done(out))
+    }
+}
+
 impl EasyOfficeIpcRouter {
+    pub(crate) fn sheet_session_name_values(
+        entries: &Entries,
+        owner: &str,
+    ) -> Result<String, EasyOfficeError> {
+        match crate::sheet_session::registry().name_values(
+            session_id(entries)?,
+            owner,
+            Instant::now(),
+        )? {
+            Applied::Done(json) => Ok(json),
+            Applied::Expired => Ok(EXPIRED.to_string()),
+            Applied::Refused => Ok(REFUSED.to_string()),
+        }
+    }
+
     pub(crate) fn sheet_session_names(
         entries: &Entries,
         owner: &str,
@@ -93,23 +141,17 @@ impl EasyOfficeIpcRouter {
     }
 
     pub(crate) fn sheet_name_check(entries: &Entries) -> Result<String, EasyOfficeError> {
+        if let Some(list) = StrictJsonValue::get_field(entries, "candidates") {
+            return Self::sheet_name_check_many(entries, list);
+        }
         let candidate = parse_name(StrictJsonValue::get_field(entries, "candidate").ok_or_else(
             || EasyOfficeError::InvalidArgument("JSON 'candidate' 필드가 필요합니다.".to_string()),
         )?)?;
-        let defs = names_field(entries)?;
-        let sheets: Vec<&str> = StrictJsonValue::get_field(entries, "sheets")
-            .and_then(StrictJsonValue::as_array)
-            .map(|items| items.iter().filter_map(StrictJsonValue::as_str).collect())
-            .unwrap_or_default();
         let replace = match StrictJsonValue::get_field(entries, "replace") {
             Some(v) if !matches!(v, StrictJsonValue::Null) => Some(parse_name(v)?),
             _ => None,
         };
-        let mut wb = WorkbookEngine::new();
-        for sheet in &sheets {
-            wb.add_sheet(*sheet);
-        }
-        wb.set_names_lenient(&defs);
+        let wb = Self::name_check_workbook(entries)?;
         let issue = wb.check_name(
             &candidate,
             replace
@@ -124,6 +166,45 @@ impl EasyOfficeIpcRouter {
                 format!("{{\"problem\":\"{}\"{syntax}}}", issue_code(issue))
             }
         })
+    }
+
+    fn sheet_name_check_many(
+        entries: &Entries,
+        list: &StrictJsonValue,
+    ) -> Result<String, EasyOfficeError> {
+        let candidates = crate::sheet_names_json::parse_names(list)?;
+        let wb = Self::name_check_workbook(entries)?;
+        let mut out = String::from("{\"problems\":[");
+        for (i, issue) in wb.check_names(&candidates).into_iter().enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            match issue {
+                None => out.push_str("null"),
+                Some(issue) => out.push_str(&format!("\"{}\"", issue_code(issue))),
+            }
+        }
+        out.push_str("]}");
+        Ok(out)
+    }
+
+    /// A workbook of the request's sheets and names, to judge new names against.
+    fn name_check_workbook(entries: &Entries) -> Result<WorkbookEngine, EasyOfficeError> {
+        let mut wb = WorkbookEngine::new();
+        for sheet in StrictJsonValue::get_field(entries, "sheets")
+            .and_then(StrictJsonValue::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(StrictJsonValue::as_str)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
+        {
+            wb.add_sheet(sheet);
+        }
+        wb.set_names_lenient(&names_field(entries)?);
+        Ok(wb)
     }
 
     /// The names of the session as `{"names":[...]}` fields for an answer.

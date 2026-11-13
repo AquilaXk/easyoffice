@@ -15,6 +15,9 @@ pub struct WorkbookEngine {
     names: Arc<NameTable>,
 }
 
+/// Cells of a range a name's value shows in the 이름 관리 list.
+pub const NAME_VALUE_CELLS: usize = 24;
+
 /// A change of the defined names worked out but not applied: the new table and the formulas
 /// (sheet index, cell) that use a name whose meaning changes and so compile again.
 pub(crate) struct NamesPlan {
@@ -90,6 +93,86 @@ impl WorkbookEngine {
             .iter()
             .find(|&&(i, _)| i == at)
             .map(|&(_, issue)| issue)
+    }
+
+    /// [`check_name`](Self::check_name) for many new definitions at once, judged together with the names the
+    /// workbook has: a name that repeats an earlier candidate is a duplicate. One table is built for all.
+    pub fn check_names(&self, candidates: &[DefinedName]) -> Vec<Option<crate::NameIssue>> {
+        let mut defs: Vec<DefinedName> = self.names().to_vec();
+        let first = defs.len();
+        defs.extend_from_slice(candidates);
+        let sheet_names: Vec<&str> = self.sheets.iter().map(|s| s.name.as_str()).collect();
+        let issues = NameTable::build(&defs, &sheet_names, true).issues;
+        (first..defs.len())
+            .map(|i| {
+                issues
+                    .iter()
+                    .find(|&&(j, _)| j == i)
+                    .map(|&(_, issue)| issue)
+            })
+            .collect()
+    }
+
+    /// The value of a name as the 이름 관리 list shows it: a cell's value, a range as `{a,b;c,d}` (rows end with `;`, at
+    /// most [`NAME_VALUE_CELLS`] cells, `…` for the rest), any other formula its result on the sheet the name
+    /// belongs to (the first sheet for a workbook name).
+    pub fn name_value_text(&self, def: &DefinedName) -> String {
+        let Some(sheet) = def
+            .scope
+            .as_deref()
+            .or_else(|| self.sheets.first().map(|s| s.name.as_str()))
+        else {
+            return String::new();
+        };
+        let folded = easyoffice_formats::fold_name(&def.name);
+        if let Some(Ok(crate::Expr::SheetRange { sheet: at, range })) =
+            self.names.resolved_expr(&folded, sheet)
+        {
+            return self.range_text(at, range);
+        }
+        self.evaluate_formula_on_sheet(sheet, &format!("={}", def.name))
+            .to_display_string()
+    }
+
+    fn range_text(&self, sheet: &str, range: &CellRange) -> String {
+        let (r0, r1) = (
+            range.start.row().min(range.end.row()),
+            range.start.row().max(range.end.row()),
+        );
+        let (c0, c1) = (
+            range.start.col().min(range.end.col()),
+            range.start.col().max(range.end.col()),
+        );
+        let mut out = String::from("{");
+        let mut shown = 0usize;
+        'rows: for r in r0..=r1 {
+            for c in c0..=c1 {
+                if shown == NAME_VALUE_CELLS {
+                    out.push('…');
+                    break 'rows;
+                }
+                if c > c0 {
+                    out.push(',');
+                }
+                let Ok(coord) = PackedCellCoordinate::new(r, c) else {
+                    break 'rows;
+                };
+                match self.evaluate_cell(sheet, &coord.to_a1()) {
+                    EvaluatedCellValue::Text(t) => {
+                        out.push('"');
+                        out.push_str(&t.replace('"', "\"\""));
+                        out.push('"');
+                    }
+                    other => out.push_str(&other.to_display_string()),
+                }
+                shown += 1;
+            }
+            if r < r1 && shown < NAME_VALUE_CELLS {
+                out.push(';');
+            }
+        }
+        out.push('}');
+        out
     }
 
     pub(crate) fn plan_names(

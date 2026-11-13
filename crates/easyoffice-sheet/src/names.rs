@@ -189,6 +189,15 @@ impl NameTable {
             .or_else(|| entries.iter().find(|r| r.scope.is_none()))
     }
 
+    /// The expanded definition of `folded` for a formula on `sheet` (see [`Self::lookup`]).
+    pub(crate) fn resolved_expr(
+        &self,
+        folded: &str,
+        sheet: &str,
+    ) -> Option<&Result<Expr, FormulaError>> {
+        self.lookup(folded, sheet).map(|r| &r.expr)
+    }
+
     /// Builds the table of `defs` for a workbook with `sheets`. Every definition with a problem is
     /// listed in `issues`; those with a bad name, a duplicate or an unknown scope are left out of
     /// the table, the others stay in it reading as errors. `strict` also refuses a name that is
