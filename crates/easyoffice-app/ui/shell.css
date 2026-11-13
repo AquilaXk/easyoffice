@@ -225,11 +225,11 @@
 /* Check box cell (sheet-rules.js sets data-dv-box): the box is centered in the cell and the value text is hidden while it is the checked or the unchecked value. */
 .sheet-grid td[data-dv-box] { position: relative; }
 .sheet-grid td[data-dv-box].dv-box-hide-value:not(.editing) { color: transparent; }
-.sheet-grid td[data-dv-box]::before { content: ""; position: absolute; left: 50%; top: 50%; width: 14px; height: 14px; box-sizing: border-box; margin: -7px 0 0 -7px; border: 1px solid var(--color-border-dark); border-radius: var(--radius-sm); background: var(--color-surface); cursor: pointer; }
+.sheet-grid td[data-dv-box]::before { content: ""; position: absolute; left: 50%; top: 50%; width: 14px; height: 14px; box-sizing: border-box; margin: -7px 0 0 -7px; border: 1px solid var(--color-border-dark); border-radius: 0; background: var(--color-surface); cursor: pointer; }
 .sheet-grid td[data-dv-box="on"]::before { border-color: var(--color-primary); background: var(--color-primary); }
 .sheet-grid td[data-dv-box="on"]::after { content: ""; position: absolute; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; background: var(--color-surface); -webkit-mask: var(--dv-check-mask) center / 12px no-repeat; mask: var(--dv-check-mask) center / 12px no-repeat; pointer-events: none; }
 .cf-dropdown-menu[aria-multiselectable="true"] li { position: relative; padding-left: 30px; }
-.cf-dropdown-menu[aria-multiselectable="true"] li::before { content: ""; position: absolute; left: 10px; top: 50%; width: 14px; height: 14px; box-sizing: border-box; margin-top: -7px; border: 1px solid var(--color-border-dark); border-radius: var(--radius-sm); background: var(--color-surface); }
+.cf-dropdown-menu[aria-multiselectable="true"] li::before { content: ""; position: absolute; left: 10px; top: 50%; width: 14px; height: 14px; box-sizing: border-box; margin-top: -7px; border: 1px solid var(--color-border-dark); border-radius: 0; background: var(--color-surface); }
 .cf-dropdown-menu[aria-multiselectable="true"] li[aria-checked="true"]::before { border-color: var(--color-primary); background: var(--color-primary); }
 .cf-dropdown-menu[aria-multiselectable="true"] li[aria-checked="true"]::after { content: ""; position: absolute; left: 10px; top: 50%; width: 14px; height: 14px; margin-top: -7px; background: var(--color-surface); -webkit-mask: var(--dv-check-mask) center / 12px no-repeat; mask: var(--dv-check-mask) center / 12px no-repeat; }
 
@@ -297,10 +297,9 @@
 :where(.sheet-grid td.frozen-row, .sheet-grid td.frozen-col) { background-color: var(--ui-surface); }
 .sheet-grid td.frozen-row.frozen-col, .sheet-grid tbody th.frozen-row { z-index: 3; }
 .sheet-grid thead th.frozen-col { z-index: 4; }
-/* The frozen edge is the status bar divider (`status-bar.css` .stb-divider: a 1px strong line and a 1px paper-colour line). */
-.sheet-grid .frozen-edge-row { box-shadow: inset 0 -1px 0 var(--doc-paper), inset 0 -2px 0 var(--ui-border-strong); }
-.sheet-grid .frozen-edge-col { box-shadow: inset -1px 0 0 var(--doc-paper), inset -2px 0 0 var(--ui-border-strong); }
-.sheet-grid .frozen-edge-row.frozen-edge-col { box-shadow: inset -1px -1px 0 var(--doc-paper), inset -2px -2px 0 var(--ui-border-strong); }
+.sheet-grid .frozen-edge-row { box-shadow: inset 0 -1px 0 var(--ui-border-strong); }
+.sheet-grid .frozen-edge-col { box-shadow: inset -1px 0 0 var(--ui-border-strong); }
+.sheet-grid .frozen-edge-row.frozen-edge-col { box-shadow: inset -1px -1px 0 var(--ui-border-strong); }
 /* Outline (PD-208): sheet-outline-ui.js draws a lane per level beside the row numbers and above the column letters; the frame leaves them no room until a group exists. */
 .sheet-frame { flex: 1 1 auto; min-height: 220px; min-width: 0; display: grid; grid-template-columns: var(--outline-w, 0px) minmax(0, 1fr); grid-template-rows: var(--outline-h, 0px) minmax(0, 1fr); background: var(--ui-bg-light); }
 .sheet-frame > .sheet-viewport { grid-area: 2 / 2; min-height: 0; }
@@ -311,17 +310,18 @@
 .sheet-outline .outline-plane { position: absolute; overflow: hidden; }
 .sheet-outline-rows .outline-plane { left: 0; right: 0; top: 26px; bottom: 0; }
 .sheet-outline-cols .outline-plane { top: 0; bottom: 0; left: 56px; right: 0; }
-/* Outline buttons are the status bar icon button (`status-bar.css` .stb-icon-btn: 24x24, no radius, a transparent 1px border, the hover fill and strong border); the bar is its divider (.stb-divider). */
-.outline-bar { position: absolute; box-sizing: border-box; border: 0 solid var(--ui-border-strong); }
-.sheet-outline-rows .outline-bar { width: 2px; margin-left: -1px; border-left-width: 1px; border-right: 1px solid var(--doc-paper); }
-.sheet-outline-cols .outline-bar { height: 2px; margin-top: -1px; border-top-width: 1px; border-bottom: 1px solid var(--doc-paper); }
-.outline-toggle, .outline-level { position: absolute; box-sizing: border-box; width: 24px; height: 24px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border: 1px solid transparent; border-radius: 0; background: transparent; color: var(--color-text-secondary); font-size: var(--font-size-sm); cursor: pointer; }
-.outline-toggle .eo-icon { width: 18px; height: 18px; stroke-width: 1.5; }
+.outline-bar { position: absolute; background: var(--ui-text-muted); }
+.sheet-outline-rows .outline-bar { width: 1px; }
+.sheet-outline-cols .outline-bar { height: 1px; }
+.outline-toggle { position: absolute; box-sizing: border-box; width: 11px; height: 11px; padding: 0; border: 1px solid var(--ui-text-muted); border-radius: 0; background: var(--ui-surface); color: var(--ui-text); }
+.outline-toggle::before, .outline-toggle.folded::after { content: ""; position: absolute; background: currentColor; }
+.outline-toggle::before { left: 2px; right: 2px; top: 4px; height: 1px; }
+.outline-toggle.folded::after { top: 2px; bottom: 2px; left: 4px; width: 1px; }
 .outline-levels { position: absolute; display: flex; }
 .outline-levels-row { top: 0; left: 0; height: 26px; align-items: flex-end; }
 .outline-levels-col { left: 0; top: 0; width: 56px; flex-direction: column; align-items: flex-end; }
-.outline-level { position: static; }
-.outline-level:hover, .outline-toggle:hover { background: var(--ui-hover); border-color: var(--ui-border-strong); }
+.outline-level { box-sizing: border-box; width: 14px; height: 14px; padding: 0; border: 1px solid var(--ui-border-strong); background: var(--ui-surface); color: var(--ui-text); font-size: 10px; line-height: 12px; text-align: center; }
+.outline-level:hover, .outline-toggle:hover { background: var(--ui-hover); }
 .outline-toggle:focus-visible, .outline-level:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; z-index: 1; }
 /* Sheet tabs (PD-209, sheet-tab-ui.js): the name typed in the tab's place, a tab dragged to another place, and the two dialogs. The dialog values are rhwp-studio's confirm dialog (360px, body padding 16px 20px, line height 1.6). */
 .sheet-tab-btn { transition: transform 0.12s ease; }

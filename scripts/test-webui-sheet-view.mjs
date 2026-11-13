@@ -122,13 +122,13 @@ test("grouping rows draws a bar and a button, folding hides them, a level button
   assert.deepEqual(layout().outlineOf("Sheet1").rows, [[3, 5, 1]]);
   const side = document.getElementById("sheet-outline-rows");
   assert.equal(side.hidden, false);
-  assert.equal(document.getElementById("sheet-frame").style.getPropertyValue("--outline-w"), "48px");
+  assert.equal(document.getElementById("sheet-frame").style.getPropertyValue("--outline-w"), "28px");
   const toggle = () => side.querySelector(".outline-toggle");
   assert.equal(toggle().dataset.first, "3");
   assert.equal(toggle().getAttribute("aria-label"), "행 3~5 하위 수준 숨기기");
   assert.equal(toggle().getAttribute("aria-expanded"), "true");
-  // The button (24px, the status bar icon button) sits on the summary row 6: five rows of 24px, centred.
-  assert.equal(toggle().style.top, 6 * 24 - 24 + 12 - 12 + "px");
+  // The button sits on the summary row 6: 26px of the header and five rows of 24px, centred.
+  assert.equal(toggle().style.top, 6 * 24 - 24 + 12 - 5.5 + "px");
   assert.equal(side.querySelectorAll(".outline-bar").length, 1);
 
   userClick(toggle());

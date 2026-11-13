@@ -10,7 +10,7 @@
   const ROW_H = 22; // the height of a field in a dialog (`.dialog-input`)
   const LIST_ROWS = 10;
   const BUFFER_ROWS = 3;
-  const HIT_PX = 15; // the right end of a header cell that opens the panel: its arrow cell, 15px wide and as tall as the cell
+  const HIT_PX = 22; // the corner of a header cell that opens the panel (its button is 18px)
   const MENU_MARGIN = 2; // rhwp-studio's context menu keeps 2px from the window edge
   const SEARCH_DELAY_MS = 120;
 
@@ -34,7 +34,7 @@
       const td = ev.target?.closest?.("td.filter-head");
       if (!td || (ev.button ?? 0) !== 0) return;
       const box = td.getBoundingClientRect();
-      if (ev.clientX < box.right - HIT_PX) return;
+      if (ev.clientX < box.right - HIT_PX || ev.clientY < box.bottom - HIT_PX) return;
       ev.preventDefault();
       ev.stopPropagation();
       void open(td._col, box.left, box.bottom);
