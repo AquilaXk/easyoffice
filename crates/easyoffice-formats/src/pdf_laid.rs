@@ -6,8 +6,8 @@
 
 use std::collections::HashMap;
 
-use crate::pdf_text_wrap::{text_units, wrap_spans};
-use crate::pdf_writer::{tj_operand, PdfLaidPage, PdfPageEntry, PDF_TEXT_FONT_PT};
+use crate::pdf_text_wrap::wrap_spans;
+use crate::pdf_writer::{mixed_units, text_ops, PdfLaidPage, PdfPageEntry, PDF_TEXT_FONT_PT};
 use crate::rich_document::{
     RichAlignment, RichBindingKind, RichDocument, RichField, RichParagraph,
 };
@@ -28,6 +28,8 @@ const ROW_PX: f64 = 24.0;
 const HEADING_COL_PX: f64 = 36.0;
 const HEADING_ROW_PX: f64 = 22.0;
 const SHEET_FONT_PT: f64 = 10.0;
+/// The width of every grid line, in points.
+const GRID_WIDTH_PT: f64 = 0.5;
 const CELL_PAD_PT: f64 = 4.0;
 const DEFAULT_SHEET_MARGIN_MM: f64 = 10.0;
 const WIDE_SHEET_COLUMNS: u32 = 8;
@@ -38,7 +40,7 @@ const MAX_SHEET_CELLS: u64 = 200_000;
 
 /// Text width in points at `size` pt.
 fn width_pt(text: &str, size: f64) -> f64 {
-    f64::from(text_units(text)) * size / 1000.0
+    f64::from(mixed_units(text)) * size / 1000.0
 }
 
 /// One page being drawn: the content stream in PDF user space (origin bottom left).
@@ -61,15 +63,36 @@ impl Canvas {
         if text.is_empty() {
             return;
         }
-        let (font, operand) = tj_operand(text);
-        self.ops.push(format!(
-            "BT {font} {size:.2} Tf {x:.2} {y:.2} Td {operand} Tj ET"
-        ));
+        self.ops.push(text_ops(x, y, size, text));
     }
 
     fn line(&mut self, x1: f64, y1: f64, x2: f64, y2: f64) {
         self.ops
             .push(format!("{x1:.2} {y1:.2} m {x2:.2} {y2:.2} l S"));
+    }
+
+    /// The grid lines of one page at one width: every row edge and column edge once, or, without grid lines, the box of the
+    /// headings alone.
+    fn grid(&mut self, xs: &[f64], ys: &[f64], all: bool, headings: bool) {
+        let (Some(&left), Some(&right), Some(&top), Some(&bottom)) =
+            (xs.first(), xs.last(), ys.first(), ys.last())
+        else {
+            return;
+        };
+        let (cols, rows): (&[f64], &[f64]) = if all {
+            (xs, ys)
+        } else if headings && xs.len() > 1 && ys.len() > 1 {
+            (&xs[..2], &ys[..2])
+        } else {
+            return;
+        };
+        self.ops.push(format!("{GRID_WIDTH_PT} w"));
+        for &y in rows {
+            self.line(left, y, right, y);
+        }
+        for &x in cols {
+            self.line(x, top, x, bottom);
+        }
     }
 
     fn finish(self, rotation_degrees: u16) -> PdfPageEntry {
@@ -462,7 +485,13 @@ fn sheet_area_pages(
             let font = SHEET_FONT_PT * scale;
             let pad = CELL_PAD_PT * scale;
             let mut y = y_top;
-            let draw_grid = page.grid_lines || page.headings;
+            // The edges the cells share are drawn once: one line per row edge and per column edge, across the whole page.
+            let mut xs = vec![x0];
+            let mut ys = vec![y_top];
+            let mut xs_done = false;
+            if head_w > 0.0 {
+                xs.push(x0 + head_w * scale);
+            }
             if head_h > 0.0 {
                 let h = head_h * scale;
                 let mut x = x0 + head_w * scale;
@@ -481,6 +510,7 @@ fn sheet_area_pages(
                     x += w;
                 }
                 y -= h;
+                ys.push(y);
             }
             for &i in &rows {
                 let h = row_sizes[i] * scale;
@@ -514,20 +544,16 @@ fn sheet_area_pages(
                         };
                         canvas.text(tx, y - h + (h - font) / 2.0 + 1.0, font, &shown);
                     }
-                    if page.grid_lines {
-                        canvas.line(x, y - h, x + w, y - h);
-                        canvas.line(x + w, y, x + w, y - h);
-                    }
                     x += w;
+                    if !xs_done {
+                        xs.push(x);
+                    }
                 }
-                if page.grid_lines {
-                    canvas.line(x0 + head_w * scale, y, x, y);
-                }
+                xs_done = true;
                 y -= h;
+                ys.push(y);
             }
-            if draw_grid {
-                canvas.line(x0, y_top, x0 + content_w, y_top);
-            }
+            canvas.grid(&xs, &ys, page.grid_lines, page.headings);
             entries.push(canvas.finish(0));
         }
     }

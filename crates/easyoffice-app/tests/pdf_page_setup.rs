@@ -13,14 +13,56 @@ fn pdf(payload: &str) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
-/// The text a PDF string operand holds, as the writer spells it: ASCII in parentheses, the rest as UTF-16 hex.
-fn operand(text: &str) -> String {
-    if text.is_ascii() {
-        format!("({text})")
-    } else {
-        let hex: String = text.encode_utf16().map(|u| format!("{u:04X}")).collect();
-        format!("<{hex}>")
+/// The operands that show `text` as the writer spells them: one operand in one font, or, when the text has Latin-1 signs
+/// beyond ASCII, run by run (ASCII and Latin-1 in parentheses, the signs as octal escapes, the rest as UTF-16 hex).
+fn operands(text: &str) -> Vec<String> {
+    if !text.chars().any(|c| matches!(c, '\u{A0}'..='\u{FF}')) {
+        return vec![if text.is_ascii() {
+            format!("({text})")
+        } else {
+            format!(
+                "<{}>",
+                text.encode_utf16()
+                    .map(|u| format!("{u:04X}"))
+                    .collect::<String>()
+            )
+        }];
     }
+    let latin = |c: char| matches!(c, ' '..='~' | '\u{A0}'..='\u{FF}');
+    let mut out: Vec<String> = Vec::new();
+    let mut run = String::new();
+    let mut run_latin = false;
+    let flush = |run: &mut String, run_latin: bool, out: &mut Vec<String>| {
+        if run.is_empty() {
+            return;
+        }
+        out.push(if run_latin {
+            let body: String = run
+                .chars()
+                .map(|c| {
+                    if c.is_ascii() {
+                        c.to_string()
+                    } else {
+                        format!("\\{:03o}", c as u32)
+                    }
+                })
+                .collect();
+            format!("({body})")
+        } else {
+            let hex: String = run.encode_utf16().map(|u| format!("{u:04X}")).collect();
+            format!("<{hex}>")
+        });
+        run.clear();
+    };
+    for c in text.chars() {
+        if !run.is_empty() && latin(c) != run_latin {
+            flush(&mut run, run_latin, &mut out);
+        }
+        run_latin = latin(c);
+        run.push(c);
+    }
+    flush(&mut run, run_latin, &mut out);
+    out
 }
 
 fn media_boxes(pdf: &str) -> Vec<(f64, f64)> {
@@ -35,8 +77,21 @@ fn media_boxes(pdf: &str) -> Vec<(f64, f64)> {
         .collect()
 }
 
+/// How many times `text` is shown: its operands one after the other, only text-object and font operators between them.
 fn count(pdf: &str, text: &str) -> usize {
-    pdf.matches(&operand(text)).count()
+    let ops = operands(text);
+    pdf.match_indices(&ops[0])
+        .filter(|(at, first)| {
+            let mut rest = &pdf[at + first.len()..];
+            ops[1..].iter().all(|next| match rest.find(next.as_str()) {
+                Some(i) if i < 90 => {
+                    rest = &rest[i + next.len()..];
+                    true
+                }
+                _ => false,
+            })
+        })
+        .count()
 }
 
 fn sheet_payload(page: &str) -> String {
@@ -180,4 +235,86 @@ fn a_document_with_a_header_but_no_setup_is_a_portrait_a4_with_the_header_and_nu
     );
     assert_eq!(count(&out, "머리말 글"), boxes.len());
     assert_eq!(count(&out, &format!("- 1 / {} -", boxes.len())), 1);
+}
+
+#[test]
+fn grid_lines_are_drawn_once_per_shared_edge_at_one_width() {
+    let out = pdf(&sheet_payload(
+        r#","page":{"printArea":["A1:C3"],"grid":true}"#,
+    ))
+    .unwrap();
+    assert_eq!(
+        out.matches(" l S").count(),
+        (3 + 1) + (3 + 1),
+        "four row edges and four column edges"
+    );
+    assert_eq!(
+        out.matches(" w\n").count() + out.matches(" w ").count(),
+        1,
+        "one stroke width"
+    );
+    assert_eq!(out.matches("0.5 w").count(), 1);
+    let with_headings = pdf(&sheet_payload(
+        r#","page":{"printArea":["A1:C3"],"grid":true,"headings":true}"#,
+    ))
+    .unwrap();
+    assert_eq!(
+        with_headings.matches(" l S").count(),
+        (3 + 2) + (3 + 2),
+        "the heading row and column add an edge each"
+    );
+    let headings_only = pdf(&sheet_payload(
+        r#","page":{"printArea":["A1:C3"],"headings":true}"#,
+    ))
+    .unwrap();
+    assert_eq!(
+        headings_only.matches(" l S").count(),
+        4,
+        "the box of the headings"
+    );
+}
+
+/// Every character of the header and the body is in the page's text, in the font that shows it: the middle dot by the Latin
+/// font, the rest by the Korean one (a character outside the Basic Multilingual Plane as its two code units).
+#[test]
+fn no_character_of_a_header_or_body_is_dropped() {
+    let samples = [
+        "총무팀 · 대외비",
+        "※ 참고 사항",
+        "전각 ＊ ① ★ ㈜",
+        "é ± ½ ©",
+        "웃음 😀 끝",
+    ];
+    let body = samples
+        .iter()
+        .map(|t| format!(r#"{{"type":"paragraph","runs":[{{"text":"{t}"}}]}}"#))
+        .collect::<Vec<_>>()
+        .join(",");
+    let payload = format!(
+        r#"{{"sourceFormat":"docx","targetFormat":"pdf","title":"t","blocks":[{body}],"header":[{{"type":"paragraph","runs":[{{"text":"{}"}}]}}]}}"#,
+        samples[0]
+    );
+    let out = pdf(&payload).unwrap();
+    for text in samples {
+        assert!(count(&out, text) >= 1, "{text:?} is shown whole");
+        for c in text.chars().filter(|c| !c.is_whitespace()) {
+            let needle = if c.is_ascii() {
+                c.to_string()
+            } else if ('\u{A0}'..='\u{FF}').contains(&c) {
+                format!("\\{:03o}", c as u32)
+            } else {
+                c.to_string()
+                    .encode_utf16()
+                    .map(|u| format!("{u:04X}"))
+                    .collect()
+            };
+            assert!(out.contains(&needle), "{c:?} of {text:?} is missing");
+        }
+    }
+    assert!(out.contains("\\267"), "the middle dot is the Latin font's");
+    assert!(
+        out.contains("/W [1 [278 278 355 "),
+        "a space between Korean words is a Latin space, not half an em"
+    );
+    assert_eq!(count(&out, samples[0]), 2, "the header and the body line");
 }

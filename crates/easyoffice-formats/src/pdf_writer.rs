@@ -42,6 +42,72 @@ pub(crate) fn pdf_text_string(text: &str) -> String {
     }
 }
 
+/// Whether the Latin font (Helvetica, WinAnsi) shows `c`: ASCII and the Latin-1 letters and signs (the middle dot among them).
+fn in_latin_font(c: char) -> bool {
+    matches!(c, ' '..='~' | '\u{A0}'..='\u{FF}')
+}
+
+/// Width of `text` in thousandths of the font size as [`text_ops`] shows it: the Latin font's widths for what it shows,
+/// a full em for the rest. Latin-1 signs outside the ASCII table count 556, the width of most of them.
+pub(crate) fn mixed_units(text: &str) -> u32 {
+    text.chars()
+        .map(|c| match c {
+            ' '..='~' => crate::pdf_text_wrap::ascii_units(c),
+            '\u{A0}'..='\u{FF}' => 556,
+            _ => 1000,
+        })
+        .sum()
+}
+
+/// The operators that show `text` at (`x`, `y`) in `size` pt. A line the Korean font shows whole is one text object in one
+/// font ([`tj_operand`]). A line with Latin-1 signs outside ASCII (the middle dot, accented letters), which the Korean
+/// font's viewer substitute may not draw, is split at the font changes into one text object per run, each at the advance
+/// width of the runs before it, the signs and the ASCII beside them in the Latin font. No character is left out.
+pub(crate) fn text_ops(x: f64, y: f64, size: f64, text: &str) -> String {
+    if !text.chars().any(|c| matches!(c, '\u{A0}'..='\u{FF}')) {
+        let (font, operand) = tj_operand(text);
+        return format!("BT {font} {size:.2} Tf {x:.2} {y:.2} Td {operand} Tj ET");
+    }
+    let mut out = String::new();
+    let mut at = x;
+    let mut rest = text;
+    while let Some(first) = rest.chars().next() {
+        let latin = in_latin_font(first);
+        let end = rest
+            .char_indices()
+            .find(|&(_, c)| in_latin_font(c) != latin)
+            .map_or(rest.len(), |(i, _)| i);
+        let (run, tail) = rest.split_at(end);
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        if latin {
+            let literal = run.chars().fold(String::new(), |mut acc, c| {
+                match c {
+                    '\\' | '(' | ')' => {
+                        acc.push('\\');
+                        acc.push(c);
+                    }
+                    ' '..='~' => acc.push(c),
+                    _ => acc.push_str(&format!("\\{:03o}", c as u32)),
+                }
+                acc
+            });
+            out.push_str(&format!(
+                "BT /F1 {size:.2} Tf {at:.2} {y:.2} Td ({literal}) Tj ET"
+            ));
+        } else {
+            out.push_str(&format!(
+                "BT /F2 {size:.2} Tf {at:.2} {y:.2} Td <{}> Tj ET",
+                encode_utf16be_hex_impl(run)
+            ));
+        }
+        at += f64::from(mixed_units(run)) * size / 1000.0;
+        rest = tail;
+    }
+    out
+}
+
 pub(crate) fn tj_operand(text: &str) -> (&'static str, String) {
     if text.is_ascii() {
         ("/F1", format!("({})", escape_pdf_text(text)))
@@ -148,10 +214,21 @@ pub(crate) fn text_entries(
         .collect()
 }
 
-fn page_content_stream(page: &PdfPageModel, watermark: Option<&str>) -> String {
+/// The content stream of a text page. Lines are one font each where highlight annotations were placed by their widths
+/// (`annotated`); otherwise they switch fonts run by run ([`text_ops`]).
+fn page_content_stream(page: &PdfPageModel, watermark: Option<&str>, annotated: bool) -> String {
     let mut stream_lines: Vec<String> = Vec::new();
     for (l_idx, line_str) in page.body_text.split('\n').enumerate() {
         let y = PDF_BODY_FIRST_BASELINE_PT - (l_idx as i32) * PDF_BODY_LINE_PITCH_PT;
+        if !annotated {
+            stream_lines.push(text_ops(
+                PDF_TEXT_MARGIN_PT as f64,
+                f64::from(y),
+                PDF_TEXT_FONT_PT as f64,
+                line_str,
+            ));
+            continue;
+        }
         let (font_tag, operand) = tj_operand(line_str);
         stream_lines.push(format!(
             "BT {font_tag} {PDF_TEXT_FONT_PT} Tf {PDF_TEXT_MARGIN_PT} {y} Td {operand} Tj ET"
@@ -368,7 +445,8 @@ impl PdfSerializer {
         w.object(
             cid_font_obj,
             &format!(
-                "<< /Type /Font /Subtype /CIDFontType0 /BaseFont /{KOREAN_CID_FONT} /CIDSystemInfo << /Registry (Adobe) /Ordering (Korea1) /Supplement 1 >> /FontDescriptor {descriptor_obj} 0 R /DW 1000 /W [1 95 500] >>"
+                "<< /Type /Font /Subtype /CIDFontType0 /BaseFont /{KOREAN_CID_FONT} /CIDSystemInfo << /Registry (Adobe) /Ordering (Korea1) /Supplement 1 >> /FontDescriptor {descriptor_obj} 0 R /DW 1000 /W {} >>",
+                crate::pdf_text_wrap::cid_ascii_widths()
             ),
         );
         w.object(
@@ -420,11 +498,11 @@ fn write_page(
                 content,
             )
         }
-        (PdfPageEntry::Text(page, _), _) => (
+        (PdfPageEntry::Text(page, annotations), _) => (
             page.page_number,
             page.rotation_degrees,
             String::new(),
-            page_content_stream(page, watermark),
+            page_content_stream(page, watermark, !annotations.is_empty()),
         ),
         (PdfPageEntry::Image(page), Some(image_obj)) => (
             page.page_number,

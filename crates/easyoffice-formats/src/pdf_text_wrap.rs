@@ -3,8 +3,8 @@
 //! A line is shown with one font: Helvetica when it is ASCII, otherwise the predefined Korean CID
 //! font. Helvetica advances are the published metrics of that standard font (the PDF base-14
 //! Helvetica AFM, WinAnsi codes 32..=126, thousandths of the font size). The Korean font is
-//! measured with the widths the writer declares for it (`/DW 1000`, `/W [1 95 500]`): ASCII is half
-//! width, every other character full width. Breaks fall after spaces; a word wider than a whole
+//! measured with the widths the writer declares for it (`/DW 1000` and the Helvetica widths for the
+//! ASCII CIDs, `/W [1 [...]]`): ASCII keeps its Helvetica width, every other character is full width. Breaks fall after spaces; a word wider than a whole
 //! line is split between characters, and breaking never drops text except the spaces at a break.
 
 use std::ops::Range;
@@ -20,9 +20,13 @@ const HELVETICA_WIDTHS: [u16; 95] = [
     556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500, 334, 260, 334, 584, // p .. ~
 ];
 const SPACE_UNITS: u32 = 278;
-/// ASCII advance in the Korean font (`/W [1 95 500]`) and the advance of every other character.
-const CID_ASCII_UNITS: u32 = 500;
+/// The advance of every character of the Korean font that is not ASCII.
 const CID_WIDE_UNITS: u32 = 1000;
+
+/// The Latin font's width of an ASCII character.
+pub(crate) fn ascii_units(c: char) -> u32 {
+    latin_units(c)
+}
 
 fn latin_units(c: char) -> u32 {
     match c {
@@ -33,10 +37,17 @@ fn latin_units(c: char) -> u32 {
 
 fn cid_units(c: char) -> u32 {
     if c.is_ascii() {
-        CID_ASCII_UNITS
+        latin_units(c)
     } else {
         CID_WIDE_UNITS
     }
+}
+
+/// The `/W` entry of the Korean font: the ASCII CIDs (1..=95, in code order) take the Helvetica widths, so a space between
+/// Korean words is a Latin space and not half an em.
+pub(crate) fn cid_ascii_widths() -> String {
+    let widths: Vec<String> = HELVETICA_WIDTHS.iter().map(u16::to_string).collect();
+    format!("[1 [{}]]", widths.join(" "))
 }
 
 /// Width of `text` as the writer will show it (one font for the whole string), in thousandths of
@@ -150,7 +161,7 @@ mod tests {
 
     #[test]
     fn korean_lines_use_the_declared_cid_widths() {
-        assert_eq!(text_units("한글 ab"), 1000 + 1000 + 500 + 500 + 500);
+        assert_eq!(text_units("한글 ab"), 1000 + 1000 + 278 + 556 + 556);
         assert_eq!(text_units("한글   "), 2000, "trailing spaces hang");
     }
 
