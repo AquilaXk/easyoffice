@@ -14,6 +14,7 @@ pub mod cli_args;
 mod convert_hwp;
 mod convert_ipc;
 mod convert_open;
+mod convert_password;
 mod convert_structured;
 mod convert_structured_doc;
 mod convert_structured_encode;

@@ -222,7 +222,21 @@
     return auditSafeResult(doc.entries.length);
   }
 
-  function offlineSourceConversion(parsed) {
+  // The engine's judgment of a save that drops a password (the rule of `convert_password.rs`): XLSX holds an agile or
+// legacy digest, ODS an ODS key, `both` fits either, every other format holds none; without `acceptPasswordLoss` it is refused.
+const OFFLINE_HOLDS = { xlsx: ["agile", "both", "legacy"], ods: ["odf", "both"] };
+function offlinePasswordLoss(request) {
+  if (request.acceptPasswordLoss === true) return false;
+  const holds = OFFLINE_HOLDS[String(request.targetFormat || "").toLowerCase()] || [];
+  const found = [request.workbookProtect?.pwd];
+  for (const sheet of request.sheets || []) {
+    found.push(sheet.protect?.pwd);
+    for (const range of sheet.protect?.ranges || []) found.push(range.pwd);
+  }
+  return found.some((pwd) => pwd && !holds.includes(pwd.kind));
+}
+
+function offlineSourceConversion(parsed) {
     const decoded = offlineDecodeSource(parsed);
     if (parsed.action === "decode") return decoded;
     const b64 = encodeUtf8Base64(JSON.stringify(decoded.blocks || decoded.sheets || decoded.slides || []));
@@ -791,6 +805,7 @@
         if (raw.trimStart().startsWith("{")) {
           const parsed = parseRequiredRpcJsonObject(raw);
           if (parsed.sourceBase64 !== undefined) return offlineSourceConversion(parsed);
+          if (offlinePasswordLoss(parsed)) return { refused: "passwordLoss" };
           fields = parseConvertJsonFields(parsed);
         } else {
           fields = parseConvertPipeFields(raw);

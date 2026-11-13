@@ -20,6 +20,7 @@ use std::collections::HashSet;
 use std::fmt::Write;
 
 use crate::convert_hwp::ShellWriters;
+use crate::convert_password::{accepts_loss, password_lost, REFUSED_PASSWORD_LOSS};
 use crate::convert_structured::{encode_source_target, StructuredContent};
 use crate::convert_structured_doc::parse_pdf_options;
 use crate::page_setup_json::write_page_setup;
@@ -682,6 +683,9 @@ impl EasyOfficeIpcRouter {
         let src_fmt = decoded.format;
         let mut warnings = decoded.warnings.clone();
         let content = into_structured(decoded.content, &styling, parse_pdf_options(entries)?);
+        if !accepts_loss(entries)? && password_lost(&content, dst_fmt) {
+            return Ok(REFUSED_PASSWORD_LOSS.to_string());
+        }
         let dst_bytes = encode_source_target(
             &content,
             &bytes,

@@ -5,6 +5,7 @@ use easyoffice_formats::{
 use easyoffice_sheet::{EvaluatedCellValue, PackedCellCoordinate, SheetEngine};
 
 use crate::convert_hwp::{write_hwp, written_compatibility, ShellWriters};
+use crate::convert_password::{accepts_loss, password_lost, REFUSED_PASSWORD_LOSS};
 use crate::convert_structured::{
     encode_structured, encode_target, parse_structured_content, StructuredContent,
 };
@@ -162,6 +163,7 @@ impl EasyOfficeIpcRouter {
         let trimmed = payload.strip_prefix('\u{FEFF}').unwrap_or(payload).trim();
         let mut structured: Option<StructuredContent> = None;
         let mut warnings: Vec<String> = Vec::new();
+        let mut accept_loss = false;
         let (src_owned, dst_owned, title_owned, body_owned) = if trimmed.starts_with('{') {
             let entries = Self::parse_rpc_json_object(trimmed)?;
             if let Some(b64) = Self::optional_json_str(&entries, "sourceBase64")? {
@@ -172,6 +174,7 @@ impl EasyOfficeIpcRouter {
                     "decode 요청에는 sourceBase64가 필요합니다.".to_string(),
                 ));
             }
+            accept_loss = accepts_loss(&entries)?;
             if let Some((content, parse_warnings)) = parse_structured_content(&entries)? {
                 structured = Some(content);
                 warnings = parse_warnings;
@@ -265,6 +268,9 @@ impl EasyOfficeIpcRouter {
         // format (an ordinary save) the encode that makes the output already is that size, so the
         // document is not encoded a second time.
         let (source_len, dst_bytes) = if let Some(content) = &structured {
+            if !accept_loss && password_lost(content, dst_fmt) {
+                return Ok(REFUSED_PASSWORD_LOSS.to_string());
+            }
             let dst_bytes =
                 encode_target(content, dst_fmt, src_fmt, title, writers, &mut warnings)?;
             let source_len = if size_fmt == dst_fmt {

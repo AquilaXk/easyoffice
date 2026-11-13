@@ -292,25 +292,11 @@
     return false;
   }
 
-  // Whether a save into `ext` drops a password: a digest only the other file format holds, or no protection at all.
-  const HOLDS = { xlsx: ["agile", "both", "legacy"], ods: ["odf", "both"] };
-  function lostPassword(ext) {
-    const keep = HOLDS[String(ext).toLowerCase()];
-    const found = [];
-    for (const json of Object.values(layout().getAll())) {
-      if (json.protect?.pwd) found.push(json.protect.pwd);
-      for (const range of json.protect?.ranges || []) if (range.pwd) found.push(range.pwd);
-    }
-    if (workbook?.pwd) found.push(workbook.pwd);
-    return found.some((pwd) => !keep || !keep.includes(pwd.kind));
-  }
-
   host.__EASYOFFICE_SHEET_PROTECT__ = {
     visibleEntry,
     keepProtection,
     restoreWouldChange,
     inverseEdit,
-    lostPassword,
     alertBlocked,
     FLAGS,
     FLAG_NAMES,

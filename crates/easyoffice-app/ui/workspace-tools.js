@@ -275,19 +275,20 @@
       if (fb) fb.textContent = text;
     }
 
-    // A password the target format cannot hold is dropped only after the user agrees (PD-216): the content
-    // is the sheets of the editor (a converter source file carries none).
-    async function confirmPasswordLoss(dstExt, content) {
-      if (!content?.sheets || !host.__EASYOFFICE_SHEET_PROTECT__.lostPassword(dstExt)) return true;
-      return Boolean(await host.__EASYOFFICE_DESKTOP_BRIDGE__.confirm("password-free-save-sheet"));
+    // The engine judges a conversion or save that drops a password (PD-216): it answers `refused: "passwordLoss"`
+    // and writes nothing. The page asks once with the confirmation window and sends the same request again with
+    // the yes; `{ cancelled: true }` is the answer to a no.
+    async function convertAskingPasswordLoss(request) {
+      const res = await invokeIpc("convert_document_format", JSON.stringify(request));
+      if (res?.refused !== "passwordLoss") return res;
+      if (!(await host.__EASYOFFICE_DESKTOP_BRIDGE__.confirm("password-free-save-sheet"))) return { cancelled: true };
+      return invokeIpc("convert_document_format", JSON.stringify({ ...request, acceptPasswordLoss: true }));
     }
 
     async function convertForSave(srcExt, dstExt, title, content) {
       try {
-        const res = await invokeIpc(
-          "convert_document_format",
-          JSON.stringify({ sourceFormat: srcExt, targetFormat: dstExt, title, ...content })
-        );
+        const res = await convertAskingPasswordLoss({ sourceFormat: srcExt, targetFormat: dstExt, title, ...content });
+        if (res?.cancelled) return { res: null, b64: "", failure: "", cancelled: true };
         const b64 = String(res?.convertedBase64 || "");
         return { res, b64, failure: b64 ? "" : "변환 결과가 비어 있습니다" };
       } catch (err) {
@@ -355,11 +356,11 @@
       } else {
         content = buildConversionContent(curMod);
       }
-      if (!(await confirmPasswordLoss(dstExt, content))) {
+      const converted = await convertForSave(srcExt, dstExt, title, content);
+      if (converted.cancelled) {
         setStatusFeedback("문서 저장 취소 (" + dstExt.toUpperCase() + "): 암호 없이 저장하지 않았습니다");
         return false;
       }
-      const converted = await convertForSave(srcExt, dstExt, title, content);
       let failure = converted.failure;
       const deliver = spec.inPlace ? deliverInPlace : deliverSavedFile;
       const delivery = failure ? null : await deliver(converted.b64, title, dstExt);
@@ -498,9 +499,10 @@
         content = buildConversionContent(effectiveMod);
       }
       const title = "SecurityAudit_" + effectiveMod;
+      // The audit reads the container and keeps nothing: a password it cannot hold is no reason to stop.
       const convRes = await invokeIpc(
         "convert_document_format",
-        JSON.stringify({ sourceFormat: srcExt, targetFormat: ext, title, ...content })
+        JSON.stringify({ sourceFormat: srcExt, targetFormat: ext, title, acceptPasswordLoss: true, ...content })
       );
       const containerBase64 = String(convRes?.convertedBase64 || "");
       return await invokeIpc("audit_security", JSON.stringify({ fileName: title + "." + ext, containerBase64 }));
@@ -912,7 +914,7 @@
     const { runPiiScrubAction } = host.__EASYOFFICE_CREATE_WORKSPACE_SCRUB__(deps, panelHooks, { resolveSourceScopeKind, computeSmartStats, describePdfHighlight });
 
     return {
-      runPiiScrubAction, resolveSourceScopeKind, buildConversionContent, resolveConverterInput, confirmPasswordLoss, resolveSaveFileBase, triggerBase64Download, deliverSavedFile,
+      runPiiScrubAction, resolveSourceScopeKind, buildConversionContent, resolveConverterInput, convertAskingPasswordLoss, resolveSaveFileBase, triggerBase64Download, deliverSavedFile,
       describeDeliveryFailure, describeConversionSpec, describePdfHighlight, openToolDialog, saveActiveModuleDocument,
       computeSmartStats, renderPageStatus, applySmartDiagnoseDom, runSmartDiagnoseAction, runModuleSecurityAudit,
       fetchSecurityAuditOutcome, applySecurityAuditDom, runSecurityAuditAction, runBenchmarkAction,

@@ -211,6 +211,17 @@ impl Credential {
         matches!(self, Self::None)
     }
 
+    /// Whether an XLSX file holds this credential: none, the legacy hash, the agile digest, or the agile half
+    /// of a password just set. The key of an ODS file is not written to XLSX.
+    pub fn fits_xlsx(&self) -> bool {
+        !matches!(self, Self::Odf(_))
+    }
+
+    /// Whether an ODS file holds this credential: none, its key, or the key half of a password just set.
+    pub fn fits_ods(&self) -> bool {
+        matches!(self, Self::None | Self::Odf(_) | Self::Both(..))
+    }
+
     /// The agile digest and the ODS key of `password` (see [`Credential::Both`]); `None` when the password is
     /// empty or longer than [`MAX_PASSWORD_UNITS`].
     pub fn new_both(password: &str) -> Option<Self> {

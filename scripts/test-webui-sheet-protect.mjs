@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
+import { createWebUiDom, createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { switchModule, studioItem, commandItem, createMemoryStorage } from "./test-support/modules.mjs";
 import { demoHtml, openDemoWorkbook } from "./test-support/demo-fixtures.mjs";
 
@@ -23,10 +23,11 @@ function blocked(t) {
 }
 
 // `engine`: a page whose engine answers the session actions (row and column edits), over the sample table written into the page.
-async function open({ engine = false, localStorage } = {}) {
+async function open({ engine = false, localStorage, testIpc } = {}) {
   const requests = [];
   const harness = await createWorkspaceHarness({
     ...(localStorage ? { localStorage } : {}),
+    ...(testIpc ? { testIpc } : {}),
     ...(engine
       ? {
           transformHtml: demoHtml,
@@ -668,28 +669,6 @@ test("editing an unlocked cell with a hidden formula shows its value, and leavin
 });
 
 // ---- a save that drops a password ------------------------------------------------------------------------------------
-test("which formats keep which password", async () => {
-  const t = await open();
-  const set = (pwd, ranges = []) => t.layout.setProtect("Sheet1", { on: true, deny: [], pwd, ranges });
-  const agile = { kind: "agile", alg: "SHA-512", hash: "h", salt: "s", spin: 1 };
-  const odf = { kind: "odf", key: "k" };
-  const both = { kind: "both", alg: "SHA-512", hash: "h", salt: "s", spin: 1, key: "k" };
-  assert.equal(t.guard.lostPassword("xlsx"), false, "no password");
-  set(undefined);
-  assert.equal(t.guard.lostPassword("xls"), false, "protection without a password drops nothing");
-  const lost = (pwd, ext) => (set(pwd), t.guard.lostPassword(ext));
-  assert.deepEqual(["xlsx", "ods", "xls", "csv"].map((ext) => lost(agile, ext)), [false, true, true, true]);
-  assert.deepEqual(["xlsx", "ods", "xls", "csv"].map((ext) => lost(odf, ext)), [true, false, true, true]);
-  assert.deepEqual(["xlsx", "ods", "xls", "csv"].map((ext) => lost(both, ext)), [false, false, true, true]);
-  assert.equal(lost({ kind: "legacy", hash: "83AF" }, "xlsx"), false);
-  assert.equal(lost({ kind: "legacy", hash: "83AF" }, "ods"), true);
-  set(undefined, [{ name: "r", sqref: ["A1"], pwd: odf }]);
-  assert.equal(t.guard.lostPassword("xlsx"), true, "a range's password counts");
-  t.layout.setProtect("Sheet1", null);
-  t.guard.setWorkbook({ structure: true, pwd: agile });
-  assert.equal(t.guard.lostPassword("ods"), true, "so does the workbook's");
-});
-
 test("a save that drops a password asks first, and declining writes nothing", async () => {
   const t = await open();
   t.layout.setProtect("Sheet1", { on: true, deny: [], pwd: { kind: "odf", key: "k" } });
@@ -1179,4 +1158,101 @@ test("a restore of the step of a row edit puts the allowed ranges back where the
   assert.equal(kept.on, true);
   assert.deepEqual(kept.ranges.map((r) => [r.name, r.sqref]), [["r", ["B2:B3"]], ["now", ["D1"]]]);
   assert.deepEqual(kept.ranges[0].pwd, pwd, "the password stays the one the sheet has");
+});
+
+// The engine's own answers to a conversion, as the page meets them: every request of `convert_document_format` is kept.
+async function openRecording(respond) {
+  const { sandbox } = await createWebUiDom();
+  const cat = sandbox.__EASYOFFICE_RIBBON_CATALOG__;
+  const offline = sandbox.__EASYOFFICE_CREATE_OFFLINE_RPC__({
+    getActiveModule: () => "SHEET",
+    ribbonCategoryTools: cat.RIBBON_CATEGORY_TOOLS,
+    ribbonStyleLabels: cat.RIBBON_STYLE_LABELS,
+    contextualToolBadges: cat.CONTEXTUAL_TOOL_BADGES,
+    moduleSpecs: cat.MODULE_SPECS,
+    localRibbonState: cat.createDefaultRibbonState(),
+  });
+  const converts = [];
+  const t = await open({
+    testIpc: async (command, payload) => {
+      if (command === "convert_document_format") converts.push(JSON.parse(payload));
+      return respond?.(command, JSON.parse(payload || "{}")) ?? offline[command](payload);
+    },
+  });
+  const asked = [];
+  let answer = true;
+  t.host.confirm = (text) => (asked.push(text), answer);
+  return { t, converts, asked, answer: (value) => (answer = value) };
+}
+
+const WITH_PASSWORD = { on: true, deny: [], pwd: { kind: "agile", alg: "SHA-512", hash: "h", salt: "s", spin: 1 } };
+
+test("a refused conversion asks once: the first request has no acceptance, the second has it, and a no stops after the first", async () => {
+  const r = await openRecording();
+  r.t.layout.setProtect("Sheet1", WITH_PASSWORD);
+  switchModule(r.t.document, "CONV");
+  await flushAsyncTurns(10);
+  r.t.byId("conv-src-fmt").value = "xlsx";
+  r.t.byId("conv-dst-fmt").value = "ods";
+  r.answer(false);
+  r.converts.length = 0;
+  r.t.userClick(r.t.byId("btn-run-convert"));
+  await flushAsyncTurns(30);
+  assert.equal(r.converts.length, 1, "a no sends nothing more");
+  assert.equal(r.converts[0].acceptPasswordLoss, undefined);
+  assert.equal(r.t.downloads.length, 0);
+  r.answer(true);
+  r.t.userClick(r.t.byId("btn-run-convert"));
+  await flushAsyncTurns(30);
+  assert.deepEqual(r.converts.slice(1).map((c) => c.acceptPasswordLoss), [undefined, true], "asked once, then the same request with the yes");
+  assert.equal(r.asked.length, 2, "one question for each try, never two for one");
+  assert.equal(r.t.downloads.length, 1);
+});
+
+test("a protection without a password and a format that holds it send one request and ask nothing", async () => {
+  const r = await openRecording();
+  r.t.layout.setProtect("Sheet1", { on: true, deny: [] });
+  switchModule(r.t.document, "CONV");
+  await flushAsyncTurns(10);
+  r.t.byId("conv-src-fmt").value = "xlsx";
+  r.t.byId("conv-dst-fmt").value = "csv";
+  r.converts.length = 0;
+  r.t.userClick(r.t.byId("btn-run-convert"));
+  await flushAsyncTurns(30);
+  assert.equal(r.converts.length, 1);
+  assert.deepEqual(r.asked, []);
+});
+
+test("the converter of a chosen source file asks when the engine refuses, and sends it again on a yes", async () => {
+  const refuse = (command, body) => (command === "convert_document_format" && body.sourceBase64 && body.acceptPasswordLoss !== true ? { refused: "passwordLoss" } : undefined);
+  const r = await openRecording(refuse);
+  switchModule(r.t.document, "CONV");
+  await flushAsyncTurns(10);
+  const input = r.t.byId("conv-source-file");
+  const bytes = new TextEncoder().encode("x");
+  input.files = [{ name: "원본.xlsx", size: 1, arrayBuffer: async () => bytes.buffer }];
+  input.dispatchEvent({ type: "change", target: input });
+  await flushAsyncTurns(20);
+  r.t.byId("conv-dst-fmt").value = "ods";
+  r.answer(false);
+  const before = r.converts.length;
+  r.t.userClick(r.t.byId("btn-run-convert"));
+  await flushAsyncTurns(30);
+  assert.equal(r.converts.length - before, 1);
+  assert.match(r.t.byId("conv-result-box").textContent, /변환 취소/);
+  assert.equal(r.t.downloads.length, 0);
+  r.answer(true);
+  r.t.userClick(r.t.byId("btn-run-convert"));
+  await flushAsyncTurns(30);
+  assert.deepEqual(r.converts.slice(before + 1).map((c) => c.acceptPasswordLoss), [undefined, true]);
+});
+
+test("the security audit never asks: it keeps nothing of the container", async () => {
+  const r = await openRecording();
+  r.t.layout.setProtect("Sheet1", { ...WITH_PASSWORD, pwd: { kind: "odf", key: "k" } });
+  r.t.userClick(r.t.byId("btn-run-security-audit"));
+  await flushAsyncTurns(30);
+  const audit = r.converts.at(-1);
+  assert.equal(audit.acceptPasswordLoss, true);
+  assert.deepEqual(r.asked, []);
 });

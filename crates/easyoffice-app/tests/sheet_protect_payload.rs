@@ -244,3 +244,160 @@ fn a_hidden_formula_does_not_leave_as_text_in_formats_that_hold_values_or_no_pro
     let csv_open = open("csv", csv.as_bytes());
     assert!(!csv_open.contains("\"protect\"") && !csv_open.contains("hideFormula"));
 }
+
+const REFUSED: &str = r#"{"refused":"passwordLoss"}"#;
+
+/// A conversion request of the editor's sheet with `protect` (a sheet password) and `book` (a workbook one).
+fn editor_request(dst: &str, sheet_extra: &str, top_extra: &str) -> String {
+    format!(
+        r#"{{"sourceFormat":"xlsx","targetFormat":"{dst}","title":"t"{top_extra},"sheets":[{{"name":"시트","cells":[{{"ref":"A1","raw":"가"}}]{sheet_extra}}}]}}"#
+    )
+}
+
+fn protect_with(kind: &str) -> String {
+    format!(
+        r#","protect":{{"on":true,"deny":["formatCells"],"pwd":{}}}"#,
+        hash("pw-1", kind)
+    )
+}
+
+fn book_with(kind: &str) -> String {
+    format!(
+        r#","workbookProtect":{{"structure":true,"pwd":{}}}"#,
+        hash("pw-2", kind)
+    )
+}
+
+fn written(json: &str) -> Vec<u8> {
+    assert!(!json.contains("refused"), "{json}");
+    EasyOfficeIpcRouter::decode_base64(json_str_field(json, "convertedBase64")).unwrap()
+}
+
+#[test]
+fn a_save_that_drops_a_password_is_refused_until_the_request_accepts_it() {
+    // The sheet, the allowed range and the workbook each hold a password a format other than their own drops.
+    let ranged = format!(
+        r#","protect":{{"on":true,"deny":[],"ranges":[{{"name":"r","sqref":["A1"],"pwd":{}}}]}}"#,
+        hash("pw-3", "agile")
+    );
+    for (what, sheet, book) in [
+        ("sheet", protect_with("agile"), String::new()),
+        ("range", ranged, String::new()),
+        ("workbook alone", String::new(), book_with("agile")),
+    ] {
+        for dst in ["ods", "xls", "csv", "tsv", "pdf", "docx"] {
+            let request = editor_request(dst, &sheet, &book);
+            assert_eq!(
+                call("convert_document_format", &request).unwrap(),
+                REFUSED,
+                "{what} -> {dst}"
+            );
+            let accepted = request.replacen('{', r#"{"acceptPasswordLoss":true,"#, 1);
+            let json = call("convert_document_format", &accepted).unwrap();
+            assert!(
+                json.contains("\"status\":\"OK\""),
+                "{what} -> {dst}: {json}"
+            );
+        }
+    }
+    // The file written after the question has no password.
+    let request = editor_request("ods", &protect_with("agile"), &book_with("agile")).replacen(
+        '{',
+        r#"{"acceptPasswordLoss":true,"#,
+        1,
+    );
+    let bytes = written(&call("convert_document_format", &request).unwrap());
+    let styling = read_sheet_styling(&bytes, DocumentFormat::Ods)
+        .unwrap()
+        .remove(0)
+        .1;
+    assert!(styling.protect.is_none_or(|p| p.credential.is_none()));
+    assert!(styling
+        .workbook_protect
+        .is_none_or(|b| b.credential.is_none()));
+    // The answer is not a conversion: it carries no file.
+    assert!(!REFUSED.contains("convertedBase64"));
+}
+
+#[test]
+fn a_password_the_format_holds_and_a_protection_without_one_are_not_asked_about() {
+    for (dst, kind) in [
+        ("xlsx", "agile"),
+        ("xlsx", "both"),
+        ("ods", "odf"),
+        ("ods", "both"),
+    ] {
+        let request = editor_request(dst, &protect_with(kind), &book_with(kind));
+        written(&call("convert_document_format", &request).unwrap());
+    }
+    let bare = r#","protect":{"on":true,"deny":["formatCells"]}"#;
+    for dst in ["xlsx", "ods", "xls", "csv", "pdf"] {
+        let request = editor_request(dst, bare, r#","workbookProtect":{"structure":true}"#);
+        written(&call("convert_document_format", &request).unwrap());
+    }
+    // The other direction of the editor's own formats is asked about: an ODS key cannot go to XLSX.
+    let request = editor_request("xlsx", &protect_with("odf"), "");
+    assert_eq!(call("convert_document_format", &request).unwrap(), REFUSED);
+}
+
+#[test]
+fn a_converted_source_file_is_judged_like_the_editor_sheet() {
+    let source = |name: &str, kind: &str| {
+        let dst = if name == "xlsx" { "xlsx" } else { "ods" };
+        let request = editor_request(dst, &protect_with(kind), &book_with(kind));
+        let written = call("convert_document_format", &request).unwrap();
+        EasyOfficeIpcRouter::decode_base64(json_str_field(&written, "convertedBase64")).unwrap()
+    };
+    let convert = |name: &str, bytes: &[u8], dst: &str, extra: &str| {
+        let payload = format!(
+            r#"{{{extra}"fileName":"s.{name}","sourceBase64":"{}","targetFormat":"{dst}"}}"#,
+            EasyOfficeIpcRouter::encode_base64(bytes)
+        );
+        call("convert_document_format", &payload).unwrap()
+    };
+    let accept = r#""acceptPasswordLoss":true,"#;
+    // XLSX with an agile password -> ODS, XLS and CSV.
+    let xlsx = source("xlsx", "agile");
+    for dst in ["ods", "xls", "csv"] {
+        assert_eq!(convert("xlsx", &xlsx, dst, ""), REFUSED, "xlsx -> {dst}");
+        assert!(
+            convert("xlsx", &xlsx, dst, accept).contains("\"status\":\"OK\""),
+            "xlsx -> {dst}"
+        );
+    }
+    let odf = convert("xlsx", &xlsx, "ods", accept);
+    let bytes =
+        EasyOfficeIpcRouter::decode_base64(json_str_field(&odf, "convertedBase64")).unwrap();
+    let styling = read_sheet_styling(&bytes, DocumentFormat::Ods)
+        .unwrap()
+        .remove(0)
+        .1;
+    assert!(
+        styling.protect.is_none_or(|p| p.credential.is_none()),
+        "the password is gone, after the question"
+    );
+    // The same format keeps it without a question.
+    assert!(convert("xlsx", &xlsx, "xlsx", "").contains("\"status\":\"OK\""));
+    // ODS with an ODS key -> XLSX.
+    let ods = source("ods", "odf");
+    assert_eq!(convert("ods", &ods, "xlsx", ""), REFUSED);
+    assert!(convert("ods", &ods, "xlsx", accept).contains("\"status\":\"OK\""));
+    assert!(convert("ods", &ods, "ods", "").contains("\"status\":\"OK\""));
+    // A workbook protected by itself is judged too.
+    let alone = {
+        let request = editor_request("xlsx", "", &book_with("agile"));
+        let json = call("convert_document_format", &request).unwrap();
+        EasyOfficeIpcRouter::decode_base64(json_str_field(&json, "convertedBase64")).unwrap()
+    };
+    assert_eq!(convert("xlsx", &alone, "ods", ""), REFUSED);
+}
+
+#[test]
+fn the_acceptance_must_be_a_boolean() {
+    let request = editor_request("ods", &protect_with("agile"), "").replacen(
+        '{',
+        r#"{"acceptPasswordLoss":"yes","#,
+        1,
+    );
+    assert!(call("convert_document_format", &request).is_err());
+}

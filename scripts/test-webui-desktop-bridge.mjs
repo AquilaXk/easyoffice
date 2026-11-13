@@ -22,7 +22,7 @@ async function createOfflineBackend() {
   });
 }
 
-async function createShellHarness({ engineOverrides = {}, saveFile } = {}) {
+async function createShellHarness({ engineOverrides = {}, saveFile, confirm } = {}) {
   const offline = await createOfflineBackend();
   const calls = [];
   const fetchCalls = [];
@@ -41,6 +41,7 @@ async function createShellHarness({ engineOverrides = {}, saveFile } = {}) {
           throw shellError(err?.message || String(err));
         }
       }
+      if (command === "confirm_dialog" && confirm) return confirm(args);
       if (command === "save_document_file") {
         if (!saveFile) throw shellError("save not configured");
         return saveFile(args);
@@ -153,6 +154,30 @@ test("desktop save uses the native save command instead of a Blob download", asy
   assert.equal(downloads.length, 0, "no Blob download inside the shell");
   assert.ok(calls.some((c) => c.command === "ipc_dispatch" && c.args.command === "convert_document_format"));
   assert.match(feedback(document), /^문서 저장 완료 \(분기_경영실적_보고서\.docx · /);
+});
+
+test("desktop save of a sheet whose password the format drops: the engine refuses, the shell asks, a yes sends the same request again", async () => {
+  for (const answer of [false, true]) {
+    const saves = [];
+    const { document, userClick, calls, host } = await createShellHarness({
+      saveFile: (args) => (saves.push(args), { status: "saved", name: args.fileName, bytes: 42 }),
+      confirm: () => answer,
+    });
+    switchModule(document, "SHEET");
+    await flushAsyncTurns(6);
+    // An ODS key is not an XLSX digest, and the sheet saves as XLSX.
+    host.__EASYOFFICE_SHEET_LAYOUT__.setProtect("Sheet1", { on: true, deny: [], pwd: { kind: "odf", key: "k" } });
+    const mark = calls.length;
+    userClick(studioItem(document, "studio-save"));
+    await flushAsyncTurns(20);
+    const since = calls.slice(mark);
+    const converts = since.filter((c) => c.command === "ipc_dispatch" && c.args.command === "convert_document_format").map((c) => JSON.parse(c.args.payload));
+    const asked = since.filter((c) => c.command === "confirm_dialog").map((c) => c.args);
+    assert.deepEqual(asked, [{ kind: "password-free-save-sheet" }]);
+    assert.deepEqual(converts.map((c) => c.acceptPasswordLoss), answer ? [undefined, true] : [undefined]);
+    assert.equal(saves.length, answer ? 1 : 0, answer ? "written after the yes" : "nothing is written after a no");
+    if (!answer) assert.match(feedback(document), /문서 저장 취소 \(XLSX\)/);
+  }
 });
 
 test("save as never overwrites the opened file: the menu item, the shortcut and the native menu all go through the dialog, and PDF never overwrites in place", async () => {
