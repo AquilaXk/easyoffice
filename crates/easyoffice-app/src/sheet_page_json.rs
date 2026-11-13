@@ -200,6 +200,31 @@ fn page_json(page: &SheetPage) -> String {
     out
 }
 
+/// The `page` of a request as JSON after `edit`: the print area and the repeated rows and columns follow the cells
+/// (a range the edit shrinks to nothing is left out, as a deleted row leaves a merge).
+pub(crate) fn moved_page_json(
+    value: &StrictJsonValue,
+    edit: &easyoffice_sheet::AxisEdit,
+) -> Result<String, EasyOfficeError> {
+    let holder = vec![("page".to_string(), value.clone())];
+    let mut styling = SheetStyling::default();
+    parse_page(&holder, &mut styling)?;
+    let page = &mut styling.page;
+    page.print_area = easyoffice_sheet::shift_boxes(&page.print_area, edit, false);
+    let on_axis = |run: Option<(u32, u32)>, axis| {
+        run.and_then(|r| {
+            if edit.axis == axis {
+                easyoffice_sheet::shift_runs(&[r], edit).first().copied()
+            } else {
+                Some(r)
+            }
+        })
+    };
+    page.title_rows = on_axis(page.title_rows, easyoffice_sheet::Axis::Row);
+    page.title_cols = on_axis(page.title_cols, easyoffice_sheet::Axis::Col);
+    Ok(page_json(page))
+}
+
 /// `,"page":{..}` when the setup is not the default.
 pub(crate) fn write_page(out: &mut String, styling: &SheetStyling) {
     if !styling.page.is_default() {
@@ -288,5 +313,37 @@ mod tests {
             r#"{"page":{"titleRows":[1,256],"titleCols":[1,64],"scale":{"percent":400}}}"#
         )
         .is_ok());
+    }
+
+    #[test]
+    fn the_print_area_and_repeated_lines_follow_an_edit_of_the_rows_and_columns() {
+        use easyoffice_sheet::{Axis, AxisEdit, EditKind};
+        let page = StrictJsonValue::parse(
+            r#"{"printArea":["B2:D10"],"titleRows":[1,2],"titleCols":[2,3],"landscape":true}"#,
+        )
+        .unwrap();
+        let moved = |axis, kind, at, count| {
+            moved_page_json(&page, &AxisEdit::new(axis, kind, at, count).unwrap()).unwrap()
+        };
+        // two rows inserted above row 3 (0-based 2): the area grows by two rows, the title rows (1-2) stay
+        assert_eq!(
+            moved(Axis::Row, EditKind::Insert, 2, 2),
+            r#"{"landscape":true,"printArea":["B2:D12"],"titleRows":[1,2],"titleCols":[2,3]}"#
+        );
+        // the first row deleted: the area and the titles move up
+        assert_eq!(
+            moved(Axis::Row, EditKind::Delete, 0, 1),
+            r#"{"landscape":true,"printArea":["B1:D9"],"titleRows":[1,1],"titleCols":[2,3]}"#
+        );
+        // both title rows deleted: the repeated rows are gone
+        assert_eq!(
+            moved(Axis::Row, EditKind::Delete, 0, 2),
+            r#"{"landscape":true,"printArea":["B1:D8"],"titleCols":[2,3]}"#
+        );
+        // a column inserted before B: the area and the title columns move right
+        assert_eq!(
+            moved(Axis::Col, EditKind::Insert, 0, 1),
+            r#"{"landscape":true,"printArea":["C2:E10"],"titleRows":[1,2],"titleCols":[3,4]}"#
+        );
     }
 }
