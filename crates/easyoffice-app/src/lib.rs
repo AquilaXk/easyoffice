@@ -41,6 +41,7 @@ mod sheet_format_ipc;
 mod sheet_ipc_tests;
 mod sheet_layout_json;
 mod sheet_look_json;
+mod sheet_page_json;
 mod sheet_pivot_ipc;
 mod sheet_refs_ipc;
 #[cfg(test)]
