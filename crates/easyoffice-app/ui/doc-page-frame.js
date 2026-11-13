@@ -10,6 +10,17 @@
   // offers close, delete and page number, and the copies on the other pages follow every keystroke.
 
   const KINDS = ["header", "footer"];
+  const FIELDS = { page: "쪽 번호", pages: "총 쪽수", filename: "파일 이름" };
+  // The page setup that places them, in twips, as the section's `data-eo-margins` ("top,bottom,header,footer"):
+  // top and bottom are the distances from the page edge to the body, header and footer those to the header
+  // and footer (the engine's `RichPageMargins`). Without one the reference editor's new-document setup applies
+  // (`rhwp` `src/model/page.rs:36-51`: header area 15 mm below a 20 mm margin, body at 35 mm; footer area 15 mm
+  // above a 15 mm margin, body ending 30 mm from the bottom).
+  const DEFAULT_MARGINS = { top: 1984, bottom: 1700, header: 1134, footer: 850 };
+  const PX_PER_TWIP = 1 / 15;
+  // Space kept between a header or footer that grew past its area and the body.
+  const GROWN_GAP_PX = 6;
+  const MARGIN_KEYS = ["top", "bottom", "header", "footer"];
   const LABELS = { header: "머리말", footer: "꼬리말" };
   const APPLY_LABEL = "양쪽";
   const SECTION_CLASS = "eo-page-frame";
@@ -21,6 +32,13 @@
   const isFrame = (el) => el?.nodeType === 1 && el.tagName === "SECTION" && el.dataset?.eoHf !== undefined;
 
   const lastParagraph = (section) => Array.from(section.children).at(-1) ?? section;
+
+  // `data-eo-margins` as `{ top, bottom, header, footer }` in twips, or null when it is absent or malformed.
+  function parseMargins(text) {
+    const parts = String(text ?? "").split(",").map((v) => Number(v));
+    if (parts.length !== MARGIN_KEYS.length || !parts.every((v) => Number.isInteger(v) && v >= 0)) return null;
+    return Object.fromEntries(MARGIN_KEYS.map((key, i) => [key, parts[i]]));
+  }
 
   function hasContent(section) {
     return Boolean(section) && (section.textContent.trim() !== "" || section.querySelector("." + FIELD_CLASS) !== null);
@@ -42,10 +60,21 @@
     const scrollOf = () => editor?.closest?.(".doc-scroll-container") ?? document.querySelector(".doc-scroll-container");
     const toolbar = () => document.getElementById("icon-toolbar");
 
+    // The page setup of the document: the one a section carries, else the default.
+    function marginsOf() {
+      for (const kind of KINDS) {
+        const found = parseMargins(sectionOf(kind)?.dataset.eoMargins);
+        if (found) return found;
+      }
+      return null;
+    }
+
     function create(kind) {
       const section = document.createElement("section");
       section.className = SECTION_CLASS;
       section.dataset.eoHf = kind;
+      const margins = KINDS.map((k) => sectionOf(k)?.dataset.eoMargins).find(Boolean);
+      if (margins) section.dataset.eoMargins = margins;
       const p = document.createElement("p");
       p.appendChild(document.createElement("br"));
       section.appendChild(p);
@@ -67,21 +96,29 @@
         el.removeAttribute("id");
         el.removeAttribute("contenteditable");
       }
+      for (const el of copy.querySelectorAll('[data-eo-field="filename"]')) el.dataset.eoName = fileName();
       return copy;
     }
 
+    const fileName = () => String(deps.getFileName?.() ?? "");
+
     // Draws the header and footer on every sheet of the page layer; the sheet of page 1 shows the live section
-    // instead of a copy while that one is edited. Only a changed content, a new sheet or an edit state redraws.
+    // instead of a copy while that one is edited. Only a changed content, name, setup, sheet count or edit state
+    // redraws, and then the areas are measured (a header that grew moves the body, `applyGeometry`).
     function paint() {
       const layer = layerOf();
       if (!layer) return;
       const sections = KINDS.map((kind) => sectionOf(kind)).map((s) => (hasContent(s) || s === sectionOf(editing) ? s : null));
-      const key = sections.map((s) => (s ? s.innerHTML : "")).join("\u0001") + "|" + editing + "|" + layer.children.length;
+      const sheets = layer.children.length;
+      const key = [sections.map((s) => (s ? s.innerHTML : "")).join("\u0001"), editing, sheets, fileName(), sections.map((s) => s?.dataset.eoMargins).join()].join("|");
       [["data-hf-header", sections[0]], ["data-hf-footer", sections[1]]].forEach(([name, section]) => {
         if (!section) layer.removeAttribute(name);
         else if (!layer.hasAttribute(name)) layer.setAttribute(name, "");
       });
-      if (key === paintedKey && layer.children.length > 0) return;
+      // The page-count field reads the number of sheets from this counter.
+      const counters = "eo-page 0 eo-total " + sheets;
+      if (layer.style.getPropertyValue("counter-reset") !== counters) layer.style.setProperty("counter-reset", counters);
+      if (key === paintedKey && sheets > 0) return;
       paintedKey = key;
       Array.from(layer.children).forEach((sheet, index) => {
         for (const old of Array.from(sheet.querySelectorAll(":scope > ." + COPY_CLASS))) old.remove();
@@ -90,6 +127,40 @@
           sheet.appendChild(copyOf(section));
         });
       });
+      applyGeometry(sections, layer);
+    }
+
+    function setVar(name, value) {
+      const style = editor.style;
+      if (value === null) {
+        if (style.getPropertyValue(name)) style.removeProperty(name);
+      } else if (style.getPropertyValue(name) !== value) {
+        style.setProperty(name, value);
+      }
+    }
+
+    // Places the areas from the page setup and tells the page layout how far the body must keep away.
+    function applyGeometry(sections, layer) {
+      const m = marginsOf() ?? DEFAULT_MARGINS;
+      const px = (twips) => Math.round(twips * PX_PER_TWIP * 100) / 100;
+      const [header, footer] = sections;
+      const band = (kind) => px(kind === "header" ? Math.max(0, m.top - m.header) : Math.max(0, m.bottom - m.footer));
+      const grown = (kind) => {
+        const live = editing === kind ? sectionOf(kind) : null;
+        const copy = layer.children[0]?.querySelector(":scope > ." + COPY_CLASS + '[data-hf="' + kind + '"]');
+        return Number((live ?? copy)?.offsetHeight) || 0;
+      };
+      setVar("--hf-hd", header ? px(m.header) + "px" : null);
+      setVar("--hf-band-h", header ? band("header") + "px" : null);
+      setVar("--hf-ft", footer ? px(m.footer) + "px" : null);
+      setVar("--hf-fband-h", footer ? band("footer") + "px" : null);
+      // Measured with the areas at their minimum: the body starts below the header, ends above the footer.
+      const headerHeight = header ? grown("header") : 0;
+      const footerHeight = footer ? grown("footer") : 0;
+      const room = (distance, height, area, margin) => Math.max(margin, distance + height + (height > area + 0.5 ? GROWN_GAP_PX : 0));
+      setVar("--pg-hf-top", header ? room(px(m.header), headerHeight, band("header"), px(m.top)) + "px" : null);
+      setVar("--pg-hf-bottom", footer ? room(px(m.footer), footerHeight, band("footer"), px(m.bottom)) + "px" : null);
+      setVar("--hf-fh", footer && editing === "footer" ? footerHeight + "px" : null);
     }
 
     function schedule() {
@@ -117,6 +188,7 @@
       }
       for (const field of editor.querySelectorAll("." + FIELD_CLASS)) {
         if (field.getAttribute("contenteditable") !== "false") field.setAttribute("contenteditable", "false");
+        if (editing && field.dataset.eoField === "filename" && field.dataset.eoName !== fileName()) field.dataset.eoName = fileName();
       }
       paint();
     }
@@ -213,14 +285,15 @@
       return true;
     }
 
-    // A page-number field at the caret of the header or footer being edited.
-    function insertPageNumber() {
+    // A field (`page`, `pages`, `filename`) at the caret of the header or footer being edited.
+    function insertField(kind = "page") {
+      if (!Object.hasOwn(FIELDS, kind)) return false;
       const section = editing ? sectionOf(editing) : null;
       if (!section) return false;
       const run = () => {
         const field = document.createElement("span");
         field.className = FIELD_CLASS;
-        field.dataset.eoField = "page";
+        field.dataset.eoField = kind;
         field.setAttribute("contenteditable", "false");
         const sel = env.getSelection?.();
         const range = sel?.rangeCount ? sel.getRangeAt(0) : null;
@@ -254,7 +327,13 @@
     function bindToolbar() {
       const group = toolbar()?.querySelector(".tb-headerfooter-group");
       if (!group) return;
-      const actions = { close: endEdit, delete: removeEditing, "page-number": insertPageNumber };
+      const actions = {
+        close: endEdit,
+        delete: removeEditing,
+        "page-number": () => insertField("page"),
+        "total-pages": () => insertField("pages"),
+        "file-name": () => insertField("filename"),
+      };
       for (const btn of group.querySelectorAll("[data-hf-action]")) {
         btn.addEventListener("click", () => actions[btn.dataset.hfAction]?.());
       }
@@ -283,7 +362,7 @@
     }
 
     const api = {
-      attach, detach, open, endEdit, removeEditing, insertPageNumber, paint, sync,
+      attach, detach, open, endEdit, removeEditing, insertField, paint, sync,
       isEditing: () => editing,
       has: (kind) => hasContent(sectionOf(kind)),
     };

@@ -140,3 +140,60 @@ test("the footer command is a document command: the other windows have neither t
     assert.equal(toolbarButton(document, "mod-footer").hidden, true, `${mod} button`);
   }
 });
+
+test("the page setup places the areas and sets how far the body keeps away; without one the reference editor's defaults apply", async () => {
+  const { document, editor, host } = await openDoc("w-hf-geometry");
+  const frame = host.__EASYOFFICE_DOC_PAGE_FRAME__;
+  const layer = document.createElement("footer");
+  layer.className = "doc-page-layer";
+  layer.appendChild(Object.assign(document.createElement("i"), { className: "doc-page-sheet" }));
+  editor.appendChild(layer);
+  editor.insertBefore(
+    Object.assign(document.createElement("section"), { className: "eo-page-frame" }),
+    layer
+  );
+  const header = editor.querySelector(":scope > section.eo-page-frame");
+  header.dataset.eoHf = "header";
+  header.innerHTML = "<p>머리</p>";
+  frame.paint();
+  const get = (name) => editor.style.getPropertyValue(name);
+  // Defaults: header 20 mm from the top, body at 35 mm (1134 and 1984 twips, 15 twips to the pixel).
+  assert.equal(get("--hf-hd"), "75.6px");
+  assert.equal(get("--hf-band-h"), "56.67px");
+  assert.equal(get("--pg-hf-top"), "132.27px");
+  assert.equal(get("--pg-hf-bottom"), "", "no footer, no footer room");
+  header.dataset.eoMargins = "2000,1800,1000,700";
+  const footer = document.createElement("section");
+  footer.className = "eo-page-frame";
+  footer.dataset.eoHf = "footer";
+  footer.dataset.eoMargins = "2000,1800,1000,700";
+  footer.innerHTML = "<p>꼬리</p>";
+  editor.insertBefore(footer, layer);
+  frame.paint();
+  assert.equal(get("--hf-hd"), "66.67px");
+  assert.equal(get("--pg-hf-top"), "133.33px");
+  assert.equal(get("--hf-ft"), "46.67px");
+  assert.equal(get("--hf-fband-h"), "73.33px");
+  assert.equal(get("--pg-hf-bottom"), "120px");
+  header.remove();
+  footer.remove();
+  frame.paint();
+  assert.equal(get("--pg-hf-top"), "", "without a header the geometry is the editor's own");
+});
+
+test("the total-pages and file-name buttons insert their fields, which save as their own field runs", async () => {
+  const { document, editor, host, userClick } = await openDoc("w-hf-fields");
+  userClick(toolbarButton(document, "mod-footer"));
+  await flushAsyncTurns();
+  section(editor, "footer").querySelector("p").textContent = "";
+  for (const action of ["page-number", "total-pages", "file-name"]) {
+    document.querySelector(`#icon-toolbar [data-hf-action="${action}"]`).click();
+    await flushAsyncTurns();
+  }
+  host.__EASYOFFICE_DOC_PAGE_FRAME__.endEdit();
+  const frame = host.__EASYOFFICE_SAVE_PAYLOAD__.collectPageFrame(editor);
+  assert.deepEqual(frame.footer[0].runs.map((r) => r.field), ["page", "pages", "filename"]);
+  const labels = ["쪽번호", "총쪽수", "파일명"];
+  const shown = [...document.querySelectorAll("#icon-toolbar .tb-headerfooter-group .tb-label")].map((el) => el.textContent);
+  for (const label of labels) assert.ok(shown.includes(label), label);
+});

@@ -104,8 +104,17 @@
     function readGeometry() {
       const cs = env.getComputedStyle(editor);
       const px = (v) => Number.parseFloat(v) || 0;
-      const padding = { top: px(cs.paddingTop), right: px(cs.paddingRight), bottom: px(cs.paddingBottom), left: px(cs.paddingLeft) };
+      // A header or footer that needs more room than the margin raises the body's start or end on every page
+      // (`doc-page-frame.js`); the first block of the document is then pushed down like any block that starts early.
+      const hf = (name) => px(cs.getPropertyValue?.(name));
+      const padding = {
+        top: Math.max(px(cs.paddingTop), hf("--pg-hf-top")),
+        right: px(cs.paddingRight),
+        bottom: Math.max(px(cs.paddingBottom), hf("--pg-hf-bottom")),
+        left: px(cs.paddingLeft),
+      };
       const next = core.pageGeometry({ ...core.paperOf(editor), padding });
+      next.cssPadTop = px(cs.paddingTop);
       const key = [next.width, next.height, next.padTop, next.padBottom, next.padLeft, next.padRight].join(",");
       return { next, changed: key !== geoKey, key };
     }
@@ -146,7 +155,6 @@
         host.appendChild(sheet);
       }
       editor.style.setProperty("--pg-doc-h", count * geo.pitch - geo.gap + "px");
-      for (const fn of sheetListeners) fn(host, count);
     }
 
     // ---- measuring --------------------------------------------------------------------------
@@ -220,10 +228,17 @@
 
     // ---- applying ---------------------------------------------------------------------------
 
+    // The margin that carries a block to where the plan puts it: its measured gap plus the push. The first block's
+    // gap is measured from the editor's edge, so it holds the editor's own top padding, which is not margin.
+    function marginFor(rec, plan, i) {
+      if (!(plan.push[i] > core.EPS)) return 0;
+      return core.round2(rec.gap - (i === 0 ? geo.cssPadTop : 0) + plan.push[i]);
+    }
+
     function applyPlan(list, plan) {
       for (let i = 0; i < list.length; i += 1) {
         const rec = recs.get(list[i]);
-        const mt = plan.push[i] > core.EPS ? core.round2(rec.gap + plan.push[i]) : 0;
+        const mt = marginFor(rec, plan, i);
         const sig = plan.sig[i];
         if (mt === rec.mt && sig === rec.sig) continue;
         const el = list[i];
@@ -325,7 +340,7 @@
     function needsWrites(list, plan) {
       for (let i = 0; i < list.length; i += 1) {
         const rec = recs.get(list[i]);
-        if (rec.mt !== (plan.push[i] > core.EPS ? core.round2(rec.gap + plan.push[i]) : 0) || rec.sig !== plan.sig[i]) return true;
+        if (rec.mt !== marginFor(rec, plan, i) || rec.sig !== plan.sig[i]) return true;
       }
       return false;
     }
@@ -353,6 +368,8 @@
       syncSheets(count, false);
       // The writes of this pass (styles, attributes, sheets) are not changes to measure.
       observer?.takeRecords();
+      // What the listeners write (the header and footer's room, `--pg-hf-top`) is: the next pass sees it.
+      for (const fn of sheetListeners) fn(layer, count);
       const countChanged = count !== lastCount;
       lastCount = count;
       const current = computeCurrentPage();

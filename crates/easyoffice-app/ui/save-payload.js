@@ -46,6 +46,10 @@
   // The in-document bookmark of a table-of-contents block (`doc-toc.js`): heading `eo-h-N` is bookmark `_TocN`, an
   // entry's `#eo-h-N` link is `#_TocN` (the engine's `toc_bookmark_number`: 1 to 4294967295, no leading zero).
   const MAX_FRAME_PARAGRAPHS = 64; // the engine's MAX_PAGE_FRAME_PARAGRAPHS
+  // The editor's field marks (`data-eo-field`) as the payload's run `field` values.
+  const FIELD_KEYS = { page: "page", pages: "pages", filename: "filename" };
+  const MARGIN_NAMES = ["top", "bottom", "header", "footer"];
+  const MAX_MARGIN_TWIPS = 31680; // the engine's MAX_PAGE_MARGIN_TWIPS
   const MAX_BOOKMARK = 4294967295;
   const HEADING_ID_RE = /^eo-h-([1-9]\d{0,9})$/;
   const bookmarkNumber = (id) => {
@@ -365,9 +369,9 @@
     }
 
     // A page-number field (`doc-page-frame.js`) is a run of its own with the format around it.
-    function walkField(ctx, fmt) {
+    function walkField(node, ctx, fmt) {
       if (!cur) cur = { ctx, runs: [] };
-      const run = { text: "", field: "page" };
+      const run = { text: "", field: FIELD_KEYS[node.dataset.eoField] };
       if (fmt.script) run.script = fmt.script;
       BOOL_KEYS.forEach((k) => {
         if (fmt[k]) run[k] = true;
@@ -457,7 +461,7 @@
       if (tag === "BR") return walkLineBreak(ctx, fmt);
       if (tag === "TABLE") return walkTable(node);
       if (tag === "IMG" && node.dataset?.eoImageId) return pushImage(node);
-      if (node.dataset?.eoField === "page") return walkField(ctx, fmt);
+      if (FIELD_KEYS[node.dataset?.eoField]) return walkField(node, ctx, fmt);
       const nextFmt = styleFormat(node, fmt);
       const childNodes = node.childNodes;
       if (!BLOCK_TAGS.has(tag)) {
@@ -493,7 +497,13 @@
       if ((kind !== "header" && kind !== "footer") || Object.hasOwn(frame, kind)) continue;
       const blocks = collectDocBlocks(section, options).filter((b) => b.type === "paragraph").slice(0, MAX_FRAME_PARAGRAPHS);
       if (blocks.some((b) => b.runs.length > 0)) frame[kind] = blocks;
+      const margins = String(section.dataset.eoMargins ?? "").split(",").map(Number);
+      if (!Object.hasOwn(frame, "pageMargins") && margins.length === MARGIN_NAMES.length && margins.every((v) => Number.isInteger(v) && v >= 0 && v <= MAX_MARGIN_TWIPS)) {
+        frame.pageMargins = Object.fromEntries(MARGIN_NAMES.map((name, i) => [name, margins[i]]));
+      }
     }
+    // The page setup only travels with a header or footer.
+    if (!("header" in frame) && !("footer" in frame)) delete frame.pageMargins;
     return frame;
   }
 

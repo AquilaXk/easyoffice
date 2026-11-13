@@ -119,11 +119,13 @@
     linear-gradient(#d0d0d0, #d0d0d0);
   background-repeat: no-repeat;
   background-size: 14px 1px, 1px 14px, 14px 1px, 1px 14px, 14px 1px, 1px 14px, 14px 1px, 1px 14px;
+  /* Corner marks 4px outside the body area: the margins are the page's (`--pg-pad-*`, which a header or footer
+     that needs more room raises, doc-pages.js); without a page layout they are the editor's padding. */
   background-position:
-    38px 44px, 52px 30px,
-    calc(100% - 38px) 44px, calc(100% - 52px) 30px,
-    38px calc(100% - 44px), 52px calc(100% - 30px),
-    calc(100% - 38px) calc(100% - 44px), calc(100% - 52px) calc(100% - 30px);
+    calc(var(--pg-pad-l, 56px) - 18px) calc(var(--pg-pad-t, 48px) - 4px), calc(var(--pg-pad-l, 56px) - 4px) calc(var(--pg-pad-t, 48px) - 18px),
+    calc(100% - var(--pg-pad-r, 56px) + 18px) calc(var(--pg-pad-t, 48px) - 4px), calc(100% - var(--pg-pad-r, 56px) + 4px) calc(var(--pg-pad-t, 48px) - 18px),
+    calc(var(--pg-pad-l, 56px) - 18px) calc(100% - var(--pg-pad-b, 48px) + 4px), calc(var(--pg-pad-l, 56px) - 4px) calc(100% - var(--pg-pad-b, 48px) + 18px),
+    calc(100% - var(--pg-pad-r, 56px) + 18px) calc(100% - var(--pg-pad-b, 48px) + 4px), calc(100% - var(--pg-pad-r, 56px) + 4px) calc(100% - var(--pg-pad-b, 48px) + 18px);
 }
 .eo-boxed-heading {
   display: flex;
@@ -365,24 +367,27 @@
    one is edited, the live section sits on page 1 inside the reference editor's edit region: the guide corners of the
    page margins around the band (`page-margin-guides.ts`, 14px, same colour as the sheet corners), the badge above its
    top-left corner (`editor.css` .hf-edit-badge) and the dimmed workspace (`#scroll-container.hf-editing`). */
-#doc-editor { --hf-h: calc(var(--pg-pad-t, 48px) - 16px); }
 #doc-editor > section[data-eo-hf] { display: none; }
+/* The areas: the header starts `--hf-hd` below the page's top edge and is at least as high as the space the page
+   setup leaves for it (`--hf-band-h`); the footer ends `--hf-ft` above the bottom edge (`--hf-fband-h`). They grow
+   with their text, and doc-pages.js moves the body away (`--pg-hf-top`, `--pg-hf-bottom`). */
 .doc-page-hf {
   position: absolute;
   left: var(--pg-pad-l, 56px);
   right: var(--pg-pad-r, 56px);
-  height: var(--hf-h);
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  justify-content: flex-start;
   font-style: normal;
   font-size: 10pt;
   line-height: 1.4;
 }
-.doc-page-hf[data-hf="header"] { top: calc((var(--pg-pad-t, 48px) - var(--hf-h)) / 2); justify-content: flex-end; }
-.doc-page-hf[data-hf="footer"] { bottom: calc((var(--pg-pad-b, 48px) - var(--hf-h)) / 2); justify-content: flex-start; }
+.doc-page-hf[data-hf="header"] { top: var(--hf-hd, 75.6px); min-height: var(--hf-band-h, 56.7px); }
+.doc-page-hf[data-hf="footer"] { bottom: var(--hf-ft, 56.7px); min-height: var(--hf-fband-h, 56.7px); }
 .doc-page-hf p, #doc-editor > section[data-eo-hf] p { margin: 0; min-height: 1.4em; }
 .eo-page-field::before { content: counter(eo-page); }
+.eo-page-field[data-eo-field="pages"]::before { content: counter(eo-total); }
+.eo-page-field[data-eo-field="filename"]::before { content: attr(data-eo-name); }
 .doc-page-layer[data-hf-footer] .doc-page-sheet::after { display: none; }
 #doc-editor[data-eo-hf-edit="header"] > section[data-eo-hf="header"],
 #doc-editor[data-eo-hf-edit="footer"] > section[data-eo-hf="footer"] {
@@ -390,22 +395,24 @@
   z-index: 3;
   display: flex;
   flex-direction: column;
+  justify-content: flex-start;
   box-sizing: border-box;
   left: var(--pg-pad-l, 56px);
   width: calc(var(--pg-w, 794px) - var(--pg-pad-l, 56px) - var(--pg-pad-r, 56px));
-  height: var(--hf-h);
   background: var(--doc-paper);
   font-size: 10pt;
   line-height: 1.4;
   outline: none;
   cursor: text;
 }
-#doc-editor[data-eo-hf-edit="header"] > section[data-eo-hf="header"] { top: calc((var(--pg-pad-t, 48px) - var(--hf-h)) / 2); justify-content: flex-end; }
+#doc-editor[data-eo-hf-edit="header"] > section[data-eo-hf="header"] { top: var(--hf-hd, 75.6px); min-height: var(--hf-band-h, 56.7px); }
 #doc-editor[data-eo-hf-edit="footer"] > section[data-eo-hf="footer"] {
-  top: calc(var(--pg-h, 1123px) - (var(--pg-pad-b, 48px) - var(--hf-h)) / 2 - var(--hf-h));
-  justify-content: flex-start;
+  top: calc(var(--pg-h, 1123px) - var(--hf-ft, 56.7px) - max(var(--hf-fband-h, 56.7px), var(--hf-fh, 0px)));
+  min-height: var(--hf-fband-h, 56.7px);
 }
-#doc-editor[data-eo-hf-edit] > section[data-eo-hf] .eo-page-field::before { content: "1"; }
+#doc-editor[data-eo-hf-edit] > section[data-eo-hf] .eo-page-field[data-eo-field="page"]::before,
+#doc-editor[data-eo-hf-edit] > section[data-eo-hf] .eo-page-field:not([data-eo-field])::before { content: "1"; }
+#doc-editor[data-eo-hf-edit] > section[data-eo-hf] .eo-page-field[data-eo-field="pages"]::before { content: "1"; }
 #doc-editor[data-eo-hf-edit] > section[data-eo-hf]::before {
   content: "";
   position: absolute;

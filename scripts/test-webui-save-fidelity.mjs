@@ -248,8 +248,8 @@ test("DOC save sends the header and footer sections as their own fields, a page-
   const editor = document.getElementById("doc-editor");
   editor.innerHTML =
     '<p>본문 문단</p>' +
-    '<section class="eo-page-frame" data-eo-hf="header"><p style="text-align: center;"><strong>제목 머리</strong></p></section>' +
-    '<section class="eo-page-frame" data-eo-hf="footer"><p>쪽 <span class="eo-page-field" data-eo-field="page"></span></p></section>';
+    '<section class="eo-page-frame" data-eo-hf="header" data-eo-margins="1985,1590,1134,680"><p style="text-align: center;"><strong>제목 머리</strong></p></section>' +
+    '<section class="eo-page-frame" data-eo-hf="footer"><p>쪽 <span class="eo-page-field" data-eo-field="page"></span>/<span class="eo-page-field" data-eo-field="pages"></span> <span class="eo-page-field" data-eo-field="filename"></span></p></section>';
 
   userClick(studioItem(document, "studio-save"));
   await flushAsyncTurns(10);
@@ -257,5 +257,8 @@ test("DOC save sends the header and footer sections as their own fields, a page-
   assert.equal(converts.length, 1);
   assert.deepEqual(converts[0].blocks.map((block) => block.runs[0].text), ["본문 문단"]);
   assert.deepEqual(converts[0].header, [{ type: "paragraph", runs: [{ text: "제목 머리", bold: true }], align: "center" }]);
-  assert.deepEqual(converts[0].footer, [{ type: "paragraph", runs: [{ text: "쪽 " }, { text: "", field: "page" }] }]);
+  assert.deepEqual(converts[0].footer, [
+    { type: "paragraph", runs: [{ text: "쪽 " }, { text: "", field: "page" }, { text: "/" }, { text: "", field: "pages" }, { text: " " }, { text: "", field: "filename" }] },
+  ]);
+  assert.deepEqual(converts[0].pageMargins, { top: 1985, bottom: 1590, header: 1134, footer: 680 });
 });

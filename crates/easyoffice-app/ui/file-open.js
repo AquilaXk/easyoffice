@@ -124,7 +124,8 @@
   }
 
   // The page-number field of a header or footer (`doc-page-frame.js`): drawn by the page, not text.
-  const fieldSpec = () => ({ ...elSpec("span", [], {}, { class: "eo-page-field", contenteditable: "false" }), data: { eoField: "page" } });
+  const FIELD_MARKS = { page: "page", pages: "pages", filename: "filename" };
+  const fieldSpec = (mark) => ({ ...elSpec("span", [], {}, { class: "eo-page-field", contenteditable: "false" }), data: { eoField: mark } });
 
   // `spec` inside the character formatting of a decoded run.
   function formatSpec(spec, run) {
@@ -144,8 +145,8 @@
   function runSpecs(runs) {
     const out = [];
     (runs || []).forEach((run) => {
-      if (run.field === "page") {
-        out.push(formatSpec(fieldSpec(), run));
+      if (Object.hasOwn(FIELD_MARKS, run.field)) {
+        out.push(formatSpec(fieldSpec(FIELD_MARKS[run.field]), run));
         return;
       }
       const lines = String(run.text ?? "").split("\n");
@@ -272,11 +273,17 @@
     return nodes;
   }
 
+  // `data-eo-margins` ("top,bottom,header,footer" in twips) of a decoded `pageMargins`, or nothing.
+  function pageMarginsData(margins) {
+    const values = ["top", "bottom", "header", "footer"].map((name) => margins?.[name]);
+    return values.every((v) => Number.isInteger(v) && v >= 0) ? { eoMargins: values.join(",") } : {};
+  }
+
   // The header and footer of a decoded document as the editor's sections (`doc-page-frame.js`), after the body.
   function pageFrameNodes(res) {
     return ["header", "footer"]
       .filter((kind) => Array.isArray(res[kind]) && res[kind].length > 0)
-      .map((kind) => ({ ...elSpec("section", buildEditorNodes(res[kind]), {}, { class: "eo-page-frame" }), data: { eoHf: kind } }));
+      .map((kind) => ({ ...elSpec("section", buildEditorNodes(res[kind]), {}, { class: "eo-page-frame" }), data: { eoHf: kind, ...pageMarginsData(res.pageMargins) } }));
   }
 
   // `{ [1-based column]: px }` from a decoded sheet's `columns` (PD-089); invalid entries are skipped.
