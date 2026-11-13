@@ -23,6 +23,7 @@
     notRange: "참조 영역이 아닌 이름",
     unknownSheet: "참조할 시트가 없음",
     limit: "이름은 10,000개까지",
+    nothing: "만들 이름이 없음",
     unchecked: "이름을 확인하지 못함",
   };
   const WORKBOOK = "통합 문서";
@@ -35,7 +36,7 @@
     const kit = host.__EASYOFFICE_CREATE_SHEET_DIALOG_KIT__(document);
     const names = host.__EASYOFFICE_SHEET_NAMES__;
     const byId = (id) => document.getElementById(id);
-    const state = { picked: -1, editing: null, bound: false };
+    const state = { picked: -1, editing: null, bound: false, values: [], valuesStamp: 0 };
 
     function say(text) {
       const fb = byId("status-command-feedback");
@@ -242,24 +243,25 @@
 
     // ---- 이름 관리 ---------------------------------------------------------------------------------------
 
-    const manageable = () => names.getAll().filter((def) => !def.hidden);
+    // The names the list shows (not the hidden ones) with their place in the whole list, which the values follow.
+    const manageable = () => names.getAll().map((def, index) => ({ def, index })).filter(({ def }) => !def.hidden);
 
     function renderManager() {
       const list = byId("sheet-names-list");
       if (!list) return;
       list.replaceChildren();
       const shown = manageable();
-      shown.forEach((def, i) => {
+      shown.forEach(({ def, index }, i) => {
         const li = document.createElement("li");
         li.setAttribute("role", "option");
         li.setAttribute("aria-selected", i === state.picked ? "true" : "false");
         li.dataset.index = String(i);
-        for (const text of [def.name, scopeLabel(def), def.refersTo]) {
+        for (const text of [def.name, state.values[index] ?? "", def.refersTo, scopeLabel(def), def.comment ?? ""]) {
           const span = document.createElement("span");
           span.textContent = text;
+          span.title = text;
           li.appendChild(span);
         }
-        li.title = def.comment || "";
         list.appendChild(li);
       });
       const has = state.picked >= 0 && state.picked < shown.length;
@@ -269,17 +271,58 @@
       }
     }
 
+    // The values come from the engine, which has the cells: the list shows without them first and fills in.
+    async function loadValues() {
+      state.values = [];
+      const stamp = (state.valuesStamp += 1);
+      const result = await sheetStoreHelpers.nameValues?.(sheetDataStore).catch(() => null);
+      if (stamp !== state.valuesStamp || !result?.ok || !Array.isArray(result.answer?.values)) return;
+      state.values = result.answer.values;
+      if (byId("sheet-names-dialog")?.open) renderManager();
+    }
+
     function openManager() {
       state.picked = -1;
       kit.note("sheet-names-status", "");
       renderManager();
       kit.openDialog("sheet-names-dialog");
+      void loadValues();
       return true;
     }
 
-    function deleteName() {
-      const def = manageable()[state.picked];
-      if (!def) return Promise.resolve(false);
+    // "<name> 이름을 지울까요?" with 지움 and 취소 (the spreadsheet help's question and button), true on 지움.
+    function confirmDelete(name) {
+      const dialog = byId("sheet-name-delete-dialog");
+      if (!dialog) return Promise.resolve(true);
+      byId("sheet-name-delete-message").textContent = name + " 이름을 지울까요?";
+      const ok = byId("btn-sheet-name-delete-ok");
+      return new Promise((resolve) => {
+        let settled = false;
+        const closers = Array.from(dialog.querySelectorAll("[data-dialog-close]"));
+        const finish = (value) => {
+          if (settled) return;
+          settled = true;
+          ok.removeEventListener("click", onOk);
+          closers.forEach((closer) => closer.removeEventListener("click", onNo));
+          dialog.removeEventListener("close", onNo);
+          kit.closeDialog("sheet-name-delete-dialog");
+          resolve(value);
+        };
+        const onOk = () => finish(true);
+        const onNo = () => finish(false);
+        ok.addEventListener("click", onOk);
+        closers.forEach((closer) => closer.addEventListener("click", onNo));
+        dialog.addEventListener("close", onNo);
+        kit.openDialog("sheet-name-delete-dialog");
+        ok.focus?.();
+      });
+    }
+
+    async function deleteName() {
+      const picked = manageable()[state.picked];
+      if (!picked) return false;
+      const { def } = picked;
+      if (!(await confirmDelete(def.name))) return false;
       state.picked = -1;
       return step((list) => list.filter((other) => !(names.fold(other.name) === names.fold(def.name) && (other.scope ?? "") === (def.scope ?? ""))), "이름 삭제: " + def.name);
     }
@@ -341,7 +384,67 @@
       return done;
     }
 
+    // ---- 선택 영역에서 이름 만들기 -----------------------------------------------------------------------
+
+    const EDGE_IDS = { top: "sheet-name-create-top", bottom: "sheet-name-create-bottom", left: "sheet-name-create-left", right: "sheet-name-create-right" };
+    const cellText = (map, r, c) => {
+      const entry = map[host.__EASYOFFICE_SHEET_REFS__.refOf(r, c)];
+      return entry ? String(entry.value || entry.formula || "") : "";
+    };
+
+    // Which edges hold labels, as a guess: the first row when it is all text, else the left column when it is, else the first row.
+    function guessEdges(map, rg) {
+      const isText = (r, c) => {
+        const t = cellText(map, r, c).trim();
+        return t !== "" && !Number.isFinite(Number(t.replaceAll(",", "")));
+      };
+      const rowText = (r) => Array.from({ length: rg.c2 - rg.c1 + 1 }, (_, i) => isText(r, rg.c1 + i)).every(Boolean);
+      const colText = (c) => Array.from({ length: rg.r2 - rg.r1 + 1 }, (_, i) => isText(rg.r1 + i, c)).every(Boolean);
+      const left = !rowText(rg.r1) && colText(rg.c1);
+      return { top: !left, bottom: false, left, right: false };
+    }
+
+    function openCreate() {
+      commitIfEditing();
+      const sheet = getActiveSheetName();
+      sheetDataStore[sheet] = deps.snapshotDomSheetCells();
+      const rg = getRange();
+      if (rg.r1 === rg.r2 && rg.c1 === rg.c2) {
+        say(MESSAGES.nothing);
+        return false;
+      }
+      const edges = guessEdges(sheetDataStore[sheet] || {}, rg);
+      for (const key of Object.keys(EDGE_IDS)) kit.setChecked(EDGE_IDS[key], edges[key]);
+      kit.note("sheet-name-create-status", "");
+      kit.openDialog("sheet-name-create-dialog");
+      return true;
+    }
+
+    async function confirmCreate() {
+      const sheet = getActiveSheetName();
+      const edges = Object.fromEntries(Object.keys(EDGE_IDS).map((key) => [key, kit.checked(EDGE_IDS[key])]));
+      const map = sheetDataStore[sheet] || {};
+      const candidates = names.namesFromSelection(sheet, getRange(), edges, (r, c) => cellText(map, r, c));
+      let usable = [];
+      if (candidates.length > 0) {
+        try {
+          const res = await sheetStoreHelpers.callSheetAction({ sessionAction: "nameCheck", sheets: sheetKeys(), names: names.getAll(), candidates });
+          usable = Array.isArray(res?.problems) ? candidates.filter((_, i) => res.problems[i] === null) : [];
+        } catch {
+          usable = [];
+        }
+      }
+      usable = usable.slice(0, Math.max(0, names.MAX_NAMES - names.getAll().length));
+      if (usable.length === 0) {
+        kit.note("sheet-name-create-status", MESSAGES.nothing);
+        return false;
+      }
+      kit.closeDialog("sheet-name-create-dialog");
+      return step((list) => [...list, ...usable], "이름 " + usable.length + "개 만듦");
+    }
+
     function bindDialogs() {
+      byId("btn-sheet-name-create-apply")?.addEventListener("click", () => void confirmCreate());
       byId("sheet-names-list")?.addEventListener("click", (ev) => {
         const li = ev.target.closest?.("li");
         if (!li) return;
@@ -350,12 +453,12 @@
       });
       byId("sheet-names-list")?.addEventListener("dblclick", (ev) => {
         const li = ev.target.closest?.("li");
-        if (li) openEdit(manageable()[Number(li.dataset.index)]);
+        if (li) openEdit(manageable()[Number(li.dataset.index)]?.def);
       });
       byId("btn-sheet-names-new")?.addEventListener("click", () => openEdit(null));
       byId("btn-sheet-names-edit")?.addEventListener("click", () => {
-        const def = manageable()[state.picked];
-        if (def) openEdit(def);
+        const picked = manageable()[state.picked];
+        if (picked) openEdit(picked.def);
       });
       byId("btn-sheet-names-delete")?.addEventListener("click", () => void deleteName());
       byId("btn-sheet-name-edit-apply")?.addEventListener("click", () => void confirmEdit());
@@ -377,8 +480,9 @@
     const actions = {
       "name-define": () => Promise.resolve(openEdit(null)),
       "name-manage": () => Promise.resolve(openManager()),
+      "name-create": () => Promise.resolve(openCreate()),
     };
-    return { actions, bind, refreshNameBox, openManager, openEdit, checkCandidate, commitNameBox, goTo, state: () => state };
+    return { actions, bind, refreshNameBox, openManager, openEdit, openCreate, confirmCreate, deleteName, checkCandidate, commitNameBox, goTo, state: () => state };
   }
 
   host.__EASYOFFICE_SHEET_NAMES_MESSAGES__ = MESSAGES;

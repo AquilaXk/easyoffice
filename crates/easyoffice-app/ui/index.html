@@ -300,6 +300,7 @@
             <div class="menu-dropdown" role="menu">
               <div class="md-item" data-sheet-act="name-define" role="menuitem" tabindex="-1"><span class="md-label">이름 정의…</span></div>
               <div class="md-item" data-sheet-act="name-manage" role="menuitem" tabindex="-1"><span class="md-label">이름 관리…</span></div>
+              <div class="md-item" data-sheet-act="name-create" role="menuitem" tabindex="-1"><span class="md-label">선택 영역에서 이름 만들기…</span></div>
             </div>
           </div>
           <div class="menu-item" data-menu="data" data-kinds="SHEET">
@@ -1405,7 +1406,7 @@
       <div class="dialog-wrap">
         <div class="dialog-title"><span id="sheet-names-dialog-title">이름 관리</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
         <div class="dialog-body">
-          <div class="sheet-names-head" aria-hidden="true"><span>이름</span><span>범위</span><span>참조 영역</span></div>
+          <div class="sheet-names-head" aria-hidden="true"><span>이름</span><span>값</span><span>참조 영역</span><span>범위</span><span>설명</span></div>
           <ul id="sheet-names-list" class="dialog-list sheet-names-list" role="listbox" aria-label="이름 목록"></ul>
           <p id="sheet-names-status" class="dialog-pdf-note" role="status"></p>
         </div>
@@ -1414,6 +1415,32 @@
           <button id="btn-sheet-names-edit" type="button" class="dialog-btn">편집</button>
           <button id="btn-sheet-names-delete" type="button" class="dialog-btn">삭제</button>
           <button type="button" class="dialog-btn" data-dialog-close>닫기</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="sheet-name-delete-dialog" class="tool-dialog sheet-tab-dialog" role="alertdialog" aria-labelledby="sheet-name-delete-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="sheet-name-delete-title">이름 삭제</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body"><p id="sheet-name-delete-message"></p></div>
+        <div class="dialog-footer">
+          <button id="btn-sheet-name-delete-ok" type="button" class="dialog-btn dialog-btn-primary">지움</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="sheet-name-create-dialog" class="tool-dialog sheet-rule-dialog" aria-labelledby="sheet-name-create-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="sheet-name-create-title">선택 영역에서 이름 만들기</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><label class="dialog-checkbox"><input id="sheet-name-create-top" type="checkbox" /> 첫 행</label><label class="dialog-checkbox"><input id="sheet-name-create-bottom" type="checkbox" /> 마지막 행</label></div>
+          <div class="dialog-row"><label class="dialog-checkbox"><input id="sheet-name-create-left" type="checkbox" /> 왼쪽 열</label><label class="dialog-checkbox"><input id="sheet-name-create-right" type="checkbox" /> 오른쪽 열</label></div>
+          <p id="sheet-name-create-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-sheet-name-create-apply" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
         </div>
       </div>
     </dialog>

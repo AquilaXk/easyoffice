@@ -67,7 +67,8 @@ const fn item(
     }
 }
 
-/// A spreadsheet menu item that runs the page menu item `data-sheet-act="<act>"`.
+/// A spreadsheet menu item that runs the page menu item `data-sheet-act="<act>"` (the long ones are written with
+/// braces so the formatter keeps each on one line).
 macro_rules! sa {
     ($id:literal, $label:literal, $act:literal) => {
         item($id, $label, None, concat!("sheet-act:", $act))
@@ -594,30 +595,19 @@ pub const ITEMS: &[MenuItemSpec] = &[
     sa!("sheet:tab-unhide", "시트 숨기기 취소…", "tab-unhide"),
     sa!("sheet:name-define", "이름 정의…", "name-define"),
     sa!("sheet:name-manage", "이름 관리…", "name-manage"),
+    sa! { "sheet:name-create", "선택 영역에서 이름 만들기…", "name-create" },
     sa!("sheet:page-setup", "쪽 설정…", "page-setup"),
     sa!("sheet:print-area-set", "인쇄 영역 설정", "print-area-set"),
-    sa!(
-        "sheet:print-area-clear",
-        "인쇄 영역 해제",
-        "print-area-clear"
-    ),
+    sa! { "sheet:print-area-clear", "인쇄 영역 해제", "print-area-clear" },
     sa!("sheet:group", "그룹 묶기", "group"),
     sa!("sheet:ungroup", "그룹 풀기", "ungroup"),
     sa!("sheet:hide-detail", "하위 수준 숨기기", "hide-detail"),
     sa!("sheet:show-detail", "하위 수준 표시", "show-detail"),
     sa!("sheet:outline-clear", "윤곽 지우기", "outline-clear"),
     sa!("sheet:row-insert-above", "행 위에 삽입", "row-insert-above"),
-    sa!(
-        "sheet:row-insert-below",
-        "행 아래에 삽입",
-        "row-insert-below"
-    ),
+    sa! { "sheet:row-insert-below", "행 아래에 삽입", "row-insert-below" },
     sa!("sheet:col-insert-left", "열 왼쪽에 삽입", "col-insert-left"),
-    sa!(
-        "sheet:col-insert-right",
-        "열 오른쪽에 삽입",
-        "col-insert-right"
-    ),
+    sa! { "sheet:col-insert-right", "열 오른쪽에 삽입", "col-insert-right" },
     sa!("sheet:row-delete", "행 삭제", "row-delete"),
     sa!("sheet:col-delete", "열 삭제", "col-delete"),
     sa!("sheet:hide", "숨기기", "hide"),

@@ -25,10 +25,10 @@ const open = async () => {
   return harness;
 };
 
-test("the table holds the 11 number-format items, the 35 row, column, hide, merge, sort, filter, freeze, sheet tab, group, page setup, print area and name items and 골라 붙이기", () => {
+test("the table holds the 11 number-format items, the 36 row, column, hide, merge, sort, filter, freeze, sheet tab, group, page setup, print area and name items and 골라 붙이기", () => {
   const items = sheetItems();
   assert.equal(items.filter((i) => i.name === "sheet-numfmt").length, 11);
-  assert.equal(items.filter((i) => i.name === "sheet-act").length, 35);
+  assert.equal(items.filter((i) => i.name === "sheet-act").length, 36);
   assert.deepEqual(items.filter((i) => i.name === "sheet-paste").map((i) => [i.id, i.label, i.argument]), [["edit:paste-special", "골라 붙이기…", "special"]]);
 });
 

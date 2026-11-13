@@ -559,7 +559,14 @@ const TABLE_DOC: MenuSpec = menu(
     ],
 );
 /// The spreadsheet's 수식 menu: the defined names (수식 > 이름 > 이름 정의, 이름 관리 of the spreadsheet help).
-const FORMULA_SHEET: MenuSpec = menu("수식", &["sheet:name-define", "sheet:name-manage"]);
+const FORMULA_SHEET: MenuSpec = menu(
+    "수식",
+    &[
+        "sheet:name-define",
+        "sheet:name-manage",
+        "sheet:name-create",
+    ],
+);
 const DATA_SHEET: MenuSpec = menu(
     "데이터",
     &[

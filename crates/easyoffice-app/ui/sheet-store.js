@@ -469,6 +469,9 @@
     // page's sheet set changes, so the page lets go of it and the next sync opens a new one.
     const rewriteSheetRefs = (sheetsMap, request) => runOnSession(sheetsMap, request, "sheetRefs", dropSession);
 
+    // The value text of every defined name, as the engine shows it in the 이름 관리 list (PD-214).
+    const nameValues = (sheetsMap) => runOnSession(sheetsMap, {}, "nameValues", () => {});
+
     // One retry after a reset covers an expired or evicted session. `null` sends the caller to the
     // stateless command: after two failures, and at once for a sheet set the engine refused for
     // size (the engine already dropped that session, so reopening it would only repeat the load).
@@ -757,6 +760,7 @@
       validateEntry,
       editAxis,
       rewriteSheetRefs,
+      nameValues,
       callSheetAction: sessionCall,
       enableSheetSessions,
       scrubSheetStoreMap,

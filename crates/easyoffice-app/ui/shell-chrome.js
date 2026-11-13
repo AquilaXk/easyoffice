@@ -158,6 +158,7 @@
     "sheet:freeze-clear": "sheet-act:freeze-clear",
     "sheet:name-define": "sheet-act:name-define",
     "sheet:name-manage": "sheet-act:name-manage",
+    "sheet:name-create": "sheet-act:name-create",
     "sheet:page-setup": "sheet-act:page-setup",
     "sheet:print-area-set": "sheet-act:print-area-set",
     "sheet:print-area-clear": "sheet-act:print-area-clear",

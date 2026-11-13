@@ -174,6 +174,33 @@
     return null;
   }
 
+  // ---- 선택 영역에서 이름 만들기 ---------------------------------------------------------------------------
+
+  // The most names one 선택 영역에서 이름 만들기 asks the engine about.
+  const MAX_FROM_SELECTION = 1000;
+
+  // The names the labels of a selection give: `edges` says which of the first row, last row, left column and right column
+  // hold labels (`{ top, bottom, left, right }`). Each label names the cells of its row or column between the label
+  // lines; a label that is empty is left out (the engine leaves out the ones that break the rules of a name).
+  // `labelAt(row, col)` is the text of a cell. At most `MAX_FROM_SELECTION` names.
+  function namesFromSelection(sheet, rg, edges, labelAt) {
+    const r1 = rg.r1 + (edges.top ? 1 : 0);
+    const r2 = rg.r2 - (edges.bottom ? 1 : 0);
+    const c1 = rg.c1 + (edges.left ? 1 : 0);
+    const c2 = rg.c2 - (edges.right ? 1 : 0);
+    const out = [];
+    if (r1 > r2 || c1 > c2) return out;
+    const add = (row, col, box) => {
+      const name = String(labelAt(row, col) ?? "").trim();
+      if (name && out.length < MAX_FROM_SELECTION) out.push({ name, refersTo: refersToOf(sheet, box) });
+    };
+    if (edges.top) for (let c = c1; c <= c2; c += 1) add(rg.r1, c, { r1, c1: c, r2, c2: c });
+    if (edges.left) for (let r = r1; r <= r2; r += 1) add(r, rg.c1, { r1: r, c1, r2: r, c2 });
+    if (edges.bottom) for (let c = c1; c <= c2; c += 1) add(rg.r2, c, { r1, c1: c, r2, c2: c });
+    if (edges.right) for (let r = r1; r <= r2; r += 1) add(r, rg.c2, { r1: r, c1, r2: r, c2 });
+    return out;
+  }
+
   // ---- the check before a definition is sent --------------------------------------------------------
 
   // The limits that need no engine. `null` when the fields fit; else the problem's code.
@@ -204,6 +231,8 @@
     visibleFor,
     nameOfRange,
     limitProblem,
+    namesFromSelection,
+    MAX_FROM_SELECTION,
     fold,
     on(event, fn) {
       if (event === "changed") listener = fn;

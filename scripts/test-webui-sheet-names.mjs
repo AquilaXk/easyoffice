@@ -18,6 +18,11 @@ async function open(options = {}) {
       if (command === "evaluate_sheet") {
         const body = JSON.parse(args.payload);
         calls.push(body);
+        if (body.sessionAction === "nameCheck" && body.candidates) {
+          const seen = new Set(body.names.map((n) => n.name.toLowerCase()));
+          return { problems: body.candidates.map((c) => { const k = c.name.toLowerCase(); if (!/^[^\d\s][\w가-힣]*$/.test(c.name) || /^[A-Za-z]{1,3}\d+$/.test(c.name)) return "name"; if (seen.has(k)) return "duplicate"; seen.add(k); return null; }) };
+        }
+        if (body.sessionAction === "nameValues") return { session: "s1", values: body.names ? [] : (options.values ?? []) };
         if (body.sessionAction === "nameCheck") {
           const { candidate, names, replace } = body;
           const same = (a, b) => a.name.toLowerCase() === b.name.toLowerCase() && (a.scope ?? "") === (b.scope ?? "");
@@ -66,7 +71,7 @@ const select = (t, ref) => t.cell(ref).focus();
 test("the 수식 menu has 이름 정의 and 이름 관리, and both dialogs use the shared frame", async () => {
   const t = await open();
   const menu = [...t.document.querySelectorAll('.menu-item[data-menu="formula"] .md-label')].map((el) => el.textContent);
-  assert.deepEqual(menu, ["이름 정의…", "이름 관리…"]);
+  assert.deepEqual(menu, ["이름 정의…", "이름 관리…", "선택 영역에서 이름 만들기…"]);
   for (const id of ["sheet-names-dialog", "sheet-name-edit-dialog"]) {
     const dialog = t.document.getElementById(id);
     assert.match(dialog.className, /tool-dialog/);
@@ -124,7 +129,8 @@ test("이름 관리 lists the names with their scope and reference, edits one an
   ], true);
   await t.act("name-manage");
   const rows = [...t.document.querySelectorAll("#sheet-names-list li")].map((li) => [...li.querySelectorAll("span")].map((s) => s.textContent));
-  assert.deepEqual(rows, [["Prices", "통합 문서", "Sheet1!$A$1:$A$3"], ["Local", "Sheet1", "Sheet1!$B$1"]]);
+  assert.deepEqual(rows, [["Prices", "", "Sheet1!$A$1:$A$3", "통합 문서", ""], ["Local", "", "Sheet1!$B$1", "Sheet1", "메모"]]);
+  assert.deepEqual([...t.document.querySelectorAll("#sheet-names-dialog .sheet-names-head span")].map((s) => s.textContent), ["이름", "값", "참조 영역", "범위", "설명"]);
   assert.equal(t.document.getElementById("btn-sheet-names-edit").disabled, true);
   t.userClick(t.document.querySelector('#sheet-names-list li[data-index="1"]'));
   assert.equal(t.document.getElementById("btn-sheet-names-edit").disabled, false);
@@ -140,6 +146,17 @@ test("이름 관리 lists the names with their scope and reference, edits one an
   assert.equal(t.names.getAll().length, 3, "the hidden name stays");
   t.userClick(t.document.querySelector('#sheet-names-list li[data-index="0"]'));
   t.document.getElementById("btn-sheet-names-delete").click();
+  await flushAsyncTurns(30);
+  const confirm = t.document.getElementById("sheet-name-delete-dialog");
+  assert.equal(confirm.open, true, "deleting asks first");
+  assert.equal(t.document.getElementById("sheet-name-delete-message").textContent, "Prices 이름을 지울까요?");
+  assert.deepEqual([...confirm.querySelectorAll(".dialog-footer .dialog-btn")].map((b) => b.textContent), ["지움", "취소"]);
+  confirm.querySelector(".dialog-footer [data-dialog-close]").click();
+  await flushAsyncTurns(20);
+  assert.equal(t.names.getAll().length, 3, "취소 keeps the name");
+  t.document.getElementById("btn-sheet-names-delete").click();
+  await flushAsyncTurns(30);
+  t.document.getElementById("btn-sheet-name-delete-ok").click();
   await flushAsyncTurns(30);
   assert.deepEqual(t.names.getAll().map((n) => n.name), ["Local", "Secret"]);
   await t.undo();
@@ -337,4 +354,37 @@ test("the core reads the ranges a name can refer to and writes them back absolut
   assert.equal(n.parseAddress("SUM"), null, "a lone word is a name, not a column");
   assert.equal(n.limitProblem({ name: "a".repeat(256), refersTo: "1" }), "tooLong");
   assert.equal(n.limitProblem({ name: "a", refersTo: "1", comment: "c".repeat(256) }), "comment");
+});
+
+test("이름 관리 shows the values the engine answers, in the order of the list", async () => {
+  const t = await open({ values: ["10", "{1,2;3,4}", "1"] });
+  t.names.replaceAll([{ name: "A_", refersTo: "Sheet1!$A$1" }, { name: "B_", refersTo: "Sheet1!$A$1:$B$2" }, { name: "H_", refersTo: "1", hidden: true }], true);
+  await t.act("name-manage");
+  await flushAsyncTurns(30);
+  const rows = [...t.document.querySelectorAll("#sheet-names-list li")].map((li) => [...li.querySelectorAll("span")].map((s) => s.textContent));
+  assert.deepEqual(rows.map((r) => [r[0], r[1]]), [["A_", "10"], ["B_", "{1,2;3,4}"]]);
+  assert.ok(t.calls.some((c) => c.sessionAction === "nameValues"));
+});
+
+test("선택 영역에서 이름 만들기 names the rows or columns by their labels, skips what the engine refuses, one undo step", async () => {
+  const t = await open();
+  const labels = { A1: "수량", B1: "단가", C1: "1x", A2: "1", B2: "2", C2: "3", A3: "4", B3: "5", C3: "6" };
+  const store = t.host.__EASYOFFICE_SHEET_NAMES__;
+  const out = store.namesFromSelection("Sheet1", { r1: 1, c1: 1, r2: 3, c2: 3 }, { top: true, bottom: false, left: false, right: false }, (r, c) => labels["ABC"[c - 1] + r]);
+  assert.deepEqual(out.map((n) => [n.name, n.refersTo]), [["수량", "Sheet1!$A$2:$A$3"], ["단가", "Sheet1!$B$2:$B$3"], ["1x", "Sheet1!$C$2:$C$3"]]);
+  const both = store.namesFromSelection("Sheet1", { r1: 1, c1: 1, r2: 3, c2: 3 }, { top: true, bottom: false, left: true, right: false }, (r, c) => labels["ABC"[c - 1] + r]);
+  assert.deepEqual(both.map((n) => n.refersTo), ["Sheet1!$B$2:$B$3", "Sheet1!$C$2:$C$3", "Sheet1!$B$2:$C$2", "Sheet1!$B$3:$C$3"]);
+  assert.deepEqual(store.namesFromSelection("Sheet1", { r1: 1, c1: 1, r2: 1, c2: 3 }, { top: true, bottom: false, left: false, right: false }, () => "x"), [], "no rows below the labels");
+  await t.typeInBox("A1:C2");
+  await t.act("name-create");
+  const dialog = t.document.getElementById("sheet-name-create-dialog");
+  assert.equal(dialog.open, true);
+  assert.deepEqual([...dialog.querySelectorAll(".dialog-checkbox")].map((l) => l.textContent.trim()), ["첫 행", "마지막 행", "왼쪽 열", "오른쪽 열"]);
+  assert.equal(t.document.getElementById("sheet-name-create-top").checked, true, "a first row is the guess");
+  t.document.getElementById("sheet-name-create-top").checked = false;
+  t.document.getElementById("btn-sheet-name-create-apply").click();
+  await flushAsyncTurns(30);
+  assert.equal(dialog.open, true, "no edge chosen, no name to make");
+  assert.equal(t.document.getElementById("sheet-name-create-status").textContent, "만들 이름이 없음");
+  assert.deepEqual(t.names.getAll(), []);
 });
