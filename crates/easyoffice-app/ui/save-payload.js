@@ -550,6 +550,9 @@
       const columns = buildColumnsPayload(columnWidths?.[name]);
       const sheet = columns.length > 0 ? { name, cells, columns } : { name, cells };
       if (numFmts.codes.length > 0) sheet.numFmts = numFmts.codes;
+      // The arrays that spill (PD-217): the cells they filled are in `cells` as values.
+      const spillAreas = host.__EASYOFFICE_SHEET_SPILL__?.areasOf(store) || [];
+      if (spillAreas.length > 0) sheet.spills = spillAreas;
       const rules = rulesBySheet?.[name];
       if (rules && ((rules.cf || []).length > 0 || (rules.dv || []).length > 0)) sheet.rules = rules;
       // Merged ranges and hidden rows and columns (PD-194): `merges`, `hiddenRows`, `hiddenCols`.

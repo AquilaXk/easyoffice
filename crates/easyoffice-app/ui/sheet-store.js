@@ -9,6 +9,9 @@
   const rulesApi = host.__EASYOFFICE_SHEET_RULES__;
   // The defined names of the workbook (PD-214); absent in pages that do not load them.
   const namesApi = host.__EASYOFFICE_SHEET_NAMES__;
+  // The cells an array fills (PD-217): results the engine answers with, never input; absent in pages that do not load them.
+  const spillApi = host.__EASYOFFICE_SHEET_SPILL__;
+  const isInputEntry = (entry) => !spillApi || spillApi.isInput(entry);
   // The `names` field of a stateless request: only when there are names to send.
   const namesField = () => (namesApi?.hasAny() ? { names: namesApi.getAll() } : {});
 
@@ -123,7 +126,7 @@
         const shPrefix = shName + "!";
         for (const ref of Object.keys(snap)) {
           const entry = snap[ref];
-          if (!entry) continue;
+          if (!entry || !isInputEntry(entry)) continue;
           if (isFormulaStr(entry.formula || "")) {
             formulaTargets.push({ sheet: shName, cell: ref, key: shPrefix + ref });
           }
@@ -233,7 +236,7 @@
         const shPrefix = shName + "!";
         for (const ref of Object.keys(snap)) {
           const entry = snap[ref];
-          if (!entry) continue;
+          if (!entry || !isInputEntry(entry)) continue;
           if (isFormulaStr(entry.formula || "")) {
             formulaTargets.push({ sheet: shName, cell: ref, key: shPrefix + ref });
           }
@@ -297,13 +300,32 @@
       for (const c of Array.isArray(last.changed) ? last.changed : []) {
         session.values.set(c.sheet + "!" + c.cell, c.value);
       }
+      const spillsChanged = takeSpills(sheetsMap, last);
       await syncRules(names);
       return {
         formulaTargets,
         circular: last.circular === true,
         timedOut: last.timedOut === true,
         pending: last.pending,
+        spillsChanged,
       };
+    }
+
+    // Folds what an answer says about arrays into the sheet model: the areas that changed and the values of the
+    // cells they fill. Returns whether the model changed.
+    function takeSpills(sheetsMap, answer) {
+      if (!spillApi) return false;
+      let changed = false;
+      for (const info of Array.isArray(answer.spills) ? answer.spills : []) {
+        const map = sheetsMap?.[info.sheet];
+        if (!map) continue;
+        spillApi.applyInfo(map, info, (ref) => session.values.get(info.sheet + "!" + ref));
+        changed = true;
+      }
+      for (const c of Array.isArray(answer.changed) ? answer.changed : []) {
+        if (spillApi.setValue(sheetsMap?.[c.sheet], c.cell, c.value)) changed = true;
+      }
+      return changed;
     }
 
     // Sends the whole list of defined names when it differs from what the session holds, before the cells, so the
@@ -384,7 +406,7 @@
 
     // Moves the mirror of the session after an `structure` answer: the cells and values of the
     // edited sheet change position and the rewritten formulas replace their text.
-    function moveMirror(request, answer) {
+    function moveMirror(request, answer, sheetsMap) {
       const edit = { axis: request.axis, op: request.op, at: request.at, count: request.count };
       const layoutApi = host.__EASYOFFICE_SHEET_LAYOUT__;
       const mirror = session.raw.get(request.sheet);
@@ -417,6 +439,7 @@
       for (const c of Array.isArray(answer.changed) ? answer.changed : []) {
         session.values.set(c.sheet + "!" + c.cell, c.value);
       }
+      takeSpills(sheetsMap, answer);
       // The engine moved the names with the cells: the page takes its list.
       if (namesApi && Array.isArray(answer.names)) {
         namesApi.replaceAll(answer.names, true);
@@ -449,7 +472,7 @@
               return { ok: false, reason: "limit" };
             }
             if (!answer || answer.expired === true) throw new Error("시트 세션이 만료되었습니다.");
-            done(request, answer);
+            done(request, answer, sheetsMap);
             return { ok: true, answer };
           } catch (err) {
             if (err?.refused === true) {
@@ -628,6 +651,7 @@
         }
       });
 
+      if (spillApi) spillApi.replaceAll(sheets, rpcRes?.spills);
       const extraValue = extraTarget
         ? readExtraValue(rpcRes, sheets, extraTarget, rpcTargets.length)
         : "";
@@ -641,6 +665,7 @@
         if (viaSession) {
           return {
             rpcRes: { circular: viaSession.circular, timedOut: viaSession.timedOut, pending: viaSession.pending },
+            spillsChanged: viaSession.spillsChanged === true,
             formulaTargets: viaSession.formulaTargets,
             targetValues: viaSession.formulaTargets.map((t) => sessionValue(t.key)),
             batchValues: null,
@@ -662,7 +687,8 @@
       const targetValues = Array.isArray(rpcRes?.targetValues) ? rpcRes.targetValues : null;
       const batchValues =
         rpcRes && typeof rpcRes.values === "object" && rpcRes.values ? rpcRes.values : null;
-      return { rpcRes, formulaTargets, targetValues, batchValues };
+      if (spillApi) spillApi.replaceAll(sheetsMap, rpcRes?.spills);
+      return { rpcRes, formulaTargets, targetValues, batchValues, spillsChanged: Boolean(spillApi) };
     }
 
     function collectEntryScrubJob(entry, plainEntries, formulaJobs) {

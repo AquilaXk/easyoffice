@@ -399,6 +399,9 @@
       setDisplayValue(td, value);
       if (formula) td.dataset.formula = formula;
       else delete td.dataset.formula;
+      // A cell an array filled (PD-217) is a result: it keeps the address of the formula that made it.
+      if (entry?.spillOf) td.dataset.spillOf = entry.spillOf;
+      else if (td.dataset.spillOf !== undefined) delete td.dataset.spillOf;
       const st = entry?.style;
       td.style.fontWeight = st?.fontWeight || "";
       td.style.fontStyle = st?.fontStyle || "";

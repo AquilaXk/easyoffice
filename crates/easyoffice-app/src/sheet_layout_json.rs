@@ -5,8 +5,8 @@
 //! inclusive. Input over a limit is refused, not trimmed.
 
 use easyoffice_formats::{
-    normalize_runs, run_total, CellBox, EasyOfficeError, SheetFilter, SheetStyling,
-    StrictJsonValue, MAX_HIDDEN_ROWS, MAX_MERGES,
+    normalize_runs, normalize_spills, run_total, CellBox, EasyOfficeError, SheetFilter,
+    SheetStyling, SpillRef, StrictJsonValue, MAX_HIDDEN_ROWS, MAX_MERGES, MAX_SPILL_REFS,
 };
 use std::fmt::Write;
 
@@ -120,10 +120,50 @@ pub(crate) fn parse_layout(
     if let Some(v) = StrictJsonValue::get_field(obj, "filter") {
         styling.filter = Some(crate::sheet_filter_json::parse_filter(v)?);
     }
+    if let Some(v) = StrictJsonValue::get_field(obj, "spills") {
+        styling.spills = parse_spills(v)?;
+    }
     crate::sheet_view_json::parse_view(obj, styling)?;
     crate::sheet_page_json::parse_page(obj, styling)?;
     crate::sheet_protect_json::parse_sheet_protect(obj, styling)?;
     Ok(())
+}
+
+/// `spills`: `["A1:A3", ...]`, the area of each array that spills, its first cell the formula's (PD-217).
+pub(crate) fn parse_spills(v: &StrictJsonValue) -> Result<Vec<SpillRef>, EasyOfficeError> {
+    let items = v.as_array().ok_or_else(|| bad("spills"))?;
+    if items.len() > MAX_SPILL_REFS {
+        return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+            "스필 영역 수가 한도({MAX_SPILL_REFS})를 초과했습니다."
+        )));
+    }
+    let mut refs = Vec::with_capacity(items.len());
+    for item in items {
+        let area = item
+            .as_str()
+            .filter(|t| t.bytes().any(|b| b.is_ascii_digit()) && t.contains(':'))
+            .and_then(CellBox::parse)
+            .filter(|b| b.area() > 1 && b.row1 <= LAST_ROW && b.col1 <= LAST_COL)
+            .ok_or_else(|| bad("spills"))?;
+        refs.push(SpillRef {
+            row: area.row0,
+            col: area.col0,
+            rows: area.row1 - area.row0 + 1,
+            cols: area.col1 - area.col0 + 1,
+        });
+    }
+    let kept = normalize_spills(&refs, LAST_ROW + 1, LAST_COL + 1);
+    if kept.len() != refs.len() {
+        return Err(EasyOfficeError::ResourceBudgetExceeded(
+            "스필 영역이 한도를 넘었습니다.".to_string(),
+        ));
+    }
+    Ok(kept)
+}
+
+pub(crate) fn spills_json(spills: &[SpillRef]) -> String {
+    let items: Vec<String> = spills.iter().map(|r| format!("\"{}\"", r.a1())).collect();
+    format!("[{}]", items.join(","))
 }
 
 pub(crate) fn merges_json(merges: &[CellBox]) -> String {
@@ -160,6 +200,9 @@ pub(crate) fn write_layout_split(
 ) {
     if !styling.merges.is_empty() {
         let _ = write!(out, ",\"merges\":{}", merges_json(&styling.merges));
+    }
+    if !styling.spills.is_empty() {
+        let _ = write!(out, ",\"spills\":{}", spills_json(&styling.spills));
     }
     if !hidden_rows.is_empty() {
         let _ = write!(out, ",\"hiddenRows\":{}", runs_json(hidden_rows));

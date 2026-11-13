@@ -33,6 +33,7 @@ const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/pii-dom-scrubber.js",
   "../crates/easyoffice-app/ui/sheet-rules.js",
   "../crates/easyoffice-app/ui/sheet-names.js",
+  "../crates/easyoffice-app/ui/sheet-spill.js",
   "../crates/easyoffice-app/ui/sheet-store.js",
   "../crates/easyoffice-app/ui/ribbon-catalog.js",
   "../crates/easyoffice-app/ui/save-payload.js",

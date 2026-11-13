@@ -201,6 +201,9 @@
       const textVal = grid.readTdValue(td);
       const formula = td.dataset.formula || "";
       const prevEntry = map[ref];
+      const spill = host.__EASYOFFICE_SHEET_SPILL__;
+      // A cell an array filled that the user did not change stays a result (PD-217).
+      if (!formula && spill?.stillResult(prevEntry, textVal)) return;
       const keepComputedValue =
         isFormulaStr(formula) &&
         textVal === formula &&
@@ -225,6 +228,10 @@
         cellEntry.style = { fontWeight, fontStyle, textDecoration, fontSize };
         if (numFmt) cellEntry.style.numFmt = numFmt;
         for (const key of lookApi?.hasLook(look) ? lookApi.LOOK_KEYS : []) if (look[key]) cellEntry.style[key] = look[key];
+      }
+      if (spill?.isAnchor(prevEntry) && prevEntry.formula === formula) {
+        cellEntry.spillRows = prevEntry.spillRows;
+        cellEntry.spillCols = prevEntry.spillCols;
       }
       map[ref] = cellEntry;
       if (value !== "" || formula !== "") {
@@ -408,6 +415,11 @@
         }
         const { rpcRes, formulaTargets, targetValues, batchValues } = liveEval;
         let updatedActiveSheet = false;
+        // The cells an array fills changed: the window shows them again (PD-217).
+        if (liveEval.spillsChanged && getActiveModule() === "SHEET") {
+          refreshWindowFromModel();
+          updatedActiveSheet = true;
+        }
         formulaTargets.forEach((target, idx) => {
           const rawVal = extractEvaluatedTargetValue(
             rpcRes,

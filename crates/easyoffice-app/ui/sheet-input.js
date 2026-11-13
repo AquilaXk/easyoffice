@@ -174,7 +174,27 @@
     }
 
     // ---- selection painting ----------------------------------------------------------------
+    // The border of the area of the array the active cell belongs to, with the token of the selection stroke (PD-217).
+    function paintSpillArea() {
+      const spill = host.__EASYOFFICE_SHEET_SPILL__;
+      if (!spill) return;
+      const area = spill.areaOf((ref) => api.getEntry(ref), grid.refOf(sel.ar, sel.ac));
+      const tbody = document.querySelector("#pane-sheet tbody");
+      if (!tbody) return;
+      if (!area && !tbody.querySelector("td.spill-t, td.spill-b, td.spill-l, td.spill-r")) return;
+      tbody.querySelectorAll("td[data-cell]").forEach((td) => {
+        const r = td._row;
+        const c = td._col;
+        const inside = Boolean(area) && r >= area.r0 && r <= area.r1 && c >= area.c0 && c <= area.c1;
+        td.classList.toggle("spill-t", inside && r === area.r0);
+        td.classList.toggle("spill-b", inside && r === area.r1);
+        td.classList.toggle("spill-l", inside && c === area.c0);
+        td.classList.toggle("spill-r", inside && c === area.c1);
+      });
+    }
+
     function paintSelection() {
+      paintSpillArea();
       const rg = getRange();
       if (typeof grid.paintSelectionRange === "function") {
         grid.paintSelectionRange({ r1: rg.r1, r2: rg.r2, c1: rg.c1, c2: rg.c2, ar: sel.ar, ac: sel.ac });
@@ -224,7 +244,12 @@
       if (formulaInput && document.activeElement !== formulaInput) {
         // A protected sheet does not show the formula of a cell whose format hides it (PD-216).
         const hidden = protectApi?.formulaHidden(api.getSheetName(), sel.ar, sel.ac, activeTd ? activeTd._st : api.getEntry(ref)?.style);
-        if (activeTd) {
+        // A cell an array filled shows the formula of the array, dimmed: it cannot be edited on its own (PD-217).
+        const filledBy = host.__EASYOFFICE_SHEET_SPILL__?.isChild(api.getEntry(ref)) ? api.getEntry(api.getEntry(ref).spillOf) : null;
+        formulaInput.classList.toggle("spill-ghost", Boolean(filledBy));
+        if (filledBy) {
+          formulaInput.value = filledBy.formula || "";
+        } else if (activeTd) {
           const live = grid.readTdValue(activeTd);
           formulaInput.value = stateOf(activeTd)?.userEdited ? live : hidden ? live : activeTd.dataset.formula || live;
         } else {

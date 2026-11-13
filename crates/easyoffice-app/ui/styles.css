@@ -557,3 +557,13 @@ select:focus-visible,
 }
 .workspace-grid { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
 .workspace-grid > .canvas-stage { flex: 1 1 auto; }
+/* The area of the array the selected cell belongs to (PD-217): the selection stroke token on the outer edges. */
+.sheet-grid td.spill-t, .sheet-grid td.spill-b, .sheet-grid td.spill-l, .sheet-grid td.spill-r {
+  box-shadow: var(--spill-t, 0 0 0 0 transparent), var(--spill-b, 0 0 0 0 transparent), var(--spill-l, 0 0 0 0 transparent), var(--spill-r, 0 0 0 0 transparent);
+}
+.sheet-grid td.spill-t { --spill-t: inset 0 1px 0 0 var(--table-selection-stroke); }
+.sheet-grid td.spill-b { --spill-b: inset 0 -1px 0 0 var(--table-selection-stroke); }
+.sheet-grid td.spill-l { --spill-l: inset 1px 0 0 0 var(--table-selection-stroke); }
+.sheet-grid td.spill-r { --spill-r: inset -1px 0 0 0 var(--table-selection-stroke); }
+/* A cell an array filled shows the formula of the array dimmed in the formula bar. */
+#pane-sheet #sheet-formula-bar .sb-formula-input.spill-ghost { color: var(--ui-text-disabled); }

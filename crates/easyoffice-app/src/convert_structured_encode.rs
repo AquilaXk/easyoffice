@@ -5,7 +5,8 @@
 use easyoffice_formats::{
     pages_write_loss, CsvCodec, DocumentFormat, EasyOfficeError, LegacyOle2Codec, LegacyXlsPayload,
     OdfCodec, OdsUnpacked, OoxmlCodec, PdfWriteOptions, RichBlock, RichDocument, RichParagraph,
-    RichRun, UniversalDocumentModel, UniversalFormatConverter, XlsxCachedValue, XlsxFormulaCache,
+    RichRun, SheetStyling, UniversalDocumentModel, UniversalFormatConverter, XlsxCachedValue,
+    XlsxFormulaCache,
 };
 use easyoffice_sheet::{
     EvaluatedCellValue, PackedCellCoordinate, WorkbookEngine, WorkbookEvalTarget,
@@ -33,12 +34,21 @@ fn cached_value(v: &EvaluatedCellValue) -> Option<XlsxCachedValue> {
     }
 }
 
-/// A formula engine holding every sheet, so cross-sheet references resolve.
-fn workbook_engine(sheets: &[OdsUnpacked]) -> WorkbookEngine {
+/// A formula engine holding every sheet, so cross-sheet references resolve. The cells an array
+/// filled (`stylings[i].spills`) are results of its formula: the engine calculates them, so they
+/// are not cells there (PD-217).
+fn workbook_engine(sheets: &[OdsUnpacked], stylings: &[SheetStyling]) -> WorkbookEngine {
     let mut wb = WorkbookEngine::new();
-    for (name, cells) in sheets {
+    for (index, (name, cells)) in sheets.iter().enumerate() {
+        let spills = stylings.get(index).map_or(&[][..], |st| &st.spills[..]);
         let sheet = wb.add_sheet(name.clone());
         for (row, col, raw) in cells {
+            if spills
+                .iter()
+                .any(|area| area.covers_after_anchor(*row, *col))
+            {
+                continue;
+            }
             if let Ok(coord) = PackedCellCoordinate::new(*row, *col) {
                 sheet.set_cell_coord(coord, raw.clone());
             }
@@ -50,8 +60,11 @@ fn workbook_engine(sheets: &[OdsUnpacked]) -> WorkbookEngine {
 /// Every sheet with each formula replaced by the value it displays, for the formats that hold
 /// values only (a BIFF8 formula needs a compiled token stream, and CSV has no formulas). Also
 /// returns how many formulas were replaced.
-fn computed_sheets(sheets: &[OdsUnpacked]) -> Result<(Vec<OdsUnpacked>, usize), EasyOfficeError> {
-    let wb = workbook_engine(sheets);
+fn computed_sheets(
+    sheets: &[OdsUnpacked],
+    stylings: &[SheetStyling],
+) -> Result<(Vec<OdsUnpacked>, usize), EasyOfficeError> {
+    let wb = workbook_engine(sheets, stylings);
     let mut a1_pairs: Vec<(&str, String)> = Vec::new();
     for (name, cells) in sheets {
         for (row, col, raw) in cells {
@@ -102,10 +115,11 @@ const WARNED_SHEET_NAMES: usize = 5;
 /// XLS: every sheet, formulas as values.
 fn encode_xls(
     sheets: &[OdsUnpacked],
+    stylings: &[SheetStyling],
     title: &str,
     warnings: &mut Vec<String>,
 ) -> Result<Vec<u8>, EasyOfficeError> {
-    let (computed, formulas) = computed_sheets(sheets)?;
+    let (computed, formulas) = computed_sheets(sheets, stylings)?;
     if formulas > 0 {
         warnings.push(format!(
             "수식 {formulas}개는 계산된 값으로 저장했습니다. XLS 파일에는 수식이 아니라 값이 들어갑니다."
@@ -148,12 +162,13 @@ fn encode_xls(
 /// reader accepts are reported, never dropped silently.
 fn encode_delimited(
     sheets: &[OdsUnpacked],
+    stylings: &[SheetStyling],
     format: DocumentFormat,
     title: &str,
     warnings: &mut Vec<String>,
 ) -> Result<Vec<u8>, EasyOfficeError> {
     let label = format.extension().to_uppercase();
-    let (computed, _) = computed_sheets(sheets)?;
+    let (computed, _) = computed_sheets(sheets, stylings)?;
     let mut computed = computed.into_iter();
     let (first_name, mut cells) = computed.next().unwrap_or_default();
     let left_out: Vec<String> = computed.map(|(name, _)| name).collect();
@@ -196,11 +211,12 @@ fn encode_delimited(
 /// One evaluation covers all sheets, so a formula that sheets after it read is computed once.
 fn evaluate_workbook(
     sheets: &[OdsUnpacked],
+    stylings: &[SheetStyling],
     with_grids: bool,
 ) -> Result<(Vec<XlsxFormulaCache>, Vec<ValueGrid>), EasyOfficeError> {
     // The caches of XLSX and ODS may lack the formulas a slow workbook did not get to; displayed
     // values may not.
-    let mut values = evaluate_formulas(sheets, with_grids)?;
+    let mut values = evaluate_formulas(sheets, stylings, with_grids)?;
     let mut caches = Vec::with_capacity(sheets.len());
     let mut grids = Vec::new();
     let mut grid_cells = 0usize;
@@ -216,8 +232,11 @@ fn evaluate_workbook(
 
 /// The displayed text of every cell of every sheet at its own position (the PDF of a sheet draws the cells where the
 /// sheet has them, so a print area and repeated rows address real rows).
-fn evaluate_displays(sheets: &[OdsUnpacked]) -> Result<Vec<DisplayCells>, EasyOfficeError> {
-    let mut values = evaluate_formulas(sheets, true)?;
+fn evaluate_displays(
+    sheets: &[OdsUnpacked],
+    stylings: &[SheetStyling],
+) -> Result<Vec<DisplayCells>, EasyOfficeError> {
+    let mut values = evaluate_formulas(sheets, stylings, true)?;
     Ok(sheets
         .iter()
         .map(|(_, cells)| sheet_values(cells, &mut values, true).1)
@@ -228,9 +247,10 @@ fn evaluate_displays(sheets: &[OdsUnpacked]) -> Result<Vec<DisplayCells>, EasyOf
 /// time limit cut off, which only a `complete`-less caller gets: the others are refused).
 fn evaluate_formulas(
     sheets: &[OdsUnpacked],
+    stylings: &[SheetStyling],
     complete: bool,
 ) -> Result<std::vec::IntoIter<Option<EvaluatedCellValue>>, EasyOfficeError> {
-    let wb = workbook_engine(sheets);
+    let wb = workbook_engine(sheets, stylings);
     let a1_addrs: Vec<(&str, String)> = sheets
         .iter()
         .flat_map(|(name, cells)| {
@@ -440,15 +460,15 @@ pub(crate) fn encode_structured(
         }
         StructuredContent::Workbook(sheets, stylings) => match format {
             DocumentFormat::Xlsx => {
-                let (caches, _) = evaluate_workbook(sheets, false)?;
+                let (caches, _) = evaluate_workbook(sheets, stylings, false)?;
                 OoxmlCodec::pack_xlsx_multi_styled(sheets, &caches, stylings)
             }
             DocumentFormat::Ods => {
-                let (caches, _) = evaluate_workbook(sheets, false)?;
+                let (caches, _) = evaluate_workbook(sheets, stylings, false)?;
                 OdfCodec::pack_ods_multi_styled_with_cache(sheets, &caches, stylings)
             }
             DocumentFormat::Pdf => {
-                let displays = evaluate_displays(sheets)?;
+                let displays = evaluate_displays(sheets, stylings)?;
                 let named: Vec<OdsUnpacked> = sheets
                     .iter()
                     .map(|(name, _)| name.clone())
@@ -456,12 +476,12 @@ pub(crate) fn encode_structured(
                     .collect();
                 easyoffice_formats::encode_sheet_pdf(title, &named, stylings)
             }
-            DocumentFormat::Xls => encode_xls(sheets, title, warnings),
+            DocumentFormat::Xls => encode_xls(sheets, stylings, title, warnings),
             DocumentFormat::Csv | DocumentFormat::Tsv => {
-                encode_delimited(sheets, format, title, warnings)
+                encode_delimited(sheets, stylings, format, title, warnings)
             }
             _ => {
-                let (_, grids) = evaluate_workbook(sheets, true)?;
+                let (_, grids) = evaluate_workbook(sheets, stylings, true)?;
                 let mut blocks = Vec::with_capacity(sheets.len() * 2);
                 for ((name, _), grid) in sheets.iter().zip(grids) {
                     blocks.push(RichBlock::Paragraph(RichParagraph {
