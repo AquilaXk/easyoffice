@@ -582,6 +582,10 @@
               if (box) box.textContent = "원본 파일을 사용할 수 없습니다: " + input.problem;
               return;
             }
+            if (!(await workspacePanels.confirmPasswordLoss(dst, input.content))) {
+              if (box) box.textContent = "변환 취소: 암호 없이 저장하지 않았습니다";
+              return;
+            }
             const convTitle = input.title ?? "통합_변환_문서";
             const res = await invokeIpc(
               "convert_document_format",

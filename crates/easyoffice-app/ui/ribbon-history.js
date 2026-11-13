@@ -239,7 +239,9 @@
       host.__EASYOFFICE_SHEET_TAB_STRIP__.render({ document, keys: Object.keys(sheetDataStore), active: activeSheetName });
     }
 
-    function restoreSnapshotStores(snap, sheetController) {
+    // `keepProtections`: an undo or a redo (a step recorded before cannot lift a protection); a restore of the
+    // autosave or of an opened file applies the protection the snapshot has.
+    function restoreSnapshotStores(snap, sheetController, keepProtections) {
       const currentSheets = Object.keys(sheetDataStore);
       if (snap.docTabs) {
         docTabStore.DOC = snap.docTabs.DOC ? structuredClone(snap.docTabs.DOC) : null;
@@ -253,8 +255,10 @@
         sheetController.replaceColumnWidths(structuredClone(snap.sheetColumnWidths));
       }
       if (snap.sheetRules) host.__EASYOFFICE_SHEET_RULES__.replaceAll(structuredClone(snap.sheetRules), true);
-      // A restore never changes a protection or its password: the sheets that exist keep the ones they have (PD-216).
-      if (snap.sheetLayout) host.__EASYOFFICE_SHEET_LAYOUT__.replaceAll(host.__EASYOFFICE_SHEET_PROTECT__.keepProtection(snap, currentSheets));
+      if (snap.sheetLayout) {
+        const layout = keepProtections ? host.__EASYOFFICE_SHEET_PROTECT__.keepProtection(snap, currentSheets) : snap.sheetLayout;
+        host.__EASYOFFICE_SHEET_LAYOUT__.replaceAll(layout);
+      }
       // A change of the names re-evaluates the page's formulas; the restore does that itself.
       if (snap.definedNames) host.__EASYOFFICE_SHEET_NAMES__.replaceAll(structuredClone(snap.definedNames), true);
       if (Array.isArray(snap.sheetOrder)) host.__EASYOFFICE_SHEET_TAB_STRIP__.replaceOrder(snap.sheetOrder);
@@ -263,12 +267,12 @@
       }
     }
 
-    async function restoreWorkspaceSnapshot(snap, backendSyncRes) {
+    async function restoreWorkspaceSnapshot(snap, backendSyncRes, { keepProtections = false } = {}) {
       if (!snap) return;
       const sheetController = getSheetController();
       const workspacePanels = getWorkspacePanels();
       sheetController.bumpSnapshotEpoch();
-      restoreSnapshotStores(snap, sheetController);
+      restoreSnapshotStores(snap, sheetController, keepProtections);
       if (snap.ribbonState) {
         Object.assign(localRibbonState, structuredClone(snap.ribbonState));
       }
@@ -355,11 +359,13 @@
           backendSyncRes = await invokeIpc(ipcCmd, ribbonIpcPayload({ module: ribbonModule }));
         }
         sourceStack.pop();
+        // The step of a row or column edit leads back the other way on the opposite stack.
+        if (targetSnap.structureEdit) currentSnap.structureEdit = host.__EASYOFFICE_SHEET_PROTECT__.inverseEdit(targetSnap.structureEdit);
         destStack.push(currentSnap);
         const snapToRestore = evaluatedSheets
           ? { ...targetSnap, sheets: evaluatedSheets }
           : targetSnap;
-        await restoreWorkspaceSnapshot(snapToRestore, backendSyncRes);
+        await restoreWorkspaceSnapshot(snapToRestore, backendSyncRes, { keepProtections: true });
         if (fb) fb.textContent = doneMsg;
       });
     }

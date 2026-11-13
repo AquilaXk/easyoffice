@@ -194,7 +194,8 @@
           else say(result.message || FAILURES[result.reason] || FAILURES.error);
           return false;
         }
-        pushRawUndoSnapshot(before);
+        // The step knows the edit, so that its undo is compared where the edit moved the cells (PD-216).
+        pushRawUndoSnapshot({ ...before, structureEdit: { sheet: name, ...edit } });
         applyAnswer(name, edit, result.answer);
         grid.layoutChanged();
         refreshWindowFromModel();

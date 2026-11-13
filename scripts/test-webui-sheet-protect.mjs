@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
-import { switchModule, studioItem, commandItem } from "./test-support/modules.mjs";
+import { switchModule, studioItem, commandItem, createMemoryStorage } from "./test-support/modules.mjs";
 import { demoHtml, openDemoWorkbook } from "./test-support/demo-fixtures.mjs";
 
 // Sheet and workbook protection (PD-216): the 시트 보호, 통합 문서 보호 and 범위 편집 허용 commands of the 도구 menu with
@@ -23,10 +23,11 @@ function blocked(t) {
 }
 
 // `engine`: a page whose engine answers the session actions (row and column edits), over the sample table written into the page.
-async function open({ engine = false } = {}) {
+async function open({ engine = false, localStorage } = {}) {
   const requests = [];
-  const harness = await createWorkspaceHarness(
-    engine
+  const harness = await createWorkspaceHarness({
+    ...(localStorage ? { localStorage } : {}),
+    ...(engine
       ? {
           transformHtml: demoHtml,
           tauriInvoke: async (command, args) => {
@@ -40,8 +41,8 @@ async function open({ engine = false } = {}) {
             return { status: "ok" };
           },
         }
-      : {},
-  );
+      : {}),
+  });
   if (!engine) await openDemoWorkbook(harness.document);
   switchModule(harness.document, "SHEET");
   await flushAsyncTurns();
@@ -1023,4 +1024,159 @@ test("checklist: with the structure protected every sheet tab command is refused
   assert.deepEqual(items.map((el) => el.getAttribute("aria-disabled")), items.map(() => "true"), "the tab menu is greyed out");
   tab.dispatchEvent({ type: "dblclick", target: tab, bubbles: true });
   assert.equal(t.document.querySelector("#sheet-tab-bar input.sheet-tab-edit"), null, "a double click does not start a rename");
+});
+
+// ======================================================================================================================
+// The review of the checklist: the autosave, the converter and the undo of an allowed row or column edit.
+// ======================================================================================================================
+const AUTOSAVE_KEY = "easyoffice.workspace.autosave.v1";
+
+test("the autosave record keeps the protection of the sheet and of the workbook, and a new window restores both", async () => {
+  const storage = createMemoryStorage();
+  const t = await open({ localStorage: storage });
+  await t.act("sheet-protect");
+  t.check("sheet-protect-use-password", true);
+  t.byId("sheet-protect-password").value = SECRET;
+  t.byId("sheet-protect-confirm").value = SECRET;
+  await t.click("btn-sheet-protect-apply");
+  await t.act("workbook-protect");
+  t.byId("sheet-wb-protect-password").value = SECRET;
+  t.byId("sheet-wb-protect-confirm").value = SECRET;
+  await t.click("btn-sheet-wb-protect-apply");
+  const sheet = t.layout.protectOf("Sheet1");
+  const book = t.guard.getWorkbook();
+  t.advanceTimers(5000);
+  await flushAsyncTurns(10);
+  const record = storage.getItem(AUTOSAVE_KEY);
+  assert.ok(record, "the record is written");
+  assert.equal(record.includes(SECRET), false, "no password in the record, only the digests");
+  assert.deepEqual(JSON.parse(record).workbookProtect, book);
+
+  const next = await createWorkspaceHarness({ localStorage: storage });
+  await flushAsyncTurns(15);
+  const restored = next.host.__EASYOFFICE_SHEET_PROTECT__;
+  assert.deepEqual(next.host.__EASYOFFICE_SHEET_LAYOUT__.protectOf("Sheet1"), sheet, "the sheet is still protected with its password");
+  assert.equal(restored.structureLocked(), true, "so is the workbook");
+  assert.deepEqual(restored.getWorkbook(), book);
+});
+
+test("a workbook that only has its structure protected is kept by the autosave too", async () => {
+  const storage = createMemoryStorage();
+  const t = await open({ localStorage: storage });
+  await t.act("workbook-protect");
+  await t.click("btn-sheet-wb-protect-apply");
+  t.check("sheet-wb-protect-none", true);
+  await t.click("btn-sheet-wb-protect-apply");
+  assert.equal(t.guard.structureLocked(), true);
+  t.advanceTimers(5000);
+  await flushAsyncTurns(10);
+  const next = await createWorkspaceHarness({ localStorage: storage });
+  await flushAsyncTurns(15);
+  assert.equal(next.host.__EASYOFFICE_SHEET_PROTECT__.structureLocked(), true);
+});
+
+test("an undo still keeps the protection a step lacks while the restore of an autosave brings the snapshot's own", async () => {
+  const t = await open();
+  const b3 = t.cell("B3");
+  b3.focus();
+  typeText(t, "5");
+  t.key(b3, "Enter");
+  await flushAsyncTurns(15);
+  // The layout is set past the history (as a step recorded before a protection would meet it): the undo does not lift it.
+  t.layout.setProtect("Sheet1", { on: true, deny: [] });
+  await t.undo();
+  assert.equal(t.layout.protectOf("Sheet1")?.on, true, "the undo keeps the protection");
+});
+
+// A sheet that holds a password, and the 변환 tab asked to convert the sheets of the editor.
+async function convertSheetWithPassword(dstFormat, pwdKind) {
+  const t = await open();
+  t.layout.setProtect("Sheet1", { on: true, deny: [], pwd: { kind: pwdKind, alg: "SHA-512", hash: "h", salt: "s", spin: 1, key: "k" } });
+  const asked = [];
+  let answer = false;
+  t.host.confirm = (text) => (asked.push(text), answer);
+  switchModule(t.document, "CONV");
+  await flushAsyncTurns(10);
+  t.byId("conv-src-fmt").value = "xlsx";
+  t.byId("conv-dst-fmt").value = dstFormat;
+  const run = async () => {
+    const before = t.downloads.length;
+    t.userClick(t.byId("btn-run-convert"));
+    await flushAsyncTurns(30);
+    return t.downloads.length - before;
+  };
+  return { t, asked, run, answer: (value) => (answer = value) };
+}
+
+test("the convert button asks before it drops a password, and declining converts nothing", async () => {
+  const c = await convertSheetWithPassword("csv", "both");
+  assert.equal(await c.run(), 0, "declined: no file");
+  assert.deepEqual(c.asked, ["저장한 파일에는 암호가 적용되지 않습니다. 암호 없이 저장하시겠습니까?"]);
+  assert.match(c.t.byId("conv-result-box").textContent, /변환 취소/);
+  c.answer(true);
+  assert.equal(await c.run(), 1, "accepted: the file is written");
+  assert.equal(c.asked.length, 2);
+});
+
+test("the convert button keeps a password the target format holds without a question", async () => {
+  const c = await convertSheetWithPassword("xlsx", "both");
+  c.answer(true);
+  assert.equal(await c.run(), 1);
+  assert.deepEqual(c.asked, []);
+});
+
+test("Ctrl+S in the converter asks before it drops a password of the sheets it converts", async () => {
+  const c = await convertSheetWithPassword("tsv", "odf");
+  c.t.userClick(studioItem(c.t.document, "studio-save"));
+  await flushAsyncTurns(30);
+  assert.equal(c.t.downloads.length, 0, "declined: nothing is written");
+  assert.equal(c.asked.length, 1);
+  assert.match(c.t.status(), /문서 저장 취소 \(TSV\)/);
+});
+
+test("an allowed row insert is undone, the locked values return to their places, and a redo does the edit again", async () => {
+  const t = await open({ engine: true });
+  const base = t.guard.FLAG_NAMES.filter((f) => !t.guard.DEFAULT_ALLOWED.includes(f));
+  t.layout.setProtect("Sheet1", { on: true, deny: base.filter((f) => f !== "insertRows") });
+  const before = ["B2", "B3", "C2", "A2"].map((ref) => cellText(t, ref));
+  t.cell("B2").focus();
+  await t.act("row-insert-above");
+  assert.equal(cellText(t, "B3"), before[0], "the row went in above B2: its value moved down");
+  assert.equal(cellText(t, "B2"), "");
+  await t.undo();
+  assert.deepEqual(["B2", "B3", "C2", "A2"].map((ref) => cellText(t, ref)), before, "the undo succeeded");
+  assert.equal(t.byId("sheet-protect-alert-dialog").open, false, "no refusal");
+  await redo(t);
+  assert.equal(cellText(t, "B3"), before[0]);
+  await t.undo();
+  assert.deepEqual(["B2", "B3", "C2", "A2"].map((ref) => cellText(t, ref)), before);
+  assert.equal(t.layout.protectOf("Sheet1").on, true, "the sheet stays protected");
+});
+
+test("a restore compares a step of a row edit where the edit put the cells", async () => {
+  const t = await open();
+  t.layout.setProtect("Sheet1", { on: true, deny: [] });
+  const store = { Sheet1: { B3: { value: "7", formula: "" }, C3: { formula: "=B3+1", value: "8" } } };
+  const step = (cells, structureEdit) => ({ sheets: { Sheet1: cells }, structureEdit });
+  const edit = { sheet: "Sheet1", axis: "row", op: "insert", at: 2, count: 1 };
+  // The step before an insert at row 2 held the value in B2 and the formula in C2; now they are one row down.
+  const then = { B2: { value: "7", formula: "" }, C2: { formula: "=B2+1", value: "8" } };
+  assert.equal(t.guard.restoreWouldChange(step(then), store), true, "by address it looks like a change");
+  assert.equal(t.guard.restoreWouldChange(step(then, edit), store), false, "with the edit it is none");
+  assert.equal(t.guard.restoreWouldChange(step({ ...then, B2: { value: "9", formula: "" } }, edit), store), true, "a real change is still one");
+  const back = t.guard.inverseEdit(edit);
+  assert.deepEqual(back, { ...edit, op: "delete" });
+  const after = { B3: { value: "7", formula: "" } };
+  assert.equal(t.guard.restoreWouldChange(step(after, back), { Sheet1: { B2: { value: "7", formula: "" } } }), false, "the redo of the insert leads the other way");
+});
+
+test("a restore of the step of a row edit puts the allowed ranges back where the step had them and keeps their passwords", async () => {
+  const t = await open();
+  const pwd = { kind: "both", alg: "SHA-512", hash: "OFFLINE-1-1", salt: "S", spin: 1, key: "K" };
+  t.layout.setProtect("Sheet1", { on: true, deny: [], ranges: [{ name: "r", sqref: ["B3:B4"], pwd }, { name: "now", sqref: ["D1"] }] });
+  const old = { sheetLayout: { Sheet1: { protect: { on: false, deny: [], ranges: [{ name: "r", sqref: ["B2:B3"] }, { name: "gone", sqref: ["A1"] }] } } }, sheetOrder: ["Sheet1"] };
+  const kept = t.guard.keepProtection(old, ["Sheet1"]).Sheet1.protect;
+  assert.equal(kept.on, true);
+  assert.deepEqual(kept.ranges.map((r) => [r.name, r.sqref]), [["r", ["B2:B3"]], ["now", ["D1"]]]);
+  assert.deepEqual(kept.ranges[0].pwd, pwd, "the password stays the one the sheet has");
 });

@@ -224,6 +224,15 @@
   }
 
   // ---- what an undo, a redo and a save may do to the protection ----------------------------------------------
+  // The protection `current` as it is, its allowed ranges at the place `then` has them (a row or column edit moves them);
+  // a range the snapshot lacks stays, and one only the snapshot has is not brought back.
+  function withRangesOf(current, then) {
+    const out = structuredClone(current);
+    const placed = new Map((then?.ranges || []).map((range) => [range.name, range.sqref]));
+    for (const range of out.ranges || []) if (placed.has(range.name)) range.sqref = structuredClone(placed.get(range.name));
+    return out;
+  }
+
   // The layout of `snap` with the protection of every sheet in `currentNames` and in `snap` as it is now.
   function keepProtection(snap, currentNames) {
     const out = structuredClone(snap.sheetLayout);
@@ -231,7 +240,7 @@
     const now = layout().getAll();
     for (const name of currentNames.filter((n) => known.has(n))) {
       const entry = { ...(out[name] || {}) };
-      if (now[name]?.protect) entry.protect = structuredClone(now[name].protect);
+      if (now[name]?.protect) entry.protect = withRangesOf(now[name].protect, out[name]?.protect);
       else delete entry.protect;
       if (Object.keys(entry).length > 0) out[name] = entry;
       else delete out[name];
@@ -239,17 +248,43 @@
     return out;
   }
 
+  // The cells of a step recorded before a row or column edit, set where that edit puts them: a cell the edit
+  // deleted is gone. `edit`: { axis, op, at, count } is the edit that leads from the step's state to the current one.
+  function shiftedCells(cells, edit) {
+    const out = {};
+    const { refOf } = host.__EASYOFFICE_SHEET_REFS__;
+    for (const [ref, entry] of Object.entries(cells)) {
+      const p = refs().parseRef(ref);
+      if (!p) continue;
+      const index = edit.axis === "row" ? p.row : p.col;
+      let moved = index;
+      if (edit.op === "insert" && index >= edit.at) moved = index + edit.count;
+      if (edit.op === "delete") {
+        if (index >= edit.at + edit.count) moved = index - edit.count;
+        else if (index >= edit.at) continue;
+      }
+      out[edit.axis === "row" ? refOf(moved, p.col) : refOf(p.row, moved)] = entry;
+    }
+    return out;
+  }
+
+  // The edit that leads back from the state `edit` led to.
+  const inverseEdit = (edit) => (edit ? { ...edit, op: edit.op === "insert" ? "delete" : "insert" } : undefined);
+
   // Whether restoring `snap` would change a locked cell of a sheet that is protected now. Formula cells compare by
-  // their text, because their value follows the cells they read.
+  // their text, because their value follows the cells they read; the step of a row or column edit is compared where
+  // the edit puts its cells, and there a formula the edit rewrote is the same formula.
   function restoreWouldChange(snap, store) {
     if (!snap.sheets) return false;
     const raw = (e) => e?.formula || e?.value || "";
+    const edit = snap.structureEdit;
     for (const name of Object.keys(store)) {
       if (!isOn(name) || !snap.sheets[name]) continue;
+      const moved = edit?.sheet === name;
       const now = store[name] || {};
-      const then = snap.sheets[name];
+      const then = moved ? shiftedCells(snap.sheets[name], edit) : snap.sheets[name];
       for (const ref of new Set([...Object.keys(now), ...Object.keys(then)])) {
-        if (raw(now[ref]) === raw(then[ref])) continue;
+        if (raw(now[ref]) === raw(then[ref]) || (moved && now[ref]?.formula && then[ref]?.formula)) continue;
         const at = refs().parseRef(ref);
         if (at && !cellEditable(name, at.row, at.col, now[ref]?.style)) return true;
       }
@@ -274,6 +309,7 @@
     visibleEntry,
     keepProtection,
     restoreWouldChange,
+    inverseEdit,
     lostPassword,
     alertBlocked,
     FLAGS,

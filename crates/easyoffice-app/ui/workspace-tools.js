@@ -275,6 +275,13 @@
       if (fb) fb.textContent = text;
     }
 
+    // A password the target format cannot hold is dropped only after the user agrees (PD-216): the content
+    // is the sheets of the editor (a converter source file carries none).
+    async function confirmPasswordLoss(dstExt, content) {
+      if (!content?.sheets || !host.__EASYOFFICE_SHEET_PROTECT__.lostPassword(dstExt)) return true;
+      return Boolean(await host.__EASYOFFICE_DESKTOP_BRIDGE__.confirm("password-free-save-sheet"));
+    }
+
     async function convertForSave(srcExt, dstExt, title, content) {
       try {
         const res = await invokeIpc(
@@ -348,9 +355,7 @@
       } else {
         content = buildConversionContent(curMod);
       }
-      // A password the target format cannot hold is dropped only after the user agrees (PD-216).
-      const protect = host.__EASYOFFICE_SHEET_PROTECT__;
-      if (!isConv && curMod === "SHEET" && protect.lostPassword(dstExt) && !(await host.__EASYOFFICE_DESKTOP_BRIDGE__.confirm("password-free-save-sheet"))) {
+      if (!(await confirmPasswordLoss(dstExt, content))) {
         setStatusFeedback("문서 저장 취소 (" + dstExt.toUpperCase() + "): 암호 없이 저장하지 않았습니다");
         return false;
       }
@@ -907,7 +912,7 @@
     const { runPiiScrubAction } = host.__EASYOFFICE_CREATE_WORKSPACE_SCRUB__(deps, panelHooks, { resolveSourceScopeKind, computeSmartStats, describePdfHighlight });
 
     return {
-      runPiiScrubAction, resolveSourceScopeKind, buildConversionContent, resolveConverterInput, resolveSaveFileBase, triggerBase64Download, deliverSavedFile,
+      runPiiScrubAction, resolveSourceScopeKind, buildConversionContent, resolveConverterInput, confirmPasswordLoss, resolveSaveFileBase, triggerBase64Download, deliverSavedFile,
       describeDeliveryFailure, describeConversionSpec, describePdfHighlight, openToolDialog, saveActiveModuleDocument,
       computeSmartStats, renderPageStatus, applySmartDiagnoseDom, runSmartDiagnoseAction, runModuleSecurityAudit,
       fetchSecurityAuditOutcome, applySecurityAuditDom, runSecurityAuditAction, runBenchmarkAction,

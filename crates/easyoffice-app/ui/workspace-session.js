@@ -121,11 +121,13 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     return value === "" || value === null || value === false ? undefined : value;
   }
 
-  function contentFingerprint(snap) {
+  // `workbookProtect`: the protection of the workbook (no part of a snapshot); a workbook without one adds nothing.
+  function contentFingerprint(snap, workbookProtect) {
     const parts = [
       snap.docTabs, snap.sheets, snap.sheetRowCounts, snap.sheetColumnWidths, snap.sheetRules, snap.sheetLayout, snap.definedNames,
       snap.sheetFrozen, snap.sheetOrder, snap.slides, snap.pdfStudio, snap.pdfRotationDeg,
     ];
+    if (workbookProtect) parts.push(workbookProtect);
     return hashFingerprint(JSON.stringify(canonicalizeContent(parts, "")));
   }
 
@@ -360,6 +362,8 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       else host.removeEventListener?.("beforeunload", handleBeforeUnload);
     }
 
+    const workbookProtectOf = () => host.__EASYOFFICE_SHEET_PROTECT__?.getWorkbook() ?? null;
+
     function persistRecord(snap) {
       const storage = resolveStorage();
       if (!storage || discarded) return;
@@ -373,6 +377,8 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
             dirty,
             baseline: baselineHash,
             snapshot: snap,
+            // The workbook's protection is no part of a snapshot (an undo cannot lift it): the record keeps it beside.
+            workbookProtect: workbookProtectOf(),
           })
         );
       } catch {
@@ -405,7 +411,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       if (deps.getSheetStore && skipAutosaveForLargeWorkbook(deps.getSheetStore())) return;
       const snap = captureWorkspaceSnapshot(false);
       if (skipAutosaveForLargeWorkbook(snap.sheets)) return;
-      const hash = contentFingerprint(snap);
+      const hash = contentFingerprint(snap, workbookProtectOf());
       if (baselineHash === null) baselineHash = hash;
       pendingActivity = false;
       dirty = hash !== baselineHash;
@@ -444,7 +450,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
 
     function establishBaseline(restoredRecord) {
       const snap = captureWorkspaceSnapshot(false);
-      const hash = contentFingerprint(snap);
+      const hash = contentFingerprint(snap, workbookProtectOf());
       baselineHash = typeof restoredRecord?.baseline === "string" ? restoredRecord.baseline : hash;
       dirty = hash !== baselineHash;
       syncUnloadGuard();
@@ -458,7 +464,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     function markSaved() {
       return runExclusive(() => {
         const snap = captureWorkspaceSnapshot(false);
-        baselineHash = contentFingerprint(snap);
+        baselineHash = contentFingerprint(snap, workbookProtectOf());
         dirty = false;
         pendingActivity = false;
         persistRecord(snap);
@@ -485,6 +491,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       restoring = true;
       try {
         await runExclusive(() => restoreWorkspaceSnapshot(record.snapshot, null));
+        host.__EASYOFFICE_SHEET_PROTECT__.setWorkbook(record.workbookProtect ?? null);
       } finally {
         restoring = false;
       }
