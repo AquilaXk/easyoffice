@@ -113,6 +113,7 @@ pub use utf16_swar::{
     decode_utf16le_swar, decode_utf16le_vec_baseline, encode_utf16le_scalar_baseline,
     encode_utf16le_swar, encode_utf16le_swar_into, expand_ascii4_to_utf16le_u64, SectorBitset,
 };
+pub use xls_sheet_names::{sheet_name_problem, SheetNameProblem, MAX_SHEET_NAME_UNITS};
 pub use zip_codec::*;
 pub use zip_policy::*;
 

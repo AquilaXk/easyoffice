@@ -12,6 +12,7 @@ mod cf;
 pub(crate) mod data;
 mod pack;
 mod period;
+mod sheet_ref;
 mod shift;
 mod validate;
 
@@ -23,6 +24,7 @@ use easyoffice_formats::{CellBox, CfKind, CfRule, SheetRules};
 
 pub use axis_shift::shift_rules;
 pub use pack::{decode_visuals, encode_visuals, PackedVisuals};
+pub use sheet_ref::follow_sheet_change;
 pub use validate::{validate_input, Verdict};
 
 pub use easyoffice_formats::DataValidation;

@@ -13,9 +13,13 @@
 //! and answers `{"refused":"limit"}`: the page evaluates that workbook without a session. A
 //! session id is only valid for the window (owner) that opened it.
 
+use crate::sheet_refs_ipc::SheetOp;
 use crate::sheet_rules_json::{parse_rules, visuals_json};
 use crate::EasyOfficeIpcRouter;
-use easyoffice_formats::{DvAlert, EasyOfficeError, SheetRules, StrictJsonValue};
+use easyoffice_formats::{
+    sheet_name_problem, DvAlert, EasyOfficeError, SheetNameProblem, SheetRules, StrictJsonValue,
+    MAX_SHEET_NAME_UNITS,
+};
 use easyoffice_sheet::{
     AxisBudget, AxisEdit, Budget, CellChange, ChangedCell, Footprint, PackedCellCoordinate,
     RecalcError, RecalcSession, Verdict, WorkbookEngine,
@@ -441,6 +445,58 @@ impl Registry {
         Ok(Applied::Done(json))
     }
 
+    /// The formula texts a rename or deletion of a sheet rewrites (see `sheet_refs_ipc`). The
+    /// session is not changed.
+    pub(crate) fn sheet_refs(
+        &self,
+        id: &str,
+        owner: &str,
+        op: &SheetOp,
+        now: Instant,
+    ) -> Result<Applied, EasyOfficeError> {
+        let Some(handle) = self.checkout(id, owner, now) else {
+            return Ok(Applied::Expired);
+        };
+        let Ok(session) = handle.lock() else {
+            lock(&self.inner).sessions.remove(id);
+            return Ok(Applied::Expired);
+        };
+        check_sheet_op(&session, op)?;
+        let plan = match session.plan_sheet_rewrites(op.change(), AxisBudget::default()) {
+            Ok(plan) => plan,
+            Err(RecalcError::Invalid(EasyOfficeError::ResourceBudgetExceeded(_))) => {
+                return Ok(Applied::Done(REFUSED_STRUCTURE.to_string()));
+            }
+            Err(RecalcError::Invalid(err)) => return Err(err),
+            Err(RecalcError::OverBudget) => {
+                drop(session);
+                lock(&self.inner).sessions.remove(id);
+                return Ok(Applied::Refused);
+            }
+        };
+        let mut out = String::with_capacity(32 + plan.len() * 48);
+        out.push_str("{\"session\":\"");
+        out.push_str(id);
+        out.push_str("\",\"formulas\":[");
+        for (i, (sheet, coord, text)) in plan.iter().enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            out.push_str("{\"sheet\":\"");
+            EasyOfficeIpcRouter::escape_json_into(
+                &mut out,
+                session.sheet_name(*sheet).unwrap_or_default(),
+            );
+            out.push_str("\",\"cell\":\"");
+            out.push_str(&coord.to_a1());
+            out.push_str("\",\"value\":\"");
+            EasyOfficeIpcRouter::escape_json_into(&mut out, text);
+            out.push_str("\"}");
+        }
+        out.push_str("]}");
+        Ok(Applied::Done(out))
+    }
+
     /// Makes room for a session of `projected_bytes` and `projected_cells` under the all-session bounds by evicting the
     /// least recently used other sessions; false when even that is not enough.
     fn reserve_total(&self, id: &str, projected_bytes: usize, projected_cells: usize) -> bool {
@@ -506,6 +562,54 @@ pub(crate) fn registry() -> &'static Registry {
 /// Closes every session opened by `owner` (a window label); returns how many.
 pub fn close_sheet_sessions_of(owner: &str) -> usize {
     registry().close_owner(owner)
+}
+
+/// Refuses a sheet change the workbook cannot take: an unknown sheet, a name that breaks the
+/// rules or that another sheet has, or the deletion of the last sheet.
+fn check_sheet_op(session: &RecalcSession, op: &SheetOp) -> Result<(), EasyOfficeError> {
+    let names: Vec<&str> = session.sheet_names().collect();
+    let same = |a: &str, b: &str| a.to_lowercase() == b.to_lowercase();
+    if !names.iter().any(|n| same(n, op.sheet())) {
+        return Err(EasyOfficeError::InvalidArgument(format!(
+            "시트를 찾을 수 없습니다: {}",
+            op.sheet()
+        )));
+    }
+    match op {
+        SheetOp::Delete { .. } if names.len() < 2 => Err(EasyOfficeError::InvalidArgument(
+            "마지막 시트는 삭제할 수 없습니다.".to_string(),
+        )),
+        SheetOp::Rename { from, to } => {
+            if let Some(problem) = sheet_name_problem(to) {
+                return Err(EasyOfficeError::InvalidArgument(sheet_name_message(
+                    problem,
+                )));
+            }
+            if names.iter().any(|n| same(n, to) && !same(n, from)) {
+                return Err(EasyOfficeError::InvalidArgument(
+                    "이미 있는 시트 이름입니다.".to_string(),
+                ));
+            }
+            Ok(())
+        }
+        SheetOp::Delete { .. } => Ok(()),
+    }
+}
+
+fn sheet_name_message(problem: SheetNameProblem) -> String {
+    match problem {
+        SheetNameProblem::Empty => "시트 이름이 비어 있습니다.".to_string(),
+        SheetNameProblem::TooLong => {
+            format!("시트 이름은 {MAX_SHEET_NAME_UNITS}자까지입니다.")
+        }
+        SheetNameProblem::ForbiddenChar(c) => {
+            format!("시트 이름에 쓸 수 없는 글자입니다: {}", c.escape_default())
+        }
+        SheetNameProblem::EdgeApostrophe => {
+            "시트 이름은 작은따옴표로 시작하거나 끝날 수 없습니다.".to_string()
+        }
+        SheetNameProblem::Reserved => "예약된 시트 이름입니다.".to_string(),
+    }
 }
 
 pub(crate) const EXPIRED: &str = "{\"expired\":true}";
@@ -590,6 +694,7 @@ impl EasyOfficeIpcRouter {
             "apply" => Self::sheet_session_apply(entries, owner),
             "rules" => Self::sheet_session_rules(entries, owner),
             "structure" => Self::sheet_session_structure(entries, owner),
+            "sheetRefs" => Self::sheet_session_sheet_refs(entries, owner),
             "validate" => Self::sheet_session_validate(entries, owner),
             "pivot" => Self::sheet_pivot(entries),
             "format" => Self::sheet_format(entries),

@@ -6,7 +6,8 @@
 //! outcome lists only the formula cells whose value differs from what the page already shows.
 
 use super::{RecalcError, RecalcOutcome, RecalcSession};
-use crate::axis::{AxisBudget, AxisEdit, AxisEditReport};
+use crate::axis::{AxisBudget, AxisEdit, AxisEditReport, SheetChange};
+use crate::PackedCellCoordinate;
 use crate::{MemoTable, WorkbookEngine};
 impl RecalcSession {
     /// Applies `edit` to `sheet`. Fails without changing the session when the edit is refused
@@ -51,5 +52,23 @@ impl RecalcSession {
         let outcome = next.recalculate();
         *self = next;
         Ok((report, outcome))
+    }
+}
+
+impl RecalcSession {
+    /// The formula texts a rename or deletion of a sheet rewrites (see
+    /// [`WorkbookEngine::plan_sheet_rewrites`]); the session is not changed. The page applies the
+    /// answer and opens a new session, as the sheets it holds are not the sheets of this one.
+    pub fn plan_sheet_rewrites(
+        &self,
+        change: SheetChange<'_>,
+        budget: AxisBudget,
+    ) -> Result<Vec<(usize, PackedCellCoordinate, String)>, RecalcError> {
+        if self.over_budget {
+            return Err(RecalcError::OverBudget);
+        }
+        self.wb
+            .plan_sheet_rewrites(change, budget)
+            .map_err(RecalcError::Invalid)
     }
 }

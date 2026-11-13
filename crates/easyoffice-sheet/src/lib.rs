@@ -54,8 +54,9 @@ pub mod types;
 pub mod workbook;
 
 pub use axis::{
-    shift_boxes, shift_filter, shift_levels, shift_outline, shift_runs, shift_widths, Axis,
-    AxisBudget, AxisEdit, AxisEditReport, EditKind, FilterShift,
+    quote_sheet_name, rewrite_sheet_names, shift_boxes, shift_filter, shift_levels, shift_outline,
+    shift_runs, shift_widths, Axis, AxisBudget, AxisEdit, AxisEditReport, EditKind, FilterShift,
+    SheetChange,
 };
 pub use coercion::*;
 pub use functions::*;
@@ -67,8 +68,8 @@ pub use recalc::{
     RuleUpdates,
 };
 pub use rules::{
-    decode_visuals, encode_visuals, shift_rules, validate_input, Bar, CellVisual, Icon,
-    PackedVisuals, RuleRuntime, Verdict,
+    decode_visuals, encode_visuals, follow_sheet_change, shift_rules, validate_input, Bar,
+    CellVisual, Icon, PackedVisuals, RuleRuntime, Verdict,
 };
 pub use sheet_sort::{sorted_formula, SortKey};
 pub use sort_keys::{sort_order, SortColumn, MAX_SORT_KEYS};

@@ -314,3 +314,84 @@ fn widths_follow_column_edits_only() {
     let rows = AxisEdit::new(Axis::Row, EditKind::Insert, 0, 1).unwrap();
     assert_eq!(shift_widths(&widths, &rows), widths);
 }
+
+fn renamed(formula: &str, from: &str, to: &str) -> String {
+    rewrite_sheet_names(formula, SheetChange::Rename { from, to })
+        .unwrap_or_else(|| formula.to_string())
+}
+
+fn after_delete(formula: &str, name: &str) -> String {
+    rewrite_sheet_names(formula, SheetChange::Delete { name })
+        .unwrap_or_else(|| formula.to_string())
+}
+
+#[test]
+fn renaming_a_sheet_rewrites_only_references_that_name_it() {
+    let cases: &[(&str, &str)] = &[
+        ("=Old!A1", "=New!A1"),
+        ("=old!A1+Other!A1", "=New!A1+Other!A1"),
+        ("=SUM(Old!A1:B2)", "=SUM(New!A1:B2)"),
+        ("=SUM(Old!A1:Old!B2)", "=SUM(New!A1:New!B2)"),
+        ("='Old'!$A$1", "=New!$A$1"),
+        ("=A1+B2", "=A1+B2"),
+        ("=\"Old!A1\"", "=\"Old!A1\""),
+        ("=Older!A1", "=Older!A1"),
+        ("=LOG10(Old!A1)", "=LOG10(New!A1)"),
+        ("=Old!A:A", "=New!A:A"),
+        ("=Old!1:3", "=New!1:3"),
+    ];
+    for (before, after) in cases {
+        assert_eq!(renamed(before, "Old", "New"), *after, "{before}");
+    }
+}
+
+#[test]
+fn a_new_name_is_quoted_when_the_formula_needs_it() {
+    let cases: &[(&str, &str)] = &[
+        ("매출 합계", "='매출 합계'!A1"),
+        ("It's", "='It''s'!A1"),
+        ("2024", "='2024'!A1"),
+        ("A1", "='A1'!A1"),
+        ("TRUE", "='TRUE'!A1"),
+        ("월별", "='월별'!A1"),
+        ("Plain_1", "=Plain_1!A1"),
+    ];
+    for (to, after) in cases {
+        assert_eq!(renamed("=Old!A1", "Old", to), *after, "{to}");
+    }
+    // A quoted old name with a space and a doubled quote is found.
+    assert_eq!(renamed("='It''s a'!B2", "It's a", "X"), "=X!B2");
+    assert_eq!(
+        renamed("=SUM('2월'!A1:B3)", "2월", "봄"),
+        "=SUM('봄'!A1:B3)"
+    );
+}
+
+#[test]
+fn deleting_a_sheet_turns_its_references_into_ref_errors() {
+    let cases: &[(&str, &str)] = &[
+        ("=Gone!A1", "=#REF!"),
+        ("=Gone!A1+B2", "=#REF!+B2"),
+        ("=SUM(Gone!A1:B2)", "=SUM(#REF!)"),
+        ("=SUM(Gone!A1:Gone!B2)", "=SUM(#REF!)"),
+        ("=SUM(Gone!A:A,Keep!A:A)", "=SUM(#REF!,Keep!A:A)"),
+        ("='Gone'!$A$1*2", "=#REF!*2"),
+        ("=Keep!A1", "=Keep!A1"),
+        ("=A1", "=A1"),
+        ("=\"Gone!A1\"", "=\"Gone!A1\""),
+    ];
+    for (before, after) in cases {
+        assert_eq!(after_delete(before, "Gone"), *after, "{before}");
+    }
+    assert_eq!(after_delete("=SUM('두 번'!B1:B3)", "두 번"), "=SUM(#REF!)");
+}
+
+#[test]
+fn a_rewrite_that_changes_nothing_answers_none() {
+    let rename = SheetChange::Rename { from: "A", to: "B" };
+    assert_eq!(rewrite_sheet_names("=C!A1", rename), None);
+    assert_eq!(
+        rewrite_sheet_names("=A1", SheetChange::Delete { name: "A" }),
+        None
+    );
+}

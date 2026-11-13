@@ -2,7 +2,7 @@
 //! from the edited workbook.
 
 use super::*;
-use crate::axis::{Axis, AxisBudget, AxisEdit, AxisEditReport, EditKind};
+use crate::axis::{Axis, AxisBudget, AxisEdit, AxisEditReport, EditKind, SheetChange};
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -278,4 +278,116 @@ fn insertions_never_change_what_a_formula_shows() {
             }
         }
     }
+}
+
+/// The workbook after a rename: the sheet carries its new name, the planned texts replace the old.
+fn renamed_session(s: &RecalcSession, from: &str, to: &str) -> RecalcSession {
+    let plan = s
+        .plan_sheet_rewrites(SheetChange::Rename { from, to }, AxisBudget::default())
+        .unwrap();
+    let mut wb = WorkbookEngine::new();
+    for sheet in s.workbook().sheets() {
+        wb.add_sheet(if sheet.name == from { to } else { &sheet.name });
+    }
+    for (si, sheet) in s.workbook().sheets().iter().enumerate() {
+        let name = wb.sheets()[si].name.clone();
+        for (&coord, text) in sheet.raw_cells() {
+            let new = plan
+                .iter()
+                .find(|(i, c, _)| *i == si && *c == coord)
+                .map_or(text.as_str(), |(_, _, t)| t.as_str());
+            wb.set_cell(&name, &coord.to_a1(), new).unwrap();
+        }
+    }
+    let mut next = RecalcSession::new(wb).unwrap();
+    next.recalculate();
+    next
+}
+
+#[test]
+fn a_rename_changes_no_value_and_leaves_the_session_alone() {
+    let s = session(
+        &["Data", "Sum"],
+        &[
+            ("Data", "A1", "4"),
+            ("Data", "A2", "5"),
+            ("Data", "B1", "=A1*2"),
+            ("Sum", "A1", "=SUM(Data!A1:A2)+Data!B1"),
+            ("Sum", "A2", "=SUM(Data!A1:Data!A2)"),
+            ("Sum", "A3", "=\"Data!A1\"&Data!A1"),
+            ("Sum", "A4", "=Sum!A1+A2"),
+        ],
+    );
+    let before = values(&s);
+    let next = renamed_session(&s, "Data", "월별 합계");
+    assert_eq!(
+        raw(&s, "Sum", "A1").as_deref(),
+        Some("=SUM(Data!A1:A2)+Data!B1")
+    );
+    assert_eq!(
+        raw(&next, "Sum", "A1").as_deref(),
+        Some("=SUM('월별 합계'!A1:A2)+'월별 합계'!B1")
+    );
+    assert_eq!(
+        raw(&next, "Sum", "A3").as_deref(),
+        Some("=\"Data!A1\"&'월별 합계'!A1")
+    );
+    assert_eq!(raw(&next, "Sum", "A4").as_deref(), Some("=Sum!A1+A2"));
+    let after = values(&next);
+    for ((sheet, cell), value) in &before {
+        let sheet = if sheet == "Data" {
+            "월별 합계"
+        } else {
+            sheet
+        };
+        assert_eq!(
+            after[&(sheet.to_string(), cell.clone())],
+            *value,
+            "{sheet}!{cell}"
+        );
+    }
+}
+
+#[test]
+fn deleting_a_sheet_plans_ref_errors_and_skips_its_own_formulas() {
+    let s = session(
+        &["Gone", "Keep"],
+        &[
+            ("Gone", "A1", "=Keep!A1+Gone!A2"),
+            ("Keep", "A1", "3"),
+            ("Keep", "B1", "=SUM(Gone!A1:A5)+A1"),
+            ("Keep", "C1", "=A1"),
+        ],
+    );
+    let plan = s
+        .plan_sheet_rewrites(SheetChange::Delete { name: "Gone" }, AxisBudget::default())
+        .unwrap();
+    assert_eq!(plan.len(), 1);
+    let (si, coord, text) = &plan[0];
+    assert_eq!(
+        (s.sheet_name(*si), coord.to_a1(), text.as_str()),
+        (Some("Keep"), "B1".to_string(), "=SUM(#REF!)+A1")
+    );
+}
+
+#[test]
+fn a_plan_over_budget_is_refused() {
+    let mut many = session(&["S", "T"], &[]);
+    for r in 1..=3_000 {
+        many.set_cell("S", at(&format!("A{r}")), &format!("=T!B{r}"))
+            .unwrap();
+    }
+    let err = many.plan_sheet_rewrites(
+        SheetChange::Rename { from: "T", to: "U" },
+        AxisBudget::within(Duration::ZERO),
+    );
+    assert!(matches!(err, Err(RecalcError::Invalid(_))));
+    let few = many.plan_sheet_rewrites(
+        SheetChange::Rename { from: "T", to: "U" },
+        AxisBudget {
+            time: Duration::from_secs(5),
+            max_rewrites: 10,
+        },
+    );
+    assert!(matches!(few, Err(RecalcError::Invalid(_))));
 }

@@ -139,12 +139,25 @@ fn parse_endpoint(bytes: &[u8], i: usize) -> Option<Endpoint> {
 }
 
 /// A reference starting at `i`: a cell, `A1:B2`, `A:C` or `1:3`; `second` is the range's far end.
-struct Unit {
+#[derive(Clone)]
+pub(super) struct Unit {
     first: Endpoint,
     second: Option<Endpoint>,
     /// Text between the colon and the second end (a repeated sheet name), copied as written.
     tail_prefix: std::ops::Range<usize>,
     end: usize,
+}
+
+impl Unit {
+    /// The sheet prefix repeated in front of a range's second end (`Q1!A1:Q1!B2`), if any.
+    pub(super) fn repeated_prefix(&self) -> Option<std::ops::Range<usize>> {
+        (!self.tail_prefix.is_empty()).then(|| self.tail_prefix.clone())
+    }
+
+    /// Where the cell or range ends.
+    pub(super) fn end(&self) -> usize {
+        self.end
+    }
 }
 
 fn follows_ident(bytes: &[u8], end: usize) -> bool {
@@ -249,15 +262,32 @@ fn move_unit(unit: &mut Unit, edit: &AxisEdit, collapse: bool) -> Outcome {
     Outcome::Moved
 }
 
-/// `text` with every reference to cells of `target_sheet` moved for `edit`, or `None` when
-/// nothing changes. `own_sheet` is the sheet that holds the text (a reference without a sheet
-/// name points there).
-pub fn rewrite_formula_refs(
+/// One reference in formula text: where it starts, the sheet prefix in front of it (`Q1!`, with
+/// the sheet's name) and the cell or range after the prefix when there is one.
+pub(super) struct Site {
+    pub(super) start: usize,
+    pub(super) prefix_len: usize,
+    pub(super) sheet: Option<String>,
+    pub(super) unit: Option<Unit>,
+}
+
+impl Site {
+    pub(super) fn unit_start(&self) -> usize {
+        self.start + self.prefix_len
+    }
+
+    /// Where the site's text ends: after the cell or range, or after the prefix alone.
+    fn end(&self) -> usize {
+        self.unit.as_ref().map_or(self.unit_start(), Unit::end)
+    }
+}
+
+/// `text` with the sites `replace` answers for rewritten: it gets each reference (outside string
+/// literals) and returns the text that takes the place of `text[start..end]`, or `None` to keep it.
+/// `None` when nothing changed.
+pub(super) fn scan_refs(
     text: &str,
-    own_sheet: &str,
-    target_sheet: &str,
-    edit: &AxisEdit,
-    collapse: bool,
+    mut replace: impl FnMut(&Site) -> Option<String>,
 ) -> Option<String> {
     let bytes = text.as_bytes();
     let len = bytes.len();
@@ -292,49 +322,63 @@ pub fn rewrite_formula_refs(
             Some((len, name)) => (len, Some(name)),
             None => (0, None),
         };
-        let unit_start = i + prefix_len;
-        let parsed = parse_unit(text, unit_start, sheet.as_deref());
-        let Some(mut unit) = parsed else {
-            // Not a reference: skip the sheet prefix or one character.
-            i = if prefix_len > 0 {
-                unit_start
-            } else {
-                i + text[i..].chars().next().map_or(1, char::len_utf8)
-            };
+        let unit = parse_unit(text, i + prefix_len, sheet.as_deref());
+        if unit.is_none() && prefix_len == 0 {
+            // Not a reference: skip one character.
+            i += text[i..].chars().next().map_or(1, char::len_utf8);
             continue;
-        };
-        let applies = sheet
-            .as_deref()
-            .unwrap_or(own_sheet)
-            .eq_ignore_ascii_case(target_sheet);
-        let outcome = if applies {
-            move_unit(&mut unit, edit, collapse)
-        } else {
-            Outcome::Same
-        };
-        match outcome {
-            Outcome::Same => {}
-            Outcome::Deleted | Outcome::Moved => {
-                let buf = out.get_or_insert_with(|| String::with_capacity(len + 8));
-                buf.push_str(&text[copied..i]);
-                if matches!(outcome, Outcome::Deleted) {
-                    buf.push_str("#REF!");
-                } else {
-                    buf.push_str(&text[i..unit_start]);
-                    unit.first.write(buf);
-                    if let Some(second) = unit.second {
-                        buf.push(':');
-                        buf.push_str(&text[unit.tail_prefix.clone()]);
-                        second.write(buf);
-                    }
-                }
-                copied = unit.end;
-            }
         }
-        i = unit.end;
+        let site = Site {
+            start: i,
+            prefix_len,
+            sheet,
+            unit,
+        };
+        let end = site.end();
+        if let Some(new) = replace(&site) {
+            let buf = out.get_or_insert_with(|| String::with_capacity(len + 8));
+            buf.push_str(&text[copied..i]);
+            buf.push_str(&new);
+            copied = end;
+        }
+        i = end;
     }
     out.map(|mut buf| {
         buf.push_str(&text[copied..]);
         buf
+    })
+}
+
+/// `text` with every reference to cells of `target_sheet` moved for `edit`, or `None` when
+/// nothing changes. `own_sheet` is the sheet that holds the text (a reference without a sheet
+/// name points there).
+pub fn rewrite_formula_refs(
+    text: &str,
+    own_sheet: &str,
+    target_sheet: &str,
+    edit: &AxisEdit,
+    collapse: bool,
+) -> Option<String> {
+    scan_refs(text, |site| {
+        let mut unit = site.unit.clone()?;
+        let sheet = site.sheet.as_deref().unwrap_or(own_sheet);
+        if !sheet.eq_ignore_ascii_case(target_sheet) {
+            return None;
+        }
+        match move_unit(&mut unit, edit, collapse) {
+            Outcome::Same => None,
+            Outcome::Deleted => Some("#REF!".to_string()),
+            Outcome::Moved => {
+                let mut buf = String::new();
+                buf.push_str(&text[site.start..site.unit_start()]);
+                unit.first.write(&mut buf);
+                if let Some(second) = unit.second {
+                    buf.push(':');
+                    buf.push_str(&text[unit.tail_prefix.clone()]);
+                    second.write(&mut buf);
+                }
+                Some(buf)
+            }
+        }
     })
 }

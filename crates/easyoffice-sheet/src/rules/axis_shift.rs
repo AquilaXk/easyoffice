@@ -22,12 +22,42 @@ impl Follow<'_> {
             *text = next;
         }
     }
+}
 
-    fn value(&self, value: &mut CfValue) {
-        if value.kind == ValueKind::Formula {
-            self.text(&mut value.text, false);
+/// Calls `f` with every formula text in the operands of a conditional formatting rule; the flag is
+/// true for an expression rule's own formula (the others are values and thresholds).
+pub(super) fn cf_formulas(rule: &mut CfRule, mut f: impl FnMut(&mut String, bool)) {
+    let mut value = |v: &mut CfValue| {
+        if v.kind == ValueKind::Formula {
+            f(&mut v.text, false);
         }
+    };
+    match &mut rule.kind {
+        CfKind::CellIs { a, b, .. } => {
+            f(a, false);
+            f(b, false);
+        }
+        CfKind::Expression(formula) => f(formula, true),
+        CfKind::ColorScale(stops) => stops.iter_mut().for_each(|(v, _)| value(v)),
+        CfKind::DataBar { min, max, .. } => {
+            value(min);
+            value(max);
+        }
+        CfKind::IconSet { thresholds, .. } => thresholds.iter_mut().for_each(value),
+        _ => {}
     }
+}
+
+/// Calls `f` with the formula texts of a data validation's operands. A list is either its items
+/// (`a,b,c`) or `=range`; items, and a check box's two values, are not references.
+pub(super) fn dv_formulas(rule: &mut DataValidation, mut f: impl FnMut(&mut String)) {
+    let literal =
+        rule.kind == DvKind::Checkbox || (rule.kind.is_list() && !rule.a.starts_with('='));
+    if literal {
+        return;
+    }
+    f(&mut rule.a);
+    f(&mut rule.b);
 }
 
 /// True when the rule's first range starts in the rows or columns the edit deletes: the cell its
@@ -49,35 +79,16 @@ fn shift_cf(rule: &mut CfRule, own_is_target: bool, f: &Follow<'_>) {
     if own_is_target {
         rule.ranges = shift_boxes(&rule.ranges, f.edit, false);
     }
-    match &mut rule.kind {
-        CfKind::CellIs { a, b, .. } => {
-            f.text(a, false);
-            f.text(b, false);
-        }
-        CfKind::Expression(formula) => f.text(formula, collapse),
-        CfKind::ColorScale(stops) => stops.iter_mut().for_each(|(v, _)| f.value(v)),
-        CfKind::DataBar { min, max, .. } => {
-            f.value(min);
-            f.value(max);
-        }
-        CfKind::IconSet { thresholds, .. } => thresholds.iter_mut().for_each(|v| f.value(v)),
-        _ => {}
-    }
+    cf_formulas(rule, |text, expression| {
+        f.text(text, expression && collapse)
+    });
 }
 
 fn shift_dv(rule: &mut DataValidation, own_is_target: bool, f: &Follow<'_>) {
     if own_is_target {
         rule.ranges = shift_boxes(&rule.ranges, f.edit, false);
     }
-    // A list is either its items (`a,b,c`) or `=range`; items, and a check box's two values, are
-    // not references.
-    let literal =
-        rule.kind == DvKind::Checkbox || (rule.kind.is_list() && !rule.a.starts_with('='));
-    if literal {
-        return;
-    }
-    f.text(&mut rule.a, false);
-    f.text(&mut rule.b, false);
+    dv_formulas(rule, |text| f.text(text, false));
 }
 
 /// Moves the rules of the sheet `own` (`own_is_target`: it is the edited sheet `target`, so its

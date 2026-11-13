@@ -5,7 +5,7 @@
 //! budget and the sheet edge), and the workbook changes only when that succeeded, so a refused
 //! edit leaves it exactly as it was.
 
-use super::{formula::rewrite_formula_refs, AxisEdit, EditKind};
+use super::{formula::rewrite_formula_refs, rewrite_sheet_names, AxisEdit, EditKind, SheetChange};
 use crate::{PackedCellCoordinate, SheetEngine, WorkbookEngine};
 use easyoffice_formats::EasyOfficeError;
 use std::time::{Duration, Instant};
@@ -142,5 +142,49 @@ impl WorkbookEngine {
             rewritten,
             removed_cells,
         })
+    }
+}
+
+impl WorkbookEngine {
+    /// The new text of every formula that names the sheet `change` renames or deletes, as sheet
+    /// index, cell and text. The workbook itself does not change (the caller renames or removes
+    /// the sheet). The formulas of a deleted sheet go with it and are left out. Fails when the
+    /// scan outruns `budget` (time or the number of formulas it changes).
+    pub fn plan_sheet_rewrites(
+        &self,
+        change: SheetChange<'_>,
+        budget: AxisBudget,
+    ) -> Result<Vec<(usize, PackedCellCoordinate, String)>, EasyOfficeError> {
+        let started = Instant::now();
+        let mut plan = Vec::new();
+        let mut scanned = 0usize;
+        for (si, engine) in self.sheets().iter().enumerate() {
+            let deleted = matches!(change, SheetChange::Delete { name } if engine.name.eq_ignore_ascii_case(name));
+            if deleted {
+                continue;
+            }
+            for (&coord, raw) in &engine.cells {
+                if crate::parser::strip_formula_prefix(raw).is_none() {
+                    continue;
+                }
+                scanned += 1;
+                if scanned % CLOCK_STRIDE == 0 && started.elapsed() > budget.time {
+                    return Err(EasyOfficeError::ResourceBudgetExceeded(
+                        "수식이 너무 많아 제한 시간 안에 시트 이름을 옮기지 못했습니다."
+                            .to_string(),
+                    ));
+                }
+                let Some(new) = rewrite_sheet_names(raw, change) else {
+                    continue;
+                };
+                if plan.len() >= budget.max_rewrites {
+                    return Err(EasyOfficeError::ResourceBudgetExceeded(
+                        "바뀌는 수식이 너무 많아 시트를 바꿀 수 없습니다.".to_string(),
+                    ));
+                }
+                plan.push((si, coord, new));
+            }
+        }
+        Ok(plan)
     }
 }

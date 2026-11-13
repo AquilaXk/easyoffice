@@ -240,6 +240,11 @@ impl RecalcSession {
         self.wb.sheets().get(sheet).map(|s| s.name.as_str())
     }
 
+    /// The sheets' names in the order the session was opened with.
+    pub fn sheet_names(&self) -> impl Iterator<Item = &str> {
+        self.wb.sheets().iter().map(|s| s.name.as_str())
+    }
+
     /// Cells, text and graph the session holds (what a caller meters).
     pub fn footprint(&self) -> Footprint {
         Footprint {
