@@ -642,7 +642,7 @@ impl OoxmlCodec {
             }
             if !styling.view_within_bounds(Self::MAX_XLSX_ROWS, Self::MAX_XLSX_COLS) {
                 return Err(EasyOfficeError::ResourceBudgetExceeded(
-                    "XLSX 틀 고정·탭 색·그룹 값이 허용 범위를 초과했습니다.".to_string(),
+                    "XLSX 틀 고정·탭 색·그룹·쪽 설정 값이 허용 범위를 초과했습니다.".to_string(),
                 ));
             }
             if let Some((row, col)) = cell.or(column) {

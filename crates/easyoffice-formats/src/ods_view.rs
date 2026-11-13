@@ -33,13 +33,16 @@ const FIXED_SPLIT: i64 = 2;
 pub(crate) struct TableProps {
     pub(crate) color: Option<u32>,
     pub(crate) hidden: bool,
+    /// The master page (1-based, `ods_page`) of the sheet's page layout, 0 for none.
+    pub(crate) master: u16,
 }
 
 impl TableProps {
-    fn of(styling: &SheetStyling) -> Self {
+    fn of(styling: &SheetStyling, layouts: &[crate::SheetPage]) -> Self {
         Self {
             color: styling.tab_color,
             hidden: styling.hidden,
+            master: crate::sheet_styling::ods_page::master_of(layouts, styling),
         }
     }
 }
@@ -48,24 +51,31 @@ impl TableProps {
 /// first-use order.
 pub(crate) struct TabStyles {
     props: Vec<TableProps>,
+    layouts: Vec<crate::SheetPage>,
 }
 
 impl TabStyles {
     pub(crate) fn build(stylings: &[SheetStyling]) -> Self {
+        let layouts = crate::sheet_styling::ods_page::layouts(stylings);
         let mut props: Vec<TableProps> = Vec::new();
-        for p in stylings.iter().map(TableProps::of) {
+        for p in stylings.iter().map(|st| TableProps::of(st, &layouts)) {
             if p != TableProps::default() && !props.contains(&p) {
                 props.push(p);
             }
         }
-        Self { props }
+        Self { props, layouts }
+    }
+
+    /// The page layouts of the workbook (one master page each), for `styles.xml`.
+    pub(crate) fn layouts(&self) -> &[crate::SheetPage] {
+        &self.layouts
     }
 
     pub(crate) fn name(&self, styling: &SheetStyling) -> Option<String> {
         let at = self
             .props
             .iter()
-            .position(|&p| p == TableProps::of(styling))?;
+            .position(|&p| p == TableProps::of(styling, &self.layouts))?;
         Some(format!("ta{}", at + 1))
     }
 
@@ -81,9 +91,14 @@ impl TabStyles {
             let color = p.color.map_or(String::new(), |c| {
                 format!(" tableooo:tab-color=\"#{c:06x}\"")
             });
+            let master = if p.master > 0 {
+                format!(" style:master-page-name=\"Mp{}\"", p.master)
+            } else {
+                String::new()
+            };
             let _ = write!(
                 xml,
-                "<style:style style:name=\"ta{}\" style:family=\"table\"><style:table-properties{display}{color}/></style:style>",
+                "<style:style style:name=\"ta{}\" style:family=\"table\"{master}><style:table-properties{display}{color}/></style:style>",
                 i + 1
             );
         }
@@ -104,7 +119,11 @@ pub(crate) fn table_props(automatic_styles: &str) -> HashMap<String, TableProps>
             .and_then(|c| c.strip_prefix('#'))
             .and_then(crate::parse_hex_rgb);
         let hidden = extract_attr_from_fragment(body, "table:display") == Some("false");
-        let props = TableProps { color, hidden };
+        let props = TableProps {
+            color,
+            hidden,
+            master: 0,
+        };
         if let (Some(name), true) = (
             extract_attr_from_fragment(attrs, "style:name"),
             props != TableProps::default(),
@@ -312,21 +331,24 @@ mod tests {
             read.get("ta1"),
             Some(&TableProps {
                 color: Some(0x3366CC),
-                hidden: false
+                hidden: false,
+                master: 0
             })
         );
         assert_eq!(
             read.get("ta2"),
             Some(&TableProps {
                 color: None,
-                hidden: true
+                hidden: true,
+                master: 0
             })
         );
         assert_eq!(
             read.get("ta3"),
             Some(&TableProps {
                 color: Some(0x3366CC),
-                hidden: true
+                hidden: true,
+                master: 0
             })
         );
         let bad = r##"<style:style style:name="x" style:family="table"><style:table-properties tableooo:tab-color="red"/></style:style>"##;

@@ -12,6 +12,8 @@ use std::sync::Arc;
 pub(crate) mod ods_grid;
 #[path = "ods_numfmt.rs"]
 pub(crate) mod ods_numfmt;
+#[path = "ods_page.rs"]
+pub(crate) mod ods_page;
 #[path = "ods_styles.rs"]
 pub(crate) mod ods_styles;
 #[path = "ods_view.rs"]
@@ -291,13 +293,14 @@ impl SheetStyling {
             && self.page.is_default()
     }
 
-    /// Whether the frozen pane, the tab colour and the groups are within the bounds of a sheet that
+    /// Whether the frozen pane, the tab colour, the groups and the page setup are within the bounds of a sheet that
     /// has `max_row` rows and `max_col` columns.
     pub fn view_within_bounds(&self, max_row: u32, max_col: u32) -> bool {
         self.freeze
             .is_none_or(|f| Freeze::new(f.rows, f.cols).is_some())
             && self.tab_color.is_none_or(|rgb| rgb <= 0xFF_FFFF)
             && self.outline.within_bounds(max_row, max_col)
+            && self.page.within_bounds(max_row, max_col)
     }
 
     /// Whether the user, a folded group or the filter hides `row`.

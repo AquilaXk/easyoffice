@@ -374,11 +374,15 @@ impl OdfCodec {
         XmlSanitizer::validate_safe_xml(&content)?;
 
         let settings = settings_xml(&names, stylings);
-        let media = [("settings.xml".to_string(), "text/xml")];
-        let manifest = Self::build_manifest_with_media(
-            Self::MIMETYPE_ODS,
-            if settings.is_some() { &media } else { &[] },
-        );
+        let page_styles = crate::sheet_styling::ods_page::styles_xml(tab_styles.layouts());
+        let mut media = Vec::new();
+        if settings.is_some() {
+            media.push(("settings.xml".to_string(), "text/xml"));
+        }
+        if page_styles.is_some() {
+            media.push(("styles.xml".to_string(), "text/xml"));
+        }
+        let manifest = Self::build_manifest_with_media(Self::MIMETYPE_ODS, &media);
         let mut parts = vec![
             (
                 "mimetype".to_string(),
@@ -389,6 +393,10 @@ impl OdfCodec {
         ];
         if let Some(settings) = settings {
             parts.push(("settings.xml".to_string(), settings.into_bytes()));
+        }
+        if let Some(styles) = page_styles {
+            XmlSanitizer::validate_safe_xml(&styles)?;
+            parts.push(("styles.xml".to_string(), styles.into_bytes()));
         }
         ZipArchiveCodec::pack_compressed(&parts)
     }
@@ -438,7 +446,7 @@ impl OdfCodec {
                 .any(|&(r, c)| r > Self::MAX_ROWS || c > Self::MAX_COLS);
             if !styling.view_within_bounds(Self::MAX_ROWS + 1, Self::MAX_COLS + 1) {
                 return Err(ods_budget_error(
-                    "ODS 틀 고정·탭 색·그룹 값이 허용 범위를 초과했습니다.",
+                    "ODS 틀 고정·탭 색·그룹·쪽 설정 값이 허용 범위를 초과했습니다.",
                 ));
             }
             if bad_cell || styling.columns.keys().any(|&c| c > Self::MAX_COLS) {
@@ -488,8 +496,11 @@ impl OdfCodec {
             .map_or(String::new(), |name| {
                 format!(" table:style-name=\"{name}\"")
             });
+        let print_ranges = styling.map_or(String::new(), |st| {
+            crate::sheet_styling::ods_page::print_ranges_attr(sheet_name, &st.page)
+        });
         content.push_str(&format!(
-            "<table:table table:name=\"{}\"{tab_style}>",
+            "<table:table table:name=\"{}\"{tab_style}{print_ranges}>",
             XmlSanitizer::escape(sheet_name)
         ));
         if let Some(st) = styling {
@@ -602,9 +613,10 @@ impl OdfCodec {
     pub fn unpack_ods_styling(
         bytes: &[u8],
     ) -> Result<Vec<(String, SheetStyling)>, EasyOfficeError> {
-        let (content_xml, _, settings) = Self::extract_parts(bytes, Self::MIMETYPE_ODS)?;
+        let (content_xml, _, settings, styles) = Self::extract_parts(bytes, Self::MIMETYPE_ODS)?;
         let mut stylings = parse_ods_styling(&content_xml)?;
         Self::apply_freezes(&mut stylings, settings.as_deref());
+        crate::sheet_styling::ods_page::read_pages(&content_xml, styles.as_deref(), &mut stylings);
         Self::show_one_sheet(&mut stylings);
         Ok(stylings)
     }
@@ -618,9 +630,10 @@ impl OdfCodec {
     pub fn unpack_ods_with_styling(
         bytes: &[u8],
     ) -> Result<(OdsMultiUnpacked, Vec<(String, SheetStyling)>), EasyOfficeError> {
-        let (content_xml, _, settings) = Self::extract_parts(bytes, Self::MIMETYPE_ODS)?;
+        let (content_xml, _, settings, styles) = Self::extract_parts(bytes, Self::MIMETYPE_ODS)?;
         let (sheets, mut stylings) = read_ods_sheets_with_styling(&content_xml)?;
         Self::apply_freezes(&mut stylings, settings.as_deref());
+        crate::sheet_styling::ods_page::read_pages(&content_xml, styles.as_deref(), &mut stylings);
         Self::show_one_sheet(&mut stylings);
         Ok((sheets, stylings))
     }
@@ -794,14 +807,15 @@ impl OdfCodec {
         bytes: &[u8],
         expected_mime: &str,
     ) -> Result<(String, Option<String>), EasyOfficeError> {
-        Self::extract_parts(bytes, expected_mime).map(|(content, meta, _)| (content, meta))
+        Self::extract_parts(bytes, expected_mime).map(|(content, meta, _, _)| (content, meta))
     }
 
-    /// `content.xml`, `meta.xml` and `settings.xml` (when the file has them) of an ODF package.
+    /// `content.xml`, `meta.xml`, `settings.xml` and `styles.xml` (when the file has them) of an ODF package.
+    #[allow(clippy::type_complexity)]
     fn extract_parts(
         bytes: &[u8],
         expected_mime: &str,
-    ) -> Result<(String, Option<String>, Option<String>), EasyOfficeError> {
+    ) -> Result<(String, Option<String>, Option<String>, Option<String>), EasyOfficeError> {
         let entries = ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default())?;
         validate_zip_xml_entries(&entries)?;
         if let Some(mime_entry) = entries.iter().find(|e| e.path == "mimetype") {
@@ -847,7 +861,18 @@ impl OdfCodec {
             None => None,
         };
 
-        Ok((xml.to_string(), meta_xml, settings_xml))
+        let styles_xml = match entries.iter().find(|e| e.path == "styles.xml") {
+            Some(entry) => {
+                let text = std::str::from_utf8(&entry.data).map_err(|_| {
+                    EasyOfficeError::InvalidUtf8("ODF styles.xml UTF-8 오류".to_string())
+                })?;
+                XmlSanitizer::validate_safe_xml(text)?;
+                Some(text.to_string())
+            }
+            None => None,
+        };
+
+        Ok((xml.to_string(), meta_xml, settings_xml, styles_xml))
     }
 
     /// A workbook shows at least one sheet: a file that hides them all opens on its first.

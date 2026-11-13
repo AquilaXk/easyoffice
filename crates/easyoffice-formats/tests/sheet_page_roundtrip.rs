@@ -2,8 +2,8 @@
 //! area, repeated rows and columns) survives XLSX and ODS round trips and hostile files cannot widen it (PD-213).
 
 use easyoffice_formats::{
-    CellBox, OoxmlCodec, PageMargins, PageScale, SheetPage, SheetStyling, ZipArchiveCodec,
-    ZipSecurityPolicy, MAX_PRINT_RANGES, MAX_TITLE_ROWS, PAPER_A3,
+    CellBox, OdfCodec, OoxmlCodec, PageMargins, PageScale, SheetPage, SheetStyling,
+    ZipArchiveCodec, ZipSecurityPolicy, MAX_PRINT_RANGES, MAX_TITLE_ROWS, PAPER_A3,
 };
 
 fn full_page() -> SheetPage {
@@ -242,4 +242,145 @@ fn hostile_defined_names_are_bounded() {
         assert_eq!(page.title_rows, expect_rows, "{names}");
         assert_eq!(page.title_cols, expect_cols, "{names}");
     }
+}
+
+// ---- ODS
+
+fn pack_ods(names: &[&str], pages: Vec<SheetPage>) -> Vec<u8> {
+    let sheets: Vec<_> = names
+        .iter()
+        .map(|n| ((*n).to_string(), vec![(0u32, 0u32, "1".to_string())]))
+        .collect();
+    let stylings: Vec<SheetStyling> = pages
+        .into_iter()
+        .map(|page| SheetStyling {
+            page,
+            ..SheetStyling::default()
+        })
+        .collect();
+    OdfCodec::pack_ods_multi_styled(&sheets, &stylings).unwrap()
+}
+
+fn read_ods(bytes: &[u8]) -> Vec<SheetPage> {
+    OdfCodec::unpack_ods_with_styling(bytes)
+        .unwrap()
+        .1
+        .into_iter()
+        .map(|(_, s)| s.page)
+        .collect()
+}
+
+/// What an ODS keeps of a page: no header and footer distances, no repeated rows and columns.
+fn ods_kept(page: &SheetPage) -> SheetPage {
+    let mut kept = page.clone();
+    kept.title_rows = None;
+    kept.title_cols = None;
+    kept.margins = kept.margins.map(|m| PageMargins {
+        header: PageMargins::NORMAL.header,
+        footer: PageMargins::NORMAL.footer,
+        ..m
+    });
+    kept
+}
+
+#[test]
+fn an_ods_keeps_the_layout_the_print_ranges_and_gives_each_sheet_its_own() {
+    let a = full_page();
+    let b = SheetPage {
+        scale: PageScale::Fit {
+            width: 2,
+            height: 0,
+        },
+        paper: Some(1),
+        ..SheetPage::default()
+    };
+    let c = SheetPage {
+        print_area: vec![CellBox {
+            row0: 2,
+            col0: 2,
+            row1: 4,
+            col1: 4,
+        }],
+        ..SheetPage::default()
+    };
+    let bytes = pack_ods(
+        &["Sheet1", "내 시트", "세 번째"],
+        vec![a.clone(), b.clone(), c.clone()],
+    );
+    assert_eq!(read_ods(&bytes), vec![ods_kept(&a), b, c]);
+    let content = part(&bytes, "content.xml");
+    assert!(
+        content.contains("table:print-ranges=\"Sheet1.A1:Sheet1.D10 Sheet1.F15:Sheet1.F15\""),
+        "{content}"
+    );
+    assert!(part(&bytes, "styles.xml").contains("style:print-orientation=\"landscape\""));
+    // The second write of what was read is the same file content.
+    let again = pack_ods(
+        &["Sheet1"],
+        read_ods(&pack_ods(&["Sheet1"], vec![a.clone()])),
+    );
+    assert_eq!(read_ods(&again), vec![ods_kept(&a)]);
+}
+
+#[test]
+fn a_default_ods_setup_writes_no_styles_part_and_equal_layouts_share_a_master_page() {
+    let bytes = pack_ods(&["A"], vec![SheetPage::default()]);
+    assert!(
+        ZipArchiveCodec::unpack(&bytes, &ZipSecurityPolicy::default())
+            .unwrap()
+            .iter()
+            .all(|e| e.path != "styles.xml")
+    );
+    let landscape = SheetPage {
+        landscape: true,
+        ..SheetPage::default()
+    };
+    let bytes = pack_ods(&["A", "B"], vec![landscape.clone(), landscape]);
+    assert_eq!(
+        part(&bytes, "styles.xml")
+            .matches("<style:master-page ")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn hostile_ods_values_are_left_out() {
+    let bytes = pack_ods(
+        &["Sheet1"],
+        vec![SheetPage {
+            landscape: true,
+            ..SheetPage::default()
+        }],
+    );
+    let styles = part(&bytes, "styles.xml")
+        .replace("style:scale-to=\"100%\"", "style:scale-to=\"9000%\"")
+        .replace("fo:margin-top=\"19.05mm\"", "fo:margin-top=\"99999in\"");
+    let patched = replace_part(&bytes, "styles.xml", &styles);
+    let page = read_ods(&patched).remove(0);
+    assert_eq!(page.scale, PageScale::Percent(100));
+    assert_eq!(page.margins, None, "a margin out of bounds drops them all");
+    assert!(page.landscape);
+    let many = (0..=MAX_PRINT_RANGES)
+        .map(|i| format!("Sheet1.A{0}:Sheet1.A{0}", i + 1))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let content = part(&bytes, "content.xml").replace(
+        "<table:table table:name=\"Sheet1\"",
+        &format!("<table:table table:print-ranges=\"{many}\" table:name=\"Sheet1\""),
+    );
+    assert!(
+        read_ods(&replace_part(&bytes, "content.xml", &content))[0]
+            .print_area
+            .is_empty(),
+        "too many ranges are not read"
+    );
+    let odd = part(&bytes, "content.xml").replace("<table:table table:name=\"Sheet1\"", "<table:table table:print-ranges=\"Other.A1:Other.B2 junk Sheet1.ZZZZ9:Sheet1.A1\" table:name=\"Sheet1\"");
+    assert_eq!(
+        read_ods(&replace_part(&bytes, "content.xml", &odd))[0]
+            .print_area
+            .len(),
+        1,
+        "a range of another sheet reads by its cells, junk is dropped"
+    );
 }

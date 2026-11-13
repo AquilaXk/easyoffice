@@ -32,7 +32,7 @@ const PAGE: &str = r#","page":{"landscape":true,"centerH":true,"grid":true,"head
 
 #[test]
 fn the_page_setup_reaches_the_file_and_comes_back_as_the_same_key() {
-    for (dst, format) in [("xlsx", DocumentFormat::Xlsx)] {
+    for (dst, format) in [("xlsx", DocumentFormat::Xlsx), ("ods", DocumentFormat::Ods)] {
         let bytes = save(dst, PAGE).unwrap();
         let page = read_sheet_styling(&bytes, format).unwrap().remove(0).1.page;
         assert!(
@@ -42,13 +42,25 @@ fn the_page_setup_reaches_the_file_and_comes_back_as_the_same_key() {
         assert_eq!(page.paper, Some(8), "{dst}");
         assert_eq!(page.scale, PageScale::Percent(85), "{dst}");
         assert_eq!(page.print_area.len(), 2, "{dst}");
-        assert_eq!(
-            (page.title_rows, page.title_cols),
-            (Some((0, 1)), Some((0, 0))),
-            "{dst}"
-        );
+        // An ODS keeps neither the header and footer distances nor the repeated rows and columns.
+        let want = if dst == "xlsx" {
+            PAGE.to_string()
+        } else {
+            PAGE.replace(r#","titleRows":[1,2],"titleCols":[1,1]"#, "")
+                .replace(
+                    r#""header":250,"footer":350"#,
+                    r#""header":300,"footer":300"#,
+                )
+        };
+        if dst == "xlsx" {
+            assert_eq!(
+                (page.title_rows, page.title_cols),
+                (Some((0, 1)), Some((0, 0))),
+                "{dst}"
+            );
+        }
         let opened = open(dst, &bytes);
-        assert!(opened.contains(&PAGE[1..]), "{dst}: {opened}");
+        assert!(opened.contains(&want[1..]), "{dst}: {opened}");
         let plain = open(dst, &save(dst, "").unwrap());
         assert!(
             !plain.contains("\"page\""),
@@ -68,6 +80,8 @@ fn a_bad_page_value_refuses_the_save() {
         r#","page":{"titleCols":[1,500]}"#,
         r#","page":"landscape""#,
     ] {
-        assert!(save("xlsx", page).is_err(), "{page}");
+        for dst in ["xlsx", "ods"] {
+            assert!(save(dst, page).is_err(), "{dst}: {page}");
+        }
     }
 }
