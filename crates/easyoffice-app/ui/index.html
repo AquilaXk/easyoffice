@@ -1021,28 +1021,34 @@
     </dialog>
 
     <dialog id="sheet-link-dialog" class="tool-dialog" aria-labelledby="sheet-link-dialog-title">
-      <div class="dialog-wrap">
+      <div class="dialog-wrap dialog-hyperlink">
         <div class="dialog-title"><span id="sheet-link-dialog-title">하이퍼링크</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
-        <div class="dialog-body">
+        <div class="dialog-body dialog-hyperlink-body">
           <div class="dialog-row"><label class="dialog-label" for="sheet-link-text">표시할 문자열</label><input id="sheet-link-text" class="dialog-text-input" type="text" autocomplete="off" spellcheck="false" /></div>
-          <div class="dialog-section-title">연결 대상</div>
-          <div class="dialog-tabs" role="tablist" aria-label="연결 대상">
-            <button type="button" class="dialog-tab active" role="tab" id="sheet-link-tab-web" aria-selected="true" aria-controls="sheet-link-pane-web">웹 주소</button>
-            <button type="button" class="dialog-tab" role="tab" id="sheet-link-tab-doc" aria-selected="false" aria-controls="sheet-link-pane-doc" tabindex="-1">현재 문서</button>
-          </div>
-          <div class="dialog-section" id="sheet-link-pane-web" role="tabpanel" aria-labelledby="sheet-link-tab-web">
-            <div class="dialog-row"><label class="dialog-label" for="sheet-link-address">웹 주소</label><input id="sheet-link-address" class="dialog-text-input" type="text" maxlength="2048" autocomplete="off" spellcheck="false" placeholder="https://example.com" /></div>
-          </div>
-          <div class="dialog-section" id="sheet-link-pane-doc" role="tabpanel" aria-labelledby="sheet-link-tab-doc" hidden>
-            <div class="dialog-row"><label class="dialog-label" for="sheet-link-sheet">시트</label><select id="sheet-link-sheet" class="sb-combo dialog-select"></select></div>
-            <div class="dialog-row"><label class="dialog-label" for="sheet-link-ref">셀 참조</label><input id="sheet-link-ref" class="dialog-text-input" type="text" maxlength="255" autocomplete="off" spellcheck="false" placeholder="A1" /></div>
-          </div>
-          <div class="dialog-status-row"><span id="sheet-link-status" class="dialog-status" role="status" aria-live="polite"></span></div>
+          <fieldset class="dialog-hyperlink-target">
+            <legend>연결 대상</legend>
+            <div class="dialog-tabs" role="tablist" aria-label="연결 대상">
+              <button type="button" class="dialog-tab active" role="tab" id="sheet-link-tab-web" aria-selected="true" aria-controls="sheet-link-pane-web">웹 주소</button>
+              <button type="button" class="dialog-tab" role="tab" id="sheet-link-tab-doc" aria-selected="false" aria-controls="sheet-link-pane-doc" tabindex="-1">현재 문서</button>
+            </div>
+            <div class="dialog-section dialog-hyperlink-panel" id="sheet-link-pane-web" role="tabpanel" aria-labelledby="sheet-link-tab-web">
+              <label for="sheet-link-address">웹 주소</label>
+              <div class="dialog-row dialog-hyperlink-address">
+                <input id="sheet-link-address" class="dialog-text-input" type="text" maxlength="2048" autocomplete="off" spellcheck="false" placeholder="https://example.com" />
+                <button type="button" id="btn-sheet-link-preview" class="dialog-btn dialog-hyperlink-preview" title="웹 주소 새 탭에서 열어보기" aria-label="웹 주소 새 탭에서 열어보기"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18M5 7h14M5 17h14"/></svg></button>
+              </div>
+            </div>
+            <div class="dialog-section dialog-hyperlink-panel" id="sheet-link-pane-doc" role="tabpanel" aria-labelledby="sheet-link-tab-doc" hidden>
+              <div class="dialog-row"><label class="dialog-label" for="sheet-link-sheet">시트</label><select id="sheet-link-sheet" class="sb-combo dialog-select"></select></div>
+              <div class="dialog-row"><label class="dialog-label" for="sheet-link-ref">셀 참조</label><input id="sheet-link-ref" class="dialog-text-input" type="text" maxlength="255" autocomplete="off" spellcheck="false" placeholder="A1" /></div>
+            </div>
+          </fieldset>
+          <p id="sheet-link-status" class="dialog-hyperlink-status" role="alert"></p>
         </div>
         <div class="dialog-footer">
-          <button id="btn-sheet-link-remove" type="button" class="dialog-btn" hidden>링크 제거</button>
           <button id="btn-sheet-link-apply" type="button" class="dialog-btn dialog-btn-primary">넣기</button>
           <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+          <button id="btn-sheet-link-remove" type="button" class="dialog-btn" hidden>링크 제거</button>
         </div>
       </div>
     </dialog>

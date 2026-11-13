@@ -116,6 +116,16 @@
 
     // ---- the dialog ----------------------------------------------------------------------------------------
 
+    // 넣기 needs a target, the globe button an address it may open (the reference editor's dialog does the same).
+    function refreshButtons() {
+      const address = kit.val("sheet-link-address");
+      const apply = byId("btn-sheet-link-apply");
+      const preview = byId("btn-sheet-link-preview");
+      if (apply) apply.disabled = (state.tab === "doc" ? kit.val("sheet-link-ref") : address).trim() === "";
+      const target = links.normalizeTarget(address);
+      if (preview) preview.disabled = target === null || links.isInternal(target);
+    }
+
     function showTab(tab) {
       state.tab = tab;
       for (const name of ["web", "doc"]) {
@@ -127,6 +137,7 @@
         const pane = byId("sheet-link-pane-" + name);
         if (pane) pane.hidden = !on;
       }
+      refreshButtons();
     }
 
     function fillSheets(current) {
@@ -184,6 +195,7 @@
       kit.setVal("sheet-link-ref", place.ref);
       showTab(internal ? "doc" : "web");
       kit.note("sheet-link-status", "");
+      refreshButtons();
       byId("sheet-link-dialog-title").textContent = link ? "하이퍼링크 고치기" : "하이퍼링크";
       byId("btn-sheet-link-apply").textContent = link ? "고치기" : "넣기";
       const remove = byId("btn-sheet-link-remove");
@@ -257,6 +269,11 @@
       byId("btn-sheet-link-apply")?.addEventListener("click", () => void apply());
       byId("btn-sheet-link-remove")?.addEventListener("click", () => void remove());
       for (const tab of ["web", "doc"]) byId("sheet-link-tab-" + tab)?.addEventListener("click", () => showTab(tab));
+      byId("btn-sheet-link-preview")?.addEventListener("click", () => {
+        const target = links.normalizeTarget(kit.val("sheet-link-address"));
+        if (target !== null && !links.isInternal(target)) void follow({ target }, state.sheet);
+      });
+      for (const id of ["sheet-link-address", "sheet-link-ref"]) byId(id)?.addEventListener("input", refreshButtons);
       for (const id of ["sheet-link-address", "sheet-link-ref", "sheet-link-text"]) {
         byId(id)?.addEventListener("keydown", (ev) => {
           if (ev.key !== "Enter") return;
