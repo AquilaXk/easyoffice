@@ -9,27 +9,170 @@
 /// Functions a file spells `_xlfn._xlws.NAME`.
 const WORKSHEET_ONLY: [&str; 2] = ["FILTER", "SORT"];
 
-/// Functions a file spells `_xlfn.NAME`.
-const FUTURE: [&str; 16] = [
-    "SORTBY",
-    "UNIQUE",
-    "SEQUENCE",
-    "RANDARRAY",
-    "LET",
-    "LAMBDA",
-    "MAP",
-    "REDUCE",
-    "SCAN",
-    "BYROW",
+/// Functions a file spells `_xlfn.NAME`: every function added after the first release of the file
+/// format, as [MS-XLSX] 2.2.2.1 lists the "future functions" a formula names with that prefix (the
+/// statistical and distribution names with a dot, the 2013 text and logic functions, the dynamic
+/// array family). Sorted, upper case; a function the engine does not have is listed too, so a formula
+/// that names it is spelled the way the file format wants. Functions of this engine with no entry
+/// (`AVERAGE.WEIGHTED`, `MARGINOFERROR`) are its own and are written as they are.
+const FUTURE: [&str; 154] = [
+    "ACOT",
+    "ACOTH",
+    "AGGREGATE",
+    "ANCHORARRAY",
+    "ARABIC",
+    "ARRAYTOTEXT",
+    "BASE",
+    "BETA.DIST",
+    "BETA.INV",
+    "BINOM.DIST",
+    "BINOM.DIST.RANGE",
+    "BINOM.INV",
+    "BITAND",
+    "BITLSHIFT",
+    "BITOR",
+    "BITRSHIFT",
+    "BITXOR",
     "BYCOL",
+    "BYROW",
+    "CEILING.MATH",
+    "CEILING.PRECISE",
+    "CHISQ.DIST",
+    "CHISQ.DIST.RT",
+    "CHISQ.INV",
+    "CHISQ.INV.RT",
+    "CHISQ.TEST",
+    "CHOOSECOLS",
+    "CHOOSEROWS",
+    "COMBINA",
+    "CONCAT",
+    "CONFIDENCE.NORM",
+    "CONFIDENCE.T",
+    "COT",
+    "COTH",
+    "COVARIANCE.P",
+    "COVARIANCE.S",
+    "CSC",
+    "CSCH",
+    "DAYS",
+    "DECIMAL",
+    "DROP",
+    "ERF.PRECISE",
+    "ERFC.PRECISE",
+    "EXPAND",
+    "EXPON.DIST",
+    "F.DIST",
+    "F.DIST.RT",
+    "F.INV",
+    "F.INV.RT",
+    "F.TEST",
+    "FILTERXML",
+    "FLOOR.MATH",
+    "FLOOR.PRECISE",
+    "FORECAST.ETS",
+    "FORECAST.ETS.CONFINT",
+    "FORECAST.ETS.SEASONALITY",
+    "FORECAST.ETS.STAT",
+    "FORECAST.LINEAR",
+    "FORMULATEXT",
+    "GAMMA",
+    "GAMMA.DIST",
+    "GAMMA.INV",
+    "GAMMALN.PRECISE",
+    "GAUSS",
+    "HSTACK",
+    "HYPGEOM.DIST",
+    "IFNA",
+    "IFS",
+    "IMCOSH",
+    "IMCOT",
+    "IMCSC",
+    "IMCSCH",
+    "IMSEC",
+    "IMSECH",
+    "IMSINH",
+    "IMTAN",
+    "ISFORMULA",
+    "ISOMITTED",
+    "ISOWEEKNUM",
+    "LAMBDA",
+    "LET",
+    "LOGNORM.DIST",
+    "LOGNORM.INV",
     "MAKEARRAY",
+    "MAP",
+    "MAXIFS",
+    "MINIFS",
+    "MODE.MULT",
+    "MODE.SNGL",
+    "MUNIT",
+    "NEGBINOM.DIST",
+    "NETWORKDAYS.INTL",
+    "NORM.DIST",
+    "NORM.INV",
+    "NORM.S.DIST",
+    "NORM.S.INV",
+    "NUMBERVALUE",
+    "PDURATION",
+    "PERCENTILE.EXC",
+    "PERCENTILE.INC",
+    "PERCENTRANK.EXC",
+    "PERCENTRANK.INC",
+    "PERMUTATIONA",
+    "PHI",
+    "POISSON.DIST",
+    "QUARTILE.EXC",
+    "QUARTILE.INC",
+    "QUERYSTRING",
+    "RANDARRAY",
+    "RANK.AVG",
+    "RANK.EQ",
+    "REDUCE",
+    "RRI",
+    "SCAN",
+    "SEC",
+    "SECH",
+    "SEQUENCE",
+    "SHEET",
+    "SHEETS",
+    "SINGLE",
+    "SKEW.P",
+    "SORTBY",
+    "STDEV.P",
+    "STDEV.S",
+    "SWITCH",
+    "T.DIST",
+    "T.DIST.2T",
+    "T.DIST.RT",
+    "T.INV",
+    "T.INV.2T",
+    "T.TEST",
+    "TAKE",
+    "TEXTAFTER",
+    "TEXTBEFORE",
+    "TEXTJOIN",
+    "TEXTSPLIT",
+    "TOCOL",
+    "TOROW",
+    "UNICHAR",
+    "UNICODE",
+    "UNIQUE",
+    "VALUETOTEXT",
+    "VAR.P",
+    "VAR.S",
+    "VSTACK",
+    "WEBSERVICE",
+    "WEIBULL.DIST",
+    "WORKDAY.INTL",
+    "WRAPCOLS",
+    "WRAPROWS",
     "XLOOKUP",
     "XMATCH",
-    "ANCHORARRAY",
-    "SINGLE",
+    "XOR",
+    "Z.TEST",
 ];
 
-const FILE_PREFIXES: [&str; 4] = ["_xlfn._xlws.", "_xlfn.", "_xlpm.", "_xlop."];
+const FILE_PREFIXES: [&str; 3] = ["_xlfn._xlws.", "_xlfn.", "_xlpm."];
 
 #[derive(Clone, PartialEq, Debug)]
 enum Tok {
@@ -96,7 +239,7 @@ pub fn to_file_formula(text: &str) -> String {
     if !text.chars().any(|c| c.is_ascii_alphabetic() || c == '#') {
         return text.to_string();
     }
-    let tokens = anchor_calls(tokenize(text));
+    let tokens = optional_parameters(anchor_calls(tokenize(text)));
     let variables = declared_variables(&tokens);
     let mut out = String::with_capacity(text.len() + 16);
     for (i, token) in tokens.iter().enumerate() {
@@ -113,7 +256,10 @@ pub fn to_file_formula(text: &str) -> String {
         } else if called && WORKSHEET_ONLY.contains(&upper.as_str()) {
             out.push_str("_xlfn._xlws.");
             out.push_str(&upper);
-        } else if called && FUTURE.contains(&upper.as_str()) && !variables.contains(&upper) {
+        } else if called
+            && FUTURE.binary_search(&upper.as_str()).is_ok()
+            && !variables.contains(&upper)
+        {
             out.push_str("_xlfn.");
             out.push_str(&upper);
         } else if !qualified && variables.contains(&upper) {
@@ -131,18 +277,54 @@ pub fn from_file_formula(text: &str) -> String {
     if !text.contains("_xl") && !text.contains("ANCHORARRAY") {
         return text.to_string();
     }
-    let mut tokens = tokenize(text);
-    for token in &mut tokens {
-        if let Tok::Word(word) = token {
-            for prefix in FILE_PREFIXES {
-                if let Some(rest) = word.strip_prefix(prefix) {
-                    *word = rest.to_string();
-                    break;
-                }
-            }
+    let mut tokens: Vec<Tok> = Vec::new();
+    for token in tokenize(text) {
+        let Tok::Word(word) = token else {
+            tokens.push(token);
+            continue;
+        };
+        if let Some(rest) = word.strip_prefix("_xlop.") {
+            // An optional `LAMBDA` parameter is written `[x]` on the page.
+            tokens.extend([
+                Tok::Punct('['),
+                Tok::Word(rest.to_string()),
+                Tok::Punct(']'),
+            ]);
+            continue;
         }
+        let plain = FILE_PREFIXES
+            .iter()
+            .find_map(|prefix| word.strip_prefix(prefix))
+            .map_or(word.clone(), str::to_string);
+        tokens.push(Tok::Word(plain));
     }
     join(&spill_operators(tokens))
+}
+
+/// `[x]` in an argument list as the word `_xlop.x`.
+fn optional_parameters(tokens: Vec<Tok>) -> Vec<Tok> {
+    let mut out: Vec<Tok> = Vec::with_capacity(tokens.len());
+    let mut i = 0;
+    while i < tokens.len() {
+        let before_ok = matches!(out.last(), Some(Tok::Punct('(' | ',')))
+            || out
+                .iter()
+                .rev()
+                .find(|t| !matches!(t, Tok::Punct(c) if c.is_whitespace()))
+                .is_some_and(|t| matches!(t, Tok::Punct('(' | ',')));
+        if let (true, Tok::Punct('['), Some(Tok::Word(w)), Some(Tok::Punct(']'))) =
+            (before_ok, &tokens[i], tokens.get(i + 1), tokens.get(i + 2))
+        {
+            if !w.contains('.') {
+                out.push(Tok::Word(format!("_xlop.{w}")));
+                i += 3;
+                continue;
+            }
+        }
+        out.push(tokens[i].clone());
+        i += 1;
+    }
+    out
 }
 
 /// `A1#` as `_xlfn.ANCHORARRAY(A1)`.
@@ -245,7 +427,11 @@ fn declared_variables(tokens: &[Tok]) -> std::collections::HashSet<String> {
                         && call.depth == depth
                         && !word.chars().next().is_some_and(|c| c.is_ascii_digit())
                     {
-                        vars.insert(word.trim_start_matches("_xlpm.").to_ascii_uppercase());
+                        vars.insert(
+                            word.trim_start_matches("_xlpm.")
+                                .trim_start_matches("_xlop.")
+                                .to_ascii_uppercase(),
+                        );
                     }
                 }
                 arg_start = false;
@@ -288,6 +474,56 @@ mod tests {
             "A1&\"FILTER(\"&#N/A"
         );
         assert_eq!(to_file_formula("SUM(A1:A3)"), "SUM(A1:A3)");
+    }
+
+    #[test]
+    fn the_table_of_future_functions_is_sorted_and_every_name_round_trips() {
+        assert!(
+            FUTURE.windows(2).all(|w| w[0] < w[1]),
+            "sorted, no duplicates"
+        );
+        for name in FUTURE
+            .iter()
+            .filter(|n| !matches!(**n, "ANCHORARRAY" | "LAMBDA" | "LET"))
+        {
+            let page = format!("{name}(A1, 2)");
+            let file = to_file_formula(&page);
+            assert!(
+                file == format!("_xlfn.{name}(A1, 2)")
+                    || file == format!("_xlfn._xlws.{name}(A1, 2)"),
+                "{file}"
+            );
+            assert_eq!(from_file_formula(&file), page);
+        }
+        // a name that is no future function, a name inside text, and a legacy name stay as they are
+        for text in [
+            "SUM(A1)",
+            "VLOOKUP(A1, B:C, 2, 0)",
+            "\"IFS(\"&A1",
+            "STDEV(A1:A3)",
+            "FDIST(1,2,3)",
+        ] {
+            assert_eq!(to_file_formula(text), text);
+        }
+        assert_eq!(
+            to_file_formula("IFS(A1>1, \"a\", TRUE, \"b\")"),
+            "_xlfn.IFS(A1>1, \"a\", TRUE, \"b\")"
+        );
+        assert_eq!(
+            to_file_formula("STDEV.S(A1:A3)+IFNA(B1, 0)"),
+            "_xlfn.STDEV.S(A1:A3)+_xlfn.IFNA(B1, 0)"
+        );
+    }
+
+    #[test]
+    fn optional_lambda_parameters_have_their_own_spelling() {
+        let page = "LAMBDA(a, [b], IF(ISOMITTED(b), a, a*b))(1)";
+        let file = to_file_formula(page);
+        assert_eq!(
+            file,
+            "_xlfn.LAMBDA(_xlpm.a, _xlop.b, IF(_xlfn.ISOMITTED(_xlpm.b), _xlpm.a, _xlpm.a*_xlpm.b))(1)"
+        );
+        assert_eq!(from_file_formula(&file), page);
     }
 
     #[test]

@@ -72,3 +72,37 @@ fn a_conversion_between_formats_keeps_the_cells_the_array_filled() {
     let lines: Vec<&str> = csv.trim_start_matches('\u{feff}').lines().collect();
     assert_eq!(lines, ["b,,a,,3", "a,,b,,", "b,,c,,", "c,,,,"], "{csv}");
 }
+
+#[test]
+fn a_filled_cell_whose_text_starts_with_an_equals_sign_stays_text() {
+    let sheet = r#"{"name":"S","cells":[
+ {"ref":"A1","raw":"=VSTACK(\"a\", \"=x\")"},{"ref":"A2","raw":"=x"}],"spills":["A1:A2"]}"#;
+    for format in ["xlsx", "ods", "csv"] {
+        let payload = format!(
+            r#"{{"sourceFormat":"xlsx","targetFormat":"{format}","title":"t","sheets":[{sheet}]}}"#
+        );
+        let json = EasyOfficeIpcRouter::dispatch("convert_document_format", &payload).unwrap();
+        let bytes =
+            EasyOfficeIpcRouter::decode_base64(json_str_field(&json, "convertedBase64")).unwrap();
+        match format {
+            "csv" => {
+                let csv = String::from_utf8(bytes).unwrap();
+                assert_eq!(
+                    csv.trim_start_matches('\u{feff}')
+                        .lines()
+                        .collect::<Vec<_>>(),
+                    ["a,", "=x,"],
+                    "{csv}"
+                );
+            }
+            _ => {
+                let reopened = open(&bytes, &format!("t.{format}"));
+                assert!(
+                    reopened.contains(r#""spills":["A1:A2"]"#),
+                    "{format}: {reopened}"
+                );
+                assert!(!reopened.contains(r#"{"ref":"A2""#), "{format}: {reopened}");
+            }
+        }
+    }
+}

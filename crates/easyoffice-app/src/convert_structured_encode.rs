@@ -126,6 +126,23 @@ fn add_spilled_cells(sheet: &str, cells: &mut Vec<(u32, u32, String)>, spills: &
     }
 }
 
+/// `sheets` without the cells the arrays filled: they are results of the arrays' formulas.
+fn without_spilled_cells(sheets: &[OdsUnpacked], stylings: &[SheetStyling]) -> Vec<OdsUnpacked> {
+    sheets
+        .iter()
+        .enumerate()
+        .map(|(index, (name, cells))| {
+            let spills = stylings.get(index).map_or(&[][..], |st| &st.spills[..]);
+            let kept = cells
+                .iter()
+                .filter(|(row, col, _)| !spills.iter().any(|a| a.covers_after_anchor(*row, *col)))
+                .cloned()
+                .collect();
+            (name.clone(), kept)
+        })
+        .collect()
+}
+
 /// `sheets` with the cells the arrays filled added as values.
 fn with_spilled_cells(sheets: &[OdsUnpacked], spills: &[SpillArea]) -> Vec<OdsUnpacked> {
     sheets
@@ -502,58 +519,64 @@ pub(crate) fn encode_structured(
                 .then(|| compute_xlsx_formula_cache(&doc.to_universal_model()));
             UniversalFormatConverter::encode_rich(&doc, format, cache.as_ref())
         }
-        StructuredContent::Workbook(sheets, stylings) => match format {
-            DocumentFormat::Xlsx => {
-                let (caches, _, spills) = evaluate_workbook(sheets, stylings, false)?;
-                OoxmlCodec::pack_xlsx_multi_styled(
-                    &with_spilled_cells(sheets, &spills),
-                    &caches,
-                    stylings,
-                )
-            }
-            DocumentFormat::Ods => {
-                let (caches, _, spills) = evaluate_workbook(sheets, stylings, false)?;
-                OdfCodec::pack_ods_multi_styled_with_cache(
-                    &with_spilled_cells(sheets, &spills),
-                    &caches,
-                    stylings,
-                )
-            }
-            DocumentFormat::Pdf => {
-                let displays = evaluate_displays(sheets, stylings)?;
-                let named: Vec<OdsUnpacked> = sheets
-                    .iter()
-                    .map(|(name, _)| name.clone())
-                    .zip(displays)
-                    .collect();
-                easyoffice_formats::encode_sheet_pdf(title, &named, stylings)
-            }
-            DocumentFormat::Xls => encode_xls(sheets, stylings, title, warnings),
-            DocumentFormat::Csv | DocumentFormat::Tsv => {
-                encode_delimited(sheets, stylings, format, title, warnings)
-            }
-            _ => {
-                let (_, grids, _) = evaluate_workbook(sheets, stylings, true)?;
-                let mut blocks = Vec::with_capacity(sheets.len() * 2);
-                for ((name, _), grid) in sheets.iter().zip(grids) {
-                    blocks.push(RichBlock::Paragraph(RichParagraph {
-                        runs: vec![RichRun::plain(name.clone())],
-                        heading_level: 2,
-                        ..RichParagraph::default()
-                    }));
-                    if !grid.is_empty() {
-                        blocks.push(RichBlock::Table(grid.into()));
-                    }
+        StructuredContent::Workbook(page_sheets, stylings) => {
+            // The cells an array filled are its formula's results: the engine gives them (and they come
+            // back from `with_spilled_cells` and `add_spilled_cells` below), whatever text the page sent.
+            let engine_sheets = without_spilled_cells(page_sheets, stylings);
+            let sheets: &[OdsUnpacked] = &engine_sheets;
+            match format {
+                DocumentFormat::Xlsx => {
+                    let (caches, _, spills) = evaluate_workbook(sheets, stylings, false)?;
+                    OoxmlCodec::pack_xlsx_multi_styled(
+                        &with_spilled_cells(sheets, &spills),
+                        &caches,
+                        stylings,
+                    )
                 }
-                let doc = RichDocument {
-                    page_frame: Default::default(),
-                    title: title.to_string(),
-                    blocks,
-                    official_agency: None,
-                };
-                UniversalFormatConverter::encode_rich(&doc, format, None)
+                DocumentFormat::Ods => {
+                    let (caches, _, spills) = evaluate_workbook(sheets, stylings, false)?;
+                    OdfCodec::pack_ods_multi_styled_with_cache(
+                        &with_spilled_cells(sheets, &spills),
+                        &caches,
+                        stylings,
+                    )
+                }
+                DocumentFormat::Pdf => {
+                    let displays = evaluate_displays(sheets, stylings)?;
+                    let named: Vec<OdsUnpacked> = sheets
+                        .iter()
+                        .map(|(name, _)| name.clone())
+                        .zip(displays)
+                        .collect();
+                    easyoffice_formats::encode_sheet_pdf(title, &named, stylings)
+                }
+                DocumentFormat::Xls => encode_xls(sheets, stylings, title, warnings),
+                DocumentFormat::Csv | DocumentFormat::Tsv => {
+                    encode_delimited(sheets, stylings, format, title, warnings)
+                }
+                _ => {
+                    let (_, grids, _) = evaluate_workbook(sheets, stylings, true)?;
+                    let mut blocks = Vec::with_capacity(sheets.len() * 2);
+                    for ((name, _), grid) in sheets.iter().zip(grids) {
+                        blocks.push(RichBlock::Paragraph(RichParagraph {
+                            runs: vec![RichRun::plain(name.clone())],
+                            heading_level: 2,
+                            ..RichParagraph::default()
+                        }));
+                        if !grid.is_empty() {
+                            blocks.push(RichBlock::Table(grid.into()));
+                        }
+                    }
+                    let doc = RichDocument {
+                        page_frame: Default::default(),
+                        title: title.to_string(),
+                        blocks,
+                        official_agency: None,
+                    };
+                    UniversalFormatConverter::encode_rich(&doc, format, None)
+                }
             }
-        },
+        }
         StructuredContent::Slides(slides) if is_document_format(format) => {
             let doc = slides_to_document(slides, title);
             UniversalFormatConverter::encode_rich(&doc, format, None)

@@ -44,3 +44,15 @@ pub(crate) fn build_content_types(sheet_count: usize) -> String {
     ));
     content_types
 }
+
+use crate::XlsxCachedValue;
+
+/// What one cell holds when it is written: its stored text, the value its formula gave, and the area
+/// of the array it spills (PD-217).
+pub(crate) struct CellContent<'a> {
+    pub(crate) raw: &'a str,
+    pub(crate) cached: Option<&'a XlsxCachedValue>,
+    pub(crate) spill: Option<&'a crate::SpillRef>,
+    /// A cell an array filled: its text is a value, even when it starts with `=`.
+    pub(crate) filled: bool,
+}

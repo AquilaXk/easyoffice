@@ -186,30 +186,33 @@ fn build_shared_strings_xml(shared_strings: &[&str], total_str_count: usize) -> 
 }
 
 /// Appends the XML of one cell (`raw` is the stored text: formula, number, string or blank).
-/// What one cell holds when it is written: its stored text, the value its formula gave, and the area
-/// of the array it spills (PD-217).
-struct CellContent<'a> {
-    raw: &'a str,
-    cached: Option<&'a XlsxCachedValue>,
-    spill: Option<&'a crate::SpillRef>,
-}
-
 fn push_cell_xml(
     sheet_xml: &mut String,
     col_ref: &str,
     row_num: u32,
     xf: usize,
-    content: CellContent<'_>,
+    content: crate::sheet_styling::xlsx_parts::CellContent<'_>,
     sst_map: &SharedStringMap<'_>,
 ) {
     use std::fmt::Write;
-    let CellContent { raw, cached, spill } = content;
+    let crate::sheet_styling::xlsx_parts::CellContent {
+        raw,
+        cached,
+        spill,
+        filled,
+    } = content;
     let _ = write!(sheet_xml, "<c r=\"{col_ref}{row_num}\"");
     if xf > 0 {
         let _ = write!(sheet_xml, " s=\"{xf}\"");
     }
     if raw.is_empty() {
         sheet_xml.push_str("/>");
+    } else if filled && raw.starts_with('=') {
+        let _ = write!(
+            sheet_xml,
+            " t=\"inlineStr\"><is><t xml:space=\"preserve\">{}</t></is></c>",
+            XmlSanitizer::escape(raw)
+        );
     } else if let Some(formula) = raw.strip_prefix('=') {
         let body = XmlSanitizer::escape(&crate::to_file_formula(formula));
         // An array that spills is an array formula over its area, flagged dynamic (`cm`).
@@ -327,6 +330,7 @@ fn build_sheet_xml(
     sheet_xml.push_str("<sheetData>");
     let mut col_buf = [0u8; 4];
     let mut ids = IdMemo::new();
+    let spill_areas: &[crate::SpillRef] = styling.map_or(&[], |st| &st.spills);
     let spill_anchors: std::collections::HashMap<(u32, u32), crate::SpillRef> = styling
         .map(|st| st.spills.iter().map(|r| ((r.row, r.col), *r)).collect())
         .unwrap_or_default();
@@ -369,10 +373,14 @@ fn build_sheet_xml(
                 col_ref,
                 row_num,
                 xf,
-                CellContent {
+                crate::sheet_styling::xlsx_parts::CellContent {
                     raw,
                     cached,
                     spill: spill_anchors.get(&(row, col)),
+                    filled: raw.starts_with('=')
+                        && spill_areas
+                            .iter()
+                            .any(|area| area.covers_after_anchor(row, col)),
                 },
                 sst_map,
             );

@@ -581,7 +581,19 @@ impl OdfCodec {
                     ),
                     _ => style_attr,
                 };
-                Self::push_ods_cell(content, (row, col), raw, cached, &style_attr);
+                let filled = raw.starts_with('=')
+                    && styling.is_some_and(|st| {
+                        st.spills.iter().any(|a| a.covers_after_anchor(row, col))
+                    });
+                if filled {
+                    // A cell an array filled holds a value, even one that starts with `=`.
+                    content.push_str(&format!(
+                        "<table:table-cell row=\"{row}\" col=\"{col}\"{style_attr} office:value-type=\"string\"><text:p>{}</text:p></table:table-cell>",
+                        XmlSanitizer::escape(raw)
+                    ));
+                } else {
+                    Self::push_ods_cell(content, (row, col), raw, cached, &style_attr);
+                }
                 expected_col = col.saturating_add(1);
             }
             content.push_str("</table:table-row>");

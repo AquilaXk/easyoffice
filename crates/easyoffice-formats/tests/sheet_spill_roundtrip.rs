@@ -140,3 +140,42 @@ fn ods_writes_a_matrix_formula_and_reads_it_back_as_a_spill() {
     );
     let _ = DocumentFormat::Ods;
 }
+
+#[test]
+fn functions_that_came_after_the_first_file_format_are_written_with_the_future_prefix() {
+    let formulas = [
+        "=IFS(A1>1, \"a\", TRUE, \"b\")",
+        "=STDEV.S(A1:A3)+IFNA(B1, 0)",
+        "=TEXTJOIN(\",\", TRUE, A1:A3)&CONCAT(A1, B1)",
+        "=SWITCH(A1, 1, \"x\", \"y\")+MAXIFS(A1:A3, B1:B3, 1)+XOR(TRUE, FALSE)",
+        "=NORM.S.DIST(1, TRUE)+PERCENTILE.INC(A1:A3, 0.5)+DAYS(B1, A1)",
+        "=STDEV(A1:A3)+SUM(A1:A3)+FDIST(1, 2, 3)",
+    ];
+    let cells: Vec<(u32, u32, String)> = formulas
+        .iter()
+        .enumerate()
+        .map(|(i, f)| (i as u32, 3, (*f).to_string()))
+        .collect();
+    let sheets = vec![("Sheet1".to_string(), cells.clone())];
+    let bytes =
+        OoxmlCodec::pack_xlsx_multi_styled(&sheets, &[], &[SheetStyling::default()]).unwrap();
+    let xml = part(&bytes, "xl/worksheets/sheet1.xml").unwrap();
+    for needle in [
+        "_xlfn.IFS(",
+        "_xlfn.STDEV.S(",
+        "_xlfn.IFNA(",
+        "_xlfn.TEXTJOIN(",
+        "_xlfn.CONCAT(",
+        "_xlfn.SWITCH(",
+        "_xlfn.MAXIFS(",
+        "_xlfn.XOR(",
+        "_xlfn.NORM.S.DIST(",
+        "_xlfn.PERCENTILE.INC(",
+        "_xlfn.DAYS(",
+        ">STDEV(A1:A3)+SUM(A1:A3)+FDIST(1, 2, 3)<",
+    ] {
+        assert!(xml.contains(needle), "{needle} in {xml}");
+    }
+    let (read, _) = OoxmlCodec::unpack_xlsx_with_styling(&bytes).unwrap();
+    assert_eq!(read[0].1, cells);
+}
