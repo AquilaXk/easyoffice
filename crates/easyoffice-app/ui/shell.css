@@ -205,6 +205,7 @@
 .tool-dialog .dialog-list:empty::before { content: "규칙 없음"; display: block; padding: 4px 8px; color: var(--color-text-muted); }
 .tool-dialog .dialog-list li { padding: 3px 8px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tool-dialog .dialog-list li[aria-selected="true"] { background: var(--color-accent-bg); font-weight: 700; }
+#sheet-name-edit-dialog .dialog-label { width: 64px; min-width: 64px; flex-shrink: 0; }
 /* The name list of the 이름 관리 dialog: the list cell of the rules dialog, three columns (PD-214). */
 .tool-dialog .sheet-names-head, .tool-dialog .sheet-names-list li { display: grid; grid-template-columns: 9em 7em minmax(0, 1fr); gap: 8px; }
 .tool-dialog .sheet-names-head { padding: 3px 8px; border: 1px solid var(--color-border); border-bottom: 0; background: var(--color-surface); color: var(--color-text-muted); font-size: var(--font-size-sm); }
