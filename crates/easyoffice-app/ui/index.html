@@ -364,67 +364,44 @@
       </div>
 
       <div id="icon-toolbar" class="eo-icon-toolbar" role="toolbar" aria-label="표준 도구 상자">
-        <div class="tb-group" data-kinds="SHEET">
+        <div class="tb-group">
           <button type="button" class="tb-btn" data-studio-cmd="clip-cut" title="오려두기 (Ctrl+X)" aria-label="오려두기"><span class="tb-sprite icon-cut"></span><span class="tb-label">오려<br/>두기</span></button>
           <button type="button" class="tb-btn" data-studio-cmd="clip-copy" title="복사하기 (Ctrl+C)" aria-label="복사하기"><span class="tb-sprite icon-copy"></span><span class="tb-label">복사<br/>하기</span></button>
           <button type="button" class="tb-btn tb-paste" data-studio-cmd="clip-paste" title="붙이기 (Ctrl+V)" aria-label="붙이기"><span class="tb-sprite icon-paste"></span><span class="tb-label">붙이기</span></button>
         </div>
-        <span class="tb-sep" data-kinds="SHEET" aria-hidden="true"></span>
-        <div class="tb-group" data-kinds="SHEET">
-          <button type="button" class="tb-btn" data-studio-cmd="home-style" title="스타일 적용" aria-label="스타일 적용"><span class="tb-sprite icon-char-shape"></span><span class="tb-label">스타일</span></button>
+        <span class="tb-sep" aria-hidden="true"></span>
+        <div class="tb-group sb-viewmark-group">
+          <button id="btn-toggle-ctrl-marks" class="tb-btn" type="button" title="조판 부호 표시" aria-label="조판 부호 표시"><span class="tb-sprite icon-ctrl-mark"></span><span class="tb-label">조판<br/>부호</span></button>
+          <button id="btn-toggle-para-marks" class="tb-btn active" type="button" aria-pressed="true" title="문단 부호 표시" aria-label="문단 부호 표시"><span class="tb-sprite icon-para-mark"></span><span class="tb-label">문단<br/>부호</span></button>
+          <button id="btn-toggle-doc-grid" class="tb-btn" type="button" title="격자 보기" aria-label="격자 보기"><span class="tb-sprite icon-grid"></span><span class="tb-label">격자<br/>보기</span></button>
         </div>
-        <span class="tb-sep" data-kinds="SHEET" aria-hidden="true"></span>
-        <div class="tb-group" data-kinds="SHEET">
+        <span class="tb-sep" aria-hidden="true"></span>
+        <div class="tb-group">
+          <button type="button" class="tb-btn" data-studio-cmd="home-style" title="스타일 적용" aria-label="스타일 적용"><span class="tb-sprite icon-char-shape"></span><span class="tb-label">스타일</span></button>
+          <button type="button" class="tb-btn" data-studio-cmd="para-shape" title="양쪽 정렬" aria-label="양쪽 정렬"><span class="tb-sprite icon-align-justify"></span><span class="tb-label">양쪽<br/>정렬</span></button>
+        </div>
+        <span class="tb-sep" aria-hidden="true"></span>
+        <div class="tb-group">
+          <button type="button" class="tb-btn" data-studio-cmd="para-numbering" title="문단 번호" aria-label="문단 번호"><span class="tb-sprite icon-numbering"></span><span class="tb-label">문단<br/>번호</span></button>
+          <button type="button" class="tb-btn" data-studio-cmd="para-bullet" title="글머리표" aria-label="글머리표"><span class="tb-sprite icon-bullet"></span><span class="tb-label">글머리<br/>표</span></button>
+          <button type="button" class="tb-btn" data-studio-cmd="indent-in" title="한 수준 증가" aria-label="한 수준 증가"><span class="tb-sprite icon-indent"></span><span class="tb-label">수준▲</span></button>
+          <button type="button" class="tb-btn" data-studio-cmd="indent-out" title="한 수준 감소" aria-label="한 수준 감소"><span class="tb-sprite icon-outdent"></span><span class="tb-label">수준▼</span></button>
+        </div>
+        <span class="tb-sep" aria-hidden="true"></span>
+        <div class="tb-group">
           <button type="button" class="tb-btn" data-studio-cmd="insert-table" title="표 만들기" aria-label="표 만들기"><span class="tb-sprite icon-table"></span><span class="tb-label">표</span></button>
           <button type="button" class="tb-btn" data-studio-cmd="insert-shape" title="도형 삽입" aria-label="도형 삽입"><span class="tb-sprite icon-shape"></span><span class="tb-label">도형</span></button>
         </div>
-        <span class="tb-sep" data-kinds="SHEET" aria-hidden="true"></span>
-        <div class="tb-group" data-kinds="SHEET">
+        <span class="tb-sep" aria-hidden="true"></span>
+        <div class="tb-group">
           <button type="button" class="tb-btn" data-studio-cmd="mod-symbol" title="문자표" aria-label="문자표"><span class="tb-sprite icon-symbols"></span><span class="tb-label">문자표</span></button>
           <button type="button" class="tb-btn" data-studio-cmd="insert-link" title="하이퍼링크" aria-label="하이퍼링크"><span class="tb-sprite icon-hyperlink"></span><span class="tb-label">하이퍼<br/>링크</span></button>
         </div>
-        <span class="tb-sep" data-kinds="SHEET" aria-hidden="true"></span>
-        <div class="tb-group" data-kinds="SHEET">
+        <span class="tb-sep" aria-hidden="true"></span>
+        <div class="tb-group">
+          <button type="button" class="tb-btn" data-studio-cmd="mod-header" title="머리말/꼬리말" aria-label="머리말/꼬리말"><span class="tb-sprite icon-header"></span><span class="tb-label">머리말/<br/>꼬리말</span></button>
+          <button type="button" class="tb-btn" data-studio-cmd="mod-footnote" title="각주" aria-label="각주"><span class="tb-sprite icon-footnote"></span><span class="tb-label">각주</span></button>
           <button type="button" class="tb-btn" data-studio-cmd="palette" title="명령 검색 (Ctrl+K)" aria-label="명령 검색"><span class="tb-sprite icon-find"></span><span class="tb-label">명령<br/>검색</span></button>
-        </div>
-        <div class="tb-group">
-          <button type="button" class="tb-btn" data-studio-cmd="clip-cut" data-icon="cut" title="오려두기 (Ctrl+X)" aria-label="오려두기"></button>
-          <button type="button" class="tb-btn" data-studio-cmd="clip-copy" data-icon="copy" title="복사하기 (Ctrl+C)" aria-label="복사하기"></button>
-          <button type="button" class="tb-btn" data-studio-cmd="clip-paste" data-icon="paste" title="붙이기 (Ctrl+V)" aria-label="붙이기"></button>
-        </div>
-        <span class="tb-sep" aria-hidden="true"></span>
-        <div class="tb-group sb-viewmark-group">
-          <button id="btn-toggle-ctrl-marks" class="tb-btn" type="button" data-icon="pilcrow" title="조판 부호 표시" aria-label="조판 부호 표시"></button>
-          <button id="btn-toggle-para-marks" class="tb-btn active" type="button" data-icon="return-mark" aria-pressed="true" title="문단 부호 표시" aria-label="문단 부호 표시"></button>
-          <button id="btn-toggle-doc-grid" class="tb-btn" type="button" data-icon="grid" title="격자 보기" aria-label="격자 보기"></button>
-        </div>
-        <span class="tb-sep" aria-hidden="true"></span>
-        <div class="tb-group">
-          <button type="button" class="tb-btn" data-studio-cmd="home-style" data-icon="char-shape" title="스타일 적용" aria-label="스타일 적용"></button>
-          <button type="button" class="tb-btn" data-studio-cmd="para-shape" data-icon="align-justify" title="양쪽 정렬" aria-label="양쪽 정렬"></button>
-        </div>
-        <span class="tb-sep" aria-hidden="true"></span>
-        <div class="tb-group">
-          <button type="button" class="tb-btn" data-studio-cmd="para-numbering" data-icon="list-numbered" title="문단 번호" aria-label="문단 번호"></button>
-          <button type="button" class="tb-btn" data-studio-cmd="para-bullet" data-icon="list-bullet" title="글머리표" aria-label="글머리표"></button>
-          <button type="button" class="tb-btn" data-studio-cmd="indent-out" data-icon="outdent" title="한 수준 감소" aria-label="한 수준 감소"></button>
-          <button type="button" class="tb-btn" data-studio-cmd="indent-in" data-icon="indent" title="한 수준 증가" aria-label="한 수준 증가"></button>
-        </div>
-        <span class="tb-sep" aria-hidden="true"></span>
-        <div class="tb-group">
-          <button type="button" class="tb-btn" data-studio-cmd="insert-table" data-icon="table" title="표 만들기" aria-label="표 만들기"></button>
-          <button type="button" class="tb-btn" data-studio-cmd="insert-shape" data-icon="shapes" title="도형 삽입" aria-label="도형 삽입"></button>
-        </div>
-        <span class="tb-sep" aria-hidden="true"></span>
-        <div class="tb-group">
-          <button type="button" class="tb-btn" data-studio-cmd="mod-symbol" data-icon="symbols" title="문자표" aria-label="문자표"></button>
-          <button type="button" class="tb-btn" data-studio-cmd="insert-link" data-icon="link" title="하이퍼링크" aria-label="하이퍼링크"></button>
-        </div>
-        <span class="tb-sep" aria-hidden="true"></span>
-        <div class="tb-group">
-          <button type="button" class="tb-btn" data-studio-cmd="mod-header" data-icon="header" title="머리말/꼬리말" aria-label="머리말/꼬리말"></button>
-          <button type="button" class="tb-btn" data-studio-cmd="mod-footnote" data-icon="footnote" title="각주" aria-label="각주"></button>
-          <button type="button" class="tb-btn" data-studio-cmd="palette" data-icon="find" title="명령 검색 (Ctrl+K)" aria-label="명령 검색"></button>
         </div>
         <span class="tb-sep" data-kinds="SHEET" aria-hidden="true"></span>
         <div class="tb-group" data-kinds="SHEET">

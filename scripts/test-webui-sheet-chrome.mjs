@@ -52,19 +52,29 @@ test("sheet, formula bar and tab rules use design tokens only (no literal colour
   assert.ok(selection.includes("var(--table-selection-stroke)"), "selection uses the table selection stroke token");
 });
 
-test("the sheet toolbar is the reference toolbar format: the icon above a label, on the reference sprite", async () => {
+// The toolbars of the document, sheet, slide and PDF windows are one format: the reference's tall button with the icon above its label.
+const TOOLBAR_BUTTONS = "#icon-toolbar .tb-btn";
+const CHARACTER_ICONS = ["icon-ctrl-mark", "icon-para-mark"];
+
+test("the toolbars are the reference toolbar format: the icon above a label, on the reference sprite", async () => {
   const { document } = await createWorkspaceHarness({ search: "?module=SHEET&win=w-sheet-toolbar" });
-  const buttons = [...document.querySelectorAll('#icon-toolbar [data-kinds="SHEET"] .tb-btn')];
-  assert.equal(buttons.length, 21);
+  const buttons = [...document.querySelectorAll(TOOLBAR_BUTTONS)];
+  assert.equal(buttons.length, 19 + 12, "document groups, sheet groups");
   const css = read("toolbar.css");
   for (const button of buttons) {
-    const sprite = button.querySelector(".tb-sprite");
-    assert.ok(sprite && button.querySelector(".tb-label")?.textContent.trim(), button.getAttribute("title"));
-    assert.ok(button.getAttribute("aria-label"), "the name stays on the button");
-    const icon = sprite.className.split(" ").find((name) => name.startsWith("icon-"));
-    assert.ok(css.includes(`.${icon} { background-position:`), `${icon} has its cell of the sprite`);
+    const name = button.getAttribute("title");
+    assert.ok(button.querySelector(".tb-label")?.textContent.trim(), `${name} has its label`);
+    assert.ok(button.getAttribute("aria-label"), `${name} keeps its name on the button`);
+    assert.equal(button.querySelector("svg"), null, `${name} draws no icon of its own`);
+    assert.equal(button.hasAttribute("data-icon"), false);
+    if (button.querySelector(".tb-icon-text")) continue;
+    const icon = button.querySelector(".tb-sprite")?.className.split(" ").find((cls) => cls.startsWith("icon-"));
+    assert.ok(icon, `${name} shows an icon`);
+    assert.ok(CHARACTER_ICONS.includes(icon) || css.includes(`.${icon} { background-position:`), `${icon} has its cell of the sprite`);
   }
-  const rule = rulesFor(css, ['.app-shell[data-module="SHEET"] #icon-toolbar .tb-btn']).map((r) => r.body).join(" ");
+  const shown = buttons.filter((button) => !button.hidden && !button.closest("[hidden]") && button.closest("#icon-toolbar"));
+  assert.equal(shown.length, 21, "the sheet window shows the sheet commands only");
+  const rule = rulesFor(css, ["#icon-toolbar .tb-btn"]).map((r) => r.body).join(" ");
   assert.ok(rule.includes("flex-direction: column") && rule.includes("min-width: 44px") && rule.includes("padding: 2px 4px"));
   assert.match(css, /\.tb-sprite \{[^}]*width: 18px;[^}]*height: 18px;[^}]*var\(--ui-icon-sprite-url\)/);
   assert.ok(read("tokens.css").includes("--ui-icon-sprite-url: url(/hwp-studio/images/icon_small_ko_dark.svg)"));

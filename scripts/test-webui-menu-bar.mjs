@@ -260,8 +260,7 @@ test("menu and toolbar labels name what their command does", async () => {
   const { document } = await openModule("DOC");
   const labelsOf = (cmd) =>
     document.querySelectorAll(`.md-item[data-studio-menu-cmd="${cmd}"]`).filter(shown).map((el) => el.querySelector(".md-label").textContent.trim());
-  // The sheet window has its own copies in the reference toolbar format (`data-kinds="SHEET"`); this test reads the document window.
-  const buttonsOf = (cmd) => document.querySelectorAll(`#icon-toolbar [data-studio-cmd="${cmd}"]`).filter((el) => !el.closest("[data-kinds]"));
+  const buttonsOf = (cmd) => document.querySelectorAll(`#icon-toolbar [data-studio-cmd="${cmd}"]`);
   assert.deepEqual(labelsOf("home-style"), ["스타일 적용"]);
   assert.deepEqual(buttonsOf("home-style").map((el) => [el.getAttribute("title"), el.getAttribute("aria-label")]), [["스타일 적용", "스타일 적용"]]);
   assert.deepEqual(labelsOf("layout-paper"), ["편집 용지", "편집 용지"]);

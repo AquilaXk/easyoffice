@@ -3,7 +3,7 @@
  * Adapted from rhwp-studio `src/styles/base.css` (MIT, Copyright (c) 2025-2026 Edward Kim; see
  * THIRD_PARTY_NOTICES.md). The values are unchanged; only the icon-sprite filter token is left out
  * because EasyOffice draws its icons with `ui/icons.js`. The sprite tokens point at the editor bundle's
- * own sprite files (`/hwp-studio/images/`), which the sheet window's toolbar draws its icons from. Light is the default, dark applies under
+ * own sprite files (`/hwp-studio/images/`), which the toolbars draw their icons from. Light is the default, dark applies under
  * `:root[data-theme-effective="dark"]` (set by `ui/theme.js`). Every colour in `styles.css` and
  * `shell.css` comes from these tokens; fixed document colours live in `content.css`. */
 /* ─── 디자인 토큰 ───────────────────────────────────── */

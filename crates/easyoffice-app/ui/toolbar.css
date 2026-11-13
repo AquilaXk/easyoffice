@@ -5,8 +5,8 @@
  * and separator values of `#icon-toolbar`, `.tb-group`, `.tb-sep`, `.tb-btn`, `.tb-label`,
  * `#style-bar` and `#status-bar`, keyed to EasyOffice's markup (`#icon-toolbar` also carries
  * `.eo-icon-toolbar`, `#doc-style-bar` plays rhwp's `#style-bar`, `#status-bar` also carries
- * `.statusbar`). Sizes stay with styles.css: EasyOffice's buttons are icon-only (no labels), so the
- * bars keep the compact heights that the reference app's "labels hidden" mode uses. */
+ * `.statusbar`). The icon toolbar and the slide and PDF button rows take the reference's tall
+ * icon-above-label buttons (below); the style bar and status bar keep the compact heights of styles.css. */
 
 #icon-toolbar {
   background: linear-gradient(to bottom, var(--ui-toolbar-bg-start), var(--ui-toolbar-bg-end));
@@ -60,12 +60,14 @@
   white-space: nowrap;
 }
 
-/* Sheet window toolbar in the reference toolbar format (`toolbar.css` #icon-toolbar, .tb-group, .tb-sep,
-   .tb-btn, .tb-sprite, .tb-label, .tb-paste): a tall button with the icon above its label, 44px wide at
-   least, on the reference's icon sprite (the editor bundle's `icon_small_ko.svg`, 40px cells, drawn at
-   18px). The buttons of the other windows keep the compact icon-only form (they are not changed here),
-   so the sheet window shows its own copies, which carry `data-kinds="SHEET"`. */
-.app-shell[data-module="SHEET"] #icon-toolbar {
+/* Toolbars of the document, sheet, slide and PDF windows in the reference toolbar format (`toolbar.css`
+   #icon-toolbar, .tb-group, .tb-sep, .tb-btn, .tb-sprite, .tb-label, .tb-icon-text, .tb-paste): a tall
+   button with the icon above its label, 44px wide at least, on the reference's icon sprite (the editor
+   bundle's `icon_small_ko.svg`, 40px cells, drawn at 18px). The shared #icon-toolbar carries the document
+   groups; the sheet window hides the groups it does not use and adds its own (`data-kinds="SHEET"`).
+   The slide and PDF windows keep their combo boxes in a second row and take the buttons in the same
+   format. */
+#icon-toolbar {
   align-items: stretch;
   height: 56px;
   min-height: 56px;
@@ -74,22 +76,17 @@
   overflow-y: hidden;
 }
 
-.app-shell[data-module="SHEET"] #icon-toolbar .tb-group {
-  display: flex;
+#icon-toolbar .tb-group {
   align-items: stretch;
   gap: 0;
 }
 
-.app-shell[data-module="SHEET"] #icon-toolbar > :not([data-kinds]) {
-  display: none; /* after the group rule above: same specificity */
-}
-
-.app-shell[data-module="SHEET"] #icon-toolbar .tb-sep {
+#icon-toolbar .tb-sep {
   width: 1px;
   height: auto;
 }
 
-.app-shell[data-module="SHEET"] #icon-toolbar .tb-btn {
+#icon-toolbar .tb-btn {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -101,7 +98,13 @@
   font-size: var(--font-size-base);
 }
 
-.app-shell[data-module="SHEET"] #icon-toolbar .tb-paste {
+#icon-toolbar .tb-btn[hidden],
+#icon-toolbar .tb-group[hidden],
+#icon-toolbar .tb-sep[hidden] {
+  display: none;
+}
+
+#icon-toolbar .tb-paste {
   min-width: 50px;
 }
 
@@ -114,17 +117,57 @@
   flex-shrink: 0;
 }
 
-/* Sprite cells: calc(-40px * column) calc(-40px * row). The first nine are the reference toolbar's own. */
+/* The sprite has no marks icons: the reference draws them from characters (`.icon-ctrl-mark`, `.icon-para-mark`). */
+.icon-ctrl-mark,
+.icon-para-mark {
+  background-image: none;
+  position: relative;
+}
+
+.icon-ctrl-mark::before,
+.icon-para-mark::before {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 18px;
+  height: 18px;
+  font-size: var(--font-size-lg);
+  line-height: 18px;
+  text-align: center;
+  color: var(--accent-light);
+}
+
+.icon-ctrl-mark::before {
+  content: "\00B6";
+  font-family: serif;
+}
+
+.icon-para-mark::before {
+  content: "\21B5";
+  font-family: sans-serif;
+}
+
+/* Sprite cells: calc(-40px * column) calc(-40px * row). The cut, copy, paste, grid, char-shape, table,
+   shape, symbols, hyperlink, header, footnote and find cells are the reference toolbar's own; the others
+   are the cells of the same sprite that mean the same as the command (numbers, text alignment, vertical
+   alignment, wrapping, cell borders, lists, indent, slides, stamp). */
 .icon-cut { background-position: calc(-40px * 2) calc(-40px * 1); }
 .icon-copy { background-position: calc(-40px * 3) calc(-40px * 1); }
 .icon-paste { background-position: calc(-40px * 4) calc(-40px * 1); }
+.icon-grid { background-position: calc(-40px * 13) calc(-40px * 2); }
 .icon-char-shape { background-position: calc(-40px * 12) calc(-40px * 8); }
 .icon-table { background-position: calc(-40px * 2) calc(-40px * 3); }
 .icon-shape { background-position: calc(-40px * 0) calc(-40px * 3); }
 .icon-symbols { background-position: calc(-40px * 4) calc(-40px * 3); }
 .icon-hyperlink { background-position: calc(-40px * 5) calc(-40px * 3); }
+.icon-header { background-position: calc(-40px * 1) calc(-40px * 4); }
+.icon-footnote { background-position: calc(-40px * 4) calc(-40px * 4); }
 .icon-find { background-position: calc(-40px * 15) calc(-40px * 1); }
-/* Cells of the same sprite for the sheet commands: numbers (currency, percent, decimals), text alignment, vertical alignment, wrapping, cell borders. */
+.icon-align-justify { background-position: calc(-40px * 3) calc(-40px * 9); }
+.icon-numbering { background-position: calc(-40px * 8) calc(-40px * 8); }
+.icon-bullet { background-position: calc(-40px * 9) calc(-40px * 8); }
+.icon-outdent { background-position: calc(-40px * 4) calc(-40px * 9); }
+.icon-indent { background-position: calc(-40px * 5) calc(-40px * 9); }
 .icon-currency { background-position: calc(-40px * 0) calc(-40px * 12); }
 .icon-decimal-increase { background-position: calc(-40px * 1) calc(-40px * 12); }
 .icon-decimal-decrease { background-position: calc(-40px * 2) calc(-40px * 12); }
@@ -137,7 +180,6 @@
 .icon-valign-bottom { background-position: calc(-40px * 2) calc(-40px * 15); }
 .icon-wrap { background-position: calc(-40px * 0) calc(-40px * 7); }
 .icon-border-all { background-position: calc(-40px * 4) calc(-40px * 16); }
-
 
 #doc-style-bar,
 #sheet-formula-bar,

@@ -61,11 +61,12 @@ function accessibleName(el, document) {
   return (el.getAttribute("title") || "").trim();
 }
 
-function textWithoutIcons(el) {
+// `skipClass` leaves out the text of one more kind of element (the toolbar button labels are words, not icons).
+function textWithoutIcons(el, skipClass) {
   let out = "";
   for (const node of el.childNodes) {
     if (node.nodeType === 3) out += node.textContent;
-    else if (!["svg", "path"].includes(String(node.tagName).toLowerCase()) && node.getAttribute?.("aria-hidden") !== "true") out += textWithoutIcons(node);
+    else if (!["svg", "path"].includes(String(node.tagName).toLowerCase()) && node.getAttribute?.("aria-hidden") !== "true" && !(skipClass && node.classList?.contains(skipClass))) out += textWithoutIcons(node, skipClass);
   }
   return out;
 }
@@ -112,7 +113,7 @@ test("icons are inserted as SVG elements and replace glyph text", async () => {
   }
   const glyphButtons = document
     .querySelectorAll("#icon-toolbar button, .statusbar-zoom-btn, #btn-theme-toggle, #btn-command-palette, .sb-step-btn, #doc-style-bar button")
-    .filter((b) => GLYPH_ICON.test(textWithoutIcons(b)));
+    .filter((b) => GLYPH_ICON.test(textWithoutIcons(b, "tb-label")));
   assert.deepEqual(glyphButtons.map((b) => b.id || b.title), [], "no emoji or symbol characters stand in for icons");
 });
 
