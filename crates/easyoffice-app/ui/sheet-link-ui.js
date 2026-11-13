@@ -20,6 +20,7 @@
     missing: "연결 대상 없음",
     failed: "열지 못함",
     nothing: "넣을 칸 없음",
+    filled: "채운 칸에는 넣을 수 없음",
   };
 
   function createSheetLinkUi(deps) {
@@ -168,6 +169,11 @@
     // The dialog for the active cell: empty for a new link, filled for the cell's own.
     function open() {
       const { sheet, ref, entry } = loadCell();
+      // A cell an array filled holds a result, not input (PD-217): a link would turn it into input and block the array.
+      if (host.__EASYOFFICE_SHEET_SPILL__?.isChild(entry)) {
+        say(MESSAGES.filled);
+        return false;
+      }
       const link = links.of(entry);
       const internal = link ? links.isInternal(link.target) : false;
       const place = internal ? splitLocation(links.locationOf(link.target), sheet) : { sheet, ref: "" };

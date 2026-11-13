@@ -438,3 +438,54 @@ test("a hostile file's links: unsafe addresses never show, a link on an empty ce
   assert.equal(kept, 65530, "at most the bound of one sheet");
   assert.equal(map.A1.link.target, "https://example.com/0", "the unsafe addresses of that cell were turned away first");
 });
+
+test("a link to a defined name selects what the name refers to, on its sheet; a name that is gone says so", async () => {
+  const t = await open();
+  t.host.__EASYOFFICE_SHEET_NAMES__.replaceAll([{ name: "Block", refersTo: "Sheet2!$B$2:$C$2" }], true);
+  await t.select("C4");
+  await t.openDialog();
+  t.byId("sheet-link-tab-doc").click();
+  t.fill("sheet-link-ref", "block");
+  await t.apply();
+  assert.equal(t.cell("C4").getAttribute("title"), "Block", "the name as the workbook spells it");
+  const td = t.cell("C4");
+  const click = async () => {
+    td.dispatchEvent({ type: "mousedown", target: td, button: 0, timeStamp: 1000, clientX: 1, clientY: 1, bubbles: true });
+    td.dispatchEvent({ type: "mouseup", target: td, button: 0, bubbles: true });
+    td.dispatchEvent({ type: "click", target: td, button: 0, timeStamp: 1010, clientX: 1, clientY: 1, bubbles: true });
+    await flushAsyncTurns(30);
+  };
+  await click();
+  assert.equal(t.document.querySelector(".sheet-tab-btn.active").dataset.sheetTab, "Sheet2");
+  assert.equal(t.byId("active-cell-ref").textContent, "Block");
+  t.userClick(t.document.querySelector('.sheet-tab-btn[data-sheet-tab="Sheet1"]'));
+  await flushAsyncTurns(20);
+  await t.select("C4");
+  t.host.__EASYOFFICE_SHEET_NAMES__.replaceAll([], true);
+  await click();
+  assert.equal(t.say(), "연결 대상 없음");
+});
+
+test("a cell an array filled takes no link", async () => {
+  const { host, document } = await open();
+  const saysOf = [];
+  const store = { S: { A1: { value: "1", formula: "", spillOf: "B1" } } };
+  const ui = host.__EASYOFFICE_CREATE_SHEET_LINK_UI__({
+    document,
+    gridUtils: host.__EASYOFFICE_SHEET_GRID_UTILS__,
+    sheetDataStore: store,
+    getActiveSheetName: () => "S",
+    getSelection: () => ({ ar: 1, ac: 1 }),
+    getRange: () => ({ r1: 1, c1: 1, r2: 1, c2: 1 }),
+    selectRange: () => {},
+    switchSheet: async () => {},
+    commitIfEditing: () => {},
+    focusAnchor: () => {},
+    snapshotDomSheetCells: () => store.S,
+    applyCellEdits: async (edits) => saysOf.push(edits),
+  });
+  assert.equal(ui.open(), false);
+  assert.equal(document.getElementById("status-command-feedback").textContent, "채운 칸에는 넣을 수 없음");
+  assert.equal(document.getElementById("sheet-link-dialog").open, false);
+  assert.deepEqual(saysOf, []);
+});

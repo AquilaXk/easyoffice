@@ -62,6 +62,21 @@
     return "#" + quoteSheet(sheet) + "!" + (one ? corner(rg.r1, rg.c1) : corner(rg.r1, rg.c1) + ":" + corner(rg.r2, rg.c2));
   }
 
+  // A cell with a hyperlink shows as a link and says where it goes: the screen tip, else the address.
+  function paint(td, link) {
+    td._link = link || null;
+    if (!link) {
+      if (td.dataset.link) {
+        delete td.dataset.link;
+        td.removeAttribute("title");
+      }
+      return;
+    }
+    const internal = isInternal(link.target);
+    td.dataset.link = internal ? "internal" : "external";
+    td.setAttribute("title", link.tip || (internal ? locationOf(link.target) : link.target));
+  }
+
   // The links of a sheet map for a save: `[{ ref, target, tip? }]`, the cells that show something only.
   function payloadOf(map) {
     const out = [];
@@ -136,6 +151,7 @@
     isInternal,
     locationOf,
     internalTarget,
+    paint,
     payloadOf,
     attach,
     internalTargets,
