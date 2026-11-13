@@ -6,6 +6,7 @@ use std::borrow::Cow;
 
 use super::{Header, SectionWalker};
 use crate::rich_document::{frame_paragraph, MAX_PAGE_FRAME_PARAGRAPHS};
+use crate::rich_page_frame::margins_from_hwpx;
 use crate::xml_stream::{attr, XmlEvent};
 use crate::{RichBlock, RichField, RichRun};
 
@@ -23,8 +24,36 @@ pub(super) struct FrameLeftOut {
 }
 
 impl SectionWalker {
+    /// The page margins of a section (`hp:secPr > hp:pagePr > hp:margin`, events span `hp:secPr` to its end);
+    /// the first section that gives them wins.
+    pub(super) fn on_section_properties(&mut self, events: &[XmlEvent<'_>]) {
+        if self.margins.is_some() {
+            return;
+        }
+        for event in events {
+            let XmlEvent::Start {
+                name: "hp:margin",
+                attrs,
+            } = event
+            else {
+                continue;
+            };
+            let value = |key: &str| attr(attrs, key).and_then(|v| v.trim().parse::<u32>().ok());
+            if let (Some(header), Some(footer), Some(top), Some(bottom)) = (
+                value("header"),
+                value("footer"),
+                value("top"),
+                value("bottom"),
+            ) {
+                let margins = margins_from_hwpx(header, footer, top, bottom);
+                self.margins = margins.within_bounds().then_some(margins);
+            }
+            return;
+        }
+    }
+
     /// A page-number field of a header or footer paragraph, in the format of the open run.
-    pub(super) fn push_page_field(&mut self, header: &Header) {
+    pub(super) fn push_page_field(&mut self, header: &Header, field: RichField) {
         self.flush_run(header);
         let fmt = self
             .runs
@@ -43,7 +72,7 @@ impl SectionWalker {
                 color: fmt.color,
                 highlight: fmt.highlight,
                 script: fmt.script,
-                field: Some(RichField::PageNumber),
+                field: Some(field),
                 ..RichRun::default()
             });
         }
@@ -83,9 +112,21 @@ impl SectionWalker {
                 XmlEvent::Start {
                     name: "hp:autoNum",
                     attrs,
-                } if attr(attrs, "numType").as_deref() == Some("PAGE") => {
+                } if matches!(
+                    attr(attrs, "numType").as_deref(),
+                    Some("PAGE" | "TOTAL_PAGE")
+                ) =>
+                {
                     depth += 1;
-                    walker.push_page_field(header);
+                    let total = attr(attrs, "numType").as_deref() == Some("TOTAL_PAGE");
+                    walker.push_page_field(
+                        header,
+                        if total {
+                            RichField::TotalPages
+                        } else {
+                            RichField::PageNumber
+                        },
+                    );
                 }
                 XmlEvent::Start { name, attrs } => {
                     depth += 1;

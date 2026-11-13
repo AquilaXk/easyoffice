@@ -19,10 +19,10 @@ use easyoffice_formats::{
     base64_codec, code_within_bounds, evaluate_table_formulas, frame_paragraph,
     normalize_hex_color, safe_link_target, CellMerge, CellStyle, EasyOfficeError, NumFmtTable,
     OdsUnpacked, OoxmlCodec, PdfWriteOptions, RichAlignment, RichBlock, RichDocument, RichField,
-    RichImage, RichListKind, RichPageFrame, RichParagraph, RichRun, RichScript, RichTable, RichToc,
-    SheetStyling, StrictJsonValue, MAX_COLUMN_PX, MAX_IMAGE_BYTES, MAX_NUM_FMTS,
-    MAX_PAGE_FRAME_PARAGRAPHS, MAX_SIZE_PT, MAX_TOC_LEVEL, MAX_TOC_PAGE, MIN_COLUMN_PX,
-    MIN_SIZE_PT,
+    RichImage, RichListKind, RichPageFrame, RichPageMargins, RichParagraph, RichRun, RichScript,
+    RichTable, RichToc, SheetStyling, StrictJsonValue, MAX_COLUMN_PX, MAX_IMAGE_BYTES,
+    MAX_NUM_FMTS, MAX_PAGE_FRAME_PARAGRAPHS, MAX_PAGE_MARGIN_TWIPS, MAX_SIZE_PT, MAX_TOC_LEVEL,
+    MAX_TOC_PAGE, MIN_COLUMN_PX, MIN_SIZE_PT,
 };
 use easyoffice_sheet::{PackedCellCoordinate, WorkbookEngine};
 
@@ -223,14 +223,38 @@ fn parse_page_frame(
     Ok(RichPageFrame {
         header: parse("header")?,
         footer: parse("footer")?,
+        margins: parse_page_margins(entries)?,
     })
 }
 
-/// Run field: `"page"` (the page number) or absent.
+/// `"pageMargins":{"top","bottom","header","footer"}` in twips, each 0 to [`MAX_PAGE_MARGIN_TWIPS`]; all four
+/// keys are required.
+fn parse_page_margins(entries: &JsonObject) -> Result<Option<RichPageMargins>, EasyOfficeError> {
+    let Some(value) = field(entries, "pageMargins") else {
+        return Ok(None);
+    };
+    let obj = as_object(value, "pageMargins")?;
+    let max = i64::from(MAX_PAGE_MARGIN_TWIPS);
+    let twips = |key: &str| -> Result<u32, EasyOfficeError> {
+        opt_bounded(obj, key, 0, max)?
+            .map(|v| v as u32)
+            .ok_or_else(|| invalid(format!("구조화 저장: 'pageMargins.{key}'가 필요합니다.")))
+    };
+    Ok(Some(RichPageMargins {
+        top: twips("top")?,
+        bottom: twips("bottom")?,
+        header: twips("header")?,
+        footer: twips("footer")?,
+    }))
+}
+
+/// Run field: `"page"` (the page number), `"pages"` (the page count), `"filename"` or absent.
 fn opt_run_field(run: &JsonObject) -> Result<Option<RichField>, EasyOfficeError> {
     match opt_str(run, "field")? {
         None | Some("") => Ok(None),
         Some("page") => Ok(Some(RichField::PageNumber)),
+        Some("pages") => Ok(Some(RichField::TotalPages)),
+        Some("filename") => Ok(Some(RichField::FileName)),
         Some(other) => Err(invalid(format!("구조화 저장: 알 수 없는 필드 '{other}'"))),
     }
 }

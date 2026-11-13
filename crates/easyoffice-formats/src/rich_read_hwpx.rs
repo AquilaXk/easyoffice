@@ -20,8 +20,8 @@ use crate::rich_xml::{heading_level_from_name, push_linked_run, CharFmt};
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
     EasyOfficeError, HwpxCodec, RichAlignment, RichBlock, RichDocument, RichImage, RichListKind,
-    RichPageFrame, RichParagraph, RichRun, RichScript, ZipArchiveCodec, ZipArchiveEntry,
-    ZipSecurityPolicy,
+    RichPageFrame, RichPageMargins, RichParagraph, RichRun, RichScript, ZipArchiveCodec,
+    ZipArchiveEntry, ZipSecurityPolicy,
 };
 
 /// EMU per HWPUNIT (1/7200 inch).
@@ -423,6 +423,8 @@ struct SectionWalker {
     /// The header and footer of the page (the first `BOTH` control of each kind) and what was left out.
     frame: RichPageFrame,
     frame_found: [bool; 2],
+    /// Page margins of the first section that gives them.
+    margins: Option<RichPageMargins>,
     left_out: frame::FrameLeftOut,
 }
 
@@ -757,6 +759,12 @@ fn read_section(
                     walker.on_ctrl(&control, header);
                 }
             }
+            XmlEvent::Start {
+                name: "hp:secPr", ..
+            } => {
+                let properties = reader.collect_subtree(event)?;
+                walker.on_section_properties(&properties);
+            }
             XmlEvent::Start { name, ref attrs } => {
                 if SKIPPED_SUBTREES.contains(&name) {
                     if !matches!(name, "hp:secPr" | "hp:ctrl")
@@ -813,6 +821,15 @@ fn strip_link_flags(command: &str) -> String {
         });
     }
     out
+}
+
+/// The page frame read, with the margins of the section when it has a header or footer.
+fn finish_frame(walker: &mut SectionWalker) -> RichPageFrame {
+    let mut frame = std::mem::take(&mut walker.frame);
+    if !frame.is_empty() {
+        frame.margins = walker.margins;
+    }
+    frame
 }
 
 fn push_text(runs: &mut [RunState], text: &str) {
@@ -893,7 +910,7 @@ pub(crate) fn read_hwpx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Eas
     }
     Ok((
         RichDocument {
-            page_frame: std::mem::take(&mut walker.frame),
+            page_frame: finish_frame(&mut walker),
             title,
             blocks,
             official_agency,

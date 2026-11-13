@@ -3,7 +3,7 @@
 //! the HWPX `hp:header`/`hp:footer` controls of the first paragraph. The readers live next to each
 //! format's body reader; this module holds what the writers and the readers share.
 
-use crate::rich_document::{RichField, RichParagraph};
+use crate::rich_document::{RichField, RichPageMargins, RichParagraph};
 use crate::rich_run_writers::docx_run_properties;
 
 pub(crate) const DOCX_HEADER_PART: &str = "word/header1.xml";
@@ -19,19 +19,39 @@ const DOCX_NAMESPACES: &str = concat!(
     "xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\""
 );
 
-/// The instruction of a `PAGE` field (`w:fldSimple/@w:instr`, `w:instrText`) with its switches.
-pub(crate) fn is_page_instruction(instruction: &str) -> bool {
-    instruction
-        .split_whitespace()
-        .next()
-        .is_some_and(|word| word.eq_ignore_ascii_case("PAGE"))
+/// The field a DOCX instruction (`w:fldSimple/@w:instr`, `w:instrText`) names, ignoring its switches:
+/// `PAGE`, `NUMPAGES` or `FILENAME`.
+pub(crate) fn field_of_instruction(instruction: &str) -> Option<RichField> {
+    let word = instruction.split_whitespace().next()?;
+    [
+        ("PAGE", RichField::PageNumber),
+        ("NUMPAGES", RichField::TotalPages),
+        ("FILENAME", RichField::FileName),
+    ]
+    .into_iter()
+    .find(|(name, _)| word.eq_ignore_ascii_case(name))
+    .map(|(_, field)| field)
 }
 
 /// A field as a `w:fldSimple` around one run (the placeholder text is what a viewer shows before it
 /// updates the field).
 pub(crate) fn docx_field_run(field: RichField, run_properties: &str) -> String {
-    let RichField::PageNumber = field;
-    format!("<w:fldSimple w:instr=\" PAGE \"><w:r>{run_properties}<w:t>1</w:t></w:r></w:fldSimple>")
+    let (instruction, placeholder) = match field {
+        RichField::PageNumber => ("PAGE", "1"),
+        RichField::TotalPages => ("NUMPAGES", "1"),
+        RichField::FileName => ("FILENAME", "document"),
+    };
+    format!(
+        "<w:fldSimple w:instr=\" {instruction} \"><w:r>{run_properties}<w:t>{placeholder}</w:t></w:r></w:fldSimple>"
+    )
+}
+
+/// `w:pgMar` for the section properties (side margins 1 inch, as the page size has no side margin of its own).
+pub(crate) fn docx_page_margins(margins: &RichPageMargins) -> String {
+    format!(
+        "<w:pgMar w:top=\"{}\" w:right=\"1440\" w:bottom=\"{}\" w:left=\"1440\" w:header=\"{}\" w:footer=\"{}\" w:gutter=\"0\"/>",
+        margins.top, margins.bottom, margins.header, margins.footer
+    )
 }
 
 fn docx_frame_paragraph(p: &RichParagraph) -> String {
@@ -129,26 +149,69 @@ pub(crate) fn docx_frame_refs(header: bool, footer: bool) -> DocxFrameRefs {
     refs
 }
 
-/// A paragraph's runs as ODF text (`text:span` per formatted run, `text:page-number` for the page field).
-pub(crate) fn odt_page_number(run_text_style: Option<usize>) -> String {
-    let field = "<text:page-number text:select-page=\"current\">1</text:page-number>";
+/// An ODF field element for a run (a `text:span` around it when the run has a text style).
+pub(crate) fn odt_field(field: RichField, run_text_style: Option<usize>) -> String {
+    let element = match field {
+        RichField::PageNumber => {
+            "<text:page-number text:select-page=\"current\">1</text:page-number>"
+        }
+        RichField::TotalPages => "<text:page-count>1</text:page-count>",
+        RichField::FileName => {
+            "<text:file-name text:display=\"name-and-extension\">document</text:file-name>"
+        }
+    };
     match run_text_style {
-        Some(t) => format!("<text:span text:style-name=\"T{t}\">{field}</text:span>"),
-        None => field.to_string(),
+        Some(t) => format!("<text:span text:style-name=\"T{t}\">{element}</text:span>"),
+        None => element.to_string(),
     }
 }
 
-/// The page layout and master page that give an ODT its header and footer: `(automatic styles, master styles)`.
-pub(crate) fn odt_master_page(header: Option<&str>, footer: Option<&str>) -> (String, String) {
-    let layout = concat!(
-        "<style:page-layout style:name=\"pm1\"><style:page-layout-properties fo:page-width=\"21cm\" ",
-        "fo:page-height=\"29.7cm\" style:print-orientation=\"portrait\" fo:margin-top=\"1.25cm\" ",
-        "fo:margin-bottom=\"1.25cm\" fo:margin-left=\"2cm\" fo:margin-right=\"2cm\"/>",
-        "<style:header-style><style:header-footer-properties fo:min-height=\"0.6cm\" fo:margin-bottom=\"0.25cm\"/></style:header-style>",
-        "<style:footer-style><style:header-footer-properties fo:min-height=\"0.6cm\" fo:margin-top=\"0.25cm\"/></style:footer-style>",
-        "</style:page-layout>"
-    )
-    .to_string();
+/// Twips as an ODF point length (`36pt`, `7.5pt`): exact to a twip.
+fn odt_pt(twips: u32) -> String {
+    let (whole, hundredths) = (twips / 20, twips % 20 * 5);
+    if hundredths == 0 {
+        format!("{whole}pt")
+    } else {
+        format!("{whole}.{hundredths:02}pt")
+    }
+}
+
+/// The page layout and master page that give an ODT its header and footer: `(page layout, master styles)`.
+/// The layout's top margin is the distance to the header, the header's minimum height reaches the body (and
+/// the same for the footer); a part that is absent leaves its margin as the distance to the body.
+pub(crate) fn odt_master_page(
+    header: Option<&str>,
+    footer: Option<&str>,
+    margins: Option<&RichPageMargins>,
+) -> (String, String) {
+    let m = margins.copied().unwrap_or(RichPageMargins {
+        top: 1191,
+        bottom: 1191,
+        header: 709,
+        footer: 709,
+    });
+    let (margin_top, header_height) = match header {
+        Some(_) => (m.header, m.top.saturating_sub(m.header)),
+        None => (m.top, 0),
+    };
+    let (margin_bottom, footer_height) = match footer {
+        Some(_) => (m.footer, m.bottom.saturating_sub(m.footer)),
+        None => (m.bottom, 0),
+    };
+    let layout = format!(
+        concat!(
+            "<style:page-layout style:name=\"pm1\"><style:page-layout-properties fo:page-width=\"21cm\" ",
+            "fo:page-height=\"29.7cm\" style:print-orientation=\"portrait\" fo:margin-top=\"{}\" ",
+            "fo:margin-bottom=\"{}\" fo:margin-left=\"2cm\" fo:margin-right=\"2cm\"/>",
+            "<style:header-style><style:header-footer-properties fo:min-height=\"{}\" fo:margin-bottom=\"0pt\"/></style:header-style>",
+            "<style:footer-style><style:header-footer-properties fo:min-height=\"{}\" fo:margin-top=\"0pt\"/></style:footer-style>",
+            "</style:page-layout>"
+        ),
+        odt_pt(margin_top),
+        odt_pt(margin_bottom),
+        odt_pt(header_height),
+        odt_pt(footer_height)
+    );
     let mut master =
         String::from("<office:master-styles><style:master-page style:name=\"Standard\" style:page-layout-name=\"pm1\">");
     if let Some(xml) = header {
@@ -199,9 +262,46 @@ pub(crate) fn hwpx_frame_control(header: bool, id: u32, paragraphs: &str) -> Str
     )
 }
 
-/// The page-number control inside a header or footer paragraph.
-pub(crate) const HWPX_PAGE_NUMBER_CONTROL: &str = concat!(
-    "<hp:ctrl><hp:autoNum num=\"1\" numType=\"PAGE\">",
-    "<hp:autoNumFormat type=\"DIGIT\" userChar=\"\" prefixChar=\"\" suffixChar=\"\" supscript=\"0\"/>",
-    "</hp:autoNum></hp:ctrl>"
-);
+/// The control of a page-number or page-count field inside a header or footer paragraph (`numType` is `PAGE`
+/// or `TOTAL_PAGE`).
+pub(crate) fn hwpx_number_control(num_type: &str) -> String {
+    format!(
+        concat!(
+            "<hp:ctrl><hp:autoNum num=\"1\" numType=\"{}\">",
+            "<hp:autoNumFormat type=\"DIGIT\" userChar=\"\" prefixChar=\"\" suffixChar=\"\" supscript=\"0\"/>",
+            "</hp:autoNum></hp:ctrl>"
+        ),
+        num_type
+    )
+}
+
+/// HWPUNIT per twip (1/7200 inch against 1/1440 inch).
+const HWPUNIT_PER_TWIP: u32 = 5;
+
+/// The page margins as `hp:margin` values `(header, footer, top, bottom)` in HWPUNIT: the reference
+/// editor's top margin is the distance to the header and its header margin the header area's height, its
+/// footer margin the distance to the footer and its bottom margin the footer area's height
+/// (`rhwp` `src/model/page.rs:238-269`).
+pub(crate) fn hwpx_margin_values(m: &RichPageMargins) -> (u32, u32, u32, u32) {
+    (
+        m.top.saturating_sub(m.header) * HWPUNIT_PER_TWIP,
+        m.footer * HWPUNIT_PER_TWIP,
+        m.header * HWPUNIT_PER_TWIP,
+        m.bottom.saturating_sub(m.footer) * HWPUNIT_PER_TWIP,
+    )
+}
+
+/// The inverse of [`hwpx_margin_values`] for the `(header, footer, top, bottom)` of a `hp:margin`.
+pub(crate) fn margins_from_hwpx(
+    header: u32,
+    footer: u32,
+    top: u32,
+    bottom: u32,
+) -> RichPageMargins {
+    RichPageMargins {
+        top: top.saturating_add(header) / HWPUNIT_PER_TWIP,
+        bottom: bottom.saturating_add(footer) / HWPUNIT_PER_TWIP,
+        header: top / HWPUNIT_PER_TWIP,
+        footer: footer / HWPUNIT_PER_TWIP,
+    }
+}

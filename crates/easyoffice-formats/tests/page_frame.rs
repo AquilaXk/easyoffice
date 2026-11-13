@@ -4,8 +4,8 @@
 
 use easyoffice_formats::{
     DecodedContent, DocumentFormat, EasyOfficeError, RichAlignment, RichBlock, RichDocument,
-    RichField, RichPageFrame, RichParagraph, RichRun, UniversalFormatConverter, ZipArchiveCodec,
-    ZipSecurityPolicy, MAX_PAGE_FRAME_PARAGRAPHS,
+    RichField, RichPageFrame, RichPageMargins, RichParagraph, RichRun, UniversalFormatConverter,
+    ZipArchiveCodec, ZipSecurityPolicy, MAX_PAGE_FRAME_PARAGRAPHS,
 };
 
 fn para(runs: Vec<RichRun>, alignment: Option<RichAlignment>) -> RichParagraph {
@@ -23,6 +23,21 @@ fn page_number() -> RichRun {
         ..RichRun::default()
     }
 }
+
+fn field(field: RichField) -> RichRun {
+    RichRun {
+        field: Some(field),
+        ..RichRun::default()
+    }
+}
+
+/// Header at 20 mm, body at 35 mm; footer at 12 mm, body ends 28 mm from the bottom.
+const MARGINS: RichPageMargins = RichPageMargins {
+    top: 1985,
+    bottom: 1590,
+    header: 1134,
+    footer: 680,
+};
 
 fn sample() -> RichDocument {
     RichDocument {
@@ -46,9 +61,16 @@ fn sample() -> RichDocument {
                 para(vec![RichRun::plain("총무팀 <기밀> & 사본")], None),
             ],
             footer: vec![para(
-                vec![RichRun::plain("- "), page_number(), RichRun::plain(" -")],
+                vec![
+                    RichRun::plain("- "),
+                    page_number(),
+                    RichRun::plain(" / "),
+                    field(RichField::TotalPages),
+                    RichRun::plain(" -"),
+                ],
                 Some(RichAlignment::Right),
             )],
+            margins: Some(MARGINS),
         },
     }
 }
@@ -391,6 +413,7 @@ fn hwpx_even_and_odd_headers_and_second_sections_are_reported() {
         page_frame: RichPageFrame {
             header: vec![para(vec![RichRun::plain("양쪽")], None)],
             footer: Vec::new(),
+            margins: None,
         },
         blocks: vec![RichBlock::Paragraph(para(
             vec![RichRun::plain("본문")],
@@ -439,5 +462,152 @@ fn hwpx_even_and_odd_headers_and_second_sections_are_reported() {
     assert!(
         warnings.iter().any(|w| w.contains("구역마다")),
         "{warnings:?}"
+    );
+}
+
+// ---- page margins and more fields
+
+#[test]
+fn the_margins_that_place_the_frame_come_back_from_all_three_formats() {
+    for (format, name) in [
+        (DocumentFormat::Docx, "m.docx"),
+        (DocumentFormat::Odt, "m.odt"),
+        (DocumentFormat::Hwpx, "m.hwpx"),
+    ] {
+        let bytes = UniversalFormatConverter::encode_rich(&sample(), format, None).expect("encode");
+        let (back, _) = decode(&bytes, name);
+        assert_eq!(back.page_frame.margins, Some(MARGINS), "{name}");
+    }
+    let docx =
+        UniversalFormatConverter::encode_rich(&sample(), DocumentFormat::Docx, None).unwrap();
+    let parts = entries(&docx);
+    assert!(part(&parts, "word/document.xml")
+        .contains("w:top=\"1985\" w:right=\"1440\" w:bottom=\"1590\" w:left=\"1440\" w:header=\"1134\" w:footer=\"680\""));
+    let hwpx =
+        UniversalFormatConverter::encode_rich(&sample(), DocumentFormat::Hwpx, None).unwrap();
+    // The reference editor's top margin is the distance to the header, its header margin the header's height.
+    assert!(part(&entries(&hwpx), "Contents/section0.xml")
+        .contains("<hp:margin header=\"4255\" footer=\"3400\""));
+}
+
+#[test]
+fn a_frame_without_margins_writes_the_format_defaults_and_reads_back_a_value_of_its_own() {
+    let mut doc = sample();
+    doc.page_frame.margins = None;
+    for (format, name) in [
+        (DocumentFormat::Odt, "d.odt"),
+        (DocumentFormat::Hwpx, "d.hwpx"),
+    ] {
+        let bytes = UniversalFormatConverter::encode_rich(&doc, format, None).unwrap();
+        let (back, _) = decode(&bytes, name);
+        let margins = back.page_frame.margins.expect(name);
+        assert!(
+            margins.top >= margins.header && margins.bottom >= margins.footer,
+            "{name}: {margins:?}"
+        );
+    }
+    let docx = UniversalFormatConverter::encode_rich(&doc, DocumentFormat::Docx, None).unwrap();
+    assert_eq!(decode(&docx, "d.docx").0.page_frame.margins, None);
+}
+
+#[test]
+fn page_total_and_file_name_fields_round_trip_in_docx_and_odt_and_the_file_name_is_text_in_hwpx() {
+    let mut doc = sample();
+    doc.page_frame.footer = vec![para(
+        vec![
+            field(RichField::FileName),
+            RichRun::plain(" "),
+            field(RichField::PageNumber),
+            RichRun::plain("/"),
+            field(RichField::TotalPages),
+        ],
+        None,
+    )];
+    for (format, name, instruction) in [
+        (DocumentFormat::Docx, "f.docx", "NUMPAGES"),
+        (DocumentFormat::Odt, "f.odt", "text:page-count"),
+    ] {
+        let bytes = UniversalFormatConverter::encode_rich(&doc, format, None).unwrap();
+        assert!(
+            entries(&bytes)
+                .iter()
+                .any(|(_, xml)| xml.contains(instruction)),
+            "{name}"
+        );
+        assert_eq!(
+            decode(&bytes, name).0.page_frame.footer,
+            doc.page_frame.footer,
+            "{name}"
+        );
+    }
+    let bytes = UniversalFormatConverter::encode_rich(&doc, DocumentFormat::Hwpx, None).unwrap();
+    let parts = entries(&bytes);
+    let section = part(&parts, "Contents/section0.xml");
+    assert!(section.contains("numType=\"TOTAL_PAGE\""));
+    assert!(
+        section.contains("<hp:t>쪽 틀</hp:t>"),
+        "the file name is the title's text"
+    );
+    let footer = &decode(&bytes, "f.hwpx").0.page_frame.footer[0];
+    assert_eq!(
+        footer.runs.last().and_then(|r| r.field),
+        Some(RichField::TotalPages)
+    );
+}
+
+#[test]
+fn margins_that_are_incomplete_or_out_of_bounds_are_dropped_and_never_without_a_frame() {
+    let header = format!("<w:hdr {W}><w:p><w:r><w:t>머리</w:t></w:r></w:p></w:hdr>");
+    let rel =
+        format!("<Relationship Id=\"rId1\" Type=\"{REL_BASE}/header\" Target=\"header1.xml\"/>");
+    for (props, expected) in [
+        (
+            "<w:pgMar w:top=\"1440\" w:bottom=\"1440\" w:header=\"720\" w:footer=\"720\"/>",
+            Some((1440, 720)),
+        ),
+        (
+            "<w:pgMar w:top=\"-1440\" w:bottom=\"1440\" w:header=\"720\" w:footer=\"720\"/>",
+            Some((1440, 720)),
+        ),
+        (
+            "<w:pgMar w:top=\"1440\" w:bottom=\"1440\" w:header=\"720\"/>",
+            None,
+        ),
+        (
+            "<w:pgMar w:top=\"99999999\" w:bottom=\"1440\" w:header=\"720\" w:footer=\"720\"/>",
+            None,
+        ),
+        (
+            "<w:pgMar w:top=\"x\" w:bottom=\"1\" w:header=\"720\" w:footer=\"720\"/>",
+            None,
+        ),
+    ] {
+        let bytes = docx_package(
+            &body_with_section(
+                "<w:headerReference w:type=\"default\" r:id=\"rId1\"/>",
+                props,
+            ),
+            &[("word/header1.xml", &header)],
+            &rel,
+        );
+        let got = decode(&bytes, "m.docx")
+            .0
+            .page_frame
+            .margins
+            .map(|m| (m.top, m.header));
+        assert_eq!(got, expected, "{props}");
+    }
+    let bytes = docx_package(
+        &body_with_section(
+            "",
+            "<w:pgMar w:top=\"1440\" w:bottom=\"1440\" w:header=\"720\" w:footer=\"720\"/>",
+        ),
+        &[],
+        "",
+    );
+    assert_eq!(
+        decode(&bytes, "n.docx").0.page_frame.margins,
+        None,
+        "a document without a frame has none"
     );
 }

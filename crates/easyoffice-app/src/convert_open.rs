@@ -74,8 +74,11 @@ fn write_paragraph(out: &mut String, p: &RichParagraph) {
         if let Some(size) = r.size_half_pt {
             let _ = write!(out, ",\"sizeHalfPt\":{size}");
         }
-        if r.field == Some(RichField::PageNumber) {
-            out.push_str(",\"field\":\"page\"");
+        match r.field {
+            Some(RichField::PageNumber) => out.push_str(",\"field\":\"page\""),
+            Some(RichField::TotalPages) => out.push_str(",\"field\":\"pages\""),
+            Some(RichField::FileName) => out.push_str(",\"field\":\"filename\""),
+            None => {}
         }
         if let Some(link) = &r.link {
             out.push_str(",\"link\":");
@@ -495,6 +498,17 @@ fn decode_response(
     out.push_str("],");
     match &decoded.content {
         DecodedContent::Document(doc) => {
+            if let Some(m) = doc
+                .page_frame
+                .margins
+                .filter(|_| !doc.page_frame.is_empty())
+            {
+                let _ = write!(
+                    out,
+                    "\"pageMargins\":{{\"top\":{},\"bottom\":{},\"header\":{},\"footer\":{}}},",
+                    m.top, m.bottom, m.header, m.footer
+                );
+            }
             out.push_str("\"blocks\":[");
             write_list(&mut out, &doc.blocks, write_block);
             for (key, paragraphs) in [

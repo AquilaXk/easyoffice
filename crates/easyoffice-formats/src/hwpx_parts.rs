@@ -315,7 +315,11 @@ pub(crate) fn header_xml_with(
 
 /// Section properties (`hp:secPr`) plus the column control; must sit in the first run of the
 /// first paragraph of each section.
-pub(crate) fn section_properties_xml() -> String {
+pub(crate) fn section_properties_xml(margins: Option<&crate::RichPageMargins>) -> String {
+    let (header, footer, top, bottom) = margins.map_or(
+        (4252, 4252, 5668, 4252),
+        crate::rich_page_frame::hwpx_margin_values,
+    );
     format!(
         concat!(
             "<hp:secPr id=\"\" textDirection=\"HORIZONTAL\" spaceColumns=\"1134\" tabStop=\"8000\" tabStopVal=\"4000\" tabStopUnit=\"HWPUNIT\" outlineShapeIDRef=\"0\" memoShapeIDRef=\"0\" textVerticalWidthHead=\"0\" masterPageCnt=\"0\">",
@@ -323,13 +327,17 @@ pub(crate) fn section_properties_xml() -> String {
             "<hp:startNum pageStartsOn=\"BOTH\" page=\"0\" pic=\"0\" tbl=\"0\" equation=\"0\"/>",
             "<hp:visibility hideFirstHeader=\"0\" hideFirstFooter=\"0\" hideFirstMasterPage=\"0\" border=\"SHOW_ALL\" fill=\"SHOW_ALL\" hideFirstPageNum=\"0\" hideFirstEmptyLine=\"0\" showLineNumber=\"0\"/>",
             "<hp:pagePr landscape=\"WIDELY\" width=\"{w}\" height=\"{h}\" gutterType=\"LEFT_ONLY\">",
-            "<hp:margin header=\"4252\" footer=\"4252\" gutter=\"0\" left=\"{m}\" right=\"{m}\" top=\"5668\" bottom=\"4252\"/>",
+            "<hp:margin header=\"{header}\" footer=\"{footer}\" gutter=\"0\" left=\"{m}\" right=\"{m}\" top=\"{top}\" bottom=\"{bottom}\"/>",
             "</hp:pagePr></hp:secPr>",
             "<hp:ctrl><hp:colPr id=\"\" type=\"NEWSPAPER\" layout=\"LEFT\" colCount=\"1\" sameSz=\"1\" sameGap=\"0\"/></hp:ctrl>"
         ),
         w = PAGE_WIDTH,
         h = PAGE_HEIGHT,
-        m = MARGIN_SIDE
+        m = MARGIN_SIDE,
+        header = header,
+        footer = footer,
+        top = top,
+        bottom = bottom
     )
 }
 

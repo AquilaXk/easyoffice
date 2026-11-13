@@ -96,3 +96,65 @@ fn a_malformed_or_oversized_frame_rejects_the_save() {
     )
     .is_ok());
 }
+
+const MARGINS: &str =
+    "\"pageMargins\":{\"top\":1985,\"bottom\":1590,\"header\":1134,\"footer\":680},";
+const WIDE_FRAME: &str = concat!(
+    "\"header\":[{\"type\":\"paragraph\",\"runs\":[{\"text\":\"머리\"}]}],",
+    "\"footer\":[{\"type\":\"paragraph\",\"runs\":[{\"text\":\"\",\"field\":\"filename\"},{\"text\":\" \"},",
+    "{\"text\":\"\",\"field\":\"page\"},{\"text\":\"/\"},{\"text\":\"\",\"field\":\"pages\"}]}]"
+);
+
+#[test]
+fn page_margins_and_the_page_count_and_file_name_fields_survive_docx_and_odt_save_and_reopen() {
+    for (format, name) in [
+        ("docx", "여백.docx"),
+        ("odt", "여백.odt"),
+        ("hwpx", "여백.hwpx"),
+    ] {
+        let frame = format!("{MARGINS}{WIDE_FRAME}");
+        let saved =
+            EasyOfficeIpcRouter::dispatch("convert_document_format", &payload(format, &frame))
+                .unwrap();
+        let bytes =
+            EasyOfficeIpcRouter::decode_base64(json_field(&saved, "convertedBase64")).unwrap();
+        let json = EasyOfficeIpcRouter::dispatch(
+            "convert_document_format",
+            &request(Some("decode"), name, &bytes, ""),
+        )
+        .unwrap();
+        assert!(
+            json.contains(
+                "\"pageMargins\":{\"top\":1985,\"bottom\":1590,\"header\":1134,\"footer\":680}"
+            ),
+            "{format}: {json}"
+        );
+        assert!(
+            json.contains("{\"text\":\"\",\"field\":\"pages\"}"),
+            "{format}: {json}"
+        );
+        assert_eq!(
+            json.contains("\"field\":\"filename\""),
+            format != "hwpx",
+            "{format}: the file name is a field except in HWPX"
+        );
+    }
+}
+
+#[test]
+fn bad_page_margins_reject_the_save() {
+    for margins in [
+        "\"pageMargins\":{\"top\":1,\"bottom\":1,\"header\":1},",
+        "\"pageMargins\":{\"top\":99999,\"bottom\":1,\"header\":1,\"footer\":1},",
+        "\"pageMargins\":{\"top\":-1,\"bottom\":1,\"header\":1,\"footer\":1},",
+        "\"pageMargins\":[1,2,3,4],",
+        "\"pageMargins\":{\"top\":\"1\",\"bottom\":1,\"header\":1,\"footer\":1},",
+    ] {
+        let frame = format!("{margins}{WIDE_FRAME}");
+        assert!(
+            EasyOfficeIpcRouter::dispatch("convert_document_format", &payload("docx", &frame))
+                .is_err(),
+            "{margins}"
+        );
+    }
+}

@@ -15,12 +15,13 @@ use crate::hwpx_parts::{
 };
 use crate::office_codecs::{checked_part, checked_zip_xml_entries};
 use crate::rich_document::{
-    frame_paragraph, RichAlignment, RichBlock, RichDocument, RichParagraph,
+    frame_paragraph, RichAlignment, RichBlock, RichDocument, RichField, RichPageMargins,
+    RichParagraph,
 };
 use crate::rich_image::{check_document_images, RichImage};
 use crate::rich_image_writers::{hwpx_picture_run, MediaParts};
 use crate::rich_link_writers::{external_link_groups, hwpx_link_begin, hwpx_link_end};
-use crate::rich_page_frame::{hwpx_frame_control, HWPX_PAGE_NUMBER_CONTROL};
+use crate::rich_page_frame::{hwpx_frame_control, hwpx_number_control};
 use crate::rich_table::{CellSpan, SpanMap};
 use crate::rtf_xml_helpers::{
     extract_attr, extract_attr_from_fragment, extract_tag_bodies,
@@ -75,6 +76,8 @@ struct ShapeTables {
     fonts: Vec<String>,
     font_map: std::collections::HashMap<String, usize>,
     next_field_id: u32,
+    /// Text a file-name field is written as.
+    file_text: String,
 }
 
 fn hex_rgb(hex: &str) -> Option<u32> {
@@ -108,6 +111,7 @@ impl ShapeTables {
             fonts: Vec::new(),
             font_map: std::collections::HashMap::new(),
             next_field_id: 0,
+            file_text: String::new(),
         }
     }
 
@@ -206,8 +210,8 @@ impl ShapeTables {
                     script: run.script,
                 };
                 let char_pr = intern(&mut self.char_shapes, &mut self.char_map, shape);
-                if run.field.is_some() {
-                    sec.field_run(char_pr);
+                if let Some(field) = run.field {
+                    sec.field_run(char_pr, field, &self.file_text);
                 } else {
                     sec.run(char_pr, &run.text);
                 }
@@ -230,6 +234,8 @@ struct SectionWriter {
     sec_pr_pending: bool,
     /// `hp:ctrl` header and footer of the page, written into the run that holds the section properties.
     frame_controls: String,
+    /// Page margins of the section (`hp:pagePr`); the defaults when `None`.
+    margins: Option<RichPageMargins>,
 }
 
 impl SectionWriter {
@@ -242,6 +248,7 @@ impl SectionWriter {
             next_table_id: 1,
             sec_pr_pending: true,
             frame_controls: String::new(),
+            margins: None,
         }
     }
 
@@ -253,6 +260,7 @@ impl SectionWriter {
             next_table_id: 1,
             sec_pr_pending: false,
             frame_controls: String::new(),
+            margins: None,
         }
     }
 
@@ -279,7 +287,8 @@ impl SectionWriter {
         if self.sec_pr_pending {
             self.sec_pr_pending = false;
             self.xml.push_str("<hp:run charPrIDRef=\"0\">");
-            self.xml.push_str(&section_properties_xml());
+            self.xml
+                .push_str(&section_properties_xml(self.margins.as_ref()));
             self.xml.push_str(&self.frame_controls);
             self.xml.push_str("</hp:run>");
         }
@@ -306,10 +315,16 @@ impl SectionWriter {
         self.xml.push_str("</hp:t></hp:run>");
     }
 
-    /// A run holding a page-number field.
-    fn field_run(&mut self, char_pr: usize) {
+    /// A run holding a page-number or page-count field; the file name has no field that reads back, so it
+    /// is the text `file_name`.
+    fn field_run(&mut self, char_pr: usize, field: RichField, file_name: &str) {
+        let inner = match field {
+            RichField::PageNumber => format!("{}<hp:t/>", hwpx_number_control("PAGE")),
+            RichField::TotalPages => format!("{}<hp:t/>", hwpx_number_control("TOTAL_PAGE")),
+            RichField::FileName => format!("<hp:t>{}</hp:t>", XmlSanitizer::escape(file_name)),
+        };
         self.xml.push_str(&format!(
-            "<hp:run charPrIDRef=\"{char_pr}\">{HWPX_PAGE_NUMBER_CONTROL}<hp:t/></hp:run>"
+            "<hp:run charPrIDRef=\"{char_pr}\">{inner}</hp:run>"
         ));
     }
 
@@ -399,6 +414,10 @@ impl HwpxCodec {
         let mut media = MediaParts::new();
         let mut sec = SectionWriter::new();
         let mut shapes = ShapeTables::new();
+        shapes.file_text = doc.display_title();
+        if !doc.page_frame.is_empty() {
+            sec.margins = doc.page_frame.margins;
+        }
         for (header, paragraphs) in [
             (true, &doc.page_frame.header),
             (false, &doc.page_frame.footer),

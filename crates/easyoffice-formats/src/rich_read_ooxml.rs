@@ -11,7 +11,7 @@ use crate::rich_document::{frame_paragraph, MAX_PAGE_FRAME_PARAGRAPHS};
 use crate::rich_document::{
     highlight_name_to_hex, normalize_hex_color, toc_bookmark_number, RichToc,
 };
-use crate::rich_page_frame::is_page_instruction;
+use crate::rich_page_frame::field_of_instruction;
 use crate::rich_read_images::{
     drawing_picture, load_docx_frame_targets, load_docx_hyperlinks, DocxMedia, DrawingOutcome,
 };
@@ -23,8 +23,8 @@ use crate::rich_xml::{
 use crate::xml_stream::{attr, Attrs, XmlEvent, XmlReader};
 use crate::{
     EasyOfficeError, RichAlignment, RichBlock, RichDocument, RichField, RichImage, RichListKind,
-    RichPageFrame, RichParagraph, RichRun, RichScript, XmlSanitizer, ZipArchiveCodec,
-    ZipSecurityPolicy, MAX_IMAGES_PER_DOCUMENT, MAX_TOTAL_IMAGE_BYTES,
+    RichPageFrame, RichPageMargins, RichParagraph, RichRun, RichScript, XmlSanitizer,
+    ZipArchiveCodec, ZipSecurityPolicy, MAX_IMAGES_PER_DOCUMENT, MAX_TOTAL_IMAGE_BYTES,
 };
 
 /// `w:vMerge` state of a table cell.
@@ -370,10 +370,30 @@ struct DocxWalker {
     /// Instruction text of the open complex field (`w:fldChar` begin to separate) and whether its text is open.
     field_instruction: Option<String>,
     in_instruction: bool,
-    /// The result of a page field is open: its text is the field's, not the paragraph's.
-    field_result: bool,
-    /// Runs of an open `w:fldSimple` page field: 0 none, 1 open, 2 its field run is written.
-    simple_page: u8,
+    /// The field of an open `w:fldSimple` and whether its field run is written.
+    simple_field: Option<(RichField, bool)>,
+    /// The field of a complex field whose result is open.
+    result_field: Option<RichField>,
+    /// `w:pgMar` of the open section, and the margins of the first section with a header or footer reference.
+    section_margins: Option<RichPageMargins>,
+    section_has_ref: bool,
+    frame_margins: Option<RichPageMargins>,
+}
+
+/// `w:pgMar` as page margins: all four distances present (a negative top or bottom, an exact margin in
+/// Word, counts by its size) and within the bounds.
+fn page_margins(attrs: &Attrs<'_>) -> Option<RichPageMargins> {
+    let twips = |key: &str| {
+        let v = attr(attrs, key)?.trim().parse::<i64>().ok()?;
+        u32::try_from(v.abs()).ok()
+    };
+    let margins = RichPageMargins {
+        top: twips("w:top")?,
+        bottom: twips("w:bottom")?,
+        header: twips("w:header")?,
+        footer: twips("w:footer")?,
+    };
+    margins.within_bounds().then_some(margins)
 }
 
 impl DocxWalker {
@@ -469,7 +489,13 @@ impl DocxWalker {
     /// Section header/footer references (body parts) and page fields (header/footer parts).
     fn track_frame(&mut self, name: &str, attrs: &Attrs<'_>) {
         match name {
+            "w:sectPr" => {
+                self.section_margins = None;
+                self.section_has_ref = false;
+            }
+            "w:pgMar" => self.section_margins = page_margins(attrs),
             "w:headerReference" | "w:footerReference" => {
+                self.section_has_ref = true;
                 if let Some(rel_id) = attr(attrs, "r:id") {
                     self.frame_refs.push(FrameRef {
                         header: name == "w:headerReference",
@@ -480,24 +506,25 @@ impl DocxWalker {
             }
             "w:titlePg" => self.title_pg |= toggle_on(attr(attrs, "w:val").as_deref()),
             "w:fldSimple" if self.frame_mode => {
-                let page = attr(attrs, "w:instr").is_some_and(|i| is_page_instruction(&i));
-                self.simple_page = u8::from(page);
+                self.simple_field = attr(attrs, "w:instr")
+                    .and_then(|i| field_of_instruction(&i))
+                    .map(|field| (field, false));
             }
             "w:fldChar" if self.frame_mode => match attr(attrs, "w:fldCharType").as_deref() {
                 Some("begin") => self.field_instruction = Some(String::new()),
                 Some("separate") => {
-                    let page = self
+                    let field = self
                         .field_instruction
                         .take()
-                        .is_some_and(|i| is_page_instruction(&i));
-                    if page {
-                        self.field_result = true;
-                        self.push_field_run();
+                        .and_then(|i| field_of_instruction(&i));
+                    if let Some(field) = field {
+                        self.result_field = Some(field);
+                        self.push_field_run(field);
                     }
                 }
                 Some("end") => {
                     self.field_instruction = None;
-                    self.field_result = false;
+                    self.result_field = None;
                 }
                 _ => {}
             },
@@ -505,7 +532,7 @@ impl DocxWalker {
         }
     }
 
-    fn push_field_run(&mut self) {
+    fn push_field_run(&mut self, field: RichField) {
         if let Some(top) = self.paras.last_mut() {
             top.runs.push(RichRun {
                 bold: self.fmt.bold,
@@ -517,7 +544,7 @@ impl DocxWalker {
                 color: self.fmt.color.clone(),
                 highlight: self.fmt.highlight.clone(),
                 script: self.fmt.script,
-                field: Some(RichField::PageNumber),
+                field: Some(field),
                 ..RichRun::default()
             });
         }
@@ -575,14 +602,21 @@ impl DocxWalker {
         match name {
             "w:t" => self.in_t = false,
             "w:instrText" => self.in_instruction = false,
-            "w:fldSimple" => self.simple_page = 0,
+            "w:fldSimple" => self.simple_field = None,
+            "w:sectPr" => {
+                if self.section_has_ref && self.frame_margins.is_none() {
+                    self.frame_margins = self.section_margins;
+                }
+            }
             "w:rPr" => self.in_rpr = false,
             "w:pPr" => self.in_ppr = false,
             "w:r" => {
-                if self.simple_page == 1 {
-                    self.push_field_run();
-                    self.simple_page = 2;
-                } else if self.simple_page == 0 && !self.field_result {
+                if let Some((field, written)) = self.simple_field {
+                    if !written {
+                        self.push_field_run(field);
+                        self.simple_field = Some((field, true));
+                    }
+                } else if self.result_field.is_none() {
                     if let Some(top) = self.paras.last_mut() {
                         push_linked_run(
                             &mut top.runs,
@@ -778,6 +812,7 @@ fn read_page_frame(
     media: &DocxMedia<'_>,
     refs: &[FrameRef],
     title_pg: bool,
+    margins: Option<RichPageMargins>,
 ) -> Result<(RichPageFrame, Vec<String>), EasyOfficeError> {
     let mut frame = RichPageFrame::default();
     let mut warnings = Vec::new();
@@ -812,6 +847,9 @@ fn read_page_frame(
         } else {
             frame.footer = paragraphs;
         }
+    }
+    if !frame.is_empty() {
+        frame.margins = margins;
     }
     if other_pages {
         warnings.push("첫 쪽·짝수 쪽 머리말·꼬리말은 가져오지 않았습니다.".to_string());
@@ -865,6 +903,7 @@ pub(crate) fn read_docx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Eas
         &media,
         &walker.frame_refs,
         walker.title_pg,
+        walker.frame_margins,
     )?;
     let mut warnings = walker.warnings;
     for note in frame_warnings {

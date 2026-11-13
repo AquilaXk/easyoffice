@@ -120,6 +120,45 @@ pub struct RichRun {
 pub enum RichField {
     /// The number of the page (DOCX `PAGE`, ODT `text:page-number`, HWPX `autoNum` of type `PAGE`).
     PageNumber,
+    /// The number of pages (DOCX `NUMPAGES`, ODT `text:page-count`, HWPX `autoNum` of type `TOTAL_PAGE`).
+    TotalPages,
+    /// The name of the file (DOCX `FILENAME`, ODT `text:file-name`). HWPX has no counterpart that is known
+    /// to read back, so it is written as the title's text.
+    FileName,
+}
+
+/// Page margins that place the header and footer, in twips, as a word processor's page setup gives them:
+/// `top` and `bottom` are the distances from the page edge to the body (a taller header pushes the body
+/// down), `header` and `footer` the distances from the page edge to the header and footer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RichPageMargins {
+    pub top: u32,
+    pub bottom: u32,
+    pub header: u32,
+    pub footer: u32,
+}
+
+/// Largest page margin a document keeps, in twips (22 inches).
+pub const MAX_PAGE_MARGIN_TWIPS: u32 = 31_680;
+
+impl RichPageMargins {
+    /// The new-document page setup of the reference editor (A4: top 20 mm and bottom 15 mm margins, header
+    /// and footer areas of 15 mm; `rhwp` `src/model/page.rs:36-51`, areas at `:238-269`), in this form: the
+    /// header starts 20 mm from the top and the body 35 mm; the footer ends 15 mm from the bottom and the
+    /// body 30 mm.
+    pub const HWP_DEFAULT: Self = Self {
+        top: 1984,
+        bottom: 1700,
+        header: 1134,
+        footer: 850,
+    };
+
+    /// Whether every value is within [`MAX_PAGE_MARGIN_TWIPS`].
+    pub fn within_bounds(&self) -> bool {
+        [self.top, self.bottom, self.header, self.footer]
+            .iter()
+            .all(|v| *v <= MAX_PAGE_MARGIN_TWIPS)
+    }
 }
 
 /// Most paragraphs of one header or footer; a file with more keeps the first ones.
@@ -132,6 +171,9 @@ pub const MAX_PAGE_FRAME_PARAGRAPHS: usize = 64;
 pub struct RichPageFrame {
     pub header: Vec<RichParagraph>,
     pub footer: Vec<RichParagraph>,
+    /// Where the page setup of the file puts them; `None` when it gives none (the editor then uses
+    /// [`RichPageMargins::HWP_DEFAULT`]). Only written and read together with a header or footer.
+    pub margins: Option<RichPageMargins>,
 }
 
 impl RichPageFrame {

@@ -94,8 +94,9 @@ pub use pdf_writer::PdfWriteOptions;
 pub use rich_document::{
     evaluate_table_formulas, frame_paragraph, normalize_hex_color, safe_link_target, RichAlignment,
     RichBlock, RichDocument, RichField, RichListKind, RichListNumber, RichNumberEnclosure,
-    RichNumberFormat, RichPageFrame, RichParagraph, RichRun, RichScript, RichToc,
-    MAX_PAGE_FRAME_PARAGRAPHS, MAX_TOC_LEVEL, MAX_TOC_PAGE, TOC_BOOKMARK_PREFIX,
+    RichNumberFormat, RichPageFrame, RichPageMargins, RichParagraph, RichRun, RichScript, RichToc,
+    MAX_PAGE_FRAME_PARAGRAPHS, MAX_PAGE_MARGIN_TWIPS, MAX_TOC_LEVEL, MAX_TOC_PAGE,
+    TOC_BOOKMARK_PREFIX,
 };
 pub use rich_image::{
     RichImage, IMAGE_PLACEHOLDER_TEXT, MAX_ALT_TEXT_BYTES, MAX_IMAGES_PER_DOCUMENT,
