@@ -91,7 +91,7 @@ pub use rules::{
 };
 pub use sheet_sort::{sorted_formula, SortKey};
 pub use sort_keys::{sort_order, SortColumn, MAX_SORT_KEYS};
-pub use spill::{SpillInfo, MAX_SPILL_CELLS, MAX_SPILL_ROUNDS};
+pub use spill::{SheetLock, SpillInfo, MAX_SPILL_CELLS, MAX_SPILL_ROUNDS};
 pub use types::*;
 pub use workbook::*;
 
@@ -208,6 +208,8 @@ pub struct SheetEngine {
     pub(crate) array_formulas: HashSet<PackedCellCoordinate>,
     /// The areas anchors fill in this sheet (PD-217).
     pub(crate) spill: spill::SpillTable,
+    /// The cells of a protected sheet that may be changed (PD-217).
+    pub(crate) spill_lock: Option<Arc<spill::SheetLock>>,
     pub(crate) dense_numbers: Vec<f64>,
     /// Cached dependency order of the last full recalculation; dropped on every edit.
     pub(crate) plan: OnceLock<dag::RecalcPlan>,
@@ -249,6 +251,7 @@ impl SheetEngine {
             subtotal_coords: HashSet::new(),
             array_formulas: HashSet::new(),
             spill: spill::SpillTable::default(),
+            spill_lock: None,
             dense_numbers: Vec::new(),
             plan: OnceLock::new(),
             formula_index: OnceLock::new(),

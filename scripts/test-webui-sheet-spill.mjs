@@ -119,3 +119,16 @@ test("the session sends no result, and folds the areas of its answer into the mo
   await store.evaluateLiveFormulaTargets(sheets, "Sheet1");
   assert.deepEqual(sent, []);
 });
+
+test("an area is forgotten even when the entry of its formula was edited and lost the size", async () => {
+  const { spill } = await spillApi();
+  const map = { A1: entry("", "=SEQUENCE(3)") };
+  spill.applyInfo(map, { cell: "A1", rows: 3, cols: 1, blocked: false }, () => "x");
+  map.A1 = entry("#SPILL!", "=SEQUENCE(4)");
+  spill.applyInfo(map, { cell: "A1", rows: 4, cols: 1, blocked: true }, () => "");
+  assert.equal(map.A2, undefined);
+  assert.equal(map.A3, undefined);
+  map.A1 = entry("typed");
+  spill.applyInfo(map, { cell: "A1", rows: 0, cols: 0, blocked: false }, () => "");
+  assert.equal(Object.keys(map).length, 1);
+});

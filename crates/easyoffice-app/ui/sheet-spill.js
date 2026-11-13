@@ -60,7 +60,11 @@
   // Forgets the cells the array of `anchorRef` filled.
   function clearArea(map, anchorRef) {
     const anchor = map[anchorRef];
-    if (!isAnchor(anchor)) return;
+    if (!isAnchor(anchor)) {
+      // The formula was edited or removed, so its entry no longer says how big the area was: look for its cells.
+      for (const ref of Object.keys(map)) if (map[ref]?.spillOf === anchorRef) delete map[ref];
+      return;
+    }
     forEachChild(anchorRef, anchor.spillRows, anchor.spillCols, (ref) => {
       if (map[ref]?.spillOf === anchorRef) delete map[ref];
     });
@@ -135,6 +139,36 @@
     return out;
   }
 
+  // The cells of a protected sheet that may be changed, for the engine (it will not place an array over the others):
+  // `{ unlocked, locked, rows, cols }`, 1-based, or `null` for a sheet that is not protected.
+  const MAX_LOCK_CELLS = 1000000;
+  function lockPayload(name, map, layoutApi) {
+    const p = layoutApi?.protectOf?.(name);
+    if (!p || p.on !== true) return null;
+    const unlocked = [];
+    const locked = [];
+    for (const ref of Object.keys(map || {})) {
+      const style = map[ref]?.style;
+      if (!style || (!style.unlocked && !style.locked)) continue;
+      const at = parseRef(ref);
+      if (at) (style.unlocked ? unlocked : locked).push([at.row, at.col, at.col]);
+    }
+    // Ranges allowed without a password are open to everyone.
+    for (const range of p.ranges || []) {
+      if (range.pwd) continue;
+      for (const box of range.sqref || []) {
+        const [a, b = a] = String(box).split(":");
+        const from = parseRef(a);
+        const to = parseRef(b);
+        for (let r = from?.row; from && to && r <= to.row && unlocked.length < MAX_LOCK_CELLS; r += 1) {
+          unlocked.push([r, Math.min(from.col, to.col), Math.max(from.col, to.col)]);
+        }
+      }
+    }
+    const runs = (axis) => (layoutApi.unlockedOf(name, axis) || []).map((r) => [r[0], r[1]]);
+    return { unlocked, locked, rows: runs("row"), cols: runs("col") };
+  }
+
   // The engine is not told about cells an array filled.
   const isInput = (entry) => !isChild(entry);
 
@@ -153,6 +187,7 @@
     setValue,
     replaceAll,
     areasOf,
+    lockPayload,
     clearArea,
   };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

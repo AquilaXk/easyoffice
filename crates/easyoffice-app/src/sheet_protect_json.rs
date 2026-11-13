@@ -388,6 +388,61 @@ pub(crate) fn moved_runs_json(
     Ok(runs_json(&runs))
 }
 
+/// The cells of a protected sheet that may be changed, for the arrays that spill (PD-217):
+/// `{"unlocked":[[row, first, last], ...], "locked": [...], "rows": [[first, last], ...], "cols": [...]}`,
+/// 1-based. Over a limit is refused.
+pub(crate) fn parse_sheet_lock(
+    v: &StrictJsonValue,
+) -> Result<easyoffice_sheet::SheetLock, EasyOfficeError> {
+    const MAX_CELL_RUNS: usize = 1_000_000;
+    let bad =
+        || EasyOfficeError::InvalidArgument("JSON 'lock' 필드가 올바르지 않습니다.".to_string());
+    let obj = v.as_object().ok_or_else(bad)?;
+    let cells = |name: &str| -> Result<Vec<(u32, u32, u32)>, EasyOfficeError> {
+        let Some(items) = StrictJsonValue::get_field(obj, name) else {
+            return Ok(Vec::new());
+        };
+        let items = items.as_array().ok_or_else(bad)?;
+        if items.len() > MAX_CELL_RUNS {
+            return Err(EasyOfficeError::ResourceBudgetExceeded(
+                "잠금 해제 셀 수가 한도를 넘었습니다.".to_string(),
+            ));
+        }
+        let mut out = Vec::with_capacity(items.len());
+        for item in items {
+            let n: Vec<u32> = item
+                .as_array()
+                .ok_or_else(bad)?
+                .iter()
+                .map(|x| {
+                    x.as_u64()
+                        .filter(|n| (1..=1_048_576).contains(n))
+                        .map(|n| n as u32 - 1)
+                })
+                .collect::<Option<_>>()
+                .ok_or_else(bad)?;
+            let [r, c0, c1] = n[..] else {
+                return Err(bad());
+            };
+            out.push((r, c0.min(c1), c0.max(c1)));
+        }
+        out.sort_unstable();
+        Ok(out)
+    };
+    let runs = |name: &str, last: u32| -> Result<Vec<(u32, u32)>, EasyOfficeError> {
+        match StrictJsonValue::get_field(obj, name) {
+            Some(v) => parse_runs(v, last, name),
+            None => Ok(Vec::new()),
+        }
+    };
+    Ok(easyoffice_sheet::SheetLock {
+        unlocked_cells: cells("unlocked")?,
+        locked_cells: cells("locked")?,
+        unlocked_rows: runs("rows", 1_048_575)?,
+        unlocked_cols: runs("cols", 16_383)?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

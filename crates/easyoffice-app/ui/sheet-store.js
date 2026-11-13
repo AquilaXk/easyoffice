@@ -168,6 +168,8 @@
       rules: new Map(),
       // The names payload the session holds (see `syncNames`), null before the first one is sent.
       names: null,
+      // The lock payload of each protected sheet the session was told (see `syncLocks`).
+      locks: new Map(),
       gen: 0,
     };
     let sessionChain = Promise.resolve();
@@ -184,6 +186,7 @@
       session.values = new Map();
       session.rules = new Map();
       session.names = null;
+      session.locks = new Map();
     }
 
     // Forgets the session and tells the engine to release it (an unknown id is harmless there).
@@ -302,12 +305,13 @@
       }
       const spillsChanged = takeSpills(sheetsMap, last);
       await syncRules(names);
+      const lockChanged = await syncLocks(names, sheetsMap);
       return {
         formulaTargets,
         circular: last.circular === true,
         timedOut: last.timedOut === true,
         pending: last.pending,
-        spillsChanged,
+        spillsChanged: spillsChanged || lockChanged,
       };
     }
 
@@ -344,6 +348,31 @@
       for (const c of Array.isArray(res.changed) ? res.changed : []) session.values.set(c.sheet + "!" + c.cell, c.value);
       takeRuleChanges(res);
       session.names = payload;
+    }
+
+    // Tells the engine which cells of the protected sheets may be changed, when that differs from what it holds: an array is
+    // not placed over the others (PD-217). Returns whether the answer changed the model.
+    async function syncLocks(names, sheetsMap) {
+      const layoutApi = host.__EASYOFFICE_SHEET_LAYOUT__;
+      if (!spillApi || !layoutApi) return false;
+      let changed = false;
+      for (const name of names) {
+        const payload = JSON.stringify(spillApi.lockPayload(name, sheetsMap[name], layoutApi));
+        if ((session.locks.get(name) ?? "null") === payload) continue;
+        const res = await sessionCall({ sessionAction: "locks", session: session.id, sheet: name, lock: JSON.parse(payload) });
+        if (!res || res.expired === true) throw new Error("시트 세션이 만료되었습니다.");
+        if (res.refused) continue;
+        session.locks.set(name, payload);
+        for (const c of Array.isArray(res.changed) ? res.changed : []) session.values.set(c.sheet + "!" + c.cell, c.value);
+        if (takeSpills(sheetsMap, res)) changed = true;
+        // a formula cell whose value changed shows it
+        for (const c of Array.isArray(res.changed) ? res.changed : []) {
+          const held = sheetsMap[c.sheet]?.[c.cell];
+          if (held && isFormulaStr(held.formula || "")) held.value = String(c.value);
+        }
+        changed = true;
+      }
+      return changed;
     }
 
     // Rules exist on the page, or the session still holds rules the page has since cleared.

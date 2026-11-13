@@ -95,6 +95,49 @@ impl SpillTable {
     }
 }
 
+/// Which cells of a protected sheet may be changed (PD-217): an array cannot be placed over a cell
+/// that may not, as it cannot be typed into. Unlocked cells are lists of `(row, first column, last
+/// column)`, sorted; rows and columns are runs `(first, last)`, zero-based.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SheetLock {
+    pub unlocked_cells: Vec<(u32, u32, u32)>,
+    pub locked_cells: Vec<(u32, u32, u32)>,
+    pub unlocked_rows: Vec<(u32, u32)>,
+    pub unlocked_cols: Vec<(u32, u32)>,
+}
+
+fn in_cells(cells: &[(u32, u32, u32)], row: u32, col: u32) -> bool {
+    let from = cells.partition_point(|&(r, _, _)| r < row);
+    cells[from..]
+        .iter()
+        .take_while(|&&(r, _, _)| r == row)
+        .any(|&(_, c0, c1)| (c0..=c1).contains(&col))
+}
+
+fn in_runs(runs: &[(u32, u32)], at: u32) -> bool {
+    runs.iter().any(|&(a, b)| (a..=b).contains(&at))
+}
+
+impl SheetLock {
+    /// Whether the cell may be changed.
+    pub fn is_unlocked(&self, row: u32, col: u32) -> bool {
+        !in_cells(&self.locked_cells, row, col)
+            && (in_cells(&self.unlocked_cells, row, col)
+                || in_runs(&self.unlocked_rows, row)
+                || in_runs(&self.unlocked_cols, col))
+    }
+
+    /// Whether every cell of the rectangle may be changed.
+    fn covers(&self, (r0, c0, r1, c1): (u32, u32, u32, u32)) -> bool {
+        let whole_rows = (r0..=r1).all(|r| in_runs(&self.unlocked_rows, r));
+        let whole_cols = (c0..=c1).all(|c| in_runs(&self.unlocked_cols, c));
+        if self.locked_cells.is_empty() && (whole_rows || whole_cols) {
+            return true;
+        }
+        (r0..=r1).all(|r| (c0..=c1).all(|c| self.is_unlocked(r, c)))
+    }
+}
+
 /// What a pass decided for one anchor.
 #[derive(Debug)]
 pub(crate) struct Pending {
@@ -216,6 +259,17 @@ impl SheetEngine {
         let Some((last_row, last_col)) = rect_end(anchor, rows, cols) else {
             return false;
         };
+        if let Some(lock) = &self.spill_lock {
+            // The anchor's cell is the formula's own; the cells after it must be ones that may be changed.
+            let rows = (anchor.row(), last_row);
+            let cols = (anchor.col(), last_col);
+            let rest_ok = |r0, c0, r1, c1| r0 > r1 || c0 > c1 || lock.covers((r0, c0, r1, c1));
+            let ok = rest_ok(rows.0, cols.0 + 1, rows.1, cols.1)
+                && rest_ok(rows.0 + 1, cols.0, rows.1, cols.1);
+            if !ok {
+                return false;
+            }
+        }
         let blocked_by = |cell: PackedCellCoordinate| {
             self.cells.contains_key(&cell)
                 || self.spill.owner.get(&cell).is_some_and(|&o| o != anchor)
@@ -409,6 +463,11 @@ pub(crate) fn release_anchor(
 }
 
 impl SheetEngine {
+    /// Sets which cells of the (protected) sheet may be changed; `None` for a sheet that is not protected.
+    pub fn set_spill_lock(&mut self, lock: Option<SheetLock>) {
+        self.spill_lock = lock.map(Arc::new);
+    }
+
     /// Forgets every area of the sheet (the cells they filled stop being cells).
     pub(crate) fn clear_spills(&mut self) {
         if !self.spill.is_empty() {

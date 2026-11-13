@@ -323,3 +323,49 @@ fn cell_col(n: u32) -> String {
     }
     s
 }
+
+#[test]
+fn a_protected_sheet_does_not_let_an_array_spill_over_locked_cells() {
+    use easyoffice_sheet::SheetLock;
+    let mut m = new_empty_model();
+    // protected, only the formula's own cell unlocked: the cells after it are locked
+    let only_anchor = SheetLock {
+        unlocked_cells: vec![(0, 0, 0)],
+        ..SheetLock::default()
+    };
+    m.session()
+        .set_sheet_lock("Sheet1", Some(only_anchor))
+        .unwrap();
+    m._set("A1", "=SEQUENCE(3, 2)");
+    m.evaluate();
+    assert_eq!(spilled(&m, &["A1", "B1", "A3"]), ["#SPILL!", "", ""]);
+    // the whole area unlocked: it spills (the blocked array is tried again when the lock changes)
+    let area = SheetLock {
+        unlocked_cells: vec![(0, 0, 1), (1, 0, 1), (2, 0, 1)],
+        ..SheetLock::default()
+    };
+    m.session().set_sheet_lock("Sheet1", Some(area)).unwrap();
+    m.evaluate();
+    assert_eq!(spilled(&m, &["A1", "B1", "A3", "B3"]), ["1", "2", "5", "6"]);
+    // protecting a sheet leaves an array that is placed where it is until its formula is calculated again
+    let nothing = SheetLock::default();
+    m.session().set_sheet_lock("Sheet1", Some(nothing)).unwrap();
+    m.evaluate();
+    assert_eq!(m._get_text("B3"), "6");
+    m._set("A1", "=SEQUENCE(3, 2)+0");
+    m.evaluate();
+    assert_eq!(m._get_text("A1"), "#SPILL!");
+    // whole columns unlocked count too, and a cell locked inside them wins
+    let columns = SheetLock {
+        unlocked_cols: vec![(0, 1)],
+        locked_cells: vec![(2, 1, 1)],
+        ..SheetLock::default()
+    };
+    m.session().set_sheet_lock("Sheet1", Some(columns)).unwrap();
+    m.evaluate();
+    assert_eq!(m._get_text("A1"), "#SPILL!");
+    // not protected any more
+    m.session().set_sheet_lock("Sheet1", None).unwrap();
+    m.evaluate();
+    assert_eq!(m._get_text("B3"), "6");
+}

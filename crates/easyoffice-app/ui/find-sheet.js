@@ -79,6 +79,8 @@
     // Applies the edits of one cell to the candidate entry. A formula cell is edited only when searching
     // by formula (otherwise its text is a result); false when the cell cannot take the edit.
     function editEntry(entry, edits, formula) {
+      // A cell an array filled is a result of the array's formula: it is found, never replaced (PD-217).
+      if (entry.spillOf) return false;
       const isFormulaCell = isFormulaStr(entry.formula || "");
       if (isFormulaCell && !formula) return false;
       const next = applyEdits([cellText(entry, formula)], edits)[0];

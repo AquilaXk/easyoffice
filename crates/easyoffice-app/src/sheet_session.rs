@@ -22,7 +22,7 @@ use easyoffice_formats::{
 };
 use easyoffice_sheet::{
     AxisBudget, AxisEdit, Budget, CellChange, ChangedCell, Footprint, PackedCellCoordinate,
-    RecalcError, RecalcOutcome, RecalcSession, Verdict, WorkbookEngine, MAX_EVAL_TIME,
+    RecalcError, RecalcOutcome, RecalcSession, SheetLock, Verdict, WorkbookEngine, MAX_EVAL_TIME,
 };
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
@@ -459,6 +459,32 @@ impl Registry {
         Ok(Applied::Done(json))
     }
 
+    /// Tells the session which cells of `sheet` may be changed and recalculates the arrays of it (PD-217).
+    pub(crate) fn set_lock(
+        &self,
+        id: &str,
+        owner: &str,
+        sheet: &str,
+        mask: Option<SheetLock>,
+        now: Instant,
+    ) -> Result<Applied, EasyOfficeError> {
+        let Some(handle) = self.checkout(id, owner, now) else {
+            return Ok(Applied::Expired);
+        };
+        let Ok(mut session) = handle.lock() else {
+            lock(&self.inner).sessions.remove(id);
+            return Ok(Applied::Expired);
+        };
+        match session.set_sheet_lock(sheet, mask) {
+            Ok(()) => {}
+            Err(RecalcError::Invalid(err)) => return Err(err),
+            Err(RecalcError::OverBudget) => return Ok(Applied::Refused),
+        }
+        let outcome = session.recalculate();
+        let json = recalc_answer(id, &mut session, &[], &outcome);
+        Ok(Applied::Done(json))
+    }
+
     /// Forgets session `id` (it is expired for its page from now on).
     pub(crate) fn forget(&self, id: &str) {
         lock(&self.inner).sessions.remove(id);
@@ -773,6 +799,7 @@ impl EasyOfficeIpcRouter {
             "open" => Self::sheet_session_open(entries, owner),
             "apply" => Self::sheet_session_apply(entries, owner),
             "rules" => Self::sheet_session_rules(entries, owner),
+            "locks" => Self::sheet_session_locks(entries, owner),
             "structure" => Self::sheet_session_structure(entries, owner),
             "names" => Self::sheet_session_names(entries, owner),
             "nameCheck" => Self::sheet_name_check(entries),
@@ -858,6 +885,25 @@ impl EasyOfficeIpcRouter {
             // Rules over the hit budget leave the session usable; only the rules are refused.
             Err(EasyOfficeError::ResourceBudgetExceeded(_)) => Ok(REFUSED_RULES.to_string()),
             Err(err) => Err(err),
+        }
+    }
+
+    /// `locks` `{session, sheet, lock}`: `lock` is `null` for a sheet that is not protected, else
+    /// `{"unlocked":[[row,first,last],...],"locked":[...],"rows":[[first,last],...],"cols":[...]}`, 1-based.
+    fn sheet_session_locks(
+        entries: &[(String, StrictJsonValue)],
+        owner: &str,
+    ) -> Result<String, EasyOfficeError> {
+        let id = session_id(entries)?;
+        let sheet = Self::optional_json_str(entries, "sheet")?.unwrap_or("");
+        let lock = match StrictJsonValue::get_field(entries, "lock") {
+            None | Some(StrictJsonValue::Null) => None,
+            Some(v) => Some(crate::sheet_protect_json::parse_sheet_lock(v)?),
+        };
+        match registry().set_lock(id, owner, sheet, lock, Instant::now())? {
+            Applied::Done(json) => Ok(json),
+            Applied::Expired => Ok(EXPIRED.to_string()),
+            Applied::Refused => Ok(REFUSED.to_string()),
         }
     }
 

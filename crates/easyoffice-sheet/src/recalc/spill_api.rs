@@ -31,6 +31,27 @@ impl RecalcSession {
             .is_some_and(|v| self.dirty.contains(v))
     }
 
+    /// Tells the session which cells of `sheet` may be changed (`None`: the sheet is not protected). An array that
+    /// is placed stays where it is until its formula is calculated again; an array that could not be placed is
+    /// tried again by the next [`recalculate`](Self::recalculate).
+    pub fn set_sheet_lock(
+        &mut self,
+        sheet: &str,
+        lock: Option<crate::SheetLock>,
+    ) -> Result<(), super::RecalcError> {
+        let idx = self.sheet_index(sheet)?;
+        let engine = &mut self.wb.sheets_mut()[usize::from(idx)];
+        engine.set_spill_lock(lock);
+        let anchors: Vec<PackedCellCoordinate> =
+            engine.spill.blocked().map(|(anchor, _)| anchor).collect();
+        for coord in anchors {
+            if let Some(v) = self.graph.vertex_at(idx, coord) {
+                self.dirty.insert(v);
+            }
+        }
+        Ok(())
+    }
+
     /// Calculates formula text (`=...`) as if it stood in `anchor`, reading the session's values.
     pub fn evaluate_text(
         &mut self,

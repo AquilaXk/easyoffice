@@ -22,7 +22,7 @@
   const T_BOOK_OFF = "통합 문서 보호 해제";
 
   function createSheetProtectUi(deps) {
-    const { document, grid, getActiveSheetName, sheetStoreHelpers, commitIfEditing, enqueueWorkspaceHistoryOp, drainInFlightSheetWork, refreshChrome } = deps;
+    const { document, grid, getActiveSheetName, sheetStoreHelpers, commitIfEditing, enqueueWorkspaceHistoryOp, drainInFlightSheetWork, refreshChrome, recalculateActiveSheetFormulas } = deps;
     const kit = host.__EASYOFFICE_CREATE_SHEET_DIALOG_KIT__(document);
     const layoutApi = host.__EASYOFFICE_SHEET_LAYOUT__;
     const guard = host.__EASYOFFICE_SHEET_PROTECT__;
@@ -67,6 +67,8 @@
         refreshChrome();
         refreshMenu();
         say(text);
+        // The arrays of the sheet are placed again over the cells the new state lets them have (PD-217).
+        await recalculateActiveSheetFormulas?.();
         return true;
       });
     }
