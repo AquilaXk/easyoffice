@@ -559,6 +559,16 @@ fn expand_all(
                         None => Repl::Error(FormulaError::Name),
                     }
                 });
+                // A definition that is only another name (`b = a`) comes out as that name's shared tree: it is stored
+                // as the tree's top layer, so the top of a stored definition is always the real call or reference.
+                let sizes = sizes.map(|(logical, phys)| {
+                    let mut phys = phys;
+                    while let Expr::Shared(inner) = &expr {
+                        expr = inner.expr.clone();
+                        phys = physical_count(&expr);
+                    }
+                    (logical, phys)
+                });
                 match sizes {
                     Ok((logical, phys)) if table_nodes.saturating_add(phys) <= MAX_TABLE_NODES => {
                         table_nodes += phys;

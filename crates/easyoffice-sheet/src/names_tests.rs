@@ -418,3 +418,97 @@ fn the_definitions_of_a_workbook_stop_at_the_table_bound() {
     assert_eq!(value(&wb, "Sheet1", "X1"), V::Number(13_000.0));
     assert_eq!(value(&wb, "Sheet1", "X2"), V::Error(FormulaError::Value));
 }
+
+const SHAPE_FUNCTIONS: [&str; 24] = [
+    "SUM({n})",
+    "ROWS({n})",
+    "COLUMNS({n})",
+    "COUNT({n})",
+    "COUNTA({n})",
+    "COUNTBLANK({n})",
+    "AVERAGE({n})",
+    "MIN({n})",
+    "MAX({n})",
+    "SMALL({n},2)",
+    "LARGE({n},1)",
+    "STDEV({n})",
+    "PRODUCT({n})",
+    "SUMSQ({n})",
+    "COUNTIF({n},2)",
+    "SUMIF({n},\">1\")",
+    "MATCH(2,{n},0)",
+    "VLOOKUP(2,{n},1,FALSE)",
+    "ROW({n})",
+    "COLUMN({n})",
+    "RANK(2,{n})",
+    "INDEX({n},1)",
+    "SUMPRODUCT({n},{n})",
+    "MEDIAN({n})",
+];
+
+/// What a name stands for must not change how a function reads its argument: for every definition that is a
+/// reference or a call that yields one, an alias of it (one step and two steps) gives what the same function
+/// gives with the definition written out.
+#[test]
+fn an_alias_of_a_name_is_read_by_the_functions_like_the_name_and_like_the_definition_itself() {
+    let mut wb = WorkbookEngine::new();
+    wb.add_sheet("Sheet1");
+    for r in 1..=5u32 {
+        wb.set_cell("Sheet1", &format!("A{r}"), r.to_string())
+            .unwrap();
+        wb.set_cell("Sheet1", &format!("B{r}"), (r * 10).to_string())
+            .unwrap();
+    }
+    let bases = [
+        ("off", "OFFSET(Sheet1!$A$1,0,0,3,1)"),
+        ("tr", "TRANSPOSE(Sheet1!$A$1:$B$2)"),
+        ("mm", "MMULT(Sheet1!$A$1:$B$2,Sheet1!$A$1:$B$2)"),
+        ("rng", "Sheet1!$A$1:$B$3"),
+    ];
+    let mut defs = Vec::new();
+    for (base, text) in bases {
+        defs.push(def(&format!("{base}_0"), None, text));
+        defs.push(def(&format!("{base}_1"), None, &format!("{base}_0")));
+        defs.push(def(&format!("{base}_2"), None, &format!("{base}_1")));
+    }
+    wb.set_names(&defs).unwrap();
+    let mut checked = 0;
+    for (base, text) in bases {
+        for template in SHAPE_FUNCTIONS {
+            let oracle_cell = format!("Z{}", 1 + checked);
+            wb.set_cell(
+                "Sheet1",
+                &oracle_cell,
+                format!("={}", template.replace("{n}", text)),
+            )
+            .unwrap();
+            let want = value(&wb, "Sheet1", &oracle_cell);
+            for depth in 0..=2 {
+                let cell = format!("Y{}", 1 + checked * 3 + depth);
+                let formula = template.replace("{n}", &format!("{base}_{depth}"));
+                wb.set_cell("Sheet1", &cell, format!("={formula}")).unwrap();
+                assert_eq!(
+                    value(&wb, "Sheet1", &cell),
+                    want,
+                    "{formula} against {}",
+                    template.replace("{n}", text)
+                );
+            }
+            checked += 1;
+        }
+    }
+    assert_eq!(checked, 4 * 24);
+    // The values the review found wrong, spelled out.
+    wb.set_cell("Sheet1", "W1", "=SUM(off_2)").unwrap();
+    wb.set_cell("Sheet1", "W2", "=SUM(tr_2)").unwrap();
+    wb.set_cell("Sheet1", "W3", "=ROWS(tr_2)").unwrap();
+    wb.set_cell("Sheet1", "W4", "=SUM(mm_2)").unwrap();
+    assert_eq!(value(&wb, "Sheet1", "W1"), V::Number(6.0));
+    assert_eq!(value(&wb, "Sheet1", "W2"), V::Number(33.0));
+    assert_eq!(value(&wb, "Sheet1", "W3"), V::Number(2.0));
+    assert_eq!(
+        value(&wb, "Sheet1", "W4"),
+        V::Number(693.0),
+        "the sum of [[1,10],[2,20]] squared"
+    );
+}

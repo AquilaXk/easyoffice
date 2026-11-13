@@ -194,6 +194,7 @@ impl SheetEngine {
     ) -> Result<EvaluatedCellValue, FormulaError> {
         let mut fold = AggFold::<K>::new();
         for arg in args {
+            let arg = arg.peeled();
             match arg {
                 Expr::Range(range) => fold = self.agg_range(fold, range, ctx, depth)?,
                 Expr::SheetRange { sheet, range } => {

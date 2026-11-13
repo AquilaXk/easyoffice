@@ -15,7 +15,7 @@ use crate::{EvalContext, EvaluatedCellValue as V, Expr, FormulaError as E, Sheet
 type Fallible<T> = Result<T, E>;
 
 fn is_reference(arg: &Expr) -> bool {
-    match arg {
+    match arg.peeled() {
         Expr::Cell(_) | Expr::Range(_) | Expr::SheetCell { .. } | Expr::SheetRange { .. } => true,
         Expr::FuncCall { name, .. } => {
             crate::functions_matrix::is_array_fn(name)

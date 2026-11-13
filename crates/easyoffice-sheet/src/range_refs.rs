@@ -217,6 +217,7 @@ impl SheetEngine {
         if depth > Self::MAX_RECURSION_DEPTH {
             return Err(FormulaError::Ref);
         }
+        let expr = expr.peeled();
         match expr {
             Expr::ErrorLiteral(e) => Err(*e),
             Expr::Cell(c) => Ok(CellRange::new(*c, *c).ok().map(|r| (None, r, false))),
