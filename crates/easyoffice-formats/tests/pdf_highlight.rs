@@ -15,6 +15,8 @@ const PITCH: f64 = 16.0;
 const BELOW: f64 = 3.0;
 const ABOVE: f64 = 10.0;
 const EM: f64 = 12.0;
+/// A space is a Latin space (0.278 em) in the Korean font as well: its declared widths for the ASCII codes are Helvetica's.
+const SPACE: f64 = 0.278;
 
 fn doc(lines: &[&str]) -> RichDocument {
     RichDocument {
@@ -84,14 +86,14 @@ fn assert_quad(actual: &[f64], expected: &[f64]) {
 
 #[test]
 fn a_korean_phrase_is_marked_where_it_is_drawn() {
-    // "가나다 " is 3 em + a half-em space before the phrase; the phrase is 5 em wide.
+    // "가나다 " is 3 em + a Latin space before the phrase; the phrase is 5 em wide.
     let (pdf, warnings) = write(
         &doc(&["가나다 하이라이트 라마"]),
         highlight("하이라이트", PdfHighlightKind::Highlight),
     );
     assert!(warnings.is_empty(), "{warnings:?}");
     assert_eq!(pdf.matches("/Subtype /Highlight").count(), 1, "{pdf}");
-    let x0 = LEFT + 3.5 * EM;
+    let x0 = LEFT + (3.0 + SPACE) * EM;
     assert_eq!(quads(&pdf).len(), 1);
     assert_quad(&quads(&pdf)[0], &quad(x0, x0 + 5.0 * EM, FIRST_BASELINE));
     assert!(pdf.contains("/C [1 1 0]"), "{pdf}");
@@ -115,7 +117,7 @@ fn an_underline_is_an_underline_annotation_with_its_own_appearance() {
     assert_eq!(pdf.matches("/Subtype /Underline").count(), 1, "{pdf}");
     assert_eq!(pdf.matches("/Subtype /Highlight").count(), 0);
     assert!(pdf.contains("/C [1 0 0]"), "{pdf}");
-    let x0 = LEFT + 2.5 * EM;
+    let x0 = LEFT + (2.0 + SPACE) * EM;
     assert_quad(&quads(&pdf)[0], &quad(x0, x0 + EM, FIRST_BASELINE));
     assert!(
         pdf.contains("1 0 0 RG"),
@@ -132,12 +134,12 @@ fn latin_text_uses_the_helvetica_advances_and_mixed_lines_the_korean_font_widths
     );
     let x0 = LEFT + EM * 2.556;
     assert_quad(&quads(&pdf)[0], &quad(x0, x0 + EM * 2.611, FIRST_BASELINE));
-    // A line with Hangul is shown in the Korean font: ASCII is half an em wide there.
+    // A line with Hangul is shown in the Korean font, where ASCII keeps its Helvetica width.
     let (pdf, _) = write(
         &doc(&["Hello 월드 끝"]),
         highlight("월드", PdfHighlightKind::Highlight),
     );
-    let x0 = LEFT + 3.0 * EM;
+    let x0 = LEFT + EM * 2.556;
     assert_quad(&quads(&pdf)[0], &quad(x0, x0 + 2.0 * EM, FIRST_BASELINE));
 }
 
@@ -150,11 +152,15 @@ fn every_occurrence_gets_an_annotation_on_the_line_it_is_on() {
     let found = quads(&pdf);
     assert_eq!(found.len(), 3, "{found:?}");
     assert_quad(&found[0], &quad(LEFT, LEFT + EM, FIRST_BASELINE));
-    let second = LEFT + 2.5 * EM;
+    let second = LEFT + (2.0 + SPACE) * EM;
     assert_quad(&found[1], &quad(second, second + EM, FIRST_BASELINE));
     assert_quad(
         &found[2],
-        &quad(LEFT + 1.5 * EM, LEFT + 2.5 * EM, FIRST_BASELINE - PITCH),
+        &quad(
+            LEFT + (1.0 + SPACE) * EM,
+            LEFT + (2.0 + SPACE) * EM,
+            FIRST_BASELINE - PITCH,
+        ),
     );
 }
 
@@ -185,7 +191,7 @@ fn a_phrase_across_a_break_at_a_space_is_marked_on_both_lines_without_the_space(
     );
     let found = quads(&pdf);
     assert_eq!(found.len(), 1, "{found:?}");
-    let first = LEFT + 37.0 * EM + 0.5 * EM;
+    let first = LEFT + 37.0 * EM + SPACE * EM;
     let mut expected = quad(first, first + 2.0 * EM, FIRST_BASELINE);
     expected.extend(quad(LEFT, LEFT + 2.0 * EM, FIRST_BASELINE - PITCH));
     assert_quad(&found[0], &expected);

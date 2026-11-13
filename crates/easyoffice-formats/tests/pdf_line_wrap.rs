@@ -29,10 +29,32 @@ fn written_pages(body: &str) -> Vec<Vec<String>> {
         .collect()
 }
 
-/// Width of a non-ASCII line in the Korean font: full-width glyphs are 1000, ASCII 500.
+/// The widths the written file declares for the ASCII codes of the Korean font (`/W [1 [...]]`, code 0x20 first).
+fn declared_ascii_widths() -> Vec<u32> {
+    let bytes = PdfSerializer::serialize(&model("한"));
+    let text = String::from_utf8_lossy(&bytes).into_owned();
+    let start = text
+        .find("/W [1 [")
+        .expect("the Korean font declares widths")
+        + "/W [1 [".len();
+    let end = start + text[start..].find(']').unwrap();
+    text[start..end]
+        .split_whitespace()
+        .map(|n| n.parse().unwrap())
+        .collect()
+}
+
+/// Width of a non-ASCII line in the Korean font: full-width glyphs are 1000, ASCII the declared width.
 fn cid_units(line: &str) -> u32 {
+    let ascii = declared_ascii_widths();
     line.chars()
-        .map(|c| if c.is_ascii() { 500 } else { 1000 })
+        .map(|c| {
+            if c.is_ascii() {
+                ascii[c as usize - 0x20]
+            } else {
+                1000
+            }
+        })
         .sum()
 }
 

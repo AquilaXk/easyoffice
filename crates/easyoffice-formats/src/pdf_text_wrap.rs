@@ -229,7 +229,7 @@ mod tests {
     #[test]
     fn units_before_uses_the_font_of_the_whole_line() {
         assert_eq!(units_before("Hello", 2), 722 + 556);
-        assert_eq!(units_before("Hello 한", 2), 500 + 500);
+        assert_eq!(units_before("Hello 한", 2), 722 + 556);
         assert_eq!(units_before("한글", "한".len()), 1000);
     }
 }
