@@ -78,8 +78,7 @@
       sheetStoreHelpers,
       enqueueWorkspaceHistoryOp,
       drainInFlightSheetWork,
-      pushRawUndoSnapshot,
-      captureWorkspaceSnapshot,
+      sheetHistory,
       flushFocusedSheetCellBeforeSwitch,
       performSwitchSheetTabAsync,
       applyCellEdits,
@@ -104,8 +103,9 @@
         if (host.__EASYOFFICE_SHEET_PROTECT__?.guardAction(sheet, "formatCells") === false) return false;
         const next = structuredClone(rules.get(sheet));
         mutate(next);
-        pushRawUndoSnapshot(captureWorkspaceSnapshot(false));
+        const record = sheetHistory.begin({ parts: ["sheetRules"] });
         rules.set(sheet, next);
+        sheetHistory.commit(record);
         return true;
       });
     }
@@ -705,8 +705,7 @@
         getRange,
         sheetStoreHelpers,
         enqueueWorkspaceHistoryOp,
-        pushRawUndoSnapshot,
-        captureWorkspaceSnapshot,
+        sheetHistory,
         flushFocusedSheetCellBeforeSwitch,
         performSwitchSheetTabAsync,
         selectionText,

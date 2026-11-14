@@ -190,8 +190,7 @@
       refreshWindowFromModel,
       enqueueWorkspaceHistoryOp,
       drainInFlightSheetWork,
-      pushRawUndoSnapshot,
-      captureWorkspaceSnapshot,
+      sheetHistory,
       sortRange,
     } = deps;
     const layoutApi = host.__EASYOFFICE_SHEET_LAYOUT__;
@@ -293,15 +292,16 @@
       return true;
     }
 
-    // One undoable change of the filter of the active sheet; `cells` when the change moves cells (a
-    // sort), else the undo step leaves the cells out.
-    function change(work, cells = false) {
+    // One undoable change of the filter of the active sheet; `rangeOf(name)` is the range of the cells the change
+    // moves (a sort), else the undo step leaves the cells out.
+    function change(work, rangeOf = null) {
       return enqueueWorkspaceHistoryOp(async () => {
         await drainInFlightSheetWork();
         const name = syncCells();
-        const before = captureWorkspaceSnapshot(false, !cells);
+        const range = rangeOf?.(name);
+        const record = sheetHistory.begin({ parts: ["sheetLayout"], ...(range ? { range } : {}) });
         const done = await work(name);
-        if (done) pushRawUndoSnapshot(before);
+        if (done) sheetHistory.commit(record);
         return done;
       });
     }
@@ -439,7 +439,10 @@
         say(descending ? "내림차순 정렬" : "오름차순 정렬");
         changed();
         return true;
-      }, true);
+      }, (name) => {
+        const filter = filterOf(name);
+        return filter ? { r1: filter.range.r1 + 1, r2: filter.range.r2, c1: filter.range.c1, c2: filter.range.c2 } : null;
+      });
     }
 
     function run(action) {

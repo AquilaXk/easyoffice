@@ -26,8 +26,7 @@
       sortRange,
       enqueueWorkspaceHistoryOp,
       drainInFlightSheetWork,
-      pushRawUndoSnapshot,
-      captureWorkspaceSnapshot,
+      sheetHistory,
     } = deps;
     const { $, setChecked, openDialog, closeDialog, note } = kit;
     const filterCore = host.__EASYOFFICE_SHEET_FILTER_CORE__;
@@ -178,9 +177,9 @@
       return enqueueWorkspaceHistoryOp(async () => {
         await drainInFlightSheetWork();
         sheetDataStore[getActiveSheetName()] = snapshotDomSheetCells();
-        const before = captureWorkspaceSnapshot(false);
+        const change = sheetHistory.begin({ range: spec.range });
         const moved = await sortRange(spec);
-        if (moved) pushRawUndoSnapshot(before);
+        if (moved) sheetHistory.commit(change);
         return moved;
       });
     }

@@ -17,8 +17,7 @@
       enqueueWorkspaceHistoryOp,
       drainInFlightSheetWork,
       snapshotDomSheetCells,
-      pushRawUndoSnapshot,
-      captureWorkspaceSnapshot,
+      sheetHistory,
       bumpExtent,
       refreshWindowFromModel,
       recalculateActiveSheetFormulas,
@@ -87,10 +86,11 @@
         const map = snapshotDomSheetCells();
         sheetDataStore[curSheet] = map;
         if (!editsAllowed(edits, curSheet, map, widthCols.length)) return false;
-        pushRawUndoSnapshot(captureWorkspaceSnapshot(false));
+        const change = sheetHistory.begin({ refs: edits.map((edit) => edit.ref), parts: widthCols.length > 0 ? ["sheetColumnWidths"] : [] });
         const protectedSheet = Boolean(host.__EASYOFFICE_SHEET_PROTECT__?.isOn(curSheet));
         for (const edit of edits) writeEdit(map, edit, curSheet, protectedSheet);
         for (const col of widthCols) grid.applyColWidth(Number(col), widths[col]);
+        sheetHistory.commit(change);
         grid.renderWindow(false);
         refreshWindowFromModel();
         await recalculateActiveSheetFormulas({ updateFocusedDisplay: true });

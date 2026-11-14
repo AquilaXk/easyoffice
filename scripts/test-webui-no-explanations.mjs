@@ -74,11 +74,11 @@ test("a ribbon command never puts its id, tab or context on the status lines", a
 
 test("the status line never shows an internal module id in parentheses", () => {
   const MODULE_ID = /\((?:SHEET|DOC|HWP|SLIDE|PDF)\)/;
-  for (const name of ["ribbon-history.js", "sheet-controller.js", "workspace-tools.js", "workspace-panels.js", "app.js"]) {
+  for (const name of ["ribbon-history.js", "workspace-history.js", "sheet-controller.js", "workspace-tools.js", "workspace-panels.js", "app.js"]) {
     const source = UI(name);
     assert.doesNotMatch(source, /(?:실행 취소|다시 실행) 완료 \(/, name + " built the history status from a prefix");
     assert.doesNotMatch(source, /textContent\s*=[^;\n]*getActiveModule\(\)/, name + " writes the module id to a text");
   }
-  assert.match(UI("ribbon-history.js"), /doneMsg = isUndo \? "실행 취소" : "다시 실행"/);
+  assert.match(UI("workspace-history.js"), /say\(isUndo \? "실행 취소" : "다시 실행"\)/);
   assert.doesNotMatch(UI("ribbon-history.js"), MODULE_ID);
 });

@@ -135,9 +135,8 @@
     getActiveSheetCellRef: () => activeSheetCellRef,
     setActiveSheetCellRef: (next) => { activeSheetCellRef = next; },
     enqueueWorkspaceHistoryOp,
-    captureWorkspaceSnapshot: ribbonHistory.captureWorkspaceSnapshot,
-    pushRawUndoSnapshot: ribbonHistory.pushRawUndoSnapshot, restoreWorkspaceSnapshot: ribbonHistory.restoreWorkspaceSnapshot,
-    commitDeferredUndoSnapshot: ribbonHistory.commitDeferredUndoSnapshot,
+    restoreWorkspaceSnapshot: ribbonHistory.restoreWorkspaceSnapshot,
+    sheetHistory: ribbonHistory.sheetHistory,
     onSheetSwitchedOutline: () => workspacePanels.renderModuleOutline("SHEET"),
   });
 
@@ -219,7 +218,7 @@
   const findReplace = host.__EASYOFFICE_CREATE_FIND_REPLACE__({
     document, env: host, getActiveModule: () => activeModule, setFeedback: (text) => setStatusFeedback(text),
     sheetDataStore, sheetController, sheetStoreHelpers, getActiveSheetName: () => activeSheetName, getActiveSheetCellRef: () => activeSheetCellRef,
-    captureWorkspaceSnapshot: ribbonHistory.captureWorkspaceSnapshot, commitDeferredUndoSnapshot: ribbonHistory.commitDeferredUndoSnapshot,
+    sheetHistory: ribbonHistory.sheetHistory, captureWorkspaceSnapshot: ribbonHistory.captureWorkspaceSnapshot, commitDeferredUndoSnapshot: ribbonHistory.commitDeferredUndoSnapshot,
     saveDocState: () => workspacePanels.saveActiveDocTabState(), noteActivity: () => workspaceSession.noteActivity(),
   });
 

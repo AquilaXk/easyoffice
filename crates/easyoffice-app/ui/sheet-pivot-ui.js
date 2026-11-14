@@ -17,8 +17,7 @@
       getRange,
       sheetStoreHelpers,
       enqueueWorkspaceHistoryOp,
-      pushRawUndoSnapshot,
-      captureWorkspaceSnapshot,
+      sheetHistory,
       flushFocusedSheetCellBeforeSwitch,
       performSwitchSheetTabAsync,
       selectionText,
@@ -221,12 +220,13 @@
         // The report is a new sheet: the workbook's structure must be open, and a protected sheet must allow 피벗 테이블 보고서 사용 (PD-216).
         const guard = host.__EASYOFFICE_SHEET_PROTECT__;
         if (guard && !(guard.guardAction(getActiveSheetName(), "pivotTables") && guard.guardStructure())) return false;
-        pushRawUndoSnapshot(captureWorkspaceSnapshot(false));
+        const change = sheetHistory.begin({ addsSheets: true, parts: ["sheetRowCounts", "sheetOrder"] });
         const key = uniqueSheetKey();
         const built = pivotCells(result, labels);
         sheetDataStore[key] = built.cells;
         sheetRowCounts[key] = Math.max(12, built.rows);
         host.__EASYOFFICE_SHEET_TAB_STRIP__.render({ document, keys: Object.keys(sheetDataStore), active: getActiveSheetName() });
+        sheetHistory.commit(change);
         await performSwitchSheetTabAsync(key);
         return true;
       });

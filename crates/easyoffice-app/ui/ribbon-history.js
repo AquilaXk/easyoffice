@@ -1,8 +1,6 @@
 (function (host) {
   "use strict";
 
-  const MAX_UNDO_SNAPSHOTS = 64;
-
   // Per-page-load client id so the backend keeps ribbon state/undo stacks per browser window.
   function createRibbonSessionId() {
     const cryptoApi = host.crypto || globalThis.crypto;
@@ -32,6 +30,13 @@
   function cyclePreset(presets, current) {
     const curIdx = presets.indexOf(current);
     return presets[curIdx >= 0 ? (curIdx + 1) % presets.length : 1];
+  }
+
+  // What a sheet ribbon command may change: the selection (formats, a sum written into the active cell), or the
+  // whole sheet for the sort, which takes the data range of its own, and the row count (a row added).
+  function ribbonSheetScope(cmdId, sheetController) {
+    const full = { r1: 1, c1: 1, r2: Infinity, c2: Infinity };
+    return { range: cmdId === "sheet-data-sort" ? full : sheetController.getSelectionRange(), parts: ["sheetRowCounts"] };
   }
 
   function docEffectTrack({ docEditor }) {
@@ -83,35 +88,22 @@
 
     const { syncLocalRibbonStateFromBackend } = ribbonCatalog;
 
-    const {
-      sheetMapHasAnyFormula,
-      sheetCellDataChanged,
-      computeEvaluatedSheetStore,
-    } = sheetStoreHelpers;
-
     const ribbonSessionId = createRibbonSessionId();
     const ribbonIpcPayload = (fields) => JSON.stringify({ ...fields, sessionId: ribbonSessionId });
-    const workspaceUndoStack = [];
-    const workspaceRedoStack = [];
-    let historyMutationEpoch = 0;
+    let workspaceHistory = null;
+    const sheetHistory = host.__EASYOFFICE_CREATE_SHEET_HISTORY__({
+      sheetDataStore,
+      sheetRowCounts,
+      getActiveModule,
+      getActiveSheetName,
+      getActiveSheetCellRef,
+      getController: getSheetController,
+      push: (record) => workspaceHistory.pushRecord(record),
+    });
 
-    function getHistoryMutationEpoch() {
-      return historyMutationEpoch;
-    }
-
-    function pushRawUndoSnapshot(snap) {
-      if (!snap) return;
-      historyMutationEpoch += 1;
-      workspaceUndoStack.push(snap);
-      if (workspaceUndoStack.length > MAX_UNDO_SNAPSHOTS) {
-        workspaceUndoStack.shift();
-      }
-      workspaceRedoStack.length = 0;
-    }
-
-    function commitDeferredUndoSnapshot(preSnapshot) {
-      pushRawUndoSnapshot(preSnapshot);
-    }
+    const getHistoryMutationEpoch = () => workspaceHistory.getEpoch();
+    const pushRawUndoSnapshot = (snap) => workspaceHistory.pushRecord(snap);
+    const commitDeferredUndoSnapshot = pushRawUndoSnapshot;
 
     // Document names (opened or saved file names) are part of the undoable workspace state; the
     // window bridge owns them because they also feed the window title.
@@ -181,7 +173,7 @@
     }
 
     async function activatePaneInternal(mod, skipTabBufferSync) {
-      historyMutationEpoch += 1;
+      workspaceHistory.bumpEpoch();
       const sheetController = getSheetController();
       const workspacePanels = getWorkspacePanels();
       const curMod = getActiveModule();
@@ -241,7 +233,7 @@
 
     // `keepProtections`: an undo or a redo (a step recorded before cannot lift a protection); a restore of the
     // autosave or of an opened file applies the protection the snapshot has.
-    function restoreSnapshotStores(snap, sheetController, keepProtections) {
+    function restoreSnapshotStores(snap, sheetController, keepProtections, adopt) {
       const currentSheets = Object.keys(sheetDataStore);
       if (snap.docTabs) {
         docTabStore.DOC = snap.docTabs.DOC ? structuredClone(snap.docTabs.DOC) : null;
@@ -249,7 +241,7 @@
       }
       if (snap.sheets) {
         const clonedRowCounts = snap.sheetRowCounts ? structuredClone(snap.sheetRowCounts) : null;
-        sheetController.replaceLiveSheetDataStore(cloneSheets(snap.sheets), clonedRowCounts);
+        sheetController.replaceLiveSheetDataStore(adopt ? snap.sheets : cloneSheets(snap.sheets), clonedRowCounts);
       }
       if (snap.sheetColumnWidths && typeof sheetController.replaceColumnWidths === "function") {
         sheetController.replaceColumnWidths(structuredClone(snap.sheetColumnWidths));
@@ -267,36 +259,45 @@
       }
     }
 
-    async function restoreWorkspaceSnapshot(snap, backendSyncRes, { keepProtections = false } = {}) {
+    // The pdf, view, theme and document-name parts of a whole snapshot.
+    function restoreWorkspaceWideState(snap) {
+      const workspacePanels = getWorkspacePanels();
+      applyPdfRotationDom(typeof snap.pdfRotationDeg === "number" ? snap.pdfRotationDeg : 0);
+      workspacePanels.restorePdfStudioState(snap.pdfStudio);
+      workspacePanels.restoreWorkspaceViewState(snap.viewState);
+      if (snap.theme) host.__EASYOFFICE_THEME__.setMode(snap.theme);
+      localRibbonState.darkThemeEnabled = host.__EASYOFFICE_THEME__.getEffective() === "dark";
+      applyTabTitles(snap.tabTitles);
+    }
+
+    // `adopt`: the snapshot's per-sheet maps become the model's own (the caller built them and keeps no copy).
+    async function restoreWorkspaceSnapshot(snap, backendSyncRes, { keepProtections = false, adopt = false } = {}) {
       if (!snap) return;
       const sheetController = getSheetController();
       const workspacePanels = getWorkspacePanels();
       sheetController.bumpSnapshotEpoch();
-      restoreSnapshotStores(snap, sheetController, keepProtections);
+      restoreSnapshotStores(snap, sheetController, keepProtections, adopt);
       if (snap.ribbonState) {
         Object.assign(localRibbonState, structuredClone(snap.ribbonState));
       }
       if (backendSyncRes) {
         syncLocalRibbonStateFromBackend(localRibbonState, backendSyncRes);
       }
-      applyPdfRotationDom(typeof snap.pdfRotationDeg === "number" ? snap.pdfRotationDeg : 0);
-      workspacePanels.restorePdfStudioState(snap.pdfStudio);
-      workspacePanels.restoreWorkspaceViewState(snap.viewState);
-
-      if (snap.theme) host.__EASYOFFICE_THEME__.setMode(snap.theme);
-      localRibbonState.darkThemeEnabled = host.__EASYOFFICE_THEME__.getEffective() === "dark";
-      applyTabTitles(snap.tabTitles);
-
+      // A sheet step carries the sheet's own state only (`sheet-history.js`); the rest of the workspace stays as it is.
+      const wholeWorkspace = snap.scope !== "sheet";
+      if (wholeWorkspace) restoreWorkspaceWideState(snap);
       const targetMod = snap.activeModule || getActiveModule();
-      if (targetMod === "DOC" || targetMod === "HWP") {
-        workspacePanels.restoreDocTabState(targetMod);
-      } else if (docTabStore.DOC) {
-        workspacePanels.restoreDocTabState("DOC");
+      if (wholeWorkspace) {
+        if (targetMod === "DOC" || targetMod === "HWP") {
+          workspacePanels.restoreDocTabState(targetMod);
+        } else if (docTabStore.DOC) {
+          workspacePanels.restoreDocTabState("DOC");
+        }
       }
       if (snap.activeSheetName) {
         setActiveSheetName(snap.activeSheetName);
         syncSheetTabBar(snap.activeSheetName);
-        sheetController.restoreDomSheetCells(snap.activeSheetName);
+        sheetController.restoreDomSheetCells(snap.activeSheetName, { keepExtent: !wholeWorkspace });
         sheetController.updateSheetSelectionAndAggregates(snap.activeSheetCellRef || "A1");
         // The rules are evaluated on the restored cells, not on the page's cells of before.
         if (snap.sheetRules) host.__EASYOFFICE_SHEET_RULES__.notify();
@@ -308,75 +309,19 @@
       sheetController.refreshFocusedSheetCellPendingSnapshot();
     }
 
-    // Protecting or lifting a protection cannot be undone: the record of steps ends there (PD-216).
-    function clearWorkspaceHistory() {
-      historyMutationEpoch += 1;
-      workspaceUndoStack.length = 0;
-      workspaceRedoStack.length = 0;
-    }
-    host.__EASYOFFICE_WORKSPACE_HISTORY__ = { clear: clearWorkspaceHistory };
-
-    function performWorkspaceHistoryStep(isUndo) {
-      return enqueueWorkspaceHistoryOp(async () => {
-        const sheetController = getSheetController();
-        await sheetController.drainInFlightSheetWork();
-        const fb = document.getElementById("status-command-feedback");
-        const sourceStack = isUndo ? workspaceUndoStack : workspaceRedoStack;
-        const destStack = isUndo ? workspaceRedoStack : workspaceUndoStack;
-        const emptyMsg = isUndo ? "실행 취소할 작업이 없습니다" : "다시 실행할 작업이 없습니다";
-        const ipcCmd = isUndo ? "undo_ribbon_command" : "redo_ribbon_command";
-        const doneMsg = isUndo ? "실행 취소" : "다시 실행";
-        if (sourceStack.length === 0) {
-          if (fb) fb.textContent = emptyMsg;
-          return;
-        }
-        sheetDataStore[getActiveSheetName()] = sheetController.snapshotDomSheetCells();
-        if (host.__EASYOFFICE_SHEET_PROTECT__.restoreWouldChange(sourceStack.at(-1), sheetDataStore)) {
-          host.__EASYOFFICE_SHEET_PROTECT__.alertBlocked();
-          return;
-        }
-        historyMutationEpoch += 1;
-        const targetSnap = sourceStack.at(-1);
-        const currentSnap = captureWorkspaceSnapshot(Boolean(targetSnap.isRibbon), targetSnap.layoutOnly === true);
-        currentSnap.ribbonModule = targetSnap.ribbonModule;
-        let evaluatedSheets = null;
-        if (
-          sheetCellDataChanged(currentSnap.sheets, targetSnap.sheets, false) &&
-          sheetMapHasAnyFormula(targetSnap.sheets)
-        ) {
-          const evalRes = await sheetController.trackSheetAsyncWork(
-            computeEvaluatedSheetStore(
-              targetSnap.sheets,
-              targetSnap.activeSheetName || getActiveSheetName(),
-              null
-            )
-          );
-          evaluatedSheets = evalRes.sheets;
-        }
-        let backendSyncRes = null;
-        if (targetSnap.isRibbon === true) {
-          const ribbonModule = targetSnap.ribbonModule || targetSnap.activeModule;
-          backendSyncRes = await invokeIpc(ipcCmd, ribbonIpcPayload({ module: ribbonModule }));
-        }
-        sourceStack.pop();
-        // The step of a row or column edit leads back the other way on the opposite stack.
-        if (targetSnap.structureEdit) currentSnap.structureEdit = host.__EASYOFFICE_SHEET_PROTECT__.inverseEdit(targetSnap.structureEdit);
-        destStack.push(currentSnap);
-        const snapToRestore = evaluatedSheets
-          ? { ...targetSnap, sheets: evaluatedSheets }
-          : targetSnap;
-        await restoreWorkspaceSnapshot(snapToRestore, backendSyncRes, { keepProtections: true });
-        if (fb) fb.textContent = doneMsg;
-      });
-    }
-
-    function performWorkspaceUndo() {
-      return performWorkspaceHistoryStep(true);
-    }
-
-    function performWorkspaceRedo() {
-      return performWorkspaceHistoryStep(false);
-    }
+    workspaceHistory = host.__EASYOFFICE_CREATE_WORKSPACE_HISTORY__({
+      document,
+      invokeIpc,
+      sheetDataStore,
+      sheetStoreHelpers,
+      ribbonIpcPayload,
+      sheetHistory,
+      getSheetController,
+      getActiveSheetName,
+      captureWorkspaceSnapshot,
+      restoreWorkspaceSnapshot,
+      enqueueWorkspaceHistoryOp,
+    });
 
     function syncDocStyleBarFromTarget(targetEl) {
       getWorkspacePanels().syncDocStyleBarFromTarget(targetEl);
@@ -918,8 +863,10 @@
       return enqueueWorkspaceHistoryOp(async () => {
         const sheetController = getSheetController();
         await sheetController.commitPendingFocusedSheetCell(true);
-        const preSnapshot = captureWorkspaceSnapshot(true);
         const effectiveModule = options.targetModule || getActiveModule();
+        // A sheet command changes cells of the sheet only: its step keeps those, not the workspace.
+        const sheetStep = effectiveModule === "SHEET" && cmdId.startsWith("sheet-");
+        const preSnapshot = sheetStep ? sheetHistory.begin(ribbonSheetScope(cmdId, sheetController)) : captureWorkspaceSnapshot(true);
         if (isHwpEmbedCommandBlocked(cmdId, effectiveModule)) return null;
         const preparedEffect = await prepareRibbonAsyncEffect(cmdId, effectiveModule);
         const currentStyle = normalizeRibbonStyleKey(localRibbonState.ribbonStyle);
@@ -927,7 +874,8 @@
           "execute_ribbon_command",
           ribbonIpcPayload({ commandId: cmdId })
         );
-        preSnapshot.ribbonModule = execRes?.activeModule || effectiveModule;
+        const ribbonModule = execRes?.activeModule || effectiveModule;
+        if (!sheetStep) preSnapshot.ribbonModule = ribbonModule;
         syncLocalRibbonStateFromBackend(localRibbonState, execRes);
         localRibbonState.ribbonStyle = currentStyle;
         localRibbonState.darkThemeEnabled = host.__EASYOFFICE_THEME__.getEffective() === "dark";
@@ -937,7 +885,9 @@
           localRibbonState.activeModule = getActiveModule();
         }
         await applyRibbonDomSideEffects(cmdId, execRes, preparedEffect, options);
-        commitDeferredUndoSnapshot(preSnapshot);
+        // The sort runs on after the command returns: the step keeps the cells as they were, changed or not.
+        if (sheetStep) sheetHistory.commit(preSnapshot, { compact: false, ribbonModule });
+        else commitDeferredUndoSnapshot(preSnapshot);
         sheetController.refreshFocusedSheetCellPendingSnapshot();
         const fb = document.getElementById("status-command-feedback");
         if (fb && execRes && !options.skipFeedback && !DIALOG_COMMANDS.has(cmdId)) {
@@ -967,14 +917,15 @@
     return {
       enqueueWorkspaceHistoryOp,
       getHistoryMutationEpoch,
+      sheetHistory,
       pushRawUndoSnapshot,
       commitDeferredUndoSnapshot,
       captureWorkspaceSnapshot,
       pushUndoSnapshot,
       pushRibbonUndoSnapshot: pushUndoSnapshot,
       restoreWorkspaceSnapshot,
-      performWorkspaceUndo,
-      performWorkspaceRedo,
+      performWorkspaceUndo: () => workspaceHistory.undo(),
+      performWorkspaceRedo: () => workspaceHistory.redo(),
       applyModuleAccent,
       activatePaneInternal,
       activatePane,

@@ -2,10 +2,8 @@
   "use strict";
 
   const DEFAULT_SHEET_ROW_COUNT = 12;
-  // Cells hold their pre-edit snapshot eagerly up to this many entries; beyond it the snapshot
-  // is captured when the cell has been idle (or at the first edit) to keep navigation instant.
-  const EAGER_SNAPSHOT_MAX_ENTRIES = 4000;
-  const IDLE_SNAPSHOT_DELAY_MS = 250;
+  // A sheet with more entries than this is heavy: a calculation lets the keystroke paint before it builds its payload.
+  const HEAVY_SHEET_MAX_ENTRIES = 4000;
 
   function hasCellContent(entry) {
     return Boolean(entry && (entry.value || entry.formula));
@@ -23,10 +21,8 @@
       getActiveSheetCellRef,
       setActiveSheetCellRef,
       enqueueWorkspaceHistoryOp,
-      captureWorkspaceSnapshot,
-      pushRawUndoSnapshot,
       restoreWorkspaceSnapshot,
-      commitDeferredUndoSnapshot,
+      sheetHistory,
       onSheetSwitchedOutline,
     } = deps;
 
@@ -294,8 +290,7 @@
       enqueueWorkspaceHistoryOp,
       drainInFlightSheetWork,
       snapshotDomSheetCells,
-      pushRawUndoSnapshot,
-      captureWorkspaceSnapshot,
+      sheetHistory,
       bumpExtent,
       refreshWindowFromModel,
       recalculateActiveSheetFormulas,
@@ -314,6 +309,7 @@
       const entry = {
         initialText,
         initialRaw: td.dataset.formula || initialText,
+        ref: td.dataset.cell,
         pendingSnapshot: null,
         snapshotPushed: false,
         userEdited: false,
@@ -356,14 +352,30 @@
       }
     }
 
-    function restoreDomSheetCells(sheetName) {
+    // `keepExtent`: the used extent is the one `noteCellsRestored` keeps, not read again from every cell.
+    function restoreDomSheetCells(sheetName, { keepExtent = false } = {}) {
       // Seed the default sheet only for an empty workbook (an opened file defines its own sheets).
       if (Object.keys(sheetDataStore).length === 0) {
         sheetDataStore.Sheet1 = snapshotDomSheetCells();
       }
-      extentCache[sheetName] = scanExtent(sheetName);
+      if (!keepExtent) extentCache[sheetName] = scanExtent(sheetName);
       grid.renderWindow(true);
       refreshWindowFromModel();
+    }
+
+    // Cells of a sheet were written back by an undo or a redo: `written` are the packed addresses that now hold
+    // content, `removed` those that hold none. The used extent grows with the first; a cell removed at its edge makes it
+    // be read again when asked for.
+    function noteCellsRestored(sheetName, written, removed) {
+      const e = extentCache[sheetName];
+      if (!e) return;
+      for (const packed of written) bumpExtent(sheetName, Math.floor(packed / 32768), packed % 32768);
+      for (const packed of removed) {
+        if (Math.floor(packed / 32768) >= e.dataRows || packed % 32768 >= e.dataCols) {
+          delete extentCache[sheetName];
+          return;
+        }
+      }
     }
 
     function replaceLiveSheetDataStore(nextSheets, nextRowCounts) {
@@ -527,10 +539,10 @@
       return { epoch, targetSheet, targetCellRef, evaluated };
     }
 
-    function commitPreparedFormulaBarEvaluation(prep, preSnapshot = null) {
+    function commitPreparedFormulaBarEvaluation(prep, change = null) {
       if (prep?.epoch !== sheetSnapshotEpoch) return;
       const out = document.getElementById("sheet-eval-result");
-      commitDeferredUndoSnapshot(preSnapshot);
+      if (change) sheetHistory.commit(change, { compact: false });
       replaceLiveSheetDataStore(prep.evaluated.sheets);
       restoreDomSheetCells(getActiveSheetName());
       refreshFocusedSheetCellPendingSnapshot();
@@ -556,9 +568,9 @@
     function evaluateActiveSheetFormulaBar(recordUndo) {
       const drainThenRun = async () => {
         await drainInFlightSheetWork();
-        const preSnapshot = recordUndo ? captureWorkspaceSnapshot(false) : null;
+        const change = recordUndo ? sheetHistory.begin({ refs: [getActiveSheetCellRef()] }) : null;
         const prep = await prepareFormulaBarEvaluation();
-        commitPreparedFormulaBarEvaluation(prep, preSnapshot);
+        commitPreparedFormulaBarEvaluation(prep, change);
       };
       if (recordUndo) {
         return enqueueWorkspaceHistoryOp(drainThenRun);
@@ -566,30 +578,25 @@
       return drainThenRun();
     }
 
-    function buildPreEditSnapshotForCell(td, st) {
-      if (st.pendingSnapshot) {
-        return st.pendingSnapshot;
-      }
-      const fallbackSnap = captureWorkspaceSnapshot(false);
-      const shName = st.sheetName || getActiveSheetName();
-      if (fallbackSnap.sheets?.[shName] && td.dataset?.cell) {
-        const prevStyle = fallbackSnap.sheets[shName][td.dataset.cell]?.style;
-        const cellSnap = {
-          value: st.initialText,
-          formula: isFormulaStr(st.initialRaw) ? st.initialRaw : "",
-        };
-        if (prevStyle) {
-          cellSnap.style = prevStyle;
-        }
-        fallbackSnap.sheets[shName][td.dataset.cell] = cellSnap;
-      }
-      return fallbackSnap;
+    // What a cell held when it took the focus is what an undo gives back. The model is read as it is: the cell's own text
+    // is in the page, not yet in the model.
+    function capturePendingCell(st) {
+      st.pendingSnapshot = sheetHistory.begin({ sheet: st.sheetName, refs: [st.ref], sync: false });
+    }
+
+    // The cell as it was before the first edit when no capture was made at the focus: the model's entry (style, link)
+    // with the text the cell showed.
+    function captureCellBeforeEdit(td, st) {
+      const ref = td.dataset.cell;
+      const prev = sheetDataStore[st.sheetName]?.[ref];
+      const formula = isFormulaStr(st.initialRaw) ? st.initialRaw : "";
+      const entry = prev || st.initialText !== "" || formula !== "" ? { ...prev, value: st.initialText, formula } : undefined;
+      return sheetHistory.begin({ sheet: st.sheetName, refs: [ref], before: { [ref]: entry }, sync: false });
     }
 
     function pushCellUndoSnapshotIfNeeded(td, st, effectiveRaw) {
       if (!st || st.snapshotPushed || effectiveRaw === st.initialRaw) return;
-      const snap = buildPreEditSnapshotForCell(td, st);
-      pushRawUndoSnapshot(snap);
+      sheetHistory.commit(st.pendingSnapshot ?? captureCellBeforeEdit(td, st), { compact: false });
       st.snapshotPushed = true;
     }
 
@@ -713,33 +720,17 @@
       return committed;
     }
 
-    let idleSnapshotTimer = null;
-
     function isHeavySheet() {
       const ext = getSheetExtent(getActiveSheetName());
-      return ext.dataRows * ext.dataCols > EAGER_SNAPSHOT_MAX_ENTRIES;
+      return ext.dataRows * ext.dataCols > HEAVY_SHEET_MAX_ENTRIES;
     }
 
     function ensurePendingSnapshot(st) {
-      if (!st.pendingSnapshot && !st.userEdited && !st.snapshotPushed) {
-        st.pendingSnapshot = captureWorkspaceSnapshot(false);
-      }
+      if (!st.pendingSnapshot && !st.userEdited && !st.snapshotPushed) capturePendingCell(st);
     }
 
-    // Small sheets capture the pre-edit snapshot on focus; large sheets capture it once the
-    // cell has been idle (or at the first edit) so arrow-key navigation never pays for a deep copy.
-    function schedulePendingSnapshot(st) {
-      if (!isHeavySheet()) {
-        st.pendingSnapshot = captureWorkspaceSnapshot(false);
-        return;
-      }
-      if (idleSnapshotTimer !== null) host.clearTimeout?.(idleSnapshotTimer);
-      idleSnapshotTimer =
-        host.setTimeout?.(() => {
-          idleSnapshotTimer = null;
-          if (sheetCellFocusState.get(document.activeElement) === st) ensurePendingSnapshot(st);
-        }, IDLE_SNAPSHOT_DELAY_MS) ?? null;
-    }
+    // The capture is one cell, so every focus makes it, on any size of sheet.
+    const schedulePendingSnapshot = capturePendingCell;
 
     const input = host.__EASYOFFICE_CREATE_SHEET_INPUT__({
       document,
@@ -829,8 +820,7 @@
       refreshFocusedSheetCellPendingSnapshot,
       enqueueWorkspaceHistoryOp,
       drainInFlightSheetWork,
-      pushRawUndoSnapshot,
-      captureWorkspaceSnapshot,
+      sheetHistory,
     });
 
     lookOps = host.__EASYOFFICE_CREATE_SHEET_LOOK__({
@@ -874,8 +864,7 @@
       sortRange: (target) => ops.sortActiveSheetRange(target),
       enqueueWorkspaceHistoryOp,
       drainInFlightSheetWork,
-      pushRawUndoSnapshot,
-      captureWorkspaceSnapshot,
+      sheetHistory,
       restoreWorkspaceSnapshot,
     });
     structure.bind();
@@ -891,8 +880,7 @@
       sheetStoreHelpers,
       enqueueWorkspaceHistoryOp,
       drainInFlightSheetWork,
-      pushRawUndoSnapshot,
-      captureWorkspaceSnapshot,
+      sheetHistory,
       flushFocusedSheetCellBeforeSwitch,
       performSwitchSheetTabAsync,
       applyCellEdits,
@@ -950,6 +938,8 @@
       refreshFocusedSheetCellPendingSnapshot,
       restoreDomSheetCells,
       replaceLiveSheetDataStore,
+      noteCellsRestored,
+      getSelectionRange: () => input.getRange(),
       updateSheetSelectionAndAggregates,
       recalculateActiveSheetFormulas,
       prepareFormulaBarEvaluation,

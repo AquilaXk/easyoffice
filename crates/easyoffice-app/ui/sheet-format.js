@@ -178,8 +178,7 @@
       refreshFocusedSheetCellPendingSnapshot,
       enqueueWorkspaceHistoryOp,
       drainInFlightSheetWork,
-      pushRawUndoSnapshot,
-      captureWorkspaceSnapshot,
+      sheetHistory,
     } = api;
     const numfmt = host.__EASYOFFICE_SHEET_NUMFMT__;
     let stateTimer = null;
@@ -328,8 +327,9 @@
       return enqueueWorkspaceHistoryOp(async () => {
         await drainInFlightSheetWork();
         if (formatBlocked(false)) return { count: 0 };
-        pushRawUndoSnapshot(captureWorkspaceSnapshot(false));
+        const change = sheetHistory.begin({ range: effectiveRange() });
         const result = applyNumFmtToModel(resolve);
+        sheetHistory.commit(change);
         refreshFocusedSheetCellPendingSnapshot?.();
         const fb = document.getElementById("status-command-feedback");
         if (fb) fb.textContent = result.refused ? "서식 코드를 더 늘릴 수 없음" : (label || "표시 형식") + ": " + result.count + "칸";
@@ -343,11 +343,17 @@
       return enqueueWorkspaceHistoryOp(async () => {
         await drainInFlightSheetWork();
         if (formatBlocked(lock)) return 0;
-        pushRawUndoSnapshot(captureWorkspaceSnapshot(false));
+        // A border also sets the edge the cell next to the range shares, and the locks of a row or column are layout.
+        const rg = effectiveRange();
+        const change = sheetHistory.begin({
+          range: { r1: Math.max(1, rg.r1 - 1), c1: Math.max(1, rg.c1 - 1), r2: rg.r2 + 1, c2: rg.c2 + 1 },
+          parts: ["sheetLayout"],
+        });
         const curSheet = getActiveSheetName();
         const map = snapshotDomSheetCells();
         sheetDataStore[curSheet] = map;
-        const result = edit({ map, rg: effectiveRange(), patch: (ref, mutate) => patchCell(map, ref, mutate) });
+        const result = edit({ map, rg, patch: (ref, mutate) => patchCell(map, ref, mutate) });
+        sheetHistory.commit(change);
         refreshWindowFromModel();
         saveActiveSheetCellsToWorkbook();
         refreshFocusedSheetCellPendingSnapshot?.();
@@ -380,8 +386,9 @@
       return enqueueWorkspaceHistoryOp(async () => {
         await drainInFlightSheetWork();
         if (formatBlocked(false)) return 0;
-        pushRawUndoSnapshot(captureWorkspaceSnapshot(false));
+        const change = sheetHistory.begin({ range: effectiveRange() });
         const count = applyToModel(kind, value);
+        sheetHistory.commit(change);
         refreshFocusedSheetCellPendingSnapshot?.();
         const fb = document.getElementById("status-command-feedback");
         if (fb) fb.textContent = "셀 서식: " + count + "칸";

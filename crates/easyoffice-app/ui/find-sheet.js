@@ -18,7 +18,7 @@
   function createSheetFindSource(deps) {
     const {
       sheetDataStore, getActiveSheetName, sheetController, gridUtils,
-      captureWorkspaceSnapshot, commitDeferredUndoSnapshot, computeEvaluatedSheetStore, isFormulaStr,
+      sheetHistory, computeEvaluatedSheetStore, isFormulaStr,
     } = deps;
 
     // The text one entry offers to the search: its formula when searching by formula, else what it shows.
@@ -98,8 +98,13 @@
       await sheetController.drainInFlightSheetWork();
       const active = getActiveSheetName();
       const epoch = sheetController.getSnapshotEpoch();
-      const pre = captureWorkspaceSnapshot(false);
       sheetController.snapshotDomSheetCells();
+      const bySheet = {};
+      for (const { id } of plan) {
+        const { sheet, ref } = splitId(id, options.workbook, active);
+        (bySheet[sheet] ??= []).push(ref);
+      }
+      const change = sheetHistory.begin({ bySheet, sync: false });
       const candidate = gridUtils.cloneSheetStore(sheetDataStore);
       let replaced = 0;
       let skipped = 0;
@@ -115,8 +120,8 @@
       if (replaced === 0) return { replaced, skipped };
       const evaluated = await sheetController.trackSheetAsyncWork(computeEvaluatedSheetStore(candidate, active, null));
       if (epoch !== sheetController.getSnapshotEpoch()) throw new Error(MSG_STALE);
-      commitDeferredUndoSnapshot(pre);
       sheetController.replaceLiveSheetDataStore(evaluated.sheets);
+      sheetHistory.commit(change);
       sheetController.restoreDomSheetCells(active);
       sheetController.refreshFocusedSheetCellPendingSnapshot();
       return { replaced, skipped };

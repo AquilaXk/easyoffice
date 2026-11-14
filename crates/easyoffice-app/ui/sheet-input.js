@@ -538,6 +538,7 @@
       const entry = {
         initialText: text,
         initialRaw: td.dataset.formula || text,
+        ref: td.dataset.cell,
         pendingSnapshot: null,
         snapshotPushed: false,
         userEdited: false,

@@ -6,7 +6,7 @@
   // name, its scope and what it refers to; 이름 추가, 이름 편집, 이름 삭제, 닫기; the 수식 menu opens 이름 정의). The name box is the cell address field of the
   // formula bar: a name typed there selects what it refers to, an address selects that range, and a new valid name
   // names the selection; its list opens with the arrow and ends with the 이름 관리 entry. Each change of the list is
-  // one undo step (`captureWorkspaceSnapshot` carries the names).
+  // one undo step (`sheetHistory` keeps the names).
 
   const MESSAGES = {
     empty: "이름을 입력",
@@ -31,7 +31,7 @@
   function createSheetNamesUi(deps) {
     const {
       document, sheetDataStore, sheetStoreHelpers, getActiveSheetName, getRange, selectRange, switchSheet, focusAnchor, commitIfEditing,
-      enqueueWorkspaceHistoryOp, drainInFlightSheetWork, pushRawUndoSnapshot, captureWorkspaceSnapshot,
+      enqueueWorkspaceHistoryOp, drainInFlightSheetWork, sheetHistory,
     } = deps;
     const kit = host.__EASYOFFICE_CREATE_SHEET_DIALOG_KIT__(document);
     const names = host.__EASYOFFICE_SHEET_NAMES__;
@@ -72,9 +72,9 @@
       return enqueueWorkspaceHistoryOp(async () => {
         await drainInFlightSheetWork();
         commitIfEditing();
-        const before = captureWorkspaceSnapshot(false, true);
+        const record = sheetHistory.begin({ parts: ["definedNames"] });
         names.replaceAll(change(names.getAll()));
-        pushRawUndoSnapshot(before);
+        sheetHistory.commit(record);
         refreshNameBox();
         renderManager();
         say(text);

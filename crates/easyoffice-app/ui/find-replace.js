@@ -42,8 +42,7 @@
       return host.__EASYOFFICE_CREATE_SHEET_FIND_SOURCE__({
         sheetDataStore: deps.sheetDataStore, getActiveSheetName: deps.getActiveSheetName,
         getActiveCellRef: deps.getActiveSheetCellRef, sheetController: deps.sheetController,
-        gridUtils: host.__EASYOFFICE_SHEET_GRID_UTILS__, captureWorkspaceSnapshot: deps.captureWorkspaceSnapshot,
-        commitDeferredUndoSnapshot: deps.commitDeferredUndoSnapshot,
+        gridUtils: host.__EASYOFFICE_SHEET_GRID_UTILS__, sheetHistory: deps.sheetHistory,
         computeEvaluatedSheetStore: deps.sheetStoreHelpers.computeEvaluatedSheetStore,
         isFormulaStr: deps.sheetStoreHelpers.isFormulaStr,
       });

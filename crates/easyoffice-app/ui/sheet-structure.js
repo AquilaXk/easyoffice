@@ -44,8 +44,7 @@
       sortRange,
       enqueueWorkspaceHistoryOp,
       drainInFlightSheetWork,
-      pushRawUndoSnapshot,
-      captureWorkspaceSnapshot,
+      sheetHistory,
     } = deps;
     const rulesApi = host.__EASYOFFICE_SHEET_RULES__;
     const linkApi = host.__EASYOFFICE_SHEET_LINK__;
@@ -193,19 +192,20 @@
         const name = getActiveSheetName();
         sheetDataStore[name] = snapshotDomSheetCells();
         if (protectApi && !editAllowed(name, axis, op, at, count)) return false;
-        const before = captureWorkspaceSnapshot(false);
         const edit = { axis, op, at, count };
+        // Every cell may move or be rewritten by the edit, and the engine's answer lands on the model before the cells
+        // move: the step keeps the cells the edit changed or deleted, read against where the edit puts them (PD-216).
+        const change = sheetHistory.begin({ sheets: "all", parts: "all", shift: { sheet: name, ...edit } });
         const result = await sheetStoreHelpers.editAxis(sheetDataStore, { sheet: name, ...edit, ...layoutRequest(name) });
         if (!result.ok) {
           if (result.reason === "protected") protectApi.alertBlocked();
           else say(result.message || FAILURES[result.reason] || FAILURES.error);
           return false;
         }
-        // The step knows the edit, so that its undo is compared where the edit moved the cells (PD-216).
-        pushRawUndoSnapshot({ ...before, structureEdit: { sheet: name, ...edit } });
         applyAnswer(name, edit, result.answer);
         // The rebuilt session placed every array again: the cells they fill are taken from it (PD-217).
         if (Array.isArray(result.answer.spillAreas)) host.__EASYOFFICE_SHEET_SPILL__?.replaceAll(sheetDataStore, result.answer.spillAreas);
+        sheetHistory.commit(change);
         grid.layoutChanged();
         refreshWindowFromModel();
         await recalculateActiveSheetFormulas({ updateFocusedDisplay: true });
@@ -229,8 +229,9 @@
         await drainInFlightSheetWork();
         commitIfEditing();
         if (protectApi && !protectApi.guardAction(name, axis === "row" ? "formatRows" : "formatColumns")) return false;
-        pushRawUndoSnapshot(captureWorkspaceSnapshot(false));
+        const change = sheetHistory.begin({ parts: ["sheetLayout"] });
         layoutApi.setHidden(name, axis, first, last, hidden);
+        sheetHistory.commit(change);
         grid.layoutChanged();
         refreshChrome();
         say((axis === "row" ? "행 " : "열 ") + (hidden ? "숨김" : "숨기기 취소"));
@@ -256,7 +257,7 @@
         const map = snapshotDomSheetCells();
         sheetDataStore[name] = map;
         if (protectApi && !(protectApi.guardAction(name, "formatCells") && protectApi.guardCells(name, rg, (r, c) => map[grid.refOf(r, c)]?.style))) return false;
-        pushRawUndoSnapshot(captureWorkspaceSnapshot(false));
+        const change = sheetHistory.begin({ range: rg, parts: ["sheetLayout"] });
         const parse = grid.parseRef;
         for (const ref of Object.keys(map)) {
           const p = parse(ref);
@@ -265,6 +266,7 @@
           }
         }
         layoutApi.addMerge(name, rg.r1, rg.c1, rg.r2, rg.c2);
+        sheetHistory.commit(change);
         grid.layoutChanged();
         refreshWindowFromModel();
         await recalculateActiveSheetFormulas({ updateFocusedDisplay: true });
@@ -285,8 +287,9 @@
         await drainInFlightSheetWork();
         commitIfEditing();
         if (protectApi && !protectApi.guardAction(name, "formatCells")) return false;
-        pushRawUndoSnapshot(captureWorkspaceSnapshot(false));
+        const change = sheetHistory.begin({ parts: ["sheetLayout"] });
         layoutApi.removeMerges(name, rg.r1, rg.c1, rg.r2, rg.c2);
+        sheetHistory.commit(change);
         grid.layoutChanged();
         refreshChrome();
         say("병합 해제");

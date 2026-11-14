@@ -44,8 +44,7 @@
       refreshChrome,
       enqueueWorkspaceHistoryOp,
       drainInFlightSheetWork,
-      pushRawUndoSnapshot,
-      captureWorkspaceSnapshot,
+      sheetHistory,
       restoreWorkspaceSnapshot,
       ui,
     } = deps;
@@ -83,28 +82,28 @@
     const structureBlocked = () => host.__EASYOFFICE_SHEET_PROTECT__?.guardStructure() === false;
 
     // ---- one undoable step ------------------------------------------------------------------------
-    // `work(next, before)` changes `next`, a copy of the workspace snapshot `before` whose per-sheet
-    // maps are new objects (their entries are shared, so it replaces an entry and never edits one),
-    // and returns the status text, or false to stop with nothing changed.
-    function change(work) {
+    // `work(next)` changes `next`, the sheet state of the workspace whose per-sheet maps are the model's own: it
+    // replaces a map or an entry and never edits one in place. It returns the status text, or false to stop with
+    // nothing changed. `renames` ({ from: to }) names the sheets the step renames.
+    function change(work, renames = {}) {
       return enqueueWorkspaceHistoryOp(async () => {
         await drainInFlightSheetWork();
         commitIfEditing();
         sheetDataStore[getActiveSheetName()] = snapshotDomSheetCells();
-        const before = captureWorkspaceSnapshot(false);
+        const record = sheetHistory.begin({ sheets: "all", parts: "all", sync: false });
+        const state = sheetHistory.current();
         const next = {
-          ...before,
-          sheets: { ...before.sheets },
-          sheetRowCounts: { ...before.sheetRowCounts },
-          sheetColumnWidths: { ...before.sheetColumnWidths },
-          sheetRules: { ...before.sheetRules },
-          sheetLayout: { ...before.sheetLayout },
-          sheetOrder: [...before.sheetOrder],
+          ...state,
+          sheets: { ...sheetDataStore },
+          sheetColumnWidths: { ...state.sheetColumnWidths },
+          sheetRules: { ...state.sheetRules },
+          sheetLayout: { ...state.sheetLayout },
+          sheetOrder: [...state.sheetOrder],
         };
-        const text = await work(next, before);
+        const text = await work(next);
         if (typeof text !== "string") return false;
-        pushRawUndoSnapshot(before);
-        await restoreWorkspaceSnapshot(next);
+        await restoreWorkspaceSnapshot(next, null, { adopt: true });
+        sheetHistory.commit(record, { renames });
         await recalculateActiveSheetFormulas({ updateFocusedDisplay: true });
         refreshChrome();
         say(text);
@@ -237,7 +236,7 @@
         next.sheetOrder = next.sheetOrder.map((n) => (n === sheet ? to : n));
         if (next.activeSheetName === sheet) next.activeSheetName = to;
         return "시트 이름 바꿈: " + to;
-      });
+      }, { [sheet]: to });
       if (done) ui.focusTab(to);
       return done;
     }

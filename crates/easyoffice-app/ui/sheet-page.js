@@ -164,7 +164,7 @@
   // ---- dialog and commands ------------------------------------------------------------------------
 
   function createSheetPage(deps) {
-    const { document, getRange, getActiveSheetName, enqueueWorkspaceHistoryOp, drainInFlightSheetWork, commitIfEditing, grid, refreshChrome, pushRawUndoSnapshot, captureWorkspaceSnapshot } = deps;
+    const { document, getRange, getActiveSheetName, enqueueWorkspaceHistoryOp, drainInFlightSheetWork, commitIfEditing, grid, refreshChrome, sheetHistory } = deps;
     const kit = host.__EASYOFFICE_CREATE_SHEET_DIALOG_KIT__(document);
     const layoutApi = host.__EASYOFFICE_SHEET_LAYOUT__;
     const byId = (id) => document.getElementById(id);
@@ -181,10 +181,10 @@
         await drainInFlightSheetWork();
         commitIfEditing();
         const name = getActiveSheetName();
-        const before = captureWorkspaceSnapshot(false, true);
+        const record = sheetHistory.begin({ parts: ["sheetLayout"] });
         const message = change(name);
         if (message === null) return false;
-        pushRawUndoSnapshot(before);
+        sheetHistory.commit(record);
         grid.layoutChanged();
         refreshChrome();
         say(message);

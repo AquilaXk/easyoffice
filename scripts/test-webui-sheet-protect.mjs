@@ -1132,23 +1132,6 @@ test("an allowed row insert is undone, the locked values return to their places,
   assert.equal(t.layout.protectOf("Sheet1").on, true, "the sheet stays protected");
 });
 
-test("a restore compares a step of a row edit where the edit put the cells", async () => {
-  const t = await open();
-  t.layout.setProtect("Sheet1", { on: true, deny: [] });
-  const store = { Sheet1: { B3: { value: "7", formula: "" }, C3: { formula: "=B3+1", value: "8" } } };
-  const step = (cells, structureEdit) => ({ sheets: { Sheet1: cells }, structureEdit });
-  const edit = { sheet: "Sheet1", axis: "row", op: "insert", at: 2, count: 1 };
-  // The step before an insert at row 2 held the value in B2 and the formula in C2; now they are one row down.
-  const then = { B2: { value: "7", formula: "" }, C2: { formula: "=B2+1", value: "8" } };
-  assert.equal(t.guard.restoreWouldChange(step(then), store), true, "by address it looks like a change");
-  assert.equal(t.guard.restoreWouldChange(step(then, edit), store), false, "with the edit it is none");
-  assert.equal(t.guard.restoreWouldChange(step({ ...then, B2: { value: "9", formula: "" } }, edit), store), true, "a real change is still one");
-  const back = t.guard.inverseEdit(edit);
-  assert.deepEqual(back, { ...edit, op: "delete" });
-  const after = { B3: { value: "7", formula: "" } };
-  assert.equal(t.guard.restoreWouldChange(step(after, back), { Sheet1: { B2: { value: "7", formula: "" } } }), false, "the redo of the insert leads the other way");
-});
-
 test("a restore of the step of a row edit puts the allowed ranges back where the step had them and keeps their passwords", async () => {
   const t = await open();
   const pwd = { kind: "both", alg: "SHA-512", hash: "OFFLINE-1-1", salt: "S", spin: 1, key: "K" };

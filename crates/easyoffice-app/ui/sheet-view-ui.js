@@ -27,8 +27,7 @@
       getActiveSheetName,
       enqueueWorkspaceHistoryOp,
       drainInFlightSheetWork,
-      pushRawUndoSnapshot,
-      captureWorkspaceSnapshot,
+      sheetHistory,
     } = deps;
 
     function say(text) {
@@ -43,10 +42,10 @@
         await drainInFlightSheetWork();
         commitIfEditing();
         const name = getActiveSheetName();
-        const before = captureWorkspaceSnapshot(false, true);
+        const record = sheetHistory.begin({ parts: ["sheetLayout"] });
         const message = change(name);
         if (message === null) return false;
-        pushRawUndoSnapshot(before);
+        sheetHistory.commit(record);
         grid.layoutChanged();
         refreshChrome();
         say(message);
