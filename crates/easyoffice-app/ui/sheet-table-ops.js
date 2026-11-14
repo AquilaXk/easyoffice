@@ -9,7 +9,7 @@
 (function (host) {
   "use strict";
 
-  // The plans of the table commands of the sheet window (PD-230), as functions of plain data: making a table of a range
+  // The plans of the table commands of the sheet window (PD-231), as functions of plain data: making a table of a range
   // (`표 만들기`), giving a table a new range (`표 크기 조정`) and growing a table over what is typed under or beside it. A
   // plan says what changes (the table, the header cells to write, the row to insert) or why nothing may; the page applies it
   // as one undoable step. Rows and columns are 1-based. `ctx` is `{ tables, merges, filter, cellAt }`: the tables of the sheet

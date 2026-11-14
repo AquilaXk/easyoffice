@@ -1,7 +1,7 @@
 (function (host) {
   "use strict";
 
-  // The gallery of table styles of the table design bar (PD-230): the 60 built-in styles in the groups the spreadsheet program
+  // The gallery of table styles of the table design bar (PD-231): the 60 built-in styles in the groups the spreadsheet program
   // lists them (밝게, 보통, 어둡게), the styles the file defines (사용자 지정) and the button that clears the style. A style is a
   // five by five sample of a table in that style with the bar's options (header row, stripes, first and last column) applied.
   // The panel is a popover under the button, placed and closed like the colour palette (`color-picker.js`).

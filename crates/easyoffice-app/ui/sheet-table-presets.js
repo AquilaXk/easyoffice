@@ -13,7 +13,7 @@
 (function (host) {
   "use strict";
 
-  // The 60 built-in table styles (PD-230): `TableStyleLight1` .. `21`, `TableStyleMedium1` .. `28`, `TableStyleDark1` .. `11`.
+  // The 60 built-in table styles (PD-231): `TableStyleLight1` .. `21`, `TableStyleMedium1` .. `28`, `TableStyleDark1` .. `11`.
   //
 
   const PRESETS = {

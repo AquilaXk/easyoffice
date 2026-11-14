@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createWorkspaceHarness } from "./webui-dom-harness.mjs";
 
-// The plans of the table commands (PD-230): making a table of a range, the names, giving a table a new range, and growing a
+// The plans of the table commands (PD-231): making a table of a range, the names, giving a table a new range, and growing a
 // table over what is typed under or beside it.
 
 async function ops() {

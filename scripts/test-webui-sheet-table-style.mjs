@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createWorkspaceHarness } from "./webui-dom-harness.mjs";
 
-// How a table looks (PD-230): the 60 built-in styles, a file's own definition, stripes, the first and last column, the header
+// How a table looks (PD-231): the 60 built-in styles, a file's own definition, stripes, the first and last column, the header
 // and totals rows, the edges, the lookup of the table that holds a cell, and the paint of a grid cell.
 
 const table = (extra = {}) => ({

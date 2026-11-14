@@ -441,7 +441,7 @@
 .sheet-name-box-list li > span:last-child { margin-left: auto; overflow: hidden; text-overflow: ellipsis; color: var(--color-text-muted); }
 .sheet-name-box-list li:hover { background: var(--color-accent-bg); }
 .sheet-name-box-list li[data-manage] { border-top: 1px solid var(--color-border-light); }
-/* Table (sheet-table-ui.js, PD-230): the 표 만들기 dialog takes the sort dialog's label column; the 표 디자인 bar is a style bar (the name box, the buttons, the option checkboxes, the gallery button) that shows while the active cell is in a table. */
+/* Table (sheet-table-ui.js, PD-231): the 표 만들기 dialog takes the sort dialog's label column; the 표 디자인 bar is a style bar (the name box, the buttons, the option checkboxes, the gallery button) that shows while the active cell is in a table. */
 #sheet-table-dialog { width: min(440px, calc(100vw - 32px)); }
 #sheet-table-dialog .dialog-label { width: 112px; min-width: 112px; flex-shrink: 0; }
 #sheet-table-dialog .dialog-text-input { flex: 1; min-width: 0; }

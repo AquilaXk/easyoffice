@@ -1,5 +1,5 @@
 //! `evaluate_sheet` with `sessionAction` `tableColumn`: the formulas that name a table are written anew after an
-//! edit of the table, as the spreadsheet program does (PD-225, PD-230). No session is needed: the page sends the
+//! edit of the table, as the spreadsheet program does (PD-225, PD-231). No session is needed: the page sends the
 //! formulas that have a bracket (or the table's name) and the tables, and applies what comes back.
 //!
 //! `{table, from, to, tables:{"Sheet1":[table, ...]}, formulas:[{sheet, cell, text}], names?:[...]}` ->

@@ -1,5 +1,5 @@
 //! Open and save of a workbook whose 1,000 tables each have a custom style, against the same workbook with the style
-//! definitions left out (PD-230). Run with
+//! definitions left out (PD-231). Run with
 //! `cargo test --release -p easyoffice-formats --test sheet_table_styles_bench -- --ignored --nocapture`.
 
 use easyoffice_formats::{

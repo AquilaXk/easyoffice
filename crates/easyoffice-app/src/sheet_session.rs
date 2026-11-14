@@ -806,7 +806,7 @@ impl EasyOfficeIpcRouter {
     /// - `tableColumn` `{table, from, to, tables, formulas, names?}` -> `{rewrites, names}`: the formulas that name a
     ///   renamed column of a table, written with the new name (no session needed, see `sheet_table_column_ipc`,
     ///   PD-225). With `op` `rename` (`{table, to}`) or `range` (`{table}`) the formulas that name a renamed table
-    ///   or a table turned into a range (PD-230).
+    ///   or a table turned into a range (PD-231).
     /// - `close` `{session}` -> `{closed}`.
     pub(crate) fn handle_sheet_session_action(
         action: &str,

@@ -1,4 +1,4 @@
-//! Two edits of the formulas that name a table (PD-230): the table gets a new name, or it becomes a plain
+//! Two edits of the formulas that name a table (PD-231): the table gets a new name, or it becomes a plain
 //! range. Both look at the structured references (`structured_ref::rewrite_refs`) and at the bare table name
 //! (`=SUM(Sales)`, the data rows), outside quoted text and outside bracket groups.
 

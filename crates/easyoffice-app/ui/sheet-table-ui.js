@@ -1,7 +1,7 @@
 (function (host) {
   "use strict";
 
-  // The table commands of the sheet window (PD-230): the 표 만들기 dialog (the insert menu, the toolbar and Ctrl+T), the 표 디자인 bar that
+  // The table commands of the sheet window (PD-231): the 표 만들기 dialog (the insert menu, the toolbar and Ctrl+T), the 표 디자인 bar that
   // shows while the active cell is in a table (the table's name, 표 크기 조정, 범위로 변환, the options of the style, the style
   // gallery) and the growth of a table over what is typed under or beside it. The plans are `sheet-table-ops.js`; each command is
   // ONE undoable step of the layout (and of the cells it writes), refused on a protected sheet.

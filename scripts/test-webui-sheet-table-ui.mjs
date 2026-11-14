@@ -4,7 +4,7 @@ import { createWebUiDom, createWorkspaceHarness, flushAsyncTurns } from "./webui
 import { switchModule, commandItem } from "./test-support/modules.mjs";
 import { demoHtml, openDemoWorkbook } from "./test-support/demo-fixtures.mjs";
 
-// The table commands in the page (PD-230): the 표 만들기 dialog, the 표 디자인 bar (name, size, options, style gallery, 범위로
+// The table commands in the page (PD-231): the 표 만들기 dialog, the 표 디자인 bar (name, size, options, style gallery, 범위로
 // 변환), the growth of a table over what is typed, each as one undo step, and a protected sheet refusing them.
 
 const cell = (d, ref) => d.querySelector(`#pane-sheet td[data-cell="${ref}"]`);

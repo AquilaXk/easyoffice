@@ -14,7 +14,7 @@
 (function (host) {
   "use strict";
 
-  // How a table looks (PD-230): the style a table names (one of the 60 built-in ones of `sheet-table-presets.js`, or the
+  // How a table looks (PD-231): the style a table names (one of the 60 built-in ones of `sheet-table-presets.js`, or the
   // definition the file gave, `styleDef`) turned into the fill, text colour, bold and border edges of each cell, and the
   // lookup of the table that holds a cell. The grid asks `paintTd` for every cell it draws; the gallery asks `previewCells`.
 

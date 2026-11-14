@@ -75,7 +75,7 @@
     // The name box and the defined names dialogs (PD-214).
     const namesUi = host.__EASYOFFICE_CREATE_SHEET_NAMES_UI__({ ...deps, kit: host.__EASYOFFICE_CREATE_SHEET_DIALOG_KIT__(document) });
 
-    // The tables: 표 만들기, the 표 디자인 bar and the growth of a table over what is typed (PD-230).
+    // The tables: 표 만들기, the 표 디자인 bar and the growth of a table over what is typed (PD-231).
     const tableUi = host.__EASYOFFICE_CREATE_SHEET_TABLE_UI__({
       ...deps,
       kit: host.__EASYOFFICE_CREATE_SHEET_DIALOG_KIT__(document),

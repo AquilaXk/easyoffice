@@ -337,7 +337,7 @@
     { keys: "Ctrl+/", action: "palette" },
     { keys: "Ctrl+K", action: "insert-link", ribbon: true, modules: ["DOC", "SHEET", "SLIDE"], notInField: true },
     // The table of a sheet is made with Ctrl+T (Cmd+T on a Mac) as in the spreadsheet program; a browser keeps the key for a new
-    // tab, so it is bound in the desktop shell only (PD-230).
+    // tab, so it is bound in the desktop shell only (PD-231).
     { keys: "Ctrl+T", action: "insert-table", ribbon: true, module: "SHEET", desktopOnly: true, notInField: true },
     // Find and replace as in the reference editor (Ctrl+F, Ctrl+F2). Ctrl+H is left alone: it is the
     // system "hide" key on macOS and the history page in browsers.

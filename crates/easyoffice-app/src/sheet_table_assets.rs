@@ -1,4 +1,4 @@
-//! The scripts of the sheet tables (PD-230), served by name: the built-in style set, the style layer of the grid, the plans
+//! The scripts of the sheet tables (PD-231), served by name: the built-in style set, the style layer of the grid, the plans
 //! of the table commands, the style gallery and the commands' own module.
 
 const PRESETS: &str = include_str!("../ui/sheet-table-presets.js");
