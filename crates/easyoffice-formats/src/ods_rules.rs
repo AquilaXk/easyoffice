@@ -135,7 +135,7 @@ fn condition_value(kind: &CfKind, anchor: &str) -> Option<String> {
     })
 }
 
-fn rule_body(rule: &CfRule, styles: &OdsRuleTable) -> String {
+fn rule_body(rule: &CfRule, styles: &OdsRuleTable, sheet_name: &str) -> String {
     let anchor = CellBox::cell(
         rule.ranges.first().map_or(0, |b| b.row0),
         rule.ranges.first().map_or(0, |b| b.col0),
@@ -181,7 +181,7 @@ fn rule_body(rule: &CfRule, styles: &OdsRuleTable) -> String {
             format!(
                 "<calcext:condition{style} calcext:value=\"{}\" calcext:base-cell-address=\"{}\"/>",
                 XmlSanitizer::escape(&value),
-                "{SHEET}.".to_string() + &anchor
+                XmlSanitizer::escape(&format!("{}.{anchor}", quote_sheet(sheet_name)))
             )
         }
     }
@@ -355,7 +355,7 @@ impl OdsRuleTable {
         ordered.sort_by_key(|r| r.priority);
         let mut xml = String::new();
         for rule in ordered {
-            let body = rule_body(rule, self).replace("{SHEET}", &quote_sheet(sheet_name));
+            let body = rule_body(rule, self, sheet_name);
             if body.is_empty() {
                 continue;
             }
