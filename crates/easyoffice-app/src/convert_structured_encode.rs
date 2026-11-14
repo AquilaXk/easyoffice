@@ -208,6 +208,17 @@ fn encode_xls(
             "하이퍼링크 {skipped_links}개는 XLS의 범위(65,536행, 256열) 밖이거나 주소가 너무 길어 저장하지 않았습니다."
         ));
     }
+    let (approximated, dropped) = LegacyOle2Codec::xls_color_losses(stylings);
+    if approximated > 0 {
+        warnings.push(format!(
+            "칸 색 {approximated}가지는 XLS의 56색 팔레트에서 가장 가까운 색으로 저장했습니다."
+        ));
+    }
+    if dropped > 0 {
+        warnings.push(format!(
+            "색이 있는 칸 {dropped}개는 XLS의 범위(65,536행, 256열) 밖이라 색을 저장하지 않았습니다."
+        ));
+    }
     let mut payloads: Vec<LegacyXlsPayload> = computed
         .into_iter()
         .map(|(sheet_name, cells)| LegacyXlsPayload { sheet_name, cells })
@@ -218,7 +229,7 @@ fn encode_xls(
             cells: Vec::new(),
         });
     }
-    LegacyOle2Codec::pack_xls_multi_values_linked(&payloads, &links)
+    LegacyOle2Codec::pack_xls_multi_values_styled(&payloads, &links, stylings)
 }
 
 /// CSV/TSV hold one sheet: the first, as values. Sheets left out and cells outside what the CSV

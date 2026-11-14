@@ -1,6 +1,8 @@
 //! Alignment, wrapping and borders of a cell in the save payload and the open payload (PD-207):
 //! `{"ha":"center","va":"top","wrap":true,"bd":{"t":"thin:112233","r":"double:000000"}}`.
 //!
+//! `fill` and `fc` are the fill colour and the font colour of the cell as `rrggbb` (PD-227).
+//!
 //! `unlocked`, `locked` and `hideFormula` are the protection flags of the cell (PD-216): unlocked, kept locked
 //! inside an unlocked row or column, and a formula the protected sheet does not show.
 //!
@@ -57,8 +59,20 @@ fn parse_borders(value: &StrictJsonValue) -> Result<CellBorders, EasyOfficeError
     })
 }
 
+/// An optional `rrggbb` colour of the payload key `key`.
+fn parse_color(obj: &JsonObject, key: &str) -> Result<Option<u32>, EasyOfficeError> {
+    text(obj, key)?
+        .map(|word| {
+            parse_hex_rgb(word)
+                .ok_or_else(|| invalid(format!("구조화 저장: '{key}'는 rrggbb 형식이어야 합니다.")))
+        })
+        .transpose()
+}
+
 /// Reads the look keys of a payload `style` object into `style`.
 pub(crate) fn parse_look(obj: &JsonObject, style: &mut CellStyle) -> Result<(), EasyOfficeError> {
+    style.fill = parse_color(obj, "fill")?;
+    style.font_color = parse_color(obj, "fc")?;
     if let Some(word) = text(obj, "ha")? {
         style.h_align = HAlign::from_payload(word).ok_or_else(|| {
             invalid("구조화 저장: 'ha'는 left, center, right 중 하나여야 합니다.")
@@ -116,6 +130,12 @@ pub(crate) fn write_look(out: &mut String, style: &CellStyle, wrote: &mut bool) 
     if style.wrap {
         key(out, "wrap");
         out.push_str("true");
+    }
+    for (rgb, name) in [(style.fill, "fill"), (style.font_color, "fc")] {
+        if let Some(rgb) = rgb {
+            key(out, name);
+            let _ = write!(out, "\"{rgb:06x}\"");
+        }
     }
     for (on, name) in [
         (style.unlocked, "unlocked"),

@@ -318,3 +318,32 @@ fn no_character_of_a_header_or_body_is_dropped() {
     );
     assert_eq!(count(&out, samples[0]), 2, "the header and the body line");
 }
+
+#[test]
+fn cell_fills_and_font_colours_are_drawn_in_the_sheet_pdf() {
+    let cells = concat!(
+        r#"{"ref":"A1","raw":"빨강","style":{"fill":"ff0000"}},"#,
+        r#"{"ref":"B1","raw":"파랑 글자","style":{"fc":"0000ff"}},"#,
+        r#"{"ref":"C1","raw":"검정 칸","style":{"fill":"000000"}},"#,
+        r#"{"ref":"A2","raw":"","style":{"fill":"00ff00"}},"#,
+        r#"{"ref":"A3","raw":"바닥"}"#
+    );
+    let payload = format!(
+        r#"{{"sourceFormat":"xlsx","targetFormat":"pdf","title":"t","sheets":[{{"name":"시트","cells":[{cells}]}}]}}"#
+    );
+    let out = pdf(&payload).unwrap();
+    assert!(
+        out.contains("1.000 0.000 0.000 rg") && out.contains(" re f"),
+        "a red box"
+    );
+    assert!(
+        out.contains("0.000 1.000 0.000 rg"),
+        "a blank filled cell is drawn too"
+    );
+    assert!(out.contains("0.000 0.000 1.000 rg"), "blue text");
+    assert!(
+        out.contains("1.000 1.000 1.000 rg"),
+        "automatic text on a black fill is white"
+    );
+    assert_eq!(out.matches(" re f").count(), 3, "one box per filled cell");
+}

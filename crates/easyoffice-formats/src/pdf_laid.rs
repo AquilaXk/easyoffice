@@ -34,6 +34,8 @@ const CELL_PAD_PT: f64 = 4.0;
 const DEFAULT_SHEET_MARGIN_MM: f64 = 10.0;
 const WIDE_SHEET_COLUMNS: u32 = 8;
 const MIN_SCALE: f64 = 0.1;
+/// A fill with a luminance (0..=255) up to this is dark: its automatic text is white (PD-227).
+const DARK_FILL_LUMINANCE: u32 = 62;
 /// Pages and printed cells a sheet may make (the page's print caps, `sheet-page-print.js`).
 const MAX_SHEET_PAGES: usize = 5_000;
 const MAX_SHEET_CELLS: u64 = 200_000;
@@ -41,6 +43,19 @@ const MAX_SHEET_CELLS: u64 = 200_000;
 /// Text width in points at `size` pt.
 fn width_pt(text: &str, size: f64) -> f64 {
     f64::from(mixed_units(text)) * size / 1000.0
+}
+
+/// The three operands of `rg` for `0xRRGGBB`.
+fn rgb_ops(rgb: u32) -> String {
+    let channel = |shift: u32| f64::from((rgb >> shift) & 0xFF) / 255.0;
+    format!("{:.3} {:.3} {:.3}", channel(16), channel(8), channel(0))
+}
+
+/// The colour of text with no colour of its own on `fill`: white on a dark fill, none (black) otherwise.
+fn auto_text_color(fill: Option<u32>) -> Option<u32> {
+    let rgb = fill?;
+    let (r, g, b) = ((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
+    ((r * 76 + g * 151 + b * 29) / 256 <= DARK_FILL_LUMINANCE).then_some(0xFFFFFF)
 }
 
 /// One page being drawn: the content stream in PDF user space (origin bottom left).
@@ -64,6 +79,26 @@ impl Canvas {
             return;
         }
         self.ops.push(text_ops(x, y, size, text));
+    }
+
+    /// Text in the colour `rgb` (the fill colour of the path state stays as it was after it).
+    fn colored_text(&mut self, x: f64, y: f64, size: f64, text: &str, rgb: u32) {
+        if text.is_empty() {
+            return;
+        }
+        self.ops.push(format!(
+            "q {} rg {} Q",
+            rgb_ops(rgb),
+            text_ops(x, y, size, text)
+        ));
+    }
+
+    /// A filled box with the corner `(x, y)` at the bottom left.
+    fn fill_rect(&mut self, x: f64, y: f64, w: f64, h: f64, rgb: u32) {
+        self.ops.push(format!(
+            "q {} rg {x:.2} {y:.2} {w:.2} {h:.2} re f Q",
+            rgb_ops(rgb)
+        ));
     }
 
     fn line(&mut self, x1: f64, y1: f64, x2: f64, y2: f64) {
@@ -534,7 +569,13 @@ fn sheet_area_pages(
                     if w <= 0.0 {
                         continue;
                     }
-                    if let Some(text) = cells.get(&(r, area.c1 + k as u32)) {
+                    let at = (r, area.c1 + k as u32);
+                    let look = styling.and_then(|s| s.cells.get(&at));
+                    let fill = look.and_then(|style| style.fill);
+                    if let Some(rgb) = fill {
+                        canvas.fill_rect(x, y - h, w, h, rgb);
+                    }
+                    if let Some(text) = cells.get(&at) {
                         let shown = fit_text(text, font, w - 2.0 * pad);
                         let tw = width_pt(&shown, font);
                         let tx = if is_number(text) {
@@ -542,7 +583,14 @@ fn sheet_area_pages(
                         } else {
                             x + pad
                         };
-                        canvas.text(tx, y - h + (h - font) / 2.0 + 1.0, font, &shown);
+                        let ty = y - h + (h - font) / 2.0 + 1.0;
+                        match look
+                            .and_then(|style| style.font_color)
+                            .or_else(|| auto_text_color(fill))
+                        {
+                            Some(rgb) => canvas.colored_text(tx, ty, font, &shown, rgb),
+                            None => canvas.text(tx, ty, font, &shown),
+                        }
                     }
                     x += w;
                     if !xs_done {
