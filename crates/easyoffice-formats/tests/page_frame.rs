@@ -587,6 +587,15 @@ fn margins_that_are_incomplete_or_out_of_bounds_are_dropped() {
             "<w:pgMar w:top=\"x\" w:bottom=\"1\" w:header=\"720\" w:footer=\"720\"/>",
             None,
         ),
+        // The smallest 64-bit value has no absolute value in the same type.
+        (
+            "<w:pgMar w:top=\"-9223372036854775808\" w:bottom=\"1440\" w:header=\"720\" w:footer=\"720\"/>",
+            None,
+        ),
+        (
+            "<w:pgMar w:top=\"1440\" w:bottom=\"1440\" w:header=\"720\" w:footer=\"720\" w:left=\"-9223372036854775808\"/>",
+            Some((1440, 720)),
+        ),
     ] {
         let bytes = docx_package(
             &body_with_section(

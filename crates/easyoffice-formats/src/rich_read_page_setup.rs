@@ -10,7 +10,7 @@ pub(crate) fn page_margins(attrs: &Attrs<'_>) -> Option<RichPageMargins> {
     const DEFAULT_SIDE_TWIPS: u32 = 1440;
     let twips = |key: &str| {
         let v = attr(attrs, key)?.trim().parse::<i64>().ok()?;
-        u32::try_from(v.abs()).ok()
+        u32::try_from(v.unsigned_abs()).ok()
     };
     let margins = RichPageMargins {
         top: twips("w:top")?,
