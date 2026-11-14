@@ -427,7 +427,7 @@ jobs:
               throw "Windows --serve loopback smoke test failed to return HTTP 200"
             }
             $csp = ($resp.Headers["Content-Security-Policy"] -join ", ").Trim()
-            if ($csp -ne "default-src 'self'") {
+            if ($csp -ne "default-src 'self'; base-uri 'none'; object-src 'none'") {
               throw "Unexpected Content-Security-Policy header: '$csp'"
             }
           } finally {
