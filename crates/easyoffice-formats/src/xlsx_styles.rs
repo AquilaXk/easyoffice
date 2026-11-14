@@ -119,7 +119,8 @@ impl XlsxStyleTable {
                     .filter_map(|t| t.filter.as_deref())
                     .flat_map(color_criteria);
                 sheet.chain(tables)
-            })),
+            }))
+            .with_table_styles(stylings.iter().flat_map(|st| &st.tables)),
         };
         for styling in stylings {
             let mut ids = IdMemo::new();
@@ -435,6 +436,7 @@ impl XlsxStyleTable {
         xml.push_str("</cellXfs>");
         xml.push_str(&cell_styles_xml(linked));
         xml.push_str(&self.dxf.to_xml());
+        xml.push_str(&self.dxf.table_styles_xml());
         xml.push_str("</styleSheet>");
         xml
     }
@@ -587,6 +589,8 @@ pub(crate) struct XfStyles {
     /// The colours of the differential formats, for the colour filters (PD-226). Set by the caller
     /// that has the theme.
     pub(crate) dxf_colors: Vec<crate::sheet_styling::xlsx_filter_dxf::DxfColors>,
+    /// The custom table styles of `tableStyles` by name (PD-231). Set by the caller that has the theme.
+    pub(crate) table_styles: HashMap<String, crate::sheet_styling::table_style::TableStyleDef>,
 }
 
 /// `numFmtId` -> `formatCode` of the `numFmts` element.
@@ -725,6 +729,7 @@ pub(crate) fn parse_cell_xf_styles(styles_xml: &str, colors: &ColorScheme) -> Xf
         num_fmts,
         rejected,
         dxf_colors: Vec::new(),
+        table_styles: HashMap::new(),
     }
 }
 

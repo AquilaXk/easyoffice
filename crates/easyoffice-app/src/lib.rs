@@ -73,6 +73,7 @@ mod sheet_table_json;
 mod sheet_view_json;
 mod sheet_view_scripts;
 pub mod smart_tools;
+mod table_style_json;
 
 pub use benchmark::*;
 pub use convert_hwp::{RichHwpWriter, ShellWriters};

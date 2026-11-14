@@ -52,6 +52,8 @@ pub(crate) mod sheet_view;
 pub(crate) mod structured_cells;
 #[path = "structured_ref.rs"]
 pub(crate) mod structured_ref;
+#[path = "table_style.rs"]
+pub(crate) mod table_style;
 #[path = "xlsx_bounds.rs"]
 pub(crate) mod xlsx_bounds;
 #[path = "xlsx_color.rs"]
@@ -99,6 +101,10 @@ pub use sheet_table::{
 };
 pub use sheet_view::*;
 pub use structured_ref::*;
+pub use table_style::{
+    is_builtin_table_style, StyleElement, StyleFormat, TableEdge, TableLine, TableStyleDef,
+    EDGE_KEYS, MAX_STRIPE, MAX_TABLE_STYLES,
+};
 pub use xlsx_formula_text::{from_file_formula, to_file_formula};
 pub use xlsx_layout::{intersect_runs, normalize_runs, run_total, MAX_HIDDEN_ROWS, MAX_MERGES};
 

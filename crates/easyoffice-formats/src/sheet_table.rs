@@ -24,6 +24,7 @@ use std::collections::HashSet;
 
 use crate::sheet_filter::{columns_within_bounds, FilterColumn, MAX_FILTER_ROWS};
 use crate::sheet_names::{defined_name_problem, fold_name, NameProblem};
+use crate::sheet_styling::table_style::{is_builtin_table_style, TableStyleDef};
 use crate::{CellBox, EasyOfficeError};
 
 #[path = "ods_tables.rs"]
@@ -55,6 +56,8 @@ pub struct SheetTable {
     pub columns: Vec<String>,
     /// The table style (`TableStyleMedium2`); `None` for a table without one.
     pub style: Option<String>,
+    /// The definition of `style` when it is not a built-in style: the file's `tableStyles` entry (PD-231).
+    pub style_def: Option<TableStyleDef>,
     pub first_column: bool,
     pub last_column: bool,
     pub row_stripes: bool,
@@ -79,6 +82,7 @@ impl SheetTable {
             totals: false,
             columns: (1..=width).map(|n| format!("Column{n}")).collect(),
             style: None,
+            style_def: None,
             first_column: false,
             last_column: false,
             row_stripes: true,
@@ -117,6 +121,12 @@ impl SheetTable {
             && self.columns.len() == self.width() as usize
             && self.columns.iter().all(|c| text_ok(c))
             && self.style.as_deref().is_none_or(text_ok)
+            && self.style_def.as_ref().is_none_or(|d| {
+                self.style
+                    .as_deref()
+                    .is_some_and(|s| !is_builtin_table_style(s))
+                    && d.within_bounds()
+            })
             && self
                 .filter
                 .as_ref()

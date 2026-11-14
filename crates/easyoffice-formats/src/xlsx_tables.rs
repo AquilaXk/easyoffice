@@ -18,6 +18,7 @@ use std::fmt::Write;
 use crate::sheet_filter::SheetFilter;
 use crate::sheet_names::fold_name;
 use crate::sheet_styling::sheet_rules::xlsx_rules::DxfTable;
+use crate::sheet_styling::table_style::TableStyleDef;
 use crate::sheet_styling::xlsx_filter::{autofilter_xml, FilterScan};
 use crate::sheet_styling::xlsx_filter_dxf::DxfColors;
 use crate::sheet_styling::xlsx_sheet::decode_xlsx_escapes;
@@ -222,6 +223,7 @@ pub(crate) fn read_sheet_tables(
     registry: &mut TableRegistry,
     tables: &mut Vec<SheetTable>,
     dxfs: &[DxfColors],
+    styles: &HashMap<String, TableStyleDef>,
 ) -> Result<u32, EasyOfficeError> {
     let ids = table_part_ids(sheet_xml)?;
     if ids.is_empty() {
@@ -239,7 +241,15 @@ pub(crate) fn read_sheet_tables(
             .filter(|path| registry.claim_part(path))
             .and_then(|path| entries.get(path.as_str()).copied())
             .and_then(|data| std::str::from_utf8(data).ok())
-            .and_then(|xml| parse_table_with(xml, dxfs));
+            .and_then(|xml| parse_table_with(xml, dxfs))
+            .map(|mut table| {
+                table.style_def = table
+                    .style
+                    .as_ref()
+                    .and_then(|name| styles.get(name))
+                    .cloned();
+                table
+            });
         let admitted = match table {
             Some(table) => registry.admit(tables, table)?,
             None => {

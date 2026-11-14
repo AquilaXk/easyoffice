@@ -7,6 +7,7 @@ use crate::sheet_styling::sheet_rules::xlsx_rules::{parse_dxf_styles, parse_work
 use crate::sheet_styling::sheet_table::xlsx_tables::{
     merge_relationships, read_sheet_tables, HeaderCells, TableWriter,
 };
+use crate::sheet_styling::table_style::parse_table_styles;
 use crate::sheet_styling::xlsx_color::{ColorScheme, XlsxColor};
 use crate::sheet_styling::xlsx_filter_dxf::parse_dxf_colors;
 use crate::sheet_styling::xlsx_sheet::{read_shared_strings, scan_worksheet, SharedStrings};
@@ -616,6 +617,7 @@ impl OoxmlCodec {
         let dxf_styles = styles_xml.map(parse_dxf_styles).unwrap_or_default();
         if let (Some(colors), Some(styles)) = (&colors, styles_xml) {
             xf_styles.dxf_colors = parse_dxf_colors(styles, colors);
+            xf_styles.table_styles = parse_table_styles(styles, colors);
         }
         let mut stylings = Vec::new();
         let workbook_names: Vec<String> = sheet_specs.iter().map(|spec| spec.0.clone()).collect();
@@ -682,6 +684,7 @@ impl OoxmlCodec {
                     &mut table_registry,
                     &mut styling.tables,
                     &xf_styles.dxf_colors,
+                    &xf_styles.table_styles,
                 )?;
                 if let std::borrow::Cow::Owned(kept) =
                     merges_clear_of_tables(&styling.merges, &styling.tables)

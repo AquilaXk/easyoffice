@@ -12,6 +12,7 @@
 
 use crate::sheet_filter_json::{parse_columns, write_columns};
 use crate::sheet_layout_json::{parse_runs_limited, runs_json};
+use crate::table_style_json::{parse_style_def, write_style_def};
 use crate::EasyOfficeIpcRouter;
 use easyoffice_formats::{
     tables_within_bounds, CellBox, EasyOfficeError, SheetTable, StrictJsonValue, MAX_FILTER_ROWS,
@@ -75,6 +76,10 @@ fn parse_table(v: &StrictJsonValue) -> Result<SheetTable, EasyOfficeError> {
     table.style = match field("style") {
         None | Some(StrictJsonValue::Null) => None,
         Some(style) => Some(text_of(style, "style")?),
+    };
+    table.style_def = match field("styleDef") {
+        None | Some(StrictJsonValue::Null) => None,
+        Some(def) => Some(parse_style_def(def)?),
     };
     table.filter = match field("filter") {
         None | Some(StrictJsonValue::Null) => None,
@@ -190,6 +195,10 @@ pub(crate) fn tables_json(tables: &[SheetTable]) -> String {
             EasyOfficeIpcRouter::escape_json_into(&mut out, style);
             out.push('"');
         }
+        if let Some(def) = &t.style_def {
+            out.push_str(",\"styleDef\":");
+            write_style_def(&mut out, def);
+        }
         let _ = write!(
             out,
             ",\"firstColumn\":{},\"lastColumn\":{},\"rowStripes\":{},\"columnStripes\":{}",
@@ -231,6 +240,20 @@ mod tests {
         assert!(tables[0].totals && tables[0].filter.is_some() && !tables[1].header);
         assert_eq!(tables_json(&tables), text);
         assert_eq!(tables_json(&[]), "[]");
+    }
+
+    #[test]
+    fn a_custom_style_definition_goes_with_its_table() {
+        let text = concat!(
+            r#"[{"name":"T","range":"A1:B3","header":true,"totals":false,"columns":["a","b"],"style":"Mine","#,
+            r#""styleDef":{"h":{"f":"1f4e78","c":"ffffff","b":1}},"firstColumn":false,"lastColumn":false,"rowStripes":true,"columnStripes":false}]"#
+        );
+        let tables = parse(text).unwrap();
+        assert!(tables[0].style_def.is_some());
+        assert_eq!(tables_json(&tables), text);
+        // A definition belongs to a style that is not a built-in one.
+        assert!(parse(&text.replace("\"Mine\"", "\"TableStyleMedium2\"")).is_err());
+        assert!(parse(&text.replace(",\"style\":\"Mine\"", "")).is_err());
     }
 
     #[test]

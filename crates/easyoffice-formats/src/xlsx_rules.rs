@@ -19,6 +19,8 @@ use crate::sheet_styling::sheet_rules::{
     FLAG_ITALIC, FLAG_STRIKE, FLAG_UNDERLINE, ICON_SETS, MAX_RULES_PER_SHEET, MAX_RULE_STOPS,
     MAX_RULE_TEXT_CHARS,
 };
+use crate::sheet_styling::table_style::{table_styles_xml, TableStyleDef, MAX_TABLE_STYLES};
+use crate::sheet_table::SheetTable;
 use crate::XmlSanitizer;
 
 /// Differential formats of a workbook, deduplicated in first-use order.
@@ -29,6 +31,9 @@ pub(crate) struct DxfTable {
     /// The formats of colour filters (`font`, colour), after the conditional formats (PD-226).
     colors: Vec<(bool, Option<u32>)>,
     color_index: HashMap<(bool, Option<u32>), usize>,
+    /// The custom table styles the tables name, by name, once each (PD-231). Their formats come after the
+    /// colour filters' in the list.
+    table_styles: Vec<(String, TableStyleDef)>,
 }
 
 impl DxfTable {
@@ -62,18 +67,40 @@ impl DxfTable {
         self
     }
 
+    /// Adds the custom styles of `tables`, each name once; a name over the bound is left out.
+    pub(crate) fn with_table_styles<'a>(
+        mut self,
+        tables: impl IntoIterator<Item = &'a SheetTable>,
+    ) -> Self {
+        for table in tables {
+            let (Some(name), Some(def)) = (&table.style, &table.style_def) else {
+                continue;
+            };
+            if self.table_styles.len() < MAX_TABLE_STYLES
+                && !self.table_styles.iter().any(|(n, _)| n == name)
+            {
+                self.table_styles.push((name.clone(), def.clone()));
+            }
+        }
+        self
+    }
+
     /// The id of the format a colour filter names.
     pub(crate) fn color_id(&self, font: bool, color: Option<u32>) -> Option<usize> {
         let at = self.color_index.get(&(font, color)).copied()?;
         Some(self.styles.len() + at)
     }
 
-    /// `<dxfs>` element (empty when no rule or filter formats by style).
+    /// `<dxfs>` element (empty when no rule, filter or table style formats by style).
     pub(crate) fn to_xml(&self) -> String {
-        if self.styles.is_empty() && self.colors.is_empty() {
+        let (_, table_dxfs) = self.table_styles_parts();
+        if self.styles.is_empty() && self.colors.is_empty() && table_dxfs.is_empty() {
             return String::new();
         }
-        let mut xml = format!("<dxfs count=\"{}\">", self.styles.len() + self.colors.len());
+        let mut xml = format!(
+            "<dxfs count=\"{}\">",
+            self.styles.len() + self.colors.len() + table_dxfs.len()
+        );
         for s in &self.styles {
             xml.push_str("<dxf>");
             if s.fg.is_some() || s.flags != 0 {
@@ -120,8 +147,21 @@ impl DxfTable {
             }
             xml.push_str("</dxf>");
         }
+        xml.push_str(&table_dxfs.concat());
         xml.push_str("</dxfs>");
         xml
+    }
+
+    /// The `tableStyles` element, which follows `dxfs` in the stylesheet (empty without custom styles).
+    pub(crate) fn table_styles_xml(&self) -> String {
+        self.table_styles_parts().0
+    }
+
+    fn table_styles_parts(&self) -> (String, Vec<String>) {
+        table_styles_xml(
+            self.table_styles.iter().map(|(n, d)| (n.as_str(), d)),
+            self.styles.len() + self.colors.len(),
+        )
     }
 }
 
