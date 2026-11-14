@@ -286,7 +286,7 @@
       }
       const writesContent = mode !== "formats" && mode !== "widths";
       if (snap.rows === null && writesContent && cutsArray(target, pasteRows, pasteCols)) {
-        say("배열 수식의 개별 셀 내용을 변경할 수 없습니다");
+        say("배열의 일부분을 변경할 수 없음");
         return Promise.resolve(null);
       }
       const extra = plan.clipped > 0 ? " (시트 범위를 벗어난 " + plan.clipped + "칸 제외)" : "";

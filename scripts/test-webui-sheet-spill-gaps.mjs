@@ -146,7 +146,7 @@ test("clipboard text is not written over a part of an array, but over the whole 
   const { clip, edits } = clipboard(host, entries, (t) => said.push(t));
   // a part of the area without the formula's cell
   assert.equal(await clip.pasteText("x\ty", { r1: 2, c1: 1, r2: 2, c2: 1 }), null);
-  assert.deepEqual(said, ["배열 수식의 개별 셀 내용을 변경할 수 없습니다"]);
+  assert.deepEqual(said, ["배열의 일부분을 변경할 수 없음"]);
   assert.deepEqual(edits, []);
   // the block reaches the cell of the formula: the array is replaced, nothing is cut
   assert.notEqual(await clip.pasteText("x\ny\nz", { r1: 1, c1: 1, r2: 1, c2: 1 }), null);
