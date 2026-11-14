@@ -131,7 +131,7 @@ async function open() {
   // Everything the sheet window shows and keeps: the cells of the window, the layout, names, rules, widths and the tabs.
   const view = () =>
     structuredClone({
-      cells: [...document.querySelectorAll("#pane-sheet td[data-cell]")].filter((td) => /^[A-H]\d+$/.test(td.dataset.cell)).map((td) => [td.dataset.cell, td.textContent, td.dataset.formula || "", td.style.cssText || "", JSON.stringify(td._st || null), td._nf || ""]),
+      cells: [...document.querySelectorAll("#pane-sheet td[data-cell]")].filter((td) => /^[A-H]\d+$/.test(td.dataset.cell)).map((td) => [td.dataset.cell, td.textContent, td.dataset.formula || "", td.style.cssText || "", JSON.stringify(td._st || null), td._nf || "", td.dataset.link || ""]),
       layout: host.__EASYOFFICE_SHEET_LAYOUT__.getAll(),
       names: host.__EASYOFFICE_SHEET_NAMES__.getAll(),
       rules: host.__EASYOFFICE_SHEET_RULES__.getAll(),
@@ -164,6 +164,14 @@ test("a typed value and a typed formula are steps that go back and forth, and co
   assert.equal(t.sizes().undo, 2);
   // 2 steps of one cell are a few hundred bytes, not the workbook.
   assert.ok(t.sizes().bytes < 4096, "bytes: " + t.sizes().bytes);
+});
+
+test("a typed address is two steps, the entry and its automatic link, and both go back and forth (PD-223)", async () => {
+  const t = await open();
+  await roundTrip(t, () => t.typeInto("B2", "https://example.com/a"), 2);
+  assert.equal(t.sizes().undo, 2);
+  assert.ok(t.sizes().bytes < 4096, "bytes: " + t.sizes().bytes);
+  assert.equal(t.cell("B2").dataset.link, "external");
 });
 
 test("a bold format over a range, a hidden row, a merge and a freeze go back and forth", async () => {

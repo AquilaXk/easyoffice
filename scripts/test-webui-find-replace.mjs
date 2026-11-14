@@ -184,6 +184,33 @@ test("the sheet module finds cell text, replaces values (not formula results), a
   assert.match(count(h), /수식 셀 1개는 건너뜀/);
 });
 
+test("a replacement that is an address makes no automatic link and leaves the link a cell has (PD-223)", async () => {
+  const h = await createWorkspaceHarness();
+  switchModule(h.document, "SHEET");
+  await flushAsyncTurns();
+  await pickFile(
+    h.document,
+    makeFixtureFile("찾기.xlsx", {
+      sheets: [{ name: "Sheet1", cells: [{ ref: "A1", raw: "홈 하나" }, { ref: "A2", raw: "홈 둘" }], links: [{ ref: "A2", target: "https://example.com/own" }] }],
+    }),
+  );
+  await flushAsyncTurns(12);
+  const td = (ref) => h.document.querySelector(`#pane-sheet td[data-cell="${ref}"]`);
+  ctrl(h, "F2");
+  type(h, "find-query", "홈 하나");
+  type(h, "find-replacement", "https://example.com/typed");
+  $(h.document, "btn-find-replace-all").click();
+  await flushAsyncTurns(14);
+  assert.equal(td("A1").textContent, "https://example.com/typed");
+  assert.equal(td("A1").dataset.link, undefined, "the text is not turned into a link by a replacement");
+  type(h, "find-query", "홈 둘");
+  $(h.document, "btn-find-replace-all").click();
+  await flushAsyncTurns(14);
+  assert.equal(td("A2").textContent, "https://example.com/typed");
+  assert.equal(td("A2").dataset.link, "external", "the cell keeps the link it had");
+  assert.equal(td("A2")._link.target, "https://example.com/own");
+});
+
 async function openSheet(sheets) {
   const h = await createWorkspaceHarness();
   switchModule(h.document, "SHEET");

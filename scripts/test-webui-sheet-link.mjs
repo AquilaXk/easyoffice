@@ -693,3 +693,37 @@ test("a right click on a link cell opens a menu with 하이퍼링크 고치기..
   assert.equal(shown().includes("행 삭제") || shown().includes("열 삭제"), true);
   assert.equal(shown().includes("하이퍼링크 지우기"), false, "a header menu shows no link items");
 });
+
+test("an address entered in the formula bar becomes a link when the cell has none, in a step after the entry's", async () => {
+  const t = await open();
+  await t.select("B8");
+  const before = t.cell("B8").textContent;
+  const bar = t.byId("formula-input");
+  bar.value = "https://example.com/bar";
+  bar.dispatchEvent({ type: "input", target: bar });
+  bar.dispatchEvent({ type: "keydown", key: "Enter", target: bar });
+  await flushAsyncTurns(30);
+  assert.equal(t.cell("B8").textContent, "https://example.com/bar");
+  assert.equal(t.cell("B8").dataset.link, "external");
+  await t.undo();
+  assert.equal(t.cell("B8").dataset.link, undefined, "the first undo takes the link");
+  assert.equal(t.cell("B8").textContent, "https://example.com/bar");
+  await t.undo();
+  assert.equal(t.cell("B8").textContent, before);
+});
+
+test("the link menu on a protected sheet is held back by the lock and the flag: 지우기 on a locked cell shows the protection alert and keeps the link", async () => {
+  const t = await open();
+  const flags = t.host.__EASYOFFICE_SHEET_PROTECT__.FLAG_NAMES.filter((f) => f !== "insertHyperlinks" && f !== "selectLockedCells");
+  const book = PROTECTED_BOOK(flags);
+  book.sheets[0].links = [{ ref: "A3", target: URL_A }];
+  await pickFile(t.document, makeFixtureFile("보호3.xlsx", book));
+  await flushAsyncTurns(20);
+  const td = t.cell("A3");
+  assert.equal(td.dataset.link, "external");
+  td.dispatchEvent({ type: "contextmenu", target: td, button: 2, clientX: 40, clientY: 40, bubbles: true });
+  t.userClick(t.byId("sheet-header-menu").querySelector('[data-sheet-act="link-clear"]'));
+  await flushAsyncTurns(20);
+  assert.equal(td.dataset.link, "external", "a locked cell keeps its link");
+  assert.equal(t.byId("sheet-protect-alert-dialog").open, true);
+});
