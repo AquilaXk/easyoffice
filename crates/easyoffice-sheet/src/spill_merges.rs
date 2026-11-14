@@ -11,23 +11,35 @@
 //! text: `THIRD_PARTY_NOTICES.md`.
 
 use crate::axis::{shift_boxes, AxisEdit};
+use crate::recalc::IntervalIndex;
 use easyoffice_formats::CellBox;
 
-/// The merged ranges of one sheet, sorted by first row.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// The merged ranges of one sheet: sorted by first row, with the row intervals in an index.
+#[derive(Debug, Clone, Default)]
 pub struct SpillMerges {
     sorted: Vec<CellBox>,
-    /// The most rows any merge has: a merge that starts before a rectangle can still reach it by this many.
-    tallest: u32,
+    /// The row intervals of `sorted` (the id is the position), for the merges that start above a rectangle and reach it.
+    rows: IntervalIndex,
 }
+
+impl PartialEq for SpillMerges {
+    fn eq(&self, other: &Self) -> bool {
+        self.sorted == other.sorted
+    }
+}
+
+impl Eq for SpillMerges {}
 
 impl SpillMerges {
     pub(crate) fn new(mut boxes: Vec<CellBox>) -> Self {
         boxes.sort_unstable_by_key(|b| (b.row0, b.col0));
-        let tallest = boxes.iter().map(|b| b.row1 - b.row0 + 1).max().unwrap_or(0);
+        let mut rows = IntervalIndex::default();
+        for (id, b) in boxes.iter().enumerate() {
+            rows.insert(b.row0, b.row1, id as u32);
+        }
         Self {
             sorted: boxes,
-            tallest,
+            rows,
         }
     }
 
@@ -40,14 +52,20 @@ impl SpillMerges {
         Self::new(shift_boxes(&self.sorted, edit, true))
     }
 
-    /// Whether a merged range shares a cell with the rectangle `(row0, col0, row1, col1)`.
+    /// Whether a merged range shares a cell with the rectangle `(row0, col0, row1, col1)`: the merges that
+    /// cover its first row come from the index, the ones that start inside it from the sorted list.
     pub(crate) fn touches(&self, (row0, col0, row1, col1): (u32, u32, u32, u32)) -> bool {
-        let from = self
-            .sorted
-            .partition_point(|b| b.row0 < row0.saturating_sub(self.tallest.saturating_sub(1)));
-        self.sorted[from..]
-            .iter()
-            .take_while(|b| b.row0 <= row1)
-            .any(|b| b.row1 >= row0 && b.col0 <= col1 && b.col1 >= col0)
+        let meets = |b: &CellBox| b.col0 <= col1 && b.col1 >= col0;
+        let mut hit = false;
+        self.rows.stab(row0, |id| {
+            hit = hit || meets(&self.sorted[id as usize]);
+        });
+        hit || {
+            let from = self.sorted.partition_point(|b| b.row0 <= row0);
+            self.sorted[from..]
+                .iter()
+                .take_while(|b| b.row0 <= row1)
+                .any(meets)
+        }
     }
 }

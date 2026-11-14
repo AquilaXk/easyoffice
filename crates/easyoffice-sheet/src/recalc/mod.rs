@@ -16,6 +16,7 @@ mod dynamic;
 mod graph;
 mod id_set;
 mod interval;
+pub(crate) use interval::IntervalIndex;
 mod names;
 mod rule_session;
 mod spill_api;
@@ -433,6 +434,13 @@ impl RecalcSession {
             })
     }
 
+    /// Takes a formula cell out of the graph, with what it read through `OFFSET` and `INDIRECT`: its id may be
+    /// reused, so nothing may stay behind under it. Every path that removes a vertex goes through here.
+    fn release_vertex(graph: &mut DepGraph, dynamic: &mut dynamic::DynamicReads, vertex: u32) {
+        graph.remove_vertex(vertex);
+        dynamic.forget(vertex);
+    }
+
     fn stage(
         &mut self,
         sheet: u16,
@@ -451,8 +459,7 @@ impl RecalcSession {
                 self.graph.unregister(vertex, &self.refs);
             }
             self.formula_bytes -= old_raw.len();
-            self.graph.remove_vertex(vertex);
-            self.dynamic.forget(vertex);
+            Self::release_vertex(&mut self.graph, &mut self.dynamic, vertex);
             self.dirty.remove(vertex);
             self.cyclic.remove(vertex);
             self.memo.remove_at(engine.resolved_sheet_id(), coord);
@@ -532,7 +539,8 @@ impl RecalcSession {
         let mut first_round = true;
         loop {
             self.mark_spill_dirty(&seeds, &freed, first_round.then_some(&edited_all[..]));
-            self.dynamic.mark_readers(&seeds, &mut self.dirty);
+            self.dynamic
+                .mark_readers(&seeds, &mut self.dirty, &|v| self.graph.is_live(v));
             self.graph
                 .expand_dirty(&seeds, &mut self.dirty, &mut self.queue);
             let result = self.run_round();
@@ -595,7 +603,8 @@ impl RecalcSession {
             infos.extend(out.infos);
             let mut readers = out.touched;
             readers.extend(rings.iter().copied());
-            self.dynamic.mark_readers(&readers, &mut self.dirty);
+            self.dynamic
+                .mark_readers(&readers, &mut self.dirty, &|v| self.graph.is_live(v));
             self.graph
                 .expand_dirty(&readers, &mut self.dirty, &mut self.queue);
             for &v in &poisoned {

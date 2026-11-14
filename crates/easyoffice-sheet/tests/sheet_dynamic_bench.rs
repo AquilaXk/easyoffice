@@ -240,3 +240,31 @@ fn arrays_beside_many_merged_ranges() {
         );
     }
 }
+
+#[test]
+#[ignore = "measurement"]
+fn arrays_beside_merges_with_one_as_tall_as_the_sheet() {
+    // 50,000 arrays of two cells, 100,000 small merged ranges and one merged range the height of the sheet.
+    let mut wb = WorkbookEngine::new();
+    let sheet = wb.add_sheet("Sheet1");
+    for k in 0..50_000u32 {
+        sheet.set_cell_coord(
+            PackedCellCoordinate::new(k * 3, 0).unwrap(),
+            "=SEQUENCE(2)".to_string(),
+        );
+    }
+    let mut boxes: Vec<easyoffice_formats::CellBox> = (0..100_000u32)
+        .map(|r| easyoffice_formats::CellBox::parse(&format!("E{}:F{}", r + 1, r + 1)).unwrap())
+        .collect();
+    boxes.push(easyoffice_formats::CellBox::parse("Z1:Z1048576").unwrap());
+    sheet.set_spill_merges(boxes);
+    let mut best = f64::MAX;
+    for _ in 0..3 {
+        let mut session = RecalcSession::new(wb.clone()).unwrap();
+        let started = Instant::now();
+        let outcome = session.recalculate();
+        best = best.min(ms(started));
+        assert_eq!(outcome.spills.len(), 50_000);
+    }
+    println!("50,000 arrays, 100,000 small merges and one as tall as the sheet: {best:.1} ms");
+}

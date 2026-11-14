@@ -416,6 +416,13 @@ impl DepGraph {
         self.vertex_of.get(&cell_key(sheet, coord)).copied()
     }
 
+    /// Whether the id is a formula cell of the graph (not a free id).
+    pub(crate) fn is_live(&self, vertex: u32) -> bool {
+        self.sheet
+            .get(vertex as usize)
+            .is_some_and(|&s| s != u16::MAX)
+    }
+
     #[inline]
     pub(crate) fn site(&self, vertex: u32) -> (u16, PackedCellCoordinate) {
         (self.sheet[vertex as usize], self.coord[vertex as usize])

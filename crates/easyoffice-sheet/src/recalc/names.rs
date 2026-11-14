@@ -62,7 +62,7 @@ impl RecalcSession {
         self.graph.unregister_batch(&mut pairs);
         for vertex in leaving {
             let (sheet, coord) = self.graph.site(vertex);
-            self.graph.remove_vertex(vertex);
+            Self::release_vertex(&mut self.graph, &mut self.dynamic, vertex);
             self.dirty.remove(vertex);
             self.cyclic.remove(vertex);
             let engine = &self.wb.sheets()[usize::from(sheet)];

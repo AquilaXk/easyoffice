@@ -270,3 +270,33 @@ fn readers_of_a_filled_range_follow_edits_of_the_input_the_array_is_made_from() 
     m.evaluate();
     assert_eq!(texts(&m, &["E1", "E2"]), ["1", "1"]);
 }
+
+#[test]
+fn a_change_of_names_forgets_what_the_formulas_that_left_read_through_indirect_and_offset() {
+    use easyoffice_formats::DefinedName;
+    for refers_to in ["5", "TRUE", "=5", "((1))"] {
+        let def = |text: &str| {
+            vec![DefinedName {
+                name: "N".to_string(),
+                refers_to: text.to_string(),
+                ..DefinedName::default()
+            }]
+        };
+        let mut m = new_empty_model();
+        m.session().set_names(&def("Sheet1!$D$1")).unwrap();
+        m._set("A1", "=SEQUENCE(3)");
+        m._set("C1", "=N+SUM(INDIRECT(\"A1:A3\"))");
+        m._set("C2", "=N");
+        m._set("C3", "=OFFSET(A1,0,0,3,1)+0*N");
+        m.evaluate();
+        assert_eq!(m._get_text("C1"), "6");
+        m.session().set_names_lenient(&def(refers_to)).unwrap();
+        m.evaluate();
+        m._set("A1", "=SEQUENCE(4)");
+        m.evaluate();
+        assert_eq!(m._get_text("A4"), "4", "{refers_to}");
+        m._set("A1", "=SEQUENCE(3)");
+        m.evaluate();
+        assert_eq!(m._get_text("A4"), "", "{refers_to}");
+    }
+}

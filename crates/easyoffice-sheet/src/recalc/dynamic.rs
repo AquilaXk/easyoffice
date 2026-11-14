@@ -90,13 +90,25 @@ impl DynamicReads {
     }
 
     /// Adds to `dirty` the formulas that read one of the cells `seeds` through `OFFSET` or `INDIRECT`.
-    pub(super) fn mark_readers(&self, seeds: &[(u16, PackedCellCoordinate)], dirty: &mut IdSet) {
+    pub(super) fn mark_readers(
+        &self,
+        seeds: &[(u16, PackedCellCoordinate)],
+        dirty: &mut IdSet,
+        is_live: &impl Fn(u32) -> bool,
+    ) {
         if seeds.is_empty() || self.is_idle() {
             return;
         }
-        self.edges.mark_dependents(seeds, dirty);
+        let mut found = IdSet::default();
+        self.edges.mark_dependents(seeds, &mut found);
         self.anything.for_each(|v| {
-            dirty.insert(v);
+            found.insert(v);
+        });
+        // A formula that left the graph is never calculated (its id may be free or reused).
+        found.for_each(|v| {
+            if is_live(v) {
+                dirty.insert(v);
+            }
         });
     }
 
