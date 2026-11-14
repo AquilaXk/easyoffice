@@ -83,6 +83,7 @@
     document, env: host, desktopBridge, getActiveModule: () => activeModule,
     setFeedback: (text) => setStatusFeedback(text),
     onRecentsChanged: (entries) => shellChrome.pushRecents(entries),
+    settleDirty: () => workspaceSession.settle(),
     isDirty: () => workspaceSession.isDirty(),
     save: () => saveWorkspaceDocument({ closing: true }),
     discardStoredState: () => { workspaceSession.discardStoredState(); hwpSession.discardAutosave(); },

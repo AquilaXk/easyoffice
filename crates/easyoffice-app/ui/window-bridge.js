@@ -365,6 +365,8 @@
     }
 
     async function runCloseRequest() {
+      // A cell still being edited is committed and an edit the autosave has not compared yet is settled first.
+      await deps.settleDirty?.();
       if (!deps.isDirty()) return closeWindow();
       ackPrompt();
       const choice = await askCloseChoice();

@@ -327,6 +327,10 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     let dirty = false;
     let externalDirty = false; // unsaved changes owned by another editor (the embedded HWP editor)
     let pendingActivity = false;
+    // An edit since the last comparison with the saved content: the autosave decides after a pause, but what
+    // the shell is told ("unsaved") must not wait for it, or a close, quit, logoff or update restart in that
+    // time loses the edit without a question. A click alone is no edit.
+    let pendingEdit = false;
     let guardRegistered = false;
     let restoring = false;
     let autosaveTimer = null;
@@ -339,9 +343,11 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       if (fb) fb.textContent = text;
     }
 
+    const hasUnsavedChanges = () => dirty || externalDirty || pendingEdit;
+
     function handleBeforeUnload(ev) {
       flushAutosaveNow();
-      if (!dirty && !externalDirty) return undefined;
+      if (!hasUnsavedChanges()) return undefined;
       ev.preventDefault?.();
       ev.returnValue = "";
       return "";
@@ -350,7 +356,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     function syncUnloadGuard() {
       const want = dirty || pendingActivity || externalDirty;
       const shell = document.getElementById("app");
-      const unsaved = dirty || externalDirty;
+      const unsaved = hasUnsavedChanges();
       if (shell) shell.dataset.dirty = unsaved ? "true" : "false";
       if (lastReportedDirty !== unsaved) {
         lastReportedDirty = unsaved;
@@ -396,6 +402,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     function skipAutosaveForLargeWorkbook(sheets) {
       if (!exceedsSheetCells(sheets, AUTOSAVE_MAX_SHEET_CELLS)) return false;
       pendingActivity = false;
+      pendingEdit = false;
       dirty = true;
       try {
         resolveStorage()?.removeItem(storageKey());
@@ -414,6 +421,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       const hash = contentFingerprint(snap, workbookProtectOf());
       if (baselineHash === null) baselineHash = hash;
       pendingActivity = false;
+      pendingEdit = false;
       dirty = hash !== baselineHash;
       persistRecord(snap);
       syncUnloadGuard();
@@ -430,6 +438,13 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       }
     }
 
+    // Brings what the window knows of its changes up to date: a sheet cell still being edited is committed,
+    // then the content is compared with the saved one. A close decides on the answer of `isDirty` after this.
+    async function settle() {
+      await getSheetController?.()?.commitPendingFocusedSheetCell?.(true);
+      await runExclusive(() => flushAutosaveNow());
+    }
+
     function scheduleAutosave() {
       if (autosaveTimer !== null) host.clearTimeout?.(autosaveTimer);
       autosaveTimer = host.setTimeout?.(() => {
@@ -441,9 +456,10 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       }, AUTOSAVE_DEBOUNCE_MS) ?? null;
     }
 
-    function noteActivity() {
+    function noteActivity(isEdit = true) {
       if (restoring) return;
       pendingActivity = true;
+      if (isEdit) pendingEdit = true;
       syncUnloadGuard();
       scheduleAutosave();
     }
@@ -453,6 +469,8 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       const hash = contentFingerprint(snap, workbookProtectOf());
       baselineHash = typeof restoredRecord?.baseline === "string" ? restoredRecord.baseline : hash;
       dirty = hash !== baselineHash;
+      // The content was just compared: what happened before is part of the comparison.
+      pendingEdit = false;
       syncUnloadGuard();
     }
 
@@ -467,6 +485,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
         baselineHash = contentFingerprint(snap, workbookProtectOf());
         dirty = false;
         pendingActivity = false;
+        pendingEdit = false;
         persistRecord(snap);
         syncUnloadGuard();
       });
@@ -514,7 +533,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     function installActivityTracking() {
       const root = document.documentElement;
       for (const type of ["input", "change", "click", "eo-doc-mutated"]) {
-        root?.addEventListener?.(type, () => noteActivity());
+        root?.addEventListener?.(type, () => noteActivity(type !== "click"));
       }
       host.addEventListener?.("pagehide", () => flushAutosaveNow());
       document.addEventListener?.("selectionchange", () => {
@@ -845,7 +864,8 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       applyPlatformChrome,
       showBootstrapError,
       hideBootstrapError,
-      isDirty: () => dirty || externalDirty,
+      isDirty: hasUnsavedChanges,
+      settle,
     };
   }
 

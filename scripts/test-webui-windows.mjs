@@ -490,6 +490,58 @@ test("dirty state and the document name are reported to the shell for the native
   assert.equal(document.title, "● 제목 없음 — EasyOffice");
 });
 
+// The debounce of the autosave decides "changed" only after the typing pauses; the shell must not be told
+// "clean" in the meantime (a quit, a logoff or an update restart would drop the edit without a question).
+test("an edit is reported to the shell at once, before the autosave has compared the content", async () => {
+  const { document, shell } = await openWindow("?module=DOC&win=w-pending-edit", {}, { localStorage: createMemoryStorage() });
+  const states = () => shell.named("report_window_state").map((c) => c.args);
+  assert.equal(states().at(-1).dirty, false);
+  typeIntoDocParagraph(document, "방금 친 글");
+  await flushAsyncTurns(10);
+  assert.deepEqual(states().at(-1), { name: "제목 없음", dirty: true }, "no timer has run");
+});
+
+test("closing right after an edit asks first, and a click alone does not make the window dirty", async () => {
+  const { document, host, shell } = await openWindow("?module=DOC&win=w-pending-close", closeAnswers("cancel"), { localStorage: createMemoryStorage() });
+  document.documentElement.dispatchEvent({ type: "click", target: document.body });
+  await flushAsyncTurns(5);
+  assert.equal(shell.named("report_window_state").at(-1).args.dirty, false, "a click is no edit");
+  typeIntoDocParagraph(document, "방금 친 글");
+  await host.__EASYOFFICE_CLOSE_REQUEST__();
+  assert.equal(shell.named("confirm_close").length, 1);
+  assert.equal(shell.named("close_current_window").length, 0);
+});
+
+test("settling commits the cell being edited first and then compares the content, so the close decision is exact", async () => {
+  const { host } = await openWindow("?module=SHEET&win=w-settle");
+  const order = [];
+  let content = "1";
+  const session = host.__EASYOFFICE_CREATE_WORKSPACE_SESSION__({
+    document: { getElementById: () => null, querySelectorAll: () => [], activeElement: null, addEventListener() {} },
+    shortcutBindings: host.__EASYOFFICE_RIBBON_CATALOG__.WORKSPACE_SHORTCUT_BINDINGS,
+    getActiveModule: () => "SHEET", getHwpHost: () => null,
+    captureWorkspaceSnapshot: () => { order.push("capture"); return { sheets: { S: { A1: { value: content } } } }; },
+    restoreWorkspaceSnapshot: async () => {},
+    runExclusive: (fn) => Promise.resolve().then(fn),
+    getWorkspacePanels: () => null,
+    getSheetController: () => ({ commitPendingFocusedSheetCell: async (keepFocus) => { order.push("commit:" + keepFocus); content = "2"; } }),
+    isDesktopShell: () => true,
+  });
+  session.establishBaseline();
+  order.length = 0;
+  session.noteActivity();
+  assert.equal(session.isDirty(), true, "an edit counts at once");
+  await session.settle();
+  assert.deepEqual(order.slice(0, 2), ["commit:true", "capture"]);
+  assert.equal(session.isDirty(), true, "the committed cell differs from the saved content");
+  await session.markSaved();
+  session.noteActivity(false);
+  assert.equal(session.isDirty(), false, "a click is no edit");
+  session.noteActivity();
+  await session.settle();
+  assert.equal(session.isDirty(), false, "an edit that left the content as saved is clean once compared");
+});
+
 test("a pending open (bytes and display name only) is loaded into the new window", async () => {
   const docx = Buffer.from("PK\u0003\u0004fake").toString("base64");
   const { shell, document } = await openWindow("?module=DOC&win=w-pending", {
