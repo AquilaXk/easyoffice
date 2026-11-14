@@ -21,6 +21,7 @@ enum EasyOfficeQuickLookStatus: Int32 {
 /// so the cases only differ in the reason that is logged.
 enum EasyOfficeQuickLookError: Error {
     case fileTooLarge
+    case notRegularFile
     case emptyData
     case status(Int32)
     case renderFailed
@@ -28,6 +29,7 @@ enum EasyOfficeQuickLookError: Error {
     var reason: String {
         switch self {
         case .fileTooLarge: return "file-too-large"
+        case .notRegularFile: return "not-regular-file"
         case .emptyData: return "empty-data"
         case .renderFailed: return "render-failed"
         case .status(let code):
@@ -54,12 +56,19 @@ func easyOfficeQuickLookData(from bytes: EasyOfficeQuickLookBytes) throws -> Dat
     return Data(bytes: ptr, count: bytes.len)
 }
 
+/// Reads the file Finder names. The size and the kind are those of the file a link leads to (the
+/// size of a link is the length of its path), and only a regular file is read: opening a pipe would
+/// wait for a writer that never comes, and a device would never end.
 func easyOfficeQuickLookReadFile(_ fileURL: URL) throws -> Data {
-    let values = try fileURL.resourceValues(forKeys: [.fileSizeKey])
+    let target = fileURL.resolvingSymlinksInPath()
+    let values = try target.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+    guard values.isRegularFile == true else {
+        throw EasyOfficeQuickLookError.notRegularFile
+    }
     if let fileSize = values.fileSize, fileSize > easyOfficeQuickLookMaxFileSize {
         throw EasyOfficeQuickLookError.fileTooLarge
     }
-    let data = try Data(contentsOf: fileURL, options: [.mappedIfSafe])
+    let data = try Data(contentsOf: target, options: [.mappedIfSafe])
     if data.count > easyOfficeQuickLookMaxFileSize {
         throw EasyOfficeQuickLookError.fileTooLarge
     }

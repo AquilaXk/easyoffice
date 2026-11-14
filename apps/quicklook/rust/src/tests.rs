@@ -559,10 +559,14 @@ fn deeply_nested_and_self_referencing_svg_does_not_crash() {
         r##"<defs><g id="a"><use href="#b"/></g><g id="b"><use href="#a"/></g></defs><use href="#a"/>"##,
     );
     for text in [nested, looping] {
-        let outcome = bounded::run(Duration::from_secs(20), move || {
-            let page = render::parse_svg(&text)?;
-            render::png(&page, 64)
-        });
+        let outcome = bounded::run_with(
+            Duration::from_secs(20),
+            || Ok(()),
+            move |()| {
+                let page = render::parse_svg(&text)?;
+                render::png(&page, 64)
+            },
+        );
         assert!(outcome.is_ok() || outcome.is_err());
     }
 }
@@ -571,8 +575,9 @@ fn deeply_nested_and_self_referencing_svg_does_not_crash() {
 
 #[test]
 fn a_slow_request_times_out() {
+    static LIMIT: bounded::Limiter = bounded::Limiter::new(2);
     let started = Instant::now();
-    let outcome: Result<(), i32> = bounded::run(Duration::from_millis(100), || {
+    let outcome: Result<(), i32> = bounded::run_limited(&LIMIT, Duration::from_millis(100), || {
         std::thread::sleep(Duration::from_secs(3));
         Ok(())
     });
@@ -582,12 +587,14 @@ fn a_slow_request_times_out() {
 
 #[test]
 fn a_panic_becomes_a_status() {
-    let outcome: Result<(), i32> = bounded::run(Duration::from_secs(5), || panic!("boom"));
+    static LIMIT: bounded::Limiter = bounded::Limiter::new(2);
+    let outcome: Result<(), i32> =
+        bounded::run_limited(&LIMIT, Duration::from_secs(5), || panic!("boom"));
     assert_eq!(outcome, Err(STATUS_RENDER_FAILED));
 }
 
 #[test]
-fn abandoned_workers_are_capped_and_overlapping_requests_are_not() {
+fn stuck_workers_keep_their_permits_until_they_end() {
     static LIMIT: bounded::Limiter = bounded::Limiter::new(2);
     let (release, hold) = std::sync::mpsc::channel::<()>();
     let hold = std::sync::Arc::new(std::sync::Mutex::new(hold));
@@ -600,11 +607,22 @@ fn abandoned_workers_are_capped_and_overlapping_requests_are_not() {
             });
         assert_eq!(outcome, Err(STATUS_TIMEOUT));
     }
-    // Both timed-out workers still run: a third request is refused without starting a thread.
-    let third: Result<u8, i32> = bounded::run_limited(&LIMIT, Duration::from_secs(5), || Ok(1));
+    // Both timed-out workers still run: a third request gives up without copying its input or
+    // starting a thread.
+    let copied = std::sync::atomic::AtomicUsize::new(0);
+    let third: Result<u8, i32> = bounded::run_limited_with(
+        &LIMIT,
+        Duration::from_millis(100),
+        || {
+            copied.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        },
+        |()| Ok(1),
+    );
     assert_eq!(third, Err(STATUS_TIMEOUT));
+    assert_eq!(copied.load(std::sync::atomic::Ordering::SeqCst), 0);
     drop(release);
-    // They end when the channel closes, and requests are served again.
+    // They end when the channel closes, and the permits come back.
     let started = Instant::now();
     loop {
         let again: Result<u8, i32> = bounded::run_limited(&LIMIT, Duration::from_secs(5), || Ok(1));
@@ -613,21 +631,35 @@ fn abandoned_workers_are_capped_and_overlapping_requests_are_not() {
         }
         assert!(
             started.elapsed() < Duration::from_secs(5),
-            "slots never came back"
+            "permits never came back"
         );
         std::thread::sleep(Duration::from_millis(20));
     }
-    // Many requests at once are all served: only abandoned workers count.
+}
+
+#[test]
+fn no_more_workers_run_at_once_than_the_limit_and_every_request_is_served() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static LIMIT: bounded::Limiter = bounded::Limiter::new(2);
+    static RUNNING: AtomicUsize = AtomicUsize::new(0);
+    static PEAK: AtomicUsize = AtomicUsize::new(0);
     let outcomes: Vec<_> = (0..12)
         .map(|n| {
             std::thread::spawn(move || {
-                bounded::run_limited(&LIMIT, Duration::from_secs(5), move || Ok(n))
+                bounded::run_limited(&LIMIT, Duration::from_secs(20), move || {
+                    let now = RUNNING.fetch_add(1, Ordering::SeqCst) + 1;
+                    PEAK.fetch_max(now, Ordering::SeqCst);
+                    std::thread::sleep(Duration::from_millis(30));
+                    RUNNING.fetch_sub(1, Ordering::SeqCst);
+                    Ok(n)
+                })
             })
         })
         .collect();
     for (n, handle) in outcomes.into_iter().enumerate() {
         assert_eq!(handle.join().unwrap(), Ok(n));
     }
+    assert_eq!(PEAK.load(Ordering::SeqCst), 2);
 }
 
 fn png_data_url(png: &[u8]) -> String {
