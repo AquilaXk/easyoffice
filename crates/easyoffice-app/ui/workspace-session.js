@@ -65,6 +65,34 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
   // `apps/studio-host/src/core/desktop-chrome.ts`: the same chrome selector and context-menu guard.
   const NON_EDITOR_CHROME_SELECTOR = "#home-screen, #menu-bar, #icon-toolbar, #doc-style-bar, #status-bar";
   const URL_ATTRS = new Set(["href", "src", "action", "formaction", "xlink:href", "srcset", "poster"]);
+  const CLICK_MUTATING_CONTROL_SELECTOR =
+    'button, [role="button"], [role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"], [role="tab"], [data-cmd], [data-studio-cmd], [data-studio-menu-cmd], [data-sheet-act], [data-ribbon-cmd], input[type="checkbox"], input[type="radio"], summary, a[href]';
+
+  function isSafeRestoredUrl(raw) {
+    if (typeof raw !== "string") return false;
+    const str = raw.trim();
+    if (!str) return true;
+    if (/[\u0000-\u001f\u007f-\u009f]/.test(str)) return false;
+    if (str.startsWith("//") || str.startsWith("\\\\")) return false;
+    const colonIdx = str.indexOf(":");
+    const slashIdx = str.indexOf("/");
+    const questionIdx = str.indexOf("?");
+    const hashIdx = str.indexOf("#");
+    if (colonIdx >= 0) {
+      const firstDelim = Math.min(
+        slashIdx >= 0 ? slashIdx : Infinity,
+        questionIdx >= 0 ? questionIdx : Infinity,
+        hashIdx >= 0 ? hashIdx : Infinity
+      );
+      if (colonIdx < firstDelim) {
+        const scheme = str.slice(0, colonIdx).toLowerCase();
+        if (scheme !== "http" && scheme !== "https" && scheme !== "mailto") {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
 
   // Commands that still apply while the embedded HWP editor is the active surface.
   // The PII scrub and security audit read the page's own (hidden) fallback DOM, not the embedded document, so they stay off here.
@@ -224,7 +252,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       for (const [name, val] of Object.entries(attrs)) {
         const lower = name.toLowerCase();
         if (lower.startsWith("on")) return false;
-        if (URL_ATTRS.has(lower) && /^\s*(javascript|vbscript|data):/i.test(String(val))) return false;
+        if (URL_ATTRS.has(lower) && !isSafeRestoredUrl(String(val))) return false;
       }
       return isSafeNodeSpecList(spec.children, depth + 1);
     });
@@ -532,9 +560,15 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
 
     function installActivityTracking() {
       const root = document.documentElement;
-      for (const type of ["input", "change", "click", "eo-doc-mutated"]) {
-        root?.addEventListener?.(type, () => noteActivity(type !== "click"));
+      for (const type of ["input", "change", "eo-doc-mutated"]) {
+        root?.addEventListener?.(type, () => noteActivity(true));
       }
+      root?.addEventListener?.("click", (ev) => {
+        const target = ev?.target;
+        if (target && typeof target.closest === "function" && target.closest(CLICK_MUTATING_CONTROL_SELECTOR)) {
+          noteActivity(false);
+        }
+      });
       host.addEventListener?.("pagehide", () => flushAutosaveNow());
       document.addEventListener?.("selectionchange", () => {
         const r = captureSelectionRange();

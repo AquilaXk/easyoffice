@@ -233,7 +233,7 @@
         // The shared decoder uses the webview's `Uint8Array.fromBase64` when it has one and an
         // unrolled byte loop otherwise (`sheet-utils.js`, loaded before this file).
         const bytes = host.__EASYOFFICE_SHEET_UTILS__.base64ToBytes(res.base64);
-        return { name: baseName(res.name), bytes };
+        return { name: baseName(res.name), bytes, base64: res.base64 };
       }
       const opener = env.opener;
       if (!launch.handoff || !opener || typeof opener.__EASYOFFICE_TAKE_HANDOFF__ !== "function") return null;
@@ -479,7 +479,7 @@
       let opened = false;
       let tracked = false;
       try {
-        const outcome = await openBytes(pending.name, pending.bytes);
+        const outcome = await openBytes(pending.name, pending.bytes, { sourceBase64: pending.base64 });
         opened = outcome?.ok === true;
         // A text-only open (the editor could not show an HWP-family file) rebuilt the document from its text, so
         // a save of it must not replace the original: the shell lets go of the file and Save asks where to write.

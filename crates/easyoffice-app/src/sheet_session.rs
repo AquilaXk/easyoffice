@@ -21,8 +21,8 @@ use easyoffice_formats::{
     MAX_SHEET_NAME_UNITS,
 };
 use easyoffice_sheet::{
-    AxisBudget, AxisEdit, Budget, CellChange, ChangedCell, Footprint, PackedCellCoordinate,
-    RecalcError, RecalcOutcome, RecalcSession, SheetLock, Verdict, WorkbookEngine, MAX_EVAL_TIME,
+    AxisBudget, AxisEdit, Budget, CellChange, Footprint, PackedCellCoordinate, RecalcError,
+    RecalcSession, SheetLock, Verdict, WorkbookEngine, MAX_EVAL_TIME,
 };
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
@@ -89,6 +89,17 @@ struct Entry {
     /// Cells and bytes the session held after its last call (counted against the totals).
     cells: usize,
     bytes: usize,
+    /// Fixed sheet-name metadata bytes allocated at `open`.
+    base_bytes: usize,
+    /// Per-sheet lock mask heap bytes held outside `Footprint`.
+    lock_bytes: HashMap<String, usize>,
+}
+
+impl Entry {
+    fn extra_bytes(&self) -> usize {
+        self.base_bytes
+            .saturating_add(self.lock_bytes.values().copied().sum())
+    }
 }
 
 /// Answer to `apply`.
@@ -115,118 +126,9 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// `[{"sheet","cell","value"}, ...]` for the formula cells of `changed`.
-pub(crate) fn write_changed(out: &mut String, session: &RecalcSession, changed: &[ChangedCell]) {
-    out.push('[');
-    for (i, c) in changed.iter().enumerate() {
-        if i > 0 {
-            out.push(',');
-        }
-        out.push_str("{\"sheet\":\"");
-        out.push_str(&EasyOfficeIpcRouter::escape_json_str(
-            session.sheet_name(c.sheet).unwrap_or_default(),
-        ));
-        out.push_str("\",\"cell\":\"");
-        out.push_str(&c.coord.to_a1());
-        out.push_str("\",\"value\":\"");
-        out.push_str(&EasyOfficeIpcRouter::escape_json_str(
-            &c.value.to_display_string(),
-        ));
-        out.push_str("\"}");
-    }
-    out.push(']');
-}
-
-/// `,"spills":[{"sheet","cell","rows","cols","blocked"}, ...]` for the arrays whose area changed in the
-/// recalculation (`rows` is 0 when the formula no longer spills); nothing when none did (PD-217).
-pub(crate) fn spills_field(session: &RecalcSession, outcome: &RecalcOutcome) -> String {
-    if outcome.spills.is_empty() {
-        return String::new();
-    }
-    let mut out = String::from(",\"spills\":[");
-    for (i, spill) in outcome.spills.iter().enumerate() {
-        if i > 0 {
-            out.push(',');
-        }
-        out.push_str("{\"sheet\":\"");
-        out.push_str(&EasyOfficeIpcRouter::escape_json_str(
-            session.sheet_name(spill.sheet).unwrap_or_default(),
-        ));
-        out.push_str(&format!(
-            "\",\"cell\":\"{}\",\"rows\":{},\"cols\":{},\"blocked\":{}}}",
-            spill.anchor.to_a1(),
-            spill.rows,
-            spill.cols,
-            spill.blocked
-        ));
-    }
-    out.push(']');
-    out
-}
-
-/// `,"timedOut":true,"pending":n` when the recalculation ran out of time: `pending` formulas keep the
-/// value the page shows and are computed by the next `apply` (the page sends one without changes).
-pub(crate) fn timed_out_field(outcome: &RecalcOutcome) -> String {
-    if outcome.timed_out {
-        format!(",\"timedOut\":true,\"pending\":{}", outcome.pending)
-    } else {
-        String::new()
-    }
-}
-
-/// The answer to an `apply` that recalculated: the changed formula cells, `circular`, the cells whose
-/// conditional formatting changed and the sheets that lost their rules.
-pub(crate) fn recalc_answer(
-    id: &str,
-    session: &mut RecalcSession,
-    changes: &[CellChange],
-    outcome: &RecalcOutcome,
-) -> String {
-    let mut out = String::with_capacity(64 + outcome.changed.len() * 40);
-    out.push_str("{\"session\":\"");
-    out.push_str(id);
-    out.push_str("\",\"changed\":");
-    write_changed(&mut out, session, &outcome.changed);
-    out.push_str(&format!(
-        ",\"circular\":{},\"recomputed\":{}",
-        outcome.circular, outcome.recomputed
-    ));
-    out.push_str(&timed_out_field(outcome));
-    out.push_str(&spills_field(session, outcome));
-    let rule_updates = session.rule_updates(changes, outcome);
-    if !rule_updates.changed.is_empty() {
-        out.push_str(",\"cf\":[");
-        for (i, (sheet, visuals)) in rule_updates.changed.iter().enumerate() {
-            if i > 0 {
-                out.push(',');
-            }
-            let packed = visuals_json(visuals);
-            out.push_str(&format!(
-                "{{\"sheet\":\"{}\",{}",
-                EasyOfficeIpcRouter::escape_json_str(
-                    session.sheet_name(*sheet).unwrap_or_default()
-                ),
-                &packed[1..]
-            ));
-        }
-        out.push(']');
-    }
-    if !rule_updates.dropped.is_empty() {
-        let names: Vec<String> = rule_updates
-            .dropped
-            .iter()
-            .map(|&i| {
-                format!(
-                    "\"{}\"",
-                    EasyOfficeIpcRouter::escape_json_str(session.sheet_name(i).unwrap_or_default())
-                )
-            })
-            .collect();
-        out.push_str(&format!(",\"cfDropped\":[{}]", names.join(",")));
-    }
-    out.push('}');
-    out
-}
+#[path = "sheet_session_json.rs"]
+mod json;
+pub(crate) use json::*;
 
 impl Registry {
     pub(crate) fn new(limits: Limits) -> Self {
@@ -276,12 +178,28 @@ impl Registry {
         }
         let session = RecalcSession::with_budget(wb, self.limits.budget())
             .map_err(|err| EasyOfficeError::InvalidArgument(err.to_string()))?;
+        let base_bytes: usize = sheets.iter().map(String::len).sum();
+        let fp = session.footprint();
+        let total_bytes = fp.total_bytes().saturating_add(base_bytes);
+        let total_cells = fp.cells;
+        if total_bytes > self.limits.max_session_bytes
+            || total_cells > self.limits.max_session_cells
+        {
+            return Err(EasyOfficeError::ResourceBudgetExceeded(
+                "시트 세션 메모리 한도를 넘었습니다.".to_string(),
+            ));
+        }
         let mut inner = lock(&self.inner);
         self.drop_idle(&mut inner, now);
         while inner.sessions.len() >= self.limits.max_sessions {
             if !Self::evict_oldest(&mut inner, None) {
                 break;
             }
+        }
+        if !self.reserve_total_locked(&mut inner, "", total_bytes, total_cells) {
+            return Err(EasyOfficeError::ResourceBudgetExceeded(
+                "전역 시트 세션 메모리 한도를 넘었습니다.".to_string(),
+            ));
         }
         inner.counter += 1;
         let mut id = fresh_id(inner.counter);
@@ -295,8 +213,10 @@ impl Registry {
                 session: Arc::new(Mutex::new(session)),
                 owner: owner.to_string(),
                 last_used: now,
-                cells: 0,
-                bytes: 0,
+                cells: total_cells,
+                bytes: total_bytes,
+                base_bytes,
+                lock_bytes: HashMap::new(),
             },
         );
         Ok(id)
@@ -336,9 +256,7 @@ impl Registry {
         let outcome = session.set_rules(sheet, rules);
         // The rules were replaced, so the session holds different memory now, whatever the outcome.
         let mut after = session.footprint();
-        let fits = outcome.is_err()
-            || (after.total_bytes() <= self.limits.max_session_bytes
-                && self.reserve_total(id, after.total_bytes(), after.cells));
+        let fits = outcome.is_err() || self.fits(id, after);
         if !fits {
             // Only the rules are refused (like rules that match too many cells): the sheet keeps
             // its cells and loses its rules, and the session stays usable.
@@ -385,16 +303,15 @@ impl Registry {
                 title,
                 message,
                 show,
-            } => format!(
-                "{{\"ok\":false,\"alert\":\"{}\",\"title\":\"{}\",\"message\":\"{}\",\"show\":{show}}}",
-                match alert {
+            } => {
+                let a = match alert {
                     DvAlert::Stop => "stop",
                     DvAlert::Warning => "warning",
                     DvAlert::Information => "information",
-                },
-                EasyOfficeIpcRouter::escape_json_str(&title),
-                EasyOfficeIpcRouter::escape_json_str(&message)
-            ),
+                };
+                format!("{{\"ok\":false,\"alert\":\"{a}\",\"title\":\"{}\",\"message\":\"{}\",\"show\":{show}}}",
+                    EasyOfficeIpcRouter::escape_json_str(&title), EasyOfficeIpcRouter::escape_json_str(&message))
+            }
         };
         Ok(Applied::Done(json))
     }
@@ -424,13 +341,21 @@ impl Registry {
             lock(&self.inner).sessions.remove(id);
             return Ok(Applied::Expired);
         };
+        let extra = lock(&self.inner)
+            .sessions
+            .get(id)
+            .map_or(0, Entry::extra_bytes);
         let before = session.footprint();
+        let projected_bytes = before
+            .total_bytes()
+            .saturating_add(extra)
+            .saturating_add(incoming);
         // Upper bounds before anything is staged: every change adds a cell and its text.
         if before.cells.saturating_add(changes.len()) > self.limits.max_session_cells
-            || before.total_bytes().saturating_add(incoming) > self.limits.max_session_bytes
+            || projected_bytes > self.limits.max_session_bytes
             || !self.reserve_total(
                 id,
-                before.total_bytes().saturating_add(incoming),
+                projected_bytes,
                 before.cells.saturating_add(changes.len()),
             )
         {
@@ -460,6 +385,32 @@ impl Registry {
     }
 
     /// Tells the session which cells of `sheet` may be changed and recalculates the arrays of it (PD-217).
+    const MAX_LOCK_RANGES_PER_SHEET: usize = 10_000;
+
+    fn lock_heap_bytes(lock: &Option<SheetLock>) -> usize {
+        lock.as_ref().map_or(0, |l| {
+            (l.unlocked_cells.len() + l.locked_cells.len()) * 12
+                + (l.unlocked_rows.len() + l.unlocked_cols.len()) * 8
+                + 64
+        })
+    }
+
+    fn check_sheet_lock_limits(lock: &Option<SheetLock>) -> Result<(), EasyOfficeError> {
+        let spans = lock.as_ref().map_or(0, |l| {
+            l.unlocked_cells.len()
+                + l.locked_cells.len()
+                + l.unlocked_rows.len()
+                + l.unlocked_cols.len()
+        });
+        if spans > Self::MAX_LOCK_RANGES_PER_SHEET {
+            Err(EasyOfficeError::ResourceBudgetExceeded(
+                "시트 잠금 범위 수가 한도를 초과했습니다.".to_string(),
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
     pub(crate) fn set_lock(
         &self,
         id: &str,
@@ -468,6 +419,8 @@ impl Registry {
         mask: Option<SheetLock>,
         now: Instant,
     ) -> Result<Applied, EasyOfficeError> {
+        Self::check_sheet_lock_limits(&mask)?;
+        let lock_bytes = Self::lock_heap_bytes(&mask);
         let Some(handle) = self.checkout(id, owner, now) else {
             return Ok(Applied::Expired);
         };
@@ -475,13 +428,50 @@ impl Registry {
             lock(&self.inner).sessions.remove(id);
             return Ok(Applied::Expired);
         };
+        let extra_without_sheet = lock(&self.inner).sessions.get(id).map_or(0, |entry| {
+            entry.base_bytes.saturating_add(
+                entry
+                    .lock_bytes
+                    .iter()
+                    .filter(|(k, _)| !k.eq_ignore_ascii_case(sheet))
+                    .map(|(_, &v)| v)
+                    .sum(),
+            )
+        });
+        let before_fp = session.footprint();
+        let projected_bytes = before_fp
+            .total_bytes()
+            .saturating_add(extra_without_sheet)
+            .saturating_add(lock_bytes);
+        if projected_bytes > self.limits.max_session_bytes
+            || !self.reserve_total(id, projected_bytes, before_fp.cells)
+        {
+            drop(session);
+            return Ok(Applied::Refused);
+        }
         match session.set_sheet_lock(sheet, mask) {
             Ok(()) => {}
             Err(RecalcError::Invalid(err)) => return Err(err),
-            Err(RecalcError::OverBudget) => return Ok(Applied::Refused),
+            Err(RecalcError::OverBudget) => {
+                drop(session);
+                lock(&self.inner).sessions.remove(id);
+                return Ok(Applied::Refused);
+            }
         }
         let outcome = session.recalculate();
         let json = recalc_answer(id, &mut session, &[], &outcome);
+        let final_fp = session.footprint();
+        drop(session);
+        if let Some(entry) = lock(&self.inner).sessions.get_mut(id) {
+            entry
+                .lock_bytes
+                .retain(|k, _| !k.eq_ignore_ascii_case(sheet));
+            if lock_bytes > 0 {
+                entry.lock_bytes.insert(sheet.to_string(), lock_bytes);
+            }
+            entry.cells = final_fp.cells;
+            entry.bytes = final_fp.total_bytes().saturating_add(entry.extra_bytes());
+        }
         Ok(Applied::Done(json))
     }
 
@@ -493,15 +483,19 @@ impl Registry {
     /// Whether a session holding `after` is within the per-session and all-session bounds (older sessions are
     /// evicted to make room).
     pub(crate) fn fits(&self, id: &str, after: Footprint) -> bool {
-        after.total_bytes() <= self.limits.max_session_bytes
-            && self.reserve_total(id, after.total_bytes(), after.cells)
+        let extra = lock(&self.inner)
+            .sessions
+            .get(id)
+            .map_or(0, Entry::extra_bytes);
+        let projected = after.total_bytes().saturating_add(extra);
+        projected <= self.limits.max_session_bytes && self.reserve_total(id, projected, after.cells)
     }
 
     /// Counts what the session holds after a call against the all-session totals.
     pub(crate) fn record_footprint(&self, id: &str, after: Footprint) {
         if let Some(entry) = lock(&self.inner).sessions.get_mut(id) {
             entry.cells = after.cells;
-            entry.bytes = after.total_bytes();
+            entry.bytes = after.total_bytes().saturating_add(entry.extra_bytes());
         }
     }
 
@@ -537,6 +531,10 @@ impl Registry {
         let json = crate::sheet_structure_ipc::session_answer(id, &session, &report, &outcome);
         let after = session.footprint();
         drop(session);
+        if !self.fits(id, after) {
+            self.forget(id);
+            return Ok(Applied::Refused);
+        }
         self.record_footprint(id, after);
         Ok(Applied::Done(json))
     }
@@ -571,23 +569,19 @@ impl Registry {
             }
         };
         let mut out = String::with_capacity(32 + plan.len() * 48);
-        out.push_str("{\"session\":\"");
-        out.push_str(id);
-        out.push_str("\",\"formulas\":[");
+        out.push_str(&format!("{{\"session\":\"{id}\",\"formulas\":["));
         for (i, (sheet, coord, text)) in plan.iter().enumerate() {
             if i > 0 {
                 out.push(',');
             }
-            out.push_str("{\"sheet\":\"");
-            EasyOfficeIpcRouter::escape_json_into(
-                &mut out,
+            let name = EasyOfficeIpcRouter::escape_json_str(
                 session.sheet_name(*sheet).unwrap_or_default(),
             );
-            out.push_str("\",\"cell\":\"");
-            out.push_str(&coord.to_a1());
-            out.push_str("\",\"value\":\"");
-            EasyOfficeIpcRouter::escape_json_into(&mut out, text);
-            out.push_str("\"}");
+            let val = EasyOfficeIpcRouter::escape_json_str(text);
+            out.push_str(&format!(
+                "{{\"sheet\":\"{name}\",\"cell\":\"{}\",\"value\":\"{val}\"}}",
+                coord.to_a1()
+            ));
         }
         out.push(']');
         if let Some(followed) =
@@ -603,6 +597,16 @@ impl Registry {
     /// least recently used other sessions; false when even that is not enough.
     fn reserve_total(&self, id: &str, projected_bytes: usize, projected_cells: usize) -> bool {
         let mut inner = lock(&self.inner);
+        self.reserve_total_locked(&mut inner, id, projected_bytes, projected_cells)
+    }
+
+    fn reserve_total_locked(
+        &self,
+        inner: &mut Inner,
+        id: &str,
+        projected_bytes: usize,
+        projected_cells: usize,
+    ) -> bool {
         loop {
             let (cells, bytes) = inner
                 .sessions
@@ -616,7 +620,7 @@ impl Registry {
             {
                 return true;
             }
-            if !Self::evict_oldest(&mut inner, Some(id)) {
+            if !Self::evict_oldest(inner, Some(id)) {
                 return false;
             }
         }
@@ -701,9 +705,7 @@ fn check_sheet_op(session: &RecalcSession, op: &SheetOp) -> Result<(), EasyOffic
 fn sheet_name_message(problem: SheetNameProblem) -> String {
     match problem {
         SheetNameProblem::Empty => "시트 이름이 비어 있습니다.".to_string(),
-        SheetNameProblem::TooLong => {
-            format!("시트 이름은 {MAX_SHEET_NAME_UNITS}자까지입니다.")
-        }
+        SheetNameProblem::TooLong => format!("시트 이름은 {MAX_SHEET_NAME_UNITS}자까지입니다."),
         SheetNameProblem::ForbiddenChar(c) => {
             format!("시트 이름에 쓸 수 없는 글자입니다: {}", c.escape_default())
         }
@@ -711,6 +713,14 @@ fn sheet_name_message(problem: SheetNameProblem) -> String {
             "시트 이름은 작은따옴표로 시작하거나 끝날 수 없습니다.".to_string()
         }
         SheetNameProblem::Reserved => "예약된 시트 이름입니다.".to_string(),
+    }
+}
+
+fn applied_json(res: Applied) -> String {
+    match res {
+        Applied::Done(json) => json,
+        Applied::Expired => EXPIRED.to_string(),
+        Applied::Refused => REFUSED.to_string(),
     }
 }
 
@@ -844,20 +854,24 @@ impl EasyOfficeIpcRouter {
                     "JSON 'sheets' 필드는 문자열 배열이어야 합니다.".to_string(),
                 )
             })?;
-        let mut sheets = Vec::with_capacity(items.len());
-        for item in items {
-            let name = item
-                .as_str()
-                .filter(|n| !n.trim().is_empty())
-                .ok_or_else(|| {
-                    EasyOfficeError::InvalidArgument(
-                        "JSON 'sheets' 항목은 비어 있지 않은 문자열이어야 합니다.".to_string(),
-                    )
-                })?;
-            sheets.push(name.to_string());
+        let sheets = items
+            .iter()
+            .map(|item| {
+                item.as_str()
+                    .filter(|n| !n.trim().is_empty())
+                    .map(ToString::to_string)
+                    .ok_or_else(|| {
+                        EasyOfficeError::InvalidArgument(
+                            "JSON 'sheets' 항목은 비어 있지 않은 문자열이어야 합니다.".to_string(),
+                        )
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        match registry().open(&sheets, owner, Instant::now()) {
+            Ok(id) => Ok(format!("{{\"session\":\"{id}\"}}")),
+            Err(EasyOfficeError::ResourceBudgetExceeded(_)) => Ok(REFUSED.to_string()),
+            Err(err) => Err(err),
         }
-        let id = registry().open(&sheets, owner, Instant::now())?;
-        Ok(format!("{{\"session\":\"{id}\"}}"))
     }
 
     fn sheet_session_apply(
@@ -870,37 +884,30 @@ impl EasyOfficeIpcRouter {
             StrictJsonValue::get_field(entries, "recalc"),
             Some(StrictJsonValue::Bool(false))
         );
-        match registry().apply(id, owner, &changes, recalc, Instant::now())? {
-            Applied::Done(json) => Ok(json),
-            Applied::Expired => Ok(EXPIRED.to_string()),
-            Applied::Refused => Ok(REFUSED.to_string()),
-        }
+        registry()
+            .apply(id, owner, &changes, recalc, Instant::now())
+            .map(applied_json)
     }
-}
 
-impl EasyOfficeIpcRouter {
     fn sheet_session_rules(
         entries: &[(String, StrictJsonValue)],
         owner: &str,
     ) -> Result<String, EasyOfficeError> {
-        let id = session_id(entries)?;
-        let sheet = Self::optional_json_str(entries, "sheet")?.unwrap_or("");
+        let (id, sheet) = (
+            session_id(entries)?,
+            Self::optional_json_str(entries, "sheet")?.unwrap_or(""),
+        );
         let rules =
             parse_rules(StrictJsonValue::get_field(entries, "rules").ok_or_else(|| {
                 EasyOfficeError::InvalidArgument("JSON 'rules' 필드가 필요합니다.".to_string())
             })?)?;
         match registry().set_rules(id, owner, sheet, rules, Instant::now()) {
-            Ok(Applied::Done(json)) => Ok(json),
-            Ok(Applied::Expired) => Ok(EXPIRED.to_string()),
-            Ok(Applied::Refused) => Ok(REFUSED.to_string()),
-            // Rules over the hit budget leave the session usable; only the rules are refused.
+            Ok(applied) => Ok(applied_json(applied)),
             Err(EasyOfficeError::ResourceBudgetExceeded(_)) => Ok(REFUSED_RULES.to_string()),
             Err(err) => Err(err),
         }
     }
 
-    /// `locks` `{session, sheet, lock}`: `lock` is `null` for a sheet that is not protected, else
-    /// `{"unlocked":[[row,first,last],...],"locked":[...],"rows":[[first,last],...],"cols":[...]}`, 1-based.
     fn sheet_session_locks(
         entries: &[(String, StrictJsonValue)],
         owner: &str,
@@ -908,14 +915,14 @@ impl EasyOfficeIpcRouter {
         let id = session_id(entries)?;
         let sheet = Self::optional_json_str(entries, "sheet")?.unwrap_or("");
         let lock = match StrictJsonValue::get_field(entries, "lock") {
-            None | Some(StrictJsonValue::Null) => None,
-            Some(v) => Some(crate::sheet_protect_json::parse_sheet_lock(v)?),
+            Some(v) if !matches!(v, StrictJsonValue::Null) => {
+                Some(crate::sheet_protect_json::parse_sheet_lock(v)?)
+            }
+            _ => None,
         };
-        match registry().set_lock(id, owner, sheet, lock, Instant::now())? {
-            Applied::Done(json) => Ok(json),
-            Applied::Expired => Ok(EXPIRED.to_string()),
-            Applied::Refused => Ok(REFUSED.to_string()),
-        }
+        registry()
+            .set_lock(id, owner, sheet, lock, Instant::now())
+            .map(applied_json)
     }
 
     fn sheet_session_validate(
@@ -927,11 +934,9 @@ impl EasyOfficeIpcRouter {
         let cell = Self::optional_json_str(entries, "cell")?.unwrap_or("");
         let value = Self::optional_json_str(entries, "value")?.unwrap_or("");
         let coord = PackedCellCoordinate::parse_a1(cell.trim())?;
-        match registry().validate(id, owner, sheet, coord, value, Instant::now())? {
-            Applied::Done(json) => Ok(json),
-            Applied::Expired => Ok(EXPIRED.to_string()),
-            Applied::Refused => Ok(REFUSED.to_string()),
-        }
+        registry()
+            .validate(id, owner, sheet, coord, value, Instant::now())
+            .map(applied_json)
     }
 }
 

@@ -504,8 +504,12 @@
       const convText = convBox ? convBox.textContent : "";
       let res;
       try {
+        const rawB64 = typeof options?.sourceBase64 === "string" ? options.sourceBase64 : "";
+        const sourceBase64 = rawB64 && Math.abs(Math.floor((rawB64.length * 3) / 4) - data.length) <= 4
+          ? rawB64
+          : host.__EASYOFFICE_SHEET_UTILS__.bytesToBase64(data, btoaFn);
         res = await invokeIpc("convert_document_format", JSON.stringify({
-          action: "decode", fileName: name, sourceBase64: host.__EASYOFFICE_SHEET_UTILS__.bytesToBase64(data, btoaFn), ...GRID_LIMITS,
+          action: "decode", fileName: name, sourceBase64, ...GRID_LIMITS,
         }));
       } catch (err) {
         if (convBox) convBox.textContent = convText;
@@ -538,7 +542,7 @@
       }
       if (outcome.error) return fail(name + " — " + outcome.error);
       // A PDF is also handed to the shell, so that the studio edits its objects (PD-170).
-      const pdfNote = res.module === "PDF" && deps.pdfEdit ? await deps.pdfEdit.open(name, data) : "";
+      const pdfNote = res.module === "PDF" && deps.pdfEdit ? await deps.pdfEdit.open(name, data, options) : "";
       setFeedback(describe(res, name) + pdfNote);
       return { ok: true, module: res.module, format: res.format, warnings: res.warnings || [], title: name };
     }

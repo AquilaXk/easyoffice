@@ -288,7 +288,9 @@
 
     async function convertForSave(srcExt, dstExt, title, content) {
       try {
-        const res = await convertAskingPasswordLoss({ sourceFormat: srcExt, targetFormat: dstExt, title, ...content });
+        const payload = { sourceFormat: srcExt, targetFormat: dstExt, title, ...content };
+        if (!content?.sourceBase64) payload.forSave = true;
+        const res = await convertAskingPasswordLoss(payload);
         if (res?.cancelled) return { res: null, b64: "", failure: "", cancelled: true };
         const b64 = String(res?.convertedBase64 || "");
         return { res, b64, failure: b64 ? "" : "변환 결과가 비어 있습니다" };

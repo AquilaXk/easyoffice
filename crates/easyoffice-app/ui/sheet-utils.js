@@ -743,19 +743,46 @@
 
   // Picture bytes stay out of the DOM and of undo snapshots: the editor holds an id (a data
   // attribute), this store holds the base64 bytes once, and the <img> gets a blob: URL.
+  const MAX_DOC_IMAGES = 2048;
+  const MAX_DOC_IMAGE_BYTES = 128 * 1024 * 1024;
   const DOC_IMAGE_MIME = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg" };
   const docImages = new Map();
   let docImageSeq = 0;
+  let docImageTotalBytes = 0;
+
+  function pruneDocImages(neededBytes) {
+    while (
+      docImages.size > 0 &&
+      (docImages.size >= MAX_DOC_IMAGES || docImageTotalBytes + neededBytes > MAX_DOC_IMAGE_BYTES)
+    ) {
+      const oldestId = docImages.keys().next().value;
+      const oldest = docImages.get(oldestId);
+      if (!oldest) break;
+      if (oldest.url) host.URL?.revokeObjectURL?.(oldest.url);
+      docImageTotalBytes -= oldest.bytesLen || 0;
+      docImages.delete(oldestId);
+    }
+  }
 
   function registerDocImage(base64, format) {
+    const b64Str = String(base64);
+    const approxBytes = Math.ceil((b64Str.length * 3) / 4);
+    pruneDocImages(approxBytes);
     docImageSeq += 1;
     const id = "img" + docImageSeq;
-    docImages.set(id, { base64: String(base64), format: String(format), url: null });
+    const entry = { base64: b64Str, format: String(format), url: null, bytesLen: approxBytes };
+    docImages.set(id, entry);
+    docImageTotalBytes += approxBytes;
     return id;
   }
 
   function getDocImage(id) {
-    return docImages.get(String(id)) || null;
+    const key = String(id);
+    const entry = docImages.get(key);
+    if (!entry) return null;
+    docImages.delete(key);
+    docImages.set(key, entry);
+    return entry;
   }
 
   const BASE64_CHUNK = 0x8000;
@@ -800,9 +827,12 @@
 
   // blob: URL of a stored picture (created once); "" when the host cannot make one.
   function docImageUrl(id) {
-    const entry = docImages.get(String(id));
+    const key = String(id);
+    const entry = docImages.get(key);
     const mime = entry ? DOC_IMAGE_MIME[entry.format] : null;
     if (!entry || !mime) return "";
+    docImages.delete(key);
+    docImages.set(key, entry);
     if (entry.url === null) {
       const make = host.URL?.createObjectURL;
       try {

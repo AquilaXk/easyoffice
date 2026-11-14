@@ -5,8 +5,8 @@
 use easyoffice_formats::{
     pages_write_loss, CsvCodec, DocumentFormat, EasyOfficeError, LegacyOle2Codec, LegacyXlsPayload,
     OdfCodec, OdsUnpacked, OoxmlCodec, PdfWriteOptions, RichBlock, RichDocument, RichParagraph,
-    RichRun, SheetStyling, UniversalDocumentModel, UniversalFormatConverter, XlsxCachedValue,
-    XlsxFormulaCache,
+    RichRun, SheetStyling, SpillRef, UniversalDocumentModel, UniversalFormatConverter,
+    XlsxCachedValue, XlsxFormulaCache,
 };
 use easyoffice_sheet::{
     EvaluatedCellValue, PackedCellCoordinate, SpillArea, WorkbookEngine, WorkbookEvalTarget,
@@ -35,6 +35,39 @@ fn cached_value(v: &EvaluatedCellValue) -> Option<XlsxCachedValue> {
     }
 }
 
+struct SpillRefCoverFilter<'a> {
+    spills: &'a [SpillRef],
+    min_row: u32,
+    max_row: u32,
+}
+
+impl<'a> SpillRefCoverFilter<'a> {
+    fn new(spills: &'a [SpillRef]) -> Option<Self> {
+        if spills.is_empty() {
+            return None;
+        }
+        let mut min_row = u32::MAX;
+        let mut max_row = 0;
+        for s in spills {
+            min_row = min_row.min(s.row);
+            max_row = max_row.max(s.row.saturating_add(s.rows));
+        }
+        Some(Self {
+            spills,
+            min_row,
+            max_row,
+        })
+    }
+
+    #[inline]
+    fn covers_after_anchor(&self, row: u32, col: u32) -> bool {
+        if row < self.min_row || row >= self.max_row {
+            return false;
+        }
+        self.spills.iter().any(|a| a.covers_after_anchor(row, col))
+    }
+}
+
 /// A formula engine holding every sheet, so cross-sheet references resolve. The cells an array
 /// filled (`stylings[i].spills`) are results of its formula: the engine calculates them, so they
 /// are not cells there (PD-217).
@@ -55,15 +88,20 @@ fn workbook_engine(
             let _ = wb.set_tables(name, styling.tables.clone());
         }
         let sheet = wb.try_add_sheet(name.clone())?;
-        for (row, col, raw) in cells {
-            if spills
-                .iter()
-                .any(|area| area.covers_after_anchor(*row, *col))
-            {
-                continue;
+        if let Some(filter) = SpillRefCoverFilter::new(spills) {
+            for (row, col, raw) in cells {
+                if filter.covers_after_anchor(*row, *col) {
+                    continue;
+                }
+                if let Ok(coord) = PackedCellCoordinate::new(*row, *col) {
+                    sheet.set_cell_coord(coord, raw.clone());
+                }
             }
-            if let Ok(coord) = PackedCellCoordinate::new(*row, *col) {
-                sheet.set_cell_coord(coord, raw.clone());
+        } else {
+            for (row, col, raw) in cells {
+                if let Ok(coord) = PackedCellCoordinate::new(*row, *col) {
+                    sheet.set_cell_coord(coord, raw.clone());
+                }
             }
         }
     }
@@ -126,9 +164,19 @@ fn computed_sheets(
 
 /// Adds the cells the arrays of `sheet` filled (as the values they show) to its cells, where it has none (PD-217).
 fn add_spilled_cells(sheet: &str, cells: &mut Vec<(u32, u32, String)>, spills: &[SpillArea]) {
+    if spills.is_empty() {
+        return;
+    }
+    let applicable: Vec<&SpillArea> = spills
+        .iter()
+        .filter(|a| a.sheet == sheet && !a.blocked)
+        .collect();
+    if applicable.is_empty() {
+        return;
+    }
     let held: std::collections::HashSet<(u32, u32)> =
         cells.iter().map(|&(r, c, _)| (r, c)).collect();
-    for area in spills.iter().filter(|a| a.sheet == sheet && !a.blocked) {
+    for area in applicable {
         for (i, value) in area.values.iter().enumerate() {
             let (dr, dc) = ((i / area.cols) as u32, (i % area.cols) as u32);
             let at = (area.anchor.row() + dr, area.anchor.col() + dc);
@@ -146,11 +194,15 @@ fn without_spilled_cells(sheets: &[OdsUnpacked], stylings: &[SheetStyling]) -> V
         .enumerate()
         .map(|(index, (name, cells))| {
             let spills = stylings.get(index).map_or(&[][..], |st| &st.spills[..]);
-            let kept = cells
-                .iter()
-                .filter(|(row, col, _)| !spills.iter().any(|a| a.covers_after_anchor(*row, *col)))
-                .cloned()
-                .collect();
+            let kept = if let Some(filter) = SpillRefCoverFilter::new(spills) {
+                cells
+                    .iter()
+                    .filter(|(row, col, _)| !filter.covers_after_anchor(*row, *col))
+                    .cloned()
+                    .collect()
+            } else {
+                cells.clone()
+            };
             (name.clone(), kept)
         })
         .collect()

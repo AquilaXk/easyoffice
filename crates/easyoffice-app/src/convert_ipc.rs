@@ -1,6 +1,6 @@
 use easyoffice_formats::{
-    DocumentFormat, EasyOfficeError, UniversalDocumentModel, UniversalFormatConverter,
-    XlsxCachedValue, XlsxFormulaCache,
+    DocumentFormat, EasyOfficeError, FormatDetector, StrictJsonValue, UniversalDocumentModel,
+    UniversalFormatConverter, XlsxCachedValue, XlsxFormulaCache,
 };
 use easyoffice_sheet::{EvaluatedCellValue, PackedCellCoordinate, SheetEngine};
 
@@ -164,6 +164,7 @@ impl EasyOfficeIpcRouter {
         let mut structured: Option<StructuredContent> = None;
         let mut warnings: Vec<String> = Vec::new();
         let mut accept_loss = false;
+        let mut for_save = false;
         let (src_owned, dst_owned, title_owned, body_owned) = if trimmed.starts_with('{') {
             let entries = Self::parse_rpc_json_object(trimmed)?;
             if let Some(b64) = Self::optional_json_str(&entries, "sourceBase64")? {
@@ -175,6 +176,10 @@ impl EasyOfficeIpcRouter {
                 ));
             }
             accept_loss = accepts_loss(&entries)?;
+            for_save = matches!(
+                StrictJsonValue::get_field(&entries, "forSave"),
+                Some(StrictJsonValue::Bool(true))
+            );
             if let Some((content, parse_warnings)) = parse_structured_content(&entries)? {
                 structured = Some(content);
                 warnings = parse_warnings;
@@ -278,7 +283,7 @@ impl EasyOfficeIpcRouter {
             } else {
                 let dst_bytes =
                     encode_target(content, dst_fmt, src_fmt, title, writers, &mut warnings)?;
-                let source_len = if size_fmt == dst_fmt {
+                let source_len = if for_save || size_fmt == dst_fmt {
                     dst_bytes.len()
                 } else {
                     // Only what the target loses is reported; the source-side encode is just for its size.
@@ -308,7 +313,7 @@ impl EasyOfficeIpcRouter {
             if dst_fmt == DocumentFormat::Hwp {
                 let hwpx = UniversalFormatConverter::encode(&model, DocumentFormat::Hwpx)?;
                 let dst_bytes = write_hwp(&hwpx, writers.hwp)?;
-                let source_len = if size_fmt == DocumentFormat::Hwpx {
+                let source_len = if for_save || size_fmt == DocumentFormat::Hwpx {
                     hwpx.len()
                 } else {
                     encode(size_fmt)?.len()
@@ -316,7 +321,7 @@ impl EasyOfficeIpcRouter {
                 (source_len, dst_bytes)
             } else {
                 let dst_bytes = encode(dst_fmt)?;
-                let source_len = if size_fmt == dst_fmt {
+                let source_len = if for_save || size_fmt == dst_fmt {
                     dst_bytes.len()
                 } else {
                     encode(size_fmt)?.len()
@@ -324,7 +329,19 @@ impl EasyOfficeIpcRouter {
                 (source_len, dst_bytes)
             }
         };
-        Self::conversion_response(src_fmt, dst_fmt, source_len, &dst_bytes, &warnings)
+        if for_save {
+            Self::conversion_response_for_save(
+                src_fmt,
+                dst_fmt,
+                source_len,
+                &dst_bytes,
+                &warnings,
+                structured.as_ref(),
+                title,
+            )
+        } else {
+            Self::conversion_response(src_fmt, dst_fmt, source_len, &dst_bytes, &warnings)
+        }
     }
 
     /// Legacy text-markup `body` (`[[TABLE_ROW]]`, `[[SHEET_A1]]`, `[[SLIDE]]`, `[[AGENCY]]` lines).
@@ -395,6 +412,83 @@ impl EasyOfficeIpcRouter {
             decoded.paragraphs.len(),
             decoded.tables.len(),
             Self::escape_json_str(&decoded.title),
+            b64,
+            warnings_json
+        ))
+    }
+
+    pub(crate) fn conversion_response_for_save(
+        src_fmt: DocumentFormat,
+        dst_fmt: DocumentFormat,
+        source_len: usize,
+        dst_bytes: &[u8],
+        warnings: &[String],
+        structured: Option<&StructuredContent>,
+        title: &str,
+    ) -> Result<String, EasyOfficeError> {
+        let warnings_json = warnings
+            .iter()
+            .map(|w| format!("\"{}\"", Self::escape_json_str(w)))
+            .collect::<Vec<_>>()
+            .join(",");
+        let detected_dst =
+            FormatDetector::detect(dst_bytes, Some(dst_fmt.extension())).unwrap_or(dst_fmt);
+        let b64 = Self::encode_base64(dst_bytes);
+        let (compatibility, specification) = written_compatibility(dst_fmt);
+        let compatibility_warning = compatibility.warning().map_or_else(
+            || "null".to_string(),
+            |w| format!("\"{}\"", Self::escape_json_str(w)),
+        );
+        let (para_count, table_count) = match structured {
+            Some(StructuredContent::Document(doc, _)) => {
+                let mut p = 0;
+                let mut t = 0;
+                for b in &doc.blocks {
+                    match b {
+                        easyoffice_formats::RichBlock::Paragraph(_) => p += 1,
+                        easyoffice_formats::RichBlock::Table(_) => t += 1,
+                        _ => {}
+                    }
+                }
+                (p, t)
+            }
+            _ => (0, 0),
+        };
+
+        Ok(format!(
+            concat!(
+                "{{",
+                "\"sourceFormat\":\"{}\",",
+                "\"targetFormat\":\"{}\",",
+                "\"sourceBytes\":{},",
+                "\"outputBytes\":{},",
+                "\"targetBytes\":{},",
+                "\"detectedTarget\":\"{}\",",
+                "\"containerFamily\":\"{}\",",
+                "\"specification\":\"{}\",",
+                "\"compatibility\":\"{}\",",
+                "\"compatibilityWarning\":{},",
+                "\"paragraphCount\":{},",
+                "\"tableCount\":{},",
+                "\"title\":\"{}\",",
+                "\"convertedBase64\":\"{}\",",
+                "\"warnings\":[{}],",
+                "\"status\":\"OK\"",
+                "}}"
+            ),
+            src_fmt.extension(),
+            dst_fmt.extension(),
+            source_len,
+            dst_bytes.len(),
+            dst_bytes.len(),
+            detected_dst.extension(),
+            dst_fmt.container_family().as_str(),
+            specification,
+            compatibility.as_str(),
+            compatibility_warning,
+            para_count,
+            table_count,
+            Self::escape_json_str(title),
             b64,
             warnings_json
         ))
@@ -638,5 +732,19 @@ mod tests {
         assert!(expected_len > 0);
         assert!(hwpx_only.contains(&format!("\"outputBytes\":{expected_len}")));
         assert!(hwp_res.contains(&format!("\"sourceBytes\":{expected_len}")));
+    }
+
+    #[test]
+    fn for_save_skips_redundant_encode_and_decode() {
+        let json = EasyOfficeIpcRouter::dispatch(
+            "convert_document_format",
+            r#"{"sourceFormat":"docx","targetFormat":"hwpx","title":"저장문서","forSave":true,"blocks":[{"type":"paragraph","runs":[{"text":"내용"}]}]}"#,
+        )
+        .unwrap();
+        assert!(json.contains("\"status\":\"OK\""));
+        assert!(json.contains("\"sourceFormat\":\"docx\""));
+        assert!(json.contains("\"targetFormat\":\"hwpx\""));
+        assert!(json.contains("\"paragraphCount\":1"));
+        assert!(json.contains("\"convertedBase64\":\""));
     }
 }

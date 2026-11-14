@@ -192,6 +192,10 @@ fn parse_data(
         }
         columns.push(Column { col, texts, aux });
     }
+    debug_assert!(
+        columns.windows(2).all(|w| w[0].col < w[1].col),
+        "filter columns must be sorted by col ascending"
+    );
     Ok(columns)
 }
 

@@ -25,12 +25,16 @@
 
     // Called after a PDF was decoded into the studio. Returns the text to add to the status line:
     // empty outside the shell, otherwise whether the original's objects are being edited.
-    async function open(fileName, bytes) {
+    async function open(fileName, bytes, options) {
       active = false;
       const bridge = shell();
       if (!bridge) return "";
       try {
-        const state = await bridge.open(fileName, host.__EASYOFFICE_SHEET_UTILS__.bytesToBase64(bytes, (bin) => host.btoa(bin)));
+        const rawB64 = typeof options?.sourceBase64 === "string" ? options.sourceBase64 : "";
+        const b64 = rawB64 && Math.abs(Math.floor((rawB64.length * 3) / 4) - bytes.length) <= 4
+          ? rawB64
+          : host.__EASYOFFICE_SHEET_UTILS__.bytesToBase64(bytes, (bin) => host.btoa(bin));
+        const state = await bridge.open(fileName, b64);
         active = true;
         return " · 원본 PDF 편집 사용 (" + state.pages + "쪽 · 그림·글꼴·배치 보존)";
       } catch (err) {

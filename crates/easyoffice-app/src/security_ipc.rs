@@ -7,6 +7,109 @@ use easyoffice_formats::{
 use crate::{DocumentSecurityAuditor, EasyOfficeIpcRouter, PiiAuditResult};
 use std::fmt::Write as _;
 
+#[inline]
+fn is_pdf_whitespace(b: u8) -> bool {
+    matches!(b, b' ' | b'\t' | b'\r' | b'\n' | b'\0' | 0x0c)
+}
+
+#[inline]
+fn is_pdf_delimiter(b: u8) -> bool {
+    is_pdf_whitespace(b)
+        || matches!(
+            b,
+            b'(' | b')' | b'<' | b'>' | b'[' | b']' | b'{' | b'}' | b'/' | b'%'
+        )
+}
+
+#[inline]
+fn hex_val(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
+}
+
+pub(crate) fn pdf_has_encrypt_key(bytes: &[u8]) -> bool {
+    let mut i = 0;
+    let len = bytes.len();
+    while i < len {
+        let b = bytes[i];
+        if b == b'%' {
+            i += 1;
+            while i < len && bytes[i] != b'\r' && bytes[i] != b'\n' {
+                i += 1;
+            }
+        } else if b == b'(' {
+            i += 1;
+            let mut depth = 1usize;
+            while i < len && depth > 0 {
+                match bytes[i] {
+                    b'\\' => {
+                        i += 2;
+                        continue;
+                    }
+                    b'(' => depth += 1,
+                    b')' => depth -= 1,
+                    _ => {}
+                }
+                i += 1;
+            }
+        } else if b == b'<' {
+            if i + 1 < len && bytes[i + 1] == b'<' {
+                i += 2;
+                continue;
+            } else {
+                i += 1;
+                while i < len && bytes[i] != b'>' {
+                    i += 1;
+                }
+                if i < len {
+                    i += 1;
+                }
+            }
+        } else if b == b'>' {
+            if i + 1 < len && bytes[i + 1] == b'>' {
+                i += 2;
+                continue;
+            } else {
+                i += 1;
+            }
+        } else if b == b'/' {
+            i += 1;
+            let mut name = [0u8; 8];
+            let mut n_len = 0;
+            while i < len && !is_pdf_delimiter(bytes[i]) {
+                let ch = if bytes[i] == b'#' && i + 2 < len {
+                    if let (Some(h1), Some(h2)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2])) {
+                        i += 3;
+                        (h1 << 4) | h2
+                    } else {
+                        let c = bytes[i];
+                        i += 1;
+                        c
+                    }
+                } else {
+                    let c = bytes[i];
+                    i += 1;
+                    c
+                };
+                if n_len < 8 {
+                    name[n_len] = ch;
+                }
+                n_len += 1;
+            }
+            if n_len == 7 && &name[..7] == b"Encrypt" {
+                return true;
+            }
+        } else {
+            i += 1;
+        }
+    }
+    false
+}
+
 const MAX_SCRUB_BATCH_ITEMS: usize = 4_096;
 const MAX_SCRUB_BATCH_BYTES: usize = 4 * 1_048_576;
 
@@ -354,17 +457,7 @@ impl EasyOfficeIpcRouter {
     }
 
     fn audit_pdf_container(bytes: &[u8]) -> Result<usize, EasyOfficeError> {
-        let raw_lossy = String::from_utf8_lossy(bytes);
-        let has_encrypt_key = [
-            "/Encrypt ",
-            "/Encrypt/",
-            "/Encrypt<<",
-            "/Encrypt\n",
-            "/Encrypt\r",
-        ]
-        .iter()
-        .any(|needle| raw_lossy.contains(needle));
-        if has_encrypt_key {
+        if pdf_has_encrypt_key(bytes) {
             return Err(EasyOfficeError::SecurityViolation(
                 "암호화된 PDF 문서는 보안 정책상 거부됩니다.".to_string(),
             ));
@@ -524,5 +617,15 @@ mod tests {
         let huge_item = "a".repeat(2 * 1_048_576 + 1);
         let too_many_bytes = format!("{{\"texts\":[\"{huge_item}\",\"{huge_item}\"]}}");
         assert!(EasyOfficeIpcRouter::handle_scrub_pii(&too_many_bytes).is_err());
+    }
+
+    #[test]
+    fn pdf_encrypt_detection_handles_escapes_comments_and_delimiters() {
+        assert!(pdf_has_encrypt_key(b"/E#6ecrypt /Filter /Standard"));
+        assert!(pdf_has_encrypt_key(b"/#45ncrypt<< /V 2 >>"));
+        assert!(pdf_has_encrypt_key(b"<< /Encrypt<< /V 1 >> >>"));
+        assert!(!pdf_has_encrypt_key(b"% /Encrypt\n/Title (doc)"));
+        assert!(!pdf_has_encrypt_key(b"(/Encrypt) show"));
+        assert!(!pdf_has_encrypt_key(b"/EncryptedCustomTag 123"));
     }
 }

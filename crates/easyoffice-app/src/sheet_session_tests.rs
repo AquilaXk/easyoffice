@@ -641,3 +641,97 @@ fn ipc_recalc_bench() {
         close(&id);
     }
 }
+
+#[test]
+fn session_open_enforces_total_byte_budget_and_lru_eviction() {
+    let probe = Registry::new(LIMITS);
+    let now = Instant::now();
+    let probe_id = probe.open(&["S1".to_string()], "win1", now).unwrap();
+    let one_session_bytes = lock(&probe.inner).sessions.get(&probe_id).unwrap().bytes;
+    assert!(one_session_bytes > 0);
+
+    // Allow plenty of session slots (`max_sessions: 16`), but cap `max_total_bytes` to fit at most 2 sessions.
+    let limits = Limits {
+        max_sessions: 16,
+        max_sheets: 10,
+        max_sheet_name_bytes: 100,
+        max_session_cells: 1000,
+        max_session_edges: 1000,
+        max_session_bytes: one_session_bytes * 4,
+        max_total_cells: 2000,
+        max_total_bytes: one_session_bytes * 2,
+        max_changes: 100,
+        idle_ttl: Duration::from_secs(60),
+        max_recalc: Duration::from_secs(1),
+    };
+    let reg = Registry::new(limits);
+    let s1 = reg.open(&["S1".to_string()], "win1", now).unwrap();
+    let s2 = reg
+        .open(&["S2".to_string()], "win1", now + Duration::from_millis(1))
+        .unwrap();
+    assert_eq!(reg.len(), 2);
+
+    // Third session exceeds `max_total_bytes` (3 * one_session_bytes > 2 * one_session_bytes) and evicts LRU `s1`.
+    let s3 = reg
+        .open(&["S3".to_string()], "win1", now + Duration::from_millis(2))
+        .unwrap();
+    assert_eq!(reg.len(), 2);
+    assert!(reg.checkout(&s1, "win1", now).is_none());
+    assert!(reg.checkout(&s2, "win1", now).is_some());
+    assert!(reg.checkout(&s3, "win1", now).is_some());
+
+    // A session whose initial footprint alone exceeds `max_total_bytes` fails closed immediately.
+    let tiny = Registry::new(Limits {
+        max_total_bytes: one_session_bytes.saturating_sub(1),
+        ..limits
+    });
+    assert!(matches!(
+        tiny.open(&["S1".to_string()], "win1", now),
+        Err(EasyOfficeError::ResourceBudgetExceeded(_))
+    ));
+}
+
+#[test]
+fn sheet_session_lock_tracks_memory_and_enforces_budget() {
+    let limits = Limits {
+        max_sessions: 4,
+        max_sheets: 10,
+        max_sheet_name_bytes: 100,
+        max_session_cells: 1000,
+        max_session_edges: 1000,
+        max_session_bytes: 100_000,
+        max_total_cells: 2000,
+        max_total_bytes: 200_000,
+        max_changes: 100,
+        idle_ttl: Duration::from_secs(60),
+        max_recalc: Duration::from_secs(1),
+    };
+    let reg = Registry::new(limits);
+    let now = Instant::now();
+    let s1 = reg.open(&["Sheet1".to_string()], "win1", now).unwrap();
+    let base_bytes = lock(&reg.inner).sessions.get(&s1).unwrap().bytes;
+    let sheet_lock = SheetLock {
+        unlocked_cells: vec![(1, 1, 10), (2, 1, 10)],
+        locked_cells: Vec::new(),
+        unlocked_rows: Vec::new(),
+        unlocked_cols: Vec::new(),
+    };
+    let res = reg
+        .set_lock(&s1, "win1", "Sheet1", Some(sheet_lock), now)
+        .unwrap();
+    match res {
+        Applied::Done(json) => assert!(json.contains("\"session\":\"")),
+        _ => panic!("expected Applied::Done"),
+    }
+    let locked_bytes = lock(&reg.inner).sessions.get(&s1).unwrap().bytes;
+    assert!(locked_bytes > base_bytes);
+
+    // Subsequent `apply` retains lock heap bytes in entry accounting.
+    let change = CellChange {
+        sheet: "Sheet1".to_string(),
+        coord: PackedCellCoordinate::new(0, 0).unwrap(),
+        raw: "42".to_string(),
+    };
+    let _ = reg.apply(&s1, "win1", &[change], true, now).unwrap();
+    assert!(lock(&reg.inner).sessions.get(&s1).unwrap().bytes > locked_bytes);
+}

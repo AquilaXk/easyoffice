@@ -26,6 +26,28 @@
   const ALL_PARTS = Object.keys(PART_READERS);
   const rawOf = (e) => e?.formula || e?.value || "";
 
+  function shallowOrDeepEqual(a, b) {
+    if (a === b) return true;
+    if (a === null || b === null || typeof a !== "object" || typeof b !== "object") return false;
+    if (Array.isArray(a)) {
+      if (!Array.isArray(b) || a.length !== b.length) return false;
+      for (let i = 0; i < a.length; i++) {
+        if (!shallowOrDeepEqual(a[i], b[i])) return false;
+      }
+      return true;
+    }
+    if (Array.isArray(b)) return false;
+    const keysA = Object.keys(a);
+    const keysB = Object.keys(b);
+    if (keysA.length !== keysB.length) return false;
+    for (let i = 0; i < keysA.length; i++) {
+      const k = keysA[i];
+      if (!Object.prototype.hasOwnProperty.call(b, k)) return false;
+      if (!shallowOrDeepEqual(a[k], b[k])) return false;
+    }
+    return true;
+  }
+
   function createSheetHistory(deps) {
     const { sheetDataStore, sheetRowCounts, getActiveModule, getActiveSheetName, getActiveSheetCellRef, getController, push } = deps;
     const D = host.__EASYOFFICE_SHEET_DELTA__;
@@ -44,7 +66,7 @@
       const out = {};
       for (const name of Object.keys(before)) {
         const now = PART_READERS[name](ctx);
-        if (JSON.stringify(now) !== JSON.stringify(before[name])) out[name] = before[name];
+        if (!shallowOrDeepEqual(now, before[name])) out[name] = before[name];
       }
       return out;
     }

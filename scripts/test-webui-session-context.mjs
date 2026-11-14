@@ -538,3 +538,65 @@ test("start window (?module=START) blocks document editing and saving shortcuts 
   assert.equal(themeEv.defaultPrevented, true, "theme shortcut still works in start window");
 });
 
+test("session restore rejects unsafe inline schemes like javascript, vbscript, data, and file URLs", async () => {
+  const badUrls = [
+    "javascript:alert(1)",
+    "vbscript:msgbox",
+    "data:text/html,<script>alert(1)</script>",
+    "file:///etc/passwd",
+    "//evil.example/payload",
+    "jav\u0000ascript:alert(1)",
+  ];
+  for (const badUrl of badUrls) {
+    const maliciousRecord = {
+      version: 1,
+      dirty: true,
+      snapshot: {
+        activeModule: "DOC",
+        docTabs: {
+          DOC: {
+            editorNodes: [
+              {
+                t: "el",
+                tag: "a",
+                attrs: { href: badUrl },
+                data: {},
+                children: [{ t: "text", text: "링크" }],
+              },
+            ],
+            layoutStyle: {},
+          },
+          HWP: null,
+        },
+        sheets: {},
+        sheetRowCounts: {},
+        slides: [],
+      },
+    };
+    const storage = createMemoryStorage({ [AUTOSAVE_KEY]: JSON.stringify(maliciousRecord) });
+    const { document } = await createWorkspaceHarness({ localStorage: storage });
+    await flushAsyncTurns(10);
+    const editor = document.getElementById("doc-editor");
+    assert.equal(editor.querySelectorAll('a[href^="javascript:"], a[href^="data:"], a[href^="file:"], a[href^="vbscript:"]').length, 0);
+    assert.ok(editor.querySelector("p"), "default document remains when unsafe url is rejected");
+  }
+});
+
+test("pure selection and cell clicks do not trigger unnecessary autosave serialization", async () => {
+  const storage = createMemoryStorage();
+  const { document, sandbox, userClick, advanceTimers } = await createWorkspaceHarness({ localStorage: storage });
+  await flushAsyncTurns(10);
+  assert.equal(storage.getItem(AUTOSAVE_KEY), null, "starts empty");
+
+  switchModule(document, "SHEET");
+  await flushAsyncTurns();
+  const b2 = document.querySelector('#pane-sheet td[data-cell="B2"]');
+  assert.ok(b2, "B2 cell materialized in sheet pane");
+  userClick(b2);
+  await flushAsyncTurns(5);
+  advanceTimers(2000);
+  await flushAsyncTurns(5);
+  assert.equal(storage.getItem(AUTOSAVE_KEY), null, "plain cell click must not trigger autosave timer");
+});
+
+

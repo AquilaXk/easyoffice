@@ -5,19 +5,8 @@
   // materializes the cells around the viewport (plus a small overscan) as real table rows.
   // Logical addressing covers the full 1,048,576 x 16,384 sheet while the DOM stays small.
   const { MAX_ROWS, MAX_COLS } = host.__EASYOFFICE_SHEET_REFS__;
-  const ROW_H = 24;
-  const HEAD_H = 26;
-  const ROW_HEAD_W = 56;
-  const DEFAULT_COL_W = 96;
-  const MIN_COL_W = 36;
-  const MAX_COL_W = 720;
-  const OVERSCAN_ROWS = 8;
-  const OVERSCAN_COLS = 2;
-  // Without layout metrics (hidden pane, headless tests) a bounded window is rendered instead.
-  const FALLBACK_ROWS = 60;
-  const FALLBACK_COLS = 40;
-  const DEFAULT_COLS = 8;
-  const MIN_ROWS = 12;
+  const ROW_H = 24, HEAD_H = 26, ROW_HEAD_W = 56, DEFAULT_COL_W = 96, MIN_COL_W = 36, MAX_COL_W = 720;
+  const OVERSCAN_ROWS = 8, OVERSCAN_COLS = 2, FALLBACK_ROWS = 60, FALLBACK_COLS = 40, DEFAULT_COLS = 8, MIN_ROWS = 12;
 
   const { PACK_STRIDE, colName, colIndex, packCoord, packRef, parseRef, refOf } = host.__EASYOFFICE_SHEET_REFS__;
 
@@ -159,19 +148,10 @@
     const { document, getSheetName, getEntry, getExtent, getCursor, hooks, getMap } = deps;
     const widthsBySheet = Object.create(null);
     const fallback = { firstRow: 1, cols: DEFAULT_COLS };
-    const tdByPacked = new Map();
-    const colHeadByCol = new Map();
-    const rowHeadByRow = new Map();
-    let selectedTd = null;
-    const rangeTds = [];
-    const activeColHeads = [];
-    const activeRowHeads = [];
-    let widthCacheSheet = null;
-    let widthCacheCols = [];
-    let widthCachePrefix = [];
-    let view = null;
-    let spacerTop = null;
-    let spacerBottom = null;
+    const tdByPacked = new Map(), colHeadByCol = new Map(), rowHeadByRow = new Map();
+    let selectedTd = null, widthCacheSheet = null, view = null, spacerTop = null, spacerBottom = null;
+    const rangeTds = [], activeColHeads = [], activeRowHeads = [];
+    let widthCacheCols = [], widthCachePrefix = [];
     // Hidden rows and columns and merged ranges of the active sheet (PD-194).
     const layoutApi = host.__EASYOFFICE_SHEET_LAYOUT__;
     let widthCacheVersion = -1;
@@ -637,7 +617,8 @@
       if (!display?.active() || !v.layout) return;
       const scan = (from, to) => {
         for (let r = Math.max(1, from); r <= Math.min(MAX_ROWS, to); r += 1) {
-          for (let c = v.c0; c <= v.c1 && !rowIsHidden(r); c += 1) {
+          if (rowIsHidden(r)) continue;
+          for (let c = v.c0; c <= v.c1; c += 1) {
             const entry = getEntry(refOf(r, c));
             const code = entry?.style?.numFmt;
             if (code) display.shown(code, String(entry.value ?? ""));
@@ -697,26 +678,29 @@
       const colRuns = layout?.hiddenCols || [];
       const filter = layout?.filter || null;
       const filterCols = filter ? new Set(filter.columns.map((x) => x.col)) : null;
+      const hasColRuns = !empty && colRuns.length > 0;
+      const hiddenColSet = hasColRuns ? new Set() : null;
       for (const [c, th] of colHeadByCol) {
-        th.classList.toggle("sheet-hidden", !empty && layoutApi.colHidden(name, c));
-        markHiddenEdge(th, "col", empty ? null : layoutApi.runAt(colRuns, c - 1));
+        const hid = hasColRuns && layoutApi.colHidden(name, c);
+        if (hid) hiddenColSet.add(c);
+        th.classList.toggle("sheet-hidden", hid);
+        markHiddenEdge(th, "col", hasColRuns ? layoutApi.runAt(colRuns, c - 1) : null);
       }
-      // A row number turns to the accent color while a filter has hidden rows (the rows below its header).
       const skipped = filter !== null && filter.hidden.length > 0;
       for (const [r, th] of rowHeadByRow) {
         markHiddenEdge(th, "row", empty ? null : layoutApi.runAt(runs, r - 1));
         th.classList.toggle("filter-row", skipped && r > filter.range.r1 && r <= filter.range.r2);
       }
       seedDomMaps();
+      const hasMerges = Boolean(!empty && layout?.merges && layout.merges.length > 0);
       for (const td of tdByPacked.values()) {
         const r = td._row;
         const c = td._col;
-        td.classList.toggle("sheet-hidden", !empty && layoutApi.colHidden(name, c));
-        // The header row of an auto filter carries the drop-down button, on for a column with a condition.
+        td.classList.toggle("sheet-hidden", hiddenColSet ? hiddenColSet.has(c) : false);
         const head = filter !== null && r === filter.range.r1 && c >= filter.range.c1 && c <= filter.range.c2;
         td.classList.toggle("filter-head", head);
         td.classList.toggle("filter-on", head && filterCols.has(c));
-        const m = empty ? null : layoutApi.mergeAt(name, r, c);
+        const m = hasMerges ? layoutApi.mergeAt(name, r, c) : null;
         const anchor = Boolean(m) && m.r1 === r && m.c1 === c;
         td.classList.toggle("merge-anchor", anchor);
         td.classList.toggle("merge-cover", Boolean(m) && !anchor);
@@ -940,59 +924,20 @@
     }
 
     return {
-      MAX_ROWS,
-      MAX_COLS,
-      ROW_H,
-      ROW_HEAD_W,
-      HEAD_H, rowTop,
-      DEFAULT_COL_W,
-      colName,
-      colIndex,
-      packCoord,
-      packRef,
-      parseRef,
-      refOf,
-      colWidth,
-      colLeft,
-      colAtX,
-      applyColWidth,
-      layoutChanged,
-      rowAtVisible,
+      MAX_ROWS, MAX_COLS, ROW_H, ROW_HEAD_W, HEAD_H, rowTop, DEFAULT_COL_W,
+      colName, colIndex, packCoord, packRef, parseRef, refOf, colWidth, colLeft, colAtX,
+      applyColWidth, layoutChanged, rowAtVisible,
       mergeAt: (r, c) => layoutApi?.mergeAt(getSheetName(), r, c) || null,
       rowHidden: (r) => Boolean(layoutApi?.rowHidden(getSheetName(), r)),
       colHidden: (c) => Boolean(layoutApi?.colHidden(getSheetName(), c)),
-      getAllWidths,
-      replaceAllWidths,
-      repaintFx,
-      repaintNumFmt,
-      renderWindow,
-      refreshCells,
-      ensureVisible,
-      visibleRowSpan,
-      getTdAt,
-      getTdByRef,
-      forEachMaterializedTd,
-      paintSelectionRange,
-      paintTd,
-      setDisplayValue,
-      readTdValue,
-      install,
-      getView: () => view,
+      getAllWidths, replaceAllWidths, repaintFx, repaintNumFmt, renderWindow, refreshCells,
+      ensureVisible, visibleRowSpan, getTdAt, getTdByRef, forEachMaterializedTd,
+      paintSelectionRange, paintTd, setDisplayValue, readTdValue, install, getView: () => view,
     };
   }
 
   host.__EASYOFFICE_CREATE_SHEET_GRID__ = createSheetGrid;
   host.__EASYOFFICE_SHEET_GRID_UTILS__ = {
-    MAX_ROWS,
-    MAX_COLS,
-    colName,
-    colIndex,
-    packCoord,
-    packRef,
-    parseRef,
-    refOf,
-    isNumericText,
-    formatGeneral,
-    cloneSheetStore,
+    MAX_ROWS, MAX_COLS, colName, colIndex, packCoord, packRef, parseRef, refOf, isNumericText, formatGeneral, cloneSheetStore,
   };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);
