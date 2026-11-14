@@ -377,7 +377,7 @@ pub struct SheetStyling {
     pub links: SheetLinks,
     /// Links a reader turned away: an address the policy refuses or a bound (PD-218).
     pub links_rejected: u32,
-    /// The tables of the sheet (PD-224): Excel tables in XLSX, database ranges in ODS.
+    /// The tables of the sheet (PD-224): the table parts of XLSX, the database ranges of ODS.
     pub tables: Vec<SheetTable>,
     /// Tables a reader turned away: a bound, an overlap or a part it could not read (PD-224).
     pub tables_rejected: u32,

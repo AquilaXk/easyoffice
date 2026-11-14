@@ -1,4 +1,4 @@
-//! The tables of a worksheet (PD-224): an Excel table in XLSX, a database range in ODS. A table is a
+//! The tables of a worksheet (PD-224): a table part in XLSX, a database range in ODS. A table is a
 //! named rectangle with an optional header row and totals row, column names, a style name with its
 //! banding options and an auto filter state.
 //!

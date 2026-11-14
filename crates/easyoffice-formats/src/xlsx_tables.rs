@@ -8,7 +8,7 @@
 //! breaks a bound of the model or shares a cell with an earlier table is turned away and counted; a
 //! workbook that lists more tables or columns than the budgets is refused as a whole. The writer
 //! gives every table an id that is unique in the workbook, names its columns from the header cells
-//! (Excel refuses a table whose column names differ from its header cells) and writes the header
+//! (the spreadsheet program refuses a table whose column names differ from its header cells) and writes the header
 //! cells as strings.
 
 use std::collections::{HashMap, HashSet};
