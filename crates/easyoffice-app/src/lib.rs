@@ -290,10 +290,10 @@ impl EasyOfficeIpcRouter {
                         "JSON 'sheets' 항목은 비어 있거나 공백만일 수 없습니다.".to_string(),
                     ));
                 }
-                wb.add_sheet(s_name);
+                wb.try_add_sheet(s_name)?;
             }
         } else if !default_sheet.trim().is_empty() {
-            wb.add_sheet(default_sheet);
+            wb.try_add_sheet(default_sheet)?;
         }
         let mut cell_triples: Vec<(String, String, String)> = Vec::new();
         if let Some(cells_val) = StrictJsonValue::get_field(entries, "cells") {
@@ -334,7 +334,7 @@ impl EasyOfficeIpcRouter {
         if !has_explicit_sheets {
             for (sh, _, _) in &cell_triples {
                 if !sh.trim().is_empty() {
-                    wb.add_sheet(sh);
+                    wb.try_add_sheet(sh)?;
                 }
             }
         }

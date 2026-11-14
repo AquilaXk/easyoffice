@@ -272,7 +272,7 @@ impl Registry {
         }
         let mut wb = WorkbookEngine::new();
         for name in sheets {
-            wb.add_sheet(name);
+            wb.try_add_sheet(name)?;
         }
         let session = RecalcSession::with_budget(wb, self.limits.budget())
             .map_err(|err| EasyOfficeError::InvalidArgument(err.to_string()))?;

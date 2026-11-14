@@ -532,8 +532,7 @@ fn write_split(
         }
         #[cfg(unix)]
         if let Some(first) = written.first() {
-            crate::save_file::sync_parent_dir(first)
-                .map_err(|err| SaveError::from_io(first, &err).to_string())?;
+            crate::save_file::sync_parent_dir(first);
         }
         Ok(())
     })();

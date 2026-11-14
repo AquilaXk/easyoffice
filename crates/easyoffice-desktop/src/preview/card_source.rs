@@ -156,7 +156,9 @@ fn evaluate_into(
     }
     let mut workbook = WorkbookEngine::new();
     for (sheet_name, cells) in sheets {
-        let sheet = workbook.add_sheet(sheet_name.clone());
+        let Ok(sheet) = workbook.try_add_sheet(sheet_name.clone()) else {
+            return;
+        };
         for (row, column, raw) in cells {
             if let Ok(coord) = PackedCellCoordinate::new(*row, *column) {
                 sheet.set_cell_coord(coord, raw.clone());

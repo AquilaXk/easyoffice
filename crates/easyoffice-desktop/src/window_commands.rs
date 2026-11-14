@@ -492,6 +492,10 @@ impl OpenTarget {
         let is_link = fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink());
         if is_link {
             crate::save_file::ensure_safe_symlink_target(&canonical)?;
+        } else if !crate::save_file::in_sensitive_credential_dir(path)
+            && crate::save_file::in_sensitive_credential_dir(&canonical)
+        {
+            return Err(crate::save_file::sensitive_symlink_error());
         }
         let shown = if is_link {
             std::path::absolute(path).unwrap_or_else(|_| canonical.clone())

@@ -202,7 +202,7 @@ impl EasyOfficeIpcRouter {
             })
             .unwrap_or_default()
         {
-            wb.add_sheet(sheet);
+            wb.try_add_sheet(sheet)?;
         }
         wb.set_names_lenient(&names_field(entries)?);
         Ok(wb)

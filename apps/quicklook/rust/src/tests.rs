@@ -412,17 +412,21 @@ fn entity_bomb(levels: usize) -> String {
     )
 }
 
-/// A gzip file of stored (uncompressed) deflate blocks, without a CRC trailer (the reader of the
-/// check does not need one): enough for a test, with no compression dependency.
+/// A valid RFC 1952 gzip file of stored (uncompressed) deflate blocks with CRC32 and ISIZE trailer.
 fn gzip(bytes: &[u8]) -> Vec<u8> {
     let mut out = vec![0x1F, 0x8B, 8, 0, 0, 0, 0, 0, 0, 3];
     let mut chunks = bytes.chunks(65_535).peekable();
+    if chunks.peek().is_none() {
+        out.extend_from_slice(&[1, 0, 0, 0xFF, 0xFF]);
+    }
     while let Some(chunk) = chunks.next() {
         out.push(u8::from(chunks.peek().is_none()));
         out.extend_from_slice(&(chunk.len() as u16).to_le_bytes());
         out.extend_from_slice(&(!(chunk.len() as u16)).to_le_bytes());
         out.extend_from_slice(chunk);
     }
+    out.extend_from_slice(&easyoffice_formats::IeeeCrc32::checksum(bytes).to_le_bytes());
+    out.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
     out
 }
 
@@ -455,7 +459,13 @@ fn an_svg_that_declares_entities_is_refused_as_a_page_and_left_out_as_a_picture(
     };
     // Controls: plain and gzip pictures are read.
     assert_eq!(pictures(square.as_bytes()), 1);
-    assert_eq!(pictures(&gzip(square.as_bytes())), 1);
+    let valid_gz = gzip(square.as_bytes());
+    assert_eq!(pictures(&valid_gz), 1);
+    let mut bad_crc_gz = valid_gz.clone();
+    let crc_idx = bad_crc_gz.len() - 8;
+    bad_crc_gz[crc_idx] ^= 0xFF;
+    assert_eq!(pictures(&bad_crc_gz), 0);
+    assert_eq!(pictures(&valid_gz[..valid_gz.len() - 8]), 0);
     let bomb = entity_bomb(6);
     assert_eq!(pictures(bomb.as_bytes()), 0);
     assert_eq!(pictures(&gzip(bomb.as_bytes())), 0);

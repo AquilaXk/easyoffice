@@ -328,6 +328,14 @@ fn symlinks_to_dotfiles_and_credential_dirs_are_refused() {
         };
         assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied, "{real:?}");
     }
+    // Directory symlink into a credential folder is also refused.
+    let dir_link = dir.join("linked_dir");
+    std::os::unix::fs::symlink(dir.join(".ssh"), &dir_link).unwrap();
+    let via_dir = dir_link.join("id_rsa");
+    let Err(err) = OpenTarget::of(&via_dir) else {
+        panic!("expected PermissionDenied for {via_dir:?}");
+    };
+    assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
     // PD-177: a symlink to a non-hidden document store file outside sensitive dirs still opens.
     let allowed = dir.join("store").join("a1b2c3.bin");
     fs::create_dir_all(allowed.parent().unwrap()).unwrap();

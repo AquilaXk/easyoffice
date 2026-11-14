@@ -38,20 +38,23 @@ fn cached_value(v: &EvaluatedCellValue) -> Option<XlsxCachedValue> {
 /// A formula engine holding every sheet, so cross-sheet references resolve. The cells an array
 /// filled (`stylings[i].spills`) are results of its formula: the engine calculates them, so they
 /// are not cells there (PD-217).
-fn workbook_engine(sheets: &[OdsUnpacked], stylings: &[SheetStyling]) -> WorkbookEngine {
+fn workbook_engine(
+    sheets: &[OdsUnpacked],
+    stylings: &[SheetStyling],
+) -> Result<WorkbookEngine, EasyOfficeError> {
     let mut wb = WorkbookEngine::new();
     for (index, (name, cells)) in sheets.iter().enumerate() {
         let spills = stylings.get(index).map_or(&[][..], |st| &st.spills[..]);
-        wb.add_sheet(name.clone());
+        wb.try_add_sheet(name.clone())?;
         if let Some(styling) = stylings.get(index) {
-            wb.add_sheet(name.clone())
+            wb.try_add_sheet(name.clone())?
                 .set_spill_merges(styling.merges.clone());
             // The tables come before the cells, so a structured reference compiles against them (PD-225). The
             // reader and the page already hold them within the bounds; one that is not leaves the references
             // to read as errors.
             let _ = wb.set_tables(name, styling.tables.clone());
         }
-        let sheet = wb.add_sheet(name.clone());
+        let sheet = wb.try_add_sheet(name.clone())?;
         for (row, col, raw) in cells {
             if spills
                 .iter()
@@ -64,7 +67,7 @@ fn workbook_engine(sheets: &[OdsUnpacked], stylings: &[SheetStyling]) -> Workboo
             }
         }
     }
-    wb
+    Ok(wb)
 }
 
 /// Every sheet with each formula replaced by the value it displays, for the formats that hold
@@ -74,7 +77,7 @@ fn computed_sheets(
     sheets: &[OdsUnpacked],
     stylings: &[SheetStyling],
 ) -> Result<(Vec<OdsUnpacked>, usize), EasyOfficeError> {
-    let wb = workbook_engine(sheets, stylings);
+    let wb = workbook_engine(sheets, stylings)?;
     let mut a1_pairs: Vec<(&str, String)> = Vec::new();
     for (name, cells) in sheets {
         for (row, col, raw) in cells {
@@ -338,7 +341,7 @@ fn evaluate_formulas(
     ),
     EasyOfficeError,
 > {
-    let wb = workbook_engine(sheets, stylings);
+    let wb = workbook_engine(sheets, stylings)?;
     let a1_addrs: Vec<(&str, String)> = sheets
         .iter()
         .flat_map(|(name, cells)| {

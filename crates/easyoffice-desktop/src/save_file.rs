@@ -217,6 +217,22 @@ pub fn write_document_bytes(path: &Path, bytes: &[u8]) -> Result<Written, SaveEr
 
 const SENSITIVE_CREDENTIAL_DIRS: &[&[u8]] = &[b".ssh", b".gnupg", b".aws", b".kube"];
 
+pub(crate) fn in_sensitive_credential_dir(path: &Path) -> bool {
+    path.components().any(|comp| match comp {
+        std::path::Component::Normal(part) => SENSITIVE_CREDENTIAL_DIRS
+            .iter()
+            .any(|dir| part.as_encoded_bytes().eq_ignore_ascii_case(dir)),
+        _ => false,
+    })
+}
+
+pub(crate) fn sensitive_symlink_error() -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        "숨김 파일이나 자격증명 디렉터리를 가리키는 심볼릭 링크는 허용되지 않습니다.",
+    )
+}
+
 /// Rejects symlink targets pointing at hidden dotfiles (`.zshrc`, `.env`, …) or inside sensitive
 /// credential directories (`.ssh`, `.gnupg`, `.aws`, `.kube`) while allowing normal non-hidden
 /// targets regardless of extension (PD-177).
@@ -224,17 +240,8 @@ pub(crate) fn ensure_safe_symlink_target(canonical: &Path) -> std::io::Result<()
     let is_dotfile = canonical
         .file_name()
         .is_some_and(|name| name.as_encoded_bytes().starts_with(b"."));
-    let in_sensitive_dir = canonical.components().any(|comp| match comp {
-        std::path::Component::Normal(part) => SENSITIVE_CREDENTIAL_DIRS
-            .iter()
-            .any(|dir| part.as_encoded_bytes().eq_ignore_ascii_case(dir)),
-        _ => false,
-    });
-    if is_dotfile || in_sensitive_dir {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied,
-            "숨김 파일이나 자격증명 디렉터리를 가리키는 심볼릭 링크는 허용되지 않습니다.",
-        ));
+    if is_dotfile || in_sensitive_credential_dir(canonical) {
+        return Err(sensitive_symlink_error());
     }
     Ok(())
 }
@@ -249,7 +256,18 @@ fn resolve_link(path: &Path) -> std::io::Result<PathBuf> {
             ensure_safe_symlink_target(&canonical)?;
             Ok(canonical)
         }
-        _ => Ok(path.to_path_buf()),
+        _ => {
+            if !in_sensitive_credential_dir(path) {
+                if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+                    if let Ok(canon_parent) = fs::canonicalize(parent) {
+                        if in_sensitive_credential_dir(&canon_parent) {
+                            return Err(sensitive_symlink_error());
+                        }
+                    }
+                }
+            }
+            Ok(path.to_path_buf())
+        }
     }
 }
 
@@ -268,13 +286,13 @@ pub(crate) fn write_claimed_file(file: &mut fs::File, bytes: &[u8]) -> std::io::
     file.sync_all()
 }
 
-/// Flushes directory entries on Unix after rename/create so crash recovery keeps the link target.
+/// Flushes directory entries on Unix after rename/create so crash recovery keeps the link target
+/// (best effort: network, FUSE, or exFAT volumes may refuse `fsync` on a directory).
 #[cfg(unix)]
-pub(crate) fn sync_parent_dir(path: &Path) -> std::io::Result<()> {
+pub(crate) fn sync_parent_dir(path: &Path) {
     if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
-        fs::File::open(parent)?.sync_all()?;
+        let _ = fs::File::open(parent).and_then(|dir| dir.sync_all());
     }
-    Ok(())
 }
 
 /// Options that create the temporary file with the permissions the target already has, so the
@@ -374,7 +392,7 @@ fn write_then_rename(
     drop(file);
     fs::rename(tmp_path, path)?;
     #[cfg(unix)]
-    sync_parent_dir(path)?;
+    sync_parent_dir(path);
     Ok(())
 }
 
@@ -554,6 +572,17 @@ mod tests {
             assert_eq!(err.to_string(), "쓰기 권한이 없습니다.", "{rel}");
             assert_eq!(fs::read(&real).unwrap(), b"untouched");
         }
+        // Directory symlink into a credential folder is also refused.
+        let dir_link = dir.join("linked_dir");
+        std::os::unix::fs::symlink(dir.join(".ssh"), &dir_link).unwrap();
+        let via_dir = dir_link.join("authorized_keys");
+        assert_eq!(
+            write_document_bytes(&via_dir, b"overwrite")
+                .unwrap_err()
+                .to_string(),
+            "쓰기 권한이 없습니다."
+        );
+        assert!(!dir.join(".ssh").join("authorized_keys").exists());
         // PD-177: a link with a different extension outside sensitive paths remains writable.
         let allowed = dir.join("store").join("a1b2c3.bin");
         fs::create_dir_all(allowed.parent().unwrap()).unwrap();
