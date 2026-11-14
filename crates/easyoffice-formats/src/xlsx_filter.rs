@@ -57,6 +57,12 @@ impl FilterScan {
         self.filter.filter(SheetFilter::within_bounds)
     }
 
+    /// The filter as read, with the bounds not applied (a table keeps its conditions whatever the
+    /// range's height).
+    pub(crate) fn finish_unbounded(self) -> Option<SheetFilter> {
+        self.filter
+    }
+
     pub(crate) fn feed(&mut self, event: &XmlEvent<'_>) {
         match event {
             XmlEvent::Start { name, attrs } if self.inside || *name == "autoFilter" => {

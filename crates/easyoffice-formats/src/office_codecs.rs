@@ -6,6 +6,9 @@ use crate::sheet_styling::sheet_links::LinkAllowance;
 use crate::sheet_styling::sheet_rules::xlsx_rules::{
     parse_dxf_styles, parse_worksheet_rules, rules_xml,
 };
+use crate::sheet_styling::sheet_table::xlsx_tables::{
+    merge_relationships, read_sheet_tables, HeaderCells, TableWriter,
+};
 use crate::sheet_styling::sheet_view::{level_at, Outline};
 use crate::sheet_styling::xlsx_filter::autofilter_xml;
 use crate::sheet_styling::xlsx_layout::{layout_cols_xml, merge_cells_xml};
@@ -14,7 +17,9 @@ use crate::sheet_styling::xlsx_styles::{parse_cell_xf_styles, XfStyles, XlsxStyl
 use crate::sheet_styling::xlsx_view::{
     apply_tint, sheet_format_pr_xml, sheet_pr_xml, sheet_views_xml, theme_palette, DEFAULT_THEME,
 };
-use crate::sheet_styling::{hides_every_sheet, IdMemo, SheetStyling};
+use crate::sheet_styling::{
+    hides_every_sheet, unique_table_names, IdMemo, SheetStyling, TableRegistry,
+};
 use crate::{EasyOfficeError, XmlSanitizer, ZipArchiveCodec, ZipSecurityPolicy};
 use std::sync::Arc;
 
@@ -202,6 +207,7 @@ fn push_cell_xml(
         cached,
         spill,
         filled,
+        text_only,
     } = content;
     let _ = write!(sheet_xml, "<c r=\"{col_ref}{row_num}\"");
     if xf > 0 {
@@ -209,7 +215,7 @@ fn push_cell_xml(
     }
     if raw.is_empty() {
         sheet_xml.push_str("/>");
-    } else if filled && raw.starts_with('=') {
+    } else if text_only || (filled && raw.starts_with('=')) {
         let _ = write!(
             sheet_xml,
             " t=\"inlineStr\"><is><t xml:space=\"preserve\">{}</t></is></c>",
@@ -321,7 +327,8 @@ fn build_sheet_xml(
     styling: Option<&SheetStyling>,
     style_table: &XlsxStyleTable,
     sst_map: &SharedStringMap<'_>,
-    links_xml: &str,
+    (links_xml, table_parts): (&str, &str),
+    headers: &HeaderCells,
 ) -> String {
     use std::fmt::Write;
     let blank = String::new();
@@ -387,6 +394,7 @@ fn build_sheet_xml(
                         && spill_areas
                             .iter()
                             .any(|area| area.covers_after_anchor(row, col)),
+                    text_only: headers.contains(row, col),
                 },
                 sst_map,
             );
@@ -408,6 +416,7 @@ fn build_sheet_xml(
         sheet_xml.push_str(links_xml);
         sheet_xml.push_str(&crate::sheet_styling::xlsx_page::page_tail_xml(&st.page));
     }
+    sheet_xml.push_str(table_parts);
     sheet_xml.push_str("</worksheet>");
     sheet_xml
 }
@@ -586,6 +595,19 @@ impl OoxmlCodec {
         XmlSanitizer::validate_safe_xml(&wb_rels_xml)?;
         XmlSanitizer::validate_safe_xml(&sst_xml)?;
 
+        let sheet_tables = unique_table_names(
+            (0..active_sheets.len()).map(|i| stylings.get(i).map_or(&[][..], |st| &st.tables[..])),
+            stylings
+                .first()
+                .into_iter()
+                .flat_map(|st| st.defined_names.iter().map(|n| n.name.as_str())),
+        );
+        let mut table_writer = TableWriter::default();
+        let sheet_parts: Vec<_> = active_sheets
+            .iter()
+            .zip(&sheet_tables)
+            .map(|((_, cells), tables)| table_writer.add_sheet(tables, cells))
+            .collect();
         let has_spills = stylings.iter().any(|s| !s.spills.is_empty());
         let (content_types, wb_rels_xml) = if has_spills {
             (
@@ -604,6 +626,10 @@ impl OoxmlCodec {
                 wb_rels_xml,
             )
         };
+        let content_types = content_types.replace(
+            "</Types>",
+            &format!("{}</Types>", table_writer.content_types),
+        );
         let mut entries = vec![
             (
                 "[Content_Types].xml".to_string(),
@@ -634,20 +660,22 @@ impl OoxmlCodec {
             let (links, link_rels) = stylings
                 .get(i)
                 .map_or((String::new(), None), |st| links_xml(&st.links));
+            let tables = &sheet_parts[i];
             let sheet_xml = build_sheet_xml(
-                cells,
+                tables.cells.as_deref().unwrap_or(cells),
                 caches.get(i),
                 stylings.get(i),
                 &style_table,
                 &sst_map,
-                &links,
+                (&links, &tables.parts_xml),
+                &HeaderCells::new(&sheet_tables[i]),
             );
             XmlSanitizer::validate_safe_xml(&sheet_xml)?;
             entries.push((
                 format!("xl/worksheets/sheet{}.xml", i + 1),
                 sheet_xml.into_bytes(),
             ));
-            if let Some(rels) = link_rels {
+            if let Some(rels) = merge_relationships(link_rels, &tables.rels) {
                 XmlSanitizer::validate_safe_xml(&rels)?;
                 entries.push((
                     format!("xl/worksheets/_rels/sheet{}.xml.rels", i + 1),
@@ -656,6 +684,7 @@ impl OoxmlCodec {
             }
         }
 
+        entries.extend(table_writer.parts);
         ZipArchiveCodec::pack_compressed(&entries)
     }
 
@@ -667,78 +696,6 @@ impl OoxmlCodec {
                 "XLSX 워크시트 개수({count})가 허용 상한({})을 초과했습니다.",
                 Self::MAX_XLSX_SHEETS
             )));
-        }
-        Ok(())
-    }
-
-    /// Rejects cell / style coordinates outside the ECMA-376 limits.
-    fn validate_xlsx_bounds(
-        active_sheets: &[OdsUnpacked],
-        stylings: &[SheetStyling],
-    ) -> Result<(), EasyOfficeError> {
-        for (_, cells) in active_sheets {
-            for &(row, col, _) in cells {
-                if row >= Self::MAX_XLSX_ROWS || col >= Self::MAX_XLSX_COLS {
-                    return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
-                        "XLSX 셀 좌표({row}, {col})가 ECMA-376 허용 범위({}x{})를 초과했습니다.",
-                        Self::MAX_XLSX_ROWS,
-                        Self::MAX_XLSX_COLS
-                    )));
-                }
-            }
-        }
-        for styling in stylings {
-            let cell = styling
-                .cells
-                .keys()
-                .copied()
-                .find(|&(r, c)| r >= Self::MAX_XLSX_ROWS || c >= Self::MAX_XLSX_COLS);
-            let link = styling
-                .links
-                .keys()
-                .copied()
-                .find(|&(r, c)| r >= Self::MAX_XLSX_ROWS || c >= Self::MAX_XLSX_COLS);
-            let column = styling
-                .columns
-                .keys()
-                .find(|&&c| c >= Self::MAX_XLSX_COLS)
-                .map(|&c| (0, c));
-            let layout = styling
-                .merges
-                .iter()
-                .any(|m| m.row1 >= Self::MAX_XLSX_ROWS || m.col1 >= Self::MAX_XLSX_COLS)
-                || styling
-                    .hidden_rows
-                    .iter()
-                    .any(|r| r.1 >= Self::MAX_XLSX_ROWS)
-                || styling
-                    .hidden_cols
-                    .iter()
-                    .any(|c| c.1 >= Self::MAX_XLSX_COLS)
-                || styling.merges.len() > crate::MAX_MERGES
-                || crate::run_total(&styling.hidden_rows) > crate::MAX_HIDDEN_ROWS
-                || styling.filter.as_ref().is_some_and(|f| {
-                    !f.within_bounds()
-                        || f.range.row1 >= Self::MAX_XLSX_ROWS
-                        || f.range.col1 >= Self::MAX_XLSX_COLS
-                });
-            if layout {
-                return Err(EasyOfficeError::ResourceBudgetExceeded(
-                    "XLSX 병합·숨김 범위가 허용 범위를 초과했습니다.".to_string(),
-                ));
-            }
-            if !styling.view_within_bounds(Self::MAX_XLSX_ROWS, Self::MAX_XLSX_COLS) {
-                return Err(EasyOfficeError::ResourceBudgetExceeded(
-                    "XLSX 틀 고정·탭 색·그룹·쪽 설정 값이 허용 범위를 초과했습니다.".to_string(),
-                ));
-            }
-            if let Some((row, col)) = cell.or(column).or(link) {
-                return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
-                    "XLSX 서식 좌표({row}, {col})가 ECMA-376 허용 범위({}x{})를 초과했습니다.",
-                    Self::MAX_XLSX_ROWS,
-                    Self::MAX_XLSX_COLS
-                )));
-            }
         }
         Ok(())
     }
@@ -888,6 +845,7 @@ impl OoxmlCodec {
         let mut scanned_parts = std::collections::HashSet::new();
         let mut budget = DecodeBudget::new();
         let mut link_allowance = LinkAllowance::default();
+        let mut table_registry = TableRegistry::default();
         for (idx, (sheet_name, target_path, hidden)) in sheet_specs.into_iter().enumerate() {
             let part = entry_by_path
                 .get_key_value(target_path.as_str())
@@ -932,6 +890,13 @@ impl OoxmlCodec {
                 let links = read_links(sheet_xml, &relationships, &mut link_allowance);
                 (styling.links, styling.links_rejected) = (links.links, links.rejected);
                 crate::sheet_styling::xlsx_styles::strip_link_look(&mut styling, &scan.link_styled);
+                styling.tables_rejected = read_sheet_tables(
+                    sheet_xml,
+                    part_path,
+                    &entry_by_path,
+                    &mut table_registry,
+                    &mut styling.tables,
+                )?;
                 if let (None, Some(tab), Some(theme)) = (styling.tab_color, scan.tab_theme, &theme)
                 {
                     styling.tab_color = Some(apply_tint(theme[tab.index], tab.tint));

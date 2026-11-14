@@ -55,4 +55,6 @@ pub(crate) struct CellContent<'a> {
     pub(crate) spill: Option<&'a crate::SpillRef>,
     /// A cell an array filled: its text is a value, even when it starts with `=`.
     pub(crate) filled: bool,
+    /// A table's header cell: written as an inline string whatever its text (PD-224).
+    pub(crate) text_only: bool,
 }

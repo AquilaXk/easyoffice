@@ -383,6 +383,9 @@ impl OdfCodec {
                 names[0],
             ));
         }
+        content.push_str(
+            &crate::sheet_styling::sheet_table::ods_tables::database_ranges_xml(stylings, &names),
+        );
         content.push_str("</office:spreadsheet></office:body></office:document-content>");
         XmlSanitizer::validate_safe_xml(&content)?;
 
@@ -454,6 +457,11 @@ impl OdfCodec {
             {
                 return Err(ods_budget_error("ODS 셀 좌표가 허용 범위를 초과했습니다."));
             }
+        }
+        if !crate::workbook_tables_within_bounds(stylings) {
+            return Err(ods_budget_error(
+                "ODS 표 개수·열 개수·범위가 허용 범위를 초과했습니다.",
+            ));
         }
         for styling in stylings {
             let bad_cell = styling
@@ -699,6 +707,7 @@ impl OdfCodec {
         Self::apply_freezes(&mut stylings, settings.as_deref());
         crate::sheet_styling::ods_page::read_pages(&content_xml, styles.as_deref(), &mut stylings);
         crate::sheet_styling::ods_names::read_names(&content_xml, &mut stylings);
+        crate::sheet_styling::sheet_table::ods_tables::read_tables(&content_xml, &mut stylings)?;
         crate::sheet_styling::ods_protect::read_protection(&content_xml, &mut stylings)?;
         Self::show_one_sheet(&mut stylings);
         Ok(stylings)
@@ -718,6 +727,7 @@ impl OdfCodec {
         Self::apply_freezes(&mut stylings, settings.as_deref());
         crate::sheet_styling::ods_page::read_pages(&content_xml, styles.as_deref(), &mut stylings);
         crate::sheet_styling::ods_names::read_names(&content_xml, &mut stylings);
+        crate::sheet_styling::sheet_table::ods_tables::read_tables(&content_xml, &mut stylings)?;
         crate::sheet_styling::ods_protect::read_protection(&content_xml, &mut stylings)?;
         Self::show_one_sheet(&mut stylings);
         Ok((sheets, stylings))

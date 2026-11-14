@@ -40,8 +40,12 @@ pub(crate) mod sheet_protect;
 pub(crate) mod sheet_rules;
 #[path = "sheet_spill.rs"]
 pub(crate) mod sheet_spill;
+#[path = "sheet_table.rs"]
+pub(crate) mod sheet_table;
 #[path = "sheet_view.rs"]
 pub(crate) mod sheet_view;
+#[path = "xlsx_bounds.rs"]
+pub(crate) mod xlsx_bounds;
 #[path = "xlsx_filter.rs"]
 pub(crate) mod xlsx_filter;
 #[path = "xlsx_formula_text.rs"]
@@ -74,6 +78,11 @@ pub use sheet_page::*;
 pub use sheet_protect::*;
 pub use sheet_rules::*;
 pub use sheet_spill::*;
+pub use sheet_table::{
+    table_name_problem, tables_within_bounds, unique_name, unique_table_names,
+    workbook_tables_within_bounds, SheetTable, TableRegistry, MAX_TABLES, MAX_TABLE_COLUMNS_TOTAL,
+    MAX_TABLE_TEXT_CHARS,
+};
 pub use sheet_view::*;
 pub use xlsx_formula_text::{from_file_formula, to_file_formula};
 pub use xlsx_layout::{intersect_runs, normalize_runs, run_total, MAX_HIDDEN_ROWS, MAX_MERGES};
@@ -368,6 +377,10 @@ pub struct SheetStyling {
     pub links: SheetLinks,
     /// Links a reader turned away: an address the policy refuses or a bound (PD-218).
     pub links_rejected: u32,
+    /// The tables of the sheet (PD-224): Excel tables in XLSX, database ranges in ODS.
+    pub tables: Vec<SheetTable>,
+    /// Tables a reader turned away: a bound, an overlap or a part it could not read (PD-224).
+    pub tables_rejected: u32,
 }
 
 impl SheetStyling {
@@ -400,6 +413,7 @@ impl SheetStyling {
             && self.workbook_protect.is_none()
             && self.spills.is_empty()
             && self.links.is_empty()
+            && self.tables.is_empty()
     }
 
     /// Whether the frozen pane, the tab colour, the groups and the page setup are within the bounds of a sheet that

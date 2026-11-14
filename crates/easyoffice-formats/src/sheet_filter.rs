@@ -112,21 +112,13 @@ impl SheetFilter {
     /// over.
     pub fn within_bounds(&self) -> bool {
         let r = self.range;
-        let text_ok = |c: &CustomCondition| c.text.chars().count() <= MAX_FILTER_TEXT_CHARS;
         r.row1 > r.row0
             && r.row1 - r.row0 < MAX_FILTER_ROWS
-            && self.columns.len() <= MAX_FILTER_COLUMNS
             && self
                 .hidden
                 .iter()
                 .all(|&(first, last)| first > r.row0 && last <= r.row1)
-            && self
-                .columns
-                .windows(2)
-                .all(|pair| pair[0].col < pair[1].col)
-            && self.columns.iter().all(|c| {
-                (r.col0..=r.col1).contains(&c.col) && criteria_within_bounds(&c.criteria, text_ok)
-            })
+            && columns_within_bounds(&self.columns, &r)
     }
 
     pub fn column(&self, col: u32) -> Option<&FilterColumn> {
@@ -145,6 +137,17 @@ impl SheetFilter {
     pub fn hides(&self, row: u32) -> bool {
         crate::sheet_styling::xlsx_layout::run_contains(&self.hidden, row)
     }
+}
+
+/// Whether the conditions are sorted by column, inside `range`, and within the bounds of their texts.
+pub(crate) fn columns_within_bounds(columns: &[FilterColumn], range: &CellBox) -> bool {
+    let text_ok = |c: &CustomCondition| c.text.chars().count() <= MAX_FILTER_TEXT_CHARS;
+    columns.len() <= MAX_FILTER_COLUMNS
+        && columns.windows(2).all(|pair| pair[0].col < pair[1].col)
+        && columns.iter().all(|c| {
+            (range.col0..=range.col1).contains(&c.col)
+                && criteria_within_bounds(&c.criteria, text_ok)
+        })
 }
 
 fn criteria_within_bounds(c: &FilterCriteria, text_ok: impl Fn(&CustomCondition) -> bool) -> bool {

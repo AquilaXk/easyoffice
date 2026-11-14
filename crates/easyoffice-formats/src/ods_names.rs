@@ -145,7 +145,7 @@ pub(crate) fn names_xml(names: &[DefinedName], scope: Option<&str>, first_sheet:
 }
 
 /// `$Sheet1.$A$1` or `$'My Data'.A1` as the sheet and the cell text; a part after `:` may leave the sheet out.
-fn split_address(part: &str) -> Option<(Option<String>, &str)> {
+pub(crate) fn split_address(part: &str) -> Option<(Option<String>, &str)> {
     let part = part.trim().trim_start_matches('$');
     if let Some(rest) = part.strip_prefix('\'') {
         let mut i = 0;
@@ -168,7 +168,7 @@ fn split_address(part: &str) -> Option<(Option<String>, &str)> {
     ))
 }
 
-fn quote(sheet: &str) -> String {
+pub(crate) fn quote(sheet: &str) -> String {
     if sheet.chars().all(|c| c.is_alphanumeric() || c == '_')
         && !sheet.starts_with(|c: char| c.is_ascii_digit())
     {
