@@ -58,7 +58,10 @@ fn workbook(styled: bool) -> Vec<u8> {
         }
         tables.push(table);
     }
-    let styling = SheetStyling { tables, ..SheetStyling::default() };
+    let styling = SheetStyling {
+        tables,
+        ..SheetStyling::default()
+    };
     OoxmlCodec::pack_xlsx_multi_styled(&[("S".to_string(), cells)], &[], &[styling]).unwrap()
 }
 
@@ -71,7 +74,13 @@ fn with_many_dxfs(bytes: &[u8]) -> Vec<u8> {
             let mut text = String::from_utf8_lossy(&e.data).into_owned();
             if e.path == "xl/styles.xml" {
                 let padding = "<dxf><font><b/></font></dxf>".repeat(EXTRA_DXFS);
-                text = text.replacen("<dxfs count=\"", &format!("<dxfs count=\"{EXTRA_DXFS}\" data-x=\""), 1).replacen("\">", &format!("\">{padding}"), 1);
+                text = text
+                    .replacen(
+                        "<dxfs count=\"",
+                        &format!("<dxfs count=\"{EXTRA_DXFS}\" data-x=\""),
+                        1,
+                    )
+                    .replacen("\">", &format!("\">{padding}"), 1);
             }
             (e.path, text.into_bytes())
         })
@@ -98,12 +107,29 @@ fn custom_table_styles_cost_little_to_open_and_save() {
     let open = |bytes: &[u8]| {
         OoxmlCodec::unpack_xlsx_with_styling(bytes).unwrap();
     };
-    println!("bytes: no styles {}, 1,000 styles {}, with {} more dxfs {}", plain.len(), styled.len(), EXTRA_DXFS, hostile.len());
-    println!("open ms (min of 5): no styles {:.1}, 1,000 styles {:.1}, hostile {:.1}", best_ms(|| open(&plain)), best_ms(|| open(&styled)), best_ms(|| open(&hostile)));
+    println!(
+        "bytes: no styles {}, 1,000 styles {}, with {} more dxfs {}",
+        plain.len(),
+        styled.len(),
+        EXTRA_DXFS,
+        hostile.len()
+    );
+    println!(
+        "open ms (min of 5): no styles {:.1}, 1,000 styles {:.1}, hostile {:.1}",
+        best_ms(|| open(&plain)),
+        best_ms(|| open(&styled)),
+        best_ms(|| open(&hostile))
+    );
     let (cells, styling) = OoxmlCodec::unpack_xlsx_with_styling(&styled).unwrap();
     let styling: Vec<SheetStyling> = styling.into_iter().map(|(_, s)| s).collect();
-    let cells = vec![("S".to_string(), cells.into_iter().next().map(|(_, c)| c).unwrap())];
-    println!("save ms (min of 5): 1,000 styles {:.1}", best_ms(|| {
-        OoxmlCodec::pack_xlsx_multi_styled(&cells, &[], &styling).unwrap();
-    }));
+    let cells = vec![(
+        "S".to_string(),
+        cells.into_iter().next().map(|(_, c)| c).unwrap(),
+    )];
+    println!(
+        "save ms (min of 5): 1,000 styles {:.1}",
+        best_ms(|| {
+            OoxmlCodec::pack_xlsx_multi_styled(&cells, &[], &styling).unwrap();
+        })
+    );
 }
