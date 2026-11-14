@@ -74,6 +74,7 @@ pub mod text_pdf_codecs;
 pub mod utf16_swar;
 mod xls_sheet_names;
 mod xls_sst_cursor;
+mod xls_styles;
 mod xml_decl_scan;
 mod xml_stream;
 pub mod zip_codec;

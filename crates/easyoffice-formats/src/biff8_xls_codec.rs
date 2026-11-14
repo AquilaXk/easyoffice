@@ -6,8 +6,11 @@ use crate::ole2_codec::{
 };
 use crate::sheet_links::xls_links::{self, XlsLinkReader};
 use crate::sheet_links::{LinkCollector, SheetLinks};
-use crate::sheet_styling::SheetStyling;
+use crate::sheet_styling::{CellStyle, SheetStyling};
 use crate::xls_sst_cursor::SstContinueCursor;
+use crate::xls_styles::{
+    blank_record, default_font_record, set_formula_xf, XlsColorPlan, XlsStyleReader,
+};
 use crate::{DocumentFormat, EasyOfficeError, LegacyOle2Codec, XlsxFormulaCache};
 
 /// Legacy `.xls` BIFF8 spreadsheet payload model.
@@ -152,11 +155,11 @@ impl LegacyOle2Codec {
         sheets: &[LegacyXlsPayload],
         caches: &[XlsxFormulaCache],
     ) -> Result<Vec<u8>, EasyOfficeError> {
-        Self::pack_xls_multi_inner(sheets, true, caches, &[])
+        Self::pack_xls_multi_inner(sheets, true, caches, &[], &[])
     }
 
     pub fn pack_xls_multi_values(sheets: &[LegacyXlsPayload]) -> Result<Vec<u8>, EasyOfficeError> {
-        Self::pack_xls_multi_inner(sheets, false, &[], &[])
+        Self::pack_xls_multi_inner(sheets, false, &[], &[], &[])
     }
 
     /// [`Self::pack_xls_multi_values`] with the hyperlinks of each sheet (PD-223): one `HLink` record per
@@ -166,7 +169,25 @@ impl LegacyOle2Codec {
         sheets: &[LegacyXlsPayload],
         links: &[SheetLinks],
     ) -> Result<Vec<u8>, EasyOfficeError> {
-        Self::pack_xls_multi_inner(sheets, false, &[], links)
+        Self::pack_xls_multi_inner(sheets, false, &[], links, &[])
+    }
+
+    /// [`Self::pack_xls_multi_values_linked`] with the fill and font colours of the cells of each sheet
+    /// (`stylings` has one entry per sheet, PD-227): the `FONT`, `XF` and `PALETTE` records they need and a
+    /// `BLANK` record for a coloured cell without a value. No other formatting is written.
+    pub fn pack_xls_multi_values_styled(
+        sheets: &[LegacyXlsPayload],
+        links: &[SheetLinks],
+        stylings: &[SheetStyling],
+    ) -> Result<Vec<u8>, EasyOfficeError> {
+        Self::pack_xls_multi_inner(sheets, false, &[], links, stylings)
+    }
+
+    /// What a save as XLS cannot keep of the colours of `stylings`: `(approximated, dropped)` is the number
+    /// of colours that took the closest of the 56 palette colours and of coloured cells outside the 65,536
+    /// rows by 256 columns of the format.
+    pub fn xls_color_losses(stylings: &[SheetStyling]) -> (u32, u32) {
+        XlsColorPlan::plan(stylings).map_or((0, 0), |plan| (plan.approximated, plan.dropped))
     }
 
     fn pack_xls_multi_inner(
@@ -174,6 +195,7 @@ impl LegacyOle2Codec {
         allow_formulas: bool,
         caches: &[XlsxFormulaCache],
         links: &[SheetLinks],
+        stylings: &[SheetStyling],
     ) -> Result<Vec<u8>, EasyOfficeError> {
         if sheets.is_empty() {
             return Err(EasyOfficeError::EmptyPayload);
@@ -203,6 +225,7 @@ impl LegacyOle2Codec {
             rgces.push(sheet_rgces);
         }
 
+        let colors = XlsColorPlan::plan(stylings);
         let mut stream = Vec::with_capacity(512);
 
         // 1. Workbook Globals Substream BOF (0x0809, len 16, substream 0x0005)
@@ -215,27 +238,18 @@ impl LegacyOle2Codec {
         stream.extend_from_slice(&0u32.to_le_bytes());
         stream.extend_from_slice(&0x0006u32.to_le_bytes());
 
-        // Minimal FONT (0x0031) and XF (0x00E0) records for BIFF8 spec compliance
-        let font_name = b"Arial";
-        let font_rec_len = (16 + font_name.len()) as u16;
-        stream.extend_from_slice(&Self::BIFF8_FONT.to_le_bytes());
-        stream.extend_from_slice(&font_rec_len.to_le_bytes());
-        stream.extend_from_slice(&200u16.to_le_bytes()); // dyHeight = 10pt
-        stream.extend_from_slice(&0u16.to_le_bytes()); // grbit
-        stream.extend_from_slice(&0x7FFFu16.to_le_bytes()); // icv
-        stream.extend_from_slice(&400u16.to_le_bytes()); // bls = normal
-        stream.extend_from_slice(&0u16.to_le_bytes()); // sss
-        stream.push(0); // uls
-        stream.push(0); // bFamily
-        stream.push(0); // bCharSet
-        stream.push(0); // reserved
-        stream.push(font_name.len() as u8);
-        stream.push(0); // compressed 8-bit Latin-1
-        stream.extend_from_slice(font_name);
-
+        // Minimal FONT (0x0031) and XF (0x00E0) records for BIFF8 spec compliance, then the fonts, XFs and
+        // palette the cell colours need (PD-227).
+        stream.extend(default_font_record());
+        if let Some(plan) = &colors {
+            plan.font_records(&mut stream);
+        }
         stream.extend_from_slice(&Self::BIFF8_XF.to_le_bytes());
         stream.extend_from_slice(&20u16.to_le_bytes());
         stream.extend_from_slice(&[0u8; 20]);
+        if let Some(plan) = &colors {
+            plan.xf_and_palette_records(&mut stream);
+        }
 
         // 2. BOUNDSHEET records (0x0085)
         let mut lb_ply_pos_offsets = Vec::with_capacity(sheets.len());
@@ -320,18 +334,40 @@ impl LegacyOle2Codec {
             stream.extend_from_slice(&(max_c.min(u16::MAX as u32) as u16).to_le_bytes()); // last_col + 1
             stream.extend_from_slice(&0u16.to_le_bytes()); // reserved
 
+            let styling = stylings.get(sheet_idx);
+            let xf_of =
+                |row: u32, col: u32| colors.as_ref().map_or(0, |plan| plan.xf(styling, row, col));
+            // A coloured cell with no value is a BLANK record, placed in row order among the cells.
+            let valued: std::collections::HashSet<(u32, u32)> = if colors.is_some() {
+                sheet.cells.iter().map(|&(r, c, _)| (r, c)).collect()
+            } else {
+                std::collections::HashSet::new()
+            };
+            let mut blanks = styling
+                .filter(|_| colors.is_some())
+                .map(XlsColorPlan::colored_cells)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|at| !valued.contains(at))
+                .peekable();
             for ((row, col, raw), rgce) in sheet.cells.iter().zip(&rgces[sheet_idx]) {
+                while let Some((br, bc)) = blanks.next_if(|&at| at < (*row, *col)) {
+                    blank_record(&mut stream, br as u16, bc as u16, xf_of(br, bc));
+                }
                 let r16 = *row as u16;
                 let c16 = *col as u16;
+                let xf = xf_of(*row, *col);
                 if let Some(rgce) = rgce {
                     let cached = caches.get(sheet_idx).and_then(|c| c.get(&(*row, *col)));
-                    stream.extend_from_slice(&formula_records(r16, c16, rgce, cached));
+                    let mut record = formula_records(r16, c16, rgce, cached);
+                    set_formula_xf(&mut record, xf);
+                    stream.extend_from_slice(&record);
                 } else if let Some(num) = numeric_cell_value(raw) {
                     stream.extend_from_slice(&Self::BIFF8_NUMBER.to_le_bytes());
                     stream.extend_from_slice(&14u16.to_le_bytes());
                     stream.extend_from_slice(&r16.to_le_bytes());
                     stream.extend_from_slice(&c16.to_le_bytes());
-                    stream.extend_from_slice(&0u16.to_le_bytes()); // xf
+                    stream.extend_from_slice(&xf.to_le_bytes());
                     stream.extend_from_slice(&num.to_bits().to_le_bytes());
                 } else {
                     let sst_idx = sst_index_map.get(raw.as_str()).copied().unwrap_or(0);
@@ -339,9 +375,12 @@ impl LegacyOle2Codec {
                     stream.extend_from_slice(&10u16.to_le_bytes());
                     stream.extend_from_slice(&r16.to_le_bytes());
                     stream.extend_from_slice(&c16.to_le_bytes());
-                    stream.extend_from_slice(&0u16.to_le_bytes()); // xf
+                    stream.extend_from_slice(&xf.to_le_bytes());
                     stream.extend_from_slice(&sst_idx.to_le_bytes());
                 }
+            }
+            for (br, bc) in blanks {
+                blank_record(&mut stream, br as u16, bc as u16, xf_of(br, bc));
             }
 
             if let Some(sheet_links) = links.get(sheet_idx) {
@@ -414,18 +453,20 @@ impl LegacyOle2Codec {
         Ok(Self::unpack_xls_walk(bytes)?.0)
     }
 
-    /// The sheets of a workbook with the formatting an XLS carries next to them: the hyperlinks (PD-223).
-    /// Each sheet's styling holds nothing else.
+    /// The sheets of a workbook with the formatting an XLS carries next to them: the hyperlinks (PD-223)
+    /// and the fill and font colours of the cells (PD-227). Each sheet's styling holds nothing else.
     pub fn unpack_xls_with_styling(
         bytes: &[u8],
     ) -> Result<(crate::OdsMultiUnpacked, Vec<(String, SheetStyling)>), EasyOfficeError> {
-        let (payloads, collectors) = Self::unpack_xls_walk(bytes)?;
+        let (payloads, collectors, colors) = Self::unpack_xls_walk(bytes)?;
         let mut sheets = Vec::with_capacity(payloads.len());
         let mut stylings = Vec::with_capacity(payloads.len());
+        let mut colors = colors.into_iter();
         for (payload, links) in payloads.into_iter().zip(collectors) {
             stylings.push((
                 payload.sheet_name.clone(),
                 SheetStyling {
+                    cells: colors.next().unwrap_or_default(),
                     links: links.links,
                     links_rejected: links.rejected,
                     ..SheetStyling::default()
@@ -436,9 +477,17 @@ impl LegacyOle2Codec {
         Ok((sheets, stylings))
     }
 
+    #[allow(clippy::type_complexity)]
     fn unpack_xls_walk(
         bytes: &[u8],
-    ) -> Result<(Vec<LegacyXlsPayload>, Vec<LinkCollector>), EasyOfficeError> {
+    ) -> Result<
+        (
+            Vec<LegacyXlsPayload>,
+            Vec<LinkCollector>,
+            Vec<std::collections::BTreeMap<(u32, u32), CellStyle>>,
+        ),
+        EasyOfficeError,
+    > {
         let streams = Ole2ContainerCodec::unpack(bytes)?;
         let wb = streams
             .iter()
@@ -485,6 +534,9 @@ impl LegacyOle2Codec {
         if state.in_worksheet {
             state.links.before(opcode);
         }
+        state
+            .styles
+            .record(opcode, &data[rec.start..rec.end], state.in_worksheet);
         match opcode {
             Self::BIFF8_FILEPASS => {
                 return Err(EasyOfficeError::EncryptedDocumentUnsupported(
@@ -873,6 +925,8 @@ struct XlsParseState {
     budget: DecodeBudget,
     /// The hyperlinks of the worksheets (PD-223).
     links: XlsLinkReader,
+    /// The fill and font colours of the cells (PD-227).
+    styles: XlsStyleReader,
 }
 
 impl XlsParseState {
@@ -900,10 +954,18 @@ impl XlsParseState {
             cells: std::mem::take(&mut self.current_cells),
         });
         self.links.end_sheet();
+        self.styles.end_sheet();
         self.in_worksheet = false;
     }
 
-    fn finish(mut self) -> (Vec<LegacyXlsPayload>, Vec<LinkCollector>) {
+    #[allow(clippy::type_complexity)]
+    fn finish(
+        mut self,
+    ) -> (
+        Vec<LegacyXlsPayload>,
+        Vec<LinkCollector>,
+        Vec<std::collections::BTreeMap<(u32, u32), CellStyle>>,
+    ) {
         if self.sheets.is_empty()
             && (!self.current_cells.is_empty() || !self.boundsheet_names.is_empty())
         {
@@ -917,7 +979,8 @@ impl XlsParseState {
                 cells: self.current_cells,
             });
             self.links.end_sheet();
+            self.styles.end_sheet();
         }
-        (self.sheets, self.links.finish())
+        (self.sheets, self.links.finish(), self.styles.finish())
     }
 }
