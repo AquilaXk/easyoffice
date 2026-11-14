@@ -25,8 +25,12 @@ use crate::xml_stream::{Attrs, XmlEvent, XmlReader};
 use crate::{CellBox, XmlSanitizer};
 use std::fmt::Write;
 
-/// Elements of a filter condition tree one file may nest or list before the filter is dropped.
+/// Elements of a filter condition tree one file may list before the filter is dropped.
 const MAX_NODES: usize = 100_000;
+/// Elements a condition tree may nest: the schema's `filter-and`, `filter-or`, `filter-condition` and set
+/// item need four, so a deeper tree is not one this model holds and is refused before it is built (a
+/// tree of tens of thousands of levels would overflow the stack when it is dropped).
+const MAX_DEPTH: usize = 8;
 
 // ---- wildcard patterns <-> literal text and regular expressions ------------------------------------------
 
@@ -300,7 +304,7 @@ fn parse_tree(filter_inner: &str) -> Option<Node> {
         match event {
             XmlEvent::Start { name, attrs } => {
                 nodes += 1;
-                if nodes > MAX_NODES {
+                if nodes > MAX_NODES || stack.len() >= MAX_DEPTH {
                     return None;
                 }
                 match name {
@@ -755,14 +759,28 @@ mod tests {
             &range()
         )
         .is_empty());
-        // Deep nesting is no problem for the reader (no recursion) and holds no column.
+        // Deep nesting is refused before it is built: 100,000 levels hold no column and do not overflow the
+        // stack, tested on a thread with a stack far smaller than a release build's.
         let deep = format!(
             "{}{}{}",
-            "<table:filter-and>".repeat(5000),
+            "<table:filter-and>".repeat(100_000),
             one,
-            "</table:filter-and>".repeat(5000)
+            "</table:filter-and>".repeat(100_000)
         );
-        assert!(parse_filter(&deep, &range()).len() <= 1);
+        let found = std::thread::Builder::new()
+            .stack_size(256 * 1024)
+            .spawn(move || parse_filter(&deep, &range()).len())
+            .unwrap()
+            .join()
+            .unwrap();
+        assert_eq!(found, 0);
+        let shallow = format!(
+            "{}{}{}",
+            "<table:filter-and>".repeat(3),
+            one,
+            "</table:filter-and>".repeat(3)
+        );
+        assert!(parse_filter(&shallow, &range()).len() <= 1);
         // A list of set items is cut at the bound.
         let items = "<table:filter-set-item table:value=\"v\"/>".repeat(MAX_FILTER_VALUES + 500);
         let set = format!("<table:filter-condition table:field-number=\"0\" table:value=\"\" table:operator=\"=\" table:data-type=\"text\">{items}</table:filter-condition>");

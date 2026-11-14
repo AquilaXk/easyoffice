@@ -491,6 +491,8 @@ pub(crate) struct StyleSink<'s> {
     link_allowance: LinkAllowance,
     /// The rows an auto filter hides in the table being read, and whether the next row is one.
     filtered: Vec<(u32, u32)>,
+    /// The rows in `filtered`, counted as they are added (a sum over the runs per row would be quadratic).
+    filtered_total: u64,
     next_filtered: bool,
 }
 
@@ -513,6 +515,7 @@ impl<'s> StyleSink<'s> {
             links: LinkCollector::default(),
             link_allowance: LinkAllowance::default(),
             filtered: Vec::new(),
+            filtered_total: 0,
             next_filtered: false,
         }
     }
@@ -601,6 +604,7 @@ impl OdsSink for StyleSink<'_> {
         self.grouped = [0, 0];
         self.links = LinkCollector::default();
         self.filtered = Vec::new();
+        self.filtered_total = 0;
     }
 
     fn row_filtered(&mut self, filtered: bool) {
@@ -684,11 +688,11 @@ impl OdsSink for StyleSink<'_> {
             col = col.saturating_add(cell.col_repeat);
         }
         if std::mem::take(&mut self.next_filtered)
-            && crate::sheet_styling::xlsx_layout::run_total(&self.filtered)
-                < u64::from(MAX_FILTERED_ROWS)
+            && self.filtered_total < u64::from(MAX_FILTERED_ROWS)
         {
             let last = self.row.saturating_add(repeat - 1).min(OdfCodec::MAX_ROWS);
             crate::sheet_styling::xlsx_layout::add_run(&mut self.filtered, self.row, last);
+            self.filtered_total += u64::from(last.saturating_sub(self.row)) + 1;
         }
         self.row = self.row.saturating_add(repeat);
         Ok(())

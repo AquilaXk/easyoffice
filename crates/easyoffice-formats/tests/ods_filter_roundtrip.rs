@@ -190,3 +190,38 @@ fn repack(original: &[u8], content: &str) -> Vec<u8> {
         .collect();
     easyoffice_formats::ZipArchiveCodec::pack_compressed(&parts).unwrap()
 }
+
+/// 300,000 pairs of a filtered row and a shown row, appended to the first table of a small file.
+fn many_filtered_rows() -> Vec<u8> {
+    let bytes = pack(SheetStyling::default(), 3);
+    let entries = easyoffice_formats::ZipArchiveCodec::unpack(
+        &bytes,
+        &easyoffice_formats::ZipSecurityPolicy::default(),
+    )
+    .unwrap();
+    let content = entries.iter().find(|e| e.path == "content.xml").unwrap();
+    let xml = String::from_utf8(content.data.clone()).unwrap();
+    let pairs = "<table:table-row table:visibility=\"filter\"/><table:table-row/>".repeat(300_000);
+    repack(
+        &bytes,
+        &xml.replacen("</table:table>", &format!("{pairs}</table:table>"), 1),
+    )
+}
+
+#[test]
+fn a_flood_of_filtered_rows_is_read_in_linear_time_and_bounded() {
+    let bytes = many_filtered_rows();
+    let start = std::time::Instant::now();
+    let back = read(&bytes);
+    let elapsed = start.elapsed();
+    println!("300,000 filtered rows read in {elapsed:?}");
+    // No filter owns them: they are the user's hidden rows, up to the bound the reader keeps.
+    assert!(back.filter.is_none());
+    let hidden: u64 = back
+        .hidden_rows
+        .iter()
+        .map(|r| u64::from(r.1 - r.0) + 1)
+        .sum();
+    assert!((300_000..=300_001).contains(&hidden), "{hidden}");
+    assert!(elapsed.as_secs_f64() < 5.0, "{elapsed:?}");
+}
