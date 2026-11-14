@@ -211,6 +211,8 @@
 .icon-valign-bottom { background-position: calc(-40px * 2) calc(-40px * 15); }
 .icon-wrap { background-position: calc(-40px * 0) calc(-40px * 7); }
 .icon-border-all { background-position: calc(-40px * 4) calc(-40px * 16); }
+.icon-font-color { background-position: calc(-40px * 0) calc(-40px * 8); }
+.icon-fill-color { background-position: calc(-40px * 7) calc(-40px * 20); }
 
 #doc-style-bar,
 #sheet-formula-bar,
@@ -612,6 +614,22 @@ input.sb-ls-select {
   border: none;
   opacity: 0;
   pointer-events: none;
+}
+
+/* The colour buttons of the sheet toolbar: the tall button with the arrow beside it; the colour the button
+   applies is the bar under its icon (`--bar-color`, set by sheet-color-ui.js). */
+.tb-color-host {
+  align-items: stretch;
+}
+
+.tb-color-host .sb-color-arrow {
+  height: auto;
+  width: 12px;
+}
+
+.tb-color-btn .tb-sprite {
+  height: 15px;
+  border-bottom: 3px solid var(--bar-color, transparent);
 }
 
 .sb-hl-palette {

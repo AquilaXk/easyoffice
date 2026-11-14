@@ -233,6 +233,8 @@
 .tool-dialog .dialog-swatch { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 4px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text-muted); font-size: 8px; }
 .tool-dialog .dialog-swatch-chip { width: 22px; height: 12px; border: 1px solid var(--color-border-dark); background: var(--dialog-swatch, var(--color-surface)); }
 .tool-dialog .dialog-color-host .sb-hl-palette { z-index: 300; }
+/* The sample of the 글꼴 and 채우기 panes of the cell format dialog (PD-227): the colours come from custom properties set by sheet-look-ui.js. */
+.tool-dialog .sheet-color-sample { display: inline-flex; align-items: center; min-width: 160px; height: 40px; padding: 0 8px; border: 1px solid var(--color-border-dark); background: var(--sample-fill, var(--color-surface)); color: var(--sample-text, var(--color-text)); }
 .tool-dialog .dialog-stack { display: flex; flex-direction: column; }
 .tool-dialog .dialog-list { list-style: none; margin: 0 0 6px; padding: 0; max-height: 120px; overflow-y: auto; border: 1px solid var(--color-border); background: var(--color-surface); font-size: var(--font-size-sm); }
 .tool-dialog .dialog-list:empty::before { content: "규칙 없음"; display: block; padding: 4px 8px; color: var(--color-text-muted); }

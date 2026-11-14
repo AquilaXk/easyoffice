@@ -7,14 +7,17 @@
   //
   // Actions: `align-left|center|right`, `valign-top|middle|bottom`, `wrap`, `border-all|outer|inner|top|
   // bottom|left|right|none`, `line-thin|thick|dashed|dotted|double` (the line the next border takes),
-  // `dialog-align`, `dialog-border`.
+  // `dialog-align`, `dialog-border`, and the colors (PD-227): `fill:<rrggbb>`, `fill-none`, `font-color:<rrggbb>`,
+  // `font-color-auto`.
 
   const AREA_LIMIT = 500000; // styled cells one sheet may hold (the file writers' limit)
   const STATE_SCAN_CELLS = 20000;
   const H_ACTIONS = { "align-left": "left", "align-center": "center", "align-right": "right" };
   const V_ACTIONS = { "valign-top": "top", "valign-middle": "middle", "valign-bottom": "" };
   const BORDER_KINDS = { "border-all": "all", "border-outer": "outer", "border-inner": "inner", "border-top": "top", "border-bottom": "bottom", "border-left": "left", "border-right": "right", "border-none": "none" };
-  const LABELS = { align: "맞춤", wrap: "줄 바꿈", border: "테두리", protect: "셀 보호" };
+  const LABELS = { align: "맞춤", wrap: "줄 바꿈", border: "테두리", protect: "셀 보호", fill: "채우기 색", fontColor: "글꼴 색" };
+  // The style key and label of each color action.
+  const COLOR_ACTIONS = { fill: ["fill", LABELS.fill], "font-color": ["fontColor", LABELS.fontColor] };
 
   function createSheetLookOps(deps) {
     const { document, format, gridUtils, sheetDataStore, getActiveSheetName, getActiveModule, getRange, getSelection, openDialog } = deps;
@@ -27,6 +30,8 @@
       textAlign: (e) => e?.style?.textAlign || "",
       verticalAlign: (e) => e?.style?.verticalAlign || "",
       wrap: (e) => (e?.style?.wrap ? "1" : ""),
+      fill: (e) => e?.style?.fill || "",
+      fontColor: (e) => e?.style?.fontColor || "",
     };
     const KEYS = Object.keys(readers);
 
@@ -41,11 +46,11 @@
         }
       };
       // A range past the limit is not scanned (the whole sheet is 17 billion cells): it counts as mixed.
-      if (area > STATE_SCAN_CELLS) return { textAlign: "mixed", verticalAlign: "mixed", wrap: "mixed" };
+      if (area > STATE_SCAN_CELLS) return Object.fromEntries(KEYS.map((key) => [key, "mixed"]));
       for (let r = rg.r1; r <= rg.r2; r += 1) {
         for (let c = rg.c1; c <= rg.c2; c += 1) take(map[gridUtils.refOf(r, c)]);
       }
-      return { textAlign: seen.textAlign ?? "", verticalAlign: seen.verticalAlign ?? "", wrap: seen.wrap ?? "" };
+      return Object.fromEntries(KEYS.map((key) => [key, seen[key] ?? ""]));
     }
 
     // Sets `key` of every cell of the selection to `value`; the same value again clears it.
@@ -66,7 +71,26 @@
       });
     }
 
-    // The selected cells with `values` written by `{ textAlign, verticalAlign, wrap }` in one step (the dialog), and
+    // Sets the color `key` (`fill` or `fontColor`) of every cell of the selection; "" removes it. The same color
+    // again is not a toggle: a color button applies what it shows.
+    function paint(key, label, rgb) {
+      const value = rgb ? look.normalizeColor(rgb) : "";
+      if (rgb && !value) return Promise.resolve(null);
+      return format.editStyles(label, ({ rg: range, patch }) => {
+        let n = 0;
+        for (let r = range.r1; r <= range.r2; r += 1) {
+          for (let c = range.c1; c <= range.c2; c += 1) {
+            patch(gridUtils.refOf(r, c), (st) => {
+              st[key] = value;
+            });
+            n += 1;
+          }
+        }
+        return n;
+      });
+    }
+
+    // The selected cells with `values` written by `{ textAlign, verticalAlign, wrap, fill, fontColor }` in one step (the dialog), and
     // `locks` `{ locked, hideFormula }` (the 보호 pane, PD-216), which a protected sheet does not let change.
     function setLook(values, border, locks) {
       const lock = Object.keys(locks || {}).length > 0;
@@ -226,6 +250,11 @@
       if (action === "wrap") return setKey(LABELS.wrap, "wrap", true);
       if (action in BORDER_KINDS) return applyBorder(BORDER_KINDS[action]);
       if (action.startsWith("line-") && look.LINES.includes(action.slice(5))) return setLine(action.slice(5));
+      const [colorKind, colorValue = ""] = action.split(":");
+      const color = COLOR_ACTIONS[colorKind];
+      if (color && action.includes(":")) return paint(color[0], color[1], colorValue);
+      if (action === "fill-none") return paint("fill", LABELS.fill, "");
+      if (action === "font-color-auto") return paint("fontColor", LABELS.fontColor, "");
       if (action.startsWith("dialog-")) return openDialog?.(action.slice(7));
       return null;
     }
@@ -259,7 +288,7 @@
     }
 
     bind();
-    return { run, setLook, applyBorders, borderState, protectStates, setColor, setLine, sync, pen, states };
+    return { run, paint, setLook, applyBorders, borderState, protectStates, setColor, setLine, sync, pen, states };
   }
 
   host.__EASYOFFICE_CREATE_SHEET_LOOK_OPS__ = createSheetLookOps;

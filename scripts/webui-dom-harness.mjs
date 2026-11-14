@@ -90,6 +90,7 @@ const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/sheet-format.js",
   "../crates/easyoffice-app/ui/sheet-numfmt-ui.js",
   "../crates/easyoffice-app/ui/sheet-look-ops.js",
+  "../crates/easyoffice-app/ui/sheet-color-ui.js",
   "../crates/easyoffice-app/ui/sheet-look-ui.js",
   "../crates/easyoffice-app/ui/sheet-filter.js",
   "../crates/easyoffice-app/ui/sheet-filter-ui.js",

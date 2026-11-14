@@ -56,9 +56,9 @@
     return row;
   }
 
-  function readRecent() {
+  function readRecent(key) {
     try {
-      const saved = JSON.parse(host.localStorage.getItem(RECENT_KEY) || "[]");
+      const saved = JSON.parse(host.localStorage.getItem(key) || "[]");
       if (!Array.isArray(saved)) return [];
       const colors = saved.filter((c) => typeof c === "string" && HEX_COLOR.test(c)).map((c) => c.toLowerCase());
       return [...new Set(colors)].slice(0, RECENT_LIMIT);
@@ -67,8 +67,8 @@
     }
   }
 
-  // Returns the function that records a chosen colour.
-  function appendRecentColors(document, panel, onSelect) {
+  // Returns the function that records a chosen colour in the list stored under `key`.
+  function appendRecentColors(document, panel, onSelect, key) {
     const recent = document.createElement("div");
     recent.className = "eo-recent-colors";
     const label = document.createElement("div");
@@ -78,7 +78,7 @@
     recent.appendChild(label);
     recent.appendChild(row);
     panel.appendChild(recent);
-    let colors = readRecent();
+    let colors = readRecent(key);
     let hasUnsaved = false;
     const render = () => {
       row.replaceChildren(...colors.map((color) => makeSwatch(document, color, onSelect)));
@@ -87,10 +87,10 @@
     render();
     return (color) => {
       // Other windows' choices merge in unless an earlier save failed and memory is ahead.
-      const shared = hasUnsaved ? [] : readRecent();
+      const shared = hasUnsaved ? [] : readRecent(key);
       colors = [...new Set([color, ...shared, ...colors])].slice(0, RECENT_LIMIT);
       try {
-        host.localStorage.setItem(RECENT_KEY, JSON.stringify(colors));
+        host.localStorage.setItem(key, JSON.stringify(colors));
         hasUnsaved = false;
       } catch {
         hasUnsaved = true;
@@ -168,7 +168,8 @@
 
   // `hostEl` holds the toggle button (`[data-color-toggle]`), the native input and the palette
   // panel (`.sb-hl-palette`). `onSelect(color)` gets "#rrggbb", or "" for "색 없음" (`options.clear`).
-  // `options.remember` keeps the recent-colour row.
+  // `options.remember` keeps the recent-colour row (stored under `options.recentKey`, the shared text-colour
+  // key by default); `options.clearLabel` names the button that sends "" (default "색 없음").
   function setupColorPicker(hostEl, onSelect, options = {}) {
     const document = hostEl.ownerDocument;
     const button = hostEl.querySelector("[data-color-toggle]");
@@ -190,11 +191,11 @@
       onSelect(color);
     };
     for (const colors of [GRAY_ROW, ...PALETTE_ROWS]) panel.appendChild(makeRow(document, colors, applyColor));
-    if (options.remember) remember = appendRecentColors(document, panel, applyColor);
+    if (options.remember) remember = appendRecentColors(document, panel, applyColor, options.recentKey || RECENT_KEY);
     const actions = document.createElement("div");
     actions.className = "sb-hl-palette-actions";
     if (options.clear) {
-      actions.appendChild(makeButton(document, "색 없음", () => {
+      actions.appendChild(makeButton(document, options.clearLabel || "색 없음", () => {
         popup.close();
         onSelect("");
       }));

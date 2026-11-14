@@ -128,6 +128,28 @@
       };
     }
 
+    // An inserted row or column takes the formats, not the contents, of the one before it, as the spreadsheet
+    // program's insert does (PD-227); the first row and column have nothing before them. The copies are bounded.
+    const MAX_INHERITED_CELLS = 200000;
+    function inheritFormats(moved, edit) {
+      if (edit.op !== "insert" || edit.at <= 1) return;
+      const before = edit.at - 1;
+      const byRow = edit.axis === "row";
+      const copies = {};
+      let n = 0;
+      for (const ref of Object.keys(moved)) {
+        const p = grid.parseRef(ref);
+        const style = moved[ref].style;
+        if (!p || !style || (byRow ? p.row : p.col) !== before) continue;
+        for (let i = 1; i <= edit.count; i += 1) {
+          copies[byRow ? grid.refOf(before + i, p.col) : grid.refOf(p.row, before + i)] = { value: "", formula: "", style };
+        }
+        n += edit.count;
+        if (n > MAX_INHERITED_CELLS) return;
+      }
+      Object.assign(moved, copies);
+    }
+
     // The answer applied to the model: cells move, rewritten formulas replace their text, the layout,
     // widths and rules of the engine replace the page's.
     function applyAnswer(name, edit, answer) {
@@ -139,6 +161,7 @@
         const to = layoutApi.remapRef(edit, ref);
         if (to !== null) moved[to] = old[ref];
       }
+      inheritFormats(moved, edit);
       nextSheets[name] = moved;
       for (const f of Array.isArray(answer.formulas) ? answer.formulas : []) {
         const entry = nextSheets[f.sheet]?.[f.cell];

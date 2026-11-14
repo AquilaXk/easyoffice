@@ -447,6 +447,21 @@
           <button type="button" class="tb-btn" data-sheet-look="wrap" title="줄 바꿈" aria-label="줄 바꿈" aria-pressed="false"><span class="tb-sprite icon-wrap"></span><span class="tb-label">줄<br/>바꿈</span></button>
           <button type="button" class="tb-btn" data-sheet-look="dialog-border" title="테두리" aria-label="테두리"><span class="tb-sprite icon-border-all"></span><span class="tb-label">테두리</span></button>
         </div>
+        <span class="tb-sep" data-kinds="SHEET" aria-hidden="true"></span>
+        <div class="tb-group" data-kinds="SHEET">
+          <div id="sheet-fill-host" class="sb-color-host tb-color-host">
+            <button id="btn-sheet-fill" type="button" class="tb-btn tb-color-btn" title="채우기 색" aria-label="채우기 색 적용"><span class="tb-sprite icon-fill-color"></span><span class="tb-label">채우기<br/>색</span></button>
+            <button class="sb-color-arrow" type="button" data-color-toggle aria-haspopup="true" aria-expanded="false" title="채우기 색 선택" aria-label="채우기 색 선택"><span aria-hidden="true">▾</span></button>
+            <input id="sheet-fill-input" type="color" value="#ffff00" aria-label="채우기 색 선택" />
+            <div id="sheet-fill-palette" class="sb-hl-palette" hidden></div>
+          </div>
+          <div id="sheet-font-color-host" class="sb-color-host tb-color-host">
+            <button id="btn-sheet-font-color" type="button" class="tb-btn tb-color-btn" title="글꼴 색" aria-label="글꼴 색 적용"><span class="tb-sprite icon-font-color"></span><span class="tb-label">글꼴<br/>색</span></button>
+            <button class="sb-color-arrow" type="button" data-color-toggle aria-haspopup="true" aria-expanded="false" title="글꼴 색 선택" aria-label="글꼴 색 선택"><span aria-hidden="true">▾</span></button>
+            <input id="sheet-font-color-input" type="color" value="#ff0000" aria-label="글꼴 색 선택" />
+            <div id="sheet-font-color-palette" class="sb-hl-palette" hidden></div>
+          </div>
+        </div>
       </div>
 
       <div id="doc-style-bar" class="eo-doc-style-bar" role="toolbar" aria-label="문단 및 글자 서식 도구줄">
@@ -1372,7 +1387,9 @@
         <div class="dialog-tabs" role="tablist" aria-label="셀 서식">
           <button type="button" class="dialog-tab active" role="tab" id="sheet-fmt-tab-numfmt" aria-selected="true" aria-controls="sheet-fmt-pane-numfmt" data-fmt-tab="numfmt">표시 형식</button>
           <button type="button" class="dialog-tab" role="tab" id="sheet-fmt-tab-align" aria-selected="false" aria-controls="sheet-fmt-pane-align" tabindex="-1" data-fmt-tab="align">맞춤</button>
+          <button type="button" class="dialog-tab" role="tab" id="sheet-fmt-tab-font" aria-selected="false" aria-controls="sheet-fmt-pane-font" tabindex="-1" data-fmt-tab="font">글꼴</button>
           <button type="button" class="dialog-tab" role="tab" id="sheet-fmt-tab-border" aria-selected="false" aria-controls="sheet-fmt-pane-border" tabindex="-1" data-fmt-tab="border">테두리</button>
+          <button type="button" class="dialog-tab" role="tab" id="sheet-fmt-tab-fill" aria-selected="false" aria-controls="sheet-fmt-pane-fill" tabindex="-1" data-fmt-tab="fill">채우기</button>
           <button type="button" class="dialog-tab" role="tab" id="sheet-fmt-tab-protect" aria-selected="false" aria-controls="sheet-fmt-pane-protect" tabindex="-1" data-fmt-tab="protect">보호</button>
         </div>
         <div class="dialog-body" id="sheet-fmt-pane-numfmt" role="tabpanel" aria-labelledby="sheet-fmt-tab-numfmt" data-fmt-pane="numfmt">
@@ -1391,11 +1408,19 @@
           <div class="dialog-row"><label class="dialog-label" for="sheet-align-v-select">세로</label><select id="sheet-align-v-select" class="sb-combo dialog-select"></select></div>
           <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-align-wrap" type="checkbox" /> 텍스트 줄 바꿈</label></div>
         </div>
+        <div class="dialog-body" id="sheet-fmt-pane-font" role="tabpanel" aria-labelledby="sheet-fmt-tab-font" data-fmt-pane="font" hidden>
+          <div class="dialog-row"><span class="dialog-label">색</span><div id="sheet-fcolor-host" class="sb-color-host dialog-color-host"><button class="dialog-swatch" type="button" data-color-toggle aria-haspopup="true" aria-expanded="false" title="글꼴 색" aria-label="글꼴 색"><span class="dialog-swatch-chip" aria-hidden="true"></span><span aria-hidden="true">▾</span></button><input id="sheet-fcolor" type="color" value="#000000" aria-label="글꼴 색" /><div id="sheet-fcolor-palette" class="sb-hl-palette" hidden></div></div></div>
+          <div class="dialog-row"><span class="dialog-label">미리 보기</span><output id="sheet-font-sample" class="sheet-color-sample">가나다 AaBb</output></div>
+        </div>
         <div class="dialog-body" id="sheet-fmt-pane-border" role="tabpanel" aria-labelledby="sheet-fmt-tab-border" data-fmt-pane="border" hidden>
           <div class="dialog-row"><span class="dialog-label">선 종류</span><div class="sheet-line-grid" role="radiogroup" aria-label="선 종류"><button type="button" class="sheet-line-item" role="radio" aria-checked="false" data-border-line="thin" title="가는 실선" aria-label="가는 실선"></button><button type="button" class="sheet-line-item" role="radio" aria-checked="false" data-border-line="thick" title="굵은 실선" aria-label="굵은 실선"></button><button type="button" class="sheet-line-item" role="radio" aria-checked="false" data-border-line="dashed" title="파선" aria-label="파선"></button><button type="button" class="sheet-line-item" role="radio" aria-checked="false" data-border-line="dotted" title="점선" aria-label="점선"></button><button type="button" class="sheet-line-item" role="radio" aria-checked="false" data-border-line="double" title="이중 실선" aria-label="이중 실선"></button></div></div>
           <div class="dialog-row"><span class="dialog-label">색</span><div id="sheet-border-color-host" class="sb-color-host dialog-color-host"><button class="dialog-swatch" type="button" data-color-toggle aria-haspopup="true" aria-expanded="false" title="테두리 색" aria-label="테두리 색"><span class="dialog-swatch-chip" aria-hidden="true"></span><span aria-hidden="true">▾</span></button><input id="sheet-border-color" type="color" value="#000000" aria-label="테두리 색" /><div id="sheet-border-color-palette" class="sb-hl-palette" hidden></div></div></div>
           <div class="dialog-row"><span class="dialog-label">미리 보기</span><div class="dialog-btn-group" role="group" aria-label="미리 보기"><button type="button" data-border-preset="none">없음</button><button type="button" data-border-preset="outer">바깥쪽</button><button type="button" data-border-preset="inner">안쪽</button><button type="button" data-border-preset="all">모두</button></div></div>
           <div class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><svg id="sheet-border-preview" class="sheet-border-preview" viewBox="0 0 120 72" role="img" aria-label="테두리 미리 보기"></svg><div class="sheet-border-positions" role="group" aria-label="테두리 위치"><button type="button" aria-pressed="false" data-border-pos="t">위쪽</button><button type="button" aria-pressed="false" data-border-pos="b">아래쪽</button><button type="button" aria-pressed="false" data-border-pos="l">왼쪽</button><button type="button" aria-pressed="false" data-border-pos="r">오른쪽</button><button type="button" aria-pressed="false" data-border-pos="h">가로 중심선</button><button type="button" aria-pressed="false" data-border-pos="v">세로 중심선</button></div></div>
+        </div>
+        <div class="dialog-body" id="sheet-fmt-pane-fill" role="tabpanel" aria-labelledby="sheet-fmt-tab-fill" data-fmt-pane="fill" hidden>
+          <div class="dialog-row"><span class="dialog-label">배경색</span><div id="sheet-bgcolor-host" class="sb-color-host dialog-color-host"><button class="dialog-swatch" type="button" data-color-toggle aria-haspopup="true" aria-expanded="false" title="배경색" aria-label="배경색"><span class="dialog-swatch-chip" aria-hidden="true"></span><span aria-hidden="true">▾</span></button><input id="sheet-bgcolor" type="color" value="#ffffff" aria-label="배경색" /><div id="sheet-bgcolor-palette" class="sb-hl-palette" hidden></div></div></div>
+          <div class="dialog-row"><span class="dialog-label">견본</span><output id="sheet-fill-sample" class="sheet-color-sample"></output></div>
         </div>
         <div class="dialog-body" id="sheet-fmt-pane-protect" role="tabpanel" aria-labelledby="sheet-fmt-tab-protect" data-fmt-pane="protect" hidden>
           <div class="dialog-row"><span class="dialog-label">셀 보호</span><label class="dialog-checkbox"><input id="sheet-protect-cell-locked" type="checkbox" /> 잠금</label></div>
@@ -1868,6 +1893,7 @@
     <script src="./sheet-format.js"></script>
     <script src="./sheet-numfmt-ui.js"></script>
     <script src="./sheet-look-ops.js"></script>
+    <script src="./sheet-color-ui.js"></script>
     <script src="./sheet-look-ui.js"></script>
     <script src="./sheet-filter.js"></script>
     <script src="./sheet-filter-ui.js"></script>

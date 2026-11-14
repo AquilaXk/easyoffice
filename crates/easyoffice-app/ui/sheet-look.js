@@ -13,8 +13,9 @@
 (function (host) {
   "use strict";
 
-  // Alignment, wrapping and borders of a sheet cell (PD-207): the style keys, the border edit
-  // plans and the CSS a cell takes. A cell style carries `textAlign` (`left|center|right`),
+  // Alignment, wrapping, borders and colors of a sheet cell (PD-207, PD-227): the style keys, the border edit
+  // plans and the CSS a cell takes. `fill` and `fontColor` are `rrggbb` strings (no key: no fill, automatic
+  // text). A cell style carries `textAlign` (`left|center|right`),
   // `verticalAlign` (`top|middle`; the bottom is the default and has no key), `wrap` (`true`) and
   // `border`, a frozen `{ t, r, b, l }` whose edges are `"<line>:<rrggbb>"` strings (the save payload
   // uses the same text). Edges are kept on both cells that share them, so an edit of a range also
@@ -30,7 +31,10 @@
   const SIDE_CSS = { t: "Top", r: "Right", b: "Bottom", l: "Left" };
   // The protection flags of a cell (PD-216) travel as style keys too: `unlocked`, `locked` (kept locked inside an
   // unlocked row or column) and `hideFormula`, all `true` or absent.
-  const LOOK_KEYS = ["textAlign", "verticalAlign", "wrap", "border", "unlocked", "locked", "hideFormula"];
+  const LOOK_KEYS = ["textAlign", "verticalAlign", "wrap", "border", "unlocked", "locked", "hideFormula", "fill", "fontColor"];
+  // Text with no color of its own is white on a dark fill (a luminance of 62 of 255 or less), black on
+  // any other fill, and the theme's text color on a cell without a fill.
+  const DARK_FILL_LUMINANCE = 62;
 
   // `rrggbb` from `#rrggbb`, `rrggbb` or `#rgb` (any case); null for anything else.
   function normalizeColor(text) {
@@ -73,7 +77,7 @@
 
   // The same text for every style with this look: the part of `internStyle`'s key that is new.
   const protectKey = (st) => (st.unlocked ? "u" : "") + (st.locked ? "l" : "") + (st.hideFormula ? "h" : "");
-  const lookKey = (st) => (st ? (st.textAlign || "") + "|" + (st.verticalAlign || "") + "|" + (st.wrap ? 1 : 0) + "|" + borderKey(st.border) + "|" + protectKey(st) : "|||0||");
+  const lookKey = (st) => (st ? (st.textAlign || "") + "|" + (st.verticalAlign || "") + "|" + (st.wrap ? 1 : 0) + "|" + borderKey(st.border) + "|" + protectKey(st) + "|" + (st.fill || "") + "|" + (st.fontColor || "") : "|||0||||");
 
   // Whether a wrapped cell was ever made in this page: a sheet is scanned for wrapped rows only then (every
   // wrapped style comes from `internStyle`, a clone of the model, or a file open, and each of them notes it).
@@ -82,7 +86,14 @@
     wrapSeen = true;
   };
 
-  const hasLook = (st) => Boolean(st) && Boolean(st.textAlign || st.verticalAlign || st.wrap || st.border || st.unlocked || st.locked || st.hideFormula);
+  const hasLook = (st) => Boolean(st) && Boolean(st.textAlign || st.verticalAlign || st.wrap || st.border || st.unlocked || st.locked || st.hideFormula || st.fill || st.fontColor);
+
+  // The text color a cell shows as `rrggbb`, "" for the theme's own.
+  function autoTextColor(fill) {
+    const n = Number.parseInt(fill, 16);
+    return ((((n >> 16) & 255) * 76 + ((n >> 8) & 255) * 151 + (n & 255) * 29) >> 8) <= DARK_FILL_LUMINANCE ? "ffffff" : "000000";
+  }
+  const textColorOf = (st) => st?.fontColor || (st?.fill ? autoTextColor(st.fill) : "");
 
   // `border` with the edge of `side` replaced (`null` removes it); "" when no edge is left.
   function withSide(border, side, edge) {
@@ -244,6 +255,29 @@
     };
   }
 
+  // The fill and text color go through custom properties and attributes, as the conditional format colors do:
+  // the selection, the conditional format and the number format color keep their own place above them in CSS.
+  // Explicit black text on a cell with no fill is marked `black`: the dark theme shows it as the theme's text.
+  function paintColors(td, st) {
+    const s = td.style;
+    const fill = st?.fill || "";
+    const fg = textColorOf(st);
+    if (fill) {
+      td.dataset.fill = "1";
+      s.setProperty("--cell-fill", "#" + fill);
+    } else if (td.dataset.fill) {
+      delete td.dataset.fill;
+      s.removeProperty("--cell-fill");
+    }
+    if (fg) {
+      td.dataset.fg = fg === "000000" && !fill ? "black" : "1";
+      s.setProperty("--cell-fg", "#" + fg);
+    } else if (td.dataset.fg) {
+      delete td.dataset.fg;
+      s.removeProperty("--cell-fg");
+    }
+  }
+
   // Draws the look of `st` on `td` (alignment, wrapping and the resolved edges); a cell painted before
   // with another look is reset first. `fontPx` is the line height basis of wrapped text.
   function paintTd(td, st, row, col, borderAt, span) {
@@ -258,6 +292,7 @@
     if (shadows.length > 0) s.setProperty("--lk-shadow", shadows.join(", "));
     else s.removeProperty("--lk-shadow");
     td.classList.toggle("lk-shadow", shadows.length > 0);
+    paintColors(td, st);
     if (st?.wrap) {
       s.whiteSpace = "pre-wrap";
       s.overflowWrap = "anywhere";
@@ -284,6 +319,9 @@
     if (st.textAlign) s.textAlign = st.textAlign;
     s.verticalAlign = st.verticalAlign || "bottom";
     if (st.wrap) s.whiteSpace = "pre-wrap";
+    if (st.fill) s.backgroundColor = "#" + st.fill;
+    const fg = textColorOf(st);
+    if (fg) s.color = "#" + fg;
     for (const side of SIDES) {
       const css = edgeCss(st.border?.[side]);
       if (!css) continue;
@@ -311,6 +349,8 @@
     borderKey,
     lookKey,
     hasLook,
+    autoTextColor,
+    textColorOf,
     markWrap,
     wrapSeen: () => wrapSeen,
     withSide,

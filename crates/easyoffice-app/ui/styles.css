@@ -499,13 +499,23 @@ select:focus-visible,
 .sheet-grid td.selected-cell { outline: 2px solid var(--table-selection-stroke); outline-offset: -2px; background: var(--ui-surface); }
 .sheet-grid td.in-range.selected-cell { background: var(--ui-surface); }
 .sheet-grid td.editing { caret-color: auto; cursor: text; user-select: text; text-overflow: clip; text-align: left; }
+/* Cell fill and text colour (PD-227): sheet-look.js sets `--cell-fill` and `--cell-fg`. The selection tint lies over the fill, the active cell shows its colour as it is, a conditional format colour wins (its own fallback is the cell colour), then the number format colour, and the link colour is below all of them. */
+.sheet-grid td[data-fill] { background-color: var(--cell-fill, transparent); }
+.sheet-grid td[data-fill].in-range { background: linear-gradient(var(--table-selection-fill), var(--table-selection-fill)) var(--cell-fill, transparent); }
+.sheet-grid td[data-fill].selected-cell, .sheet-grid td[data-fill].in-range.selected-cell { background: var(--cell-fill, transparent); }
+.sheet-grid td[data-fg] { color: var(--cell-fg, inherit); }
+/* Black text on a cell with no fill is the automatic colour: the dark theme shows it as the theme's text. */
+:where(:root[data-theme-effective="dark"] .sheet-grid) td[data-fg="black"] { color: var(--ui-text); }
+.sheet-grid td.merge-anchor[data-fill]::after { background: var(--cell-fill, transparent); }
+.sheet-grid td.merge-anchor[data-fill].in-range::after { background: linear-gradient(var(--table-selection-fill), var(--table-selection-fill)) var(--cell-fill, transparent); }
+.sheet-grid td.merge-anchor[data-fill].selected-cell::after { background: var(--cell-fill, transparent); }
 /* Conditional formatting (PD-171): sheet-rules.js sets the custom properties and classes. */
-.sheet-grid td[data-cf]:not(.selected-cell):not(.in-range) { background-color: var(--cf-bg, transparent); }
+.sheet-grid td[data-cf]:not(.selected-cell):not(.in-range) { background-color: var(--cf-bg, var(--cell-fill, transparent)); }
 /* Section color of a number format, set by sheet-grid.js; a conditional format colour wins. */
 .sheet-grid td.nf-colored { color: var(--nf-color, inherit); }
 /* The `[Red]` section is the theme's negative color (4.5:1 or more on the cell, light and dark). */
 .sheet-grid td.nf-red { color: var(--ui-danger); }
-.sheet-grid td[data-cf] { color: var(--cf-fg, inherit); background-image: var(--cf-bar, none); }
+.sheet-grid td[data-cf] { color: var(--cf-fg, var(--cell-fg, inherit)); background-image: var(--cf-bar, none); }
 .sheet-grid td.cf-bold { font-weight: 700; }
 .sheet-grid td.cf-italic { font-style: italic; }
 .sheet-grid td.cf-underline { text-decoration: underline; }

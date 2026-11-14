@@ -59,7 +59,7 @@ const CHARACTER_ICONS = ["icon-ctrl-mark", "icon-para-mark"];
 test("the toolbars are the reference toolbar format: the icon above a label, on the reference sprite", async () => {
   const { document } = await createWorkspaceHarness({ search: "?module=SHEET&win=w-sheet-toolbar" });
   const buttons = [...document.querySelectorAll(TOOLBAR_BUTTONS)];
-  assert.equal(buttons.length, 20 + 5 + 12 + 8 + 2, "document groups, the header and footer edit group, sheet groups, slide row, PDF row");
+  assert.equal(buttons.length, 20 + 5 + 14 + 8 + 2, "document groups, the header and footer edit group, sheet groups, slide row, PDF row");
   const css = read("toolbar.css");
   for (const button of buttons) {
     const name = button.getAttribute("title");
@@ -73,7 +73,7 @@ test("the toolbars are the reference toolbar format: the icon above a label, on 
     assert.ok(CHARACTER_ICONS.includes(icon) || css.includes(`.${icon} { background-position:`), `${icon} has its cell of the sprite`);
   }
   const shown = buttons.filter((button) => !button.hidden && !button.closest("[hidden]") && button.closest("#icon-toolbar"));
-  assert.equal(shown.length, 21, "the sheet window shows the sheet commands only");
+  assert.equal(shown.length, 23, "the sheet window shows the sheet commands only");
   const rule = rulesFor(css, ["#icon-toolbar .tb-btn"]).map((r) => r.body).join(" ");
   assert.ok(rule.includes("flex-direction: column") && rule.includes("min-width: 44px") && rule.includes("padding: 2px 4px"));
   assert.match(css, /\.tb-sprite \{[^}]*width: 18px;[^}]*height: 18px;[^}]*var\(--ui-icon-sprite-url\)/);

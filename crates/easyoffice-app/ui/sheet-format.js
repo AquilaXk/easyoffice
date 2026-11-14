@@ -88,6 +88,8 @@
     if (style.unlocked) out.unlocked = true;
     if (style.locked) out.locked = true;
     if (style.hideFormula) out.hideFormula = true;
+    if (look.normalizeColor(style.fill) === style.fill) out.fill = style.fill;
+    if (look.normalizeColor(style.fontColor) === style.fontColor) out.fc = style.fontColor;
     const mask = entryMask({ style });
     if (mask & 1) out.bold = true;
     if (mask & 2) out.italic = true;
@@ -120,6 +122,10 @@
     if (payload.unlocked === true) style.unlocked = true;
     else if (payload.locked === true) style.locked = true;
     if (payload.hideFormula === true) style.hideFormula = true;
+    const fill = look.normalizeColor(payload.fill);
+    if (fill) style.fill = fill;
+    const fontColor = look.normalizeColor(payload.fc);
+    if (fontColor) style.fontColor = fontColor;
     return Object.values(style).some(Boolean) ? internStyle(style) : null;
   }
 

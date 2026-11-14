@@ -36,6 +36,9 @@
     let color = look.DEFAULT_COLOR;
     let borderTouched = false;
     let loadedLocks = { locked: "1", hidden: "" };
+    // The 글꼴 and 채우기 panes: the colors the selection has ("" none, "mixed", `rrggbb`) and the ones chosen.
+    let loadedColors = { fill: "", fontColor: "" };
+    let wantColors = {};
 
     const tabs = () => [...document.querySelectorAll("#sheet-numfmt-dialog [data-fmt-tab]")];
     const panes = () => [...document.querySelectorAll("#sheet-numfmt-dialog [data-fmt-pane]")];
@@ -163,10 +166,42 @@
       }
     }
 
+    // ---- colors ----------------------------------------------------------------------------------------
+    // Shows `rgb` ("" for none or mixed) in the chip of the host `hostId` and in the sample.
+    function showColor(key) {
+      const rgb = key in wantColors ? wantColors[key] : loadedColors[key] === "mixed" ? "" : loadedColors[key];
+      const [hostId, sampleId, prop] = key === "fill" ? ["sheet-bgcolor-host", "sheet-fill-sample", "--sample-fill"] : ["sheet-fcolor-host", "sheet-font-sample", "--sample-text"];
+      $(hostId)?.querySelector?.(".dialog-swatch-chip")?.style?.setProperty("--dialog-swatch", rgb ? "#" + rgb : "");
+      $(sampleId)?.style?.setProperty(prop, rgb ? "#" + rgb : "");
+    }
+
+    function loadColors(rg) {
+      const { fill, fontColor } = ops.states(rg);
+      loadedColors = { fill, fontColor };
+      wantColors = {};
+      showColor("fill");
+      showColor("fontColor");
+    }
+
+    // The colors the panes changed: `{ fill, fontColor }`, each only when it was chosen ("" removes it).
+    function colorValues() {
+      const out = {};
+      for (const key of ["fill", "fontColor"]) if (key in wantColors && wantColors[key] !== loadedColors[key]) out[key] = wantColors[key];
+      return out;
+    }
+
+    function chooseColor(key, picked) {
+      const rgb = picked === "" ? "" : look.normalizeColor(picked);
+      if (rgb === null) return;
+      wantColors[key] = rgb;
+      showColor(key);
+    }
+
     // `open(pane)`: loads the panes from the selection and shows `pane`.
     function open(pane) {
       ensureControls();
       const rg = getRange();
+      loadColors(rg);
       loadAlign(rg);
       loadBorder(rg);
       loadProtect(rg);
@@ -208,13 +243,13 @@
 
     // True when the panes have something to write; `apply()` writes it in one step.
     function dirty() {
-      return Object.keys(alignValues()).length > 0 || borderTouched || Object.keys(lockValues()).length > 0;
+      return Object.keys(alignValues()).length > 0 || Object.keys(colorValues()).length > 0 || borderTouched || Object.keys(lockValues()).length > 0;
     }
 
     function apply() {
       ops.pen.line = line;
       ops.pen.color = color;
-      return ops.setLook(alignValues(), borderTouched ? borderSteps() : null, lockValues());
+      return ops.setLook({ ...alignValues(), ...colorValues() }, borderTouched ? borderSteps() : null, lockValues());
     }
 
     function lineSvg(name) {
@@ -252,7 +287,10 @@
       }
       fillOptions("sheet-align-h-select", H_OPTIONS);
       fillOptions("sheet-align-v-select", V_OPTIONS);
-      host.__EASYOFFICE_COLOR_PICKER__?.setupColorPicker($("sheet-border-color-host"), (picked) => {
+      const picker = host.__EASYOFFICE_COLOR_PICKER__;
+      picker?.setupColorPicker($("sheet-fcolor-host"), (picked) => chooseColor("fontColor", picked), { clear: true, clearLabel: "자동" });
+      picker?.setupColorPicker($("sheet-bgcolor-host"), (picked) => chooseColor("fill", picked), { clear: true, clearLabel: "채우기 없음" });
+      picker?.setupColorPicker($("sheet-border-color-host"), (picked) => {
         const rgb = look.normalizeColor(picked);
         if (!rgb) return;
         color = rgb;
@@ -272,6 +310,7 @@
     const ops = host.__EASYOFFICE_CREATE_SHEET_LOOK_OPS__({ ...deps, openDialog: (pane) => numfmtUi?.openNumfmtDialog(pane) });
     const ui = createSheetLookUi({ document: deps.document, kit, ops, getRange: deps.getRange, getActiveSheetName: deps.getActiveSheetName });
     numfmtUi = host.__EASYOFFICE_CREATE_SHEET_NUMFMT_UI__?.({ document: deps.document, format: deps.format, kit, look: ui });
+    host.__EASYOFFICE_CREATE_SHEET_COLOR_UI__?.({ document: deps.document, ops });
     return ops;
   }
 
