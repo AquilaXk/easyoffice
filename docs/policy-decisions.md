@@ -3628,3 +3628,23 @@
 - **검토와 다르게 한 것** 앱 출처를 페이지 쪽 `location.origin`과 한 번 더 대조하는 안은 넣지 않았습니다(플랫폼별 값을 실기로 확인하지 못했고, 탐색 제한이 이미 같은 일을 함). 썸네일 전용 래스터 예산은 넣지 않았습니다(기존 한도가 주석과 같은 4096×4096이고 동시 2개로 합계가 묶임). Swift 파일 읽기는 FIFO에서 멈춘다는 부분이 거짓이고(이 macOS의 읽기는 FIFO를 거부함) 링크의 크기 확인 우회만 실재했습니다.
 - **Verified by** `cargo test -p easyoffice-sheet`(`rules::tests`, `recalc::tests_axis`, `recalc::tests_names`, `sheet_dynamic_limits`, `sheet_pivot_limits`), `cargo test -p easyoffice-formats`(`pdf_stream_parser`, `sheet_rules_roundtrip`, `pages_notes`, `xlsx_sheet`, `xlsx_formula_text`), `cargo test -p easyoffice-app sheet_pivot`, `cargo test -p easyoffice-desktop`(`navigation_is_limited_to_embedded_origin`, `session_end_windows`), `node scripts/run-quicklook-tests.mjs`, `node --test scripts/test-webui-windows.mjs scripts/test-webui-sheet-spill.mjs scripts/test-release-assets.mjs scripts/test-retry-on-download-failure.mjs`.
 - **Revisit when** Windows 실기에서 로그오프 차단 이유의 이동을 확인할 때, 한 코드의 대상이 16단위를 넘는 실제 글꼴 맵이 나올 때, 릴리스 CLI를 올릴 때(잠금 파일을 함께 갱신).
+
+## PD-220. 외부 검토 2차(중간 9건·낮음 2건)의 처리: 저장 손상·멈춤·우회 경로를 항목마다 재현으로 가려 고친다
+
+- **Status** Implemented (QA 요청 2026-11-14). 항목마다 재현 시험으로 참·거짓을 가렸고, 거짓·부분으로 가려진 것은 아래에 근거를 둡니다.
+- **Context** 참으로 확인된 것: 다른 시트를 가리키는 목록 유효성의 엔진 거부, 사용자 지정 유효성 검사의 세션 memo 오염, 배열 수식이 있는 일괄 계산의 마감 중복, ODS 조건부 서식 시트 이름 이스케이프 누락, XLS 공유 문자열의 서로게이트 쌍 분할(자기 파일을 못 엶), 가운뎃점 줄의 PDF 줄바꿈 분할(PD-213의 부작용), 스필 칸의 개인정보 마스킹 허위 완료, DOCX 여백 `i64::MIN` 패닉, PDF 분할의 중복 범위·동명 파일 덮어쓰기, 링크로 연 문서의 형식 판정과 외부 변경 확인 중 재변경, 이름 있는 파이프에서 `File::open` 영구 대기, 인쇄 SVG 살균의 빈틈과 CSP·`--serve` 헤더, FFI의 무한 NUL 탐색, 위생 가드 우회. 거짓·부분: 스핀 서버의 슬롯 포화 503은 동기 드레인이 없고 기존 시험이 즉시 응답을 보장함, `odt_twips_to_pt`의 입력은 `i32`에서 온 값이라 도달하지 않음(`unsigned_abs`로 바꿔 둠), `ods_protect.rs`는 시트 이름을 쓰지 않고 키·알고리즘을 이미 이스케이프함, FFI의 `into_raw_c_string`은 패닉 경로가 사실상 없으나 방어 안으로 옮김.
+- **Decision (`PD-220`)**
+  1. **유효성**: 목록 범위의 시트 이름(따옴표·대소문자 포함)을 읽어 그 시트의 칸을 본다. 없는 시트는 항목이 없다. 사용자 지정 수식은 입력을 넣은 채 자기 memo로 계산하고 버리며, 모든 검사에 평가 마감(`MAX_EVAL_TIME`)이 걸린다. 마감이 지나면 거부한다.
+  2. **일괄 계산**: 배열 수식이 있는 요청은 정착과 수식 대상이 마감 하나를 나눠 쓰고, 만료되면 `timedOut`이며 그 대상은 값이 없다.
+  3. **저장 손상**: ODS 기준 칸 주소는 이스케이프한다. XLS SST는 서로게이트 쌍을 CONTINUE 경계에서 쪼개지 않는다. 글꼴이 섞인 PDF 줄은 텍스트 객체 하나에서 글꼴만 바꾸고 각 구간은 앞 구간 폭만큼 `Td`로 옮긴다(읽는 쪽이 한 줄로 잇는다).
+  4. **마스킹**: 스필 칸은 세지도 바꾸지도 않는다(다음 계산이 원본에서 다시 채움).
+  5. **PDF 분할**: 같은 이름이 되는 범위가 둘이면 시작 전에 거부한다. 파일은 쓰기 직전에 `create_new`로 이름을 잡고, 롤백은 이 호출이 만든 파일만 지운다.
+  6. **열기·저장**: 일반 파일이 아닌 경로(이름 있는 파이프)는 열기 전에 거부하고 핸들로 다시 확인한다(`open_regular`). 링크로 연 문서의 저장 형식과 이름은 링크의 것이고 바이트는 링크 뒤의 파일에 쓴다. 외부 변경 확인 창이 닫힌 뒤 디스크(대상 경로와 지문)를 다시 보고, 달라졌으면 다시 묻는다(최대 3번, 그 뒤 취소).
+  7. **인쇄 SVG**: 문서 유형·ENTITY 선언은 파싱 전에 거부하고, SVG 이름공간의 허용 요소·속성만 남기며, 값은 `url(#id)`와 안쪽 `#` 참조·이미지 `data:`만 받는다. `a`는 글자만 남긴다. 셸 CSP와 `--serve` 기본 CSP에 `base-uri 'none'`, `object-src 'none'`을 더한다.
+  8. **`--serve`**: 중복 `Host`·`Origin`과 모든 `Transfer-Encoding`은 400, 헤더 끝 탐색은 새 바이트만 훑는다.
+  9. **FFI**: 명령 1 KiB, 내용 16 MiB를 넘는 문자열은 끝까지 읽지 않고 거부하며, 응답 문자열 생성도 패닉 방어 안에서 한다.
+  10. **위생 가드**: `parseFromString`·`createContextualFragment`·`srcdoc`·`document.write`·`setHTMLUnsafe`·`parseHTMLUnsafe`와 문자열 키(`el["innerHTML"]`) 접근을 마크업 쓰기로 본다. 남기는 `parseFromString`은 `PARSE_ALLOWED`에 파일과 이유로 적는다(인쇄 SVG 하나).
+- **재사용 판단** (1) 허용 라이선스 크레이트로 바로 쓸 수 있는 것은 없었습니다. (2) 평가 마감, 문서 복원 예산, 저장 경로의 지문, 참조 승인 문 같은 기존 부품을 그대로 썼습니다. (3) 이식한 참조 구현은 없습니다.
+- **검토와 다르게 한 것** 개인정보 마스킹은 "원본 확인 경고"를 넣지 않았습니다(참조 앱에 없는 새 화면 문구이고, 원본 칸은 이미 마스킹 대상). FFI는 길이 인자를 받는 새 진입점 대신 기존 진입점의 읽기를 한도로 묶었습니다(소비자가 없는 ABI를 늘리지 않음). `--serve` 503은 고치지 않았습니다.
+- **Verified by** `cargo test -p easyoffice-sheet`(`rules::tests_validate`, `recalc::tests_deadline`), `cargo test -p easyoffice-formats`(`ods_rules_sheet_names`, `xls_writer_limits`, `pdf_mixed_font_lines`, `page_frame`), `cargo test -p easyoffice-desktop`(분할, 파이프, 링크, 재확인), `cargo test -p easyoffice-app`(`ffi`, `http_server_security`), `node --test scripts/test-html-sink-rule.mjs scripts/test-webui-hwp-print.mjs scripts/test-webui-sheet-spill.mjs`.
+- **Revisit when** 실제 브라우저에서 인쇄 SVG 살균을 확인할 때, 길이 인자 FFI 진입점을 쓰는 소비자가 생길 때, 열기와 쓰기 사이의 파이프 교체 틈이 문제로 보고될 때.
