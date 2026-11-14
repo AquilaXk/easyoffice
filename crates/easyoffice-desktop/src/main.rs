@@ -359,9 +359,23 @@ async fn save_tracked(
     }
 }
 
-/// Only the embedded app origin may be displayed; any other navigation is refused.
+/// Only the embedded app origin of this platform may be displayed; any other navigation is refused.
 pub(crate) fn is_app_origin(url: &tauri::Url) -> bool {
-    url.scheme() == "tauri" || url.host_str() == Some("tauri.localhost")
+    has_app_origin(url, cfg!(windows))
+}
+
+/// Whether `url` is the app origin: `http://tauri.localhost` where WebView2 serves the app
+/// (`windows`), `tauri://localhost` elsewhere, and in neither case with a port. Tauri's own check of
+/// a local page leaves the port out, and `*.localhost` leads to the loopback interface, so a server
+/// of another process at `http://tauri.localhost:PORT` would otherwise be shown in a shell window,
+/// which hands its page the window's command token.
+pub(crate) fn has_app_origin(url: &tauri::Url, windows: bool) -> bool {
+    let (scheme, host) = if windows {
+        ("http", "tauri.localhost")
+    } else {
+        ("tauri", "localhost")
+    };
+    url.scheme() == scheme && url.host_str() == Some(host) && url.port().is_none()
 }
 
 fn main() {
@@ -564,12 +578,31 @@ mod tests {
 
     #[test]
     fn navigation_is_limited_to_embedded_origin() {
-        let ok = |s: &str| is_app_origin(&tauri::Url::parse(s).unwrap());
-        assert!(ok("http://tauri.localhost/index.html"));
-        assert!(ok("tauri://localhost/index.html"));
-        assert!(!ok("https://example.com/"));
-        assert!(!ok("http://127.0.0.1:8787/"));
-        assert!(!ok("file:///C:/Windows/win.ini"));
+        let ok = |s: &str, windows| has_app_origin(&tauri::Url::parse(s).unwrap(), windows);
+        assert!(ok("http://tauri.localhost/index.html", true));
+        assert!(ok("tauri://localhost/index.html", false));
+        // Each platform has its own origin: the other's is not served there.
+        assert!(!ok("tauri://localhost/index.html", true));
+        assert!(!ok("http://tauri.localhost/index.html", false));
+        // A port, another scheme or host, or a look-alike host is another origin.
+        for windows in [true, false] {
+            for other in [
+                "http://tauri.localhost:8787/index.html",
+                "https://tauri.localhost/index.html",
+                "tauri://localhost:8787/index.html",
+                "tauri://tauri.localhost/index.html",
+                "http://localhost/index.html",
+                "http://tauri.localhost.evil.test/index.html",
+                "http://tauri.localhost@127.0.0.1:8787/",
+                "https://example.com/",
+                "http://127.0.0.1:8787/",
+                "file:///C:/Windows/win.ini",
+            ] {
+                assert!(!ok(other, windows), "{other}");
+            }
+        }
+        let url = tauri::Url::parse("https://example.com/").unwrap();
+        assert!(!is_app_origin(&url));
     }
 
     #[test]

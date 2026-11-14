@@ -161,9 +161,9 @@ mod tests {
              frame-ancestors tauri://localhost"
         );
         // Both are origins the shell accepts for navigation, i.e. the ones its pages are served from.
-        for origin in [app_origin(true), app_origin(false)] {
-            let url = tauri::Url::parse(&format!("{origin}/index.html")).unwrap();
-            assert!(crate::is_app_origin(&url), "{origin}");
+        for windows in [true, false] {
+            let url = tauri::Url::parse(&format!("{}/index.html", app_origin(windows))).unwrap();
+            assert!(crate::has_app_origin(&url, windows), "{windows}");
         }
         assert_eq!(studio_csp_value("not an origin"), STUDIO_CSP);
     }
