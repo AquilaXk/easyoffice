@@ -367,20 +367,50 @@ impl SheetEngine {
         let mut acc = 1.0_f64;
         for arg in args {
             if let Some(spec) = self.extract_streaming_range_ctx(arg, ctx, depth)? {
-                for dr in 0..spec.3 {
-                    for dc in 0..spec.4 {
-                        let cell_val = self.eval_streaming_cell(&spec, dr, dc, ctx, depth)?;
-                        if let EvaluatedCellValue::Number(x) = cell_val {
-                            let t = x.trunc();
-                            if !t.is_finite() || !(0.0..=10_000.0).contains(&t) {
-                                return Err(FormulaError::Num);
-                            }
-                            let k = t as u64;
-                            total_n = total_n.checked_add(k).ok_or(FormulaError::Num)?;
-                            acc *= binom_f64(total_n, k)?;
-                            if !acc.is_finite() {
-                                return Err(FormulaError::Num);
-                            }
+                let (ref sheet_opt, min_r, min_c, rows, cols, transposed) = spec;
+                let total = rows.saturating_mul(cols);
+                let target_sheet = self.resolve_sheet_ref(sheet_opt.as_deref(), ctx);
+                let max_r = min_r + (rows as u32).saturating_sub(1);
+                let max_c = min_c + (cols as u32).saturating_sub(1);
+                let pop_count = target_sheet.map_or(total, |ts| {
+                    ts.cell_index().count_in_range(min_r, max_r, min_c, max_c)
+                });
+                let mut process = |cell_val: EvaluatedCellValue| -> Result<(), FormulaError> {
+                    if let EvaluatedCellValue::Number(x) = cell_val {
+                        let t = x.trunc();
+                        if !t.is_finite() || !(0.0..=10_000.0).contains(&t) {
+                            return Err(FormulaError::Num);
+                        }
+                        let k = t as u64;
+                        total_n = total_n.checked_add(k).ok_or(FormulaError::Num)?;
+                        acc *= binom_f64(total_n, k)?;
+                        if !acc.is_finite() {
+                            return Err(FormulaError::Num);
+                        }
+                    }
+                    Ok(())
+                };
+                if !transposed
+                    && (pop_count == 0 || (total > 64 && total > pop_count.saturating_mul(2)))
+                {
+                    if pop_count > 0 {
+                        for coord in target_sheet
+                            .unwrap()
+                            .cell_index()
+                            .range_coords(min_r, max_r, min_c, max_c)
+                        {
+                            process(self.eval_sheet_coord(
+                                sheet_opt.as_deref(),
+                                coord,
+                                ctx,
+                                depth,
+                            ))?;
+                        }
+                    }
+                } else {
+                    for dr in 0..rows {
+                        for dc in 0..cols {
+                            process(self.eval_streaming_cell(&spec, dr, dc, ctx, depth)?)?;
                         }
                     }
                 }
@@ -410,7 +440,7 @@ impl SheetEngine {
         let x = self.eval_arg_num(&args[0], ctx, depth)?;
         let n = self.eval_arg_num(&args[1], ctx, depth)?;
         let m = self.eval_arg_num(&args[2], ctx, depth)?;
-        let coeff_vals = if matches!(args[3], Expr::Range(_) | Expr::SheetRange { .. }) {
+        let coeff_vals = if matches!(args[3], Expr::Range(_) | Expr::SheetRange(_)) {
             self.eval_range_vec(&args[3], ctx, depth)?
         } else {
             vec![EvaluatedCellValue::Number(

@@ -94,9 +94,9 @@ fn collect_patches(
     match expr {
         Expr::Cell(_)
         | Expr::Range(_)
-        | Expr::SheetCell { .. }
-        | Expr::SheetRange { .. }
-        | Expr::SpillRef { .. } => {
+        | Expr::SheetCell(_)
+        | Expr::SheetRange(_)
+        | Expr::SpillRef(_) => {
             let Some(spec) = specs.get(*spec_idx).copied() else {
                 return false;
             };
@@ -138,8 +138,8 @@ fn collect_patches(
             path.pop();
             ok_r
         }
-        Expr::FuncCall { args, .. } => {
-            for (idx, arg) in args.iter().enumerate() {
+        Expr::FuncCall(f) => {
+            for (idx, arg) in f.args.iter().enumerate() {
                 path.push(ChildStep::Arg(idx));
                 let ok = collect_patches(arg, specs, spec_idx, path, patches);
                 path.pop();
@@ -149,14 +149,14 @@ fn collect_patches(
             }
             true
         }
-        Expr::Call { callee, args } => {
+        Expr::Call(c) => {
             path.push(ChildStep::Callee);
-            let ok_c = collect_patches(callee, specs, spec_idx, path, patches);
+            let ok_c = collect_patches(&c.callee, specs, spec_idx, path, patches);
             path.pop();
             if !ok_c {
                 return false;
             }
-            for (idx, arg) in args.iter().enumerate() {
+            for (idx, arg) in c.args.iter().enumerate() {
                 path.push(ChildStep::Arg(idx));
                 let ok = collect_patches(arg, specs, spec_idx, path, patches);
                 path.pop();
@@ -171,7 +171,7 @@ fn collect_patches(
         | Expr::Boolean(_)
         | Expr::ErrorLiteral(_)
         | Expr::Missing
-        | Expr::Name { .. }
+        | Expr::Name(_)
         | Expr::Var(_)
         | Expr::Array(_)
         | Expr::Shared(_) => true,
@@ -187,10 +187,9 @@ fn node_at_path_mut<'a>(mut expr: &'a mut Expr, path: &[ChildStep]) -> Option<&'
             ) => inner,
             (Expr::Binary { lhs, .. }, ChildStep::Left) => lhs,
             (Expr::Binary { rhs, .. }, ChildStep::Right) => rhs,
-            (Expr::FuncCall { args, .. } | Expr::Call { args, .. }, ChildStep::Arg(idx)) => {
-                args.get_mut(idx)?
-            }
-            (Expr::Call { callee, .. }, ChildStep::Callee) => callee,
+            (Expr::FuncCall(f), ChildStep::Arg(idx)) => f.args.get_mut(idx)?,
+            (Expr::Call(c), ChildStep::Arg(idx)) => c.args.get_mut(idx)?,
+            (Expr::Call(c), ChildStep::Callee) => &mut *c.callee,
             _ => return None,
         };
     }
@@ -200,15 +199,24 @@ fn node_at_path_mut<'a>(mut expr: &'a mut Expr, path: &[ChildStep]) -> Option<&'
 #[inline]
 fn apply_shift_ref(node: &mut Expr, shifted: ShiftedRef) -> bool {
     match (node, shifted) {
-        (
-            Expr::Cell(c) | Expr::SheetCell { coord: c, .. } | Expr::SpillRef { coord: c, .. },
-            ShiftedRef::Cell(new_c),
-        ) => {
+        (Expr::Cell(c), ShiftedRef::Cell(new_c)) => {
             *c = new_c;
             true
         }
-        (Expr::Range(r) | Expr::SheetRange { range: r, .. }, ShiftedRef::Range(new_r)) => {
+        (Expr::SheetCell(sc), ShiftedRef::Cell(new_c)) => {
+            sc.coord = new_c;
+            true
+        }
+        (Expr::SpillRef(sp), ShiftedRef::Cell(new_c)) => {
+            sp.coord = new_c;
+            true
+        }
+        (Expr::Range(r), ShiftedRef::Range(new_r)) => {
             *r = new_r;
+            true
+        }
+        (Expr::SheetRange(sr), ShiftedRef::Range(new_r)) => {
+            sr.range = new_r;
             true
         }
         _ => false,

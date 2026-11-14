@@ -28,10 +28,10 @@ pub(crate) fn is_formula(entry: Option<&Result<Expr, FormulaError>>) -> bool {
 
 pub(crate) fn expr_contains_subtotal(expr: &Expr) -> bool {
     match expr {
-        Expr::FuncCall { name, args } => {
-            name.eq_ignore_ascii_case("SUBTOTAL")
-                || name.eq_ignore_ascii_case("AGGREGATE")
-                || args.iter().any(expr_contains_subtotal)
+        Expr::FuncCall(f) => {
+            f.name.eq_ignore_ascii_case("SUBTOTAL")
+                || f.name.eq_ignore_ascii_case("AGGREGATE")
+                || f.args.iter().any(expr_contains_subtotal)
         }
         Expr::UnaryPlus(inner) | Expr::UnaryMinus(inner) | Expr::PostfixPercent(inner) => {
             expr_contains_subtotal(inner)
@@ -112,6 +112,22 @@ impl FormulaIndex {
             );
         }
     }
+
+    /// Count of formula cells inside the rectangle.
+    #[inline]
+    pub(crate) fn count_in_range(&self, min_r: u32, max_r: u32, min_c: u32, max_c: u32) -> usize {
+        let first = self.columns.partition_point(|(c, _)| *c < min_c);
+        let mut count = 0usize;
+        for (col, rows) in &self.columns[first..] {
+            if *col > max_c {
+                break;
+            }
+            let lo = rows.partition_point(|&r| r < min_r);
+            let hi = rows.partition_point(|&r| r <= max_r);
+            count += hi - lo;
+        }
+        count
+    }
 }
 
 /// Populated cells indexed by column (`FastMap<u32, Vec<u32>>` with sorted `row` indices per `col`)
@@ -120,6 +136,8 @@ impl FormulaIndex {
 pub(crate) struct CellIndex {
     pub(crate) by_col: FastMap<u32, Vec<u32>>,
     pub(crate) sorted_coords: Vec<PackedCellCoordinate>,
+    /// Column -> (row / 64) -> 64-row bitmask (bit `row % 64` is 1 if populated).
+    pub(crate) col_masks: FastMap<u32, std::collections::BTreeMap<u32, u64>>,
 }
 
 impl CellIndex {
@@ -132,18 +150,55 @@ impl CellIndex {
             .collect();
         sorted_coords.sort_unstable();
         let mut by_col: FastMap<u32, Vec<u32>> = FastMap::default();
+        let mut col_masks: FastMap<u32, std::collections::BTreeMap<u32, u64>> = FastMap::default();
         for &coord in &sorted_coords {
-            by_col.entry(coord.col()).or_default().push(coord.row());
+            let (r, c) = (coord.row(), coord.col());
+            by_col.entry(c).or_default().push(r);
+            *col_masks.entry(c).or_default().entry(r / 64).or_default() |= 1u64 << (r % 64);
         }
         Self {
             by_col,
             sorted_coords,
+            col_masks,
         }
     }
 
     /// Adds or removes one populated cell in both views of the index.
     pub(crate) fn set_populated(&mut self, coord: PackedCellCoordinate, present: bool) {
         let (col, row) = (coord.col(), coord.row());
+        let block_idx = row / 64;
+        let bit = 1u64 << (row % 64);
+
+        if present {
+            let mask_entry = self
+                .col_masks
+                .entry(col)
+                .or_default()
+                .entry(block_idx)
+                .or_default();
+            if (*mask_entry & bit) != 0 {
+                return;
+            }
+            *mask_entry |= bit;
+        } else if let Some(blocks) = self.col_masks.get_mut(&col) {
+            if let Some(word) = blocks.get_mut(&block_idx) {
+                if (*word & bit) == 0 {
+                    return;
+                }
+                *word &= !bit;
+                if *word == 0 {
+                    blocks.remove(&block_idx);
+                    if blocks.is_empty() {
+                        self.col_masks.remove(&col);
+                    }
+                }
+            } else {
+                return;
+            }
+        } else {
+            return;
+        }
+
         match (self.sorted_coords.binary_search(&coord), present) {
             (Err(pos), true) => {
                 self.sorted_coords.insert(pos, coord);
@@ -225,6 +280,58 @@ impl CellIndex {
         out
     }
 
+    /// Checks whether any populated cell or external spill cell exists inside `[min_r..=max_r, min_c..=max_c]`
+    /// excluding `anchor`, with zero heap allocations.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn has_spill_collision(
+        &self,
+        min_r: u32,
+        max_r: u32,
+        min_c: u32,
+        max_c: u32,
+        anchor: PackedCellCoordinate,
+        cells: &crate::memo::CellMap<String>,
+        spill_owner: &crate::memo::CellMap<PackedCellCoordinate>,
+    ) -> bool {
+        if min_r > max_r || min_c > max_c || self.sorted_coords.is_empty() {
+            return false;
+        }
+        let col_span = (max_c - min_c + 1) as usize;
+        let blocked = |coord: PackedCellCoordinate| {
+            coord != anchor
+                && (cells.contains_key(&coord)
+                    || spill_owner.get(&coord).is_some_and(|&o| o != anchor))
+        };
+        if col_span <= self.by_col.len().saturating_mul(4) {
+            for col in min_c..=max_c {
+                if let Some(rows) = self.by_col.get(&col) {
+                    let lo = rows.partition_point(|&r| r < min_r);
+                    let hi = rows.partition_point(|&r| r <= max_r);
+                    for &r in &rows[lo..hi] {
+                        let coord = PackedCellCoordinate((u64::from(r) << 32) | u64::from(col));
+                        if blocked(coord) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        } else {
+            for (&col, rows) in &self.by_col {
+                if (min_c..=max_c).contains(&col) {
+                    let lo = rows.partition_point(|&r| r < min_r);
+                    let hi = rows.partition_point(|&r| r <= max_r);
+                    for &r in &rows[lo..hi] {
+                        let coord = PackedCellCoordinate((u64::from(r) << 32) | u64::from(col));
+                        if blocked(coord) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
     /// Sorted populated row indices within `[min_r..=max_r]` in column `col`.
     pub(crate) fn col_rows_slice(&self, col: u32, min_r: u32, max_r: u32) -> &[u32] {
         if min_r > max_r {
@@ -255,6 +362,82 @@ impl CellIndex {
         &self.sorted_coords[lo..hi]
     }
 
+    /// Exact count of populated cells in column `col` inside `[min_r..=max_r]` using 64-row
+    /// word bitmasks in $O(B)$ time ($B \approx \text{populated blocks}$) via `count_ones`.
+    #[inline]
+    pub(crate) fn count_col_range(&self, col: u32, min_r: u32, max_r: u32) -> usize {
+        if min_r > max_r {
+            return 0;
+        }
+        let Some(blocks) = self.col_masks.get(&col) else {
+            return 0;
+        };
+        let start_blk = min_r / 64;
+        let end_blk = max_r / 64;
+        let mut count = 0usize;
+        for (&blk, &word) in blocks.range(start_blk..=end_blk) {
+            let mut active = word;
+            if blk == start_blk {
+                let mask = !((1u64 << (min_r % 64)) - 1);
+                active &= mask;
+            }
+            if blk == end_blk {
+                let end_mod = max_r % 64;
+                let mask = if end_mod == 63 {
+                    !0u64
+                } else {
+                    (1u64 << (end_mod + 1)) - 1
+                };
+                active &= mask;
+            }
+            count += active.count_ones() as usize;
+        }
+        count
+    }
+
+    /// Iterates populated rows in column `col` inside `[min_r..=max_r]` using bitmask
+    /// `(word & mask).trailing_zeros()` scans without vector allocation.
+    #[allow(dead_code)]
+    #[inline]
+    pub(crate) fn for_each_col_row(
+        &self,
+        col: u32,
+        min_r: u32,
+        max_r: u32,
+        mut f: impl FnMut(u32),
+    ) {
+        if min_r > max_r {
+            return;
+        }
+        let Some(blocks) = self.col_masks.get(&col) else {
+            return;
+        };
+        let start_blk = min_r / 64;
+        let end_blk = max_r / 64;
+        for (&blk, &word) in blocks.range(start_blk..=end_blk) {
+            let mut active = word;
+            if blk == start_blk {
+                let mask = !((1u64 << (min_r % 64)) - 1);
+                active &= mask;
+            }
+            if blk == end_blk {
+                let end_mod = max_r % 64;
+                let mask = if end_mod == 63 {
+                    !0u64
+                } else {
+                    (1u64 << (end_mod + 1)) - 1
+                };
+                active &= mask;
+            }
+            let base_row = blk * 64;
+            while active != 0 {
+                let tz = active.trailing_zeros();
+                f(base_row + tz);
+                active &= active - 1;
+            }
+        }
+    }
+
     /// Exact count of populated coordinates inside `[min_r..=max_r, min_c..=max_c]` without
     /// allocating a coordinate vector ($O(\log N)$ for single rows or single columns).
     pub(crate) fn count_in_range(&self, min_r: u32, max_r: u32, min_c: u32, max_c: u32) -> usize {
@@ -262,7 +445,7 @@ impl CellIndex {
             return 0;
         }
         if min_c == max_c {
-            return self.col_rows_slice(min_c, min_r, max_r).len();
+            return self.count_col_range(min_c, min_r, max_r);
         }
         if min_r == max_r {
             return self.row_coords_slice(min_r, min_c, max_c).len();
@@ -498,10 +681,9 @@ impl<'x> DepScanner<'x> {
                         walk.visit(slot, sid, *dep);
                     }
                 }
-                Expr::SheetCell {
-                    sheet: name,
-                    coord: dep,
-                } => {
+                Expr::SheetCell(sc) => {
+                    let name = &sc.sheet;
+                    let dep = &sc.coord;
                     if let Some(ds) = self.sheets.resolve(self.root, self.wb, name) {
                         let dep_sheet = self.sheets.get(ds);
                         if is_formula(dep_sheet.compiled_asts.get(dep)) {
@@ -509,30 +691,33 @@ impl<'x> DepScanner<'x> {
                         }
                     }
                 }
-                Expr::SpillRef { sheet: None, coord } => {
-                    if is_formula(sheet.compiled_asts.get(coord)) {
-                        walk.visit(slot, sid, *coord);
-                    }
-                }
-                Expr::SpillRef {
-                    sheet: Some(name),
-                    coord,
-                } => {
-                    if let Some(ds) = self.sheets.resolve(self.root, self.wb, name) {
-                        let dep_sheet = self.sheets.get(ds);
-                        if is_formula(dep_sheet.compiled_asts.get(coord)) {
-                            walk.visit(ds, dep_sheet.resolved_sheet_id(), *coord);
+                Expr::SpillRef(sp) => match &sp.sheet {
+                    None => {
+                        let coord = &sp.coord;
+                        if is_formula(sheet.compiled_asts.get(coord)) {
+                            walk.visit(slot, sid, *coord);
                         }
                     }
-                }
-                Expr::Call { callee, args } => {
-                    for a in args.iter().rev() {
+                    Some(name) => {
+                        let coord = &sp.coord;
+                        if let Some(ds) = self.sheets.resolve(self.root, self.wb, name) {
+                            let dep_sheet = self.sheets.get(ds);
+                            if is_formula(dep_sheet.compiled_asts.get(coord)) {
+                                walk.visit(ds, dep_sheet.resolved_sheet_id(), *coord);
+                            }
+                        }
+                    }
+                },
+                Expr::Call(c) => {
+                    for a in c.args.iter().rev() {
                         self.expr_stack.push(a);
                     }
-                    self.expr_stack.push(callee);
+                    self.expr_stack.push(&c.callee);
                 }
                 Expr::Range(range) => walk.range(sheet, slot, sid, *range, &mut self.scratch),
-                Expr::SheetRange { sheet: name, range } => {
+                Expr::SheetRange(sr) => {
+                    let name = &sr.sheet;
+                    let range = &sr.range;
                     if let Some(ds) = self.sheets.resolve(self.root, self.wb, name) {
                         let dep_sheet = self.sheets.get(ds);
                         let dep_sid = dep_sheet.resolved_sheet_id();
@@ -551,8 +736,8 @@ impl<'x> DepScanner<'x> {
                     self.expr_stack.push(rhs);
                     self.expr_stack.push(lhs);
                 }
-                Expr::FuncCall { args, .. } => {
-                    for a in args.iter().rev() {
+                Expr::FuncCall(f) => {
+                    for a in f.args.iter().rev() {
                         self.expr_stack.push(a);
                     }
                 }
@@ -560,7 +745,7 @@ impl<'x> DepScanner<'x> {
                 | Expr::Text(_)
                 | Expr::Boolean(_)
                 | Expr::ErrorLiteral(_)
-                | Expr::Name { .. }
+                | Expr::Name(_)
                 | Expr::Array(_)
                 | Expr::Var(_)
                 | Expr::Missing => {}
@@ -712,5 +897,22 @@ mod tests {
         want_f.sort_unstable();
         assert_eq!(got_f, want_f);
         assert_eq!(sheet.evaluate_cell("B1"), EvaluatedCellValue::Number(9.0));
+    }
+
+    #[test]
+    fn col_masks_and_word_scans() {
+        let mut sheet = SheetEngine::new("MaskS");
+        for r in [0, 5, 63, 64, 65, 127, 128, 500, 1000] {
+            let coord = PackedCellCoordinate::new(r, 0).unwrap();
+            sheet.set_coord_number(coord, r as f64);
+        }
+        let idx = sheet.cell_index();
+        assert_eq!(idx.count_col_range(0, 0, 1000), 9);
+        assert_eq!(idx.count_col_range(0, 1, 63), 2);
+        assert_eq!(idx.count_col_range(0, 64, 127), 3);
+
+        let mut scanned = Vec::new();
+        idx.for_each_col_row(0, 0, 1000, |r| scanned.push(r));
+        assert_eq!(scanned, vec![0, 5, 63, 64, 65, 127, 128, 500, 1000]);
     }
 }

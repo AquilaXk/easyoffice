@@ -119,6 +119,37 @@ fn in_runs(runs: &[(u32, u32)], at: u32) -> bool {
     runs.iter().any(|&(a, b)| (a..=b).contains(&at))
 }
 
+fn covered_in_runs(runs: &[(u32, u32)], lo: u32, hi: u32) -> u64 {
+    if lo > hi || runs.is_empty() {
+        return 0;
+    }
+    let mut intervals = Vec::with_capacity(runs.len());
+    for &(a, b) in runs {
+        let a_clamped = a.max(lo);
+        let b_clamped = b.min(hi);
+        if a_clamped <= b_clamped {
+            intervals.push((a_clamped, b_clamped));
+        }
+    }
+    if intervals.is_empty() {
+        return 0;
+    }
+    intervals.sort_unstable_by_key(|&(a, _)| a);
+    let mut total = 0u64;
+    let (mut cur_a, mut cur_b) = intervals[0];
+    for &(a, b) in &intervals[1..] {
+        if a <= cur_b.saturating_add(1) {
+            cur_b = cur_b.max(b);
+        } else {
+            total += u64::from(cur_b - cur_a + 1);
+            cur_a = a;
+            cur_b = b;
+        }
+    }
+    total += u64::from(cur_b - cur_a + 1);
+    total
+}
+
 impl SheetLock {
     /// Whether the cell may be changed.
     pub fn is_unlocked(&self, row: u32, col: u32) -> bool {
@@ -162,14 +193,83 @@ impl SheetLock {
         }
     }
 
-    /// Whether every cell of the rectangle may be changed.
+    /// Whether every cell of the rectangle may be changed in O(K log K) run-interval checks.
     fn covers(&self, (r0, c0, r1, c1): (u32, u32, u32, u32)) -> bool {
-        let whole_rows = (r0..=r1).all(|r| in_runs(&self.unlocked_rows, r));
-        let whole_cols = (c0..=c1).all(|c| in_runs(&self.unlocked_cols, c));
-        if self.locked_cells.is_empty() && (whole_rows || whole_cols) {
+        if r0 > r1 || c0 > c1 {
             return true;
         }
-        (r0..=r1).all(|r| (c0..=c1).all(|c| self.is_unlocked(r, c)))
+        // 1. Any explicitly locked cell inside the rectangle immediately violates full coverage.
+        if !self.locked_cells.is_empty() {
+            let hit_locked = self
+                .locked_cells
+                .iter()
+                .any(|&(lr, lc0, lc1)| (r0..=r1).contains(&lr) && lc0 <= c1 && c0 <= lc1);
+            if hit_locked {
+                return false;
+            }
+        }
+
+        let total_rows = u64::from(r1 - r0 + 1);
+        let covered_rows = covered_in_runs(&self.unlocked_rows, r0, r1);
+        let rem_rows = total_rows.saturating_sub(covered_rows);
+
+        let total_cols = u64::from(c1 - c0 + 1);
+        let covered_cols = covered_in_runs(&self.unlocked_cols, c0, c1);
+        let rem_cols = total_cols.saturating_sub(covered_cols);
+
+        if rem_rows == 0 || rem_cols == 0 {
+            return true;
+        }
+
+        let clipped_cols: Vec<(u32, u32)> = self
+            .unlocked_cols
+            .iter()
+            .filter_map(|&(a, b)| {
+                let lo = a.max(c0);
+                let hi = b.min(c1);
+                (lo <= hi).then_some((lo, hi))
+            })
+            .collect();
+
+        // Group unlocked_cells by row clipped to c0..=c1, merging with clipped_cols per row.
+        let from = self.unlocked_cells.partition_point(|&(r, _, _)| r < r0);
+        let mut checked_rows = 0u64;
+        let mut row_intervals: Vec<(u32, u32)> = Vec::new();
+        let mut cur_row: Option<u32> = None;
+
+        for &(r, c0_cell, c1_cell) in &self.unlocked_cells[from..] {
+            if r > r1 {
+                break;
+            }
+            if in_runs(&self.unlocked_rows, r) {
+                continue;
+            }
+            let overlap_c0 = c0_cell.max(c0);
+            let overlap_c1 = c1_cell.min(c1);
+            if overlap_c0 <= overlap_c1 {
+                if cur_row != Some(r) {
+                    if cur_row.is_some() {
+                        row_intervals.extend_from_slice(&clipped_cols);
+                        if covered_in_runs(&row_intervals, c0, c1) < total_cols {
+                            return false;
+                        }
+                        row_intervals.clear();
+                        checked_rows += 1;
+                    }
+                    cur_row = Some(r);
+                }
+                row_intervals.push((overlap_c0, overlap_c1));
+            }
+        }
+        if cur_row.is_some() {
+            row_intervals.extend_from_slice(&clipped_cols);
+            if covered_in_runs(&row_intervals, c0, c1) < total_cols {
+                return false;
+            }
+            checked_rows += 1;
+        }
+
+        checked_rows == rem_rows
     }
 }
 
@@ -241,6 +341,11 @@ impl SheetEngine {
             return first;
         }
         let children = grid.data.len() - 1;
+        let candidate_cost = children.min(budget).max(1);
+        ctx.steps = ctx.steps.saturating_add(children.min(1024));
+        if ctx.expired() {
+            return V::Error(FormulaError::Spill);
+        }
         let fits = rect_end(anchor, rows, cols).is_some() && children <= budget;
         let free = fits && self.area_is_free(anchor, rows, cols, sheet_id, ctx);
         let area = Area {
@@ -249,6 +354,7 @@ impl SheetEngine {
             blocked: !free,
         };
         if !free {
+            ctx.spill_budget = Some(budget.saturating_sub(candidate_cost));
             ctx.pending.push(Pending {
                 sheet_id,
                 anchor,
@@ -258,16 +364,15 @@ impl SheetEngine {
             return V::Error(FormulaError::Spill);
         }
         ctx.spill_budget = Some(budget - children);
-        for dr in 0..rows {
-            for dc in 0..cols {
-                if dr + dc > 0 {
-                    ctx.claims.insert(
-                        PackedWorkbookCoord::new(sheet_id, at(anchor, dr, dc)).0,
-                        anchor,
-                    );
-                }
-            }
-        }
+        let (last_row, last_col) = rect_end(anchor, rows, cols).unwrap();
+        ctx.claims.push(crate::eval_context::ClaimedSpillRect {
+            sheet_id,
+            r0: anchor.row(),
+            c0: anchor.col(),
+            r1: last_row,
+            c1: last_col,
+            owner: anchor,
+        });
         ctx.fresh.insert(
             PackedWorkbookCoord::new(sheet_id, anchor).0,
             Arc::clone(&grid),
@@ -312,30 +417,30 @@ impl SheetEngine {
                 return false;
             }
         }
-        let blocked_by = |cell: PackedCellCoordinate| {
-            self.cells.contains_key(&cell)
-                || self.spill.owner.get(&cell).is_some_and(|&o| o != anchor)
-        };
-        if self
-            .cell_index()
-            .range_coords(anchor.row(), last_row, anchor.col(), last_col)
-            .into_iter()
-            .any(|cell| cell != anchor && blocked_by(cell))
-        {
+        if self.cell_index().has_spill_collision(
+            anchor.row(),
+            last_row,
+            anchor.col(),
+            last_col,
+            anchor,
+            &self.cells,
+            &self.spill.owner,
+        ) {
             return false;
         }
         if ctx.claims.is_empty() {
             return true;
         }
-        for dr in 0..rows {
-            for dc in 0..cols {
-                let key = PackedWorkbookCoord::new(sheet_id, at(anchor, dr, dc)).0;
-                if ctx.claims.get(&key).is_some_and(|&o| o != anchor) {
-                    return false;
-                }
-            }
-        }
-        true
+        !ctx.claims.iter().any(|c| {
+            c.overlaps(
+                sheet_id,
+                anchor.row(),
+                anchor.col(),
+                last_row,
+                last_col,
+                anchor,
+            )
+        })
     }
 }
 
@@ -556,5 +661,40 @@ impl SheetEngine {
             Some(anchor) => self.place_array(anchor, grid, ctx),
             None => grid.top_left(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sheet_lock_covers_large_ranges_instantly() {
+        let lock = SheetLock {
+            unlocked_cells: vec![(10, 0, 100), (10, 50, 150)], // overlapping
+            locked_cells: vec![],
+            unlocked_rows: vec![(0, 1_048_575)],
+            unlocked_cols: vec![],
+        };
+        // Covered by whole rows run: instant
+        assert!(lock.covers((0, 0, 1_048_575, 100)));
+
+        let lock2 = SheetLock {
+            unlocked_cells: vec![(10, 0, 100), (10, 50, 150)],
+            locked_cells: vec![],
+            unlocked_rows: vec![(0, 5), (7, 10)],
+            unlocked_cols: vec![(0, 16_383)],
+        };
+        // Covered by whole cols run: instant
+        assert!(lock2.covers((0, 0, 1_048_575, 16_383)));
+
+        let lock3 = SheetLock {
+            unlocked_cells: vec![(6, 0, 100)],
+            locked_cells: vec![],
+            unlocked_rows: vec![(0, 5), (7, 10)],
+            unlocked_cols: vec![],
+        };
+        // Row 6 not covered outside col 0..100
+        assert!(!lock3.covers((0, 0, 10, 200)));
     }
 }

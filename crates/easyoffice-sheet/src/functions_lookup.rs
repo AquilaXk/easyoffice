@@ -546,10 +546,7 @@ impl SheetEngine {
         ctx: &mut EvalContext<'_>,
         depth: usize,
     ) -> CellResult {
-        let expr = Expr::FuncCall {
-            name: name.to_string(),
-            args: args.to_vec(),
-        };
+        let expr = Expr::func_call(name.to_string(), args.to_vec());
         let Some((sheet_opt, range, _)) = self.extract_range_and_sheet_ctx(&expr, ctx, depth)?
         else {
             return Err(FormulaError::Value);

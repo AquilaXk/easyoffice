@@ -1,13 +1,14 @@
 use crate::names::{name_key, NameKey};
 use crate::table_index::{implicit_key, TableCtx};
 use crate::{CellRange, FormulaError, PackedCellCoordinate};
-use std::sync::Arc;
+
+use std::borrow::Cow;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum Token {
+pub(crate) enum Token<'a> {
     Number(f64),
-    Text(String),
-    Ident(String),
+    Text(Cow<'a, str>),
+    Ident(Cow<'a, str>),
     ErrorLiteral(FormulaError),
     Plus,
     Minus,
@@ -33,108 +34,12 @@ pub(crate) enum Token {
     Semicolon,
     /// The bracket group of a structured reference (`[Q1]`, `[[#This Row],[Q1]]`, `[@Q1]`), the table's
     /// name before it (if any) being the identifier token in front.
-    Structured(String),
+    Structured(Cow<'a, str>),
     /// The spill range operator after a reference (`A1#`).
     Hash,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum Expr {
-    Number(f64),
-    Text(String),
-    Boolean(bool),
-    ErrorLiteral(FormulaError),
-    Missing,
-    Cell(PackedCellCoordinate),
-    Range(CellRange),
-    SheetCell {
-        sheet: String,
-        coord: PackedCellCoordinate,
-    },
-    SheetRange {
-        sheet: String,
-        range: CellRange,
-    },
-    /// A defined name (PD-214), optionally written with its sheet (`Sheet1!Rate`). A formula compiled
-    /// in a workbook has these replaced by the definitions; one that is still here reads `#NAME?`.
-    Name {
-        scope: Option<String>,
-        name: String,
-    },
-    /// An expanded definition of a defined name that many formulas use, shared instead of copied (PD-214). It stands
-    /// only where a value is read (an operand, a whole formula): a function's arguments get their own copy of the
-    /// top layer, so the functions that look at the shape of an argument see references and calls as written.
-    Shared(Arc<SharedExpr>),
-    UnaryPlus(Box<Expr>),
-    UnaryMinus(Box<Expr>),
-    PostfixPercent(Box<Expr>),
-    Binary {
-        op: BinaryOp,
-        lhs: Box<Expr>,
-        rhs: Box<Expr>,
-    },
-    FuncCall {
-        name: String,
-        args: Vec<Expr>,
-    },
-    /// An array constant (`{1,2;3,4}`).
-    Array(Arc<ArrayLit>),
-    /// A variable of `LET` or a parameter of `LAMBDA` (upper case); it reads `#NAME?` outside them.
-    Var(String),
-    /// The spill range of the formula at a cell (`A1#`, `Sheet1!A1#`).
-    SpillRef {
-        sheet: Option<String>,
-        coord: PackedCellCoordinate,
-    },
-    /// A call of a `LAMBDA` value: `LAMBDA(x, x+1)(2)`, a variable that holds one, or a defined name.
-    Call {
-        callee: Box<Expr>,
-        args: Vec<Expr>,
-    },
-}
-
-/// The values of an array constant, row by row.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ArrayLit {
-    pub rows: usize,
-    pub cols: usize,
-    pub data: Vec<crate::EvaluatedCellValue>,
-}
-
-/// A syntax tree that formulas share, with the number of nodes it stands for.
-#[derive(Debug, Clone, PartialEq)]
-pub struct SharedExpr {
-    pub expr: Expr,
-    /// Nodes of the tree with every shared tree inside it counted in full (what evaluating it takes).
-    pub nodes: usize,
-}
-
-impl Expr {
-    /// The expression itself, looking through [`Expr::Shared`].
-    pub fn peeled(&self) -> &Expr {
-        let mut cur = self;
-        while let Expr::Shared(shared) = cur {
-            cur = &shared.expr;
-        }
-        cur
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BinaryOp {
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Pow,
-    Concat,
-    Eq,
-    Ne,
-    Lt,
-    Le,
-    Gt,
-    Ge,
-}
+pub use crate::expr::*;
 
 pub const MAX_FORMULA_LEN: usize = 8_192;
 pub const MAX_TOKENS: usize = 8_192;
@@ -463,7 +368,7 @@ fn range_ref_spec(start_raw: &str, end_raw: &str) -> RefSpec {
 pub(crate) use crate::lexer::tokenize_formula;
 
 pub(crate) struct Parser<'a> {
-    pub(crate) tokens: Vec<Token>,
+    pub(crate) tokens: Vec<Token<'a>>,
     pub(crate) pos: usize,
     /// A defined name was read (see [`Expr::Name`]).
     pub(crate) saw_name: bool,
@@ -478,7 +383,7 @@ pub(crate) struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
-    pub(crate) fn new(tokens: Vec<Token>, tables: Option<&'a TableCtx<'a>>) -> Self {
+    pub(crate) fn new(tokens: Vec<Token<'a>>, tables: Option<&'a TableCtx<'a>>) -> Self {
         Self {
             tokens,
             pos: 0,
@@ -515,20 +420,20 @@ impl<'a> Parser<'a> {
             resolved,
             Expr::Cell(_)
                 | Expr::Range(_)
-                | Expr::SheetCell { .. }
-                | Expr::SheetRange { .. }
-                | Expr::SpillRef { .. }
+                | Expr::SheetCell(_)
+                | Expr::SheetRange(_)
+                | Expr::SpillRef(_)
         ) {
             self.record_ref(RefSpec::Fixed);
         }
         Ok(resolved)
     }
 
-    pub(crate) fn peek(&self) -> Option<&Token> {
+    pub(crate) fn peek(&self) -> Option<&Token<'a>> {
         self.tokens.get(self.pos)
     }
 
-    fn next(&mut self) -> Option<Token> {
+    fn next(&mut self) -> Option<Token<'a>> {
         if self.pos < self.tokens.len() {
             let tok = std::mem::replace(&mut self.tokens[self.pos], Token::Comma);
             self.pos += 1;
@@ -653,15 +558,12 @@ impl<'a> Parser<'a> {
         let mut expr = self.parse_primary(depth)?;
         // `LAMBDA(x, x+1)(2)`: a function call result that is called again.
         while matches!(self.peek(), Some(Token::LParen))
-            && (matches!(&expr, Expr::FuncCall { name, .. } if name == "LAMBDA")
-                || matches!(&expr, Expr::Call { .. }))
+            && (matches!(&expr, Expr::FuncCall(f) if f.name == "LAMBDA")
+                || matches!(&expr, Expr::Call(_)))
         {
             self.next();
             let args = self.parse_call_args(depth)?;
-            expr = Expr::Call {
-                callee: Box::new(expr),
-                args,
-            };
+            expr = Expr::call(Box::new(expr), args);
         }
         let mut pct_depth = depth;
         while matches!(self.peek(), Some(Token::Percent)) {
@@ -677,7 +579,7 @@ impl<'a> Parser<'a> {
 
     fn next_range_endpoint_string(&mut self) -> Option<String> {
         match self.next() {
-            Some(Token::Ident(s)) => Some(s),
+            Some(Token::Ident(s)) => Some(s.into_owned()),
             Some(Token::Number(n)) if n.fract() == 0.0 && n >= 1.0 => Some(format!("{}", n as u64)),
             _ => None,
         }
@@ -689,7 +591,7 @@ impl<'a> Parser<'a> {
         }
         match self.next() {
             Some(Token::Number(n)) => self.parse_number_primary(n),
-            Some(Token::Text(s)) => Ok(Expr::Text(s)),
+            Some(Token::Text(s)) => Ok(Expr::Text(s.into_owned())),
             Some(Token::ErrorLiteral(e)) => Ok(Expr::ErrorLiteral(e)),
             Some(Token::LParen) => {
                 let inner = self.parse_expression(depth + 1)?;
@@ -737,10 +639,14 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_ident_primary(&mut self, name: String, depth: usize) -> Result<Expr, FormulaError> {
+    fn parse_ident_primary(
+        &mut self,
+        name: Cow<'a, str>,
+        depth: usize,
+    ) -> Result<Expr, FormulaError> {
         if matches!(self.peek(), Some(Token::Bang)) {
             self.next();
-            return self.parse_sheet_reference(name);
+            return self.parse_sheet_reference(name.into_owned());
         }
         if let Some(Token::Structured(group)) = self.peek() {
             let group = group.clone();
@@ -764,16 +670,10 @@ impl<'a> Parser<'a> {
             self.saw_name |= !crate::names::is_function(&canonical);
             if canonical == "ANCHORARRAY" {
                 if let [Expr::Cell(coord)] = args.as_slice() {
-                    return Ok(Expr::SpillRef {
-                        sheet: None,
-                        coord: *coord,
-                    });
+                    return Ok(Expr::spill_ref(None, *coord));
                 }
             }
-            return Ok(Expr::FuncCall {
-                name: canonical,
-                args,
-            });
+            return Ok(Expr::func_call(canonical, args));
         }
         if name.eq_ignore_ascii_case("TRUE") {
             return Ok(Expr::Boolean(true));
@@ -790,10 +690,7 @@ impl<'a> Parser<'a> {
                 if self.ref_specs.is_some() {
                     self.record_ref(RefSpec::Cell(cell_endpoint_spec(&name, sc)));
                 }
-                Ok(Expr::SpillRef {
-                    sheet: None,
-                    coord: sc,
-                })
+                Ok(Expr::spill_ref(None, sc))
             }
             Ok(sc) => {
                 if self.ref_specs.is_some() {
@@ -801,7 +698,7 @@ impl<'a> Parser<'a> {
                 }
                 Ok(Expr::Cell(sc))
             }
-            Err(_) => Ok(self.name_or_error(None, name)),
+            Err(_) => Ok(self.name_or_error(None, name.into_owned())),
         }
     }
 
@@ -812,11 +709,11 @@ impl<'a> Parser<'a> {
         match classify_failed_a1_token(&name) {
             _ if loose && scope.is_none() => {
                 self.saw_name = true;
-                Expr::Name { scope, name }
+                Expr::name(scope, name)
             }
             FormulaError::Name if easyoffice_formats::defined_name_problem(&name).is_none() => {
                 self.saw_name = true;
-                Expr::Name { scope, name }
+                Expr::name(scope, name)
             }
             error => Expr::ErrorLiteral(error),
         }
@@ -850,7 +747,7 @@ impl<'a> Parser<'a> {
                         let spec = range_ref_spec(&cell_ident, &end_ident);
                         self.record_ref(spec);
                     }
-                    Ok(Expr::SheetRange { sheet: name, range })
+                    Ok(Expr::sheet_range(name, range))
                 }
                 Err(_) => Ok(Expr::ErrorLiteral(FormulaError::Ref)),
             };
@@ -860,19 +757,16 @@ impl<'a> Parser<'a> {
                 if self.ref_specs.is_some() {
                     self.record_ref(RefSpec::Cell(cell_endpoint_spec(&cell_ident, coord)));
                 }
-                Ok(Expr::SpillRef {
-                    sheet: Some(name),
-                    coord,
-                })
+                Ok(Expr::spill_ref(Some(name), coord))
             }
             Ok(coord) => {
                 if self.ref_specs.is_some() {
                     self.record_ref(RefSpec::Cell(cell_endpoint_spec(&cell_ident, coord)));
                 }
-                Ok(Expr::SheetCell { sheet: name, coord })
+                Ok(Expr::sheet_cell(name, coord))
             }
             Err(_) => match self.name_or_error(Some(name), cell_ident) {
-                named @ Expr::Name { .. } => Ok(named),
+                named @ Expr::Name(_) => Ok(named),
                 _ => Ok(Expr::ErrorLiteral(FormulaError::Ref)),
             },
         }
@@ -953,7 +847,15 @@ fn parse_formula_inner(
     tables: Option<&TableCtx<'_>>,
     capture_refs: bool,
 ) -> Result<(Parsed, Vec<RefSpec>), FormulaError> {
-    let tokens = tokenize_formula(expr_src)?;
+    if expr_src.len() > MAX_FORMULA_LEN {
+        return Err(FormulaError::Value);
+    }
+    let normalized = normalize_open_formula_body(expr_src);
+    let src: &str = normalized.as_ref();
+    if src.len() > MAX_FORMULA_LEN {
+        return Err(FormulaError::Value);
+    }
+    let tokens = tokenize_formula(src)?;
     let mut parser = Parser::new(tokens, tables);
     if capture_refs {
         parser.ref_specs = Some(Vec::new());
@@ -986,7 +888,7 @@ pub fn compile_formula_expr(expr_src: &str) -> Result<Expr, FormulaError> {
     let (mut expr, saw_name) = parse_formula(expr_src)?;
     if saw_name {
         crate::names::walk_mut(&mut expr, |node, _| {
-            if matches!(node, Expr::Name { .. }) {
+            if matches!(node, Expr::Name(_)) {
                 *node = Expr::ErrorLiteral(FormulaError::Name);
             }
             true

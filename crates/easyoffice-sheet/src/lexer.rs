@@ -1,11 +1,12 @@
 //! Lexing a formula body into tokens (see [`crate::parser`]).
 
-use crate::parser::{normalize_open_formula_body, Token, MAX_FORMULA_LEN, MAX_TOKENS};
+use crate::parser::{Token, MAX_FORMULA_LEN, MAX_TOKENS};
 use crate::FormulaError;
+use std::borrow::Cow;
 
 /// Token for operators and punctuation that are always a single byte.
 #[inline]
-fn single_byte_token(b: u8) -> Option<Token> {
+fn single_byte_token(b: u8) -> Option<Token<'static>> {
     Some(match b {
         b'+' => Token::Plus,
         b'-' => Token::Minus,
@@ -25,7 +26,7 @@ fn single_byte_token(b: u8) -> Option<Token> {
 }
 
 /// Lexes `<`, `<>`, `<=`, `>` or `>=` at `i`; returns the token and its byte length.
-fn lex_comparison(bytes: &[u8], i: usize) -> (Token, usize) {
+fn lex_comparison(bytes: &[u8], i: usize) -> (Token<'static>, usize) {
     let next = bytes.get(i + 1).copied();
     match (bytes[i], next) {
         (b'<', Some(b'>')) => (Token::Ne, 2),
@@ -38,23 +39,49 @@ fn lex_comparison(bytes: &[u8], i: usize) -> (Token, usize) {
 
 /// Lexes a quoted run starting at the opening `quote` at `i` (doubled quotes escape);
 /// returns the content and the index after the closing quote.
-fn lex_quoted(src: &str, i: usize, quote: u8) -> Result<(String, usize), FormulaError> {
+/// If no doubled quotes are present, borrows the slice with zero heap allocations.
+fn lex_quoted<'a>(
+    src: &'a str,
+    i: usize,
+    quote: u8,
+) -> Result<(Cow<'a, str>, usize), FormulaError> {
     let bytes = src.as_bytes();
-    let mut i = i + 1;
-    let mut text = String::new();
-    while i < bytes.len() {
-        let Some(rel) = bytes[i..].iter().position(|&b| b == quote) else {
+    let mut cur = i + 1;
+    let mut has_escapes = false;
+    let content_start = cur;
+
+    while cur < bytes.len() {
+        let Some(rel) = bytes[cur..].iter().position(|&b| b == quote) else {
             return Err(FormulaError::Value);
         };
-        if rel > 0 {
-            text.push_str(&src[i..i + rel]);
-            i += rel;
-        }
-        if bytes.get(i + 1) == Some(&quote) {
-            text.push(quote as char);
-            i += 2;
+        cur += rel;
+        if bytes.get(cur + 1) == Some(&quote) {
+            has_escapes = true;
+            cur += 2;
         } else {
-            return Ok((text, i + 1));
+            let content_end = cur;
+            let next_idx = cur + 1;
+            if !has_escapes {
+                return Ok((Cow::Borrowed(&src[content_start..content_end]), next_idx));
+            } else {
+                let mut text = String::with_capacity(content_end - content_start);
+                let mut p = content_start;
+                while p < content_end {
+                    let rel = bytes[p..content_end]
+                        .iter()
+                        .position(|&b| b == quote)
+                        .unwrap_or(content_end - p);
+                    if rel > 0 {
+                        text.push_str(&src[p..p + rel]);
+                        p += rel;
+                    }
+                    if p < content_end && bytes[p] == quote && bytes.get(p + 1) == Some(&quote) {
+                        text.push(quote as char);
+                        p += 2;
+                    }
+                }
+                return Ok((Cow::Owned(text), next_idx));
+            }
         }
     }
     Err(FormulaError::Value)
@@ -82,7 +109,7 @@ fn is_error_literal_stop(b: u8) -> bool {
 }
 
 /// Lexes a `#...` error literal at `start`; returns the token and the next index.
-fn lex_error_literal(src: &str, start: usize) -> Result<(Token, usize), FormulaError> {
+fn lex_error_literal(src: &str, start: usize) -> Result<(Token<'static>, usize), FormulaError> {
     let bytes = src.as_bytes();
     let rest = &src[start..];
     if rest.len() >= 4
@@ -127,7 +154,7 @@ fn skip_digits(bytes: &[u8], mut i: usize) -> usize {
 }
 
 /// Lexes a numeric literal (digits, dots and an optional exponent) at `start`.
-fn lex_number(src: &str, start: usize) -> Result<(Token, usize), FormulaError> {
+fn lex_number(src: &str, start: usize) -> Result<(Token<'static>, usize), FormulaError> {
     let bytes = src.as_bytes();
     let mut i = start;
     while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == b'.') {
@@ -149,8 +176,8 @@ fn lex_number(src: &str, start: usize) -> Result<(Token, usize), FormulaError> {
     Ok((Token::Number(val), i))
 }
 
-/// Lexes an identifier that starts with an ASCII letter, `$` or `_`.
-fn lex_ascii_ident(src: &str, start: usize) -> Result<(Token, usize), FormulaError> {
+/// Lexes an identifier that starts with an ASCII letter, `$` or `_` without heap allocation.
+fn lex_ascii_ident<'a>(src: &'a str, start: usize) -> Result<(Token<'a>, usize), FormulaError> {
     let bytes = src.as_bytes();
     let mut i = start;
     while i < bytes.len() {
@@ -168,11 +195,15 @@ fn lex_ascii_ident(src: &str, start: usize) -> Result<(Token, usize), FormulaErr
         }
         i += ch.len_utf8();
     }
-    Ok((Token::Ident(src[start..i].to_string()), i))
+    Ok((Token::Ident(Cow::Borrowed(&src[start..i])), i))
 }
 
-/// Handles a non-ASCII start byte: skips Unicode whitespace or lexes a Unicode identifier.
-fn lex_other(src: &str, start: usize, tokens: &mut Vec<Token>) -> Result<usize, FormulaError> {
+/// Handles a non-ASCII start byte: skips Unicode whitespace or lexes a Unicode identifier without heap allocation.
+fn lex_other<'a>(
+    src: &'a str,
+    start: usize,
+    tokens: &mut Vec<Token<'a>>,
+) -> Result<usize, FormulaError> {
     let ch = src[start..].chars().next().ok_or(FormulaError::Value)?;
     if ch.is_whitespace() {
         return Ok(start + ch.len_utf8());
@@ -188,12 +219,16 @@ fn lex_other(src: &str, start: usize, tokens: &mut Vec<Token>) -> Result<usize, 
         }
         i += c.len_utf8();
     }
-    tokens.push(Token::Ident(src[start..i].to_string()));
+    tokens.push(Token::Ident(Cow::Borrowed(&src[start..i])));
     Ok(i)
 }
 
 /// Lexes the token starting at non-whitespace byte `i`; returns the next index.
-fn lex_token(src: &str, i: usize, tokens: &mut Vec<Token>) -> Result<usize, FormulaError> {
+fn lex_token<'a>(
+    src: &'a str,
+    i: usize,
+    tokens: &mut Vec<Token<'a>>,
+) -> Result<usize, FormulaError> {
     let bytes = src.as_bytes();
     let b = bytes[i];
     if let Some(tok) = single_byte_token(b) {
@@ -222,12 +257,7 @@ fn lex_token(src: &str, i: usize, tokens: &mut Vec<Token>) -> Result<usize, Form
     Ok(next)
 }
 
-pub(crate) fn tokenize_formula(raw_src: &str) -> Result<Vec<Token>, FormulaError> {
-    if raw_src.len() > MAX_FORMULA_LEN {
-        return Err(FormulaError::Value);
-    }
-    let normalized = normalize_open_formula_body(raw_src);
-    let src: &str = normalized.as_ref();
+pub(crate) fn tokenize_formula<'a>(src: &'a str) -> Result<Vec<Token<'a>>, FormulaError> {
     if src.len() > MAX_FORMULA_LEN {
         return Err(FormulaError::Value);
     }
@@ -248,7 +278,7 @@ pub(crate) fn tokenize_formula(raw_src: &str) -> Result<Vec<Token>, FormulaError
         if b == b'[' {
             // The group of a structured reference (the ODF references were rewritten before).
             let end = easyoffice_formats::group_end(src, i).ok_or(FormulaError::Value)?;
-            tokens.push(Token::Structured(src[i..end].to_string()));
+            tokens.push(Token::Structured(Cow::Borrowed(&src[i..end])));
             i = end;
             continue;
         }

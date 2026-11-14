@@ -128,3 +128,21 @@ fn sort_keeps_absolute_row_references_and_moves_relative_ones() {
         EvaluatedCellValue::Number(20.0)
     );
 }
+
+#[test]
+fn sort_sparse_huge_range_avoids_preallocation_bomb() {
+    let mut s = SheetEngine::new("Sheet1");
+    s.set_cell("A1", "30").unwrap();
+    s.set_cell("A2", "10").unwrap();
+    s.set_cell("A3", "20").unwrap();
+    // Sort all rows in max spreadsheet range 0..=1_048_575
+    let start = std::time::Instant::now();
+    s.sort_rows(0, 1_048_575, &[SortKey::asc(0)], false)
+        .unwrap();
+    let elapsed = start.elapsed();
+    assert!(elapsed.as_millis() < 500, "took too long: {:?}", elapsed);
+
+    assert_eq!(s.evaluate_cell("A1").to_display_string(), "10");
+    assert_eq!(s.evaluate_cell("A2").to_display_string(), "20");
+    assert_eq!(s.evaluate_cell("A3").to_display_string(), "30");
+}

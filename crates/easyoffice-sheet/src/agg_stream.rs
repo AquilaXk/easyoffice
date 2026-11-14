@@ -194,24 +194,22 @@ impl SheetEngine {
             let arg = arg.peeled();
             match arg {
                 Expr::Range(range) => fold = self.agg_range(fold, range, ctx, depth)?,
-                Expr::SheetRange { sheet, range } => {
-                    fold = self.agg_sheet_range(fold, sheet, range, ctx, depth)?;
+                Expr::SheetRange(sr) => {
+                    fold = self.agg_sheet_range(fold, &sr.sheet, &sr.range, ctx, depth)?;
                 }
-                Expr::Cell(_) | Expr::SheetCell { .. } => {
+                Expr::Cell(_) | Expr::SheetCell(_) => {
                     let v = self.eval_expr_ctx(arg, ctx, depth);
                     fold.fold(&v, 0, true)?;
                 }
-                Expr::FuncCall { name: fn_name, .. }
-                    if crate::functions_matrix::is_array_fn(fn_name) =>
-                {
+                Expr::FuncCall(f) if crate::functions_matrix::is_array_fn(&f.name) => {
                     if let Some(m) = self.matrix_expr(arg, ctx, depth)? {
                         for idx in 0..m.data.len() {
                             fold.fold(&m.value_at(idx), idx, true)?;
                         }
                     }
                 }
-                Expr::FuncCall { name: fn_name, .. }
-                    if matches!(fn_name.as_str(), "INDIRECT" | "OFFSET" | "TRANSPOSE") =>
+                Expr::FuncCall(f)
+                    if matches!(f.name.as_str(), "INDIRECT" | "OFFSET" | "TRANSPOSE") =>
                 {
                     fold = self.agg_reference_func(fold, arg, ctx, depth)?;
                 }

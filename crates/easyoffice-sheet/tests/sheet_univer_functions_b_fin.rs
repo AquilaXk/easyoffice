@@ -3144,3 +3144,47 @@ fn yieldmat_matches_the_reference_cases() {
     let failures = run(YIELDMAT);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+#[test]
+fn cumipmt_cumprinc_closed_form_matches_loop_and_resists_dos() {
+    let s = SheetEngine::new("S");
+    let test_params = [
+        (0.05, 360.0, 100_000.0, 1, 12, 0.0),
+        (0.05, 360.0, 100_000.0, 1, 12, 1.0),
+        (0.08, 120.0, 50_000.0, 13, 24, 0.0),
+        (0.08, 120.0, 50_000.0, 1, 1, 1.0),
+        (0.001, 60.0, 10_000.0, 5, 20, 0.0),
+        (1e-5, 360.0, 200_000.0, 1, 100, 0.0),
+    ];
+    for (rate, nper, pv, start_p, end_p, t) in test_params {
+        let f_ipmt = format!("=CUMIPMT({rate},{nper},{pv},{start_p},{end_p},{t})");
+        let f_princ = format!("=CUMPRINC({rate},{nper},{pv},{start_p},{end_p},{t})");
+        let res_ipmt = s.evaluate_formula_str(&f_ipmt);
+        let res_princ = s.evaluate_formula_str(&f_princ);
+        assert!(
+            matches!(res_ipmt, V::Number(_)),
+            "failed for {f_ipmt}: {res_ipmt:?}"
+        );
+        assert!(
+            matches!(res_princ, V::Number(_)),
+            "failed for {f_princ}: {res_princ:?}"
+        );
+    }
+    let start_t = std::time::Instant::now();
+    let dos_res = s.evaluate_formula_str("=CUMIPMT(0.05, 1000000000, 10000, 1, 1000000000, 0)");
+    assert!(
+        start_t.elapsed().as_millis() < 500,
+        "CUMIPMT 1e9 took too long: {:?}",
+        start_t.elapsed()
+    );
+    assert!(matches!(dos_res, V::Number(_) | V::Error(E::Num)));
+
+    let start_t2 = std::time::Instant::now();
+    let dos_res2 = s.evaluate_formula_str("=CUMIPMT(1e-13, 1e18, 1000, 1, 1e18, 0)");
+    assert!(
+        start_t2.elapsed().as_millis() < 500,
+        "CUMIPMT 1e18 took too long: {:?}",
+        start_t2.elapsed()
+    );
+    assert!(matches!(dos_res2, V::Error(E::Num)));
+}

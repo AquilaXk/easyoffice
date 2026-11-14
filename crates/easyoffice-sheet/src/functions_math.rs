@@ -557,25 +557,48 @@ impl SheetEngine {
                 } else {
                     let m = n + k - 1;
                     let c = k.min(m - k);
-                    (1..=c)
-                        .fold(1.0f64, |acc, i| acc * ((m - c + i) as f64) / (i as f64))
-                        .round()
+                    if c >= 515 {
+                        return Err(FormulaError::Num);
+                    }
+                    let mut acc = 1.0f64;
+                    for i in 1..=c {
+                        acc = acc * ((m - c + i) as f64) / (i as f64);
+                        if !acc.is_finite() {
+                            return Err(FormulaError::Num);
+                        }
+                    }
+                    acc.round()
                 }
             }
             "PERMUT" => {
-                if k > n {
+                if k > n || k > 170 {
                     return Err(FormulaError::Num);
                 }
-                ((n - k + 1)..=n).fold(1.0f64, |acc, i| acc * i as f64)
+                let mut acc = 1.0f64;
+                for i in (n - k + 1)..=n {
+                    acc *= i as f64;
+                    if !acc.is_finite() {
+                        return Err(FormulaError::Num);
+                    }
+                }
+                acc
             }
             _ => {
                 if k > n {
                     return Err(FormulaError::Num);
                 }
-                let k = k.min(n - k);
-                (1..=k)
-                    .fold(1.0f64, |acc, i| acc * ((n - k + i) as f64) / (i as f64))
-                    .round()
+                let c = k.min(n - k);
+                if c >= 515 {
+                    return Err(FormulaError::Num);
+                }
+                let mut acc = 1.0f64;
+                for i in 1..=c {
+                    acc = acc * ((n - c + i) as f64) / (i as f64);
+                    if !acc.is_finite() {
+                        return Err(FormulaError::Num);
+                    }
+                }
+                acc.round()
             }
         };
         if !res.is_finite() {

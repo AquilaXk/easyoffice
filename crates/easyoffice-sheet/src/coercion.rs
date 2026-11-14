@@ -396,6 +396,29 @@ impl SheetEngine {
         depth: usize,
     ) -> Result<(), FormulaError> {
         let (ref sheet_opt, min_r, min_c, rows, cols, transposed) = *spec;
+        let total = rows.saturating_mul(cols);
+        let target_sheet = self.resolve_sheet_ref(sheet_opt.as_deref(), ctx);
+        let max_r = min_r + (rows as u32).saturating_sub(1);
+        let max_c = min_c + (cols as u32).saturating_sub(1);
+        let pop_count = target_sheet.map_or(total, |ts| {
+            ts.cell_index().count_in_range(min_r, max_r, min_c, max_c)
+        });
+        if !transposed && (pop_count == 0 || (total > 64 && total > pop_count.saturating_mul(2))) {
+            if pop_count == 0 {
+                return Ok(());
+            }
+            let pop_coords = target_sheet
+                .unwrap()
+                .cell_index()
+                .range_coords(min_r, max_r, min_c, max_c);
+            for coord in pop_coords {
+                if self.is_nested_subtotal_cell(sheet_opt.as_deref(), coord, ctx) {
+                    continue;
+                }
+                acc.fold(self.eval_sheet_coord(sheet_opt.as_deref(), coord, ctx, depth))?;
+            }
+            return Ok(());
+        }
         for dr in 0..rows {
             for dc in 0..cols {
                 let (r, c) = if transposed {
@@ -577,6 +600,7 @@ pub fn wildcard_prefix_match(text: &str, pattern: &str) -> bool {
     wildcard_match(text, &pat)
 }
 
+#[doc(hidden)]
 pub fn wildcard_match_alloc_baseline(text: &str, pattern: &str) -> bool {
     let t: Vec<char> = text.to_lowercase().chars().collect();
     let pat_lower = pattern.to_lowercase();
@@ -593,22 +617,30 @@ pub fn wildcard_match_alloc_baseline(text: &str, pattern: &str) -> bool {
         }
         p.push((ch, false));
     }
-    let mut dp = vec![vec![false; p.len() + 1]; t.len() + 1];
-    dp[0][0] = true;
+    // Fail-closed OOM defense: delegate to linear-space matcher if DP table exceeds 1 MiB entries
+    if (t.len() + 1).saturating_mul(p.len() + 1) > 1_048_576 {
+        return wildcard_match(text, pattern);
+    }
+    // Rolling 2-row vector reduces memory from (t.len() + 1) * (p.len() + 1) to 2 * (p.len() + 1)
+    let mut prev = vec![false; p.len() + 1];
+    let mut curr = vec![false; p.len() + 1];
+    prev[0] = true;
     for j in 1..=p.len() {
         if !p[j - 1].1 && p[j - 1].0 == '*' {
-            dp[0][j] = dp[0][j - 1];
+            prev[j] = prev[j - 1];
         }
     }
     for i in 1..=t.len() {
+        curr.fill(false);
         for j in 1..=p.len() {
             let (pch, escaped) = p[j - 1];
             if !escaped && pch == '*' {
-                dp[i][j] = dp[i - 1][j] || dp[i][j - 1];
+                curr[j] = prev[j] || curr[j - 1];
             } else if (!escaped && pch == '?') || pch == t[i - 1] {
-                dp[i][j] = dp[i - 1][j - 1];
+                curr[j] = prev[j - 1];
             }
         }
+        std::mem::swap(&mut prev, &mut curr);
     }
-    dp[t.len()][p.len()]
+    prev[p.len()]
 }

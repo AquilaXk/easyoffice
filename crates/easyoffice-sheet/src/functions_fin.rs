@@ -22,10 +22,7 @@ const RATE_CHECK_TOLERANCE: f64 = 1e-6;
 const RATE_DIFF_STEP: f64 = 1e-7;
 const RATE_STEP_TOLERANCE: f64 = 1e-12;
 const RATE_MIN_SCALE: f64 = 1e-6;
-const MAX_DEPRECIATION_PERIODS: usize = 10_000;
-const MONTHS_PER_YEAR: usize = 12;
-const DB_RATE_SCALE: f64 = 1000.0;
-const DDB_DEFAULT_FACTOR: f64 = 2.0;
+
 const DAYS_PER_YEAR_XIRR: f64 = 365.0;
 
 fn check_arity(args: &[Expr], min: usize, max: usize) -> Result<(), FormulaError> {
@@ -262,34 +259,6 @@ impl RateProblem {
     }
 }
 
-fn declining_balance(cost: f64, salvage: f64, life: f64, period: usize, month: usize) -> f64 {
-    let rate = ((1.0 - (salvage / cost).powf(1.0 / life)) * DB_RATE_SCALE).round() / DB_RATE_SCALE;
-    let months = MONTHS_PER_YEAR as f64;
-    let mut total_dep = 0.0;
-    let mut dep = 0.0;
-    for p in 1..=period {
-        dep = if p == 1 {
-            cost * rate * (month as f64) / months
-        } else if p == (life.trunc() as usize) + 1 && month < MONTHS_PER_YEAR {
-            (cost - total_dep) * rate * ((MONTHS_PER_YEAR - month) as f64) / months
-        } else {
-            (cost - total_dep) * rate
-        };
-        total_dep += dep;
-    }
-    dep
-}
-
-fn double_declining_balance(cost: f64, salvage: f64, life: f64, period: usize, factor: f64) -> f64 {
-    let mut book = cost;
-    let mut dep = 0.0;
-    for _ in 1..=period {
-        dep = (book * (factor / life)).min((book - salvage).max(0.0));
-        book -= dep;
-    }
-    dep
-}
-
 /// Running state of the NPV accumulation.
 struct NpvAccumulator {
     rate: f64,
@@ -441,7 +410,31 @@ impl SheetEngine {
         ctx: &mut EvalContext<'_>,
         depth: usize,
     ) -> Result<(), FormulaError> {
-        let (_, _, _, rows, cols, _) = *spec;
+        let (ref sheet_opt, min_r, min_c, rows, cols, transposed) = *spec;
+        let total = rows.saturating_mul(cols);
+        let target_sheet = self.resolve_sheet_ref(sheet_opt.as_deref(), ctx);
+        let max_r = min_r + (rows as u32).saturating_sub(1);
+        let max_c = min_c + (cols as u32).saturating_sub(1);
+        let pop_count = target_sheet.map_or(total, |ts| {
+            ts.cell_index().count_in_range(min_r, max_r, min_c, max_c)
+        });
+        if !transposed && (pop_count == 0 || (total > 64 && total > pop_count.saturating_mul(2))) {
+            if pop_count == 0 {
+                return Ok(());
+            }
+            let pop_coords = target_sheet
+                .unwrap()
+                .cell_index()
+                .range_coords(min_r, max_r, min_c, max_c);
+            for coord in pop_coords {
+                if let EvaluatedCellValue::Number(n) =
+                    self.eval_sheet_coord(sheet_opt.as_deref(), coord, ctx, depth)
+                {
+                    acc.add(n);
+                }
+            }
+            return Ok(());
+        }
         for dr in 0..rows {
             for dc in 0..cols {
                 if let EvaluatedCellValue::Number(n) =
@@ -566,80 +559,6 @@ impl SheetEngine {
         num((numerator / den).ln() / (1.0 + rate).ln())
     }
 
-    fn fin_sln(
-        &self,
-        args: &[Expr],
-        ctx: &mut EvalContext<'_>,
-        depth: usize,
-    ) -> Result<EvaluatedCellValue, FormulaError> {
-        check_arity(args, 3, 3)?;
-        let [cost, salvage, life] = self.arg_nums(args, ctx, depth)?;
-        if life.abs() < DERIVATIVE_EPSILON {
-            return Err(FormulaError::DivByZero);
-        }
-        num((cost - salvage) / life)
-    }
-
-    fn fin_db(
-        &self,
-        args: &[Expr],
-        ctx: &mut EvalContext<'_>,
-        depth: usize,
-    ) -> Result<EvaluatedCellValue, FormulaError> {
-        check_arity(args, 4, 5)?;
-        let [cost, salvage, life, period] = self.arg_nums(args, ctx, depth)?;
-        let period = period.trunc() as usize;
-        let month = self
-            .opt_arg_num(args, 4, MONTHS_PER_YEAR as f64, ctx, depth)?
-            .trunc() as usize;
-        if cost <= 0.0
-            || salvage < 0.0
-            || life <= 0.0
-            || !(1..=MAX_DEPRECIATION_PERIODS).contains(&period)
-            || !(1..=MONTHS_PER_YEAR).contains(&month)
-        {
-            return Err(FormulaError::Num);
-        }
-        num(declining_balance(cost, salvage, life, period, month))
-    }
-
-    fn fin_ddb(
-        &self,
-        args: &[Expr],
-        ctx: &mut EvalContext<'_>,
-        depth: usize,
-    ) -> Result<EvaluatedCellValue, FormulaError> {
-        check_arity(args, 4, 5)?;
-        let [cost, salvage, life, period] = self.arg_nums(args, ctx, depth)?;
-        let period = period.trunc() as usize;
-        let factor = self.opt_arg_num(args, 4, DDB_DEFAULT_FACTOR, ctx, depth)?;
-        if cost < 0.0
-            || salvage < 0.0
-            || life <= 0.0
-            || !(1..=MAX_DEPRECIATION_PERIODS).contains(&period)
-            || factor <= 0.0
-        {
-            return Err(FormulaError::Num);
-        }
-        num(double_declining_balance(
-            cost, salvage, life, period, factor,
-        ))
-    }
-
-    fn fin_syd(
-        &self,
-        args: &[Expr],
-        ctx: &mut EvalContext<'_>,
-        depth: usize,
-    ) -> Result<EvaluatedCellValue, FormulaError> {
-        check_arity(args, 4, 4)?;
-        let [cost, salvage, life, per] = self.arg_nums(args, ctx, depth)?;
-        if life <= 0.0 || per <= 0.0 || per > life {
-            return Err(FormulaError::Num);
-        }
-        num((cost - salvage) * (life - per + 1.0) * 2.0 / (life * (life + 1.0)))
-    }
-
     fn fin_effect(
         &self,
         args: &[Expr],
@@ -679,30 +598,55 @@ impl SheetEngine {
     ) -> Result<EvaluatedCellValue, FormulaError> {
         check_arity(args, 6, 6)?;
         let [rate, nper, pv, start_p, end_p, t] = self.arg_nums(args, ctx, depth)?;
-        let start_period = start_p.ceil() as i64;
-        let end_period = end_p.trunc() as i64;
-        if rate <= 0.0
+        if !rate.is_finite()
+            || !nper.is_finite()
+            || !pv.is_finite()
+            || !start_p.is_finite()
+            || !end_p.is_finite()
+            || !t.is_finite()
+            || rate <= 0.0
             || nper <= 0.0
             || pv <= 0.0
             || start_p < 1.0
             || end_p < 1.0
-            || start_period > end_period
-            || end_p > nper
+            || start_p > 1e12
+            || end_p > 1e12
+            || nper > 1e12
             || (t != 0.0 && t != 1.0)
         {
             return Err(FormulaError::Num);
         }
-        let pmt = calc_pmt(rate, nper, pv, 0.0, t)?;
-        let mut total = 0.0;
-        for per in start_period..=end_period {
-            let ipmt = if per == 1 && t != 0.0 {
-                0.0
-            } else {
-                calc_fv(rate, (per - 1) as f64, pmt, pv, t)? * rate / type_adjust(rate, t)
-            };
-            total += if is_interest { ipmt } else { pmt - ipmt };
+        let start_period = start_p.ceil() as i64;
+        let end_period = end_p.trunc() as i64;
+        if start_period < 1 || start_period > end_period || (end_period as f64) > nper {
+            return Err(FormulaError::Num);
         }
-        num(total)
+        let pmt = calc_pmt(rate, nper, pv, 0.0, t)?;
+        let a = if start_period == 1 && t != 0.0 {
+            1i64
+        } else {
+            start_period - 1
+        };
+        let b = end_period - 1;
+        let cum_ipmt = if a > b {
+            0.0
+        } else {
+            let m = (b - a + 1) as f64;
+            let c_coeff = pv * rate / type_adjust(rate, t) + pmt;
+            if rate.abs() < ZERO_RATE_EPSILON {
+                let sum_k = ((a + b) as f64) * m * 0.5;
+                -(pv * m + pmt * sum_k) * rate
+            } else {
+                let sum_geom = (1.0 + rate).powf(a as f64) * ((m * rate.ln_1p()).exp_m1() / rate);
+                -c_coeff * sum_geom + m * pmt
+            }
+        };
+        let total_periods = (end_period - start_period + 1) as f64;
+        let cum_princ = total_periods * pmt - cum_ipmt;
+        if !cum_ipmt.is_finite() || !cum_princ.is_finite() {
+            return Err(FormulaError::Num);
+        }
+        num(if is_interest { cum_ipmt } else { cum_princ })
     }
 
     fn eval_cf_date_pairs(

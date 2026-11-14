@@ -139,29 +139,37 @@ impl SheetEngine {
             return Err(FormulaError::Value);
         }
         let by_col = self.arg_bool(args, 2, env, ctx, depth)?;
-        let order: Vec<(usize, usize)> = if by_col {
-            (0..grid.cols)
-                .flat_map(|c| (0..grid.rows).map(move |r| (r, c)))
-                .collect()
-        } else {
-            (0..grid.rows)
-                .flat_map(|r| (0..grid.cols).map(move |c| (r, c)))
-                .collect()
+        let keep = |v: &V| {
+            let blank = matches!(v, V::Empty);
+            let error = matches!(v, V::Error(_));
+            match ignore {
+                1 => !blank,
+                2 => !error,
+                3 => !blank && !error,
+                _ => true,
+            }
         };
-        let flat: Vec<V> = order
-            .into_iter()
-            .map(|(r, c)| grid.get(r, c).clone())
-            .filter(|v| {
-                let blank = matches!(v, V::Empty);
-                let error = matches!(v, V::Error(_));
-                match ignore {
-                    1 => !blank,
-                    2 => !error,
-                    3 => !blank && !error,
-                    _ => true,
+        // Emit directly into flat vector in a single pass without allocating intermediate coordinate vectors.
+        let mut flat = Vec::new();
+        if by_col {
+            for c in 0..grid.cols {
+                for r in 0..grid.rows {
+                    let v = grid.get(r, c).clone();
+                    if keep(&v) {
+                        flat.push(v);
+                    }
                 }
-            })
-            .collect();
+            }
+        } else {
+            for r in 0..grid.rows {
+                for c in 0..grid.cols {
+                    let v = grid.get(r, c).clone();
+                    if keep(&v) {
+                        flat.push(v);
+                    }
+                }
+            }
+        }
         if flat.is_empty() {
             return Err(FormulaError::Calc);
         }

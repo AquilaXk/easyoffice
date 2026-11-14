@@ -201,13 +201,17 @@ fn judge(dv: &DataValidation, cells: &mut dyn Cells, input: &str) -> bool {
             [on, off].iter().any(|v| v.eq_ignore_ascii_case(entered))
         }
         DvKind::ListMultiple => {
-            // Every chosen item (comma separated) must be an item of the list.
+            // Every chosen item (comma separated) must be an item of the list (case-insensitive).
             let items = list_items(dv, cells);
             input
                 .split(',')
                 .map(str::trim)
                 .filter(|chosen| !chosen.is_empty())
-                .all(|chosen| items.iter().any(|item| item == chosen))
+                .all(|chosen| {
+                    items
+                        .iter()
+                        .any(|item| item.eq_ignore_ascii_case(chosen) || item == chosen)
+                })
         }
         DvKind::Custom => {
             let r = cells.eval_formula(dv.a.trim().trim_start_matches('='));
@@ -254,15 +258,11 @@ pub(crate) fn validate_within(
     if input.is_empty() || input.trim_start().starts_with('=') {
         return (Verdict::Valid, memo);
     }
-    let previous = wb.sheets()[sheet].cells.get(&coord).cloned();
     let custom = dv.kind == DvKind::Custom;
-    if custom {
-        wb.sheets_mut()[sheet].set_cell_coord(coord, input);
-    }
     let sid = wb.sheets()[sheet].resolved_sheet_id();
-    // A custom formula runs with the input in its cell, so the formula values of the caller's memo
-    // may rest on the old content and what the check computes is not the sheet's: it gets a memo of
-    // its own that is dropped, and the caller's memo comes back as it went in.
+    // A custom formula runs with the input in its cell via virtual overlay (zero-mutation),
+    // so the formula values of the caller's memo may rest on the old content and what the check
+    // computes is not the sheet's: it gets a memo of its own that is dropped.
     let (check_memo, kept) = if custom {
         (MemoTable::new(sid), Some(memo))
     } else {
@@ -271,6 +271,9 @@ pub(crate) fn validate_within(
     let (ok, memo) = {
         let mut ctx = EvalContext::with_workbook(wb, sid).with_time_limit(limit);
         ctx.memo = check_memo;
+        if custom {
+            ctx.cell_overlay = Some((sid, coord, typed_value(input)));
+        }
         let ok = {
             let mut cells = SheetCells {
                 sheet: &wb.sheets()[sheet],
@@ -281,9 +284,6 @@ pub(crate) fn validate_within(
         let used = std::mem::replace(&mut ctx.memo, MemoTable::new(sid));
         (ok, kept.unwrap_or(used))
     };
-    if custom {
-        wb.sheets_mut()[sheet].set_cell_coord(coord, previous.unwrap_or_default());
-    }
     let verdict = if ok {
         Verdict::Valid
     } else {

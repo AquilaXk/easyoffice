@@ -86,14 +86,8 @@ fn expr_of(cells: CellBox, sheet: Option<&str>) -> Result<Expr, FormulaError> {
     Ok(match (sheet, single) {
         (None, true) => Expr::Cell(start),
         (None, false) => Expr::Range(CellRange { start, end }),
-        (Some(sheet), true) => Expr::SheetCell {
-            sheet: sheet.to_string(),
-            coord: start,
-        },
-        (Some(sheet), false) => Expr::SheetRange {
-            sheet: sheet.to_string(),
-            range: CellRange { start, end },
-        },
+        (Some(sheet), true) => Expr::sheet_cell(sheet.to_string(), start),
+        (Some(sheet), false) => Expr::sheet_range(sheet.to_string(), CellRange { start, end }),
     })
 }
 

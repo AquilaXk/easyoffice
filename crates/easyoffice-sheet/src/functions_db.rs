@@ -290,7 +290,28 @@ impl SheetEngine {
         let criteria = self.db_criteria(&crit_block, &headers, ctx, depth)?;
 
         let mut totals = Totals::new();
-        for record in 1..db.rows {
+        let (ref sheet_opt, min_r, min_c, rows, cols, transposed) = db.spec;
+        let max_record = if !transposed {
+            if let Some(target) = self.resolve_sheet_ref(sheet_opt.as_deref(), ctx) {
+                let max_r = min_r + (rows as u32).saturating_sub(1);
+                let max_c = min_c + (cols as u32).saturating_sub(1);
+                let pop_coords = target
+                    .cell_index()
+                    .range_coords(min_r + 1, max_r, min_c, max_c);
+                if pop_coords.is_empty() {
+                    1
+                } else {
+                    let last_r = pop_coords.iter().map(|c| c.row()).max().unwrap_or(min_r);
+                    ((last_r - min_r) as usize + 1).min(db.rows)
+                }
+            } else {
+                db.rows
+            }
+        } else {
+            db.rows
+        };
+
+        for record in 1..max_record {
             if !criteria.matches(self, &db, record, ctx, depth)? {
                 continue;
             }

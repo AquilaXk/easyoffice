@@ -125,15 +125,16 @@ pub(crate) fn is_lifted_fn(name: &str) -> bool {
 pub(crate) fn arrayish(expr: &Expr) -> bool {
     match expr.peeled() {
         Expr::Range(r) => r.start != r.end,
-        Expr::SheetRange { range, .. } => range.start != range.end,
+        Expr::SheetRange(sr) => sr.range.start != sr.range.end,
         Expr::Array(lit) => lit.rows * lit.cols > 1,
-        Expr::SpillRef { .. } | Expr::Var(_) | Expr::Call { .. } => true,
+        Expr::SpillRef(_) | Expr::Var(_) | Expr::Call(_) => true,
         Expr::UnaryPlus(inner) | Expr::UnaryMinus(inner) | Expr::PostfixPercent(inner) => {
             arrayish(inner)
         }
         Expr::Binary { lhs, rhs, .. } => arrayish(lhs) || arrayish(rhs),
-        Expr::FuncCall { name, args } => {
-            let name = name.as_str();
+        Expr::FuncCall(f) => {
+            let name = f.name.as_str();
+            let args = &f.args;
             is_spill_fn(name)
                 || name == "TRANSPOSE"
                 || is_array_fn(name)
@@ -148,7 +149,8 @@ pub(crate) fn arrayish(expr: &Expr) -> bool {
 /// range's one column, or more rows than its one row.
 pub(crate) fn xlookup_returns_array(args: &[Expr]) -> bool {
     let size = |e: &Expr| match e.peeled() {
-        Expr::Range(r) | Expr::SheetRange { range: r, .. } => Some(r.dimensions()),
+        Expr::Range(r) => Some(r.dimensions()),
+        Expr::SheetRange(sr) => Some(sr.range.dimensions()),
         _ => None,
     };
     match (args.get(1).and_then(size), args.get(2).and_then(size)) {
@@ -174,15 +176,16 @@ fn scan(expr: &Expr, seen: &mut crate::DetSet<*const crate::SharedExpr>) -> bool
         Expr::Shared(shared) => {
             seen.insert(std::sync::Arc::as_ptr(shared)) && scan(&shared.expr, seen)
         }
-        Expr::Array(_) | Expr::SpillRef { .. } | Expr::Call { .. } | Expr::Var(_) => true,
+        Expr::Array(_) | Expr::SpillRef(_) | Expr::Call(_) | Expr::Var(_) => true,
         Expr::UnaryPlus(inner) | Expr::UnaryMinus(inner) | Expr::PostfixPercent(inner) => {
             arrayish(inner) || scan(inner, seen)
         }
         Expr::Binary { lhs, rhs, .. } => {
             arrayish(lhs) || arrayish(rhs) || scan(lhs, seen) || scan(rhs, seen)
         }
-        Expr::FuncCall { name, args } => {
-            let name = name.as_str();
+        Expr::FuncCall(f) => {
+            let name = f.name.as_str();
+            let args = &f.args;
             if is_spill_fn(name) {
                 return true;
             }
@@ -190,7 +193,7 @@ fn scan(expr: &Expr, seen: &mut crate::DetSet<*const crate::SharedExpr>) -> bool
                 return args.iter().any(|a| {
                     matches!(
                         a.peeled(),
-                        Expr::Array(_) | Expr::SpillRef { .. } | Expr::Call { .. } | Expr::Var(_)
+                        Expr::Array(_) | Expr::SpillRef(_) | Expr::Call(_) | Expr::Var(_)
                     ) || scan_spill_only(a)
                 });
             }
@@ -204,7 +207,7 @@ fn scan(expr: &Expr, seen: &mut crate::DetSet<*const crate::SharedExpr>) -> bool
 fn scan_spill_only(expr: &Expr) -> bool {
     let mut found = false;
     crate::names::walk(expr, |node| {
-        found |= matches!(node, Expr::FuncCall { name, .. } if is_spill_fn(name));
+        found |= matches!(node, Expr::FuncCall(f) if is_spill_fn(&f.name));
     });
     found
 }

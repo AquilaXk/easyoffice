@@ -144,10 +144,10 @@ pub(crate) fn walk_mut(root: &mut Expr, mut visit: impl FnMut(&mut Expr, bool) -
                 stack.push((&mut **lhs, false));
                 stack.push((&mut **rhs, false));
             }
-            Expr::FuncCall { args, .. } => stack.extend(args.iter_mut().map(|a| (a, true))),
-            Expr::Call { callee, args } => {
-                stack.extend(args.iter_mut().map(|a| (a, true)));
-                stack.push((&mut **callee, false));
+            Expr::FuncCall(f) => stack.extend(f.args.iter_mut().map(|a| (a, true))),
+            Expr::Call(c) => {
+                stack.extend(c.args.iter_mut().map(|a| (a, true)));
+                stack.push((&mut *c.callee, false));
             }
             _ => {}
         }
@@ -167,10 +167,10 @@ pub(crate) fn walk(root: &Expr, mut visit: impl FnMut(&Expr)) {
                 stack.push(lhs);
                 stack.push(rhs);
             }
-            Expr::FuncCall { args, .. } => stack.extend(args.iter()),
-            Expr::Call { callee, args } => {
-                stack.push(callee);
-                stack.extend(args.iter());
+            Expr::FuncCall(f) => stack.extend(f.args.iter()),
+            Expr::Call(c) => {
+                stack.push(&c.callee);
+                stack.extend(c.args.iter());
             }
             _ => {}
         }
@@ -203,8 +203,8 @@ fn is_leaf(expr: &Expr) -> bool {
         expr,
         Expr::Cell(_)
             | Expr::Range(_)
-            | Expr::SheetCell { .. }
-            | Expr::SheetRange { .. }
+            | Expr::SheetCell(_)
+            | Expr::SheetRange(_)
             | Expr::Number(_)
             | Expr::Boolean(_)
             | Expr::ErrorLiteral(_)
@@ -236,9 +236,11 @@ fn replace_names<'a>(
         if too_large {
             return false;
         }
-        let Expr::Name { scope, name } = node else {
+        let Expr::Name(n) = node else {
             return true;
         };
+        let scope = &n.scope;
+        let name = &n.name;
         let replacement = match resolve(scope.as_deref(), name) {
             Repl::Error(e) => Expr::ErrorLiteral(e),
             Repl::Leaf(expr) => expr,
@@ -470,16 +472,10 @@ impl NameTable {
         let mut folded = String::new();
         // `Square(3)` where `Square` is a defined name: a call of the value the name stands for.
         walk_mut(expr, |node, _| {
-            if let Expr::FuncCall { name, args } = node {
-                if !is_function(name) && self.lookup(&fold_name(name), sheet).is_some() {
-                    let callee = Expr::Name {
-                        scope: None,
-                        name: std::mem::take(name),
-                    };
-                    *node = Expr::Call {
-                        callee: Box::new(callee),
-                        args: std::mem::take(args),
-                    };
+            if let Expr::FuncCall(f) = node {
+                if !is_function(&f.name) && self.lookup(&fold_name(&f.name), sheet).is_some() {
+                    let callee = Expr::name(None, std::mem::take(&mut f.name));
+                    *node = Expr::call(Box::new(callee), std::mem::take(&mut f.args));
                 }
             }
             true
@@ -541,16 +537,10 @@ fn qualify_references(expr: &mut Expr, owner: &str) {
     walk_mut(expr, |node, _| {
         match node {
             Expr::Cell(coord) => {
-                *node = Expr::SheetCell {
-                    sheet: owner.to_string(),
-                    coord: *coord,
-                };
+                *node = Expr::sheet_cell(owner.to_string(), *coord);
             }
             Expr::Range(range) => {
-                *node = Expr::SheetRange {
-                    sheet: owner.to_string(),
-                    range: *range,
-                };
+                *node = Expr::sheet_range(owner.to_string(), *range);
             }
             _ => {}
         }
@@ -588,9 +578,9 @@ fn expand_all(
         let mut deps = Vec::new();
         let scope = defs[i].scope.as_deref();
         walk(expr, |node| {
-            if let Expr::Name { scope: q, name } = node {
-                let folded = fold_name(name);
-                if let Some(j) = pick(&folded, q.as_deref().or(scope)) {
+            if let Expr::Name(n) = node {
+                let folded = fold_name(&n.name);
+                if let Some(j) = pick(&folded, n.scope.as_deref().or(scope)) {
                     deps.push(j);
                 }
             }

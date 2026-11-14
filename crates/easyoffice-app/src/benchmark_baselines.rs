@@ -343,7 +343,9 @@ pub(crate) fn eval_expr_uncompiled_baseline(
                 )),
             }
         }
-        Expr::FuncCall { name, args } => {
+        Expr::FuncCall(f) => {
+            let name = &f.name;
+            let args = &f.args;
             if name == "IF" && args.len() >= 2 {
                 let cond =
                     eval_expr_uncompiled_baseline(sheet, &args[0], memo, visiting, depth + 1)

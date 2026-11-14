@@ -14,6 +14,8 @@ mod criteria;
 mod dag;
 mod deadline;
 mod dyn_reads;
+mod eval_context;
+pub mod expr;
 pub mod filter;
 #[cfg(test)]
 mod function_coverage_tests;
@@ -52,6 +54,7 @@ mod functions_trend;
 #[cfg(test)]
 mod functions_unit_tests;
 mod lexer;
+mod lookup_helpers;
 mod lookup_index;
 mod memo;
 pub mod names;
@@ -84,11 +87,12 @@ pub use axis::{
 pub use coercion::*;
 pub(crate) use dag::expr_contains_subtotal;
 pub use deadline::MAX_EVAL_TIME;
+pub use expr::*;
 pub use functions::*;
 pub use functions_complex::{format_complex, parse_complex};
 pub use memo::{CellMap, CoordHasher, DetMap, DetSet, DetWordHasher, FastMap, MemoTable};
 pub use names::{validate_names, NameIssue, NameTable};
-pub use parser::{compile_formula_expr, BinaryOp, Expr, SharedExpr};
+pub use parser::compile_formula_expr;
 pub use pivot::{PivotError, PivotSpec};
 pub use recalc::{
     Budget, CellChange, ChangedCell, Footprint, RecalcError, RecalcOutcome, RecalcSession,
@@ -115,104 +119,7 @@ pub(crate) enum CellEval {
     Memoized,
 }
 
-pub(crate) struct EvalContext<'a> {
-    pub workbook: Option<&'a WorkbookEngine>,
-    pub memo: MemoTable,
-    pub current_coord: Option<PackedCellCoordinate>,
-    pub(crate) steps: usize,
-    pub(crate) array_bytes: usize,
-    pub(crate) rng_state: u64,
-    pub(crate) circular: bool,
-    pub(crate) clock: deadline::Clock,
-    /// Arrays that stand for temporary ranges while a function of the scalar engine runs on them
-    /// (see `array_eval`).
-    pub(crate) temp: Vec<Arc<array::Grid>>,
-    /// Calls of `LAMBDA` values in progress.
-    pub(crate) lambda_depth: usize,
-    /// Cells anchors may still fill; `None` when areas are not placed (a calculation outside a
-    /// session): an array then shows its first value only.
-    pub(crate) spill_budget: Option<usize>,
-    /// What the pass decided for the anchors it calculated (see `spill`).
-    pub(crate) pending: Vec<spill::Pending>,
-    /// Cells the pass has given to anchors, by sheet and cell, to the anchor.
-    pub(crate) claims: FastMap<u64, PackedCellCoordinate>,
-    /// The arrays this pass placed, by sheet and anchor: a `A1#` read in the same pass takes the array itself.
-    pub(crate) fresh: FastMap<u64, Arc<array::Grid>>,
-    /// What the formulas of this pass read through `OFFSET` and `INDIRECT`; `None` when nobody collects it.
-    pub(crate) dyn_reads: Option<dyn_reads::DynReads>,
-    pub(crate) lookup_cache: lookup_index::LookupCache,
-}
-
-impl<'a> EvalContext<'a> {
-    #[inline]
-    pub fn standalone_id(sheet_id: u16) -> Self {
-        Self {
-            workbook: None,
-            memo: MemoTable::new(sheet_id),
-            current_coord: None,
-            steps: 0,
-            array_bytes: 0,
-            rng_state: 0x5DEE_CE66_D1A4_F87B,
-            circular: false,
-            clock: deadline::Clock::default(),
-            temp: Vec::new(),
-            lambda_depth: 0,
-            spill_budget: None,
-            pending: Vec::new(),
-            claims: FastMap::default(),
-            fresh: FastMap::default(),
-            dyn_reads: None,
-            lookup_cache: lookup_index::LookupCache::default(),
-        }
-    }
-
-    #[inline]
-    pub fn with_workbook(workbook: &'a WorkbookEngine, sheet_id: u16) -> Self {
-        Self {
-            workbook: Some(workbook),
-            memo: MemoTable::new(sheet_id),
-            current_coord: None,
-            steps: 0,
-            array_bytes: 0,
-            rng_state: 0x5DEE_CE66_D1A4_F87B,
-            circular: false,
-            clock: deadline::Clock::default(),
-            temp: Vec::new(),
-            lambda_depth: 0,
-            spill_budget: None,
-            pending: Vec::new(),
-            claims: FastMap::default(),
-            fresh: FastMap::default(),
-            dyn_reads: None,
-            lookup_cache: lookup_index::LookupCache::default(),
-        }
-    }
-
-    /// The value at `coord` of temporary array number `index`.
-    pub(crate) fn temp_cell(
-        &self,
-        index: usize,
-        coord: PackedCellCoordinate,
-    ) -> EvaluatedCellValue {
-        match self.temp.get(index) {
-            Some(grid)
-                if (coord.row() as usize) < grid.rows && (coord.col() as usize) < grid.cols =>
-            {
-                grid.get(coord.row() as usize, coord.col() as usize).clone()
-            }
-            _ => EvaluatedCellValue::Empty,
-        }
-    }
-
-    #[inline]
-    pub fn next_rand_f64(&mut self) -> f64 {
-        self.rng_state = self
-            .rng_state
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1442695040888963407);
-        ((self.rng_state >> 11) as f64) * (1.0 / ((1u64 << 53) as f64))
-    }
-}
+pub(crate) use eval_context::EvalContext;
 
 /// Spreadsheet calculation engine with $O(V + E)$ cycle detection, pre-compiled ASTs, and DAG memoization.
 #[derive(Debug, Clone, Default)]
@@ -250,6 +157,8 @@ pub struct SheetEngine {
     /// Nodes the formulas of the whole workbook hold because they use names (shared by its sheets, see
     /// `names::MAX_WORKBOOK_NAME_NODES`).
     pub(crate) name_budget: Arc<std::sync::atomic::AtomicUsize>,
+    /// Persistent exact-lookup index cache, invalidated per column on edits.
+    pub(crate) lookup_cache: crate::lookup_index::SharedLookupCache,
 }
 
 impl SheetEngine {
@@ -287,6 +196,7 @@ impl SheetEngine {
             tables: Arc::default(),
             name_uses: CellMap::default(),
             name_budget: Arc::default(),
+            lookup_cache: crate::lookup_index::SharedLookupCache::default(),
         }
     }
 
@@ -325,6 +235,9 @@ impl SheetEngine {
         }
         if self.cell_index.get().is_some() {
             self.cell_index = OnceLock::new();
+        }
+        if let Ok(mut cache) = self.lookup_cache.0.write() {
+            cache.clear();
         }
     }
 
@@ -398,6 +311,9 @@ impl SheetEngine {
                 index.set_formula(coord, is_formula);
             }
         }
+        if let Ok(mut cache) = self.lookup_cache.0.write() {
+            cache.invalidate_col(coord.col());
+        }
     }
 
     /// Drops the cached indexes; the next evaluation rebuilds them in one sorted pass, which is
@@ -405,6 +321,9 @@ impl SheetEngine {
     pub(crate) fn drop_indexes(&mut self) {
         self.formula_index = OnceLock::new();
         self.cell_index = OnceLock::new();
+        if let Ok(mut cache) = self.lookup_cache.0.write() {
+            cache.clear();
+        }
     }
 
     /// Records whether the formula compiled for `coord` is one the array evaluator calculates.
@@ -647,6 +566,12 @@ impl SheetEngine {
         if depth > Self::MAX_RECURSION_DEPTH {
             return CellEval::Owned(EvaluatedCellValue::Error(FormulaError::Ref));
         }
+        let sid = self.resolved_sheet_id();
+        if let Some((o_sid, o_coord, ref o_val)) = ctx.cell_overlay {
+            if o_sid == sid && o_coord == coord {
+                return CellEval::Owned(o_val.clone());
+            }
+        }
         let r = coord.row() as usize;
         let c = coord.col() as usize;
         if r < Self::DENSE_ROWS && c < Self::DENSE_COLS {
@@ -795,7 +720,7 @@ impl SheetEngine {
             }
             Expr::Boolean(b) => EvaluatedCellValue::Boolean(*b),
             Expr::ErrorLiteral(e) => EvaluatedCellValue::Error(*e),
-            Expr::Name { .. } | Expr::Var(_) | Expr::Call { .. } => {
+            Expr::Name(_) | Expr::Var(_) | Expr::Call(_) => {
                 EvaluatedCellValue::Error(FormulaError::Name)
             }
             Expr::Array(lit) => lit
@@ -803,14 +728,10 @@ impl SheetEngine {
                 .first()
                 .cloned()
                 .unwrap_or(EvaluatedCellValue::Empty),
-            Expr::SpillRef { sheet, coord } => {
-                self.eval_sheet_coord(sheet.as_deref(), *coord, ctx, depth)
-            }
+            Expr::SpillRef(sp) => self.eval_sheet_coord(sp.sheet.as_deref(), sp.coord, ctx, depth),
             Expr::Shared(shared) => self.eval_expr_ctx(&shared.expr, ctx, depth),
             Expr::Cell(coord) => self.eval_coord_ctx(*coord, ctx, depth),
-            Expr::SheetCell { sheet, coord } => {
-                self.eval_sheet_coord(Some(sheet), *coord, ctx, depth)
-            }
+            Expr::SheetCell(sc) => self.eval_sheet_coord(Some(&sc.sheet), sc.coord, ctx, depth),
             Expr::Range(range) => {
                 if range.start == range.end {
                     self.eval_coord_ctx(range.start, ctx, depth)
@@ -818,7 +739,9 @@ impl SheetEngine {
                     EvaluatedCellValue::Error(FormulaError::Value)
                 }
             }
-            Expr::SheetRange { sheet, range } => {
+            Expr::SheetRange(sr) => {
+                let sheet = &sr.sheet;
+                let range = sr.range;
                 if !self.has_sheet_in_ctx(sheet, ctx) {
                     EvaluatedCellValue::Error(FormulaError::Ref)
                 } else if range.start == range.end {
@@ -843,7 +766,7 @@ impl SheetEngine {
                 Self::apply_binary_op(*op, l_val, r_val)
             }
             Expr::Binary { .. } => self.eval_binary_chain(expr, ctx, depth),
-            Expr::FuncCall { name, args } => self.eval_func_call_expr(name, args, ctx, depth),
+            Expr::FuncCall(f) => self.eval_func_call_expr(&f.name, &f.args, ctx, depth),
         };
         crate::coercion::sanitize_evaluated_value(res)
     }

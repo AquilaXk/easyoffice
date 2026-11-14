@@ -9,7 +9,7 @@
 //! character turns that character into one space (the half that is left is one byte wide).
 
 use crate::byte_width::{slice_bytes, text_bytes, to_full_width, to_half_width};
-use crate::functions_lookup_text::{bounded_text, find_literal, search_wildcard};
+use crate::functions_lookup_text::{bounded_text, find_literal, search_wildcard_ctx};
 use crate::{EvalContext, EvaluatedCellValue, Expr, FormulaError, SheetEngine};
 
 type CellResult = Result<EvaluatedCellValue, FormulaError>;
@@ -34,7 +34,13 @@ fn byte_count(x: f64) -> Option<usize> {
 
 /// `FINDB` / `SEARCHB` over the bytes from `start` (1-based): the text from there on is searched by
 /// character, and the character position found is turned back into a byte position.
-fn find_bytes(is_search: bool, needle: &str, hay: &str, start: f64) -> CellResult {
+fn find_bytes(
+    is_search: bool,
+    needle: &str,
+    hay: &str,
+    start: f64,
+    ctx: Option<&mut EvalContext<'_>>,
+) -> CellResult {
     let start = start.floor();
     let total = text_bytes(hay);
     if start < 1.0 || start > total.max(1) as f64 {
@@ -43,7 +49,7 @@ fn find_bytes(is_search: bool, needle: &str, hay: &str, start: f64) -> CellResul
     let from = start as usize - 1;
     let tail = slice_bytes(hay, from, total);
     let found = if is_search {
-        search_wildcard(needle, &tail, 1)?
+        search_wildcard_ctx(needle, &tail, 1, ctx)?
     } else {
         find_literal(needle, &tail, 1)?
     };
@@ -137,7 +143,7 @@ impl SheetEngine {
                     Some(arg) => self.eval_arg_num_blank_zero(arg, ctx, depth)?,
                     None => 1.0,
                 };
-                find_bytes(name == "SEARCHB", &needle, &hay, start)
+                find_bytes(name == "SEARCHB", &needle, &hay, start, Some(ctx))
             }
         }
     }

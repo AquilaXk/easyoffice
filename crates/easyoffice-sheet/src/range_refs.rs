@@ -255,30 +255,34 @@ impl SheetEngine {
             Expr::ErrorLiteral(e) => Err(*e),
             Expr::Cell(c) => Ok(CellRange::new(*c, *c).ok().map(|r| (None, r, false))),
             Expr::Range(r) => Ok(Some((None, *r, false))),
-            Expr::SheetCell { sheet, coord } => {
-                if !self.has_sheet_in_ctx(sheet, ctx) {
+            Expr::SheetCell(sc) => {
+                if !self.has_sheet_in_ctx(&sc.sheet, ctx) {
                     return Err(FormulaError::Ref);
                 }
-                Ok(CellRange::new(*coord, *coord)
+                Ok(CellRange::new(sc.coord, sc.coord)
                     .ok()
-                    .map(|r| (Some(Cow::Borrowed(sheet.as_str())), r, false)))
+                    .map(|r| (Some(Cow::Borrowed(sc.sheet.as_str())), r, false)))
             }
-            Expr::SheetRange { sheet, range } => {
-                if !self.has_sheet_in_ctx(sheet, ctx) {
+            Expr::SheetRange(sr) => {
+                if !self.has_sheet_in_ctx(&sr.sheet, ctx) {
                     return Err(FormulaError::Ref);
                 }
-                Ok(Some((Some(Cow::Borrowed(sheet.as_str())), *range, false)))
+                Ok(Some((
+                    Some(Cow::Borrowed(sr.sheet.as_str())),
+                    sr.range,
+                    false,
+                )))
             }
-            Expr::FuncCall { name, args } if name == "TRANSPOSE" && args.len() == 1 => Ok(self
-                .extract_range_and_sheet_ctx(&args[0], ctx, depth + 1)?
+            Expr::FuncCall(f) if f.name == "TRANSPOSE" && f.args.len() == 1 => Ok(self
+                .extract_range_and_sheet_ctx(&f.args[0], ctx, depth + 1)?
                 .map(|(s, r, t)| (s, r, !t))),
-            Expr::FuncCall { name, args } if name == "INDIRECT" => {
-                let resolved = self.extract_indirect_ref(args, ctx, depth)?;
+            Expr::FuncCall(f) if f.name == "INDIRECT" => {
+                let resolved = self.extract_indirect_ref(&f.args, ctx, depth)?;
                 self.note_dynamic_read(resolved.as_ref(), ctx);
                 Ok(resolved)
             }
-            Expr::FuncCall { name, args } if name == "OFFSET" => {
-                let resolved = self.extract_offset_ref(args, ctx, depth)?;
+            Expr::FuncCall(f) if f.name == "OFFSET" => {
+                let resolved = self.extract_offset_ref(&f.args, ctx, depth)?;
                 self.note_dynamic_read(resolved.as_ref(), ctx);
                 Ok(resolved)
             }
@@ -382,16 +386,19 @@ impl SheetEngine {
             if let Some(spec) = self.extract_streaming_range_ctx(arg, ctx, depth)? {
                 let (ref sheet_opt, min_r, min_c, rows, cols, transposed) = spec;
                 let total = rows.saturating_mul(cols);
+                let target_sheet = self.resolve_sheet_ref(sheet_opt.as_deref(), ctx);
+                let max_r = min_r + (rows as u32).saturating_sub(1);
+                let max_c = min_c + (cols as u32).saturating_sub(1);
+                let pop_count = target_sheet.map_or(total, |ts| {
+                    ts.cell_index().count_in_range(min_r, max_r, min_c, max_c)
+                });
                 if !transposed
-                    && total > 1024
-                    && self
-                        .resolve_sheet_ref(sheet_opt.as_deref(), ctx)
-                        .is_some_and(|ts| total > ts.cells.len().saturating_mul(2))
+                    && (pop_count == 0 || (total > 64 && total > pop_count.saturating_mul(2)))
                 {
-                    let max_r = min_r + (rows as u32).saturating_sub(1);
-                    let max_c = min_c + (cols as u32).saturating_sub(1);
-                    let pop_coords = self
-                        .resolve_sheet_ref(sheet_opt.as_deref(), ctx)
+                    if pop_count == 0 {
+                        continue;
+                    }
+                    let pop_coords = target_sheet
                         .unwrap()
                         .cell_index()
                         .range_coords(min_r, max_r, min_c, max_c);

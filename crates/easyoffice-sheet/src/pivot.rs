@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 
 /// Rows between two clock reads.
 const CLOCK_ROWS: u32 = 1024;
+pub const MAX_PIVOT_CELLS: usize = 100_000;
 
 /// What a pivot takes from its range: offsets are columns counted from the range's first column.
 #[derive(Debug, Clone)]
@@ -66,16 +67,58 @@ fn pivot_numeric_value(val: &EvaluatedCellValue, aggregation: PivotAggregation) 
     counts_non_empty.then_some(1.0)
 }
 
-fn aggregate_slice(values: &[f64], agg: PivotAggregation) -> f64 {
-    if values.is_empty() {
-        return 0.0;
+#[derive(Debug, Clone, Copy)]
+struct PivotAccumulator {
+    count: usize,
+    sum: f64,
+    mean: f64,
+    m2: f64,
+    min: f64,
+    max: f64,
+}
+
+impl Default for PivotAccumulator {
+    fn default() -> Self {
+        Self {
+            count: 0,
+            sum: 0.0,
+            mean: 0.0,
+            m2: 0.0,
+            min: f64::INFINITY,
+            max: f64::NEG_INFINITY,
+        }
     }
-    match agg {
-        PivotAggregation::Sum => values.iter().sum(),
-        PivotAggregation::Average => values.iter().sum::<f64>() / (values.len() as f64),
-        PivotAggregation::Count => values.len() as f64,
-        PivotAggregation::Min => values.iter().copied().fold(f64::INFINITY, f64::min),
-        PivotAggregation::Max => values.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+}
+
+impl PivotAccumulator {
+    #[inline]
+    fn add(&mut self, val: f64) {
+        self.count += 1;
+        self.sum += val;
+        let delta = val - self.mean;
+        self.mean += delta / (self.count as f64);
+        let delta2 = val - self.mean;
+        self.m2 += delta * delta2;
+        if val < self.min {
+            self.min = val;
+        }
+        if val > self.max {
+            self.max = val;
+        }
+    }
+
+    #[inline]
+    fn result(&self, agg: PivotAggregation) -> f64 {
+        if self.count == 0 {
+            return 0.0;
+        }
+        match agg {
+            PivotAggregation::Sum => self.sum,
+            PivotAggregation::Average => self.sum / (self.count as f64),
+            PivotAggregation::Count => self.count as f64,
+            PivotAggregation::Min => self.min,
+            PivotAggregation::Max => self.max,
+        }
     }
 }
 
@@ -84,7 +127,7 @@ fn aggregate_slice(values: &[f64], agg: PivotAggregation) -> f64 {
 struct Groups {
     keys: Vec<String>,
     index: HashMap<String, usize>,
-    buckets: Vec<Vec<f64>>,
+    accs: Vec<PivotAccumulator>,
 }
 
 impl Groups {
@@ -94,7 +137,7 @@ impl Groups {
         }
         let at = self.keys.len();
         self.keys.push(display);
-        self.buckets.push(Vec::new());
+        self.accs.push(PivotAccumulator::default());
         self.index.insert(canonical, at);
         at
     }
@@ -115,8 +158,8 @@ fn tally(
     let first_row = usize::from(spec.header);
     let mut rows = Groups::default();
     let mut cols = Groups::default();
-    let mut cell_buckets: HashMap<(usize, usize), Vec<f64>> = HashMap::new();
-    let mut all_values: Vec<f64> = Vec::new();
+    let mut cell_buckets: HashMap<(usize, usize), PivotAccumulator> = HashMap::new();
+    let mut grand_acc = PivotAccumulator::default();
 
     if spec.row < col_count && spec.value < col_count {
         let key_col = min_c + spec.row as u32;
@@ -153,37 +196,35 @@ fn tally(
                 return Err(PivotError::TooLarge);
             }
             if let Some(num) = pivot_numeric_value(&value_at(vc)?, spec.agg) {
-                cell_buckets.entry((r_idx, c_idx)).or_default().push(num);
-                rows.buckets[r_idx].push(num);
-                cols.buckets[c_idx].push(num);
-                all_values.push(num);
+                cell_buckets.entry((r_idx, c_idx)).or_default().add(num);
+                rows.accs[r_idx].add(num);
+                cols.accs[c_idx].add(num);
+                grand_acc.add(num);
             }
         }
     }
     if cols.keys.is_empty() {
         cols.keys.push("Total".to_string());
-        cols.buckets.push(Vec::new());
+        cols.accs.push(PivotAccumulator::default());
     }
-    let total = |buckets: &[Vec<f64>]| -> Vec<f64> {
-        buckets
-            .iter()
-            .map(|b| aggregate_slice(b, spec.agg))
-            .collect()
+    let total = |accs: &[PivotAccumulator]| -> Vec<f64> {
+        accs.iter().map(|a| a.result(spec.agg)).collect()
     };
     let matrix = (0..rows.keys.len())
         .map(|r| {
             (0..cols.keys.len())
                 .map(|c| {
-                    let bucket = cell_buckets.get(&(r, c)).map_or(&[][..], Vec::as_slice);
-                    aggregate_slice(bucket, spec.agg)
+                    cell_buckets
+                        .get(&(r, c))
+                        .map_or(0.0, |a| a.result(spec.agg))
                 })
                 .collect()
         })
         .collect();
     Ok(PivotTableSummary {
-        row_totals: total(&rows.buckets),
-        column_totals: total(&cols.buckets),
-        grand_total: aggregate_slice(&all_values, spec.agg),
+        row_totals: total(&rows.accs),
+        column_totals: total(&cols.accs),
+        grand_total: grand_acc.result(spec.agg),
         row_keys: rows.keys,
         column_keys: cols.keys,
         matrix,
@@ -247,7 +288,7 @@ impl SheetEngine {
             agg: aggregation,
         };
         let mut ctx = EvalContext::standalone_id(self.resolved_sheet_id());
-        tally(&spec, usize::MAX, None, |coord| {
+        tally(&spec, MAX_PIVOT_CELLS, None, |coord| {
             ctx.reset_steps();
             Ok(self.eval_coord_ctx(coord, &mut ctx, 0))
         })

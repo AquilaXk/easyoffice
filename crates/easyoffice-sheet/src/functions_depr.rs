@@ -227,4 +227,117 @@ impl SheetEngine {
             yearly
         })
     }
+
+    pub(crate) fn fin_sln(
+        &self,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<EvaluatedCellValue, FormulaError> {
+        if args.len() != 3 {
+            return Err(FormulaError::Value);
+        }
+        let cost = self.eval_arg_num(&args[0], ctx, depth)?;
+        let salvage = self.eval_arg_num(&args[1], ctx, depth)?;
+        let life = self.eval_arg_num(&args[2], ctx, depth)?;
+        if life.abs() < 1e-12 {
+            return Err(FormulaError::DivByZero);
+        }
+        num((cost - salvage) / life)
+    }
+
+    pub(crate) fn fin_db(
+        &self,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<EvaluatedCellValue, FormulaError> {
+        if args.len() < 4 || args.len() > 5 {
+            return Err(FormulaError::Value);
+        }
+        let cost = self.eval_arg_num(&args[0], ctx, depth)?;
+        let salvage = self.eval_arg_num(&args[1], ctx, depth)?;
+        let life = self.eval_arg_num(&args[2], ctx, depth)?;
+        let period = self.eval_arg_num(&args[3], ctx, depth)?.trunc() as usize;
+        let month = match args.get(4) {
+            Some(a) => self.eval_arg_num(a, ctx, depth)?.trunc() as usize,
+            None => 12,
+        };
+        if cost <= 0.0
+            || salvage < 0.0
+            || life <= 0.0
+            || !(1..=100_000).contains(&period)
+            || !(1..=12).contains(&month)
+        {
+            return Err(FormulaError::Num);
+        }
+        let rate = ((1.0 - (salvage / cost).powf(1.0 / life)) * 1000.0).round() / 1000.0;
+        let months = 12.0;
+        let mut total_dep = 0.0;
+        let mut dep = 0.0;
+        for p in 1..=period {
+            dep = if p == 1 {
+                cost * rate * (month as f64) / months
+            } else if p == (life.trunc() as usize) + 1 && month < 12 {
+                (cost - total_dep) * rate * ((12 - month) as f64) / months
+            } else {
+                (cost - total_dep) * rate
+            };
+            total_dep += dep;
+        }
+        num(dep)
+    }
+
+    pub(crate) fn fin_ddb(
+        &self,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<EvaluatedCellValue, FormulaError> {
+        if args.len() < 4 || args.len() > 5 {
+            return Err(FormulaError::Value);
+        }
+        let cost = self.eval_arg_num(&args[0], ctx, depth)?;
+        let salvage = self.eval_arg_num(&args[1], ctx, depth)?;
+        let life = self.eval_arg_num(&args[2], ctx, depth)?;
+        let period = self.eval_arg_num(&args[3], ctx, depth)?.trunc() as usize;
+        let factor = match args.get(4) {
+            Some(a) => self.eval_arg_num(a, ctx, depth)?,
+            None => 2.0,
+        };
+        if cost < 0.0
+            || salvage < 0.0
+            || life <= 0.0
+            || !(1..=100_000).contains(&period)
+            || factor <= 0.0
+        {
+            return Err(FormulaError::Num);
+        }
+        let mut book = cost;
+        let mut dep = 0.0;
+        for _ in 1..=period {
+            dep = (book * (factor / life)).min((book - salvage).max(0.0));
+            book -= dep;
+        }
+        num(dep)
+    }
+
+    pub(crate) fn fin_syd(
+        &self,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<EvaluatedCellValue, FormulaError> {
+        if args.len() != 4 {
+            return Err(FormulaError::Value);
+        }
+        let cost = self.eval_arg_num(&args[0], ctx, depth)?;
+        let salvage = self.eval_arg_num(&args[1], ctx, depth)?;
+        let life = self.eval_arg_num(&args[2], ctx, depth)?;
+        let per = self.eval_arg_num(&args[3], ctx, depth)?;
+        if life <= 0.0 || per <= 0.0 || per > life {
+            return Err(FormulaError::Num);
+        }
+        num((cost - salvage) * (life - per + 1.0) * 2.0 / (life * (life + 1.0)))
+    }
 }

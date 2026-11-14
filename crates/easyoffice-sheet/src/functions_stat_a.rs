@@ -16,8 +16,9 @@ type Fallible<T> = Result<T, E>;
 
 fn is_reference(arg: &Expr) -> bool {
     match arg.peeled() {
-        Expr::Cell(_) | Expr::Range(_) | Expr::SheetCell { .. } | Expr::SheetRange { .. } => true,
-        Expr::FuncCall { name, .. } => {
+        Expr::Cell(_) | Expr::Range(_) | Expr::SheetCell(_) | Expr::SheetRange(_) => true,
+        Expr::FuncCall(f) => {
+            let name = &f.name;
             crate::functions_matrix::is_array_fn(name)
                 || matches!(name.as_str(), "INDIRECT" | "OFFSET" | "TRANSPOSE")
         }

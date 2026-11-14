@@ -435,20 +435,47 @@ fn cell_is(cmp: Cmp, a: &Operand, b: &Operand, value: &EvaluatedCellValue) -> bo
     }
 }
 
-fn text_of(value: &EvaluatedCellValue) -> String {
-    match value {
-        EvaluatedCellValue::Empty => String::new(),
-        other => other.to_display_string(),
-    }
-}
-
 fn text_rule(op: TextOp, needle: &str, value: &EvaluatedCellValue) -> bool {
-    let hay = fold(&text_of(value));
-    match op {
-        TextOp::Contains => hay.contains(needle),
-        TextOp::NotContains => !hay.contains(needle),
-        TextOp::Begins => hay.starts_with(needle),
-        TextOp::Ends => hay.ends_with(needle),
+    match value {
+        EvaluatedCellValue::Text(s) => {
+            let hay = fold(s);
+            match op {
+                TextOp::Contains => hay.contains(needle),
+                TextOp::NotContains => !hay.contains(needle),
+                TextOp::Begins => hay.starts_with(needle),
+                TextOp::Ends => hay.ends_with(needle),
+            }
+        }
+        EvaluatedCellValue::Empty => match op {
+            TextOp::Contains | TextOp::Begins | TextOp::Ends => needle.is_empty(),
+            TextOp::NotContains => !needle.is_empty(),
+        },
+        EvaluatedCellValue::Number(_) => {
+            if !needle
+                .bytes()
+                .any(|b| b.is_ascii_digit() || b == b'.' || b == b'-')
+            {
+                return op == TextOp::NotContains;
+            }
+            let s = value.to_display_string();
+            let hay = fold(&s);
+            match op {
+                TextOp::Contains => hay.contains(needle),
+                TextOp::NotContains => !hay.contains(needle),
+                TextOp::Begins => hay.starts_with(needle),
+                TextOp::Ends => hay.ends_with(needle),
+            }
+        }
+        _ => {
+            let s = value.to_display_string();
+            let hay = fold(&s);
+            match op {
+                TextOp::Contains => hay.contains(needle),
+                TextOp::NotContains => !hay.contains(needle),
+                TextOp::Begins => hay.starts_with(needle),
+                TextOp::Ends => hay.ends_with(needle),
+            }
+        }
     }
 }
 

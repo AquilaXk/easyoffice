@@ -143,8 +143,22 @@ impl DocumentPageLayout {
             PageOrientation::Portrait => (Self::A4_WIDTH_PT, Self::A4_HEIGHT_PT),
             PageOrientation::Landscape => (Self::A4_HEIGHT_PT, Self::A4_WIDTH_PT),
         };
-        let content_width = (page_width_pt - margin_pt * 2.0).max(120.0);
+        if !margin_pt.is_finite()
+            || margin_pt < 0.0
+            || margin_pt * 2.0 >= page_width_pt
+            || margin_pt * 2.0 >= page_height_pt
+        {
+            return Err(EasyOfficeError::InvalidArgument(format!(
+                "페이지 여백이 유효 범위를 벗어났습니다: {margin_pt}"
+            )));
+        }
+        let content_width = page_width_pt - margin_pt * 2.0;
         let total_gaps = Self::COLUMN_GAP_PT * ((column_count - 1) as f64);
+        if content_width <= total_gaps {
+            return Err(EasyOfficeError::InvalidArgument(
+                "여백 또는 단 간격이 본문 인쇄 영역을 초과했습니다.".to_string(),
+            ));
+        }
         let column_width_pt = (content_width - total_gaps) / (column_count as f64);
 
         Ok(Self {
@@ -317,9 +331,32 @@ impl SlideStageLayout {
     }
 
     pub fn verify_non_overlapping(&self, elements: &[LayoutRect]) -> bool {
-        elements
-            .iter()
-            .all(|el| el.y >= self.lower_element_zone_min_y && el.max_y() <= self.stage_height_pt)
+        for el in elements {
+            if !el.x.is_finite()
+                || !el.y.is_finite()
+                || !el.width.is_finite()
+                || !el.height.is_finite()
+                || el.x < 0.0
+                || el.y < self.lower_element_zone_min_y
+                || el.width <= 0.0
+                || el.height <= 0.0
+                || el.x + el.width > self.stage_width_pt
+                || el.y + el.height > self.stage_height_pt
+            {
+                return false;
+            }
+        }
+        for i in 0..elements.len() {
+            let a = &elements[i];
+            for b in &elements[i + 1..] {
+                let overlap_x = a.x < b.x + b.width && b.x < a.x + a.width;
+                let overlap_y = a.y < b.y + b.height && b.y < a.y + a.height;
+                if overlap_x && overlap_y {
+                    return false;
+                }
+            }
+        }
+        true
     }
 
     pub fn compute_snap_guides(
@@ -437,6 +474,12 @@ mod tests {
         let official = portrait.compute_ksx6101_official_header(4);
         assert_eq!(official.approval_cells.len(), 4);
         assert_eq!(official.collaboration_cells.len(), 4);
+
+        // Fail-closed page margin boundary validation
+        assert!(DocumentPageLayout::compute(PageOrientation::Portrait, 2, f64::NAN).is_err());
+        assert!(DocumentPageLayout::compute(PageOrientation::Portrait, 2, -1.0).is_err());
+        assert!(DocumentPageLayout::compute(PageOrientation::Portrait, 2, 300.0).is_err());
+        assert!(DocumentPageLayout::compute(PageOrientation::Landscape, 2, 300.0).is_err());
     }
 
     #[test]
@@ -446,6 +489,16 @@ mod tests {
         let clamped = stage.clamp_element_to_lower_stage(overlapping);
         assert!(clamped.y >= SlideStageLayout::LOWER_ELEMENT_ZONE_MIN_Y);
         assert!(stage.verify_non_overlapping(&[clamped]));
+
+        // SlideStageLayout overlap and boundary rejection tests
+        let touching = LayoutRect::new(clamped.x + clamped.width, clamped.y, 100.0, 50.0);
+        assert!(stage.verify_non_overlapping(&[clamped, touching])); // 경계 맞닿음 허용
+        let overlapped = LayoutRect::new(clamped.x + clamped.width - 5.0, clamped.y, 100.0, 50.0);
+        assert!(!stage.verify_non_overlapping(&[clamped, overlapped])); // 내부 겹침 거부
+        let out_of_stage = LayoutRect::new(750.0, 250.0, 100.0, 50.0);
+        assert!(!stage.verify_non_overlapping(&[out_of_stage])); // 오른쪽 경계 초과 거부
+        let in_upper_zone = LayoutRect::new(50.0, 100.0, 100.0, 50.0);
+        assert!(!stage.verify_non_overlapping(&[in_upper_zone])); // 상단 텍스트존 침범 거부
 
         let centered = LayoutRect::new(310.0, 250.0, 220.0, 100.0);
         let guides = stage.compute_snap_guides(&centered, &[], 4.0);

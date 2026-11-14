@@ -105,34 +105,34 @@ pub(crate) fn collect_refs(
                 sheet: own_sheet,
                 coord: *coord,
             }),
-            Expr::SheetCell { sheet, coord } => {
-                if let Some(idx) = resolve(sheet) {
+            Expr::SheetCell(sc) => {
+                if let Some(idx) = resolve(&sc.sheet) {
                     out.push(Ref::Cell {
                         sheet: idx,
-                        coord: *coord,
+                        coord: sc.coord,
                     });
                 }
             }
-            Expr::SpillRef { sheet, coord } => {
-                let target = match sheet {
+            Expr::SpillRef(sp) => {
+                let target = match &sp.sheet {
                     None => Some(own_sheet),
                     Some(name) => resolve(name),
                 };
                 if let Some(idx) = target {
                     out.push(Ref::Cell {
                         sheet: idx,
-                        coord: *coord,
+                        coord: sp.coord,
                     });
                 }
             }
-            Expr::Call { callee, args } => {
-                stack.push(callee);
-                stack.extend(args.iter());
+            Expr::Call(c) => {
+                stack.push(&c.callee);
+                stack.extend(c.args.iter());
             }
             Expr::Range(range) => out.push(Ref::rect(own_sheet, *range)),
-            Expr::SheetRange { sheet, range } => {
-                if let Some(idx) = resolve(sheet) {
-                    out.push(Ref::rect(idx, *range));
+            Expr::SheetRange(sr) => {
+                if let Some(idx) = resolve(&sr.sheet) {
+                    out.push(Ref::rect(idx, sr.range));
                 }
             }
             Expr::Shared(shared) => {
@@ -149,15 +149,15 @@ pub(crate) fn collect_refs(
                 stack.push(lhs);
                 stack.push(rhs);
             }
-            Expr::FuncCall { name, args } => {
-                volatile |= VOLATILE_FUNCTIONS.contains(&name.as_str());
-                stack.extend(args.iter());
+            Expr::FuncCall(f) => {
+                volatile |= VOLATILE_FUNCTIONS.contains(&f.name.as_str());
+                stack.extend(f.args.iter());
             }
             Expr::Number(_)
             | Expr::Text(_)
             | Expr::Boolean(_)
             | Expr::ErrorLiteral(_)
-            | Expr::Name { .. }
+            | Expr::Name(_)
             | Expr::Array(_)
             | Expr::Var(_)
             | Expr::Missing => {}

@@ -71,7 +71,7 @@ impl Parser<'_> {
             (Some(Token::Number(n)), sign) => {
                 Ok(EvaluatedCellValue::Number(n * sign.unwrap_or(1.0)))
             }
-            (Some(Token::Text(t)), None) => Ok(EvaluatedCellValue::Text(t)),
+            (Some(Token::Text(t)), None) => Ok(EvaluatedCellValue::Text(t.into_owned())),
             (Some(Token::ErrorLiteral(e)), None) => Ok(EvaluatedCellValue::Error(e)),
             (Some(Token::Ident(w)), None) if w.eq_ignore_ascii_case("TRUE") => {
                 Ok(EvaluatedCellValue::Boolean(true))
@@ -99,7 +99,8 @@ fn bound(scope: &[String], name: &str) -> bool {
 /// kept as the variable `?X` so that `LAMBDA` can tell it is optional.
 fn declare(arg: &mut Expr) -> Option<String> {
     match arg {
-        Expr::Name { scope: None, name } => {
+        Expr::Name(n) if n.scope.is_none() => {
+            let name = &n.name;
             let (optional, plain) = match name.strip_prefix("_xlop.") {
                 Some(rest) => (true, rest),
                 None => (false, name.as_str()),
@@ -118,8 +119,8 @@ fn declare(arg: &mut Expr) -> Option<String> {
 
 fn resolve(expr: &mut Expr, scope: &mut Vec<String>) {
     match expr {
-        Expr::Name { scope: None, name } if bound(scope, name) => {
-            *expr = Expr::Var(name.to_ascii_uppercase());
+        Expr::Name(n) if n.scope.is_none() && bound(scope, &n.name) => {
+            *expr = Expr::Var(n.name.to_ascii_uppercase());
         }
         Expr::UnaryPlus(inner) | Expr::UnaryMinus(inner) | Expr::PostfixPercent(inner) => {
             resolve(inner, scope);
@@ -128,44 +129,39 @@ fn resolve(expr: &mut Expr, scope: &mut Vec<String>) {
             resolve(lhs, scope);
             resolve(rhs, scope);
         }
-        Expr::Call { callee, args } => {
-            resolve(callee, scope);
-            args.iter_mut().for_each(|a| resolve(a, scope));
+        Expr::Call(c) => {
+            resolve(&mut c.callee, scope);
+            c.args.iter_mut().for_each(|a| resolve(a, scope));
         }
-        Expr::FuncCall { name, args }
-            if name == "LET" && args.len() >= 3 && args.len() % 2 == 1 =>
-        {
+        Expr::FuncCall(f) if f.name == "LET" && f.args.len() >= 3 && f.args.len() % 2 == 1 => {
             let mark = scope.len();
-            let last = args.len() - 1;
+            let last = f.args.len() - 1;
             for i in (0..last).step_by(2) {
-                resolve(&mut args[i + 1], scope);
-                if let Some(var) = declare(&mut args[i]) {
+                resolve(&mut f.args[i + 1], scope);
+                if let Some(var) = declare(&mut f.args[i]) {
                     scope.push(var);
                 }
             }
-            resolve(&mut args[last], scope);
+            resolve(&mut f.args[last], scope);
             scope.truncate(mark);
         }
-        Expr::FuncCall { name, args } if name == "LAMBDA" && !args.is_empty() => {
+        Expr::FuncCall(f) if f.name == "LAMBDA" && !f.args.is_empty() => {
             let mark = scope.len();
-            let last = args.len() - 1;
-            for arg in &mut args[..last] {
+            let last = f.args.len() - 1;
+            for arg in &mut f.args[..last] {
                 if let Some(var) = declare(arg) {
                     scope.push(var);
                 }
             }
-            resolve(&mut args[last], scope);
+            resolve(&mut f.args[last], scope);
             scope.truncate(mark);
         }
-        Expr::FuncCall { name, args } if bound(scope, name) => {
-            let mut inner = std::mem::take(args);
+        Expr::FuncCall(f) if bound(scope, &f.name) => {
+            let mut inner = std::mem::take(&mut f.args);
             inner.iter_mut().for_each(|a| resolve(a, scope));
-            *expr = Expr::Call {
-                callee: Box::new(Expr::Var(name.to_ascii_uppercase())),
-                args: inner,
-            };
+            *expr = Expr::call(Box::new(Expr::Var(f.name.to_ascii_uppercase())), inner);
         }
-        Expr::FuncCall { args, .. } => args.iter_mut().for_each(|a| resolve(a, scope)),
+        Expr::FuncCall(f) => f.args.iter_mut().for_each(|a| resolve(a, scope)),
         _ => {}
     }
 }

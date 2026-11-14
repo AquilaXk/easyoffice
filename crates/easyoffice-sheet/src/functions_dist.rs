@@ -2,12 +2,141 @@
 //! `GAMMA.DIST`, `BINOM.DIST`, `NORM.DIST` families with their inverses and the legacy names,
 //! plus `GAMMA` and `GAMMALN`. Numerics live in [`crate::special`] (ported from `statrs`).
 
-use crate::functions_complex::{std_normal_cdf, std_normal_pdf};
 use crate::special::{
     beta_regularized, gamma, gamma_regularized, invert, ln_beta, ln_gamma, Monotone,
 };
 use crate::{EvalContext, EvaluatedCellValue, Expr, FormulaError, SheetEngine};
 use std::f64::consts::PI;
+
+const FRAC_1_SQRT_PI: f64 = 0.564_189_583_547_756_3;
+pub(crate) const FRAC_1_SQRT_2PI: f64 = 0.398_942_280_401_432_7;
+
+/// W. J. Cody (1969) rational Chebyshev approximation for `erf(x)`, accurate to `< 1e-15`.
+#[allow(clippy::excessive_precision)]
+pub(crate) fn erf_cody(x: f64) -> f64 {
+    if x == 0.0 {
+        return 0.0;
+    }
+    let z = x.abs();
+    if z <= 0.46875 {
+        const P: [f64; 5] = [
+            3.161_123_743_870_565_6e00,
+            1.138_641_541_510_501_6e02,
+            3.774_852_376_853_02e02,
+            3.209_377_589_138_469_5e03,
+            1.857_777_061_846_031_5e-1,
+        ];
+        const Q: [f64; 4] = [
+            2.360_129_095_234_412_1e01,
+            2.440_246_379_344_441_7e02,
+            1.282_616_526_077_372_3e03,
+            2.844_236_833_439_171e03,
+        ];
+        let y = z * z;
+        let num = (((P[4] * y + P[0]) * y + P[1]) * y + P[2]) * y + P[3];
+        let den = (((y + Q[0]) * y + Q[1]) * y + Q[2]) * y + Q[3];
+        x * (num / den)
+    } else {
+        let c = erfc_cody_pos(z);
+        let res = 1.0 - c;
+        if x < 0.0 {
+            -res
+        } else {
+            res
+        }
+    }
+}
+
+/// W. J. Cody (1969) rational Chebyshev approximation for `erfc(z)` where `z >= 0`.
+#[allow(clippy::excessive_precision)]
+fn erfc_cody_pos(z: f64) -> f64 {
+    if z > 27.0 {
+        return 0.0;
+    }
+    if z <= 0.46875 {
+        return 1.0 - erf_cody(z);
+    }
+    let z_sq = (z * 16.0).trunc() / 16.0;
+    let del = (z - z_sq) * (z + z_sq);
+    let exp_term = (-z_sq * z_sq).exp() * (-del).exp();
+    if z <= 4.0 {
+        const C: [f64; 9] = [
+            5.641_884_969_886_701e-1,
+            8.883_149_794_388_376e00,
+            6.611_919_063_714_163e01,
+            2.986_351_381_974_001e02,
+            8.819_522_212_417_691e02,
+            1.712_047_612_634_070_6e03,
+            2.051_078_377_826_071_5e03,
+            1.230_339_354_797_997_2e03,
+            2.153_115_354_744_038_5e-8,
+        ];
+        const D: [f64; 8] = [
+            1.574_492_611_070_983_5e01,
+            1.176_939_508_913_125e02,
+            5.371_811_018_620_099e02,
+            1.621_389_574_566_690_2e03,
+            3.290_799_235_733_459_6e03,
+            4.362_619_090_143_247e03,
+            3.439_367_674_143_721_6e03,
+            1.230_339_354_803_749_5e03,
+        ];
+        let num = (((((((C[8] * z + C[0]) * z + C[1]) * z + C[2]) * z + C[3]) * z + C[4]) * z
+            + C[5])
+            * z
+            + C[6])
+            * z
+            + C[7];
+        let den = (((((((z + D[0]) * z + D[1]) * z + D[2]) * z + D[3]) * z + D[4]) * z + D[5]) * z
+            + D[6])
+            * z
+            + D[7];
+        exp_term * (num / den)
+    } else {
+        const P: [f64; 6] = [
+            3.053_266_349_612_323_4e-1,
+            3.603_448_999_498_044_4e-1,
+            1.257_817_261_112_292_5e-1,
+            1.608_378_514_874_228e-2,
+            6.587_491_615_298_378e-4,
+            1.631_538_713_730_209_7e-2,
+        ];
+        const Q: [f64; 5] = [
+            2.568_520_192_289_822_4,
+            1.872_952_849_923_460_4e00,
+            5.279_051_029_514_284e-1,
+            6.051_834_131_244_132e-2,
+            2.335_204_976_268_691_8e-3,
+        ];
+        let u = 1.0 / (z * z);
+        let num = u * (((((P[5] * u + P[0]) * u + P[1]) * u + P[2]) * u + P[3]) * u + P[4]);
+        let den = ((((u + Q[0]) * u + Q[1]) * u + Q[2]) * u + Q[3]) * u + Q[4];
+        exp_term * (FRAC_1_SQRT_PI - num / den) / z
+    }
+}
+
+#[inline]
+pub(crate) fn erfc_cody(x: f64) -> f64 {
+    if x == 0.0 {
+        1.0
+    } else if x > 0.0 {
+        erfc_cody_pos(x)
+    } else if x < -0.46875 {
+        2.0 - erfc_cody_pos(-x)
+    } else {
+        1.0 - erf_cody(x)
+    }
+}
+
+#[inline]
+pub(crate) fn std_normal_pdf(x: f64) -> f64 {
+    FRAC_1_SQRT_2PI * (-0.5 * x * x).exp()
+}
+
+#[inline]
+pub(crate) fn std_normal_cdf(z: f64) -> f64 {
+    0.5 * erfc_cody(-z * std::f64::consts::FRAC_1_SQRT_2)
+}
 
 pub(crate) type Num = Result<f64, FormulaError>;
 

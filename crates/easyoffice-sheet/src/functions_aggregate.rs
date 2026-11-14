@@ -27,8 +27,6 @@ const MAX_OPTION: i64 = 7;
 const FIRST_ARRAY_CODE: i64 = 14;
 /// Options 0 to 3 skip nested `SUBTOTAL` / `AGGREGATE` cells, 4 to 7 keep them.
 const NESTED_OPTIONS: i64 = 4;
-/// Ranges above this size with few populated cells are walked through the cell index.
-const SPARSE_MIN_CELLS: usize = 1024;
 
 #[derive(Clone, Copy)]
 struct Skip {
@@ -214,18 +212,27 @@ impl SheetEngine {
         let (sheet, min_r, min_c, rows, cols, transposed) = spec;
         let sheet = sheet.as_deref();
         let total = rows.saturating_mul(*cols);
-        let populated = self
-            .resolve_sheet_ref(sheet, ctx)
-            .filter(|target| {
-                !transposed && total > SPARSE_MIN_CELLS && total > target.cells.len() * 2
-            })
-            .map(|target| {
-                let last_row = min_r + (*rows as u32).saturating_sub(1);
-                let last_col = min_c + (*cols as u32).saturating_sub(1);
+        let target_sheet = self.resolve_sheet_ref(sheet, ctx);
+        let last_row = min_r + (*rows as u32).saturating_sub(1);
+        let last_col = min_c + (*cols as u32).saturating_sub(1);
+        let pop_count = target_sheet.map_or(total, |t| {
+            t.cell_index()
+                .count_in_range(*min_r, last_row, *min_c, last_col)
+        });
+        let populated = if !transposed
+            && (pop_count == 0 || (total > 64 && total > pop_count.saturating_mul(2)))
+        {
+            if pop_count == 0 {
+                return Ok(());
+            }
+            target_sheet.map(|target| {
                 target
                     .cell_index()
                     .range_coords(*min_r, last_row, *min_c, last_col)
-            });
+            })
+        } else {
+            None
+        };
         let mut visit = |coord: PackedCellCoordinate, ctx: &mut EvalContext<'_>| {
             if skip.nested && self.is_nested_subtotal_cell(sheet, coord, ctx) {
                 return Ok(());

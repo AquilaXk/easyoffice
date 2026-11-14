@@ -89,9 +89,7 @@ impl SheetEngine {
                 Some(val) => Ok(val.clone()),
                 None => Ok(Val::error(FormulaError::Name)),
             },
-            Expr::SpillRef { sheet, coord } => {
-                self.spill_ref_grid(sheet.as_deref(), *coord, ctx, depth)
-            }
+            Expr::SpillRef(sp) => self.spill_ref_grid(sp.sheet.as_deref(), sp.coord, ctx, depth),
             Expr::UnaryPlus(inner) | Expr::UnaryMinus(inner) | Expr::PostfixPercent(inner) => {
                 let grid = self.eval_val(inner, env, ctx, depth + 1)?.into_grid()?;
                 Ok(Val::grid(unary_grid(ctx, expr, &grid)?))
@@ -101,7 +99,9 @@ impl SheetEngine {
                 let r = self.eval_val(rhs, env, ctx, depth + 1)?.into_grid()?;
                 binary_grid(ctx, *op, &l, &r).map(Val::grid)
             }
-            Expr::Call { callee, args } => {
+            Expr::Call(c) => {
+                let callee = &c.callee;
+                let args = &c.args;
                 let f = self.eval_val(callee, env, ctx, depth + 1)?;
                 let mut vals = Vec::with_capacity(args.len());
                 for arg in args {
@@ -109,8 +109,8 @@ impl SheetEngine {
                 }
                 self.apply_val(&f, vals, ctx, depth + 1)
             }
-            Expr::FuncCall { name, args } => self.eval_val_call(name, args, env, ctx, depth),
-            Expr::Cell(_) | Expr::SheetCell { .. } | Expr::Range(_) | Expr::SheetRange { .. } => {
+            Expr::FuncCall(f) => self.eval_val_call(&f.name, &f.args, env, ctx, depth),
+            Expr::Cell(_) | Expr::SheetCell(_) | Expr::Range(_) | Expr::SheetRange(_) => {
                 match self.read_ref_grid(expr, ctx, depth)? {
                     Some(grid) => Ok(Val::grid(grid)),
                     None => Ok(Val::error(FormulaError::Ref)),
@@ -120,7 +120,7 @@ impl SheetEngine {
             | Expr::Text(_)
             | Expr::Boolean(_)
             | Expr::ErrorLiteral(_)
-            | Expr::Name { .. } => Ok(Val::scalar(self.eval_expr_ctx(expr, ctx, depth))),
+            | Expr::Name(_) => Ok(Val::scalar(self.eval_expr_ctx(expr, ctx, depth))),
         }
     }
 
@@ -133,7 +133,7 @@ impl SheetEngine {
         depth: usize,
     ) -> ValResult {
         match expr.peeled() {
-            Expr::Cell(_) | Expr::SheetCell { .. } | Expr::Range(_) | Expr::SheetRange { .. } => {
+            Expr::Cell(_) | Expr::SheetCell(_) | Expr::Range(_) | Expr::SheetRange(_) => {
                 Ok(Val::Ref(Arc::new(expr.peeled().clone())))
             }
             Expr::Var(name) => match env.get(name) {
@@ -318,10 +318,10 @@ impl SheetEngine {
             }
             "INDIRECT" | "OFFSET" => {
                 let mark = ctx.temp.len();
-                let call = Expr::FuncCall {
-                    name: name.to_string(),
-                    args: self.substitute_args(args, env, ctx, depth)?,
-                };
+                let call = Expr::func_call(
+                    name.to_string(),
+                    self.substitute_args(args, env, ctx, depth)?,
+                );
                 let grid = self.read_ref_grid(&call, ctx, depth);
                 ctx.temp.truncate(mark);
                 match grid? {
@@ -331,10 +331,10 @@ impl SheetEngine {
             }
             _ if crate::functions_matrix::is_array_fn(name) => {
                 let mark = ctx.temp.len();
-                let call = Expr::FuncCall {
-                    name: name.to_string(),
-                    args: self.substitute_args(args, env, ctx, depth)?,
-                };
+                let call = Expr::func_call(
+                    name.to_string(),
+                    self.substitute_args(args, env, ctx, depth)?,
+                );
                 let result = self.matrix_expr(&call, ctx, depth);
                 ctx.temp.truncate(mark);
                 match result {
@@ -419,7 +419,7 @@ impl SheetEngine {
             }
             let plain_ref = matches!(
                 arg.peeled(),
-                Expr::Cell(_) | Expr::SheetCell { .. } | Expr::Range(_) | Expr::SheetRange { .. }
+                Expr::Cell(_) | Expr::SheetCell(_) | Expr::Range(_) | Expr::SheetRange(_)
             );
             if plain_ref || !(needs_array(arg) || (!env.is_empty() && uses_vars(arg))) {
                 out.push(arg.clone());
@@ -446,10 +446,10 @@ impl SheetEngine {
         let start = PackedCellCoordinate::new(0, 0).map_err(|_| FormulaError::Spill)?;
         let range = CellRange::new(start, end).map_err(|_| FormulaError::Spill)?;
         ctx.temp.push(Arc::clone(grid));
-        Ok(Expr::SheetRange {
-            sheet: virtual_sheet_name(ctx.temp.len() - 1),
+        Ok(Expr::sheet_range(
+            virtual_sheet_name(ctx.temp.len() - 1),
             range,
-        })
+        ))
     }
 
     /// A one-value function over arrays: one call per element, the arrays stretched to the same shape.
@@ -464,7 +464,7 @@ impl SheetEngine {
         let mut grids: Vec<Option<Arc<Grid>>> = Vec::with_capacity(args.len());
         let mut call_args: Vec<Expr> = args.to_vec();
         for (i, arg) in args.iter().enumerate() {
-            let single_cell = |e: &Expr| matches!(e, Expr::Cell(_) | Expr::SheetCell { .. });
+            let single_cell = |e: &Expr| matches!(e, Expr::Cell(_) | Expr::SheetCell(_));
             match Self::bound_ref(arg, env) {
                 Some(reference) if single_cell(&reference) => {
                     call_args[i] = reference;
@@ -501,7 +501,7 @@ impl SheetEngine {
 fn uses_vars(expr: &Expr) -> bool {
     let mut found = false;
     crate::names::walk(expr, |node| {
-        found |= matches!(node, Expr::Var(_) | Expr::Call { .. });
+        found |= matches!(node, Expr::Var(_) | Expr::Call(_));
     });
     found
 }

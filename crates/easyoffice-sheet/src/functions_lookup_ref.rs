@@ -286,15 +286,15 @@ impl SheetEngine {
         let trimmed = formula.trim();
         let body = crate::parser::strip_formula_prefix(trimmed)
             .or_else(|| crate::parser::strip_open_formula_prefix(trimmed))?;
-        let Some(Ok(Expr::FuncCall { name, args })) =
+        let Some(Ok(Expr::FuncCall(call))) =
             self.compile_formula(ctx.current_coord, body.trim()).entry
         else {
             return None;
         };
-        if name != "HYPERLINK" || check_lookup_arity(&args, 1, 2).is_err() {
+        if call.name != "HYPERLINK" || check_lookup_arity(&call.args, 1, 2).is_err() {
             return None;
         }
-        let target = match self.eval_arg_val(&args[0], ctx, 0) {
+        let target = match self.eval_arg_val(&call.args[0], ctx, 0) {
             Ok(value) => value.to_display_string(),
             Err(e) => return Some(Err(e)),
         };

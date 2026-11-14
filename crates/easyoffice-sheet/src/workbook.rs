@@ -16,6 +16,8 @@ pub struct WorkbookEngine {
     pub(crate) tables: Arc<crate::table_index::TableIndex>,
     /// Nodes the formulas that use names hold, over all sheets (see `names::MAX_WORKBOOK_NAME_NODES`).
     name_budget: Arc<AtomicUsize>,
+    sheet_by_name: std::collections::HashMap<String, usize>,
+    sheet_by_id: std::collections::HashMap<u16, usize>,
 }
 
 impl Clone for WorkbookEngine {
@@ -31,6 +33,8 @@ impl Clone for WorkbookEngine {
             names: Arc::clone(&self.names),
             tables: Arc::clone(&self.tables),
             name_budget: budget,
+            sheet_by_name: self.sheet_by_name.clone(),
+            sheet_by_id: self.sheet_by_id.clone(),
         }
     }
 }
@@ -162,8 +166,8 @@ impl WorkbookEngine {
         };
         let folded = easyoffice_formats::fold_name(&def.name);
         if let Some(Ok(tree)) = self.names.resolved_expr(&folded, sheet) {
-            if let crate::Expr::SheetRange { sheet: at, range } = &tree.expr {
-                return self.range_text(at, range);
+            if let crate::Expr::SheetRange(sr) = &tree.expr {
+                return self.range_text(&sr.sheet, &sr.range);
             }
         }
         self.evaluate_formula_on_sheet(sheet, &format!("={}", def.name))
@@ -324,11 +328,29 @@ impl WorkbookEngine {
         if name.trim().is_empty() {
             return None;
         }
-        // A name that equals a non-blank one up to ASCII case is non-blank too, so the sheets'
-        // own names need no trimming here.
+        let key = name.to_ascii_uppercase();
+        if let Some(&idx) = self.sheet_by_name.get(&key) {
+            if idx < self.sheets.len() && self.sheets[idx].name.eq_ignore_ascii_case(name) {
+                return Some(idx);
+            }
+        }
         self.sheets
             .iter()
             .position(|s| s.name.eq_ignore_ascii_case(name))
+    }
+
+    pub fn sheet_by_id(&self, sheet_id: u16) -> Option<&SheetEngine> {
+        self.find_sheet_index_by_id(sheet_id)
+            .map(|i| &self.sheets[i])
+    }
+
+    pub(crate) fn find_sheet_index_by_id(&self, sheet_id: u16) -> Option<usize> {
+        if let Some(&idx) = self.sheet_by_id.get(&sheet_id) {
+            if idx < self.sheets.len() && self.sheets[idx].sheet_id == sheet_id {
+                return Some(idx);
+            }
+        }
+        self.sheets.iter().position(|s| s.sheet_id == sheet_id)
     }
 
     pub fn try_add_sheet(
@@ -356,7 +378,9 @@ impl WorkbookEngine {
             engine.sheet_id
         };
         let mut candidate = start_id;
-        while self.sheets.iter().any(|s| s.sheet_id == candidate) {
+        while self.sheet_by_id.contains_key(&candidate)
+            || self.sheets.iter().any(|s| s.sheet_id == candidate)
+        {
             candidate = candidate.checked_add(1).unwrap_or(1);
             if candidate == start_id {
                 return Err(EasyOfficeError::ResourceBudgetExceeded(
@@ -369,6 +393,10 @@ impl WorkbookEngine {
         engine.names = Arc::clone(&self.names);
         engine.tables = Arc::clone(&self.tables);
         engine.name_budget = Arc::clone(&self.name_budget);
+        let new_idx = self.sheets.len();
+        self.sheet_by_name
+            .insert(engine.name.to_ascii_uppercase(), new_idx);
+        self.sheet_by_id.insert(candidate, new_idx);
         self.sheets.push(engine);
         if !self.names.is_empty() {
             // A name may be scoped to the sheet that is new, or be the new sheet's name.
@@ -501,9 +529,9 @@ impl SheetEngine {
         };
         let val = self.evaluate_cell(a1);
         if let EvaluatedCellValue::Number(n) = val {
-            if let Some(Ok(crate::Expr::FuncCall { name, .. })) = self.compiled_asts.get(&coord) {
+            if let Some(Ok(crate::Expr::FuncCall(f))) = self.compiled_asts.get(&coord) {
                 if matches!(
-                    name.as_str(),
+                    f.name.as_str(),
                     "DATE" | "EDATE" | "EOMONTH" | "WORKDAY" | "TODAY" | "DATEVALUE" | "오늘"
                 ) && (1.0..=2_958_465.999_999).contains(&n)
                 {

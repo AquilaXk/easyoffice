@@ -110,6 +110,12 @@ impl WorkbookEngine {
         let mut scanned = 0usize;
         for (si, engine) in self.sheets().iter().enumerate() {
             for (&coord, raw) in &engine.cells {
+                scanned += 1;
+                if scanned % CLOCK_STRIDE == 0 && started.elapsed() > budget.time {
+                    return Err(EasyOfficeError::ResourceBudgetExceeded(
+                        "수식이 너무 많아 제한 시간 안에 참조를 옮기지 못했습니다.".to_string(),
+                    ));
+                }
                 if si == target && edit.map_coord(coord).is_none() {
                     if edit.kind == EditKind::Insert {
                         return Err(EasyOfficeError::InvalidArgument(
@@ -120,12 +126,6 @@ impl WorkbookEngine {
                 }
                 if crate::parser::strip_formula_prefix(raw).is_none() {
                     continue;
-                }
-                scanned += 1;
-                if scanned % CLOCK_STRIDE == 0 && started.elapsed() > budget.time {
-                    return Err(EasyOfficeError::ResourceBudgetExceeded(
-                        "수식이 너무 많아 제한 시간 안에 참조를 옮기지 못했습니다.".to_string(),
-                    ));
                 }
                 if let Some(new) =
                     rewrite_formula_refs(raw, &engine.name, &target_name, &edit, false)
@@ -158,7 +158,12 @@ impl WorkbookEngine {
             self.commit_tables(plan);
         }
         let mut rewritten = Vec::with_capacity(rewrites.len());
-        for (si, coord, new) in rewrites {
+        for (idx, (si, coord, new)) in rewrites.into_iter().enumerate() {
+            if idx % CLOCK_STRIDE == 0 && started.elapsed() > budget.time {
+                return Err(EasyOfficeError::ResourceBudgetExceeded(
+                    "수식 적용 제한 시간을 초과했습니다.".to_string(),
+                ));
+            }
             let at = if si == target {
                 edit.map_coord(coord).unwrap_or(coord)
             } else {

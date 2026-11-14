@@ -109,7 +109,17 @@ fn substitute_text(text: &str, old: &str, new: &str, target: Option<usize>) -> C
 }
 
 /// SEARCH: case-insensitive wildcard search; `start` is 1-based.
+#[allow(dead_code)]
 pub(crate) fn search_wildcard(needle: &str, hay: &str, start: isize) -> CellResult {
+    search_wildcard_ctx(needle, hay, start, None)
+}
+
+pub(crate) fn search_wildcard_ctx(
+    needle: &str,
+    hay: &str,
+    start: isize,
+    mut ctx: Option<&mut EvalContext<'_>>,
+) -> CellResult {
     if start < 1 {
         return Err(FormulaError::Value);
     }
@@ -128,8 +138,21 @@ pub(crate) fn search_wildcard(needle: &str, hay: &str, start: isize) -> CellResu
             Err(FormulaError::Value)
         };
     }
+    // Construct trailing wildcard pattern ONCE outside the loop avoiding O(|T|) heap allocations.
+    let trailing_tildes = needle.chars().rev().take_while(|&c| c == '~').count();
+    let pat = if trailing_tildes % 2 == 1 {
+        format!("{needle}~*")
+    } else {
+        format!("{needle}*")
+    };
     for (char_idx, (byte_pos, _)) in hay.char_indices().enumerate().skip(st) {
-        if crate::coercion::wildcard_prefix_match(&hay[byte_pos..], needle) {
+        if let Some(ref mut c) = ctx {
+            c.steps = c.steps.saturating_add(1);
+            if c.expired() {
+                return Err(FormulaError::Calc);
+            }
+        }
+        if crate::coercion::wildcard_match(&hay[byte_pos..], &pat) {
             return number_cell((char_idx + 1) as f64);
         }
     }
@@ -534,7 +557,7 @@ impl SheetEngine {
             None => 1,
         };
         if is_search {
-            search_wildcard(&needle, &hay, start)
+            search_wildcard_ctx(&needle, &hay, start, Some(ctx))
         } else {
             find_literal(&needle, &hay, start)
         }

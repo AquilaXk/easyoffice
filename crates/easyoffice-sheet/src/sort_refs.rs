@@ -104,11 +104,11 @@ fn parse_cell_ref(raw: &str, i: usize) -> Option<CellRef> {
     while cur < len && bytes[cur].is_ascii_digit() {
         cur += 1;
     }
-    if bytes
-        .get(cur)
-        .is_some_and(|&b| is_ident_byte(b) || b == b'(')
-    {
-        return None;
+    if cur < len {
+        let next_ch = raw[cur..].chars().next().unwrap();
+        if next_ch.is_alphanumeric() || next_ch == '_' || next_ch == '(' || next_ch == '.' {
+            return None;
+        }
     }
     let row = raw[row_start..cur].parse().ok()?;
     Some(CellRef {
@@ -185,9 +185,15 @@ pub(crate) fn adjust_formula_row_refs(raw: &str, own_sheet: &str, rows: SortedRo
         if b == b'"' && !in_single_quotes {
             in_double_quotes = !in_double_quotes;
         } else if b == b'\'' && !in_double_quotes {
+            if in_single_quotes && bytes.get(i + 1) == Some(&b'\'') {
+                out.push_str("''");
+                i += 2;
+                continue;
+            }
             in_single_quotes = !in_single_quotes;
             if !in_single_quotes && bytes.get(i + 1) == Some(&b'!') {
-                foreign = !raw[quote_start..i].eq_ignore_ascii_case(own_sheet);
+                let unescaped = raw[quote_start..i].replace("''", "'");
+                foreign = !unescaped.eq_ignore_ascii_case(own_sheet);
                 out.push_str("'!");
                 i += 2;
                 continue;
@@ -202,7 +208,13 @@ pub(crate) fn adjust_formula_row_refs(raw: &str, own_sheet: &str, rows: SortedRo
                     continue;
                 }
             }
-            let prev_is_ident = i > 0 && (is_ident_byte(bytes[i - 1]) || bytes[i - 1] == b'.');
+            let prev_char = if i > 0 {
+                raw[..i].chars().next_back()
+            } else {
+                None
+            };
+            let prev_is_ident =
+                prev_char.is_some_and(|ch| ch.is_alphanumeric() || ch == '_' || ch == '.');
             if !prev_is_ident {
                 if let Some(prefix) = sheet_prefix_len(bytes, i) {
                     foreign = !raw[i..i + prefix - 1].eq_ignore_ascii_case(own_sheet);
@@ -228,4 +240,34 @@ pub(crate) fn adjust_formula_row_refs(raw: &str, own_sheet: &str, rows: SortedRo
         i += ch.len_utf8();
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sort_refs_escaped_quotes_and_unicode_boundary() {
+        let rows = SortedRows::new(0, 10, 0, 1); // Row 1 moved to Row 2 (delta +1)
+
+        // 1. Escaped single quote in sheet name matches own_sheet -> rewritten
+        let rewritten = adjust_formula_row_refs("='팀''A'!A1", "팀'A", rows);
+        assert_eq!(rewritten, "='팀''A'!A2");
+
+        // Escaped single quote in sheet name does not match own_sheet -> foreign, untouched
+        let foreign = adjust_formula_row_refs("='팀''A'!A1", "다른시트", rows);
+        assert_eq!(foreign, "='팀''A'!A1");
+
+        // 2. Korean identifier containing A1 -> untouched!
+        let korean_ident = adjust_formula_row_refs("=매출A1 + 10", "Sheet1", rows);
+        assert_eq!(korean_ident, "=매출A1 + 10");
+
+        // Korean identifier following A1 -> untouched!
+        let korean_after = adjust_formula_row_refs("=A1매출 + 10", "Sheet1", rows);
+        assert_eq!(korean_after, "=A1매출 + 10");
+
+        // 3. Dot-containing function name -> function name untouched, argument rewritten
+        let norm_dist = adjust_formula_row_refs("=NORM.S.DIST(A1, TRUE)", "Sheet1", rows);
+        assert_eq!(norm_dist, "=NORM.S.DIST(A2, TRUE)");
+    }
 }

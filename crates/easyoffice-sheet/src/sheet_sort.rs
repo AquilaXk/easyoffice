@@ -85,14 +85,28 @@ impl SheetEngine {
             ));
         }
 
-        let rows = (end_row - start_row + 1) as usize;
+        // Collect populated cells in range first to prevent massive allocations on sparse trailing empty rows.
+        let in_range: Vec<PackedCellCoordinate> = self
+            .cells
+            .keys()
+            .copied()
+            .filter(|c| (start_row..=end_row).contains(&c.row()))
+            .collect();
+        if in_range.is_empty() {
+            return Ok(());
+        }
+        let effective_end_row = in_range.iter().map(|c| c.row()).max().unwrap();
+        let rows = (effective_end_row - start_row + 1) as usize;
+
         let mut ctx = EvalContext::standalone_id(self.resolved_sheet_id());
         let mut columns = Vec::with_capacity(keys.len());
         for key in keys {
             let mut column = SortColumn::new(key.ascending, case_sensitive, rows);
-            for r in start_row..=end_row {
+            for r in start_row..=effective_end_row {
                 let coord = PackedCellCoordinate::new(r, key.col)?;
                 if self.cells.contains_key(&coord) {
+                    ctx.steps = 0;
+                    ctx.circular = false;
                     push_value(&mut column, &self.eval_coord_ctx(coord, &mut ctx, 0));
                 } else {
                     column.push_empty();
@@ -104,16 +118,14 @@ impl SheetEngine {
 
         // Take the cells of the range out (no copies), grouped by source row.
         let mut moved: Vec<(u32, u32, String)> = Vec::new();
-        let in_range: Vec<PackedCellCoordinate> = self
-            .cells
-            .keys()
-            .copied()
-            .filter(|c| (start_row..=end_row).contains(&c.row()))
-            .collect();
-        for coord in in_range {
-            if let Some(raw) = self.cells.remove(&coord) {
+        for coord in &in_range {
+            if let Some(raw) = self.cells.remove(coord) {
                 moved.push((coord.row(), coord.col(), raw));
             }
+            self.compiled_asts.remove(coord);
+            self.subtotal_coords.remove(coord);
+            self.array_formulas.remove(coord);
+            self.update_dense_number(*coord, None);
         }
         moved.sort_unstable_by_key(|&(r, c, _)| (r, c));
         let mut starts = vec![0usize; rows + 1];
@@ -124,12 +136,14 @@ impl SheetEngine {
             starts[i + 1] += starts[i];
         }
 
+        let mut dirty_coords: Vec<PackedCellCoordinate> = Vec::with_capacity(moved.len());
         for (offset, &source) in order.iter().enumerate() {
             let target_row = start_row + offset as u32;
             let source_row = start_row + source;
             let from = starts[source as usize];
             let to = starts[source as usize + 1];
             for (_, col, raw) in &mut moved[from..to] {
+                let target_coord = PackedCellCoordinate::new(target_row, *col)?;
                 let text = std::mem::take(raw);
                 let text = if target_row == source_row {
                     text
@@ -140,11 +154,28 @@ impl SheetEngine {
                         SortedRows::new(start_row, end_row, source_row, target_row),
                     )
                 };
-                self.cells
-                    .insert(PackedCellCoordinate::new(target_row, *col)?, text);
+                self.cells.insert(target_coord, text);
+                dirty_coords.push(target_coord);
             }
         }
-        self.rebuild_compiled_asts();
+
+        for coord in dirty_coords {
+            if let Some(raw) = self.cells.get(&coord) {
+                let crate::compile::Compiled { entry, uses } = self.compile_cell_entry(coord, raw);
+                self.set_name_uses(coord, uses);
+                self.update_dense_number(coord, entry.as_ref());
+                self.mark_array_formula(coord, entry.as_ref());
+                if let Some(comp) = entry {
+                    if matches!(comp, Ok(ref expr) if crate::dag::expr_contains_subtotal(expr)) {
+                        self.subtotal_coords.insert(coord);
+                    }
+                    self.compiled_asts.insert(coord, comp);
+                }
+            }
+        }
+        self.drop_indexes();
+        self.invalidate_plan();
+        self.invalidate_caches();
         Ok(())
     }
 }

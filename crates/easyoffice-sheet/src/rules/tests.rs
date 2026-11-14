@@ -719,7 +719,10 @@ fn a_multiple_list_takes_any_chosen_items_of_the_list() {
     assert!(check(&literal, "B2", "red,blue"));
     assert!(check(&literal, "B2", "blue, green ,red"));
     assert!(!check(&literal, "B2", "red,pink"));
-    assert!(!check(&literal, "B2", "RED"));
+    assert!(
+        check(&literal, "B2", "RED"),
+        "case-insensitive matching for ListMultiple"
+    );
     assert!(check(&literal, "B2", ",red,"), "empty parts are ignored");
     let range = [dv(
         DvKind::ListMultiple,

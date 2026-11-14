@@ -50,7 +50,10 @@ fn round_to_multiple(up: bool, number: f64, significance: f64, mode: f64) -> f64
 
 /// `ROUNDBANK`: halves round to the even neighbor; the scaled value is first fixed to 8 decimals.
 fn round_bank(number: f64, digits: f64) -> f64 {
-    if digits > BANK_MAX_DIGITS {
+    if !number.is_finite() {
+        return number;
+    }
+    if digits > BANK_MAX_DIGITS || number.abs() >= 4_503_599_627_370_496.0 {
         return number;
     }
     if digits < -BANK_MAX_DIGITS {
@@ -75,10 +78,14 @@ fn round_bank(number: f64, digits: f64) -> f64 {
     }
 }
 
-/// `Number(x.toFixed(places))`: the decimal string rounding, half away from zero on the exact
-/// binary value, which `format!` reproduces.
+/// Pure f64 scale/rounding replacing format!("{:.places$}").parse() round-trip.
+#[inline]
 fn round_decimals(x: f64, places: usize) -> f64 {
-    format!("{x:.places$}").parse().unwrap_or(x)
+    let scale = 10f64.powi(places as i32);
+    if !x.is_finite() || x.abs() >= 4_503_599_627_370_496.0 / scale {
+        return x;
+    }
+    (x * scale).round() / scale
 }
 
 fn finite(v: f64) -> Fallible<EvaluatedCellValue> {
@@ -190,5 +197,17 @@ impl SheetEngine {
             }
             _ => unary(name, number),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn roundbank_handles_large_floats_without_overflow() {
+        assert_eq!(round_bank(1e305, 2.0), 1e305);
+        assert_eq!(round_bank(-1e305, 2.0), -1e305);
+        assert_eq!(round_decimals(1e305, 8), 1e305);
     }
 }

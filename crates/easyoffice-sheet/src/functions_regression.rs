@@ -152,12 +152,22 @@ pub(crate) fn pseudo_inverse_symmetric(m: &Matrix) -> Option<Matrix> {
         for p in 0..n {
             for q in p + 1..n {
                 let apq = a[p * n + q];
-                if apq == 0.0 {
+                if apq == 0.0 || !apq.is_finite() {
                     continue;
                 }
                 let theta = (a[q * n + q] - a[p * n + p]) / (2.0 * apq);
+                if !theta.is_finite() {
+                    continue;
+                }
                 let t = theta.signum() / (theta.abs() + (theta * theta + 1.0).sqrt());
-                let (c, s) = (1.0 / (t * t + 1.0).sqrt(), t / (t * t + 1.0).sqrt());
+                if !t.is_finite() {
+                    continue;
+                }
+                let denom = (t * t + 1.0).sqrt();
+                if denom == 0.0 || !denom.is_finite() {
+                    continue;
+                }
+                let (c, s) = (1.0 / denom, t / denom);
                 for k in 0..n {
                     let (akp, akq) = (a[k * n + p], a[k * n + q]);
                     a[k * n + p] = c * akp - s * akq;

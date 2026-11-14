@@ -328,9 +328,9 @@ impl SheetEngine {
         depth: usize,
     ) -> Result<Option<Matrix>, FormulaError> {
         match expr.peeled() {
-            Expr::FuncCall { name, args } if is_array_fn(name) => {
-                self.eval_matrix_call(name, args, ctx, depth).map(Some)
-            }
+            Expr::FuncCall(f) if is_array_fn(&f.name) => self
+                .eval_matrix_call(&f.name, &f.args, ctx, depth)
+                .map(Some),
             _ => Ok(None),
         }
     }
@@ -405,9 +405,9 @@ impl SheetEngine {
         if let Some(m) = self.matrix_expr(expr, ctx, depth + 1)? {
             return Ok(m);
         }
-        if let Expr::FuncCall { name, args } = expr.peeled() {
-            if name == "TRANSPOSE" && args.len() == 1 {
-                if let Some(m) = self.matrix_expr(&args[0], ctx, depth + 1)? {
+        if let Expr::FuncCall(f) = expr.peeled() {
+            if f.name == "TRANSPOSE" && f.args.len() == 1 {
+                if let Some(m) = self.matrix_expr(&f.args[0], ctx, depth + 1)? {
                     return Ok(m.transposed());
                 }
             }
