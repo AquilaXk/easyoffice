@@ -553,6 +553,9 @@ const DESKTOP_SHELL_CSP = {
   "img-src": "'self' data: blob:",
   "frame-src": "'self'",
   "connect-src": "'self' ipc: http://ipc.localhost",
+  // `default-src` does not cover a base URL, and a plug-in object has no use here.
+  "base-uri": "'none'",
+  "object-src": "'none'",
 };
 // The app commands live in one Rust list (shared by build.rs and the crate); the capability file may
 // grant exactly those (PD-088: engine IPC, save, and the narrow window commands; none takes a path).

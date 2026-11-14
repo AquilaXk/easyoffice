@@ -15,7 +15,9 @@
         "script-src": "'self' 'wasm-unsafe-eval'",
         "img-src": "'self' data: blob:",
         "frame-src": "'self'",
-        "connect-src": "'self' ipc: http://ipc.localhost"
+        "connect-src": "'self' ipc: http://ipc.localhost",
+        "base-uri": "'none'",
+        "object-src": "'none'"
       },
       "capabilities": ["main-window"]
     }

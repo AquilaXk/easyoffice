@@ -399,6 +399,8 @@ test("editor frame: the window capability is local-only, global Tauri stays off 
   const conf = JSON.parse(readRel("crates/easyoffice-desktop/tauri.conf.json"));
   assert.equal(conf.app.withGlobalTauri, false);
   assert.equal(conf.app.security.csp["frame-src"], "'self'");
+  assert.equal(conf.app.security.csp["base-uri"], "'none'");
+  assert.equal(conf.app.security.csp["object-src"], "'none'");
   // The editor document is answered with the --serve policy (no ipc: endpoints) by the app protocol hook.
   const windows = readRel("crates/easyoffice-desktop/src/window_commands.rs");
   assert.match(windows, /\.on_web_resource_request\([^)]*\|request, response\|/);
