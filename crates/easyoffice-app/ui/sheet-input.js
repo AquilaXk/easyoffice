@@ -516,6 +516,8 @@
       }
       delete td.dataset.editMode;
       td.classList.remove("editing");
+      // The caret scrolled a long text inside the cell; the finished cell shows its text from the start again.
+      td.scrollLeft = 0;
     }
 
     function cancelEdit(td) {
