@@ -6,6 +6,12 @@
   // (`sheet-view-state.js`) before the window leaves the sheet or the workbook is saved, `restore` gives a
   // sheet its own view back when the window comes to it. A sheet that has none shows A1 selected, unscrolled,
   // at 100 percent. Switching sheets lives here because it is the one place both happen.
+  //
+  // The zoom a sheet keeps and gives back when its tab is chosen follows another reference spreadsheet, whose sheet
+  // item sets the zoom of the sheet it switches to (`packages/react/src/components/SheetTab/SheetItem.tsx` lines
+  // 185 and 199, MIT, Copyright (c) 2022 Suzhou Ruilisi Technology Co., Ltd, commit
+  // 94346608877db4747406707a177c4b8f3bacdbf9). That reference keeps no selection or scroll position; those and the
+  // file side are written here.
 
   const viewApi = host.__EASYOFFICE_SHEET_VIEW_STATE__;
   const layoutApi = host.__EASYOFFICE_SHEET_LAYOUT__;

@@ -300,6 +300,9 @@ pub(crate) fn table_columns_xml(styling: &SheetStyling, table: &OdsStyleTable) -
     for &(first, last, _) in &outline.cols {
         cuts.extend([first, last + 1]);
     }
+    for &(first, last) in &outline.collapsed_cols {
+        cuts.extend([first, last + 1]);
+    }
     let header_end = crate::sheet_styling::ods_page::title_end(styling.page.title_cols);
     if let Some(end) = header_end {
         cuts.extend([0, end]);
@@ -311,7 +314,7 @@ pub(crate) fn table_columns_xml(styling: &SheetStyling, table: &OdsStyleTable) -
         &outline.open_cols,
     );
     // Stretches of equal width and level, from the cuts.
-    let mut stretches: Vec<(u32, u32, Option<u32>, u8, bool)> = Vec::new();
+    let mut stretches: Vec<(u32, u32, Option<u32>, u8, bool, bool)> = Vec::new();
     let cuts: Vec<u32> = cuts.into_iter().collect();
     for pair in cuts.windows(2) {
         let (from, to) = (pair[0], pair[1]);
@@ -322,26 +325,31 @@ pub(crate) fn table_columns_xml(styling: &SheetStyling, table: &OdsStyleTable) -
         if px.is_none() && level == 0 && !unlocked && header_end.is_none_or(|end| from >= end) {
             continue;
         }
+        // The columns a folded group hid are written collapsed as well, which is how the other spreadsheet programs
+        // tell a folded group from an open one.
+        let collapsed =
+            crate::sheet_styling::xlsx_layout::run_contains(&outline.collapsed_cols, from);
         match stretches.last_mut() {
             Some(last)
                 if last.1 == from
                     && last.2 == px
                     && last.3 == level
                     && last.4 == unlocked
+                    && last.5 == collapsed
                     && header_end != Some(from) =>
             {
                 last.1 = to
             }
-            _ => stretches.push((from, to, px, level, unlocked)),
+            _ => stretches.push((from, to, px, level, unlocked, collapsed)),
         }
     }
     let mut xml = String::new();
     let mut next = 0u32;
     let unlocked_name = table.unlocked_name();
-    for (from, to, px, _, unlocked) in stretches {
+    for (from, to, px, _, unlocked, collapsed) in stretches {
         if from > next {
             groups.close_all(&mut xml);
-            xml.push_str(&repeated_column(None, None, from - next));
+            xml.push_str(&repeated_column(None, None, false, from - next));
         }
         if from == 0 && header_end.is_some() {
             xml.push_str("<table:table-header-columns>");
@@ -350,6 +358,7 @@ pub(crate) fn table_columns_xml(styling: &SheetStyling, table: &OdsStyleTable) -
         xml.push_str(&repeated_column(
             px.and_then(|px| table.column_style_name(px)).as_deref(),
             unlocked_name.as_deref().filter(|_| unlocked),
+            collapsed,
             to - from,
         ));
         next = to;
@@ -362,7 +371,12 @@ pub(crate) fn table_columns_xml(styling: &SheetStyling, table: &OdsStyleTable) -
     xml
 }
 
-fn repeated_column(style: Option<&str>, default_cell: Option<&str>, count: u32) -> String {
+fn repeated_column(
+    style: Option<&str>,
+    default_cell: Option<&str>,
+    collapsed: bool,
+    count: u32,
+) -> String {
     let mut style = style.map_or(String::new(), |s| {
         format!(" table:style-name=\"{}\"", XmlSanitizer::escape(s))
     });
@@ -371,6 +385,9 @@ fn repeated_column(style: Option<&str>, default_cell: Option<&str>, count: u32) 
             " table:default-cell-style-name=\"{}\"",
             XmlSanitizer::escape(cell_style)
         ));
+    }
+    if collapsed {
+        style.push_str(" table:visibility=\"collapse\"");
     }
     let repeat = if count > 1 {
         format!(" table:number-columns-repeated=\"{count}\"")

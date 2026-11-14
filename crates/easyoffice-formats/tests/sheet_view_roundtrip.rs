@@ -475,6 +475,25 @@ fn an_inner_group_keeps_its_own_fold_when_the_outer_group_folds_and_opens_again(
             && content.contains("<table:table-row-group table:display=\"true\">"),
         "{content}"
     );
+    // The rows and columns a fold hid are collapsed as well, as the other spreadsheet programs write a folded group;
+    // an open group's rows are not.
+    let folded = ods_content(&pack_ods(nested(&[(4, 5)], false)));
+    assert_eq!(
+        folded
+            .matches("table:table-row table:visibility=\"collapse\"")
+            .count(),
+        2,
+        "{folded}"
+    );
+    assert_eq!(
+        folded
+            .matches("<table:table-column table:visibility=\"collapse\"")
+            .count(),
+        1,
+        "{folded}"
+    );
+    let open = ods_content(&pack_ods(nested(&[], false)));
+    assert!(!open.contains("collapse"), "{open}");
 }
 
 #[test]

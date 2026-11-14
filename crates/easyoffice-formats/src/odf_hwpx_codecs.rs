@@ -536,8 +536,15 @@ impl OdfCodec {
             }
             groups.move_to(content, row);
             let filtered = styling.is_some_and(|st| st.filter_hides(row));
+            // The rows a folded group hid are collapsed too, which is how the other spreadsheet programs tell a folded
+            // group from an open one; a reader here takes the fold from the group's `table:display`.
+            let folded = styling.is_some_and(|st| {
+                crate::sheet_styling::xlsx_layout::run_contains(&st.outline.collapsed_rows, row)
+            });
             let visibility = if filtered {
                 " table:visibility=\"filter\""
+            } else if folded {
+                " table:visibility=\"collapse\""
             } else {
                 ""
             };
