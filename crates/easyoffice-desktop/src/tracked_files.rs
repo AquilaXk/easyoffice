@@ -106,19 +106,39 @@ pub enum DiskState {
     Missing,
 }
 
-pub fn disk_state(path: &Path, expected: &Fingerprint) -> DiskState {
-    match Fingerprint::of(path) {
-        Ok(now) if now == *expected => DiskState::Unchanged,
+/// What the disk shows for a tracked path at one moment: how it compares with what the window last
+/// saw, and the file the path led to (a link may be pointed elsewhere) with that file's fingerprint.
+/// Two views that differ are two different answers to "what would a save write over".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiskView {
+    pub state: DiskState,
+    target: Option<PathBuf>,
+    now: Option<Fingerprint>,
+}
+
+pub fn disk_view(path: &Path, expected: &Fingerprint) -> DiskView {
+    let now = Fingerprint::of(path);
+    let state = match &now {
+        Ok(now) if now == expected => DiskState::Unchanged,
         Ok(_) => DiskState::Changed,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => DiskState::Missing,
         // Unreadable metadata (permissions, sharing violation): be careful and ask.
         Err(_) => DiskState::Changed,
+    };
+    DiskView {
+        state,
+        target: fs::canonicalize(path).ok(),
+        now: now.ok(),
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct TrackedFile {
+    /// The file the bytes are written to: the real file behind a symbolic link.
     pub path: PathBuf,
+    /// The path the user opened or saved by (a link's own name): its extension is the format the
+    /// document is saved in and its name is what the window shows.
+    pub shown: PathBuf,
     pub fingerprint: Fingerprint,
     /// The window was opened for this file and nothing was saved to another file since.
     pub from_open: bool,
@@ -143,7 +163,7 @@ pub fn path_has_extension(path: &Path, extension: &str) -> bool {
 impl TrackedFile {
     /// In-place saving keeps the format: a different extension goes through "save as" instead.
     pub fn extension_matches(&self, extension: &str) -> bool {
-        path_has_extension(&self.path, extension)
+        path_has_extension(&self.shown, extension)
     }
 }
 
@@ -154,20 +174,34 @@ pub struct TrackedFiles {
 
 impl TrackedFiles {
     /// The file the window was saved to.
-    pub fn track(&mut self, label: &str, path: PathBuf, fingerprint: Fingerprint) {
-        self.insert(label, path, fingerprint, false);
+    pub fn track(&mut self, label: &str, path: PathBuf, shown: PathBuf, fingerprint: Fingerprint) {
+        self.insert(label, path, shown, fingerprint, false);
     }
 
     /// The file the window was opened for.
-    pub fn track_opened(&mut self, label: &str, path: PathBuf, fingerprint: Fingerprint) {
-        self.insert(label, path, fingerprint, true);
+    pub fn track_opened(
+        &mut self,
+        label: &str,
+        path: PathBuf,
+        shown: PathBuf,
+        fingerprint: Fingerprint,
+    ) {
+        self.insert(label, path, shown, fingerprint, true);
     }
 
-    fn insert(&mut self, label: &str, path: PathBuf, fingerprint: Fingerprint, from_open: bool) {
+    fn insert(
+        &mut self,
+        label: &str,
+        path: PathBuf,
+        shown: PathBuf,
+        fingerprint: Fingerprint,
+        from_open: bool,
+    ) {
         self.by_label.insert(
             label.to_string(),
             TrackedFile {
                 path,
+                shown,
                 fingerprint,
                 from_open,
             },
@@ -214,11 +248,11 @@ mod tests {
         let file = dir.join("a.docx");
         fs::write(&file, b"one").unwrap();
         let seen = Fingerprint::of(&file).unwrap();
-        assert_eq!(disk_state(&file, &seen), DiskState::Unchanged);
+        assert_eq!(disk_view(&file, &seen).state, DiskState::Unchanged);
         fs::write(&file, b"three bytes more").unwrap();
-        assert_eq!(disk_state(&file, &seen), DiskState::Changed);
+        assert_eq!(disk_view(&file, &seen).state, DiskState::Changed);
         fs::remove_file(&file).unwrap();
-        assert_eq!(disk_state(&file, &seen), DiskState::Missing);
+        assert_eq!(disk_view(&file, &seen).state, DiskState::Missing);
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -240,7 +274,7 @@ mod tests {
         let now = fs::metadata(&file).unwrap();
         assert_eq!(now.len(), 6);
         assert_eq!(now.modified().unwrap(), stamp);
-        assert_eq!(disk_state(&file, &seen), DiskState::Changed);
+        assert_eq!(disk_view(&file, &seen).state, DiskState::Changed);
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -251,7 +285,7 @@ mod tests {
         fs::write(&file, b"abcdef").unwrap();
         let seen = Fingerprint::of(&file).unwrap();
         assert_eq!(Fingerprint::of(&file).unwrap(), seen);
-        assert_eq!(disk_state(&file, &seen), DiskState::Unchanged);
+        assert_eq!(disk_view(&file, &seen).state, DiskState::Unchanged);
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -361,25 +395,47 @@ mod tests {
         fs::write(&file, b"x").unwrap();
         let fp = Fingerprint::of(&file).unwrap();
         let mut files = TrackedFiles::default();
-        files.track("doc-1", file.clone(), fp);
+        files.track("doc-1", file.clone(), file.clone(), fp);
         let got = files.get("doc-1").unwrap();
         assert!(got.extension_matches("HWPX"));
         assert!(!got.extension_matches("hwp"));
         fs::write(&file, b"longer now").unwrap();
         files.set_fingerprint("doc-1", Fingerprint::of(&file).unwrap());
         assert_eq!(
-            disk_state(&file, &files.get("doc-1").unwrap().fingerprint),
+            disk_view(&file, &files.get("doc-1").unwrap().fingerprint).state,
             DiskState::Unchanged
         );
         files.untrack("doc-1");
         assert!(files.get("doc-1").is_none());
         let md_file = TrackedFile {
             path: dir.join("notes.markdown"),
+            shown: dir.join("notes.markdown"),
             fingerprint: fp,
             from_open: true,
         };
         assert!(md_file.extension_matches("md"));
         assert!(md_file.extension_matches("MARKDOWN"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A document opened through a link is saved into the file behind it, under the name and the
+    /// format of the link (the title and the file type the page shows are the link's too).
+    #[test]
+    fn a_tracked_file_has_the_format_and_the_name_of_what_the_user_opened() {
+        let dir = scratch("shown");
+        let behind = dir.join("a1b2c3.bin");
+        let link = dir.join("보고서.docx");
+        fs::write(&behind, b"x").unwrap();
+        let fp = Fingerprint::of(&behind).unwrap();
+        let mut files = TrackedFiles::default();
+        files.track_opened("doc-1", behind.clone(), link.clone(), fp);
+        let got = files.get("doc-1").unwrap();
+        assert!(got.extension_matches("docx"), "the format is the link's");
+        assert!(!got.extension_matches("bin"));
+        assert_eq!(got.path, behind, "the bytes go to the file behind it");
+        assert_eq!(got.shown, link);
+        files.track("doc-2", behind.clone(), link.clone(), fp);
+        assert_eq!(files.get("doc-2").unwrap().shown, link);
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -399,7 +455,7 @@ mod tests {
             opened.expect("open_regular returned").unwrap_err().kind(),
             std::io::ErrorKind::InvalidInput
         );
-        let state = within_time(&pipe, move || disk_state(&for_state, &seen));
+        let state = within_time(&pipe, move || disk_view(&for_state, &seen).state);
         assert_eq!(
             state,
             Some(DiskState::Changed),

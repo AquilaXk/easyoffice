@@ -10,7 +10,7 @@
 
 use crate::save_error::SaveError;
 use crate::save_verify::{verify_document_bytes, REFUSED_MESSAGE};
-use crate::tracked_files::{disk_state, DiskState, Fingerprint};
+use crate::tracked_files::{disk_view, DiskState, Fingerprint};
 use easyoffice_app::EasyOfficeIpcRouter;
 use serde::Serialize;
 use std::fs;
@@ -28,6 +28,8 @@ const TEMP_SUFFIX: &str = ".easyoffice-saving";
 
 /// Attempts at a free temporary name; a name only repeats if another process left one behind.
 const MAX_TEMP_NAME_ATTEMPTS: u32 = 16;
+/// How many times the user is asked about a file that keeps changing under the question.
+const MAX_CONFIRMATIONS: usize = 3;
 
 /// A save request from the WebView: a proposed file name (never a path) plus the document bytes.
 #[derive(Debug)]
@@ -282,16 +284,28 @@ pub enum InPlaceResult {
 /// Saves over the file the document came from. If the file no longer matches the fingerprint taken
 /// when it was opened, or is gone (deleted or moved), `confirm_overwrite` decides with what was found
 /// (the shell shows a native dialog, as the reference app does); the write itself is the same
-/// temp-file + fsync + rename as every other save.
+/// temp-file + fsync + rename as every other save. The question can stay open for a long time, so
+/// the disk is looked at again once it is answered: a file that turned into something else meanwhile
+/// (changed once more, or a link pointed at another file) is asked about again, and one that keeps
+/// changing is left alone after [`MAX_CONFIRMATIONS`] questions.
 pub fn save_in_place(
     path: &Path,
     expected: &Fingerprint,
     bytes: &[u8],
-    confirm_overwrite: impl FnOnce(DiskState) -> bool,
+    mut confirm_overwrite: impl FnMut(DiskState) -> bool,
 ) -> Result<InPlaceResult, SaveError> {
-    let state = disk_state(path, expected);
-    if state != DiskState::Unchanged && !confirm_overwrite(state) {
-        return Ok(InPlaceResult::Declined);
+    let mut asked_about = disk_view(path, expected);
+    let mut questions = 0;
+    while asked_about.state != DiskState::Unchanged {
+        if questions == MAX_CONFIRMATIONS || !confirm_overwrite(asked_about.state) {
+            return Ok(InPlaceResult::Declined);
+        }
+        questions += 1;
+        let after = disk_view(path, expected);
+        if after == asked_about {
+            break;
+        }
+        asked_about = after;
     }
     write_document_bytes(path, bytes).map(InPlaceResult::Saved)
 }
@@ -615,6 +629,92 @@ mod tests {
         assert_eq!(asked, Some(DiskState::Changed));
         assert_eq!(saved_bytes(accepted), 4);
         assert_eq!(fs::read(&target).unwrap(), b"mine");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The question stays open for as long as the user takes: what the file turns into meanwhile is
+    /// not what was shown, so the answer is only good for the file it was given about.
+    #[test]
+    fn a_file_that_changes_again_while_the_question_is_open_is_asked_about_again() {
+        let dir = scratch_dir("conflict-again");
+        let target = dir.join("a.hwp");
+        fs::write(&target, b"old").unwrap();
+        let seen = Fingerprint::of(&target).unwrap();
+        fs::write(&target, b"edited elsewhere").unwrap();
+        let mut asked = 0;
+        let result = save_in_place(&target, &seen, b"mine", |_| {
+            asked += 1;
+            if asked == 1 {
+                fs::write(&target, b"edited again while the dialog was up").unwrap();
+                return true;
+            }
+            false
+        })
+        .unwrap();
+        assert_eq!(asked, 2, "the second change is asked about too");
+        assert_eq!(result, InPlaceResult::Declined);
+        assert_eq!(
+            fs::read(&target).unwrap(),
+            b"edited again while the dialog was up"
+        );
+        // An answer about a file that stayed as it was is enough.
+        fs::write(&target, b"edited elsewhere").unwrap();
+        let mut asked = 0;
+        let accepted = save_in_place(&target, &seen, b"mine", |_| {
+            asked += 1;
+            true
+        })
+        .unwrap();
+        assert_eq!((asked, saved_bytes(accepted)), (1, 4));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_file_that_keeps_changing_is_asked_about_a_few_times_and_then_left_alone() {
+        let dir = scratch_dir("conflict-churn");
+        let target = dir.join("a.hwp");
+        fs::write(&target, b"old").unwrap();
+        let seen = Fingerprint::of(&target).unwrap();
+        fs::write(&target, b"0").unwrap();
+        let mut asked = 0;
+        let result = save_in_place(&target, &seen, b"mine", |_| {
+            asked += 1;
+            fs::write(&target, asked.to_string()).unwrap();
+            true
+        })
+        .unwrap();
+        assert_eq!(result, InPlaceResult::Declined);
+        assert_eq!(asked, MAX_CONFIRMATIONS);
+        assert_ne!(fs::read(&target).unwrap(), b"mine");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The path the question was about is a link that is pointed somewhere else while it is up.
+    #[cfg(unix)]
+    #[test]
+    fn a_link_that_is_retargeted_while_the_question_is_open_is_asked_about_again() {
+        let dir = scratch_dir("conflict-retarget");
+        let (first, second) = (dir.join("first.docx"), dir.join("second.docx"));
+        let link = dir.join("link.docx");
+        fs::write(&first, b"old").unwrap();
+        fs::write(&second, b"old").unwrap();
+        std::os::unix::fs::symlink(&first, &link).unwrap();
+        let seen = Fingerprint::of(&first).unwrap();
+        fs::write(&first, b"edited elsewhere").unwrap();
+        let mut asked = 0;
+        let result = save_in_place(&link, &seen, b"mine", |_| {
+            asked += 1;
+            if asked == 1 {
+                fs::remove_file(&link).unwrap();
+                std::os::unix::fs::symlink(&second, &link).unwrap();
+                fs::write(&second, b"edited elsewhere").unwrap();
+                return true;
+            }
+            false
+        })
+        .unwrap();
+        assert_eq!((asked, result), (2, InPlaceResult::Declined));
+        assert_eq!(fs::read(&second).unwrap(), b"edited elsewhere");
         let _ = fs::remove_dir_all(&dir);
     }
 

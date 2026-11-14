@@ -331,7 +331,7 @@ async fn save_tracked(
     let dialog_app = app.clone();
     let parent = window.clone();
     let path = tracked.path.clone();
-    let file_name = windows::display_name(&path);
+    let file_name = windows::display_name(&tracked.shown);
     let result = tauri::async_runtime::spawn_blocking(move || {
         save_in_place(&path, &tracked.fingerprint, request.bytes(), |state| {
             dialog_app
@@ -354,7 +354,7 @@ async fn save_tracked(
         InPlaceResult::Declined => Ok(SaveOutcome::cancelled()),
         InPlaceResult::Saved(written) => {
             window_commands::note_written(app, window.label(), written.fingerprint);
-            Ok(SaveOutcome::saved(&tracked.path, written.bytes))
+            Ok(SaveOutcome::saved(&tracked.shown, written.bytes))
         }
     }
 }

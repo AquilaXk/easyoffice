@@ -190,7 +190,7 @@ fn an_abandoned_open_lets_go_of_the_file_and_its_bytes() {
         .claim_path("doc-1-a", path_key(&canonical))
         .unwrap();
     let fingerprint = Fingerprint::of(&canonical).unwrap();
-    locked(&state.files).track_opened("doc-1-a", canonical.clone(), fingerprint);
+    locked(&state.files).track_opened("doc-1-a", canonical.clone(), canonical.clone(), fingerprint);
     locked(&state.pending).push(
         "doc-1-a",
         PendingOpen {
@@ -277,6 +277,34 @@ fn a_file_opened_through_a_link_keeps_the_links_name() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// A link and the file behind it may differ in their extension: the document is saved in place in
+/// the format of the name it was opened by, into the file behind the link, and the link stays.
+#[cfg(unix)]
+#[test]
+fn a_link_with_another_extension_than_its_target_still_saves_in_place() {
+    let dir = scratch_dir("open-link-ext");
+    let real = dir.join("data").join("a1b2c3.bin");
+    fs::create_dir_all(real.parent().unwrap()).unwrap();
+    fs::write(&real, b"old").unwrap();
+    let link = dir.join("분기 보고서.docx");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    let OpenTarget { canonical, shown } = OpenTarget::of(&link).unwrap();
+    let state = AppWindows::new(None);
+    let fingerprint = Fingerprint::of(&canonical).unwrap();
+    locked(&state.files).track_opened("doc-1-a", canonical, shown, fingerprint);
+    let tracked = locked(&state.files).get("doc-1-a").unwrap();
+    assert!(tracked.extension_matches("docx"));
+    crate::save_file::save_in_place(&tracked.path, &tracked.fingerprint, b"new", |_| false)
+        .unwrap();
+    assert_eq!(fs::read(&real).unwrap(), b"new");
+    assert!(fs::symlink_metadata(&link)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert_eq!(display_name(&tracked.shown), "분기 보고서.docx");
+    let _ = fs::remove_dir_all(&dir);
+}
+
 /// The size is checked before the read, and the file may grow in between: the read itself is
 /// bounded, so no more than the limit (plus the one byte that shows the overrun) is held.
 #[test]
@@ -304,12 +332,22 @@ fn an_abandoned_open_leaves_a_file_the_window_was_saved_to_meanwhile() {
     locked(&state.registry)
         .claim_path("doc-1-a", opened_key.clone())
         .unwrap();
-    locked(&state.files).track_opened("doc-1-a", opened, Fingerprint::of(&saved).unwrap());
+    locked(&state.files).track_opened(
+        "doc-1-a",
+        opened.clone(),
+        opened,
+        Fingerprint::of(&saved).unwrap(),
+    );
     // What `note_saved_path` does for a save to `b.docx`.
     locked(&state.registry)
         .claim_path("doc-1-a", saved_key.clone())
         .unwrap();
-    locked(&state.files).track("doc-1-a", saved.clone(), Fingerprint::of(&saved).unwrap());
+    locked(&state.files).track(
+        "doc-1-a",
+        saved.clone(),
+        saved.clone(),
+        Fingerprint::of(&saved).unwrap(),
+    );
     state.abandon_open("doc-1-a");
     assert_eq!(locked(&state.files).get("doc-1-a").unwrap().path, saved);
     assert_eq!(

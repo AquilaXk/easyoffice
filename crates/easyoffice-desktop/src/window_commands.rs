@@ -539,7 +539,7 @@ pub fn open_path(app: &AppHandle, path: &Path) -> Result<OpenOutcome, String> {
             return Ok(OpenOutcome::FOCUSED);
         }
     }
-    locked(&state.files).track_opened(&label, canonical.clone(), fingerprint);
+    locked(&state.files).track_opened(&label, canonical.clone(), shown.clone(), fingerprint);
     locked(&state.pending).push(
         &label,
         PendingOpen {
@@ -624,7 +624,7 @@ pub fn note_saved_path(
         .is_ok();
     match fingerprint {
         Some(fingerprint) if claimed => {
-            locked(&state.files).track(label, canonical.clone(), fingerprint)
+            locked(&state.files).track(label, canonical.clone(), shown.clone(), fingerprint)
         }
         _ => locked(&state.files).untrack(label),
     }
