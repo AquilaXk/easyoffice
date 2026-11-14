@@ -271,7 +271,7 @@ test("the oldest steps leave when the bytes pass the bound, and a step over the 
   assert.ok(history.sizes().bytes <= limits.MAX_HISTORY_BYTES);
   history.pushRecord({ kind: "delta", bytes: limits.MAX_HISTORY_BYTES + 1 });
   assert.equal(history.sizes().undo, 0, "the record of steps ends");
-  assert.equal(feedback.textContent, "실행 취소 기록 한도 초과: 기록을 비움");
+  assert.equal(feedback.textContent, "", "and says nothing: the undo has nothing to undo");
   history.pushRecord({ kind: "delta", bytes: 10 });
   assert.equal(history.sizes().undo, 1, "and starts again");
 });

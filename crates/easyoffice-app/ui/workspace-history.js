@@ -62,8 +62,8 @@
       record.bytes ??= snapshotBytes(record);
       redoStack.length = 0;
       if (record.bytes > MAX_HISTORY_BYTES) {
+        // A step over the bound cannot be kept: the record ends without a message and the undo has nothing to undo.
         undoStack.length = 0;
-        say("실행 취소 기록 한도 초과: 기록을 비움");
         return;
       }
       undoStack.push(record);
