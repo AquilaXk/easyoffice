@@ -223,6 +223,17 @@ pub fn date_tree(numbers: &[f64], dates: &RowBits, excluded: &RowBits) -> DateTr
     tree
 }
 
+/// The rows `date_tree` counts: the date cells with a date part among the rows `excluded` leaves visible.
+pub fn tree_rows(numbers: &[f64], dates: &RowBits, excluded: &RowBits) -> RowBits {
+    let mut rows = RowBits::new(numbers.len());
+    for (i, &serial) in numbers.iter().enumerate() {
+        if dates.get(i) && !excluded.get(i) && Moment::of_serial(serial).is_some() {
+            rows.set(i);
+        }
+    }
+    rows
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

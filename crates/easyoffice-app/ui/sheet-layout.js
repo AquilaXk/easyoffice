@@ -406,6 +406,19 @@
     return true;
   }
 
+  // Clears the conditions of a table's own filter and the rows they hide (the table keeps its filter buttons).
+  // True when there was anything to clear.
+  function clearTableFilter(name, tableName) {
+    const layout = bySheet[name];
+    const table = layout?.tables?.find((t) => t.name === tableName);
+    if (!table || (!table.filter?.length && !table.filterHidden?.length)) return false;
+    if (table.filter) table.filter = [];
+    delete table.filterHidden;
+    layout.rows = null;
+    touch();
+    return true;
+  }
+
   // ---- the tables (PD-224) ----------------------------------------------------------------------------------------
   const tablesOf = (name) => bySheet[name]?.tables || [];
 
@@ -591,6 +604,7 @@
     filterOf,
     setFilter,
     setTableFilterHidden,
+    clearTableFilter,
     filterToJson,
     colHidden,
     hiddenColRuns,

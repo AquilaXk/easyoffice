@@ -484,9 +484,27 @@
       });
     }
 
+    // The table with a filter that holds the active cell: `필터 지우기` clears that filter, as the data tab's clear does
+    // for the range around the active cell (PD-226).
+    function activeFilteredTable(name) {
+      const rg = getRange();
+      return layoutApi
+        .tablesIn(name, rg.r1, rg.c1, rg.r2, rg.c2)
+        .find((t) => t.filter?.length || t.filterHidden?.length);
+    }
+
     function clearAll() {
       if (blocked(false)) return Promise.resolve(false);
       return change(async (name) => {
+        const table = activeFilteredTable(name);
+        if (table) {
+          layoutApi.clearTableFilter(name, table.name);
+          grid.layoutChanged();
+          refreshWindowFromModel();
+          say("필터 지움");
+          changed();
+          return true;
+        }
         const filter = filterOf(name);
         if (!filter || (filter.columns.length === 0 && filter.hidden.length === 0)) {
           say("지울 필터 조건 없음");

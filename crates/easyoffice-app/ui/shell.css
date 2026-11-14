@@ -317,6 +317,11 @@
 /* Auto filter (PD-198): the panel is a `.context-menu` (menu-bar.css) with a search field, a virtual list and the dialog buttons. */
 .sheet-filter-panel { width: 240px; padding: 4px 0 8px; }
 .sheet-filter-panel .md-item[data-filter-act] { padding-left: 16px; }
+.sheet-filter-panel { overflow: visible; }
+.sheet-filter-panel .md-sub { padding-left: 16px; }
+.sheet-filter-panel .md-sub-panel .sb-hl-palette-row { padding: 2px 16px; margin-bottom: 0; }
+.sheet-filter-row .sheet-filter-arrow { margin-left: 0; padding-left: 0; flex: none; }
+.sheet-filter-row .sheet-filter-arrow[hidden] { display: none; }
 .sheet-filter-search { padding: 2px 8px 6px; }
 .sheet-filter-panel .dialog-text-input { width: 100%; }
 .sheet-filter-list { position: relative; margin: 0 8px; overflow-y: auto; box-sizing: border-box; border: 1px solid var(--color-border); background: var(--color-surface); font-size: var(--font-size-sm); outline: none; }

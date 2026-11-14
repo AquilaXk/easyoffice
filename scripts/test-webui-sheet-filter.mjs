@@ -319,8 +319,8 @@ test("a value condition hides rows apart from the user's, shows on the header an
   assert.equal(panel.hidden, false);
   assert.equal(d.getElementById("sheet-filter-count").textContent, "3 / 3", "영업, 개발, 기획");
   const rows = () => [...d.querySelectorAll("#sheet-filter-rows .sheet-filter-row")].filter((r) => !r.hidden);
-  assert.deepEqual(rows().map((r) => r.children[1].textContent), ["모두 선택", "개발", "기획", "영업"]);
-  assert.deepEqual(rows().map((r) => r.children[2].textContent), ["", "2", "1", "3"]);
+  assert.deepEqual(rows().map((r) => r.children[2].textContent), ["(모두 선택)", "개발", "기획", "영업"]);
+  assert.deepEqual(rows().map((r) => r.children[3].textContent), ["", "2", "1", "3"]);
   // Uncheck 개발 and 기획, then confirm: only 영업 stays.
   await click(h, rows()[1]);
   await click(h, rows()[2]);
@@ -342,7 +342,7 @@ test("a value condition hides rows apart from the user's, shows on the header an
   assert.equal(apply.data.length, 1, "only the column that has a condition is sent");
   // The list of the other column leaves out the rows column A hides.
   await panelOpen("B");
-  assert.deepEqual(rows().map((r) => r.children[1].textContent), ["모두 선택", "10", "30", "50"]);
+  assert.deepEqual(rows().map((r) => r.children[2].textContent), ["(모두 선택)", "10", "30", "50"]);
   d.getElementById("sheet-filter-panel").hidden = true;
   // Editing a cell does not move the rows; "다시 적용" judges the cells as they are now.
   await click(h, act(d, "filter-reapply"));
@@ -417,7 +417,7 @@ async function openPanel(h, col) {
 }
 
 const shownRows = (d) => [...d.querySelectorAll("#sheet-filter-rows .sheet-filter-row")].filter((r) => !r.hidden);
-const labels = (d) => shownRows(d).map((r) => r.children[1].textContent);
+const labels = (d) => shownRows(d).map((r) => r.children[2].textContent);
 
 test("a press away from the corner of a header cell selects the cell and does not open the panel", async () => {
   const h = await createHarness();
@@ -442,7 +442,7 @@ test("the list keeps only the rows in view, however many values a column has", a
   await openPanel(h, "A");
   assert.equal(d.getElementById("sheet-filter-count").textContent, many + 1 + " / " + (many + 1), "the blank row counts");
   assert.ok(shownRows(d).length <= 20, "rows in the document: " + shownRows(d).length);
-  assert.equal(labels(d)[0], "모두 선택");
+  assert.equal(labels(d)[0], "(모두 선택)");
   assert.equal(d.getElementById("sheet-filter-rows").style.height, (many + 2) * 22 + "px");
   // Scrolling moves the window: the first row now shown is far down the list.
   const list = d.getElementById("sheet-filter-list");
@@ -450,7 +450,7 @@ test("the list keeps only the rows in view, however many values a column has", a
   list.dispatchEvent({ type: "scroll", target: list });
   assert.ok(shownRows(d).length <= 20);
   assert.ok(labels(d).includes("값02999") || labels(d).includes("값02998"), labels(d).join());
-  assert.ok(!labels(d).includes("모두 선택"));
+  assert.ok(!labels(d).includes("(모두 선택)"));
 });
 
 test("a list cut at its limit is read-only until a search narrows it", async () => {
@@ -495,7 +495,7 @@ test("the panel is driven from the keyboard: Alt+Down opens it, arrows and space
   const panel = d.getElementById("sheet-filter-panel");
   assert.equal(panel.hidden, false);
   assert.equal(d.activeElement.id, "sheet-filter-search", "the search field takes the focus");
-  // Down from the search field moves into the list, on "모두 선택".
+  // Down from the search field moves into the list, on "(모두 선택)".
   key(d.getElementById("sheet-filter-search"), "ArrowDown");
   assert.equal(d.activeElement.id, "sheet-filter-list");
   assert.equal(d.getElementById("sheet-filter-list").getAttribute("aria-activedescendant"), "sheet-filter-row-0");
@@ -786,4 +786,190 @@ test("the colours the rules give a column are sent as runs for a colour conditio
   layout.replaceAll({ 표: { filter: { range: "A1:B7", columns: [{ col: 1, values: ["영업"] }] } } });
   await click(h, act(d, "filter-reapply"));
   assert.equal(h.requests.at(-1).data[0].fill, undefined);
+});
+
+test("필터 지우기 clears the filter of the table around the active cell and shows its rows, one undo brings it back", async () => {
+  const h = await createHarness(undefined, GROWN);
+  const d = h.document;
+  const layout = h.host.__EASYOFFICE_SHEET_LAYOUT__;
+  layout.replaceAll({
+    표: {
+      hiddenRows: [[2, 2]],
+      filter: { range: "D1:E7", columns: [{ col: 4, values: ["x"] }], hidden: [[3, 3]] },
+      tables: [{ name: "T", range: "A1:B7", header: true, columns: ["부서", "매출"], filter: [{ col: 1, values: ["영업"] }], filterHidden: [[3, 3], [5, 5]] }],
+    },
+  });
+  // The active cell is outside the table: the sheet's filter is what clears.
+  cell(d, "D2").focus();
+  await click(h, act(d, "filter-clear"));
+  assert.deepEqual(layout.filterOf("표").columns, []);
+  assert.deepEqual(layout.tablesOf("표")[0].filterHidden, [[3, 3], [5, 5]], "the table keeps its rows");
+  // The active cell is in the table: its conditions and rows go, the user's row stays hidden.
+  cell(d, "A4").focus();
+  await click(h, act(d, "filter-clear"));
+  const table = layout.tablesOf("표")[0];
+  assert.deepEqual(table.filter, []);
+  assert.equal(table.filterHidden, undefined);
+  assert.deepEqual([2, 3, 5].map((r) => layout.rowHidden("표", r)), [true, false, false]);
+  assert.equal(feedback(d), "필터 지움");
+  await click(h, undo(d));
+  assert.deepEqual(layout.tablesOf("표")[0].filter, [{ col: 1, values: ["영업"] }]);
+  assert.deepEqual(layout.tablesOf("표")[0].filterHidden, [[3, 3], [5, 5]]);
+  // Nothing left to clear in the table, and no sheet filter conditions either.
+  await click(h, undo(d));
+  cell(d, "A4").focus();
+  await click(h, act(d, "filter-clear"));
+  await click(h, act(d, "filter-clear"));
+  assert.equal(feedback(d), "필터 지움", "the second one clears the sheet filter's conditions");
+});
+
+// ---- PD-226: the date tree and the colour submenu of the panel -------------------------------------------------
+
+const TREE = { years: [[2023, 3, [[3, 2, [[15, 1], [16, 1]]], [4, 1, [[1, 1]]]]], [2024, 1, [[1, 1, [[5, 1]]]]]], more: false };
+
+function treeEngine(extra = {}) {
+  return (body) => {
+    if (body.op === "values") return { items: [["x", 1]], blank: 0, more: false, dates: TREE, ...extra };
+    if (body.op === "apply") return { hidden: [], count: 0 };
+    return undefined;
+  };
+}
+
+const arrowOf = (row) => row.children[0];
+
+test("a column's dates are a year, month, day tree that folds, and a checked node is a date group", async () => {
+  const h = await createHarness(treeEngine());
+  const d = h.document;
+  cell(d, "A2").focus();
+  await click(h, act(d, "filter-toggle"));
+  await openPanel(h, "A");
+  const rows = () => shownRows(d);
+  assert.deepEqual(labels(d), ["(모두 선택)", "2023", "2024", "x"], "folded: the years, then the other texts");
+  assert.deepEqual(rows().map((r) => r.children[3].textContent), ["", "3", "1", "1"]);
+  assert.equal(d.getElementById("sheet-filter-count").textContent, "5 / 5", "the days and the text");
+  assert.equal(rows()[1].getAttribute("aria-expanded"), "false");
+  assert.equal(arrowOf(rows()[3]).hidden, true, "a text has no chevron");
+  assert.equal(arrowOf(rows()[1]).hidden, false);
+  assert.equal(arrowOf(rows()[1]).dataset.icon, "chevron-right");
+  // Unfold 2023, then March.
+  await click(h, arrowOf(rows()[1]));
+  assert.deepEqual(labels(d), ["(모두 선택)", "2023", "3월", "4월", "2024", "x"]);
+  assert.equal(arrowOf(rows()[1]).dataset.icon, "chevron-down");
+  assert.equal(rows()[1].getAttribute("aria-expanded"), "true");
+  await click(h, arrowOf(rows()[2]));
+  assert.deepEqual(labels(d), ["(모두 선택)", "2023", "3월", "15", "16", "4월", "2024", "x"]);
+  assert.equal(rows()[3].style.paddingLeft, "40px", "a day is two levels in");
+  // Uncheck the 16th: its month and year turn mixed. Uncheck the 2024 node as a whole.
+  await click(h, rows()[4]);
+  assert.equal(rows()[2]._box.indeterminate, true);
+  assert.equal(rows()[1]._box.indeterminate, true);
+  assert.equal(d.getElementById("sheet-filter-count").textContent, "4 / 5");
+  await click(h, rows()[6]);
+  assert.equal(rows()[6]._box.checked, false);
+  await click(h, rows()[6]);
+  await click(h, d.getElementById("btn-sheet-filter-ok"));
+  const apply = h.requests.filter((r) => r.op === "apply").at(-1);
+  // A whole year is a year group, a whole month a month group, the rest single days.
+  assert.deepEqual(apply.filter.columns, [
+    { col: 1, values: ["x"], dates: [{ unit: "day", year: 2023, month: 3, day: 15 }, { unit: "month", year: 2023, month: 4 }, { unit: "year", year: 2024 }] },
+  ]);
+  // The panel shows the saved groups again.
+  await openPanel(h, "A");
+  await click(h, arrowOf(shownRows(d)[1]));
+  await click(h, arrowOf(shownRows(d)[2]));
+  assert.deepEqual(shownRows(d).map((r) => [r.children[2].textContent, r._box.checked, r._box.indeterminate]), [
+    ["(모두 선택)", false, true],
+    ["2023", false, true],
+    ["3월", false, true],
+    ["15", true, false],
+    ["16", false, false],
+    ["4월", true, false],
+    ["2024", true, false],
+    ["x", true, false],
+  ]);
+});
+
+test("choosing every value, dates included, clears the condition, and a search lists the texts flat", async () => {
+  const h = await createHarness(treeEngine());
+  const d = h.document;
+  cell(d, "A2").focus();
+  await click(h, act(d, "filter-toggle"));
+  await openPanel(h, "A");
+  await click(h, d.getElementById("btn-sheet-filter-ok"));
+  assert.deepEqual(h.host.__EASYOFFICE_SHEET_LAYOUT__.filterOf("표").columns, [], "nothing unchecked");
+  // Uncheck "(모두 선택)" and check the 2024 year only.
+  await openPanel(h, "A");
+  await click(h, shownRows(d)[0]);
+  assert.equal(d.getElementById("btn-sheet-filter-ok").disabled, true, "nothing checked");
+  await click(h, shownRows(d)[2]);
+  await click(h, d.getElementById("btn-sheet-filter-ok"));
+  assert.deepEqual(h.host.__EASYOFFICE_SHEET_LAYOUT__.filterOf("표").columns, [{ col: 1, values: [], dates: [{ unit: "year", year: 2024 }] }]);
+});
+
+test("a condition from a file that has date groups and no texts shows its groups checked", async () => {
+  const h = await createHarness(treeEngine());
+  const d = h.document;
+  const layout = h.host.__EASYOFFICE_SHEET_LAYOUT__;
+  cell(d, "A2").focus();
+  await click(h, act(d, "filter-toggle"));
+  layout.setFilter("표", { ...layout.filterOf("표"), columns: [{ col: 1, values: [], dates: [{ unit: "month", year: 2023, month: 3 }] }] });
+  cell(d, "A1").focus();
+  key(cell(d, "A1"), "ArrowDown", { altKey: true });
+  await flushAsyncTurns(10);
+  await click(h, arrowOf(shownRows(d)[1]));
+  await click(h, arrowOf(shownRows(d)[2]));
+  assert.deepEqual(shownRows(d).map((r) => [r.children[2].textContent, r._box.checked]), [
+    ["(모두 선택)", false], ["2023", false], ["3월", true], ["15", true], ["16", true], ["4월", false], ["2024", false], ["x", false],
+  ]);
+  // The keyboard folds with the arrow keys.
+  const list = d.getElementById("sheet-filter-list");
+  list.focus();
+  const at = (k) => key(list, k);
+  // The cursor is on March, where the last fold left it: down and up again, then fold it.
+  at("ArrowDown");
+  at("ArrowUp");
+  at("ArrowLeft");
+  assert.deepEqual(labels(d).slice(0, 4), ["(모두 선택)", "2023", "3월", "4월"], "March folded");
+  at("ArrowRight");
+  assert.equal(labels(d)[3], "15");
+});
+
+test("the 색 기준 필터 submenu lists the colours of the column and sets a colour condition", async () => {
+  const colors = { fill: [["ffc7ce", 2], ["00ff00", 1]], font: [["9c0006", 1]], noFill: 3, noFont: 5 };
+  const h = await createHarness((body) => (body.op === "values" ? { items: [["x", 1]], blank: 0, more: false, colors } : body.op === "apply" ? { hidden: [], count: 0 } : undefined));
+  const d = h.document;
+  cell(d, "A2").focus();
+  await click(h, act(d, "filter-toggle"));
+  await openPanel(h, "A");
+  const sub = d.getElementById("sheet-filter-color");
+  assert.equal(sub.getAttribute("aria-disabled"), null, "the column has two kinds of fill");
+  const menu = d.getElementById("sheet-filter-color-menu");
+  const text = () => [...menu.children].map((el) => el.querySelector?.(".md-label")?.textContent ?? el.className);
+  // Fills: two colours and "채우기 없음". Text colours: one colour and "자동" is two kinds as well.
+  assert.deepEqual(text(), ["셀 색 기준 필터", "sb-hl-palette-row", "채우기 없음", "글꼴 색 기준 필터", "sb-hl-palette-row", "자동"]);
+  const swatches = [...menu.querySelectorAll(".sb-hl-swatch")];
+  assert.deepEqual(swatches.map((s) => s.dataset.rgb), ["ffc7ce", "00ff00", "9c0006"]);
+  assert.equal(swatches[0].title, "#ffc7ce (2)");
+  await click(h, swatches[0]);
+  assert.equal(d.getElementById("sheet-filter-panel").hidden, true);
+  const apply = () => h.requests.filter((r) => r.op === "apply").at(-1).filter.columns;
+  assert.deepEqual(apply(), [{ col: 1, color: { rgb: "ffc7ce" } }]);
+  // The colour is marked in the list the next time; "채우기 없음" and a text colour are conditions too.
+  await openPanel(h, "A");
+  assert.ok([...d.querySelectorAll("#sheet-filter-color-menu .sb-hl-swatch")][0].classList.contains("selected"));
+  await click(h, [...d.querySelectorAll("#sheet-filter-color-menu .md-item")].find((el) => el.querySelector(".md-label").textContent === "채우기 없음"));
+  assert.deepEqual(apply(), [{ col: 1, color: {} }]);
+  await openPanel(h, "A");
+  await click(h, [...d.querySelectorAll("#sheet-filter-color-menu .sb-hl-swatch")][2]);
+  assert.deepEqual(apply(), [{ col: 1, color: { font: true, rgb: "9c0006" } }]);
+});
+
+test("the 색 기준 필터 submenu is off when the column has fewer than two kinds of colour", async () => {
+  const h = await createHarness((body) => (body.op === "values" ? { items: [["x", 1]], blank: 0, more: false, colors: { fill: [["ffc7ce", 4]], font: [], noFill: 0, noFont: 4 } } : undefined));
+  const d = h.document;
+  cell(d, "A2").focus();
+  await click(h, act(d, "filter-toggle"));
+  await openPanel(h, "A");
+  assert.equal(d.getElementById("sheet-filter-color").getAttribute("aria-disabled"), "true");
+  assert.equal(d.getElementById("sheet-filter-color-menu").children.length, 0);
 });

@@ -25,8 +25,8 @@ use easyoffice_formats::{
     SheetFilter, SheetStyling, SheetTable, StrictJsonValue, MAX_FILTER_ROWS, MAX_FILTER_VALUES,
 };
 use easyoffice_sheet::filter::{
-    color_list, date_tree, hidden_bits, number_of, split_hidden_rows, value_list, CellAux,
-    ColumnText, RowBits, NO_COLOR,
+    color_list, date_tree, hidden_bits, number_of, split_hidden_rows, tree_rows, value_list,
+    CellAux, ColumnText, DateTree, RowBits, NO_COLOR,
 };
 use easyoffice_sheet::{code_shows_date, format_cell_value};
 use std::fmt::Write;
@@ -259,7 +259,18 @@ fn values_answer(
         .find(|v| v.col == col)
         .ok_or_else(|| invalid("열 값이 없습니다"))?;
     let excluded = hidden_bits(filter, views, Some(col))?;
-    let list = value_list(target.texts, &excluded, query, MAX_FILTER_VALUES);
+    // Without a search the dates are the tree's, and the list holds the other texts; a search lists every
+    // text that has it, the dates' too.
+    let tree = target
+        .aux
+        .filter(|_| query.is_empty())
+        .map(|aux| (aux, date_tree(&aux.numbers, &aux.dates, &excluded)))
+        .filter(|(_, tree)| !tree.years.is_empty());
+    let mut listed = excluded.clone();
+    if let Some((aux, _)) = &tree {
+        listed.union_with(&tree_rows(&aux.numbers, &aux.dates, &excluded));
+    }
+    let list = value_list(target.texts, &listed, query, MAX_FILTER_VALUES);
     let mut out = String::from("{\"items\":[");
     for (i, item) in list.items.iter().enumerate() {
         if i > 0 {
@@ -270,8 +281,10 @@ fn values_answer(
         let _ = write!(out, ",{}]", item.count);
     }
     let _ = write!(out, "],\"blank\":{},\"more\":{}", list.blank, list.more);
+    if let Some((_, tree)) = &tree {
+        push_date_tree(&mut out, tree);
+    }
     if let Some(aux) = target.aux {
-        push_date_tree(&mut out, aux, &excluded);
         push_colors(&mut out, aux, &excluded);
     }
     out.push('}');
@@ -279,11 +292,7 @@ fn values_answer(
 }
 
 /// `,"dates":{"years":[...],"more":bool}` when the column has dates among the visible rows.
-fn push_date_tree(out: &mut String, aux: &CellAux, excluded: &RowBits) {
-    let tree = date_tree(&aux.numbers, &aux.dates, excluded);
-    if tree.years.is_empty() {
-        return;
-    }
+fn push_date_tree(out: &mut String, tree: &DateTree) {
     out.push_str(",\"dates\":{\"years\":[");
     for (i, (year, count, months)) in tree.years.iter().enumerate() {
         let _ = write!(out, "{}[{year},{count},[", if i > 0 { "," } else { "" });
@@ -694,6 +703,21 @@ mod tests {
         assert!(
             json.contains(r#""colors":{"fill":[["ff0000",2]],"noFill":3,"font":[],"noFont":5}"#),
             "{json}"
+        );
+        // The dates are the tree's: the list holds the other texts and the empty cell.
+        assert!(
+            json.starts_with(r#"{"items":[["t",1]],"blank":1,"more":false,"dates""#),
+            "{json}"
+        );
+        // A search lists every text that has it, dates included, and brings no tree.
+        let searched = call(&format!(
+            r#"{{"sessionAction":"filter","op":"values","col":1,"query":"2023","filter":{filter},"data":{data}}}"#
+        ))
+        .unwrap();
+        assert!(
+            searched.starts_with(r#"{"items":[["2023-03-15",1],["2023-03-16",1]],"#)
+                && !searched.contains(r#""dates""#),
+            "{searched}"
         );
     }
 

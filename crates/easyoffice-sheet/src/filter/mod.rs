@@ -29,7 +29,7 @@ mod wildcard;
 pub use aux::{color_list, CellAux, ColorList, NO_COLOR};
 pub use bits::RowBits;
 pub use condition::{number_of, ColumnMatcher};
-pub use dates::{date_tree, DateKeys, DateTree, Moment, MonthNode};
+pub use dates::{date_tree, tree_rows, DateKeys, DateTree, Moment, MonthNode};
 pub use runs::{intersect_runs, subtract_runs};
 pub use wildcard::{Wildcard, MAX_PATTERN_CHARS};
 
