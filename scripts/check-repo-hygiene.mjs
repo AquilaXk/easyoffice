@@ -381,7 +381,13 @@ try {
     .map((s) => s.trim())
     .filter(Boolean);
 
+  // Windows refuses to check out a path segment named CON, PRN, AUX, NUL, COM1-9 or LPT1-9,
+  // with or without an extension, so such a file breaks the Windows CI checkout.
+  const WINDOWS_RESERVED_SEGMENT = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.[^.]*)*$/i;
   for (const tracked of trackedList) {
+    if (tracked.split("/").some((segment) => WINDOWS_RESERVED_SEGMENT.test(segment))) {
+      errors.push(`Path uses a name Windows reserves and cannot check out: ${tracked}`);
+    }
     for (const forbidden of FORBIDDEN_GIT_PATHS) {
       if (tracked === forbidden || tracked.startsWith(forbidden) || tracked.includes(`/${forbidden}`)) {
         errors.push(`Forbidden local-only file is tracked by Git: ${tracked}`);
