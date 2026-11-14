@@ -10,7 +10,16 @@ pub extern "C" fn easyoffice_ffi_version() -> *const c_char {
     FFI_VERSION_CSTR.as_ptr() as *const c_char
 }
 
+/// Longest command name the bridge reads; the commands are a few dozen bytes.
+const MAX_COMMAND_BYTES: usize = 1024;
+const MAX_PAYLOAD_BYTES: usize = crate::http_server::MAX_IPC_HTTP_BODY_BYTES;
+const PANIC_JSON: &str =
+    "{\"ok\":false,\"error\":\"internal panic caught at FFI boundary (Fail-Closed)\"}";
+
 /// Dispatches an IPC command over the C-ABI boundary, returning a heap-allocated NUL-terminated JSON string.
+/// A string longer than its limit is refused without being read to its end (the payload limit is the
+/// one `dispatch` applies, 16 MiB). The result is null only when even the fixed error answer could not
+/// be made.
 ///
 /// # Safety
 /// `command_ptr` and `payload_ptr` must be either null (handled Fail-Closed) or valid pointers to NUL-terminated C strings.
@@ -21,49 +30,63 @@ pub unsafe extern "C" fn easyoffice_ffi_dispatch_json(
     payload_ptr: *const c_char,
 ) -> *mut c_char {
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        if command_ptr.is_null() {
-            return into_raw_c_string(
-                "{\"ok\":false,\"error\":\"null command pointer (Fail-Closed)\"}",
-            );
-        }
-
-        let cmd_str = match CStr::from_ptr(command_ptr).to_str() {
-            Ok(s) => s,
-            Err(_) => {
-                return into_raw_c_string(
-                    "{\"ok\":false,\"error\":\"invalid UTF-8 in command_ptr (Fail-Closed)\"}",
-                );
-            }
-        };
-
-        let payload_str = if payload_ptr.is_null() {
-            ""
-        } else {
-            match CStr::from_ptr(payload_ptr).to_str() {
-                Ok(s) => s,
-                Err(_) => {
-                    return into_raw_c_string(
-                        "{\"ok\":false,\"error\":\"invalid UTF-8 in payload_ptr (Fail-Closed)\"}",
-                    );
-                }
-            }
-        };
-
-        match EasyOfficeIpcRouter::dispatch(cmd_str, payload_str) {
-            Ok(json) => into_raw_c_string(&json),
-            Err(err) => {
-                let escaped = EasyOfficeIpcRouter::escape_json_str(&err.to_string());
-                into_raw_c_string(&format!("{{\"ok\":false,\"error\":\"{escaped}\"}}"))
-            }
-        }
+        into_raw_c_string(&respond(command_ptr, payload_ptr))
     }));
+    outcome.unwrap_or_else(|_| {
+        std::panic::catch_unwind(|| into_raw_c_string(PANIC_JSON)).unwrap_or(std::ptr::null_mut())
+    })
+}
 
-    match outcome {
-        Ok(ptr) => ptr,
-        Err(_) => into_raw_c_string(
-            "{\"ok\":false,\"error\":\"internal panic caught at FFI boundary (Fail-Closed)\"}",
-        ),
+/// The answer JSON for one call.
+///
+/// # Safety
+/// The pointers are those of [`easyoffice_ffi_dispatch_json`].
+unsafe fn respond(command_ptr: *const c_char, payload_ptr: *const c_char) -> String {
+    const FAIL_CLOSED: &str = "(Fail-Closed)";
+    let error = |what: &str| format!("{{\"ok\":false,\"error\":\"{what} {FAIL_CLOSED}\"}}");
+    if command_ptr.is_null() {
+        return error("null command pointer");
     }
+    let Some(command) = bounded_c_str(command_ptr, MAX_COMMAND_BYTES) else {
+        return error("command is too long");
+    };
+    let Ok(command) = std::str::from_utf8(command) else {
+        return error("invalid UTF-8 in command_ptr");
+    };
+    let payload = if payload_ptr.is_null() {
+        &[][..]
+    } else {
+        match bounded_c_str(payload_ptr, MAX_PAYLOAD_BYTES) {
+            Some(bytes) => bytes,
+            None => return error("payload exceeds the IPC limit"),
+        }
+    };
+    let Ok(payload) = std::str::from_utf8(payload) else {
+        return error("invalid UTF-8 in payload_ptr");
+    };
+    match EasyOfficeIpcRouter::dispatch(command, payload) {
+        Ok(json) => json,
+        Err(err) => {
+            let escaped = EasyOfficeIpcRouter::escape_json_str(&err.to_string());
+            format!("{{\"ok\":false,\"error\":\"{escaped}\"}}")
+        }
+    }
+}
+
+/// The bytes of the NUL-terminated string at `ptr`, or `None` when it is longer than `limit`. The
+/// scan stops at the terminator or after `limit + 1` bytes, so it never reads past what a valid
+/// string holds and never walks a string that is already over the limit to its end.
+///
+/// # Safety
+/// `ptr` points to a NUL-terminated string.
+unsafe fn bounded_c_str<'a>(ptr: *const c_char, limit: usize) -> Option<&'a [u8]> {
+    let bytes = ptr.cast::<u8>();
+    for len in 0..=limit {
+        if *bytes.add(len) == 0 {
+            return Some(std::slice::from_raw_parts(bytes, len));
+        }
+    }
+    None
 }
 
 /// Frees a C string previously allocated by `easyoffice_ffi_dispatch_json`.
@@ -124,6 +147,38 @@ mod tests {
 
         let bootstrap_json = invoke_c_abi_roundtrip("get_workspace_bootstrap", "");
         assert!(bootstrap_json.contains("shortcutModifier"));
+    }
+
+    #[test]
+    fn a_string_over_its_limit_is_refused_without_being_read_to_its_end() {
+        let at_limit = |len: usize, nul_at: usize| {
+            let mut buf = vec![b'a'; len];
+            buf[nul_at] = 0;
+            buf
+        };
+        // The terminator at the limit is the longest string that passes; one byte later is over.
+        let ok = at_limit(10, 5);
+        assert_eq!(
+            unsafe { bounded_c_str(ok.as_ptr().cast(), 5) },
+            Some(&b"aaaaa"[..])
+        );
+        let over = at_limit(10, 6);
+        assert_eq!(unsafe { bounded_c_str(over.as_ptr().cast(), 5) }, None);
+        // Nothing past `limit + 1` bytes is touched: this buffer has no terminator after them.
+        let unterminated = vec![b'a'; 6];
+        assert_eq!(
+            unsafe { bounded_c_str(unterminated.as_ptr().cast(), 5) },
+            None
+        );
+
+        let command = CString::new("x".repeat(MAX_COMMAND_BYTES + 1)).unwrap();
+        let answer = invoke_c_abi_roundtrip(command.to_str().unwrap(), "");
+        assert!(answer.contains("command is too long"), "{answer}");
+        let payload = "a".repeat(MAX_PAYLOAD_BYTES + 1);
+        let answer = invoke_c_abi_roundtrip("scrub_pii", &payload);
+        assert!(answer.contains("payload exceeds the IPC limit"), "{answer}");
+        let within = "a".repeat(1024);
+        assert!(invoke_c_abi_roundtrip("scrub_pii", &within).contains("\"scrubbedText\""));
     }
 
     #[test]
