@@ -261,20 +261,22 @@
   function paintColors(td, st) {
     const s = td.style;
     const fill = st?.fill || "";
-    const fg = textColorOf(st);
-    if (fill) {
-      td.dataset.fill = "1";
-      s.setProperty("--cell-fill", "#" + fill);
-    } else if (td.dataset.fill) {
-      delete td.dataset.fill;
-      s.removeProperty("--cell-fill");
-    }
-    if (fg) {
-      td.dataset.fg = fg === "000000" && !fill ? "black" : "1";
-      s.setProperty("--cell-fg", "#" + fg);
-    } else if (td.dataset.fg) {
-      delete td.dataset.fg;
-      s.removeProperty("--cell-fg");
+    const fg = st?.fontColor || "";
+    // Text with no color of its own on a fill is black or white by the fill (`--cell-auto-fg`); CSS keeps it
+    // below the hyperlink look.
+    const auto = !fg && fill ? autoTextColor(fill) : "";
+    for (const [name, mark, value, markValue] of [
+      ["--cell-fill", "fill", fill, "1"],
+      ["--cell-fg", "fg", fg, fg === "000000" && !fill ? "black" : "1"],
+      ["--cell-auto-fg", null, auto, ""],
+    ]) {
+      if (value) {
+        s.setProperty(name, "#" + value);
+        if (mark) td.dataset[mark] = markValue;
+      } else {
+        s.removeProperty(name);
+        if (mark) delete td.dataset[mark];
+      }
     }
   }
 

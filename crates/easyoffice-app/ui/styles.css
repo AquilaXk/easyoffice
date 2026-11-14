@@ -503,6 +503,7 @@ select:focus-visible,
 .sheet-grid td[data-fill] { background-color: var(--cell-fill, transparent); }
 .sheet-grid td[data-fill].in-range { background: linear-gradient(var(--table-selection-fill), var(--table-selection-fill)) var(--cell-fill, transparent); }
 .sheet-grid td[data-fill].selected-cell, .sheet-grid td[data-fill].in-range.selected-cell { background: var(--cell-fill, transparent); }
+.sheet-grid td[data-fill]:where(:not([data-fg]):not([data-link])) { color: var(--cell-auto-fg, inherit); }
 .sheet-grid td[data-fg] { color: var(--cell-fg, inherit); }
 /* Black text on a cell with no fill is the automatic colour: the dark theme shows it as the theme's text. */
 :where(:root[data-theme-effective="dark"] .sheet-grid) td[data-fg="black"] { color: var(--ui-text); }

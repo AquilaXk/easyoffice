@@ -441,3 +441,23 @@ fn ods_reads_transparent_automatic_and_malformed_colours_as_none() {
     assert_eq!(styling.cells[&(0, 2)].fill, Some(0xABCDEF));
     assert_eq!(styling.cells[&(0, 2)].font_color, Some(0x010203));
 }
+
+#[test]
+fn colours_inside_a_table_and_beside_a_filter_and_conditional_format_survive() {
+    use easyoffice_formats::{CellBox, SheetTable};
+    let mut styling = with(vec![
+        ((0, 0), colored(Some(0x1F4E78), Some(0xFFFFFF))),
+        ((1, 0), colored(Some(0xDDEBF7), None)),
+        ((1, 1), colored(None, Some(0xC00000))),
+        ((5, 5), colored(Some(0x00B050), None)),
+    ]);
+    styling.tables.push(SheetTable::new(
+        "Table1".to_string(),
+        CellBox::parse("A1:B3").unwrap(),
+    ));
+    for format in [DocumentFormat::Xlsx, DocumentFormat::Ods] {
+        let back = round_trip(format, &styling);
+        assert_eq!(back.cells, styling.cells, "{format:?}");
+        assert_eq!(back.tables.len(), 1, "{format:?}");
+    }
+}

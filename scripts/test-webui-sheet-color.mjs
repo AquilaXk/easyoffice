@@ -6,6 +6,7 @@ import { loadUiModule } from "./test-support/load-ui-module.mjs";
 import { makeFixtureFile, pickFile } from "./test-support/fixture-files.mjs";
 import { switchModule, studioItem } from "./test-support/modules.mjs";
 import { demoHtml } from "./test-support/demo-fixtures.mjs";
+import { fakeSortEngine } from "./test-support/fake-sort-engine.mjs";
 
 // Cell fill and font colors (PD-227): the model keys, the toolbar buttons and their palettes, the 글꼴 and 채우기
 // panes of the 셀 서식 dialog, the paint of the grid, the save and open payloads, and the commands that carry a
@@ -107,6 +108,7 @@ const redo = async (h) => {
 
 const fillOf = (h, ref) => cell(h.document, ref).style.getPropertyValue("--cell-fill");
 const textOf = (h, ref) => cell(h.document, ref).style.getPropertyValue("--cell-fg");
+const autoOf = (h, ref) => cell(h.document, ref).style.getPropertyValue("--cell-auto-fg");
 const swatch = (h, paletteId, color) => [...$(h, paletteId).querySelectorAll(".sb-hl-swatch")].find((b) => b.title === color);
 
 test("the toolbar has a 채우기 색 and a 글꼴 색 button with the reference palette and the spreadsheet program's clear words", async () => {
@@ -131,10 +133,11 @@ test("the fill button applies its color to the selection, the palette picks anot
   assert.equal(fillOf(h, "B1"), "#ffff00");
   assert.equal(fillOf(h, "A2"), "", "a cell outside stays");
   assert.equal(cell(h.document, "A1").dataset.fill, "1");
-  assert.equal(textOf(h, "A1"), "#000000", "automatic text on a light fill is black, whatever the theme");
+  assert.equal(textOf(h, "A1"), "", "no text color of its own");
+  assert.equal(autoOf(h, "A1"), "#000000", "automatic text on a light fill is black, whatever the theme");
   await click(h, swatch(h, "sheet-fill-palette", "#0000ff"));
   assert.equal(fillOf(h, "A1"), "#0000ff");
-  assert.equal(textOf(h, "A1"), "#ffffff", "automatic text on a dark fill is white");
+  assert.equal(autoOf(h, "A1"), "#ffffff", "automatic text on a dark fill is white");
   assert.equal($(h, "btn-sheet-fill").style.getPropertyValue("--bar-color"), "#0000ff", "the button shows the color it applies");
   await undo(h);
   assert.equal(fillOf(h, "A1"), "#ffff00", "one undo steps back one color");
@@ -175,8 +178,8 @@ test("black text on a cell with no fill is marked automatic for the dark theme a
   await openModel(h, { sheets: [{ name: "표", cells }] });
   assert.equal(cell(h.document, "A1").dataset.fg, "black");
   assert.equal(cell(h.document, "A2").dataset.fg, "1");
-  assert.equal(cell(h.document, "A3").dataset.fg, "1");
-  assert.equal(textOf(h, "A3"), "#ffffff");
+  assert.equal(cell(h.document, "A3").dataset.fg, undefined, "no text color of its own: the automatic one is by the fill");
+  assert.equal(autoOf(h, "A3"), "#ffffff");
 });
 
 test("a protected sheet refuses a color unless it allows 셀 서식", async () => {
@@ -359,6 +362,7 @@ test("the formulas of a cell with a conditional format keep the cell's own color
   const css = fs.readFileSync(UI("styles.css"), "utf8");
   assert.match(css, /td\[data-cf\]:not\(\.selected-cell\):not\(\.in-range\) \{ background-color: var\(--cf-bg, var\(--cell-fill, transparent\)\); \}/);
   assert.match(css, /td\[data-cf\] \{ color: var\(--cf-fg, var\(--cell-fg, inherit\)\)/);
+  assert.match(css, /td\[data-fill\]:where\(:not\(\[data-fg\]\):not\(\[data-link\]\)\) \{ color: var\(--cell-auto-fg/);
   // The cell's own colors come first in the sheet, so the number format color and the conditional format win.
   assert.ok(css.indexOf("td[data-fg] { color: var(--cell-fg, inherit); }") < css.indexOf("td.nf-colored"), "the cell text color is below the number format color");
   assert.ok(css.indexOf("td[data-fg] { color: var(--cell-fg, inherit); }") < css.indexOf("td[data-cf] { color:"), "and below the conditional format");
@@ -426,4 +430,34 @@ test("the first row has nothing before it, so a row inserted above it is plain",
   await flushAsyncTurns(20);
   assert.equal(fillOf(h, "A1"), "", "the new first row");
   assert.equal(fillOf(h, "A2"), "#ffff00", "the old first row moved down with its fill");
+});
+
+test("a sort moves the colors with their rows", async () => {
+  const colName = (c) => String.fromCharCode(64 + c);
+  const gridUtils = { refOf: (r, c) => colName(c) + r };
+  const sandbox = { __EASYOFFICE_SHEET_UTILS__: { normalizeFormattedNumericCell: (v) => String(v ?? "").trim() } };
+  const host = loadUiModule(UI("sheet-sort.js"), sandbox);
+  const run = host.__EASYOFFICE_CREATE_SHEET_SORT__({
+    gridUtils,
+    call: async (body) => fakeSortEngine(body),
+    layoutApi: { mergesIn: () => [], rowHidden: () => false },
+    cloneStyle: (st) => (st ? { ...st } : undefined),
+  }).run;
+  const red = { fill: "ff0000" };
+  const blue = { fontColor: "0000ff" };
+  const map = {
+    A1: { value: "c", formula: "", style: red },
+    B1: { value: "x", formula: "" },
+    A2: { value: "a", formula: "" },
+    B2: { value: "y", formula: "", style: blue },
+    A3: { value: "b", formula: "", style: blue },
+    B3: { value: "z", formula: "" },
+  };
+  const result = await run("S", map, { range: { r1: 1, c1: 1, r2: 3, c2: 2 }, keys: [{ col: 1, asc: true }], hasHeader: false, caseSensitive: false });
+  assert.equal(result.ok, true);
+  assert.deepEqual([map.A1.value, map.A2.value, map.A3.value], ["a", "b", "c"]);
+  assert.equal(map.A3.style.fill, "ff0000", "the red fill went down with c");
+  assert.equal(map.B1.style.fontColor, "0000ff", "the blue text went up with a");
+  assert.equal(map.A2.style.fontColor, "0000ff");
+  assert.equal(map.A1.style, undefined);
 });
