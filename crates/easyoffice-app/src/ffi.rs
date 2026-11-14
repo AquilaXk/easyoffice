@@ -165,7 +165,7 @@ mod tests {
         let over = at_limit(10, 6);
         assert_eq!(unsafe { bounded_c_str(over.as_ptr().cast(), 5) }, None);
         // Nothing past `limit + 1` bytes is touched: this buffer has no terminator after them.
-        let unterminated = vec![b'a'; 6];
+        let unterminated = [b'a'; 6];
         assert_eq!(
             unsafe { bounded_c_str(unterminated.as_ptr().cast(), 5) },
             None
