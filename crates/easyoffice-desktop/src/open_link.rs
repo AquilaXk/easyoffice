@@ -16,10 +16,19 @@ pub(crate) fn open_target(raw: &str) -> Option<String> {
     let url = tauri::Url::parse(&kept).ok()?;
     let allowed = match url.scheme() {
         "http" | "https" => url.host_str().is_some_and(|host| !host.is_empty()),
-        "mailto" => !url.path().is_empty(),
+        "mailto" => !url.path().is_empty() && !has_attachment_param(&url),
         _ => false,
     };
     (allowed && url.username().is_empty() && url.password().is_none()).then(|| url.to_string())
+}
+
+fn has_attachment_param(url: &tauri::Url) -> bool {
+    url.query_pairs().any(|(key, _)| {
+        matches!(
+            key.to_ascii_lowercase().as_str(),
+            "attach" | "attachment" | "attachments"
+        )
+    })
 }
 
 /// Opens `url` in the default browser or mail program.
@@ -74,6 +83,10 @@ mod tests {
             "https://exa mple.com/",
             "https://example.com/\u{7}",
             "mailto:",
+            "mailto:victim@example.com?attach=/etc/passwd",
+            "mailto:victim@example.com?ATTACHMENT=c:\\boot.ini",
+            "mailto:victim@example.com?attachments=/etc/shadow",
+            "mailto:victim@example.com?%61ttach=/etc/passwd",
             "example.com",
             "//example.com",
             "\\\\server\\share\\a.exe",

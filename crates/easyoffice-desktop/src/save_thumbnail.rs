@@ -50,6 +50,9 @@ pub fn render_png_sized(svg: &str, fonts: &Arc<Database>, side: u32) -> Result<V
         return Err("쪽 크기가 올바르지 않습니다.".to_string());
     }
     let scale = side as f32 / width.max(height);
+    if !scale.is_finite() || scale <= 0.0 {
+        return Err("쪽 크기가 올바르지 않습니다.".to_string());
+    }
     let pixels = |extent: f32| ((extent * scale).round() as u32).clamp(1, side);
     let mut pixmap = tiny_skia::Pixmap::new(pixels(width), pixels(height))
         .ok_or_else(|| "미리보기 그림을 만들지 못했습니다.".to_string())?;

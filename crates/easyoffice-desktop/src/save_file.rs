@@ -215,36 +215,9 @@ pub fn write_document_bytes(path: &Path, bytes: &[u8]) -> Result<Written, SaveEr
     })
 }
 
-const SENSITIVE_CREDENTIAL_DIRS: &[&[u8]] = &[b".ssh", b".gnupg", b".aws", b".kube"];
-
-pub(crate) fn in_sensitive_credential_dir(path: &Path) -> bool {
-    path.components().any(|comp| match comp {
-        std::path::Component::Normal(part) => SENSITIVE_CREDENTIAL_DIRS
-            .iter()
-            .any(|dir| part.as_encoded_bytes().eq_ignore_ascii_case(dir)),
-        _ => false,
-    })
-}
-
-pub(crate) fn sensitive_symlink_error() -> std::io::Error {
-    std::io::Error::new(
-        std::io::ErrorKind::PermissionDenied,
-        "숨김 파일이나 자격증명 디렉터리를 가리키는 심볼릭 링크는 허용되지 않습니다.",
-    )
-}
-
-/// Rejects symlink targets pointing at hidden dotfiles (`.zshrc`, `.env`, …) or inside sensitive
-/// credential directories (`.ssh`, `.gnupg`, `.aws`, `.kube`) while allowing normal non-hidden
-/// targets regardless of extension (PD-177).
-pub(crate) fn ensure_safe_symlink_target(canonical: &Path) -> std::io::Result<()> {
-    let is_dotfile = canonical
-        .file_name()
-        .is_some_and(|name| name.as_encoded_bytes().starts_with(b"."));
-    if is_dotfile || in_sensitive_credential_dir(canonical) {
-        return Err(sensitive_symlink_error());
-    }
-    Ok(())
-}
+pub(crate) use crate::sensitive_path::{
+    ensure_safe_symlink_target, in_sensitive_credential_dir, sensitive_symlink_error,
+};
 
 /// The file a save really replaces. A symbolic link is followed: renaming the temporary file over
 /// the link would swap the link for a regular file and leave its target unchanged. A link that

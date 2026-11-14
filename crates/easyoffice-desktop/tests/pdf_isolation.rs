@@ -324,11 +324,11 @@ fn a_worker_that_is_not_there_is_a_sentence_not_a_panic() {
 
 #[test]
 fn a_bomb_the_scan_cannot_see_is_stopped_by_the_memory_limit() {
-    let file = Arc::new(hidden_object_stream_bomb(50));
+    let file = Arc::new(hidden_object_stream_bomb(25));
     assert!(file.len() < MIB as usize, "{} bytes", file.len());
-    // The scan before the parse lets it through (a unit test of the shell checks that); only the
-    // worker's limit stands between it and 400 MiB.
-    let supervisor = supervisor(Duration::from_secs(60), 200);
+    // The scan before the parse lets it through (within the 256 MiB scan cap); only the
+    // worker's limit stands between it and 200 MiB.
+    let supervisor = supervisor(Duration::from_secs(60), 150);
     let started = Instant::now();
     let err = supervisor.inspect(&file).unwrap_err();
     // Where the shell measures memory (macOS, Linux) it is the memory sentence; elsewhere the

@@ -1,4 +1,5 @@
 use super::*;
+use crate::svg_budget::MAX_NESTED_SVG_DEPTH;
 use std::path::Path;
 
 /// All pages in one slice: the whole export through [`PdfAssembler`]. Fails closed on any page

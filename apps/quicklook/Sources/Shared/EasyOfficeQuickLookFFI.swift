@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// Largest file the extensions read; the Rust side refuses the same size (render.rs MAX_INPUT_BYTES).
@@ -56,22 +57,52 @@ func easyOfficeQuickLookData(from bytes: EasyOfficeQuickLookBytes) throws -> Dat
     return Data(bytes: ptr, count: bytes.len)
 }
 
-/// Reads the file Finder names. The size and the kind are those of the file a link leads to (the
-/// size of a link is the length of its path), and only a regular file is read: opening a pipe would
-/// wait for a writer that never comes, and a device would never end.
+/// Reads the file Finder names via a safe file descriptor loop without mmap to prevent SIGBUS crashes.
+/// Validates regular file status and bounds size during chunked Darwin reads.
 func easyOfficeQuickLookReadFile(_ fileURL: URL) throws -> Data {
-    let target = fileURL.resolvingSymlinksInPath()
-    let values = try target.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
-    guard values.isRegularFile == true else {
+    let path = fileURL.resolvingSymlinksInPath().path
+    let fd = Darwin.open(path, O_RDONLY | O_NONBLOCK | O_NOFOLLOW)
+    guard fd >= 0 else {
         throw EasyOfficeQuickLookError.notRegularFile
     }
-    if let fileSize = values.fileSize, fileSize > easyOfficeQuickLookMaxFileSize {
+    defer { Darwin.close(fd) }
+
+    var st = stat()
+    guard fstat(fd, &st) == 0 else {
+        throw EasyOfficeQuickLookError.notRegularFile
+    }
+    guard (st.st_mode & S_IFMT) == S_IFREG else {
+        throw EasyOfficeQuickLookError.notRegularFile
+    }
+    if st.st_size > off_t(easyOfficeQuickLookMaxFileSize) {
         throw EasyOfficeQuickLookError.fileTooLarge
     }
-    let data = try Data(contentsOf: target, options: [.mappedIfSafe])
-    if data.count > easyOfficeQuickLookMaxFileSize {
-        throw EasyOfficeQuickLookError.fileTooLarge
+    if st.st_size == 0 {
+        throw EasyOfficeQuickLookError.emptyData
     }
+
+    var data = Data()
+    data.reserveCapacity(Int(min(st.st_size, off_t(easyOfficeQuickLookMaxFileSize))))
+    let bufferSize = 64 * 1024
+    var buffer = [UInt8](repeating: 0, count: bufferSize)
+
+    while true {
+        let bytesRead = Darwin.read(fd, &buffer, bufferSize)
+        if bytesRead == 0 {
+            break
+        }
+        if bytesRead < 0 {
+            if errno == EINTR {
+                continue
+            }
+            throw EasyOfficeQuickLookError.renderFailed
+        }
+        if data.count + bytesRead > easyOfficeQuickLookMaxFileSize {
+            throw EasyOfficeQuickLookError.fileTooLarge
+        }
+        data.append(buffer, count: bytesRead)
+    }
+
     if data.isEmpty {
         throw EasyOfficeQuickLookError.emptyData
     }

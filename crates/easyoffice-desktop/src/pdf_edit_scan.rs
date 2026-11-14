@@ -130,11 +130,66 @@ pub fn scan_streams(
     Ok(())
 }
 
-/// The dictionary text before a `stream` keyword: what follows the last `obj` before it.
+/// The dictionary text before a `stream` keyword: what follows the last `obj` keyword token
+/// outside of comments, literal strings, and hex strings.
 fn dictionary_window(bytes: &[u8], stream_at: usize) -> &[u8] {
     let hay = &bytes[stream_at.saturating_sub(DICT_LOOKBACK)..stream_at];
-    match hay.windows(3).rposition(|w| w == b"obj") {
-        Some(i) => &hay[i + 3..],
+    let mut last_obj_end = None;
+    let mut i = 0;
+    while i < hay.len() {
+        let b = hay[i];
+        if b == b'%' {
+            // Comment: skip to end of line
+            i += 1;
+            while i < hay.len() && hay[i] != b'\r' && hay[i] != b'\n' {
+                i += 1;
+            }
+        } else if b == b'(' {
+            // Literal string: handle escaped parens and nested parens
+            i += 1;
+            let mut depth = 1usize;
+            while i < hay.len() && depth > 0 {
+                if hay[i] == b'\\' {
+                    i += 2;
+                } else if hay[i] == b'(' {
+                    depth += 1;
+                    i += 1;
+                } else if hay[i] == b')' {
+                    depth -= 1;
+                    i += 1;
+                } else {
+                    i += 1;
+                }
+            }
+        } else if b == b'<' {
+            if i + 1 < hay.len() && hay[i + 1] == b'<' {
+                // Dictionary start delimiter `<<`
+                i += 2;
+            } else {
+                // Hex string `<...>`
+                i += 1;
+                while i < hay.len() && hay[i] != b'>' {
+                    i += 1;
+                }
+                if i < hay.len() && hay[i] == b'>' {
+                    i += 1;
+                }
+            }
+        } else if is_name_end(b) {
+            i += 1;
+        } else {
+            // Regular token
+            let start = i;
+            while i < hay.len() && !is_name_end(hay[i]) {
+                i += 1;
+            }
+            if &hay[start..i] == b"obj" {
+                last_obj_end = Some(i);
+            }
+        }
+    }
+    match last_obj_end {
+        Some(end) => &hay[end..],
         None => hay,
     }
 }
@@ -318,5 +373,16 @@ mod tests {
         let bytes = b"1 0 obj << /Filter /LZWDecode >> endobj 2 0 obj << /Length 3 >> stream";
         let at = bytes.len() - b"stream".len();
         assert_eq!(dictionary_window(bytes, at), b" << /Length 3 >> ");
+    }
+
+    #[test]
+    fn fake_obj_in_comments_and_strings_does_not_hide_hostile_filters() {
+        let deadline = Deadline::after(std::time::Duration::from_secs(10));
+        let fake = b"1 0 obj << /Filter /ASCIIHexDecode % fake obj\n /Title (my obj inside) >> stream\nABCDEFendstream endobj";
+        let err = scan_streams(fake, &deadline, 1024, 1024).unwrap_err();
+        assert_eq!(err, MSG_STREAM_FILTER);
+
+        let window = dictionary_window(fake, fake.len() - b"stream\nABCDEFendstream endobj".len());
+        assert!(window.starts_with(b" << /Filter /ASCIIHexDecode"));
     }
 }

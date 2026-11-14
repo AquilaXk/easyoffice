@@ -212,12 +212,15 @@ fn a_bomb_is_counted_however_the_dictionary_hides_it() {
 
 #[test]
 fn a_bomb_in_a_stream_whose_dictionary_the_scan_misreads_gets_past_the_scan() {
-    // This is why the worker has a memory limit: the scan is a courtesy, not a guarantee. The bomb
-    // is 8 MiB here; the worker test (`tests/pdf_isolation.rs`) uses 400 MiB.
+    // With the refined dictionary_window lexer, literal strings like `/Pad (obj)` no longer
+    // trick the scanner, so the flate stream bomb is detected and refused.
     use crate::pdf_edit_fixtures::hidden_object_stream_bomb;
-    use crate::pdf_edit_scan::scan_streams;
+    use crate::pdf_edit_scan::{scan_streams, MSG_STREAM_TOO_BIG};
     let file = hidden_object_stream_bomb(1);
-    assert!(scan_streams(&file, &deadline(), 1 << 20, 1 << 20).is_ok());
+    assert_eq!(
+        scan_streams(&file, &deadline(), 1 << 20, 1 << 20).unwrap_err(),
+        MSG_STREAM_TOO_BIG
+    );
 }
 
 #[test]

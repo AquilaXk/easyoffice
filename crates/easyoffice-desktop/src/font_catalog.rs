@@ -75,13 +75,13 @@ pub struct FontFaceInfo {
 pub struct SystemFontList {
     /// Random per list; a read must quote it.
     pub revision: String,
-    pub faces: Vec<FontFaceInfo>,
+    pub faces: Arc<[FontFaceInfo]>,
 }
 
 /// The installed fonts: faces, and the files they live in (never leaves this module).
 pub struct Catalog {
     files: Vec<PathBuf>,
-    faces: Vec<FontFaceInfo>,
+    faces: Arc<[FontFaceInfo]>,
 }
 
 impl Catalog {
@@ -138,7 +138,10 @@ impl Catalog {
                 aliases: names.iter().skip(1).take(MAX_ALIASES).cloned().collect(),
             });
         }
-        Self { files, faces }
+        Self {
+            files,
+            faces: faces.into(),
+        }
     }
 }
 
@@ -279,7 +282,7 @@ impl SystemFonts {
             .clone_from(&revision);
         Ok(SystemFontList {
             revision,
-            faces: catalog.faces.clone(),
+            faces: Arc::clone(&catalog.faces),
         })
     }
 

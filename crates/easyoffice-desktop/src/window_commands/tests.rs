@@ -422,3 +422,31 @@ fn persisting_writes_the_geometry_the_moves_recorded_and_needs_nothing_else() {
     let _ = std::fs::remove_dir_all(&dir);
     AppWindows::new(None).persist_geometry();
 }
+
+#[test]
+fn opening_more_than_batch_limit_is_refused() {
+    let files: Vec<PathBuf> = (0..MAX_OPEN_BATCH + 1)
+        .map(|i| PathBuf::from(format!("/tmp/doc_{i}.docx")))
+        .collect();
+    let mut failed_msg = String::new();
+    let handled = route_launch_files(
+        &files,
+        |_| Ok(OpenOutcome::OPENED),
+        |msg| failed_msg = msg.to_string(),
+    );
+    assert!(!handled);
+    assert!(failed_msg.contains("한 번에 열 수 있는 파일 한도"));
+}
+
+#[test]
+fn window_limit_bounds_concurrent_windows() {
+    let mut registry = WindowRegistry::default();
+    for i in 0..MAX_OPEN_WINDOWS {
+        assert!(check_window_limit(&registry).is_ok());
+        registry.register(&format!("win-{i}"), WindowKind::Doc);
+    }
+    let err = check_window_limit(&registry).expect_err("33rd window must be refused");
+    assert!(err.contains("동시에 열 수 있는 문서 창 한도"));
+    registry.remove("win-0");
+    assert!(check_window_limit(&registry).is_ok());
+}

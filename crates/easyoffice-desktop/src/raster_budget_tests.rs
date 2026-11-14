@@ -113,3 +113,28 @@ fn an_export_budget_is_per_page_and_counts_the_refused() {
     assert!(RasterBudget::for_export().admit(&png_header(100, 100)));
     assert_eq!(budget.refused(), 1);
 }
+
+#[test]
+fn a_gif_frame_bomb_with_small_logical_screen_is_refused() {
+    let mut bomb = gif_header(1, 1);
+    // Image descriptor with 10000x10000 frame (0x2C)
+    bomb.push(0x2C);
+    bomb.extend_from_slice(&[0, 0, 0, 0]); // left, top
+    bomb.extend_from_slice(&10_000u16.to_le_bytes()); // width
+    bomb.extend_from_slice(&10_000u16.to_le_bytes()); // height
+    bomb.push(0); // packed: no local color table
+    bomb.push(2); // lzw min code size
+    bomb.push(0); // empty sub-block terminator
+    bomb.push(0x3B); // trailer
+
+    let budget = RasterBudget::for_page();
+    assert!(!budget.admit(&bomb), "GIF frame bomb must be refused");
+}
+
+#[test]
+fn a_malformed_gif_block_is_refused() {
+    let mut bad = gif_header(1, 1);
+    bad.push(0xFF); // invalid block
+    let budget = RasterBudget::for_page();
+    assert!(!budget.admit(&bad), "Malformed GIF must be refused");
+}

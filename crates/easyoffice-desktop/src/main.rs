@@ -49,6 +49,7 @@ mod save_error;
 mod save_file;
 mod save_thumbnail;
 mod save_verify;
+mod sensitive_path;
 mod session_end_windows;
 mod shell_caller;
 mod smoke;

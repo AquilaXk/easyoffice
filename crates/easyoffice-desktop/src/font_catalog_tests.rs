@@ -7,7 +7,7 @@ use std::time::Instant;
 fn catalog_of(files: Vec<PathBuf>) -> Catalog {
     Catalog {
         files,
-        faces: Vec::new(),
+        faces: Arc::new([]),
     }
 }
 

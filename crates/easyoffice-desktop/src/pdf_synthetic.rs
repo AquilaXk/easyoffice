@@ -262,6 +262,17 @@ fn asks_for_emphasis(svg: &str) -> bool {
     let end = len - 3;
     let mut i = 0;
     while i < end {
+        let b = bytes[i];
+        if (b == b'"' || b == b'\'') && bytes[i + 1..].starts_with(b"data:") {
+            let quote = b;
+            let start = i + 1 + b"data:".len();
+            if let Some(pos) = bytes[start..].iter().position(|&byte| byte == quote) {
+                i = start + pos + 1;
+                continue;
+            } else {
+                break;
+            }
+        }
         let w =
             u32::from_le_bytes([bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3]]) | 0x2020_2020;
         if w == WORD_BOLD {
@@ -595,6 +606,18 @@ mod tests {
         ] {
             assert!(!asks_for_emphasis(no), "{no}");
         }
+    }
+
+    #[test]
+    fn data_uri_payload_containing_bold_or_italic_is_skipped_without_false_positive() {
+        let data_payload = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABolditalobliqueXXXX==";
+        let svg = format!(
+            r#"<svg xmlns="{SVG_NS}"><image href="{data_payload}" width="100" height="100"/><text>Plain upright text</text></svg>"#
+        );
+        assert!(
+            !asks_for_emphasis(&svg),
+            "Base64 data URI payload must not trigger emphasis analysis"
+        );
     }
 
     #[test]

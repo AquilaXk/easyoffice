@@ -38,15 +38,35 @@ fn build() -> Database {
     with_mapped_faces(db)
 }
 
-/// `db` with every file face mapped once for the life of the process. A face loaded from a file is
+/// Whether a font path resides in an immutable system or app bundle directory.
+/// Fonts in user-writable directories (~/Library/Fonts etc.) are excluded from mmap to prevent SIGBUS.
+fn is_immutable_font_path(path: &std::path::Path) -> bool {
+    if path.starts_with("/System/") || path.starts_with("/Library/Fonts") {
+        return true;
+    }
+    if let Some(bundled) = bundled_dir() {
+        if path.starts_with(&bundled) {
+            return true;
+        }
+    }
+    false
+}
+
+/// `db` with immutable system/app file faces mapped once for the life of the process. A face loaded from a file is
 /// otherwise opened, mapped and unmapped on every access, and text layout accesses it per text run
 /// (the PD-114 export fix; here it was 63% of a first page PNG and 35% of a preview PDF).
 fn with_mapped_faces(mut db: Database) -> Database {
-    let ids: Vec<_> = db.faces().map(|face| face.id).collect();
+    let ids: Vec<_> = db
+        .faces()
+        .filter_map(|face| match &face.source {
+            usvg::fontdb::Source::File(path) | usvg::fontdb::Source::SharedFile(path, _) => {
+                is_immutable_font_path(path).then_some(face.id)
+            }
+            usvg::fontdb::Source::Binary(_) => None,
+        })
+        .collect();
     for id in ids {
-        // SAFETY: the same read-only mapping fontdb makes per access, held longer. A font file
-        // truncated by another process would fault in either case. A face that cannot be mapped
-        // keeps reading its file per call.
+        // SAFETY: mapped only for immutable system/app-bundle font paths.
         let _ = unsafe { db.make_shared_face_data(id) };
     }
     db

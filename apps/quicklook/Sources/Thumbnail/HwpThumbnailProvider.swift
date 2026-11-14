@@ -26,12 +26,24 @@ final class HwpThumbnailProvider: QLThumbnailProvider {
             let requested = max(request.maximumSize.width, request.maximumSize.height) * request.scale
             let maxPixels = UInt32(max(1, min(requested, CGFloat(easyOfficeQuickLookMaxThumbnailDimension))))
 
-            if let embedded = try? Self.embeddedThumbnail(from: fileData, maximumPixelDimension: maxPixels) {
+            var tryRender = true
+            do {
+                let embedded = try Self.embeddedThumbnail(from: fileData, maximumPixelDimension: maxPixels)
                 handler(Self.reply(for: request, image: embedded.image, imageSize: embedded.size), nil)
                 return
+            } catch let error as EasyOfficeQuickLookError {
+                if case .status(let code) = error,
+                   code == EasyOfficeQuickLookStatus.tooLarge.rawValue || code == EasyOfficeQuickLookStatus.invalidInput.rawValue {
+                    tryRender = false
+                    throw error
+                }
+            } catch {
+                // other errors fallback to rendered thumbnail
             }
-            let rendered = try Self.renderedThumbnail(from: fileData, maximumPixelDimension: maxPixels)
-            handler(Self.reply(for: request, image: rendered.image, imageSize: rendered.size), nil)
+            if tryRender {
+                let rendered = try Self.renderedThumbnail(from: fileData, maximumPixelDimension: maxPixels)
+                handler(Self.reply(for: request, image: rendered.image, imageSize: rendered.size), nil)
+            }
         } catch {
             Self.logger.warning("Thumbnail skipped reason=\(easyOfficeQuickLookFailureReason(for: error), privacy: .public)")
             handler(nil, error)
@@ -71,7 +83,9 @@ final class HwpThumbnailProvider: QLThumbnailProvider {
         guard let image = decodeImage(pngData, maximumPixelDimension: maximumPixelDimension) else {
             throw EasyOfficeQuickLookError.renderFailed
         }
-        return (image, CGSize(width: max(1, result.width), height: max(1, result.height)))
+        let width = (result.width == 0 || result.width > 32768) ? image.width : Int(result.width)
+        let height = (result.height == 0 || result.height > 32768) ? image.height : Int(result.height)
+        return (image, CGSize(width: max(1, width), height: max(1, height)))
     }
 
     private static func decodeImage(_ data: Data, maximumPixelDimension: UInt32) -> CGImage? {

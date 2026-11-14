@@ -117,9 +117,20 @@ fn stamp_elements(text: &str, width: f32) -> String {
     )
 }
 
+#[inline]
+fn is_xml_10_char(c: char) -> bool {
+    matches!(
+        c,
+        '\t' | '\n' | '\r' | '\u{20}'..='\u{D7FF}' | '\u{E000}'..='\u{FFFD}' | '\u{10000}'..='\u{10FFFF}'
+    )
+}
+
 fn xml_escape(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for c in text.chars() {
+        if !is_xml_10_char(c) {
+            continue;
+        }
         match c {
             '&' => out.push_str("&amp;"),
             '<' => out.push_str("&lt;"),
@@ -201,6 +212,12 @@ mod tests {
         let svg = overlay.svg(300.0, 400.0, true).unwrap();
         assert!(svg.contains("&lt;script&gt;&amp;&quot;x&quot;&lt;/script&gt;"));
         assert!(!svg.contains("<script>"));
+    }
+
+    #[test]
+    fn xml_escape_filters_forbidden_control_characters() {
+        let escaped = xml_escape("A\u{0000}B\u{0008}C\u{FFFE}D&E");
+        assert_eq!(escaped, "ABCD&amp;E");
     }
 
     #[test]

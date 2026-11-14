@@ -98,6 +98,9 @@ pub fn parse_svg(svg: &str) -> Result<Page, i32> {
 pub fn png(page: &Page, max_side: u32) -> Result<Vec<u8>, i32> {
     let side = max_side.clamp(1, MAX_PNG_SIDE);
     let scale = side as f32 / page.width.max(page.height);
+    if !scale.is_finite() || scale <= 0.0 {
+        return Err(STATUS_RENDER_FAILED);
+    }
     let pixels = |extent: f32| ((extent * scale).round() as u32).clamp(1, side);
     let mut pixmap = tiny_skia::Pixmap::new(pixels(page.width), pixels(page.height))
         .ok_or(STATUS_RENDER_FAILED)?;

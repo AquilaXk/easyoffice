@@ -12,7 +12,7 @@
 //!   faces were probed and what they answered, as two bits per (character, face) pair.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use usvg::fontdb::{Database, Source, ID};
 
@@ -57,6 +57,19 @@ pub fn has_face_from(db: &Database, dirs: &[PathBuf]) -> bool {
     })
 }
 
+fn is_immutable_font_path(path: &Path) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        path.starts_with("/System/") || path.starts_with("/Library/Fonts")
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        !path.components().any(|comp| {
+            matches!(comp, std::path::Component::Normal(p) if p.as_encoded_bytes().starts_with(b"."))
+        })
+    }
+}
+
 /// A copy of `db` whose faces keep their font files mapped into memory for the life of the copy.
 ///
 /// A face loaded from a file is opened, mapped and unmapped again on every access, and text
@@ -65,11 +78,17 @@ pub fn has_face_from(db: &Database, dirs: &[PathBuf]) -> bool {
 /// only as long as the returned database, that is, one export.
 pub fn with_mapped_faces(db: &Database) -> Database {
     let mut mapped = db.clone();
-    let ids: Vec<ID> = mapped.faces().map(|face| face.id).collect();
+    let ids: Vec<ID> = mapped
+        .faces()
+        .filter_map(|face| match &face.source {
+            Source::File(path) | Source::SharedFile(path, _) => {
+                is_immutable_font_path(path).then_some(face.id)
+            }
+            Source::Binary(_) => None,
+        })
+        .collect();
     for id in ids {
-        // SAFETY: fontdb's own access maps the same file the same way for each call; the only
-        // difference is the span. A font file that is truncated by another process during an export
-        // would fault in either case. A face that cannot be mapped keeps reading its file per call.
+        // SAFETY: mapped only for immutable font paths; mutable user-writable paths fallback to file reading.
         let _ = unsafe { mapped.make_shared_face_data(id) };
     }
     mapped

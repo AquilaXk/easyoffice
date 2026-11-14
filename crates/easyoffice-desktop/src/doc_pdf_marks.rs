@@ -63,13 +63,25 @@ fn em_width(text: &str) -> f32 {
         .max(LATIN_EM)
 }
 
+#[inline]
+fn is_xml_10_char(c: char) -> bool {
+    matches!(
+        c,
+        '\t' | '\n' | '\r' | '\u{20}'..='\u{D7FF}' | '\u{E000}'..='\u{FFFD}' | '\u{10000}'..='\u{10FFFF}'
+    )
+}
+
 fn escape(text: &str, out: &mut String) {
     for c in text.chars() {
+        if !is_xml_10_char(c) {
+            continue;
+        }
         match c {
             '&' => out.push_str("&amp;"),
             '<' => out.push_str("&lt;"),
             '>' => out.push_str("&gt;"),
             '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
             _ => out.push(c),
         }
     }
@@ -168,6 +180,20 @@ mod tests {
         let left: f32 = stamp_rect.attribute("x").unwrap().parse().unwrap();
         let width: f32 = stamp_rect.attribute("width").unwrap().parse().unwrap();
         assert!(left >= 0.0 && left + width <= 793.7, "{left} + {width}");
+    }
+
+    #[test]
+    fn control_characters_are_stripped_from_marks() {
+        let svg = marked(
+            0,
+            &options(
+                Some("기밀\u{0000}\u{0008}\u{001F}문서"),
+                Some("승인\u{000B}\u{FFFF}필"),
+            ),
+        );
+        assert!(svg.contains(">기밀문서</text>"));
+        assert!(svg.contains(">승인필</text>"));
+        assert!(usvg::Tree::from_str(&svg, &usvg::Options::default()).is_ok());
     }
 
     #[test]

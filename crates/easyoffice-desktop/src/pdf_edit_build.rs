@@ -97,6 +97,9 @@ struct Placement {
 
 fn placement(page: &Page<'_>, turn: u16) -> Result<Placement, String> {
     let (width, height) = page.base_dimensions();
+    if !width.is_finite() || width <= 0.0 || !height.is_finite() || height <= 0.0 {
+        return Err("PDF 쪽 크기가 유효하지 않습니다.".to_string());
+    }
     let crop = page.intersected_crop_box();
     // The copy carries `initial_transform` as its matrix: rotation of the original, then the shift
     // that puts the visible area at the origin. Drawing it through the inverse of the rotation
@@ -108,6 +111,9 @@ fn placement(page: &Page<'_>, turn: u16) -> Result<Placement, String> {
         .ok_or_else(|| "PDF 쪽의 변환 행렬을 계산할 수 없습니다.".to_string())?;
     #[allow(clippy::cast_possible_truncation)]
     let form = undo.map(|v| v as f32);
+    if !form.iter().all(|v| v.is_finite()) {
+        return Err("PDF 쪽 변환 행렬이 유효하지 않습니다.".to_string());
+    }
     Ok(Placement {
         width,
         height,

@@ -32,6 +32,11 @@ const CLOSE_REQUEST_SCRIPT: &str =
 const SMOKE_SECONDARY_SCRIPT: &str = "window.__EASYOFFICE_SMOKE__ = 'secondary';";
 const CASCADE_STEP: f64 = 28.0;
 
+/// Maximum files opened in a single batch.
+pub const MAX_OPEN_BATCH: usize = 16;
+/// Maximum concurrent document windows allowed in the process.
+pub const MAX_OPEN_WINDOWS: usize = 32;
+
 /// Error shape shared with the other commands (`{"status":"error","message":...}`).
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct WindowError {
@@ -302,11 +307,24 @@ pub fn create_primary_window(app: &AppHandle, kind: WindowKind) -> Result<(), St
     create_registered_window(app, kind, PRIMARY_LABEL)
 }
 
+pub(crate) fn check_window_limit(registry: &WindowRegistry) -> Result<(), String> {
+    if registry.len() >= MAX_OPEN_WINDOWS {
+        return Err(format!(
+            "동시에 열 수 있는 문서 창 한도({MAX_OPEN_WINDOWS}개)를 초과했습니다."
+        ));
+    }
+    Ok(())
+}
+
 /// Registers and creates a window of `kind` with a fresh label.
 pub fn create_new_window(app: &AppHandle, kind: WindowKind) -> Result<String, String> {
     let state = app.state::<AppWindows>();
     let label = state.next_label();
-    locked(&state.registry).register(&label, kind);
+    {
+        let mut registry = locked(&state.registry);
+        check_window_limit(&registry)?;
+        registry.register(&label, kind);
+    }
     if let Err(err) = create_registered_window(app, kind, &label) {
         locked(&state.registry).remove(&label);
         return Err(err);
@@ -491,11 +509,11 @@ impl OpenTarget {
         let canonical = fs::canonicalize(path)?;
         let is_link = fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink());
         if is_link {
-            crate::save_file::ensure_safe_symlink_target(&canonical)?;
-        } else if !crate::save_file::in_sensitive_credential_dir(path)
-            && crate::save_file::in_sensitive_credential_dir(&canonical)
+            crate::sensitive_path::ensure_safe_symlink_target(&canonical)?;
+        } else if !crate::sensitive_path::in_sensitive_credential_dir(path)
+            && crate::sensitive_path::in_sensitive_credential_dir(&canonical)
         {
-            return Err(crate::save_file::sensitive_symlink_error());
+            return Err(crate::sensitive_path::sensitive_symlink_error());
         }
         let shown = if is_link {
             std::path::absolute(path).unwrap_or_else(|_| canonical.clone())
@@ -520,6 +538,7 @@ pub fn open_path(app: &AppHandle, path: &Path) -> Result<OpenOutcome, String> {
         close_empty_start_windows(app);
         return Ok(OpenOutcome::FOCUSED);
     }
+    check_window_limit(&locked(&state.registry))?;
     let (file, meta) = open_regular(&canonical)
         .map_err(|err| open_failure("파일 정보를 읽지 못했습니다", &canonical, &err))?;
     check_open_size(kind, meta.len(), &name)?;
@@ -537,6 +556,13 @@ pub fn open_path(app: &AppHandle, path: &Path) -> Result<OpenOutcome, String> {
     let label = state.next_label();
     {
         let mut registry = locked(&state.registry);
+        if let Some(owner) = registry.find_by_path(&key).map(String::from) {
+            drop(registry);
+            focus_window(app, &owner);
+            close_empty_start_windows(app);
+            return Ok(OpenOutcome::FOCUSED);
+        }
+        check_window_limit(&registry)?;
         registry.register(&label, kind);
         if let Err(owner) = registry.claim_path(&label, key) {
             registry.remove(&label);
@@ -673,6 +699,12 @@ pub fn route_launch_files(
     mut open: impl FnMut(&Path) -> Result<OpenOutcome, String>,
     mut fail: impl FnMut(&str),
 ) -> bool {
+    if files.len() > MAX_OPEN_BATCH {
+        fail(&format!(
+            "한 번에 열 수 있는 파일 한도({MAX_OPEN_BATCH}개)를 초과했습니다."
+        ));
+        return false;
+    }
     let mut handled = false;
     for path in files {
         match open(path) {

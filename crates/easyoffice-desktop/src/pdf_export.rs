@@ -21,9 +21,10 @@
 
 use crate::raster_budget::is_raster_mime;
 use crate::raster_budget::RasterBudget;
+pub use crate::svg_budget::NestedSvgBudget;
+use crate::svg_budget::MAX_NESTED_SVG_BYTES;
 use easyoffice_formats::checked_svg_text;
 use pdf_writer::{Chunk, Content, Finish, Name, Pdf, Rect, Ref, TextStr};
-use std::cell::Cell;
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -46,14 +47,6 @@ const MAX_CONVERT_THREADS: usize = 4;
 /// What a page-conversion thread that panicked turns into.
 pub(crate) const MSG_CONVERT_PANICKED: &str =
     "PDF 변환 중 내부 오류가 발생해 내보내기를 중단했습니다.";
-/// Deepest `<image>` inside `<image>` of SVG data URLs that is kept; deeper pictures are dropped.
-/// WMF/EMF pictures are one level (an SVG that holds a bitmap); the bound keeps a hostile chain of
-/// nested data URLs from recursing without end.
-const MAX_NESTED_SVG_DEPTH: u32 = 4;
-/// Largest nested SVG picture once inflated (bytes). The text a data URL holds is read by the SVG
-/// parser, which expands entity declarations without a bound and inflates gzip without one, so
-/// [`checked_svg_text`] reads every nested picture first; one it refuses is dropped.
-const MAX_NESTED_SVG_BYTES: usize = 16 * 1_048_576;
 /// SVG user units are CSS pixels (96 per inch); PDF user units are points (72 per inch).
 const PX_TO_PT: f32 = 72.0 / 96.0;
 /// Name of the page's form XObject.
@@ -102,46 +95,24 @@ impl Budget {
     }
 }
 
-thread_local! {
-    /// How many nested SVG pictures this thread is parsing right now.
-    static NESTED_SVG_DEPTH: Cell<u32> = const { Cell::new(0) };
-}
-
-/// Leaves one nesting level when dropped.
-struct NestedLevel;
-
-impl NestedLevel {
-    /// Enters a level, or `None` when [`MAX_NESTED_SVG_DEPTH`] is reached.
-    fn enter() -> Option<Self> {
-        NESTED_SVG_DEPTH.with(|depth| {
-            (depth.get() < MAX_NESTED_SVG_DEPTH).then(|| {
-                depth.set(depth.get() + 1);
-                Self
-            })
-        })
-    }
-}
-
-impl Drop for NestedLevel {
-    fn drop(&mut self) {
-        NESTED_SVG_DEPTH.with(|depth| depth.set(depth.get() - 1));
-    }
-}
-
 /// Reads a `data:image/svg+xml` picture together with the images inside it. usvg's own resolver
 /// drops every `<image>` of such a sub-SVG (the SVG rule), which turned WMF/EMF pictures that
 /// hold a bitmap into blanks; the page and its sub-SVGs both come from the editor, so the
 /// sub-SVG is parsed with the same options. Ported from rhwp `pdf_image_href_resolver` (rhwp
-/// 0.8.7, `src/renderer/pdf.rs` lines 1188-1205; MIT), with the nesting bound added because that
-/// version recurses as deep as the data does. Other data pictures go to usvg's default resolver;
+/// 0.8.7, `src/renderer/pdf.rs` lines 1188-1205; MIT), with depth, count, and cumulative byte
+/// limits enforced by [`NestedSvgBudget`]. Other data pictures go to usvg's default resolver;
 /// path and `file:` hrefs are ignored, in the page and in nested SVGs alike.
-fn image_href_resolver(budget: Arc<RasterBudget>) -> usvg::ImageHrefResolver<'static> {
+fn image_href_resolver(
+    budget: Arc<RasterBudget>,
+    svg_budget: Arc<NestedSvgBudget>,
+) -> usvg::ImageHrefResolver<'static> {
     let default_data = usvg::ImageHrefResolver::default_data_resolver();
     usvg::ImageHrefResolver {
         resolve_data: Box::new(move |mime, data, options| {
             if mime.eq_ignore_ascii_case("image/svg+xml") {
-                let _level = NestedLevel::enter()?;
+                let guard = svg_budget.enter(data.len())?;
                 let text = checked_svg_text(&data, MAX_NESTED_SVG_BYTES).ok()?;
+                guard.admit_bytes(text.len())?;
                 crate::svg_budget::check_svg_structure(&text).ok()?;
                 return usvg::Tree::from_str(&text, options)
                     .ok()
@@ -172,6 +143,7 @@ pub(crate) fn parse_options(fonts: &Arc<Database>) -> usvg::Options<'static> {
         crate::pdf_font_select::memoized_stock_selector(),
         new_fallback_selector(),
         Arc::new(RasterBudget::for_export()),
+        Arc::new(NestedSvgBudget::new()),
     )
 }
 
@@ -186,6 +158,7 @@ pub(crate) fn bitmap_parse_options(
         crate::pdf_font_select::memoized_stock_selector(),
         new_fallback_selector(),
         Arc::new(budget),
+        Arc::new(NestedSvgBudget::new()),
     )
 }
 
@@ -201,6 +174,7 @@ fn options_with(
     select_font: usvg::FontSelectionFn<'static>,
     select_fallback: usvg::FallbackSelectionFn<'static>,
     budget: Arc<RasterBudget>,
+    svg_budget: Arc<NestedSvgBudget>,
 ) -> usvg::Options<'static> {
     let mut options = usvg::Options {
         fontdb: Arc::clone(fonts),
@@ -208,7 +182,7 @@ fn options_with(
     };
     options.font_resolver.select_font = select_font;
     options.font_resolver.select_fallback = select_fallback;
-    options.image_href_resolver = image_href_resolver(budget);
+    options.image_href_resolver = image_href_resolver(budget, svg_budget);
     options
 }
 
@@ -233,6 +207,7 @@ impl ExportOptions {
     /// Options for one page and the budget they count its pictures in.
     fn page(&self) -> (usvg::Options<'static>, Arc<RasterBudget>) {
         let budget = Arc::new(RasterBudget::for_export());
+        let svg_budget = Arc::new(NestedSvgBudget::new());
         let shared_font = Arc::clone(&self.select_font);
         let select_font: usvg::FontSelectionFn<'static> =
             Box::new(move |font, db| shared_font.as_ref()(font, db));
@@ -244,6 +219,7 @@ impl ExportOptions {
             select_font,
             select_fallback,
             Arc::clone(&budget),
+            svg_budget,
         );
         (options, budget)
     }
@@ -396,7 +372,7 @@ impl PdfAssembler {
         let catalog_ref = alloc.bump();
         let tree_ref = alloc.bump();
         Self {
-            options: ExportOptions::new(Arc::new(crate::pdf_fonts::with_mapped_faces(fonts))),
+            options: ExportOptions::new(Arc::clone(fonts)),
             embed_text,
             budget: Budget::default(),
             skipped_pictures: 0,

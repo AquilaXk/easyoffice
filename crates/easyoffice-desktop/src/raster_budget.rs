@@ -83,7 +83,16 @@ impl RasterBudget {
         let Ok(size) = imagesize::blob_size(data) else {
             return false;
         };
-        let pixels = (size.width as u64).saturating_mul(size.height as u64);
+        let mut pixels = (size.width as u64).saturating_mul(size.height as u64);
+        if data.starts_with(b"GIF87a") || data.starts_with(b"GIF89a") {
+            let Ok(Some(frame_pixels)) = inspect_gif_frames(data) else {
+                return false;
+            };
+            if frame_pixels > self.per_image {
+                return false;
+            }
+            pixels = pixels.max(frame_pixels);
+        }
         if pixels == 0 || pixels > self.per_image {
             return false;
         }
@@ -105,6 +114,100 @@ impl RasterBudget {
             }
         }
     }
+}
+
+/// Inspects GIF frames following Global Color Table and Extension blocks to find the maximum
+/// frame dimension, and rejects malformed blocks before decoders allocate.
+fn inspect_gif_frames(data: &[u8]) -> Result<Option<u64>, ()> {
+    if !data.starts_with(b"GIF87a") && !data.starts_with(b"GIF89a") {
+        return Ok(None);
+    }
+    if data.len() < 13 {
+        return Err(());
+    }
+    let packed = data[10];
+    let has_gct = (packed & 0x80) != 0;
+    let gct_size = if has_gct {
+        3usize.checked_mul(1 << ((packed & 0x07) + 1)).ok_or(())?
+    } else {
+        0
+    };
+    let mut offset = 13usize.checked_add(gct_size).ok_or(())?;
+    if offset > data.len() {
+        return Err(());
+    }
+
+    let mut max_pixels = 0u64;
+    let mut loop_count = 0usize;
+
+    while offset < data.len() {
+        loop_count += 1;
+        if loop_count > 4096 {
+            return Err(());
+        }
+        let block_type = data[offset];
+        if block_type == 0x3B {
+            // GIF Trailer
+            break;
+        }
+        if block_type == 0x21 {
+            // Extension block: 0x21 + label + subblocks
+            offset = offset.checked_add(2).ok_or(())?;
+            while offset < data.len() {
+                let sub_len = data[offset] as usize;
+                offset = offset.checked_add(1).ok_or(())?;
+                if sub_len == 0 {
+                    break;
+                }
+                offset = offset.checked_add(sub_len).ok_or(())?;
+                if offset > data.len() {
+                    return Err(());
+                }
+            }
+        } else if block_type == 0x2C {
+            // Image Descriptor: 10 bytes header
+            if offset + 10 > data.len() {
+                return Err(());
+            }
+            let w = u16::from_le_bytes([data[offset + 5], data[offset + 6]]) as u64;
+            let h = u16::from_le_bytes([data[offset + 7], data[offset + 8]]) as u64;
+            let frame_pixels = w.saturating_mul(h);
+            max_pixels = max_pixels.max(frame_pixels);
+
+            let img_packed = data[offset + 9];
+            let has_lct = (img_packed & 0x80) != 0;
+            let lct_size = if has_lct {
+                3usize
+                    .checked_mul(1 << ((img_packed & 0x07) + 1))
+                    .ok_or(())?
+            } else {
+                0
+            };
+            offset = offset.checked_add(10 + lct_size).ok_or(())?;
+            if offset >= data.len() {
+                return Err(());
+            }
+            // Skip LZW minimum code size
+            offset = offset.checked_add(1).ok_or(())?;
+            // Skip image data sub-blocks
+            while offset < data.len() {
+                let sub_len = data[offset] as usize;
+                offset = offset.checked_add(1).ok_or(())?;
+                if sub_len == 0 {
+                    break;
+                }
+                offset = offset.checked_add(sub_len).ok_or(())?;
+                if offset > data.len() {
+                    return Err(());
+                }
+            }
+        } else {
+            // Unknown/malformed block
+            return Err(());
+        }
+    }
+
+    Ok(Some(max_pixels))
 }
 
 #[cfg(test)]
