@@ -107,3 +107,62 @@ fn structured_bench() {
         run("structured", true);
     }
 }
+
+const SHEETS: u32 = 40;
+const PER_SHEET: u32 = 2_000;
+
+/// 40 sheets, each with a table and 2,000 formulas `=[@c1]*2` (no table name): the tables told after the cells (the
+/// order a request had) and before them. Milliseconds to build the workbook.
+fn many_sheets(tables_first: bool) -> f64 {
+    let started = Instant::now();
+    let mut wb = WorkbookEngine::new();
+    let names: Vec<String> = (1..=SHEETS).map(|i| format!("S{i}")).collect();
+    for name in &names {
+        wb.add_sheet(name.clone());
+    }
+    let table_of = |i: u32| {
+        let mut t = SheetTable::new(
+            format!("Tab_{i}"),
+            CellBox::parse(&format!("A1:B{}", PER_SHEET + 1)).unwrap(),
+        );
+        t.columns = vec!["c1".into(), "c2".into()];
+        t
+    };
+    if tables_first {
+        for (i, name) in names.iter().enumerate() {
+            wb.set_tables(name, vec![table_of(i as u32)]).unwrap();
+        }
+    }
+    for name in &names {
+        wb.set_cell(name, "A1", "c1".to_string()).unwrap();
+        wb.set_cell(name, "B1", "c2".to_string()).unwrap();
+        for r in 2..=PER_SHEET + 1 {
+            wb.set_cell(name, &format!("A{r}"), r.to_string()).unwrap();
+            wb.set_cell(name, &format!("B{r}"), "=[@c1]*2".to_string())
+                .unwrap();
+        }
+    }
+    if !tables_first {
+        for (i, name) in names.iter().enumerate() {
+            wb.set_tables(name, vec![table_of(i as u32)]).unwrap();
+        }
+    }
+    assert_eq!(
+        wb.evaluate_cell("S40", "B2").to_display_string(),
+        "4",
+        "the formulas read their rows"
+    );
+    ms(started)
+}
+
+#[test]
+#[ignore = "measurement harness"]
+fn many_sheets_bench() {
+    for _ in 0..3 {
+        println!(
+            "40 sheets x 2,000 [@c1]*2: tables after the cells {:.1} | tables first {:.1}",
+            many_sheets(false),
+            many_sheets(true)
+        );
+    }
+}

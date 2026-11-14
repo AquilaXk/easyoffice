@@ -15,6 +15,7 @@ use easyoffice_formats::{
     StrictJsonValue, MAX_TABLE_TEXT_CHARS,
 };
 use easyoffice_sheet::PackedCellCoordinate;
+use std::collections::HashMap;
 
 type Entries = [(String, StrictJsonValue)];
 
@@ -51,15 +52,15 @@ impl EasyOfficeIpcRouter {
             text_field(entries, "from")?,
             text_field(entries, "to")?,
         );
-        let sheets: Vec<(String, Vec<SheetTable>)> = tables_by_sheet(entries)?
+        // The tables of each sheet by its name without case: one lookup per formula.
+        let sheets: HashMap<String, Vec<SheetTable>> = tables_by_sheet(entries)?
             .into_iter()
-            .map(|(name, field)| (name, field.tables.unwrap_or_default()))
+            .map(|(name, field)| (name.to_lowercase(), field.tables.unwrap_or_default()))
             .collect();
         let tables_on = |sheet: &str| {
             sheets
-                .iter()
-                .find(|(name, _)| name.eq_ignore_ascii_case(sheet))
-                .map_or(&[][..], |(_, tables)| &tables[..])
+                .get(&sheet.to_lowercase())
+                .map_or(&[][..], |tables| &tables[..])
         };
         let formulas = StrictJsonValue::get_field(entries, "formulas")
             .and_then(StrictJsonValue::as_array)

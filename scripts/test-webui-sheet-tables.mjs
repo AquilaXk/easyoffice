@@ -143,6 +143,11 @@ test("a header cell with new text renames its column once, after the first look"
   assert.deepEqual(layout.tablesOf("S")[0].columns, ["Region", "Sales Q1", "Q2"]);
   assert.equal(layout.setTableColumn("S", "Sales", 1, "Sales Q1"), false);
   assert.equal(layout.setTableColumn("S", "Nope", 1, "x"), false);
+  // A document opened afresh forgets the headers it saw: the next look is a baseline again.
+  layout.resetTableHeaders();
+  cells.B1 = entry("Other");
+  assert.deepEqual(layout.tableColumnRenames({ S: cells }), []);
+  cells.B1 = entry("Sales Q1");
   // Back to the old text (an undo) is a rename back.
   cells.B1 = entry("Q1");
   assert.deepEqual(layout.tableColumnRenames({ S: cells }).map((r) => [r.from, r.to]), [["Sales Q1", "Q1"]]);

@@ -331,23 +331,15 @@ impl EasyOfficeIpcRouter {
             }
         }
         let has_explicit_sheets = explicit_sheets_val.is_some();
-        for (sh, addr, val) in cell_triples {
-            if !has_explicit_sheets && !sh.trim().is_empty() {
-                wb.add_sheet(&sh);
-            }
-            if wb.sheet(&sh).is_some() {
-                wb.set_cell(&sh, &addr, val)?;
-            }
-        }
-        let names = sheet_names_json::names_field(entries)?;
-        if !names.is_empty() {
-            wb.set_names_lenient(&names);
-        }
-        for (name, merges) in sheet_layout_json::merges_by_sheet(entries)? {
-            if let Some(sheet) = wb.sheet_mut(&name) {
-                sheet.set_spill_merges(merges);
+        if !has_explicit_sheets {
+            for (sh, _, _) in &cell_triples {
+                if !sh.trim().is_empty() {
+                    wb.add_sheet(sh);
+                }
             }
         }
+        // The tables come before the cells: a structured reference compiles against them once, where tables set after
+        // the cells would compile again every formula that names a table each time one sheet's tables are set (PD-225).
         for (name, field) in sheet_table_json::tables_by_sheet(entries)? {
             if wb.sheet(&name).is_none() {
                 continue;
@@ -359,6 +351,20 @@ impl EasyOfficeIpcRouter {
                         sheet.set_spill_tables(field.boxes);
                     }
                 }
+            }
+        }
+        for (sh, addr, val) in cell_triples {
+            if wb.sheet(&sh).is_some() {
+                wb.set_cell(&sh, &addr, val)?;
+            }
+        }
+        let names = sheet_names_json::names_field(entries)?;
+        if !names.is_empty() {
+            wb.set_names_lenient(&names);
+        }
+        for (name, merges) in sheet_layout_json::merges_by_sheet(entries)? {
+            if let Some(sheet) = wb.sheet_mut(&name) {
+                sheet.set_spill_merges(merges);
             }
         }
         Ok(wb)

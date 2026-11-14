@@ -1,5 +1,5 @@
 use crate::names::{name_key, NameKey};
-use crate::table_index::{TableCtx, IMPLICIT_TABLE_KEY};
+use crate::table_index::{implicit_key, TableCtx};
 use crate::{CellRange, FormulaError, PackedCellCoordinate};
 use std::sync::Arc;
 
@@ -436,7 +436,7 @@ impl<'a> Parser<'a> {
         let sref = easyoffice_formats::parse_group(group).ok_or(FormulaError::Value)?;
         self.table_keys.push(match table {
             Some(name) => name_key(&easyoffice_formats::fold_name(name)),
-            None => IMPLICIT_TABLE_KEY,
+            None => implicit_key(self.tables.map_or("", |ctx| ctx.sheet)),
         });
         Ok(match self.tables {
             Some(ctx) => ctx.index.resolve(ctx, table, &sref),

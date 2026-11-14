@@ -608,23 +608,23 @@ pub fn may_hold_structured_ref(text: &str) -> bool {
     text.as_bytes().contains(&b'[')
 }
 
-/// `formula` (text without `=`) with the references the file format cannot hold written as it does: the
-/// table's name in front of an unqualified reference (`own_table` is the table the formula's cell is in)
-/// and `#This Row` for `@`. A reference that names no table or breaks the syntax becomes `#REF!`.
+/// `formula` (text without `=`) with the references written as the file format holds them: the table's name in
+/// front of an unqualified reference (`own_table` is the table the formula's cell is in), `#This Row` for `@`
+/// and the group in its one spelling (a column name with a special character in double brackets). A reference that names no table or breaks the syntax becomes `#REF!`.
 pub fn to_file_refs(formula: &str, own_table: Option<&str>) -> Option<String> {
     rewrite_refs(formula, |found| {
-        let sref = found.sref.as_ref();
-        if found.table.is_some() && !sref.is_some_and(|s| s.at) {
-            return sref.is_none().then(|| "#REF!".to_string());
-        }
-        let (Some(sref), Some(table)) = (sref, found.table.or(own_table)) else {
+        let Some(sref) = found.sref.as_ref() else {
+            return Some("#REF!".to_string());
+        };
+        let Some(table) = found.table.or(own_table) else {
             return Some("#REF!".to_string());
         };
         let canonical = StructuredRef {
             at: false,
             ..sref.clone()
         };
-        Some(format!("{table}{}", write_group(&canonical)))
+        let written = format!("{table}{}", write_group(&canonical));
+        (written != formula[found.start..found.end]).then_some(written)
     })
 }
 
@@ -888,6 +888,12 @@ mod tests {
         );
         assert_eq!(to_file_refs("[@a]", None).as_deref(), Some("#REF!"));
         assert_eq!(to_file_refs("T[[#This Row],[a]]", Some("T")), None);
+        // A column name with a special character is written in double brackets, as the documentation says.
+        assert_eq!(
+            to_file_refs("SUM(T[d$])", None).as_deref(),
+            Some("SUM(T[[d$]])")
+        );
+        assert_eq!(to_file_refs("T[[d$]]+T[ b c ]", None), None);
         assert_eq!(to_file_refs("T[bad", Some("T")), None);
         assert_eq!(
             to_file_refs("T[[a],[b]]", Some("T")).as_deref(),

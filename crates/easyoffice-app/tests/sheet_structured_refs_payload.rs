@@ -277,3 +277,25 @@ fn a_renamed_column_is_written_into_the_formulas_that_name_it() {
         );
     }
 }
+
+#[test]
+fn a_request_with_tables_on_many_sheets_reads_the_unnamed_references_of_each() {
+    // The sheets come from the cells (no `sheets` list) and the tables are told for each of them.
+    let mut cells = String::new();
+    let mut tables = Vec::new();
+    for i in 1..=12 {
+        cells.push_str(&format!(
+            r#"{{"sheet":"S{i}","cell":"A1","value":"c1"}},{{"sheet":"S{i}","cell":"A2","value":"{i}"}},{{"sheet":"S{i}","cell":"B2","value":"=[@c1]*2"}},"#
+        ));
+        tables.push(format!(
+            r#""S{i}":[{{"name":"Tab_{i}","range":"A1:B2","columns":["c1","c2"]}}]"#
+        ));
+    }
+    let payload = format!(
+        r#"{{"sheet":"S1","cells":[{}],"tables":{{{}}},"targets":[{{"sheet":"S1","cell":"B2"}},{{"sheet":"S12","cell":"B2"}}]}}"#,
+        cells.trim_end_matches(','),
+        tables.join(",")
+    );
+    let answer = call(&payload);
+    assert!(answer.contains(r#""targetValues":["2","24"]"#), "{answer}");
+}

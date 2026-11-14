@@ -457,6 +457,9 @@
     return renames;
   }
 
+  // Forgets the header texts seen: a document opened or closed starts its tables afresh (the next look is a baseline).
+  const resetTableHeaders = () => seenHeaders.clear();
+
   // Gives column `index` of the table the name `columnName`; true when it changed.
   function setTableColumn(sheet, table, index, columnName) {
     const t = tablesOf(sheet).find((x) => x.name === table);
@@ -567,6 +570,7 @@
     tablesIn,
     settleTableHeaders,
     tableColumnRenames,
+    resetTableHeaders,
     tableNamed,
     tableAt,
     setTableColumn,

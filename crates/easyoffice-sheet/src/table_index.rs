@@ -25,9 +25,11 @@ use easyoffice_formats::{
 };
 use std::collections::{HashMap, HashSet};
 
-/// What a formula remembers of a reference that names no table (inside one, `[@Q1]`): any change of the
-/// tables compiles it again.
-pub(crate) const IMPLICIT_TABLE_KEY: NameKey = 0;
+/// What a formula remembers of a reference that names no table (inside one, `[@Q1]`): a change of any table of
+/// its own sheet compiles it again, and a change on another sheet does not.
+pub(crate) fn implicit_key(sheet: &str) -> NameKey {
+    name_key(&format!("\u{0}{}", fold_name(sheet)))
+}
 
 #[derive(Debug, Clone)]
 struct Entry {
@@ -165,25 +167,28 @@ impl TableIndex {
     }
 
     /// The hash of each table name whose table is not the same in `other` (a table that is not in one of them
-    /// counts), and [`IMPLICIT_TABLE_KEY`] when there is any.
+    /// counts) and, for a reference that names no table, the key of the sheet the table is on (see [`implicit_key`]).
     pub(crate) fn changed_keys(&self, other: &TableIndex) -> HashSet<NameKey> {
         let mut changed = HashSet::new();
-        let mut note = |name: &str| {
-            changed.insert(name_key(&fold_name(name)));
+        let mut note = |entry: &Entry| {
+            changed.insert(name_key(&fold_name(&entry.table.name)));
+            changed.insert(implicit_key(&entry.sheet));
         };
         for (folded, &i) in &self.by_name {
             match other.by_name.get(folded) {
                 Some(&j) if self.entries[i].same_shape(&other.entries[j]) => {}
-                _ => note(&self.entries[i].table.name),
+                found => {
+                    note(&self.entries[i]);
+                    if let Some(&j) = found {
+                        note(&other.entries[j]);
+                    }
+                }
             }
         }
         for (folded, &j) in &other.by_name {
             if !self.by_name.contains_key(folded) {
-                note(&other.entries[j].table.name);
+                note(&other.entries[j]);
             }
-        }
-        if !changed.is_empty() {
-            changed.insert(IMPLICIT_TABLE_KEY);
         }
         changed
     }

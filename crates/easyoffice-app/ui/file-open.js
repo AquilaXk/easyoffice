@@ -416,6 +416,7 @@
         const sheets = Array.isArray(res.sheets) && res.sheets.length > 0 ? res.sheets : [{ name: "Sheet1", cells: [] }];
         const { store, rowCounts, columnWidths, rulesBySheet, layoutBySheet } = buildSheetStore(sheets);
         host.__EASYOFFICE_SHEET_LAYOUT__.replaceAll(layoutBySheet);
+        host.__EASYOFFICE_SHEET_LAYOUT__.resetTableHeaders();
         next.sheetLayout = layoutBySheet;
         // The tabs follow the file's order; the book opens on its first sheet that is shown.
         const order = sheets.map((sheet) => sheet.name);

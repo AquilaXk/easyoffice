@@ -201,3 +201,60 @@ fn shared_formulas_keep_structured_references_unshifted() {
     assert_eq!(formula_at(&back[0].1, 0, 0), "=B1+SUM(Sales[Q1])");
     assert_eq!(formula_at(&back[0].1, 1, 0), "=B2+SUM(Sales[Q1])");
 }
+
+#[test]
+fn names_are_written_in_the_files_spelling_too() {
+    let def = |name: &str, refers_to: &str| DefinedName {
+        name: name.into(),
+        scope: None,
+        refers_to: refers_to.into(),
+        comment: String::new(),
+        hidden: false,
+    };
+    let mut table = sales();
+    table.columns[2] = "Q$2".into();
+    let st = SheetStyling {
+        tables: vec![table],
+        defined_names: vec![
+            def("A_", "Sales[@Q1]"),
+            def("B_", "[@Q1]"),
+            def("C_", "SUM(Sales[Q$2])+Sales[[#This Row],[Q1]]"),
+            def("D_", "Sales[Q1]"),
+        ],
+        ..SheetStyling::default()
+    };
+    let bytes = OoxmlCodec::pack_xlsx_multi_styled(
+        &[("Data".to_string(), data(&[]))],
+        &[],
+        std::slice::from_ref(&st),
+    )
+    .unwrap();
+    let entries = ZipArchiveCodec::unpack(&bytes, &ZipSecurityPolicy::default()).unwrap();
+    let wb = entries
+        .iter()
+        .find(|e| e.path == "xl/workbook.xml")
+        .unwrap();
+    let xml = String::from_utf8(wb.data.clone()).unwrap();
+    assert!(
+        xml.contains(">Sales[[#This Row],[Q1]]</definedName>"),
+        "{xml}"
+    );
+    assert!(
+        xml.contains(">#REF!</definedName>"),
+        "a name sits in no table: {xml}"
+    );
+    assert!(
+        xml.contains("SUM(Sales[[Q$2]])+Sales[[#This Row],[Q1]]"),
+        "{xml}"
+    );
+    assert!(xml.contains(">Sales[Q1]</definedName>"), "{xml}");
+    // The cells of the same sheet get the same spelling for a name with a special character.
+    let cells = data(&[(5, 1, "=SUM(Sales[Q$2])")]);
+    let bytes = OoxmlCodec::pack_xlsx_multi_styled(
+        &[("Data".to_string(), cells)],
+        &[],
+        std::slice::from_ref(&st),
+    )
+    .unwrap();
+    assert!(sheet_xml(&bytes, 1).contains("<f>SUM(Sales[[Q$2]])</f>"));
+}

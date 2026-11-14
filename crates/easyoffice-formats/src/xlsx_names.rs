@@ -112,7 +112,19 @@ pub(crate) fn defined_names_xml(sheet_names: &[String], stylings: &[SheetStyling
         if def.scope.is_some() && local.is_none() {
             continue;
         }
-        push_name(&mut inner, def, local);
+        // A structured reference is written the way the file format holds it; a name sits in no table, so a reference
+        // with no table's name is `#REF!` (PD-225).
+        match crate::structured_ref::to_file_refs(&def.refers_to, None) {
+            Some(refers_to) => push_name(
+                &mut inner,
+                &DefinedName {
+                    refers_to,
+                    ..def.clone()
+                },
+                local,
+            ),
+            None => push_name(&mut inner, def, local),
+        }
     }
     if inner.is_empty() {
         inner
