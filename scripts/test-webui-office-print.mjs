@@ -116,6 +116,33 @@ test("sheet: alignment, wrapping and borders print, and a bordered empty cell is
   assert.equal(tds[1].style.borderTopStyle, "", "an edge nobody set keeps the table's");
 });
 
+test("sheet: fills and text colors print, a filled empty cell is part of the range, and the print root keeps the colors (PD-227)", async () => {
+  const t = await setup("SHEET");
+  await pickFile(
+    t.h.document,
+    makeFixtureFile("색.xlsx", {
+      sheets: [{ name: "Sheet1", cells: [
+        { ref: "B2", raw: "가", style: { fill: "ffeb9c", fc: "9c5700" } },
+        { ref: "C2", raw: "", style: { fill: "00b050" } },
+        { ref: "D2", raw: "나", style: { fill: "000000" } },
+        { ref: "E2", raw: "다", style: { fc: "ff0000" } },
+      ] }],
+    })
+  );
+  await flushAsyncTurns(8);
+  await t.print();
+  const tds = t.printed[0].querySelectorAll("td");
+  assert.equal(tds.length, 4, "the range is B2:E2 although C2 holds no text");
+  assert.equal(tds[0].style.backgroundColor, "#ffeb9c");
+  assert.equal(tds[0].style.color, "#9c5700");
+  assert.equal(tds[1].style.backgroundColor, "#00b050");
+  assert.equal(tds[2].style.color, "#ffffff", "automatic text on a black fill prints white");
+  assert.equal(tds[3].style.color, "#ff0000");
+  assert.equal(tds[3].style.backgroundColor, "");
+  const css = (await import("node:fs")).readFileSync(new URL("../crates/easyoffice-app/ui/shell.css", import.meta.url), "utf8");
+  assert.match(css, /#eo-print-root \{[^}]*print-color-adjust: exact/);
+});
+
 test("sheet: an empty sheet and a range past the cell cap are refused with a message", async () => {
   const t = await setup("SHEET");
   await pickFile(t.h.document, makeFixtureFile("빈.xlsx", { sheets: [{ name: "Sheet1", cells: [] }] }));

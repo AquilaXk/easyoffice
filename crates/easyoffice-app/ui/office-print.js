@@ -127,7 +127,7 @@
         const entry = map[ref];
         const packed = entry ? gridUtils.packRef(ref) : 0;
         const text = entry && entry.value != null ? String(entry.value) : "";
-        if (packed <= 0 || (text === "" && !entry?.style?.border)) continue;
+        if (packed <= 0 || (text === "" && !entry?.style?.border && !entry?.style?.fill)) continue;
         const col = packed & COLUMN_BITS;
         const row = (packed - col) / ROW_STRIDE;
         cells.push({ row, col, text, entry });
