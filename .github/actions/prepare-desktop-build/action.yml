@@ -25,6 +25,12 @@ runs:
       with:
         node-version: "22"
 
+    # The CLI the signing step runs comes from the committed lockfile: every package is checked against its
+    # integrity hash and no install script runs, so a changed registry package cannot reach the signing key.
+    - name: Install the pinned Tauri CLI from the lockfile
+      shell: bash
+      run: npm ci --ignore-scripts --no-audit --no-fund --prefix scripts/tauri-cli
+
     # The bundler's downloaded tools (PD-118); the build step retries a failed download.
     - name: Cache the Tauri bundler tools
       uses: ./.github/actions/cache-tauri-tools

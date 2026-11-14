@@ -70,12 +70,15 @@ test("does not retry a compile failure", async () => {
 const read = (rel) => readText(new URL(`../${rel}`, import.meta.url));
 const CLI_BUILD = /@tauri-apps\/cli@(\d+\.\d+\.\d+) build/g;
 
+// CI runs the CLI through npx; the release builds run the copy installed from the committed lockfile.
+const RELEASE_CLI = 'node "$GITHUB_WORKSPACE/scripts/tauri-cli/node_modules/@tauri-apps/cli/tauri.js"';
+
 test("every Tauri build runs through the retry wrapper", () => {
-  for (const file of [".github/workflows/ci.yml", ".github/workflows/release.yml"]) {
-    const lines = read(file).split("\n").filter((line) => line.includes("npx ") && line.includes("@tauri-apps/cli@") && line.includes(" build "));
+  for (const [file, runner] of [[".github/workflows/ci.yml", "npx "], [".github/workflows/release.yml", RELEASE_CLI]]) {
+    const lines = read(file).split("\n").filter((line) => line.includes(runner) && line.includes(" build "));
     assert.ok(lines.length > 0, `${file} has no bundling build`);
     for (const line of lines) {
-      assert.match(line, /scripts\/retry-on-download-failure\.mjs" -- npx /, `${file}: ${line.trim()}`);
+      assert.ok(line.includes(`scripts/retry-on-download-failure.mjs" -- ${runner}`), `${file}: ${line.trim()}`);
     }
   }
 });
@@ -98,5 +101,6 @@ test("the cached CLI version equals the version the builds run", () => {
   for (const file of [".github/workflows/ci.yml", ".github/actions/prepare-desktop-build/action.yml"]) {
     for (const match of read(file).matchAll(/tauri-cli-version: (\S+)/g)) versions.add(match[1]);
   }
+  versions.add(JSON.parse(read("scripts/tauri-cli/package.json")).dependencies["@tauri-apps/cli"]);
   assert.equal(versions.size, 1, `Tauri CLI versions differ: ${[...versions].join(", ")}`);
 });

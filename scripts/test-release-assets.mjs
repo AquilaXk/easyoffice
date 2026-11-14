@@ -267,6 +267,27 @@ test("every build job signs: the updater artifacts are switched on with the rele
   assert.doesNotMatch(workflow.replaceAll(/\$\{\{ secrets\.TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)? \}\}/g, ""), /PRIVATE_KEY[^\n]*(echo|printf|cat)/, "a key is never echoed");
 });
 
+// The CLI that holds the signing key is the one the committed lockfile pins, installed without scripts; the
+// release never fetches a package by name in a step that has the key.
+test("the release builds run the lockfile's Tauri CLI, not a package fetched by name", () => {
+  assert.doesNotMatch(workflow, /\bnpx\b/);
+  const action = read(".github/actions/prepare-desktop-build/action.yml");
+  assert.match(action, /npm ci --ignore-scripts [^\n]*--prefix scripts\/tauri-cli/);
+  const manifest = JSON.parse(read("scripts/tauri-cli/package.json"));
+  assert.match(manifest.dependencies["@tauri-apps/cli"], /^\d+\.\d+\.\d+$/, "an exact version");
+  const lock = JSON.parse(read("scripts/tauri-cli/package-lock.json"));
+  const cli = lock.packages["node_modules/@tauri-apps/cli"];
+  assert.equal(cli.version, manifest.dependencies["@tauri-apps/cli"]);
+  for (const [name, entry] of Object.entries(lock.packages)) {
+    if (name) assert.match(entry.integrity ?? "", /^sha512-/, `${name} has an integrity hash`);
+  }
+});
+
+test("publishing is serialized by version across tag pushes and manual runs", () => {
+  const publish = workflow.slice(workflow.indexOf("  publish-release:"));
+  assert.match(publish, /concurrency:\s+group: release-publish-\$\{\{ needs\.prepare\.outputs\.version \}\}\s+cancel-in-progress: false/);
+});
+
 test("a run without the signing key fails before any build, publishing or not", () => {
   const prepare = workflow.slice(workflow.indexOf("  prepare:"), workflow.indexOf("  release-macos:"));
   assert.match(prepare, /TAURI_SIGNING_PRIVATE_KEY: \$\{\{ secrets\.TAURI_SIGNING_PRIVATE_KEY \}\}/);

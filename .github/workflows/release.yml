@@ -33,6 +33,8 @@ on:
 # Tag pushes group by tag. A manual run groups by version, publish flag and draft flag, so a trial
 # build (publish=false) never queues behind or replaces a publishing run of the same version, and a
 # queued request to publish a release is never cancelled by a draft request for the same version.
+# Publishing has a group of its own, by version (the `publish-release` job): a tag push and a manual run
+# of the same version build side by side but never write the release at the same time.
 concurrency:
   group: release-${{ github.event_name == 'workflow_dispatch' && format('dispatch-{0}-{1}-{2}', inputs.version, inputs.publish, inputs.release_draft) || github.ref_name }}
   cancel-in-progress: false
@@ -156,7 +158,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           BUNDLES="$(node "$GITHUB_WORKSPACE/scripts/release-assets.mjs" bundles macos-universal)"
-          node "$GITHUB_WORKSPACE/scripts/retry-on-download-failure.mjs" -- npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --ci --target universal-apple-darwin --bundles "$BUNDLES" --config "{\"version\":\"${VERSION}\",\"bundle\":{\"createUpdaterArtifacts\":true}}" -- --locked
+          node "$GITHUB_WORKSPACE/scripts/retry-on-download-failure.mjs" -- node "$GITHUB_WORKSPACE/scripts/tauri-cli/node_modules/@tauri-apps/cli/tauri.js" build --ci --target universal-apple-darwin --bundles "$BUNDLES" --config "{\"version\":\"${VERSION}\",\"bundle\":{\"createUpdaterArtifacts\":true}}" -- --locked
 
       - name: Verify the Quick Look extensions are inside the app (identity, types, sandbox, both architectures)
         run: node scripts/verify-quicklook-bundle.mjs target/universal-apple-darwin/release/bundle/macos/EasyOffice.app --archs arm64,x86_64
@@ -213,7 +215,7 @@ jobs:
       - name: Run the shared release gates and prepare the editor bundle
         uses: ./.github/actions/prepare-desktop-build
 
-      # Prebuilt Tauri CLI (major 2) from npm; it builds crates/easyoffice-desktop in release mode
+      # Prebuilt Tauri CLI (major 2) installed from scripts/tauri-cli/package-lock.json; it builds crates/easyoffice-desktop in release mode
       # with the WebUI embedded and packages it with NSIS. The release version overrides the
       # installer version so the installer metadata and the tag agree.
       - name: Build EasyOffice desktop shell and the signed NSIS installer
@@ -225,7 +227,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           BUNDLES="$(node "$GITHUB_WORKSPACE/scripts/release-assets.mjs" bundles windows-x64)"
-          node "$GITHUB_WORKSPACE/scripts/retry-on-download-failure.mjs" -- npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --ci --bundles "$BUNDLES" --config "{\"version\":\"${VERSION}\",\"bundle\":{\"createUpdaterArtifacts\":true}}" -- --locked
+          node "$GITHUB_WORKSPACE/scripts/retry-on-download-failure.mjs" -- node "$GITHUB_WORKSPACE/scripts/tauri-cli/node_modules/@tauri-apps/cli/tauri.js" build --ci --bundles "$BUNDLES" --config "{\"version\":\"${VERSION}\",\"bundle\":{\"createUpdaterArtifacts\":true}}" -- --locked
 
       - name: Smoke test desktop shell window (embedded WebUI, IPC round trip and HWP editor round trip)
         shell: pwsh
@@ -296,7 +298,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           BUNDLES="$(node "$GITHUB_WORKSPACE/scripts/release-assets.mjs" bundles "$PLATFORM")"
-          node "$GITHUB_WORKSPACE/scripts/retry-on-download-failure.mjs" -- npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --ci --bundles "$BUNDLES" --config "{\"version\":\"${VERSION}\",\"bundle\":{\"createUpdaterArtifacts\":true}}" -- --locked
+          node "$GITHUB_WORKSPACE/scripts/retry-on-download-failure.mjs" -- node "$GITHUB_WORKSPACE/scripts/tauri-cli/node_modules/@tauri-apps/cli/tauri.js" build --ci --bundles "$BUNDLES" --config "{\"version\":\"${VERSION}\",\"bundle\":{\"createUpdaterArtifacts\":true}}" -- --locked
 
       - name: Verify the package structure (AppImage extraction, deb and rpm metadata, desktop entry, notices) and the signatures
         env:
@@ -320,6 +322,9 @@ jobs:
     needs: [prepare, release-macos, build-windows-release, build-linux-release]
     # publish=false (workflow_dispatch only) stops after the build jobs, leaving the Actions artifacts.
     if: github.event_name != 'workflow_dispatch' || inputs.publish
+    concurrency:
+      group: release-publish-${{ needs.prepare.outputs.version }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:

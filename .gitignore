@@ -41,3 +41,6 @@ crates/easyoffice-app/ui/hwp-studio/
 # Quick Look extension (PD-140): its own Cargo target directory
 apps/quicklook/rust/target/
 /coverage/
+
+# The pinned Tauri CLI the release builds install (scripts/tauri-cli/package-lock.json)
+scripts/tauri-cli/node_modules/

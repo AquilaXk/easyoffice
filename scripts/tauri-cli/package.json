@@ -1,0 +1,9 @@
+{
+  "name": "easyoffice-tauri-cli",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The Tauri CLI the release builds run, pinned by package-lock.json (integrity hashes).",
+  "dependencies": {
+    "@tauri-apps/cli": "2.12.4"
+  }
+}
