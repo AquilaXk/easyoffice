@@ -1,6 +1,7 @@
 #[path = "pdf_object_graph.rs"]
 mod pdf_object_graph;
 
+use crate::decode_budget::DecodeBudget;
 use crate::pdf_stream_parser::{
     advance_past_stream_eol, contains_subslice, decode_base64_bytes_impl, escape_pdf_text,
     is_pdf_delim_or_ws, is_standalone_pdf_kw, parse_indirect_obj_header,
@@ -63,11 +64,13 @@ fn ordered_by_sequence(
 type ToUnicodeMaps = HashMap<(u32, u16), PdfToUnicodeMap>;
 
 /// Parses each `/ToUnicode` stream referenced by a font dictionary once.
+/// What the maps hold is charged to `budget`.
 fn build_tounicode_maps(
     bytes: &[u8],
     objects: &HashMap<(u32, u16), PdfIndirectObject>,
     flate_cache: &HashMap<(u32, u16), Vec<u8>>,
-) -> ToUnicodeMaps {
+    budget: &mut DecodeBudget,
+) -> Result<ToUnicodeMaps, EasyOfficeError> {
     let mut maps = ToUnicodeMaps::new();
     for obj in objects.values() {
         let PdfObjValue::Dict(ref entries) = obj.val else {
@@ -90,10 +93,10 @@ fn build_tounicode_maps(
             continue;
         };
         let mut cmap = PdfToUnicodeMap::default();
-        PdfToUnicodeMap::parse_cmap_stream(&String::from_utf8_lossy(stream), &mut cmap);
+        PdfToUnicodeMap::parse_cmap_stream(&String::from_utf8_lossy(stream), &mut cmap, budget)?;
         maps.insert((on, gn), cmap);
     }
-    maps
+    Ok(maps)
 }
 
 /// Whether a composite font's `/Encoding` CMap yields UTF-16BE code units (`UniKS-UCS2-H`, ...).
@@ -487,6 +490,8 @@ struct PageWalkState<'a> {
     to_unicode: &'a ToUnicodeMaps,
     first_used_flate: HashSet<(u32, u16)>,
     remaining_budget: usize,
+    /// Text the pages decode to and what the font maps hold, over the whole document.
+    decoded: DecodeBudget,
     visited: HashSet<(u32, u16)>,
     node_count: usize,
     pages: Vec<PdfPageModel>,
@@ -704,6 +709,15 @@ impl PdfSerializer {
         let resources = dict_get(page_entries, "/Resources").or(inherited.resources);
         let fonts = page_font_decoders(resources, state.objects, state.to_unicode);
         let parsed = parse_pdf_content_stream_with_fonts(&stream_text, &fonts);
+        if parsed.exceeded {
+            return Err(EasyOfficeError::ResourceBudgetExceeded(
+                "PDF 페이지 한 장이 글꼴 맵으로 복원하는 글자 수가 한도를 넘었습니다.".to_string(),
+            ));
+        }
+        state.decoded.charge(
+            parsed.body_text.len() + parsed.watermark.as_ref().map_or(0, String::len),
+            "PDF 페이지 글자",
+        )?;
         if let Some(wm) = parsed.watermark {
             state.watermark_text = Some(wm);
         }
@@ -857,7 +871,8 @@ impl PdfSerializer {
 
         expand_pdf_object_streams(bytes, &mut objects, &flate_cache, &mut order_seq);
         let ordered_objs = ordered_by_sequence(&objects);
-        let to_unicode = build_tounicode_maps(bytes, &objects, &flate_cache);
+        let mut decoded = DecodeBudget::new();
+        let to_unicode = build_tounicode_maps(bytes, &objects, &flate_cache, &mut decoded)?;
         let (title, pages_target) =
             resolve_catalog_and_pages_target(&objects, &ordered_objs, &trailers);
 
@@ -868,6 +883,7 @@ impl PdfSerializer {
             to_unicode: &to_unicode,
             first_used_flate: HashSet::new(),
             remaining_budget,
+            decoded,
             visited: HashSet::new(),
             node_count: 0,
             pages: Vec::new(),

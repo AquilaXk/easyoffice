@@ -25,6 +25,7 @@ pub(crate) const MAX_UTF8_BYTES_PER_UNIT: usize = 3;
 /// Remaining decoded-byte allowance of one document.
 #[derive(Debug)]
 pub(crate) struct DecodeBudget {
+    limit: usize,
     remaining: usize,
 }
 
@@ -40,7 +41,10 @@ impl DecodeBudget {
     }
 
     pub(crate) const fn with_limit(limit: usize) -> Self {
-        Self { remaining: limit }
+        Self {
+            limit,
+            remaining: limit,
+        }
     }
 
     /// Bytes still available: the output ceiling for a decoder that can stop at a given size.
@@ -57,7 +61,7 @@ impl DecodeBudget {
             }
             None => Err(EasyOfficeError::ResourceBudgetExceeded(format!(
                 "{what}: 문서 전체 복원 크기가 예산({} MiB)을 넘었습니다.",
-                MAX_DECODED_DOCUMENT_BYTES / MIB
+                self.limit / MIB
             ))),
         }
     }

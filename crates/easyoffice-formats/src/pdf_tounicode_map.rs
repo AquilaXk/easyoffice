@@ -1,7 +1,19 @@
 //! `/ToUnicode` CMap parsing and the per-font decoding rules the content stream interpreter reads.
 
 use super::{decode_hex_bytes_single_pass, decode_pdf_hex_string};
+use crate::decode_budget::DecodeBudget;
+use crate::EasyOfficeError;
 use std::collections::HashMap;
+
+/// Most UTF-16 code units one code may map to. Ligatures and emoji sequences need a handful; a longer
+/// destination is not a font map but a way to multiply a small file by the number of codes.
+const MAX_DST_UNITS: usize = 16;
+
+/// Bytes charged for one entry of the code tables besides its text: the key, the value and the
+/// table's own slack.
+const ENTRY_BYTES: usize = 32;
+
+const MAP_WHAT: &str = "PDF ToUnicode 글꼴 맵";
 
 #[derive(Debug, Clone)]
 pub(crate) struct PdfToUnicodeMap {
@@ -29,11 +41,11 @@ fn next_hex_token<'a>(block: &'a str, idx: &mut usize) -> Option<&'a str> {
     let bytes = block.as_bytes();
     while *idx < bytes.len() {
         if bytes[*idx] == b'<' {
-            if let Some(close) = block[*idx + 1..].find('>') {
-                let s = &block[*idx + 1..*idx + 1 + close];
-                *idx += close + 2;
-                return Some(s);
-            }
+            // No `>` after this one means none after any later `<` either.
+            let close = block[*idx + 1..].find('>')?;
+            let s = &block[*idx + 1..*idx + 1 + close];
+            *idx += close + 2;
+            return Some(s);
         }
         *idx += 1;
     }
@@ -56,17 +68,32 @@ impl PdfToUnicodeMap {
         }
     }
 
-    #[inline]
-    pub(crate) fn insert_mapping(&mut self, code: u16, dst: String) {
+    /// Maps `code` to `dst`, charging the table to `budget`. A destination longer than
+    /// [`MAX_DST_UNITS`] is left out.
+    pub(crate) fn insert_mapping(
+        &mut self,
+        code: u16,
+        dst: String,
+        budget: &mut DecodeBudget,
+    ) -> Result<(), EasyOfficeError> {
         let mut chars = dst.chars();
         if let (Some(ch), None) = (chars.next(), chars.next()) {
+            budget.charge(ENTRY_BYTES, MAP_WHAT)?;
             self.insert_char(code, ch);
-        } else {
+        } else if dst.encode_utf16().count() <= MAX_DST_UNITS {
+            budget.charge(ENTRY_BYTES + dst.len(), MAP_WHAT)?;
             self.map.insert(code, dst);
         }
+        Ok(())
     }
 
-    pub(crate) fn parse_cmap_stream(cmap_text: &str, out: &mut Self) {
+    /// Reads the `bfchar` and `bfrange` blocks of a CMap into `out`; what the tables hold is charged
+    /// to `budget`, which fails the read when the document has used its allowance (Fail-Closed).
+    pub(crate) fn parse_cmap_stream(
+        cmap_text: &str,
+        out: &mut Self,
+        budget: &mut DecodeBudget,
+    ) -> Result<(), EasyOfficeError> {
         let mut rest = cmap_text;
         while let Some(pos) = rest.find("beginbfchar") {
             let after = &rest[pos + "beginbfchar".len()..];
@@ -83,7 +110,7 @@ impl PdfToUnicodeMap {
                     if byte_len == 2 {
                         out.is_two_byte = true;
                     }
-                    out.insert_mapping(code, dst);
+                    out.insert_mapping(code, dst, budget)?;
                 }
             }
             rest = &after[end_pos + "endbfchar".len()..];
@@ -96,12 +123,17 @@ impl PdfToUnicodeMap {
                 break;
             };
             let block = &after[..end_pos];
-            Self::parse_bfrange_block(block, out);
+            Self::parse_bfrange_block(block, out, budget)?;
             rest_range = &after[end_pos + "endbfrange".len()..];
         }
+        Ok(())
     }
 
-    fn parse_bfrange_block(block: &str, out: &mut PdfToUnicodeMap) {
+    fn parse_bfrange_block(
+        block: &str,
+        out: &mut PdfToUnicodeMap,
+        budget: &mut DecodeBudget,
+    ) -> Result<(), EasyOfficeError> {
         let bytes = block.as_bytes();
         let mut i = 0usize;
         while i < bytes.len() {
@@ -127,11 +159,12 @@ impl PdfToUnicodeMap {
             }
             if i < bytes.len() && bytes[i] == b'[' {
                 i += 1;
-                Self::parse_bfrange_array(block, &mut i, (lo, hi), out);
+                Self::parse_bfrange_array(block, &mut i, (lo, hi), out, budget)?;
             } else if let Some(dst_hex) = next_hex_token(block, &mut i) {
-                Self::apply_bfrange_base(dst_hex, (lo, hi), out);
+                Self::apply_bfrange_base(dst_hex, (lo, hi), out, budget)?;
             }
         }
+        Ok(())
     }
 
     /// Reads `<dst> <dst> ... ]` after the opening `[`, mapping consecutive codes from `lo`.
@@ -140,7 +173,8 @@ impl PdfToUnicodeMap {
         i: &mut usize,
         (lo, hi): (u16, u16),
         out: &mut PdfToUnicodeMap,
-    ) {
+        budget: &mut DecodeBudget,
+    ) -> Result<(), EasyOfficeError> {
         let bytes = block.as_bytes();
         let mut code = lo;
         while *i < bytes.len() {
@@ -152,41 +186,58 @@ impl PdfToUnicodeMap {
                 break;
             }
             if bytes[*i] == b'<' {
-                if let Some(close) = block[*i + 1..].find('>') {
-                    let dst_hex = &block[*i + 1..*i + 1 + close];
-                    *i += close + 2;
-                    if code <= hi {
-                        if let Some(dst) = decode_pdf_hex_string(dst_hex, true) {
-                            out.insert_mapping(code, dst);
-                        }
-                        code = code.saturating_add(1);
+                let Some(close) = block[*i + 1..].find('>') else {
+                    break;
+                };
+                let dst_hex = &block[*i + 1..*i + 1 + close];
+                *i += close + 2;
+                if code <= hi {
+                    if let Some(dst) = decode_pdf_hex_string(dst_hex, true) {
+                        out.insert_mapping(code, dst, budget)?;
                     }
-                    continue;
+                    code = code.saturating_add(1);
                 }
+                continue;
             }
             *i += 1;
         }
+        Ok(())
     }
 
     /// Maps `lo..=hi` onto consecutive code points or multi-code-unit UTF-16 sequences starting at `<dst>`.
-    fn apply_bfrange_base(dst_hex: &str, (lo, hi): (u16, u16), out: &mut PdfToUnicodeMap) {
+    /// The entries it adds are charged before they are made; a destination longer than
+    /// [`MAX_DST_UNITS`] adds none.
+    fn apply_bfrange_base(
+        dst_hex: &str,
+        (lo, hi): (u16, u16),
+        out: &mut PdfToUnicodeMap,
+        budget: &mut DecodeBudget,
+    ) -> Result<(), EasyOfficeError> {
+        let entries = usize::from(hi - lo) + 1;
         if let Some((dst_base, _)) = Self::parse_code_hex(dst_hex) {
             if lo == 0x0000 && hi == 0xFFFF && dst_base == 0x0000 {
-                return;
+                return Ok(());
             }
+            budget.charge(entries * ENTRY_BYTES, MAP_WHAT)?;
             for offset in 0..=(hi - lo) {
                 if let Some(ch) = char::from_u32(u32::from(dst_base) + u32::from(offset)) {
                     out.insert_char(lo + offset, ch);
                 }
             }
-            return;
+            return Ok(());
+        }
+        // Four hex digits make a code unit (whitespace may sit between them): refuse a long
+        // destination before decoding it.
+        if dst_hex.len() > MAX_DST_UNITS * 8 {
+            return Ok(());
         }
         let Some(bytes) = decode_hex_bytes_single_pass(dst_hex) else {
-            return;
+            return Ok(());
         };
-        if bytes.len() < 4 || bytes.len() % 2 != 0 {
-            return;
+        if bytes.len() < 4 || bytes.len() % 2 != 0 || bytes.len() > MAX_DST_UNITS * 2 {
+            return Ok(());
         }
+        budget.charge(entries * (ENTRY_BYTES + bytes.len() * 2), MAP_WHAT)?;
         let base_units: Vec<u16> = bytes
             .chunks_exact(2)
             .map(|p| u16::from_be_bytes([p[0], p[1]]))
@@ -208,6 +259,7 @@ impl PdfToUnicodeMap {
                 }
             }
         }
+        Ok(())
     }
 
     fn extract_hex_tokens(block: &str) -> Vec<&str> {
@@ -216,11 +268,12 @@ impl PdfToUnicodeMap {
         let mut i = 0usize;
         while i < bytes.len() {
             if bytes[i] == b'<' {
-                if let Some(close) = block[i + 1..].find('>') {
-                    out.push(&block[i + 1..i + 1 + close]);
-                    i += close + 2;
-                    continue;
-                }
+                let Some(close) = block[i + 1..].find('>') else {
+                    break;
+                };
+                out.push(&block[i + 1..i + 1 + close]);
+                i += close + 2;
+                continue;
             }
             i += 1;
         }

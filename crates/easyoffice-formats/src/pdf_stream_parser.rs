@@ -34,6 +34,8 @@ enum PdfStreamOperand {
 }
 
 pub(crate) struct ParsedPdfContentStream {
+    /// The stream decoded to more text than [`MAX_PAGE_TEXT_BYTES`]; the rest was dropped.
+    pub(crate) exceeded: bool,
     pub(crate) body_text: String,
     pub(crate) watermark: Option<String>,
     pub(crate) stamp: Option<String>,
@@ -121,12 +123,18 @@ impl PdfStreamCollector {
             self.stream_segments.join("\n")
         };
         ParsedPdfContentStream {
+            exceeded: false,
             body_text,
             watermark: self.watermark,
             stamp: self.stamp,
         }
     }
 }
+
+/// Decoded text one content stream may produce. A font map turns two bytes into up to
+/// [`MAX_DST_UNITS`](pdf_tounicode_map) characters, so a stream is capped by what it decodes to, not
+/// by its own size.
+pub(crate) const MAX_PAGE_TEXT_BYTES: usize = 32 * 1024 * 1024;
 
 const MAX_GRAPHICS_STATE_DEPTH: usize = 64;
 const LEADING_EPSILON: f64 = 1e-6;
@@ -147,6 +155,9 @@ struct PdfStreamInterpreter<'a> {
     array_has_text: bool,
     operands: Vec<PdfStreamOperand>,
     collector: PdfStreamCollector,
+    text_bytes: usize,
+    text_limit: usize,
+    exceeded: bool,
 }
 
 /// End index of the regular-character run starting at `from`.
@@ -188,7 +199,7 @@ fn font_operands(operands: &[PdfStreamOperand]) -> (Option<f64>, Option<&str>) {
 }
 
 impl<'a> PdfStreamInterpreter<'a> {
-    fn new(fonts: &'a PdfPageFonts<'a>) -> Self {
+    fn new(fonts: &'a PdfPageFonts<'a>, text_limit: usize) -> Self {
         Self {
             fonts,
             in_text_object: false,
@@ -203,6 +214,9 @@ impl<'a> PdfStreamInterpreter<'a> {
             array_has_text: false,
             operands: Vec::new(),
             collector: PdfStreamCollector::default(),
+            text_bytes: 0,
+            text_limit,
+            exceeded: false,
         }
     }
 
@@ -212,6 +226,11 @@ impl<'a> PdfStreamInterpreter<'a> {
     }
 
     fn push_text(&mut self, decoded: String) {
+        self.text_bytes = self.text_bytes.saturating_add(decoded.len());
+        if self.text_bytes > self.text_limit {
+            self.exceeded = true;
+            return;
+        }
         if self.in_array {
             self.array_buf.push_str(&decoded);
             self.array_has_text = true;
@@ -442,9 +461,18 @@ pub(crate) fn parse_pdf_content_stream_with_fonts(
     stream: &str,
     fonts: &PdfPageFonts<'_>,
 ) -> ParsedPdfContentStream {
+    parse_pdf_content_stream_within(stream, fonts, MAX_PAGE_TEXT_BYTES)
+}
+
+/// [`parse_pdf_content_stream_with_fonts`] that decodes at most `text_limit` bytes of text.
+fn parse_pdf_content_stream_within(
+    stream: &str,
+    fonts: &PdfPageFonts<'_>,
+    text_limit: usize,
+) -> ParsedPdfContentStream {
     let bytes = stream.as_bytes();
     let mut i = 0usize;
-    let mut interp = PdfStreamInterpreter::new(fonts);
+    let mut interp = PdfStreamInterpreter::new(fonts, text_limit);
     while i < bytes.len() {
         if bytes[i].is_ascii_whitespace() {
             i += 1;
@@ -459,7 +487,11 @@ pub(crate) fn parse_pdf_content_stream_with_fonts(
             Ok(None) => i = interp.apply_code_token(stream, i),
         }
     }
-    interp.collector.finish()
+    let exceeded = interp.exceeded;
+    ParsedPdfContentStream {
+        exceeded,
+        ..interp.collector.finish()
+    }
 }
 
 fn last_numeric_operand(operands: &[PdfStreamOperand]) -> Option<f64> {
@@ -481,6 +513,9 @@ pub(crate) fn decode_pdf_hex_string(hex: &str, prefer_utf16be: bool) -> Option<S
 }
 
 /// Decodes string bytes through a ToUnicode map; `None` when the map has no hit (or no usable width).
+/// Most text one string may decode to through a font map; past it the string is read without the map.
+const MAX_MAPPED_BYTES: usize = 1 << 20;
+
 fn map_bytes_with_cmap(cm: &PdfToUnicodeMap, bytes: &[u8]) -> Option<String> {
     if cm.is_empty() {
         return None;
@@ -504,6 +539,9 @@ fn map_bytes_with_cmap(cm: &PdfToUnicodeMap, bytes: &[u8]) -> Option<String> {
             } else if let Some(ch) = char::from_u32(u32::from(code)) {
                 mapped.push(ch);
             }
+            if mapped.len() > MAX_MAPPED_BYTES {
+                return None;
+            }
         }
     } else if !cm.is_two_byte {
         for &b in bytes {
@@ -515,6 +553,9 @@ fn map_bytes_with_cmap(cm: &PdfToUnicodeMap, bytes: &[u8]) -> Option<String> {
                 any_hit = true;
             } else {
                 mapped.push(char::from(b));
+            }
+            if mapped.len() > MAX_MAPPED_BYTES {
+                return None;
             }
         }
     }
@@ -742,6 +783,8 @@ pub(crate) fn encode_utf16be_hex_impl(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::decode_budget::DecodeBudget;
+    use crate::EasyOfficeError;
 
     #[test]
     fn single_pass_hex_decoder_and_bfrange_multi_unit_utf16() {
@@ -759,10 +802,80 @@ mod tests {
             "endbfrange\n"
         );
         let mut cmap = PdfToUnicodeMap::default();
-        PdfToUnicodeMap::parse_cmap_stream(cmap_stream, &mut cmap);
+        PdfToUnicodeMap::parse_cmap_stream(cmap_stream, &mut cmap, &mut DecodeBudget::new())
+            .unwrap();
         assert_eq!(cmap.map.get(&0x0001).map(String::as_str), Some("fi"));
         assert_eq!(cmap.map.get(&0x0002).map(String::as_str), Some("fj"));
         assert_eq!(cmap.map.get(&0x0010).map(String::as_str), Some("😀"));
         assert_eq!(cmap.map.get(&0x0011).map(String::as_str), Some("😁"));
+    }
+
+    fn parsed_cmap(
+        text: &str,
+        budget: &mut DecodeBudget,
+    ) -> Result<PdfToUnicodeMap, EasyOfficeError> {
+        let mut cmap = PdfToUnicodeMap::default();
+        PdfToUnicodeMap::parse_cmap_stream(text, &mut cmap, budget)?;
+        Ok(cmap)
+    }
+
+    #[test]
+    fn a_long_range_destination_does_not_multiply_into_the_table() {
+        // 10 KB of destination under one range of 65535 codes: 650 MB of strings before the limit.
+        let dst = "0041".repeat(2500);
+        let text = format!("1 beginbfrange\n<0001> <FFFF> <{dst}>\nendbfrange\n");
+        let cmap = parsed_cmap(&text, &mut DecodeBudget::new()).unwrap();
+        assert!(cmap.map.is_empty());
+        let long_char = format!("1 beginbfchar\n<0001> <{dst}>\nendbfchar\n");
+        assert!(parsed_cmap(&long_char, &mut DecodeBudget::new())
+            .unwrap()
+            .map
+            .is_empty());
+    }
+
+    #[test]
+    fn font_maps_are_charged_to_the_document_budget() {
+        let text = "1 beginbfrange\n<0001> <FFFF> <00660069>\nendbfrange\n";
+        assert!(parsed_cmap(text, &mut DecodeBudget::new()).is_ok());
+        let mut small = DecodeBudget::with_limit(1024 * 1024);
+        assert!(matches!(
+            parsed_cmap(text, &mut small),
+            Err(EasyOfficeError::ResourceBudgetExceeded(_))
+        ));
+        let singles = "1 beginbfrange\n<0100> <FFFF> <0100>\nendbfrange\n";
+        let mut small = DecodeBudget::with_limit(1024 * 1024);
+        assert!(parsed_cmap(singles, &mut small).is_err());
+    }
+
+    #[test]
+    fn a_string_that_would_decode_past_the_output_limit_is_read_without_the_map() {
+        let cmap = parsed_cmap(
+            "1 beginbfchar\n<0001> <00410042004300440045004600470048>\nendbfchar\n",
+            &mut DecodeBudget::new(),
+        )
+        .unwrap();
+        let hex = "0001".repeat(200_000);
+        let decoded = decode_pdf_hex_string_with_cmap(&hex, true, Some(&cmap)).unwrap();
+        assert!(decoded.len() <= 700_000, "{}", decoded.len());
+        let small = decode_pdf_hex_string_with_cmap("00010001", true, Some(&cmap)).unwrap();
+        assert_eq!(small, "ABCDEFGHABCDEFGH");
+    }
+
+    #[test]
+    fn a_stream_that_decodes_to_too_much_text_says_so() {
+        let fonts = PdfPageFonts::new();
+        let stream = "BT (aaaaaaaaaa) Tj (bbbbbbbbbb) Tj ET";
+        assert!(!parse_pdf_content_stream_within(stream, &fonts, 100).exceeded);
+        assert!(parse_pdf_content_stream_within(stream, &fonts, 15).exceeded);
+    }
+
+    #[test]
+    fn stray_angle_brackets_without_a_close_are_read_in_one_pass() {
+        let text = format!("1 beginbfrange\n{}\nendbfrange\n", "< ".repeat(200_000));
+        let started = std::time::Instant::now();
+        assert!(parsed_cmap(&text, &mut DecodeBudget::new())
+            .unwrap()
+            .is_empty());
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
     }
 }

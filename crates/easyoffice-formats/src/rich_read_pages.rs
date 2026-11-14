@@ -19,6 +19,7 @@ use std::rc::Rc;
 
 use self::marks::FootnoteMark;
 use self::numbering::DocumentSettings;
+use crate::decode_budget::DecodeBudget;
 use crate::pages_package::load_package;
 use crate::pages_proto::{read_reference, ArchiveObject, Message, ObjectTable};
 use crate::pages_schema::{attachment, baseline, char_props_layout, compact_para, heading};
@@ -37,6 +38,9 @@ use crate::{
 
 const MAX_PARAGRAPHS: usize = 200_000;
 const MAX_RUNS: usize = 1_000_000;
+/// Text the reader may convert in all: a storage that many shapes or footnotes point at is converted once
+/// per reference, so the paragraph and run counts alone do not bound what it copies.
+const MAX_CONVERTED_TEXT_BYTES: usize = 64 * 1024 * 1024;
 const MAX_STYLE_CHAIN: usize = 16;
 const MAX_FONT_SIZE_PT: f32 = 1000.0;
 const MAX_HEADING_LEVEL: u8 = 6;
@@ -448,6 +452,7 @@ struct Reader<'a> {
     /// Marks such as page-number fields in headers and footers are not reported as skipped.
     quiet: bool,
     settings: DocumentSettings,
+    text_budget: DecodeBudget,
 }
 
 impl<'a> Reader<'a> {
@@ -629,6 +634,7 @@ impl<'a> Reader<'a> {
         flow: Flow,
     ) -> Result<Vec<RichBlock>, EasyOfficeError> {
         let text = st.text(storage::TEXT)?;
+        self.text_budget.charge(text.len(), "Pages 본문 텍스트")?;
         let marks = if flow == Flow::Body {
             self.footnote_marks(st)
         } else {
@@ -798,6 +804,7 @@ pub(crate) fn read_pages(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Ea
         fmt_cache: HashMap::new(),
         images: PageImages::new(&pkg.objects, &pkg.data_files),
         quiet: false,
+        text_budget: DecodeBudget::with_limit(MAX_CONVERTED_TEXT_BYTES),
         settings: pkg
             .objects
             .objects

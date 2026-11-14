@@ -250,3 +250,16 @@ fn footnote_marks_without_matching_text_or_object_do_not_break_reading() {
     assert!(texts.contains(&"각주".to_string()));
     assert!(texts.contains(&"1 주석".to_string()) && texts.contains(&"2 주석".to_string()));
 }
+
+#[test]
+fn one_large_footnote_named_by_many_marks_is_refused_by_its_copied_bytes() {
+    // 100 marks name one single-paragraph footnote of 1 MiB: few paragraphs and runs, 100 MiB of text.
+    let mut b = DocBuilder::default();
+    let note = footnote(&mut b, &"가".repeat(350_000));
+    let marks: Vec<(u64, u64)> = (0..100u64).map(|i| (i, note)).collect();
+    let body = body_with_footnotes(&mut b, "본문", &marks);
+    assert!(matches!(
+        open(&pages_zip(b.finish(body))),
+        Err(EasyOfficeError::ResourceBudgetExceeded(_))
+    ));
+}
