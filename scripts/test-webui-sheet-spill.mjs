@@ -198,6 +198,6 @@ test("masking personal data skips the cells an array filled and counts only what
   };
   const out = await store.scrubSheetStoreMap(sheets, "Sheet1", null);
   assert.equal(out.totalMasked, 2, "the typed cells A1 and B1 count; the cell C2 an array filled does not");
-  assert.deepEqual(scrubbed.sort(), ["010-1234-5678", "010-1234-5678"]);
+  assert.deepEqual(scrubbed, ["010-1234-5678", "010-1234-5678"]);
   assert.equal(out.nextSheets.Sheet1.C2.value, "010-1234-5678", "a result is left to the next calculation");
 });
