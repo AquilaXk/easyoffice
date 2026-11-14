@@ -475,6 +475,11 @@
           refreshWindowFromModel();
           updatedActiveSheet = true;
         }
+        // A header cell that got new text names its column anew: the formulas that name the column follow (PD-225).
+        sheetStoreHelpers.followTableHeaders(sheetDataStore, () => {
+          refreshWindowFromModel();
+          void recalculateActiveSheetFormulas();
+        });
         if (updatedActiveSheet && getActiveModule() === "SHEET") {
           updateSheetSelectionAndAggregates(getActiveSheetCellRef() || "A1");
         }

@@ -76,3 +76,17 @@ test("a turned-over paste swaps the offsets of references that are relative in r
   assert.equal(shift('="A1"&LOG10(A1)', 9, -2, turn), '="A1"&LOG10(A8)');
   assert.equal(shift("=A1", 0, -2, { fromRow: 1, fromCol: 3, toRow: 1, toCol: 1 }), "=#REF!", "a swapped offset past the grid edge");
 });
+
+test("a structured reference names columns, so a fill or a paste leaves it as written (PD-225)", async () => {
+  const shift = await shifter();
+  assert.equal(shift("=SUM(Sales[Q1])+B2", 3, 1), "=SUM(Sales[Q1])+C5");
+  assert.equal(shift("=[@Q1]*[@Q2]+A1", 2, 0), "=[@Q1]*[@Q2]+A3");
+  assert.equal(shift("=Sales[[#This Row],[Q1]]*2", 5, 2), "=Sales[[#This Row],[Q1]]*2");
+  assert.equal(shift("=SUM(Sales[[#Headers],[#Data],[Q1]:[Q2]])", 1, 1), "=SUM(Sales[[#Headers],[#Data],[Q1]:[Q2]])");
+  assert.equal(shift("=Sales[@[A1 total]]+A1", 1, 0), "=Sales[@[A1 total]]+A2", "a column name that looks like a cell");
+  assert.equal(shift("=Sales[it'[1']]+A1", 1, 0), "=Sales[it'[1']]+A2", "an escaped bracket stays in the group");
+  assert.equal(shift("=Sales[Q1]+Sheet2!A1", 1, 0), "=Sales[Q1]+Sheet2!A2");
+  assert.equal(shift('="Sales[Q1]"&A1', 1, 0), '="Sales[Q1]"&A2');
+  const turn = { fromRow: 1, fromCol: 3, toRow: 10, toCol: 1 };
+  assert.equal(shift("=Sales[Q1]+A1", 9, -2, turn), "=Sales[Q1]+A8", "a turned-over paste leaves the group too");
+});

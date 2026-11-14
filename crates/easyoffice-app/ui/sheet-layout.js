@@ -424,6 +424,48 @@
     return changed;
   }
 
+  // ---- the column names of a table follow its header cells (PD-225) ----------------------------------------------
+  // `columns` of a table is what structured references are resolved against. A header cell the user changes names its
+  // column anew: the list says which columns got a new name, the page rewrites the formulas that name them with the engine
+  // (`tableColumn`) and then sets the name here. A header seen for the first time (a file just opened) only becomes the
+  // baseline, and a header that is empty, a formula, over 255 characters or the name of another column of the table is left
+  // to the engine, which repairs such names when the file is written.
+  const seenHeaders = new Map();
+
+  function tableColumnRenames(stores) {
+    const renames = [];
+    const parse = host.__EASYOFFICE_SHEET_GRID_UTILS__.parseRef;
+    for (const name of Object.keys(bySheet)) {
+      const map = stores?.[name];
+      for (const t of tablesOf(name)) {
+        if (!t.header || !map) continue;
+        const from = parse(String(t.range).split(":")[0]);
+        if (!from) continue;
+        t.columns.forEach((column, i) => {
+          const cell = map[refOf(from.row, from.col + i)];
+          const text = String(cell?.value ?? "");
+          const key = name + "|" + t.name + "|" + i;
+          const before = seenHeaders.get(key);
+          seenHeaders.set(key, text);
+          const same = (other) => other.toLowerCase() === text.toLowerCase();
+          if (before === undefined || text === before || text === column || text === "" || String(cell?.formula || "").startsWith("=")) return;
+          if (Array.from(text).length > MAX_TABLE_NAME || t.columns.some((other, j) => j !== i && same(other))) return;
+          renames.push({ sheet: name, table: t.name, index: i, from: column, to: text });
+        });
+      }
+    }
+    return renames;
+  }
+
+  // Gives column `index` of the table the name `columnName`; true when it changed.
+  function setTableColumn(sheet, table, index, columnName) {
+    const t = tablesOf(sheet).find((x) => x.name === table);
+    if (!t || index < 0 || index >= t.columns.length || t.columns[index] === columnName) return false;
+    t.columns[index] = columnName;
+    touch();
+    return true;
+  }
+
   const MAX_TABLE_NAME = 255;
 
   // `tables` of a copied sheet with names that no table of `layouts` (sheet name -> layout JSON) has: `Name_2`, `Name_3`, ...
@@ -512,6 +554,8 @@
     tablesOf,
     tablesIn,
     settleTableHeaders,
+    tableColumnRenames,
+    setTableColumn,
     copiedTables,
     filterOf,
     setFilter,

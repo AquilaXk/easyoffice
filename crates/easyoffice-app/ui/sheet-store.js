@@ -418,6 +418,48 @@
       return changed;
     }
 
+    // A column of a table got a new name from its header cell (PD-225): the engine writes the new name into the formulas that
+    // name the column (and the defined names), the page takes the text, and the table's column gets the name. True when
+    // something changed. A request the engine refuses leaves that rename undone; the header keeps its text.
+    async function renameTableColumns(renames, sheetsMap) {
+      const layoutApi = host.__EASYOFFICE_SHEET_LAYOUT__;
+      const namesApi = host.__EASYOFFICE_SHEET_NAMES__;
+      if (!layoutApi || !spillApi) return false;
+      let changed = false;
+      for (const r of renames) {
+        const tables = {};
+        const formulas = [];
+        for (const [sheet, map] of Object.entries(sheetsMap)) {
+          const list = spillApi.blockerPayload("tables", sheet, layoutApi);
+          if (list.length) tables[sheet] = list;
+          for (const [cell, held] of Object.entries(map || {})) {
+            if (held?.formula && held.formula.includes("[")) formulas.push({ sheet, cell, text: held.formula });
+          }
+        }
+        let answer = null;
+        try {
+          answer = await sessionCall({ sessionAction: "tableColumn", table: r.table, from: r.from, to: r.to, tables, formulas, names: namesApi?.getAll() || [] });
+        } catch {
+          answer = null;
+        }
+        if (!answer || !Array.isArray(answer.rewrites)) continue;
+        for (const w of answer.rewrites) {
+          const held = sheetsMap[w.sheet]?.[w.cell];
+          if (held) held.formula = w.text;
+        }
+        if (answer.names && namesApi) namesApi.replaceAll(answer.names);
+        layoutApi.setTableColumn(r.sheet, r.table, r.index, r.to);
+        changed = true;
+      }
+      return changed;
+    }
+
+    // Looks at the header cells of the tables for a column that got a new name; `onChange` runs when the formulas followed.
+    function followTableHeaders(sheetsMap, onChange) {
+      const renames = host.__EASYOFFICE_SHEET_LAYOUT__?.tableColumnRenames(sheetsMap) || [];
+      if (renames.length > 0) void renameTableColumns(renames, sheetsMap).then((moved) => moved && onChange());
+    }
+
     // Rules exist on the page, or the session still holds rules the page has since cleared.
     function rulesInPlay() {
       return Boolean(rulesApi) && (rulesApi.hasAny() || session.rules.size > 0);
@@ -917,6 +959,8 @@
       nameValues,
       linkTarget,
       callSheetAction: sessionCall,
+      renameTableColumns,
+      followTableHeaders,
       enableSheetSessions,
       scrubSheetStoreMap,
     };

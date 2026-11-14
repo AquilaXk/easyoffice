@@ -17,8 +17,11 @@
   const CELL = String.raw`\$?[A-Za-z]{1,3}\$?[1-9]\d{0,6}`;
   const COL_RANGE = String.raw`\$?[A-Za-z]{1,3}:\$?[A-Za-z]{1,3}`;
   const ROW_RANGE = String.raw`\$?[1-9]\d{0,6}:\$?[1-9]\d{0,6}`;
+  // A bracket group (`Table1[[#This Row],[Q1]]`, `[@Q1]`) is a structured reference: it names columns, so a fill or a
+  // paste leaves it as written (PD-225). The group nests up to the depth the engine reads (`'` escapes the next character).
+  const GROUP_RE = String.raw`\[(?:[^\[\]']|'.|\[(?:[^\[\]']|'.|\[(?:[^\[\]']|'.|\[(?:[^\[\]']|'.)*\])*\])*\])*\]`;
   const TOKEN_RE = new RegExp(
-    String.raw`"(?:[^"]|"")*"|(?<![\p{L}\p{N}_.$!])((?:'(?:[^']|'')+'|[\p{L}\p{N}_.]+)!)?` +
+    String.raw`"(?:[^"]|"")*"|` + GROUP_RE + String.raw`|(?<![\p{L}\p{N}_.$!])((?:'(?:[^']|'')+'|[\p{L}\p{N}_.]+)!)?` +
       `(${CELL}(?::${CELL})?|${COL_RANGE}|${ROW_RANGE})` +
       String.raw`(?![\p{L}\p{N}_(!])`,
     "gu"
