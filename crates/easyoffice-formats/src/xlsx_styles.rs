@@ -9,7 +9,7 @@
 //! Elements follow the ECMA-376 `CT_Stylesheet` sequence (`numFmts`, `fonts`, `fills`, `borders`,
 //! `cellStyleXfs`, `cellXfs`, `cellStyles`); spreadsheet programs reject any other order.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::rtf_xml_helpers::{
     extract_attr_from_fragment, extract_tag_bodies, extract_tags_or_self_closing_with_attrs,
@@ -28,6 +28,8 @@ use std::sync::Arc;
 /// `width = trunc(256 * px / MDW) / 256`, hence `px = round(width * MDW)`.
 pub(crate) const MAX_DIGIT_WIDTH_PX: f64 = 7.0;
 const DEFAULT_SIZE_PT: f64 = 11.0;
+/// `cellStyles` entries a reader looks at (a spreadsheet program keeps fewer than this many cell styles).
+const MAX_CELL_STYLE_ENTRIES: usize = 65_536;
 /// Border definitions a reader keeps; a stylesheet with more reads the rest as no border.
 pub(crate) const MAX_BORDER_DEFS: usize = 65_536;
 
@@ -480,6 +482,8 @@ fn parse_borders(styles_xml: &str) -> Vec<CellBorders> {
 #[derive(Default)]
 pub(crate) struct XfStyles {
     pub(crate) styles: Vec<CellStyle>,
+    /// Per `cellXfs` entry: it points at the "Hyperlink" or "Followed Hyperlink" cell style (PD-223).
+    pub(crate) link_xfs: Vec<bool>,
     pub(crate) num_fmts: Arc<Vec<String>>,
     pub(crate) rejected: u32,
 }
@@ -519,15 +523,17 @@ fn model_num_fmt(id: u32, codes: &HashMap<u32, String>, table: &mut NumFmtTable)
 
 /// The `cellStyleXfs` indexes of the "Hyperlink" and "Followed Hyperlink" cell styles (`builtinId` 8 and 9)
 /// that `cellStyles` names, whatever the style is called.
-fn hyperlink_style_xfs(styles_xml: &str) -> Vec<u32> {
+/// At most [`MAX_CELL_STYLE_ENTRIES`] entries are read; a style past that is read as an ordinary one.
+fn hyperlink_style_xfs(styles_xml: &str) -> HashSet<u32> {
     let Some(body) = extract_tag_bodies(styles_xml, "cellStyles")
         .into_iter()
         .next()
     else {
-        return Vec::new();
+        return HashSet::new();
     };
     extract_tags_or_self_closing_with_attrs(body, "cellStyle")
         .into_iter()
+        .take(MAX_CELL_STYLE_ENTRIES)
         .filter(|(attrs, _)| {
             matches!(
                 extract_attr_from_fragment(attrs, "builtinId"),
@@ -559,6 +565,7 @@ pub(crate) fn parse_cell_xf_styles(styles_xml: &str) -> XfStyles {
     let borders = parse_borders(styles_xml);
     let link_styles = hyperlink_style_xfs(styles_xml);
     let mut table = NumFmtTable::default();
+    let mut link_xfs = Vec::new();
     let styles = extract_tags_or_self_closing_with_attrs(xfs_xml, "xf")
         .into_iter()
         .map(|(attrs, body)| {
@@ -567,11 +574,7 @@ pub(crate) fn parse_cell_xf_styles(styles_xml: &str) -> XfStyles {
             };
             let font_id = number("fontId").unwrap_or(0) as usize;
             let mut style = fonts.get(font_id).copied().unwrap_or_default();
-            // The underline of a cell that has the "Hyperlink" style comes from that style, which the cell
-            // has because of its link and not as a look of its own (PD-223).
-            if number("xfId").is_some_and(|id| link_styles.contains(&id)) {
-                style.underline = false;
-            }
+            link_xfs.push(number("xfId").is_some_and(|id| link_styles.contains(&id)));
             if style
                 .size_pt
                 .is_some_and(|s| (s - default_size).abs() < 0.005)
@@ -605,8 +608,26 @@ pub(crate) fn parse_cell_xf_styles(styles_xml: &str) -> XfStyles {
     let (num_fmts, rejected) = table.finish();
     XfStyles {
         styles,
+        link_xfs,
         num_fmts,
         rejected,
+    }
+}
+
+/// Takes the underline off the cells of `link_styled` (cells whose format points at the "Hyperlink" cell style)
+/// that have a link: the style gives them that underline because of the link and not as a look of their own
+/// (PD-223). A cell with the style and no link keeps its underline.
+pub(crate) fn strip_link_look(styling: &mut SheetStyling, link_styled: &[(u32, u32)]) {
+    for at in link_styled {
+        if !styling.links.contains_key(at) {
+            continue;
+        }
+        if let Some(style) = styling.cells.get_mut(at) {
+            style.underline = false;
+            if style.is_plain() {
+                styling.cells.remove(at);
+            }
+        }
     }
 }
 

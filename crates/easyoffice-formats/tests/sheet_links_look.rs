@@ -183,3 +183,115 @@ fn a_link_with_no_cells_to_carry_it_is_not_needed() {
         .clone();
     assert_eq!(back.len(), 1);
 }
+
+fn xlsx_with_styles(replace: impl Fn(&str) -> String) -> Vec<u8> {
+    let bytes = OoxmlCodec::pack_xlsx_multi_styled(&sheets(), &[], &styling()).unwrap();
+    let mut entries = ZipArchiveCodec::unpack(&bytes, &ZipSecurityPolicy::default()).unwrap();
+    for e in &mut entries {
+        if e.path == "xl/styles.xml" {
+            e.data = replace(std::str::from_utf8(&e.data).unwrap()).into_bytes();
+        }
+    }
+    ZipArchiveCodec::pack_compressed(&entries).unwrap()
+}
+
+#[test]
+fn a_hostile_stylesheet_with_many_hyperlink_styles_is_read_in_linear_time() {
+    // Every one of N cell styles is a "Hyperlink" (builtinId 8) and M formats point at a style that is not among
+    // them: a list that is searched for each format would cost N x M.
+    let (n, m) = (200_000usize, 200_000usize);
+    let hostile = xlsx_with_styles(|styles| {
+        let styles_at = |tag: &str| styles.find(tag).unwrap();
+        let mut out = styles[..styles_at("<cellXfs")].to_string();
+        out.push_str(&format!("<cellXfs count=\"{m}\">"));
+        for _ in 0..m {
+            out.push_str(
+                "<xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"999999\"/>",
+            );
+        }
+        out.push_str(&format!("</cellXfs><cellStyles count=\"{n}\">"));
+        for i in 0..n {
+            out.push_str(&format!(
+                "<cellStyle name=\"h{i}\" xfId=\"{i}\" builtinId=\"8\"/>"
+            ));
+        }
+        out.push_str("</cellStyles></styleSheet>");
+        out
+    });
+    let start = std::time::Instant::now();
+    let back = OoxmlCodec::unpack_xlsx_styling(&hostile).unwrap();
+    assert!(start.elapsed().as_secs() < 5, "{:?}", start.elapsed());
+    assert_eq!(back[0].1.links, styling()[0].links);
+}
+
+#[test]
+fn hyperlink_styles_past_the_bound_are_read_as_ordinary_styles() {
+    // The style the cells use is entry 70,000 of the list: past the bound, so it is not taken for a link look.
+    let bytes = xlsx_with_styles(|styles| {
+        let cut = styles.find("<cellStyles").unwrap();
+        let mut out = styles[..cut].replace("xfId=\"1\"", "xfId=\"70000\"");
+        out.push_str("<cellStyles count=\"70001\">");
+        for i in 0..70_000 {
+            out.push_str(&format!(
+                "<cellStyle name=\"n{i}\" xfId=\"0\" builtinId=\"0\"/>"
+            ));
+        }
+        out.push_str("<cellStyle name=\"Hyperlink\" xfId=\"70000\" builtinId=\"8\"/></cellStyles></styleSheet>");
+        out
+    });
+    let back = &OoxmlCodec::unpack_xlsx_styling(&bytes).unwrap()[0].1;
+    assert!(
+        back.cells[&(0, 0)].underline,
+        "fail-closed: the underline stays"
+    );
+}
+
+#[test]
+fn only_a_cell_with_a_link_loses_the_underline_the_hyperlink_style_gives() {
+    // A cell that has the style and no link (the link was removed elsewhere, or the style was applied by hand) keeps its
+    // underline; saving it again keeps it too.
+    let mut st = styling().remove(0);
+    st.links.remove(&(0, 0));
+    st.cells.insert(
+        (0, 0),
+        CellStyle {
+            underline: true,
+            ..CellStyle::default()
+        },
+    );
+    let bytes = OoxmlCodec::pack_xlsx_multi_styled(&sheets(), &[], &[st]).unwrap();
+    let styles = entry(&bytes, "xl/styles.xml").unwrap();
+    assert!(
+        styles.contains("builtinId=\"8\""),
+        "the other link cells still use the style"
+    );
+    let mut entries = ZipArchiveCodec::unpack(&bytes, &ZipSecurityPolicy::default()).unwrap();
+    for e in &mut entries {
+        if e.path == "xl/worksheets/sheet1.xml" {
+            // A1 is given the format of a linked cell (A2's) although it has no link.
+            let text = String::from_utf8(e.data.clone()).unwrap();
+            let a2_style = text
+                .split("<c r=\"A2\"")
+                .nth(1)
+                .and_then(|t| t.split("s=\"").nth(1))
+                .and_then(|t| t.split('"').next())
+                .unwrap()
+                .to_string();
+            let a1 = text.find("<c r=\"A1\"").unwrap();
+            let end = a1 + text[a1..].find('>').unwrap();
+            let tag = text[a1..end].split(" s=\"").next().unwrap().to_string();
+            e.data =
+                format!("{}{} s=\"{a2_style}\"{}", &text[..a1], tag, &text[end..]).into_bytes();
+        }
+    }
+    let foreign = ZipArchiveCodec::pack_compressed(&entries).unwrap();
+    let back = &OoxmlCodec::unpack_xlsx_styling(&foreign).unwrap()[0].1;
+    assert!(
+        back.cells[&(0, 0)].underline,
+        "no link: the underline stays"
+    );
+    assert!(
+        !back.cells.contains_key(&(1, 0)) || !back.cells[&(1, 0)].underline,
+        "a link: it goes"
+    );
+}

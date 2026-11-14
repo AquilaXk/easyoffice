@@ -917,7 +917,7 @@ impl OoxmlCodec {
             let scan = scan_worksheet(
                 sheet_xml,
                 &shared_strings,
-                &xf_styles.styles,
+                &xf_styles,
                 with_styling,
                 &mut budget,
             )?;
@@ -931,6 +931,7 @@ impl OoxmlCodec {
                 let relationships = sheet_relationships(&entry_by_path, part_path);
                 let links = read_links(sheet_xml, &relationships, &mut link_allowance);
                 (styling.links, styling.links_rejected) = (links.links, links.rejected);
+                crate::sheet_styling::xlsx_styles::strip_link_look(&mut styling, &scan.link_styled);
                 if let (None, Some(tab), Some(theme)) = (styling.tab_color, scan.tab_theme, &theme)
                 {
                     styling.tab_color = Some(apply_tint(theme[tab.index], tab.tint));

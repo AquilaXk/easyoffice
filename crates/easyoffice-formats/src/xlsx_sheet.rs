@@ -19,7 +19,7 @@ use crate::sheet_styling::xlsx_filter::FilterScan;
 use crate::sheet_styling::xlsx_layout::{add_run, has_room, parse_merge};
 use crate::sheet_styling::xlsx_page::PageScan;
 use crate::sheet_styling::xlsx_protect::ProtectScan;
-use crate::sheet_styling::xlsx_styles::xlsx_width_to_px;
+use crate::sheet_styling::xlsx_styles::{xlsx_width_to_px, XfStyles};
 use crate::sheet_styling::xlsx_view::{level_attr, ThemeTab, ViewScan, LAST_COL};
 use crate::sheet_styling::{run_total, CellStyle, SheetStyling, MAX_HIDDEN_ROWS, MAX_STYLED_CELLS};
 use crate::xml_stream::{unescape_cow, Attrs, XmlEvent, XmlReader};
@@ -107,6 +107,8 @@ pub(crate) struct WorksheetScan {
     pub(crate) styling: SheetStyling,
     /// A tab colour that names a theme slot; the workbook's theme turns it into RGB.
     pub(crate) tab_theme: Option<ThemeTab>,
+    /// The cells whose format points at the "Hyperlink" cell style (PD-223).
+    pub(crate) link_styled: Vec<(u32, u32)>,
 }
 
 /// Which part of a `c` element the text events belong to.
@@ -202,6 +204,9 @@ struct SheetScanner<'s> {
     shared: &'s SharedStrings,
     budget: &'s mut DecodeBudget,
     xf_styles: &'s [CellStyle],
+    /// Per format: it points at the "Hyperlink" cell style; the cells that use one are listed in `link_styled`.
+    link_xfs: &'s [bool],
+    link_styled: Vec<(u32, u32)>,
     want_styling: bool,
     cells: Vec<(u32, u32, String)>,
     styling: SheetStyling,
@@ -362,14 +367,17 @@ impl<'s> SheetScanner<'s> {
         if self.styling.cells.len() >= MAX_STYLED_CELLS {
             return;
         }
-        let Some(style) = style
+        let Some((index, style)) = style
             .and_then(|v| v.parse::<usize>().ok())
-            .and_then(|i| self.xf_styles.get(i))
-            .filter(|s| !s.is_plain())
+            .and_then(|i| Some((i, self.xf_styles.get(i)?)))
+            .filter(|(_, s)| !s.is_plain())
         else {
             return;
         };
         self.styling.cells.insert(at, *style);
+        if self.link_xfs.get(index).copied().unwrap_or(false) {
+            self.link_styled.push(at);
+        }
     }
 
     /// A `mergeCell` becomes a merged range.
@@ -639,14 +647,16 @@ impl<'s> SheetScanner<'s> {
 pub(crate) fn scan_worksheet(
     sheet_xml: &str,
     shared: &SharedStrings,
-    xf_styles: &[CellStyle],
+    xf: &XfStyles,
     want_styling: bool,
     budget: &mut DecodeBudget,
 ) -> Result<WorksheetScan, EasyOfficeError> {
     let mut scanner = SheetScanner {
         shared,
         budget,
-        xf_styles,
+        xf_styles: &xf.styles,
+        link_xfs: &xf.link_xfs,
+        link_styled: Vec::new(),
         want_styling,
         cells: Vec::new(),
         styling: SheetStyling::default(),
@@ -715,6 +725,7 @@ pub(crate) fn scan_worksheet(
         cells: scanner.cells,
         styling: scanner.styling,
         tab_theme: view.tab_theme,
+        link_styled: scanner.link_styled,
     })
 }
 
