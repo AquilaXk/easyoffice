@@ -400,6 +400,33 @@ fn open_columns(
         let shown = code.and_then(|code| format_cell_value(code, raw));
         column.texts[offset] = shown.map_or_else(|| raw.clone(), |s| s.text);
     }
+    // A colour condition is judged against the colours of the cells themselves, blank ones too (PD-227). A
+    // colour a conditional format gives is not known here: a file's colour condition over such a column hides
+    // every row, which are the rows the file already hides (they stay the filter's) and the rows it shows stay.
+    let colored: Vec<usize> = columns
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| matches!(c.criteria, FilterCriteria::Color { .. }))
+        .map(|(at, _)| at)
+        .collect();
+    if !colored.is_empty() {
+        for &at in &colored {
+            let aux = data[at].aux.get_or_insert_with(CellAux::default);
+            aux.fills = vec![NO_COLOR; rows];
+            aux.fonts = vec![NO_COLOR; rows];
+        }
+        let band = (range.row0 + 1, 0)..=(range.row1, u32::MAX);
+        for (&(row, col), style) in styling.cells.range(band) {
+            let Some(at) = colored.iter().copied().find(|&at| cols[at] == col) else {
+                continue;
+            };
+            let offset = (row - range.row0 - 1) as usize;
+            if let Some(aux) = data[at].aux.as_mut() {
+                aux.fills[offset] = style.fill.unwrap_or(NO_COLOR);
+                aux.fonts[offset] = style.font_color.unwrap_or(NO_COLOR);
+            }
+        }
+    }
     (data, unread)
 }
 
@@ -543,6 +570,51 @@ mod tests {
         assert_eq!(split.filter.unwrap().hidden, vec![(2, 2)]);
         assert_eq!(split.hidden, vec![(3, 3), (7, 7)]);
         assert!(split_for_open(&cells, &SheetStyling::default()).is_none());
+    }
+
+    #[test]
+    fn opening_judges_a_colour_condition_against_the_colours_of_the_cells() {
+        use easyoffice_formats::CellStyle;
+        let mut filter = SheetFilter::new(CellBox::parse("A1:A6").unwrap());
+        filter.columns = vec![FilterColumn {
+            col: 0,
+            criteria: FilterCriteria::Color {
+                font: false,
+                color: Some(0xFFC7CE),
+            },
+        }];
+        let pink = CellStyle {
+            fill: Some(0xFFC7CE),
+            ..CellStyle::default()
+        };
+        let green = CellStyle {
+            fill: Some(0x00FF00),
+            ..CellStyle::default()
+        };
+        let mut styling = SheetStyling {
+            filter: Some(filter),
+            // The file hides rows 3, 4 and 6 (indexes 2, 3, 5): the user hid row 4 too, but the file says one flag.
+            hidden_rows: vec![(2, 3), (5, 5)],
+            ..SheetStyling::default()
+        };
+        // Row 2 pink (shown), row 3 green, row 4 none, row 5 pink (blank cell, no text), row 6 green.
+        styling.cells.insert((1, 0), pink);
+        styling.cells.insert((2, 0), green);
+        styling.cells.insert((4, 0), pink);
+        styling.cells.insert((5, 0), green);
+        let cells: Vec<(u32, u32, String)> = ["부서", "a", "b", "c"]
+            .iter()
+            .enumerate()
+            .map(|(i, t)| (i as u32, 0, t.to_string()))
+            .collect();
+        let split = split_for_open(&cells, &styling).unwrap();
+        // Rows 3, 4 and 6 hide because their cell is not pink, so the file's hidden rows are all the filter's.
+        assert_eq!(split.filter.unwrap().hidden, vec![(2, 3), (5, 5)]);
+        assert!(split.hidden.is_empty());
+        // The same file with no colours of its own: nothing is pink, every row of the file's is the filter's.
+        styling.cells.clear();
+        let split = split_for_open(&cells, &styling).unwrap();
+        assert_eq!(split.filter.unwrap().hidden, vec![(2, 3), (5, 5)]);
     }
 
     /// 100,000 rows of 3 columns, a sheet filter over all of them and 300 tables of 100 rows each, every

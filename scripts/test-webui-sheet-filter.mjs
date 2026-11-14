@@ -766,7 +766,7 @@ function packedFill(cells, rgb) {
   return { pal: [rgb], w: Buffer.from(new Uint8Array(new Uint32Array(words).buffer)).toString("base64") };
 }
 
-test("the colours the rules give a column are sent as runs for a colour condition, and only then", async () => {
+test("the colours of a column are sent as runs for a colour condition, the rules' over the cell's own, and only then", async () => {
   const h = await createHarness((body) => (body.op === "apply" ? { hidden: [[3, 3]], count: 1 } : undefined));
   const d = h.document;
   const layout = h.host.__EASYOFFICE_SHEET_LAYOUT__;
@@ -780,12 +780,39 @@ test("the colours the rules give a column are sent as runs for a colour conditio
   const sent = h.requests.at(-1);
   assert.deepEqual(sent.filter.columns, [{ col: 1, color: { rgb: "ffc7ce" } }]);
   assert.deepEqual(sent.data[0].fill, [[0, 1, "ffc7ce"], [3, 3, "ffc7ce"]]);
-  assert.equal(sent.data[0].font, undefined);
+  assert.deepEqual(sent.data[0].font, [], "both kinds are told: a column with no text colour says so (PD-227)");
   assert.deepEqual(layout.filterOf("표").hidden, [[3, 3]]);
+
   // A column with a value list has no colour in its request.
   layout.replaceAll({ 표: { filter: { range: "A1:B7", columns: [{ col: 1, values: ["영업"] }] } } });
   await click(h, act(d, "filter-reapply"));
   assert.equal(h.requests.at(-1).data[0].fill, undefined);
+});
+
+test("a colour condition and the colour list read the colours of the cells, a rule's colour winning over the cell's (PD-227)", async () => {
+  const cells = [
+    { ref: "A1", raw: "부서" },
+    { ref: "A2", raw: "가", style: { fill: "00ff00", fc: "0000ff" } },
+    { ref: "A3", raw: "나", style: { fill: "ff0000" } },
+    { ref: "A4", raw: "다" },
+    { ref: "A5", raw: "라", style: { fill: "00ff00" } },
+    { ref: "A6", raw: "마", style: { fc: "0000ff" } },
+  ];
+  const h = await createHarness(undefined, { sheets: [{ name: "표", cells }] });
+  const d = h.document;
+  const layout = h.host.__EASYOFFICE_SHEET_LAYOUT__;
+  const rules = h.host.__EASYOFFICE_SHEET_RULES__;
+  // A rule gives A3 another fill: the rule's colour is the one the filter sees.
+  rules.applyPacked("표", packedFill([[2, 0]], 0xffc7ce), true);
+  layout.replaceAll({ 표: { filter: { range: "A1:A6", columns: [{ col: 1, color: { rgb: "00ff00" } }] } } });
+  await click(h, act(d, "filter-reapply"));
+  const sent = h.requests.at(-1).data[0];
+  assert.deepEqual(sent.fill, [[0, 0, "00ff00"], [1, 1, "ffc7ce"], [3, 3, "00ff00"]], "A2, A3 (the rule's), A5");
+  assert.deepEqual(sent.font, [[0, 0, "0000ff"], [4, 4, "0000ff"]], "A2 and A6 have a text colour");
+  // Only a font condition: both kinds are still told.
+  layout.replaceAll({ 표: { filter: { range: "A1:A6", columns: [{ col: 1, color: { font: true } }] } } });
+  await click(h, act(d, "filter-reapply"));
+  assert.ok(h.requests.at(-1).data[0].fill.length > 0 && h.requests.at(-1).data[0].font.length > 0);
 });
 
 test("필터 지우기 clears the filter of the table around the active cell and shows its rows, one undo brings it back", async () => {

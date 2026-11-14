@@ -283,13 +283,31 @@
       return item;
     }
 
-    // The colours the conditional formats give the rows of column `col`, for a colour condition or the colour
-    // list of the panel; the sheet has no colour of its own to filter by (PD-226).
+    // The fill and text colours of the rows of column `col`, for a colour condition or the colour list of the
+    // panel (PD-226, PD-227): what a conditional format gives a cell wins over the cell's own colour, as it does
+    // on screen. Both kinds are always sent, `[]` for a column none of whose cells has one: the page knows every
+    // colour, so a condition is judged against all of them. Runs are `[[first, last, "rrggbb"], ...]` from the
+    // first row below the header.
     function addColors(item, filter, col) {
       const rules = host.__EASYOFFICE_SHEET_RULES__;
-      const runs = rules?.colorRuns?.(getActiveSheetName(), col, filter.range.r1 + 1, filter.range.r2);
-      if (runs?.fill.length) item.fill = runs.fill;
-      if (runs?.font.length) item.font = runs.font;
+      const { r1, r2 } = filter.range;
+      const rows = r2 - r1;
+      const given = rules?.colorRuns?.(getActiveSheetName(), col, r1 + 1, r2);
+      const map = sheetDataStore[getActiveSheetName()] || {};
+      const name = gridUtils.colName(col);
+      for (const [kind, key] of [["fill", "fill"], ["font", "fontColor"]]) {
+        const colors = new Array(rows).fill("");
+        for (let i = 0; i < rows; i += 1) colors[i] = map[name + (r1 + 1 + i)]?.style?.[key] || "";
+        for (const [first, last, rgb] of given?.[kind] || []) colors.fill(rgb, first, last + 1);
+        const runs = [];
+        for (let i = 0; i < rows; i += 1) {
+          if (!colors[i]) continue;
+          const last = runs[runs.length - 1];
+          if (last && last[1] === i - 1 && last[2] === colors[i]) last[1] = i;
+          else runs.push([i, i, colors[i]]);
+        }
+        item[kind] = runs;
+      }
     }
 
     function requestFor(op, filter, extraCols, extra) {
