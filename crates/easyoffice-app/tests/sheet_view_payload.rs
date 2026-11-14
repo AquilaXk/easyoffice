@@ -116,3 +116,34 @@ fn a_bad_selection_zoom_or_scroll_refuses_the_save() {
         assert!(save("xlsx", view).is_err(), "{view}");
     }
 }
+
+#[test]
+fn an_inner_group_open_inside_a_folded_one_survives_both_files() {
+    let outline = |folded: &str, open: &str| {
+        format!(
+            r#","outline":{{"rows":[[3,4,1],[5,6,2],[7,9,1]],"cols":[[2,2,1],[3,3,2],[4,5,1]],"foldedRows":{folded},"foldedCols":[[2,5]]{open}}}"#
+        )
+    };
+    for (what, extra) in [
+        (
+            "outer folded, inner open",
+            outline("[[3,9]]", r#","openRows":[[5,6,2]],"openCols":[[3,3,2]]"#),
+        ),
+        ("outer folded, inner folded", outline("[[3,9]]", "")),
+        ("outer open, inner folded", outline("[[5,6]]", "")),
+    ] {
+        for dst in ["xlsx", "ods"] {
+            let opened = open(dst, &save(dst, &extra).unwrap());
+            assert!(opened.contains(&extra), "{what}, {dst}: {opened}");
+        }
+    }
+    // A mark that names no group, or one outside the folded rows, refuses the save.
+    for open in [
+        r#","openRows":[[5,5,2]]"#,
+        r#","openRows":[[5,6,1]]"#,
+        r#","openRows":[[5,6,2],[3,9,1]]"#,
+    ] {
+        assert!(save("xlsx", &outline("[[3,9]]", open)).is_err(), "{open}");
+    }
+    assert!(save("xlsx", &outline("[[5,6]]", r#","openRows":[[7,9,1]]"#)).is_err());
+}

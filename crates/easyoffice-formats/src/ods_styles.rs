@@ -14,7 +14,9 @@ use crate::sheet_styling::sheet_links::ods_links::href_to_target;
 use crate::sheet_styling::sheet_links::{LinkAllowance, LinkCollector};
 use crate::sheet_styling::sheet_look::{ods_border_edge, ods_border_value, parse_hex_rgb};
 use crate::sheet_styling::sheet_rules::ods_rules_read::{OdsRuleReader, ValidationSink};
-use crate::sheet_styling::sheet_view::{push_level, Outline, MAX_OUTLINE_LEVEL, MAX_OUTLINE_ROWS};
+use crate::sheet_styling::sheet_view::{
+    push_level, LevelRun, Outline, MAX_OUTLINE_LEVEL, MAX_OUTLINE_ROWS,
+};
 use crate::sheet_styling::{
     format_centipt, resolve_code, BorderLine, CellBorders, CellStyle, HAlign, IdMemo, NumFmtTable,
     SheetStyling, StyleKey, VAlign, MAX_COLUMN_PX, MAX_STYLED_CELLS, MIN_COLUMN_PX,
@@ -306,6 +308,7 @@ pub(crate) fn table_columns_xml(styling: &SheetStyling, table: &OdsStyleTable) -
         "table:table-column-group",
         &outline.cols,
         &outline.collapsed_cols,
+        &outline.open_cols,
     );
     // Stretches of equal width and level, from the cuts.
     let mut stretches: Vec<(u32, u32, Option<u32>, u8, bool)> = Vec::new();
@@ -500,7 +503,11 @@ pub(crate) struct StyleSink<'s> {
     tab_color: Option<u32>,
     hidden: bool,
     outline: Outline,
-    open_groups: [Vec<bool>; 2],
+    /// The groups open now, per axis: `(hidden, display)`: whether the group's rows are hidden (it or a group around
+    /// it is folded) and whether the group itself is shown open.
+    open_groups: [Vec<(bool, bool)>; 2],
+    /// The groups shown open inside folded ones, as the runs a table lists them (`Outline::settle_open`).
+    open_runs: [Vec<LevelRun>; 2],
     grouped: [u64; 2],
     /// The links of the table being read and what the document may still hold (PD-218).
     links: LinkCollector,
@@ -527,6 +534,7 @@ impl<'s> StyleSink<'s> {
             hidden: false,
             outline: Outline::default(),
             open_groups: [Vec::new(), Vec::new()],
+            open_runs: [Vec::new(), Vec::new()],
             grouped: [0, 0],
             links: LinkCollector::default(),
             link_allowance: LinkAllowance::default(),
@@ -534,6 +542,15 @@ impl<'s> StyleSink<'s> {
             filtered_total: 0,
             next_filtered: false,
         }
+    }
+
+    /// The outline of the table with the groups it shows open inside folded ones.
+    fn settled_outline(&mut self) -> Outline {
+        let mut outline = std::mem::take(&mut self.outline);
+        let [rows, cols] = std::mem::take(&mut self.open_runs);
+        outline.open_rows = Outline::settle_open(&outline.rows, &outline.collapsed_rows, rows);
+        outline.open_cols = Outline::settle_open(&outline.cols, &outline.collapsed_cols, cols);
+        outline
     }
 
     /// The group level and folded state of the rows (`axis` 0) or columns (1) `first..=last`.
@@ -568,8 +585,13 @@ impl<'s> StyleSink<'s> {
             depth as u8,
         );
         // A run the bounds refused is not in a group, so it cannot be folded either.
-        if self.grouped[axis] > before && self.open_groups[axis].last() == Some(&true) {
-            crate::sheet_styling::xlsx_layout::add_run(collapsed, first, last);
+        if self.grouped[axis] > before {
+            if let Some(&(true, shown_open)) = self.open_groups[axis].last() {
+                crate::sheet_styling::xlsx_layout::add_run(collapsed, first, last);
+                if shown_open {
+                    self.open_runs[axis].push((first, last, depth as u8));
+                }
+            }
         }
     }
 
@@ -617,6 +639,7 @@ impl OdsSink for StyleSink<'_> {
         self.hidden = props.hidden;
         self.outline = Outline::default();
         self.open_groups = [Vec::new(), Vec::new()];
+        self.open_runs = [Vec::new(), Vec::new()];
         self.grouped = [0, 0];
         self.links = LinkCollector::default();
         self.filtered = Vec::new();
@@ -632,9 +655,9 @@ impl OdsSink for StyleSink<'_> {
         if !open {
             stack.pop();
         } else if stack.len() < 64 {
-            // A group inside a folded one is folded too.
-            let folded = !display || stack.last() == Some(&true);
-            stack.push(folded);
+            // The rows of a group inside a folded one are hidden, whether or not the group is folded itself.
+            let hidden = !display || stack.last().is_some_and(|g| g.0);
+            stack.push((hidden, display));
         }
     }
 
@@ -728,7 +751,7 @@ impl OdsSink for StyleSink<'_> {
             },
             tab_color: self.tab_color.take(),
             hidden: std::mem::take(&mut self.hidden),
-            outline: std::mem::take(&mut self.outline),
+            outline: self.settled_outline(),
             filtered_rows: std::mem::take(&mut self.filtered),
             ..SheetStyling::default()
         };

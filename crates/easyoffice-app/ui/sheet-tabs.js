@@ -60,7 +60,8 @@
     const sheetKeys = () => [...new Set([...Object.keys(sheetDataStore), getActiveSheetName()])];
     const allSheets = () => strip.reconcile(sheetKeys());
     const shownSheets = () => strip.visibleOf(sheetKeys());
-    const hiddenSheets = () => allSheets().filter((name) => layoutApi.hiddenOf(name));
+    // The sheets 숨기기 취소 offers: a very hidden sheet (a file's) is not among them (PD-209).
+    const hiddenSheets = () => allSheets().filter((name) => layoutApi.hiddenOf(name) && !layoutApi.veryHiddenOf(name));
 
     // What each command may do now; the menus grey the rest out.
     // A workbook whose structure is protected (PD-216) allows none of them.
@@ -265,7 +266,7 @@
         if (next.sheetColumnWidths[sheet]) next.sheetColumnWidths[name] = { ...next.sheetColumnWidths[sheet] };
         if (next.sheetRules[sheet]) next.sheetRules[name] = structuredClone(next.sheetRules[sheet]);
         if (next.sheetLayout[sheet]) {
-          const { hidden, ...kept } = structuredClone(next.sheetLayout[sheet]);
+          const { hidden, veryHidden, ...kept } = structuredClone(next.sheetLayout[sheet]);
           // Table names are unique in the workbook: the copy's tables get names of their own (PD-224).
           if (kept.tables) kept.tables = layoutApi.copiedTables(kept.tables, next.sheetLayout);
           if (Object.keys(kept).length > 0) next.sheetLayout[name] = kept;

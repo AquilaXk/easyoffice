@@ -177,6 +177,57 @@ test("groups of columns come from selected column headers and ungrouping takes a
   assert.match(document.getElementById("status-command-feedback").textContent, /대상 그룹 없음/);
 });
 
+test("a range of cells asks 행 or 열 before it groups or ungroups, and cancelling changes nothing (PD-208)", async () => {
+  const { document, userClick, act, layout } = await open();
+  const cell = (ref, shiftKey = false) => {
+    const td = document.querySelector(`#pane-sheet td[data-cell="${ref}"]`);
+    td.dispatchEvent({ type: "mousedown", target: td, shiftKey, button: 0 });
+  };
+  const dialog = () => document.getElementById("sheet-group-dialog");
+  const title = () => document.getElementById("sheet-group-title").textContent;
+  const labels = () => [...dialog().querySelectorAll("label.dialog-checkbox")].map((l) => l.textContent.trim());
+  cell("B2");
+  cell("C4", true);
+  // 취소 leaves the sheet as it is.
+  await act("group");
+  assert.equal(dialog().open, true);
+  assert.equal(title(), "그룹");
+  assert.deepEqual(labels(), ["행", "열"]);
+  assert.equal(document.getElementById("sheet-group-rows").checked, true, "행 is the first answer");
+  userClick(dialog().querySelector("[data-dialog-close].dialog-btn"));
+  await flushAsyncTurns(20);
+  assert.equal(layout().outlineOf("Sheet1"), null);
+  // 열 groups the columns of the range, 행 its rows.
+  await act("group");
+  document.getElementById("sheet-group-cols").checked = true;
+  document.getElementById("sheet-group-rows").checked = false;
+  userClick(document.getElementById("btn-sheet-group-ok"));
+  await flushAsyncTurns(20);
+  assert.deepEqual(layout().outlineOf("Sheet1").cols, [[2, 3, 1]]);
+  assert.equal(layout().outlineOf("Sheet1").rows, undefined);
+  await act("group");
+  userClick(document.getElementById("btn-sheet-group-ok"));
+  await flushAsyncTurns(20);
+  assert.deepEqual(layout().outlineOf("Sheet1").rows, [[2, 4, 1]]);
+  // The other command asks as well, under its own title, and takes the answer's axis out one level.
+  await act("ungroup");
+  assert.equal(title(), "그룹 해제");
+  document.getElementById("sheet-group-cols").checked = true;
+  document.getElementById("sheet-group-rows").checked = false;
+  userClick(document.getElementById("btn-sheet-group-ok"));
+  await flushAsyncTurns(20);
+  assert.equal(layout().outlineOf("Sheet1").cols, undefined);
+  assert.deepEqual(layout().outlineOf("Sheet1").rows, [[2, 4, 1]]);
+  // A selected header names its axis: no question.
+  for (const [row, shiftKey] of [[2, false], [4, true]]) {
+    const th = document.querySelector(`#pane-sheet th[data-row="${row}"]`);
+    th.dispatchEvent({ type: "mousedown", target: th, shiftKey, button: 0 });
+  }
+  await act("ungroup");
+  assert.equal(dialog().open, false);
+  assert.equal(layout().outlineOf("Sheet1"), null);
+});
+
 test("a row edit sends the groups and keeps the frozen panes and the tab colour the answer does not carry", async () => {
   const { document, act, selectRows, layout, requests } = await open();
   selectRows(3, 5);

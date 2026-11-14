@@ -46,41 +46,12 @@
   }
 
   function createSheetTabUi({ document, kit, getTabs, say }) {
-    const { $, openDialog, closeDialog } = kit;
+    const { $, modal } = kit;
     const bar = () => $("sheet-tab-bar");
     const tabButtons = () => Array.from(bar()?.querySelectorAll(".sheet-tab-btn[data-sheet-tab]") || []);
     const tabOf = (name) => tabButtons().find((b) => b.dataset.sheetTab === name) || null;
 
     // ---- dialogs ------------------------------------------------------------------------------------
-    // Opens `#<id>` and resolves what `valueOf` answers when the button `okId` is pressed, or null when
-    // the dialog closes any other way (the close buttons, Escape). `ready` runs once it is open.
-    function modal(id, okId, valueOf, bindExtra, ready) {
-      const dialog = $(id);
-      const ok = $(okId);
-      return new Promise((resolve) => {
-        let settled = false;
-        const unbind = bindExtra ? bindExtra(finish) : () => {};
-        const closers = Array.from(dialog.querySelectorAll("[data-dialog-close]"));
-        function finish(value) {
-          if (settled) return;
-          settled = true;
-          ok.removeEventListener("click", onOk);
-          closers.forEach((closer) => closer.removeEventListener("click", onCancel));
-          dialog.removeEventListener("close", onCancel);
-          unbind();
-          closeDialog(id);
-          resolve(value);
-        }
-        const onOk = () => finish(valueOf());
-        const onCancel = () => finish(null);
-        ok.addEventListener("click", onOk);
-        closers.forEach((closer) => closer.addEventListener("click", onCancel));
-        dialog.addEventListener("close", onCancel);
-        openDialog(id);
-        ready?.();
-      });
-    }
-
     // Asks the question of `#sheet-tab-delete-dialog`; resolves true on 확인, false on anything else.
     async function confirmDelete(label) {
       if (!$("sheet-tab-delete-dialog")) return true;

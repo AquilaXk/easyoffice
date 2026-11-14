@@ -362,6 +362,18 @@ impl<'s> SheetScanner<'s> {
             &self.marks_cols,
             outline.summary_left,
         );
+        outline.open_rows = Outline::open_inside(
+            &outline.rows,
+            &outline.collapsed_rows,
+            &self.marks_rows,
+            outline.summary_above,
+        );
+        outline.open_cols = Outline::open_inside(
+            &outline.cols,
+            &outline.collapsed_cols,
+            &self.marks_cols,
+            outline.summary_left,
+        );
     }
 
     fn record_style(&mut self, style: Option<&str>, at: (u32, u32)) {

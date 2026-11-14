@@ -11,7 +11,8 @@
   // The tables (PD-224) are the engine's JSON as sent and received: `[{ name, range: "A1:C5", header, totals, columns,
   // style, firstColumn, lastColumn, rowStripes, columnStripes, filter? }]`. The engine moves their ranges with the cells
   // (`structure` session action); this module stores them and gives a copied sheet's tables names of their own.
-  // The sheet is hidden (PD-209): `hidden` is true for a sheet without a tab.
+  // The sheet is hidden (PD-209): `hidden` is true for a sheet without a tab; `veryHidden` marks one the sheet menu
+  // does not list either (a file's `veryHidden` sheet), which is hidden as well.
   // The protection (PD-216): `protect` is the engine's JSON `{ on, deny: [flag], pwd, ranges }` (the password only as the
   // digest the engine made), `unlockedRows` and `unlockedCols` are runs of rows and columns whose own format is
   // unlocked (`sheet-protect.js` reads them).
@@ -28,7 +29,7 @@
   const listeners = [];
 
   function blank() {
-    return { merges: [], hiddenRows: [], hiddenCols: [], filter: null, freeze: null, tabColor: null, hidden: false, outline: null, page: null, protect: null, unlockedRows: [], unlockedCols: [], tables: [], index: null, rows: null };
+    return { merges: [], hiddenRows: [], hiddenCols: [], filter: null, freeze: null, tabColor: null, hidden: false, veryHidden: false, outline: null, page: null, protect: null, unlockedRows: [], unlockedCols: [], tables: [], index: null, rows: null };
   }
 
   function entry(name) {
@@ -45,6 +46,7 @@
         !layout.freeze &&
         !layout.tabColor &&
         !layout.hidden &&
+        !layout.veryHidden &&
         !layout.outline &&
         !layout.page &&
         !layout.protect &&
@@ -293,6 +295,7 @@
     if (layout.freeze) out.freeze = { rows: layout.freeze.rows, cols: layout.freeze.cols };
     if (layout.tabColor) out.tabColor = layout.tabColor;
     if (layout.hidden) out.hidden = true;
+    if (layout.veryHidden) out.veryHidden = true;
     if (layout.outline) out.outline = structuredClone(layout.outline);
     if (layout.page) out.page = structuredClone(layout.page);
     if (layout.protect) out.protect = structuredClone(layout.protect);
@@ -346,7 +349,8 @@
     const cols = Number(json?.freeze?.cols) || 0;
     layout.freeze = rows > 0 || cols > 0 ? { rows, cols } : null;
     layout.tabColor = /^[0-9a-f]{6}$/i.test(json?.tabColor || "") ? json.tabColor.toLowerCase() : null;
-    layout.hidden = json?.hidden === true;
+    layout.veryHidden = json?.veryHidden === true;
+    layout.hidden = json?.hidden === true || layout.veryHidden;
     layout.outline = json?.outline && Object.keys(json.outline).length > 0 ? structuredClone(json.outline) : null;
     layout.page = json?.page && Object.keys(json.page).length > 0 ? structuredClone(json.page) : null;
     layout.protect = json?.protect && typeof json.protect === "object" ? structuredClone(json.protect) : null;
@@ -530,6 +534,7 @@
   const tabColorOf = (name) => bySheet[name]?.tabColor || null;
   const outlineOf = (name) => bySheet[name]?.outline || null;
   const hiddenOf = (name) => bySheet[name]?.hidden === true;
+  const veryHiddenOf = (name) => bySheet[name]?.veryHidden === true;
 
   function setView(name, key, value) {
     const layout = entry(name);
@@ -612,6 +617,7 @@
     setFreeze,
     tabColorOf,
     hiddenOf,
+    veryHiddenOf,
     setHiddenSheet,
     outlineOf,
     setOutline,

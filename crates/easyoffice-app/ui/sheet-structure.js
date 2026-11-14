@@ -67,7 +67,7 @@
     });
 
     // Frozen panes and groups (PD-208).
-    const view = host.__EASYOFFICE_CREATE_SHEET_VIEW__(deps);
+    const view = host.__EASYOFFICE_CREATE_SHEET_VIEW__({ ...deps, kit: host.__EASYOFFICE_CREATE_SHEET_DIALOG_KIT__(document) });
     const outlineUi = host.__EASYOFFICE_CREATE_SHEET_OUTLINE_UI__({ document, grid, view, getActiveSheetName });
     // Page setup and print area (PD-213).
     const pageUi = host.__EASYOFFICE_CREATE_SHEET_PAGE__(deps);

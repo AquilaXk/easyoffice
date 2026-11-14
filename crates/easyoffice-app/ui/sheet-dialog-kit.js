@@ -75,6 +75,35 @@
       else dlg.removeAttribute("open");
     }
 
+    // Opens `#<id>` and resolves what `valueOf` answers when the button `okId` is pressed, or null when
+    // the dialog closes any other way (the close buttons, Escape). `ready` runs once it is open.
+    function modal(id, okId, valueOf, bindExtra, ready) {
+      const dialog = $(id);
+      const ok = $(okId);
+      return new Promise((resolve) => {
+        let settled = false;
+        const unbind = bindExtra ? bindExtra(finish) : () => {};
+        const closers = Array.from(dialog.querySelectorAll("[data-dialog-close]"));
+        function finish(value) {
+          if (settled) return;
+          settled = true;
+          ok.removeEventListener("click", onOk);
+          closers.forEach((closer) => closer.removeEventListener("click", onCancel));
+          dialog.removeEventListener("close", onCancel);
+          unbind();
+          closeDialog(id);
+          resolve(value);
+        }
+        const onOk = () => finish(valueOf());
+        const onCancel = () => finish(null);
+        ok.addEventListener("click", onOk);
+        closers.forEach((closer) => closer.addEventListener("click", onCancel));
+        dialog.addEventListener("close", onCancel);
+        openDialog(id);
+        ready?.();
+      });
+    }
+
     const optionsOf = (el) => [...el.querySelectorAll("option")];
 
     function fillOptions(id, pairs) {
@@ -93,7 +122,7 @@
       if (el) el.textContent = text;
     }
 
-    return { $, val, checked, setVal, setChecked, bindColors, fireChange, setSelect, openDialog, closeDialog, optionsOf, fillOptions, note };
+    return { $, val, checked, setVal, setChecked, bindColors, fireChange, setSelect, openDialog, closeDialog, modal, optionsOf, fillOptions, note };
   }
 
   host.__EASYOFFICE_CREATE_SHEET_DIALOG_KIT__ = createDialogKit;

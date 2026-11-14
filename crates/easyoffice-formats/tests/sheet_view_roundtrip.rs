@@ -378,3 +378,122 @@ fn hostile_ods_splits_leave_nothing_frozen_and_a_bad_pane_is_refused_on_write() 
     bad.outline.collapsed_rows.clear();
     assert!(OdfCodec::pack_ods_multi_styled(&sheets(), &[bad]).is_err());
 }
+
+/// Rows 3-9 are the outer group (level 1) and rows 5-6 an inner one (level 2); columns B-D and C the same.
+/// `collapsed` is the outer stretch (2, 8), the inner one (4, 5), both or neither; `open_inner` leaves the inner group
+/// open inside a folded outer one.
+fn nested(collapsed: &[(u32, u32)], open_inner: bool) -> SheetStyling {
+    let cols = |&(a, b): &(u32, u32)| if (a, b) == (4, 5) { (2, 2) } else { (1, 3) };
+    SheetStyling {
+        outline: Outline {
+            rows: vec![(2, 3, 1), (4, 5, 2), (6, 8, 1)],
+            cols: vec![(1, 1, 1), (2, 2, 2), (3, 3, 1)],
+            collapsed_rows: collapsed.to_vec(),
+            collapsed_cols: collapsed.iter().map(cols).collect(),
+            open_rows: if open_inner { vec![(4, 5, 2)] } else { vec![] },
+            open_cols: if open_inner { vec![(2, 2, 2)] } else { vec![] },
+            ..Outline::default()
+        },
+        ..SheetStyling::default()
+    }
+}
+
+#[test]
+fn an_inner_group_keeps_its_own_fold_when_the_outer_group_folds_and_opens_again() {
+    let cases = [
+        ("outer open, inner folded", nested(&[(4, 5)], false)),
+        ("outer folded, inner folded", nested(&[(2, 8)], false)),
+        ("outer folded, inner open", nested(&[(2, 8)], true)),
+        ("nothing folded", nested(&[], false)),
+    ];
+    for (what, case) in &cases {
+        assert!(case.view_within_bounds(1_048_576, 16_384), "{what}");
+        assert_eq!(
+            read(&pack(case.clone())).outline,
+            case.outline,
+            "xlsx, {what}"
+        );
+        assert_eq!(
+            read_ods(&pack_ods(case.clone())).outline,
+            case.outline,
+            "ods, {what}"
+        );
+    }
+    // The file marks a group on its summary row only when the group is folded: the outer summary (row 10), and the inner
+    // one (row 7) only when it is folded too.
+    let marks = |case: &SheetStyling| {
+        let xml = part(&pack(case.clone()), "xl/worksheets/sheet1.xml");
+        ["<row r=\"7\"", "<row r=\"10\""].map(|row| {
+            xml.find(row).is_some_and(|at| {
+                xml[at..]
+                    .split('>')
+                    .next()
+                    .unwrap()
+                    .contains("collapsed=\"1\"")
+            })
+        })
+    };
+    assert_eq!(marks(&cases[1].1), [true, true]);
+    assert_eq!(marks(&cases[2].1), [false, true]);
+    assert_eq!(marks(&cases[0].1), [true, false]);
+    // In ODS the open inner group is written open inside the folded outer one.
+    let content = ods_content(&pack_ods(cases[2].1.clone()));
+    assert!(
+        content.contains("<table:table-row-group table:display=\"false\">")
+            && content.contains("<table:table-row-group table:display=\"true\">"),
+        "{content}"
+    );
+}
+
+#[test]
+fn open_groups_that_name_no_group_or_lie_outside_the_folded_rows_are_refused_on_write() {
+    let write =
+        |styling: SheetStyling| OoxmlCodec::pack_xlsx_multi_styled(&sheets(), &[], &[styling]);
+    for open in [
+        // Not a whole stretch of its level, outside the folded rows, the wrong level, unsorted, repeated.
+        vec![(4, 4, 2)],
+        vec![(6, 8, 1)],
+        vec![(4, 5, 1)],
+        vec![(4, 5, 2), (2, 8, 1)],
+        vec![(4, 5, 2), (4, 5, 2)],
+    ] {
+        let mut bad = nested(&[(2, 5)], false);
+        bad.outline.open_rows = open.clone();
+        assert!(write(bad.clone()).is_err(), "{open:?}");
+        assert!(pack_ods_result(bad).is_err(), "{open:?}");
+    }
+    // The same rows as the folded ones are fine.
+    let mut fine = nested(&[(2, 8)], false);
+    fine.outline.open_rows = vec![(4, 5, 2)];
+    assert!(write(fine).is_ok());
+}
+
+fn pack_ods_result(styling: SheetStyling) -> Result<Vec<u8>, easyoffice_formats::EasyOfficeError> {
+    OdfCodec::pack_ods_multi_styled(&sheets(), &[styling])
+}
+
+#[test]
+fn a_file_with_a_hostile_number_of_open_groups_stays_bounded() {
+    // 30,000 one-row groups of level 2 inside one folded group, none of them marked: every one is an open group.
+    let mut rows = vec![(0, 0, 1)];
+    rows.extend((0..30_000u32).map(|i| (1 + i * 2, 1 + i * 2, 2)));
+    let xml = {
+        let mut x = String::from("<worksheet><sheetData>");
+        for (first, _, level) in &rows {
+            x.push_str(&format!(
+                "<row r=\"{}\" hidden=\"1\" outlineLevel=\"{level}\"/>",
+                first + 1
+            ));
+        }
+        x.push_str("</sheetData></worksheet>");
+        x
+    };
+    let started = std::time::Instant::now();
+    let back = read(&with_sheet(&pack(SheetStyling::default()), &xml, None));
+    assert!(back.outline.open_rows.len() <= 100_000);
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "{:?}",
+        started.elapsed()
+    );
+}

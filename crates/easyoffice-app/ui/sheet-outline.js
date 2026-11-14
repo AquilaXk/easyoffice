@@ -2,24 +2,28 @@
   "use strict";
 
   // Row and column groups (PD-208): the rules of grouping, folding and the level buttons. An outline
-  // is `{ rows, cols, foldedRows, foldedCols, summaryAbove, summaryLeft }` (the save payload's form,
-  // 1-based): `rows` and `cols` are runs `[first, last, level]` (level 1 to 7) that are sorted and
-  // disjoint; `foldedRows` and `foldedCols` are the runs a fold hid, each inside a group. Every
+  // is `{ rows, cols, foldedRows, foldedCols, openRows, openCols, summaryAbove, summaryLeft }` (the save
+  // payload's form, 1-based): `rows` and `cols` are runs `[first, last, level]` (level 1 to 7) that are sorted
+  // and disjoint; `foldedRows` and `foldedCols` are the runs a fold hid, each inside a group; `openRows` and
+  // `openCols` list `[first, last, level]` groups that lie in folded runs but are open themselves (sorted by level,
+  // then position), so that a folded group shows its inner groups as they were when it opens. Every
   // function returns a new outline and leaves its argument alone. The engine moves the runs when
   // rows or columns are inserted or deleted (`structure` session action).
   //
   // A group is a stretch of consecutive rows whose level is at least `k`; the row (column) that
   // sums it up is the one below it (to its right), or above it (to its left) when `summaryAbove`
-  // (`summaryLeft`) is set. Folding a group hides every row of the stretch and unfolding shows them
-  // all again; the level buttons (`showLevel`) are the way to fold nested groups one level at a time.
+  // (`summaryLeft`) is set. Each group has a folded state of its own: the rows hidden are those of the
+  // folded groups, so opening an outer group shows the inner groups folded or open as they were, and the
+  // level buttons (`showLevel`) fold every group from one level down.
 
   const MAX_LEVEL = 7;
   const MAX_GROUPED = 100000;
   const layoutApi = host.__EASYOFFICE_SHEET_LAYOUT__;
 
-  const keys = (axis) => (axis === "row" ? { levels: "rows", folded: "foldedRows" } : { levels: "cols", folded: "foldedCols" });
+  const keys = (axis) => (axis === "row" ? { levels: "rows", folded: "foldedRows", open: "openRows" } : { levels: "cols", folded: "foldedCols", open: "openCols" });
   const levelsOf = (outline, axis) => outline?.[keys(axis).levels] || [];
   const foldedOf = (outline, axis) => outline?.[keys(axis).folded] || [];
+  const openOf = (outline, axis) => outline?.[keys(axis).open] || [];
   const summaryAbove = (outline, axis) => Boolean(axis === "row" ? outline?.summaryAbove : outline?.summaryLeft);
 
   function levelAt(runs, i) {
@@ -118,16 +122,55 @@
     return out;
   }
 
-  const covers = (runs, first, last) => {
-    const run = layoutApi.runAt(runs, first);
-    return Boolean(run) && run[1] >= last;
-  };
+  // Whether one run of the sorted, disjoint `runs` holds `first..last`.
+  function covers(runs, first, last) {
+    let lo = 0;
+    let hi = runs.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (runs[mid][1] < first) lo = mid + 1;
+      else if (runs[mid][0] > first) hi = mid - 1;
+      else return runs[mid][1] >= last;
+    }
+    return false;
+  }
 
-  const isFolded = (outline, axis, group) => covers(foldedOf(outline, axis), group.first, group.last);
+  // Open groups are sorted by level and then position.
+  function openIndex(open, group) {
+    let lo = 0;
+    let hi = open.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const [first, , level] = open[mid];
+      if (level < group.level || (level === group.level && first < group.first)) lo = mid + 1;
+      else if (level > group.level || first > group.first) hi = mid - 1;
+      else return open[mid][1] === group.last ? mid : -1;
+    }
+    return -1;
+  }
 
-  // The folded runs may only hold indexes of a group.
-  function trimFolded(outline) {
+  // A group is folded when its rows are hidden by a fold and it was not left open inside a folded one.
+  const isFolded = (outline, axis, group) => covers(foldedOf(outline, axis), group.first, group.last) && openIndex(openOf(outline, axis), group) < 0;
+
+  // `outline` with the folded runs and the open groups made from the groups of `axis` that `closed(group)` names:
+  // the rows hidden are those of the closed groups, and a group inside them that is not closed is open.
+  function withClosed(outline, axis, closed) {
+    const k = keys(axis);
+    const all = groups(outline, axis);
+    let folded = [];
+    for (const g of all) if (closed(g)) folded = layoutApi.addRun(folded, g.first, g.last);
+    const open = all.filter((g) => !closed(g) && covers(folded, g.first, g.last)).map((g) => [g.first, g.last, g.level]);
     const next = { ...outline };
+    if (folded.length) next[k.folded] = folded;
+    else delete next[k.folded];
+    if (open.length) next[k.open] = open;
+    else delete next[k.open];
+    return next;
+  }
+
+  // The folded runs may only hold indexes of a group, and the open groups must still be groups inside them.
+  function trimFolded(outline) {
+    let next = { ...outline };
     for (const axis of ["row", "col"]) {
       const k = keys(axis);
       const plain = levelsOf(next, axis).map((r) => [r[0], r[1]]);
@@ -142,6 +185,10 @@
       const merged = kept.reduce((acc, run) => layoutApi.addRun(acc, run[0], run[1]), []);
       if (merged.length) next[k.folded] = merged;
       else delete next[k.folded];
+      const stretches = new Set(groups(next, axis).map((g) => g.level + ":" + g.first + ":" + g.last));
+      const open = openOf(next, axis).filter(([first, last, level]) => covers(merged, first, last) && stretches.has(level + ":" + first + ":" + last));
+      if (open.length) next[k.open] = open;
+      else delete next[k.open];
       if (!levelsOf(next, axis).length) delete next[k.levels];
     }
     return next;
@@ -172,18 +219,14 @@
     return { outline: clean({ ...outline, [keys(axis).levels]: mapped }) };
   }
 
-  // Folds or unfolds `group` (a stretch from `groups`).
+  // Folds or unfolds `group` (a stretch from `groups`); the other groups keep their own state.
   function setFolded(outline, axis, group, fold) {
-    const k = keys(axis).folded;
-    const runs = foldedOf(outline, axis);
-    const next = fold ? layoutApi.addRun(runs, group.first, group.last) : layoutApi.removeRun(runs, group.first, group.last);
-    return clean({ ...outline, [k]: next });
+    return clean(withClosed(outline, axis, (g) => (g.level === group.level && g.first === group.first ? fold : isFolded(outline, axis, g))));
   }
 
-  // What the level button `n` shows: the rows of a level below `n`, so every deeper group is folded.
+  // What the level button `n` shows: every group from level `n` down is folded, the groups above stay open.
   function showLevel(outline, axis, n) {
-    const hidden = segments(levelsOf(outline, axis), n);
-    return clean({ ...outline, [keys(axis).folded]: hidden });
+    return clean(withClosed(outline, axis, (g) => g.level >= n));
   }
 
   // The groups a fold command acts on for the selection `first..last`: those whose summary lies in
@@ -215,6 +258,7 @@
     levelAt,
     levelsOf,
     foldedOf,
+    openOf,
     maxLevel,
     groups,
     visibleGroups,

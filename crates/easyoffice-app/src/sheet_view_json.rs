@@ -5,8 +5,9 @@
 //! `hidden`: `true` for a sheet without a tab; `veryHidden`: `true` for one the sheet menu does not list
 //! either, which is hidden as well (PD-209).
 //! `outline`: `{"rows": [[first, last, level], ...], "cols": [...], "foldedRows": [[first, last], ...],
-//! "foldedCols": [...], "summaryAbove": bool, "summaryLeft": bool}`, 1-based and inclusive; a level
-//! is 1 to 7 and a folded run lies inside a group. Input over a limit is refused, not trimmed.
+//! "foldedCols": [...], "openRows": [[first, last, level], ...], "openCols": [...], "summaryAbove": bool,
+//! "summaryLeft": bool}`, 1-based and inclusive; a level is 1 to 7 and a folded run lies inside a group. `openRows`
+//! and `openCols` list the groups left open inside folded ones (each a whole group of its level, in the folded runs). Input over a limit is refused, not trimmed.
 //! `view`: `{"active": [row, col], "range": [row1, col1, row2, col2], "zoom": percent, "top": [row, col]}`,
 //! 1-based; the selected cell, the selected range that holds it, the zoom (10 to 400) and the first row and
 //! column the scrolling part shows. Each key is left out at its default (A1, A1, 100, A1).
@@ -89,6 +90,48 @@ fn parse_levels(
     Ok(runs)
 }
 
+/// `[[first, last, level], ...]` of the groups left open, sorted by level and then position; `Outline::within_bounds`
+/// holds them to whole groups inside folded rows.
+fn parse_open(
+    v: &StrictJsonValue,
+    limit: u32,
+    what: &str,
+) -> Result<Vec<LevelRun>, EasyOfficeError> {
+    let items = v.as_array().ok_or_else(|| bad(what))?;
+    if items.len() > MAX_OUTLINE_RUNS {
+        return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+            "열린 그룹 수가 한도({MAX_OUTLINE_RUNS})를 초과했습니다."
+        )));
+    }
+    let mut runs: Vec<LevelRun> = Vec::with_capacity(items.len());
+    for item in items {
+        let triple = item
+            .as_array()
+            .filter(|t| t.len() == 3)
+            .ok_or_else(|| bad(what))?;
+        let [first, last, level] = [0, 1, 2].map(|i| triple[i].as_u64());
+        let index = |n: Option<u64>| {
+            n.filter(|n| (1..=u64::from(limit)).contains(n))
+                .map(|n| n as u32 - 1)
+        };
+        let level = level
+            .filter(|l| (1..=u64::from(MAX_OUTLINE_LEVEL)).contains(l))
+            .map(|l| l as u8);
+        let (Some(first), Some(last), Some(level)) = (index(first), index(last), level) else {
+            return Err(bad(what));
+        };
+        if first > last
+            || runs
+                .last()
+                .is_some_and(|prev| (level, first) <= (prev.2, prev.0))
+        {
+            return Err(bad(what));
+        }
+        runs.push((first, last, level));
+    }
+    Ok(runs)
+}
+
 fn parse_folded(
     v: &StrictJsonValue,
     limit: u32,
@@ -113,6 +156,12 @@ pub(crate) fn parse_outline(v: &StrictJsonValue) -> Result<Outline, EasyOfficeEr
     }
     if let Some(v) = field("foldedCols") {
         outline.collapsed_cols = parse_folded(v, COLS, "outline.foldedCols")?;
+    }
+    if let Some(v) = field("openRows") {
+        outline.open_rows = parse_open(v, ROWS, "outline.openRows")?;
+    }
+    if let Some(v) = field("openCols") {
+        outline.open_cols = parse_open(v, COLS, "outline.openCols")?;
     }
     outline.summary_above = flag("summaryAbove")?;
     outline.summary_left = flag("summaryLeft")?;
@@ -244,6 +293,12 @@ pub(crate) fn outline_json(outline: &Outline) -> String {
     }
     if !outline.collapsed_cols.is_empty() {
         put(&mut out, "foldedCols", runs_json(&outline.collapsed_cols));
+    }
+    if !outline.open_rows.is_empty() {
+        put(&mut out, "openRows", levels_json(&outline.open_rows));
+    }
+    if !outline.open_cols.is_empty() {
+        put(&mut out, "openCols", levels_json(&outline.open_cols));
     }
     if outline.summary_above {
         put(&mut out, "summaryAbove", "true".into());
@@ -403,6 +458,29 @@ mod tests {
             r#"{"view":{"top":[1,16385]}}"#,
         ] {
             assert!(read(text).is_err(), "{text}");
+        }
+    }
+
+    #[test]
+    fn groups_left_open_inside_folded_rows_round_trip_and_lies_are_refused() {
+        let text = r#"{"outline":{"rows":[[3,4,1],[5,6,2],[7,9,1]],"cols":[[2,2,1],[3,3,2],[4,5,1]],"foldedRows":[[3,9]],"foldedCols":[[2,5]],"openRows":[[5,6,2]],"openCols":[[3,3,2]]}}"#;
+        let styling = read(text).unwrap();
+        assert_eq!(styling.outline.open_rows, vec![(4, 5, 2)]);
+        let mut out = String::new();
+        write_view(&mut out, &styling);
+        assert_eq!(format!("{{{}}}", &out[1..]), text);
+        for bad_text in [
+            r#"{"outline":{"rows":[[3,4,1],[5,6,2]],"foldedRows":[[3,6]],"openRows":[[5,5,2]]}}"#,
+            r#"{"outline":{"rows":[[3,4,1],[5,6,2]],"openRows":[[5,6,2]]}}"#,
+            r#"{"outline":{"rows":[[3,4,1],[5,6,2]],"foldedRows":[[3,6]],"openRows":[[5,6,1]]}}"#,
+            r#"{"outline":{"rows":[[3,6,1],[5,6,2]],"foldedRows":[[3,6]],"openRows":[[5,6,2],[3,6,1]]}}"#,
+            r#"{"outline":{"rows":[[3,6,1]],"foldedRows":[[3,6]],"openRows":[[3,6,1],[3,6,1]]}}"#,
+            r#"{"outline":{"rows":[[3,6,1]],"foldedRows":[[3,6]],"openRows":[[3,6,8]]}}"#,
+            r#"{"outline":{"rows":[[3,6,1]],"foldedRows":[[3,6]],"openRows":[[3,6]]}}"#,
+            r#"{"outline":{"openRows":[[0,1,1]]}}"#,
+            r#"{"outline":{"openRows":3}}"#,
+        ] {
+            assert!(read(bad_text).is_err(), "{bad_text}");
         }
     }
 

@@ -153,8 +153,12 @@ pub(crate) fn layout_cols_xml(styling: &SheetStyling, unlocked_xf: usize) -> Str
             by_col.entry(col).or_default().unlocked = true;
         }
     }
-    let marks =
-        Outline::summary_marks(&outline.cols, &outline.collapsed_cols, outline.summary_left);
+    let marks = Outline::summary_marks(
+        &outline.cols,
+        &outline.collapsed_cols,
+        &outline.open_cols,
+        outline.summary_left,
+    );
     for col in marks {
         by_col.entry(col).or_default().collapsed = true;
     }

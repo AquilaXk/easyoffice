@@ -209,6 +209,11 @@ pub struct Outline {
     /// Rows and columns the user folded: sorted, disjoint runs, each inside a group.
     pub collapsed_rows: Vec<(u32, u32)>,
     pub collapsed_cols: Vec<(u32, u32)>,
+    /// Groups the user left open inside rows (columns) an outer group folded: a folded group opens with its
+    /// inner groups as they were, so the ones a file marks open must be remembered. Each is the whole stretch
+    /// of its level, inside the folded rows; every other group inside the folded rows is folded itself.
+    pub open_rows: Vec<LevelRun>,
+    pub open_cols: Vec<LevelRun>,
     /// The summary row sits above its group, the summary column to its left (the files' default is
     /// below and to the right).
     pub summary_above: bool,
@@ -292,6 +297,38 @@ fn runs_within(runs: &[LevelRun], limit: u32) -> bool {
             .all(|&(s, e, level)| s <= e && e < limit && (1..=MAX_OUTLINE_LEVEL).contains(&level))
 }
 
+/// Whether `first..=last` lies in one run of the sorted, disjoint `runs`.
+fn covered(runs: &[(u32, u32)], first: u32, last: u32) -> bool {
+    let after = runs.partition_point(|&(s, _)| s <= first);
+    after > 0 && runs[after - 1].1 >= last
+}
+
+/// Whether `open` is sorted by level and then position, and every run of it is one whole group of `levels` that
+/// lies in the `collapsed` rows.
+fn open_within(open: &[LevelRun], levels: &[LevelRun], collapsed: &[(u32, u32)]) -> bool {
+    if open.len() > MAX_OUTLINE_RUNS
+        || !open.windows(2).all(|p| (p[0].2, p[0].0) < (p[1].2, p[1].0))
+    {
+        return false;
+    }
+    let by_level: Vec<Vec<(u32, u32)>> = (0..=MAX_OUTLINE_LEVEL)
+        .map(|k| {
+            if k == 0 || open.iter().all(|r| r.2 != k) {
+                Vec::new()
+            } else {
+                segments(levels, k)
+            }
+        })
+        .collect();
+    open.iter().all(|&(first, last, level)| {
+        level <= MAX_OUTLINE_LEVEL
+            && by_level[usize::from(level)]
+                .binary_search(&(first, last))
+                .is_ok()
+            && covered(collapsed, first, last)
+    })
+}
+
 fn collapsed_within(collapsed: &[(u32, u32)], levels: &[LevelRun], limit: u32) -> bool {
     collapsed.windows(2).all(|p| p[0].1 + 1 < p[1].0)
         && collapsed.iter().all(|&(s, e)| s <= e && e < limit)
@@ -335,6 +372,65 @@ impl Outline {
             && run_total(&self.collapsed_rows) <= MAX_OUTLINE_ROWS
             && collapsed_within(&self.collapsed_rows, &self.rows, max_row)
             && collapsed_within(&self.collapsed_cols, &self.cols, max_col)
+            && open_within(&self.open_rows, &self.rows, &self.collapsed_rows)
+            && open_within(&self.open_cols, &self.cols, &self.collapsed_cols)
+    }
+
+    /// The groups of `levels` that lie in the `collapsed` rows and are not folded themselves, from what a file
+    /// says: a group is folded when its summary carries `collapsed` (`marks`, sorted).
+    pub fn open_inside(
+        levels: &[LevelRun],
+        collapsed: &[(u32, u32)],
+        marks: &[u32],
+        above: bool,
+    ) -> Vec<LevelRun> {
+        let mut open = Vec::new();
+        for k in 1..=MAX_OUTLINE_LEVEL {
+            for (first, last) in segments(levels, k) {
+                let marked = summary_of(first, last, above)
+                    .is_some_and(|row| marks.binary_search(&row).is_ok());
+                if !marked && covered(collapsed, first, last) {
+                    open.push((first, last, k));
+                }
+            }
+        }
+        open
+    }
+
+    /// `raw` (runs of rows a file puts in open groups, in file order) reduced to the whole groups of `levels` in the
+    /// `collapsed` rows, sorted. A run that is only part of a stretch (neighbouring groups of one level are one
+    /// stretch here) is left out and so counts as folded.
+    pub fn settle_open(
+        levels: &[LevelRun],
+        collapsed: &[(u32, u32)],
+        mut raw: Vec<LevelRun>,
+    ) -> Vec<LevelRun> {
+        raw.sort_unstable_by_key(|&(first, _, level)| (level, first));
+        let mut joined: Vec<LevelRun> = Vec::with_capacity(raw.len());
+        for run in raw {
+            match joined.last_mut() {
+                Some(prev) if prev.2 == run.2 && prev.1 + 1 == run.0 => prev.1 = run.1,
+                _ => joined.push(run),
+            }
+        }
+        let by_level: Vec<Vec<(u32, u32)>> = (0..=MAX_OUTLINE_LEVEL)
+            .map(|k| {
+                if k == 0 {
+                    Vec::new()
+                } else {
+                    segments(levels, k)
+                }
+            })
+            .collect();
+        joined.retain(|&(first, last, level)| {
+            level <= MAX_OUTLINE_LEVEL
+                && by_level[usize::from(level)]
+                    .binary_search(&(first, last))
+                    .is_ok()
+                && covered(collapsed, first, last)
+        });
+        joined.truncate(MAX_OUTLINE_RUNS);
+        joined
     }
 
     /// The deepest level of the rows (columns with `cols`).
@@ -370,7 +466,12 @@ impl Outline {
 
     /// The rows (columns) a file marks `collapsed`: the summary of every stretch of grouped rows
     /// that is folded as a whole, sorted. The inverse of [`Self::split_collapsed`].
-    pub fn summary_marks(levels: &[LevelRun], collapsed: &[(u32, u32)], above: bool) -> Vec<u32> {
+    pub fn summary_marks(
+        levels: &[LevelRun],
+        collapsed: &[(u32, u32)],
+        open: &[LevelRun],
+        above: bool,
+    ) -> Vec<u32> {
         let mut marks = Vec::new();
         if collapsed.is_empty() {
             return marks;
@@ -378,7 +479,11 @@ impl Outline {
         for k in 1..=MAX_OUTLINE_LEVEL {
             for (first, last) in segments(levels, k) {
                 if let Some(row) = summary_of(first, last, above) {
-                    if runs_cover(collapsed, first, last) {
+                    if runs_cover(collapsed, first, last)
+                        && open
+                            .binary_search_by_key(&(k, first), |r| (r.2, r.0))
+                            .is_err()
+                    {
                         marks.push(row);
                     }
                 }
@@ -448,13 +553,13 @@ mod tests {
         // Rows 1..=9 level 1, rows 3..=5 level 2; summary below.
         let levels: Vec<LevelRun> = vec![(1, 2, 1), (3, 5, 2), (6, 9, 1)];
         // Inner group folded: its summary row is 6.
-        let marks = Outline::summary_marks(&levels, &[(3, 5)], false);
+        let marks = Outline::summary_marks(&levels, &[(3, 5)], &[], false);
         assert_eq!(marks, vec![6]);
         let mut hidden = vec![(3, 5)];
         let folded = Outline::split_collapsed(&levels, &mut hidden, &marks, false);
         assert_eq!((folded, hidden), (vec![(3, 5)], vec![]));
         // Outer group folded as a whole: both summaries are marked.
-        let marks = Outline::summary_marks(&levels, &[(1, 9)], false);
+        let marks = Outline::summary_marks(&levels, &[(1, 9)], &[], false);
         assert_eq!(marks, vec![6, 10]);
         let mut hidden = vec![(1, 9)];
         let folded = Outline::split_collapsed(&levels, &mut hidden, &marks, false);
@@ -476,8 +581,11 @@ mod tests {
     #[test]
     fn a_summary_above_the_group_is_the_row_before_it() {
         let levels: Vec<LevelRun> = vec![(5, 8, 1)];
-        assert_eq!(Outline::summary_marks(&levels, &[(5, 8)], true), vec![4]);
-        assert!(Outline::summary_marks(&[(0, 3, 1)], &[(0, 3)], true).is_empty());
+        assert_eq!(
+            Outline::summary_marks(&levels, &[(5, 8)], &[], true),
+            vec![4]
+        );
+        assert!(Outline::summary_marks(&[(0, 3, 1)], &[(0, 3)], &[], true).is_empty());
         let mut hidden = vec![(5, 8)];
         let folded = Outline::split_collapsed(&levels, &mut hidden, &[4], true);
         assert_eq!(folded, vec![(5, 8)]);
@@ -535,7 +643,7 @@ mod tests {
         let oracle: Vec<u32> = (0..10_000u32).map(|i| (i * 2) * 4 + 4).collect();
 
         let start = std::time::Instant::now();
-        let actual = Outline::summary_marks(&levels, &collapsed, false);
+        let actual = Outline::summary_marks(&levels, &collapsed, &[], false);
         let elapsed = start.elapsed();
         assert_eq!(actual, oracle);
         assert!(
@@ -544,7 +652,7 @@ mod tests {
         );
         // Adjacent unmerged runs in `collapsed` must behave identically to `intersect_runs`.
         assert_eq!(
-            Outline::summary_marks(&[(1, 4, 1)], &[(1, 2), (3, 4)], false),
+            Outline::summary_marks(&[(1, 4, 1)], &[(1, 2), (3, 4)], &[], false),
             vec![5]
         );
     }

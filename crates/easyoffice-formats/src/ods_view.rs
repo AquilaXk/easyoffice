@@ -154,12 +154,23 @@ pub(crate) struct GroupWriter<'a> {
 }
 
 impl<'a> GroupWriter<'a> {
-    pub(crate) fn new(tag: &'static str, levels: &'a [LevelRun], collapsed: &[(u32, u32)]) -> Self {
+    /// `open` are the groups inside folded rows that are open themselves (`Outline::open_rows`, sorted).
+    pub(crate) fn new(
+        tag: &'static str,
+        levels: &'a [LevelRun],
+        collapsed: &[(u32, u32)],
+        open: &[LevelRun],
+    ) -> Self {
         let mut folded = vec![Vec::new(); usize::from(MAX_OUTLINE_LEVEL) + 1];
         for k in 1..=MAX_OUTLINE_LEVEL {
             folded[usize::from(k)] = segments(levels, k)
                 .into_iter()
-                .filter(|&stretch| intersect_runs(collapsed, &[stretch]) == [stretch])
+                .filter(|&stretch| {
+                    intersect_runs(collapsed, &[stretch]) == [stretch]
+                        && open
+                            .binary_search_by_key(&(k, stretch.0), |r| (r.2, r.0))
+                            .is_err()
+                })
                 .collect();
         }
         Self {
@@ -370,7 +381,7 @@ mod tests {
     fn groups_open_and_close_with_the_level_and_carry_their_folded_state() {
         // Rows 2-6 level 1, with rows 3-4 a folded second level.
         let levels: Vec<LevelRun> = vec![(2, 2, 1), (3, 4, 2), (5, 6, 1)];
-        let mut writer = GroupWriter::new("table:table-row-group", &levels, &[(3, 4)]);
+        let mut writer = GroupWriter::new("table:table-row-group", &levels, &[(3, 4)], &[]);
         let mut xml = String::new();
         for row in 0..8 {
             writer.move_to(&mut xml, row);

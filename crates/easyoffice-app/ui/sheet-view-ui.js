@@ -19,6 +19,7 @@
   function createSheetView(deps) {
     const {
       document,
+      kit,
       grid,
       getRange,
       getSelection,
@@ -92,19 +93,33 @@
     }
 
     // ---- groups -----------------------------------------------------------------------------------
-    // The selection's axis: a selected header names it, a range of cells means rows.
-    function target() {
-      const sel = getSelection();
-      const axis = sel.axis === "col" ? "col" : "row";
+    // The rows or columns of the selection along `axis`.
+    function target(axis) {
       const rg = getRange();
       return axis === "row" ? { axis, first: rg.r1, last: rg.r2 } : { axis, first: rg.c1, last: rg.c2 };
     }
 
-    // Applies `edit(outline, target)` (`{ outline }` or `{ error }`) to the active sheet's outline.
-    function editOutline(edit, message) {
-      if (groupBlocked(target().axis)) return Promise.resolve(false);
+    // A selected header names the axis; a range of cells asks which one, in the dialog of the spreadsheet
+    // program's 그룹 and 그룹 해제 commands (`행`, `열`). Resolves "row", "col" or null when it is cancelled.
+    function axisOfSelection(title) {
+      const axis = getSelection().axis;
+      // Showing and hiding detail has no question: it works on the rows unless columns are selected.
+      if (axis || !title) return Promise.resolve(axis || "row");
+      const $ = kit.$;
+      if (!$("sheet-group-dialog")) return Promise.resolve("row");
+      $("sheet-group-title").textContent = title;
+      $("sheet-group-rows").checked = true;
+      $("sheet-group-cols").checked = false;
+      return kit.modal("sheet-group-dialog", "btn-sheet-group-ok", () => ($("sheet-group-cols").checked ? "col" : "row"), null, () => $("sheet-group-rows").focus());
+    }
+
+    // Applies `edit(outline, target)` (`{ outline }` or `{ error }`) to the active sheet's outline, on the axis the
+    // selection names or the dialog answers.
+    async function editOutline(edit, message, title) {
+      const axis = await axisOfSelection(title);
+      if (!axis || groupBlocked(axis)) return false;
       return step((name) => {
-        const t = target();
+        const t = target(axis);
         const result = edit(layoutApi.outlineOf(name) || {}, t);
         if (result.error) {
           say(GROUP_ERRORS[result.error]);
@@ -115,8 +130,8 @@
       });
     }
 
-    const group = () => editOutline((o, t) => outlineApi.group(o, t.axis, t.first, t.last), "그룹 묶기");
-    const ungroup = () => editOutline((o, t) => outlineApi.ungroup(o, t.axis, t.first, t.last), "그룹 풀기");
+    const group = () => editOutline((o, t) => outlineApi.group(o, t.axis, t.first, t.last), "그룹 묶기", "그룹");
+    const ungroup = () => editOutline((o, t) => outlineApi.ungroup(o, t.axis, t.first, t.last), "그룹 풀기", "그룹 해제");
     const hideDetail = () => editOutline((o, t) => outlineApi.fold(o, t.axis, t.first, t.last, true), "하위 수준 숨기기");
     const showDetail = () => editOutline((o, t) => outlineApi.fold(o, t.axis, t.first, t.last, false), "하위 수준 표시");
     const clearOutline = () =>

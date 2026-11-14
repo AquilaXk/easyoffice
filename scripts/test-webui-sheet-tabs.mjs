@@ -703,3 +703,32 @@ test("renaming and deleting a protected sheet, then undo and redo, keep its prot
   await h.history("studio-undo");
   same("and the undo of the delete again");
 });
+
+test("a very hidden sheet has no tab, is not offered by 숨기기 취소, and stays very hidden through a save (PD-209)", async () => {
+  const h = await open();
+  await h.openBook([
+    { name: "보임", cells: { A1: "a" } },
+    { name: "숨김", cells: { A1: "h" }, hidden: true },
+    { name: "깊은", cells: { A1: "v" }, hidden: true, veryHidden: true },
+  ]);
+  assert.deepEqual(h.names(), ["보임"]);
+  const layout = h.host.__EASYOFFICE_SHEET_LAYOUT__;
+  assert.equal(layout.veryHiddenOf("깊은"), true);
+  assert.equal(layout.veryHiddenOf("숨김"), false);
+  await h.tabMenu("보임", "unhide");
+  const rows = [...h.document.querySelectorAll("#sheet-tab-unhide-list li")];
+  assert.deepEqual(rows.map((r) => r.textContent), ["숨김"], "the list holds the hidden sheet only");
+  h.userClick(h.document.querySelector("#sheet-tab-unhide-dialog .dialog-btn-primary"));
+  await flushAsyncTurns(30);
+  assert.deepEqual(h.names(), ["보임", "숨김"]);
+  // With only a very hidden sheet left, the command is greyed.
+  const t = h.tab("보임");
+  t.dispatchEvent({ type: "contextmenu", target: t, clientX: 40, clientY: 700 });
+  assert.equal(h.menu().querySelector('[data-tab-act="unhide"]').getAttribute("aria-disabled"), "true", "only a very hidden sheet is left");
+  const sent = await h.saved();
+  assert.deepEqual(sent.map((s) => [s.name, s.hidden === true, s.veryHidden === true]), [["보임", false, false], ["숨김", false, false], ["깊은", true, true]]);
+  // A sheet that was hidden by the menu goes out as hidden, not as very hidden.
+  await h.tabMenu("숨김", "hide");
+  const again = await h.saved();
+  assert.deepEqual(again.map((s) => [s.name, s.hidden === true, s.veryHidden === true]), [["보임", false, false], ["숨김", true, false], ["깊은", true, true]]);
+});

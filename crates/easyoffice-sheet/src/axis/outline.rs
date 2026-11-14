@@ -45,9 +45,17 @@ pub fn shift_levels(runs: &[LevelRun], edit: &AxisEdit) -> Vec<LevelRun> {
 /// The groups of `outline` after `edit`.
 pub fn shift_outline(outline: &Outline, edit: &AxisEdit) -> Outline {
     let mut moved = outline.clone();
-    let (levels, folded) = match edit.axis {
-        Axis::Row => (&mut moved.rows, &mut moved.collapsed_rows),
-        Axis::Col => (&mut moved.cols, &mut moved.collapsed_cols),
+    let (levels, folded, open) = match edit.axis {
+        Axis::Row => (
+            &mut moved.rows,
+            &mut moved.collapsed_rows,
+            &mut moved.open_rows,
+        ),
+        Axis::Col => (
+            &mut moved.cols,
+            &mut moved.collapsed_cols,
+            &mut moved.open_cols,
+        ),
     };
     *levels = shift_levels(levels, edit);
     let mut runs: Vec<(u32, u32)> = folded
@@ -58,6 +66,16 @@ pub fn shift_outline(outline: &Outline, edit: &AxisEdit) -> Outline {
     let mut grouped: Vec<(u32, u32)> = levels.iter().map(|&(s, e, _)| (s, e)).collect();
     normalize_runs(&mut grouped);
     *folded = intersect_runs(&runs, &grouped);
+    // The groups left open inside folded rows move with their rows; one the edit cut, joined or took out of the
+    // folded rows is folded with them.
+    let shifted: Vec<LevelRun> = open
+        .iter()
+        .filter_map(|&(s, e, level)| {
+            let (ns, ne) = edit.shift_span(s, e)?;
+            Some((ns, ne, level))
+        })
+        .collect();
+    *open = Outline::settle_open(levels, folded, shifted);
     moved
 }
 
@@ -94,6 +112,28 @@ mod tests {
         assert_eq!(del(8, 2), vec![(2, 5, 1)]);
         assert_eq!(del(0, 2), vec![(0, 3, 1), (6, 7, 2)]);
         assert_eq!(del(4, 4), vec![(2, 3, 1), (4, 5, 2)]);
+    }
+
+    #[test]
+    fn an_inner_group_left_open_inside_a_folded_one_moves_with_its_rows() {
+        let outline = Outline {
+            rows: vec![(2, 3, 1), (4, 5, 2), (6, 8, 1)],
+            collapsed_rows: vec![(2, 8)],
+            open_rows: vec![(4, 5, 2)],
+            ..Outline::default()
+        };
+        let before = shift_outline(&outline, &edit(Axis::Row, EditKind::Insert, 0, 2));
+        assert_eq!(
+            (before.collapsed_rows, before.open_rows),
+            (vec![(4, 10)], vec![(6, 7, 2)])
+        );
+        let inside = shift_outline(&outline, &edit(Axis::Row, EditKind::Insert, 5, 1));
+        assert_eq!(inside.open_rows, vec![(4, 6, 2)]);
+        // The edit that takes the inner group out leaves nothing to remember.
+        let gone = shift_outline(&outline, &edit(Axis::Row, EditKind::Delete, 4, 2));
+        assert!(gone.open_rows.is_empty());
+        let cols = shift_outline(&outline, &edit(Axis::Col, EditKind::Insert, 0, 1));
+        assert_eq!(cols.open_rows, outline.open_rows);
     }
 
     #[test]

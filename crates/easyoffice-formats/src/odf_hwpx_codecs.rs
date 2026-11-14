@@ -520,6 +520,7 @@ impl OdfCodec {
             "table:table-row-group",
             &outline.rows,
             &outline.collapsed_rows,
+            &outline.open_rows,
         );
         let header_end = styling.and_then(|st| title_end(st.page.title_rows));
         let matrices: std::collections::HashMap<(u32, u32), crate::SpillRef> = styling

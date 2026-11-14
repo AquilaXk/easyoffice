@@ -313,6 +313,7 @@ fn summary_rows(styling: &SheetStyling) -> Vec<u32> {
     Outline::summary_marks(
         &outline.rows,
         &outline.collapsed_rows,
+        &outline.open_rows,
         outline.summary_above,
     )
 }
