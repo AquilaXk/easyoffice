@@ -198,12 +198,39 @@ fn is_word_char(c: char) -> bool {
     c.is_alphanumeric() || matches!(c, '_' | '.' | '$')
 }
 
+/// The end (a char index) of the structured reference group that opens at `chars[i]`, if one does: it follows
+/// a table's name or starts with `@`, `#` or `[` (PD-225). Its text is one opaque token, so the `[Q1]` after the
+/// comma of `[[#This Row],[Q1]]` is not read as an optional parameter.
+fn structured_group_end(text: &str, chars: &[char], offsets: &[usize], i: usize) -> Option<usize> {
+    let named = i > 0 && is_word_char(chars[i - 1]);
+    let opens = chars[i + 1..]
+        .iter()
+        .find(|c| **c != ' ')
+        .is_some_and(|c| matches!(c, '@' | '#' | '['));
+    if !(named || opens) {
+        return None;
+    }
+    let end = crate::structured_ref::group_end(text, offsets[i])?;
+    offsets
+        .binary_search(&end)
+        .ok()
+        .or((end == text.len()).then_some(chars.len()))
+}
+
 fn tokenize(text: &str) -> Vec<Tok> {
     let chars: Vec<char> = text.chars().collect();
+    let offsets: Vec<usize> = text.char_indices().map(|(i, _)| i).collect();
     let mut out = Vec::new();
     let mut i = 0;
     while i < chars.len() {
         let c = chars[i];
+        if c == '[' {
+            if let Some(end) = structured_group_end(text, &chars, &offsets, i) {
+                out.push(Tok::Quoted(chars[i..end].iter().collect()));
+                i = end;
+                continue;
+            }
+        }
         if c == '"' || c == '\'' {
             let mut j = i + 1;
             while j < chars.len() {

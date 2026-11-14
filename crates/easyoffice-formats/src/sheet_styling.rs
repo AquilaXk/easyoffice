@@ -44,6 +44,10 @@ pub(crate) mod sheet_spill;
 pub(crate) mod sheet_table;
 #[path = "sheet_view.rs"]
 pub(crate) mod sheet_view;
+#[path = "structured_cells.rs"]
+pub(crate) mod structured_cells;
+#[path = "structured_ref.rs"]
+pub(crate) mod structured_ref;
 #[path = "xlsx_bounds.rs"]
 pub(crate) mod xlsx_bounds;
 #[path = "xlsx_filter.rs"]
@@ -84,6 +88,7 @@ pub use sheet_table::{
     MAX_TABLE_COLUMNS_TOTAL, MAX_TABLE_TEXT_CHARS,
 };
 pub use sheet_view::*;
+pub use structured_ref::*;
 pub use xlsx_formula_text::{from_file_formula, to_file_formula};
 pub use xlsx_layout::{intersect_runs, normalize_runs, run_total, MAX_HIDDEN_ROWS, MAX_MERGES};
 

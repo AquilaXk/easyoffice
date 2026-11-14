@@ -60,6 +60,7 @@ struct RuleContext<'a> {
     table: &'a OdsRuleTable,
     sheet: usize,
     stylings: &'a [SheetStyling],
+    sheet_names: &'a [&'a str],
 }
 
 impl OdfCodec {
@@ -365,11 +366,16 @@ impl OdfCodec {
                 table: &rule_table,
                 sheet: sheet_idx,
                 stylings,
+                sheet_names: &names,
             };
+            // A format with no tables holds the cells a structured reference stands for (PD-225).
+            let cells = crate::sheet_styling::structured_cells::range_formulas(
+                cells, sheet_idx, &names, stylings,
+            );
             Self::push_ods_table(
                 &mut content,
                 sheet_name,
-                cells,
+                &cells,
                 caches.get(sheet_idx),
                 stylings.get(sheet_idx),
                 (&style_table, &rules, &tab_styles),
@@ -377,10 +383,13 @@ impl OdfCodec {
         }
 
         if let Some(first) = stylings.first() {
-            content.push_str(&crate::sheet_styling::ods_names::names_xml(
+            let defined = crate::sheet_styling::structured_cells::range_names(
                 &first.defined_names,
-                None,
-                names[0],
+                &names,
+                stylings,
+            );
+            content.push_str(&crate::sheet_styling::ods_names::names_xml(
+                &defined, None, names[0],
             ));
         }
         content.push_str(
@@ -626,8 +635,13 @@ impl OdfCodec {
         }
         groups.close_all(content);
         if let Some(first) = rules.stylings.first() {
-            content.push_str(&crate::sheet_styling::ods_names::names_xml(
+            let defined = crate::sheet_styling::structured_cells::range_names(
                 &first.defined_names,
+                rules.sheet_names,
+                rules.stylings,
+            );
+            content.push_str(&crate::sheet_styling::ods_names::names_xml(
+                &defined,
                 Some(sheet_name),
                 sheet_name,
             ));

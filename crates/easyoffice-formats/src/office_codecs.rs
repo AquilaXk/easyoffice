@@ -605,12 +605,20 @@ impl OoxmlCodec {
                 .into_iter()
                 .flat_map(|st| st.defined_names.iter().map(|n| n.name.as_str())),
         );
+        // A structured reference is written the way the file format holds it (PD-225).
+        let sheet_cells: Vec<_> = active_sheets
+            .iter()
+            .zip(&sheet_tables)
+            .map(|((_, cells), tables)| {
+                crate::sheet_styling::structured_cells::file_formulas(cells, tables)
+            })
+            .collect();
         let mut table_writer = TableWriter::default();
-        let sheet_parts: Vec<_> = active_sheets
+        let sheet_parts: Vec<_> = sheet_cells
             .iter()
             .zip(&sheet_tables)
             .enumerate()
-            .map(|(i, ((_, cells), tables))| table_writer.add_sheet(tables, cells, caches.get(i)))
+            .map(|(i, (cells, tables))| table_writer.add_sheet(tables, cells, caches.get(i)))
             .collect();
         let has_spills = stylings.iter().any(|s| !s.spills.is_empty());
         let (content_types, wb_rels_xml) = if has_spills {
@@ -660,7 +668,7 @@ impl OoxmlCodec {
                     .to_vec(),
             ));
         }
-        for (i, (_, cells)) in active_sheets.iter().enumerate() {
+        for (i, cells) in sheet_cells.iter().enumerate() {
             let (links, link_rels) = stylings
                 .get(i)
                 .map_or((String::new(), None), |st| links_xml(&st.links));

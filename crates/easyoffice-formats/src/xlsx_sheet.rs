@@ -808,13 +808,17 @@ fn quoted_end(bytes: &[u8], start: usize) -> usize {
 }
 
 fn shift_shared_formula(formula: &str, dr: i64, dc: i64) -> Option<String> {
-    if formula.as_bytes().contains(&b'[') {
-        return None;
-    }
     let bytes = formula.as_bytes();
     let mut out = String::with_capacity(formula.len() + 8);
     let mut i = 0usize;
     while i < bytes.len() {
+        // The group of a structured reference names columns, not cells: it is copied as written (PD-225).
+        if bytes[i] == b'[' {
+            let end = crate::group_end(formula, i)?;
+            out.push_str(&formula[i..end]);
+            i = end;
+            continue;
+        }
         // Quoted text and quoted sheet names pass untouched: a doubled quote stays inside.
         if matches!(bytes[i], b'"' | b'\'') {
             let end = quoted_end(bytes, i);
