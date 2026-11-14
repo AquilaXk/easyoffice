@@ -14,7 +14,7 @@
 //! value (`1.0` against `1`), the wildcard match is the linear `wildcard` module, and the cell
 //! text is the displayed text the caller passes in.
 
-use super::aux::{CellAux, NO_COLOR};
+use super::cell_aux::{CellAux, NO_COLOR};
 use super::dates::DateKeys;
 use super::wildcard::Wildcard;
 use easyoffice_formats::{CustomCondition, CustomOp, FilterCriteria};

@@ -15,19 +15,19 @@
 //! the list is bounded. Nothing here reads a cell: the caller passes the displayed text of the
 //! rows below the header, column by column, with the numbers, date flags and colours the criteria
 //! beyond text need (`CellAux`). The reference's worker plumbing is not used. The colour filter and
-//! the date tree are in `aux`, `dates`; the top and average criteria it has no counterpart for are in
+//! the date tree are in `cell_aux`, `dates`; the top and average criteria it has no counterpart for are in
 //! `stats` (PD-226).
 
-mod aux;
 mod bits;
+mod cell_aux;
 mod condition;
 mod dates;
 mod runs;
 mod stats;
 mod wildcard;
 
-pub use aux::{color_list, CellAux, ColorList, NO_COLOR};
 pub use bits::RowBits;
+pub use cell_aux::{color_list, CellAux, ColorList, NO_COLOR};
 pub use condition::{number_of, ColumnMatcher};
 pub use dates::{date_tree, tree_rows, DateKeys, DateTree, Moment, MonthNode};
 pub use runs::{intersect_runs, subtract_runs};
