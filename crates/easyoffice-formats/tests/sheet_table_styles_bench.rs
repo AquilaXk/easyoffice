@@ -133,3 +133,49 @@ fn custom_table_styles_cost_little_to_open_and_save() {
         })
     );
 }
+
+/// A 1 MiB `dxf` that every element of 1,000 styles names (a hostile stylesheet): it is read once.
+#[test]
+#[ignore = "benchmark"]
+fn one_big_dxf_named_by_every_element_is_read_once() {
+    let filler =
+        "<border><top style=\"thin\"><color rgb=\"FF000000\"/></top></border>".repeat(16_000);
+    let mut styles = format!(
+        "<styleSheet><dxfs count=\"1\"><dxf><font><b/></font>{filler}</dxf></dxfs><tableStyles>"
+    );
+    for n in 0..1_000 {
+        styles.push_str(&format!("<tableStyle name=\"S{n}\">"));
+        for e in StyleElement::ALL {
+            styles.push_str(&format!(
+                "<tableStyleElement type=\"{}\" dxfId=\"0\"/>",
+                e.xlsx()
+            ));
+        }
+        styles.push_str("</tableStyle>");
+    }
+    styles.push_str("</tableStyles></styleSheet>");
+    let base = workbook(false);
+    let entries = ZipArchiveCodec::unpack(&base, &ZipSecurityPolicy::default()).unwrap();
+    let parts: Vec<(String, Vec<u8>)> = entries
+        .into_iter()
+        .map(|e| {
+            if e.path == "xl/styles.xml" {
+                (e.path, styles.clone().into_bytes())
+            } else {
+                (e.path, e.data)
+            }
+        })
+        .collect();
+    let bytes = ZipArchiveCodec::pack(&parts).unwrap();
+    println!("styles.xml {} bytes", styles.len());
+    println!(
+        "open ms (min of 3): {:.1}",
+        (0..3)
+            .map(|_| {
+                let t = Instant::now();
+                OoxmlCodec::unpack_xlsx_with_styling(&bytes).unwrap();
+                t.elapsed().as_secs_f64() * 1000.0
+            })
+            .fold(f64::MAX, f64::min)
+    );
+}

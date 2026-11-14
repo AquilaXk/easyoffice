@@ -6,7 +6,7 @@
 //! (extended icon sets, extended validations) are named in
 //! [`SheetRules::unsupported`] by the reader; theme and indexed colours are not resolved.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
 use crate::rtf_xml_helpers::{
@@ -20,7 +20,7 @@ use crate::sheet_styling::sheet_rules::{
     MAX_RULE_TEXT_CHARS,
 };
 use crate::sheet_styling::table_style::{table_styles_xml, TableStyleDef, MAX_TABLE_STYLES};
-use crate::sheet_table::SheetTable;
+use crate::sheet_table::{unique_name, SheetTable};
 use crate::XmlSanitizer;
 
 /// Differential formats of a workbook, deduplicated in first-use order.
@@ -34,6 +34,9 @@ pub(crate) struct DxfTable {
     /// The custom table styles the tables name, by name, once each (PD-231). Their formats come after the
     /// colour filters' in the list.
     table_styles: Vec<(String, TableStyleDef)>,
+    /// The name each (name, definition) a table has is written under: two tables that call different definitions by one name
+    /// get names of their own (`Name_2`), so neither loses its look.
+    style_names: HashMap<(String, TableStyleDef), String>,
 }
 
 impl DxfTable {
@@ -67,22 +70,37 @@ impl DxfTable {
         self
     }
 
-    /// Adds the custom styles of `tables`, each name once; a name over the bound is left out.
+    /// Adds the custom styles of `tables`: each (name, definition) once, under its own name when another definition has the
+    /// name already; a style over the bound is left out.
     pub(crate) fn with_table_styles<'a>(
         mut self,
         tables: impl IntoIterator<Item = &'a SheetTable>,
     ) -> Self {
+        let mut taken: HashSet<String> = HashSet::new();
         for table in tables {
             let (Some(name), Some(def)) = (&table.style, &table.style_def) else {
                 continue;
             };
-            if self.table_styles.len() < MAX_TABLE_STYLES
-                && !self.table_styles.iter().any(|(n, _)| n == name)
-            {
-                self.table_styles.push((name.clone(), def.clone()));
+            let key = (name.clone(), def.clone());
+            if self.style_names.contains_key(&key) || self.table_styles.len() >= MAX_TABLE_STYLES {
+                continue;
             }
+            let written = unique_name(&mut taken, name);
+            self.table_styles.push((written.clone(), def.clone()));
+            self.style_names.insert(key, written);
         }
         self
+    }
+
+    /// The name `table`'s style is written under (the one it has unless its definition shares the name with another).
+    pub(crate) fn table_style_name<'a>(&'a self, table: &'a SheetTable) -> Option<&'a str> {
+        let name = table.style.as_deref()?;
+        let def = table.style_def.as_ref()?;
+        Some(
+            self.style_names
+                .get(&(name.to_string(), def.clone()))
+                .map_or(name, String::as_str),
+        )
     }
 
     /// The id of the format a colour filter names.
@@ -197,13 +215,9 @@ fn first_formula_texts(body: &str) -> Vec<String> {
         .collect()
 }
 
-/// Styles of the `<dxf>` entries of `styles.xml`, in file order.
-pub(crate) fn parse_dxf_styles(styles_xml: &str) -> Vec<CfStyle> {
-    let Some(dxfs) = extract_tag_bodies(styles_xml, "dxfs").into_iter().next() else {
-        return Vec::new();
-    };
-    extract_tag_bodies(dxfs, "dxf")
-        .into_iter()
+/// Styles of the `<dxf>` entries `dxfs` (`xlsx_filter_dxf::dxf_bodies` of `styles.xml`), in file order.
+pub(crate) fn parse_dxf_styles(dxfs: &[&str]) -> Vec<CfStyle> {
+    dxfs.iter()
         .take(MAX_RULES_PER_SHEET)
         .map(|dxf| {
             let mut style = CfStyle::default();

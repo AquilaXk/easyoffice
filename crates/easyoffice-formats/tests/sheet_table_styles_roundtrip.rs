@@ -146,3 +146,21 @@ fn a_flood_of_table_styles_in_a_file_is_cut_at_the_bound() {
         "the table's own style is first in the file"
     );
 }
+
+#[test]
+fn two_tables_that_call_different_definitions_by_one_name_each_keep_their_own() {
+    let mut other = custom();
+    other.elements[0].1.fill = Some(0x00AA00);
+    let mut second = table("B", "Mine", "D1:E4");
+    second.style_def = Some(other.clone());
+    let bytes = pack(vec![table("A", "Mine", "A1:B4"), second]);
+    let styles = part(&bytes, "xl/styles.xml");
+    assert_eq!(styles.matches("<tableStyle ").count(), 2, "{styles}");
+    assert!(styles.contains("name=\"Mine\"") && styles.contains("name=\"Mine_2\""));
+    let back = OoxmlCodec::unpack_xlsx_with_styling(&bytes).unwrap().1;
+    let tables = &back[0].1.tables;
+    assert_eq!(tables[0].style.as_deref(), Some("Mine"));
+    assert_eq!(tables[1].style.as_deref(), Some("Mine_2"));
+    assert_eq!(tables[0].style_def, Some(custom()));
+    assert_eq!(tables[1].style_def, Some(other));
+}

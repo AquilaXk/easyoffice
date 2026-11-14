@@ -387,7 +387,7 @@ fn table_xml(id: usize, table: &SheetTable, columns: &[String], dxf: &DxfTable) 
         );
     }
     out.push_str("</tableColumns><tableStyleInfo");
-    if let Some(style) = &table.style {
+    if let Some(style) = dxf.table_style_name(table).or(table.style.as_deref()) {
         let _ = write!(out, " name=\"{}\"", XmlSanitizer::escape(style));
     }
     let bit = |on: bool| u8::from(on);

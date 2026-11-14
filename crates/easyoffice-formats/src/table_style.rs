@@ -31,11 +31,9 @@ use crate::XmlSanitizer;
 pub const MAX_TABLE_STYLES: usize = 1_000;
 /// Rows or columns in one stripe (the spreadsheet program offers 1..=9).
 pub const MAX_STRIPE: u8 = 9;
-/// The `dxf` entries a reader looks at.
-const MAX_DXFS: usize = 65_536;
 
 /// The parts of a table a style formats, in the order they are applied (a later one wins).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StyleElement {
     Whole,
     ColumnStripe1,
@@ -117,7 +115,7 @@ impl StyleElement {
 }
 
 /// The weight of a border line.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TableLine {
     Thin,
     Medium,
@@ -160,7 +158,7 @@ impl TableLine {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TableEdge {
     pub line: TableLine,
     pub color: u32,
@@ -172,7 +170,7 @@ pub const EDGE_KEYS: [&str; 6] = ["t", "b", "l", "r", "h", "v"];
 const EDGE_TAGS: [&str; 6] = ["top", "bottom", "left", "right", "horizontal", "vertical"];
 
 /// What one element of a style sets; a part it leaves out is the one an element below it sets.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct StyleFormat {
     pub fill: Option<u32>,
     pub color: Option<u32>,
@@ -194,7 +192,7 @@ impl StyleFormat {
 }
 
 /// A custom table style: each element it formats, once.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct TableStyleDef {
     pub elements: Vec<(StyleElement, StyleFormat)>,
 }
@@ -291,6 +289,7 @@ fn read_format(dxf: &str, colors: &ColorScheme) -> StyleFormat {
 /// [`MAX_STRIPE`] is left out.
 pub(crate) fn parse_table_styles(
     styles_xml: &str,
+    dxfs: &[&str],
     colors: &ColorScheme,
 ) -> HashMap<String, TableStyleDef> {
     let mut out = HashMap::new();
@@ -300,18 +299,8 @@ pub(crate) fn parse_table_styles(
     else {
         return out;
     };
-    let dxfs: Vec<&str> = extract_tag_bodies(styles_xml, "dxfs")
-        .into_iter()
-        .next()
-        .map(|body| {
-            // An empty `<dxf/>` still takes an id.
-            extract_tags_or_self_closing_with_attrs(body, "dxf")
-                .into_iter()
-                .take(MAX_DXFS)
-                .map(|(_, dxf)| dxf)
-                .collect()
-        })
-        .unwrap_or_default();
+    // A format is read once however many elements name its `dxf`.
+    let mut formats: HashMap<usize, StyleFormat> = HashMap::new();
     for (attrs, body) in extract_tags_with_attrs(block, "tableStyle") {
         if out.len() >= MAX_TABLE_STYLES {
             break;
@@ -333,16 +322,19 @@ pub(crate) fn parse_table_styles(
             else {
                 continue;
             };
-            let Some(dxf) = extract_attr_from_fragment(attrs, "dxfId")
+            let Some(id) = extract_attr_from_fragment(attrs, "dxfId")
                 .and_then(|id| id.trim().parse::<usize>().ok())
-                .and_then(|id| dxfs.get(id))
+                .filter(|id| *id < dxfs.len())
             else {
                 continue;
             };
             if def.elements.iter().any(|(e, _)| *e == element) {
                 continue;
             }
-            let mut format = read_format(dxf, colors);
+            let mut format = formats
+                .entry(id)
+                .or_insert_with(|| read_format(dxfs[id], colors))
+                .clone();
             if let Some(size) =
                 extract_attr_from_fragment(attrs, "size").and_then(|s| s.trim().parse::<u8>().ok())
             {
@@ -455,6 +447,7 @@ pub(crate) fn table_styles_xml<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sheet_styling::xlsx_filter_dxf::dxf_bodies;
 
     #[test]
     fn built_in_names_are_the_sixty_the_spec_lists() {
@@ -508,7 +501,7 @@ mod tests {
 
     #[test]
     fn a_custom_style_reads_its_elements_with_colours_and_stripe_size() {
-        let styles = parse_table_styles(STYLES, &ColorScheme::default());
+        let styles = parse_table_styles(STYLES, &dxf_bodies(STYLES), &ColorScheme::default());
         assert!(
             !styles.contains_key("TableStyleMedium2"),
             "a built-in name is the page's"
@@ -572,7 +565,7 @@ mod tests {
 
     #[test]
     fn a_written_style_reads_back_the_same() {
-        let styles = parse_table_styles(STYLES, &ColorScheme::default());
+        let styles = parse_table_styles(STYLES, &dxf_bodies(STYLES), &ColorScheme::default());
         let mine = &styles["Mine"];
         let (xml, dxfs) = table_styles_xml([("Mine", mine)], 5);
         assert_eq!(dxfs.len(), mine.elements.len());
@@ -583,7 +576,7 @@ mod tests {
             "<styleSheet><dxfs>{padding}{}</dxfs>{xml}</styleSheet>",
             dxfs.concat()
         );
-        let again = parse_table_styles(&file, &ColorScheme::default());
+        let again = parse_table_styles(&file, &dxf_bodies(&file), &ColorScheme::default());
         let strip = |def: &TableStyleDef| {
             let mut e = def.elements.clone();
             e.sort_by_key(|(e, _)| StyleElement::ALL.iter().position(|a| a == e));
@@ -594,6 +587,64 @@ mod tests {
     }
 
     #[test]
+    fn conditional_formats_and_table_styles_count_an_empty_dxf_the_same_way() {
+        let xml = concat!(
+            "<styleSheet><dxfs count=\"3\"><dxf/><dxf><font><b/></font><fill><patternFill><bgColor rgb=\"FFFF0000\"/></patternFill></fill></dxf><dxf/></dxfs>",
+            "<tableStyles><tableStyle name=\"Red\"><tableStyleElement type=\"headerRow\" dxfId=\"1\"/><tableStyleElement type=\"totalRow\" dxfId=\"2\"/></tableStyle></tableStyles></styleSheet>"
+        );
+        let list = dxf_bodies(xml);
+        assert_eq!(list.len(), 3);
+        let rule = crate::sheet_styling::sheet_rules::xlsx_rules::parse_dxf_styles(&list);
+        assert_eq!(
+            rule[1].bg,
+            Some(0xFF0000),
+            "a conditional format that names entry 1"
+        );
+        let styles = parse_table_styles(xml, &list, &ColorScheme::default());
+        let header = &styles["Red"].elements[0];
+        assert_eq!(
+            (header.0, header.1.fill),
+            (StyleElement::Header, Some(0xFF0000)),
+            "a table style that names entry 1"
+        );
+        assert_eq!(
+            styles["Red"].elements.len(),
+            1,
+            "an empty entry sets nothing"
+        );
+    }
+
+    #[test]
+    fn one_big_dxf_named_by_every_element_of_a_thousand_styles_is_read_once() {
+        let filler =
+            "<border><top style=\"thin\"><color rgb=\"FF000000\"/></top></border>".repeat(16_000);
+        let mut xml =
+            format!("<styleSheet><dxfs><dxf><font><b/></font>{filler}</dxf></dxfs><tableStyles>");
+        for n in 0..MAX_TABLE_STYLES {
+            let _ = write!(xml, "<tableStyle name=\"S{n}\">");
+            for e in StyleElement::ALL {
+                let _ = write!(
+                    xml,
+                    "<tableStyleElement type=\"{}\" dxfId=\"0\"/>",
+                    e.xlsx()
+                );
+            }
+            xml.push_str("</tableStyle>");
+        }
+        xml.push_str("</tableStyles></styleSheet>");
+        assert!(xml.len() > 1_000_000);
+        let started = std::time::Instant::now();
+        let styles = parse_table_styles(&xml, &dxf_bodies(&xml), &ColorScheme::default());
+        assert_eq!(styles.len(), MAX_TABLE_STYLES);
+        assert!(styles["S999"].elements.iter().all(|(_, f)| f.bold));
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(2),
+            "{:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
     fn a_flood_of_styles_is_cut_at_the_bound() {
         let mut xml = String::from("<styleSheet><dxfs><dxf><fill><patternFill><bgColor rgb=\"FF010203\"/></patternFill></fill></dxf></dxfs><tableStyles>");
         for n in 0..(MAX_TABLE_STYLES + 500) {
@@ -601,7 +652,7 @@ mod tests {
         }
         xml.push_str("</tableStyles></styleSheet>");
         assert_eq!(
-            parse_table_styles(&xml, &ColorScheme::default()).len(),
+            parse_table_styles(&xml, &dxf_bodies(&xml), &ColorScheme::default()).len(),
             MAX_TABLE_STYLES
         );
     }

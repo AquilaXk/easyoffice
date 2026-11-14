@@ -9,7 +9,7 @@ use crate::sheet_styling::sheet_table::xlsx_tables::{
 };
 use crate::sheet_styling::table_style::parse_table_styles;
 use crate::sheet_styling::xlsx_color::{ColorScheme, XlsxColor};
-use crate::sheet_styling::xlsx_filter_dxf::parse_dxf_colors;
+use crate::sheet_styling::xlsx_filter_dxf::{dxf_bodies, parse_dxf_colors};
 use crate::sheet_styling::xlsx_sheet::{read_shared_strings, scan_worksheet, SharedStrings};
 use crate::sheet_styling::xlsx_styles::{parse_cell_xf_styles, XfStyles, XlsxStyleTable};
 use crate::sheet_styling::xlsx_view::{apply_tint, theme_palette, DEFAULT_THEME};
@@ -614,10 +614,12 @@ impl OoxmlCodec {
             (Some(styles), Some(colors)) => parse_cell_xf_styles(styles, colors),
             _ => XfStyles::default(),
         };
-        let dxf_styles = styles_xml.map(parse_dxf_styles).unwrap_or_default();
+        // The differential formats are listed once for every reader of them (an empty entry takes an id).
+        let dxf_list = styles_xml.map(dxf_bodies).unwrap_or_default();
+        let dxf_styles = parse_dxf_styles(&dxf_list);
         if let (Some(colors), Some(styles)) = (&colors, styles_xml) {
-            xf_styles.dxf_colors = parse_dxf_colors(styles, colors);
-            xf_styles.table_styles = parse_table_styles(styles, colors);
+            xf_styles.dxf_colors = parse_dxf_colors(&dxf_list, colors);
+            xf_styles.table_styles = parse_table_styles(styles, &dxf_list, colors);
         }
         let mut stylings = Vec::new();
         let workbook_names: Vec<String> = sheet_specs.iter().map(|spec| spec.0.clone()).collect();
