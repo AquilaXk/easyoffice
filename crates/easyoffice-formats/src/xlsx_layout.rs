@@ -9,7 +9,7 @@
 //! commit 5a06a7842c8e13fa0646d0733dc3662cf4b330b9. The file format side (`<row hidden>`,
 //! `<col hidden>`, `<mergeCells>`) follows ECMA-376 18.3.1; the reference stores no file format.
 
-use crate::sheet_styling::sheet_view::{Outline, MAX_OUTLINE_ROWS};
+use crate::sheet_styling::sheet_view::Outline;
 use crate::sheet_styling::xlsx_styles::{cols_xml, px_to_xlsx_width};
 use crate::{CellBox, SheetStyling};
 use std::collections::BTreeMap;
