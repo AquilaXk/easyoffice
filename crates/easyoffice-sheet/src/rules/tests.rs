@@ -127,6 +127,23 @@ fn text_rules_ignore_case() {
 }
 
 #[test]
+fn bottom_rank_larger_than_the_value_count_marks_every_value() {
+    let wb = workbook(&[("A1", "5"), ("A2", "7"), ("A3", "9")]);
+    for n in [3, 4, 10, u32::MAX] {
+        let rules = vec![rule(
+            "A1:A3",
+            1,
+            CfKind::Top {
+                n,
+                percent: false,
+                bottom: true,
+            },
+        )];
+        assert_eq!(marked(&eval(&wb, rules)), ["A1", "A2", "A3"], "n={n}");
+    }
+}
+
+#[test]
 fn top_and_bottom_ranks() {
     let wb = numbers_1_to_10();
     let top = |n, percent, bottom| {

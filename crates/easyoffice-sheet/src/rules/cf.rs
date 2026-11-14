@@ -231,12 +231,8 @@ fn rank_cut(n: u32, percent: bool, bottom: bool, data: &RangeData) -> Option<f64
         return Some(if bottom { ascending[safe] } else { at(safe) });
     }
     let n = n as usize;
-    if bottom {
-        let target = n.saturating_sub(1).min(len);
-        Some(at(len - target - 1))
-    } else {
-        Some(at(n.min(len).saturating_sub(1)))
-    }
+    let rank = n.min(len).saturating_sub(1);
+    Some(if bottom { ascending[rank] } else { at(rank) })
 }
 
 /// Port of the data bar pre-computation: the range and where the zero axis sits (percent).
