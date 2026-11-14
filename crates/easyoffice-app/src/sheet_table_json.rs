@@ -84,6 +84,31 @@ fn parse_table(v: &StrictJsonValue) -> Result<SheetTable, EasyOfficeError> {
     Ok(table)
 }
 
+/// What a request says of the tables of one sheet: their ranges and, when it sends the tables themselves (names,
+/// header and totals rows, columns), the tables, which structured references are resolved against (PD-225).
+pub(crate) struct TablesField {
+    pub(crate) boxes: Vec<CellBox>,
+    pub(crate) tables: Option<Vec<SheetTable>>,
+}
+
+/// A sheet's `tables` field: `["A1:C5", ...]` (ranges only) or the table objects of [`parse_tables`]. An empty
+/// list is "no tables" in either form and so takes the table form, which clears what the engine holds.
+pub(crate) fn parse_tables_field(v: &StrictJsonValue) -> Result<TablesField, EasyOfficeError> {
+    let items = v.as_array().ok_or_else(|| bad("tables"))?;
+    if items.is_empty() || items.iter().any(|item| item.as_object().is_some()) {
+        let tables = parse_tables(v)?;
+        let boxes = tables.iter().map(|t| t.range).collect();
+        return Ok(TablesField {
+            boxes,
+            tables: Some(tables),
+        });
+    }
+    Ok(TablesField {
+        boxes: parse_table_ranges(v)?,
+        tables: None,
+    })
+}
+
 /// The tables of one sheet from their JSON; they must be within the bounds and share no cell.
 pub(crate) fn parse_tables(v: &StrictJsonValue) -> Result<Vec<SheetTable>, EasyOfficeError> {
     let items = v.as_array().ok_or_else(|| bad("tables"))?;
@@ -109,17 +134,18 @@ pub(crate) fn parse_table_ranges(v: &StrictJsonValue) -> Result<Vec<CellBox>, Ea
         .collect()
 }
 
-/// The `tables` field of a request without a session: `{"Sheet1": ["A1:C5", ...], ...}`; none when absent.
+/// The `tables` field of a request without a session: `{"Sheet1": ["A1:C5", ...], ...}` (or the table objects
+/// in place of the ranges); none when absent.
 pub(crate) fn tables_by_sheet(
     entries: &[(String, StrictJsonValue)],
-) -> Result<Vec<(String, Vec<CellBox>)>, EasyOfficeError> {
+) -> Result<Vec<(String, TablesField)>, EasyOfficeError> {
     let Some(field) = StrictJsonValue::get_field(entries, "tables") else {
         return Ok(Vec::new());
     };
     let sheets = field.as_object().ok_or_else(|| bad("tables"))?;
     sheets
         .iter()
-        .map(|(name, list)| Ok((name.clone(), parse_table_ranges(list)?)))
+        .map(|(name, list)| Ok((name.clone(), parse_tables_field(list)?)))
         .collect()
 }
 
@@ -234,6 +260,19 @@ mod tests {
         for text in cases {
             assert!(parse(&text).is_err(), "{}", &text[..text.len().min(120)]);
         }
+    }
+
+    #[test]
+    fn a_tables_field_is_ranges_or_tables() {
+        let field = |t: &str| parse_tables_field(&StrictJsonValue::parse(t).unwrap());
+        let ranges = field(r#"["A1:C5"]"#).unwrap();
+        assert!(ranges.tables.is_none() && ranges.boxes.len() == 1);
+        let full = field(r#"[{"name":"T","range":"A1:B3","columns":["a","b"]}]"#).unwrap();
+        assert_eq!(full.tables.unwrap()[0].columns, ["a", "b"]);
+        // An empty list clears the tables the engine holds.
+        assert!(field("[]").unwrap().tables.is_some_and(|t| t.is_empty()));
+        // The two forms do not mix.
+        assert!(field(r#"["A1:C5",{"name":"T","range":"A7:B9","columns":["a","b"]}]"#).is_err());
     }
 
     #[test]

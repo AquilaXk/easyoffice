@@ -42,11 +42,16 @@ fn workbook_engine(sheets: &[OdsUnpacked], stylings: &[SheetStyling]) -> Workboo
     let mut wb = WorkbookEngine::new();
     for (index, (name, cells)) in sheets.iter().enumerate() {
         let spills = stylings.get(index).map_or(&[][..], |st| &st.spills[..]);
-        let sheet = wb.add_sheet(name.clone());
+        wb.add_sheet(name.clone());
         if let Some(styling) = stylings.get(index) {
-            sheet.set_spill_merges(styling.merges.clone());
-            sheet.set_spill_tables(styling.tables.iter().map(|t| t.range).collect());
+            wb.add_sheet(name.clone())
+                .set_spill_merges(styling.merges.clone());
+            // The tables come before the cells, so a structured reference compiles against them (PD-225). The
+            // reader and the page already hold them within the bounds; one that is not leaves the references
+            // to read as errors.
+            let _ = wb.set_tables(name, styling.tables.clone());
         }
+        let sheet = wb.add_sheet(name.clone());
         for (row, col, raw) in cells {
             if spills
                 .iter()

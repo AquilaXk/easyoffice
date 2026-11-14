@@ -17,8 +17,8 @@ use crate::sheet_refs_ipc::SheetOp;
 use crate::sheet_rules_json::{parse_rules, visuals_json};
 use crate::EasyOfficeIpcRouter;
 use easyoffice_formats::{
-    sheet_name_problem, CellBox, DvAlert, EasyOfficeError, SheetNameProblem, SheetRules,
-    StrictJsonValue, MAX_SHEET_NAME_UNITS,
+    sheet_name_problem, DvAlert, EasyOfficeError, SheetNameProblem, SheetRules, StrictJsonValue,
+    MAX_SHEET_NAME_UNITS,
 };
 use easyoffice_sheet::{
     AxisBudget, AxisEdit, Budget, CellChange, ChangedCell, Footprint, PackedCellCoordinate,
@@ -485,38 +485,6 @@ impl Registry {
         Ok(Applied::Done(json))
     }
 
-    /// Tells the session the merged ranges of `sheet` (the tables of it with `tables`) and recalculates the arrays
-    /// they concern (PD-222, PD-224).
-    pub(crate) fn set_blockers(
-        &self,
-        id: &str,
-        owner: &str,
-        sheet: &str,
-        (boxes, tables): (Vec<CellBox>, bool),
-        now: Instant,
-    ) -> Result<Applied, EasyOfficeError> {
-        let Some(handle) = self.checkout(id, owner, now) else {
-            return Ok(Applied::Expired);
-        };
-        let Ok(mut session) = handle.lock() else {
-            lock(&self.inner).sessions.remove(id);
-            return Ok(Applied::Expired);
-        };
-        let set = if tables {
-            session.set_sheet_tables(sheet, boxes)
-        } else {
-            session.set_sheet_merges(sheet, boxes)
-        };
-        match set {
-            Ok(()) => {}
-            Err(RecalcError::Invalid(err)) => return Err(err),
-            Err(RecalcError::OverBudget) => return Ok(Applied::Refused),
-        }
-        let outcome = session.recalculate();
-        let json = recalc_answer(id, &mut session, &[], &outcome);
-        Ok(Applied::Done(json))
-    }
-
     /// Forgets session `id` (it is expired for its page from now on).
     pub(crate) fn forget(&self, id: &str) {
         lock(&self.inner).sessions.remove(id);
@@ -825,6 +793,9 @@ impl EasyOfficeIpcRouter {
     ///   array that would cross one is `#SPILL!` (PD-222).
     /// - `linkTarget` `{session | cells.., sheet, cell, formula}` -> `{target}`, `{error}` or `{none}`: the address a
     ///   `HYPERLINK` formula cell opens (PD-223, see `sheet_link_target_ipc`).
+    /// - `tableColumn` `{table, from, to, tables, formulas, names?}` -> `{rewrites, names}`: the formulas that name a
+    ///   renamed column of a table, written with the new name (no session needed, see `sheet_table_column_ipc`,
+    ///   PD-225).
     /// - `close` `{session}` -> `{closed}`.
     pub(crate) fn handle_sheet_session_action(
         action: &str,
@@ -838,6 +809,7 @@ impl EasyOfficeIpcRouter {
             "locks" => Self::sheet_session_locks(entries, owner),
             "merges" => Self::sheet_session_blockers(entries, owner, false),
             "tables" => Self::sheet_session_blockers(entries, owner, true),
+            "tableColumn" => Self::table_column_rewrites(entries),
             "structure" => Self::sheet_session_structure(entries, owner),
             "names" => Self::sheet_session_names(entries, owner),
             "nameCheck" => Self::sheet_name_check(entries),
@@ -940,29 +912,6 @@ impl EasyOfficeIpcRouter {
             Some(v) => Some(crate::sheet_protect_json::parse_sheet_lock(v)?),
         };
         match registry().set_lock(id, owner, sheet, lock, Instant::now())? {
-            Applied::Done(json) => Ok(json),
-            Applied::Expired => Ok(EXPIRED.to_string()),
-            Applied::Refused => Ok(REFUSED.to_string()),
-        }
-    }
-
-    /// `merges` `{session, sheet, merges}`: `merges` is `["A1:B2", ...]`; the arrays do not cross them (PD-222).
-    /// `tables` `{session, sheet, tables}`: `tables` is `["A1:C5", ...]`, the ranges of the sheet's tables, which
-    /// an array may not be placed in or cross (PD-224).
-    fn sheet_session_blockers(
-        entries: &[(String, StrictJsonValue)],
-        owner: &str,
-        tables: bool,
-    ) -> Result<String, EasyOfficeError> {
-        let id = session_id(entries)?;
-        let sheet = Self::optional_json_str(entries, "sheet")?.unwrap_or("");
-        let boxes =
-            match StrictJsonValue::get_field(entries, if tables { "tables" } else { "merges" }) {
-                None | Some(StrictJsonValue::Null) => Vec::new(),
-                Some(v) if tables => crate::sheet_table_json::parse_table_ranges(v)?,
-                Some(v) => crate::sheet_layout_json::parse_merges(v)?,
-            };
-        match registry().set_blockers(id, owner, sheet, (boxes, tables), Instant::now())? {
             Applied::Done(json) => Ok(json),
             Applied::Expired => Ok(EXPIRED.to_string()),
             Applied::Refused => Ok(REFUSED.to_string()),

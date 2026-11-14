@@ -36,6 +36,7 @@ pub mod ribbon;
 mod ribbon_session;
 mod security_ipc;
 pub mod self_test;
+mod sheet_blockers_ipc;
 mod sheet_filter_ipc;
 mod sheet_filter_json;
 mod sheet_format_ipc;
@@ -67,6 +68,7 @@ mod sheet_sort_ipc;
 mod sheet_structure_ipc;
 #[cfg(test)]
 mod sheet_structure_ipc_tests;
+mod sheet_table_column_ipc;
 mod sheet_table_json;
 mod sheet_view_json;
 mod sheet_view_scripts;
@@ -346,9 +348,17 @@ impl EasyOfficeIpcRouter {
                 sheet.set_spill_merges(merges);
             }
         }
-        for (name, tables) in sheet_table_json::tables_by_sheet(entries)? {
-            if let Some(sheet) = wb.sheet_mut(&name) {
-                sheet.set_spill_tables(tables);
+        for (name, field) in sheet_table_json::tables_by_sheet(entries)? {
+            if wb.sheet(&name).is_none() {
+                continue;
+            }
+            match field.tables {
+                Some(tables) => wb.set_tables(&name, tables)?,
+                None => {
+                    if let Some(sheet) = wb.sheet_mut(&name) {
+                        sheet.set_spill_tables(field.boxes);
+                    }
+                }
             }
         }
         Ok(wb)
