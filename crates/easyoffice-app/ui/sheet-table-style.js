@@ -259,6 +259,15 @@
   const SHADOW_SIDE = [(px, c) => `inset 0 ${px}px 0 0 ${c}`, (px, c) => `inset 0 -${px}px 0 0 ${c}`, (px, c) => `inset ${px}px 0 0 0 ${c}`, (px, c) => `inset -${px}px 0 0 0 ${c}`];
   const cssColor = (rgb) => (rgb === AUTO ? "var(--color-text)" : "#" + rgb);
 
+  // The inset shadows that draw the edges of a cell look (top, bottom, left, right).
+  function shadowsOf(look) {
+    const shadows = [];
+    look.edges.forEach((e, side) => {
+      if (e) shadows.push(SHADOW_SIDE[side](e.px, cssColor(e.color)));
+    });
+    return shadows;
+  }
+
   function clearTd(td) {
     const s = td.style;
     s.removeProperty("--ts-fill");
@@ -292,10 +301,7 @@
       if (look.color && !(look.color === AUTO && !look.fill && !directFill)) fg = look.color;
       else if (look.fill && !directFill) fg = autoTextColor(look.fill);
     }
-    const shadows = [];
-    look.edges.forEach((e, side) => {
-      if (e) shadows.push(SHADOW_SIDE[side](e.px, cssColor(e.color)));
-    });
+    const shadows = shadowsOf(look);
     const sig = [look.fill || "", fg, look.bold ? 1 : 0, look.italic ? 1 : 0, shadows.join(",")].join("|");
     if (td._ts === sig) return;
     td._ts = sig;
@@ -359,6 +365,8 @@
     lookOf,
     paintTd,
     previewCells,
+    shadowsOf,
+    cssColor,
     autoTextColor,
     BUILT_IN,
     DEFAULT_STYLE,

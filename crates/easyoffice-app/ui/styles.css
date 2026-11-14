@@ -500,7 +500,7 @@ select:focus-visible,
 .sheet-grid td.in-range.selected-cell { background: var(--ui-surface); }
 .sheet-grid td.editing { caret-color: auto; cursor: text; user-select: text; text-overflow: clip; text-align: left; }
 /* Table style (PD-230): sheet-table-style.js sets `--ts-fill`, `--ts-fg` and `--ts-shadow`. It lies under the cell's own fill and colour (the block below) and under conditional formats; the grid line inside a filled table cell takes the fill. */
-.sheet-grid td[data-ts-f] { background-color: var(--ts-fill, transparent); border-right-color: var(--ts-fill); border-bottom-color: var(--ts-fill); }
+.sheet-grid td[data-ts-f] { background-color: var(--ts-fill, transparent); border-right-color: var(--ts-fill, transparent); border-bottom-color: var(--ts-fill, transparent); }
 .sheet-grid td[data-ts-f].in-range { background: linear-gradient(var(--table-selection-fill), var(--table-selection-fill)) var(--ts-fill, transparent); }
 .sheet-grid td[data-ts-f].selected-cell, .sheet-grid td[data-ts-f].in-range.selected-cell { background: var(--ts-fill, transparent); }
 .sheet-grid td[data-ts-b] { font-weight: 700; }

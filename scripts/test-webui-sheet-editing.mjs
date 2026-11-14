@@ -480,11 +480,3 @@ test("sheet-grid packRef, COL_NAMES cache, getTdAt, and paintSelectionRange upda
   }
 });
 
-test("adding a table row appends blank cells, not zeros", async () => {
-  const { document, userClick } = await openSheet();
-  const before = document.querySelectorAll("#pane-sheet tbody tr").length;
-  userClick(commandItem(document, "sheet-insert-table"));
-  await flushAsyncTurns();
-  assert.equal(document.querySelectorAll("#pane-sheet tbody tr").length, before + 1);
-  for (const letter of "ABCDEFGH") assert.equal(cell(document, letter + (before + 1)).textContent, "", letter);
-});

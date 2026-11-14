@@ -601,12 +601,12 @@
         case "sheet-data-fn-browser":
           sheetController.commitPreparedFormulaBarEvaluation(preparedEffect?.formulaPrep, null);
           break;
-        case "sheet-insert-table":
-          sheetController.appendSheetRow();
-          break;
         case "sheet-data-sort":
           void sheetController.sortActiveSheetRange();
           setSheetSummary(execRes);
+          break;
+        case "sheet-insert-table":
+          void sheetController.runSheetStructure("table-create");
           break;
         case "sheet-mod-pivot":
           sheetController.openPivotDialog();
@@ -839,7 +839,7 @@
 
     // 대화상자를 여는 명령은 상태 줄을 바꾸지 않는다.
     const SHEET_PAGE_COMMANDS = new Set(["sheet-layout-paper", "sheet-layout-orientation", "sheet-layout-margins"]);
-    const DIALOG_COMMANDS = new Set(["sheet-mod-pivot", "sheet-mod-condfmt", "sheet-insert-link", "sheet-mod-freeze", "pdf-mod-highlight", "doc-mod-toc"]);
+    const DIALOG_COMMANDS = new Set(["sheet-insert-table", "sheet-mod-pivot", "sheet-mod-condfmt", "sheet-insert-link", "sheet-mod-freeze", "pdf-mod-highlight", "doc-mod-toc"]);
 
     function executeTrackedRibbonCommand(cmdId, options = {}) {
       // The highlight command asks for its phrase, kind and color first; the dialog's 확인 runs it again with them.
@@ -886,7 +886,8 @@
         }
         await applyRibbonDomSideEffects(cmdId, execRes, preparedEffect, options);
         // The sort runs on after the command returns: the step keeps the cells as they were, changed or not.
-        if (sheetStep) sheetHistory.commit(preSnapshot, { compact: false, ribbonModule });
+        // The 표 만들기 dialog makes its own step when it is confirmed.
+        if (sheetStep && cmdId !== "sheet-insert-table") sheetHistory.commit(preSnapshot, { compact: false, ribbonModule });
         else commitDeferredUndoSnapshot(preSnapshot);
         sheetController.refreshFocusedSheetCellPendingSnapshot();
         const fb = document.getElementById("status-command-feedback");

@@ -181,17 +181,6 @@
       },
     });
 
-    function appendSheetRow() {
-      const curSheet = getActiveSheetName();
-      if (host.__EASYOFFICE_SHEET_PROTECT__?.guardAction(curSheet, "insertRows") === false) return;
-      const map = snapshotDomSheetCells();
-      const nextCount = getSheetRowCount(curSheet) + 1;
-      sheetRowCounts[curSheet] = nextCount;
-      sheetDataStore[curSheet] = map;
-      grid.renderWindow(true);
-      grid.refreshCells();
-    }
-
     function syncTdIntoMap(map, td) {
       const ref = td.dataset.cell;
       const textVal = grid.readTdValue(td);
@@ -777,6 +766,7 @@
         format.scheduleToolbarSync();
         lookOps?.sync();
         rulesUi?.syncArrow();
+        host.__EASYOFFICE_SHEET_TABLE_BAR__?.sync();
       },
       onFormatKey: (kind) => void format.formatRange(kind).catch(() => {}),
       commitSheetCellEdit,
@@ -948,7 +938,6 @@
       trackSheetAsyncWork,
       drainInFlightSheetWork,
       getSheetRowCount,
-      appendSheetRow,
       snapshotDomSheetCells,
       saveActiveSheetCellsToWorkbook,
       refreshFocusedSheetCellPendingSnapshot,

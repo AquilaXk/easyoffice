@@ -597,7 +597,7 @@ test("failed ribbon async prep (autosum, smart stats, security audit) preserves 
   assert.equal(a9.textContent, "연락처 010-****-****");
 });
 
-test("workspace snapshot SSOT restores per-sheet row counts, doc layout styles, slide title styles, and canvas-stage view state on Undo and Redo", async () => {
+test("workspace snapshot SSOT restores doc layout styles, slide title styles, and canvas-stage view state on Undo and Redo", async () => {
   const { document, sandbox, userClick } = await createWorkspaceHarness({ transformHtml: demoHtml });
 
   const docEditor = document.getElementById("doc-editor");
@@ -639,29 +639,6 @@ test("workspace snapshot SSOT restores per-sheet row counts, doc layout styles, 
   switchModule(document, "SHEET");
   await flushAsyncTurns();
   await flushAsyncTurns();
-
-  assert.equal(document.querySelectorAll("#pane-sheet tbody tr").length, 12);
-  userClick(commandItem(document, "sheet-insert-table"));
-  await flushAsyncTurns();
-  assert.equal(document.querySelectorAll("#pane-sheet tbody tr").length, 13);
-
-  userClick(document.querySelector('.sheet-tab-btn[data-sheet-tab="Sheet2"]'));
-  await flushAsyncTurns();
-  assert.equal(document.querySelectorAll("#pane-sheet tbody tr").length, 12);
-
-  userClick(document.querySelector('.sheet-tab-btn[data-sheet-tab="Sheet1"]'));
-  await flushAsyncTurns();
-  assert.equal(document.querySelectorAll("#pane-sheet tbody tr").length, 13);
-
-  sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
-  await flushAsyncTurns();
-  assert.equal(document.querySelectorAll("#pane-sheet tbody tr").length, 12);
-  assert.equal(document.querySelector('#pane-sheet td[data-cell="A13"]'), null);
-
-  sandbox.dispatchWindowKeydown({ key: "y", ctrlKey: true });
-  await flushAsyncTurns();
-  assert.equal(document.querySelectorAll("#pane-sheet tbody tr").length, 13);
-  assert.notEqual(document.querySelector('#pane-sheet td[data-cell="A13"]'), null);
 
   switchModule(document, "SLIDE");
   await flushAsyncTurns();

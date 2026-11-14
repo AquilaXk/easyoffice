@@ -438,6 +438,18 @@ const WEBUI_ASSET_MARKERS: &[(&str, &str)] = &[
         "__EASYOFFICE_SHEET_TABLE_STYLE__",
     ),
     (
+        include_str!("../ui/sheet-table-ops.js"),
+        "__EASYOFFICE_SHEET_TABLE_OPS__",
+    ),
+    (
+        include_str!("../ui/sheet-table-gallery.js"),
+        "__EASYOFFICE_CREATE_SHEET_TABLE_GALLERY__",
+    ),
+    (
+        include_str!("../ui/sheet-table-ui.js"),
+        "__EASYOFFICE_CREATE_SHEET_TABLE_UI__",
+    ),
+    (
         include_str!("../ui/sheet-filter.js"),
         "__EASYOFFICE_CREATE_SHEET_FILTER__",
     ),

@@ -312,8 +312,8 @@
   // palette). Each entry is dispatched by app.js `handleWorkspaceShortcutKeydown`, except
   // `native` entries (browser editing keys left untouched) and `external` entries (handled by
   // workspace-tools.js). Browser-reserved keys (Ctrl+N/T/W/R, Ctrl+Shift+R/T/J/C/N/I, F5, ...)
-  // must never be listed here, except the two window commands marked `desktopOnly`: they are bound
-  // only inside the desktop shell, which owns its windows (PD-088). `forwardFromEditor` marks the
+  // must never be listed here, except the commands marked `desktopOnly` (new and close window, the table of a
+  // sheet): they are bound only inside the desktop shell, which owns its windows (PD-088). `forwardFromEditor` marks the
   // combos the embedded HWP editor forwards to the shell over the embed port (the editor sends the
   // combo string only, never typed text). `macOnly` binds the combo on macOS alone: the reference
   // app gives PDF export ⌘E through its macOS menu and leaves Ctrl+E to the editor's delete everywhere else.
@@ -336,6 +336,9 @@
     // its own Ctrl+K,H. A text field takes Ctrl+K for itself.
     { keys: "Ctrl+/", action: "palette" },
     { keys: "Ctrl+K", action: "insert-link", ribbon: true, modules: ["DOC", "SHEET", "SLIDE"], notInField: true },
+    // The table of a sheet is made with Ctrl+T (Cmd+T on a Mac) as in the spreadsheet program; a browser keeps the key for a new
+    // tab, so it is bound in the desktop shell only (PD-230).
+    { keys: "Ctrl+T", action: "insert-table", ribbon: true, module: "SHEET", desktopOnly: true, notInField: true },
     // Find and replace as in the reference editor (Ctrl+F, Ctrl+F2). Ctrl+H is left alone: it is the
     // system "hide" key on macOS and the history page in browsers.
     { keys: "Ctrl+F", action: "find" },

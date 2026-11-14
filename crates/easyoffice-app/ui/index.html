@@ -583,6 +583,29 @@
 
           <div id="pane-hwp" class="editor-pane" hidden></div>
           <div id="pane-sheet" class="editor-pane" hidden>
+            <div id="sheet-table-bar" class="eo-doc-style-bar sheet-table-bar" role="toolbar" aria-label="표 디자인 도구줄" hidden>
+              <span class="sb-size-unit sheet-table-bar-tab">표 디자인</span>
+              <div class="sb-field-grid">
+                <label for="sheet-table-name" class="sb-size-unit">표 이름</label>
+                <input id="sheet-table-name" class="sb-select sheet-table-name" type="text" maxlength="255" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="tb-group">
+                <button type="button" class="tb-btn" data-table-act="resize">표 크기 조정</button>
+                <button type="button" class="tb-btn" data-table-act="to-range">범위로 변환</button>
+              </div>
+              <div class="sb-field-grid sheet-table-options" role="group" aria-label="표 스타일 옵션">
+                <label class="dialog-checkbox"><input type="checkbox" data-table-opt="header" /> 머리글 행</label>
+                <label class="dialog-checkbox"><input type="checkbox" data-table-opt="totals" /> 요약 행</label>
+                <label class="dialog-checkbox"><input type="checkbox" data-table-opt="firstColumn" /> 첫 번째 열</label>
+                <label class="dialog-checkbox"><input type="checkbox" data-table-opt="lastColumn" /> 마지막 열</label>
+                <label class="dialog-checkbox"><input type="checkbox" data-table-opt="rowStripes" /> 줄무늬 행</label>
+                <label class="dialog-checkbox"><input type="checkbox" data-table-opt="columnStripes" /> 줄무늬 열</label>
+              </div>
+              <div class="tb-group">
+                <button id="btn-table-style" type="button" class="tb-btn" aria-haspopup="true" aria-expanded="false" aria-controls="sheet-table-gallery">표 스타일 ▾</button>
+                <div id="sheet-table-gallery" class="sheet-table-gallery" role="group" aria-label="표 스타일" hidden></div>
+              </div>
+            </div>
             <div id="sheet-formula-bar" class="formula-bar eo-doc-style-bar" role="toolbar" aria-label="수식 입력줄 도구줄">
               <div class="sb-field-grid sb-formula-field">
                 <span class="sheet-name-box">
@@ -1684,6 +1707,21 @@
       </div>
     </dialog>
 
+    <dialog id="sheet-table-dialog" class="tool-dialog sheet-rule-dialog" aria-labelledby="sheet-table-dialog-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="sheet-table-dialog-title">표 만들기</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><label id="sheet-table-range-label" class="dialog-label" for="sheet-table-range">표에 사용할 데이터</label><input id="sheet-table-range" class="dialog-text-input" type="text" autocomplete="off" spellcheck="false" /></div>
+          <div id="sheet-table-header-row" class="dialog-row"><span class="dialog-label" aria-hidden="true"></span><label class="dialog-checkbox"><input id="sheet-table-header" type="checkbox" /> 내 표에 머리글 포함</label></div>
+          <p id="sheet-table-status" class="dialog-pdf-note" role="status"></p>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-sheet-table-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
     <dialog id="pii-dialog" class="tool-dialog" aria-labelledby="pii-dialog-title">
       <div class="dialog-wrap">
         <div class="dialog-title"><span id="pii-dialog-title">개인정보 스캔/마스킹</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
@@ -1908,6 +1946,9 @@
     <script src="./sheet-layout.js"></script>
     <script src="./sheet-table-presets.js"></script>
     <script src="./sheet-table-style.js"></script>
+    <script src="./sheet-table-ops.js"></script>
+    <script src="./sheet-table-gallery.js"></script>
+    <script src="./sheet-table-ui.js"></script>
     <script src="./sheet-view-state.js"></script>
     <script src="./sheet-protect.js"></script>
     <script src="./sheet-tab-names.js"></script>

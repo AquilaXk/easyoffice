@@ -9,6 +9,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::hwp_bundle;
+use crate::sheet_table_assets;
 use crate::EasyOfficeIpcRouter;
 
 const SERVE_DEV_ONLY_NOTICE: &str = "NOTICE: --serve is a developer/testing mode only, not for end users; install the EasyOffice desktop app instead.\n안내: --serve는 개발·테스트 전용 모드이며 일반 사용자용이 아닙니다. 설치형 EasyOffice 앱을 사용하세요.";
@@ -47,8 +48,6 @@ const SHEET_SORT_JS: &str = include_str!("../ui/sheet-sort.js");
 const SHEET_SORT_UI_JS: &str = include_str!("../ui/sheet-sort-ui.js");
 const SHEET_OPS_JS: &str = include_str!("../ui/sheet-ops.js");
 const SHEET_LAYOUT_JS: &str = include_str!("../ui/sheet-layout.js");
-const SHEET_TABLE_PRESETS_JS: &str = include_str!("../ui/sheet-table-presets.js");
-const SHEET_TABLE_STYLE_JS: &str = include_str!("../ui/sheet-table-style.js");
 const SHEET_FILTER_JS: &str = include_str!("../ui/sheet-filter.js");
 const SHEET_FILTER_UI_JS: &str = include_str!("../ui/sheet-filter-ui.js");
 const SHEET_STRUCTURE_JS: &str = include_str!("../ui/sheet-structure.js");
@@ -702,15 +701,10 @@ fn handle_http_connection(stream: &mut TcpStream, port: u16, ipc_handler: &IpcDi
             "application/javascript; charset=utf-8",
             Cow::Borrowed(SHEET_LAYOUT_JS),
         ),
-        ("GET", "/sheet-table-presets.js") => (
+        ("GET", file) if sheet_table_assets::script(file).is_some() => (
             "200 OK",
             "application/javascript; charset=utf-8",
-            Cow::Borrowed(SHEET_TABLE_PRESETS_JS),
-        ),
-        ("GET", "/sheet-table-style.js") => (
-            "200 OK",
-            "application/javascript; charset=utf-8",
-            Cow::Borrowed(SHEET_TABLE_STYLE_JS),
+            Cow::Borrowed(sheet_table_assets::script(file).unwrap_or_default()),
         ),
         ("GET", "/sheet-filter.js") => (
             "200 OK",

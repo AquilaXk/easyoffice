@@ -91,6 +91,8 @@
         for (const edit of edits) writeEdit(map, edit, curSheet, protectedSheet);
         for (const col of widthCols) grid.applyColWidth(Number(col), widths[col]);
         sheetHistory.commit(change);
+        // A table next to what was written grows over it in a step of its own (PD-230).
+        host.__EASYOFFICE_SHEET_TABLE_BAR__?.expandAfter(curSheet, edits.filter((e) => e.value !== "" || e.formula !== "").map((e) => e.ref));
         grid.renderWindow(false);
         refreshWindowFromModel();
         await recalculateActiveSheetFormulas({ updateFocusedDisplay: true });

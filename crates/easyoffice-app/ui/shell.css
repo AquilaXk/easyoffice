@@ -257,8 +257,8 @@
 /* Thick and double cell edges and the outer edges of the first row and column (sheet-look.js) are inset shadows, so a line's width never moves the cell's text. */
 .sheet-grid td.lk-shadow { box-shadow: var(--lk-shadow, 0 0 0 0 transparent); }
 /* The edges of a table style (sheet-table-style.js) are inset shadows too, under the cell's own edges. */
-.sheet-grid td.ts-shadow { box-shadow: var(--ts-shadow); }
-.sheet-grid td.ts-shadow.lk-shadow { box-shadow: var(--lk-shadow, 0 0 0 0 transparent), var(--ts-shadow); }
+.sheet-grid td.ts-shadow { box-shadow: var(--ts-shadow, none); }
+.sheet-grid td.ts-shadow.lk-shadow { box-shadow: var(--lk-shadow, 0 0 0 0 transparent), var(--ts-shadow, none); }
 /* The arrow of a list cell is the combo box's arrow cell (`toolbar.css` `.custom-select-arrow`): no box, a 1px left divider, the `▾` letter at 8px in the muted color, 15px wide and as tall as the cell, at the cell's right end. Hover and the open menu take the combo's hover fill. */
 .cf-dropdown-btn { position: fixed; z-index: 30; display: inline-flex; align-items: center; justify-content: center; width: 15px; padding: 0; border: 0; border-left: 1px solid var(--color-border-light); border-radius: 0; background: var(--color-surface); color: var(--color-text-muted); font: inherit; font-size: 8px; line-height: 1; cursor: default; }
 .cf-dropdown-btn:hover, .cf-dropdown-btn[aria-expanded="true"] { background: var(--color-hover-bg); }
@@ -441,3 +441,24 @@
 .sheet-name-box-list li > span:last-child { margin-left: auto; overflow: hidden; text-overflow: ellipsis; color: var(--color-text-muted); }
 .sheet-name-box-list li:hover { background: var(--color-accent-bg); }
 .sheet-name-box-list li[data-manage] { border-top: 1px solid var(--color-border-light); }
+/* Table (sheet-table-ui.js, PD-230): the 표 만들기 dialog takes the sort dialog's label column; the 표 디자인 bar is a style bar (the name box, the buttons, the option checkboxes, the gallery button) that shows while the active cell is in a table. */
+#sheet-table-dialog { width: min(440px, calc(100vw - 32px)); }
+#sheet-table-dialog .dialog-label { width: 112px; min-width: 112px; flex-shrink: 0; }
+#sheet-table-dialog .dialog-text-input { flex: 1; min-width: 0; }
+.sheet-table-bar { margin: 0 0 4px; padding: 0 8px; overflow-x: auto; scrollbar-width: none; }
+.sheet-table-bar[hidden] { display: none; }
+.sheet-table-bar-tab { flex-shrink: 0; padding-right: 6px; font-weight: 700; color: var(--accent-strong); }
+.sheet-table-name { width: 120px; }
+.sheet-table-options { gap: 10px; }
+.sheet-table-options .dialog-checkbox { font-size: var(--font-size-sm); white-space: nowrap; }
+.sheet-table-options input[type="checkbox"] { margin: 0; accent-color: var(--color-primary); }
+.sheet-table-bar .tb-btn[aria-expanded="true"] { background: var(--ui-hover-strong); }
+.sheet-table-gallery { position: fixed; inset: auto; margin: 0; padding: 4px 6px 4px; z-index: 300; width: max-content; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow-y: auto; color: var(--color-text); background: var(--color-surface-raised); border: 1px solid var(--ui-border-strong); box-shadow: var(--shadow-light); }
+.sheet-table-gallery:not([hidden]) { display: block; }
+.sheet-table-gallery-title { padding: 2px 0; color: var(--color-text-secondary); font-size: var(--font-size-sm); }
+.sheet-table-gallery-row { gap: 4px; margin-bottom: 4px; }
+.sheet-table-swatch { display: grid; grid-template-columns: repeat(5, 1fr); grid-template-rows: repeat(5, 1fr); width: 54px; height: 44px; padding: 1px; background: var(--color-surface); outline: 1px solid var(--ui-border-strong); outline-offset: 0; }
+.sheet-table-swatch:hover { outline-color: var(--color-text); }
+.sheet-table-swatch.selected { outline: 2px solid var(--accent-strong); }
+.sheet-table-swatch-cell { display: flex; align-items: center; justify-content: center; min-width: 0; min-height: 0; }
+.sheet-table-swatch-text { width: 70%; height: 2px; opacity: 0.7; }

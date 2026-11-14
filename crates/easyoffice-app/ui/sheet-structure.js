@@ -75,6 +75,14 @@
     // The name box and the defined names dialogs (PD-214).
     const namesUi = host.__EASYOFFICE_CREATE_SHEET_NAMES_UI__({ ...deps, kit: host.__EASYOFFICE_CREATE_SHEET_DIALOG_KIT__(document) });
 
+    // The tables: 표 만들기, the 표 디자인 bar and the growth of a table over what is typed (PD-230).
+    const tableUi = host.__EASYOFFICE_CREATE_SHEET_TABLE_UI__({
+      ...deps,
+      kit: host.__EASYOFFICE_CREATE_SHEET_DIALOG_KIT__(document),
+      editAxis: (...args) => editAxis(...args),
+      filter,
+    });
+
     // The hyperlink dialog and the click on a link cell (PD-218).
     const linkUi = host.__EASYOFFICE_CREATE_SHEET_LINK_UI__(deps);
 
@@ -203,7 +211,8 @@
       return true;
     }
 
-    function editAxis(axis, op, at, count) {
+    // `inStep(sheet)` runs in the step after the answer is applied, so a command that opens a row for its own cells is one undo step.
+    function editAxis(axis, op, at, count, inStep) {
       const unit = axis === "row" ? "행" : "열";
       const limit = axis === "row" ? MAX_ROWS_PER_EDIT : MAX_COLS_PER_EDIT;
       if (count > limit) {
@@ -229,6 +238,7 @@
         applyAnswer(name, edit, result.answer);
         // The rebuilt session placed every array again: the cells they fill are taken from it (PD-217).
         if (Array.isArray(result.answer.spillAreas)) host.__EASYOFFICE_SHEET_SPILL__?.replaceAll(sheetDataStore, result.answer.spillAreas);
+        inStep?.(name);
         sheetHistory.commit(change);
         grid.layoutChanged();
         refreshWindowFromModel();
@@ -380,6 +390,7 @@
       ...protectUi.actions,
       ...rangesUi.actions,
       ...linkUi.actions,
+      ...tableUi.actions,
       "tab-add": () => tabs.insert(null),
       ...tabs.actions,
       "sort-dialog": () => Promise.resolve(sortUi.open()),
@@ -512,6 +523,7 @@
       protectUi.bind();
       rangesUi.bind();
       linkUi.bind();
+      tableUi.bind();
       const viewport = document.getElementById("sheet-viewport");
       viewport?.addEventListener("dblclick", onDblClick);
       viewport?.addEventListener("contextmenu", onContextMenu);
@@ -541,9 +553,17 @@
       protectUi.refreshMenu();
       filterUi.refreshMenu();
       outlineUi.render();
+      tableUi.sync();
     }
 
-    return { run, bind, closeMenu, refreshSheetChrome, openHyperlink: () => linkUi.open(), autoLink: linkUi.autoLink };
+    // The text of a cell was typed: it may become a link, and a table next to it grows over it.
+    function autoLink(sheet, ref, replace) {
+      const linked = linkUi.autoLink(sheet, ref, replace);
+      void tableUi.expandAfter(sheet, [ref]);
+      return linked;
+    }
+
+    return { run, bind, closeMenu, refreshSheetChrome, openHyperlink: () => linkUi.open(), autoLink, expandAfter: tableUi.expandAfter };
   }
 
   host.__EASYOFFICE_CREATE_SHEET_STRUCTURE__ = createSheetStructure;
