@@ -42,6 +42,7 @@ mod sheet_format_ipc;
 #[cfg(test)]
 mod sheet_ipc_tests;
 mod sheet_layout_json;
+mod sheet_link_target_ipc;
 #[cfg(test)]
 mod sheet_links_ipc_tests;
 mod sheet_links_json;

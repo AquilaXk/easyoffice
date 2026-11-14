@@ -275,6 +275,36 @@ impl SheetEngine {
         })
     }
 
+    /// The address a formula whose result is a `HYPERLINK` call opens (PD-223): its first argument evaluated on
+    /// this sheet, under the rules of the function (a target the editors would open, or a `#` jump inside the
+    /// workbook). `None` when the formula is not such a call; the error the function itself would give otherwise.
+    pub(crate) fn hyperlink_address_ctx(
+        &self,
+        formula: &str,
+        ctx: &mut EvalContext<'_>,
+    ) -> Option<Result<String, FormulaError>> {
+        let trimmed = formula.trim();
+        let body = crate::parser::strip_formula_prefix(trimmed)
+            .or_else(|| crate::parser::strip_open_formula_prefix(trimmed))?;
+        let Some(Ok(Expr::FuncCall { name, args })) = self.compile_formula(body.trim()).entry
+        else {
+            return None;
+        };
+        if name != "HYPERLINK" || check_lookup_arity(&args, 1, 2).is_err() {
+            return None;
+        }
+        let target = match self.eval_arg_val(&args[0], ctx, 0) {
+            Ok(value) => value.to_display_string(),
+            Err(e) => return Some(Err(e)),
+        };
+        let allowed = safe_link_target(&target).is_some() || is_internal_link_target(&target);
+        Some(if allowed {
+            Ok(target)
+        } else {
+            Err(FormulaError::Value)
+        })
+    }
+
     /// `FORMULATEXT(ref)` (`as_text`) or `ISFORMULA(ref)` on the first cell of the reference.
     fn lookup_formula_cell(
         &self,

@@ -387,6 +387,20 @@ impl WorkbookEngine {
         self.evaluate_formula_on_sheet_at(sheet_name, None, formula)
     }
 
+    /// The address of a `HYPERLINK` formula of a cell of `sheet_name` (see `SheetEngine::hyperlink_address_ctx`):
+    /// `None` when the formula is not a `HYPERLINK` call or the sheet is not in the workbook.
+    pub fn hyperlink_address_at(
+        &self,
+        sheet_name: &str,
+        anchor: Option<PackedCellCoordinate>,
+        formula: &str,
+    ) -> Option<Result<String, FormulaError>> {
+        let sheet = self.sheet(sheet_name)?;
+        let mut ctx = EvalContext::with_workbook(self, sheet.resolved_sheet_id());
+        ctx.current_coord = anchor;
+        sheet.hyperlink_address_ctx(formula, &mut ctx)
+    }
+
     pub fn evaluate_formula_on_sheet_at(
         &self,
         sheet_name: &str,

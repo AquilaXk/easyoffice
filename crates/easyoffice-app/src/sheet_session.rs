@@ -817,6 +817,8 @@ impl EasyOfficeIpcRouter {
     ///   session needed, see `sheet_protect_ipc`, PD-216).
     /// - `merges` `{session, sheet, merges}` -> the recalculation answer: `merges` is `["A1:B2", ...]` and an
     ///   array that would cross one is `#SPILL!` (PD-222).
+    /// - `linkTarget` `{session | cells.., sheet, cell, formula}` -> `{target}`, `{error}` or `{none}`: the address a
+    ///   `HYPERLINK` formula cell opens (PD-223, see `sheet_link_target_ipc`).
     /// - `close` `{session}` -> `{closed}`.
     pub(crate) fn handle_sheet_session_action(
         action: &str,
@@ -833,6 +835,7 @@ impl EasyOfficeIpcRouter {
             "names" => Self::sheet_session_names(entries, owner),
             "nameCheck" => Self::sheet_name_check(entries),
             "nameValues" => Self::sheet_session_name_values(entries, owner),
+            "linkTarget" => Self::sheet_link_target(entries, owner),
             "sheetRefs" => Self::sheet_session_sheet_refs(entries, owner),
             "validate" => Self::sheet_session_validate(entries, owner),
             "pivot" => Self::sheet_pivot(entries),
