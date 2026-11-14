@@ -73,11 +73,19 @@
   // The address a typed text becomes under the AutoCorrect rule of the spreadsheet programs, "Internet and network paths with
   // hyperlinks" (PD-223): the whole text is one word that starts with http://, https:// or mailto:, or with www. and holds a
   // dot after it (the address then starts with http://). Null for any other text, and for an address the policy refuses.
-  const AUTO_ADDRESS_RE = /^(?:(?:https?:\/\/|mailto:)\S+|www\.[^\s.]\S*\.\S+)$/i;
+  // The checks are plain scans (no backtracking pattern) over a text of at most the address length.
+  const MAX_ADDRESS_CHARS = 2048;
+  const AUTO_SCHEME_RE = /^(?:https?:\/\/|mailto:)/i;
+  const AUTO_WHITESPACE_RE = /\s/;
   function autoTarget(text) {
     const typed = String(text ?? "").trim();
-    if (!AUTO_ADDRESS_RE.test(typed)) return null;
-    return normalizeTarget(/^www\./i.test(typed) ? "http://" + typed : typed);
+    if (typed.length > MAX_ADDRESS_CHARS || AUTO_WHITESPACE_RE.test(typed)) return null;
+    const scheme = AUTO_SCHEME_RE.exec(typed);
+    if (scheme) return typed.length > scheme[0].length ? normalizeTarget(typed) : null;
+    if (typed.slice(0, 4).toLowerCase() !== "www.") return null;
+    const rest = typed.slice(4);
+    const dot = rest.indexOf(".", 1);
+    return rest[0] !== "." && dot > 0 && dot < rest.length - 1 ? normalizeTarget("http://" + typed) : null;
   }
 
   // A cell with a hyperlink shows as a link and says where it goes: the screen tip, else the address. A cell whose

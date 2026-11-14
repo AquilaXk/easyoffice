@@ -541,11 +541,12 @@
           cell: targetCellRef,
         })
       );
-      return { epoch, targetSheet, targetCellRef, evaluated };
+      const textChanged = rawFormula !== (prevCell?.formula || prevCell?.value || "").trim();
+      return { epoch, targetSheet, targetCellRef, evaluated, textChanged };
     }
 
     function commitPreparedFormulaBarEvaluation(prep, change = null) {
-      if (prep?.epoch !== sheetSnapshotEpoch) return;
+      if (prep?.epoch !== sheetSnapshotEpoch) return false;
       const out = document.getElementById("sheet-eval-result");
       if (change) sheetHistory.commit(change, { compact: false });
       replaceLiveSheetDataStore(prep.evaluated.sheets);
@@ -556,6 +557,7 @@
         out.textContent = "결과 (" + prep.targetCellRef + "): " + prep.evaluated.extraValue;
         updateSheetSelectionAndAggregates(getActiveSheetCellRef() || prep.targetCellRef);
       }
+      return true;
     }
 
     // The formula bar writes its text into the active cell, so a locked cell of a protected sheet refuses it
@@ -575,8 +577,8 @@
         await drainInFlightSheetWork();
         const change = recordUndo ? sheetHistory.begin({ refs: [getActiveSheetCellRef()] }) : null;
         const prep = await prepareFormulaBarEvaluation();
-        commitPreparedFormulaBarEvaluation(prep, change);
-        if (recordUndo) structure.autoLink(getActiveSheetName(), getActiveSheetCellRef(), false);
+        const committed = commitPreparedFormulaBarEvaluation(prep, change);
+        if (recordUndo && committed && prep.textChanged) structure.autoLink(prep.targetSheet, prep.targetCellRef, false);
       };
       if (recordUndo) {
         return enqueueWorkspaceHistoryOp(drainThenRun);

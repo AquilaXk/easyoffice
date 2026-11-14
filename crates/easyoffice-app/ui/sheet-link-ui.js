@@ -143,7 +143,8 @@
       if (target === null || (entry.link && (!replace || entry.link.target === target))) return false;
       const guard = host.__EASYOFFICE_SHEET_PROTECT__;
       const link = links.make(target, "");
-      if (!link || (guard && !guard.allows(sheet, "insertHyperlinks"))) return false;
+      const at = gridUtils.parseRef(ref);
+      if (!link || !at || (guard && !(guard.allows(sheet, "insertHyperlinks") && guard.cellEditable(sheet, at.row, at.col, entry.style)))) return false;
       const change = sheetHistory.begin({ sheet, refs: [ref], sync: false });
       const next = { ...entry, link };
       sheetDataStore[sheet][ref] = next;

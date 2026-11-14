@@ -727,3 +727,35 @@ test("the link menu on a protected sheet is held back by the lock and the flag: 
   assert.equal(td.dataset.link, "external", "a locked cell keeps its link");
   assert.equal(t.byId("sheet-protect-alert-dialog").open, true);
 });
+
+test("the formula bar makes no automatic link on a locked cell or from an unchanged text, and a long text is not scanned for long", async () => {
+  const t = await open();
+  const flags = t.host.__EASYOFFICE_SHEET_PROTECT__.FLAG_NAMES.filter((f) => f !== "insertHyperlinks" && f !== "selectLockedCells");
+  const book = PROTECTED_BOOK(flags);
+  book.sheets[0].cells = [{ ref: "A2", raw: "https://example.com/open" }, { ref: "A3", raw: "https://example.com/locked" }];
+  await pickFile(t.document, makeFixtureFile("보호4.xlsx", book));
+  await flushAsyncTurns(20);
+  const enter = async () => {
+    const bar = t.byId("formula-input");
+    bar.dispatchEvent({ type: "keydown", key: "Enter", target: bar });
+    await flushAsyncTurns(30);
+  };
+  await t.select("A3");
+  await enter();
+  assert.equal(t.cell("A3").dataset.link, undefined, "a locked cell takes no link from the bar");
+  assert.equal(t.byId("sheet-protect-alert-dialog").open, true, "the protection alert is the only effect");
+  t.byId("sheet-protect-alert-dialog").close();
+  await t.select("A2");
+  await enter();
+  assert.equal(t.cell("A2").dataset.link, undefined, "Enter on an unchanged plain address makes no link");
+  const bar = t.byId("formula-input");
+  bar.value = "https://example.com/changed";
+  bar.dispatchEvent({ type: "input", target: bar });
+  await enter();
+  assert.equal(t.cell("A2").dataset.link, "external", "a changed text does");
+  const start = Date.now();
+  for (const text of ["www." + "a".repeat(32000), "www.a" + ".".repeat(32000), "https://" + "x".repeat(32000), "w".repeat(32000) + " "]) {
+    assert.equal(t.links.autoTarget(text), null);
+  }
+  assert.ok(Date.now() - start < 200, "linear scans: " + (Date.now() - start) + " ms");
+});
