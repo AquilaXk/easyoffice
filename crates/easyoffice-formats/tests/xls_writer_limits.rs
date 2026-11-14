@@ -178,3 +178,22 @@ fn document_text_starting_with_equals_is_stored_as_text_not_as_a_formula() {
     assert_eq!(cells[0].2, "=1+2");
     assert_eq!(cells[1].2, "=== 제목 ===");
 }
+
+/// Text of a shared string that runs over several records is cut between characters, never inside
+/// a surrogate pair: the reader decodes the characters of one record on their own.
+#[test]
+fn a_long_string_is_not_cut_inside_a_surrogate_pair() {
+    for pad in 0..4 {
+        let text = format!("{}{}", "a".repeat(pad), "🎉".repeat(6_000));
+        let other = format!("{}{}", "b".repeat(pad), "😀".repeat(5_000));
+        let payload = LegacyXlsPayload {
+            sheet_name: "S".to_string(),
+            cells: vec![(0, 0, text.clone()), (1, 0, other.clone())],
+        };
+        let xls = LegacyOle2Codec::pack_xls_multi_values(&[payload]).unwrap();
+        let back =
+            LegacyOle2Codec::unpack_xls_multi(&xls).unwrap_or_else(|e| panic!("pad {pad}: {e:?}"));
+        let cells: Vec<&str> = back[0].cells.iter().map(|c| c.2.as_str()).collect();
+        assert_eq!(cells, [text.as_str(), other.as_str()], "pad {pad}");
+    }
+}

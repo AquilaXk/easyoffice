@@ -225,15 +225,21 @@ impl LegacyOle2Codec {
             current_buf.push(0x01); // UTF-16LE
             let mut unit_idx = 0usize;
             while unit_idx < units.len() {
-                let avail_bytes = max_rec.saturating_sub(current_buf.len());
-                let avail_units = avail_bytes / 2;
-                if avail_units == 0 {
+                let avail_units = max_rec.saturating_sub(current_buf.len()) / 2;
+                let mut take = avail_units.min(units.len() - unit_idx);
+                // A record ends between characters: a surrogate pair does not straddle two records.
+                if unit_idx + take < units.len()
+                    && take > 0
+                    && (0xD800..0xDC00).contains(&units[unit_idx + take - 1])
+                {
+                    take -= 1;
+                }
+                if take == 0 {
                     flush_record(stream, current_opcode, &mut current_buf);
                     current_opcode = Self::BIFF8_CONTINUE;
                     current_buf.push(0x01); // continuation grbit = UTF-16LE
                     continue;
                 }
-                let take = avail_units.min(units.len() - unit_idx);
                 for &u in &units[unit_idx..unit_idx + take] {
                     current_buf.extend_from_slice(&u.to_le_bytes());
                 }
