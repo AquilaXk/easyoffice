@@ -35,6 +35,9 @@ impl Clone for WorkbookEngine {
     }
 }
 
+/// Maximum sheets one workbook holds (matches XLSX format cap and keeps sheet indices within `u16`).
+pub const MAX_WORKBOOK_SHEETS: usize = 1_024;
+
 /// Cells of a range a name's value shows in the 이름 관리 list.
 pub const NAME_VALUE_CELLS: usize = 24;
 
@@ -328,7 +331,10 @@ impl WorkbookEngine {
             .position(|s| s.name.eq_ignore_ascii_case(name))
     }
 
-    pub fn add_sheet(&mut self, name: impl Into<String>) -> &mut SheetEngine {
+    pub fn try_add_sheet(
+        &mut self,
+        name: impl Into<String>,
+    ) -> Result<&mut SheetEngine, EasyOfficeError> {
         let raw = name.into();
         let norm = if raw.trim().is_empty() {
             "Sheet1"
@@ -336,15 +342,29 @@ impl WorkbookEngine {
             raw.as_str()
         };
         if let Some(pos) = self.find_sheet_index(norm) {
-            return &mut self.sheets[pos];
+            return Ok(&mut self.sheets[pos]);
+        }
+        if self.sheets.len() >= MAX_WORKBOOK_SHEETS || u16::try_from(self.sheets.len()).is_err() {
+            return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+                "워크북은 최대 {MAX_WORKBOOK_SHEETS}개 시트까지만 지원합니다."
+            )));
         }
         let mut engine = SheetEngine::new(norm);
-        while engine.sheet_id == 0 || self.sheets.iter().any(|s| s.sheet_id == engine.sheet_id) {
-            engine.sheet_id = engine.sheet_id.wrapping_add(1);
-            if engine.sheet_id == 0 {
-                engine.sheet_id = 1;
+        let start_id = if engine.sheet_id == 0 {
+            1
+        } else {
+            engine.sheet_id
+        };
+        let mut candidate = start_id;
+        while self.sheets.iter().any(|s| s.sheet_id == candidate) {
+            candidate = candidate.checked_add(1).unwrap_or(1);
+            if candidate == start_id {
+                return Err(EasyOfficeError::ResourceBudgetExceeded(
+                    "워크북 시트 식별자 공간이 가득 찼습니다.".to_string(),
+                ));
             }
         }
+        engine.sheet_id = candidate;
         engine.has_workbook_assigned_id = true;
         engine.names = Arc::clone(&self.names);
         engine.tables = Arc::clone(&self.tables);
@@ -355,7 +375,11 @@ impl WorkbookEngine {
             let defs = self.names.definitions().to_vec();
             self.set_names_lenient(&defs);
         }
-        self.sheets.last_mut().unwrap()
+        Ok(self.sheets.last_mut().unwrap())
+    }
+
+    pub fn add_sheet(&mut self, name: impl Into<String>) -> &mut SheetEngine {
+        self.try_add_sheet(name).unwrap_or_else(|e| panic!("{e}"))
     }
 
     pub fn sheet(&self, name: &str) -> Option<&SheetEngine> {

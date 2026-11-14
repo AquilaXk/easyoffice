@@ -18,7 +18,9 @@
 
 use super::id_set::IdSet;
 use super::interval::IntervalIndex;
-use crate::{CellRange, Expr, FastMap, PackedCellCoordinate, PackedWorkbookCoord, WorkbookEngine};
+use crate::{
+    CellRange, DetSet, Expr, FastMap, PackedCellCoordinate, PackedWorkbookCoord, WorkbookEngine,
+};
 
 /// Packed `(sheet index, row, col)`.
 pub(crate) type CellKey = u64;
@@ -92,8 +94,7 @@ pub(crate) fn collect_refs(
     out.clear();
     let mut volatile = false;
     let mut stack: Vec<&Expr> = vec![ast];
-    let mut seen_shared: std::collections::HashSet<*const crate::SharedExpr> =
-        std::collections::HashSet::new();
+    let mut seen_shared: DetSet<*const crate::SharedExpr> = DetSet::default();
     let resolve = |name: &str| {
         wb.find_sheet_index(name)
             .and_then(|idx| u16::try_from(idx).ok())
@@ -293,61 +294,45 @@ fn sheet_ranges(sheets: &mut Vec<SheetRanges>, sheet: u16) -> &mut SheetRanges {
 }
 
 impl RangeDeps {
-    fn add(&mut self, sheet: u16, rect: (u32, u32, u32, u32), dependent: u32) {
+    fn ensure_entry(&mut self, sheet: u16, rect: (u32, u32, u32, u32)) -> u32 {
         let (r0, r1, c0, c1) = rect;
         let key = RectKey::new(sheet, r0, r1, c0, c1);
-        let id = match self.by_rect.get(&key) {
-            Some(&id) => id,
-            None => {
-                let entry = RangeEntry {
-                    c0,
-                    c1,
-                    deps: Dependents::default(),
-                };
-                let id = match self.free.pop() {
-                    Some(id) => {
-                        self.entries[id as usize] = Some(entry);
-                        id
-                    }
-                    None => {
-                        self.entries.push(Some(entry));
-                        (self.entries.len() - 1) as u32
-                    }
-                };
-                self.by_rect.insert(key, id);
-                let ranges = sheet_ranges(&mut self.sheets, sheet);
-                if c1 - c0 < NARROW_MAX_WIDTH {
-                    for col in c0..=c1 {
-                        let before = ranges.narrow.len();
-                        ranges.narrow.entry(col).or_default().insert(r0, r1, id);
-                        self.containers += ranges.narrow.len() - before;
-                        self.slots += 1;
-                    }
-                } else {
-                    ranges.wide.insert(r0, r1, id);
-                    self.slots += 1;
-                }
+        if let Some(&id) = self.by_rect.get(&key) {
+            return id;
+        }
+        let entry = RangeEntry {
+            c0,
+            c1,
+            deps: Dependents::default(),
+        };
+        let id = match self.free.pop() {
+            Some(id) => {
+                self.entries[id as usize] = Some(entry);
                 id
             }
+            None => {
+                self.entries.push(Some(entry));
+                (self.entries.len() - 1) as u32
+            }
         };
-        if let Some(entry) = self.entries[id as usize].as_mut() {
-            self.edges += usize::from(entry.deps.insert(dependent));
+        self.by_rect.insert(key, id);
+        let ranges = sheet_ranges(&mut self.sheets, sheet);
+        if c1 - c0 < NARROW_MAX_WIDTH {
+            for col in c0..=c1 {
+                let before = ranges.narrow.len();
+                ranges.narrow.entry(col).or_default().insert(r0, r1, id);
+                self.containers += ranges.narrow.len() - before;
+                self.slots += 1;
+            }
+        } else {
+            ranges.wide.insert(r0, r1, id);
+            self.slots += 1;
         }
+        id
     }
 
-    fn remove(&mut self, sheet: u16, rect: (u32, u32, u32, u32), dependent: u32) {
+    fn retire_entry(&mut self, sheet: u16, key: RectKey, rect: (u32, u32, u32, u32), id: u32) {
         let (r0, r1, c0, c1) = rect;
-        let key = RectKey::new(sheet, r0, r1, c0, c1);
-        let Some(&id) = self.by_rect.get(&key) else {
-            return;
-        };
-        let Some(entry) = self.entries[id as usize].as_mut() else {
-            return;
-        };
-        self.edges -= usize::from(entry.deps.remove(dependent));
-        if !entry.deps.is_empty() {
-            return;
-        }
         self.entries[id as usize] = None;
         self.free.push(id);
         self.by_rect.remove(&key);
@@ -366,6 +351,56 @@ impl RangeDeps {
         } else {
             ranges.wide.remove(r0, r1, id);
             self.slots -= 1;
+        }
+    }
+
+    fn add(&mut self, sheet: u16, rect: (u32, u32, u32, u32), dependent: u32) {
+        let id = self.ensure_entry(sheet, rect);
+        if let Some(entry) = self.entries[id as usize].as_mut() {
+            self.edges += usize::from(entry.deps.insert(dependent));
+        }
+    }
+
+    fn add_sorted(&mut self, sheet: u16, rect: (u32, u32, u32, u32), dependents: &[u32]) {
+        if dependents.is_empty() {
+            return;
+        }
+        let id = self.ensure_entry(sheet, rect);
+        if let Some(entry) = self.entries[id as usize].as_mut() {
+            self.edges += entry.deps.insert_sorted(dependents);
+        }
+    }
+
+    fn remove(&mut self, sheet: u16, rect: (u32, u32, u32, u32), dependent: u32) {
+        let (r0, r1, c0, c1) = rect;
+        let key = RectKey::new(sheet, r0, r1, c0, c1);
+        let Some(&id) = self.by_rect.get(&key) else {
+            return;
+        };
+        let Some(entry) = self.entries[id as usize].as_mut() else {
+            return;
+        };
+        self.edges -= usize::from(entry.deps.remove(dependent));
+        if entry.deps.is_empty() {
+            self.retire_entry(sheet, key, rect, id);
+        }
+    }
+
+    fn remove_sorted(&mut self, sheet: u16, rect: (u32, u32, u32, u32), dependents: &[u32]) {
+        if dependents.is_empty() {
+            return;
+        }
+        let (r0, r1, c0, c1) = rect;
+        let key = RectKey::new(sheet, r0, r1, c0, c1);
+        let Some(&id) = self.by_rect.get(&key) else {
+            return;
+        };
+        let Some(entry) = self.entries[id as usize].as_mut() else {
+            return;
+        };
+        self.edges -= entry.deps.remove_sorted(dependents);
+        if entry.deps.is_empty() {
+            self.retire_entry(sheet, key, rect, id);
         }
     }
 
@@ -531,10 +566,11 @@ impl DepGraph {
         pairs.sort_unstable();
         let mut ids: Vec<u32> = Vec::new();
         for group in pairs.chunk_by(|a, b| a.0 == b.0) {
+            ids.clear();
+            ids.extend(group.iter().map(|&(_, v)| v));
+            ids.dedup();
             match group[0].0 {
                 Ref::Cell { sheet, coord } => {
-                    ids.clear();
-                    ids.extend(group.iter().map(|&(_, v)| v));
                     let deps = self.cell_deps.entry(cell_key(sheet, coord)).or_default();
                     self.cell_edges += deps.insert_sorted(&ids);
                 }
@@ -545,9 +581,7 @@ impl DepGraph {
                     c0,
                     c1,
                 } => {
-                    for &(_, v) in group {
-                        self.ranges.add(sheet, (r0, r1, c0, c1), v);
-                    }
+                    self.ranges.add_sorted(sheet, (r0, r1, c0, c1), &ids);
                 }
             }
         }
@@ -558,11 +592,12 @@ impl DepGraph {
         pairs.sort_unstable();
         let mut ids: Vec<u32> = Vec::new();
         for group in pairs.chunk_by(|a, b| a.0 == b.0) {
+            ids.clear();
+            ids.extend(group.iter().map(|&(_, v)| v));
+            ids.dedup();
             match group[0].0 {
                 Ref::Cell { sheet, coord } => {
                     let key = cell_key(sheet, coord);
-                    ids.clear();
-                    ids.extend(group.iter().map(|&(_, v)| v));
                     if let Some(deps) = self.cell_deps.get_mut(&key) {
                         self.cell_edges -= deps.remove_sorted(&ids);
                         if deps.is_empty() {
@@ -577,9 +612,7 @@ impl DepGraph {
                     c0,
                     c1,
                 } => {
-                    for &(_, v) in group {
-                        self.ranges.remove(sheet, (r0, r1, c0, c1), v);
-                    }
+                    self.ranges.remove_sorted(sheet, (r0, r1, c0, c1), &ids);
                 }
             }
         }
@@ -654,5 +687,252 @@ impl DepGraph {
                 }
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::recalc::{CellChange, RecalcSession};
+    use std::time::Instant;
+
+    #[test]
+    fn unregister_batch_matches_single_unregister_for_cells_and_rects() {
+        let a1 = PackedCellCoordinate::parse_a1("A1").unwrap();
+        let rect = Ref::Rect {
+            sheet: 0,
+            r0: 0,
+            r1: 99,
+            c0: 0,
+            c1: 0,
+        };
+        let cell_ref = Ref::Cell {
+            sheet: 0,
+            coord: a1,
+        };
+
+        let mut g_single = DepGraph::default();
+        let mut g_batch = DepGraph::default();
+        for r in 0..40u32 {
+            let coord = PackedCellCoordinate::new(r, 1).unwrap();
+            let v1 = g_single.add_vertex(0, coord);
+            let v2 = g_batch.add_vertex(0, coord);
+            assert_eq!(v1, v2);
+            g_single.register(v1, &[cell_ref, rect]);
+            g_batch.register(v2, &[cell_ref, rect]);
+        }
+
+        // Unregister vertices 0..30 via single vs batch, leaving 30..40 intact.
+        let mut pairs = Vec::new();
+        for r in 0..30u32 {
+            let coord = PackedCellCoordinate::new(r, 1).unwrap();
+            let v = g_single.vertex_at(0, coord).unwrap();
+            g_single.unregister(v, &[cell_ref, rect]);
+            g_single.remove_vertex(v);
+            pairs.push((cell_ref, v));
+            pairs.push((rect, v));
+        }
+        g_batch.unregister_batch(&mut pairs);
+        for r in 0..30u32 {
+            let coord = PackedCellCoordinate::new(r, 1).unwrap();
+            let v = g_batch.vertex_at(0, coord).unwrap();
+            g_batch.remove_vertex(v);
+        }
+
+        assert_eq!(g_batch.edge_count(), g_single.edge_count());
+        assert_eq!(g_batch.range_count(), g_single.range_count());
+        let mut dirty_s = IdSet::default();
+        let mut dirty_b = IdSet::default();
+        g_single.mark_dependents(&[(0, a1)], &mut dirty_s);
+        g_batch.mark_dependents(&[(0, a1)], &mut dirty_b);
+        let mut rem_s = Vec::new();
+        let mut rem_b = Vec::new();
+        dirty_s.for_each(|v| rem_s.push(v));
+        dirty_b.for_each(|v| rem_b.push(v));
+        assert_eq!(rem_s, rem_b);
+        assert_eq!(rem_b.len(), 10);
+
+        // Unregistering remaining 10 empties range and cell edge counts cleanly.
+        let mut rest = Vec::new();
+        for r in 30..40u32 {
+            let coord = PackedCellCoordinate::new(r, 1).unwrap();
+            let v_s = g_single.vertex_at(0, coord).unwrap();
+            g_single.unregister(v_s, &[cell_ref, rect]);
+            let v = g_batch.vertex_at(0, coord).unwrap();
+            rest.push((cell_ref, v));
+            rest.push((rect, v));
+        }
+        g_batch.unregister_batch(&mut rest);
+        assert_eq!(g_batch.edge_count(), 0);
+        assert_eq!(g_batch.range_count(), 0);
+        assert_eq!(g_single.edge_count(), 0);
+        assert_eq!(g_single.range_count(), 0);
+        // Duplicate (Ref, v) pairs and wide rectangles match single register/unregister too.
+        let wide_rect = Ref::Rect {
+            sheet: 0,
+            r0: 0,
+            r1: 10,
+            c0: 0,
+            c1: 31,
+        };
+        let mut reg_wide = vec![(wide_rect, 90), (wide_rect, 90), (cell_ref, 90)];
+        let v_s = g_single.add_vertex(0, PackedCellCoordinate::new(0, 5).unwrap());
+        let v_b = g_batch.add_vertex(0, PackedCellCoordinate::new(0, 5).unwrap());
+        for r in &mut reg_wide {
+            r.1 = v_b;
+        }
+        g_single.register(v_s, &[wide_rect, cell_ref]);
+        g_batch.register_batch(&mut reg_wide);
+        assert_eq!(g_batch.edge_count(), g_single.edge_count());
+        assert_eq!(g_batch.range_count(), g_single.range_count());
+
+        let mut unreg_wide = vec![(wide_rect, v_b), (wide_rect, v_b), (cell_ref, v_b)];
+        g_single.unregister(v_s, &[wide_rect, cell_ref]);
+        g_batch.unregister_batch(&mut unreg_wide);
+        g_single.remove_vertex(v_s);
+        g_batch.remove_vertex(v_b);
+        assert_eq!(g_batch.edge_count(), 0);
+        assert_eq!(g_batch.range_count(), 0);
+    }
+
+    #[test]
+    fn apply_batch_unregister_matches_single_edits() {
+        let mut wb1 = WorkbookEngine::new();
+        let _ = wb1.add_sheet("S");
+        for r in 1..=20u32 {
+            wb1.set_cell("S", &format!("A{r}"), r.to_string()).unwrap();
+            wb1.set_cell("S", &format!("B{r}"), format!("=SUM($A$1:$A$20)+$A${r}"))
+                .unwrap();
+        }
+        let wb2 = wb1.clone();
+        let mut s_single = RecalcSession::new(wb1).unwrap();
+        let mut s_batch = RecalcSession::new(wb2).unwrap();
+        let _ = s_single.recalculate();
+        let _ = s_batch.recalculate();
+
+        let batch = vec![
+            CellChange {
+                sheet: "S".into(),
+                coord: PackedCellCoordinate::parse_a1("B1").unwrap(),
+                raw: String::new(),
+            },
+            // Same cell updated twice in one batch (clearing then setting a formula)
+            CellChange {
+                sheet: "S".into(),
+                coord: PackedCellCoordinate::parse_a1("B2").unwrap(),
+                raw: String::new(),
+            },
+            CellChange {
+                sheet: "S".into(),
+                coord: PackedCellCoordinate::parse_a1("B2").unwrap(),
+                raw: "=A1*10".into(),
+            },
+            // Unchanged no-op + clear mixed in
+            CellChange {
+                sheet: "S".into(),
+                coord: PackedCellCoordinate::parse_a1("B3").unwrap(),
+                raw: "=SUM($A$1:$A$20)+$A$3".into(),
+            },
+            CellChange {
+                sheet: "S".into(),
+                coord: PackedCellCoordinate::parse_a1("B4").unwrap(),
+                raw: "42".into(),
+            },
+            CellChange {
+                sheet: "S".into(),
+                coord: PackedCellCoordinate::parse_a1("B5").unwrap(),
+                raw: String::new(),
+            },
+            CellChange {
+                sheet: "S".into(),
+                coord: PackedCellCoordinate::parse_a1("B6").unwrap(),
+                raw: "=A2+A3".into(),
+            },
+            CellChange {
+                sheet: "S".into(),
+                coord: PackedCellCoordinate::parse_a1("B7").unwrap(),
+                raw: String::new(),
+            },
+            CellChange {
+                sheet: "S".into(),
+                coord: PackedCellCoordinate::parse_a1("B8").unwrap(),
+                raw: String::new(),
+            },
+            CellChange {
+                sheet: "S".into(),
+                coord: PackedCellCoordinate::parse_a1("A1").unwrap(),
+                raw: "100".into(),
+            },
+        ];
+        for ch in &batch {
+            s_single.set_cell(&ch.sheet, ch.coord, &ch.raw).unwrap();
+        }
+        s_batch.apply(&batch).unwrap();
+        let _ = s_single.recalculate();
+        let _ = s_batch.recalculate();
+
+        assert_eq!(s_batch.graph_size(), s_single.graph_size());
+        for r in 1..=20u32 {
+            let c = PackedCellCoordinate::parse_a1(&format!("B{r}")).unwrap();
+            assert_eq!(s_batch.cell_value("S", c), s_single.cell_value("S", c));
+        }
+    }
+
+    #[test]
+    #[ignore = "measurement harness: run with --release -- --ignored --nocapture"]
+    fn bench_q3_dep_unregister_release() {
+        let mut g = DepGraph::default();
+        let a1 = PackedCellCoordinate::parse_a1("A1").unwrap();
+        let rect = Ref::Rect {
+            sheet: 0,
+            r0: 0,
+            r1: 499,
+            c0: 0,
+            c1: 0,
+        };
+        let cell_ref = Ref::Cell {
+            sheet: 0,
+            coord: a1,
+        };
+        let count = 20_000u32;
+        let mut pairs = Vec::with_capacity((count as usize) * 2);
+        for r in 0..count {
+            let v = g.add_vertex(0, PackedCellCoordinate::new(r, 1).unwrap());
+            pairs.push((cell_ref, v));
+            pairs.push((rect, v));
+        }
+        let mut reg_pairs = pairs.clone();
+        g.register_batch(&mut reg_pairs);
+
+        let started_batch = Instant::now();
+        g.unregister_batch(&mut pairs);
+        let batch_ms = started_batch.elapsed().as_secs_f64() * 1000.0;
+        assert_eq!(g.edge_count(), 0);
+        assert_eq!(g.range_count(), 0);
+
+        // Also benchmark RecalcSession::apply clearing 10,000 formula cells sharing $A$1:$A$500.
+        let mut wb = WorkbookEngine::new();
+        let _ = wb.add_sheet("S");
+        let n_cells = 10_000u32;
+        for r in 1..=n_cells {
+            wb.set_cell("S", &format!("B{r}"), "=SUM($A$1:$A$500)+$A$1")
+                .unwrap();
+        }
+        let mut session = RecalcSession::new(wb).unwrap();
+        let clears: Vec<CellChange> = (1..=n_cells)
+            .map(|r| CellChange {
+                sheet: "S".to_string(),
+                coord: PackedCellCoordinate::parse_a1(&format!("B{r}")).unwrap(),
+                raw: String::new(),
+            })
+            .collect();
+        let started_apply = Instant::now();
+        session.apply(&clears).unwrap();
+        let apply_ms = started_apply.elapsed().as_secs_f64() * 1000.0;
+        assert_eq!(session.graph_size(), (0, 0));
+
+        eprintln!(
+            "bench_q3_dep_unregister_release: unregister_batch({count})={batch_ms:.3} ms, apply_clear({n_cells})={apply_ms:.3} ms"
+        );
     }
 }

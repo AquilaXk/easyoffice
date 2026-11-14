@@ -38,7 +38,11 @@ pub struct PackedVisuals {
 impl PackedVisuals {
     /// The words as little-endian bytes (what the page decodes from base64).
     pub fn word_bytes(&self) -> Vec<u8> {
-        self.words.iter().flat_map(|w| w.to_le_bytes()).collect()
+        let mut bytes = Vec::with_capacity(self.words.len().saturating_mul(4));
+        for &w in &self.words {
+            bytes.extend_from_slice(&w.to_le_bytes());
+        }
+        bytes
     }
 }
 
@@ -131,7 +135,9 @@ pub fn decode_visuals(packed: &PackedVisuals) -> Vec<CellVisual> {
             hide_value: head & HIDE != 0,
         };
         if head & (BG | FG) != 0 {
-            let w = words[at];
+            let Some(w) = words.get(at).copied() else {
+                return Vec::new();
+            };
             at += 1;
             if head & BG != 0 {
                 v.bg = color(w & 0xFFFF);
@@ -141,7 +147,9 @@ pub fn decode_visuals(packed: &PackedVisuals) -> Vec<CellVisual> {
             }
         }
         if head & BAR != 0 {
-            let w = words[at];
+            let Some(w) = words.get(at).copied() else {
+                return Vec::new();
+            };
             at += 1;
             v.bar = Some(Bar {
                 pct: (((w >> 16) & 0xFF) as i16 - 128) as i8,
@@ -159,5 +167,83 @@ pub fn decode_visuals(packed: &PackedVisuals) -> Vec<CellVisual> {
         }
         out.push(v);
     }
+    if at < words.len() {
+        return Vec::new();
+    }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn coord(row: u32, col: u32) -> PackedCellCoordinate {
+        PackedCellCoordinate::new(row, col).unwrap()
+    }
+
+    #[test]
+    fn word_bytes_preallocates_exact_byte_capacity() {
+        let visuals = vec![CellVisual {
+            coord: coord(0, 0),
+            bg: Some(0x112233),
+            fg: Some(0x445566),
+            flags: 1,
+            bar: Some(Bar {
+                pct: 50,
+                start: 10,
+                color: 0x778899,
+                gradient: true,
+            }),
+            icon: None,
+            hide_value: false,
+        }];
+        let packed = encode_visuals(&visuals);
+        let bytes = packed.word_bytes();
+        assert_eq!(bytes.len(), packed.words.len() * 4);
+        assert!(bytes.capacity() >= bytes.len());
+    }
+
+    #[test]
+    fn decode_visuals_rejects_truncated_buffers_fail_closed() {
+        let mut bg_truncated = encode_visuals(&[CellVisual {
+            coord: coord(0, 0),
+            bg: Some(0xFFC7CE),
+            fg: Some(0x9C0006),
+            flags: 0,
+            bar: None,
+            icon: None,
+            hide_value: false,
+        }]);
+        bg_truncated.words.pop();
+        assert!(decode_visuals(&bg_truncated).is_empty());
+
+        let mut bar_truncated = encode_visuals(&[CellVisual {
+            coord: coord(1, 2),
+            bg: Some(0x112233),
+            fg: None,
+            flags: 0,
+            bar: Some(Bar {
+                pct: 25,
+                start: 0,
+                color: 0x638EC6,
+                gradient: false,
+            }),
+            icon: None,
+            hide_value: false,
+        }]);
+        bar_truncated.words.pop();
+        assert!(decode_visuals(&bar_truncated).is_empty());
+
+        let mut orphan_tail = encode_visuals(&[CellVisual {
+            coord: coord(0, 0),
+            bg: None,
+            fg: None,
+            flags: 1,
+            bar: None,
+            icon: None,
+            hide_value: false,
+        }]);
+        orphan_tail.words.push(0xDEAD_BEEF);
+        assert!(decode_visuals(&orphan_tail).is_empty());
+    }
 }

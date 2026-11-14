@@ -195,3 +195,19 @@ fn extreme_index_arguments_end_in_an_error_value_not_a_panic() {
         assert!(got.starts_with('#'), "{formula} -> {got}");
     }
 }
+
+#[test]
+fn chained_large_dynamic_arrays_exceeding_128_mib_fail_closed() {
+    let mut m = new_empty_model();
+    // Each SEQUENCE(1000, 1500) is below MAX_ARRAY_CELLS (2_097_152), but 4 chained arrays in one
+    // root cell evaluate to 6_000_000 cells (~144 MiB > 128 MiB cap) and must fail closed.
+    m._set(
+        "A1",
+        "=LET(a, SEQUENCE(1000,1500), b, SEQUENCE(1000,1500), c, SEQUENCE(1000,1500), d, SEQUENCE(1000,1500), INDEX(a,1,1)+INDEX(b,1,1)+INDEX(c,1,1)+INDEX(d,1,1))",
+    );
+    // A separate root cell with a single legal array must still succeed after A1 hits the budget.
+    m._set("B1", "=INDEX(SEQUENCE(1000,1500), 1, 1)");
+    m.evaluate();
+    assert_eq!(text(&m, "A1"), "#SPILL!");
+    assert_eq!(text(&m, "B1"), "1");
+}

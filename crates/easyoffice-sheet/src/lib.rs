@@ -52,6 +52,7 @@ mod functions_trend;
 #[cfg(test)]
 mod functions_unit_tests;
 mod lexer;
+mod lookup_index;
 mod memo;
 pub mod names;
 #[cfg(test)]
@@ -81,10 +82,11 @@ pub use axis::{
     AxisEditReport, EditKind, FilterShift, SheetChange,
 };
 pub use coercion::*;
+pub(crate) use dag::expr_contains_subtotal;
 pub use deadline::MAX_EVAL_TIME;
 pub use functions::*;
 pub use functions_complex::{format_complex, parse_complex};
-pub use memo::{CellMap, CoordHasher, FastMap, MemoTable};
+pub use memo::{CellMap, CoordHasher, DetMap, DetSet, DetWordHasher, FastMap, MemoTable};
 pub use names::{validate_names, NameIssue, NameTable};
 pub use parser::{compile_formula_expr, BinaryOp, Expr, SharedExpr};
 pub use pivot::{PivotError, PivotSpec};
@@ -118,6 +120,7 @@ pub(crate) struct EvalContext<'a> {
     pub memo: MemoTable,
     pub current_coord: Option<PackedCellCoordinate>,
     pub(crate) steps: usize,
+    pub(crate) array_bytes: usize,
     pub(crate) rng_state: u64,
     pub(crate) circular: bool,
     pub(crate) clock: deadline::Clock,
@@ -137,6 +140,7 @@ pub(crate) struct EvalContext<'a> {
     pub(crate) fresh: FastMap<u64, Arc<array::Grid>>,
     /// What the formulas of this pass read through `OFFSET` and `INDIRECT`; `None` when nobody collects it.
     pub(crate) dyn_reads: Option<dyn_reads::DynReads>,
+    pub(crate) lookup_cache: lookup_index::LookupCache,
 }
 
 impl<'a> EvalContext<'a> {
@@ -147,6 +151,7 @@ impl<'a> EvalContext<'a> {
             memo: MemoTable::new(sheet_id),
             current_coord: None,
             steps: 0,
+            array_bytes: 0,
             rng_state: 0x5DEE_CE66_D1A4_F87B,
             circular: false,
             clock: deadline::Clock::default(),
@@ -157,6 +162,7 @@ impl<'a> EvalContext<'a> {
             claims: FastMap::default(),
             fresh: FastMap::default(),
             dyn_reads: None,
+            lookup_cache: lookup_index::LookupCache::default(),
         }
     }
 
@@ -167,6 +173,7 @@ impl<'a> EvalContext<'a> {
             memo: MemoTable::new(sheet_id),
             current_coord: None,
             steps: 0,
+            array_bytes: 0,
             rng_state: 0x5DEE_CE66_D1A4_F87B,
             circular: false,
             clock: deadline::Clock::default(),
@@ -177,6 +184,7 @@ impl<'a> EvalContext<'a> {
             claims: FastMap::default(),
             fresh: FastMap::default(),
             dyn_reads: None,
+            lookup_cache: lookup_index::LookupCache::default(),
         }
     }
 
@@ -369,6 +377,15 @@ impl SheetEngine {
         self.store_cell(coord, raw_value.into());
         // Indexes that exist are patched instead of rebuilt: an edit that does not add or remove a
         // populated / formula cell leaves them untouched.
+        self.patch_indexes(coord, was_populated, was_formula);
+    }
+
+    fn patch_indexes(
+        &mut self,
+        coord: PackedCellCoordinate,
+        was_populated: bool,
+        was_formula: bool,
+    ) {
         let is_populated = self.cells.contains_key(&coord);
         let is_formula = dag::is_formula(self.compiled_asts.get(&coord));
         if was_populated != is_populated {
@@ -433,7 +450,9 @@ impl SheetEngine {
 
     #[inline]
     pub(crate) fn set_coord_number(&mut self, coord: PackedCellCoordinate, num: f64) {
-        self.invalidate_caches();
+        self.invalidate_plan();
+        let was_populated = self.cells.contains_key(&coord);
+        let was_formula = dag::is_formula(self.compiled_asts.get(&coord));
         let comp = Ok(Expr::Number(num));
         self.set_name_uses(coord, None);
         self.update_dense_number(coord, Some(&comp));
@@ -441,6 +460,7 @@ impl SheetEngine {
         self.subtotal_coords.remove(&coord);
         self.array_formulas.remove(&coord);
         self.cells.insert(coord, format!("{num}"));
+        self.patch_indexes(coord, was_populated, was_formula);
     }
 
     pub(crate) fn rebuild_compiled_asts(&mut self) {
@@ -961,21 +981,5 @@ impl SheetEngine {
         } else {
             Self::values_match(cell, pattern)
         }
-    }
-}
-
-pub(crate) fn expr_contains_subtotal(expr: &Expr) -> bool {
-    match expr {
-        Expr::FuncCall { name, args } => {
-            name.eq_ignore_ascii_case("SUBTOTAL")
-                || name.eq_ignore_ascii_case("AGGREGATE")
-                || args.iter().any(expr_contains_subtotal)
-        }
-        Expr::UnaryPlus(inner) | Expr::UnaryMinus(inner) | Expr::PostfixPercent(inner) => {
-            expr_contains_subtotal(inner)
-        }
-        Expr::Binary { lhs, rhs, .. } => expr_contains_subtotal(lhs) || expr_contains_subtotal(rhs),
-        Expr::Shared(shared) => expr_contains_subtotal(&shared.expr),
-        _ => false,
     }
 }

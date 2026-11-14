@@ -10,9 +10,11 @@
 mod axis_shift;
 mod cf;
 pub(crate) mod data;
+pub(crate) mod expr_shift;
 mod pack;
 mod period;
 mod sheet_ref;
+#[cfg(test)]
 mod shift;
 mod validate;
 
@@ -85,6 +87,8 @@ impl CellVisual {
 struct RuleState {
     locality: Locality,
     needs_blanks: bool,
+    /// True when the last evaluation stopped early on deadline or cumulative step budget.
+    incomplete: bool,
     /// Plan of a rule that reads nothing but the cell (built at the first evaluation).
     plan: Option<Plan>,
     hits: CellMap<Hit>,
@@ -146,6 +150,7 @@ impl RuleRuntime {
             .map(|r| RuleState {
                 locality: locality(&r.kind),
                 needs_blanks: needs_blanks(&r.kind),
+                incomplete: false,
                 plan: None,
                 hits: CellMap::default(),
             })
@@ -199,33 +204,65 @@ impl RuleRuntime {
     }
 
     fn compute_whole(&mut self, i: usize, cells: &mut dyn Cells) {
+        self.states[i].incomplete = false;
+        if cells.budget_exhausted() {
+            self.states[i].incomplete = true;
+            return;
+        }
         let rule = &self.rules[i];
-        let state = &mut self.states[i];
-        let data = self.stats.get(cells, &rule.ranges, state.needs_blanks);
+        let (data, complete) = self
+            .stats
+            .get(cells, &rule.ranges, self.states[i].needs_blanks);
+        if !complete || cells.budget_exhausted() {
+            self.states[i].incomplete = true;
+            return;
+        }
         let mut hits = CellMap::default();
         if let CfKind::Expression(formula) = &rule.kind {
             let (ar, ac) = expression_anchor(rule);
+            let template = cells.compile_rule_expr(formula);
+            let mut scratch = template.init_scratch();
             for (coord, _) in &data.cells {
-                let shifted = shift::shift_formula(
-                    formula,
-                    i64::from(coord.row()) - i64::from(ar),
-                    i64::from(coord.col()) - i64::from(ac),
-                );
-                if shifted.is_some_and(|f| truthy(&cells.eval_formula(&f))) {
+                if cells.budget_exhausted() {
+                    self.states[i].incomplete = true;
+                    break;
+                }
+                let dr = i64::from(coord.row()) - i64::from(ar);
+                let dc = i64::from(coord.col()) - i64::from(ac);
+                let matched = template.eval_in_place(cells, &mut scratch, dr, dc);
+                if cells.budget_exhausted() {
+                    self.states[i].incomplete = true;
+                    break;
+                }
+                if matched {
                     hits.insert(*coord, Hit::Style);
                 }
             }
         } else if let Some(plan) = make_plan(rule, &data, cells, self.today) {
-            for (coord, value) in &data.cells {
+            if cells.budget_exhausted() {
+                self.states[i].incomplete = true;
+                return;
+            }
+            for (idx, (coord, value)) in data.cells.iter().enumerate() {
+                if (idx & 1023) == 1023 {
+                    cells.tick_rule_steps(1024);
+                    if cells.budget_exhausted() {
+                        self.states[i].incomplete = true;
+                        break;
+                    }
+                }
                 if let Some(hit) = apply_plan(&plan, value) {
                     hits.insert(*coord, hit);
                 }
             }
-            if state.locality == Locality::Cell {
-                state.plan = Some(plan);
+            if self.states[i].locality == Locality::Cell {
+                self.states[i].plan = Some(plan);
             }
+        } else if cells.budget_exhausted() {
+            self.states[i].incomplete = true;
+            return;
         }
-        state.hits = hits;
+        self.states[i].hits = hits;
         self.enforce_budget();
     }
 
@@ -293,9 +330,21 @@ impl RuleRuntime {
     pub(crate) fn evaluate(&mut self, cells: &mut dyn Cells) -> Vec<CellVisual> {
         self.stats.clear();
         for i in 0..self.rules.len() {
+            if cells.budget_exhausted() {
+                for state in &mut self.states[i..] {
+                    state.incomplete = true;
+                }
+                break;
+            }
             self.compute_whole(i, cells);
             if self.over_budget {
                 return Vec::new();
+            }
+            if cells.budget_exhausted() {
+                for state in &mut self.states[i + 1..] {
+                    state.incomplete = true;
+                }
+                break;
             }
         }
         let mut coords: Vec<PackedCellCoordinate> = self
@@ -324,7 +373,11 @@ impl RuleRuntime {
         touched: &[PackedCellCoordinate],
         any_changed: bool,
     ) -> Vec<CellVisual> {
-        if self.rules.is_empty() || self.over_budget || (touched.is_empty() && !any_changed) {
+        let any_incomplete = self.states.iter().any(|s| s.incomplete);
+        if self.rules.is_empty()
+            || self.over_budget
+            || (touched.is_empty() && !any_changed && !any_incomplete)
+        {
             return Vec::new();
         }
         self.stats.invalidate(touched);
@@ -340,43 +393,67 @@ impl RuleRuntime {
                         .any(|b| b.contains(c.row(), c.col()))
                 })
                 .collect();
-            match self.states[i].locality {
-                Locality::Cell => {
-                    for c in inside {
-                        self.update_cell(i, c, cells);
-                        dirty.push(c);
+            let affected = match self.states[i].locality {
+                Locality::Sheet => any_changed || !touched.is_empty(),
+                Locality::Cell | Locality::Range => !inside.is_empty(),
+            };
+            if cells.budget_exhausted() {
+                if self.states[i].incomplete || affected {
+                    self.states[i].incomplete = true;
+                }
+                for j in (i + 1)..self.rules.len() {
+                    let rule_j_affected = match self.states[j].locality {
+                        Locality::Sheet => any_changed || !touched.is_empty(),
+                        Locality::Cell | Locality::Range => touched.iter().any(|c| {
+                            self.rules[j]
+                                .ranges
+                                .iter()
+                                .any(|b| b.contains(c.row(), c.col()))
+                        }),
+                    };
+                    if rule_j_affected {
+                        self.states[j].incomplete = true;
                     }
-                    self.enforce_budget();
+                }
+                break;
+            }
+            if self.states[i].incomplete || self.states[i].locality != Locality::Cell {
+                if self.states[i].incomplete || affected {
+                    let before = std::mem::take(&mut self.states[i].hits);
+                    self.compute_whole(i, cells);
                     if self.over_budget {
                         return Vec::new();
                     }
+                    let after = &self.states[i].hits;
+                    dirty.extend(
+                        before
+                            .iter()
+                            .filter(|(k, h)| after.get(k) != Some(h))
+                            .map(|(k, _)| *k),
+                    );
+                    dirty.extend(
+                        after
+                            .iter()
+                            .filter(|(k, h)| before.get(k) != Some(h))
+                            .map(|(k, _)| *k),
+                    );
                 }
-                Locality::Range | Locality::Sheet => {
-                    let affected = if self.states[i].locality == Locality::Sheet {
-                        any_changed || !touched.is_empty()
-                    } else {
-                        !inside.is_empty()
-                    };
-                    if affected {
-                        let before = std::mem::take(&mut self.states[i].hits);
-                        self.compute_whole(i, cells);
-                        if self.over_budget {
-                            return Vec::new();
-                        }
-                        let after = &self.states[i].hits;
-                        dirty.extend(
-                            before
-                                .iter()
-                                .filter(|(k, h)| after.get(k) != Some(h))
-                                .map(|(k, _)| *k),
-                        );
-                        dirty.extend(
-                            after
-                                .iter()
-                                .filter(|(k, h)| before.get(k) != Some(h))
-                                .map(|(k, _)| *k),
-                        );
+            } else {
+                for c in inside {
+                    if cells.budget_exhausted() {
+                        self.states[i].incomplete = true;
+                        break;
                     }
+                    self.update_cell(i, c, cells);
+                    dirty.push(c);
+                    if cells.budget_exhausted() {
+                        self.states[i].incomplete = true;
+                        break;
+                    }
+                }
+                self.enforce_budget();
+                if self.over_budget {
+                    return Vec::new();
                 }
             }
         }
@@ -422,8 +499,10 @@ impl WorkbookEngine {
             .iter()
             .flat_map(|r| r.ranges.iter().copied())
             .collect();
-        let mut ctx = EvalContext::with_workbook(self, engine.resolved_sheet_id());
+        let mut ctx = EvalContext::with_workbook(self, engine.resolved_sheet_id())
+            .with_time_limit(crate::MAX_EVAL_TIME);
         prepare_formulas(engine, &boxes, &mut ctx);
+        ctx.reset_steps();
         let mut cells = SheetCells {
             sheet: engine,
             ctx: &mut ctx,
@@ -434,5 +513,7 @@ impl WorkbookEngine {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_expr_shift;
 #[cfg(test)]
 mod tests_validate;

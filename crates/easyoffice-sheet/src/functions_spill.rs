@@ -192,9 +192,9 @@ impl SheetEngine {
         let mut order: Vec<usize> = (0..lines).collect();
         order.sort_by(|&a, &b| sort_key_cmp(key_at(a), key_at(b), ascending));
         Ok(Val::grid(if by_col {
-            data.take_cols(&order)
+            data.take_cols_checked(ctx, &order)?
         } else {
-            data.take_rows(&order)
+            data.take_rows_checked(ctx, &order)?
         }))
     }
 
@@ -251,9 +251,9 @@ impl SheetEngine {
             Ordering::Equal
         });
         Ok(Val::grid(if by_col {
-            data.take_cols(&order)
+            data.take_cols_checked(ctx, &order)?
         } else {
-            data.take_rows(&order)
+            data.take_rows_checked(ctx, &order)?
         }))
     }
 
@@ -294,9 +294,9 @@ impl SheetEngine {
             return Err(FormulaError::Calc);
         }
         Ok(Val::grid(if by_col {
-            data.take_cols(&keep)
+            data.take_cols_checked(ctx, &keep)?
         } else {
-            data.take_rows(&keep)
+            data.take_rows_checked(ctx, &keep)?
         }))
     }
 
@@ -340,9 +340,9 @@ impl SheetEngine {
             };
         }
         Ok(Val::grid(if by_rows {
-            data.take_rows(&keep)
+            data.take_rows_checked(ctx, &keep)?
         } else {
-            data.take_cols(&keep)
+            data.take_cols_checked(ctx, &keep)?
         }))
     }
 }

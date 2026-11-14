@@ -92,7 +92,12 @@ struct Lu {
 
 /// Crout-style LU decomposition with partial pivoting; a pivot not above `min_pivot` (or not
 /// finite) marks the matrix singular. `transpose` decomposes the transpose, as the determinant does.
-fn lu_decompose(m: &Matrix, transpose: bool, min_pivot: f64) -> Lu {
+fn lu_decompose_with(
+    m: &Matrix,
+    transpose: bool,
+    min_pivot: f64,
+    mut ctx: Option<&mut EvalContext<'_>>,
+) -> Result<Lu, FormulaError> {
     let n = m.rows;
     let mut dec = if transpose {
         m.transposed()
@@ -108,6 +113,9 @@ fn lu_decompose(m: &Matrix, transpose: bool, min_pivot: f64) -> Lu {
     let mut even_swaps = true;
     for c in 0..n {
         for i in 0..c {
+            if let Some(c_ref) = ctx.as_deref_mut() {
+                c_ref.charge_steps((i >> 6).max(1))?;
+            }
             let mut value = dec.data[i * n + c];
             for k in 0..i {
                 value -= lu.data[i * n + k] * lu.data[k * n + c];
@@ -117,6 +125,9 @@ fn lu_decompose(m: &Matrix, transpose: bool, min_pivot: f64) -> Lu {
         let mut max_pivot = f64::NEG_INFINITY;
         let mut pivot_row = c;
         for r in c..n {
+            if let Some(c_ref) = ctx.as_deref_mut() {
+                c_ref.charge_steps((c >> 6).max(1))?;
+            }
             let mut value = dec.data[r * n + c];
             for k in 0..c {
                 value -= lu.data[r * n + k] * lu.data[k * n + c];
@@ -129,12 +140,12 @@ fn lu_decompose(m: &Matrix, transpose: bool, min_pivot: f64) -> Lu {
         }
         let pivot = lu.data[pivot_row * n + c].abs();
         if !pivot.is_finite() || pivot <= min_pivot {
-            return Lu {
+            return Ok(Lu {
                 even_swaps,
                 singular: true,
                 lu,
                 perm,
-            };
+            });
         }
         if pivot_row != c {
             lu.swap_rows(c, pivot_row);
@@ -147,51 +158,50 @@ fn lu_decompose(m: &Matrix, transpose: bool, min_pivot: f64) -> Lu {
             lu.data[r * n + c] /= pivot_element;
         }
     }
-    Lu {
+    Ok(Lu {
         even_swaps,
         singular: false,
         lu,
         perm,
-    }
+    })
 }
 
 /// Determinant: closed forms up to 2x2, otherwise the product of the LU pivots (0 when singular).
-fn determinant(m: &Matrix) -> f64 {
+fn determinant_with(m: &Matrix, ctx: &mut EvalContext<'_>) -> Result<f64, FormulaError> {
     match m.rows {
-        1 => m.data[0],
-        2 => m.data[0] * m.data[3] - m.data[1] * m.data[2],
+        1 => Ok(m.data[0]),
+        2 => Ok(m.data[0] * m.data[3] - m.data[1] * m.data[2]),
         n => {
-            let lu = lu_decompose(m, true, DETERM_MIN_PIVOT);
+            let lu = lu_decompose_with(m, true, DETERM_MIN_PIVOT, Some(ctx))?;
             if lu.singular {
-                return 0.0;
+                return Ok(0.0);
             }
             let det = (0..n).fold(if lu.even_swaps { 1.0 } else { -1.0 }, |acc, i| {
                 acc * lu.lu.data[i * n + i]
             });
             // -0 becomes 0
-            if det == 0.0 {
-                0.0
-            } else {
-                det
-            }
+            Ok(if det == 0.0 { 0.0 } else { det })
         }
     }
 }
 
-/// Inverse from the LU factors (permuted identity, forward elimination, back substitution);
-/// `None` when singular.
-fn inverse(m: &Matrix) -> Option<Matrix> {
-    inverse_with(m, false, f64::EPSILON)
-}
-
 /// [`inverse`] with the decomposition's transpose flag and pivot threshold chosen by the caller.
 pub(crate) fn inverse_with(m: &Matrix, transpose: bool, min_pivot: f64) -> Option<Matrix> {
+    inverse_with_ctx(m, transpose, min_pivot, None).unwrap_or(None)
+}
+
+fn inverse_with_ctx(
+    m: &Matrix,
+    transpose: bool,
+    min_pivot: f64,
+    mut ctx: Option<&mut EvalContext<'_>>,
+) -> Result<Option<Matrix>, FormulaError> {
     let n = m.rows;
     let Lu {
         singular, lu, perm, ..
-    } = lu_decompose(m, transpose, min_pivot);
+    } = lu_decompose_with(m, transpose, min_pivot, ctx.as_deref_mut())?;
     if singular {
-        return None;
+        return Ok(None);
     }
     let mut out = Matrix::zeros(n, n);
     for (row, &src) in perm.iter().enumerate() {
@@ -199,6 +209,9 @@ pub(crate) fn inverse_with(m: &Matrix, transpose: bool, min_pivot: f64) -> Optio
     }
     for pivot in 0..n {
         for row in pivot + 1..n {
+            if let Some(c_ref) = ctx.as_deref_mut() {
+                c_ref.charge_steps((n >> 6).max(1))?;
+            }
             let factor = lu.data[row * n + pivot];
             for col in 0..n {
                 out.data[row * n + col] -= out.data[pivot * n + col] * factor;
@@ -211,21 +224,36 @@ pub(crate) fn inverse_with(m: &Matrix, transpose: bool, min_pivot: f64) -> Optio
             out.data[row * n + col] /= pivot_element;
         }
         for upper in 0..row {
+            if let Some(c_ref) = ctx.as_deref_mut() {
+                c_ref.charge_steps((n >> 6).max(1))?;
+            }
             let factor = lu.data[upper * n + row];
             for col in 0..n {
                 out.data[upper * n + col] -= out.data[row * n + col] * factor;
             }
         }
     }
-    Some(out)
+    Ok(Some(out))
 }
 
 /// `a * b` with the sum of each cell taken in inner-index order.
 pub(crate) fn multiply(a: &Matrix, b: &Matrix) -> Matrix {
+    multiply_with_ctx(a, b, None).unwrap_or_else(|_| Matrix::zeros(a.rows, b.cols))
+}
+
+fn multiply_with_ctx(
+    a: &Matrix,
+    b: &Matrix,
+    mut ctx: Option<&mut EvalContext<'_>>,
+) -> Result<Matrix, FormulaError> {
     let mut out = Matrix::zeros(a.rows, b.cols);
+    let step_cost = (b.cols >> 6).max(1);
     for i in 0..a.rows {
         let out_row = &mut out.data[i * b.cols..(i + 1) * b.cols];
         for k in 0..a.cols {
+            if let Some(c_ref) = ctx.as_deref_mut() {
+                c_ref.charge_steps(step_cost)?;
+            }
             let scale = a.data[i * a.cols + k];
             let b_row = &b.data[k * b.cols..(k + 1) * b.cols];
             for (o, &x) in out_row.iter_mut().zip(b_row) {
@@ -233,7 +261,7 @@ pub(crate) fn multiply(a: &Matrix, b: &Matrix) -> Matrix {
             }
         }
     }
-    out
+    Ok(out)
 }
 
 /// A matrix cell: numbers and numeric text; blank, logical and other text cells are `#VALUE!`.
@@ -260,10 +288,11 @@ impl SheetEngine {
                 if m.rows != m.cols || m.rows > MAX_INVERT_DIM {
                     return Err(FormulaError::Value);
                 }
-                Ok(EvaluatedCellValue::Number(determinant(&m)))
+                Ok(EvaluatedCellValue::Number(determinant_with(&m, ctx)?))
             }
             "MMULT" => {
                 let (a, b) = self.mmult_operands(args, ctx, depth)?;
+                ctx.charge_steps((a.cols >> 6).max(1))?;
                 let top_left = (0..a.cols).fold(0.0, |sum, k| sum + a.data[k] * b.data[k * b.cols]);
                 Ok(EvaluatedCellValue::Number(top_left))
             }
@@ -337,7 +366,7 @@ impl SheetEngine {
         match name {
             "MMULT" => {
                 let (a, b) = self.mmult_operands(args, ctx, depth)?;
-                Ok(multiply(&a, &b))
+                multiply_with_ctx(&a, &b, Some(ctx))
             }
             "MINVERSE" => {
                 check_lookup_arity(args, 1, 1)?;
@@ -345,7 +374,7 @@ impl SheetEngine {
                 if m.rows != m.cols || m.rows > MAX_INVERT_DIM {
                     return Err(FormulaError::Value);
                 }
-                inverse(&m).ok_or(FormulaError::Num)
+                inverse_with_ctx(&m, false, f64::EPSILON, Some(ctx))?.ok_or(FormulaError::Num)
             }
             "MUNIT" => {
                 check_lookup_arity(args, 1, 1)?;
@@ -354,6 +383,7 @@ impl SheetEngine {
                     return Err(FormulaError::Value);
                 }
                 let n = n as usize;
+                ctx.charge_steps((n >> 6).max(1))?;
                 let mut m = Matrix::zeros(n, n);
                 for i in 0..n {
                     m.data[i * n + i] = 1.0;
@@ -396,6 +426,7 @@ impl SheetEngine {
         }
         let mut m = Matrix::zeros(rows, cols);
         for r in 0..rows {
+            ctx.charge_steps((cols >> 6).max(1))?;
             for c in 0..cols {
                 let v = self.eval_streaming_cell_allow_error(&spec, r, c, ctx, depth)?;
                 m.data[r * cols + c] = matrix_number(v)?;

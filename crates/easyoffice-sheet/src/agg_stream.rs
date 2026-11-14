@@ -10,6 +10,8 @@ use crate::{
 /// Number of independent accumulation lanes (a power of two so lane selection is a mask).
 const LANE_COUNT: usize = 4;
 const LANE_MASK: usize = LANE_COUNT - 1;
+/// Minimum cell count before checking `CellIndex::count_in_range` for count-only aggregates.
+const COUNT_SPARSE_MIN_CELLS: usize = 64;
 /// Ranges above this size may switch to a walk over populated cells only.
 const SPARSE_MIN_CELLS: usize = 1024;
 /// A range is sparse when it is larger than this multiple of the populated cell count.
@@ -45,11 +47,6 @@ fn sorted_population(
     (min_r, max_r, min_c, max_c): Bounds,
 ) -> Vec<PackedCellCoordinate> {
     sheet.cell_index().range_coords(min_r, max_r, min_c, max_c)
-}
-
-#[inline]
-fn is_sparse(total: usize, populated: usize) -> bool {
-    total > SPARSE_MIN_CELLS && total > populated.saturating_mul(SPARSE_RATIO)
 }
 
 /// Lane-ordered accumulator state for one aggregate call (`Copy` so walks can keep it in registers).
@@ -227,68 +224,96 @@ impl SheetEngine {
         fold.finish()
     }
 
-    fn agg_range<const K: u8>(
+    fn agg_block<const K: u8>(
         &self,
         mut fold: AggFold<K>,
-        range: &CellRange,
+        sheet_opt: Option<&str>,
+        bounds: Bounds,
+        total: usize,
         ctx: &mut EvalContext<'_>,
         depth: usize,
     ) -> Result<AggFold<K>, FormulaError> {
-        let bounds = range_bounds(range);
         let (min_r, max_r, min_c, max_c) = bounds;
-        let total = range.cell_count();
-        if is_sparse(total, self.cells.len()) {
-            let pop = sorted_population(self, bounds);
-            let pop_len = pop.len();
-            for (idx, coord) in pop.into_iter().enumerate() {
-                self.with_coord_value(coord, ctx, depth, |v| fold.fold(v, idx, true))?;
+        let check_sparse = total > SPARSE_MIN_CELLS
+            || (matches!(K, KIND_COUNT | KIND_COUNTA | KIND_COUNTBLANK)
+                && total > COUNT_SPARSE_MIN_CELLS);
+        if check_sparse {
+            let wb_opt = ctx.workbook;
+            let target = match sheet_opt {
+                None => Some(self),
+                Some(name) if crate::WorkbookEngine::is_same_sheet_identity(name, &self.name) => {
+                    Some(self)
+                }
+                Some(name) => wb_opt.and_then(|wb| wb.sheet(name)),
+            };
+            if let Some(ts) = target {
+                let pop_count = ts.cell_index().count_in_range(min_r, max_r, min_c, max_c);
+                if pop_count == 0 {
+                    ctx.steps = ctx.steps.saturating_add(1);
+                    if ctx.steps & crate::deadline::POLL_STEPS_MASK == 0 {
+                        ctx.poll_deadline();
+                    }
+                    if ctx.steps > Self::MAX_EVAL_STEPS || ctx.expired() {
+                        return Err(FormulaError::Value);
+                    }
+                    fold.add_skipped_blanks(total);
+                    return Ok(fold);
+                }
+                if total > pop_count.saturating_mul(SPARSE_RATIO) {
+                    let pop = sorted_population(ts, bounds);
+                    let pop_len = pop.len();
+                    for (idx, coord) in pop.into_iter().enumerate() {
+                        ts.with_coord_value(coord, ctx, depth, |v| fold.fold(v, idx, true))?;
+                    }
+                    fold.add_skipped_blanks(total.saturating_sub(pop_len));
+                    return Ok(fold);
+                }
             }
-            fold.add_skipped_blanks(total.saturating_sub(pop_len));
-            return Ok(fold);
         }
         for r in min_r..=max_r {
             for c in min_c..=max_c {
                 let coord = PackedCellCoordinate::new(r, c).map_err(|_| FormulaError::Ref)?;
-                self.with_coord_value(coord, ctx, depth, |v| fold.fold(v, c as usize, true))?;
-            }
-        }
-        Ok(fold)
-    }
-
-    fn agg_sheet_range<const K: u8>(
-        &self,
-        mut fold: AggFold<K>,
-        sheet: &str,
-        range: &CellRange,
-        ctx: &mut EvalContext<'_>,
-        depth: usize,
-    ) -> Result<AggFold<K>, FormulaError> {
-        let bounds = range_bounds(range);
-        let (min_r, max_r, min_c, max_c) = bounds;
-        let total = range.cell_count();
-        let sparse_pop = self
-            .resolve_sheet_ref(Some(sheet), ctx)
-            .filter(|ts| is_sparse(total, ts.cells.len()))
-            .map(|ts| sorted_population(ts, bounds));
-        if let Some(pop) = sparse_pop {
-            let pop_len = pop.len();
-            for (idx, coord) in pop.into_iter().enumerate() {
-                self.with_sheet_coord_value(Some(sheet), coord, ctx, depth, |v| {
-                    fold.fold(v, idx, true)
-                })?;
-            }
-            fold.add_skipped_blanks(total.saturating_sub(pop_len));
-            return Ok(fold);
-        }
-        for r in min_r..=max_r {
-            for c in min_c..=max_c {
-                let coord = PackedCellCoordinate::new(r, c).map_err(|_| FormulaError::Ref)?;
-                self.with_sheet_coord_value(Some(sheet), coord, ctx, depth, |v| {
+                self.with_sheet_coord_value(sheet_opt, coord, ctx, depth, |v| {
                     fold.fold(v, c as usize, true)
                 })?;
             }
         }
         Ok(fold)
+    }
+
+    fn agg_range<const K: u8>(
+        &self,
+        fold: AggFold<K>,
+        range: &CellRange,
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<AggFold<K>, FormulaError> {
+        self.agg_block(
+            fold,
+            None,
+            range_bounds(range),
+            range.cell_count(),
+            ctx,
+            depth,
+        )
+    }
+
+    fn agg_sheet_range<const K: u8>(
+        &self,
+        fold: AggFold<K>,
+        sheet: &str,
+        range: &CellRange,
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<AggFold<K>, FormulaError> {
+        self.agg_block(
+            fold,
+            Some(sheet),
+            range_bounds(range),
+            range.cell_count(),
+            ctx,
+            depth,
+        )
     }
 
     /// INDIRECT / OFFSET / TRANSPOSE arguments: stream the referenced range when possible.
@@ -306,24 +331,17 @@ impl SheetEngine {
         };
         let (ref sheet_opt, min_r, min_c, rows, cols, transposed) = spec;
         let total = rows.saturating_mul(cols);
-        let sparse_pop = (!transposed)
-            .then(|| self.resolve_sheet_ref(sheet_opt.as_deref(), ctx))
-            .flatten()
-            .filter(|ts| is_sparse(total, ts.cells.len()))
-            .map(|ts| {
-                let max_r = min_r + (rows as u32).saturating_sub(1);
-                let max_c = min_c + (cols as u32).saturating_sub(1);
-                sorted_population(ts, (min_r, max_r, min_c, max_c))
-            });
-        if let Some(pop) = sparse_pop {
-            let pop_len = pop.len();
-            for (idx, coord) in pop.into_iter().enumerate() {
-                self.with_sheet_coord_value(sheet_opt.as_deref(), coord, ctx, depth, |v| {
-                    fold.fold(v, idx, true)
-                })?;
-            }
-            fold.add_skipped_blanks(total.saturating_sub(pop_len));
-            return Ok(fold);
+        if !transposed && rows > 0 && cols > 0 {
+            let max_r = min_r + (rows as u32) - 1;
+            let max_c = min_c + (cols as u32) - 1;
+            return self.agg_block(
+                fold,
+                sheet_opt.as_deref(),
+                (min_r, max_r, min_c, max_c),
+                total,
+                ctx,
+                depth,
+            );
         }
         for dr in 0..rows {
             for dc in 0..cols {

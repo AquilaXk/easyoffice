@@ -11,7 +11,7 @@
 //! A function that returns an array where one value is wanted is `#CALC!` (the reference says
 //! `#VALUE!`; the spreadsheet program says `#CALC!`).
 
-use crate::array::{check_cells, Env, Grid, Val};
+use crate::array::{Env, Grid, Val};
 use crate::array_eval::ValResult;
 use crate::{EvalContext, EvaluatedCellValue as V, Expr, FormulaError, SheetEngine};
 use std::sync::Arc;
@@ -109,6 +109,7 @@ impl SheetEngine {
         if grids.iter().any(|g| g.rows != rows || g.cols != cols) {
             return Err(FormulaError::Value);
         }
+        ctx.charge_array_cells(rows, cols)?;
         let mut data = Vec::with_capacity(rows * cols);
         for i in 0..rows * cols {
             let call_args = grids
@@ -180,6 +181,7 @@ impl SheetEngine {
         depth: usize,
     ) -> ValResult {
         let (initial, grid, f) = self.fold_args(args, env, ctx, depth)?;
+        ctx.charge_array_cells(grid.rows, grid.cols)?;
         let mut acc = initial.clone().unwrap_or_else(|| grid.data[0].clone());
         let start = usize::from(initial.is_none());
         let mut data = Vec::with_capacity(grid.data.len());
@@ -212,12 +214,17 @@ impl SheetEngine {
         let grid = self.eval_val(&args[0], env, ctx, depth + 1)?.into_grid()?;
         let f = self.lambda_arg(&args[1], env, ctx, depth)?;
         let lines = if by_row { grid.rows } else { grid.cols };
+        if by_row {
+            ctx.charge_array_cells(lines, 1)?;
+        } else {
+            ctx.charge_array_cells(1, lines)?;
+        }
         let mut data = Vec::with_capacity(lines);
         for i in 0..lines {
             let line = if by_row {
-                grid.take_rows(&[i])
+                grid.take_rows_checked(ctx, &[i])?
             } else {
-                grid.take_cols(&[i])
+                grid.take_cols_checked(ctx, &[i])?
             };
             data.push(element(self.apply_val(
                 &f,
@@ -253,7 +260,7 @@ impl SheetEngine {
             return Err(FormulaError::Spill);
         }
         let (rows, cols) = (rows as usize, cols as usize);
-        check_cells(rows, cols)?;
+        ctx.charge_array_cells(rows, cols)?;
         let f = self.lambda_arg(&args[2], env, ctx, depth)?;
         let mut data = Vec::with_capacity(rows * cols);
         for r in 1..=rows {

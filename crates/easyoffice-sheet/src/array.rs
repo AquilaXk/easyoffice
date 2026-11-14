@@ -8,6 +8,10 @@ use std::sync::Arc;
 /// bigger is refused with `#SPILL!` (the "out of memory" cause) before it is allocated.
 pub(crate) const MAX_ARRAY_CELLS: usize = crate::MAX_EVAL_STEPS;
 
+/// Per-root-cell dynamic array memory budget (128 MiB): prevents chained/nested arrays from
+/// allocating arbitrarily large heaps within a single root formula evaluation.
+pub(crate) const MAX_ARRAY_BYTES: usize = 128 * 1024 * 1024;
+
 /// Nested calls of `LAMBDA` values. A function that calls itself through a variable ends here
 /// with `#NUM!` instead of the Rust stack.
 pub(crate) const MAX_LAMBDA_DEPTH: usize = 64;
@@ -38,13 +42,25 @@ impl Grid {
         Self { rows, cols, data }
     }
 
-    /// A grid of `rows` by `cols` cells filled by `f(row, col)`; `#SPILL!` past the cell budget.
-    pub(crate) fn build(
+    pub(crate) fn from_rows_checked(
+        ctx: &mut crate::EvalContext<'_>,
+        rows: usize,
+        cols: usize,
+        data: Vec<EvaluatedCellValue>,
+    ) -> Result<Self, FormulaError> {
+        ctx.charge_array_cells(rows, cols)?;
+        Ok(Self::from_rows(rows, cols, data))
+    }
+
+    /// A grid of `rows` by `cols` cells filled by `f(row, col)`; `#SPILL!` past the per-array or
+    /// per-root array memory budget.
+    pub(crate) fn build_checked(
+        ctx: &mut crate::EvalContext<'_>,
         rows: usize,
         cols: usize,
         mut f: impl FnMut(usize, usize) -> EvaluatedCellValue,
     ) -> Result<Self, FormulaError> {
-        check_cells(rows, cols)?;
+        ctx.charge_array_cells(rows, cols)?;
         let mut data = Vec::with_capacity(rows * cols);
         for r in 0..rows {
             for c in 0..cols {
@@ -84,32 +100,50 @@ impl Grid {
         }
     }
 
+    pub(crate) fn transposed_checked(
+        &self,
+        ctx: &mut crate::EvalContext<'_>,
+    ) -> Result<Self, FormulaError> {
+        ctx.charge_array_cells(self.cols, self.rows)?;
+        Ok(self.transposed())
+    }
+
     /// The rows listed by `keep`, in that order.
-    pub(crate) fn take_rows(&self, keep: &[usize]) -> Self {
+    pub(crate) fn take_rows_checked(
+        &self,
+        ctx: &mut crate::EvalContext<'_>,
+        keep: &[usize],
+    ) -> Result<Self, FormulaError> {
+        ctx.charge_array_cells(keep.len(), self.cols)?;
         let mut data = Vec::with_capacity(keep.len() * self.cols);
         for &r in keep {
             data.extend_from_slice(&self.data[r * self.cols..(r + 1) * self.cols]);
         }
-        Self {
+        Ok(Self {
             rows: keep.len(),
             cols: self.cols,
             data,
-        }
+        })
     }
 
     /// The columns listed by `keep`, in that order.
-    pub(crate) fn take_cols(&self, keep: &[usize]) -> Self {
+    pub(crate) fn take_cols_checked(
+        &self,
+        ctx: &mut crate::EvalContext<'_>,
+        keep: &[usize],
+    ) -> Result<Self, FormulaError> {
+        ctx.charge_array_cells(self.rows, keep.len())?;
         let mut data = Vec::with_capacity(self.rows * keep.len());
         for r in 0..self.rows {
             for &c in keep {
                 data.push(self.get(r, c).clone());
             }
         }
-        Self {
+        Ok(Self {
             rows: self.rows,
             cols: keep.len(),
             data,
-        }
+        })
     }
 }
 
@@ -120,6 +154,14 @@ pub(crate) fn check_cells(rows: usize, cols: usize) -> Result<(), FormulaError> 
     } else {
         Err(FormulaError::Spill)
     }
+}
+
+/// Byte cost of `rows * cols` array cells, checked against [`MAX_ARRAY_CELLS`] and overflow.
+pub(crate) fn array_bytes_for(rows: usize, cols: usize) -> Result<usize, FormulaError> {
+    check_cells(rows, cols)?;
+    rows.checked_mul(cols)
+        .and_then(|n| n.checked_mul(std::mem::size_of::<EvaluatedCellValue>()))
+        .ok_or(FormulaError::Spill)
 }
 
 /// A `LAMBDA` and the scope it was made in.

@@ -115,8 +115,15 @@ impl SheetEngine {
             Err(e) => return names_used(keys, 0, Err(e)),
         };
         // The workbook's bound: past it a formula that uses a name reads `#VALUE!` (fail closed).
+        // When recompiling or overwriting an existing cell, exclude its own currently held nodes so
+        // repeated updates near the limit do not double-count against itself.
+        let old_held = coord
+            .and_then(|c| self.name_uses.get(&c))
+            .map_or(0, |u| u.nodes as usize);
         let in_use = self.name_budget.load(std::sync::atomic::Ordering::Relaxed);
-        if in_use.saturating_add(held) > crate::names::MAX_WORKBOOK_NAME_NODES {
+        if in_use.saturating_sub(old_held).saturating_add(held)
+            > crate::names::MAX_WORKBOOK_NAME_NODES
+        {
             return names_used(keys, 0, Err(FormulaError::Value));
         }
         names_used(keys, held, Ok(expr))

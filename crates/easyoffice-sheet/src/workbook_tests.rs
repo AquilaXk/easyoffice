@@ -944,3 +944,30 @@ fn test_sheet_whitespace_trim_and_apostrophe_cross_sheet_lookup() {
         Some("'A''B'")
     );
 }
+
+#[test]
+fn adversarial_sheet_limit_blocks_excess_without_infinite_loop() {
+    let mut wb = WorkbookEngine::new();
+    for i in 0..1_024usize {
+        wb.add_sheet(format!("S{i}"));
+    }
+    assert_eq!(wb.sheet_count(), 1_024);
+    // Re-referencing an existing sheet at the cap still succeeds idempotently.
+    assert_eq!(wb.add_sheet("S0").name, "S0");
+    assert_eq!(wb.sheet_count(), 1_024);
+    assert!(matches!(
+        wb.try_add_sheet("S1024"),
+        Err(easyoffice_formats::EasyOfficeError::ResourceBudgetExceeded(
+            _
+        ))
+    ));
+    assert!(wb.try_add_sheet("S0").is_ok());
+
+    let overflow = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        wb.add_sheet("S1024");
+    }));
+    assert!(
+        overflow.is_err(),
+        "adding sheet #1025 beyond workbook sheet cap must fail closed"
+    );
+}

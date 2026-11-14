@@ -4,7 +4,7 @@
 //! argument replaced by a literal (one value) or a temporary range (more), so every function that
 //! reads ranges keeps working on array results.
 
-use crate::array::{check_cells, virtual_sheet_name, Closure, Env, Grid, Val, MAX_LAMBDA_DEPTH};
+use crate::array::{virtual_sheet_name, Closure, Env, Grid, Val, MAX_LAMBDA_DEPTH};
 use crate::array_class::{arrayish, is_lifted_fn, needs_array};
 use crate::{
     BinaryOp, CellRange, EvalContext, EvaluatedCellValue as V, Expr, FormulaError,
@@ -74,11 +74,12 @@ impl SheetEngine {
         match expr {
             Expr::Shared(shared) => self.eval_val(&shared.expr, env, ctx, depth),
             Expr::Missing => Ok(Val::scalar(V::Empty)),
-            Expr::Array(lit) => Ok(Val::grid(Grid::from_rows(
+            Expr::Array(lit) => Ok(Val::grid(Grid::from_rows_checked(
+                ctx,
                 lit.rows,
                 lit.cols,
                 lit.data.clone(),
-            ))),
+            )?)),
             Expr::Var(name) => match env.get(name) {
                 Some(Val::Ref(reference)) => {
                     let reference = Arc::clone(reference);
@@ -93,12 +94,12 @@ impl SheetEngine {
             }
             Expr::UnaryPlus(inner) | Expr::UnaryMinus(inner) | Expr::PostfixPercent(inner) => {
                 let grid = self.eval_val(inner, env, ctx, depth + 1)?.into_grid()?;
-                Ok(Val::grid(unary_grid(expr, &grid)))
+                Ok(Val::grid(unary_grid(ctx, expr, &grid)?))
             }
             Expr::Binary { op, lhs, rhs } => {
                 let l = self.eval_val(lhs, env, ctx, depth + 1)?.into_grid()?;
                 let r = self.eval_val(rhs, env, ctx, depth + 1)?.into_grid()?;
-                binary_grid(*op, &l, &r).map(Val::grid)
+                binary_grid(ctx, *op, &l, &r).map(Val::grid)
             }
             Expr::Call { callee, args } => {
                 let f = self.eval_val(callee, env, ctx, depth + 1)?;
@@ -168,23 +169,30 @@ impl SheetEngine {
             return Ok(None);
         };
         let (ref sheet_opt, min_r, min_c, rows, cols, transposed) = spec;
-        check_cells(rows, cols)?;
+        ctx.charge_array_cells(rows, cols)?;
         let total = rows * cols;
-        // A big range over few cells reads only the populated ones.
-        let populated = (!transposed && total > 1024)
+        let mut data = vec![V::Empty; total];
+        // A sparse range over few populated cells (per range, not whole sheet) avoids dense walks.
+        let sparse_pop = (!transposed && total > 64)
             .then(|| self.resolve_sheet_ref(sheet_opt.as_deref(), ctx))
             .flatten()
-            .filter(|ts| total > ts.cell_index().sorted_coords.len().saturating_mul(2))
-            .map(|ts| {
-                ts.cell_index().range_coords(
-                    min_r,
-                    min_r + rows as u32 - 1,
-                    min_c,
-                    min_c + cols as u32 - 1,
-                )
+            .and_then(|ts| {
+                let max_r = min_r + rows as u32 - 1;
+                let max_c = min_c + cols as u32 - 1;
+                let pop_count = ts.cell_index().count_in_range(min_r, max_r, min_c, max_c);
+                if pop_count == 0 {
+                    Some(Vec::new())
+                } else if total > pop_count.saturating_mul(2) {
+                    Some(ts.cell_index().range_coords(min_r, max_r, min_c, max_c))
+                } else {
+                    None
+                }
             });
-        let mut data = vec![V::Empty; total];
-        if let Some(coords) = populated {
+        if let Some(coords) = sparse_pop {
+            ctx.steps = ctx.steps.saturating_add(1);
+            if ctx.steps > Self::MAX_EVAL_STEPS {
+                return Err(FormulaError::Value);
+            }
             for coord in coords {
                 let (dr, dc) = (
                     (coord.row() - min_r) as usize,
@@ -236,17 +244,23 @@ impl SheetEngine {
             return Ok(Val::error(FormulaError::Ref));
         }
         let (rows, cols) = area.unwrap_or((1, 1));
-        let grid = Grid::build(rows, cols, |r, c| {
-            if r == 0 && c == 0 {
-                anchor.clone()
-            } else {
-                match PackedCellCoordinate::new(coord.row() + r as u32, coord.col() + c as u32) {
-                    Ok(at) => self.eval_sheet_coord(sheet_opt, at, ctx, depth),
-                    Err(_) => V::Error(FormulaError::Ref),
-                }
+        ctx.charge_array_cells(rows, cols)?;
+        let mut data = Vec::with_capacity(rows * cols);
+        for r in 0..rows {
+            for c in 0..cols {
+                let v = if r == 0 && c == 0 {
+                    anchor.clone()
+                } else {
+                    match PackedCellCoordinate::new(coord.row() + r as u32, coord.col() + c as u32)
+                    {
+                        Ok(at) => self.eval_sheet_coord(sheet_opt, at, ctx, depth),
+                        Err(_) => V::Error(FormulaError::Ref),
+                    }
+                };
+                data.push(v);
             }
-        })?;
-        Ok(Val::grid(grid))
+        }
+        Ok(Val::grid(Grid::from_rows(rows, cols, data)))
     }
 
     fn eval_val_call(
@@ -281,7 +295,7 @@ impl SheetEngine {
             "BYROW" | "BYCOL" => self.fn_byrow_bycol(name == "BYROW", args, env, ctx, depth),
             "TRANSPOSE" if args.len() == 1 => {
                 let grid = self.eval_val(&args[0], env, ctx, depth + 1)?.into_grid()?;
-                Ok(Val::grid(grid.transposed()))
+                Ok(Val::grid(grid.transposed_checked(ctx)?))
             }
             "XLOOKUP" => self.fn_xlookup_array(args, env, ctx, depth),
             "TAKE" | "DROP" => self.fn_take_drop(name == "TAKE", args, env, ctx, depth),
@@ -324,11 +338,12 @@ impl SheetEngine {
                 let result = self.matrix_expr(&call, ctx, depth);
                 ctx.temp.truncate(mark);
                 match result {
-                    Ok(Some(m)) => Ok(Val::grid(Grid::from_rows(
+                    Ok(Some(m)) => Ok(Val::grid(Grid::from_rows_checked(
+                        ctx,
                         m.rows,
                         m.cols,
                         (0..m.data.len()).map(|i| m.value_at(i)).collect(),
-                    ))),
+                    )?)),
                     Ok(None) => Ok(Val::error(FormulaError::Name)),
                     Err(e) => Ok(Val::error(e)),
                 }
@@ -466,7 +481,7 @@ impl SheetEngine {
         }
         let present: Vec<&Grid> = grids.iter().flatten().map(|g| &**g).collect();
         let (rows, cols) = broadcast_dims(&present);
-        check_cells(rows, cols)?;
+        ctx.charge_array_cells(rows, cols)?;
         let mut data = Vec::with_capacity(rows * cols);
         for r in 0..rows {
             for c in 0..cols {
@@ -502,7 +517,8 @@ pub(crate) fn literal(value: &V) -> Expr {
     }
 }
 
-fn unary_grid(op: &Expr, grid: &Grid) -> Grid {
+fn unary_grid(ctx: &mut EvalContext<'_>, op: &Expr, grid: &Grid) -> Result<Grid, FormulaError> {
+    ctx.charge_array_cells(grid.rows, grid.cols)?;
     let data = grid
         .data
         .iter()
@@ -521,12 +537,17 @@ fn unary_grid(op: &Expr, grid: &Grid) -> Grid {
             },
         })
         .collect();
-    Grid::from_rows(grid.rows, grid.cols, data)
+    Ok(Grid::from_rows(grid.rows, grid.cols, data))
 }
 
-fn binary_grid(op: BinaryOp, l: &Grid, r: &Grid) -> Result<Grid, FormulaError> {
+fn binary_grid(
+    ctx: &mut EvalContext<'_>,
+    op: BinaryOp,
+    l: &Grid,
+    r: &Grid,
+) -> Result<Grid, FormulaError> {
     let (rows, cols) = broadcast_dims(&[l, r]);
-    check_cells(rows, cols)?;
+    ctx.charge_array_cells(rows, cols)?;
     let mut data = Vec::with_capacity(rows * cols);
     for i in 0..rows {
         for j in 0..cols {

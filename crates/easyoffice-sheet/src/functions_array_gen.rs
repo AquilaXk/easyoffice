@@ -8,7 +8,7 @@
 //! an array that is too big. The reference has no array `XLOOKUP`; the match position comes from
 //! this engine's `XMATCH`, so the match and search modes are the ones `XLOOKUP` already has.
 
-use crate::array::{check_cells, Env, Grid, Val};
+use crate::array::{Env, Grid, Val};
 use crate::array_eval::ValResult;
 use crate::{
     EvalContext, EvaluatedCellValue as V, Expr, FormulaError, PackedCellCoordinate, SheetEngine,
@@ -51,10 +51,9 @@ impl SheetEngine {
         }
         let rows = self.arg_size(args, 0, PackedCellCoordinate::MAX_ROWS, env, ctx, depth)?;
         let cols = self.arg_size(args, 1, PackedCellCoordinate::MAX_COLS, env, ctx, depth)?;
-        check_cells(rows, cols)?;
         let start = self.arg_number(args, 2, 1.0, env, ctx, depth)?;
         let step = self.arg_number(args, 3, 1.0, env, ctx, depth)?;
-        let grid = Grid::build(rows, cols, |r, c| {
+        let grid = Grid::build_checked(ctx, rows, cols, |r, c| {
             V::Number(start + (r * cols + c) as f64 * step)
         })?;
         Ok(Val::grid(grid))
@@ -73,23 +72,24 @@ impl SheetEngine {
         }
         let rows = self.arg_size(args, 0, PackedCellCoordinate::MAX_ROWS, env, ctx, depth)?;
         let cols = self.arg_size(args, 1, PackedCellCoordinate::MAX_COLS, env, ctx, depth)?;
-        check_cells(rows, cols)?;
         let min = self.arg_number(args, 2, 0.0, env, ctx, depth)?;
         let max = self.arg_number(args, 3, 1.0, env, ctx, depth)?;
         if min > max {
             return Err(FormulaError::Value);
         }
         let whole = self.arg_bool(args, 4, env, ctx, depth)?;
-        let grid = Grid::build(rows, cols, |_, _| {
+        ctx.charge_array_cells(rows, cols)?;
+        let mut data = Vec::with_capacity(rows * cols);
+        for _ in 0..rows * cols {
             let unit = ctx.next_rand_f64();
-            V::Number(if whole {
+            data.push(V::Number(if whole {
                 let low = min.floor();
                 low + (unit * (max.floor() - low + 1.0)).floor()
             } else {
                 min + unit * (max - min)
-            })
-        })?;
-        Ok(Val::grid(grid))
+            }));
+        }
+        Ok(Val::grid(Grid::from_rows(rows, cols, data)))
     }
 
     /// `IF` over arrays: a single condition picks a branch (which stays whole, array or not), an array
@@ -127,7 +127,7 @@ impl SheetEngine {
             cond.rows.max(yes.rows).max(no.rows),
             cond.cols.max(yes.cols).max(no.cols),
         );
-        let grid = Grid::build(rows, cols, |r, c| {
+        let grid = Grid::build_checked(ctx, rows, cols, |r, c| {
             let at = |g: &Grid| {
                 let (r, c) = (
                     if g.rows == 1 { 0 } else { r },
@@ -170,7 +170,7 @@ impl SheetEngine {
         }
         let fallback = self.eval_val(&args[1], env, ctx, depth + 1)?.into_grid()?;
         let (rows, cols) = (value.rows.max(fallback.rows), value.cols.max(fallback.cols));
-        let grid = Grid::build(rows, cols, |r, c| {
+        let grid = Grid::build_checked(ctx, rows, cols, |r, c| {
             let at = |g: &Grid| {
                 let (r, c) = (
                     if g.rows == 1 { 0 } else { r },
@@ -228,12 +228,16 @@ impl SheetEngine {
             _ => false,
         };
         if !wide {
-            let grid = Grid::build(lookup.rows, lookup.cols, |r, c| {
-                let mut one = vec![crate::array_eval::literal(lookup.get(r, c))];
-                one.extend(rest.iter().cloned());
-                self.eval_func_ctx("XLOOKUP", &one, ctx, depth)
-            })?;
-            return Ok(Val::grid(grid));
+            ctx.charge_array_cells(lookup.rows, lookup.cols)?;
+            let mut data = Vec::with_capacity(lookup.rows * lookup.cols);
+            for r in 0..lookup.rows {
+                for c in 0..lookup.cols {
+                    let mut one = vec![crate::array_eval::literal(lookup.get(r, c))];
+                    one.extend(rest.iter().cloned());
+                    data.push(self.eval_func_ctx("XLOOKUP", &one, ctx, depth));
+                }
+            }
+            return Ok(Val::grid(Grid::from_rows(lookup.rows, lookup.cols, data)));
         }
         if !lookup.is_scalar() {
             return Err(FormulaError::Value);
@@ -269,7 +273,7 @@ impl SheetEngine {
                 .ref_spec_dims(&rest[0], ctx, depth)
                 .is_some_and(|d| d.1 == 1);
         let (out_rows, out_cols) = if vertical { (1, cols) } else { (rows, 1) };
-        check_cells(out_rows, out_cols)?;
+        ctx.charge_array_cells(out_rows, out_cols)?;
         let mut data = Vec::with_capacity(out_rows * out_cols);
         for k in 0..out_rows * out_cols {
             let (dr, dc) = if vertical { (found, k) } else { (k, found) };

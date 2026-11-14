@@ -164,12 +164,12 @@ pub(crate) fn xlookup_returns_array(args: &[Expr]) -> bool {
 /// which calculates them element by element itself.
 pub(crate) fn needs_array(root: &Expr) -> bool {
     arrayish(root) || {
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = crate::DetSet::default();
         scan(root, &mut seen)
     }
 }
 
-fn scan(expr: &Expr, seen: &mut std::collections::HashSet<*const crate::SharedExpr>) -> bool {
+fn scan(expr: &Expr, seen: &mut crate::DetSet<*const crate::SharedExpr>) -> bool {
     match expr {
         Expr::Shared(shared) => {
             seen.insert(std::sync::Arc::as_ptr(shared)) && scan(&shared.expr, seen)

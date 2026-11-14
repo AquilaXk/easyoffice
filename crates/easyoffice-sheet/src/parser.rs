@@ -400,6 +400,66 @@ pub fn normalize_open_formula_references(raw_src: &str) -> String {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct RefEndpointSpec {
+    pub(crate) coord: PackedCellCoordinate,
+    pub(crate) shift_row: bool,
+    pub(crate) shift_col: bool,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum RefSpec {
+    Fixed,
+    Cell(RefEndpointSpec),
+    Range {
+        start: RefEndpointSpec,
+        end: RefEndpointSpec,
+    },
+}
+
+fn cell_endpoint_spec(raw: &str, coord: PackedCellCoordinate) -> RefEndpointSpec {
+    let (col_abs, after_col_dollar) = match raw.strip_prefix('$') {
+        Some(rest) => (true, rest),
+        None => (false, raw),
+    };
+    let letters_end = after_col_dollar
+        .find(|c: char| !c.is_ascii_alphabetic())
+        .unwrap_or(after_col_dollar.len());
+    let (letters, rest) = after_col_dollar.split_at(letters_end);
+    let (row_abs, digits) = match rest.strip_prefix('$') {
+        Some(r) => (true, r),
+        None => (false, rest),
+    };
+    let is_cell = !letters.is_empty()
+        && letters.len() <= 3
+        && !digits.is_empty()
+        && digits.len() <= 7
+        && digits.bytes().all(|b| b.is_ascii_digit());
+    RefEndpointSpec {
+        coord,
+        shift_row: is_cell && !row_abs,
+        shift_col: is_cell && !col_abs,
+    }
+}
+
+fn range_ref_spec(start_raw: &str, end_raw: &str) -> RefSpec {
+    match (
+        PackedCellCoordinate::parse_a1(start_raw),
+        PackedCellCoordinate::parse_a1(end_raw),
+    ) {
+        (Ok(c0), Ok(c1)) => {
+            let s0 = cell_endpoint_spec(start_raw, c0);
+            let s1 = cell_endpoint_spec(end_raw, c1);
+            if s0.shift_row || s0.shift_col || s1.shift_row || s1.shift_col {
+                RefSpec::Range { start: s0, end: s1 }
+            } else {
+                RefSpec::Fixed
+            }
+        }
+        _ => RefSpec::Fixed,
+    }
+}
+
 pub(crate) use crate::lexer::tokenize_formula;
 
 pub(crate) struct Parser<'a> {
@@ -413,6 +473,8 @@ pub(crate) struct Parser<'a> {
     tables: Option<&'a TableCtx<'a>>,
     /// The hash of each table a structured reference named (see [`crate::table_index`]).
     table_keys: Vec<NameKey>,
+    /// Optional per-leaf shiftability descriptors recorded alongside parsed references.
+    ref_specs: Option<Vec<RefSpec>>,
 }
 
 impl<'a> Parser<'a> {
@@ -424,6 +486,13 @@ impl<'a> Parser<'a> {
             saw_scope: false,
             tables,
             table_keys: Vec::new(),
+            ref_specs: None,
+        }
+    }
+
+    fn record_ref(&mut self, spec: RefSpec) {
+        if let Some(specs) = &mut self.ref_specs {
+            specs.push(spec);
         }
     }
 
@@ -438,10 +507,21 @@ impl<'a> Parser<'a> {
             Some(name) => name_key(&easyoffice_formats::fold_name(name)),
             None => implicit_key(self.tables.map_or("", |ctx| ctx.sheet)),
         });
-        Ok(match self.tables {
+        let resolved = match self.tables {
             Some(ctx) => ctx.index.resolve(ctx, table, &sref),
             None => Expr::ErrorLiteral(FormulaError::Name),
-        })
+        };
+        if matches!(
+            resolved,
+            Expr::Cell(_)
+                | Expr::Range(_)
+                | Expr::SheetCell { .. }
+                | Expr::SheetRange { .. }
+                | Expr::SpillRef { .. }
+        ) {
+            self.record_ref(RefSpec::Fixed);
+        }
+        Ok(resolved)
     }
 
     pub(crate) fn peek(&self) -> Option<&Token> {
@@ -646,7 +726,13 @@ impl<'a> Parser<'a> {
             return Err(FormulaError::Ref);
         }
         match CellRange::parse_endpoints(start, &end) {
-            Ok(range) => Ok(Expr::Range(range)),
+            Ok(range) => {
+                if self.ref_specs.is_some() {
+                    let spec = range_ref_spec(start, &end);
+                    self.record_ref(spec);
+                }
+                Ok(Expr::Range(range))
+            }
             Err(_) => Ok(Expr::ErrorLiteral(FormulaError::Ref)),
         }
     }
@@ -700,11 +786,21 @@ impl<'a> Parser<'a> {
             return self.finish_range(&name);
         }
         match PackedCellCoordinate::parse_a1(&name) {
-            Ok(sc) if self.take_hash() => Ok(Expr::SpillRef {
-                sheet: None,
-                coord: sc,
-            }),
-            Ok(sc) => Ok(Expr::Cell(sc)),
+            Ok(sc) if self.take_hash() => {
+                if self.ref_specs.is_some() {
+                    self.record_ref(RefSpec::Cell(cell_endpoint_spec(&name, sc)));
+                }
+                Ok(Expr::SpillRef {
+                    sheet: None,
+                    coord: sc,
+                })
+            }
+            Ok(sc) => {
+                if self.ref_specs.is_some() {
+                    self.record_ref(RefSpec::Cell(cell_endpoint_spec(&name, sc)));
+                }
+                Ok(Expr::Cell(sc))
+            }
             Err(_) => Ok(self.name_or_error(None, name)),
         }
     }
@@ -749,16 +845,32 @@ impl<'a> Parser<'a> {
                 return Ok(Expr::ErrorLiteral(FormulaError::Ref));
             }
             return match CellRange::parse_endpoints(&cell_ident, &end_ident) {
-                Ok(range) => Ok(Expr::SheetRange { sheet: name, range }),
+                Ok(range) => {
+                    if self.ref_specs.is_some() {
+                        let spec = range_ref_spec(&cell_ident, &end_ident);
+                        self.record_ref(spec);
+                    }
+                    Ok(Expr::SheetRange { sheet: name, range })
+                }
                 Err(_) => Ok(Expr::ErrorLiteral(FormulaError::Ref)),
             };
         }
         match PackedCellCoordinate::parse_a1(&cell_ident) {
-            Ok(coord) if self.take_hash() => Ok(Expr::SpillRef {
-                sheet: Some(name),
-                coord,
-            }),
-            Ok(coord) => Ok(Expr::SheetCell { sheet: name, coord }),
+            Ok(coord) if self.take_hash() => {
+                if self.ref_specs.is_some() {
+                    self.record_ref(RefSpec::Cell(cell_endpoint_spec(&cell_ident, coord)));
+                }
+                Ok(Expr::SpillRef {
+                    sheet: Some(name),
+                    coord,
+                })
+            }
+            Ok(coord) => {
+                if self.ref_specs.is_some() {
+                    self.record_ref(RefSpec::Cell(cell_endpoint_spec(&cell_ident, coord)));
+                }
+                Ok(Expr::SheetCell { sheet: name, coord })
+            }
             Err(_) => match self.name_or_error(Some(name), cell_ident) {
                 named @ Expr::Name { .. } => Ok(named),
                 _ => Ok(Expr::ErrorLiteral(FormulaError::Ref)),
@@ -825,8 +937,27 @@ pub(crate) fn parse_formula_in(
     expr_src: &str,
     tables: Option<&TableCtx<'_>>,
 ) -> Result<Parsed, FormulaError> {
+    parse_formula_inner(expr_src, tables, false).map(|(parsed, _)| parsed)
+}
+
+/// Parses a formula body while collecting shiftability specs for each written reference node.
+pub(crate) fn parse_formula_with_refs(
+    expr_src: &str,
+    tables: Option<&TableCtx<'_>>,
+) -> Result<(Parsed, Vec<RefSpec>), FormulaError> {
+    parse_formula_inner(expr_src, tables, true)
+}
+
+fn parse_formula_inner(
+    expr_src: &str,
+    tables: Option<&TableCtx<'_>>,
+    capture_refs: bool,
+) -> Result<(Parsed, Vec<RefSpec>), FormulaError> {
     let tokens = tokenize_formula(expr_src)?;
     let mut parser = Parser::new(tokens, tables);
+    if capture_refs {
+        parser.ref_specs = Some(Vec::new());
+    }
     let mut expr = parser.parse_expression(0)?;
     if parser.pos != parser.tokens.len() {
         return Err(FormulaError::Value);
@@ -834,11 +965,15 @@ pub(crate) fn parse_formula_in(
     if parser.saw_scope {
         crate::parser_array::resolve_scopes(&mut expr);
     }
-    Ok(Parsed {
-        expr,
-        saw_name: parser.saw_name,
-        table_keys: parser.table_keys,
-    })
+    let specs = parser.ref_specs.take().unwrap_or_default();
+    Ok((
+        Parsed {
+            expr,
+            saw_name: parser.saw_name,
+            table_keys: parser.table_keys,
+        },
+        specs,
+    ))
 }
 
 /// Parses a formula body with no tables around it. The flag says whether it uses defined names.

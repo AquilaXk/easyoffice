@@ -662,3 +662,68 @@ fn readers_through_indirect_that_the_deadline_cut_off_are_finished_by_the_next_p
     session.recalculate();
     assert_eq!(value(&session, "C7"), "10");
 }
+
+#[test]
+fn matrix_n3_ops_respect_step_and_time_deadlines() {
+    let mut wb = WorkbookEngine::new();
+    wb.add_sheet("Sheet1");
+    // Three 400x400 MMULTs (192M multiply-adds total) exceed MAX_EVAL_STEPS inside O(N^3) loops.
+    wb.set_cell(
+        "Sheet1",
+        "A1",
+        "=SUM(MMULT(MUNIT(400),MUNIT(400)),MMULT(MUNIT(400),MUNIT(400)),MMULT(MUNIT(400),MUNIT(400)))",
+    )
+    .unwrap();
+    assert_eq!(
+        wb.evaluate_cell("Sheet1", "A1"),
+        EvaluatedCellValue::Error(FormulaError::Value)
+    );
+
+    // A tight deadline cuts off an in-flight O(N^3) matrix evaluation promptly.
+    wb.set_cell("Sheet1", "B1", "=INDEX(MMULT(MUNIT(400),MUNIT(400)),1,1)")
+        .unwrap();
+    let targets = [WorkbookEvalTarget {
+        sheet: "Sheet1",
+        expr: "B1",
+        anchor: None,
+    }];
+    let batch = wb.evaluate_targets_within(&targets, Duration::from_millis(1));
+    assert!(batch.timed_out);
+}
+
+#[test]
+fn cf_session_deadline_stops_set_rules_and_recovers_on_next_update() {
+    use easyoffice_formats::{parse_sqref, CfKind, CfRule, CfStyle, SheetRules};
+    let mut wb = WorkbookEngine::new();
+    let _ = wb.add_sheet("Sheet1");
+    for row in 1..=6 {
+        wb.set_cell("Sheet1", &format!("A{row}"), row.to_string())
+            .unwrap();
+    }
+    let mut session = session_with(wb, Duration::ZERO);
+    let rules = SheetRules {
+        cf: vec![CfRule {
+            ranges: parse_sqref("A1:A6"),
+            priority: 1,
+            stop_if_true: false,
+            kind: CfKind::Expression("A1>0".to_string()),
+            style: CfStyle {
+                bg: Some(0xFF_00_00),
+                fg: None,
+                flags: 0,
+            },
+        }],
+        ..SheetRules::default()
+    };
+    let visuals = session.set_rules("Sheet1", rules).unwrap();
+    assert!(
+        visuals.is_empty(),
+        "set_rules with Duration::ZERO budget must fail closed immediately (got {} hits)",
+        visuals.len()
+    );
+    session.budget.max_time = MAX_EVAL_TIME;
+    let out = session.recalculate();
+    let updates = session.rule_updates(&[], &out);
+    let marked: usize = updates.changed.iter().map(|(_, v)| v.len()).sum();
+    assert_eq!(marked, 6, "rule must recover cleanly once budget returns");
+}

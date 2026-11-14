@@ -49,12 +49,14 @@ impl EvalContext<'_> {
     fn expire(&mut self) {
         self.clock.expired = true;
         self.steps = usize::MAX;
+        self.array_bytes = crate::array::MAX_ARRAY_BYTES;
     }
 
     /// The same context with no deadline and a fresh step budget (for cells that hold constants).
     pub(crate) fn without_deadline(mut self) -> Self {
         self.clock = Clock::default();
         self.steps = 0;
+        self.array_bytes = 0;
         self
     }
 
@@ -62,6 +64,43 @@ impl EvalContext<'_> {
     #[inline]
     pub(crate) fn expired(&self) -> bool {
         self.clock.expired
+    }
+
+    /// Charges `n` evaluation steps, polls the deadline across [`POLL_STEPS`] boundaries, and
+    /// fails closed with `#VALUE!` when [`MAX_EVAL_STEPS`](crate::MAX_EVAL_STEPS) or the deadline
+    /// is exceeded.
+    #[inline]
+    pub(crate) fn charge_steps(&mut self, n: usize) -> Result<(), FormulaError> {
+        let before = self.steps;
+        let next = before.saturating_add(n);
+        self.steps = next;
+        if (before ^ next) >= POLL_STEPS {
+            self.poll_deadline();
+        }
+        if self.steps > crate::MAX_EVAL_STEPS {
+            return Err(FormulaError::Value);
+        }
+        Ok(())
+    }
+
+    /// Reserves `rows * cols` dynamic-array cell slots against the per-root 128 MiB array budget
+    /// (`#SPILL!` fail-closed on overflow or exhaustion).
+    #[inline]
+    pub(crate) fn charge_array_cells(
+        &mut self,
+        rows: usize,
+        cols: usize,
+    ) -> Result<(), FormulaError> {
+        let bytes = crate::array::array_bytes_for(rows, cols)?;
+        let next = self
+            .array_bytes
+            .checked_add(bytes)
+            .ok_or(FormulaError::Spill)?;
+        if next > crate::array::MAX_ARRAY_BYTES {
+            return Err(FormulaError::Spill);
+        }
+        self.array_bytes = next;
+        Ok(())
     }
 
     /// Counts `n` root ticks and reads the clock when a multiple of [`POLL_STEPS`] is crossed.
@@ -82,11 +121,17 @@ impl EvalContext<'_> {
         }
     }
 
-    /// Starts a root cell: a fresh step budget unless the deadline has passed.
+    /// Starts a root cell: a fresh step and array budget unless the deadline has passed.
     #[inline]
     pub(crate) fn reset_steps(&mut self) {
         self.tick(ROOT_TICKS);
-        self.steps = if self.clock.expired { usize::MAX } else { 0 };
+        if self.clock.expired {
+            self.steps = usize::MAX;
+            self.array_bytes = crate::array::MAX_ARRAY_BYTES;
+        } else {
+            self.steps = 0;
+            self.array_bytes = 0;
+        }
     }
 }
 
@@ -131,7 +176,8 @@ impl SheetEngine {
                 None
             } else {
                 // A value computed while the deadline passed may rest on an aborted cell.
-                Some(self.eval_coord_ctx(coord, &mut ctx, 0)).filter(|_| !ctx.expired())
+                let val = self.eval_coord_ctx(coord, &mut ctx, 0);
+                (!ctx.expired()).then_some(val)
             };
             if let Some(value) = value.or_else(|| self.settled_value(coord, &ctx)) {
                 results.insert(coord, value);

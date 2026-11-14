@@ -31,7 +31,8 @@ impl RecalcSession {
             .first()
             .map_or(1, |s| s.resolved_sheet_id());
         let memo = std::mem::replace(&mut self.memo, MemoTable::new(primary_id));
-        let mut ctx = EvalContext::with_workbook(&self.wb, primary_id);
+        let mut ctx =
+            EvalContext::with_workbook(&self.wb, primary_id).with_time_limit(self.budget.max_time);
         ctx.memo = memo;
         // A formula the last recalculation did not reach reads as the value the page shows (empty
         // for a new one): a rule never calculates it, which would repeat the work the deadline cut off.

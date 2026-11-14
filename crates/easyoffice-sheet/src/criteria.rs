@@ -249,25 +249,51 @@ struct CritTotals {
 }
 
 impl SheetEngine {
+    /// Exact populated cell count in a non-transposed block, if resolvable to a real sheet.
+    fn block_pop_count(
+        &self,
+        sheet: Option<&str>,
+        origin: (u32, u32),
+        counts: (usize, usize),
+        ctx: &EvalContext<'_>,
+    ) -> Option<usize> {
+        let (min_r, min_c) = origin;
+        let (r_count, c_count) = counts;
+        if r_count == 0 || c_count == 0 {
+            return Some(0);
+        }
+        let ts = self.resolve_sheet_ref(sheet, ctx)?;
+        let max_r = min_r + (r_count as u32) - 1;
+        let max_c = min_c + (c_count as u32) - 1;
+        Some(ts.cell_index().count_in_range(min_r, max_r, min_c, max_c))
+    }
+
     /// Populated coordinates inside the anchored block when the block is large and sparse.
+    /// Returns `Some(vec)` only when `pop_count > 0`; callers handle `pop_count == 0` via `block_pop_count`.
     fn sparse_block_population(
         &self,
         sheet: Option<&str>,
         origin: (u32, u32),
         counts: (usize, usize),
-        ctx: &mut EvalContext<'_>,
+        min_cells: usize,
+        ctx: &EvalContext<'_>,
     ) -> Option<Vec<PackedCellCoordinate>> {
         let (min_r, min_c) = origin;
         let (r_count, c_count) = counts;
         let total = r_count.saturating_mul(c_count);
-        if total <= SPARSE_BLOCK_MIN_CELLS {
+        if total <= min_cells {
             return None;
         }
-        let ts = self
-            .resolve_sheet_ref(sheet, ctx)
-            .filter(|ts| total > ts.cells.len().saturating_mul(2))?;
+        let ts = self.resolve_sheet_ref(sheet, ctx)?;
         let max_r = min_r + (r_count as u32).saturating_sub(1);
         let max_c = min_c + (c_count as u32).saturating_sub(1);
+        let pop_count = ts.cell_index().count_in_range(min_r, max_r, min_c, max_c);
+        if total <= pop_count.saturating_mul(2) {
+            return None;
+        }
+        if pop_count == 0 {
+            return Some(Vec::new());
+        }
         Some(ts.cell_index().range_coords(min_r, max_r, min_c, max_c))
     }
 
@@ -303,28 +329,40 @@ impl SheetEngine {
         let compiled_crit = CompiledCriteria::compile(&crit_val);
         let (ref sheet_opt, min_r, min_c, r_count, c_count, transposed) = range_spec;
         let total = r_count.saturating_mul(c_count);
-        let sparse = if transposed {
-            None
-        } else {
-            self.sparse_block_population(
+        if !transposed && total > 64 {
+            if let Some(pop_count) = self.block_pop_count(
                 sheet_opt.as_deref(),
                 (min_r, min_c),
                 (r_count, c_count),
                 ctx,
-            )
-        };
-        let mut cnt = 0usize;
-        if let Some(pop_coords) = sparse {
-            let pop_len = pop_coords.len();
-            for coord in pop_coords {
-                let val = self.eval_sheet_coord(sheet_opt.as_deref(), coord, ctx, depth);
-                cnt += usize::from(compiled_crit.matches(&val));
+            ) {
+                if pop_count == 0 {
+                    ctx.steps = ctx.steps.saturating_add(1);
+                    if ctx.steps > Self::MAX_EVAL_STEPS {
+                        return Err(FormulaError::Value);
+                    }
+                    let matched = usize::from(compiled_crit.matches(&EvaluatedCellValue::Empty));
+                    return Ok(EvaluatedCellValue::Number((total * matched) as f64));
+                }
+                if total > pop_count.saturating_mul(2) {
+                    let ts = self.resolve_sheet_ref(sheet_opt.as_deref(), ctx).unwrap();
+                    let max_r = min_r + (r_count as u32).saturating_sub(1);
+                    let max_c = min_c + (c_count as u32).saturating_sub(1);
+                    let pop_coords = ts.cell_index().range_coords(min_r, max_r, min_c, max_c);
+                    let pop_len = pop_coords.len();
+                    let mut cnt = 0usize;
+                    for coord in pop_coords {
+                        let val = self.eval_sheet_coord(sheet_opt.as_deref(), coord, ctx, depth);
+                        cnt += usize::from(compiled_crit.matches(&val));
+                    }
+                    if compiled_crit.matches(&EvaluatedCellValue::Empty) {
+                        cnt += total.saturating_sub(pop_len);
+                    }
+                    return Ok(EvaluatedCellValue::Number(cnt as f64));
+                }
             }
-            if compiled_crit.matches(&EvaluatedCellValue::Empty) {
-                cnt += total.saturating_sub(pop_len);
-            }
-            return Ok(EvaluatedCellValue::Number(cnt as f64));
         }
+        let mut cnt = 0usize;
         for dr in 0..r_count {
             for dc in 0..c_count {
                 let val = self.eval_streaming_cell_allow_error(&range_spec, dr, dc, ctx, depth)?;
@@ -380,7 +418,24 @@ impl SheetEngine {
             Some(arg) => Some(self.resolve_sum_target(arg, (r_count, c_count), ctx, depth)?),
             None => None,
         };
-        let anchor_spec = target_spec.as_ref().unwrap_or(&range_spec);
+        let mut anchor_spec = target_spec.as_ref().unwrap_or(&range_spec);
+        if !transposed && !anchor_spec.5 && !compiled_crit.matches(&EvaluatedCellValue::Empty) {
+            if let (Some(crit_pop), Some(targ_pop)) = (
+                self.block_pop_count(
+                    range_spec.0.as_deref(),
+                    (range_spec.1, range_spec.2),
+                    (r_count, c_count),
+                    ctx,
+                ),
+                Some(anchor_spec).and_then(|sp| {
+                    self.block_pop_count(sp.0.as_deref(), (sp.1, sp.2), (r_count, c_count), ctx)
+                }),
+            ) {
+                if crit_pop < targ_pop {
+                    anchor_spec = &range_spec;
+                }
+            }
+        }
         let sparse = if transposed || anchor_spec.5 {
             None
         } else {
@@ -388,6 +443,7 @@ impl SheetEngine {
                 anchor_spec.0.as_deref(),
                 (anchor_spec.1, anchor_spec.2),
                 (r_count, c_count),
+                64,
                 ctx,
             )
         };
@@ -550,23 +606,61 @@ impl SheetEngine {
     ) -> Result<CritTotals, FormulaError> {
         let total = job.r_count.saturating_mul(job.c_count);
         let mut totals = CritTotals::default();
-        let sparse_idx = job
-            .specs
-            .iter()
-            .zip(job.crits.iter())
-            .position(|(sp, cc)| !sp.5 && !cc.matches(&EvaluatedCellValue::Empty));
-        let target_dense = job.target_spec.as_ref().is_some_and(|ts| !ts.5);
-        if total > SPARSE_BLOCK_MIN_CELLS && (sparse_idx.is_some() || target_dense) {
-            let anchor = match sparse_idx {
-                Some(idx) => &job.specs[idx],
-                None => job.target_spec.as_ref().unwrap(),
-            };
+        let best_sparse = if total > 64 {
+            let crit_cands = job
+                .specs
+                .iter()
+                .zip(job.crits.iter())
+                .filter(|(sp, cc)| !sp.5 && !cc.matches(&EvaluatedCellValue::Empty))
+                .map(|(sp, _)| sp);
+            let target_cand = job.target_spec.as_ref().filter(|ts| !ts.5).into_iter();
+            crit_cands
+                .chain(target_cand)
+                .filter_map(|sp| {
+                    let pop = self.block_pop_count(
+                        sp.0.as_deref(),
+                        (sp.1, sp.2),
+                        (job.r_count, job.c_count),
+                        ctx,
+                    )?;
+                    Some((sp, pop))
+                })
+                .min_by_key(|&(_, pop)| pop)
+        } else {
+            None
+        };
+        if let Some((anchor, min_pop)) = best_sparse.filter(|&(_, pop)| {
+            pop == 0 || total > pop.saturating_mul(2).max(SPARSE_BLOCK_MIN_CELLS)
+        }) {
+            if min_pop == 0 {
+                ctx.steps = ctx.steps.saturating_add(1);
+                return Ok(totals);
+            }
             self.multi_criteria_sparse(job, anchor, &mut totals, ctx, depth)?;
-        } else if total > SPARSE_BLOCK_MIN_CELLS
-            && job.target_spec.is_none()
-            && job.specs.iter().all(|sp| !sp.5)
-        {
-            totals.count = self.multi_criteria_count_by_population(job, total, ctx, depth)?;
+        } else if total > 64 && job.target_spec.is_none() && job.specs.iter().all(|sp| !sp.5) {
+            let pop_sum: Option<usize> = job
+                .specs
+                .iter()
+                .map(|sp| {
+                    self.block_pop_count(
+                        sp.0.as_deref(),
+                        (sp.1, sp.2),
+                        (job.r_count, job.c_count),
+                        ctx,
+                    )
+                })
+                .sum();
+            if pop_sum.is_some_and(|sum| total > sum.saturating_mul(2)) {
+                totals.count = self.multi_criteria_count_by_population(job, total, ctx, depth)?;
+            } else {
+                for dr in 0..job.r_count {
+                    for dc in 0..job.c_count {
+                        if self.cell_passes_all(job, dr, dc, ctx, depth)? {
+                            self.accumulate_match(job, dr, dc, &mut totals, ctx, depth)?;
+                        }
+                    }
+                }
+            }
         } else {
             for dr in 0..job.r_count {
                 for dc in 0..job.c_count {
@@ -699,6 +793,99 @@ mod tests {
         assert_eq!(
             s.evaluate_formula_str("=SUMIFS(B1:B5000, A1:A5000, \">10\", B1:B5000, \"<300\")"),
             EvaluatedCellValue::Number(450.0)
+        );
+    }
+
+    #[test]
+    fn q2_sparse_col_avoids_dense_scan_when_other_cols_populated() {
+        let mut s = SheetEngine::new("SparseQ2");
+        // Populate 8000 rows in Z so whole-sheet `cells.len() * 2` > 15_000 (defeating
+        // whole-sheet heuristics while A1:A15000 has only 2 populated cells).
+        for r in 1..=8000u32 {
+            s.set_cell(&format!("Z{r}"), r.to_string()).unwrap();
+        }
+        s.set_cell("A5", "10").unwrap();
+        s.set_cell("A20", "=\"\"").unwrap();
+
+        assert_eq!(
+            s.evaluate_formula_str("=COUNT(A1:A15000)"),
+            EvaluatedCellValue::Number(1.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=COUNTA(A1:A15000)"),
+            EvaluatedCellValue::Number(2.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=COUNTBLANK(A1:A15000)"),
+            EvaluatedCellValue::Number(14999.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=COUNTIF(A1:A15000, \">5\")"),
+            EvaluatedCellValue::Number(1.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=COUNTIF(A1:A15000, \"\")"),
+            EvaluatedCellValue::Number(14999.0)
+        );
+
+        // 150 calls stay under MAX_FORMULA_LEN (8192) while dense scans would hit 2.25M > MAX_EVAL_STEPS.
+        for (expr, expected) in [
+            ("COUNT(A1:A15000)", 150.0),
+            ("COUNTA(A1:A15000)", 300.0),
+            ("COUNTBLANK(A1:A15000)", 150.0 * 14999.0),
+            ("COUNTIF(A1:A15000, \">5\")", 150.0),
+            ("COUNTIFS(Z1:Z15000, \">0\", B1:B15000, \">0\")", 0.0),
+        ] {
+            let joined = (0..150).map(|_| expr).collect::<Vec<_>>().join("+");
+            assert_eq!(
+                s.evaluate_formula_str(&format!("={joined}")),
+                EvaluatedCellValue::Number(expected),
+                "expr={expr}"
+            );
+        }
+
+        // Array condition evaluation in sparse range (`array_eval::read_ref_grid`): `"" > 5` is TRUE in spreadsheet comparison order (10 and "" => 2 hits).
+        let arr_cond = (0..40)
+            .map(|_| "SUM(--(A1:A15000>5))")
+            .collect::<Vec<_>>()
+            .join("+");
+        assert_eq!(
+            s.evaluate_formula_str(&format!("={arr_cond}")),
+            EvaluatedCellValue::Number(80.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=SUM(--(A1:A15000=10))"),
+            EvaluatedCellValue::Number(1.0)
+        );
+
+        // Spilled cells committed via RecalcSession remain accurately counted in sparse ranges.
+        let mut wb = crate::WorkbookEngine::new();
+        wb.add_sheet("SpillQ2");
+        wb.set_cell("SpillQ2", "A10", "=SEQUENCE(5)").unwrap();
+        wb.set_cell("SpillQ2", "B1", "=COUNT(A1:A3500)").unwrap();
+        wb.set_cell("SpillQ2", "B2", "=COUNTA(A1:A3500)").unwrap();
+        wb.set_cell("SpillQ2", "B3", "=COUNTBLANK(A1:A3500)")
+            .unwrap();
+        wb.set_cell("SpillQ2", "B4", "=COUNTIF(A1:A3500, \">2\")")
+            .unwrap();
+        let mut session = crate::RecalcSession::new(wb).unwrap();
+        session.recalculate();
+        let a1 = |a: &str| PackedCellCoordinate::parse_a1(a).unwrap();
+        assert_eq!(
+            session.cell_value("SpillQ2", a1("B1")),
+            EvaluatedCellValue::Number(5.0)
+        );
+        assert_eq!(
+            session.cell_value("SpillQ2", a1("B2")),
+            EvaluatedCellValue::Number(5.0)
+        );
+        assert_eq!(
+            session.cell_value("SpillQ2", a1("B3")),
+            EvaluatedCellValue::Number(3495.0)
+        );
+        assert_eq!(
+            session.cell_value("SpillQ2", a1("B4")),
+            EvaluatedCellValue::Number(3.0)
         );
     }
 }

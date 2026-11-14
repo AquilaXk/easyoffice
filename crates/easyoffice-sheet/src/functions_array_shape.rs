@@ -11,7 +11,7 @@
 //! (`TAKE(a,,2)`) means the whole side, every result is checked against the array budget, and an
 //! omitted `LAMBDA` parameter is a variable bound to nothing instead of an empty argument.
 
-use crate::array::{check_cells, Env, Grid, Val};
+use crate::array::{Env, Grid, Val};
 use crate::array_eval::ValResult;
 use crate::{EvalContext, EvaluatedCellValue as V, Expr, FormulaError, SheetEngine};
 use std::sync::Arc;
@@ -40,10 +40,15 @@ fn drop_range(len: usize, n: i64) -> std::ops::Range<usize> {
     }
 }
 
-fn slice(grid: &Grid, rows: std::ops::Range<usize>, cols: std::ops::Range<usize>) -> Grid {
-    let keep_rows: Vec<usize> = rows.collect();
-    let keep_cols: Vec<usize> = cols.collect();
-    grid.take_rows(&keep_rows).take_cols(&keep_cols)
+fn slice(
+    ctx: &mut EvalContext<'_>,
+    grid: &Grid,
+    rows: std::ops::Range<usize>,
+    cols: std::ops::Range<usize>,
+) -> Result<Grid, FormulaError> {
+    Grid::build_checked(ctx, rows.len(), cols.len(), |r, c| {
+        grid.get(rows.start + r, cols.start + c).clone()
+    })
 }
 
 /// The padding value of `EXPAND`/`WRAP*`: `#N/A` unless one is given.
@@ -113,7 +118,7 @@ impl SheetEngine {
         if row_range.is_empty() || col_range.is_empty() {
             return Err(FormulaError::Calc);
         }
-        Ok(Val::grid(slice(&grid, row_range, col_range)))
+        Ok(Val::grid(slice(ctx, &grid, row_range, col_range)?))
     }
 
     /// `TOCOL(array, [ignore], [scan_by_column])` and `TOROW(...)`.
@@ -162,9 +167,9 @@ impl SheetEngine {
         }
         let n = flat.len();
         Ok(Val::grid(if column {
-            Grid::from_rows(n, 1, flat)
+            Grid::from_rows_checked(ctx, n, 1, flat)?
         } else {
-            Grid::from_rows(1, n, flat)
+            Grid::from_rows_checked(ctx, 1, n, flat)?
         }))
     }
 
@@ -188,7 +193,7 @@ impl SheetEngine {
         if vertical {
             let cols = grids.iter().map(|g| g.cols).max().unwrap_or(0);
             let rows: usize = grids.iter().map(|g| g.rows).sum();
-            check_cells(rows, cols)?;
+            ctx.charge_array_cells(rows, cols)?;
             let mut data = Vec::with_capacity(rows * cols);
             for g in &grids {
                 for r in 0..g.rows {
@@ -205,7 +210,7 @@ impl SheetEngine {
         } else {
             let rows = grids.iter().map(|g| g.rows).max().unwrap_or(0);
             let cols: usize = grids.iter().map(|g| g.cols).sum();
-            check_cells(rows, cols)?;
+            ctx.charge_array_cells(rows, cols)?;
             let mut data = Vec::with_capacity(rows * cols);
             for r in 0..rows {
                 for g in &grids {
@@ -244,14 +249,10 @@ impl SheetEngine {
             }
             picks.push(if n > 0 { n - 1 } else { len + n } as usize);
         }
-        check_cells(
-            if rows { picks.len() } else { grid.rows },
-            if rows { grid.cols } else { picks.len() },
-        )?;
         Ok(Val::grid(if rows {
-            grid.take_rows(&picks)
+            grid.take_rows_checked(ctx, &picks)?
         } else {
-            grid.take_cols(&picks)
+            grid.take_cols_checked(ctx, &picks)?
         }))
     }
 
@@ -280,7 +281,7 @@ impl SheetEngine {
             None | Some(Expr::Missing) => pad_of(None),
             Some(_) => pad_of(Some(self.arg_single(args, 3, None, env, ctx, depth)?)),
         };
-        let out = Grid::build(rows, cols, |r, c| {
+        let out = Grid::build_checked(ctx, rows, cols, |r, c| {
             if r < grid.rows && c < grid.cols {
                 grid.get(r, c).clone()
             } else {
@@ -319,9 +320,9 @@ impl SheetEngine {
         let lines = n.div_ceil(count);
         let at = |i: usize| grid.data.get(i).cloned().unwrap_or_else(|| pad.clone());
         let out = if by_rows {
-            Grid::build(lines, count, |r, c| at(r * count + c))?
+            Grid::build_checked(ctx, lines, count, |r, c| at(r * count + c))?
         } else {
-            Grid::build(count, lines, |r, c| at(c * count + r))?
+            Grid::build_checked(ctx, count, lines, |r, c| at(c * count + r))?
         };
         Ok(Val::grid(out))
     }

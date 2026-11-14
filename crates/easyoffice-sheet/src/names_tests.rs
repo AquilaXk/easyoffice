@@ -517,3 +517,39 @@ fn an_alias_of_a_name_is_read_by_the_functions_like_the_name_and_like_the_defini
         "the sum of [[1,10],[2,20]] squared"
     );
 }
+
+#[test]
+fn recompiling_existing_cell_does_not_falsely_exhaust_name_budget() {
+    let mut wb = book();
+    for r in 1..=5u32 {
+        wb.set_cell("Sheet1", &format!("A{r}"), "10").unwrap();
+    }
+    wb.set_names(&[def("Big", None, &vec!["A1"; 500].join("+"))])
+        .unwrap();
+    // 2_097 * 1_000 = 2_097_000 <= MAX_WORKBOOK_NAME_NODES (2_097_152), leaving 152 nodes free.
+    let fill = crate::names::MAX_WORKBOOK_NAME_NODES / 1_000;
+    for i in 1..=fill {
+        wb.set_cell("Sheet1", &format!("X{i}"), "=SUM(Big)")
+            .unwrap();
+    }
+    let used_before = wb.name_nodes().0;
+    assert_eq!(used_before, fill * 1_000);
+    assert_eq!(value(&wb, "Sheet1", "X1"), V::Number(5_000.0));
+
+    // Repeatedly overwriting / recompiling X1 must reuse X1's old budget instead of double-counting.
+    for _ in 0..10 {
+        wb.set_cell("Sheet1", "X1", "=SUM(Big)").unwrap();
+        assert_eq!(value(&wb, "Sheet1", "X1"), V::Number(5_000.0));
+        assert_eq!(wb.name_nodes().0, used_before);
+    }
+
+    // Recompiling via set_names on Big must also keep X1 valid.
+    wb.set_names(&[def("Big", None, &vec!["A2"; 500].join("+"))])
+        .unwrap();
+    assert_eq!(value(&wb, "Sheet1", "X1"), V::Number(5_000.0));
+    assert_eq!(wb.name_nodes().0, used_before);
+
+    // A genuinely new concurrent cell exceeding the budget must still be blocked fail-closed.
+    wb.set_cell("Sheet1", "Z1", "=SUM(Big)").unwrap();
+    assert_eq!(value(&wb, "Sheet1", "Z1"), V::Error(FormulaError::Value));
+}

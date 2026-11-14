@@ -39,7 +39,8 @@ mod tests_structured;
 
 use crate::dag::is_formula;
 use crate::{
-    EvalContext, EvaluatedCellValue, FormulaError, MemoTable, PackedCellCoordinate, WorkbookEngine,
+    DetMap, DetSet, EvalContext, EvaluatedCellValue, FormulaError, MemoTable, PackedCellCoordinate,
+    WorkbookEngine,
 };
 use crate::{SpillInfo, MAX_EVAL_TIME};
 use easyoffice_formats::EasyOfficeError;
@@ -251,7 +252,7 @@ pub struct RecalcSession {
     /// Estimated heap bytes of the defined names and of what they add to the formulas (see `names`).
     name_bytes: usize,
     /// Rules per sheet index (see `rule_session`).
-    rules: std::collections::HashMap<u16, crate::rules::RuleRuntime>,
+    rules: DetMap<u16, crate::rules::RuleRuntime>,
     /// What staged edits already changed about areas (an anchor that went away): reported by the next
     /// recalculation.
     released: crate::spill::Published,
@@ -296,7 +297,7 @@ impl RecalcSession {
             over_budget: false,
             refs: Vec::new(),
             queue: Vec::new(),
-            rules: std::collections::HashMap::new(),
+            rules: DetMap::default(),
             released: crate::spill::Published::default(),
             dynamic_circular_pass: false,
             dynamic: dynamic::DynamicReads::default(),
@@ -419,6 +420,40 @@ impl RecalcSession {
         if changes.len() > BULK_CHANGE_THRESHOLD {
             for &idx in &resolved {
                 self.wb.sheets_mut()[usize::from(idx)].drop_indexes();
+            }
+        }
+        if changes.len() >= 8 {
+            let mut batch_pairs: Vec<(Ref, u32)> = Vec::new();
+            let mut leaving: Vec<(u32, u16, PackedCellCoordinate, usize)> = Vec::new();
+            let mut seen_vertices = DetSet::default();
+            for (change, &sheet) in changes.iter().zip(&resolved) {
+                let engine = &self.wb.sheets()[usize::from(sheet)];
+                let old_raw = engine.cells.get(&change.coord).map_or("", String::as_str);
+                if old_raw == change.raw {
+                    continue;
+                }
+                if let Some(vertex) = self.graph.vertex_at(sheet, change.coord) {
+                    if seen_vertices.insert(vertex) {
+                        if let Some(Ok(ast)) = engine.compiled_asts.get(&change.coord) {
+                            collect_refs(&self.wb, sheet, ast, &mut self.refs);
+                            batch_pairs.extend(self.refs.iter().map(|&r| (r, vertex)));
+                        }
+                        leaving.push((vertex, sheet, change.coord, old_raw.len()));
+                    }
+                }
+            }
+            if !leaving.is_empty() {
+                if !batch_pairs.is_empty() {
+                    self.graph.unregister_batch(&mut batch_pairs);
+                }
+                for (vertex, sheet, coord, old_len) in leaving {
+                    self.formula_bytes -= old_len;
+                    Self::release_vertex(&mut self.graph, &mut self.dynamic, vertex);
+                    self.dirty.remove(vertex);
+                    self.cyclic.remove(vertex);
+                    let sid = self.wb.sheets()[usize::from(sheet)].resolved_sheet_id();
+                    self.memo.remove_at(sid, coord);
+                }
             }
         }
         for (change, idx) in changes.iter().zip(resolved) {
@@ -791,7 +826,7 @@ impl RecalcSession {
         self.rng_state = ctx.rng_state;
         // What the formulas that finished read through OFFSET and INDIRECT: the next round recalculates them
         // when the cells a round fills are among it.
-        let unreached: std::collections::HashSet<u32> = unfinished.iter().copied().collect();
+        let unreached: DetSet<u32> = unfinished.iter().copied().collect();
         self.dynamic.absorb(
             ctx.dyn_reads.take().unwrap_or_default(),
             order

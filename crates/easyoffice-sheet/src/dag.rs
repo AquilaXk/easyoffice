@@ -6,7 +6,7 @@
 //! last full recalculation, dropped on every edit), and the per-column formula index that lets
 //! range dependencies skip empty and literal cells.
 
-use crate::memo::{DfsState, FastMap};
+use crate::memo::{DetSet, DfsState, FastMap};
 use crate::{
     CellRange, EvalContext, EvaluatedCellValue, Expr, FormulaError, MemoTable,
     PackedCellCoordinate, SheetEngine, WorkbookEngine,
@@ -24,6 +24,22 @@ pub(crate) fn is_formula(entry: Option<&Result<Expr, FormulaError>>) -> bool {
         entry,
         Some(Ok(expr)) if !matches!(expr, Expr::Number(_) | Expr::Boolean(_))
     )
+}
+
+pub(crate) fn expr_contains_subtotal(expr: &Expr) -> bool {
+    match expr {
+        Expr::FuncCall { name, args } => {
+            name.eq_ignore_ascii_case("SUBTOTAL")
+                || name.eq_ignore_ascii_case("AGGREGATE")
+                || args.iter().any(expr_contains_subtotal)
+        }
+        Expr::UnaryPlus(inner) | Expr::UnaryMinus(inner) | Expr::PostfixPercent(inner) => {
+            expr_contains_subtotal(inner)
+        }
+        Expr::Binary { lhs, rhs, .. } => expr_contains_subtotal(lhs) || expr_contains_subtotal(rhs),
+        Expr::Shared(shared) => expr_contains_subtotal(&shared.expr),
+        _ => false,
+    }
 }
 
 /// Formula cells grouped by column, each column's rows sorted ascending.
@@ -98,11 +114,11 @@ impl FormulaIndex {
     }
 }
 
-/// Populated cells indexed by column (`HashMap<u32, Vec<u32>>` with sorted `row` indices per `col`)
+/// Populated cells indexed by column (`FastMap<u32, Vec<u32>>` with sorted `row` indices per `col`)
 /// plus a pre-sorted `Vec<PackedCellCoordinate>` of all populated coordinates.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct CellIndex {
-    pub(crate) by_col: HashMap<u32, Vec<u32>>,
+    pub(crate) by_col: FastMap<u32, Vec<u32>>,
     pub(crate) sorted_coords: Vec<PackedCellCoordinate>,
 }
 
@@ -115,7 +131,7 @@ impl CellIndex {
             .copied()
             .collect();
         sorted_coords.sort_unstable();
-        let mut by_col: HashMap<u32, Vec<u32>> = HashMap::new();
+        let mut by_col: FastMap<u32, Vec<u32>> = FastMap::default();
         for &coord in &sorted_coords {
             by_col.entry(coord.col()).or_default().push(coord.row());
         }
@@ -208,6 +224,83 @@ impl CellIndex {
         }
         out
     }
+
+    /// Sorted populated row indices within `[min_r..=max_r]` in column `col`.
+    pub(crate) fn col_rows_slice(&self, col: u32, min_r: u32, max_r: u32) -> &[u32] {
+        if min_r > max_r {
+            return &[];
+        }
+        let Some(rows) = self.by_col.get(&col) else {
+            return &[];
+        };
+        let lo = rows.partition_point(|&r| r < min_r);
+        let hi = rows.partition_point(|&r| r <= max_r);
+        &rows[lo..hi]
+    }
+
+    /// Sorted populated coordinates within `row` and columns `[min_c..=max_c]`.
+    pub(crate) fn row_coords_slice(
+        &self,
+        row: u32,
+        min_c: u32,
+        max_c: u32,
+    ) -> &[PackedCellCoordinate] {
+        if min_c > max_c || self.sorted_coords.is_empty() {
+            return &[];
+        }
+        let min_key = PackedCellCoordinate((u64::from(row) << 32) | u64::from(min_c));
+        let max_key = PackedCellCoordinate((u64::from(row) << 32) | u64::from(max_c));
+        let lo = self.sorted_coords.partition_point(|&c| c < min_key);
+        let hi = self.sorted_coords.partition_point(|&c| c <= max_key);
+        &self.sorted_coords[lo..hi]
+    }
+
+    /// Exact count of populated coordinates inside `[min_r..=max_r, min_c..=max_c]` without
+    /// allocating a coordinate vector ($O(\log N)$ for single rows or single columns).
+    pub(crate) fn count_in_range(&self, min_r: u32, max_r: u32, min_c: u32, max_c: u32) -> usize {
+        if min_r > max_r || min_c > max_c || self.sorted_coords.is_empty() {
+            return 0;
+        }
+        if min_c == max_c {
+            return self.col_rows_slice(min_c, min_r, max_r).len();
+        }
+        if min_r == max_r {
+            return self.row_coords_slice(min_r, min_c, max_c).len();
+        }
+        let min_key = PackedCellCoordinate((u64::from(min_r) << 32) | u64::from(min_c));
+        let max_key = PackedCellCoordinate((u64::from(max_r) << 32) | u64::from(max_c));
+        let lo_sorted = self.sorted_coords.partition_point(|&c| c < min_key);
+        let hi_sorted = self.sorted_coords.partition_point(|&c| c <= max_key);
+        if lo_sorted >= hi_sorted {
+            return 0;
+        }
+        let col_span = (max_c - min_c + 1) as usize;
+        if hi_sorted - lo_sorted <= col_span.saturating_mul(16) {
+            return self.sorted_coords[lo_sorted..hi_sorted]
+                .iter()
+                .filter(|c| (min_c..=max_c).contains(&c.col()))
+                .count();
+        }
+        let mut count = 0usize;
+        if col_span <= self.by_col.len().saturating_mul(4) {
+            for col in min_c..=max_c {
+                if let Some(rows) = self.by_col.get(&col) {
+                    let lo = rows.partition_point(|&r| r < min_r);
+                    let hi = rows.partition_point(|&r| r <= max_r);
+                    count += hi - lo;
+                }
+            }
+        } else {
+            for (&col, rows) in &self.by_col {
+                if (min_c..=max_c).contains(&col) {
+                    let lo = rows.partition_point(|&r| r < min_r);
+                    let hi = rows.partition_point(|&r| r <= max_r);
+                    count += hi - lo;
+                }
+            }
+        }
+        count
+    }
 }
 
 impl SheetEngine {
@@ -282,7 +375,7 @@ struct SheetTable<'x> {
     slots: Vec<&'x SheetEngine>,
     /// AST sheet token text -> resolved slot, so a name is looked up in the workbook once per
     /// spelling instead of once per reference.
-    names: FastMap<&'x str, Option<u16>>,
+    names: HashMap<&'x str, Option<u16>>,
 }
 
 impl<'x> SheetTable<'x> {
@@ -387,7 +480,7 @@ struct DepScanner<'x> {
     sheets: SheetTable<'x>,
     expr_stack: Vec<&'x Expr>,
     /// Shared trees (see [`Expr::Shared`]) already scanned for the formula at hand.
-    seen_shared: std::collections::HashSet<*const crate::SharedExpr>,
+    seen_shared: DetSet<*const crate::SharedExpr>,
     scratch: Vec<PackedCellCoordinate>,
 }
 
@@ -497,10 +590,10 @@ impl SheetEngine {
             wb: ctx.workbook,
             sheets: SheetTable {
                 slots: vec![self],
-                names: FastMap::default(),
+                names: HashMap::new(),
             },
             expr_stack: Vec::new(),
-            seen_shared: std::collections::HashSet::new(),
+            seen_shared: DetSet::default(),
             scratch: Vec::new(),
         };
         let mut state = DfsState::new(self_sid);
@@ -559,5 +652,65 @@ impl SheetEngine {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn set_coord_number_preserves_cell_and_formula_indexes() {
+        let mut sheet = SheetEngine::new("S");
+        sheet.set_cell("A1", "10").unwrap();
+        sheet.set_cell("B1", "=A1*2").unwrap();
+        sheet.set_cell("D1", "5").unwrap();
+        let c_ptr = sheet.cell_index() as *const CellIndex;
+        let f_ptr = sheet.formula_index() as *const FormulaIndex;
+        let d1 = PackedCellCoordinate::parse_a1("D1").unwrap();
+
+        sheet.set_coord_number(d1, 42.0);
+        assert!(
+            sheet.cell_index.get().is_some(),
+            "cell_index dropped on overwrite"
+        );
+        assert!(
+            sheet.formula_index.get().is_some(),
+            "formula_index dropped on overwrite"
+        );
+        assert!(std::ptr::eq(sheet.cell_index.get().unwrap(), c_ptr));
+        assert!(std::ptr::eq(sheet.formula_index.get().unwrap(), f_ptr));
+
+        // Goal seek repeatedly updates D1 via set_coord_number without dropping indexes.
+        sheet.set_cell("E1", "=D1*3").unwrap();
+        let _ = sheet.cell_index();
+        let _ = sheet.formula_index();
+        let solved = sheet.goal_seek("E1", 60.0, "D1").unwrap();
+        assert!((solved - 20.0).abs() < 1e-4);
+        assert!(sheet.cell_index.get().is_some());
+        assert!(sheet.formula_index.get().is_some());
+
+        // New cell via set_coord_number patches CellIndex in place.
+        let c5 = PackedCellCoordinate::parse_a1("C5").unwrap();
+        sheet.set_coord_number(c5, 7.0);
+        assert!(sheet.cell_index.get().is_some());
+        let rebuilt_cells = CellIndex::build(&sheet);
+        let mut got: Vec<_> = sheet.cell_index().sorted_coords.clone();
+        got.sort_unstable();
+        assert_eq!(got, rebuilt_cells.sorted_coords);
+
+        // Replacing a formula cell with a number removes it from FormulaIndex in place.
+        let b1 = PackedCellCoordinate::parse_a1("B1").unwrap();
+        sheet.set_coord_number(b1, 9.0);
+        assert!(sheet.formula_index.get().is_some());
+        assert!(sheet.cell_index.get().is_some());
+        let mut got_f = Vec::new();
+        sheet.formula_index().collect(0, 100, 0, 100, &mut got_f);
+        let mut want_f = Vec::new();
+        FormulaIndex::build(&sheet).collect(0, 100, 0, 100, &mut want_f);
+        got_f.sort_unstable();
+        want_f.sort_unstable();
+        assert_eq!(got_f, want_f);
+        assert_eq!(sheet.evaluate_cell("B1"), EvaluatedCellValue::Number(9.0));
     }
 }

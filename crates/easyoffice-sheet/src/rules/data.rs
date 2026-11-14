@@ -6,7 +6,10 @@
 //! computed once per distinct range list and shared by every rule on it until a cell in the range
 //! changes (`StatsCache::invalidate`).
 
-use crate::{EvalContext, EvaluatedCellValue, PackedCellCoordinate, SheetEngine, WorkbookEngine};
+use super::expr_shift::{eval_compiled_sanitized, RuleExprTemplate};
+use crate::{
+    EvalContext, EvaluatedCellValue, Expr, PackedCellCoordinate, SheetEngine, WorkbookEngine,
+};
 use easyoffice_formats::CellBox;
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
@@ -23,6 +26,16 @@ pub(crate) trait Cells {
     fn populated(&mut self, b: &CellBox) -> Vec<PackedCellCoordinate>;
     /// Evaluates formula text without the leading `=`.
     fn eval_formula(&mut self, formula: &str) -> EvaluatedCellValue;
+    /// True once the rule evaluation pass has run past its deadline or cumulative step budget.
+    fn budget_exhausted(&self) -> bool {
+        false
+    }
+    /// Charges cumulative rule evaluation steps and polls the session deadline.
+    fn tick_rule_steps(&mut self, _n: usize) {}
+    /// Precompiles a conditional formatting expression formula once at its anchor.
+    fn compile_rule_expr(&mut self, formula: &str) -> RuleExprTemplate;
+    /// Evaluates a precompiled (and possibly offset-shifted) rule AST within the current pass budget.
+    fn eval_compiled_expr(&mut self, expr: &Expr, needs_array: bool) -> EvaluatedCellValue;
 }
 
 /// [`Cells`] over one sheet of a workbook and an evaluation context that already holds the values
@@ -34,7 +47,6 @@ pub(crate) struct SheetCells<'a, 'c> {
 
 impl Cells for SheetCells<'_, '_> {
     fn value(&mut self, coord: PackedCellCoordinate) -> EvaluatedCellValue {
-        self.ctx.reset_steps();
         self.sheet.eval_coord_ctx(coord, self.ctx, 0)
     }
 
@@ -45,7 +57,6 @@ impl Cells for SheetCells<'_, '_> {
                 .workbook
                 .is_some_and(|wb| wb.sheet(sheet).is_some());
         known.then(|| {
-            self.ctx.reset_steps();
             self.sheet.with_sheet_coord_value(
                 Some(sheet),
                 coord,
@@ -63,9 +74,26 @@ impl Cells for SheetCells<'_, '_> {
     }
 
     fn eval_formula(&mut self, formula: &str) -> EvaluatedCellValue {
-        self.ctx.reset_steps();
         self.sheet
             .eval_raw_string_ctx(&format!("={formula}"), self.ctx, 0)
+    }
+
+    #[inline]
+    fn budget_exhausted(&self) -> bool {
+        self.ctx.expired() || self.ctx.steps > SheetEngine::MAX_EVAL_STEPS
+    }
+
+    #[inline]
+    fn tick_rule_steps(&mut self, n: usize) {
+        let _ = self.ctx.charge_steps(n);
+    }
+
+    fn compile_rule_expr(&mut self, formula: &str) -> RuleExprTemplate {
+        RuleExprTemplate::compile(self.sheet, formula)
+    }
+
+    fn eval_compiled_expr(&mut self, expr: &Expr, needs_array: bool) -> EvaluatedCellValue {
+        eval_compiled_sanitized(self.sheet, expr, needs_array, self.ctx)
     }
 }
 
@@ -98,9 +126,22 @@ pub(crate) struct RangeData {
 }
 
 impl RangeData {
-    fn load(cells: &mut dyn Cells, boxes: &[CellBox], with_blanks: bool) -> Self {
+    fn load(cells: &mut dyn Cells, boxes: &[CellBox], with_blanks: bool) -> (Self, bool) {
         let mut coords: Vec<PackedCellCoordinate> = Vec::new();
         for b in boxes {
+            if cells.budget_exhausted() {
+                return (
+                    Self {
+                        cells: Vec::new(),
+                        numbers: Vec::new(),
+                        min: f64::INFINITY,
+                        max: f64::NEG_INFINITY,
+                        sum: 0.0,
+                        sorted: OnceLock::new(),
+                    },
+                    false,
+                );
+            }
             if with_blanks && b.area() <= BLANK_SCAN_CELLS {
                 for r in b.row0..=b.row1 {
                     for c in b.col0..=b.col1 {
@@ -122,7 +163,13 @@ impl RangeData {
             sorted: OnceLock::new(),
         };
         for coord in coords {
+            if cells.budget_exhausted() {
+                return (data, false);
+            }
             let value = cells.value(coord);
+            if cells.budget_exhausted() {
+                return (data, false);
+            }
             if let EvaluatedCellValue::Number(n) = value {
                 if n.is_finite() {
                     data.numbers.push((coord, n));
@@ -133,7 +180,7 @@ impl RangeData {
             }
             data.cells.push((coord, value));
         }
-        data
+        (data, true)
     }
 
     fn heap_bytes_estimate(&self) -> usize {
@@ -204,18 +251,21 @@ impl StatsCache {
         cells: &mut dyn Cells,
         boxes: &[CellBox],
         with_blanks: bool,
-    ) -> Arc<RangeData> {
+    ) -> (Arc<RangeData>, bool) {
         let key = (boxes.to_vec(), with_blanks);
         if let Some(hit) = self.entries.get(&key) {
-            return hit.clone();
+            return (hit.clone(), true);
         }
-        let data = Arc::new(RangeData::load(cells, boxes, with_blanks));
-        if self.cached_cells + data.cells.len() > MAX_CACHED_CELLS {
-            self.clear();
+        let (raw, complete) = RangeData::load(cells, boxes, with_blanks);
+        let data = Arc::new(raw);
+        if complete {
+            if self.cached_cells + data.cells.len() > MAX_CACHED_CELLS {
+                self.clear();
+            }
+            self.cached_cells += data.cells.len();
+            self.entries.insert(key, data.clone());
         }
-        self.cached_cells += data.cells.len();
-        self.entries.insert(key, data.clone());
-        data
+        (data, complete)
     }
 
     pub fn heap_bytes_estimate(&self) -> usize {
