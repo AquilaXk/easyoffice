@@ -38,7 +38,7 @@ const MAX_CELL_STYLE_ENTRIES: usize = 65_536;
 pub(crate) const MAX_BORDER_DEFS: usize = 65_536;
 const MAX_FILL_DEFS: usize = 65_536;
 const MAX_FONT_DEFS: usize = 65_536;
-const MAX_XF_DEFS: usize = 65_536;
+pub(crate) const MAX_XF_DEFS: usize = 65_536;
 
 /// Converts a column width in CSS pixels to the SpreadsheetML `width` attribute value.
 pub(crate) fn px_to_xlsx_width(px: u32) -> f64 {
@@ -171,6 +171,15 @@ impl XlsxStyleTable {
             }
         }
         table
+    }
+
+    /// Whether the reader of this crate would read every definition back: it keeps at most [`MAX_XF_DEFS`] formats
+    /// (the default one included), and [`MAX_FONT_DEFS`], [`MAX_FILL_DEFS`] and [`MAX_BORDER_DEFS`] of the others.
+    pub(crate) fn within_read_limits(&self) -> bool {
+        self.styles.len() < MAX_XF_DEFS
+            && self.fonts.len() < MAX_FONT_DEFS
+            && self.fills.len() + FIRST_SOLID_FILL <= MAX_FILL_DEFS
+            && self.borders.len() < MAX_BORDER_DEFS
     }
 
     /// `cellXfs` index of the format of an unlocked row or column (0 when the table has none).

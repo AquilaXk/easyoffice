@@ -194,3 +194,128 @@ fn read_a_file_an_independent_writer_made() {
         println!("{at:?} fill={:?} font={:?}", style.fill, style.font_color);
     }
 }
+
+/// The `(opcode, body)` records of the first (globals) substream of a written workbook.
+fn globals(bytes: &[u8]) -> Vec<(u16, Vec<u8>)> {
+    let streams = easyoffice_formats::Ole2ContainerCodec::unpack(bytes).unwrap();
+    let wb = &streams.iter().find(|s| s.name == "Workbook").unwrap().data;
+    let (mut at, mut out, mut eofs) = (0usize, Vec::new(), 0);
+    while at + 4 <= wb.len() && eofs < 1 {
+        let op = u16::from_le_bytes([wb[at], wb[at + 1]]);
+        let len = usize::from(u16::from_le_bytes([wb[at + 2], wb[at + 3]]));
+        out.push((op, wb[at + 4..at + 4 + len].to_vec()));
+        at += 4 + len;
+        eofs += usize::from(op == 0x000A);
+    }
+    out
+}
+
+fn palette_of(records: &[(u16, Vec<u8>)]) -> Vec<u32> {
+    match records.iter().find(|r| r.0 == 0x0092) {
+        Some((_, body)) => body[2..]
+            .chunks(4)
+            .map(|c| (u32::from(c[0]) << 16) | (u32::from(c[1]) << 8) | u32::from(c[2]))
+            .collect(),
+        None => Vec::new(),
+    }
+}
+
+fn manhattan(a: u32, b: u32) -> u32 {
+    (0..3)
+        .map(|k| ((a >> (8 * k)) & 0xFF).abs_diff((b >> (8 * k)) & 0xFF))
+        .sum()
+}
+
+/// A sheet whose cells have `pairs` distinct (fill, font) colour pairs, or `fills` distinct fills: the XFs stay
+/// under the limit of the format, and every colour reads back as the closest palette colour (PD-227).
+fn many_colours(cells: Vec<((u32, u32), CellStyle)>) {
+    let originals = cells.clone();
+    let bytes = pack(vec![(0, 0, "x")], styling(cells));
+    let records = globals(&bytes);
+    let xfs = records.iter().filter(|r| r.0 == 0x00E0).count();
+    assert!(xfs <= 4_050, "{xfs} XFs");
+    let palette = palette_of(&records);
+    assert_eq!(palette.len(), 56, "so many colours change the palette");
+    let back = read(&bytes);
+    assert_eq!(back.cells.len(), originals.len());
+    for (at, style) in originals {
+        let got = back.cells[&at];
+        for (want, read) in [(style.fill, got.fill), (style.font_color, got.font_color)] {
+            let Some(want) = want else {
+                assert_eq!(read, None, "{at:?}");
+                continue;
+            };
+            let read = read.unwrap_or_else(|| panic!("{at:?} lost its colour"));
+            assert!(
+                palette.contains(&read),
+                "{at:?}: {read:06X} is not a palette colour"
+            );
+            let closest = palette.iter().map(|&c| manhattan(c, want)).min().unwrap();
+            assert_eq!(
+                manhattan(read, want),
+                closest,
+                "{at:?}: {want:06X} read as {read:06X}"
+            );
+        }
+    }
+}
+
+#[test]
+fn five_thousand_colour_pairs_share_xfs_and_read_back_as_the_closest_palette_colour() {
+    let cells = (0..5_000u32)
+        .map(|i| {
+            let fill = 0x010203 * (i % 97 + 1) + (i / 97) * 0x000101;
+            let font = 0x0A0B0C + 0x030201 * (i % 89);
+            ((i % 60_000, i / 60_000), colored(Some(fill), Some(font)))
+        })
+        .collect();
+    many_colours(cells);
+}
+
+#[test]
+fn seventy_thousand_fills_never_wrap_an_xf_number() {
+    // 65,536 rows x 256 columns hold them: distinct fills spread over the whole grid of the format.
+    let cells = (0..70_000u32)
+        .map(|i| {
+            (
+                (i % 65_536, i / 65_536),
+                colored(Some((i.wrapping_mul(2_654_435_761)) >> 8 & 0xFFFFFF), None),
+            )
+        })
+        .collect();
+    many_colours(cells);
+}
+
+#[test]
+fn a_short_xf_record_keeps_the_numbers_of_the_xfs_after_it() {
+    let st = styling(vec![
+        ((0, 0), colored(Some(0xFF0000), None)),
+        ((0, 1), colored(Some(0x00FF00), None)),
+    ]);
+    let bytes = pack(vec![(0, 0, "a"), (0, 1, "b")], st);
+    let streams = easyoffice_formats::Ole2ContainerCodec::unpack(&bytes).unwrap();
+    let mut wb = streams
+        .iter()
+        .find(|s| s.name == "Workbook")
+        .unwrap()
+        .data
+        .clone();
+    // Insert a short XF record before the written ones: every XF number after it moves by one, so the
+    // cells (which name the XF by number) now point at the XF before the one they were written for.
+    let at = (0..wb.len() - 4)
+        .find(|&i| wb[i..i + 4] == [0xE0, 0x00, 20, 0x00])
+        .unwrap();
+    let mut spliced = wb[..at].to_vec();
+    spliced.extend([0xE0, 0x00, 4, 0x00, 1, 2, 3, 4]);
+    spliced.extend(&wb[at..]);
+    wb = spliced;
+    let repacked =
+        easyoffice_formats::Ole2ContainerCodec::pack(&[("Workbook".to_string(), wb)]).unwrap();
+    let back = read(&repacked);
+    // Written: default XF 0, green 1, red 2 (the colours are in order). With the short record first they
+    // are 1, 2 and 3 and the cells, which name the XF by number, point one XF earlier: A1 (red, XF 2) now
+    // reads the green XF and B1 (green, XF 1) the default one. Had the short record been skipped without
+    // taking a number, A1 and B1 would have read their own colours.
+    assert_eq!(back.cells.get(&(0, 0)).and_then(|c| c.fill), Some(0x00FF00));
+    assert_eq!(back.cells.get(&(0, 1)).and_then(|c| c.fill), None);
+}

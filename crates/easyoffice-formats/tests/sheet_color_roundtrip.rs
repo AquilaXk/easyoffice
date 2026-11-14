@@ -461,3 +461,17 @@ fn colours_inside_a_table_and_beside_a_filter_and_conditional_format_survive() {
         assert_eq!(back.tables.len(), 1, "{format:?}");
     }
 }
+
+#[test]
+fn a_workbook_with_more_formats_than_the_reader_keeps_is_not_written() {
+    // 70,000 distinct fills are 70,000 formats; a reader keeps 65,536, so the file would lose the rest.
+    let cells = (0..70_000u32)
+        .map(|i| ((i % 60_000, i / 60_000), colored(Some(i), None)))
+        .collect();
+    let result = OoxmlCodec::pack_xlsx_multi_styled(&sheet(), &[], &[with(cells)]);
+    assert!(result.is_err());
+    let few = (0..60_000u32)
+        .map(|i| ((i, 0), colored(Some(i), None)))
+        .collect();
+    assert!(OoxmlCodec::pack_xlsx_multi_styled(&sheet(), &[], &[with(few)]).is_ok());
+}

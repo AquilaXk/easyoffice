@@ -590,6 +590,12 @@ impl OoxmlCodec {
         Self::check_sheet_count(active_sheets.len())?;
         Self::validate_xlsx_bounds(active_sheets, stylings)?;
         let style_table = XlsxStyleTable::build(stylings);
+        // A workbook the reader would cut short is not written (a cell past the limit would lose its format).
+        if !style_table.within_read_limits() {
+            return Err(EasyOfficeError::ResourceBudgetExceeded(
+                "서로 다른 셀 서식이 65,535가지를 넘어 XLSX로 저장할 수 없습니다.".to_string(),
+            ));
+        }
         let hidden = hidden_sheets(active_sheets.len(), stylings);
         let (workbook_xml, wb_rels_xml) = build_workbook_parts(active_sheets, &hidden, stylings);
         let styles_xml = style_table.to_xml();

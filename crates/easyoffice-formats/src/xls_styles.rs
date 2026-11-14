@@ -45,6 +45,8 @@ const ICV_SYSTEM_BACKGROUND: u16 = 0x0041;
 /// First colour index of the 56 custom palette entries, and their count.
 const FIRST_ENTRY: usize = 8;
 const ENTRIES: usize = 56;
+/// XF records a workbook may have, the default ones included (MS-XLS `XFCRC` `cxfs`: 16 to 4,050).
+const MAX_XFS: u16 = 4_050;
 /// A `FONT` or `XF` record a reader keeps (an XF index is 16 bits).
 const MAX_RECORDS: usize = 65_536;
 /// The fill pattern of a solid fill.
@@ -91,12 +93,14 @@ impl XlsStyleReader {
                 FONT if self.fonts.len() < MAX_RECORDS => {
                     self.fonts.push(u16_at(body, 4).unwrap_or(ICV_AUTO_FONT));
                 }
+                // A short record still takes its number: the XFs after it keep theirs.
                 XF if self.xfs.len() < MAX_RECORDS => {
-                    if let (Some(font), Some(fill), Some(fore)) =
-                        (u16_at(body, 0), u32_at(body, 14), u16_at(body, 18))
-                    {
-                        self.xfs.push((font, fill >> 26, fore & 0x7F));
-                    }
+                    self.xfs.push(
+                        match (u16_at(body, 0), u32_at(body, 14), u16_at(body, 18)) {
+                            (Some(font), Some(fill), Some(fore)) => (font, fill >> 26, fore & 0x7F),
+                            _ => (0, 0, ICV_SYSTEM_TEXT),
+                        },
+                    );
                 }
                 PALETTE => self.palette = read_palette(body),
                 _ => {}
@@ -308,21 +312,40 @@ impl XlsColorPlan {
             };
             index_of.insert(rgb, (icv + FIRST_ENTRY) as u16);
         }
+        // An XF is a pair of palette indexes, not of colours: colours that share an index (the closest-colour
+        // fallback) share the XF, so at most 57 x 57 of them exist whatever the sheet holds.
         let mut fonts: Vec<u16> = Vec::new();
         let mut font_of: HashMap<u16, usize> = HashMap::new();
-        let mut xfs = Vec::new();
+        let mut xfs: Vec<(usize, Option<u16>)> = Vec::new();
+        let mut xf_of: HashMap<(Option<u16>, Option<u16>), u16> = HashMap::new();
         let mut by_look = HashMap::new();
         for &(fill, font) in &looks {
-            let font_record = font.map_or(0, |rgb| {
-                let icv = index_of[&rgb];
-                *font_of.entry(icv).or_insert_with(|| {
-                    fonts.push(icv);
-                    fonts.len()
-                })
-            });
-            xfs.push((font_record, fill.map(|rgb| index_of[&rgb])));
-            // The default XF is index 0.
-            by_look.insert((fill, font), xfs.len() as u16);
+            let key = (
+                fill.map(|rgb| index_of[&rgb]),
+                font.map(|rgb| index_of[&rgb]),
+            );
+            let xf = match xf_of.get(&key) {
+                Some(&xf) => xf,
+                // The default XF is index 0; a table past the limit of the format keeps the default look.
+                None => match u16::try_from(xfs.len() + 1).ok().filter(|&n| n < MAX_XFS) {
+                    Some(xf) => {
+                        let font_record = key.1.map_or(0, |icv| {
+                            *font_of.entry(icv).or_insert_with(|| {
+                                fonts.push(icv);
+                                fonts.len()
+                            })
+                        });
+                        xfs.push((font_record, key.0));
+                        xf_of.insert(key, xf);
+                        xf
+                    }
+                    None => {
+                        approximated = approximated.saturating_add(1);
+                        0
+                    }
+                },
+            };
+            by_look.insert((fill, font), xf);
         }
         Some(Self {
             palette: custom.then_some(slots),
