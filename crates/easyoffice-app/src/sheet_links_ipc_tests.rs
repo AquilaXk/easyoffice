@@ -1,5 +1,5 @@
-//! Cell hyperlinks over the save and open commands (PD-218): the page's `links` reach XLSX and ODS,
-//! come back when the file is opened and cross formats; a format without links keeps the text; a
+//! Cell hyperlinks over the save and open commands (PD-218, PD-223): the page's `links` reach XLSX, ODS and
+//! XLS, come back when the file is opened and cross formats; a format without links keeps the text; a
 //! request with an address the policy refuses is not saved.
 
 use super::*;
@@ -75,15 +75,44 @@ fn links_cross_from_xlsx_to_ods_and_back() {
 }
 
 #[test]
-fn csv_and_xls_keep_the_text_and_no_links() {
-    for (format, file) in [("csv", "l.csv"), ("xls", "l.xls")] {
-        let back = opened(file, &saved(format));
-        assert_eq!(links_of(&back, 0), "", "{format}");
-    }
+fn xls_keeps_the_links_and_csv_keeps_the_text_only() {
+    assert_eq!(links_of(&opened("l.xls", &saved("xls")), 0), EXPECTED);
+    assert_eq!(links_of(&opened("l.csv", &saved("csv")), 0), "");
     let csv = String::from_utf8(saved("csv")).unwrap();
     assert!(
         csv.contains("홈페이지") && !csv.contains("example.com"),
         "{csv}"
+    );
+}
+
+#[test]
+fn links_cross_through_xls_in_both_directions() {
+    let convert = |file: &str, bytes: &[u8], target: &str| {
+        base64_field(&dispatch(&format!(
+            "{{\"fileName\":\"{file}\",\"sourceBase64\":\"{}\",\"targetFormat\":\"{target}\"}}",
+            EasyOfficeIpcRouter::encode_base64(bytes)
+        )))
+    };
+    let xls = convert("l.xlsx", &saved("xlsx"), "xls");
+    assert_eq!(links_of(&opened("l.xls", &xls), 0), EXPECTED);
+    let ods = convert("l.xls", &xls, "ods");
+    assert_eq!(links_of(&opened("l.ods", &ods), 0), EXPECTED);
+    let xlsx = convert("l.ods", &convert("l.xls", &saved("xls"), "ods"), "xlsx");
+    assert_eq!(links_of(&opened("l.xlsx", &xlsx), 0), EXPECTED);
+}
+
+#[test]
+fn an_xls_save_leaves_out_links_off_its_grid_with_a_warning() {
+    let payload = concat!(
+        "{\"targetFormat\":\"xls\",\"sheets\":[{\"name\":\"S\",\"cells\":[{\"ref\":\"A1\",\"raw\":\"x\"}],",
+        "\"links\":[{\"ref\":\"A1\",\"target\":\"https://a.b/\"},{\"ref\":\"A70000\",\"target\":\"https://c.d/\"}]}]}"
+    );
+    let saved = dispatch(payload);
+    assert!(saved.contains("하이퍼링크 1개는 XLS의 범위"), "{saved}");
+    let back = opened("s.xls", &base64_field(&saved));
+    assert_eq!(
+        links_of(&back, 0),
+        "[{\"ref\":\"A1\",\"target\":\"https://a.b/\"}]"
     );
 }
 

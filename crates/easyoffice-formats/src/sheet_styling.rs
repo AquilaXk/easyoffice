@@ -78,7 +78,7 @@ pub use sheet_view::*;
 pub use xlsx_formula_text::{from_file_formula, to_file_formula};
 pub use xlsx_layout::{intersect_runs, normalize_runs, run_total, MAX_HIDDEN_ROWS, MAX_MERGES};
 
-use crate::{DocumentFormat, EasyOfficeError, OdfCodec, OoxmlCodec};
+use crate::{DocumentFormat, EasyOfficeError, LegacyOle2Codec, OdfCodec, OoxmlCodec};
 
 /// Largest number of styled cells or sized columns one sheet may carry.
 pub const MAX_STYLED_CELLS: usize = 500_000;
@@ -443,8 +443,8 @@ pub(crate) fn format_centipt(centi: u32) -> String {
     text.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
-/// Reads the formatting of every sheet of an XLSX or ODS file, keyed by sheet name. Other
-/// formats carry none.
+/// Reads the formatting of every sheet of an XLSX or ODS file, keyed by sheet name; an XLS carries the
+/// hyperlinks only (PD-223). Other formats carry none.
 pub fn read_sheet_styling(
     bytes: &[u8],
     format: DocumentFormat,
@@ -452,6 +452,7 @@ pub fn read_sheet_styling(
     match format {
         DocumentFormat::Xlsx => OoxmlCodec::unpack_xlsx_styling(bytes),
         DocumentFormat::Ods => OdfCodec::unpack_ods_styling(bytes),
+        DocumentFormat::Xls => Ok(LegacyOle2Codec::unpack_xls_with_styling(bytes)?.1),
         _ => Ok(Vec::new()),
     }
 }

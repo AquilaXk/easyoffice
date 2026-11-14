@@ -4,6 +4,10 @@ use crate::decode_budget::DecodeBudget;
 use crate::ole2_codec::{
     decode_utf16le, read_u16_le, read_u32_le, read_u64_le, write_u32_le, Ole2ContainerCodec,
 };
+use crate::sheet_links::xls_links::{self, XlsLinkReader};
+use crate::sheet_links::{LinkCollector, SheetLinks};
+use crate::sheet_styling::SheetStyling;
+use crate::xls_sst_cursor::SstContinueCursor;
 use crate::{DocumentFormat, EasyOfficeError, LegacyOle2Codec, XlsxFormulaCache};
 
 /// Legacy `.xls` BIFF8 spreadsheet payload model.
@@ -11,131 +15,6 @@ use crate::{DocumentFormat, EasyOfficeError, LegacyOle2Codec, XlsxFormulaCache};
 pub struct LegacyXlsPayload {
     pub sheet_name: String,
     pub cells: Vec<(u32, u32, String)>,
-}
-
-struct SstContinueCursor<'a> {
-    chunks: &'a [&'a [u8]],
-    chunk_idx: usize,
-    pos: usize,
-}
-
-impl<'a> SstContinueCursor<'a> {
-    fn new(chunks: &'a [&'a [u8]], initial_pos: usize) -> Self {
-        Self {
-            chunks,
-            chunk_idx: 0,
-            pos: initial_pos,
-        }
-    }
-
-    fn advance_if_exhausted(&mut self) -> bool {
-        while self.chunk_idx < self.chunks.len() && self.pos >= self.chunks[self.chunk_idx].len() {
-            self.chunk_idx += 1;
-            self.pos = 0;
-        }
-        self.chunk_idx < self.chunks.len()
-    }
-
-    fn read_raw_bytes(&mut self, mut n: usize) -> Option<Vec<u8>> {
-        let mut out = Vec::with_capacity(n);
-        while n > 0 {
-            if !self.advance_if_exhausted() {
-                return None;
-            }
-            let chunk = self.chunks[self.chunk_idx];
-            let avail = (chunk.len() - self.pos).min(n);
-            out.extend_from_slice(&chunk[self.pos..self.pos + avail]);
-            self.pos += avail;
-            n -= avail;
-        }
-        Some(out)
-    }
-
-    fn skip_raw_bytes(&mut self, mut n: usize) -> bool {
-        while n > 0 {
-            if !self.advance_if_exhausted() {
-                return false;
-            }
-            let chunk = self.chunks[self.chunk_idx];
-            let avail = (chunk.len() - self.pos).min(n);
-            self.pos += avail;
-            n -= avail;
-        }
-        true
-    }
-
-    fn read_u8(&mut self) -> Option<u8> {
-        if !self.advance_if_exhausted() {
-            return None;
-        }
-        let b = self.chunks[self.chunk_idx][self.pos];
-        self.pos += 1;
-        Some(b)
-    }
-
-    fn read_u16(&mut self) -> Option<u16> {
-        let b = self.read_raw_bytes(2)?;
-        Some(u16::from_le_bytes([b[0], b[1]]))
-    }
-
-    fn read_u32(&mut self) -> Option<u32> {
-        let b = self.read_raw_bytes(4)?;
-        Some(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
-    }
-
-    fn read_biff8_chars(
-        &mut self,
-        mut rem_chars: usize,
-        mut is_utf16: bool,
-    ) -> Result<String, EasyOfficeError> {
-        let mut out = String::with_capacity(rem_chars);
-        let mut first_segment = true;
-        while rem_chars > 0 {
-            if !self.advance_if_exhausted() {
-                return Err(EasyOfficeError::CorruptedContainer(
-                    "BIFF8 SST 문자열 데이터가 조기 종료되었습니다.".to_string(),
-                ));
-            }
-            if !first_segment && self.pos == 0 {
-                let cont_grbit = self.read_u8().ok_or_else(|| {
-                    EasyOfficeError::CorruptedContainer(
-                        "BIFF8 SST CONTINUE 플래그 바이트 누락".to_string(),
-                    )
-                })?;
-                is_utf16 = (cont_grbit & 0x01) != 0;
-            }
-            first_segment = false;
-            let chunk = self.chunks[self.chunk_idx];
-            let avail_bytes = chunk.len().saturating_sub(self.pos);
-            if is_utf16 {
-                let take_chars = (avail_bytes / 2).min(rem_chars);
-                if take_chars == 0 {
-                    return Err(EasyOfficeError::CorruptedContainer(
-                        "BIFF8 SST UTF-16LE 코드 유닛이 레코드 경계에서 홀수 바이트로 잘렸습니다."
-                            .to_string(),
-                    ));
-                }
-                let take_bytes = take_chars * 2;
-                let s = decode_utf16le(&chunk[self.pos..self.pos + take_bytes])?;
-                out.push_str(&s);
-                self.pos += take_bytes;
-                rem_chars -= take_chars;
-            } else {
-                let take_chars = avail_bytes.min(rem_chars);
-                if take_chars == 0 {
-                    return Err(EasyOfficeError::CorruptedContainer(
-                        "BIFF8 SST 8비트 문자열 세그먼트가 비어 있습니다.".to_string(),
-                    ));
-                }
-                for &b in &chunk[self.pos..self.pos + take_chars] {
-                    out.push(b as char);
-                }
-                self.pos += take_chars;
-                rem_chars -= take_chars;
-            }
-        }
-        Ok(out)
-    }
 }
 
 impl LegacyOle2Codec {
@@ -273,17 +152,28 @@ impl LegacyOle2Codec {
         sheets: &[LegacyXlsPayload],
         caches: &[XlsxFormulaCache],
     ) -> Result<Vec<u8>, EasyOfficeError> {
-        Self::pack_xls_multi_inner(sheets, true, caches)
+        Self::pack_xls_multi_inner(sheets, true, caches, &[])
     }
 
     pub fn pack_xls_multi_values(sheets: &[LegacyXlsPayload]) -> Result<Vec<u8>, EasyOfficeError> {
-        Self::pack_xls_multi_inner(sheets, false, &[])
+        Self::pack_xls_multi_inner(sheets, false, &[], &[])
+    }
+
+    /// [`Self::pack_xls_multi_values`] with the hyperlinks of each sheet (PD-223): one `HLink` record per
+    /// linked cell, and an `HLinkTooltip` for a link with a screen tip. A link outside the BIFF8 grid is
+    /// refused.
+    pub fn pack_xls_multi_values_linked(
+        sheets: &[LegacyXlsPayload],
+        links: &[SheetLinks],
+    ) -> Result<Vec<u8>, EasyOfficeError> {
+        Self::pack_xls_multi_inner(sheets, false, &[], links)
     }
 
     fn pack_xls_multi_inner(
         sheets: &[LegacyXlsPayload],
         allow_formulas: bool,
         caches: &[XlsxFormulaCache],
+        links: &[SheetLinks],
     ) -> Result<Vec<u8>, EasyOfficeError> {
         if sheets.is_empty() {
             return Err(EasyOfficeError::EmptyPayload);
@@ -454,6 +344,9 @@ impl LegacyOle2Codec {
                 }
             }
 
+            if let Some(sheet_links) = links.get(sheet_idx) {
+                xls_links::write_links(&mut stream, sheet_links)?;
+            }
             stream.extend_from_slice(&Self::BIFF8_EOF.to_le_bytes());
             stream.extend_from_slice(&0u16.to_le_bytes());
         }
@@ -518,6 +411,34 @@ impl LegacyOle2Codec {
     }
 
     pub fn unpack_xls_multi(bytes: &[u8]) -> Result<Vec<LegacyXlsPayload>, EasyOfficeError> {
+        Ok(Self::unpack_xls_walk(bytes)?.0)
+    }
+
+    /// The sheets of a workbook with the formatting an XLS carries next to them: the hyperlinks (PD-223).
+    /// Each sheet's styling holds nothing else.
+    pub fn unpack_xls_with_styling(
+        bytes: &[u8],
+    ) -> Result<(Vec<crate::OdsUnpacked>, Vec<(String, SheetStyling)>), EasyOfficeError> {
+        let (payloads, collectors) = Self::unpack_xls_walk(bytes)?;
+        let mut sheets = Vec::with_capacity(payloads.len());
+        let mut stylings = Vec::with_capacity(payloads.len());
+        for (payload, links) in payloads.into_iter().zip(collectors) {
+            stylings.push((
+                payload.sheet_name.clone(),
+                SheetStyling {
+                    links: links.links,
+                    links_rejected: links.rejected,
+                    ..SheetStyling::default()
+                },
+            ));
+            sheets.push((payload.sheet_name, payload.cells));
+        }
+        Ok((sheets, stylings))
+    }
+
+    fn unpack_xls_walk(
+        bytes: &[u8],
+    ) -> Result<(Vec<LegacyXlsPayload>, Vec<LinkCollector>), EasyOfficeError> {
         let streams = Ole2ContainerCodec::unpack(bytes)?;
         let wb = streams
             .iter()
@@ -561,6 +482,9 @@ impl LegacyOle2Codec {
         opcode: u16,
         rec: XlsRecord,
     ) -> Result<usize, EasyOfficeError> {
+        if state.in_worksheet {
+            state.links.before(opcode);
+        }
         match opcode {
             Self::BIFF8_FILEPASS => {
                 return Err(EasyOfficeError::EncryptedDocumentUnsupported(
@@ -578,6 +502,12 @@ impl LegacyOle2Codec {
             Self::BIFF8_STRING => Self::xls_string(state, data, rec)?,
             Self::BIFF8_LABEL => Self::xls_label(state, data, rec)?,
             Self::BIFF8_BOOLERR => Self::xls_boolerr(state, data, rec)?,
+            xls_links::HLINK if state.in_worksheet => {
+                state.links.hlink(&data[rec.start..rec.end]);
+            }
+            xls_links::HLINK_TOOLTIP if state.in_worksheet => {
+                state.links.tooltip(&data[rec.start..rec.end]);
+            }
             Self::BIFF8_EOF => state.end_substream(),
             _ => {}
         }
@@ -941,6 +871,8 @@ struct XlsParseState {
     last_formula_cell_idx: Option<usize>,
     /// Decoded bytes of the cell texts, over all worksheets of the workbook (PD-175).
     budget: DecodeBudget,
+    /// The hyperlinks of the worksheets (PD-223).
+    links: XlsLinkReader,
 }
 
 impl XlsParseState {
@@ -967,10 +899,11 @@ impl XlsParseState {
             sheet_name: name,
             cells: std::mem::take(&mut self.current_cells),
         });
+        self.links.end_sheet();
         self.in_worksheet = false;
     }
 
-    fn finish(mut self) -> Vec<LegacyXlsPayload> {
+    fn finish(mut self) -> (Vec<LegacyXlsPayload>, Vec<LinkCollector>) {
         if self.sheets.is_empty()
             && (!self.current_cells.is_empty() || !self.boundsheet_names.is_empty())
         {
@@ -983,7 +916,8 @@ impl XlsParseState {
                 sheet_name: name,
                 cells: self.current_cells,
             });
+            self.links.end_sheet();
         }
-        self.sheets
+        (self.sheets, self.links.finish())
     }
 }

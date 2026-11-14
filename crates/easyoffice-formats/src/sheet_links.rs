@@ -24,6 +24,8 @@ use crate::CellBox;
 // The readers and writers of the model sit beside it; they are internal to the crate.
 #[path = "ods_links.rs"]
 pub(crate) mod ods_links;
+#[path = "xls_links.rs"]
+pub(crate) mod xls_links;
 #[path = "xlsx_links.rs"]
 pub(crate) mod xlsx_links;
 

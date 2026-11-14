@@ -17,6 +17,7 @@ use crate::convert_ipc::compute_xlsx_formula_cache;
 use crate::convert_structured::StructuredContent;
 use crate::convert_structured_doc::{is_document_format, slides_to_document};
 use crate::eval_limit::evaluate_for_file;
+use crate::sheet_links_xls::xls_links;
 
 /// Upper bound on cells of the value grids rendered when a workbook is saved to a document format.
 const MAX_GRID_CELLS: usize = CsvCodec::MAX_GRID_CELLS;
@@ -194,6 +195,13 @@ fn encode_xls(
             renamed[..shown].join(", ")
         ));
     }
+    let mut skipped_links = 0;
+    let links = xls_links(stylings, &names, &clean, &mut skipped_links);
+    if skipped_links > 0 {
+        warnings.push(format!(
+            "하이퍼링크 {skipped_links}개는 XLS의 범위(65,536행, 256열) 밖이라 저장하지 않았습니다."
+        ));
+    }
     let mut payloads: Vec<LegacyXlsPayload> = computed
         .into_iter()
         .map(|(sheet_name, cells)| LegacyXlsPayload { sheet_name, cells })
@@ -204,7 +212,7 @@ fn encode_xls(
             cells: Vec::new(),
         });
     }
-    LegacyOle2Codec::pack_xls_multi_values(&payloads)
+    LegacyOle2Codec::pack_xls_multi_values_linked(&payloads, &links)
 }
 
 /// CSV/TSV hold one sheet: the first, as values. Sheets left out and cells outside what the CSV

@@ -257,10 +257,16 @@ impl UniversalFormatConverter {
             }
             DocumentFormat::Xls => {
                 warnings.push(NOTE_SHEET.to_string());
-                let sheets = LegacyOle2Codec::unpack_xls_multi(bytes)?
-                    .into_iter()
-                    .map(|s| (s.sheet_name, s.cells))
-                    .collect();
+                let sheets = if with_styling {
+                    let (s, st) = LegacyOle2Codec::unpack_xls_with_styling(bytes)?;
+                    styling = st;
+                    s
+                } else {
+                    LegacyOle2Codec::unpack_xls_multi(bytes)?
+                        .into_iter()
+                        .map(|s| (s.sheet_name, s.cells))
+                        .collect()
+                };
                 DecodedContent::Workbook(normalize_sheets(sheets))
             }
             DocumentFormat::Ods => {
