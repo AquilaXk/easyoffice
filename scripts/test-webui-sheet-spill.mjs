@@ -174,3 +174,30 @@ test("a names answer that shrinks an area removes the cells the area filled", as
   assert.equal(sheets.Sheet1.B2, undefined);
   assert.equal(sheets.Sheet1.B3, undefined);
 });
+
+test("masking personal data skips the cells an array filled and counts only what the user wrote", async () => {
+  const { sandbox } = await createWorkspaceHarness();
+  const scrubbed = [];
+  const invokeIpc = async (command, payload) => {
+    if (command !== "scrub_pii") throw new Error("unexpected " + command);
+    scrubbed.push(payload);
+    const hit = payload.includes("010-1234-5678");
+    return { scrubbedText: payload.replaceAll("010-1234-5678", "010-****-****"), totalMasked: hit ? 1 : 0 };
+  };
+  const store = sandbox.__EASYOFFICE_CREATE_SHEET_STORE__({
+    invokeIpc,
+    normalizeFormattedNumericCell: (v) => v,
+    tokenizeFormulaStringLiterals: () => [],
+  });
+  const sheets = {
+    Sheet1: {
+      A1: entry("010-1234-5678"),
+      B1: entry("010-1234-5678"),
+      C2: { value: "010-1234-5678", formula: "", spillOf: "C1" },
+    },
+  };
+  const out = await store.scrubSheetStoreMap(sheets, "Sheet1", null);
+  assert.equal(out.totalMasked, 2, "the typed cells A1 and B1 count; the cell C2 an array filled does not");
+  assert.deepEqual(scrubbed.sort(), ["010-1234-5678", "010-1234-5678"]);
+  assert.equal(out.nextSheets.Sheet1.C2.value, "010-1234-5678", "a result is left to the next calculation");
+});

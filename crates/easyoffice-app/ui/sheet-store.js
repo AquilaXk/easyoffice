@@ -724,7 +724,10 @@
       return { rpcRes, formulaTargets, targetValues, batchValues, spillsChanged: Boolean(spillApi) };
     }
 
+    // A cell an array filled is a result: the next calculation writes it again, so masking it would
+    // count a cell that comes back. The cells it is calculated from are masked instead.
     function collectEntryScrubJob(entry, plainEntries, formulaJobs) {
+      if (!isInputEntry(entry)) return;
       const formula = entry.formula || "";
       if (!isFormulaStr(formula)) {
         if ((entry.value || "").trim()) plainEntries.push(entry);
