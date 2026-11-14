@@ -79,9 +79,9 @@ pub use sheet_protect::*;
 pub use sheet_rules::*;
 pub use sheet_spill::*;
 pub use sheet_table::{
-    table_name_problem, tables_within_bounds, unique_name, unique_table_names,
-    workbook_tables_within_bounds, SheetTable, TableRegistry, MAX_TABLES, MAX_TABLE_COLUMNS_TOTAL,
-    MAX_TABLE_TEXT_CHARS,
+    merges_clear_of_tables, table_name_problem, tables_within_bounds, unique_name,
+    unique_table_names, workbook_tables_within_bounds, SheetTable, TableRegistry, MAX_TABLES,
+    MAX_TABLE_COLUMNS_TOTAL, MAX_TABLE_TEXT_CHARS,
 };
 pub use sheet_view::*;
 pub use xlsx_formula_text::{from_file_formula, to_file_formula};
@@ -381,6 +381,8 @@ pub struct SheetStyling {
     pub tables: Vec<SheetTable>,
     /// Tables a reader turned away: a bound, an overlap or a part it could not read (PD-224).
     pub tables_rejected: u32,
+    /// Merged ranges a reader left out because they shared cells with a table (PD-224).
+    pub merges_dropped: u32,
 }
 
 impl SheetStyling {

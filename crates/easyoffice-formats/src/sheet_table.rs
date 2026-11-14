@@ -155,6 +155,24 @@ pub fn tables_within_bounds(tables: &[SheetTable]) -> bool {
             .all(|(i, t)| tables[i + 1..].iter().all(|o| !t.overlaps(&o.range)))
 }
 
+/// `merges` without the ranges that share a cell with a table: the spreadsheet program does not merge cells of a
+/// table (its merge command is off inside one), so such a range is not kept. Borrowed when none is dropped.
+pub fn merges_clear_of_tables<'a>(
+    merges: &'a [CellBox],
+    tables: &[SheetTable],
+) -> std::borrow::Cow<'a, [CellBox]> {
+    if tables.is_empty() || !merges.iter().any(|m| tables.iter().any(|t| t.overlaps(m))) {
+        return std::borrow::Cow::Borrowed(merges);
+    }
+    std::borrow::Cow::Owned(
+        merges
+            .iter()
+            .filter(|m| !tables.iter().any(|t| t.overlaps(m)))
+            .copied()
+            .collect(),
+    )
+}
+
 /// Whether the tables of all the sheets of a workbook are within their bounds: each sheet's tables, and
 /// the counts of the workbook.
 pub fn workbook_tables_within_bounds(stylings: &[crate::SheetStyling]) -> bool {
@@ -176,6 +194,8 @@ pub struct TableRegistry {
     seen: usize,
     columns: usize,
     names: HashSet<String>,
+    /// The table parts already read: a part is one table, so a second listing of it is turned away unread.
+    parts: HashSet<String>,
 }
 
 impl TableRegistry {
@@ -185,6 +205,11 @@ impl TableRegistry {
             names: taken.into_iter().map(fold_name).collect(),
             ..Self::default()
         }
+    }
+
+    /// Whether `path` (a table part) has not been read yet; it is marked as read.
+    pub fn claim_part(&mut self, path: &str) -> bool {
+        self.parts.insert(path.to_string())
     }
 
     /// Counts a table that was turned away before it could be built (a range on no sheet, a part that could

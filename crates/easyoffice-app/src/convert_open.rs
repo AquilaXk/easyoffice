@@ -496,6 +496,12 @@ fn decode_response(
                         st.tables_rejected
                     ));
                 }
+                if st.merges_dropped > 0 {
+                    warnings.push(format!(
+                        "{name} 시트의 병합 {}개는 표와 겹쳐 풀었습니다. 표 안의 칸은 병합할 수 없습니다.",
+                        st.merges_dropped
+                    ));
+                }
                 if st.num_fmts_rejected > 0 {
                     warnings.push(format!(
                         "서식 코드 {}개는 한도를 넘거나 알 수 없어 일반 서식으로 가져왔습니다.",

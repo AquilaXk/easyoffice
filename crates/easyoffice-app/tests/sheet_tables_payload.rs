@@ -246,3 +246,57 @@ fn a_table_name_with_markup_characters_never_reaches_a_package() {
     assert!(opened.contains(r#""style":"S&amp;\"<""#), "{opened}");
     assert!(opened.contains(r#""name":"Tab.1_x""#), "{opened}");
 }
+
+#[test]
+fn a_header_formula_is_saved_as_its_result_and_equal_table_names_are_made_unique() {
+    let sheet = r#"{"name":"S","cells":[
+        {"ref":"A1","raw":"=\"Reg\"&\"ion\""},{"ref":"B1","raw":"=1+1"},{"ref":"A2","raw":"x"}],
+      "tables":[{"name":"T","range":"A1:B3","columns":["a","b"]}]}"#;
+    let other = r#"{"name":"U","cells":[{"ref":"A1","raw":"h"}],
+      "tables":[{"name":"t","range":"A1:A2","columns":["h"]}]}"#;
+    let payload = format!(
+        r#"{{"sourceFormat":"xlsx","targetFormat":"xlsx","title":"표","sheets":[{sheet},{other}]}}"#
+    );
+    let opened = decode("표.xlsx", &bytes_of(&convert(&payload)));
+    assert!(opened.contains(r#""columns":["Region","2"]"#), "{opened}");
+    assert!(
+        opened.contains(r#"{"ref":"A1","raw":"Region"}"#),
+        "the cell is the text: {opened}"
+    );
+    assert!(
+        opened.contains(r#""name":"T""#) && opened.contains(r#""name":"t_2""#),
+        "{opened}"
+    );
+}
+
+#[test]
+fn a_merge_over_a_table_in_a_file_is_left_out_with_a_warning_and_a_save_leaves_it_out() {
+    use easyoffice_formats::{ZipArchiveCodec, ZipSecurityPolicy};
+    let sheet = r#"{"name":"S","cells":[{"ref":"A1","raw":"a"},{"ref":"B1","raw":"b"}],
+      "merges":["D5:E6"],"tables":[{"name":"T","range":"A1:B3","columns":["a","b"]}]}"#;
+    let bytes = save("xlsx", sheet);
+    let parts: Vec<(String, Vec<u8>)> =
+        ZipArchiveCodec::unpack(&bytes, &ZipSecurityPolicy::default())
+            .unwrap()
+            .into_iter()
+            .map(|e| {
+                let text = String::from_utf8_lossy(&e.data).into_owned();
+                let text = if e.path == "xl/worksheets/sheet1.xml" {
+                    text.replace(
+                        r#"<mergeCell ref="D5:E6"/>"#,
+                        r#"<mergeCell ref="D5:E6"/><mergeCell ref="A2:A3"/>"#,
+                    )
+                    .replace(r#"count="1""#, r#"count="2""#)
+                } else {
+                    text
+                };
+                (e.path.clone(), text.into_bytes())
+            })
+            .collect();
+    let opened = decode("표.xlsx", &ZipArchiveCodec::pack(&parts).unwrap());
+    assert!(opened.contains(r#""merges":["D5:E6"]"#), "{opened}");
+    assert!(
+        opened.contains("병합 1개는 표와 겹쳐 풀었습니다"),
+        "{opened}"
+    );
+}

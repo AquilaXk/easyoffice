@@ -11,15 +11,17 @@
 //! (the spreadsheet program refuses a table whose column names differ from its header cells) and writes the header
 //! cells as strings.
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
 use crate::sheet_filter::SheetFilter;
+use crate::sheet_names::fold_name;
 use crate::sheet_styling::xlsx_filter::{autofilter_xml, FilterScan};
 use crate::sheet_styling::xlsx_sheet::decode_xlsx_escapes;
 use crate::sheet_table::{SheetTable, TableRegistry, MAX_TABLES, MAX_TABLE_TEXT_CHARS};
 use crate::xml_stream::{unescape_cow, Attrs, XmlEvent, XmlReader};
-use crate::{CellBox, EasyOfficeError, XmlSanitizer};
+use crate::{CellBox, EasyOfficeError, XlsxCachedValue, XlsxFormulaCache, XmlSanitizer};
 
 const TABLE_RELATIONSHIP: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/table";
@@ -221,9 +223,11 @@ pub(crate) fn read_sheet_tables(
     let dir = part_path.rsplit_once('/').map_or("", |(dir, _)| dir);
     let mut rejected = 0u32;
     for id in &ids {
+        // A table part is one table of one sheet: a part listed again is turned away without being read.
         let table = targets
             .get(id)
             .and_then(|target| resolve_target(dir, target))
+            .filter(|path| registry.claim_part(path))
             .and_then(|path| entries.get(path.as_str()).copied())
             .and_then(|data| std::str::from_utf8(data).ok())
             .and_then(parse_table);
@@ -295,6 +299,7 @@ fn resolve_columns<'a>(
     header_text: impl Fn(u32) -> Option<&'a str>,
 ) -> (Vec<String>, Vec<(u32, String)>) {
     let mut taken = HashSet::new();
+    let mut next_suffix: HashMap<String, u32> = HashMap::new();
     let mut names = Vec::with_capacity(table.columns.len());
     let mut fixes = Vec::new();
     for (i, model) in table.columns.iter().enumerate() {
@@ -311,12 +316,19 @@ fn resolve_columns<'a>(
             base.to_string()
         };
         let mut name = base.clone();
-        let mut n = 1u32;
-        while !taken.insert(crate::sheet_names::fold_name(&name)) {
-            n += 1;
-            let suffix = n.to_string();
-            let keep = MAX_TABLE_TEXT_CHARS - suffix.len();
-            name = base.chars().take(keep).collect::<String>() + &suffix;
+        if !taken.insert(fold_name(&name)) {
+            // The next number to try for this name continues where the last repeat stopped, so a run of equal
+            // headers costs one step each.
+            let next = next_suffix.entry(fold_name(&base)).or_insert(1);
+            loop {
+                *next += 1;
+                let suffix = next.to_string();
+                let keep = MAX_TABLE_TEXT_CHARS - suffix.len();
+                name = base.chars().take(keep).collect::<String>() + &suffix;
+                if taken.insert(fold_name(&name)) {
+                    break;
+                }
+            }
         }
         if table.header && text != Some(name.as_str()) {
             fixes.push((col, name.clone()));
@@ -396,6 +408,7 @@ impl TableWriter {
         &mut self,
         tables: &[SheetTable],
         cells: &[(u32, u32, String)],
+        cache: Option<&XlsxFormulaCache>,
     ) -> SheetTables {
         if tables.is_empty() {
             return SheetTables::default();
@@ -404,11 +417,24 @@ impl TableWriter {
         for (i, t) in tables.iter().enumerate().filter(|(_, t)| t.header) {
             by_row.entry(t.range.row0).or_default().push(i);
         }
-        let mut texts: HashMap<(usize, u32), &str> = HashMap::new();
+        // A header cell holds text: a formula there is its result, which the spreadsheet program also keeps
+        // as fixed text.
+        let mut texts: HashMap<(usize, u32), Cow<'_, str>> = HashMap::new();
+        let mut formulas: Vec<Vec<u32>> = vec![Vec::new(); tables.len()];
         for (row, col, raw) in cells {
             for &i in by_row.get(row).into_iter().flatten() {
                 if (tables[i].range.col0..=tables[i].range.col1).contains(col) {
-                    texts.insert((i, *col), raw);
+                    let text = match (
+                        raw.starts_with('='),
+                        cache.and_then(|c| c.get(&(*row, *col))),
+                    ) {
+                        (true, Some(value)) => Cow::Owned(cached_text(value)),
+                        _ => Cow::Borrowed(raw.as_str()),
+                    };
+                    texts.insert((i, *col), text);
+                    if raw.starts_with('=') {
+                        formulas[i].push(*col);
+                    }
                 }
             }
         }
@@ -420,12 +446,18 @@ impl TableWriter {
             tables.len()
         );
         for (i, table) in tables.iter().enumerate() {
-            let (names, header_fixes) = resolve_columns(table, |col| texts.get(&(i, col)).copied());
+            let (names, header_fixes) =
+                resolve_columns(table, |col| texts.get(&(i, col)).map(|t| t.as_ref()));
             fixes.extend(
                 header_fixes
                     .into_iter()
                     .map(|(col, name)| ((table.range.row0, col), name)),
             );
+            // A formula in a header cell becomes the text of its name, whatever it computed.
+            for &col in &formulas[i] {
+                let name = &names[(col - table.range.col0) as usize];
+                fixes.insert((table.range.row0, col), name.clone());
+            }
             self.count += 1;
             let n = self.count;
             let _ = write!(
@@ -447,6 +479,15 @@ impl TableWriter {
             out.cells = Some(patched_cells(cells, fixes));
         }
         out
+    }
+}
+
+/// The text a computed formula value shows in a header cell.
+fn cached_text(value: &XlsxCachedValue) -> String {
+    match value {
+        XlsxCachedValue::Number(n) => n.to_string(),
+        XlsxCachedValue::Text(text) => text.clone(),
+        XlsxCachedValue::Boolean(b) => b.to_string().to_uppercase(),
     }
 }
 
@@ -581,6 +622,41 @@ mod tests {
     }
 
     #[test]
+    fn repeated_names_count_on_from_the_last_repeat_and_skip_taken_numbers() {
+        let t = table("T", "A1:F3");
+        let headers = ["a", "a2", "a", "a", "A", "a"];
+        let (names, _) = resolve_columns(&t, |c| headers.get(c as usize).copied());
+        assert_eq!(names, ["a", "a2", "a3", "a4", "A5", "a6"]);
+    }
+
+    #[test]
+    fn a_formula_in_a_header_cell_becomes_the_text_of_its_result() {
+        let mut cache = XlsxFormulaCache::new();
+        cache.insert((0, 0), XlsxCachedValue::Text("Total".into()));
+        cache.insert((0, 1), XlsxCachedValue::Number(2024.0));
+        cache.insert((0, 2), XlsxCachedValue::Boolean(true));
+        let cells: Vec<(u32, u32, String)> = ["=B9", "=B8", "=B7", "=B6", "plain"]
+            .iter()
+            .enumerate()
+            .map(|(c, t)| (0, c as u32, (*t).to_string()))
+            .collect();
+        let mut writer = TableWriter::default();
+        let out = writer.add_sheet(&[table("T", "A1:E3")], &cells, Some(&cache));
+        let patched = out.cells.unwrap();
+        let text = |c: u32| patched.iter().find(|x| x.1 == c).unwrap().2.clone();
+        assert_eq!([text(0), text(1), text(2)], ["Total", "2024", "TRUE"]);
+        // No computed value: the name the table had; the cell no longer holds the formula.
+        assert_eq!(text(3), "Column4");
+        assert_eq!(text(4), "plain");
+        let xml = String::from_utf8(writer.parts[0].1.clone()).unwrap();
+        assert!(
+            xml.contains("name=\"Total\"")
+                && xml.contains("name=\"2024\"")
+                && xml.contains("name=\"TRUE\"")
+        );
+    }
+
+    #[test]
     fn header_cells_are_found_by_row_and_column() {
         let mut other = table("U", "F5:G8");
         other.header = false;
@@ -593,8 +669,8 @@ mod tests {
     fn the_writer_gives_unique_ids_and_patches_header_cells() {
         let mut writer = TableWriter::default();
         let cells = vec![(0, 0, "A".to_string()), (0, 1, "A".to_string())];
-        let first = writer.add_sheet(&[table("T", "A1:B3")], &cells);
-        let second = writer.add_sheet(&[table("U", "A1:B3")], &[]);
+        let first = writer.add_sheet(&[table("T", "A1:B3")], &cells, None);
+        let second = writer.add_sheet(&[table("U", "A1:B3")], &[], None);
         assert_eq!(writer.parts.len(), 2);
         assert_eq!(writer.parts[1].0, "xl/tables/table2.xml");
         assert!(first.rels.contains("Target=\"../tables/table1.xml\""));

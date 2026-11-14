@@ -18,7 +18,8 @@ use crate::sheet_styling::xlsx_view::{
     apply_tint, sheet_format_pr_xml, sheet_pr_xml, sheet_views_xml, theme_palette, DEFAULT_THEME,
 };
 use crate::sheet_styling::{
-    hides_every_sheet, unique_table_names, IdMemo, SheetStyling, TableRegistry,
+    hides_every_sheet, merges_clear_of_tables, unique_table_names, IdMemo, SheetStyling,
+    TableRegistry,
 };
 use crate::{EasyOfficeError, XmlSanitizer, ZipArchiveCodec, ZipSecurityPolicy};
 use std::sync::Arc;
@@ -411,7 +412,9 @@ fn build_sheet_xml(
         if let Some(filter) = &st.filter {
             sheet_xml.push_str(&autofilter_xml(filter));
         }
-        sheet_xml.push_str(&merge_cells_xml(&st.merges));
+        sheet_xml.push_str(&merge_cells_xml(&merges_clear_of_tables(
+            &st.merges, &st.tables,
+        )));
         sheet_xml.push_str(&rules_xml(&st.rules, &style_table.dxf));
         sheet_xml.push_str(links_xml);
         sheet_xml.push_str(&crate::sheet_styling::xlsx_page::page_tail_xml(&st.page));
@@ -606,7 +609,8 @@ impl OoxmlCodec {
         let sheet_parts: Vec<_> = active_sheets
             .iter()
             .zip(&sheet_tables)
-            .map(|((_, cells), tables)| table_writer.add_sheet(tables, cells))
+            .enumerate()
+            .map(|(i, ((_, cells), tables))| table_writer.add_sheet(tables, cells, caches.get(i)))
             .collect();
         let has_spills = stylings.iter().any(|s| !s.spills.is_empty());
         let (content_types, wb_rels_xml) = if has_spills {
@@ -897,6 +901,12 @@ impl OoxmlCodec {
                     &mut table_registry,
                     &mut styling.tables,
                 )?;
+                if let std::borrow::Cow::Owned(kept) =
+                    merges_clear_of_tables(&styling.merges, &styling.tables)
+                {
+                    styling.merges_dropped = (styling.merges.len() - kept.len()) as u32;
+                    styling.merges = kept;
+                }
                 if let (None, Some(tab), Some(theme)) = (styling.tab_color, scan.tab_theme, &theme)
                 {
                     styling.tab_color = Some(apply_tint(theme[tab.index], tab.tint));
