@@ -16,7 +16,7 @@ use crate::decode_budget::DecodeBudget;
 use crate::rtf_xml_helpers::{format_col_letters, parse_a1_zero_based};
 use crate::sheet_styling::sheet_view::{push_level, Outline, MAX_OUTLINE_ROWS};
 use crate::sheet_styling::xlsx_filter::FilterScan;
-use crate::sheet_styling::xlsx_layout::{add_run, has_room, parse_merge};
+use crate::sheet_styling::xlsx_layout::{add_run, parse_merge, MAX_MERGES};
 use crate::sheet_styling::xlsx_page::PageScan;
 use crate::sheet_styling::xlsx_protect::ProtectScan;
 use crate::sheet_styling::xlsx_styles::{xlsx_width_to_px, XfStyles};
@@ -220,6 +220,8 @@ struct SheetScanner<'s> {
     next_col: u32,
     /// Rows and columns put in groups so far, and the rows and columns that carry `collapsed`.
     outline_rows: u64,
+    /// Rows in `styling.hidden_rows` so far; counted here because summing the runs per row is quadratic in them.
+    hidden_rows_total: u64,
     outline_cols: u64,
     marks_rows: Vec<u32>,
     marks_cols: Vec<u32>,
@@ -241,14 +243,21 @@ impl<'s> SheetScanner<'s> {
         }
         self.next_row = self.row + 1;
         self.next_col = 0;
-        if self.want_styling && has_room(&self.styling) && attrs_flag(attrs, "hidden") {
+        if self.want_styling && attrs_flag(attrs, "hidden") && self.has_room() {
             add_run(&mut self.styling.hidden_rows, self.row, self.row);
+            self.hidden_rows_total += 1;
         }
         if self.want_styling {
             self.record_row_group(attrs);
             self.record_row_lock(attrs);
         }
         Ok(())
+    }
+
+    /// Whether the sheet may take another merged range or hidden row.
+    fn has_room(&self) -> bool {
+        self.styling.merges.len() < MAX_MERGES
+            && self.hidden_rows_total < MAX_HIDDEN_ROWS + MAX_OUTLINE_ROWS
     }
 
     /// The format of the open `row` (`s` with `customFormat`) unlocks it (PD-216).
@@ -397,7 +406,7 @@ impl<'s> SheetScanner<'s> {
 
     /// A `mergeCell` becomes a merged range.
     fn record_merge(&mut self, attrs: &Attrs<'_>) {
-        if !has_room(&self.styling) {
+        if !self.has_room() {
             return;
         }
         let merge = attrs
@@ -685,6 +694,7 @@ pub(crate) fn scan_worksheet(
         next_row: 0,
         next_col: 0,
         outline_rows: 0,
+        hidden_rows_total: 0,
         outline_cols: 0,
         marks_rows: Vec::new(),
         marks_cols: Vec::new(),

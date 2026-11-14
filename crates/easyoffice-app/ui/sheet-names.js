@@ -94,10 +94,12 @@
     if (!silent) listener?.();
   }
 
-  // `text` with every reference to the sheet `from` (`from!A1`, `'from'!A1`) naming `to`, outside string literals.
+  // `text` with every reference to the sheet `from` (`from!A1`, `'from'!A1`) naming `to`, outside string literals. A name
+  // that only ends in `from` (`내시트1!A1`, any letter, digit, `_` or `.` before it) and an external reference
+  // (`[1]from!A1`) are not references to the sheet.
   function retarget(text, from, to) {
     const esc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const pattern = new RegExp(`(?<![\\w.'!$])(?:'${esc(from.replaceAll("'", "''"))}'|${esc(from)})!`, "gi");
+    const pattern = new RegExp(`(?<![\\p{L}\\p{N}_.'!$\\]])(?:'${esc(from.replaceAll("'", "''"))}'|${esc(from)})!`, "giu");
     return String(text)
       .split(/("(?:[^"]|"")*")/)
       .map((part, i) => (i % 2 === 1 ? part : part.replace(pattern, () => quoteSheet(to) + "!")))
@@ -105,14 +107,14 @@
   }
 
   // The names a copy of the sheet `from` named `to` brings along: each name whose scope is `from`, now scoped to `to`
-  // and referring to the copy where it referred to the original. `defs` is a list as `getAll` gives it; the result is
-  // the names to add, as many as the limit leaves room for.
+  // and referring to the copy where it referred to the original. `defs` is a list as `getAll` gives it. Null when the
+  // copy cannot have them all (the list would pass the limit or a definition would pass its length); a copy takes every
+  // one of them or none, and no definition is cut.
   function copiedFor(defs, from, to) {
-    const room = Math.max(0, MAX_NAMES - defs.length);
-    return defs
-      .filter((def) => def.scope && sameScope(def.scope, from))
-      .slice(0, room)
-      .map((def) => ({ ...def, scope: to, refersTo: retarget(def.refersTo, from, to).slice(0, MAX_REFERS_TO_CHARS) }));
+    const own = defs.filter((def) => def.scope && sameScope(def.scope, from));
+    if (defs.length + own.length > MAX_NAMES) return null;
+    const copies = own.map((def) => ({ ...def, scope: to, refersTo: retarget(def.refersTo, from, to) }));
+    return copies.some((def) => def.refersTo.length > MAX_REFERS_TO_CHARS) ? null : copies;
   }
 
   const hasAny = () => list.length > 0;

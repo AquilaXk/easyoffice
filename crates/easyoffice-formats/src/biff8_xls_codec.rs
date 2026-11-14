@@ -599,7 +599,7 @@ impl LegacyOle2Codec {
         rec: XlsRecord,
     ) -> Result<(), EasyOfficeError> {
         let XlsRecord { start, end } = rec;
-        if rec.len() < 8 {
+        if rec.len() < 8 || !xls_boundsheet::is_worksheet(&data[start..end]) {
             return Ok(());
         }
         let cch_u8 = data[start + 6] as usize;

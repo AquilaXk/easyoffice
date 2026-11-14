@@ -548,3 +548,25 @@ fn a_file_with_a_hostile_number_of_open_groups_stays_bounded() {
         started.elapsed()
     );
 }
+
+#[test]
+fn many_runs_of_hidden_rows_are_read_in_time_linear_in_the_rows() {
+    // 80,000 hidden rows in 20,000 runs of four, with a gap of one between them.
+    let mut xml = String::from("<worksheet><sheetData>");
+    for run in 0..20_000u32 {
+        for row in 0..4 {
+            xml.push_str(&format!("<row r=\"{}\" hidden=\"1\"/>", run * 5 + row + 1));
+        }
+    }
+    xml.push_str("</sheetData></worksheet>");
+    let started = std::time::Instant::now();
+    let back = read(&with_sheet(&pack(SheetStyling::default()), &xml, None));
+    assert_eq!(back.hidden_rows.len(), 20_000);
+    assert_eq!(back.hidden_rows[1], (5, 8));
+    // The sum of the runs was taken per row, which took seconds; a pass over the rows takes a fraction of one.
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(2),
+        "{:?}",
+        started.elapsed()
+    );
+}

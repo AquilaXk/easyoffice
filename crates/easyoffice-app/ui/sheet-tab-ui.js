@@ -271,7 +271,8 @@
       const dx = ev.clientX - drag.startX;
       if (!drag.moved && Math.abs(dx) < DRAG_START_PX) return;
       drag.moved = true;
-      // With Ctrl (Option on a Mac) held the tab is copied: the tabs stay and a mark shows the slot (PD-209).
+      // With Ctrl (Option on a Mac, as that program's help says) held the tab is copied: the tabs stay and a mark shows
+      // the slot (PD-209).
       drag.copy = Boolean(ev.ctrlKey || ev.altKey);
       bar()?.classList.toggle("copying", drag.copy);
       if (drag.copy) {
@@ -292,15 +293,16 @@
       });
     }
 
-    function onRelease() {
+    // The key that is held as the button goes up decides between a copy and a move (the key goes up after the button).
+    function onRelease(ev) {
       if (!drag) return;
-      const { moved, tab, index, target, copy, slot } = drag;
+      const { moved, tab, index, target, items } = drag;
       const buttons = tabButtons();
       drag = null;
       if (!moved) return;
       swallowClick = true;
       clearDrag();
-      if (copy) void getTabs().moveOrCopy(tab.dataset.sheetTab, buttons[slot]?.dataset.sheetTab ?? null, true);
+      if (ev?.ctrlKey || ev?.altKey) void getTabs().moveOrCopy(tab.dataset.sheetTab, buttons[dropSlot(items, ev.clientX)]?.dataset.sheetTab ?? null, true);
       else if (target !== index) void getTabs().moveTo(tab.dataset.sheetTab, target);
     }
 

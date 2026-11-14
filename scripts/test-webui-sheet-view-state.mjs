@@ -164,9 +164,34 @@ test("a renamed sheet keeps its view and a copy starts from its source's", async
   assert.deepEqual(store.get("A (2)"), store.get("A"));
   store.set("A", { zoom: 75 });
   assert.equal(store.get("A (2)").zoom, 150, "a copy is a value, not a link");
-  store.rename("A (2)", "Z");
+  store.remove("A (2)");
   assert.equal(store.get("A (2)"), null);
-  assert.equal(store.get("Z").zoom, 150);
-  store.remove("Z");
-  assert.equal(store.get("Z"), null);
+});
+
+test("a renamed or deleted sheet leaves its view for the undo, and a new sheet takes none of it (PD-208)", async () => {
+  const h = await open();
+  await h.openBook(BOOK);
+  const store = h.host.__EASYOFFICE_SHEET_VIEW_STATE__;
+  const rename = async (from, to) => {
+    const t = h.tab(from);
+    t.dispatchEvent({ type: "dblclick", target: t });
+    await flushAsyncTurns(5);
+    const input = h.document.querySelector("#sheet-tab-bar .sheet-tab-edit");
+    input.value = to;
+    input.dispatchEvent({ type: "keydown", key: "Enter", target: input });
+    await flushAsyncTurns(40);
+  };
+  await rename("A", "Z");
+  assert.equal(store.get("Z").zoom, 150, "the new name has the view");
+  assert.equal(store.get("A").zoom, 150, "the old name keeps it for an undo");
+  h.userClick(h.document.querySelector('.md-item[data-studio-menu-cmd="studio-undo"]'));
+  await flushAsyncTurns(40);
+  assert.equal(h.active(), "A");
+  assert.equal(h.zoomLabel(), "150%", "the undone sheet shows its view");
+  // A deleted sheet keeps its view, a sheet inserted under that name does not inherit it.
+  store.set("Sheet4", { zoom: 200 });
+  h.userClick(h.document.getElementById("btn-add-sheet-tab"));
+  await flushAsyncTurns(40);
+  assert.equal(h.active(), "Sheet4");
+  assert.equal(store.get("Sheet4"), null);
 });

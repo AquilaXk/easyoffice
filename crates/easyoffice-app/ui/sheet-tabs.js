@@ -191,6 +191,7 @@
       return change((next) => {
         const name = names.nextDefault(next.sheetOrder);
         next.sheets[name] = {};
+        viewState.remove(name);
         place(next, name, before ? next.sheetOrder.indexOf(before) : -1);
         activate(next, name);
         return "시트 삽입: " + names.labelOf(name);
@@ -215,7 +216,7 @@
         next.sheetRules = withoutKey(next.sheetRules, sheet);
         next.sheetLayout = withoutKey(next.sheetLayout, sheet);
         next.sheetOrder = next.sheetOrder.filter((n) => n !== sheet);
-        viewState.remove(sheet);
+        // The view of a deleted sheet stays: an undo brings the sheet back and it opens as it was left.
         return "시트 삭제: " + names.labelOf(sheet);
       });
     }
@@ -244,7 +245,8 @@
         next.sheetLayout = renamedKey(next.sheetLayout, sheet, to);
         next.sheetOrder = next.sheetOrder.map((n) => (n === sheet ? to : n));
         if (next.activeSheetName === sheet) next.activeSheetName = to;
-        viewState.rename(sheet, to);
+        // The old name keeps its view for the undo that gives the name back.
+        viewState.copy(sheet, to);
         return "시트 이름 바꿈: " + to;
       }, { [sheet]: to });
       if (done) ui.focusTab(to);
@@ -253,9 +255,15 @@
 
     // `next` with a copy of `sheet` under a name of its own; returns the name. Its formulas keep their text: a
     // reference without a sheet name now points into the copy, one with a name still points where it did. The
-    // sheet's own names (those scoped to it) are copied to the copy and refer to it (PD-214).
+    // sheet's own names (those scoped to it) are copied to the copy and refer to it (PD-214). Null, with the reason in the
+    // status text, when the names cannot all be copied: the copy is then not made.
     function cloneInto(next, sheet) {
       const name = names.copyName(names.labelOf(sheet), next.sheetOrder);
+      const copies = host.__EASYOFFICE_SHEET_NAMES__.copiedFor(next.definedNames || [], sheet, name);
+      if (copies === null) {
+        say("이름 정의가 한도를 넘어 복사할 수 없음");
+        return null;
+      }
       next.sheets[name] = structuredClone(next.sheets[sheet] || {});
       if (next.sheetRowCounts[sheet]) next.sheetRowCounts[name] = next.sheetRowCounts[sheet];
       if (next.sheetColumnWidths[sheet]) next.sheetColumnWidths[name] = { ...next.sheetColumnWidths[sheet] };
@@ -266,8 +274,7 @@
         if (kept.tables) kept.tables = layoutApi.copiedTables(kept.tables, next.sheetLayout);
         if (Object.keys(kept).length > 0) next.sheetLayout[name] = kept;
       }
-      const scoped = host.__EASYOFFICE_SHEET_NAMES__.copiedFor(next.definedNames || [], sheet, name);
-      if (scoped.length > 0) next.definedNames = [...next.definedNames, ...scoped];
+      if (copies.length > 0) next.definedNames = [...next.definedNames, ...copies];
       viewState.copy(sheet, name);
       return name;
     }
@@ -281,6 +288,7 @@
       }
       return change((next) => {
         const name = cloneInto(next, sheet);
+        if (name === null) return false;
         place(next, name, next.sheetOrder.indexOf(sheet) + 1);
         activate(next, name);
         return "시트 복사: " + names.labelOf(name);
@@ -298,8 +306,12 @@
         if (before !== null && !next.sheetOrder.includes(before)) return false;
         if (!makeCopy && before === sheet) return false;
         const name = makeCopy ? cloneInto(next, sheet) : sheet;
-        next.sheetOrder = next.sheetOrder.filter((n) => n !== name);
-        next.sheetOrder.splice(before === null ? next.sheetOrder.length : next.sheetOrder.indexOf(before), 0, name);
+        if (name === null) return false;
+        const order = next.sheetOrder.filter((n) => n !== name);
+        order.splice(before === null ? order.length : order.indexOf(before), 0, name);
+        // A move to where the sheet is makes no step.
+        if (!makeCopy && order.every((n, i) => n === next.sheetOrder[i])) return false;
+        next.sheetOrder = order;
         if (makeCopy || next.activeSheetName !== name) activate(next, name);
         return (makeCopy ? "시트 복사: " : "시트 이동: ") + names.labelOf(name);
       });

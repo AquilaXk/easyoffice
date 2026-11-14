@@ -230,14 +230,6 @@ pub(crate) fn parse_merge(reference: &str) -> Option<CellBox> {
         .filter(|b| b.area() > 1)
 }
 
-/// Whether `styling` still has room for another merge or hidden row (readers stop at the bounds).
-/// A file does not tell the rows a user hid from the rows a folded group hid, so a reader holds
-/// both kinds at once.
-pub(crate) fn has_room(styling: &SheetStyling) -> bool {
-    styling.merges.len() < MAX_MERGES
-        && run_total(&styling.hidden_rows) < MAX_HIDDEN_ROWS + MAX_OUTLINE_ROWS
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -152,13 +152,37 @@
   // A group is folded when its rows are hidden by a fold and it was not left open inside a folded one.
   const isFolded = (outline, axis, group) => covers(foldedOf(outline, axis), group.first, group.last) && openIndex(openOf(outline, axis), group) < 0;
 
+  // `runs` sorted and joined where they overlap or touch: one sort, one pass.
+  function mergeRuns(runs) {
+    const sorted = runs.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    const out = [];
+    for (const [first, last] of sorted) {
+      const prev = out[out.length - 1];
+      if (prev && first <= prev[1] + 1) prev[1] = Math.max(prev[1], last);
+      else out.push([first, last]);
+    }
+    return out;
+  }
+
+  // The parts of the sorted, disjoint `a` that lie in the sorted, disjoint `b`: one pass over both.
+  function intersectRuns(a, b) {
+    const out = [];
+    for (let i = 0, j = 0; i < a.length && j < b.length; ) {
+      const first = Math.max(a[i][0], b[j][0]);
+      const last = Math.min(a[i][1], b[j][1]);
+      if (first <= last) out.push([first, last]);
+      if (a[i][1] < b[j][1]) i += 1;
+      else j += 1;
+    }
+    return out;
+  }
+
   // `outline` with the folded runs and the open groups made from the groups of `axis` that `closed(group)` names:
   // the rows hidden are those of the closed groups, and a group inside them that is not closed is open.
   function withClosed(outline, axis, closed) {
     const k = keys(axis);
     const all = groups(outline, axis);
-    let folded = [];
-    for (const g of all) if (closed(g)) folded = layoutApi.addRun(folded, g.first, g.last);
+    const folded = mergeRuns(all.filter(closed).map((g) => [g.first, g.last]));
     const open = all.filter((g) => !closed(g) && covers(folded, g.first, g.last)).map((g) => [g.first, g.last, g.level]);
     const next = { ...outline };
     if (folded.length) next[k.folded] = folded;
@@ -173,16 +197,8 @@
     let next = { ...outline };
     for (const axis of ["row", "col"]) {
       const k = keys(axis);
-      const plain = levelsOf(next, axis).map((r) => [r[0], r[1]]);
-      const kept = [];
-      for (const [a, b] of foldedOf(next, axis)) {
-        for (const [s, e] of plain) {
-          if (e < a) continue;
-          if (s > b) break;
-          kept.push([Math.max(a, s), Math.min(b, e)]);
-        }
-      }
-      const merged = kept.reduce((acc, run) => layoutApi.addRun(acc, run[0], run[1]), []);
+      const plain = mergeRuns(levelsOf(next, axis).map((r) => [r[0], r[1]]));
+      const merged = mergeRuns(intersectRuns(mergeRuns(foldedOf(next, axis)), plain));
       if (merged.length) next[k.folded] = merged;
       else delete next[k.folded];
       const stretches = new Set(groups(next, axis).map((g) => g.level + ":" + g.first + ":" + g.last));

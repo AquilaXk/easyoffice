@@ -31,6 +31,12 @@ pub(crate) fn push(stream: &mut Vec<u8>, name: &str, state: SheetState) -> usize
     position_at
 }
 
+/// Whether the record is of a worksheet (`dt` 0, the byte after `hsState`); macro, chart and VB module sheets have
+/// no worksheet substream here, so their names and states must not take a worksheet's place.
+pub(crate) fn is_worksheet(payload: &[u8]) -> bool {
+    payload[5] == 0
+}
+
 /// The state a record's `hsState` byte (the byte after the stream position) says; `payload` is the record's
 /// data and must hold at least the 8 bytes of the fixed part.
 pub(crate) fn state_of(payload: &[u8]) -> SheetState {

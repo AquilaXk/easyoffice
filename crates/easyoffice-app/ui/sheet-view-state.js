@@ -6,7 +6,9 @@
   // range: [row1, col1, row2, col2], zoom, top: [row, col] }`, 1-based, a key left out at its default
   // (A1, A1, 100, A1). The store is kept apart from the layout on purpose: a view is not an undo step and
   // does not make the document unsaved, as in the spreadsheet program, so no history snapshot holds it.
-  // A sheet that is renamed, copied or deleted takes its view along.
+  // A sheet that is renamed or copied hands its view to the new name; the old name keeps its entry, so an undo that gives
+  // the name back (or the sheet back, after a deletion or a copy that goes) finds the view where it was, and an insert
+  // clears the name it takes.
 
   const MIN_ZOOM = 10;
   const MAX_ZOOM = 400;
@@ -52,12 +54,6 @@
 
   const remove = (name) => void delete bySheet[name];
 
-  function rename(from, to) {
-    if (from === to || !bySheet[from]) return;
-    bySheet[to] = bySheet[from];
-    delete bySheet[from];
-  }
-
   function copy(from, to) {
     if (bySheet[from]) bySheet[to] = structuredClone(bySheet[from]);
     else delete bySheet[to];
@@ -90,5 +86,5 @@
     };
   }
 
-  host.__EASYOFFICE_SHEET_VIEW_STATE__ = { MIN_ZOOM, MAX_ZOOM, get, set, remove, rename, copy, replaceAll, getAll, fromLive, toLive };
+  host.__EASYOFFICE_SHEET_VIEW_STATE__ = { MIN_ZOOM, MAX_ZOOM, get, set, remove, copy, replaceAll, getAll, fromLive, toLive };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

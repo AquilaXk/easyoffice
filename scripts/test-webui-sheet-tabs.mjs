@@ -866,3 +866,61 @@ test("a copy brings the names scoped to its source and refers to itself, and the
   assert.equal(h.menu().querySelector('[data-tab-act="move-copy"]').getAttribute("aria-disabled"), "true");
   h.host.__EASYOFFICE_SHEET_PROTECT__.setWorkbook(null);
 });
+
+test("the key held as the button goes up decides between a copy and a move, and a move to the same place is no step (PD-209)", async () => {
+  const h = await open();
+  await h.openBook([{ name: "Sheet1", cells: { A1: "1" } }, { name: "Sheet2", cells: { A1: "2" } }, { name: "Sheet3", cells: { A1: "3" } }]);
+  const { document } = h;
+  const place = () => h.tabs().forEach((t, i) => {
+    t.getBoundingClientRect = () => ({ left: 10 + i * 80, top: 0, width: 80, height: 24 });
+  });
+  // Ctrl went up before the pointer moved on and the button goes up without it: a move, not a copy.
+  place();
+  const first = h.tab("Sheet1");
+  first.dispatchEvent({ type: "mousedown", target: first, clientX: 40, button: 0 });
+  document.dispatchEvent({ type: "mousemove", target: document.body, clientX: 200, ctrlKey: true });
+  document.dispatchEvent({ type: "mouseup", target: document.body, clientX: 200 });
+  await flushAsyncTurns(30);
+  assert.equal(h.names().length, 3, "no copy");
+  // The other way round: Ctrl goes down after the last move and is held at the release: a copy at the release point.
+  place();
+  const second = h.tab("Sheet2");
+  second.dispatchEvent({ type: "mousedown", target: second, clientX: 100, button: 0 });
+  document.dispatchEvent({ type: "mousemove", target: document.body, clientX: 40 });
+  document.dispatchEvent({ type: "mouseup", target: document.body, clientX: 40, ctrlKey: true });
+  await flushAsyncTurns(30);
+  assert.equal(h.names().length, 4, "one copy");
+  // A move before the sheet that already follows it, or before itself, changes nothing.
+  const steps = async () => (await h.saved()).length;
+  const before = h.names();
+  const only = h.tab(before[0]);
+  await h.tabMenu(before[0], "move-copy");
+  const rows = [...document.querySelectorAll("#sheet-tab-move-list li")];
+  h.userClick(rows[1]);
+  h.userClick(document.getElementById("btn-sheet-tab-move-ok"));
+  await flushAsyncTurns(30);
+  assert.deepEqual(h.names(), before);
+  await h.history("studio-undo");
+  assert.equal(h.names().length, 3, "the one undo step is the copy's, the move before the next tab made none");
+  assert.ok(only && (await steps()) === 3);
+});
+
+test("a copy of a sheet takes its names with their references moved by the sheet name, never by a part of another name, and is refused when it cannot take them whole (PD-214)", async () => {
+  const h = await open();
+  await h.openBook([{ name: "시트1", cells: { A1: "1" } }, { name: "Sheet2", cells: { A1: "2" } }]);
+  const namesApi = h.host.__EASYOFFICE_SHEET_NAMES__;
+  assert.equal(namesApi.retarget("내시트1!A1+[1]시트1!A1+시트1!A1+'시트1'!B2+\"시트1!x\"", "시트1", "시트1 (2)"), "내시트1!A1+[1]시트1!A1+'시트1 (2)'!A1+'시트1 (2)'!B2+\"시트1!x\"");
+  assert.equal(namesApi.retarget("Xsheet1!A1+sheet1!A1+Sheet1_2!A1+Sheet1.x!A1", "Sheet1", "Z"), "Xsheet1!A1+Z!A1+Sheet1_2!A1+Sheet1.x!A1");
+  // A definition that would pass its length is refused whole, and so is a list that would pass the limit.
+  const long = "시트1!$A$1" + "+1".repeat(4100);
+  namesApi.replaceAll([{ name: "Long", scope: "시트1", refersTo: long }, { name: "Short", scope: "시트1", refersTo: "시트1!$A$1" }], true);
+  assert.equal(namesApi.copiedFor(namesApi.getAll(), "시트1", "시트1 (2)"), null, "a longer name text than the limit");
+  namesApi.replaceAll([{ name: "Short", scope: "시트1", refersTo: "시트1!$A$1" }], true);
+  assert.equal(namesApi.copiedFor(namesApi.getAll(), "시트1", "시트1 (2)").length, 1);
+  const many = Array.from({ length: namesApi.MAX_NAMES - 1 }, (_, i) => ({ name: "N" + i, refersTo: "Sheet2!$A$1" }));
+  namesApi.replaceAll([...many, { name: "Own", scope: "시트1", refersTo: "시트1!$A$1" }], true);
+  assert.equal(namesApi.copiedFor(namesApi.getAll(), "시트1", "시트1 (2)"), null, "the list would pass its limit");
+  await h.tabMenu("시트1", "copy");
+  assert.deepEqual(h.names(), ["시트1", "Sheet2"], "no copy was made");
+  assert.match(h.status(), /이름 정의가 한도를 넘어/);
+});
