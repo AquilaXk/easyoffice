@@ -427,7 +427,9 @@ fn declared_variables(tokens: &[Tok]) -> std::collections::HashSet<String> {
                 arg_start = true;
             }
             Tok::Word(word) => {
-                let follows = matches!(next_significant(i + 1), Some(Tok::Punct(',' | ')')));
+                // A variable is followed by its value (`LET`) or the next parameter (`LAMBDA`); the
+                // last argument, which ends at `)`, is the body.
+                let follows = matches!(next_significant(i + 1), Some(Tok::Punct(',')));
                 if let (true, true, Some(call)) = (arg_start, follows, calls.last()) {
                     let declares = match call.name.as_str() {
                         "LET" => call.arg % 2 == 0,
@@ -456,6 +458,23 @@ fn declared_variables(tokens: &[Tok]) -> std::collections::HashSet<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_last_argument_of_let_and_lambda_is_a_body_not_a_variable() {
+        assert_eq!(to_file_formula("LET(x,1,B1)"), "_xlfn.LET(_xlpm.x,1,B1)");
+        assert_eq!(
+            to_file_formula("LAMBDA(x,TRUE)"),
+            "_xlfn.LAMBDA(_xlpm.x,TRUE)"
+        );
+        assert_eq!(
+            to_file_formula("LET(x,1,y,2,y)"),
+            "_xlfn.LET(_xlpm.x,1,_xlpm.y,2,_xlpm.y)"
+        );
+        assert_eq!(
+            to_file_formula("LAMBDA(x,y,y)"),
+            "_xlfn.LAMBDA(_xlpm.x,_xlpm.y,_xlpm.y)"
+        );
+    }
 
     #[test]
     fn functions_variables_and_the_spill_operator_get_their_file_spelling() {

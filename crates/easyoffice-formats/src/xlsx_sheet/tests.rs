@@ -285,6 +285,22 @@ fn shared_formulas_shift_from_their_master() {
 }
 
 #[test]
+fn shared_formulas_keep_quoted_text_and_sheet_names_and_get_the_page_spelling() {
+    let xml = sheet(
+        r#"<c r="A1"><f t="shared" si="0">IF(B1="가나 A1 ""다""",'Sheet A1'!B1,_xlfn.IFS(B1,1)+SUM(_xlfn.ANCHORARRAY(C1)))</f></c><c r="A2"><f t="shared" si="0"/></c>"#,
+    );
+    let cells = new_cells(&xml, &[]).unwrap();
+    assert_eq!(
+        cells[0].2,
+        r#"=IF(B1="가나 A1 ""다""",'Sheet A1'!B1,IFS(B1,1)+SUM(C1#))"#
+    );
+    assert_eq!(
+        cells[1].2,
+        r#"=IF(B2="가나 A1 ""다""",'Sheet A1'!B2,IFS(B2,1)+SUM(C2#))"#
+    );
+}
+
+#[test]
 fn shared_string_table_matches_the_substring_scanner() {
     for sst in [
         "<sst><si><t>가</t></si><si><t xml:space=\"preserve\"> a </t></si><si/><si></si><si> </si></sst>",

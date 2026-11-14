@@ -524,7 +524,7 @@ impl<'s> SheetScanner<'s> {
         };
         self.budget
             .charge_cell(shifted.len() + 1, CELL_BUDGET_WHAT)?;
-        Ok(Some(with_equals(&shifted)))
+        Ok(Some(with_equals(&crate::from_file_formula(&shifted))))
     }
 
     /// The text a finished cell contributes, charged to the decoded budget; `None` when the cell
@@ -777,6 +777,25 @@ fn decode_xlsx_escapes_into(s: &str, out: &mut String) {
     }
 }
 
+/// The index after the quoted run (`"text"` or `'Sheet'`) that starts at `start`, where a doubled
+/// quote is part of the run; the end of `bytes` for a run that never closes. Quotes are ASCII, so
+/// the index is always a character boundary.
+fn quoted_end(bytes: &[u8], start: usize) -> usize {
+    let quote = bytes[start];
+    let mut i = start + 1;
+    while i < bytes.len() {
+        if bytes[i] == quote {
+            if bytes.get(i + 1) == Some(&quote) {
+                i += 2;
+                continue;
+            }
+            return i + 1;
+        }
+        i += 1;
+    }
+    bytes.len()
+}
+
 fn shift_shared_formula(formula: &str, dr: i64, dc: i64) -> Option<String> {
     if formula.as_bytes().contains(&b'[') {
         return None;
@@ -785,22 +804,11 @@ fn shift_shared_formula(formula: &str, dr: i64, dc: i64) -> Option<String> {
     let mut out = String::with_capacity(formula.len() + 8);
     let mut i = 0usize;
     while i < bytes.len() {
-        if bytes[i] == b'"' {
-            out.push('"');
-            i += 1;
-            while i < bytes.len() {
-                let b = bytes[i];
-                out.push(b as char);
-                i += 1;
-                if b == b'"' {
-                    if i < bytes.len() && bytes[i] == b'"' {
-                        out.push('"');
-                        i += 1;
-                    } else {
-                        break;
-                    }
-                }
-            }
+        // Quoted text and quoted sheet names pass untouched: a doubled quote stays inside.
+        if matches!(bytes[i], b'"' | b'\'') {
+            let end = quoted_end(bytes, i);
+            out.push_str(&formula[i..end]);
+            i = end;
             continue;
         }
         let prev_ok = i == 0
