@@ -259,13 +259,17 @@
   // ---- the cells of the grid -------------------------------------------------------------------------------------------
   const SHADOW_SIDE = [(px, c) => `inset 0 ${px}px 0 0 ${c}`, (px, c) => `inset 0 -${px}px 0 0 ${c}`, (px, c) => `inset ${px}px 0 0 0 ${c}`, (px, c) => `inset -${px}px 0 0 0 ${c}`];
   const cssColor = (rgb) => (rgb === AUTO ? "var(--color-text)" : "#" + rgb);
+  const GRID_COLOR = "var(--ui-border-light)";
 
   // The inset shadows that draw the edges of a cell look (top, bottom, left, right).
-  function shadowsOf(look) {
+  // The inset shadows that draw the edges of a cell look (top, bottom, left, right), then the grid line of the sides that have
+  // none: `grid` is `[top, bottom, left, right]` flags, only the bottom and right lines are the cell's own.
+  function shadowsOf(look, grid = [false, false, false, false]) {
     const shadows = [];
     look.edges.forEach((e, side) => {
       if (e) shadows.push(SHADOW_SIDE[side](e.px, cssColor(e.color)));
     });
+    for (const side of [1, 3]) if (grid[side]) shadows.push(SHADOW_SIDE[side](1, GRID_COLOR));
     return shadows;
   }
 
@@ -279,6 +283,7 @@
     delete td.dataset.tsB;
     delete td.dataset.tsI;
     td.classList.remove("ts-shadow");
+    delete td.dataset.ts;
     td._ts = "";
   }
 
@@ -302,11 +307,16 @@
       if (look.color && !(look.color === AUTO && !look.fill && !directFill)) fg = look.color;
       else if (look.fill && !directFill) fg = autoTextColor(look.fill);
     }
-    const shadows = shadowsOf(look);
+    // The cell has no border of its own width here (CSS `[data-ts]`): the table's lines run unbroken to the cell's edge, and the grid
+    // line a filled cell hides, and a side with an edge covers, comes back as a shadow under them where the cell shows it.
+    const grid = [false, false, false, false];
+    for (const side of [1, 3]) grid[side] = !look.fill && !look.edges[side] && !td.style[side === 1 ? "borderBottomStyle" : "borderRightStyle"];
+    const shadows = shadowsOf(look, grid);
     const sig = [look.fill || "", fg, look.bold ? 1 : 0, look.italic ? 1 : 0, shadows.join(",")].join("|");
     if (td._ts === sig) return;
     td._ts = sig;
     const s = td.style;
+    td.dataset.ts = "1";
     if (look.fill) {
       s.setProperty("--ts-fill", "#" + look.fill);
       td.dataset.tsF = "1";

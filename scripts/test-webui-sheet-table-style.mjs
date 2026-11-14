@@ -176,16 +176,39 @@ test("a grid cell takes the table's fill and text colors, and a cell's own fill 
   assert.equal(td.style.getPropertyValue("--ts-fill"), "");
 });
 
-test("a cell edge becomes an inset shadow of the table style", async () => {
-  const { style, document } = await setup();
-  const td = document.createElement("td");
-  td._row = 4;
-  td._col = 3;
-  style.paintTd(td, "S");
-  assert.equal(td.classList.contains("ts-shadow"), true);
-  const shadow = td.style.getPropertyValue("--ts-shadow");
-  assert.match(shadow, /^inset 0 -1px 0 0 #[0-9a-f]{6}$/);
-  near(shadow.slice(-6), "8eaadb");
+test("a table cell draws its edges and its grid line as shadows, so a line runs unbroken to the cell's edge", async () => {
+  const { style, document } = await setup([table({ totals: true })]);
+  const at = (row, col) => {
+    const td = document.createElement("td");
+    td._row = row;
+    td._col = col;
+    style.paintTd(td, "S");
+    return td;
+  };
+  const shadow = (td) => td.style.getPropertyValue("--ts-shadow");
+  // Row 4 (no band) has the thin line of Medium2 under it and no vertical line: the line, then the grid line on the right.
+  const plain = at(4, 3);
+  assert.equal(plain.dataset.ts, "1", "the cell has no border width of its own (CSS)");
+  assert.match(shadow(plain), /^inset 0 -1px 0 0 #[0-9a-f]{6}, inset -1px 0 0 0 var\(--ui-border-light\)$/);
+  // A banded row hides the grid line: only the table's line.
+  const band = at(3, 3);
+  assert.match(shadow(band), /^inset 0 -1px 0 0 #[0-9a-f]{6}$/);
+  // The row above the totals row has the double line of the style under it: two pixels.
+  assert.match(shadow(at(7, 3)), /^inset 0 -2px 0 0 #[0-9a-f]{6}/);
+  // The table's first row draws its top line; the first column its left line.
+  assert.match(shadow(at(2, 2)), /^inset 0 1px 0 0 #[0-9a-f]{6}.*inset 1px 0 0 0 #[0-9a-f]{6}/);
+  // A side the cell has a border of its own on keeps it and gets no grid line from the style.
+  const own = document.createElement("td");
+  own._row = 4;
+  own._col = 3;
+  own.style.borderRightStyle = "solid";
+  style.paintTd(own, "S");
+  assert.doesNotMatch(shadow(own), /ui-border-light/);
+  // A cell that leaves the table loses all of it.
+  plain._row = 20;
+  style.paintTd(plain, "S");
+  assert.equal(plain.dataset.ts, undefined);
+  assert.equal(shadow(plain), "");
 });
 
 test("the table style lies under the cell's own colors and the conditional format in the sheet's CSS", async () => {
