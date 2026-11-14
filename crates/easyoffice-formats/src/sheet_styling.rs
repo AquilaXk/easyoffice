@@ -8,6 +8,10 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 // XLSX and ODS style tables live beside this module's model; they are internal to the crate.
+#[path = "ods_bounds.rs"]
+pub(crate) mod ods_bounds;
+#[path = "ods_filter.rs"]
+pub(crate) mod ods_filter;
 #[path = "ods_grid.rs"]
 pub(crate) mod ods_grid;
 #[path = "ods_names.rs"]
@@ -355,6 +359,9 @@ pub struct SheetStyling {
     pub hidden_cols: Vec<(u32, u32)>,
     /// The auto filter (PD-198). The rows it hides are `filter.hidden`, apart from `hidden_rows`.
     pub filter: Option<SheetFilter>,
+    /// The rows an ODS file marks as hidden by a filter (`table:visibility="filter"`), until the
+    /// database ranges are read and say which filter they belong to (PD-226). Empty after a read.
+    pub filtered_rows: Vec<(u32, u32)>,
     /// Frozen rows and columns (PD-208).
     pub freeze: Option<Freeze>,
     /// Colour of the sheet's tab as `0xRRGGBB` (PD-208).
@@ -484,15 +491,28 @@ impl SheetStyling {
             })
     }
 
-    /// Whether the user, a folded group, the filter or a table's filter hides `row`.
-    pub fn row_hidden(&self, row: u32) -> bool {
-        xlsx_layout::run_contains(&self.hidden_rows, row)
-            || xlsx_layout::run_contains(&self.outline.collapsed_rows, row)
-            || self.filter.as_ref().is_some_and(|f| f.hides(row))
+    /// The runs of rows the filter and the tables' filters hide.
+    pub(crate) fn filter_hidden_runs(&self) -> impl Iterator<Item = &(u32, u32)> {
+        self.filter
+            .iter()
+            .flat_map(|f| f.hidden.iter())
+            .chain(self.tables.iter().flat_map(|t| t.filter_hidden.iter()))
+    }
+
+    /// Whether the filter or a table's filter hides `row`.
+    pub(crate) fn filter_hides(&self, row: u32) -> bool {
+        self.filter.as_ref().is_some_and(|f| f.hides(row))
             || self
                 .tables
                 .iter()
                 .any(|t| xlsx_layout::run_contains(&t.filter_hidden, row))
+    }
+
+    /// Whether the user, a folded group, the filter or a table's filter hides `row`.
+    pub fn row_hidden(&self, row: u32) -> bool {
+        xlsx_layout::run_contains(&self.hidden_rows, row)
+            || xlsx_layout::run_contains(&self.outline.collapsed_rows, row)
+            || self.filter_hides(row)
     }
 }
 

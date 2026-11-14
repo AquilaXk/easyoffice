@@ -56,6 +56,10 @@ impl<A: OdsSink, B: OdsSink> OdsSink for (A, B) {
         self.0.group(columns, display, open);
         self.1.group(columns, display, open);
     }
+    fn row_filtered(&mut self, filtered: bool) {
+        self.0.row_filtered(filtered);
+        self.1.row_filtered(filtered);
+    }
     fn row(&mut self, repeat: u32, cells: &[OdsCell<'_>]) -> Result<(), EasyOfficeError> {
         self.0.row(repeat, cells)?;
         self.1.row(repeat, cells)
@@ -74,6 +78,8 @@ pub(crate) trait OdsSink {
     /// A `table:table-row-group` (or, with `columns`, `table:table-column-group`) opens or closes;
     /// `display` is false for a folded one.
     fn group(&mut self, _columns: bool, _display: bool, _open: bool) {}
+    /// Called before each `row`: the row is one an auto filter hides (`table:visibility="filter"`).
+    fn row_filtered(&mut self, _filtered: bool) {}
     fn row(&mut self, repeat: u32, cells: &[OdsCell<'_>]) -> Result<(), EasyOfficeError>;
     fn table_end(&mut self);
 }
@@ -279,6 +285,7 @@ pub(crate) fn walk_ods<S: OdsSink>(
     let mut table_nesting = 0usize;
     let mut seen_row = false;
     let mut row_repeat: Option<u32> = None;
+    let mut row_filtered = false;
     let mut cells: Vec<OdsCell<'_>> = Vec::new();
     let mut cell: Option<CellBuilder<'_>> = None;
     while let Some(event) = reader.next_event()? {
@@ -335,6 +342,9 @@ pub(crate) fn walk_ods<S: OdsSink>(
             } if row_repeat.is_none() => {
                 seen_row = true;
                 cells.clear();
+                row_filtered = attrs
+                    .iter_raw()
+                    .any(|(n, v)| n == "table:visibility" && v == "filter");
                 row_repeat = Some(
                     attrs
                         .iter_raw()
@@ -344,6 +354,7 @@ pub(crate) fn walk_ods<S: OdsSink>(
             }
             XmlEvent::End("table:table-row") => {
                 if let Some(repeat) = row_repeat.take() {
+                    sink.row_filtered(row_filtered);
                     sink.row(repeat, &cells)?;
                 }
             }

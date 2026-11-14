@@ -466,6 +466,9 @@ pub(crate) fn parse_automatic_styles(content_xml: &str) -> AutomaticStyles {
     styles
 }
 
+/// Rows one table may list as hidden by a filter; more are not recorded.
+const MAX_FILTERED_ROWS: u32 = 1_048_576;
+
 /// Collects cell and column styles of each table while the grid is walked.
 pub(crate) struct StyleSink<'s> {
     styles: &'s AutomaticStyles,
@@ -486,6 +489,9 @@ pub(crate) struct StyleSink<'s> {
     /// The links of the table being read and what the document may still hold (PD-218).
     links: LinkCollector,
     link_allowance: LinkAllowance,
+    /// The rows an auto filter hides in the table being read, and whether the next row is one.
+    filtered: Vec<(u32, u32)>,
+    next_filtered: bool,
 }
 
 impl<'s> StyleSink<'s> {
@@ -506,6 +512,8 @@ impl<'s> StyleSink<'s> {
             grouped: [0, 0],
             links: LinkCollector::default(),
             link_allowance: LinkAllowance::default(),
+            filtered: Vec::new(),
+            next_filtered: false,
         }
     }
 
@@ -592,6 +600,11 @@ impl OdsSink for StyleSink<'_> {
         self.open_groups = [Vec::new(), Vec::new()];
         self.grouped = [0, 0];
         self.links = LinkCollector::default();
+        self.filtered = Vec::new();
+    }
+
+    fn row_filtered(&mut self, filtered: bool) {
+        self.next_filtered = filtered;
     }
 
     fn group(&mut self, columns: bool, display: bool, open: bool) {
@@ -670,6 +683,13 @@ impl OdsSink for StyleSink<'_> {
             }
             col = col.saturating_add(cell.col_repeat);
         }
+        if std::mem::take(&mut self.next_filtered)
+            && crate::sheet_styling::xlsx_layout::run_total(&self.filtered)
+                < u64::from(MAX_FILTERED_ROWS)
+        {
+            let last = self.row.saturating_add(repeat - 1).min(OdfCodec::MAX_ROWS);
+            crate::sheet_styling::xlsx_layout::add_run(&mut self.filtered, self.row, last);
+        }
         self.row = self.row.saturating_add(repeat);
         Ok(())
     }
@@ -689,6 +709,7 @@ impl OdsSink for StyleSink<'_> {
             tab_color: self.tab_color.take(),
             hidden: std::mem::take(&mut self.hidden),
             outline: std::mem::take(&mut self.outline),
+            filtered_rows: std::mem::take(&mut self.filtered),
             ..SheetStyling::default()
         };
         let links = std::mem::take(&mut self.links);

@@ -442,48 +442,6 @@ impl OdfCodec {
         }
     }
 
-    /// Rejects cell / style coordinates and counts above the ODS budgets.
-    fn validate_ods_bounds(
-        sheets: &[OdsUnpacked],
-        stylings: &[SheetStyling],
-    ) -> Result<(), EasyOfficeError> {
-        let mut total_cells = 0usize;
-        for (_, cells) in sheets {
-            total_cells = total_cells.saturating_add(cells.len());
-            if total_cells > Self::MAX_CELLS {
-                return Err(ods_budget_error("ODS 셀 개수가 허용 예산을 초과했습니다."));
-            }
-            if cells
-                .iter()
-                .any(|(row, col, _)| *row > Self::MAX_ROWS || *col > Self::MAX_COLS)
-            {
-                return Err(ods_budget_error("ODS 셀 좌표가 허용 범위를 초과했습니다."));
-            }
-        }
-        if !crate::workbook_tables_within_bounds(stylings) {
-            return Err(ods_budget_error(
-                "ODS 표 개수·열 개수·범위가 허용 범위를 초과했습니다.",
-            ));
-        }
-        for styling in stylings {
-            let bad_cell = styling
-                .cells
-                .keys()
-                .any(|&(r, c)| r > Self::MAX_ROWS || c > Self::MAX_COLS);
-            if !styling.view_within_bounds(Self::MAX_ROWS + 1, Self::MAX_COLS + 1) {
-                return Err(ods_budget_error(
-                    "ODS 틀 고정·탭 색·그룹·쪽 설정 값이 허용 범위를 초과했습니다.",
-                ));
-            }
-            if bad_cell || styling.columns.keys().any(|&c| c > Self::MAX_COLS) {
-                return Err(ods_budget_error(
-                    "ODS 서식 좌표가 허용 범위를 초과했습니다.",
-                ));
-            }
-        }
-        Ok(())
-    }
-
     /// Appends one `<table:table>` with sparse-row / sparse-column gap elements.
     fn push_ods_table(
         content: &mut String,
@@ -523,6 +481,10 @@ impl OdfCodec {
                 for row in first..=last {
                     grid.entry(row).or_default();
                 }
+            }
+            // The rows a filter hides are written, empty ones too, to carry their visibility (PD-226).
+            for row in st.filter_hidden_runs().flat_map(|&(a, b)| a..=b) {
+                grid.entry(row).or_default();
             }
         }
         let tab_style = styling
@@ -572,7 +534,13 @@ impl OdfCodec {
                 content.push_str("<table:table-header-rows>");
             }
             groups.move_to(content, row);
-            content.push_str("<table:table-row>");
+            let filtered = styling.is_some_and(|st| st.filter_hides(row));
+            let visibility = if filtered {
+                " table:visibility=\"filter\""
+            } else {
+                ""
+            };
+            content.push_str(&format!("<table:table-row{visibility}>"));
             let mut expected_col: u32 = 0;
             for (col, raw) in row_cells {
                 if col > expected_col {

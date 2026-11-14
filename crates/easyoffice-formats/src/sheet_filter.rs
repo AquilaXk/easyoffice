@@ -293,3 +293,8 @@ pub(crate) fn color_criteria(
         _ => None,
     })
 }
+
+/// Whether `text` is a plain number (the text a numeric condition compares with).
+pub(crate) fn plain_number(text: &str) -> bool {
+    text.trim().parse::<f64>().is_ok_and(f64::is_finite)
+}

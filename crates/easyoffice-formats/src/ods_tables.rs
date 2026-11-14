@@ -8,20 +8,28 @@
 //! (it writes it for a table it opened from XLSX); the style and the banding go out as the foreign
 //! attributes `eo:table-style` and `eo:table-flags` (a list of `first-column`, `last-column`,
 //! `row-stripes`, `column-stripes`), which a file by another program reads without. Column names are the header cells' text, so the reader leaves them as
-//! `ColumnN` until the file is written. The conditions of a table's filter are not written: ODS keeps
-//! them in `table:filter`, which this codec does not read or write for sheets either.
+//! `ColumnN` until the file is written. The conditions of a table's filter are the `table:filter` child
+//! of its range (`ods_filter`).
 //!
-//! The ranges the office suite keeps for a sheet's own auto filter (`__Anonymous_Sheet_DB__N`) and the
-//! ones that mark a selection (`table:is-selection`) are not tables and are skipped.
+//! The range the office suite keeps for a sheet's own auto filter (`__Anonymous_Sheet_DB__N`, filter
+//! buttons on) is the sheet's filter, not a table: it is read into `SheetStyling::filter` and written
+//! the same way with the conditions as its `table:filter` child (PD-226). The ranges that mark a
+//! selection (`table:is-selection`) are skipped. The rows a filter hides are the rows' `table:visibility`
+//! `filter`, which `filtered_rows` carries from the grid walk and this reader hands to the filter whose
+//! data rows they are in; the rest are rows a user hid.
 
 use std::fmt::Write;
 
 use crate::rtf_xml_helpers::{extract_attr_from_fragment, extract_balanced_elements};
+use crate::sheet_filter::{FilterColumn, SheetFilter, MAX_FILTER_ROWS};
+use crate::sheet_styling::ods_filter;
 use crate::sheet_styling::ods_names::{quote, split_address};
+use crate::sheet_styling::xlsx_layout::{add_run, intersect_runs, subtract_runs};
 use crate::sheet_table::{unique_table_names, SheetTable, TableRegistry};
 use crate::{CellBox, EasyOfficeError, SheetStyling, XmlSanitizer};
 
 const ANONYMOUS_PREFIX: &str = "__Anonymous_";
+const SHEET_FILTER_PREFIX: &str = "__Anonymous_Sheet_DB__";
 const FLAG_TOKENS: [&str; 4] = [
     "first-column",
     "last-column",
@@ -80,7 +88,10 @@ fn parse_address(text: &str) -> Option<(String, CellBox)> {
 /// `<table:database-ranges>` for the tables of every sheet, empty when there are none. Names are made
 /// unique among themselves and the defined names first.
 pub(crate) fn database_ranges_xml(stylings: &[SheetStyling], sheets: &[&str]) -> String {
-    if stylings.iter().all(|st| st.tables.is_empty()) {
+    if stylings
+        .iter()
+        .all(|st| st.tables.is_empty() && st.filter.is_none())
+    {
         return String::new();
     }
     let taken = stylings
@@ -89,7 +100,15 @@ pub(crate) fn database_ranges_xml(stylings: &[SheetStyling], sheets: &[&str]) ->
         .flat_map(|st| st.defined_names.iter().map(|n| n.name.as_str()));
     let named = unique_table_names(stylings.iter().map(|st| &st.tables[..]), taken);
     let mut out = String::from("<table:database-ranges>");
-    for (tables, sheet) in named.iter().zip(sheets) {
+    for (i, (tables, sheet)) in named.iter().zip(sheets).enumerate() {
+        if let Some(filter) = stylings.get(i).and_then(|st| st.filter.as_ref()) {
+            let _ = write!(
+                out,
+                "<table:database-range table:name=\"{SHEET_FILTER_PREFIX}{i}\" table:target-range-address=\"{}\" table:display-filter-buttons=\"true\">{}</table:database-range>",
+                XmlSanitizer::escape(&address(sheet, &filter.range)),
+                ods_filter::filter_xml(&filter.range, &filter.columns)
+            );
+        }
         for table in tables {
             let _ = write!(
                 out,
@@ -109,7 +128,16 @@ pub(crate) fn database_ranges_xml(stylings: &[SheetStyling], sheets: &[&str]) ->
             if !flags.is_empty() {
                 let _ = write!(out, " eo:table-flags=\"{flags}\"");
             }
-            out.push_str("/>");
+            let conditions = table
+                .filter
+                .as_deref()
+                .map(|columns| ods_filter::filter_xml(&table.filter_range(), columns))
+                .unwrap_or_default();
+            if conditions.is_empty() {
+                out.push_str("/>");
+            } else {
+                let _ = write!(out, ">{conditions}</table:database-range>");
+            }
         }
     }
     out.push_str("</table:database-ranges>");
@@ -123,6 +151,9 @@ pub(crate) fn read_tables(
     stylings: &mut [(String, SheetStyling)],
 ) -> Result<(), EasyOfficeError> {
     if !content.contains("table:database-range") {
+        stylings
+            .iter_mut()
+            .for_each(|(_, st)| assign_filtered_rows(st));
         return Ok(());
     }
     let taken: Vec<String> = stylings
@@ -133,16 +164,23 @@ pub(crate) fn read_tables(
     let mut registry = TableRegistry::new(taken.iter().map(String::as_str));
     let mut lost = 0u32;
     for (_, block) in extract_balanced_elements(content, "table:database-ranges") {
-        for (attrs, _) in extract_balanced_elements(block, "table:database-range") {
+        for (attrs, inner) in extract_balanced_elements(block, "table:database-range") {
             let attr =
                 |name: &str| extract_attr_from_fragment(attrs, name).map(XmlSanitizer::unescape);
             let name = attr("table:name").unwrap_or_default();
-            if name.starts_with(ANONYMOUS_PREFIX)
-                || attr("table:is-selection").as_deref() == Some("true")
-            {
+            if attr("table:is-selection").as_deref() == Some("true") {
                 continue;
             }
             let found = attr("table:target-range-address").and_then(|a| parse_address(&a));
+            if name.starts_with(ANONYMOUS_PREFIX) {
+                if name.starts_with(SHEET_FILTER_PREFIX)
+                    && attr("table:display-filter-buttons").as_deref() == Some("true")
+                    && attr("table:contains-header").as_deref() != Some("false")
+                {
+                    read_sheet_filter(found, inner, stylings);
+                }
+                continue;
+            }
             let styling = found
                 .as_ref()
                 .and_then(|(sheet, _)| stylings.iter_mut().find(|(n, _)| n == sheet));
@@ -160,7 +198,7 @@ pub(crate) fn read_tables(
                 apply_flags(&mut table, &flags);
             }
             if table.header && attr("table:display-filter-buttons").as_deref() == Some("true") {
-                table.filter = Some(Vec::new());
+                table.filter = Some(filter_columns(inner, &table.filter_range()));
             }
             if !registry.admit(&mut styling.tables, table)? {
                 styling.tables_rejected = styling.tables_rejected.saturating_add(1);
@@ -170,7 +208,77 @@ pub(crate) fn read_tables(
     if let Some((_, first)) = stylings.first_mut() {
         first.tables_rejected = first.tables_rejected.saturating_add(lost);
     }
+    for (_, styling) in stylings.iter_mut() {
+        assign_filtered_rows(styling);
+    }
     Ok(())
+}
+
+/// Whether the sheet's filter is within the bounds of the model and of the ODS grid (`limits` is the last
+/// row and column).
+pub(crate) fn filter_within_bounds(styling: &SheetStyling, limits: (u32, u32)) -> bool {
+    styling
+        .filter
+        .as_ref()
+        .is_none_or(|f| f.within_bounds() && f.range.row1 <= limits.0 && f.range.col1 <= limits.1)
+}
+
+/// The conditions in the `table:filter` of a database range whose content is `inner`.
+fn filter_columns(inner: &str, range: &CellBox) -> Vec<FilterColumn> {
+    extract_balanced_elements(inner, "table:filter")
+        .into_iter()
+        .next()
+        .map(|(_, body)| ods_filter::parse_filter(body, range))
+        .unwrap_or_default()
+}
+
+/// The filter of the anonymous database range of a sheet: the sheet's filter, when it has none yet, has a
+/// header row and a data row, is within the bounds of the model and shares no cell with a table.
+fn read_sheet_filter(
+    found: Option<(String, CellBox)>,
+    inner: &str,
+    stylings: &mut [(String, SheetStyling)],
+) {
+    let Some((sheet, range)) = found else {
+        return;
+    };
+    let Some((_, styling)) = stylings.iter_mut().find(|(n, _)| *n == sheet) else {
+        return;
+    };
+    if styling.filter.is_some() || styling.tables.iter().any(|t| t.overlaps(&range)) {
+        return;
+    }
+    let mut filter = SheetFilter::new(range);
+    filter.columns = filter_columns(inner, &range);
+    if filter.within_bounds() {
+        styling.filter = Some(filter);
+    }
+}
+
+/// Hands the rows the grid marked as hidden by a filter to the filter whose data rows they are in (the
+/// sheet's, then the tables'); every other marked row is a row a user hid.
+fn assign_filtered_rows(styling: &mut SheetStyling) {
+    let mut rest = std::mem::take(&mut styling.filtered_rows);
+    if rest.is_empty() {
+        return;
+    }
+    let mut claim = |first: u32, last: u32| {
+        let mine = intersect_runs(&rest, &[(first, last)]);
+        rest = subtract_runs(&rest, &mine);
+        mine
+    };
+    if let Some(filter) = styling.filter.as_mut() {
+        filter.hidden = claim(filter.range.row0 + 1, filter.range.row1);
+    }
+    for table in &mut styling.tables {
+        let range = table.filter_range();
+        if table.filter.is_some() && range.row1 - range.row0 < MAX_FILTER_ROWS {
+            table.filter_hidden = claim(range.row0 + 1, range.row1);
+        }
+    }
+    for &(first, last) in &rest {
+        add_run(&mut styling.hidden_rows, first, last);
+    }
 }
 
 #[cfg(test)]

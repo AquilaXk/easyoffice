@@ -289,11 +289,7 @@ fn group_cells_by_row<'a>(
         for (row, col) in blank_cells {
             rows_map.entry(row).or_default().push((col, blank));
         }
-        let filtered = st
-            .filter
-            .iter()
-            .flat_map(|f| f.hidden.iter())
-            .chain(st.tables.iter().flat_map(|t| t.filter_hidden.iter()));
+        let filtered = st.filter_hidden_runs();
         let hidden = st.hidden_rows.iter().chain(&st.outline.collapsed_rows);
         for &(start, end) in hidden.chain(filtered) {
             for row in start..=end {
