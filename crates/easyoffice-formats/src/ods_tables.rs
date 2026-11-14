@@ -209,9 +209,20 @@ pub(crate) fn read_tables(
         first.tables_rejected = first.tables_rejected.saturating_add(lost);
     }
     for (_, styling) in stylings.iter_mut() {
+        drop_filter_over_tables(styling);
         assign_filtered_rows(styling);
     }
     Ok(())
+}
+
+/// A sheet filter that shares a cell with a table goes (the sheet's filter may not, PD-224); the file
+/// lists the ranges in any order, so this runs once every table is read.
+fn drop_filter_over_tables(styling: &mut SheetStyling) {
+    if let Some(range) = styling.filter.as_ref().map(|f| f.range) {
+        if styling.tables.iter().any(|t| t.overlaps(&range)) {
+            styling.filter = None;
+        }
+    }
 }
 
 /// Whether the sheet's filter is within the bounds of the model and of the ODS grid (`limits` is the last
@@ -233,7 +244,7 @@ fn filter_columns(inner: &str, range: &CellBox) -> Vec<FilterColumn> {
 }
 
 /// The filter of the anonymous database range of a sheet: the sheet's filter, when it has none yet, has a
-/// header row and a data row, is within the bounds of the model and shares no cell with a table.
+/// header row and a data row and is within the bounds of the model.
 fn read_sheet_filter(
     found: Option<(String, CellBox)>,
     inner: &str,
@@ -245,7 +256,7 @@ fn read_sheet_filter(
     let Some((_, styling)) = stylings.iter_mut().find(|(n, _)| *n == sheet) else {
         return;
     };
-    if styling.filter.is_some() || styling.tables.iter().any(|t| t.overlaps(&range)) {
+    if styling.filter.is_some() {
         return;
     }
     let mut filter = SheetFilter::new(range);
