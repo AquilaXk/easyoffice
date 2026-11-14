@@ -294,10 +294,10 @@ impl SheetEngine {
         let Some((last_row, last_col)) = rect_end(anchor, rows, cols) else {
             return false;
         };
-        if self
-            .spill_merges
-            .as_ref()
-            .is_some_and(|m| m.touches((anchor.row(), anchor.col(), last_row, last_col)))
+        let area = (anchor.row(), anchor.col(), last_row, last_col);
+        if [&self.spill_merges, &self.spill_tables]
+            .into_iter()
+            .any(|blockers| blockers.as_ref().is_some_and(|b| b.touches(area)))
         {
             return false;
         }
@@ -514,6 +514,12 @@ impl SheetEngine {
     pub fn set_spill_merges(&mut self, merges: Vec<easyoffice_formats::CellBox>) {
         self.spill_merges =
             (!merges.is_empty()).then(|| Arc::new(crate::spill_merges::SpillMerges::new(merges)));
+    }
+
+    /// Sets the tables of the sheet, which an array may not be placed in or cross; an empty list for a sheet with none.
+    pub fn set_spill_tables(&mut self, tables: Vec<easyoffice_formats::CellBox>) {
+        self.spill_tables =
+            (!tables.is_empty()).then(|| Arc::new(crate::spill_merges::SpillMerges::new(tables)));
     }
 
     /// Forgets every area of the sheet (the cells they filled stop being cells).

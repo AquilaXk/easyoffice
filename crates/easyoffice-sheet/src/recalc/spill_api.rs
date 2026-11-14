@@ -60,13 +60,38 @@ impl RecalcSession {
         sheet: &str,
         merges: Vec<easyoffice_formats::CellBox>,
     ) -> Result<(), super::RecalcError> {
+        self.set_sheet_blockers(sheet, merges, false)
+    }
+
+    /// Tells the session the tables of `sheet` (an empty list: none). An array that would be placed in or cross
+    /// one is `#SPILL!`, as for merged ranges (PD-224).
+    pub fn set_sheet_tables(
+        &mut self,
+        sheet: &str,
+        tables: Vec<easyoffice_formats::CellBox>,
+    ) -> Result<(), super::RecalcError> {
+        self.set_sheet_blockers(sheet, tables, true)
+    }
+
+    fn set_sheet_blockers(
+        &mut self,
+        sheet: &str,
+        boxes: Vec<easyoffice_formats::CellBox>,
+        tables: bool,
+    ) -> Result<(), super::RecalcError> {
         let idx = self.sheet_index(sheet)?;
         let engine = &mut self.wb.sheets_mut()[usize::from(idx)];
-        let next = (!merges.is_empty())
-            .then(|| std::sync::Arc::new(crate::spill_merges::SpillMerges::new(merges)));
-        if engine.spill_merges == next {
+        let next = (!boxes.is_empty())
+            .then(|| std::sync::Arc::new(crate::spill_merges::SpillMerges::new(boxes)));
+        let slot = if tables {
+            &mut engine.spill_tables
+        } else {
+            &mut engine.spill_merges
+        };
+        if *slot == next {
             return Ok(());
         }
+        *slot = next.clone();
         let anchors: Vec<PackedCellCoordinate> = engine
             .spill
             .anchors_with_area()
@@ -83,7 +108,6 @@ impl RecalcSession {
             })
             .map(|(anchor, _)| anchor)
             .collect();
-        engine.spill_merges = next;
         for coord in anchors {
             if let Some(v) = self.graph.vertex_at(idx, coord) {
                 self.dirty.insert(v);

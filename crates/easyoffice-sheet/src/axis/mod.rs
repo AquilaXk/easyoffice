@@ -25,6 +25,7 @@ mod links;
 mod names;
 mod outline;
 mod sheet_ref;
+mod tables;
 
 pub use apply::{AxisBudget, AxisEditReport};
 pub use filter::{shift_filter, FilterShift};
@@ -34,6 +35,7 @@ pub use links::{follow_sheet_change_links, shift_link_targets};
 pub use names::{follow_sheet_change_names, shift_names};
 pub use outline::{shift_levels, shift_outline};
 pub use sheet_ref::{quote_sheet_name, rewrite_sheet_names, SheetChange};
+pub use tables::{shift_table, shift_tables};
 
 use crate::PackedCellCoordinate;
 use easyoffice_formats::EasyOfficeError;

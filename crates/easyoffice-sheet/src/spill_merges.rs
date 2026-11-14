@@ -47,9 +47,10 @@ impl SpillMerges {
         self.sorted.is_empty()
     }
 
-    /// The merges after the rows or columns of the sheet move for `edit`.
-    pub(crate) fn shifted(&self, edit: &AxisEdit) -> Self {
-        Self::new(shift_boxes(&self.sorted, edit, true))
+    /// The ranges after the rows or columns of the sheet move for `edit`; a merge left with one cell is gone
+    /// (`drop_single`), a table of one cell stays.
+    pub(crate) fn shifted(&self, edit: &AxisEdit, drop_single: bool) -> Self {
+        Self::new(shift_boxes(&self.sorted, edit, drop_single))
     }
 
     /// Whether a merged range shares a cell with the rectangle `(row0, col0, row1, col1)`: the merges that

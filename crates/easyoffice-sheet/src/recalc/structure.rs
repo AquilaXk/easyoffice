@@ -35,12 +35,13 @@ impl RecalcSession {
         {
             target_engine.set_spill_lock(Some(lock));
         }
-        if let Some(merges) = target_engine
-            .spill_merges
-            .as_deref()
-            .map(|m| m.shifted(&edit))
-        {
-            target_engine.spill_merges = (!merges.is_empty()).then(|| std::sync::Arc::new(merges));
+        for (slot, drop_single) in [
+            (&mut target_engine.spill_merges, true),
+            (&mut target_engine.spill_tables, false),
+        ] {
+            if let Some(moved) = slot.as_deref().map(|m| m.shifted(&edit, drop_single)) {
+                *slot = (!moved.is_empty()).then(|| std::sync::Arc::new(moved));
+            }
         }
         let validations = self.moved_validations(sheet, &edit);
         let mut wb = std::mem::replace(&mut self.wb, WorkbookEngine::new());

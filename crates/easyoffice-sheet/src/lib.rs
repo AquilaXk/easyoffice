@@ -75,8 +75,8 @@ pub mod workbook;
 pub use axis::{
     follow_sheet_change_links, follow_sheet_change_names, quote_sheet_name, rewrite_sheet_names,
     shift_boxes, shift_filter, shift_levels, shift_link_targets, shift_names, shift_outline,
-    shift_runs, shift_widths, Axis, AxisBudget, AxisEdit, AxisEditReport, EditKind, FilterShift,
-    SheetChange,
+    shift_runs, shift_table, shift_tables, shift_widths, Axis, AxisBudget, AxisEdit,
+    AxisEditReport, EditKind, FilterShift, SheetChange,
 };
 pub use coercion::*;
 pub use deadline::MAX_EVAL_TIME;
@@ -221,6 +221,8 @@ pub struct SheetEngine {
     pub(crate) spill_lock: Option<Arc<spill::SheetLock>>,
     /// The merged ranges of the sheet, which an array may not cross (PD-222).
     pub(crate) spill_merges: Option<Arc<spill_merges::SpillMerges>>,
+    /// The tables of the sheet, which an array may not be placed in or cross (PD-224).
+    pub(crate) spill_tables: Option<Arc<spill_merges::SpillMerges>>,
     pub(crate) dense_numbers: Vec<f64>,
     /// Cached dependency order of the last full recalculation; dropped on every edit.
     pub(crate) plan: OnceLock<dag::RecalcPlan>,
@@ -264,6 +266,7 @@ impl SheetEngine {
             spill: spill::SpillTable::default(),
             spill_lock: None,
             spill_merges: None,
+            spill_tables: None,
             dense_numbers: Vec::new(),
             plan: OnceLock::new(),
             formula_index: OnceLock::new(),
