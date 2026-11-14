@@ -195,6 +195,37 @@ mod tests {
     }
 
     #[test]
+    fn the_rows_a_table_filter_hides_move_with_their_rows() {
+        // The table is B3:E12 (rows 3..12, header row 3, totals row 12): rows 5-6 and 9 are hidden by its filter.
+        let mut t = sample();
+        t.filter_hidden = vec![(4, 5), (8, 8)];
+        let hidden = |edit| shift_table(&t, &edit).map(|t| t.filter_hidden);
+        // Rows inserted before the table move the runs; inside they cut a run and are shown.
+        assert_eq!(
+            hidden(edit(Axis::Row, EditKind::Insert, 1, 2)),
+            Some(vec![(6, 7), (10, 10)])
+        );
+        assert_eq!(
+            hidden(edit(Axis::Row, EditKind::Insert, 6, 1)),
+            Some(vec![(4, 4), (6, 6), (9, 9)])
+        );
+        // Deleted rows take their part of a run along.
+        assert_eq!(
+            hidden(edit(Axis::Row, EditKind::Delete, 5, 1)),
+            Some(vec![(4, 4), (7, 7)])
+        );
+        assert_eq!(
+            hidden(edit(Axis::Row, EditKind::Delete, 1, 1)),
+            Some(vec![(3, 4), (7, 7)])
+        );
+        // A column edit leaves the rows where they are.
+        assert_eq!(
+            hidden(edit(Axis::Col, EditKind::Insert, 3, 1)),
+            Some(vec![(4, 5), (8, 8)])
+        );
+    }
+
+    #[test]
     fn column_edits_move_names_and_conditions() {
         let t = sample();
         let inserted = shift_table(&t, &edit(Axis::Col, EditKind::Insert, 4, 1)).unwrap();

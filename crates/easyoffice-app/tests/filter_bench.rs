@@ -109,4 +109,41 @@ fn filter_requests_over_100000_rows() {
         &request("values", greater, &[&b, &c], r#""col":3,"query":"99","#),
     );
     time("apply, none (empty filter)", &request("apply", "", &[], ""));
+    // The criteria of PD-226. The date column's dates are 5,000 distinct days of 2009 to 2022; the colour
+    // column has 50,000 alternating one-row runs.
+    let top = r#"{"col":2,"top":{"count":10}}"#;
+    let percent = r#"{"col":2,"top":{"bottom":true,"percent":true,"count":25}}"#;
+    let average = r#"{"col":2,"average":{"above":true}}"#;
+    let year =
+        r#"{"col":4,"dates":[{"unit":"year","year":2015},{"unit":"month","year":2012,"month":6}]}"#;
+    let runs: Vec<String> = (0..ROWS / 2)
+        .map(|i| format!("[{},{},\"ffc7ce\"]", 2 * i, 2 * i))
+        .collect();
+    let colored = column(1, &dept, &format!(r#","fill":[{}]"#, runs.join(",")));
+    let color = r#"{"col":1,"color":{"rgb":"ffc7ce"}}"#;
+    time("apply, top 10 numbers", &request("apply", top, &[&b], ""));
+    time(
+        "apply, bottom 25 percent",
+        &request("apply", percent, &[&b], ""),
+    );
+    time(
+        "apply, above average",
+        &request("apply", average, &[&b], ""),
+    );
+    time(
+        "apply, date groups (year, month)",
+        &request("apply", year, &[&d], ""),
+    );
+    time(
+        "apply, fill colour (50,000 runs)",
+        &request("apply", color, &[&colored], ""),
+    );
+    time(
+        "apply, top 10 after a value list",
+        &request("apply", &format!("{values_col},{top}"), &[&a, &b], ""),
+    );
+    time(
+        "values, date tree over 5,000 days",
+        &request("values", year, &[&d], r#""col":4,"#),
+    );
 }
