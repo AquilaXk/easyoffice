@@ -194,3 +194,28 @@ fn a_session_counts_the_names_of_the_workbook_it_is_built_from() {
     ));
     assert!(RecalcSession::with_budget(wb, Budget::default()).is_ok());
 }
+
+#[test]
+fn a_name_that_changes_the_size_of_an_array_does_not_leave_the_old_area_behind() {
+    let mut s = session();
+    s.set_names(&[def("N", "3")]).unwrap();
+    s.apply(&[CellChange {
+        sheet: "Sheet1".to_string(),
+        coord: at("E1"),
+        raw: "=SEQUENCE(N)".to_string(),
+    }])
+    .unwrap();
+    s.recalculate();
+    assert_eq!(shown(&s, "E3"), "3");
+    s.set_names(&[def("N", "1")]).unwrap();
+    s.recalculate();
+    assert_eq!(shown(&s, "E1"), "1");
+    assert_eq!(shown(&s, "E2"), "");
+    assert_eq!(shown(&s, "E3"), "");
+    // the name goes away: the formula shows the error and the area is gone
+    s.set_names(&[]).unwrap();
+    s.recalculate();
+    assert_eq!(shown(&s, "E1"), "#NAME?");
+    assert_eq!(shown(&s, "E2"), "");
+    assert!(s.spill_areas().iter().all(|a| a.anchor != at("E1")));
+}

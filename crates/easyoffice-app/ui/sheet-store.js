@@ -273,7 +273,7 @@
       if (session.id === null || session.sheetKey !== sheetKey) {
         await openSession(names, sheetKey);
       }
-      await syncNames();
+      await syncNames(sheetsMap);
       const { changes, formulaTargets } = diffAgainstMirror(sheetsMap, names);
       let at = 0;
       let last = null;
@@ -334,7 +334,7 @@
 
     // Sends the whole list of defined names when it differs from what the session holds, before the cells, so the
     // formulas that use a name are compiled once. The answer lists the formulas whose value changed.
-    async function syncNames() {
+    async function syncNames(sheetsMap) {
       if (!namesApi) return;
       const payload = namesApi.payload();
       if (payload === session.names || (session.names === null && !namesApi.hasAny())) return;
@@ -347,6 +347,8 @@
       if (!res || res.expired === true) throw new Error("시트 세션이 만료되었습니다.");
       for (const c of Array.isArray(res.changed) ? res.changed : []) session.values.set(c.sheet + "!" + c.cell, c.value);
       takeRuleChanges(res);
+      // A name can change the size of an array: the areas the answer lists leave the cells they filled.
+      takeSpills(sheetsMap, res);
       session.names = payload;
     }
 

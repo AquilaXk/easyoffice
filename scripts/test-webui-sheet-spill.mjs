@@ -132,3 +132,45 @@ test("an area is forgotten even when the entry of its formula was edited and los
   spill.applyInfo(map, { cell: "A1", rows: 0, cols: 0, blocked: false }, () => "");
   assert.equal(Object.keys(map).length, 1);
 });
+
+test("a names answer that shrinks an area removes the cells the area filled", async () => {
+  const { sandbox, host } = await createWorkspaceHarness();
+  let applied = 0;
+  const invokeIpc = async (command, payload) => {
+    const body = JSON.parse(payload);
+    if (body.sessionAction === "open") return { session: "s1" };
+    if (body.sessionAction === "close") return { closed: true };
+    if (body.sessionAction === "apply") {
+      if (applied++ > 0) return { session: "s1", changed: [], circular: false, recomputed: 0 };
+      return {
+        session: "s1",
+        changed: [1, 2, 3].map((n) => ({ sheet: "Sheet1", cell: "B" + n, value: String(n) })),
+        spills: [{ sheet: "Sheet1", cell: "B1", rows: 3, cols: 1, blocked: false }],
+        circular: false,
+        recomputed: 1,
+      };
+    }
+    if (body.sessionAction === "names") {
+      return {
+        session: "s1",
+        changed: [{ sheet: "Sheet1", cell: "B1", value: "1" }],
+        spills: [{ sheet: "Sheet1", cell: "B1", rows: 1, cols: 1, blocked: false }],
+        circular: false,
+      };
+    }
+    throw new Error("unexpected " + command);
+  };
+  const store = sandbox.__EASYOFFICE_CREATE_SHEET_STORE__({
+    invokeIpc,
+    normalizeFormattedNumericCell: (v) => v,
+    tokenizeFormulaStringLiterals: () => [],
+  });
+  store.enableSheetSessions(true);
+  const sheets = { Sheet1: { A1: entry("5"), B1: entry("", "=SEQUENCE(N)") } };
+  await store.evaluateLiveFormulaTargets(sheets, "Sheet1");
+  assert.equal(sheets.Sheet1.B3.value, "3");
+  host.__EASYOFFICE_SHEET_NAMES__.replaceAll([{ name: "N", refersTo: "1" }], true);
+  await store.evaluateLiveFormulaTargets(sheets, "Sheet1");
+  assert.equal(sheets.Sheet1.B2, undefined);
+  assert.equal(sheets.Sheet1.B3, undefined);
+});
