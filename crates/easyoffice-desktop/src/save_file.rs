@@ -718,6 +718,34 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// The window tracks the real file (no link in its path): what can change under the question is
+    /// that the name now leads somewhere else, a link to a file of the same content.
+    #[cfg(unix)]
+    #[test]
+    fn a_tracked_real_path_replaced_by_a_link_while_the_question_is_open_is_asked_about_again() {
+        let dir = scratch_dir("conflict-replaced");
+        let (tracked, other) = (dir.join("a.docx"), dir.join("other.docx"));
+        fs::write(&tracked, b"old").unwrap();
+        let tracked = fs::canonicalize(&tracked).unwrap();
+        let seen = Fingerprint::of(&tracked).unwrap();
+        fs::write(&tracked, b"edited elsewhere").unwrap();
+        fs::write(&other, b"edited elsewhere").unwrap();
+        let mut asked = 0;
+        let result = save_in_place(&tracked, &seen, b"mine", |_| {
+            asked += 1;
+            if asked == 1 {
+                fs::remove_file(&tracked).unwrap();
+                std::os::unix::fs::symlink(&other, &tracked).unwrap();
+                return true;
+            }
+            false
+        })
+        .unwrap();
+        assert_eq!((asked, result), (2, InPlaceResult::Declined));
+        assert_eq!(fs::read(&other).unwrap(), b"edited elsewhere");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn a_deleted_or_moved_original_asks_before_it_is_recreated() {
         let dir = scratch_dir("gone");
