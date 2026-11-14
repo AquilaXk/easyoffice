@@ -10,6 +10,7 @@ use crate::sheet_styling::sheet_table::xlsx_tables::{
     merge_relationships, read_sheet_tables, HeaderCells, TableWriter,
 };
 use crate::sheet_styling::sheet_view::{level_at, Outline};
+use crate::sheet_styling::xlsx_color::ColorScheme;
 use crate::sheet_styling::xlsx_filter::autofilter_xml;
 use crate::sheet_styling::xlsx_filter_dxf::parse_dxf_colors;
 use crate::sheet_styling::xlsx_layout::{layout_cols_xml, merge_cells_xml};
@@ -830,37 +831,27 @@ impl OoxmlCodec {
             sheet_specs[0].2 = false;
         }
 
-        let mut xf_styles = if with_styling {
-            entry_by_path
-                .get("xl/styles.xml")
-                .and_then(|d| std::str::from_utf8(d).ok())
-                .map(parse_cell_xf_styles)
-                .unwrap_or_default()
-        } else {
-            XfStyles::default()
-        };
-        let dxf_styles = if with_styling {
-            entry_by_path
-                .get("xl/styles.xml")
-                .and_then(|d| std::str::from_utf8(d).ok())
-                .map(parse_dxf_styles)
-                .unwrap_or_default()
-        } else {
-            Vec::new()
-        };
+        let styles_xml = entry_by_path
+            .get("xl/styles.xml")
+            .and_then(|d| std::str::from_utf8(d).ok())
+            .filter(|_| with_styling);
         let theme = with_styling.then(|| {
             entry_by_path
                 .get("xl/theme/theme1.xml")
                 .and_then(|d| std::str::from_utf8(d).ok())
                 .map_or(DEFAULT_THEME, theme_palette)
         });
-        if let (Some(theme), Some(styles)) = (
-            &theme,
-            entry_by_path
-                .get("xl/styles.xml")
-                .and_then(|d| std::str::from_utf8(d).ok()),
-        ) {
-            xf_styles.dxf_colors = parse_dxf_colors(styles, theme);
+        let colors = theme.map(|theme| match styles_xml {
+            Some(styles) => ColorScheme::from_styles(theme, styles),
+            None => ColorScheme::new(theme),
+        });
+        let mut xf_styles = match (styles_xml, &colors) {
+            (Some(styles), Some(colors)) => parse_cell_xf_styles(styles, colors),
+            _ => XfStyles::default(),
+        };
+        let dxf_styles = styles_xml.map(parse_dxf_styles).unwrap_or_default();
+        if let (Some(colors), Some(styles)) = (&colors, styles_xml) {
+            xf_styles.dxf_colors = parse_dxf_colors(styles, colors);
         }
         let mut stylings = Vec::new();
         let workbook_names: Vec<String> = sheet_specs.iter().map(|spec| spec.0.clone()).collect();
@@ -912,7 +903,14 @@ impl OoxmlCodec {
                 let relationships = sheet_relationships(&entry_by_path, part_path);
                 let links = read_links(sheet_xml, &relationships, &mut link_allowance);
                 (styling.links, styling.links_rejected) = (links.links, links.rejected);
-                crate::sheet_styling::xlsx_styles::strip_link_look(&mut styling, &scan.link_styled);
+                let link_color = colors
+                    .as_ref()
+                    .map_or(DEFAULT_THEME[10], ColorScheme::hyperlink);
+                crate::sheet_styling::xlsx_styles::strip_link_look(
+                    &mut styling,
+                    &scan.link_styled,
+                    link_color,
+                );
                 styling.tables_rejected = read_sheet_tables(
                     sheet_xml,
                     part_path,

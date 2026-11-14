@@ -54,6 +54,8 @@ pub(crate) mod structured_cells;
 pub(crate) mod structured_ref;
 #[path = "xlsx_bounds.rs"]
 pub(crate) mod xlsx_bounds;
+#[path = "xlsx_color.rs"]
+pub(crate) mod xlsx_color;
 #[path = "xlsx_filter.rs"]
 pub(crate) mod xlsx_filter;
 #[path = "xlsx_filter_dxf.rs"]
@@ -124,6 +126,35 @@ const FORCE_LOCKED_BIT: u64 = 1 << 27;
 /// The cell carries a hyperlink: the writers give it the spreadsheet program's hyperlink look (PD-223).
 const LINK_BIT: u64 = 1 << 28;
 const SIZE_SHIFT: u32 = 40;
+/// A colour word of [`StyleKey::colors`]: the colour is set (bit 24) and its RGB (bits 0..=23). The
+/// fill takes the low word and the font colour the high one, so each compares as one masked word.
+const COLOR_SET: u64 = 1 << 24;
+const COLOR_WORD_MASK: u64 = (1 << 25) - 1;
+const FONT_COLOR_SHIFT: u32 = 32;
+
+const NO_BORDERS: CellBorders = CellBorders {
+    top: BorderEdge::NONE,
+    right: BorderEdge::NONE,
+    bottom: BorderEdge::NONE,
+    left: BorderEdge::NONE,
+};
+
+#[inline]
+const fn color_word(rgb: Option<u32>) -> u64 {
+    match rgb {
+        Some(rgb) => COLOR_SET | (rgb as u64 & 0xFF_FFFF),
+        None => 0,
+    }
+}
+
+#[inline]
+const fn word_color(word: u64) -> Option<u32> {
+    if word & COLOR_SET == 0 {
+        None
+    } else {
+        Some((word & 0xFF_FFFF) as u32)
+    }
+}
 
 /// Formatting of one cell: the flags, font size, number format, alignment, wrapping and borders
 /// the sheet editor can set (PD-084, PD-193, PD-207).
@@ -150,14 +181,20 @@ pub struct CellStyle {
     pub force_locked: bool,
     /// A protected sheet does not show the formula of the cell in the formula bar (PD-216).
     pub formula_hidden: bool,
+    /// Solid fill of the cell as `0xRRGGBB`; `None` is no fill (PD-227).
+    pub fill: Option<u32>,
+    /// Font colour as `0xRRGGBB`; `None` is the automatic colour (PD-227).
+    pub font_color: Option<u32>,
 }
 
 /// Style identity for $O(1)$ word comparison and hashing: one packed 64-bit word
 /// (`size_centipt << 40 | locked << 27 | hidden << 26 | unlocked << 25 | wrap << 24 | num_fmt << 8 | v_align << 6 | h_align << 4 | flags`, the
-/// size compared in hundredths of a point) and the four border words.
+/// size compared in hundredths of a point), one word holding the fill and the font colour, and the four
+/// border words.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub(crate) struct StyleKey {
     bits: u64,
+    colors: u64,
     borders: CellBorders,
 }
 
@@ -165,12 +202,8 @@ impl StyleKey {
     /// The key of a cell with a hyperlink and no look of its own.
     pub(crate) const LINK_ONLY: Self = Self {
         bits: LINK_BIT,
-        borders: CellBorders {
-            top: BorderEdge::NONE,
-            right: BorderEdge::NONE,
-            bottom: BorderEdge::NONE,
-            left: BorderEdge::NONE,
-        },
+        colors: 0,
+        borders: NO_BORDERS,
     };
 
     #[inline]
@@ -227,7 +260,7 @@ impl StyleKey {
     pub(crate) const fn with_link(self) -> Self {
         Self {
             bits: self.bits | LINK_BIT,
-            borders: self.borders,
+            ..self
         }
     }
 
@@ -266,21 +299,27 @@ impl StyleKey {
     pub(crate) const fn with_num_fmt(self, id: u16) -> Self {
         Self {
             bits: (self.bits & !(0xFFFF << NUM_FMT_SHIFT)) | ((id as u64) << NUM_FMT_SHIFT),
-            borders: self.borders,
+            ..self
         }
     }
 
-    /// The key reduced to what the font element of a style depends on: the flags and the size.
+    #[inline]
+    pub(crate) const fn fill(self) -> Option<u32> {
+        word_color(self.colors)
+    }
+
+    #[inline]
+    pub(crate) const fn font_color(self) -> Option<u32> {
+        word_color(self.colors >> FONT_COLOR_SHIFT)
+    }
+
+    /// The key reduced to what the font element of a style depends on: the flags, the size and the colour.
     #[inline]
     pub(crate) const fn font_part(self) -> Self {
         Self {
             bits: self.bits & (FLAGS_MASK | LINK_BIT | (!0u64 << SIZE_SHIFT)),
-            borders: CellBorders {
-                top: BorderEdge::NONE,
-                right: BorderEdge::NONE,
-                bottom: BorderEdge::NONE,
-                left: BorderEdge::NONE,
-            },
+            colors: self.colors & (COLOR_WORD_MASK << FONT_COLOR_SHIFT),
+            borders: NO_BORDERS,
         }
     }
 
@@ -317,6 +356,8 @@ impl CellStyle {
             && !self.unlocked
             && !self.force_locked
             && !self.formula_hidden
+            && self.fill.is_none()
+            && self.font_color.is_none()
     }
 
     #[inline]
@@ -334,6 +375,7 @@ impl CellStyle {
                 | ((self.v_align as u64) << V_ALIGN_SHIFT)
                 | ((self.h_align as u64) << H_ALIGN_SHIFT)
                 | u64::from(self.flags()),
+            colors: color_word(self.fill) | (color_word(self.font_color) << FONT_COLOR_SHIFT),
             borders: self.borders,
         }
     }

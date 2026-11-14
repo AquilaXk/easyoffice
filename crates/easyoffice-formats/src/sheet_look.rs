@@ -256,9 +256,9 @@ pub fn parse_hex_rgb(text: &str) -> Option<u32> {
 /// The color of a SpreadsheetML `color` element: an `rgb` of `RRGGBB` or `AARRGGBB`; a theme,
 /// indexed or automatic color reads as the default (black).
 pub(crate) fn xlsx_color_rgb(attrs: &str) -> u32 {
-    let rgb = crate::rtf_xml_helpers::extract_attr_from_fragment(attrs, "rgb").unwrap_or("");
-    let digits = if rgb.len() == 8 { &rgb[2..] } else { rgb };
-    parse_hex_rgb(digits).unwrap_or(BORDER_DEFAULT_RGB)
+    crate::rtf_xml_helpers::extract_attr_from_fragment(attrs, "rgb")
+        .and_then(crate::sheet_styling::xlsx_color::parse_argb)
+        .unwrap_or(BORDER_DEFAULT_RGB)
 }
 
 /// `0.74pt solid #112233` (an `fo:border*` value) as an edge: the line kind from the style word

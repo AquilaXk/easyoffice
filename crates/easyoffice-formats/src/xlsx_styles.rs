@@ -4,8 +4,9 @@
 //! Writer layout: `numFmts` holds the custom number format codes (ids from 164, PD-193); `fonts`
 //! holds the default font (index 0) plus one font per distinct font look; `cellXfs` holds the
 //! default format (index 0) plus one format per distinct style (font look, number format,
-//! alignment and borders); `borders` holds the empty border (index 0) plus one entry per distinct
-//! set of edges (PD-207).
+//! alignment, borders and fill); `borders` holds the empty border (index 0) plus one entry per distinct
+//! set of edges (PD-207); `fills` holds the two fills every file starts with (none and `gray125`) plus
+//! one solid fill per distinct colour, `fonts` carry the font colour (PD-227).
 //! Elements follow the ECMA-376 `CT_Stylesheet` sequence (`numFmts`, `fonts`, `fills`, `borders`,
 //! `cellStyleXfs`, `cellXfs`, `cellStyles`); spreadsheet programs reject any other order.
 
@@ -17,6 +18,7 @@ use crate::rtf_xml_helpers::{
 use crate::sheet_styling::sheet_filter::color_criteria;
 use crate::sheet_styling::sheet_look::{xlsx_color_rgb, BorderEdge, BorderLine, CellBorders};
 use crate::sheet_styling::sheet_rules::xlsx_rules::DxfTable;
+use crate::sheet_styling::xlsx_color::ColorScheme;
 use crate::sheet_styling::{
     format_centipt, CellStyle, HAlign, IdMemo, NumFmtTable, SheetStyling, StyleKey, VAlign,
     CUSTOM_BASE, MAX_COLUMN_PX, MIN_COLUMN_PX,
@@ -31,8 +33,12 @@ pub(crate) const MAX_DIGIT_WIDTH_PX: f64 = 7.0;
 const DEFAULT_SIZE_PT: f64 = 11.0;
 /// `cellStyles` entries a reader looks at (a spreadsheet program keeps fewer than this many cell styles).
 const MAX_CELL_STYLE_ENTRIES: usize = 65_536;
-/// Border definitions a reader keeps; a stylesheet with more reads the rest as no border.
+/// Border, fill, font and cell format definitions a reader keeps; a stylesheet with more reads the rest as
+/// no border, no fill, the default font and the default format.
 pub(crate) const MAX_BORDER_DEFS: usize = 65_536;
+const MAX_FILL_DEFS: usize = 65_536;
+const MAX_FONT_DEFS: usize = 65_536;
+const MAX_XF_DEFS: usize = 65_536;
 
 /// Converts a column width in CSS pixels to the SpreadsheetML `width` attribute value.
 pub(crate) fn px_to_xlsx_width(px: u32) -> f64 {
@@ -56,6 +62,7 @@ fn unlocked_style() -> CellStyle {
 
 /// Colour of the spreadsheet program's "Hyperlink" and "Followed Hyperlink" cell styles (ARGB).
 const HYPERLINK_COLOR: &str = "FF0563C1";
+const HYPERLINK_RGB: u32 = 0x0563C1;
 /// The font of the "Hyperlink" cell style: the default font, underlined, in [`HYPERLINK_COLOR`] (PD-223).
 const HYPERLINK_STYLE_KEY: StyleKey = StyleKey::LINK_ONLY;
 /// `builtinId` of the "Hyperlink" and "Followed Hyperlink" cell styles (ECMA-376 18.8.7).
@@ -63,6 +70,9 @@ const BUILTIN_HYPERLINK: &str = "8";
 const BUILTIN_FOLLOWED_HYPERLINK: &str = "9";
 /// `cellStyleXfs` index the writer gives the "Hyperlink" style (index 0 is Normal).
 const HYPERLINK_STYLE_XF: usize = 1;
+/// The first fill id of a solid fill: 0 is `none` and 1 is `gray125`, which a spreadsheet program reads
+/// as the pattern whatever the file says there.
+const FIRST_SOLID_FILL: usize = 2;
 
 /// Deduplicated styles of a whole workbook, in first-use order.
 pub(crate) struct XlsxStyleTable {
@@ -75,6 +85,9 @@ pub(crate) struct XlsxStyleTable {
     /// Distinct non-empty border sets, border id `n + 1`.
     borders: Vec<CellBorders>,
     border_index: HashMap<CellBorders, usize>,
+    /// Distinct fill colours, fill id `n + 2` (0 is none, 1 the `gray125` placeholder every file has).
+    fills: Vec<u32>,
+    fill_index: HashMap<u32, usize>,
     /// Custom number format codes of the whole workbook.
     num_fmts: NumFmtTable,
     /// Differential formats of the conditional formatting rules (PD-171).
@@ -90,6 +103,8 @@ impl XlsxStyleTable {
             index: HashMap::new(),
             borders: Vec::new(),
             border_index: HashMap::new(),
+            fills: Vec::new(),
+            fill_index: HashMap::new(),
             num_fmts: NumFmtTable::default(),
             dxf: DxfTable::build(
                 stylings
@@ -134,6 +149,12 @@ impl XlsxStyleTable {
                 if !borders.is_none() && !table.border_index.contains_key(&borders) {
                     table.borders.push(borders);
                     table.border_index.insert(borders, table.borders.len());
+                }
+                if let Some(rgb) = key.fill() {
+                    table.fill_index.entry(rgb).or_insert_with(|| {
+                        table.fills.push(rgb);
+                        table.fills.len() + FIRST_SOLID_FILL - 1
+                    });
                 }
                 let font = key.font_part();
                 if font != StyleKey::default() && !table.font_index.contains_key(&font) {
@@ -220,7 +241,9 @@ impl XlsxStyleTable {
                 .size_centipt()
                 .map_or_else(|| "11".to_string(), format_centipt);
             out.push_str(&format!("<sz val=\"{sz}\"/>"));
-            if k.link() {
+            if let Some(rgb) = k.font_color() {
+                out.push_str(&format!("<color rgb=\"FF{rgb:06X}\"/>"));
+            } else if k.link() {
                 out.push_str(&format!("<color rgb=\"{HYPERLINK_COLOR}\"/>"));
             }
         } else {
@@ -244,6 +267,19 @@ impl XlsxStyleTable {
             ));
         }
         xml.push_str("</numFmts>");
+        xml
+    }
+
+    fn fills_xml(&self) -> String {
+        let mut xml = format!("<fills count=\"{}\">", self.fills.len() + FIRST_SOLID_FILL);
+        xml.push_str("<fill><patternFill patternType=\"none\"/></fill>");
+        xml.push_str("<fill><patternFill patternType=\"gray125\"/></fill>");
+        for rgb in &self.fills {
+            xml.push_str(&format!(
+                "<fill><patternFill patternType=\"solid\"><fgColor rgb=\"FF{rgb:06X}\"/><bgColor indexed=\"64\"/></patternFill></fill>"
+            ));
+        }
+        xml.push_str("</fills>");
         xml
     }
 
@@ -288,16 +324,24 @@ impl XlsxStyleTable {
     fn xf_xml(&self, key: StyleKey) -> String {
         let font_id = self.font_index.get(&key.font_part()).copied().unwrap_or(0);
         let border_id = self.border_index.get(&key.borders()).copied().unwrap_or(0);
+        let fill_id = key
+            .fill()
+            .and_then(|rgb| self.fill_index.get(&rgb))
+            .copied()
+            .unwrap_or(0);
         let num_fmt = key.num_fmt();
         let style_xf = if key.link() { HYPERLINK_STYLE_XF } else { 0 };
         let mut xf = format!(
-            "<xf numFmtId=\"{num_fmt}\" fontId=\"{font_id}\" fillId=\"0\" borderId=\"{border_id}\" xfId=\"{style_xf}\""
+            "<xf numFmtId=\"{num_fmt}\" fontId=\"{font_id}\" fillId=\"{fill_id}\" borderId=\"{border_id}\" xfId=\"{style_xf}\""
         );
         if num_fmt != 0 {
             xf.push_str(" applyNumberFormat=\"1\"");
         }
         if font_id != 0 {
             xf.push_str(" applyFont=\"1\"");
+        }
+        if fill_id != 0 {
+            xf.push_str(" applyFill=\"1\"");
         }
         if border_id != 0 {
             xf.push_str(" applyBorder=\"1\"");
@@ -365,7 +409,7 @@ impl XlsxStyleTable {
             xml.push_str(&Self::font_xml(Some(*key)));
         }
         xml.push_str("</fonts>");
-        xml.push_str("<fills count=\"1\"><fill><patternFill patternType=\"none\"/></fill></fills>");
+        xml.push_str(&self.fills_xml());
         xml.push_str(&format!("<borders count=\"{}\">", self.borders.len() + 1));
         xml.push_str(&Self::border_xml(CellBorders::default()));
         for &borders in &self.borders {
@@ -430,7 +474,9 @@ fn truthy(attrs: &str, name: &str, default: bool) -> bool {
     }
 }
 
-fn parse_font(body: &str) -> CellStyle {
+/// The font of a `font` element: the flags, the size and the colour. An automatic colour and one the
+/// reader cannot resolve are "no colour".
+fn parse_font(body: &str, colors: &ColorScheme) -> CellStyle {
     let flag = |tag: &str| {
         extract_tags_or_self_closing_with_attrs(body, tag)
             .first()
@@ -444,14 +490,47 @@ fn parse_font(body: &str) -> CellStyle {
         .and_then(|(attrs, _)| extract_attr_from_fragment(attrs, "val"))
         .and_then(|v| v.parse::<f64>().ok())
         .filter(|s| s.is_finite());
+    let font_color = extract_tags_or_self_closing_with_attrs(body, "color")
+        .first()
+        .and_then(|(attrs, _)| colors.resolve(attrs).rgb());
     CellStyle {
         bold: flag("b"),
         italic: flag("i"),
         underline,
         strike: flag("strike"),
         size_pt,
+        font_color,
         ..CellStyle::default()
     }
+}
+
+/// The colour of a `fill` element: a solid pattern's foreground colour (its background colour when
+/// the foreground has none). Other patterns and gradients read as no fill.
+fn parse_fill(body: &str, colors: &ColorScheme) -> Option<u32> {
+    let (attrs, inner) = extract_tags_or_self_closing_with_attrs(body, "patternFill")
+        .into_iter()
+        .next()?;
+    if extract_attr_from_fragment(attrs, "patternType") != Some("solid") {
+        return None;
+    }
+    let colour = |tag: &str| {
+        extract_tags_or_self_closing_with_attrs(inner, tag)
+            .first()
+            .and_then(|(attrs, _)| colors.resolve(attrs).rgb())
+    };
+    colour("fgColor").or_else(|| colour("bgColor"))
+}
+
+/// The fill colour of every entry of the `fills` element, in file order (at most [`MAX_FILL_DEFS`]).
+fn parse_fills(styles_xml: &str, colors: &ColorScheme) -> Vec<Option<u32>> {
+    let Some(body) = extract_tag_bodies(styles_xml, "fills").into_iter().next() else {
+        return Vec::new();
+    };
+    extract_tags_or_self_closing_with_attrs(body, "fill")
+        .into_iter()
+        .take(MAX_FILL_DEFS)
+        .map(|(_, fill)| parse_fill(fill, colors))
+        .collect()
 }
 
 /// One edge of a `border` element: the style word and the color of the side `tag`.
@@ -559,18 +638,21 @@ fn hyperlink_style_xfs(styles_xml: &str) -> HashSet<u32> {
 
 /// Style of every `cellXfs` entry, resolved against `fonts` and `numFmts`. A font size equal to
 /// the default font's (font 0) reads as "no explicit size".
-pub(crate) fn parse_cell_xf_styles(styles_xml: &str) -> XfStyles {
+pub(crate) fn parse_cell_xf_styles(styles_xml: &str, colors: &ColorScheme) -> XfStyles {
     let Some(fonts_xml) = extract_tag_bodies(styles_xml, "fonts").into_iter().next() else {
         return XfStyles::default();
     };
-    let fonts: Vec<CellStyle> = extract_tag_bodies(fonts_xml, "font")
+    let fonts: Vec<CellStyle> = extract_tags_or_self_closing_with_attrs(fonts_xml, "font")
         .into_iter()
-        .map(parse_font)
+        .take(MAX_FONT_DEFS)
+        .map(|(_, font)| parse_font(font, colors))
         .collect();
     let default_size = fonts
         .first()
         .and_then(|f| f.size_pt)
         .unwrap_or(DEFAULT_SIZE_PT);
+    let default_color = fonts.first().and_then(|f| f.font_color);
+    let fills = parse_fills(styles_xml, colors);
     let Some(xfs_xml) = extract_tag_bodies(styles_xml, "cellXfs").into_iter().next() else {
         return XfStyles::default();
     };
@@ -581,6 +663,7 @@ pub(crate) fn parse_cell_xf_styles(styles_xml: &str) -> XfStyles {
     let mut link_xfs = Vec::new();
     let styles = extract_tags_or_self_closing_with_attrs(xfs_xml, "xf")
         .into_iter()
+        .take(MAX_XF_DEFS)
         .map(|(attrs, body)| {
             let number = |name: &str| {
                 extract_attr_from_fragment(attrs, name).and_then(|v| v.parse::<u32>().ok())
@@ -594,6 +677,14 @@ pub(crate) fn parse_cell_xf_styles(styles_xml: &str) -> XfStyles {
             {
                 style.size_pt = None;
             }
+            // The colour of the default font is the look of an unset colour.
+            if style.font_color.is_some() && style.font_color == default_color {
+                style.font_color = None;
+            }
+            style.fill = number("fillId")
+                .and_then(|id| fills.get(id as usize))
+                .copied()
+                .flatten();
             style.num_fmt = model_num_fmt(number("numFmtId").unwrap_or(0), &codes, &mut table);
             let border_id = number("borderId").unwrap_or(0) as usize;
             style.borders = borders.get(border_id).copied().unwrap_or_default();
@@ -629,15 +720,26 @@ pub(crate) fn parse_cell_xf_styles(styles_xml: &str) -> XfStyles {
 }
 
 /// Takes the underline off the cells of `link_styled` (cells whose format points at the "Hyperlink" cell style)
-/// that have a link: the style gives them that underline because of the link and not as a look of their own
-/// (PD-223). A cell with the style and no link keeps its underline.
-pub(crate) fn strip_link_look(styling: &mut SheetStyling, link_styled: &[(u32, u32)]) {
+/// that have a link: the style gives them that underline and the hyperlink colour (`link_color`, or the
+/// colour this writer gives the style) because of the link and not as a look of their own (PD-223). A
+/// cell with the style and no link keeps both.
+pub(crate) fn strip_link_look(
+    styling: &mut SheetStyling,
+    link_styled: &[(u32, u32)],
+    link_color: u32,
+) {
     for at in link_styled {
         if !styling.links.contains_key(at) {
             continue;
         }
         if let Some(style) = styling.cells.get_mut(at) {
             style.underline = false;
+            if style
+                .font_color
+                .is_some_and(|rgb| rgb == link_color || rgb == HYPERLINK_RGB)
+            {
+                style.font_color = None;
+            }
             if style.is_plain() {
                 styling.cells.remove(at);
             }
