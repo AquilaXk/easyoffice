@@ -178,5 +178,7 @@ pub unsafe extern "C" fn eo_ql_extract_embedded_thumbnail(
 /// `ptr` and `len` must be a buffer returned by this crate and not yet freed (null is accepted).
 #[no_mangle]
 pub unsafe extern "C" fn eo_ql_free_bytes(ptr: *mut u8, len: usize) {
-    Bytes::free(ptr, len);
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        Bytes::free(ptr, len);
+    }));
 }

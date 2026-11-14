@@ -421,14 +421,30 @@ function createRibbonBackendMock() {
       };
     },
     scrub_pii: (args) => {
-      const text = String(args.payload || "");
-      if (text.includes("010-1234-5678")) {
-        return {
-          scrubbedText: text.replaceAll("010-1234-5678", "010-****-****"),
-          totalMasked: 1,
-        };
+      const scrubOne = (raw) => {
+        const text = String(raw || "");
+        if (text.includes("010-1234-5678")) {
+          return {
+            scrubbedText: text.replaceAll("010-1234-5678", "010-****-****"),
+            totalMasked: 1,
+          };
+        }
+        return { scrubbedText: text, totalMasked: 0 };
+      };
+      const raw = String(args.payload || "");
+      if (raw.trimStart().startsWith("{")) {
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed && Array.isArray(parsed.texts)) {
+            const results = parsed.texts.map(scrubOne);
+            const totalMasked = results.reduce((sum, r) => sum + r.totalMasked, 0);
+            return { results, totalMasked, count: results.length };
+          }
+        } catch (_err) {
+          // Treat malformed JSON as plain text like production RPC.
+        }
       }
-      return { scrubbedText: text, totalMasked: 0 };
+      return scrubOne(raw);
     },
     evaluate_sheet: (args) => {
       if (mock.failSheetEval) {

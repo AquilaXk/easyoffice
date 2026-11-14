@@ -666,12 +666,12 @@ impl EasyOfficeIpcRouter {
                 .map(str::trim)
                 .filter(|s| !s.is_empty()),
         };
-        let (decoded, styling) =
-            UniversalFormatConverter::decode_rich_with_styling(&bytes, source_hint)?;
         let action = Self::optional_json_str(entries, "action")?.unwrap_or("convert");
         if action == "decode" {
             let max_rows = limit(entries, "maxRows")?;
             let max_cols = limit(entries, "maxCols")?;
+            let (decoded, styling) =
+                UniversalFormatConverter::decode_rich_with_styling(&bytes, source_hint)?;
             return decode_response(
                 &decoded,
                 &styling,
@@ -694,10 +694,14 @@ impl EasyOfficeIpcRouter {
         let dst_fmt = DocumentFormat::from_extension(dst_ext).ok_or_else(|| {
             EasyOfficeError::InvalidArgument(format!("지원하지 않는 대상 포맷: {dst_ext}"))
         })?;
+        let pdf_options = parse_pdf_options(entries)?;
+        let allow_loss = accepts_loss(entries)?;
         let fallback_title = Self::optional_json_str(entries, "title")?
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .unwrap_or("변환_문서");
+        let (decoded, styling) =
+            UniversalFormatConverter::decode_rich_with_styling(&bytes, source_hint)?;
         let decoded_title = decoded.title.trim();
         let title = if !decoded_title.is_empty()
             && !matches!(
@@ -710,8 +714,8 @@ impl EasyOfficeIpcRouter {
         };
         let src_fmt = decoded.format;
         let mut warnings = decoded.warnings.clone();
-        let content = into_structured(decoded.content, &styling, parse_pdf_options(entries)?);
-        if !accepts_loss(entries)? && password_lost(&content, dst_fmt) {
+        let content = into_structured(decoded.content, &styling, pdf_options);
+        if !allow_loss && password_lost(&content, dst_fmt) {
             return Ok(REFUSED_PASSWORD_LOSS.to_string());
         }
         let dst_bytes = encode_source_target(

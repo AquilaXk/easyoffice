@@ -52,8 +52,10 @@
   const LINK_ATTRIBUTES = new Set(["href", "xlink:href"]);
   const SAFE_IMAGE_PREFIXES = [
     "data:image/png;", "data:image/jpeg;", "data:image/jpg;", "data:image/gif;",
-    "data:image/webp;", "data:image/bmp;", "data:image/svg+xml;",
+    "data:image/webp;", "data:image/bmp;",
   ];
+  const SAFE_SVG_XMLNS = /\bxmlns(?::[a-z0-9_-]+)?\s*=\s*(["'])http:\/\/(?:www\.w3\.org\/2000\/svg|www\.w3\.org\/1999\/xlink|www\.w3\.org\/XML\/1998\/namespace)\1/gi;
+  const MAX_SVG_DATA_URL_BYTES = 8 * 1024 * 1024;
   const DOCUMENT_TYPE = /<!(?:DOCTYPE|ENTITY)/i;
   // Text with its white space and control characters taken out, as a URL parser reads it: the
   // browser ignores tabs and line breaks inside a scheme (`java<TAB>script:`).
@@ -81,9 +83,76 @@
 
   // ---- SVG sanitizing (adapted from the reference app's print dialog) ---------------------------------------
 
+  function decodeSvgDataUrlPayload(raw) {
+    const str = String(raw ?? "");
+    const comma = str.indexOf(",");
+    if (comma < 0) return null;
+    const header = compact(str.slice(0, comma));
+    if (!header.startsWith("data:image/svg+xml")) return null;
+    const meta = header.slice("data:image/svg+xml".length);
+    if (meta !== "" && !meta.startsWith(";")) return null;
+    const isBase64 = meta.split(";").slice(1).includes("base64");
+    const body = str.slice(comma + 1);
+    if (body.length > MAX_SVG_DATA_URL_BYTES * 2) return null;
+    try {
+      if (isBase64) {
+        const cleaned = body.replace(/\s+/g, "");
+        if (!cleaned || cleaned.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(cleaned)) return null;
+        const bin = (envAtob())(cleaned);
+        if (bin.length > MAX_SVG_DATA_URL_BYTES) return null;
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+        return typeof TextDecoder === "function" ? new TextDecoder("utf-8", { fatal: true }).decode(bytes) : bin;
+      }
+      const decoded = decodeURIComponent(body);
+      return decoded.length <= MAX_SVG_DATA_URL_BYTES ? decoded : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function envAtob() {
+    if (typeof host.atob === "function") return host.atob.bind(host);
+    if (typeof globalThis.atob === "function") return globalThis.atob.bind(globalThis);
+    throw new Error("no atob");
+  }
+
+  function decodeNumericEntities(text) {
+    return text
+      .replace(/&#x([0-9a-fA-F]+);?/g, (_, hex) => {
+        const cp = Number.parseInt(hex, 16);
+        return Number.isFinite(cp) && cp > 0 && cp <= 0x10ffff ? String.fromCodePoint(cp) : "";
+      })
+      .replace(/&#(\d+);?/g, (_, dec) => {
+        const cp = Number.parseInt(dec, 10);
+        return Number.isFinite(cp) && cp > 0 && cp <= 0x10ffff ? String.fromCodePoint(cp) : "";
+      });
+  }
+
+  function isSafeSvgDataUrl(raw) {
+    const svg = decodeSvgDataUrlPayload(raw);
+    if (!svg) return false;
+    const expanded = decodeNumericEntities(svg);
+    for (const candidate of [svg, expanded]) {
+      if (DOCUMENT_TYPE.test(candidate)) return false;
+      if (/<\s*(?:script|foreignobject|iframe|object|embed|applet)\b/i.test(candidate)) return false;
+      if (/(?:^|[\s"'/<>])on[a-z]+\s*=/i.test(candidate)) return false;
+      const strippedNs = candidate.replace(SAFE_SVG_XMLNS, "");
+      if (/https?:/i.test(strippedNs) || /file:/i.test(strippedNs)) return false;
+      const compacted = compact(candidate.replace(SAFE_SVG_XMLNS, ""));
+      if (/(?:javascript|vbscript):|data:text\/html|data:image\/svg\+xml/i.test(compacted)) return false;
+    }
+    return true;
+  }
+
   function isSafeReference(value) {
     const text = compact(value);
-    return text === "" || text.startsWith("#") || SAFE_IMAGE_PREFIXES.some((prefix) => text.startsWith(prefix));
+    if (text === "" || text.startsWith("#")) return true;
+    if (SAFE_IMAGE_PREFIXES.some((prefix) => text.startsWith(prefix))) return true;
+    if (text.startsWith("data:image/svg+xml;") || text.startsWith("data:image/svg+xml,")) {
+      return isSafeSvgDataUrl(value);
+    }
+    return false;
   }
 
   // A value may point only inside the page: `url(#id)`; a scheme or another URL is refused.

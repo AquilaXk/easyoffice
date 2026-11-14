@@ -124,11 +124,11 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
   // `workbookProtect`: the protection of the workbook (no part of a snapshot); a workbook without one adds nothing.
   function contentFingerprint(snap, workbookProtect) {
     const parts = [
-      snap.docTabs, snap.sheets, snap.sheetRowCounts, snap.sheetColumnWidths, snap.sheetRules, snap.sheetLayout, snap.definedNames,
+      snap.docTabs, snap.sheetRowCounts, snap.sheetColumnWidths, snap.sheetRules, snap.sheetLayout, snap.definedNames,
       snap.sheetFrozen, snap.sheetOrder, snap.slides, snap.pdfStudio, snap.pdfRotationDeg,
     ];
     if (workbookProtect) parts.push(workbookProtect);
-    return hashFingerprint(JSON.stringify(canonicalizeContent(parts, "")));
+    return hashFingerprint(JSON.stringify(canonicalizeContent(parts, ""))) + "-" + sheetStoreDigest(snap.sheets);
   }
 
   // FNV-1a step over `text`, continuing from `h`.
@@ -876,6 +876,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     shortcutComboFromEvent,
     guessClientPlatform,
     isRestorableSnapshot,
+    contentFingerprint,
     moduleFingerprint,
   };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

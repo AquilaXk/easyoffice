@@ -215,14 +215,66 @@ pub fn write_document_bytes(path: &Path, bytes: &[u8]) -> Result<Written, SaveEr
     })
 }
 
+const SENSITIVE_CREDENTIAL_DIRS: &[&[u8]] = &[b".ssh", b".gnupg", b".aws", b".kube"];
+
+/// Rejects symlink targets pointing at hidden dotfiles (`.zshrc`, `.env`, …) or inside sensitive
+/// credential directories (`.ssh`, `.gnupg`, `.aws`, `.kube`) while allowing normal non-hidden
+/// targets regardless of extension (PD-177).
+pub(crate) fn ensure_safe_symlink_target(canonical: &Path) -> std::io::Result<()> {
+    let is_dotfile = canonical
+        .file_name()
+        .is_some_and(|name| name.as_encoded_bytes().starts_with(b"."));
+    let in_sensitive_dir = canonical.components().any(|comp| match comp {
+        std::path::Component::Normal(part) => SENSITIVE_CREDENTIAL_DIRS
+            .iter()
+            .any(|dir| part.as_encoded_bytes().eq_ignore_ascii_case(dir)),
+        _ => false,
+    });
+    if is_dotfile || in_sensitive_dir {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "숨김 파일이나 자격증명 디렉터리를 가리키는 심볼릭 링크는 허용되지 않습니다.",
+        ));
+    }
+    Ok(())
+}
+
 /// The file a save really replaces. A symbolic link is followed: renaming the temporary file over
 /// the link would swap the link for a regular file and leave its target unchanged. A link that
 /// points nowhere is an error, so nothing is created behind it.
 fn resolve_link(path: &Path) -> std::io::Result<PathBuf> {
     match fs::symlink_metadata(path) {
-        Ok(meta) if meta.file_type().is_symlink() => fs::canonicalize(path),
+        Ok(meta) if meta.file_type().is_symlink() => {
+            let canonical = fs::canonicalize(path)?;
+            ensure_safe_symlink_target(&canonical)?;
+            Ok(canonical)
+        }
         _ => Ok(path.to_path_buf()),
     }
+}
+
+/// Creates `path` exclusively (`create_new(true)`) and returns the open file handle so callers write
+/// directly to the claimed descriptor without reopening by path.
+pub(crate) fn claim_new_file(path: &Path) -> std::io::Result<fs::File> {
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+}
+
+/// Writes `bytes` to an already claimed file handle and flushes file contents to disk.
+pub(crate) fn write_claimed_file(file: &mut fs::File, bytes: &[u8]) -> std::io::Result<()> {
+    file.write_all(bytes)?;
+    file.sync_all()
+}
+
+/// Flushes directory entries on Unix after rename/create so crash recovery keeps the link target.
+#[cfg(unix)]
+pub(crate) fn sync_parent_dir(path: &Path) -> std::io::Result<()> {
+    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        fs::File::open(parent)?.sync_all()?;
+    }
+    Ok(())
 }
 
 /// Options that create the temporary file with the permissions the target already has, so the
@@ -320,7 +372,10 @@ fn write_then_rename(
     file.sync_all()?;
     keep_mode_of(&file, path);
     drop(file);
-    fs::rename(tmp_path, path)
+    fs::rename(tmp_path, path)?;
+    #[cfg(unix)]
+    sync_parent_dir(path)?;
+    Ok(())
 }
 
 /// A replaced document keeps its permission bits (best effort: some volumes refuse `chmod`, and the
@@ -472,6 +527,67 @@ mod tests {
             .unwrap()
             .file_type()
             .is_symlink());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_write_through_a_link_to_sensitive_or_dotfile_target_is_refused() {
+        let dir = scratch_dir("symlink-sensitive");
+        for (idx, rel) in [
+            ".zshrc",
+            ".env",
+            ".ssh/id_rsa",
+            ".gnupg/secring.gpg",
+            ".aws/credentials",
+            ".kube/config",
+        ]
+        .iter()
+        .enumerate()
+        {
+            let real = dir.join(rel);
+            fs::create_dir_all(real.parent().unwrap()).unwrap();
+            fs::write(&real, b"untouched").unwrap();
+            let link = dir.join(format!("계약서_{idx}.docx"));
+            std::os::unix::fs::symlink(&real, &link).unwrap();
+            let err = write_document_bytes(&link, b"overwrite").unwrap_err();
+            assert_eq!(err.to_string(), "쓰기 권한이 없습니다.", "{rel}");
+            assert_eq!(fs::read(&real).unwrap(), b"untouched");
+        }
+        // PD-177: a link with a different extension outside sensitive paths remains writable.
+        let allowed = dir.join("store").join("a1b2c3.bin");
+        fs::create_dir_all(allowed.parent().unwrap()).unwrap();
+        fs::write(&allowed, b"old").unwrap();
+        let ok_link = dir.join("보고서.docx");
+        std::os::unix::fs::symlink(&allowed, &ok_link).unwrap();
+        write_document_bytes(&ok_link, b"new").unwrap();
+        assert_eq!(fs::read(&allowed).unwrap(), b"new");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_claimed_file_writes_the_claimed_descriptor_without_reopening_the_path() {
+        let dir = scratch_dir("claimed-fd");
+        let target = dir.join("split_1.pdf");
+        let victim = dir.join("victim.txt");
+        fs::write(&victim, b"untouched").unwrap();
+        let mut claimed = claim_new_file(&target).unwrap();
+        // Second claim at the same path fails atomically.
+        assert_eq!(
+            claim_new_file(&target).unwrap_err().kind(),
+            std::io::ErrorKind::AlreadyExists
+        );
+        // Simulate a path swap after claim: remove target and drop a symlink at the same path.
+        fs::remove_file(&target).unwrap();
+        std::os::unix::fs::symlink(&victim, &target).unwrap();
+        assert_eq!(
+            claim_new_file(&target).unwrap_err().kind(),
+            std::io::ErrorKind::AlreadyExists
+        );
+        // Writing to the claimed descriptor never touches the symlink or its victim.
+        write_claimed_file(&mut claimed, b"payload").unwrap();
+        assert_eq!(fs::read(&victim).unwrap(), b"untouched");
         let _ = fs::remove_dir_all(&dir);
     }
 

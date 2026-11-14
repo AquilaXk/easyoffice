@@ -258,3 +258,23 @@ fn an_untyped_data_picture_is_left_out_of_the_card_and_the_page_is_drawn() {
         assert_eq!(pixel(&png, 1, 1), [255, 255, 255, 255], "{href:.60}");
     }
 }
+
+#[test]
+fn svg_pages_and_pictures_over_element_filter_or_use_budgets_are_refused() {
+    use crate::hostile_svg::{excessive_filters, page_with_picture, tag_flood, use_explosion_dag};
+    let fonts = fonts();
+    for hostile in [
+        use_explosion_dag(16),
+        excessive_filters(80, 4),
+        tag_flood(105_000),
+    ] {
+        assert!(
+            render_png(&hostile, &fonts).is_err(),
+            "page must be refused"
+        );
+        // As a nested data:image/svg+xml picture, the hostile SVG is dropped and the page still draws.
+        let png = render_png(&page_with_picture(hostile.as_bytes()), &fonts)
+            .expect("host page renders without hostile nested svg");
+        assert_eq!(pixel(&png, 1, 1), [255, 255, 255, 255]);
+    }
+}

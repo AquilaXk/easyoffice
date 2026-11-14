@@ -546,6 +546,11 @@ for (const file of files) {
     if (lineCount >= 1000) {
       errors.push(`Source file ${rel} exceeds 1,000-line ceiling (${lineCount} lines)`);
     }
+    if (rel.startsWith("apps/hwp-studio/src/") && rel.endsWith(".ts")) {
+      for (const violation of findHtmlSinkViolations(sourceText, rel)) {
+        errors.push(`Prohibited HTML sink in ${rel} (${violation})`);
+      }
+    }
   }
 }
 

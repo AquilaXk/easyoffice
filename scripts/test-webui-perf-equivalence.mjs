@@ -105,6 +105,46 @@ test("the sheet fingerprint tells edited stores from untouched ones exactly as t
   assert.notEqual(fingerprint(same, { sheetRowCounts: { Sheet1: 13 } }), fingerprint(same));
 });
 
+test("contentFingerprint keeps exact equivalence with canonical serialization and skips JSON stringifying sheets", () => {
+  const env = {};
+  loadUiModule(new URL("workspace-session.js", UI), env);
+  const { contentFingerprint } = env.__EASYOFFICE_WORKSPACE_SESSION_UTILS__;
+  const baseSnap = (sheets, extra = {}) => ({
+    docTabs: { DOC: { p: "본문" }, HWP: null },
+    sheets,
+    sheetRowCounts: { Sheet1: 12 },
+    sheetColumnWidths: {},
+    sheetRules: {},
+    sheetLayout: {},
+    definedNames: {},
+    sheetFrozen: {},
+    sheetOrder: ["Sheet1", "Lists"],
+    slides: [{ title: "제목" }],
+    pdfStudio: null,
+    pdfRotationDeg: 0,
+    ...extra,
+  });
+  const next = rng(20261114);
+  let differing = 0;
+  for (let round = 0; round < 400; round += 1) {
+    const a = randomStore(next);
+    const b = round % 2 === 0 ? reordered(a, next) : perturbed(a, next);
+    const sameBefore = referenceFingerprint(baseSnap(a)) === referenceFingerprint(baseSnap(b));
+    assert.equal(
+      contentFingerprint(baseSnap(a), null) === contentFingerprint(baseSnap(b), null),
+      sameBefore,
+      `round ${round}`,
+    );
+    if (!sameBefore) differing += 1;
+  }
+  assert.ok(differing > 60);
+  const emptyA = baseSnap({ Sheet1: { A1: { value: "", formula: "" } } });
+  const emptyB = baseSnap({});
+  assert.equal(contentFingerprint(emptyA, null), contentFingerprint(emptyB, null));
+  assert.notEqual(contentFingerprint(emptyB, { lock: true }), contentFingerprint(emptyB, null));
+  assert.notEqual(contentFingerprint(baseSnap({}, { docTabs: { DOC: { p: "수정" } } }), null), contentFingerprint(emptyB, null));
+});
+
 // ---- formatted-number normalization ------------------------------------------------------------
 
 function referenceNormalize(raw) {

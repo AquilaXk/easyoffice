@@ -16,7 +16,10 @@ use crate::pdf_edit_budget::{
 use crate::pdf_edit_engine::{ChildEngine, PdfEngine};
 use crate::pdf_edit_overlay::Overlay;
 use crate::pdf_edit_session::EditSession;
-use crate::save_file::{split_file_name, write_document_bytes, SaveRequest};
+use crate::save_error::SaveError;
+use crate::save_file::{
+    claim_new_file, split_file_name, write_claimed_file, write_document_bytes, SaveRequest,
+};
 use crate::shell_caller::ShellCaller;
 use crate::tracked_files::open_regular;
 use crate::{pdf_job, IpcError};
@@ -519,12 +522,18 @@ fn write_split(
             }
             let request = SaveRequest::from_bytes(name, bytes)?;
             let target = folder.join(name);
-            claim_new_file(&target).map_err(|err| match err.kind() {
+            let mut file = claim_new_file(&target).map_err(|err| match err.kind() {
                 std::io::ErrorKind::AlreadyExists => taken_message(name),
-                _ => err.to_string(),
+                _ => SaveError::from_io(&target, &err).to_string(),
             })?;
             written.push(target.clone());
-            write_document_bytes(&target, request.bytes()).map_err(|err| err.to_string())?;
+            write_claimed_file(&mut file, request.bytes())
+                .map_err(|err| SaveError::from_io(&target, &err).to_string())?;
+        }
+        #[cfg(unix)]
+        if let Some(first) = written.first() {
+            crate::save_file::sync_parent_dir(first)
+                .map_err(|err| SaveError::from_io(first, &err).to_string())?;
         }
         Ok(())
     })();
@@ -541,15 +550,6 @@ fn write_split(
 
 fn taken_message(name: &str) -> String {
     format!("같은 이름의 파일이 이미 있어 분할하지 않았습니다: {name}")
-}
-
-/// Creates `path` empty and fails when anything is there: the name is the call's from then on.
-fn claim_new_file(path: &Path) -> std::io::Result<()> {
-    std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-        .map(drop)
 }
 
 /// Answer of `pdf_edit_save`. Like a save it names the file only, never a path (PD-088).

@@ -490,6 +490,9 @@ impl OpenTarget {
     fn of(path: &Path) -> std::io::Result<Self> {
         let canonical = fs::canonicalize(path)?;
         let is_link = fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink());
+        if is_link {
+            crate::save_file::ensure_safe_symlink_target(&canonical)?;
+        }
         let shown = if is_link {
             std::path::absolute(path).unwrap_or_else(|_| canonical.clone())
         } else {

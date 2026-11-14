@@ -35,7 +35,10 @@ const CLEARABLE = new Set(["innerHTML", "srcdoc"]);
  * editor frame sends, refuses a document type declaration, keeps only listed elements and attributes,
  * and only then imports the tree.
  */
-export const PARSE_ALLOWED = new Map([["crates/easyoffice-app/ui/hwp-print.js", "page SVG, whitelist sanitizer"]]);
+export const PARSE_ALLOWED = new Map([
+  ["crates/easyoffice-app/ui/hwp-print.js", "page SVG, whitelist sanitizer"],
+  ["apps/hwp-studio/src/command/print-pages.ts", "editor print SVG page"],
+]);
 
 /** Returns one message per violation, each with the 1-based line of the sink. */
 export function findHtmlSinkViolations(source, rel = "") {

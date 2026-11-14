@@ -495,6 +495,7 @@ pub fn parse_page(svg: &str, options: &usvg::Options<'_>) -> Result<(usvg::Tree,
     // The page comes from the page script: a declaration would make the parser expand entities
     // without a bound, and no page the editor draws has one.
     easyoffice_formats::XmlSanitizer::validate_safe_xml(svg).map_err(|e| e.to_string())?;
+    crate::svg_budget::check_svg_structure(svg).map_err(str::to_string)?;
     let parse = |source: &str| usvg::Tree::from_str(source, options).map_err(|e| e.to_string());
     let mut report = Report::default();
     if !asks_for_emphasis(svg) {

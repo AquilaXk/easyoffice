@@ -54,6 +54,7 @@ mod shell_caller;
 mod smoke;
 mod smoke_steps;
 mod studio_frame;
+mod svg_budget;
 mod tracked_files;
 mod update_check;
 mod update_install;

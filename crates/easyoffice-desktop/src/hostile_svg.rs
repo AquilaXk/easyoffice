@@ -76,3 +76,30 @@ pub(crate) fn untyped_data_urls(payload: &[u8]) -> Vec<String> {
         format!("data:text/plain,{percent}"),
     ]
 }
+
+/// An SVG DAG of `<use>` elements that expands to `2^levels` rectangles from `2 * levels + 1` tags.
+pub(crate) fn use_explosion_dag(levels: usize) -> String {
+    let mut defs = String::from(r#"<g id="u0"><rect width="4" height="4"/></g>"#);
+    for lvl in 1..=levels {
+        let prev = lvl - 1;
+        defs.push_str(&format!(
+            r##"<g id="u{lvl}"><use href="#u{prev}"/><use href="#u{prev}"/></g>"##
+        ));
+    }
+    format!(r##"{SVG_OPEN}<defs>{defs}</defs><use href="#u{levels}"/></svg>"##)
+}
+
+/// An SVG containing `filters` `<filter>` elements with `primitives` `<feGaussianBlur>` children each.
+pub(crate) fn excessive_filters(filters: usize, primitives: usize) -> String {
+    let prims = r#"<feGaussianBlur stdDeviation="2"/>"#.repeat(primitives);
+    let mut defs = String::new();
+    for i in 0..filters {
+        defs.push_str(&format!(r#"<filter id="f{i}">{prims}</filter>"#));
+    }
+    format!(r#"{SVG_OPEN}<defs>{defs}</defs><rect width="8" height="8" filter="url(#f0)"/></svg>"#)
+}
+
+/// An SVG containing `tags` empty `<g/>` elements to exhaust element budgets.
+pub(crate) fn tag_flood(tags: usize) -> String {
+    format!(r#"{SVG_OPEN}{}</svg>"#, "<g/>".repeat(tags))
+}

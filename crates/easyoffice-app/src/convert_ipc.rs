@@ -271,15 +271,21 @@ impl EasyOfficeIpcRouter {
             if !accept_loss && password_lost(content, dst_fmt) {
                 return Ok(REFUSED_PASSWORD_LOSS.to_string());
             }
-            let dst_bytes =
-                encode_target(content, dst_fmt, src_fmt, title, writers, &mut warnings)?;
-            let source_len = if size_fmt == dst_fmt {
-                dst_bytes.len()
+            if dst_fmt == DocumentFormat::Hwp && size_fmt == DocumentFormat::Hwpx {
+                let hwpx = encode_structured(content, DocumentFormat::Hwpx, title, &mut warnings)?;
+                let dst_bytes = write_hwp(&hwpx, writers.hwp)?;
+                (hwpx.len(), dst_bytes)
             } else {
-                // Only what the target loses is reported; the source-side encode is just for its size.
-                encode_structured(content, size_fmt, title, &mut Vec::new())?.len()
-            };
-            (source_len, dst_bytes)
+                let dst_bytes =
+                    encode_target(content, dst_fmt, src_fmt, title, writers, &mut warnings)?;
+                let source_len = if size_fmt == dst_fmt {
+                    dst_bytes.len()
+                } else {
+                    // Only what the target loses is reported; the source-side encode is just for its size.
+                    encode_structured(content, size_fmt, title, &mut Vec::new())?.len()
+                };
+                (source_len, dst_bytes)
+            }
         } else {
             let model = Self::legacy_body_model(body, title);
             let cached = [
@@ -299,18 +305,24 @@ impl EasyOfficeIpcRouter {
                     formula_cache.as_ref(),
                 )
             };
-            let dst_bytes = if dst_fmt == DocumentFormat::Hwp {
+            if dst_fmt == DocumentFormat::Hwp {
                 let hwpx = UniversalFormatConverter::encode(&model, DocumentFormat::Hwpx)?;
-                write_hwp(&hwpx, writers.hwp)?
+                let dst_bytes = write_hwp(&hwpx, writers.hwp)?;
+                let source_len = if size_fmt == DocumentFormat::Hwpx {
+                    hwpx.len()
+                } else {
+                    encode(size_fmt)?.len()
+                };
+                (source_len, dst_bytes)
             } else {
-                encode(dst_fmt)?
-            };
-            let source_len = if size_fmt == dst_fmt {
-                dst_bytes.len()
-            } else {
-                encode(size_fmt)?.len()
-            };
-            (source_len, dst_bytes)
+                let dst_bytes = encode(dst_fmt)?;
+                let source_len = if size_fmt == dst_fmt {
+                    dst_bytes.len()
+                } else {
+                    encode(size_fmt)?.len()
+                };
+                (source_len, dst_bytes)
+            }
         };
         Self::conversion_response(src_fmt, dst_fmt, source_len, &dst_bytes, &warnings)
     }
@@ -566,5 +578,65 @@ mod tests {
             r#"{"sourceFormat":"xlsx","targetFormat":"pages","title":"시트","sheets":[{"name":"S","cells":[{"ref":"A1","raw":"1"}]}]}"#,
         )
         .is_err());
+    }
+
+    #[test]
+    fn invalid_action_and_target_are_validated_before_decoding_source_bytes() {
+        let junk_b64 = EasyOfficeIpcRouter::encode_base64(b"not-a-valid-document-bytes");
+        let bad_action = format!(
+            "{{\"sourceBase64\":\"{junk_b64}\",\"fileName\":\"a.docx\",\"action\":\"bogus_op\"}}"
+        );
+        let err_action = EasyOfficeIpcRouter::dispatch("convert_document_format", &bad_action)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err_action.contains("알 수 없는 action: bogus_op"),
+            "{err_action}"
+        );
+
+        let bad_target = format!(
+            "{{\"sourceBase64\":\"{junk_b64}\",\"fileName\":\"a.docx\",\"action\":\"convert\",\"targetFormat\":\"badfmt\"}}"
+        );
+        let err_target = EasyOfficeIpcRouter::dispatch("convert_document_format", &bad_target)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err_target.contains("지원하지 않는 대상 포맷: badfmt"),
+            "{err_target}"
+        );
+    }
+
+    #[test]
+    fn hwpx_to_hwp_reuses_encoded_hwpx_for_source_bytes() {
+        let hwp_stub = UniversalFormatConverter::encode(
+            &EasyOfficeIpcRouter::legacy_body_model("본문", "표"),
+            DocumentFormat::Hwp,
+        )
+        .unwrap();
+        let captured_hwpx = std::cell::RefCell::new(Vec::new());
+        let writer = |hwpx: &[u8]| -> Result<Vec<u8>, String> {
+            captured_hwpx.borrow_mut().extend_from_slice(hwpx);
+            Ok(hwp_stub.clone())
+        };
+        let writers = ShellWriters {
+            pdf: None,
+            hwp: Some(&writer),
+        };
+        let hwpx_only = EasyOfficeIpcRouter::dispatch(
+            "convert_document_format",
+            r#"{"sourceFormat":"hwpx","targetFormat":"hwpx","title":"보고서","blocks":[{"type":"paragraph","runs":[{"text":"본문"}]}]}"#,
+        )
+        .unwrap();
+        let hwp_res = EasyOfficeIpcRouter::dispatch_for_owner_with_shell_writers(
+            "convert_document_format",
+            r#"{"sourceFormat":"hwpx","targetFormat":"hwp","title":"보고서","blocks":[{"type":"paragraph","runs":[{"text":"본문"}]}]}"#,
+            "",
+            writers,
+        )
+        .unwrap();
+        let expected_len = captured_hwpx.borrow().len();
+        assert!(expected_len > 0);
+        assert!(hwpx_only.contains(&format!("\"outputBytes\":{expected_len}")));
+        assert!(hwp_res.contains(&format!("\"sourceBytes\":{expected_len}")));
     }
 }

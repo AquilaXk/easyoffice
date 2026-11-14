@@ -201,3 +201,45 @@ test("masking personal data skips the cells an array filled and counts only what
   assert.deepEqual(scrubbed, ["010-1234-5678", "010-1234-5678"]);
   assert.equal(out.nextSheets.Sheet1.C2.value, "010-1234-5678", "a result is left to the next calculation");
 });
+
+test("scrubSheetStoreMap batches more than 32 entries in 1024-item chunks and offlineRpc supports texts arrays", async () => {
+  const { sandbox } = await createWorkspaceHarness();
+  const offlineRpc = sandbox.__EASYOFFICE_CREATE_OFFLINE_RPC__({
+    getActiveModule: () => "SHEET",
+    ribbonCategoryTools: sandbox.__EASYOFFICE_RIBBON_CATALOG__.RIBBON_CATEGORY_TOOLS,
+    ribbonStyleLabels: sandbox.__EASYOFFICE_RIBBON_CATALOG__.RIBBON_STYLE_LABELS,
+    contextualToolBadges: sandbox.__EASYOFFICE_RIBBON_CATALOG__.CONTEXTUAL_TOOL_BADGES,
+    moduleSpecs: sandbox.__EASYOFFICE_RIBBON_CATALOG__.MODULE_SPECS,
+    localRibbonState: sandbox.__EASYOFFICE_RIBBON_CATALOG__.createDefaultRibbonState(),
+  });
+
+  const directBatch = offlineRpc.scrub_pii(JSON.stringify({ texts: ["010-1234-5678", "홍길동", "a@b.kr"] }));
+  assert.equal(directBatch.results.length, 3);
+  assert.equal(directBatch.results[0].scrubbedText, "010-****-****");
+  assert.equal(directBatch.results[2].scrubbedText, "***@***");
+  assert.equal(directBatch.totalMasked, 2);
+  assert.throws(() => offlineRpc.scrub_pii(JSON.stringify({ texts: "bad" })));
+
+  const payloads = [];
+  const invokeIpc = async (command, payload) => {
+    if (command !== "scrub_pii") throw new Error("unexpected " + command);
+    payloads.push(payload);
+    return offlineRpc.scrub_pii(payload);
+  };
+  const store = sandbox.__EASYOFFICE_CREATE_SHEET_STORE__({
+    invokeIpc,
+    normalizeFormattedNumericCell: (v) => v,
+    tokenizeFormulaStringLiterals: () => [],
+  });
+  const sheet1 = {};
+  for (let r = 1; r <= 1030; r += 1) {
+    sheet1[`A${r}`] = entry(r === 1 || r === 1030 ? "010-1234-5678" : `항목_${r}`);
+  }
+  const out = await store.scrubSheetStoreMap({ Sheet1: sheet1 }, "Sheet1", null);
+  assert.equal(payloads.length, 2, "1030 items must batch into two chunks (1024 + 6)");
+  assert.equal(JSON.parse(payloads[0]).texts.length, 1024);
+  assert.equal(JSON.parse(payloads[1]).texts.length, 6);
+  assert.equal(out.totalMasked, 2);
+  assert.equal(out.nextSheets.Sheet1.A1.value, "010-****-****");
+  assert.equal(out.nextSheets.Sheet1.A1030.value, "010-****-****");
+});

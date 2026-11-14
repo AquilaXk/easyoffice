@@ -47,6 +47,9 @@ impl Bytes {
 
     /// Hands the vector to the caller; `free` is the only way back.
     pub fn from_vec(bytes: Vec<u8>) -> Bytes {
+        if bytes.is_empty() {
+            return Bytes::EMPTY;
+        }
         let raw = Box::into_raw(bytes.into_boxed_slice());
         Bytes {
             ptr: raw.cast::<u8>(),

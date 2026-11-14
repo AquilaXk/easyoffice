@@ -69,6 +69,13 @@ test("a parse that stays is named by its file", () => {
   const code = "new DOMParser().parseFromString(text, 'image/svg+xml');";
   assert.equal(findHtmlSinkViolations(code, "crates/easyoffice-app/ui/other.js").length, 1);
   assert.deepEqual(findHtmlSinkViolations(code, "crates/easyoffice-app/ui/hwp-print.js"), []);
+  assert.deepEqual(findHtmlSinkViolations(code, "apps/hwp-studio/src/command/print-pages.ts"), []);
+  assert.equal(findHtmlSinkViolations(code, "apps/hwp-studio/src/command/other.ts").length, 1);
+  assert.equal(
+    findHtmlSinkViolations("el.innerHTML = html;", "apps/hwp-studio/src/command/print-pages.ts").length,
+    1,
+    "PARSE_ALLOWED only exempts parseFromString, never innerHTML",
+  );
 });
 
 test("ignores the new sinks in comments and strings", () => {

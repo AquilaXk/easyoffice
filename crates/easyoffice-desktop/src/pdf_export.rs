@@ -142,6 +142,7 @@ fn image_href_resolver(budget: Arc<RasterBudget>) -> usvg::ImageHrefResolver<'st
             if mime.eq_ignore_ascii_case("image/svg+xml") {
                 let _level = NestedLevel::enter()?;
                 let text = checked_svg_text(&data, MAX_NESTED_SVG_BYTES).ok()?;
+                crate::svg_budget::check_svg_structure(&text).ok()?;
                 return usvg::Tree::from_str(&text, options)
                     .ok()
                     .map(usvg::ImageKind::SVG);

@@ -12,7 +12,49 @@
     formatFormulaValue,
     evaluateFormulaExpression,
   } = host.__EASYOFFICE_OFFLINE_FORMULA_EVAL__;
-  const { localScrubPii } = host.__EASYOFFICE_SHEET_UTILS__;
+  const { localScrubPii: scrubSinglePii } = host.__EASYOFFICE_SHEET_UTILS__;
+  const MAX_SCRUB_BATCH_ITEMS = 4096;
+  const MAX_SCRUB_BATCH_BYTES = 4 * 1048576;
+
+  function localScrubPii(rawInput) {
+    const raw = String(rawInput ?? "");
+    if (raw.trimStart().startsWith("{")) {
+      let parsed = null;
+      try {
+        parsed = JSON.parse(raw);
+      } catch (_err) {
+        parsed = null;
+      }
+      if (parsed && typeof parsed === "object" && Object.prototype.hasOwnProperty.call(parsed, "texts")) {
+        if (!Array.isArray(parsed.texts)) {
+          throw new Error("JSON 'texts' 필드는 문자열 배열이어야 합니다.");
+        }
+        if (parsed.texts.length > MAX_SCRUB_BATCH_ITEMS) {
+          throw new Error("개인정보 마스킹 배치는 최대 4096개까지 지원합니다.");
+        }
+        let totalBytes = 0;
+        const encoder = typeof TextEncoder === "function" ? new TextEncoder() : null;
+        for (const item of parsed.texts) {
+          if (typeof item !== "string") {
+            throw new Error("JSON 'texts' 항목은 문자열이어야 합니다.");
+          }
+          totalBytes += encoder ? encoder.encode(item).length : item.length * 3;
+          if (totalBytes > MAX_SCRUB_BATCH_BYTES) {
+            throw new Error("개인정보 마스킹 배치 크기가 허용 한도를 초과했습니다.");
+          }
+        }
+        const meta = parsed.metadata && typeof parsed.metadata === "object" ? parsed.metadata : undefined;
+        let totalMasked = 0;
+        const results = parsed.texts.map((text) => {
+          const itemRes = scrubSinglePii(text, meta);
+          totalMasked += Number(itemRes.totalMasked || 0);
+          return itemRes;
+        });
+        return { results, totalMasked, count: results.length };
+      }
+    }
+    return scrubSinglePii(rawInput);
+  }
 
   function tryParseAssistantEnvelope(rawText) {
     if (!rawText.trimStart().startsWith("{")) {

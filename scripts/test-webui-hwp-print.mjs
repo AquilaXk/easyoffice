@@ -329,3 +329,25 @@ test("a page with a document type declaration, entities or another root is refus
     await assert.rejects(setup({ pages: [{ svg, ...A4 }] }).print.print(), /올바르지 않은 쪽/, svg);
   }
 });
+
+test("svg data urls carrying scripts, handlers, javascript schemes, or external http urls are stripped", async () => {
+  const { internals } = setup({ pages: makePages(1) });
+  const b64 = (s) => "data:image/svg+xml;base64," + Buffer.from(s, "utf8").toString("base64");
+  const pct = (s) => "data:image/svg+xml;charset=utf-8," + encodeURIComponent(s);
+  const safeNs = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><rect width="8" height="8"/></svg>';
+  const unsafePayloads = [
+    b64('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'),
+    pct('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'),
+    b64('<svg onload="alert(1)"/>'),
+    pct('<svg><rect onmouseover="fetch(1)"/></svg>'),
+    b64('<svg><a href="javascript:alert(1)"><rect/></a></svg>'),
+    b64('<svg><image href="https://evil.example/leak.png"/></svg>'),
+    pct('<svg><rect fill="url(http://evil.example/x)"/></svg>'),
+    "data:image/svg+xml;base64,!!!invalid-base64!!!",
+  ];
+  const safeUrls = [b64(safeNs), pct(safeNs)];
+  const tree = new El("svg", {}, [...unsafePayloads, ...safeUrls].map((href) => new El("image", { href })));
+  internals.sanitizeSvg(tree);
+  const kept = tree.children.filter((c) => c.attrs.has("href")).map((c) => c.attrs.get("href"));
+  assert.deepEqual(kept, safeUrls);
+});

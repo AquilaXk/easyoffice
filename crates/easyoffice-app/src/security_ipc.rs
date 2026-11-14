@@ -4,7 +4,61 @@ use easyoffice_formats::{
     XmlSanitizer, ZipArchiveCodec, ZipEntryDescriptor, ZipSecurityGuard, ZipSecurityPolicy,
 };
 
-use crate::{DocumentSecurityAuditor, EasyOfficeIpcRouter};
+use crate::{DocumentSecurityAuditor, EasyOfficeIpcRouter, PiiAuditResult};
+use std::fmt::Write as _;
+
+const MAX_SCRUB_BATCH_ITEMS: usize = 4_096;
+const MAX_SCRUB_BATCH_BYTES: usize = 4 * 1_048_576;
+
+fn parse_metadata_pairs(entries: &[(String, StrictJsonValue)]) -> Vec<(String, String)> {
+    let mut meta_pairs = Vec::new();
+    if let Some(StrictJsonValue::Object(meta_entries)) =
+        StrictJsonValue::get_field(entries, "metadata")
+    {
+        for (k, v) in meta_entries {
+            if let Some(s) = v.to_scalar_string() {
+                meta_pairs.push((k.clone(), s));
+            }
+        }
+    }
+    meta_pairs
+}
+
+fn push_scrub_audit_json(out: &mut String, audit: &PiiAuditResult) {
+    out.push_str("{\"scrubbedText\":\"");
+    out.push_str(&EasyOfficeIpcRouter::escape_json_str(&audit.scrubbed_text));
+    let _ = write!(
+        out,
+        "\",\"maskedResidentIds\":{},\"maskedPhoneNumbers\":{},\"maskedEmails\":{},\"maskedIdentifierNumbers\":{},\"totalMasked\":{},\"spans\":[",
+        audit.masked_resident_ids,
+        audit.masked_phone_numbers,
+        audit.masked_emails,
+        audit.masked_identifier_numbers,
+        audit.total_masked_count(),
+    );
+    for (idx, sp) in audit.spans.iter().enumerate() {
+        if idx > 0 {
+            out.push(',');
+        }
+        let _ = write!(
+            out,
+            "{{\"start\":{},\"end\":{},\"replacement\":\"{}\"}}",
+            sp.start_utf16,
+            sp.end_utf16,
+            EasyOfficeIpcRouter::escape_json_str(&sp.replacement)
+        );
+    }
+    out.push_str("],\"strippedMetadataFields\":[");
+    for (idx, k) in audit.stripped_metadata_fields.iter().enumerate() {
+        if idx > 0 {
+            out.push(',');
+        }
+        out.push('"');
+        out.push_str(&EasyOfficeIpcRouter::escape_json_str(k));
+        out.push('"');
+    }
+    out.push_str("]}");
+}
 
 impl EasyOfficeIpcRouter {
     pub(crate) fn handle_detect_format(payload: &str) -> Result<String, EasyOfficeError> {
@@ -344,62 +398,131 @@ impl EasyOfficeIpcRouter {
             .strip_prefix('\u{FEFF}')
             .unwrap_or(payload)
             .trim_start();
-        let audit = if trimmed.starts_with('{') {
+        if trimmed.starts_with('{') {
             if let Ok(entries) = Self::parse_rpc_json_object(trimmed) {
+                if let Some(texts_val) = StrictJsonValue::get_field(&entries, "texts") {
+                    let items = texts_val.as_array().ok_or_else(|| {
+                        EasyOfficeError::InvalidArgument(
+                            "JSON 'texts' 필드는 문자열 배열이어야 합니다.".to_string(),
+                        )
+                    })?;
+                    if items.len() > MAX_SCRUB_BATCH_ITEMS {
+                        return Err(EasyOfficeError::InvalidArgument(format!(
+                            "개인정보 마스킹 배치는 최대 {MAX_SCRUB_BATCH_ITEMS}개까지 지원합니다."
+                        )));
+                    }
+                    let mut total_bytes = 0usize;
+                    let mut inputs = Vec::with_capacity(items.len());
+                    for item in items {
+                        let text = item.as_str().ok_or_else(|| {
+                            EasyOfficeError::InvalidArgument(
+                                "JSON 'texts' 항목은 문자열이어야 합니다.".to_string(),
+                            )
+                        })?;
+                        total_bytes = total_bytes.saturating_add(text.len());
+                        if total_bytes > MAX_SCRUB_BATCH_BYTES {
+                            return Err(EasyOfficeError::PayloadTooLarge {
+                                actual: total_bytes,
+                                max: MAX_SCRUB_BATCH_BYTES,
+                            });
+                        }
+                        inputs.push(text);
+                    }
+                    let meta_pairs = parse_metadata_pairs(&entries);
+                    let mut out = String::with_capacity(items.len().saturating_mul(160) + 48);
+                    out.push_str("{\"results\":[");
+                    let mut total_masked = 0usize;
+                    for (idx, text) in inputs.iter().enumerate() {
+                        if idx > 0 {
+                            out.push(',');
+                        }
+                        let audit = DocumentSecurityAuditor::scan_and_scrub_pii_with_metadata(
+                            text,
+                            &meta_pairs,
+                        );
+                        total_masked = total_masked.saturating_add(audit.total_masked_count());
+                        push_scrub_audit_json(&mut out, &audit);
+                    }
+                    let _ = write!(
+                        out,
+                        "],\"totalMasked\":{},\"count\":{}}}",
+                        total_masked,
+                        inputs.len()
+                    );
+                    return Ok(out);
+                }
                 if let Some(StrictJsonValue::Str(text)) =
                     StrictJsonValue::get_field(&entries, "text")
                 {
-                    let mut meta_pairs: Vec<(String, String)> = Vec::new();
-                    if let Some(StrictJsonValue::Object(meta_entries)) =
-                        StrictJsonValue::get_field(&entries, "metadata")
-                    {
-                        for (k, v) in meta_entries {
-                            if let Some(s) = v.to_scalar_string() {
-                                meta_pairs.push((k.clone(), s));
-                            }
-                        }
-                    }
-                    DocumentSecurityAuditor::scan_and_scrub_pii_with_metadata(text, &meta_pairs)
-                } else {
-                    DocumentSecurityAuditor::scan_and_scrub_pii(payload)
+                    let meta_pairs = parse_metadata_pairs(&entries);
+                    let audit = DocumentSecurityAuditor::scan_and_scrub_pii_with_metadata(
+                        text,
+                        &meta_pairs,
+                    );
+                    let mut out = String::with_capacity(audit.scrubbed_text.len() + 192);
+                    push_scrub_audit_json(&mut out, &audit);
+                    return Ok(out);
                 }
-            } else {
-                DocumentSecurityAuditor::scan_and_scrub_pii(payload)
             }
-        } else {
-            DocumentSecurityAuditor::scan_and_scrub_pii(payload)
-        };
+        }
+        let audit = DocumentSecurityAuditor::scan_and_scrub_pii(payload);
+        let mut out = String::with_capacity(audit.scrubbed_text.len() + 192);
+        push_scrub_audit_json(&mut out, &audit);
+        Ok(out)
+    }
+}
 
-        let escaped = Self::escape_json_str(&audit.scrubbed_text);
-        let spans_json = audit
-            .spans
-            .iter()
-            .map(|sp| {
-                format!(
-                    "{{\"start\":{},\"end\":{},\"replacement\":\"{}\"}}",
-                    sp.start_utf16,
-                    sp.end_utf16,
-                    Self::escape_json_str(&sp.replacement)
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(",");
-        let stripped_json = audit
-            .stripped_metadata_fields
-            .iter()
-            .map(|k| format!("\"{}\"", Self::escape_json_str(k)))
-            .collect::<Vec<_>>()
-            .join(",");
-        Ok(format!(
-            "{{\"scrubbedText\":\"{}\",\"maskedResidentIds\":{},\"maskedPhoneNumbers\":{},\"maskedEmails\":{},\"maskedIdentifierNumbers\":{},\"totalMasked\":{},\"spans\":[{}],\"strippedMetadataFields\":[{}]}}",
-            escaped,
-            audit.masked_resident_ids,
-            audit.masked_phone_numbers,
-            audit.masked_emails,
-            audit.masked_identifier_numbers,
-            audit.total_masked_count(),
-            spans_json,
-            stripped_json
-        ))
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scrub_pii_batch_masks_items_within_bounds_and_rejects_bad_batches() {
+        let out = EasyOfficeIpcRouter::handle_scrub_pii(
+            r#"{"texts":["연락처 010-1234-5678","홍길동","a@b.kr"],"metadata":{"Author":"홍길동"}}"#,
+        )
+        .unwrap();
+        let parsed = StrictJsonValue::parse(&out).unwrap();
+        let entries = parsed.as_object().unwrap();
+        let results = StrictJsonValue::get_field(entries, "results")
+            .and_then(StrictJsonValue::as_array)
+            .expect("results array");
+        assert_eq!(results.len(), 3);
+        let first = results[0].as_object().unwrap();
+        assert_eq!(
+            StrictJsonValue::get_str(first, "scrubbedText"),
+            Some("연락처 010-****-****")
+        );
+        let third = results[2].as_object().unwrap();
+        assert_eq!(
+            StrictJsonValue::get_str(third, "scrubbedText"),
+            Some("***@***")
+        );
+        assert_eq!(
+            StrictJsonValue::get_field(entries, "totalMasked").and_then(StrictJsonValue::as_u64),
+            Some(2)
+        );
+
+        let empty = EasyOfficeIpcRouter::handle_scrub_pii(r#"{"texts":[]}"#).unwrap();
+        let empty_obj = StrictJsonValue::parse(&empty).unwrap();
+        let empty_results = StrictJsonValue::get_field(empty_obj.as_object().unwrap(), "results")
+            .and_then(StrictJsonValue::as_array)
+            .unwrap();
+        assert!(empty_results.is_empty());
+
+        // Single text & plain string backward compatibility.
+        let single = EasyOfficeIpcRouter::handle_scrub_pii(r#"{"text":"010-1234-5678"}"#).unwrap();
+        assert!(single.contains("\"scrubbedText\":\"010-****-****\""));
+        let plain = EasyOfficeIpcRouter::handle_scrub_pii("a@b.kr").unwrap();
+        assert!(plain.contains("\"scrubbedText\":\"***@***\""));
+
+        // Fail closed on non-array, non-string element, or item count above limit (4096).
+        assert!(EasyOfficeIpcRouter::handle_scrub_pii(r#"{"texts":"bad"}"#).is_err());
+        assert!(EasyOfficeIpcRouter::handle_scrub_pii(r#"{"texts":["ok",123]}"#).is_err());
+        let too_many = format!("{{\"texts\":[{}]}}", vec!["\"x\""; 4_097].join(","));
+        assert!(EasyOfficeIpcRouter::handle_scrub_pii(&too_many).is_err());
+        let huge_item = "a".repeat(2 * 1_048_576 + 1);
+        let too_many_bytes = format!("{{\"texts\":[\"{huge_item}\",\"{huge_item}\"]}}");
+        assert!(EasyOfficeIpcRouter::handle_scrub_pii(&too_many_bytes).is_err());
     }
 }

@@ -11,6 +11,10 @@ use std::sync::Arc;
 #[allow(dead_code)]
 mod budget;
 
+#[path = "../../../../crates/easyoffice-desktop/src/svg_budget.rs"]
+#[allow(dead_code)]
+pub mod svg_budget;
+
 pub use budget::{is_raster_mime, RasterBudget};
 
 /// Largest SVG picture inside a page once inflated (bytes).
@@ -26,9 +30,11 @@ pub fn bounded_image_resolver(budget: RasterBudget) -> usvg::ImageHrefResolver<'
     usvg::ImageHrefResolver {
         resolve_data: Box::new(move |mime, data, options| {
             if mime.eq_ignore_ascii_case("image/svg+xml") {
-                let plain = match checked_svg_text(&data, MAX_NESTED_SVG_BYTES).ok()? {
+                let text = checked_svg_text(&data, MAX_NESTED_SVG_BYTES).ok()?;
+                svg_budget::check_svg_structure(&text).ok()?;
+                let plain = match text {
                     Cow::Borrowed(_) => data,
-                    Cow::Owned(text) => Arc::new(text.into_bytes()),
+                    Cow::Owned(s) => Arc::new(s.into_bytes()),
                 };
                 return default_data("image/svg+xml", plain, options);
             }

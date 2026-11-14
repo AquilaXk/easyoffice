@@ -96,10 +96,14 @@ fn text_that_is_not_a_document_fails_closed() {
 
 #[test]
 fn free_accepts_null_and_zero() {
+    let mut dummy = 1_u8;
     unsafe {
         eo_ql_free_bytes(std::ptr::null_mut(), 0);
         eo_ql_free_bytes(std::ptr::null_mut(), 7);
+        eo_ql_free_bytes(&mut dummy as *mut u8, 0);
     }
+    let empty = Bytes::from_vec(Vec::new());
+    assert!(empty.ptr.is_null() && empty.len == 0);
 }
 
 // --- real documents --------------------------------------------------------------------------
@@ -708,4 +712,38 @@ fn a_photo_over_the_thumbnail_limit_is_left_out() {
         r#"<image x="0" y="0" width="100" height="100" href="{big}"/>"#
     )));
     assert!(!has_red(&page), "20 MP is over 4096 x 4096");
+}
+
+#[test]
+fn hostile_use_dag_filters_and_tag_flood_svgs_are_refused() {
+    let mut defs = String::from(r#"<g id="u0"><rect width="10" height="10" fill="red"/></g>"#);
+    for lvl in 1..=16 {
+        let prev = lvl - 1;
+        defs.push_str(&format!(
+            r##"<g id="u{lvl}"><use href="#u{prev}"/><use href="#u{prev}"/></g>"##
+        ));
+    }
+    let use_dag = svg(&format!(r##"<defs>{defs}</defs><use href="#u16"/>"##));
+
+    let prims = r#"<feGaussianBlur stdDeviation="2"/>"#.repeat(4);
+    let mut filter_defs = String::new();
+    for i in 0..80 {
+        filter_defs.push_str(&format!(r#"<filter id="f{i}">{prims}</filter>"#));
+    }
+    let filter_bomb = svg(&format!(
+        r#"<defs>{filter_defs}</defs><rect width="10" height="10" filter="url(#f0)"/>"#
+    ));
+    let tag_flood = svg(&"<g/>".repeat(105_000));
+
+    for hostile in [use_dag, filter_bomb, tag_flood] {
+        assert!(
+            render::parse_svg(&hostile).is_err(),
+            "hostile page SVG must be refused"
+        );
+        let b64 = base64::engine::general_purpose::STANDARD.encode(hostile.as_bytes());
+        let nested = rendered(&svg(&format!(
+            r#"<image x="0" y="0" width="100" height="100" href="data:image/svg+xml;base64,{b64}"/>"#
+        )));
+        assert!(!has_red(&nested), "hostile nested SVG must be dropped");
+    }
 }

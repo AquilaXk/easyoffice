@@ -850,6 +850,24 @@
       }
     }
 
+    async function invokeScrubTexts(texts) {
+      if (texts.length === 0) return [];
+      if (texts.length <= 32) {
+        return Promise.all(texts.map((text) => invokeIpc("scrub_pii", text)));
+      }
+      const out = [];
+      for (let i = 0; i < texts.length; i += 1024) {
+        const chunk = texts.slice(i, i + 1024);
+        const resp = await invokeIpc("scrub_pii", JSON.stringify({ texts: chunk }));
+        const items = resp && Array.isArray(resp.results) ? resp.results : null;
+        if (!items || items.length !== chunk.length) {
+          throw new Error("scrub_pii 배치 응답이 올바르지 않습니다.");
+        }
+        for (let j = 0; j < items.length; j += 1) out.push(items[j]);
+      }
+      return out;
+    }
+
     async function scrubSheetStoreMap(baseSheets, activeSheetName, trackAsyncFn) {
       const candidateSheets = cloneStore(baseSheets);
       const plainEntries = [];
@@ -861,17 +879,13 @@
         job.literalSegs.forEach((seg) => literalInputs.push(seg));
       });
 
-      const [plainResults, literalResults] = await Promise.all([
-        Promise.all(plainEntries.map((entry) => invokeIpc("scrub_pii", entry.value))),
-        Promise.all(literalInputs.map((seg) => invokeIpc("scrub_pii", seg.text))),
-      ]);
-
-      plainResults.forEach((res, idx) => {
-        assertValidScrubResponse(plainEntries[idx].value, res);
-      });
-      literalResults.forEach((res, idx) => {
-        assertValidScrubResponse(literalInputs[idx].text, res);
-      });
+      const allTexts = plainEntries.map((entry) => entry.value).concat(literalInputs.map((seg) => seg.text));
+      const allResults = await invokeScrubTexts(allTexts);
+      for (let i = 0; i < allTexts.length; i += 1) {
+        assertValidScrubResponse(allTexts[i], allResults[i]);
+      }
+      const plainResults = allResults.slice(0, plainEntries.length);
+      const literalResults = allResults.slice(plainEntries.length);
 
       let totalMasked = 0;
       plainResults.forEach((res, idx) => {

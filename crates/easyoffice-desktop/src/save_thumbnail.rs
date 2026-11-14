@@ -38,6 +38,8 @@ pub fn render_png_sized(svg: &str, fonts: &Arc<Database>, side: u32) -> Result<V
     // The SVG parser expands entity declarations without a bound: such a page is refused.
     XmlSanitizer::validate_safe_xml(&svg)
         .map_err(|err| format!("쪽 SVG를 읽지 못했습니다: {err}"))?;
+    crate::svg_budget::check_svg_structure(&svg)
+        .map_err(|err| format!("쪽 SVG를 읽지 못했습니다: {err}"))?;
     let tree = usvg::Tree::from_str(
         &svg,
         &pdf_export::bitmap_parse_options(fonts, RasterBudget::for_page()),

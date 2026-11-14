@@ -305,6 +305,40 @@ fn a_link_with_another_extension_than_its_target_still_saves_in_place() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+#[cfg(unix)]
+#[test]
+fn symlinks_to_dotfiles_and_credential_dirs_are_refused() {
+    let dir = scratch_dir("open-link-sensitive");
+    let targets = [
+        dir.join(".zshrc"),
+        dir.join(".env"),
+        dir.join(".bashrc"),
+        dir.join(".ssh").join("id_rsa"),
+        dir.join(".gnupg").join("secring.gpg"),
+        dir.join(".aws").join("credentials"),
+        dir.join(".kube").join("config"),
+    ];
+    for (idx, real) in targets.iter().enumerate() {
+        fs::create_dir_all(real.parent().unwrap()).unwrap();
+        fs::write(real, b"secret").unwrap();
+        let link = dir.join(format!("문서_{idx}.docx"));
+        std::os::unix::fs::symlink(real, &link).unwrap();
+        let Err(err) = OpenTarget::of(&link) else {
+            panic!("expected PermissionDenied for {real:?}");
+        };
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied, "{real:?}");
+    }
+    // PD-177: a symlink to a non-hidden document store file outside sensitive dirs still opens.
+    let allowed = dir.join("store").join("a1b2c3.bin");
+    fs::create_dir_all(allowed.parent().unwrap()).unwrap();
+    fs::write(&allowed, b"content").unwrap();
+    let ok_link = dir.join("보고서.docx");
+    std::os::unix::fs::symlink(&allowed, &ok_link).unwrap();
+    let target = OpenTarget::of(&ok_link).unwrap();
+    assert_eq!(target.canonical, fs::canonicalize(&allowed).unwrap());
+    let _ = fs::remove_dir_all(&dir);
+}
+
 /// The size is checked before the read, and the file may grow in between: the read itself is
 /// bounded, so no more than the limit (plus the one byte that shows the overrun) is held.
 #[test]

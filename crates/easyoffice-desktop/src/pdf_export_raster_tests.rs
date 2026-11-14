@@ -211,3 +211,22 @@ fn only_raster_and_svg_types_reach_the_picture_readers() {
         );
     }
 }
+
+#[test]
+fn svg_pages_and_nested_svgs_over_use_filter_or_tag_budgets_are_refused_or_dropped() {
+    use crate::hostile_svg::{excessive_filters, page_with_picture, tag_flood, use_explosion_dag};
+    for hostile in [
+        use_explosion_dag(16),
+        excessive_filters(80, 4),
+        tag_flood(105_000),
+    ] {
+        // Synthetic parser rejects the page itself.
+        let opts = parse_options(&Arc::new(Database::new()));
+        assert!(
+            crate::pdf_synthetic::parse_page(&hostile, &opts).is_err(),
+            "synthetic parser must reject hostile svg"
+        );
+        // Nested data URL picture is dropped cleanly while host page survives.
+        assert_eq!(kept_pictures(&page_with_picture(hostile.as_bytes())), 0);
+    }
+}
