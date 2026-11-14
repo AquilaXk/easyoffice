@@ -1,12 +1,12 @@
-//! Pivot tables over the sheet engine's `compute_pivot_grid` (PD-171).
+//! Pivot tables over the sheet engine's `compute_pivot_within` (PD-171).
 //!
 //! `evaluate_sheet` with `sessionAction:"pivot"` takes the cells the page sends (the same
 //! `sheets`/`cells` the stateless evaluation takes) and answers with the grouped values; the page
 //! writes them into a new sheet. The command set stays at 15.
 
-use crate::EasyOfficeIpcRouter;
+use crate::{eval_limit, EasyOfficeIpcRouter};
 use easyoffice_formats::{EasyOfficeError, StrictJsonValue};
-use easyoffice_sheet::{CellRange, PivotAggregation};
+use easyoffice_sheet::{CellRange, PivotAggregation, PivotError, PivotSpec};
 use std::fmt::Write;
 
 /// Cells (rows x columns) of a pivot answer.
@@ -84,9 +84,6 @@ impl EasyOfficeIpcRouter {
     ) -> Result<String, EasyOfficeError> {
         let default_sheet = Self::resolve_default_sheet_from_entries(entries)?;
         let wb = Self::build_workbook_from_json_entries(entries, &default_sheet)?;
-        let sheet = wb
-            .sheet(&default_sheet)
-            .ok_or_else(|| invalid("피벗 대상 시트를 찾을 수 없습니다."))?;
         let range = CellRange::parse(Self::optional_json_str(entries, "range")?.unwrap_or(""))?;
         let (_, width) = range.dimensions();
         let row = offset(entries, "row")?.ok_or_else(|| invalid("피벗 행 열이 필요합니다."))?;
@@ -104,12 +101,30 @@ impl EasyOfficeIpcRouter {
             Some(StrictJsonValue::Bool(false))
         );
         let agg = aggregation(Self::optional_json_str(entries, "agg")?.unwrap_or("sum"))?;
-        let pivot = sheet.compute_pivot_grid(&range, header, row, col, value, agg);
-        if pivot.row_keys.len().saturating_mul(pivot.column_keys.len()) > MAX_PIVOT_CELLS {
-            return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
-                "피벗 결과가 {MAX_PIVOT_CELLS}칸을 넘습니다. 행·열 항목을 줄여 주세요."
-            )));
-        }
+        let spec = PivotSpec {
+            range,
+            header,
+            row,
+            col,
+            value,
+            agg,
+        };
+        let pivot = wb
+            .compute_pivot_within(
+                &default_sheet,
+                &spec,
+                MAX_PIVOT_CELLS,
+                eval_limit::eval_time(),
+            )
+            .map_err(|err| match err {
+                PivotError::NoSheet => invalid("피벗 대상 시트를 찾을 수 없습니다."),
+                PivotError::TooLarge => EasyOfficeError::ResourceBudgetExceeded(format!(
+                    "피벗 결과가 {MAX_PIVOT_CELLS}칸을 넘습니다. 행·열 항목을 줄여 주세요."
+                )),
+                PivotError::TimedOut => EasyOfficeError::ResourceBudgetExceeded(
+                    "피벗 계산이 제한 시간을 넘었습니다. 범위를 줄여 주세요.".to_string(),
+                ),
+            })?;
         let mut out = String::from("{\"rowKeys\":");
         strings(&mut out, &pivot.row_keys);
         out.push_str(",\"columnKeys\":");
@@ -185,6 +200,68 @@ mod tests {
         );
         let count = pivot("\"row\":1,\"value\":0,\"agg\":\"count\"").unwrap();
         assert!(count.contains("\"matrix\":[[3],[1]]"), "{count}");
+    }
+
+    fn request(sheets: &str, cells: &[(&str, &str, String)], extra: &str) -> String {
+        let cells = cells
+            .iter()
+            .map(|(sheet, cell, value)| {
+                format!("{{\"sheet\":\"{sheet}\",\"cell\":\"{cell}\",\"value\":\"{value}\"}}")
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        format!("{{\"sessionAction\":\"pivot\",\"sheet\":\"S\",\"sheets\":{sheets},\"cells\":[{cells}],{extra}}}")
+    }
+
+    #[test]
+    fn values_come_from_the_whole_workbook() {
+        let cells = [
+            ("S", "A1", "부서".to_string()),
+            ("S", "C1", "매출".to_string()),
+            ("S", "A2", "영업".to_string()),
+            ("S", "C2", "=T!A1*2".to_string()),
+            ("S", "A3", "개발".to_string()),
+            ("S", "C3", "=Rate+SUM(T!A1:A2)".to_string()),
+            ("S", "A4", "배열".to_string()),
+            ("S", "C4", "=SUM(SEQUENCE(3))".to_string()),
+            ("T", "A1", "5".to_string()),
+            ("T", "A2", "7".to_string()),
+        ];
+        let body = request(
+            "[\"S\",\"T\"]",
+            &cells,
+            "\"range\":\"A1:C4\",\"row\":0,\"value\":2,\"agg\":\"sum\",\"names\":[{\"name\":\"Rate\",\"refersTo\":\"100\"}]",
+        );
+        let json = EasyOfficeIpcRouter::dispatch("evaluate_sheet", &body).unwrap();
+        assert!(
+            json.contains("\"rowKeys\":[\"영업\",\"개발\",\"배열\"]"),
+            "{json}"
+        );
+        assert!(json.contains("\"matrix\":[[10],[112],[6]]"), "{json}");
+    }
+
+    #[test]
+    fn an_answer_over_the_cell_limit_is_refused_while_the_groups_are_collected() {
+        let mut cells = Vec::new();
+        for n in 0..600u32 {
+            cells.push(("S", format!("A{}", n + 1), format!("r{n}")));
+            cells.push(("S", format!("B{}", n + 1), format!("c{n}")));
+            cells.push(("S", format!("C{}", n + 1), "1".to_string()));
+        }
+        let cells: Vec<(&str, &str, String)> = cells
+            .iter()
+            .map(|(s, c, v)| (*s, c.as_str(), v.clone()))
+            .collect();
+        let body = request(
+            "[\"S\"]",
+            &cells,
+            "\"range\":\"A1:C600\",\"header\":false,\"row\":0,\"col\":1,\"value\":2",
+        );
+        let err = EasyOfficeIpcRouter::dispatch("evaluate_sheet", &body).unwrap_err();
+        assert!(
+            matches!(err, EasyOfficeError::ResourceBudgetExceeded(_)),
+            "{err:?}"
+        );
     }
 
     #[test]

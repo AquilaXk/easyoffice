@@ -405,7 +405,7 @@ pub enum PivotAggregation {
     Max,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct PivotTableSummary {
     pub row_keys: Vec<String>,
     pub column_keys: Vec<String>,

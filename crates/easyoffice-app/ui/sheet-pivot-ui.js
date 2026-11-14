@@ -120,13 +120,19 @@
       return openDialog("sheet-pivot-dialog");
     }
 
-    function sheetCellPayload(sheet) {
+    // Every sheet's cells and the defined names go along, so a formula of the source range that reads another
+    // sheet or a name has the value it shows.
+    function workbookPayload() {
       const cells = [];
-      for (const [cell, entry] of Object.entries(sheetDataStore[sheet] || {})) {
-        const value = entry?.formula || entry?.value;
-        if (value) cells.push({ cell, value });
+      const sheets = Object.keys(sheetDataStore);
+      for (const sheet of sheets) {
+        for (const [cell, entry] of Object.entries(sheetDataStore[sheet] || {})) {
+          const value = entry?.formula || entry?.value;
+          if (value) cells.push({ sheet, cell, value });
+        }
       }
-      return cells;
+      const namesApi = host.__EASYOFFICE_SHEET_NAMES__;
+      return { sheets, cells, ...(namesApi?.hasAny() ? { names: namesApi.getAll() } : {}) };
     }
 
     const numberText = (n) => (Number.isFinite(n) ? String(Math.round(n * 1e10) / 1e10) : "");
@@ -184,7 +190,7 @@
       const request = {
         sessionAction: "pivot",
         sheet,
-        cells: sheetCellPayload(sheet),
+        ...workbookPayload(),
         range: rules.formatRanges([box]),
         header: checked("sheet-pivot-header"),
         row: Number(val("sheet-pivot-row-select")),

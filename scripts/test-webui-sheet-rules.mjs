@@ -428,7 +428,7 @@ test("pivot results become the cells of a new sheet", async () => {
   assert.deepEqual(text(one.cells), { A1: "부서", B1: "평균: 매출", A2: "영업", B2: "13.6666666667", A3: "합계", B3: "13.6666666667" });
 });
 
-test("the pivot dialog sends the sheet's cells and writes a new sheet with the answer", async () => {
+test("the pivot dialog sends the workbook's cells and writes a new sheet with the answer", async () => {
   const harness = await dialogHarness();
   const { document, win: sandbox, userClick } = harness;
   const sent = [];
@@ -474,9 +474,10 @@ test("the pivot dialog sends the sheet's cells and writes a new sheet with the a
   assert.equal(sent.length, 1);
   assert.deepEqual(
     { ...sent[0], cells: undefined },
-    { sessionAction: "pivot", sheet: "Sheet1", cells: undefined, range: "A1:C2", header: true, row: 0, col: null, value: 2, agg: "sum" }
+    { sessionAction: "pivot", sheet: "Sheet1", sheets: ["Sheet1"], cells: undefined, range: "A1:C2", header: true, row: 0, col: null, value: 2, agg: "sum" }
   );
   assert.equal(sent[0].cells.length, 6);
+  assert.ok(sent[0].cells.every((c) => c.sheet === "Sheet1"));
   assert.deepEqual(switched, ["피벗1"]);
   assert.equal(stored["피벗1"].B2.value, "10");
   assert.equal(document.getElementById("sheet-pivot-dialog").open, false);

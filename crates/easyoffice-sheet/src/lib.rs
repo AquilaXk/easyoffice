@@ -58,6 +58,7 @@ mod names_tests;
 mod operators;
 mod parser;
 mod parser_array;
+mod pivot;
 mod recalc;
 mod rules;
 mod sheet_sort;
@@ -82,6 +83,7 @@ pub use functions_complex::{format_complex, parse_complex};
 pub use memo::{CellMap, CoordHasher, FastMap, MemoTable};
 pub use names::{validate_names, NameIssue, NameTable};
 pub use parser::{compile_formula_expr, BinaryOp, Expr, SharedExpr};
+pub use pivot::{PivotError, PivotSpec};
 pub use recalc::{
     Budget, CellChange, ChangedCell, Footprint, RecalcError, RecalcOutcome, RecalcSession,
     RuleUpdates, SpillArea,

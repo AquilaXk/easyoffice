@@ -1,10 +1,8 @@
 use crate::names::NameTable;
 use crate::{
-    CellRange, EvalContext, EvaluatedCellValue, FormulaError, PackedCellCoordinate,
-    PivotAggregation, PivotTableSummary, SheetEngine,
+    CellRange, EvalContext, EvaluatedCellValue, FormulaError, PackedCellCoordinate, SheetEngine,
 };
 use easyoffice_formats::{DefinedName, EasyOfficeError, MAX_NAMES};
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -453,168 +451,6 @@ impl SheetEngine {
         val.to_display_string()
     }
 
-    pub fn compute_pivot(
-        &self,
-        range: &CellRange,
-        has_header_row: bool,
-        row_field_col_offset: usize,
-        value_field_col_offset: usize,
-        aggregation: PivotAggregation,
-    ) -> PivotTableSummary {
-        self.compute_pivot_grid(
-            range,
-            has_header_row,
-            row_field_col_offset,
-            None,
-            value_field_col_offset,
-            aggregation,
-        )
-    }
-
-    pub fn compute_pivot_grid(
-        &self,
-        range: &CellRange,
-        has_header_row: bool,
-        row_field_col_offset: usize,
-        column_field_col_offset: Option<usize>,
-        value_field_col_offset: usize,
-        aggregation: PivotAggregation,
-    ) -> PivotTableSummary {
-        let (row_count, col_count) = range.dimensions();
-        let min_r = range.start.row().min(range.end.row());
-        let min_c = range.start.col().min(range.end.col());
-        let start_row_idx = if has_header_row { 1 } else { 0 };
-
-        let mut ctx = EvalContext::standalone_id(self.resolved_sheet_id());
-        let mut row_keys: Vec<String> = Vec::new();
-        let mut row_key_idx: HashMap<String, usize> = HashMap::new();
-        let mut col_keys: Vec<String> = Vec::new();
-        let mut col_key_idx: HashMap<String, usize> = HashMap::new();
-        let mut cell_buckets: HashMap<(usize, usize), Vec<f64>> = HashMap::new();
-        let mut row_buckets: Vec<Vec<f64>> = Vec::new();
-        let mut col_buckets: Vec<Vec<f64>> = Vec::new();
-        let mut all_values: Vec<f64> = Vec::new();
-
-        if row_field_col_offset < col_count && value_field_col_offset < col_count {
-            let key_col = min_c + row_field_col_offset as u32;
-            let val_col = min_c + value_field_col_offset as u32;
-            let opt_col_col = column_field_col_offset
-                .filter(|&c| c < col_count)
-                .map(|c| min_c + c as u32);
-            for r_off in start_row_idx..row_count {
-                let row_idx = min_r + r_off as u32;
-                let (Ok(kc), Ok(vc)) = (
-                    PackedCellCoordinate::new(row_idx, key_col),
-                    PackedCellCoordinate::new(row_idx, val_col),
-                ) else {
-                    continue;
-                };
-                let (key_str, canonical_row) =
-                    normalize_pivot_key(self.eval_coord_ctx(kc, &mut ctx, 0));
-                if key_str.is_empty() {
-                    continue;
-                }
-                let r_idx = match row_key_idx.get(&canonical_row) {
-                    Some(&idx) => idx,
-                    None => {
-                        let idx = row_keys.len();
-                        row_keys.push(key_str);
-                        row_buckets.push(Vec::new());
-                        row_key_idx.insert(canonical_row, idx);
-                        idx
-                    }
-                };
-                let (col_str, canonical_col) = match opt_col_col {
-                    Some(cc_idx) => self.pivot_column_key(row_idx, cc_idx, &mut ctx),
-                    None => pivot_total_key(),
-                };
-                let c_idx = match col_key_idx.get(&canonical_col) {
-                    Some(&idx) => idx,
-                    None => {
-                        let idx = col_keys.len();
-                        col_keys.push(col_str);
-                        col_buckets.push(Vec::new());
-                        col_key_idx.insert(canonical_col, idx);
-                        idx
-                    }
-                };
-                let val = self.eval_coord_ctx(vc, &mut ctx, 0);
-                if let Some(num) = pivot_numeric_value(&val, aggregation) {
-                    cell_buckets.entry((r_idx, c_idx)).or_default().push(num);
-                    row_buckets[r_idx].push(num);
-                    col_buckets[c_idx].push(num);
-                    all_values.push(num);
-                }
-            }
-        }
-        if col_keys.is_empty() {
-            col_keys.push("Total".to_string());
-            col_buckets.push(Vec::new());
-        }
-
-        let row_totals: Vec<f64> = row_buckets
-            .iter()
-            .map(|b| Self::aggregate_slice(b, aggregation))
-            .collect();
-        let column_totals: Vec<f64> = col_buckets
-            .iter()
-            .map(|b| Self::aggregate_slice(b, aggregation))
-            .collect();
-        let matrix: Vec<Vec<f64>> = (0..row_keys.len())
-            .map(|r_idx| {
-                (0..col_keys.len())
-                    .map(|c_idx| {
-                        Self::aggregate_slice(
-                            cell_buckets.get(&(r_idx, c_idx)).map_or(&[], Vec::as_slice),
-                            aggregation,
-                        )
-                    })
-                    .collect()
-            })
-            .collect();
-        let grand_total = Self::aggregate_slice(&all_values, aggregation);
-
-        PivotTableSummary {
-            row_keys,
-            column_keys: col_keys,
-            matrix,
-            row_totals,
-            column_totals,
-            grand_total,
-        }
-    }
-
-    /// Column key of the pivot row `row_idx` taken from column `cc_idx`.
-    fn pivot_column_key(
-        &self,
-        row_idx: u32,
-        cc_idx: u32,
-        ctx: &mut EvalContext<'_>,
-    ) -> (String, String) {
-        let Ok(cc) = PackedCellCoordinate::new(row_idx, cc_idx) else {
-            return pivot_total_key();
-        };
-        let (cs, canon) = normalize_pivot_key(self.eval_coord_ctx(cc, ctx, 0));
-        if cs.is_empty() {
-            ("(Blank)".to_string(), "(blank)".to_string())
-        } else {
-            (cs, canon)
-        }
-    }
-
-    fn aggregate_slice(values: &[f64], agg: PivotAggregation) -> f64 {
-        if values.is_empty() {
-            return 0.0;
-        }
-        match agg {
-            PivotAggregation::Sum => values.iter().sum(),
-            PivotAggregation::Average => values.iter().sum::<f64>() / (values.len() as f64),
-            PivotAggregation::Count => values.len() as f64,
-            PivotAggregation::Min => values.iter().copied().fold(f64::INFINITY, f64::min),
-            PivotAggregation::Max => values.iter().copied().fold(f64::NEG_INFINITY, f64::max),
-        }
-    }
-
     /// Secant / Newton-Raphson solver up to 100 iterations finding the value of `variable_cell`
     /// that makes `target_cell` evaluate to `target_value` within `1e-6`.
     pub fn goal_seek(
@@ -715,35 +551,6 @@ impl SheetEngine {
             "100회 반복 내에 목표값 찾기가 수렴하지 않았습니다.".to_string(),
         ))
     }
-}
-
-/// Display text and case-folded canonical form of a pivot key cell.
-fn normalize_pivot_key(v: EvaluatedCellValue) -> (String, String) {
-    let disp = match v {
-        EvaluatedCellValue::Number(n) => crate::coercion::format_general_number(n),
-        EvaluatedCellValue::Text(s) => match crate::coercion::parse_strict_number(&s) {
-            Some(n) => crate::coercion::format_general_number(n),
-            None => s,
-        },
-        other => other.to_display_string(),
-    };
-    let canon = disp.to_lowercase();
-    (disp, canon)
-}
-
-fn pivot_total_key() -> (String, String) {
-    ("Total".to_string(), "total".to_string())
-}
-
-/// Numeric contribution of a pivot value cell (`COUNT` also counts non-empty non-numbers).
-fn pivot_numeric_value(val: &EvaluatedCellValue, aggregation: PivotAggregation) -> Option<f64> {
-    if let EvaluatedCellValue::Number(num) = val {
-        return Some(*num);
-    }
-    let counts_non_empty = aggregation == PivotAggregation::Count
-        && !matches!(val, EvaluatedCellValue::Empty)
-        && !val.to_display_string().is_empty();
-    counts_non_empty.then_some(1.0)
 }
 
 fn restore_cell(sheet: &mut SheetEngine, coord: PackedCellCoordinate, orig: Option<String>) {
