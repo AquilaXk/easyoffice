@@ -294,8 +294,8 @@
   // Cell entries keep the decoded `style` (bold/italic/underline/strike/size) so a file's formatting
   // shows after opening and is written again by the next save; styled blank cells are kept too.
   // The position-bound parts of a sheet in an open answer: merges, hidden rows and columns, the filter
-  // (PD-194, PD-198) and the view (PD-208).
-  const LAYOUT_KEYS = ["merges", "hiddenRows", "hiddenCols", "filter", "freeze", "tabColor", "hidden", "outline", "page", "protect", "unlockedRows", "unlockedCols"];
+  // (PD-194, PD-198), the view (PD-208) and the tables (PD-224).
+  const LAYOUT_KEYS = ["merges", "hiddenRows", "hiddenCols", "filter", "freeze", "tabColor", "hidden", "outline", "page", "protect", "unlockedRows", "unlockedCols", "tables"];
 
   function buildSheetStore(sheets) {
     const codec = host.__EASYOFFICE_SHEET_STYLE_CODEC__;

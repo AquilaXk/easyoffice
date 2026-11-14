@@ -258,6 +258,8 @@
         if (next.sheetRules[sheet]) next.sheetRules[name] = structuredClone(next.sheetRules[sheet]);
         if (next.sheetLayout[sheet]) {
           const { hidden, ...kept } = structuredClone(next.sheetLayout[sheet]);
+          // Table names are unique in the workbook: the copy's tables get names of their own (PD-224).
+          if (kept.tables) kept.tables = layoutApi.copiedTables(kept.tables, next.sheetLayout);
           if (Object.keys(kept).length > 0) next.sheetLayout[name] = kept;
         }
         place(next, name, next.sheetOrder.indexOf(sheet) + 1);

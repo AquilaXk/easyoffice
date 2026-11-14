@@ -8,6 +8,9 @@
   // The auto filter (PD-198) is `{ range: { r1, c1, r2, c2 }, columns, hidden }`: `columns` are the
   // engine's column conditions as sent and received, `hidden` the rows the filter hides, kept apart
   // from `hiddenRows` (the user's). The grid asks for the union through a per-sheet row index.
+  // The tables (PD-224) are the engine's JSON as sent and received: `[{ name, range: "A1:C5", header, totals, columns,
+  // style, firstColumn, lastColumn, rowStripes, columnStripes, filter? }]`. The engine moves their ranges with the cells
+  // (`structure` session action); this module stores them and gives a copied sheet's tables names of their own.
   // The sheet is hidden (PD-209): `hidden` is true for a sheet without a tab.
   // The protection (PD-216): `protect` is the engine's JSON `{ on, deny: [flag], pwd, ranges }` (the password only as the
   // digest the engine made), `unlockedRows` and `unlockedCols` are runs of rows and columns whose own format is
@@ -25,7 +28,7 @@
   const listeners = [];
 
   function blank() {
-    return { merges: [], hiddenRows: [], hiddenCols: [], filter: null, freeze: null, tabColor: null, hidden: false, outline: null, page: null, protect: null, unlockedRows: [], unlockedCols: [], index: null, rows: null };
+    return { merges: [], hiddenRows: [], hiddenCols: [], filter: null, freeze: null, tabColor: null, hidden: false, outline: null, page: null, protect: null, unlockedRows: [], unlockedCols: [], tables: [], index: null, rows: null };
   }
 
   function entry(name) {
@@ -46,7 +49,8 @@
         !layout.page &&
         !layout.protect &&
         layout.unlockedRows.length === 0 &&
-        layout.unlockedCols.length === 0)
+        layout.unlockedCols.length === 0 &&
+        layout.tables.length === 0)
     );
   }
 
@@ -293,6 +297,7 @@
     if (layout.protect) out.protect = structuredClone(layout.protect);
     if (layout.unlockedRows?.length) out.unlockedRows = layout.unlockedRows.map((r) => [r[0], r[1]]);
     if (layout.unlockedCols?.length) out.unlockedCols = layout.unlockedCols.map((r) => [r[0], r[1]]);
+    if (layout.tables?.length) out.tables = structuredClone(layout.tables);
     return out;
   }
 
@@ -346,6 +351,7 @@
     layout.protect = json?.protect && typeof json.protect === "object" ? structuredClone(json.protect) : null;
     layout.unlockedRows = runs(json?.unlockedRows);
     layout.unlockedCols = runs(json?.unlockedCols);
+    layout.tables = Array.isArray(json?.tables) ? structuredClone(json.tables) : [];
     return layout;
   }
 
@@ -385,6 +391,21 @@
     layout.rows = null;
     if (isEmpty(layout)) delete bySheet[name];
     touch();
+  }
+
+  // ---- the tables (PD-224) ----------------------------------------------------------------------------------------
+  const tablesOf = (name) => bySheet[name]?.tables || [];
+
+  // `tables` of a copied sheet with names that no table of `layouts` (sheet name -> layout JSON) has: `Name_2`, `Name_3`, ...
+  function copiedTables(tables, layouts) {
+    const taken = new Set();
+    for (const json of Object.values(layouts || {})) for (const t of json?.tables || []) taken.add(String(t.name).toLowerCase());
+    return structuredClone(tables).map((t) => {
+      let name = t.name;
+      for (let n = 2; taken.has(name.toLowerCase()); n += 1) name = t.name + "_" + n;
+      taken.add(name.toLowerCase());
+      return { ...t, name };
+    });
   }
 
   // ---- the view: frozen panes, tab colour and groups (PD-208) -------------------------------------
@@ -454,6 +475,8 @@
     rowsHiddenBefore,
     rowsHiddenTotal,
     rowAtVisible,
+    tablesOf,
+    copiedTables,
     filterOf,
     setFilter,
     filterToJson,

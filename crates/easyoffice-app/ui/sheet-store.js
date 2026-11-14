@@ -172,8 +172,10 @@
       names: null,
       // The lock payload of each protected sheet the session was told (see `syncLocks`).
       locks: new Map(),
-      // The merges payload of each sheet the session was told, and the layout version it was read at (see `syncMerges`).
+      // The merges and the table ranges of each sheet the session was told, and the layout version they were read at
+      // (see `syncMerges`).
       merges: new Map(),
+      tables: new Map(),
       mergesVersion: -1,
       gen: 0,
     };
@@ -193,6 +195,7 @@
       session.names = null;
       session.locks = new Map();
       session.merges = new Map();
+      session.tables = new Map();
       session.mergesVersion = -1;
     }
 
@@ -385,8 +388,9 @@
       return changed;
     }
 
-    // Tells the engine the merged ranges of each sheet when they differ from what it holds: an array is not placed
-    // across one (PD-222). Before the cells, so an array is placed once. Returns whether the answer changed the model.
+    // Tells the engine the merged ranges and the table ranges of each sheet when they differ from what it holds: an array
+    // is not placed across one (PD-222, PD-224). Before the cells, so an array is placed once. Returns whether the answer
+    // changed the model.
     async function syncMerges(names, sheetsMap) {
       const layoutApi = host.__EASYOFFICE_SHEET_LAYOUT__;
       if (!spillApi || !layoutApi?.version) return false;
@@ -394,19 +398,21 @@
       if (session.mergesVersion === version) return false;
       let changed = false;
       for (const name of names) {
-        const payload = JSON.stringify(spillApi.mergePayload(name, layoutApi));
-        if ((session.merges.get(name) ?? "[]") === payload) continue;
-        const res = await sessionCall({ sessionAction: "merges", session: session.id, sheet: name, merges: JSON.parse(payload) });
-        if (!res || res.expired === true) throw new Error("시트 세션이 만료되었습니다.");
-        if (res.refused) continue;
-        session.merges.set(name, payload);
-        for (const c of Array.isArray(res.changed) ? res.changed : []) session.values.set(c.sheet + "!" + c.cell, c.value);
-        if (takeSpills(sheetsMap, res)) changed = true;
-        for (const c of Array.isArray(res.changed) ? res.changed : []) {
-          const held = sheetsMap[c.sheet]?.[c.cell];
-          if (held && isFormulaStr(held.formula || "")) held.value = String(c.value);
+        for (const kind of ["merges", "tables"]) {
+          const payload = JSON.stringify(spillApi.blockerPayload(kind, name, layoutApi));
+          if ((session[kind].get(name) ?? "[]") === payload) continue;
+          const res = await sessionCall({ sessionAction: kind, session: session.id, sheet: name, [kind]: JSON.parse(payload) });
+          if (!res || res.expired === true) throw new Error("시트 세션이 만료되었습니다.");
+          if (res.refused) continue;
+          session[kind].set(name, payload);
+          for (const c of Array.isArray(res.changed) ? res.changed : []) session.values.set(c.sheet + "!" + c.cell, c.value);
+          if (takeSpills(sheetsMap, res)) changed = true;
+          for (const c of Array.isArray(res.changed) ? res.changed : []) {
+            const held = sheetsMap[c.sheet]?.[c.cell];
+            if (held && isFormulaStr(held.formula || "")) held.value = String(c.value);
+          }
+          changed = true;
         }
-        changed = true;
       }
       session.mergesVersion = version;
       return changed;

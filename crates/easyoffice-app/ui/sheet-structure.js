@@ -120,6 +120,7 @@
         protect: json.protect || null,
         unlockedRows: json.unlockedRows || [],
         unlockedCols: json.unlockedCols || [],
+        tables: json.tables || [],
         widths: pairsOf(grid.getAllWidths()[name]),
         rules,
         // The in-workbook targets of the cell links move with the cells (PD-218).

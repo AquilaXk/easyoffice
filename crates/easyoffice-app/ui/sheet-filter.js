@@ -348,6 +348,15 @@
           say("필터 범위는 " + MAX_FILTER_ROWS + "행까지");
           return false;
         }
+        // A table has filter buttons of its own: the sheet's filter may not share a cell with one (PD-224).
+        const overlaps = layoutApi.tablesOf(name).some((t) => {
+          const [from, to] = t.range.split(":").map((ref) => gridUtils.parseRef(ref));
+          return from && to && from.row <= range.r2 && to.row >= range.r1 && from.col <= range.c2 && to.col >= range.c1;
+        });
+        if (overlaps) {
+          say("표와 겹치는 범위에는 필터를 켤 수 없음");
+          return false;
+        }
         layoutApi.setFilter(name, { range, columns: [], hidden: [] });
         grid.layoutChanged();
         refreshWindowFromModel();

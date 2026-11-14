@@ -136,3 +136,15 @@ fn a_workbook_without_a_session_places_arrays_around_tables() {
     let shown: Vec<String> = batch.values.iter().map(|v| v.to_display_string()).collect();
     assert_eq!(shown, ["3", "#SPILL!"]);
 }
+
+#[test]
+fn structured_references_are_not_supported_yet() {
+    // `Table1[Col]` needs the table names and columns in the formula engine; until then it is an error, not a
+    // number (a TODO line tracks it).
+    let mut m = new_empty_model();
+    m._set("A1", "1");
+    m._set("B1", "=SUM(Table1[Q1])");
+    m.evaluate();
+    let shown = m._get_text("B1");
+    assert!(shown.starts_with('#'), "{shown}");
+}

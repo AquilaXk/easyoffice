@@ -406,6 +406,32 @@ test("a copy goes right after its source, keeps formulas as written and takes th
   assert.equal(h.host.__EASYOFFICE_SHEET_LAYOUT__.get("시트 1 (2)"), null);
 });
 
+test("a copy takes the tables of its source under names of their own and a save sends all of them (PD-224)", async () => {
+  const h = await open();
+  const table = (name, range) => ({ name, range, header: true, totals: false, columns: ["a", "b"], rowStripes: true, columnStripes: false, firstColumn: false, lastColumn: false });
+  await h.openBook([
+    { name: "Sheet1", cells: { A1: "a", B1: "b" }, tables: [table("Sales", "A1:B4")] },
+    { name: "Sheet2", cells: {}, tables: [table("Other", "C1:D3")] },
+  ]);
+  let book = await h.book();
+  assert.deepEqual(book.Sheet1.tables.map((t) => t.name), ["Sales"]);
+  assert.deepEqual(book.Sheet2.tables.map((t) => t.name), ["Other"]);
+  await h.tabMenu("Sheet1", "copy");
+  book = await h.book();
+  assert.deepEqual(book["시트 1 (2)"].tables.map((t) => [t.name, t.range]), [["Sales_2", "A1:B4"]]);
+  assert.deepEqual(book.Sheet1.tables.map((t) => t.name), ["Sales"], "the source keeps its name");
+  await h.history("studio-undo");
+  assert.equal(h.host.__EASYOFFICE_SHEET_LAYOUT__.get("시트 1 (2)"), null);
+  assert.deepEqual((await h.book()).Sheet1.tables.map((t) => t.name), ["Sales"]);
+  // Deleting a sheet takes its tables with it; undo brings them back.
+  await h.tabMenu("Sheet2", "delete");
+  userClickOk(h, "sheet-tab-delete-dialog");
+  await flushAsyncTurns(30);
+  assert.equal((await h.book()).Sheet2, undefined);
+  await h.history("studio-undo");
+  assert.deepEqual((await h.book()).Sheet2.tables.map((t) => t.name), ["Other"]);
+});
+
 test("a copy of a long name is cut to fit the name length", async () => {
   const h = await open();
   const long = "가".repeat(31);

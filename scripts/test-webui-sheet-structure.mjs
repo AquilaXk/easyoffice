@@ -207,3 +207,41 @@ test("the formula bar, name box and aggregate follow the selected cell after str
   assert.equal(formula(), "");
   assert.doesNotMatch(agg(), /1,200/);
 });
+
+test("a row edit sends the tables of the sheet, takes the engine's moved ones, and undo gives the old ones back (PD-224)", async () => {
+  const calls = [];
+  const table = (range) => ({ name: "T", range, header: true, totals: false, columns: ["a", "b"], rowStripes: true, columnStripes: false, firstColumn: false, lastColumn: false });
+  const harness = await createWorkspaceHarness({
+    transformHtml: demoHtml,
+    tauriInvoke: async (command, args) => {
+      if (command === "get_workspace_bootstrap") return JSON.stringify({ platform: "macOS", shortcutModifier: "⌘", sheetSessions: true, openTabs: [] });
+      if (command !== "evaluate_sheet") return { status: "ok" };
+      const body = JSON.parse(args.payload);
+      calls.push(body);
+      switch (body.sessionAction) {
+        case "open":
+          return { session: "s1" };
+        case "structure":
+          return { session: "s1", formulas: [], changed: [], circular: false, merges: [], hiddenRows: [], hiddenCols: [], widths: [], rules: {}, tables: [table("A3:B6")] };
+        case "close":
+          return { closed: true };
+        default:
+          return { session: "s1", changed: [], circular: false };
+      }
+    },
+  });
+  switchModule(harness.document, "SHEET");
+  await flushAsyncTurns();
+  const layout = harness.host.__EASYOFFICE_SHEET_LAYOUT__;
+  layout.replaceAll({ Sheet1: { tables: [table("A2:B5")] } });
+  harness.document.querySelector('#pane-sheet td[data-cell="C2"]').focus();
+  harness.userClick(harness.document.querySelector('.md-item[data-sheet-act="row-insert-above"]'));
+  await flushAsyncTurns(20);
+  const sent = calls.find((c) => c.sessionAction === "structure");
+  assert.deepEqual(sent.tables.map((t) => t.range), ["A2:B5"]);
+  assert.equal(layout.tablesOf("Sheet1")[0].range, "A3:B6");
+  harness.userClick(studioItem(harness.document, "studio-undo"));
+  await flushAsyncTurns(20);
+  assert.equal(layout.tablesOf("Sheet1")[0].range, "A2:B5");
+  layout.replaceAll({});
+});

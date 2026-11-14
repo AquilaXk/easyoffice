@@ -191,14 +191,26 @@
     return (layoutApi?.get?.(name)?.merges || []).map((m) => refOf(m.r1, m.c1) + ":" + refOf(m.r2, m.c2));
   }
 
-  // The `merges` field of a request without a session: `{ "Sheet1": ["A1:B2"] }`, nothing when no sheet has one.
+  // The ranges of the tables of a sheet, for the engine (an array is not placed in or across one, PD-224).
+  function tablePayload(name, layoutApi) {
+    return (layoutApi?.get?.(name)?.tables || []).map((t) => t.range);
+  }
+
+  // What the engine is told of `kind` (`merges` or `tables`) for a sheet.
+  const blockerPayload = (kind, name, layoutApi) => (kind === "tables" ? tablePayload : mergePayload)(name, layoutApi);
+
+  // The `merges` and `tables` fields of a request without a session: `{ "Sheet1": ["A1:B2"] }`, nothing when no sheet has one.
   function mergesField(names, layoutApi) {
     const out = {};
-    for (const name of names) {
-      const list = mergePayload(name, layoutApi);
-      if (list.length) out[name] = list;
+    for (const kind of ["merges", "tables"]) {
+      const byName = {};
+      for (const name of names) {
+        const list = blockerPayload(kind, name, layoutApi);
+        if (list.length) byName[name] = list;
+      }
+      if (Object.keys(byName).length) out[kind] = byName;
     }
-    return Object.keys(out).length ? { merges: out } : {};
+    return out;
   }
 
   // The engine is not told about cells an array filled.
@@ -221,6 +233,7 @@
     areasOf,
     lockPayload,
     mergePayload,
+    blockerPayload,
     mergesField,
     clearArea,
   };

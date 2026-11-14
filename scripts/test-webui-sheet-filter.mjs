@@ -356,6 +356,20 @@ test("a value condition hides rows apart from the user's, shows on the header an
   assert.deepEqual(layout.getAll(), before, "the undo restored the state from before the condition");
 });
 
+test("the sheet's filter is not turned on over a table, and is over the cells next to one (PD-224)", async () => {
+  const h = await createHarness();
+  const d = h.document;
+  const layout = h.host.__EASYOFFICE_SHEET_LAYOUT__;
+  const before = layout.getAll();
+  layout.replaceAll({ ...before, 표: { ...before["표"], tables: [{ name: "T", range: "A1:B7", header: true, totals: false, columns: ["a", "b"] }] } });
+  cell(d, "A3").focus();
+  await click(h, act(d, "filter-toggle"));
+  assert.equal(feedback(d), "표와 겹치는 범위에는 필터를 켤 수 없음");
+  assert.equal(layout.filterOf("표"), null);
+  assert.equal(act(d, "filter-toggle").getAttribute("aria-checked"), "false");
+  layout.replaceAll(before);
+});
+
 test("the custom condition dialog sets a condition from two rows and the column shows it again", async () => {
   const h = await createHarness();
   const d = h.document;
