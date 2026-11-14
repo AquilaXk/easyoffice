@@ -18,6 +18,7 @@ use crate::pdf_edit_overlay::Overlay;
 use crate::pdf_edit_session::EditSession;
 use crate::save_file::{split_file_name, write_document_bytes, SaveRequest};
 use crate::shell_caller::ShellCaller;
+use crate::tracked_files::open_regular;
 use crate::{pdf_job, IpcError};
 use easyoffice_app::EasyOfficeIpcRouter;
 use serde::{Deserialize, Serialize};
@@ -415,17 +416,14 @@ fn read_pdfs(paths: &[PathBuf], held: usize) -> Result<Vec<Vec<u8>>, String> {
             eprintln!("pdf edit: {} could not be read: {err}", path.display());
             MSG_READ_FAILED.to_string()
         };
-        let size = std::fs::metadata(path).map_err(unreadable)?.len();
-        if size > MAX_SOURCE_BYTES as u64 {
+        let (file, meta) = open_regular(path).map_err(unreadable)?;
+        if meta.len() > MAX_SOURCE_BYTES as u64 {
             return Err(too_big_message());
         }
         // The read is bounded too: a file that grows after its size was looked at is cut off.
         let mut bytes = Vec::new();
-        std::fs::File::open(path)
-            .and_then(|file| {
-                file.take(MAX_SOURCE_BYTES as u64 + 1)
-                    .read_to_end(&mut bytes)
-            })
+        file.take(MAX_SOURCE_BYTES as u64 + 1)
+            .read_to_end(&mut bytes)
             .map_err(unreadable)?;
         total = total.saturating_add(bytes.len());
         if bytes.len() > MAX_SOURCE_BYTES {
@@ -908,6 +906,21 @@ mod tests {
             std::fs::read_dir(&dir).unwrap().count(),
             1,
             "the first file this call wrote is gone again"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_named_pipe_is_not_read_as_a_pdf() {
+        let dir = scratch_dir("pipe");
+        let pipe = dir.join("a.pdf");
+        crate::named_pipe_support::make_pipe(&pipe);
+        let paths = vec![pipe.clone()];
+        let read = crate::named_pipe_support::within_time(&pipe, move || read_pdfs(&paths, 0));
+        assert_eq!(
+            read.expect("read_pdfs returned"),
+            Err(MSG_READ_FAILED.to_string())
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

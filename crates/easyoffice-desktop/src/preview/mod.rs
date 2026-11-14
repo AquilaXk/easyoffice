@@ -24,12 +24,13 @@ mod zip;
 
 use crate::pdf_fonts::shared_font_db;
 use crate::shell_caller::ShellCaller;
+use crate::tracked_files::open_regular;
 use crate::AppWindows;
 use bounded::{Gate, RenderError};
 use cache::{FileStamp, PreviewCache};
 use serde::Serialize;
 use source::Source;
-use std::fs::{File, Metadata};
+use std::fs::Metadata;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -247,13 +248,17 @@ fn load_preview_after(
     render: impl FnOnce(Vec<u8>) -> Result<Vec<u8>, RenderError> + Send + 'static,
 ) -> Option<Arc<Thumbnail>> {
     let meta = std::fs::metadata(path).ok()?;
+    // A named pipe has no picture and opening one blocks: refused before the cache and the open.
+    if !meta.is_file() {
+        return None;
+    }
     let stamp = FileStamp::of(&meta);
     if let Some(hit) = state.cached(id, &stamp) {
         return hit;
     }
-    let found = match File::open(path) {
+    let found = match open_regular(path) {
         Err(_) => None,
-        Ok(mut file) => match extract_thumbnail(&mut file) {
+        Ok((mut file, _)) => match extract_thumbnail(&mut file) {
             Some(embedded) => Some(Arc::new(embedded)),
             None => {
                 ready();

@@ -6,7 +6,7 @@ use crate::open_feedback::{report_open_failure, UNSUPPORTED};
 use crate::recent::RecentList;
 use crate::shell_caller::{self, ShellCaller};
 use crate::smoke::SmokeProbe;
-use crate::tracked_files::{Fingerprint, TrackedFile, TrackedFiles};
+use crate::tracked_files::{open_regular, Fingerprint, TrackedFile, TrackedFiles};
 use crate::window_state::{MonitorRect, WindowGeometry};
 use crate::windows::{
     display_name, is_window_label, new_label, path_key, window_title, window_url, CloseAction,
@@ -513,12 +513,10 @@ pub fn open_path(app: &AppHandle, path: &Path) -> Result<OpenOutcome, String> {
         close_empty_start_windows(app);
         return Ok(OpenOutcome::FOCUSED);
     }
-    let meta = fs::metadata(&canonical)
+    let (file, meta) = open_regular(&canonical)
         .map_err(|err| open_failure("파일 정보를 읽지 못했습니다", &canonical, &err))?;
     check_open_size(kind, meta.len(), &name)?;
-    let bytes = match fs::File::open(&canonical)
-        .and_then(|file| read_within(file, kind.max_open_bytes(), meta.len()))
-    {
+    let bytes = match read_within(file, kind.max_open_bytes(), meta.len()) {
         Ok(bytes) => bytes,
         // The file grew past the checked size while it was read.
         Err(err) if err.kind() == std::io::ErrorKind::InvalidData => {

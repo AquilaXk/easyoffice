@@ -5,6 +5,7 @@
 use super::bounded::{self, Gate, RenderError};
 use super::card_tests::fonts;
 use super::*;
+use std::fs::File;
 use std::io::Cursor;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;

@@ -676,3 +676,22 @@ fn measure_cards() {
         }
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn a_named_pipe_has_no_preview_and_is_not_waited_for() {
+    let dir = std::env::temp_dir().join(format!("easyoffice-preview-pipe-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let pipe = dir.join("report.docx");
+    crate::named_pipe_support::make_pipe(&pipe);
+    let path = pipe.clone();
+    let found = crate::named_pipe_support::within_time(&pipe, move || {
+        load_preview_with(&PreviewState::new(), "00000000000000d1", &path, |_| {
+            Ok(PNG_1X1.to_vec())
+        })
+        .is_none()
+    });
+    assert_eq!(found, Some(true));
+    let _ = fs::remove_dir_all(&dir);
+}

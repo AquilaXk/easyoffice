@@ -693,6 +693,8 @@ mod path_leak_tests;
 
 #[cfg(test)]
 mod hostile_svg;
+#[cfg(all(test, unix))]
+mod named_pipe_support;
 #[cfg(test)]
 mod pdf_edit_fixtures;
 #[cfg(test)]

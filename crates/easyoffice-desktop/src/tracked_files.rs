@@ -45,8 +45,7 @@ impl Fingerprint {
     /// Reads the file once: metadata from the opened handle, then the content through a fixed
     /// buffer. Files above the save limit hash only their first bytes; the length already differs.
     pub fn of(path: &Path) -> std::io::Result<Self> {
-        let file = fs::File::open(path)?;
-        let meta = file.metadata()?;
+        let (file, meta) = open_regular(path)?;
         let content_hash = hash_reader(file.take(MAX_SAVE_BYTES as u64 + 1))?;
         Ok(Self::from_parts(&meta, content_hash))
     }
@@ -63,6 +62,24 @@ impl Fingerprint {
             content_hash,
         }
     }
+}
+
+/// Opens `path` for reading when it is a regular file, with the metadata of the opened handle. A
+/// named pipe is refused before it is opened (opening one blocks until a program writes to it, and
+/// its length of 0 passes every size check), and the handle is looked at again in case the path was
+/// replaced in between.
+pub fn open_regular(path: &Path) -> std::io::Result<(fs::File, fs::Metadata)> {
+    let not_regular =
+        || std::io::Error::new(std::io::ErrorKind::InvalidInput, "not a regular file");
+    if !fs::metadata(path)?.is_file() {
+        return Err(not_regular());
+    }
+    let file = fs::File::open(path)?;
+    let meta = file.metadata()?;
+    if !meta.is_file() {
+        return Err(not_regular());
+    }
+    Ok((file, meta))
 }
 
 /// Streams `reader` through a stack buffer into a 64-bit hash, without allocating.
@@ -364,5 +381,31 @@ mod tests {
         assert!(md_file.extension_matches("md"));
         assert!(md_file.extension_matches("MARKDOWN"));
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_named_pipe_is_not_opened_or_fingerprinted() {
+        use crate::named_pipe_support::{make_pipe, within_time};
+        let dir = scratch("pipe");
+        let file = dir.join("real.docx");
+        fs::write(&file, b"one").unwrap();
+        let seen = Fingerprint::of(&file).unwrap();
+        let pipe = dir.join("pipe.docx");
+        make_pipe(&pipe);
+        let (for_open, for_state) = (pipe.clone(), pipe.clone());
+        let opened = within_time(&pipe, move || open_regular(&for_open).map(drop));
+        assert_eq!(
+            opened.expect("open_regular returned").unwrap_err().kind(),
+            std::io::ErrorKind::InvalidInput
+        );
+        let state = within_time(&pipe, move || disk_state(&for_state, &seen));
+        assert_eq!(
+            state,
+            Some(DiskState::Changed),
+            "a pipe is not the file that was opened"
+        );
+        assert!(open_regular(&file).is_ok());
+        assert!(open_regular(&dir).is_err(), "a folder is not a file either");
     }
 }
