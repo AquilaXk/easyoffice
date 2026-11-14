@@ -372,17 +372,7 @@ fn build_sheet_xml(
         sheet_xml.push('>');
         for (col, raw) in row_cells {
             let col_ref = write_col_letters(&mut col_buf, col as usize);
-            let xf = styling.map_or(0, |st| {
-                let link = st.links.contains_key(&(row, col));
-                match st.cells.get(&(row, col)) {
-                    Some(style) => style_table.xf_index(style, st, &mut ids, link),
-                    None if link => {
-                        style_table.xf_index(&st.link_cell_style(row, col), st, &mut ids, true)
-                    }
-                    None if st.cell_unlocked(row, col) => style_table.unlocked_xf(),
-                    None => 0,
-                }
-            });
+            let xf = styling.map_or(0, |st| style_table.cell_xf(st, row, col, &mut ids));
             let cached = cache.and_then(|c| c.get(&(row, col)));
             push_cell_xml(
                 &mut sheet_xml,

@@ -170,6 +170,24 @@ impl XlsxStyleTable {
             .unwrap_or(0)
     }
 
+    /// `cellXfs` index of the cell `(row, col)`: its own format, the hyperlink look when it has a link (PD-223), or
+    /// the lock of its unlocked row or column; 0 for a cell with none of them. `ids` is one memo per sheet.
+    pub(crate) fn cell_xf(
+        &self,
+        styling: &SheetStyling,
+        row: u32,
+        col: u32,
+        ids: &mut IdMemo,
+    ) -> usize {
+        let link = styling.links.contains_key(&(row, col));
+        match styling.cells.get(&(row, col)) {
+            Some(style) => self.xf_index(style, styling, ids, link),
+            None if link => self.xf_index(&styling.link_cell_style(row, col), styling, ids, true),
+            None if styling.cell_unlocked(row, col) => self.unlocked_xf(),
+            None => 0,
+        }
+    }
+
     fn font_xml(key: Option<StyleKey>) -> String {
         let mut out = String::from("<font>");
         if let Some(k) = key {

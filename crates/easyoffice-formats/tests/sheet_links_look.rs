@@ -135,7 +135,7 @@ fn a_file_the_spreadsheet_program_made_reads_the_same_way() {
     let mut entries = ZipArchiveCodec::unpack(&bytes, &ZipSecurityPolicy::default()).unwrap();
     for e in &mut entries {
         if e.path == "xl/styles.xml" {
-            // Excel names the style by its builtin id and may call it anything; the font has a theme colour.
+            // The spreadsheet program names the style by its builtin id and may call it anything; the font has a theme colour.
             let text = String::from_utf8(e.data.clone()).unwrap();
             e.data = text
                 .replace("name=\"Hyperlink\"", "name=\"하이퍼링크\"")
