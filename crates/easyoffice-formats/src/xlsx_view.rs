@@ -10,11 +10,13 @@
 //! 18.3.1.31, and the theme tint follows 18.3.1.15 (HLS luminance).
 //!
 //! Modifications: a frozen pane whose sheet view is scrolled (`sheetView@topLeftCell` away from A1)
-//! is read as if it started at the first row and column, as in the reference. Indexed tab colours
-//! are not read. Every value is checked against the bounds of [`crate::sheet_view`] and a value over
-//! them is ignored, not clamped.
+//! is read as if it started at the first row and column, as in the reference. Every value is checked
+//! against the bounds of [`crate::sheet_view`] and a value over them is ignored, not clamped. The
+//! selection, the zoom and the scroll position (`sheetView@zoomScale`, `topLeftCell`, the `selection` of
+//! the active pane) are read as well, which the reference leaves out (it ignores all of them).
 
-use crate::sheet_styling::sheet_view::{Freeze, MAX_OUTLINE_LEVEL};
+use crate::rtf_xml_helpers::{format_col_letters, parse_a1_zero_based};
+use crate::sheet_styling::sheet_view::{Freeze, ViewState, MAX_OUTLINE_LEVEL};
 use crate::sheet_styling::SheetStyling;
 use crate::xml_stream::{unescape_cow, Attrs, XmlEvent};
 use crate::OoxmlCodec;
@@ -34,11 +36,27 @@ pub(crate) struct ThemeTab {
     pub(crate) tint: f64,
 }
 
+/// The four panes of a sheet view (ECMA-376 18.18.52 `ST_Pane`), in the order a scan indexes them.
+const PANES: [&str; 4] = ["topLeft", "topRight", "bottomLeft", "bottomRight"];
+
+/// The first range of a `sqref` as `(first, last)` cells; `None` when it is not a cell or a range.
+fn first_range(sqref: &str) -> Option<((u32, u32), (u32, u32))> {
+    let first = sqref.split_whitespace().next()?;
+    let (a, b) = first.split_once(':').unwrap_or((first, first));
+    Some((parse_a1_zero_based(a)?, parse_a1_zero_based(b)?))
+}
+
 /// `view` data of one worksheet as the scan finds it.
 #[derive(Default)]
 pub(crate) struct ViewScan {
     in_view: bool,
     views_seen: u8,
+    zoom: Option<u16>,
+    sheet_top_left: Option<(u32, u32)>,
+    pane_top_left: Option<(u32, u32)>,
+    active_pane: usize,
+    /// The selection of each pane, by the index in [`PANES`].
+    selections: [Option<ViewState>; 4],
     pub(crate) freeze: Option<Freeze>,
     pub(crate) tab_rgb: Option<u32>,
     pub(crate) tab_theme: Option<ThemeTab>,
@@ -78,8 +96,12 @@ impl ViewScan {
                 "sheetView" => {
                     self.views_seen = self.views_seen.saturating_add(1);
                     self.in_view = self.views_seen == 1;
+                    if self.in_view {
+                        self.view(attrs);
+                    }
                 }
                 "pane" if self.in_view => self.pane(attrs),
+                "selection" if self.in_view => self.selection(attrs),
                 "tabColor" => self.tab(attrs),
                 "outlinePr" => {
                     self.summary_above = off(attrs, "summaryBelow");
@@ -92,7 +114,62 @@ impl ViewScan {
         }
     }
 
+    fn view(&mut self, attrs: &Attrs<'_>) {
+        self.zoom = attrs
+            .get("zoomScale")
+            .and_then(|v| v.trim().parse::<u32>().ok())
+            .and_then(ViewState::zoom_of);
+        self.sheet_top_left = attrs
+            .get("topLeftCell")
+            .and_then(|v| parse_a1_zero_based(&v));
+    }
+
+    fn selection(&mut self, attrs: &Attrs<'_>) {
+        let pane = attrs.get("pane");
+        let at = PANES
+            .iter()
+            .position(|&p| Some(p) == pane.as_deref())
+            .unwrap_or(0);
+        let range = attrs.get("sqref").and_then(|v| first_range(&v));
+        let active = attrs
+            .get("activeCell")
+            .and_then(|v| parse_a1_zero_based(&v));
+        // The active cell may lie in any range of `sqref`; this model keeps the first range, so a cell
+        // outside it makes the cell itself the selection.
+        self.selections[at] = match (active, range) {
+            (Some(a), Some((from, to))) => Some(ViewState::selecting(a, from, to)),
+            (Some(a), None) => Some(ViewState::selecting(a, a, a)),
+            (None, Some((from, to))) => Some(ViewState::selecting(from, from, to)),
+            (None, None) => None,
+        };
+    }
+
+    /// The selection, zoom and scroll position the scan found.
+    pub(crate) fn state(&self) -> ViewState {
+        let selected = self.selections[self.active_pane]
+            .or_else(|| self.selections.iter().flatten().next().copied())
+            .unwrap_or_default();
+        let top_left = match self.freeze {
+            Some(_) => self.pane_top_left,
+            None => self.sheet_top_left,
+        };
+        ViewState {
+            zoom: self.zoom,
+            top_left: top_left.unwrap_or_default(),
+            ..selected
+        }
+    }
+
     fn pane(&mut self, attrs: &Attrs<'_>) {
+        self.pane_top_left = attrs
+            .get("topLeftCell")
+            .and_then(|v| parse_a1_zero_based(&v));
+        if let Some(at) = attrs
+            .get("activePane")
+            .and_then(|p| PANES.iter().position(|&n| n == p))
+        {
+            self.active_pane = at;
+        }
         if !matches!(
             attrs.get("state").as_deref(),
             Some("frozen" | "frozenSplit")
@@ -247,42 +324,125 @@ pub(crate) fn sheet_pr_xml(styling: &SheetStyling) -> String {
     xml
 }
 
-/// `<sheetViews>` with the frozen pane (empty when nothing is frozen).
-pub(crate) fn sheet_views_xml(freeze: Option<Freeze>) -> String {
-    let Some(Freeze { rows, cols }) = freeze else {
-        return String::new();
-    };
-    let top_left = format!(
-        "{}{}",
-        crate::rtf_xml_helpers::format_col_letters(cols),
-        rows + 1
-    );
-    let mut xml = String::from("<sheetViews><sheetView workbookViewId=\"0\">");
-    match (rows > 0, cols > 0) {
-        (true, true) => {
-            let _ = write!(
-                xml,
-                "<pane xSplit=\"{cols}\" ySplit=\"{rows}\" topLeftCell=\"{top_left}\" activePane=\"bottomRight\" state=\"frozen\"/>\
-                 <selection pane=\"topRight\"/><selection pane=\"bottomLeft\"/><selection pane=\"bottomRight\"/>"
-            );
-        }
-        (true, false) => {
-            let _ = write!(
-                xml,
-                "<pane ySplit=\"{rows}\" topLeftCell=\"{top_left}\" activePane=\"bottomLeft\" state=\"frozen\"/>\
-                 <selection pane=\"bottomLeft\"/>"
-            );
-        }
-        _ => {
-            let _ = write!(
-                xml,
-                "<pane xSplit=\"{cols}\" topLeftCell=\"{top_left}\" activePane=\"topRight\" state=\"frozen\"/>\
-                 <selection pane=\"topRight\"/>"
-            );
-        }
+/// The A1 name of a zero-based `(row, col)`.
+fn a1((row, col): (u32, u32)) -> String {
+    format!("{}{}", format_col_letters(col), row + 1)
+}
+
+/// `sqref` of a selection: the cell, or `A1:B2`.
+fn sqref_of(range: (u32, u32, u32, u32)) -> String {
+    let (r0, c0, r1, c1) = range;
+    if (r0, c0) == (r1, c1) {
+        a1((r0, c0))
+    } else {
+        format!("{}:{}", a1((r0, c0)), a1((r1, c1)))
     }
-    xml.push_str("</sheetView></sheetViews>");
-    xml
+}
+
+/// `<sheetViews>` with the frozen pane, the selection, the zoom and the scroll position (empty when none
+/// is set).
+///
+/// The pane that holds the active cell carries the selection; the others get an empty `selection`, which
+/// the format asks for. `sheetView@topLeftCell` is the top left cell of the top left pane, which shares its
+/// rows with the top right pane and its columns with the bottom left one; `pane@topLeftCell` is the first
+/// cell of the scrolling pane.
+pub(crate) fn sheet_views_xml(freeze: Option<Freeze>, view: &ViewState) -> String {
+    if freeze.is_none() && view.is_default() {
+        return String::new();
+    }
+    let Freeze { rows, cols } = freeze.unwrap_or(Freeze { rows: 0, cols: 0 });
+    let zoom = view.zoom.map_or(String::new(), |z| {
+        format!(" zoomScale=\"{z}\" zoomScaleNormal=\"{z}\"")
+    });
+    let selected = (view.active != (0, 0) || view.range != (0, 0, 0, 0)).then(|| {
+        format!(
+            "activeCell=\"{}\" sqref=\"{}\"",
+            a1(view.active),
+            sqref_of(view.range)
+        )
+    });
+    // The scrolling pane never starts above or left of the frozen ones.
+    let (scroll_row, scroll_col) = (view.top_left.0.max(rows), view.top_left.1.max(cols));
+    let (view_top_left, panes) = match (rows > 0, cols > 0) {
+        (false, false) => (
+            view.top_left,
+            selected.map_or(String::new(), |s| format!("<selection {s}/>")),
+        ),
+        (has_rows, has_cols) => {
+            // The pane the active cell lies in; a sheet nobody selected in is left in the scrolling pane.
+            let scrolling = match (has_rows, has_cols) {
+                (true, true) => "bottomRight",
+                (true, false) => "bottomLeft",
+                _ => "topRight",
+            };
+            let above = has_rows && view.active.0 < rows;
+            let left = has_cols && view.active.1 < cols;
+            let active_pane = match (selected.is_some(), above, left) {
+                (false, ..) | (_, false, false) => scrolling,
+                (_, true, true) => "topLeft",
+                (_, true, false) if has_cols => "topRight",
+                (_, false, true) if has_rows => "bottomLeft",
+                _ => "topLeft",
+            };
+            let mut elements = String::new();
+            for name in ["topLeft", "topRight", "bottomLeft", "bottomRight"] {
+                let exists = match name {
+                    "topLeft" => name == active_pane,
+                    "topRight" => has_cols,
+                    "bottomLeft" => has_rows,
+                    _ => has_rows && has_cols,
+                };
+                if !exists {
+                    continue;
+                }
+                let pane = if name == "topLeft" {
+                    String::new()
+                } else {
+                    format!(" pane=\"{name}\"")
+                };
+                let chosen = selected.as_deref().filter(|_| name == active_pane);
+                let _ = write!(
+                    elements,
+                    "<selection{pane}{}/>",
+                    chosen.map_or(String::new(), |s| format!(" {s}"))
+                );
+            }
+            let (view_row, view_col) = (
+                if has_rows { 0 } else { scroll_row },
+                if has_cols { 0 } else { scroll_col },
+            );
+            let split = format!(
+                "{}{}",
+                if has_cols {
+                    format!(" xSplit=\"{cols}\"")
+                } else {
+                    String::new()
+                },
+                if has_rows {
+                    format!(" ySplit=\"{rows}\"")
+                } else {
+                    String::new()
+                },
+            );
+            // With only rows frozen the top left pane scrolls sideways with the scrolling one, with only
+            // columns frozen it scrolls down with it.
+            (
+                (view_row, view_col),
+                format!(
+                    "<pane{split} topLeftCell=\"{}\" activePane=\"{active_pane}\" state=\"frozen\"/>{elements}",
+                    a1((scroll_row, scroll_col)),
+                ),
+            )
+        }
+    };
+    let top_left = if view_top_left == (0, 0) {
+        String::new()
+    } else {
+        format!(" topLeftCell=\"{}\"", a1(view_top_left))
+    };
+    format!(
+        "<sheetViews><sheetView workbookViewId=\"0\"{zoom}{top_left}>{panes}</sheetView></sheetViews>"
+    )
 }
 
 /// `<sheetFormatPr>` with the deepest group level (empty when there are no groups).
@@ -409,18 +569,158 @@ mod tests {
 
     #[test]
     fn views_are_written_with_the_pane_of_each_kind() {
-        assert_eq!(sheet_views_xml(None), "");
-        let both = sheet_views_xml(Freeze::new(2, 3));
+        let plain = ViewState::default();
+        assert_eq!(sheet_views_xml(None, &plain), "");
+        let both = sheet_views_xml(Freeze::new(2, 3), &plain);
         assert!(both.contains(
             r#"<pane xSplit="3" ySplit="2" topLeftCell="D3" activePane="bottomRight" state="frozen"/>"#
         ));
-        let rows = sheet_views_xml(Freeze::new(1, 0));
+        let rows = sheet_views_xml(Freeze::new(1, 0), &plain);
         assert!(rows.contains(
             r#"<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>"#
         ));
-        let cols = sheet_views_xml(Freeze::new(0, 27));
+        let cols = sheet_views_xml(Freeze::new(0, 27), &plain);
         assert!(cols.contains(
             r#"<pane xSplit="27" topLeftCell="AB1" activePane="topRight" state="frozen"/>"#
         ));
+    }
+
+    fn state_of(xml: &str) -> ViewState {
+        scan(xml).state()
+    }
+
+    #[test]
+    fn the_selection_zoom_and_scroll_of_a_plain_sheet_are_read() {
+        let view = state_of(
+            r#"<sheetViews><sheetView zoomScale="150" topLeftCell="D10" workbookViewId="0"><selection activeCell="G14" sqref="F12:G14"/></sheetView></sheetViews>"#,
+        );
+        assert_eq!(view.active, (13, 6));
+        assert_eq!(view.range, (11, 5, 13, 6));
+        assert_eq!(view.zoom, Some(150));
+        assert_eq!(view.top_left, (9, 3));
+        // A reversed range is the same range; the first range of a list is the selection.
+        let view =
+            state_of(r#"<sheetView><selection activeCell="B2" sqref="C3:A1 E5"/></sheetView>"#);
+        assert_eq!((view.active, view.range), ((1, 1), (0, 0, 2, 2)));
+        // An active cell outside the first range selects itself.
+        let view = state_of(r#"<sheetView><selection activeCell="E5" sqref="A1:B2"/></sheetView>"#);
+        assert_eq!((view.active, view.range), ((4, 4), (4, 4, 4, 4)));
+        // No attribute at all is the default view.
+        assert!(state_of("<sheetView/>").is_default());
+    }
+
+    #[test]
+    fn a_frozen_sheet_reads_the_selection_of_its_active_pane_and_the_scrolling_panes_corner() {
+        let view = state_of(
+            r#"<sheetView zoomScale="80"><pane xSplit="2" ySplit="3" topLeftCell="E20" activePane="bottomRight" state="frozen"/><selection pane="topRight"/><selection pane="bottomLeft" activeCell="A9" sqref="A9"/><selection pane="bottomRight" activeCell="H25" sqref="H25:J26"/></sheetView>"#,
+        );
+        assert_eq!(view.active, (24, 7));
+        assert_eq!(view.range, (24, 7, 25, 9));
+        assert_eq!(view.top_left, (19, 4));
+        assert_eq!(view.zoom, Some(80));
+        // The sheet view's own `topLeftCell` is the top left pane's corner, not the scroll position.
+        let view = state_of(
+            r#"<sheetView topLeftCell="A1"><pane ySplit="1" topLeftCell="A40" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="C41" sqref="C41"/></sheetView>"#,
+        );
+        assert_eq!((view.active, view.top_left), ((40, 2), (39, 0)));
+        // The selection of a pane that is not the active one is the fallback.
+        let view = state_of(
+            r#"<sheetView><pane ySplit="1" activePane="bottomLeft" state="frozen"/><selection pane="topLeft" activeCell="B1" sqref="B1"/></sheetView>"#,
+        );
+        assert_eq!(view.active, (0, 1));
+    }
+
+    #[test]
+    fn hostile_view_attributes_are_dropped_not_clamped() {
+        for bad in [
+            r#"zoomScale="9""#,
+            r#"zoomScale="401""#,
+            r#"zoomScale="NaN""#,
+            r#"zoomScale="-100""#,
+            r#"zoomScale="4294967396""#,
+            r#"zoomScale="1e2""#,
+            r#"zoomScale="100""#,
+        ] {
+            let view = state_of(&format!("<sheetView {bad}/>"));
+            assert_eq!(view.zoom, None, "{bad}");
+        }
+        for bad in [
+            "XFE1", "A1048577", "ZZZZ1", "A0", "1A", "A", "", "$$", "A1:B2",
+        ] {
+            let view = state_of(&format!(r#"<sheetView topLeftCell="{bad}"/>"#));
+            assert_eq!(view.top_left, (0, 0), "{bad}");
+        }
+        for bad in ["XFE1:A1", "A1:B", "garbage", "", "A1048577:A1"] {
+            let view = state_of(&format!(
+                r#"<sheetView><selection sqref="{bad}"/></sheetView>"#
+            ));
+            assert!(view.is_default(), "{bad}");
+        }
+        let edge = state_of(
+            r#"<sheetView topLeftCell="XFD1048576"><selection activeCell="XFD1048576" sqref="A1:XFD1048576"/></sheetView>"#,
+        );
+        assert_eq!(edge.top_left, (1_048_575, 16_383));
+        assert!(edge.within_bounds(1_048_576, 16_384));
+    }
+
+    #[test]
+    fn a_view_is_written_and_read_back_for_every_freeze_and_active_pane() {
+        let freezes = [
+            None,
+            Freeze::new(2, 0),
+            Freeze::new(0, 3),
+            Freeze::new(2, 3),
+        ];
+        let cells = [(0, 0), (0, 5), (7, 0), (9, 8), (1, 1)];
+        for freeze in freezes {
+            for active in cells {
+                for zoom in [None, Some(10), Some(125), Some(400)] {
+                    let (fr, fc) = freeze.map_or((0, 0), |f| (f.rows, f.cols));
+                    let view = ViewState {
+                        zoom,
+                        top_left: (fr + 4, fc + 6),
+                        ..ViewState::selecting(active, active, (active.0 + 1, active.1 + 2))
+                    };
+                    let xml = sheet_views_xml(freeze, &view);
+                    let read = scan(&xml);
+                    assert_eq!(read.freeze, freeze, "{xml}");
+                    assert_eq!(read.state(), view, "{xml}");
+                }
+            }
+        }
+        // A sheet nobody selected anything in keeps its scroll position and nothing else.
+        let scrolled = ViewState {
+            top_left: (30, 4),
+            ..ViewState::default()
+        };
+        let xml = sheet_views_xml(None, &scrolled);
+        assert!(
+            xml.contains(r#"topLeftCell="E31""#) && !xml.contains("selection"),
+            "{xml}"
+        );
+        assert_eq!(scan(&xml).state(), scrolled);
+    }
+
+    #[test]
+    fn a_zoom_of_100_is_not_written() {
+        let xml = sheet_views_xml(
+            None,
+            &ViewState {
+                zoom: ViewState::zoom_of(100),
+                ..ViewState::default()
+            },
+        );
+        assert_eq!(xml, "");
+        let xml = sheet_views_xml(
+            None,
+            &ViewState {
+                zoom: ViewState::zoom_of(200),
+                ..ViewState::default()
+            },
+        );
+        assert!(
+            xml.contains(r#"zoomScale="200" zoomScaleNormal="200""#),
+            "{xml}"
+        );
     }
 }

@@ -559,6 +559,9 @@
       if (rules && ((rules.cf || []).length > 0 || (rules.dv || []).length > 0)) sheet.rules = rules;
       // Merged ranges and hidden rows and columns (PD-194): `merges`, `hiddenRows`, `hiddenCols`.
       Object.assign(sheet, layoutBySheet?.[name]);
+      // The selection, zoom and scroll position of the sheet (PD-208).
+      const view = host.__EASYOFFICE_SHEET_VIEW_STATE__?.get(name);
+      if (view) sheet.view = view;
       return sheet;
     });
   }

@@ -576,6 +576,7 @@
       const zoomLabel = document.getElementById("status-zoom-label");
       if (zoomLabel) zoomLabel.textContent = zoomText;
       const zoomSlider = document.getElementById("status-zoom-slider");
+      host.__EASYOFFICE_ZOOM_RANGE__.syncSlider(zoomSlider, getActiveModule());
       if (zoomSlider) zoomSlider.value = String(Number.parseInt(zoomText, 10) || 100);
     }
 

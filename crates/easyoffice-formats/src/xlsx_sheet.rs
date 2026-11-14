@@ -341,6 +341,7 @@ impl<'s> SheetScanner<'s> {
         }
         let styling = &mut self.styling;
         styling.freeze = view.freeze;
+        styling.view = view.state();
         styling.tab_color = view.tab_rgb;
         let outline = &mut styling.outline;
         if outline.is_empty() {

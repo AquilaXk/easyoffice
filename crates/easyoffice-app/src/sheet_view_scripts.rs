@@ -8,7 +8,7 @@ macro_rules! view_script {
 }
 
 /// The scripts of the sheet's view (PD-208) and tabs (PD-209) by request path.
-pub(crate) const SHEET_VIEW_SCRIPTS: [(&str, &str); 9] = [
+pub(crate) const SHEET_VIEW_SCRIPTS: [(&str, &str); 12] = [
     ("/sheet-outline.js", include_str!("../ui/sheet-outline.js")),
     ("/sheet-freeze.js", include_str!("../ui/sheet-freeze.js")),
     ("/sheet-view-ui.js", include_str!("../ui/sheet-view-ui.js")),
@@ -21,4 +21,7 @@ pub(crate) const SHEET_VIEW_SCRIPTS: [(&str, &str); 9] = [
     view_script!("sheet-tabs.js"),
     view_script!("sheet-tab-ui.js"),
     view_script!("sheet-tab-menu.js"),
+    view_script!("sheet-view-state.js"),
+    view_script!("sheet-view-live.js"),
+    view_script!("zoom-range.js"),
 ];

@@ -126,6 +126,7 @@
       }
       if (scope === "SHEET") {
         sheetDataStore[getActiveSheetName()] = sheetController.snapshotDomSheetCells();
+        sheetController.captureView();
         const keys = host.__EASYOFFICE_SHEET_TAB_STRIP__.reconcile(Object.keys(sheetDataStore));
         return { sheets: savePayload.buildSheetsPayload(keys, sheetDataStore, sheetController.getColumnWidths(), sheetController.getSheetRules(), host.__EASYOFFICE_SHEET_LAYOUT__.getAll()), names: host.__EASYOFFICE_SHEET_NAMES__.getAll(), ...workbookProtectField() };
       }
@@ -900,10 +901,10 @@
         for (const evt of ["input", "change"]) zoomSlider.addEventListener(evt, onSlide);
         zoomSlider.addEventListener("keydown", (ev) => {
           const cur = Number(zoomSlider.value) || 100;
-          const next = { PageUp: cur + 10, PageDown: cur - 10, Home: 50, End: 200, ArrowUp: cur + 5, ArrowRight: cur + 5, ArrowDown: cur - 5, ArrowLeft: cur - 5 }[ev.key];
+          const next = { PageUp: cur + 10, PageDown: cur - 10, Home: -1e9, End: 1e9, ArrowUp: cur + 5, ArrowRight: cur + 5, ArrowDown: cur - 5, ArrowLeft: cur - 5 }[ev.key];
           if (next === undefined) return;
           ev.preventDefault?.();
-          applyZoom(Math.max(50, Math.min(200, next)));
+          applyZoom(next);
         });
       }
       for (const [id, pct, mode] of [["btn-zoom-fit-width", 120, "width"], ["btn-zoom-fit-page", 100, "page"]]) {

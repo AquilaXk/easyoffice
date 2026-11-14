@@ -6,7 +6,8 @@ use crate::ole2_codec::{
 };
 use crate::sheet_links::xls_links::{self, XlsLinkReader};
 use crate::sheet_links::{LinkCollector, SheetLinks};
-use crate::sheet_styling::{CellStyle, SheetStyling};
+use crate::sheet_styling::{sheet_states, CellStyle, SheetState, SheetStyling};
+use crate::xls_boundsheet;
 use crate::xls_sst_cursor::SstContinueCursor;
 use crate::xls_styles::{
     blank_record, default_font_record, set_formula_xf, XlsColorPlan, XlsStyleReader,
@@ -259,22 +260,9 @@ impl LegacyOle2Codec {
                 .map(|s| s.sheet_name.as_str())
                 .collect::<Vec<_>>(),
         );
-        for name in &sheet_names {
-            let sheet_units: Vec<u16> = name.encode_utf16().collect();
-            let mut sheet_name_utf16 = Vec::with_capacity(sheet_units.len() * 2);
-            for u in &sheet_units {
-                sheet_name_utf16.extend_from_slice(&u.to_le_bytes());
-            }
-            let bs_len = (8 + sheet_name_utf16.len()) as u16;
-            stream.extend_from_slice(&Self::BIFF8_BOUNDSHEET.to_le_bytes());
-            stream.extend_from_slice(&bs_len.to_le_bytes());
-            lb_ply_pos_offsets.push(stream.len());
-            stream.extend_from_slice(&0u32.to_le_bytes()); // patched to Worksheet BOF offset
-            stream.push(0); // hsState = visible
-            stream.push(0); // dt = worksheet
-            stream.push(sheet_units.len() as u8); // 1-byte cch
-            stream.push(0x01); // grbit = 1 (UTF-16LE)
-            stream.extend_from_slice(&sheet_name_utf16);
+        let states = sheet_states(sheets.len(), stylings);
+        for (name, &state) in sheet_names.iter().zip(&states) {
+            lb_ply_pos_offsets.push(xls_boundsheet::push(&mut stream, name, state));
         }
 
         let mut sst_strings: Vec<String> = Vec::new();
@@ -453,25 +441,26 @@ impl LegacyOle2Codec {
         Ok(Self::unpack_xls_walk(bytes)?.0)
     }
 
-    /// The sheets of a workbook with the formatting an XLS carries next to them: the hyperlinks (PD-223)
-    /// and the fill and font colours of the cells (PD-227). Each sheet's styling holds nothing else.
+    /// The sheets of a workbook with the formatting an XLS carries next to them: the hyperlinks (PD-223), the
+    /// fill and font colours of the cells (PD-227) and which sheets are hidden (PD-209). Each sheet's styling
+    /// holds nothing else. A workbook that hides every sheet shows the first.
     pub fn unpack_xls_with_styling(
         bytes: &[u8],
     ) -> Result<(crate::OdsMultiUnpacked, Vec<(String, SheetStyling)>), EasyOfficeError> {
-        let (payloads, collectors, colors) = Self::unpack_xls_walk(bytes)?;
+        let (payloads, collectors, colors, states) = Self::unpack_xls_walk(bytes)?;
         let mut sheets = Vec::with_capacity(payloads.len());
         let mut stylings = Vec::with_capacity(payloads.len());
         let mut colors = colors.into_iter();
+        let mut states = states.into_iter();
         for (payload, links) in payloads.into_iter().zip(collectors) {
-            stylings.push((
-                payload.sheet_name.clone(),
-                SheetStyling {
-                    cells: colors.next().unwrap_or_default(),
-                    links: links.links,
-                    links_rejected: links.rejected,
-                    ..SheetStyling::default()
-                },
-            ));
+            let mut styling = SheetStyling {
+                cells: colors.next().unwrap_or_default(),
+                links: links.links,
+                links_rejected: links.rejected,
+                ..SheetStyling::default()
+            };
+            states.next().unwrap_or_default().apply(&mut styling);
+            stylings.push((payload.sheet_name.clone(), styling));
             sheets.push((payload.sheet_name, payload.cells));
         }
         Ok((sheets, stylings))
@@ -485,6 +474,7 @@ impl LegacyOle2Codec {
             Vec<LegacyXlsPayload>,
             Vec<LinkCollector>,
             Vec<std::collections::BTreeMap<(u32, u32), CellStyle>>,
+            Vec<SheetState>,
         ),
         EasyOfficeError,
     > {
@@ -626,6 +616,11 @@ impl LegacyOle2Codec {
                 None
             }
         };
+        if parsed_name.is_some() {
+            state
+                .boundsheet_states
+                .push(xls_boundsheet::state_of(&data[start..end]));
+        }
         state.boundsheet_names.extend(parsed_name);
         Ok(())
     }
@@ -916,6 +911,8 @@ impl XlsRecord {
 #[derive(Default)]
 struct XlsParseState {
     boundsheet_names: Vec<String>,
+    /// The `hsState` of each `BOUNDSHEET`, in the order of the names.
+    boundsheet_states: Vec<SheetState>,
     sst_strings: Vec<String>,
     sheets: Vec<LegacyXlsPayload>,
     current_cells: Vec<(u32, u32, String)>,
@@ -965,6 +962,7 @@ impl XlsParseState {
         Vec<LegacyXlsPayload>,
         Vec<LinkCollector>,
         Vec<std::collections::BTreeMap<(u32, u32), CellStyle>>,
+        Vec<SheetState>,
     ) {
         if self.sheets.is_empty()
             && (!self.current_cells.is_empty() || !self.boundsheet_names.is_empty())
@@ -981,6 +979,16 @@ impl XlsParseState {
             self.links.end_sheet();
             self.styles.end_sheet();
         }
-        (self.sheets, self.links.finish(), self.styles.finish())
+        let mut states = self.boundsheet_states;
+        states.resize(self.sheets.len(), SheetState::Visible);
+        if states.iter().all(|&s| s != SheetState::Visible) && !states.is_empty() {
+            states[0] = SheetState::Visible;
+        }
+        (
+            self.sheets,
+            self.links.finish(),
+            self.styles.finish(),
+            states,
+        )
     }
 }

@@ -410,8 +410,12 @@ pub struct SheetStyling {
     pub tab_color: Option<u32>,
     /// The sheet is hidden: it has no tab until the user shows it again (PD-209).
     pub hidden: bool,
+    /// The sheet is hidden for good: the sheet menu does not list it either (PD-209). Implies `hidden`.
+    pub very_hidden: bool,
     /// Row and column groups and the groups the user folded (PD-208).
     pub outline: Outline,
+    /// The selected cells, the zoom and the scroll position the sheet was left at (PD-208).
+    pub view: ViewState,
     /// Paper, margins, scale, print area and repeated rows and columns for printing (PD-213).
     pub page: SheetPage,
     /// The defined names of the workbook (PD-214), carried by the first sheet like the number format
@@ -446,7 +450,7 @@ impl SheetStyling {
     pub(crate) fn with_first_shown(stylings: &[SheetStyling]) -> Vec<SheetStyling> {
         let mut shown = stylings.to_vec();
         if let Some(first) = shown.first_mut() {
-            first.hidden = false;
+            SheetState::Visible.apply(first);
         }
         shown
     }
@@ -462,7 +466,9 @@ impl SheetStyling {
             && self.freeze.is_none()
             && self.tab_color.is_none()
             && !self.hidden
+            && !self.very_hidden
             && self.outline.is_empty()
+            && self.view.is_default()
             && self.page.is_default()
             && self.defined_names.is_empty()
             && self.protect.is_none()
@@ -481,6 +487,7 @@ impl SheetStyling {
             .is_none_or(|f| Freeze::new(f.rows, f.cols).is_some())
             && self.tab_color.is_none_or(|rgb| rgb <= 0xFF_FFFF)
             && self.outline.within_bounds(max_row, max_col)
+            && self.view.within_bounds(max_row, max_col)
             && self.page.within_bounds(max_row, max_col)
             && self
                 .protect
@@ -563,6 +570,18 @@ impl SheetStyling {
 /// never sends or keeps such a state, a file made by another program might have it.
 pub(crate) fn hides_every_sheet(stylings: &[SheetStyling], count: usize) -> bool {
     count > 0 && stylings.len() >= count && stylings[..count].iter().all(|s| s.hidden)
+}
+
+/// The state of each sheet of `stylings`. A workbook shows at least one sheet, so when every sheet is
+/// hidden the first one is shown; the page never sends that, a file made by another program might.
+pub(crate) fn sheet_states(sheet_count: usize, stylings: &[SheetStyling]) -> Vec<SheetState> {
+    let mut states: Vec<SheetState> = (0..sheet_count)
+        .map(|i| stylings.get(i).map_or(SheetState::Visible, SheetState::of))
+        .collect();
+    if hides_every_sheet(stylings, sheet_count) {
+        states[0] = SheetState::Visible;
+    }
+    states
 }
 
 /// Formats a size in hundredths of a point without trailing zeros (`1125` -> `11.25`).

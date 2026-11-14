@@ -10,13 +10,92 @@
 //! reference has no group levels, so the levels follow ECMA-376 18.3.1.73 (`outlineLevel`, 0 to 7)
 //! and 18.3.1.31 (`outlinePr`: `summaryBelow`, `summaryRight`).
 //!
+//! 참조 구현 (the sheet state and the sheet view): IronCalc `base/src/types.rs` lines 152-170 (`SheetState`
+//! with `visible`, `hidden`, `veryHidden` and their file names), `xlsx/src/import/workbook.rs` lines 36-41
+//! (the `state` attribute), `xlsx/src/export/worksheets.rs` lines 640-725 (the selection is written as the
+//! `activeCell` and `sqref` of the pane that holds it, with a `selection` for each of the other panes and
+//! the `topLeftCell` of the sheet view and of the pane) and `xlsx/src/import/worksheets.rs` lines 823-895
+//! (one `sheetView`, the `pane` of a frozen sheet), Apache-2.0 or MIT, Copyright (c) IronCalc contributors,
+//! commit 87b684b. Apache POI `hssf/record/BoundSheetRecord.java` lines 38-39 and 128-150 (the option
+//! word's bit 0 hides a sheet, bit 1 hides it for good), Apache-2.0, Copyright The Apache Software
+//! Foundation, commit 47dcff7.
+//!
 //! Modifications: a group's folded state is the set of rows or columns that folding hid
 //! ([`Outline::collapsed_rows`]), kept apart from the rows a user hid (`SheetStyling::hidden_rows`)
 //! and the rows a filter hid, so each kind is shown or hidden on its own. A file stores one `hidden`
 //! flag per row plus a `collapsed` flag on the summary row; [`Outline::split_collapsed`] tells the two
 //! kinds apart and [`Outline::summary_marks`] writes the flags back. Every size is bounded.
 
+use crate::sheet_styling::SheetStyling;
 use crate::xlsx_layout::{add_run, intersect_runs, normalize_runs, run_total, subtract_runs};
+
+/// Whether a sheet has a tab (ECMA-376 18.18.68 `ST_SheetState`; BIFF8 `BOUNDSHEET` `hsState`). A hidden
+/// sheet comes back through the sheet menu; a very hidden one does not, only another program's
+/// macro or object model shows it again (PD-209).
+///
+/// The model and its file names follow the sources named at the head of this file.
+///
+/// Differences: the state is read from and applied to [`SheetStyling`] (`hidden`, `very_hidden`), where
+/// `very_hidden` implies `hidden`; an unknown `state` text is `Visible`, not an error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SheetState {
+    #[default]
+    Visible,
+    Hidden,
+    VeryHidden,
+}
+
+impl SheetState {
+    /// The state a sheet's styling carries.
+    pub fn of(styling: &SheetStyling) -> Self {
+        match (styling.hidden, styling.very_hidden) {
+            (_, true) => Self::VeryHidden,
+            (true, false) => Self::Hidden,
+            _ => Self::Visible,
+        }
+    }
+
+    /// Gives `styling` this state.
+    pub fn apply(self, styling: &mut SheetStyling) {
+        styling.hidden = self != Self::Visible;
+        styling.very_hidden = self == Self::VeryHidden;
+    }
+
+    /// The `state` attribute of a `sheet` element.
+    pub fn from_xlsx(state: Option<&str>) -> Self {
+        match state {
+            Some("hidden") => Self::Hidden,
+            Some("veryHidden") => Self::VeryHidden,
+            _ => Self::Visible,
+        }
+    }
+
+    /// The `state` attribute to write; `None` for a visible sheet.
+    pub fn xlsx(self) -> Option<&'static str> {
+        match self {
+            Self::Visible => None,
+            Self::Hidden => Some("hidden"),
+            Self::VeryHidden => Some("veryHidden"),
+        }
+    }
+
+    /// The `hsState` byte of a `BOUNDSHEET` record.
+    pub fn from_biff(hs_state: u8) -> Self {
+        match hs_state & 0x03 {
+            0 => Self::Visible,
+            2 => Self::VeryHidden,
+            _ => Self::Hidden,
+        }
+    }
+
+    pub fn biff(self) -> u8 {
+        match self {
+            Self::Visible => 0,
+            Self::Hidden => 1,
+            Self::VeryHidden => 2,
+        }
+    }
+}
 
 /// Deepest group level (ECMA-376 `outlineLevel` is 0 to 7).
 pub const MAX_OUTLINE_LEVEL: u8 = 7;
@@ -28,6 +107,80 @@ pub const MAX_FREEZE_COLS: u32 = 100;
 pub const MAX_OUTLINE_ROWS: u64 = 100_000;
 /// Runs of equal level one axis may carry.
 pub const MAX_OUTLINE_RUNS: usize = 100_000;
+
+/// Smallest and largest zoom percentage a sheet view may carry (ECMA-376 18.3.1.88 `zoomScale`).
+pub const MIN_ZOOM: u16 = 10;
+pub const MAX_ZOOM: u16 = 400;
+
+/// Where a sheet was left: its selected cells, its zoom and how far it is scrolled. Cells are
+/// zero-based `(row, col)`. It is what the view of the sheet (`sheetView`, the table entry of
+/// `settings.xml`) says; it is not part of the undo history (PD-208).
+///
+/// The way a selection, a frozen pane and the scroll corners are written follows the source named at the head
+/// of this file for the sheet view.
+///
+/// Differences: the reference does not read the selection, zoom or scroll position (it opens every
+/// sheet at A1) and writes a selection of one cell; this keeps a range, the zoom and the scroll
+/// position, and reads them from the pane the file marks active. A value outside its bound is dropped as
+/// a whole, never clamped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ViewState {
+    /// The active cell: where typing goes. It lies in `range`.
+    pub active: (u32, u32),
+    /// The selected range as `(first row, first col, last row, last col)`; the active cell for one cell.
+    pub range: (u32, u32, u32, u32),
+    /// The zoom in percent; `None` is 100.
+    pub zoom: Option<u16>,
+    /// The first row and column the scrolling part of the sheet shows (below and right of a frozen pane).
+    pub top_left: (u32, u32),
+}
+
+impl ViewState {
+    /// A zoom of 100 is no zoom, a zoom outside the bound is none either.
+    pub fn zoom_of(percent: u32) -> Option<u16> {
+        u16::try_from(percent)
+            .ok()
+            .filter(|z| *z != 100 && (MIN_ZOOM..=MAX_ZOOM).contains(z))
+    }
+
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// The state of a selection of `range` (corners in any order) with `active` in it; an active cell outside
+    /// the range selects that cell alone.
+    pub fn selecting(active: (u32, u32), (r0, c0): (u32, u32), (r1, c1): (u32, u32)) -> Self {
+        let range = (r0.min(r1), c0.min(c1), r0.max(r1), c0.max(c1));
+        let inside =
+            (range.0..=range.2).contains(&active.0) && (range.1..=range.3).contains(&active.1);
+        Self {
+            active,
+            range: if inside {
+                range
+            } else {
+                (active.0, active.1, active.0, active.1)
+            },
+            ..Self::default()
+        }
+    }
+
+    /// Whether every cell lies in a sheet of `max_row` rows and `max_col` columns, the active cell lies in the
+    /// range and the zoom is in bounds.
+    pub fn within_bounds(&self, max_row: u32, max_col: u32) -> bool {
+        let (r0, c0, r1, c1) = self.range;
+        r0 <= r1
+            && c0 <= c1
+            && r1 < max_row
+            && c1 < max_col
+            && (r0..=r1).contains(&self.active.0)
+            && (c0..=c1).contains(&self.active.1)
+            && self.top_left.0 < max_row
+            && self.top_left.1 < max_col
+            && self
+                .zoom
+                .is_none_or(|z| z != 100 && (MIN_ZOOM..=MAX_ZOOM).contains(&z))
+    }
+}
 
 /// Zero-based inclusive run of rows or columns that share one group level (1 to 7).
 pub type LevelRun = (u32, u32, u8);
@@ -240,6 +393,32 @@ impl Outline {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_sheet_state_is_read_and_written_by_each_format() {
+        for (text, state) in [
+            (None, SheetState::Visible),
+            (Some("visible"), SheetState::Visible),
+            (Some("hidden"), SheetState::Hidden),
+            (Some("veryHidden"), SheetState::VeryHidden),
+            (Some("nonsense"), SheetState::Visible),
+        ] {
+            assert_eq!(SheetState::from_xlsx(text), state);
+        }
+        for state in [
+            SheetState::Visible,
+            SheetState::Hidden,
+            SheetState::VeryHidden,
+        ] {
+            assert_eq!(SheetState::from_xlsx(state.xlsx()), state);
+            assert_eq!(SheetState::from_biff(state.biff()), state);
+            let mut styling = SheetStyling::default();
+            state.apply(&mut styling);
+            assert_eq!(SheetState::of(&styling), state);
+        }
+        assert_eq!(SheetState::from_biff(3), SheetState::Hidden);
+        assert_eq!(SheetState::from_biff(0x40), SheetState::Visible);
+    }
 
     #[test]
     fn freeze_needs_a_pane_inside_the_bounds() {

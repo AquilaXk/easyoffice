@@ -9,6 +9,7 @@ const INDEX_HTML_PATH = fileURLToPath(
 );
 const PROD_PRE_SCRIPTS = [
   "../crates/easyoffice-app/ui/theme.js",
+  "../crates/easyoffice-app/ui/zoom-range.js",
   "../crates/easyoffice-app/ui/icons.js",
   "../crates/easyoffice-app/ui/sheet-utils.js",
 ].map((relPath) => ({
@@ -66,6 +67,7 @@ const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/sheet-numfmt.js",
   "../crates/easyoffice-app/ui/sheet-numfmt-display.js",
   "../crates/easyoffice-app/ui/sheet-layout.js",
+  "../crates/easyoffice-app/ui/sheet-view-state.js",
   "../crates/easyoffice-app/ui/sheet-protect.js",
   "../crates/easyoffice-app/ui/sheet-tab-names.js",
   "../crates/easyoffice-app/ui/sheet-tab-strip.js",
@@ -108,6 +110,7 @@ const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/sheet-tab-menu.js",
   "../crates/easyoffice-app/ui/sheet-structure.js",
   "../crates/easyoffice-app/ui/sheet-cell-write.js",
+  "../crates/easyoffice-app/ui/sheet-view-live.js",
   "../crates/easyoffice-app/ui/sheet-controller.js",
   "../crates/easyoffice-app/ui/sheet-delta.js",
   "../crates/easyoffice-app/ui/sheet-history.js",

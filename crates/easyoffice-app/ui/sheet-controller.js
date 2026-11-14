@@ -807,6 +807,27 @@
       return input.runClipboardCommand(cmd);
     }
 
+    const viewLive = host.__EASYOFFICE_CREATE_SHEET_VIEW_LIVE__({
+      document,
+      grid,
+      input,
+      sheetDataStore,
+      getActiveModule,
+      getActiveSheetName,
+      setActiveSheetName,
+      flushFocusedSheetCellBeforeSwitch,
+      snapshotDomSheetCells,
+      saveActiveSheetCellsToWorkbook,
+      restoreDomSheetCells,
+      refreshFocusedSheetCellPendingSnapshot,
+      afterSwitch: (target) => {
+        if (getActiveModule() === "SHEET" && typeof onSheetSwitchedOutline === "function") onSheetSwitchedOutline();
+        const fb = document.getElementById("status-command-feedback");
+        if (fb) fb.textContent = "시트 탭 전환: " + target;
+        structure.refreshSheetChrome();
+      },
+    });
+
     const ops = host.__EASYOFFICE_CREATE_SHEET_OPS__({
       document,
       gridUtils,
@@ -881,6 +902,7 @@
       recalculateActiveSheetFormulas,
       getExtent: () => getSheetExtent(getActiveSheetName()),
       sortRange: (target) => ops.sortActiveSheetRange(target),
+      viewLive,
       enqueueWorkspaceHistoryOp,
       drainInFlightSheetWork,
       sheetHistory,
@@ -910,34 +932,9 @@
     sheetRules.on("repaint", () => grid.repaintFx());
     sheetRules.on("readCells", (sheet, ref) => String(sheetDataStore[sheet]?.[ref]?.value ?? ""));
 
-    async function performSwitchSheetTabAsync(targetSheetName) {
-      await flushFocusedSheetCellBeforeSwitch();
-      if (!sheetDataStore.Sheet1 && getActiveSheetName() === "Sheet1") {
-        sheetDataStore.Sheet1 = snapshotDomSheetCells();
-      }
-      saveActiveSheetCellsToWorkbook();
-      setActiveSheetName(targetSheetName);
-      if (!sheetDataStore[targetSheetName]) {
-        sheetDataStore[targetSheetName] = {};
-      }
-      restoreDomSheetCells(targetSheetName);
-      refreshFocusedSheetCellPendingSnapshot();
-      const sheetTabBar = document.getElementById("sheet-tab-bar");
-      if (sheetTabBar) {
-        sheetTabBar.querySelectorAll(".sheet-tab-btn[data-sheet-tab]").forEach((b) => {
-          const isAct = b.dataset.sheetTab === targetSheetName;
-          b.classList.toggle("active", isAct);
-          b.setAttribute("role", "tab");
-          b.setAttribute("aria-selected", isAct ? "true" : "false");
-        });
-      }
-      updateSheetSelectionAndAggregates("A1");
-      if (getActiveModule() === "SHEET" && typeof onSheetSwitchedOutline === "function") {
-        onSheetSwitchedOutline();
-      }
-      const fb = document.getElementById("status-command-feedback");
-      if (fb) fb.textContent = "시트 탭 전환: " + targetSheetName;
-      structure.refreshSheetChrome();
+    // Switching sheets and the view each sheet keeps (`sheet-view-live.js`).
+    function performSwitchSheetTabAsync(target) {
+      return viewLive.switchTo(target);
     }
 
     function switchSheetTab(targetSheetName) {
@@ -988,6 +985,8 @@
       syncSheetFormatToolbar: format.syncToolbar,
       performSwitchSheetTabAsync,
       switchSheetTab,
+      captureView: viewLive.capture,
+      restoreView: viewLive.restore,
     };
   }
 

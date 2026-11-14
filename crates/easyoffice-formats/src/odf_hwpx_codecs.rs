@@ -10,7 +10,7 @@ use crate::sheet_styling::ods_numfmt::{EO_NS, NUMBER_NS};
 use crate::sheet_styling::ods_page::title_end;
 use crate::sheet_styling::ods_styles::{parse_ods_styling, table_columns_xml, OdsStyleTable};
 use crate::sheet_styling::ods_view::{
-    read_freezes, settings_xml, GroupWriter, TabStyles, TABLEOOO_NS,
+    read_views, settings_xml, GroupWriter, TabStyles, TABLEOOO_NS,
 };
 use crate::sheet_styling::sheet_rules::ods_rules::{OdsRuleTable, CALCEXT_NS};
 use crate::sheet_styling::{hides_every_sheet, IdMemo, SheetStyling};
@@ -672,7 +672,7 @@ impl OdfCodec {
     ) -> Result<Vec<(String, SheetStyling)>, EasyOfficeError> {
         let (content_xml, _, settings, styles) = Self::extract_parts(bytes, Self::MIMETYPE_ODS)?;
         let mut stylings = parse_ods_styling(&content_xml)?;
-        Self::apply_freezes(&mut stylings, settings.as_deref());
+        Self::apply_views(&mut stylings, settings.as_deref());
         crate::sheet_styling::ods_page::read_pages(&content_xml, styles.as_deref(), &mut stylings);
         crate::sheet_styling::ods_names::read_names(&content_xml, &mut stylings);
         crate::sheet_styling::sheet_table::ods_tables::read_tables(&content_xml, &mut stylings)?;
@@ -692,7 +692,7 @@ impl OdfCodec {
     ) -> Result<(OdsMultiUnpacked, Vec<(String, SheetStyling)>), EasyOfficeError> {
         let (content_xml, _, settings, styles) = Self::extract_parts(bytes, Self::MIMETYPE_ODS)?;
         let (sheets, mut stylings) = read_ods_sheets_with_styling(&content_xml)?;
-        Self::apply_freezes(&mut stylings, settings.as_deref());
+        Self::apply_views(&mut stylings, settings.as_deref());
         crate::sheet_styling::ods_page::read_pages(&content_xml, styles.as_deref(), &mut stylings);
         crate::sheet_styling::ods_names::read_names(&content_xml, &mut stylings);
         crate::sheet_styling::sheet_table::ods_tables::read_tables(&content_xml, &mut stylings)?;
@@ -941,16 +941,18 @@ impl OdfCodec {
     /// A workbook shows at least one sheet: a file that hides them all opens on its first.
     fn show_one_sheet(stylings: &mut [(String, SheetStyling)]) {
         if !stylings.is_empty() && stylings.iter().all(|(_, s)| s.hidden) {
-            stylings[0].1.hidden = false;
+            crate::SheetState::Visible.apply(&mut stylings[0].1);
         }
     }
 
-    /// Gives each table the frozen pane `settings.xml` names for its sheet.
-    fn apply_freezes(stylings: &mut [(String, SheetStyling)], settings: Option<&str>) {
+    /// Gives each table the frozen pane and the view `settings.xml` names for its sheet.
+    fn apply_views(stylings: &mut [(String, SheetStyling)], settings: Option<&str>) {
         let Some(settings) = settings else { return };
-        let mut freezes = read_freezes(settings);
+        let mut views = read_views(settings);
         for (name, styling) in stylings {
-            styling.freeze = freezes.remove(name.as_str());
+            if let Some(table) = views.remove(name.as_str()) {
+                (styling.freeze, styling.view) = (table.freeze, table.view);
+            }
         }
     }
 }

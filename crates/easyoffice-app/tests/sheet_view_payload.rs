@@ -74,3 +74,45 @@ fn a_bad_view_value_refuses_the_save() {
         assert!(save("xlsx", view).is_err(), "{view}");
     }
 }
+
+#[test]
+fn the_selection_zoom_and_scroll_reach_both_files_and_come_back() {
+    let view = r#","view":{"active":[12,6],"range":[12,6,14,7],"zoom":150,"top":[10,4]}"#;
+    let frozen = r#","freeze":{"rows":2,"cols":1},"view":{"active":[12,6],"range":[12,6,14,7],"zoom":80,"top":[30,5]}"#;
+    for dst in ["xlsx", "ods"] {
+        for (extra, want) in [(view, view), (frozen, frozen)] {
+            let bytes = save(dst, extra).unwrap();
+            let opened = open(dst, &bytes);
+            // ODS keeps the cursor cell, not the range.
+            let want = if dst == "ods" {
+                want.replace(r#","range":[12,6,14,7]"#, "")
+            } else {
+                want.to_string()
+            };
+            assert!(opened.contains(&want), "{dst}: {opened}");
+        }
+        let plain = open(dst, &save(dst, "").unwrap());
+        assert!(!plain.contains("\"view\""), "{dst}");
+        // A view that only repeats the defaults says nothing in the file either.
+        let default = open(
+            dst,
+            &save(dst, r#","view":{"zoom":100,"active":[1,1],"top":[1,1]}"#).unwrap(),
+        );
+        assert!(!default.contains("\"view\""), "{dst}");
+    }
+}
+
+#[test]
+fn a_bad_selection_zoom_or_scroll_refuses_the_save() {
+    for view in [
+        r#","view":{"zoom":401}"#,
+        r#","view":{"zoom":9}"#,
+        r#","view":{"active":[0,0]}"#,
+        r#","view":{"active":[1048577,1]}"#,
+        r#","view":{"top":[1,16385]}"#,
+        r#","view":{"range":[1,1,2]}"#,
+        r#","view":"A1""#,
+    ] {
+        assert!(save("xlsx", view).is_err(), "{view}");
+    }
+}

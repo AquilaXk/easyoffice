@@ -29,10 +29,10 @@ fn save(dst: &str, sheets: &[String]) -> Result<Vec<u8>, String> {
 }
 
 fn names_and_hidden(dst: &str, bytes: &[u8]) -> Vec<(String, bool)> {
-    let format = if dst == "xlsx" {
-        DocumentFormat::Xlsx
-    } else {
-        DocumentFormat::Ods
+    let format = match dst {
+        "xlsx" => DocumentFormat::Xlsx,
+        "xls" => DocumentFormat::Xls,
+        _ => DocumentFormat::Ods,
     };
     read_sheet_styling(bytes, format)
         .unwrap()
@@ -189,5 +189,67 @@ fn many_sheets_keep_their_order_and_flags() {
             assert_eq!(*hidden, (i + 1) % 3 == 0, "{name}");
         }
         assert!(save(dst, &make(257)).is_err(), "{dst}");
+    }
+}
+
+fn states(dst: &str, bytes: &[u8]) -> Vec<(bool, bool)> {
+    let format = match dst {
+        "xlsx" => DocumentFormat::Xlsx,
+        "xls" => DocumentFormat::Xls,
+        _ => DocumentFormat::Ods,
+    };
+    read_sheet_styling(bytes, format)
+        .unwrap()
+        .into_iter()
+        .map(|(_, styling)| (styling.hidden, styling.very_hidden))
+        .collect()
+}
+
+#[test]
+fn a_very_hidden_sheet_keeps_its_state_in_xlsx_and_xls_and_is_hidden_in_ods() {
+    let sheets = [
+        sheet("보임", ""),
+        sheet("숨김", r#","hidden":true"#),
+        sheet("깊은", r#","veryHidden":true"#),
+    ];
+    let want = vec![(false, false), (true, false), (true, true)];
+    let xlsx = save("xlsx", &sheets).unwrap();
+    let xml = workbook_xml(&xlsx);
+    assert!(
+        xml.contains("name=\"숨김\" sheetId=\"2\" state=\"hidden\""),
+        "{xml}"
+    );
+    assert!(
+        xml.contains("name=\"깊은\" sheetId=\"3\" state=\"veryHidden\""),
+        "{xml}"
+    );
+    assert_eq!(states("xlsx", &xlsx), want);
+    assert_eq!(states("xls", &save("xls", &sheets).unwrap()), want);
+    assert_eq!(
+        states("ods", &save("ods", &sheets).unwrap()),
+        vec![(false, false), (true, false), (true, false)]
+    );
+    // The open answer tells the page which hidden sheet the menu must not list.
+    let opened = open("xlsx", &xlsx);
+    assert_eq!(opened.matches("\"veryHidden\":true").count(), 1, "{opened}");
+    assert_eq!(opened.matches("\"hidden\":true").count(), 2, "{opened}");
+}
+
+#[test]
+fn an_xls_that_hides_every_sheet_opens_on_the_first_and_a_request_that_lies_is_refused() {
+    let all = [
+        sheet("A", r#","veryHidden":true"#),
+        sheet("B", r#","hidden":true"#),
+    ];
+    assert_eq!(
+        states("xls", &save("xls", &all).unwrap()),
+        vec![(false, false), (true, false)]
+    );
+    for extra in [
+        r#","veryHidden":"yes""#,
+        r#","veryHidden":1"#,
+        r#","veryHidden":null"#,
+    ] {
+        assert!(save("xlsx", &[sheet("A", extra)]).is_err(), "{extra}");
     }
 }

@@ -20,7 +20,7 @@ use crate::sheet_styling::xlsx_view::{
     apply_tint, sheet_format_pr_xml, sheet_pr_xml, sheet_views_xml, theme_palette, DEFAULT_THEME,
 };
 use crate::sheet_styling::{
-    hides_every_sheet, merges_clear_of_tables, unique_table_names, IdMemo, SheetStyling,
+    merges_clear_of_tables, sheet_states, unique_table_names, IdMemo, SheetState, SheetStyling,
     TableRegistry,
 };
 use crate::{EasyOfficeError, XmlSanitizer, ZipArchiveCodec, ZipSecurityPolicy};
@@ -72,27 +72,18 @@ const XLSX_ROOT_RELS: &str = concat!(
 
 type SharedStringMap<'a> = std::collections::HashMap<&'a str, usize>;
 
-/// Which sheets `stylings` hides. A workbook shows at least one sheet, so when every sheet is
-/// hidden the first one is shown; the page never sends that, a file made by another program might.
-fn hidden_sheets(sheet_count: usize, stylings: &[SheetStyling]) -> Vec<bool> {
-    let mut hidden: Vec<bool> = (0..sheet_count)
-        .map(|i| stylings.get(i).is_some_and(|s| s.hidden))
-        .collect();
-    if hides_every_sheet(stylings, sheet_count) {
-        hidden[0] = false;
-    }
-    hidden
-}
-
 /// `xl/workbook.xml` and `xl/_rels/workbook.xml.rels` contents. A hidden sheet is written as
-/// `state="hidden"`, and the book opens on the first sheet that is shown (ECMA-376 18.2.19
-/// `sheet@state`, 18.2.1 `bookViews`).
+/// `state="hidden"` or `state="veryHidden"`, and the book opens on the first sheet that is shown
+/// (ECMA-376 18.2.19 `sheet@state`, 18.2.1 `bookViews`).
 fn build_workbook_parts(
     active_sheets: &[OdsUnpacked],
-    hidden: &[bool],
+    states: &[SheetState],
     stylings: &[SheetStyling],
 ) -> (String, String) {
-    let first_shown = hidden.iter().position(|&h| !h).unwrap_or(0);
+    let first_shown = states
+        .iter()
+        .position(|&s| s == SheetState::Visible)
+        .unwrap_or(0);
     let mut workbook_xml = String::from(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?><workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">",
     );
@@ -116,7 +107,9 @@ fn build_workbook_parts(
         } else {
             s_name.clone()
         };
-        let state = if hidden[i] { " state=\"hidden\"" } else { "" };
+        let state = states[i]
+            .xlsx()
+            .map_or(String::new(), |text| format!(" state=\"{text}\""));
         workbook_xml.push_str(&format!(
             "<sheet name=\"{}\" sheetId=\"{num}\"{state} r:id=\"rId{num}\"/>",
             XmlSanitizer::escape(&clean_name)
@@ -342,7 +335,7 @@ fn build_sheet_xml(
     );
     if let Some(st) = styling {
         sheet_xml.push_str(&sheet_pr_xml(st));
-        sheet_xml.push_str(&sheet_views_xml(st.freeze));
+        sheet_xml.push_str(&sheet_views_xml(st.freeze, &st.view));
         sheet_xml.push_str(&sheet_format_pr_xml(st));
         sheet_xml.push_str(&layout_cols_xml(st, style_table.unlocked_xf()));
     }
@@ -596,8 +589,8 @@ impl OoxmlCodec {
                 "서로 다른 셀 서식이 65,535가지를 넘어 XLSX로 저장할 수 없습니다.".to_string(),
             ));
         }
-        let hidden = hidden_sheets(active_sheets.len(), stylings);
-        let (workbook_xml, wb_rels_xml) = build_workbook_parts(active_sheets, &hidden, stylings);
+        let states = sheet_states(active_sheets.len(), stylings);
+        let (workbook_xml, wb_rels_xml) = build_workbook_parts(active_sheets, &states, stylings);
         let styles_xml = style_table.to_xml();
         let (shared_strings, sst_map, total_str_count) = collect_shared_strings(active_sheets);
         let sst_xml = build_shared_strings_xml(&shared_strings, total_str_count);
@@ -809,7 +802,7 @@ impl OoxmlCodec {
 
         let sheet_tags = extract_balanced_elements(wb_xml, "sheet");
         Self::check_sheet_count(sheet_tags.len())?;
-        let mut sheet_specs: Vec<(String, String, bool)> = Vec::new();
+        let mut sheet_specs: Vec<(String, String, SheetState)> = Vec::new();
         for (idx, (s_attrs, _)) in sheet_tags.into_iter().enumerate() {
             let name = extract_attr_from_fragment(s_attrs, "name")
                 .map(XmlSanitizer::unescape)
@@ -818,23 +811,19 @@ impl OoxmlCodec {
                 .or_else(|| extract_attr_from_fragment(s_attrs, "id"))
                 .and_then(|rid| rel_targets.get(rid).cloned())
                 .unwrap_or_else(|| format!("xl/worksheets/sheet{}.xml", idx + 1));
-            // `veryHidden` is hidden here too: the page has one kind of hidden sheet.
-            let hidden = matches!(
-                extract_attr_from_fragment(s_attrs, "state"),
-                Some("hidden" | "veryHidden")
-            );
-            sheet_specs.push((name, target_path, hidden));
+            let state = SheetState::from_xlsx(extract_attr_from_fragment(s_attrs, "state"));
+            sheet_specs.push((name, target_path, state));
         }
         if sheet_specs.is_empty() {
             sheet_specs.push((
                 "Sheet1".to_string(),
                 "xl/worksheets/sheet1.xml".to_string(),
-                false,
+                SheetState::Visible,
             ));
         }
         // A workbook shows at least one sheet: a file that hides them all opens on its first.
-        if sheet_specs.iter().all(|spec| spec.2) {
-            sheet_specs[0].2 = false;
+        if sheet_specs.iter().all(|spec| spec.2 != SheetState::Visible) {
+            sheet_specs[0].2 = SheetState::Visible;
         }
 
         let styles_xml = entry_by_path
@@ -866,7 +855,7 @@ impl OoxmlCodec {
         let mut budget = DecodeBudget::new();
         let mut link_allowance = LinkAllowance::default();
         let mut table_registry = TableRegistry::default();
-        for (idx, (sheet_name, target_path, hidden)) in sheet_specs.into_iter().enumerate() {
+        for (idx, (sheet_name, target_path, state)) in sheet_specs.into_iter().enumerate() {
             let part = entry_by_path
                 .get_key_value(target_path.as_str())
                 .or_else(|| {
@@ -902,7 +891,7 @@ impl OoxmlCodec {
             if with_styling {
                 let mut styling = scan.styling;
                 styling.num_fmts = Arc::clone(&xf_styles.num_fmts);
-                styling.hidden = hidden;
+                state.apply(&mut styling);
                 // The count belongs to the workbook; one sheet carries it.
                 styling.num_fmts_rejected = if idx == 0 { xf_styles.rejected } else { 0 };
                 styling.rules = parse_worksheet_rules(sheet_xml, &dxf_styles);

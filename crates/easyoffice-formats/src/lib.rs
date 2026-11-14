@@ -72,6 +72,7 @@ mod svg_guard;
 mod text_decode;
 pub mod text_pdf_codecs;
 pub mod utf16_swar;
+mod xls_boundsheet;
 mod xls_sheet_names;
 mod xls_sst_cursor;
 mod xls_styles;

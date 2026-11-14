@@ -46,8 +46,10 @@
       drainInFlightSheetWork,
       sheetHistory,
       restoreWorkspaceSnapshot,
+      viewLive,
       ui,
     } = deps;
+    const viewState = host.__EASYOFFICE_SHEET_VIEW_STATE__;
 
     function say(text) {
       const fb = document.getElementById("status-command-feedback");
@@ -90,6 +92,8 @@
         await drainInFlightSheetWork();
         commitIfEditing();
         sheetDataStore[getActiveSheetName()] = snapshotDomSheetCells();
+        viewLive.capture();
+        const before = getActiveSheetName();
         const record = sheetHistory.begin({ sheets: "all", parts: "all", sync: false });
         const state = sheetHistory.current();
         const next = {
@@ -103,6 +107,8 @@
         const text = await work(next);
         if (typeof text !== "string") return false;
         await restoreWorkspaceSnapshot(next, null, { adopt: true });
+        // A sheet the window now shows is shown as it was left, a copy as its source was (PD-208).
+        if (getActiveSheetName() !== before) viewLive.restore();
         sheetHistory.commit(record, { renames });
         await recalculateActiveSheetFormulas({ updateFocusedDisplay: true });
         refreshChrome();
@@ -207,6 +213,7 @@
         next.sheetRules = withoutKey(next.sheetRules, sheet);
         next.sheetLayout = withoutKey(next.sheetLayout, sheet);
         next.sheetOrder = next.sheetOrder.filter((n) => n !== sheet);
+        viewState.remove(sheet);
         return "시트 삭제: " + names.labelOf(sheet);
       });
     }
@@ -235,6 +242,7 @@
         next.sheetLayout = renamedKey(next.sheetLayout, sheet, to);
         next.sheetOrder = next.sheetOrder.map((n) => (n === sheet ? to : n));
         if (next.activeSheetName === sheet) next.activeSheetName = to;
+        viewState.rename(sheet, to);
         return "시트 이름 바꿈: " + to;
       }, { [sheet]: to });
       if (done) ui.focusTab(to);
@@ -264,6 +272,7 @@
         }
         place(next, name, next.sheetOrder.indexOf(sheet) + 1);
         activate(next, name);
+        viewState.copy(sheet, name);
         return "시트 복사: " + names.labelOf(name);
       });
     }

@@ -305,6 +305,7 @@
     const columnWidths = {};
     const rulesBySheet = {};
     const layoutBySheet = {};
+    const viewBySheet = {};
     (sheets || []).forEach((sheet) => {
       const map = {};
       let maxRow = 0;
@@ -333,8 +334,10 @@
       if (LAYOUT_KEYS.some((key) => sheet[key]?.length || (sheet[key] && !Array.isArray(sheet[key])))) {
         layoutBySheet[sheet.name] = Object.fromEntries(LAYOUT_KEYS.map((key) => [key, sheet[key]]));
       }
+      // The selection, zoom and scroll position (PD-208) are not part of the layout: they are no undo step.
+      if (sheet.view) viewBySheet[sheet.name] = sheet.view;
     });
-    return { store, rowCounts, columnWidths, rulesBySheet, layoutBySheet };
+    return { store, rowCounts, columnWidths, rulesBySheet, layoutBySheet, viewBySheet };
   }
 
   function hasFiles(ev) {
@@ -414,7 +417,8 @@
         };
       } else if (mod === "SHEET") {
         const sheets = Array.isArray(res.sheets) && res.sheets.length > 0 ? res.sheets : [{ name: "Sheet1", cells: [] }];
-        const { store, rowCounts, columnWidths, rulesBySheet, layoutBySheet } = buildSheetStore(sheets);
+        const { store, rowCounts, columnWidths, rulesBySheet, layoutBySheet, viewBySheet } = buildSheetStore(sheets);
+        host.__EASYOFFICE_SHEET_VIEW_STATE__.replaceAll(viewBySheet);
         host.__EASYOFFICE_SHEET_LAYOUT__.replaceAll(layoutBySheet);
         host.__EASYOFFICE_SHEET_LAYOUT__.resetTableHeaders();
         next.sheetLayout = layoutBySheet;
@@ -437,7 +441,8 @@
         next.sheetRowCounts = rowCounts;
         next.sheetColumnWidths = columnWidths;
         next.activeSheetName = first;
-        next.activeSheetCellRef = "A1";
+        const active = host.__EASYOFFICE_SHEET_VIEW_STATE__.get(first)?.active;
+        next.activeSheetCellRef = active ? host.__EASYOFFICE_SHEET_GRID_UTILS__.refOf(active[0], active[1]) : "A1";
         if (typeof replaceColumnWidths === "function") replaceColumnWidths(columnWidths);
       } else if (mod === "SLIDE") {
         const slides = Array.isArray(res.slides) ? res.slides : [];
@@ -520,7 +525,10 @@
         await applyDecoded(next, res, name);
         pushRawUndoSnapshot(pre);
         await restoreWorkspaceSnapshot(next, null);
-        if (res.module === "SHEET") clearSheetEvalResult();
+        if (res.module === "SHEET") {
+          clearSheetEvalResult();
+          deps.restoreSheetView?.();
+        }
         baselines[res.module] = fingerprint(captureWorkspaceSnapshot(false), res.module);
         return { ok: true };
       }).catch((err) => ({ error: err?.message || String(err) }));

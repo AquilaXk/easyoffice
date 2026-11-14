@@ -2,15 +2,19 @@
 //! answer, the save request and the row/column edit of a sheet session (PD-208).
 //!
 //! `freeze`: `{"rows": n, "cols": n}`, the counts of frozen rows and columns. `tabColor`: `rrggbb`.
-//! `hidden`: `true` for a sheet without a tab (PD-209).
+//! `hidden`: `true` for a sheet without a tab; `veryHidden`: `true` for one the sheet menu does not list
+//! either, which is hidden as well (PD-209).
 //! `outline`: `{"rows": [[first, last, level], ...], "cols": [...], "foldedRows": [[first, last], ...],
 //! "foldedCols": [...], "summaryAbove": bool, "summaryLeft": bool}`, 1-based and inclusive; a level
 //! is 1 to 7 and a folded run lies inside a group. Input over a limit is refused, not trimmed.
+//! `view`: `{"active": [row, col], "range": [row1, col1, row2, col2], "zoom": percent, "top": [row, col]}`,
+//! 1-based; the selected cell, the selected range that holds it, the zoom (10 to 400) and the first row and
+//! column the scrolling part shows. Each key is left out at its default (A1, A1, 100, A1).
 
 use crate::sheet_layout_json::runs_json;
 use easyoffice_formats::{
     normalize_runs, parse_hex_rgb, EasyOfficeError, Freeze, LevelRun, Outline, SheetStyling,
-    StrictJsonValue, MAX_OUTLINE_LEVEL, MAX_OUTLINE_RUNS,
+    StrictJsonValue, ViewState, MAX_OUTLINE_LEVEL, MAX_OUTLINE_RUNS, MAX_ZOOM, MIN_ZOOM,
 };
 use std::fmt::Write;
 
@@ -122,7 +126,63 @@ pub(crate) fn parse_outline(v: &StrictJsonValue) -> Result<Outline, EasyOfficeEr
     Ok(outline)
 }
 
-/// Reads `freeze`, `tabColor`, `hidden` and `outline` of a sheet object into `styling`.
+/// `[n, n, ...]` of exactly `N` 1-based numbers up to `limits` as zero-based.
+fn cell_list<const N: usize>(
+    v: &StrictJsonValue,
+    limits: [u32; N],
+    what: &str,
+) -> Result<[u32; N], EasyOfficeError> {
+    let items = v
+        .as_array()
+        .filter(|a| a.len() == N)
+        .ok_or_else(|| bad(what))?;
+    let mut out = [0; N];
+    for (i, item) in items.iter().enumerate() {
+        out[i] = item
+            .as_u64()
+            .filter(|n| (1..=u64::from(limits[i])).contains(n))
+            .map(|n| n as u32 - 1)
+            .ok_or_else(|| bad(what))?;
+    }
+    Ok(out)
+}
+
+pub(crate) fn parse_view_state(v: &StrictJsonValue) -> Result<ViewState, EasyOfficeError> {
+    let obj = v.as_object().ok_or_else(|| bad("view"))?;
+    let field = |key: &str| StrictJsonValue::get_field(obj, key);
+    let mut view = ViewState::default();
+    if let Some(v) = field("active") {
+        let [row, col] = cell_list(v, [ROWS, COLS], "view.active")?;
+        view = ViewState::selecting((row, col), (row, col), (row, col));
+    }
+    if let Some(v) = field("range") {
+        let [r0, c0, r1, c1] = cell_list(v, [ROWS, COLS, ROWS, COLS], "view.range")?;
+        let active = if field("active").is_some() {
+            view.active
+        } else {
+            (r0.min(r1), c0.min(c1))
+        };
+        view = ViewState::selecting(active, (r0, c0), (r1, c1));
+        // A range that does not hold the active cell is a lie, not a selection of that cell alone.
+        if view.range != (r0.min(r1), c0.min(c1), r0.max(r1), c0.max(c1)) {
+            return Err(bad("view.range"));
+        }
+    }
+    if let Some(v) = field("zoom") {
+        let percent = v
+            .as_u64()
+            .filter(|z| (u64::from(MIN_ZOOM)..=u64::from(MAX_ZOOM)).contains(z))
+            .ok_or_else(|| bad("view.zoom"))?;
+        view.zoom = ViewState::zoom_of(percent as u32);
+    }
+    if let Some(v) = field("top") {
+        let [row, col] = cell_list(v, [ROWS, COLS], "view.top")?;
+        view.top_left = (row, col);
+    }
+    Ok(view)
+}
+
+/// Reads `freeze`, `tabColor`, `hidden`, `veryHidden`, `outline` and `view` of a sheet object into `styling`.
 pub(crate) fn parse_view(
     obj: &[(String, StrictJsonValue)],
     styling: &mut SheetStyling,
@@ -140,8 +200,15 @@ pub(crate) fn parse_view(
     if let Some(v) = StrictJsonValue::get_field(obj, "hidden") {
         styling.hidden = v.as_bool().ok_or_else(|| bad("hidden"))?;
     }
+    if let Some(v) = StrictJsonValue::get_field(obj, "veryHidden") {
+        styling.very_hidden = v.as_bool().ok_or_else(|| bad("veryHidden"))?;
+        styling.hidden |= styling.very_hidden;
+    }
     if let Some(v) = StrictJsonValue::get_field(obj, "outline") {
         styling.outline = parse_outline(v)?;
+    }
+    if let Some(v) = StrictJsonValue::get_field(obj, "view") {
+        styling.view = parse_view_state(v)?;
     }
     Ok(())
 }
@@ -188,7 +255,7 @@ pub(crate) fn outline_json(outline: &Outline) -> String {
     out
 }
 
-/// `,"freeze":..,"tabColor":..,"hidden":true,"outline":..` for the parts that are set.
+/// `,"freeze":..,"tabColor":..,"hidden":true,"veryHidden":true,"outline":..,"view":..` for the parts that are set.
 pub(crate) fn write_view(out: &mut String, styling: &SheetStyling) {
     if let Some(f) = styling.freeze {
         let _ = write!(
@@ -203,9 +270,56 @@ pub(crate) fn write_view(out: &mut String, styling: &SheetStyling) {
     if styling.hidden {
         out.push_str(",\"hidden\":true");
     }
+    if styling.very_hidden {
+        out.push_str(",\"veryHidden\":true");
+    }
     if !styling.outline.is_empty() {
         let _ = write!(out, ",\"outline\":{}", outline_json(&styling.outline));
     }
+    if !styling.view.is_default() {
+        let _ = write!(out, ",\"view\":{}", view_json(&styling.view));
+    }
+}
+
+/// The view as one JSON object (a default key is left out).
+pub(crate) fn view_json(view: &ViewState) -> String {
+    let mut out = String::from("{");
+    let mut sep = "";
+    let (r0, c0, r1, c1) = view.range;
+    if view.active != (0, 0) {
+        let _ = write!(
+            out,
+            "\"active\":[{},{}]",
+            view.active.0 + 1,
+            view.active.1 + 1
+        );
+        sep = ",";
+    }
+    if (r0, c0, r1, c1) != (view.active.0, view.active.1, view.active.0, view.active.1) {
+        let _ = write!(
+            out,
+            "{sep}\"range\":[{},{},{},{}]",
+            r0 + 1,
+            c0 + 1,
+            r1 + 1,
+            c1 + 1
+        );
+        sep = ",";
+    }
+    if let Some(zoom) = view.zoom {
+        let _ = write!(out, "{sep}\"zoom\":{zoom}");
+        sep = ",";
+    }
+    if view.top_left != (0, 0) {
+        let _ = write!(
+            out,
+            "{sep}\"top\":[{},{}]",
+            view.top_left.0 + 1,
+            view.top_left.1 + 1
+        );
+    }
+    out.push('}');
+    out
 }
 
 #[cfg(test)]
@@ -237,6 +351,62 @@ mod tests {
     }
 
     #[test]
+    fn the_selection_zoom_and_scroll_round_trip_through_json() {
+        for text in [
+            r#"{"view":{"active":[12,6],"range":[12,6,14,7],"zoom":150,"top":[10,4]}}"#,
+            r#"{"view":{"active":[3,3],"range":[2,2,5,5]}}"#,
+            r#"{"view":{"zoom":10}}"#,
+            r#"{"view":{"zoom":400,"top":[1048576,16384]}}"#,
+            r#"{"view":{"range":[1,1,1048576,16384]}}"#,
+        ] {
+            let styling = read(text).unwrap();
+            let mut out = String::new();
+            write_view(&mut out, &styling);
+            assert_eq!(format!("{{{}}}", &out[1..]), text);
+        }
+        // A range without a cell, or a zoom of 100, is the default view and writes nothing.
+        let mut out = String::new();
+        write_view(
+            &mut out,
+            &read(r#"{"view":{"zoom":100,"active":[1,1]}}"#).unwrap(),
+        );
+        assert_eq!(out, "");
+        // Corners in any order are one range, and the active cell defaults to its first cell.
+        let styling = read(r#"{"view":{"range":[5,6,2,3]}}"#).unwrap();
+        assert_eq!(
+            (styling.view.active, styling.view.range),
+            ((1, 2), (1, 2, 4, 5))
+        );
+    }
+
+    #[test]
+    fn a_hostile_view_is_refused() {
+        for text in [
+            r#"{"view":[]}"#,
+            r#"{"view":{"active":[0,1]}}"#,
+            r#"{"view":{"active":[1048577,1]}}"#,
+            r#"{"view":{"active":[1,16385]}}"#,
+            r#"{"view":{"active":[1]}}"#,
+            r#"{"view":{"active":[1,1,1]}}"#,
+            r#"{"view":{"active":[-1,1]}}"#,
+            r#"{"view":{"active":[1.5,1]}}"#,
+            r#"{"view":{"active":["1",1]}}"#,
+            r#"{"view":{"active":[9,9],"range":[1,1,2,2]}}"#,
+            r#"{"view":{"range":[1,1,1048577,1]}}"#,
+            r#"{"view":{"zoom":9}}"#,
+            r#"{"view":{"zoom":401}}"#,
+            r#"{"view":{"zoom":99999999999}}"#,
+            r#"{"view":{"zoom":-100}}"#,
+            r#"{"view":{"zoom":125.5}}"#,
+            r#"{"view":{"zoom":"150"}}"#,
+            r#"{"view":{"top":[0,0]}}"#,
+            r#"{"view":{"top":[1,16385]}}"#,
+        ] {
+            assert!(read(text).is_err(), "{text}");
+        }
+    }
+
+    #[test]
     fn hostile_views_are_refused() {
         for bad_text in [
             r#"{"freeze":{"rows":1001}}"#,
@@ -252,6 +422,8 @@ mod tests {
             r#"{"hidden":"yes"}"#,
             r#"{"hidden":1}"#,
             r#"{"hidden":null}"#,
+            r#"{"veryHidden":"yes"}"#,
+            r#"{"veryHidden":0}"#,
             r#"{"outline":{"rows":[[1,3,8]]}}"#,
             r#"{"outline":{"rows":[[1,3,0]]}}"#,
             r#"{"outline":{"rows":[[0,3,1]]}}"#,
@@ -268,6 +440,20 @@ mod tests {
         ] {
             assert!(read(bad_text).is_err(), "{bad_text}");
         }
+    }
+
+    #[test]
+    fn a_very_hidden_sheet_is_hidden_and_says_so() {
+        let styling = read(r#"{"veryHidden":true}"#).unwrap();
+        assert!(styling.hidden && styling.very_hidden);
+        let mut out = String::new();
+        write_view(&mut out, &styling);
+        assert_eq!(out, r#","hidden":true,"veryHidden":true"#);
+        assert!(
+            !read(r#"{"hidden":true,"veryHidden":false}"#)
+                .unwrap()
+                .very_hidden
+        );
     }
 
     #[test]

@@ -336,6 +336,15 @@
       sel.cc = rg.c2;
     }
 
+    // Gives the selection back as a sheet's view had it, `{ ar, ac, cr, cc }`, without scrolling to it.
+    function restoreSelection(s) {
+      const last = { row: grid.MAX_ROWS, col: grid.MAX_COLS };
+      Object.assign(sel, s);
+      const [r1, r2, c1, c2] = [Math.min(s.ar, s.cr), Math.max(s.ar, s.cr), Math.min(s.ac, s.cc), Math.max(s.ac, s.cc)];
+      sel.axis = c1 === 1 && c2 >= last.col ? "row" : r1 === 1 && r2 >= last.row ? "col" : null;
+      refreshChrome();
+    }
+
     // Selects a range from outside the grid (the name box): the first cell is the anchor and the range is shown.
     function selectRange(rg) {
       const r1 = clamp(rg.r1, 1, grid.MAX_ROWS);
@@ -863,6 +872,7 @@
       getRange,
       selectAxis,
       selectRange,
+      restoreSelection,
       runClipboardCommand,
       shiftFormula: clip.shiftFormula,
       getSelection: () => ({ ...sel }),

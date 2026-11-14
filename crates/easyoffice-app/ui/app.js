@@ -197,6 +197,7 @@
     pushRawUndoSnapshot: ribbonHistory.pushRawUndoSnapshot,
     restoreWorkspaceSnapshot: ribbonHistory.restoreWorkspaceSnapshot,
     commitPendingSheetCell: (flush) => sheetController.commitPendingFocusedSheetCell(flush),
+    restoreSheetView: () => sheetController.restoreView(),
     computeEvaluatedSheetStore: sheetStoreHelpers.computeEvaluatedSheetStore,
     replaceColumnWidths: (widths) => sheetController.replaceColumnWidths(widths), replaceSheetRules: (rules) => host.__EASYOFFICE_SHEET_RULES__.replaceAll(rules),
   });
@@ -398,7 +399,9 @@
   }
 
   function applyZoomPercent(pct, fitMode) {
-    const nextZoom = Math.max(50, Math.min(200, Math.round(Number(pct) || 100)));
+    const zoomRange = host.__EASYOFFICE_ZOOM_RANGE__;
+    const { min, max } = zoomRange.rangeOf(activeModule);
+    const nextZoom = Math.max(min, Math.min(max, Math.round(Number(pct) || 100)));
     localRibbonState.zoomPercent = nextZoom;
     const stage = document.querySelector(".canvas-stage");
     if (stage) {
@@ -408,18 +411,16 @@
     const zoomLabel = document.getElementById("status-zoom-label");
     if (zoomLabel) zoomLabel.textContent = nextZoom + "%";
     const zoomSlider = document.getElementById("status-zoom-slider");
+    zoomRange.syncSlider(zoomSlider, activeModule);
     if (zoomSlider) zoomSlider.value = String(nextZoom);
     docRunsUi?.syncRuler?.(nextZoom / 100);
   }
 
   function applyZoomStepDelta(delta) {
-    const steps = [75, 90, 100, 125, 150];
-    const curZoom = Number(localRibbonState.zoomPercent || 100);
-    let idx = steps.indexOf(curZoom);
-    if (idx < 0) idx = 2;
-    const nextIdx = Math.max(0, Math.min(steps.length - 1, idx + delta));
-    applyZoomPercent(steps[nextIdx]);
+    applyZoomPercent(host.__EASYOFFICE_ZOOM_RANGE__.step(activeModule, Number(localRibbonState.zoomPercent || 100), delta));
   }
+  // The sheet's view restores a sheet's own zoom through this (`sheet-view-live.js`).
+  host.__EASYOFFICE_ZOOM__ = { apply: applyZoomPercent, current: () => Number(localRibbonState.zoomPercent || 100) };
 
   function setupStaticNavigationHandlers() {
     const zoomOutBtn = document.getElementById("btn-zoom-out");

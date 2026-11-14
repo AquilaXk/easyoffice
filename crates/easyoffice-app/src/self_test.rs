@@ -482,6 +482,18 @@ const WEBUI_ASSET_MARKERS: &[(&str, &str)] = &[
         "__EASYOFFICE_CREATE_SHEET_FORMAT__",
     ),
     (
+        include_str!("../ui/sheet-view-state.js"),
+        "__EASYOFFICE_SHEET_VIEW_STATE__",
+    ),
+    (
+        include_str!("../ui/sheet-view-live.js"),
+        "__EASYOFFICE_CREATE_SHEET_VIEW_LIVE__",
+    ),
+    (
+        include_str!("../ui/zoom-range.js"),
+        "__EASYOFFICE_ZOOM_RANGE__",
+    ),
+    (
         include_str!("../ui/sheet-controller.js"),
         "__EASYOFFICE_CREATE_SHEET_CONTROLLER__",
     ),
