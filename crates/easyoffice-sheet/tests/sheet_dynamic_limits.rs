@@ -168,3 +168,30 @@ fn a_defined_name_for_a_lambda_spills_and_follows_its_definition() {
     m.evaluate();
     assert_eq!(text(&m, "C3"), "27");
 }
+
+#[test]
+fn extreme_index_arguments_end_in_an_error_value_not_a_panic() {
+    let mut m = new_empty_model();
+    for (i, v) in ["1", "2", "3", "4"].iter().enumerate() {
+        m._set(&format!("A{}", i + 1), v);
+    }
+    let cases = [
+        ("C1", "=CHOOSEROWS(A1:A4,-1E+300)"),
+        ("C2", "=CHOOSEROWS(A1:A4,-9223372036854775808)"),
+        ("C3", "=CHOOSECOLS(A1:A4,-1E+300)"),
+        ("C4", "=CHOOSEROWS(A1:A4,1E+300)"),
+        ("C5", "=OFFSET(A2,4294967296,0)"),
+        ("C6", "=OFFSET(A2,0,4294967296)"),
+        ("C7", "=OFFSET(A2,1E+300,0)"),
+        ("C8", "=OFFSET(A2,0,0,1E+300,1)"),
+        ("C9", "=OFFSET(A2,0,0,4294967297,1)"),
+    ];
+    for (cell, formula) in cases {
+        m._set(cell, formula);
+    }
+    m.evaluate();
+    for (cell, formula) in cases {
+        let got = text(&m, cell);
+        assert!(got.starts_with('#'), "{formula} -> {got}");
+    }
+}

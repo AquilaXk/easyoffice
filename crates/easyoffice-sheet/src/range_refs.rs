@@ -195,16 +195,20 @@ impl SheetEngine {
         if height < 1 || width < 1 {
             return Err(FormulaError::Value);
         }
-        let start_r = base_range.start.row().min(base_range.end.row()) as i64 + dr;
-        let start_c = base_range.start.col().min(base_range.end.col()) as i64 + dc;
-        if start_r < 0 || start_c < 0 {
-            return Err(FormulaError::Ref);
-        }
-        let start_coord = PackedCellCoordinate::new(start_r as u32, start_c as u32)
-            .map_err(|_| FormulaError::Ref)?;
-        let end_coord =
-            PackedCellCoordinate::new((start_r + height - 1) as u32, (start_c + width - 1) as u32)
-                .map_err(|_| FormulaError::Ref)?;
+        // Saturating i64 sums and `try_from` keep a huge offset or size an out-of-range `#REF!`
+        // instead of an overflow panic or a wrapped-around cell.
+        let corner = |base: u32, offset: i64, extent: i64| -> Result<(u32, u32), FormulaError> {
+            let start = i64::from(base).saturating_add(offset);
+            let end = start.saturating_add(extent - 1);
+            let to_u32 = |n: i64| u32::try_from(n).map_err(|_| FormulaError::Ref);
+            Ok((to_u32(start)?, to_u32(end)?))
+        };
+        let (start_r, end_r) =
+            corner(base_range.start.row().min(base_range.end.row()), dr, height)?;
+        let (start_c, end_c) = corner(base_range.start.col().min(base_range.end.col()), dc, width)?;
+        let start_coord =
+            PackedCellCoordinate::new(start_r, start_c).map_err(|_| FormulaError::Ref)?;
+        let end_coord = PackedCellCoordinate::new(end_r, end_c).map_err(|_| FormulaError::Ref)?;
         let range = CellRange::new(start_coord, end_coord).map_err(|_| FormulaError::Ref)?;
         Ok(Some((sheet_opt, range, false)))
     }

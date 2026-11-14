@@ -239,7 +239,7 @@ impl SheetEngine {
         let mut picks = Vec::with_capacity(args.len() - 1);
         for i in 1..args.len() {
             let n = self.arg_number(args, i, 0.0, env, ctx, depth)?.trunc() as i64;
-            if n == 0 || n.abs() > len {
+            if n == 0 || n.unsigned_abs() > len.unsigned_abs() {
                 return Err(FormulaError::Value);
             }
             picks.push(if n > 0 { n - 1 } else { len + n } as usize);
