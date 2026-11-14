@@ -173,7 +173,7 @@ pub fn is_allowed_origin(origin: &str, port: u16) -> bool {
 /// CSP of the main page and every API/error response. A same-origin <iframe> is already allowed by
 /// the `default-src` fallback (`frame-src` -> `child-src` -> `default-src`), so the editor frame
 /// needs no relaxation here; only `/hwp-studio/*` gets its own policy (`hwp_bundle::STUDIO_CSP`).
-const MAIN_CSP: &str = "default-src 'self'";
+const MAIN_CSP: &str = "default-src 'self'; base-uri 'none'; object-src 'none'";
 
 fn write_http_response(stream: &mut TcpStream, status: &str, content_type: &str, body: &str) {
     write_http_bytes(stream, status, content_type, MAIN_CSP, "", body.as_bytes());
@@ -219,7 +219,7 @@ fn write_http_400_framing(stream: &mut TcpStream) {
         stream,
         "400 Bad Request",
         "application/json; charset=utf-8",
-        "{\"status\":\"bad_request\",\"message\":\"Content-Length 헤더가 올바르지 않습니다.\"}",
+        "{\"status\":\"bad_request\",\"message\":\"요청 헤더가 올바르지 않습니다.\"}",
     );
 }
 
@@ -287,6 +287,16 @@ enum ReadStop {
 const READ_CHUNK_BYTES: usize = 64 * 1024;
 const HEADER_TERMINATOR: &[u8; 4] = b"\r\n\r\n";
 
+/// The header length when `buf` holds the terminator; the first `before` bytes were searched already
+/// (a terminator may begin up to three bytes before the new data), so a byte-at-a-time client costs one scan step per byte.
+fn header_end_after(buf: &[u8], before: usize) -> Option<usize> {
+    let from = before.saturating_sub(HEADER_TERMINATOR.len() - 1);
+    buf[from..]
+        .windows(HEADER_TERMINATOR.len())
+        .position(|w| w == HEADER_TERMINATOR)
+        .map(|pos| from + pos + HEADER_TERMINATOR.len())
+}
+
 /// Reads from `stream` until the header terminator arrives; returns the header length.
 fn read_until_headers(
     stream: &mut TcpStream,
@@ -302,9 +312,10 @@ fn read_until_headers(
             Ok(0) | Err(_) => return Err(ReadStop::Drop),
             Ok(n) => n,
         };
+        let before = buf.len();
         buf.extend_from_slice(&chunk[..n]);
-        if let Some(pos) = buf.windows(4).position(|w| w == HEADER_TERMINATOR) {
-            return Ok(pos + 4);
+        if let Some(end) = header_end_after(buf, before) {
+            return Ok(end);
         }
         if buf.len() > MAX_HTTP_BODY_BYTES {
             return Err(ReadStop::TooLarge);
@@ -363,8 +374,8 @@ struct RequestHeaders {
 enum HeaderError {
     /// `Content-Length` above the body limit: 413.
     TooLarge,
-    /// A `Content-Length` that is not plain digits or appears more than once: the message framing
-    /// is unreliable (RFC 9112 6.3), 400.
+    /// A bad or repeated `Content-Length`, a `Transfer-Encoding`, or a repeated `Host` or `Origin`
+    /// (RFC 9112 3.2, 6.3): 400.
     BadFraming,
 }
 
@@ -374,8 +385,8 @@ enum HeaderError {
 /// refused.
 const IPC_REQUEST_HEADER: &str = "x-easyoffice-ipc";
 
-/// Parses the header lines. A repeated `Content-Length` is refused even when the values agree: the
-/// one to trust would be a guess.
+/// Parses the header lines. A repeated `Content-Length`, `Host` or `Origin` is refused even when the
+/// values agree: the one to trust would be a guess. So is any `Transfer-Encoding`.
 fn parse_request_headers<'a>(
     lines: impl Iterator<Item = &'a str>,
     body_limit: usize,
@@ -398,10 +409,18 @@ fn parse_request_headers<'a>(
                 .ok()
                 .filter(|&len| len <= body_limit)
                 .ok_or(HeaderError::TooLarge)?;
+        } else if key.eq_ignore_ascii_case("transfer-encoding") {
+            // Only a body with a `Content-Length` is read; another framing is refused.
+            return Err(HeaderError::BadFraming);
         } else if key.eq_ignore_ascii_case("host") {
-            headers.host = Some(value.to_string());
+            // The checks look at one value: with two, the one in use may be the unchecked one.
+            if headers.host.replace(value.to_string()).is_some() {
+                return Err(HeaderError::BadFraming);
+            }
         } else if key.eq_ignore_ascii_case("origin") {
-            headers.origin = Some(value.to_string());
+            if headers.origin.replace(value.to_string()).is_some() {
+                return Err(HeaderError::BadFraming);
+            }
         } else if key.eq_ignore_ascii_case(IPC_REQUEST_HEADER) {
             headers.ipc_marker = value == "1";
         }

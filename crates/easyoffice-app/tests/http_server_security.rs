@@ -49,7 +49,9 @@ fn test_http_ipc_rejects_unpaired_surrogate_with_400_and_csp() {
         "expected 400 Bad Request, got: {resp}"
     );
     assert!(
-        resp.contains("Content-Security-Policy: default-src 'self'\r\n"),
+        resp.contains(
+            "Content-Security-Policy: default-src 'self'; base-uri 'none'; object-src 'none'\r\n"
+        ),
         "missing CSP header on 400 response: {resp}"
     );
 
@@ -89,7 +91,7 @@ fn test_http_panic_recovery_releases_all_32_slots_and_serves_subsequent_get() {
             "iteration {i}: expected 500 Internal Server Error, got: {resp}"
         );
         assert!(
-            resp.contains("Content-Security-Policy: default-src 'self'\r\n"),
+            resp.contains("Content-Security-Policy: default-src 'self'; base-uri 'none'; object-src 'none'\r\n"),
             "iteration {i}: missing CSP header on 500 response: {resp}"
         );
     }
@@ -101,7 +103,9 @@ fn test_http_panic_recovery_releases_all_32_slots_and_serves_subsequent_get() {
         "expected 200 OK after 32 panics, got: {ok_resp}"
     );
     assert!(
-        ok_resp.contains("Content-Security-Policy: default-src 'self'\r\n"),
+        ok_resp.contains(
+            "Content-Security-Policy: default-src 'self'; base-uri 'none'; object-src 'none'\r\n"
+        ),
         "missing CSP header on 200 response: {ok_resp}"
     );
 
@@ -175,7 +179,9 @@ fn test_http_slowloris_overflow_and_deadline_eviction_preserve_fast_get() {
         "expected immediate 503 or 200 during slowloris wave, got: {overflow_resp}"
     );
     assert!(
-        overflow_resp.contains("Content-Security-Policy: default-src 'self'\r\n"),
+        overflow_resp.contains(
+            "Content-Security-Policy: default-src 'self'; base-uri 'none'; object-src 'none'\r\n"
+        ),
         "missing CSP header during slowloris wave"
     );
 
@@ -195,7 +201,9 @@ fn test_http_slowloris_overflow_and_deadline_eviction_preserve_fast_get() {
         "expected 200 OK after slowloris deadline eviction, got: {ok_resp}"
     );
     assert!(
-        ok_resp.contains("Content-Security-Policy: default-src 'self'\r\n"),
+        ok_resp.contains(
+            "Content-Security-Policy: default-src 'self'; base-uri 'none'; object-src 'none'\r\n"
+        ),
         "missing CSP header on GET /: {ok_resp}"
     );
     assert!(
@@ -346,7 +354,9 @@ fn test_bundle_files_are_binary_exact_with_mime_and_iframe_csp() {
 
     let (head, _) = split_response(&get(port, "/"));
     assert!(
-        head.contains("Content-Security-Policy: default-src 'self'\r\n"),
+        head.contains(
+            "Content-Security-Policy: default-src 'self'; base-uri 'none'; object-src 'none'\r\n"
+        ),
         "main page keeps its CSP: {head}"
     );
     stop.store(true, Ordering::Release);
@@ -411,7 +421,9 @@ fn test_editor_csp_names_the_page_origin_not_self() {
     // The main page keeps the plain policy.
     let main = get_with_host(port, "/", &format!("127.0.0.1:{port}"));
     assert!(
-        main.contains("Content-Security-Policy: default-src 'self'\r\n"),
+        main.contains(
+            "Content-Security-Policy: default-src 'self'; base-uri 'none'; object-src 'none'\r\n"
+        ),
         "{main}"
     );
     stop.store(true, Ordering::Release);
@@ -434,7 +446,9 @@ fn assert_status(resp: &str, status: &str) {
         &resp[..resp.len().min(300)]
     );
     assert!(
-        resp.contains("Content-Security-Policy: default-src 'self'\r\n"),
+        resp.contains(
+            "Content-Security-Policy: default-src 'self'; base-uri 'none'; object-src 'none'\r\n"
+        ),
         "{resp}"
     );
 }
@@ -519,6 +533,92 @@ fn test_content_length_must_be_one_plain_number() {
         &send(&format!("Content-Length: {}\r\n", "9".repeat(40))),
         "413 Payload Too Large",
     );
+    stop.store(true, Ordering::Release);
+    handle.join().unwrap();
+}
+
+#[test]
+fn test_one_host_and_one_origin_and_no_transfer_encoding() {
+    let (port, stop, handle) = start_server();
+    let local = format!("127.0.0.1:{port}");
+    let get = |headers: &str| {
+        let raw = format!("GET / HTTP/1.1\r\n{headers}Connection: close\r\n\r\n");
+        send_raw_http_request(port, raw.as_bytes(), Duration::from_secs(5))
+    };
+    // Two `Host` lines are refused whichever one is the loopback name.
+    assert_status(&get(&format!("Host: {local}\r\n")), "200 OK");
+    assert_status(
+        &get(&format!("Host: evil.example\r\nHost: {local}\r\n")),
+        "400 Bad Request",
+    );
+    assert_status(
+        &get(&format!("Host: {local}\r\nhost: evil.example\r\n")),
+        "400 Bad Request",
+    );
+    assert_status(
+        &get(&format!("Host: {local}\r\nHost: {local}\r\n")),
+        "400 Bad Request",
+    );
+    let len = format!(
+        "Content-Length: {}\r\nX-EasyOffice-Ipc: 1\r\n",
+        BOOTSTRAP.len()
+    );
+    let origin = format!("Origin: http://{local}\r\n");
+    assert_status(
+        &post_ipc(port, &format!("{origin}{len}"), BOOTSTRAP),
+        "200 OK",
+    );
+    assert_status(
+        &post_ipc(
+            port,
+            &format!("Origin: http://evil.example\r\n{origin}{len}"),
+            BOOTSTRAP,
+        ),
+        "400 Bad Request",
+    );
+    assert_status(
+        &post_ipc(port, &format!("{origin}{origin}{len}"), BOOTSTRAP),
+        "400 Bad Request",
+    );
+    // A body framed another way than by `Content-Length` is not read at all.
+    for coding in ["chunked", "gzip, chunked", "identity"] {
+        let headers = format!("{origin}{len}Transfer-Encoding: {coding}\r\n");
+        assert_status(&post_ipc(port, &headers, BOOTSTRAP), "400 Bad Request");
+    }
+    stop.store(true, Ordering::Release);
+    handle.join().unwrap();
+}
+
+#[test]
+fn test_a_request_arriving_in_small_pieces_is_read_whole_at_every_split() {
+    let (port, stop, handle) = start_server();
+    let raw = format!("GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
+    let end = raw.len() - 4;
+    // The header terminator split at each of its three inner positions, and one byte at a time.
+    for cut in [end + 1, end + 2, end + 3] {
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        stream.write_all(&raw.as_bytes()[..cut]).unwrap();
+        stream.flush().unwrap();
+        thread::sleep(Duration::from_millis(60));
+        stream.write_all(&raw.as_bytes()[cut..]).unwrap();
+        let mut out = String::new();
+        let _ = stream.read_to_string(&mut out);
+        assert_status(&out, "200 OK");
+    }
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    for byte in raw.as_bytes() {
+        stream.write_all(&[*byte]).unwrap();
+        stream.flush().unwrap();
+    }
+    let mut out = String::new();
+    let _ = stream.read_to_string(&mut out);
+    assert_status(&out, "200 OK");
     stop.store(true, Ordering::Release);
     handle.join().unwrap();
 }
