@@ -391,3 +391,89 @@ fn a_plan_over_budget_is_refused() {
     );
     assert!(matches!(few, Err(RecalcError::Invalid(_))));
 }
+
+#[test]
+fn a_row_edit_moves_the_cells_a_protected_sheet_lets_an_array_cover() {
+    use crate::SheetLock;
+    let mut s = session(&["S"], &[("S", "A1", "=SEQUENCE(2)")]);
+    // Protected: the anchor and the cell under it may be changed.
+    s.set_sheet_lock(
+        "S",
+        Some(SheetLock {
+            unlocked_cells: vec![(0, 0, 0), (1, 0, 0)],
+            ..SheetLock::default()
+        }),
+    )
+    .unwrap();
+    s.recalculate();
+    assert_eq!(s.cell_value("S", at("A2")).to_display_string(), "2");
+    // The new row 2 has no unlocked mark: the array may not cover it any more.
+    edit_ok(&mut s, "S", row_edit(EditKind::Insert, 2, 1));
+    assert_eq!(s.cell_value("S", at("A1")).to_display_string(), "#SPILL!");
+}
+
+#[test]
+fn the_lock_of_columns_follows_a_column_edit_and_a_lock_of_another_sheet_stays() {
+    use crate::SheetLock;
+    let mut s = session(&["S", "T"], &[]);
+    let lock = SheetLock {
+        unlocked_cells: vec![(0, 1, 3), (2, 0, 0)],
+        unlocked_cols: vec![(1, 1), (3, 5)],
+        unlocked_rows: vec![(0, 1)],
+        ..SheetLock::default()
+    };
+    let col_insert = AxisEdit::new(Axis::Col, EditKind::Insert, 2, 2).unwrap();
+    let moved = lock.shifted(&col_insert);
+    assert_eq!(moved.unlocked_cells, vec![(0, 1, 1), (0, 4, 5), (2, 0, 0)]);
+    assert_eq!(moved.unlocked_cols, vec![(1, 1), (5, 7)]);
+    assert_eq!(moved.unlocked_rows, vec![(0, 1)]);
+    let row_delete = row_edit(EditKind::Delete, 1, 1);
+    let moved = lock.shifted(&row_delete);
+    assert_eq!(moved.unlocked_cells, vec![(1, 0, 0)]);
+    assert_eq!(moved.unlocked_rows, vec![(0, 0)]);
+    assert_eq!(moved.unlocked_cols, lock.unlocked_cols);
+    s.set_sheet_lock("T", Some(lock.clone())).unwrap();
+    edit_ok(&mut s, "S", row_edit(EditKind::Insert, 1, 1));
+    assert_eq!(
+        s.workbook().sheet("T").unwrap().spill_lock.as_deref(),
+        Some(&lock)
+    );
+}
+
+#[test]
+fn data_validations_survive_an_edit_and_follow_the_cells() {
+    use crate::rules::Verdict;
+    use easyoffice_formats::{CellBox, Cmp, DataValidation, DvKind, SheetRules};
+    let mut s = session(&["S"], &[("S", "A1", "1")]);
+    let mut dv = DataValidation::new(
+        vec![CellBox {
+            row0: 4,
+            col0: 0,
+            row1: 4,
+            col1: 0,
+        }],
+        DvKind::Whole,
+    );
+    dv.cmp = Cmp::Between;
+    dv.a = "1".to_string();
+    dv.b = "10".to_string();
+    s.set_rules(
+        "S",
+        SheetRules {
+            dv: vec![dv],
+            ..SheetRules::default()
+        },
+    )
+    .unwrap();
+    assert!(matches!(
+        s.validate("S", at("A5"), "99").unwrap(),
+        Verdict::Invalid { .. }
+    ));
+    edit_ok(&mut s, "S", row_edit(EditKind::Insert, 1, 2));
+    assert!(matches!(
+        s.validate("S", at("A7"), "99").unwrap(),
+        Verdict::Invalid { .. }
+    ));
+    assert_eq!(s.validate("S", at("A7"), "5").unwrap(), Verdict::Valid);
+    assert_eq!(s.validate("S", at("A5"), "99").unwrap(), Verdict::Valid);
+}

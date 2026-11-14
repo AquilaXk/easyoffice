@@ -14,6 +14,7 @@
 //! order of evaluation has to be known in advance.
 
 use crate::array::Grid;
+use crate::axis::{shift_runs, Axis, AxisEdit};
 use crate::memo::CellMap;
 use crate::{
     EvalContext, EvaluatedCellValue as V, FormulaError, MemoTable, PackedCellCoordinate,
@@ -125,6 +126,40 @@ impl SheetLock {
             && (in_cells(&self.unlocked_cells, row, col)
                 || in_runs(&self.unlocked_rows, row)
                 || in_runs(&self.unlocked_cols, col))
+    }
+
+    /// The lock after the rows or columns of the sheet move for `edit`: a cell keeps its mark, a
+    /// deleted cell loses it, and an inserted cell has none (it stays locked on a protected sheet).
+    pub(crate) fn shifted(&self, edit: &AxisEdit) -> SheetLock {
+        let by_rows = edit.axis == Axis::Row;
+        let cells = |list: &[(u32, u32, u32)]| -> Vec<(u32, u32, u32)> {
+            let mut out = Vec::with_capacity(list.len());
+            for &(row, first, last) in list {
+                if by_rows {
+                    out.extend(edit.map_index(row).map(|moved| (moved, first, last)));
+                } else {
+                    out.extend(
+                        shift_runs(&[(first, last)], edit)
+                            .into_iter()
+                            .map(|(a, b)| (row, a, b)),
+                    );
+                }
+            }
+            out
+        };
+        let runs = |list: &[(u32, u32)], axis: Axis| {
+            if edit.axis == axis {
+                shift_runs(list, edit)
+            } else {
+                list.to_vec()
+            }
+        };
+        SheetLock {
+            unlocked_cells: cells(&self.unlocked_cells),
+            locked_cells: cells(&self.locked_cells),
+            unlocked_rows: runs(&self.unlocked_rows, Axis::Row),
+            unlocked_cols: runs(&self.unlocked_cols, Axis::Col),
+        }
     }
 
     /// Whether every cell of the rectangle may be changed.

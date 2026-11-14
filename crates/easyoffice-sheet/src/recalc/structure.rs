@@ -9,6 +9,7 @@ use super::{RecalcError, RecalcOutcome, RecalcSession};
 use crate::axis::{AxisBudget, AxisEdit, AxisEditReport, SheetChange};
 use crate::PackedCellCoordinate;
 use crate::{MemoTable, WorkbookEngine};
+use easyoffice_formats::SheetRules;
 impl RecalcSession {
     /// Applies `edit` to `sheet`. Fails without changing the session when the edit is refused
     /// (unknown sheet, a cell would leave the sheet, too many formulas for `budget`).
@@ -25,6 +26,16 @@ impl RecalcSession {
         }
         let target = self.sheet_index(sheet)?;
         let report = self.wb.apply_axis_edit(sheet, edit, budget)?;
+        // The cells the lock and the validations name moved with the edit.
+        let target_engine = &mut self.wb.sheets_mut()[usize::from(target)];
+        if let Some(lock) = target_engine
+            .spill_lock
+            .as_deref()
+            .map(|l| l.shifted(&edit))
+        {
+            target_engine.set_spill_lock(Some(lock));
+        }
+        let validations = self.moved_validations(sheet, &edit);
         let mut wb = std::mem::replace(&mut self.wb, WorkbookEngine::new());
         // The areas arrays filled are at the old positions; the rebuilt session places them again.
         for sheet in wb.sheets_mut() {
@@ -53,9 +64,46 @@ impl RecalcSession {
             }
         }
         next.rng_state = self.rng_state;
+        // The page sends the conditional formats again (it needs their appearance); until it does,
+        // an entry is still checked against the validations.
+        next.rules.extend(validations);
         let outcome = next.recalculate();
         *self = next;
         Ok((report, outcome))
+    }
+}
+
+impl RecalcSession {
+    /// The data validations of every sheet, moved for an `edit` of `target`, as rule runtimes that
+    /// hold nothing else.
+    fn moved_validations(
+        &self,
+        target: &str,
+        edit: &AxisEdit,
+    ) -> Vec<(u16, crate::rules::RuleRuntime)> {
+        let mut out = Vec::new();
+        for (&idx, runtime) in &self.rules {
+            if runtime.validations.is_empty() {
+                continue;
+            }
+            let Some(own) = self
+                .wb
+                .sheets()
+                .get(usize::from(idx))
+                .map(|s| s.name.as_str())
+            else {
+                continue;
+            };
+            let mut rules = SheetRules {
+                dv: runtime.validations.clone(),
+                ..SheetRules::default()
+            };
+            crate::shift_rules(&mut rules, own, target, edit);
+            if !rules.dv.is_empty() {
+                out.push((idx, crate::rules::RuleRuntime::new(rules)));
+            }
+        }
+        out
     }
 }
 
