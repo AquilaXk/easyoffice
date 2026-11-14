@@ -17,8 +17,8 @@ use crate::sheet_refs_ipc::SheetOp;
 use crate::sheet_rules_json::{parse_rules, visuals_json};
 use crate::EasyOfficeIpcRouter;
 use easyoffice_formats::{
-    sheet_name_problem, DvAlert, EasyOfficeError, SheetNameProblem, SheetRules, StrictJsonValue,
-    MAX_SHEET_NAME_UNITS,
+    sheet_name_problem, CellBox, DvAlert, EasyOfficeError, SheetNameProblem, SheetRules,
+    StrictJsonValue, MAX_SHEET_NAME_UNITS,
 };
 use easyoffice_sheet::{
     AxisBudget, AxisEdit, Budget, CellChange, ChangedCell, Footprint, PackedCellCoordinate,
@@ -485,6 +485,32 @@ impl Registry {
         Ok(Applied::Done(json))
     }
 
+    /// Tells the session the merged ranges of `sheet` and recalculates the arrays they concern (PD-222).
+    pub(crate) fn set_merges(
+        &self,
+        id: &str,
+        owner: &str,
+        sheet: &str,
+        merges: Vec<CellBox>,
+        now: Instant,
+    ) -> Result<Applied, EasyOfficeError> {
+        let Some(handle) = self.checkout(id, owner, now) else {
+            return Ok(Applied::Expired);
+        };
+        let Ok(mut session) = handle.lock() else {
+            lock(&self.inner).sessions.remove(id);
+            return Ok(Applied::Expired);
+        };
+        match session.set_sheet_merges(sheet, merges) {
+            Ok(()) => {}
+            Err(RecalcError::Invalid(err)) => return Err(err),
+            Err(RecalcError::OverBudget) => return Ok(Applied::Refused),
+        }
+        let outcome = session.recalculate();
+        let json = recalc_answer(id, &mut session, &[], &outcome);
+        Ok(Applied::Done(json))
+    }
+
     /// Forgets session `id` (it is expired for its page from now on).
     pub(crate) fn forget(&self, id: &str) {
         lock(&self.inner).sessions.remove(id);
@@ -789,6 +815,8 @@ impl EasyOfficeIpcRouter {
     ///   keys (no session needed, see `sheet_sort_ipc`, PD-203).
     /// - `protectHash` `{password, kind}` -> `{pwd}` and `protectVerify` `{pwd, password}` -> `{ok}` (no
     ///   session needed, see `sheet_protect_ipc`, PD-216).
+    /// - `merges` `{session, sheet, merges}` -> the recalculation answer: `merges` is `["A1:B2", ...]` and an
+    ///   array that would cross one is `#SPILL!` (PD-222).
     /// - `close` `{session}` -> `{closed}`.
     pub(crate) fn handle_sheet_session_action(
         action: &str,
@@ -800,6 +828,7 @@ impl EasyOfficeIpcRouter {
             "apply" => Self::sheet_session_apply(entries, owner),
             "rules" => Self::sheet_session_rules(entries, owner),
             "locks" => Self::sheet_session_locks(entries, owner),
+            "merges" => Self::sheet_session_merges(entries, owner),
             "structure" => Self::sheet_session_structure(entries, owner),
             "names" => Self::sheet_session_names(entries, owner),
             "nameCheck" => Self::sheet_name_check(entries),
@@ -901,6 +930,24 @@ impl EasyOfficeIpcRouter {
             Some(v) => Some(crate::sheet_protect_json::parse_sheet_lock(v)?),
         };
         match registry().set_lock(id, owner, sheet, lock, Instant::now())? {
+            Applied::Done(json) => Ok(json),
+            Applied::Expired => Ok(EXPIRED.to_string()),
+            Applied::Refused => Ok(REFUSED.to_string()),
+        }
+    }
+
+    /// `merges` `{session, sheet, merges}`: `merges` is `["A1:B2", ...]`; the arrays do not cross them (PD-222).
+    fn sheet_session_merges(
+        entries: &[(String, StrictJsonValue)],
+        owner: &str,
+    ) -> Result<String, EasyOfficeError> {
+        let id = session_id(entries)?;
+        let sheet = Self::optional_json_str(entries, "sheet")?.unwrap_or("");
+        let merges = match StrictJsonValue::get_field(entries, "merges") {
+            None | Some(StrictJsonValue::Null) => Vec::new(),
+            Some(v) => crate::sheet_layout_json::parse_merges(v)?,
+        };
+        match registry().set_merges(id, owner, sheet, merges, Instant::now())? {
             Applied::Done(json) => Ok(json),
             Applied::Expired => Ok(EXPIRED.to_string()),
             Applied::Refused => Ok(REFUSED.to_string()),

@@ -294,6 +294,13 @@ impl SheetEngine {
         let Some((last_row, last_col)) = rect_end(anchor, rows, cols) else {
             return false;
         };
+        if self
+            .spill_merges
+            .as_ref()
+            .is_some_and(|m| m.touches((anchor.row(), anchor.col(), last_row, last_col)))
+        {
+            return false;
+        }
         if let Some(lock) = &self.spill_lock {
             // The anchor's cell is the formula's own; the cells after it must be ones that may be changed.
             let rows = (anchor.row(), last_row);
@@ -501,6 +508,12 @@ impl SheetEngine {
     /// Sets which cells of the (protected) sheet may be changed; `None` for a sheet that is not protected.
     pub fn set_spill_lock(&mut self, lock: Option<SheetLock>) {
         self.spill_lock = lock.map(Arc::new);
+    }
+
+    /// Sets the merged ranges of the sheet, which an array may not cross; an empty list for a sheet with none.
+    pub fn set_spill_merges(&mut self, merges: Vec<easyoffice_formats::CellBox>) {
+        self.spill_merges =
+            (!merges.is_empty()).then(|| Arc::new(crate::spill_merges::SpillMerges::new(merges)));
     }
 
     /// Forgets every area of the sheet (the cells they filled stop being cells).

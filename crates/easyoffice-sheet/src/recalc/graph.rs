@@ -613,6 +613,15 @@ impl DepGraph {
             });
     }
 
+    /// Adds to `dirty` the formulas that read a seed cell directly or through a range (no further closure).
+    pub(crate) fn mark_dependents(&self, seeds: &[(u16, PackedCellCoordinate)], dirty: &mut IdSet) {
+        for &(sheet, coord) in seeds {
+            self.visit_dependents(sheet, coord, |v| {
+                dirty.insert(v);
+            });
+        }
+    }
+
     /// Adds to `dirty` every formula that transitively reads a seed cell or a vertex already in
     /// `dirty`. `scratch` is a reusable work queue.
     pub(crate) fn expand_dirty(

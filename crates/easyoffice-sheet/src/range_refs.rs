@@ -213,6 +213,34 @@ impl SheetEngine {
         Ok(Some((sheet_opt, range, false)))
     }
 
+    /// Writes down the range an `OFFSET` or `INDIRECT` of the formula in `ctx.current_coord` resolved to,
+    /// when the pass collects them (see `dyn_reads`).
+    fn note_dynamic_read(
+        &self,
+        resolved: Option<&ResolvedRangeRef<'_>>,
+        ctx: &mut EvalContext<'_>,
+    ) {
+        let (Some((sheet_opt, range, _)), Some(reader)) = (resolved, ctx.current_coord) else {
+            return;
+        };
+        if ctx.dyn_reads.is_none() {
+            return;
+        }
+        let Some(target) = self.resolve_sheet_ref(sheet_opt.as_deref(), ctx) else {
+            return;
+        };
+        let rect = crate::dyn_reads::DynRect {
+            sheet_id: target.resolved_sheet_id(),
+            r0: range.start.row().min(range.end.row()),
+            r1: range.start.row().max(range.end.row()),
+            c0: range.start.col().min(range.end.col()),
+            c1: range.start.col().max(range.end.col()),
+        };
+        if let Some(reads) = ctx.dyn_reads.as_mut() {
+            reads.record(self.resolved_sheet_id(), reader, rect);
+        }
+    }
+
     pub(crate) fn extract_range_and_sheet_ctx<'b>(
         &self,
         expr: &'b Expr,
@@ -245,10 +273,14 @@ impl SheetEngine {
                 .extract_range_and_sheet_ctx(&args[0], ctx, depth + 1)?
                 .map(|(s, r, t)| (s, r, !t))),
             Expr::FuncCall { name, args } if name == "INDIRECT" => {
-                self.extract_indirect_ref(args, ctx, depth)
+                let resolved = self.extract_indirect_ref(args, ctx, depth)?;
+                self.note_dynamic_read(resolved.as_ref(), ctx);
+                Ok(resolved)
             }
             Expr::FuncCall { name, args } if name == "OFFSET" => {
-                self.extract_offset_ref(args, ctx, depth)
+                let resolved = self.extract_offset_ref(args, ctx, depth)?;
+                self.note_dynamic_read(resolved.as_ref(), ctx);
+                Ok(resolved)
             }
             _ => Ok(None),
         }

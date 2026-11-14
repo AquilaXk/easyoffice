@@ -52,6 +52,46 @@ impl RecalcSession {
         Ok(())
     }
 
+    /// Tells the session the merged ranges of `sheet` (an empty list: none). An array that would cross one is
+    /// `#SPILL!`: the arrays that cross a merge now and the ones that could not be placed are calculated again
+    /// by the next [`recalculate`](Self::recalculate) (PD-222).
+    pub fn set_sheet_merges(
+        &mut self,
+        sheet: &str,
+        merges: Vec<easyoffice_formats::CellBox>,
+    ) -> Result<(), super::RecalcError> {
+        let idx = self.sheet_index(sheet)?;
+        let engine = &mut self.wb.sheets_mut()[usize::from(idx)];
+        let next = (!merges.is_empty())
+            .then(|| std::sync::Arc::new(crate::spill_merges::SpillMerges::new(merges)));
+        if engine.spill_merges == next {
+            return Ok(());
+        }
+        let anchors: Vec<PackedCellCoordinate> = engine
+            .spill
+            .anchors_with_area()
+            .filter(|&(anchor, area)| {
+                area.blocked
+                    || next.as_ref().is_some_and(|m| {
+                        m.touches((
+                            anchor.row(),
+                            anchor.col(),
+                            anchor.row() + area.rows - 1,
+                            anchor.col() + area.cols - 1,
+                        ))
+                    })
+            })
+            .map(|(anchor, _)| anchor)
+            .collect();
+        engine.spill_merges = next;
+        for coord in anchors {
+            if let Some(v) = self.graph.vertex_at(idx, coord) {
+                self.dirty.insert(v);
+            }
+        }
+        Ok(())
+    }
+
     /// Calculates formula text (`=...`) as if it stood in `anchor`, reading the session's values.
     pub fn evaluate_text(
         &mut self,

@@ -36,6 +36,20 @@ pub(crate) fn parse_merges(v: &StrictJsonValue) -> Result<Vec<CellBox>, EasyOffi
         .collect()
 }
 
+/// The `merges` field of a request without a session: `{"Sheet1": ["A1:B2", ...], ...}` (PD-222); none when absent.
+pub(crate) fn merges_by_sheet(
+    entries: &[(String, StrictJsonValue)],
+) -> Result<Vec<(String, Vec<CellBox>)>, EasyOfficeError> {
+    let Some(field) = StrictJsonValue::get_field(entries, "merges") else {
+        return Ok(Vec::new());
+    };
+    let sheets = field.as_object().ok_or_else(|| bad("merges"))?;
+    sheets
+        .iter()
+        .map(|(name, list)| Ok((name.clone(), parse_merges(list)?)))
+        .collect()
+}
+
 /// Runs from `[[first, last], ...]`, 1-based; `last_index` is the last valid zero-based index.
 pub(crate) fn parse_runs(
     v: &StrictJsonValue,

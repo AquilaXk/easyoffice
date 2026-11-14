@@ -13,6 +13,7 @@ mod compile;
 mod criteria;
 mod dag;
 mod deadline;
+mod dyn_reads;
 pub mod filter;
 #[cfg(test)]
 mod function_coverage_tests;
@@ -66,6 +67,7 @@ mod sort_keys;
 mod sort_refs;
 mod special;
 mod spill;
+mod spill_merges;
 mod text_format;
 pub mod types;
 pub mod workbook;
@@ -131,6 +133,8 @@ pub(crate) struct EvalContext<'a> {
     pub(crate) claims: FastMap<u64, PackedCellCoordinate>,
     /// The arrays this pass placed, by sheet and anchor: a `A1#` read in the same pass takes the array itself.
     pub(crate) fresh: FastMap<u64, Arc<array::Grid>>,
+    /// What the formulas of this pass read through `OFFSET` and `INDIRECT`; `None` when nobody collects it.
+    pub(crate) dyn_reads: Option<dyn_reads::DynReads>,
 }
 
 impl<'a> EvalContext<'a> {
@@ -150,6 +154,7 @@ impl<'a> EvalContext<'a> {
             pending: Vec::new(),
             claims: FastMap::default(),
             fresh: FastMap::default(),
+            dyn_reads: None,
         }
     }
 
@@ -169,6 +174,7 @@ impl<'a> EvalContext<'a> {
             pending: Vec::new(),
             claims: FastMap::default(),
             fresh: FastMap::default(),
+            dyn_reads: None,
         }
     }
 
@@ -213,6 +219,8 @@ pub struct SheetEngine {
     pub(crate) spill: spill::SpillTable,
     /// The cells of a protected sheet that may be changed (PD-217).
     pub(crate) spill_lock: Option<Arc<spill::SheetLock>>,
+    /// The merged ranges of the sheet, which an array may not cross (PD-222).
+    pub(crate) spill_merges: Option<Arc<spill_merges::SpillMerges>>,
     pub(crate) dense_numbers: Vec<f64>,
     /// Cached dependency order of the last full recalculation; dropped on every edit.
     pub(crate) plan: OnceLock<dag::RecalcPlan>,
@@ -255,6 +263,7 @@ impl SheetEngine {
             array_formulas: HashSet::new(),
             spill: spill::SpillTable::default(),
             spill_lock: None,
+            spill_merges: None,
             dense_numbers: Vec::new(),
             plan: OnceLock::new(),
             formula_index: OnceLock::new(),

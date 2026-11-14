@@ -12,6 +12,7 @@
 //! are dirty on every pass, and while a circular reference exists every formula is (see
 //! [`RecalcSession::recalculate`]). The sheet set is fixed for the life of a session.
 
+mod dynamic;
 mod graph;
 mod id_set;
 mod interval;
@@ -253,6 +254,8 @@ pub struct RecalcSession {
     released: crate::spill::Published,
     /// A dynamic circular reference was met in the pass in progress.
     dynamic_circular_pass: bool,
+    /// What formulas read through `OFFSET` and `INDIRECT` (see `dynamic`).
+    dynamic: dynamic::DynamicReads,
 }
 
 impl RecalcSession {
@@ -293,6 +296,7 @@ impl RecalcSession {
             rules: std::collections::HashMap::new(),
             released: crate::spill::Published::default(),
             dynamic_circular_pass: false,
+            dynamic: dynamic::DynamicReads::default(),
             // The workbook is put in place after the loop, so its names are counted from the argument.
             name_bytes: workbook.name_bytes(),
             wb: WorkbookEngine::new(),
@@ -340,8 +344,11 @@ impl RecalcSession {
         Footprint {
             cells: self.wb.sheets().iter().map(|s| s.cells.len()).sum(),
             raw_bytes: self.raw_bytes,
-            edges: self.graph.edge_count(),
-            graph_bytes: self.graph.heap_bytes_estimate(),
+            edges: self.graph.edge_count() + self.dynamic.edge_count(),
+            graph_bytes: self
+                .graph
+                .heap_bytes_estimate()
+                .saturating_add(self.dynamic.heap_bytes_estimate()),
             ast_bytes: self.ast_bytes(),
             rule_bytes: self
                 .rules
@@ -445,6 +452,7 @@ impl RecalcSession {
             }
             self.formula_bytes -= old_raw.len();
             self.graph.remove_vertex(vertex);
+            self.dynamic.forget(vertex);
             self.dirty.remove(vertex);
             self.cyclic.remove(vertex);
             self.memo.remove_at(engine.resolved_sheet_id(), coord);
@@ -524,6 +532,7 @@ impl RecalcSession {
         let mut first_round = true;
         loop {
             self.mark_spill_dirty(&seeds, &freed, first_round.then_some(&edited_all[..]));
+            self.dynamic.mark_readers(&seeds, &mut self.dirty);
             self.graph
                 .expand_dirty(&seeds, &mut self.dirty, &mut self.queue);
             let result = self.run_round();
@@ -586,6 +595,7 @@ impl RecalcSession {
             infos.extend(out.infos);
             let mut readers = out.touched;
             readers.extend(rings.iter().copied());
+            self.dynamic.mark_readers(&readers, &mut self.dirty);
             self.graph
                 .expand_dirty(&readers, &mut self.dirty, &mut self.queue);
             for &v in &poisoned {
@@ -717,6 +727,7 @@ impl RecalcSession {
             EvalContext::with_workbook(&self.wb, primary_id).with_time_limit(self.budget.max_time);
         ctx.memo = std::mem::replace(&mut self.memo, MemoTable::new(primary_id));
         ctx.rng_state = self.rng_state;
+        ctx.dyn_reads = Some(crate::dyn_reads::DynReads::default());
         ctx.spill_budget = Some(
             crate::spill::MAX_SPILL_CELLS
                 .saturating_sub(sheets.iter().map(|s| s.spill.filled_count()).sum::<usize>()),
@@ -767,6 +778,26 @@ impl RecalcSession {
         }
         self.dynamic_circular_pass = ctx.circular;
         self.rng_state = ctx.rng_state;
+        // What the formulas that finished read through OFFSET and INDIRECT: the next round recalculates them
+        // when the cells a round fills are among it.
+        let unreached: std::collections::HashSet<u32> = unfinished.iter().copied().collect();
+        self.dynamic.absorb(
+            ctx.dyn_reads.take().unwrap_or_default(),
+            order
+                .iter()
+                .filter(|(_, v)| !unreached.contains(v))
+                .map(|&(_, v)| {
+                    let (sheet, coord) = self.graph.site(v);
+                    (v, sheet, coord)
+                }),
+            &|sheet| sheets[usize::from(sheet)].resolved_sheet_id(),
+            &|id| {
+                sheets
+                    .iter()
+                    .position(|s| s.resolved_sheet_id() == id)
+                    .map(|i| i as u16)
+            },
+        );
         let timed_out = ctx.expired();
         self.memo = ctx.memo;
         self.dirty.clear();

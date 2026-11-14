@@ -338,6 +338,11 @@ impl EasyOfficeIpcRouter {
         if !names.is_empty() {
             wb.set_names_lenient(&names);
         }
+        for (name, merges) in sheet_layout_json::merges_by_sheet(entries)? {
+            if let Some(sheet) = wb.sheet_mut(&name) {
+                sheet.set_spill_merges(merges);
+            }
+        }
         Ok(wb)
     }
 

@@ -168,3 +168,75 @@ fn the_ordinary_path_is_not_slower() {
     }
     println!("100,003 formula chain, session open + first calculation (best of 5): {best:.1} ms");
 }
+
+#[test]
+#[ignore = "measurement"]
+fn readers_through_indirect_and_offset() {
+    // 50,000 formulas that compute their reference (PD-222): session open and first calculation, then the calculation after a
+    // one-cell edit (they are volatile, so all of them are calculated again), best of 5.
+    let mut wb = data_workbook(&[]);
+    let sheet = wb.sheet_mut("Sheet1").unwrap();
+    for r in 0..50_000u32 {
+        let f = if r % 2 == 0 {
+            format!("=INDIRECT(\"A\"&{})", r + 1)
+        } else {
+            format!("=OFFSET(A1,{r},0)")
+        };
+        sheet.set_cell_coord(PackedCellCoordinate::new(r, 4).unwrap(), f);
+    }
+    let (mut first, mut again) = (f64::MAX, f64::MAX);
+    for _ in 0..5 {
+        let mut session = RecalcSession::new(wb.clone()).unwrap();
+        let started = Instant::now();
+        session.recalculate();
+        first = first.min(ms(started));
+        session
+            .set_cell("Sheet1", PackedCellCoordinate::parse_a1("A1").unwrap(), "7")
+            .unwrap();
+        let started = Instant::now();
+        session.recalculate();
+        again = again.min(ms(started));
+    }
+    println!("50,000 INDIRECT/OFFSET readers: first calculation {first:.1} ms, after an edit {again:.1} ms");
+}
+
+#[test]
+#[ignore = "measurement"]
+fn arrays_beside_many_merged_ranges() {
+    // 10,000 arrays of two cells in column A and 100,000 merged ranges in columns E:F (PD-222): session open and first
+    // calculation, best of 5, without and with the merges.
+    let build = |merged: bool| {
+        let mut session_wb = WorkbookEngine::new();
+        let sheet = session_wb.add_sheet("Sheet1");
+        for k in 0..10_000u32 {
+            sheet.set_cell_coord(
+                PackedCellCoordinate::new(k * 3, 0).unwrap(),
+                "=SEQUENCE(2)".to_string(),
+            );
+        }
+        if merged {
+            let boxes: Vec<easyoffice_formats::CellBox> = (0..100_000u32)
+                .map(|r| {
+                    easyoffice_formats::CellBox::parse(&format!("E{}:F{}", r + 1, r + 1)).unwrap()
+                })
+                .collect();
+            sheet.set_spill_merges(boxes);
+        }
+        session_wb
+    };
+    for merged in [false, true] {
+        let wb = build(merged);
+        let mut best = f64::MAX;
+        for _ in 0..5 {
+            let mut session = RecalcSession::new(wb.clone()).unwrap();
+            let started = Instant::now();
+            let outcome = session.recalculate();
+            best = best.min(ms(started));
+            assert_eq!(outcome.spills.len(), 10_000);
+        }
+        println!(
+            "10,000 arrays, {} merged ranges: {best:.1} ms",
+            if merged { "100,000" } else { "no" }
+        );
+    }
+}
