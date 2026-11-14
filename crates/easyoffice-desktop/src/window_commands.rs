@@ -399,6 +399,7 @@ fn attach_handlers(app: &AppHandle, window: &WebviewWindow) {
             let action =
                 locked(&app.state::<AppWindows>().registry).begin_close(&label, Instant::now());
             if action == CloseAction::CloseNow {
+                hand_over_shutdown_block(&app, &label);
                 return;
             }
             api.prevent_close();
@@ -870,7 +871,17 @@ pub fn raise_and_close(window: &WebviewWindow) -> bool {
 /// Destroys the calling window without another close request (the page already asked the user).
 #[tauri::command]
 pub fn close_current_window(_caller: ShellCaller, window: WebviewWindow) {
+    hand_over_shutdown_block(window.app_handle(), window.label());
     let _ = window.destroy();
+}
+
+/// A window that is about to be destroyed hands the shutdown block it may carry to another window
+/// first, so that a logoff over unsaved documents is held without a gap (Windows, PD-191).
+fn hand_over_shutdown_block(app: &AppHandle, label: &str) {
+    #[cfg(windows)]
+    crate::session_end_windows::rehome_block(app, label);
+    #[cfg(not(windows))]
+    let _ = (app, label);
 }
 
 #[tauri::command]

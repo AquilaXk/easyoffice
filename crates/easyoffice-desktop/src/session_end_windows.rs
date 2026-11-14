@@ -10,7 +10,10 @@
 //! the shutdown is not held.
 //!
 //! The reason hangs on a window handle and goes with that window, so [`rehome_block`] moves it to
-//! another open window before the one carrying it is destroyed by the queue.
+//! another open window before the one carrying it is destroyed: from the close request that lets a
+//! window close and from the command that destroys one, not after the `Destroyed` event, when the
+//! system has already dropped the reason and nothing holds the shutdown for a moment. The same call
+//! after the event is the fallback for a window destroyed any other way.
 #![cfg_attr(not(windows), allow(dead_code))]
 
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -67,6 +70,13 @@ impl BlockSlot {
 
 static BLOCK: BlockSlot = BlockSlot(AtomicUsize::new(0));
 
+/// Whether the block has to move off its carrier because the window `own` (the one being closed,
+/// if it still exists) is the carrier, or the carrier is gone. A carrier that is another open window
+/// keeps it.
+fn carrier_must_move(carrier: usize, own: Option<usize>, carrier_exists: bool) -> bool {
+    carrier != 0 && (own == Some(carrier) || !carrier_exists)
+}
+
 #[cfg(windows)]
 pub use native::{attach, rehome_block, release_block};
 
@@ -80,9 +90,9 @@ mod native {
         ShutdownBlockReasonCreate, ShutdownBlockReasonDestroy,
     };
     use windows_sys::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
-    use windows_sys::Win32::UI::WindowsAndMessaging::{WM_NCDESTROY, WM_QUERYENDSESSION};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{IsWindow, WM_NCDESTROY, WM_QUERYENDSESSION};
 
-    use super::{reason_utf16, BLOCK, SUBCLASS_ID};
+    use super::{carrier_must_move, reason_utf16, BLOCK, SUBCLASS_ID};
     use crate::window_commands::AppWindows;
 
     /// The window procedure has no context pointer.
@@ -150,11 +160,21 @@ mod native {
         if !windows.has_unsaved_documents() {
             return false;
         }
+        // A carrier that no longer exists took its reason with it: the block must be made anew.
+        let carrier = BLOCK.current();
+        if carrier != 0 && !window_exists(carrier) {
+            BLOCK.release();
+        }
         if BLOCK.claim(hwnd) {
             create_reason(hwnd);
             crate::app_quit::defer_to_main(app, crate::app_quit::request_session_end);
         }
         true
+    }
+
+    fn window_exists(hwnd: usize) -> bool {
+        // SAFETY: a handle value only; `IsWindow` answers false for one that is not a window.
+        unsafe { IsWindow(hwnd as HWND) != 0 }
     }
 
     fn create_reason(hwnd: usize) {
@@ -179,10 +199,16 @@ mod native {
         }
     }
 
-    /// The window `gone` is being destroyed by the queue: a block carried by it moves to another
-    /// open window. Nothing to do without a block or without another window.
+    /// The window `gone` is about to be destroyed (or has been): a block carried by it moves to
+    /// another open window, the new reason registered before the old one is dropped. Nothing to do
+    /// without a block, when another window carries it, or without another window.
     pub fn rehome_block(app: &AppHandle, gone: &str) {
-        if BLOCK.current() == 0 {
+        let carrier = BLOCK.current();
+        let own = app
+            .get_webview_window(gone)
+            .and_then(|window| window.hwnd().ok())
+            .map(|hwnd| hwnd.0 as usize);
+        if carrier == 0 || !carrier_must_move(carrier, own, window_exists(carrier)) {
             return;
         }
         let next = app
@@ -223,6 +249,20 @@ mod tests {
         assert_eq!(slot.release(), Some(7));
         assert_eq!(slot.release(), None, "released once");
         assert!(slot.claim(9), "a later session end blocks again");
+    }
+
+    #[test]
+    fn the_block_leaves_a_carrier_that_is_closing_or_gone_and_stays_on_another_open_window() {
+        // No block.
+        assert!(!carrier_must_move(0, Some(7), true));
+        // The window being closed carries it: move before it is destroyed.
+        assert!(carrier_must_move(7, Some(7), true));
+        // Another open window carries it.
+        assert!(!carrier_must_move(7, Some(5), true));
+        assert!(!carrier_must_move(7, None, true));
+        // The carrier is gone already (the event came first): move now.
+        assert!(carrier_must_move(7, None, false));
+        assert!(carrier_must_move(7, Some(5), false));
     }
 
     #[test]
@@ -269,6 +309,18 @@ mod tests {
         }
         let windows = include_str!("window_commands.rs");
         assert!(windows.contains("crate::session_end_windows::attach(&window)"));
+        // The block moves before the window is destroyed, on both ways a window closes.
+        let close_now = windows.split("CloseAction::CloseNow").nth(1).unwrap();
+        assert!(
+            close_now.contains("hand_over_shutdown_block"),
+            "close request"
+        );
+        let destroy = windows.split("pub fn close_current_window").nth(1).unwrap();
+        let before_destroy = destroy.split("window.destroy()").next().unwrap();
+        assert!(
+            before_destroy.contains("hand_over_shutdown_block"),
+            "destroy command"
+        );
         let quit = include_str!("app_quit.rs")
             .split("#[cfg(test)]")
             .next()
