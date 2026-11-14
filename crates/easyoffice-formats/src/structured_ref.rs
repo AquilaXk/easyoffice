@@ -12,8 +12,8 @@
 //! Apache-2.0, commit 01b39c1ad26252f7b6c810440e8433a932daee07; Univer
 //! `packages/engine-formula/src/engine/reference-object/table-reference-object.ts` (splitting the body into a
 //! section and a column or column range at the first top-level comma, one layer of brackets around each
-//! part, the escape set, column names compared as written) and `packages/core/src/bases/formula-table-name.ts`,
-//! Apache-2.0, Copyright 2023-present DreamNum Co., Ltd., commit 5a06a7842c8e13fa0646d0733dc3662cf4b330b9.
+//! part, the escape set, column names compared as written), Apache-2.0, Copyright 2023-present DreamNum Co.,
+//! Ltd., commit 5a06a7842c8e13fa0646d0733dc3662cf4b330b9.
 //! Source and license text: `THIRD_PARTY_NOTICES.md`.
 //!
 //! Modifications: both references read leniently (a second `#` item, an unknown `#` word or a missing column

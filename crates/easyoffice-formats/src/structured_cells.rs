@@ -147,3 +147,23 @@ pub(crate) fn range_names<'a>(
             .collect(),
     )
 }
+
+/// The `table:named-expressions` of the names of `scope` (a sheet; `None` for the workbook's), for ODS: the names
+/// the first sheet's styling carries, with their structured references written as ranges.
+pub(crate) fn names_xml(
+    stylings: &[SheetStyling],
+    sheet_names: &[&str],
+    scope: Option<&str>,
+) -> String {
+    let Some(first) = stylings.first() else {
+        return String::new();
+    };
+    let defined = range_names(&first.defined_names, sheet_names, stylings);
+    crate::sheet_styling::ods_names::names_xml(
+        &defined,
+        scope,
+        scope
+            .or_else(|| sheet_names.first().copied())
+            .unwrap_or_default(),
+    )
+}

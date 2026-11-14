@@ -77,7 +77,7 @@ fn this_row_and_the_calculated_column() {
 #[test]
 fn missing_tables_columns_and_items() {
     let mut m = model();
-    assert_eq!(text(&mut m, "=SUM(Nope[Q1])"), "#NAME?");
+    assert_eq!(text(&mut m, "=SUM(Nope[Q1])"), "#REF!");
     assert_eq!(text(&mut m, "=SUM(Table1[Q9])"), "#REF!");
     assert_eq!(text(&mut m, "=SUM(Table1[[#Totals],[Q1]])"), "0");
     assert_eq!(text(&mut m, "=Table1[#This Row]"), "#VALUE!");
@@ -90,7 +90,7 @@ fn missing_tables_columns_and_items() {
         .set_sheet_table_defs("Sheet1", Vec::new())
         .unwrap();
     m.evaluate();
-    assert_eq!(text(&mut m, "=SUM(Table1[Q1])"), "#NAME?");
+    assert_eq!(text(&mut m, "=SUM(Table1[Q1])"), "#REF!");
 }
 
 use easyoffice_sheet::{Axis, AxisBudget, AxisEdit, EditKind};
@@ -148,7 +148,7 @@ fn a_change_of_the_tables_compiles_the_formulas_that_name_one_again() {
     m._set("Sheet2!A1", "=SUM(Table1[Q2])");
     m._set("Sheet2!A2", "=SUM(Other[x])");
     m.evaluate();
-    assert_eq!(texts(&m, &["Sheet2!A1", "Sheet2!A2"]), ["60", "#NAME?"]);
+    assert_eq!(texts(&m, &["Sheet2!A1", "Sheet2!A2"]), ["60", "#REF!"]);
     // The table grows by a row.
     m._set("B5", "40");
     m._set("A5", "4");
@@ -205,4 +205,126 @@ fn defined_names_can_hold_a_structured_reference() {
 
 fn texts(m: &dynamic_support::Model, cells: &[&str]) -> Vec<String> {
     cells.iter().map(|c| m._get_text(c)).collect()
+}
+
+#[test]
+fn a_column_spills_and_feeds_the_array_functions() {
+    let mut m = model();
+    m._set("H1", "=Table1[Q1]");
+    m._set("J1", "=SORT(Table1[Q2],,-1)");
+    m._set("L1", "=SUM(FILTER(Table1[Q1],Table1[Q2]>10))");
+    m._set("L2", "=XLOOKUP(2,Table1[Q1],Table1[Q2])");
+    m._set("L3", "=SUMPRODUCT(Table1[Q1],Table1[Q2])");
+    m.evaluate();
+    assert_eq!(texts(&m, &["H1", "H2", "H3", "H4"]), ["1", "2", "3", ""]);
+    assert_eq!(texts(&m, &["J1", "J2", "J3"]), ["30", "20", "10"]);
+    assert_eq!(texts(&m, &["L1", "L2", "L3"]), ["5", "20", "140"]);
+    // An array that would run into another table is blocked, as with a plain range.
+    m._set("H6", "x");
+    m._set("H7", "1");
+    m.session()
+        .set_sheet_table_defs(
+            "Sheet1",
+            vec![
+                table("Table1", "A1:C5", &["Q1", "Q2", "Total"], true),
+                table("Z", "H2:H7", &["x"], false),
+            ],
+        )
+        .unwrap();
+    m.evaluate();
+    assert_eq!(m._get_text("H1"), "#SPILL!");
+}
+
+#[test]
+fn names_with_special_characters_and_other_alphabets() {
+    let mut m = new_empty_model();
+    let names = [
+        "Q1 $",
+        "it's",
+        "a[1]",
+        "#tag",
+        "@at",
+        "매출 합계",
+        "x,y",
+        "a:b",
+    ];
+    for (i, n) in names.iter().enumerate() {
+        m._set(&format!("{}1", (b'A' + i as u8) as char), n);
+        m._set(
+            &format!("{}2", (b'A' + i as u8) as char),
+            &format!("{}", i + 1),
+        );
+    }
+    m.session()
+        .set_sheet_table_defs("Sheet1", vec![table("T", "A1:H2", &names, false)])
+        .unwrap();
+    for (name, shown) in [
+        ("Q1 $", "[[Q1 $]]"),
+        ("it's", "[[it''s]]"),
+        ("a[1]", "[[a'[1']]]"),
+        ("#tag", "[['#tag]]"),
+        ("@at", "[['@at]]"),
+        ("매출 합계", "[매출 합계]"),
+        ("x,y", "[[x,y]]"),
+        ("a:b", "[[a:b]]"),
+    ] {
+        let i = names.iter().position(|n| *n == name).unwrap();
+        let formula = format!("=SUM(T{shown})");
+        assert_eq!(text(&mut m, &formula), format!("{}", i + 1), "{formula}");
+    }
+    assert_eq!(text(&mut m, "=SUM(T[[Q1 $]:[it''s]])"), "3");
+    assert_eq!(text(&mut m, "=SUM(T[매출 합계])"), "6");
+    assert_eq!(
+        text(&mut m, "=SUM(t[Q1 $])"),
+        "1",
+        "a reference reads names without case"
+    );
+}
+
+#[test]
+fn a_table_on_another_sheet_and_this_row_across_sheets() {
+    let mut m = model();
+    m._set("Sheet2!A1", "=SUM(Table1[Q1])");
+    m._set("Sheet2!A2", "=Table1[[#This Row],[Q1]]");
+    m.evaluate();
+    // `#This Row` is the formula's row on the table's own sheet only.
+    assert_eq!(texts(&m, &["Sheet2!A1", "Sheet2!A2"]), ["6", "#VALUE!"]);
+    // A table of one data row and one column: the reference is one cell.
+    m._set("Sheet1!E1", "5");
+    m._set("Sheet1!E2", "6");
+    m.session()
+        .set_sheet_table_defs(
+            "Sheet1",
+            vec![
+                table("Table1", "A1:C5", &["Q1", "Q2", "Total"], true),
+                table("One", "E1:E2", &["h"], false),
+            ],
+        )
+        .unwrap();
+    m._set("Sheet2!B1", "=One[h]+1");
+    m._set("Sheet2!B2", "=ROWS(One[h])");
+    m.evaluate();
+    assert_eq!(texts(&m, &["Sheet2!B1", "Sheet2!B2"]), ["7", "1"]);
+}
+
+#[test]
+fn a_table_without_a_header_or_totals_row() {
+    let mut m = new_empty_model();
+    for r in 1..=3 {
+        m._set(&format!("A{r}"), &format!("{r}"));
+    }
+    let mut t = table("Plain", "A1:A3", &["Column1"], false);
+    t.header = false;
+    m.session().set_sheet_table_defs("Sheet1", vec![t]).unwrap();
+    assert_eq!(text(&mut m, "=SUM(Plain[Column1])"), "6");
+    assert_eq!(text(&mut m, "=SUM(Plain[#Headers])"), "#REF!");
+    assert_eq!(text(&mut m, "=SUM(Plain[#Totals])"), "#REF!");
+    assert_eq!(text(&mut m, "=ROWS(Plain[#All])"), "3");
+}
+
+#[test]
+fn a_sort_moves_a_relative_cell_but_not_a_structured_reference() {
+    let moved =
+        easyoffice_sheet::sorted_formula("=[@A5]*A5+Sales[[#This Row],[A5]]", "S", 0, 9, 2, 6);
+    assert_eq!(moved, "=[@A5]*A9+Sales[[#This Row],[A5]]");
 }

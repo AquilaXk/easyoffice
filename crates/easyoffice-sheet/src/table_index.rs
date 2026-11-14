@@ -199,7 +199,7 @@ impl TableIndex {
     }
 
     /// The cells the reference `sref` of `table` (the table the formula's cell is in when `None`) stands for,
-    /// in a formula at `ctx`. A table that is not there reads `#NAME?`, a reference that finds no cells `#REF!`
+    /// in a formula at `ctx`. A table or column that is not there reads `#REF!`
     /// and `#This Row` outside the data rows `#VALUE!`.
     pub(crate) fn resolve(
         &self,
@@ -216,12 +216,9 @@ impl TableIndex {
             (None, None) => None,
         };
         let Some(entry) = entry else {
-            let error = if table.is_some() {
-                FormulaError::Name
-            } else {
-                FormulaError::Ref
-            };
-            return Expr::ErrorLiteral(error);
+            // A table that is not there (deleted, or not told yet) reads as a reference to nothing, as it does
+            // when the spreadsheet program deletes the table a formula names.
+            return Expr::ErrorLiteral(FormulaError::Ref);
         };
         let same_sheet = entry.sheet.eq_ignore_ascii_case(ctx.sheet);
         let row = ctx

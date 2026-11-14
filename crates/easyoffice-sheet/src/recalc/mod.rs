@@ -34,6 +34,8 @@ mod tests_bench;
 mod tests_deadline;
 #[cfg(test)]
 mod tests_names;
+#[cfg(test)]
+mod tests_structured;
 
 use crate::dag::is_formula;
 use crate::{

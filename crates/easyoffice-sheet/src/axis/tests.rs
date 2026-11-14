@@ -395,3 +395,44 @@ fn a_rewrite_that_changes_nothing_answers_none() {
         None
     );
 }
+
+#[test]
+fn a_structured_reference_is_left_as_written_by_an_edit_and_a_rename() {
+    // Its brackets name columns (`B3`, `A5` look like cells but are not), so nothing in them moves (PD-225).
+    check(
+        edit(Axis::Row, EditKind::Insert, 3, 2),
+        &[
+            ("=A5+Sales[A5]", "=A7+Sales[A5]"),
+            (
+                "=SUM(Sales[[#This Row],[B3]])+B3",
+                "=SUM(Sales[[#This Row],[B3]])+B5",
+            ),
+            ("=[@A5]*A5", "=[@A5]*A7"),
+            (
+                "=Sales[[#Headers],[#Data],[A3]:[B9]]",
+                "=Sales[[#Headers],[#Data],[A3]:[B9]]",
+            ),
+            ("=\"Sales[A5]\"&A5", "=\"Sales[A5]\"&A7"),
+            ("=Sales[it'[3']]+A3", "=Sales[it'[3']]+A5"),
+        ],
+    );
+    check(
+        edit(Axis::Col, EditKind::Delete, 1, 1),
+        &[("=Sales[A1]+A1+B1", "=Sales[A1]+#REF!+A1")],
+    );
+    let renamed = rewrite_sheet_names(
+        "=Sales[Q1]+Old!A1+Sales[[#This Row],[Old]]",
+        SheetChange::Rename {
+            from: "Old",
+            to: "New sheet",
+        },
+    );
+    assert_eq!(
+        renamed.as_deref(),
+        Some("=Sales[Q1]+'New sheet'!A1+Sales[[#This Row],[Old]]")
+    );
+    assert_eq!(
+        rewrite_sheet_names("=Sales[Old]", SheetChange::Delete { name: "Old" }),
+        None
+    );
+}

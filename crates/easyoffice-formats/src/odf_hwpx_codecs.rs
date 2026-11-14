@@ -382,16 +382,9 @@ impl OdfCodec {
             );
         }
 
-        if let Some(first) = stylings.first() {
-            let defined = crate::sheet_styling::structured_cells::range_names(
-                &first.defined_names,
-                &names,
-                stylings,
-            );
-            content.push_str(&crate::sheet_styling::ods_names::names_xml(
-                &defined, None, names[0],
-            ));
-        }
+        content.push_str(&crate::sheet_styling::structured_cells::names_xml(
+            stylings, &names, None,
+        ));
         content.push_str(
             &crate::sheet_styling::sheet_table::ods_tables::database_ranges_xml(stylings, &names),
         );
@@ -634,18 +627,11 @@ impl OdfCodec {
             }
         }
         groups.close_all(content);
-        if let Some(first) = rules.stylings.first() {
-            let defined = crate::sheet_styling::structured_cells::range_names(
-                &first.defined_names,
-                rules.sheet_names,
-                rules.stylings,
-            );
-            content.push_str(&crate::sheet_styling::ods_names::names_xml(
-                &defined,
-                Some(sheet_name),
-                sheet_name,
-            ));
-        }
+        content.push_str(&crate::sheet_styling::structured_cells::names_xml(
+            rules.stylings,
+            rules.sheet_names,
+            Some(sheet_name),
+        ));
         content.push_str("</table:table>");
     }
 
