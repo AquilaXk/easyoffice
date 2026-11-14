@@ -61,15 +61,18 @@ pub(crate) fn mixed_units(text: &str) -> u32 {
 
 /// The operators that show `text` at (`x`, `y`) in `size` pt. A line the Korean font shows whole is one text object in one
 /// font ([`tj_operand`]). A line with Latin-1 signs outside ASCII (the middle dot, accented letters), which the Korean
-/// font's viewer substitute may not draw, is split at the font changes into one text object per run, each at the advance
-/// width of the runs before it, the signs and the ASCII beside them in the Latin font. No character is left out.
+/// font's viewer substitute may not draw, is still one text object: the font changes at the runs, and each run
+/// starts at the advance width of the runs before it, the signs and the ASCII beside them in the Latin font. A reader
+/// takes the runs of one text object on one baseline as one line. No character is left out.
 pub(crate) fn text_ops(x: f64, y: f64, size: f64, text: &str) -> String {
     if !text.chars().any(|c| matches!(c, '\u{A0}'..='\u{FF}')) {
         let (font, operand) = tj_operand(text);
         return format!("BT {font} {size:.2} Tf {x:.2} {y:.2} Td {operand} Tj ET");
     }
-    let mut out = String::new();
-    let mut at = x;
+    let mut out = String::from("BT");
+    // `Td` moves from the start of the previous run: the offset is the width of that run, rounded
+    // against the sum already written so the error never adds up.
+    let (mut width_before, mut written) = (0.0_f64, 0.0_f64);
     let mut rest = text;
     while let Some(first) = rest.chars().next() {
         let latin = in_latin_font(first);
@@ -78,9 +81,13 @@ pub(crate) fn text_ops(x: f64, y: f64, size: f64, text: &str) -> String {
             .find(|&(_, c)| in_latin_font(c) != latin)
             .map_or(rest.len(), |(i, _)| i);
         let (run, tail) = rest.split_at(end);
-        if !out.is_empty() {
-            out.push(' ');
-        }
+        let target = (width_before * 100.0).round() / 100.0;
+        let (dx, dy) = if rest.len() == text.len() {
+            (x, y)
+        } else {
+            (target - written, 0.0)
+        };
+        written = target;
         if latin {
             let literal = run.chars().fold(String::new(), |mut acc, c| {
                 match c {
@@ -94,17 +101,18 @@ pub(crate) fn text_ops(x: f64, y: f64, size: f64, text: &str) -> String {
                 acc
             });
             out.push_str(&format!(
-                "BT /F1 {size:.2} Tf {at:.2} {y:.2} Td ({literal}) Tj ET"
+                " /F1 {size:.2} Tf {dx:.2} {dy:.2} Td ({literal}) Tj"
             ));
         } else {
             out.push_str(&format!(
-                "BT /F2 {size:.2} Tf {at:.2} {y:.2} Td <{}> Tj ET",
+                " /F2 {size:.2} Tf {dx:.2} {dy:.2} Td <{}> Tj",
                 encode_utf16be_hex_impl(run)
             ));
         }
-        at += f64::from(mixed_units(run)) * size / 1000.0;
+        width_before += f64::from(mixed_units(run)) * size / 1000.0;
         rest = tail;
     }
+    out.push_str(" ET");
     out
 }
 
@@ -572,4 +580,28 @@ fn write_trailer(w: &mut PdfObjectWriter, total_objects: usize, info_obj: usize)
     w.line("startxref");
     w.line(&xref_offset.to_string());
     w.line("%%EOF");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{mixed_units, text_ops};
+
+    #[test]
+    fn a_mixed_line_is_one_text_object_whose_runs_start_where_the_runs_before_end() {
+        let ops = text_ops(54.0, 700.0, 12.0, "가·나");
+        assert_eq!(ops.matches("BT").count(), 1, "{ops}");
+        assert_eq!(ops.matches("ET").count(), 1, "{ops}");
+        let moves: Vec<(f64, f64)> = ops
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .windows(3)
+            .filter(|w| w[2] == "Td")
+            .map(|w| (w[0].parse().unwrap(), w[1].parse().unwrap()))
+            .collect();
+        let advance = |run: &str| f64::from(mixed_units(run)) * 12.0 / 1000.0;
+        assert_eq!(moves.len(), 3, "{ops}");
+        assert_eq!(moves[0], (54.0, 700.0));
+        assert!((moves[1].0 - advance("가")).abs() < 0.006 && moves[1].1 == 0.0);
+        assert!((moves[2].0 - advance("·")).abs() < 0.006 && moves[2].1 == 0.0);
+    }
 }
