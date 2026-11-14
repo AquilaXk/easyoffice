@@ -537,6 +537,7 @@ test("the shell lets go of the file after a cancelled password or a failed open,
     [{ ok: false, error: "손상" }, 1, "refused"],
     [undefined, 1, "no answer"],
     [{ ok: true, module: "HWP" }, 0, "shown"],
+    [{ ok: true, module: "DOC", textOnly: true }, 1, "shown as text only: a save must not replace the original"],
   ];
   for (const [outcome, abandons, why] of outcomes) {
     const { shell, document } = await openWindow("?module=HWP&win=w-pw", pending);

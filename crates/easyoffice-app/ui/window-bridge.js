@@ -474,13 +474,18 @@
       if (isStart) return;
       const pending = await takePendingOpen().catch(() => null);
       if (!pending) return;
-      let shown = false;
+      let opened = false;
+      let tracked = false;
       try {
-        shown = (await openBytes(pending.name, pending.bytes))?.ok === true;
+        const outcome = await openBytes(pending.name, pending.bytes);
+        opened = outcome?.ok === true;
+        // A text-only open (the editor could not show an HWP-family file) rebuilt the document from its text, so
+        // a save of it must not replace the original: the shell lets go of the file and Save asks where to write.
+        tracked = opened && outcome.textOnly !== true;
       } finally {
-        if (!shown && desktopAvailable()) await shell("abandonTrackedOpen", {}).catch(() => {});
+        if (!tracked && desktopAvailable()) await shell("abandonTrackedOpen", {}).catch(() => {});
       }
-      if (shown) await afterShown?.();
+      if (opened) await afterShown?.();
     }
 
     // Long status texts are clipped with an ellipsis; hovering or focusing one shows the full text.
