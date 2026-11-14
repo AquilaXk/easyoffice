@@ -3610,3 +3610,21 @@
 - **Alternatives rejected** 링크를 별도 표로 두고 위치 이동 서비스로 따라가는 방식(엔진 세션이 칸을 모르는 이 구조에서 같은 일을 두 번 함), 쓰기가 링크를 지우는 방식(참조 엔진 A의 규칙, 스프레드시트 프로그램과 다름), 클릭에 확인 창(문서 링크 기준이 없고 모든 클릭에 한 번 더 누르게 함), `Ctrl`/`Cmd`+`K`를 명령 검색으로 두는 방식(사무 프로그램·참조 편집기와 충돌), 두 단계 `Ctrl+K,H`(사무 프로그램의 한 번 입력과 다름).
 - **Verified by** `cargo test -p easyoffice-formats --lib sheet_links`와 `--test sheet_links_roundtrip --test sheet_links_scale`(왕복, 악의적 파일, 상한), `cargo test -p easyoffice-sheet --lib axis::links`, `cargo test -p easyoffice-app --lib link`(열기·저장 JSON, 교차 형식, 행·열 편집·이름 변경 응답), `cargo test -p easyoffice-desktop open_link`와 기능 목록 대조, `node --test scripts/test-webui-sheet-link.mjs scripts/test-webui-sheet-link-follow.mjs scripts/test-webui-sheet-native-menu.mjs scripts/test-webui-desktop-bridge.mjs`, 실제 엔진과 헤드리스 브라우저 캡처, 측정 `cargo test --release -p easyoffice-formats --test sheet_links_scale -- --nocapture`.
 - **Revisit when** 칸 오른쪽 메뉴가 생길 때, `HYPERLINK` 수식 칸의 클릭 열기, 파일·상대 경로 링크, XLS 링크 기록, 입력한 주소의 자동 링크, 화면 설명 편집 칸, 링크 칸의 글꼴 색 저장, 문서 창의 책갈피 단축키가 필요할 때.
+
+## PD-219. 외부 검토 1차(높음 13건)의 처리: 신뢰할 수 없는 입력의 상한을 만드는 단계로 앞당기고, 앱 출처·종료 차단·저장 안 된 변경 판단의 빈틈을 닫는다
+
+- **Status** Implemented (QA 요청 2026-11-14). 항목마다 재현으로 참·거짓을 가린 뒤 고쳤고, 거짓·부분으로 가려진 것은 아래에 근거를 둡니다.
+- **Context** 외부 모델의 검토 결과를 그대로 믿지 않고 코드를 읽어 재현했습니다. 참으로 확인된 것: 조건부 서식 하위 N 패닉, ODS 유효성 이름 패닉, `CHOOSEROWS`·`OFFSET`의 큰 정수, 공유 수식·`LET`·`LAMBDA`의 파일 철자, 이름 변경 응답의 스필 누락, 행·열 편집 때 보호 잠금과 유효성 규칙, 피벗의 상한 위치·단계 합산·교차 시트, PDF 글꼴 맵과 Pages 반복 참조의 바이트 증폭, Quick Look 동시 실행, 창 탐색 출처의 포트, 편집기가 못 연 HWPX의 원본 덮어쓰기, 자동 저장 비교 전 편집, Windows 종료 차단 이유의 공백, 릴리스 서명 단계의 CLI 설치.
+- **Decision (`PD-219`)**
+  1. **피벗**: 그룹 수집 중에 행 그룹 × 열 그룹이 250,000칸을 넘으면 칸 배열을 만들기 전에 거부하고(`ResourceBudgetExceeded`), 평가 한 번의 시간 상한(`MAX_EVAL_TIME`) 안에 끝나지 않으면 부분 답 없이 거부합니다. 칸마다 단계 예산을 새로 세고, 값은 통합 문서 전체(다른 시트·이름·스필)에서 읽습니다. 페이지는 모든 시트의 칸과 이름 목록을 보냅니다.
+  2. **PDF·Pages**: `/ToUnicode` 맵은 한 코드의 대상이 UTF-16 16단위를 넘으면 버리고, 맵이 담는 바이트는 문서 복원 예산(`DecodeBudget`)에 올립니다. 문자열 하나가 맵을 거쳐 1 MiB를, 한 페이지가 32 MiB를 넘으면 거부하고 페이지 글자는 문서 예산에 올립니다. Pages의 텍스트 저장소는 참조될 때마다 바이트를 64 MiB 예산에 올립니다.
+  3. **Quick Look**: 요청은 프로세스에서 동시에 2개이고, 작업 스레드는 마감을 넘겨도 끝날 때까지 허가를 쥡니다(셸 카드 미리보기와 같은 문). 입력 복사는 허가를 얻은 뒤에 하고, 모든 C 함수 본문은 `catch_unwind`로 감쌉니다. Swift는 링크를 풀어 일반 파일인지와 크기를 그 대상으로 확인합니다.
+  4. **앱 출처**: 창 탐색은 Windows에서 `http://tauri.localhost`, 그 밖에서 `tauri://localhost`이고 어느 쪽도 포트가 없는 주소만 허용합니다. 프레임워크의 로컬 판정이 포트를 보지 않고 `*.localhost`는 루프백으로 가기 때문입니다.
+  5. **종료 차단(Windows)**: 차단 이유는 창이 파괴되기 전(닫기 요청이 통과할 때, `close_current_window`)에 다른 창으로 옮깁니다. 담은 창이 이미 없으면 다음 종료 질의에서 새로 등록합니다.
+  6. **텍스트만 연 HWP 계열**: 셸이 원본 추적을 놓습니다. 저장은 위치를 묻습니다.
+  7. **저장 안 된 변경**: 입력·변경·문서 변경 신호(클릭 제외)는 자동 저장 비교 전에도 즉시 셸에 "저장 안 됨"으로 알리고, 창을 닫기 전에 편집 중인 시트 칸을 확정하고 내용을 비교해 마지막 판단을 합니다.
+  8. **릴리스**: 서명 키가 있는 단계의 CLI는 `scripts/tauri-cli/package-lock.json`(무결성 해시)에서 스크립트 없이 설치한 것이고, 발행 작업은 버전 단위의 동시성 그룹 하나로 직렬화합니다.
+- **재사용 판단** (1) 허용 라이선스 크레이트로 바로 쓸 수 있는 것은 없었습니다. (2) 문서 복원 예산, 셸 미리보기의 허가 문, 행·열 이동 함수, 평가 마감을 그대로 썼습니다. (3) 이식한 참조 구현은 없습니다.
+- **검토와 다르게 한 것** 앱 출처를 페이지 쪽 `location.origin`과 한 번 더 대조하는 안은 넣지 않았습니다(플랫폼별 값을 실기로 확인하지 못했고, 탐색 제한이 이미 같은 일을 함). 썸네일 전용 래스터 예산은 넣지 않았습니다(기존 한도가 주석과 같은 4096×4096이고 동시 2개로 합계가 묶임). Swift 파일 읽기는 FIFO에서 멈춘다는 부분이 거짓이고(이 macOS의 읽기는 FIFO를 거부함) 링크의 크기 확인 우회만 실재했습니다.
+- **Verified by** `cargo test -p easyoffice-sheet`(`rules::tests`, `recalc::tests_axis`, `recalc::tests_names`, `sheet_dynamic_limits`, `sheet_pivot_limits`), `cargo test -p easyoffice-formats`(`pdf_stream_parser`, `sheet_rules_roundtrip`, `pages_notes`, `xlsx_sheet`, `xlsx_formula_text`), `cargo test -p easyoffice-app sheet_pivot`, `cargo test -p easyoffice-desktop`(`navigation_is_limited_to_embedded_origin`, `session_end_windows`), `node scripts/run-quicklook-tests.mjs`, `node --test scripts/test-webui-windows.mjs scripts/test-webui-sheet-spill.mjs scripts/test-release-assets.mjs scripts/test-retry-on-download-failure.mjs`.
+- **Revisit when** Windows 실기에서 로그오프 차단 이유의 이동을 확인할 때, 한 코드의 대상이 16단위를 넘는 실제 글꼴 맵이 나올 때, 릴리스 CLI를 올릴 때(잠금 파일을 함께 갱신).
