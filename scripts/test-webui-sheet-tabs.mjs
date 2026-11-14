@@ -1040,3 +1040,10 @@ test("the keyboard reaches the 탭 색 palette: Right opens it, the arrows move 
   assert.equal(document.activeElement, sub);
   assert.equal(h.menu().hidden, false, "Escape in the palette goes back first");
 });
+
+test("the text on a tab colour is white on a dark colour and black on a light one, by the reference's brightness rule, not the cell rule (PD-229)", async () => {
+  const h = await open();
+  const want = { "3366cc": "#ffffff", "1f3864": "#ffffff", c00000: "#ffffff", "00b050": "#ffffff", ffc000: "#000000", e2e2f8: "#000000", "808080": "#000000", "7f7f7f": "#ffffff" };
+  await h.openBook([{ name: "Sheet1", cells: { A1: "1" } }, ...Object.keys(want).map((rgb, i) => ({ name: "S" + (i + 2), cells: { A1: "x" }, tabColor: rgb }))]);
+  for (const [i, [rgb, text]] of Object.entries(want).entries()) assert.equal(h.tab("S" + (i + 2)).style.getPropertyValue("--tab-text"), text, rgb);
+});

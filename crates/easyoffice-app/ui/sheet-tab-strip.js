@@ -8,10 +8,11 @@
   // list and a sheet nobody placed (the pivot's, a restored older snapshot's) goes last.
   //
   // 참조 구현: the reference engine's `packages/sheets-ui/src/views/sheet-bar/sheet-bar-tabs/SheetBarItem.tsx` lines
-  // 38-99 (a tab that is not selected takes the colour as its background and a light or dark text by the colour's
-  // darkness; a selected tab shows the colour as a 2px bar at its lower edge), Apache-2.0, Copyright 2023-present
-  // DreamNum Co., Ltd., commit 5a06a7842c8e13fa0646d0733dc3662cf4b330b9. Modifications: plain DOM and CSS, the text
-  // colour comes from the cell rule of the sheet window (`autoTextColor`).
+  // 38-99 and `packages/core/src/shared/color/color-kit.ts` lines 369-385 (a tab that is not selected takes the colour
+  // as its background and a light or dark text by the colour's brightness; a selected tab shows the colour as a 2px
+  // bar at its lower edge), Apache-2.0, Copyright 2023-present
+  // DreamNum Co., Ltd., commit 5a06a7842c8e13fa0646d0733dc3662cf4b330b9. Modifications: plain DOM and CSS, the
+  // text colours are white and black.
 
   const names = host.__EASYOFFICE_SHEET_TAB_NAMES__;
   const layout = host.__EASYOFFICE_SHEET_LAYOUT__;
@@ -51,9 +52,19 @@
     return tab;
   }
 
-  // The tab's colour (PD-229): a tab that is not chosen has it for its background and the text that reads on it (the
-  // rule of a cell with a fill, PD-227); the chosen tab keeps its own look and shows the colour as a bar along its
-  // lower edge. The look is in `shell.css` (`data-tab-color`); this sets the two values it uses.
+  // The text on a tab colour: light on a dark colour, dark on a light one. A colour is dark when its brightness
+  // (r * 299 + g * 587 + b * 114) / 1000 is under 128, as the reference's `ColorKit.getBrightness` and `isDark` have
+  // it (`packages/core/src/shared/color/color-kit.ts` lines 369-385). The rule of a cell with a fill (PD-227) is for
+  // the cells and stays as it is; its threshold of 62 leaves black text on mid colours such as `3366cc`, too dark to read on a tab.
+  function tabTextColor(rgb) {
+    const n = parseInt(rgb, 16);
+    const brightness = (((n >> 16) & 255) * 299 + ((n >> 8) & 255) * 587 + (n & 255) * 114) / 1000;
+    return brightness < 128 ? "ffffff" : "000000";
+  }
+
+  // The tab's colour (PD-229): a tab that is not chosen has it for its background and the text that reads on it
+  // (`tabTextColor`); the chosen tab keeps its own look and shows the colour as a bar along its lower edge. The look
+  // is in `shell.css` (`data-tab-color`); this sets the two values it uses.
   function paintColor(btn, rgb) {
     if (!rgb) {
       delete btn.dataset.tabColor;
@@ -63,7 +74,7 @@
     }
     btn.dataset.tabColor = rgb;
     btn.style.setProperty("--tab-color", "#" + rgb);
-    btn.style.setProperty("--tab-text", "#" + (host.__EASYOFFICE_SHEET_LOOK__?.autoTextColor(rgb) ?? "000000"));
+    btn.style.setProperty("--tab-text", "#" + tabTextColor(rgb));
   }
 
   // Draws the tabs of the visible sheets before the add button, in order, reusing the buttons that
