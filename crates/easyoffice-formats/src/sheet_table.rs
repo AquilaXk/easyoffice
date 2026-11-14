@@ -13,8 +13,8 @@
 //!
 //! Modifications: the model has no differential format ids, calculated column formulas, totals
 //! functions or query connections (a file that has them is read without them); the filter state keeps
-//! only the conditions of the columns (`FilterColumn`), the rows a filter hides stay hidden rows of
-//! the sheet; every size is bounded and a table over a bound is turned away, never trimmed. Names follow
+//! only the conditions of the columns (`FilterColumn`) and the rows they hide (`filter_hidden`, kept
+//! apart from the rows a user hid, PD-226); every size is bounded and a table over a bound is turned away, never trimmed. Names follow
 //! the defined-name syntax of `sheet_names` without `?`, because a table name is a name of the
 //! workbook (ECMA-376 18.5.1.2 `displayName`).
 //!
@@ -22,7 +22,7 @@
 
 use std::collections::HashSet;
 
-use crate::sheet_filter::{columns_within_bounds, FilterColumn};
+use crate::sheet_filter::{columns_within_bounds, FilterColumn, MAX_FILTER_ROWS};
 use crate::sheet_names::{defined_name_problem, fold_name, NameProblem};
 use crate::{CellBox, EasyOfficeError};
 
@@ -62,6 +62,10 @@ pub struct SheetTable {
     /// The auto filter of the table: `None` when the table has no filter buttons, else the conditions of
     /// its columns (absolute columns, inside the range).
     pub filter: Option<Vec<FilterColumn>>,
+    /// The rows the conditions of `filter` hide, as sorted, disjoint zero-based inclusive runs, apart
+    /// from the rows a user hid (PD-226). Empty for a table whose filter has no conditions, or whose
+    /// range is too tall for the filter to be applied.
+    pub filter_hidden: Vec<(u32, u32)>,
 }
 
 impl SheetTable {
@@ -80,6 +84,7 @@ impl SheetTable {
             row_stripes: true,
             column_stripes: false,
             filter: None,
+            filter_hidden: Vec::new(),
         }
     }
 
@@ -116,6 +121,20 @@ impl SheetTable {
                 .filter
                 .as_ref()
                 .is_none_or(|f| self.header && columns_within_bounds(f, &r))
+            && self.filter_hidden_within_bounds()
+    }
+
+    /// The hidden runs sit below the header row inside the filter range, and the range is one the
+    /// filter may be applied to.
+    fn filter_hidden_within_bounds(&self) -> bool {
+        let filtered = self.filter_range();
+        self.filter_hidden.is_empty()
+            || (self.filter.is_some()
+                && filtered.row1 - filtered.row0 < MAX_FILTER_ROWS
+                && self.filter_hidden.iter().all(|&(first, last)| {
+                    first > filtered.row0 && first <= last && last <= filtered.row1
+                })
+                && self.filter_hidden.windows(2).all(|w| w[0].1 < w[1].0))
     }
 
     /// Whether the table shares a cell with `other`.

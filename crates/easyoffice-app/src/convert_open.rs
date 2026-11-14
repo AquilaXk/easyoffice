@@ -435,9 +435,13 @@ fn write_sheet(
     }
     if let Some(st) = styling {
         match crate::sheet_filter_ipc::split_for_open(cells, st) {
-            Some((filter, hidden)) => {
-                crate::sheet_layout_json::write_layout_split(out, st, &hidden, Some(&filter));
-            }
+            Some(split) => crate::sheet_layout_json::write_layout_split(
+                out,
+                st,
+                &split.hidden,
+                split.filter.as_ref(),
+                &split.tables,
+            ),
             None => crate::sheet_layout_json::write_layout(out, st),
         }
     }

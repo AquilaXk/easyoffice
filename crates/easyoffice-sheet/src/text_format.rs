@@ -596,6 +596,17 @@ pub fn format_number_styled(num: f64, fmt_str: &str) -> Result<FormattedText, Fo
     compiled_format(fmt_str).render_number(num)
 }
 
+/// Whether the number `num` shows as a date or a time under the format `code`: the section the
+/// number takes holds a date or time part (PD-226, the date tree of an auto filter).
+pub fn code_shows_date(code: &str, num: f64) -> bool {
+    let compiled = compiled_format(code);
+    if compiled.is_text_only() || !num.is_finite() {
+        return false;
+    }
+    let (idx, _) = compiled.pick_numeric(num);
+    matches!(compiled.sections[idx].kind, SectionKind::Date)
+}
+
 /// Display of a cell's stored value `raw` under the cell format `code` (PD-193): a number goes
 /// through the number sections, text through the text section. `None` when the cell keeps its
 /// General display: the value is text and the code has no text section, or a date/time code

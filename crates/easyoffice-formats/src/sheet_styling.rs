@@ -52,6 +52,8 @@ pub(crate) mod structured_ref;
 pub(crate) mod xlsx_bounds;
 #[path = "xlsx_filter.rs"]
 pub(crate) mod xlsx_filter;
+#[path = "xlsx_filter_dxf.rs"]
+pub(crate) mod xlsx_filter_dxf;
 #[path = "xlsx_formula_text.rs"]
 pub(crate) mod xlsx_formula_text;
 #[path = "xlsx_layout.rs"]
@@ -482,11 +484,15 @@ impl SheetStyling {
             })
     }
 
-    /// Whether the user, a folded group or the filter hides `row`.
+    /// Whether the user, a folded group, the filter or a table's filter hides `row`.
     pub fn row_hidden(&self, row: u32) -> bool {
         xlsx_layout::run_contains(&self.hidden_rows, row)
             || xlsx_layout::run_contains(&self.outline.collapsed_rows, row)
             || self.filter.as_ref().is_some_and(|f| f.hides(row))
+            || self
+                .tables
+                .iter()
+                .any(|t| xlsx_layout::run_contains(&t.filter_hidden, row))
     }
 }
 

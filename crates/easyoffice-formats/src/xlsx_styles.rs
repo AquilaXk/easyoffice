@@ -14,6 +14,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use crate::rtf_xml_helpers::{
     extract_attr_from_fragment, extract_tag_bodies, extract_tags_or_self_closing_with_attrs,
 };
+use crate::sheet_styling::sheet_filter::color_criteria;
 use crate::sheet_styling::sheet_look::{xlsx_color_rgb, BorderEdge, BorderLine, CellBorders};
 use crate::sheet_styling::sheet_rules::xlsx_rules::DxfTable;
 use crate::sheet_styling::{
@@ -94,7 +95,16 @@ impl XlsxStyleTable {
                 stylings
                     .iter()
                     .flat_map(|st| st.rules.cf.iter().map(|rule| rule.style)),
-            ),
+            )
+            .with_colors(stylings.iter().flat_map(|st| {
+                let sheet = st.filter.iter().flat_map(|f| color_criteria(&f.columns));
+                let tables = st
+                    .tables
+                    .iter()
+                    .filter_map(|t| t.filter.as_deref())
+                    .flat_map(color_criteria);
+                sheet.chain(tables)
+            })),
         };
         for styling in stylings {
             let mut ids = IdMemo::new();
@@ -486,6 +496,9 @@ pub(crate) struct XfStyles {
     pub(crate) link_xfs: Vec<bool>,
     pub(crate) num_fmts: Arc<Vec<String>>,
     pub(crate) rejected: u32,
+    /// The colours of the differential formats, for the colour filters (PD-226). Set by the caller
+    /// that has the theme.
+    pub(crate) dxf_colors: Vec<crate::sheet_styling::xlsx_filter_dxf::DxfColors>,
 }
 
 /// `numFmtId` -> `formatCode` of the `numFmts` element.
@@ -611,6 +624,7 @@ pub(crate) fn parse_cell_xf_styles(styles_xml: &str) -> XfStyles {
         link_xfs,
         num_fmts,
         rejected,
+        dxf_colors: Vec::new(),
     }
 }
 

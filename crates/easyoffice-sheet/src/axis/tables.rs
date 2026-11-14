@@ -11,7 +11,7 @@
 //! `AxisEdit::shift_span` (see the header of `axis/mod.rs`). The spreadsheet program keeps a table whose
 //! totals row is deleted as a table without one; this port does the same.
 
-use super::{Axis, AxisEdit, EditKind};
+use super::{shift_runs, Axis, AxisEdit, EditKind};
 use easyoffice_formats::{fold_name, FilterColumn, SheetTable};
 use std::collections::HashSet;
 
@@ -29,6 +29,7 @@ pub fn shift_table(table: &SheetTable, edit: &AxisEdit) -> Option<SheetTable> {
             }
             (out.range.row0, out.range.row1) = edit.shift_span(range.row0, range.row1)?;
             out.totals = table.totals && !deleted(range.row1);
+            out.filter_hidden = shift_runs(&table.filter_hidden, edit);
         }
         Axis::Col => {
             let range = table.range;
@@ -109,6 +110,7 @@ mod tests {
                 criteria: FilterCriteria::Values {
                     blank: false,
                     values: vec!["x".into()],
+                    dates: Vec::new(),
                 },
             },
             FilterColumn {
@@ -116,6 +118,7 @@ mod tests {
                 criteria: FilterCriteria::Values {
                     blank: true,
                     values: Vec::new(),
+                    dates: Vec::new(),
                 },
             },
         ]);

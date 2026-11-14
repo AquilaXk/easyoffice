@@ -11,6 +11,7 @@ use crate::sheet_styling::sheet_table::xlsx_tables::{
 };
 use crate::sheet_styling::sheet_view::{level_at, Outline};
 use crate::sheet_styling::xlsx_filter::autofilter_xml;
+use crate::sheet_styling::xlsx_filter_dxf::parse_dxf_colors;
 use crate::sheet_styling::xlsx_layout::{layout_cols_xml, merge_cells_xml};
 use crate::sheet_styling::xlsx_sheet::{read_shared_strings, scan_worksheet, SharedStrings};
 use crate::sheet_styling::xlsx_styles::{parse_cell_xf_styles, XfStyles, XlsxStyleTable};
@@ -288,7 +289,11 @@ fn group_cells_by_row<'a>(
         for (row, col) in blank_cells {
             rows_map.entry(row).or_default().push((col, blank));
         }
-        let filtered = st.filter.iter().flat_map(|f| f.hidden.iter());
+        let filtered = st
+            .filter
+            .iter()
+            .flat_map(|f| f.hidden.iter())
+            .chain(st.tables.iter().flat_map(|t| t.filter_hidden.iter()));
         let hidden = st.hidden_rows.iter().chain(&st.outline.collapsed_rows);
         for &(start, end) in hidden.chain(filtered) {
             for row in start..=end {
@@ -410,7 +415,7 @@ fn build_sheet_xml(
             ));
         }
         if let Some(filter) = &st.filter {
-            sheet_xml.push_str(&autofilter_xml(filter));
+            sheet_xml.push_str(&autofilter_xml(filter, &style_table.dxf));
         }
         sheet_xml.push_str(&merge_cells_xml(&merges_clear_of_tables(
             &st.merges, &st.tables,
@@ -618,7 +623,9 @@ impl OoxmlCodec {
             .iter()
             .zip(&sheet_tables)
             .enumerate()
-            .map(|(i, (cells, tables))| table_writer.add_sheet(tables, cells, caches.get(i)))
+            .map(|(i, (cells, tables))| {
+                table_writer.add_sheet(tables, cells, caches.get(i), &style_table.dxf)
+            })
             .collect();
         let has_spills = stylings.iter().any(|s| !s.spills.is_empty());
         let (content_types, wb_rels_xml) = if has_spills {
@@ -827,7 +834,7 @@ impl OoxmlCodec {
             sheet_specs[0].2 = false;
         }
 
-        let xf_styles = if with_styling {
+        let mut xf_styles = if with_styling {
             entry_by_path
                 .get("xl/styles.xml")
                 .and_then(|d| std::str::from_utf8(d).ok())
@@ -851,6 +858,14 @@ impl OoxmlCodec {
                 .and_then(|d| std::str::from_utf8(d).ok())
                 .map_or(DEFAULT_THEME, theme_palette)
         });
+        if let (Some(theme), Some(styles)) = (
+            &theme,
+            entry_by_path
+                .get("xl/styles.xml")
+                .and_then(|d| std::str::from_utf8(d).ok()),
+        ) {
+            xf_styles.dxf_colors = parse_dxf_colors(styles, theme);
+        }
         let mut stylings = Vec::new();
         let workbook_names: Vec<String> = sheet_specs.iter().map(|spec| spec.0.clone()).collect();
         let mut parsed_sheets = Vec::with_capacity(sheet_specs.len());
@@ -908,6 +923,7 @@ impl OoxmlCodec {
                     &entry_by_path,
                     &mut table_registry,
                     &mut styling.tables,
+                    &xf_styles.dxf_colors,
                 )?;
                 if let std::borrow::Cow::Owned(kept) =
                     merges_clear_of_tables(&styling.merges, &styling.tables)

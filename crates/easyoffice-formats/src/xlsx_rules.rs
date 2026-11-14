@@ -25,6 +25,8 @@ use crate::XmlSanitizer;
 pub(crate) struct DxfTable {
     styles: Vec<CfStyle>,
     index: HashMap<CfStyle, usize>,
+    /// The formats of colour filters (`font`, colour), after the conditional formats (PD-226).
+    colors: Vec<(bool, Option<u32>)>,
 }
 
 impl DxfTable {
@@ -43,12 +45,31 @@ impl DxfTable {
         self.index.get(style).copied()
     }
 
-    /// `<dxfs>` element (empty when no rule formats by style).
+    /// Adds the formats the colour filters name (`font` colour or fill colour, `None` for no colour).
+    pub(crate) fn with_colors(
+        mut self,
+        all: impl IntoIterator<Item = (bool, Option<u32>)>,
+    ) -> Self {
+        for color in all {
+            if !self.colors.contains(&color) {
+                self.colors.push(color);
+            }
+        }
+        self
+    }
+
+    /// The id of the format a colour filter names.
+    pub(crate) fn color_id(&self, font: bool, color: Option<u32>) -> Option<usize> {
+        let at = self.colors.iter().position(|c| *c == (font, color))?;
+        Some(self.styles.len() + at)
+    }
+
+    /// `<dxfs>` element (empty when no rule or filter formats by style).
     pub(crate) fn to_xml(&self) -> String {
-        if self.styles.is_empty() {
+        if self.styles.is_empty() && self.colors.is_empty() {
             return String::new();
         }
-        let mut xml = format!("<dxfs count=\"{}\">", self.styles.len());
+        let mut xml = format!("<dxfs count=\"{}\">", self.styles.len() + self.colors.len());
         for s in &self.styles {
             xml.push_str("<dxf>");
             if s.fg.is_some() || s.flags != 0 {
@@ -73,6 +94,25 @@ impl DxfTable {
                     xml,
                     "<fill><patternFill><bgColor rgb=\"FF{bg:06X}\"/></patternFill></fill>"
                 );
+            }
+            xml.push_str("</dxf>");
+        }
+        for &(font, color) in &self.colors {
+            xml.push_str("<dxf>");
+            match (font, color) {
+                (true, Some(rgb)) => {
+                    let _ = write!(xml, "<font><color rgb=\"FF{rgb:06X}\"/></font>");
+                }
+                (true, None) => xml.push_str("<font><color auto=\"1\"/></font>"),
+                (false, Some(rgb)) => {
+                    let _ = write!(
+                        xml,
+                        "<fill><patternFill><bgColor rgb=\"FF{rgb:06X}\"/></patternFill></fill>"
+                    );
+                }
+                (false, None) => xml.push_str(
+                    "<fill><patternFill patternType=\"none\"><bgColor auto=\"1\"/></patternFill></fill>",
+                ),
             }
             xml.push_str("</dxf>");
         }

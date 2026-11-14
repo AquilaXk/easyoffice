@@ -14,6 +14,8 @@
 //! value (`1.0` against `1`), the wildcard match is the linear `wildcard` module, and the cell
 //! text is the displayed text the caller passes in.
 
+use super::aux::{CellAux, NO_COLOR};
+use super::dates::DateKeys;
 use super::wildcard::Wildcard;
 use easyoffice_formats::{CustomCondition, CustomOp, FilterCriteria};
 use std::collections::HashSet;
@@ -50,7 +52,7 @@ pub(super) type TextSet = HashSet<Box<str>, BuildHasherDefault<TextHasher>>;
 
 /// The number a cell text stands for.
 #[inline]
-pub(super) fn number_of(text: &str) -> Option<f64> {
+pub fn number_of(text: &str) -> Option<f64> {
     let first = *text.as_bytes().first()?;
     // Cheap rejection: a number starts with a digit, a sign or a point (or space padding).
     if !(first.is_ascii_digit() || matches!(first, b'-' | b'+' | b'.' | b' ')) {
@@ -151,10 +153,21 @@ impl Cond {
 }
 
 enum Test {
-    Values { blank: bool, set: TextSet },
+    Values {
+        blank: bool,
+        set: TextSet,
+        dates: DateKeys,
+    },
     One(Cond),
     And(Cond, Cond),
     Or(Cond, Cond),
+    /// The fill (or font) colour of the cell, `NO_COLOR` for the cells with none.
+    Color {
+        font: bool,
+        color: u32,
+    },
+    /// Compares the cell with the other cells of the column; judged by `stats`, never per cell.
+    Statistic,
 }
 
 /// A column's condition ready to test cell texts.
@@ -164,10 +177,20 @@ impl ColumnMatcher {
     /// `None` when a pattern is over the wildcard bound.
     pub fn compile(criteria: &FilterCriteria) -> Option<Self> {
         Some(Self(match criteria {
-            FilterCriteria::Values { blank, values } => Test::Values {
+            FilterCriteria::Values {
+                blank,
+                values,
+                dates,
+            } => Test::Values {
                 blank: *blank,
                 set: values.iter().map(|v| v.as_str().into()).collect(),
+                dates: DateKeys::new(dates),
             },
+            FilterCriteria::Color { font, color } => Test::Color {
+                font: *font,
+                color: color.unwrap_or(NO_COLOR),
+            },
+            FilterCriteria::Top { .. } | FilterCriteria::Average { .. } => Test::Statistic,
             FilterCriteria::Custom { and, first, second } => {
                 let first = Cond::compile(first)?;
                 match (second, and) {
@@ -179,19 +202,33 @@ impl ColumnMatcher {
         }))
     }
 
-    /// Whether a row whose cell shows `text` stays visible. `scratch` is reused between calls.
+    /// Whether the criterion compares a cell with the rest of its column (the largest numbers, the
+    /// average): those are judged after the others, over the rows still visible.
+    pub const fn is_statistic(&self) -> bool {
+        matches!(self.0, Test::Statistic)
+    }
+
+    /// Whether a row whose cell shows `text` stays visible, judging by the text alone (a colour or a
+    /// date group needs [`Self::accepts_at`]). `scratch` is reused between calls.
     pub fn accepts(&self, text: &str, scratch: &mut Vec<char>) -> bool {
+        self.accepts_at(0, text, &CellAux::default(), scratch)
+    }
+
+    /// Whether data row `i`, whose cell shows `text` and has the facts `aux`, stays visible.
+    pub fn accepts_at(&self, i: usize, text: &str, aux: &CellAux, scratch: &mut Vec<char>) -> bool {
         match &self.0 {
-            Test::Values { blank, set } => {
+            Test::Values { blank, set, dates } => {
                 if text.is_empty() {
                     *blank
                 } else {
-                    set.contains(text)
+                    set.contains(text) || aux.date(i).is_some_and(|serial| dates.covers(serial))
                 }
             }
             Test::One(a) => a.accepts(text, scratch),
             Test::And(a, b) => a.accepts(text, scratch) && b.accepts(text, scratch),
             Test::Or(a, b) => a.accepts(text, scratch) || b.accepts(text, scratch),
+            Test::Color { font, color } => aux.color(*font, i) == *color,
+            Test::Statistic => true,
         }
     }
 }

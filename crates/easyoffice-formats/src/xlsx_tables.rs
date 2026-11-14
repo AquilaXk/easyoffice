@@ -17,7 +17,9 @@ use std::fmt::Write;
 
 use crate::sheet_filter::SheetFilter;
 use crate::sheet_names::fold_name;
+use crate::sheet_styling::sheet_rules::xlsx_rules::DxfTable;
 use crate::sheet_styling::xlsx_filter::{autofilter_xml, FilterScan};
+use crate::sheet_styling::xlsx_filter_dxf::DxfColors;
 use crate::sheet_styling::xlsx_sheet::decode_xlsx_escapes;
 use crate::sheet_table::{SheetTable, TableRegistry, MAX_TABLES, MAX_TABLE_TEXT_CHARS};
 use crate::xml_stream::{unescape_cow, Attrs, XmlEvent, XmlReader};
@@ -49,10 +51,16 @@ fn count_flag(attrs: &Attrs<'_>, name: &str, default: bool) -> Option<bool> {
 }
 
 /// The table of one part, or `None` when the part is not a table this model can hold.
+#[cfg(test)]
 fn parse_table(xml: &str) -> Option<SheetTable> {
+    parse_table_with(xml, &[])
+}
+
+/// [`parse_table`] with the colours of the workbook's differential formats, which a colour filter names.
+fn parse_table_with(xml: &str, dxfs: &[DxfColors]) -> Option<SheetTable> {
     let mut reader = XmlReader::with_budget(xml, MAX_TABLE_PART_EVENTS);
     let mut table: Option<SheetTable> = None;
-    let mut filter = FilterScan::new();
+    let mut filter = FilterScan::new(dxfs);
     let mut has_filter = false;
     let mut columns: Vec<String> = Vec::new();
     let mut max_columns = 0usize;
@@ -213,6 +221,7 @@ pub(crate) fn read_sheet_tables(
     entries: &HashMap<&str, &[u8]>,
     registry: &mut TableRegistry,
     tables: &mut Vec<SheetTable>,
+    dxfs: &[DxfColors],
 ) -> Result<u32, EasyOfficeError> {
     let ids = table_part_ids(sheet_xml)?;
     if ids.is_empty() {
@@ -230,7 +239,7 @@ pub(crate) fn read_sheet_tables(
             .filter(|path| registry.claim_part(path))
             .and_then(|path| entries.get(path.as_str()).copied())
             .and_then(|data| std::str::from_utf8(data).ok())
-            .and_then(parse_table);
+            .and_then(|xml| parse_table_with(xml, dxfs));
         let admitted = match table {
             Some(table) => registry.admit(tables, table)?,
             None => {
@@ -339,7 +348,7 @@ fn resolve_columns<'a>(
 }
 
 /// The XML of one table part.
-fn table_xml(id: usize, table: &SheetTable, columns: &[String]) -> String {
+fn table_xml(id: usize, table: &SheetTable, columns: &[String], dxf: &DxfTable) -> String {
     let name = XmlSanitizer::escape(&table.name);
     let mut out = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?><table xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" id=\"{id}\" name=\"{name}\" displayName=\"{name}\" ref=\"{}\"",
@@ -356,7 +365,7 @@ fn table_xml(id: usize, table: &SheetTable, columns: &[String]) -> String {
     if let Some(conditions) = &table.filter {
         let mut filter = SheetFilter::new(table.filter_range());
         filter.columns.clone_from(conditions);
-        out.push_str(&autofilter_xml(&filter));
+        out.push_str(&autofilter_xml(&filter, dxf));
     }
     let _ = write!(out, "<tableColumns count=\"{}\">", columns.len());
     for (i, column) in columns.iter().enumerate() {
@@ -409,6 +418,7 @@ impl TableWriter {
         tables: &[SheetTable],
         cells: &[(u32, u32, String)],
         cache: Option<&XlsxFormulaCache>,
+        dxf: &DxfTable,
     ) -> SheetTables {
         if tables.is_empty() {
             return SheetTables::default();
@@ -466,7 +476,7 @@ impl TableWriter {
             );
             self.parts.push((
                 format!("xl/tables/table{n}.xml"),
-                table_xml(n, table, &names).into_bytes(),
+                table_xml(n, table, &names, dxf).into_bytes(),
             ));
             let _ = write!(out.parts_xml, "<tablePart r:id=\"rIdT{n}\"/>");
             let _ = write!(
@@ -538,7 +548,7 @@ mod tests {
         t.first_column = true;
         t.column_stripes = true;
         t.filter = Some(Vec::new());
-        let xml = table_xml(7, &t, &t.columns);
+        let xml = table_xml(7, &t, &t.columns, &DxfTable::default());
         assert!(xml.contains("id=\"7\"") && xml.contains("totalsRowCount=\"1\""));
         assert!(xml.contains("<autoFilter ref=\"B2:D8\"/>"), "{xml}");
         assert!(xml.contains("name=\"a_x000a_b\""));
@@ -551,7 +561,7 @@ mod tests {
         let mut t = table("T", "A1:B3");
         t.header = false;
         t.row_stripes = false;
-        let xml = table_xml(1, &t, &t.columns);
+        let xml = table_xml(1, &t, &t.columns, &DxfTable::default());
         assert!(xml.contains("headerRowCount=\"0\"") && !xml.contains("<autoFilter"));
         assert_eq!(parse_table(&xml), Some(t));
     }
@@ -561,7 +571,7 @@ mod tests {
         let mut t = table("Tab1", "A1:B2");
         t.columns = vec!["\"<>&".into(), "x' y".into()];
         t.style = Some("\"<>&'".into());
-        let xml = table_xml(1, &t, &t.columns);
+        let xml = table_xml(1, &t, &t.columns, &DxfTable::default());
         XmlSanitizer::validate_safe_xml(&xml).unwrap();
         assert_eq!(parse_table(&xml), Some(t));
     }
@@ -641,7 +651,12 @@ mod tests {
             .map(|(c, t)| (0, c as u32, (*t).to_string()))
             .collect();
         let mut writer = TableWriter::default();
-        let out = writer.add_sheet(&[table("T", "A1:E3")], &cells, Some(&cache));
+        let out = writer.add_sheet(
+            &[table("T", "A1:E3")],
+            &cells,
+            Some(&cache),
+            &DxfTable::default(),
+        );
         let patched = out.cells.unwrap();
         let text = |c: u32| patched.iter().find(|x| x.1 == c).unwrap().2.clone();
         assert_eq!([text(0), text(1), text(2)], ["Total", "2024", "TRUE"]);
@@ -669,8 +684,8 @@ mod tests {
     fn the_writer_gives_unique_ids_and_patches_header_cells() {
         let mut writer = TableWriter::default();
         let cells = vec![(0, 0, "A".to_string()), (0, 1, "A".to_string())];
-        let first = writer.add_sheet(&[table("T", "A1:B3")], &cells, None);
-        let second = writer.add_sheet(&[table("U", "A1:B3")], &[], None);
+        let first = writer.add_sheet(&[table("T", "A1:B3")], &cells, None, &DxfTable::default());
+        let second = writer.add_sheet(&[table("U", "A1:B3")], &[], None, &DxfTable::default());
         assert_eq!(writer.parts.len(), 2);
         assert_eq!(writer.parts[1].0, "xl/tables/table2.xml");
         assert!(first.rels.contains("Target=\"../tables/table1.xml\""));

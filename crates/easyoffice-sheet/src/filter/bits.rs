@@ -2,7 +2,7 @@
 //! of several columns and turning the result into runs works a 64-row word at a time.
 
 /// Hidden flags of `len` rows, row `i` being bit `i % 64` of word `i / 64`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RowBits {
     words: Vec<u64>,
     len: usize,

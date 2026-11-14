@@ -13,30 +13,49 @@
 //! Modifications: the hidden rows are a bit per row (`RowBits`) and the columns are evaluated one
 //! after the other into it, distinct texts are counted in one pass with an optional search, and
 //! the list is bounded. Nothing here reads a cell: the caller passes the displayed text of the
-//! rows below the header, column by column. The reference's colour filters, date grouping tree
-//! and worker plumbing are not used.
+//! rows below the header, column by column, with the numbers, date flags and colours the criteria
+//! beyond text need (`CellAux`). The reference's worker plumbing is not used. The colour filter and
+//! the date tree are in `aux`, `dates`; the top and average criteria it has no counterpart for are in
+//! `stats` (PD-226).
 
+mod aux;
 mod bits;
 mod condition;
+mod dates;
 mod runs;
+mod stats;
 mod wildcard;
 
+pub use aux::{color_list, CellAux, ColorList, NO_COLOR};
 pub use bits::RowBits;
-pub use condition::ColumnMatcher;
+pub use condition::{number_of, ColumnMatcher};
+pub use dates::{date_tree, DateKeys, DateTree, Moment, MonthNode};
 pub use runs::{intersect_runs, subtract_runs};
 pub use wildcard::{Wildcard, MAX_PATTERN_CHARS};
 
-use condition::{number_of, TextHasher};
+use condition::TextHasher;
 use easyoffice_formats::{EasyOfficeError, SheetFilter, MAX_FILTER_TEXT_CHARS};
 use std::collections::HashMap;
 use std::hash::BuildHasherDefault;
 
 /// The displayed text of one column of the data rows: `texts[i]` is the row
-/// `range.row0 + 1 + i`.
+/// `range.row0 + 1 + i`. `aux` holds the numbers, date flags and colours of the same rows for the
+/// criteria that read them; a column judged by text alone has none.
 #[derive(Debug, Clone, Copy)]
 pub struct ColumnText<'a> {
     pub col: u32,
     pub texts: &'a [String],
+    pub aux: Option<&'a CellAux>,
+}
+
+impl<'a> ColumnText<'a> {
+    pub const fn text(col: u32, texts: &'a [String]) -> Self {
+        Self {
+            col,
+            texts,
+            aux: None,
+        }
+    }
 }
 
 fn invalid(what: &str) -> EasyOfficeError {
@@ -51,7 +70,7 @@ fn column<'a>(
     columns: &[ColumnText<'a>],
     col: u32,
     rows: usize,
-) -> Result<&'a [String], EasyOfficeError> {
+) -> Result<ColumnText<'a>, EasyOfficeError> {
     let found = columns
         .iter()
         .find(|c| c.col == col)
@@ -59,11 +78,12 @@ fn column<'a>(
     if found.texts.len() != rows {
         return Err(invalid("열 값의 행 수가 필터 범위와 다릅니다"));
     }
-    Ok(found.texts)
+    Ok(*found)
 }
 
 /// The data rows (relative to the row below the header) the conditions of every column except
-/// `skip` hide.
+/// `skip` hide. The conditions that compare a cell with its column (the largest numbers, the
+/// average) are judged last, column by column, over the rows the other conditions left visible.
 pub fn hidden_bits(
     filter: &SheetFilter,
     columns: &[ColumnText<'_>],
@@ -72,16 +92,26 @@ pub fn hidden_bits(
     let rows = data_rows(filter);
     let mut hidden = RowBits::new(rows);
     let mut scratch: Vec<char> = Vec::new();
+    let no_aux = CellAux::default();
+    let mut statistics = Vec::new();
     for entry in filter.columns.iter().filter(|c| Some(c.col) != skip) {
-        let texts = column(columns, entry.col, rows)?;
+        let cells = column(columns, entry.col, rows)?;
         let matcher = ColumnMatcher::compile(&entry.criteria)
             .ok_or_else(|| invalid("조건 문자열이 너무 깁니다"))?;
-        for (i, text) in texts.iter().enumerate() {
+        if matcher.is_statistic() {
+            statistics.push((&entry.criteria, cells));
+            continue;
+        }
+        let aux = cells.aux.unwrap_or(&no_aux);
+        for (i, text) in cells.texts.iter().enumerate() {
             // A row another column already hides is not tested again.
-            if !hidden.get(i) && !matcher.accepts(text, &mut scratch) {
+            if !hidden.get(i) && !matcher.accepts_at(i, text, aux, &mut scratch) {
                 hidden.set(i);
             }
         }
+    }
+    for (criteria, cells) in statistics {
+        stats::hide_by_statistic(criteria, cells.aux.unwrap_or(&no_aux), rows, &mut hidden);
     }
     Ok(hidden)
 }

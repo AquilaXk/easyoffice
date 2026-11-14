@@ -5,15 +5,17 @@
 //! "style":"TableStyleMedium2","firstColumn":false,"lastColumn":false,"rowStripes":true,
 //! "columnStripes":false,"filter":[...]}, ...]`. `header` defaults to true and `rowStripes` to true, the
 //! other flags to false; `columns` has one name per column of the range; `filter` is absent for a table
-//! without filter buttons, else the conditions of its columns as in `sheet_filter_json`. The ranges of
+//! without filter buttons, else the conditions of its columns as in `sheet_filter_json`, and
+//! `filterHidden` lists the rows (1-based runs) those conditions hide (PD-226). The ranges of
 //! the table that a session needs to place arrays are `["A1:C5", ...]`. Input over a bound is refused,
 //! not trimmed.
 
 use crate::sheet_filter_json::{parse_columns, write_columns};
+use crate::sheet_layout_json::{parse_runs_limited, runs_json};
 use crate::EasyOfficeIpcRouter;
 use easyoffice_formats::{
-    tables_within_bounds, CellBox, EasyOfficeError, SheetTable, StrictJsonValue, MAX_TABLES,
-    MAX_TABLE_TEXT_CHARS,
+    tables_within_bounds, CellBox, EasyOfficeError, SheetTable, StrictJsonValue, MAX_FILTER_ROWS,
+    MAX_TABLES, MAX_TABLE_TEXT_CHARS,
 };
 use std::fmt::Write;
 
@@ -78,6 +80,14 @@ fn parse_table(v: &StrictJsonValue) -> Result<SheetTable, EasyOfficeError> {
         None | Some(StrictJsonValue::Null) => None,
         Some(conditions) => Some(parse_columns(conditions, &range)?),
     };
+    if let Some(hidden) = field("filterHidden") {
+        table.filter_hidden = parse_runs_limited(
+            hidden,
+            LAST_ROW,
+            "table.filterHidden",
+            u64::from(MAX_FILTER_ROWS),
+        )?;
+    }
     if !table.within_bounds() {
         return Err(over());
     }
@@ -188,6 +198,9 @@ pub(crate) fn tables_json(tables: &[SheetTable]) -> String {
         if let Some(conditions) = &t.filter {
             out.push_str(",\"filter\":");
             write_columns(&mut out, conditions);
+            if !t.filter_hidden.is_empty() {
+                let _ = write!(out, ",\"filterHidden\":{}", runs_json(&t.filter_hidden));
+            }
         }
         out.push('}');
     }

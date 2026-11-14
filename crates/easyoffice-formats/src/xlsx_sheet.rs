@@ -671,7 +671,7 @@ pub(crate) fn scan_worksheet(
     };
     let mut reader = XmlReader::unbounded(sheet_xml);
     let mut cell: Option<CellState<'_>> = None;
-    let mut filter = FilterScan::new();
+    let mut filter = FilterScan::new(&xf.dxf_colors);
     let mut view = ViewScan::default();
     let mut page = PageScan::default();
     let mut protect = ProtectScan::default();

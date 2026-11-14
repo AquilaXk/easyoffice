@@ -6,7 +6,8 @@
 
 use easyoffice_formats::{
     normalize_runs, normalize_spills, run_total, CellBox, EasyOfficeError, SheetFilter,
-    SheetStyling, SpillRef, StrictJsonValue, MAX_HIDDEN_ROWS, MAX_MERGES, MAX_SPILL_REFS,
+    SheetStyling, SheetTable, SpillRef, StrictJsonValue, MAX_HIDDEN_ROWS, MAX_MERGES,
+    MAX_SPILL_REFS,
 };
 use std::fmt::Write;
 
@@ -205,15 +206,22 @@ pub(crate) fn runs_json(runs: &[(u32, u32)]) -> String {
 
 /// `,"merges":..,"hiddenRows":..,"hiddenCols":..,"filter":..` for the parts that are not empty.
 pub(crate) fn write_layout(out: &mut String, styling: &SheetStyling) {
-    write_layout_split(out, styling, &styling.hidden_rows, styling.filter.as_ref());
+    write_layout_split(
+        out,
+        styling,
+        &styling.hidden_rows,
+        styling.filter.as_ref(),
+        &styling.tables,
+    );
 }
 
-/// [`write_layout`] with the hidden rows and the filter a caller has already told apart.
+/// [`write_layout`] with the hidden rows, the filter and the tables a caller has already told apart.
 pub(crate) fn write_layout_split(
     out: &mut String,
     styling: &SheetStyling,
     hidden_rows: &[(u32, u32)],
     filter: Option<&SheetFilter>,
+    tables: &[SheetTable],
 ) {
     if !styling.merges.is_empty() {
         let _ = write!(out, ",\"merges\":{}", merges_json(&styling.merges));
@@ -234,11 +242,11 @@ pub(crate) fn write_layout_split(
             crate::sheet_filter_json::filter_json(filter)
         );
     }
-    if !styling.tables.is_empty() {
+    if !tables.is_empty() {
         let _ = write!(
             out,
             ",\"tables\":{}",
-            crate::sheet_table_json::tables_json(&styling.tables)
+            crate::sheet_table_json::tables_json(tables)
         );
     }
     crate::sheet_view_json::write_view(out, styling);
