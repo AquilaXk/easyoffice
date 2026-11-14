@@ -1,21 +1,22 @@
+// 참조 구현 (reference implementation): Apache POI `poi/src/main/java/org/apache/poi/ss/usermodel/TableStyleType.java` lines 41-250 (the elements of a
+// style in the order they are applied, later ones over earlier ones; the region each one covers; a stripe starts at the
+// first row below the header and its size comes from the element; the column stripes start at the first column), Apache-2.0,
+// Copyright The Apache Software Foundation, commit 47dcff769bb395034dddfd59c4609659b6dbc6a4. Source and license text:
+// `THIRD_PARTY_NOTICES.md`.
+//
+// Modifications: the region test is answered for one cell at a time from the table's rectangle (no range objects); a cell
+// draws its own top edge only on the table's first row and its left edge only on the first column, and its bottom and right
+// edges are the edge it shares with the next cell, taken from the highest element that names it; the colours are resolved to
+// `rrggbb` once per style with the Office theme; an automatic (black) colour follows the page theme; a cell's own fill, text
+// colour and borders win over the table style, and conditional formatting wins over both (the CSS orders them).
+//
+
 (function (host) {
   "use strict";
 
   // How a table looks (PD-230): the style a table names (one of the 60 built-in ones of `sheet-table-presets.js`, or the
   // definition the file gave, `styleDef`) turned into the fill, text colour, bold and border edges of each cell, and the
   // lookup of the table that holds a cell. The grid asks `paintTd` for every cell it draws; the gallery asks `previewCells`.
-  //
-  // 참조 구현: Apache POI `poi/src/main/java/org/apache/poi/ss/usermodel/TableStyleType.java` lines 41-250 (the elements of a
-  // style in the order they are applied, later ones over earlier ones; the region each one covers; a stripe starts at the
-  // first row below the header and its size comes from the element; the column stripes start at the first column), Apache-2.0,
-  // Copyright The Apache Software Foundation, commit 47dcff769bb395034dddfd59c4609659b6dbc6a4. Source and license text:
-  // `THIRD_PARTY_NOTICES.md`.
-  //
-  // Modifications: the region test is answered for one cell at a time from the table's rectangle (no range objects); a cell
-  // draws its own top edge only on the table's first row and its left edge only on the first column, and its bottom and right
-  // edges are the edge it shares with the next cell, taken from the highest element that names it; the colours are resolved to
-  // `rrggbb` once per style with the Office theme; an automatic (black) colour follows the page theme; a cell's own fill, text
-  // colour and borders win over the table style, and conditional formatting wins over both (the CSS orders them).
 
   // The elements in the order they are applied (`StyleElement::key` in `table_style.rs`).
   const ORDER = ["w", "c1", "c2", "r1", "r2", "lc", "fc", "h", "t", "fh", "lh", "ft", "lt"];

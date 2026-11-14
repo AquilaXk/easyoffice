@@ -442,19 +442,29 @@
       const ctx = contextOf(name);
       const b = ctx.boxOf(table);
       const above = { r1: b.r1 - 1, c1: b.c1, r2: b.r1 - 1, c2: b.c2 };
-      const room = b.r1 > 1 && rowEmpty(ctx, above.r1, b.c1, b.c2) && !ctx.tables.some((t) => t !== table && layoutApi.tableBox(t).r2 >= above.r1 && layoutApi.tableBox(t).r1 <= above.r2 && layoutApi.tableBox(t).c1 <= b.c2 && layoutApi.tableBox(t).c2 >= b.c1) && !ctx.merges.some((m) => m.r1 <= above.r2 && m.r2 >= above.r1 && m.c1 <= b.c2 && m.c2 >= b.c1);
-      const headerOf = (held, row) => ({
-        table: { ...held, header: true, range: ops.rangeText(row, b.c1, b.r2, b.c2) },
-        writes: held.columns.map((text, i) => ({ row, col: b.c1 + i, text })),
-        text: STATUS.header,
-      });
+      // The row above takes the header when it holds nothing or only the names the columns have (the header cells a turn-off left),
+      // and no other table, merge or filter is there.
+      const fits = b.r1 > 1 && table.columns.every((name, i) => {
+        const text = ctx.cellAt(above.r1, b.c1 + i)?.value;
+        return !text || text === name;
+      }) && !ctx.cellAt(above.r1, b.c1)?.formula;
+      const room = fits && !ctx.tables.some((t) => t !== table && touchesBox(layoutApi.tableBox(t), above)) && !ctx.merges.some((m) => touchesBox(m, above)) && !(ctx.filter && touchesBox(ctx.filter, above));
+      // The header goes into `row`, the table's range grows up to it.
+      const headerOf = (held, row) => {
+        const now = layoutApi.tableBox(held);
+        return {
+          table: { ...held, header: true, range: ops.rangeText(row, now.c1, now.r2, now.c2) },
+          writes: held.columns.map((text, i) => ({ row, col: now.c1 + i, text })),
+          text: STATUS.header,
+        };
+      };
       if (room) return changeTable(table, (held) => headerOf(held, above.r1));
       // No room above: a row opens at the table's first row (the table moves down) and the header goes into it.
       if (!allowed(name)) return Promise.resolve(false);
       return editAxis("row", "insert", b.r1, 1, (sheet) => {
         const held = layoutApi.tablesOf(sheet).find((t) => t.name === table.name);
         if (!held) return;
-        const made = headerOf(held, b.r1);
+        const made = headerOf(held, layoutApi.tableBox(held).r1 - 1);
         writeCells(sheet, made.writes);
         layoutApi.setTables(sheet, withTable(sheet, held, made.table));
       }).then((done) => {

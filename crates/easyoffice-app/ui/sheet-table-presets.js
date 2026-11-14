@@ -1,18 +1,20 @@
+// 참조 구현 (reference implementation): Apache POI `poi-ooxml/src/main/resources/org/apache/poi/xssf/usermodel/presetTableStyles.xml` (the `TableStyle*`
+// entries of the file: each element names a differential format of the entry's `dxfs`, counted from 1), Apache-2.0,
+// Copyright The Apache Software Foundation, commit 47dcff769bb395034dddfd59c4609659b6dbc6a4. Source and license text:
+// `THIRD_PARTY_NOTICES.md`.
+//
+// Modifications: each element is one record with the parts a table can show; `f` fill, `c` text colour, `b` bold, `i` italic,
+// `sz` stripe size, `bd` the border edges `t b l r h v` as `weight:colour`. A colour is `rrggbb` or `t<theme index>[:tint]`
+// (the slots of `xl/theme/theme1.xml` as SpreadsheetML numbers them: 0 light 1, 1 dark 1, 2 light 2, 3 dark 2, 4..9 accents).
+// Element keys are those of `StyleElement::key` (`table_style.rs`): `w` whole table, `c1` `c2` column stripes, `r1` `r2` row
+// stripes, `lc` last column, `fc` first column, `h` header row, `t` totals row.
+//
+
 (function (host) {
   "use strict";
 
   // The 60 built-in table styles (PD-230): `TableStyleLight1` .. `21`, `TableStyleMedium1` .. `28`, `TableStyleDark1` .. `11`.
   //
-  // 참조 구현: Apache POI `poi-ooxml/src/main/resources/org/apache/poi/xssf/usermodel/presetTableStyles.xml` (the `TableStyle*`
-  // entries of the file: each element names a differential format of the entry's `dxfs`, counted from 1), Apache-2.0,
-  // Copyright The Apache Software Foundation, commit 47dcff769bb395034dddfd59c4609659b6dbc6a4. Source and license text:
-  // `THIRD_PARTY_NOTICES.md`.
-  //
-  // Modifications: each element is one record with the parts a table can show; `f` fill, `c` text colour, `b` bold, `i` italic,
-  // `sz` stripe size, `bd` the border edges `t b l r h v` as `weight:colour`. A colour is `rrggbb` or `t<theme index>[:tint]`
-  // (the slots of `xl/theme/theme1.xml` as SpreadsheetML numbers them: 0 light 1, 1 dark 1, 2 light 2, 3 dark 2, 4..9 accents).
-  // Element keys are those of `StyleElement::key` (`table_style.rs`): `w` whole table, `c1` `c2` column stripes, `r1` `r2` row
-  // stripes, `lc` last column, `fc` first column, `h` header row, `t` totals row.
 
   const PRESETS = {
   TableStyleDark1: {"w":{"c":"t0","f":"t1:0.45"},"h":{"b":1,"c":"t0","f":"t1","bd":{"b":"medium:t0"}},"t":{"b":1,"c":"t0","f":"t1:0.15","bd":{"t":"medium:t0"}},"fc":{"b":1,"c":"t0","f":"t1:0.25","bd":{"r":"medium:t0"}},"lc":{"b":1,"c":"t0","f":"t1:0.25","bd":{"l":"medium:t0"}},"r1":{"f":"t1:0.25"},"c1":{"f":"t1:0.25"}},

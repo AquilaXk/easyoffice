@@ -163,6 +163,56 @@ test("the options of the bar change the table, each as one undo step", async () 
   assert.equal(tables(h)[0].firstColumn, false);
 });
 
+test("the totals row takes the free row under the table with a label and a function, and turning it off empties the row", async () => {
+  const h = await openSheet();
+  await makeTable(h);
+  const box = (opt) => h.document.querySelector(`#sheet-table-bar [data-table-opt="${opt}"]`);
+  cell(h.document, "B3").focus();
+  await flushAsyncTurns(2);
+  box("totals").checked = true;
+  box("totals").dispatchEvent({ type: "change", target: box("totals"), bubbles: true });
+  await flushAsyncTurns(16);
+  assert.equal(tables(h)[0].range, "A1:H9");
+  assert.equal(tables(h)[0].totals, true);
+  assert.equal(cell(h.document, "A9").textContent, "요약");
+  assert.equal(cell(h.document, "H9").dataset.formula, "=SUBTOTAL(103,표1[상태])", "a column of text is counted");
+  await undo(h);
+  assert.equal(tables(h)[0].totals, false);
+  assert.equal(cell(h.document, "A9").textContent, "");
+  await redo(h);
+  cell(h.document, "B3").focus();
+  await flushAsyncTurns(2);
+  box("totals").checked = false;
+  box("totals").dispatchEvent({ type: "change", target: box("totals"), bubbles: true });
+  await flushAsyncTurns(16);
+  assert.equal(tables(h)[0].range, "A1:H8");
+  assert.equal(cell(h.document, "A9").textContent, "", "the row that left is empty");
+});
+
+test("the header row turned off leaves the first row's cells and the filter, and turned on takes the row back", async () => {
+  const h = await openSheet();
+  await makeTable(h);
+  const box = (opt) => h.document.querySelector(`#sheet-table-bar [data-table-opt="${opt}"]`);
+  cell(h.document, "B3").focus();
+  await flushAsyncTurns(2);
+  box("header").checked = false;
+  box("header").dispatchEvent({ type: "change", target: box("header"), bubbles: true });
+  await flushAsyncTurns(16);
+  assert.equal(tables(h)[0].header, false);
+  assert.equal(tables(h)[0].range, "A2:H8");
+  assert.equal(cell(h.document, "A1").textContent, "부문", "the cells stay");
+  assert.equal(cell(h.document, "A1").dataset.tsF, undefined, "the row is out of the table");
+  cell(h.document, "B3").focus();
+  await flushAsyncTurns(2);
+  box("header").checked = true;
+  box("header").dispatchEvent({ type: "change", target: box("header"), bubbles: true });
+  await flushAsyncTurns(16);
+  assert.equal(tables(h)[0].header, true);
+  assert.equal(tables(h)[0].range, "A1:H8");
+  await undo(h);
+  assert.equal(tables(h)[0].header, false);
+});
+
 test("the gallery lists the 60 styles in three groups, picks one and clears it", async () => {
   const h = await openSheet();
   await makeTable(h);
@@ -220,6 +270,31 @@ test("what is typed beside the table becomes a column with a header of its own",
   await undo(h);
   assert.equal(tables(h)[0].range, "A1:C4");
   assert.equal(cell(h.document, "D3").textContent, "x");
+});
+
+test("rows pasted under the table are taken in as a step of their own; a paste inside the table leaves its size and style", async () => {
+  const h = await openSheet();
+  await makeTable(h);
+  const a9 = cell(h.document, "A9");
+  a9.focus();
+  a9.dispatchEvent({ type: "paste", target: a9, clipboardData: { getData: () => "x1\t1\nx2\t2", setData() {} } });
+  await flushAsyncTurns(24);
+  assert.equal(tables(h)[0].range, "A1:H10", "both pasted rows are in");
+  assert.equal(cell(h.document, "A10").textContent, "x2");
+  assert.equal(cell(h.document, "A9").dataset.tsF, undefined, "the pasted rows follow the stripes: the ninth is the plain one");
+  assert.equal(cell(h.document, "A10").dataset.tsF, "1", "and the tenth the banded one");
+  await undo(h);
+  assert.equal(tables(h)[0].range, "A1:H8", "one undo takes the growth back");
+  assert.equal(cell(h.document, "A10").textContent, "x2");
+  await undo(h);
+  assert.equal(cell(h.document, "A10").textContent, "");
+  const b3 = cell(h.document, "B3");
+  b3.focus();
+  b3.dispatchEvent({ type: "paste", target: b3, clipboardData: { getData: () => "7\t8", setData() {} } });
+  await flushAsyncTurns(24);
+  assert.equal(tables(h)[0].range, "A1:H8");
+  assert.equal(cell(h.document, "C3").textContent, "8");
+  assert.equal(cell(h.document, "C2").dataset.tsF, "1", "the style is the table's, whatever a cell holds");
 });
 
 test("a protected sheet's table does not grow", async () => {
@@ -327,4 +402,15 @@ test("the size of the table is changed in the dialog from the bar, in one undo s
   h.userClick($(h, "btn-sheet-table-ok"));
   await flushAsyncTurns(4);
   assert.equal($(h, "sheet-table-status").textContent, "머리글 행은 같은 행에 있어야 함");
+});
+
+test("Ctrl+T is the sheet's table key in the desktop shell only: a browser keeps it for a new tab", async () => {
+  const h = await openSheet();
+  const binding = h.host.__EASYOFFICE_RIBBON_CATALOG__.WORKSPACE_SHORTCUT_BINDINGS.find((b) => b.keys === "Ctrl+T");
+  assert.deepEqual({ action: binding.action, module: binding.module, desktopOnly: binding.desktopOnly, ribbon: binding.ribbon }, { action: "insert-table", module: "SHEET", desktopOnly: true, ribbon: true });
+  cell(h.document, "B3").focus();
+  const ev = h.sandbox.dispatchWindowKeydown({ key: "t", ctrlKey: true });
+  await flushAsyncTurns(6);
+  assert.equal(ev.defaultPrevented, false, "the page leaves the key to the browser");
+  assert.notEqual($(h, "sheet-table-dialog").open, true);
 });

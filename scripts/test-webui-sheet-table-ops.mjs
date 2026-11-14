@@ -39,12 +39,13 @@ test("a range is read with dollars, a sheet name or one cell, and another sheet'
   for (const bad of ["", "A", "1:2", "A1:B2:C3", "A0:B2", "ZZZZ1:A2"]) assert.equal(api.parseRange(bad, "Sheet1"), null, bad);
 });
 
-test("the default names are the first free 표N and Column<n>, and a repeated header gets a number", async () => {
+test("the default names are 표N past the tables and Column<n>, and a repeated header gets a number", async () => {
   const { api } = await ops();
   assert.equal(api.defaultName([]), "표1");
-  assert.equal(api.defaultName(["표1", "표2", "Sales"]), "표3");
-  assert.equal(api.defaultName(["표1", "표3"]), "표2");
-  assert.equal(api.defaultName(["표1".toUpperCase()]), "표2");
+  assert.equal(api.defaultName(["표1", "표2", "Sales"], 3), "표4", "one past the tables");
+  assert.equal(api.defaultName(["표1", "표7"], 2), "표8", "and past the biggest number in use");
+  assert.equal(api.defaultName(["표5"], 0), "표6");
+  assert.equal(api.defaultName(["Sales"], 1), "표2");
   const used = new Set();
   assert.deepEqual(api.headerNames(["Region", "", "region", "Region", "Column2"], used), ["Region", "Column2", "region2", "Region3", "Column22"]);
 });

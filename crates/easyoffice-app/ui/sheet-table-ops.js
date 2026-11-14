@@ -1,3 +1,11 @@
+// 참조 구현 (reference implementation): Univer (https://github.com/dream-num/univer, Apache-2.0, Copyright 2023-present DreamNum
+// Co., Ltd., commit 5a06a7842c8e13fa0646d0733dc3662cf4b330b9): `packages/sheets-table/src/commands/commands/add-sheet-table.command.ts`
+// lines 54-70, the default name of a new table: the index starts at the number of tables plus one and moves past every name with the
+// prefix and a number at or over it. Source and license text: `THIRD_PARTY_NOTICES.md`.
+// Modifications: a name the numbering lands on that is taken moves on to the next number; the rest of the plans (the range, the
+// header cells, the refusals, the growth over typed cells) follow the spreadsheet program and are written here.
+//
+
 (function (host) {
   "use strict";
 
@@ -59,10 +67,20 @@
     return { r1: Math.min(a.row, b.row), c1: Math.min(a.col, b.col), r2: Math.max(a.row, b.row), c2: Math.max(a.col, b.col) };
   }
 
-  // The smallest `표N` that no table or defined name has (names compare without case).
-  function defaultName(taken) {
+  // `표N` for a workbook that has `count` tables: N is one past the tables, and one past the biggest number a name that starts
+  // `표` already ends in (names compare without case).
+  //
+  // The numbering is the reference engine's (see the header); a name the numbering lands on that is taken moves on to the next number.
+  function defaultName(taken, count = 0) {
     const used = new Set([...taken].map(fold));
-    for (let n = 1; ; n += 1) if (!used.has(fold(DEFAULT_TABLE + n))) return DEFAULT_TABLE + n;
+    let index = count + 1;
+    for (const name of used) {
+      if (!name.startsWith(DEFAULT_TABLE)) continue;
+      const n = Number(name.slice(DEFAULT_TABLE.length));
+      if (Number.isInteger(n) && n >= index) index = n + 1;
+    }
+    while (used.has(DEFAULT_TABLE + index)) index += 1;
+    return DEFAULT_TABLE + index;
   }
 
   // `Column<n>` for the column at 1-based `position`, the first number from there that no column of `used` has.
@@ -129,7 +147,7 @@
       if (insertRow || String(entry?.value ?? "") !== text || entry?.formula) headerWrites.push({ row: box.r1, col: at, text });
     });
     const table = {
-      name: name || defaultName([...ctx.tables.map((t) => t.name), ...takenNames]),
+      name: name || defaultName([...ctx.tables.map((t) => t.name), ...takenNames], totalTables),
       range: rangeText(final.r1, final.c1, final.r2, final.c2),
       header: true,
       totals: false,
