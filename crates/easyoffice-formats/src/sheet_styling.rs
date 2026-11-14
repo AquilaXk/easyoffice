@@ -50,6 +50,8 @@ pub(crate) mod sheet_table;
 pub(crate) mod sheet_view;
 #[path = "structured_cells.rs"]
 pub(crate) mod structured_cells;
+#[path = "structured_edit.rs"]
+pub(crate) mod structured_edit;
 #[path = "structured_ref.rs"]
 pub(crate) mod structured_ref;
 #[path = "table_style.rs"]
@@ -100,6 +102,7 @@ pub use sheet_table::{
     MAX_TABLE_COLUMNS_TOTAL, MAX_TABLE_TEXT_CHARS,
 };
 pub use sheet_view::*;
+pub use structured_edit::{convert_table_refs, rename_table_refs};
 pub use structured_ref::*;
 pub use table_style::{
     is_builtin_table_style, StyleElement, StyleFormat, TableEdge, TableLine, TableStyleDef,

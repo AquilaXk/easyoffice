@@ -494,7 +494,7 @@ fn col_letters(col: u32) -> String {
 
 /// The A1 text of `cells`, on `sheet` when that is not the formula's own sheet. `relative_row` leaves the
 /// row without `$` (a `#This Row` reference follows a fill).
-fn a1_text(cells: CellBox, sheet: Option<&str>, relative_row: bool) -> String {
+pub(crate) fn a1_text(cells: CellBox, sheet: Option<&str>, relative_row: bool) -> String {
     let row_mark = if relative_row { "" } else { "$" };
     let end = |col: u32, row: u32| format!("${}{row_mark}{}", col_letters(col), row + 1);
     let mut out = sheet.map_or_else(String::new, |s| format!("{}!", quote_sheet(s)));

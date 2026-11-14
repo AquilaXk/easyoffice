@@ -279,6 +279,79 @@ fn a_renamed_column_is_written_into_the_formulas_that_name_it() {
 }
 
 #[test]
+fn a_renamed_table_is_written_into_the_formulas_and_names_that_name_it() {
+    let answer = call(&format!(
+        r#"{{"sessionAction":"tableColumn","op":"rename","table":"sales","to":"Orders",
+          "tables":{{"S":[{SALES}]}},
+          "names":[{{"name":"Qs","refersTo":"Sales[Q1]"}},{{"name":"Whole","refersTo":"SUM(Sales)"}},{{"name":"Keep","refersTo":"Other[Q2]"}}],
+          "formulas":[
+            {{"sheet":"S","cell":"E1","text":"=SUM(Sales[Q1])+COUNTA(SALES)"}},
+            {{"sheet":"S","cell":"B2","text":"=[@Q1]*2"}},
+            {{"sheet":"S","cell":"E3","text":"=Sales!A1"}},
+            {{"sheet":"S","cell":"E4","text":"=\"Sales[Q1]\""}}]}}"#
+    ));
+    assert!(
+        answer.contains(r#"{"sheet":"S","cell":"E1","text":"=SUM(Orders[Q1])+COUNTA(Orders)"}"#),
+        "{answer}"
+    );
+    for cell in ["B2", "E3", "E4"] {
+        assert!(
+            !answer.contains(&format!("\"cell\":\"{cell}\"")),
+            "{cell}: {answer}"
+        );
+    }
+    assert!(
+        answer.contains(r#""names":[{"name":"Qs","refersTo":"Orders[Q1]"},{"name":"Whole","refersTo":"SUM(Orders)"},{"name":"Keep","refersTo":"Other[Q2]"}]"#),
+        "{answer}"
+    );
+}
+
+#[test]
+fn a_table_turned_into_a_range_leaves_its_references_as_cells() {
+    let answer = call(&format!(
+        r#"{{"sessionAction":"tableColumn","op":"range","table":"Sales",
+          "tables":{{"S":[{SALES}],"Other":[{{"name":"Other","range":"A1:B3","columns":["x","Q1"]}}]}},
+          "names":[{{"name":"Qs","refersTo":"Sales[Q1]"}},{{"name":"Row","refersTo":"Sales[[#This Row],[Q1]]"}}],
+          "formulas":[
+            {{"sheet":"S","cell":"E1","text":"=SUM(Sales[Q1])"}},
+            {{"sheet":"S","cell":"B2","text":"=[@Q1]*2"}},
+            {{"sheet":"Other","cell":"D1","text":"=SUM(Sales[Q1])+Other[Q1]"}},
+            {{"sheet":"S","cell":"E3","text":"=SUM(Nothing[Q1])"}}]}}"#
+    ));
+    assert!(
+        answer.contains(r#"{"sheet":"S","cell":"E1","text":"=SUM($B$2:$B$4)"}"#),
+        "{answer}"
+    );
+    assert!(
+        answer.contains(r#"{"sheet":"S","cell":"B2","text":"=$B2*2"}"#),
+        "{answer}"
+    );
+    assert!(
+        answer.contains(r#"{"sheet":"Other","cell":"D1","text":"=SUM(S!$B$2:$B$4)+Other[Q1]"}"#),
+        "{answer}"
+    );
+    assert!(!answer.contains("\"cell\":\"E3\""), "{answer}");
+    assert!(
+        answer.contains(r#"{"name":"Qs","refersTo":"S!$B$2:$B$4"}"#),
+        "{answer}"
+    );
+    assert!(
+        answer.contains(r##"{"name":"Row","refersTo":"#VALUE!"}"##),
+        "{answer}"
+    );
+    for hostile in [
+        r#"{"sessionAction":"tableColumn","op":"range","table":"Nope","tables":{},"formulas":[]}"#,
+        r#"{"sessionAction":"tableColumn","op":"bogus","table":"T","formulas":[]}"#,
+        r#"{"sessionAction":"tableColumn","op":"rename","table":"T","formulas":[]}"#,
+    ] {
+        assert!(
+            EasyOfficeIpcRouter::dispatch("evaluate_sheet", hostile).is_err(),
+            "{hostile}"
+        );
+    }
+}
+
+#[test]
 fn a_request_with_tables_on_many_sheets_reads_the_unnamed_references_of_each() {
     // The sheets come from the cells (no `sheets` list) and the tables are told for each of them.
     let mut cells = String::new();
