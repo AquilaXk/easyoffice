@@ -366,9 +366,14 @@
     // Cells of a sheet were written back by an undo or a redo: `written` are the packed addresses that now hold
     // content, `removed` those that hold none. The used extent grows with the first; a cell removed at its edge makes it
     // be read again when asked for.
-    function noteCellsRestored(sheetName, written, removed) {
+    // `moved`: the cells of the sheet were shifted by a row or column edit, so the extent is read again.
+    function noteCellsRestored(sheetName, { written, removed, moved }) {
       const e = extentCache[sheetName];
       if (!e) return;
+      if (moved) {
+        delete extentCache[sheetName];
+        return;
+      }
       for (const packed of written) bumpExtent(sheetName, Math.floor(packed / 32768), packed % 32768);
       for (const packed of removed) {
         if (Math.floor(packed / 32768) >= e.dataRows || packed % 32768 >= e.dataCols) {

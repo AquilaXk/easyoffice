@@ -233,14 +233,19 @@
     return out;
   }
 
-  // The layout of `snap` with the protection of every sheet in `currentNames` and in `snap` as it is now.
+  // The layout of `snap` with the protection every sheet has as it is now. `snap.protectionNow` ({ name: protection | null })
+  // is the protection of each sheet under the name it takes in the snapshot, read before the step moved the sheets (a
+  // renamed sheet, a deleted one): the sheets it lists are kept, the others keep the protection of the snapshot. Without
+  // it the sheets in `currentNames` that `snap` knows are kept as the layout has them now.
   function keepProtection(snap, currentNames) {
     const out = structuredClone(snap.sheetLayout);
     const known = new Set(snap.sheetOrder || (snap.sheets ? Object.keys(snap.sheets) : currentNames));
-    const now = layout().getAll();
-    for (const name of currentNames.filter((n) => known.has(n))) {
+    const layoutNow = layout().getAll();
+    const now = snap.protectionNow ?? Object.fromEntries(Object.entries(layoutNow).map(([name, json]) => [name, json.protect ?? null]));
+    const kept = snap.protectionNow ? Object.keys(now) : currentNames.filter((n) => known.has(n));
+    for (const name of kept) {
       const entry = { ...(out[name] || {}) };
-      if (now[name]?.protect) entry.protect = withRangesOf(now[name].protect, out[name]?.protect);
+      if (now[name]) entry.protect = withRangesOf(now[name], out[name]?.protect);
       else delete entry.protect;
       if (Object.keys(entry).length > 0) out[name] = entry;
       else delete out[name];

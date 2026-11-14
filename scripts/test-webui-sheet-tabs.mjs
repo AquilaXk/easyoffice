@@ -626,3 +626,54 @@ test("a file opens in its own order on its first shown sheet, and the order and 
   assert.deepEqual(sent.map((s) => [s.name, s.hidden === true]), [["숨김", true], ["2024", false], ["10", false], ["가", true], ["Sheet9", false]]);
   assert.deepEqual(sent.map((s) => s.cells.A1), ["h", "a", "b", "c", "d"]);
 });
+
+// A step of a sheet's name or existence puts the sheet back with everything its layout holds, and a protection (with the
+// digest of its password) is never lost or lifted by it (PD-216, PD-221).
+test("renaming and deleting a protected sheet, then undo and redo, keep its protection, password digest and layout", async () => {
+  const h = await open();
+  await h.add();
+  const layout = h.host.__EASYOFFICE_SHEET_LAYOUT__;
+  const pwd = { kind: "both", alg: "SHA-512", hash: "OFFLINE-1-1", salt: "S", spin: 1, key: "K" };
+  const protect = { on: true, deny: ["formatCells"], ranges: [{ name: "r", sqref: ["B2:B3"], pwd }], pwd };
+  layout.setProtect("Sheet2", protect);
+  layout.setFreeze("Sheet2", { rows: 1, cols: 0 });
+  layout.setPage("Sheet2", { orientation: "landscape" });
+  layout.setHidden("Sheet2", "row", 3, 4, true);
+  layout.addMerge("Sheet2", 1, 1, 2, 2);
+  layout.setFilter("Sheet2", { range: { r1: 5, c1: 1, r2: 9, c2: 3 }, columns: [], hidden: [] });
+  const kept = structuredClone(layout.getAll());
+  assert.deepEqual(layout.protectOf("Sheet2"), protect);
+  const same = (label) => {
+    assert.deepEqual(layout.getAll(), kept, label);
+    assert.deepEqual(layout.protectOf("Sheet2"), protect, label + ": the protection and the digest of the password");
+  };
+  const t = h.tab("Sheet2");
+  t.dispatchEvent({ type: "dblclick", target: t });
+  const input = h.document.querySelector("#sheet-tab-bar .sheet-tab-edit");
+  input.value = "둘째";
+  input.dispatchEvent({ type: "keydown", key: "Enter", target: input });
+  await flushAsyncTurns(30);
+  assert.deepEqual(layout.protectOf("둘째"), protect, "the rename carries the protection");
+  assert.equal(layout.protectOf("Sheet2"), null);
+  await h.history("studio-undo");
+  assert.deepEqual(h.names(), ["Sheet1", "Sheet2"]);
+  same("undo of the rename");
+  await h.history("studio-redo");
+  assert.deepEqual(layout.protectOf("둘째"), protect, "redo of the rename");
+  assert.equal(layout.protectOf("Sheet2"), null);
+  await h.history("studio-undo");
+  same("and the undo again");
+
+  await h.tabMenu("Sheet2", "delete");
+  userClickOk(h, "sheet-tab-delete-dialog");
+  await flushAsyncTurns(30);
+  assert.deepEqual(h.names(), ["Sheet1"]);
+  assert.equal(layout.protectOf("Sheet2"), null, "the deleted sheet has none");
+  await h.history("studio-undo");
+  assert.deepEqual(h.names(), ["Sheet1", "Sheet2"]);
+  same("undo of the delete");
+  await h.history("studio-redo");
+  assert.deepEqual(h.names(), ["Sheet1"]);
+  await h.history("studio-undo");
+  same("and the undo of the delete again");
+});

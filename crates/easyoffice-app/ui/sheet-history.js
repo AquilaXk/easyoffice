@@ -160,14 +160,30 @@
       const undone = shift && shift.sheet === entry.name ? current : null;
       forgetAreas(map, entry.delta);
       const replaced = D.apply(map, entry.delta);
-      notes.extent.set(entry.name, D.extentChange(entry.delta));
+      notes.extent.set(entry.name, { ...D.extentChange(entry.delta), moved: shift?.sheet === entry.name });
       return { name: now, ...(entry.alias ? { alias: entry.name } : {}), ...(existed ? {} : { absent: true }), delta: undone ?? replaced };
     }
 
+    // The protection each sheet has now, under the name it has once the record is applied (a renamed sheet comes back under
+    // its old name, a sheet the record deletes has none). A sheet the record brings back is not listed: the protection of the
+    // record is its own. Read before the cells move, because the layout is still keyed by the names of now.
+    function protectionNow(record) {
+      const now = host.__EASYOFFICE_SHEET_LAYOUT__.getAll();
+      const renamedTo = {};
+      const deleted = new Set();
+      for (const entry of record.sheets) {
+        if (entry.absent) deleted.add(entry.alias ?? entry.name);
+        else if (entry.alias) renamedTo[entry.alias] = entry.name;
+      }
+      const out = {};
+      for (const name of Object.keys(sheetDataStore)) if (!deleted.has(name)) out[renamedTo[name] ?? name] = now[name]?.protect ?? null;
+      return out;
+    }
+
     // Applies `record` to the page's model and returns the record that undoes it (its redo). The settings of the record are
-    // put back by the caller (`partsOf`), after the cells.
+    // put back by the caller (`snapshotOf`), after the cells.
     function swap(record) {
-      const notes = { extent: new Map() };
+      const notes = { extent: new Map(), protection: protectionNow(record) };
       const inverse = { kind: "delta", view: readView(), sheets: [], parts: readParts(Object.keys(record.parts)), bytes: 256 };
       if (record.isRibbon) Object.assign(inverse, { isRibbon: true, ribbonModule: record.ribbonModule });
       if (record.shift) inverse.shift = D.inverseEdit(record.shift);
@@ -177,9 +193,9 @@
       return { inverse, notes };
     }
 
-    // The settings of `record` as a partial workspace snapshot for `restoreWorkspaceSnapshot`.
-    function snapshotOf(record) {
-      const snap = { scope: "sheet", ...record.view, ...record.parts };
+    // The settings of `record` as a partial workspace snapshot for `restoreWorkspaceSnapshot`; `notes` come from `swap`.
+    function snapshotOf(record, notes) {
+      const snap = { scope: "sheet", ...record.view, ...record.parts, protectionNow: notes.protection };
       delete snap.sheetRowCounts;
       return snap;
     }

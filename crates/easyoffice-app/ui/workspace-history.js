@@ -96,8 +96,8 @@
       dest.push(inverse);
       enforceLimits();
       sheetHistory.restoreRowCounts(record);
-      for (const [name, change] of notes.extent) controller.noteCellsRestored(name, change.written, change.removed);
-      await restoreWorkspaceSnapshot(sheetHistory.snapshotOf(record), backendSyncRes, { keepProtections: true });
+      for (const [name, change] of notes.extent) controller.noteCellsRestored(name, change);
+      await restoreWorkspaceSnapshot(sheetHistory.snapshotOf(record, notes), backendSyncRes, { keepProtections: true });
       if (record.sheets.some((entry) => entry.delta.n > 0 || entry.absent)) await controller.recalculateActiveSheetFormulas({ updateFocusedDisplay: true });
       return true;
     }
