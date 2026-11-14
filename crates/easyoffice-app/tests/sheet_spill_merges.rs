@@ -185,3 +185,33 @@ fn an_xls_holds_the_values_of_the_arrays_placed_around_the_merges() {
         assert!(opened.contains(cell), "{cell}: {opened}");
     }
 }
+
+#[test]
+fn a_merge_list_over_the_limit_or_with_a_wrong_entry_is_refused() {
+    let opened = call(r#"{"sessionAction":"open","sheets":["S"]}"#);
+    let id = json_str_field(&opened, "session").to_string();
+    let many = vec![r#""A1:B2""#; 100_001].join(",");
+    for bad in [
+        format!("[{many}]"),
+        r#"["A:B"]"#.to_string(),
+        r#"[1]"#.to_string(),
+        r#"{"A1":"B2"}"#.to_string(),
+    ] {
+        let answer = EasyOfficeIpcRouter::dispatch(
+            "evaluate_sheet",
+            &format!(r#"{{"sessionAction":"merges","session":"{id}","sheet":"S","merges":{bad}}}"#),
+        );
+        assert!(answer.is_err(), "{}", &bad[..bad.len().min(40)]);
+    }
+    // a request without a session refuses a merge list that is not an object of lists
+    let stateless = EasyOfficeIpcRouter::dispatch(
+        "evaluate_sheet",
+        r#"{"sheet":"S","cells":[{"cell":"A1","value":"=1"}],"merges":["A1:B2"],"targets":[{"sheet":"S","cell":"A1"}]}"#,
+    );
+    assert!(stateless.is_err());
+    // a merge of a sheet that is not there is ignored
+    let ignored = call(
+        r#"{"sheet":"S","cells":[{"cell":"A1","value":"=1"}],"merges":{"Z":["A1:B2"]},"targets":[{"sheet":"S","cell":"A1"}]}"#,
+    );
+    assert!(ignored.contains(r#""targetValues":["1"]"#), "{ignored}");
+}

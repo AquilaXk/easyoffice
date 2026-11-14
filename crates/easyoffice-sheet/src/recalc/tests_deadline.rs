@@ -636,3 +636,29 @@ fn formula_targets_of_a_workbook_with_arrays_share_one_deadline() {
         "a target that has a value has its real one"
     );
 }
+
+#[test]
+fn readers_through_indirect_that_the_deadline_cut_off_are_finished_by_the_next_pass() {
+    let mut wb = WorkbookEngine::new();
+    wb.add_sheet("Sheet1");
+    wb.set_cell("Sheet1", "A1", "=SEQUENCE(3)").unwrap();
+    for r in 1..=20 {
+        wb.set_cell("Sheet1", &format!("C{r}"), "=SUM(INDIRECT(\"A1:A10\"))")
+            .unwrap();
+    }
+    let mut session = session_with(wb, MAX_EVAL_TIME);
+    session.budget.max_time = Duration::ZERO;
+    let cut = session.recalculate();
+    assert!(cut.timed_out);
+    session.budget.max_time = MAX_EVAL_TIME;
+    let done = session.recalculate();
+    assert!(!done.timed_out && !done.circular);
+    assert_eq!(value(&session, "C1"), "6");
+    assert_eq!(value(&session, "C20"), "6");
+    // the reads of the finished pass are known: a bigger array reaches them again
+    session
+        .set_cell("Sheet1", at("A1"), "=SEQUENCE(4)")
+        .unwrap();
+    session.recalculate();
+    assert_eq!(value(&session, "C7"), "10");
+}
