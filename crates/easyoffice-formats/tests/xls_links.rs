@@ -388,3 +388,30 @@ fn a_workbook_without_links_reads_no_links() {
     let xls = LegacyOle2Codec::pack_xls_multi_values(&[payload("S1")]).unwrap();
     assert_eq!(read(&xls), (Vec::new(), 0));
 }
+
+#[test]
+fn a_range_past_the_biff8_columns_is_turned_away() {
+    let mut wide = excel_url_link((0, 0), "x", "https://a.b/");
+    wide[..8].copy_from_slice(&area((0, 0), (40_000, 40_000)));
+    let mut edge = excel_url_link((0, 0), "x", "https://a.b/");
+    edge[..8].copy_from_slice(&area((1, 1), (255, 255)));
+    let (links, rejected) = read(&with_records(&[record(HLINK, &wide), record(HLINK, &edge)]));
+    assert_eq!(links, [(1, 255, "https://a.b/|".to_string())]);
+    assert_eq!(rejected, 1);
+}
+
+#[test]
+fn an_address_whose_record_would_pass_8224_bytes_is_refused_on_save() {
+    let emoji = format!("https://a.b/{}", "😀".repeat(2_036));
+    let long = CellLink::new(&emoji, "").unwrap();
+    assert!(!long.fits_xls());
+    assert!(CellLink::new("https://a.b/x", &"😀".repeat(255))
+        .unwrap()
+        .fits_xls());
+    let mut links = SheetLinks::new();
+    links.insert((0, 0), long);
+    assert!(LegacyOle2Codec::pack_xls_multi_values_linked(&[payload("S1")], &[links]).is_err());
+    // The longest plain address (2,048 characters) fits.
+    let plain = CellLink::new(&format!("https://a.b/{}", "x".repeat(2_030)), "팁").unwrap();
+    assert!(plain.fits_xls());
+}

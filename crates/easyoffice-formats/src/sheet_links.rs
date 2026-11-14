@@ -90,6 +90,11 @@ impl CellLink {
         })
     }
 
+    /// Whether the link's records fit a BIFF8 record (PD-223); a longer one cannot be written to an XLS.
+    pub fn fits_xls(&self) -> bool {
+        xls_links::fits(self)
+    }
+
     /// Whether the link jumps inside the workbook.
     pub fn is_internal(&self) -> bool {
         self.target.starts_with('#')

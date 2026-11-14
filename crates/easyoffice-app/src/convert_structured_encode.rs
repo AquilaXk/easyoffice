@@ -199,7 +199,7 @@ fn encode_xls(
     let links = xls_links(stylings, &names, &clean, &mut skipped_links);
     if skipped_links > 0 {
         warnings.push(format!(
-            "하이퍼링크 {skipped_links}개는 XLS의 범위(65,536행, 256열) 밖이라 저장하지 않았습니다."
+            "하이퍼링크 {skipped_links}개는 XLS의 범위(65,536행, 256열) 밖이거나 주소가 너무 길어 저장하지 않았습니다."
         ));
     }
     let mut payloads: Vec<LegacyXlsPayload> = computed

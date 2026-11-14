@@ -17,9 +17,9 @@
 //! MS-OSHARED 2.3.7.1 makes the field optional). An address outside the workbook is a URL moniker, the
 //! location after a `#` of an address stays inside the URL; a location inside the workbook has no moniker.
 
-use crate::sheet_links::{LinkAllowance, LinkCollector, SheetLinks};
+use crate::sheet_links::{CellLink, LinkAllowance, LinkCollector, SheetLinks};
 use crate::utf16_swar::decode_utf16le_swar;
-use crate::{CellBox, EasyOfficeError, MAX_BIFF8_COL, MAX_BIFF8_ROW};
+use crate::{CellBox, EasyOfficeError, MAX_BIFF8_COL, MAX_BIFF8_RECORD_DATA_LEN, MAX_BIFF8_ROW};
 
 /// Record type of `HLink`.
 pub(crate) const HLINK: u16 = 0x01B8;
@@ -95,11 +95,13 @@ fn zero_terminated(bytes: &[u8]) -> Option<String> {
     decode_utf16le_swar(&bytes[..end]).ok()
 }
 
-/// The range of the record's first eight bytes (`Ref8U`): rows then columns, first before last.
+/// The range of the record's first eight bytes (`Ref8U`): rows then columns, first before last, inside the
+/// BIFF8 grid (a column past 255 is no cell of the sheet).
 fn read_area(bytes: &mut Bytes) -> Option<CellBox> {
     let (row0, row1) = (bytes.u16()?, bytes.u16()?);
     let (col0, col1) = (bytes.u16()?, bytes.u16()?);
-    (row0 <= row1 && col0 <= col1).then(|| CellBox {
+    let in_grid = u32::from(row1) <= MAX_BIFF8_ROW && u32::from(col1) <= MAX_BIFF8_COL;
+    (row0 <= row1 && col0 <= col1 && in_grid).then(|| CellBox {
         row0: row0.into(),
         col0: col0.into(),
         row1: row1.into(),
@@ -317,12 +319,41 @@ fn tooltip_data(row: u16, col: u16, tip: &str) -> Vec<u8> {
     out
 }
 
+/// Whether the records of `link` fit the 8,224 bytes a BIFF8 record holds (a long address of characters that take
+/// two UTF-16 units each does not): the `HLink` and, with a screen tip, its `HLinkTooltip`.
+pub(crate) fn fits(link: &CellLink) -> bool {
+    let units = |text: &str| text.encode_utf16().count() + 1;
+    let link_len = match link.target.strip_prefix('#') {
+        Some(location) => HEADER_LEN + 4 + 4 + 4 + units(location) * 2,
+        None => {
+            HEADER_LEN
+                + 4
+                + 4
+                + URL_MONIKER_CLSID.len()
+                + 4
+                + units(&link.target) * 2
+                + URL_TAIL.len()
+        }
+    };
+    let tip_len = if link.tip.is_empty() {
+        0
+    } else {
+        12 + units(&link.tip) * 2
+    };
+    link_len.max(tip_len) <= MAX_BIFF8_RECORD_DATA_LEN
+}
+
 /// Appends the records of the links of one sheet in cell order. A link outside the BIFF8 grid is refused.
 pub(crate) fn write_links(stream: &mut Vec<u8>, links: &SheetLinks) -> Result<(), EasyOfficeError> {
     for (&(row, col), link) in links {
         if row > MAX_BIFF8_ROW || col > MAX_BIFF8_COL {
             return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
                 "BIFF8 하이퍼링크 칸(row={row}, col={col})이 명세 상한(row<={MAX_BIFF8_ROW}, col<={MAX_BIFF8_COL})을 초과했습니다."
+            )));
+        }
+        if !fits(link) {
+            return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+                "BIFF8 하이퍼링크 칸(row={row}, col={col})의 레코드가 {MAX_BIFF8_RECORD_DATA_LEN}바이트를 넘습니다."
             )));
         }
         let (row, col) = (row as u16, col as u16);

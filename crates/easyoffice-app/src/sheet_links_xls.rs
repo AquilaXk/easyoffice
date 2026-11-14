@@ -1,5 +1,5 @@
 //! The hyperlinks of a workbook saved as XLS (PD-223): the page's links go in as the file's `HLink` records,
-//! with the two changes the format makes. A link outside the 65,536 x 256 grid is left out and counted, and a
+//! with the two changes the format makes. A link outside the 65,536 x 256 grid or too long for a record is left out and counted, and a
 //! jump to a sheet whose name the format cannot keep follows the sheet to its new name.
 
 use easyoffice_formats::{SheetLinks, SheetStyling, MAX_BIFF8_COL, MAX_BIFF8_ROW};
@@ -25,7 +25,7 @@ pub(crate) fn xls_links(
         .map(|styling| {
             let mut kept = SheetLinks::new();
             for (&(row, col), link) in &styling.links {
-                if row > MAX_BIFF8_ROW || col > MAX_BIFF8_COL {
+                if row > MAX_BIFF8_ROW || col > MAX_BIFF8_COL || !link.fits_xls() {
                     *skipped += 1;
                     continue;
                 }

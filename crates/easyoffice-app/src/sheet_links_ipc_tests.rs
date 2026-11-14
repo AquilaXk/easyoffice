@@ -117,6 +117,21 @@ fn an_xls_save_leaves_out_links_off_its_grid_with_a_warning() {
 }
 
 #[test]
+fn an_xls_save_leaves_out_an_address_too_long_for_a_record_and_keeps_the_rest() {
+    let long = format!("https://a.b/{}", "😀".repeat(2_036));
+    let payload = format!(
+        "{{\"targetFormat\":\"xls\",\"sheets\":[{{\"name\":\"S\",\"cells\":[{{\"ref\":\"A1\",\"raw\":\"x\"}},{{\"ref\":\"A2\",\"raw\":\"y\"}}],\"links\":[{{\"ref\":\"A1\",\"target\":\"https://a.b/\"}},{{\"ref\":\"A2\",\"target\":\"{long}\"}}]}}]}}"
+    );
+    let saved = dispatch(&payload);
+    assert!(saved.contains("하이퍼링크 1개는 XLS의 범위"), "{saved}");
+    let back = opened("s.xls", &base64_field(&saved));
+    assert_eq!(
+        links_of(&back, 0),
+        "[{\"ref\":\"A1\",\"target\":\"https://a.b/\"}]"
+    );
+}
+
+#[test]
 fn a_save_with_an_unsafe_address_is_refused() {
     for bad in [
         "{\"ref\":\"A1\",\"target\":\"javascript:alert(1)\"}",
