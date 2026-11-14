@@ -12,7 +12,7 @@ use crate::sheet_styling::ods_numfmt::{data_style_xml, read_data_styles};
 use crate::sheet_styling::ods_view::{table_props, GroupWriter, TableProps};
 use crate::sheet_styling::sheet_links::ods_links::href_to_target;
 use crate::sheet_styling::sheet_links::{LinkAllowance, LinkCollector};
-use crate::sheet_styling::sheet_look::{ods_border_edge, ods_border_value};
+use crate::sheet_styling::sheet_look::{ods_border_edge, ods_border_value, parse_hex_rgb};
 use crate::sheet_styling::sheet_rules::ods_rules_read::{OdsRuleReader, ValidationSink};
 use crate::sheet_styling::sheet_view::{push_level, Outline, MAX_OUTLINE_LEVEL, MAX_OUTLINE_ROWS};
 use crate::sheet_styling::{
@@ -145,6 +145,9 @@ impl OdsStyleTable {
             if let Some(centi) = k.size_centipt() {
                 props.push_str(&format!(" fo:font-size=\"{}pt\"", format_centipt(centi)));
             }
+            if let Some(rgb) = k.font_color() {
+                props.push_str(&format!(" fo:color=\"#{rgb:06x}\""));
+            }
             let data = match k.num_fmt() {
                 0 => String::new(),
                 id => format!(" style:data-style-name=\"eonf{id}\""),
@@ -205,6 +208,9 @@ fn cell_look_xml(k: StyleKey) -> String {
     if k.wrap() {
         cell.push_str(" fo:wrap-option=\"wrap\"");
     }
+    if let Some(rgb) = k.fill() {
+        cell.push_str(&format!(" fo:background-color=\"#{rgb:06x}\""));
+    }
     let b = k.borders();
     for (side, edge) in [
         ("top", b.top),
@@ -234,7 +240,12 @@ fn cell_look_xml(k: StyleKey) -> String {
     xml
 }
 
-/// Alignment, wrapping and borders out of the cell and paragraph properties of a style body.
+/// `#rrggbb` of an `fo:color` or `fo:background-color`; `transparent` and anything else is no colour.
+fn ods_color(value: &str) -> Option<u32> {
+    parse_hex_rgb(value.strip_prefix('#')?)
+}
+
+/// Alignment, wrapping, borders and fill out of the cell and paragraph properties of a style body.
 fn parse_cell_look(body: &str, style: &mut CellStyle) {
     if let Some((attrs, _)) =
         extract_tags_or_self_closing_with_attrs(body, "style:paragraph-properties")
@@ -257,6 +268,7 @@ fn parse_cell_look(body: &str, style: &mut CellStyle) {
     }
     style.v_align = get("style:vertical-align").map_or(VAlign::Bottom, VAlign::from_ods);
     style.wrap = get("fo:wrap-option") == Some("wrap");
+    style.fill = get("fo:background-color").and_then(ods_color);
     let all = get("fo:border").map(ods_border_edge);
     let edge = |side: &str| {
         get(&format!("fo:border-{side}"))
@@ -393,6 +405,10 @@ fn parse_text_properties(attrs: &str) -> CellStyle {
             .and_then(length_to_px)
             .map(|px| (px / PX_PER_INCH * PT_PER_INCH * 100.0).round() / 100.0)
             .filter(|pt| *pt >= 1.0),
+        // `use-window-font-color` is the automatic colour whatever `fo:color` says.
+        font_color: get("fo:color")
+            .and_then(ods_color)
+            .filter(|_| get("style:use-window-font-color") != Some("true")),
         ..CellStyle::default()
     }
 }

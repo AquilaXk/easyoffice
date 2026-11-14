@@ -392,3 +392,52 @@ fn hostile_stylesheets_stay_bounded_and_never_panic() {
     let styling = foreign(&styles, 1);
     assert_eq!(styling.cells[&(0, 0)].borders.left.rgb(), 0);
 }
+
+#[test]
+fn ods_round_trips_the_colours_and_shares_the_styles() {
+    let styling = with(vec![
+        ((0, 0), colored(Some(0xFFEB9C), None)),
+        ((0, 1), colored(None, Some(0x9C5700))),
+        ((1, 1), colored(Some(0x00B050), Some(0xFFFFFF))),
+        ((2, 2), colored(Some(0x000000), Some(0x000000))),
+    ]);
+    let back = round_trip(DocumentFormat::Ods, &styling);
+    assert_eq!(back.cells, styling.cells);
+    let bytes = pack(DocumentFormat::Ods, &styling);
+    let content = part(&bytes, "content.xml");
+    assert!(
+        content.contains("fo:background-color=\"#ffeb9c\""),
+        "{content}"
+    );
+    assert!(content.contains("fo:color=\"#9c5700\""));
+    // The same look on a thousand cells is one automatic style.
+    let many = with(
+        (0..1000)
+            .map(|r| ((r, 0), colored(Some(0x123456), Some(0x654321))))
+            .collect(),
+    );
+    let content = part(&pack(DocumentFormat::Ods, &many), "content.xml");
+    assert_eq!(content.matches("style:family=\"table-cell\"").count(), 1);
+}
+
+#[test]
+fn ods_reads_transparent_automatic_and_malformed_colours_as_none() {
+    let content = concat!(
+        "<?xml version=\"1.0\"?><office:document-content xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:style=\"urn:oasis:names:tc:opendocument:xmlns:style:1.0\" xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">",
+        "<office:automatic-styles>",
+        "<style:style style:name=\"a\" style:family=\"table-cell\"><style:table-cell-properties fo:background-color=\"transparent\"/><style:text-properties fo:color=\"#ff0000\" style:use-window-font-color=\"true\"/></style:style>",
+        "<style:style style:name=\"b\" style:family=\"table-cell\"><style:table-cell-properties fo:background-color=\"#12345\"/><style:text-properties fo:color=\"red\"/></style:style>",
+        "<style:style style:name=\"c\" style:family=\"table-cell\"><style:table-cell-properties fo:background-color=\"#AbCdEf\"/><style:text-properties fo:color=\"#010203\"/></style:style>",
+        "</office:automatic-styles>",
+        "<office:body><office:spreadsheet><table:table table:name=\"Sheet1\"><table:table-row>",
+        "<table:table-cell table:style-name=\"a\" office:value-type=\"string\"><text:p>1</text:p></table:table-cell>",
+        "<table:table-cell table:style-name=\"b\" office:value-type=\"string\"><text:p>2</text:p></table:table-cell>",
+        "<table:table-cell table:style-name=\"c\" office:value-type=\"string\"><text:p>3</text:p></table:table-cell>",
+        "</table:table-row></table:table></office:spreadsheet></office:body></office:document-content>"
+    );
+    let bytes = pack(DocumentFormat::Ods, &SheetStyling::default());
+    let styling = read(&swap(&bytes, "content.xml", content), DocumentFormat::Ods);
+    assert_eq!(styling.cells.len(), 1, "{:?}", styling.cells);
+    assert_eq!(styling.cells[&(0, 2)].fill, Some(0xABCDEF));
+    assert_eq!(styling.cells[&(0, 2)].font_color, Some(0x010203));
+}
