@@ -262,6 +262,9 @@
     const s = td.style;
     const fill = st?.fill || "";
     const fg = st?.fontColor || "";
+    // Most cells have no color and had none: nothing to write or remove.
+    if (!fill && !fg && !td._colored) return;
+    td._colored = Boolean(fill || fg);
     // Text with no color of its own on a fill is black or white by the fill (`--cell-auto-fg`); CSS keeps it
     // below the hyperlink look.
     const auto = !fg && fill ? autoTextColor(fill) : "";
