@@ -3,10 +3,11 @@
 //! `table-database-range-attlist`). The model is `sheet_table`.
 //!
 //! A database range has a name, `table:target-range-address`, `table:contains-header` (default true)
-//! and `table:display-filter-buttons` (default false). ODF has no totals row, table style or banding,
-//! so those go out as the foreign attributes `eo:table-style` and `eo:table-flags` (a list of
-//! `totals`, `first-column`, `last-column`, `row-stripes`, `column-stripes`) and a file by another
-//! program reads without them. Column names are the header cells' text, so the reader leaves them as
+//! and `table:display-filter-buttons` (default false). ODF has no totals row, table style or banding.
+//! The totals row is `calcext:contains-footer`, the attribute the office suite writes and reads for it
+//! (it writes it for a table it opened from XLSX); the style and the banding go out as the foreign
+//! attributes `eo:table-style` and `eo:table-flags` (a list of `first-column`, `last-column`,
+//! `row-stripes`, `column-stripes`), which a file by another program reads without. Column names are the header cells' text, so the reader leaves them as
 //! `ColumnN` until the file is written. The conditions of a table's filter are not written: ODS keeps
 //! them in `table:filter`, which this codec does not read or write for sheets either.
 //!
@@ -21,8 +22,7 @@ use crate::sheet_table::{unique_table_names, SheetTable, TableRegistry};
 use crate::{CellBox, EasyOfficeError, SheetStyling, XmlSanitizer};
 
 const ANONYMOUS_PREFIX: &str = "__Anonymous_";
-const FLAG_TOKENS: [&str; 5] = [
-    "totals",
+const FLAG_TOKENS: [&str; 4] = [
     "first-column",
     "last-column",
     "row-stripes",
@@ -31,7 +31,6 @@ const FLAG_TOKENS: [&str; 5] = [
 
 fn flags_of(table: &SheetTable) -> String {
     let on = [
-        table.totals,
         table.first_column,
         table.last_column,
         table.row_stripes,
@@ -47,11 +46,10 @@ fn flags_of(table: &SheetTable) -> String {
 
 fn apply_flags(table: &mut SheetTable, text: &str) {
     let has = |token: &str| text.split_whitespace().any(|t| t == token);
-    table.totals = has(FLAG_TOKENS[0]);
-    table.first_column = has(FLAG_TOKENS[1]);
-    table.last_column = has(FLAG_TOKENS[2]);
-    table.row_stripes = has(FLAG_TOKENS[3]);
-    table.column_stripes = has(FLAG_TOKENS[4]);
+    table.first_column = has(FLAG_TOKENS[0]);
+    table.last_column = has(FLAG_TOKENS[1]);
+    table.row_stripes = has(FLAG_TOKENS[2]);
+    table.column_stripes = has(FLAG_TOKENS[3]);
 }
 
 /// `Sheet1.A1:Sheet1.C5` for a table of `sheet`.
@@ -101,6 +99,9 @@ pub(crate) fn database_ranges_xml(stylings: &[SheetStyling], sheets: &[&str]) ->
                 table.header,
                 table.filter.is_some()
             );
+            if table.totals {
+                out.push_str(" calcext:contains-footer=\"true\"");
+            }
             if let Some(style) = &table.style {
                 let _ = write!(out, " eo:table-style=\"{}\"", XmlSanitizer::escape(style));
             }
@@ -152,6 +153,7 @@ pub(crate) fn read_tables(
             };
             let mut table = SheetTable::new(name, range);
             table.header = attr("table:contains-header").as_deref() != Some("false");
+            table.totals = attr("calcext:contains-footer").as_deref() == Some("true");
             table.style = attr("eo:table-style");
             table.row_stripes = false;
             if let Some(flags) = attr("eo:table-flags") {
@@ -236,6 +238,24 @@ mod tests {
         assert_eq!(tables[0].name, "Ok");
         assert!(tables[0].header && tables[0].filter.is_some());
         assert_eq!(tables[0].range.to_a1(), "A1:B5");
+    }
+
+    #[test]
+    fn the_ranges_an_office_suite_wrote_for_its_own_tables_are_read() {
+        // As the office suite writes a table it opened from an XLSX file: the footer and the filter buttons.
+        let xml = concat!(
+            "<table:database-ranges>",
+            "<table:database-range table:name=\"Sales\" table:target-range-address=\"Data.A1:Data.C4\" ",
+            "table:display-filter-buttons=\"true\" calcext:contains-footer=\"true\"/>",
+            "<table:database-range table:name=\"Bare\" table:contains-header=\"false\" ",
+            "table:target-range-address=\"Data.E1:Data.E2\"/>",
+            "</table:database-ranges>"
+        );
+        let mut sheets = vec![sheet("Data")];
+        read_tables(xml, &mut sheets).unwrap();
+        let tables = &sheets[0].1.tables;
+        assert!(tables[0].header && tables[0].totals && tables[0].filter.is_some());
+        assert!(!tables[1].header && !tables[1].totals && tables[1].filter.is_none());
     }
 
     #[test]
