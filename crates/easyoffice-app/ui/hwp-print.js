@@ -27,12 +27,37 @@
   const PAGE_HEIGHT_GUARD_MM = 0.1;
   const AFTERPRINT_FALLBACK_MS = 5 * 60 * 1000;
   const ID_REFERENCE = /url\((['"]?)#([^)'"\s]+)\1\)/g;
-  const DROPPED_ELEMENTS = "script, foreignObject, iframe, object, embed, link, meta";
-  const LINK_ATTRIBUTES = new Set(["href", "src", "xlink:href"]);
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  // What the editor's page renderer writes, and nothing else. An element or attribute outside the
+  // lists is removed: the page SVG comes from a frame the shell does not trust, and what is kept goes
+  // into the shell's own document, where a script, a style, a link or a reference to another
+  // document must never come from. `a` is unwrapped (its text stays). `style` and `class` have no
+  // use here: the page's policy does not allow inline styles.
+  const KEPT_ELEMENTS = new Set([
+    "svg", "g", "defs", "title", "desc", "rect", "line", "polyline", "polygon", "circle", "ellipse", "path",
+    "text", "tspan", "image", "clipPath", "marker", "pattern", "linearGradient", "radialGradient", "stop",
+    "filter", "feColorMatrix", "feComponentTransfer", "feFuncR", "feFuncG", "feFuncB",
+  ]);
+  const KEPT_ATTRIBUTES = new Set([
+    "id", "x", "y", "x1", "y1", "x2", "y2", "cx", "cy", "r", "rx", "ry", "fx", "fy", "width", "height", "d", "points",
+    "transform", "viewBox", "preserveAspectRatio", "version", "overflow", "opacity", "fill", "fill-opacity", "fill-rule",
+    "stroke", "stroke-width", "stroke-opacity", "stroke-dasharray", "stroke-dashoffset", "stroke-linecap",
+    "stroke-linejoin", "stroke-miterlimit", "font-size", "font-family", "font-weight", "font-style", "text-anchor",
+    "dominant-baseline", "text-decoration", "letter-spacing", "word-spacing", "textLength", "lengthAdjust", "xml:space",
+    "clip-path", "clip-rule", "filter", "marker-start", "marker-mid", "marker-end", "markerWidth", "markerHeight",
+    "markerUnits", "refX", "refY", "orient", "offset", "stop-color", "stop-opacity", "gradientUnits", "gradientTransform",
+    "patternUnits", "patternContentUnits", "patternTransform", "type", "values", "tableValues", "slope", "intercept",
+    "amplitude", "exponent", "href", "xlink:href",
+  ]);
+  const LINK_ATTRIBUTES = new Set(["href", "xlink:href"]);
   const SAFE_IMAGE_PREFIXES = [
     "data:image/png;", "data:image/jpeg;", "data:image/jpg;", "data:image/gif;",
     "data:image/webp;", "data:image/bmp;", "data:image/svg+xml;",
   ];
+  const DOCUMENT_TYPE = /<!(?:DOCTYPE|ENTITY)/i;
+  // Text with its white space and control characters taken out, as a URL parser reads it: the
+  // browser ignores tabs and line breaks inside a scheme (`java<TAB>script:`).
+  const compact = (value) => String(value).replace(/[\u0000-\u0020\u007f-\u009f]+/g, "").toLowerCase();
   const MSG_UNSUPPORTED = "이 편집기 구성 요소는 인쇄를 지원하지 않습니다.";
   const MSG_BUSY = "이미 인쇄를 준비하고 있습니다.";
   const MSG_EMPTY = "인쇄할 쪽이 없습니다.";
@@ -57,19 +82,31 @@
   // ---- SVG sanitizing (adapted from the reference app's print dialog) ---------------------------------------
 
   function isSafeReference(value) {
-    const text = String(value).trim().toLowerCase();
+    const text = compact(value);
     return text === "" || text.startsWith("#") || SAFE_IMAGE_PREFIXES.some((prefix) => text.startsWith(prefix));
   }
 
+  // A value may point only inside the page: `url(#id)`; a scheme or another URL is refused.
+  function isSafeValue(value) {
+    const text = compact(value);
+    return !/(?:javascript|vbscript|data|https?|file|blob):/.test(text) && !/url\((?!['"]?#)/.test(text);
+  }
+
   function shouldDropAttribute(name, value) {
-    const attr = name.toLowerCase();
-    const text = value.trim().toLowerCase();
-    if (attr.startsWith("on") || text.includes("javascript:")) return true;
-    return LINK_ATTRIBUTES.has(attr) && !isSafeReference(text);
+    if (!KEPT_ATTRIBUTES.has(name)) return true;
+    return LINK_ATTRIBUTES.has(name) ? !isSafeReference(value) : !isSafeValue(value);
+  }
+
+  function isKeptElement(element) {
+    return element.namespaceURI === SVG_NS && KEPT_ELEMENTS.has(element.localName);
   }
 
   function sanitizeSvg(root) {
-    for (const node of Array.from(root.querySelectorAll(DROPPED_ELEMENTS))) node.remove();
+    for (const element of Array.from(root.querySelectorAll("*"))) {
+      if (isKeptElement(element)) continue;
+      if (element.namespaceURI === SVG_NS && element.localName === "a") element.replaceWith(...element.childNodes);
+      else element.remove();
+    }
     for (const element of [root, ...Array.from(root.querySelectorAll("*"))]) {
       for (const attribute of Array.from(element.attributes)) {
         if (shouldDropAttribute(attribute.name, attribute.value)) element.removeAttribute(attribute.name);
@@ -152,10 +189,13 @@
     let job = null;
     let printed = null;
 
+    // A document type declaration is refused before the text is parsed (entities would expand
+    // into the tree); the root must be an `svg` of the SVG namespace.
     function parseSvg(text) {
+      if (DOCUMENT_TYPE.test(text)) return null;
       const parsed = new env.DOMParser().parseFromString(text, "image/svg+xml");
       const svg = parsed.documentElement;
-      if (parsed.querySelector("parsererror") || String(svg.tagName).toLowerCase() !== "svg") return null;
+      if (parsed.querySelector("parsererror") || !svg || svg.namespaceURI !== SVG_NS || svg.localName !== "svg") return null;
       return svg;
     }
 

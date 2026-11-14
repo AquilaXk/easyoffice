@@ -16,6 +16,8 @@ class FakeSvg {
   constructor(text) {
     this.text = text;
     this.tagName = "svg";
+    this.localName = "svg";
+    this.namespaceURI = "http://www.w3.org/2000/svg";
     this.attrs = new Map([["id", "g1"], ["fill", "url(#g1)"], ["onload", "x()"], ["href", "https://evil.example/a"]]);
     this.dropped = [];
   }
@@ -26,6 +28,31 @@ class FakeSvg {
   removeAttribute(k) { this.attrs.delete(k); }
   querySelectorAll() { return []; }
   remove() { this.removed = true; }
+}
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+// An element tree with the parts of the DOM the sanitizer uses, so the lists are tried on trees
+// shaped like the attacks (the parsing itself is the browser's).
+class El {
+  constructor(localName, attrs = {}, children = [], namespaceURI = SVG_NS) {
+    this.localName = localName;
+    this.namespaceURI = namespaceURI;
+    this.attrs = new Map(Object.entries(attrs));
+    this.children = children;
+    children.forEach((c) => { c.parent = this; });
+  }
+  get attributes() { return [...this.attrs].map(([name, value]) => ({ name, value })); }
+  get childNodes() { return [...this.children]; }
+  removeAttribute(k) { this.attrs.delete(k); }
+  querySelectorAll() { return this.children.flatMap((c) => [c, ...c.querySelectorAll()]); }
+  remove() { this.parent.children = this.parent.children.filter((c) => c !== this); }
+  replaceWith(...nodes) {
+    const at = this.parent.children.indexOf(this);
+    nodes.forEach((n) => { n.parent = this.parent; });
+    this.parent.children.splice(at, 1, ...nodes);
+  }
+  names() { return this.children.map((c) => c.localName); }
 }
 
 class FakeNode {
@@ -255,4 +282,50 @@ test("the smoke step never calls the native print command", async () => {
   const t = setup({ pages: makePages(3), desktopBridge: shellBridge(calls) });
   assert.match(await t.print.smoke(), /pages=3/);
   assert.deepEqual(calls, []);
+});
+
+test("the sanitizer keeps what the page renderer writes and drops everything else", async () => {
+  const { internals } = setup({ pages: makePages(1) });
+  const other = "http://www.w3.org/1999/xhtml";
+  const tree = new El("svg", { viewBox: "0 0 10 10", width: "10", height: "10", onload: "x()", class: "c", style: "fill:red" }, [
+    new El("style"), new El("script"), new El("foreignObject"), new El("set", { attributeName: "href", to: "javascript:x()" }),
+    new El("animate", { attributeName: "href", values: "javascript:x()" }), new El("base", { href: "https://evil.example/" }),
+    new El("use", { href: "#a" }), new El("script", {}, [], other), new El("rect", { x: "1", fill: "url(#g)", onclick: "x()" }),
+    new El("a", { href: "https://evil.example/" }, [new El("text", { x: "0" })]),
+    new El("image", { href: "data:image/png;base64,AAAA", "xlink:href": "#p" }),
+    new El("g", {}, [new El("style"), new El("path", { d: "M0 0", stroke: "url(https://evil.example/s.svg#x)" })]),
+  ]);
+  internals.sanitizeSvg(tree);
+  assert.deepEqual(tree.names(), ["rect", "text", "image", "g"], "listed elements stay, the link keeps its text");
+  assert.deepEqual([...tree.attrs.keys()], ["viewBox", "width", "height"], "no handler, class or style");
+  const [rect, , image, group] = tree.children;
+  assert.deepEqual([...rect.attrs.keys()], ["x", "fill"]);
+  assert.deepEqual([...image.attrs.keys()], ["href", "xlink:href"]);
+  assert.deepEqual(group.names(), ["path"]);
+  assert.deepEqual([...group.children[0].attrs.keys()], ["d"], "a value may not point outside the page");
+});
+
+test("a reference is kept only when it points inside the page or is a plain image", async () => {
+  const { internals } = setup({ pages: makePages(1) });
+  const hrefs = ["#a", "data:image/jpeg;base64,/9j/", "data:image/svg+xml;base64,PHN2Zz4=", "", "https://evil.example/a.png",
+    "javascript:alert(1)", "java\tscript:alert(1)", " java\nscript:alert(1)", "JaVaScRiPt:alert(1)", "data:text/html;base64,PHNjcmlwdD4=",
+    "data:image/png,not-base64", "//evil.example/a.png", "vbscript:x"];
+  const tree = new El("svg", {}, hrefs.map((href) => new El("image", { href })));
+  internals.sanitizeSvg(tree);
+  assert.deepEqual(tree.children.filter((c) => c.attrs.has("href")).map((c) => c.attrs.get("href")),
+    ["#a", "data:image/jpeg;base64,/9j/", "data:image/svg+xml;base64,PHN2Zz4=", ""]);
+  for (const value of ["java\tscript:x()", "url( 'https://evil.example/x' )", "URL(data:image/svg+xml;base64,AA==)", "url(\"javascript:x\")"]) {
+    const el = new El("rect", { fill: value });
+    internals.sanitizeSvg(new El("svg", {}, [el]));
+    assert.equal(el.attrs.has("fill"), false, value);
+  }
+  const kept = new El("rect", { fill: "url(#g) none", stroke: "url('#g')", filter: "url(#f)", "font-family": "Noto Sans KR, serif" });
+  internals.sanitizeSvg(new El("svg", {}, [kept]));
+  assert.deepEqual([...kept.attrs.keys()], ["fill", "stroke", "filter", "font-family"]);
+});
+
+test("a page with a document type declaration, entities or another root is refused", async () => {
+  for (const svg of ['<!DOCTYPE svg [<!ENTITY a "aaaa">]><svg>&a;</svg>', '<!doctype svg><svg/>', '<svg><!ENTITY x "y"></svg>']) {
+    await assert.rejects(setup({ pages: [{ svg, ...A4 }] }).print.print(), /올바르지 않은 쪽/, svg);
+  }
 });
