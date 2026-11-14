@@ -67,10 +67,22 @@ pub(crate) fn target_to_href(target: &str) -> String {
     }
 }
 
+/// The text styles a link's `text:a` names, as the spreadsheet program's "Hyperlink" and "Followed Hyperlink"
+/// cell styles look (PD-223): the standard names of the office suite's "Internet link" styles, the colours
+/// and the single underline of those cell styles. They go in `styles.xml` as common styles.
+pub(crate) const LINK_STYLES_XML: &str = concat!(
+    "<office:styles>",
+    "<style:style style:name=\"Internet_20_link\" style:display-name=\"Internet link\" style:family=\"text\">",
+    "<style:text-properties fo:color=\"#0563c1\" style:text-underline-style=\"solid\" style:text-underline-width=\"auto\" style:text-underline-color=\"font-color\"/></style:style>",
+    "<style:style style:name=\"Visited_20_Internet_20_Link\" style:display-name=\"Visited Internet Link\" style:family=\"text\">",
+    "<style:text-properties fo:color=\"#954f72\" style:text-underline-style=\"solid\" style:text-underline-width=\"auto\" style:text-underline-color=\"font-color\"/></style:style>",
+    "</office:styles>"
+);
+
 /// The `text:a` start tag of `link`.
 fn anchor_open(link: &CellLink) -> String {
     let mut anchor = format!(
-        "<text:a xlink:type=\"simple\" xlink:href=\"{}\"",
+        "<text:a xlink:type=\"simple\" xlink:href=\"{}\" text:style-name=\"Internet_20_link\" text:visited-style-name=\"Visited_20_Internet_20_Link\"",
         XmlSanitizer::escape(&target_to_href(&link.target))
     );
     if !link.tip.is_empty() {
@@ -142,7 +154,7 @@ mod tests {
         wrap_first_paragraph(&mut xml, 4, &link);
         assert_eq!(
             xml,
-            "<x/><table:table-cell><text:p><text:a xlink:type=\"simple\" xlink:href=\"https://example.com/?a=1&amp;b=2\" office:title=\"팁 &quot;하나&quot;\">글자</text:a></text:p></table:table-cell>"
+            "<x/><table:table-cell><text:p><text:a xlink:type=\"simple\" xlink:href=\"https://example.com/?a=1&amp;b=2\" text:style-name=\"Internet_20_link\" text:visited-style-name=\"Visited_20_Internet_20_Link\" office:title=\"팁 &quot;하나&quot;\">글자</text:a></text:p></table:table-cell>"
         );
         let mut empty = String::from("<table:table-cell table:style-name=\"a\"/>");
         wrap_first_paragraph(&mut empty, 0, &link);

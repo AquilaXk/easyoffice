@@ -87,9 +87,10 @@ fn mils(text: &str) -> Option<u32> {
     (m <= f64::from(MAX_MARGIN_MILS)).then_some(m as u32)
 }
 
-/// `styles.xml` with one page layout (`Mpm<N>`) and master page (`Mp<N>`) per layout, `None` without any.
-pub(crate) fn styles_xml(layouts: &[SheetPage]) -> Option<String> {
-    if layouts.is_empty() {
+/// `styles.xml` with one page layout (`Mpm<N>`) and master page (`Mp<N>`) per layout and, when a cell holds a
+/// hyperlink, the named text styles its `text:a` uses; `None` without either.
+pub(crate) fn styles_xml(layouts: &[SheetPage], links: bool) -> Option<String> {
+    if layouts.is_empty() && !links {
         return None;
     }
     let mut automatic = String::new();
@@ -152,10 +153,17 @@ pub(crate) fn styles_xml(layouts: &[SheetPage]) -> Option<String> {
             "xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" ",
             "xmlns:style=\"urn:oasis:names:tc:opendocument:xmlns:style:1.0\" ",
             "xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\" xmlns:eo=\"{}\" office:version=\"1.2\">",
-            "<office:automatic-styles>{}</office:automatic-styles><office:master-styles>{}</office:master-styles>",
+            "{}<office:automatic-styles>{}</office:automatic-styles><office:master-styles>{}</office:master-styles>",
             "</office:document-styles>"
         ),
-        EO_NS, automatic, masters
+        EO_NS,
+        if links {
+            crate::sheet_styling::ods_links::LINK_STYLES_XML
+        } else {
+            ""
+        },
+        automatic,
+        masters
     ))
 }
 
@@ -502,7 +510,7 @@ mod tests {
             grid_lines: true,
             ..SheetPage::default()
         };
-        let xml = styles_xml(std::slice::from_ref(&page)).unwrap();
+        let xml = styles_xml(std::slice::from_ref(&page), false).unwrap();
         let (_, inner) = extract_balanced_elements(&xml, "style:page-layout").remove(0);
         assert_eq!(layout_from(layout_properties(inner).unwrap()), page);
         assert_eq!(mils("297mm"), Some(11_693));

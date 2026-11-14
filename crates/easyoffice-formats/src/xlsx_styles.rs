@@ -51,6 +51,16 @@ fn unlocked_style() -> CellStyle {
     }
 }
 
+/// Colour of the spreadsheet program's "Hyperlink" and "Followed Hyperlink" cell styles (ARGB).
+const HYPERLINK_COLOR: &str = "FF0563C1";
+/// The font of the "Hyperlink" cell style: the default font, underlined, in [`HYPERLINK_COLOR`] (PD-223).
+const HYPERLINK_STYLE_KEY: StyleKey = StyleKey::LINK_ONLY;
+/// `builtinId` of the "Hyperlink" and "Followed Hyperlink" cell styles (ECMA-376 18.8.7).
+const BUILTIN_HYPERLINK: &str = "8";
+const BUILTIN_FOLLOWED_HYPERLINK: &str = "9";
+/// `cellStyleXfs` index the writer gives the "Hyperlink" style (index 0 is Normal).
+const HYPERLINK_STYLE_XF: usize = 1;
+
 /// Deduplicated styles of a whole workbook, in first-use order.
 pub(crate) struct XlsxStyleTable {
     /// Distinct font looks (flags and size), font id `n + 1`.
@@ -88,15 +98,21 @@ impl XlsxStyleTable {
             let mut ids = IdMemo::new();
             let unlocked = (!styling.unlocked_rows.is_empty() || !styling.unlocked_cols.is_empty())
                 .then(unlocked_style);
-            for style in styling
+            let linked = styling
+                .links
+                .keys()
+                .map(|&(row, col)| (styling.link_cell_style(row, col), true));
+            let plain = styling
                 .cells
                 .values()
                 .copied()
                 .chain(unlocked)
                 .filter(|s| !s.is_plain())
-            {
+                .map(|style| (style, false));
+            for (style, link) in plain.chain(linked) {
                 let id = ids.get(style.num_fmt, styling, |code| table.num_fmts.intern(code));
                 let key = style.key().with_num_fmt(id);
+                let key = if link { key.with_link() } else { key };
                 if key == StyleKey::default() || table.index.contains_key(&key) {
                     continue;
                 }
@@ -112,6 +128,13 @@ impl XlsxStyleTable {
                     table.fonts.push(font);
                     table.font_index.insert(font, table.fonts.len());
                 }
+            }
+        }
+        if table.styles.iter().any(|key| key.link()) {
+            let font = HYPERLINK_STYLE_KEY.font_part();
+            if !table.font_index.contains_key(&font) {
+                table.fonts.push(font);
+                table.font_index.insert(font, table.fonts.len());
             }
         }
         table
@@ -132,15 +155,17 @@ impl XlsxStyleTable {
         style: &CellStyle,
         styling: &SheetStyling,
         ids: &mut IdMemo,
+        link: bool,
     ) -> usize {
-        if style.is_plain() {
+        if style.is_plain() && !link {
             return 0;
         }
         let id = ids.get(style.num_fmt, styling, |code| {
             self.num_fmts.lookup(code).unwrap_or(0)
         });
+        let key = style.key().with_num_fmt(id);
         self.index
-            .get(&style.key().with_num_fmt(id))
+            .get(&if link { key.with_link() } else { key })
             .copied()
             .unwrap_or(0)
     }
@@ -158,10 +183,16 @@ impl XlsxStyleTable {
                     out.push_str(tag);
                 }
             }
+            if k.link() && !k.underline() {
+                out.push_str("<u/>");
+            }
             let sz = k
                 .size_centipt()
                 .map_or_else(|| "11".to_string(), format_centipt);
             out.push_str(&format!("<sz val=\"{sz}\"/>"));
+            if k.link() {
+                out.push_str(&format!("<color rgb=\"{HYPERLINK_COLOR}\"/>"));
+            }
         } else {
             out.push_str("<sz val=\"11\"/>");
         }
@@ -228,8 +259,9 @@ impl XlsxStyleTable {
         let font_id = self.font_index.get(&key.font_part()).copied().unwrap_or(0);
         let border_id = self.border_index.get(&key.borders()).copied().unwrap_or(0);
         let num_fmt = key.num_fmt();
+        let style_xf = if key.link() { HYPERLINK_STYLE_XF } else { 0 };
         let mut xf = format!(
-            "<xf numFmtId=\"{num_fmt}\" fontId=\"{font_id}\" fillId=\"0\" borderId=\"{border_id}\" xfId=\"0\""
+            "<xf numFmtId=\"{num_fmt}\" fontId=\"{font_id}\" fillId=\"0\" borderId=\"{border_id}\" xfId=\"{style_xf}\""
         );
         if num_fmt != 0 {
             xf.push_str(" applyNumberFormat=\"1\"");
@@ -275,6 +307,22 @@ impl XlsxStyleTable {
         }
     }
 
+    /// `cellStyleXfs`: Normal and, when a cell carries a link, the "Hyperlink" style with its own font.
+    fn cell_style_xfs_xml(&self, linked: bool) -> String {
+        let normal = "<xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/>";
+        if !linked {
+            return format!("<cellStyleXfs count=\"1\">{normal}</cellStyleXfs>");
+        }
+        let font_id = self
+            .font_index
+            .get(&HYPERLINK_STYLE_KEY.font_part())
+            .copied()
+            .unwrap_or(0);
+        format!(
+            "<cellStyleXfs count=\"2\">{normal}<xf numFmtId=\"0\" fontId=\"{font_id}\" fillId=\"0\" borderId=\"0\" applyNumberFormat=\"0\" applyFill=\"0\" applyBorder=\"0\" applyAlignment=\"0\" applyProtection=\"0\"/></cellStyleXfs>"
+        )
+    }
+
     pub(crate) fn to_xml(&self) -> String {
         let mut xml = String::from(concat!(
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
@@ -294,21 +342,27 @@ impl XlsxStyleTable {
             xml.push_str(&Self::border_xml(borders));
         }
         xml.push_str("</borders>");
-        xml.push_str(
-            "<cellStyleXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/></cellStyleXfs>",
-        );
+        let linked = self.styles.iter().any(|key| key.link());
+        xml.push_str(&self.cell_style_xfs_xml(linked));
         xml.push_str(&format!("<cellXfs count=\"{}\">", self.styles.len() + 1));
         xml.push_str("<xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\"/>");
         for &key in &self.styles {
             xml.push_str(&self.xf_xml(key));
         }
         xml.push_str("</cellXfs>");
-        xml.push_str(
-            "<cellStyles count=\"1\"><cellStyle name=\"Normal\" xfId=\"0\" builtinId=\"0\"/></cellStyles>",
-        );
+        xml.push_str(&cell_styles_xml(linked));
         xml.push_str(&self.dxf.to_xml());
         xml.push_str("</styleSheet>");
         xml
+    }
+}
+
+/// `cellStyles`: Normal and, when a cell carries a link, "Hyperlink" (`builtinId` 8).
+fn cell_styles_xml(linked: bool) -> String {
+    if linked {
+        format!("<cellStyles count=\"2\"><cellStyle name=\"Normal\" xfId=\"0\" builtinId=\"0\"/><cellStyle name=\"Hyperlink\" xfId=\"{HYPERLINK_STYLE_XF}\" builtinId=\"{BUILTIN_HYPERLINK}\"/></cellStyles>")
+    } else {
+        "<cellStyles count=\"1\"><cellStyle name=\"Normal\" xfId=\"0\" builtinId=\"0\"/></cellStyles>".to_string()
     }
 }
 
@@ -445,6 +499,27 @@ fn model_num_fmt(id: u32, codes: &HashMap<u32, String>, table: &mut NumFmtTable)
     }
 }
 
+/// The `cellStyleXfs` indexes of the "Hyperlink" and "Followed Hyperlink" cell styles (`builtinId` 8 and 9)
+/// that `cellStyles` names, whatever the style is called.
+fn hyperlink_style_xfs(styles_xml: &str) -> Vec<u32> {
+    let Some(body) = extract_tag_bodies(styles_xml, "cellStyles")
+        .into_iter()
+        .next()
+    else {
+        return Vec::new();
+    };
+    extract_tags_or_self_closing_with_attrs(body, "cellStyle")
+        .into_iter()
+        .filter(|(attrs, _)| {
+            matches!(
+                extract_attr_from_fragment(attrs, "builtinId"),
+                Some(BUILTIN_HYPERLINK | BUILTIN_FOLLOWED_HYPERLINK)
+            )
+        })
+        .filter_map(|(attrs, _)| extract_attr_from_fragment(attrs, "xfId")?.parse().ok())
+        .collect()
+}
+
 /// Style of every `cellXfs` entry, resolved against `fonts` and `numFmts`. A font size equal to
 /// the default font's (font 0) reads as "no explicit size".
 pub(crate) fn parse_cell_xf_styles(styles_xml: &str) -> XfStyles {
@@ -464,6 +539,7 @@ pub(crate) fn parse_cell_xf_styles(styles_xml: &str) -> XfStyles {
     };
     let codes = read_num_fmt_codes(styles_xml);
     let borders = parse_borders(styles_xml);
+    let link_styles = hyperlink_style_xfs(styles_xml);
     let mut table = NumFmtTable::default();
     let styles = extract_tags_or_self_closing_with_attrs(xfs_xml, "xf")
         .into_iter()
@@ -473,6 +549,11 @@ pub(crate) fn parse_cell_xf_styles(styles_xml: &str) -> XfStyles {
             };
             let font_id = number("fontId").unwrap_or(0) as usize;
             let mut style = fonts.get(font_id).copied().unwrap_or_default();
+            // The underline of a cell that has the "Hyperlink" style comes from that style, which the cell
+            // has because of its link and not as a look of its own (PD-223).
+            if number("xfId").is_some_and(|id| link_styles.contains(&id)) {
+                style.underline = false;
+            }
             if style
                 .size_pt
                 .is_some_and(|s| (s - default_size).abs() < 0.005)

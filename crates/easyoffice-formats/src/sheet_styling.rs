@@ -101,6 +101,8 @@ const WRAP_BIT: u64 = 1 << 24;
 const UNLOCKED_BIT: u64 = 1 << 25;
 const FORMULA_HIDDEN_BIT: u64 = 1 << 26;
 const FORCE_LOCKED_BIT: u64 = 1 << 27;
+/// The cell carries a hyperlink: the writers give it the spreadsheet program's hyperlink look (PD-223).
+const LINK_BIT: u64 = 1 << 28;
 const SIZE_SHIFT: u32 = 40;
 
 /// Formatting of one cell: the flags, font size, number format, alignment, wrapping and borders
@@ -140,6 +142,17 @@ pub(crate) struct StyleKey {
 }
 
 impl StyleKey {
+    /// The key of a cell with a hyperlink and no look of its own.
+    pub(crate) const LINK_ONLY: Self = Self {
+        bits: LINK_BIT,
+        borders: CellBorders {
+            top: BorderEdge::NONE,
+            right: BorderEdge::NONE,
+            bottom: BorderEdge::NONE,
+            left: BorderEdge::NONE,
+        },
+    };
+
     #[inline]
     pub(crate) const fn flags(self) -> u8 {
         (self.bits & FLAGS_MASK) as u8
@@ -185,6 +198,20 @@ impl StyleKey {
     }
 
     #[inline]
+    pub(crate) const fn link(self) -> bool {
+        self.bits & LINK_BIT != 0
+    }
+
+    /// The key of the same cell with a hyperlink on it.
+    #[inline]
+    pub(crate) const fn with_link(self) -> Self {
+        Self {
+            bits: self.bits | LINK_BIT,
+            borders: self.borders,
+        }
+    }
+
+    #[inline]
     pub(crate) const fn formula_hidden(self) -> bool {
         self.bits & FORMULA_HIDDEN_BIT != 0
     }
@@ -227,7 +254,7 @@ impl StyleKey {
     #[inline]
     pub(crate) const fn font_part(self) -> Self {
         Self {
-            bits: self.bits & (FLAGS_MASK | (!0u64 << SIZE_SHIFT)),
+            bits: self.bits & (FLAGS_MASK | LINK_BIT | (!0u64 << SIZE_SHIFT)),
             borders: CellBorders {
                 top: BorderEdge::NONE,
                 right: BorderEdge::NONE,
@@ -420,6 +447,18 @@ impl SheetStyling {
                     || xlsx_layout::run_contains(&self.unlocked_cols, col)
             }
         }
+    }
+
+    /// The format a cell with a hyperlink is written with: its own, or the plain one that carries the lock of
+    /// its row or column (PD-223).
+    pub fn link_cell_style(&self, row: u32, col: u32) -> CellStyle {
+        self.cells
+            .get(&(row, col))
+            .copied()
+            .unwrap_or_else(|| CellStyle {
+                unlocked: self.cell_unlocked(row, col),
+                ..CellStyle::default()
+            })
     }
 
     /// Whether the user, a folded group or the filter hides `row`.

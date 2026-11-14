@@ -387,7 +387,10 @@ impl OdfCodec {
         XmlSanitizer::validate_safe_xml(&content)?;
 
         let settings = settings_xml(&names, stylings);
-        let page_styles = crate::sheet_styling::ods_page::styles_xml(tab_styles.layouts());
+        let page_styles = crate::sheet_styling::ods_page::styles_xml(
+            tab_styles.layouts(),
+            stylings.iter().any(|st| !st.links.is_empty()),
+        );
         let mut media = Vec::new();
         if settings.is_some() {
             media.push(("settings.xml".to_string(), "text/xml"));

@@ -269,10 +269,17 @@ fn group_cells_by_row<'a>(
     if let Some(st) = styling {
         let valued: std::collections::HashSet<(u32, u32)> =
             cells.iter().map(|(r, c, _)| (*r, *c)).collect();
-        for (&(row, col), style) in &st.cells {
-            if !style.is_plain() && !valued.contains(&(row, col)) {
-                rows_map.entry(row).or_default().push((col, blank));
-            }
+        // A cell with a hyperlink is written with its look even when it holds no value (PD-223).
+        let blank_cells: std::collections::BTreeSet<(u32, u32)> = st
+            .cells
+            .iter()
+            .filter(|(_, style)| !style.is_plain())
+            .map(|(&at, _)| at)
+            .chain(st.links.keys().copied())
+            .filter(|at| !valued.contains(at))
+            .collect();
+        for (row, col) in blank_cells {
+            rows_map.entry(row).or_default().push((col, blank));
         }
         let filtered = st.filter.iter().flat_map(|f| f.hidden.iter());
         let hidden = st.hidden_rows.iter().chain(&st.outline.collapsed_rows);
@@ -365,10 +372,16 @@ fn build_sheet_xml(
         sheet_xml.push('>');
         for (col, raw) in row_cells {
             let col_ref = write_col_letters(&mut col_buf, col as usize);
-            let xf = styling.map_or(0, |st| match st.cells.get(&(row, col)) {
-                Some(style) => style_table.xf_index(style, st, &mut ids),
-                None if st.cell_unlocked(row, col) => style_table.unlocked_xf(),
-                None => 0,
+            let xf = styling.map_or(0, |st| {
+                let link = st.links.contains_key(&(row, col));
+                match st.cells.get(&(row, col)) {
+                    Some(style) => style_table.xf_index(style, st, &mut ids, link),
+                    None if link => {
+                        style_table.xf_index(&st.link_cell_style(row, col), st, &mut ids, true)
+                    }
+                    None if st.cell_unlocked(row, col) => style_table.unlocked_xf(),
+                    None => 0,
+                }
             });
             let cached = cache.and_then(|c| c.get(&(row, col)));
             push_cell_xml(
