@@ -444,10 +444,11 @@
       const above = { r1: b.r1 - 1, c1: b.c1, r2: b.r1 - 1, c2: b.c2 };
       // The row above takes the header when it holds nothing or only the names the columns have (the header cells a turn-off left),
       // and no other table, merge or filter is there.
+      // A formula there is content even when its result is empty.
       const fits = b.r1 > 1 && table.columns.every((name, i) => {
-        const text = ctx.cellAt(above.r1, b.c1 + i)?.value;
-        return !text || text === name;
-      }) && !ctx.cellAt(above.r1, b.c1)?.formula;
+        const entry = ctx.cellAt(above.r1, b.c1 + i);
+        return !entry?.formula && (!entry?.value || entry.value === name);
+      });
       const room = fits && !ctx.tables.some((t) => t !== table && touchesBox(layoutApi.tableBox(t), above)) && !ctx.merges.some((m) => touchesBox(m, above)) && !(ctx.filter && touchesBox(ctx.filter, above));
       // The header goes into `row`, the table's range grows up to it.
       const headerOf = (held, row) => {
@@ -583,20 +584,51 @@
       });
     }
 
-    // The tables of `sheet` after every growth the cells call for, with the header cells to write; null when none grows.
+    // The tables of `sheet` after every growth the cells call for, with the header cells to write; null when none grows. A cell
+    // is only looked at against the tables that end in the row above it or the column before it (a table by the row under it and
+    // the column beside it), so many cells and many tables cost one lookup per cell; the cells go in order of row and column, so
+    // a pasted block grows a table row by row in one pass.
     function growth(sheet, cells) {
-      let tables = layoutApi.tablesOf(sheet);
+      const tables = [...layoutApi.tablesOf(sheet)];
+      const at = new Map(tables.map((t, i) => [t, i]));
+      const below = new Map();
+      const beside = new Map();
+      const put = (map, key, t) => {
+        const held = map.get(key);
+        if (held) held.add(t);
+        else map.set(key, new Set([t]));
+      };
+      const link = (t) => {
+        const b = layoutApi.tableBox(t);
+        put(below, b.r2 + 1, t);
+        put(beside, b.c2 + 1, t);
+      };
+      const unlink = (t) => {
+        const b = layoutApi.tableBox(t);
+        below.get(b.r2 + 1)?.delete(t);
+        beside.get(b.c2 + 1)?.delete(t);
+      };
+      tables.forEach(link);
+      const ctx = contextOf(sheet, tables);
       const writes = [];
       let columns = columnTotal();
       let steps = 0;
+      const ordered = [...cells].sort((a, b) => a.row - b.row || a.col - b.col);
       let again = true;
       while (again && steps < MAX_EXPAND_STEPS) {
         again = false;
-        for (const cell of cells) {
-          const plan = ops.planExpand({ row: cell.row, col: cell.col, ctx: contextOf(sheet, tables), totalColumns: columns });
+        for (const cell of ordered) {
+          const candidates = [...(below.get(cell.row) || []), ...(beside.get(cell.col) || [])];
+          if (candidates.length === 0) continue;
+          const plan = ops.planExpand({ row: cell.row, col: cell.col, ctx, totalColumns: columns, candidates });
           if (!plan) continue;
-          const source = tables.find((t) => t.name === plan.table.name);
-          tables = tables.map((t) => (t === source ? plan.table : t));
+          const source = candidates.find((t) => t.name === plan.table.name);
+          const i = at.get(source);
+          unlink(source);
+          tables[i] = plan.table;
+          at.delete(source);
+          at.set(plan.table, i);
+          link(plan.table);
           writes.push(...plan.headerWrites);
           columns += plan.to === "column" ? 1 : 0;
           steps += 1;
@@ -691,7 +723,7 @@
         });
       });
       layoutApi.onChange(sync);
-      host.__EASYOFFICE_SHEET_TABLE_BAR__ = { sync, expandAfter };
+      host.__EASYOFFICE_SHEET_TABLE_BAR__ = { sync, expandAfter, growth };
     }
 
     return {

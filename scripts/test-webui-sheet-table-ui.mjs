@@ -265,8 +265,8 @@ test("what is typed beside the table becomes a column with a header of its own",
   key(d3, "Enter");
   await flushAsyncTurns(24);
   assert.equal(tables(h)[0].range, "A1:D4");
-  assert.equal(tables(h)[0].columns.at(-1), "Column4");
-  assert.equal(cell(h.document, "D1").textContent, "Column4", "the header of the new column");
+  assert.equal(tables(h)[0].columns.at(-1), "3분기", "the header cell D1 already says its name");
+  assert.equal(cell(h.document, "D1").textContent, "3분기", "and keeps it");
   await undo(h);
   assert.equal(tables(h)[0].range, "A1:C4");
   assert.equal(cell(h.document, "D3").textContent, "x");
@@ -413,4 +413,83 @@ test("Ctrl+T is the sheet's table key in the desktop shell only: a browser keeps
   await flushAsyncTurns(6);
   assert.equal(ev.defaultPrevented, false, "the page leaves the key to the browser");
   assert.notEqual($(h, "sheet-table-dialog").open, true);
+});
+
+test("a header cell beside the table that is empty is named Column<n> and written; one with text names the column", async () => {
+  const h = await openSheet();
+  const { pickFile, makeFixtureFile } = await import("./test-support/fixture-files.mjs");
+  const table = { name: "Sales", range: "A1:C3", header: true, totals: false, columns: ["a", "b", "c"], style: "TableStyleMedium2", firstColumn: false, lastColumn: false, rowStripes: true, columnStripes: false };
+  const cells = [["A1", "a"], ["B1", "b"], ["C1", "c"], ["A2", "1"], ["B2", "2"], ["C2", "3"], ["A3", "4"], ["B3", "5"], ["C3", "6"], ["E1", "Notes"]].map(([ref, raw]) => ({ ref, raw }));
+  await pickFile(h.document, makeFixtureFile("n.xlsx", { sheets: [{ name: "Sheet1", cells, tables: [table] }] }));
+  await flushAsyncTurns(8);
+  const bar = h.host.__EASYOFFICE_SHEET_TABLE_BAR__;
+  // D2 typed: D1 is empty, so the new column is Column4 and the cell D1 says it.
+  const empty = bar.growth("Sheet1", [{ row: 2, col: 4 }]);
+  assert.equal(empty, null, "D2 holds nothing yet: not content");
+  const d2 = cell(h.document, "D2");
+  d2.focus();
+  typeText(h.document, "x");
+  key(d2, "Enter");
+  await flushAsyncTurns(24);
+  assert.equal(tables(h)[0].range, "A1:D3");
+  assert.equal(tables(h)[0].columns[3], "Column4");
+  assert.equal(cell(h.document, "D1").textContent, "Column4");
+  // The next column's header cell E1 holds Notes: typing under it grows the table and the text is the name.
+  const e2 = cell(h.document, "E2");
+  e2.focus();
+  typeText(h.document, "y");
+  key(e2, "Enter");
+  await flushAsyncTurns(24);
+  assert.equal(tables(h)[0].range, "A1:E3");
+  assert.equal(tables(h)[0].columns[4], "Notes");
+  assert.equal(cell(h.document, "E1").textContent, "Notes", "the text that was there stays");
+});
+
+test("turning the header on does not use a row above that holds a formula in any column, even one that results in nothing", async () => {
+  const h = await openSheet();
+  const { pickFile, makeFixtureFile } = await import("./test-support/fixture-files.mjs");
+  const table = { name: "Sales", range: "A2:C4", header: false, totals: false, columns: ["a", "b", "c"], style: "TableStyleMedium2", firstColumn: false, lastColumn: false, rowStripes: true, columnStripes: false };
+  const cells = [["A1", "a"], ["B1", "b"], ["C1", '=""'], ["A2", "1"], ["B2", "2"], ["C2", "3"], ["A3", "4"], ["B3", "5"], ["C3", "6"], ["A4", "7"], ["B4", "8"], ["C4", "9"]].map(([ref, raw]) => ({ ref, raw }));
+  await pickFile(h.document, makeFixtureFile("f.xlsx", { sheets: [{ name: "Sheet1", cells, tables: [table] }] }));
+  await flushAsyncTurns(8);
+  const box = h.document.querySelector('#sheet-table-bar [data-table-opt="header"]');
+  cell(h.document, "B3").focus();
+  await flushAsyncTurns(2);
+  box.checked = true;
+  box.dispatchEvent({ type: "change", target: box, bubbles: true });
+  await flushAsyncTurns(16);
+  // The row above is not taken (its C1 is a formula): the row would have to open, which needs the engine; nothing is overwritten.
+  assert.equal(tables(h)[0].range, "A2:C4");
+  assert.equal(cell(h.document, "C1").dataset.formula, '=""', "the formula is still there");
+  assert.equal(cell(h.document, "A1").textContent, "a");
+});
+
+test("opening the dialog records no undo step and a cancelled dialog leaves the redo steps; making the table is one step", async () => {
+  const h = await openSheet();
+  const base = h.host.__EASYOFFICE_WORKSPACE_HISTORY__.sizes().undo; // the opened file is a step of its own
+  const sizes = () => ({ undo: h.host.__EASYOFFICE_WORKSPACE_HISTORY__.sizes().undo - base, redo: h.host.__EASYOFFICE_WORKSPACE_HISTORY__.sizes().redo });
+  await makeTable(h);
+  assert.deepEqual(sizes(), { undo: 1, redo: 0 }, "one step for the table");
+  const box = h.document.querySelector('#sheet-table-bar [data-table-opt="firstColumn"]');
+  cell(h.document, "B3").focus();
+  await flushAsyncTurns(2);
+  box.checked = true;
+  box.dispatchEvent({ type: "change", target: box, bubbles: true });
+  await flushAsyncTurns(14);
+  await undo(h);
+  assert.deepEqual(sizes(), { undo: 1, redo: 1 });
+  // The dialog of a second table opens and is cancelled: nothing is recorded, and the redo step is still there.
+  cell(h.document, "F12").focus();
+  await flushAsyncTurns(2);
+  h.userClick(commandItem(h.document, "sheet-insert-table"));
+  await flushAsyncTurns(8);
+  assert.equal($(h, "sheet-table-dialog").open, true);
+  assert.deepEqual(sizes(), { undo: 1, redo: 1 }, "opening records nothing");
+  h.userClick(h.document.querySelector("#sheet-table-dialog [data-dialog-close].dialog-btn"));
+  await flushAsyncTurns(4);
+  assert.deepEqual(sizes(), { undo: 1, redo: 1 }, "a cancel leaves the redo step");
+  // One undo takes the table back and nothing is left of it.
+  await undo(h);
+  assert.equal(tables(h).length, 0);
+  assert.deepEqual(sizes(), { undo: 0, redo: 2 });
 });

@@ -886,8 +886,10 @@
         }
         await applyRibbonDomSideEffects(cmdId, execRes, preparedEffect, options);
         // The sort runs on after the command returns: the step keeps the cells as they were, changed or not.
-        // The 표 만들기 dialog makes its own step when it is confirmed.
-        if (sheetStep && cmdId !== "sheet-insert-table") sheetHistory.commit(preSnapshot, { compact: false, ribbonModule });
+        // The 표 만들기 dialog makes its own step when it is confirmed: opening it records none.
+        if (cmdId === "sheet-insert-table") {
+          // nothing to keep
+        } else if (sheetStep) sheetHistory.commit(preSnapshot, { compact: false, ribbonModule });
         else commitDeferredUndoSnapshot(preSnapshot);
         sheetController.refreshFocusedSheetCellPendingSnapshot();
         const fb = document.getElementById("status-command-feedback");

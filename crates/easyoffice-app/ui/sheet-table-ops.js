@@ -204,11 +204,12 @@
   // ---- growing over what is typed -----------------------------------------------------------------------------------------
   // The plan when the cell at `row`, `col` was just given content: the table of the sheet that has it right above (a row more) or
   // right beside it (a column more) takes it in, `{ table, headerWrites, to }` (`to`: `"row"` or `"column"`); null when none grows.
-  // Not a table with a totals row below, not into another table, a merge or the filter, and not past the sheet.
-  function planExpand({ row, col, ctx, totalColumns = 0 }) {
+  // Not a table with a totals row below, not into another table, a merge or the filter, and not past the sheet. `candidates` are
+  // the tables the cell may be next to (all of the sheet's by default): a caller with many cells and tables narrows them.
+  function planExpand({ row, col, ctx, totalColumns = 0, candidates = ctx.tables }) {
     const typed = ctx.cellAt(row, col);
     if (!typed || (!typed.value && !typed.formula)) return null;
-    for (const table of ctx.tables) {
+    for (const table of candidates) {
       const g = ctx.boxOf(table);
       const header = table.header !== false;
       const below = row === g.r2 + 1 && col >= g.c1 && col <= g.c2 && table.totals !== true && row <= MAX_ROW;
@@ -220,9 +221,9 @@
       const next = { ...structuredClone(table), range: rangeText(grown.r1, grown.c1, grown.r2, grown.c2) };
       const headerWrites = [];
       if (beside) {
+        // The header cell the column takes in names it (an empty one is `Column<n>`; a formula is fixed as the text of its result).
         const used = new Set(table.columns.map(fold));
-        const typedHeader = header && row === g.r1;
-        const [name] = headerNames([typedHeader ? cellText(ctx, row, col) : ""], used, table.columns.length + 1);
+        const [name] = headerNames([header ? cellText(ctx, g.r1, col) : ""], used, table.columns.length + 1);
         next.columns = [...table.columns, name];
         const entry = ctx.cellAt(g.r1, col);
         if (header && (String(entry?.value ?? "") !== name || entry?.formula)) headerWrites.push({ row: g.r1, col, text: name });

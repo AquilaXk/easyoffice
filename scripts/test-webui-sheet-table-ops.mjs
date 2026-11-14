@@ -129,14 +129,29 @@ test("a cell typed right under a table takes its row in, a cell beside it takes 
   const below = api.planExpand({ row: 5, col: 1, ctx });
   assert.equal(below.table.range, "A1:C5");
   assert.equal(below.to, "row");
+  // A header cell the column takes in names it, whichever row of the table was typed in.
   const beside = api.planExpand({ row: 2, col: 4, ctx });
   assert.equal(beside.table.range, "A1:D4");
-  assert.deepEqual(beside.table.columns, ["a", "b", "c", "Column4"]);
-  assert.deepEqual(beside.headerWrites, [{ row: 1, col: 4, text: "Column4" }]);
-  // Typed in the header row beside the table: the text names the new column.
+  assert.deepEqual(beside.table.columns, ["a", "b", "c", "Extra"]);
+  assert.deepEqual(beside.headerWrites, [], "the header cell keeps its text");
   const named = api.planExpand({ row: 1, col: 4, ctx });
   assert.deepEqual(named.table.columns, ["a", "b", "c", "Extra"]);
-  assert.deepEqual(named.headerWrites, []);
+  // An empty header cell is `Column<n>`, a formula there is fixed as the text of its result, a repeated name gets a number.
+  const bare = sheet({ D2: "x" }, { tables: [t] });
+  const fresh = api.planExpand({ row: 2, col: 4, ctx: bare });
+  assert.deepEqual(fresh.table.columns, ["a", "b", "c", "Column4"]);
+  assert.deepEqual(fresh.headerWrites, [{ row: 1, col: 4, text: "Column4" }]);
+  const formula = { ...bare, cellAt: (r, c) => (r === 1 && c === 4 ? { value: "7", formula: "=3+4" } : bare.cellAt(r, c)) };
+  assert.deepEqual(api.planExpand({ row: 2, col: 4, ctx: formula }).headerWrites, [{ row: 1, col: 4, text: "7" }]);
+  const same = sheet({ D1: "A", D2: "x" }, { tables: [t] });
+  assert.deepEqual(api.planExpand({ row: 2, col: 4, ctx: same }).headerWrites, [{ row: 1, col: 4, text: "A2" }]);
+  // A table without a header row has nothing to read: `Column<n>` and no cell is written.
+  const plain = sheet({ D2: "x", D1: "Notes" }, { tables: [table("P", "A2:C4", { header: false })] });
+  const noHeader = api.planExpand({ row: 3, col: 4, ctx: { ...plain, cellAt: (r, c) => (r === 3 && c === 4 ? { value: "x", formula: "" } : plain.cellAt(r, c)) } });
+  assert.deepEqual(noHeader.table.columns, ["a", "b", "c", "Column4"]);
+  assert.deepEqual(noHeader.headerWrites, []);
+  // Candidates narrow the tables looked at.
+  assert.equal(api.planExpand({ row: 5, col: 1, ctx, candidates: [] }), null);
   assert.equal(api.planExpand({ row: 9, col: 1, ctx }), null, "a gap is not adjacent");
   assert.equal(api.planExpand({ row: 5, col: 5, ctx }), null, "nor the corner");
   assert.equal(api.planExpand({ row: 5, col: 2, ctx: sheet({}, { tables: [t] }) }), null, "an empty cell is not content");
