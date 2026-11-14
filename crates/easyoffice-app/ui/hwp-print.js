@@ -89,6 +89,8 @@
   // A value may point only inside the page: `url(#id)`; a scheme or another URL is refused.
   function isSafeValue(value) {
     const text = compact(value);
+    // A backslash is a CSS escape (`\75rl(` is `url(`): none is read, the value is refused.
+    if (text.includes("\\")) return false;
     return !/(?:javascript|vbscript|data|https?|file|blob):/.test(text) && !/url\((?!['"]?#)/.test(text);
   }
 

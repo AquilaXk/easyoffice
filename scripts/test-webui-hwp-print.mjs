@@ -314,7 +314,7 @@ test("a reference is kept only when it points inside the page or is a plain imag
   internals.sanitizeSvg(tree);
   assert.deepEqual(tree.children.filter((c) => c.attrs.has("href")).map((c) => c.attrs.get("href")),
     ["#a", "data:image/jpeg;base64,/9j/", "data:image/svg+xml;base64,PHN2Zz4=", ""]);
-  for (const value of ["java\tscript:x()", "url( 'https://evil.example/x' )", "URL(data:image/svg+xml;base64,AA==)", "url(\"javascript:x\")"]) {
+  for (const value of ["\\75rl(//evil.example/x.svg#a)", "\\75 rl(https://evil.example/x)", "ur\\6c(//evil.example/x)", "java\\73cript:x()", "java\tscript:x()", "url( 'https://evil.example/x' )", "URL(data:image/svg+xml;base64,AA==)", "url(\"javascript:x\")"]) {
     const el = new El("rect", { fill: value });
     internals.sanitizeSvg(new El("svg", {}, [el]));
     assert.equal(el.attrs.has("fill"), false, value);
