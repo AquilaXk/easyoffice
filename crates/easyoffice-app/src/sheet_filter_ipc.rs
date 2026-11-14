@@ -336,12 +336,15 @@ pub(crate) struct OpenSplit {
     pub(crate) hidden: Vec<(u32, u32)>,
 }
 
+/// A cell of an opened sheet: row, column, stored text.
+type OpenCell = (u32, u32, String);
+
 /// The stored texts of the cells of `columns` below the header of `range`, with the numbers the
 /// criteria read, and the rows whose cell is a formula (unread).
 fn open_columns(
     range: CellBox,
     columns: &[FilterColumn],
-    cells: &[(u32, u32, String)],
+    cells: &[&OpenCell],
     styling: &SheetStyling,
 ) -> (Vec<Column>, RowBits) {
     let rows = (range.row1 - range.row0) as usize;
@@ -359,11 +362,11 @@ fn open_columns(
         })
         .collect();
     let mut unread = RowBits::new(rows);
-    for (row, col, raw) in cells {
-        let (Some(at), true) = (
-            cols.binary_search(col).ok(),
-            *row > range.row0 && *row <= range.row1,
-        ) else {
+    // `cells` is sorted by row: only the rows below the header of the range are visited.
+    let first = cells.partition_point(|c| c.0 <= range.row0);
+    let end = cells.partition_point(|c| c.0 <= range.row1);
+    for (row, col, raw) in cells[first..end].iter().copied() {
+        let Some(at) = cols.binary_search(col).ok() else {
             continue;
         };
         let offset = (*row - range.row0 - 1) as usize;
@@ -396,7 +399,7 @@ fn open_columns(
 fn take_filter_rows(
     range: CellBox,
     columns: &[FilterColumn],
-    cells: &[(u32, u32, String)],
+    cells: &[&OpenCell],
     styling: &SheetStyling,
     hidden: &mut Vec<(u32, u32)>,
 ) -> Option<Vec<(u32, u32)>> {
@@ -429,17 +432,22 @@ pub(crate) fn split_for_open(
     if filter.is_none() && !tables_filtered {
         return None;
     }
+    // One index for the sheet's filter and every table: the cells by row, so a filter reads only its rows.
+    let mut by_row: Vec<&OpenCell> = cells.iter().collect();
+    by_row.sort_unstable_by_key(|c| c.0);
     let mut hidden = styling.hidden_rows.clone();
-    if let Some(f) = filter.as_mut() {
-        f.hidden = take_filter_rows(f.range, &f.columns, cells, styling, &mut hidden)?;
+    // A file that marks the filter's rows itself (ODS `table:visibility`) has them told apart already.
+    if let Some(f) = filter.as_mut().filter(|f| f.hidden.is_empty()) {
+        f.hidden = take_filter_rows(f.range, &f.columns, &by_row, styling, &mut hidden)?;
     }
-    for table in &mut tables {
+    for table in tables.iter_mut().filter(|t| t.filter_hidden.is_empty()) {
         let range = table.filter_range();
         let conditions = table.filter.as_deref().filter(|f| !f.is_empty());
         // A range too tall for a filter keeps its conditions and its rows stay the user's.
         if let Some(conditions) = conditions.filter(|_| range.row1 - range.row0 < MAX_FILTER_ROWS) {
-            table.filter_hidden = take_filter_rows(range, conditions, cells, styling, &mut hidden)
-                .unwrap_or_default();
+            table.filter_hidden =
+                take_filter_rows(range, conditions, &by_row, styling, &mut hidden)
+                    .unwrap_or_default();
         }
     }
     Some(OpenSplit {
@@ -452,6 +460,7 @@ pub(crate) fn split_for_open(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use easyoffice_formats::CellBox;
 
     fn call(body: &str) -> Result<String, EasyOfficeError> {
         EasyOfficeIpcRouter::dispatch("evaluate_sheet", body)
@@ -501,7 +510,6 @@ mod tests {
 
     #[test]
     fn opening_tells_the_filter_s_rows_from_the_user_s() {
-        use easyoffice_formats::{CellBox, FilterColumn, FilterCriteria};
         let mut filter = SheetFilter::new(CellBox::parse("A1:A5").unwrap());
         filter.columns = vec![FilterColumn {
             col: 0,
@@ -526,6 +534,82 @@ mod tests {
         assert_eq!(split.filter.unwrap().hidden, vec![(2, 2)]);
         assert_eq!(split.hidden, vec![(3, 3), (7, 7)]);
         assert!(split_for_open(&cells, &SheetStyling::default()).is_none());
+    }
+
+    /// 100,000 rows of 3 columns, a sheet filter over all of them and 300 tables of 100 rows each, every
+    /// table with a condition: the time `split_for_open` takes (`--ignored --nocapture`, release).
+    #[test]
+    #[ignore = "measurement"]
+    fn opening_a_sheet_with_a_filter_and_many_filtered_tables() {
+        let rows = 100_000u32;
+        let cells: Vec<(u32, u32, String)> = (0..rows)
+            .flat_map(|r| (0..3).map(move |c| (r, c, format!("v{}", r % 7))))
+            .collect();
+        let on = |col| FilterColumn {
+            col,
+            criteria: FilterCriteria::Values {
+                blank: false,
+                values: vec!["v1".into()],
+                dates: Vec::new(),
+            },
+        };
+        let mut filter = SheetFilter::new(CellBox::parse(&format!("A1:C{rows}")).unwrap());
+        filter.columns = vec![on(0)];
+        // The tables sit in columns far to the right of the data, so the filter does not share a cell with them.
+        let tables: Vec<SheetTable> = (0..300u32)
+            .map(|i| {
+                let first = i * 100 + 1;
+                let mut t = SheetTable::new(
+                    format!("T{i}"),
+                    CellBox::parse(&format!("H{first}:J{}", first + 99)).unwrap(),
+                );
+                t.filter = Some(vec![on(7)]);
+                t
+            })
+            .collect();
+        let styling = SheetStyling {
+            filter: Some(filter),
+            tables,
+            hidden_rows: vec![(2, 50_000)],
+            ..SheetStyling::default()
+        };
+        let start = std::time::Instant::now();
+        let split = split_for_open(&cells, &styling).unwrap();
+        println!("split_for_open: {:?}", start.elapsed());
+        assert!(split.filter.is_some());
+    }
+
+    #[test]
+    fn rows_a_file_marks_as_the_filter_s_are_kept_whatever_the_conditions_say() {
+        let mut filter = SheetFilter::new(CellBox::parse("A1:A5").unwrap());
+        filter.columns = vec![FilterColumn {
+            col: 0,
+            criteria: FilterCriteria::Values {
+                blank: false,
+                values: vec!["영업".into()],
+                dates: Vec::new(),
+            },
+        }];
+        // The reader of a format that tells the kinds apart put row 4 (영업) in the filter's rows.
+        filter.hidden = vec![(4, 4)];
+        let mut table = SheetTable::new("T", CellBox::parse("C1:C5").unwrap());
+        table.filter = filter.columns.clone().into();
+        table.filter_hidden = vec![(3, 3)];
+        let styling = SheetStyling {
+            filter: Some(filter),
+            tables: vec![table],
+            hidden_rows: vec![(2, 2)],
+            ..SheetStyling::default()
+        };
+        let cells: Vec<(u32, u32, String)> = ["부서", "영업", "개발", "영업", "개발"]
+            .iter()
+            .enumerate()
+            .map(|(i, t)| (i as u32, 0, t.to_string()))
+            .collect();
+        let split = split_for_open(&cells, &styling).unwrap();
+        assert_eq!(split.filter.unwrap().hidden, vec![(4, 4)]);
+        assert_eq!(split.tables[0].filter_hidden, vec![(3, 3)]);
+        assert_eq!(split.hidden, vec![(2, 2)]);
     }
 
     fn apply(filter: &str, data: &str) -> Result<String, EasyOfficeError> {
@@ -573,10 +657,11 @@ mod tests {
         );
         let font =
             r#"{"range":"A1:A5","columns":[{"col":1,"color":{"font":true,"rgb":"ff0000"}}]}"#;
-        assert_eq!(
-            apply(font, fill).unwrap(),
-            r#"{"hidden":[[2,5]],"count":4}"#
-        );
+        // No text colour was sent: the condition is not judged (the sheet has no colour of its own to read).
+        assert_eq!(apply(font, fill).unwrap(), r#"{"hidden":[],"count":0}"#);
+        let plain = r#"[{"col":1,"values":["a","b","c","d"]}]"#;
+        assert_eq!(apply(pink, plain).unwrap(), r#"{"hidden":[],"count":0}"#);
+        assert_eq!(apply(none, plain).unwrap(), r#"{"hidden":[],"count":0}"#);
         // 45000 is 2023-03-15, 45400 is 2024-04-18; only the cells in a date format are dates.
         let dates =
             r#"[{"col":1,"values":["45000","45400","45000","hello"],"fmt":[[0,1,"yyyy-mm-dd"]]}]"#;

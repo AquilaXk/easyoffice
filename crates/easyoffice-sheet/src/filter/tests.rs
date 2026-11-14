@@ -335,10 +335,51 @@ fn a_colour_criterion_matches_the_fill_or_the_font_and_no_colour_is_its_own_valu
     // The font list is shorter than the rows: the rest have no font colour.
     assert_eq!(hidden_of(&on(true, Some(0x9C0006)), &[col]), vec![0, 2, 3]);
     assert_eq!(hidden_of(&on(true, None), &[col]), vec![1]);
-    // A column with no facts at all has no colour anywhere.
+    // A column the caller told no colours of is not judged: the condition only stays (a colour of a cell the
+    // sheet does not model), whatever the colour, the font or the fill.
     let bare = ColumnText::text(0, &t);
-    assert_eq!(hidden_of(&on(false, Some(1)), &[bare]), vec![0, 1, 2, 3]);
-    assert_eq!(hidden_of(&on(false, None), &[bare]), Vec::<usize>::new());
+    assert_eq!(hidden_of(&on(false, Some(1)), &[bare]), Vec::<usize>::new());
+    assert_eq!(hidden_of(&on(true, None), &[bare]), Vec::<usize>::new());
+    // Fills told, fonts not: the fill condition is judged, the font condition passes.
+    let fills_only = CellAux {
+        fills: vec![0xFFC7CE, NO_COLOR],
+        ..CellAux::default()
+    };
+    let col = ColumnText {
+        col: 0,
+        texts: &t,
+        aux: Some(&fills_only),
+    };
+    assert_eq!(hidden_of(&on(false, Some(0xFFC7CE)), &[col]), vec![1, 2, 3]);
+    assert_eq!(
+        hidden_of(&on(true, Some(0x9C0006)), &[col]),
+        Vec::<usize>::new()
+    );
+    // A colour condition does not hide the rows another column's condition leaves.
+    let both = filter_over(
+        4,
+        vec![
+            FilterColumn {
+                col: 0,
+                criteria: values(false, &["a", "b"]),
+            },
+            FilterColumn {
+                col: 1,
+                criteria: FilterCriteria::Color {
+                    font: false,
+                    color: Some(1),
+                },
+            },
+        ],
+    );
+    let other = texts(&["x", "y", "z", "w"]);
+    assert_eq!(
+        hidden_of(
+            &both,
+            &[ColumnText::text(0, &t), ColumnText::text(1, &other)]
+        ),
+        vec![2, 3]
+    );
 }
 
 #[test]

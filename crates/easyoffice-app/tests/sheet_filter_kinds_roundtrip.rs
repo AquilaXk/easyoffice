@@ -82,8 +82,13 @@ fn top_and_date_group_conditions_survive_xlsx_and_ods_and_cross_over() {
                 "xlsx keeps the date group: {filter}"
             );
         } else {
-            // The format has no date group: the column is left out and its rows stay hidden.
+            // The format has no date group: the column is left out and its rows stay hidden, as the file
+            // marked them (`table:visibility`), not as the conditions that are left would judge them.
             assert!(!filter.contains(r#""col":3"#), "ods: {filter}");
+            assert!(
+                filter.contains(r#""hidden":[[3,4],[6,7]]"#),
+                "ods: {filter}"
+            );
         }
         // The rows were hidden in the file by the filter: they come back as the filter's.
         assert!(

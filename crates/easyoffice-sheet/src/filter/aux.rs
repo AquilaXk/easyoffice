@@ -32,6 +32,14 @@ impl CellAux {
         self.dates.get(i).then(|| self.number(i)).flatten()
     }
 
+    /// Whether the caller told anything about the fill (or text) colours of the column. A colour
+    /// condition over a column it told nothing about is not judged: the sheet has no colour of its own
+    /// for a cell, so a colour condition a file carries (a cell colour the model dropped) only stays.
+    #[inline]
+    pub fn has_color(&self, font: bool) -> bool {
+        !(if font { &self.fonts } else { &self.fills }).is_empty()
+    }
+
     #[inline]
     pub fn color(&self, font: bool, i: usize) -> u32 {
         let list = if font { &self.fonts } else { &self.fills };

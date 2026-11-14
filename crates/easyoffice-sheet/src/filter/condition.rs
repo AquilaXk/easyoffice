@@ -227,7 +227,7 @@ impl ColumnMatcher {
             Test::One(a) => a.accepts(text, scratch),
             Test::And(a, b) => a.accepts(text, scratch) && b.accepts(text, scratch),
             Test::Or(a, b) => a.accepts(text, scratch) || b.accepts(text, scratch),
-            Test::Color { font, color } => aux.color(*font, i) == *color,
+            Test::Color { font, color } => !aux.has_color(*font) || aux.color(*font, i) == *color,
             Test::Statistic => true,
         }
     }
