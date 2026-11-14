@@ -118,7 +118,8 @@ fn xlsx_reads_the_style_back_as_the_link_alone() {
     assert!(bold.bold && !bold.underline);
     assert!(back.cells[&(3, 0)].underline);
     // The next save writes the same look.
-    let again = OoxmlCodec::pack_xlsx_multi_styled(&sheets(), &[], &[back.clone()]).unwrap();
+    let again =
+        OoxmlCodec::pack_xlsx_multi_styled(&sheets(), &[], std::slice::from_ref(back)).unwrap();
     assert_eq!(
         entry(&again, "xl/styles.xml"),
         entry(&bytes, "xl/styles.xml")

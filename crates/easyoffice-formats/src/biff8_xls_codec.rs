@@ -418,7 +418,7 @@ impl LegacyOle2Codec {
     /// Each sheet's styling holds nothing else.
     pub fn unpack_xls_with_styling(
         bytes: &[u8],
-    ) -> Result<(Vec<crate::OdsUnpacked>, Vec<(String, SheetStyling)>), EasyOfficeError> {
+    ) -> Result<(crate::OdsMultiUnpacked, Vec<(String, SheetStyling)>), EasyOfficeError> {
         let (payloads, collectors) = Self::unpack_xls_walk(bytes)?;
         let mut sheets = Vec::with_capacity(payloads.len());
         let mut stylings = Vec::with_capacity(payloads.len());
