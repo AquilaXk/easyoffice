@@ -107,6 +107,8 @@ pub(crate) struct WorksheetScan {
     pub(crate) styling: SheetStyling,
     /// A tab colour that names a theme slot; the workbook's theme turns it into RGB.
     pub(crate) tab_theme: Option<ThemeTab>,
+    /// A tab colour that names a slot of the `indexed` palette.
+    pub(crate) tab_indexed: Option<usize>,
     /// The cells whose format points at the "Hyperlink" cell style (PD-223).
     pub(crate) link_styled: Vec<(u32, u32)>,
 }
@@ -743,6 +745,7 @@ pub(crate) fn scan_worksheet(
         cells: scanner.cells,
         styling: scanner.styling,
         tab_theme: view.tab_theme,
+        tab_indexed: view.tab_indexed,
         link_styled: scanner.link_styled,
     })
 }

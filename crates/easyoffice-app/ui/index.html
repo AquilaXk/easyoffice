@@ -249,6 +249,7 @@
               <div class="md-item" data-sheet-act="tab-delete" role="menuitem" tabindex="-1"><span class="md-label">시트 삭제</span></div>
               <div class="md-item" data-sheet-act="tab-rename" role="menuitem" tabindex="-1"><span class="md-label">시트 이름 바꾸기</span></div>
               <div class="md-item" data-sheet-act="tab-copy" role="menuitem" tabindex="-1"><span class="md-label">시트 복사</span></div>
+              <div class="md-item" data-sheet-act="tab-move-copy" role="menuitem" tabindex="-1"><span class="md-label">시트 이동/복사…</span></div>
               <div class="md-item" data-sheet-act="tab-left" role="menuitem" tabindex="-1"><span class="md-label">시트 왼쪽으로 이동</span></div>
               <div class="md-item" data-sheet-act="tab-right" role="menuitem" tabindex="-1"><span class="md-label">시트 오른쪽으로 이동</span></div>
               <div class="md-item" data-sheet-act="tab-hide" role="menuitem" tabindex="-1"><span class="md-label">시트 숨기기</span></div>
@@ -1471,6 +1472,21 @@
       </div>
     </dialog>
 
+    <dialog id="sheet-tab-move-dialog" class="tool-dialog sheet-tab-dialog" aria-labelledby="sheet-tab-move-title">
+      <div class="dialog-wrap">
+        <div class="dialog-title"><span id="sheet-tab-move-title">이동/복사</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
+        <div class="dialog-body">
+          <div class="dialog-row"><span id="sheet-tab-move-label" class="dialog-label">다음 시트의 앞에</span></div>
+          <ul id="sheet-tab-move-list" class="dialog-list sheet-tab-hidden-list" role="listbox" aria-labelledby="sheet-tab-move-label"></ul>
+          <div class="dialog-row"><label class="dialog-checkbox"><input id="sheet-tab-move-copy" type="checkbox" /> 복사본 만들기</label></div>
+        </div>
+        <div class="dialog-footer">
+          <button id="btn-sheet-tab-move-ok" type="button" class="dialog-btn dialog-btn-primary">확인</button>
+          <button type="button" class="dialog-btn" data-dialog-close>취소</button>
+        </div>
+      </div>
+    </dialog>
+
     <dialog id="sheet-group-dialog" class="tool-dialog sheet-tab-dialog" aria-labelledby="sheet-group-title">
       <div class="dialog-wrap">
         <div class="dialog-title"><span id="sheet-group-title">그룹</span><button type="button" class="dialog-close" data-dialog-close aria-label="닫기">&times;</button></div>
@@ -1814,6 +1830,7 @@
       <div class="md-item" data-tab-act="delete" role="menuitem" tabindex="-1"><span class="md-label">삭제</span></div>
       <div class="md-item" data-tab-act="rename" role="menuitem" tabindex="-1"><span class="md-label">이름 바꾸기</span></div>
       <div class="md-item" data-tab-act="copy" role="menuitem" tabindex="-1"><span class="md-label">복사</span></div>
+      <div class="md-item" data-tab-act="move-copy" role="menuitem" tabindex="-1"><span class="md-label">이동/복사…</span></div>
       <div class="md-sep"></div>
       <div class="md-item" data-tab-act="move-left" role="menuitem" tabindex="-1"><span class="md-label">왼쪽으로 이동</span></div>
       <div class="md-item" data-tab-act="move-right" role="menuitem" tabindex="-1"><span class="md-label">오른쪽으로 이동</span></div>

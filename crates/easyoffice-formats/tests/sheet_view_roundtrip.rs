@@ -146,6 +146,38 @@ fn a_summary_above_the_group_is_kept() {
 }
 
 #[test]
+fn an_indexed_tab_colour_is_resolved_with_the_default_palette_and_the_files_own() {
+    let sheet = |attr: &str| {
+        format!(r#"<worksheet><sheetPr><tabColor {attr}/></sheetPr><sheetData/></worksheet>"#)
+    };
+    let bytes = pack(SheetStyling::default());
+    // Index 10 is red, 12 blue and 17 green in the default palette (ECMA-376 18.8.27).
+    for (index, rgb) in [(10, 0xFF0000), (12, 0x0000FF), (17, 0x008000)] {
+        let xml = sheet(&format!(r#"indexed="{index}""#));
+        assert_eq!(
+            read(&with_sheet(&bytes, &xml, None)).tab_color,
+            Some(rgb),
+            "indexed {index}"
+        );
+    }
+    // An index outside the palette, the system colours and a bad number give no colour.
+    for bad in ["64", "65", "999", "-1", "x", ""] {
+        let xml = sheet(&format!(r#"indexed="{bad}""#));
+        assert_eq!(
+            read(&with_sheet(&bytes, &xml, None)).tab_color,
+            None,
+            "indexed {bad:?}"
+        );
+    }
+    // `rgb` wins over `indexed`.
+    let both = sheet(r#"rgb="FF123456" indexed="10""#);
+    assert_eq!(
+        read(&with_sheet(&bytes, &both, None)).tab_color,
+        Some(0x123456)
+    );
+}
+
+#[test]
 fn a_theme_tab_colour_is_resolved_with_the_files_theme_and_tint() {
     let xml =
         r#"<worksheet><sheetPr><tabColor theme="4" tint="0.0"/></sheetPr><sheetData/></worksheet>"#;

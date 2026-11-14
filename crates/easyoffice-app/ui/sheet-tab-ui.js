@@ -12,9 +12,22 @@
   // middle of a tab), Apache-2.0, Copyright 2023-present DreamNum Co., Ltd., commit
   // 5a06a7842c8e13fa0646d0733dc3662cf4b330b9. Modifications: plain DOM elements and mouse events;
   // the target is counted among the tabs that are shown.
+  //
+  // The slot a Ctrl drag copies to is shown as another reference does, a 2px mark on the left edge of the tab the
+  // pointer is before and the drop that puts the sheet before that tab, or last (`packages/react/src/components/
+  // SheetTab/SheetItem.tsx` lines 99-140 and 209, MIT, Copyright (c) 2022 Suzhou Ruilisi Technology Co., Ltd,
+  // commit 94346608877db4747406707a177c4b8f3bacdbf9). That reference moves the dragged sheet only; the copy by
+  // the held key is added here.
 
   const names = host.__EASYOFFICE_SHEET_TAB_NAMES__;
   const DRAG_START_PX = 4;
+
+  // The slot a pointer at `x` drops a copy in: the index of the first tab whose middle is right of it (the count of
+  // tabs for the end).
+  function dropSlot(items, x) {
+    const at = items.findIndex((item) => x < item.left + item.width / 2);
+    return at < 0 ? items.length : at;
+  }
 
   // Where a tab of `items` (`{ left, width }`) dragged `dragX` pixels lands, and how far each other
   // tab moves to make room.
@@ -60,20 +73,10 @@
       return answer === true;
     }
 
-    // Lists `hidden` in `#sheet-tab-unhide-dialog`; resolves the names the user picked, or null.
-    function pickHidden(hidden) {
-      const list = $("sheet-tab-unhide-list");
-      if (!$("sheet-tab-unhide-dialog") || !list || hidden.length === 0) return Promise.resolve(null);
-      list.replaceChildren();
-      for (const name of hidden) {
-        const item = document.createElement("li");
-        item.setAttribute("role", "option");
-        item.setAttribute("aria-selected", "false");
-        item.tabIndex = -1;
-        item.dataset.sheet = name;
-        item.textContent = names.labelOf(name);
-        list.appendChild(item);
-      }
+    // A list of `<li>` items that one or several can be picked from: a click, the arrow keys, Space, and Enter or a
+    // double click that finish. `multiple` lets Ctrl, Shift and Space add to the pick. `bindList(finish)` binds the
+    // events and returns what unbinds them; `picked()` gives the `data-sheet` of the picked items.
+    function listPicker(list, multiple) {
       const items = () => Array.from(list.querySelectorAll("li"));
       const select = (item, additive) => {
         if (!additive) items().forEach((other) => other.setAttribute("aria-selected", "false"));
@@ -84,7 +87,7 @@
       const bindList = (finish) => {
         const onClick = (ev) => {
           const item = ev.target?.closest?.("li");
-          if (item) select(item, ev.ctrlKey || ev.metaKey || ev.shiftKey);
+          if (item) select(item, multiple && (ev.ctrlKey || ev.metaKey || ev.shiftKey));
         };
         const onDouble = (ev) => {
           const item = ev.target?.closest?.("li");
@@ -98,7 +101,7 @@
           if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
             ev.preventDefault();
             select(all[Math.max(0, Math.min(all.length - 1, at + (ev.key === "ArrowDown" ? 1 : -1)))], false);
-          } else if (ev.key === " " && at >= 0) {
+          } else if (ev.key === " " && at >= 0 && multiple) {
             ev.preventDefault();
             select(all[at], true);
           } else if (ev.key === "Enter" && picked().length > 0) {
@@ -115,8 +118,48 @@
           list.removeEventListener("keydown", onKey);
         };
       };
+      return { items, select, picked, bindList };
+    }
+
+    function fillList(list, entries) {
+      list.replaceChildren();
+      for (const [name, label] of entries) {
+        const item = document.createElement("li");
+        item.setAttribute("role", "option");
+        item.setAttribute("aria-selected", "false");
+        item.tabIndex = -1;
+        item.dataset.sheet = name;
+        item.textContent = label;
+        list.appendChild(item);
+      }
+    }
+
+    // Lists `hidden` in `#sheet-tab-unhide-dialog`; resolves the names the user picked, or null.
+    function pickHidden(hidden) {
+      const list = $("sheet-tab-unhide-list");
+      if (!$("sheet-tab-unhide-dialog") || !list || hidden.length === 0) return Promise.resolve(null);
+      fillList(list, hidden.map((name) => [name, names.labelOf(name)]));
+      const { items, select, picked, bindList } = listPicker(list, true);
       select(items()[0], false);
       return modal("sheet-tab-unhide-dialog", "btn-sheet-tab-unhide-ok", () => (picked().length > 0 ? picked() : null), bindList, () => items()[0].focus());
+    }
+
+    // Asks where `sheet` goes in `#sheet-tab-move-dialog` (이동/복사): the sheet it goes before, `shown` being the
+    // sheets with a tab and the last entry 끝으로 이동, and whether to copy. `before` is the entry that is picked
+    // first. Resolves `{ before, copy }` (`before` null for the end) or null.
+    function pickPlace(shown, before) {
+      const list = $("sheet-tab-move-list");
+      if (!$("sheet-tab-move-dialog") || !list) return Promise.resolve(null);
+      fillList(list, [...shown.map((name) => [name, names.labelOf(name)]), ["", "(끝으로 이동)"]]);
+      $("sheet-tab-move-copy").checked = false;
+      const { items, select, picked, bindList } = listPicker(list, false);
+      const first = items().find((i) => i.dataset.sheet === (before ?? "")) || items().at(-1);
+      select(first, false);
+      const answer = () => {
+        const [name] = picked();
+        return name === undefined ? null : { before: name === "" ? null : name, copy: $("sheet-tab-move-copy").checked };
+      };
+      return modal("sheet-tab-move-dialog", "btn-sheet-tab-move-ok", answer, (finish) => bindList(() => finish(answer())), () => first.focus());
     }
 
     // ---- the name, typed in place of the tab -----------------------------------------------------------
@@ -194,14 +237,15 @@
 
     // ---- dragging a tab -----------------------------------------------------------------------------
     // A press on a tab that moves more than a few pixels drags it; the tabs it passes shift to make
-    // room, and letting go moves the sheet. The click that ends the drag is not a tab switch.
+    // room, and letting go moves the sheet (or copies it, with Ctrl held). The click that ends the drag is not a tab switch.
     let drag = null;
     let swallowClick = false;
 
     function clearDrag() {
+      bar()?.classList.remove("copying");
       for (const btn of tabButtons()) {
         btn.style.transform = "";
-        btn.classList.remove("dragging");
+        btn.classList.remove("dragging", "drop-before", "drop-end");
       }
     }
 
@@ -227,6 +271,19 @@
       const dx = ev.clientX - drag.startX;
       if (!drag.moved && Math.abs(dx) < DRAG_START_PX) return;
       drag.moved = true;
+      // With Ctrl (Option on a Mac) held the tab is copied: the tabs stay and a mark shows the slot (PD-209).
+      drag.copy = Boolean(ev.ctrlKey || ev.altKey);
+      bar()?.classList.toggle("copying", drag.copy);
+      if (drag.copy) {
+        drag.slot = dropSlot(drag.items, ev.clientX);
+        tabButtons().forEach((btn, i) => {
+          btn.style.transform = "";
+          btn.classList.remove("dragging");
+          btn.classList.toggle("drop-before", i === drag.slot);
+          btn.classList.toggle("drop-end", drag.slot === drag.items.length && i === drag.items.length - 1);
+        });
+        return;
+      }
       const { target, offsets } = dragTarget(drag.items, drag.index, dx);
       drag.target = target;
       tabButtons().forEach((btn, i) => {
@@ -237,12 +294,14 @@
 
     function onRelease() {
       if (!drag) return;
-      const { moved, tab, index, target } = drag;
+      const { moved, tab, index, target, copy, slot } = drag;
+      const buttons = tabButtons();
       drag = null;
       if (!moved) return;
       swallowClick = true;
       clearDrag();
-      if (target !== index) void getTabs().moveTo(tab.dataset.sheetTab, target);
+      if (copy) void getTabs().moveOrCopy(tab.dataset.sheetTab, buttons[slot]?.dataset.sheetTab ?? null, true);
+      else if (target !== index) void getTabs().moveTo(tab.dataset.sheetTab, target);
     }
 
     // True once for the click that ends a drag.
@@ -280,9 +339,9 @@
       });
     }
 
-    return { bind, confirmDelete, pickHidden, startRename, focusTab };
+    return { bind, confirmDelete, pickHidden, pickPlace, startRename, focusTab };
   }
 
   host.__EASYOFFICE_CREATE_SHEET_TAB_UI__ = createSheetTabUi;
-  host.__EASYOFFICE_SHEET_TAB_DRAG__ = { dragTarget };
+  host.__EASYOFFICE_SHEET_TAB_DRAG__ = { dragTarget, dropSlot };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

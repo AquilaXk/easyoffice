@@ -486,6 +486,7 @@ const SHEET_SHEET: MenuSpec = menu(
         "sheet:tab-delete",
         "sheet:tab-rename",
         "sheet:tab-copy",
+        "sheet:tab-move-copy",
         "sheet:tab-left",
         "sheet:tab-right",
         "sheet:tab-hide",

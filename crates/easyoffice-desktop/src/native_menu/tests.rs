@@ -850,6 +850,7 @@ fn the_spreadsheet_bar_has_the_number_format_and_row_column_items_in_the_page_or
             "시트 삭제",
             "시트 이름 바꾸기",
             "시트 복사",
+            "시트 이동/복사…",
             "시트 왼쪽으로 이동",
             "시트 오른쪽으로 이동",
             "시트 숨기기",

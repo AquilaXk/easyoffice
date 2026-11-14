@@ -378,6 +378,9 @@
 .sheet-tab-btn { transition: transform 0.12s ease; }
 .sheet-tab-btn.dragging { z-index: 2; transition: none; background: var(--color-surface-raised); border-color: var(--ui-border-strong); box-shadow: var(--shadow-dropdown); }
 .sheet-tab-edit { flex: 0 0 auto; }
+.sheet-tab-bar.copying { cursor: copy; }
+.sheet-tab-btn.drop-before { box-shadow: inset 2px 0 0 var(--accent-strong); }
+.sheet-tab-btn.drop-end { box-shadow: inset -2px 0 0 var(--accent-strong); }
 .sheet-tab-edit[aria-invalid="true"] { border-color: var(--ui-danger-strong); box-shadow: 0 0 0 2px var(--ui-danger-soft); }
 .sheet-tab-dialog { width: min(360px, calc(100vw - 32px)); }
 #sheet-tab-delete-message { margin: 0; padding: 4px 8px; line-height: 1.6; white-space: pre-line; overflow-wrap: anywhere; }

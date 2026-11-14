@@ -60,6 +60,8 @@ pub(crate) struct ViewScan {
     pub(crate) freeze: Option<Freeze>,
     pub(crate) tab_rgb: Option<u32>,
     pub(crate) tab_theme: Option<ThemeTab>,
+    /// A tab colour that names a slot of the `indexed` palette (ECMA-376 18.8.27).
+    pub(crate) tab_indexed: Option<usize>,
     pub(crate) summary_above: bool,
     pub(crate) summary_left: bool,
 }
@@ -184,7 +186,12 @@ impl ViewScan {
     fn tab(&mut self, attrs: &Attrs<'_>) {
         self.tab_rgb = attrs.get("rgb").as_deref().and_then(parse_argb);
         self.tab_theme = None;
+        self.tab_indexed = None;
         if self.tab_rgb.is_some() {
+            return;
+        }
+        if let Some(index) = attrs.get("indexed") {
+            self.tab_indexed = index.trim().parse::<usize>().ok().filter(|&i| i < 64);
             return;
         }
         let index = attrs
@@ -530,6 +537,7 @@ mod tests {
     fn tab_colours_come_from_rgb_or_theme_and_bad_ones_are_ignored() {
         let rgb = scan(r#"<sheetPr><tabColor rgb="FF3366CC"/></sheetPr>"#);
         assert_eq!(rgb.tab_rgb, Some(0x3366CC));
+        assert_eq!(scan(r#"<tabColor indexed="12"/>"#).tab_indexed, Some(12));
         let theme = scan(r#"<tabColor theme="5" tint="-0.25"/>"#);
         assert_eq!(
             theme.tab_theme,
@@ -545,10 +553,15 @@ mod tests {
             r#"theme="12""#,
             r#"theme="4" tint="2""#,
             r#"theme="4" tint="NaN""#,
-            r#"indexed="12""#,
+            r#"indexed="64""#,
+            r#"indexed="-1""#,
+            r#"indexed="x""#,
         ] {
             let view = scan(&format!("<tabColor {bad}/>"));
-            assert!(view.tab_rgb.is_none() && view.tab_theme.is_none(), "{bad}");
+            assert!(
+                view.tab_rgb.is_none() && view.tab_theme.is_none() && view.tab_indexed.is_none(),
+                "{bad}"
+            );
         }
     }
 

@@ -589,6 +589,7 @@ pub const ITEMS: &[MenuItemSpec] = &[
     sa!("sheet:tab-delete", "시트 삭제", "tab-delete"),
     sa!("sheet:tab-rename", "시트 이름 바꾸기", "tab-rename"),
     sa!("sheet:tab-copy", "시트 복사", "tab-copy"),
+    sa!("sheet:tab-move-copy", "시트 이동/복사…", "tab-move-copy"),
     sa!("sheet:tab-left", "시트 왼쪽으로 이동", "tab-left"),
     sa!("sheet:tab-right", "시트 오른쪽으로 이동", "tab-right"),
     sa!("sheet:tab-hide", "시트 숨기기", "tab-hide"),

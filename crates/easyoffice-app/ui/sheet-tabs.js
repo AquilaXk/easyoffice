@@ -74,6 +74,7 @@
         copy: open && allSheets().length < names.MAX_SHEETS,
         delete: open && shown.length > 1 && at >= 0,
         rename: open && at >= 0,
+        moveCopy: open && at >= 0,
         moveLeft: open && at > 0,
         moveRight: open && at >= 0 && at < shown.length - 1,
         hide: open && shown.length > 1 && at >= 0,
@@ -250,9 +251,28 @@
       return done;
     }
 
-    // The copy goes right after its source and becomes the active sheet. Its formulas keep their
-    // text: a reference without a sheet name now points into the copy, one with a name still
-    // points where it did.
+    // `next` with a copy of `sheet` under a name of its own; returns the name. Its formulas keep their text: a
+    // reference without a sheet name now points into the copy, one with a name still points where it did. The
+    // sheet's own names (those scoped to it) are copied to the copy and refer to it (PD-214).
+    function cloneInto(next, sheet) {
+      const name = names.copyName(names.labelOf(sheet), next.sheetOrder);
+      next.sheets[name] = structuredClone(next.sheets[sheet] || {});
+      if (next.sheetRowCounts[sheet]) next.sheetRowCounts[name] = next.sheetRowCounts[sheet];
+      if (next.sheetColumnWidths[sheet]) next.sheetColumnWidths[name] = { ...next.sheetColumnWidths[sheet] };
+      if (next.sheetRules[sheet]) next.sheetRules[name] = structuredClone(next.sheetRules[sheet]);
+      if (next.sheetLayout[sheet]) {
+        const { hidden, veryHidden, ...kept } = structuredClone(next.sheetLayout[sheet]);
+        // Table names are unique in the workbook: the copy's tables get names of their own (PD-224).
+        if (kept.tables) kept.tables = layoutApi.copiedTables(kept.tables, next.sheetLayout);
+        if (Object.keys(kept).length > 0) next.sheetLayout[name] = kept;
+      }
+      const scoped = host.__EASYOFFICE_SHEET_NAMES__.copiedFor(next.definedNames || [], sheet, name);
+      if (scoped.length > 0) next.definedNames = [...next.definedNames, ...scoped];
+      viewState.copy(sheet, name);
+      return name;
+    }
+
+    // The copy goes right after its source and becomes the active sheet.
     function copy(sheet) {
       if (structureBlocked()) return Promise.resolve(false);
       if (!can(sheet).copy) {
@@ -260,22 +280,39 @@
         return Promise.resolve(false);
       }
       return change((next) => {
-        const name = names.copyName(names.labelOf(sheet), next.sheetOrder);
-        next.sheets[name] = structuredClone(next.sheets[sheet] || {});
-        if (next.sheetRowCounts[sheet]) next.sheetRowCounts[name] = next.sheetRowCounts[sheet];
-        if (next.sheetColumnWidths[sheet]) next.sheetColumnWidths[name] = { ...next.sheetColumnWidths[sheet] };
-        if (next.sheetRules[sheet]) next.sheetRules[name] = structuredClone(next.sheetRules[sheet]);
-        if (next.sheetLayout[sheet]) {
-          const { hidden, veryHidden, ...kept } = structuredClone(next.sheetLayout[sheet]);
-          // Table names are unique in the workbook: the copy's tables get names of their own (PD-224).
-          if (kept.tables) kept.tables = layoutApi.copiedTables(kept.tables, next.sheetLayout);
-          if (Object.keys(kept).length > 0) next.sheetLayout[name] = kept;
-        }
+        const name = cloneInto(next, sheet);
         place(next, name, next.sheetOrder.indexOf(sheet) + 1);
         activate(next, name);
-        viewState.copy(sheet, name);
         return "시트 복사: " + names.labelOf(name);
       });
+    }
+
+    // 이동/복사: `sheet`, or a copy of it, goes before the sheet `before` (null for the end) and is the active sheet.
+    function moveOrCopy(sheet, before, makeCopy) {
+      if (structureBlocked()) return Promise.resolve(false);
+      if (makeCopy && !can(sheet).copy) {
+        say("시트는 " + names.MAX_SHEETS + "개까지");
+        return Promise.resolve(false);
+      }
+      return change((next) => {
+        if (before !== null && !next.sheetOrder.includes(before)) return false;
+        if (!makeCopy && before === sheet) return false;
+        const name = makeCopy ? cloneInto(next, sheet) : sheet;
+        next.sheetOrder = next.sheetOrder.filter((n) => n !== name);
+        next.sheetOrder.splice(before === null ? next.sheetOrder.length : next.sheetOrder.indexOf(before), 0, name);
+        if (makeCopy || next.activeSheetName !== name) activate(next, name);
+        return (makeCopy ? "시트 복사: " : "시트 이동: ") + names.labelOf(name);
+      });
+    }
+
+    // The dialog of 이동/복사 for `sheet`: the sheets with a tab to go before, and the choice of a copy.
+    async function movePlace(sheet) {
+      if (structureBlocked()) return false;
+      if (!can(sheet).moveCopy) return false;
+      const shown = shownSheets();
+      const after = shown[shown.indexOf(sheet) + 1] ?? null;
+      const answer = await ui.pickPlace(shown, after);
+      return answer ? moveOrCopy(sheet, answer.before, answer.copy) : false;
     }
 
     // `sheet` takes the place of the tab that is now at visible position `target`.
@@ -331,13 +368,14 @@
       "tab-delete": () => remove(getActiveSheetName()),
       "tab-rename": () => Promise.resolve(ui.startRename(getActiveSheetName())),
       "tab-copy": () => copy(getActiveSheetName()),
+      "tab-move-copy": () => movePlace(getActiveSheetName()),
       "tab-left": () => move(getActiveSheetName(), -1),
       "tab-right": () => move(getActiveSheetName(), 1),
       "tab-hide": () => hide(getActiveSheetName()),
       "tab-unhide": () => unhide(),
     };
 
-    return { can, insert, remove, rename, checkRename, copy, move, moveTo, hide, unhide, actions, shownSheets, hiddenSheets };
+    return { can, insert, remove, rename, checkRename, copy, moveOrCopy, movePlace, move, moveTo, hide, unhide, actions, shownSheets, hiddenSheets };
   }
 
   host.__EASYOFFICE_CREATE_SHEET_TABS__ = createSheetTabs;

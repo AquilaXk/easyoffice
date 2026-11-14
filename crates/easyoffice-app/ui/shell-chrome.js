@@ -170,6 +170,7 @@
     "sheet:tab-delete": "sheet-act:tab-delete",
     "sheet:tab-rename": "sheet-act:tab-rename",
     "sheet:tab-copy": "sheet-act:tab-copy",
+    "sheet:tab-move-copy": "sheet-act:tab-move-copy",
     "sheet:tab-left": "sheet-act:tab-left",
     "sheet:tab-right": "sheet-act:tab-right",
     "sheet:tab-hide": "sheet-act:tab-hide",

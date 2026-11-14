@@ -631,7 +631,7 @@ test("the menu is greyed per tab and its keys skip what cannot run", async () =>
   press("ArrowUp");
   assert.equal(focused(), "move-right");
   press("ArrowUp");
-  assert.equal(focused(), "copy", "move-left is skipped");
+  assert.equal(focused(), "move-copy", "move-left is skipped");
   press("Escape");
   assert.equal(h.menu().hidden, true);
 });
@@ -731,4 +731,138 @@ test("a very hidden sheet has no tab, is not offered by 숨기기 취소, and st
   await h.tabMenu("숨김", "hide");
   const again = await h.saved();
   assert.deepEqual(again.map((s) => [s.name, s.hidden === true, s.veryHidden === true]), [["보임", false, false], ["숨김", true, false], ["깊은", true, true]]);
+});
+
+test("a drag with Ctrl held copies the sheet before the tab the pointer is at, and shows the slot (PD-209)", async () => {
+  const h = await open();
+  await h.openBook([
+    { name: "Sheet1", cells: { A1: "1" } },
+    { name: "Sheet2", cells: { A1: "2" } },
+    { name: "Sheet3", cells: { A1: "3" } },
+  ]);
+  const { document } = h;
+  const place = () => h.tabs().forEach((t, i) => {
+    t.getBoundingClientRect = () => ({ left: 10 + i * 80, top: 0, width: 80, height: 24 });
+  });
+  place();
+  const first = h.tab("Sheet1");
+  first.dispatchEvent({ type: "mousedown", target: first, clientX: 40, button: 0 });
+  // Between the middles of the second and third tab: the slot is before Sheet3.
+  document.dispatchEvent({ type: "mousemove", target: document.body, clientX: 200, ctrlKey: true });
+  assert.equal(document.getElementById("sheet-tab-bar").classList.contains("copying"), true);
+  assert.deepEqual(h.tabs().map((t) => t.classList.contains("drop-before")), [false, false, true]);
+  assert.ok(h.tabs().every((t) => t.style.transform === ""), "the tabs stay where they are");
+  document.dispatchEvent({ type: "mouseup", target: document.body, clientX: 200, ctrlKey: true });
+  await flushAsyncTurns(30);
+  assert.deepEqual(h.names(), ["Sheet1", "Sheet2", "시트 1 (2)", "Sheet3"]);
+  assert.equal(h.active(), "시트 1 (2)");
+  assert.ok(h.tabs().every((t) => !t.classList.contains("drop-before") && !t.classList.contains("drop-end")));
+  assert.equal(document.getElementById("sheet-tab-bar").classList.contains("copying"), false);
+  const book = await h.book();
+  assert.equal(book["시트 1 (2)"].cells.A1, "1");
+  // Past the last tab the copy goes to the end; the mark is on the right edge of the last tab.
+  place();
+  const second = h.tab("Sheet2");
+  second.dispatchEvent({ type: "mousedown", target: second, clientX: 100, button: 0 });
+  document.dispatchEvent({ type: "mousemove", target: document.body, clientX: 500, ctrlKey: true });
+  assert.equal(h.tabs().at(-1).classList.contains("drop-end"), true);
+  document.dispatchEvent({ type: "mouseup", target: document.body, clientX: 500, ctrlKey: true });
+  await flushAsyncTurns(30);
+  assert.deepEqual(h.names(), ["Sheet1", "Sheet2", "시트 1 (2)", "Sheet3", "시트 2 (2)"]);
+  // Letting go of Ctrl before the drop is a move again.
+  place();
+  const third = h.tab("Sheet3");
+  third.dispatchEvent({ type: "mousedown", target: third, clientX: 270, button: 0 });
+  document.dispatchEvent({ type: "mousemove", target: document.body, clientX: 200, ctrlKey: true });
+  document.dispatchEvent({ type: "mousemove", target: document.body, clientX: 90 });
+  assert.equal(document.getElementById("sheet-tab-bar").classList.contains("copying"), false);
+  document.dispatchEvent({ type: "mouseup", target: document.body, clientX: 90 });
+  await flushAsyncTurns(30);
+  assert.equal(h.names().length, 5, "no sheet was added");
+  assert.equal(h.names().indexOf("Sheet3") < 3, true);
+  // One undo step takes a copy back.
+  await h.history("studio-undo");
+  await h.history("studio-undo");
+  assert.deepEqual(h.names(), ["Sheet1", "Sheet2", "시트 1 (2)", "Sheet3", "시트 2 (2)"].filter((n) => n !== "시트 2 (2)"));
+});
+
+test("이동/복사 lists the sheets with a tab and 끝으로 이동, moves or copies before the one picked, and cancelling does nothing (PD-209)", async () => {
+  const h = await open();
+  await h.openBook([
+    { name: "A", cells: { A1: "a" } },
+    { name: "B", cells: { A1: "b" }, hidden: true },
+    { name: "C", cells: { A1: "c" } },
+    { name: "D", cells: { A1: "d" } },
+  ]);
+  const { document, userClick } = h;
+  const dialog = () => document.getElementById("sheet-tab-move-dialog");
+  const rows = () => [...document.querySelectorAll("#sheet-tab-move-list li")];
+  const pick = async (label, copy) => {
+    userClick(rows().find((r) => r.textContent === label));
+    document.getElementById("sheet-tab-move-copy").checked = copy;
+    userClick(document.getElementById("btn-sheet-tab-move-ok"));
+    await flushAsyncTurns(30);
+  };
+  await h.tabMenu("A", "move-copy");
+  assert.equal(dialog().open, true);
+  assert.equal(document.getElementById("sheet-tab-move-title").textContent, "이동/복사");
+  assert.deepEqual(rows().map((r) => r.textContent), ["A", "C", "D", "(끝으로 이동)"], "a hidden sheet is not listed");
+  assert.equal(rows().find((r) => r.getAttribute("aria-selected") === "true").textContent, "C", "the sheet after this one is picked first");
+  assert.equal(document.getElementById("sheet-tab-move-copy").checked, false);
+  // 취소 changes nothing.
+  userClick(dialog().querySelector("[data-dialog-close].dialog-btn"));
+  await flushAsyncTurns(20);
+  assert.deepEqual(h.names(), ["A", "C", "D"]);
+  // Move A to the end.
+  await h.tabMenu("A", "move-copy");
+  await pick("(끝으로 이동)", false);
+  assert.deepEqual(h.names(), ["C", "D", "A"]);
+  assert.equal(h.active(), "A");
+  // Copy D before C.
+  await h.tabMenu("D", "move-copy");
+  await pick("C", true);
+  assert.deepEqual(h.names(), ["D (2)", "C", "D", "A"]);
+  assert.equal(h.active(), "D (2)");
+  // A move before itself is nothing and adds no step.
+  await h.tabMenu("C", "move-copy");
+  await pick("C", false);
+  assert.deepEqual(h.names(), ["D (2)", "C", "D", "A"]);
+  // Each of the two steps is one undo step; the hidden sheet kept its place in the order.
+  await h.history("studio-undo");
+  assert.deepEqual(h.names(), ["C", "D", "A"]);
+  await h.history("studio-undo");
+  assert.deepEqual(h.names(), ["A", "C", "D"]);
+  const sent = await h.saved();
+  assert.deepEqual(sent.map((s) => s.name), ["A", "B", "C", "D"]);
+});
+
+test("a copy brings the names scoped to its source and refers to itself, and the limit of sheets and a protected structure stop it (PD-214, PD-216)", async () => {
+  const h = await open();
+  await h.openBook([
+    { name: "Sheet1", cells: { A1: "1", B1: "=Local" } },
+    { name: "Sheet2", cells: { A1: "2" } },
+  ]);
+  const namesApi = h.host.__EASYOFFICE_SHEET_NAMES__;
+  namesApi.replaceAll([
+    { name: "Local", scope: "Sheet1", refersTo: "Sheet1!$A$1:Sheet1!$B$2+Sheet2!$A$1+\"Sheet1!\"" },
+    { name: "Global", refersTo: "Sheet1!$A$1" },
+    { name: "Other", scope: "Sheet2", refersTo: "Sheet2!$A$1" },
+  ], true);
+  await h.tabMenu("Sheet1", "copy");
+  const copy = h.active();
+  assert.equal(copy, "시트 1 (2)");
+  const all = namesApi.getAll();
+  assert.equal(all.length, 4);
+  assert.deepEqual(all.find((d) => d.scope === copy), { name: "Local", scope: copy, refersTo: "'시트 1 (2)'!$A$1:'시트 1 (2)'!$B$2+Sheet2!$A$1+\"Sheet1!\"" });
+  assert.equal(all.find((d) => d.name === "Local" && d.scope === "Sheet1").refersTo.startsWith("Sheet1!"), true, "the source keeps its own");
+  assert.equal(all.find((d) => d.name === "Global").scope, undefined, "a name of the workbook is not copied");
+  // The names go with the step: one undo takes the copy and its names back.
+  await h.history("studio-undo");
+  assert.equal(namesApi.getAll().length, 3);
+  // A protected structure refuses the dialog and the copy alike.
+  h.host.__EASYOFFICE_SHEET_PROTECT__.setWorkbook({ structure: true, windows: false });
+  const t = h.tab("Sheet1");
+  t.dispatchEvent({ type: "contextmenu", target: t, clientX: 40, clientY: 700 });
+  assert.equal(h.menu().querySelector('[data-tab-act="move-copy"]').getAttribute("aria-disabled"), "true");
+  h.host.__EASYOFFICE_SHEET_PROTECT__.setWorkbook(null);
 });

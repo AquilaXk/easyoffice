@@ -116,6 +116,8 @@
     // Applies `edit(outline, target)` (`{ outline }` or `{ error }`) to the active sheet's outline, on the axis the
     // selection names or the dialog answers.
     async function editOutline(edit, message, title) {
+      // A protected sheet that allows neither rows nor columns to be formatted does not even ask.
+      if (title && !getSelection().axis && groupBlocked(null)) return false;
       const axis = await axisOfSelection(title);
       if (!axis || groupBlocked(axis)) return false;
       return step((name) => {

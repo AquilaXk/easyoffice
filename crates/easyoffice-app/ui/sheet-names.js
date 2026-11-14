@@ -94,6 +94,27 @@
     if (!silent) listener?.();
   }
 
+  // `text` with every reference to the sheet `from` (`from!A1`, `'from'!A1`) naming `to`, outside string literals.
+  function retarget(text, from, to) {
+    const esc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = new RegExp(`(?<![\\w.'!$])(?:'${esc(from.replaceAll("'", "''"))}'|${esc(from)})!`, "gi");
+    return String(text)
+      .split(/("(?:[^"]|"")*")/)
+      .map((part, i) => (i % 2 === 1 ? part : part.replace(pattern, () => quoteSheet(to) + "!")))
+      .join("");
+  }
+
+  // The names a copy of the sheet `from` named `to` brings along: each name whose scope is `from`, now scoped to `to`
+  // and referring to the copy where it referred to the original. `defs` is a list as `getAll` gives it; the result is
+  // the names to add, as many as the limit leaves room for.
+  function copiedFor(defs, from, to) {
+    const room = Math.max(0, MAX_NAMES - defs.length);
+    return defs
+      .filter((def) => def.scope && sameScope(def.scope, from))
+      .slice(0, room)
+      .map((def) => ({ ...def, scope: to, refersTo: retarget(def.refersTo, from, to).slice(0, MAX_REFERS_TO_CHARS) }));
+  }
+
   const hasAny = () => list.length > 0;
   // The list as JSON, made once per change of the list (every evaluation compares it with what the session holds).
   let payloadText = "";
@@ -223,6 +244,8 @@
     refersToOf,
     getAll,
     replaceAll,
+    copiedFor,
+    retarget,
     hasAny,
     payload,
     getVersion,

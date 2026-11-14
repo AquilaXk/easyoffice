@@ -10,7 +10,7 @@ use crate::sheet_styling::sheet_table::xlsx_tables::{
     merge_relationships, read_sheet_tables, HeaderCells, TableWriter,
 };
 use crate::sheet_styling::sheet_view::{level_at, Outline};
-use crate::sheet_styling::xlsx_color::ColorScheme;
+use crate::sheet_styling::xlsx_color::{ColorScheme, XlsxColor};
 use crate::sheet_styling::xlsx_filter::autofilter_xml;
 use crate::sheet_styling::xlsx_filter_dxf::parse_dxf_colors;
 use crate::sheet_styling::xlsx_layout::{layout_cols_xml, merge_cells_xml};
@@ -924,6 +924,13 @@ impl OoxmlCodec {
                 if let (None, Some(tab), Some(theme)) = (styling.tab_color, scan.tab_theme, &theme)
                 {
                     styling.tab_color = Some(apply_tint(theme[tab.index], tab.tint));
+                }
+                if let (None, Some(index), Some(colors)) =
+                    (styling.tab_color, scan.tab_indexed, &colors)
+                {
+                    if let XlsxColor::Rgb(rgb) = colors.resolve(&format!("indexed=\"{index}\"")) {
+                        styling.tab_color = Some(rgb);
+                    }
                 }
                 stylings.push((sheet_name.clone(), styling));
             }

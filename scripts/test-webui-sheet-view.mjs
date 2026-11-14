@@ -250,7 +250,7 @@ test("the tab colour is kept in the layout for the file but has no command and n
   const menu = document.getElementById("sheet-tab-menu");
   assert.equal(menu.hidden, false);
   // The tab commands: insert, delete, rename, copy, move, hide and show again (PD-209); no colour command.
-  assert.deepEqual([...menu.children].map((el) => el.className.includes("md-sep") ? "-" : el.querySelector(".md-label").textContent), ["시트 삽입", "삭제", "이름 바꾸기", "복사", "-", "왼쪽으로 이동", "오른쪽으로 이동", "-", "숨기기", "숨기기 취소…"]);
+  assert.deepEqual([...menu.children].map((el) => el.className.includes("md-sep") ? "-" : el.querySelector(".md-label").textContent), ["시트 삽입", "삭제", "이름 바꾸기", "복사", "이동/복사…", "-", "왼쪽으로 이동", "오른쪽으로 이동", "-", "숨기기", "숨기기 취소…"]);
   assert.equal(document.getElementById("sheet-tab-color-palette"), null);
   assert.equal(document.querySelector('[data-sheet-act="tab-color"]'), null);
   layout().replaceAll({ Sheet1: { tabColor: "3366cc" } });
